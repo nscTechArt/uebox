@@ -48,7 +48,10 @@ export default defineConfig({
   title: '虚幻盒子',
   description: '虚幻引擎的 agent harness —— 使用手册',
   lang: 'zh-CN',
-  // 目前只在本地跑，没有部署。将来挂到子路径时改这里
+  // 和官网同一个域：nginx 把 /guide/ /develop/ /assets/ /shots/ 这几条路由到本站产物，
+  // 其余交给 uebox.ai 的官网（Astro）。所以 base 是 `/` 而不是 `/guide/` ——
+  // 手册里所有内链都是 `/guide/xxx` 这种从根算起的绝对路径。
+  // 换成子路径部署要连带改那几十条链接，别只改这一行
   base: '/',
   // 死链就让构建红 —— 手册里所有内链都指向本站已存在的页面，
   // 外链（GitHub 仓库那些）VitePress 本来就不检查。
@@ -84,6 +87,16 @@ export default defineConfig({
 
   themeConfig: {
     logo: { light: '/icon.svg', dark: '/icon-dark.svg', alt: '虚幻盒子' },
+
+    // 左上角的 logo 和站名默认指向 `/`。同域部署之后 `/` 是官网首页，不是本站的 ——
+    // 但 VitePress 是单页应用，它会拦下这次跳转，**在前端自己画出本站的 index.md**：
+    // 地址栏显示 uebox.ai，内容却是文档站的首页，刷新一下又变成官网。两张首页打架。
+    // 指到手册首页，把 `/` 整个让给官网
+    logoLink: '/guide/',
+
+    // 同理：默认的 404 页有个「回首页」按钮也指向 `/`
+    notFound: { link: '/guide/', linkText: '回到使用手册' },
+
     outline: { level: [2, 3], label: '本页内容' },
 
     nav: [
@@ -91,9 +104,9 @@ export default defineConfig({
       { text: '给开发者', link: '/develop/', activeMatch: '/develop/' },
       // 这里是**文档站**，不是官网。卖点、下载页那些归 uebox.ai，
       // 这两条是回程入口 —— 没有它们，用户从文档回不到产品页。
-      // 下载暂时直指 Releases：uebox.ai 还没更新，它的下载页路径没人确认过，
-      // 挂一条猜出来的 URL 会变成死链。官网上线后再换过来
-      { text: '下载', link: 'https://github.com/ueboxai/uebox/releases' },
+      // 下载指官网的下载区（那里的按钮走 /dl/win 这类固定地址，换存储后端不用改这里），
+      // 不再直指 Releases
+      { text: '下载', link: 'https://uebox.ai/#download' },
       { text: '官网', link: 'https://uebox.ai' }
       // 「源码」不进 nav：右边本来就有 GitHub 图标，同一个地址摆两遍是噪声
     ],

@@ -4,7 +4,8 @@
 
 ## 下载
 
-安装包发布在 GitHub Releases：<https://github.com/ueboxai/uebox/releases>
+官网上是直接下载：<https://uebox.ai/#download>。历史版本和校验和在
+[GitHub Releases](https://github.com/ueboxai/uebox/releases)。
 
 挑你系统对应的那个：
 
@@ -12,9 +13,7 @@
 | ------- | --------------------------------------------------------------- |
 | Windows | `.exe` 安装包。这是主要支持平台                                 |
 | macOS   | `.dmg`。M 系列芯片选文件名带 `arm64` 的那个，Intel 机器选另一个 |
-| Linux   | 见 Release 页面的 Linux 产物。安装包不含 `uebox` 命令行工具     |
-
-没有国内镜像，下载源只有 GitHub Releases 一处。国内访问慢是已知的 —— 双渠道和自建更新服务器都已经删掉了，这是知情的选择。
+| Linux   | `.AppImage`。安装包不含 `uebox` 命令行工具                      |
 
 装完第一次打开会让你选一次界面语言，然后进入项目库。它会列出本机装了哪些虚幻引擎，但**不会扫你的硬盘找工程** —— 工程由你自己导入。完整的开机顺序见[第一次打开](/guide/first-run)。
 
