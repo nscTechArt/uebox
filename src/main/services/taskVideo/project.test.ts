@@ -16,10 +16,24 @@ const dirs: string[] = []
 afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })))
 })
+
+/**
+ * 临时目录，路径已解析成真名。
+ *
+ * Windows 上 `tmpdir()` 给的是 8.3 短名 —— 用户名超过 8 个字符就会缩写
+ * （CI runner 的 `runneradmin` 变成 `RUNNER~1`），而被测代码里的
+ * `assertVideoProject` 故意走 `fs.realpath`：权限白名单必须校验真实路径，
+ * 否则符号链接或 8.3 别名就能绕过去。两边不一致，断言便对不上。
+ * 开局就解析成真名，测试跟用户名长度无关。
+ */
+async function tempRoot(prefix: string): Promise<string> {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(tmpdir(), prefix)))
+  dirs.push(root)
+  return root
+}
 describe('task video context', () => {
   it('keeps original tool paths beside explicitly labeled context previews', async () => {
-    const root = await fs.mkdtemp(path.join(tmpdir(), 'task-video-original-'))
-    dirs.push(root)
+    const root = await tempRoot('task-video-original-')
     const history = conversationMessages(
       {
         messagesBySid: {
@@ -59,8 +73,7 @@ describe('task video context', () => {
     expect(await fs.readFile(entry.images[0], 'utf8')).toBe('preview')
   })
   it('resolves the UI chat id from the host Agent id and refuses ambiguous mappings', async () => {
-    const root = await fs.mkdtemp(path.join(tmpdir(), 'task-video-mapping-'))
-    dirs.push(root)
+    const root = await tempRoot('task-video-mapping-')
     const folder = path.join(root, 'chat-history')
     await fs.mkdir(folder)
     await fs.writeFile(
@@ -95,8 +108,7 @@ describe('task video context', () => {
     expect(ambiguous.warning).toBeTruthy()
   })
   it('recovers early UI history and outcomes without crossing sessions or exposing reasoning', async () => {
-    const root = await fs.mkdtemp(path.join(tmpdir(), 'task-video-history-'))
-    dirs.push(root)
+    const root = await tempRoot('task-video-history-')
     const history = conversationMessages(
       {
         messagesBySid: {
@@ -130,8 +142,7 @@ describe('task video context', () => {
     expect(await fs.readFile(snapshot.entries[0].images[0], 'utf8')).toBe('image')
   })
   it('persists visible history and image bytes, excluding thinking and tool arguments', async () => {
-    const root = await fs.mkdtemp(path.join(tmpdir(), 'task-video-test-'))
-    dirs.push(root)
+    const root = await tempRoot('task-video-test-')
     const project = await createVideoProject(root, 'session-a', [
       {
         role: 'assistant',
