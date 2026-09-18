@@ -1,0 +1,36 @@
+{
+  // 第三个 TS 工程：独立的 uebox CLI。
+  //
+  // 必须单独列一份，不能指望 `tsconfig.node.json` 顺带查到 —— 那份的 include
+  // 只有 `src/main` / `src/preload` / `src/shared` / `src/renderer/src/types`，
+  // `packages/**` 一个字都不在里面。不加这份的话 `pnpm typecheck` 会**一声不响
+  // 地全绿**，而绿灯会被当成通过（docs/CLI设计.md §8）。
+  //
+  // 两条要求：
+  //
+  // 1. **编译选项必须和子包自己的 `tsconfig.json` 一致或更严。** 门禁比出包宽的话，
+  //    就会出现「门禁全绿、`pnpm build` 报三个类型错」—— 那时候门禁已经没有意义了。
+  // 2. **要覆盖测试文件。** vitest 只转译不查类型，测试里的类型错误除了这里没有
+  //    第二个地方能拦。
+  //
+  // 和主进程那份的区别：CLI 是纯 Node 程序，不碰 Electron，也不用渲染层的路径
+  // 别名。types 里没有 electron-vite/node，就是为了让「不小心 import 了主进程」
+  // 这件事在类型层面就过不去。
+  "include": ["packages/cli/src/**/*"],
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

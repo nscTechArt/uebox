@@ -1,0 +1,253 @@
+/* Ant Design 全局样式覆盖 */
+
+/*
+ * ===== Phosphor 图标放进 antd 组件里的兜底 =====
+ *
+ * antd 会把「图标 + 文字」一起塞进内层的 `.ant-menu-title-content`
+ * （见 ant-design-vue/es/menu/src/MenuItem.js 的 renderItemChildren），
+ * 间距靠它自己那条 `.anticon + span { margin-inline-start: 10px }`
+ * （= controlHeightSM 24 − fontSize 14），对齐靠 `.anticon` 是 inline-flex。
+ *
+ * 图标换成 Phosphor 的裸 <svg> 之后这两条都不再命中：图标贴着文字、还低半格；
+ * 而如果在组件里给 svg 加 `display:block` 想修对齐，它在这个 inline 容器里会独占一行，
+ * 图标直接被顶到文字上面去。所以正确做法是把这一层做成 flex 行。
+ *
+ * 写在全局文件而不是组件的 scoped 样式里 —— `.ant-menu-title-content` 是 antd
+ * 内部渲染的，拿不到 scoped 的 data-v 属性，组件里写 :deep() 命中不稳。
+ */
+.ant-menu-title-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ant-menu-title-content > svg,
+.ant-btn > svg {
+  display: block;
+  flex: none;
+}
+
+/* 文字自己截省略号，别让外层 flex 去截 */
+.ant-menu-title-content > span:not(.aigc-tag):not(.beta-tag) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 按钮里的图标 + 文字：antd 原本给的是 marginXS = 8px */
+.ant-btn > svg + span,
+.ant-btn > span + svg {
+  margin-inline-start: 8px;
+}
+
+/*
+ * 全局消息必须有独立、可读的承载层。
+ * Ant Design 默认读取 colorBgElevated，而当前主题把它定义成了低透明色，
+ * Toast 覆盖在导航文字上时会让前后两层文案混在一起。
+ */
+.ant-message .ant-message-notice-content {
+  background: var(--color-bg-raised) !important;
+  color: var(--color-text-primary) !important;
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-pop) !important;
+  backdrop-filter: blur(var(--blur-lg));
+  -webkit-backdrop-filter: blur(var(--blur-lg));
+}
+
+.ant-message .ant-message-custom-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ant-message .ant-message-custom-content > .anticon {
+  flex: none;
+  margin-inline-end: 0;
+}
+
+/* 抽屉和气泡卡片的承载色。
+   弹窗、提示气泡、下拉浮层都不在这里了 —— 它们已经换成自建组件，长相归各自管。 */
+.ant-drawer-content,
+.ant-popover-inner {
+  background: var(--color-bg-raised) !important;
+}
+
+/* 抽屉内容区透出上面那层底色 */
+.ant-drawer-body {
+  background: transparent;
+}
+
+/* 抽屉头部 */
+.ant-drawer-header {
+  background: var(--color-bg-raised) !important;
+  border-color: var(--color-border);
+}
+
+/* 选择器下拉面板 */
+.ant-select-dropdown,
+.ant-cascader-dropdown,
+.ant-tree-select-dropdown,
+.ant-date-picker-dropdown {
+  background: var(--color-bg-raised) !important;
+}
+
+/* 气泡确认框 */
+.ant-popconfirm-inner-content {
+  background: var(--color-bg-raised) !important;
+}
+
+/* 文本颜色统一 */
+.ant-drawer-title {
+  color: var(--color-text-primary);
+}
+
+.ant-drawer-close {
+  color: var(--color-text-secondary);
+}
+
+.ant-drawer-close:hover {
+  color: var(--color-text-primary);
+}
+
+/* 输入框和表单组件 */
+.ant-input-affix-wrapper {
+  /* background: var(--color-bg-surface-hover) !important; */
+}
+
+.ant-input,
+.ant-input-number,
+.ant-select-selector,
+.ant-picker {
+  /* background: var(--color-bg-surface) !important; */
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ant-input:hover,
+.ant-input-number:hover,
+.ant-select-selector:hover,
+.ant-picker:hover {
+  border-color: var(--color-border-strong) !important;
+}
+
+.ant-input:focus,
+.ant-input-number:focus,
+.ant-select-focused .ant-select-selector,
+.ant-picker-focused {
+  border-color: var(--color-border) !important;
+  /* box-shadow: 0 0 0 2px var(--color-accent-border) !important; */
+}
+
+/* 按钮样式 */
+.ant-btn-default {
+  background: transparent !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ant-btn-default:hover {
+  background: var(--color-bg-surface-hover) !important;
+  border-color: var(--color-border-strong) !important;
+  color: var(--color-text-primary) !important;
+}
+
+/* 主按钮走**反相底**：浅色主题下近黑配白字，深色主题下近白配黑字。
+ *
+ * 以前它是「卡片色的底 + 正文色的字」—— 也就是白底黑字，跟旁边的次要按钮
+ * 长得一模一样，一屏上哪个是主操作完全看不出来。悬停时又冒出 antd 自己的蓝底
+ * （下面那条 background 没写 !important，被 antd 生成的样式压过去了），
+ * 于是「白底黑字 → 蓝底黑字」，蓝底上的黑字只有 2.8:1，鼠标一放上去字就糊。
+ *
+ * 主按钮的作用是「这一屏就点这个」，靠的是**明度反差**而不是颜色 ——
+ * 界面上已经有蓝色链接、蓝色徽标，主按钮再用同一个蓝，它就只是「又一块蓝的」。
+ * 描边去掉：底色跟页面差 18:1，边界已经足够清楚，再描一圈只会显脏。
+ */
+.ant-btn-primary:not(.ant-btn-dangerous) {
+  background: var(--color-bg-inverse) !important;
+  border-color: transparent !important;
+  color: var(--color-text-inverse) !important;
+
+  &:hover,
+  &:focus {
+    background: var(--color-bg-inverse-hover) !important;
+    border-color: transparent !important;
+    color: var(--color-text-inverse) !important;
+  }
+
+  /* 禁用态不许用 opacity —— 它把整个按钮往背后的东西上拖，
+     浅色主题下白字压在冲淡的暗底上会直接消失（见设计规范 §3.3 第 4 条）。 */
+  &:disabled,
+  &.ant-btn-disabled {
+    background: var(--color-bg-surface-hover) !important;
+    border-color: transparent !important;
+    color: var(--color-text-disabled) !important;
+    box-shadow: none;
+  }
+}
+
+/* 表格样式 */
+.ant-table {
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ant-table-thead > tr > th {
+  background: var(--color-bg-surface) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: var(--color-bg-surface-hover) !important;
+}
+
+/* 分页器 */
+.ant-pagination-item {
+  background: var(--color-bg-surface) !important;
+  border-color: var(--color-border) !important;
+}
+
+.ant-pagination-item a {
+  color: var(--color-text-primary) !important;
+}
+
+.ant-pagination-item:hover {
+  border-color: var(--color-border-strong) !important;
+}
+
+.ant-pagination-item:hover a {
+  color: var(--color-text-primary) !important;
+}
+
+.ant-pagination-item-active {
+  background: var(--color-bg-selected) !important;
+  border-color: var(--color-border) !important;
+}
+
+.ant-pagination-item-active a {
+  color: var(--color-text-selected) !important;
+}
+
+.ant-tree-switcher {
+  padding-top: 3px;
+}
+
+.ant-picker-panel-container {
+  background: var(--color-bg-raised);
+}
+
+.ant-input-group-addon {
+  color: #ffffff7a !important;
+}
+
+.ant-table-thead > tr > th {
+  background: transparent !important;
+}

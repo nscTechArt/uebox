@@ -1,0 +1,123 @@
+node_modules
+dist
+out
+.DS_Store
+
+# 带后缀的构建产物目录：`dist` 那一行是精确匹配，挡不住 `dist-<名字>/`。
+# electron-builder 的 `--dir`／自定义 outDir 会产出这种目录，里面的
+# app.asar 动辄几 GB。2026-09-04 之前 dist-codex-cu-removal/ 就这么被提交过：
+# 一个 3.7 GB 的 app.asar 进了 git，顺带把 scripts/check-secrets.mjs 也搞崩了
+# （readFileSync 读不了超过 Node 2 GiB Buffer 上限的文件，整个密钥扫描当场退出）。
+dist-*/
+build-*/
+.eslintcache
+*.log*
+coverage
+
+# pnpm-lock.yaml 必须进版本库：CI 用 `pnpm install --frozen-lockfile`，
+# 公开仓库也需要它才能复现构建。
+# 本仓库只用 pnpm。不要提交 package-lock.json / yarn.lock / .yarnrc，
+# 多份 lockfile 会让贡献者装出不一样的依赖树。
+package-lock.json
+yarn.lock
+.yarnrc
+.yarnrc.yml
+
+# 运行时上传目录：由 src/main/services/config.ts 的 uploadDir 创建，内容是用户数据
+uploads/
+
+# 本地草稿与原型：不是测试，也不是文档，不进公开仓库
+.test/
+.doc/
+
+# 文档站的本地缓存（产物目录 website/.vitepress/dist 已被上面的 `dist` 挡住）
+website/.vitepress/cache
+
+# Database files
+database/
+*.db
+*.sqlite
+*.sqlite3
+
+# AI IDE 私有配置：不进公开仓库
+.agent
+.claude
+.cursor
+.gemini
+.qoder
+.superset
+.trae
+
+tools/ffmpeg.exe
+tools/FBX2glTF.exe
+
+.tmp
+tmp/
+
+# 环境变量：一律不进版本库
+# 这四个文件曾被跟踪并含真实密钥（JINA/DASHSCOPE/HTTP_AUTH_TOKEN/SENTRY_DSN），
+# 且 .env.production 会被 electron-builder 打进 app.asar 随安装包发布。
+# 需要新增变量时改 .env.example，不要把真实值提交上来。
+.env
+.env.*
+!.env.example
+
+# tsc --composite 的增量缓存。仓库脚本一律带 --composite false 不会产出，
+# 但直接跑 vue-tsc -p tsconfig.web.json 会在根目录留下它。
+*.tsbuildinfo
+
+# 防止旧的私有代码检出目录意外进入公开仓库。
+edition-private/
+
+# 插件源码**在本仓库里**，不要再加回 `plugin/` 忽略规则。
+#
+# ## 当初为什么拆出去，现在为什么合回来
+#
+# 插件原先是独立仓库 github.com/ueboxai/unreal-agent-link（MIT、公开），
+# 理由是「社区可以不装盒子单独用它」。本仓库只负责出包分发，
+# 刻意不放第二份源码 —— 因为两份源码正是让插件和分发包脱节七个月的结构。
+#
+# 2026-09-03 陈东拍板合并，判据是那个理由的前提不成立：
+# **插件只服务这个 App，而且是强绑定**，没有独立使用的场景。
+# 那么拆开就只剩成本：
+#
+#   - 改一次功能要跨两个仓库，本仓库的 CI 看不见插件那一半；
+#   - 插件源码在本仓库是「忽略的本地检出」，工作副本被误删过两次
+#     （2026-09-03 凌晨，一晚上两回），而 git 帮不上任何忙 —— 它不在版本控制里；
+#   - 「两份源码会脱节」这个老问题，合并之后自然消失。
+#
+# 合并之后 `resources/plugins/*.zip` 才谈得上从 git 拿掉：在那之前它是
+# 这个仓库里唯一能装进用户工程的东西，删了应用就没插件可装。两件事顺序绑死。
+#
+# 构建产物由 plugin/UnrealAgentLink/.gitignore 自己挡（Binaries/、Intermediate/、
+# .ual-build 等），git 认嵌套的忽略文件，这里不用重复写。
+
+# 插件分发包：派生产物，由发包流程产出，不进 git。
+#
+# 2026-09-03 之前它们是跟进 git 的 —— 那时候插件源码在**别的仓库**，
+# 这些 zip 是本仓库里唯一能装进用户工程的东西，不提交就等于没有插件。
+# 插件源码并进来之后那个理由消失了，而代价一直在：9 个包 18 MB，
+# 历史上提交过 31 次，仓库 pack 里很大一块是它们的历次副本。
+#
+# 现在谁来产出：
+#   · 开发时  pnpm plugin:build --engine 5.5      （缺包时 UnrealPathManager 会说人话）
+#   · 发版时  pnpm build:win 里的 plugin:build:all（九个版本一个不落）
+#
+# 历史里那 31 次副本**不清理**：重写历史会让所有已 clone 的人对不上，
+# 省下的几百 MB 不值这个代价。以后不再长就行。
+resources/plugins/*.zip
+
+# npm pack 的产物（uebox CLI 发布包体检会生成）
+*.tgz
+.evn.local
+
+# 临时草稿。开发中会拿它们跑一次性的比对/扫描脚本，从来不该进 git ——
+# 这一条是补上的：b1ca1ca 一次扫进来十个（两份 260 KB 的语言包快照、
+# 一个 1.27 MB 的 json、六个 .mjs，还有一个 tests/tmp_t.test.ts 从此
+# 每次 pnpm verify 都跟着跑）。
+#
+# 但**别指望这几行兜底**：它只挡这三个通配符，换个名字的草稿照样被卷走。
+# 真正的防线是 AGENTS.md §5.11「按路径提交自己的文件」。
+tmp_*
+*.tmp.ts
+.tmp_*.patch

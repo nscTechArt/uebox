@@ -1,0 +1,21 @@
+diff --git a/examples/jsm/loaders/GLTFLoader.js b/examples/jsm/loaders/GLTFLoader.js
+index 2edc9a26..f6294bc5 100644
+--- a/examples/jsm/loaders/GLTFLoader.js
++++ b/examples/jsm/loaders/GLTFLoader.js
+@@ -3135,6 +3135,16 @@ class GLTFParser {
+ 
+ 		return this.getDependency( 'texture', mapDef.index ).then( function ( texture ) {
+ 
++			// 贴图加载失败时 loadTexture 会 catch 成 null（见 textureCache 那段），
++			// 下面几行会当场在 null 上写 encoding 而整个模型加载失败。
++			// 少一张贴图不该让模型打不开：当没有这张贴图处理。
++			if ( texture === null ) {
++
++				console.warn( 'THREE.GLTFLoader: texture for ' + mapName + ' failed to load, skipping it.' );
++				return null;
++
++			}
++
+ 			// Materials sample aoMap from UV set 1 and other maps from UV set 0 - this can't be configured
+ 			// However, we will copy UV set 0 to UV set 1 on demand for aoMap
+ 			if ( mapDef.texCoord !== undefined && mapDef.texCoord != 0 && ! ( mapName === 'aoMap' && mapDef.texCoord == 1 ) ) {

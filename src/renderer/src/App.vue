@@ -1,0 +1,164 @@
+<script setup lang="ts">
+// App组件 - 只作为路由的容器
+import { onMounted, ref, computed, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { ConfigProvider } from 'ant-design-vue'
+
+import { useTheme } from '@renderer/hooks/useTheme'
+import { useSpotlightAction } from '@renderer/hooks/useSpotlightAction'
+import { useLocalShortcuts } from '@renderer/hooks/useLocalShortcuts'
+// 导入样式系统。调色板必须在最前面 —— 后面每个文件都在引用它定义的语义变量。
+import '@renderer/assets/styles/palette.generated.css'
+import '@renderer/assets/styles/theme.css'
+import '@renderer/assets/styles/typography.css'
+import '@renderer/assets/styles/components.css'
+import '@renderer/assets/styles/glass-morphism.css'
+// import '@renderer/assets/styles/motion.css'
+import '@renderer/assets/styles/layout.css'
+
+const route = useRoute()
+const { themeConfig, initTheme } = useTheme()
+const isWin11 = ref(true)
+
+// 价格 Store
+
+// Spotlight 操作处理
+const { init: initSpotlightAction, destroy: destroySpotlightAction } = useSpotlightAction()
+
+// 本地快捷键处理
+const { init: initLocalShortcuts, destroy: destroyLocalShortcuts } = useLocalShortcuts()
+
+// 截图模式状态（仅用于显示 UI 确认界面）
+const screenshotMode = ref(false)
+
+const isStandaloneWindow = computed(() => {
+  return Boolean(route.meta?.standalone)
+})
+
+/**
+ * 拉取系统信息以决定是否启用背景图（非 Win11）
+ */
+async function fetchSystemInfo(): Promise<void> {
+  try {
+    const info = await window.api.system.getInfo()
+    isWin11.value = Boolean(info?.isWindows11)
+  } catch {
+    isWin11.value = true
+  }
+}
+
+// 截图模式事件监听清理函数
+let cleanupScreenshotListener: (() => void) | null = null
+let cleanupScreenshotShortcutListener: (() => void) | null = null
+
+// 初始化主题和价格
+onMounted(async () => {
+  initTheme()
+
+  // 添加主进程日志监听器（用于调试）
+  window.api.on('main-log', (...args: unknown[]) => {
+    console.log('[主进程]', String(args[0] || ''))
+  })
+
+  // 监听截图模式变化
+  cleanupScreenshotListener = window.api.screenshot.onModeChanged((data) => {
+    screenshotMode.value = data.active
+  })
+
+  // 监听快捷键触发进入截图模式
+  cleanupScreenshotShortcutListener = window.api.screenshot.onEnterViaShortcut(async () => {
+    console.log('[App] 收到快捷键触发截图模式')
+    await window.api.screenshot.enterMode()
+  })
+
+  // 独立窗口不需要初始化这些
+  if (isStandaloneWindow.value) return
+
+  await fetchSystemInfo()
+
+  // 初始化 Spotlight 操作监听
+  initSpotlightAction()
+
+  // 初始化本地快捷键监听
+  initLocalShortcuts()
+})
+
+onUnmounted(() => {
+  cleanupScreenshotListener?.()
+  cleanupScreenshotShortcutListener?.()
+  if (!isStandaloneWindow.value) {
+    destroySpotlightAction()
+    destroyLocalShortcuts()
+  }
+})
+</script>
+
+<template>
+  <ConfigProvider :theme="themeConfig">
+    <!-- 独立窗口：完全透明，不使用主布局 -->
+    <template v-if="isStandaloneWindow">
+      <router-view />
+    </template>
+    <!-- 普通窗口：使用主布局 -->
+    <template v-else>
+      <div class="app-container">
+        <div class="app-content glass">
+          <router-view />
+        </div>
+      </div>
+    </template>
+  </ConfigProvider>
+</template>
+
+<style>
+@import './assets/styles/global.css';
+
+.welcome-modal-content p {
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+/* 应用根容器 - 渐变背景 */
+.app-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+  box-sizing: border-box;
+}
+
+.app-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  transition: all var(--motion-normal) var(--easing-standard);
+}
+
+/* 全局滚动条样式 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--color-bg-surface-hover);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-bg-surface-hover);
+}
+</style>

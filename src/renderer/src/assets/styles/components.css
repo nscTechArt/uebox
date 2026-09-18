@@ -1,0 +1,531 @@
+/* 虚幻盒子设计规范 - 组件样式 */
+
+/* ========== 按钮组件 ========== */
+
+/* 主要按钮 */
+.btn-primary {
+  background: var(--gradient-accent);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-6);
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--easing-standard);
+  position: relative;
+  overflow: hidden;
+  text-shadow: 0 1px 2px var(--shadow-color-weak);
+  box-shadow: var(--shadow-soft);
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left var(--motion-standard) var(--easing-standard);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-pop);
+  border-color: var(--color-accent-border);
+}
+
+.btn-primary:hover::before {
+  left: 100%;
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-soft);
+}
+
+.btn-primary:disabled {
+  background: var(--color-bg-surface-hover);
+  border-color: var(--color-border-subtle);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* 次要按钮 */
+.btn-secondary {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-6);
+  color: var(--color-text-primary);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--easing-standard);
+}
+
+.btn-secondary:hover {
+  background: var(--color-bg-surface-hover);
+  border-color: var(--color-accent-border);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+/* 文本按钮 */
+.btn-text {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  color: var(--color-accent-text);
+  font-weight: 500;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--motion-fast) var(--easing-standard);
+}
+
+.btn-text:hover {
+  background: var(--color-bg-surface-hover);
+  color: var(--color-accent-text);
+}
+
+/* 按钮尺寸变体 */
+.btn-sm {
+  padding: var(--space-2) var(--space-4);
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.btn-lg {
+  padding: var(--space-4) var(--space-8);
+  font-size: 16px;
+  border-radius: var(--radius-lg);
+}
+
+/* ========== 卡片组件 ========== */
+
+.card {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(var(--blur-panel));
+  -webkit-backdrop-filter: blur(var(--blur-panel));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-glass);
+  transition: all var(--motion-fast) var(--easing-standard);
+  position: relative;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+}
+
+.card-header {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-bottom: var(--space-4);
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.card-subtitle {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin: var(--space-1) 0 0 0;
+  line-height: 1.4;
+}
+
+.card-body {
+  color: var(--color-text-primary);
+  line-height: 1.6;
+}
+
+.card-footer {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+  margin-top: var(--space-4);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* ========== 输入框组件 ========== */
+
+.input {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.4;
+  width: 100%;
+  transition: all var(--motion-fast) var(--easing-standard);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent-border);
+  box-shadow: 0 0 0 2px var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+
+.input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.input:disabled {
+  background: var(--color-bg-sunken);
+  border-color: var(--color-border-subtle);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+/* 输入框组 */
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.input-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.input-error {
+  font-size: 12px;
+  color: var(--color-danger-text);
+  margin-top: var(--space-1);
+}
+
+.input.error {
+  border-color: var(--color-danger-border);
+}
+
+.input.error:focus {
+  box-shadow: 0 0 0 2px var(--color-danger-border);
+}
+
+/* ========== 标签组件 ========== */
+
+.tag {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  transition: all var(--motion-fast) var(--easing-standard);
+}
+
+.tag-primary {
+  background: var(--gradient-accent);
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
+  text-shadow: 0 1px 2px var(--shadow-color-weak);
+}
+
+.tag-success {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+  color: var(--color-success-text);
+}
+
+.tag-warning {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning-text);
+}
+
+.tag-error {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger-text);
+}
+
+/* ========== 徽章组件 ========== */
+
+.badge {
+  /* background: var(--gradient-accent); */
+  /* border: 1px solid var(--color-accent-border); */
+  /* border-radius: var(--radius-sm); */
+  padding: var(--space-1) var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-shadow: 0 1px 2px var(--shadow-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  line-height: 1;
+}
+
+.badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent-solid);
+  border: 1px solid var(--color-accent-border);
+  padding: 0;
+  min-width: auto;
+}
+
+/* ========== 分割线组件 ========== */
+
+.divider {
+  height: 1px;
+  background: var(--color-bg-surface-hover);
+  border: none;
+  margin: var(--space-4) 0;
+}
+
+.divider-vertical {
+  width: 1px;
+  height: auto;
+  background: var(--color-bg-surface-hover);
+  margin: 0 var(--space-4);
+}
+
+/* ========== 加载组件 ========== */
+
+.loading {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-border-subtle);
+  border-top: 2px solid var(--color-accent-border);
+  border-radius: 50%;
+  animation: spin var(--motion-standard) linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * 图标自转。Phosphor 是裸 SVG，没有 antd `<LoadingOutlined spin>` 那种内置旋转，
+ * 转不转由调用方挂这个类决定。
+ */
+.icon-spin {
+  animation: spin 1s linear infinite;
+}
+
+.loading-lg {
+  width: 32px;
+  height: 32px;
+  border-width: 3px;
+}
+
+.loading-sm {
+  width: 16px;
+  height: 16px;
+  border-width: 1.5px;
+}
+
+/* ========== 工具提示组件 ========== */
+
+.tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip-content {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: all var(--motion-fast) var(--easing-standard);
+  z-index: 1000;
+  margin-bottom: var(--space-1);
+}
+
+.tooltip-content::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--color-border);
+}
+
+.tooltip:hover .tooltip-content {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ========== 响应式适配 ========== */
+
+@media (max-width: 768px) {
+  .btn-primary,
+  .btn-secondary {
+    padding: var(--space-3) var(--space-5);
+    font-size: 16px; /* 移动端增大触摸目标 */
+  }
+
+  .card {
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+  }
+
+  .input {
+    padding: var(--space-4);
+    font-size: 16px; /* 防止iOS缩放 */
+  }
+}
+
+/* ========== 无障碍适配 ========== */
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-text,
+  .card,
+  .input,
+  .tag,
+  .tooltip-content {
+    transition: none;
+  }
+
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .card:hover {
+    transform: none;
+  }
+
+  .loading,
+  .icon-spin {
+    animation: none;
+  }
+
+  .loading::after {
+    content: '...';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 12px;
+    color: var(--color-accent-text);
+  }
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+  .btn-primary {
+    background: var(--color-accent-solid-hover);
+    border-color: var(--color-accent-border);
+  }
+
+  .btn-secondary {
+    background: var(--color-bg-surface);
+    border-color: var(--color-border-strong);
+  }
+
+  .card {
+    border-color: var(--color-border-strong);
+  }
+
+  .input {
+    border-color: var(--color-border-strong);
+  }
+}
+
+/* 焦点可见性 */
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.btn-text:focus-visible,
+.input:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* 强制颜色模式适配 */
+@media (forced-colors: active) {
+  .btn-primary,
+  .btn-secondary,
+  .card,
+  .input,
+  .tag {
+    forced-color-adjust: none;
+  }
+}
+
+/* ========== 动效开关（偏好设置 → 常规 → 减少动态效果） ========== */
+
+/*
+ * 上面那条 `prefers-reduced-motion` 只认系统设置，漏掉两种人：系统里没开、
+ * 但就是不想看动画的（远程桌面、老机器、投屏），以及系统里误开了、却想看动画的
+ * （某些 Windows「性能优化」会顺手打开它）。
+ *
+ * 三档的判定收在 `hooks/useMotionPreference.ts` 里，解析成 full / reduced 写在
+ * <html data-motion> 上，这里只认属性。判定写在 CSS 里的话，「强制开」那一档
+ * 必须去否定一条媒体查询 —— 那是 CSS 里最容易写错的东西。
+ *
+ * 用 0.01ms 而不是 0：动画的 `animationend`/`transitionend` 回调仍然会触发，
+ * 有些组件靠它收尾（弹窗关闭后销毁）。真写成 0，那些回调不再来，弹窗就留在
+ * DOM 里不走了。这是社区里那条「reduce motion 重置」的标准写法。
+ */
+html[data-motion='reduced'] *,
+html[data-motion='reduced'] *::before,
+html[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

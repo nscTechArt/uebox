@@ -1,0 +1,51 @@
+{
+  "terminal.integrated.scrollback": 100000,
+  // 全局设置：默认行尾序列为 LF
+  "files.eol": "\n",
+
+  // 自动检测文件的行尾序列
+  "files.autoGuessEncoding": true,
+
+  // 在状态栏显示行尾序列
+  "editor.renderWhitespace": "boundary",
+
+  // 保存时自动修复行尾序列
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true,
+
+  // 语言特定的格式化设置
+  "[typescript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features",
+    "files.eol": "\n"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "files.eol": "\n"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "files.eol": "\n"
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "octref.vetur",
+    "files.eol": "\n"
+  },
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "files.eol": "\n"
+  },
+  "[less]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "files.eol": "\n"
+  },
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "files.eol": "\n"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "files.eol": "\n"
+  },
+  "i18n-ally.localesPaths": ["src/renderer/src/i18n", "src/renderer/src/i18n/locales"]
+}

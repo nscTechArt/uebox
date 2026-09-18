@@ -1,0 +1,117 @@
+// 「操作岛」的外观 —— 蓝图库 / 材质库 / 库浏览器共用。
+//
+// 岛屿是这几个页面唯一的控件容器：玻璃底、1px 细描边、统一 38px 高，
+// 把功能相近的控件收在一起（搜索 / 筛选 / 视图 / 次要动作）。判定依据是
+// —— 这一片所有控件
+// 都是玻璃幽灵式，实心底的按钮在这里会像贴上去的。
+//
+// 为什么是 mixin 而不是一份普通样式：岛屿里的内容来自调用方或子组件，
+// 各自带着自己的 scope id，只能由**外层**用 `:deep()` 穿透着写。
+// 外层选择器每个页面都不一样（`.header-actions` / `.browser-toolbar`），
+// 所以共用的只能是这段外观本身。
+//
+// 用法：
+//   @import '../styles/islands.less';
+//   .browser-toolbar :deep(.action-island) { .library-island(); }
+
+// 岛本身
+.library-island() {
+  display: flex;
+  align-items: center;
+  // 和 AppButton 同高（32px），几个岛和岛外按钮才在一条基线上
+  height: 32px;
+  gap: 4px;
+  padding: 0 4px;
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+// 岛内的竖分隔线
+.library-island-divider() {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--color-border-strong);
+}
+
+// 岛内的纯图标按钮
+.library-island-icon-btn() {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+  &:hover:not(:disabled) {
+    color: var(--color-text-primary);
+    background: var(--color-bg-surface-hover);
+  }
+
+  &:disabled {
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+  }
+}
+
+// 岛外的独立按钮（幽灵式，不是实心填充）
+.library-ghost-button() {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(12px);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    background: var(--color-bg-surface-hover);
+    border-color: var(--color-border-strong);
+    color: var(--color-text-primary);
+  }
+
+  &:disabled {
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+  }
+}
+
+// 岛外的主操作按钮：反相底，靠明度反差跳出来（docs/UI-Design-Standards.md §7）
+.library-primary-button() {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-inverse);
+  border: none;
+  color: var(--color-text-inverse);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+
+  &:hover {
+    background: var(--color-bg-inverse-hover);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}

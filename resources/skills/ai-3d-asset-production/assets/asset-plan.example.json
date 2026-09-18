@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "subject": "Cartoon dairy cow holding a milk bottle, sitting, stylized soft-plastic look",
+  "references": ["refs/cow-front.png"],
+  "observations": [
+    "White body with one large dark grey patch covering the top of the head and the right ear.",
+    "Two dark curved horns; a pale yellow tuft sits between them.",
+    "Blush is on the cheeks, below the eyes - not on the body.",
+    "Both front limbs wrap around the bottle; the bottle is not free-standing."
+  ],
+  "unknowns": ["Rear of the body is not visible in the single reference."],
+  "intended_use": "background prop",
+  "max_triangles": 20000,
+  "route": {
+    "views": "generate_image, front first then left/rear/right anchored on it",
+    "base_mesh": "generate_3d_model, quality medium, material pbr",
+    "cleanup": "unreal geometry script",
+    "refine": "blender, only if silhouette fails acceptance"
+  },
+  "features": [
+    {
+      "id": "cow-identity",
+      "critical": true,
+      "basis": "observed",
+      "description": "Reads as a dairy cow, not a bear: dark head patch plus dark horns are both present.",
+      "accept_when": "Patch and horns are visible in the front and both side views."
+    },
+    {
+      "id": "head-tuft",
+      "critical": false,
+      "basis": "observed",
+      "description": "Pale yellow tuft between the horns.",
+      "accept_when": "Visible from the front; colour is yellow, not white."
+    },
+    {
+      "id": "bottle-hold",
+      "critical": true,
+      "basis": "observed",
+      "description": "Both front limbs contact and wrap the bottle.",
+      "accept_when": "Contact is visible from the front and three-quarter views; the bottle does not float."
+    },
+    {
+      "id": "cheek-blush",
+      "critical": false,
+      "basis": "observed",
+      "description": "Blush sits on the face below the eyes.",
+      "accept_when": "Blush is on the head mass, not on the torso."
+    }
+  ],
+  "views": [
+    { "id": "front", "azimuth": 0, "elevation": 0 },
+    { "id": "left", "azimuth": 270, "elevation": 0 },
+    { "id": "rear", "azimuth": 180, "elevation": 0 },
+    { "id": "right", "azimuth": 90, "elevation": 0 },
+    { "id": "three-quarter", "azimuth": 35, "elevation": 25 }
+  ]
+}

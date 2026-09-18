@@ -1,0 +1,4269 @@
+<template>
+  <div
+    class="input-composer"
+    :class="{ 'drag-over': isDragging }"
+    @dragover.prevent="handleDragOver"
+    @dragleave.prevent="handleDragLeave"
+    @drop.prevent="handleDrop"
+  >
+    <!--
+      排着队等下一轮的跟进消息。
+      放在最上面：它是「已经交出去、但还没发生」的东西，和下面那些「还在手上、
+      跟着这次发送一起走」的附件不是一类，混在一排里用户分不清哪条已经算数了。
+    -->
+    <div v-if="queuedFollowUps.length > 0" class="queued-followup-row">
+      <div v-for="item in queuedFollowUps" :key="item.id" class="source-pill queued-pill">
+        <div class="pill-icon">
+          <PhListPlus />
+        </div>
+        <span class="pill-title" :title="item.text">{{ item.text }}</span>
+        <button
+          class="pill-remove"
+          :aria-label="t('assistantInputComposer.queueCancel')"
+          @click.stop="handleCancelQueued(item.id)"
+        >
+          <PhX />
+        </button>
+        <!--
+          排上之后随时能改主意：用户看着 agent 正往错的方向跑，这会儿
+          「等你跑完」正是他不想要的。没有这条出路的话他只能取消掉标签、
+          再把同一句话重打一遍。
+          放在整行最右边：正文才是这一条的主体，按钮挤在文字旁边会把正文压成几个字。
+          带不走的附件（Excel、PDF、@ 来源）那条不给这个按钮，点下去东西会静悄悄
+          少一半。图能带走，只贴了图的那条照给。
+        -->
+        <button
+          v-if="item.canSteer"
+          class="pill-action"
+          :aria-label="t('assistantInputComposer.queueSteerNow')"
+          @click.stop="handleSteerQueued(item.id)"
+        >
+          <PhChatCircle />
+          <span>{{ t('assistantInputComposer.queueSteerNow') }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 图片预览区域 -->
+    <div v-if="pendingImages.length > 0" class="image-preview-row">
+      <div v-for="(img, index) in pendingImages" :key="index" class="image-preview-item">
+        <img :src="img.preview" alt="preview" class="preview-img" @click="openImagePreview(img)" />
+        <div v-if="img.uploading" class="upload-overlay">
+          <PhCircleNotch class="icon-spin" />
+        </div>
+        <PhXCircle weight="fill" class="remove-btn" @click="removeImage(index)" />
+      </div>
+    </div>
+
+    <!-- Excel 文件预览区域 -->
+    <div v-if="pendingExcelFiles.length > 0" class="excel-preview-row">
+      <div
+        v-for="(excel, index) in pendingExcelFiles"
+        :key="index"
+        class="excel-preview-item"
+        :class="{ parsing: excel.parsing, error: excel.error }"
+      >
+        <PhFileXls class="excel-icon" />
+        <span class="excel-name">{{ excel.fileName }}</span>
+        <span v-if="excel.parsing" class="excel-status">
+          <PhCircleNotch class="icon-spin" />
+        </span>
+        <span v-else-if="excel.rowCount" class="excel-rows">{{
+          t('assistantInputComposer.excelRows', { count: excel.rowCount })
+        }}</span>
+        <PhXCircle weight="fill" class="remove-btn" @click="removeExcelFile(index)" />
+      </div>
+    </div>
+
+    <!-- 文档文件预览区域（PDF/Word） -->
+    <div v-if="pendingDocFiles.length > 0" class="doc-preview-row">
+      <div
+        v-for="(doc, index) in pendingDocFiles"
+        :key="index"
+        class="doc-preview-item"
+        :class="{ parsing: doc.parsing, error: doc.error }"
+      >
+        <PhFilePdf v-if="doc.fileType === 'pdf'" class="doc-icon pdf-icon" />
+        <PhFileDoc v-else class="doc-icon word-icon" />
+        <span class="doc-name">{{ doc.fileName }}</span>
+        <span v-if="doc.parsing" class="doc-status">
+          <PhCircleNotch class="icon-spin" />
+        </span>
+        <PhXCircle weight="fill" class="remove-btn" @click="removeDocFile(index)" />
+      </div>
+    </div>
+
+    <!-- 知识库 @ 提及：已选来源标签（多选） -->
+    <div v-if="mentionedSources.length > 0" class="mentioned-source-row">
+      <div v-for="source in mentionedSources" :key="source.id" class="source-pill">
+        <div class="pill-icon">
+          <component :is="getSourceIcon(source.type)" />
+        </div>
+        <span class="pill-title">{{ source.title }}</span>
+        <button class="pill-remove" @click.stop="handleRemoveMention(source.id)">
+          <PhX />
+        </button>
+      </div>
+    </div>
+
+    <div v-if="props.boundNotebook && !notebookMode" class="bound-wiki-row">
+      <div class="source-pill wiki-pill">
+        <div class="pill-icon">
+          <PhFileText />
+        </div>
+        <span class="pill-title">Wiki: {{ props.boundNotebook.title }}</span>
+        <button class="pill-remove" @click.stop="handleClearBoundWiki">
+          <PhX />
+        </button>
+      </div>
+    </div>
+
+    <!-- 知识库 @ 提及：来源选择弹出层 -->
+    <Transition name="popover-fade">
+      <div v-if="showMentionPopover" class="source-mention-popover">
+        <div class="popover-header">
+          <span class="header-title">{{ t('assistantInputComposer.mentionPopover.title') }}</span>
+          <span class="header-hint">{{ t('assistantInputComposer.mentionPopover.hint') }}</span>
+        </div>
+        <!-- 什么都没打、也没有知识库来源可推荐：告诉用户该干什么，
+             而不是甩一句「暂无来源」让他以为功能坏了 -->
+        <div v-if="!hasMentionCandidates && !searchingNotes" class="empty-state">
+          <span>
+            {{
+              mentionQuery
+                ? t('assistantInputComposer.mentionPopover.noMatch')
+                : t('assistantInputComposer.mentionPopover.typeToSearch')
+            }}
+          </span>
+        </div>
+        <div v-else class="source-list">
+          <!-- 知识库来源：只有知识库的对话栏会有，按下 @ 就列出来 -->
+          <template v-if="availableNotebookSources.length > 0">
+            <div class="source-group-label">
+              {{ t('assistantInputComposer.mentionPopover.groupSources') }}
+            </div>
+            <div
+              v-for="source in availableNotebookSources"
+              :key="source.id"
+              class="source-item"
+              :class="{ selected: isSourceSelected(source.id) }"
+              @click="handleSourceSelect(source)"
+            >
+              <div class="source-icon">
+                <component :is="getSourceIcon(source.type)" />
+              </div>
+              <div class="source-info">
+                <div class="source-title">{{ source.title }}</div>
+                <div class="source-type">{{ getSourceTypeLabel(source.type) }}</div>
+              </div>
+              <div v-if="isSourceSelected(source.id)" class="check-mark">✓</div>
+            </div>
+          </template>
+
+          <!-- 笔记：打了关键词才搜得出来 -->
+          <template v-if="searchingNotes || noteMatches.length > 0">
+            <div class="source-group-label">
+              {{ t('assistantInputComposer.mentionPopover.groupNotes') }}
+              <PhCircleNotch v-if="searchingNotes" class="icon-spin" />
+            </div>
+            <div
+              v-for="note in noteMatches"
+              :key="note.id"
+              class="source-item"
+              :class="{ selected: isSourceSelected(note.id) }"
+              @click="handleSourceSelect(note)"
+            >
+              <div class="source-icon">
+                <PhNotePencil />
+              </div>
+              <div class="source-info">
+                <div class="source-title">{{ note.title }}</div>
+                <div class="source-type">
+                  {{ t('assistantInputComposer.mentionPopover.noteLabel') }}
+                </div>
+              </div>
+              <div v-if="isSourceSelected(note.id)" class="check-mark">✓</div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="popover-fade">
+      <div v-if="showWikiPopover" class="source-mention-popover wiki-popover">
+        <div class="popover-header">
+          <span class="header-title">{{ t('assistantInputComposer.wikiPopover.title') }}</span>
+          <span class="header-hint">{{ t('assistantInputComposer.wikiPopover.hint') }}</span>
+        </div>
+        <div v-if="loadingWikiOptions" class="empty-state">
+          <PhCircleNotch class="icon-spin" />
+        </div>
+        <div v-else-if="filteredWikiOptions.length === 0" class="empty-state">
+          <span>{{ t('assistantInputComposer.wikiPopover.empty') }}</span>
+        </div>
+        <div v-else class="source-list">
+          <div
+            v-for="wiki in filteredWikiOptions"
+            :key="wiki.notebookId"
+            class="source-item"
+            :class="{ selected: props.boundNotebook?.notebookId === wiki.notebookId }"
+            @click="handleSelectWiki(wiki)"
+          >
+            <div class="source-icon">
+              <PhFileText />
+            </div>
+            <div class="source-info">
+              <div class="source-title">{{ wiki.title }}</div>
+              <div class="source-type">
+                {{
+                  t('assistantInputComposer.wikiPopover.sourceCount', {
+                    count: wiki.sourceCount || 0
+                  })
+                }}
+              </div>
+            </div>
+            <div v-if="props.boundNotebook?.notebookId === wiki.notebookId" class="check-mark">
+              <PhCheck />
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="popover-fade">
+      <SkillCommandMenu
+        v-if="showSkillMenu && skillQuery !== null"
+        ref="skillCommandMenuRef"
+        :skills="installedSkills"
+        :query="skillQuery"
+        :loading="loadingSkills"
+        :error="skillLoadError"
+        @select="handleSelectSkill"
+        @select-command="handleSelectCommand"
+        @retry="loadSkills"
+        @close="closeSkillMenu"
+      />
+    </Transition>
+
+    <div class="placeholder-row">
+      <button
+        v-if="isImageGenerationMode"
+        type="button"
+        class="tool-indicator image-mode"
+        :title="t('assistant.composer.exitImageGen')"
+        aria-pressed="true"
+        @click="emit('cancel-image-generation')"
+      >
+        <PhImage /> {{ t('assistant.composer.imageGen') }}
+      </button>
+      <button
+        v-if="isGoalMode"
+        type="button"
+        class="tool-indicator goal-mode"
+        :title="t('assistant.composer.exitGoalMode')"
+        aria-pressed="true"
+        @click="cancelGoalMode"
+      >
+        <PhTarget /> {{ t('assistant.composer.goalMode') }}
+      </button>
+      <a-textarea
+        ref="textareaRef"
+        v-model:value="composerContent"
+        :placeholder="
+          mentionedSources.length > 0
+            ? t('assistantInputComposer.placeholderMentioned', { count: mentionedSources.length })
+            : placeholderText
+        "
+        :bordered="false"
+        :auto-size="{ minRows: 1, maxRows: 10 }"
+        aria-autocomplete="list"
+        aria-controls="assistant-skill-command-menu"
+        :aria-expanded="showSkillMenu"
+        spellcheck="false"
+        @keydown="handleKeydown"
+        @paste="handlePaste"
+        @click="handleTextareaClick"
+        @contextmenu.prevent="handleContextMenu"
+      />
+    </div>
+
+    <div class="tools-row">
+      <div class="left-tools">
+        <!-- 知识库 @ 按钮（仅在知识库模式下显示） -->
+        <AppTooltip
+          v-if="notebookMode"
+          :title="
+            availableNotebookSources.length === 0
+              ? t('assistantInputComposer.mentionPopover.empty')
+              : t('assistantInputComposer.atMentionTooltip')
+          "
+        >
+          <AppButton
+            class="at-btn"
+            :class="{
+              disabled: availableNotebookSources.length === 0,
+              active: mentionedSources.length > 0
+            }"
+            shape="circle"
+            size="small"
+            :disabled="availableNotebookSources.length === 0"
+            @click="handleAtClick"
+          >
+            <span class="at-symbol">@</span>
+          </AppButton>
+        </AppTooltip>
+        <PhPaperclip class="tool" @click="triggerFileInput" />
+        <input
+          ref="fileInputRef"
+          type="file"
+          accept="image/bmp,image/jpeg,image/png,image/webp"
+          multiple
+          hidden
+          @change="handleFileSelect"
+        />
+        <!--
+          审批策略。这是现在唯一的「让它别乱动」开关 —— 老的 Chat 模式已经删了，
+          要纯对话就把审批档位调严，写操作到不了工程上。
+        -->
+        <div
+          v-click-outside="closeApprovalDropdown"
+          class="mode-selector approval-selector"
+          :class="{ 'is-yolo': permissionMode === 'yolo' }"
+          @keydown.esc.stop.prevent="dismissModeDropdown($event, closeApprovalDropdown)"
+        >
+          <!--
+            触发器上**不要挂 tooltip**：下拉面板是往上弹的，tooltip 正好压在它
+            上面，把选项的点击整个吃掉（真机验证时就是卡在这里）。
+            而且每一档在面板里本来就有一行说明，再加一层浮层是重复。
+          -->
+          <AppButton
+            variant="text"
+            size="small"
+            class="mode-trigger"
+            :aria-expanded="showApprovalDropdown"
+            :aria-label="currentApprovalConfig.label"
+            :title="currentApprovalConfig.label"
+            @click="toggleApprovalDropdown"
+          >
+            <component :is="currentApprovalConfig.icon" class="approval-trigger-icon" />
+            <span class="mode-trigger-label">{{ currentApprovalConfig.label }}</span>
+            <PhCaretDown class="mode-trigger-arrow" :class="{ open: showApprovalDropdown }" />
+            <span class="mode-trigger-glow" />
+          </AppButton>
+          <Transition name="mode-dropdown">
+            <div v-if="showApprovalDropdown" class="mode-dropdown approval-dropdown">
+              <button
+                v-for="opt in approvalOptions"
+                :key="opt.value"
+                type="button"
+                class="mode-option"
+                :class="{ active: permissionMode === opt.value }"
+                :aria-pressed="permissionMode === opt.value"
+                @click="selectApproval(opt.value, $event)"
+              >
+                <div
+                  class="mode-option-icon-wrap"
+                  :class="{ active: permissionMode === opt.value }"
+                >
+                  <component :is="opt.icon" />
+                </div>
+                <div class="mode-option-text">
+                  <span class="mode-option-name">{{ opt.label }}</span>
+                  <span class="mode-option-desc">{{ opt.desc }}</span>
+                </div>
+                <div v-if="permissionMode === opt.value" class="mode-option-check">
+                  <PhCheck />
+                </div>
+              </button>
+            </div>
+          </Transition>
+        </div>
+
+        <!--
+          思考程度。Chat 与 Agent 两种模式都走同一个内核，所以不像审批策略那样
+          限定在 Agent —— 两边都用得上。
+        -->
+        <div
+          v-click-outside="closeThinkingDropdown"
+          class="mode-selector thinking-selector"
+          @keydown.esc.stop.prevent="dismissModeDropdown($event, closeThinkingDropdown)"
+        >
+          <AppButton
+            variant="text"
+            size="small"
+            class="mode-trigger"
+            :aria-expanded="showThinkingDropdown"
+            :aria-label="thinkingTriggerTitle"
+            :title="thinkingTriggerTitle"
+            @click="toggleThinkingDropdown"
+          >
+            <PhLightbulb class="thinking-trigger-icon" />
+            <span class="mode-trigger-label">{{ currentThinkingLabel }}</span>
+            <PhCaretDown class="mode-trigger-arrow" :class="{ open: showThinkingDropdown }" />
+            <span class="mode-trigger-glow" />
+          </AppButton>
+          <Transition name="mode-dropdown">
+            <div v-if="showThinkingDropdown" class="mode-dropdown thinking-dropdown">
+              <button
+                v-for="opt in thinkingOptions"
+                :key="opt.value"
+                type="button"
+                class="mode-option"
+                :class="{ active: thinkingLevel === opt.value }"
+                :aria-pressed="thinkingLevel === opt.value"
+                @click="selectThinkingLevel(opt.value, $event)"
+              >
+                <span class="thinking-level-name">
+                  {{ opt.label }}
+                  <!-- 厂商给这一档起了别名时，把档位原名跟在后面 —— 用户在
+                       官方文档或别的客户端里看到的是原名 -->
+                  <span v-if="opt.original" class="thinking-alias">({{ opt.original }})</span>
+                </span>
+                <span class="mode-option-desc">{{ opt.desc }}</span>
+                <div v-if="thinkingLevel === opt.value" class="mode-option-check">
+                  <PhCheck />
+                </div>
+              </button>
+              <!--
+                选的档位当前模型没有时，内核会夹到最近的一档。不说出来的话
+                这一行一个勾都没有，用户不知道自己这次到底跑在哪一档。
+              -->
+              <div v-if="thinkingClamped" class="mode-dropdown-note">
+                {{
+                  t('assistantInputComposer.thinking.clamped', {
+                    chosen: thinkingLevel,
+                    actual: effectiveThinkingLevel,
+                    model: thinkingSupport?.modelId ?? ''
+                  })
+                }}
+              </div>
+            </div>
+          </Transition>
+        </div>
+      </div>
+
+      <!-- 保持 grid 布局的占位元素 -->
+      <div class="chips-placeholder"></div>
+
+      <div class="right-tools">
+        <!-- Agent 模型快捷切换：放在发送区左侧，切换后下一轮立即使用新绑定。 -->
+        <div
+          v-if="!isImageGenerationMode"
+          v-click-outside="closeAgentModelDropdown"
+          class="agent-model-selector"
+        >
+          <AppButton
+            variant="text"
+            size="small"
+            class="mode-trigger agent-model-trigger"
+            :disabled="modelSwitchDisabled"
+            :loading="agentModelSaving"
+            :aria-label="agentModelTriggerTitle"
+            :title="agentModelTriggerTitle"
+            aria-haspopup="menu"
+            :aria-expanded="showAgentModelDropdown"
+            @click="toggleAgentModelDropdown"
+          >
+            <template #icon><PhCpu class="agent-model-trigger-icon" /></template>
+            <span class="mode-trigger-label agent-model-trigger-label">
+              {{ currentAgentModelLabel }}
+            </span>
+            <PhCaretDown
+              class="mode-trigger-arrow agent-model-trigger-caret"
+              :class="{ open: showAgentModelDropdown }"
+            />
+            <span class="mode-trigger-glow" />
+          </AppButton>
+          <Transition name="mode-dropdown">
+            <div
+              v-if="showAgentModelDropdown"
+              class="mode-dropdown agent-model-dropdown"
+              role="menu"
+            >
+              <div
+                v-if="agentModelLoading && !agentModelSettings"
+                class="mode-dropdown-note agent-model-status"
+                role="status"
+              >
+                <PhCircleNotch class="icon-spin" />
+                {{ t('assistantInputComposer.model.loading') }}
+              </div>
+              <button
+                v-else-if="agentModelLoadError && !agentModelSettings"
+                type="button"
+                class="mode-option agent-model-retry"
+                @click="loadAgentModels"
+              >
+                {{ t('assistantInputComposer.model.loadFailed') }}
+              </button>
+              <template v-else-if="agentModelCatalog?.groups.length === 0">
+                <div class="mode-dropdown-note agent-model-status" role="status">
+                  {{ t('assistantInputComposer.model.empty') }}
+                </div>
+                <button
+                  type="button"
+                  class="mode-option agent-model-settings"
+                  role="menuitem"
+                  @click="openModelSettings"
+                >
+                  {{ t('assistantInputComposer.model.configure') }}
+                </button>
+              </template>
+              <template v-else>
+                <div
+                  v-for="group in agentModelCatalog?.groups ?? []"
+                  :key="group.providerId"
+                  class="agent-model-group"
+                  role="group"
+                >
+                  <div class="agent-model-group-title">{{ group.providerName }}</div>
+                  <button
+                    v-for="option in group.options"
+                    :key="option.key"
+                    type="button"
+                    class="mode-option agent-model-option"
+                    :class="{ active: option.key === selectedAgentModelKey }"
+                    role="menuitemradio"
+                    :aria-checked="option.key === selectedAgentModelKey"
+                    @click="selectAgentModel(option)"
+                  >
+                    <span class="agent-model-option-name">{{ option.modelName }}</span>
+                    <span
+                      v-if="option.modelName !== option.modelId"
+                      class="mode-option-desc agent-model-option-id"
+                    >
+                      {{ option.modelId }}
+                    </span>
+                    <span v-if="option.key === selectedAgentModelKey" class="mode-option-check">
+                      <PhCheck />
+                    </span>
+                  </button>
+                </div>
+              </template>
+            </div>
+          </Transition>
+        </div>
+        <AppTooltip v-if="byokConfigured" placement="top">
+          <template #title>
+            <span>{{ t('assistantInputComposer.byokEnabled') }}</span>
+          </template>
+          <span class="byok-indicator" :aria-label="t('assistantInputComposer.byokEnabled')">
+            <PhSliders />
+          </span>
+        </AppTooltip>
+        <!--
+          上下文用量。外面只有一个圆环，不带文字 —— 输入框那一排已经够挤了。
+          悬停看详情，**点一下直接压缩**（不用再点第二个按钮）。
+        -->
+        <AppTooltip
+          v-if="contextUsage"
+          placement="top"
+          overlay-class-name="context-usage-tip"
+          :mouse-enter-delay="0.15"
+        >
+          <template #title>
+            <div class="context-tip">
+              <div class="context-tip-head">
+                <span>{{ t('assistantInputComposer.contextTitle') }}</span>
+                <span class="context-tip-value">
+                  {{ formatTokens(contextUsage.tokens) }} /
+                  {{ formatTokens(contextUsage.contextWindow) }}（{{ contextUsageLabel }}）
+                </span>
+              </div>
+              <div class="context-tip-track">
+                <div
+                  class="context-tip-fill"
+                  :class="{ high: contextUsagePercent >= 80 }"
+                  :style="{ width: `${Math.max(contextUsagePercent, 1.5)}%` }"
+                />
+              </div>
+            </div>
+          </template>
+          <button
+            type="button"
+            class="context-ring"
+            :class="{ high: contextUsagePercent >= 80, busy: compacting }"
+            :disabled="compacting || props.isGenerating"
+            :aria-label="contextUsageText"
+            @click="handleCompact"
+          >
+            <svg viewBox="0 0 20 20" width="18" height="18">
+              <circle class="context-ring-track" cx="10" cy="10" r="8" />
+              <!--
+                从 12 点开始顺时针：默认起点在 3 点，转 -90° 才符合"进度条"的直觉。
+                dasharray 用整圈周长，dashoffset 按百分比留白。
+              -->
+              <circle
+                class="context-ring-fill"
+                cx="10"
+                cy="10"
+                r="8"
+                :stroke-dasharray="RING_CIRCUMFERENCE"
+                :stroke-dashoffset="ringOffset"
+                transform="rotate(-90 10 10)"
+              />
+            </svg>
+          </button>
+        </AppTooltip>
+        <!--
+          实时语音。点开就一直听着，说完模型直接答；要动 UE 时它会把指令
+          交给现有的 Agent 链路跑（确认框、撤销栈都还在）。
+        -->
+        <AppTooltip
+          v-if="!props.isGenerating || voiceVisible"
+          placement="top"
+          :title="
+            props.voice.connecting.value
+              ? t('assistantInputComposer.voice.cancelConnection')
+              : props.voice.active.value
+                ? t('assistantInputComposer.voice.stop')
+                : t('assistantInputComposer.voice.start')
+          "
+        >
+          <!--
+            圆环画在按钮外面，不画在按钮里 —— 会话阶段（连接 / 在听 / 在想 /
+            在调工具 / 在说）由它一个人交代，按钮只管颜色和按下去的手感。
+            连接中不再换成 spinner 图标：麦克风图标一直在，外面的环负责表示在忙。
+          -->
+          <span class="voice-slot">
+            <VoiceRing :phase="props.voice.phase.value" :level="props.voice.outputLevel.value" />
+            <AppButton
+              shape="circle"
+              class="voice-btn"
+              :class="{ live: props.voice.active.value }"
+              :aria-label="
+                props.voice.connecting.value
+                  ? t('assistantInputComposer.voice.cancelConnection')
+                  : props.voice.active.value
+                    ? t('assistantInputComposer.voice.stop')
+                    : t('assistantInputComposer.voice.start')
+              "
+              :aria-pressed="props.voice.active.value"
+              @click="toggleVoice"
+            >
+              <template #icon>
+                <PhMicrophone />
+              </template>
+            </AppButton>
+          </span>
+        </AppTooltip>
+        <!--
+          停止任务和挂断通话分别保留入口：挂断后后台任务仍会继续。
+
+          跑着的时候输入框一有东西，这颗就从「停止」换回「发送」：人刚打完一句话，
+          手边这颗最该是发出去，不是把正在跑的那一轮掐了。清空输入框才退回红色停止。
+        -->
+        <AppButton
+          v-if="props.isGenerating && !canSendFollowUp"
+          variant="primary"
+          shape="circle"
+          class="stop-btn"
+          :aria-label="t('assistantInputComposer.stopTask')"
+          danger
+          @click="handleStop"
+        >
+          <template #icon>
+            <PhStop />
+          </template>
+        </AppButton>
+        <AppButton
+          v-else
+          variant="primary"
+          shape="circle"
+          class="send-btn"
+          :aria-label="canSendFollowUp ? followUpActionLabel : t('common.send')"
+          :disabled="isSendDisabled"
+          :loading="isUploading"
+          @click="handlePrimaryAction"
+        >
+          <template #icon>
+            <PhArrowUp v-if="!isUploading" />
+          </template>
+        </AppButton>
+      </div>
+    </div>
+
+    <!-- 开启完全访问权限前的二次确认 -->
+    <AppModal
+      v-model:open="showFullAccessConfirm"
+      hide-footer
+      :width="480"
+      centered
+      class="full-access-modal"
+    >
+      <div class="full-access">
+        <h3 class="full-access-title">
+          <PhWarning />
+          {{ t('assistantInputComposer.approval.confirmTitle') }}
+        </h3>
+        <p class="full-access-intro">{{ t('assistantInputComposer.approval.confirmIntro') }}</p>
+
+        <div class="full-access-list">
+          <div v-for="scope in fullAccessScopes" :key="scope.title" class="full-access-item">
+            <component :is="scope.icon" class="full-access-icon" />
+            <div class="full-access-text">
+              <span class="full-access-item-title">{{ scope.title }}</span>
+              <span class="full-access-item-desc">{{ scope.desc }}</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="full-access-risk">{{ t('assistantInputComposer.approval.confirmRisk') }}</p>
+
+        <div class="full-access-actions">
+          <AppButton @click="showFullAccessConfirm = false">
+            {{ t('assistantInputComposer.approval.confirmCancel') }}
+          </AppButton>
+          <AppButton danger @click="confirmFullAccess">
+            <PhWarning />
+            {{ t('assistantInputComposer.approval.confirmOk') }}
+          </AppButton>
+        </div>
+      </div>
+    </AppModal>
+
+    <!-- 拖拽提示遮罩 -->
+    <div v-if="isDragging" class="drag-overlay">
+      <PhImage class="drag-icon" />
+      <span>{{ t('assistant.composer.dragImageHere') }}</span>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import AppModal from '@renderer/components/AppModal.vue'
+import AppTooltip from '@renderer/components/AppTooltip.vue'
+import AppButton from '@renderer/components/AppButton.vue'
+import { ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { agentV3API, type AgentV3SkillSummary } from '@/api/agentV3'
+import assetNoteAPI from '@renderer/api/assetNote'
+import { aiProviderAPI } from '@/api/aiProvider'
+import {
+  buildThinkingOptions,
+  resolveEffectiveLevel,
+  thinkingDisplayLabel,
+  type ModelThinkingSupport
+} from '../composables/thinkingLevels'
+import { buildAgentModelCatalog, type AgentModelOption } from '../composables/agentModelSelection'
+import { resolveFollowUpAction } from '../composables/followUpQueue'
+import { resolveComposerKeyAction } from '../composables/sendShortcut'
+import { formatTokenCount } from '../composables/tokenUsageFormat'
+import { useI18n } from 'vue-i18n'
+import { message } from '@/utils/messageManager'
+import { useAIConfigStore } from '@/store/modules/aiConfig'
+import {
+  PhArrowUp,
+  PhCaretDown,
+  PhChartBar,
+  PhChatCircle,
+  PhCheck,
+  PhCircleNotch,
+  PhCpu,
+  PhEye,
+  PhFile,
+  PhFileDoc,
+  PhFilePdf,
+  PhFileText,
+  PhFileXls,
+  PhGlobe,
+  PhImage,
+  PhLightbulb,
+  PhLightning,
+  PhLink,
+  // 「加到列表末尾」——排队按钮要表达的正是这个动作，不是「等一会儿」（沙漏）
+  // 也不是「回退」（逆时针钟）
+  PhListPlus,
+  PhMicrophone,
+  PhNotePencil,
+  PhPaperclip,
+  PhSealCheck,
+  PhSliders,
+  PhStop,
+  PhTarget,
+  PhWarning,
+  PhX,
+  PhXCircle,
+  PhYoutubeLogo
+} from '@phosphor-icons/vue'
+import {
+  MAX_IMAGE_DRAFT_BYTES,
+  useChatSessionsStore,
+  type BoundNotebook,
+  type ChatImageDraft
+} from '@/store/modules/chatSessions'
+import {
+  resolvePermissionMode,
+  setPermissionMode,
+  type ChatPermissionMode
+} from '../composables/sessionPermissionMode'
+import type { Component } from 'vue'
+import {
+  isImageFile,
+  isFileSizeValid,
+  extractImagesFromPaste,
+  extractImagesFromDrop,
+  getMaxImageSizeText,
+  fileToBase64,
+  uploadImage,
+  compressImageToTarget
+} from '@renderer/utils/imageUpload'
+import { openImageViewer } from '@renderer/services/imageViewer'
+import SkillCommandMenu from './SkillCommandMenu.vue'
+import { parseSkillSlashQuery, skillMention } from './skillCommands'
+import { noteToMentionSource, parseMentionQuery, stripMentionQuery } from './mentionQuery'
+import {
+  buildGoalCommandDraft,
+  matchRunCommand,
+  parseGoalCommandDraft,
+  slashCommandInsertion,
+  type SlashCommand
+} from './slashCommands'
+import VoiceRing from './VoiceRing.vue'
+import type { RealtimeVoiceState } from '../composables/useRealtimeVoice'
+import { startVoiceIn } from '../composables/voiceAssistant'
+import type { SettingsView } from '@core/shared/aiProvider'
+
+type PendingImage = ChatImageDraft
+
+/**
+ * 知识库来源项接口
+ */
+interface NotebookSourceItem {
+  id: string
+  title: string
+  type:
+    | 'file'
+    | 'link'
+    | 'youtube'
+    | 'bilibili'
+    | 'text'
+    | 'note'
+    | 'video'
+    | 'image'
+    | 'ue-project'
+    | 'wechat'
+    | 'mp'
+  content?: string
+  sourceUrl?: string
+  loading?: boolean
+  error?: string | null
+}
+
+interface NotebookOption {
+  notebookId: string
+  title: string
+  sourceCount?: number
+}
+
+const emit = defineEmits<{
+  (
+    e: 'send',
+    payload: {
+      content: string
+      images: string[]
+      imageFiles?: File[]
+      forcedSources?: NotebookSourceItem[]
+      excelContext?: string
+      /** Excel 文件元数据，用于在 UserBubble 中显示 */
+      excelFiles?: Array<{ fileName: string; rowCount?: number }>
+      /** 文档文件元数据，用于在 UserBubble 中显示 */
+      docFiles?: Array<{ fileName: string }>
+      /** 内嵌文档（PDF base64 数据，供 Gemini 直接处理） */
+      inlineDocuments?: Array<{ fileName: string; mimeType: string; base64Data: string }>
+    }
+  ): void
+  (e: 'attach'): void
+  /**
+   * 执行一条不带参数的内置命令（菜单里的 `/image`，以及手动输入兼容的 `/compact`）。
+   *
+   * 命令本身在这个组件里认（面板选中、或者用户把它敲全了回车），
+   * 但真正干活的东西在会话那一层 —— 所以只把命令名冒上去。
+   */
+  (e: 'run-command', name: string): void
+  (e: 'create-image'): void
+  (e: 'cancel-image-generation'): void
+  (e: 'search-web'): void
+  (e: 'stop'): void
+  (e: 'toggle-agent-mode', value: boolean): void
+  (e: 'toggle-ask-mode', value: boolean): void
+  (e: 'bind-wiki', value: BoundNotebook): void
+  (e: 'clear-bound-wiki'): void
+  /** 图片数量变化事件，用于通知父组件调整布局高度 */
+  (e: 'images-change', hasImages: boolean): void
+  /**
+   * 运行中插话改方向。
+   *
+   * 和 `send` 是两回事：`send` 开新一轮，插话是把话塞进**正在跑的那一轮**，
+   * 当前步骤做完后 agent 会看到它再决定下一步 —— 不打断、不丢掉已经做完的部分。
+   *
+   * 图跟着一起走。**不会为它换模型**：这一轮用哪个模型在跑起来那一刻就定了，
+   * 中途换等于把整段 prompt cache 作废。当前模型看不了图时它会照实说看不到。
+   */
+  (e: 'steer', payload: { text: string; images: string[] }): void
+  /** 取消一条还排着的跟进消息 */
+  (e: 'cancel-queued', id: string): void
+  /** 排着的这条别等了，现在就插进正在跑的那一轮 */
+  (e: 'steer-queued', id: string): void
+}>()
+
+const props = defineProps<{
+  disabled?: boolean
+  isImageGenerationMode?: boolean
+  isGenerating?: boolean
+  isAgentMode?: boolean
+  /** 是否处于 Ask 模式（只读模式） */
+  askMode?: boolean
+  /** 是否隐藏模式切换芯片（开启会话后不允许切换模式） */
+  hideChips?: boolean
+  /** 知识库模式：启用 @ 提及功能 */
+  notebookMode?: boolean
+  /** 知识库来源列表 */
+  notebookSources?: NotebookSourceItem[]
+  boundNotebook?: BoundNotebook | null
+  /** 当前会话 ID。用于查内核推来的真实上下文用量 */
+  chatSid?: string
+  /** 页面级实时语音会话。不能由这个会随欢迎态切换而销毁的组件持有。 */
+  voice: RealtimeVoiceState
+  /**
+   * 这条对话上还排着、等下一轮发出去的跟进消息。
+   *
+   * 队列本身归页面管（它要跨会话存活，而这个组件会随欢迎态切换销毁），
+   * 这里只负责把它画出来、以及把「取消这一条」冒上去。
+   */
+  queuedFollowUps?: ReadonlyArray<{
+    id: string
+    text: string
+    /** 能不能「立即插话」。带着插话通道送不走的附件（Excel、PDF、@ 来源）就不能 */
+    canSteer: boolean
+  }>
+}>()
+
+const localContent = ref('')
+const { t } = useI18n()
+const router = useRouter()
+const aiConfigStore = useAIConfigStore()
+const chatSessionsStore = useChatSessionsStore()
+const content = computed<string>({
+  get: () => (props.chatSid ? chatSessionsStore.getDraft(props.chatSid) : localContent.value),
+  set: (value) => {
+    if (props.chatSid) {
+      chatSessionsStore.setDraft(props.chatSid, value)
+    } else {
+      localContent.value = value
+    }
+  }
+})
+
+const voiceVisible = computed(() => props.voice.connecting.value || props.voice.active.value)
+
+/**
+ * 输入框里的麦克风：**在眼前这条对话上开口**。
+ *
+ * 曾经在这儿直接开语音，对白全落到一条固定的「语音助手」对话里 ——
+ * 用户在某条对话里点麦克风，本来是想接着眼前这段上下文往下聊，结果语音既看不见
+ * 这条对话说过什么，说的话也不写在这儿。绑定见 `voiceAssistant.startVoiceIn`。
+ */
+function toggleVoice(): void {
+  if (props.voice.active.value || props.voice.connecting.value) {
+    void props.voice.stop()
+    return
+  }
+  void startVoiceIn(props.chatSid || '')
+}
+
+const isImageGenerationMode = computed(() => !!props.isImageGenerationMode)
+const goalCommandText = computed(() =>
+  isImageGenerationMode.value ? null : parseGoalCommandDraft(content.value)
+)
+const isGoalMode = computed(() => goalCommandText.value !== null)
+const composerContent = computed<string>({
+  get: () => goalCommandText.value ?? content.value,
+  set: (value) => {
+    content.value = isGoalMode.value ? buildGoalCommandDraft(value) : value
+  }
+})
+
+function cancelGoalMode(): void {
+  const objective = parseGoalCommandDraft(content.value)
+  if (objective === null) return
+  content.value = objective
+}
+
+const isAgentMode = computed(() => !!props.isAgentMode)
+const notebookMode = computed(() => !!props.notebookMode)
+const byokConfigured = computed(() => !!aiConfigStore.getEnabledOpenAICompatibleByok())
+type SkillCommandMenuExposed = {
+  onKeydown: (event: KeyboardEvent) => boolean
+}
+
+// 只读选项沿用现有 Ask 能力；父页面持有真正执行时读取的状态
+const localAskMode = ref(!!props.askMode)
+watch(
+  () => props.askMode,
+  (val) => {
+    localAskMode.value = !!val
+  }
+)
+
+// ==================== 审批策略 ====================
+/**
+ * 四档按「管得严 → 管得松」排。只读复用 Agent 的 Ask 模式，
+ * 其余三档对应内核的 `ApprovalMode`。
+ *
+ * 默认是中间那档：全都问的话每一步写操作都要点一次，实际用不了；
+ * 全放行又太危险。可撤销的自动放行、不可逆的仍然问，是唯一能长期开着的档。
+ *
+ * **档位跟着这条会话走**，不是全局的 —— 见 composables/sessionPermissionMode.ts。
+ */
+type AgentPermissionMode = ChatPermissionMode
+
+const approvalOptions = [
+  {
+    value: 'read-only' as const,
+    label: t('assistantInputComposer.approval.readOnlyLabel'),
+    desc: t('assistantInputComposer.approval.readOnlyDesc'),
+    icon: PhEye
+  },
+  {
+    value: 'ask' as const,
+    label: t('assistantInputComposer.approval.askLabel'),
+    desc: t('assistantInputComposer.approval.askDesc'),
+    icon: PhSealCheck
+  },
+  {
+    value: 'auto-edit' as const,
+    label: t('assistantInputComposer.approval.autoEditLabel'),
+    desc: t('assistantInputComposer.approval.autoEditDesc'),
+    icon: PhSliders
+  },
+  {
+    value: 'yolo' as const,
+    label: t('assistantInputComposer.approval.yoloLabel'),
+    desc: t('assistantInputComposer.approval.yoloDesc'),
+    icon: PhLightning
+  }
+]
+
+const showApprovalDropdown = ref(false)
+/**
+ * 显示哪一档：**问这条会话**，不问全局设置。
+ *
+ * 没有 chatSid 的那些用法（还没落到某条对话上的输入框）退回旧行为：
+ * 只读看本地状态，其余看设置页的默认档位。
+ */
+const permissionMode = computed<AgentPermissionMode>(() => {
+  if (props.chatSid) return resolvePermissionMode(props.chatSid)
+  return localAskMode.value ? 'read-only' : aiConfigStore.agentPermissionMode
+})
+const currentApprovalConfig = computed(
+  () => approvalOptions.find((opt) => opt.value === permissionMode.value) ?? approvalOptions[2]
+)
+
+function toggleApprovalDropdown(): void {
+  showApprovalDropdown.value = !showApprovalDropdown.value
+}
+
+function closeApprovalDropdown(): void {
+  showApprovalDropdown.value = false
+}
+
+function dismissModeDropdown(event: Event, close: () => void): void {
+  const selector = (event.currentTarget as HTMLElement).closest('.mode-selector')
+  close()
+  selector?.querySelector<HTMLButtonElement>('button.mode-trigger')?.focus()
+}
+
+const showFullAccessConfirm = ref(false)
+
+/** 弹窗里逐条列出放开之后 AI 能做什么。写具体的能力，不写"等等" */
+const fullAccessScopes = computed(() => [
+  {
+    icon: PhChartBar,
+    title: t('assistantInputComposer.approval.confirmProject'),
+    desc: t('assistantInputComposer.approval.confirmProjectDesc')
+  },
+  {
+    icon: PhFile,
+    title: t('assistantInputComposer.approval.confirmFile'),
+    desc: t('assistantInputComposer.approval.confirmFileDesc')
+  },
+  {
+    icon: PhLightning,
+    title: t('assistantInputComposer.approval.confirmCommand'),
+    desc: t('assistantInputComposer.approval.confirmCommandDesc')
+  }
+])
+
+// ==================== Agent 模型快捷切换 ====================
+const agentModelSettings = ref<SettingsView | null>(null)
+const agentModelLoading = ref(false)
+const agentModelSaving = ref(false)
+const agentModelLoadError = ref(false)
+const showAgentModelDropdown = ref(false)
+
+const agentModelCatalog = computed(() =>
+  agentModelSettings.value ? buildAgentModelCatalog(agentModelSettings.value) : null
+)
+const selectedAgentModelKey = computed(() => agentModelCatalog.value?.selected?.key ?? null)
+const currentAgentModelLabel = computed(() => {
+  const catalog = agentModelCatalog.value
+  if (catalog?.selected) return catalog.selected.modelName
+  if (catalog?.binding) return catalog.binding.modelId
+  return t('assistantInputComposer.model.select')
+})
+const agentModelTriggerTitle = computed(() => {
+  if (props.isGenerating) return t('assistantInputComposer.model.busy')
+  const label = agentModelCatalog.value?.selected?.fullLabel ?? currentAgentModelLabel.value
+  return t('assistantInputComposer.model.current', { model: label })
+})
+const modelSwitchDisabled = computed(
+  () => !!props.disabled || !!props.isGenerating || agentModelSaving.value
+)
+
+async function loadAgentModels(): Promise<void> {
+  if (agentModelLoading.value) return
+  agentModelLoading.value = true
+  agentModelLoadError.value = false
+  try {
+    agentModelSettings.value = await aiProviderAPI.getSettings()
+  } catch (error) {
+    agentModelLoadError.value = true
+    console.warn('[输入框] 读取 Agent 模型列表失败:', error)
+  } finally {
+    agentModelLoading.value = false
+  }
+}
+
+function toggleAgentModelDropdown(): void {
+  showAgentModelDropdown.value = !showAgentModelDropdown.value
+  if (showAgentModelDropdown.value) void loadAgentModels()
+}
+
+function closeAgentModelDropdown(): void {
+  showAgentModelDropdown.value = false
+}
+
+function openModelSettings(): void {
+  closeAgentModelDropdown()
+  void router.push({ path: '/preferences', query: { tab: 'models' } })
+}
+
+async function selectAgentModel(option: AgentModelOption): Promise<void> {
+  const settings = agentModelSettings.value
+  if (!settings || option.key === selectedAgentModelKey.value || agentModelSaving.value) return
+
+  showAgentModelDropdown.value = false
+  agentModelSaving.value = true
+  try {
+    agentModelSettings.value = await aiProviderAPI.setAgentRole(
+      settings.roles,
+      {
+        providerId: option.providerId,
+        modelId: option.modelId
+      },
+      t('assistantInputComposer.model.switchFailed')
+    )
+    await loadThinkingSupport()
+    message.success(t('assistantInputComposer.model.switched', { model: option.fullLabel }))
+  } catch (error) {
+    message.error(
+      error instanceof Error ? error.message : t('assistantInputComposer.model.switchFailed')
+    )
+  } finally {
+    agentModelSaving.value = false
+  }
+}
+
+// ==================== 思考程度 ====================
+/**
+ * 档位清单**向内核现问**，不在这里写死 —— 各家模型声明的档位差得很远，
+ * 写死会列出当前模型根本没有的档位。清单逻辑在 composables/thinkingLevels.ts，
+ * 那边有测试守着。
+ */
+const thinkingSupport = ref<ModelThinkingSupport | null>(null)
+
+/**
+ * 档位名不翻译，只翻译右边那句说明 —— 档位是模型自己的词汇，
+ * 用户在厂商文档和别的客户端里看到的就是 low / high / xhigh 这些词。
+ */
+const describeThinkingLevel = (level: AgentV3ThinkingLevel): string =>
+  t(`assistantInputComposer.thinking.${level}Desc`)
+
+const thinkingOptions = computed(() =>
+  buildThinkingOptions(thinkingSupport.value, describeThinkingLevel)
+)
+
+const showThinkingDropdown = ref(false)
+const thinkingLevel = computed(() => aiConfigStore.agentThinkingLevel)
+
+/** 选的档位当前模型没有时，内核会夹到最近的一档 —— 界面得说出来 */
+const effectiveThinkingLevel = computed(() =>
+  resolveEffectiveLevel(thinkingLevel.value, thinkingSupport.value)
+)
+const thinkingClamped = computed(() => effectiveThinkingLevel.value !== thinkingLevel.value)
+
+/** 触发器上那个词。显示实际会用的那一档，不是用户存的那一档 */
+const currentThinkingLabel = computed(() =>
+  thinkingDisplayLabel(effectiveThinkingLevel.value, thinkingSupport.value)
+)
+
+/**
+ * 触发器的 title / aria-label。
+ *
+ * 窄容器下标签会被折掉只剩图标（见样式里的 `@container`），那时候
+ * 「这个灯泡是干嘛的」只能靠它回答；宽的时候它也不多余 ——
+ * 标签上只有档位名，没说这是「思考程度」。
+ */
+const thinkingTriggerTitle = computed(
+  () => `${t('assistantInputComposer.thinking.label')}：${currentThinkingLabel.value}`
+)
+
+/**
+ * 问一次当前绑定的模型支持哪几档。
+ *
+ * 失败就保持 null（下拉列全集）——这只是为了画一个下拉，
+ * 不该因为取不到清单就把输入框弄坏。
+ */
+async function loadThinkingSupport(): Promise<void> {
+  try {
+    thinkingSupport.value = await agentV3API.thinkingLevels()
+  } catch (error) {
+    console.warn('[输入框] 取思考档位清单失败，按全集显示:', error)
+    thinkingSupport.value = null
+  }
+}
+
+// 打开时才问：用户可能在设置页换了模型，缓存住的清单会是上一个模型的
+function toggleThinkingDropdown(): void {
+  showThinkingDropdown.value = !showThinkingDropdown.value
+  if (showThinkingDropdown.value) void loadThinkingSupport()
+}
+
+onMounted(() => {
+  void loadThinkingSupport()
+  void loadAgentModels()
+})
+
+onActivated(() => {
+  void loadAgentModels()
+})
+
+function closeThinkingDropdown(): void {
+  showThinkingDropdown.value = false
+}
+
+function selectThinkingLevel(level: AgentV3ThinkingLevel, event: Event): void {
+  dismissModeDropdown(event, closeThinkingDropdown)
+  aiConfigStore.setAgentThinkingLevel(level)
+}
+
+/**
+ * 落到**这条会话**上，顺便记成「下次新会话的起步档位」。
+ *
+ * 没有 chatSid 时只记后者 —— 那种情况下没有会话可挂，而什么都不存
+ * 等于这个下拉点了没反应。
+ */
+function applyPermissionMode(mode: AgentPermissionMode): void {
+  localAskMode.value = mode === 'read-only'
+  emit('toggle-ask-mode', mode === 'read-only')
+
+  if (props.chatSid) {
+    setPermissionMode(props.chatSid, mode)
+    return
+  }
+  aiConfigStore.setAgentPermissionMode(mode)
+}
+
+function selectApproval(mode: AgentPermissionMode, event: Event): void {
+  dismissModeDropdown(event, closeApprovalDropdown)
+  // 放开全部权限之前再确认一次。不是走流程 —— 这一档意味着删除资产、
+  // 执行 Python、改工程都不再问，用户得真的看清自己放开的是什么
+  if (mode === 'yolo' && permissionMode.value !== 'yolo') {
+    showFullAccessConfirm.value = true
+    return
+  }
+  applyPermissionMode(mode)
+}
+
+function confirmFullAccess(): void {
+  showFullAccessConfirm.value = false
+  applyPermissionMode('yolo')
+}
+
+// v-click-outside 自定义指令
+type ClickOutsideEl = HTMLElement & { _clickOutside: (e: Event) => void }
+const vClickOutside = {
+  mounted(el: HTMLElement, binding: { value: () => void }): void {
+    const handler = (e: Event): void => {
+      if (!el.contains(e.target as Node)) {
+        binding.value()
+      }
+    }
+    ;(el as ClickOutsideEl)._clickOutside = handler
+    document.addEventListener('click', handler)
+  },
+  unmounted(el: HTMLElement): void {
+    document.removeEventListener('click', (el as ClickOutsideEl)._clickOutside)
+  }
+}
+
+// ==================== Token 估算 ====================
+/**
+ * 真实上下文用量。
+ *
+ * 取代原来那个渲染层估算：它只数屏幕上的消息，算不到系统提示词、77 个工具的
+ * 定义、工具返回值和压缩后的摘要 —— 和模型真正看到的差着数量级。
+ * 这里的数由内核在每轮组装上下文时算出来推给界面。
+ *
+ * 第一轮跑起来之前没有数据，那时**不显示**而不是显示一个估的数：
+ * 宁可空着，也不要给一个会误导判断的数字。
+ */
+const contextUsage = computed(() =>
+  props.chatSid ? chatSessionsStore.getContextUsage(props.chatSid) : undefined
+)
+
+const contextUsagePercent = computed(() => {
+  const usage = contextUsage.value
+  if (!usage || usage.contextWindow <= 0) return 0
+  return Math.min(100, Math.round((usage.tokens / usage.contextWindow) * 100))
+})
+
+/**
+ * 12345 → 12.3k，1000000 → 1M。
+ *
+ * 上下文动辄几万 token，原样铺开一排数字读不出量级；而百万窗口写成
+ * 「1000k」既啰嗦又容易看错位数，厂商自己也都写 1M。
+ *
+ * 实现搬去了 `composables/tokenUsageFormat.ts` —— 回复下面的本轮用量要用同一套
+ * 口径，两处各写一份的话早晚会一个显示 12.3k、另一个显示 12345。
+ */
+const formatTokens = formatTokenCount
+
+/**
+ * 芯片上那一小段文字。
+ *
+ * 百分比不足 1 时显示 `<1%` 而不是 `0%` —— 大窗口模型（Gemini 1M）聊上
+ * 十几轮也才百分之几，一直显示 0% 会让人以为这个指示器坏了。
+ */
+const contextUsageLabel = computed(() => {
+  const usage = contextUsage.value
+  if (!usage) return ''
+  if (contextUsagePercent.value < 1) return '<1%'
+  return `${contextUsagePercent.value}%`
+})
+
+const compacting = ref(false)
+
+/** 圆环半径 8 的周长（2πr）。dasharray/dashoffset 都按它算 */
+const RING_CIRCUMFERENCE = Number((2 * Math.PI * 8).toFixed(2))
+
+/**
+ * 圆环留白长度。
+ *
+ * 百分比很小时也留一小段可见的弧（下限 4%），否则 1% 的时候环上什么都看不到，
+ * 用户分不清「刚开始」和「指示器坏了」。
+ */
+const ringOffset = computed(() => {
+  const shown = Math.max(contextUsagePercent.value, 4)
+  return ((100 - shown) / 100) * RING_CIRCUMFERENCE
+})
+
+/**
+ * 手动压缩。
+ *
+ * 自动压缩只在快撑满时才动手，但用户常常**提前**就想压：一段探索跑完了、
+ * 接下来换个方向，早期那堆试错留着只是占地方还让模型分心。
+ */
+async function handleCompact(): Promise<void> {
+  if (!props.chatSid || compacting.value) return
+  const sessionId = chatSessionsStore.getAgentSessionId(props.chatSid)
+  if (!sessionId) {
+    message.warning(t('assistantInputComposer.compactNoSession'))
+    return
+  }
+
+  compacting.value = true
+  try {
+    const result = await window.api.agentV3.compact({ sessionId })
+    if (!result.success) {
+      // 主进程只回「哪一种情况」，措辞在这里。它写的是实现语言
+      //（「最近这几轮本来就要完整保留」是在解释保留额度，不是在告诉用户
+      // 该怎么办），而且绕过 i18n，英文界面会蹦出中文。
+      const key = result.reason && result.reason !== 'error' ? result.reason : ''
+      message.warning(
+        key
+          ? t(`assistantInputComposer.compactReason.${key}`)
+          : result.error || t('assistantInputComposer.compactFailed')
+      )
+      return
+    }
+
+    // 压完立刻把指示器刷新到新值 —— 否则用户点了「压缩」，数字纹丝不动，
+    // 只能怀疑是不是没生效（下一轮对话才会重新上报）
+    if (result.tokensAfter !== undefined && result.contextWindow) {
+      chatSessionsStore.setContextUsage(props.chatSid, {
+        tokens: result.tokensAfter,
+        contextWindow: result.contextWindow
+      })
+    }
+    message.success(
+      t('assistantInputComposer.compactDone', {
+        before: formatTokens(result.tokensBefore ?? 0),
+        after: formatTokens(result.tokensAfter ?? 0)
+      })
+    )
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    compacting.value = false
+  }
+}
+
+const contextUsageText = computed(() => {
+  const usage = contextUsage.value
+  if (!usage) return ''
+  return t('assistantInputComposer.contextUsage', {
+    used: formatTokens(usage.tokens),
+    total: formatTokens(usage.contextWindow),
+    percent: contextUsageLabel.value
+  })
+})
+
+// ==================== 右键菜单 ====================
+function handleContextMenu(): void {
+  if (window.electron?.ipcRenderer) {
+    window.electron.ipcRenderer.send('app:show-input-context-menu', {
+      cut: t('common.cut') || '剪切',
+      copy: t('common.copy') || '复制',
+      paste: t('common.paste') || '粘贴',
+      selectAll: t('common.selectAll') || '全选'
+    })
+  }
+}
+
+// ==================== @ 提及相关状态 ====================
+/** 当前选中的来源（多选） */
+const mentionedSources = ref<NotebookSourceItem[]>([])
+/** 是否显示来源选择弹出层 */
+const showMentionPopover = ref(false)
+/**
+ * `@` 后面已经打了什么。null = 当前光标不在一次 @ 提及里。
+ *
+ * 知识库来源是「按下 @ 就推荐」，笔记不是 —— 笔记可能成百上千，
+ * 一按 @ 就糊一屏没有意义，得等用户打出关键词再搜。
+ */
+const mentionQuery = ref<string | null>(null)
+const noteMatches = ref<NotebookSourceItem[]>([])
+const searchingNotes = ref(false)
+const showWikiPopover = ref(false)
+const loadingWikiOptions = ref(false)
+const wikiOptions = ref<NotebookOption[]>([])
+const skillCommandMenuRef = ref<SkillCommandMenuExposed | null>(null)
+const installedSkills = ref<AgentV3SkillSummary[]>([])
+const loadingSkills = ref(false)
+const skillLoadError = ref('')
+const showSkillMenu = ref(false)
+
+const skillCommandsEnabled = computed(
+  () => !isImageGenerationMode.value && !props.disabled && !props.isGenerating
+)
+const skillQuery = computed(() =>
+  skillCommandsEnabled.value ? parseSkillSlashQuery(content.value) : null
+)
+
+const wikiCommandQuery = computed(() => {
+  const trimmed = content.value.trim()
+  if (!trimmed.startsWith('/wiki')) {
+    return ''
+  }
+
+  return trimmed.slice('/wiki'.length).trim()
+})
+
+const filteredWikiOptions = computed(() => {
+  const query = wikiCommandQuery.value
+  if (!query || query === 'clear') {
+    return wikiOptions.value
+  }
+
+  const normalizedQuery = query.toLowerCase()
+  return wikiOptions.value.filter((item) => item.title.toLowerCase().includes(normalizedQuery))
+})
+
+/**
+ * 可供选择的知识库来源（过滤掉加载中和错误的）。
+ *
+ * 只有知识库的对话栏会把 sources 传进来，所以这一组在外面的助手页天然是空的 ——
+ * 那正是想要的：知识库来源只属于那个知识库，不该在外面被推荐。
+ */
+const availableNotebookSources = computed(() => {
+  const sources = (props.notebookSources || []).filter((s) => !s.loading && !s.error)
+  const query = (mentionQuery.value || '').trim().toLowerCase()
+  if (!query) return sources
+  return sources.filter((s) => s.title.toLowerCase().includes(query))
+})
+
+/** 笔记要打了字才出现，所以空 query 时这一组一定是空的 */
+const hasMentionCandidates = computed(
+  () => availableNotebookSources.value.length > 0 || noteMatches.value.length > 0
+)
+
+/**
+ * 一次 @ 提及至少要打几个字才去搜。
+ * 一个字的候选面太大，搜出来也是噪声。
+ */
+const MIN_NOTE_QUERY_LENGTH = 1
+const NOTE_SEARCH_DEBOUNCE_MS = 200
+const NOTE_SEARCH_LIMIT = 8
+
+let noteSearchTimer: ReturnType<typeof setTimeout> | null = null
+let noteSearchRequestId = 0
+
+function clearNoteSearch(): void {
+  if (noteSearchTimer) {
+    clearTimeout(noteSearchTimer)
+    noteSearchTimer = null
+  }
+  noteSearchRequestId++
+  noteMatches.value = []
+  searchingNotes.value = false
+}
+
+function scheduleNoteSearch(query: string): void {
+  if (noteSearchTimer) clearTimeout(noteSearchTimer)
+
+  const keyword = query.trim()
+  if (keyword.length < MIN_NOTE_QUERY_LENGTH) {
+    clearNoteSearch()
+    return
+  }
+
+  searchingNotes.value = true
+  noteSearchTimer = setTimeout(async () => {
+    const requestId = ++noteSearchRequestId
+    try {
+      const found = await assetNoteAPI.search(keyword, { limit: NOTE_SEARCH_LIMIT })
+      // 用户还在打字，迟到的结果不该盖掉新的
+      if (requestId !== noteSearchRequestId) return
+      noteMatches.value = found.map((note) => noteToMentionSource(note, t('noteEditor.newNote')))
+    } catch (error) {
+      if (requestId !== noteSearchRequestId) return
+      console.error('[InputComposer] 搜索笔记失败:', error)
+      noteMatches.value = []
+    } finally {
+      if (requestId === noteSearchRequestId) searchingNotes.value = false
+    }
+  }, NOTE_SEARCH_DEBOUNCE_MS)
+}
+
+/**
+ * 获取来源类型图标
+ */
+function getSourceIcon(type: string): Component {
+  switch (type) {
+    case 'link':
+      return PhLink
+    case 'youtube':
+      return PhYoutubeLogo
+    case 'bilibili':
+      return PhGlobe
+    case 'text':
+      return PhFileText
+    case 'file':
+      return PhFile
+    default:
+      return PhGlobe
+  }
+}
+
+/**
+ * 获取来源类型标签
+ */
+function getSourceTypeLabel(type: string): string {
+  switch (type) {
+    case 'link':
+      return t('assistantInputComposer.sourceType.link')
+    case 'youtube':
+      return 'YouTube'
+    case 'bilibili':
+      return t('assistantInputComposer.sourceType.bilibili')
+    case 'text':
+      return t('assistantInputComposer.sourceType.text')
+    case 'file':
+      return t('assistantInputComposer.sourceType.file')
+    case 'ue-project':
+      return t('assistantInputComposer.sourceType.ueProject')
+    default:
+      return type
+  }
+}
+
+/**
+ * 打开 @ 来源选择器
+ */
+function handleAtClick(): void {
+  if (availableNotebookSources.value.length === 0) return
+  showWikiPopover.value = false
+  showMentionPopover.value = !showMentionPopover.value
+}
+
+/**
+ * 选中来源（多选模式）
+ */
+function handleSourceSelect(source: NotebookSourceItem): void {
+  // 检查是否已选中
+  const isSelected = mentionedSources.value.some((s) => s.id === source.id)
+  if (isSelected) {
+    // 已选中则取消选中
+    mentionedSources.value = mentionedSources.value.filter((s) => s.id !== source.id)
+  } else {
+    // 未选中则添加
+    mentionedSources.value = [...mentionedSources.value, source]
+  }
+  showMentionPopover.value = false
+  clearNoteSearch()
+  content.value = stripMentionQuery(content.value)
+  mentionQuery.value = null
+}
+
+async function ensureWikiOptionsLoaded(): Promise<void> {
+  if (loadingWikiOptions.value || wikiOptions.value.length > 0) {
+    return
+  }
+
+  loadingWikiOptions.value = true
+  try {
+    const notebooks = await window.api.notebook.list()
+    wikiOptions.value = notebooks.map((item) => ({
+      notebookId: item.notebookId,
+      title: item.title,
+      sourceCount: item.sourceCount || 0
+    }))
+  } catch (error) {
+    console.error('[InputComposer] Failed to load notebooks for /wiki:', error)
+    message.error(t('assistantInputComposer.toast.loadWikiFailed'))
+  } finally {
+    loadingWikiOptions.value = false
+  }
+}
+
+async function openWikiPopover(): Promise<void> {
+  await ensureWikiOptionsLoaded()
+  showMentionPopover.value = false
+  showWikiPopover.value = true
+}
+
+function handleSelectWiki(option: NotebookOption): void {
+  emit('bind-wiki', {
+    notebookId: option.notebookId,
+    title: option.title
+  })
+  content.value = ''
+  showWikiPopover.value = false
+}
+
+function handleClearBoundWiki(): void {
+  if (notebookMode.value) return
+  emit('clear-bound-wiki')
+}
+
+/**
+ * `/wiki` 在知识库里没有意义 —— 它是「给这条会话绑一个知识库」，
+ * 而知识库模式下当前这个库就是答案，再绑一个别的只会自相矛盾。
+ *
+ * 这是**场景差异**，不是能力阉割：附件、审批档位、思考程度、斜杠命令
+ * 那些以前一并关掉的，现在都开着。
+ */
+function isWikiCommand(value: string): boolean {
+  if (notebookMode.value) return false
+  return value.trim().startsWith('/wiki')
+}
+
+/**
+ * 检查来源是否已选中
+ */
+function isSourceSelected(sourceId: string): boolean {
+  return mentionedSources.value.some((s) => s.id === sourceId)
+}
+
+/**
+ * 移除选中的来源
+ */
+function handleRemoveMention(sourceId: string): void {
+  mentionedSources.value = mentionedSources.value.filter((s) => s.id !== sourceId)
+}
+
+/**
+ * 点击输入框：关闭弹层，但内容仍是 `/关键词` 时要恢复技能菜单。
+ * 菜单只靠 watch(skillQuery) 打开，内容不变就不会再触发，
+ * 不在这里补一次的话，点击重新聚焦后菜单就再也弹不出来。
+ */
+function handleTextareaClick(): void {
+  showMentionPopover.value = false
+  showWikiPopover.value = false
+  showSkillMenu.value = skillQuery.value !== null
+}
+
+/**
+ * 监听输入，驱动 @ 提及。
+ *
+ * 不再限定知识库模式 —— 外面的助手页也要能 @ 到自己写的笔记。两边的区别在
+ * 「推荐什么」而不是「能不能用」：知识库来源由知识库的对话栏传进来，按下 @
+ * 就列出来；笔记要打了关键词才搜。
+ */
+watch(content, (newVal) => {
+  const query = parseMentionQuery(newVal)
+  mentionQuery.value = query
+
+  if (query === null) {
+    showMentionPopover.value = false
+    clearNoteSearch()
+    return
+  }
+
+  showMentionPopover.value = true
+  scheduleNoteSearch(query)
+})
+
+watch(content, (newVal) => {
+  if (isWikiCommand(newVal)) {
+    if (wikiCommandQuery.value !== 'clear') {
+      void openWikiPopover()
+    } else {
+      showWikiPopover.value = false
+    }
+    return
+  }
+
+  if (showWikiPopover.value) {
+    showWikiPopover.value = false
+  }
+})
+
+async function loadSkills(): Promise<void> {
+  if (loadingSkills.value) return
+
+  loadingSkills.value = true
+  skillLoadError.value = ''
+  try {
+    const result = await agentV3API.listSkills()
+    // 用户在设置里关掉的不进这个菜单：选了它，agent 那边根本不会加载 ——
+    // 菜单里摆着一条选了没用的技能，比不摆更糟
+    installedSkills.value = result.skills.filter((skill) => skill.enabled)
+  } catch (error) {
+    console.error('[InputComposer] Failed to load skills for / menu:', error)
+    skillLoadError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    loadingSkills.value = false
+  }
+}
+
+function closeSkillMenu(): void {
+  showSkillMenu.value = false
+}
+
+function handleSelectSkill(skill: AgentV3SkillSummary): void {
+  content.value = skillMention(skill.name)
+  showSkillMenu.value = false
+
+  focus()
+}
+
+/**
+ * 选中一条内置命令。
+ *
+ * 带参数的（`/goal <目标>`）会保留 `/name ` 作为真实草稿，界面上折叠成模式标签；
+ * 选中即执行会把「我在挑命令」和「我写完了」搅成一件事。
+ * `/wiki` 属于这一档，它会顺势弹出自己的知识库选择层，那是 content 的 watcher 干的。
+ *
+ * 不带参数的（当前菜单里是 `/image`）当场执行：填进去再让用户按一次回车
+ * 是白让他多按一下。
+ */
+function handleSelectCommand(command: SlashCommand): void {
+  showSkillMenu.value = false
+
+  if (command.kind === 'run') {
+    content.value = ''
+    emit('run-command', command.name)
+    focus()
+    return
+  }
+
+  content.value = slashCommandInsertion(command.name)
+  focus()
+}
+
+watch(skillQuery, (query, previousQuery) => {
+  if (query === null) {
+    showSkillMenu.value = false
+    return
+  }
+
+  showMentionPopover.value = false
+  showWikiPopover.value = false
+  showSkillMenu.value = true
+  if (previousQuery === null) void loadSkills()
+})
+
+// 图片草稿和文字一样按会话留在运行内存中；退出应用后自然释放，不写入持久层。
+const localPendingImages = ref<PendingImage[]>([])
+const pendingImages = computed<PendingImage[]>(() =>
+  props.chatSid ? chatSessionsStore.getImageDraft(props.chatSid) : localPendingImages.value
+)
+
+function replacePendingImages(images: PendingImage[]): boolean {
+  if (!props.chatSid) {
+    localPendingImages.value = images
+    return true
+  }
+  return chatSessionsStore.trySetImageDraft(props.chatSid, images)
+}
+
+const isDragging = ref(false)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+// Ant Design 的 textarea 组件实例
+const textareaRef = ref<{ $el?: HTMLElement } | null>(null)
+
+// Excel 文件相关状态
+interface PendingExcelFile {
+  file: File
+  fileName: string
+  content?: string
+  rowCount?: number
+  parsing: boolean
+  error?: string
+}
+const pendingExcelFiles = ref<PendingExcelFile[]>([])
+
+/**
+ * 聊天里能直接拖进来的文档格式。
+ *
+ * 与主进程 documentLoader 的 ANYDOC_EXTENSIONS 同源 —— 那边解析得了、这边却
+ * 默默忽略，用户只会以为拖拽坏了。xlsx/xls 不在此列：它们另有 Excel 分支。
+ */
+const CHAT_DOC_EXTENSIONS = new Set([
+  'pdf',
+  'doc',
+  'docx',
+  'docm',
+  'ppt',
+  'pps',
+  'pot',
+  'pptx',
+  'pptm',
+  'ppsx',
+  'ppsm',
+  'odt',
+  'ods',
+  'odp',
+  'rtf',
+  'epub'
+])
+
+// 文档文件相关状态（PDF/Word）
+// Gemini 3 Flash 支持 PDF 直接内嵌 (application/pdf)
+interface PendingDocFile {
+  file: File
+  fileName: string
+  /** 只区分 PDF 与其他：PDF 走 base64 内嵌，其余走主进程解析出的文本 */
+  fileType: string
+  /** Base64 编码的文件内容（用于 Gemini 内嵌） */
+  base64Data?: string
+  /** MIME 类型 */
+  mimeType?: string
+  /** 解析后的文本内容（用于非 PDF 文件回退） */
+  content?: string
+  parsing: boolean
+  error?: string
+}
+const pendingDocFiles = ref<PendingDocFile[]>([])
+
+// 图片限制常量
+const MAX_IMAGES = 5
+const MAX_TOTAL_SIZE = 100 * 1024 * 1024 // 100MB - Gemini 3 Flash 支持大图片内嵌
+const MAX_EXCEL_FILES = 3
+const MAX_DOC_FILES = 3
+
+/**
+ * 监听图片列表变化，通知父组件调整布局高度
+ */
+watch(
+  () => pendingImages.value.length,
+  (newLen, oldLen = 0) => {
+    // 仅在有无图片状态切换时触发
+    if (newLen > 0 !== oldLen > 0) {
+      emit('images-change', newLen > 0)
+    }
+  },
+  { immediate: true }
+)
+
+// 计算属性
+const isUploading = computed(() => pendingImages.value.some((img) => img.uploading))
+const isParsingExcel = computed(() => pendingExcelFiles.value.some((f) => f.parsing))
+const isSendDisabled = computed(() => {
+  // 禁用条件：外部禁用、正在上传/解析、或者没有内容和附件
+  if (props.disabled) return true
+  if (isUploading.value || isParsingExcel.value) return true
+  const hasContent = composerContent.value.trim().length > 0
+  const hasImages = pendingImages.value.length > 0
+  const hasExcel = pendingExcelFiles.value.some((f) => f.content && !f.error)
+  return !hasContent && !hasImages && !hasExcel
+})
+
+const placeholderText = computed(() => {
+  // 生成中且能插话时换提示语：不换的话输入框看起来只是"还不能发"，
+  // 用户不会想到这时候打的字会被送进正在跑的那一轮
+  if (props.isGenerating && isAgentMode.value) {
+    return t('assistant.composer.placeholderSteer')
+  }
+  if (isImageGenerationMode.value) {
+    return t('assistant.composer.placeholderImage')
+  }
+  if (isAgentMode.value) {
+    return t('assistant.composer.placeholderAgent')
+  }
+  if (pendingImages.value.length > 0) {
+    return t('assistant.composer.placeholderImageChat')
+  }
+  return t('assistant.composer.placeholderDefault')
+})
+
+/**
+ * 触发文件选择器
+ */
+function triggerFileInput(): void {
+  fileInputRef.value?.click()
+}
+
+/**
+ * 处理文件选择
+ */
+async function handleFileSelect(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const files = input.files
+  if (!files || files.length === 0) return
+
+  // 分离图片文件、Excel 文件和文档文件
+  const imageFiles: File[] = []
+  const excelFiles: File[] = []
+  const docFiles: File[] = []
+
+  for (const file of Array.from(files)) {
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext === 'xlsx' || ext === 'xls') {
+      excelFiles.push(file)
+    } else if (ext && CHAT_DOC_EXTENSIONS.has(ext)) {
+      docFiles.push(file)
+    } else if (file.type.startsWith('image/')) {
+      imageFiles.push(file)
+    }
+  }
+
+  // 处理图片
+  if (imageFiles.length > 0) {
+    await addImages(imageFiles)
+  }
+
+  // 处理 Excel 文件
+  if (excelFiles.length > 0) {
+    await addExcelFiles(excelFiles)
+  }
+
+  // 处理文档文件（PDF/Word）
+  if (docFiles.length > 0) {
+    await addDocFiles(docFiles)
+  }
+
+  // 清空 input 以便再次选择同一文件
+  input.value = ''
+}
+
+/**
+ * 添加图片到待上传列表
+ */
+async function addImages(files: File[]): Promise<void> {
+  const currentCount = pendingImages.value.length
+  const remaining = MAX_IMAGES - currentCount
+
+  if (remaining <= 0) {
+    message.warning(t('assistant.composer.maxImagesWarning'))
+    return
+  }
+
+  // 计算当前已添加图片的总大小
+  const currentTotalSize = pendingImages.value.reduce((sum, img) => sum + img.file.size, 0)
+
+  // 过滤并处理文件
+  const filesToProcess: File[] = []
+  let newTotalSize = currentTotalSize
+
+  for (let file of files) {
+    // 检查数量限制
+    if (filesToProcess.length >= remaining) {
+      message.warning(t('assistant.composer.maxImagesWarning'))
+      break
+    }
+
+    // 检查文件类型
+    if (!isImageFile(file)) {
+      message.warning(t('assistant.composer.notImageFile', { name: file.name }))
+      continue
+    }
+
+    // 🔴 极致压缩图片（下压到 300KB 左右），避免 base64 内联导致大请求引发 API 400
+    try {
+      file = await compressImageToTarget(file, 300)
+    } catch (err) {
+      console.warn('图片压缩失败，使用原图:', err)
+    }
+
+    // 检查单张文件大小（通用限制）
+    if (!isFileSizeValid(file)) {
+      const sizeMB = (file.size / 1024 / 1024).toFixed(2)
+      message.warning(
+        t('assistant.composer.fileSizeExceeded', {
+          name: file.name,
+          size: sizeMB,
+          limit: getMaxImageSizeText()
+        })
+      )
+      continue
+    }
+
+    // 如果仍然需要一个极致宽容的边界检查（防止不可预期的绕过）
+    if (newTotalSize + file.size > MAX_TOTAL_SIZE) {
+      const currentTotalMB = (newTotalSize / 1024 / 1024).toFixed(2)
+      const fileSizeMB = (file.size / 1024 / 1024).toFixed(2)
+      const maxTotalMB = (MAX_TOTAL_SIZE / 1024 / 1024).toFixed(0)
+      message.warning(
+        t('assistant.composer.totalSizeExceeded', {
+          name: file.name,
+          current: currentTotalMB,
+          fileSize: fileSizeMB,
+          limit: maxTotalMB
+        })
+      )
+      continue
+    }
+
+    filesToProcess.push(file)
+    newTotalSize += file.size
+  }
+
+  // 处理通过检查的文件：先生成本地预览，再异步上传到对象存储
+  for (const file of filesToProcess) {
+    const pendingImageId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    try {
+      const base64Data = await fileToBase64(file)
+      const pendingImage: PendingImage = {
+        id: pendingImageId,
+        file,
+        preview: base64Data,
+        url: base64Data, // 直接使用 base64 作为 URL
+        uploading: true
+      }
+      if (!replacePendingImages([...pendingImages.value, pendingImage])) {
+        const bytesPerMB = 1024 * 1024
+        message.warning(
+          t('assistant.composer.totalSizeExceeded', {
+            name: file.name,
+            current: (chatSessionsStore.getImageDraftBytes() / bytesPerMB).toFixed(2),
+            fileSize: (file.size / bytesPerMB).toFixed(2),
+            limit: MAX_IMAGE_DRAFT_BYTES / bytesPerMB
+          })
+        )
+        continue
+      }
+
+      const uploadResult = await uploadImage(file)
+      const currentImage = pendingImages.value.find((img) => img.id === pendingImageId)
+      if (!currentImage) {
+        continue
+      }
+
+      if (uploadResult.success && uploadResult.url) {
+        currentImage.url = uploadResult.url
+        currentImage.uploading = false
+        currentImage.error = undefined
+      } else {
+        currentImage.uploading = false
+        currentImage.error = uploadResult.error || t('assistant.composer.uploadFailed')
+        message.error(currentImage.error)
+      }
+    } catch (error) {
+      console.error('创建图片预览失败:', error)
+      const currentImage = pendingImages.value.find((img) => img.id === pendingImageId)
+      if (currentImage) {
+        currentImage.uploading = false
+        currentImage.error =
+          error instanceof Error
+            ? error.message
+            : t('assistant.composer.previewFailed', { name: file.name })
+      }
+      message.error(t('assistant.composer.previewFailed', { name: file.name }))
+    }
+  }
+}
+
+/**
+ * 添加 Excel 文件到待处理列表
+ * 通过 IPC 调用主进程解析 Excel 内容
+ */
+async function addExcelFiles(files: File[]): Promise<void> {
+  const remaining = MAX_EXCEL_FILES - pendingExcelFiles.value.length
+  if (remaining <= 0) {
+    message.warning(t('assistantInputComposer.toast.maxExcelFiles', { max: MAX_EXCEL_FILES }))
+    return
+  }
+
+  for (const file of files.slice(0, remaining)) {
+    // 检查文件大小（5MB 限制）
+    if (file.size > 5 * 1024 * 1024) {
+      const sizeMB = (file.size / 1024 / 1024).toFixed(2)
+      message.warning(
+        t('assistantInputComposer.toast.excelTooLarge', { name: file.name, size: sizeMB })
+      )
+      continue
+    }
+
+    // 添加到待处理列表
+    const pending: PendingExcelFile = {
+      file,
+      fileName: file.name,
+      parsing: true
+    }
+    pendingExcelFiles.value.push(pending)
+    const currentIndex = pendingExcelFiles.value.length - 1
+
+    // 异步解析
+    try {
+      // 将文件读取为 ArrayBuffer 并传递给主进程
+      const arrayBuffer = await file.arrayBuffer()
+
+      const result = await window.electron.ipcRenderer.invoke('file:execute', {
+        toolName: 'parseExcel',
+        params: { buffer: arrayBuffer, fileName: file.name }
+      })
+
+      if (result.success) {
+        pendingExcelFiles.value[currentIndex] = {
+          ...pending,
+          content: result.content,
+          rowCount: result.rowCount,
+          parsing: false
+        }
+        // message.success(`已解析 ${file.name}（${result.rowCount} 行）`)
+      } else {
+        pendingExcelFiles.value[currentIndex] = {
+          ...pending,
+          parsing: false,
+          error: result.error || '解析失败'
+        }
+        message.error(
+          result.error || t('assistantInputComposer.toast.parseFailed', { name: file.name })
+        )
+      }
+    } catch (error) {
+      console.error('[InputComposer] Excel 解析失败:', error)
+      pendingExcelFiles.value[currentIndex] = {
+        ...pending,
+        parsing: false,
+        error: error instanceof Error ? error.message : '解析失败'
+      }
+      message.error(t('assistantInputComposer.toast.parseFailed', { name: file.name }))
+    }
+  }
+}
+
+/**
+ * 添加文档文件到待解析列表（PDF/Word）
+ * 使用现有的 document:load IPC 解析文档
+ */
+async function addDocFiles(files: File[]): Promise<void> {
+  const remaining = MAX_DOC_FILES - pendingDocFiles.value.length
+  if (remaining <= 0) {
+    message.warning(t('assistantInputComposer.toast.maxDocFiles', { max: MAX_DOC_FILES }))
+    return
+  }
+
+  const toProcess = files.slice(0, remaining)
+
+  for (const file of toProcess) {
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+
+    // 先添加一个"处理中"状态的占位
+    const pending: PendingDocFile = {
+      file,
+      fileName: file.name,
+      fileType: ext,
+      parsing: true
+    }
+    pendingDocFiles.value.push(pending)
+    const currentIndex = pendingDocFiles.value.length - 1
+
+    try {
+      // 将文件读取为 ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer()
+      const buffer = new Uint8Array(arrayBuffer)
+
+      // PDF 文件：直接使用 base64 内嵌（Gemini 3 Flash 原生支持）
+      if (ext === 'pdf') {
+        // 转换为 base64
+        const base64Data = btoa(buffer.reduce((data, byte) => data + String.fromCharCode(byte), ''))
+        pendingDocFiles.value[currentIndex] = {
+          ...pending,
+          base64Data,
+          mimeType: 'application/pdf',
+          parsing: false
+        }
+        console.log(
+          `[InputComposer] PDF ${file.name} 已转为 base64，大小: ${(buffer.length / 1024 / 1024).toFixed(2)}MB`
+        )
+      } else {
+        // Word 文件：使用 IPC 解析文本（Gemini 不支持 Word 内嵌）
+        const result = await window.electron.ipcRenderer.invoke('file:execute', {
+          toolName: 'parseDocument',
+          params: { buffer: Array.from(buffer), fileName: file.name }
+        })
+
+        if (result.success) {
+          pendingDocFiles.value[currentIndex] = {
+            ...pending,
+            content: result.content,
+            parsing: false
+          }
+        } else {
+          pendingDocFiles.value[currentIndex] = {
+            ...pending,
+            parsing: false,
+            error: result.error || '解析失败'
+          }
+          message.error(
+            result.error || t('assistantInputComposer.toast.parseFailed', { name: file.name })
+          )
+        }
+      }
+    } catch (error) {
+      console.error('[InputComposer] 文档处理失败:', error)
+      pendingDocFiles.value[currentIndex] = {
+        ...pending,
+        parsing: false,
+        error: error instanceof Error ? error.message : '处理失败'
+      }
+      message.error(t('assistantInputComposer.toast.processFailed', { name: file.name }))
+    }
+  }
+}
+
+/**
+ * 移除待上传的文档文件
+ */
+function removeDocFile(index: number): void {
+  pendingDocFiles.value.splice(index, 1)
+}
+
+/**
+ * 移除图片
+ */
+function removeImage(index: number): void {
+  replacePendingImages(pendingImages.value.filter((_, imageIndex) => imageIndex !== index))
+}
+
+/**
+ * 移除 Excel 文件
+ */
+function removeExcelFile(index: number): void {
+  pendingExcelFiles.value.splice(index, 1)
+}
+
+/**
+ * 处理粘贴事件
+ */
+async function handlePaste(event: ClipboardEvent): Promise<void> {
+  const images = extractImagesFromPaste(event)
+  if (images.length > 0) {
+    event.preventDefault()
+    await addImages(images)
+  }
+}
+
+/**
+ * 处理拖拽进入
+ */
+function handleDragOver(event: DragEvent): void {
+  // 检查是否有图片文件
+  const items = event.dataTransfer?.items
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        isDragging.value = true
+        return
+      }
+    }
+  }
+}
+
+/**
+ * 处理拖拽离开
+ */
+function handleDragLeave(): void {
+  isDragging.value = false
+}
+
+/**
+ * 处理拖拽放下
+ */
+async function handleDrop(event: DragEvent): Promise<void> {
+  isDragging.value = false
+  const images = extractImagesFromDrop(event)
+  if (images.length > 0) {
+    await addImages(images)
+  }
+}
+
+/**
+ * 打开图片预览
+ */
+function openImagePreview(img: PendingImage): void {
+  const items = pendingImages.value
+    .map((it) => ({
+      src: it.url || it.preview,
+      alt: it.file?.name || 'image'
+    }))
+    .filter((it) => !!it.src)
+  const index = Math.max(0, pendingImages.value.indexOf(img))
+  void openImageViewer({ items, index })
+}
+
+/**
+ * 处理发送
+ */
+function handleSend(event?: Event): void {
+  if (isSendDisabled.value) return
+
+  const trimmedContent = content.value.trim()
+
+  /*
+   * 用户完全可以不碰面板，直接把 `/compact` 敲全然后回车。
+   * 不在这儿拦下来，那句话就当正文发给模型了 —— 模型会礼貌地回一句
+   * 「好的我来压缩」然后什么也没发生，正是这轮要消灭的那种假生效。
+   */
+  const runCommand = matchRunCommand(trimmedContent)
+  if (runCommand) {
+    content.value = ''
+    showSkillMenu.value = false
+    emit('run-command', runCommand.name)
+    return
+  }
+
+  if (isWikiCommand(trimmedContent)) {
+    if (trimmedContent === '/wiki clear') {
+      if (props.boundNotebook) {
+        emit('clear-bound-wiki')
+      } else {
+        message.info(t('assistantInputComposer.toast.noWikiBound'))
+      }
+      content.value = ''
+      showWikiPopover.value = false
+      return
+    }
+
+    void openWikiPopover()
+    return
+  }
+
+  // 未配置模型时保留草稿和附件，让用户在当前入口完成设置再发送。
+  // 本地命令和生图不依赖 Agent 模型，因此在它们各自的路径之后判断。
+  if (!isImageGenerationMode.value && !props.isGenerating && !agentModelCatalog.value?.selected) {
+    // 原生点击的冒泡可能晚于 nextTick，直接阻止本次点击关闭刚打开的设置入口。
+    event?.stopPropagation()
+    showAgentModelDropdown.value = true
+    message.info(t('assistantInputComposer.model.required'))
+    void loadAgentModels()
+    return
+  }
+
+  // 收集已上传成功的图片 URL
+  const uploadedImages = pendingImages.value
+    .filter((img) => img.url && !img.uploading && !img.error)
+    .map((img) => img.url!)
+
+  // 在图片生成模式下，如果有图片，传递 File 对象用于图生图
+  const imageFiles: File[] | undefined = isImageGenerationMode.value
+    ? pendingImages.value
+        .filter((img) => img.file && !img.uploading && !img.error)
+        .map((img) => img.file!)
+    : undefined
+
+  // 收集已解析的 Excel 内容
+  const excelContents = pendingExcelFiles.value
+    .filter((f) => f.content && !f.parsing && !f.error)
+    .map((f) => `### 文件：${f.fileName}\n\n${f.content}`)
+
+  // 收集已解析的 Word 文档内容（非 PDF，因为 PDF 使用 inline data）
+  const docContents = pendingDocFiles.value
+    .filter((f) => f.content && !f.parsing && !f.error && f.fileType !== 'pdf')
+    .map((f) => `### 文件：${f.fileName}\n\n${f.content}`)
+
+  // 收集 PDF 的 base64 数据作为 inline documents（供 Gemini 直接处理）
+  const inlineDocuments = pendingDocFiles.value
+    .filter((f) => f.base64Data && f.mimeType && !f.parsing && !f.error && f.fileType === 'pdf')
+    .map((f) => ({
+      fileName: f.fileName,
+      mimeType: f.mimeType!,
+      base64Data: f.base64Data!
+    }))
+
+  // 合并所有文档上下文（Excel + Word，不包括 PDF）
+  const allDocContents = [...excelContents, ...docContents]
+  const excelContext = allDocContents.length > 0 ? allDocContents.join('\n\n---\n\n') : undefined
+
+  // 收集 Excel 文件元数据（用于 UserBubble 显示）
+  const excelFiles = pendingExcelFiles.value
+    .filter((f) => f.content && !f.parsing && !f.error)
+    .map((f) => ({ fileName: f.fileName, rowCount: f.rowCount }))
+
+  // 收集文档文件元数据（用于 UserBubble 显示，包括 PDF 和 Word）
+  const docFiles = pendingDocFiles.value
+    .filter((f) => (f.content || f.base64Data) && !f.parsing && !f.error)
+    .map((f) => ({ fileName: f.fileName }))
+
+  // 发送消息（包含可能的强制来源列表和 inline documents）
+  emit('send', {
+    content: trimmedContent,
+    images: uploadedImages,
+    imageFiles,
+    forcedSources: mentionedSources.value.length > 0 ? [...mentionedSources.value] : undefined,
+    excelContext,
+    excelFiles: excelFiles.length > 0 ? excelFiles : undefined,
+    docFiles: docFiles.length > 0 ? docFiles : undefined,
+    inlineDocuments: inlineDocuments.length > 0 ? inlineDocuments : undefined
+  })
+
+  // 清空状态
+  content.value = ''
+  replacePendingImages([])
+  pendingExcelFiles.value = []
+  pendingDocFiles.value = []
+  mentionedSources.value = []
+  showMentionPopover.value = false
+  showWikiPopover.value = false
+  showSkillMenu.value = false
+}
+
+/**
+ * 触发停止生成事件
+ */
+function handleStop(): void {
+  emit('stop')
+}
+
+/**
+ * 能不能插话。
+ *
+ * 只在 **Agent 模式跑着的时候**才成立：插话是 agent 循环的能力（消息注入
+ * 当前轮次），普通对话的流式输出里没有这个东西，摆一个点了没反应的按钮
+ * 比不摆更糟。
+ */
+/** 现在处于"可以插话"的状态（不管有没有打字）。状态条和按钮的显隐都看它 */
+const canSteerNow = computed(() => !!props.isGenerating && isAgentMode.value)
+
+const canSteer = computed(() => canSteerNow.value && content.value.trim().length > 0)
+
+/**
+ * 跑着的时候，这次回车默认走排队还是插话。
+ *
+ * 直接读 store 而不是让页面传 prop：这是一条用户级偏好，和「这条对话」无关，
+ * 多传一层只会多一个能对不上的地方。
+ */
+const followUpBehavior = computed(() => aiConfigStore.followUpBehavior)
+
+/** 哪个键算发送。同样直接读 store —— 用户级偏好，和「这条对话」无关 */
+const sendShortcut = computed(() => aiConfigStore.sendShortcut)
+
+/**
+ * 运行中那颗按钮对读屏软件报的名字。
+ *
+ * 界面上不写字了（发送箭头就是发送箭头，多一颗带标签的按钮只是占地方），
+ * 但点下去实际发生的是排队还是插话，读屏的人有权先知道。
+ */
+const followUpActionLabel = computed(() =>
+  followUpBehavior.value === 'queue'
+    ? t('assistantInputComposer.queueAction')
+    : t('assistantInputComposer.steerAction')
+)
+
+/**
+ * 跑着的时候，输入框里已经有能发的东西。
+ *
+ * 只在 Agent 模式成立：普通对话的流式输出里没有队列这回事，这时候换成发送按钮
+ * 点下去只会被主进程以「会话正在执行中」顶回来，那还不如留着停止按钮。
+ */
+const canSendFollowUp = computed(() => canSteerNow.value && !isSendDisabled.value)
+
+/**
+ * 插话。带上贴进来的图 —— 用的是和 `handleSend` 同一批「传完了、没出错」的图。
+ *
+ * 其余附件（Excel、PDF、@ 来源）这条通道带不走，所以**留在输入框里不清空**：
+ * 用户看得见它们还在，下一次普通发送会把它们发出去。清掉的话东西会静悄悄少一半。
+ */
+function handleSteer(): void {
+  const text = content.value.trim()
+  if (!text) return
+  const ready = pendingImages.value.filter((img) => img.url && !img.uploading && !img.error)
+  const images = ready.map((img) => img.url!)
+  emit('steer', { text, images })
+  content.value = ''
+  // 只摘走真的发出去的那几张。还在传的、传坏的留在原地 ——
+  // 一起清掉的话用户会以为它们也跟着这句话进去了
+  if (images.length > 0) {
+    replacePendingImages(pendingImages.value.filter((img) => !ready.includes(img)))
+  }
+}
+
+/**
+ * 运行中那颗按钮：按设置走排队或插话。
+ *
+ * 排队走的是普通 `send` —— 页面看见「跑着的时候来了一条 send」就把它排进队列。
+ * 不为排队单开一条事件：那样页面要维护两条几乎一样的发送路径，而附件、@提及、
+ * 草稿清空这些事在两条路上都得做一遍。
+ */
+function handleFollowUpAction(): void {
+  if (followUpBehavior.value === 'steer') {
+    handleSteer()
+    return
+  }
+  if (isSendDisabled.value) return
+  handleSend()
+}
+
+/**
+ * 右下角那颗按钮：闲着就是普通发送，跑着就按设置排队 / 插话。
+ *
+ * 原生事件要一路传给 `handleSend` —— 没配模型那条分支要靠它 `stopPropagation`，
+ * 否则这一下点击会顺手把刚弹出来的模型设置入口又关掉。
+ */
+function handlePrimaryAction(event?: Event): void {
+  if (canSendFollowUp.value) {
+    handleFollowUpAction()
+    return
+  }
+  handleSend(event)
+}
+
+function handleCancelQueued(id: string): void {
+  emit('cancel-queued', id)
+}
+
+function handleSteerQueued(id: string): void {
+  emit('steer-queued', id)
+}
+
+/** 排着的消息。父组件没传就是空 —— 模板里不用到处判空 */
+const queuedFollowUps = computed(() => props.queuedFollowUps ?? [])
+
+/**
+ * 键盘处理
+ */
+function handleKeydown(e: KeyboardEvent): void {
+  if (props.disabled) return
+
+  if (showSkillMenu.value && skillCommandMenuRef.value?.onKeydown(e)) return
+
+  // 修复在输入框中无法使用快捷键全选的问题
+  const isSelectAll = (e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'a'
+  if (isSelectAll) {
+    const target = e.target as HTMLTextAreaElement | null
+    if (target && typeof target.select === 'function') {
+      e.preventDefault()
+      e.stopPropagation()
+      target.select()
+      return
+    }
+  }
+
+  /*
+   * 哪个键算发送由设置定（回车 / Ctrl+回车），换行交给输入框默认行为。
+   * 两段判定都是纯函数，各自有测试：判错的表现是「我的话发不出去」或者
+   * 「我还没写完就发出去了」，两种都不报错，只会在真机上被用户撞见。
+   */
+  const keyAction = resolveComposerKeyAction(e, sendShortcut.value)
+  if (keyAction === null || keyAction === 'newline') return
+
+  e.preventDefault()
+
+  /*
+   * 跑着的时候这一下有两种处置，用户在设置里选默认那种，加一个修饰键
+   * 对**这一条**反着来。
+   *
+   * 两种都不能退化成「什么也不做」：这时候开新一轮会被主进程以
+   * 「会话正在执行中」顶回来，用户敲下的那段话就白打了。
+   */
+  const action = resolveFollowUpAction(
+    followUpBehavior.value,
+    keyAction === 'submit-opposite',
+    canSteerNow.value
+  )
+  if (action === 'steer') {
+    if (canSteer.value) handleSteer()
+    return
+  }
+  // 普通对话的流式输出里没有队列这回事（那是 agent 循环的能力），
+  // 生成中照旧什么都不做 —— 发出去只会被拒
+  if (action === 'send' && props.isGenerating) return
+  if (isSendDisabled.value) return
+  handleSend()
+}
+
+/**
+ * 组件挂载后，确保 textarea 有正确的高度，避免初始化时的高度闪烁
+ * 注意：只设置初始高度，不阻止 auto-size 的正常工作
+ */
+onMounted(() => {
+  nextTick(() => {
+    if (textareaRef.value) {
+      // Ant Design 的 textarea 组件，需要访问内部的 textarea 元素
+      const textareaEl = textareaRef.value.$el?.querySelector(
+        'textarea'
+      ) as HTMLTextAreaElement | null
+      if (textareaEl) {
+        // 只在初始化时设置一次高度，之后让 auto-size 接管
+        // 移除可能存在的固定高度样式，让 auto-size 正常工作
+        textareaEl.style.height = 'auto'
+        // 触发一次重新计算，确保初始高度正确
+        const scrollHeight = textareaEl.scrollHeight
+        if (scrollHeight > 0) {
+          // 使用 requestAnimationFrame 确保在下一帧设置，避免与 auto-size 冲突
+          requestAnimationFrame(() => {
+            if (textareaEl && textareaEl.scrollHeight === scrollHeight) {
+              // 只在高度没有变化时才设置，避免干扰 auto-size
+              textareaEl.style.height = `${scrollHeight}px`
+            }
+          })
+        }
+      }
+    }
+  })
+})
+</script>
+
+<style scoped lang="less">
+.input-composer {
+  position: relative;
+  // 这排控件收不收由**它自己这块地方**有多宽决定，不是窗口宽度 ——
+  // 同一个组件既铺在整页助手里，也嵌在库详情页那块四百来宽的面板里
+  container: composer / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: var(--color-bg-surface-hover);
+  box-shadow:
+    inset 0 0 0 1px var(--shadow-highlight),
+    0 12px 24px var(--shadow-color);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 聚焦态：输入内容时微妙边框亮起 */
+  &:focus-within {
+    box-shadow:
+      inset 0 0 0 1px var(--shadow-highlight),
+      0 12px 28px var(--shadow-color-strong);
+  }
+
+  &.drag-over {
+    box-shadow:
+      inset 0 0 0 2px var(--color-accent-border),
+      0 12px 24px var(--shadow-color);
+  }
+
+  .ant-input {
+    font-size: 14px !important;
+  }
+}
+
+.image-preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.image-preview-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+
+  .preview-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.2s ease;
+  }
+
+  .upload-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg-scrim);
+    color: var(--color-text-primary);
+    font-size: 20px;
+  }
+
+  .remove-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 18px;
+    color: var(--color-text-on-solid);
+    background: var(--color-bg-overlay);
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+
+    &:hover {
+      color: var(--color-danger-text);
+    }
+  }
+
+  &:hover .remove-btn {
+    opacity: 1;
+  }
+
+  &:hover .preview-img {
+    opacity: 0.9;
+  }
+}
+
+// Excel 文件预览样式
+.excel-preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.excel-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  transition: all 0.2s ease;
+
+  &.parsing {
+    opacity: 0.7;
+  }
+
+  &.error {
+    background: var(--color-danger-bg);
+    border-color: var(--color-danger-border);
+  }
+
+  .excel-icon {
+    font-size: 16px;
+    color: var(--color-success-text);
+  }
+
+  .excel-name {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .excel-rows {
+    color: var(--color-text-primary);
+    font-size: 11px;
+  }
+
+  .excel-status {
+    color: var(--color-success-text);
+  }
+
+  .remove-btn {
+    font-size: 12px;
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: var(--color-danger-text);
+    }
+  }
+}
+
+// 文档文件预览样式（PDF/Word）
+.doc-preview-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.doc-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--color-bg-surface-hover);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-subtle);
+
+  &.parsing {
+    opacity: 0.7;
+  }
+
+  &.error {
+    border-color: var(--color-danger-border);
+  }
+
+  .doc-icon {
+    font-size: 16px;
+  }
+
+  .pdf-icon {
+    color: var(--color-danger-text);
+  }
+
+  .word-icon {
+    color: var(--color-accent-text);
+  }
+
+  .doc-name {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .doc-pages {
+    color: var(--color-text-primary);
+    font-size: 11px;
+  }
+
+  .doc-status {
+    color: var(--color-accent-text);
+  }
+
+  .remove-btn {
+    font-size: 12px;
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: var(--color-danger-text);
+    }
+  }
+}
+
+.placeholder-row {
+  display: flex;
+  align-items: flex-start; /* Align to top for multi-line input */
+  gap: 8px;
+}
+
+.tool-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  padding: 3.5px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tool-indicator.image-mode,
+.tool-indicator.goal-mode {
+  background: var(--color-accent-bg);
+  color: var(--color-accent-text);
+  border: 1px solid var(--color-accent-border);
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-border-focus);
+    outline-offset: 2px;
+  }
+}
+
+.tool-indicator.model-mode {
+  background: var(--color-accent-bg);
+  color: var(--color-accent-text);
+  border: 1px solid var(--color-accent-border);
+}
+
+.tool-indicator.agent-mode {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border: 1px solid var(--color-warning-border);
+}
+
+.placeholder-row :deep(.ant-input) {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  background: transparent;
+  padding: 4px 0; /* Adjust padding to align with indicator */
+}
+
+.placeholder-row :deep(.ant-input::placeholder) {
+  color: var(--color-text-disabled);
+}
+
+/* 确保 textarea 在初始化时就有正确的高度，避免闪烁，但不阻止 auto-size 正常工作 */
+.placeholder-row :deep(textarea.ant-input) {
+  /* 设置行高，确保单行时的高度正确 */
+  line-height: 24px;
+}
+
+.tools-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 三列都要能被压缩。不写这条，grid 子项的 min-width:auto 会按内容撑开，
+   窄容器下右边那组直接溢出到面板外面 */
+.tools-row > * {
+  min-width: 0;
+}
+
+/*
+ * 窄容器下把这排控件的文字折成图标。
+ *
+ * ## 为什么是容器查询，不是媒体查询
+ *
+ * 这个组件既出现在整页的助手里，也嵌在蓝图库 / 材质库详情页那块四百来宽的
+ * 面板里（`LibraryAIPanel.vue`）。决定挤不挤的是**它自己这块地方有多宽**，
+ * 和窗口多宽没关系 —— 用户把窗口拉到 2560 宽，那块面板还是 420。
+ *
+ * ## 这些数字是**内容盒**的宽度
+ *
+ * 容器查询量的是容器内容盒，`.input-composer` 自己左右各 18px 内边距
+ * 已经被扣掉了，外面面板的内边距也不在内。所以这里的 480 对应的面板宽度
+ * 大约是 520–540。**这组数字是估的，真机上按实际观感再调**。
+ *
+ * ## 折的顺序
+ *
+ * 先折审批档和思考档（它们的图标本身就说明问题：盾牌/灯泡），
+ * 最后才折模型名 —— 「现在跑在哪个模型上」是这排里用户最常看的一条。
+ * 折掉的文字都进了 title 和 aria-label，鼠标停一下还看得到。
+ */
+@container composer (max-width: 480px) {
+  .approval-selector .mode-trigger-label,
+  .thinking-selector .mode-trigger-label {
+    display: none;
+  }
+}
+
+@container composer (max-width: 380px) {
+  .agent-model-trigger-label {
+    display: none;
+  }
+}
+
+.left-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 8px;
+}
+
+/* Ask 模式切换按钮 */
+.ask-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  user-select: none;
+
+  &:hover {
+    color: var(--color-text-secondary);
+    background: var(--color-bg-surface-hover);
+    border-color: var(--color-border-subtle);
+  }
+
+  &.active {
+    color: var(--color-text-selected);
+    background: var(--color-bg-selected);
+  }
+
+  .ask-icon {
+    font-size: 14px;
+  }
+
+  .ask-label {
+    font-weight: 500;
+    line-height: 1;
+  }
+}
+
+/* ==================== 模式选择器下拉框 ==================== */
+.mode-selector {
+  position: relative;
+}
+
+/* 圆环要贴着按钮转，所以按钮得有个定位锚点 */
+.voice-slot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-btn {
+  position: relative;
+  /* 环画在按钮底下，图标压在最上面 */
+  z-index: 1;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  transition:
+    color var(--motion-fast) var(--easing-standard),
+    background-color var(--motion-normal) var(--easing-standard),
+    transform var(--motion-fast) var(--easing-decelerate);
+}
+
+.voice-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-surface-hover);
+  transform: scale(1.06);
+}
+
+/* 按下去要有回应，且回应必须比松手快 —— 这是「按钮活着」的全部来源 */
+.voice-btn:active:not(:disabled) {
+  transform: scale(0.92);
+  transition-duration: 90ms;
+}
+
+/* 连接中：图标不换、不转，只是暗下去。转圈那件事交给外面的环 */
+.voice-btn:disabled {
+  color: var(--color-text-disabled);
+  background: transparent;
+}
+
+/*
+ * 会话开着必须一眼看得出来 —— 麦克风一直开着而用户以为没开，
+ * 是这类功能最要命的状态（既是隐私问题，也在持续计费）。
+ *
+ * 以前这里是整个按钮的透明度脉冲。它有两个毛病：只改透明度的状态提示
+ * 在浅色主题下几乎读不出来，而且它和外圈的呼吸抢节奏。现在常态由**颜色**
+ * 扛（不依赖动画，减少动态效果时照样成立），进入这个状态时图标弹一下作为交接。
+ */
+.voice-btn.live {
+  /* 红底上用 on-solid（两套主题都是白），text-inverse 在深色主题下是近黑，压在红上读不清 */
+  color: var(--color-text-on-solid);
+  background: var(--color-danger-solid);
+}
+
+.voice-btn.live:hover:not(:disabled) {
+  color: var(--color-text-on-solid);
+  background: color-mix(in srgb, var(--color-danger-solid) 86%, var(--color-text-on-solid));
+}
+
+.voice-btn.live :deep(svg) {
+  animation: voice-icon-engage 260ms var(--easing-bounce) 1;
+}
+
+/* 一次性的状态交接：图标顶一下再落回，告诉用户"从现在开始在录" */
+@keyframes voice-icon-engage {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* 尊重「减少动态效果」：颜色那一重仍然在 */
+@media (prefers-reduced-motion: reduce) {
+  .voice-btn,
+  .voice-btn:hover:not(:disabled),
+  .voice-btn:active:not(:disabled) {
+    transform: none;
+    transition: none;
+  }
+
+  .voice-btn.live :deep(svg) {
+    animation: none;
+  }
+}
+
+.mode-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 9px;
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  // background: var(--color-bg-surface);
+  // backdrop-filter: blur(12px);
+  // -webkit-backdrop-filter: blur(12px);
+  // border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  overflow: hidden;
+
+  &:hover {
+    background: var(--color-bg-surface-hover);
+    border-color: var(--color-border);
+    color: var(--color-text-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--shadow-color-weak);
+
+    .mode-trigger-glow {
+      opacity: 1;
+    }
+  }
+
+  &:active {
+    transform: translateY(0) scale(0.97);
+    transition-duration: 0.1s;
+  }
+}
+
+.mode-trigger-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(109, 195, 255, 0.06), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.mode-trigger-icon {
+  font-size: 13px;
+  color: var(--color-accent-text);
+  filter: drop-shadow(0 0 3px var(--color-accent-border));
+}
+
+.mode-trigger-label {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* 审批策略与思考程度。挨着模式选择器，但视觉上退一档 —— 它们是模式的
+   从属选项，不该和「Chat / Agent」抢注意力。
+   两个选择器共用同一套样式：它们在同一行里并排，各写一份迟早会漂移 */
+.approval-selector .mode-trigger,
+.thinking-selector .mode-trigger,
+.agent-model-selector .mode-trigger {
+  color: var(--color-text-primary);
+}
+
+.approval-selector .mode-trigger-label,
+.thinking-selector .mode-trigger-label,
+.agent-model-selector .mode-trigger-label {
+  font-weight: 500;
+}
+
+.approval-trigger-icon,
+.thinking-trigger-icon,
+.agent-model-trigger-icon {
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+/* 全放行是有代价的选择，得看得出来 —— 用户可能几周后才想起自己开过 */
+.approval-selector.is-yolo .mode-trigger,
+.approval-selector.is-yolo .approval-trigger-icon {
+  color: var(--color-warning-text);
+}
+
+.approval-dropdown,
+.thinking-dropdown,
+.agent-model-dropdown {
+  min-width: 252px;
+}
+
+/* 开启完全访问权限的确认弹窗 */
+.full-access {
+  color: var(--color-text-primary);
+}
+
+.full-access-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-warning-text);
+}
+
+.full-access-intro {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+}
+
+.full-access-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--color-bg-surface-hover);
+}
+
+.full-access-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+}
+
+.full-access-icon {
+  margin-top: 2px;
+  font-size: 15px;
+  color: var(--color-accent-text);
+  flex: none;
+}
+
+.full-access-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.full-access-item-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.full-access-item-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.full-access-risk {
+  margin: 14px 0 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+}
+
+.full-access-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mode-trigger-arrow {
+  font-size: 9px;
+  color: var(--color-text-primary);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-left: 1px;
+
+  &.open {
+    transform: rotate(180deg);
+    color: var(--color-accent-text);
+  }
+}
+
+.mode-dropdown {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  min-width: 232px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow:
+    0 12px 40px var(--shadow-color),
+    0 4px 12px var(--shadow-color-weak),
+    inset 0 0.5px 0 var(--shadow-highlight);
+  z-index: 100;
+
+  /* 顶部微光线 */
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 16px;
+    right: 16px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(109, 195, 255, 0.15), transparent);
+    border-radius: 1px;
+  }
+}
+
+/* 下拉菜单动画 */
+.mode-dropdown-enter-active {
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mode-dropdown-leave-active {
+  transition: all 0.18s cubic-bezier(0.4, 0, 1, 1);
+}
+
+.mode-dropdown-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.94);
+}
+
+.mode-dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+}
+
+.mode-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &:hover {
+    background: var(--color-bg-surface-hover);
+    transform: translateX(2px);
+  }
+
+  &.active {
+    background: var(--color-bg-selected);
+
+    /* 左侧渐变指示条 */
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 18px;
+      border-radius: 0 3px 3px 0;
+      background: var(--color-accent-solid);
+    }
+  }
+
+  & + .mode-option {
+    margin-top: 2px;
+  }
+}
+
+.mode-option-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--color-bg-surface-hover);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &.active {
+    background: var(--color-accent-solid);
+    border-color: var(--color-accent-solid);
+    color: var(--color-text-on-solid);
+    box-shadow: var(--shadow-xs);
+  }
+}
+
+.mode-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mode-option-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+}
+
+.mode-option-desc,
+.mode-dropdown-note {
+  font-size: 11px;
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+
+/* 下拉底部那句说明（档位属于哪个模型 / 被夹到了哪一档）。挂在选项下面
+   而不是做成 tooltip：下拉是往上弹的，浮层会压住选项把点击吃掉（审批那边踩过） */
+.mode-dropdown-note {
+  padding: 6px 12px 2px;
+  border-top: 1px solid var(--color-border-subtle);
+  margin-top: 4px;
+}
+
+/* 档位这一档是**单行**的：档位名 + 右侧说明 + 勾。
+   与 Chat / Agent 那种「标题 + 副标题」的两行卡片不同 —— 档位名本身就是
+   一个词（low / xhigh），堆成两行反而更难扫，也和 pi 那边的排布对得上 */
+.thinking-level-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.thinking-dropdown .mode-option-desc {
+  margin-left: 12px;
+  white-space: nowrap;
+}
+
+/* 厂商别名后面跟的档位原名 */
+.thinking-alias {
+  margin-left: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.mode-option-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-accent-solid);
+  color: var(--color-text-on-solid);
+  font-size: 10px;
+  flex-shrink: 0;
+  animation: check-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes check-pop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.right-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
+}
+
+.agent-model-trigger {
+  max-inline-size: 24ch;
+  color: var(--color-text-secondary);
+}
+
+.agent-model-trigger :deep(.app-button__label) {
+  gap: inherit;
+  min-width: 0;
+}
+
+.agent-model-trigger-label {
+  max-inline-size: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-model-dropdown {
+  right: 0;
+  left: auto;
+  max-block-size: 50vh;
+  overflow-y: auto;
+}
+
+.agent-model-group + .agent-model-group {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.agent-model-group-title {
+  padding: var(--space-1) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.agent-model-option,
+.agent-model-retry,
+.agent-model-settings,
+.approval-dropdown > button,
+.thinking-dropdown > button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.agent-model-option-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.agent-model-option-id {
+  max-inline-size: 20ch;
+  margin-left: var(--space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+}
+
+.agent-model-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 0;
+  padding: var(--space-3);
+  border-top: 0;
+}
+
+.tool {
+  font-size: 18px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &:hover {
+    color: var(--color-accent-text);
+    background: var(--color-accent-bg);
+    transform: rotate(-12deg);
+  }
+
+  &:active {
+    transform: scale(0.9) rotate(-12deg);
+  }
+}
+
+.chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 隐藏 chips 时的占位元素，保持 grid 布局 */
+.chips-placeholder {
+  display: block; /* 占位元素，仅用于保持三列 grid 结构 */
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  color: var(--color-text-primary);
+}
+
+.preset-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.popover-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.preset-label {
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.slider-value {
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+.price-section {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.price-info {
+  color: var(--color-text-primary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.send-btn {
+  --send-button-bg: var(--color-bg-inverse);
+  --send-button-color: var(--color-text-inverse);
+
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  font-size: 1.2em;
+  color: var(--send-button-color) !important;
+  background: var(--send-button-bg) !important;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.1s ease;
+
+  &:hover:not(:disabled),
+  &:focus:not(:disabled) {
+    color: var(--send-button-color) !important;
+    background: var(--send-button-bg) !important;
+    border-color: transparent !important;
+    box-shadow: var(--shadow-soft);
+    transform: none;
+  }
+
+  &:focus-visible:not(:disabled) {
+    box-shadow: 0 0 0 2px var(--color-border-focus);
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+    transition-duration: 0.1s;
+  }
+}
+
+// disabled
+.send-btn:disabled {
+  color: var(--color-text-disabled);
+  background: var(--color-bg-surface-hover) !important;
+  box-shadow: none;
+  transition: transform 0.1s ease;
+}
+
+.stop-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  font-size: 1.2em;
+  box-shadow: none;
+  border: none;
+  transition: all 0.2s ease;
+
+  &:hover {
+    transform: scale(1.06);
+  }
+}
+
+/* 上下文用量指示器。纯展示 —— V3 会自动压缩，没有需要用户点的动作 */
+/* 用量指示器：外面只有一个圆环，悬停看详情，点一下直接压缩 */
+.context-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-right: 4px;
+
+  &:hover:not(:disabled) {
+    color: var(--color-text-primary);
+    background: var(--color-bg-surface-hover);
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.92);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+  }
+}
+
+.context-ring-track {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 2.5;
+}
+
+.context-ring-fill {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.35s ease;
+}
+
+/* 快满了要看得见 —— 再往后就会触发压缩，早期结论可能被摘要掉 */
+.context-ring.high {
+  color: var(--color-warning-text);
+}
+
+/* 压缩中：整个环转起来，比换个图标更能说明"正在处理这件事" */
+.context-ring.busy svg {
+  animation: context-ring-spin 1s linear infinite;
+}
+
+@keyframes context-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.byok-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  margin-right: -2px;
+
+  &:hover {
+    color: var(--color-text-primary);
+    background: var(--color-bg-surface-hover);
+  }
+}
+
+.drag-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--color-bg-surface);
+  border-radius: 20px;
+  border: 2px dashed var(--color-accent-border);
+  color: var(--color-accent-text);
+  font-size: 14px;
+  pointer-events: none;
+
+  .drag-icon {
+    font-size: 32px;
+  }
+}
+
+.agent-mode-tooltip {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.tooltip-link {
+  color: var(--color-accent-text);
+  text-decoration: none;
+  margin-left: 4px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+
+  &:hover {
+    color: var(--color-accent-text);
+    text-decoration: underline;
+  }
+}
+
+// ==================== 知识库 @ 提及样式 ====================
+.mentioned-source-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.bound-wiki-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+/*
+ * 一条排队消息占一整行，不跟别的标签挤在一排。
+ * 它是用户自己刚打的一句话 —— 缩成「总结下…」等于没显示，他分不清排着的
+ * 是哪一条，也就没法判断要不要撤回。
+ */
+.queued-followup-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+/*
+ * 「立即发送」。用强调色，因为它是这一行里唯一会**当场改变 agent 行为**的按钮 ——
+ * 旁边的 ✕ 只是撤回一条还没发生的事。
+ */
+.pill-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-accent-text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: var(--color-accent-bg);
+  }
+}
+
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 6px;
+  background: var(--color-accent-bg);
+  border-radius: 6px;
+  max-width: 200px;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: var(--color-accent-bg);
+
+    .pill-remove {
+      opacity: 1;
+    }
+  }
+}
+
+.wiki-pill {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+
+  .pill-icon {
+    background: var(--color-accent-bg);
+    color: var(--color-accent-text);
+  }
+
+  .pill-title {
+    color: var(--color-accent-text);
+  }
+
+  .pill-remove {
+    color: var(--color-accent-text);
+
+    &:hover {
+      background: var(--color-accent-bg);
+      color: var(--color-text-primary);
+    }
+  }
+}
+
+/*
+ * 排队的消息用中性底色，不用强调色。
+ * 强调色在这个输入框里已经被 @提及 和绑定的知识库占着了，那两样是「这次发送
+ * 带上的东西」；排着的消息是「还没发生的下一次」，视觉上要退后一层。
+ *
+ * 必须排在 `.source-pill` 后面：它是那条规则的变体，两边选择器权重一样，
+ * 谁在后面谁说了算。写在前面的话下面这个 `max-width: none` 会被基类的 200px
+ * 顶掉，正文照旧被压成「记得打…」。
+ */
+.queued-pill {
+  background: var(--color-bg-surface);
+  /* 撑满整行 —— 覆盖 .source-pill 给「@提及」用的 200px */
+  max-width: none;
+
+  &:hover {
+    background: var(--color-bg-surface-hover);
+  }
+
+  /* 正文吃掉整行剩下的宽度，两颗按钮被推到最右边 */
+  .pill-title {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .pill-title,
+  .pill-icon,
+  .pill-remove {
+    color: var(--color-text-secondary);
+  }
+}
+
+.pill-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--color-accent-bg);
+  color: var(--color-accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.pill-title {
+  font-size: 12px;
+  color: var(--color-accent-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.pill-remove {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--color-accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: all 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--color-accent-bg);
+    color: var(--color-accent-text);
+    opacity: 1;
+  }
+}
+
+.at-btn {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  background: var(--color-bg-surface-hover);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  margin-right: 8px;
+
+  &:hover:not(.disabled) {
+    background: var(--color-accent-bg);
+    border-color: var(--color-accent-border);
+    color: var(--color-accent-text);
+  }
+
+  &.active {
+    background: var(--color-bg-selected);
+    color: var(--color-text-selected);
+  }
+
+  &.disabled {
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+  }
+
+  .at-symbol {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+  }
+}
+
+.source-mention-popover {
+  position: absolute;
+  bottom: 100%;
+  left: 16px;
+  width: 360px;
+  margin-bottom: 6px;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  box-shadow:
+    0 4px 16px var(--shadow-color),
+    0 0 1px var(--shadow-highlight),
+    inset 0 0 0 0.5px var(--shadow-highlight);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  max-height: 200px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+}
+
+.popover-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+
+  .header-title {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+    letter-spacing: 0.02em;
+  }
+
+  .header-hint {
+    font-size: 12px;
+    color: var(--color-text-primary);
+  }
+}
+
+.empty-state {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+// 分组标题：一个列表里混着「知识库来源」和「我的笔记」两种东西，
+// 不分组用户分不出哪条是哪种
+.source-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+
+  .icon-spin {
+    font-size: 11px;
+  }
+}
+
+.source-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+
+  /* 自定义滚动条 */
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-bg-surface-hover);
+    border-radius: 2px;
+
+    &:hover {
+      background: var(--color-bg-surface-hover);
+    }
+  }
+}
+
+.source-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+
+  &:hover {
+    background: var(--color-bg-surface-hover);
+  }
+
+  &:active {
+    background: var(--color-bg-surface-hover);
+    transform: scale(0.98);
+  }
+
+  &.selected {
+    background: var(--color-bg-selected);
+
+    .source-icon {
+      background: var(--color-bg-selected);
+    }
+  }
+
+  & + .source-item {
+    margin-top: 2px;
+  }
+}
+
+.check-mark {
+  font-size: 12px;
+  color: var(--color-accent-text);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.source-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  background: var(--color-accent-bg);
+  color: var(--color-accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.source-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-title {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.source-type {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  margin-top: 1px;
+}
+
+/* Transition */
+.popover-fade-enter-active,
+.popover-fade-leave-active {
+  transition: all 0.2s ease;
+}
+
+.popover-fade-enter-from,
+.popover-fade-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+</style>
+
+<style lang="less">
+/* 悬停卡片 teleport 到 body，scoped 样式够不着，这一段必须是全局的。
+   只放宽最小宽度 —— 里面是个两栏的用量表，太窄会折行。
+   颜色、留白、圆角、投影一律走全局的提示气泡外观（antd-override.css）。 */
+.context-usage-tip .app-tooltip {
+  min-width: 220px;
+}
+
+.context-tip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.context-tip-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.context-tip-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-bg-surface-hover);
+  overflow: hidden;
+}
+
+.context-tip-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent-solid);
+  transition: width 0.3s ease;
+}
+
+.context-tip-fill.high {
+  background: var(--color-warning-solid);
+}
+</style>

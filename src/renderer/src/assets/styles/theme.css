@@ -1,0 +1,151 @@
+/* 虚幻盒子设计规范 —— 非颜色的全局 token
+ *
+ * 颜色不在这里。颜色分两层住在 palette.generated.css：
+ *   第一层原色（--n-*、--accent-* …）描述「这是什么颜色」，组件不准直接用；
+ *   第二层语义（--color-text-secondary、--color-accent-solid …）描述「用在哪」，
+ *   组件只用这一层。换主题就是把第二层重新指一遍。
+ * 那个文件由 scripts/gen-palette.mjs 生成，改色改脚本，别手改十六进制。
+ *
+ * 这里剩下的是间距、字号、圆角、动效、模糊、投影 —— 以及少数几个
+ * 「颜色的组合」（渐变、投影），它们的颜色部分一律引用第二层语义变量。
+ */
+:root {
+  /* 字体系统 - Typography */
+  --font-family-base:
+    'Segoe UI Variable', 'Segoe UI', sans-serif; /* 必须用 Variable 版本才有那个味道 */
+  --font-family-primary: var(--font-family-base);
+  --font-family-mono:
+    'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono',
+    'Source Code Pro', Menlo, Consolas, 'Courier New', monospace;
+  --font-family-numeric: 'JetBrains Mono', 'SF Mono', 'Roboto Mono', monospace;
+  --font-mono: var(--font-family-mono);
+
+  /* 字体大小 - Font Sizes */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+  --font-size-5xl: 48px;
+
+  /* 字体粗细 - Font Weights */
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-weight-extrabold: 800;
+
+  /* 行高 - Line Heights */
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  /* 空间系统 - Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-9: 40px;
+  --space-10: 48px;
+  --space-12: 64px;
+  --space-16: 80px;
+  --space-20: 96px;
+  --space-24: 112px;
+
+  /* 圆角系统 - Border Radius (Win11 标准) */
+  --radius-card: 4px; /* 内部小卡片 */
+  --radius-container: 8px; /* 外部大容器 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* 动效系统 - Motion */
+  --motion-fast: 150ms;
+  --motion-normal: 250ms;
+  --motion-slow: 350ms;
+  --motion-slower: 500ms;
+
+  /* 缓动函数 - Easing */
+  --easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-standard-alt: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --easing-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --easing-accelerate: cubic-bezier(0.4, 0, 1, 1);
+  --easing-sharp: cubic-bezier(0.4, 0, 0.6, 1);
+  --easing-bounce: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-standard: var(--easing-standard);
+
+  /* 模糊系统 - Blur */
+  --blur-xs: 2px;
+  --blur-sm: 4px;
+  --blur-md: 8px;
+  --blur-lg: 24px;
+  --blur-xl: 36px;
+  --blur-2xl: 64px;
+  --blur-3xl: 80px;
+  --blur-panel: var(--blur-lg);
+
+  /* 渐变。插值走 oklab —— sRGB 默认插值会让中点发暗发灰，
+     那正是以前那条「紫 → 青 → 蓝」渐变中间糊掉的原因。
+     而且只用一个色相的深浅两端，不再横跨三种颜色。 */
+  --gradient-accent: linear-gradient(
+    135deg in oklab,
+    var(--color-accent-solid) 0%,
+    var(--color-accent-solid-hover) 100%
+  );
+}
+
+/* 投影跟着主题走：深色底上的投影要更黑更散，浅色底上要更轻。
+   投影只负责「浮起来」这件事，分层靠的是描边和表面色，不是投影。
+
+   下面三档 --shadow-color-* 给组件里那些自己写几何的投影用
+   （`box-shadow: 0 6px 30px var(--shadow-color-strong)`）。
+   写死 rgba(0,0,0,0.75) 的问题不在深色模式 —— 那里它是对的 ——
+   而在浅色模式：同样一坨黑压在白底上，卡片看着像脏了一块。
+   --shadow-highlight 是玻璃质感的那道顶部高光，浅色模式下要收掉，
+   白底上再叠一层白等于没有，只会让边缘发糊。 */
+:root,
+[data-theme='dark'] {
+  --shadow-color-weak: rgb(0 0 0 / 20%);
+  --shadow-color: rgb(0 0 0 / 40%);
+  --shadow-color-strong: rgb(0 0 0 / 65%);
+  --shadow-highlight: rgb(255 255 255 / 5%);
+
+  --shadow-soft: 0 1px 1px rgb(0 0 0 / 40%), 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-glass: 0 2px 8px rgb(0 0 0 / 25%), 0 1px 0 rgb(255 255 255 / 3%);
+  --shadow-pop: 0 8px 8px rgb(0 0 0 / 35%);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-sm: var(--shadow-soft);
+  --shadow-md: var(--shadow-pop);
+  --shadow-card-hover: 0 8px 24px rgb(0 0 0 / 45%);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 55%);
+  --shadow-modal: 0 24px 64px rgb(0 0 0 / 70%), inset 0 1px 1px rgb(255 255 255 / 4%);
+}
+
+[data-theme='light'] {
+  --shadow-color-weak: rgb(0 0 0 / 4%);
+  --shadow-color: rgb(0 0 0 / 10%);
+  --shadow-color-strong: rgb(0 0 0 / 18%);
+  --shadow-highlight: rgb(255 255 255 / 0%);
+
+  --shadow-soft: 0 1px 1px rgb(0 0 0 / 10%), 0 1px 2px rgb(0 0 0 / 6%);
+  --shadow-glass: 0 2px 8px rgb(0 0 0 / 10%), 0 1px 0 rgb(255 255 255 / 30%);
+  --shadow-pop: 0 8px 8px rgb(0 0 0 / 8%);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 6%);
+  --shadow-sm: var(--shadow-soft);
+  --shadow-md: var(--shadow-pop);
+  --shadow-card-hover: 0 8px 24px rgb(0 0 0 / 12%);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 14%);
+  --shadow-modal: 0 24px 64px rgb(0 0 0 / 18%), inset 0 1px 1px rgb(255 255 255 / 80%);
+}

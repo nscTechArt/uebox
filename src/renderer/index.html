@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <!-- frame-ancestors 只能由 HTTP 头下发，写在 meta 里浏览器会忽略并告警；
+         Electron 渲染进程本来也不会被外部页面 iframe，所以这里直接不写。
+
+         connect-src 里的 blob: 是给 3D 预览用的：GLB 里内嵌的贴图会被 three 的
+         GLTFLoader 先转成 blob URL，再由 ImageBitmapLoader 用 fetch 取回来（Chromium 上
+         createImageBitmap 存在，走的就是这条路）。blob URL 只指向渲染进程自己刚造出来的
+         字节，放行它不会多出任何外发通道。data: 仍然不放行——那条自己解码即可，见
+         src/renderer/src/utils/imageBlob.ts。 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https: local-resource: uebox-asset:; media-src 'self' data: blob: http: https: local-resource: uebox-asset:; font-src 'self' data:; connect-src 'self' blob: http: https: ws: wss: local-resource: uebox-asset:; frame-src 'self' data: blob:; worker-src 'self' blob:; form-action 'none'"
+    />
+    <title>UnrealBox</title>
+    <style>
+      /* Spotlight 窗口透明背景 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      /* 当 URL hash 包含 spotlight 时，设置透明背景 */
+      html.spotlight-window,
+      html.spotlight-window body {
+        background: transparent !important;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

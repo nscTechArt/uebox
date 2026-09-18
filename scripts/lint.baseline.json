@@ -1,0 +1,834 @@
+{
+  "scripts/asset-import-benchmark.ts": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "scripts/compare-manifest.js": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "scripts/generate-git-log.js": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/main/ipc/aigc.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/main/ipc/assetImport.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/ipc/assistant.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/ipc/baiduyun.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/main/ipc/dragDrop.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/ipc/networkVault.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/ipc/networkVaultV2.ts": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/main/ipc/vault.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/ipc/webdav.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/networkV2/AssetServer.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/networkV2/batchDelete.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/networkV2/folderDelete.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/networkV2/ImportSessionClient.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/main/networkV2/scanResurrection.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/networkV2/SyncClient.test.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/main/networkV2/SyncClient.ts": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/main/services/asset/AssetImportService.ts": {
+    "errors": 18,
+    "warnings": 0
+  },
+  "src/main/services/asset/importFeatureFlag.test.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/services/asset/importFeatureFlag.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/services/asset/ImportRecoveryContextService.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/services/asset/importUploadRetry.test.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/main/services/asset/importUploadRetry.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/main/services/asset/RemoteImportService.ts": {
+    "errors": 10,
+    "warnings": 0
+  },
+  "src/main/services/asset/ResumeImportService.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/services/asset/ResumeImportService.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/services/config.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/services/http/server.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/services/index.ts": {
+    "errors": 10,
+    "warnings": 0
+  },
+  "src/main/services/messaging/handlers/contentHandler.ts": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/main/services/monitoring/healthCheck.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/services/monitoring/metrics.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/services/shortcutService.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/services/task/executors/fileTaskExecutor.ts": {
+    "errors": 9,
+    "warnings": 0
+  },
+  "src/main/services/task/executors/pluginTaskExecutor.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/services/task/executors/systemTaskExecutor.ts": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "src/main/services/task/taskManager.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/services/types.ts": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "src/main/services/updater/autoUpdater.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/services/videoCompressor.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/DatabaseManager.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/dbUtils.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetData.ts": {
+    "errors": 44,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetData/crud.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetData/dependencyHandlers.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetData/fileUtils.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetData/remoteImportPath.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetData/thumbnails.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetFolder.ts": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/assetTag.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/dragMove.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/product.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/ipc/settings.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/assetData.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/assetData.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/assetTag.ts": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/importRecoveryContext.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/importTask.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/notebookRag.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/project.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/projectCollection.ts": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/settings.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/tag.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/models/tagGroup.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/services/notebookIndexJobService.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/sqliteDataBase/types.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/utils/assetDependency/AssetDependencyResolver.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/utils/assetDependency/AssetImportManager.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/utils/fileProcessor/BaseFileProcessor.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/utils/fileProcessor/UnrealAssetProcessor.ts": {
+    "errors": 20,
+    "warnings": 0
+  },
+  "src/main/utils/PathManager.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/main/utils/uasset-reader-new.js": {
+    "errors": 15,
+    "warnings": 0
+  },
+  "src/main/utils/UnrealPathManager.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/main/windowStateManager.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/api-services/baiduYunApi/index.ts": {
+    "errors": 15,
+    "warnings": 0
+  },
+  "src/renderer/src/api/ai.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/api/assetData.ts": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/renderer/src/api/folderTag.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/common/http/request.ts": {
+    "errors": 16,
+    "warnings": 0
+  },
+  "src/renderer/src/common/http/types.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/common/routeUtils.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/common/utils.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/renderer/src/common/utils/storage.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/components/AssetDependencyGraph.vue": {
+    "errors": 28,
+    "warnings": 0
+  },
+  "src/renderer/src/components/BubbleMenuToolbar.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/components/ContextMenu/ContextMenu.vue": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "src/renderer/src/components/ContextMenu/types.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/components/ProjectSelectModal.vue": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/components/TagSelector/TagSelectorList.vue": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/env.d.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useAppInfo.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useAutoScroll.ts": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useContextMenuManager.ts": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useDragImport.ts": {
+    "errors": 13,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useI18n.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useLocalShortcuts.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/usePersistOptions.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useProjects.ts": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useSpotlightAction.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/hooks/useVideoThumbnail.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/i18n/index.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/layout/components/SideMenu.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/layout/components/TabsHeader.vue": {
+    "errors": 26,
+    "warnings": 0
+  },
+  "src/renderer/src/layout/MainLayout.vue": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/renderer/src/main.ts": {
+    "errors": 27,
+    "warnings": 0
+  },
+  "src/renderer/src/shims-vue.d.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/assetSelectionStore.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/assetViewStore.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/baiduyun.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/blueprintLibraryStore.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/chatMessages.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/chatSessions.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/materialLibraryStore.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/tabs.ts": {
+    "errors": 16,
+    "warnings": 0
+  },
+  "src/renderer/src/store/modules/webdav.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/utils/boxSelect.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/utils/imageUpload.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/utils/thumbnails.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AIGCStudio/aigcEventBus.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AIGCStudio/components/ImageHistoryPanel.vue": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AIGCStudio/components/ImagePanel.vue": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AIGCStudio/components/ImagePreviewArea.vue": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AIGCStudio/imageStore.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AIGCStudio/index.vue": {
+    "errors": 11,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/AssetDependencyGraph.vue": {
+    "errors": 36,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/AssetDetailsPanel.vue": {
+    "errors": 73,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/AssetFileList.vue": {
+    "errors": 217,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/AssetTree.vue": {
+    "errors": 21,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Baiduyun/BaiduyunDetailsPanel.vue": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Baiduyun/BaiduyunFileList.vue": {
+    "errors": 24,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Baiduyun/BaiduyunUploadPanel.vue": {
+    "errors": 13,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Baiduyun/BaiduyunUserInfoCard.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/ChangeIconModal.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/CodePreview.vue": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "src/renderer/src/views/AssetManagement/components/CreateVaultModal.vue": {
+    "errors": 1,
+    "warnings": 1
+  },
+  "src/renderer/src/views/AssetManagement/components/DeleteVaultModal.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/modals/AddFolderModal.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/modals/BatchThumbnailUploadModal.vue": {
+    "errors": 11,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/modals/ImageCropperModal.vue": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/modals/ImportToProjectModal.vue": {
+    "errors": 47,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/modals/RenameAssetModal.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/modals/RenameFolderModal.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/NetworkAuthModal.vue": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "src/renderer/src/views/AssetManagement/components/TagSelector.vue": {
+    "errors": 15,
+    "warnings": 2
+  },
+  "src/renderer/src/views/AssetManagement/components/VaultSwitcher.vue": {
+    "errors": 27,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Webdav/WebdavAuthForm.vue": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Webdav/WebdavFileList.vue": {
+    "errors": 40,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Webdav/WebdavUploadPanel.vue": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/components/Webdav/WebdavUserInfoCard.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/composables/useFileSelection.ts": {
+    "errors": 28,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/composables/useVirtualScroll.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/hooks/useAssetTree.ts": {
+    "errors": 20,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/index.vue": {
+    "errors": 130,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/TagManagement/index.vue": {
+    "errors": 25,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/TagManagement/TagGroupList.vue": {
+    "errors": 12,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/types.ts": {
+    "errors": 3,
+    "warnings": 0
+  },
+  "src/renderer/src/views/AssetManagement/utils/tabStateManager.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/components/AIBubble.vue": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/components/AssetList.vue": {
+    "errors": 1,
+    "warnings": 1
+  },
+  "src/renderer/src/views/Assistant/components/ChatLog.vue": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/components/MessageSources.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/agentCompletionHandlers.ts": {
+    "errors": 12,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/agentControlHandlers.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/agentHandlerShared.ts": {
+    "errors": 11,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/agentSessionIsolation.test.ts": {
+    "errors": 11,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/agentStreamHandlers.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/notebookRagContext.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/useAgentMode.ts": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/useAgentModeHandlers.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/useChatFlow.ts": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/composables/useContextChips.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Assistant/Welcome.vue": {
+    "errors": 16,
+    "warnings": 0
+  },
+  "src/renderer/src/views/BlueprintLibrary/BlueprintEditor.test.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/BlueprintLibrary/BlueprintGallery.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/BlueprintLibrary/BlueprintLibraryLayout.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/BlueprintLibrary/BlueprintRenderer.vue": {
+    "errors": 26,
+    "warnings": 0
+  },
+  "src/renderer/src/views/BlueprintLibrary/utils/blueprintTabRoute.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Home/components/EngineSection.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Home/components/Project/ProjectSection.vue": {
+    "errors": 22,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Home/components/Project/RenameProjectModal.vue": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/renderer/src/views/MaterialLibrary/MaterialEditor.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/MaterialLibrary/MaterialGallery.test.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/MaterialLibrary/MaterialLibraryLayout.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/MaterialLibrary/utils/materialTabRoute.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/components/BrainstormViewer.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/components/MindmapViewer.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/components/MockInterviewViewer.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/components/NoteStudioPanel.vue": {
+    "errors": 5,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/components/SourcePreviewPanel.vue": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "src/renderer/src/views/Notebook/NotebookDetail.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/NotebookLayout.test.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/NotebookList.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/renderer/src/views/Notebook/utils/notebookTabRoute.ts": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/ScreenRecorder/ScreenRecorderPanel.vue": {
+    "errors": 14,
+    "warnings": 0
+  },
+  "src/renderer/src/views/ScreenRecorder/SelectionOverlay.vue": {
+    "errors": 6,
+    "warnings": 0
+  },
+  "src/renderer/src/views/ServerManagement/index.vue": {
+    "errors": 15,
+    "warnings": 0
+  },
+  "src/renderer/src/views/System/NotFound.vue": {
+    "errors": 2,
+    "warnings": 0
+  },
+  "src/renderer/src/views/System/Preferences/panels/ProfileAsset.vue": {
+    "errors": 17,
+    "warnings": 0
+  },
+  "src/renderer/src/views/System/Preferences/panels/ProfileNamingRules.vue": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "src/shared/agentFastPath.ts": {
+    "errors": 1,
+    "warnings": 0
+  },
+  "tests/fixtures/mcp/quirky-server.mjs": {
+    "errors": 0,
+    "warnings": 2
+  },
+  "tests/performance/benchmark_parser.ts": {
+    "errors": 8,
+    "warnings": 0
+  },
+  "tests/performance/generate_test_assets.js": {
+    "errors": 7,
+    "warnings": 0
+  },
+  "tests/types/vitest.d.ts": {
+    "errors": 12,
+    "warnings": 0
+  },
+  "tests/unit/remote-import-service.test.ts": {
+    "errors": 4,
+    "warnings": 0
+  },
+  "tests/utils/test-utils.ts": {
+    "errors": 23,
+    "warnings": 0
+  }
+}

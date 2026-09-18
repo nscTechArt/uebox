@@ -1,0 +1,191 @@
+/* 全局样式 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  /* 全局禁止文字选择 */
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  /* 全局禁止拖拽 */
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
+}
+
+/* 局部允许文字选择的类 */
+.selectable,
+.selectable * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+}
+
+/* Markdown 内容允许选择/复制 */
+.markdown-body,
+.markdown-body * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+  cursor: auto;
+}
+
+/* 局部允许拖拽的类 */
+.draggable {
+  -webkit-user-drag: element !important;
+  -khtml-user-drag: element !important;
+  -moz-user-drag: element !important;
+  -o-user-drag: element !important;
+  user-drag: element !important;
+}
+
+/* 输入框等表单元素默认允许选择 */
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
+}
+
+/* 文本选区必须在黑白灰表面上有明确反馈，输入框、编辑器和正文统一使用。 */
+::selection {
+  color: var(--color-selection-text);
+  background: var(--color-selection-bg);
+}
+
+::-moz-selection {
+  color: var(--color-selection-text);
+  background: var(--color-selection-bg);
+}
+
+@media (forced-colors: active) {
+  ::selection {
+    color: HighlightText;
+    background: Highlight;
+  }
+}
+
+html,
+body {
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 优化文本渲染，提高清晰度 */
+  text-rendering: optimizeLegibility;
+  /* 启用字距调整 */
+  font-kerning: normal;
+  /* 启用字体特性：连字、字距 */
+  font-feature-settings:
+    'kern' 1,
+    'liga' 1;
+  /* 使用亚像素抗锯齿（Windows 上更清晰） */
+  -webkit-text-stroke: 0;
+  /* 防止字体大小自动调整 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* transition: all 0.3s ease; */
+
+  overflow: hidden;
+  background-color: transparent;
+}
+
+.app-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  /* 移除渐变背景，改由主题背景图接管 */
+  /* 主题底色只在 --app-surface-bg 里定义一次（见下面各主题），
+     侧边栏浮层要盖住内容时也用它，才能和当前主题长得一样 */
+  background: var(--app-surface-bg) !important;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  box-shadow: 0 16px 40px var(--shadow-color);
+  background-clip: padding-box;
+  clip-path: inset(0 round var(--radius-xs));
+  isolation: isolate;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  color: var(--color-text-primary);
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+/* 单色图标。
+ *
+ * assets/icon 里那几个字形是写死白色的（SVG 是 fill="#ffffff"，PNG 是白像素）。
+ * 通过 <img> 渲染时颜色改不了 —— 图片里是什么色就是什么色 ——
+ * 于是浅色主题下白图标压在白底上，等于没有。
+ *
+ * 用 mask 而不是 <img>：mask 只取图片的**形状**（alpha 通道），
+ * 颜色来自 background-color，这里指向 currentColor，
+ * 图标就跟旁边的文字一个颜色，换主题自动跟着走，也不用再准备一套深色资源。
+ *
+ * 用法：<span class="mono-icon" :style="{ '--mono-icon': `url(${icon})` }" />
+ * 只给确认是单色的图标用。用户自带的彩色图标套上去会被整个染成一个颜色。
+ */
+.mono-icon {
+  display: inline-block;
+  background-color: currentColor;
+  -webkit-mask: var(--mono-icon) center / contain no-repeat;
+  mask: var(--mono-icon) center / contain no-repeat;
+}
+
+/* 应用底色。两个主题都直接用调色板的页面色，不再垫背景图。
+ *
+ * 两个原因。一是浅色模式那张图（background_light.jpg）根本不存在 ——
+ * 声明指向一个 404，整个容器就没有背景，窗口背后是什么就透什么。
+ * 二是新色彩体系是平的、死中性的：一张照片垫在半透明面板底下，
+ * 会把每一层表面的颜色都染成不确定的样子，「卡片比页面亮 4%」这种
+ * 分层约定当场作废 —— 那正是分层能被看出来的全部依据。
+ *
+ * 想把壁纸加回来就改这两行，别的地方不用动。 */
+html[data-theme='dark'],
+html[data-theme='light'] {
+  --app-surface-bg: var(--color-bg-page);
+}
+
+.app-content {
+  flex: 1;
+  overflow: auto;
+  border-radius: inherit;
+  clip-path: inset(0 round var(--radius-xl));
+}
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.tippy-box {
+  background: transparent !important;
+}
+
+/* 放全局样式更好（非 scoped），或至少覆盖到节点内部 */
+.ue-node img,
+.ue-node svg,
+.ue-pin img,
+.ue-pin svg {
+  -webkit-user-drag: none;
+  user-drag: none;
+}

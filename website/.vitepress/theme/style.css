@@ -1,0 +1,539 @@
+/**
+ * 文档站配色与首页排版。
+ *
+ * 配色不是在这里挑的，是从应用抄的 —— 取值来自
+ * src/renderer/src/assets/styles/palette.generated.css（那份由 pnpm palette 生成）。
+ * 两边不一致，用户从官网点进应用会觉得是两个产品。
+ *
+ * 抄的时候按应用自己定的分工来（scripts/gen-palette.mjs 里那句
+ * 「黑白灰负责表面；系统蓝只用于强动作和当前位置指示」）：
+ *   · 表面、文字、描边 —— 中性灰阶（--n-*）
+ *   · 链接、当前导航项、主按钮 —— 系统蓝（--accent-solid）
+ *   · 大标题不是强动作也不是位置指示，所以用正文色，不染蓝
+ *
+ * 另一件事是**首页排版按中文重算**。默认主题的字号照英文调的，中文是全角字，
+ * 同样 56px 下「虚幻引擎开发者的工作站」要占两行还断在词中间。
+ */
+
+/* ==========================================================================
+ * 品牌色
+ *
+ * 数值取自应用自身的 --accent-solid，保证文档站和客户端是同一个蓝，
+ * 不是随手挑的近似色。深色模式下链接色（brand-1）提高一档纯粹是可读性需要
+ * —— 同一色相在深色背景上对比度不够 —— 不代表客户端在深色下用的是另一个颜色。
+ * 实心按钮两个主题都用同一个蓝，悬停一律往暗走，这也是应用的约定。
+ * ========================================================================== */
+
+:root {
+  --vp-c-brand-1: #1a73e2;
+  --vp-c-brand-2: #1665c8;
+  --vp-c-brand-3: #125aad;
+  --vp-c-brand-soft: rgba(26, 115, 226, 0.14);
+}
+
+.dark {
+  --vp-c-brand-1: #5b9df5;
+  --vp-c-brand-2: #7cb0f7;
+  --vp-c-brand-3: #1a73e2;
+  --vp-c-brand-soft: rgba(91, 157, 245, 0.16);
+}
+
+/* 主按钮 = 应用的 --accent-solid / --accent-solid-hover，两个主题同一套 */
+:root,
+.dark {
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-bg: #1a73e2;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-hover-bg: #1665c8;
+  --vp-button-brand-active-border: transparent;
+  --vp-button-brand-active-text: #ffffff;
+  --vp-button-brand-active-bg: #125aad;
+}
+
+/* ==========================================================================
+ * 表面 / 文字 / 描边 —— 中性灰阶
+ * ========================================================================== */
+
+:root {
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-alt: #f7f7f7; /* n-50，应用的页面底 */
+  --vp-c-bg-soft: #f7f7f7;
+  --vp-c-bg-elv: #ffffff;
+
+  --vp-c-text-1: #111111; /* n-950 */
+  --vp-c-text-2: #505050; /* n-800 */
+  --vp-c-text-3: #7a7a7a; /* n-700 */
+
+  --vp-c-divider: #ededed; /* n-100 */
+  --vp-c-border: #dcdcdc; /* n-200，应用的 border-subtle */
+  --vp-c-gutter: #ededed;
+
+  /* 中性档（功能卡图标底、代码块、徽标） */
+  --vp-c-default-1: #505050;
+  --vp-c-default-2: #7a7a7a;
+  --vp-c-default-3: #bebebe;
+  --vp-c-default-soft: #ededed;
+
+  /* 次按钮 = 应用的 soft 表面 */
+  --vp-button-alt-border: #dcdcdc;
+  --vp-button-alt-text: #111111;
+  --vp-button-alt-bg: #f2f2f2; /* n-75，白底上的 hover 档 */
+  --vp-button-alt-hover-border: #bebebe;
+  --vp-button-alt-hover-text: #111111;
+  --vp-button-alt-hover-bg: #ededed;
+  --vp-button-alt-active-border: #bebebe;
+  --vp-button-alt-active-text: #111111;
+  --vp-button-alt-active-bg: #ededed;
+}
+
+.dark {
+  /* 页面 n-950，卡片 n-925（比页面亮一档，和应用里 page/surface 的关系一致），
+     导航栏走 n-975，让内容区浮在上面 */
+  --vp-c-bg: #111111;
+  --vp-c-bg-alt: #080808;
+  --vp-c-bg-soft: #1c1c1c;
+  --vp-c-bg-elv: #1c1c1c;
+
+  --vp-c-text-1: #fcfcfc;
+  --vp-c-text-2: #bebebe; /* n-300，应用的 text-secondary */
+  --vp-c-text-3: #7a7a7a;
+
+  --vp-c-divider: #272727; /* n-900 */
+  --vp-c-border: #343434; /* n-850 */
+  --vp-c-gutter: #272727;
+
+  --vp-c-default-1: #bebebe;
+  --vp-c-default-2: #949494;
+  --vp-c-default-3: #7a7a7a;
+  --vp-c-default-soft: #272727;
+
+  --vp-button-alt-border: #343434;
+  --vp-button-alt-text: #fcfcfc;
+  --vp-button-alt-bg: #272727; /* n-900 */
+  --vp-button-alt-hover-border: #505050;
+  --vp-button-alt-hover-text: #fcfcfc;
+  --vp-button-alt-hover-bg: #2f2f2f;
+  --vp-button-alt-active-border: #505050;
+  --vp-button-alt-active-text: #fcfcfc;
+  --vp-button-alt-active-bg: #2f2f2f;
+}
+
+/* ==========================================================================
+ * 首屏
+ * ========================================================================== */
+
+:root {
+  /* 产品名染成品牌蓝，其余仍是正文色 —— 首屏需要一个落点，
+     而应用本身就是「中性底 + 高饱和点缀」那一路。仍然不用渐变：
+     应用里没有一处是渐变的。 */
+  --vp-home-hero-name-color: var(--vp-c-brand-1);
+  --vp-home-hero-name-background: none;
+  /* 图标自带圆角底板，不需要默认那团方形色块；改用下面自己画的一层柔光 */
+  --vp-home-hero-image-background-image: none;
+  --vp-home-hero-image-filter: none;
+}
+
+/* 默认 .name / .text 在 ≥960px 是 56px。中文是全角字，一行放不下那么多，
+   压到 46px 一行念得完，份量也还在。 */
+.VPHero .name,
+.VPHero .text {
+  letter-spacing: -0.02em;
+}
+
+@media (min-width: 640px) {
+  .VPHero .name,
+  .VPHero .text {
+    font-size: 42px;
+    line-height: 54px;
+  }
+}
+
+@media (min-width: 960px) {
+  .VPHero .name,
+  .VPHero .text {
+    font-size: 46px;
+    line-height: 58px;
+  }
+
+  /* 一句话的 tagline 压得住更大的字号，这一行是首屏唯一的正文 */
+  .VPHero .tagline {
+    font-size: 20px;
+    line-height: 34px;
+    max-width: 480px;
+  }
+}
+
+/* 图标背后一层柔光。
+   尺寸写死成一个居中的圆，不用 inset 百分比 —— 容器是扁的，百分比算出来
+   上下左右差一倍，光斑会变成一条横的。 */
+.VPHero .image-container {
+  position: relative;
+}
+
+.VPHero .image-container::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* 窄屏上要收住：420 的圆在 375 的视口里会往两边各探出二十来像素，
+     绝对定位的伪元素照样算进 scrollWidth，整页就多出一条横向滚动条 */
+  width: min(420px, 84vw);
+  height: min(420px, 84vw);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(26 115 226 / 18%), transparent);
+  filter: blur(36px);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* 深色底上要更亮一点才看得出来，浅色底上反而要收 */
+.dark .VPHero .image-container::before {
+  background: radial-gradient(closest-side, rgb(91 157 245 / 30%), transparent);
+}
+
+.VPHero .VPImage.image-src {
+  max-width: 240px;
+  max-height: 240px;
+}
+
+/* ==========================================================================
+ * 首页的竖向留白
+ *
+ * 顶栏和正文之间要留 100px。
+ *
+ * hero 的 margin-top 是负的一个导航条高度（默认主题让首屏顶到页面最上沿），
+ * 所以**这里的 padding-top 是从视口顶算起的**，要把导航条自己的高度加回去，
+ * 否则写 100px 得到的是「距离顶栏 100 − 64 = 36px」。
+ * `--vp-layout-top-height` 是横幅（banner）的高度，站上没开，留着是因为
+ * 将来开了不加会顶掉。
+ * ========================================================================== */
+
+.VPHome .VPHero {
+  padding-top: calc(var(--vp-nav-height) + var(--vp-layout-top-height, 0px) + 100px);
+}
+
+@media (min-width: 960px) {
+  .VPHome .VPHero {
+    padding-bottom: 56px;
+  }
+
+  .VPHome .VPFeatures {
+    padding-top: 40px;
+  }
+}
+
+/* ==========================================================================
+ * 功能卡
+ * ========================================================================== */
+
+/* 默认卡片的边框色等于它自己的背景色（等于没有边框），深色下四张卡糊成一片。
+   借应用的做法：卡片是 surface + 一条细描边。 */
+/* 选择器要比默认主题的 `.VPFeature[data-v-xxxx]` 更specific，
+   否则 scoped 样式赢，这里写了等于没写 —— 别把前缀简化掉。 */
+.VPHome .items .VPFeature {
+  border-color: var(--vp-c-border);
+}
+
+.VPHome .items .VPFeature .icon {
+  background-color: transparent;
+  border: 1px solid var(--vp-c-border);
+  color: var(--vp-c-text-1);
+}
+
+.VPHome .items .VPFeature .icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* ==========================================================================
+ * 首页正文（功能卡之后那段 Markdown）
+ *
+ * 默认它是通栏的，跟上面的卡片对不上左边线。收进同一条 1152px 的栏里。
+ * ========================================================================== */
+
+.VPHome .vp-doc {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 0 24px 96px;
+}
+
+@media (min-width: 640px) {
+  .VPHome .vp-doc {
+    padding: 0 48px 96px;
+  }
+}
+
+@media (min-width: 960px) {
+  .VPHome .vp-doc {
+    padding: 0 64px 96px;
+  }
+}
+
+.VPHome .vp-doc h2 {
+  margin-top: 40px;
+  padding-top: 32px;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+/* 首页这一段几乎每行都有三四个链接。染成蓝的话整块变成一片蓝字，
+   既读不出重点，也和下面「蓝只留给强动作」的分工打架 —— 正文里的路标不是强动作。
+   改成正文色 + 常驻下划线（应用里 .text-link 就是这么做的）。
+   只作用于首页：内容页的链接是稀疏出现的，蓝色在那边是对的。 */
+.VPHome .vp-doc a {
+  color: var(--vp-c-text-1);
+  text-decoration: underline;
+  text-decoration-color: var(--vp-c-border);
+  text-underline-offset: 3px;
+}
+
+.VPHome .vp-doc a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* 但表格里的链接是例外。首页那张「其余模块的位置」第一列整列都是链接，
+   而表格的阅读方式是扫而不是读 —— 扫的时候要一眼看出哪些点得动。 */
+.VPHome .vp-doc table a {
+  color: var(--vp-c-brand-1);
+  text-decoration: none;
+}
+
+.VPHome .vp-doc table a:hover {
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+ * 正文排版
+ *
+ * 手册里最密的几页（助手能做什么、设置速查）是「一段说明 + 一张表 + 一个提示框」
+ * 反复堆叠。默认主题这三样的视觉重量差不多，连着读十屏会糊成一片，
+ * 找不到「这一节从哪开始」。下面这一组只做一件事：把层级拉开。
+ *
+ * 分寸：不加色块、不加圆角卡片、不加阴影堆叠。手册是拿来查的，
+ * 花哨的装饰会让人误以为某一块比别的重要。
+ * ========================================================================== */
+
+/* h2 起一条分隔线，一眼看得出章节边界。默认主题已经给了 border-top，但
+   一是内容页的 h2 上边距偏小（中文行高比英文高，压得很紧），
+   二是它用 --vp-c-divider，深色下那个值和页面底几乎同色，线等于没有 */
+.vp-doc h2 {
+  margin-top: 56px;
+  padding-top: 28px;
+  border-top-color: var(--vp-c-border);
+  letter-spacing: -0.01em;
+}
+
+.vp-doc h3 {
+  margin-top: 36px;
+  letter-spacing: -0.01em;
+}
+
+/* 中文正文行距。默认 28px 对全角字偏紧，长段落读起来发闷 */
+.vp-doc p,
+.vp-doc li {
+  line-height: 1.75;
+}
+
+/* 行内代码：默认是圆角色块 + 变色，一行里出现三个工具名就像挖了三个洞。
+   改成中性底 + 正文色，只靠底色和等宽字区分 */
+.vp-doc :not(pre) > code {
+  color: var(--vp-c-text-1);
+  background-color: var(--vp-c-default-soft);
+  font-size: 0.875em;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.vp-doc a > code {
+  color: inherit;
+}
+
+/* ==========================================================================
+ * 表格
+ *
+ * 这份手册里表格是主力载体（能力表、档位表、错误提示对照表），
+ * 值得比默认主题多花一点。三件事：表头能认出来、行能扫得动、窄屏不炸。
+ * ========================================================================== */
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+  margin: 20px 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 15px;
+}
+
+.vp-doc th,
+.vp-doc td {
+  border: 0;
+  border-bottom: 1px solid var(--vp-c-divider);
+  padding: 10px 14px;
+  line-height: 1.7;
+  vertical-align: top;
+}
+
+.vp-doc th {
+  background-color: var(--vp-c-bg-alt);
+  color: var(--vp-c-text-1);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* 默认主题给偶数行上了斑马纹。表格一多就成了满屏横条，
+   而这些表大多只有三五行 —— 斑马纹解决的问题它们没有 */
+.vp-doc tr:nth-child(2n) td {
+  background-color: transparent;
+}
+
+.vp-doc tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.vp-doc tbody tr:hover td {
+  background-color: var(--vp-c-bg-alt);
+}
+
+.vp-doc td:first-child {
+  color: var(--vp-c-text-1);
+}
+
+/* 窄屏：表格改为可横向滚动，**而且给每格一个宽度下限**。
+   只写 overflow-x 不够 —— 表格布局会一路压缩列宽去迁就容器，
+   压到每格三四个字一行，根本没有溢出，滚动条也就不会出现。
+   下限一给，宽表真的溢出容器，横向滚动才起作用。 */
+@media (max-width: 640px) {
+  .vp-doc table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .vp-doc th,
+  .vp-doc td {
+    min-width: 7.5em;
+  }
+
+  /* 说明列该宽一些，否则一句话被切成七八行 */
+  .vp-doc td:last-child,
+  .vp-doc th:last-child {
+    min-width: 15em;
+  }
+}
+
+/* ==========================================================================
+ * 提示框
+ *
+ * 默认样式是整块染色。能力页上一节里能出现三个框，整屏都是色块。
+ * 改成：左侧一条色带 + 极淡的底，颜色只用来分类，不用来抢注意力。
+ * ========================================================================== */
+
+.vp-doc .custom-block {
+  border: 1px solid var(--vp-c-divider);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 14px 18px;
+  font-size: 15px;
+}
+
+.vp-doc .custom-block p {
+  line-height: 1.75;
+}
+
+.vp-doc .custom-block-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.vp-doc .custom-block.tip {
+  border-left-color: var(--vp-c-brand-1);
+  background-color: var(--vp-c-bg-alt);
+}
+
+.vp-doc .custom-block.info {
+  border-left-color: var(--vp-c-default-2);
+  background-color: var(--vp-c-bg-alt);
+}
+
+.vp-doc .custom-block.warning {
+  border-left-color: #d99100;
+  background-color: var(--vp-c-bg-alt);
+}
+
+.vp-doc .custom-block.danger {
+  border-left-color: #d13438;
+  background-color: var(--vp-c-bg-alt);
+}
+
+/* 框里的表格已经被外层框住了，再套一圈边就是双线 */
+.vp-doc .custom-block table {
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+  margin-bottom: 0;
+}
+
+.vp-doc .custom-block th {
+  background-color: transparent;
+}
+
+/* ==========================================================================
+ * 截图
+ *
+ * 手册里的截图都是应用的深色/浅色界面，直接贴在页面上没有边界，
+ * 深色图贴浅色页会像一块挖空。给一圈描边和圆角，让它看起来是「一张图」。
+ * ========================================================================== */
+
+.vp-doc img {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  display: block;
+}
+
+/* 图标类的内联图片（徽章、emoji 图）不该被框起来 */
+.vp-doc a > img,
+.vp-doc img[width] {
+  border: 0;
+  border-radius: 0;
+}
+
+/* 用 alt 文本当图注。手册里的 alt 全是「这张图在看什么」的说明，
+   写了却只有读屏软件看得到，太浪费 */
+.vp-doc p > img + em,
+.vp-doc figure figcaption {
+  color: var(--vp-c-text-3);
+  font-size: 14px;
+}
+
+/* ==========================================================================
+ * 侧边栏与目录
+ * ========================================================================== */
+
+/* 分组标题压得比条目还轻，扫不出分组。加重并拉开间距 */
+.VPSidebarItem.level-0 > .item > .text {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--vp-c-text-1);
+}
+
+.VPSidebarItem.level-0 {
+  padding-bottom: 20px;
+}
+
+/* 当前页在侧边栏里只靠颜色区分，深色下不够明显。补一条左边线 */
+.VPSidebarItem.is-active > .item > .link > .text {
+  font-weight: 600;
+}
+
+/* 右侧「本页内容」在长页面上是主要导航（能力页有二十来个二级标题），
+   行距太挤时扫不动 */
+.VPDocAsideOutline .outline-link {
+  line-height: 1.6;
+  padding: 3px 0;
+}

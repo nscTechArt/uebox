@@ -1,0 +1,119 @@
+appId: com.unreal.agent
+productName: 虚幻盒子
+copyright: Copyright © 2026 虚幻盒子科技有限公司
+directories:
+  buildResources: build
+# 发行包只接收运行产物与明确的资源；Git 忽略规则不参与打包。
+files:
+  - out/**
+  - node_modules/**
+  - resources/icon*.{png,ico}
+  - resources/plugins/*.zip
+  - resources/plugins/ualink-config.json
+  - LICENSE
+  - THIRD-PARTY-NOTICES.md
+  - licenses/**
+  - '!**/*.{map,js.map,css.map}'
+  # 不按扩展名删除依赖文档：LICENSE.md / NOTICE.md 也必须随包保留。
+  # 不按目录名删除 test/spec，@standard-schema/spec 是真实运行依赖。
+asarUnpack:
+  - resources/**
+  # Native SQLite 模块 - 必须解压以支持 RAG 向量搜索
+  - node_modules/better-sqlite3/**
+  - node_modules/sqlite-vec/**
+  # sqlite-vec 平台特定原生模块（Windows/macOS/Linux）
+  - node_modules/sqlite-vec-windows-x64/**
+  - node_modules/sqlite-vec-darwin-x64/**
+  - node_modules/sqlite-vec-darwin-arm64/**
+  - node_modules/sqlite-vec-linux-x64/**
+  # Sharp 图像处理原生模块
+  - node_modules/sharp/**
+  - node_modules/@img/**
+  # anydoc 文档解析原生模块（Word/PDF/Excel/PPT/ODF/RTF/EPUB → Markdown）
+  # 平台二进制是 optionalDependencies，按当前平台只装一个（@firecrawl/anydoc-<平台>）
+  - node_modules/@firecrawl/**
+extraResources:
+  - from: src/renderer/public/task-video-runtime
+    to: task-video-runtime
+  - from: build/icon.ico
+    to: icon.ico
+  - from: build/icon.png
+    to: icon.png
+  - from: build/icon-dark.ico
+    to: icon-dark.ico
+  # 注意：这里曾经有一条 resources/project —— 随包发的工程模板。
+  # 现在模板全部走线上模板源（见 docs/community-templates.md），安装包里不再带模板。
+  # UE5 Agent Skills（Skill 模式知识增强）
+  - from: resources/skills
+    to: skills
+  # uebox 命令行（自包含：dist + 生产依赖 + 给外部 Agent 的 Skill）。
+  # 由 scripts/build-cli-bundle.mjs 产出，build:win 里先跑它再打包。
+  # 不发 npm 包，只随安装包走。
+  - from: packages/cli/bundle
+    to: cli
+  # 不携带 FFmpeg、FBX2glTF、Poppler。FFmpeg 由用户自行安装；
+  # PDF 文字提取走本地 anydoc，FBX 预览走渲染层 FBXLoader。
+  # 分发说明和对应源码入口见 THIRD-PARTY-NOTICES.md。
+
+win:
+  executableName: unreal-agent
+  # 跟 exe 放在同一层（不是 resources/ 里）—— `uebox.cmd` 靠 %~dp0 找同目录的
+  # unreal-agent.exe 当 Node 用。放在 win 下而不是顶层：这是个 .cmd，
+  # 发到 macOS/Linux 包里只是垃圾文件。
+  extraFiles:
+    - from: build/uebox.cmd
+      to: uebox.cmd
+  icon: build/icon.ico
+  legalTrademarks: UE Box
+  requestedExecutionLevel: asInvoker
+nsis:
+  # 安装包文件名写死 `uebox` 而不是 `${name}`：`${name}` 取的是 package.json 的
+  # name，那个值同时决定 Electron 的 userData 目录（%APPDATA%/unreal-box），改它
+  # 会让已装用户的设置、数据库、聊天记录全部失联。对外的名字和存数据的目录名
+  # 本来就该分开，这里只改对外那半边。
+  artifactName: uebox-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+mac:
+  # Explicit null prevents builder from inferring a feed from CI credentials.
+  # build-mac-installer.mjs overrides this only for a configured update repository.
+  publish: null
+  target:
+    - dmg
+    - zip
+  artifactName: uebox-${version}-${arch}-mac.${ext}
+  entitlements: build/entitlements.mac.plist
+  icon: build/icon.icns
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    - NSCameraUsageDescription: Application requests access to the device's camera.
+    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
+    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
+    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+  notarize: false
+dmg:
+  artifactName: uebox-${version}-${arch}-mac.${ext}
+linux:
+  target:
+    - AppImage
+    - snap
+    - deb
+  maintainer: 虚幻盒子科技有限公司
+  category: Utility
+appImage:
+  artifactName: uebox-${version}.${ext}
+npmRebuild: false
+# 这里**不写 publish**，由 scripts/build-win-installer.js 按需注入。
+#
+# electron-builder 会把 publish 的值写进包内的 app-update.yml，所以只要写死在
+# 这里，每个打出来的包（包括别人自己编译的）开机都会往那个地址发请求 ——
+# 与 README 第一句「完全离线运行，不依赖官方服务器」直接冲突。
+#
+# 更新源只有一条线：公开的 GitHub Releases，没有渠道之分。把 package.json 的
+# `updateGithubRepo` 填成 `owner/repo`，build:win 就会注入 publish 并生成
+# latest.yml；留空则打出不带更新源的纯净包。运行期解析见
+# src/main/services/updater/updateFeed.ts（自架静态源用 updateFeedUrl）。

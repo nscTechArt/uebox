@@ -1,0 +1,256 @@
+/* 虚幻盒子设计规范 - 玻璃拟态效果 */
+
+/* 基础玻璃拟态类 */
+.glass {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(var(--blur-xl));
+  -webkit-backdrop-filter: blur(var(--blur-xl));
+  box-shadow: var(--shadow-glass);
+  position: relative;
+}
+
+/* 玻璃拟态内描边效果 */
+.glass::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* 玻璃卡片 */
+.glass-card {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(var(--blur-lg));
+  -webkit-backdrop-filter: blur(var(--blur-lg));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-glass);
+  padding: var(--space-6);
+  transition: all var(--motion-fast) var(--easing-standard);
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  background: var(--color-bg-surface-hover);
+  box-shadow: var(--shadow-pop);
+}
+
+/* 玻璃面板 */
+.glass-panel {
+  background: var(--color-bg-option);
+  backdrop-filter: blur(var(--blur-xl));
+  -webkit-backdrop-filter: blur(var(--blur-xl));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-glass);
+  padding: 0;
+}
+
+/* 玻璃浮层 */
+.glass-overlay {
+  background: var(--color-bg-surface-hover);
+  backdrop-filter: blur(var(--blur-2xl));
+  -webkit-backdrop-filter: blur(var(--blur-2xl));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-glass);
+  padding: var(--space-4);
+}
+
+/* 玻璃导航栏 */
+.glass-navbar {
+  background: var(--color-bg-surface-hover);
+  backdrop-filter: blur(var(--blur-xl));
+  -webkit-backdrop-filter: blur(var(--blur-xl));
+  border-bottom: 1px solid var(--color-border-subtle);
+  box-shadow: 0 1px 0 var(--color-border-subtle);
+  transition: all var(--motion-fast) var(--easing-standard);
+}
+
+/* 滚动时加深导航栏 */
+.glass-navbar.scrolled {
+  background: var(--color-bg-surface-hover);
+  box-shadow: var(--shadow-soft);
+}
+
+/* 玻璃侧边栏 */
+.glass-sidebar {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(var(--blur-xl));
+  -webkit-backdrop-filter: blur(var(--blur-xl));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 0;
+  border-left: none;
+  border-top: none;
+  border-bottom: none;
+  box-shadow: var(--shadow-glass);
+  height: 100vh;
+}
+
+/* 玻璃模态框 */
+.glass-modal {
+  background: var(--color-bg-surface-hover);
+  backdrop-filter: blur(var(--blur-2xl));
+  -webkit-backdrop-filter: blur(var(--blur-2xl));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-8);
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+/* 玻璃按钮 */
+.glass-button {
+  background: var(--color-bg-surface-hover);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-6);
+  color: var(--color-text-primary);
+  font-weight: 500;
+  transition: all var(--motion-fast) var(--easing-standard);
+  cursor: pointer;
+}
+
+.glass-button:hover {
+  background: var(--color-bg-surface-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
+}
+
+.glass-button:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-glass);
+}
+
+/* 玻璃输入框 */
+.glass-input {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-primary);
+  transition: all var(--motion-fast) var(--easing-standard);
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: 0 0 0 2px var(--color-accent-border);
+}
+
+.glass-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* 玻璃标签 */
+.glass-tag {
+  background: var(--color-bg-surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* 玻璃徽章 */
+.glass-badge {
+  background: var(--gradient-accent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-shadow: 0 1px 2px var(--shadow-color);
+}
+
+/* 降级支持 - 不支持backdrop-filter时的回退样式 */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass,
+  .glass-card,
+  .glass-panel,
+  .glass-overlay,
+  .glass-navbar,
+  .glass-sidebar,
+  .glass-modal,
+  .glass-button,
+  .glass-input {
+    background: var(--color-bg-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  [data-theme='dark'] .glass,
+  [data-theme='dark'] .glass-card,
+  [data-theme='dark'] .glass-panel,
+  [data-theme='dark'] .glass-overlay,
+  [data-theme='dark'] .glass-navbar,
+  [data-theme='dark'] .glass-sidebar,
+  [data-theme='dark'] .glass-modal,
+  [data-theme='dark'] .glass-button,
+  [data-theme='dark'] .glass-input {
+    background: var(--color-bg-surface-hover);
+  }
+}
+
+/* 减少动态效果时的简化样式 */
+@media (prefers-reduced-motion: reduce) {
+  .glass-card:hover,
+  .glass-button:hover,
+  .glass-button:active {
+    transform: none;
+  }
+
+  .glass-card,
+  .glass-navbar,
+  .glass-button,
+  .glass-input {
+    transition: none;
+  }
+}
+
+/* 减少透明度时的回退样式 */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-card,
+  .glass-panel,
+  .glass-overlay,
+  .glass-navbar,
+  .glass-sidebar,
+  .glass-modal,
+  .glass-button,
+  .glass-input {
+    background: var(--color-bg-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  [data-theme='dark'] .glass,
+  [data-theme='dark'] .glass-card,
+  [data-theme='dark'] .glass-panel,
+  [data-theme='dark'] .glass-overlay,
+  [data-theme='dark'] .glass-navbar,
+  [data-theme='dark'] .glass-sidebar,
+  [data-theme='dark'] .glass-modal,
+  [data-theme='dark'] .glass-button,
+  [data-theme='dark'] .glass-input {
+    background: var(--color-bg-surface-hover);
+  }
+}

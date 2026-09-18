@@ -1,0 +1,460 @@
+{
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "capturedAt": "2026-09-17T19:18:41.932Z",
+  "shots": [
+    {
+      "id": "ai-answer",
+      "page": "guide/assistant",
+      "route": null,
+      "caption": "回答末尾：token 用量与追问建议",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 186351
+    },
+    {
+      "id": "ai-conversation",
+      "page": "guide/assistant",
+      "route": null,
+      "caption": "一轮真实对话：提问、工具调用、开始作答",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 171018
+    },
+    {
+      "id": "ai-tool-call",
+      "page": "guide/assistant",
+      "route": null,
+      "caption": "展开后的工具调用：工具名、参数、返回值",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 171724
+    },
+    {
+      "id": "aigc-generating",
+      "page": "guide/aigc",
+      "route": null,
+      "caption": "AI 创作：任务提交后，右侧历史里的生成中状态",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 112072
+    },
+    {
+      "id": "aigc-result",
+      "page": "guide/aigc",
+      "route": null,
+      "caption": "AI 创作：生成完成，左侧参数、中间大图、右侧历史",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 1243463
+    },
+    {
+      "id": "aigc-studio",
+      "page": "guide/aigc",
+      "route": "/aigc-studio",
+      "caption": "AI 创作（生图）",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 65410
+    },
+    {
+      "id": "asset-dependency-graph",
+      "page": "guide/asset-organize",
+      "route": "/asset-management/dependency-graph",
+      "caption": "资产依赖关系图",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 56263
+    },
+    {
+      "id": "asset-library-details",
+      "page": "guide/asset-organize",
+      "route": "/asset-management?folderKey=demo_textures",
+      "caption": "资产库：选中一份资产后的详情面板",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 177351
+    },
+    {
+      "id": "asset-library-grid",
+      "page": "guide/asset-organize",
+      "route": "/asset-management?folderKey=demo_textures",
+      "caption": "资产库：贴图文件夹里的素材网格",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 155057
+    },
+    {
+      "id": "asset-library",
+      "page": "guide/asset-library",
+      "route": "/asset-management",
+      "caption": "资产库主界面",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 99884
+    },
+    {
+      "id": "assistant-welcome",
+      "page": "guide/assistant",
+      "route": "/dev-assistant",
+      "caption": "AI 会话首屏（未开始对话）",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 120639
+    },
+    {
+      "id": "blueprint-library",
+      "page": "guide/snippets",
+      "route": "/blueprint-library",
+      "caption": "蓝图库画廊视图",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 213082
+    },
+    {
+      "id": "engine-changes",
+      "page": "guide/assistant",
+      "route": null,
+      "caption": "本轮改动：这一轮在引擎里动了什么",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 127789
+    },
+    {
+      "id": "engine-review",
+      "page": "guide/assistant",
+      "route": null,
+      "caption": "审查改动：机器去引擎里核实后的结论",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 166675
+    },
+    {
+      "id": "engine-selfcheck",
+      "page": "guide/assistant",
+      "route": null,
+      "caption": "让它自证：逐条回应机器查出的问题，并说清哪里没做到、哪里是自己加的",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 166675
+    },
+    {
+      "id": "home-projects",
+      "page": "guide/projects",
+      "route": "/",
+      "caption": "项目库：上方引擎版本，下方我的项目",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 168041
+    },
+    {
+      "id": "material-library",
+      "page": "guide/snippets",
+      "route": "/material-library",
+      "caption": "材质库画廊视图",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 68507
+    },
+    {
+      "id": "model-viewer-loaded",
+      "page": "guide/model3d",
+      "route": "/model-3d-viewer?filePath={{workspace}}/Assets/Meshes/SM_Boulder_01.obj",
+      "caption": "3D 查看器：加载了一个模型，右侧是模型详情",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 160041
+    },
+    {
+      "id": "model-viewer-wireframe",
+      "page": "guide/model3d",
+      "route": "/model-3d-viewer?filePath={{workspace}}/Assets/Meshes/SM_Boulder_01.obj",
+      "caption": "3D 查看器：线框模式",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 349288
+    },
+    {
+      "id": "model-viewer",
+      "page": "guide/model3d",
+      "route": "/model-3d-viewer",
+      "caption": "3D 查看器空状态",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 182828
+    },
+    {
+      "id": "note-editor",
+      "page": "guide/notebook",
+      "route": "/note-editor",
+      "caption": "笔记编辑器",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 53751
+    },
+    {
+      "id": "notebooks",
+      "page": "guide/notebook",
+      "route": "/notebooks",
+      "caption": "知识库列表",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 56735
+    },
+    {
+      "id": "server-management",
+      "page": "guide/asset-server",
+      "route": "/server-management",
+      "caption": "资产节点管理",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 81455
+    },
+    {
+      "id": "settings-about",
+      "page": "guide/settings",
+      "route": "/preferences?tab=about",
+      "caption": "设置 → 关于：版本与检查更新",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 87612
+    },
+    {
+      "id": "settings-ai",
+      "page": "guide/settings",
+      "route": "/preferences?tab=ai",
+      "caption": "设置 → AI 助手：对话行为与隐私",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 116687
+    },
+    {
+      "id": "settings-appearance",
+      "page": "guide/settings",
+      "route": "/preferences?tab=appearance",
+      "caption": "设置 → 外观：语言、主题、动效",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 81850
+    },
+    {
+      "id": "settings-asset",
+      "page": "guide/settings",
+      "route": "/preferences?tab=asset",
+      "caption": "设置 → 资产库设置",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 112128
+    },
+    {
+      "id": "settings-cli",
+      "page": "guide/settings",
+      "route": "/preferences?tab=cli",
+      "caption": "设置 → 命令行：程序位置与 PATH",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 96358
+    },
+    {
+      "id": "settings-general",
+      "page": "guide/settings",
+      "route": "/preferences?tab=general",
+      "caption": "设置 → 常规：开机自启与通知",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 95295
+    },
+    {
+      "id": "settings-mcp",
+      "page": "guide/settings",
+      "route": "/preferences?tab=mcp",
+      "caption": "设置 → MCP：接入第三方与对外开放",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 121074
+    },
+    {
+      "id": "settings-models",
+      "page": "guide/settings",
+      "route": "/preferences?tab=models",
+      "caption": "设置 → 模型：服务商与默认模型",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 148778
+    },
+    {
+      "id": "settings-namingrules",
+      "page": "guide/settings",
+      "route": "/preferences?tab=namingRules",
+      "caption": "设置 → 命名规则四张表",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 96433
+    },
+    {
+      "id": "settings-notebook",
+      "page": "guide/settings",
+      "route": "/preferences?tab=notebook",
+      "caption": "设置 → 知识库设置",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 84850
+    },
+    {
+      "id": "settings-personalization",
+      "page": "guide/settings",
+      "route": "/preferences?tab=personalization",
+      "caption": "设置 → 个性化：给助手的常驻说明",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 99723
+    },
+    {
+      "id": "settings-plugin-connected",
+      "page": "guide/plugin",
+      "route": "/preferences?tab=plugin",
+      "caption": "设置 → 插件：引擎桥接正常、已连接的工程为 1",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 117716
+    },
+    {
+      "id": "settings-plugin",
+      "page": "guide/settings",
+      "route": "/preferences?tab=plugin",
+      "caption": "设置 → 插件：连接状态与自动安装",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 113815
+    },
+    {
+      "id": "settings-project",
+      "page": "guide/settings",
+      "route": "/preferences?tab=project",
+      "caption": "设置 → 项目库设置",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 79673
+    },
+    {
+      "id": "settings-screenrecorder",
+      "page": "guide/settings",
+      "route": "/preferences?tab=screenRecorder",
+      "caption": "设置 → 录屏：录制文件库",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 95282
+    },
+    {
+      "id": "settings-shortcuts",
+      "page": "guide/settings",
+      "route": "/preferences?tab=shortcuts",
+      "caption": "设置 → 快捷键清单",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 91470
+    },
+    {
+      "id": "settings-skills",
+      "page": "guide/settings",
+      "route": "/preferences?tab=skills",
+      "caption": "设置 → 技能清单",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 136061
+    },
+    {
+      "id": "settings-tools",
+      "page": "guide/settings",
+      "route": "/preferences?tab=tools",
+      "caption": "设置 → 工具清单与工具搜索开关",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 118866
+    },
+    {
+      "id": "settings-usage",
+      "page": "guide/settings",
+      "route": "/preferences?tab=usage",
+      "caption": "设置 → 用量统计",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 108476
+    },
+    {
+      "id": "settings-voice",
+      "page": "guide/settings",
+      "route": "/preferences?tab=voice",
+      "caption": "设置 → 语音设置",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 96176
+    },
+    {
+      "id": "vault-create-modal",
+      "page": "guide/asset-library",
+      "route": "/asset-management",
+      "caption": "新建资产库：引用原有文件 / 复制并归档 / 网络协作库",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 106591
+    },
+    {
+      "id": "vault-create-network",
+      "page": "guide/asset-team",
+      "route": "/asset-management",
+      "caption": "新建资产库 → 网络协作库：SMB 共享与资产服务器两条路",
+      "ok": true,
+      "width": 1600,
+      "height": 1000,
+      "bytes": 111569
+    }
+  ]
+}

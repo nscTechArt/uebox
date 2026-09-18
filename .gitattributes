@@ -1,0 +1,72 @@
+# 设置默认行为，如果没有指定，Git 会自动处理行结束符
+* text=auto
+
+# 明确指定文本文件使用 LF 行结束符
+#
+# 注意 .mjs / .cjs 也必须列出来：漏掉它们时 Windows 检出会拿到 CRLF，
+# 而 prettier 规则要的是 LF —— 表现是 scripts/*.mjs 平白多出上百个
+# prettier/prettier 警告，把 lint 棘轮顶红，且只在 Windows 上复现。
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.css text eol=lf
+*.less text eol=lf
+*.scss text eol=lf
+*.html text eol=lf
+*.xml text eol=lf
+*.txt text eol=lf
+
+# 插件那一侧（C++ / C# / .uplugin / ini）也必须钉 LF，理由和上面的 .mjs 一样，
+# 但后果更硬：分发包新鲜度门禁按**原始字节**算源码指纹
+# （scripts/build-plugin.mjs 的 sourceFingerprint，哈希 Source/Config/Content/
+# Resources 四个目录加 .uplugin）。漏掉这些扩展名的话，同一份内容在不同
+# 检出方式下行尾不同 —— 指纹就不同。
+#
+# 表现：Windows 上 core.autocrlf 默认开着，贡献者 clone 下来一个字没改，
+# 跑 pnpm verify 第 10 步就报「源码已经变了」，还得重编九个引擎版本才绿。
+# 2026-09-18 首次开源导出时真踩到：git archive 出的和工作区的行尾不一致。
+*.cpp text eol=lf
+*.h text eol=lf
+*.cs text eol=lf
+*.ini text eol=lf
+*.svg text eol=lf
+*.uplugin text eol=lf
+*.uproject text eol=lf
+
+# 配置文件
+*.config.* text eol=lf
+.editorconfig text eol=lf
+.gitignore text eol=lf
+.prettierrc* text eol=lf
+.eslintrc* text eol=lf
+
+# 二进制文件不进行行结束符转换
+#
+# 虚幻的 .uasset / .umap 必须显式标出来。它们原本落在 `* text=auto` 里 ——
+# 靠 git 猜（看有没有 NUL 字节），实际会猜对，但这是在赌：一个恰好没有 NUL
+# 的资产会被当文本做行尾转换，直接损坏。
+*.uasset binary
+*.umap binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.otf binary
+*.zip binary
+*.tar.gz binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary

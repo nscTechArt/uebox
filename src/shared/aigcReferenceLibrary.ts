@@ -1,0 +1,4 @@
+export const AIGC_ROOT_FOLDER_KEY = 'AIGC'
+export const AIGC_REFERENCE_LIBRARY_FOLDER_KEY = 'AIGC_reference'
+export const AIGC_REFERENCE_LIBRARY_FOLDER_NAME = '参考素材'
+export const AIGC_IMAGE_REFERENCE_LIMIT = 9

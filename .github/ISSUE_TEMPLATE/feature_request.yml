@@ -1,0 +1,71 @@
+name: 功能建议 / Feature request
+description: 说说你想要什么功能 —— 只写「想要什么」就够了，不用想「怎么实现」
+title: '[Feature] '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **写「我想要什么」，不用写「该怎么做」。** 实现路径交给开发者或 AI。
+
+        💡 提示：填完这个 Issue 之后，你可以把它整段复制给你的 AI 编码助手，
+        让它照着做 —— 仓库里已经放好了给 AI 看的规范和验收门禁。
+        三步上手：[用 AI 给虚幻盒子加功能](../blob/main/docs/contributing/vibe-coding.zh-CN.md)
+
+        **Write what you want, not how to build it.** Implementation is for the developer or the AI.
+        Tip: once filed, paste this whole issue into your AI coding assistant and have it build the thing.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 你想要什么功能？/ What do you want?
+      description: 一两句话说清楚
+      placeholder: 例如：资产库的标签可以自定义颜色
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么需要它？/ Why do you need it?
+      description: 你现在是怎么绕过这个问题的？不方便在哪？
+      placeholder: 例如：我有几十个标签，全是同一个颜色，扫一眼根本分不出哪个是材质哪个是蓝图
+    validations:
+      required: true
+
+  - type: textarea
+    id: where
+    attributes:
+      label: 在哪里用到它？/ Where would it live?
+      description: 你希望在应用的哪个位置看到 / 点到这个功能
+      placeholder: 例如：资产管理 → 标签管理 → 新建或编辑标签的弹窗里
+    validations:
+      required: false
+
+  - type: textarea
+    id: edge
+    attributes:
+      label: 边界情况 / Edge cases
+      description: 有没有什么特殊情况，你希望它这样处理？
+      placeholder: 例如：不选颜色的话应该用默认色，不能报错
+    validations:
+      required: false
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: 你打算自己动手吗？/ Will you build it?
+      options:
+        - 我想自己试试（可能会用 AI）/ I'd like to try (possibly with AI)
+        - 希望有人来做 / Hoping someone picks it up
+        - 不确定 / Not sure
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认 / Confirm
+      options:
+        - label: 我搜过已有 Issue，没有重复的 / I searched existing issues
+          required: true

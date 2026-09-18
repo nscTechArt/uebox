@@ -1,0 +1,83 @@
+name: Bug 反馈 / Bug report
+description: 有东西坏了
+title: '[Bug] '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **安全漏洞请不要开公开 Issue**，走私有的
+        [Security Advisory](../security/advisories/new)。
+
+        ⚠️ **Do not report security vulnerabilities here** — use the private Security Advisory flow.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 出了什么问题？/ What went wrong?
+      placeholder: 例如：给标签改完名字之后，列表里还是显示旧名字，要重启应用才更新
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么复现 / Steps to reproduce
+      placeholder: |
+        1. 打开资产管理
+        2. 进入标签管理
+        3. 双击某个标签改名，确定
+        4. 看列表 —— 名字没变
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 你期望的结果 / What you expected
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号 / Version
+      description: 在「关于」页面里能看到
+      placeholder: 0.1.20
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统 / OS
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS
+        - Linux
+        - 其他 / Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 截图或日志 / Screenshots or logs
+      description: |
+        贴截图最直观。日志在（Windows）`%APPDATA%/unreal-box/logs/`，
+        macOS 在 `~/Library/Logs/unreal-box/`。
+        **贴之前请自己看一眼，去掉里面的路径、账号等隐私信息。**
+      placeholder: 拖拽图片到这里即可
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认 / Confirm
+      options:
+        - label: 我搜过已有 Issue，没有重复的 / I searched existing issues
+          required: true
+        - label: 我用的是最新版本 / I'm on the latest version
+          required: false

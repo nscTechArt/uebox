@@ -1,0 +1,110 @@
+# Routine repository checks may run outside the sandbox without another prompt.
+prefix_rule(
+    pattern = [
+        "pnpm",
+        [
+            "verify",
+            "verify:fast",
+            "verify:ai-endpoints",
+            "verify:packaged-deps",
+            "format",
+            "lint",
+            "lint:all",
+            "lint:baseline:update",
+            "lint:changed",
+            "typecheck",
+            "typecheck:node",
+            "typecheck:web",
+            "test:run",
+            "test:run:fast",
+            "test:run:node",
+            "docs:check",
+            "security:secrets",
+            "rebuild:electron",
+            "rebuild:node",
+        ],
+    ],
+    decision = "allow",
+    justification = "These are the repository's documented validation and ABI maintenance commands.",
+    match = [
+        "pnpm verify",
+        "pnpm verify --with-build",
+        "pnpm lint:changed",
+        "pnpm test:run:fast",
+        "pnpm rebuild:electron",
+    ],
+)
+
+prefix_rule(
+    pattern = ["npx", ["vitest", "eslint", "prettier"]],
+    decision = "allow",
+    justification = "These tools are pinned by the repository and used for focused checks and fixes.",
+    match = [
+        "npx vitest run tests/example.test.ts",
+        "npx eslint src/example.ts",
+        "npx prettier --check AGENTS.md",
+    ],
+)
+
+# Read-only Git inspection and narrowly scoped local preparation are allowed.
+prefix_rule(
+    pattern = ["git", ["status", "diff", "log", "show", "branch"]],
+    decision = "allow",
+    justification = "These commands inspect repository state without publishing changes.",
+    match = ["git status --short", "git diff --stat", "git log -5"],
+)
+
+prefix_rule(
+    pattern = ["git", "add"],
+    decision = "allow",
+    justification = "Staging explicit files is allowed; AGENTS.md forbids publishing without human approval.",
+    match = ["git add AGENTS.md", "git add src/example.ts tests/example.test.ts"],
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", "-b"],
+    decision = "allow",
+    justification = "Creating a local contribution branch is allowed by the repository workflow.",
+    match = ["git checkout -b feat/example"],
+)
+
+# Publishing always needs a fresh human decision.
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "AGENTS.md requires explicit human confirmation before pushing.",
+    match = ["git push", "git push origin feat/example"],
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", "create"],
+    decision = "prompt",
+    justification = "AGENTS.md requires explicit human confirmation before opening a pull request.",
+    match = ["gh pr create", "gh pr create --fill"],
+)
+
+# Destructive Git shortcuts are never part of this repository's normal workflow.
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "Use a targeted, recoverable edit instead of discarding the worktree.",
+    match = ["git reset --hard", "git reset --hard HEAD~1"],
+)
+
+prefix_rule(
+    pattern = ["git", "clean"],
+    decision = "forbidden",
+    justification = "Inspect untracked files and remove only explicit targets after human confirmation.",
+    match = ["git clean -fd", "git clean -fdx"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease"]],
+    decision = "forbidden",
+    justification = "Force-pushing is not allowed by the project workflow.",
+    match = [
+        "git push --force",
+        "git push -f origin main",
+        "git push --force-with-lease",
+    ],
+)

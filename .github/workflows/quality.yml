@@ -1,0 +1,56 @@
+name: Quality Gate
+
+on:
+  # 不写分支过滤时，任何人 fork 之后每推一次都会烧一轮 30 分钟的 windows runner，
+  # 而那些提交本来就会以 PR 的形式再跑一次 —— 纯重复。
+  push:
+    branches:
+      - main
+  pull_request:
+
+# 顶层收到最小权限。GitHub 给 workflow 的默认 token 在老仓库里是可写的，
+# 公开之后这就是攻击面：任何能让这个 job 执行到自己代码的人（比如一个改了
+# postinstall 的依赖）都能拿它写仓库。这个门禁只需要读代码。
+permissions: {}
+
+# 这个工作流刻意不列举检查项。
+# 门禁的唯一定义在 scripts/verify.mjs，CI 只是「在干净机器上跑一遍 pnpm verify」。
+# 想加一道门禁，改 verify.mjs 即可，本地和 CI 会同时生效 —— 两边不可能再漂。
+jobs:
+  windows-quality:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    # 第三方 action 一律钉 commit SHA，不钉 tag。
+    # `@v4` 是一个可变引用：上游（或拿到上游账号的人）把 v4 重新指向别的 commit，
+    # 我们这边下一次 CI 就会在有仓库上下文的机器上跑陌生代码，而 diff 里什么都看不见。
+    # 钉死的代价是要有人跟着升 —— 那件事交给 .github/dependabot.yml。
+    # 每行后面的 # vX.Y.Z 是给人看的，改 SHA 时记得一起改。
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # lint:changed / docs:check 要跟 base 分支做 merge-base 比对，浅克隆拿不到历史
+          fetch-depth: 0
+          # checkout 默认把 token 写进 .git/config 留给后续步骤用。
+          # 本 job 只读代码，不需要它 —— 留着等于把凭据暴露给 pnpm install 跑的每一段
+          # 安装脚本。
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.21.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: pnpm verify --ci
+        run: pnpm verify --ci
+        env:
+          # PR 跟目标分支比；push 事件留空，由 verify.mjs 自行回退到 origin/main
+          VERIFY_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}

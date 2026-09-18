@@ -1,0 +1,7 @@
+# Shared, project-scoped defaults for Codex.
+# Model, provider, account, and telemetry settings remain user-owned.
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = false

@@ -1,0 +1,47 @@
+version: 2
+
+# 两件事要自动跟：workflow 里钉死的 action SHA，和生产依赖的安全更新。
+# 都开了分组，否则一个 npm ecosystem 每周能糊上来几十个 PR，
+# 噪音大到没人看 —— 那等于没开。
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # quality.yml 里的 action 全部钉在 commit SHA（防 tag 被重新指向）。
+    # 钉死之后就必须有人来推，这个 job 就是那个人。
+    groups:
+      actions:
+        patterns:
+          - '*'
+    labels:
+      - dependencies
+      - ci
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # 刚发布的版本先晾 7 天再升：npm 上的投毒包基本都在发布后几小时内被摘掉，
+    # 冷却期比任何扫描都管用。
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      # 开发依赖挂了顶多本地跑不起来，合并成一个 PR 就够。
+      dev-dependencies:
+        dependency-type: development
+        patterns:
+          - '*'
+      # 生产依赖会进安装包，按 minor/patch 分组，major 单独出 PR 人工看。
+      prod-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # electron 跟着 electron-builder / better-sqlite3 的 ABI 走，
+      # 升版本要连带 pnpm rebuild:electron，不能让机器人自己决定。
+      - dependency-name: electron
+        update-types:
+          - version-update:semver-major

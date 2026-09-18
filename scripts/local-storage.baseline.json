@@ -1,0 +1,206 @@
+{
+  "ai-config-store": {
+    "category": "secret",
+    "why": "模型服务商配置，含用户自备的 API Key。localStorage 是明文的，应走主进程安全存储。"
+  },
+  "aigc-image-history-view-mode": {
+    "category": "ui",
+    "why": "生图历史面板的网格/列表切换。"
+  },
+  "aigc-image-selected-model": {
+    "category": "ui",
+    "why": "上次选用的生图模型，只是个下拉框的记忆。"
+  },
+  "aigc-studio-history-panel-width": {
+    "category": "ui",
+    "why": "历史面板拖拽后的宽度。"
+  },
+  "app-custom-theme": {
+    "category": "ui",
+    "why": "用户自定义的界面背景、前景与强调色。"
+  },
+  "app-motion": {
+    "category": "ui",
+    "why": "减少动态效果三档（跟随系统/开启/关闭）。和主题同理：要在 Vue 起来之前同步读到，否则首帧会带着动画闪一下。"
+  },
+  "app-theme": {
+    "category": "ui",
+    "why": "亮色/暗色主题。"
+  },
+  "asset-selection-store": {
+    "category": "ui",
+    "why": "资产列表的选中态，属于会话内的临时状态。"
+  },
+  "asset-view-store": {
+    "category": "ui",
+    "why": "资产库的视图模式。"
+  },
+  "assetManagement.archiveImportAction": {
+    "category": "ui",
+    "why": "把压缩包导入 UE 工程时「解压后导入 / 原样复制」的记忆，勾了「不再询问」才写。"
+  },
+  "assetManagement.defaultApps": {
+    "category": "ui",
+    "why": "各类文件的默认打开方式，是偏好设置。"
+  },
+  "assetManagement.detailsPanel.visible": {
+    "category": "ui",
+    "why": "详情面板是否展开。"
+  },
+  "assetManagement.displaySize": {
+    "category": "ui",
+    "why": "缩略图显示尺寸。"
+  },
+  "assetManagement.enableNetworkVault": {
+    "category": "ui",
+    "why": "是否启用网络保管库的开关。"
+  },
+  "assetManagement.serverAddress": {
+    "category": "ui",
+    "why": "网络保管库服务端地址，是配置不是凭据。"
+  },
+  "assetManagement.serverApiKey": {
+    "category": "secret",
+    "why": "网络保管库的 API Key，明文存在 localStorage 里，应走主进程安全存储。"
+  },
+  "assetManagement.serverAuthToken": {
+    "category": "secret",
+    "why": "网络保管库的登录令牌，明文存在 localStorage 里，应走主进程安全存储。"
+  },
+  "assetManagement.serverUsername": {
+    "category": "secret",
+    "why": "网络保管库账号，与令牌同处，一并迁走。"
+  },
+  "assetManagement.showDependencies": {
+    "category": "ui",
+    "why": "是否显示依赖资产。"
+  },
+  "assetManagement.skipDeleteConfirm": {
+    "category": "ui",
+    "why": "「删除不再询问」的一次性标记。"
+  },
+  "assetManagement.sortConfig": {
+    "category": "ui",
+    "why": "资产列表排序方式。"
+  },
+  "baiduyun-store": {
+    "category": "secret",
+    "why": "百度网盘的访问令牌与应用配置，明文存在 localStorage 里。"
+  },
+  "blueprint-create-modal-settings": {
+    "category": "ui",
+    "why": "新建蓝图对话框上次填的类型等，只是表单记忆。"
+  },
+  "blueprint-library-ui": {
+    "category": "ui",
+    "why": "蓝图库的排序、视图模式、类型筛选、编辑器视角。条目本身已经落成保管库里的 .ueblueprint 包。"
+  },
+  "chat-sidebar": {
+    "category": "ui",
+    "why": "对话侧边栏的展开/宽度。"
+  },
+  "defaultEngineVersion": {
+    "category": "ui",
+    "why": "默认引擎版本偏好。"
+  },
+  "dynamic:`${props.overlayStoragePrefix}-h`": {
+    "category": "ui",
+    "why": "AI 聊天悬浮面板的高度，前缀由调用方给。"
+  },
+  "dynamic:`${props.overlayStoragePrefix}-w`": {
+    "category": "ui",
+    "why": "AI 聊天悬浮面板的宽度，前缀由调用方给。"
+  },
+  "dynamic:panelModeStorageKey": {
+    "category": "ui",
+    "why": "蓝图/材质库 AI 面板的停靠模式。"
+  },
+  "dynamic:panelWidthStorageKey": {
+    "category": "ui",
+    "why": "资产库左侧目录树 / 右侧详情面板的拖拽宽度，键名由调用方给（assetManagement.treePanelWidth / assetManagement.detailsPanelWidth）。"
+  },
+  "dynamic:sidebarVisibleStorageKey": {
+    "category": "ui",
+    "why": "蓝图/材质库侧边栏是否可见。"
+  },
+  "home.projectFilter": {
+    "category": "ui",
+    "why": "「我的项目」筛到哪个分组、哪个引擎版本。首页没有 keepAlive，切个标签就卸载，不记住的话每次回来都要重新点。"
+  },
+  "infographic_brief_cache_v1": {
+    "category": "ui",
+    "why": "信息图摘要缓存，可从原始内容重新生成。"
+  },
+  "infographic_model_config": {
+    "category": "ui",
+    "why": "信息图用哪个模型的偏好，不含凭据。"
+  },
+  "lastOpenedEngineVersion": {
+    "category": "ui",
+    "why": "上次打开的引擎版本。"
+  },
+  "library-browser-modules": {
+    "category": "ui",
+    "why": "库浏览器里用户勾选启用了哪些可选模块（云盘、网络协作库、依赖图…）。是这台机器上的界面偏好，丢了重新勾一次即可。"
+  },
+  "library-browser-sidebar-width": {
+    "category": "ui",
+    "why": "库浏览器（蓝图/材质共用的壳）文件夹栏拖宽后的宽度。纯界面偏好，丢了拖一次分界线就回来。"
+  },
+  "locale": {
+    "category": "ui",
+    "why": "界面语言。"
+  },
+  "material-library-ui": {
+    "category": "ui",
+    "why": "材质库的排序、视图模式、筛选条件。条目本身已经落成保管库里的 .uematerial 包。"
+  },
+  "mock-interview-history": {
+    "category": "content",
+    "why": "模拟面试的历史记录与错题本。这是用户攒出来的东西，应该落文件。"
+  },
+  "note-view-store": {
+    "category": "ui",
+    "why": "笔记视图模式。"
+  },
+  "notebook_left_width": {
+    "category": "ui",
+    "why": "笔记本左栏宽度。"
+  },
+  "notebook_right_width": {
+    "category": "ui",
+    "why": "笔记本右栏宽度。"
+  },
+  "notebook-store": {
+    "category": "ui",
+    "why": "笔记本的分栏宽度与 tab 界面状态；正文在数据库里。"
+  },
+  "sidebar-collapsed": {
+    "category": "ui",
+    "why": "主侧边栏是否折叠。"
+  },
+  "sidebar-tools-prefs": {
+    "category": "ui",
+    "why": "侧边栏工具的自定义排列。"
+  },
+  "sidebar-width": {
+    "category": "ui",
+    "why": "主侧边栏的可拖拽宽度。"
+  },
+  "studio-outputs": {
+    "category": "ui",
+    "why": "只读不写的老数据：产出已经改存在保管库的 Notebook/<id>/outputs.json，这个键只在老用户首次打开知识库时被读一次并搬走，搬完就删。"
+  },
+  "tabs-store": {
+    "category": "ui",
+    "why": "打开着的标签页，属于会话状态，丢了重开即可。"
+  },
+  "unreal-agent:import-path": {
+    "category": "ui",
+    "why": "上次导入到项目的路径，是输入框记忆。"
+  },
+  "webdav-store": {
+    "category": "secret",
+    "why": "WebDAV 连接配置与历史，含账号密码，明文存在 localStorage 里。"
+  }
+}

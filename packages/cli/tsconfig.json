@@ -1,0 +1,30 @@
+{
+  // 出包用（`pnpm run build` 真的产出 dist/）。
+  // 门禁走的是仓库根的 tsconfig.cli.json —— 那份只做类型检查、不产出。
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": false,
+    // 不出 source map：`files` 里不包含 `.ts` 源码，光有 map 指向一堆不存在的
+    // 文件，对排查一点用没有，只是每个模块多一份体积。要调试就在仓库里跑源码。
+    "sourceMap": false,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  // 测试和测试用的假盒子都不进发布产物。让测试脚手架跟着 CLI 发出去，
+  // 等于在用户机器上多放一个能起 HTTP 服务的模块。
+  "exclude": ["src/**/*.test.ts", "src/testServer.ts"]
+}
