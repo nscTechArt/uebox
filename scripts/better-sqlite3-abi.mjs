@@ -156,6 +156,28 @@ function blockingProcesses() {
  *
  * 只对 Node ABI 走这条路：Electron 那份由 electron-rebuild 负责，它自己有缓存。
  */
+/**
+ * prebuild-install 的入口脚本路径。
+ *
+ * 它是 better-sqlite3 的传递依赖，不是本仓库的直接依赖 —— 所以先从
+ * better-sqlite3 的位置解析，解析不到再从本脚本的位置试一次（有 hoist 时能命中）。
+ * 两处都没有就返回 null，由调用方回落到本地编译。
+ */
+function prebuildInstallBin() {
+  for (const from of [join(PKG_DIR, 'package.json'), import.meta.url]) {
+    try {
+      const resolve = createRequire(from).resolve
+      const manifest = resolve('prebuild-install/package.json')
+      const bin = JSON.parse(readFileSync(manifest, 'utf8')).bin
+      const entry = typeof bin === 'string' ? bin : bin?.['prebuild-install']
+      if (entry) return join(dirname(manifest), entry)
+    } catch {
+      // 这一处解析不到，试下一处
+    }
+  }
+  return null
+}
+
 function tryPrebuild(runtime) {
   if (runtime !== 'node') return false
 
@@ -169,10 +191,23 @@ function tryPrebuild(runtime) {
   copyFileSync(join(PKG_DIR, 'package.json'), join(stage, 'package.json'))
 
   console.log('尝试下载 better-sqlite3 的 Node 预编译包（不碰 node_modules）...')
+
+  // 直接用 node 跑 prebuild-install 的入口，不经过 npx。
+  // npx 会以 cwd 为起点找包，而这里的 cwd 是 pnpm store 里的 better-sqlite3 目录 ——
+  // 那底下解析不到 prebuild-install，npx 便改去临时目录现装一份，然后在干净机器上
+  // 报 `Cannot find module '<repo>/prebuild-install@x.y.z/.../bin.js'`。
+  // 走 require.resolve 是从本脚本出发解析，与 cwd 无关。
+  const binPath = prebuildInstallBin()
+  if (!binPath) {
+    console.warn('装配里没有 prebuild-install，回落到本地编译。')
+    rmSync(stage, { recursive: true, force: true })
+    return false
+  }
+
   const result = spawnSync(
-    isWindows ? 'npx.cmd' : 'npx',
+    process.execPath,
     [
-      'prebuild-install',
+      binPath,
       '--runtime',
       'node',
       '--target',
@@ -184,7 +219,7 @@ function tryPrebuild(runtime) {
       '--path',
       stage
     ],
-    { cwd: PKG_DIR, stdio: 'inherit', shell: isWindows }
+    { cwd: PKG_DIR, stdio: 'inherit' }
   )
 
   const produced = join(stage, 'build', 'Release', 'better_sqlite3.node')
@@ -229,10 +264,17 @@ function rebuild(runtime) {
   }
 
   console.log(`正在为 ${runtime} 编译 better-sqlite3（只需一次，之后走缓存）...`)
+
+  // 一律走 pnpm，不碰 npm/npx。
+  // 本仓库的 package.json 同时有 pnpm.overrides 和给 npm 看的 overrides，
+  // 后者里 `@electron/rebuild@4.2.0` 和直接依赖的 `^4.2.0` 在 npm 眼里冲突，
+  // 于是 `npm rebuild` 在这个仓库里必然以 EOVERRIDE 失败 —— 本机缓存是热的时候
+  // 根本走不到这条分支，所以一直没人发现，直到 CI 在干净机器上跑。
+  const pnpm = isWindows ? 'pnpm.cmd' : 'pnpm'
   const [command, args] =
     runtime === 'node'
-      ? [isWindows ? 'npm.cmd' : 'npm', ['rebuild', 'better-sqlite3']]
-      : [isWindows ? 'npx.cmd' : 'npx', ['electron-rebuild', '-f', '-w', 'better-sqlite3']]
+      ? [pnpm, ['rebuild', 'better-sqlite3']]
+      : [pnpm, ['exec', 'electron-rebuild', '-f', '-w', 'better-sqlite3']]
 
   const result = spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell: isWindows })
   if (result.status !== 0) process.exit(result.status ?? 1)

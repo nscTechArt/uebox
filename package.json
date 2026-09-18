@@ -208,7 +208,7 @@
     "vue-tsc": "^3.0.3"
   },
   "overrides": {
-    "@xmldom/xmldom": "0.8.13",
+    "@xmldom/xmldom": "0.8.15",
     "brace-expansion@2": "2.1.4",
     "defu": "6.1.7",
     "fast-uri@3": "3.1.6",
@@ -243,7 +243,7 @@
         "tar-fs": "2.1.4"
       }
     },
-    "@electron/rebuild@4.2.0": {
+    "@electron/rebuild@^4.2.0": {
       "node-abi": "4.35.0"
     }
   },
