@@ -35,6 +35,7 @@
     "plugin:build:all": "node scripts/build-all-plugins.mjs",
     "plugin:release": "node scripts/release-plugin.mjs",
     "release:app": "node scripts/release-app.mjs",
+    "release:dl": "node scripts/release-dl.mjs",
     "audit:prod": "pnpm audit --prod --audit-level=high --registry=https://registry.npmjs.org",
     "security:secrets": "node scripts/check-secrets.mjs",
     "verify:overrides": "node scripts/check-overrides-sync.mjs",
