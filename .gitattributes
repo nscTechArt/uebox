@@ -10,6 +10,11 @@
 *.mjs text eol=lf
 *.cjs text eol=lf
 *.ts text eol=lf
+# .mts / .cts 是上面那条 .mjs 注释说的同一个坑，只是当时漏了 TS 这一对：
+# website/.vitepress/config.mts 落到 `* text=auto`，Windows 检出拿到 CRLF，
+# prettier 一个文件就报 250 条 `Delete ␍`，而 Linux 上完全复现不了。
+*.mts text eol=lf
+*.cts text eol=lf
 *.vue text eol=lf
 *.json text eol=lf
 *.md text eol=lf
