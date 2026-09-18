@@ -41,6 +41,23 @@ describe('useSidebarPeek', () => {
     expect(hasVisibleSidebarFloatingOverlay()).toBe(false)
   })
 
+  it('弹窗关掉后只是父节点被藏起来，不该再算作浮层还开着', () => {
+    // AppModal 开过一次就一直留在 body 里，关掉是 v-show 藏根节点；
+    // 命中的 .app-modal__wrap 是它的孩子，自己永远是 display: flex
+    const root = document.createElement('div')
+    root.className = 'app-modal-root'
+    const wrap = document.createElement('div')
+    wrap.className = 'app-modal__wrap'
+    wrap.style.display = 'flex'
+    root.append(wrap)
+    document.body.append(root)
+
+    expect(hasVisibleSidebarFloatingOverlay()).toBe(true)
+
+    root.style.display = 'none'
+    expect(hasVisibleSidebarFloatingOverlay()).toBe(false)
+  })
+
   it('浮出只在收起态生效', () => {
     const { peek } = setup({ collapsed: true })
     peek.open()

@@ -20,11 +20,26 @@ export const PEEK_CLOSE_DELAY = 220
 export const SIDEBAR_FLOATING_OVERLAY_SELECTOR =
   '.app-modal__wrap, .app-dropdown, .ant-dropdown, .ant-popover, .context-menu'
 
+/**
+ * 必须一路往上问到根。
+ *
+ * 关键在 `display`：祖先是 `display: none` 时，后代自己的 computed display 仍然是
+ * 它声明的那个值（flex/block），并不会变成 none。AppModal 就踩在这上面 —— 它开过一次
+ * 之后根节点一直留在 body 里，用 `v-show` 藏起来，而选择器命中的 `.app-modal__wrap`
+ * 是它的孩子，单看自己永远是 `display: flex`。只看一层的话，全程都会被当成「弹窗还开着」。
+ */
+function isElementVisible(node: Element): boolean {
+  for (let el: Element | null = node; el; el = el.parentElement) {
+    const style = window.getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false
+    }
+  }
+  return true
+}
+
 export function hasVisibleSidebarFloatingOverlay(root: ParentNode = document): boolean {
-  return Array.from(root.querySelectorAll(SIDEBAR_FLOATING_OVERLAY_SELECTOR)).some((node) => {
-    const style = window.getComputedStyle(node)
-    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
-  })
+  return Array.from(root.querySelectorAll(SIDEBAR_FLOATING_OVERLAY_SELECTOR)).some(isElementVisible)
 }
 
 export interface SidebarPeekOptions {
