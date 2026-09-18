@@ -130,9 +130,32 @@ export default defineConfig({
     // 监听模式设置
     watch: false,
 
-    // 快照设置
+    /**
+     * 快照设置。
+     *
+     * 扩展名必须覆盖上面 include 里的全部后缀，而且推导失败要**报错**，
+     * 不能原样返回 testPath —— 原样返回的后果是 vitest 把测试文件本身当成
+     * 那个测试的快照文件，`vitest -u` 发现「这个快照文件里没有快照」，
+     * 就判定它过期并**删掉源文件**。
+     *
+     * 2026-09-19 真踩到：正则当时只认 `[tj]sx?`，不认 .mjs。跑一次
+     * `vitest run --update`，报告写着「Snapshots 4 files removed」，
+     * 实际删掉的是四个 *.test.mjs 测试文件（tests/unit 三个 + tests/manual 一个）。
+     * 测试全绿，因为被删的文件已经不会再被收集了。
+     */
     resolveSnapshotPath: (testPath, snapExtension) => {
-      return testPath.replace(/\.test\.([tj]sx?)/, `.__snapshots__/test$1${snapExtension}`)
+      const resolved = testPath.replace(
+        /\.test\.([tj]sx?|[mc][tj]s)$/,
+        `.__snapshots__/test$1${snapExtension}`
+      )
+      if (resolved === testPath) {
+        throw new Error(
+          `推导不出快照路径：${testPath}\n` +
+            '扩展名不在 resolveSnapshotPath 的正则里。补上它 —— ' +
+            '绝不能原样返回，那会让 vitest -u 删掉这个测试文件。'
+        )
+      }
+      return resolved
     },
 
     // 设置文件

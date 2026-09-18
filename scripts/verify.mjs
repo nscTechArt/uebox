@@ -77,6 +77,19 @@ const STEPS = [
     ]
   },
   {
+    title: 'overrides 两表同步 / overrides sync',
+    script: 'verify:overrides',
+    hint: [
+      'package.json 里有两份依赖强制替换表，服务两拨读者：',
+      '  · pnpm.overrides —— 决定实际装什么；',
+      '  · overrides      —— npm 与 GitHub 的依赖图 / 安全扫描读它。',
+      '',
+      '手工维护的重复品必然会漂。漂了的后果是安全修复只落实一半：',
+      '装的是安全版本，但 GitHub 读到的是旧版本，安全页照旧挂红（或者反过来，',
+      '以为修好了其实没装上）。改一份就必须改另一份。'
+    ]
+  },
+  {
     title: '官方端点棘轮 / official endpoints',
     script: 'verify:official-endpoints',
     hint: [

@@ -37,6 +37,7 @@
     "release:app": "node scripts/release-app.mjs",
     "audit:prod": "pnpm audit --prod --audit-level=high --registry=https://registry.npmjs.org",
     "security:secrets": "node scripts/check-secrets.mjs",
+    "verify:overrides": "node scripts/check-overrides-sync.mjs",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck:cli": "tsc --noEmit -p tsconfig.cli.json",
