@@ -920,7 +920,7 @@ export class AssetServer {
     if (method === 'GET' && subPath === '/search') {
       const q = url.searchParams.get('q') || ''
 
-      const results = searchAssetDataByName(db, q)
+      const results = searchAssetDataByName(db, q, 200)
       this.sendJson(res, 200, { success: true, data: results })
       return
     }

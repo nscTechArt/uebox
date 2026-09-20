@@ -1483,6 +1483,30 @@ export class VaultManager {
   }
 
   /**
+   * 没有统计信息（sqlite_stat1）的库补一次 ANALYZE。
+   *
+   * 整个项目以前从来不跑 ANALYZE。没有统计信息时规划器对每个索引一视同仁，
+   * 「索引列 + isDelete」这类查询会选中 idx_assetData_isDelete（只有 0/1 两个值，
+   * 等于全表扫）。远端导入卡死那次就是这么来的（见 remoteImportPath.ts）。
+   *
+   * 只在没有 stat1 时跑：52 万行的库约 5 秒，一次性；有了之后由 SyncClient
+   * 在全量对账后刷新。
+   */
+  private ensureQueryPlannerStats(vaultDb: Database.Database): void {
+    try {
+      const hasStats = vaultDb
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'`)
+        .get()
+      if (hasStats) return
+      const started = Date.now()
+      vaultDb.exec('ANALYZE')
+      console.log(`[VaultManager] 首次 ANALYZE 完成，耗时 ${Date.now() - started} ms`)
+    } catch (err) {
+      console.warn('[VaultManager] ANALYZE 失败（不影响使用）:', err)
+    }
+  }
+
+  /**
    * 初始化保管库数据库
    */
   private initializeVaultDatabase(vaultDb: Database.Database): void {
@@ -1625,6 +1649,11 @@ export class VaultManager {
       // 带 isDelete 的复合索引。老库在这里打开时顺手补上，见 initializeVaultDatabase 的调用点。
       'CREATE INDEX IF NOT EXISTS idx_assetData_filePath_isDelete ON assetData(filePath, isDelete)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_originPath_isDelete ON assetData(originPath, isDelete)',
+      // 缩略图占用判断 / 媒体读取权限按文件名等值查；部分索引，`= ?` 蕴含 IS NOT NULL
+      'CREATE INDEX IF NOT EXISTS idx_assetData_imgLocalPath_present ON assetData(imgLocalPath) WHERE imgLocalPath IS NOT NULL',
+      'CREATE INDEX IF NOT EXISTS idx_assetData_customPoster_present ON assetData(customPoster) WHERE customPoster IS NOT NULL',
+      // 筛选下拉的类型聚合只读索引不回表
+      'CREATE INDEX IF NOT EXISTS idx_assetData_types_cover ON assetData(classNameCn, isDelete, fileExtension, ext, className)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_isDelete ON assetData(isDelete)',
       // 🚀 性能优化：添加 assetName 索引（常用于排序和搜索）
       'CREATE INDEX IF NOT EXISTS idx_assetData_assetName ON assetData(assetName COLLATE NOCASE)',
@@ -1639,6 +1668,7 @@ export class VaultManager {
     ]
 
     indexes.forEach((sql) => vaultDb.exec(sql))
+    this.ensureQueryPlannerStats(vaultDb)
 
     // 迁移：为 assetData 表添加缺失的新列
     const assetDataMigrations = [

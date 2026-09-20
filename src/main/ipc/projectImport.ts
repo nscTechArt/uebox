@@ -12,7 +12,7 @@ import {
   getAssetDataBySoftPath,
   getAssetsByKeys,
   getAssetsBySoftPaths,
-  searchAssetDataByName,
+  findAssetDataByExactName,
   type AssetData
 } from '../sqliteDataBase/models/assetData'
 import { serviceManager } from '../services'
@@ -1038,7 +1038,7 @@ async function planAssetImport(
               if (!depAsset) {
                 const depName = depSoftPath.split('/').pop() || ''
                 if (depName) {
-                  const candidates = searchAssetDataByName(db, depName)
+                  const candidates = findAssetDataByExactName(db, depName)
                   // 优先匹配 softPath 结尾一致的
                   depAsset = candidates.find(
                     (c) => c.softPath && c.softPath.endsWith('/' + depName)

@@ -1938,10 +1938,17 @@ export function registerAssetThumbnailIPC(): void {
       isKnownAssetPath: (candidate) => {
         try {
           const db = getVaultDatabase()
+          // 三列 OR 会让规划器退回 isDelete 单列索引整表扫（52 万行 4.7 秒，同步阻塞主进程）。
+          // 拆成三条等值查询各走自己的索引，和 remoteImportPath.ts 同一个修法。
           const row = db
             .prepare(
-              `SELECT 1 FROM assetData
-               WHERE isDelete = 0 AND (filePath = ? OR originPath = ? OR imgLocalPath = ?)
+              `SELECT 1 FROM (
+                 SELECT 1 FROM assetData WHERE isDelete = 0 AND filePath = ?
+                 UNION ALL
+                 SELECT 1 FROM assetData WHERE isDelete = 0 AND originPath = ?
+                 UNION ALL
+                 SELECT 1 FROM assetData WHERE isDelete = 0 AND imgLocalPath = ?
+               )
                LIMIT 1`
             )
             .get(candidate, candidate, candidate)

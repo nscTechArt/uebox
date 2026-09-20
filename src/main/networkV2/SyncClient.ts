@@ -1051,6 +1051,16 @@ export class SyncClient extends EventEmitter {
     this.lastSeq = snapshotSeq
     this.scheduleMissingRowRepair()
 
+    // 整库刚被重写过，统计信息要跟着刷新，否则规划器还按旧分布挑索引。
+    // 52 万行约 5 秒，相对于前面几分钟的全量写入可以接受；失败不影响同步结果。
+    try {
+      const analyzeStart = Date.now()
+      this.localDb.exec('ANALYZE')
+      console.log(`[SyncClient] 对账后 ANALYZE 完成，耗时 ${Date.now() - analyzeStart} ms`)
+    } catch (err) {
+      console.warn('[SyncClient] 对账后 ANALYZE 失败（不影响数据）:', err)
+    }
+
     console.log(
       `[SyncClient] 对账同步完成: ${allAssetRows.length} 资产, ${allFolderRows.length} 文件夹 ` +
         `(软删 ${softDeletedAssets} 资产 / ${softDeletedFolders} 文件夹，` +

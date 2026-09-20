@@ -3,6 +3,8 @@ import { getPublicDatabase } from '../sqliteDataBase'
 import { getVaultDatabase } from '../sqliteDataBase/index'
 import { searchProjects, ProjectRecord } from '../sqliteDataBase/models/project'
 import { searchAssetDataByName, AssetData } from '../sqliteDataBase/models/assetData'
+import { searchAssetsByCriteria } from '../sqliteDataBase/models/assetSearch'
+import { resolveKeywordCriteria } from '../sqliteDataBase/models/assetSearchIndex'
 import { logger } from '../services'
 import type { SpotlightSearchResponse, SpotlightSearchResult } from '../../shared/spotlight'
 import { mt } from '../i18n'
@@ -45,7 +47,12 @@ export function registerSpotlightIPC(): void {
       try {
         const vaultDb = getVaultDatabase()
         if (vaultDb) {
-          const assets = searchAssetDataByName(vaultDb, trimmedQuery).slice(0, 5)
+          // 每敲一个字调一次。LIKE '%x%' 在 52 万行的库上 5 秒多且同步阻塞主进程，
+          // 索引就绪就走 FTS；没就绪才退回 LIKE，并且只取 5 条。
+          const keyword = resolveKeywordCriteria(vaultDb, trimmedQuery)
+          const assets = keyword.ftsMatch
+            ? searchAssetsByCriteria(vaultDb, { ftsMatch: keyword.ftsMatch, limit: 5 })
+            : searchAssetDataByName(vaultDb, trimmedQuery, 5)
           for (const asset of assets) {
             assetResults.push(formatAssetResult(asset))
           }
