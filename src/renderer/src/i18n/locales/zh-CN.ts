@@ -1226,7 +1226,20 @@ export default {
   update: {
     newVersionAvailable: '新版本↑',
     downloading: '正在下载更新...',
-    readyToInstall: '更新已就绪，点击安装'
+    readyToInstall: '更新已就绪，点击安装',
+    /** 标题栏角标：发现新版本，点一下开始下载 */
+    updateTo: '更新 {version}',
+    downloadHint: '发现新版本 {version}，点击下载',
+    downloadingPercent: '下载中 {percent}%',
+    downloadingHint: '正在下载 {version}',
+    restartToUpdate: '重启更新',
+    /** 启动/后台检查发现新版本时的一次性全局提示 */
+    foundToast: '发现新版本 {version}，点标题栏右上角即可下载',
+    downloadStarted: '开始下载新版本，可在标题栏查看进度',
+    installTitle: '安装更新',
+    installContent: '新版本 {version} 已下载完成，现在重启安装吗？',
+    installNow: '立即重启',
+    later: '稍后'
   },
   page: {
     home: {

@@ -3,12 +3,14 @@
  * 关于页面组件
  * 原型风格：居中布局 + Logo图片 + 下划线链接
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import AppButton from '@renderer/components/AppButton.vue'
 import BrandMark from '@renderer/components/BrandMark.vue'
+import { formatUpdateVersion, useUpdateStore } from '@renderer/store/modules/updateStore'
 
 const { t } = useI18n()
 
@@ -18,89 +20,25 @@ const { t } = useI18n()
 const appVersion = ref<string>('...')
 
 /**
- * 更新状态
+ * 更新状态来自全局 Store（store/modules/updateStore.ts）。
+ *
+ * 这个面板以前自己挂一整套 updater 监听，于是「有没有新版本」这件事只在它
+ * 挂载期间成立 —— 关掉设置页，启动时查到的结果就没人记得了。现在监听在
+ * App.vue 注册一次，这里只读状态、只管本页面该有的反馈。
  */
-const isChecking = ref(false)
-const updateAvailable = ref(false)
-const updateDownloaded = ref(false)
-const latestVersion = ref<string>('')
+const updateStore = useUpdateStore()
+const { phase, latestVersion } = storeToRefs(updateStore)
 
-// 事件监听器清理函数
-const cleanupFunctions: Array<() => void> = []
-
-type UpdateErrorData = {
-  message?: string
-  code?: string
-}
-
-function resolveUpdateErrorMessage(data?: UpdateErrorData): string {
-  if (data?.code === 'UPDATE_FEED_NOT_FOUND') {
-    return t('profile.about.updateFeedNotReady')
-  }
-
-  if (data?.code === 'UPDATE_NETWORK_ERROR') {
-    return t('profile.about.updateServerUnavailable')
-  }
-
-  return data?.message || t('profile.about.updateError')
-}
+const isChecking = computed(() => phase.value === 'checking')
+const latestVersionLabel = computed(() => formatUpdateVersion(latestVersion.value))
 
 /**
- * 设置更新事件监听
+ * 这一轮结果是不是用户在这个页面点出来的。
+ *
+ * 后台每 4 小时会自动查一次，那种检查不该在设置页弹「已是最新版本」；
+ * 只有用户亲手点了「检查更新」，才需要给一个明确的回音。
  */
-function setupUpdateListeners(): void {
-  // 监听检查中
-  cleanupFunctions.push(
-    window.api.updater.onUpdateChecking(() => {
-      isChecking.value = true
-    })
-  )
-
-  // 监听发现新版本
-  cleanupFunctions.push(
-    window.api.updater.onUpdateAvailable((data) => {
-      isChecking.value = false
-      updateAvailable.value = true
-      latestVersion.value = data.version
-      showUpdateAvailableDialog(data.version)
-    })
-  )
-
-  // 监听无更新
-  cleanupFunctions.push(
-    window.api.updater.onUpdateNotAvailable(() => {
-      isChecking.value = false
-      updateAvailable.value = false
-      message.success(t('profile.about.upToDate'))
-    })
-  )
-
-  // 监听下载完成
-  cleanupFunctions.push(
-    window.api.updater.onUpdateDownloaded((data) => {
-      isChecking.value = false
-      updateDownloaded.value = true
-      latestVersion.value = data.version
-      showUpdateReadyDialog(data.version)
-    })
-  )
-
-  // 监听错误
-  cleanupFunctions.push(
-    window.api.updater.onUpdateError((data) => {
-      isChecking.value = false
-      message.error(resolveUpdateErrorMessage(data))
-    })
-  )
-}
-
-/**
- * 清理事件监听
- */
-function cleanupListeners(): void {
-  cleanupFunctions.forEach((cleanup) => cleanup())
-  cleanupFunctions.length = 0
-}
+const awaitingManualResult = ref(false)
 
 /**
  * 显示发现新版本对话框。
@@ -124,22 +62,12 @@ function showUpdateAvailableDialog(version: string): void {
 }
 
 /**
- * 下载更新。下载完成由 onUpdateDownloaded 接手弹安装框。
+ * 下载更新。进度显示在标题栏那枚角标上，完成后由 watch 接手弹安装框。
  */
-async function downloadUpdate(): Promise<void> {
-  // 先提示再 await —— downloadUpdate() 要等整个下载结束才 resolve，
-  // 放在后面的话「正在下载」会在下载完成之后才弹出来
+function downloadUpdate(): void {
+  // 下载失败不在这里报：主进程会推 update-error，App.vue 统一报一次
   message.info(t('profile.about.downloading'))
-
-  try {
-    const result = await window.api.updater.downloadUpdate()
-    if (!result.success) {
-      message.error(result.error || t('profile.about.downloadError'))
-    }
-  } catch (e) {
-    console.error('下载更新失败:', e)
-    message.error(t('profile.about.downloadError'))
-  }
+  void updateStore.download()
 }
 
 /**
@@ -152,7 +80,7 @@ function showUpdateReadyDialog(version: string): void {
     okText: t('profile.about.installNow'),
     cancelText: t('profile.about.later'),
     onOk: () => {
-      installUpdate()
+      void installUpdate()
     }
   })
 }
@@ -161,25 +89,42 @@ function showUpdateReadyDialog(version: string): void {
  * 安装更新
  */
 async function installUpdate(): Promise<void> {
-  try {
-    // IPC 失败是返回 { success: false }，不是抛异常 —— 只 catch 的话装不上也悄无声息
-    const result = await window.api.updater.quitAndInstall()
-    if (!result.success) {
-      message.error(result.error || t('profile.about.updateError'))
-    }
-  } catch (e) {
-    console.error('安装更新失败:', e)
-    message.error(t('profile.about.updateError'))
+  // IPC 失败是返回 { success: false }，不是抛异常 —— 只 catch 的话装不上也悄无声息
+  const result = await updateStore.install()
+  if (!result.success) {
+    message.error(result.error || t('profile.about.updateError'))
   }
 }
+
+/**
+ * 跟着全局状态走：用户手点的那一轮给回音，下载完成不论来源都要问一句装不装。
+ */
+watch(phase, (next, previous) => {
+  if (next === 'downloaded' && previous !== 'downloaded') {
+    awaitingManualResult.value = false
+    showUpdateReadyDialog(latestVersionLabel.value)
+    return
+  }
+
+  if (!awaitingManualResult.value) return
+
+  if (next === 'available') {
+    awaitingManualResult.value = false
+    showUpdateAvailableDialog(latestVersionLabel.value)
+    return
+  }
+
+  // 回到 idle 有两种可能：已是最新，或者检查失败。失败时 App.vue 已经报过错了
+  if (next === 'idle' && previous === 'checking') {
+    awaitingManualResult.value = false
+    if (!updateStore.lastError) message.success(t('profile.about.upToDate'))
+  }
+})
 
 /**
  * 获取应用版本号
  */
 onMounted(async () => {
-  // 设置更新事件监听
-  setupUpdateListeners()
-
   try {
     const info = await window.api.system.getInfo()
     if (info?.appVersion) {
@@ -189,10 +134,6 @@ onMounted(async () => {
     console.error('获取应用版本失败:', e)
     appVersion.value = 'unknown'
   }
-})
-
-onUnmounted(() => {
-  cleanupListeners()
 })
 
 /**
@@ -208,15 +149,27 @@ function openLink(url: string): void {
 async function checkForUpdates(): Promise<void> {
   if (isChecking.value) return
 
-  isChecking.value = true
+  // 已经有结果在手上就别再发请求：直接把对应的弹窗给出来
+  if (phase.value === 'downloaded') {
+    showUpdateReadyDialog(latestVersionLabel.value)
+    return
+  }
+  if (phase.value === 'available') {
+    showUpdateAvailableDialog(latestVersionLabel.value)
+    return
+  }
+  if (phase.value === 'downloading') {
+    message.info(t('profile.about.downloading'))
+    return
+  }
+
+  awaitingManualResult.value = true
   message.info(t('profile.about.checking'))
 
-  try {
-    await window.api.updater.checkForUpdates()
-  } catch (e) {
-    isChecking.value = false
-    console.error('检查更新失败:', e)
-    message.error(t('profile.about.updateError'))
+  const result = await updateStore.check()
+  if (!result.success) {
+    awaitingManualResult.value = false
+    message.error(result.error || t('profile.about.updateError'))
   }
 }
 </script>

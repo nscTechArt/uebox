@@ -97,6 +97,41 @@ describe('ue_save', () => {
   })
 
   /**
+   * 「刚改完却说没东西可存」几乎只有一个原因：那次改动走的是 Python，漏了标脏。
+   *
+   * 提示不能按 still_dirty_count 收窄：没标脏的包压根不计入那个数，所以
+   * 「用户另开着一张改了一半的关卡」时反而不出现 —— 而那正是丢数据的场景。
+   */
+  it('没存出任何东西时提示标脏，哪怕工程里还有别人的脏改动', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      scope: 'touched',
+      saved_count: 0,
+      saved: [],
+      still_dirty_count: 3
+    })
+
+    const result = await save({})
+
+    expect(result.success).toBe(true)
+    expect(String(result.summary)).toContain('asset.modify()')
+  })
+
+  it('点名保存一张干净的关卡不提标脏 —— 那本来就该是「已经存过了」', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      scope: 'list',
+      saved_count: 0,
+      saved: [],
+      still_dirty_count: 0
+    })
+
+    const result = await save({ scope: 'list', paths: ['/Game/Maps/Main'] })
+
+    expect(String(result.summary)).not.toContain('asset.modify()')
+  })
+
+  /**
    * 默认只存自己改的，用户手改的会留着脏 —— 那是对的行为。
    * 但必须说出来：不说的话模型看到「成功」就以为工程干净了，
    * 然后可能去做打开别的关卡这种会丢东西的事。

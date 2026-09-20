@@ -24,10 +24,8 @@ export function createRunPythonScriptTool(): V2Tool {
   return defineV2Tool({
     description: `在虚幻引擎中执行 Python 脚本 —— 读和写都可以。
 
-【功能说明】：
-- 适用于没有专用工具覆盖的查询、统计、批量操作
-- 有专用工具的事情优先用专用工具（摆 Actor 用 ue_spawn_actor，
-  查 Actor 用 ue_get_actor），Python 是它们够不着时的补充
+【功能说明】：用于没有专用工具覆盖的查询、统计、批量操作。
+有专用工具的事情优先用专用工具，Python 是补充。
 
 【怎么拿到结果】：
 1. \`print()\` 的内容会被捕获并回传（截取最后 8000 字符）。
@@ -35,13 +33,14 @@ export function createRunPythonScriptTool(): V2Tool {
    - 示例：\`output_data = {"assets": ["/Game/A"], "count": 1}\`
    - 数据量大、需要后续处理时用它，比 print 可靠。
 
-【unreal 的 API 别靠猜，当场问它】：
-很多 unreal API 参数错了只返回 False，一个字的原因都没有
-（\`EditorAssetLibrary.rename_asset\` 的新名要**完整包路径**不是纯名字，
-写错就静默 False —— 真机上为这个白试了两次）。所以调一个没把握的 API 之前，先：
-\`print(unreal.EditorAssetLibrary.rename_asset.__doc__)\`
-或者 \`print(help(unreal.EditorAssetLibrary))\` —— 一次调用就能拿到签名，
-比试错快得多。返回 False 时也先打 docstring 再改，别改一个参数试一次。
+【改完要标脏，这一步会丢数据】：Python 不走事务系统，包不标脏 \`ue_save\` 就一个字节
+都不写、也不报错。改完必须 \`asset.modify()\`，存盘用 \`save_asset(path, only_if_is_dirty=False)\`，
+回读看文件时间戳（\`load_asset\` 查的是内存，查不出来）。
+
+【unreal 的 API 别靠猜，当场问它】：参数写错通常只返回 False，一个字的原因都没有
+（\`rename_asset\` 的新名要完整包路径，写成纯名字就静默失败）。没把握就先
+\`print(unreal.EditorAssetLibrary.rename_asset.__doc__)\`，一次调用拿到签名，
+比改一个参数试一次快得多。
 
 【注意】：脚本在编辑器主线程上同步执行，最多等待 5 分钟。超时或停止等待不代表 UE 已停止执行，先回读确认，不能直接重复修改。`,
 
@@ -64,11 +63,31 @@ export function createRunPythonScriptTool(): V2Tool {
       )
 
       if (!result.success) {
-        if (options?.abortSignal?.aborted) {
+        if (options?.abortSignal?.aborted || result.aborted) {
           return { success: false, aborted: true, error: result.error }
         }
+        /*
+         * 「没确认上」才补这段排查指引，脚本自己报错不补。
+         *
+         * 主线程被死循环占住时，后面每一条命令（连只读的）都会一起超时 ——
+         * 试探问不出任何东西，只是每次再赔一个超时。真机上撞到过：一个 `continue`
+         * 前不前进的循环卡死编辑器，之后又白发了两条命令才反应过来。能在这种状态下
+         * 回话的只有 `ue_session_health`（进程检测在盒子侧做，不走引擎 RPC）。
+         *
+         * 拼在这里而不是 `runEditorPython` 里：那个 `error` 还有两条路会原样弹给
+         * 用户看，而这段话是说给模型听的、还点名了一个用户调不到的工具。
+         */
+        const hint = result.unconfirmed
+          ? '\n不要再发命令试探 —— 主线程被占住时所有命令都会一起超时。' +
+            '先用 ue_session_health 看编辑器进程还在不在，真卡死了请用户重启编辑器，' +
+            '重启后先回读现场再继续。'
+          : ''
         // V3 的失败适配只保留 error/details；stdout 单独放顶层会被丢掉。
-        return { success: false, error: result.error, details: { stdout: result.stdout } }
+        return {
+          success: false,
+          error: (result.error ?? 'Python 执行失败') + hint,
+          details: { stdout: result.stdout }
+        }
       }
 
       let message = 'Python 脚本执行成功'

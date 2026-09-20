@@ -121,6 +121,37 @@ describe('发命令之前的整批预检', () => {
   })
 
   /**
+   * 上一次调用的局部 id 拿到这次来用 —— 真机上为这个连失败四次。
+   *
+   * 引擎回的是 404「Source node not found: uvco」，字面意思是「图里没这个节点」，
+   * 而真正的原因是「这个 id 是上次调用的，用完就失效了」。两者听起来一样，
+   * 但前者会让人去图里找节点，后者要去上一次的回执里拿真实 node_id ——
+   * 猜错方向就是一整轮。更糟的是这条 404 来自 connect 阶段，那时节点已经全建完，
+   * 而材质这边**不回滚**。挡在建节点之前，失败才是干净的。
+   */
+  it('端点是上次调用的局部 id：挡在建节点之前，且点破为什么', async () => {
+    mockEngine()
+    let text: string
+    try {
+      text = textOf(
+        await tool.execute('c1', {
+          path: '/Game/M_Wood',
+          nodes: [{ id: 'base', node_type: 'Constant3Vector', value: '#fff' }],
+          connections: [{ from: 'uvco.RGB', to: 'base.A' }]
+        })
+      )
+    } catch (error) {
+      text = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(text).toContain('uvco')
+    expect(text).toContain('只在这一次调用里有效')
+    expect(text).toContain('material_get_graph')
+    // 那个 Constant3Vector 也不许建出来
+    expect(callRequest.mock.calls.length).toBe(0)
+  })
+
+  /**
    * 坏的通道串也要在**发命令之前**挡住。
    *
    * 之前只测了「没给 value」，于是把 preflight 的这一段换成
@@ -293,6 +324,47 @@ describe('一次调用把图写完', () => {
     expect(first!.target_node).toBe('Material')
     expect(first!.target_pin).toBe('BaseColor')
     expect(second!.source_node).toBe('Node_1')
+  })
+
+  /**
+   * 主节点别名不分大小写 —— 插件那侧是 `TargetNode == TEXT("Material")`，
+   * 而 UE 的 `FString::operator==` 走 Stricmp。前置校验要是用 JS 的严格 ===
+   * 去比，就凭空比引擎窄一档：一个本来能跑的写法被挡在门外，报的还是
+   * 「这是上次调用的局部 id」这么个完全不沾边的理由。
+   */
+  it('主节点写成小写 material 也认，并归一化成保留写法', async () => {
+    mockEngine()
+    await tool.execute('c1', {
+      path: '/Game/M_Wood',
+      nodes: [],
+      connections: [{ from: 'TextureSample_7.RGB', to: 'material.BaseColor' }]
+    })
+
+    // 归一化在 splitEndpoint 里做，预检和 connect() 因此不会错开
+    expect(callsTo('material.connect_pins')[0]!.target_node).toBe('Material')
+  })
+
+  /**
+   * 把局部 id 起名叫 material 的话，连到它的线会被当成接主输出，
+   * 这个节点从此指不到 —— 而且一个字都不报。当场拦住。
+   */
+  it('局部 id 叫 material 时拒绝，不让它顶掉主输出', async () => {
+    mockEngine()
+    let text: string
+    try {
+      text = textOf(
+        await tool.execute('c1', {
+          path: '/Game/M_Wood',
+          nodes: [{ id: 'material', node_type: 'Constant', value: 1 }],
+          connections: []
+        })
+      )
+    } catch (error) {
+      text = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(text).toContain('保留写法')
+    expect(callRequest.mock.calls.length).toBe(0)
   })
 
   it('图里已有的真实 node_id 可以直接连，不必是本次新建的', async () => {

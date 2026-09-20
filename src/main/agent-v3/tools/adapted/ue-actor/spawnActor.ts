@@ -174,6 +174,31 @@ interface SpawnActorV2Response extends WorldScopedResponse {
 }
 
 /**
+ * 摆完提醒一句「你填的是原点」—— 只在真有风险的那一批上说。
+ *
+ * 风险条件是「非内置几何体 + 给了 Z」：内置的 cube/sphere 原点在哪是已知的，
+ * 而外部资产的原点全看美术（角上、几何中心、甚至底面以下都有），于是
+ * 「z 填半个高度」对一半的资产是错的 —— 摆歪了引擎不报错，只能截图目测。
+ *
+ * 这句话刻意**不写进工具描述**：描述是每一轮都要付的前缀，而这条只有
+ * 「正在用外部网格摆东西」的那次用得上。同一批里说一次就够，不逐个重复。
+ */
+function describePivotRisk(instances: SpawnActorNormalizedInstance[]): string {
+  const risky = instances.some(
+    (item) =>
+      !item.preset &&
+      (item.mesh || item.asset_id?.includes('/')) &&
+      typeof item.transform?.location?.z === 'number'
+  )
+  if (!risky) return ''
+  return (
+    '\n注意 location 填的是网格原点，不是几何中心 —— 这批用的是外部网格，原点在哪各不相同。' +
+    '位置看着不对（浮空/陷地/没对齐）就用 ue_set_transform 的 { snap_to_floor: true } 落地，' +
+    '或 ue_get_actor 带 return_bounds: true 读 bounds_min / pivot_offset，不要按标称尺寸重算。'
+  )
+}
+
+/**
  * 尝试修复常见的 JSON 格式问题
  * @param jsonStr 可能有问题的 JSON 字符串
  * @returns 修复后的字符串
@@ -467,7 +492,6 @@ export function createSpawnActorTool(): V2Tool {
 【核心能力】
 - 支持传入 instances 数组批量创建（一批最多 ${MAX_BATCH_SPAWN} 个，超了整批拒绝），也支持单体参数
 - asset_id 推荐字段：支持别名 / 资源路径 / 类名，自动回落解析
-- 兼容旧字段：preset（别名）、class（类路径），旧 batch 自动转为 instances
 - 可直接覆盖静态网格（mesh），附带 transform 或顶层 location/rotation/scale
 
 ${UE_UNIT_NOTE}
@@ -597,7 +621,8 @@ ${UE_ROTATION_NOTE}`,
               (response?.message || `成功创建 ${count} 个 Actor`) +
               describeWorld(response) +
               placement +
-              orientation,
+              orientation +
+              describePivotRisk(payload.instances),
             _aiInstruction: 'Actor 创建完成。如果所有任务已完成，请调用 done 工具汇报结果。'
           }
         }

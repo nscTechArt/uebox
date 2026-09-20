@@ -37,6 +37,17 @@ export interface EditorPythonResult {
   output?: Record<string, unknown>
   /** 脚本 print 出来的东西（不含结果行），尾部截断到 8000 字符 */
   stdout?: string
+  /**
+   * 没拿到执行结果（超时 / 连接断了），**不是**脚本自己报错。
+   *
+   * 分出来是因为这两种失败的下一步完全不同：脚本报错就改脚本再跑；没确认上则
+   * 连"跑没跑"都不知道，重发可能把同一个修改做两遍。调用方按这个标志决定要不要
+   * 给模型补那段排查指引 —— 指引只对模型有用，而这个 `error` 还会原样进用户界面
+   * （`openAsset` 走 message.warning、`reviewChanges` 进审查面板）。
+   */
+  unconfirmed?: boolean
+  /** 调用方主动停的，不是引擎卡了 */
+  aborted?: boolean
 }
 
 interface RunPythonResponse {
@@ -99,7 +110,11 @@ export async function runEditorPython(
   timeoutMs = 300_000,
   abortSignal?: AbortSignal
 ): Promise<EditorPythonResult> {
-  if (abortSignal?.aborted) return { success: false, error: '已取消，脚本未发送' }
+  // aborted 是这个结果的判别字段，发出去之前取消也要标 —— 别让调用方只能靠
+  // 「我自己也查一遍 signal」才分得清「用户停的」和「引擎出事了」
+  if (abortSignal?.aborted) {
+    return { success: false, aborted: true, error: '已取消，脚本未发送' }
+  }
   const wsService = serviceManager.getWebSocketService()
   if (wsService.getConnectionCount() === 0) {
     return { success: false, error: '没有连接的虚幻引擎项目' }
@@ -127,9 +142,28 @@ export async function runEditorPython(
         ])
       : await call
   } catch (error) {
+    /*
+     * 这个 catch 同时接住三种东西：请求超时、连接断开，以及**调用方按了停止**
+     * （上面那条 race 的拒绝）。它们不能共用一句话 —— 按停止是用户自己的动作，
+     * 冲他喊「编辑器可能卡死了，请重启」是不对的。
+     *
+     * 排查指引也不在这里拼。这个 `error` 会原样进用户界面（`openAsset` 走
+     * message.warning、`reviewChanges` 进审查面板），而那段指引是说给模型听的、
+     * 还点名了一个用户根本调不到的工具。谁面对模型谁去拼：见 `unconfirmed` 的注释。
+     */
+    const reason = error instanceof Error ? error.message : String(error)
+    if (abortSignal?.aborted) {
+      return {
+        success: false,
+        aborted: true,
+        unconfirmed: true,
+        error: `已停止等待（${description}）：${reason}。编辑器里的脚本可能仍在执行，先回读再操作。`
+      }
+    }
     return {
       success: false,
-      error: `Python 执行未确认（${description}）：${(error as Error).message}。请先回读，勿重复执行修改。`
+      unconfirmed: true,
+      error: `Python 执行未确认（${description}）：${reason}。请先回读，勿重复执行修改。`
     }
   } finally {
     if (onAbort) abortSignal?.removeEventListener('abort', onAbort)
@@ -146,6 +180,15 @@ export async function runEditorPython(
     }
   }
 
-  if (error) return { success: false, error, stdout }
+  /*
+   * 结果行丢了 = **没确认上**，不是「脚本写错了」。
+   *
+   * `parsePythonLogs` 的这两句话自己就写着「未确认执行结果」，但原来没带
+   * `unconfirmed`，于是 `ue_run_python_script` 把它当普通脚本报错处理 ——
+   * 回给模型的是「改改再跑」，而真相是这段脚本可能已经把关卡改了一半。
+   * 触发得到：脚本自己 `sys.exit()`、把编辑器搞崩、或者这份引擎的 Python
+   * 日志捕获什么都没回（插件只在 LogOutput 非空时才发 logs，ok 却照发 true）。
+   */
+  if (error) return { success: false, unconfirmed: true, error, stdout }
   return { success: true, output, stdout }
 }
