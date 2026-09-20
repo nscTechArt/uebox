@@ -51,7 +51,13 @@ export function registerSpotlightIPC(): void {
           // 索引就绪就走 FTS；没就绪才退回 LIKE，并且只取 5 条。
           const keyword = resolveKeywordCriteria(vaultDb, trimmedQuery)
           const assets = keyword.ftsMatch
-            ? searchAssetsByCriteria(vaultDb, { ftsMatch: keyword.ftsMatch, limit: 5 })
+            ? // 这里没有任何筛选条件、不分页、也不数总数，截断召回是安全的：
+              // 一个字母就是前缀词，不封顶的话 52 万行几乎全中，每敲一键算一遍 bm25
+              searchAssetsByCriteria(vaultDb, {
+                ftsMatch: keyword.ftsMatch,
+                limit: 5,
+                recallDepth: 200
+              })
             : searchAssetDataByName(vaultDb, trimmedQuery, 5)
           for (const asset of assets) {
             assetResults.push(formatAssetResult(asset))

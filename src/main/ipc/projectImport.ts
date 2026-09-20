@@ -7,6 +7,7 @@ import * as https from 'https'
 import { getVaultDatabase } from '../sqliteDataBase'
 import { VaultManager, VaultType } from '../sqliteDataBase/VaultManager'
 import { PathManager } from '../utils/PathManager'
+import { stripAssetNameExtension } from '../utils/assetName'
 import {
   getAssetDataByKey,
   getAssetDataBySoftPath,
@@ -1038,14 +1039,21 @@ async function planAssetImport(
               if (!depAsset) {
                 const depName = depSoftPath.split('/').pop() || ''
                 if (depName) {
-                  const candidates = findAssetDataByExactName(db, depName)
+                  // 把 softPath 后缀作为偏好传下去：同名资产是常态，
+                  // 不排序的话真正要的那一行可能被 LIMIT 截在外面
+                  const candidates = findAssetDataByExactName(db, depName, 50, '/' + depName)
+                  // 名字对不对得上单独判一次：查询按「名字」或「名字.扩展名」两种形态收，
+                  // 同名同目录的旁支（SM_Chair.fbx / .png / .psd）softPath 是一样的，
+                  // 只看 softPath 的话它们会顶掉真正要的那个 .uasset
+                  const nameMatches = (c: AssetData): boolean =>
+                    c.assetName === depName || stripAssetNameExtension(c.assetName) === depName
                   // 优先匹配 softPath 结尾一致的
                   depAsset = candidates.find(
-                    (c) => c.softPath && c.softPath.endsWith('/' + depName)
+                    (c) => c.softPath && c.softPath.endsWith('/' + depName) && nameMatches(c)
                   )
-                  // 次优：精确名称匹配
+                  // 次优：名称对得上就行，不再要求 softPath
                   if (!depAsset) {
-                    depAsset = candidates.find((c) => c.assetName === depName)
+                    depAsset = candidates.find(nameMatches)
                   }
                 }
               }

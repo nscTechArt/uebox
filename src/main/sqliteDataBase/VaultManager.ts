@@ -1494,13 +1494,23 @@ export class VaultManager {
    */
   private ensureQueryPlannerStats(vaultDb: Database.Database): void {
     try {
-      const hasStats = vaultDb
+      // 判据要盯着 assetData 自己，不能是「sqlite_stat1 这张表在不在」，也不能是
+      // 「随便哪张表有统计行」。建库时这里也会跑一次，而那时 assetData 还是空的：
+      // initializeVaultDatabase 要到后面才插入 'ALL' 根目录，于是早期某次 open 会写出
+      // 一行只属于 assetFolder 的统计。按「有没有任意行」判断的话，从那以后
+      // assetData 永远轮不到 ANALYZE —— 等它长到 52 万行，规划器仍然没有它的统计信息，
+      // 照样退回 idx_assetData_isDelete 全表扫，这个方法要修的问题原样复现
+      // （本地建的库没有 SyncClient 全量对账那条兜底路径）。
+      const hasTable = vaultDb
         .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'`)
         .get()
+      const hasStats = hasTable
+        ? vaultDb.prepare(`SELECT 1 FROM sqlite_stat1 WHERE tbl = 'assetData' LIMIT 1`).get()
+        : undefined
       if (hasStats) return
       const started = Date.now()
       vaultDb.exec('ANALYZE')
-      console.log(`[VaultManager] 首次 ANALYZE 完成，耗时 ${Date.now() - started} ms`)
+      console.log(`[VaultManager] ANALYZE 完成，耗时 ${Date.now() - started} ms`)
     } catch (err) {
       console.warn('[VaultManager] ANALYZE 失败（不影响使用）:', err)
     }
@@ -1649,7 +1659,10 @@ export class VaultManager {
       // 带 isDelete 的复合索引。老库在这里打开时顺手补上，见 initializeVaultDatabase 的调用点。
       'CREATE INDEX IF NOT EXISTS idx_assetData_filePath_isDelete ON assetData(filePath, isDelete)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_originPath_isDelete ON assetData(originPath, isDelete)',
-      // 缩略图占用判断 / 媒体读取权限按文件名等值查；部分索引，`= ?` 蕴含 IS NOT NULL
+      // 缩略图占用判断 / 媒体读取权限按文件名等值查；部分索引，`= ?` 蕴含 IS NOT NULL。
+      // 谓词到 IS NOT NULL 为止，别加 `AND col != ''`：部分索引可用的前提是查询条件蕴含
+      // 谓词的每一个 AND 分支，而 `col = ?` 蕴含不了 `col != ''`（? 在 prepare 时未知），
+      // 加上去计划直接从索引 seek 退化成 SCAN。理由详见 models/assetData.ts 同一段注释。
       'CREATE INDEX IF NOT EXISTS idx_assetData_imgLocalPath_present ON assetData(imgLocalPath) WHERE imgLocalPath IS NOT NULL',
       'CREATE INDEX IF NOT EXISTS idx_assetData_customPoster_present ON assetData(customPoster) WHERE customPoster IS NOT NULL',
       // 筛选下拉的类型聚合只读索引不回表

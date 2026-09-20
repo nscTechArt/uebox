@@ -202,6 +202,14 @@ export const initAssetDataModel = (db: Database.Database): void => {
     CREATE INDEX IF NOT EXISTS idx_assetData_assetName ON ${TABLE_NAME}(assetName COLLATE NOCASE);
     -- 缩略图占用判断（vaultThumbnailRefs）与媒体读取权限（thumbnails.ts）按文件名等值查。
     -- 部分索引：绝大多数行这两列为空，全列索引白占空间；等值条件蕴含 IS NOT NULL，规划器能用。
+    --
+    -- 谓词只能写到 IS NOT NULL 为止，别加 "AND col != 空串"。本仓库的「空」确实既有
+    -- NULL 又有空串（写入方多数写空串），加上去看着更贴合实际，但 SQLite 判定部分索引
+    -- 可用，要求查询条件蕴含谓词的**每一个** AND 分支："col = ?" 能蕴含 IS NOT NULL，
+    -- 却蕴含不了 "col != 空串"（? 的值在 prepare 时未知）。实测加了之后计划从
+    -- "SEARCH ... USING INDEX (imgLocalPath=?)" 退化成 "SCAN assetData"，强行 INDEXED BY
+    -- 直接报 no query solution —— 想省空间反而把索引整个废掉。真要瘦身得在写入侧把
+    -- 空串归一成 NULL，不是在这里加条件。
     CREATE INDEX IF NOT EXISTS idx_assetData_imgLocalPath_present
       ON ${TABLE_NAME}(imgLocalPath) WHERE imgLocalPath IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_assetData_customPoster_present
@@ -387,33 +395,117 @@ export const searchAssetDataByName = (
             LIMIT ${cappedLimit}`
         )
         .all(pattern) as AssetData[]
-    } catch {
-      // 索引还没建出来（极老的库、或建库脚本没跑完）就退回普通写法
+    } catch (err) {
+      // 只有「索引不存在」才该退回慢路（极老的库、或建库脚本没跑完）。
+      // 以前这里是个裸 catch：SQLITE_BUSY、中断、索引损坏也会被它吞掉，
+      // 然后悄悄跑回这个方法专门要消灭的整表扫，日志里一个字都没有。
+      const message = err instanceof Error ? err.message : String(err)
+      if (!/no such index/i.test(message)) throw err
+      console.warn('[assetData] idx_assetData_assetName 缺失，本次搜索退回全表扫:', message)
     }
   }
   const stmt = db.prepare(
-    `SELECT * FROM ${TABLE_NAME} WHERE isDelete = 0 AND assetName LIKE ? ORDER BY assetName ASC` +
+    // 排序必须和快路一致，否则同一次搜索走哪条路会得到不同的 top-N：
+    // 快路是 NOCASE，这里不写 COLLATE 就是 BINARY，大小写混排的结果对不上
+    `SELECT * FROM ${TABLE_NAME} WHERE isDelete = 0 AND assetName LIKE ? ORDER BY assetName COLLATE NOCASE ASC` +
       (cappedLimit ? ` LIMIT ${cappedLimit}` : '')
   )
   return stmt.all(pattern) as AssetData[]
 }
 
 /**
- * 按资产名精确查（不区分大小写），走 idx_assetData_assetName。
+ * 按资产名查（不区分大小写），走 idx_assetData_assetName。
  *
  * 工程导入按依赖名找资产原来用 searchAssetDataByName 模糊查再在 JS 里做精确过滤，
- * 每个依赖一次全表扫。这里的结果集是它后续过滤条件的超集，语义不变。
+ * 每个依赖一次全表扫。这里换成索引等值查，但**不能只比 assetName = ?**：
+ * 库里同一列存着两种形态。扫描器（networkVaultV2.ts 的 performServerScan）写的是
+ * `basename(fullPath)`，带扩展名，例如 `SM_Chair.uasset`；而依赖名是从 softPath
+ * 切出来的，softPath 早就把扩展名去掉了，只有 `SM_Chair`。只比等值的话，
+ * 网络库里由扫描器建的行一条都命中不了，依赖被静默丢掉，导入出来的工程引用全是红的。
+ * 所以再带一段 `名字.` 前缀的范围查 —— 同样是索引 seek，不是扫表。
+ *
+ * 范围只认**一段**扩展名：`instr(substr(...))` 把 `SM_Chair.uasset.bak` 这类挡在外面。
+ * 不挡的话，调用方那边第一道过滤只看 softPath，`.bak` / `.fbx` / `.png` 这些跟资产同名
+ * 同目录的旁支会顶掉真正的 `.uasset`（并列时还按 id DESC 让最近导入的那个赢）。
+ *
+ * 结果按「softPath 后缀是否命中」优先排序再截断：同名资产在 UE 工程里是常态，
+ * 无序的 LIMIT 会让调用方真正要的那一行恰好落在窗口外。
  */
+/** LIKE 的元字符要转义：UE 资产名里 `_` 满地都是，不转义它就是个单字符通配符 */
+const escapeLikePattern = (value: string): string => value.replace(/[\\%_]/g, '\\$&')
+
+/** 导出给执行计划的回归测试 EXPLAIN 用 —— 测试抄一份副本的话，钉索引被删了它也发现不了 */
+export const buildExactNameSQL = (indexed: string): string =>
+  `SELECT * FROM (
+      SELECT * FROM ${TABLE_NAME}${indexed}
+        WHERE isDelete = 0 AND assetName = @stem COLLATE NOCASE
+      UNION ALL
+      SELECT * FROM ${TABLE_NAME}${indexed}
+        WHERE isDelete = 0
+          AND assetName > @low COLLATE NOCASE
+          AND assetName < @high COLLATE NOCASE
+          AND instr(substr(assetName, length(@stem) + 2), '.') = 0
+    )
+    ORDER BY CASE WHEN softPath LIKE @prefer ESCAPE '\\' THEN 0 ELSE 1 END, id DESC
+    LIMIT @lim`
+
+export const EXACT_NAME_INDEX_HINT = ' INDEXED BY idx_assetData_assetName'
+
+/**
+ * 每个库缓存一份 prepare 好的语句。
+ *
+ * 这个函数在工程导入里是「每个依赖调一次」，实测 2000 次里 db.prepare() 本身就占了
+ * 111 ms —— 5000 个文件 × 8 个依赖那种规模下是 2.2 秒纯粹浪费在重复编译同一条 SQL。
+ * WeakMap 挂在 Database 上，库关掉就跟着回收。
+ */
+const exactNameStmtCache = new WeakMap<
+  Database.Database,
+  { pinned?: Database.Statement; plain?: Database.Statement }
+>()
+
+function exactNameStatement(db: Database.Database, indexed: string): Database.Statement {
+  let entry = exactNameStmtCache.get(db)
+  if (!entry) {
+    entry = {}
+    exactNameStmtCache.set(db, entry)
+  }
+  const key = indexed ? 'pinned' : 'plain'
+  const cached = entry[key]
+  if (cached) return cached
+  const stmt = db.prepare(buildExactNameSQL(indexed))
+  entry[key] = stmt
+  return stmt
+}
+
 export const findAssetDataByExactName = (
   db: Database.Database,
   assetName: string,
-  limit = 50
+  limit = 50,
+  preferSoftPathSuffix?: string
 ): AssetData[] => {
   if (!assetName) return []
-  const stmt = db.prepare(
-    `SELECT * FROM ${TABLE_NAME} WHERE isDelete = 0 AND assetName = ? COLLATE NOCASE LIMIT ?`
-  )
-  return stmt.all(assetName, Math.max(1, Math.floor(limit))) as AssetData[]
+  const params = {
+    stem: assetName,
+    low: `${assetName}.`,
+    high: `${assetName}.￿`,
+    // 没给偏好后缀就传 null：`softPath LIKE NULL` 恒为 NULL，稳稳落到 ELSE 1。
+    // 这里以前传 ''，而 `'' LIKE ''` 为真 —— softPath 确实可能是空串，那些行会被
+    // 顶到排序最前面，正好挤掉调用方要的那一条
+    prefer: preferSoftPathSuffix ? `%${escapeLikePattern(preferSoftPathSuffix)}` : null,
+    lim: Math.max(1, Math.floor(limit))
+  }
+  // 两条分支都得把索引钉死。库里没有统计信息时规划器会挑 idx_assetData_isDelete ——
+  // 一个只有 0/1 两个值的索引，52 万行上等于全表扫，正是 a1ef7de 要消灭的那个形状。
+  // 实测（4 行的内存库、未 ANALYZE）不钉就会选它。
+  try {
+    return exactNameStatement(db, EXACT_NAME_INDEX_HINT).all(params) as AssetData[]
+  } catch (err) {
+    // 只有「索引不存在」才退回让规划器自己选（极老的库、建库脚本没跑完）
+    const message = err instanceof Error ? err.message : String(err)
+    if (!/no such index/i.test(message)) throw err
+    console.warn('[assetData] idx_assetData_assetName 缺失，按名找依赖退回全表扫:', message)
+    return exactNameStatement(db, '').all(params) as AssetData[]
+  }
 }
 
 /**
