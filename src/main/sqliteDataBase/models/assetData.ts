@@ -198,6 +198,17 @@ export const initAssetDataModel = (db: Database.Database): void => {
     -- 不够：那条查询同时按 originPath 查，缺一侧索引整条就退化成全表扫。
     CREATE INDEX IF NOT EXISTS idx_assetData_filePath_isDelete ON ${TABLE_NAME}(filePath, isDelete);
     CREATE INDEX IF NOT EXISTS idx_assetData_originPath_isDelete ON ${TABLE_NAME}(originPath, isDelete);
+    -- 名称等值 / 排序（Spotlight、工程导入按名找依赖）
+    CREATE INDEX IF NOT EXISTS idx_assetData_assetName ON ${TABLE_NAME}(assetName COLLATE NOCASE);
+    -- 缩略图占用判断（vaultThumbnailRefs）与媒体读取权限（thumbnails.ts）按文件名等值查。
+    -- 部分索引：绝大多数行这两列为空，全列索引白占空间；等值条件蕴含 IS NOT NULL，规划器能用。
+    CREATE INDEX IF NOT EXISTS idx_assetData_imgLocalPath_present
+      ON ${TABLE_NAME}(imgLocalPath) WHERE imgLocalPath IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_assetData_customPoster_present
+      ON ${TABLE_NAME}(customPoster) WHERE customPoster IS NOT NULL;
+    -- 筛选下拉的类型聚合（getDistinctAssetTypes）只读索引不回表：52 万行从 7.9 s 降到 0.3 s
+    CREATE INDEX IF NOT EXISTS idx_assetData_types_cover
+      ON ${TABLE_NAME}(classNameCn, isDelete, fileExtension, ext, className);
     CREATE INDEX IF NOT EXISTS idx_assetData_folderKey_isDelete_assetName
       ON ${TABLE_NAME}(folderKey, isDelete, assetName COLLATE NOCASE);
   `
@@ -352,11 +363,77 @@ export const getAssetDataByFolderKey = (
  * @param searchTerm 搜索关键词
  * @returns 匹配的资产数据列表
  */
-export const searchAssetDataByName = (db: Database.Database, searchTerm: string): AssetData[] => {
+export const searchAssetDataByName = (
+  db: Database.Database,
+  searchTerm: string,
+  limit?: number
+): AssetData[] => {
+  // 前置通配的 LIKE 用不上索引，52 万行的库每次 5 秒多，而且是同步的。
+  // 交互式搜索（Spotlight）应优先走 FTS（见 ipc/spotlight.ts），这里只是兜底，
+  // 所以至少把结果集封住，别把整表搬进内存。
+  const cappedLimit =
+    Number.isFinite(limit) && (limit as number) > 0 ? Math.floor(limit as number) : 0
+  const pattern = `%${searchTerm}%`
+  if (cappedLimit) {
+    // 强制沿 assetName 索引按序走：常见词凑够 LIMIT 条就停；生僻词也只是扫一遍索引
+    // （不回表），实测 52 万行从 6 秒降到零点几秒。规划器自己不会选这条路，
+    // 没有统计信息时它更喜欢 isDelete 那个两值索引 + 整表排序。
+    try {
+      return db
+        .prepare(
+          `SELECT * FROM ${TABLE_NAME} INDEXED BY idx_assetData_assetName
+            WHERE isDelete = 0 AND assetName LIKE ?
+            ORDER BY assetName COLLATE NOCASE ASC
+            LIMIT ${cappedLimit}`
+        )
+        .all(pattern) as AssetData[]
+    } catch {
+      // 索引还没建出来（极老的库、或建库脚本没跑完）就退回普通写法
+    }
+  }
   const stmt = db.prepare(
-    `SELECT * FROM ${TABLE_NAME} WHERE isDelete = 0 AND assetName LIKE ? ORDER BY assetName ASC`
+    `SELECT * FROM ${TABLE_NAME} WHERE isDelete = 0 AND assetName LIKE ? ORDER BY assetName ASC` +
+      (cappedLimit ? ` LIMIT ${cappedLimit}` : '')
   )
-  return stmt.all(`%${searchTerm}%`) as AssetData[]
+  return stmt.all(pattern) as AssetData[]
+}
+
+/**
+ * 按资产名精确查（不区分大小写），走 idx_assetData_assetName。
+ *
+ * 工程导入按依赖名找资产原来用 searchAssetDataByName 模糊查再在 JS 里做精确过滤，
+ * 每个依赖一次全表扫。这里的结果集是它后续过滤条件的超集，语义不变。
+ */
+export const findAssetDataByExactName = (
+  db: Database.Database,
+  assetName: string,
+  limit = 50
+): AssetData[] => {
+  if (!assetName) return []
+  const stmt = db.prepare(
+    `SELECT * FROM ${TABLE_NAME} WHERE isDelete = 0 AND assetName = ? COLLATE NOCASE LIMIT ?`
+  )
+  return stmt.all(assetName, Math.max(1, Math.floor(limit))) as AssetData[]
+}
+
+/**
+ * 找出 imports 里可能包含某个 softPath 的资产（反向引用候选）。
+ *
+ * imports 是 JSON 文本列建不了索引，只能扫。但把 instr() 放进 SQL 让 SQLite 在 C 里扫，
+ * 而不是把 52 万行整表捞进 JS 再逐行 JSON.parse：后者实测 50 秒、1.5 GB 堆，
+ * 前者约 7 秒、几乎不占内存。返回的是候选，调用方仍需 parseImports 精确确认。
+ */
+export const findAssetsPossiblyImporting = (
+  db: Database.Database,
+  softPath: string,
+  excludeAssetKey: string
+): AssetData[] => {
+  if (!softPath) return []
+  const stmt = db.prepare(
+    `SELECT * FROM ${TABLE_NAME}
+      WHERE isDelete = 0 AND assetKey != ? AND imports IS NOT NULL AND instr(imports, ?) > 0`
+  )
+  return stmt.all(excludeAssetKey, softPath) as AssetData[]
 }
 
 /**

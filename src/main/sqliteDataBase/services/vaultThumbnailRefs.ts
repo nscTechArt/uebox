@@ -67,12 +67,16 @@ export interface ThumbnailRetentionScope {
 /**
  * 删完这一批之后，仍然被别人指着的缩略图文件名。
  *
- * 一次扫完整库而不是逐条查：调用方是「彻底删除 / 清空回收站」这种批量动作，
- * 逐条查等于几千次全表扫描，全压在同步事务里主进程会卡死。所以 IPC 层提供了
- * 批量接口（hardDeleteMany），一次用户动作只扫一遍。
+ * 返回值只承诺 `has()` 可用（调用方 retainSharedThumbnails / isRetained 只用它）。
  *
- * 返回集合里同时放了原图名和它的 `_thumb` 变体：清理时两个文件是一起删的，
- * 只保护其中一个等于没保护。
+ * 原来是一次 `SELECT … FROM assetData WHERE imgLocalPath != '' OR customPoster != ''`
+ * 把整库读进 JS 建一个 Set。52 万行的镜像库上这是 7 秒的全表扫 + 上百 MB 的字符串集合，
+ * 每次彻底删除 / 清空回收站都来一遍，而且 crud.ts 里那次还在写事务里。
+ *
+ * 现在按需查：`has(filename)` 走 imgLocalPath / customPoster 的部分索引做等值查找，
+ * 每次 0.1 ms 以内。字段值存成路径形态（`file:///…/x.png`）的比不了等值，
+ * 这部分只扫一遍索引挑出来放进内存 —— 正常情况下寥寥无几。
+ * 文件夹封面表很小，照旧全量读。
  */
 export function getRetainedThumbnailFilenames(
   db: Database.Database,
@@ -80,39 +84,123 @@ export function getRetainedThumbnailFilenames(
 ): Set<string> {
   const excludedAssets = new Set(scope.excludeAssetKeys ?? [])
   const excludedFolders = new Set(scope.excludeFolderKeys ?? [])
-  const retained = new Set<string>()
-
-  const keep = (value?: string | null): void => {
-    const filename = thumbnailFilenameOf(value)
-    if (!filename) return
-    retained.add(filename)
-    retained.add(toThumbVariant(filename))
-  }
-
-  const assetRows = db
-    .prepare(
-      `SELECT assetKey, imgLocalPath, customPoster FROM assetData
-        WHERE (imgLocalPath IS NOT NULL AND imgLocalPath != '')
-           OR (customPoster IS NOT NULL AND customPoster != '')`
-    )
-    .all() as Array<{ assetKey: string; imgLocalPath: string | null; customPoster: string | null }>
-
-  for (const row of assetRows) {
-    if (excludedAssets.has(row.assetKey)) continue
-    keep(row.imgLocalPath)
-    keep(row.customPoster)
-  }
+  const retained = new LazyRetainedThumbnailSet(db, excludedAssets)
 
   const folderRows = db
     .prepare(`SELECT folderKey, img FROM assetFolder WHERE img IS NOT NULL AND img != ''`)
     .all() as Array<{ folderKey: string; img: string | null }>
-
   for (const row of folderRows) {
     if (excludedFolders.has(row.folderKey)) continue
-    keep(row.img)
+    retained.keepValue(row.img)
+  }
+
+  // 路径形态的值：带目录分隔符或 file: 前缀。第一步只扫索引不回表（52 万行约 0.3 s），
+  // 第二步只对命中的那几个值回表取 assetKey 做排除判断。
+  const SEP = String.fromCharCode(92)
+  for (const col of ['imgLocalPath', 'customPoster'] as const) {
+    const pathFormValues = db
+      .prepare(
+        `SELECT DISTINCT ${col} AS value FROM assetData
+          WHERE ${col} IS NOT NULL
+            AND (instr(${col}, '/') > 0 OR instr(${col}, '${SEP}') > 0 OR ${col} LIKE 'file:%')`
+      )
+      .all() as Array<{ value: string }>
+    if (pathFormValues.length === 0) continue
+    const ownersStmt = db.prepare(`SELECT assetKey FROM assetData WHERE ${col} = ?`)
+    for (const { value } of pathFormValues) {
+      const owners = ownersStmt.all(value) as Array<{ assetKey: string }>
+      if (owners.some((row) => !excludedAssets.has(row.assetKey))) retained.keepValue(value)
+    }
   }
 
   return retained
+}
+
+/**
+ * 按需判断「这个缩略图文件名还有没有别人在用」的集合。
+ *
+ * 只实现了 has()。size / 遍历只反映预加载的那一小部分（文件夹封面、路径形态的值），
+ * 别拿它当完整清单用。
+ */
+class LazyRetainedThumbnailSet extends Set<string> {
+  private readonly memo = new Map<string, boolean>()
+  /** 字段值精确等于某个文件名的行 */
+  private readonly exactLookup: Database.Statement
+  /** 字段值以 `stem.` 开头的行（同名不同扩展名的原图，它们的 _thumb 变体就是被问的那个名字） */
+  private readonly stemLookup: Database.Statement
+
+  constructor(
+    db: Database.Database,
+    private readonly excludedAssets: ReadonlySet<string>
+  ) {
+    super()
+    this.exactLookup = db.prepare(
+      `SELECT assetKey FROM assetData WHERE imgLocalPath = ?
+       UNION ALL
+       SELECT assetKey FROM assetData WHERE customPoster = ?`
+    )
+    // '/' 是 '.' 的下一个字符，[stem., stem/) 恰好覆盖 stem.<任意扩展名>；走同一个部分索引的范围扫描
+    this.stemLookup = db.prepare(
+      `SELECT assetKey, imgLocalPath AS value FROM assetData WHERE imgLocalPath >= ? AND imgLocalPath < ?
+       UNION ALL
+       SELECT assetKey, customPoster AS value FROM assetData WHERE customPoster >= ? AND customPoster < ?`
+    )
+  }
+
+  private ownedByOthers(rows: Array<{ assetKey: string }>): boolean {
+    return rows.some((row) => !this.excludedAssets.has(row.assetKey))
+  }
+
+  /** 把一个字段原值（可能是路径）登记成受保护的文件名及其 _thumb 变体 */
+  keepValue(value?: string | null): void {
+    const filename = thumbnailFilenameOf(value)
+    if (!filename) return
+    super.add(filename)
+    super.add(toThumbVariant(filename))
+  }
+
+  /**
+   * 和原来全量建集合的口径一致：某个存活引用 V（按文件名 base(V)）同时保护
+   * base(V) 和 toThumbVariant(base(V)) 两个名字。所以问 X 时要查两种情况：
+   *   1. 有人的字段值就是 X；
+   *   2. X 形如 `stem_thumb.jpg`，而有人的字段值是 `stem`（无扩展名）或 `stem.<ext>`。
+   */
+  override has(filename: string): boolean {
+    if (super.has(filename)) return true
+    const cached = this.memo.get(filename)
+    if (cached !== undefined) return cached
+    let hit = false
+    try {
+      hit = this.ownedByOthers(
+        this.exactLookup.all(filename, filename) as Array<{ assetKey: string }>
+      )
+      const suffix = '_thumb.jpg'
+      if (!hit && filename.endsWith(suffix) && filename.length > suffix.length) {
+        const stem = filename.slice(0, -suffix.length)
+        hit = this.ownedByOthers(this.exactLookup.all(stem, stem) as Array<{ assetKey: string }>)
+        if (!hit) {
+          const rows = this.stemLookup.all(
+            `${stem}.`,
+            `${stem}/`,
+            `${stem}.`,
+            `${stem}/`
+          ) as Array<{
+            assetKey: string
+            value: string
+          }>
+          hit = rows.some((row) => {
+            if (this.excludedAssets.has(row.assetKey)) return false
+            const base = thumbnailFilenameOf(row.value)
+            return !!base && toThumbVariant(base) === filename
+          })
+        }
+      }
+    } catch {
+      hit = false
+    }
+    this.memo.set(filename, hit)
+    return hit
+  }
 }
 
 /** 这个缩略图还被别人用着吗 */

@@ -52,6 +52,8 @@ let assets: FakeAsset[] = []
 let parsedImportsOverride: Record<string, string[]> = {}
 
 vi.mock('../sqliteDataBase/models/assetData', () => ({
+  findAssetDataByExactName: (_db: unknown, name: string) =>
+    assets.filter((a) => a.assetName === name),
   getAssetDataByKey: (_db: unknown, key: string) => assets.find((a) => a.assetKey === key) ?? null,
   getAssetDataBySoftPath: (_db: unknown, softPath: string) =>
     assets.find((a) => a.softPath === softPath) ?? null,

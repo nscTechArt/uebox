@@ -4,7 +4,7 @@ import { basename, extname } from 'path'
 
 import { getVaultDatabase } from '../../index'
 import {
-  getAllAssetData,
+  findAssetsPossiblyImporting,
   getAssetDataByKey,
   getAssetsBySoftPaths,
   type AssetData
@@ -18,24 +18,20 @@ import { buildImportStatusSummary, parseImports } from '../../../utils/assetDepe
 /**
  * 找出「谁引用了这个 softPath」。
  *
- * imports 是 JSON 文本列，建不了索引，所以只能全表扫一遍再逐行 parse。
- * 调用方要清楚这是 O(全库) 的操作 —— 详情面板不该走这条路，只有依赖关系图
- * 这种用户主动打开的页面才值得付这个代价。
+ * imports 是 JSON 文本列，建不了索引，只能扫。但扫要在 SQLite 里扫（instr 预筛），
+ * 不能把整张表捞进 JS 再逐行 parse：52 万行的镜像库上后者 50 秒、堆 1.5 GB 起，
+ * 前者约 7 秒、内存只装命中的几十行。仍然是 O(全库)，只有依赖关系图这种
+ * 用户主动打开的页面才值得付这个代价，详情面板不该走这条路。
  */
 function findReferencingAssets(
-  allAssets: AssetData[],
+  db: ReturnType<typeof getVaultDatabase>,
   targetSoftPath: string,
   excludeAssetKey: string
 ): AssetData[] {
   if (!targetSoftPath) return []
-  const result: AssetData[] = []
-  for (const asset of allAssets) {
-    if (asset.assetKey === excludeAssetKey || !asset.imports) continue
-    if (parseImports(asset.imports).includes(targetSoftPath)) {
-      result.push(asset)
-    }
-  }
-  return result
+  return findAssetsPossiblyImporting(db, targetSoftPath, excludeAssetKey).filter((asset) =>
+    parseImports(asset.imports).includes(targetSoftPath)
+  )
 }
 
 export function registerAssetDependencyIPC(): void {
@@ -51,7 +47,7 @@ export function registerAssetDependencyIPC(): void {
 
       return {
         success: true,
-        data: findReferencingAssets(getAllAssetData(db), currentAsset.softPath, assetKey)
+        data: findReferencingAssets(db, currentAsset.softPath, assetKey)
       }
     } catch (error) {
       console.error('查询资产引用失败:', error)
@@ -257,7 +253,7 @@ export function registerAssetDependencyIPC(): void {
 
       // 反向引用：没有索引，只能全表扫。这是这个接口最贵的一步。
       const referencingAssets = currentAsset.softPath
-        ? findReferencingAssets(getAllAssetData(db), currentAsset.softPath, assetKey)
+        ? findReferencingAssets(db, currentAsset.softPath, assetKey)
         : []
 
       referencingAssets.forEach((asset) => {
