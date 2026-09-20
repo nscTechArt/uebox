@@ -115,7 +115,7 @@
     "@tiptap/suggestion": "^3.30.5",
     "@tiptap/vue-3": "^3.30.5",
     "@types/markdown-it": "^14.2.0",
-    "adm-zip": "^0.6.0",
+    "adm-zip": "^0.6.1",
     "ant-design-vue": "~4.2.6",
     "axios": "^1.20.0",
     "better-sqlite3": "^12.11.1",
