@@ -16,7 +16,6 @@
     "format": "prettier --write .",
     "lint": "node scripts/check-lint-baseline.mjs",
     "lint:baseline:update": "node scripts/check-lint-baseline.mjs --update",
-    "tool-budget:update": "cross-env TOOL_BUDGET_UPDATE=1 vitest run src/main/agent-v3/core/toolBudget.test.ts",
     "palette": "node scripts/gen-palette.mjs",
     "lint:all": "eslint --cache src tests scripts electron.vite.config.ts vitest.config.ts eslint.config.mjs",
     "lint:changed": "node scripts/lint-changed.mjs",
