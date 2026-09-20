@@ -27,7 +27,8 @@
  *      不编译、不落盘。失败后图和调用前一模一样，改完重发整份即可 ——
  *      不需要先搞清楚上次留下了什么残骸。
  *   2. **编译错误按你给的 id 回传**，不是引擎 GUID。改哪个节点一目了然。
- *   3. **布局在这里算**。ELK 分层布局把坐标算好再发下去，图是顺着读的。
+ *   3. **布局在这里算**。分层布局（`blueprint-layout/blueprintLayout.ts`）把坐标
+ *      算好再发下去，图是顺着执行流读的。
  */
 
 import { defineV2Tool } from '../../adaptV2Tool'
@@ -37,7 +38,7 @@ import {
   autoLayoutBlueprintNodes,
   BlueprintLayoutConnection,
   BlueprintLayoutNode
-} from '../../../../blueprint-layout/elkLayout'
+} from '../../../../blueprint-layout/blueprintLayout'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'

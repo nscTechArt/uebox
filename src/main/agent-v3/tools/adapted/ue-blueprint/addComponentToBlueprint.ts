@@ -150,21 +150,6 @@ export function createAddComponentToBlueprintTool() {
   return defineV2Tool({
     description: `为已存在的蓝图资产添加新的组件。
 
-【功能说明】：
-- 向指定蓝图添加新组件
-- 支持设置组件的变换（位置、旋转、缩放）
-- 支持设置组件属性
-
-【参数说明】：
-- blueprint_name: 蓝图名称或路径（必填）
-- component_type: 组件类型（必填）
-- component_name: 组件名称（必填）
-- location: 组件相对位置 { x, y, z }
-- rotation: 组件相对旋转 { pitch, yaw, roll }
-- scale: 组件相对缩放 { x, y, z }
-- component_properties: 组件属性键值对
-- attach_to: 挂到哪个组件下面（可选，省略或填 "Root" 表示挂在根上）
-
 【挂载关系怎么确认】：
 返回里的 attached_to 是**实际**挂在了谁下面，attached 表示是不是按你要求挂的。
 你指定的父组件不存在时不会失败，而是挂到根上并给出 attach_warning ——
@@ -189,15 +174,7 @@ depth 是层级深度。不需要再调 blueprint_describe 复核，更不用写
 - ParticleSystemComponent - 粒子系统组件
 - NiagaraComponent - Niagara 粒子组件
 - WidgetComponent - UI 组件
-- ArrowComponent - 箭头组件（调试用）
-
-【返回数据】：
-- ok: 是否成功
-- blueprint_name: 蓝图名称
-- component_name: 添加的组件名称
-- component_class: 组件类型
-- attached: 是否已附加
-- saved: 是否已保存`,
+- ArrowComponent - 箭头组件（调试用）`,
 
     inputSchema: AddComponentToBlueprintSchema,
 

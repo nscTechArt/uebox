@@ -26,8 +26,8 @@ one call. If you want to "add just one more node", re-send the complete graph wi
 included.
 
 Taking something *out* is the exception: `blueprint_delete_node` and
-`blueprint_disconnect_pins` do exactly one thing each — see
-`references/writing-graphs.md`.
+`blueprint_disconnect_pins` do exactly one thing each — as does `blueprint_comment`,
+which frames a stretch of logic in a comment box. See `references/writing-graphs.md`.
 
 **2. Never guess a function or pin name.** `blueprint_search_nodes` returns the exact
 `member_name` and every pin's name, type and direction without creating anything:

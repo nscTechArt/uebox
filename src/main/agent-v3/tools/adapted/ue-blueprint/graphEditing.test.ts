@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  *
- * `blueprint_delete_node` / `blueprint_disconnect_pins` 的契约测试。
+ * `blueprint_delete_node` / `blueprint_disconnect_pins` / `blueprint_comment` 的契约测试。
  *
  * 两个都是薄透传，所以测的是「透传对不对」：打的是哪条 RPC、参数有没有被吃掉、
  * 失败有没有被当成成功（薄工具最容易在最后这条上出事）。
@@ -22,7 +22,11 @@ vi.mock('../../../core/projectTargetContext', () => ({
   getTargetConnectionId: () => 'conn-1'
 }))
 
-import { createDeleteBlueprintNodeTool, createDisconnectBlueprintPinsTool } from './graphEditing'
+import {
+  createBlueprintCommentTool,
+  createDeleteBlueprintNodeTool,
+  createDisconnectBlueprintPinsTool
+} from './graphEditing'
 
 type ToolResult = Record<string, unknown>
 type Executable = { execute: (input: unknown) => Promise<ToolResult> }
@@ -31,6 +35,8 @@ const del = (input: unknown): Promise<ToolResult> =>
   (createDeleteBlueprintNodeTool() as unknown as Executable).execute(input)
 const disconnect = (input: unknown): Promise<ToolResult> =>
   (createDisconnectBlueprintPinsTool() as unknown as Executable).execute(input)
+const comment = (input: unknown): Promise<ToolResult> =>
+  (createBlueprintCommentTool() as unknown as Executable).execute(input)
 
 beforeEach(() => {
   callRequest.mockReset()
@@ -104,5 +110,46 @@ describe('blueprint_disconnect_pins', () => {
 
     expect(result.success).toBe(false)
     expect(callRequest).not.toHaveBeenCalled()
+  })
+})
+
+describe('blueprint_comment', () => {
+  it('省略 node_id 就是新建一个框，enclose_nodes 原样传下去', async () => {
+    callRequest.mockResolvedValue({ ok: true, node_id: 'c1', created: true })
+
+    const result = await comment({
+      blueprint_path: '/Game/BP_Door',
+      text: '开门那一段',
+      enclose_nodes: ['n1', 'n2']
+    })
+
+    expect(callRequest.mock.calls[0][0]).toBe('blueprint.set_comment')
+    expect(callRequest.mock.calls[0][1]).toEqual({
+      blueprint_path: '/Game/BP_Door',
+      text: '开门那一段',
+      enclose_nodes: ['n1', 'n2']
+    })
+    expect(result.created).toBe(true)
+  })
+
+  it('给了 node_id 就是改已有的框', async () => {
+    callRequest.mockResolvedValue({ ok: true, node_id: 'c1', created: false })
+
+    await comment({ blueprint_path: '/Game/BP_Door', node_id: 'c1', text: '改一下' })
+
+    expect(callRequest.mock.calls[0][1]).toMatchObject({ node_id: 'c1', text: '改一下' })
+  })
+
+  /** 拿一个普通节点的 id 当注释框传是常见错误，不能被吞成成功 */
+  it('插件说那不是注释框就是失败', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error: 'Node n1 is a K2Node_CallFunction, not a comment box.'
+    })
+
+    const result = await comment({ blueprint_path: '/Game/BP_Door', node_id: 'n1', text: 'x' })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('not a comment box')
   })
 })

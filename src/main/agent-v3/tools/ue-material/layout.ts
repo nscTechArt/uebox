@@ -3,9 +3,8 @@
  *
  * ## 为什么不复用蓝图那套
  *
- * `blueprint-layout/elkLayout.ts` 有 500 多行，其中大半是**执行流**特有的：
- * `isExecPin()` 靠 `exec`/`then` 这类关键字认执行引脚，`assignExecutionBackbone()`
- * 从没有 exec 输入的节点起排主干，数据节点再吊在用到它的 exec 节点旁边。
+ * `blueprint-layout/blueprintLayout.ts` 大半是**执行流**特有的：执行节点按最长
+ * 路径定列、主干走一条直线、数据节点再挂在用到它的执行节点下方。
  *
  * 材质图里没有执行流，全是数据流。那套逻辑套上来的结果是所有节点都被判成
  * 「数据节点」、主干为空 —— 整个骨架落空。

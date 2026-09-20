@@ -287,6 +287,18 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     concurrency: 'sequential',
     make: () => ueBlueprint.createDisconnectBlueprintPinsTool()
   },
+  /**
+   * 注释框 —— 蓝图里唯一的分组手段。
+   *
+   * 它不属于「写图的逆操作」那一组：注释框不参与编译，加错了也只是图上多一个框。
+   */
+  {
+    name: 'blueprint_comment',
+    namespace: 'ue.blueprint',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueBlueprint.createBlueprintCommentTool()
+  },
   {
     name: 'blueprint_add_component',
     namespace: 'ue.blueprint',

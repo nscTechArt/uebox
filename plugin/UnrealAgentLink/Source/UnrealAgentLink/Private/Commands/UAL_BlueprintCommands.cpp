@@ -23,6 +23,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EdGraphNode_Comment.h"
 #include "EdGraphSchema_K2.h"
 #include "UAL_ScopedTransaction.h"
 #include "UAL_TouchedPackages.h"
@@ -189,6 +190,11 @@ void FUAL_BlueprintCommands::RegisterCommands(TMap<FString, TFunction<void(const
 	});
 
 	// blueprint.set_node_positions - 批量挪节点（排版落地）
+	CommandMap.Add(TEXT("blueprint.set_comment"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		Handle_SetComment(Payload, RequestId);
+	});
+
 	CommandMap.Add(TEXT("blueprint.set_node_positions"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 	{
 		Handle_SetNodePositions(Payload, RequestId);
@@ -981,6 +987,37 @@ static TSharedPtr<FJsonObject> UAL_BuildNodeJson(UEdGraphNode* Node)
 	 * 改之前要先在真机上量一遍这几个节点到底长什么样。
 	 */
 	NodeObj->SetBoolField(TEXT("is_ghost_node"), Node->IsAutomaticallyPlacedGhostNode());
+
+	/**
+	 * 注释框的几何和内容。
+	 *
+	 * 没有这一段，调用方拿到的注释框只有一个左上角坐标 —— 既不知道它有多大，
+	 * 也不知道它框住了谁。整理图的时候那就只有两个选择：当普通节点排（空框
+	 * 飞到一边，原来框住的那段逻辑裸在外面），或者干脆不动它（图挪走了，
+	 * 说明还留在原地）。两个都是错的，而用户手写的分组说明就这么没了。
+	 *
+	 * `nodes_under_comment` 来自引擎的 `NodesUnderComment`，它只在用户拖动或
+	 * 缩放过这个注释框之后才会被填上，**可能是空的**。空的时候调用方要靠
+	 * 几何包含关系自己判断 —— 现在它有 x/y/width/height，判得出来。
+	 */
+	if (const UEdGraphNode_Comment* Comment = Cast<UEdGraphNode_Comment>(Node))
+	{
+		NodeObj->SetStringField(TEXT("comment_text"), Comment->NodeComment);
+		NodeObj->SetNumberField(TEXT("node_width"), Comment->NodeWidth);
+		NodeObj->SetNumberField(TEXT("node_height"), Comment->NodeHeight);
+		NodeObj->SetNumberField(TEXT("font_size"), Comment->FontSize);
+
+		TArray<TSharedPtr<FJsonValue>> Under;
+		for (UObject* Object : Comment->GetNodesUnderComment())
+		{
+			if (const UEdGraphNode* Inner = Cast<UEdGraphNode>(Object))
+			{
+				Under.Add(MakeShared<FJsonValueString>(UAL_GuidToString(Inner->NodeGuid)));
+			}
+		}
+		NodeObj->SetArrayField(TEXT("nodes_under_comment"), Under);
+	}
+
 	UAL_AnnotateNodeForRewrite(Node, NodeObj);
 	NodeObj->SetArrayField(TEXT("pins"), UAL_BuildPinsJson(Node));
 	return NodeObj;
@@ -7580,6 +7617,224 @@ void FUAL_BlueprintCommands::Handle_SetNodePositions(const TSharedPtr<FJsonObjec
 		Result->SetStringField(
 			TEXT("note"),
 			TEXT("Some node ids were not in this graph - re-read it with blueprint.get_graph, the layout you computed may be stale."));
+	}
+
+	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
+}
+
+/**
+ * blueprint.set_comment —— 建一个注释框，或者改一个已有的。
+ *
+ * ## 为什么要有它
+ *
+ * 注释框是蓝图里唯一的分组手段，也是用户手写的说明文字在图上的载体。
+ * 在它之前，整个工具集**读不出注释框有多大、框住了谁，更写不了它**：
+ * 排版只好绕着它走（原地不动），于是图整理完，说明还贴在原来的位置上，
+ * 指着一片空白。
+ *
+ * ## 边界
+ *
+ * `bounds` 给了就按 bounds 来 —— 调用方（排版）自己算过每个节点多大，
+ * 比这边准。`enclose_nodes` 是给「框住这几个节点」这种说法用的，尺寸按节点
+ * 数量和引脚数估，宽松一点也不碍事：注释框是给人看的，不参与编译。
+ */
+void FUAL_BlueprintCommands::Handle_SetComment(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+{
+	FString BlueprintPath;
+	if (!Payload->TryGetStringField(TEXT("blueprint_path"), BlueprintPath) || BlueprintPath.IsEmpty())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing required field: blueprint_path"));
+		return;
+	}
+
+	UBlueprint* Blueprint = nullptr;
+	FString ResolvedPath;
+	if (!UAL_LoadBlueprintByPathOrName(BlueprintPath, Blueprint, ResolvedPath) || !Blueprint)
+	{
+		UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+		return;
+	}
+
+	FString GraphName;
+	Payload->TryGetStringField(TEXT("graph_name"), GraphName);
+	UEdGraph* Graph = UAL_FindGraph(Blueprint, GraphName);
+	if (!Graph)
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 404,
+			FString::Printf(TEXT("Graph not found: %s"), GraphName.IsEmpty() ? TEXT("EventGraph") : *GraphName));
+		return;
+	}
+
+	FString NodeId;
+	Payload->TryGetStringField(TEXT("node_id"), NodeId);
+
+	UEdGraphNode_Comment* Comment = nullptr;
+	bool bCreated = false;
+
+	FUAL_ScopedTransaction Transaction(NSLOCTEXT("UnrealAgentLink", "SetBlueprintComment", "Set Blueprint Comment"));
+	Blueprint->Modify();
+	Graph->Modify();
+
+	if (!NodeId.IsEmpty())
+	{
+		UEdGraphNode* Existing = UAL_FindNodeByGuid(Graph, NodeId);
+		if (!Existing)
+		{
+			UAL_CommandUtils::SendError(
+				RequestId, 404,
+				FString::Printf(TEXT("Node not found in this graph: %s"), *NodeId));
+			return;
+		}
+		Comment = Cast<UEdGraphNode_Comment>(Existing);
+		if (!Comment)
+		{
+			UAL_CommandUtils::SendError(
+				RequestId, 400,
+				FString::Printf(TEXT("Node %s is a %s, not a comment box. Omit node_id to create a new comment."),
+					*NodeId, *Existing->GetClass()->GetName()));
+			return;
+		}
+		Comment->Modify();
+	}
+	else
+	{
+		Comment = NewObject<UEdGraphNode_Comment>(Graph);
+		Comment->SetFlags(RF_Transactional);
+		Graph->AddNode(Comment, /*bFromUI=*/false, /*bSelectNewNode=*/false);
+		Comment->CreateNewGuid();
+		Comment->PostPlacedNewNode();
+		Comment->AllocateDefaultPins();
+		// 新注释框先给一个能看见的默认大小，下面有 bounds / enclose_nodes 再覆盖
+		Comment->NodeWidth = 400;
+		Comment->NodeHeight = 200;
+		bCreated = true;
+	}
+
+	FString Text;
+	if (Payload->TryGetStringField(TEXT("text"), Text))
+	{
+		Comment->NodeComment = Text;
+	}
+	else if (bCreated)
+	{
+		Comment->NodeComment = TEXT("Comment");
+	}
+
+	int32 FontSize = 0;
+	if (Payload->TryGetNumberField(TEXT("font_size"), FontSize) && FontSize > 0)
+	{
+		Comment->FontSize = FMath::Clamp(FontSize, 1, 1000);
+	}
+
+	const TSharedPtr<FJsonObject>* ColorObj = nullptr;
+	if (Payload->TryGetObjectField(TEXT("color"), ColorObj) && ColorObj && (*ColorObj).IsValid())
+	{
+		FLinearColor Color = Comment->CommentColor;
+		(*ColorObj)->TryGetNumberField(TEXT("r"), Color.R);
+		(*ColorObj)->TryGetNumberField(TEXT("g"), Color.G);
+		(*ColorObj)->TryGetNumberField(TEXT("b"), Color.B);
+		(*ColorObj)->TryGetNumberField(TEXT("a"), Color.A);
+		Comment->CommentColor = Color;
+	}
+
+	// enclose_nodes：把点到的节点重新登记为「框在里面的」，并按它们算一个框。
+	// 登记这一步不能省 —— 用户之后在编辑器里拖动这个注释框时，引擎靠
+	// NodesUnderComment 决定带走谁，空的话框一动、里面的节点全留在原地
+	const TArray<TSharedPtr<FJsonValue>>* EncloseArray = nullptr;
+	bool bHasEnclosed = false;
+	int32 MinX = 0, MinY = 0, MaxX = 0, MaxY = 0;
+	TArray<TSharedPtr<FJsonValue>> EnclosedIds;
+	TArray<TSharedPtr<FJsonValue>> NotFound;
+
+	if (Payload->TryGetArrayField(TEXT("enclose_nodes"), EncloseArray) && EncloseArray)
+	{
+		Comment->ClearNodesUnderComment();
+		for (const TSharedPtr<FJsonValue>& Value : *EncloseArray)
+		{
+			FString InnerId;
+			if (!Value.IsValid() || !Value->TryGetString(InnerId) || InnerId.IsEmpty())
+			{
+				continue;
+			}
+			UEdGraphNode* Inner = UAL_FindNodeByGuid(Graph, InnerId);
+			if (!Inner || Inner == Comment)
+			{
+				NotFound.Add(MakeShared<FJsonValueString>(InnerId));
+				continue;
+			}
+
+			Comment->AddNodeUnderComment(Inner);
+			EnclosedIds.Add(MakeShared<FJsonValueString>(UAL_GuidToString(Inner->NodeGuid)));
+
+			// 节点的真实尺寸只有编辑器里的 Slate widget 知道（这里拿不到），
+			// 所以按引脚数估一个 —— 估宽了只是框大一点，估窄了会把节点露在外面
+			const int32 EstimatedWidth = Inner->NodeWidth > 0 ? Inner->NodeWidth : 260;
+			const int32 EstimatedHeight =
+				Inner->NodeHeight > 0 ? Inner->NodeHeight : (60 + Inner->Pins.Num() * 28);
+
+			if (!bHasEnclosed)
+			{
+				MinX = Inner->NodePosX;
+				MinY = Inner->NodePosY;
+				MaxX = Inner->NodePosX + EstimatedWidth;
+				MaxY = Inner->NodePosY + EstimatedHeight;
+				bHasEnclosed = true;
+			}
+			else
+			{
+				MinX = FMath::Min(MinX, Inner->NodePosX);
+				MinY = FMath::Min(MinY, Inner->NodePosY);
+				MaxX = FMath::Max(MaxX, Inner->NodePosX + EstimatedWidth);
+				MaxY = FMath::Max(MaxY, Inner->NodePosY + EstimatedHeight);
+			}
+		}
+
+		if (bHasEnclosed)
+		{
+			// 上边多留一条：注释框的标题栏画在框体上方，不留就压住第一排节点
+			const int32 Padding = 40;
+			const int32 TitleBar = 48;
+			Comment->NodePosX = MinX - Padding;
+			Comment->NodePosY = MinY - Padding - TitleBar;
+			Comment->NodeWidth = (MaxX - MinX) + Padding * 2;
+			Comment->NodeHeight = (MaxY - MinY) + Padding * 2 + TitleBar;
+		}
+	}
+
+	// bounds 最后处理：调用方明确给了框，就以它为准
+	const TSharedPtr<FJsonObject>* BoundsObj = nullptr;
+	if (Payload->TryGetObjectField(TEXT("bounds"), BoundsObj) && BoundsObj && (*BoundsObj).IsValid())
+	{
+		int32 Value = 0;
+		if ((*BoundsObj)->TryGetNumberField(TEXT("x"), Value)) Comment->NodePosX = Value;
+		if ((*BoundsObj)->TryGetNumberField(TEXT("y"), Value)) Comment->NodePosY = Value;
+		if ((*BoundsObj)->TryGetNumberField(TEXT("width"), Value)) Comment->NodeWidth = FMath::Max(Value, 32);
+		if ((*BoundsObj)->TryGetNumberField(TEXT("height"), Value)) Comment->NodeHeight = FMath::Max(Value, 32);
+	}
+
+	// 注释框不参与编译，用 MarkBlueprintAsModified 就够 ——
+	// 结构性修改会触发一次完整重编译，大蓝图上那是好几秒的白等
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("ok"), NotFound.Num() == 0);
+	Result->SetStringField(TEXT("blueprint_path"), ResolvedPath);
+	Result->SetStringField(TEXT("graph_name"), Graph->GetName());
+	Result->SetStringField(TEXT("node_id"), UAL_GuidToString(Comment->NodeGuid));
+	Result->SetBoolField(TEXT("created"), bCreated);
+	Result->SetStringField(TEXT("text"), Comment->NodeComment);
+	Result->SetNumberField(TEXT("x"), Comment->NodePosX);
+	Result->SetNumberField(TEXT("y"), Comment->NodePosY);
+	Result->SetNumberField(TEXT("width"), Comment->NodeWidth);
+	Result->SetNumberField(TEXT("height"), Comment->NodeHeight);
+	Result->SetArrayField(TEXT("enclosed_nodes"), EnclosedIds);
+	if (NotFound.Num() > 0)
+	{
+		Result->SetArrayField(TEXT("not_found"), NotFound);
+		Result->SetStringField(
+			TEXT("note"),
+			TEXT("Some enclose_nodes ids were not in this graph - re-read it with blueprint.get_graph."));
 	}
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);

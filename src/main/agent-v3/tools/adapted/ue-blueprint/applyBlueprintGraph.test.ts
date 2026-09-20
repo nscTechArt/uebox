@@ -26,10 +26,11 @@ vi.mock('../../../core/projectTargetContext', () => ({
 
 // ELK 布局是异步的、要拉一个真实的布局引擎。这里测的是「坐标有没有被填上」，
 // 不是布局算得好不好 —— 让它回一个可预测的结果。
-vi.mock('../../../../blueprint-layout/elkLayout', () => ({
+vi.mock('../../../../blueprint-layout/blueprintLayout', () => ({
   autoLayoutBlueprintNodes: vi.fn(async (nodes: Array<{ id: string }>) =>
     nodes.map((node, index) => ({ id: node.id, x: index * 400, y: 50 }))
-  )
+  ),
+  estimateBlueprintNodeSize: () => ({ width: 200, height: 110 })
 }))
 
 import { createApplyBlueprintGraphTool } from './applyBlueprintGraph'

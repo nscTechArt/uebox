@@ -133,6 +133,23 @@ public:
 	static void Handle_SetNodePositions(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 
 	/**
+	 * blueprint.set_comment —— 建一个注释框，或者改一个已有的（文字、大小、
+	 * 颜色、框住谁）。
+	 *
+	 * 注释框是蓝图里唯一的分组手段。在它之前工具集**读不出它有多大、框住了谁，
+	 * 也写不了它**：排版只能绕着走，于是图整理完，用户手写的说明还贴在原处，
+	 * 指着一片空白。
+	 *
+	 * 请求: { "blueprint_path": "...", "graph_name": "EventGraph",
+	 *         "node_id": "GUID"（省略＝新建）, "text": "...",
+	 *         "bounds": { x, y, width, height },
+	 *         "enclose_nodes": ["GUID", ...],
+	 *         "color": { r, g, b, a }, "font_size": 18 }
+	 * 响应: { ok, node_id, created, text, x, y, width, height, enclosed_nodes }
+	 */
+	static void Handle_SetComment(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/**
 	 * blueprint.set_variable_meta —— 改变量的元数据。
 	 *
 	 * 在它之前**变量建出来就定死了**：只能加，不能调整它在细节面板里的表现。

@@ -75,6 +75,18 @@ export interface BlueprintGraphNodeInfo {
    * 把用户在编辑器里拉过的切线整条盖掉。
    */
   timeline?: Record<string, unknown>
+  /**
+   * 注释框专有：文字、框体大小、框住了哪些节点。
+   *
+   * `nodes_under_comment` 来自引擎的 `NodesUnderComment`，**只在用户拖动或
+   * 缩放过这个框之后才有**，所以可能是空的。空的时候按 x/y/width/height
+   * 算几何包含关系 —— 那几个字段一定有。
+   */
+  comment_text?: string
+  node_width?: number
+  node_height?: number
+  font_size?: number
+  nodes_under_comment?: string[]
 }
 
 export interface GetBlueprintGraphResponse {
@@ -190,6 +202,12 @@ function describeNodeForModel(node: BlueprintGraphNodeInfo): Record<string, unkn
     // 坐标要留着：放新节点时得知道往哪儿放，不然新节点全叠在原点上
     pos_x: node.pos_x,
     pos_y: node.pos_y,
+    // 注释框：带上文字和框体大小，否则它在模型眼里就是一个没有引脚的空节点，
+    // 既看不出它说了什么，也看不出它框住了哪一段逻辑
+    ...(node.comment_text !== undefined ? { comment_text: node.comment_text } : {}),
+    ...(node.node_width ? { node_width: node.node_width } : {}),
+    ...(node.node_height ? { node_height: node.node_height } : {}),
+    ...(node.nodes_under_comment?.length ? { nodes_under_comment: node.nodes_under_comment } : {}),
     pins: node.pins?.map(describePin)
   }
 }

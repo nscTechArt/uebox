@@ -58,6 +58,7 @@ const CROSS_REFERENCE_RENAMES: Readonly<Record<string, string>> = Object.freeze(
   // 删节点回来了（整图重写代价太大），所以它指向自己而不是 apply_graph
   'blueprint.delete_node': 'blueprint_delete_node',
   'blueprint.disconnect_pins': 'blueprint_disconnect_pins',
+  'blueprint.set_comment': 'blueprint_comment',
   'material.create': 'material_create',
   'material.create_instance': 'material_create_instance',
   'material.apply': 'material_apply',

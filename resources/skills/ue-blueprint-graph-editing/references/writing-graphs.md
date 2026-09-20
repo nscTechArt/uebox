@@ -74,11 +74,34 @@ so it takes the rest of that call with it.
 ## Tidying up
 
 `blueprint_tidy_graph` re-lays-out an entire existing graph — including nodes you
-did not create — so it reads left-to-right along the execution flow. It moves nodes
-only; no node, wire or value is touched, and the change is undoable.
+did not create — so it reads left-to-right along the execution flow. Comment boxes
+move with the logic they frame. The change is undoable.
+
+It makes exactly one change beyond moving things: a pure getter (variable get, Self,
+literal) used in two distant places gets a second copy next to the far consumer, the
+way a person laying out a graph by hand would. Pure nodes are already evaluated once
+per consumer, so the copy changes nothing about behaviour — it only removes a wire
+that crossed the whole canvas. Pass `duplicate_getters: false` to move nodes only.
 
 Worth doing when you have built a graph across several calls, or when the user says
 the graph is hard to read. Take a `ue_screenshot` afterwards if you want to confirm.
+
+## Comment boxes
+
+`blueprint_comment` creates a comment box or edits an existing one. Comment boxes are
+the only grouping device a Blueprint graph has, so a long graph is much easier to read
+with two or three of them than without.
+
+- Creating: omit `node_id` and pass `enclose_nodes` (node GUIDs). The box sizes itself
+  around them.
+- Editing: pass the `node_id` of a node whose `class` is `EdGraphNode_Comment`. Fields
+  you leave out are not touched.
+
+`enclose_nodes` is not only about size: the engine uses that list to decide which nodes
+travel with the box when a user drags it. A box with an empty list leaves its contents
+behind when moved.
+
+Comment boxes do not take part in compilation, so nothing needs compiling afterwards.
 
 ## All or nothing
 

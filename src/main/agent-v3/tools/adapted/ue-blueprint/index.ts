@@ -45,5 +45,12 @@ export {
   createSetBlueprintParentClassTool
 } from './blueprintMembers'
 
-/** 图编辑的两个逆操作：删节点、断连线。理由见 graphEditing.ts 文件头 */
-export { createDeleteBlueprintNodeTool, createDisconnectBlueprintPinsTool } from './graphEditing'
+/**
+ * 图编辑的两个逆操作（删节点、断连线，理由见 graphEditing.ts 文件头），
+ * 外加注释框的读写 —— 蓝图里唯一的分组手段。
+ */
+export {
+  createDeleteBlueprintNodeTool,
+  createDisconnectBlueprintPinsTool,
+  createBlueprintCommentTool
+} from './graphEditing'
