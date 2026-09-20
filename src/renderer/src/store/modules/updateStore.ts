@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
+import { updaterAPI } from '@renderer/api/updater'
+
 /**
  * 应用更新状态，全局一份。
  *
@@ -27,6 +29,21 @@ export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'd
 export interface UpdateErrorPayload {
   message?: string
   code?: string
+}
+
+/**
+ * 一次手动检查问出了什么。
+ *
+ * `unknown` 是「没问出结果」，不是「没有更新」：主进程有三条分支什么都不做
+ * 也返回成功（没配更新源、已经有检查在跑、开发环境 updater 未激活），
+ * 那几条路上一个事件都不会来。调用方据此决定要不要报「已是最新版本」。
+ */
+export type UpdateCheckOutcome = 'available' | 'downloaded' | 'upToDate' | 'unknown'
+
+export interface UpdateCheckResult {
+  success: boolean
+  error?: string
+  outcome: UpdateCheckOutcome
 }
 
 export interface UpdateInitHooks {
@@ -64,12 +81,34 @@ export const useUpdateStore = defineStore('update', () => {
 
   let cleanups: Array<() => void> = []
   let initialized = false
+  /** init() 传进来的提示回调。syncFromMain 也要用，所以不能只活在 init 的闭包里 */
+  let initHooks: UpdateInitHooks = {}
 
-  /** 新发现的版本要不要弹一次全局提示；弹过就不再弹 */
-  function shouldAnnounce(version: string): boolean {
-    if (!version || announcedVersion.value === version) return false
+  /** 这个阶段是不是「已经有结论」。有结论的状态不该被下一轮检查打回去 */
+  function isSettledPhase(value: UpdatePhase): boolean {
+    return value === 'available' || value === 'downloading' || value === 'downloaded'
+  }
+
+  /**
+   * 用户正站在关于页等这一轮检查的结果。
+   *
+   * 这一轮的结果由那个面板自己弹确认框说，全局 toast 就别再说一遍 ——
+   * 否则一次点击同时出现「发现新版本 v1.3.0，点标题栏右上角即可下载」和
+   * 一个已经摆在眼前的「现在下载吗？」，两句话让用户去做两件不同的事。
+   */
+  let manualCheckInFlight = false
+
+  /**
+   * 新发现的版本弹一次全局提示；同一个版本只弹一次。
+   *
+   * 手动检查那一轮**照样记名**、只是不弹：记了名，这个版本之后的后台检查
+   * 才不会再弹一次已经当面说过的事。
+   */
+  function announce(version: string): void {
+    if (!version || announcedVersion.value === version) return
     announcedVersion.value = version
-    return true
+    if (manualCheckInFlight) return
+    initHooks.onAvailable?.(version)
   }
 
   /**
@@ -84,30 +123,39 @@ export const useUpdateStore = defineStore('update', () => {
   function init(hooks: UpdateInitHooks = {}): void {
     if (initialized) return
     initialized = true
+    initHooks = hooks
 
     const api = window.api?.updater
     if (!api) return
 
     cleanups = [
       api.onUpdateChecking(() => {
-        // 已经下载好了就别退回「检查中」—— 那个角标是用户唯一的安装入口
-        if (phase.value === 'downloaded' || phase.value === 'downloading') return
+        // 已经有结果在手上就别退回「检查中」—— 那个角标是用户唯一的安装入口。
+        // 「有新版本」也算结果：后台每 4 小时查一次，每次都把角标摘掉的话，
+        // 用户刚看到的更新提示会无缘无故消失，而静默检查失败是不推事件的，
+        // 摘掉了就再也装不回来。
+        if (isSettledPhase(phase.value)) return
         lastError.value = null
         phase.value = 'checking'
       }),
       api.onUpdateAvailable((data) => {
-        latestVersion.value = data.version
         lastError.value = null
-        // 下载中/已下载的状态比「有新版本」更靠后，不要被一次例行检查打回去
+        // 下载中/已下载的状态比「有新版本」更靠后，不要被一次例行检查打回去。
+        // 版本号也一起挡在外面：装的是已经落盘的那一个，这里改了就会出现
+        // 弹窗说要装 1.3.0、实际装上 1.2.0
         if (phase.value === 'downloading' || phase.value === 'downloaded') return
+        latestVersion.value = data.version
         phase.value = 'available'
-        if (shouldAnnounce(data.version)) hooks.onAvailable?.(data.version)
+        announce(data.version)
       }),
       api.onUpdateNotAvailable(() => {
         if (phase.value === 'downloading' || phase.value === 'downloaded') return
         phase.value = 'idle'
       }),
       api.onDownloadProgress((data) => {
+        // 已下载之后还漏进来的进度事件不能把状态拽回「下载中」——
+        // 那会让角标变成 aria-disabled，唯一的安装入口就此点不动
+        if (phase.value === 'downloaded') return
         phase.value = 'downloading'
         downloadPercent.value = Math.max(0, Math.min(100, Math.round(data.percent)))
       }),
@@ -119,8 +167,23 @@ export const useUpdateStore = defineStore('update', () => {
       api.onUpdateError((data) => {
         lastError.value = data ?? null
         hooks.onError?.(data)
-        // 下载失败要退回「可更新」，让用户能再点一次；已装好的不受影响
-        phase.value = phase.value === 'downloaded' ? 'downloaded' : 'idle'
+        /*
+         * 退回「可更新」，不是「无事发生」。
+         *
+         * 这里原来写的是 idle，和上一行注释说的正好相反。`hasUpdateNews` 不含
+         * idle，所以那等于**把标题栏角标摘掉**：后台查到了新版本（角标亮着）→
+         * 用户去关于页点一次检查 → 这次是非静默的、网络又断了 → update-error
+         * 到达 → 角标没了，而 latestVersion 还在，下一次成功检查之前（最长 4 小时）
+         * 没有任何东西能把它装回来。
+         *
+         * 下载那条路看着没事，只是运气好：download() 的 revertToAvailable()
+         * 恰好在事件之后一个微任务才跑。不经过 download() 的 update-error 没这个运气。
+         *
+         * 手上没有版本号就还是 idle —— 那时候亮一个不知道要更新到哪的角标才是错的。
+         */
+        if (phase.value !== 'downloaded') {
+          phase.value = latestVersion.value ? 'available' : 'idle'
+        }
         downloadPercent.value = 0
       })
     ]
@@ -132,8 +195,7 @@ export const useUpdateStore = defineStore('update', () => {
   /** 问主进程要一次当前状态。推送已经把阶段推到更靠后时不覆盖 */
   async function syncFromMain(): Promise<void> {
     try {
-      const result = await window.api?.updater?.getStatus()
-      const data = result?.success ? result.data : undefined
+      const data = await updaterAPI.getStatus()
       if (!data) return
 
       if (data.latestVersion) latestVersion.value = data.latestVersion
@@ -146,6 +208,10 @@ export const useUpdateStore = defineStore('update', () => {
       if (phase.value === 'downloading' || phase.value === 'downloaded') return
       if (data.updateAvailable) {
         phase.value = 'available'
+        // 走到这里说明启动检查早于订阅、事件已经丢了。提示也得在这里补一次，
+        // 否则这个 Store 存在的理由（自动检查到的新版本要全局提示）在它
+        // 真正要救的那条路径上恰好不成立
+        announce(data.latestVersion || latestVersion.value)
         return
       }
       if (data.checking) phase.value = 'checking'
@@ -154,19 +220,50 @@ export const useUpdateStore = defineStore('update', () => {
     }
   }
 
-  /** 手动检查。结果走事件回来，这里只负责发起 */
-  async function check(): Promise<{ success: boolean; error?: string }> {
+  /** 手动检查。结果走事件回来，这里负责发起并收尾 */
+  async function check(): Promise<UpdateCheckResult> {
+    const before: UpdatePhase = phase.value
     lastError.value = null
-    phase.value = 'checking'
+    // 已经有结论的状态不进「检查中」，否则角标会在检查期间凭空消失一下
+    if (!isSettledPhase(before)) phase.value = 'checking'
+    manualCheckInFlight = true
     try {
-      const result = await window.api.updater.checkForUpdates()
-      if (!result?.success) phase.value = 'idle'
-      return result ?? { success: false }
-    } catch (error) {
-      phase.value = 'idle'
-      console.error('[update] 检查更新失败:', error)
-      return { success: false, error: String(error) }
+      // 桥不在、抛异常都由 api 层收成 { success, error }，这里不必再 try
+      return finishCheck(before, await updaterAPI.checkForUpdates())
+    } finally {
+      manualCheckInFlight = false
     }
+  }
+
+  /**
+   * 收尾一次手动检查。
+   *
+   * 事件都是在主进程 handler resolve 之前推过来的，所以 await 回来时还停在
+   * 「检查中」就说明这一轮一个事件都没发。主进程有三条这样的分支，而且它们
+   * 全都返回 success —— 不自己退回去的话 phase 永远卡在 checking，
+   * isChecking 永远为真，「检查更新」按钮这个会话就此报废。
+   */
+  function finishCheck(
+    before: UpdatePhase,
+    result: { success: boolean; error?: string }
+  ): UpdateCheckResult {
+    const answered = phase.value !== 'checking'
+    if (!answered) phase.value = before === 'checking' ? 'idle' : before
+
+    if (!result.success) {
+      // IPC 自己就失败了，主进程不会再推 update-error。这里补一条，
+      // 否则靠 lastError 区分「已是最新」和「没查成」的地方会判成前者
+      lastError.value = { message: result.error }
+      return { success: false, error: result.error, outcome: 'unknown' }
+    }
+
+    let outcome: UpdateCheckOutcome = 'unknown'
+    if (answered && !lastError.value) {
+      if (phase.value === 'downloaded') outcome = 'downloaded'
+      else if (phase.value === 'available') outcome = 'available'
+      else if (phase.value === 'idle') outcome = 'upToDate'
+    }
+    return { success: true, outcome }
   }
 
   /**
@@ -190,26 +287,35 @@ export const useUpdateStore = defineStore('update', () => {
       if (current !== 'downloaded') phase.value = 'available'
     }
 
-    try {
-      const result = await window.api.updater.downloadUpdate()
-      if (!result?.success) revertToAvailable()
-      return result ?? { success: false }
-    } catch (error) {
+    const result = await updaterAPI.downloadUpdate()
+    if (!result.success) {
       revertToAvailable()
-      console.error('[update] 下载更新失败:', error)
-      return { success: false, error: String(error) }
+      return result
     }
+
+    /*
+     * 报了成功也要确认它真的动了。
+     *
+     * 主进程的 `downloadUpdate()` 有三条什么都不做就返回的分支（没配更新源、
+     * 当前没有可用更新、已经有下载在跑），IPC 一律包成 `{ success: true }`。
+     * 而这个方法要等整个下载结束才 resolve —— 真下载过就必然先收到
+     * `update-downloaded`，phase 已经是 downloaded。所以 await 回来还停在
+     * downloading、一个字节都没走，就说明这一轮压根没开始。
+     *
+     * 不退回去的话：角标永远停在「下载中 0%」，而 TabsHeader 对 downloading
+     * 直接 return —— 唯一的入口就此点不动，且没有任何提示。
+     */
+    const current: UpdatePhase = phase.value
+    if (current === 'downloading' && downloadPercent.value === 0) {
+      revertToAvailable()
+      return { success: false, error: '更新下载没有开始（可能没有可用更新，或已有下载在进行）' }
+    }
+    return result
   }
 
   /** 退出并安装。成功的话这个进程随即就没了 */
-  async function install(): Promise<{ success: boolean; error?: string }> {
-    try {
-      const result = await window.api.updater.quitAndInstall()
-      return result ?? { success: false }
-    } catch (error) {
-      console.error('[update] 安装更新失败:', error)
-      return { success: false, error: String(error) }
-    }
+  function install(): Promise<{ success: boolean; error?: string }> {
+    return updaterAPI.quitAndInstall()
   }
 
   /** 窗口卸载时摘掉订阅。正常情况下不会走到 —— 主窗口活到进程结束 */

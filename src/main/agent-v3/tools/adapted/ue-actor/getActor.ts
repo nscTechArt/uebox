@@ -158,7 +158,7 @@ export interface GetActorInfoPayload {
 }
 
 /** 单个 Actor 信息项 */
-interface ActorInfoItem {
+export interface ActorInfoItem {
   name: string
   path: string
   class: string

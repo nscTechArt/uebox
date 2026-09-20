@@ -1263,7 +1263,8 @@ export default {
     installTitle: 'Install update',
     installContent: 'Version {version} has been downloaded. Restart to install now?',
     installNow: 'Restart now',
-    later: 'Later'
+    later: 'Later',
+    installFailed: 'Could not install the update. Try again later or download the installer manually'
   },
   page: {
     home: {

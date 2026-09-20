@@ -26,8 +26,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useTabsStore, DEFAULT_TAB_KEY } from '@renderer/store/modules/tabs'
 import { formatUpdateVersion, useUpdateStore } from '@renderer/store/modules/updateStore'
+import { useUpdateInstall } from '@renderer/composables/useUpdateInstall'
 import { message } from '@renderer/utils/messageManager'
-import { confirmDialog } from '@renderer/utils/dialog'
 import { useI18n } from '@renderer/hooks/useI18n'
 import ContextMenu from '@renderer/components/ContextMenu/ContextMenu.vue'
 import type { MenuItem } from '@renderer/components/ContextMenu/types'
@@ -669,6 +669,7 @@ watch(
  * 「设置 → 关于」手动发起，于是这个按钮在真实使用中几乎永远不出现。
  */
 const updateStore = useUpdateStore()
+const { confirmInstall } = useUpdateInstall()
 const {
   phase: updatePhase,
   latestVersion: updateVersion,
@@ -709,15 +710,9 @@ const handleUpdateClick = (): void => {
   if (updatePhase.value === 'downloading') return
 
   if (updatePhase.value === 'downloaded') {
-    confirmDialog({
-      title: t('update.installTitle'),
-      content: t('update.installContent', { version: updateVersionLabel.value }),
-      okText: t('update.installNow'),
-      cancelText: t('update.later'),
-      onOk: () => {
-        void updateStore.install()
-      }
-    })
+    // 弹窗和失败提示都在 useUpdateInstall 里 —— 关于页用的是同一份，
+    // 免得同一个动作按入口不同给两种反馈（原来这里失败是一声不吭的）
+    confirmInstall()
     return
   }
 
@@ -1242,21 +1237,30 @@ onBeforeUnmount(() => {
     font-variant-numeric: tabular-nums;
   }
 
-  /* 「有新版本」用一颗呼吸的小圆点，比图标更像通知，也更安静 */
+  /* 「有新版本」用一颗呼吸的小圆点，比图标更像通知，也更安静。
+     呼吸 8 次（约 16 秒）就停：这个阶段会一直挂到用户点下载为止，也就是
+     基本等于整个会话。`infinite` 的话标题栏里就永远有一个合成动画在跑，
+     GPU 进程再也不进空闲 —— 只是开着窗口也在掉电。吸引注意本来也只需要
+     开头那几下，之后圆点静静留着就够了 */
   .update-dot {
     width: 6px;
     height: 6px;
     flex-shrink: 0;
     border-radius: 50%;
     background: currentColor;
-    animation: update-dot-pulse 2s var(--easing-standard) infinite;
+    animation: update-dot-pulse 2s var(--easing-standard) 8;
   }
 
+  /* 进度条不能用 --color-accent-bg-hover：浅色下它是 #ededed，压在 #f7f7f7 的
+     按钮底色上对比度只有 1.1:1，等于看不见；而且那正是 hover 的底色，
+     真看见了也会被当成鼠标划过。改用强调实色压低透明度 —— 两套主题下都能
+     看出来，又不会盖掉上面那行字 */
   .update-progress {
     position: absolute;
     inset: 0 auto 0 0;
     z-index: 0;
-    background: var(--color-accent-bg-hover);
+    background: var(--color-accent-solid);
+    opacity: 0.28;
     transition: width var(--motion-normal) var(--easing-standard);
   }
 

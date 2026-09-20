@@ -11,6 +11,7 @@ import { confirmDialog } from '@renderer/utils/dialog'
 import AppButton from '@renderer/components/AppButton.vue'
 import BrandMark from '@renderer/components/BrandMark.vue'
 import { formatUpdateVersion, useUpdateStore } from '@renderer/store/modules/updateStore'
+import { useUpdateInstall } from '@renderer/composables/useUpdateInstall'
 
 const { t } = useI18n()
 
@@ -70,31 +71,9 @@ function downloadUpdate(): void {
   void updateStore.download()
 }
 
-/**
- * 显示更新就绪对话框
- */
-function showUpdateReadyDialog(version: string): void {
-  confirmDialog({
-    title: t('profile.about.checkUpdate'),
-    content: t('profile.about.updateReady', { version }),
-    okText: t('profile.about.installNow'),
-    cancelText: t('profile.about.later'),
-    onOk: () => {
-      void installUpdate()
-    }
-  })
-}
-
-/**
- * 安装更新
- */
-async function installUpdate(): Promise<void> {
-  // IPC 失败是返回 { success: false }，不是抛异常 —— 只 catch 的话装不上也悄无声息
-  const result = await updateStore.install()
-  if (!result.success) {
-    message.error(result.error || t('profile.about.updateError'))
-  }
-}
+// 安装确认框和失败提示都走 useUpdateInstall：标题栏角标用的是同一份。
+// 原来这两处各写一遍，文案键也各一套，已经跑偏成「关于页报错、角标不报」
+const { confirmInstall } = useUpdateInstall()
 
 /**
  * 跟着全局状态走：用户手点的那一轮给回音，下载完成不论来源都要问一句装不装。
@@ -102,7 +81,7 @@ async function installUpdate(): Promise<void> {
 watch(phase, (next, previous) => {
   if (next === 'downloaded' && previous !== 'downloaded') {
     awaitingManualResult.value = false
-    showUpdateReadyDialog(latestVersionLabel.value)
+    confirmInstall()
     return
   }
 
@@ -111,13 +90,6 @@ watch(phase, (next, previous) => {
   if (next === 'available') {
     awaitingManualResult.value = false
     showUpdateAvailableDialog(latestVersionLabel.value)
-    return
-  }
-
-  // 回到 idle 有两种可能：已是最新，或者检查失败。失败时 App.vue 已经报过错了
-  if (next === 'idle' && previous === 'checking') {
-    awaitingManualResult.value = false
-    if (!updateStore.lastError) message.success(t('profile.about.upToDate'))
   }
 })
 
@@ -151,7 +123,7 @@ async function checkForUpdates(): Promise<void> {
 
   // 已经有结果在手上就别再发请求：直接把对应的弹窗给出来
   if (phase.value === 'downloaded') {
-    showUpdateReadyDialog(latestVersionLabel.value)
+    confirmInstall()
     return
   }
   if (phase.value === 'available') {
@@ -166,10 +138,21 @@ async function checkForUpdates(): Promise<void> {
   awaitingManualResult.value = true
   message.info(t('profile.about.checking'))
 
+  // 回音按 check() 返回的结论给，不要去读 watch 到的 phase：watch 默认是
+  // flush 'pre'，它那一轮比这里的 await 续体先跑，那时 awaitingManualResult
+  // 还是 true、lastError 还没写，于是一次失败的检查会先报「已是最新版本」
+  // 再报错，同一次点击弹两条互相矛盾的提示
   const result = await updateStore.check()
+  awaitingManualResult.value = false
+
   if (!result.success) {
-    awaitingManualResult.value = false
     message.error(result.error || t('profile.about.updateError'))
+    return
+  }
+  // outcome 为 unknown 表示这一轮压根没问出结果（没配更新源、已有检查在跑），
+  // 那就什么都不说，别谎报「已是最新版本」
+  if (result.outcome === 'upToDate') {
+    message.success(t('profile.about.upToDate'))
   }
 }
 </script>

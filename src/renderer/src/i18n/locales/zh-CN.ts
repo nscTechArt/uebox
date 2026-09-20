@@ -1239,7 +1239,9 @@ export default {
     installTitle: '安装更新',
     installContent: '新版本 {version} 已下载完成，现在重启安装吗？',
     installNow: '立即重启',
-    later: '稍后'
+    later: '稍后',
+    /** quitAndInstall 失败不走 update-error 事件，只能在发起的地方报 */
+    installFailed: '安装更新失败，请稍后重试或手动下载安装包'
   },
   page: {
     home: {

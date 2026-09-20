@@ -21,6 +21,7 @@ import { z } from 'zod'
 import { serviceManager } from '../../../../services'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
+import type { ActorInfoItem, GetActorInfoPayload } from './getActor'
 import { worldFields, describeWorld, type WorldScopedResponse } from '../../worldScope'
 import { UE_UNIT_NOTE, describePlacementScale } from '../../ueUnits'
 import {
@@ -296,18 +297,35 @@ interface SetTransformUnifiedResponse extends WorldScopedResponse, UnmatchedTarg
 }
 
 /** actor.get_info 回的字段里，排布要用到的那几个 */
-interface ArrangeActorInfo {
-  name?: string
-  path?: string
-  transform?: { location?: { x: number; y: number; z: number } }
-  /**
-   * 世界空间包围盒的尺寸。排布用不到它，但**诊断要靠它**：
-   * 插件只在 `Bounds.IsValid` 时才发 min/max，而 `bounds` 是无条件发的。
-   * 两者一起看才分得清「插件太旧」和「这个 Actor 没有几何体」。
-   */
-  bounds?: { x: number; y: number; z: number }
-  bounds_min?: { x: number; y: number; z: number }
-  bounds_max?: { x: number; y: number; z: number }
+/**
+ * 排布要用到的那几个字段，**从 `getActor.ts` 的那份派生**，不要另写一份。
+ *
+ * 同一条 `actor.get_info` 命令原来在两个文件里各有一份字段表。改名一个协议键
+ * （`return_bounds`、`include_system_actors`）时，getActor 那边的调用点会当场
+ * 编译不过，而这边照发那个已经没人认的键、静默拿不到包围盒，最后报成
+ * 「这个 Actor 没有几何体」—— 错得离真因很远。派生就不会有第二份可漂移的真相。
+ *
+ * `bounds` 留在表里是**诊断要用**：插件只在 `Bounds.IsValid` 时才发 min/max，
+ * 而 `bounds` 是无条件发的。两者一起看才分得清「插件太旧」和「没有几何体」。
+ */
+type ArrangeActorInfo = Pick<
+  ActorInfoItem,
+  'name' | 'path' | 'transform' | 'bounds' | 'bounds_min' | 'bounds_max'
+>
+
+/** 名字列表最多列几个。和 `unmatchedTargets.ts` 的 MAX_LISTED 同一个数 */
+const MAX_LISTED_NAMES = 8
+
+/**
+ * 名字列表折一下再进错误信息。
+ *
+ * `MAX_ARRANGE` 是 100，不折的话一次写错的批量就能把 100 个 Actor 名字
+ * 整段塞进模型的上下文里 —— 而看前八个就足够认出自己写错了什么。
+ */
+function listNames(names: string[]): string {
+  const shown = names.slice(0, MAX_LISTED_NAMES).join('、')
+  const rest = names.length - MAX_LISTED_NAMES
+  return rest > 0 ? `${shown}（还有 ${rest} 个）` : shown
 }
 
 /** get_info 的回包：除了 actors，世界归属和没对上的名字都要带出来 */
@@ -463,17 +481,20 @@ async function arrangeActors(
   }
   const wantedNames = isNameList(targets.names) ? targets.names : undefined
 
+  // 标上 GetActorInfoPayload：协议键改名时这里要和 getActor 一起编译不过，
+  // 而不是默默发一个没人认的键、再把拿不到的包围盒报成「没有几何体」
+  const infoPayload: GetActorInfoPayload = {
+    targets,
+    return_transform: true,
+    return_bounds: true,
+    limit: MAX_ARRANGE + 1,
+    // 显式发 false：这是跨进程的协议字段，别让「默认值由谁负责」跨两层去推断。
+    // 用 filter:{} 排整个关卡时，漏掉它会把 HLOD 之类的系统 Actor 也排进去
+    include_system_actors: false
+  }
   const info = await wsService.callRequest<ArrangeInfoResponse>(
     'actor.get_info',
-    {
-      targets,
-      return_transform: true,
-      return_bounds: true,
-      limit: MAX_ARRANGE + 1,
-      // 显式发 false：这是跨进程的协议字段，别让「默认值由谁负责」跨两层去推断。
-      // 用 filter:{} 排整个关卡时，漏掉它会把 HLOD 之类的系统 Actor 也排进去
-      include_system_actors: false
-    },
+    infoPayload,
     getTargetConnectionId(),
     30000
   )
@@ -505,7 +526,7 @@ async function arrangeActors(
       return {
         success: false,
         error:
-          `这些名字在关卡里一个都没对上：${wantedNames.join('、')}。` +
+          `这些名字在关卡里一个都没对上：${listNames(wantedNames)}。` +
           'arrange 不会少排几个凑合过去 —— 名字核对好再重发（ue_get_actor 可以查真实名字）。',
         unmatched_targets: wantedNames,
         unmatched_count: wantedNames.length
@@ -617,12 +638,12 @@ async function arrangeActors(
   if (missingNames.length > 0 || exhaustedNames.length > 0) {
     const parts: string[] = []
     if (missingNames.length > 0) {
-      parts.push(`这些名字在关卡里没找到：${missingNames.join('、')}`)
+      parts.push(`这些名字在关卡里没找到：${listNames(missingNames)}`)
     }
     if (exhaustedNames.length > 0) {
       // 名字在，但指不到那么多个 —— 重名或大小写变体，引擎按名字只认得出一个
       parts.push(
-        `这些名字点到的 Actor 不够用：${exhaustedNames.join('、')}` +
+        `这些名字点到的 Actor 不够用：${listNames(exhaustedNames)}` +
           '（名字不唯一，或同一个名字点了多次，而引擎按名字只解析得出一个）。' +
           '要分别指定就改用 targets.paths，path 才是唯一的'
       )
