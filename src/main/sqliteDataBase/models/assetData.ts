@@ -194,6 +194,10 @@ export const initAssetDataModel = (db: Database.Database): void => {
     CREATE INDEX IF NOT EXISTS idx_assetData_assetClass ON ${TABLE_NAME}(assetClass);
     CREATE INDEX IF NOT EXISTS idx_assetData_className ON ${TABLE_NAME}(className);
     CREATE INDEX IF NOT EXISTS idx_assetData_fileMd5 ON ${TABLE_NAME}(fileMd5);
+    -- 远端导入按路径查重（remoteImportPath.ts）用的复合索引。单列 filePath 索引
+    -- 不够：那条查询同时按 originPath 查，缺一侧索引整条就退化成全表扫。
+    CREATE INDEX IF NOT EXISTS idx_assetData_filePath_isDelete ON ${TABLE_NAME}(filePath, isDelete);
+    CREATE INDEX IF NOT EXISTS idx_assetData_originPath_isDelete ON ${TABLE_NAME}(originPath, isDelete);
     CREATE INDEX IF NOT EXISTS idx_assetData_folderKey_isDelete_assetName
       ON ${TABLE_NAME}(folderKey, isDelete, assetName COLLATE NOCASE);
   `

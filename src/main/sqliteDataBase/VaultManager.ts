@@ -1621,6 +1621,10 @@ export class VaultManager {
       'CREATE INDEX IF NOT EXISTS idx_assetData_processorType ON assetData(processorType)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_assetClass ON assetData(assetClass)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_filePath ON assetData(filePath)',
+      // 远端导入按路径查重（remoteImportPath.ts）：filePath / originPath 各配一个
+      // 带 isDelete 的复合索引。老库在这里打开时顺手补上，见 initializeVaultDatabase 的调用点。
+      'CREATE INDEX IF NOT EXISTS idx_assetData_filePath_isDelete ON assetData(filePath, isDelete)',
+      'CREATE INDEX IF NOT EXISTS idx_assetData_originPath_isDelete ON assetData(originPath, isDelete)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_isDelete ON assetData(isDelete)',
       // 🚀 性能优化：添加 assetName 索引（常用于排序和搜索）
       'CREATE INDEX IF NOT EXISTS idx_assetData_assetName ON assetData(assetName COLLATE NOCASE)',
