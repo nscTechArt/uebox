@@ -74,6 +74,18 @@ function mockEngine(actors: unknown[] = [CORNER_PIVOT, CENTER_PIVOT]): void {
   })
 }
 
+/** get_info 照常，但第 n 次 set_transform（从 1 数）回一个引擎失败 */
+function mockEngineFailingAt(n: number, actors: unknown[] = [CORNER_PIVOT, CENTER_PIVOT]): void {
+  let moves = 0
+  callRequest.mockImplementation(async (method: string) => {
+    if (method === 'actor.get_info') return { actors }
+    moves += 1
+    return moves === n
+      ? { ok: false, error: 'No actor found matching the specified names/paths' }
+      : { count: 1 }
+  })
+}
+
 /** 发出去的每一次 set_transform 的目标位置，按调用顺序 */
 const sentLocations = (): Vec[] =>
   callRequest.mock.calls
@@ -195,5 +207,338 @@ describe('arrange：算不出来的时候干净地停住', () => {
     expect(result.success).toBe(false)
     expect(String(result.error)).toContain('arrange')
     expect(callRequest).not.toHaveBeenCalled()
+  })
+
+  /**
+   * 引擎报错是 **resolve 不是 throw** —— `services/websocket/server.ts` 把 code>=400
+   * 规范化成 `{ok:false, success:false, error}` 原样返回。所以「await 了没抛异常」
+   * 不等于「改成功了」。不看回包的话，「这个 Actor 刚被改名了，404」和真的挪好了
+   * 在调用方眼里一模一样，而回执还会加一句「不用再逐个回读位置」。
+   */
+  it('引擎回 ok:false 时不许报成功，并说清已经挪了几个', async () => {
+    mockEngineFailingAt(2)
+
+    const result = await run({
+      targets: { names: ['A', 'B'] },
+      operation: { arrange: { axis: 'y', gap: 50, start: 0 } }
+    })
+
+    expect(result.success).toBe(false)
+    // 发了两次，但只有第一次引擎确认动了 —— 报的是确认数，不是请求数。
+    // 结构化数据要放 details：适配层只转发 error/code/details，顶层字段会被丢掉
+    const details = result.details as Record<string, unknown>
+    expect(details.moved).toBe(1)
+    expect(details.requested).toBe(2)
+    expect(sentLocations()).toHaveLength(2)
+    // 重试要能原地接上，否则游标会从已经挪过的那批重新起算
+    expect(String(result.error)).toContain('start: 0')
+    expect(String(result.error)).toContain('不会回滚')
+  })
+
+  it('名字一个都没对上时报错，不返回 Infinity/NaN 的「成功」', async () => {
+    // 引擎按 filter 命中了别的 Actor，names 里那个拼错了
+    mockEngine([{ ...CORNER_PIVOT, name: 'Other' }])
+
+    const result = await run({
+      targets: { names: ['wall_typo'] },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('wall_typo')
+    expect(JSON.stringify(result)).not.toContain('Infinity')
+    expect(JSON.stringify(result)).not.toContain('NaN')
+    expect(sentLocations()).toHaveLength(0)
+  })
+
+  it('名字只对上一半也拒绝 —— 少排一栋的街看起来完全正常', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: ['A', 'H2_typo', 'B'] },
+      operation: { arrange: { axis: 'y', gap: 50, start: 0 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.unmatched_targets).toEqual(['H2_typo'])
+    expect(sentLocations()).toHaveLength(0)
+  })
+
+  /** 引擎的名字匹配不分大小写，回给我们的是 GetActorLabel() 的原样大小写 */
+  it('大小写不同的名字照样认得出来', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: ['a', 'b'] },
+      operation: { arrange: { axis: 'y', gap: 50, start: 0 } }
+    })
+
+    expect(result.success).toBe(true)
+    expect(sentLocations()).toHaveLength(2)
+  })
+
+  /** 名字不唯一（getActor.ts 明写着「path 是唯一的，名字不是」） */
+  it('重名不会把同一个 Actor 摆两次', async () => {
+    mockEngine([CORNER_PIVOT])
+    const result = await run({
+      targets: { names: ['A', 'A'] },
+      operation: { arrange: { axis: 'y', gap: 50, start: 0 } }
+    })
+
+    // 池子里只有一个 A，第二个 A 对不上 —— 报出来，而不是把那一个摆两次
+    expect(result.success).toBe(false)
+    expect(result.unmatched_targets).toEqual(['A'])
+  })
+
+  it('get_info 失败时报真实错误，不说成「你没选中东西」', async () => {
+    callRequest.mockImplementation(async (method: string) => {
+      if (method === 'actor.get_info') {
+        return { ok: false, error: 'Unknown filter key: klass', __rpc: { code: 400 } }
+      }
+      return { count: 1 }
+    })
+
+    const result = await run({
+      targets: { filter: { klass: 'Light' } },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('Unknown filter key')
+    expect(String(result.error)).not.toContain('没有选中任何 Actor')
+  })
+
+  it('align.axis 写成大写就报错，不静默算出 NaN', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: ['A'] },
+      operation: { arrange: { axis: 'y', gap: 50, align: { axis: 'X', value: -1310 } } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('align.axis')
+    expect(callRequest).not.toHaveBeenCalled()
+  })
+
+  it('align.edge 拼错就报错，不静默退回 min', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: ['A'] },
+      operation: {
+        arrange: { axis: 'y', gap: 50, align: { axis: 'x', edge: 'centre', value: 0 } }
+      }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('align.edge')
+  })
+
+  /**
+   * 模型把嵌套对象序列化成字符串是这个文件从头就在防的事。`gap: "200"` 原来会
+   * 静默变成 0：20 栋楼严丝合缝贴在一起，success 照报，回执还说「间距 0 厘米」——
+   * 自洽得看不出毛病，只有截图才发现。
+   */
+  it('gap / start 给成字符串就报错，不静默当默认值', async () => {
+    mockEngine()
+    const gapResult = await run({
+      targets: { names: ['A'] },
+      operation: { arrange: { axis: 'y', gap: '200' } }
+    })
+    expect(gapResult.success).toBe(false)
+    expect(String(gapResult.error)).toContain('arrange.gap')
+
+    const startResult = await run({
+      targets: { names: ['A'] },
+      operation: { arrange: { axis: 'y', gap: 0, start: '-800' } }
+    })
+    expect(startResult.success).toBe(false)
+    expect(String(startResult.error)).toContain('arrange.start')
+    expect(callRequest).not.toHaveBeenCalled()
+  })
+
+  /**
+   * 名字一个都没对上时引擎回的是 404，不是「200 + 空 actors」——
+   * 插件只把 filter 那条翻译成 200 空列表。原来这会走到「查询失败」那一支，
+   * 回一句英文，而且 404 会被适配层抛成 EngineNotFoundError。
+   */
+  it('全部名字都没对上（引擎 404）也走同一句中文指引', async () => {
+    callRequest.mockImplementation(async (method: string) => {
+      if (method === 'actor.get_info') {
+        return {
+          ok: false,
+          error: 'No actor found matching the specified names/paths',
+          __rpc: { code: 404 }
+        }
+      }
+      return { count: 1 }
+    })
+
+    const result = await run({
+      targets: { names: ['Wall_A', 'Wall_B'] },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('Wall_A')
+    expect(String(result.error)).toContain('不会少排几个凑合过去')
+    expect(result.unmatched_count).toBe(2)
+  })
+
+  it('没有几何体的 Actor 不劝人去升级插件', async () => {
+    // 插件无条件发 bounds，只在包围盒有效时才发 min/max —— 点光源永远没有
+    mockEngine([
+      {
+        name: 'PointLight_1',
+        path: '/L/PointLight_1',
+        transform: { location: { x: 0, y: 0, z: 0 } },
+        bounds: { x: 0, y: 0, z: 0 }
+      }
+    ])
+
+    const result = await run({
+      targets: { names: ['PointLight_1'] },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('没有可量的包围盒')
+    expect(String(result.error)).not.toContain('升级引擎插件')
+  })
+
+  it('重名点两次时说「不够用」，不说「没找到」', async () => {
+    // 引擎按名字只解析得出一个（FindActorByLabel 取第一个命中，结果进 TSet）
+    mockEngine([CORNER_PIVOT])
+    const result = await run({
+      targets: { names: ['A', 'A'] },
+      operation: { arrange: { axis: 'y', gap: 50, start: 0 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('不够用')
+    expect(String(result.error)).toContain('targets.paths')
+    expect(String(result.error)).not.toContain('在关卡里没找到')
+  })
+
+  it('names 给成裸字符串时报错，不逐字符去找', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: 'MyCube' },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('targets.names')
+    expect(callRequest).not.toHaveBeenCalled()
+  })
+
+  it('names 里混了非字符串也报错，不抛 TypeError', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: ['A', 123] },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('targets.names')
+  })
+
+  it('space 和 arrange 同时给时拒绝，不默默按世界坐标排', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: ['A'] },
+      operation: { space: 'Local', arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('space')
+    expect(callRequest).not.toHaveBeenCalled()
+  })
+
+  it('超过 100 个时按真实总数报，不报被截断的数', async () => {
+    const many = Array.from({ length: 101 }, (_, i) => ({
+      ...CORNER_PIVOT,
+      name: `A${i}`,
+      path: `/L/A${i}`
+    }))
+    callRequest.mockImplementation(async (method: string) => {
+      if (method === 'actor.get_info') return { actors: many, total_found: 500 }
+      return { count: 1 }
+    })
+
+    const result = await run({
+      targets: { filter: {} },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('500')
+    expect(sentLocations()).toHaveLength(0)
+  })
+
+  it('names 和 filter 混着给时拒绝，不把筛出来的那些悄悄丢掉', async () => {
+    mockEngine()
+    const result = await run({
+      targets: { names: ['A'], filter: { class: 'StaticMeshActor' } },
+      operation: { arrange: { axis: 'y', gap: 50 } }
+    })
+
+    expect(result.success).toBe(false)
+    expect(sentLocations()).toHaveLength(0)
+  })
+})
+
+describe('arrange：中止与世界归属', () => {
+  /**
+   * 守的是「不再往场景里写」这一件事，**不是回执**。
+   *
+   * 回执到不了模型：适配层把 execute 包在 `runAbortable` 里，那是一场
+   * `Promise.race`，abort 一触发就立刻 reject 成 ToolAbortedError，我们这个
+   * return 慢一个微任务，永远输。这个用例直接调 execute（绕开适配层），
+   * 所以它能看到返回值 —— 但生产环境看不到，别据此以为模型会拿到 moved。
+   */
+  it('用户按停止之后不再往场景里写', async () => {
+    mockEngine()
+    const controller = new AbortController()
+    let moves = 0
+    callRequest.mockImplementation(async (method: string) => {
+      if (method === 'actor.get_info') return { actors: [CORNER_PIVOT, CENTER_PIVOT] }
+      moves += 1
+      controller.abort() // 第一个刚挪完，用户就按了停止
+      return { count: 1 }
+    })
+
+    const tool = createSetTransformUnifiedTool() as unknown as {
+      execute: (input: unknown, options?: { abortSignal?: AbortSignal }) => Promise<ToolResult>
+    }
+    const result = await tool.execute(
+      { targets: { names: ['A', 'B'] }, operation: { arrange: { axis: 'y', gap: 50, start: 0 } } },
+      { abortSignal: controller.signal }
+    )
+
+    expect(result.aborted).toBe(true)
+    expect((result.details as Record<string, unknown>).moved).toBe(1)
+    expect(moves).toBe(1) // 第二个没发出去 —— 这条才是生产环境真正依赖的
+  })
+
+  /** PIE 里排完就没了，不说一声的话模型会把「改成功了」原样转述给用户 */
+  it('PIE 世界要在回执里点出来', async () => {
+    callRequest.mockImplementation(async (method: string) => {
+      if (method === 'actor.get_info') {
+        return {
+          actors: [CORNER_PIVOT],
+          world: 'pie',
+          world_note: '改动不落盘，停止 PIE 就没了'
+        }
+      }
+      return { count: 1 }
+    })
+
+    const result = await run({
+      targets: { names: ['A'] },
+      operation: { arrange: { axis: 'y', gap: 0, start: 0 } }
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.world).toBe('pie')
+    expect(String(result.message)).toContain('游戏正在运行')
+    expect(String(result.message)).toContain('停止 PIE 就没了')
   })
 })

@@ -247,6 +247,20 @@ const ENDPOINT_NODE = /^[A-Za-z0-9_]+$/
  */
 const ENGINE_NODE_ID = /(_\d+$)|(^[0-9A-Fa-f]{32}$)/
 
+/**
+ * 主节点别名在**这一处**归一化，别让各处自己去比大小写。
+ *
+ * 插件那侧 `TargetNode == TEXT("Material")` 走的是 Stricmp，所以 `"material"`
+ * 一直是能连上的。预检和 `connect()` 各写一套比较法的话，两边会错开：预检放行了
+ * 小写，`connect()` 却还在用严格 ===，于是它掉进「查局部 id 映射」那条路 ——
+ * 恰好有人把某个新节点的局部 id 起名叫 `material` 时，BaseColor 会被悄悄接到
+ * 那个节点上，主输出一根线都没有，而且没有任何一处报错。
+ * 归一化放在入口，下游一律拿到规范写法，这类错位就不可能发生。
+ */
+function normalizeEndpointNode(node: string): string {
+  return node.toLowerCase() === MATERIAL_OUTPUT.toLowerCase() ? MATERIAL_OUTPUT : node
+}
+
 function splitEndpoint(raw: string, side: 'from' | 'to'): { node: string; pin: string } {
   const trimmed = raw.trim()
   const dot = trimmed.indexOf('.')
@@ -259,7 +273,7 @@ function splitEndpoint(raw: string, side: 'from' | 'to'): { node: string; pin: s
         `例如 "tex.RGB" 或 "${MATERIAL_OUTPUT}.BaseColor"。`
     )
   }
-  return { node, pin }
+  return { node: normalizeEndpointNode(node), pin }
 }
 
 const NodeSchema = z.object({
@@ -521,6 +535,15 @@ function preflight(input: Input): void {
     }
     seen.add(node.id)
 
+    // `Material`（含大小写变体）是主输出的保留写法，拿它当局部 id 的话
+    // 连到它的线会被当成接主输出，这个节点从此指不到 —— 当场说清楚
+    if (node.id.toLowerCase() === MATERIAL_OUTPUT.toLowerCase()) {
+      throw new Error(
+        `节点 id 不能叫「${node.id}」：${MATERIAL_OUTPUT} 是材质主输出的保留写法（不分大小写），` +
+          '连线时会被当成主节点。换个 id 重发。'
+      )
+    }
+
     if (PARAMETER_NODE_TYPES.has(node.node_type) && !node.node_name) {
       throw new Error(
         `节点 ${node.id}（${node.node_type}）缺 node_name。参数节点不给名字会用引擎默认的 ` +
@@ -552,20 +575,8 @@ function preflight(input: Input): void {
     const from = splitEndpoint(conn.from, 'from')
     const to = splitEndpoint(conn.to, 'to')
     for (const node of [from.node, to.node]) {
-      /*
-       * 主节点别名要**不分大小写**地认。
-       *
-       * 插件那侧是 `TargetNode == TEXT("Material")`，而 UE 的 `FString::operator==`
-       * 走 Stricmp —— 所以 `"material.BaseColor"` 一直是能连上的。这里要是用
-       * JS 的严格 === 去比，就凭空比引擎窄了一档：一个本来能跑的写法被挡在门外，
-       * 报的还是「这是上次调用的局部 id」这么个完全不沾边的理由。
-       */
-      if (
-        seen.has(node) ||
-        node.toLowerCase() === MATERIAL_OUTPUT.toLowerCase() ||
-        ENGINE_NODE_ID.test(node)
-      )
-        continue
+      // 大小写已经在 splitEndpoint 里归一化了，这里和 connect() 一样用严格比较
+      if (node === MATERIAL_OUTPUT || seen.has(node) || ENGINE_NODE_ID.test(node)) continue
       throw new Error(
         `连线端点「${node}」既不在本次 nodes 里，也不像引擎的 node_id。` +
           '局部 id **只在这一次调用里有效** —— 上一次调用返回的那批，这次已经失效了。' +

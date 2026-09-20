@@ -99,6 +99,11 @@ calls of 50, not one call of 200.
 
 ## Modular kits: read the pivot before you compute a single coordinate
 
+> For a **row** of objects — a street, a fence, a shelf — skip this arithmetic entirely and use
+> `ue_set_transform`'s `arrange` operation (see "Laying out a row" below). It works off measured
+> bounding boxes, so the pivot cannot trip it up. The rest of this section is for single objects
+> and for "this one edge must sit at this coordinate".
+
 A floor, four walls and a ceiling only line up if you know **where each mesh's origin sits
 relative to its geometry**. That convention is not uniform, not even inside one asset pack:
 floors are often pivoted at a corner and extend towards +X/+Y, while walls and ceilings are
@@ -153,7 +158,41 @@ in the schema, so the shapes only exist in the tool description — read it befo
 { multiply: { location: { x: 100, y: 100, z: 100 } } } the metres→cm rescue
 { space: "Local", add: { ... } }           default space is World
 { snap_to_floor: true }                    on the operation itself, never inside `set`
+{ arrange: { axis, gap, start?, align? } } lay a set out along one axis, no overlap
 ```
+
+### Laying out a row — do not compute the spacing yourself
+
+`arrange` is the operation for "put these N things in a line": a street of houses, a fence, a
+shelf of props.
+
+```
+{ arrange: { axis: "y", gap: 200, start: -800,
+             align: { axis: "x", edge: "min", value: -1310 } } }
+```
+
+`gap` is **edge to edge on the real bounding box**, so objects of different sizes never overlap
+and never leave a gap you did not ask for. `align` pins each object's `min`/`max`/`center` to a
+line on a second axis — that is how you get a row flush against a road or a wall. Without
+`start` the row is laid out in place, beginning at the current front-most edge. With
+`targets.names` the order you wrote is the order on the ground.
+
+**This replaces the pivot arithmetic in the section above for rows.** Computing `x += width +
+gap` from `mesh_describe` is where placement actually goes wrong: the origin sits in a different
+spot on every asset, so the arithmetic is right for half your kit and silently wrong for the
+other half. `arrange` never touches the origin — it pushes each object's measured `min` edge to
+a cursor — so that whole class of failure does not exist. Read the pivot section for single
+objects and for "this edge must sit at this coordinate" cases; use `arrange` for rows.
+
+Limits worth knowing before you call it: 100 actors per call, mutually exclusive with
+`set`/`add`/`multiply`/`snap_to_floor` (arrange first, then snap in a second call), and it
+refuses rather than half-doing the job — an unresolved name, or a mix of `names` with
+`filter`/`paths`, comes back as an error naming what it could not place. If a move fails
+part-way it says how many already moved and gives you the `start` to pass on the retry.
+
+Undo is **one entry per actor**, not one per call, because each actor is moved by its own
+command. Arranging 20 buildings puts 20 entries on the stack — `ue_undo` with `steps: 1` will
+put back exactly one of them.
 
 ### Putting something on the ground
 

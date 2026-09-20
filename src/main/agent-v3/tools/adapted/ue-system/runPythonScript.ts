@@ -63,11 +63,31 @@ export function createRunPythonScriptTool(): V2Tool {
       )
 
       if (!result.success) {
-        if (options?.abortSignal?.aborted) {
+        if (options?.abortSignal?.aborted || result.aborted) {
           return { success: false, aborted: true, error: result.error }
         }
+        /*
+         * 「没确认上」才补这段排查指引，脚本自己报错不补。
+         *
+         * 主线程被死循环占住时，后面每一条命令（连只读的）都会一起超时 ——
+         * 试探问不出任何东西，只是每次再赔一个超时。真机上撞到过：一个 `continue`
+         * 前不前进的循环卡死编辑器，之后又白发了两条命令才反应过来。能在这种状态下
+         * 回话的只有 `ue_session_health`（进程检测在盒子侧做，不走引擎 RPC）。
+         *
+         * 拼在这里而不是 `runEditorPython` 里：那个 `error` 还有两条路会原样弹给
+         * 用户看，而这段话是说给模型听的、还点名了一个用户调不到的工具。
+         */
+        const hint = result.unconfirmed
+          ? '\n不要再发命令试探 —— 主线程被占住时所有命令都会一起超时。' +
+            '先用 ue_session_health 看编辑器进程还在不在，真卡死了请用户重启编辑器，' +
+            '重启后先回读现场再继续。'
+          : ''
         // V3 的失败适配只保留 error/details；stdout 单独放顶层会被丢掉。
-        return { success: false, error: result.error, details: { stdout: result.stdout } }
+        return {
+          success: false,
+          error: (result.error ?? 'Python 执行失败') + hint,
+          details: { stdout: result.stdout }
+        }
       }
 
       let message = 'Python 脚本执行成功'

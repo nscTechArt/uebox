@@ -95,8 +95,26 @@ function isAxis(value: unknown): value is Axis {
 
 /** 三个分量都在且都是有限数才算拿到了坐标：缺一个轴会算出 NaN，JSON 出去变 null */
 function isFiniteVec(vec: { x?: number; y?: number; z?: number } | undefined): boolean {
+  return !!vec && Number.isFinite(vec.x) && Number.isFinite(vec.y) && Number.isFinite(vec.z)
+}
+
+/** 真数字，不含 "200" 这种字符串。入参没有 schema 把关，这层要自己判 */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+/**
+ * names 必须是一串非空字符串。
+ *
+ * `targets` 是 `z.unknown()` 断言来的，什么都可能进来。`names: "MyCube"` 的
+ * `.length` 是 6，`for...of` 会把它拆成六个字符，回执变成「没找到：M、y、C、u、b、e」；
+ * `names: ["A", 123]` 则会在不分大小写那步抛 TypeError，掉进外层 catch，
+ * 连「这是 arrange 出的错」都看不出来。
+ */
+function isNameList(value: unknown): value is string[] {
   return (
-    !!vec && Number.isFinite(vec.x) && Number.isFinite(vec.y) && Number.isFinite(vec.z)
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'string' && item.trim().length > 0)
   )
 }
 
@@ -282,6 +300,12 @@ interface ArrangeActorInfo {
   name?: string
   path?: string
   transform?: { location?: { x: number; y: number; z: number } }
+  /**
+   * 世界空间包围盒的尺寸。排布用不到它，但**诊断要靠它**：
+   * 插件只在 `Bounds.IsValid` 时才发 min/max，而 `bounds` 是无条件发的。
+   * 两者一起看才分得清「插件太旧」和「这个 Actor 没有几何体」。
+   */
+  bounds?: { x: number; y: number; z: number }
   bounds_min?: { x: number; y: number; z: number }
   bounds_max?: { x: number; y: number; z: number }
 }
@@ -316,16 +340,33 @@ const MAX_ARRANGE = 100
 const ARRANGE_STEP_TIMEOUT = 30_000
 
 /**
+ * 整个排布的总时限。
+ *
+ * 光有单步超时是兜不住的：100 步 × 30 秒还是 50 分钟，比 `MAX_ARRANGE` 注释里
+ * 承诺的「好几分钟」大一个数量级，也比 `ue_run_python_script` 对外写的 5 分钟上限
+ * 长十倍。单步超时只能保证「不会卡在某一个上」，管不住「一步一步慢慢耗光一小时」。
+ * 超了就从 `partial()` 那条路出去 —— 已经挪了几个、重试要带什么 start，都在那儿。
+ */
+const ARRANGE_TOTAL_BUDGET = 5 * 60_000
+
+/**
  * 这一次 set_transform 到底动成了没有。
  *
  * 引擎报错是 **resolve 不是 throw**：`services/websocket/server.ts` 把 code>=400
  * 规范化成 `{ ok:false, success:false, error }` 原样返回。所以「await 了没抛异常」
  * 完全不等于「改成功了」—— 不看回包的话，404（这个 Actor 刚被改名/卸载了）
- * 和真的挪好了长得一模一样。判据和本文件非 arrange 那条路一致：
- * 明说 false 就是失败，否则看 count/actors 数得出来算数。
+ * 和真的挪好了长得一模一样。
+ *
+ * **和非 arrange 那条路共用一个判据。** 这里原来漏了 `ok === true` 那一支，于是
+ * 一个只回 `{ok:true}`、不带 count 的老插件在 set/add 那边算成功、在 arrange 这边
+ * 算「引擎没确认挪动」—— 而 arrange 失败即停，整排会在第一个之后放弃，回执还说
+ * 「前 N 个已经挪到新位置了」。同一份回包不能有两种读法，所以抽成一个函数两边都用。
  */
-function movedOk(response: SetTransformUnifiedResponse | undefined): boolean {
+function transformApplied(
+  response: Pick<SetTransformUnifiedResponse, 'ok' | 'success' | 'count' | 'actors'> | undefined
+): boolean {
   if (response?.ok === false || response?.success === false) return false
+  if (response?.ok === true || response?.success === true) return true
   const affected = response?.count ?? response?.actors?.length ?? 0
   return affected > 0
 }
@@ -346,7 +387,29 @@ async function arrangeActors(
   if (!isAxis(axis)) {
     return { success: false, error: 'arrange.axis 必填，取 "x" / "y" / "z" 之一：沿哪根轴排开。' }
   }
-  const gap = typeof arrange.gap === 'number' && Number.isFinite(arrange.gap) ? arrange.gap : 0
+
+  /*
+   * 数字字段给错类型要**报错**，不能悄悄用默认值顶上。
+   *
+   * 模型把嵌套对象序列化成 JSON 字符串是这个文件从头就在防的事（execute 里那一大段
+   * JSON.parse 兜底就是为它写的），所以 `gap: "200"` 是个现实输入。而它原来会静默
+   * 变成 `gap = 0`：20 栋楼严丝合缝贴在一起，success 照报，回执还说「间距 0 厘米」——
+   * 自洽得看不出毛病，只有截图才发现。`start: "-800"` 同理，整排落在原地。
+   * 下面 align 的三个字段都是硬拒绝的，这两个没道理宽松。
+   */
+  if (arrange.gap !== undefined && !isFiniteNumber(arrange.gap)) {
+    return {
+      success: false,
+      error: `arrange.gap 要是数字（厘米），收到的是 ${JSON.stringify(arrange.gap)}。字符串不会被当成数字。`
+    }
+  }
+  if (arrange.start !== undefined && !isFiniteNumber(arrange.start)) {
+    return {
+      success: false,
+      error: `arrange.start 要是数字（厘米），收到的是 ${JSON.stringify(arrange.start)}。字符串不会被当成数字。`
+    }
+  }
+  const gap = isFiniteNumber(arrange.gap) ? arrange.gap : 0
 
   /*
    * align 的三个字段都要真校验，不能只看「给没给」。
@@ -371,7 +434,8 @@ async function arrangeActors(
     if (typeof alignValue !== 'number' || !Number.isFinite(alignValue)) {
       return {
         success: false,
-        error: 'arrange.align.value 必填且要是有限数字，例如 { axis: "x", edge: "min", value: -1310 }。'
+        error:
+          'arrange.align.value 必填且要是有限数字，例如 { axis: "x", edge: "min", value: -1310 }。'
       }
     }
     if (align.edge !== undefined && !['min', 'max', 'center'].includes(align.edge)) {
@@ -387,6 +451,17 @@ async function arrangeActors(
       }
     }
   }
+
+  // names 的形状要在发命令之前定下来：下面整段排序逻辑都按「一串字符串」写的
+  if (targets.names !== undefined && !isNameList(targets.names)) {
+    return {
+      success: false,
+      error:
+        `targets.names 要是字符串数组（如 ["A", "B"]），收到的是 ${JSON.stringify(targets.names)}。` +
+        '单个名字也要写成数组。'
+    }
+  }
+  const wantedNames = isNameList(targets.names) ? targets.names : undefined
 
   const info = await wsService.callRequest<ArrangeInfoResponse>(
     'actor.get_info',
@@ -412,13 +487,35 @@ async function arrangeActors(
    * 再来调 arrange —— 死循环。真实错误要原样带出去。
    */
   if (info?.ok === false || info?.success === false) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (info as any)?.__rpc?.code ?? (info as any)?.code
+    const failure = info as RpcFailureShape
+    const code = failure?.__rpc?.code ?? failure?.code
+    /*
+     * 点名的名字**一个都没对上**时，引擎回的是 404，不是「200 + 空 actors」。
+     *
+     * 插件那侧分得很细：`ResolveTargetsToActors` 对显式 targets 全空时写的是
+     * "No actor found matching the specified names/paths"，而 `Handle_GetActorInfo`
+     * 只把 filter 那条（"No actor matched targets"）翻译成 200 空列表，其余一律
+     * SendError(404)。于是「名字写错」这个最常见的情况会走到这里，拿到一句英文，
+     * 下面那段「arrange 不会少排几个凑合过去」的中文指引反而只在**部分**没对上时才出现。
+     * 更糟的是 404 = RPC_NOT_FOUND，适配层会把它抛成 EngineNotFoundError
+     * （那个类型的定义是「按条件没查到，不是故障」）—— 名字写错却报成查询无结果。
+     * 所以这里把它接回同一句话。
+     */
+    if (code === 404 && wantedNames?.length) {
+      return {
+        success: false,
+        error:
+          `这些名字在关卡里一个都没对上：${wantedNames.join('、')}。` +
+          'arrange 不会少排几个凑合过去 —— 名字核对好再重发（ue_get_actor 可以查真实名字）。',
+        unmatched_targets: wantedNames,
+        unmatched_count: wantedNames.length
+      }
+    }
     return {
       success: false,
-      error: `arrange 查询 Actor 失败：${info.error || info.message || '未收到有效响应'}`,
+      error: `arrange 查询 Actor 失败：${failure?.error || failure?.message || '未收到有效响应'}`,
       code,
-      raw: info
+      details: failure?.details
     }
   }
 
@@ -455,17 +552,30 @@ async function arrangeActors(
    *    再退回到不分大小写 —— 和引擎那侧的规则对齐。
    */
   const missingNames: string[] = []
+  const exhaustedNames: string[] = []
   let ordered: ArrangeActorInfo[]
-  if (targets.names?.length) {
+  if (wantedNames?.length) {
     const pool = [...found]
+    /*
+     * 「池子里没了」和「关卡里没有」是两回事，报错要分开说。
+     *
+     * 引擎把名字解析成 `TSet<AActor*>`，而 `FindActorByLabel` 对一个名字只返回
+     * **第一个**命中、且不分大小写。所以 names:["Wall","Wall"]（重名在 UE 里合法）
+     * 只会回一个 Actor：第一个 "Wall" 把它取走，第二个就什么都拿不到。
+     * 这时候说「这个名字在关卡里没找到」是假的 —— 它明明在，刚还被匹配过一次。
+     * 用整批 found 再查一遍就能分辨：查得到 = 名字不唯一/点名次数超过了实际数量。
+     */
+    const existsInBatch = (name: string): boolean =>
+      found.some((actor) => actor.name?.toLowerCase() === name.toLowerCase())
     ordered = []
-    for (const name of targets.names) {
+    for (const name of wantedNames) {
       let index = pool.findIndex((actor) => actor.name === name)
       if (index < 0) {
         index = pool.findIndex((actor) => actor.name?.toLowerCase() === name.toLowerCase())
       }
       if (index < 0) {
-        missingNames.push(name)
+        if (existsInBatch(name)) exhaustedNames.push(name)
+        else missingNames.push(name)
         continue
       }
       ordered.push(pool[index]!)
@@ -475,8 +585,13 @@ async function arrangeActors(
      * names 和 paths/selection/filter 混着给时，非 names 命中的那些会落在 pool 里。
      * 它们被查出来、被算进 MAX_ARRANGE，然后一声不响地丢掉 —— 那是「少办了一件事
      * 还报成功」，直接拒绝，让调用方把话说清楚。
+     *
+     * 只在**真的混着给**的时候这么说。targets 里只有 names 却剩下东西，
+     * 那是名字对不上（引擎按别的规则匹配到了别人），该报的是下面那条
+     * 「这些名字没找到」—— 报成「你混着给了」会把人往完全错的方向带。
      */
-    if (pool.length > 0) {
+    const mixedSelectors = Boolean(targets.paths?.length || targets.selection || targets.filter)
+    if (pool.length > 0 && mixedSelectors) {
       return {
         success: false,
         error:
@@ -499,14 +614,24 @@ async function arrangeActors(
    * 排布尤其不能含糊 —— 少一栋楼，整条街的间距全是对的，唯独缺了一个口子，
    * 而回执说「已排开 2 个」，看起来完全正常。
    */
-  if (missingNames.length > 0) {
+  if (missingNames.length > 0 || exhaustedNames.length > 0) {
+    const parts: string[] = []
+    if (missingNames.length > 0) {
+      parts.push(`这些名字在关卡里没找到：${missingNames.join('、')}`)
+    }
+    if (exhaustedNames.length > 0) {
+      // 名字在，但指不到那么多个 —— 重名或大小写变体，引擎按名字只认得出一个
+      parts.push(
+        `这些名字点到的 Actor 不够用：${exhaustedNames.join('、')}` +
+          '（名字不唯一，或同一个名字点了多次，而引擎按名字只解析得出一个）。' +
+          '要分别指定就改用 targets.paths，path 才是唯一的'
+      )
+    }
     return {
       success: false,
-      error:
-        `这些名字在关卡里没找到：${missingNames.join('、')}。` +
-        'arrange 不会少排几个凑合过去 —— 名字核对好再重发（ue_get_actor 可以查真实名字）。',
-      unmatched_targets: missingNames,
-      unmatched_count: missingNames.length
+      error: `${parts.join('；')}。arrange 不会少排几个凑合过去 —— 核对好再重发（ue_get_actor 可以查真实名字和 path）。`,
+      unmatched_targets: [...missingNames, ...exhaustedNames],
+      unmatched_count: missingNames.length + exhaustedNames.length
     }
   }
 
@@ -521,43 +646,101 @@ async function arrangeActors(
       !isFiniteVec(actor.transform?.location)
   )
   if (incomplete.length > 0) {
+    /*
+     * 「插件太旧」和「这个 Actor 没有几何体」要分开说。
+     *
+     * 插件无条件发 `bounds`，只在 `Bounds.IsValid` 时才发 min/max，而
+     * `GetComponentsBoundingBox` 对没有 Primitive 组件的 Actor（点光源、相机、
+     * 空的 AActor 标记、纯逻辑蓝图）在**任何版本**上都是无效的。原来那句话
+     * 一律劝人去升级插件，等于让用户为一个换多少版都不会变的事重装一遍。
+     * 有 bounds 没 min/max = 插件是新的，是这个 Actor 本身没有可量的体积。
+     */
+    const noGeometry = incomplete.filter((actor) => actor.bounds)
+    const names = (list: ArrangeActorInfo[]): string =>
+      list.map((a) => a.name ?? '(无名)').join('、')
     return {
       success: false,
       error:
-        `这些 Actor 没回包围盒：${incomplete.map((a) => a.name ?? '(无名)').join('、')}。` +
-        'bounds_min / bounds_max 是后加的字段，插件太旧就没有 —— 升级引擎插件后再用 arrange。'
+        noGeometry.length === incomplete.length
+          ? `这些 Actor 没有可量的包围盒：${names(noGeometry)}。` +
+            '它们没有任何带体积的组件（点光源、相机、空 Actor、纯逻辑蓝图都是这样），' +
+            'arrange 按包围盒排布，排不了没有体积的东西 —— 用 ue_set_transform 的 set.location 直接给坐标。'
+          : `这些 Actor 没回包围盒：${names(incomplete)}。` +
+            (noGeometry.length > 0
+              ? `其中 ${names(noGeometry)} 是没有带体积的组件；其余` + '可能是引擎插件太旧'
+              : 'bounds_min / bounds_max 是后加的字段，插件太旧就没有') +
+            ' —— 先确认插件版本，再决定要不要把没体积的那些从 targets 里去掉。'
     }
   }
 
-  const startEdge =
-    typeof arrange.start === 'number' && Number.isFinite(arrange.start)
-      ? arrange.start
-      : Math.min(...ordered.map((actor) => actor.bounds_min![axis]))
+  const startEdge = isFiniteNumber(arrange.start)
+    ? arrange.start
+    : Math.min(...ordered.map((actor) => actor.bounds_min![axis]))
 
   let cursor = startEdge
   const placed: Array<{ name?: string; location: { x: number; y: number; z: number } }> = []
-  const failed: string[] = []
+  const deadline = Date.now() + ARRANGE_TOTAL_BUDGET
 
-  /** 半路停下时统一从这里出去：已经挪了几个必须说，否则重试会把整排再推一遍 */
-  const partial = (reason: string): Record<string, unknown> => ({
-    success: false,
-    error:
-      `arrange 停在第 ${placed.length + 1} 个（共 ${ordered.length} 个）：${reason}。` +
-      `**前 ${placed.length} 个已经挪到新位置了，不会回滚。**` +
-      (placed.length > 0
-        ? `重试前先给 start: ${startEdge}（不给的话游标会从已经挪过的那批重新起算，整排再推一次）。`
-        : ''),
-    moved: placed.length,
-    requested: ordered.length,
-    actors: placed,
-    ...worldFields(info)
-  })
+  /*
+   * 半路停下时统一从这里出去。
+   *
+   * 要交代的东西**必须写进 `error` 这一句里**：适配层的 `describeV2Failure` 只转发
+   * error / code / diagnostics / details / nextStepHint，其余顶层字段（moved、
+   * requested、actors、world）在模型看到之前就被丢掉了。所以结构化数据放 `details`
+   * （那个会转发），人要读的那几句放 `error`。
+   *
+   * 重试那句还得说「按 names 重发」：没给 names 时顺序是按**当前坐标**排的，
+   * 而这会儿前半排已经挪走了，同一个 start 再跑一次会得到另一种顺序。
+   */
+  const partial = (reason: string, extra?: Record<string, unknown>): Record<string, unknown> => {
+    const done = placed.length
+    const head =
+      done > 0
+        ? `arrange 停在第 ${done + 1} 个（共 ${ordered.length} 个）：${reason}。**前 ${done} 个已经挪到新位置了，不会回滚。**`
+        : `arrange 在第 1 个就停了（共 ${ordered.length} 个）：${reason}。场景没有任何改动。`
+    const retry =
+      done > 0
+        ? `重试请带 start: ${startEdge}（不带的话游标会从已经挪过的那批重新起算，整排再推一次）` +
+          (wantedNames?.length
+            ? '。' // names 已经钉死了顺序，照原样重发即可
+            : '，并且改用 targets.names 按你要的顺序点名 —— 现在这批是按当前坐标排序的，' +
+              '前半排已经挪走，同一个 start 再跑一次顺序会变。')
+        : ''
+    return {
+      success: false,
+      error: head + retry,
+      details: {
+        moved: done,
+        requested: ordered.length,
+        retry_start: startEdge,
+        moved_actors: placed,
+        ...worldFields(info)
+      },
+      ...(extra ?? {})
+    }
+  }
 
   for (const actor of ordered) {
-    // 用户按了停止就别再往场景里写了。剩下的命令发出去，场景会在工具早已返回之后
-    // 继续自己重排，而且这事不进 transcript（见 tools/abortable.ts）
+    /*
+     * 用户按了停止就别再往场景里写了。
+     *
+     * **只有「停止继续写」这一半是有效的。** 回执那一半到不了模型：适配层把
+     * execute 包在 `runAbortable` 里，那是一场 `Promise.race`，abort 事件一触发
+     * 就立刻 reject 成 ToolAbortedError —— 我们这个 return 慢一个微任务，永远输。
+     * 所以下面这些话是写给日志和排查的人看的，模型只会拿到通用的「已停止」。
+     * 想让模型知道已经挪了几个，得让插件支持一次调用摆多个位置（见文件末尾的说明）。
+     */
     if (signal?.aborted) {
-      return { ...partial('用户中止'), aborted: true }
+      const stopped = partial('用户中止')
+      console.warn('[SetTransformUnifiedTool] arrange 被中止：', stopped.error)
+      return { ...stopped, aborted: true }
+    }
+
+    // 单步超时挡不住「一步一步慢慢耗光一小时」，总时限才行
+    if (Date.now() > deadline) {
+      return partial(
+        `整批超过 ${ARRANGE_TOTAL_BUDGET / 60_000} 分钟总时限（引擎一直在忙，不是某一步卡住）`
+      )
     }
 
     const min = actor.bounds_min!
@@ -592,13 +775,19 @@ async function arrangeActors(
         ARRANGE_STEP_TIMEOUT
       )
     } catch (error) {
-      return partial(error instanceof Error ? error.message : String(error))
+      /*
+       * 抛出来的错要过 `describeToolError`，不能只取 message。
+       *
+       * 少了它就少了 `code` —— 超时那一档（V2_TIMEOUT_CODE）全靠它才会被适配层
+       * 认成 EngineTimeoutError。丢掉之后宿主一律盖成 TOOL_FAILED，调用方读到
+       * 「确定失败了」就重试，而超时那一刻这个 Actor 很可能已经挪过去了，于是挪两次。
+       * `tools/engineErrors.ts` 的文件头写的就是这件事，本函数外层的 catch 也是这么做的。
+       */
+      const described = describeToolError(error)
+      return partial(String(described.error ?? error), { code: described.code })
     }
 
-    if (!movedOk(response)) {
-      failed.push(
-        `${actor.name ?? actor.path ?? '(无名)'}：${response?.error || response?.message || '引擎没确认挪动'}`
-      )
+    if (!transformApplied(response)) {
       /*
        * 一个没挪动，后面全都不能接着排。
        *
@@ -606,7 +795,9 @@ async function arrangeActors(
        * 按一个并不存在的布局算出来的 —— 场景里会得到一排看着整齐、实际和请求
        * 对不上的东西。停在这儿，把已经挪了几个说清楚。
        */
-      return { ...partial(failed[0]!), failed }
+      const who = actor.name ?? actor.path ?? '(无名)'
+      const why = response?.error || response?.message || '引擎没确认挪动'
+      return partial(`${who}：${why}`)
     }
 
     placed.push({ name: actor.name, location })
@@ -631,20 +822,24 @@ async function arrangeActors(
       '位置按各自回读的真实包围盒算，没有用原点或标称尺寸推算。' +
       describeWorld(info) +
       describeUnmatchedTargets(info) +
-      describePlacementScale(placed.map((item) => item.location)),
-    /*
-     * 撤销是**一个 Actor 一条**，不是一次排布一条。
-     *
-     * 插件的 `actor.set_transform` 在 `for (AActor* ...)` 外面开事务，本来给的是
-     * 「一次调用一个撤销组」；而这里一个 Actor 发一次命令，等于主动把它拆了。
-     * 排 20 栋楼就是 20 条同名撤销记录，`ue_undo` 退一步只退回一栋，
-     * 而 `ue_undo_history` 默认只看 20 条 —— 一次排布正好把整个默认窗口占满。
-     * 要修得让插件收一份「每个 Actor 各自的位置」的清单（`actor.spawn` 的
-     * `instances` 就是这个形状），那要改 C++ 并重出插件包，不在这一层能解决。
-     */
-    _aiInstruction:
-      '排布完成。要确认就用 ue_screenshot 看一眼。' +
-      '注意撤销是一个 Actor 一条记录，整排退回去要给 ue_undo 相应的步数。'
+      describePlacementScale(placed.map((item) => item.location)) +
+      /*
+       * 撤销那句话**必须放在 message 里，不能放 `_aiInstruction`**。
+       *
+       * `adaptV2Tool` 的 `toText` 会 `delete rest._aiInstruction` 再序列化
+       * （那个字段是 V2 用来驱动 Router 的，V3 没有 done 工具），所以写在那儿
+       * 等于没写 —— 而这句话是这个设计缺陷唯一的兜底。
+       *
+       * 缺陷本身：插件的 `actor.set_transform` 在 `for (AActor* ...)` 外面开事务，
+       * 本来给的是「一次调用一个撤销组」，而这里一个 Actor 发一次命令，等于主动拆了它。
+       * 排 20 栋楼就是 20 条同名撤销记录，`ue_undo` 退一步只退回一栋，而
+       * `ue_undo_history` 默认只看 20 条 —— 一次排布正好把整个默认窗口占满。
+       * 要真修得让插件收一份「每个 Actor 各自的位置」的清单（`actor.spawn` 的
+       * `instances` 就是这个形状），那要改 C++ 并重出插件包，不在这一层能解决。
+       */
+      `\n撤销是**一个 Actor 一条记录**（不是一次排布一条）：整排退回去要给 ue_undo 相应的步数，` +
+      `这一批是 ${placed.length} 步。`,
+    _aiInstruction: '排布完成。要确认就用 ue_screenshot 看一眼。'
   }
 }
 
@@ -787,6 +982,23 @@ targets: { filter: {} }, operation: { multiply: { location: { x: 100, y: 100, z:
         }
       }
 
+      /*
+       * `space` 也要一起拒绝，不能默默丢掉。
+       *
+       * arrange 逐个发的是 `{ set: { location } }`，从来不带 space，所以写了
+       * `space: "Local"` 的调用会按世界坐标排完、回执一个字都不提 —— 而这个文件里
+       * 别的冲突组合（sun+face_direction、set.rotation+sun、arrange+set）全是当场拒绝的。
+       * 排布本来就是拿世界空间包围盒算的，局部坐标在这儿没有意义。
+       */
+      if (operation.arrange && operation.space && operation.space !== 'World') {
+        return {
+          success: false,
+          error:
+            `arrange 只按世界坐标排（它用的是世界空间包围盒），给不了 space: "${operation.space}"。` +
+            '去掉 space 重发；要按局部坐标挪东西请单独用 add / set。'
+        }
+      }
+
       try {
         // 获取 WebSocket 服务
         const wsService = serviceManager.getWebSocketService()
@@ -833,7 +1045,8 @@ targets: { filter: {} }, operation: { multiply: { location: { x: 100, y: 100, z:
         // 2. 插件端的 result 对象包含 count 字段表示成功处理的 Actor 数量
         // 3. 兼容旧版本可能返回的 ok/success 字段
         const affectedCount = response?.count ?? response?.actors?.length ?? 0
-        const isSuccess = response?.ok === true || response?.success === true || affectedCount > 0
+        // 和 arrange 那条路共用一个判据，否则同一份回包会有两种读法（见 transformApplied）
+        const isSuccess = transformApplied(response)
 
         console.log(
           '[SetTransformUnifiedTool] 成功判断:',

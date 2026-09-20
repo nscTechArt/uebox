@@ -133,6 +133,29 @@ describe('runEditorPython', () => {
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
   })
 
+  /**
+   * 超时和「用户按了停止」落在同一个 catch 里，但话不能是同一句。
+   *
+   * 这个 error 有两条路会原样弹给用户看（openAsset 走 message.warning、
+   * reviewChanges 进审查面板），所以「编辑器可能卡死了，请重启」这种排查指引
+   * 不能拼在这里 —— 用户只是按了个停止。指引由 ue_run_python_script 按
+   * `unconfirmed` 自己补，那一层面对的才是模型。
+   */
+  it('中止和超时分开标记，都不在 error 里拼排查指引', async () => {
+    const controller = new AbortController()
+    callRequest.mockReturnValue(new Promise(() => {}))
+    const aborted = runEditorPython('pass', '布尔', 300_000, controller.signal)
+    controller.abort()
+    expect(await aborted).toMatchObject({ aborted: true, unconfirmed: true })
+    expect((await aborted).error).not.toContain('重启编辑器')
+
+    callRequest.mockRejectedValueOnce(new Error('timeout'))
+    const timedOut = await runEditorPython('pass', '检查')
+    expect(timedOut).toMatchObject({ unconfirmed: true })
+    expect(timedOut.aborted).toBeUndefined()
+    expect(timedOut.error).not.toContain('重启编辑器')
+  })
+
   it('正常完成也移除取消监听器', async () => {
     const controller = new AbortController()
     const remove = vi.spyOn(controller.signal, 'removeEventListener')

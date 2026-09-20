@@ -326,6 +326,47 @@ describe('一次调用把图写完', () => {
     expect(second!.source_node).toBe('Node_1')
   })
 
+  /**
+   * 主节点别名不分大小写 —— 插件那侧是 `TargetNode == TEXT("Material")`，
+   * 而 UE 的 `FString::operator==` 走 Stricmp。前置校验要是用 JS 的严格 ===
+   * 去比，就凭空比引擎窄一档：一个本来能跑的写法被挡在门外，报的还是
+   * 「这是上次调用的局部 id」这么个完全不沾边的理由。
+   */
+  it('主节点写成小写 material 也认，并归一化成保留写法', async () => {
+    mockEngine()
+    await tool.execute('c1', {
+      path: '/Game/M_Wood',
+      nodes: [],
+      connections: [{ from: 'TextureSample_7.RGB', to: 'material.BaseColor' }]
+    })
+
+    // 归一化在 splitEndpoint 里做，预检和 connect() 因此不会错开
+    expect(callsTo('material.connect_pins')[0]!.target_node).toBe('Material')
+  })
+
+  /**
+   * 把局部 id 起名叫 material 的话，连到它的线会被当成接主输出，
+   * 这个节点从此指不到 —— 而且一个字都不报。当场拦住。
+   */
+  it('局部 id 叫 material 时拒绝，不让它顶掉主输出', async () => {
+    mockEngine()
+    let text: string
+    try {
+      text = textOf(
+        await tool.execute('c1', {
+          path: '/Game/M_Wood',
+          nodes: [{ id: 'material', node_type: 'Constant', value: 1 }],
+          connections: []
+        })
+      )
+    } catch (error) {
+      text = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(text).toContain('保留写法')
+    expect(callRequest.mock.calls.length).toBe(0)
+  })
+
   it('图里已有的真实 node_id 可以直接连，不必是本次新建的', async () => {
     mockEngine()
     await tool.execute('c1', {
