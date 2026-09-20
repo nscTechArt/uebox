@@ -171,12 +171,35 @@ export function createSaveChangesTool() {
                 : response.still_dirty_count > 0
                   ? `没有需要保存的改动。${leftover}那些不是你改的。`
                   : '没有需要保存的改动，工程是干净的。'
+          /*
+           * 「刚改完却说没东西可存」几乎只有一个原因：那次改动走的是 Python。
+           *
+           * Python 不经过编辑器的事务系统，改完对象内存里是对的、包却没被标脏，
+           * 保存这一步就整个跳过 —— 没有任何一步报错，编辑器一重启改动就没了。
+           * 真机上为这个连丢两次数据，第二次才靠 .uasset 的时间戳定位到。
+           *
+           * 这句话只在「刚动过手却存不出东西」时出现，不进工具描述：
+           * 前缀是每一轮都要付的，而这条提示只有落到这个分支的人用得上。
+           *
+           * **不要再按 `still_dirty_count === 0` 收窄。** 没标脏的包压根不计入那个数，
+           * 所以「用户另开着一张改了一半的关卡」（still_dirty_count = 3）时，
+           * 上面走的是「那些不是你改的」那一支，提示反而不出现 —— 而那正是
+           * 丢数据的场景。判据只有一条：**这次没存出任何东西**，那就值得提一句。
+           * scope=list 除外，点名保存一张干净的关卡本来就该是「它已经是存过的」。
+           */
+          const pythonHint =
+            scope !== 'list'
+              ? '\n如果你刚用 Python 改过东西，那多半是漏了标脏：Python 不走事务系统，' +
+                '改完要 asset.modify()，存盘用 save_asset(path, only_if_is_dirty=False)。' +
+                '重新 load_asset 查内存是查不出来的，要看文件时间戳。'
+              : ''
+
           return {
             success: true,
             saved_count: 0,
             scope,
             still_dirty_count: response.still_dirty_count,
-            summary
+            summary: summary + pythonHint
           }
         }
 

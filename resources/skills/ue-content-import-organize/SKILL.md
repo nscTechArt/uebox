@@ -75,6 +75,48 @@ user:
 Pass `isolate: "never"` only when the user explicitly wants everything flat in one folder and
 accepts that same-named textures will collide.
 
+## Third-party packs: the materials usually arrive broken
+
+An FBX pack imports "successfully" and the meshes render as red/blue/green candy. That is not a
+failed import — it is the normal outcome. The FBX material definitions are Phong, which the
+engine cannot represent, so it parents every material instance to
+`FBXLegacyPhongSurfaceMaterial` (a placeholder) and leaves the PBR textures **imported but
+unreferenced**. Nothing in the import response says this.
+
+Run this after importing any pack you did not author, before telling the user it worked:
+
+```python
+import unreal
+reg = unreal.AssetRegistryHelpers.get_asset_registry()
+root = "/Game/Imported"   # the destination_path you imported into
+broken, textures, used = [], [], set()
+for data in reg.get_assets_by_path(root, recursive=True):
+    asset = data.get_asset()
+    if isinstance(asset, unreal.MaterialInstance):
+        parent = asset.get_editor_property("parent")
+        if parent is None or "Legacy" in parent.get_name():
+            broken.append((data.package_name, parent.get_name() if parent else "None"))
+        for dep in reg.get_dependencies(data.package_name,
+                                        unreal.AssetRegistryDependencyOptions()) or []:
+            used.add(str(dep))
+    elif isinstance(asset, unreal.Texture):
+        textures.append(str(data.package_name))
+output_data = {
+    "broken_materials": broken,
+    "orphan_textures": [t for t in textures if t not in used],
+}
+print(output_data)
+```
+
+`broken_materials` non-empty means the pack needs real materials built by hand —
+`material_create` plus `material_apply_graph` wiring BaseColor / Metallic / Roughness / Normal /
+AO, then `material_apply` onto the slots. Say that to the user before they discover it in the
+viewport; it is a job of its own, not a detail of the import.
+
+**Material slot names are not a mapping.** Maya exports them as `blinn2`, `blinn3` … which carry
+no meaning at all. Do not guess which texture set belongs to which slot — assign one, look at it,
+then move on. A guessed mapping looks plausible in the content browser and wrong in the game.
+
 ## Geometry you generated yourself
 
 Writing an OBJ with a script and importing it is a legitimate way to make simple shapes.

@@ -234,6 +234,19 @@ export interface ApplyGraphDetails {
  */
 const ENDPOINT_NODE = /^[A-Za-z0-9_]+$/
 
+/**
+ * 像不像引擎自己发的 node_id。
+ *
+ * 引擎的 id 只有两种长相：`MaterialExpressionMultiply_5`（类名_序号）和 32 位 GUID。
+ * 局部 id 是调用方随口起的（`uvco`、`base`、`tex`），两种都不像 —— 拿这个当判据，
+ * 就能在建节点之前认出「上一次调用的局部 id 被拿来这次用了」。
+ *
+ * 判宽不判严：调用方把局部 id 起成 `tex_1` 会从这里漏过去，那就退回原来的行为
+ * （引擎回 404）。反过来误伤一个合法的引擎 id，代价是一条本来能连的线连不上，
+ * 那比漏判糟得多。
+ */
+const ENGINE_NODE_ID = /(_\d+$)|(^[0-9A-Fa-f]{32}$)/
+
 function splitEndpoint(raw: string, side: 'from' | 'to'): { node: string; pin: string } {
   const trimmed = raw.trim()
   const dot = trimmed.indexOf('.')
@@ -536,8 +549,30 @@ function preflight(input: Input): void {
    * 不回滚。挪到这里，这一类失败就是干净的。
    */
   for (const conn of input.connections) {
-    splitEndpoint(conn.from, 'from')
-    splitEndpoint(conn.to, 'to')
+    const from = splitEndpoint(conn.from, 'from')
+    const to = splitEndpoint(conn.to, 'to')
+    for (const node of [from.node, to.node]) {
+      /*
+       * 主节点别名要**不分大小写**地认。
+       *
+       * 插件那侧是 `TargetNode == TEXT("Material")`，而 UE 的 `FString::operator==`
+       * 走 Stricmp —— 所以 `"material.BaseColor"` 一直是能连上的。这里要是用
+       * JS 的严格 === 去比，就凭空比引擎窄了一档：一个本来能跑的写法被挡在门外，
+       * 报的还是「这是上次调用的局部 id」这么个完全不沾边的理由。
+       */
+      if (
+        seen.has(node) ||
+        node.toLowerCase() === MATERIAL_OUTPUT.toLowerCase() ||
+        ENGINE_NODE_ID.test(node)
+      )
+        continue
+      throw new Error(
+        `连线端点「${node}」既不在本次 nodes 里，也不像引擎的 node_id。` +
+          '局部 id **只在这一次调用里有效** —— 上一次调用返回的那批，这次已经失效了。' +
+          `要连图里已有的节点，先用 material_get_graph 拿真实 node_id（形如 ` +
+          `MaterialExpressionMultiply_5）填进来。一个节点都还没建，改完重发即可。`
+      )
+    }
   }
 }
 

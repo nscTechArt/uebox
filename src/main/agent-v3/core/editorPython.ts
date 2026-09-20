@@ -127,9 +127,23 @@ export async function runEditorPython(
         ])
       : await call
   } catch (error) {
+    /*
+     * 超时之后**不要接着发命令试探**。
+     *
+     * 脚本跑在编辑器主线程上，死循环把那根线程占住时，后面每一条命令（包括只读的）
+     * 都会一起超时 —— 试探问不出任何东西，只是每次再赔一个超时。真机上撞到过：
+     * 一个 `continue` 前不前进的循环卡死编辑器，之后又白发了两条命令才反应过来。
+     *
+     * 唯一能在这种状态下回话的是 `ue_session_health`：它的进程检测在盒子侧做，
+     * 不走引擎 RPC。所以这里把下一步直接写死，省得调用方自己去试。
+     */
     return {
       success: false,
-      error: `Python 执行未确认（${description}）：${(error as Error).message}。请先回读，勿重复执行修改。`
+      error:
+        `Python 执行未确认（${description}）：${(error as Error).message}。请先回读，勿重复执行修改。` +
+        '不要再发命令试探 —— 主线程被占住时所有命令都会一起超时。' +
+        '先用 ue_session_health 看编辑器进程还在不在（它不走引擎 RPC），' +
+        '真卡死了请用户重启编辑器，重启后先回读现场再继续。'
     }
   } finally {
     if (onAbort) abortSignal?.removeEventListener('abort', onAbort)

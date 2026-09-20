@@ -121,6 +121,37 @@ describe('发命令之前的整批预检', () => {
   })
 
   /**
+   * 上一次调用的局部 id 拿到这次来用 —— 真机上为这个连失败四次。
+   *
+   * 引擎回的是 404「Source node not found: uvco」，字面意思是「图里没这个节点」，
+   * 而真正的原因是「这个 id 是上次调用的，用完就失效了」。两者听起来一样，
+   * 但前者会让人去图里找节点，后者要去上一次的回执里拿真实 node_id ——
+   * 猜错方向就是一整轮。更糟的是这条 404 来自 connect 阶段，那时节点已经全建完，
+   * 而材质这边**不回滚**。挡在建节点之前，失败才是干净的。
+   */
+  it('端点是上次调用的局部 id：挡在建节点之前，且点破为什么', async () => {
+    mockEngine()
+    let text: string
+    try {
+      text = textOf(
+        await tool.execute('c1', {
+          path: '/Game/M_Wood',
+          nodes: [{ id: 'base', node_type: 'Constant3Vector', value: '#fff' }],
+          connections: [{ from: 'uvco.RGB', to: 'base.A' }]
+        })
+      )
+    } catch (error) {
+      text = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(text).toContain('uvco')
+    expect(text).toContain('只在这一次调用里有效')
+    expect(text).toContain('material_get_graph')
+    // 那个 Constant3Vector 也不许建出来
+    expect(callRequest.mock.calls.length).toBe(0)
+  })
+
+  /**
    * 坏的通道串也要在**发命令之前**挡住。
    *
    * 之前只测了「没给 value」，于是把 preflight 的这一段换成
