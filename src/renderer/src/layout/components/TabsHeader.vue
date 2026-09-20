@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import AppTooltip from '@renderer/components/AppTooltip.vue'
 import {
+  PhArrowClockwise,
   PhBooks,
-  PhCaretUp,
   PhChatCircle,
   PhCubeTransparent,
+  PhDownloadSimple,
   PhGear,
   PhCube,
   PhHardDrives,
@@ -22,7 +23,11 @@ import {
 import type { Component } from 'vue'
 import { computed, watch, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { useTabsStore, DEFAULT_TAB_KEY } from '@renderer/store/modules/tabs'
+import { formatUpdateVersion, useUpdateStore } from '@renderer/store/modules/updateStore'
+import { message } from '@renderer/utils/messageManager'
+import { confirmDialog } from '@renderer/utils/dialog'
 import { useI18n } from '@renderer/hooks/useI18n'
 import ContextMenu from '@renderer/components/ContextMenu/ContextMenu.vue'
 import type { MenuItem } from '@renderer/components/ContextMenu/types'
@@ -656,57 +661,71 @@ watch(
   }
 )
 
-// 更新相关状态
-const showUpdateButton = ref(false)
-const updateDownloading = ref(false)
+/**
+ * 更新角标。
+ *
+ * 状态本身在全局 Store 里（store/modules/updateStore.ts），这里只负责画和点。
+ * 以前这块是自己挂三个监听、只认「已下载」一种状态 —— 而下载只能从
+ * 「设置 → 关于」手动发起，于是这个按钮在真实使用中几乎永远不出现。
+ */
+const updateStore = useUpdateStore()
+const {
+  phase: updatePhase,
+  latestVersion: updateVersion,
+  downloadPercent
+} = storeToRefs(updateStore)
+
+const showUpdateButton = computed(() => updateStore.hasUpdateNews)
+
+const updateVersionLabel = computed(() => formatUpdateVersion(updateVersion.value))
+
+const updateButtonText = computed(() => {
+  if (updatePhase.value === 'downloading') {
+    return t('update.downloadingPercent', { percent: downloadPercent.value })
+  }
+  if (updatePhase.value === 'downloaded') return t('update.restartToUpdate')
+  return updateVersionLabel.value
+    ? t('update.updateTo', { version: updateVersionLabel.value })
+    : t('update.newVersionAvailable')
+})
+
+const updateButtonTooltip = computed(() => {
+  if (updatePhase.value === 'downloading') {
+    return t('update.downloadingHint', { version: updateVersionLabel.value })
+  }
+  if (updatePhase.value === 'downloaded') return t('update.readyToInstall')
+  return t('update.downloadHint', { version: updateVersionLabel.value })
+})
+
+const updateButtonIcon = computed(() => {
+  if (updatePhase.value === 'downloaded') return PhArrowClockwise
+  return PhDownloadSimple
+})
 
 /**
- * 处理更新按钮点击
+ * 点角标。三种阶段三件事：可更新 → 开始下载；下载中 → 不响应；已下载 → 问一句再重启。
  */
-const handleUpdateClick = async () => {
-  try {
-    await window.api.updater.quitAndInstall()
-  } catch (error) {
-    console.error('执行更新失败:', error)
+const handleUpdateClick = (): void => {
+  if (updatePhase.value === 'downloading') return
+
+  if (updatePhase.value === 'downloaded') {
+    confirmDialog({
+      title: t('update.installTitle'),
+      content: t('update.installContent', { version: updateVersionLabel.value }),
+      okText: t('update.installNow'),
+      cancelText: t('update.later'),
+      onOk: () => {
+        void updateStore.install()
+      }
+    })
+    return
   }
+
+  // 下载几百 MB，不能 await 着它画 loading —— 进度走 downloadPercent
+  message.info(t('update.downloadStarted'))
+  // 失败不在这里报：主进程的 update-error 事件会推过来，由 App.vue 统一报一次
+  void updateStore.download()
 }
-
-/**
- * 初始化更新监听
- */
-const initUpdateListeners = () => {
-  // 监听更新下载完成事件
-  const removeDownloadedListener = window.api.updater.onUpdateDownloaded(() => {
-    showUpdateButton.value = true
-    updateDownloading.value = false
-  })
-
-  // 监听下载进度事件
-  const removeProgressListener = window.api.updater.onDownloadProgress(() => {
-    updateDownloading.value = true
-  })
-
-  // 监听更新错误事件
-  const removeErrorListener = window.api.updater.onUpdateError(() => {
-    updateDownloading.value = false
-  })
-
-  // 检查当前更新状态
-  window.api.updater.getStatus().then((result) => {
-    if (result.success && result.data?.updateDownloaded) {
-      showUpdateButton.value = true
-    }
-  })
-
-  // 清理函数
-  return () => {
-    removeDownloadedListener()
-    removeProgressListener()
-    removeErrorListener()
-  }
-}
-
-let removeUpdateListeners: (() => void) | null = null
 
 onMounted(() => {
   nextTick(() => {
@@ -714,8 +733,6 @@ onMounted(() => {
     updateFade()
   })
   window.addEventListener('resize', handleResize)
-  // 初始化更新监听
-  removeUpdateListeners = initUpdateListeners()
 })
 
 onBeforeUnmount(() => {
@@ -731,10 +748,6 @@ onBeforeUnmount(() => {
   if (scrollTimer) {
     cancelAnimationFrame(scrollTimer)
     scrollTimer = null
-  }
-  // 清理更新监听
-  if (removeUpdateListeners) {
-    removeUpdateListeners()
   }
 })
 </script>
@@ -825,11 +838,25 @@ onBeforeUnmount(() => {
     </div>
     <!-- 可拖动空间（确保标签页很多时仍有拖动区域） -->
     <div class="header-spacer"></div>
-    <!-- 更新按钮 -->
-    <AppTooltip v-if="showUpdateButton" placement="bottom" :title="t('update.readyToInstall')">
-      <button class="update-button" @click="handleUpdateClick">
-        <PhCaretUp class="update-icon" />
-        <span class="update-text">{{ t('update.newVersionAvailable') }}</span>
+    <!-- 更新角标：可更新 / 下载中 / 待重启三态共用一枚按钮 -->
+    <AppTooltip v-if="showUpdateButton" placement="bottom" :title="updateButtonTooltip">
+      <button
+        class="update-button"
+        :class="`is-${updatePhase}`"
+        :aria-disabled="updatePhase === 'downloading'"
+        @click="handleUpdateClick"
+      >
+        <!-- 下载进度直接铺在按钮底色上，不另占一条进度条的位置 -->
+        <span
+          v-if="updatePhase === 'downloading'"
+          class="update-progress"
+          :style="{ width: `${downloadPercent}%` }"
+        />
+        <span class="update-body">
+          <span v-if="updatePhase === 'available'" class="update-dot" aria-hidden="true" />
+          <component :is="updateButtonIcon" v-else class="update-icon" weight="bold" />
+          <span class="update-text">{{ updateButtonText }}</span>
+        </span>
       </button>
     </AppTooltip>
     <div v-if="!isMac" class="window-controls">
@@ -1175,41 +1202,107 @@ onBeforeUnmount(() => {
 
 .update-button {
   -webkit-app-region: no-drag;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  height: 24px;
   padding: 0 10px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  color: var(--color-accent-text);
-  cursor: pointer;
-  transition: all var(--motion-fast) var(--easing-standard);
-  border-radius: 4px;
   margin-right: 8px;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-full);
+  background: var(--color-accent-bg);
+  color: var(--color-accent-text);
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background var(--motion-fast) var(--easing-standard),
+    border-color var(--motion-fast) var(--easing-standard),
+    transform var(--motion-fast) var(--easing-standard);
+
+  /* 内容压在进度条之上 */
+  .update-body {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
 
   .update-icon {
-    font-size: 12px;
-    transition: transform var(--motion-fast) var(--easing-standard);
+    font-size: 13px;
+    flex-shrink: 0;
   }
 
   .update-text {
     white-space: nowrap;
+    /* 下载中数字每秒都在跳，等宽数字能防止按钮宽度抖动 */
+    font-variant-numeric: tabular-nums;
   }
 
-  &:hover {
-    background: var(--color-accent-bg);
-    color: var(--color-accent-text);
+  /* 「有新版本」用一颗呼吸的小圆点，比图标更像通知，也更安静 */
+  .update-dot {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: currentColor;
+    animation: update-dot-pulse 2s var(--easing-standard) infinite;
+  }
 
-    .update-icon {
-      transform: translateY(-2px);
+  .update-progress {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 0;
+    background: var(--color-accent-bg-hover);
+    transition: width var(--motion-normal) var(--easing-standard);
+  }
+
+  &:not([aria-disabled='true']):hover {
+    background: var(--color-accent-bg-hover);
+    border-color: var(--color-accent-solid);
+  }
+
+  &:not([aria-disabled='true']):active {
+    transform: scale(0.97);
+  }
+
+  /* 下载中用 aria-disabled 而不是 disabled：原生 disabled 会连鼠标事件一起吞掉，
+     外面那层 Tooltip 就再也弹不出来了。点击本身在处理函数里已经挡住 */
+  &[aria-disabled='true'] {
+    cursor: default;
+  }
+
+  /* 已下载：这一步是唯一会重启应用的动作，给它实心底色区别开 */
+  &.is-downloaded {
+    background: var(--color-accent-solid);
+    border-color: var(--color-accent-solid);
+    color: var(--color-text-on-solid);
+
+    &:not([aria-disabled='true']):hover {
+      background: var(--color-accent-solid-hover);
+      border-color: var(--color-accent-solid-hover);
     }
   }
+}
 
-  &:active {
-    background: var(--color-accent-bg);
+@keyframes update-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-button .update-dot {
+    animation: none;
   }
 }
 

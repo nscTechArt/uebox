@@ -1252,7 +1252,18 @@ export default {
   update: {
     newVersionAvailable: 'New Version',
     downloading: 'Downloading update...',
-    readyToInstall: 'Update ready. Click to install'
+    readyToInstall: 'Update ready. Click to install',
+    updateTo: 'Update to {version}',
+    downloadHint: 'Version {version} is available. Click to download',
+    downloadingPercent: 'Downloading {percent}%',
+    downloadingHint: 'Downloading {version}',
+    restartToUpdate: 'Restart to update',
+    foundToast: 'Version {version} is available. Download it from the title bar',
+    downloadStarted: 'Download started. Progress shows in the title bar',
+    installTitle: 'Install update',
+    installContent: 'Version {version} has been downloaded. Restart to install now?',
+    installNow: 'Restart now',
+    later: 'Later'
   },
   page: {
     home: {

@@ -7,6 +7,13 @@ import { ConfigProvider } from 'ant-design-vue'
 import { useTheme } from '@renderer/hooks/useTheme'
 import { useSpotlightAction } from '@renderer/hooks/useSpotlightAction'
 import { useLocalShortcuts } from '@renderer/hooks/useLocalShortcuts'
+import {
+  formatUpdateVersion,
+  useUpdateStore,
+  type UpdateErrorPayload
+} from '@renderer/store/modules/updateStore'
+import { message } from '@renderer/utils/messageManager'
+import { useI18n } from '@renderer/hooks/useI18n'
 // 导入样式系统。调色板必须在最前面 —— 后面每个文件都在引用它定义的语义变量。
 import '@renderer/assets/styles/palette.generated.css'
 import '@renderer/assets/styles/theme.css'
@@ -27,6 +34,23 @@ const { init: initSpotlightAction, destroy: destroySpotlightAction } = useSpotli
 
 // 本地快捷键处理
 const { init: initLocalShortcuts, destroy: destroyLocalShortcuts } = useLocalShortcuts()
+
+/**
+ * 更新提示。
+ *
+ * 监听必须挂在这里而不是某个页面里：主进程启动时就静默查一次、之后每 4 小时再查一次，
+ * 而 `updater:update-available` 是 `webContents.send` —— 那一刻没人听就是丢了。
+ * 以前只有「设置 → 关于」在监听，等于自动检查查到了也没人知道。
+ */
+const { t } = useI18n()
+const updateStore = useUpdateStore()
+
+/** 把 updater 的错误码翻成人话。主进程只在用户主动触发时才推错误，后台静默检查不打扰 */
+function resolveUpdateErrorMessage(data?: UpdateErrorPayload): string {
+  if (data?.code === 'UPDATE_FEED_NOT_FOUND') return t('profile.about.updateFeedNotReady')
+  if (data?.code === 'UPDATE_NETWORK_ERROR') return t('profile.about.updateServerUnavailable')
+  return data?.message || t('profile.about.updateError')
+}
 
 // 截图模式状态（仅用于显示 UI 确认界面）
 const screenshotMode = ref(false)
@@ -81,6 +105,20 @@ onMounted(async () => {
 
   // 初始化本地快捷键监听
   initLocalShortcuts()
+
+  // 发现新版本时弹一次轻提示；常驻入口是标题栏那枚角标
+  updateStore.init({
+    onAvailable: (version) => {
+      message.info({
+        content: t('update.foundToast', { version: formatUpdateVersion(version) }),
+        duration: 8
+      })
+    },
+    // 错误只在这里报一次，下游（标题栏角标、关于页）不要再各报一遍
+    onError: (error) => {
+      message.error(resolveUpdateErrorMessage(error))
+    }
+  })
 })
 
 onUnmounted(() => {
