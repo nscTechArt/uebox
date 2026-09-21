@@ -21,6 +21,7 @@ import { UeboxError, type ErrorCode } from '../errors.js'
 import { requireContract } from '../connection.js'
 import * as runtime from '../runtime.js'
 import { resolveProject } from '../project.js'
+import { describeLoopbackProxyRisk, detectLoopbackProxy } from '../proxy.js'
 import { supportedTools } from '../tools.js'
 
 export interface DoctorOptions {
@@ -125,11 +126,19 @@ export async function runDoctor(options: DoctorOptions): Promise<Envelope> {
     const projects = await runtime.registeredProjects(rt)
     if (projects.length === 0) {
       // 能打开端口不足以判定 UE 可操作（§4）
+      //
+      // 工程数为 0 有两种常见原因，给的解法完全不同：工程还没开（等握手），
+      // 或者工程开着、插件也加载了，但它连不进来。后者里最常见的一种是代理 ——
+      // 而它有个要命的特点：CLI 自己不认代理变量，所以上面几层全是绿的。
+      // 见 ../proxy.ts。
+      const proxyRisk = detectLoopbackProxy(options.env ?? process.env)
       checks.push({
         name: 'projects',
         status: 'failed',
         detail: '没有已连接的虚幻引擎工程 —— 引擎命令现在发不出去。',
-        hint: '打开一个装了 UnrealAgentLink 插件的 UE 工程，等插件握手完成（大工程 30–90 秒）。'
+        hint:
+          '打开一个装了 UnrealAgentLink 插件的 UE 工程，等插件握手完成（大工程 30–90 秒）。' +
+          (proxyRisk ? `\n  ${describeLoopbackProxyRisk(proxyRisk)}` : '')
       })
       return report(checks, 'PROJECT_NOT_CONNECTED', { projects: [] })
     }
