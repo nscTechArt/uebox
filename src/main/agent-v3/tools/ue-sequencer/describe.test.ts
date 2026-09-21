@@ -74,7 +74,7 @@ describe('detail=keys 的护栏', () => {
   it('拒绝时要告诉模型下一步怎么做，而不只是说不行', async () => {
     await expect(
       tool.execute('c1', { sequence_path: '/Game/x.x', detail: 'keys' })
-    // 指向 names 而不是 outline：outline 到 60 条就截断，名字可能根本不在里面
+      // 指向 names 而不是 outline：outline 到 60 条就截断，名字可能根本不在里面
     ).rejects.toThrow(/bindings[\s\S]*names|names[\s\S]*bindings/)
   })
 
