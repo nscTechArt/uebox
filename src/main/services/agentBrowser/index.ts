@@ -143,6 +143,8 @@ interface BrowserSurface {
   id: string
   mode: AgentBrowserMode
   contents: WebContents
+  /** 创建时记下的 `webContents.id`：销毁之后再读会抛，而注销登记恰好发生在那之后 */
+  contentsId: number
   /** 独立窗口 / 隐藏模式下的宿主窗口 */
   window: BrowserWindow | null
   /** 远程页面始终使用视图，可在主窗口与组窗口之间移动 */
@@ -336,7 +338,7 @@ export class AgentBrowserService {
     if (surface.view) {
       const host = surface.window ?? findMainWindow()
       if (host && !host.isDestroyed()) host.contentView.removeChildView(surface.view)
-      unregisterNonAppWindow(surface.contents.id)
+      unregisterNonAppWindow(surface.contentsId)
       if (options.destroy && !surface.contents.isDestroyed()) surface.contents.close()
     }
     this.surface = [...this.tabs.values()].at(-1) ?? null
@@ -789,11 +791,12 @@ export class AgentBrowserService {
       mode,
       view,
       contents: view.webContents,
+      contentsId: view.webContents.id,
       window: mode === 'embedded' ? null : this.groupWindow
     }
     this.installContentsPolicy(surface)
     this.attachDebugger(surface.contents)
-    registerNonAppWindow(surface.contents.id)
+    registerNonAppWindow(surface.contentsId)
     this.tabs.set(surface.id, surface)
     this.surface = surface
     this.applyEmbeddedBounds()
@@ -816,7 +819,15 @@ export class AgentBrowserService {
       }
     })
     this.groupWindow = window
-    registerNonAppWindow(window.webContents.id)
+    /*
+     * 先把 id 存下来。窗口销毁之后 `window.webContents` 会抛
+     * （"Object has been destroyed"），而下面的 `closed` 回调正是在那之后跑的 ——
+     * 在那里现读 id 会把异常扔进 Electron 的事件派发，主进程未捕获，整个盒子退出；
+     * 更糟的是 `close()` 也就没跑，磁盘上还留着这个会话的浏览器地址，
+     * 下次打开又给恢复出来。
+     */
+    const windowContentsId = window.webContents.id
+    registerNonAppWindow(windowContentsId)
     if (process.platform !== 'darwin') window.setMenu(null)
     const rendererFile = join(__dirname, '../renderer/index.html')
     const devUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
@@ -831,7 +842,7 @@ export class AgentBrowserService {
     window.on('closed', () => {
       if (this.groupWindow !== window) return
       this.groupWindow = null
-      unregisterNonAppWindow(window.webContents.id)
+      unregisterNonAppWindow(windowContentsId)
       void this.close().catch((error: unknown) => logger.warn(String(error)))
     })
     return window
@@ -846,7 +857,7 @@ export class AgentBrowserService {
   setEmbeddedBounds(bounds: EmbeddedBounds | null, senderId?: number): void {
     if (senderId !== undefined) {
       const expected = this.currentMode() === 'embedded' ? findMainWindow() : this.groupWindow
-      if (expected?.webContents.id !== senderId) return
+      if (!expected || expected.isDestroyed() || expected.webContents.id !== senderId) return
     }
     this.embeddedBounds = bounds
     this.embeddedVisible = bounds !== null
@@ -873,7 +884,9 @@ export class AgentBrowserService {
       title: overview?.title ?? ''
     }
     sendToAppWindows('agent-browser:state', state)
-    this.groupWindow?.webContents.send('agent-browser:state', state)
+    if (this.groupWindow && !this.groupWindow.isDestroyed()) {
+      this.groupWindow.webContents.send('agent-browser:state', state)
+    }
   }
 
   private installContentsPolicy(surface: BrowserSurface): void {

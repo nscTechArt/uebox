@@ -48,7 +48,16 @@ const sessionStub = {
 }
 
 class FakeBrowserWindow {
-  webContents: Record<string, unknown>
+  /**
+   * 真机上 `window.webContents` 在窗口销毁之后**会抛**（"Object has been destroyed"）。
+   * 假窗口原来照常返回对象，于是 `closed` 回调里读 id 的那种写法在用例里一路绿灯，
+   * 在真机上却是一个主进程未捕获异常 —— 整个盒子跟着退出。这里照抄真实行为。
+   */
+  private contentsHandle: Record<string, unknown>
+  get webContents(): Record<string, unknown> {
+    if (this.destroyed) throw new TypeError('Object has been destroyed')
+    return this.contentsHandle
+  }
   private destroyed = false
   private visible = false
 
@@ -83,7 +92,7 @@ class FakeBrowserWindow {
       contents.handlers.set(event, list)
     }
 
-    this.webContents = {
+    this.contentsHandle = {
       id: contents.id,
       on,
       off: () => undefined,
@@ -662,6 +671,25 @@ describe('生命周期', () => {
 
     expect(instance.hasWindow()).toBe(false)
     await expect(instance.readInteractive()).rejects.toMatchObject({ code: 'BROWSER_NOT_OPEN' })
+  })
+
+  /**
+   * 真机上 `closed` 回调跑的时候窗口**已经销毁**了，这时候读 `window.webContents`
+   * 会抛。抛在 Electron 的事件派发里就是主进程未捕获异常 —— 用户看到的是
+   * 「关掉独立浏览器窗口，整个盒子跟着没了」；而且 `close()` 没跑完，磁盘上还留着
+   * 这个会话的地址，下次打开窗口又回来了。
+   */
+  it('窗口销毁后再收到 closed：不抛，且记录照样清掉', async () => {
+    const instance = new AgentBrowserService('crash')
+    await openPage(instance)
+    expect(savedUrls.get('crash')).toBe('https://example.com/')
+
+    hosts.at(-1)?.destroy()
+    expect(() => windowEvents.get('closed')?.forEach((handler) => handler())).not.toThrow()
+    await settle(Promise.resolve())
+
+    expect(instance.hasWindow()).toBe(false)
+    expect(savedUrls.has('crash')).toBe(false)
   })
 
   it('resetSession 连认证缓存一起清 —— 只清 storage 会留下自动认证', async () => {
