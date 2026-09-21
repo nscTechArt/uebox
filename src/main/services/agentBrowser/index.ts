@@ -14,6 +14,7 @@ import {
   findMainWindow,
   registerNonAppWindow,
   sendToAppWindows,
+  sendToWindow,
   unregisterNonAppWindow
 } from '../../appWindows'
 import { getSharp } from '../../utils/sharpLoader'
@@ -134,6 +135,17 @@ export type BrowserInteractAction =
   | { action: 'select'; ref: number; label: string; value: string }
 
 /**
+ * debugger 附没附上。
+ *
+ * `contents.debugger` 在 contents 销毁之后会抛，而「当前页面换人」这件事
+ * 恰好会在销毁之后发生（关窗、页面自关）。销毁了就是没附上。
+ */
+function debuggerAttachedOn(contents: WebContents | undefined): boolean {
+  if (!contents || contents.isDestroyed()) return false
+  return contents.debugger.isAttached()
+}
+
+/**
  * 页面挂在哪儿。
  *
  * 三档显示方式共用同一套 Session、策略、CDP 和页面脚本，差别只有「这块
@@ -143,7 +155,14 @@ interface BrowserSurface {
   id: string
   mode: AgentBrowserMode
   contents: WebContents
-  /** 创建时记下的 `webContents.id`：销毁之后再读会抛，而注销登记恰好发生在那之后 */
+  /**
+   * 创建时记下的 `webContents.id`。
+   *
+   * 注意别把这条和窗口那条搞混：**`BrowserWindow.webContents` 销毁之后再读会抛**
+   * （`ensureGroupWindow` 里缓存 id 就是为了这个），但 `webContents.id` 本身不会 ——
+   * 它是创建时钉在实例上的自有属性。这里存一份纯粹是图个稳，注销时不必再穿过
+   * 一层可能已经没了的对象。
+   */
   contentsId: number
   /** 独立窗口 / 隐藏模式下的宿主窗口 */
   window: BrowserWindow | null
@@ -180,7 +199,10 @@ export class AgentBrowserService {
     if (!sessionId || (this.restoring && url !== null)) return Promise.resolve()
     const surfaces = [...this.tabs.values()]
     const state = {
-      urls: surfaces.map((surface) => surface.contents.getURL() || 'about:blank'),
+      urls: surfaces.map(
+        (surface) =>
+          (surface.contents.isDestroyed() ? '' : surface.contents.getURL()) || 'about:blank'
+      ),
       activeIndex: Math.max(0, surfaces.indexOf(this.surface!)),
       mode: this.currentMode()
     }
@@ -342,7 +364,7 @@ export class AgentBrowserService {
       if (options.destroy && !surface.contents.isDestroyed()) surface.contents.close()
     }
     this.surface = [...this.tabs.values()].at(-1) ?? null
-    this.debuggerAttached = this.surface?.contents.debugger.isAttached() ?? false
+    this.debuggerAttached = debuggerAttachedOn(this.surface?.contents)
     if (!this.surface) this.destroyGroupWindow()
     this.applyEmbeddedBounds()
   }
@@ -359,12 +381,19 @@ export class AgentBrowserService {
   groupState(): BrowserGroupState {
     return {
       activeTabId: this.surface?.id ?? null,
-      tabs: [...this.tabs.values()].map(({ id, contents }) => ({
-        id,
-        url: contents.getURL(),
-        title: contents.getTitle(),
-        loading: contents.isLoading()
-      }))
+      // 页面自己 `window.close()` 之后 `contents` 就销毁了，而它还在表里
+      // （`destroyed` 回调把它摘掉之前）。销毁之后 `getURL()` 这些一律抛，
+      // 而这个方法是从 Electron 的事件派发里调进来的 —— 抛在那儿就是主进程退出。
+      tabs: [...this.tabs.values()].map(({ id, contents }) =>
+        contents.isDestroyed()
+          ? { id, url: '', title: '', loading: false }
+          : {
+              id,
+              url: contents.getURL(),
+              title: contents.getTitle(),
+              loading: contents.isLoading()
+            }
+      )
     }
   }
 
@@ -390,7 +419,7 @@ export class AgentBrowserService {
     const surface = this.tabs.get(tabId)
     if (!surface) throw new AgentBrowserError('BROWSER_NOT_OPEN', '标签页已关闭')
     this.surface = surface
-    this.debuggerAttached = surface.contents.debugger.isAttached()
+    this.debuggerAttached = debuggerAttachedOn(surface.contents)
     void this.persistUrl(this.currentUrl() || 'about:blank').catch(() => undefined)
     this.applyEmbeddedBounds()
     this.notifyState()
@@ -497,7 +526,12 @@ export class AgentBrowserService {
    * `hidden` 档什么都不做：那一档就是要它不出现。
    */
   private reveal(surface: BrowserSurface): void {
-    if (surface.mode === 'window' && surface.window && !surface.window.isVisible()) {
+    if (
+      surface.mode === 'window' &&
+      surface.window &&
+      !surface.window.isDestroyed() &&
+      !surface.window.isVisible()
+    ) {
       surface.window.showInactive()
     }
     if (surface.mode === 'embedded') this.applyEmbeddedBounds()
@@ -779,6 +813,9 @@ export class AgentBrowserService {
 
   private ensureSurface(): BrowserSurface {
     if (this.surface && !this.surface.contents.isDestroyed()) return this.surface
+    // 当前 surface 已经死了：先摘掉再建新的，否则它会永远留在 `this.tabs` 里，
+    // 把后面每一次 `groupState()` / `persistUrl()` 都变成一次主进程退出
+    if (this.surface) this.dropSurface(this.surface)
 
     const mode = this.currentMode()
     const host = mode === 'embedded' ? findMainWindow() : this.ensureGroupWindow()
@@ -884,9 +921,7 @@ export class AgentBrowserService {
       title: overview?.title ?? ''
     }
     sendToAppWindows('agent-browser:state', state)
-    if (this.groupWindow && !this.groupWindow.isDestroyed()) {
-      this.groupWindow.webContents.send('agent-browser:state', state)
-    }
+    sendToWindow(this.groupWindow, 'agent-browser:state', state)
   }
 
   private installContentsPolicy(surface: BrowserSurface): void {
@@ -949,14 +984,37 @@ export class AgentBrowserService {
         this.releaseSurface({ destroy: true })
         this.notifyState()
       } else if (this.tabs.has(surface.id)) {
-        this.tabs.delete(surface.id)
-        const host = surface.window ?? findMainWindow()
-        if (surface.view) host?.contentView.removeChildView(surface.view)
-        unregisterNonAppWindow(contents.id)
-        if (!contents.isDestroyed()) contents.close()
+        this.dropSurface(surface, { destroy: true })
         this.notifyState()
       }
     })
+
+    /*
+     * 页面可以自己把自己关掉（`window.close()`）。那一下 `contents` 直接销毁，
+     * **`render-process-gone` 不会触发**，于是这个 surface 会一直挂在 `this.tabs` 里，
+     * 而它上面的每一个读操作（`getURL`、`debugger`……）从此都抛。后果不是某个功能坏了，
+     * 是下一次从 Electron 事件派发里调到 `notifyState()` / `persistUrl()` 的地方
+     * 把整个主进程带走。所以死了就当场摘掉，别留在表里。
+     */
+    contents.on('destroyed', () => {
+      if (this.surface === surface) {
+        this.releaseSurface()
+        this.notifyState()
+      } else if (this.tabs.has(surface.id)) {
+        this.dropSurface(surface)
+        this.notifyState()
+      }
+    })
+  }
+
+  /** 把一个非当前的 surface 从表里摘干净：视图、登记表、必要时连 contents 一起关掉 */
+  private dropSurface(surface: BrowserSurface, options: { destroy?: boolean } = {}): void {
+    this.tabs.delete(surface.id)
+    const host = surface.window ?? findMainWindow()
+    // `contentView` 和 `webContents` 一样，窗口销毁之后再读会抛
+    if (surface.view && host && !host.isDestroyed()) host.contentView.removeChildView(surface.view)
+    unregisterNonAppWindow(surface.contentsId)
+    if (options.destroy && !surface.contents.isDestroyed()) surface.contents.close()
   }
 
   /**

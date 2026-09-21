@@ -92,6 +92,20 @@ class FakeBrowserWindow {
       contents.handlers.set(event, list)
     }
 
+    /*
+     * 销毁之后哪些还能读，哪些会抛 —— 按真机（Electron 44）实测的来，别凭印象：
+     *   - `id` 照常返回：它是创建时钉在实例上的自有属性，不走那层销毁检查；
+     *   - `isDestroyed()` 照常返回；
+     *   - `getURL()` / `getTitle()` / `isLoading()` / `debugger` 一律抛。
+     * 中间这条差别很要命：正因为 `id` 不抛，只缓存 id 并挡不住这一类崩溃。
+     */
+    const live = <T>(read: () => T): (() => T) => {
+      return () => {
+        if (this.destroyed) throw new TypeError('Object has been destroyed')
+        return read()
+      }
+    }
+
     this.contentsHandle = {
       id: contents.id,
       on,
@@ -99,11 +113,12 @@ class FakeBrowserWindow {
       isDestroyed: () => this.destroyed,
       close: () => {
         this.destroyed = true
+        contents.handlers.get('destroyed')?.forEach((handler) => handler())
       },
-      isLoading: () => false,
-      getTitle: () => '示例',
+      isLoading: live(() => false),
+      getTitle: live(() => '示例'),
       send: () => undefined,
-      getURL: () => contents.loadedUrls.at(-1) ?? '',
+      getURL: live(() => contents.loadedUrls.at(-1) ?? ''),
       loadURL: async (url: string) => {
         contents.loadedUrls.push(url)
         if (!loadUrlFailure) return
@@ -135,7 +150,7 @@ class FakeBrowserWindow {
       executeJavaScriptInIsolatedWorld: async () => pageResults.shift(),
       capturePage: async () => ({ toPNG: () => Buffer.from('png') }),
       debugger: {
-        isAttached: () => true,
+        isAttached: live(() => true),
         attach: () => undefined,
         detach: () => undefined,
         on: () => undefined,
@@ -249,6 +264,14 @@ vi.mock('../../appWindows', () => ({
   registerNonAppWindow: (id: number) => registry.registered.push(id),
   unregisterNonAppWindow: (id: number) => registry.unregistered.push(id),
   sendToAppWindows: (channel: string, payload: unknown) => broadcasts.push({ channel, payload }),
+  sendToWindow: (
+    window: { isDestroyed: () => boolean } | null,
+    channel: string,
+    payload: unknown
+  ) => {
+    if (!window || window.isDestroyed()) return
+    windowBroadcasts.push({ channel, payload })
+  },
   findMainWindow: () => ({
     isDestroyed: () => false,
     webContents: { id: 9999 },
@@ -264,6 +287,8 @@ vi.mock('../../appWindows', () => ({
 
 /** 推给界面的状态事件 */
 const broadcasts: Array<{ channel: string; payload: unknown }> = []
+/** 单独推给独立浏览器窗口的那一路 */
+const windowBroadcasts: Array<{ channel: string; payload: unknown }> = []
 
 /** 设置里当前选的显示方式 */
 const settings = { mode: 'window' as 'window' | 'embedded' | 'hidden' }
@@ -355,6 +380,7 @@ beforeEach(() => {
   views.length = 0
   attachedViews.length = 0
   broadcasts.length = 0
+  windowBroadcasts.length = 0
   settings.mode = 'window'
 })
 
@@ -684,12 +710,58 @@ describe('生命周期', () => {
     await openPage(instance)
     expect(savedUrls.get('crash')).toBe('https://example.com/')
 
-    hosts.at(-1)?.destroy()
-    expect(() => windowEvents.get('closed')?.forEach((handler) => handler())).not.toThrow()
+    const host = hosts.at(-1)
+    expect(host).toBeDefined()
+    const windowContentsId = host!.webContents.id as number
+    const closed = windowEvents.get('closed') ?? []
+    expect(closed).toHaveLength(1)
+
+    host!.destroy()
+    expect(() => closed.forEach((handler) => handler())).not.toThrow()
     await settle(Promise.resolve())
 
+    // 缓存 id 就是为了这一步还能跑完：窗口都没了，登记表也得清干净
+    expect(registry.unregistered).toContain(windowContentsId)
     expect(instance.hasWindow()).toBe(false)
     expect(savedUrls.has('crash')).toBe(false)
+  })
+
+  /**
+   * 页面可以自己 `window.close()`。那一下 contents 直接销毁，**`render-process-gone`
+   * 不触发** —— 没人把这个 tab 摘掉的话，它会一直挂在表里，而它上面每一次
+   * `getURL()` / `debugger` 都抛。真正要命的不是某个功能坏了，是下一次从
+   * Electron 事件派发里调进 `notifyState()` 的地方把整个主进程带走。
+   */
+  it('后台标签自己关掉：从表里摘干净，广播状态不抛', async () => {
+    const instance = new AgentBrowserService('selfclose')
+    await openPage(instance)
+    pageResults.push(SCAN_OK)
+    await settle(instance.openInNewTab('https://example.org/'))
+    expect(instance.groupState().tabs).toHaveLength(2)
+
+    // 第一个标签的页面自己关掉自己
+    const deadContents = views[0].webContents
+    const deadId = deadContents.id as number
+    ;(deadContents.close as () => void)()
+
+    expect(instance.groupState().tabs).toHaveLength(1)
+    expect(registry.unregistered).toContain(deadId)
+    // 活着的那个标签再来一次导航事件 —— 这是真机上把盒子带走的那条路
+    expect(() => instance.toolbar('reload')).not.toThrow()
+  })
+
+  /** 当前页面自己关掉之后再 open：死 surface 不能留在表里，否则后面每次广播都抛 */
+  it('当前标签自己关掉后重新 open：旧的死 surface 不留在表里', async () => {
+    const instance = new AgentBrowserService('reopen')
+    await openPage(instance)
+    const deadId = views[0].webContents.id as number
+
+    ;(views[0].webContents.close as () => void)()
+    pageResults.push(SCAN_OK)
+    await settle(instance.open('https://example.org/'))
+
+    expect(instance.groupState().tabs).toHaveLength(1)
+    expect(registry.unregistered).toContain(deadId)
   })
 
   it('resetSession 连认证缓存一起清 —— 只清 storage 会留下自动认证', async () => {

@@ -76,6 +76,23 @@ export function sendToAppWindows(channel: string, ...args: unknown[]): void {
   }
 }
 
+/**
+ * 给单个窗口发消息。
+ *
+ * 窗口和它的 `webContents` 是**两个独立的销毁标记**：关窗过程中有一段时间
+ * `win.isDestroyed()` 还是 false，而 `win.webContents` 已经销毁，这时候 `send`
+ * 照样抛。只查窗口那一个标记不够，所以两个都查，并且只查这一处 ——
+ * 同上：枚举收在这里，新增调用点天然是对的。
+ */
+export function sendToWindow(
+  window: BrowserWindow | null | undefined,
+  channel: string,
+  ...args: unknown[]
+): void {
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return
+  window.webContents.send(channel, ...args)
+}
+
 /** 测试用：清掉登记表 */
 export function resetNonAppWindowsForTest(): void {
   nonAppWindowIds.clear()
