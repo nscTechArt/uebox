@@ -138,15 +138,35 @@ describe('搜索模式真正进入 Agent 循环', () => {
     expect(write).not.toHaveBeenCalled()
   })
 
-  it('只读和工具名白名单在搜索前生效', async () => {
-    const { tools } = await createUnrealAgent({
-      ...base,
-      toolSearchEnabled: true,
-      readOnly: true,
-      toolNames: ['read_state', 'write_state']
-    })
-    const result = await tools[0].execute('s', { names: ['write_state', 'read_state'] })
-    expect(result.addedToolNames).toEqual(['read_state'])
+  /*
+   * 这条原来断言的是「只读 + 白名单会话里，搜索只能取回 read_state」。
+   * 2026-09-21 起这种会话**压根不折叠**（见 `createUnrealAgent` 里那段注释）：
+   * 池子已经被收窄过一次，再折一次省不下多少前缀，却仍要为每次加载全价重写一遍。
+   *
+   * 「权限在搜索之前生效」这条不变量没有丢 —— 它由
+   * `toolSearchCatalog.test.ts` 的「常驻也服从断连、只读、子任务和白名单」守着，
+   * 那条直接喂 `resolveAgentTools` + `createToolSearch`，不依赖这里开不开折叠。
+   */
+  it('收窄过的会话不折叠：只读、Ask、白名单都直接给全量', async () => {
+    settings.agentToolSearchEnabled = true
+    for (const narrowed of [
+      { readOnly: true },
+      { mode: 'ask' as const },
+      { toolNames: ['read_state'] },
+      { namespaces: ['ue.material'] }
+    ]) {
+      const agent = await createUnrealAgent({ ...base, ...narrowed })
+      expect(agent.toolSearchEnabled, JSON.stringify(narrowed)).toBe(false)
+      expect(
+        agent.tools.map((t) => t.name),
+        JSON.stringify(narrowed)
+      ).not.toContain('search_tools')
+      expect(agent.agent.state.systemPrompt).not.toContain('<tool_search_beta>')
+    }
+    // 没带白名单的子任务拿的是完整工具池，那正是折叠最划算的场景 —— 不关
+    const plain = await createUnrealAgent({ ...base, isSubAgent: true })
+    expect(plain.toolSearchEnabled).toBe(true)
+    expect(plain.tools.map((t) => t.name)).toEqual(['search_tools'])
   })
 
   it('常驻写工具不用搜索就可请求，但拒绝审批后仍然不能执行', async () => {

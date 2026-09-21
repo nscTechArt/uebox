@@ -25,7 +25,10 @@ async function search(
   loaded?: { name: string }[]
   missing?: string[]
   evicted?: string[]
+  addedToolNames?: string[]
+  loadedGroups?: string[]
   directories?: { namespace: string }[]
+  hint?: string
   nextOffset: number | null
 }> {
   const result = await controller.tool.execute('search', args)
@@ -170,6 +173,184 @@ describe('Beta 工具搜索', () => {
     const controller = createToolSearch(allowed, () => allowed)
     await search(controller, { names: ['ue_get_actor'] })
     expect(controller.getTools().slice(1)).toEqual(allowed)
+  })
+
+  /*
+   * 2026-09-21 起 query 按**组**分页。按工具分页时 `limit` 的真实含义是「我愿意
+   * 浪费几个名额」：中文查询撞上领域词表，整组同分并列，名额被一个组吃光，
+   * 第二个组还要再搜一次。实测真实轮次里 44% 需要 ≥2 个组。
+   */
+  describe('query 按组分页', () => {
+    const catalog = [
+      tool('material_a', 'ue.material', '材质 颜色'),
+      tool('material_b', 'ue.material', '材质 颜色'),
+      tool('blueprint_a', 'ue.blueprint', '材质 颜色'),
+      tool('blueprint_b', 'ue.blueprint', '材质 颜色')
+    ]
+
+    it('limit 数的是组不是工具，一页给整组、翻页换下一组', async () => {
+      const controller = createToolSearch(catalog, () => catalog)
+      const first = await search(controller, { query: '材质 颜色', limit: 1 })
+      // 一个组的两个成员一起到手，而不是两个组各给一个
+      expect(first.loaded?.map((entry) => entry.name).sort()).toEqual(['material_a', 'material_b'])
+      expect(first.nextOffset).toBe(1)
+      const second = await search(controller, { query: '材质 颜色', offset: 1, limit: 1 })
+      expect(second.loaded?.map((entry) => entry.name).sort()).toEqual([
+        'blueprint_a',
+        'blueprint_b'
+      ])
+      expect(second.nextOffset).toBe(null)
+    })
+
+    it('默认一次最多 3 个组', async () => {
+      const wide = Array.from({ length: 6 }, (_, i) => tool(`t_${i}`, `mcp.s${i}`, '材质 颜色'))
+      const controller = createToolSearch(wide, () => wide)
+      const page = await search(controller, { query: '材质 颜色' })
+      expect(new Set(page.loadedGroups)).toHaveLength(3)
+      expect(page.nextOffset).toBe(3)
+    })
+
+    /*
+     * `limit` 是上限不是配额。没有这道线就每次凑满，而多加载一组要多作废一次
+     * prompt cache（约 1.25×P₀）—— 凑一个不相关的组进来比少搜一次贵得多。
+     */
+    it('分数远低于头名的组不被凑进来', async () => {
+      const mixed = [
+        tool('material_exact', 'ue.material', '材质 材质 材质 颜色 颜色'),
+        tool('unrelated', 'ue.pcg', '材质')
+      ]
+      const controller = createToolSearch(mixed, () => mixed)
+      const page = await search(controller, { query: '材质 颜色' })
+      expect(page.loadedGroups).toEqual(['ue.material'])
+    })
+
+    /*
+     * 常驻工具混在排序里有两种输法，这套改动把两种都放大了（8 个组整组常驻，
+     * 名额从 5 个工具收到 3 个组）：吃掉一个名额，或者当了头名把真正要的折叠组
+     * 压到地板之下。两种的表象都是 `addedToolNames` 为空 —— 看起来像没搜着，
+     * 于是模型再搜一次，正是要消灭的那种连发。
+     */
+    it('命中的常驻工具不占名额、不当分母，但仍然回在 loaded 里', async () => {
+      // `ue_save` 在内置常驻清单里；描述写得比折叠组更贴题，足以当头名
+      const withResident = [
+        tool('ue_save', 'ue.editor', '整理 整理 整理 资产 资产 资产'),
+        tool('content_organize', 'ue.content', '整理 资产')
+      ]
+      const controller = createToolSearch(withResident, () => withResident, {
+        content_organize: false
+      })
+      const page = await search(controller, { query: '整理资产', limit: 1 })
+      // 唯一那个名额给了折叠组，没被常驻的 ue_save 吃掉；也没被它拉高的地板筛没
+      expect(page.loadedGroups).toEqual(['ue.content'])
+      expect(page.addedToolNames).toEqual(['content_organize'])
+      // 但「你已经有 ue_save 了」这件事仍然告诉模型
+      expect(page.loaded?.map((entry) => entry.name)).toContain('ue_save')
+    })
+
+    it('只命中常驻工具时说清楚是「已经有了」，不说未命中', async () => {
+      const onlyResident = [tool('ue_save', 'ue.editor', '保存 存盘')]
+      const controller = createToolSearch(onlyResident, () => onlyResident)
+      const page = await search(controller, { query: '保存' })
+      expect(page.addedToolNames).toEqual([])
+      expect(page.loaded?.map((entry) => entry.name)).toEqual(['ue_save'])
+      expect(page.hint).toContain('已经在你的清单里')
+    })
+  })
+
+  /*
+   * 精确点名不是检索结果，按 `limit` 截断只会无声丢掉后面几个 ——
+   * 旧默认是 5，报 8 个名字就哑掉 3 个，返回里还什么都不说。
+   */
+  it('names 全部加载，不受 limit 截断', async () => {
+    const catalog = Array.from({ length: 6 }, (_, i) => tool(`t_${i}`, `mcp.s${i}`))
+    const controller = createToolSearch(catalog, () => catalog)
+    const result = await search(controller, { names: catalog.map((entry) => entry.name) })
+    expect(result.loaded).toHaveLength(6)
+    expect(result.nextOffset).toBe(null)
+    expect(controller.getTools()).toEqual(expect.arrayContaining(catalog))
+  })
+
+  /*
+   * 小组整组常驻，理由是 prompt cache 的账：常驻字节每轮只收 0.1×，而每加载
+   * 一组要全价重写一次前缀 —— 小组摊不平。算式见 `RESIDENT_TOOL_GROUPS`。
+   */
+  describe('整组常驻', () => {
+    it('组在名单里就首发，哪怕工具本身没被点名', () => {
+      const catalog = [tool('ue_restart_editor', 'ue.editor'), tool('material_write')]
+      const controller = createToolSearch(catalog, () => catalog)
+      expect(controller.getTools().map((entry) => entry.name)).toEqual([
+        'search_tools',
+        'ue_restart_editor'
+      ])
+    })
+
+    it('整组常驻仍然让位给用户的差量', () => {
+      const catalog = [tool('ue_restart_editor', 'ue.editor')]
+      const controller = createToolSearch(catalog, () => catalog, { ue_restart_editor: false })
+      expect(controller.getTools().map((entry) => entry.name)).toEqual(['search_tools'])
+    })
+  })
+
+  /*
+   * `ue.content` 整组 41,099 字节、摊薄只有 1.6，是全表最差的一组。拆成
+   * 导入 / 整理 / 体检三组之后，图片生成那类只想「把文件放进工程」的技能
+   * 不会再把删除和重定向修复一起拖进来。
+   */
+  it('ue.content 按子组加载，导入不会带来删除', async () => {
+    const catalog = [
+      tool('ue_content_import', 'ue.content', '导入'),
+      tool('ue_content_delete', 'ue.content', '删除'),
+      tool('ue_content_describe', 'ue.content', '查看')
+    ]
+    const controller = createToolSearch(catalog, () => catalog)
+    const result = await search(controller, { names: ['ue_content_import'] })
+    expect(result.addedToolNames).toEqual(['ue_content_import'])
+    expect(result.loadedGroups).toEqual(['ue.content.import'])
+    expect(controller.getTools().map((entry) => entry.name)).not.toContain('ue_content_delete')
+  })
+
+  it('目录列的是工具组，父目录名也能浏览', async () => {
+    const catalog = [
+      tool('ue_content_import', 'ue.content', '导入'),
+      tool('ue_content_delete', 'ue.content', '删除')
+    ]
+    const controller = createToolSearch(catalog, () => catalog)
+    expect((await search(controller, {})).directories?.map((d) => d.namespace)).toEqual([
+      'ue.content.import',
+      'ue.content.organize'
+    ])
+    // 模型手里可能是拆组之前的那份记忆，或者它本来就只想说「内容浏览器那一摊」
+    const parent = await search(controller, { namespace: 'ue.content' })
+    expect(parent.loaded?.map((entry) => entry.name).sort()).toEqual([
+      'ue_content_delete',
+      'ue_content_import'
+    ])
+  })
+
+  /*
+   * 父目录认的是**真实存在的命名空间**，不是任意字符串前缀。按前缀匹配的话
+   * `namespace: 'ue'` 会一口咬住全部 UE 工具，而这条路径没有打分 —— 按名字排完
+   * 取头几个，等于整组整组地加载模型压根没要的东西，一次三份前缀重写。
+   */
+  it('namespace 只认真实目录，半截前缀不会扫走一整摊', async () => {
+    const catalog = [
+      tool('ue_content_import', 'ue.content', '导入'),
+      tool('material_set', 'ue.material', '材质'),
+      tool('blueprint_add', 'ue.blueprint', '蓝图')
+    ]
+    const controller = createToolSearch(catalog, () => catalog)
+    const half = await search(controller, { namespace: 'ue' })
+    expect(half.loaded).toEqual([])
+    expect(half.addedToolNames).toEqual([])
+    expect(controller.getTools().map((entry) => entry.name)).toEqual(['search_tools'])
+  })
+
+  it('浏览目录不跟着 query 的每页 3 组收窄', async () => {
+    const catalog = Array.from({ length: 6 }, (_, i) => tool(`t_${i}`, `mcp.s${i}`))
+    const controller = createToolSearch(catalog, () => catalog)
+    // query 一页 3 个组，目录一页 5 个条目 —— 逃生口不该跟着变窄
+    expect((await search(controller, {})).directories).toHaveLength(5)
+    expect((await search(controller, { query: '材质颜色' })).loadedGroups).toHaveLength(3)
   })
 
   /**
