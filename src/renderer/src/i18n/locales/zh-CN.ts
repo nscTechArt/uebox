@@ -1241,7 +1241,13 @@ export default {
     installNow: '立即重启',
     later: '稍后',
     /** quitAndInstall 失败不走 update-error 事件，只能在发起的地方报 */
-    installFailed: '安装更新失败，请稍后重试或手动下载安装包'
+    installFailed: '安装更新失败，请稍后重试或手动下载安装包',
+    /** 渲染进程没拿到 updater 通道（preload 没装上、通道改名、独立窗口） */
+    unavailable: '更新功能当前不可用，请重启应用后重试',
+    /** 渲染层自己判出来的：主进程静默返回成功，一个事件都没推 */
+    downloadNotStarted: '下载没有开始：可能没有可用更新，或已有下载在进行',
+    /** 没配更新源/已有检查在跑：问不出结果，但不能沉默 */
+    checkUnavailable: '这个版本没有配置更新源，无法检查更新'
   },
   page: {
     home: {
@@ -2892,9 +2898,7 @@ export default {
       checking: '正在检查更新...',
       upToDate: '当前已是最新版本',
       updateAvailable: '发现新版本 {version}，现在下载吗？',
-      updateReady: '新版本 {version} 已下载完成，是否立即安装？',
       downloadNow: '下载',
-      installNow: '立即安装',
       later: '稍后',
       downloading: '正在下载更新，完成后会提示你安装',
       updateError: '检查更新失败',

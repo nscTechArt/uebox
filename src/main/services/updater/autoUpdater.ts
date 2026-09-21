@@ -297,17 +297,42 @@ export class AutoUpdaterService {
   }
 
   /**
-   * 退出并安装更新
+   * 退出并安装更新。
+   *
+   * **必须有返回值。** 原来这里是 `void`：没下载完就 logger.warn 一声返回，
+   * 而 IPC 那层照样回 `{ success: true }` —— 于是渲染进程那句
+   * `if (!result.success) message.error(...)` 永远跑不到。用户点「立即重启」，
+   * 弹窗关掉，应用不重启，一个字的提示都没有，再点一次还是这样。
    */
-  quitAndInstall(): void {
+  quitAndInstall(): { success: boolean; error?: string } {
     if (!this.status.updateDownloaded) {
       logger.warn('更新尚未下载完成')
-      return
+      return { success: false, error: '更新尚未下载完成' }
     }
 
+    /*
+     * 和 downloadUpdate 一样要改写成手动、非静默。
+     *
+     * 安装失败（装包起不来、用户在 UAC 弹窗上点了「否」）electron-updater 是发
+     * `error` 事件报的，不是抛异常；而 handleUpdateError 按「最近一次检查」的
+     * silent 决定要不要通知渲染进程。后台每 4 小时那次检查把 silent 置成了 true，
+     * 这里不改回来的话，安装失败会被整条咽掉 —— 而这正是最常见的失败场景。
+     */
+    this.currentCheckOptions = { source: 'manual', silent: false }
+    this.errorHandledByUpdaterEvent = false
+
     logger.info('退出应用并安装更新...')
-    // updateDownloaded 为真说明 updater 早已加载过，这里不会触发首次加载
-    this.getUpdater().quitAndInstall(false, true) // 不立即退出，等待应用关闭
+    try {
+      // updateDownloaded 为真说明 updater 早已加载过，这里不会触发首次加载
+      this.getUpdater().quitAndInstall(false, true) // 不立即退出，等待应用关闭
+      return { success: true }
+    } catch (error) {
+      logger.error('退出并安装更新失败:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '退出并安装更新失败'
+      }
+    }
   }
 
   /**

@@ -30,10 +30,28 @@ export interface UpdaterStatus {
 
 export interface UpdaterActionResult {
   success: boolean
+  /** 主进程给的原文。只有主进程自己返回的才往这里放 */
   error?: string
+  /**
+   * 这一层自己造出来的失败，给 i18n key 而不是成品文案。
+   *
+   * 这里造的字符串会被关于页原样 `message.error` 弹出去，写死中文的话
+   * 英文用户就会看到一句中文（AGENTS.md §5 规则 3：面向用户的文案必须双语）。
+   * 而且只要 `error` 非空，调用方 `result.error || t('...')` 的兜底翻译就永远轮不到。
+   * 所以：能翻的给 key，翻不了的（主进程原文）才给 error。
+   */
+  errorKey?: string
 }
 
-const BRIDGE_MISSING = '更新功能不可用（渲染进程没拿到 updater 通道）'
+/** 主进程推过来的六个更新事件 */
+export interface UpdaterEventHandlers {
+  onChecking: () => void
+  onAvailable: (data: { version: string }) => void
+  onNotAvailable: () => void
+  onProgress: (data: { percent: number; transferred: number; total: number }) => void
+  onDownloaded: (data: { version: string }) => void
+  onError: (data?: { message?: string; code?: string }) => void
+}
 
 function bridge(): NonNullable<typeof window.api.updater> | null {
   return window.api?.updater ?? null
@@ -45,12 +63,14 @@ async function invoke(
   what: string
 ): Promise<UpdaterActionResult> {
   const api = bridge()
-  if (!api) return { success: false, error: BRIDGE_MISSING }
+  if (!api) return { success: false, errorKey: 'update.unavailable' }
   try {
-    return (await run(api)) ?? { success: false, error: `${what}没有返回结果` }
+    // 没返回结果时两个字段都不给：调用方的 `result.error || t(...)` 兜底才能生效
+    return (await run(api)) ?? { success: false }
   } catch (error) {
+    // 细节留在控制台，界面上给可翻译的那句
     console.error(`[updater] ${what}失败:`, error)
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
+    return { success: false, errorKey: 'update.unavailable' }
   }
 }
 
@@ -63,6 +83,30 @@ export const updaterAPI = {
 
   quitAndInstall: (): Promise<UpdaterActionResult> =>
     invoke((api) => api.quitAndInstall(), '安装更新'),
+
+  /**
+   * 挂上主进程推过来的六个事件，返回一个摘干净的函数。
+   *
+   * 订阅也得从这里走，否则这一层只包住了四个 invoke，Store 里仍旧留着
+   * 第二处 `window.api?.updater` 判断 —— 桥没了的时候两边表现还不一样：
+   * 动作调用规规矩矩回 `{success:false}`，而订阅那边默默 return，
+   * 于是「按钮报错、角标永远不动、日志里什么都没有」。
+   *
+   * 桥不在时返回 null，调用方据此知道订阅没挂上。
+   */
+  subscribe(handlers: UpdaterEventHandlers): (() => void) | null {
+    const api = bridge()
+    if (!api) return null
+    const cleanups = [
+      api.onUpdateChecking(handlers.onChecking),
+      api.onUpdateAvailable(handlers.onAvailable),
+      api.onUpdateNotAvailable(handlers.onNotAvailable),
+      api.onDownloadProgress(handlers.onProgress),
+      api.onUpdateDownloaded(handlers.onDownloaded),
+      api.onUpdateError(handlers.onError)
+    ]
+    return () => cleanups.forEach((off) => off())
+  },
 
   /** 读不到就回 null —— 调用方据此跳过这次同步，不覆盖已有状态 */
   async getStatus(): Promise<UpdaterStatus | null> {

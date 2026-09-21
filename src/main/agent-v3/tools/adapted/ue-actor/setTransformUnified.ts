@@ -307,11 +307,21 @@ interface SetTransformUnifiedResponse extends WorldScopedResponse, UnmatchedTarg
  *
  * `bounds` 留在表里是**诊断要用**：插件只在 `Bounds.IsValid` 时才发 min/max，
  * 而 `bounds` 是无条件发的。两者一起看才分得清「插件太旧」和「没有几何体」。
+ *
+ * **但要包一层 `Partial`。** `ActorInfoItem` 把 name / path / transform.location
+ * 都声明成必填，那是「插件正常时长什么样」的描述，不是校验过的事实 ——
+ * 这是 WebSocket 上过来的 JSON，没有任何运行时校验。直接 Pick 会让
+ * `actor.name?.toLowerCase()`、`actor.path ? … : …`、`isFiniteVec(actor.transform?.location)`
+ * 这些守卫在编译器眼里变成多余（eslint 的 no-unnecessary-condition 会这么报），
+ * 下一个人顺手删掉一个，遇到老插件就在 `actor.transform!.location!` 上炸 ——
+ * 而那正是「没回包围盒」那道守卫要拦的情况。派生要，假保证不要。
  */
-type ArrangeActorInfo = Pick<
-  ActorInfoItem,
-  'name' | 'path' | 'transform' | 'bounds' | 'bounds_min' | 'bounds_max'
->
+type ArrangeActorInfo = Partial<
+  Pick<ActorInfoItem, 'name' | 'path' | 'bounds' | 'bounds_min' | 'bounds_max'>
+> & {
+  /** location 也得是可选的：老插件不回 transform，回了也可能缺 location */
+  transform?: Partial<NonNullable<ActorInfoItem['transform']>>
+}
 
 /** 名字列表最多列几个。和 `unmatchedTargets.ts` 的 MAX_LISTED 同一个数 */
 const MAX_LISTED_NAMES = 8
@@ -325,7 +335,8 @@ const MAX_LISTED_NAMES = 8
 function listNames(names: string[]): string {
   const shown = names.slice(0, MAX_LISTED_NAMES).join('、')
   const rest = names.length - MAX_LISTED_NAMES
-  return rest > 0 ? `${shown}（还有 ${rest} 个）` : shown
+  // 省略号也要跟 unmatchedTargets.ts 一致，免得同一份回执里出现两种写法
+  return rest > 0 ? `${shown} …（还有 ${rest} 个）` : shown
 }
 
 /** get_info 的回包：除了 actors，世界归属和没对上的名字都要带出来 */

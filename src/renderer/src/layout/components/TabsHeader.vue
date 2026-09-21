@@ -718,8 +718,21 @@ const handleUpdateClick = (): void => {
 
   // 下载几百 MB，不能 await 着它画 loading —— 进度走 downloadPercent
   message.info(t('update.downloadStarted'))
-  // 失败不在这里报：主进程的 update-error 事件会推过来，由 App.vue 统一报一次
-  void updateStore.download()
+  void startDownload()
+}
+
+/**
+ * 下载的失败分两种，只有一种会自己报。
+ *
+ * 主进程真跑起来之后出的错走 update-error 事件，App.vue 统一报一次，这里不用管。
+ * 但「压根没开始」（没配更新源、没有可用更新、已有下载在跑）是主进程静默返回成功、
+ * 由 Store 自己判出来的 —— 没有任何事件会推过来。不在这儿报的话，用户刚被告知
+ * 「开始下载」，角标却悄悄退回「有新版本」，没有一个字的解释，而且每次点都一样。
+ */
+async function startDownload(): Promise<void> {
+  const result = await updateStore.download()
+  if (result.success) return
+  message.error(result.errorKey ? t(result.errorKey) : result.error || t('update.unavailable'))
 }
 
 onMounted(() => {

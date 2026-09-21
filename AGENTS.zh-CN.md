@@ -154,6 +154,11 @@ pnpm verify             # 约 3.5 分钟 —— 完整门禁
 4. **`src/preload/index.ts` 和 `src/preload/index.d.ts` 必须一起改**，否则 typecheck 直接挂。
 5. **渲染进程不许直接调 `ipcRenderer`。** 走 `window.api.*`，并在 `src/renderer/src/api/*` 里
    用 `unwrapResult()` 包一层，保证错误处理一致。
+   **包一层是死规矩，`unwrapResult()` 是默认做法、不是唯一做法。** 它是**抛异常**的，
+   适合「拿不到数据就没法往下走」的读取类调用。而调用方必须自己看失败、各报各的那种接口
+   （用户点一下就发一次的动作），可以改成回 `{ success, error?, errorKey? }` ——
+   前提是所有调用点仍旧走这一层，且理由写在模块文件头里。
+   参考 `src/renderer/src/api/updater.ts`。
 6. **新行为必须有测试。** 放 `tests/` 或与源码同目录的 `*.test.ts` 都行，两种都会被收集。
    见 [docs/contributing/testing.md](docs/contributing/testing.md)。
 7. **不要新增依赖、网络请求、遥测**，除非 Issue 里明确要求。CI 会跑 `pnpm audit:prod`，

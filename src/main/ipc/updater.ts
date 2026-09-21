@@ -39,8 +39,9 @@ export function registerUpdaterIPC(): void {
   // 退出并安装更新
   ipcMain.handle('updater:quit-and-install', async () => {
     try {
-      autoUpdaterService.quitAndInstall()
-      return { success: true }
+      // 把服务层的结论原样带出去。无条件回 success 的话，渲染层那句
+      // 「装不上就报错」永远跑不到（见 autoUpdater.quitAndInstall 的注释）
+      return autoUpdaterService.quitAndInstall()
     } catch (error) {
       console.error('退出并安装更新失败:', error)
       return {

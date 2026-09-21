@@ -46,7 +46,9 @@ export function useUpdateInstall(): { confirmInstall: () => void } {
   async function runInstall(): Promise<void> {
     const result = await updateStore.install()
     if (!result.success) {
-      message.error(result.error || t('update.installFailed'))
+      message.error(
+        result.errorKey ? t(result.errorKey) : result.error || t('update.installFailed')
+      )
     }
   }
 

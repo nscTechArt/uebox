@@ -65,10 +65,13 @@ function showUpdateAvailableDialog(version: string): void {
 /**
  * 下载更新。进度显示在标题栏那枚角标上，完成后由 watch 接手弹安装框。
  */
-function downloadUpdate(): void {
-  // 下载失败不在这里报：主进程会推 update-error，App.vue 统一报一次
+async function downloadUpdate(): Promise<void> {
   message.info(t('profile.about.downloading'))
-  void updateStore.download()
+  // 跑起来之后的错走 update-error 事件，App.vue 统一报；「压根没开始」是 Store
+  // 自己判出来的，没有事件会推过来，只能在这儿报（同 TabsHeader.startDownload）
+  const result = await updateStore.download()
+  if (result.success) return
+  message.error(result.errorKey ? t(result.errorKey) : result.error || t('update.unavailable'))
 }
 
 // 安装确认框和失败提示都走 useUpdateInstall：标题栏角标用的是同一份。
@@ -146,13 +149,23 @@ async function checkForUpdates(): Promise<void> {
   awaitingManualResult.value = false
 
   if (!result.success) {
-    message.error(result.error || t('profile.about.updateError'))
+    // errorKey 是 api 层造的可翻译失败（桥不在等），优先翻它；
+    // error 是主进程原文，没有就退回本页的兜底文案
+    message.error(
+      result.errorKey ? t(result.errorKey) : result.error || t('profile.about.updateError')
+    )
     return
   }
-  // outcome 为 unknown 表示这一轮压根没问出结果（没配更新源、已有检查在跑），
-  // 那就什么都不说，别谎报「已是最新版本」
   if (result.outcome === 'upToDate') {
     message.success(t('profile.about.upToDate'))
+    return
+  }
+  // unknown = 这一轮压根没问出结果（没配更新源、已有检查在跑）。不能谎报
+  // 「已是最新版本」，但也不能就这么沉默：社区版默认就没有更新源
+  // （autoUpdater 的 isConfigured 那一支），那是**最常走的一条路** ——
+  // 点一下只看到「正在检查更新...」然后再无下文，这个按钮读起来就是坏的
+  if (result.outcome === 'unknown') {
+    message.info(t('update.checkUnavailable'))
   }
 }
 </script>
