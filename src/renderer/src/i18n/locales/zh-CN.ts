@@ -100,6 +100,9 @@ export default {
     rename: '重命名',
     renameTitle: '重命名会话',
     renamePlaceholder: '请输入新的会话名称',
+    smartName: '智能命名',
+    smartNameEmpty: '这条会话还没有对话内容，起不了名',
+    smartNameFailed: '起名失败，自己写一个，或去检查轻量任务模型',
     moveToProject: '归入工程',
     removeFromProject: '不在项目中工作',
     newProjectGroup: '新建工程分组…',
@@ -132,7 +135,9 @@ export default {
     followUpUserPrompt:
       '基于上面的对话，站在用户当前的立场生成对assistant的{lang}追加和虚幻开发相关的提问建议或是对用户可能会回复的操作指令',
     sessionTitleSystemPrompt:
-      '你是会话标题生成器。根据用户发来的第一条消息，用{lang}起一个概括这段对话主题的标题，不超过15个字。只写主题本身，不要引号、不要句末标点、不要“关于”“如何”这类前缀，也不要复述整句话。仅输出JSON且必须符合schema，字段为title（字符串），不要输出其它内容或解释。'
+      '你是会话标题生成器。根据用户发来的第一条消息，用{lang}起一个概括这段对话主题的标题，不超过15个字。只写主题本身，不要引号、不要句末标点、不要“关于”“如何”这类前缀，也不要复述整句话。仅输出JSON且必须符合schema，字段为title（字符串），不要输出其它内容或解释。',
+    sessionRenameSystemPrompt:
+      '你是会话标题生成器。下面是一段对话的最后一轮问答，用{lang}起一个概括这段对话主题的标题，不超过15个字。只写主题本身，不要引号、不要句末标点、不要“关于”“如何”这类前缀，也不要复述原话。仅输出JSON且必须符合schema，字段为title（字符串），不要输出其它内容或解释。'
   },
   assetLock: {
     summary: 'AI 锁定了 {count} 个资产',
@@ -2494,6 +2499,8 @@ export default {
       editorScreenshotDesc: '允许获取虚幻编辑器画面。',
       archivedChats: '归档对话',
       archivedChatsDesc: '查看、恢复或删除已归档对话。',
+      autoRetitle: '自动生成新标题',
+      autoRetitleDesc: '每轮回复结束后，按刚聊的内容重起标题。',
       openArchivedChats: '打开归档对话',
       // 智能追加提问设置
       followUpSuggestions: '追问建议',

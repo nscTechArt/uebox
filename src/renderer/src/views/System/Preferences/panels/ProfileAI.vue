@@ -38,6 +38,15 @@ const followUpSuggestionsEnabled = computed({
   set: (value: boolean) => aiConfigStore.setFollowUpSuggestionsEnabled(value)
 })
 
+/**
+ * 每轮结束后自动重起标题。默认关 —— 它每轮都要多花一次轻量模型调用，
+ * 而且侧边栏那一行会跟着改名。
+ */
+const autoRetitleEnabled = computed({
+  get: () => aiConfigStore.autoRetitleEnabled,
+  set: (value: boolean) => aiConfigStore.setAutoRetitleEnabled(value)
+})
+
 // 「技能沉淀」那一档搬去了「个性化」页，和「它记了什么、怎么删掉」放在一起 ——
 // 一个开关和它管的那份清单分在两页，用户看不出是同一套东西。
 
@@ -274,6 +283,13 @@ watch(fileAccessScope, async (scope) => {
           <AppButton variant="soft" @click="showArchivedChats = true">
             {{ $t('profile.ai.openArchivedChats') }}
           </AppButton>
+        </div>
+        <div class="setting-item">
+          <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.ai.autoRetitle') }}</div>
+            <div class="setting-desc">{{ $t('profile.ai.autoRetitleDesc') }}</div>
+          </div>
+          <AppSwitch v-model:checked="autoRetitleEnabled" />
         </div>
       </div>
     </section>

@@ -68,3 +68,28 @@ describe('followUpSuggestionsEnabled', () => {
     expect(s.followUpSuggestionsEnabled).toBe(true)
   })
 })
+
+describe('autoRetitleEnabled', () => {
+  function store(): ReturnType<typeof useAIConfigStore> {
+    setActivePinia(createPinia())
+    return useAIConfigStore()
+  }
+
+  // 默认关：它每轮都要多打一次轻量模型，而且侧边栏那一行会跟着改名
+  it('新用户默认关闭自动生成新标题', () => {
+    expect(store().autoRetitleEnabled).toBe(false)
+  })
+
+  it('用户打开后保持打开', () => {
+    const s = store()
+    s.setAutoRetitleEnabled(true)
+    expect(s.autoRetitleEnabled).toBe(true)
+  })
+
+  it('重置配置后恢复默认关闭', () => {
+    const s = store()
+    s.setAutoRetitleEnabled(true)
+    s.resetConfig()
+    expect(s.autoRetitleEnabled).toBe(false)
+  })
+})

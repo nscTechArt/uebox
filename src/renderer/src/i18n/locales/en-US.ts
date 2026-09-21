@@ -100,6 +100,9 @@ export default {
     rename: 'Rename',
     renameTitle: 'Rename chat',
     renamePlaceholder: 'Enter a new chat name',
+    smartName: 'Smart name',
+    smartNameEmpty: 'This chat has no messages yet — nothing to name it from',
+    smartNameFailed: 'Naming failed. Type a name yourself, or check the light-task model.',
     moveToProject: 'Move to project',
     removeFromProject: 'Work outside a project',
     newProjectGroup: 'New project group…',
@@ -132,7 +135,9 @@ export default {
     followUpUserPrompt:
       "Based on the conversation above, generate follow-up questions for the assistant from the user's perspective in {lang}.",
     sessionTitleSystemPrompt:
-      'You are a chat title generator. From the user\'s first message, write a title in {lang} that captures what the conversation is about, at most 6 words. Write the topic only: no quotes, no trailing punctuation, no prefixes like "About" or "How to", and do not repeat the whole sentence. Output only JSON and must strictly follow the schema. The field is title (string). Do not output any other content or explanations.'
+      'You are a chat title generator. From the user\'s first message, write a title in {lang} that captures what the conversation is about, at most 6 words. Write the topic only: no quotes, no trailing punctuation, no prefixes like "About" or "How to", and do not repeat the whole sentence. Output only JSON and must strictly follow the schema. The field is title (string). Do not output any other content or explanations.',
+    sessionRenameSystemPrompt:
+      'You are a chat title generator. Below is the last exchange of a conversation. Write a title in {lang} that captures what the conversation is about, at most 6 words. Write the topic only: no quotes, no trailing punctuation, no prefixes like "About" or "How to", and do not repeat the wording. Output only JSON and must strictly follow the schema. The field is title (string). Do not output any other content or explanations.'
   },
   assetLock: {
     summary: 'AI has {count} asset(s) locked',
@@ -2574,6 +2579,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       editorScreenshotDesc: 'Allow capture of the Unreal Editor screen.',
       archivedChats: 'Archived chats',
       archivedChatsDesc: 'View, restore, or delete archived chats.',
+      autoRetitle: 'Auto-generate new titles',
+      autoRetitleDesc: 'Rename the chat after every reply, based on what was just discussed.',
       openArchivedChats: 'Open archived chats',
       // Smart follow-up suggestions settings
       followUpSuggestions: 'Follow-up suggestions',

@@ -494,6 +494,49 @@ export function parseGeneratedTitle(raw: string): string {
   return normalizeSessionTitle(content.split(/\r?\n/).find((line) => line.trim()))
 }
 
+/**
+ * 取名调用的公共部分：同一档模型、同一套参数、同一个解析器，只有喂进去的文本
+ * 和那条系统提示不同。
+ *
+ * 走「轻量任务」模型（`summary` 角色，不传 `level` 即是它）：这是个几秒内要
+ * 回来的装饰性调用，不值得占用户绑给对话/Agent 的那档模型。
+ *
+ * @returns 归一化后的标题。模型返回废话时是空串；模型没配、调用失败会**抛错**。
+ */
+async function requestSessionTitle(
+  text: string,
+  maxChars: number,
+  systemPromptKey: string
+): Promise<string> {
+  const excerpt = (text || '').replace(/\s+/g, ' ').trim().slice(0, maxChars)
+  if (!excerpt) return ''
+
+  const lang = i18n.global.locale.value === 'zh-CN' ? '中文' : 'English'
+
+  const response = await aiAPI.chat({
+    maxTokens: 64,
+    callType: 'session-title',
+    responseFormat: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'session_title',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: { title: { type: 'string' } },
+          required: ['title']
+        }
+      }
+    },
+    messages: [
+      { role: 'system', content: i18n.global.t(systemPromptKey, { lang }) },
+      { role: 'user', content: excerpt }
+    ]
+  })
+
+  return parseGeneratedTitle(response.content)
+}
+
 // ==================== API方法 ====================
 
 /**
@@ -864,37 +907,18 @@ export const aiAPI = {
    *          模型没配、调用失败会**抛错**，同样由调用方降级。
    */
   async generateSessionTitle(params: { firstMessage: string }): Promise<string> {
-    const excerpt = params.firstMessage.replace(/\s+/g, ' ').trim().slice(0, 500)
-    if (!excerpt) return ''
+    return requestSessionTitle(params.firstMessage, 500, 'ai.sessionTitleSystemPrompt')
+  },
 
-    const isZh = i18n.global.locale.value === 'zh-CN'
-    const lang = isZh ? '中文' : 'English'
-
-    const response = await aiAPI.chat({
-      maxTokens: 64,
-      callType: 'session-title',
-      responseFormat: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'session_title',
-          strict: true,
-          schema: {
-            type: 'object',
-            properties: { title: { type: 'string' } },
-            required: ['title']
-          }
-        }
-      },
-      messages: [
-        {
-          role: 'system',
-          content: i18n.global.t('ai.sessionTitleSystemPrompt', { lang })
-        },
-        { role: 'user', content: excerpt }
-      ]
-    })
-
-    return parseGeneratedTitle(response.content)
+  /**
+   * 按一段对话节选重新起名。用在重命名弹窗的「智能命名」上。
+   *
+   * 和 {@link generateSessionTitle} 的差别只有两处：喂的是**最后一轮问答**而不是
+   * 第一条消息（会话聊到后面，主题常常已经不是开头那件事了），额度给到 1000 字
+   * （一轮问答有两个人的话要装）。模型、参数、解析全是同一套。
+   */
+  async generateSessionTitleFromExcerpt(params: { excerpt: string }): Promise<string> {
+    return requestSessionTitle(params.excerpt, 1000, 'ai.sessionRenameSystemPrompt')
   },
 
   async generateImage(params: ImageGenerateParams): Promise<ImageResponse> {

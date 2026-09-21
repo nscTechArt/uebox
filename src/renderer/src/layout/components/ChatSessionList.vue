@@ -29,6 +29,7 @@ import {
   // 「这条会话在等你回答」。用问号而不是铃铛/感叹号：它不是通知也不是告警，
   // 就是字面意义上有一个问题挂在那儿等人回话
   PhQuestion,
+  PhSparkle,
   PhTrash
 } from '@phosphor-icons/vue'
 import { useI18n } from 'vue-i18n'
@@ -39,6 +40,7 @@ import { useAgentStreamStore } from '@renderer/store/modules/agentStream'
 import { useTabsStore } from '@renderer/store/modules/tabs'
 import { deleteChatSessions } from '@renderer/composables/deleteChatSession'
 import { applySessionClick, pruneSelection } from '../composables/chatSessionSelection'
+import { retitleSession } from '@renderer/composables/sessionRetitle'
 import {
   SECTION_PINNED_KEY,
   SECTION_PLAIN_KEY,
@@ -677,6 +679,26 @@ function closeRenameModal(): void {
   renameTitle.value = ''
 }
 
+/**
+ * 智能命名：**弹窗立刻关掉**，把最后一轮问答喂给轻量模型，名字回来直接落库。
+ *
+ * 不让用户对着一个转圈的弹窗干等几秒：这是个一句话就能讲清的动作（「按现在聊的
+ * 内容重起个名」），没有需要他确认的中间态。名字不合意，再点一次重命名就是了。
+ *
+ * 失败什么都不做，原名继续用着 —— 弹窗已经不在了，只能用一条 toast 说明。
+ */
+async function smartName(): Promise<void> {
+  const sessionId = renamingId.value
+  if (!sessionId) return
+
+  closeRenameModal()
+  const outcome = await retitleSession(sessionId, chatMsgStore.getMessages(sessionId), (title) =>
+    chatStore.updateTitle(sessionId, title)
+  )
+  if (outcome === 'empty') message.warning(t('chatSidebar.smartNameEmpty'))
+  if (outcome === 'failed') message.error(t('chatSidebar.smartNameFailed'))
+}
+
 // ==================== 归入工程 ====================
 // 目标是一组会话 id：单条操作传一个，批量操作传整个选择集，弹窗共用
 const projectModalOpen = ref(false)
@@ -1277,6 +1299,20 @@ function getChatInitial(title: string): string {
         :placeholder="t('chatSidebar.renamePlaceholder')"
         @press-enter="confirmRename"
       />
+      <template #footer>
+        <!-- 智能命名靠左：它是个可选的辅助动作，位置和右边「取消/确认」分两组，
+             但长相跟「取消」一样带边框 —— 同一排按钮里混一个无框的，看着像没做完 -->
+        <AppButton class="rename-modal__smart" @click="smartName">
+          <template #icon>
+            <PhSparkle />
+          </template>
+          {{ t('chatSidebar.smartName') }}
+        </AppButton>
+        <AppButton @click="closeRenameModal">{{ t('chatSidebar.cancel') }}</AppButton>
+        <AppButton variant="primary" :disabled="!renameTitle.trim()" @click="confirmRename">
+          {{ t('common.confirm') }}
+        </AppButton>
+      </template>
     </AppModal>
 
     <AppModal
@@ -1696,5 +1732,11 @@ function getChatInitial(title: string): string {
     border-radius: var(--radius-full);
     background: var(--color-warning-text);
   }
+}
+
+
+// 智能命名靠左推开，和右边主按钮分两组
+.rename-modal__smart {
+  margin-right: auto;
 }
 </style>

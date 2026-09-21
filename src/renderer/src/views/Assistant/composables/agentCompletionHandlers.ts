@@ -9,6 +9,7 @@ import type { AgentModeHandlersDeps, DoneEvent } from './agentHandlerShared'
 import { resolveAssistantMessage, resolveTargetChatSid } from './agentHandlerShared'
 import { collectGeneratedMediaFromAgentArtifacts } from './agentGeneratedMedia'
 import { autoNameSession } from './sessionAutoTitle'
+import { retitleSession } from '../../../composables/sessionRetitle'
 import { shouldMarkTaskDone } from './sessionTaskDone'
 import { summarizeChanges } from './changeSummary'
 import { loadToolRiskTable } from './toolRiskTable'
@@ -470,6 +471,11 @@ export function createAgentCompletionHandlers(
       scrollToBottomIfNeeded()
     }
 
+    const routePath = route?.path || ''
+    const isAssistantRoute =
+      routePath === '/dev-assistant' || routePath.startsWith('/dev-assistant/')
+    const canRetitleTab = isAssistantRoute && targetChatSid === sid.value
+
     const session = chatStore.sessionById(targetChatSid)
     const defaultTitle = !session || session.title === t('assistant.agentMode.unnamedSession')
     if (defaultTitle && updatedHistory.length > 1) {
@@ -479,10 +485,6 @@ export function createAgentCompletionHandlers(
         const autoTitle =
           firstMessage.replace(/\s+/g, ' ').slice(0, 20) || t('assistant.agentMode.unnamedSession')
         chatStore.updateTitle(targetChatSid, autoTitle)
-        const routePath = route?.path || ''
-        const isAssistantRoute =
-          routePath === '/dev-assistant' || routePath.startsWith('/dev-assistant/')
-        const canRetitleTab = isAssistantRoute && targetChatSid === sid.value
         if (canRetitleTab) {
           tabsStore.updateTabTitleByPath(
             route.fullPath,
@@ -501,6 +503,18 @@ export function createAgentCompletionHandlers(
           }
         })
       }
+    } else if (aiConfigStore.autoRetitleEnabled) {
+      // 「自动生成新标题」：每轮结束按刚聊完的这一轮重起名。
+      //
+      // 只走 else 分支 —— 上面那条路本来就在给一条还没名字的会话取名，两边一起
+      // 发就是同一轮对话打两次模型，还会互相盖。不 await：标题晚几秒到没关系，
+      // 这一轮的收尾不该等它。
+      void retitleSession(targetChatSid, chatMsgStore.getMessages(targetChatSid), (title) => {
+        chatStore.updateTitle(targetChatSid, title)
+        if (canRetitleTab) {
+          tabsStore.updateTabTitleByPath(route.fullPath, title)
+        }
+      })
     }
 
     return displayText

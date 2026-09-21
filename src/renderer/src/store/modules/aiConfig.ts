@@ -192,6 +192,9 @@ export interface AIConfigState {
   // 智能追加提问开关（默认开启）
   followUpSuggestionsEnabled?: boolean
 
+  // 每轮结束后自动重起标题（默认关闭：它每轮都要花一次轻量模型调用）
+  autoRetitleEnabled?: boolean
+
   // 语音任务进度反馈（默认开启）
   voiceAntiSilenceEnabled?: boolean
   // 无人回应时自动结束；缺失时兼容旧反馈开关的选择
@@ -578,6 +581,19 @@ export const useAIConfigStore = defineStore(
     }
 
     /**
+     * 每轮结束后自动重起标题（默认关闭）。
+     *
+     * 默认关是因为它有成本：每轮都多一次轻量模型调用，而且侧边栏那一行会跟着
+     * 每轮改名 —— 有人靠标题认会话，名字自己变来变去反而找不着。想要的人自己开。
+     */
+    const autoRetitleEnabled = computed(() => config.value.autoRetitleEnabled ?? false)
+
+    /** 设置自动重起标题开关 */
+    function setAutoRetitleEnabled(enabled: boolean): void {
+      config.value.autoRetitleEnabled = enabled
+    }
+
+    /**
      * 设置自定义 Provider BYOK 配置
      */
     function setCustomProviderByokConfig(byokConfig: Partial<CustomProviderByokConfig>): void {
@@ -675,6 +691,7 @@ export const useAIConfigStore = defineStore(
         miniChatPersistEnabled: false,
         miniChatOpacity: 1,
         followUpSuggestionsEnabled: true,
+        autoRetitleEnabled: false,
         voiceAntiSilenceEnabled: true,
         voiceAutoHangupEnabled: true,
         voiceMicrophoneDeviceId: '',
@@ -800,6 +817,8 @@ export const useAIConfigStore = defineStore(
       setMiniChatOpacity,
       followUpSuggestionsEnabled,
       setFollowUpSuggestionsEnabled,
+      autoRetitleEnabled,
+      setAutoRetitleEnabled,
       voiceAntiSilenceEnabled,
       voiceAutoHangupEnabled,
       voiceMicrophoneDeviceId,
