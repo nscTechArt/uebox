@@ -185,7 +185,22 @@ async function publish(token, repo, tag, files, notes) {
     }
     const data = readFileSync(file)
     const uploadUrl = release.upload_url.replace(/\{.*\}$/, `?name=${encodeURIComponent(name)}`)
-    await api(token, 'POST', uploadUrl, data, { 'Content-Type': 'application/octet-stream' })
+    /*
+     * 重试的理由和 release-dl.mjs 的 PUT 一样：两百多兆撞上一次瞬断就整个失败，
+     * 而失败点通常不是权限（那种第一次就 4xx 了），是连接被中途掐断。
+     * 4xx 是配置错，重试多少次都一样，直接抛。
+     */
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await api(token, 'POST', uploadUrl, data, { 'Content-Type': 'application/octet-stream' })
+        break
+      } catch (error) {
+        if (attempt >= 3 || /→ 4\d\d:/.test(error.message)) throw error
+        const wait = attempt * 3000
+        console.log(`  第 ${attempt} 次失败，${wait / 1000}s 后重试…`)
+        await new Promise((r) => setTimeout(r, wait))
+      }
+    }
     console.log(`  已上传 ${name}（${(data.length / 1024 / 1024).toFixed(2)} MB）`)
   }
 
@@ -225,11 +240,23 @@ async function main() {
     process.exit(1)
   }
 
-  // 只发更新要用到的那几个文件：安装包、它的 blockmap、latest.yml。
-  // dist 下还躺着 win-unpacked 之类的中间产物，不该上传。
+  /*
+   * 只发更新要用到的那几个文件：安装包、它的 blockmap、latest.yml。
+   * dist 下还躺着 win-unpacked 之类的中间产物，不该上传。
+   *
+   * **latest.yml 必须排最后。** 它是「有没有新版本」这个事实本身：客户端先拉它，
+   * 再按里面记的文件名去下安装包。所以它一上传，更新对所有旧版本立刻生效 ——
+   * 而此时安装包可能还没传完，或者根本传不上去。
+   *
+   * 2026-09-21 发 1.0.2 时就是这样：按字母序 latest.yml 排在 uebox-*.exe 前面，
+   * 它传完之后 214 MB 的安装包 fetch failed，Release 于是公开挂着「有 1.0.2」
+   * 却没有可下的包，检查更新的人只会下载失败。排到最后就没有这个窗口 ——
+   * 中途失败最多是「Release 里有包但还没人知道」，重跑一次补上即可。
+   */
+  const order = (f) => (f === 'latest.yml' ? 1 : 0)
   const files = readdirSync(DIST_DIR)
     .filter((f) => f === 'latest.yml' || f === latest.path || f === `${latest.path}.blockmap`)
-    .sort()
+    .sort((a, b) => order(a) - order(b) || a.localeCompare(b))
     .map((f) => join(DIST_DIR, f))
 
   console.log(`仓库：${repo}`)
