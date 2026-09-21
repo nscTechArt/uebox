@@ -46,6 +46,43 @@ const ROOT = resolve(import.meta.dirname, '..')
 const DEFAULT_FILTER = 'UnrealAgentLink'
 const DEFAULT_ENGINE = '5.5'
 
+/** 现在有没有 UnrealEditor 在跑 */
+function editorIsRunning() {
+  const probe =
+    process.platform === 'win32'
+      ? spawnSync('tasklist', ['/FI', 'IMAGENAME eq UnrealEditor*'], { encoding: 'utf8' })
+      : spawnSync('pgrep', ['-f', 'UnrealEditor'], { encoding: 'utf8' })
+  // 探测本身失败就当没在跑，别因为一个辅助判断把测试拦下来
+  if (probe.error) return false
+  return /UnrealEditor/.test(probe.stdout ?? '')
+}
+
+/**
+ * 等上一个编辑器退干净再开编。
+ *
+ * UBT 在有编辑器活着时会拒绝编译（"Unable to build while Live Coding is active"），
+ * 而连着跑两次本脚本就会撞上 —— 上一轮的自动化测试编辑器还在退出途中。
+ * 真撞上过一次，表现是编译退出码 6，错误信息埋在几百行 UBT 输出里。
+ */
+function waitForEditorToExit(timeoutMs = 60_000) {
+  if (!editorIsRunning()) return
+
+  console.log('有 UnrealEditor 在跑，等它退出（UBT 不允许带着编辑器编译）……')
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    // 同步睡 2 秒：这个脚本本来就是串行的，不值得为它引入异步
+    spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},2000)'], { stdio: 'ignore' })
+    if (!editorIsRunning()) {
+      console.log('已退出。\n')
+      return
+    }
+  }
+
+  console.error('✖ 等了 60 秒，还有 UnrealEditor 在跑。')
+  console.error('  如果是你自己开着的编辑器，先关掉；或者加 --no-build 跳过编译这步。')
+  process.exit(1)
+}
+
 function main() {
   const argv = process.argv.slice(2)
   const flag = (n) => {
@@ -76,6 +113,7 @@ function main() {
   }
 
   if (!skipBuild) {
+    waitForEditorToExit()
     console.log(`先重编 UE ${engine} —— 联接目录里躺的可能是别的版本，见文件头注释\n`)
     const built = spawnSync(
       'node',

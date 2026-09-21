@@ -2,6 +2,7 @@
 
 #include "UAL_CameraCutCoverage.h"
 #include "UAL_CommandUtils.h"
+#include "UAL_ScopedTransaction.h"
 #include "UAL_VersionCompat.h"
 
 #include "LevelSequence.h"
@@ -1179,24 +1180,41 @@ namespace
 		return nullptr;
 	}
 
-	/** 载入序列；不存在就在同一路径新建一条 */
-	ULevelSequence* LoadOrCreateSequence(
-		const FString& Path, double Fps, bool& bOutCreated, FString& OutError)
+	/**
+	 * 只查不建。
+	 *
+	 * 和 `CreateSequenceAsset` 分开，是为了让 handler 能「先把所有会失败的判断
+	 * 做完，再开始动手」。合在一起的话，路径指向一个非 Level Sequence 的资产
+	 * 这种纯校验错误，也要等到相机已经生成进关卡之后才发现。
+	 *
+	 * @return nullptr 且 OutError 为空 = 那条路径上还没有东西，可以新建
+	 */
+	ULevelSequence* FindExistingSequence(const FString& Path, FString& OutError)
 	{
-		bOutCreated = false;
-
-		if (UObject* Existing = StaticLoadObject(UObject::StaticClass(), nullptr, *Path))
+		UObject* Existing = StaticLoadObject(UObject::StaticClass(), nullptr, *Path);
+		if (!Existing)
 		{
-			ULevelSequence* Sequence = Cast<ULevelSequence>(Existing);
-			if (!Sequence)
-			{
-				OutError = FString::Printf(
-					TEXT("%s 已存在但不是 Level Sequence，实际是 %s"), *Path, *Existing->GetClass()->GetName());
-				return nullptr;
-			}
-			return Sequence;
+			return nullptr;
 		}
 
+		ULevelSequence* Sequence = Cast<ULevelSequence>(Existing);
+		if (!Sequence)
+		{
+			OutError = FString::Printf(
+				TEXT("%s 已存在但不是 Level Sequence，实际是 %s"), *Path, *Existing->GetClass()->GetName());
+			return nullptr;
+		}
+		if (!Sequence->GetMovieScene())
+		{
+			OutError = FString::Printf(TEXT("%s 没有 MovieScene（资产可能损坏）"), *Path);
+			return nullptr;
+		}
+		return Sequence;
+	}
+
+	/** 在指定路径新建一条序列。调用方要先用 `FindExistingSequence` 确认那里是空的 */
+	ULevelSequence* CreateSequenceAsset(const FString& Path, double Fps, FString& OutError)
+	{
 		// /Game/Cine/SQ_Shot01.SQ_Shot01 和 /Game/Cine/SQ_Shot01 都要能接
 		FString PackagePath = Path;
 		int32 DotIndex = INDEX_NONE;
@@ -1243,16 +1261,23 @@ namespace
 		// 那是用户没要求的破坏性操作。
 		Sequence->GetMovieScene()->SetDisplayRate(FFrameRate(FMath::RoundToInt(Fps), 1));
 
-		bOutCreated = true;
 		return Sequence;
 	}
 
-	/** 找这条序列里已经绑到该 Actor 的绑定；没有就新建一条 possessable */
-	FGuid EnsurePossessable(ULevelSequence* Sequence, AActor* Actor, UWorld* World)
+	/**
+	 * 只查不建：这条序列里有没有已经绑到该 Actor 的绑定。
+	 *
+	 * 单独拆出来是给「先探后改」用的 —— handler 要在动手之前就知道绑定在不在，
+	 * 才能顺着它找到已有的 Transform 段去验通道数。
+	 */
+	FGuid FindPossessableFor(ULevelSequence* Sequence, AActor* Actor, UWorld* World)
 	{
-		UMovieScene* MovieScene = Sequence->GetMovieScene();
+		UMovieScene* MovieScene = Sequence ? Sequence->GetMovieScene() : nullptr;
+		if (!MovieScene || !Actor)
+		{
+			return FGuid();
+		}
 
-		// 已有绑定就复用，否则每调一次就多一条重复绑定
 		for (const FMovieSceneBinding& Binding : MovieScene->GetBindings())
 		{
 			TArray<UObject*, TInlineAllocator<1>> Bound;
@@ -1267,8 +1292,23 @@ namespace
 				}
 			}
 		}
+		return FGuid();
+	}
 
+	/** 找这条序列里已经绑到该 Actor 的绑定；没有就新建一条 possessable */
+	FGuid EnsurePossessable(ULevelSequence* Sequence, AActor* Actor, UWorld* World)
+	{
+		// 已有绑定就复用，否则每调一次就多一条重复绑定
+		const FGuid Existing = FindPossessableFor(Sequence, Actor, World);
+		if (Existing.IsValid())
+		{
+			return Existing;
+		}
+
+		UMovieScene* MovieScene = Sequence->GetMovieScene();
+		MovieScene->Modify();
 		const FGuid Guid = MovieScene->AddPossessable(Actor->GetActorLabel(), Actor->GetClass());
+		Sequence->Modify();
 		Sequence->BindPossessableObject(Guid, *Actor, World);
 		return Guid;
 	}
@@ -1374,21 +1414,92 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 
 	TArray<TSharedPtr<FJsonValue>> Warnings;
 
-	// ── 序列 ──────────────────────────────────────────────────────────────
-	bool bSequenceCreated = false;
+	// ══ 先探，不动手 ══════════════════════════════════════════════════════
+	//
+	// 这一段只读。所有会返回 4xx/5xx 的判断都要在这里做完。
+	//
+	// **一旦开始改就没有回退可言。** `UTransBuffer::Cancel` 做的是
+	// `UndoBuffer.Pop()` —— 把事务记录从撤销栈上丢掉，**从不调用
+	// `FTransaction::Apply()`**。所以在改过东西之后 Cancel，改动留在原地，
+	// 而且连 Ctrl+Z 都没了，比让它提交还糟。事务在这里的作用是
+	// 「让用户事后能撤」，不是「出错时回滚」。
+	//
+	// 这个 handler 原来有三个 500 出口（建不出轨道 / 建不出段 / 通道数不够），
+	// 全都在相机已经生成进关卡、绑定和轨道已经加完之后 —— 出错就给用户
+	// 留下一台野相机，没有事务，也没人告诉他。
+
 	FString Error;
-	ULevelSequence* Sequence = LoadOrCreateSequence(SequencePath, Fps, bSequenceCreated, Error);
-	if (!Sequence)
+	ULevelSequence* Sequence = FindExistingSequence(SequencePath, Error);
+	if (!Error.IsEmpty())
 	{
-		UAL_CommandUtils::SendError(RequestId, 500, Error);
+		UAL_CommandUtils::SendError(RequestId, 409, Error);
 		return;
 	}
-	UMovieScene* MovieScene = Sequence->GetMovieScene();
+	const bool bSequenceCreated = (Sequence == nullptr);
 
-	// ── 相机 ──────────────────────────────────────────────────────────────
-	bool bCameraCreated = false;
 	AActor* Camera = FindActorByLabelInWorld(World, CameraLabel);
-	if (!Camera)
+	const bool bCameraCreated = (Camera == nullptr);
+
+	// 焦距只在新建相机时设一次，不做变焦动画 —— 变焦是创作决定，不由工具替用户做。
+	// 复用的相机不是 CineCamera 时设不了，这句提前说，免得混在结果末尾
+	if (bHasFocalLength && !bCameraCreated && !Cast<ACineCameraActor>(Camera))
+	{
+		Warnings.Add(MakeShared<FJsonValueString>(TEXT("复用的相机不是 CineCameraActor，焦距没有设置")));
+	}
+
+	// 唯一一个「全都建好了才发现不行」的失败点：Transform 段上挂了通道覆盖
+	//（例如 Perlin 噪声容器）时，GetChannels<FMovieSceneDoubleChannel>() 拿不到
+	// 预期的 9 条。序列和相机都已存在的话，顺着已有绑定能提前验掉；
+	// 两者要新建时通道排布是引擎定死的，验不验一个样
+	if (Sequence && Camera)
+	{
+		const FGuid ExistingGuid = FindPossessableFor(Sequence, Camera, World);
+		UMovieScene3DTransformTrack* ExistingTrack = ExistingGuid.IsValid()
+			? Sequence->GetMovieScene()->FindTrack<UMovieScene3DTransformTrack>(ExistingGuid)
+			: nullptr;
+		if (ExistingTrack && ExistingTrack->GetAllSections().Num() > 0)
+		{
+			if (UMovieScene3DTransformSection* ExistingSection =
+					Cast<UMovieScene3DTransformSection>(ExistingTrack->GetAllSections()[0]))
+			{
+				const int32 ChannelCount =
+					ExistingSection->GetChannelProxy().GetChannels<FMovieSceneDoubleChannel>().Num();
+				if (ChannelCount < 6)
+				{
+					UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(
+						TEXT("这条相机的 Transform 段只有 %d 条 double 通道，预期至少 6 条 —— ")
+						TEXT("段上多半挂了通道覆盖（比如 Perlin 噪声）。什么都没有改动。"),
+						ChannelCount));
+					return;
+				}
+			}
+		}
+	}
+
+	// ══ 从这里开始动手 ════════════════════════════════════════════════════
+	//
+	// 事务包住全部写入，让用户一次 Ctrl+Z 撤得干净。往下只有一个地方
+	// 允许 Cancel：序列资产没建成，那时还什么都没改。
+	// 装在 TOptional 里，是为了能在存盘之前 Reset() 把事务先结束掉。
+	// 存盘本身不可撤销，而 SaveCurrentLevel() 还会触发一轮 GC 和对话框 ——
+	// 夹在事务里是 UAL_ScopedTransaction.h 头注释点名的那类坑
+	TOptional<FUAL_ScopedTransaction> Transaction;
+	Transaction.Emplace(NSLOCTEXT("UALSequencer", "CameraKeys", "Write Camera Keys"));
+
+	if (bSequenceCreated)
+	{
+		Sequence = CreateSequenceAsset(SequencePath, Fps, Error);
+		if (!Sequence)
+		{
+			Transaction->Cancel(); // 还没改过任何东西，这时取消是安全的
+			UAL_CommandUtils::SendError(RequestId, 500, Error);
+			return;
+		}
+	}
+	UMovieScene* MovieScene = Sequence->GetMovieScene();
+	MovieScene->Modify();
+
+	if (bCameraCreated)
 	{
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.ObjectFlags |= RF_Transactional;
@@ -1396,27 +1507,24 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 			ACineCameraActor::StaticClass(), FTransform::Identity, SpawnParams);
 		if (!NewCamera)
 		{
-			UAL_CommandUtils::SendError(RequestId, 500, TEXT("新建 CineCameraActor 失败"));
+			// 这里**不能** Cancel：上面可能已经新建了序列资产。Cancel 会把那条
+			// 撤销记录丢掉，资产反而留在工程里 —— 让事务照常提交，用户撤得掉
+			UAL_CommandUtils::SendError(RequestId, 500,
+				bSequenceCreated
+					? TEXT("新建 CineCameraActor 失败。序列资产已经建出来了，可以 Ctrl+Z 撤掉。")
+					: TEXT("新建 CineCameraActor 失败，序列没有改动。"));
 			return;
 		}
 		NewCamera->SetActorLabel(CameraLabel);
 		Camera = NewCamera;
-		bCameraCreated = true;
-	}
 
-	// 焦距只在新建相机时设一次，不做变焦动画 —— 变焦是创作决定，不由工具替用户做
-	if (bHasFocalLength && bCameraCreated)
-	{
-		if (ACineCameraActor* CineCamera = Cast<ACineCameraActor>(Camera))
+		if (bHasFocalLength)
 		{
-			if (UCineCameraComponent* Component = CineCamera->GetCineCameraComponent())
+			if (UCineCameraComponent* Component = NewCamera->GetCineCameraComponent())
 			{
+				Component->Modify();
 				Component->SetCurrentFocalLength(static_cast<float>(FocalLength));
 			}
-		}
-		else
-		{
-			Warnings.Add(MakeShared<FJsonValueString>(TEXT("复用的相机不是 CineCameraActor，焦距没有设置")));
 		}
 	}
 
@@ -1430,9 +1538,12 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	}
 	if (!TransformTrack)
 	{
-		UAL_CommandUtils::SendError(RequestId, 500, TEXT("建不出 Transform 轨道"));
+		// 同样不能 Cancel —— 绑定已经加进去了。照常提交，说清楚留下了什么
+		UAL_CommandUtils::SendError(RequestId, 500,
+			TEXT("建不出 Transform 轨道。相机绑定已经加进序列了，可以 Ctrl+Z 撤掉这一笔。"));
 		return;
 	}
+	TransformTrack->Modify();
 
 	UMovieScene3DTransformSection* Section = TransformTrack->GetAllSections().Num() > 0
 		? Cast<UMovieScene3DTransformSection>(TransformTrack->GetAllSections()[0])
@@ -1447,20 +1558,33 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	}
 	if (!Section)
 	{
-		UAL_CommandUtils::SendError(RequestId, 500, TEXT("建不出 Transform 段"));
+		UAL_CommandUtils::SendError(RequestId, 500,
+			TEXT("建不出 Transform 段。相机绑定和轨道已经加进序列了，可以 Ctrl+Z 撤掉这一笔。"));
 		return;
 	}
-	Section->SetFlags(RF_Transactional);
+	// 没有 RF_Transactional 的话 Modify() 什么都不记，事务是空的，Ctrl+Z 一声不吭。
+	// 但**只在真的缺这个标记时才补**：它属于 RF_Load，会被存进包里，而 SetFlags
+	// 本身不进事务、撤不回来 —— 无条件写会改到用户的资产，并在他下次保存时落盘。
+	// 同样的判断在 UAL_MaterialCommands 里有更长的说明
+	if (!Section->HasAnyFlags(RF_Transactional))
+	{
+		Section->SetFlags(RF_Transactional);
+	}
+	Section->Modify();
 
 	// 9 条 double 通道：0-2 位移、3-5 旋转、6-8 缩放。这是引擎固定的排布。
 	//
 	// 5.0 起变换通道就是 double（LWC），不是 float —— 九个版本一致，本机逐版本验过。
+	// 已有的段在上面那段先探里验过了；这里兜住「新建的段也不对」的情况
 	TArrayView<FMovieSceneDoubleChannel*> Channels =
 		Section->GetChannelProxy().GetChannels<FMovieSceneDoubleChannel>();
 	if (Channels.Num() < 6)
 	{
 		UAL_CommandUtils::SendError(RequestId, 500,
-			FString::Printf(TEXT("Transform 段只有 %d 条 double 通道，预期至少 6 条"), Channels.Num()));
+			FString::Printf(
+				TEXT("Transform 段只有 %d 条 double 通道，预期至少 6 条。")
+				TEXT("相机绑定和轨道已经加进序列了，可以 Ctrl+Z 撤掉这一笔。"),
+				Channels.Num()));
 		return;
 	}
 
@@ -1555,6 +1679,7 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 		{
 			// 走到这里只有两种可能：切轨本来是空的，或者用户显式点名要重建。
 			// 叠加而不是重建的话，会留下旧相机的切段，渲出来在切点跳到别的机位
+			CutTrack->Modify();
 			TArray<UMovieSceneSection*> OldSections = CutTrack->GetAllSections();
 			for (UMovieSceneSection* Old : OldSections)
 			{
@@ -1586,6 +1711,10 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	//
 	// 不存盘用户关掉编辑器就全丢了，而模型以为自己成功了。
 	// 关卡先存 —— 万一后面崩了，至少不会带走新建的相机。
+	//
+	// 先把事务结束掉：存盘不是可撤销操作，而 SaveCurrentLevel() 还会走一轮 GC。
+	Transaction.Reset();
+
 	bool bLevelSaved = true;
 	if (bCameraCreated)
 	{
@@ -1593,6 +1722,15 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 		if (!bLevelSaved)
 		{
 			Warnings.Add(MakeShared<FJsonValueString>(TEXT("关卡没保存成功，新建的相机在重启编辑器后会丢失")));
+		}
+		else
+		{
+			// 红线第 4 条：不许产生序列之外的副作用，确实要产生就得明说。
+			// SaveCurrentLevel() 保存的是整个当前关卡，用户手上别的未保存改动
+			// 会一起落盘 —— 引擎没有「只存这一个 Actor」的接口
+			Warnings.Add(MakeShared<FJsonValueString>(
+				TEXT("为了让新建的相机留得住，整个当前关卡被保存了一次 —— ")
+				TEXT("你在这个关卡里别的未保存改动也一起落盘了。")));
 		}
 	}
 
@@ -1776,8 +1914,9 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 	const bool bAlreadyCovered = Before.bExists && Before.SectionCount > 0 && Coverage.bCoversPlayback;
 
 	// 切轨上已经有段、但没盖满 —— 这里原来会把已有的段**全删了重建**成一整段。
-	// 一条排好的三机位序列只要有一帧对不齐，调一次这个工具就只剩一台相机；
-	// 而且没有事务、存盘即成事实，撤不回来。
+	// 一条排好的三机位序列只要有一帧对不齐，调一次这个工具就只剩一台相机。
+	// 现在写入有事务了（Ctrl+Z 撤得回内存里的状态），但这一笔紧接着就存盘 ——
+	// 磁盘上那一版已经换掉了，不是白做一场的事。
 	//
 	// `red-lines.md` 第 1 条「发现问题只报告，不动手」、第 3 条「删除永远是
 	// 用户手动做的」—— 所以默认拒绝，要删必须显式点名 rebuild=true。
@@ -1789,7 +1928,7 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 			FString::Printf(
 				TEXT("相机切轨上已经有 %d 个段，没盖满播放范围。这个工具补全的做法是把它们")
 				TEXT("**全部删掉**，重建成「%s」从头盖到尾的一整段 —— 如果那是排好的多机位剪辑，")
-				TEXT("这一下就没了，而且撤不回来。\n\n")
+				TEXT("这一下就没了，而且会立刻存盘落到磁盘上。\n\n")
 				TEXT("确认要这么做：带上 rebuild=true 再调一次。\n")
 				TEXT("只想知道差在哪里：用 sequence_audit，它会逐段报出空隙和重叠。"),
 				Before.SectionCount, *TargetName),
@@ -1797,35 +1936,56 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 		return;
 	}
 
-	// ── 写切轨 ────────────────────────────────────────────────────────────
+	// ══ 从这里开始动手 ════════════════════════════════════════════════════
+	//
+	// 上面全是只读判断，走到这里说明该拒的都拒完了。事务包住整笔写入，
+	// 让用户一次 Ctrl+Z 撤得干净 —— 这个 handler 原来一个事务都没有，
+	// 删掉的切轨段是彻底撤不回来的。
+	//
+	// 中途失败时**不 Cancel**：`UTransBuffer::Cancel` 只把记录 Pop 掉，
+	// 不调 `FTransaction::Apply()`，改动照样留在原地，反而连撤都撤不了。
 	TArray<TSharedPtr<FJsonValue>> Warnings;
 	int32 RemovedSections = 0;
 	if (!bAlreadyCovered)
 	{
-		UMovieSceneCameraCutTrack* CutTrack = EnsureCameraCutTrack(MovieScene);
-		if (!CutTrack)
+		// 事务开在自己的作用域里，存盘留在它外面 —— 存盘本身不可撤销，
+		// 夹在事务里只会把无关的东西卷进这条撤销记录
 		{
-			UAL_CommandUtils::SendError(RequestId, 500, TEXT("建不出相机切轨"));
-			return;
-		}
+			FUAL_ScopedTransaction Transaction(
+				NSLOCTEXT("UALSequencer", "CameraCuts", "Bind Camera Cut Track"));
 
-		// 走到这里只有两种可能：切轨本来就是空的，或者用户显式给了 rebuild=true。
-		// 补空隙而不是重建，会在切点跳到别的机位，那不是「用这台相机」的意思
-		TArray<UMovieSceneSection*> OldSections = CutTrack->GetAllSections();
-		for (UMovieSceneSection* Old : OldSections)
-		{
-			CutTrack->RemoveSection(*Old);
-			++RemovedSections;
-		}
+			MovieScene->Modify();
+			UMovieSceneCameraCutTrack* CutTrack = EnsureCameraCutTrack(MovieScene);
+			if (!CutTrack)
+			{
+				Transaction.Cancel(); // 还没改过任何东西，这时取消是安全的
+				UAL_CommandUtils::SendError(RequestId, 500, TEXT("建不出相机切轨"));
+				return;
+			}
+			CutTrack->Modify();
 
-		UMovieSceneCameraCutSection* CutSection = CutTrack->AddNewCameraCut(
-			UE::MovieScene::FRelativeObjectBindingID(TargetGuid), Playback.GetLowerBoundValue());
-		if (!CutSection)
-		{
-			UAL_CommandUtils::SendError(RequestId, 500, TEXT("切轨段建不出来"));
-			return;
+			// 走到这里只有两种可能：切轨本来就是空的，或者用户显式给了 rebuild=true。
+			// 补空隙而不是重建，会在切点跳到别的机位，那不是「用这台相机」的意思
+			TArray<UMovieSceneSection*> OldSections = CutTrack->GetAllSections();
+			for (UMovieSceneSection* Old : OldSections)
+			{
+				CutTrack->RemoveSection(*Old);
+				++RemovedSections;
+			}
+
+			UMovieSceneCameraCutSection* CutSection = CutTrack->AddNewCameraCut(
+				UE::MovieScene::FRelativeObjectBindingID(TargetGuid), Playback.GetLowerBoundValue());
+			if (!CutSection)
+			{
+				UAL_CommandUtils::SendError(RequestId, 500, FString::Printf(
+					TEXT("切轨段建不出来。%s序列还没有存盘，Ctrl+Z 可以撤回。"),
+					RemovedSections > 0
+						? *FString::Printf(TEXT("原有的 %d 个切轨段已经被删掉了，"), RemovedSections)
+						: TEXT("")));
+				return;
+			}
+			CutSection->SetRange(Playback);
 		}
-		CutSection->SetRange(Playback);
 
 		SaveSequenceAsset(Sequence);
 	}
