@@ -164,7 +164,7 @@
 
       <!-- Thinking 主体区：AI 的思考过程，淡化显示 -->
       <!-- 使用 v-show 避免 DOM 元素被移除导致的闪动 -->
-      <div v-show="currentThinking" class="thinking-section">
+      <div v-show="displayThinking" class="thinking-section">
         <div class="thinking-header">
           <PhCircleNotch v-if="isThinking" class="thinking-icon is-live" />
           <PhLightning v-else class="thinking-icon" />
@@ -174,7 +174,7 @@
           <!-- 面板收起时不挂载重型 Markdown 渲染器，避免隐藏内容持续抢主线程。 -->
           <MarkdownRenderer
             v-if="!isCollapsed"
-            :content="currentThinking"
+            :content="displayThinking"
             :streaming="isThinking"
           />
         </div>
@@ -259,6 +259,12 @@ const props = defineProps<{
   isThinking: boolean
   startTime?: number // 从用户发送消息时开始的时间戳
   compact?: boolean
+  /**
+   * 外部塞进来的推理正文（模型的 reasoning）。
+   * 小窗把原本独立的那个「思考过程」框折进这里：运行中只留一条单行状态，
+   * 推理和工具步骤一起躲在同一个折叠里，点开才看。
+   */
+  thinking?: string
 }>()
 
 // 执行步骤默认只露出摘要；需要细节时用户再展开，避免流式期间同时更新大块 DOM。
@@ -1183,8 +1189,15 @@ const toolItems = computed(() => {
  * A plain typing state with an empty process array should not surface a
  * misleading "thinking" block.
  */
+/**
+ * 面板里显示的推理正文：外部折进来的优先，没有才用过程条目里推出来的那份。
+ * 两份同时存在时，外部那份是完整的 reasoning，过程里的只是零星 notify。
+ */
+const displayThinking = computed(() => props.thinking?.trim() || currentThinking.value)
+
 const shouldRenderProcessLog = computed(() => {
   return (
+    !!displayThinking.value ||
     reportItems.value.length > 0 ||
     progressBubbles.value.length > 0 ||
     !!currentThinking.value ||
@@ -1233,7 +1246,14 @@ const headerDisplayTitle = computed(() => {
   }
 
   if (props.compact) {
-    return props.isThinking ? headerTitle.value : t('assistant.agentProcess.processFinished')
+    if (!props.isThinking) return t('assistant.agentProcess.processFinished')
+    /**
+     * 框里装的是一条条工具调用，表头就不能只写「思考中」—— 说的和里面摆着的对不上，
+     * 用户看到的是「思考中」底下列着 ue_get_actor 跑完了。收起时这一行也才有信息量。
+     * 小窗比主聊天页窄得多，截得更短。
+     */
+    const latest = reportItems.value[reportItems.value.length - 1]
+    return latest ? trimReportText(latest.text, 24) : headerTitle.value
   }
 
   const latestReport = reportItems.value[reportItems.value.length - 1]

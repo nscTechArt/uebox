@@ -9,8 +9,12 @@
     />
 
     <div v-else class="assistant-shell">
+      <!--
+        运行中只留一条单行状态：推理正文这时折进过程条里，不再单开一个框。
+        跑完之后它变回独立的「思考过程」，回头翻记录时两样东西分得开。
+      -->
       <ThinkingProcess
-        v-if="message.thinking"
+        v-if="message.thinking && !foldThinkingIntoProcess"
         class="thinking-block"
         :content="message.thinking"
         :is-thinking="message.status === 'typing' && !textContent.trim()"
@@ -25,6 +29,11 @@
             :items="block.items"
             :is-thinking="block.key === liveProcessBlockKey"
             :start-time="blockStartTime(block)"
+            :thinking="
+              foldThinkingIntoProcess && block.key === liveProcessBlockKey
+                ? message.thinking
+                : undefined
+            "
           />
           <!-- agent 反问用户。和主聊天页同一张卡片，答完就地变只读 -->
           <AskUserCard
@@ -136,6 +145,11 @@ const liveProcessBlockKey = computed<string | null>(() => {
   return last && last.kind === 'process' ? last.key : null
 })
 
+/** 运行中：推理正文折进那条活着的过程条，小窗一屏只留一行状态 */
+const foldThinkingIntoProcess = computed(
+  () => Boolean(props.message.thinking) && liveProcessBlockKey.value !== null
+)
+
 function blockStartTime(block: AgentTimelineBlock): number | undefined {
   if (block.kind !== 'process') return undefined
   if (timelineBlocks.value[0]?.key === block.key) return props.message.startTime
@@ -162,8 +176,19 @@ const trailingContent = computed(() =>
     : resolveTrailingContent(textContent.value, timelineText.value)
 )
 
+/**
+ * 上面是不是已经有一条「这轮还在跑」的指示了 —— 思考框或过程条。
+ * 小窗一列只有三百多像素宽，多一个框就是多一屏。
+ */
+const hasLiveIndicator = computed(
+  () => Boolean(props.message.thinking) || timelineBlocks.value.length > 0
+)
+
 /** 正文已经逐段显示过了就不再补一张空卡片 */
 const showTrailingCard = computed(() => {
+  // 已经有思考框/过程条在转了，就别再补一张只写着「思考中...」的卡片：
+  // 三个框说同一件事，小窗里第一屏就被占满了。
+  if (hasLiveIndicator.value && isTypingPlaceholder(trailingContent.value)) return false
   if (!hasTimelineText.value) return true
   return trailingContent.value.trim().length > 0
 })

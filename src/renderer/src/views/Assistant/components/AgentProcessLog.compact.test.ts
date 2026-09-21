@@ -73,6 +73,33 @@ describe('AgentProcessLog compact mode', () => {
     expect(wrapper.find('.header-title').text()).toBe('过程已完成')
   })
 
+  it('names the running step in the header instead of a generic 思考中', () => {
+    const wrapper = mountLog(true)
+
+    const title = wrapper.find('.header-title').text()
+    expect(title).toContain('web_read')
+    expect(title).not.toBe('思考中...')
+  })
+
+  it('falls back to the generic label before any step is reported', () => {
+    const wrapper = mount(AgentProcessLog, {
+      props: {
+        items: [
+          {
+            type: 'notify-users',
+            data: { notifyType: 'thinking', message: '先看看关卡里有什么' },
+            timestamp: 1
+          }
+        ],
+        isThinking: true,
+        compact: true
+      },
+      global: { stubs: { MarkdownRenderer: true, 'a-tooltip': true } }
+    })
+
+    expect(wrapper.find('.header-title').text()).toBe('思考中...')
+  })
+
   it('keeps live work to one line until the user asks for details', async () => {
     const wrapper = mountLog(true)
 
@@ -86,6 +113,21 @@ describe('AgentProcessLog compact mode', () => {
     expect(reportText).toContain('web_read · 完成 · epicgames.github.io/lore/tutorials/quickstart')
     expect(reportText).not.toContain('"url"')
     expect(reportText).not.toContain('totalChars')
+  })
+
+  it('folds externally supplied reasoning behind the same single-line header', async () => {
+    const wrapper = mount(AgentProcessLog, {
+      props: { items, isThinking: true, compact: true, thinking: '先看看关卡里有几盏灯' },
+      global: { stubs: { 'a-tooltip': true } }
+    })
+
+    // 收起时只有那一行表头，推理正文不挂载
+    expect(wrapper.find('.process-header').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.thinking-content').text()).toBe('')
+
+    await wrapper.find('.process-header').trigger('click')
+
+    expect(wrapper.find('.thinking-content').text()).toContain('先看看关卡里有几盏灯')
   })
 
   it('scrolls the process body to the bottom when expanded', async () => {
