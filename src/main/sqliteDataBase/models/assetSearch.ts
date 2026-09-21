@@ -89,6 +89,17 @@ export interface AssetSearchCriteria {
   sortOrder?: 'asc' | 'desc'
   limit?: number
   offset?: number
+  /**
+   * 只给「取前几条就够」的交互式召回用（目前只有 Spotlight）。
+   *
+   * 给了就在 FTS 召回那一层按 bm25 截断到这么多条。**默认必须是不截断**：
+   * 召回结果是通过 `JOIN recall` 接进主查询的，那是个 INNER JOIN，也就是一道过滤 ——
+   * 在它上面截断，等于在所有 WHERE 条件、COUNT 和 LIMIT/OFFSET 之前先把行扔掉。
+   * 之前把它按 limit 自动推导，结果是：数总数的那次调用把 limit 删了于是截到 200，
+   * 按目录筛的搜索因为全局 top-N 全在别的目录而返回 0 条，翻页过了 limit*20 就空。
+   * 想提速请在调用点自己传，别让它悄悄对所有人生效。
+   */
+  recallDepth?: number
 }
 
 /**
@@ -246,14 +257,36 @@ export function buildAssetQueryParts(
     const recallParts: string[] = []
 
     if (ftsMatch) {
-      withParts.push(`
+      // 召回深度只在调用方显式要求时才封顶，理由见 AssetSearchCriteria.recallDepth：
+      // recall 是 INNER JOIN 进来的，在这一层截断就是在所有筛选、COUNT、分页之前丢行。
+      // 封顶时内层先按分数取前 N 条（SQLite 对 ORDER BY + LIMIT 用的是有界堆，
+      // 不是全量排序），再在这 N 条上编名次给 RRF 用。
+      const rawDepth = Number(criteria.recallDepth)
+      const recallDepth =
+        Number.isFinite(rawDepth) && rawDepth > 0 ? Math.floor(Math.min(rawDepth, 100000)) : 0
+      withParts.push(
+        recallDepth
+          ? `
+        fts_hits AS (
+          SELECT assetId, ROW_NUMBER() OVER (ORDER BY bm25Score) AS rnk
+          FROM (
+            SELECT rowid AS assetId, ${BM25_EXPR} AS bm25Score
+            FROM ${FTS_TABLE}
+            WHERE ${FTS_TABLE} MATCH ?
+            ORDER BY bm25Score
+            LIMIT ${recallDepth}
+          )
+        )
+      `
+          : `
         fts_hits AS (
           SELECT rowid AS assetId,
                  ROW_NUMBER() OVER (ORDER BY ${BM25_EXPR}) AS rnk
           FROM ${FTS_TABLE}
           WHERE ${FTS_TABLE} MATCH ?
         )
-      `)
+      `
+      )
       withParams.push(ftsMatch)
       recallParts.push('SELECT assetId, 1.0 / (60 + rnk) AS score FROM fts_hits')
     }
@@ -610,15 +643,20 @@ export function searchAssetsByCriteria(
     ${limitParts.join(' ')}
   `
 
-  // 调试日志：始终输出 SQL 和参数（临时开启用于排查问题）
-  console.log('[资产搜索] SQL:', sql.replace(/\s+/g, ' ').trim())
-  console.log('[资产搜索] 参数:', params)
+  // 调试日志默认关掉。Spotlight 现在也走这个函数，而它是每敲一个键查一次的：
+  // 无条件打印等于把完整 FTS 语句和用户输入的原文，按键落进主进程日志，
+  // 还要在本该提速的同步路径上付一次字符串拼接和 I/O。
+  // 需要排查时设环境变量 UEBOX_DEBUG_ASSET_SEARCH=1。
+  const debugSearch = process.env.UEBOX_DEBUG_ASSET_SEARCH === '1'
+  if (debugSearch) {
+    console.log('[资产搜索] SQL:', sql.replace(/\s+/g, ' ').trim())
+    console.log('[资产搜索] 参数:', params)
+  }
 
   const stmt = db.prepare(sql)
   const rows = stmt.all(...params) as AssetData[]
 
-  // 调试日志：输出结果数量
-  console.log('[资产搜索] 结果数量:', rows.length)
+  if (debugSearch) console.log('[资产搜索] 结果数量:', rows.length)
 
   return rows
 }

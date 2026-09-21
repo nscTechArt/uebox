@@ -920,7 +920,15 @@ export class AssetServer {
     if (method === 'GET' && subPath === '/search') {
       const q = url.searchParams.get('q') || ''
 
-      const results = searchAssetDataByName(db, q, 200)
+      // searchAssetDataByName 现在会把「索引不存在」以外的错误抛出来（SQLITE_BUSY、
+      // 中断、索引损坏），而这里是 HTTP 边界：抛上去 LAN 客户端拿到的是 500。
+      // 本地正忙不该让远端整个搜不了，捞回来当空结果返回。
+      let results: AssetData[] = []
+      try {
+        results = searchAssetDataByName(db, q, 200)
+      } catch (err) {
+        console.warn('[AssetServer] /search 查询失败，返回空结果:', err)
+      }
       this.sendJson(res, 200, { success: true, data: results })
       return
     }

@@ -7,7 +7,11 @@ import Database from 'better-sqlite3'
 
 import { initAssetDataModel } from '../../models/assetData'
 import { initAssetFolderModel } from '../../models/assetFolder'
-import { buildRemoteImportFilePath, findActiveRemoteAssetByPath } from './remoteImportPath'
+import {
+  ACTIVE_REMOTE_ASSET_BY_PATH_SQL,
+  buildRemoteImportFilePath,
+  findActiveRemoteAssetByPath
+} from './remoteImportPath'
 
 describe('remote import path helpers', () => {
   it('builds the same remote path for folder-session uploads', () => {
@@ -92,15 +96,11 @@ describe('remote import path helpers', () => {
       '2026-03-01 00:00:00'
     )
 
+    // EXPLAIN 的必须是生产那一条语句本身。抄一份进来的话，把实现改回
+    // `filePath IN (...) OR originPath IN (...)` 这个断言照样是绿的
     const plan = (
       db
-        .prepare(
-          `EXPLAIN QUERY PLAN SELECT * FROM (
-             SELECT * FROM assetData WHERE isDelete = 0 AND filePath IN (?, ?)
-             UNION ALL
-             SELECT * FROM assetData WHERE isDelete = 0 AND originPath IN (?, ?)
-           ) ORDER BY updated_at DESC, id DESC LIMIT 1`
-        )
+        .prepare(`EXPLAIN QUERY PLAN ${ACTIVE_REMOTE_ASSET_BY_PATH_SQL}`)
         .all('a', 'b', 'a', 'b') as { detail: string }[]
     ).map((row) => row.detail)
     expect(plan.some((line) => line.includes('idx_assetData_filePath_isDelete'))).toBe(true)

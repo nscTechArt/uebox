@@ -50,6 +50,22 @@ export function buildRemoteImportPathCandidates(remotePath: string): [string, st
   return [slashPath, slashPath.replace(/\//g, '\\')]
 }
 
+/**
+ * 查重语句本体。导出是为了让执行计划的回归测试 EXPLAIN 这一条，
+ * 而不是 EXPLAIN 一份抄进测试里的副本 —— 抄一份的话，把这里改回
+ * `filePath IN (...) OR originPath IN (...)` 测试照样绿，等于没有盯住。
+ */
+export const ACTIVE_REMOTE_ASSET_BY_PATH_SQL = `
+    SELECT *
+    FROM (
+      SELECT * FROM assetData WHERE isDelete = 0 AND filePath IN (?, ?)
+      UNION ALL
+      SELECT * FROM assetData WHERE isDelete = 0 AND originPath IN (?, ?)
+    )
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+  `
+
 export function findActiveRemoteAssetByPath(
   db: SqliteReadable,
   remotePath: string
@@ -65,16 +81,7 @@ export function findActiveRemoteAssetByPath(
   //
   // 拆成两条单列等值查询再 UNION ALL，每条各自只能走 (filePath, isDelete) /
   // (originPath, isDelete) 复合索引，不给规划器选错的机会。和服务端 aa166cf 的修法一致。
-  const stmt = db.prepare(`
-    SELECT *
-    FROM (
-      SELECT * FROM assetData WHERE isDelete = 0 AND filePath IN (?, ?)
-      UNION ALL
-      SELECT * FROM assetData WHERE isDelete = 0 AND originPath IN (?, ?)
-    )
-    ORDER BY updated_at DESC, id DESC
-    LIMIT 1
-  `)
+  const stmt = db.prepare(ACTIVE_REMOTE_ASSET_BY_PATH_SQL)
 
   return stmt.get(slashPath, backslashPath, slashPath, backslashPath) as AssetData | undefined
 }

@@ -124,6 +124,8 @@ export function getRetainedThumbnailFilenames(
  */
 class LazyRetainedThumbnailSet extends Set<string> {
   private readonly memo = new Map<string, boolean>()
+  /** 查询已经失败过一次。失败多半是连接级的，只叫一次就够，别刷屏 */
+  private degraded = false
   /** 字段值精确等于某个文件名的行 */
   private readonly exactLookup: Database.Statement
   /** 字段值以 `stem.` 开头的行（同名不同扩展名的原图，它们的 _thumb 变体就是被问的那个名字） */
@@ -195,8 +197,22 @@ class LazyRetainedThumbnailSet extends Set<string> {
           })
         }
       }
-    } catch {
-      hit = false
+    } catch (err) {
+      // 这条路的下游是 fs.unlink。查不出来不等于「没人用」——
+      // 失败即按「仍被占用」处理，宁可漏删一张缩略图，也不能因为一次查询异常
+      // 就把别的资产还在用的图删掉。重构前这里是全量预加载，出错会直接抛出去
+      // 中断整个清理，那个「不确定就别删」的性质得留住。
+      //
+      // 结论照样要记进 memo，而且只叫一次：失败通常是连接级的（库关了、磁盘错、
+      // 迁移到一半少了列），不记的话每个文件名都要把这几条必然失败的查询重跑一遍。
+      // isRetained 一个字段问两次、retainSharedThumbnails 两个字段，
+      // 清空回收站那种上万条的批次就是几万次失败查询加几万行日志，还都卡在同步事务里。
+      if (!this.degraded) {
+        this.degraded = true
+        console.warn('[vaultThumbnailRefs] 占用查询失败，此后一律按「仍被占用」处理:', err)
+      }
+      this.memo.set(filename, true)
+      return true
     }
     this.memo.set(filename, hit)
     return hit

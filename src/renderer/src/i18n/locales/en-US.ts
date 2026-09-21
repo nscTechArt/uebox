@@ -1264,7 +1264,11 @@ export default {
     installContent: 'Version {version} has been downloaded. Restart to install now?',
     installNow: 'Restart now',
     later: 'Later',
-    installFailed: 'Could not install the update. Try again later or download the installer manually'
+    installFailed:
+      'Could not install the update. Try again later or download the installer manually',
+    unavailable: 'Updates are unavailable right now. Restart the app and try again',
+    downloadNotStarted: 'The download did not start. There may be no update available, or one is already downloading',
+    checkUnavailable: 'This build has no update source configured, so it cannot check for updates'
   },
   page: {
     home: {
@@ -2991,9 +2995,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       checking: 'Checking for updates...',
       upToDate: 'You are using the latest version',
       updateAvailable: 'New version {version} is available. Download it now?',
-      updateReady: 'New version {version} is ready. Install now?',
       downloadNow: 'Download',
-      installNow: 'Install Now',
       later: 'Later',
       downloading: 'Downloading the update. You will be prompted to install when it finishes.',
       updateError: 'Failed to check for updates',

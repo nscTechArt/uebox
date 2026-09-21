@@ -170,6 +170,12 @@ until it is met:
 4. **`src/preload/index.ts` and `src/preload/index.d.ts` change together.** Typecheck fails otherwise.
 5. **The renderer never calls `ipcRenderer` directly.** Go through `window.api.*`, and wrap it in
    `src/renderer/src/api/*` using `unwrapResult()` so errors surface consistently.
+   The wrapper is mandatory; `unwrapResult()` is the default, not the only option. It **throws**,
+   which is right for reads whose caller cannot continue without the data. A surface whose callers
+   must inspect the failure themselves — user-initiated actions that each report differently —
+   may instead return a `{ success, error?, errorKey? }` shape, as long as every caller still goes
+   through the wrapper and the reason is written in the module header.
+   `src/renderer/src/api/updater.ts` is the worked example.
 6. **New behaviour needs a test.** Put it in `tests/` or beside the source as `*.test.ts` — both
    are picked up. See [docs/contributing/testing.md](docs/contributing/testing.md).
 7. **No new dependencies, network calls, or telemetry** unless the issue explicitly asks for it.

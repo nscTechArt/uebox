@@ -258,7 +258,7 @@ describe('updateStore', () => {
    * 否则一次点击同时出现「点标题栏右上角即可下载」和一个已经摆在眼前的
    * 「现在下载吗？」，两句话让用户去做两件不同的事。
    */
-  it('手动检查那一轮不再弹全局提示，但版本照样记名', async () => {
+  it('手动检查那一轮不弹全局提示，但也不记名 —— 抑制掉的提示不能算说过', async () => {
     const { listeners } = installUpdaterApi()
     const store = useUpdateStore()
     const onAvailable = vi.fn()
@@ -270,10 +270,17 @@ describe('updateStore', () => {
     listeners.available.forEach((fn) => fn({ version: '1.4.0' }))
     await pending
 
+    // 这一轮由关于页自己弹确认框，全局 toast 让位
     expect(onAvailable).not.toHaveBeenCalled()
-    // 记了名，之后的后台检查才不会再弹一次已经当面说过的事
+
+    /*
+     * 但不能记名。抑制的前提是「关于页会说」，而那个面板是 v-else-if 挂载的：
+     * 用户点完检查随手切走，面板卸载、watch 没了，于是一个字都没说出去。
+     * 记了名的话，之后每一次后台检查都会撞上「这个版本提示过了」提前返回 ——
+     * 整个会话再也不会提示，只剩标题栏一枚 6px 的小点。
+     */
     listeners.available.forEach((fn) => fn({ version: '1.4.0' }))
-    expect(onAvailable).not.toHaveBeenCalled()
+    expect(onAvailable).toHaveBeenCalledWith('1.4.0')
   })
 
   /**
