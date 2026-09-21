@@ -308,6 +308,20 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
   const responses = createResponseGate(send)
 
   socket.on('open', () => {
+    /*
+     * 把这一通**实际发出去**的回声门限打出来。
+     *
+     * `logFrame` 只打事件名，不打内容，所以首帧里的判停参数在日志里是看不见的 ——
+     * 而「用户改了设置但没重启，主进程还跑着旧代码」和「改了、生效了、还是压不住」
+     * 这两种情况，从对话界面上长得一模一样（都是凭空冒出用户没说过的话）。
+     * 排查时第一个要回答的就是这个，没有这行就只能猜。
+     */
+    const guard = normalizeRealtimeEchoGuard(config.echoGuard)
+    const tuning = OPENAI_ECHO_GUARD_TUNING[guard]
+    console.log(
+      `[OpenAI 实时语音 ${new Date().toISOString().slice(11, 23)}] ` +
+        `回声门限 ${guard}：threshold ${tuning.threshold}，降噪 ${tuning.noiseReduction}`
+    )
     send(buildOpenAiSessionUpdate(config))
     for (const message of config.history || []) send(buildOpenAiConversationItem(message))
     config.onEvent({ type: 'ready' })
