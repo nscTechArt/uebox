@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // 压缩要拉 sharp 并真的解码图片，这里只关心「有没有压、压不动怎么办」
 const compressForContext = vi.hoisted(() => vi.fn())
-vi.mock('../../tools/contextImage', () => ({ compressForContext }))
+vi.mock('../../tools/contextImage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../tools/contextImage')>()),
+  compressForContext
+}))
 
 import { namespaceFor, runMcpTool, toPiContent, toSafeToolName } from './McpClientManager'
 

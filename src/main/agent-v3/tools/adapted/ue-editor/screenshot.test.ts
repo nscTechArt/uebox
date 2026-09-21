@@ -28,7 +28,8 @@ vi.mock('../../../../appWindows', () => ({
 }))
 
 // 压缩要拉 sharp 并读真实文件，这里只关心「有图就带上」
-vi.mock('../../contextImage', () => ({
+vi.mock('../../contextImage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../contextImage')>()),
   compressForContext: vi.fn(async () => ({ data: 'ZmFrZQ==', mimeType: 'image/jpeg' }))
 }))
 

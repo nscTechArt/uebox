@@ -8,6 +8,7 @@ import { ipcMain, webContents } from 'electron'
 import { randomUUID } from 'crypto'
 
 import type { ImageContent } from '@earendil-works/pi-ai'
+import { admitPromptImages } from '../agent-v3/core/admitPromptImages'
 import { formatAttachmentBlock, savePromptAttachments } from '../agent-v3/core/promptAttachments'
 import { runAgentV3Smoke } from '../agent-v3/smoke'
 import {
@@ -1607,9 +1608,14 @@ export function registerAgentV3IPC(): void {
       // 闪存块排在附件块前面、信封后面：三块都是「机器核对过的事实」，
       // 按「这一轮的环境 → 用户带来的东西 → 用户说的话」由外向内排
       const snapshotBlock = editorSnapshotBlock(args.editorSnapshot, scope, sessionId)
-      const userText = [snapshotBlock, attachmentBlock, promptText].filter(Boolean).join('\n\n')
+      // 落盘用的是原图（工具要拿它干活），进上下文的那份要过关口 ——
+      // 渲染层压过，但那是尽力而为，见 admitPromptImages
+      const admitted = await admitPromptImages(args.images)
+      const userText = [snapshotBlock, attachmentBlock, ...admitted.notices, promptText]
+        .filter(Boolean)
+        .join('\n\n')
 
-      await agent.prompt(withRuntimeEnvelope(userText, envelope), args.images)
+      await agent.prompt(withRuntimeEnvelope(userText, envelope), admitted.images)
 
       // pi 把 provider 失败编码进事件流而不是抛异常，所以 prompt() 正常返回
       // 也可能什么都没发生。agent.state.errorMessage 是权威判据 ——
@@ -2523,13 +2529,19 @@ export function registerAgentV3IPC(): void {
        */
       const attachments = await savePromptAttachments(args.images)
       const attachmentBlock = formatAttachmentBlock(attachments)
-      const text = [block, attachmentBlock, args.message].filter(Boolean).join('\n\n')
+      // 插话带的图走同一道关口，理由同普通发送
+      const admittedSteer = await admitPromptImages(args.images)
+      const text = [block, attachmentBlock, ...admittedSteer.notices, args.message]
+        .filter(Boolean)
+        .join('\n\n')
 
       /*
        * 没带图就还是一条纯字符串，和以前一个字节都不差 —— 内容块数组只在
        * 真的有图时才用，免得给每一条插话都换一种形状。
        */
-      const content = args.images?.length ? [{ type: 'text', text }, ...args.images] : text
+      const content = admittedSteer.images.length
+        ? [{ type: 'text', text }, ...admittedSteer.images]
+        : text
 
       /*
        * 留底用的是 `args.message`（用户的原话），不是拼了闪存块和附件块的 `content`。

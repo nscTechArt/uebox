@@ -36,6 +36,7 @@ import type { TSchema } from 'typebox'
 import type { z } from 'zod'
 
 import { runAbortable } from './abortable'
+import { admitImageForContext } from './contextImage'
 import { toToolSchema, type ToolRisk, type UnrealAgentTool } from './defineTool'
 
 /**
@@ -248,20 +249,27 @@ function toText(result: unknown): string {
  * 约定：V2 工具在返回值里放 `images: [{ data, mimeType }]`（data 为 base64），
  * 这里转成 pi 的图片块。pi 原生支持图片进上下文，不需要先传到别处换 URL。
  */
-function extractImages(result: unknown): Array<{ type: 'image'; data: string; mimeType: string }> {
+async function extractImages(
+  result: unknown
+): Promise<
+  Array<{ type: 'image'; data: string; mimeType: string } | { type: 'text'; text: string }>
+> {
   const images = (result as { images?: unknown })?.images
   if (!Array.isArray(images)) return []
 
-  return images
-    .filter((img): img is { data: string; mimeType?: string } => {
-      const i = img as { data?: unknown }
-      return typeof i?.data === 'string' && i.data.length > 0
-    })
-    .map((img) => ({
-      type: 'image' as const,
-      data: img.data,
-      mimeType: img.mimeType ?? 'image/png'
-    }))
+  const candidates = images.filter((img): img is { data: string; mimeType?: string } => {
+    const i = img as { data?: unknown }
+    return typeof i?.data === 'string' && i.data.length > 0
+  })
+
+  // 每一张都过关口。V2 工具那边没有统一的压缩约定，这里不拦的话，
+  // 任何一个新适配进来的工具都能直接把上下文撑爆
+  const admitted = await Promise.all(
+    candidates.map((img) =>
+      admitImageForContext({ data: img.data, mimeType: img.mimeType ?? 'image/png' })
+    )
+  )
+  return admitted.flat()
 }
 
 /** 适配一个 V2 工具 */
@@ -317,7 +325,7 @@ export function adaptV2Tool(v2: V2Tool, options: AdaptOptions): UnrealAgentTool<
       }
 
       return {
-        content: [{ type: 'text', text: toText(result) }, ...extractImages(result)],
+        content: [{ type: 'text', text: toText(result) }, ...(await extractImages(result))],
         details: stripImages(result)
       }
     },

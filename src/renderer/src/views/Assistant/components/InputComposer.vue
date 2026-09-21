@@ -84,10 +84,13 @@
         :class="{ parsing: doc.parsing, error: doc.error }"
       >
         <PhFilePdf v-if="doc.fileType === 'pdf'" class="doc-icon pdf-icon" />
+        <PhFileVideo v-else-if="isMediaDoc(doc)" class="doc-icon video-icon" />
         <PhFileDoc v-else class="doc-icon word-icon" />
         <span class="doc-name">{{ doc.fileName }}</span>
         <span v-if="doc.parsing" class="doc-status">
           <PhCircleNotch class="icon-spin" />
+          <!-- 视频要跑一阵子，主进程报上来什么就显示什么 -->
+          <span v-if="doc.statusNote" class="doc-status-note">{{ doc.statusNote }}</span>
         </span>
         <PhXCircle weight="fill" class="remove-btn" @click="removeDocFile(index)" />
       </div>
@@ -316,7 +319,7 @@
         <input
           ref="fileInputRef"
           type="file"
-          accept="image/bmp,image/jpeg,image/png,image/webp"
+          accept=".bmp,.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.docm,.ppt,.pps,.pot,.pptx,.pptm,.ppsx,.ppsm,.odt,.ods,.odp,.rtf,.epub,.xlsx,.xls,.txt,.md,.csv,.json,.mp4,.mov,.webm,.mkv,.avi,.m4v,.mp3,.wav,.flac,.ogg,.m4a,.aac,.opus,.aiff"
           multiple
           hidden
           @change="handleFileSelect"
@@ -734,7 +737,7 @@
 import AppModal from '@renderer/components/AppModal.vue'
 import AppTooltip from '@renderer/components/AppTooltip.vue'
 import AppButton from '@renderer/components/AppButton.vue'
-import { ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { agentV3API, type AgentV3SkillSummary } from '@/api/agentV3'
 import assetNoteAPI from '@renderer/api/assetNote'
@@ -764,6 +767,7 @@ import {
   PhFile,
   PhFileDoc,
   PhFilePdf,
+  PhFileVideo,
   PhFileText,
   PhFileXls,
   PhGlobe,
@@ -1858,22 +1862,51 @@ const CHAT_DOC_EXTENSIONS = new Set([
   'ods',
   'odp',
   'rtf',
-  'epub'
+  'epub',
+  // 纯文本与表格：主进程 documentLoader 的 TEXT_EXTENSIONS 也认，
+  // 拖进来却不收只会让人以为坏了
+  'txt',
+  'md',
+  'markdown',
+  'csv',
+  'json'
 ])
 
-// 文档文件相关状态（PDF/Word）
-// Gemini 3 Flash 支持 PDF 直接内嵌 (application/pdf)
+/**
+ * 能拖进聊天的视频格式。与主进程 `videoFileAnalysis` 的 VIDEO_EXTENSION 同源。
+ *
+ * 它们不会被直接发给模型 —— 主进程先让视频模型看一遍，看不了就抽帧，
+ * 进对话的是描述文字或联系表。见 `services/attachmentIngest.ts`。
+ */
+const CHAT_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'])
+
+/**
+ * 音频。和视频走同一批模型 —— 能看视频的多模态模型基本都能听音频，
+ * 厂商那边是同一套接口，只是请求分片不同（见 `configuredVideoAnalysis`）。
+ * 所以用户勾一次「视频」能力，音视频都能用，不用再单勾一次。
+ */
+const CHAT_AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'aiff'])
+
+// 文档与视频的待处理状态。两者共用一条链路：都是「本地先解释成文本（或帧），再进对话」
 interface PendingDocFile {
   file: File
   fileName: string
-  /** 只区分 PDF 与其他：PDF 走 base64 内嵌，其余走主进程解析出的文本 */
+  /** 扩展名。模板据此选图标，`pdf` 用 PDF 图标，视频用胶片图标 */
   fileType: string
-  /** Base64 编码的文件内容（用于 Gemini 内嵌） */
-  base64Data?: string
-  /** MIME 类型 */
-  mimeType?: string
-  /** 解析后的文本内容（用于非 PDF 文件回退） */
+  /**
+   * 磁盘上的绝对路径，用来认领主进程报上来的进度。
+   *
+   * 不能用文件名认：同名不同目录的两份（D:/a/clip.mp4 与 D:/b/clip.mp4）
+   * 会互相串台 —— 第一条一直顶着第二条的进度，第二条一动不动。
+   * 网页里拖来的 File 没有路径，那条本来也走不到进度回调。
+   */
+  filePath?: string
+  /** 解析出的文本：文档是 Markdown，视频是模型写的描述或抽帧说明 */
   content?: string
+  /** 视频抽帧兜底时产出的联系表（data URL），发送时并进图片列表 */
+  extraImages?: string[]
+  /** 正在做什么。视频那条要跑一阵，界面上得说清此刻卡在哪一步 */
+  statusNote?: string
   parsing: boolean
   error?: string
 }
@@ -1945,39 +1978,51 @@ async function handleFileSelect(event: Event): Promise<void> {
   const files = input.files
   if (!files || files.length === 0) return
 
-  // 分离图片文件、Excel 文件和文档文件
-  const imageFiles: File[] = []
-  const excelFiles: File[] = []
-  const docFiles: File[] = []
-
-  for (const file of Array.from(files)) {
-    const ext = file.name.split('.').pop()?.toLowerCase()
-    if (ext === 'xlsx' || ext === 'xls') {
-      excelFiles.push(file)
-    } else if (ext && CHAT_DOC_EXTENSIONS.has(ext)) {
-      docFiles.push(file)
-    } else if (file.type.startsWith('image/')) {
-      imageFiles.push(file)
-    }
-  }
-
-  // 处理图片
-  if (imageFiles.length > 0) {
-    await addImages(imageFiles)
-  }
-
-  // 处理 Excel 文件
-  if (excelFiles.length > 0) {
-    await addExcelFiles(excelFiles)
-  }
-
-  // 处理文档文件（PDF/Word）
-  if (docFiles.length > 0) {
-    await addDocFiles(docFiles)
-  }
+  await routeFiles(Array.from(files))
 
   // 清空 input 以便再次选择同一文件
   input.value = ''
+}
+
+/**
+ * 按类型分派文件。选择器、拖拽、粘贴三条入口共用。
+ *
+ * **认不出的格式要出声**。这里从前是静默丢弃：用户拖一个 mp4 进来，
+ * 没有提示、没有气泡，只看见什么都没发生，于是转头去问 AI「你为什么读不了」，
+ * 而 AI 也不知道有文件来过。宁可弹一句「这个格式收不了」，也不要装作无事发生。
+ */
+async function routeFiles(files: File[]): Promise<void> {
+  const imageFiles: File[] = []
+  const excelFiles: File[] = []
+  const docFiles: File[] = []
+  const rejected: string[] = []
+
+  for (const file of files) {
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+    if (ext === 'xlsx' || ext === 'xls') {
+      excelFiles.push(file)
+    } else if (
+      CHAT_DOC_EXTENSIONS.has(ext) ||
+      CHAT_VIDEO_EXTENSIONS.has(ext) ||
+      CHAT_AUDIO_EXTENSIONS.has(ext)
+    ) {
+      docFiles.push(file)
+    } else if (file.type.startsWith('image/')) {
+      imageFiles.push(file)
+    } else {
+      rejected.push(file.name)
+    }
+  }
+
+  if (rejected.length > 0) {
+    message.warning(
+      t('assistantInputComposer.toast.unsupportedFile', { name: rejected.join('、') })
+    )
+  }
+
+  if (imageFiles.length > 0) await addImages(imageFiles)
+  if (excelFiles.length > 0) await addExcelFiles(excelFiles)
+  if (docFiles.length > 0) await addDocFiles(docFiles)
 }
 
 /**
@@ -2178,8 +2223,15 @@ async function addExcelFiles(files: File[]): Promise<void> {
 }
 
 /**
- * 添加文档文件到待解析列表（PDF/Word）
- * 使用现有的 document:load IPC 解析文档
+ * 添加文档或视频到待解析列表。
+ *
+ * 统一走主进程的 `attachment:ingest`：文档复用知识库那一套解析器
+ * （同一个 PDF，知识库读得出、聊天里读不出，是最难解释的那种不一致），
+ * 视频先让配好的视频模型看，看不了再抽帧当图片发。
+ *
+ * PDF 从前是转 base64 走 `inlineDocuments` 的 —— 那条是条死路：
+ * `useChatFlow` 的载荷类型里根本没这个字段，主进程也从没构造过 document block，
+ * 于是界面上挂着 PDF、模型那边一个字节都收不到。现在和别的文档一样解析成文本。
  */
 async function addDocFiles(files: File[]): Promise<void> {
   const remaining = MAX_DOC_FILES - pendingDocFiles.value.length
@@ -2204,25 +2256,47 @@ async function addDocFiles(files: File[]): Promise<void> {
     const currentIndex = pendingDocFiles.value.length - 1
 
     try {
-      // 将文件读取为 ArrayBuffer
-      const arrayBuffer = await file.arrayBuffer()
-      const buffer = new Uint8Array(arrayBuffer)
+      // 优先走绝对路径：视频要交给 ffmpeg，一段 100MB 的片子没必要先塞进
+      // ArrayBuffer 再序列化过 IPC。网页里拖来的 File 拿不到路径，才退回 buffer
+      const filePath = window.api.getPathForFile(file) || ''
 
-      // PDF 文件：直接使用 base64 内嵌（Gemini 3 Flash 原生支持）
-      if (ext === 'pdf') {
-        // 转换为 base64
-        const base64Data = btoa(buffer.reduce((data, byte) => data + String.fromCharCode(byte), ''))
+      if (filePath) {
+        // 进度回调按这条路径认领对应的那一格，所以要先记下来再发起解析
+        pendingDocFiles.value[currentIndex] = { ...pending, filePath }
+        const result = await window.api.attachment.ingest(filePath)
+
+        if (result.success) {
+          pendingDocFiles.value[currentIndex] = {
+            ...pending,
+            parsing: false,
+            ...(result.text ? { content: result.text } : {}),
+            ...(result.images ? { extraImages: result.images } : {})
+          }
+          if (result.framesFallback) {
+            message.info(t('assistantInputComposer.toast.videoFramesFallback', { name: file.name }))
+          }
+        } else {
+          pendingDocFiles.value[currentIndex] = {
+            ...pending,
+            parsing: false,
+            error: result.error || '解析失败'
+          }
+          message.error(
+            result.error || t('assistantInputComposer.toast.parseFailed', { name: file.name })
+          )
+        }
+      } else if (CHAT_VIDEO_EXTENSIONS.has(ext) || CHAT_AUDIO_EXTENSIONS.has(ext)) {
+        // 没有路径的视频没法交给 ffmpeg。与其把几十 MB 搬过 IPC 再失败，
+        // 不如直接说清楚：请从本地文件选择，而不是从网页里拖
         pendingDocFiles.value[currentIndex] = {
           ...pending,
-          base64Data,
-          mimeType: 'application/pdf',
-          parsing: false
+          parsing: false,
+          error: t('assistantInputComposer.toast.videoNeedsLocalFile')
         }
-        console.log(
-          `[InputComposer] PDF ${file.name} 已转为 base64，大小: ${(buffer.length / 1024 / 1024).toFixed(2)}MB`
-        )
+        message.error(t('assistantInputComposer.toast.videoNeedsLocalFile'))
       } else {
-        // Word 文件：使用 IPC 解析文本（Gemini 不支持 Word 内嵌）
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = new Uint8Array(arrayBuffer)
         const result = await window.electron.ipcRenderer.invoke('file:execute', {
           toolName: 'parseDocument',
           params: { buffer: Array.from(buffer), fileName: file.name }
@@ -2231,7 +2305,7 @@ async function addDocFiles(files: File[]): Promise<void> {
         if (result.success) {
           pendingDocFiles.value[currentIndex] = {
             ...pending,
-            content: result.content,
+            content: `### 文件：${file.name}\n\n${result.content}`,
             parsing: false
           }
         } else {
@@ -2256,6 +2330,27 @@ async function addDocFiles(files: File[]): Promise<void> {
     }
   }
 }
+
+/** 模板里选图标用。音视频那一格不该顶着一个 Word 图标 */
+function isMediaDoc(doc: PendingDocFile): boolean {
+  return CHAT_VIDEO_EXTENSIONS.has(doc.fileType) || CHAT_AUDIO_EXTENSIONS.has(doc.fileType)
+}
+
+/**
+ * 跟进主进程的解释进度。
+ *
+ * 视频那条要压缩、上传、等模型，几十秒起步；只转一个菊花的话，用户分不清
+ * 「在跑」和「卡死了」。按路径匹配到对应的那一条，把主进程报上来的话直接显示。
+ */
+onMounted(() => {
+  // 可选链不是防御性编程：单测里挂载这个组件时 window.api 只有被测到的那几块，
+  // 缺一个进度订阅不该让整个输入框起不来
+  const off = window.api.attachment?.onProgress(({ filePath, note }) => {
+    const target = pendingDocFiles.value.find((f) => f.parsing && f.filePath === filePath)
+    if (target) target.statusNote = note
+  })
+  if (off) onUnmounted(off)
+})
 
 /**
  * 移除待上传的文档文件
@@ -2282,6 +2377,13 @@ function removeExcelFile(index: number): void {
  * 处理粘贴事件
  */
 async function handlePaste(event: ClipboardEvent): Promise<void> {
+  const files = Array.from(event.clipboardData?.files ?? [])
+  if (files.length > 0) {
+    event.preventDefault()
+    await routeFiles(files)
+    return
+  }
+
   const images = extractImagesFromPaste(event)
   if (images.length > 0) {
     event.preventDefault()
@@ -2293,11 +2395,12 @@ async function handlePaste(event: ClipboardEvent): Promise<void> {
  * 处理拖拽进入
  */
 function handleDragOver(event: DragEvent): void {
-  // 检查是否有图片文件
+  // 任何文件都亮高亮，不再只认图片 —— 高亮是「这里收得下」的唯一提示，
+  // 拖着 PDF 过来却毫无反应，用户根本不会松手
   const items = event.dataTransfer?.items
   if (items) {
     for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
+      if (items[i].kind === 'file') {
         isDragging.value = true
         return
       }
@@ -2317,6 +2420,13 @@ function handleDragLeave(): void {
  */
 async function handleDrop(event: DragEvent): Promise<void> {
   isDragging.value = false
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (files.length > 0) {
+    await routeFiles(files)
+    return
+  }
+
+  // dataTransfer.files 为空时才回退到 items 扫描：从网页里直接拖图片属于这种
   const images = extractImagesFromDrop(event)
   if (images.length > 0) {
     await addImages(images)
@@ -2402,21 +2512,17 @@ function handleSend(event?: Event): void {
     .filter((f) => f.content && !f.parsing && !f.error)
     .map((f) => `### 文件：${f.fileName}\n\n${f.content}`)
 
-  // 收集已解析的 Word 文档内容（非 PDF，因为 PDF 使用 inline data）
+  // 收集已解析的文档/视频文本。文件名那一行在解析时已经加好了（见 attachmentIngest）
   const docContents = pendingDocFiles.value
-    .filter((f) => f.content && !f.parsing && !f.error && f.fileType !== 'pdf')
-    .map((f) => `### 文件：${f.fileName}\n\n${f.content}`)
+    .filter((f) => f.content && !f.parsing && !f.error)
+    .map((f) => f.content!)
 
-  // 收集 PDF 的 base64 数据作为 inline documents（供 Gemini 直接处理）
-  const inlineDocuments = pendingDocFiles.value
-    .filter((f) => f.base64Data && f.mimeType && !f.parsing && !f.error && f.fileType === 'pdf')
-    .map((f) => ({
-      fileName: f.fileName,
-      mimeType: f.mimeType!,
-      base64Data: f.base64Data!
-    }))
+  // 视频抽帧兜底产出的联系表，和用户自己带的图片走同一条通道
+  const frameImages = pendingDocFiles.value
+    .filter((f) => !f.parsing && !f.error)
+    .flatMap((f) => f.extraImages ?? [])
 
-  // 合并所有文档上下文（Excel + Word，不包括 PDF）
+  // 合并所有文档上下文（Excel + 文档 + 视频描述）
   const allDocContents = [...excelContents, ...docContents]
   const excelContext = allDocContents.length > 0 ? allDocContents.join('\n\n---\n\n') : undefined
 
@@ -2425,21 +2531,20 @@ function handleSend(event?: Event): void {
     .filter((f) => f.content && !f.parsing && !f.error)
     .map((f) => ({ fileName: f.fileName, rowCount: f.rowCount }))
 
-  // 收集文档文件元数据（用于 UserBubble 显示，包括 PDF 和 Word）
+  // 收集文档文件元数据（用于 UserBubble 显示）
   const docFiles = pendingDocFiles.value
-    .filter((f) => (f.content || f.base64Data) && !f.parsing && !f.error)
+    .filter((f) => f.content && !f.parsing && !f.error)
     .map((f) => ({ fileName: f.fileName }))
 
-  // 发送消息（包含可能的强制来源列表和 inline documents）
+  // 发送消息（包含可能的强制来源列表）
   emit('send', {
     content: trimmedContent,
-    images: uploadedImages,
+    images: [...uploadedImages, ...frameImages],
     imageFiles,
     forcedSources: mentionedSources.value.length > 0 ? [...mentionedSources.value] : undefined,
     excelContext,
     excelFiles: excelFiles.length > 0 ? excelFiles : undefined,
-    docFiles: docFiles.length > 0 ? docFiles : undefined,
-    inlineDocuments: inlineDocuments.length > 0 ? inlineDocuments : undefined
+    docFiles: docFiles.length > 0 ? docFiles : undefined
   })
 
   // 清空状态

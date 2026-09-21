@@ -21,6 +21,7 @@ import { registerAiIPC } from './ai'
 import { registerAiProviderIPC } from '../ai/ipc'
 import { registerDashScopeIPC } from './dashscope'
 import { registerVisionIPC } from './vision'
+import { registerAttachmentIPC } from './attachment'
 import { registerRealtimeVoiceIPC } from './realtimeVoice'
 import { registerVideoThumbnailIPC } from './videoThumbnail'
 import { registerVideoCompressIPC } from './videoCompress'
@@ -108,6 +109,9 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 注册视觉识别相关 IPC（图片/视频内容识别）
   registerVisionIPC()
+
+  // 注册聊天附件解释 IPC（视频/文档在本地先解释成模型吃得下的东西）
+  registerAttachmentIPC()
 
   // 注册实时语音会话 IPC
   registerRealtimeVoiceIPC()

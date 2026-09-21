@@ -15,7 +15,7 @@ vi.mock('../contextImage', async (importOriginal) => ({
 
 import { __testing } from './localFiles'
 
-const { sizeHint, withViewedImageDetails, readImageProcessor } = __testing
+const { sizeHint, withViewedImageDetails, readImageProcessor, rejectOpaqueBinary } = __testing
 
 /**
  * 敏感位置的拦截规则搬去了 `pathBoundary.ts`（碰盘的工具已经不止这里两个），
@@ -133,5 +133,30 @@ describe('读到图片时先压缩', () => {
 
     expect(out.ok).toBe(false)
     expect((out as { message: string }).message).toContain('看不到')
+  })
+})
+
+/**
+ * 守那次真机事故：模型 `read_local_file` 读 mp4，pi 把字节按 UTF-8 解成 50KB 乱码，
+ * 模型以为读到了东西，转头拿浏览器工具开 `file:`，被拒后反复重试撞上限流。
+ * 拦在读之前，并且**指明该用哪个工具** —— 只说「不支持」的话，模型会换个姿势再试。
+ */
+describe('二进制挡在读取之前', () => {
+  it.each([
+    ['D:/素材/clip.mp4', 'analyze_video'],
+    ['D:/录音/voice.m4a', 'analyze_video'],
+    ['D:/需求/案子.pdf', 'read_document'],
+    ['D:/工程/Mesh.uasset', 'ue_content_describe']
+  ])('%s 指向 %s', (path, tool) => {
+    const message = rejectOpaqueBinary(path)
+    expect(message).toContain(tool)
+    // 不指路的话模型会重试同一个路径，这句是拦截生效的另一半
+    expect(message).toContain('不要重试同一个路径')
+  })
+
+  it('读得出字的文件照常放行', () => {
+    expect(rejectOpaqueBinary('D:/工程/Config/DefaultEngine.ini')).toBeNull()
+    expect(rejectOpaqueBinary('D:/log/run.log')).toBeNull()
+    expect(rejectOpaqueBinary('D:/参考/ref.png')).toBeNull()
   })
 })

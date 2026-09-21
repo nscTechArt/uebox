@@ -27,8 +27,8 @@ const AnalyzeVideoInput = z.object({
     .string()
     .min(1)
     .describe(
-      '视频文件的**本地绝对路径**、HTTP(S) 视频直链或 Bilibili 完整视频页面 URL（自动解析）。`generate_video` 返回值里的 `video_path` 直接可用。' +
-        '支持 mp4/mov/webm/mkv/avi/m4v'
+      '视频或音频文件的**本地绝对路径**、HTTP(S) 视频直链或 Bilibili 完整视频页面 URL（自动解析）。`generate_video` 返回值里的 `video_path` 直接可用。' +
+        '视频支持 mp4/mov/webm/mkv/avi/m4v，音频支持 mp3/wav/flac/ogg/m4a/aac/opus/aiff'
     ),
   question: z
     .string()
@@ -53,12 +53,15 @@ export function createAnalyzeVideoTool(): UnrealAgentTool<AnalyzedVideoDetails> 
     name: 'analyze_video',
     namespace: 'aigc',
     risk: 'safe',
-    description: `让能看视频的模型看一段本地视频、视频直链或 Bilibili 视频，把看到的讲给你听。
+    description: `让多模态模型看一段视频、或听一段音频，把内容讲给你听。
+支持本地文件、视频直链和 Bilibili 视频；音频只收本地文件。
 
 【什么时候用】：
 - **刚用 \`generate_video\` 出完片** —— 把返回值里的 \`video_path\` 传进来，
   你就能知道这段片子到底长什么样，而不是只能转述参数
 - 用户给了一段视频文件、视频直链或 B 站完整视频链接，问里面有什么、有没有问题
+- 用户给了一段音频（录音、配音、BGM），问里面说了什么 —— 音频走同一批模型，
+  默认会给一份摘要加逐段转写
 - B 站链接自动解析；其他网页及 b23.tv 短链接暂不支持，请使用完整视频 URL
 - 用户说「这段不太对」而你不知道他指什么时，先看一眼再问
 

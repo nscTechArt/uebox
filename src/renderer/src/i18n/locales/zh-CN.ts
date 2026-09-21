@@ -5001,6 +5001,9 @@ export default {
       parseFailed: '解析 {name} 失败',
       maxDocFiles: '最多上传 {max} 个文档',
       processFailed: '处理 {name} 失败',
+      videoFramesFallback: '没有配置能看视频的模型，{name} 改为抽帧给模型看（没有声音和帧间运动）',
+      videoNeedsLocalFile: '视频要从本地文件拖进来或用回形针选择，网页里直接拖过来拿不到文件路径',
+      unsupportedFile: '收不了这些文件：{name}',
       noWikiBound: '当前未绑定知识库',
       compacted: '已从 {before} 条压缩至 {after} 条，节省约 {saved} token',
       compactFailed: {

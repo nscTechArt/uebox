@@ -10,6 +10,16 @@ const DEFAULT_PROMPT = `请用中文分析这段视频，输出 Markdown，包�
 3. 重要数据、结论与关键词
 只描述视频中实际出现或听到的内容，不要猜测。`
 
+/** 音频没有画面，问「关键时间点」之外还得把说了什么写全，否则回来一句摘要没法用 */
+const DEFAULT_AUDIO_PROMPT = `请用中文分析这段音频，输出 Markdown，包含：
+1. 内容摘要
+2. 逐段转写（有几个人说话就标出说话人，听不清的地方写明听不清）
+3. 关键时间点与重要信息
+只描述音频里实际听到的内容，不要猜测。`
+
+/** 送去理解的是视频还是音频。两者走同一批模型，但请求分片的形状不同 */
+export type MediaKind = 'video' | 'audio'
+
 export interface ConfiguredVideoAnalysisResult {
   success: boolean
   markdown?: string
@@ -91,24 +101,73 @@ function apiError(raw: string, status: number): string {
   return raw.trim().slice(0, 300) || `HTTP ${status}`
 }
 
+/**
+ * 音频在 OpenAI 兼容协议里不是 `video_url`，而是单独的 `input_audio` 分片，
+ * 还要显式报格式（通义千问 omni、GPT-4o audio 都按这个收）。
+ * Google 那边则统一走 `inlineData`，不用分。
+ */
+function audioFormatOf(mimeType: string): string | null {
+  const subtype = mimeType.split('/')[1]?.toLowerCase() ?? ''
+  /*
+   * 不能拿 MIME 的子类型直接当 format 用。
+   *
+   * `.m4a` 的 MIME 是 `audio/mp4`，照搬就会发出 `format: "mp4"`；`.aiff` 同理。
+   * 厂商那边只认一张很短的白名单（通义千问 omni、GPT-4o audio 都是），
+   * 不在表上的值换来一次 400，而错误信息只说「unsupported format」，
+   * 看不出是我们这边编错了字符串。
+   *
+   * 所以查表，查不到就返回 null —— 由调用方在**发出去之前**说清这个格式送不了，
+   * 比让用户等一次远端 400 强。
+   */
+  const BY_SUBTYPE: Record<string, string> = {
+    mpeg: 'mp3',
+    mp3: 'mp3',
+    wav: 'wav',
+    'x-wav': 'wav',
+    wave: 'wav',
+    // m4a/aac 装在 MP4 容器里，MIME 是 audio/mp4，但 format 要报 m4a
+    mp4: 'm4a',
+    'x-m4a': 'm4a',
+    m4a: 'm4a',
+    aac: 'aac',
+    flac: 'flac',
+    ogg: 'ogg',
+    opus: 'opus',
+    webm: 'webm'
+  }
+  return BY_SUBTYPE[subtype] ?? null
+}
+
 async function analyzeOpenAICompatible(
   provider: ProviderConfig,
   model: ModelConfig,
   data: string,
+  mimeType: string,
+  kind: MediaKind,
   prompt: string
 ): Promise<string> {
   const apiKey = await resolveApiKey(provider.apiKey)
   const baseUrl = provider.baseUrl.replace(/\/+$/, '')
   const url = /\/chat\/completions$/i.test(baseUrl) ? baseUrl : `${baseUrl}/chat/completions`
+  let mediaPart: Record<string, unknown>
+  if (kind === 'audio') {
+    const format = audioFormatOf(mimeType)
+    // 编不出合法的 format 就别发。远端只会回一句看不懂的 400
+    if (!format) {
+      throw new Error(
+        `${mimeType} 这种音频格式发不出去（厂商的 input_audio 不收它）。请先转成 mp3 或 wav。`
+      )
+    }
+    mediaPart = { type: 'input_audio', input_audio: { data, format } }
+  } else {
+    mediaPart = { type: 'video_url', video_url: { url: `data:;base64,${data}` } }
+  }
   const body = {
     model: model.id,
     messages: [
       {
         role: 'user',
-        content: [
-          { type: 'video_url', video_url: { url: `data:;base64,${data}` } },
-          { type: 'text', text: prompt }
-        ]
+        content: [mediaPart, { type: 'text', text: prompt }]
       }
     ],
     stream: true,
@@ -173,16 +232,27 @@ export async function analyzeVideoWithConfiguredModel(args: {
   data: string
   mimeType: string
   prompt?: string
+  /** 默认视频。音频复用同一批模型 —— 能看视频的多模态模型基本都能听音频 */
+  kind?: MediaKind
 }): Promise<ConfiguredVideoAnalysisResult | null> {
   const selected = findConfiguredVideoModel(await readSettings())
   if (!selected) return null
-  if (!args.data) return { success: false, error: '没有拿到视频内容' }
+  const kind: MediaKind = args.kind ?? 'video'
+  if (!args.data)
+    return { success: false, error: `没有拿到${kind === 'audio' ? '音频' : '视频'}内容` }
 
   try {
-    const prompt = args.prompt?.trim() || DEFAULT_PROMPT
+    const prompt = args.prompt?.trim() || (kind === 'audio' ? DEFAULT_AUDIO_PROMPT : DEFAULT_PROMPT)
     let content = ''
     if (selected.provider.protocol === 'openai-completions') {
-      content = await analyzeOpenAICompatible(selected.provider, selected.model, args.data, prompt)
+      content = await analyzeOpenAICompatible(
+        selected.provider,
+        selected.model,
+        args.data,
+        args.mimeType,
+        kind,
+        prompt
+      )
     } else if (selected.provider.protocol === 'google-generative-ai') {
       content = await analyzeGoogle(
         selected.provider,

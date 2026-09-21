@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
+import { analyzeLocalAudioFile } from './audioFileAnalysis'
 import { analyzeLocalVideoFile, type VideoFileAnalysisResult } from './videoFileAnalysis'
 import {
   BILIBILI_PLAYBACK_HEADERS,
@@ -23,6 +24,8 @@ import {
  */
 const MAX_DOWNLOAD_MB = 500
 const VIDEO_EXTENSION = /\.(mp4|mov|webm|mkv|avi|m4v)$/i
+/** 与 `audioFileAnalysis` 的那条同源 */
+const AUDIO_EXTENSION = /\.(mp3|wav|flac|ogg|m4a|aac|opus|aiff)$/i
 
 async function downloadToTempFile(
   url: string,
@@ -59,6 +62,14 @@ export async function analyzeVideoSource(args: {
 }): Promise<VideoFileAnalysisResult> {
   const source = args.source.trim()
   if (!/^https?:\/\//i.test(source)) {
+    // 音频走同一批模型，只是请求分片不同。放在这里分派，调用方不必先判类型
+    if (AUDIO_EXTENSION.test(source.split(/[?#]/)[0])) {
+      return analyzeLocalAudioFile({
+        filePath: source,
+        prompt: args.prompt,
+        onProgress: args.onProgress
+      })
+    }
     return analyzeLocalVideoFile({
       filePath: source,
       prompt: args.prompt,

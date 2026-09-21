@@ -5137,6 +5137,11 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       parseFailed: 'Failed to parse {name}',
       maxDocFiles: 'You can upload at most {max} documents',
       processFailed: 'Failed to process {name}',
+      videoFramesFallback:
+        'No video-capable model configured, so {name} was sampled into frames instead (no audio, no motion between frames)',
+      videoNeedsLocalFile:
+        'Drop the video from a folder or pick it with the paperclip — a video dragged straight from a web page has no file path',
+      unsupportedFile: 'These files cannot be attached: {name}',
       noWikiBound: 'No knowledge base is currently bound',
       compacted: 'Compacted: {before} messages → {after}, about {saved} tokens saved',
       compactFailed: {

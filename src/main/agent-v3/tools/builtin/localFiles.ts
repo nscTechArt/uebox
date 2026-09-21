@@ -44,6 +44,7 @@ import { compressForContext, describeResize } from '../contextImage'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 import { assertInAccessScope } from './accessScope'
 import { assertPathAllowed } from './pathBoundary'
+import { createReadDocumentTool } from './readDocument'
 
 /** 一次最多列多少条。目录里几万个文件时全带回去会挤爆上下文 */
 const MAX_ENTRIES = 200
@@ -148,6 +149,10 @@ function createReadLocalFileTool(): UnrealAgentTool<never> {
       if (denied) {
         return { content: [{ type: 'text', text: denied }], isError: true }
       }
+      const wrongTool = rejectOpaqueBinary(target)
+      if (wrongTool) {
+        return { content: [{ type: 'text', text: wrongTool }], isError: true }
+      }
       const result = await inner.execute(toolCallId, params, signal, onUpdate, { env: getEnv() })
       return withViewedImageDetails(result, target)
     }
@@ -156,6 +161,52 @@ function createReadLocalFileTool(): UnrealAgentTool<never> {
 
 /** 图片扩展名。只在 pi 已经判定"这是张图"之后用来做兜底路径检查 */
 const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|bmp)$/i
+
+/**
+ * 读不出字、但有专门工具能处理的二进制格式。
+ *
+ * pi 的 read 只嗅图片魔数，别的一律 `TextDecoder` 硬解 —— 一个 mp4 读回来是
+ * 50KB 乱码，既烧 token 又挤 `requestBudget` 的 3MB 预算，而模型还以为自己
+ * 读到了东西，接着基于乱码往下推。这是真出过事的：有次模型读完 mp4 乱码，
+ * 转头去用浏览器工具开 `file:` 协议，被拒之后反复重试，最后撞上限流。
+ *
+ * 所以这里**提前拦下来，并指明该用哪个工具**。只写「不支持」没有用，
+ * 模型会换个姿势再试一次。
+ */
+const WRONG_TOOL_BINARY: Array<{ pattern: RegExp; hint: string }> = [
+  {
+    pattern: /\.(mp4|mov|webm|mkv|avi|m4v)$/i,
+    hint: '这是视频文件，读成文本只会得到乱码。用 analyze_video 看它。'
+  },
+  {
+    pattern: /\.(mp3|wav|flac|ogg|m4a|aac|wma|opus|aiff|ape)$/i,
+    hint: '这是音频文件，读成文本只会得到乱码。用 analyze_video 听它 —— 那个工具同时收视频和音频。'
+  },
+  {
+    pattern: /\.(pdf|docx?|pptx?|xlsx?|epub|odt|ods|odp|rtf)$/i,
+    hint: '这是文档容器，读成文本只会得到乱码。用 read_document 读它。'
+  },
+  {
+    pattern: /\.uasset$/i,
+    hint: '这是虚幻资产，二进制。用 ue_content_describe 之类的工具看它。'
+  },
+  {
+    pattern: /\.(exe|dll|so|dylib|zip|7z|rar|tar|gz|bin|pak)$/i,
+    hint: '这是二进制文件，读成文本只会得到乱码，没有工具能直接看它的内容。'
+  }
+]
+
+/**
+ * 二进制挡在读取之前。返回 null 表示放行。
+ *
+ * 按扩展名判断而不是嗅内容：嗅内容要先把文件读进来，而「别读」正是这里要做的事。
+ */
+function rejectOpaqueBinary(target: string): string | null {
+  const clean = target.split(/[?#]/)[0]
+  const matched = WRONG_TOOL_BINARY.find((entry) => entry.pattern.test(clean))
+  if (!matched) return null
+  return `[没有读 ${clean}]${matched.hint}\n不要重试同一个路径，也不要拿浏览器工具去开本地文件。`
+}
 
 /**
  * 读到图片时，把磁盘上那条路径挂到 `details` 上。
@@ -280,9 +331,20 @@ function sizeHint(size?: number): string {
 
 /** 本地文件工具。不依赖引擎连接 —— 未连接虚幻时它们照样可用 */
 export function createLocalFileTools(): UnrealAgentTool<never>[] {
-  return [createReadLocalFileTool(), createListLocalDirTool()]
+  return [
+    createReadLocalFileTool(),
+    createListLocalDirTool(),
+    // 文档容器不能按文本读，得有个地方接住 —— 见 WRONG_TOOL_BINARY
+    createReadDocumentTool() as unknown as UnrealAgentTool<never>
+  ]
 }
 
-export const __testing = { sizeHint, MAX_ENTRIES, withViewedImageDetails, readImageProcessor }
+export const __testing = {
+  sizeHint,
+  MAX_ENTRIES,
+  withViewedImageDetails,
+  readImageProcessor,
+  rejectOpaqueBinary
+}
 
 export type { AgentToolResult }

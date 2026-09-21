@@ -2077,6 +2077,42 @@ const api = {
     validate: (url: string): Promise<boolean> => ipcRenderer.invoke('wechat:validate', url)
   },
   /**
+   * 聊天附件解释 API
+   *
+   * 视频、PDF、Word 这类文件模型吃不下，得先在本地解释成描述文本或图片帧。
+   * 解析在主进程做 —— ffmpeg 和 anydoc 原生模块都不在渲染进程这边。
+   */
+  attachment: {
+    /**
+     * 解释一个附件
+     * @param filePath - 文件的绝对路径（拖拽来的 File 请先过 getPathForFile）
+     */
+    ingest: (
+      filePath: string
+    ): Promise<{
+      success: boolean
+      kind: 'image' | 'video' | 'audio' | 'document' | 'unsupported'
+      fileName: string
+      text?: string
+      /** 抽帧产出的联系表，data URL 形式，按时间先后排列 */
+      images?: string[]
+      model?: string
+      compressed?: boolean
+      framesFallback?: boolean
+      error?: string
+    }> => ipcRenderer.invoke('attachment:ingest', { filePath }),
+    /**
+     * 订阅解释进度。视频那条可能跑一两分钟，界面要能说清此刻在干什么
+     * @returns 取消订阅的函数
+     */
+    onProgress: (callback: (payload: { filePath: string; note: string }) => void): (() => void) => {
+      const listener = (_e: unknown, payload: { filePath: string; note: string }): void =>
+        callback(payload)
+      ipcRenderer.on('attachment:ingest-progress', listener)
+      return () => ipcRenderer.removeListener('attachment:ingest-progress', listener)
+    }
+  },
+  /**
    * 文档加载器 API
    * 使用 LangChain.js 加载各种文档格式
    */

@@ -23,7 +23,8 @@ vi.mock('../../../../services', () => ({
   serviceManager: { getWebSocketService: () => ({ getConnectionCount, callRequest }) }
 }))
 vi.mock('../../../core/projectTargetContext', () => ({ getTargetConnectionId: () => undefined }))
-vi.mock('../../contextImage', () => ({
+vi.mock('../../contextImage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../contextImage')>()),
   compressForContext: vi.fn(async () => ({ data: 'ZmFrZQ==', mimeType: 'image/jpeg' }))
 }))
 vi.mock('fs', () => ({ promises: { readFile: vi.fn(async () => Buffer.from('png')) } }))

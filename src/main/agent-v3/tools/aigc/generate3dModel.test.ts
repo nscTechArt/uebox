@@ -49,7 +49,8 @@ function rodinBoundSettings(): unknown {
     roles: { model3d: { providerId: 'hyper3d', modelId: 'Gen-2' } }
   }
 }
-vi.mock('../contextImage', () => ({
+vi.mock('../contextImage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../contextImage')>()),
   compressForContext: async () => ({ data: 'compressed-preview', mimeType: 'image/jpeg' })
 }))
 /** 参考图和预览图都走它。做成 vi.fn 是为了让用例能按路径给出不同的字节 */

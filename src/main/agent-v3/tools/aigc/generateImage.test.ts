@@ -26,7 +26,8 @@ vi.mock('../../../services/aigc/assetSaver', () => ({
   saveAIGCAssetFromBuffer: (...args: unknown[]) => saveAIGCAssetFromBuffer(...args)
 }))
 // 压缩本身在 contextImage 里，这里只关心「压了几张」
-vi.mock('../contextImage', () => ({
+vi.mock('../contextImage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../contextImage')>()),
   compressForContext: async () => ({ data: 'compressed', mimeType: 'image/jpeg' })
 }))
 

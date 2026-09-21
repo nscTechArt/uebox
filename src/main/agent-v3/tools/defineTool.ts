@@ -21,6 +21,7 @@ import type { TSchema } from 'typebox'
 import { z } from 'zod'
 
 import { runAbortable } from './abortable'
+import { admitImageForContext } from './contextImage'
 
 /** 工具的危险等级，审批门（core/approval.ts）据此决定是否拦截 */
 export type ToolRisk =
@@ -106,15 +107,14 @@ export function toToolSchema(schema: z.ZodTypeAny): TSchema {
   }) as unknown as TSchema
 }
 
-function toContent(outcome: ToolOutcome): AgentToolResult<unknown>['content'] {
+async function toContent(outcome: ToolOutcome): Promise<AgentToolResult<unknown>['content']> {
   const content: AgentToolResult<unknown>['content'] = []
   if (outcome.text) content.push({ type: 'text', text: outcome.text })
   for (const image of outcome.images ?? []) {
-    content.push({
-      type: 'image',
-      data: typeof image.data === 'string' ? image.data : image.data.toString('base64'),
-      mimeType: image.mimeType
-    })
+    // 每一张都过关口。工具自己压过的从这儿原样通过，没压的在这儿被压掉 ——
+    // 「记得压缩」从此是门禁，不再是纪律。见 contextImage.admitImageForContext
+    const admitted = await admitImageForContext(image)
+    content.push(...(Array.isArray(admitted) ? admitted : [admitted]))
   }
   // pi 要求 content 非空；工具只返了 details 时给个占位，
   // 否则模型看到一个空 tool result 会以为调用失败。
@@ -122,9 +122,11 @@ function toContent(outcome: ToolOutcome): AgentToolResult<unknown>['content'] {
   return content
 }
 
-function toAgentResult<TDetails>(outcome: ToolOutcome<TDetails>): AgentToolResult<TDetails> {
+async function toAgentResult<TDetails>(
+  outcome: ToolOutcome<TDetails>
+): Promise<AgentToolResult<TDetails>> {
   return {
-    content: toContent(outcome),
+    content: await toContent(outcome),
     details: outcome.details as TDetails,
     ...(outcome.terminate !== undefined ? { terminate: outcome.terminate } : {}),
     ...(outcome.addedToolNames ? { addedToolNames: outcome.addedToolNames } : {})
@@ -180,6 +182,9 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
       // `.default()` / `.transform()` 的结果和精确的 TS 类型。
       const parsed = spec.input.parse(params) as z.infer<TIn>
 
+      /** 进度回调的串行链。见下面 report 里的说明 */
+      let reportChain: Promise<void> = Promise.resolve()
+
       // 不 try/catch：异常直接交给 pi，由它标记 isError 并喂回模型。
       // 自己吞掉再返回一个"看起来成功"的结果，会让循环以为工具跑通了。
       //
@@ -191,7 +196,19 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
         spec.execute(parsed, {
           toolCallId,
           signal,
-          report: (partial) => onUpdate?.(toAgentResult(partial))
+          // 进度回调只喂界面，不进模型上下文（进上下文的是最终那份），
+          // 所以不必让工具体等压缩跑完。但**必须串成一条链**：两次 report
+          // 各自异步解析的话，后发的可能先回，界面上就是进度倒退。
+          // 末尾的 catch 也不能省 —— 压缩抛异常时这条链是没人接的 Promise，
+          // 在主进程里就是一次 unhandledRejection，而丢一条进度不该有这种代价。
+          report: (partial) => {
+            reportChain = reportChain
+              .then(() => toAgentResult(partial))
+              .then((result) => onUpdate?.(result))
+              .catch((error: unknown) => {
+                console.warn(`[${spec.name}] 进度回调失败（不影响工具本身）:`, error)
+              })
+          }
         })
       )
 
@@ -200,7 +217,7 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
         throw new ToolFailure(outcome.text || `${spec.name} 执行失败`)
       }
 
-      return toAgentResult(outcome)
+      return await toAgentResult(outcome)
     },
     unrealBox: {
       namespace: spec.namespace,

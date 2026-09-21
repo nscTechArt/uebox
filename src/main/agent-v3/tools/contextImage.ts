@@ -242,3 +242,75 @@ export function describeResize(image: ContextImage): string | undefined {
     '磁盘上的原图没动。细节看不清就说看不清，别猜。]'
   )
 }
+
+/**
+ * 进上下文的**唯一关口**。任何一张图，不管从哪来，都从这里过一遍。
+ *
+ * ## 为什么要有这道关
+ *
+ * 在此之前，「压缩」是一条纪律而不是一道门：每个产图的工具自己记得调
+ * {@link compressForContext}，而 `defineTool` 和 `adaptV2Tool` 收下的是
+ * 无上限的 base64。八个调用点全靠自觉，新写一个功能忘了压就直接把上下文撑爆 ——
+ * 而且撑爆的方式最难查：pi 每轮重发整条 transcript，一张 4MB 的图进去之后
+ * **之后每一轮**都带着它，直到厂商网关回 413。
+ *
+ * 所以纪律改成门：`defineTool.toContent`、`adaptV2Tool` 和聊天附件都走这里，
+ * 工具自己压不压都行 —— 压过的从这儿原样通过，没压的在这儿被压掉。
+ * 新功能什么都不做就已经被管住了，这是和「记得调压缩」的本质区别。
+ *
+ * ## 三种结局，都不是静默丢弃
+ *
+ * 1. 本来就在预算内 → 原样通过，**不重编码**（重编一次只会白掉一档画质）
+ * 2. 超了但压得动 → 压完通过，带一句「缩过」告诉模型别猜细节
+ * 3. 压不动（解不开、压到最低档仍超硬上限）→ 换成一段说明文字
+ *
+ * 第 3 种是关键：**不能什么都不放**。模型看不到图而上下文里又没有任何交代时，
+ * 它会当成「这个文件是空的」往下推。
+ *
+ * ## 和 `core/requestBudget.ts` 的分工
+ *
+ * 那个是**出口**的兜底：一整条 transcript 攒到超预算时，按大小丢图。
+ * 这个是**入口**：一张图在进来的那一刻就不许超标。两道都要 ——
+ * 入口管不住历史累积，出口没法重新编码（它只能丢）。
+ */
+export async function admitImageForContext(image: {
+  data: Buffer | string
+  mimeType: string
+  /** 拼图传 {@link CONTACT_SHEET_MAX_WIDTH}，单张图不用传 */
+  maxWidth?: number
+}): Promise<
+  | { type: 'image'; data: string; mimeType: string }
+  | { type: 'text'; text: string }
+  | Array<{ type: 'image'; data: string; mimeType: string } | { type: 'text'; text: string }>
+> {
+  const buffer = Buffer.isBuffer(image.data) ? image.data : Buffer.from(image.data, 'base64')
+
+  // 已经在预算内的原样放行。重编码不是免费的：一张压过的 JPEG 再压一次，
+  // 体积省不了多少，画质却实打实掉一档
+  if (buffer.byteLength <= CONTEXT_IMAGE_MAX_BYTES) {
+    return {
+      type: 'image',
+      data: typeof image.data === 'string' ? image.data : buffer.toString('base64'),
+      mimeType: image.mimeType
+    }
+  }
+
+  const compressed = await compressForContext(buffer, {
+    ...(image.maxWidth ? { maxWidth: image.maxWidth } : {})
+  })
+
+  if (!compressed) {
+    return {
+      type: 'text',
+      text:
+        `[这张图（${Math.round(buffer.byteLength / 1024)}KB）没能进上下文：` +
+        '可能是解不开，也可能是压到最低画质仍然太大。' +
+        '告诉用户你看不到这张图，请他转成 PNG / JPEG 或缩小之后再给你。不要重试。]'
+    }
+  }
+
+  const notice = describeResize(compressed)
+  const block = { type: 'image' as const, data: compressed.data, mimeType: compressed.mimeType }
+  // 缩过就得说。模型不知道自己看的是缩过的版本时，会把「看不清」当成「图上没有」
+  return notice ? [block, { type: 'text' as const, text: notice }] : block
+}
