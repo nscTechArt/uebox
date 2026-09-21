@@ -9,6 +9,7 @@ import {
   translate
 } from './openaiRealtime'
 import type { RealtimeSessionConfig } from './types'
+import { DEFAULT_REALTIME_ECHO_GUARD } from '../../../shared/realtimeEchoGuard'
 
 const CONFIG: RealtimeSessionConfig = {
   apiKey: 'sk-test',
@@ -48,14 +49,45 @@ describe('session.update 首帧', () => {
 
   it('服务端判停，音色只在配了的时候才发', () => {
     const withoutVoice = buildOpenAiSessionUpdate(CONFIG) as {
-      session: { audio: { input: { turn_detection: unknown }; output: Record<string, unknown> } }
+      session: {
+        audio: { input: { turn_detection: { type: string } }; output: Record<string, unknown> }
+      }
     }
-    expect(withoutVoice.session.audio.input.turn_detection).toEqual({ type: 'server_vad' })
+    expect(withoutVoice.session.audio.input.turn_detection.type).toBe('server_vad')
     expect(withoutVoice.session.audio.output).not.toHaveProperty('voice')
 
     expect(buildOpenAiSessionUpdate({ ...CONFIG, voice: 'marin' })).toMatchObject({
       session: { audio: { output: { voice: 'marin' } } }
     })
+  })
+
+  /**
+   * 判停门限和输入降噪**必须显式给**。少了它们照样连得上、不报错，
+   * 只是默认的 0.5 门限顶得过本地 AEC 的回声残留 —— 模型自己的尾音被转写成
+   * 一句「用户发言」，然后它开始回应自己。钉住是唯一发现得了的办法。
+   */
+  it.each([
+    ['headset' as const, 0.5, 'near_field'],
+    ['speaker' as const, 0.65, 'far_field'],
+    ['strong' as const, 0.8, 'far_field']
+  ])('回声门限 %s：门限 %s，降噪 %s', (echoGuard, threshold, noiseReduction) => {
+    expect(buildOpenAiSessionUpdate({ ...CONFIG, echoGuard })).toMatchObject({
+      session: {
+        audio: {
+          input: {
+            noise_reduction: { type: noiseReduction },
+            turn_detection: { type: 'server_vad', threshold }
+          }
+        }
+      }
+    })
+  })
+
+  /** 不给（旧版渲染层）和给了个不认识的值，都必须落到默认档，不能是「不发」 */
+  it.each([undefined, 'loud' as never])('档位给的是 %s 时退回默认档', (echoGuard) => {
+    expect(buildOpenAiSessionUpdate({ ...CONFIG, echoGuard })).toMatchObject(
+      buildOpenAiSessionUpdate({ ...CONFIG, echoGuard: DEFAULT_REALTIME_ECHO_GUARD })
+    )
   })
 })
 

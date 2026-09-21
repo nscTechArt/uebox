@@ -18,6 +18,7 @@ import type { SideChatContext } from '../shared/sideChat'
 import type { EditorSnapshot, MiniChatInitialMessage } from '../shared/editorSnapshot'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
 import type { NotebookContextLevel } from '../shared/notebookContext'
+import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
 
 /**
  * `ws:status` / `ws:status-changed` 送过来的那个对象。
@@ -2235,10 +2236,16 @@ const api = {
      * 必须按目标采样率创建。配置没配好时回 `ok: false`，走 `start` 报错那条路。
      */
     audioSpec: () => ipcRenderer.invoke('realtime-voice:audio-spec'),
+    /**
+     * `echoGuard` 是偏好设置里的回声门限档位。**随开会话一起带上来**，
+     * 不像防冷场那样单开一条通道推 —— 它只在首帧（`session.update`）读一次，
+     * 推过去的话「什么时候到」和「什么时候建会话」没有先后保证。
+     */
     start: (args?: {
       model?: string
       voice?: string
       history?: Array<{ role: 'user' | 'assistant'; text: string }>
+      echoGuard?: RealtimeEchoGuard
     }) => ipcRenderer.invoke('realtime-voice:start', args),
     stop: () => ipcRenderer.invoke('realtime-voice:stop'),
     playbackReady: (connectionId: number) =>

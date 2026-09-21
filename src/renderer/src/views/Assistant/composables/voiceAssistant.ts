@@ -337,10 +337,25 @@ function nameVoiceSession(text: string): void {
   chatStore.updateTitle(boundSid, text.replace(/\s+/g, ' ').slice(0, VOICE_TITLE_MAX_CHARS))
 }
 
+/**
+ * 用户这句话写进对话。
+ *
+ * ## 为什么要挑位置插，而不是直接追加到末尾
+ *
+ * 识别结果不一定比模型的回答先到 —— OpenAI 那边转写是另一条管线，实测常常比
+ * 回答的头几批文字增量晚。直接追加的话，屏幕上的顺序就是事件到达的顺序，
+ * 而不是说话的顺序：模型回答的前半句排在用户这句**上面**。
+ *
+ * 所以这条还在打字的助手气泡（`voiceAssistantMessageId`）就是标尺：它存在，
+ * 就说明模型已经在回这一句了，用户这句得插到它**前面**去。顺手把那个 id
+ * 留着不清 —— 清了的话下一批增量会另起一条气泡，一句整话当场断成两截
+ * （真机 2026-09-22：「你好呀！很高兴」「嗨,你好」「听到你的声音。…」）。
+ */
 function recordVoiceUserText(text: string): void {
   if (!boundSid) return
-  voiceAssistantMessageId = ''
-  useChatMessagesStore().pushUser(boundSid, text)
+  const replying = voiceAssistantMessageId
+  if (!replying) useChatMessagesStore().pushUser(boundSid, text)
+  else useChatMessagesStore().insertUserBefore(boundSid, replying, text)
   nameVoiceSession(text)
   useChatSessionsStore().appendMessage(boundSid, text)
   const host = hostFacing(boundSid)
@@ -559,6 +574,9 @@ function createVoiceAssistant(): RealtimeVoiceState {
   const aiConfigStore = useAIConfigStore()
   shared = useRealtimeVoice({
     microphoneDeviceId: () => aiConfigStore.voiceMicrophoneDeviceId,
+    // 开会话那一刻读一次。设置里改了要下一通电话才生效 —— 首帧过后
+    // 服务端的判停门限就定死了，中途推新值也没有地方能收
+    echoGuard: () => aiConfigStore.voiceEchoGuard,
     get connectionTimeoutMessage(): string {
       return t('assistantInputComposer.voice.connectionTimeout')
     },

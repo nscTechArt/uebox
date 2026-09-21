@@ -33,6 +33,7 @@ import type { DroppedPathVerdict } from '../shared/droppedPath'
 import type { ImportFailureReport } from '../shared/projectImport'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
 import type { NotebookContextLevel } from '../shared/notebookContext'
+import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
 import type {
   LibraryKind,
   LibraryPackageDto,
@@ -2196,10 +2197,12 @@ declare global {
       audioSpec: () => Promise<
         { ok: true; inputSampleRate: number; outputSampleRate: number } | { ok: false }
       >
+      /** `echoGuard`：回声门限档位。首帧只读一次，所以随开会话一起带，不单推 */
       start: (args?: {
         model?: string
         voice?: string
         history?: Array<{ role: 'user' | 'assistant'; text: string }>
+        echoGuard?: RealtimeEchoGuard
       }) => Promise<
         | { ok: true; inputSampleRate: number; outputSampleRate: number; connectionId: number }
         | { ok: false; error: string }

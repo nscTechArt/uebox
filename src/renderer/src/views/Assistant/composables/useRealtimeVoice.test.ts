@@ -1462,3 +1462,86 @@ describe('microphone selection', () => {
     await voice.stop()
   })
 })
+
+describe('识别晚于回答到达', () => {
+  /**
+   * OpenAI 的转写是另一条管线，常常比回答的头几批增量晚到。晚到的那条
+   * 不能把已经在写的回答当成「上一轮的残留」收掉 —— 收了就是把一句整话
+   * 劈成两条气泡，中间还夹着用户那句（真机 2026-09-22）。
+   */
+  it('模型已经在回了，晚到的识别不落定这半句', async () => {
+    const onAssistantDone = vi.fn()
+    const harness = await connect({ onAssistantDone })
+
+    await harness.emit({ type: 'interrupted' })
+    await harness.emit({ type: 'assistant-text', text: '你好呀！很高兴' })
+    await harness.emit({ type: 'user-text', text: '嗨,你好', final: true })
+
+    expect(onAssistantDone).not.toHaveBeenCalled()
+
+    // 这一轮真说完了才落定，而且是完整的一句
+    await harness.emit({ type: 'assistant-text', text: '听到你的声音。' })
+    await harness.emit({ type: 'turn-done' })
+    expect(onAssistantDone).toHaveBeenCalledWith('你好呀！很高兴听到你的声音。')
+
+    await harness.voice.stop()
+  })
+
+  /**
+   * 服务端「有人开口了」判错时（外放把模型自己的头两个字收了回去），
+   * 不准把说了一半的那句当场收掉。真机 2026-09-22：「好，我」「听到了。你可以…」
+   * —— 一句整话从词中间劈成两条气泡。
+   */
+  it('打断不收字幕，同一轮的后半句接着写进同一条', async () => {
+    const onAssistantDone = vi.fn()
+    const harness = await connect({ onAssistantDone })
+
+    await harness.emit({ type: 'assistant-text', text: '好，我' })
+    // 回声把模型自己的头两个字顶成了「用户开口」
+    await harness.emit({ type: 'interrupted' })
+    expect(onAssistantDone).not.toHaveBeenCalled()
+
+    // 服务端并没有真的取消这一轮，后半句接着来
+    await harness.emit({ type: 'assistant-text', text: '听到了。你可以直接说一句。' })
+    await harness.emit({ type: 'turn-done' })
+
+    expect(onAssistantDone).toHaveBeenCalledTimes(1)
+    expect(onAssistantDone).toHaveBeenCalledWith('好，我听到了。你可以直接说一句。')
+
+    await harness.voice.stop()
+  })
+
+  /**
+   * 「已经在回了」这个状态必须**逐轮清零**。不清的话它在第一轮之后永远是真，
+   * 从此每一轮的字幕都接在上一轮后面，越滚越长。
+   */
+  it('一轮说完就清零，下一轮的字幕不接在上一轮后面', async () => {
+    const onAssistantDone = vi.fn()
+    const harness = await connect({ onAssistantDone })
+
+    await harness.emit({ type: 'assistant-text', text: '上一轮说完的话' })
+    await harness.emit({ type: 'turn-done' })
+    expect(onAssistantDone).toHaveBeenLastCalledWith('上一轮说完的话')
+
+    await harness.emit({ type: 'user-text', text: '再来一件事', final: true })
+    await harness.emit({ type: 'assistant-text', text: '这一轮的话' })
+    await harness.emit({ type: 'turn-done' })
+    expect(onAssistantDone).toHaveBeenLastCalledWith('这一轮的话')
+
+    await harness.voice.stop()
+  })
+})
+
+/**
+ * 门限只在首帧读一次，所以必须**随开会话带上去**。漏传不报错 ——
+ * 主进程会按默认档发，而用户在设置里选的那一档从此不起作用，没有任何提示。
+ */
+describe('echo guard', () => {
+  it('把偏好里的回声门限档位随 start 带给主进程', async () => {
+    const { voice } = await connect({ echoGuard: () => 'strong' })
+    expect(window.api.realtimeVoice.start).toHaveBeenCalledWith(
+      expect.objectContaining({ echoGuard: 'strong' })
+    )
+    await voice.stop()
+  })
+})

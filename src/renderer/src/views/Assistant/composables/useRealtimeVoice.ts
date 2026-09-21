@@ -11,6 +11,7 @@ import {
   LIST_SESSIONS,
   isLocalVoiceTool
 } from '@core/shared/voiceFrontDesk'
+import type { RealtimeEchoGuard } from '@core/shared/realtimeEchoGuard'
 import workletUrl from './pcmCapture.worklet.js?url'
 
 /**
@@ -205,6 +206,14 @@ export interface RealtimeVoiceHistoryMessage {
 
 export interface RealtimeVoiceOptions {
   microphoneDeviceId?: () => string
+  /**
+   * 回声门限档位（偏好设置 → 语音）。
+   *
+   * 本地这一路的回声消除是固定开的（`echoCancellation` + `createAecLoopback`），
+   * 这个档位管的是**厂商那一侧**的判停灵敏度 —— AEC 压不干净的残留顶过服务端
+   * VAD 的门限时，模型会把自己的尾音当成用户在说话。开会话时一次性带过去。
+   */
+  echoGuard?: () => RealtimeEchoGuard
   /**
    * 挑一个「灶」来干这件活。不传 sessionId 的派发都落到它给的那条上。
    *
@@ -633,6 +642,21 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
    */
   let uplinkOpen = false
   let assistantTurnCommitted = false
+  /**
+   * 用户这一开口之后，模型**已经开始回**了吗。
+   *
+   * 存在的理由只有一个：**识别结果不一定比回答先到**。OpenAI 那边转写是另一条
+   * 管线（`...input_audio_transcription.completed`），实测常常比
+   * `response.output_text.delta` 的头几批晚个几百毫秒 —— 也就是说
+   * 「用户说了什么」这条事件到的时候，屏幕上模型的回答已经写出去半句了。
+   *
+   * 不区分的话，`user-text` final 那一支会把这半句当成**上一轮的残留**收掉：
+   * 一句整话被从中间劈成两条气泡，中间还夹着用户这句
+   * （真机 2026-09-22：「你好呀！很高兴」「嗨,你好」「听到你的声音。…」）。
+   *
+   * 由 `interrupted`（服务端说用户开口了）清零，由 `assistant-text` 置位。
+   */
+  let assistantRepliedSinceUserSpoke = false
   /**
    * 进出两个采样率**可能不一样** —— 豆包收 16k、出 24k。
    * 用一个数糊过去的话，要么模型听到变调的快放、要么用户听到变调的慢放，
@@ -1330,10 +1354,21 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
         if (event.final) {
           // 用户说完了，接下来的音频属于**新一轮**，不能再丢
           setDiscardingAudio(false)
-          await commitAssistantTurn()
-          if (eventGeneration !== generation) return
-          assistantText.value = ''
-          assistantTurnCommitted = false
+          /*
+           * 收掉上一轮的字幕 —— **但只在模型还没开口回这一句的时候**。
+           *
+           * 识别不一定比回答先到（见 `assistantRepliedSinceUserSpoke`）。已经在回了
+           * 还收，收掉的就是这一轮回答的前半句：一句整话被劈成两条气泡。
+           *
+           * 兜底的那道在 `turn-done`（一轮真说完了才收，见那边）。这里只是
+           * 「上一轮的 `turn-done` 没来」时的补收 —— 漏掉一次不会让字幕丢。
+           */
+          if (!assistantRepliedSinceUserSpoke) {
+            await commitAssistantTurn()
+            if (eventGeneration !== generation) return
+            assistantText.value = ''
+            assistantTurnCommitted = false
+          }
           const text = event.text.trim()
           // 有问题挂着的话，这句就是候选答案；这一轮模型调没调工具从头数
           toolCalledThisTurn = false
@@ -1346,6 +1381,8 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
           assistantText.value = ''
           assistantTurnCommitted = false
         }
+        // 它开口回这一句了。之后才到的识别结果不准再把这半句当上一轮收掉
+        assistantRepliedSinceUserSpoke = true
         assistantText.value += event.text
         reportFloor(false, true)
         options.onAssistantText?.(assistantText.value)
@@ -1391,7 +1428,23 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
         hangUpWhenDoneSpeaking = false
         // 打断意味着用户开口了。模型那半句已经作废，不能再算它在说话
         reportFloor(true, false)
-        await commitAssistantTurn()
+        /*
+         * **这里不收字幕。**
+         *
+         * 服务端一听见有人开口就发这条，而「有人开口」判错的代价全落在这一行上：
+         * 外放时模型自己的头两个字被麦克风收回去就足以触发它。收掉的话，那半句
+         * 当场变成一条独立消息，而同一轮的后半句接着流进来、另起一条气泡 ——
+         * 一句整话被从词中间劈开（真机 2026-09-22：「好，我」「听到了。你可以…」、
+         * 「那就轻」「松一点来吧。」，中间还各夹一条空的用户气泡）。
+         *
+         * 真正该收的时机是 `turn-done`，两种情况它都到得了：服务端真的把这一轮
+         * 取消了，`response.done` 照样发；没取消（这次就是），那更该让后半句
+         * 接着写进同一条气泡。**晚收没有代价，早收不可逆。**
+         *
+         * 清零的是「它已经在回这一句了吗」—— 用户重新开口，这之后到的增量
+         * 才算在回这一句。判断插字幕位置的就是它（见 `assistantRepliedSinceUserSpoke`）。
+         */
+        assistantRepliedSinceUserSpoke = false
         break
       }
       /*
@@ -1428,6 +1481,8 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
          */
         reportFloor(false, pendingToolCalls > 0 || localUtterance !== null || scheduled.length > 0)
         await commitAssistantTurn()
+        // 这一轮说完了。之后再到的增量是**下一轮**的，不再算「已经在回用户那句」
+        assistantRepliedSinceUserSpoke = false
         // 模型这一轮只动了嘴没调工具，而用户刚才那句是在答 Agent 的问题 —— 我们替它交
         if (eventGeneration === generation) await forwardPendingAnswer()
         // 告别是这一轮说的。喇叭里还排着东西就等 `play` 的 onended 再挂
@@ -1585,6 +1640,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
     phase.value = 'connecting'
     const currentGeneration = ++generation
     assistantTurnCommitted = false
+    assistantRepliedSinceUserSpoke = false
     connectionTimer = setTimeout(() => {
       if (generation !== currentGeneration) return
       error.value = options.connectionTimeoutMessage || 'Voice connection timed out. Please retry.'
@@ -1645,7 +1701,8 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
       if (generation !== currentGeneration) return
 
       const session = await window.api.realtimeVoice.start({
-        history: options.getHistory?.() || []
+        history: options.getHistory?.() || [],
+        echoGuard: options.echoGuard?.()
       })
       if (generation !== currentGeneration) return
       if (!session.ok) {
@@ -1818,6 +1875,8 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
     userText.value = normalized
     assistantText.value = ''
     assistantTurnCommitted = false
+    // 键入也是新的一轮：这之后到的助手增量是在回这一句
+    assistantRepliedSinceUserSpoke = false
     phase.value = 'thinking'
     options.onUserText?.(normalized)
     window.api.realtimeVoice.sendText(normalized)

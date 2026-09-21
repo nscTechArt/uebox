@@ -1,4 +1,8 @@
 import WebSocket from 'ws'
+import {
+  normalizeRealtimeEchoGuard,
+  type RealtimeEchoGuard
+} from '../../../shared/realtimeEchoGuard'
 import type {
   AudioSpec,
   RealtimeConversationMessage,
@@ -63,12 +67,35 @@ const DEFAULT_BASE_URL = 'wss://api.openai.com/v1/realtime'
 export const OPENAI_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe'
 
 /**
+ * 三档回声门限各自发什么。
+ *
+ * 档位的含义和「为什么是三档」在 `shared/realtimeEchoGuard.ts`，这里只管数值。
+ *
+ * - `threshold`：服务端 VAD 的判开口门限，默认 0.5。本地 AEC 压不干净的那点残留
+ *   正好顶得过 0.5 —— 外放的桌面上把它抬到 0.65 是这一整项改动的主要作用。
+ *   再高的代价是用户小声说话时要多说半个字才被听见，所以不做成「越高越好」。
+ * - `noise_reduction`：服务端在 VAD 和转写**之前**做的降噪。`far_field` 就是为
+ *   「音箱外放、麦克风离嘴远」这个场景调的，`near_field` 给耳机和领夹麦。
+ *   不给这个字段则整个降噪都不开 —— 之前就是这样。
+ *
+ * @see https://developers.openai.com/api/docs/guides/realtime-vad
+ */
+export const OPENAI_ECHO_GUARD_TUNING: Record<
+  RealtimeEchoGuard,
+  { threshold: number; noiseReduction: 'near_field' | 'far_field' }
+> = {
+  headset: { threshold: 0.5, noiseReduction: 'near_field' },
+  speaker: { threshold: 0.65, noiseReduction: 'far_field' },
+  strong: { threshold: 0.8, noiseReduction: 'far_field' }
+
+/**
  * 首帧单独构造，**为的是能在没有真实 WebSocket 的单测里检查必填字段**。
  *
  * 这一层的故障全都是安静的：字段错了照样连得上、不报错，只是某一类信息永远不出现。
  * 只有把首帧钉在测试里才发现得了。
  */
 export function buildOpenAiSessionUpdate(config: RealtimeSessionConfig): Record<string, unknown> {
+  const echoGuard = OPENAI_ECHO_GUARD_TUNING[normalizeRealtimeEchoGuard(config.echoGuard)]
   return {
     /*
      * GA 版的字段位置和 beta 不一样：会话类型要显式给 `type: 'realtime'`，
@@ -84,9 +111,15 @@ export function buildOpenAiSessionUpdate(config: RealtimeSessionConfig): Record<
           format: { type: 'audio/pcm', rate: OPENAI_AUDIO.inputSampleRate },
           // 选填但**必须给**，理由见 OPENAI_TRANSCRIPTION_MODEL
           transcription: { model: OPENAI_TRANSCRIPTION_MODEL },
+          // 服务端在判停和转写之前先降一道噪。不给这个字段整个降噪都不开
+          noise_reduction: { type: echoGuard.noiseReduction },
           // 交给服务端判停。自己做 VAD 要处理静音阈值、尾音、抢话，
-          // 而这一家的服务端 VAD 本来就带打断（用户一开口就掐掉正在播的回答）
-          turn_detection: { type: 'server_vad' }
+          // 而这一家的服务端 VAD 本来就带打断（用户一开口就掐掉正在播的回答）。
+          //
+          // 门限**必须显式给**：默认的 0.5 顶得过本地 AEC 压不干净的那点回声残留，
+          // 于是模型自己的尾音被转写成一句「用户发言」，它开始回应自己
+          // （见 OPENAI_ECHO_GUARD_TUNING）
+          turn_detection: { type: 'server_vad', threshold: echoGuard.threshold }
         },
         output: {
           format: { type: 'audio/pcm', rate: OPENAI_AUDIO.outputSampleRate },

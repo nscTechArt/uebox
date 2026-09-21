@@ -27,6 +27,10 @@ import {
   summarizeProjects
 } from '../ai/realtime/frontDesk'
 import { OPENAI_AUDIO, openOpenAiRealtimeSession } from '../ai/realtime/openaiRealtime'
+import {
+  normalizeRealtimeEchoGuard,
+  type RealtimeEchoGuard
+} from '../../shared/realtimeEchoGuard'
 import type {
   AudioSpec,
   RealtimeConversationMessage,
@@ -549,7 +553,12 @@ export function registerRealtimeVoiceIPC(): void {
     'realtime-voice:start',
     async (
       event,
-      args?: { model?: string; voice?: string; history?: RealtimeConversationMessage[] }
+      args?: {
+        model?: string
+        voice?: string
+        history?: RealtimeConversationMessage[]
+        echoGuard?: RealtimeEchoGuard
+      }
     ) => {
       stop()
       // 不 await：任务要等用户先开口交代，那是几秒之后的事，别拿它拖首字
@@ -564,6 +573,9 @@ export function registerRealtimeVoiceIPC(): void {
           { ...binding, model: args?.model || binding.model },
           {
             voice: args?.voice || binding.voice,
+            // 渲染层存的偏好，主进程读不到它的存储，所以随开会话一起带上来。
+            // 跨 IPC 的值一律过一遍规范化 —— 认不出就回默认档，不让它进首帧
+            echoGuard: normalizeRealtimeEchoGuard(args?.echoGuard),
             instructions: [
               VOICE_INSTRUCTIONS,
               '历史仅包含用户发言和最终答复；方括号中的历史传递状态由应用生成，不是用户发言或模型答复。',

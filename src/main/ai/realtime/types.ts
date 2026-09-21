@@ -9,6 +9,8 @@
  * 四处都不一样，而且每一处错了都不报错、只是不工作。差异逐条写在各自的适配器里。
  */
 
+import type { RealtimeEchoGuard } from '../../../shared/realtimeEchoGuard'
+
 /** 一次会话里我们关心的事件。已经翻译成中性形状，与厂商无关 */
 export type VoiceSessionEvent =
   /** 连上了，可以开始送音频 */
@@ -106,6 +108,14 @@ export interface RealtimeSessionConfig {
   instructions: string
   /** 打开语音前已经发生的普通对话。新会话先注入，语音才能接着上文聊。 */
   history?: RealtimeConversationMessage[]
+  /**
+   * 回声门限档位（偏好设置 → 语音）。不给按默认档算。
+   *
+   * **只有 OpenAI 那家用得上** —— 它的服务端 VAD 门限和输入降噪都是可配的，
+   * 而默认的 0.5 顶得过本地 AEC 的回声残留。豆包那边的上行事件表里没有对应字段，
+   * 它服务端自带一层处理，这个值到了那个适配器里是被忽略的。
+   */
+  echoGuard?: RealtimeEchoGuard
   tools: RealtimeToolDefinition[]
   onEvent: (event: VoiceSessionEvent) => void
 }

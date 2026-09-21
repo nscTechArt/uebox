@@ -8,6 +8,23 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 beforeEach(() => setActivePinia(createPinia()))
 
+describe('回声门限', () => {
+  /**
+   * 默认必须是「外放」而不是最灵敏那档：桌面端绝大多数是外放，
+   * 而门限偏低的代价是模型把自己的尾音当成用户在说话，开始跟自己对话。
+   */
+  it('默认外放，选了就存下来', async () => {
+    const store = useAIConfigStore()
+    const wrapper = mount(ProfileVoice, { global: { mocks: { $t: (key: string) => key } } })
+    expect(store.voiceEchoGuard).toBe('speaker')
+    const segmented = wrapper.get('[aria-label="profile.voice.echoGuard"]')
+    expect(segmented.text()).toContain('profile.voice.echoGuardStrong')
+    await segmented.findAll('button')[2].trigger('click')
+    expect(store.voiceEchoGuard).toBe('strong')
+    wrapper.unmount()
+  })
+})
+
 describe('独立的语音自动结束设置', () => {
   it('语音和语音助手分组，自动播放默认关闭并独立保存', async () => {
     const store = useAIConfigStore()

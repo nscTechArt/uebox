@@ -323,6 +323,27 @@ export const useChatMessagesStore = defineStore(
     }
 
     /**
+     * 插一条用户消息到某条已有消息**前面**。
+     *
+     * 只给实时语音用，解决的是一件别处不会发生的事：那边「用户说了什么」和
+     * 「模型回了什么」是两条独立的管线，识别结果常常比回答的头几批文字晚到。
+     * 按到达顺序追加的话，模型回答的前半句会排在用户那句上面。
+     *
+     * 认不出那条锚（已经落定、或者根本不在这条会话里）就退回追加 ——
+     * 位置不完美总好过消息直接丢了。
+     */
+    function insertUserBefore(sid: string, beforeId: string, content: ChatMessageContent): string {
+      ensureContainer(sid)
+      const id = `${Date.now()}-u-${Math.random().toString(16).slice(2)}`
+      const message: ChatMessage = { id, role: 'user', content, status: 'done' }
+      const arr = messagesBySid.value[sid]
+      const at = arr.findIndex((item) => item.id === beforeId)
+      if (at < 0) arr.push(message)
+      else arr.splice(at, 0, message)
+      return id
+    }
+
+    /**
      * 直接推入一条完成的助手消息
      * @param sid 会话ID
      * @param content 文本内容
@@ -846,6 +867,7 @@ export const useChatMessagesStore = defineStore(
       getMessages,
       ensureContainer,
       pushUser,
+      insertUserBefore,
       pushAssistantTyping,
       pushAssistant,
       replaceTyping,

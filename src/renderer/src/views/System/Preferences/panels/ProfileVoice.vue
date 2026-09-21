@@ -10,6 +10,10 @@ import AppSwitch from '@renderer/components/AppSwitch.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
+import {
+  REALTIME_ECHO_GUARDS,
+  type RealtimeEchoGuard
+} from '@core/shared/realtimeEchoGuard'
 
 const aiConfigStore = useAIConfigStore()
 const { t } = useI18n()
@@ -36,6 +40,38 @@ const microphoneOptions = computed(() => {
   }
   return options
 })
+
+/**
+ * 回声门限。管的是**厂商那一侧**判停有多灵敏 —— 本地的回声消除一直开着，
+ * 但它压不到零，残留顶过服务端 VAD 的门限时，模型会把自己的尾音当成用户在说话
+ * （对话里凭空多出没说过的话）。档位含义见 `shared/realtimeEchoGuard.ts`。
+ */
+const echoGuard = computed({
+  get: () => aiConfigStore.voiceEchoGuard,
+  set: (guard: RealtimeEchoGuard) => aiConfigStore.setVoiceEchoGuard(guard)
+})
+
+/** 同 feedbackLevelLabel：查表而不是拼 key，缺 key 才在门禁里当场暴露 */
+function echoGuardLabel(guard: RealtimeEchoGuard): string {
+  return t(
+    {
+      headset: 'profile.voice.echoGuardHeadset',
+      speaker: 'profile.voice.echoGuardSpeaker',
+      strong: 'profile.voice.echoGuardStrong'
+    }[guard]
+  )
+}
+
+/** 当前档位下那行小字。三个词本身说不清「灵敏一点」到底换来什么 */
+const echoGuardHint = computed(() =>
+  t(
+    {
+      headset: 'profile.voice.echoGuardHeadsetHint',
+      speaker: 'profile.voice.echoGuardSpeakerHint',
+      strong: 'profile.voice.echoGuardStrongHint'
+    }[echoGuard.value]
+  )
+)
 
 type VoiceFeedbackLevel = 'concise' | 'detailed'
 const FEEDBACK_LEVELS: readonly VoiceFeedbackLevel[] = ['concise', 'detailed']
@@ -95,6 +131,22 @@ const feedbackHint = computed(() =>
             :aria-label="$t('profile.voice.microphone')"
             @dropdown-visible-change="refresh"
           />
+        </div>
+        <div class="setting-item">
+          <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.voice.echoGuard') }}</div>
+            <div class="setting-desc">{{ echoGuardHint }}</div>
+          </div>
+          <!-- @vue-generic {RealtimeEchoGuard} -->
+          <AppSegmented
+            v-model="echoGuard"
+            :options="REALTIME_ECHO_GUARDS"
+            :aria-label="$t('profile.voice.echoGuard')"
+          >
+            <template #default="{ option: guard }">
+              {{ echoGuardLabel(guard) }}
+            </template>
+          </AppSegmented>
         </div>
       </div>
     </section>

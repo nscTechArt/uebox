@@ -185,6 +185,30 @@ describe('voiceAssistant', () => {
     expect(useChatSessionsStore().sessionById('call-1')).toBeTruthy()
   })
 
+  /*
+   * 识别结果比回答晚到时，顺序和完整性都不能塌。
+   *
+   * 真机 2026-09-22：一句整话被劈成两条气泡，中间还夹着用户那句 ——
+   * 「你好呀！很高兴」「嗨,你好」「听到你的声音。…」。
+   */
+  it('识别比回答晚到时，用户那句插到回答前面，回答不被劈成两条', async () => {
+    const opts = options()
+    const chatMsgStore = useChatMessagesStore()
+    await startVoiceIn('call-1')
+
+    // 模型先开口（转写还在路上）
+    opts.onAssistantText?.('你好呀！很高兴')
+    // 这会儿识别才到
+    opts.onUserText?.('嗨,你好')
+    opts.onAssistantText?.('你好呀！很高兴听到你的声音。')
+    await opts.onAssistantDone?.('你好呀！很高兴听到你的声音。')
+
+    expect(chatMsgStore.getMessages('call-1').map((item) => [item.role, item.content])).toEqual([
+      ['user', '嗨,你好'],
+      ['assistant', '你好呀！很高兴听到你的声音。']
+    ])
+  })
+
   // 侧边栏排出一列一模一样的「AI会话」的话，用户分不出哪条通话是哪条
   it('用户的第一句话给这条新对话起名', async () => {
     const opts = options()

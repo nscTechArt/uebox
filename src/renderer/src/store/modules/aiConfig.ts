@@ -1,4 +1,9 @@
 import { MINI_CHAT_SETTINGS_ENABLED } from '../../../../shared/miniChatPreferences'
+import {
+  DEFAULT_REALTIME_ECHO_GUARD,
+  normalizeRealtimeEchoGuard,
+  type RealtimeEchoGuard
+} from '../../../../shared/realtimeEchoGuard'
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { usePersistOptions } from '../../hooks/usePersistOptions'
@@ -201,6 +206,8 @@ export interface AIConfigState {
   voiceMicrophoneDeviceId?: string
   voiceAutoPlayEnabled?: boolean
   voiceAutoHangupEnabled?: boolean
+  // 回声门限档位（默认「外放」）。含义见 shared/realtimeEchoGuard.ts
+  voiceEchoGuard?: RealtimeEchoGuard
 
   // 自定义 Provider BYOK（自带 Key，本地存储）
   openAICompatibleByok?: CustomProviderByokConfig
@@ -547,6 +554,16 @@ export const useAIConfigStore = defineStore(
     }
 
     /**
+     * 回声门限档位。旧配置里没有这个字段，一律按默认档（外放）读 ——
+     * 那也正是这一项要修的那个场景。
+     */
+    const voiceEchoGuard = computed(() => normalizeRealtimeEchoGuard(config.value.voiceEchoGuard))
+
+    function setVoiceEchoGuard(guard: RealtimeEchoGuard): void {
+      config.value.voiceEchoGuard = normalizeRealtimeEchoGuard(guard)
+    }
+
+    /**
      * MiniChat 窗口透明度（默认 1.0）
      */
     const miniChatOpacity = computed(() => {
@@ -695,6 +712,7 @@ export const useAIConfigStore = defineStore(
         voiceAntiSilenceEnabled: true,
         voiceAutoHangupEnabled: true,
         voiceMicrophoneDeviceId: '',
+        voiceEchoGuard: DEFAULT_REALTIME_ECHO_GUARD,
         openAICompatibleByok: {
           enabled: false,
           mode: 'openai-compatible',
@@ -823,6 +841,8 @@ export const useAIConfigStore = defineStore(
       voiceAutoHangupEnabled,
       voiceMicrophoneDeviceId,
       voiceAutoPlayEnabled,
+      voiceEchoGuard,
+      setVoiceEchoGuard,
       setVoiceAutoPlayEnabled,
       setVoiceMicrophoneDeviceId,
       setVoiceAutoHangupEnabled,
