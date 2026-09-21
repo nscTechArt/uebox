@@ -171,6 +171,44 @@ describe('出片体检', () => {
     expect(text).toContain('黑画面')
   })
 
+  // 重叠原来在 C++ 侧算了又丢掉，describe 在结构上永远报不出来，
+  // 只有 sequence_audit 报得出 —— 同一条序列两个工具两种说法
+  it('切轨重叠要报出来，并说清渲哪台相机是不确定的', async () => {
+    const text = await run({
+      camera_cuts: {
+        exists: true,
+        section_count: 2,
+        covers_playback: true,
+        overlaps: [[250, 300]]
+      }
+    })
+    expect(text).toContain('250–300')
+    expect(text).toContain('不确定')
+  })
+
+  // 「判不出来」不能印成「没盖满」—— 那会让用户去修一个可能没坏的东西
+  it('判不出覆盖时如实说判不出来，不说成没盖满', async () => {
+    const text = await run({
+      camera_cuts: {
+        exists: true,
+        section_count: 2,
+        covers_playback: false,
+        coverage_known: false,
+        coverage_unknown_reason: '有 1 个切轨段的时间范围有一头是无界的，算不出它盖到哪里'
+      }
+    })
+    expect(text).toContain('判不出')
+    expect(text).toContain('无界')
+    expect(text).not.toContain('没有覆盖完整播放范围')
+  })
+
+  it('老引擎不回传 coverage_known 时按判得出来处理', async () => {
+    const text = await run({
+      camera_cuts: { exists: true, section_count: 1, covers_playback: true }
+    })
+    expect(text).toContain('✅ 相机切轨覆盖了完整播放范围')
+  })
+
   it('「判不出来」和「已失效」必须分开说', async () => {
     // 混为一谈会让用户去修一个根本没坏的东西
     const text = await run({ unresolved_bindings: ['Hero'], broken_bindings: [] })

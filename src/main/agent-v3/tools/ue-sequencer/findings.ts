@@ -80,6 +80,13 @@ const EXPLANATIONS: Record<string, Explanation> = {
     why: '没被覆盖的那些帧没有相机，渲出来是黑的',
     how: '拖动 Camera Cuts 段的两端，盖满整个 playback range'
   },
+  camera_cut_coverage_unknown: {
+    what: '这次判不出相机切轨有没有盖满播放范围',
+    why:
+      '切轨上有段的时间范围是无界的（一头没有边），它到底盖到哪里算不出来；' +
+      '或者播放范围本身是空的。**这不代表切轨坏了**，只是这次没查成',
+    how: '在 Sequencer 里把那些段的两端拖出明确的边界，或者把播放范围拉出长度，然后再查一次'
+  },
   camera_cut_overlap: {
     what: '相机切轨的段互相重叠',
     why: '重叠区间渲哪台相机是不确定的，同一份序列在不同机器上可能出不同结果',

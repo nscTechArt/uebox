@@ -26,6 +26,8 @@ const OK = {
   range: [0, 240],
   replaced_keys: 0,
   camera_cut_bound: true,
+  kept_existing_cuts: false,
+  removed_cut_sections: 0,
   level_saved: true,
   warnings: []
 }
@@ -189,5 +191,87 @@ describe('返回给用户的话', () => {
 describe('输入校验', () => {
   it('少于两个关键帧直接拒绝 —— 一个键构不成运动', async () => {
     await expect(call({ keys: [KEYS[0]] })).rejects.toThrow()
+  })
+
+  /**
+   * 引擎的 AddLinearKey / AddCubicKey / AddConstantKey 底下都是
+   * `InsertKeyInternal`，它只做 `Algo::UpperBound` + `Insert`，**不去重**
+   * （`MovieSceneCurveChannelImpl.cpp`）。同帧两个键会两个都留下，
+   * 切线按零时间差算，求值取哪个不定 —— 而且没有任何报错。
+   */
+  it('同一帧给两个键必须在发出去之前拒掉', async () => {
+    await expect(call({ keys: [KEYS[0], { ...KEYS[1], frame: 0 }, KEYS[2]] })).rejects.toThrow(
+      /第 0 帧/
+    )
+
+    expect(mockUe).not.toHaveBeenCalled()
+  })
+
+  it('拒绝时要说清怎么改，而不只是说不行', async () => {
+    await expect(call({ keys: [KEYS[0], { ...KEYS[1], frame: 0 }] })).rejects.toThrow(
+      /每帧只给一个键/
+    )
+  })
+
+  it('乱序但不重复的帧照常放行', async () => {
+    mockUe.mockResolvedValueOnce(OK)
+    await expect(call({ keys: [KEYS[2], KEYS[0], KEYS[1]] })).resolves.toBeDefined()
+    expect(mockUe).toHaveBeenCalled()
+  })
+})
+
+/**
+ * 切轨上已有的段不默认删。
+ *
+ * 用户要的是「给这台相机打一串关键帧」，不是「把我排好的多机位剪辑抹掉」。
+ * 见 `red-lines.md` 第 1、3 条。
+ */
+describe('rebuild_camera_cuts 开关', () => {
+  it('默认不带，等于不许删', async () => {
+    mockUe.mockResolvedValueOnce(OK)
+    await call()
+    expect(mockUe.mock.calls.at(-1)![1]).toMatchObject({ rebuild_camera_cuts: false })
+  })
+
+  it('有意没动已有切轨时，不能说成「没建成」', async () => {
+    // 两件事的下一步完全不一样：一个要用户去排剪辑，一个要重试
+    mockUe.mockResolvedValueOnce({
+      ...OK,
+      camera_cut_bound: false,
+      kept_existing_cuts: true
+    })
+    const text = textOf(await call())
+
+    expect(text).toContain('已有的段没有动')
+    expect(text).not.toContain('渲出来是黑的')
+  })
+
+  it('真的没建成时照旧警告会黑屏', async () => {
+    mockUe.mockResolvedValueOnce({ ...OK, camera_cut_bound: false })
+    expect(textOf(await call())).toContain('渲出来是黑的')
+  })
+
+  it('删掉了切轨段要报数并说清撤不回来', async () => {
+    mockUe.mockResolvedValueOnce({ ...OK, removed_cut_sections: 2 })
+    const text = textOf(await call({ rebuild_camera_cuts: true }))
+
+    expect(text).toContain('2 个切轨段已被删除')
+    expect(text).toContain('撤不回来')
+  })
+})
+
+describe('关卡存盘如实上报', () => {
+  it('复用已有相机时不说「关卡已保存」—— 根本没动过关卡', async () => {
+    // 说成已保存，用户会以为关卡里别的未保存改动也落盘了
+    mockUe.mockResolvedValueOnce({ ...OK, camera_created: false, level_saved: true })
+    const text = textOf(await call())
+
+    expect(text).toContain('没有改动关卡')
+    expect(text).not.toContain('关卡已保存')
+  })
+
+  it('新建相机且存盘失败时明说未保存', async () => {
+    mockUe.mockResolvedValueOnce({ ...OK, camera_created: true, level_saved: false })
+    expect(textOf(await call())).toContain('**未**保存')
   })
 })

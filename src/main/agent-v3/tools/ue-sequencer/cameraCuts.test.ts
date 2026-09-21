@@ -17,6 +17,7 @@ const OK = {
   range: [0, 240],
   already_covered: false,
   binding_broken: false,
+  removed_sections: 0,
   warnings: []
 }
 
@@ -128,5 +129,42 @@ describe('返回给用户的话', () => {
   it('引擎回了空结果时报错，不谎报成功', async () => {
     mockUe.mockResolvedValueOnce({})
     await expect(call()).rejects.toThrow()
+  })
+})
+
+/**
+ * 删除是撤不回来的，所以默认不删。
+ *
+ * 这个工具「补全」的做法是把切轨上已有的段全删了换成一整段。之前它无条件这么干：
+ * 一条排好的三机位序列只要有一帧对不齐，调一次就只剩一台相机，而且没有事务、
+ * 存盘即成事实。`red-lines.md` 第 1、3 条写着「只报告不动手」「删除永远由用户发起」。
+ */
+describe('rebuild 开关', () => {
+  it('默认不带 rebuild，等于不许删', async () => {
+    const [, payload] = await callArgs()
+    expect(payload.rebuild).toBe(false)
+  })
+
+  it('点名了才传 true', async () => {
+    const [, payload] = await callArgs({ rebuild: true })
+    expect(payload.rebuild).toBe(true)
+  })
+
+  it('删掉了用户的段必须报数，并说清撤不回来', async () => {
+    mockUe.mockResolvedValueOnce({ ...OK, removed_sections: 3 })
+    const text = textOf(await call({ rebuild: true }))
+
+    expect(text).toContain('3 个切轨段已被删除')
+    expect(text).toContain('撤不回来')
+  })
+
+  it('什么都没删时不提删除，别制造不存在的疑虑', async () => {
+    mockUe.mockResolvedValueOnce(OK)
+    expect(textOf(await call())).not.toContain('已被删除')
+  })
+
+  it('描述里写明它会删、以及怎么才会删', () => {
+    expect(tool.description).toContain('全删掉')
+    expect(tool.description).toContain('rebuild')
   })
 })

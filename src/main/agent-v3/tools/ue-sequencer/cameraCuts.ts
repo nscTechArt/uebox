@@ -47,6 +47,14 @@ const InputSchema = z.object({
     .describe(
       '切到哪台相机 —— 填序列里那条绑定的名字（Sequencer 左侧显示的名字）。' +
         '序列里只有一条相机绑定时可以不填，会自动选它'
+    ),
+  rebuild: z
+    .boolean()
+    .default(false)
+    .describe(
+      '切轨上已经有段但没盖满时，允许**把已有的段全删掉**重建成一整段。' +
+        '默认关闭：那些段可能是排好的多机位剪辑，删了撤不回来。' +
+        '开之前先用 sequence_audit 看清楚差在哪里，并跟用户确认'
     )
 })
 
@@ -75,6 +83,8 @@ interface CameraCutsOutput {
   already_covered: boolean
   /** 绑定解析不到对象 —— 补了切轨也还是黑的，必须先手动重绑 */
   binding_broken: boolean
+  /** 这次删掉了几个用户原有的切轨段。只有 rebuild=true 时才可能非 0 */
+  removed_sections: number
   candidates?: string[]
   warnings?: string[]
 }
@@ -95,6 +105,11 @@ export function createSequenceCameraCutsTool(): UnrealAgentTool<CameraCutsOutput
 【它做什么】
 找到序列里的相机绑定（只有一台时自动选，多台要你用 camera_label 点名），
 建一条盖满播放范围的切轨段并绑上去，然后存盘。已经盖满了就什么都不改。
+
+【切轨上已经有段时会拒绝】
+它补全的做法是**把已有的段全删掉**换成一整段。所以切轨上已经有内容却没盖满时，
+它直接报错不动手 —— 那些段可能是别人排好的多机位剪辑。
+确认要删就带 \`rebuild: true\`，删了几个会在返回里报出来。删除撤不回来，先问用户。
 
 【它不做什么】
 不做 possessable 的重新绑定 —— 自动重绑有「该绑到哪一个」的歧义，还没做。
@@ -117,6 +132,14 @@ export function createSequenceCameraCutsTool(): UnrealAgentTool<CameraCutsOutput
             `已给 ${d.sequence_path} 补上相机切轨：`,
             `切到「${d.camera_binding}」，覆盖 [${d.range[0]}, ${d.range[1]})，序列已存盘。`
           ]
+
+      // 删了用户的东西要说在前面，而且要说清楚撤不回来
+      if (d.removed_sections > 0) {
+        lines.push(
+          `⚠️ 原有的 ${d.removed_sections} 个切轨段已被删除并替换。` +
+            `序列已存盘，这一步撤不回来。`
+        )
+      }
 
       // 绑定是坏的时候，上面那句「已补上」会误导人 —— 必须立刻跟上真相
       if (d.binding_broken) lines.push('', ...REBIND_STEPS)

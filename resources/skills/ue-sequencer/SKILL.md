@@ -55,9 +55,16 @@ description: Author any camera move in a Level Sequence by writing keyframes the
 
 **别把一串关键帧数值列给用户、让他自己去 Sequencer 里打** —— 你有工具。
 
-**`sequence_camera_cuts(sequence_path, camera_label?)`** —— 给已有序列补相机切轨。
+**`sequence_camera_cuts(sequence_path, camera_label?, rebuild?)`** —— 给已有序列补相机切轨。
 `audit` 报「没有切轨」「切轨没盖满」时用它；`sequence_camera_keys` 的切轨那步失败时
 也用它接上。已经盖满就什么都不改。
+
+**它补全的做法是把切轨上已有的段全删掉、换成一整段。** 所以切轨上已经有内容却没盖满时，
+它直接报错不动手 —— 那些段可能是别人排好的多机位剪辑，一帧对不齐就被抹成单机位，
+而且撤不回来。确认要删才带 `rebuild: true`，删之前先拿 `audit` 的结果跟用户说清楚差在哪。
+
+`sequence_camera_keys` 同理：切轨上已有段时它**不动**，关键帧照写，要重建得带
+`rebuild_camera_cuts: true`。
 
 ### 算轨迹时，这几件是引擎的事，不是审美
 
@@ -65,6 +72,8 @@ description: Author any camera move in a Level Sequence by writing keyframes the
 - **匀速运动配 `cubic` 会过冲**（忽快忽慢），用 `linear`；要缓入缓出才用 `cubic`
 - **等角度采样的圆天然匀速**，不需要弧长重参数化；沿样条走才需要
 - **播放范围是闭开区间 `[0, end)`，末帧不渲染。** 要无缝循环就别在末帧打重复的键
+- **同一帧只能给一个键。** 引擎打键不去重（`InsertKeyInternal` 只做插入），同帧两个键
+  会两个都留下，切线按零时间差算，求值取哪个不定。要让镜头停一拍，用两个相邻帧的相同数值
 - 新建的 CineCamera 会自动关掉景深（引擎默认对焦 100cm，主体在 5 米外就是糊的）
 
 ### 覆盖已有曲线：可以，但要说

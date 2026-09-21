@@ -106,8 +106,19 @@ interface DescribeOutput {
     exists: boolean
     section_count: number
     covers_playback: boolean
+    /**
+     * 覆盖情况判得出来吗。
+     *
+     * false 时 `covers_playback` 和 `gaps` 都不可信（引擎侧已经清空）——
+     * **不要把空的 gaps 读成「没有空隙」**。切轨上有无界的段、或者播放范围
+     * 本身是空的，都会走到这里。老版本引擎回传里没有这个字段，按 true 处理
+     */
+    coverage_known?: boolean
+    coverage_unknown_reason?: string
     /** 段与段之间的空隙 `[前一段末帧, 后一段首帧)`。哪怕一帧，那一帧就没有相机 */
     gaps?: Array<[number, number]>
+    /** 段与段的重叠。重叠区间渲哪台相机是不确定的 */
+    overlaps?: Array<[number, number]>
   }
   broken_bindings: string[]
   /**
@@ -149,10 +160,19 @@ function readinessLines(data: DescribeOutput, filtered: boolean): string[] {
   const lines: string[] = []
   const { camera_cuts: cuts, broken_bindings: broken } = data
 
+  // 老引擎不回传 coverage_known，按「判得出来」处理
+  const coverageKnown = cuts.coverage_known !== false
+
   if (!cuts.exists) {
     lines.push('- ❌ 没有相机切轨（Camera Cuts）。这样渲染出来会是黑画面。')
   } else if (cuts.section_count === 0) {
     lines.push('- ❌ 相机切轨是空的。这样渲染出来会是黑画面。')
+  } else if (!coverageKnown) {
+    // 「判不出来」不能印成 ⚠️ 没盖满 —— 那会让用户去修一个可能没坏的东西
+    lines.push(
+      `- ℹ️ 这次**判不出**相机切轨有没有盖满播放范围：${cuts.coverage_unknown_reason ?? '原因不明'}。` +
+        '这不代表切轨坏了，只是这次没查成。'
+    )
   } else if (!cuts.covers_playback) {
     lines.push('- ⚠️ 相机切轨没有覆盖完整播放范围，没被覆盖的那段会是黑画面。')
   } else {
@@ -162,6 +182,15 @@ function readinessLines(data: DescribeOutput, filtered: boolean): string[] {
   // 空隙单独报：肉眼在时间线上看不出来，但每个空隙就是渲出来的一段黑帧
   for (const [from, to] of cuts.gaps ?? []) {
     lines.push(`- ❌ 相机切轨在第 ${from}–${to} 帧之间有空隙，这几帧没有相机，会是黑画面。`)
+  }
+
+  // 重叠原来算了又丢，于是这里永远报不出来，只有 sequence_audit 报得出 ——
+  // 同一条序列两个工具两种说法
+  for (const [from, to] of cuts.overlaps ?? []) {
+    lines.push(
+      `- ⚠️ 相机切轨在第 ${from}–${to} 帧之间有重叠，这一段渲哪台相机是不确定的，` +
+        '同一份序列在不同机器上可能出不同结果。'
+    )
   }
 
   if (broken.length > 0) {

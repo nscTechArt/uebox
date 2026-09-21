@@ -93,7 +93,14 @@ const InputSchema = z.object({
   camera_cuts: z
     .boolean()
     .default(true)
-    .describe('顺便建好相机切轨并盖满播放范围。关掉的话渲出来是黑的，除非你另有安排')
+    .describe('顺便建好相机切轨并盖满播放范围。关掉的话渲出来是黑的，除非你另有安排'),
+  rebuild_camera_cuts: z
+    .boolean()
+    .default(false)
+    .describe(
+      '切轨上已经有段时，允许**把它们全删掉**换成这台相机的一整段。' +
+        '默认关闭：那些段可能是排好的多机位剪辑。关着的时候关键帧照写，只是不动切轨'
+    )
 })
 
 interface CameraKeysOutput {
@@ -106,6 +113,10 @@ interface CameraKeysOutput {
   /** 清掉的旧关键帧数量。0 表示这条轨道原本是空的 */
   replaced_keys: number
   camera_cut_bound: boolean
+  /** 切轨上已经有段，这次有意没动它们 */
+  kept_existing_cuts: boolean
+  /** 这次删掉了几个用户原有的切轨段 */
+  removed_cut_sections: number
   level_saved: boolean
   warnings?: string[]
   geometry?: { space: 'world'; length_unit: 'cm'; rotation_unit: 'deg' }
@@ -144,6 +155,25 @@ export function createSequenceCameraKeysTool(): UnrealAgentTool<CameraKeysOutput
     execute: async (input) => {
       // 排序在 TS 侧做：引擎那边按给定顺序打键，乱序会产生错误的插值段
       const sorted = [...input.keys].sort((a, b) => a.frame - b.frame)
+
+      // 同一帧给两个键必须在这里挡掉。引擎的 AddLinearKey / AddCubicKey /
+      // AddConstantKey 底下是 InsertKeyInternal，它只做 UpperBound + Insert，
+      // **不去重** —— 同帧两个键会两个都留下，切线按零时间差算，
+      // 求值取哪个是不定的。做循环时很容易在首尾各打一个同帧的键
+      const duplicates = sorted
+        .map((k, i) => (i > 0 && k.frame === sorted[i - 1].frame ? k.frame : -1))
+        .filter((f) => f >= 0)
+      if (duplicates.length > 0) {
+        const shown = [...new Set(duplicates)].slice(0, 5).join('、')
+        return {
+          text:
+            `失败：第 ${shown} 帧上给了不止一个关键帧。` +
+            `引擎不会去重，两个键都会留下，那条曲线在这一帧的取值是不定的。\n` +
+            `每帧只给一个键再调一次。想让镜头在某一帧停住，用两个相邻帧的相同数值，不要用同帧两个键。`,
+          isError: true
+        }
+      }
+
       const d = await callUe<CameraKeysOutput>(
         'sequence.camera_keys',
         { ...input, keys: sorted },
@@ -157,8 +187,13 @@ export function createSequenceCameraKeysTool(): UnrealAgentTool<CameraKeysOutput
       const lines = [
         '关键帧参照系：world 世界空间；位置 cm，旋转 deg。',
         `${d.sequence_created ? '已新建' : '已写入'} ${d.sequence_path}`,
-        `相机：${d.camera_label}（${d.camera_created ? '新建在关卡里' : '复用关卡里已有的'}，` +
-          `关卡${d.level_saved ? '已保存' : '**未**保存'}）`,
+        // 没新建相机就没动过关卡，说「已保存」是假话 —— 那会让用户以为
+        // 他关卡里别的未保存改动也落盘了
+        `相机：${d.camera_label}（${
+          d.camera_created
+            ? `新建在关卡里，关卡${d.level_saved ? '已保存' : '**未**保存'}`
+            : '复用关卡里已有的，没有改动关卡'
+        }）`,
         `${d.key_count} 个关键帧，播放范围 [${d.range[0]}, ${d.range[1]})`
       ]
 
@@ -166,11 +201,17 @@ export function createSequenceCameraKeysTool(): UnrealAgentTool<CameraKeysOutput
       if (d.replaced_keys > 0) {
         lines.push(`⚠️ 这条轨道原有的 ${d.replaced_keys} 个关键帧已被清掉并替换。`)
       }
+      if (d.removed_cut_sections > 0) {
+        lines.push(`⚠️ 原有的 ${d.removed_cut_sections} 个切轨段已被删除并替换，撤不回来。`)
+      }
 
+      // 「有意没动」不能说成「没建成」—— 下一步该做什么完全不一样
       lines.push(
         d.camera_cut_bound
           ? '相机切轨已建好并盖满播放范围。'
-          : '⚠️ 相机切轨没绑上，现在渲出来是黑的。'
+          : d.kept_existing_cuts
+            ? '切轨上已有的段没有动，所以这台相机还没被切进画面（下面有怎么办）。'
+            : '⚠️ 相机切轨没绑上，现在渲出来是黑的。'
       )
 
       for (const w of d.warnings ?? []) lines.push(`⚠️ ${w}`)

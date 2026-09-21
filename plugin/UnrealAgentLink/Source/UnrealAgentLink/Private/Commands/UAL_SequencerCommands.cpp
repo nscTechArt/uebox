@@ -1,5 +1,6 @@
 #include "UAL_SequencerCommands.h"
 
+#include "UAL_CameraCutCoverage.h"
 #include "UAL_CommandUtils.h"
 #include "UAL_VersionCompat.h"
 
@@ -428,13 +429,43 @@ namespace
 	{
 		bool bExists = false;
 		int32 SectionCount = 0;
-		bool bCoversPlayback = false;
-		/** 段之间的空隙 [前段末, 后段首)。哪怕一帧，那一帧就没有相机 = 黑画面 */
-		TArray<TPair<int32, int32>> Gaps;
-		/** 段之间的重叠。哪个相机生效是未定义的 */
-		TArray<TPair<int32, int32>> Overlaps;
+		UAL_CameraCutCoverage::FCutCoverage Coverage;
 	};
 
+	/**
+	 * 播放范围换算成 display 帧。
+	 *
+	 * 无界的那一头按 0 算，于是范围会变成空的 —— 覆盖判定会把空范围归入
+	 * 「判不出来」而不是「没盖满」。这个区别要命：写入侧照着「没盖满」会去删段。
+	 *
+	 * 引擎自己在 `UMovieScene::UpgradeTimeRanges()`（编辑器每次加载都跑）里，
+	 * 会把损坏或无界的播放范围强制成 `[0, 0)`，所以空范围是真会出现的状态。
+	 */
+	void PlaybackInDisplayFrames(const UMovieScene* MovieScene, int32& OutStart, int32& OutEnd)
+	{
+		OutStart = 0;
+		OutEnd = 0;
+		if (!MovieScene)
+		{
+			return;
+		}
+		const TRange<FFrameNumber> Range = MovieScene->GetPlaybackRange();
+		if (Range.GetLowerBound().IsClosed())
+		{
+			OutStart = TickToDisplay(MovieScene, Range.GetLowerBoundValue());
+		}
+		if (Range.GetUpperBound().IsClosed())
+		{
+			OutEnd = TickToDisplay(MovieScene, Range.GetUpperBoundValue());
+		}
+	}
+
+	/**
+	 * 读切轨的段，把区间算术交给 `UAL_CameraCutCoverage`。
+	 *
+	 * 算术不留在这里，是因为它原来在本文件里有两份手抄本（这里一份、
+	 * `AuditOne` 一份），连同一个 bug 也抄了两份。抽出去之后它能脱离引擎单测。
+	 */
 	FCameraCutInfo InspectCameraCuts(UMovieScene* MovieScene, int32 PlaybackStart, int32 PlaybackEnd)
 	{
 		FCameraCutInfo Info;
@@ -454,7 +485,8 @@ namespace
 		const TArray<UMovieSceneSection*>& Sections = CutTrack->GetAllSections();
 		Info.SectionCount = Sections.Num();
 
-		TArray<TPair<int32, int32>> Ranges;
+		TArray<UAL_CameraCutCoverage::FCutRange> Ranges;
+		int32 Unbounded = 0;
 		for (const UMovieSceneSection* Section : Sections)
 		{
 			bool bHasStart = false, bHasEnd = false;
@@ -462,61 +494,55 @@ namespace
 			SectionRange(Section, MovieScene, bHasStart, Start, bHasEnd, End);
 			if (bHasStart && bHasEnd)
 			{
-				Ranges.Add(TPair<int32, int32>(Start, End));
+				Ranges.Add({ Start, End });
 			}
-		}
-
-		if (Ranges.Num() == 0)
-		{
-			return Info;
-		}
-
-		Ranges.Sort([](const TPair<int32, int32>& A, const TPair<int32, int32>& B)
-		{
-			return A.Key < B.Key;
-		});
-
-		int32 MaxEnd = Ranges[0].Value;
-		for (const TPair<int32, int32>& Range : Ranges)
-		{
-			MaxEnd = FMath::Max(MaxEnd, Range.Value);
-		}
-		Info.bCoversPlayback = Ranges[0].Key <= PlaybackStart && MaxEnd >= PlaybackEnd;
-
-		for (int32 Index = 1; Index < Ranges.Num(); ++Index)
-		{
-			const int32 PrevEnd = Ranges[Index - 1].Value;
-			const int32 CurStart = Ranges[Index].Key;
-			if (CurStart > PrevEnd)
+			else
 			{
-				// 肉眼在时间线上看不出来，但渲出来就是一段黑帧
-				Info.Gaps.Add(TPair<int32, int32>(PrevEnd, CurStart));
-			}
-			else if (CurStart < PrevEnd)
-			{
-				Info.Overlaps.Add(TPair<int32, int32>(CurStart, PrevEnd));
+				// 一头无界的段盖到哪里算不出来。悄悄丢掉它再说「没盖满」，
+				// 等于给写入侧一个删段的理由 —— 记下来，让结论说「不知道」
+				++Unbounded;
 			}
 		}
 
+		Info.Coverage =
+			UAL_CameraCutCoverage::Analyse(MoveTemp(Ranges), PlaybackStart, PlaybackEnd, Unbounded);
 		return Info;
 	}
 
 	TSharedPtr<FJsonObject> MakeCameraCutsJson(const FCameraCutInfo& Info)
 	{
+		const UAL_CameraCutCoverage::FCutCoverage& Coverage = Info.Coverage;
+
 		TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
 		Json->SetBoolField(TEXT("exists"), Info.bExists);
 		Json->SetNumberField(TEXT("section_count"), Info.SectionCount);
-		Json->SetBoolField(TEXT("covers_playback"), Info.bCoversPlayback);
+		Json->SetBoolField(TEXT("covers_playback"), Coverage.bCoversPlayback);
 
-		TArray<TSharedPtr<FJsonValue>> GapArray;
-		for (const TPair<int32, int32>& Gap : Info.Gaps)
+		// 判不出来要单独说。只给 covers_playback=false 的话，模型会把
+		// 「这次没查成」读成「查出来没盖满」，然后去修一个可能没坏的东西
+		Json->SetBoolField(TEXT("coverage_known"), Coverage.bCoverageKnown);
+		if (!Coverage.bCoverageKnown)
 		{
-			TArray<TSharedPtr<FJsonValue>> Pair;
-			Pair.Add(MakeShared<FJsonValueNumber>(Gap.Key));
-			Pair.Add(MakeShared<FJsonValueNumber>(Gap.Value));
-			GapArray.Add(MakeShared<FJsonValueArray>(Pair));
+			Json->SetStringField(TEXT("coverage_unknown_reason"), Coverage.UnknownReason);
 		}
-		Json->SetArrayField(TEXT("gaps"), GapArray);
+
+		auto RangesToJson = [](const TArray<UAL_CameraCutCoverage::FCutRange>& Ranges)
+		{
+			TArray<TSharedPtr<FJsonValue>> Out;
+			for (const UAL_CameraCutCoverage::FCutRange& Range : Ranges)
+			{
+				TArray<TSharedPtr<FJsonValue>> Pair;
+				Pair.Add(MakeShared<FJsonValueNumber>(Range.Start));
+				Pair.Add(MakeShared<FJsonValueNumber>(Range.End));
+				Out.Add(MakeShared<FJsonValueArray>(Pair));
+			}
+			return Out;
+		};
+
+		Json->SetArrayField(TEXT("gaps"), RangesToJson(Coverage.Gaps));
+		// 重叠原来算了又丢掉，于是 describe 在结构上永远报不出重叠，
+		// 只有 audit 报得出 —— 同一条序列，两个工具两种说法
+		Json->SetArrayField(TEXT("overlaps"), RangesToJson(Coverage.Overlaps));
 
 		return Json;
 	}
@@ -626,12 +652,8 @@ void FUAL_SequencerCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payl
 
 	UMovieScene* MovieScene = Sequence->GetMovieScene();
 	const FFrameRate DisplayRate = MovieScene->GetDisplayRate();
-	const TRange<FFrameNumber> PlaybackRange = MovieScene->GetPlaybackRange();
-
-	const int32 PlaybackStart = PlaybackRange.GetLowerBound().IsClosed()
-		? TickToDisplay(MovieScene, PlaybackRange.GetLowerBoundValue()) : 0;
-	const int32 PlaybackEnd = PlaybackRange.GetUpperBound().IsClosed()
-		? TickToDisplay(MovieScene, PlaybackRange.GetUpperBoundValue()) : 0;
+	int32 PlaybackStart = 0, PlaybackEnd = 0;
+	PlaybackInDisplayFrames(MovieScene, PlaybackStart, PlaybackEnd);
 
 	UWorld* World = GetSequencerResolveWorld();
 
@@ -851,69 +873,54 @@ namespace
 		}
 
 		UMovieScene* MovieScene = Sequence->GetMovieScene();
-		const TRange<FFrameNumber> PlaybackRange = MovieScene->GetPlaybackRange();
-		const int32 PlaybackStart = PlaybackRange.GetLowerBound().IsClosed()
-			? TickToDisplay(MovieScene, PlaybackRange.GetLowerBoundValue()) : 0;
-		const int32 PlaybackEnd = PlaybackRange.GetUpperBound().IsClosed()
-			? TickToDisplay(MovieScene, PlaybackRange.GetUpperBoundValue()) : 0;
+		int32 PlaybackStart = 0, PlaybackEnd = 0;
+		PlaybackInDisplayFrames(MovieScene, PlaybackStart, PlaybackEnd);
 
 		// ── 相机切轨：黑帧的主要来源 ──────────────────────────────────────
-		UMovieSceneTrack* CutTrack = MovieScene->GetCameraCutTrack();
-		if (!CutTrack)
+		//
+		// 和 describe / camera_cuts 共用 InspectCameraCuts。这里原来是它的
+		// 第二份手抄本，两份的空隙判定里有同一个 bug（拿前一段的 end 当基准，
+		// 嵌套的段会被报出一段不存在的空隙）
+		const FCameraCutInfo Cuts = InspectCameraCuts(MovieScene, PlaybackStart, PlaybackEnd);
+		if (!Cuts.bExists)
 		{
 			OutFindings.Add(MakeFinding(TEXT("no_camera_cut_track"), TEXT("breaks_render"), TEXT("整条序列")));
 		}
+		else if (Cuts.SectionCount == 0)
+		{
+			OutFindings.Add(MakeFinding(TEXT("camera_cut_empty"), TEXT("breaks_render"), TEXT("Camera Cuts 轨道")));
+		}
 		else
 		{
-			TArray<TPair<int32, int32>> Ranges;
-			for (const UMovieSceneSection* Section : CutTrack->GetAllSections())
-			{
-				bool bHasStart = false, bHasEnd = false;
-				int32 Start = 0, End = 0;
-				SectionRange(Section, MovieScene, bHasStart, Start, bHasEnd, End);
-				if (bHasStart && bHasEnd)
-				{
-					Ranges.Add(TPair<int32, int32>(Start, End));
-				}
-			}
-			Ranges.Sort([](const TPair<int32, int32>& A, const TPair<int32, int32>& B) { return A.Key < B.Key; });
+			const UAL_CameraCutCoverage::FCutCoverage& Coverage = Cuts.Coverage;
 
-			if (Ranges.Num() == 0)
+			// 判不出来是「这次没查成」，不是「查出来没问题」，也不是「坏了」
+			if (!Coverage.bCoverageKnown)
 			{
-				OutFindings.Add(MakeFinding(TEXT("camera_cut_empty"), TEXT("breaks_render"), TEXT("Camera Cuts 轨道")));
+				OutFindings.Add(MakeFinding(
+					TEXT("camera_cut_coverage_unknown"), TEXT("unknown"), Coverage.UnknownReason));
 			}
-			else
+			if (Coverage.HeadUncovered.IsSet())
 			{
-				if (Ranges[0].Key > PlaybackStart)
-				{
-					OutFindings.Add(MakeFinding(TEXT("camera_cut_not_covering"), TEXT("breaks_render"),
-						FString::Printf(TEXT("播放范围开头第 %d–%d 帧"), PlaybackStart, Ranges[0].Key)));
-				}
-				int32 Tail = Ranges[0].Value;
-				for (const TPair<int32, int32>& Range : Ranges)
-				{
-					Tail = FMath::Max(Tail, Range.Value);
-				}
-				if (Tail < PlaybackEnd)
-				{
-					OutFindings.Add(MakeFinding(TEXT("camera_cut_not_covering"), TEXT("breaks_render"),
-						FString::Printf(TEXT("播放范围结尾第 %d–%d 帧"), Tail, PlaybackEnd)));
-				}
-				for (int32 Index = 1; Index < Ranges.Num(); ++Index)
-				{
-					const int32 PrevEnd = Ranges[Index - 1].Value;
-					const int32 CurStart = Ranges[Index].Key;
-					if (CurStart > PrevEnd)
-					{
-						OutFindings.Add(MakeFinding(TEXT("camera_cut_gap"), TEXT("breaks_render"),
-							FString::Printf(TEXT("第 %d–%d 帧"), PrevEnd, CurStart), true));
-					}
-					else if (CurStart < PrevEnd)
-					{
-						OutFindings.Add(MakeFinding(TEXT("camera_cut_overlap"), TEXT("breaks_render"),
-							FString::Printf(TEXT("第 %d–%d 帧"), CurStart, PrevEnd)));
-					}
-				}
+				OutFindings.Add(MakeFinding(TEXT("camera_cut_not_covering"), TEXT("breaks_render"),
+					FString::Printf(TEXT("播放范围开头第 %d–%d 帧"),
+						Coverage.HeadUncovered->Start, Coverage.HeadUncovered->End)));
+			}
+			if (Coverage.TailUncovered.IsSet())
+			{
+				OutFindings.Add(MakeFinding(TEXT("camera_cut_not_covering"), TEXT("breaks_render"),
+					FString::Printf(TEXT("播放范围结尾第 %d–%d 帧"),
+						Coverage.TailUncovered->Start, Coverage.TailUncovered->End)));
+			}
+			for (const UAL_CameraCutCoverage::FCutRange& Gap : Coverage.Gaps)
+			{
+				OutFindings.Add(MakeFinding(TEXT("camera_cut_gap"), TEXT("breaks_render"),
+					FString::Printf(TEXT("第 %d–%d 帧"), Gap.Start, Gap.End), true));
+			}
+			for (const UAL_CameraCutCoverage::FCutRange& Overlap : Coverage.Overlaps)
+			{
+				OutFindings.Add(MakeFinding(TEXT("camera_cut_overlap"), TEXT("breaks_render"),
+					FString::Printf(TEXT("第 %d–%d 帧"), Overlap.Start, Overlap.End)));
 			}
 		}
 
@@ -1349,6 +1356,9 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	Payload->TryGetBoolField(TEXT("replace_existing_keys"), bReplaceExisting);
 	bool bWantCameraCuts = true;
 	Payload->TryGetBoolField(TEXT("camera_cuts"), bWantCameraCuts);
+	// 切轨上已经有别人排好的段时，删掉重建要显式点名
+	bool bRebuildCameraCuts = false;
+	Payload->TryGetBoolField(TEXT("rebuild_camera_cuts"), bRebuildCameraCuts);
 	double FocalLength = 0.0;
 	const bool bHasFocalLength = Payload->TryGetNumberField(TEXT("focal_length_mm"), FocalLength);
 
@@ -1519,16 +1529,37 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	Section->SetRange(Range);
 
 	// ── 相机切轨 ──────────────────────────────────────────────────────────
+	//
+	// 和 sequence.camera_cuts 同一条规矩：切轨上已经有别人排好的段时，
+	// **不默认删**。默认删的后果是一条多机位序列被这个工具顺手抹成单机位，
+	// 而用户要的只是「给这台相机打一串关键帧」。见 red-lines.md 第 1、3 条。
 	bool bCameraCutBound = false;
+	bool bKeptExistingCuts = false;
+	int32 RemovedCutSections = 0;
 	if (bWantCameraCuts)
 	{
-		if (UMovieSceneCameraCutTrack* CutTrack = EnsureCameraCutTrack(MovieScene))
+		UMovieSceneCameraCutTrack* CutTrack = EnsureCameraCutTrack(MovieScene);
+		const int32 ExistingCuts = CutTrack ? CutTrack->GetAllSections().Num() : 0;
+
+		if (CutTrack && ExistingCuts > 0 && !bRebuildCameraCuts)
 		{
-			// 重建而不是叠加：叠加会留下旧相机的切段，渲出来在切点跳到别的机位
+			bKeptExistingCuts = true;
+			// 关键帧照写 —— 那是用户要的。只是不动他的剪辑
+			Warnings.Add(MakeShared<FJsonValueString>(FString::Printf(
+				TEXT("相机切轨上已经有 %d 个段，没有动它们，所以这台相机还没有被切进画面。")
+				TEXT("要让它从头盖到尾（会删掉那 %d 个段），带上 rebuild_camera_cuts=true 再调一次；")
+				TEXT("或者在 Sequencer 里手动把某一段指到「%s」。"),
+				ExistingCuts, ExistingCuts, *CameraLabel)));
+		}
+		else if (CutTrack)
+		{
+			// 走到这里只有两种可能：切轨本来是空的，或者用户显式点名要重建。
+			// 叠加而不是重建的话，会留下旧相机的切段，渲出来在切点跳到别的机位
 			TArray<UMovieSceneSection*> OldSections = CutTrack->GetAllSections();
 			for (UMovieSceneSection* Old : OldSections)
 			{
 				CutTrack->RemoveSection(*Old);
+				++RemovedCutSections;
 			}
 			if (UMovieSceneCameraCutSection* CutSection = CutTrack->AddNewCameraCut(
 					UE::MovieScene::FRelativeObjectBindingID(CameraGuid), Range.GetLowerBoundValue()))
@@ -1536,8 +1567,16 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 				CutSection->SetRange(Range);
 				bCameraCutBound = true;
 			}
+			if (RemovedCutSections > 0)
+			{
+				Warnings.Add(MakeShared<FJsonValueString>(FString::Printf(
+					TEXT("原有的 %d 个切轨段已被删除，换成了「%s」从头盖到尾的一整段。"),
+					RemovedCutSections, *CameraLabel)));
+			}
 		}
-		if (!bCameraCutBound)
+
+		// 「没建成」和「有意没动」是两回事，混成一句话用户没法判断下一步
+		if (!bCameraCutBound && !bKeptExistingCuts)
 		{
 			Warnings.Add(MakeShared<FJsonValueString>(TEXT("相机切轨没建成，现在渲出来是黑的")));
 		}
@@ -1568,6 +1607,8 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	Data->SetNumberField(TEXT("key_count"), WrittenKeys);
 	Data->SetNumberField(TEXT("replaced_keys"), ReplacedKeys);
 	Data->SetBoolField(TEXT("camera_cut_bound"), bCameraCutBound);
+	Data->SetBoolField(TEXT("kept_existing_cuts"), bKeptExistingCuts);
+	Data->SetNumberField(TEXT("removed_cut_sections"), RemovedCutSections);
 	Data->SetBoolField(TEXT("level_saved"), bLevelSaved);
 
 	TArray<TSharedPtr<FJsonValue>> RangeArray;
@@ -1598,6 +1639,10 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 
 	FString CameraLabel;
 	const bool bHasLabel = Payload->TryGetStringField(TEXT("camera_label"), CameraLabel) && !CameraLabel.IsEmpty();
+
+	// 切轨上已经有内容时，把它们全删了重建要显式点名。默认拒绝，见下面的守卫
+	bool bRebuild = false;
+	Payload->TryGetBoolField(TEXT("rebuild"), bRebuild);
 
 	FString Error;
 	ULevelSequence* Sequence = LoadSequence(SequencePath, Error);
@@ -1691,18 +1736,70 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 		}
 	}
 
-	// ── 写切轨 ────────────────────────────────────────────────────────────
+	// ── 先把不该动手的情况挡掉 ────────────────────────────────────────────
 	const TRange<FFrameNumber> Playback = MovieScene->GetPlaybackRange();
-	const int32 PlaybackStart = Playback.GetLowerBound().IsClosed()
-		? TickToDisplay(MovieScene, Playback.GetLowerBoundValue()) : 0;
-	const int32 PlaybackEnd = Playback.GetUpperBound().IsClosed()
-		? TickToDisplay(MovieScene, Playback.GetUpperBoundValue()) : 0;
+	int32 PlaybackStart = 0, PlaybackEnd = 0;
+	PlaybackInDisplayFrames(MovieScene, PlaybackStart, PlaybackEnd);
+
+	// 空的播放范围上建切段，建出来的是个零长度的段，一帧都盖不到 ——
+	// 而且原来的代码会因此判定「没盖满」，顺手把已有的段全删了。
+	// 引擎在 UpgradeTimeRanges() 里会把损坏或无界的范围强制成 [0,0)，真会遇到。
+	//
+	// 两端是否有界要单独查：下面 AddNewCameraCut 要拿 GetLowerBoundValue()，
+	// 在无界的那一头上取值是未定义的。UpgradeTimeRanges 保证加载进来的范围
+	// 两端都有界，但那是个不该默默依赖的不变量
+	if (!Playback.GetLowerBound().IsClosed() || !Playback.GetUpperBound().IsClosed()
+		|| PlaybackEnd <= PlaybackStart)
+	{
+		UAL_CommandUtils::SendError(RequestId, 409,
+			FString::Printf(
+				TEXT("这条序列的播放范围用不了（算出来是 [%d, %d)，空的或者有一头无界）。")
+				TEXT("先在 Sequencer 里把播放范围拉出明确的长度再来补切轨 —— ")
+				TEXT("往这种范围上建的切段一帧都盖不到。什么都没有改动。"),
+				PlaybackStart, PlaybackEnd));
+		return;
+	}
 
 	const FCameraCutInfo Before = InspectCameraCuts(MovieScene, PlaybackStart, PlaybackEnd);
-	const bool bAlreadyCovered =
-		Before.bExists && Before.SectionCount > 0 && Before.bCoversPlayback && Before.Gaps.Num() == 0;
+	const UAL_CameraCutCoverage::FCutCoverage& Coverage = Before.Coverage;
 
+	// 判不出覆盖就什么都不做。把「判不出来」当成「没盖满」，
+	// 等于拿一个不确定的结论去删用户的东西
+	if (Before.bExists && !Coverage.bCoverageKnown)
+	{
+		UAL_CommandUtils::SendError(RequestId, 409,
+			FString::Printf(TEXT("这条序列的切轨覆盖情况判不出来：%s。什么都没有改动。"),
+				*Coverage.UnknownReason));
+		return;
+	}
+
+	const bool bAlreadyCovered = Before.bExists && Before.SectionCount > 0 && Coverage.bCoversPlayback;
+
+	// 切轨上已经有段、但没盖满 —— 这里原来会把已有的段**全删了重建**成一整段。
+	// 一条排好的三机位序列只要有一帧对不齐，调一次这个工具就只剩一台相机；
+	// 而且没有事务、存盘即成事实，撤不回来。
+	//
+	// `red-lines.md` 第 1 条「发现问题只报告，不动手」、第 3 条「删除永远是
+	// 用户手动做的」—— 所以默认拒绝，要删必须显式点名 rebuild=true。
+	if (!bAlreadyCovered && Before.SectionCount > 0 && !bRebuild)
+	{
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetObjectField(TEXT("camera_cuts"), MakeCameraCutsJson(Before));
+		UAL_CommandUtils::SendError(RequestId, 409,
+			FString::Printf(
+				TEXT("相机切轨上已经有 %d 个段，没盖满播放范围。这个工具补全的做法是把它们")
+				TEXT("**全部删掉**，重建成「%s」从头盖到尾的一整段 —— 如果那是排好的多机位剪辑，")
+				TEXT("这一下就没了，而且撤不回来。\n\n")
+				TEXT("确认要这么做：带上 rebuild=true 再调一次。\n")
+				TEXT("只想知道差在哪里：用 sequence_audit，它会逐段报出空隙和重叠。"),
+				Before.SectionCount, *TargetName),
+			Details);
+		return;
+	}
+
+	// ── 写切轨 ────────────────────────────────────────────────────────────
 	TArray<TSharedPtr<FJsonValue>> Warnings;
+	int32 RemovedSections = 0;
 	if (!bAlreadyCovered)
 	{
 		UMovieSceneCameraCutTrack* CutTrack = EnsureCameraCutTrack(MovieScene);
@@ -1712,12 +1809,13 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 			return;
 		}
 
-		// 重建而不是补空隙：留着旧段会在切点跳到别的机位，
-		// 而用户要的是「这条序列从头到尾用这台相机」
+		// 走到这里只有两种可能：切轨本来就是空的，或者用户显式给了 rebuild=true。
+		// 补空隙而不是重建，会在切点跳到别的机位，那不是「用这台相机」的意思
 		TArray<UMovieSceneSection*> OldSections = CutTrack->GetAllSections();
 		for (UMovieSceneSection* Old : OldSections)
 		{
 			CutTrack->RemoveSection(*Old);
+			++RemovedSections;
 		}
 
 		UMovieSceneCameraCutSection* CutSection = CutTrack->AddNewCameraCut(
@@ -1732,6 +1830,14 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 		SaveSequenceAsset(Sequence);
 	}
 
+	// 删了用户的东西必须报数，而且要报在结果里而不是只写日志
+	if (RemovedSections > 0)
+	{
+		Warnings.Add(MakeShared<FJsonValueString>(FString::Printf(
+			TEXT("原有的 %d 个切轨段已被删除，换成了「%s」从头盖到尾的一整段。"),
+			RemovedSections, *TargetName)));
+	}
+
 	if (bBindingBroken)
 	{
 		Warnings.Add(MakeShared<FJsonValueString>(
@@ -1743,6 +1849,7 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 	Data->SetStringField(TEXT("camera_binding"), TargetName);
 	Data->SetBoolField(TEXT("already_covered"), bAlreadyCovered);
 	Data->SetBoolField(TEXT("binding_broken"), bBindingBroken);
+	Data->SetNumberField(TEXT("removed_sections"), RemovedSections);
 
 	TArray<TSharedPtr<FJsonValue>> RangeArray;
 	RangeArray.Add(MakeShared<FJsonValueNumber>(PlaybackStart));
