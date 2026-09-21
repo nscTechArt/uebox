@@ -110,6 +110,9 @@ const NOT_TOOL_NAMES: Record<string, string> = {
   // 它一直是 unreal.GeometryScript_MeshQueries 的方法，不是工具
   get_is_closed_mesh: 'GeometryScript_MeshQueries 的 Python 方法',
   get_mesh_info_string: 'GeometryScript_MeshQueries 的 Python 方法',
+  // ue-sequencer 的 SKILL.md 点名警告它的返回值：对不存在的名字回一个
+  // bool() 为真、is_valid=False 的代理，拿它当存在性判据会让整批写入被静默跳过
+  find_binding_by_name: 'MovieSceneSequenceExtensions 的 Python 方法',
 
   // —— 描述里的口语简写，不是完整工具名 ——
   add_param: '口语简写，指 blueprint_function_signature 的加参数动作',

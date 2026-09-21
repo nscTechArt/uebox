@@ -52,10 +52,10 @@ const InputSchema = z.object({
     .min(1)
     .describe('Level Sequence 的资产路径，如 /Game/Cinematics/Shot_01.Shot_01'),
   detail: z
-    .enum(['outline', 'tracks', 'keys'])
+    .enum(['names', 'outline', 'tracks', 'keys'])
     .default('outline')
     .describe(
-      'outline=只有绑定和轨道数（默认，最省上下文）；tracks=加上段与时间范围；keys=加上关键帧，必须同时指定 bindings'
+      'names=只列绑定名（几百个绑定的序列先用这个）；outline=绑定和轨道数（默认）；tracks=加上段与时间范围；keys=加上关键帧，必须同时指定 bindings'
     ),
   bindings: z
     .array(z.string().trim().min(1))
@@ -137,6 +137,10 @@ interface DescribeOutput {
     binding_resolution?: boolean
   }
   truncated: boolean
+  /** 这条序列**一共**多少个绑定。回传的那份可能被过滤或截断过 */
+  binding_total?: number
+  /** 这次跑没跑失效检查。names 层不跑 —— 空的 broken 不等于「没有失效的绑定」 */
+  resolution_checked?: boolean
 }
 
 /**
@@ -149,6 +153,15 @@ const MAX_BINDINGS = 60
 
 /** 关键帧层每个通道回传的上限，同上，超出如实告知 */
 const MAX_KEYS_PER_CHANNEL = 200
+
+/**
+ * `detail="names"` 的绑定上限。
+ *
+ * 名单一条几十字节，2000 条仍比一次 outline 小。上限放宽是这一层存在的理由：
+ * 60 条的截断提示让人「用 bindings 点名」，而名字就在被截掉的那部分里 ——
+ * 不给一个能看全名单的读法，这个提示就是个死循环。
+ */
+const MAX_BINDING_NAMES = 2000
 
 /**
  * 出片体检结论。
@@ -193,7 +206,11 @@ function readinessLines(data: DescribeOutput, filtered: boolean): string[] {
     )
   }
 
-  if (broken.length > 0) {
+  if (data.resolution_checked === false) {
+    // names 层根本没跑这项检查。空的 broken 数组在这里**不是**「没有失效的绑定」，
+    // 印成 ✅ 就是拿一句没做过的检查给人打包票
+    lines.push('- ℹ️ 这一层（detail="names"）没查绑定是否失效。要体检请用 detail="outline"。')
+  } else if (broken.length > 0) {
     lines.push(
       `- ❌ ${broken.length} 个绑定已失效（${broken.slice(0, 5).join('、')}${broken.length > 5 ? ' 等' : ''}）。` +
         '失效的绑定不会报错，只是什么都不做 —— 对应的轨道等于没有效果。' +
@@ -245,7 +262,9 @@ function formatOutcome(data: DescribeOutput, detail: Input['detail'], filtered: 
   const lines = [
     `序列 ${s.path}`,
     `帧率 ${s.display_rate}，播放范围 [${s.playback_start}, ${s.playback_end})，共 ${s.duration_frames} 帧`,
-    `绑定 ${data.bindings.length} 个`,
+    data.binding_total !== undefined && data.binding_total !== data.bindings.length
+      ? `绑定 ${data.bindings.length} 个（这条序列一共 ${data.binding_total} 个）`
+      : `绑定 ${data.bindings.length} 个`,
     '',
     '出片体检：',
     ...readinessLines(data, filtered),
@@ -273,8 +292,15 @@ function formatOutcome(data: DescribeOutput, detail: Input['detail'], filtered: 
     // 悄悄少给比报错更危险：模型会拿一份不完整却看起来完整的结构做决策
     lines.push(
       '',
-      `⚠️ 结果已截断（单次最多 ${MAX_BINDINGS} 个绑定 / 每通道 ${MAX_KEYS_PER_CHANNEL} 个关键帧）。` +
-        '用 bindings 参数点名你要看的绑定，拿到的才是完整数据。'
+      `⚠️ 结果已截断（单次最多 ${detail === 'names' ? MAX_BINDING_NAMES : MAX_BINDINGS} 个绑定 / 每通道 ${MAX_KEYS_PER_CHANNEL} 个关键帧）。` +
+        '先用 detail="names" 拿到完整绑定名单，再用 bindings 参数点名细看。'
+    )
+  }
+
+  if (detail === 'names') {
+    lines.push(
+      '',
+      '（这是名单。要看轨道数用 detail="outline"，要看段和时间范围用 detail="tracks"）'
     )
   }
 
@@ -301,6 +327,8 @@ export function createSequenceDescribeTool(): UnrealAgentTool<DescribeOutput> {
 量产时别拿本工具逐条查 —— 24 条的结构树会把上下文撑爆，那正是 audit 存在的理由。
 
 【分层读取，控制上下文】
+- detail="names"：只列绑定名和类型。**绑定上百条的序列先用这个**拿名单，
+  再用 bindings 点名细看（这一层不跑失效检查）
 - detail="outline"（默认）：绑定名/类型 + 轨道数。量产序列先用这个
 - detail="tracks"：加上每条轨道的段和时间范围
 - detail="keys"：加上关键帧，**必须同时用 bindings 点名**，否则会拒绝
@@ -322,7 +350,7 @@ Movie Render Queue 渲染不含末帧，AnimSequence 首尾都含。**不要自�
           text:
             'detail="keys" 时必须用 bindings 点名要看哪几个绑定。' +
             '不限范围地读取整条序列的关键帧会占满上下文。' +
-            '先用 detail="outline" 看有哪些绑定，再挑你需要的。',
+            '先用 detail="names" 拿到绑定名单，再挑你需要的。',
           isError: true
         }
       }
@@ -333,7 +361,7 @@ Movie Render Queue 渲染不含末帧，AnimSequence 首尾都含。**不要自�
           sequence_path: input.sequence_path,
           detail: input.detail,
           ...(input.bindings?.length ? { bindings: input.bindings } : {}),
-          max_bindings: MAX_BINDINGS,
+          max_bindings: input.detail === 'names' ? MAX_BINDING_NAMES : MAX_BINDINGS,
           max_keys: MAX_KEYS_PER_CHANNEL
         },
         { timeoutMs: 60_000 }

@@ -22,6 +22,7 @@
 #include "Sections/MovieSceneSubSection.h"
 #include "Tracks/MovieScene3DTransformTrack.h"
 #include "Tracks/MovieSceneCameraCutTrack.h"
+#include "Tracks/MovieSceneSpawnTrack.h"
 #include "Tracks/MovieSceneSubTrack.h"
 
 #include "CineCameraActor.h"
@@ -152,6 +153,55 @@ namespace
 			return Possessable->GetName();
 		}
 		return FString();
+	}
+
+	/**
+	 * 这条绑定身上有没有生成轨道（`UMovieSceneSpawnTrack`）。
+	 *
+	 * 有生成轨道 = 这条绑定的对象由序列自己生成，不是关卡里既有的 Actor。
+	 * 这是**与引擎版本无关**的事实判据，下面那条升级规则就建立在它上面。
+	 */
+	bool BindingHasSpawnTrack(const FMovieSceneBinding& Binding)
+	{
+		for (const UMovieSceneTrack* Track : Binding.GetTracks())
+		{
+			if (Cast<const UMovieSceneSpawnTrack>(Track))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * 绑定类型，带「生成轨道兜底」。
+	 *
+	 * `FindSpawnable` 只认 `MovieScene->Spawnables` 数组里那种老式 spawnable。
+	 * 5.5 起引擎把生成体挪到了 custom binding（记在 possessable 那一侧），
+	 * 于是同一个生成体在这里被判成 possessable —— **编得过、跑得动、答案是错的**。
+	 *
+	 * 后果是连着两条，而且都朝「让用户去修没坏的东西」的方向错：
+	 *
+	 *   1. `sequence_describe` 把生成体标成 `possessable`；
+	 *   2. 判成 possessable 就会去编辑器世界里找对象 —— 生成体在编辑期
+	 *      本来就不在关卡里，于是被报成「❌ 绑定已失效」，而它在 PIE 里工作正常。
+	 *
+	 * 2026-09-21 的用户反馈里 `DefeatCard` 就是这么被误报的。
+	 *
+	 * 不按版本号分支：`FindSpawnable` 认出来的算 spawnable，认不出来但挂着
+	 * 生成轨道的也算 —— 这条对 5.0 到 5.8 一致成立，工作室改过的引擎分支也一样。
+	 */
+	FString ResolveBindingNameForBinding(
+		UMovieScene* MovieScene,
+		const FMovieSceneBinding& Binding,
+		EUALBindingKind& OutKind)
+	{
+		const FString Name = ResolveBindingName(MovieScene, Binding.GetObjectGuid(), OutKind);
+		if (OutKind != EUALBindingKind::Spawnable && BindingHasSpawnTrack(Binding))
+		{
+			OutKind = EUALBindingKind::Spawnable;
+		}
+		return Name;
 	}
 
 	const TCHAR* BindingKindToString(EUALBindingKind Kind)
@@ -619,7 +669,20 @@ void FUAL_SequencerCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payl
 	const bool bWantTracks = (Detail == TEXT("tracks") || Detail == TEXT("keys"));
 	const bool bWantKeys = (Detail == TEXT("keys"));
 
-	int32 MaxBindings = 60;
+	/**
+	 * `detail="names"`：只要名单。
+	 *
+	 * 没有它的时候，读这一侧是个闭环死角：绑定超过 60 条就会截断，而截断提示让你
+	 * 「用 bindings 点名」—— 你得先知道名字，名字恰恰就在被截掉的那部分里。
+	 * 2026-09-21 的用户反馈里那条序列有 268 个绑定，最后是自己写 Python 遍历读出来的。
+	 *
+	 * 名单这一层只回名字/类型/轨道数，一条绑定几十字节，上限放到 2000
+	 * 仍然远小于 outline 的一次回传。不查解析（那是逐个进世界找对象，
+	 * 名单不需要），所以也更快。
+	 */
+	const bool bNamesOnly = (Detail == TEXT("names"));
+
+	int32 MaxBindings = bNamesOnly ? 2000 : 60;
 	int32 MaxKeys = 200;
 	{
 		double Tmp = 0.0;
@@ -669,7 +732,7 @@ void FUAL_SequencerCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payl
 	{
 		const FGuid& Guid = Binding.GetObjectGuid();
 		EUALBindingKind Kind = EUALBindingKind::Unknown;
-		const FString Name = ResolveBindingName(MovieScene, Guid, Kind);
+		const FString Name = ResolveBindingNameForBinding(MovieScene, Binding, Kind);
 
 		if (bFilterBindings && !Wanted.Contains(Name))
 		{
@@ -721,7 +784,7 @@ void FUAL_SequencerCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payl
 		// **解析不了 ≠ 断链**：World Partition 里 actor 没加载、正在 PIE、
 		// 拿不到编辑器世界，都会让好绑定看起来是坏的。报一个假的「已失效」
 		// 会让用户去修一个没坏的东西 —— 所以判不出来归入 unresolved，分开报。
-		if (Kind != EUALBindingKind::Spawnable)
+		if (Kind != EUALBindingKind::Spawnable && !bNamesOnly)
 		{
 			TArray<UObject*, TInlineAllocator<1>> Bound;
 			const bool bResolvable = ResolveBindingObjects(Sequence, MovieScene, Guid, World, Bound);
@@ -797,6 +860,11 @@ void FUAL_SequencerCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payl
 	Data->SetArrayField(TEXT("unresolved_bindings"), UnresolvedArray);
 	Data->SetObjectField(TEXT("capabilities"), MakeCapabilitiesJson(bBindingResolutionWorks));
 	Data->SetBoolField(TEXT("truncated"), bTruncated);
+	// 这条序列**一共**有多少绑定。回传的那份可能被过滤或截断过，
+	// 少了这个数，调用方会把手里的条数当成全部
+	Data->SetNumberField(TEXT("binding_total"), MovieScene->GetBindings().Num());
+	// names 层没跑失效检查。不说的话，空的 broken 数组会被读成「没有失效的绑定」
+	Data->SetBoolField(TEXT("resolution_checked"), !bNamesOnly);
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
@@ -931,7 +999,7 @@ namespace
 		{
 			const FGuid& Guid = Binding.GetObjectGuid();
 			EUALBindingKind Kind = EUALBindingKind::Unknown;
-			const FString Name = ResolveBindingName(MovieScene, Guid, Kind);
+			const FString Name = ResolveBindingNameForBinding(MovieScene, Binding, Kind);
 			const TArray<UMovieSceneTrack*>& Tracks = Binding.GetTracks();
 
 			if (Tracks.Num() == 0)
@@ -1804,7 +1872,7 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 	{
 		const FGuid& Guid = Binding.GetObjectGuid();
 		EUALBindingKind Kind = EUALBindingKind::Unknown;
-		const FString Name = ResolveBindingName(MovieScene, Guid, Kind);
+		const FString Name = ResolveBindingNameForBinding(MovieScene, Binding, Kind);
 
 		if (bHasLabel)
 		{

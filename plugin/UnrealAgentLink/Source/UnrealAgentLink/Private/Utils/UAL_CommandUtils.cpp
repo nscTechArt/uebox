@@ -1635,7 +1635,105 @@ bool UAL_CommandUtils::SetStructProperty(FStructProperty* StructProp, UObject* O
 		return true;
 	}
 
-	OutError = FString::Printf(TEXT("unsupported struct type: %s"), *StructProp->Struct->GetName());
+	/**
+	 * 其余结构体：按字段名通用导入。
+	 *
+	 * 上面四条手写分支之外，这里以前一律回 `unsupported struct type: X`，
+	 * 而那句话既不说「能不能部分写」也不说替代路径。2026-09-21 的用户反馈里
+	 * 一个任务连着撞上三种：`SingleAnimationPlayData`（骨骼网格全员 T-pose）、
+	 * `PostProcessSettings`（曝光锁不上）、`IntPoint`（widget 尺寸），
+	 * 三次都只能改用 Python 直写绕过去。
+	 *
+	 * `JsonObjectToUStruct` 是引擎自己那份按字段名的反射导入：
+	 *
+	 *   - **只写 JSON 里出现的字段**，其余保持原值 —— 所以
+	 *     `{"bOverride_AutoExposureBias": true, "AutoExposureBias": 1.0}`
+	 *     这种「只改两个字段」的写法是成立的，不需要整段给全；
+	 *   - 对象引用字段收资产路径字符串（`AnimToPlay: "/Game/Anims/Idle.Idle"`）；
+	 *   - 嵌套结构体递归处理。
+	 *
+	 * 上面四条手写分支不删：它们认的是 `{"x":..,"y":..}` / `{"r":..,"g":..}`
+	 * 这种小写短名和 FColor 的 0–1 自动换算，通用导入按 UPROPERTY 的真名匹配，
+	 * 认不出来。先特例后通用，两边都能用。
+	 */
+	if (Value->Type == EJson::Object)
+	{
+		void* Ptr = StructProp->ContainerPtrToValuePtr<void>(Obj);
+
+		/**
+		 * 先把键名对到 UPROPERTY 的真名上，大小写不敏感。
+		 *
+		 * 通用导入是按真名匹配的：`{"x":1,"y":2}` 写 `FIntPoint` 会一个字段都不中，
+		 * 而它的真名是 `X` / `Y`。调用方写小写是常态（JSON 世界就是这个习惯），
+		 * 为这个回一句「字段名错了」属于明知故犯。认不出来的键原样保留，
+		 * 让下面的导入去报错。
+		 */
+		TSharedRef<FJsonObject> Normalized = MakeShared<FJsonObject>();
+		{
+			TMap<FString, FString> RealNames;
+			for (TFieldIterator<FProperty> It(StructProp->Struct); It; ++It)
+			{
+				RealNames.Add(It->GetName().ToLower(), It->GetName());
+			}
+			for (const auto& Pair : Value->AsObject()->Values)
+			{
+				const FString* Real = RealNames.Find(Pair.Key.ToLower());
+				Normalized->SetField(Real ? *Real : Pair.Key, Pair.Value);
+			}
+		}
+
+		/**
+		 * 先写进一份副本，成了再整体拷回去。
+		 *
+		 * `JsonObjectToUStruct` 是**逐字段顺序写**的，中途失败就直接返回 false ——
+		 * 前面那些字段已经落在对象上了。直接写 `Ptr` 的话，
+		 * `{"bOverride_AutoExposureBias": true, "AutoExposureBias": "坏值"}`
+		 * 会变成：override 标志被打开了、曝光值还是旧的，而调用方收到的是
+		 * 「没设成」—— 他以为什么都没动，实际画面已经变了。
+		 *
+		 * 「要么全成、要么原样不动」比「一半生效还不告诉你」重要得多，
+		 * 一次结构体大小的临时分配换这个，值。
+		 */
+		UScriptStruct* Struct = StructProp->Struct;
+		if (Ptr && Struct)
+		{
+			void* Scratch = FMemory::Malloc(Struct->GetStructureSize(), Struct->GetMinAlignment());
+			Struct->InitializeStruct(Scratch);
+			Struct->CopyScriptStruct(Scratch, Ptr);
+
+			const bool bImported = FJsonObjectConverter::JsonObjectToUStruct(Normalized, Struct, Scratch, 0, 0);
+			if (bImported)
+			{
+				Struct->CopyScriptStruct(Ptr, Scratch);
+			}
+
+			Struct->DestroyStruct(Scratch);
+			FMemory::Free(Scratch);
+
+			if (bImported)
+			{
+				return true;
+			}
+		}
+
+		// 失败时把这个结构体有哪些字段说出来 —— 十有八九是字段名写错了。
+		// 报错不是文档，列头几个就够定位（同 UAL_ListEnumNames 的处理）
+		TArray<FString> FieldNames;
+		for (TFieldIterator<FProperty> It(StructProp->Struct); It && FieldNames.Num() < 12; ++It)
+		{
+			FieldNames.Add(It->GetName());
+		}
+		OutError = FString::Printf(
+			TEXT("could not set struct %s from the given object; its fields are: %s%s"),
+			*StructProp->Struct->GetName(),
+			FieldNames.Num() > 0 ? *FString::Join(FieldNames, TEXT(", ")) : TEXT("(none)"),
+			FieldNames.Num() >= 12 ? TEXT(", ...") : TEXT(""));
+		return false;
+	}
+
+	OutError = FString::Printf(
+		TEXT("struct %s expects an object with its field names, got a non-object value"),
+		*StructProp->Struct->GetName());
 	return false;
 }
 

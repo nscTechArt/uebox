@@ -3860,6 +3860,8 @@ void FUAL_BlueprintCommands::Handle_CreateBlueprint(const TSharedPtr<FJsonObject
 	// 4. Add Components
 	/** 写不进去的组件属性。不往响应里带的话，调用方以为组件配好了（见下面的注释） */
 	TArray<FString> ComponentPropertyErrors;
+	/** 实际挂接和请求不一致的地方。同理，不说的话调用方以为层级是它要的那个 */
+	TArray<FString> ComponentAttachNotes;
 	const TArray<TSharedPtr<FJsonValue>>* Components = nullptr;
 	if (Payload->TryGetArrayField(TEXT("components"), Components) && Components)
 	{
@@ -3892,7 +3894,33 @@ void FUAL_BlueprintCommands::Handle_CreateBlueprint(const TSharedPtr<FJsonObject
 					// Attach
 					if (AttachTo.IsEmpty() || AttachTo.Equals(TEXT("root"), ESearchCase::IgnoreCase) || AttachTo.Equals(TEXT("DefaultSceneRoot"), ESearchCase::IgnoreCase))
 					{
-						SCS->AddNode(NewNode); // Default root or next to it
+						/**
+						 * 「挂到根上」要真的挂上去。
+						 *
+						 * `SCS->AddNode()` 加的是**根级节点**：第一个成为 actor 的根，
+						 * 第二个之后是平级的另一棵树 —— 谁都不挂，不跟 actor 走。
+						 * 这个蓝图没有 DefaultSceneRoot 时（create 这条路就没有），
+						 * 两个组件都走 AddNode 的结果是：root = 第一个组件，
+						 * 第二个组件留在世界原点不动，`set_actor_location` 也拽不动它。
+						 *
+						 * 2026-09-21 的用户反馈：BP_Soldier_Red 的 Body 就是这么掉队的，
+						 * 而 create 回的是「成功」，连一条 warning 都没有。
+						 *
+						 * 现在第一个根级组件当根，后面的挂到它下面 —— 和用户
+						 * 改用 `blueprint_add_component` 时得到的层级一致。
+						 */
+						USCS_Node* ExistingRoot = SCS->GetAllNodes().Num() > 0 ? SCS->GetAllNodes()[0] : nullptr;
+						if (ExistingRoot && ExistingRoot != NewNode)
+						{
+							ExistingRoot->AddChildNode(NewNode);
+							ComponentAttachNotes.Add(FString::Printf(
+								TEXT("%s: attached to root component '%s'"),
+								*CompName, *ExistingRoot->GetVariableName().ToString()));
+						}
+						else
+						{
+							SCS->AddNode(NewNode); // 第一个组件：它就是根
+						}
 					}
 					else
 					{
@@ -3900,7 +3928,7 @@ void FUAL_BlueprintCommands::Handle_CreateBlueprint(const TSharedPtr<FJsonObject
 						USCS_Node* ParentNode = nullptr;
 						for (USCS_Node* Node : SCS->GetAllNodes())
 						{
-							if (Node && Node->GetVariableName().ToString().Equals(AttachTo))
+							if (Node && Node->GetVariableName().ToString().Equals(AttachTo, ESearchCase::IgnoreCase))
 							{
 								ParentNode = Node;
 								break;
@@ -3912,7 +3940,23 @@ void FUAL_BlueprintCommands::Handle_CreateBlueprint(const TSharedPtr<FJsonObject
 						}
 						else
 						{
-							SCS->AddNode(NewNode); // Fallback
+							/**
+							 * 要挂的父组件不存在。组件还是建出来（有用的兜底），
+							 * 但**必须说** —— 层级决定行为，静默挂错地方比失败难查。
+							 * 这段和 `Handle_AddComponentToBlueprint` 的处理保持一致。
+							 */
+							USCS_Node* FallbackRoot = SCS->GetAllNodes().Num() > 0 ? SCS->GetAllNodes()[0] : nullptr;
+							if (FallbackRoot && FallbackRoot != NewNode)
+							{
+								FallbackRoot->AddChildNode(NewNode);
+							}
+							else
+							{
+								SCS->AddNode(NewNode);
+							}
+							ComponentAttachNotes.Add(FString::Printf(
+								TEXT("%s: requested parent '%s' does not exist in this Blueprint; attached to the root instead"),
+								*CompName, *AttachTo));
 						}
 					}
 
@@ -4030,6 +4074,11 @@ void FUAL_BlueprintCommands::Handle_CreateBlueprint(const TSharedPtr<FJsonObject
 	{
 		CreateWarnings.Add(MakeShared<FJsonValueString>(
 			FString::Printf(TEXT("component property not applied - %s"), *PropIssue)));
+	}
+	for (const FString& AttachIssue : ComponentAttachNotes)
+	{
+		CreateWarnings.Add(MakeShared<FJsonValueString>(
+			FString::Printf(TEXT("component attachment - %s"), *AttachIssue)));
 	}
 	Result->SetArrayField(TEXT("warnings"), CreateWarnings);
 

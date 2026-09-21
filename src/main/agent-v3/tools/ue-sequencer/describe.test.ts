@@ -74,7 +74,8 @@ describe('detail=keys 的护栏', () => {
   it('拒绝时要告诉模型下一步怎么做，而不只是说不行', async () => {
     await expect(
       tool.execute('c1', { sequence_path: '/Game/x.x', detail: 'keys' })
-    ).rejects.toThrow(/bindings[\s\S]*outline|outline[\s\S]*bindings/)
+    // 指向 names 而不是 outline：outline 到 60 条就截断，名字可能根本不在里面
+    ).rejects.toThrow(/bindings[\s\S]*names|names[\s\S]*bindings/)
   })
 
   it('点名了 bindings 就放行', async () => {
@@ -325,5 +326,45 @@ describe('失败处理', () => {
     await expect(
       tool.execute('c1', { sequence_path: '/Game/x.x', detail: 'outline' })
     ).rejects.toThrow()
+  })
+})
+
+/**
+ * `detail="names"` 这一层。
+ *
+ * 它存在的理由是个闭环死角：绑定超过上限就截断，截断提示让人「用 bindings 点名」，
+ * 而名字正在被截掉的那部分里。2026-09-21 的用户反馈里 268 个绑定的序列
+ * 最后是自己写 Python 遍历读出来的。
+ */
+describe('detail=names：先拿名单', () => {
+  const runNames = async (over: Record<string, unknown> = {}): Promise<string> => {
+    mockUe.mockResolvedValueOnce(ok(over))
+    const result = await tool.execute('c1', { sequence_path: '/Game/x.x', detail: 'names' })
+    return result.content.map((c) => ('text' in c ? c.text : '')).join('')
+  }
+
+  it('names 层要用更高的绑定上限 —— 否则和 outline 一样会截断', async () => {
+    await runNames()
+    const params = mockUe.mock.calls.at(-1)?.[1] as { max_bindings?: number; detail?: string }
+    expect(params.detail).toBe('names')
+    expect(params.max_bindings).toBeGreaterThan(60)
+  })
+
+  it('没跑失效检查时不许印「✅ 没有失效的绑定」', async () => {
+    // 空的 broken 数组在这一层不是「没坏」，是「没查」。
+    // 印成 ✅ 等于拿一句没做过的检查给人打包票
+    const text = await runNames({ resolution_checked: false })
+    expect(text).not.toContain('没有失效的绑定')
+    expect(text).toContain('没查绑定是否失效')
+  })
+
+  it('回传条数少于总数时要说出总数', async () => {
+    const text = await runNames({ binding_total: 268 })
+    expect(text).toContain('268')
+  })
+
+  it('截断提示要指向 names 这一层，而不是让人去点自己还不知道的名字', async () => {
+    const text = await runNames({ truncated: true })
+    expect(text).toContain('detail="names"')
   })
 })
