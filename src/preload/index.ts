@@ -1541,11 +1541,22 @@ const api = {
       saveSettings: (args: { settings: unknown }) =>
         ipcRenderer.invoke('agent-v3:mcp:save-settings', args),
       reconnect: () => ipcRenderer.invoke('agent-v3:mcp:reconnect'),
+      /** 删一条 server 并当场落盘。不碰别的行，也不提交表单里未保存的编辑 */
+      removeServer: (args: { id: string }) =>
+        ipcRenderer.invoke('agent-v3:mcp:remove-server', args),
+      /** 存一条 server 并重连。`renamedFrom` 非空时顺手删掉旧名字那条 */
+      saveServer: (args: { id: string; config: unknown; renamedFrom?: string }) =>
+        ipcRenderer.invoke('agent-v3:mcp:save-server', args),
       /** 已连接项目的「UE 5.8 官方 MCP」开启状态 */
       epicStatus: () => ipcRenderer.invoke('agent-v3:mcp:epic-status'),
       /** 一键给某个项目开启 UE 5.8 官方 MCP */
       epicSetup: (args: { connectionId: string }) =>
-        ipcRenderer.invoke('agent-v3:mcp:epic-setup', args)
+        ipcRenderer.invoke('agent-v3:mcp:epic-setup', args),
+      /** 官方 Blender Lab MCP 的前置依赖与配置状态 */
+      blenderStatus: () => ipcRenderer.invoke('agent-v3:mcp:blender-status'),
+      /** 一键装官方 Blender Lab MCP 并写进配置 */
+      blenderSetup: (args: { blenderPath?: string } = {}) =>
+        ipcRenderer.invoke('agent-v3:mcp:blender-setup', args)
     },
     /** 把虚幻引擎能力对外暴露成 MCP server */
     mcpServer: {

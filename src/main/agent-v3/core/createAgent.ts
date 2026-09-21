@@ -25,7 +25,7 @@ import {
 import { buildUserInstructionsSection } from '../capabilities/userInstructions'
 import type { SkillMetadata } from '../../agent-v3/capabilities/skillsService/SkillsService'
 import type { McpClientManager } from '../capabilities/mcp/McpClientManager'
-import { buildMcpSection } from '../capabilities/mcp/promptSection'
+import { buildMcpSection, installableIntegrations } from '../capabilities/mcp/promptSection'
 import { createAskUserTool, type AskUserToolDeps } from '../tools/builtin/askUser'
 import { createVoiceReportTool, type VoiceReportToolDeps } from '../tools/builtin/voiceReport'
 import {
@@ -1251,13 +1251,18 @@ export function buildSystemPrompt(
     ...buildNotebookSection(ctx)
   ]
 
+  // `undefined` 和 `[]` 在下面是两个意思，别在这里替它兜底成空数组
+  const mcpStatuses = ctx.mcp?.getStatuses()
+
   return (
     lines.join('\n') +
     buildSkillsSection(skills) +
     buildSkillLearningSection(skills, ctx.skillLearning ?? 'ask') +
-    // 用户配的 MCP server 及其真实连接状态。一个都没配时是空串。
-    // 「连不上」必须让模型知道 —— 否则它会把「工具不在」答成「我没这个能力」。
-    buildMcpSection(ctx.mcp?.getStatuses()) +
+    // 用户配的 MCP server 及其真实连接状态，外加设置页此刻能一键装上的集成。
+    // 没有 MCP 管理器时整段是空串 —— 那是「不知道」，不是「一个都没配」。
+    // 「连不上」和「装一下就有」都必须让模型知道 —— 否则它会把
+    // 「工具不在」答成「我没这个能力」，而那是假话。
+    buildMcpSection(mcpStatuses, installableIntegrations(mcpStatuses ?? [])) +
     // 用户自己写的常驻说明。放在环境块**之前**：它是规矩，而环境块是事实，
     // 两者混在一起模型分不清哪句该照做、哪句只是背景
     buildUserInstructionsSection(ctx.userInstructions ?? '') +

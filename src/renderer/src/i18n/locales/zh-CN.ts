@@ -188,14 +188,23 @@ export default {
       shortDescription: '给助手接入第三方能力，或把虚幻引擎开放给外部客户端。',
       empty: '还没有配置任何 MCP 服务。',
       configPath: '配置文件：{path}',
-      // 下半页有「共享虚幻引擎能力」，上半页却没标题，手配的那几条就裸在页面上
-      manualTitle: '手动配置的服务',
+      // 上半页分两组：盒子自己装好的 vs 用户自己加的。原来这两类混在一起，
+      // 一条盒子装的 blender 长得和手填的一模一样，用户分不清哪条是自己的责任
+      builtinTitle: '内置',
+      manualTitle: '手动配置',
+      // 空组不能留一片空白 —— 那看起来像坏了，而不是「这里本来就没有」
+      manualEmpty: '还没有手动配置的服务。',
       unsaved: '有未保存的修改',
       // 收起态那一行要显示名字，还没填标识时给个占位
       newServer: '新服务'
     },
     epicSetup: {
       title: '开启虚幻引擎自带的 AI 工具集',
+      // 折叠行的标题。整块卡片压成一行之后，标题要短到能和状态并排
+      rowTitle: '虚幻引擎',
+      // noProject 那句是给展开区读的，太长挂不到行右端
+      noProjectShort: '还没连接项目 · 先在首页打开一个',
+      checking: '检查中…',
       enable: '一键开启',
       start: '启动服务',
       working: '处理中…',
@@ -212,6 +221,51 @@ export default {
       noProject: '还没有连接的虚幻引擎项目。先在首页打开一个项目，这里会显示它能不能用。',
       failed: '检查失败：{error}。如果你刚更新过盒子，重启一次应用再看。',
       hint: '会更新项目文件和编辑器偏好；可在虚幻引擎的 Edit > Plugins 中关闭。'
+    },
+    blenderSetup: {
+      title: '接入 Blender（官方 Blender Lab MCP）',
+      rowTitle: 'Blender',
+      // 行右端的短状态。长句子挂不到一行上，留给摊开的里面
+      checking: '检查中…',
+      unsupportedShort: '这个平台没有安装脚本',
+      missingPrereq: '缺少安装所需的组件',
+      notConnected: '未接入',
+      // 装好之后能改的只有这两样。标识、连接方式、启动命令都是盒子自己写的，
+      // 给输入框只会让用户改坏一条本来好好的配置 —— 要动就去「高级」
+      pathLabel: 'Blender 程序路径',
+      pathHint: '换了 Blender 的安装位置就改这里，盒子按这个路径把它拉起来。',
+      portLabel: '端口',
+      reinstall: '重新安装',
+      // 逃生口。做成链接不做成折叠区：这一页的层级已经够深了
+      raw: '高级（原始 MCP 配置）',
+      rawBack: '收起原始配置',
+      install: '一键接入',
+      // 自动探测只认标准安装位置，便携版和装在别处的要有一条出路
+      choose: '选择…',
+      // 装一次要几分钟。静默的界面会被当成死了，然后用户去点第二次
+      working: '安装中，需要几分钟…',
+      loading: '正在检查 Blender 与安装所需的组件…',
+      // 找不到 Blender 不是错误：便携版、网络盘上的本来就猜不到
+      noBlender: '没找到 Blender',
+      unsupported: '这个平台还没有安装脚本，只有 Windows 和 macOS 有。',
+      failed: '检查失败：{error}。如果你刚更新过盒子，重启一次应用再看。',
+      hint: '会安装官方 Blender Lab 服务和 Blender 插件，并自动填好 MCP 配置。需要联网。',
+      // 缺什么点名说，别合成一句「环境不满足」—— 那正是安装脚本原来的
+      // 失败样子（一句 Command failed: git），用户看不出要去装什么
+      prereq: {
+        blender: {
+          missing: '没找到 Blender。请先安装 Blender 5.1 或更新版本（blender.org）。',
+          tooOld: '这台机器上是 {found}，官方插件需要 Blender 5.1 或更新版本。'
+        },
+        git: {
+          missing: '没找到 Git。安装官方服务要用它下载源码，请先安装（git-scm.com）。',
+          tooOld: '这台机器上是 {found}，请升级 Git（git-scm.com）。'
+        },
+        python: {
+          missing: '没找到 Python。官方服务跑在 Python 上，需要 3.11 或更新版本（python.org）。',
+          tooOld: '这台机器上是 {found}，官方服务需要 Python 3.11 或更新版本（python.org）。'
+        }
+      }
     },
     engine: {
       title: '虚幻引擎内置工具集',
@@ -251,6 +305,9 @@ export default {
       hideToken: '隐藏',
       portInvalid: '端口需在 1024–65535 之间',
       running: '运行中 · 已开放 {count} 个工具',
+      // 「引擎」两个字自己把口径说清了，省掉常驻的那句免责声明。
+      // 完整那句仍在，挂 title 上，要对账的人够得着
+      runningShort: '运行中 · 开放 {count} 个引擎工具',
       // 同一页三个「工具数」口径不同，不说清楚用户会拿它们互相对账
       toolsNote: '这是盒子自己的引擎工具总数，和上方各个第三方服务的数量无关。',
       // 标题要点名说出里面有什么。风险可以折起来，但不能藏在一个叫「高级」的抽屉里
@@ -259,13 +316,15 @@ export default {
       scopeTagWritable: '可写',
       clientConfig: '连接配置',
       copyConfig: '复制配置',
-      copyToken: '复制令牌',
+      copyToken: '只复制令牌',
       copied: '已复制',
       tokenMasked: '出于安全考虑只显示头尾，完整令牌请点「复制令牌」',
-      rotate: '重置',
+      // 「重置」两个字单看不知道重置什么，而它旁边就是两个复制动作
+      rotate: '重置令牌',
       rotateConfirm:
         '重置后，所有已配置这个服务的外部客户端都会立刻连不上，需要重新粘贴配置。确定继续？',
-      clientHint: '将下方配置粘贴到外部客户端的 MCP 配置文件中。',
+      // 地址和令牌都在这段 JSON 里，说一句就不用再在别处各印一份
+      clientHint: '粘到外部客户端的 MCP 配置文件中。地址和令牌都在里面。',
       autoStartHint: '状态会记住，下次启动盒子自动运行。'
     },
     fields: {
@@ -292,7 +351,11 @@ export default {
       add: '添加服务',
       remove: '删除',
       // 手填的路径和环境变量删掉就没了，没有撤销 —— 破坏性和「重置令牌」相当
-      removeConfirm: '删除「{id}」的配置？填好的启动命令和环境变量会一起没有，不能撤销。',
+      // 这句话曾经是假的：删只是把行从表单里拿掉，盘上没动，用户切回来发现
+      // 它还在，只能判断成「删除坏了」。现在删除会当场写 mcp.json，
+      // 所以「立刻」和「不能撤销」都是真的了 —— 但要说出来它是立刻生效的，
+      // 因为这一页其余的编辑都要等保存。
+      removeConfirm: '删除「{id}」的配置？会立刻从 mcp.json 里去掉，不用再点保存，也不能撤销。',
       reveal: '打开位置',
       copyPath: '复制',
       save: '保存并连接',

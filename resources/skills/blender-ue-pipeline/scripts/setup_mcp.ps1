@@ -88,6 +88,9 @@ $entry = @{mcpServers = @{blender = @{
 Write-Output "MCP config: $(Join-Path $installRoot 'mcp-entry.json')"
 Write-Output "Official add-on: $addonZip"
 Write-Output 'Add-on verified installed and enabled in Blender.'
+# Machine-readable, for a caller that reports this in its own words. Box parses
+# this line; matching the prose below would break the moment someone rewords it.
+Write-Output "BLMCP_ONLINE=$onlineAccess"
 if ($onlineAccess) {
   Write-Output 'Online access is enabled, so a manually opened Blender starts the bridge too.'
 } else {

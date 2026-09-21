@@ -1,7 +1,7 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest'
 
-import { buildMcpSection } from './promptSection'
+import { BLENDER_INSTALLABLE, buildMcpSection, installableIntegrations } from './promptSection'
 import type { McpServerStatus } from './types'
 
 const connected = (id: string, toolCount = 3): McpServerStatus => ({
@@ -26,10 +26,61 @@ const disabled = (id: string): McpServerStatus => ({
 })
 
 describe('MCP 状态进系统提示词', () => {
-  // 一个 server 都没配的用户占多数，不该为一件不存在的事付 token
-  it('没配过任何 server 时一个字都不输出', () => {
-    expect(buildMcpSection([])).toBe('')
+  // 没有 MCP 管理器 = 不知道，不是「一个都没配」。一个字都不该说
+  it('没有 MCP 管理器时一个字都不输出', () => {
     expect(buildMcpSection()).toBe('')
+    expect(buildMcpSection(undefined, [BLENDER_INSTALLABLE])).toBe('')
+  })
+
+  // 有管理器但列表是空的：可能真没配，也可能是发现流程失败被吞了。
+  // 所以措辞是「没有连上的」，不是「你一个都没配」
+  it('列表为空且没有可装的东西时也不输出', () => {
+    expect(buildMcpSection([])).toBe('')
+  })
+
+  /**
+   * 模型最容易把「还没连」说成「做不到」：真机上用户说「我装了 Blender，
+   * 连一下」，它回「我没有连 Blender 的工具」，而设置页里就摆着一键接入。
+   *
+   * **这段话不能挂在「一条 server 都没有」上。** `statuses` 里还混着引擎
+   * 自动发现的和插件带来的 server，开着 UE 5.8 工程的用户长度不为 0 ——
+   * 而他正是会来问这句话的人。
+   */
+  it('可以一键装的东西，不管已经连着几个 server 都要说', () => {
+    const texts = [
+      buildMcpSection([], [BLENDER_INSTALLABLE]),
+      buildMcpSection([connected('ue-official', 3)], [BLENDER_INSTALLABLE])
+    ]
+    for (const text of texts) {
+      expect(text).toContain('Settings → MCP can install these')
+      expect(text).toContain('Blender')
+      // 不能只说「没有」就完了 —— 那正是模型自己的默认反应
+      expect(text).toContain('do NOT tell the user such a capability is impossible')
+    }
+  })
+
+  describe('算哪些东西现在真能一键装', () => {
+    // Linux 也是发行目标。在那儿把模型指到一个不存在的按钮前面，
+    // 和原来说「做不到」一样是假话，只是换了个方向
+    it('没有安装脚本的平台上不提', () => {
+      expect(installableIntegrations([], 'linux')).toEqual([])
+    })
+
+    it('Windows 和 macOS 上提', () => {
+      expect(installableIntegrations([], 'win32')).toEqual([BLENDER_INSTALLABLE])
+      expect(installableIntegrations([], 'darwin')).toEqual([BLENDER_INSTALLABLE])
+    })
+
+    // 已经连上了就不必再提「可以装」，describe 那几行已经把工具数讲清楚了
+    it('已经连上的就不再提', () => {
+      expect(installableIntegrations([connected('blender', 26)], 'win32')).toEqual([])
+    })
+
+    it('配了但没连上的照样提 —— 那正是要修的状态', () => {
+      expect(installableIntegrations([failed('blender', 'boom')], 'win32')).toEqual([
+        BLENDER_INSTALLABLE
+      ])
+    })
   })
 
   it('连上的 server 报出 id、工具数和工具名前缀', () => {

@@ -4,13 +4,25 @@
 
 ## 使用方式
 
-在盒子偏好设置的 MCP 页连接官方 Blender Lab 服务，随后让 Agent 使用 `blender-ue-pipeline` 技能。例如：
+在盒子偏好设置的 MCP 页点「一键接入」，随后让 Agent 使用 `blender-ue-pipeline` 技能。例如：
 
 > 把当前道具送到 Blender，四周做 4 厘米倒角，再回传 UE。保留原件和尺寸，创建一个 `_DCC` 副本。
 
 第一次回传创建副本。用户把副本放进关卡之后，继续说“把倒角调细一点，再更新刚才的副本”，管道会更新同一个资产。引用该副本的场景实例保留位置、旋转和缩放。原件的场景实例不会被自动替换。
 
 技能与执行脚本：[blender-ue-pipeline](../resources/skills/blender-ue-pipeline/SKILL.md)。安装方法：[官方 MCP 设置](../resources/skills/blender-ue-pipeline/references/setup.md)。
+
+## 接入这一步为什么要盒子代劳
+
+手工流程一共四道关：装 git 和 Python 3.11+、跑 `setup_mcp.ps1` / `setup_mcp.py`、把装出来的一长串绝对路径手敲进 MCP 设置、再手敲三行环境变量。**四道全过的用户几乎没有**，过不完就等于这个能力不存在——和 UE 5.8 官方 MCP 那四步是同一个病（见 [epicSetup.ts](../src/main/agent-v3/capabilities/mcp/epicSetup.ts)）。其中第 4 道最隐蔽：`BLENDER_PATH` 少一个字，自动拉起 Blender 的整段逻辑就认不出这是本机 Blender，静默失效。
+
+后三道现在由设置页的「一键接入」代劳：探清前置 → 在主进程里跑安装脚本 → 读脚本写出来的 `mcp-entry.json`，把那一条并进 `mcp.json`，装完立刻重连。逻辑在 [blenderSetup.ts](../src/main/agent-v3/capabilities/mcp/blenderSetup.ts)（纯逻辑）与 [blenderSetupRuntime.ts](../src/main/agent-v3/capabilities/mcp/blenderSetupRuntime.ts)（探依赖、跑脚本）。三件事值得记下来：
+
+- **安装脚本在主进程里跑，不走 agent 的 `run_shell_command`。** 那个工具只在机器上找得到 bash 时才注册（纯蓝图用户的机器上通常没有），于是原来在这类机器上模型连工具都看不见，只能回一句「我没有连 Blender 的能力」——而那是假话。
+- **第 1 道不代劳，但必须查清再报。** 装 git 和 Python 是在用户机器上装软件，盒子没有理由替他决定装哪个版本、装到哪里；可是脚本自己缺 git 时只甩一句 `Command failed: git`，用户看不出那是要他去装 git。所以前置逐项探、逐项点名，版本太低和没装分成两句不同的话。
+- **不自己拼那条 MCP 配置。** 装到哪、可执行文件叫什么由安装脚本说了算，盒子只读它写出来的 `mcp-entry.json`；两边各写一遍迟早分叉。重复点也不会装两遍——脚本认 `installed-revision.txt`，同一版本直接跳到装插件那步，所以这个按钮同时兼做「插件装坏了修一修」。
+
+系统提示词里也会说一句「这些东西设置页能一键装」（[promptSection.ts](../src/main/agent-v3/capabilities/mcp/promptSection.ts)）。原来那里是空的，省下的 token 换来的是模型把「还没连」说成「做不到」。这句话**不挂在「一条 server 都没配」上**：`statuses` 里还混着引擎自动发现的和插件带来的 server，开着 UE 5.8 工程的用户长度不为 0，而他正是会来问「连一下 Blender」的那个人。平台不支持（Linux 没有安装脚本）或者已经连上了才不说 —— 把模型指到一个不存在的按钮前面，和原来说「做不到」一样是假话。
 
 Blender 没开着不需要用户处理。调用需要桥的工具而端口连不上时，盒子按 MCP 配置里的 `BLENDER_PATH` 自己启动 Blender（带 `--online-mode`，插件的 Auto Start 会接管开桥），等桥通了把这次调用重跑一遍，并在结果里说明自动启动过。只有连接被拒会触发，超时不会 —— 超时表示结果未知。Blender 已经开着但桥没启动时不再开第二个窗口，只报出该在偏好设置里点哪里。启动逻辑在 [blenderBridge.ts](../src/main/agent-v3/capabilities/mcp/blenderBridge.ts)。
 

@@ -36,6 +36,7 @@ import AppCheckbox from '@renderer/components/AppCheckbox.vue'
  * **打开写权限时才展开那段长的** —— 风险变了才提示，而不是每次进来都吓一遍。
  * 常驻的警告等于没有警告。
  */
+import { PhCaretRight } from '@phosphor-icons/vue'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { message } from '@renderer/utils/messageManager'
 import { useI18n } from 'vue-i18n'
@@ -49,6 +50,8 @@ import {
   parseEnvText,
   toFormValues,
   toSettings,
+  BLENDER_SERVER_ID,
+  type BlenderSetupStatus,
   type EpicSetupProjectStatus,
   type McpServerFormValue
 } from '@renderer/api/mcp'
@@ -59,7 +62,8 @@ const { t } = useI18n()
 const servers = ref<McpServerFormValue[]>([])
 const statuses = ref<McpServerStatus[]>([])
 const configPath = ref('')
-const saving = ref(false)
+/** 正在存的那一条的 id。按行存，所以「正在忙」也是按行的 */
+const savingId = ref('')
 const saveError = ref('')
 
 /** 停止状态下也带着端口/令牌/配置片段，所以初值要给全 */
@@ -182,36 +186,49 @@ function envError(value: McpServerFormValue): string {
   return t('mcp.errors.envInvalid', { line: invalid[0] })
 }
 
-/** 真正会被写盘的行。空行在这里就被丢掉了 —— 见 `isBlankRow` */
-const filledServers = computed(() => servers.value.filter((s) => !isBlankRow(s)))
-
-const badRowCount = computed(
-  () => filledServers.value.filter((s) => idError(s) !== '' || envError(s) !== '').length
-)
-
-const hasErrors = computed(() => badRowCount.value > 0)
+/** 这一行自己有没有填错。挡的只是它自己的保存按钮 */
+function rowError(value: McpServerFormValue): string {
+  return idError(value) || envError(value)
+}
 
 /**
- * 禁用的按钮必须说出自己为什么点不动。
+ * 盘上现在是什么：id → 那一条配置的 JSON。
  *
- * 出错的那行可能滚出了视野（尤其是加到第三、四条以后），用户看到的就只是
- * 一个灰掉的主按钮。灰而不说等于让人猜。
+ * ## 为什么是逐条，不是整张表一个快照
+ *
+ * 每条 server 各存各的（见 `saveRow`），所以「有没有改过」也必须逐条问。
+ * 原来是整张表一个 `savedSnapshot`，那时候保存也是整张表一起写，两者是配的；
+ * 现在按行存，再用整表快照就会出现「A 行存完了，B 行因为还没存而让 A 也
+ * 显示成未保存」。
+ *
+ * 比较用 `toSettings([row])` 的结果而不是表单值本身 —— 表单里
+ * `commandLine` 和 `env` 是文本，多一个空格、换一下行序都会变，但落盘的
+ * 结果一模一样。拿文本比会让一条没改过的配置一直亮着「未保存」。
  */
-const saveBlockedReason = computed(() =>
-  hasErrors.value ? t('mcp.errors.blocked', { count: badRowCount.value }) : ''
-)
+const diskSnapshot = ref<Record<string, string>>({})
+
+function rowSnapshot(value: McpServerFormValue): string {
+  const id = value.id.trim()
+  return JSON.stringify(toSettings([value]).mcpServers[id] ?? null)
+}
+
+function rememberDisk(settings: McpSettings): void {
+  const next: Record<string, string> = {}
+  for (const row of toFormValues(settings)) next[row.id] = rowSnapshot(row)
+  diskSnapshot.value = next
+}
 
 /**
- * 有没有没保存的改动。
+ * 这一行和盘上不一样吗？
  *
- * 上半页是「改完要点保存」，下半页的端口是「失焦就落盘」—— 同一页两套语义，
- * 用户没理由猜得到哪个是哪个。至少要让这半页的改动**看得见**：
- * 这个面板已经因为「悄悄丢配置」出过一次事，切走页面丢掉一屏输入是同一个症状
- * 换了个入口。
+ * 空行不算（还没填，谈不上改动）。盘上没有这个 id 的一律算「没存过」——
+ * 新加的行、以及刚改过名的行都落在这里，两种都确实还没写进 `mcp.json`。
  */
-const savedSnapshot = ref('')
-const snapshotOf = (): string => JSON.stringify(toSettings(filledServers.value))
-const isDirty = computed(() => savedSnapshot.value !== '' && snapshotOf() !== savedSnapshot.value)
+function isRowDirty(value: McpServerFormValue): boolean {
+  if (isBlankRow(value)) return false
+  const saved = diskSnapshot.value[value.id.trim()]
+  return saved === undefined || saved !== rowSnapshot(value)
+}
 
 /**
  * 引擎自动发现来的 server（UE 5.8 内置的官方 MCP）。
@@ -278,7 +295,6 @@ const engineSummary = computed((): { tone: string; label: string } | undefined =
  * 好好跑着的时候才允许收成一行 —— 那时候里面确实没有要处理的事。
  */
 const showEngine = ref(false)
-const engineOpen = computed(() => showEngine.value || engineFailed.value)
 
 /**
  * 把主进程回的视图落到本地表单状态。
@@ -331,13 +347,13 @@ async function load(): Promise<void> {
     servers.value = toFormValues(result.settings)
     statuses.value = result.statuses
     configPath.value = result.path
-    // 「未保存」的基准线。读失败时留空 —— 那时候一切改动都无从比较，
+    // 逐条的「未保存」基准线。读失败时留空 —— 那时候一切改动都无从比较，
     // 顶着一个假的「已保存」比不显示更糟
-    savedSnapshot.value = snapshotOf()
+    rememberDisk(result.settings)
   } catch (error) {
     console.warn('[MCP] 读取第三方 server 配置失败:', error)
   }
-  await Promise.all([refreshHost(), refreshEpic()])
+  await Promise.all([refreshHost(), refreshEpic(), refreshBlender()])
 }
 
 /**
@@ -383,21 +399,6 @@ const epicReady = computed(() => epicProjects.value.filter((p) => p.state === 'r
 const epicAllReady = computed(
   () => epicProjects.value.length > 0 && epicProjects.value.every((p) => p.state === 'ready')
 )
-
-/**
- * 一键块唯一该收起来的条件：全都开好了，**并且自动发现块真的接手了**。
- *
- * 后半句是补上的。原来只看 `epicAllReady`，而那两个判据的数据源根本不一样：
- * `epicStatus` 每次都真去探端口，`statuses` 是 MCP manager 上次连接时的快照。
- * 用户开着盒子再去打开 5.8 工程和插件时两者必然错位 —— 探得到 ready，
- * 快照里却一条都没有，于是一键块因为「已经好了」收起，自动发现块因为
- * 「还不知道好了」不出现，中间是一片没有任何解释的空白。
- *
- * 这正是本文件上面那段注释写过的教训（见 `epicLoading` 那块）：
- * **空白不是「没有噪音」，空白是「看起来坏了」**。同一个错在状态机的
- * 另一端又犯了一遍，所以这里把交接做成互锁：接手的那块出现了，才允许收起。
- */
-const hideEpicSetup = computed(() => epicAllReady.value && engineStatuses.value.length > 0)
 
 /**
  * 探到服务在跑、缓存里却没有它 —— 自动补一次重连。
@@ -462,6 +463,329 @@ async function setupEpic(project: EpicSetupProjectStatus): Promise<void> {
   }
 }
 
+/**
+ * 一键接入官方 Blender Lab MCP。
+ *
+ * 和上面的引擎一键是同一个病：手工流程写在技能文档里，四道关
+ * （装 git/Python、跑安装脚本、手填一长串绝对路径、再手填三行环境变量），
+ * **走完的用户几乎没有**，走不完就等于这个能力不存在。
+ *
+ * ## 这一块也常驻，理由同上
+ *
+ * 缺 git、缺 Python、Blender 版本不够、Linux —— 四种原因如果都渲染成
+ * 「按钮不出现」，用户看到的是同一片空白。所以：能装就给按钮，不能装就
+ * **点名说缺哪一个、去哪装**（`describeMissing` 在主进程里拼好）。
+ *
+ * 只有已经配过（`configured`）才收起 —— 那时下面的 server 列表里就有这一条，
+ * 通没通看那里，这块再留着就是重复。
+ */
+const blender = ref<BlenderSetupStatus | undefined>()
+const blenderBusy = ref(false)
+const blenderMessage = ref('')
+const blenderError = ref('')
+const blenderLoading = ref(true)
+
+/**
+ * 用户自己指的那个 Blender。
+ *
+ * 自动探测只认官方安装器和 Steam 的标准位置 —— 便携版、装在 D 盘、
+ * 放在网络盘上的都猜不到，而那不是少数。没有这个入口的话，那些用户看到的是
+ * 一个永远点不了的按钮加一句「没找到 Blender」，**没有任何出路**。
+ */
+const pickedBlender = ref('')
+
+/** 装的时候用哪个 Blender：用户指的优先 */
+const blenderTarget = computed(() => pickedBlender.value || blender.value?.blenderPath || '')
+
+/**
+ * 配好**而且真的连上了**才收起来。下面的 server 列表接手报工具数。
+ *
+ * ## 后半句不能省
+ *
+ * 只看 `state === 'configured'` 的话，`mcp.json` 里一旦有一条带
+ * `BLENDER_PATH` 的配置，这一块就永远消失 —— 哪怕桥已经死了。真会发生：
+ * 插件装在 Blender 5.1 的扩展目录里，用户升到 5.2 之后扩展是分版本存的，
+ * 桥没了；或者用户在 Blender 偏好里把插件停用了；或者安装目录被清掉了。
+ * 这些时候 `runBlenderSetup` 的「再点一次修一修」正是唯一的出路，
+ * 而唯一能调它的按钮刚好不见了，只剩下手改 `mcp.json`。
+ *
+ * 判据和上面引擎那块的 `hideEpicSetup` 是同一条：**接手的那块真的在
+ * 说话了，才允许收起**。
+ */
+const hideBlenderSetup = computed(() => {
+  if (blender.value?.state !== 'configured') return false
+  const id = blender.value.configuredServerId
+  return statuses.value.some((s) => s.id === id && s.connected)
+})
+
+/**
+ * 真正挡住安装的那几条。
+ *
+ * 用户自己指了 Blender 之后，探到的那条 blender 前置就不该再挡路 ——
+ * 探测本来就只认标准位置，让它否决一个用户亲手指出来的文件是本末倒置。
+ * git 和 python 两条与选哪个 Blender 无关，照挡。
+ */
+const blenderBlockers = computed(() =>
+  (blender.value?.prerequisites ?? []).filter(
+    (item) => !item.ok && !(item.id === 'blender' && pickedBlender.value)
+  )
+)
+
+const canInstallBlender = computed(
+  () =>
+    blender.value !== undefined &&
+    blender.value.state !== 'unsupported' &&
+    blenderTarget.value !== '' &&
+    blenderBlockers.value.length === 0
+)
+
+/** 让用户自己指一个 blender 可执行文件 */
+async function chooseBlender(): Promise<void> {
+  try {
+    const result = await window.api.dialog.showOpenDialog({
+      properties: ['openFile'],
+      // macOS 上用户看到的是 Blender.app；安装脚本两种都收，交给它解析
+      filters:
+        window.api.platform === 'darwin'
+          ? [{ name: 'Blender', extensions: ['app'] }]
+          : [{ name: 'Blender', extensions: ['exe'] }]
+    })
+    const picked = result.canceled ? '' : (result.filePaths?.[0] ?? '')
+    if (picked) pickedBlender.value = picked
+  } catch (error) {
+    console.warn('[MCP] 选择 Blender 失败:', error)
+  }
+}
+
+/** 一条前置渲染成一行人话。`found` 原样带上，「4.5，需要 5.1+」才指得出下一步 */
+function prerequisiteLabel(item: {
+  id: 'blender' | 'git' | 'python'
+  found?: string
+  problem?: 'missing' | 'too-old'
+}): string {
+  const key = item.problem === 'too-old' ? 'tooOld' : 'missing'
+  return t(`mcp.blenderSetup.prereq.${item.id}.${key}`, { found: item.found ?? '' })
+}
+
+async function refreshBlender(): Promise<void> {
+  blenderLoading.value = true
+  blenderError.value = ''
+  try {
+    const result = await mcpClientAPI.blenderStatus()
+    blender.value = result.success ? result.status : undefined
+    // 主进程报的错照样要显示 —— 开发时最常见的是主进程没重启，
+    // 新 IPC 通道压根不存在，吞掉就又成了那片没有原因的空白
+    if (!result.success) blenderError.value = result.error ?? ''
+  } catch (error) {
+    blender.value = undefined
+    blenderError.value = (error as Error).message
+  } finally {
+    blenderLoading.value = false
+  }
+}
+
+/**
+ * 把主进程刚写进 `mcp.json` 的那条 Blender 认领进表单，**只动那一行**。
+ *
+ * ## 为什么不能直接 `load()`
+ *
+ * `load()` 会 `servers.value = toFormValues(...)` 整张表重来。装一次要几分钟，
+ * 用户完全可能在等待期间接着编辑别的 server —— 回来时他新加的那行没了、
+ * 其余行全收起了（`expandedRows` 按对象身份记，换了对象就全丢），
+ * **连出过事的痕迹都没有**。
+ *
+ * 所以只补那一行：盘上新增的 Blender 进表单，用户手上的编辑原样留着，
+ * 基准线按**盘上的内容**重算，于是他那些编辑仍然显示为未保存。
+ */
+async function adoptInstalledBlenderRow(): Promise<void> {
+  try {
+    const result = await mcpClientAPI.getSettings()
+    statuses.value = result.statuses
+    configPath.value = result.path
+
+    const installed = toFormValues(result.settings).find((row) => row.id === BLENDER_SERVER_ID)
+    if (installed) {
+      const at = servers.value.findIndex((row) => row.id === BLENDER_SERVER_ID)
+      if (at >= 0) servers.value.splice(at, 1, installed)
+      else servers.value.push(installed)
+    }
+
+    // 基准线是「盘上现在是什么」，不是「表单现在是什么」——
+    // 后者会把用户没保存的编辑一起算成已保存
+    rememberDisk(result.settings)
+  } catch (error) {
+    console.warn('[MCP] 装完之后重读配置失败:', error)
+  }
+}
+
+/**
+ * 点一次装一次。
+ *
+ * 跑几分钟很正常（git fetch + 建 venv + pip + 两次后台 Blender），所以
+ * 按钮上要写「安装中」而不是转个圈 —— 静默几分钟的界面，用户会当它死了
+ * 然后去点第二次。主进程那边有 15 分钟上限，不会无限挂着。
+ */
+async function setupBlender(): Promise<void> {
+  if (blenderBusy.value) return
+  blenderBusy.value = true
+  blenderMessage.value = ''
+  try {
+    const result = await mcpClientAPI.blenderSetup(blenderTarget.value)
+    // message 由主进程给：这次是装好了、缺前置、还是脚本自己挂了，
+    // 只有它知道；渲染层照 state 猜会和实际发生的事对不上
+    blenderMessage.value = result.message ?? result.error ?? ''
+    if (result.statuses) statuses.value = result.statuses
+    // 装成功那一刻 `blenderActionable` 会翻假，这一行本来会自动收起 ——
+    // 连同刚写好的那句回执一起消失。用户等了三五分钟，界面什么都没留下，
+    // 丢掉的还偏偏是别处没有的那句「盒子会自己把 Blender 拉起来，不用手动开」。
+    showBlender.value = true
+    if (result.success) await adoptInstalledBlenderRow()
+    await refreshBlender()
+  } catch (error) {
+    blenderMessage.value = (error as Error).message
+  } finally {
+    blenderBusy.value = false
+  }
+}
+
+/* ── 内置 vs 手动配置 ─────────────────────────────────────── */
+
+/**
+ * 盒子自己装的那条 Blender，从「手动配置」里摘出去。
+ *
+ * 它写在 `mcp.json` 里，所以技术上和手填的那几条一模一样 —— 但**来源不同就是
+ * 两回事**：手填的那条坏了是用户自己的责任，这条坏了该去点「重新安装」。
+ * 混在一起的时候，装好的 blender 和一条随手加的 filesystem 长得完全一样，
+ * 用户分不清哪条归谁管，也想不到上面那块安装卡片和下面这一行说的是同一个东西。
+ */
+function isPresetRow(value: McpServerFormValue): boolean {
+  return value.id.trim() === BLENDER_SERVER_ID
+}
+
+const blenderRowIndex = computed(() => servers.value.findIndex(isPresetRow))
+const blenderRow = computed(() => servers.value[blenderRowIndex.value])
+
+/** 手动配置那一组里还剩几条。空组要给一句话，不能留一片空白 */
+const manualCount = computed(() => servers.value.filter((s) => !isPresetRow(s)).length)
+
+/**
+ * 从一行的环境变量文本里取一个键。
+ *
+ * 装好的 Blender 真正可能要改的只有两样：装在哪（`BLENDER_PATH`）和端口
+ * （`BLENDER_MCP_PORT`）。它们埋在一块三行的 `KEY=VALUE` 文本里，用户得先知道
+ * 有这两个键、再知道拼写，才改得动。给它们各自一个带标签的输入框。
+ */
+function envOf(value: McpServerFormValue | undefined, key: string): string {
+  if (!value) return ''
+  return parseEnvText(value.env ?? '').env[key] ?? ''
+}
+
+/**
+ * 改回环境变量文本，**只动这一个键**。
+ *
+ * 不能整段重写：`parseEnvText` 认得的只是它认得的那些，用户手写的注释、
+ * 顺序、以及这个面板没在意的别的键都得原样留着 —— 这一页已经因为
+ * 「悄悄丢配置」出过一次事（见 `api/mcp.ts` 的 `PreservedServerFields`）。
+ */
+function setEnvOf(value: McpServerFormValue | undefined, key: string, next: string): void {
+  if (!value) return
+  const text = (value.env ?? '').trim()
+
+  // 整块 JSON 的写法也得认。按行改一个 `KEY=VALUE` 进去会把 JSON 改成
+  // 一段两种语法混着的东西，`parseEnvText` 从此整段算无效 —— 用户改了个
+  // 路径，结果整组环境变量静默消失，症状是「连上了、一调就失败」
+  if (text.startsWith('{')) {
+    const { env } = parseEnvText(text)
+    value.env = JSON.stringify({ ...env, [key]: next }, null, 2)
+    return
+  }
+
+  // 逐行改，只动这一个键：用户手写的注释、顺序、以及这个面板不认识的别的键
+  // 都得原样留着。这一页已经因为「悄悄丢配置」出过一次事
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '')
+  const at = lines.findIndex((line) => line.split('=')[0]?.trim() === key)
+  if (at >= 0) lines[at] = `${key}=${next}`
+  else lines.push(`${key}=${next}`)
+  value.env = lines.join('\n')
+}
+
+/** 「高级（原始 MCP 配置）」—— 逃生口，默认收着 */
+const showBlenderRaw = ref(false)
+
+/**
+ * 内置那两行什么时候强制摊开。
+ *
+ * 和 server 行同一条规矩：**有事要办、却藏在收起态里，等于这件事不存在**。
+ * 安装按钮、重试按钮、缺的前置、失败原因，任何一样在里面就摊开。
+ * 好好跑着的时候才允许收成一行 —— 那时里面确实没有要处理的事。
+ */
+const engineActionable = computed(
+  () =>
+    epicActionable.value.length > 0 ||
+    epicError.value !== '' ||
+    engineFailed.value ||
+    // 引擎那边好了、盒子这边还没接上：屏幕上只有一句「已开启 · 运行中」，
+    // 而**下一步在摊开的里面**（`readyHint`：会在下次对话时自动接上）。
+    // 这是原来那条一键块/自动发现块互锁换了个位置 —— 接手的那条真的在说话了，
+    // 才允许收起。两边都不说话的那片空白，用户读到的是「坏了」。
+    (epicReady.value.length > 0 && engineStatuses.value.length === 0)
+)
+const engineRowOpen = computed(() => showEngine.value || engineActionable.value)
+
+/** 还没装好就等于有事要办：按钮在行右端，缺的前置和说明在摊开的里面 */
+const blenderActionable = computed(() => !hideBlenderSetup.value && !blenderLoading.value)
+const showBlender = ref(false)
+const blenderRowOpen = computed(
+  () => showBlender.value || blenderActionable.value || blenderError.value !== ''
+)
+
+/**
+ * 虚幻引擎那一行右端说什么。
+ *
+ * 原来这些状态散在两块卡片里（一键块报「还没连项目 / 版本太低 / 要重启」，
+ * 自动发现块报「已连接 / 连接失败」），而它们说的是**同一个东西**在不同阶段。
+ * 压成一行之后就得排个优先级：真连上了以连接状态为准，没连上才轮到
+ * 「差哪一步」。
+ */
+const engineRowMeta = computed((): { tone: string; label: string } | undefined => {
+  if (engineSummary.value) return engineSummary.value
+  if (epicLoading.value) return { tone: 'muted', label: t('mcp.epicSetup.checking') }
+  if (epicError.value) return { tone: 'bad', label: t('mcp.status.failed') }
+  if (epicProjects.value.length === 0) {
+    return { tone: 'muted', label: t('mcp.epicSetup.noProjectShort') }
+  }
+  if (epicPendingRestart.value.length > 0) {
+    return { tone: 'muted', label: t('mcp.epicSetup.needsRestart') }
+  }
+  if (epicUnsupported.value.length > 0) {
+    return { tone: 'muted', label: t('mcp.epicSetup.unsupported') }
+  }
+  if (epicReady.value.length > 0) return { tone: 'ok', label: t('mcp.epicSetup.ready') }
+  return undefined
+})
+
+/**
+ * Blender 那一行右端说什么。
+ *
+ * 已经接上了就报连接状态（工具数 / 连接失败 / 已停用）—— 那是每次进这个页面
+ * 真正想知道的。没接上才轮到「差哪一步」，而那几句都得短到能挂在一行上；
+ * 完整的说明留给摊开的里面。
+ */
+const blenderRowMeta = computed((): { tone: string; label: string } => {
+  if (blenderLoading.value) return { tone: 'muted', label: t('mcp.blenderSetup.checking') }
+  const chip = chipOf(BLENDER_SERVER_ID)
+  if (chip) return { tone: chip.tone, label: chip.label }
+  if (blenderError.value) return { tone: 'bad', label: t('mcp.status.failed') }
+  if (blender.value?.state === 'unsupported') {
+    return { tone: 'muted', label: t('mcp.blenderSetup.unsupportedShort') }
+  }
+  if (!blenderTarget.value) return { tone: 'muted', label: t('mcp.blenderSetup.noBlender') }
+  if (blenderBlockers.value.length > 0) {
+    return { tone: 'muted', label: t('mcp.blenderSetup.missingPrereq') }
+  }
+  return { tone: 'muted', label: t('mcp.blenderSetup.notConnected') }
+})
+
 /** 新行的标识输入框。加完要把光标送进去，见 `addServer` */
 const idInputs = ref<HTMLInputElement[]>([])
 
@@ -492,38 +816,90 @@ async function addServer(): Promise<void> {
  * 要确认：手填的路径和环境变量删掉就没了，没有撤销。原来这里是裸删，
  * 而破坏性差不多的「重置令牌」反倒有确认 —— 保护级别正好反了。
  */
-function removeServer(index: number): void {
+/**
+ * 删一条 server，**当场落盘**。
+ *
+ * ## 为什么这一个动作不跟着「改完要点保存」走
+ *
+ * 这一页的其余编辑都是暂存的：改命令行、改 env，都要点「保存并连接」才生效。
+ * 删除原来也一样，于是用户点了删除、看见那行消失了，切回来发现它还在 ——
+ * 只能判断成「删除坏了」。确认弹窗还写着「不能撤销」，更坐实了这个误解。
+ *
+ * 删除和改一个输入框不是一回事：它有独立的确认弹窗，用户按下去的那一刻
+ * 认为事情已经办完了。所以让它真的办完。
+ *
+ * ## 只删这一条
+ *
+ * 不复用「保存并连接」那条路 —— 那个是把整张表写下去，会把用户在别的行里
+ * 还没保存的编辑一起提交。主进程的 `removeMcpServer` 走原文，只摘掉这一个键。
+ *
+ * 没保存过的行（草稿、空行）不必跑这一趟：盘上本来就没有它。
+ */
+async function removeServer(index: number): Promise<void> {
   const value = servers.value[index]
+  const id = value.id.trim()
   // 空行是用户刚点出来还没填的，删它没有任何损失，不该再拦一道
-  if (
-    !isBlankRow(value) &&
-    !window.confirm(t('mcp.actions.removeConfirm', { id: value.id.trim() }))
-  )
-    return
+  if (!isBlankRow(value) && !window.confirm(t('mcp.actions.removeConfirm', { id }))) return
+
+  const onDisk = !isBlankRow(value) && !isDraftRow(value)
   servers.value.splice(index, 1)
+  if (!onDisk) return
+
+  try {
+    const result = await mcpClientAPI.removeServer(id)
+    if (!result.success) {
+      saveError.value = result.error ?? t('mcp.errors.saveFailed')
+      return
+    }
+    if (result.statuses) statuses.value = result.statuses
+    // 基准线按**盘上现在的内容**重算：这一条已经删掉了，不该再顶着「未保存」，
+    // 而用户在别的行里没保存的编辑要继续算未保存
+    if (result.settings) rememberDisk(result.settings)
+  } catch (error) {
+    saveError.value = (error as Error).message
+  }
 }
 
-async function save(): Promise<void> {
-  if (hasErrors.value || saving.value) return
-  saving.value = true
+/**
+ * 存一条 server，当场落盘并重连。
+ *
+ * ## 为什么按行存，而不是一个总的「保存并连接」
+ *
+ * 一个总按钮把整张表一起写下去，于是几条互不相干的服务被绑成一件事：
+ * 改 blender 的时候顺手把另一条半填的也提交了；另一条填错了，blender
+ * 这条也存不了。**每条服务本来就是独立的**，编辑的粒度就该是一条。
+ *
+ * 配的这条 `saveServer` 只写这一个键，盘上别的条目原样不动 —— 包括
+ * `readMcpSettings` 认不出、但用户手写在 `mcp.json` 里的那些。
+ */
+async function saveRow(index: number): Promise<void> {
+  const value = servers.value[index]
+  const id = value.id.trim()
+  if (savingId.value || rowError(value) !== '' || isBlankRow(value)) return
+
+  const config = toSettings([value]).mcpServers[id]
+  if (!config) return
+
+  savingId.value = id
   saveError.value = ''
   try {
-    // 保存即重连，用户在这个页面就能看到每个 server 通没通，
+    // 存即重连，用户在这个页面就能看到它通没通，
     // 而不是等下一次对话才发现配错
-    const payload = toSettings(filledServers.value)
-    const result = await mcpClientAPI.saveSettings(payload)
+    const result = await mcpClientAPI.saveServer(id, config, value.savedId)
     if (result.success) {
       statuses.value = result.statuses ?? []
-      // 空行存不进 mcp.json，留在界面上只会一直顶着「未保存」的标记
-      servers.value = servers.value.filter((s) => !isBlankRow(s))
-      savedSnapshot.value = JSON.stringify(payload)
-      // 存完了就把编辑态收回去 —— 事办完了，屏幕该回到「一行一个服务」
-      expandedRows.value = new Set()
+      if (result.settings) rememberDisk(result.settings)
+      // 改过名的话，旧名字那条已经在盘上删掉了，这一行从此认新名字
+      value.savedId = id
+      // 存完了就把这一行收回去 —— 事办完了，它该回到「一行一个服务」
+      const next = new Set(expandedRows.value)
+      next.delete(value)
+      expandedRows.value = next
     } else saveError.value = result.error ?? t('mcp.errors.saveFailed')
   } catch (error) {
     saveError.value = (error as Error).message
   } finally {
-    saving.value = false
+    savingId.value = ''
   }
 }
 
@@ -713,305 +1089,574 @@ onMounted(load)
         主进程没起来，三种原因长得一模一样，都是一片空白。
         空白不是「没有噪音」，空白是「看起来坏了」。
       -->
-      <div v-if="!hideEpicSetup" class="engine-block setup">
-        <div class="engine-head">
-          <strong>{{ t('mcp.epicSetup.title') }}</strong>
-        </div>
+      <h4 class="section-title">{{ t('mcp.client.builtinTitle') }}</h4>
 
-        <p v-if="epicLoading" class="engine-hint">{{ t('mcp.epicSetup.loading') }}</p>
+      <ul class="category-list">
+        <li class="category builtin engine">
+          <div class="category-head">
+            <button class="category-open" @click="showEngine = !showEngine">
+              <PhCaretRight class="caret" :class="{ open: engineRowOpen }" />
+              <span class="category-name">{{ t('mcp.epicSetup.rowTitle') }}</span>
+              <!--
+                一行里只说一件事：现在是什么状态。原来这些话散在两块卡片里 ——
+                一键块说「还没连项目 / 版本太低 / 要重启」，自动发现块说
+                「已连接 / 连接失败」，可它们讲的是同一个东西的不同阶段。
+              -->
+              <span v-if="engineRowMeta" class="status" :class="engineRowMeta.tone">
+                {{ engineRowMeta.label }}
+              </span>
+            </button>
 
-        <!-- 主进程报的错原样显示。最常见的是开发时主进程没重启 -->
-        <p v-else-if="epicError" class="error">
-          {{ t('mcp.epicSetup.failed', { error: epicError }) }}
-        </p>
-
-        <!-- 一个项目都没连：这是最常见的「按钮怎么不见了」，必须点破 -->
-        <p v-else-if="epicProjects.length === 0" class="engine-hint">
-          {{ t('mcp.epicSetup.noProject') }}
-        </p>
-
-        <template v-else>
-          <div v-for="project in epicActionable" :key="project.connectionId" class="engine-row">
-            <code>{{ project.projectName }}</code>
+            <!--
+            有得点就把按钮放在行右端，别藏进摊开的里面 —— 这一整块存在的理由
+            就是那一下点击。只在**恰好一个**项目可操作时放这儿；多个项目时
+            按钮跟着各自的项目名走，摆在摊开的里面才分得清点的是哪个。
+          -->
             <AppButton
+              v-if="epicActionable.length === 1"
+              class="row-action"
               variant="primary"
               size="medium"
               :disabled="epicBusy !== ''"
-              @click="setupEpic(project)"
+              @click="setupEpic(epicActionable[0])"
             >
               {{
-                epicBusy === project.connectionId
+                epicBusy === epicActionable[0].connectionId
                   ? t('mcp.epicSetup.working')
-                  : project.state === 'needs-start'
+                  : epicActionable[0].state === 'needs-start'
                     ? t('mcp.epicSetup.start')
                     : t('mcp.epicSetup.enable')
               }}
             </AppButton>
           </div>
 
-          <!-- 配好了但没重启：给不了按钮，UE 没法热加载新插件模块 -->
-          <div v-for="project in epicPendingRestart" :key="project.connectionId" class="engine-row">
-            <code>{{ project.projectName }}</code>
-            <span class="status muted">{{ t('mcp.epicSetup.needsRestart') }}</span>
-          </div>
+          <div v-if="engineRowOpen" class="category-body">
+            <!-- 主进程报的错原样显示。最常见的是开发时主进程没重启 -->
+            <p v-if="epicError" class="error">
+              {{ t('mcp.epicSetup.failed', { error: epicError }) }}
+            </p>
 
-          <!-- 引擎太老：点名说出版本号，否则用户只会觉得按钮丢了 -->
-          <div v-for="project in epicUnsupported" :key="project.connectionId" class="engine-row">
-            <code>{{ project.projectName }}</code>
-            <span class="status muted">{{ t('mcp.epicSetup.unsupported') }}</span>
-          </div>
+            <!-- 一个项目都没连：这是最常见的「按钮怎么不见了」，必须点破 -->
+            <p v-else-if="epicProjects.length === 0" class="section-note">
+              {{ t('mcp.epicSetup.noProject') }}
+            </p>
 
-          <!--
-            已经开好了。绝大多数时候这几行不会出现 —— 自动发现块接手报状态，
-            整块就收起来了。它存在只为一种情况：服务确实在跑，但盒子这边
-            还没连上（补连失败、或用户把它在 mcp.json 里停用了）。
-            那时候什么都不显示，用户看到的就是一片「坏了」。
-          -->
-          <div v-for="project in epicReady" :key="project.connectionId" class="engine-row">
-            <code>{{ project.projectName }}</code>
-            <span class="status ok">{{ t('mcp.epicSetup.ready') }}</span>
-          </div>
-        </template>
+            <template v-else>
+              <!-- 多个项目才逐条给按钮，否则行右端那一个就够了（见上面） -->
+              <template v-if="epicActionable.length > 1">
+                <div
+                  v-for="project in epicActionable"
+                  :key="project.connectionId"
+                  class="engine-row"
+                >
+                  <code>{{ project.projectName }}</code>
+                  <AppButton
+                    variant="primary"
+                    size="medium"
+                    :disabled="epicBusy !== ''"
+                    @click="setupEpic(project)"
+                  >
+                    {{
+                      epicBusy === project.connectionId
+                        ? t('mcp.epicSetup.working')
+                        : project.state === 'needs-start'
+                          ? t('mcp.epicSetup.start')
+                          : t('mcp.epicSetup.enable')
+                    }}
+                  </AppButton>
+                </div>
+              </template>
 
-        <p v-if="epicMessage" class="engine-hint">{{ epicMessage }}</p>
-        <p v-else-if="epicActionable.length > 0" class="engine-hint">
-          {{ t('mcp.epicSetup.hint') }}
-        </p>
-        <!-- 能走到这儿说明引擎那边好了、盒子这边还没接上，得说清下一步 -->
-        <p v-else-if="epicReady.length > 0" class="engine-hint">
-          {{ t('mcp.epicSetup.readyHint') }}
-        </p>
-      </div>
+              <!-- 配好了但没重启：给不了按钮，UE 没法热加载新插件模块 -->
+              <div
+                v-for="project in epicPendingRestart"
+                :key="project.connectionId"
+                class="engine-row"
+              >
+                <code>{{ project.projectName }}</code>
+                <span class="status muted">{{ t('mcp.epicSetup.needsRestart') }}</span>
+              </div>
 
-      <!--
-        引擎自动发现来的那条排在最前面，且**只读**。
-        它不在 mcp.json 里，做成可编辑行只会让用户去找一个改不动的配置项。
+              <!-- 引擎太老：点名说出版本号，否则用户只会觉得按钮丢了 -->
+              <div
+                v-for="project in epicUnsupported"
+                :key="project.connectionId"
+                class="engine-row"
+              >
+                <code>{{ project.projectName }}</code>
+                <span class="status muted">{{ t('mcp.epicSetup.unsupported') }}</span>
+              </div>
 
-        好好跑着的时候收成一行：这块用户什么都不用做，摊开五行只是在占地方。
-        一旦连不上就强制摊开 —— 那时候里面有原因要看、有按钮要点。
-      -->
-      <div v-if="engineStatuses.length > 0" class="engine-block discovered">
-        <div class="engine-head">
-          <button class="row-toggle" @click="showEngine = !showEngine">
-            <span class="caret" :class="{ open: engineOpen }">›</span>
-            <strong>{{ t('mcp.engine.title') }}</strong>
-          </button>
-          <span class="status muted">{{ t('mcp.engine.readOnly') }}</span>
-          <!-- 收起的那一行必须自己说清楚里面是好是坏 -->
-          <span v-if="engineSummary" class="status" :class="engineSummary.tone">
-            {{ engineSummary.label }}
-          </span>
-        </div>
-
-        <template v-if="engineOpen">
-          <p class="engine-desc">{{ t('mcp.engine.description') }}</p>
-
-          <div v-for="status in engineStatuses" :key="status.id" class="engine-entry">
-            <div class="engine-row">
-              <code>{{ status.id }}</code>
               <!--
+              已经开好了，但下面那几条自动发现的 server 还没接上。
+              正常情况下这几行不会出现 —— 接上了就由 `engineStatuses` 报状态。
+              它只为一种情况存在：引擎服务确实在跑，盒子这边还没连上（补连失败、
+              或用户在 mcp.json 里把它停用了）。那时候什么都不显示，
+              用户看到的就是一片「坏了」。
+            -->
+              <template v-if="engineStatuses.length === 0">
+                <div v-for="project in epicReady" :key="project.connectionId" class="engine-row">
+                  <code>{{ project.projectName }}</code>
+                  <span class="status ok">{{ t('mcp.epicSetup.ready') }}</span>
+                </div>
+              </template>
+            </template>
+
+            <!--
+            真连上的那几条 server。原来这是一块独立的「自动发现」卡片，
+            而它报的「已连接 · 3 个入口」和上面一键块报的「已开启 · 运行中」
+            是同一件事的两种说法，摆成两块只会让人对账。
+          -->
+            <!-- 用户没做任何配置就多出一条东西，必须说清楚它从哪来 -->
+            <p v-if="engineStatuses.length > 0" class="engine-desc">
+              {{ t('mcp.engine.description') }}
+            </p>
+
+            <div v-for="status in engineStatuses" :key="status.id" class="engine-entry">
+              <div class="engine-row">
+                <code>{{ status.id }}</code>
+                <!--
                 连上时不能报「3 个工具」。上面刚说完「约 900 个」，
                 旁边一个「3 个工具」的绿标签，看起来就是没接全 ——
                 这是真实被问过的一句「怎么只有三个工具」。
                 这里说清楚 3 是**入口**，不是能力总数。
               -->
-              <span v-if="status.connected" class="status ok" :title="t('mcp.engine.twoTier')">
-                {{ t('mcp.engine.connected', { count: status.toolCount }) }}
-              </span>
-              <span v-else class="status" :class="chipOf(status.id)!.tone">
-                {{ chipOf(status.id)!.label }}
-              </span>
-            </div>
-            <!--
+                <span v-if="status.connected" class="status ok" :title="t('mcp.engine.twoTier')">
+                  {{ t('mcp.engine.connected', { count: status.toolCount }) }}
+                </span>
+                <span v-else class="status" :class="chipOf(status.id)!.tone">
+                  {{ chipOf(status.id)!.label }}
+                </span>
+              </div>
+              <!--
               原因写出来，不放 tooltip。一条「连接失败」不带原因，用户能做的只有
               瞪着它；而原因常常一句话就说清了（`ECONNREFUSED 127.0.0.1:30069`），
               是这一屏信息量最大的一行字。
             -->
-            <p v-if="errorOf(status.id)" class="row-error">{{ errorOf(status.id) }}</p>
-          </div>
+              <p v-if="errorOf(status.id)" class="row-error">{{ errorOf(status.id) }}</p>
+            </div>
 
-          <!-- 重试放在看到问题的地方。好好跑着的时候不给按钮：没什么可重试的 -->
-          <div v-if="engineFailed" class="actions">
-            <AppButton variant="primary" size="medium" :disabled="reconnecting" @click="reconnect">
-              {{ reconnecting ? t('mcp.engine.retrying') : t('mcp.engine.retry') }}
-            </AppButton>
-          </div>
+            <!-- 重试放在看到问题的地方。好好跑着的时候不给按钮：没什么可重试的 -->
+            <div v-if="engineFailed" class="actions">
+              <AppButton
+                variant="primary"
+                size="medium"
+                :disabled="reconnecting"
+                @click="reconnect"
+              >
+                {{ reconnecting ? t('mcp.engine.retrying') : t('mcp.engine.retry') }}
+              </AppButton>
+            </div>
 
-          <!--
+            <p v-if="epicMessage" class="section-note">{{ epicMessage }}</p>
+            <p v-else-if="epicActionable.length > 0" class="section-note">
+              {{ t('mcp.epicSetup.hint') }}
+            </p>
+            <!-- 能走到这儿说明引擎那边好了、盒子这边还没接上，得说清下一步 -->
+            <p v-else-if="epicReady.length > 0 && engineStatuses.length === 0" class="section-note">
+              {{ t('mcp.epicSetup.readyHint') }}
+            </p>
+
+            <!--
             两层结构讲在正文里，不能只放进 tooltip —— 会问「怎么只有三个」的人不会去悬停。
             但**只在真连上时讲**：连接失败的时候屏幕上没有那个「3」，
             再解释一遍「每个入口包含多种操作」就是纯噪音，还盖住了真正的问题。
           -->
-          <p v-if="engineStatuses.some((s) => s.connected)" class="engine-hint">
-            {{ t('mcp.engine.twoTier') }}
+            <p v-if="engineStatuses.some((s) => s.connected)" class="section-note">
+              {{ t('mcp.engine.twoTier') }}
+            </p>
+            <p v-if="engineStatuses.length > 0" class="section-note">
+              {{ t('mcp.engine.hint') }}
+            </p>
+          </div>
+        </li>
+
+        <!--
+        一键接入 Blender。同样常驻（配好了才收起）——
+        缺 git、缺 Python、Blender 太老、Linux，四种原因如果都长成
+        「按钮不出现」，用户看到的是同一片空白。
+      -->
+        <!--
+        Blender 也是内置的一条。
+
+        原来它出现**两次**：上面一块「一键接入」的安装卡片，下面「手动配置的
+        服务」里还有一条可编辑的 `blender` —— 而那条恰恰是安装卡片自己写进
+        `mcp.json` 的。用户看到的是同一个东西的两个身份，且下面那条长得和
+        随手加的第三方服务一模一样，看不出它归盒子管。
+      -->
+        <li class="category builtin blender">
+          <div class="category-head">
+            <button class="category-open" @click="showBlender = !showBlender">
+              <PhCaretRight class="caret" :class="{ open: blenderRowOpen }" />
+              <span class="category-name">{{ t('mcp.blenderSetup.rowTitle') }}</span>
+              <span class="status" :class="blenderRowMeta.tone">
+                {{ blenderRowMeta.label }}
+              </span>
+            </button>
+
+            <!--
+            没装好就把「一键接入」摆在行右端 —— 这一整块存在的理由就是这一下点击，
+            藏进摊开的里面等于它不存在。摊开是自动的（见 `blenderRowOpen`），
+            所以缺哪个前置、要用哪个 Blender，点之前都看得见。
+          -->
+            <AppButton
+              v-if="blenderActionable && blender?.state !== 'unsupported'"
+              class="row-action"
+              variant="primary"
+              size="medium"
+              :disabled="blenderBusy || !canInstallBlender"
+              @click="setupBlender"
+            >
+              {{ blenderBusy ? t('mcp.blenderSetup.working') : t('mcp.blenderSetup.install') }}
+            </AppButton>
+          </div>
+
+          <!-- 连不上的原因常驻显示，和手配的那几条一样 -->
+          <p v-if="errorOf(BLENDER_SERVER_ID)" class="row-error">
+            {{ errorOf(BLENDER_SERVER_ID) }}
           </p>
-          <p class="engine-hint">{{ t('mcp.engine.hint') }}</p>
-        </template>
-      </div>
+
+          <div v-if="blenderRowOpen" class="category-body">
+            <!-- 主进程报的错原样显示，最常见的是开发时主进程没重启 -->
+            <p v-if="blenderError" class="error">
+              {{ t('mcp.blenderSetup.failed', { error: blenderError }) }}
+            </p>
+
+            <p v-else-if="blender?.state === 'unsupported'" class="section-note">
+              {{ t('mcp.blenderSetup.unsupported') }}
+            </p>
+
+            <!-- ── 还没装好：选 Blender、看缺什么 ────────────────── -->
+            <template v-else-if="blenderActionable">
+              <div class="engine-row">
+                <code v-if="blenderTarget">{{ blenderTarget }}</code>
+                <!--
+                这里是「探到了什么」，不是状态胶囊，所以不用 `.status` ——
+                胶囊那个类在这一页是「连上了没有」的专用词汇，借过来用会让
+                「没找到 Blender」和一条 server 的连接状态长得一样。
+              -->
+                <span v-else class="section-note">{{ t('mcp.blenderSetup.noBlender') }}</span>
+                <!--
+                自动探测只认标准安装位置。没有这个按钮的话，便携版和装在
+                别处的用户看到的是一个永远点不了的按钮，没有任何出路。
+              -->
+                <AppButton
+                  variant="soft"
+                  size="medium"
+                  :disabled="blenderBusy"
+                  @click="chooseBlender"
+                >
+                  {{ t('mcp.blenderSetup.choose') }}
+                </AppButton>
+              </div>
+
+              <!--
+              缺什么逐条列出来。合成一句「环境不满足」等于让用户自己去猜是
+              缺 git 还是 Python 版本低 —— 而那正是安装脚本原来的失败样子
+              （一句 Command failed: git）。
+            -->
+              <p v-for="item in blenderBlockers" :key="item.id" class="section-note">
+                {{ prerequisiteLabel(item) }}
+              </p>
+
+              <p v-if="blenderMessage" class="section-note">{{ blenderMessage }}</p>
+              <p v-else-if="canInstallBlender" class="section-note">
+                {{ t('mcp.blenderSetup.hint') }}
+              </p>
+            </template>
+
+            <!-- ── 已经装好：只给真正会变的那两样 ────────────────── -->
+            <template v-else>
+              <!--
+              装成功那句回执要活过安装态自己的消失 —— 用户等了三五分钟，
+              界面把整块连同刚写好的回执一起删掉，什么都没留下。丢掉的还偏偏是
+              别处没有的那一句「盒子会自己把 Blender 拉起来，不用手动开」。
+            -->
+              <p v-if="blenderMessage" class="section-note">{{ blenderMessage }}</p>
+
+              <!--
+              标识、连接方式、启动命令都是盒子自己写的，给输入框只会让用户改坏
+              一条本来好好的配置。真正会变的只有两样：Blender 装在哪、端口多少。
+              要动别的就去「高级」——留一个逃生口，但不摆在默认路径上。
+            -->
+              <label class="field">
+                <span class="field-label">{{ t('mcp.blenderSetup.pathLabel') }}</span>
+                <input
+                  class="field-input path-input"
+                  type="text"
+                  spellcheck="false"
+                  :value="envOf(blenderRow, 'BLENDER_PATH')"
+                  @input="
+                    setEnvOf(blenderRow, 'BLENDER_PATH', ($event.target as HTMLInputElement).value)
+                  "
+                />
+                <small class="section-note">{{ t('mcp.blenderSetup.pathHint') }}</small>
+              </label>
+
+              <label class="field port-field">
+                <span class="field-label">{{ t('mcp.blenderSetup.portLabel') }}</span>
+                <input
+                  class="field-input"
+                  type="text"
+                  spellcheck="false"
+                  :value="envOf(blenderRow, 'BLENDER_MCP_PORT')"
+                  @input="
+                    setEnvOf(
+                      blenderRow,
+                      'BLENDER_MCP_PORT',
+                      ($event.target as HTMLInputElement).value
+                    )
+                  "
+                />
+              </label>
+
+              <!-- 原始配置：和手配的那几行同一套字段，改完走同一个保存 -->
+              <template v-if="showBlenderRaw && blenderRow">
+                <label class="field grow">
+                  <span class="field-label">{{ t('mcp.fields.command') }}</span>
+                  <textarea
+                    v-model="blenderRow.commandLine"
+                    class="field-input command-input"
+                    rows="2"
+                    spellcheck="false"
+                  ></textarea>
+                </label>
+
+                <label class="field env-field">
+                  <span class="field-label">{{ t('mcp.fields.env') }}</span>
+                  <textarea
+                    v-model="blenderRow.env"
+                    class="field-input"
+                    rows="3"
+                    spellcheck="false"
+                  ></textarea>
+                  <small v-if="envError(blenderRow)" class="error">{{
+                    envError(blenderRow)
+                  }}</small>
+                  <small v-else class="section-note">{{ t('mcp.fields.envHint') }}</small>
+                </label>
+              </template>
+
+              <!--
+              一排链接，不是一排按钮。原来「删除」是个红色实心按钮贴在状态旁边，
+              而它在这一行的语义其实是「不用 Blender 了」，不该比「重新安装」还重。
+            -->
+              <div class="row-actions">
+                <button class="link" :disabled="blenderBusy" @click="setupBlender">
+                  {{
+                    blenderBusy ? t('mcp.blenderSetup.working') : t('mcp.blenderSetup.reinstall')
+                  }}
+                </button>
+                <button class="link" @click="showBlenderRaw = !showBlenderRaw">
+                  {{ showBlenderRaw ? t('mcp.blenderSetup.rawBack') : t('mcp.blenderSetup.raw') }}
+                </button>
+                <!-- 这一行真的改过才长出保存 —— 没改过的按钮点下去什么都不会发生 -->
+                <AppButton
+                  v-if="blenderRow && isRowDirty(blenderRow)"
+                  class="save-row"
+                  variant="primary"
+                  size="medium"
+                  :disabled="savingId !== '' || rowError(blenderRow) !== ''"
+                  :title="rowError(blenderRow)"
+                  @click="saveRow(blenderRowIndex)"
+                >
+                  {{
+                    savingId === BLENDER_SERVER_ID ? t('mcp.actions.saving') : t('mcp.actions.save')
+                  }}
+                </AppButton>
+                <button
+                  v-if="blenderRow"
+                  class="link danger"
+                  @click="removeServer(blenderRowIndex)"
+                >
+                  {{ t('mcp.actions.remove') }}
+                </button>
+              </div>
+            </template>
+          </div>
+        </li>
+      </ul>
 
       <!--
-        手动配置的那几条要有自己的小标题。
-        下半页有「共享虚幻引擎能力」，上半页却什么都没有，blender 那条就直接
-        裸在页面上 —— 用户分不清哪块是盒子自动接的、哪块是自己配的。
-        页面 Header 说的是整页（含两节），顶不了这一块的标题。
+        手动配置的那几条自成一组。
+
+        和「内置」分开是因为**责任人不同**：这一组是用户自己加的，坏了要自己
+        去看命令行和环境变量；内置那组坏了该去点「重新安装」或「重试连接」。
+        原来两类混在一张表里，盒子装的 blender 和随手加的 filesystem 长得一样。
       -->
       <h4 class="section-title">{{ t('mcp.client.manualTitle') }}</h4>
 
-      <div
-        v-for="(server, index) in servers"
-        :key="index"
-        class="server-row"
-        :class="{ draft: isDraftRow(server), open: isExpanded(server) }"
-      >
-        <!--
+      <ul class="category-list">
+        <template v-for="(server, index) in servers" :key="index">
+          <li
+            v-if="!isPresetRow(server)"
+            class="category manual"
+            :class="{ draft: isDraftRow(server), open: isExpanded(server) }"
+          >
+            <!--
           收起态：一行就够 —— 名字 + 通没通 + 删除。
 
           **这是这一屏最大的一处减法。** 每次进这个页面都是为了看一眼服务通没通，
           而「改 blender 的启动命令」是一辈子做一两次的事；原来却把四个输入框
           和两行说明永久摊着，一条 server 占掉半屏。
         -->
-        <div class="row-summary">
-          <button class="row-toggle" @click="toggleRow(server)">
-            <span class="caret" :class="{ open: isExpanded(server) }">›</span>
-            <code>{{ server.id.trim() || t('mcp.client.newServer') }}</code>
-          </button>
-
-          <!--
+            <div class="category-head">
+              <button class="category-open" @click="toggleRow(server)">
+                <PhCaretRight class="caret" :class="{ open: isExpanded(server) }" />
+                <span class="category-name">
+                  {{ server.id.trim() || t('mcp.client.newServer') }}
+                </span>
+                <!--
             停用的 server 也会带一条状态回来（agent 要能区分「停用」和「没配过」），
             所以这里必须分开显示：把用户自己关掉的东西报成「连接失败」，
             只会让人去排查一个根本不存在的故障。
           -->
-          <span v-if="chipOf(server.id)" class="status" :class="chipOf(server.id)!.tone">
-            {{ chipOf(server.id)!.label }}
-          </span>
+                <span v-if="chipOf(server.id)" class="status" :class="chipOf(server.id)!.tone">
+                  {{ chipOf(server.id)!.label }}
+                </span>
 
-          <!-- 没存过的那条要说出来，否则和正在跑的配置长得一模一样 -->
-          <span v-else-if="isDraftRow(server)" class="status muted">
-            {{ t('mcp.status.unsaved') }}
-          </span>
+                <!-- 没存过的那条要说出来，否则和正在跑的配置长得一模一样 -->
+                <span v-else-if="isDraftRow(server)" class="status muted">
+                  {{ t('mcp.status.unsaved') }}
+                </span>
+              </button>
 
-          <!--
-            删除推到最右。原来它紧挨着绿色的状态胶囊 —— 破坏性动作贴着状态信息，
-            眼睛扫状态的时候手就在删除上。
+              <div class="head-control">
+                <!--
+            保存按钮长在它自己这一行上。
+
+            原来是页面底部一个总的「保存并连接」，于是几条互不相干的服务被绑成
+            一件事：改 blender 的时候顺手把另一条半填的也提交了，另一条填错了
+            blender 这条也存不了。每条服务本来就是独立的。
+
+            只在这一行真的改过时才出现 —— 没改过的行摆一个按钮，既是噪音，
+            点下去也什么都不会发生。
           -->
-          <AppButton
-            class="remove"
-            variant="soft"
-            size="medium"
-            danger
-            @click="removeServer(index)"
-          >
-            {{ t('mcp.actions.remove') }}
-          </AppButton>
-        </div>
+                <AppButton
+                  v-if="isRowDirty(server)"
+                  class="save-row"
+                  variant="primary"
+                  size="medium"
+                  :disabled="savingId !== '' || rowError(server) !== ''"
+                  :title="rowError(server)"
+                  @click="saveRow(index)"
+                >
+                  {{
+                    savingId === server.id.trim() ? t('mcp.actions.saving') : t('mcp.actions.save')
+                  }}
+                </AppButton>
 
-        <!--
+                <!--
+                  删除降级成链接。它是破坏性的，但也不是用户来这一页要干的事 ——
+                  做成一个和「保存并连接」一样重的实心按钮，只会让手更容易点错。
+                  Blender 那条用的是同一条规矩。
+                -->
+                <button class="link danger" @click="removeServer(index)">
+                  {{ t('mcp.actions.remove') }}
+                </button>
+              </div>
+            </div>
+
+            <!--
           连不上的原因常驻显示，不放 tooltip。收起态下这是唯一能让用户知道
           「为什么不通」的东西 —— 一条光秃秃的「连接失败」，他能做的只有瞪着它。
         -->
-        <p v-if="errorOf(server.id)" class="row-error">{{ errorOf(server.id) }}</p>
+            <p v-if="errorOf(server.id)" class="row-error">{{ errorOf(server.id) }}</p>
 
-        <div v-if="isExpanded(server)" class="row-main">
-          <label class="field id-field">
-            <span>{{ t('mcp.fields.id') }}</span>
-            <input ref="idInputs" v-model="server.id" type="text" placeholder="filesystem" />
-            <small v-if="idError(server)" class="error">{{ idError(server) }}</small>
-          </label>
+            <div v-if="isExpanded(server)" class="category-body">
+              <div class="row-fields">
+                <label class="field id-field">
+                  <span class="field-label">{{ t('mcp.fields.id') }}</span>
+                  <input
+                    ref="idInputs"
+                    v-model="server.id"
+                    class="field-input"
+                    type="text"
+                    placeholder="filesystem"
+                  />
+                  <small v-if="idError(server)" class="error">{{ idError(server) }}</small>
+                </label>
 
-          <label class="field">
-            <span>{{ t('mcp.fields.transport') }}</span>
-            <select v-model="server.transport">
-              <option value="stdio">{{ t('mcp.fields.stdio') }}</option>
-              <option value="http">{{ t('mcp.fields.http') }}</option>
-            </select>
-          </label>
+                <label class="field">
+                  <span class="field-label">{{ t('mcp.fields.transport') }}</span>
+                  <select v-model="server.transport" class="field-input">
+                    <option value="stdio">{{ t('mcp.fields.stdio') }}</option>
+                    <option value="http">{{ t('mcp.fields.http') }}</option>
+                  </select>
+                </label>
 
-          <!--
+                <!--
             启动命令用 textarea 而不是单行 input。
             实际的命令是一长串绝对路径（`…\UnrealBox\BlenderMcp\4309a396\venv\Scri…`），
             单行框只能看到开头，用户想核对路径对不对只能把光标拖到底。
             反倒是环境变量给了三行 —— 两者本该反过来。
             `parseCommandLine` 按空白切词，换行本来就吃得下。
           -->
-          <label v-if="server.transport === 'stdio'" class="field grow">
-            <span>{{ t('mcp.fields.command') }}</span>
-            <textarea
-              v-model="server.commandLine"
-              class="command-input"
-              rows="2"
-              spellcheck="false"
-              :title="server.commandLine"
-              placeholder="npx -y @modelcontextprotocol/server-filesystem D:/assets"
-            ></textarea>
-          </label>
+                <label v-if="server.transport === 'stdio'" class="field grow">
+                  <span class="field-label">{{ t('mcp.fields.command') }}</span>
+                  <textarea
+                    v-model="server.commandLine"
+                    class="field-input command-input"
+                    rows="2"
+                    spellcheck="false"
+                    :title="server.commandLine"
+                    placeholder="npx -y @modelcontextprotocol/server-filesystem D:/assets"
+                  ></textarea>
+                </label>
 
-          <label v-else class="field grow">
-            <span>{{ t('mcp.fields.url') }}</span>
-            <input v-model="server.url" type="text" placeholder="https://example.com/mcp" />
-          </label>
-        </div>
+                <label v-else class="field grow">
+                  <span class="field-label">{{ t('mcp.fields.url') }}</span>
+                  <input
+                    v-model="server.url"
+                    class="field-input"
+                    type="text"
+                    placeholder="https://example.com/mcp"
+                  />
+                </label>
+              </div>
 
-        <!--
-          环境变量。
-          常驻显示而不是折在「高级」后面 —— 有些 server 没有它根本不工作，
-          而缺了之后的症状是「连上了、工具也在、一调就失败」，
-          用户不会想到去展开一个折叠区找原因。Blender 的 BLENDER_PATH 就是这样。
-        -->
-        <label v-if="isExpanded(server) && server.transport === 'stdio'" class="field env-field">
-          <span>{{ t('mcp.fields.env') }}</span>
-          <textarea
-            v-model="server.env"
-            rows="3"
-            spellcheck="false"
-            :placeholder="t('mcp.fields.envPlaceholder')"
-          ></textarea>
-          <small v-if="envError(server)" class="error">{{ envError(server) }}</small>
-          <small v-else class="hint">{{ t('mcp.fields.envHint') }}</small>
-        </label>
+              <!--
+                环境变量。
+                常驻显示而不是折在「高级」后面 —— 有些 server 没有它根本不工作，
+                而缺了之后的症状是「连上了、工具也在、一调就失败」，
+                用户不会想到去展开一个折叠区找原因。Blender 的 BLENDER_PATH 就是这样。
+              -->
+              <label v-if="server.transport === 'stdio'" class="field env-field">
+                <span class="field-label">{{ t('mcp.fields.env') }}</span>
+                <textarea
+                  v-model="server.env"
+                  class="field-input"
+                  rows="3"
+                  spellcheck="false"
+                  :placeholder="t('mcp.fields.envPlaceholder')"
+                ></textarea>
+                <small v-if="envError(server)" class="error">{{ envError(server) }}</small>
+                <small v-else class="section-note">{{ t('mcp.fields.envHint') }}</small>
+              </label>
 
-        <!-- 「停用」是改配置，跟着编辑态走；状态和删除留在收起的那一行上 -->
-        <div v-if="isExpanded(server)" class="row-side">
-          <AppCheckbox v-model:checked="server.disabled" class="checkbox">
-            {{ t('mcp.fields.disabled') }}
-          </AppCheckbox>
-        </div>
-      </div>
-
-      <p v-if="servers.length === 0" class="empty">{{ t('mcp.client.empty') }}</p>
-
-      <!-- 一条都没有时只给「添加」—— 没东西可保存，也没东西可重连 -->
-      <div class="actions">
-        <AppButton variant="soft" size="medium" @click="addServer">
-          {{ t('mcp.actions.add') }}
-        </AppButton>
-        <template v-if="servers.length > 0">
-          <AppButton
-            variant="primary"
-            size="medium"
-            :disabled="hasErrors || saving"
-            :title="saveBlockedReason"
-            @click="save"
-          >
-            {{ saving ? t('mcp.actions.saving') : t('mcp.actions.save') }}
-          </AppButton>
-          <AppButton
-            variant="soft"
-            size="medium"
-            :disabled="saving || reconnecting"
-            @click="reconnect"
-          >
-            {{ reconnecting ? t('mcp.engine.retrying') : t('mcp.actions.reconnect') }}
-          </AppButton>
-          <!-- 上半页是「改完要点保存」，下半页的端口是失焦即落盘。至少让这半页看得见 -->
-          <span v-if="isDirty && !hasErrors" class="dirty-flag">{{ t('mcp.client.unsaved') }}</span>
+              <!-- 「停用」是改配置，跟着编辑态走；状态和删除留在收起的那一行上 -->
+              <AppCheckbox v-model:checked="server.disabled" class="checkbox">
+                {{ t('mcp.fields.disabled') }}
+              </AppCheckbox>
+            </div>
+          </li>
         </template>
-      </div>
+      </ul>
 
       <!--
-        禁用的按钮要说出原因。出错那行可能已经滚出视野，用户看到的只是
-        一个灰掉、点不动、不解释的主按钮。
+        空组要说一句话，不能留一片空白 —— 这一页已经栽过一次：什么都不渲染时，
+        「这里本来就没有」和「坏了」长得一模一样。
+        「添加服务」挨着这句话，因为那正是这一组唯一的下一步。
       -->
-      <p v-if="saveBlockedReason" class="error">{{ saveBlockedReason }}</p>
+      <div class="manual-foot">
+        <span v-if="manualCount === 0" class="section-note">
+          {{ t('mcp.client.manualEmpty') }}
+        </span>
+        <AppButton class="add" variant="soft" size="medium" @click="addServer">
+          {{ t('mcp.actions.add') }}
+        </AppButton>
+      </div>
+
       <p v-if="saveError" class="error">{{ saveError }}</p>
 
       <!-- 路径光印出来没用，用户还得自己选中再粘。给两个能点的动作 -->
@@ -1050,23 +1695,17 @@ onMounted(load)
           不再用 `setting-item`：那是个两端对齐的布局，而这一行右边没有任何控件，
           于是整块歪在左边，和上面开关那行的节奏对不上。
         -->
-        <div v-if="host.running" class="running-row">
-          <div class="setting-label">
-            <span class="dot"></span>
-            {{ t('mcp.server.running', { count: host.exposedTools }) }}
-          </div>
-          <div class="setting-desc url-line">
-            <span>{{ host.url }}</span>
-            <button class="link" @click="copy('url')">
-              {{ copied === 'url' ? t('mcp.server.copied') : t('mcp.actions.copyPath') }}
-            </button>
-          </div>
-          <!--
-            同一页三个「工具数」：146（这里）、26（blender）、3 个入口（引擎），
-            口径各不相同。不说清楚用户就会拿它们互相对账然后觉得哪里漏了 ——
-            「怎么只有三个工具」已经被真实问过一次。
-          -->
-          <div class="setting-desc">{{ t('mcp.server.toolsNote') }}</div>
+        <!--
+          一行说完。原来这里是三行：地址一行、工具数一行、口径说明一行 ——
+          而**地址和令牌本来就完整印在下面那段 JSON 里**，同一份连接信息
+          在一屏上说了三遍。现在 JSON 块是唯一来源，这行只管「通没通」。
+
+          三个「工具数」口径不同那句免责声明也不再常驻：两节现在各有标题，
+          「引擎工具」四个字自己说清了。要对账的人还够得着 —— 挂在 title 上。
+        -->
+        <div v-if="host.running" class="running-row" :title="t('mcp.server.toolsNote')">
+          <span class="dot"></span>
+          {{ t('mcp.server.runningShort', { count: host.exposedTools }) }}
         </div>
 
         <!--
@@ -1075,45 +1714,62 @@ onMounted(load)
           **先把配置粘进 Claude Code，再回来开服务** —— 上一版把这个入口
           藏在 `v-if="host.running"` 里面，服务没开时根本够不着复制按钮。
         -->
-        <button class="disclosure" @click="showConfig = !showConfig">
-          <span class="caret" :class="{ open: showConfig }">›</span>
-          {{ t('mcp.server.clientConfig') }}
-        </button>
+        <ul class="category-list">
+          <li class="category">
+            <div class="category-head">
+              <button class="category-open" @click="showConfig = !showConfig">
+                <PhCaretRight class="caret" :class="{ open: showConfig }" />
+                <span class="category-name">{{ t('mcp.server.clientConfig') }}</span>
+              </button>
+            </div>
 
-        <!-- 第二层：粘给外部客户端的东西。配一次就不用再看 -->
-        <div v-if="showConfig" class="drawer">
-          <p class="hint">{{ t('mcp.server.clientHint') }}</p>
-          <!--
+            <!-- 第二层：粘给外部客户端的东西。配一次就不用再看 -->
+            <div v-if="showConfig" class="category-body">
+              <p class="section-note">{{ t('mcp.server.clientHint') }}</p>
+              <!--
             这块里的令牌**也**要打码。下面那行头尾打码原来完全是白做的：
             同一把令牌一字不差地印在这儿，字号还更大。屏幕上多一个人、
             或者正在录屏共享，泄露的是这一块。复制拿到的始终是完整值。
           -->
-          <pre class="config"><code>{{ displayedConfig }}</code></pre>
-          <div class="actions">
-            <AppButton variant="primary" size="medium" @click="copy('config')">
-              {{ copied === 'config' ? t('mcp.server.copied') : t('mcp.server.copyConfig') }}
-            </AppButton>
-            <code class="token" :title="t('mcp.server.tokenMasked')">{{ maskedToken }}</code>
-            <AppButton variant="soft" size="medium" @click="revealToken = !revealToken">
-              {{ revealToken ? t('mcp.server.hideToken') : t('mcp.server.showToken') }}
-            </AppButton>
-            <AppButton variant="soft" size="medium" @click="copy('token')">
-              {{ copied === 'token' ? t('mcp.server.copied') : t('mcp.server.copyToken') }}
-            </AppButton>
-            <AppButton
-              variant="soft"
-              size="medium"
-              danger
-              :disabled="hostBusy"
-              @click="rotateToken"
-            >
-              {{ t('mcp.server.rotate') }}
-            </AppButton>
-          </div>
-          <p class="hint">{{ t('mcp.server.autoStartHint') }}</p>
-        </div>
+              <!--
+              「显示 / 隐藏」挪到代码块自己的右上角。它改的就是这一块里显示什么，
+              放在下面那排动作里，用户得先读完四个按钮才知道哪个管这块。
+            -->
+              <div class="config-wrap">
+                <pre class="config"><code>{{ displayedConfig }}</code></pre>
+                <button
+                  class="reveal"
+                  :title="t('mcp.server.tokenMasked')"
+                  :aria-label="revealToken ? t('mcp.server.hideToken') : t('mcp.server.showToken')"
+                  @click="revealToken = !revealToken"
+                >
+                  {{ revealToken ? t('mcp.server.hideToken') : t('mcp.server.showToken') }}
+                </button>
+              </div>
 
-        <!--
+              <!--
+              五个动作砍到三个，且只有一个是按钮。
+
+              原来这一排是：复制配置、一段打码令牌、显示、复制令牌、重置 ——
+              全都长得一样重，而最右那个红色的「重置」紧挨着「复制令牌」。
+              这跟同一页把「删除」推到最右、和状态胶囊隔开的规矩正好相反。
+            -->
+              <div class="row-actions">
+                <AppButton variant="primary" size="medium" @click="copy('config')">
+                  {{ copied === 'config' ? t('mcp.server.copied') : t('mcp.server.copyConfig') }}
+                </AppButton>
+                <button class="link" @click="copy('token')">
+                  {{ copied === 'token' ? t('mcp.server.copied') : t('mcp.server.copyToken') }}
+                </button>
+                <button class="link danger" :disabled="hostBusy" @click="rotateToken">
+                  {{ t('mcp.server.rotate') }}
+                </button>
+              </div>
+              <p class="section-note">{{ t('mcp.server.autoStartHint') }}</p>
+            </div>
+          </li>
+
+          <!--
           第三层：端口和权限档。
 
           ## 权限档回到折叠区里，但标题要点名
@@ -1126,70 +1782,83 @@ onMounted(load)
           所以折回去，但标题直接写「端口和权限」，并且**把当前档位写在标题上**：
           不展开也看得见现在是只读还是可写。风险照样在明面上，第一屏少一块。
         -->
-        <button class="disclosure" @click="showAdvanced = !showAdvanced">
-          <span class="caret" :class="{ open: showAdvanced }">›</span>
-          {{ t('mcp.server.advanced') }}
-          <span class="scope-tag" :class="{ writable: includeMutating }">
-            {{
-              includeMutating ? t('mcp.server.scopeTagWritable') : t('mcp.server.scopeTagReadOnly')
-            }}
-          </span>
-        </button>
-
-        <div v-if="showAdvanced" class="drawer">
-          <div class="setting-item">
-            <div class="setting-info">
-              <div class="setting-label">{{ t('mcp.server.includeMutating') }}</div>
-              <div class="setting-desc">
-                {{
-                  includeMutating ? t('mcp.server.scopeWritable') : t('mcp.server.scopeReadOnly')
-                }}
-              </div>
+          <li class="category">
+            <div class="category-head">
+              <button class="category-open" @click="showAdvanced = !showAdvanced">
+                <PhCaretRight class="caret" :class="{ open: showAdvanced }" />
+                <span class="category-name">{{ t('mcp.server.advanced') }}</span>
+                <span class="scope-tag" :class="{ writable: includeMutating }">
+                  {{
+                    includeMutating
+                      ? t('mcp.server.scopeTagWritable')
+                      : t('mcp.server.scopeTagReadOnly')
+                  }}
+                </span>
+              </button>
+              <!-- 当前端口也挂在标题行上，和「可写」一个套路：不展开也看得见 -->
+              <code class="category-count">:{{ port }}</code>
             </div>
-            <AppSwitch
-              v-model:checked="includeMutating"
-              :disabled="host.running"
-              :title="host.running ? t('mcp.server.stopToChange') : ''"
-              @change="persistConfig"
-            />
-          </div>
 
-          <!--
+            <div v-if="showAdvanced" class="category-body">
+              <div class="setting-item">
+                <div class="setting-info">
+                  <div class="setting-label">{{ t('mcp.server.includeMutating') }}</div>
+                  <div class="setting-desc">
+                    {{
+                      includeMutating
+                        ? t('mcp.server.scopeWritable')
+                        : t('mcp.server.scopeReadOnly')
+                    }}
+                  </div>
+                </div>
+                <AppSwitch
+                  v-model:checked="includeMutating"
+                  :disabled="host.running"
+                  :title="host.running ? t('mcp.server.stopToChange') : ''"
+                  @change="persistConfig"
+                />
+              </div>
+
+              <!--
             长警告只在**风险真的变了**的时候出现。常驻的警告等于没有警告 ——
             用户第三次进这个页面就不看了。
 
             分现在时/将来时两句：服务停着的时候说「写操作会直接执行」，
             讲的是一件此刻并没有在发生的事，而屏幕上主开关明明是关的。
           -->
-          <p v-if="includeMutating" class="warning">
-            {{ host.running ? t('mcp.server.securityNote') : t('mcp.server.securityNoteIdle') }}
-          </p>
+              <p v-if="includeMutating" class="warning">
+                {{ host.running ? t('mcp.server.securityNote') : t('mcp.server.securityNoteIdle') }}
+              </p>
 
-          <div class="setting-item">
-            <div class="setting-info">
-              <div class="setting-label">{{ t('mcp.server.port') }}</div>
-              <!--
+              <div class="setting-item">
+                <div class="setting-info">
+                  <div class="setting-label">{{ t('mcp.server.port') }}</div>
+                  <!--
                 描述里不再写「更改前请先停止服务」：控件在运行时本来就 disabled，
                 点不动的原因没必要每次都读一遍。真去点的时候用 title 说。
               -->
-              <div class="setting-desc">{{ t('mcp.server.portDesc') }}</div>
+                  <div class="setting-desc">{{ t('mcp.server.portDesc') }}</div>
+                </div>
+                <input
+                  v-model.number="port"
+                  class="threshold-input"
+                  type="number"
+                  :disabled="host.running"
+                  :title="host.running ? t('mcp.server.stopToChange') : ''"
+                  min="1024"
+                  @blur="persistConfig"
+                  @keyup.enter="persistConfig"
+                />
+              </div>
+              <p v-if="portError" class="error">{{ portError }}</p>
+              <!-- 失焦即落盘是看不见的动作，成败都要有回执 -->
+              <p v-else-if="configError" class="error">{{ configError }}</p>
+              <p v-else-if="configSaved" class="section-note">
+                {{ t('mcp.server.configSaved') }}
+              </p>
             </div>
-            <input
-              v-model.number="port"
-              class="threshold-input"
-              type="number"
-              :disabled="host.running"
-              :title="host.running ? t('mcp.server.stopToChange') : ''"
-              min="1024"
-              @blur="persistConfig"
-              @keyup.enter="persistConfig"
-            />
-          </div>
-          <p v-if="portError" class="error">{{ portError }}</p>
-          <!-- 失焦即落盘是看不见的动作，成败都要有回执 -->
-          <p v-else-if="configError" class="error">{{ configError }}</p>
-          <p v-else-if="configSaved" class="hint">{{ t('mcp.server.configSaved') }}</p>
-        </div>
+          </li>
+        </ul>
       </div>
     </section>
   </div>
@@ -1253,17 +1922,18 @@ onMounted(load)
   overflow-wrap: anywhere;
 }
 
-/* 运行中的状态块。右边没有控件，所以不能用两端对齐的 setting-item */
+/*
+ * 运行中那一行。
+ *
+ * 原来是三行（地址、工具数、口径说明），而且一行里混了三种字号两种字体。
+ * 现在只剩一句话加一个点，字号统一到 12px —— 它是状态，不是标题。
+ */
 .running-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.url-line {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 
 /* 运行中的绿点。一眼看到状态，不用读文字 */
@@ -1275,35 +1945,143 @@ onMounted(load)
   box-shadow: 0 0 6px var(--color-success-border);
 }
 
-/* ── 折叠区 ─────────────────────────────────────────────── */
+/* ── 折叠列表（与「工具」页同一套）───────────────────────── */
 /*
- * 收起来的时候，这两条原来只有一个淡淡的 `›` 加 muted 字色、行高和正文一样，
- * 看着像一句禁用的说明文字而不是能点的控件。给它内边距、hover 底色和
- * 更清楚的字色 —— 能点的东西要看起来能点。
+ * 这一页原来自己发明了一套词汇（`.pane-list` / `.drawer` / `.server-row`），
+ * 跟隔壁几页对不上。现在照搬「工具」页那套 —— `.category-list` 里一张张
+ * `.category` 卡片，卡片头是 `.category-head`（caret + 名字 + 计数/状态，
+ * 右边一个控件），摊开的内容缩进在同一张卡片里面，条目之间用一条上边线分隔。
+ * 见 ProfileTools.vue。
  */
-.disclosure {
-  align-self: flex-start;
+.category-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.category {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.category-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3);
+}
+
+/* 名字连着 caret 和状态一起可点，点击区域才够大 */
+.category-open {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  background: transparent;
+  text-align: left;
   cursor: pointer;
-  transition: background 0.15s ease-in-out;
 }
 
-.disclosure:hover {
-  background: var(--color-bg-surface-hover);
+.category-open:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* server 的名字是标识符，等宽；「工具」页那边是中文分类名，所以只有这里加 */
+.category-name {
+  font-size: var(--font-size-sm);
   color: var(--color-text-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.disclosure .caret {
+/* 当前值挂在标题行上：不展开也看得见。同「工具」页的 N / M */
+.category-count {
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 头部右侧的动作。和「工具」页那个开关同一个位置 */
+.category-head .row-action {
+  flex: none;
+}
+
+.head-control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.caret {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform var(--motion-fast, 0.15s) var(--easing-standard, ease-in-out);
+}
+
+.caret.open {
+  transform: rotate(90deg);
+}
+
+/*
+ * 摊开的内容缩进到名字下面，和「工具」页的 `.tool-list` 同一组内边距 ——
+ * 左边那一格留给 caret，读起来才是「这些属于上面那一条」。
+ */
+.category-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3) var(--space-8);
+}
+
+/* 摊开区里的条目：上边线分隔，同 `.tool-item` */
+.category-body .engine-entry,
+.category-body .engine-row {
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: var(--space-2);
+}
+
+/* 一排动作。只有主动作是按钮，其余降级成链接 */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.row-actions .link.danger {
+  margin-left: auto;
+}
+
+/* 空组那句话和「添加服务」并排：那是这一组唯一的下一步 */
+.manual-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.manual-foot .add {
+  margin-left: auto;
+}
+
+/*
+ * 没存过的那条。原来它和正在跑的配置长得一模一样 —— 一条已连接生效、
+ * 一条还只是草稿，视觉权重却完全相同，用户分不出哪条在跑。
+ */
+.category.draft {
+  border-style: dashed;
+  background: none;
 }
 
 /* 当前权限档写在折叠标题上：不展开也看得见现在是只读还是可写 */
@@ -1320,29 +2098,19 @@ onMounted(load)
   color: var(--color-warning-text);
 }
 
-.caret {
-  display: inline-block;
-  transition: transform 0.15s ease-in-out;
-}
-
-.caret.open {
-  transform: rotate(90deg);
-}
-
-.drawer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-surface-hover);
-}
-
 /* ── 客户端配置 ──────────────────────────────────────────── */
+/*
+ * 代码块是这一页唯一还留着底色方框的东西。行只有分隔线、摊开区只有内边距，
+ * 到这里才是一个块 —— 靠这三档权重就能判断层级，不用数缩进。
+ */
+.config-wrap {
+  position: relative;
+}
+
 .config {
   margin: 0;
   padding: var(--space-3);
+  padding-right: var(--space-10);
   border-radius: var(--radius-sm);
   background: var(--color-bg-surface-hover);
   font-size: 11px;
@@ -1351,145 +2119,93 @@ onMounted(load)
   white-space: pre;
 }
 
-.token {
-  flex: 1;
-  min-width: 0;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--color-bg-surface-hover);
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  text-align: center;
-}
-
-/* ── 第三方 server 行 ────────────────────────────────────── */
-.server-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-surface-hover);
-}
-
-/*
- * 没存过的那条。原来它和正在跑的配置长得一模一样 —— 一条已连接生效、
- * 一条还只是草稿，视觉权重却完全相同，用户分不出哪条在跑。
- */
-.server-row.draft {
-  border-style: dashed;
-  background: none;
-}
-
-/*
- * 收起态那一行：名字 + 通没通 + 删除。
- * 这是每次进页面都会看到的默认形态，所以它必须能一眼读完。
- */
-.row-summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.row-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0;
+/* 显示 / 隐藏挂在代码块自己的角上：它改的就是这一块里显示什么 */
+.reveal {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  padding: 2px 6px;
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
-  color: var(--color-text-primary);
-  font-size: 13px;
+  color: var(--color-text-muted);
+  font-size: 11px;
   cursor: pointer;
 }
 
-.row-toggle code {
-  font-size: 13px;
+.reveal:hover {
+  color: var(--color-text-primary);
 }
 
-.row-toggle:hover {
-  color: var(--color-accent-text, var(--color-text-primary));
+.port-field input {
+  max-width: 120px;
 }
 
-/* 破坏性动作推到最右，别贴着状态胶囊 */
-.row-summary .remove {
-  margin-left: auto;
-}
-
-/* 展开之后才和上面那行拉开距离 */
-.server-row.open .row-main {
-  margin-top: var(--space-2);
-}
-
-.row-main {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.row-side {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
+/* ── 一条 server 的编辑态 ───────────────────────────────── */
+/*
+ * 输入框原来是裸的 `<input>` / `<select>` / `<textarea>` —— 在暗色主题下
+ * 直接露出系统控件（白底下拉、浅色细边框），跟这一页其它地方完全对不上。
+ * 用 AIProviders 那套 `.field-label` + `.field-input`，同一个 token、同一档圆角。
+ */
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  font-size: 12px;
-  color: var(--color-text-muted);
+  gap: 6px;
+  min-width: 0;
 }
 
-.field.grow {
-  flex: 1;
-  min-width: 260px;
+.field-label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }
 
-.id-field {
-  width: 160px;
-}
-
-input[type='text'],
-select,
-textarea {
-  padding: 4px 8px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 4px;
-  background: var(--color-bg-surface-hover);
+.field-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-sunken);
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
-input[type='text']:focus,
-select:focus,
-textarea:focus {
+.field-input:focus {
   outline: none;
   border-color: var(--color-accent-border);
 }
 
 /*
- * 占位符要比真实内容淡得足够多。
- * 原来只差一档，新加的空行看起来像已经预填好了 —— 尤其 env 的示例
- * 跟上面 blender 那条真配置长得一样，像「复制了一份」。
+ * 标识和连接方式并排，启动命令和环境变量各自占满一行。
+ *
+ * `min-width: 260px` 是给上一版整页宽的卡片配的；摊开区现在缩进了一截
+ * （`.category-body` 左边留给 caret），那个下限会把框顶出卡片右边 ——
+ * 截图里环境变量那块就是这么溢出去的。
  */
-input::placeholder,
-textarea::placeholder {
-  color: var(--color-text-disabled);
+.row-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
-/* 环境变量是逐行的键值对，等宽字体下对齐才看得出哪一行写歪了 */
-.env-field textarea {
-  width: 100%;
-  resize: vertical;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  line-height: 1.5;
+.row-fields .field {
+  flex: 1 1 180px;
 }
 
-/* 启动命令是一长串绝对路径，单行框只能看见开头 */
+.row-fields .field.grow {
+  flex: 1 1 100%;
+}
+
+.id-field {
+  max-width: 200px;
+}
+
+.port-field {
+  max-width: 140px;
+}
+
+.env-field textarea,
+.path-input,
 .command-input {
-  width: 100%;
   resize: vertical;
   font-family: var(--font-mono, ui-monospace, monospace);
   line-height: 1.5;
@@ -1497,14 +2213,16 @@ textarea::placeholder {
 
 .checkbox {
   align-items: center;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
+/* ── 状态胶囊 ───────────────────────────────────────────── */
 .status {
   padding: 2px 8px;
   border-radius: 9999px;
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .status.ok {
@@ -1522,38 +2240,7 @@ textarea::placeholder {
   color: var(--color-text-muted);
 }
 
-/* ── 引擎自动发现（只读）──────────────────────────────────── */
-.engine-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  /* 比可编辑行更淡：它不是用户能操作的东西，不该抢注意力 */
-  background: var(--color-bg-surface-hover);
-}
-
-.engine-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 13px;
-}
-
-/* 好好跑着的时候这块收成一行，状态胶囊靠右，和下面的 server 行对齐 */
-.engine-head .status:last-child {
-  margin-left: auto;
-}
-
-.engine-desc,
-.engine-hint {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--color-text-muted);
-}
-
+/* ── 摊开区里的条目 ─────────────────────────────────────── */
 .engine-row {
   display: flex;
   align-items: center;
@@ -1561,7 +2248,7 @@ textarea::placeholder {
 }
 
 .engine-row code {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
 
@@ -1571,6 +2258,13 @@ textarea::placeholder {
   gap: var(--space-1);
 }
 
+.engine-desc {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
 /*
  * 连不上的原因。
  * 等宽 + 可换行：这里放的是 `spawn npx ENOENT` 这种原文，
@@ -1578,7 +2272,7 @@ textarea::placeholder {
  */
 .row-error {
   margin: 0;
-  padding-left: var(--space-5);
+  padding-left: var(--space-6);
   color: var(--color-danger-text);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
@@ -1586,10 +2280,9 @@ textarea::placeholder {
   overflow-wrap: anywhere;
 }
 
-/* 一键那块是要用户动手的，比只读的发现块显眼一档 */
-.engine-block.setup {
-  border-color: var(--color-accent-border);
-  background: var(--color-accent-bg);
+/* 卡片里的原因行：和摊开的内容一样缩进到名字下面 */
+.category > .row-error {
+  padding: 0 var(--space-3) var(--space-3) var(--space-8);
 }
 
 /* ── 通用 ────────────────────────────────────────────────── */
@@ -1599,12 +2292,13 @@ textarea::placeholder {
   gap: var(--space-2);
 }
 
-.hint,
-.empty,
+/* 说明文字用隔壁几页同一个名字和同一档字号 */
+.section-note,
 .path {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
 }
 
 .path {
@@ -1614,8 +2308,7 @@ textarea::placeholder {
   min-width: 0;
 }
 
-.path > :first-child,
-.url-line > span {
+.path > :first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1636,10 +2329,21 @@ textarea::placeholder {
   text-decoration: underline;
 }
 
-/* 改了没存要看得见 —— 这半页是「点保存」，下半页的端口是失焦即落盘 */
-.dirty-flag {
-  color: var(--color-warning-text);
-  font-size: 12px;
+.link:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+/*
+ * 破坏性的动作用链接而不是实心按钮。
+ *
+ * 「重置令牌」和「不用 Blender 了」都不是用户来这一页要干的事，做成和
+ * 「复制配置」「重新安装」一样重的按钮，只会让手更容易点错 —— 同一页里
+ * 「删除」被推到最右、和状态胶囊隔开，用的就是这条道理。
+ */
+.link.danger {
+  color: var(--color-danger-text);
 }
 
 .error {

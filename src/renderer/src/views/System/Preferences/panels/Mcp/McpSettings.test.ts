@@ -24,6 +24,11 @@ const writeText = vi.fn().mockResolvedValue(undefined)
 const getSettings = vi.fn()
 const epicStatus = vi.fn()
 const reconnect = vi.fn()
+const blenderStatus = vi.fn()
+const blenderSetup = vi.fn()
+const showOpenDialog = vi.fn()
+const removeServerIpc = vi.fn()
+const saveServerIpc = vi.fn()
 
 const TOKEN = '643fc00c1621ac16897808a3ce7551d056c9d9de127e6c6c'
 
@@ -92,6 +97,30 @@ beforeEach(() => {
   })
   epicStatus.mockResolvedValue({ success: true, projects: [] })
   reconnect.mockResolvedValue({ success: true, statuses: [] })
+  // 默认这台机器什么都没装：一键块该给出「缺什么」而不是按钮
+  blenderStatus.mockResolvedValue({
+    success: true,
+    status: {
+      state: 'blocked',
+      prerequisites: [
+        { id: 'blender', ok: false, problem: 'missing' },
+        { id: 'git', ok: false, problem: 'missing' },
+        { id: 'python', ok: false, problem: 'missing' }
+      ],
+      installRoot: 'C:/fake/BlenderMcp'
+    }
+  })
+  showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] })
+  removeServerIpc.mockResolvedValue({
+    success: true,
+    settings: { version: 1, mcpServers: {} },
+    statuses: []
+  })
+  saveServerIpc.mockResolvedValue({
+    success: true,
+    settings: { version: 1, mcpServers: {} },
+    statuses: []
+  })
 
   // 只替 window.api，不动 window 本身 —— 整个换掉会把 happy-dom 的
   // Event 构造器一起换没，@vue/test-utils 的 trigger 会炸在
@@ -99,9 +128,21 @@ beforeEach(() => {
   window.api = {
     ...window.api,
     agentV3: {
-      mcp: { getSettings, saveSettings: vi.fn(), reconnect, epicStatus, epicSetup: vi.fn() },
+      mcp: {
+        getSettings,
+        saveSettings: vi.fn(),
+        reconnect,
+        epicStatus,
+        epicSetup: vi.fn(),
+        blenderStatus,
+        blenderSetup,
+        removeServer: removeServerIpc,
+        saveServer: saveServerIpc
+      },
       mcpServer: { status, start, stop, rotateToken, saveConfig }
-    }
+    },
+    platform: 'win32',
+    dialog: { showOpenDialog }
   } as unknown as typeof window.api
 
   // happy-dom 的 navigator.clipboard 是不可重定义的，只能打在方法上
@@ -122,9 +163,9 @@ async function flipMainToggle(wrapper: Wrapper): Promise<void> {
   await flushPromises()
 }
 
-/** 现在有两个 `.disclosure`（连接配置 / 高级），按文案挑 */
+/** 现在有两个 `.setting-row .category-open`（连接配置 / 高级），按文案挑 */
 async function openDisclosure(wrapper: Wrapper, label: string): Promise<void> {
-  const button = wrapper.findAll('.disclosure').find((b) => b.text().includes(label))
+  const button = wrapper.findAll('.host .category-open').find((b) => b.text().includes(label))
   expect(button, `没找到「${label}」折叠入口`).toBeTruthy()
   await button!.trigger('click')
   await flushPromises()
@@ -182,7 +223,7 @@ describe('渐进披露', () => {
   it('折叠标题点名说出里面有权限，并把当前档位写在标题上', async () => {
     const wrapper = await mountPanel()
 
-    const label = wrapper.findAll('.disclosure').map((b) => b.text())
+    const label = wrapper.findAll('.host .category-open').map((b) => b.text())
     expect(label.some((l) => l.includes('权限'))).toBe(true)
     expect(wrapper.find('.scope-tag').text()).toBe('只读')
   })
@@ -222,25 +263,46 @@ describe('渐进披露', () => {
     await openDisclosure(wrapper, '连接配置')
 
     expect(wrapper.find('.config').text()).toContain('mcpServers')
-    const labels = wrapper.findAll('.drawer button').map((b) => b.text())
+    const labels = wrapper.findAll('.category-body button').map((b) => b.text())
     expect(labels).toContain('复制配置')
-    expect(labels).toContain('复制令牌')
-    expect(labels).toContain('重置')
+    expect(labels).toContain('只复制令牌')
+    expect(labels).toContain('重置令牌')
+  })
+
+  /**
+   * 五个动作砍到三个，且只有一个是按钮。
+   *
+   * 原来这一排是「复制配置 / 打码令牌 / 显示 / 复制令牌 / 重置」，全都一样重，
+   * 最右那个红色的「重置」还紧挨着「复制令牌」—— 而同一页里「删除」被特意推到
+   * 最右、和状态胶囊隔开。破坏性动作降级成链接，并且推到最右。
+   */
+  it('复制配置是唯一的按钮，破坏性的重置降级成最右边的链接', async () => {
+    const wrapper = await mountPanel()
+    await openDisclosure(wrapper, '连接配置')
+
+    const actions = wrapper.find('.row-actions')
+    expect(actions.findAll('.app-button')).toHaveLength(1)
+    expect(actions.find('.app-button').text()).toBe('复制配置')
+
+    const links = actions.findAll('.link').map((b) => b.text())
+    expect(links).toEqual(['只复制令牌', '重置令牌'])
+    expect(actions.find('.link.danger').text()).toBe('重置令牌')
   })
 
   /**
    * 令牌是凭据，没理由一直摊在屏幕上（身边有人、录屏、共享桌面）。
-   * 头尾够核对，要用就点复制。
+   *
+   * 底下那一行单独的打码令牌拿掉了 —— 它和上面 JSON 里印的是同一把，
+   * 说两遍不会更安全。现在只剩 JSON 那一份，同样打码。
    */
   it('令牌只显示头尾，完整值不出现在界面上', async () => {
     const wrapper = await mountPanel()
     await flipMainToggle(wrapper)
 
-    const token = wrapper.find('.token').text()
-    expect(token).toContain('643fc00c')
-    expect(token).toContain('7e6c6c')
-    expect(token).not.toBe(TOKEN)
-    expect(token.length).toBeLessThan(TOKEN.length)
+    const config = wrapper.find('.config').text()
+    expect(config).toContain('643fc00c')
+    expect(config).toContain('7e6c6c')
+    expect(config).not.toContain(TOKEN)
   })
 
   it('运行中给出状态点和工具数', async () => {
@@ -254,22 +316,33 @@ describe('渐进披露', () => {
   /**
    * 面板标题和页面 Header 是同一句，重复两遍是上一版最刺眼的地方。
    *
-   * 但**两节都得有自己的小标题**：下半页写着「共享虚幻引擎能力」，上半页却
-   * 什么都没有，手配的那几条就裸在页面上，用户分不清哪块是盒子自动接的。
+   * 三个小标题：内置 / 手动配置 / 共享虚幻引擎能力。前两个把「盒子自己装的」
+   * 和「用户自己加的」分开 —— 责任人不同，混在一张表里用户分不清哪条归谁管。
    */
-  it('两节各有小标题，且都不重复页面 Header 那句', async () => {
+  it('三组各有小标题，且都不重复页面 Header 那句', async () => {
     const wrapper = await mountPanel()
     const titles = wrapper.findAll('.section-title').map((n) => n.text())
 
-    expect(titles).toHaveLength(2)
+    expect(titles).toEqual(['内置', '手动配置', '共享虚幻引擎能力'])
     for (const title of titles) expect(title).not.toContain('接入外部 MCP 服务')
   })
 
   // 一条 server 都没有时，「保存并连接」「重新连接」没有意义
   it('没有第三方 server 时只给「添加服务」一个按钮', async () => {
     const wrapper = await mountPanel()
-    const buttons = wrapper.findAll('.settings-section:first-child .actions button')
+    const buttons = wrapper.findAll('.manual-foot button')
     expect(buttons).toHaveLength(1)
+  })
+
+  /**
+   * 空组要说一句话。
+   *
+   * 这一页栽过一次同样的跟头（见 `hideEpicSetup`）：什么都不渲染时，
+   * 「这里本来就没有」和「坏了」长得一模一样。
+   */
+  it('手动配置一条都没有时给一句话，不是一片空白', async () => {
+    const wrapper = await mountPanel()
+    expect(wrapper.find('.manual-foot .section-note').text()).toContain('还没有手动配置的服务')
   })
 })
 
@@ -367,7 +440,7 @@ describe('对外暴露的功能本身', () => {
     const wrapper = await mountPanel()
 
     expect(wrapper.find('.host [role="switch"]').exists()).toBe(true)
-    expect(wrapper.findAll('.disclosure').length).toBe(2)
+    expect(wrapper.findAll('.host .category-open').length).toBe(2)
   })
 
   // 不信任 start/stop 自己回的结果：以主进程报的实际状态为准
@@ -400,7 +473,7 @@ describe('对外暴露的功能本身', () => {
     await flipMainToggle(wrapper)
     window.confirm = vi.fn().mockReturnValue(false)
 
-    await wrapper.find('.drawer button.app-button--danger').trigger('click')
+    await wrapper.find('.row-actions .link.danger').trigger('click')
     await flushPromises()
     expect(rotateToken).not.toHaveBeenCalled()
   })
@@ -410,7 +483,7 @@ describe('对外暴露的功能本身', () => {
     await flipMainToggle(wrapper)
     window.confirm = vi.fn().mockReturnValue(true)
 
-    await wrapper.find('.drawer button.app-button--danger').trigger('click')
+    await wrapper.find('.row-actions .link.danger').trigger('click')
     await flushPromises()
 
     expect(rotateToken).toHaveBeenCalled()
@@ -420,7 +493,7 @@ describe('对外暴露的功能本身', () => {
   it('「复制配置」复制的是整段 JSON，不是只有令牌', async () => {
     const wrapper = await mountPanel()
     await flipMainToggle(wrapper)
-    await wrapper.find('.drawer button.app-button--primary').trigger('click')
+    await wrapper.find('.category-body button.app-button--primary').trigger('click')
     await flushPromises()
 
     expect(writeText).toHaveBeenCalledWith(HOST_VIEW.clientConfig)
@@ -448,7 +521,7 @@ describe('第三方 server 的状态胶囊', () => {
 
   it('连上时显示工具数', async () => {
     withServers([{ id: 'filesystem', connected: true, toolCount: 7 }])
-    const chip = (await mountPanel()).find('.status')
+    const chip = (await mountPanel()).find('.category.manual .status')
 
     expect(chip.classes()).toContain('ok')
     expect(chip.text()).toContain('7')
@@ -459,23 +532,24 @@ describe('第三方 server 的状态胶囊', () => {
     withServers([{ id: 'filesystem', connected: false, toolCount: 0, error: 'spawn npx ENOENT' }])
     const wrapper = await mountPanel()
 
-    expect(wrapper.find('.status').classes()).toContain('bad')
-    expect(wrapper.find('.row-error').text()).toBe('spawn npx ENOENT')
+    expect(wrapper.find('.category.manual .status').classes()).toContain('bad')
+    expect(wrapper.find('.category.manual .row-error').text()).toBe('spawn npx ENOENT')
   })
 
   it('停用时显示「已停用」而不是「连接失败」', async () => {
     withServers([{ id: 'filesystem', connected: false, toolCount: 0, disabled: true }])
-    const chip = (await mountPanel()).find('.status')
+    const chip = (await mountPanel()).find('.category.manual .status')
 
     expect(chip.classes()).toContain('muted')
     expect(chip.classes()).not.toContain('bad')
   })
 
-  it('有 server 时才出现「保存并连接」和「重新连接」', async () => {
+  // 保存和重连都跟着各自那一行走了，底下永远只剩「添加服务」
+  it('有 server 时底部也只有「添加服务」一个按钮', async () => {
     withServers([{ id: 'filesystem', connected: true, toolCount: 1 }])
     const wrapper = await mountPanel()
 
-    expect(wrapper.findAll('.settings-section:first-child .actions button')).toHaveLength(3)
+    expect(wrapper.findAll('.manual-foot button')).toHaveLength(1)
   })
 })
 
@@ -498,21 +572,23 @@ describe('引擎块：好的时候一行，坏的时候摊开', () => {
     withEngine({ id: 'ue-official', connected: true, toolCount: 3 })
     const wrapper = await mountPanel()
 
-    expect(wrapper.find('.discovered .engine-head').text()).toContain('虚幻引擎内置工具集')
-    expect(wrapper.find('.discovered .engine-head .status.ok').text()).toContain('3')
-    expect(wrapper.find('.discovered .engine-desc').exists()).toBe(false)
-    expect(wrapper.find('.discovered .engine-hint').exists()).toBe(false)
+    expect(wrapper.find('.builtin.engine').text()).toContain('虚幻引擎')
+    expect(wrapper.find('.builtin.engine .status.ok').text()).toContain('3')
+    expect(wrapper.find('.builtin.engine .category-body .engine-desc').exists()).toBe(false)
+    expect(wrapper.find('.builtin.engine .engine-hint').exists()).toBe(false)
   })
 
   it('点一下摊开，才有说明和条目', async () => {
     withEngine({ id: 'ue-official', connected: true, toolCount: 3 })
     const wrapper = await mountPanel()
 
-    await wrapper.find('.discovered .row-toggle').trigger('click')
+    await wrapper.find('.builtin.engine .category-open').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.discovered .engine-desc').exists()).toBe(true)
-    expect(wrapper.find('.discovered .engine-row').text()).toContain('ue-official')
+    expect(wrapper.find('.builtin.engine .category-body .engine-desc').exists()).toBe(true)
+    expect(wrapper.find('.builtin.engine .category-body .engine-row').text()).toContain(
+      'ue-official'
+    )
   })
 
   /**
@@ -528,15 +604,17 @@ describe('引擎块：好的时候一行，坏的时候摊开', () => {
     })
     const wrapper = await mountPanel()
 
-    expect(wrapper.find('.discovered .engine-head .status.bad').exists()).toBe(true)
-    expect(wrapper.find('.row-error').text()).toBe('connect ECONNREFUSED 127.0.0.1:30069')
+    expect(wrapper.find('.builtin.engine .status.bad').exists()).toBe(true)
+    expect(wrapper.find('.builtin.engine .row-error').text()).toBe(
+      'connect ECONNREFUSED 127.0.0.1:30069'
+    )
   })
 
   it('连不上时给「重试连接」，点了就真去重连', async () => {
     withEngine({ id: 'ue-official', connected: false, toolCount: 0, error: 'boom' })
     const wrapper = await mountPanel()
 
-    const retry = wrapper.find('.discovered .actions button')
+    const retry = wrapper.find('.builtin.engine .category-body .actions button')
     expect(retry.text()).toBe('重试连接')
     await retry.trigger('click')
     await flushPromises()
@@ -548,10 +626,10 @@ describe('引擎块：好的时候一行，坏的时候摊开', () => {
   it('连上时不给重试按钮', async () => {
     withEngine({ id: 'ue-official', connected: true, toolCount: 3 })
     const wrapper = await mountPanel()
-    await wrapper.find('.discovered .row-toggle').trigger('click')
+    await wrapper.find('.builtin.engine .category-open').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.discovered .actions').exists()).toBe(false)
+    expect(wrapper.find('.builtin.engine .category-body .actions').exists()).toBe(false)
   })
 
   // 同一条毛病，手配的那几条也犯 —— 不能只修一半
@@ -563,7 +641,7 @@ describe('引擎块：好的时候一行，坏的时候摊开', () => {
     })
     const wrapper = await mountPanel()
 
-    expect(wrapper.find('.server-row .row-error').text()).toBe('spawn npx ENOENT')
+    expect(wrapper.find('.category.manual .row-error').text()).toBe('spawn npx ENOENT')
   })
 })
 
@@ -579,10 +657,10 @@ describe('已配好的服务默认只占一行', () => {
     getSettings.mockResolvedValue({
       settings: {
         version: 1,
-        mcpServers: { blender: { type: 'stdio', command: 'blender-mcp', env: { A: '1' } } }
+        mcpServers: { 'dcc-bridge': { type: 'stdio', command: 'dcc-cli', env: { A: '1' } } }
       },
       path: 'C:/fake/mcp.json',
-      statuses: [{ id: 'blender', connected: true, toolCount: 26 }]
+      statuses: [{ id: 'dcc-bridge', connected: true, toolCount: 26 }]
     })
   }
 
@@ -590,20 +668,20 @@ describe('已配好的服务默认只占一行', () => {
     withBlender()
     const wrapper = await mountPanel()
 
-    expect(wrapper.find('.row-summary').text()).toContain('blender')
-    expect(wrapper.find('.row-summary .status').text()).toContain('26')
-    expect(wrapper.find('.server-row input[type="text"]').exists()).toBe(false)
-    expect(wrapper.find('.server-row textarea').exists()).toBe(false)
+    expect(wrapper.find('.category.manual .category-head').text()).toContain('dcc-bridge')
+    expect(wrapper.find('.category.manual .category-head .status').text()).toContain('26')
+    expect(wrapper.find('.category.manual input[type="text"]').exists()).toBe(false)
+    expect(wrapper.find('.category.manual textarea').exists()).toBe(false)
   })
 
   it('点一下才摊开成编辑态', async () => {
     withBlender()
     const wrapper = await mountPanel()
 
-    await wrapper.find('.row-toggle').trigger('click')
+    await wrapper.find('.category.manual .category-open').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.command-input').exists()).toBe(true)
+    expect(wrapper.find('.category.manual .command-input').exists()).toBe(true)
     expect(wrapper.find('.env-field').exists()).toBe(true)
   })
 
@@ -611,12 +689,12 @@ describe('已配好的服务默认只占一行', () => {
     withBlender()
     const wrapper = await mountPanel()
 
-    await wrapper.find('.row-toggle').trigger('click')
+    await wrapper.find('.category.manual .category-open').trigger('click')
     await flushPromises()
-    await wrapper.find('.row-toggle').trigger('click')
+    await wrapper.find('.category.manual .category-open').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.command-input').exists()).toBe(false)
+    expect(wrapper.find('.category.manual .command-input').exists()).toBe(false)
   })
 
   // 收起的行里报错等于没报错
@@ -624,41 +702,38 @@ describe('已配好的服务默认只占一行', () => {
     getSettings.mockResolvedValue({
       settings: {
         version: 1,
-        mcpServers: { blender: { type: 'stdio', command: 'x', env: { A: '1' } } }
+        mcpServers: { 'dcc-bridge': { type: 'stdio', command: 'x', env: { A: '1' } } }
       },
       path: 'C:/fake/mcp.json',
-      statuses: [{ id: 'blender', connected: true, toolCount: 1 }]
+      statuses: [{ id: 'dcc-bridge', connected: true, toolCount: 1 }]
     })
     const wrapper = await mountPanel()
     // 写一行认不出来的环境变量
-    await wrapper.find('.row-toggle').trigger('click')
+    await wrapper.find('.category.manual .category-open').trigger('click')
     await flushPromises()
     await wrapper.find('.env-field textarea').setValue('这不是环境变量')
     await flushPromises()
     // 就算这时候去点收起，也收不掉
-    await wrapper.find('.row-toggle').trigger('click')
+    await wrapper.find('.category.manual .category-open').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.server-row .error').exists()).toBe(true)
+    expect(wrapper.find('.category.manual .error').exists()).toBe(true)
     expect(wrapper.find('.env-field').exists()).toBe(true)
   })
 
   it('存完就把编辑态收回去 —— 事办完了，屏幕该回到一行一个服务', async () => {
     withBlender()
-    window.api.agentV3.mcp.saveSettings = vi
-      .fn()
-      .mockResolvedValue({ success: true, statuses: [{ id: 'blender', connected: true }] })
     const wrapper = await mountPanel()
-    await wrapper.find('.row-toggle').trigger('click')
+    await wrapper.find('.category.manual .category-open').trigger('click')
+    await flushPromises()
+    // 改一下才会出现这一行自己的保存按钮
+    await wrapper.find('.category.manual .command-input').setValue('dcc-cli --transport stdio')
     await flushPromises()
 
-    await wrapper
-      .findAll('.settings-section:first-child .actions button')
-      .find((b) => b.text().includes('保存'))!
-      .trigger('click')
+    await wrapper.find('button.save-row').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.command-input').exists()).toBe(false)
+    expect(wrapper.find('.category.manual .command-input').exists()).toBe(false)
   })
 })
 
@@ -684,9 +759,7 @@ describe('令牌不摊在屏幕上', () => {
     const wrapper = await mountPanel()
     await openDisclosure(wrapper, '连接配置')
 
-    const reveal = wrapper.findAll('.drawer button').find((b) => b.text() === '显示')
-    expect(reveal, '没找到「显示」').toBeTruthy()
-    await reveal!.trigger('click')
+    await wrapper.find('.config-wrap .reveal').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.config').text()).toContain(TOKEN)
@@ -696,7 +769,7 @@ describe('令牌不摊在屏幕上', () => {
   it('打码状态下复制到的仍然是完整配置', async () => {
     const wrapper = await mountPanel()
     await openDisclosure(wrapper, '连接配置')
-    await wrapper.find('.drawer button.app-button--primary').trigger('click')
+    await wrapper.find('.category-body button.app-button--primary').trigger('click')
     await flushPromises()
 
     expect(writeText).toHaveBeenCalledWith(HOST_VIEW.clientConfig)
@@ -705,40 +778,252 @@ describe('令牌不摊在屏幕上', () => {
   it('换了新令牌就收回明文 —— 上次「显示」是针对旧令牌的决定', async () => {
     const wrapper = await mountPanel()
     await openDisclosure(wrapper, '连接配置')
-    await wrapper
-      .findAll('.drawer button')
-      .find((b) => b.text() === '显示')!
-      .trigger('click')
+    await wrapper.find('.config-wrap .reveal').trigger('click')
     await flushPromises()
 
     window.confirm = vi.fn().mockReturnValue(true)
-    await wrapper.find('.drawer button.app-button--danger').trigger('click')
+    await wrapper.find('.row-actions .link.danger').trigger('click')
     await flushPromises()
 
-    expect(wrapper.findAll('.drawer button').some((b) => b.text() === '显示')).toBe(true)
+    expect(wrapper.find('.config-wrap .reveal').text()).toBe('显示')
+  })
+})
+
+/**
+ * 每条服务各存各的。
+ *
+ * 原来是页面底部一个总的「保存并连接」，于是几条互不相干的服务被绑成一件事：
+ * 改 dcc-bridge 的时候顺手把另一条半填的也提交了，另一条填错了 dcc-bridge 这条
+ * 也存不了。
+ */
+describe('按行保存', () => {
+  function withTwo(): void {
+    getSettings.mockResolvedValue({
+      settings: {
+        version: 1,
+        mcpServers: {
+          'dcc-bridge': { type: 'stdio', command: 'dcc-cli' },
+          filesystem: { type: 'stdio', command: 'npx' }
+        }
+      },
+      path: 'C:/fake/mcp.json',
+      statuses: [
+        { id: 'dcc-bridge', connected: true, toolCount: 26 },
+        { id: 'filesystem', connected: true, toolCount: 7 }
+      ]
+    })
+  }
+
+  async function editRow(wrapper: Wrapper, at: number, command: string): Promise<void> {
+    await wrapper
+      .findAll('.category.manual')
+      [at].find('.category.manual .category-open')
+      .trigger('click')
+    await flushPromises()
+    await wrapper
+      .findAll('.category.manual')
+      [at].find('.category.manual .command-input')
+      .setValue(command)
+    await flushPromises()
+  }
+
+  // 没改过的行摆一个保存按钮，既是噪音，点下去也什么都不会发生
+  it('只有改过的那一行才长出保存按钮', async () => {
+    withTwo()
+    const wrapper = await mountPanel()
+    expect(wrapper.findAll('button.save-row')).toHaveLength(0)
+
+    await editRow(wrapper, 0, 'dcc-cli --transport stdio')
+
+    const rows = wrapper.findAll('.category.manual')
+    expect(rows[0].find('button.save-row').exists()).toBe(true)
+    expect(rows[1].find('button.save-row').exists()).toBe(false)
+  })
+
+  it('存的时候只把这一条递下去，不碰另一条', async () => {
+    withTwo()
+    const wrapper = await mountPanel()
+    await editRow(wrapper, 0, 'dcc-cli --transport stdio')
+
+    await wrapper.find('button.save-row').trigger('click')
+    await flushPromises()
+
+    expect(saveServerIpc).toHaveBeenCalledTimes(1)
+    const [args] = saveServerIpc.mock.calls[0]
+    expect(args.id).toBe('dcc-bridge')
+    expect(args.config.command).toBe('dcc-cli')
+    expect(args.config.args).toEqual(['--transport', 'stdio'])
+  })
+
+  /**
+   * 改名会在盘上留下一条旧的：用新 id 写进去，旧 id 那条还躺在 mcp.json 里，
+   * 下次打开面板它又冒出来。所以存的时候要把旧名字一起递下去。
+   */
+  it('改过名的行把旧名字一起递下去，好让主进程删掉旧的那条', async () => {
+    withTwo()
+    const wrapper = await mountPanel()
+    await wrapper
+      .findAll('.category.manual')[0]
+      .find('.category.manual .category-open')
+      .trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.category.manual')[0].find('.id-field input').setValue('dcc-bridge-52')
+    await flushPromises()
+
+    await wrapper.find('button.save-row').trigger('click')
+    await flushPromises()
+
+    const [args] = saveServerIpc.mock.calls[0]
+    expect(args.id).toBe('dcc-bridge-52')
+    expect(args.renamedFrom).toBe('dcc-bridge')
+  })
+
+  it('存失败时把主进程给的原因显示出来', async () => {
+    withTwo()
+    saveServerIpc.mockResolvedValue({ success: false, error: 'EPERM: mcp.json 被占用' })
+    const wrapper = await mountPanel()
+    await editRow(wrapper, 0, 'dcc-cli --transport stdio')
+
+    await wrapper.find('button.save-row').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('EPERM: mcp.json 被占用')
+  })
+})
+
+/**
+ * 删除是这一页唯一**立刻落盘**的编辑。
+ *
+ * 其余的改动都要点「保存并连接」，删除原来也一样 —— 于是用户点了删除、
+ * 看见那行消失了、切回来发现它还在，只能判断成「删除坏了」。确认弹窗还写着
+ * 「不能撤销」，更坐实了这个误解。按下确认的那一刻事情就该办完。
+ */
+describe('删除当场落盘', () => {
+  function withServers(): void {
+    getSettings.mockResolvedValue({
+      settings: {
+        version: 1,
+        mcpServers: {
+          'dcc-bridge': { type: 'stdio', command: 'dcc-cli' },
+          filesystem: { type: 'stdio', command: 'npx' }
+        }
+      },
+      path: 'C:/fake/mcp.json',
+      statuses: [
+        { id: 'dcc-bridge', connected: true, toolCount: 26 },
+        { id: 'filesystem', connected: true, toolCount: 7 }
+      ]
+    })
+  }
+
+  async function clickRemove(wrapper: Wrapper, at = 0): Promise<void> {
+    await wrapper.findAll('.category.manual .link.danger')[at].trigger('click')
+    await flushPromises()
+  }
+
+  it('确认之后立刻写盘，不用再点保存', async () => {
+    withServers()
+    window.confirm = vi.fn().mockReturnValue(true)
+    const wrapper = await mountPanel()
+
+    await clickRemove(wrapper)
+
+    expect(removeServerIpc).toHaveBeenCalledWith({ id: 'dcc-bridge' })
+    // 走的是专门的删除通道，只摘掉这一个键，盘上别的条目原样不动
+    expect(saveServerIpc).not.toHaveBeenCalled()
+  })
+
+  it('取消就什么都不做，行也留着', async () => {
+    withServers()
+    window.confirm = vi.fn().mockReturnValue(false)
+    const wrapper = await mountPanel()
+
+    await clickRemove(wrapper)
+
+    expect(removeServerIpc).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('dcc-bridge')
+  })
+
+  // 盘上本来就没有它，跑一趟 IPC 纯属多余
+  it('没保存过的新行直接删掉，不碰盘', async () => {
+    withServers()
+    window.confirm = vi.fn().mockReturnValue(true)
+    const wrapper = await mountPanel()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '添加服务')!
+      .trigger('click')
+    await flushPromises()
+    const rows = wrapper.findAll('.category.manual .link.danger')
+    await rows[rows.length - 1].trigger('click')
+    await flushPromises()
+
+    expect(removeServerIpc).not.toHaveBeenCalled()
+  })
+
+  /**
+   * 删完那条已经在盘上没了，剩下那条没改过，所以一个保存按钮都不该冒出来 ——
+   * 基准线按**盘上现在的内容**重算，不是按表单现在的样子。
+   */
+  it('删完之后剩下那条不该跟着亮「保存」', async () => {
+    withServers()
+    window.confirm = vi.fn().mockReturnValue(true)
+    removeServerIpc.mockResolvedValue({
+      success: true,
+      settings: {
+        version: 1,
+        mcpServers: { filesystem: { type: 'stdio', command: 'npx' } }
+      },
+      statuses: [{ id: 'filesystem', connected: true, toolCount: 7 }]
+    })
+    const wrapper = await mountPanel()
+
+    await clickRemove(wrapper)
+    expect(wrapper.find('button.save-row').exists()).toBe(false)
+
+    // 再去改剩下那行：这回该出现它自己的保存按钮
+    await wrapper.find('.category.manual .category-open').trigger('click')
+    await flushPromises()
+    await wrapper.find('.category.manual .command-input').setValue('npx -y something-else')
+    await flushPromises()
+    expect(wrapper.find('button.save-row').exists()).toBe(true)
+  })
+
+  it('主进程删失败时把原因显示出来', async () => {
+    withServers()
+    window.confirm = vi.fn().mockReturnValue(true)
+    removeServerIpc.mockResolvedValue({ success: false, error: 'EPERM: mcp.json 被占用' })
+    const wrapper = await mountPanel()
+
+    await clickRemove(wrapper)
+
+    expect(wrapper.text()).toContain('EPERM: mcp.json 被占用')
   })
 })
 
 /**
  * 空行的那条规则。
  *
- * 点「添加服务」立刻蹦一句「标识不能为空」，那条红字又让「保存并连接」整个禁掉 ——
- * 用户连**刚在另一行改好的东西**都存不了。真正的语义很简单：加了没填就等于没加。
+ * 点「添加服务」立刻蹦一句「标识不能为空」，那条红字原来还会把总的
+ * 「保存并连接」整个禁掉 —— 用户连**刚在另一行改好的东西**都存不了。
+ * 现在按行存，一行填坏挡不住别的行；但「加了没填就等于没加」这条语义
+ * 仍然要守住，否则一个空行会一直亮着红字。
  */
-describe('新增行不该立刻报错、更不该锁死保存', () => {
+describe('新增行不该立刻报错、更不该挡住别的行', () => {
   function withOneServer(): void {
     getSettings.mockResolvedValue({
       settings: {
         version: 1,
-        mcpServers: { blender: { type: 'stdio', command: 'blender-mcp' } }
+        mcpServers: { 'dcc-bridge': { type: 'stdio', command: 'dcc-cli' } }
       },
       path: 'C:/fake/mcp.json',
-      statuses: [{ id: 'blender', connected: true, toolCount: 26 }]
+      statuses: [{ id: 'dcc-bridge', connected: true, toolCount: 26 }]
     })
   }
 
   async function clickAdd(wrapper: Wrapper): Promise<void> {
-    await wrapper.findAll('.settings-section:first-child .actions button')[0].trigger('click')
+    await wrapper.findAll('.manual-foot button')[0].trigger('click')
     await flushPromises()
   }
 
@@ -747,48 +1032,58 @@ describe('新增行不该立刻报错、更不该锁死保存', () => {
     const wrapper = await mountPanel()
     await clickAdd(wrapper)
 
-    expect(wrapper.findAll('.server-row')).toHaveLength(2)
-    expect(wrapper.find('.server-row .error').exists()).toBe(false)
+    expect(wrapper.findAll('.category.manual')).toHaveLength(2)
+    expect(wrapper.find('.category.manual .error').exists()).toBe(false)
   })
 
-  it('空行不挡住保存另一条已经改好的配置', async () => {
+  // 一行填坏了是它自己的事，别的行照样能存
+  it('填坏的那行不挡住另一行的保存', async () => {
     withOneServer()
     const wrapper = await mountPanel()
     await clickAdd(wrapper)
+    // 新行填了命令没填标识 —— 它自己是错的
+    await wrapper
+      .findAll('.category.manual')[1]
+      .find('.category.manual .command-input')
+      .setValue('npx -y some-server')
+    // 老那行也改一下，让它出现自己的保存按钮
+    await wrapper
+      .findAll('.category.manual')[0]
+      .find('.category.manual .category-open')
+      .trigger('click')
+    await flushPromises()
+    await wrapper
+      .findAll('.category.manual')[0]
+      .find('.category.manual .command-input')
+      .setValue('dcc-cli --x')
+    await flushPromises()
 
-    const save = wrapper
-      .findAll('.settings-section:first-child .actions button')
-      .find((b) => b.text().includes('保存'))
-    expect(save!.attributes('disabled')).toBeUndefined()
+    const rows = wrapper.findAll('.category.manual')
+    expect(rows[0].find('button.save-row').attributes('disabled')).toBeUndefined()
+    expect(rows[1].find('button.save-row').attributes('disabled')).toBeDefined()
   })
 
   // 填了一半才算错 —— 这时候用户确实漏了东西
-  it('填了命令却没填标识，才报错并说清楚挡了几条', async () => {
+  it('填了命令却没填标识才报错', async () => {
     withOneServer()
     const wrapper = await mountPanel()
     await clickAdd(wrapper)
-    await wrapper.findAll('.server-row')[1].find('.command-input').setValue('npx -y some-server')
+    await wrapper
+      .findAll('.category.manual')[1]
+      .find('.category.manual .command-input')
+      .setValue('npx -y some-server')
     await flushPromises()
 
-    expect(wrapper.find('.server-row .error').text()).toContain('标识')
-    expect(wrapper.text()).toContain('1 条配置填写不完整')
+    expect(wrapper.find('.category.manual .error').text()).toContain('标识')
   })
 
-  it('保存时把空行丢掉，不写进 mcp.json 也不留在界面上', async () => {
+  // 空行盘上没有，也没什么可存的，不该给它一个保存按钮
+  it('空行没有保存按钮', async () => {
     withOneServer()
-    const saveSettings = vi.fn().mockResolvedValue({ success: true, statuses: [] })
-    window.api.agentV3.mcp.saveSettings = saveSettings
     const wrapper = await mountPanel()
     await clickAdd(wrapper)
 
-    await wrapper
-      .findAll('.settings-section:first-child .actions button')
-      .find((b) => b.text().includes('保存'))!
-      .trigger('click')
-    await flushPromises()
-
-    expect(Object.keys(saveSettings.mock.calls[0][0].settings.mcpServers)).toEqual(['blender'])
-    expect(wrapper.findAll('.server-row')).toHaveLength(1)
+    expect(wrapper.findAll('.category.manual')[1].find('button.save-row').exists()).toBe(false)
   })
 })
 
@@ -814,12 +1109,16 @@ describe('一键块和自动发现块的交接', () => {
     epicStatus.mockResolvedValue({ success: true, projects: [READY_PROJECT] })
     const wrapper = await mountPanel()
 
-    // 两块至少要有一块在说话，否则用户看到的就是「坏了」
-    expect(wrapper.find('.engine-block.setup').exists()).toBe(true)
-    expect(wrapper.text()).toContain('BIKEOUT')
+    // 至少要有一处在说话，否则用户看到的就是「坏了」
+    expect(wrapper.find('.builtin.engine').exists()).toBe(true)
+    expect(wrapper.find('.builtin.engine .category-body').text()).toContain('BIKEOUT')
   })
 
-  it('自动发现块接手报状态之后，一键块才收起来', async () => {
+  /**
+   * 两块合成一行之后，「收起来」的含义变了：行永远在，收起的是摊开的内容。
+   * 判据还是同一条 —— 真连上了就没有要办的事，行右端报连接状态即可。
+   */
+  it('真连上之后那一行收起来，只报连接状态', async () => {
     epicStatus.mockResolvedValue({ success: true, projects: [READY_PROJECT] })
     getSettings.mockResolvedValue({
       settings: { version: 1, mcpServers: {} },
@@ -828,9 +1127,8 @@ describe('一键块和自动发现块的交接', () => {
     })
     const wrapper = await mountPanel()
 
-    expect(wrapper.find('.engine-block.setup').exists()).toBe(false)
-    // 收起来的前提是接手的那块真的在
-    expect(wrapper.find('.engine-block').exists()).toBe(true)
+    expect(wrapper.find('.builtin.engine .category-body').exists()).toBe(false)
+    expect(wrapper.find('.builtin.engine .status.ok').text()).toContain('3')
   })
 
   /**
@@ -847,8 +1145,9 @@ describe('一键块和自动发现块的交接', () => {
     const wrapper = await mountPanel()
 
     expect(reconnect).toHaveBeenCalled()
-    // 补上之后自动发现块出现，一键块随之收起
-    expect(wrapper.find('.engine-block.setup').exists()).toBe(false)
+    // 补上之后行右端就报「已连接」，摊开的内容随之收起
+    expect(wrapper.find('.builtin.engine .category-body').exists()).toBe(false)
+    expect(wrapper.find('.builtin.engine .status.ok').exists()).toBe(true)
   })
 
   it('缓存里已经有引擎 server 就不多此一举地重连', async () => {
@@ -870,7 +1169,407 @@ describe('一键块和自动发现块的交接', () => {
     })
     const wrapper = await mountPanel()
 
-    expect(wrapper.find('.engine-block.setup button').exists()).toBe(true)
+    // 只有一个项目可操作时，按钮就摆在行右端 —— 藏进摊开的里面等于它不存在
+    expect(wrapper.find('.builtin.engine .row-action').exists()).toBe(true)
     expect(reconnect).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 一键接入 Blender。
+ *
+ * 和引擎那块是同一个病、同一条对策：手工流程四道关（装 git/Python、跑安装
+ * 脚本、手填一长串绝对路径、再手填三行环境变量），走完的用户几乎没有。
+ * 走不完就等于这个能力不存在 —— 真机上模型因此回过一句「我没有连 Blender
+ * 的工具」，而设置页里就摆着这个按钮。
+ */
+/**
+ * Blender 是内置的一条，不是手动配置的一条。
+ *
+ * 它原来在页面上**出现两次**：上面一块「一键接入」的安装卡片，下面「手动配置
+ * 的服务」里还有一条可编辑的 `blender` —— 而那条恰恰是安装卡片自己写进
+ * `mcp.json` 的。用户看到的是同一个东西的两个身份，而且下面那条长得和随手加的
+ * 第三方服务一模一样，看不出它归盒子管、坏了该去点「重新安装」。
+ */
+describe('装好的 Blender 归内置组', () => {
+  const installed = {
+    settings: {
+      version: 1,
+      mcpServers: {
+        blender: {
+          type: 'stdio' as const,
+          command: 'C:/box/BlenderMcp/venv/Scripts/blender-mcp.exe',
+          args: ['--transport', 'stdio'],
+          env: {
+            BLENDER_MCP_PORT: '9876',
+            BLENDER_PATH: 'H:/Game/Blender/blender.exe',
+            BLENDER_MCP_HOST: '127.0.0.1'
+          }
+        }
+      }
+    },
+    path: 'C:/fake/mcp.json',
+    statuses: [{ id: 'blender', connected: true, toolCount: 26 }]
+  }
+
+  const configuredStatus = {
+    success: true,
+    status: {
+      state: 'configured' as const,
+      prerequisites: [],
+      installRoot: '/x',
+      configuredBlenderPath: 'H:/Game/Blender/blender.exe',
+      configuredServerId: 'blender'
+    }
+  }
+
+  beforeEach(() => {
+    getSettings.mockResolvedValue(installed)
+    blenderStatus.mockResolvedValue(configuredStatus)
+  })
+
+  it('只出现在内置那一组，手动配置里没有它', async () => {
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('.builtin.blender').text()).toContain('Blender')
+    expect(wrapper.findAll('.category.manual')).toHaveLength(0)
+    expect(wrapper.find('.manual-foot .section-note').exists()).toBe(true)
+  })
+
+  /**
+   * 标识、连接方式、启动命令都是盒子自己写的，给输入框只会让用户改坏一条
+   * 本来好好的配置。真正会变的只有两样：Blender 装在哪、端口多少 ——
+   * 而它们原来埋在一块三行的 KEY=VALUE 文本里，得先知道有这两个键才改得动。
+   */
+  it('默认只给「装在哪」和「端口」两个字段，值从环境变量里取', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('.builtin.blender .category-open').trigger('click')
+    await flushPromises()
+
+    const inputs = wrapper.findAll('.builtin.blender .category-body input')
+    expect(inputs).toHaveLength(2)
+    expect((inputs[0].element as HTMLInputElement).value).toBe('H:/Game/Blender/blender.exe')
+    expect((inputs[1].element as HTMLInputElement).value).toBe('9876')
+    // 启动命令和整块环境变量都收在「高级」后面
+    expect(wrapper.find('.builtin.blender .category-body textarea').exists()).toBe(false)
+  })
+
+  /**
+   * 改路径只动 BLENDER_PATH 那一行。整段重写会把这个面板没在意的键一起抹掉 ——
+   * 这一页已经因为「悄悄丢配置」出过一次事。
+   */
+  it('改路径只动那一个键，别的环境变量原样留着', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('.builtin.blender .category-open').trigger('click')
+    await flushPromises()
+
+    await wrapper
+      .findAll('.builtin.blender .category-body input')[0]
+      .setValue('D:/portable/blender.exe')
+    await flushPromises()
+
+    // 「高级」里那块原文是唯一能看到全部键的地方
+    await wrapper
+      .findAll('.builtin.blender .category-body .row-actions .link')
+      .find((b) => b.text().includes('高级'))!
+      .trigger('click')
+    await flushPromises()
+
+    const env = wrapper.find('.builtin.blender .category-body .env-field textarea')
+      .element as HTMLTextAreaElement
+    expect(env.value).toContain('BLENDER_PATH=D:/portable/blender.exe')
+    expect(env.value).toContain('BLENDER_MCP_HOST=127.0.0.1')
+    expect(env.value).toContain('BLENDER_MCP_PORT=9876')
+  })
+
+  // 逃生口要留着：排障时得够得着盒子到底写了什么
+  it('「高级」调得出启动命令和完整环境变量', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('.builtin.blender .category-open').trigger('click')
+    await flushPromises()
+
+    await wrapper
+      .findAll('.builtin.blender .category-body .row-actions .link')
+      .find((b) => b.text().includes('高级'))!
+      .trigger('click')
+    await flushPromises()
+
+    const command = wrapper.find('.builtin.blender .category-body .command-input')
+      .element as HTMLTextAreaElement
+    expect(command.value).toContain('blender-mcp.exe')
+  })
+
+  /**
+   * 整块 JSON 的写法也得认。按行改一个 `KEY=VALUE` 进去会写出一段两种语法
+   * 混着的东西，`parseEnvText` 从此整段算无效 —— 用户改了个路径，结果整组
+   * 环境变量静默消失，症状是「连上了、工具也在、一调就失败」。
+   */
+  it('环境变量是整块 JSON 时，改路径不把它改坏', async () => {
+    getSettings.mockResolvedValue({
+      ...installed,
+      settings: {
+        version: 1,
+        mcpServers: {
+          blender: {
+            ...installed.settings.mcpServers.blender,
+            env: { BLENDER_PATH: 'H:/Game/Blender/blender.exe', BLENDER_MCP_HOST: '127.0.0.1' }
+          }
+        }
+      }
+    })
+    const wrapper = await mountPanel()
+    await wrapper.find('.builtin.blender .category-open').trigger('click')
+    await flushPromises()
+
+    // 先切成 JSON 写法，再从上面的路径框改一次
+    const env = wrapper.find('.builtin.blender .category-body input')
+    await wrapper
+      .findAll('.builtin.blender .category-body .row-actions .link')
+      .find((b) => b.text().includes('高级'))!
+      .trigger('click')
+    await flushPromises()
+    await wrapper
+      .find('.builtin.blender .category-body .env-field textarea')
+      .setValue('{ "BLENDER_PATH": "H:/old.exe", "BLENDER_MCP_HOST": "127.0.0.1" }')
+    await env.setValue('D:/portable/blender.exe')
+    await flushPromises()
+
+    const text = (
+      wrapper.find('.builtin.blender .category-body .env-field textarea')
+        .element as HTMLTextAreaElement
+    ).value
+    expect(JSON.parse(text)).toEqual({
+      BLENDER_PATH: 'D:/portable/blender.exe',
+      BLENDER_MCP_HOST: '127.0.0.1'
+    })
+  })
+
+  // 改了才长出保存按钮 —— 没改过的按钮点下去什么都不会发生
+  it('改过之后才长出保存，存的是这一条', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('.builtin.blender .category-open').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.builtin.blender .category-body .save-row').exists()).toBe(false)
+
+    await wrapper.findAll('.builtin.blender .category-body input')[1].setValue('9999')
+    await flushPromises()
+
+    await wrapper.find('.builtin.blender .category-body .save-row').trigger('click')
+    await flushPromises()
+
+    const args = saveServerIpc.mock.calls[0][0]
+    expect(args.id).toBe('blender')
+    expect(args.config.env.BLENDER_MCP_PORT).toBe('9999')
+  })
+})
+
+describe('一键接入 Blender', () => {
+  const ready = {
+    success: true,
+    status: {
+      state: 'ready' as const,
+      prerequisites: [
+        { id: 'blender' as const, ok: true, found: 'Blender 5.2', path: 'C:/b/blender.exe' },
+        { id: 'git' as const, ok: true },
+        { id: 'python' as const, ok: true }
+      ],
+      blenderPath: 'C:/b/blender.exe',
+      installRoot: 'C:/fake/BlenderMcp'
+    }
+  }
+
+  /** 安装按钮在行右端 —— 这一块存在的理由就是这一下点击，不藏进摊开的里面 */
+  const installButton = (wrapper: Wrapper): ReturnType<Wrapper['find']> =>
+    wrapper.find('.builtin.blender .row-action')
+
+  /** 「选择…」在摊开的里面：点之前要先看见要用哪个 Blender、缺什么 */
+  const chooseButton = (wrapper: Wrapper): ReturnType<Wrapper['find']> =>
+    wrapper.find('.builtin.blender .category-body button')
+
+  it('前置齐了就给一个能点的按钮，并显示要用哪个 Blender', async () => {
+    blenderStatus.mockResolvedValue(ready)
+    const wrapper = await mountPanel()
+
+    expect(installButton(wrapper).attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.builtin.blender .category-body').text()).toContain('blender.exe')
+  })
+
+  // 缺什么要逐条点名。合成一句「环境不满足」正是安装脚本原来的失败样子
+  // （一句 Command failed: git），用户看不出要去装什么
+  it('缺前置时按钮点不了，并逐条说明缺哪个', async () => {
+    const wrapper = await mountPanel()
+    const block = wrapper.find('.builtin.blender .category-body')
+
+    expect(installButton(wrapper).attributes('disabled')).toBeDefined()
+    expect(block.text()).toContain('Git')
+    expect(block.text()).toContain('Python')
+  })
+
+  /**
+   * 自动探测只认官方安装器和 Steam 的标准位置。便携版、装在 D 盘、放在网络盘
+   * 上的都探不到 —— 没有这条出路，那些用户看到的是一个永远点不了的按钮加一句
+   * 「没找到 Blender」。
+   */
+  it('探不到 Blender 时，用户自己指一个就能装', async () => {
+    blenderStatus.mockResolvedValue({
+      success: true,
+      status: {
+        state: 'blocked',
+        prerequisites: [
+          { id: 'blender', ok: false, problem: 'missing' },
+          { id: 'git', ok: true },
+          { id: 'python', ok: true }
+        ],
+        installRoot: 'C:/fake/BlenderMcp'
+      }
+    })
+    showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['D:/portable/blender.exe'] })
+    blenderSetup.mockResolvedValue({ success: true, message: '已接入 Blender。', statuses: [] })
+    const wrapper = await mountPanel()
+
+    expect(installButton(wrapper).attributes('disabled')).toBeDefined()
+
+    await chooseButton(wrapper).trigger('click')
+    await flushPromises()
+
+    // 用户亲手指出来的文件，不该再被「探测没探到」否决
+    expect(installButton(wrapper).attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.builtin.blender .category-body').text()).toContain(
+      'D:/portable/blender.exe'
+    )
+
+    await installButton(wrapper).trigger('click')
+    await flushPromises()
+    expect(blenderSetup).toHaveBeenCalledWith({ blenderPath: 'D:/portable/blender.exe' })
+  })
+
+  it('取消选择不改动已经探到的那个', async () => {
+    blenderStatus.mockResolvedValue(ready)
+    showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] })
+    const wrapper = await mountPanel()
+
+    await chooseButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.builtin.blender .category-body').text()).toContain('C:/b/blender.exe')
+  })
+
+  // 空白不是「没有噪音」，空白是「看起来坏了」—— 这一课引擎那块已经上过一遍
+  it('平台不支持时不给按钮，但要说出原因', async () => {
+    blenderStatus.mockResolvedValue({
+      success: true,
+      status: { state: 'unsupported', prerequisites: [], installRoot: '/x' }
+    })
+    const wrapper = await mountPanel()
+    const block = wrapper.find('.builtin.blender .category-body')
+
+    expect(block.exists()).toBe(true)
+    expect(installButton(wrapper).exists()).toBe(false)
+    expect(block.text()).toContain('Windows')
+  })
+
+  const configured = {
+    success: true,
+    status: {
+      state: 'configured' as const,
+      prerequisites: [],
+      installRoot: '/x',
+      configuredBlenderPath: 'C:/b/blender.exe',
+      configuredServerId: 'blender'
+    }
+  }
+
+  /**
+   * 配好而且连上了，这一行就没有要办的事：收成一行，右端报连接状态。
+   * 「一键接入」也不再出现 —— 已经接上了，那个按钮此刻只会让人以为没装好。
+   */
+  it('配好而且连上了就收成一行，只报连接状态', async () => {
+    blenderStatus.mockResolvedValue(configured)
+    getSettings.mockResolvedValue({
+      settings: { version: 1, mcpServers: {} },
+      path: 'C:/fake/mcp.json',
+      statuses: [{ id: 'blender', connected: true, toolCount: 26 }]
+    })
+    const wrapper = await mountPanel()
+
+    expect(wrapper.find('.builtin.blender .category-body').exists()).toBe(false)
+    expect(installButton(wrapper).exists()).toBe(false)
+    expect(wrapper.find('.builtin.blender .status.ok').text()).toContain('26')
+  })
+
+  /**
+   * 配置还在、桥已经死了，正是「再点一次修一修」唯一有用的时候 ——
+   * 而第一版恰好在这时候把唯一能调它的按钮藏了起来。真会发生：插件装在
+   * Blender 5.1 的扩展目录里，用户升到 5.2 之后扩展是分版本存的，桥就没了。
+   */
+  it('配好了但没连上时，按钮必须还在 —— 那是修复的唯一入口', async () => {
+    blenderStatus.mockResolvedValue(configured)
+    getSettings.mockResolvedValue({
+      settings: { version: 1, mcpServers: {} },
+      path: 'C:/fake/mcp.json',
+      statuses: [{ id: 'blender', connected: false, toolCount: 0, error: 'boom' }]
+    })
+    const wrapper = await mountPanel()
+
+    expect(installButton(wrapper).exists()).toBe(true)
+    // 有事要办就强制摊开，否则原因和前置都藏在收起的那一行里
+    expect(wrapper.find('.builtin.blender .category-body').exists()).toBe(true)
+  })
+
+  /**
+   * 装成功那一刻 `hideBlenderSetup` 会翻真，把整块连同刚写好的回执一起卸掉。
+   * 回执得活过这一下 —— 丢掉的偏偏是别处没有的那句「盒子会自己把 Blender
+   * 拉起来，不用手动开」。
+   */
+  it('装成功之后那句回执还得看得见 —— 行不许跟着自动收起', async () => {
+    blenderStatus.mockResolvedValueOnce(ready).mockResolvedValue(configured)
+    blenderSetup.mockResolvedValue({
+      success: true,
+      message: '已接入 Blender。盒子会自己把它拉起来。',
+      statuses: [{ id: 'blender', connected: true, toolCount: 26 }]
+    })
+    getSettings.mockResolvedValue({
+      settings: { version: 1, mcpServers: {} },
+      path: 'C:/fake/mcp.json',
+      statuses: [{ id: 'blender', connected: true, toolCount: 26 }]
+    })
+    const wrapper = await mountPanel()
+
+    await installButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(installButton(wrapper).exists()).toBe(false)
+    expect(wrapper.find('.builtin.blender .category-body').text()).toContain(
+      '已接入 Blender。盒子会自己把它拉起来。'
+    )
+  })
+
+  /**
+   * 配置是主进程直接写进 `mcp.json` 的，表单里那份还是旧的。
+   * 不重读的话，用户在这一页点一下保存就会把刚装好的那条又抹掉。
+   */
+  it('装成功之后重读配置，不让表单里的旧快照把新配置写没', async () => {
+    blenderStatus.mockResolvedValue(ready)
+    blenderSetup.mockResolvedValue({ success: true, message: '已接入 Blender。', statuses: [] })
+    const wrapper = await mountPanel()
+
+    getSettings.mockClear()
+    await installButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(blenderSetup).toHaveBeenCalledWith({ blenderPath: 'C:/b/blender.exe' })
+    expect(getSettings).toHaveBeenCalled()
+  })
+
+  // 主进程才知道这次是装好了、缺前置、还是脚本自己挂了，渲染层照 state 猜会对不上
+  it('失败时把主进程那句话原样显示出来', async () => {
+    blenderStatus.mockResolvedValue(ready)
+    blenderSetup.mockResolvedValue({ success: false, message: '安装没跑完：网络连不上。' })
+    const wrapper = await mountPanel()
+
+    await installButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('安装没跑完：网络连不上。')
   })
 })

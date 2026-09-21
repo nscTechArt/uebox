@@ -192,12 +192,22 @@ export default {
         'Give the assistant third-party capabilities, or open Unreal Engine to external clients.',
       empty: 'No MCP servers configured yet.',
       configPath: 'Config file: {path}',
-      manualTitle: 'Manually configured servers',
+      // Two groups: what the box installed vs what the user added. Mixed together,
+      // a box-installed blender looked exactly like a hand-typed one.
+      builtinTitle: 'Built in',
+      manualTitle: 'Manually configured',
+      // An empty group cannot be blank — blank reads as broken, not as "nothing here".
+      manualEmpty: 'No manually configured servers yet.',
       unsaved: 'Unsaved changes',
       newServer: 'New server'
     },
     epicSetup: {
       title: "Turn on Unreal Engine's built-in AI toolsets",
+      // Row title. Once the card collapses to a line, it must sit next to a status.
+      rowTitle: 'Unreal Engine',
+      // noProject is written for the drawer; too long to hang off a row.
+      noProjectShort: 'No project connected · open one from the home page',
+      checking: 'Checking…',
       enable: 'Turn on',
       start: 'Start server',
       working: 'Working…',
@@ -212,6 +222,54 @@ export default {
         'No Unreal Engine project is connected yet. Open a project from the home page and its status will show here.',
       failed: 'Check failed: {error}. If you just updated the app, restart it and try again.',
       hint: 'Updates the project file and editor preferences. Disable it in Unreal Engine under Edit > Plugins.'
+    },
+    blenderSetup: {
+      title: 'Connect Blender (official Blender Lab MCP)',
+      rowTitle: 'Blender',
+      // Short status for the row end. Full sentences live in the drawer.
+      checking: 'Checking…',
+      unsupportedShort: 'No installer for this platform',
+      missingPrereq: 'Missing required components',
+      notConnected: 'Not connected',
+      // Only these two are worth editing after install. ID, transport and launch
+      // command are written by the box; editing them only breaks a working config.
+      pathLabel: 'Blender executable',
+      pathHint: 'Point this at Blender if you move it; the box launches it from here.',
+      portLabel: 'Port',
+      reinstall: 'Reinstall',
+      // The escape hatch. A link, not another disclosure — this page is deep enough.
+      raw: 'Advanced (raw MCP config)',
+      rawBack: 'Hide raw config',
+      install: 'Connect',
+      // Detection only covers standard install locations; portable installs need a way out.
+      choose: 'Choose…',
+      // It takes minutes. A silent UI looks dead, and the user clicks again.
+      working: 'Installing, this takes a few minutes…',
+      loading: 'Checking Blender and the components the install needs…',
+      // Not finding Blender is not an error: portable and network-drive installs are unguessable.
+      noBlender: 'No Blender found',
+      unsupported: 'No installer for this platform yet — Windows and macOS only.',
+      failed: 'Check failed: {error}. If you just updated the app, restart it and try again.',
+      hint: 'Installs the official Blender Lab server and Blender add-on, then fills in the MCP config. Needs network access.',
+      // Name what is missing. "Environment not satisfied" is exactly the failure the
+      // install script already had (one line of Command failed: git).
+      prereq: {
+        blender: {
+          missing: 'No Blender found. Install Blender 5.1 or newer first (blender.org).',
+          tooOld: 'This machine has {found}; the official add-on needs Blender 5.1 or newer.'
+        },
+        git: {
+          missing:
+            'No Git found. The install uses it to fetch the official source — install it first (git-scm.com).',
+          tooOld: 'This machine has {found}; please upgrade Git (git-scm.com).'
+        },
+        python: {
+          missing:
+            'No Python found. The official server runs on Python 3.11 or newer (python.org).',
+          tooOld:
+            'This machine has {found}; the official server needs Python 3.11 or newer (python.org).'
+        }
+      }
     },
     engine: {
       title: "Unreal Engine's built-in toolsets",
@@ -249,6 +307,8 @@ export default {
       showToken: 'Show',
       hideToken: 'Hide',
       running: 'Running · {count} tools available',
+      // The word "engine" carries the distinction, so the disclaimer moves to a title.
+      runningShort: 'Running · {count} engine tools exposed',
       toolsNote:
         "This is the box's own engine tool count; it is unrelated to the per-service counts above.",
       advanced: 'Port and permissions',
@@ -256,14 +316,16 @@ export default {
       scopeTagWritable: 'Writable',
       clientConfig: 'Connection config',
       copyConfig: 'Copy config',
-      copyToken: 'Copy token',
+      copyToken: 'Copy token only',
       copied: 'Copied',
       tokenMasked: 'Only the ends are shown; use “Copy token” for the full value',
-      rotate: 'Reset',
+      // "Reset" alone does not say what it resets, and it sits beside two copy actions.
+      rotate: 'Reset token',
       rotateConfirm:
         'Resetting will immediately break every external client configured for this service; each one must be re-pasted. Continue?',
+      // The URL and token are both inside this JSON, so neither needs its own line.
       clientHint:
-        'Paste the configuration below into your external client’s MCP configuration file.',
+        'Paste this into your external client’s MCP configuration file. The address and token are both in it.',
       autoStartHint: 'The box remembers this and runs the service automatically next launch.'
     },
     fields: {
@@ -287,8 +349,12 @@ export default {
     actions: {
       add: 'Add server',
       remove: 'Remove',
+      // This used to be a lie: removing only dropped the row from the form, so the
+      // user came back to find it still there and called delete broken. Removal now
+      // writes mcp.json on the spot — say that it is immediate, because every other
+      // edit on this page waits for Save.
       removeConfirm:
-        'Remove the configuration for “{id}”? Its launch command and environment variables go with it, and this cannot be undone.',
+        'Remove the configuration for “{id}”? It leaves mcp.json immediately — no need to save, and this cannot be undone.',
       reveal: 'Show in folder',
       copyPath: 'Copy',
       save: 'Save and connect',
@@ -1267,7 +1333,8 @@ export default {
     installFailed:
       'Could not install the update. Try again later or download the installer manually',
     unavailable: 'Updates are unavailable right now. Restart the app and try again',
-    downloadNotStarted: 'The download did not start. There may be no update available, or one is already downloading',
+    downloadNotStarted:
+      'The download did not start. There may be no update available, or one is already downloading',
     checkUnavailable: 'This build has no update source configured, so it cannot check for updates'
   },
   page: {

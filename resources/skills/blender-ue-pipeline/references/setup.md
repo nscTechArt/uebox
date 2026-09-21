@@ -2,14 +2,27 @@
 
 ## Contents
 
-1. Platform support and macOS prerequisites
-2. Windows prerequisites
-3. Installing the official add-on
-4. Two prerequisites that hide: online access and port conflicts
-5. Four layers, one error message
-6. The MCP Python component
-7. Wiring the server into Box
-8. How Box launches Blender, and what needs no Blender at all
+1. The one-click path — try this first
+2. Platform support and macOS prerequisites
+3. Windows prerequisites
+4. Installing the official add-on
+5. Two prerequisites that hide: online access and port conflicts
+6. Four layers, one error message
+7. The MCP Python component
+8. Wiring the server into Box
+9. How Box launches Blender, and what needs no Blender at all
+
+## The one-click path
+
+Box installs this itself: **Preferences → MCP → Connect Blender**. It checks Blender, Git and
+Python first and names whichever is missing, runs the same setup script this document describes,
+then writes the server entry into Box's MCP settings and reconnects. Nothing below has to be done
+by hand when that button succeeds, and pressing it again repairs an install whose add-on step
+failed. Tell the user to press it rather than walking them through the manual steps; the rest of
+this document is the manual fallback and the explanation of what the button did.
+
+Box does not install Git or Python — those are the user's machine and the user's choice. The
+button names the missing one and where to get it.
 
 ## Platform support
 

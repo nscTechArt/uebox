@@ -93,7 +93,11 @@ def install(blender_path, install_directory, runner=run):
     temporary.replace(destination)
     print('MCP config:', destination)
     print('Official add-on verified installed and enabled.')
-    if 'BLMCP_ONLINE=True' not in report.splitlines():
+    # Machine-readable, for a caller that reports this in its own words. Box parses
+    # this line; matching the prose below would break the moment someone rewords it.
+    online = 'BLMCP_ONLINE=True' in report.splitlines()
+    print('BLMCP_ONLINE=' + str(online))
+    if not online:
         print('Online access is OFF. Let Box launch Blender with --online-mode, or enable')
         print('Preferences > System > Network > Allow Online Access for manual launches.')
     print('Add the generated server entry in Box MCP settings and reconnect.')

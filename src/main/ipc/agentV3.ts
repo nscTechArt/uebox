@@ -65,6 +65,7 @@ import {
   saveMcpServerConfig,
   type McpServerHostOptions,
   type McpServerHostStatus,
+  type McpServerConfig,
   type McpSettings
 } from '../agent-v3/capabilities/mcp'
 import { clientConfigSnippet, hostUrl } from '../agent-v3/capabilities/mcp/hostStore'
@@ -2641,6 +2642,52 @@ export function registerAgentV3IPC(): void {
     }
   })
 
+  /**
+   * 删一条 server，当场落盘。
+   *
+   * 不走 `save-settings`：那个是「把表单整张写下去」，会把用户在别的行里
+   * 还没保存的编辑一起提交。删一条就只删一条，别的原样留在盘上。
+   */
+  ipcMain.handle('agent-v3:mcp:remove-server', async (_event, args: { id: string }) => {
+    try {
+      const { removeMcpServer } = await import('../agent-v3/capabilities/mcp/store')
+      await removeMcpServer(args.id)
+      // 删完立刻重连：那条 server 的工具要当场从会话里消失，
+      // 而不是留一个已经不存在的「已连接」胶囊挂在界面上
+      return { success: true, settings: await readMcpSettings(), statuses: await reconnectMcp() }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  /**
+   * 存一条 server，当场落盘并重连。
+   *
+   * 同 `remove-server`，不走 `save-settings`：那个是「把表单整张写下去」，
+   * 会把用户在别的行里还没保存的编辑一起提交。
+   *
+   * `renamedFrom` 是改过名的那一条在盘上的旧名字。不删的话盘上会多出一条
+   * 旧的，下次打开面板它又冒出来。
+   */
+  ipcMain.handle(
+    'agent-v3:mcp:save-server',
+    async (_event, args: { id: string; config: McpServerConfig; renamedFrom?: string }) => {
+      try {
+        const { removeMcpServer, upsertMcpServer } = await import(
+          '../agent-v3/capabilities/mcp/store'
+        )
+        // 先删旧名字再写新的：反过来的话，id 没变时会把刚写的又删掉
+        if (args.renamedFrom && args.renamedFrom !== args.id) {
+          await removeMcpServer(args.renamedFrom)
+        }
+        await upsertMcpServer(args.id, args.config)
+        return { success: true, settings: await readMcpSettings(), statuses: await reconnectMcp() }
+      } catch (error) {
+        return { success: false, error: (error as Error).message }
+      }
+    }
+  )
+
   ipcMain.handle('agent-v3:mcp:reconnect', async () => {
     try {
       return { success: true, statuses: await reconnectMcp() }
@@ -2672,6 +2719,41 @@ export function registerAgentV3IPC(): void {
       return { success: false, error: (error as Error).message, statuses: currentStatuses() }
     }
   })
+
+  // ── 一键接入官方 Blender Lab MCP ──────────────────────────────────────
+  // 手工流程有四道关（装 git/Python、跑安装脚本、手填命令行、手填三行环境
+  // 变量），走完的用户几乎没有。后三道盒子代劳，见 blenderSetup.ts
+  ipcMain.handle('agent-v3:mcp:blender-status', async () => {
+    try {
+      const { inspectBlenderSetup } = await import(
+        '../agent-v3/capabilities/mcp/blenderSetupRuntime'
+      )
+      return { success: true, status: await inspectBlenderSetup() }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle(
+    'agent-v3:mcp:blender-setup',
+    async (_event, args: { blenderPath?: string } = {}) => {
+      try {
+        const { runBlenderSetup } = await import('../agent-v3/capabilities/mcp/blenderSetupRuntime')
+        const result = await runBlenderSetup(args)
+        // 装完立刻重连，用户在设置页当场看到「已连接」和工具数，
+        // 而不是被告知「去点一下重新连接」
+        const statuses = result.success ? await reconnectMcp() : currentStatuses()
+        return { ...result, statuses }
+      } catch (error) {
+        return {
+          success: false,
+          message: '安装过程本身出错了。',
+          error: (error as Error).message,
+          statuses: currentStatuses()
+        }
+      }
+    }
+  )
 
   // ── 对外暴露 UE 能力（MCP Server）──────────────────────────────────────
   // 默认关闭。开启后 Claude Code / Cursor 等外部客户端能直接操作虚幻引擎。

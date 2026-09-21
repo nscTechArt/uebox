@@ -124,3 +124,74 @@ export async function writeMcpSettings(settings: McpSettings): Promise<void> {
   await fs.mkdir(join(path, '..'), { recursive: true })
   await fs.writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
 }
+
+/**
+ * 只改一条 server，盘上其余内容原样不动。
+ *
+ * ## 为什么不能用「读出来 → 改 → 整份写回去」
+ *
+ * `readMcpSettings` 是**有损**的，而且是故意的：它按 `VALID_SERVER_ID`
+ * 筛 id、按固定字段表重建每一条，读不懂的只留一行 warn 就跳过。作为
+ * 「喂给客户端的那份配置」这没问题 —— 认不出来的本来也连不上。
+ *
+ * 但一旦把这个结果再写回盘，丢弃就变成了**删除**。用户从 Claude Desktop
+ * 抄来一条 `"github.com/foo": {...}`（那边的合法 id，而这份文件的说明
+ * 正是「可以直接粘贴已有配置」），盒子替他做一件不相干的事时就把它抹了。
+ *
+ * 所以程序化地动配置走这条路：解析原文、只改目标那个键、写回去。
+ * 认不出的条目、认不出的字段，一律原样留着。
+ *
+ * 整份覆盖（`writeMcpSettings`）留给设置界面 —— 那是用户看着整张表按的保存。
+ */
+export async function upsertMcpServer(id: string, config: McpServerConfig): Promise<void> {
+  await editServersRaw((servers) => ({ ...servers, [id]: config }))
+}
+
+/**
+ * 删掉一条 server，盘上其余内容原样不动。返回它本来在不在。
+ *
+ * 和 `upsertMcpServer` 同一个理由走原文：整份重写会顺手删掉
+ * `readMcpSettings` 认不出的那些条目，而用户只是想删一条。
+ */
+export async function removeMcpServer(id: string): Promise<boolean> {
+  let existed = false
+  await editServersRaw((servers) => {
+    existed = Object.hasOwn(servers, id)
+    const next = { ...servers }
+    delete next[id]
+    return next
+  })
+  return existed
+}
+
+/**
+ * 读原文 → 改 `mcpServers` → 写回去。
+ *
+ * 认不出的条目、认不出的字段一律原样留着 —— 这是这两个函数存在的全部理由，
+ * 所以改动只能经过这里，不要另开一条自己读写的路。
+ */
+async function editServersRaw(
+  edit: (servers: Record<string, unknown>) => Record<string, unknown>
+): Promise<void> {
+  const path = mcpSettingsPath()
+
+  let raw: Record<string, unknown> = {}
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(path, 'utf8'))
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      raw = parsed as Record<string, unknown>
+    }
+  } catch {
+    // 没有文件、或者文件坏了：按空配置起一份新的。坏文件的情况下
+    // `readMcpSettings` 本来也已经把它当空的了，这里不比那更糟
+  }
+
+  const servers =
+    raw.mcpServers && typeof raw.mcpServers === 'object' && !Array.isArray(raw.mcpServers)
+      ? (raw.mcpServers as Record<string, unknown>)
+      : {}
+
+  const next = { ...raw, version: 1, mcpServers: edit(servers) }
+  await fs.mkdir(join(path, '..'), { recursive: true })
+  await fs.writeFile(path, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+}

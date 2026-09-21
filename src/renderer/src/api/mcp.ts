@@ -29,6 +29,14 @@ export interface PreservedServerFields {
 /** 界面用的一条 server 配置。比磁盘格式扁平，便于表单绑定 */
 export interface McpServerFormValue {
   id: string
+  /**
+   * 这一条在盘上是什么名字。新加的行没有。
+   *
+   * 每条 server 各存各的之后，改名就成了「盘上多一条旧的」：用新 id 写进去，
+   * 旧 id 那条还躺在 `mcp.json` 里，下次打开面板它又冒出来。存的时候拿它
+   * 把旧的那条删掉。
+   */
+  savedId?: string
   transport: 'stdio' | 'http'
   /** stdio：完整命令行，如 `npx -y @modelcontextprotocol/server-filesystem /path` */
   commandLine: string
@@ -165,6 +173,7 @@ export function formatEnvText(env: Record<string, string> | undefined): string {
 export function toFormValues(settings: McpSettings): McpServerFormValue[] {
   return Object.entries(settings.mcpServers ?? {}).map(([id, config]) => ({
     id,
+    savedId: id,
     transport: config.url ? 'http' : 'stdio',
     commandLine: config.command ? formatCommandLine(config.command, config.args) : '',
     url: config.url ?? '',
@@ -262,6 +271,38 @@ export interface EpicSetupProjectStatus {
   url: string
 }
 
+/**
+ * 官方 Blender Lab MCP 的一键状态。
+ *
+ * 状态分四档的理由同 `EpicSetupProjectStatus`：每一档该给用户的下一步都不一样
+ * —— 能装的给按钮，缺前置的点名说缺什么，配过的只报一眼状态，
+ * Linux 干脆别显示按钮，免得让人白点。
+ */
+export interface BlenderSetupStatus {
+  state: 'configured' | 'ready' | 'blocked' | 'unsupported'
+  prerequisites: Array<{
+    id: 'blender' | 'git' | 'python'
+    ok: boolean
+    found?: string
+    path?: string
+    problem?: 'missing' | 'too-old'
+  }>
+  blenderPath?: string
+  installRoot: string
+  configuredBlenderPath?: string
+  /** 已配好时那条 server 的 id。界面拿它去 `statuses` 里查连上没有 */
+  configuredServerId?: string
+}
+
+/**
+ * 一键装出来的那条 server 在 `mcp.json` 里的 id。
+ *
+ * 与主进程 `capabilities/mcp/blenderSetup.ts` 的 `BLENDER_SERVER_ID` 必须一致 ——
+ * 那边是唯一真相源，这里只是渲染层不便跨进程引用而复述一遍（同
+ * `ENGINE_SERVER_ID_PREFIX`）。
+ */
+export const BLENDER_SERVER_ID = 'blender'
+
 export const mcpClientAPI = {
   getSettings() {
     return window.api.agentV3.mcp.getSettings()
@@ -272,11 +313,30 @@ export const mcpClientAPI = {
   reconnect() {
     return window.api.agentV3.mcp.reconnect()
   },
+  /** 删一条 server 并当场落盘。不碰别的行，也不提交表单里未保存的编辑 */
+  removeServer(id: string) {
+    return window.api.agentV3.mcp.removeServer({ id })
+  },
+  /**
+   * 存一条 server 并重连。`renamedFrom` 非空时顺手把旧名字那条删掉。
+   *
+   * 每条各存各的：不碰盘上别的条目，也不提交别的行里没保存的编辑。
+   */
+  saveServer(id: string, config: McpServerConfigView, renamedFrom?: string) {
+    return window.api.agentV3.mcp.saveServer({ id, config, renamedFrom })
+  },
   epicStatus() {
     return window.api.agentV3.mcp.epicStatus()
   },
   epicSetup(connectionId: string) {
     return window.api.agentV3.mcp.epicSetup({ connectionId })
+  },
+  blenderStatus() {
+    return window.api.agentV3.mcp.blenderStatus()
+  },
+  /** 装一次要几分钟：要 git fetch、建 venv、pip 装依赖、再起两次后台 Blender */
+  blenderSetup(blenderPath?: string) {
+    return window.api.agentV3.mcp.blenderSetup(blenderPath ? { blenderPath } : {})
   }
 }
 
