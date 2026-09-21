@@ -274,24 +274,39 @@ class MiniChatWindowManager {
         typeof initialMessage === 'string' ? { text: initialMessage } : initialMessage
     }
 
-    // 如果是新创建或正在加载，等待加载完成再发送消息
+    /*
+     * 窗口是新建的（或者还在加载）：**消息留在这儿等渲染层自己来取**，不推。
+     *
+     * ## 为什么不能推
+     *
+     * 上一版是「`did-finish-load` 之后再等 500ms，赌 Vue 已经挂完了」，然后推一条
+     * 并把 `pendingMessage` 清掉。赌输了就是这样（真机 2026-09-22）：
+     *
+     * ```
+     * 03:16:12.313  [MiniChat] 延迟发送初始消息: 我这个场景怎么是个黑的?...
+     * 03:16:12.508  [MiniChat] 收到渲染进程请求, pendingMessage=false
+     * ```
+     *
+     * 推早了 200 毫秒，那会儿渲染层还没注册监听 —— 消息掉在地上；等它挂好回头来
+     * 要，`pendingMessage` 已经被推的那一下清空了。**两头都以为对方拿到了**，
+     * 用户看到的是一个空对话框，日志里一条 error 都没有。
+     *
+     * 赌赢过很多次（同一份日志里 02:49:57 那次就是渲染层先到），所以它看起来
+     * 一直是好的 —— 500ms 够不够取决于当时机器多忙，这种「大部分时候对」的时序
+     * 假设没法靠调大延迟修好，只能不猜。
+     *
+     * ## 为什么等它来取是安全的
+     *
+     * 渲染层的 `onMounted` 里是**先注册监听、再主动索取**（`MiniChatWindow.vue`），
+     * 两件事同步挨着。所以它开口要的那一刻，必然已经接得住 —— 顺序由它自己保证，
+     * 不由主进程这边的猜测保证。回应在 `mini-chat:request-initial-message` 里。
+     *
+     * 上下文那条路同理，但它本来就没有「清空」的副作用，保持原样。
+     */
     if (needsCreate || this.miniChatWindow.webContents.isLoading()) {
       this.miniChatWindow.webContents.once('did-finish-load', () => {
-        logger.info('[MiniChat] 页面加载完成')
-        // 添加延迟确保 Vue 组件已完成挂载（增加到 500ms）
-        setTimeout(() => {
-          if (this.pendingMessage && this.miniChatWindow && !this.miniChatWindow.isDestroyed()) {
-            logger.info(
-              `[MiniChat] 延迟发送初始消息: ${this.pendingMessage.text.substring(0, 50)}...`
-            )
-            this.miniChatWindow.webContents.send('mini-chat:initial-message', this.pendingMessage)
-            this.pendingMessage = null
-          } else {
-            logger.info(`[MiniChat] 延迟后无消息需要发送: pending=${!!this.pendingMessage}`)
-          }
-          // 上下文和初始消息同一条路：都要等 Vue 挂载完才有人接
-          this.deliverContext()
-        }, 500) // 500ms 延迟确保 Vue 组件挂载完成
+        logger.info('[MiniChat] 页面加载完成，初始消息等渲染层来取')
+        setTimeout(() => this.deliverContext(), 500)
       })
     } else if (this.pendingMessage) {
       // 窗口已加载，直接发送
