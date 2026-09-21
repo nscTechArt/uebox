@@ -78,7 +78,18 @@ export type EngineLink = 'target' | 'other_project' | 'none'
 export interface RuntimeEnvelope {
   /** 这一轮的作用域 id。工具结果盖同一个戳，模型据此分辨「这是不是这一轮的观测」 */
   runtimeScopeId: string
-  /** 观测时刻（ISO）。信封之间比新旧靠它 */
+  /**
+   * 观测时刻，**用户本机的挂钟时间**（`formatLocalNow` 的产物）。信封之间比新旧靠它。
+   *
+   * 以前这里是 `new Date().toISOString()` —— UTC。真机上的后果不是「差了八小时」
+   * 这么轻：用户在凌晨 1:54 问「现在几点」，模型眼前只有前一天的 17:54Z，
+   * 要自己补时区、还要自己跨日，于是它干脆不用，张口编了个「14点03分」，
+   * 还补一句「和网络授时一致」。手里有钟却读不懂，比没有钟更糟 —— 没有钟它
+   * 至少可能说「我不知道」。
+   *
+   * 所以存的是已经格式化好的本地串，不是 Date 也不是 ISO：这一段唯一的消费者
+   * 是模型，让它做时区换算就是在制造上面那次故障。
+   */
   observedAt: string
   /** 这一轮**真的去查过**的唯一一件事。其余字段都是记录，这轮没重新核对 */
   engineLink: EngineLink
@@ -88,6 +99,44 @@ export interface RuntimeEnvelope {
   sessionProject?: EnvelopeProject
   /** 连着、但不属于这条会话的工程名 */
   outOfScopeProjects?: string[]
+}
+
+const WEEKDAYS = Object.freeze([
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday'
+])
+
+const pad = (value: number): string => String(value).padStart(2, '0')
+
+/**
+ * 本机挂钟时间，写成模型不用再算一遍的样子：`2026-09-22 01:54:03 UTC+08:00 (Monday)`。
+ *
+ * 三件东西缺一不可，每一件都对应一种真机上见过的错：
+ * - **时区偏移**。没有它，模型只能猜用户在哪个时区，而它猜的通常是 UTC。
+ * - **星期几**。「上周五那次崩溃」这类话里，日期换算成星期是模型最容易算错的一步，
+ *   而它算错时不会说自己算错了。
+ * - **秒**。日志和 mtime 的比对落在秒这一级，砍掉就只能答「差不多同一分钟」。
+ *
+ * 故意不用 `toLocaleString`：它的输出跟 ICU 数据和系统区域设置走，
+ * 同一份代码在两台机器上能给出两种格式（还可能是中文月份名）。
+ * 信封是给模型读的固定格式，不是给人看的本地化文本。
+ */
+export function formatLocalNow(now: Date = new Date()): string {
+  // getTimezoneOffset 的符号是反的：东八区给 -480。UTC+08:00 里的 + 要自己倒回来
+  const offsetMinutes = -now.getTimezoneOffset()
+  const sign = offsetMinutes < 0 ? '-' : '+'
+  const absolute = Math.abs(offsetMinutes)
+  const offset = `UTC${sign}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`
+
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+
+  return `${date} ${clock} ${offset} (${WEEKDAYS[now.getDay()]})`
 }
 
 /** 新开一轮的作用域 id */
@@ -138,7 +187,12 @@ export function formatRuntimeEnvelope(envelope: RuntimeEnvelope): string {
 
   return [
     `<runtime-status scope="${envelope.runtimeScopeId}">`,
-    `checked_now: engine_link (at ${envelope.observedAt}); every other line is on record and was not re-checked`,
+    // 时刻单独占一行，而且键名就叫 `now`。以前它只出现在 `checked_now` 的括号里，
+    // 那一行说的是「engine_link 是什么时候查的」—— 模型把它读成连接检查的元数据，
+    // 不是一口钟，所以被问到时间时它宁可自己编。一个事实两个用途，
+    // 就得让两个用途各自有名字。
+    `now: ${envelope.observedAt} — the user's local clock`,
+    'checked_now: engine_link, measured at that time; every other line is on record and was not re-checked',
     `engine_link: ${envelope.engineLink}`,
     ...(envelope.targetProject
       ? [`target_project: ${describeProject(envelope.targetProject)}`]
@@ -199,7 +253,7 @@ export function withRuntimeEnvelope(prompt: string, envelope: RuntimeEnvelope | 
  */
 export const RUNTIME_ENVELOPE_RULES: readonly string[] = Object.freeze([
   'Runtime status:',
-  'Every user message in this conversation starts with a `<runtime-status>` block. Its `checked_now` line says which single field was actually measured when that message was sent; every other line is what Unreal Box has on record, carried forward as-is. Envelopes are appended and kept verbatim, so older messages keep their older envelopes on purpose.',
+  "Every user message in this conversation starts with a `<runtime-status>` block. Its `now` line is the user's wall clock at the moment that message was sent — the last one is the current date and time, and it is where questions about the time are answered from, rather than from anything you recall. Its `checked_now` line says which single field was actually measured when that message was sent; every other line is what Unreal Box has on record, carried forward as-is. Envelopes are appended and kept verbatim, so older messages keep their older envelopes on purpose.",
 
   'Reading these facts:',
   '- **Each field means exactly one thing; read it for that one thing.** `session_project` is which project this conversation is filed under — a folder the user picked. `engine_link` describes the engine connection. Between them that is the whole of what they report: what kind of project it is, whether a given file exists, and whether an editor is running all remain open questions, answered by looking or by asking. Treat an engine version, a `.uproject`, or a project type as established once something actually reports it.',

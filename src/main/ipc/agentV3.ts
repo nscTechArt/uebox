@@ -106,6 +106,7 @@ import {
 } from '../agent-v3/core/goalLoop'
 import {
   createRuntimeScopeId,
+  formatLocalNow,
   lastRuntimeScopeId,
   runWithRuntimeScope,
   withRuntimeEnvelope,
@@ -909,7 +910,7 @@ function buildRuntimeEnvelope(scope: SessionProjectScope, scopeId: string): Runt
 
   return {
     runtimeScopeId: scopeId,
-    observedAt: new Date().toISOString(),
+    observedAt: formatLocalNow(),
     engineLink: engineToolsAvailable(scope)
       ? 'target'
       : // 连着、但不是这条会话的工程。和「一个都没连」分开说，否则模型会去劝

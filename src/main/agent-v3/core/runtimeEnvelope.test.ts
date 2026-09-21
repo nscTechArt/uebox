@@ -21,6 +21,7 @@ import {
   RUNTIME_ENVELOPE_RULES,
   SESSION_HEALTH_TOOL_NAME,
   createRuntimeScopeId,
+  formatLocalNow,
   formatRuntimeEnvelope,
   getRuntimeScopeId,
   lastRuntimeScopeId,
@@ -32,7 +33,7 @@ import {
 
 const base: RuntimeEnvelope = {
   runtimeScopeId: 'rt-abc123',
-  observedAt: '2026-09-01T05:07:09.000Z',
+  observedAt: '2026-09-01 13:07:09 UTC+08:00 (Tuesday)',
   engineLink: 'target'
 }
 
@@ -41,7 +42,7 @@ describe('formatRuntimeEnvelope', () => {
     const text = formatRuntimeEnvelope(base)
 
     expect(text).toContain('<runtime-status scope="rt-abc123">')
-    expect(text).toContain('2026-09-01T05:07:09.000Z')
+    expect(text).toContain('2026-09-01 13:07:09 UTC+08:00 (Tuesday)')
     expect(text).toContain('engine_link: target')
     expect(text.trimEnd().endsWith('</runtime-status>')).toBe(true)
   })
@@ -60,6 +61,22 @@ describe('formatRuntimeEnvelope', () => {
     expect(text).toContain('was not re-checked')
   })
 
+  /**
+   * 时刻必须自己占一行、键名必须叫 `now`。
+   *
+   * 真机上它只出现在 `checked_now` 的括号里，而且是 UTC：用户凌晨 1:54 问
+   * 「现在几点」，模型眼前是前一天的 17:54Z，既要补时区又要跨日 —— 它两件都
+   * 没做，编了个「14点03分」，还加一句「和网络授时一致」。
+   * 所以这里盯的不是「有没有时间」，是「模型能不能一眼认出这是钟」。
+   */
+  it('时刻单独成行，键名是 now', () => {
+    const line = formatRuntimeEnvelope(base)
+      .split('\n')
+      .find((row) => row.startsWith('now: '))
+
+    expect(line).toContain('2026-09-01 13:07:09 UTC+08:00 (Tuesday)')
+    expect(line).toContain('local clock')
+  })
   it('一个都没连时写 none', () => {
     expect(formatRuntimeEnvelope({ ...base, engineLink: 'none' })).toContain('engine_link: none')
   })
@@ -475,5 +492,51 @@ describe('RUNTIME_ENVELOPE_RULES', () => {
   // 用户明明连着引擎，这时候劝他装插件是答非所问
   it('连着但不是本会话的工程时，禁止劝人装插件', () => {
     expect(rules).toContain('treat the plugin and the connection as working')
+  })
+
+  // 这一段是上面那次「编时间」故障的另一半：光把时刻印对还不够，
+  // 得明说这就是回答时间问题的地方，否则模型仍会去翻自己的记忆
+  it('明说时间问题从 now 那一行取，而不是从记忆里取', () => {
+    expect(rules).toContain('where questions about the time are answered from')
+  })
+})
+
+describe('formatLocalNow', () => {
+  /** 断言里按本地时区现算期望值 —— 写死 UTC+08:00 的话，CI 换个时区就红 */
+  const expectedOffset = (now: Date): string => {
+    const minutes = -now.getTimezoneOffset()
+    const absolute = Math.abs(minutes)
+    const pad = (value: number): string => String(value).padStart(2, '0')
+    return `UTC${minutes < 0 ? '-' : '+'}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`
+  }
+
+  it('印出本地日期、时刻、时区偏移和星期', () => {
+    const now = new Date(2026, 8, 22, 1, 54, 3)
+
+    expect(formatLocalNow(now)).toBe(`2026-09-22 01:54:03 ${expectedOffset(now)} (Tuesday)`)
+  })
+
+  it('补零补到两位，不留 1:5:3 这种读不准的串', () => {
+    expect(formatLocalNow(new Date(2026, 0, 2, 3, 4, 5))).toContain('2026-01-02 03:04:05')
+  })
+
+  /**
+   * 符号最容易写反：`getTimezoneOffset()` 对东八区返回 **-480**，
+   * 而人写出来的是 UTC**+**08:00。倒错号的话模型会把时间往反方向推十六小时，
+   * 而它不会察觉 —— 这种错没有任何症状，只有结论是错的。
+   */
+  it('时区偏移的符号跟着 UTC 写法，不跟着 getTimezoneOffset', () => {
+    const now = new Date(2026, 8, 22, 1, 54, 3)
+    const minutes = -now.getTimezoneOffset()
+
+    // 正好在 UTC 上（偏移 0）时两种符号都算对，这条不适用
+    if (minutes !== 0) {
+      expect(formatLocalNow(now).includes('UTC+')).toBe(minutes > 0)
+    }
+  })
+
+  /** 不走 toLocaleString 的理由：星期必须是英文，跟着系统区域走会印出「星期二」 */
+  it('星期是英文，不跟系统区域设置走', () => {
+    expect(formatLocalNow(new Date(2026, 8, 20, 12, 0, 0))).toContain('(Sunday)')
   })
 })
