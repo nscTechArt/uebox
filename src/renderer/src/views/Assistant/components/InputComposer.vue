@@ -452,6 +452,7 @@
         <!-- Agent 模型快捷切换：放在发送区左侧，切换后下一轮立即使用新绑定。 -->
         <div
           v-if="!isImageGenerationMode"
+          ref="agentModelSelectorEl"
           v-click-outside="closeAgentModelDropdown"
           class="agent-model-selector"
         >
@@ -481,6 +482,7 @@
             <div
               v-if="showAgentModelDropdown"
               class="mode-dropdown agent-model-dropdown"
+              :style="{ maxBlockSize: agentModelDropdownMaxHeight }"
               role="menu"
             >
               <div
@@ -1139,9 +1141,24 @@ async function loadAgentModels(): Promise<void> {
   }
 }
 
+// 欢迎页的输入框竖直居中，弹窗向上展开时 50vh 会顶出窗口，按触发器上方的实际空间收窄。
+const agentModelSelectorEl = ref<HTMLElement | null>(null)
+const agentModelDropdownMaxHeight = ref('50vh')
+
+function syncAgentModelDropdownHeight(): void {
+  const top = agentModelSelectorEl.value?.getBoundingClientRect().top
+  if (top == null) return
+  // 10px 是弹窗与触发器的间距，另外给窗口顶部留 16px 余量。
+  const available = Math.max(160, top - 26)
+  agentModelDropdownMaxHeight.value = `${Math.round(Math.min(available, window.innerHeight * 0.5))}px`
+}
+
 function toggleAgentModelDropdown(): void {
   showAgentModelDropdown.value = !showAgentModelDropdown.value
-  if (showAgentModelDropdown.value) void loadAgentModels()
+  if (showAgentModelDropdown.value) {
+    syncAgentModelDropdownHeight()
+    void loadAgentModels()
+  }
 }
 
 function closeAgentModelDropdown(): void {
@@ -2490,6 +2507,7 @@ function handleSend(event?: Event): void {
     // 原生点击的冒泡可能晚于 nextTick，直接阻止本次点击关闭刚打开的设置入口。
     event?.stopPropagation()
     showAgentModelDropdown.value = true
+    syncAgentModelDropdownHeight()
     message.info(t('assistantInputComposer.model.required'))
     void loadAgentModels()
     return
@@ -3292,6 +3310,11 @@ onMounted(() => {
    两个选择器共用同一套样式：它们在同一行里并排，各写一份迟早会漂移 */
 .approval-selector .mode-trigger,
 .thinking-selector .mode-trigger,
+/* 没有这个锚点，弹窗的 bottom: 100% 会贴到整个输入框上沿，欢迎页直接顶出窗口 */
+.agent-model-selector {
+  position: relative;
+}
+
 .agent-model-selector .mode-trigger {
   color: var(--color-text-primary);
 }

@@ -30,6 +30,22 @@ describe('InputComposer Agent model selector', () => {
     expect(composer).toMatch(/setAgentRole\([\s\S]*?await loadThinkingSupport\(\)/)
   })
 
+  it('弹窗高度按触发器上方的剩余空间收窄，欢迎页不会顶出窗口', () => {
+    expect(composer).toContain('ref="agentModelSelectorEl"')
+    expect(composer).toContain(':style="{ maxBlockSize: agentModelDropdownMaxHeight }"')
+    expect(composer).toMatch(
+      /function syncAgentModelDropdownHeight[\s\S]*?agentModelSelectorEl\.value\?\.getBoundingClientRect\(\)\.top/
+    )
+    expect(composer).toMatch(
+      /function syncAgentModelDropdownHeight[\s\S]*?Math\.min\(available, window\.innerHeight \* 0\.5\)/
+    )
+    expect(composer).toMatch(
+      /showAgentModelDropdown\.value\) \{\s+syncAgentModelDropdownHeight\(\)/
+    )
+    // 弹窗用 bottom: 100% 向上展开，锚点必须是触发器本身而不是整个输入框。
+    expect(composer).toMatch(/\.agent-model-selector \{\s+position: relative;/)
+  })
+
   it('加载、空态、失败和成功提示均提供双语文案', () => {
     expect(zhCN).toContain("select: '选择模型'")
     expect(enUS).toContain("select: 'Select model'")
