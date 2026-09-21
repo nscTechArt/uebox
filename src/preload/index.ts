@@ -268,8 +268,11 @@ const api = {
     execute: (action: SpotlightAction, data: Record<string, unknown>) =>
       ipcRenderer.send('spotlight:execute', action, data),
     close: () => ipcRenderer.send('spotlight:close'),
-    onShow: (callback: () => void) => {
-      const handler = (): void => callback()
+    onShow: (callback: (payload: { dictate: boolean }) => void) => {
+      // 旧版主进程不带载荷。缺省成「不听写」，别让一条没有 payload 的显示
+      // 把窗口开成录音态
+      const handler = (_event: unknown, payload?: { dictate?: boolean }): void =>
+        callback({ dictate: Boolean(payload?.dictate) })
       ipcRenderer.on('spotlight:show', handler)
       return () => ipcRenderer.removeListener('spotlight:show', handler)
     },
@@ -2247,6 +2250,13 @@ const api = {
       history?: Array<{ role: 'user' | 'assistant'; text: string }>
       echoGuard?: RealtimeEchoGuard
     }) => ipcRenderer.invoke('realtime-voice:start', args),
+    /**
+     * 只转写、不回答的听写会话（全局热键 → Spotlight）。
+     *
+     * 和 `start` 分开而不是加个参数：失败的处置完全不同。这一路的 `busy` /
+     * `vendor-unsupported` 是「退回打字」，不是报错，调用方要能分辨。
+     */
+    startDictation: () => ipcRenderer.invoke('realtime-voice:start-dictation'),
     stop: () => ipcRenderer.invoke('realtime-voice:stop'),
     playbackReady: (connectionId: number) =>
       ipcRenderer.send('realtime-voice:playback-ready', connectionId),

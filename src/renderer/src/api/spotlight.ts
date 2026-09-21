@@ -11,7 +11,8 @@ export const spotlightAPI = {
   close(): void {
     window.api.spotlight.close()
   },
-  onShow(callback: () => void): () => void {
+  /** `dictate` 为真表示这一次是语音热键唤起的，窗口该直接进听写态 */
+  onShow(callback: (payload: { dictate: boolean }) => void): () => void {
     return window.api.spotlight.onShow(callback)
   },
   onHide(callback: () => void): () => void {

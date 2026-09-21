@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   OPENAI_AUDIO,
+  OPENAI_DICTATION_PROMPT,
+  OPENAI_DICTATION_TURN_DETECTION,
   OPENAI_TRANSCRIPTION_MODEL,
   buildOpenAiConversationItem,
   buildOpenAiSessionUpdate,
@@ -49,9 +51,7 @@ describe('session.update 首帧', () => {
 
   it('服务端判停，音色只在配了的时候才发', () => {
     const withoutVoice = buildOpenAiSessionUpdate(CONFIG) as {
-      session: {
-        audio: { input: { turn_detection: { type: string } }; output: Record<string, unknown> }
-      }
+      session: { audio: { input: { turn_detection: { type: string } }; output: Record<string, unknown> } }
     }
     expect(withoutVoice.session.audio.input.turn_detection.type).toBe('server_vad')
     expect(withoutVoice.session.audio.output).not.toHaveProperty('voice')
@@ -81,6 +81,50 @@ describe('session.update 首帧', () => {
         }
       }
     })
+  })
+
+  /**
+   * 听写模式的三个字段。
+   *
+   * 这一组全都是**静默失败**：少了 `create_response: false`，会话照样建得起来，
+   * 只是用户对着一个还没提交的输入框被模型抢答；判停时长少给了，一句中间有停顿
+   * 的指令会被切成两半，先半句被两秒倒计时提交出去。只能钉住。
+   */
+  it('听写模式：只转写不回答，判停放宽，转写带领域词表', () => {
+    const dictation = buildOpenAiSessionUpdate({ ...CONFIG, dictation: true, tools: [] })
+    expect(dictation).toMatchObject({
+      session: {
+        audio: {
+          input: {
+            transcription: { model: OPENAI_TRANSCRIPTION_MODEL, prompt: OPENAI_DICTATION_PROMPT },
+            turn_detection: {
+              type: 'server_vad',
+              create_response: false,
+              silence_duration_ms: OPENAI_DICTATION_TURN_DETECTION.silenceDurationMs,
+              prefix_padding_ms: OPENAI_DICTATION_TURN_DETECTION.prefixPaddingMs
+            }
+          }
+        }
+      }
+    })
+  })
+
+  /**
+   * 通话那一路**一个字段都不许被听写模式带跑**。两条路共用同一个构造函数，
+   * 改坏了的表现是语音助手突然不再自动应答 —— 而那看起来像「模型没反应」。
+   */
+  it('不开听写时，判停里不出现听写那几个字段', () => {
+    const turnDetection = (
+      buildOpenAiSessionUpdate(CONFIG) as {
+        session: { audio: { input: { turn_detection: Record<string, unknown> } } }
+      }
+    ).session.audio.input.turn_detection
+    expect(turnDetection).not.toHaveProperty('create_response')
+    expect(turnDetection).not.toHaveProperty('silence_duration_ms')
+    expect(
+      (buildOpenAiSessionUpdate(CONFIG) as { session: { audio: { input: { transcription: object } } } })
+        .session.audio.input.transcription
+    ).not.toHaveProperty('prompt')
   })
 
   /** 不给（旧版渲染层）和给了个不认识的值，都必须落到默认档，不能是「不发」 */

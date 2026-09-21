@@ -90,6 +90,25 @@ const DEFAULT_SHORTCUTS: Shortcut[] = [
     description: '打断语音助手',
     enabled: false,
     is_locked: false
+  },
+  /*
+   * 语音下指令：热键唤起 Spotlight 并直接进听写态，说完自动提交给 Agent。
+   *
+   * **默认不启用**，理由和 `voice.interrupt` 同源但更重一层：这是个全局热键，
+   * `Alt+Q` 在别的软件里未必空着，而撞上的表现是那个软件的功能默默失灵。
+   * 更要紧的是这条链路会开麦克风 —— 一个默认就开着的全局热键随时可能开麦，
+   * 那不是功能是惊吓。用户到设置里自己打开，才知道自己开了什么。
+   *
+   * 预设 `Alt+Q` 而不是像 `voice.interrupt` 那样留空，是因为这条默认关着，
+   * 用户打开它的那一刻就该能直接用；留空会让「打开了却没反应」。
+   */
+  {
+    action_key: 'voice.spotlight_dictate',
+    accelerator: 'Alt+Q',
+    type: 'global',
+    description: '语音下指令',
+    enabled: false,
+    is_locked: false
   }
 ]
 

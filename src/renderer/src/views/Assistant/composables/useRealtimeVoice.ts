@@ -12,7 +12,8 @@ import {
   isLocalVoiceTool
 } from '@core/shared/voiceFrontDesk'
 import type { RealtimeEchoGuard } from '@core/shared/realtimeEchoGuard'
-import workletUrl from './pcmCapture.worklet.js?url'
+// 采集 worklet 是个叶子资产，语音通话和 Spotlight 听写都用它，所以住在共享目录
+import workletUrl from '@renderer/composables/pcmCapture.worklet.js?url'
 
 /**
  * 实时语音会话的渲染层这一半。

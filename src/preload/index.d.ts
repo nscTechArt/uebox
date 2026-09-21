@@ -1418,7 +1418,7 @@ declare global {
       search: (query: string) => Promise<SpotlightSearchResponse>
       execute: (action: SpotlightAction, data: Record<string, unknown>) => void
       close: () => void
-      onShow: (callback: () => void) => () => void
+      onShow: (callback: (payload: { dictate: boolean }) => void) => () => void
       onHide: (callback: () => void) => () => void
     }
     database: DatabaseAPI
@@ -2206,6 +2206,18 @@ declare global {
       }) => Promise<
         | { ok: true; inputSampleRate: number; outputSampleRate: number; connectionId: number }
         | { ok: false; error: string }
+      >
+      /**
+       * 只转写、不回答的听写会话。
+       *
+       * `reason` 分三类，调用方处置不同：`busy`（助手页正在通话）和
+       * `vendor-unsupported`（豆包做不了只转写不回答）都该**静默退回打字**，
+       * 只有 `unconfigured` / `failed` 需要把 `error` 说给用户听。
+       */
+      startDictation: () => Promise<
+        | { ok: true; inputSampleRate: number; outputSampleRate: number; connectionId: number }
+        | { ok: false; reason: 'busy' | 'vendor-unsupported' }
+        | { ok: false; reason: 'unconfigured' | 'failed'; error: string }
       >
       stop: () => Promise<{ ok: true }>
       playbackReady: (connectionId: number) => void

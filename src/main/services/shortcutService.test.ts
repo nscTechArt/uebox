@@ -49,8 +49,10 @@ vi.mock('../sqliteDataBase/models/settings', () => ({
   getSetting: () => shortcutsEnabled
 }))
 
+const showForDictation = vi.fn()
+
 vi.mock('../spotlightManager', () => ({
-  spotlightManager: { toggle: vi.fn() }
+  spotlightManager: { toggle: vi.fn(), showForDictation: () => showForDictation() }
 }))
 
 const setMiniChatShortcutEnabled = vi.fn()

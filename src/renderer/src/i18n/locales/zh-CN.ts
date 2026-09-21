@@ -3012,7 +3012,8 @@ export default {
           force_reload: '强制刷新页面'
         },
         voice: {
-          interrupt: '打断语音助手'
+          interrupt: '打断语音助手',
+          spotlight_dictate: '语音下指令'
         }
       }
     },
@@ -6341,6 +6342,16 @@ export default {
     aiFallback: {
       title: '与 AI 对话: {query}',
       description: '发送此消息给 AI 助手'
+    },
+    dictation: {
+      starting: '正在打开麦克风…',
+      listening: '正在听，说完自动提交',
+      unheard: '没听清，再说一遍',
+      /** 助手页正在通话，或者绑的模型做不了只转写 —— 都退回打字 */
+      unavailable: '这会儿用不了语音，直接打字吧',
+      micIconLabel: '语音输入中',
+      /** 倒计时期间的提示。按 Esc 取消，改字也会把倒计时推迟 */
+      autoSubmit: '{seconds} 秒后发送，改一下可以延后'
     }
   },
   globalAudioPlayer: {

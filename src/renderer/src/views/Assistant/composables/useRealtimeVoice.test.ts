@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('./pcmCapture.worklet.js?url', () => ({ default: 'pcmCapture.worklet.js' }))
+vi.mock('@renderer/composables/pcmCapture.worklet.js?url', () => ({
+  default: 'pcmCapture.worklet.js'
+}))
 
 import {
   ANSWER_QUESTION,

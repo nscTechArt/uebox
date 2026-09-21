@@ -41,6 +41,14 @@ class SpotlightWindowManager {
   private savedPosition: SpotlightPosition | null = null
   private saveTimeout: ReturnType<typeof setTimeout> | null = null
   private fadeTimer: ReturnType<typeof setInterval> | null = null
+  /**
+   * 这一次显示是不是语音热键唤起的。
+   *
+   * **随 `spotlight:show` 一起发，不另开一条通道。** 另开一条的话渲染层会先收到
+   * 「显示」再收到「开始听写」，而前者会清空输入框、重置状态 —— 两条消息之间
+   * 的顺序没有任何东西保证，真错了的表现是听写偶发地开不起来。
+   */
+  private pendingDictate: boolean = false
   /** 快捷键注册状态 */
   private shortcutStatus: ShortcutRegistrationStatus = {
     shortcut: 'CommandOrControl+Shift+Space',
@@ -360,7 +368,9 @@ class SpotlightWindowManager {
     this.spotlightWindow.setPosition(x, y)
 
     // 通知渲染进程重置状态（在显示之前）
-    this.spotlightWindow.webContents.send('spotlight:show')
+    const dictate = this.pendingDictate
+    this.pendingDictate = false
+    this.spotlightWindow.webContents.send('spotlight:show', { dictate })
 
     // 设置初始透明度为0，避免闪烁
     this.spotlightWindow.setOpacity(0)
@@ -416,6 +426,18 @@ class SpotlightWindowManager {
     }
     // 标记为隐藏状态
     this.isShowing = false
+  }
+
+  /**
+   * 语音热键唤起：弹出窗口并直接进听写态。
+   *
+   * **不是 `toggle`。** 已经开着的时候再按一次不该把窗口关掉 —— 那一下多半是
+   * 「刚才没说清，再说一遍」。窗口留着，`spotlight:show` 再发一次，
+   * 渲染层据此收掉当前这轮录音重新开始（见 `SpotlightWindow.vue`）。
+   */
+  showForDictation(): void {
+    this.pendingDictate = true
+    this.show()
   }
 
   /**

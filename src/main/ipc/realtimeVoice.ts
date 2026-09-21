@@ -410,6 +410,25 @@ function stop(): void {
 }
 
 /**
+ * 抢一路会话过来，**并且告诉原主它没了**。
+ *
+ * 会话是全局单例（见 `active`），而现在有两个入口会开它：助手页的语音通话，
+ * 和全局热键唤起的 Spotlight 听写。它们多半不在同一个窗口里，所以 `stop()`
+ * 那个「悄悄关掉」在这儿不够用 —— 被抢掉的那一头收不到任何事件，界面会
+ * 一直停在「正在听」，麦克风也一直开着，用户对着一个已经死掉的会话说话。
+ *
+ * 只在**换了个窗口**时发这条。同一个 sender 重开（用户把语音关了再开）走的是
+ * 原本那条路，再补一条 `closed` 反而会把刚建的那路当场关掉。
+ */
+function yieldSessionTo(senderId: number): void {
+  const previous = active
+  stop()
+  if (previous && previous.sender.id !== senderId && !previous.sender.isDestroyed()) {
+    previous.sender.send('realtime-voice:event', { type: 'closed' })
+  }
+}
+
+/**
  * 取「实时语音」角色绑的那个 Provider 与模型。
  *
  * **不猜**。上一版是「挑一个 OpenAI 兼容的 Provider」，而国内用户多半一个
@@ -560,7 +579,7 @@ export function registerRealtimeVoiceIPC(): void {
         echoGuard?: RealtimeEchoGuard
       }
     ) => {
-      stop()
+      yieldSessionTo(event.sender.id)
       // 不 await：任务要等用户先开口交代，那是几秒之后的事，别拿它拖首字
       void primeToolRisks()
       const generation = connectionGeneration
@@ -639,6 +658,97 @@ export function registerRealtimeVoiceIPC(): void {
       }
     }
   )
+
+  /**
+   * 开一路**只转写、不回答**的听写会话（全局热键 → Spotlight）。
+   *
+   * ## 为什么不复用 `realtime-voice:start`
+   *
+   * 那条路上挂的是一整套「语音前台」：工具表、任务表、防冷场、播报闸门、
+   * 播放设备就绪握手。听写要的只有 `user-text` 一条事件，上面那些每一样都是
+   * 负担 —— 防冷场会在用户还没想好词的时候主动搭话，任务表会往一条没人听的
+   * 会话里念进度。所以分成两个入口，共用的只有底下的 `openSession` 和音频通道。
+   *
+   * ## 失败为什么分类型返回而不是抛
+   *
+   * 调用方（Spotlight）对每一类失败的处置**都不一样**：会话被占用就退回打字，
+   * 厂商不支持也退回打字，没配模型才需要把话说给用户听。抛一个 Error 上去，
+   * 它只能拿到一句字符串，没法分辨该退回还是该报错。
+   */
+  ipcMain.handle('realtime-voice:start-dictation', async (event) => {
+    /*
+     * 助手页正在通话就直接让路 —— **不抢**。
+     *
+     * 抢过来的代价是用户正说到一半的通话突然断掉，而听写这个入口是「顺手按一下」，
+     * 顺手的操作不该有这么重的副作用。Spotlight 收到 busy 会退回普通打字模式，
+     * 连图标都退回放大镜，用户看得出来这会儿没在听。
+     */
+    if (active) return { ok: false as const, reason: 'busy' as const }
+
+    const generation = connectionGeneration
+    let binding: Awaited<ReturnType<typeof resolveRealtimeBinding>>
+    try {
+      binding = await resolveRealtimeBinding()
+    } catch (error) {
+      return {
+        ok: false as const,
+        reason: 'unconfigured' as const,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+    if (generation !== connectionGeneration) return { ok: false as const, reason: 'busy' as const }
+
+    /*
+     * 豆包做不了「只转写不回答」：3.0 的上行事件表里没有关掉自动应答的开关，
+     * 服务端判停之后必然开口。硬开这一路的结果是用户对着一个还没提交的输入框
+     * 被模型抢答，所以宁可退回打字，也不在这里悄悄降级成一路会说话的会话。
+     */
+    if (isDoubaoRealtimeUrl(binding.baseUrl)) {
+      return { ok: false as const, reason: 'vendor-unsupported' as const }
+    }
+
+    try {
+      const sender = event.sender
+      const { handle, audio } = openSession(binding, {
+        dictation: true,
+        // 模型这一路不说话，提示词用不上；工具更是一个都不能给 ——
+        // 给了就等于允许它绕过「用户确认」直接动工程
+        instructions: '',
+        tools: [],
+        echoGuard: normalizeRealtimeEchoGuard(undefined),
+        onEvent: (payload) => {
+          if (generation !== connectionGeneration) return
+          if (sender.isDestroyed()) {
+            stop()
+            return
+          }
+          /*
+           * 只放听写要的那几条过去。其余的（audio / assistant-text / turn-done…）
+           * 正常情况下压根不会来 —— 真来了说明 `create_response: false` 没生效，
+           * 那也不该转给渲染层，它没有播放器，只会当成脏数据。
+           */
+          if (
+            payload.type === 'ready' ||
+            payload.type === 'user-text' ||
+            payload.type === 'asr-failed' ||
+            payload.type === 'error' ||
+            payload.type === 'closed'
+          ) {
+            sender.send('realtime-voice:event', payload)
+          }
+          if (payload.type === 'closed' || payload.type === 'error') stop()
+        }
+      })
+      active = { handle, sender }
+      return { ok: true as const, ...audio, connectionId: generation }
+    } catch (error) {
+      return {
+        ok: false as const,
+        reason: 'failed' as const,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
 
   /**
    * 送一段用户音频。

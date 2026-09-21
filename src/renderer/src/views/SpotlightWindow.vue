@@ -3,7 +3,16 @@
     <div class="spotlight-container">
       <!-- 输入框 -->
       <div class="spotlight-input-wrapper">
-        <PhMagnifyingGlass class="search-icon" />
+        <!-- 图标就是状态指示器：放大镜 = 在打字，麦克风 = 正在收音。
+             脉动跟着实时响度走，用户据此知道麦克风真的听见了他 -->
+        <PhMicrophone
+          v-if="dictating"
+          class="search-icon mic-icon"
+          :class="{ 'is-listening': dictation.state.value === 'listening' }"
+          :style="{ '--mic-level': micPulse }"
+          :aria-label="t('spotlightWindow.dictation.micIconLabel')"
+        />
+        <PhMagnifyingGlass v-else class="search-icon" />
         <textarea
           ref="inputRef"
           v-model="query"
@@ -45,16 +54,16 @@
         </div>
       </div>
 
-      <!-- 空状态提示 -->
-      <div v-if="false" class="spotlight-hint">
-        <span>查找内容或者与 AI 对话</span>
+      <!-- 听写状态条。只在语音这一路出现，打字时一行都不占 -->
+      <div v-if="dictationHint" class="spotlight-hint">
+        <span>{{ dictationHint }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PhArchive,
@@ -64,6 +73,7 @@ import {
   PhFile,
   PhImage,
   PhMagnifyingGlass,
+  PhMicrophone,
   PhPalette,
   PhRobot,
   PhSpeakerHigh,
@@ -71,6 +81,7 @@ import {
 } from '@phosphor-icons/vue'
 import type { Component } from 'vue'
 import { spotlightAPI } from '@renderer/api/spotlight'
+import { useVoiceDictation } from '@renderer/composables/useVoiceDictation'
 import type { SpotlightSearchResult as ResultItem } from '@core/shared/spotlight'
 
 /**
@@ -91,10 +102,124 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 let unsubscribeShow: (() => void) | null = null
 let unsubscribeHide: (() => void) | null = null
 
+/* ── 语音听写 ───────────────────────────────────────────────────────────── */
+
+/**
+ * 说完之后等这么久再提交。
+ *
+ * 这一路的意义就在这两秒：转写有可能听岔，而 Agent 拿到的是会动工程的指令。
+ * 两秒够看清一句话，也短到不用动手 —— 一动键盘倒计时就推迟（`handleInput`），
+ * 所以「要改」的人永远不会被抢在前面提交。
+ */
+const DICTATION_SUBMIT_DELAY_MS = 2_000
+
+/** 这一次唤起是不是语音的。打字唤起时整条听写链路一个字节都不加载 */
+const dictating = ref(false)
+/** 倒计时还剩几秒。0 表示没在倒计时 */
+const submitCountdown = ref(0)
+/** 退回打字、或者没听清时的一句话。空字符串表示不显示状态条 */
+const dictationNotice = ref('')
+
+let submitTimer: ReturnType<typeof setInterval> | null = null
+
+const dictation = useVoiceDictation({
+  onText: (text) => {
+    /*
+     * 追加而不是覆盖。VAD 把一段长指令切成两轮是常事（中间停顿想词超过了
+     * 判停时长），覆盖的话用户会眼睁睁看着前半句消失。
+     */
+    query.value = query.value ? `${query.value} ${text}` : text
+    dictationNotice.value = ''
+    nextTick(adjustHeight)
+    startSubmitCountdown()
+  },
+  onUnheard: () => {
+    dictationNotice.value = t('spotlightWindow.dictation.unheard')
+  },
+  onError: (message) => {
+    dictationNotice.value = message || t('spotlightWindow.dictation.unavailable')
+    dictating.value = false
+  }
+})
+
+/** 响度映射成脉动幅度。开平方是因为人耳对响度的感觉是压缩的，线性映射看着太迟钝 */
+const micPulse = computed(() => Math.min(1, Math.sqrt(dictation.level.value * 6)).toFixed(3))
+
+const dictationHint = computed(() => {
+  if (dictationNotice.value) return dictationNotice.value
+  if (submitCountdown.value > 0) {
+    return t('spotlightWindow.dictation.autoSubmit', { seconds: submitCountdown.value })
+  }
+  if (!dictating.value) return ''
+  return dictation.state.value === 'listening'
+    ? t('spotlightWindow.dictation.listening')
+    : t('spotlightWindow.dictation.starting')
+})
+
+function clearSubmitCountdown(): void {
+  if (submitTimer) clearInterval(submitTimer)
+  submitTimer = null
+  submitCountdown.value = 0
+}
+
+/**
+ * 起（或者重起）自动提交的倒计时。
+ *
+ * 做成每秒一跳的可见倒计时而不是一个哑定时器：用户得看得见还剩多久，
+ * 否则「它什么时候会自己发出去」只能靠试，而试错的代价是一条已经跑起来的指令。
+ */
+function startSubmitCountdown(): void {
+  clearSubmitCountdown()
+  if (!query.value.trim()) return
+  submitCountdown.value = Math.round(DICTATION_SUBMIT_DELAY_MS / 1000)
+  submitTimer = setInterval(() => {
+    submitCountdown.value -= 1
+    if (submitCountdown.value > 0) return
+    clearSubmitCountdown()
+    void submitDictated()
+  }, 1000)
+}
+
+/** 倒计时跑完：收掉麦克风，把这句话交出去 */
+async function submitDictated(): Promise<void> {
+  const message = query.value.trim()
+  await endDictation()
+  if (!message) return
+  spotlightAPI.execute('ai', { message })
+}
+
+/** 收掉听写。重复调用无害 */
+async function endDictation(): Promise<void> {
+  clearSubmitCountdown()
+  dictating.value = false
+  await dictation.stop()
+}
+
+/**
+ * 热键唤起：开麦。
+ *
+ * 开不起来的两类原因（助手页正在通话、绑的模型做不了只转写）**不报错**，
+ * 退回普通打字：图标退回放大镜，状态条给一句话说明这会儿没在听。
+ * 用户按热键的那一下本来就是「顺手」，顺手的操作不配弹一个错误框。
+ */
+async function beginDictation(): Promise<void> {
+  dictationNotice.value = ''
+  dictating.value = true
+  const failure = await dictation.start()
+  if (!failure) return
+  dictating.value = false
+  if (failure === 'busy' || failure === 'vendor-unsupported') {
+    dictationNotice.value = t('spotlightWindow.dictation.unavailable')
+  }
+  // 其余几类 `start` 已经通过 onError 把话说清楚了，这里不再覆盖它
+}
+
 /**
  * 处理输入并自动调整高度
  */
 function handleInput(): void {
+  // 用户动手了：自动提交往后推。正在改一句话的时候被抢着发出去是最糟的一种失败
+  if (submitCountdown.value > 0) startSubmitCountdown()
   adjustHeight()
   handleSearch()
 }
@@ -219,6 +344,8 @@ function closeWindow(): void {
   query.value = ''
   results.value = []
   selectedIndex.value = 0
+  // Esc 要能救场：听岔了、或者根本不想发了，这一下必须把麦克风也关掉
+  void endDictation()
   spotlightAPI.close()
 }
 
@@ -229,6 +356,10 @@ function closeWindow(): void {
  * 处理 Enter 键
  */
 function handleEnter(): void {
+  // 手动回车压过倒计时。用户已经确认过了，没必要再让他等完那两秒
+  clearSubmitCountdown()
+  void dictation.stop()
+  dictating.value = false
   executeSelected()
 }
 
@@ -265,13 +396,24 @@ function handleKeyDown(event: KeyboardEvent): void {
 /**
  * 窗口显示时聚焦输入框
  */
-function handleShow(): void {
+function handleShow(payload: { dictate: boolean }): void {
   query.value = ''
   results.value = []
   selectedIndex.value = 0
+  dictationNotice.value = ''
+  clearSubmitCountdown()
   nextTick(() => {
     inputRef.value?.focus()
   })
+  /*
+   * 语音热键再按一次走的也是这里（`showForDictation` 不 toggle）。上面已经把
+   * 输入框清空了，`start()` 自己会收掉上一轮 —— 效果是「刚才没说清，重来」。
+   */
+  if (payload.dictate) {
+    void beginDictation()
+  } else {
+    void endDictation()
+  }
 }
 
 /**
@@ -280,6 +422,8 @@ function handleShow(): void {
 function handleHide(): void {
   query.value = ''
   results.value = []
+  // 窗口没了麦克风不能还开着。这条真漏了的话表现是一个看不见的常驻录音
+  void endDictation()
 }
 
 onMounted(() => {
@@ -295,6 +439,7 @@ onUnmounted(() => {
   unsubscribeShow?.()
   unsubscribeHide?.()
   if (searchTimeout) clearTimeout(searchTimeout)
+  void endDictation()
 })
 </script>
 
@@ -363,6 +508,27 @@ onUnmounted(() => {
   color: var(--color-text-primary);
   flex-shrink: 0;
   margin-top: 3px;
+}
+
+/*
+ * 正在收音的麦克风。**亮度跟着实时响度走，不是一个固定的呼吸动画** ——
+ * 固定动画只能说明「程序以为自己在录」，跟着响度动才说明麦克风真的听见了人。
+ * 这两件事在真机上经常不一致（选错了输入设备、系统级静音）。
+ */
+.mic-icon.is-listening {
+  color: var(--color-accent-text);
+  /* --mic-level 由 JS 每 20ms 喂一次；transition 把台阶抹平成连续的动 */
+  opacity: calc(0.55 + 0.45 * var(--mic-level, 0));
+  transform: scale(calc(1 + 0.18 * var(--mic-level, 0)));
+  transition:
+    opacity 80ms linear,
+    transform 80ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mic-icon.is-listening {
+    transform: none;
+  }
 }
 
 .spotlight-input {

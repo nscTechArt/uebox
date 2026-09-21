@@ -237,6 +237,12 @@ export class ShortcutService {
         // 手在别处、眼睛没看屏幕，把窗口弹到最前面反而是打扰
         mainWindow.webContents.send('voice:interrupt-via-shortcut')
         break
+      case 'voice.spotlight_dictate':
+        // 语音下指令：弹 Spotlight 并直接开始听写，说完填进输入框由用户确认。
+        // 走 Spotlight 而不是隐形录音，是因为 Agent 拿到的是会动工程的指令 ——
+        // 中间那一眼「它听成了什么」值一次弹窗
+        spotlightManager.showForDictation()
+        break
       // Add other global actions
     }
   }

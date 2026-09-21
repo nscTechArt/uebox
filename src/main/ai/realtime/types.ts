@@ -116,6 +116,22 @@ export interface RealtimeSessionConfig {
    * 它服务端自带一层处理，这个值到了那个适配器里是被忽略的。
    */
   echoGuard?: RealtimeEchoGuard
+  /**
+   * 听写模式：**只转写，不回答**。
+   *
+   * 全局热键唤起 Spotlight 说一句话时用的就是这一路。上层要的只有
+   * `user-text`，模型一张嘴就全是多余的：它会对着一条还没提交的指令抢答，
+   * 用户听见的是自己刚说的话被复述一遍，还白烧一轮 realtime 的钱。
+   *
+   * **只有 OpenAI 那家做得到。** 它的 `turn_detection.create_response`
+   * 能关掉服务端的自动应答；豆包 3.0 的上行事件表里没有对应开关，服务端
+   * 判停之后必然开口。所以绑定是豆包时上层根本不开这一路（见 `realtimeVoice.ts`
+   * 的 `dictation-unavailable`），而不是在这里悄悄降级成会说话的会话。
+   *
+   * 同时还会放宽判停：说一句指令中间是会停顿想词的，默认那档尾静音会把
+   * 「把这个 actor……缩放两倍」切成两句，于是 Agent 收到两条半截指令。
+   */
+  dictation?: boolean
   tools: RealtimeToolDefinition[]
   onEvent: (event: VoiceSessionEvent) => void
 }

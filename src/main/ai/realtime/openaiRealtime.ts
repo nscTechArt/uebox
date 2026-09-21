@@ -87,6 +87,46 @@ export const OPENAI_ECHO_GUARD_TUNING: Record<
   headset: { threshold: 0.5, noiseReduction: 'near_field' },
   speaker: { threshold: 0.65, noiseReduction: 'far_field' },
   strong: { threshold: 0.8, noiseReduction: 'far_field' }
+}
+
+/**
+ * 听写模式的判停参数。
+ *
+ * 通话和听写要的判停不是一回事，所以不复用那一档默认值：
+ *
+ * - `silence_duration_ms`：厂商默认 500ms。对话里这是对的 —— 半秒不吭声就该轮到
+ *   模型接话。但听写是**说一条指令**，中间停下来想词是常态（「把这个……呃……
+ *   选中的 actor 缩放两倍」）。500ms 会把它切成两轮，于是输入框里先出现半句、
+ *   两秒倒计时跑完直接提交，后半句还没说完就已经派给 Agent 了。900ms 是
+ *   「想词的停顿」和「说完了」之间比较稳的一条线。
+ * - `prefix_padding_ms`：判定开口之前倒回来多带这么久的音频。厂商默认就是 300ms，
+ *   这里显式写出来是因为听写没有第二次机会 —— 通话里第一个字被吃掉还能从上下文
+ *   猜出来，听写吃掉的是「删掉」的「删」。
+ * - `create_response: false`：**这一条是听写模式的全部意义**。不关的话服务端判停
+ *   即应答，用户对着一个还没提交的输入框被模型抢答。
+ */
+export const OPENAI_DICTATION_TURN_DETECTION = {
+  silenceDurationMs: 900,
+  prefixPaddingMs: 300
+} as const
+
+/**
+ * 喂给转写模型的领域词表。
+ *
+ * `transcription.prompt` 影响的是**识别**，和 `session.instructions` 不是一回事 ——
+ * 后者只管模型怎么回话，而听写模式下模型根本不回话。
+ *
+ * 为什么值得给：这一路收到的几乎全是虚幻的行话，而且多半是中英混着说的
+ * （「把这个 actor 缩放两倍」「打开那个蓝图」）。不给词表时「actor」稳定被写成
+ * 「阿克特」、「蓝图」写成「蓝色图」—— 转写错了 Agent 就照错的干，
+ * 而用户在输入框里看到的是一句不知所云的话。
+ *
+ * 只列**高频且容易听错**的，不是把术语表倒进来：prompt 越长，转写越容易
+ * 往词表上硬凑，把没说过的词也认出来。
+ */
+export const OPENAI_DICTATION_PROMPT =
+  '虚幻引擎操作指令。常见词汇：actor、蓝图、关卡、材质、贴图、静态网格体、骨骼网格体、' +
+  '序列器、大纲视图、细节面板、视口、缩放、旋转、位移、变换、导入、烘焙、编译、播放。'
 
 /**
  * 首帧单独构造，**为的是能在没有真实 WebSocket 的单测里检查必填字段**。
@@ -110,7 +150,11 @@ export function buildOpenAiSessionUpdate(config: RealtimeSessionConfig): Record<
         input: {
           format: { type: 'audio/pcm', rate: OPENAI_AUDIO.inputSampleRate },
           // 选填但**必须给**，理由见 OPENAI_TRANSCRIPTION_MODEL
-          transcription: { model: OPENAI_TRANSCRIPTION_MODEL },
+          transcription: {
+            model: OPENAI_TRANSCRIPTION_MODEL,
+            // 听写这一路转写就是全部产出，值得给它一份领域词表兜住行话
+            ...(config.dictation ? { prompt: OPENAI_DICTATION_PROMPT } : {})
+          },
           // 服务端在判停和转写之前先降一道噪。不给这个字段整个降噪都不开
           noise_reduction: { type: echoGuard.noiseReduction },
           // 交给服务端判停。自己做 VAD 要处理静音阈值、尾音、抢话，
@@ -119,7 +163,18 @@ export function buildOpenAiSessionUpdate(config: RealtimeSessionConfig): Record<
           // 门限**必须显式给**：默认的 0.5 顶得过本地 AEC 压不干净的那点回声残留，
           // 于是模型自己的尾音被转写成一句「用户发言」，它开始回应自己
           // （见 OPENAI_ECHO_GUARD_TUNING）
-          turn_detection: { type: 'server_vad', threshold: echoGuard.threshold }
+          turn_detection: {
+            type: 'server_vad',
+            threshold: echoGuard.threshold,
+            // 听写要的判停比对话宽，而且判停之后不准应答（见 OPENAI_DICTATION_TURN_DETECTION）
+            ...(config.dictation
+              ? {
+                  silence_duration_ms: OPENAI_DICTATION_TURN_DETECTION.silenceDurationMs,
+                  prefix_padding_ms: OPENAI_DICTATION_TURN_DETECTION.prefixPaddingMs,
+                  create_response: false
+                }
+              : {})
+          }
         },
         output: {
           format: { type: 'audio/pcm', rate: OPENAI_AUDIO.outputSampleRate },

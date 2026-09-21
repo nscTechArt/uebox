@@ -3115,7 +3115,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
           force_reload: 'Force Reload'
         },
         voice: {
-          interrupt: 'Interrupt voice assistant'
+          interrupt: 'Interrupt voice assistant',
+          spotlight_dictate: 'Speak an instruction'
         }
       }
     },
@@ -6571,6 +6572,14 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     aiFallback: {
       title: 'Chat with AI: {query}',
       description: 'Send this message to the AI assistant'
+    },
+    dictation: {
+      starting: 'Opening the microphone…',
+      listening: 'Listening — sends itself when you stop',
+      unheard: "Didn't catch that, say it again",
+      unavailable: 'Voice is busy right now, just type',
+      micIconLabel: 'Voice input active',
+      autoSubmit: 'Sending in {seconds}s — edit to hold it'
     }
   },
   globalAudioPlayer: {
