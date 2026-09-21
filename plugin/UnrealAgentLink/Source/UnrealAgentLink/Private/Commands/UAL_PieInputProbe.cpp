@@ -459,8 +459,14 @@ namespace
 		UE_LOG(LogUALPieProbe, Display, TEXT("[A 键位表] 上下文表读自 %s"), SourceName);
 
 		FObjectPropertyBase* KeyProp = CastField<FObjectPropertyBase>(MapProp->KeyProp);
-		// 5.6+ 的值是结构体不是 int，取不到优先级就只报上下文本身，不要因此整条不报
+		// 5.6+ 的值是结构体（FAppliedInputContextData）不是 int，优先级藏在里面、名字还叫 Priority。
+		// 只认 int 的话，5.6/5.7/5.8 上 ValueProp 恒为空，下面会给每一条都印「优先级 0」——
+		// 而这个探针存在的理由恰恰是查「是不是被高优先级上下文盖住了」，
+		// 编出来的 0 比不报更坏。和 UAL_InputCommands.cpp 的 ReadAppliedContexts 同一套判法
 		FNumericProperty* ValueProp = CastField<FNumericProperty>(MapProp->ValueProp);
+		FStructProperty* ValueStruct = CastField<FStructProperty>(MapProp->ValueProp);
+		FNumericProperty* InnerPriority =
+			ValueStruct ? FindFProperty<FNumericProperty>(ValueStruct->Struct, TEXT("Priority")) : nullptr;
 
 		FScriptMapHelper Helper(MapProp, MapProp->ContainerPtrToValuePtr<void>(PlayerInput));
 		int32 Count = 0;
@@ -471,10 +477,43 @@ namespace
 				continue;
 			}
 			UObject* Context = KeyProp ? KeyProp->GetObjectPropertyValue(Helper.GetKeyPtr(Index)) : nullptr;
-			const int64 Priority =
-				ValueProp ? ValueProp->GetSignedIntPropertyValue(Helper.GetValuePtr(Index)) : 0;
-			UE_LOG(LogUALPieProbe, Display, TEXT("[A 键位表] 挂着的上下文：%s（优先级 %lld）"),
-				Context ? *Context->GetPathName() : TEXT("<空>"), Priority);
+			// 取值器按 IsFloatingPoint() 分流：属性是按名字反射出来的，
+			// 类型不由这里决定，而 GetSignedIntPropertyValue 里是
+			// check(TIsIntegral<TCppType>::Value) —— 猜错了是 assert 崩编辑器，
+			// 不是读到一个错的数（同 UAL_InputCommands.cpp 里那处）
+			const auto ReadPriority = [](const FNumericProperty* Prop, const void* ValuePtr) -> int64
+			{
+				return Prop->IsFloatingPoint()
+						   ? static_cast<int64>(Prop->GetFloatingPointPropertyValue(ValuePtr))
+						   : Prop->GetSignedIntPropertyValue(ValuePtr);
+			};
+
+			bool bHasPriority = false;
+			int64 Priority = 0;
+			if (ValueProp)
+			{
+				Priority = ReadPriority(ValueProp, Helper.GetValuePtr(Index));
+				bHasPriority = true;
+			}
+			else if (InnerPriority)
+			{
+				Priority = ReadPriority(
+					InnerPriority, InnerPriority->ContainerPtrToValuePtr<void>(Helper.GetValuePtr(Index)));
+				bHasPriority = true;
+			}
+
+			// 读不出来就说读不出来。印一个 0 会被当成「这条优先级最低」，
+			// 而这一行正是用来判优先级冲突的
+			if (bHasPriority)
+			{
+				UE_LOG(LogUALPieProbe, Display, TEXT("[A 键位表] 挂着的上下文：%s（优先级 %lld）"),
+					Context ? *Context->GetPathName() : TEXT("<空>"), Priority);
+			}
+			else
+			{
+				UE_LOG(LogUALPieProbe, Display, TEXT("[A 键位表] 挂着的上下文：%s（优先级未知）"),
+					Context ? *Context->GetPathName() : TEXT("<空>"));
+			}
 			++Count;
 		}
 

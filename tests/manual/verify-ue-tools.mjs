@@ -434,6 +434,30 @@ async function materialSuite() {
     shading_model: 'DefaultLit'
   })
 
+  /*
+   * ---- 已知的覆盖缺口：这套用例全程**不开材质编辑器** ----
+   *
+   * 编辑器关着的时候插件直接改资产：UAL_ResolveLiveMaterial 拿不到编辑器就原样
+   * 返回资产，UAL_RefreshMaterialEditor 首行 !Editor 就 return。于是
+   * 建节点 → 刷新预览 → FMatExpressionPreview 这条链一步都不走 —— 而 2026-09-21
+   * 那次把编辑器整个崩掉的 bug（表达式少了 Material 回指针）**只在这条链上发作**。
+   * 下面建的 TextureSample / VectorParameter / Constant3Vector 全是会造预览的类型，
+   * 却因为窗口没开一个都碰不到那段代码。这个回归，这套用例抓不住。
+   *
+   * 这里一度加过一步 `ue_run_python_script` 去 open_editor_for_assets，撤掉了，
+   * 两个原因：
+   *   1. 没有 Python 的工程上 step() 会记成硬失败 —— 一条常驻假红，
+   *      而本文件别处正写着假红多了人就不看红色（见 step() 上面那段）。
+   *   2. 开着编辑器时，material_compile 会走 UAL_ApplyMaterialEditorToAsset，
+   *      而下面**故意**造了一张编不过的材质（空贴图接 Translucent 的 Opacity）。
+   *      引擎在那一步弹模态框，插件的命令是 FTSTicker 派发的、模态循环里不转 ——
+   *      整个脚本卡死在 fetch 上，跑不到结果表。
+   *
+   * 要补上这个缺口，得先有一条「开/关资产编辑器」的一等工具（失败可容忍、
+   * 收尾能关掉），以及 compile 那条路不再顺手存盘。在那之前，这个 bug 只能靠
+   * 人工按 docs 里的复现步骤验。
+   */
+
   await step(
     'material_describe',
     { path: MAT },

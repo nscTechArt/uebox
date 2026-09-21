@@ -12,7 +12,8 @@ import type { WorldScopedResponse } from '../../worldScope'
 
 export interface BehaviourJson {
   type: string
-  params?: Record<string, number | boolean>
+  /** 枚举参数（SwizzleAxis 的 Order、DeadZone 的 Type…）插件回的是枚举名，不是数字 */
+  params?: Record<string, number | boolean | string>
 }
 
 export interface ActionJson {

@@ -177,6 +177,8 @@ interface AddNodeResponse {
   guid?: string
   class?: string
   texture_applied?: boolean
+  /** 引擎归一化之后真正去加载的那个路径。和发出去的一样时引擎不回这个字段 */
+  resolved_texture_path?: string
   initial_value_applied?: boolean
   initial_value_error?: string
   /** 引擎回读出来的节点当前值 —— 拿它确认初始值真落上了，不用再读一次图 */
@@ -529,6 +531,8 @@ export function describeValueMismatch(sent: unknown, readBack: unknown, nodeType
  */
 function preflight(input: Input): void {
   const seen = new Set<string>()
+  /** 「节点类型 + 参数名」→ 第一个用它的局部 id，用来在发命令之前抓同批撞名 */
+  const parameterNames = new Map<string, string>()
   for (const node of input.nodes) {
     if (seen.has(node.id)) {
       throw new Error(`节点 id 重复：${node.id}。同一次调用里每个 id 只能出现一次。`)
@@ -550,6 +554,34 @@ function preflight(input: Input): void {
           '"Param"，material_set_param 之后永远够不着它，而且不报错。' +
           '一个节点都还没建，补上名字重发即可。'
       )
+    }
+
+    /*
+     * 同类型的参数名在这一批里不能重复。
+     *
+     * 引擎那边也有一道撞名 400，但它是**逐节点**的：二十个节点的图第十二个才撞，
+     * 前十一个已经落进用户的材质里了，而这条路失败即停、不回滚。能在这里判的
+     * 就别让它跑到引擎再说 —— 本函数开头那段注释讲的就是这件事。
+     *
+     * 按「类型 + 名字」判，和引擎的口径一致（`HasClassAndNameCollision` 比的是类）：
+     * 一个 ScalarParameter "Tint" 和一个 VectorParameter "Tint" 在 UE 里合法，
+     * 拦掉就是拦掉一张本来能用的图。
+     *
+     * 只管这一批内部。和图里**已有**节点撞名仍然由引擎回 400 —— 那要读一次图才知道，
+     * 不值得为它多跑一趟往返。
+     */
+    if (PARAMETER_NODE_TYPES.has(node.node_type) && node.node_name) {
+      const key = `${node.node_type} ${node.node_name}`
+      const firstUse = parameterNames.get(key)
+      if (firstUse !== undefined) {
+        throw new Error(
+          `参数名重复：节点 ${node.id} 和 ${firstUse} 都是 ${node.node_type}「${node.node_name}」。` +
+            '同名同类型的参数两个都建得出来，但 material_set_param 只够得着其中一个，' +
+            '另一个会一直拿旧值喂图，而且不报错。' +
+            '一个节点都还没建，改掉其中一个的名字（或者删掉多余那个）重发即可。'
+        )
+      }
+      parameterNames.set(key, node.id)
     }
     if (node.node_type === 'ComponentMask') {
       const problem = describeChannelMaskProblem(node.value)
@@ -617,7 +649,13 @@ async function addNodes(
     // *_applied: false。逐节点调用时这些警告至少还会各自回一句话，
     // 批量之后如果不收集，它们就彻底消失了 —— 那才是最坏的结果
     if (node.texture_path && r.texture_applied === false) {
-      details.warnings.push(`${node.id}：贴图没设上（${node.texture_path} 加载失败），节点是空的。`)
+      // 引擎会把路径归一化之后再去加载（裸名字会被补成 /Game/Materials/xxx）。
+      // 只印发出去的那个，调用方看不到这一步改写，会对着一个自己写对了的名字干瞪眼
+      const tried =
+        r.resolved_texture_path && r.resolved_texture_path !== node.texture_path
+          ? `${node.texture_path} → 实际去找的是 ${r.resolved_texture_path}`
+          : node.texture_path
+      details.warnings.push(`${node.id}：贴图没设上（${tried} 加载失败），节点是空的。`)
     }
     if (r.collection_applied === false) {
       details.warnings.push(

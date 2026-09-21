@@ -114,8 +114,8 @@ namespace
 	 * 什么也不会发生 —— 只回一个 "Hold" 而不说门槛是多少，
 	 * 调用方就会去查别的地方（设计文档 §5.3）。
 	 *
-	 * 只导出数值与布尔属性：这类类的可调参数几乎全是这两种，
-	 * 而对象/数组属性导出来只会把返回撑大。
+	 * 只导出数值、布尔和枚举三类：这类类的可调参数几乎全在这里面，
+	 * 而对象/数组/结构体属性导出来只会把返回撑大。
 	 */
 	TSharedPtr<FJsonObject> BehaviourToJson(const UObject* Object)
 	{
@@ -132,26 +132,58 @@ namespace
 		for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
 		{
 			FProperty* Prop = *It;
-			// 跳过引擎基类上的通用字段，只要这个具体触发器/修饰器自己的参数
-			if (Prop->GetOwnerClass() == UObject::StaticClass())
+
+			/*
+			 * 值一律交给 `PropertyToJsonValueCompat` 取，**不要自己按类型挑取值器**。
+			 *
+			 * `FNumericProperty` 的两个取值器各自带一道断言（`UnrealType.h`，
+			 * `TProperty_Numeric` 里）：`GetFloatingPointPropertyValue` 是
+			 * `check(TIsFloatingPoint<TCppType>::Value)`，`GetSignedIntPropertyValue`
+			 * 是 `check(TIsIntegral<TCppType>::Value)`。挑错了**不是返回一个不准的数，
+			 * 是直接 assert 把编辑器崩掉**。这里原来一律调浮点版，于是工程里只要有一个
+			 * 动作挂了 Pulse 或 Combo 触发器，`input.map` 就必崩 —— 那两个类上有
+			 * `int32 TriggerLimit` 和 `int32 CurrentComboStepIndex`。
+			 * 真机上崩过（2026-09-21 的用户报告）。
+			 *
+			 * 走这个共用封装而不是在这儿再写一遍分流：它包的
+			 * `FJsonObjectConverter::UPropertyToJsonValue` 里就是同一套
+			 * `IsFloatingPoint()` / `IsInteger()` 判断，而且本仓库另外七处属性转 JSON
+			 * 都走它 —— 那个封装存在的理由就是把跨引擎版本的差异收在一个地方。
+			 *
+			 * 顺带把枚举也接上了：`FEnumProperty` 不是 `FNumericProperty` 的子类，
+			 * 以前两个分支都接不住，于是 `SwizzleAxis` 的 `Order`、`DeadZone` 的
+			 * `Type` 这些**唯一的可调参数**一个都不出现在返回里，
+			 * 调用方看到的 ZYX 和默认的 YXZ 一模一样。转换器对枚举回的是名字字符串，
+			 * 比裸数字有用得多，所以底层是枚举的 `FByteProperty` 也不再跳过。
+			 */
+			const bool bWanted = CastField<FNumericProperty>(Prop) || CastField<FBoolProperty>(Prop) ||
+								 CastField<FEnumProperty>(Prop);
+			if (!bWanted)
 			{
 				continue;
 			}
-			if (const FNumericProperty* AsNumeric = CastField<FNumericProperty>(Prop))
+
+			const void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Object);
+
+			/*
+			 * `uint64` 要在转换器之前拦下来。
+			 *
+			 * 整数那条路上引擎只用带符号的取值器（`JsonObjectConverter.cpp` 里就是
+			 * `GetSignedIntPropertyValue`），而它对 `uint64` 是个直接重解释的
+			 * `(int64)` 转换 —— 断言过得去，值悄悄绕成负数。
+			 * 一个 `uint64 StateMask = 0x8000...` 会报成 -9223372036854775808。
+			 */
+			if (const FUInt64Property* AsUnsigned64 = CastField<FUInt64Property>(Prop))
 			{
-				// 枚举底层也是数值，但报一个裸数字没意义，跳过
-				if (CastField<FByteProperty>(Prop) && CastField<FByteProperty>(Prop)->Enum)
-				{
-					continue;
-				}
 				Params->SetNumberField(Prop->GetName(),
-					AsNumeric->GetFloatingPointPropertyValue(AsNumeric->ContainerPtrToValuePtr<void>(Object)));
+					static_cast<double>(AsUnsigned64->GetPropertyValue(ValuePtr)));
 				++ParamCount;
+				continue;
 			}
-			else if (const FBoolProperty* AsBool = CastField<FBoolProperty>(Prop))
+
+			if (const TSharedPtr<FJsonValue> Value = UAL_CommandUtils::PropertyToJsonValueCompat(Prop, ValuePtr))
 			{
-				Params->SetBoolField(Prop->GetName(),
-					AsBool->GetPropertyValue(AsBool->ContainerPtrToValuePtr<void>(Object)));
+				Params->SetField(Prop->GetName(), Value);
 				++ParamCount;
 			}
 		}
@@ -333,10 +365,25 @@ namespace
 			Json->SetStringField(TEXT("path"), Context->GetPathName());
 			Json->SetStringField(TEXT("name"), Context->GetName());
 
+			/*
+			 * 取值器按 `IsFloatingPoint()` 分流，别写死带符号整数那一版。
+			 *
+			 * 这两处拿到的属性都是**按名字**反射出来的（`ValueProp` 是 map 的值类型，
+			 * `Inner` 是结构体里叫 Priority 的那个字段），代码并不知道它到底是什么类型 ——
+			 * 而 `GetSignedIntPropertyValue` 里是 `check(TIsIntegral<TCppType>::Value)`，
+			 * 类型对不上就是 assert 崩编辑器，和 `BehaviourToJson` 那次崩的是同一道断言。
+			 * 今天九个引擎版本上 Priority 都是 int32，所以还没崩过；哪天它变成 float
+			 * 就崩了，而这行代码没有任何办法察觉。一次三元表达式就把这条路堵死。
+			 */
+			const auto ReadNumeric = [](const FNumericProperty* Prop, const void* ValuePtr) -> double
+			{
+				return Prop->IsFloatingPoint() ? Prop->GetFloatingPointPropertyValue(ValuePtr)
+											   : static_cast<double>(Prop->GetSignedIntPropertyValue(ValuePtr));
+			};
+
 			if (ValueProp)
 			{
-				Json->SetNumberField(TEXT("priority"),
-					static_cast<double>(ValueProp->GetSignedIntPropertyValue(Helper.GetValuePtr(Index))));
+				Json->SetNumberField(TEXT("priority"), ReadNumeric(ValueProp, Helper.GetValuePtr(Index)));
 			}
 			else if (ValueStruct)
 			{
@@ -344,8 +391,8 @@ namespace
 				if (const FNumericProperty* Inner =
 						FindFProperty<FNumericProperty>(ValueStruct->Struct, TEXT("Priority")))
 				{
-					Json->SetNumberField(TEXT("priority"), static_cast<double>(
-						Inner->GetSignedIntPropertyValue(Inner->ContainerPtrToValuePtr<void>(Helper.GetValuePtr(Index)))));
+					Json->SetNumberField(TEXT("priority"),
+						ReadNumeric(Inner, Inner->ContainerPtrToValuePtr<void>(Helper.GetValuePtr(Index))));
 				}
 			}
 

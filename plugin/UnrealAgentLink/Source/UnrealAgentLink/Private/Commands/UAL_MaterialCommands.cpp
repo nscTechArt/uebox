@@ -1747,11 +1747,43 @@ void FUAL_MaterialCommands::Handle_DescribeMaterial(
 		return;
 	}
 
+	/*
+	 * **照资产读，不要改读编辑器那份工作副本。**
+	 *
+	 * 「读副本」看着更贴近现场（add_node 加的参数确实只在副本上），可它会制造
+	 * 两处对不上，而两处都是静默的：
+	 *
+	 * - `Cast<UMaterial>` 对材质实例不成立，实例这条路只能顺 Parent 走到**资产**。
+	 *   于是 describe(M_Glass) 说 Translucent、describe(MI_Glass) 说 Opaque，
+	 *   同一张材质两个答案，调用方没有任何办法判断哪个算数。
+	 * - `material.set_param` 的参数表是从**保存过的父材质**推出来的，而且它不应用副本。
+	 *   describe 报着副本里的 Metallic，set_param 回 400「没有这个参数」——
+	 *   而 describe 的工具说明恰好写着「material_set_param 只认这里列出来的参数名」。
+	 *
+	 * 所以这里退回资产，两处重新一致；副本和资产不一样这件事改成**说出来**
+	 * （下面的 has_open_material_editor / editor_note）。只读命令的本分是报准，
+	 * 不是替用户把没保存的东西落盘。
+	 */
+	const bool bHasOpenMaterialEditor = UAL_FindMaterialEditor(Cast<UMaterial>(Material)) != nullptr;
+	UMaterialInterface* ReadMaterial = Material;
+
 	// 3. 构建响应
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("name"), Material->GetName());
 	Data->SetStringField(TEXT("path"), Material->GetPathName());
 	Data->SetStringField(TEXT("class"), Material->GetClass()->GetName());
+
+	// 读的是磁盘上那份。开着编辑器时必须说一句，否则调用方把这份回执
+	// 当成「我刚才改的生效了没有」的答案，而它答的是另一个问题
+	if (bHasOpenMaterialEditor)
+	{
+		Data->SetBoolField(TEXT("has_open_material_editor"), true);
+		Data->SetStringField(TEXT("editor_note"),
+			TEXT("This material is open in the Material Editor, and everything below is read from the asset "
+				 "on disk. Graph edits made through this plugin land in that editor window first, so they "
+				 "are NOT reflected here until ue_save (or the user pressing Apply). Use material_get_graph "
+				 "to see the live graph."));
+	}
 
 	// 4. 如果是 MaterialInstance，获取父材质
 	UMaterialInstance* MatInst = Cast<UMaterialInstance>(Material);
@@ -1765,7 +1797,7 @@ void FUAL_MaterialCommands::Handle_DescribeMaterial(
 	// 这里原来只给参数三件套，不给混合模式 / 着色模型 / 双面 —— 而 material.create
 	// 恰恰是设这三个的，「改之前先确认现状」因此落不了地。
 	// 实例没有自己的这些属性，跟父材质走，所以取 GetMaterial()。
-	if (UMaterial* BaseMaterial = Material->GetMaterial())
+	if (UMaterial* BaseMaterial = ReadMaterial->GetMaterial())
 	{
 		Data->SetStringField(TEXT("blend_mode"),
 			StaticEnum<EBlendMode>()->GetNameStringByValue((int64)BaseMaterial->BlendMode));
@@ -1795,15 +1827,15 @@ void FUAL_MaterialCommands::Handle_DescribeMaterial(
 	// 5. 获取材质参数
 	TArray<FMaterialParameterInfo> ScalarInfos;
 	TArray<FGuid> ScalarGuids;
-	Material->GetAllScalarParameterInfo(ScalarInfos, ScalarGuids);
+	ReadMaterial->GetAllScalarParameterInfo(ScalarInfos, ScalarGuids);
 
 	TArray<FMaterialParameterInfo> VectorInfos;
 	TArray<FGuid> VectorGuids;
-	Material->GetAllVectorParameterInfo(VectorInfos, VectorGuids);
+	ReadMaterial->GetAllVectorParameterInfo(VectorInfos, VectorGuids);
 
 	TArray<FMaterialParameterInfo> TextureInfos;
 	TArray<FGuid> TextureGuids;
-	Material->GetAllTextureParameterInfo(TextureInfos, TextureGuids);
+	ReadMaterial->GetAllTextureParameterInfo(TextureInfos, TextureGuids);
 
 	// 6. 构建标量参数列表
 	TArray<TSharedPtr<FJsonValue>> ScalarParams;
@@ -1813,7 +1845,7 @@ void FUAL_MaterialCommands::Handle_DescribeMaterial(
 		ParamObj->SetStringField(TEXT("name"), Info.Name.ToString());
 		
 		float Value = 0.0f;
-		if (Material->GetScalarParameterValue(Info, Value))
+		if (ReadMaterial->GetScalarParameterValue(Info, Value))
 		{
 			ParamObj->SetNumberField(TEXT("value"), Value);
 		}
@@ -1829,7 +1861,7 @@ void FUAL_MaterialCommands::Handle_DescribeMaterial(
 		ParamObj->SetStringField(TEXT("name"), Info.Name.ToString());
 		
 		FLinearColor Value;
-		if (Material->GetVectorParameterValue(Info, Value))
+		if (ReadMaterial->GetVectorParameterValue(Info, Value))
 		{
 			TSharedPtr<FJsonObject> ColorObj = MakeShared<FJsonObject>();
 			ColorObj->SetNumberField(TEXT("r"), Value.R);
@@ -1850,7 +1882,7 @@ void FUAL_MaterialCommands::Handle_DescribeMaterial(
 		ParamObj->SetStringField(TEXT("name"), Info.Name.ToString());
 		
 		UTexture* Texture = nullptr;
-		if (Material->GetTextureParameterValue(Info, Texture) && Texture)
+		if (ReadMaterial->GetTextureParameterValue(Info, Texture) && Texture)
 		{
 			ParamObj->SetStringField(TEXT("value"), Texture->GetPathName());
 		}
@@ -2712,6 +2744,22 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 	FString TexturePath;
 	Payload->TryGetStringField(TEXT("texture_path"), TexturePath);
 
+	/*
+	 * 归一化的结果**单独存一份，不要覆盖调用方发来的那个字符串**。
+	 *
+	 * 要归一化，是因为 `/Game/T_Noise.uasset`、反斜杠路径、末尾带空格这些
+	 * NormalizePath 专门修的写法原样 LoadObject 一律失败，而回执是 200 +
+	 * texture_applied:false —— 同一个写法换成 collection_path 却是好的。
+	 *
+	 * 但不能就地覆盖：`NormalizePath` 的默认前缀是 `/Game/Materials`，
+	 * 所以裸名字 `T_Wood` 会被改写成 `/Game/Materials/T_Wood`，
+	 * 而回执和日志印的就是这个改写后的值。模型发的是 `T_Wood`、
+	 * 收到的是一条「/Game/Materials/T_Wood 加载失败」，于是跑去查一个
+	 * 它从来没提过的路径（贴图其实在 /Game/Textures 下）—— 正是这段
+	 * 想要消灭的那种白绕。两个都报出去，它才知道发生了什么。
+	 */
+	const FString ResolvedTexturePath = TexturePath.IsEmpty() ? TexturePath : NormalizePath(TexturePath);
+
 	// 4. 根据 NodeType 创建表达式
 	UMaterialExpression* NewExpression = nullptr;
 	UClass* ExpressionClass = nullptr;
@@ -2798,6 +2846,67 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 		return;
 	}
 
+	/*
+	 * 参数名不能和图里已有的撞 —— 撞了要在建之前就拒掉。
+	 *
+	 * 上面那道只管「没给名字」。给了名字但和已有参数重名，是同一类静默失败的
+	 * 另一半：两个都叫 Roughness 的 ScalarParameter 都建得出来、都回 200，
+	 * 而 `material_create_instance` 只暴露一个，`material_set_param("Roughness")`
+	 * 只挪得动其中一个，另一个继续拿旧值喂图 —— 全程没有任何一处报错。
+	 *
+	 * 为什么不学引擎调 `ValidateParameterName`：它撞名时是**改名**
+	 * （Roughness → Roughness_2），而本工具的约定是「node_name 就是参数名」，
+	 * 悄悄改掉等于把调用方后面所有 set_param 都指偏。所以这里回 400 让调用方自己定。
+	 *
+	 * 两条判据都照引擎来，别自己发明：
+	 *
+	 * - **认参数名用 `HasAParameterName()` / `GetParameterName()`**，不要手写 Cast。
+	 *   这两个虚函数 4.27~5.8 都在（`MaterialExpression.h`），`UMaterial::
+	 *   RemoveExpressionParameter` 自己用的就是它们。手写两个 Cast 会漏掉
+	 *   `FontSampleParameter`、`RuntimeVirtualTextureSampleParameter`、
+	 *   `SparseVolumeTextureSampleParameter` —— 它们各自有 ParameterName，
+	 *   但继承的是 FontSample / RVTSample / SparseVolumeTextureSample 那几棵树，
+	 *   两个 Cast 都接不住，于是撞名照样放过去，正是这道检查要防的事。
+	 *
+	 * - **只比同一个类**，和 `UMaterialExpression::HasClassAndNameCollision`
+	 *   （`return GetClass() == OtherExpression->GetClass();`）一致。引擎把标量参数
+	 *   和向量参数放在**两张表**里，一个 ScalarParameter "Tint" 和一个
+	 *   VectorParameter "Tint" 在 UE 里合法、`material_set_param` 两个都够得着，
+	 *   跨类去拦就是拦掉一张本来能用的图。
+	 */
+	if (!NodeName.IsEmpty() &&
+		(ExpressionClass->IsChildOf(UMaterialExpressionParameter::StaticClass()) ||
+		 ExpressionClass->IsChildOf(UMaterialExpressionTextureSampleParameter::StaticClass())))
+	{
+		const FName WantedName(*NodeName);
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+		for (UMaterialExpression* Existing : Material->GetExpressions())
+#else
+		for (UMaterialExpression* Existing : Material->Expressions)
+#endif
+		{
+			// 类对不上就不是撞名。也顺手挡住了 NAME_None：不带参数名的节点
+			// `GetParameterName()` 回的就是 None，不先过 HasAParameterName 的话，
+			// `node_name: "None"` 会和图里每一个普通节点「撞名」
+			if (!Existing || Existing->GetClass() != ExpressionClass || !Existing->HasAParameterName())
+			{
+				continue;
+			}
+
+			if (Existing->GetParameterName() == WantedName)
+			{
+				UAL_CommandUtils::SendError(RequestId, 400,
+					FString::Printf(TEXT("A parameter named '%s' already exists in this material (%s). Two "
+										 "parameters with the same name both compile, but material_set_param "
+										 "can only ever reach one of them and nothing reports an error. Pick a "
+										 "different node_name, or drop this node and reuse the existing one "
+										 "(material_describe lists parameter names; material_get_graph does not)."),
+						*NodeName, *Existing->GetClass()->GetName()));
+				return;
+			}
+		}
+	}
+
 	// 5. 创建表达式并添加到材质
 	FUAL_ScopedTransaction Transaction(NSLOCTEXT("UALMaterial", "AddNode", "Add Material Node"));
 
@@ -2832,6 +2941,50 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 #else
 	Material->Expressions.Add(NewExpression);
 #endif
+
+	/*
+	 * 回指针不能漏 —— 漏了会把编辑器崩掉。
+	 *
+	 * 加进集合只完成了一半，引擎自己那条路（`MaterialEditingLibrary.cpp` 的
+	 * `CreateMaterialExpressionEx` 和 `DuplicateMaterialExpression`，两处都是）
+	 * 紧跟着就写这一行。它不是「表达式属于谁」的冗余记录 —— 材质编辑器建节点
+	 * 预览时**拿它当断言条件**：
+	 *
+	 *     FMatExpressionPreview::FMatExpressionPreview(UMaterialExpression* InExpression)
+	 *     {
+	 *         check(InExpression->Material && InExpression->Material->GetExpressions().Contains(InExpression));
+	 *
+	 * 后半截我们满足，炸的是前半截。这句在 `MaterialEditor.cpp` 里的行号逐版都不同
+	 * （5.1:205、5.2:204、5.3:204、5.4:222、5.5:240、5.6:263、5.7:268、5.8:333），
+	 * 4.27 和 5.0 上它压根不在 .cpp 里，而是 `MaterialEditor.h`（66 / 70 行）里
+	 * 内联的那个构造函数，判的是 `Expressions.Contains`。**搜那句 check，别按行号找。**
+	 *
+	 * 更要紧的是 **5.5 及以后根本走不到这句 check**：`GetExpressionPreview` 在造预览
+	 * 之前先加了一道 `if (!Preview && MaterialExpression->Material->GetExpressions()
+	 * .Contains(MaterialExpression))`，回指针是空的时候这里就是一次裸解引用。
+	 * 也就是说在支持范围的后半段，这个 bug 是**访问违例**而不是断言 ——
+	 * 不会因为 check() 在某些构建配置里被编掉就不见了。
+	 *
+	 * 触发路径是本函数末尾的 UAL_RefreshMaterialEditor →
+	 * UpdateMaterialAfterGraphChange() → RefreshExpressionPreviews() →
+	 * GetExpressionPreview() → new FMatExpressionPreview —— 也就是说
+	 * **材质编辑器开着的时候，建一个节点就可能当场崩**，编辑器里那份未保存的
+	 * 工作副本连同整个材质一起没。真机上就是这么栽的（2026-09-21 的用户报告）。
+	 *
+	 * 为什么不是每次都崩：`GetExpressionPreview` 有一道门禁 ——
+	 * `!bHidePreviewWindow && !bCollapsed`（5.8 收进了 `ShouldShowPreview()`，
+	 * 判据一样），折叠的节点不建预览就碰不到这条路。
+	 * `UMaterialExpression` 基类默认 `bCollapsed = true`，所以 Multiply / Lerp
+	 * 这些一直是安全的，ScalarParameter 也在自己的构造函数里设回了 true ——
+	 * 那次崩溃前连着建成的 15 个 ScalarParameter 不是运气好。
+	 * 而 `bCollapsed = false` 的类有十几个（5.1 是 15 个、5.2~5.5 是 17 个、
+	 * 5.8 是 18 个），里面全是常用货：TextureSample、
+	 * Constant3Vector、Constant4Vector、VectorParameter、CollectionParameter……
+	 * 建到其中任何一个，第一个就炸。所以这不是「一次发太多节点」的问题，
+	 * 发两个也一样，别把它当成批量上限能挡住的事。
+	 */
+	NewExpression->Material = Material;
+
 	NewExpression->UpdateParameterGuid(true, true);
 
 	// 6. 设置特定节点属性
@@ -2972,7 +3125,7 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 	{
 		if (!TexturePath.IsEmpty())
 		{
-			UTexture* Texture = LoadObject<UTexture>(nullptr, *TexturePath);
+			UTexture* Texture = LoadObject<UTexture>(nullptr, *ResolvedTexturePath);
 			if (Texture)
 			{
 				TexExpr->Texture = Texture;
@@ -2990,12 +3143,16 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 				TexExpr->AutoSetSampleType();
 				bTextureApplied = true;
 				UE_LOG(LogUALMaterial, Log, TEXT("Set texture for %s: %s (sampler %d)"),
-					*NewExpression->GetClass()->GetName(), *TexturePath,
+					*NewExpression->GetClass()->GetName(), *ResolvedTexturePath,
 					static_cast<int32>(TexExpr->SamplerType));
 			}
 			else
 			{
-				UE_LOG(LogUALMaterial, Warning, TEXT("Failed to load texture: %s"), *TexturePath);
+				// 两个路径都印：发来的那个和实际去找的那个。只印一个的话，
+				// 「我发的明明是 T_Wood」和「它说 /Game/Materials/T_Wood 找不到」
+				// 之间那一步改写就是隐形的
+				UE_LOG(LogUALMaterial, Warning, TEXT("Failed to load texture: %s (resolved from '%s')"),
+					*ResolvedTexturePath, *TexturePath);
 			}
 		}
 	}
@@ -3099,7 +3256,14 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 	// 贴图设置状态
 	if (!TexturePath.IsEmpty())
 	{
+		// 回执里报**发来的那个**路径，另外单给一个 resolved_texture_path。
+		// 反过来（只报改写后的）会让调用方以为自己发的就是那个，
+		// 然后对着一个它没写过的路径排查
 		Data->SetStringField(TEXT("texture_path"), TexturePath);
+		if (ResolvedTexturePath != TexturePath)
+		{
+			Data->SetStringField(TEXT("resolved_texture_path"), ResolvedTexturePath);
+		}
 		Data->SetBoolField(TEXT("texture_applied"), bTextureApplied);
 	}
 
@@ -3783,11 +3947,42 @@ void FUAL_MaterialCommands::Handle_DeleteMaterialNode(
 		ClearIfPointsAtTarget(Root.Input);
 	}
 
+	/*
+	 * 删一个节点是**四句**，顺序和配套都不能省
+	 * （引擎的 `MaterialEditor.cpp` 删除路径、`MaterialEditingLibrary.cpp` 都是这四句）：
+	 *
+	 *     MaterialExpression->Modify();
+	 *     Material->GetExpressionCollection().RemoveExpression(MaterialExpression);
+	 *     Material->RemoveExpressionParameter(MaterialExpression);
+	 *     MaterialExpression->MarkAsGarbage();
+	 *
+	 * `Modify()` **必须排在最前面，而且必须打在被删的这个表达式身上**。
+	 * 上面那个断连循环 `if (!Expression || Expression == TargetExpression) continue;`
+	 * 恰好把它跳过了，于是它是全图唯一一个没进事务的对象 —— 而
+	 * `EditorTransaction.cpp` 里撤销时那句 `Object->ClearGarbage()` 只对
+	 * **有 FObjectRecord 的对象**（也就是被 Modify() 过的）执行。
+	 * 少了它，撤销会把一个已经 MarkAsGarbage 的对象放回表达式数组，
+	 * 下一次 GC 把那个槽位清成 null，而 `UMaterialGraph::RebuildGraph` 遍历
+	 * `GetExpressions()` 时**不判空**就解引用 —— 删一个节点再 Ctrl+Z 就是一次崩溃。
+	 *
+	 * `RemoveExpressionParameter`：`Material->EditorParameters` 是个**裸 TMap，
+	 * 不是 UPROPERTY**，GC 不会帮它清。不摘的话它会一直攥着一个已经删掉的表达式指针，
+	 * 直到材质被重新打开才重建。
+	 *
+	 * `MarkAsGarbage`：告诉 GC 这个对象可以回收了。这一句在补上 `Material` 回指针
+	 * 之后更要紧 —— 现在被删掉的表达式身上带着一个看着合法的材质指针，
+	 * 却已经不在 `GetExpressions()` 里，正好是引擎断言「不可能出现」的那个状态。
+	 */
+	TargetExpression->Modify();
+
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
 	Material->GetExpressionCollection().RemoveExpression(TargetExpression);
 #else
 	Material->Expressions.Remove(TargetExpression);
 #endif
+
+	Material->RemoveExpressionParameter(TargetExpression);
+	TargetExpression->MarkAsGarbage();
 
 	// 5. 标记材质已修改并刷新编辑器
 	FPropertyChangedEvent PropertyChangedEvent(nullptr, EPropertyChangeType::ValueSet);
@@ -4671,6 +4866,27 @@ void FUAL_MaterialCommands::Handle_DuplicateMaterial(
 		}
 	}
 	
+	/*
+	 * 复制是从**资产**拷的，所以编辑器里那份没保存的改动不会进副本。
+	 *
+	 * 这里曾经调 `UAL_ApplyMaterialEditorToAsset` 想把改动先推回资产，那是错的：
+	 * 那个函数走的是编辑器的 SaveAsset 命令，也就是
+	 * 1) **整包写磁盘**，而 `UpdateOriginalMaterial` 是拿工作副本整个覆盖资产，
+	 *    没有「只推我改的那部分」这回事 —— 用户自己那些打算丢掉的改动一起被落盘，
+	 *    而存盘不可撤销，`ue_undo` 捞不回来；
+	 * 2) 工作副本编不过时会弹**模态框**（compile errors 那个警告，九个版本都在），
+	 *    而插件的命令是从 FTSTicker 上派发的、模态循环里根本不转 ——
+	 *    编辑器卡死，这条 RPC 永远不回；
+	 * 3) 它返回 void，用户点 Abort 时 `UpdateOriginalMaterial` 回 false、什么都没推，
+	 *    调用方照样收 200 —— 正是它想修的那个「静默拿到旧数据」；
+	 * 4) 它排在事务外面，复制失败回 500 的那条路上，源材质**已经被覆盖并落盘了**。
+	 *
+	 * 所以改成不写盘，只**如实说一句**：编辑器开着就在回执里讲清楚这次拷的是磁盘那份。
+	 * 要把编辑器里的改动带进副本，调用方先 ue_save（或者用户点一下 Apply）再来。
+	 */
+	const bool bSourceHasOpenEditor =
+		UAL_FindMaterialEditor(Cast<UMaterial>(SourceMaterial)) != nullptr;
+
 	// 5. 执行复制 (使用 AssetTools 以更好支持编辑器集成)
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
 	
@@ -4696,7 +4912,16 @@ void FUAL_MaterialCommands::Handle_DuplicateMaterial(
 	Data->SetStringField(TEXT("source_path"), SourcePath);
 	Data->SetStringField(TEXT("new_path"), NewAssetPath);
 	Data->SetStringField(TEXT("new_name"), FPaths::GetBaseFilename(NewAssetPath));
-	
+
+	if (bSourceHasOpenEditor)
+	{
+		Data->SetBoolField(TEXT("source_had_open_editor"), true);
+		Data->SetStringField(TEXT("source_note"),
+			TEXT("The source material is open in the Material Editor. This copy was made from the asset on "
+				 "disk, so anything changed in that window but not yet applied/saved is NOT in the copy. "
+				 "Call ue_save (or have the user press Apply) first if you need those changes copied."));
+	}
+
 	UE_LOG(LogUALMaterial, Log, TEXT("Duplicated material %s to %s"), *SourcePath, *NewAssetPath);
 	
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
@@ -4943,6 +5168,20 @@ void FUAL_MaterialCommands::Handle_CreateMaterialInstance(
 		DestPath = NormalizePath(DestPath);
 	}
 	
+	/*
+	 * 实例是照**父材质资产**建的，参数表也从那儿来 —— 编辑器里还没保存的参数
+	 * 不会出现在这个实例上。
+	 *
+	 * 这里曾经调 `UAL_ApplyMaterialEditorToAsset` 先把改动推回资产，已经撤掉了：
+	 * 那条路会整包写磁盘（连用户打算丢掉的改动一起）、编不过时弹模态框把编辑器
+	 * 和这条 RPC 一起卡死、失败了还不声不响回 200。理由完整写在 material.duplicate
+	 * 那边同一段注释里。
+	 *
+	 * 改成不写盘、只如实报一句：父材质开着编辑器时在回执里讲清楚参数表来自磁盘那份。
+	 */
+	const bool bParentHasOpenEditor =
+		UAL_FindMaterialEditor(Cast<UMaterial>(ParentMaterial)) != nullptr;
+
 	// 4. 创建材质实例
 	FString PackageName = DestPath / InstanceName;
 	UPackage* Package = CreatePackage(*PackageName);
@@ -5021,7 +5260,17 @@ void FUAL_MaterialCommands::Handle_CreateMaterialInstance(
 	AvailableParams->SetArrayField(TEXT("vector_params"), VectorParams);
 	AvailableParams->SetArrayField(TEXT("texture_params"), TextureParams);
 	Data->SetObjectField(TEXT("available_params"), AvailableParams);
-	
+
+	if (bParentHasOpenEditor)
+	{
+		Data->SetBoolField(TEXT("parent_had_open_editor"), true);
+		Data->SetStringField(TEXT("parent_note"),
+			TEXT("The parent material is open in the Material Editor. available_params comes from the asset "
+				 "on disk, so parameters added in that window but not yet applied/saved are missing here and "
+				 "material_set_param will reject them. Call ue_save (or have the user press Apply) on the "
+				 "parent, then create the instance."));
+	}
+
 	UE_LOG(LogUALMaterial, Log, TEXT("Created material instance %s from %s"), *InstanceName, *ParentMaterial->GetName());
 	
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
@@ -5297,11 +5546,28 @@ void FUAL_MaterialCommands::Handle_DeleteUnusedMaterialNodes(const TSharedPtr<FJ
 
 		for (UMaterialExpression* Expression : Unused)
 		{
+			/*
+			 * `Modify()` 在前，理由同 material.delete_node 那段注释（撤销要靠它）。
+			 *
+			 * **但这里不跟 `MarkAsGarbage()`**，和单删那条路不一样 —— 因为这条路
+			 * 判「没用上」判得不准：可达性只顺着 `FExpressionInput` 走，而
+			 * `NamedRerouteUsage` 是靠一个 `TObjectPtr<Declaration>` 连过去的、没有输入；
+			 * `UMaterialExpressionCustomOutput` 那一族（ClearCoatNormal、BentNormal、
+			 * ThinTranslucent…）压根不接主节点，编译器是扫 `GetExpressions()` 找到它们的；
+			 * `UAL_CollectRootInputs` 那张表也还缺 Anisotropy / Tangent / Refraction /
+			 * PixelDepthOffset / CustomizedUVs / FrontMaterial（5.4+ Substrate 唯一那根）。
+			 *
+			 * 判错一个节点，只从数组里摘掉还能靠撤销捞回来；再 MarkAsGarbage
+			 * 就是下一次 GC 之后彻底没了。判据补齐之前，这一步按可恢复的来。
+			 */
+			Expression->Modify();
+
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
 			Material->GetExpressionCollection().RemoveExpression(Expression);
 #else
 			Material->Expressions.Remove(Expression);
 #endif
+			Material->RemoveExpressionParameter(Expression);
 			++DeletedCount;
 		}
 
