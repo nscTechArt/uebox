@@ -5,7 +5,7 @@
  *
  * AGENTS.md §5 规则 5：渲染进程不直接碰 `ipcRenderer`，走 `window.api.*`，
  * **并且在 `src/renderer/src/api/*` 里包一层**，让错误以同一种形状冒出来。
- * 原来 Store 里散着四处 `window.api.updater.xxx()`，其中只有 `init()` 判了
+ * 原来 Store 里散着四处对 updater 桥的直接调用，其中只有 `init()` 判了
  * 桥在不在 —— 少一个桥（改名、preload 没装上、独立窗口）时，`check()` 会抛
  * 「Cannot read properties of undefined」，而那句话会被关于页原样 `message.error`
  * 弹给用户看。
