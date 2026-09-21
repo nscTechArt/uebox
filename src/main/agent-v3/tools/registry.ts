@@ -1179,7 +1179,7 @@ export function listToolCatalog(deps: BuildToolsDeps = {}): ToolCatalogEntry[] {
       namespace: tool.unrealBox.namespace,
       description: tool.description,
       risk: tool.unrealBox.risk,
-      defaultResident: isDefaultResidentTool(tool.name),
+      defaultResident: isDefaultResidentTool(tool),
       tokens: estimateTokens(
         JSON.stringify({
           name: tool.name,

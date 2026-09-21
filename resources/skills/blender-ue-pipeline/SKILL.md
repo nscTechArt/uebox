@@ -1,6 +1,6 @@
 ---
 name: blender-ue-pipeline
-description: Refine UE static props or architectural meshes in Blender with reference-guided modeling and visual quality checks, then return an editable copy to UE. Use when the user requests Blender互联、DCC管道、送到Blender修改、回传UE、按参考图完善道具、提高Blender建模质量. Do not use for skeletal characters, animation, complete scene synchronization, external image-to-3D generation services, or simple UE-only geometry edits.
+description: Connects Blender to Box, then refines UE static props or architectural meshes in Blender with reference-guided modeling and visual quality checks and returns an editable copy to UE. Use when the user requests Blender互联、DCC管道、送到Blender修改、回传UE、按参考图完善道具、提高Blender建模质量, or asks to connect, set up or troubleshoot Blender at all — "我装了 blender 连一下"、"接入 Blender"、"Blender MCP 连不上"、"blender 端口 9876". Do not use for skeletal characters, animation, complete scene synchronization, external image-to-3D generation services, or simple UE-only geometry edits.
 ---
 
 # Blender ↔ Unreal static mesh pipeline
@@ -13,9 +13,16 @@ connecting Blender gives an Agent expert sculpting or photo-reconstruction abili
 
 Use the **official Blender Lab** MCP, not a similarly named community package.
 Connection setup and the compatible Python SDK constraint are in [references/setup.md](references/setup.md).
-Use `setup_mcp.ps1` on Windows and `setup_mcp.py` on macOS. The Mac installer accepts a Blender
-`.app` and records its executable path; Linux installation is not covered. Verify the actual
-Blender bridge and UE exchange on the target machine before claiming the integration works.
+
+**When Blender is not connected yet, send the user to Preferences → MCP → Connect Blender**, which
+installs the official server and add-on and fills in the configuration. Do not walk them through
+the manual steps or run `setup_mcp.ps1` yourself unless that button reported something it cannot
+do. Never tell the user that connecting Blender is impossible here — it is one button.
+
+The manual path uses `setup_mcp.ps1` on Windows and `setup_mcp.py` on macOS. The Mac installer
+accepts a Blender `.app` and records its executable path; Linux installation is not covered.
+Verify the actual Blender bridge and UE exchange on the target machine before claiming the
+integration works.
 Before modeling, read [references/modeling-quality.md](references/modeling-quality.md).
 It adapts img2threejs's reference analysis, staged form building and evidence-based correction
 to native Blender modeling. The editable `.blend` remains the modeling source of truth.

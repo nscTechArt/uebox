@@ -24,7 +24,7 @@
  *
  * 做成 `mcp_status` 工具的话，模型只有在**想到要查**的时候才会查 ——
  * 而它答「我没有这个能力」的时候恰恰是不觉得有什么好查的。
- * 这类信息必须常驻，而且很便宜：没配 server 时一个字都不占。
+ * 这类信息必须常驻，而且很便宜：没配 server 时只有两句话，见 `NO_SERVER_LINES`。
  */
 
 import { isEpicServerId } from './epicToolsets'
@@ -45,12 +45,81 @@ function describe(status: McpServerStatus): string {
 }
 
 /**
- * 生成 MCP 那一段。没有任何 server 时返回空串。
+ * 设置页能一键装上的集成，写给模型看的说法。
+ *
+ * 模型的默认反应是「工具列表里没有 = 我没这个能力」，而盒子的设置页里
+ * 就摆着一个一键接入的按钮 —— 真机上用户说「我装了 Blender，你连一下」，
+ * 它回一句「我没有连 Blender 的工具」，**那是假话**，还把用户推向了
+ * 完全错误的方向（去换别的客户端）。
+ *
+ * 只写接入口在哪，不写怎么用 —— 真接上之后 `describe` 会把 server 和工具数
+ * 讲清楚，这几句的唯一任务是让模型别把「现在没有」说成「不可能有」。
+ */
+export const BLENDER_INSTALLABLE =
+  'Blender (the official Blender Lab MCP, giving Blender modelling and a UE round-trip)'
+
+/**
+ * 设置页此刻真的能一键装上的东西。
+ *
+ * 两道筛子，缺一句话就变成假话：
+ *
+ *   - **平台。** 安装脚本只有 Windows 和 macOS 有（同 `blenderSetup.ts` 的
+ *     `summarizeState`）。Linux 也是发行目标，在那儿把模型指到一个不存在的
+ *     按钮前面，和它原来说「做不到」一样是错的，只是换了个方向错。
+ *   - **已经连上了就不必再提。** 那时 `describe` 已经把工具数讲清楚了。
+ *     按 id 里有没有 `blender` 认 —— 只用来压掉一句提示，认错了也不伤人。
+ */
+export function installableIntegrations(
+  statuses: McpServerStatus[],
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  if (platform !== 'win32' && platform !== 'darwin') return []
+  if (statuses.some((s) => s.connected && /blender/i.test(s.id))) return []
+  return [BLENDER_INSTALLABLE]
+}
+
+/** 收尾：把「可以一键装什么」那段接在后面。两处出口都要走它 */
+function finish(lines: string[], installable: string[]): string {
+  if (installable.length > 0) {
+    lines.push(
+      '',
+      `Settings → MCP can install these for the user in one click: ${installable.join('; ')}.`,
+      'So do NOT tell the user such a capability is impossible here — say it is not connected yet and point them at Settings → MCP.'
+    )
+  }
+  return `${lines.join('\n')}\n`
+}
+
+/**
+ * 生成 MCP 那一段。
+ *
+ * ## 两个参数是两件独立的事实，不要再合成一个
+ *
+ * 第一版把「可以一键装什么」挂在 `statuses.length === 0` 上。那个判据错了两次：
+ *
+ *   - **漏报。** `statuses` 里还有引擎自动发现的和插件带来的 server
+ *     （`index.ts` 把三份合并成一份）。开着 UE 5.8 工程的用户长度不为 0，
+ *     于是这段话永远到不了他 —— 而他正是会来问「连一下 Blender」的那个人。
+ *   - **误报。** `ensureConnected()` 失败时会吞掉异常、返回空列表；那时候
+ *     断言「你一个都没配」是对着一个配置好好的用户说假话。
+ *
+ * 所以现在分开：`statuses` 只管报已有 server 的真实状态，`installable` 由
+ * 调用方按「这个平台有没有、装没装过」单独算出来，两者互不影响。
+ *
+ * `statuses` 传 `undefined` 表示**根本没有 MCP 管理器**（不知道），
+ * 和「有管理器但一条都没配」是两回事 —— 前者一个字都不说。
  *
  * 返回值以 `\n` 开头（若非空），调用方直接拼进提示词即可。
  */
-export function buildMcpSection(statuses: McpServerStatus[] = []): string {
-  if (statuses.length === 0) return ''
+export function buildMcpSection(statuses?: McpServerStatus[], installable: string[] = []): string {
+  if (!statuses) return ''
+  if (statuses.length === 0 && installable.length === 0) return ''
+
+  if (statuses.length === 0) {
+    // 措辞是「没有连上的」而不是「没配过」：发现流程失败时这里也会是空列表，
+    // 那时候「你一个都没配」是假话，而「现在没有连上的」两种情况都成立
+    return finish(['', 'No MCP servers are connected right now.'], installable)
+  }
 
   // 停用的一并算进来：对用户来说「本该有的能力现在没有」是同一件事，
   // 模型的错误反应（「我没有这个能力」）也是同一个
@@ -87,5 +156,5 @@ export function buildMcpSection(statuses: McpServerStatus[] = []): string {
     )
   }
 
-  return `${lines.join('\n')}\n`
+  return finish(lines, installable)
 }

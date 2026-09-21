@@ -82,6 +82,64 @@ const CORE_NAMES = new Set<string>([
 ])
 
 /**
+ * 整组常驻的小组。2026-09-21 加。
+ *
+ * ## 这条线是怎么算出来的
+ *
+ * 折叠省的是**前缀字节**，但开了 prompt cache 之后前缀字节很便宜（首轮 1.25×
+ * 写入，之后每轮 0.1× 读取），而**每加载一次组都让前缀变一次 = 作废整份缓存、
+ * 全价重写一遍**。把一个组常驻 vs 折叠，跑一个 N 轮的会话：
+ *
+ * - 常驻：`1.25·g + 0.1·g·(N−1)`，N=10 时是 `2.15·g`
+ * - 折叠且用到：比常驻多付 `1.25·P₀ − 0.1·g·(t−1)` ≈ `1.25·P₀`（P₀ 是底座前缀）
+ *
+ * 所以折叠划算的条件是 `p · 1.25·P₀ < (1−p) · g · 2.15`，其中 p 是「这个组在一条
+ * 会话里被用到」的概率。P₀ ≈ 24,000 token 时右边那个阈值是 37,500 —— 一次加载事件
+ * 顶得上 **17 轮**把这个组白带在前缀里。小组根本摊不平这笔钱。
+ *
+ * 逐组的盈亏平衡 p（`g × 2.15 / 37500`，g 取实测字节 ÷ 3.05 换成 token）。
+ * **字节数测于 2026-09-21**，用 `TOOL_SEARCH_MEASURE=1` 跑
+ * `toolSearchCatalog.test.ts` 的「记录各按需工具组的体积」可以复现 ——
+ * 描述改一改这些数就会漂（本表成稿当天 `ue.sequencer` 就从 9,526 漂到 10,468），
+ * 所以**重算这张表之前先重测一遍**，别拿今天的字节去比去年的行：
+ *
+ * | 组 | 字节 | 平衡 p | 取舍 |
+ * |---|---:|---:|---|
+ * | `local` | 1,129 | 2.1% | 常驻 |
+ * | `note` | 1,219 | 2.3% | 常驻 |
+ * | `ue.mesh` | 1,309 | 2.5% | 常驻 |
+ * | `ue.cpp` | 3,322 | 6.2% | 常驻 |
+ * | `ue.animation` | 4,158 | 7.8% | 常驻 |
+ * | `library` | 4,737 | 8.9% | 常驻 |
+ * | `ue.input` | 5,331 | 10.0% | 常驻 |
+ * | `ue.editor` | 6,098 | 11.5% | 常驻 |
+ * | `ue.system` | 8,253 | 15.5% | **留在折叠区** |
+ * | `video.production` | 9,521 | 17.9% | **留在折叠区** |
+ * | `ue.sequencer` | 10,468 | 19.7% | **留在折叠区** |
+ *
+ * 线划在 6.1 KB 和 8.3 KB 之间，不是「小于 10 KB」这种整数 —— 上面三个的平衡 p
+ * 已经进了 15%~20%，而 `ue.system` 在真实会话样本里是 12%（27/223 轮）。**它们是
+ * 真正的边缘，留在折叠区等数据，不是被漏掉了。**
+ *
+ * ## 这里的不确定性，别当它已经定了
+ *
+ * p 的分母是「会话」还是「轮次」会把结论翻过来：按轮次算，223 轮的样本里除
+ * `ue.mesh`（7.2%）外这些组都 ≤5%，`ue.cpp` 往下那几个就该折叠。按会话算（一次
+ * 加载事件本来就是会话级的），p 要乘 3~5 倍，整张表才都站得住。**我按会话算，
+ * 因为付钱的单位是加载事件。**这个换算系数现在没有实测，拿到之后要回来重算。
+ */
+export const RESIDENT_TOOL_GROUPS = new Set<string>([
+  'local',
+  'note',
+  'ue.mesh',
+  'ue.cpp',
+  'ue.animation',
+  'library',
+  'ue.input',
+  'ue.editor'
+])
+
+/**
  * 用户在设置页里**改不动**的那几个。
  *
  * 它们是这套机制本身的一部分：`load_skill` / `read_skill_resource` / `search_tools`
@@ -98,17 +156,29 @@ export const ALWAYS_RESIDENT_TOOL_NAMES = new Set<string>([
 ])
 
 /** 没人动过设置时，这个工具是不是常驻。设置页拿它当每一条的默认值 */
-export function isDefaultResidentTool(name: string): boolean {
-  return CORE_NAMES.has(name)
+export function isDefaultResidentTool(tool: GroupedTool): boolean {
+  return CORE_NAMES.has(tool.name) || RESIDENT_TOOL_GROUPS.has(toolSearchGroup(tool))
 }
 
-// 只用于检索，不替代工具原文。新命名空间不需要进这张表也会自动被索引。
+/**
+ * 只用于检索，不替代工具原文。
+ *
+ * 键是**工具组**（`toolSearchGroup`），不是命名空间 —— 两者从 2026-09-21 起会分叉
+ * （见 `UE_CONTENT_SUBGROUPS`）。查不到会按 `a.b.c → a.b → a` 逐段回退，所以子组
+ * 不写也能继承父段；`local.shell` 这种以前查不到的也跟着修好了。
+ *
+ * 表里缺一行的后果是无声的：那一组的中文查询只能指望描述里刚好有字面词。
+ * `toolSearchCatalog.test.ts` 有一条门禁钉住「每个在用的组都回退得到一行」。
+ */
 const DOMAIN_TERMS: Record<string, string> = {
   'ue.blueprint': '蓝图 逻辑 节点 变量 事件 函数 blueprint graph node logic event function',
   'ue.material': '材质 材质实例 表面 颜色 贴图 纹理 material shader color surface texture',
   'ue.actor': '物体 场景 对象 位置 旋转 缩放 移动 灯光 actor transform spawn light',
-  'ue.content': '内容浏览器 工程资产 导入 整理 依赖 重命名 删除 content asset import organize',
-  'ue.editor': '编辑器 截图 保存 撤销 运行 测试 editor screenshot save undo playtest',
+  'ue.content': '内容浏览器 工程资产 内容 资产 content asset',
+  'ue.content.import': '导入 导入资产 fbx 贴图 外部文件 入库 import ingest',
+  'ue.content.organize': '整理 重命名 移动 删除 重定向 清理 organize rename move delete redirector',
+  'ue.content.audit': '体检 依赖 引用 占用 体积 排行 报错日志 audit dependency size reference log',
+  'ue.editor': '编辑器 截图 保存 撤销 运行 测试 重启 editor screenshot save undo playtest restart',
   'ue.level': '关卡 场景 大纲 世界 分区 流送 level world outliner streaming',
   'ue.system': '性能 崩溃 日志 插件 控制台 脚本 卡顿 crash log performance plugin python',
   'ue.widget': '界面 控件 按钮 文本 布局 widget umg ui layout button text',
@@ -121,10 +191,35 @@ const DOMAIN_TERMS: Record<string, string> = {
   asset: '盒子素材库 保管库 标签 文件夹 asset library vault tag folder',
   library: '蓝图库 材质库 片段 收藏 snippet library',
   project: '工程 项目 创建 打开 启动 project create open launch',
+  engine: '引擎 版本 安装 路径 engine version install path',
   aigc: '生成 图片 视频 三维 generate image video 3d',
+  'video.production': '剪辑 成片 字幕 配音 合成 时间线 video edit subtitle voiceover render',
+  note: '笔记 记事 待办 摘录 note todo memo',
+  notebook: '知识库 笔记本 wiki 文档库 notebook knowledge wiki',
   browser: '浏览器 网页 点击 输入 browser webpage click',
   local: '本机 文件 目录 搜索 读写 local file directory search read write',
+  'local.shell': '命令行 终端 脚本 执行 shell terminal command run',
+  host: '宿主 提问 播报 会话 host ask report session',
+  core: '技能 加载 搜索 子任务 skill load search task',
   web: '联网 搜索 网页 文档 web search read documentation'
+}
+
+/**
+ * 这个组的领域词。查不到就按 `.` 逐段往上回退，都没有返回空串。
+ *
+ * 回退而不是「每个子组抄一遍父段」：子组是为了**加载粒度**切的，它们在语义上
+ * 仍然属于同一摊，抄一遍只会多三份要同步的文本。
+ */
+export function groupDomainTerms(group: string): string {
+  let key = group
+  for (;;) {
+    // `Object.hasOwn` 的理由同 `toolSearchGroup`：命名空间叫 `constructor`
+    // 的话，直接下标会返回原型链上的函数而不是这张表里的字符串
+    if (Object.hasOwn(DOMAIN_TERMS, key)) return DOMAIN_TERMS[key]
+    const cut = key.lastIndexOf('.')
+    if (cut < 0) return ''
+    key = key.slice(0, cut)
+  }
 }
 
 export function toolDefinitionBytes(tool: UnrealAgentTool<never>): number {
@@ -151,16 +246,107 @@ function terms(text: string): string[] {
 
 interface Entry {
   tool: UnrealAgentTool<never>
+  /** 加载粒度。算一次存下来 —— 打分、去重、分页每一步都要用 */
+  group: string
   bytes: number
   frequencies: Map<string, number>
   length: number
 }
 
-/** 截图和聚焦跟随场景操作，不单独制造一次发现往返。其余按领域/服务器聚合。 */
-export function toolSearchGroup(tool: UnrealAgentTool<never>): string {
-  return tool.name === 'ue_screenshot' || tool.name === 'ue_focus_viewport'
-    ? 'ue.actor'
-    : tool.unrealBox.namespace
+/**
+ * `ue.content` 拆成三组。2026-09-21 加。
+ *
+ * 整组 41,099 字节是全表第二大，而实测「一次检索摊给几个工具」只有 **1.6**
+ * （`docs/常驻工具集选定-2026-09-17.md` §5.3）—— 每个真正用上的工具要摊 25.7 KB，
+ * 是全表最差的一组。这一摊本来就不是一件活：导入外部文件、清理工程、查依赖体积，
+ * 三件事之间没有共用的上下文，凑在一起纯粹因为它们都由内容浏览器实现。
+ *
+ * 切在 `toolSearchGroup` 而不是改 `namespace`：命名空间是**用户可见**的分类
+ * （`src/shared/toolCategories.ts` 按它折叠设置页，还有对应的 i18n 文案），
+ * 而这里要改的只是加载粒度。改 `namespace` 会让设置页凭空多两个分组头。
+ *
+ * 新加的 `ue.content` 工具落回 `ue.content` 本身，由 `toolSearchCatalog.test.ts`
+ * 的一条门禁把它拦下来，逼着加进这张表 —— 无声落进一个没有技能引用的组，
+ * 表现是「模型永远搜不到它」，那种缺陷不该靠人眼发现。
+ */
+const UE_CONTENT_SUBGROUPS: Record<string, string> = {
+  /*
+   * 导入单独一组，哪怕它只有一个成员 —— 单成员组按 §5.3 是最差的形状（摊薄 1.0）。
+   * 这里认的是另一笔账：`ue_content_import` 被 6 个技能引用（图片生成、素材库、
+   * 三维资产生产…），那些技能要的只是「把文件放进工程」。跟整理并成一组的话，
+   * 用户让它生成一张图，`ue_content_delete` 和 `ue_fixup_redirectors` 会跟着进来。
+   */
+  ue_content_import: 'ue.content.import',
+  // 搬迁那一摊：改名、移动、迁出、回滚、删除，外加两个配套的（搬完查断链、
+  // 搬之前查命名）。它们在同一次任务里连着用，分开就是白多一次往返
+  ue_content_move: 'ue.content.organize',
+  ue_content_migrate: 'ue.content.organize',
+  ue_content_rollback: 'ue.content.organize',
+  ue_content_delete: 'ue.content.organize',
+  ue_fixup_redirectors: 'ue.content.organize',
+  ue_project_path_refs: 'ue.content.organize',
+  ue_content_naming_audit: 'ue.content.organize',
+  // 只读的查看一摊：找资产、看资产、查依赖和体积、读报错
+  ue_content_search: 'ue.content.audit',
+  ue_content_describe: 'ue.content.audit',
+  ue_content_dependencies: 'ue.content.audit',
+  ue_content_audit_optimization: 'ue.content.audit',
+  ue_project_asset_ranking: 'ue.content.audit',
+  ue_asset_size_map: 'ue.content.audit',
+  ue_message_log: 'ue.content.audit'
+}
+
+/** 分组只看名字和命名空间，不必造一个完整工具 */
+export interface GroupedTool {
+  name: string
+  unrealBox: { namespace: string }
+}
+
+/**
+ * 按**组**翻页：`ranked` 是排好序的工具，取第 `offset` 个组开始的 `limit` 个组，
+ * 每组回最多 `PREVIEW_PER_GROUP` 个成员当预览。
+ *
+ * 组的先后按它第一次出现的名次 —— `ranked` 已经排好，所以这就是组内最高分的名次。
+ * 一并返回组总数：调用方要拿它算 `nextOffset`，而这里已经分好组了，
+ * 让外面再 `new Set(...)` 数一遍是白跑一趟。
+ */
+function pickGroups(
+  ranked: Entry[],
+  offset: number,
+  limit: number
+): { selected: Entry[]; groupCount: number } {
+  const order: string[] = []
+  const members = new Map<string, Entry[]>()
+  for (const entry of ranked) {
+    const bucket = members.get(entry.group)
+    if (bucket) bucket.push(entry)
+    else {
+      members.set(entry.group, [entry])
+      order.push(entry.group)
+    }
+  }
+  return {
+    selected: order
+      .slice(offset, offset + limit)
+      .flatMap((group) => members.get(group)!.slice(0, PREVIEW_PER_GROUP)),
+    groupCount: order.length
+  }
+}
+
+/**
+ * 截图和聚焦跟随场景操作，不单独制造一次发现往返。其余按领域/服务器聚合。
+ *
+ * `Object.hasOwn` 不是洁癖：工具名只受 `registry.ts` 的 `VALID_TOOL_NAME`
+ * （`^[a-zA-Z0-9_-]{1,64}$`）约束，`toString` / `constructor` / `valueOf` 全是合法名字。
+ * 直接下标会拿到 `Object.prototype` 上的**函数**，而它不是 nullish，`??` 兜不住 ——
+ * 那个函数会一路流进 `entry.group`、Map 的键、`loadedGroups` 的 JSON，
+ * 以及落盘的 `details.toolSearch` 恢复路径。
+ */
+export function toolSearchGroup(tool: GroupedTool): string {
+  if (tool.name === 'ue_screenshot' || tool.name === 'ue_focus_viewport') return 'ue.actor'
+  if (tool.unrealBox.namespace === 'ue.content' && Object.hasOwn(UE_CONTENT_SUBGROUPS, tool.name))
+    return UE_CONTENT_SUBGROUPS[tool.name]
+  return tool.unrealBox.namespace
 }
 
 interface LoadDetails {
@@ -176,26 +362,58 @@ interface LoadResult {
   hint: string
 }
 
+/**
+ * 一组在结果里预览几个成员。
+ *
+ * 整组都加载了，但把二十条说明原样倒回去是白烧上下文；而只回一条又看不出
+ * 这组到底拿到了什么。回分数最高的几条 + `addedToolNames` 的完整名单。
+ */
+const PREVIEW_PER_GROUP = 5
+
+/**
+ * 组分数低于头名这个比例就不带上。
+ *
+ * 为什么要有这道线：`limit` 是上限不是配额，没有它就**每次都凑满**，
+ * 而每多加载一组就多作废一次 prompt cache（约 1.25×P₀，见 `RESIDENT_TOOL_GROUPS`
+ * 的算式）。凑一个不相关的组进来，代价比少搜一次大得多。
+ *
+ * 0.35 是拍的，还没有用评测集校准过 —— 现在也没有评测集可用。等那 223 条
+ * (query, 组集合) 的标注落地之后，这个数应该按组级 recall 调，别凭手感改。
+ */
+const GROUP_SCORE_FLOOR = 0.35
+
+/** `query` 一页最多加载几个**工具组**。每多一组就多作废一次 prompt cache，所以小 */
+const GROUP_PAGE = 3
+
+/**
+ * 浏览目录一页几个**条目**。
+ *
+ * 和 `GROUP_PAGE` 分开是因为两者数的东西不一样：那个数「加载几组」，有真金白银的
+ * 缓存代价；这个只是列一张表，一条都不加载。拆组之后目录条目还变多了，而浏览目录
+ * 正是排序失灵时的逃生口 —— 跟着 `GROUP_PAGE` 一起收窄，等于把逃生口也焊小了。
+ */
+const DIRECTORY_PAGE = 5
+
 const searchInput = z.object({
   query: z.string().trim().max(500).optional().describe('任务或能力，用中英文均可；精确工具名也可'),
   names: z
     .array(z.string().trim().min(1))
-    .max(8)
+    .max(16)
     .optional()
-    .describe('按已知工具名精确定位并加载所属工具组'),
+    .describe('按已知工具名精确定位。全部命中并加载所属工具组，不受 limit 限制'),
   namespace: z
     .string()
     .trim()
     .optional()
-    .describe('限定目录。空参数查询可浏览目录；目录下也支持分页'),
+    .describe('限定目录，也接受父目录名。空参数查询可浏览目录；目录下按工具分页'),
   offset: z.number().int().min(0).max(100000).default(0).describe('下一页从返回的 nextOffset 继续'),
   limit: z
     .number()
     .int()
     .min(1)
     .max(8)
-    .default(5)
-    .describe('一页最多几个候选工具，默认 5；候选命中后按整组加载')
+    .optional()
+    .describe('query 检索一页最多加载几个工具组（默认 3）；浏览目录时是几个条目（默认 5）')
 })
 
 export const TOOL_SEARCH_RULES = `
@@ -224,24 +442,36 @@ export function createToolSearch(
   restore: (messages: AgentMessage[]) => void
 } {
   const entries = catalog.map((tool): Entry => {
+    const group = toolSearchGroup(tool)
     const text = [
       ...Array<string>(4).fill(tool.name),
       tool.unrealBox.namespace,
-      DOMAIN_TERMS[tool.unrealBox.namespace] ?? '',
+      group,
+      groupDomainTerms(group),
       tool.description,
       JSON.stringify(tool.parameters)
     ].join(' ')
     const tokens = terms(text)
     const frequencies = new Map<string, number>()
     for (const token of tokens) frequencies.set(token, (frequencies.get(token) ?? 0) + 1)
-    return { tool, bytes: toolDefinitionBytes(tool), frequencies, length: tokens.length }
+    return { tool, group, bytes: toolDefinitionBytes(tool), frequencies, length: tokens.length }
   })
   const byName = new Map(entries.map((entry) => [entry.tool.name, entry]))
   const active = new Map<string, Entry>()
 
-  /** 这个工具此刻在不在常驻区。常驻的不进搜索加载区，也不必被搜出来 */
-  const isResident = (name: string): boolean =>
-    ALWAYS_RESIDENT_TOOL_NAMES.has(name) ? true : (residentOverrides[name] ?? CORE_NAMES.has(name))
+  /**
+   * 这个工具此刻在不在常驻区。常驻的不进搜索加载区，也不占检索名额。
+   *
+   * 用 `entry.group` 而不是转手 `isDefaultResidentTool(entry.tool)` —— 后者会再算一遍
+   * `toolSearchGroup`，而 `Entry.group` 正是为了「算一次存下来」才存的。`getTools()`
+   * 每轮对每个工具调一次这里，`load()` 每组调两遍，白算之外还让同一个事实有了两条
+   * 来路。`isDefaultResidentTool` 留给设置页 —— 那条路径手上只有工具，没有 Entry。
+   */
+  const isResident = (entry: Entry): boolean =>
+    ALWAYS_RESIDENT_TOOL_NAMES.has(entry.tool.name)
+      ? true
+      : (residentOverrides[entry.tool.name] ??
+        (CORE_NAMES.has(entry.tool.name) || RESIDENT_TOOL_GROUPS.has(entry.group)))
 
   const allowedEntries = (): Entry[] =>
     available().flatMap((tool) => {
@@ -250,21 +480,12 @@ export function createToolSearch(
     })
 
   const load = (selected: Entry[], allowed: Entry[]): LoadResult => {
-    const groups = [
-      ...new Set(
-        selected
-          .filter((entry) => !isResident(entry.tool.name))
-          .map((entry) => toolSearchGroup(entry.tool))
-      )
-    ]
+    const groups = [...new Set(selected.filter((entry) => !isResident(entry)).map((e) => e.group))]
     const added: Entry[] = []
     for (const group of groups) {
       const additions = allowed
         .filter(
-          (entry) =>
-            !isResident(entry.tool.name) &&
-            !active.has(entry.tool.name) &&
-            toolSearchGroup(entry.tool) === group
+          (entry) => !isResident(entry) && !active.has(entry.tool.name) && entry.group === group
         )
         .sort((a, b) => a.tool.name.localeCompare(b.tool.name))
       for (const entry of additions) active.set(entry.tool.name, entry)
@@ -272,11 +493,9 @@ export function createToolSearch(
     }
     const details: LoadDetails = {
       loadedToolNames: [...active.keys()],
-      loadedGroups: [...new Set([...active.values()].map((entry) => toolSearchGroup(entry.tool)))]
+      loadedGroups: [...new Set([...active.values()].map((entry) => entry.group))]
     }
-    const loaded = selected.filter(
-      (entry) => isResident(entry.tool.name) || active.has(entry.tool.name)
-    )
+    const loaded = selected.filter((entry) => isResident(entry) || active.has(entry.tool.name))
     return {
       addedToolNames: added.map((entry) => entry.tool.name),
       details,
@@ -292,35 +511,52 @@ export function createToolSearch(
     concurrency: 'sequential',
     description:
       '技能未覆盖时发现并加载工具组。优先 load_skill，它会同时加载正文涉及的领域工具组。UE、盒子素材库、生成工具和第三方 MCP 都可检索。' +
-      'query 搜索候选并加载所属组的完整定义；names 精确定位后也加载整组；空参数浏览目录；namespace + offset 可逐页发现全部工具。' +
+      'query 一次可加载多个相关工具组的完整定义（默认最多 3 组），跨领域任务写一句完整的任务描述即可，不必一组搜一次；' +
+      'names 精确定位，列几个就全加载；空参数浏览目录；namespace + offset 可逐页发现全部工具。' +
       '首次没找到不等于没有能力，可改词、浏览目录再找。返回后下一轮才能调用新工具，执行权限不变。',
     input: searchInput,
     execute: async ({ query, names, namespace, offset, limit }) => {
       const allowed = allowedEntries()
       if (!query && !names?.length && !namespace) {
         const counts = new Map<string, number>()
-        for (const entry of allowed) {
-          const key = entry.tool.unrealBox.namespace
-          counts.set(key, (counts.get(key) ?? 0) + 1)
-        }
+        for (const entry of allowed) counts.set(entry.group, (counts.get(entry.group) ?? 0) + 1)
         const directories = [...counts].sort(([a], [b]) => a.localeCompare(b))
+        // 目录页不跟着 query 的 3 走：那个 3 数的是「一次加载几个组」，
+        // 而这里数的是「一次看几个条目」。浏览目录是排序失灵时的逃生口，
+        // 拆组之后条目还变多了 —— 逃生口不该跟着变窄
+        const page = limit ?? DIRECTORY_PAGE
         return {
           text: JSON.stringify({
-            directories: directories.slice(offset, offset + limit).map(([id, count]) => ({
+            directories: directories.slice(offset, offset + page).map(([id, count]) => ({
               namespace: id,
               count,
-              capabilities: DOMAIN_TERMS[id] ?? id
+              capabilities: groupDomainTerms(id) || id
             })),
-            nextOffset: offset + limit < directories.length ? offset + limit : null,
+            nextOffset: offset + page < directories.length ? offset + page : null,
             hint: '用 query 搜索，或指定 namespace 浏览并加载其中的工具。'
           })
         }
       }
 
+      /*
+       * 目录名就是组名，父目录（`ue.content`）也认 —— 模型手里可能是拆组之前的
+       * 那份记忆，或者它本来就只想说「内容浏览器那一摊」。
+       *
+       * 认的是**真实存在的命名空间**，不是任意字符串前缀。`startsWith` 会让
+       * `namespace: 'ue'` 一口咬住全部 UE 工具：那条路径没有打分，按名字排完
+       * `slice(0, limit)` 取到的是字母序最靠前的几个，于是**整组整组地**加载
+       * 模型压根没要的东西 —— 一次三份前缀重写，正是这套改动要省的那笔钱。
+       * 拆组之前 `'ue'` 精确匹配不到任何命名空间，返回的是一句无害的未命中。
+       */
       let candidates = allowed.filter(
-        (entry) => !namespace || entry.tool.unrealBox.namespace === namespace
+        (entry) =>
+          !namespace || entry.group === namespace || entry.tool.unrealBox.namespace === namespace
       )
       const missing: string[] = []
+      /** 命中但已经常驻的工具。只用来回话，不占名额 —— 见下面那段 */
+      const residentHits: { entry: Entry; score: number }[] = []
+      /** query 路径按**组**分页；names 和浏览目录按工具，理由见 `selected` 那段 */
+      let groupPaged = false
       if (names?.length) {
         const selected = new Map(candidates.map((entry) => [entry.tool.name, entry]))
         candidates = [...new Set(names)].flatMap((name) => {
@@ -338,7 +574,7 @@ export function createToolSearch(
             candidates.filter((entry) => entry.frequencies.has(term)).length
           ])
         )
-        candidates = candidates
+        const scored = candidates
           .map((entry) => {
             let score = entry.tool.name.toLowerCase() === query.toLowerCase() ? 10000 : 0
             for (const term of queryTerms) {
@@ -357,11 +593,54 @@ export function createToolSearch(
           })
           .filter(({ score }) => score > 0)
           .sort((a, b) => b.score - a.score || a.entry.tool.name.localeCompare(b.entry.tool.name))
+        /*
+         * **\u5e38\u9a7b\u5de5\u5177\u4e0d\u5360\u540d\u989d\uff0c\u4e5f\u4e0d\u5f53\u5206\u6bcd\u3002**
+         *
+         * \u5b83\u4eec\u672c\u6765\u5c31\u5728\u6e05\u5355\u91cc\uff0c\u641c\u51fa\u6765\u4e00\u4e2a\u65b0\u5de5\u5177\u90fd\u5e26\u4e0d\u6765\u3002\u6df7\u5728\u4e00\u8d77\u6392\u7684\u8bdd\u6709\u4e24\u79cd\u8f93
+         * \u6cd5\uff0c\u800c\u4e14\u8fd9\u5957\u6539\u52a8\u628a\u4e24\u79cd\u90fd\u653e\u5927\u4e86\uff088 \u4e2a\u7ec4\u6539\u6210\u6574\u7ec4\u5e38\u9a7b\uff0c\u540d\u989d\u4ece 5 \u4e2a\u5de5\u5177\u6536
+         * \u5230 3 \u4e2a\u7ec4\uff09\uff1a\u4e00\u662f\u5e38\u9a7b\u7ec4\u5403\u6389\u4e00\u4e2a\u540d\u989d\uff0c\u4e8c\u662f\u5e38\u9a7b\u7ec4\u5f53\u4e86\u5934\u540d\uff0c\u628a\u771f\u6b63\u8981\u7684\u90a3
+         * \u4e2a\u6298\u53e0\u7ec4\u538b\u5230 `GROUP_SCORE_FLOOR` \u4e4b\u4e0b\u76f4\u63a5\u7b5b\u6ca1\u3002\u6a21\u578b\u6536\u5230\u7684\u662f\u4e00\u4efd
+         * `addedToolNames` \u4e3a\u7a7a\u7684\u7ed3\u679c \u2014\u2014 \u90a3\u770b\u8d77\u6765\u50cf\u300c\u6ca1\u641c\u7740\u300d\uff0c\u4e8e\u662f\u5b83\u518d\u641c\u4e00\u6b21\uff0c
+         * \u6b63\u597d\u662f\u8fd9\u5957\u6539\u52a8\u8981\u6d88\u706d\u7684\u8fde\u53d1\u3002
+         *
+         * \u547d\u4e2d\u7684\u5e38\u9a7b\u5de5\u5177\u4ecd\u7136\u56de\u5728 `loaded` \u91cc\uff08\u9644\u5728\u6298\u53e0\u7ec4\u540e\u9762\uff09\uff0c\u56e0\u4e3a\u300c\u4f60\u5df2\u7ecf\u6709
+         * \u8fd9\u4e2a\u4e86\u300d\u662f\u6a21\u578b\u9700\u8981\u77e5\u9053\u7684\u4e8b\uff1b\u53ea\u662f\u5b83\u4e0d\u53c2\u4e0e\u5206\u7ec4\u3001\u4e0d\u5360\u540d\u989d\u3001\u4e0d\u8bbe\u5730\u677f\u3002
+         */
+        const foldable: { entry: Entry; score: number }[] = []
+        for (const hit of scored) (isResident(hit.entry) ? residentHits : foldable).push(hit)
+        const best = new Map<string, number>()
+        for (const { entry, score } of foldable)
+          if (!best.has(entry.group)) best.set(entry.group, score)
+        const top = Math.max(0, ...best.values())
+        candidates = foldable
+          .filter(({ entry }) => (best.get(entry.group) ?? 0) >= top * GROUP_SCORE_FLOOR)
           .map(({ entry }) => entry)
+        groupPaged = true
       } else candidates.sort((a, b) => a.tool.name.localeCompare(b.tool.name))
 
-      const selected = candidates.slice(offset, offset + limit)
+      /*
+       * \u5206\u9875\u7684\u5355\u4f4d\u5206\u4e09\u79cd\uff0c\u56e0\u4e3a\u8fd9\u4e09\u4ef6\u4e8b\u95ee\u7684\u4e0d\u662f\u540c\u4e00\u4e2a\u95ee\u9898\u3002
+       *
+       * **query \u6309\u7ec4**\uff1a\u52a0\u8f7d\u672c\u6765\u5c31\u662f\u6574\u7ec4\u7684\uff0c\u540c\u7ec4\u7684\u7b2c\u4e8c\u4e2a\u5019\u9009\u4e00\u4e2a\u65b0\u5de5\u5177\u90fd\u5e26\u4e0d\u6765\u3002
+       * \u6309\u5de5\u5177\u5207\u7684\u65f6\u5019 `limit` \u7684\u771f\u5b9e\u542b\u4e49\u662f\u300c\u6211\u613f\u610f\u6d6a\u8d39\u51e0\u4e2a\u540d\u989d\u300d\u2014\u2014 \u4e00\u4e2a\u4e2d\u6587\u67e5\u8be2
+       * \u649e\u4e0a\u9886\u57df\u8bcd\u8868\uff0c\u6574\u7ec4\u540c\u5206\u5e76\u5217\uff0c5 \u4e2a\u540d\u989d\u88ab\u4e00\u4e2a\u7ec4\u5403\u5149\uff0c\u7b2c\u4e8c\u4e2a\u7ec4\u8fd8\u8981\u518d\u641c\u4e00\u6b21\u3002
+       * \u800c\u771f\u5b9e\u8f6e\u6b21\u91cc **44% \u9700\u8981 \u22652 \u4e2a\u7ec4\u300113% \u9700\u8981 \u22654 \u4e2a**\uff0ctrace \u91cc\u5df2\u7ecf\u80fd\u770b\u5230
+       * \u4e00\u6b21\u4efb\u52a1\u8fde\u53d1 5~9 \u6b21\u641c\u7d22\u3001\u4e00\u6b21\u6361\u4e00\u4e2a\u7ec4\u3002\u5176\u4f59\u4e24\u79cd\u89c1\u4e0b\u9762\u5404\u81ea\u90a3\u884c\u3002
+       */
+      const page = limit ?? GROUP_PAGE
+      const paged = groupPaged
+        ? pickGroups(candidates, offset, page)
+        : // names 全要，不分页：精确点名不是检索结果，截断只会无声丢掉后面几个
+          // （旧默认 `limit` 是 5，报 8 个名字就哑掉 3 个，返回里还什么都不说）
+          names?.length
+          ? { selected: candidates, groupCount: 0 }
+          : // 浏览目录按工具：一个目录本来就是一个组，按组分页等于永远只有一页
+            { selected: candidates.slice(offset, offset + page), groupCount: candidates.length }
+      // 命中的常驻工具垫在后面：告诉模型「这些你已经有了」，但它们不进 `load`
+      // 的分组（`load` 自己会把常驻的滤掉），所以既不占名额也不作废缓存
+      const selected = [...paged.selected, ...residentHits.map(({ entry }) => entry)]
       const outcome = load(selected, allowed)
+      const nextOffset = offset + page < paged.groupCount ? offset + page : null
       return {
         addedToolNames: outcome.addedToolNames,
         details: { toolSearch: outcome.details },
@@ -373,10 +652,14 @@ export function createToolSearch(
           missing,
           addedToolNames: outcome.addedToolNames,
           loadedGroups: outcome.details.loadedGroups,
-          nextOffset: offset + limit < candidates.length ? offset + limit : null,
-          hint: selected.length
+          nextOffset,
+          hint: paged.selected.length
             ? outcome.hint
-            : '未命中。换关键词、用精确 names，或空参数浏览目录后按 namespace 查找。'
+            : residentHits.length
+              ? // 这句不能说成「未命中」：命中的工具此刻就在清单里，再搜一次
+                // 还是这个结果。09-11 那轮的连发搜索就是这么来的
+                '命中的工具已经在你的清单里，直接调用即可。要别的能力就换关键词或浏览目录。'
+              : '未命中。换关键词、用精确 names，或空参数浏览目录后按 namespace 查找。'
         })
       }
     }
@@ -389,7 +672,7 @@ export function createToolSearch(
       const names = new Set(allowed.map((entry) => entry.tool.name))
       return [
         tool,
-        ...allowed.filter((entry) => isResident(entry.tool.name)).map((entry) => entry.tool),
+        ...allowed.filter((entry) => isResident(entry)).map((entry) => entry.tool),
         ...[...active.values()]
           .filter((entry) => names.has(entry.tool.name))
           .map((entry) => entry.tool)
@@ -425,10 +708,9 @@ export function createToolSearch(
         if (!Array.isArray(names)) continue
         for (const name of names) {
           const entry = byName.get(name)
-          if (!entry || isResident(name) || active.has(name)) continue
-          const group = toolSearchGroup(entry.tool)
-          if (attempted.has(group)) continue
-          attempted.add(group)
+          if (!entry || isResident(entry) || active.has(name)) continue
+          if (attempted.has(entry.group)) continue
+          attempted.add(entry.group)
           // 注册表升级/权限变化后重新计算整组预算，不能恢复半组。
           load([entry], entries)
         }

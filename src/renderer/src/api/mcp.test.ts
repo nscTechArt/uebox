@@ -124,6 +124,9 @@ describe('toSettings / toFormValues', () => {
     const values = [
       {
         id: 'fs',
+        // 从盘上读出来的行都带着它在盘上的名字：按行保存时要靠它认出
+        // 「这一条改过名了」，把旧名字那条一起删掉
+        savedId: 'fs',
         transport: 'stdio' as const,
         commandLine: 'npx -y srv',
         url: '',
@@ -141,6 +144,7 @@ describe('toSettings / toFormValues', () => {
     const values = [
       {
         id: 'remote',
+        savedId: 'remote',
         transport: 'http' as const,
         commandLine: '',
         url: 'https://x/mcp',

@@ -1,5 +1,6 @@
 #include "UAL_NetworkManager.h"
 
+#include "UAL_ProxyDiagnostics.h"
 #include "Async/Async.h"
 #include "WebSocketsModule.h"
 #include "HAL/PlatformProcess.h"
@@ -18,6 +19,12 @@ void FUAL_NetworkManager::Init(const FString& ServerUrl)
 {
 	TargetUrl = ServerUrl;
 	bWantsReconnect = true;
+
+	// 代理只查一次：这些设置在编辑器活着的时候不会变，而连接失败每 5 秒来一次。
+	// 查到了也先不喊 —— 万一这台机器的代理确实放过了回环，喊了就是误报。
+	// 真喊是在第一次连接失败的时候（HandleOnConnectionError），那时它才是答案。
+	ProxyRemedy = UAL_ProxyDiagnostics::DescribeRemedy(
+		UAL_ProxyDiagnostics::DiagnoseCurrentEnvironment(TargetUrl), TargetUrl);
 
 	Connect();
 	StartReconnectTimer();
@@ -142,6 +149,7 @@ bool FUAL_NetworkManager::TickReconnect(float DeltaTime)
 		{
 			UE_LOG(LogUALNetwork, Warning,
 				TEXT("Connect attempt stuck for %.1fs with no callback; forcing retry"), Elapsed);
+			LogProxyRemedyOnce(); // 没有任何回调也可能是代理把连接吞了
 			CleanupSocket(); // 内部会把 bIsConnecting 置回 false
 		}
 	}
@@ -227,12 +235,25 @@ void FUAL_NetworkManager::HandleOnClosed(int32 StatusCode, const FString& Reason
 void FUAL_NetworkManager::HandleOnConnectionError(const FString& Error)
 {
 	UE_LOG(LogUALNetwork, Error, TEXT("Connection error: %s"), *Error);
+	LogProxyRemedyOnce();
 	bIsConnecting = false;
 	BroadcastDisconnectedOnce();
 	if (bWantsReconnect)
 	{
 		CleanupSocket();
 	}
+}
+
+void FUAL_NetworkManager::LogProxyRemedyOnce()
+{
+	// 只播一次。连接失败每 5 秒来一次，这段话不短，跟着刷会把日志冲烂 ——
+	// 而它每次的内容都一模一样，刷一百遍也不多一个字的信息。
+	if (ProxyRemedy.IsEmpty() || bLoggedProxyRemedy)
+	{
+		return;
+	}
+	bLoggedProxyRemedy = true;
+	UE_LOG(LogUALNetwork, Error, TEXT("%s"), *ProxyRemedy);
 }
 
 void FUAL_NetworkManager::BroadcastDisconnectedOnce()

@@ -3103,6 +3103,34 @@ declare global {
           error?: string
           statuses?: McpServerStatus[]
         }>
+        /**
+         * 删一条 server 并当场落盘。
+         *
+         * 只删这一条 —— 不碰盘上别的条目，也不提交表单里未保存的编辑。
+         * 回来的 `settings` 是删完之后的盘上内容，界面拿它重算「未保存」基准线。
+         */
+        removeServer: (args: { id: string }) => Promise<{
+          success: boolean
+          error?: string
+          settings?: McpSettings
+          statuses?: McpServerStatus[]
+        }>
+        /**
+         * 存一条 server 并重连。只写这一条。
+         *
+         * `renamedFrom` 是它在盘上的旧名字 —— 改过名的话要顺手删掉那条，
+         * 否则盘上会多出一份旧的，下次打开面板又冒出来。
+         */
+        saveServer: (args: {
+          id: string
+          config: McpServerConfigView
+          renamedFrom?: string
+        }) => Promise<{
+          success: boolean
+          error?: string
+          settings?: McpSettings
+          statuses?: McpServerStatus[]
+        }>
         /** 已连接项目的「UE 5.8 官方 MCP」开启状态 */
         epicStatus: () => Promise<{
           success: boolean
@@ -3126,6 +3154,21 @@ declare global {
           addedPlugins?: string[]
           wroteAutoStart?: boolean
           running?: boolean
+          statuses?: McpServerStatus[]
+        }>
+        /** 官方 Blender Lab MCP 的前置依赖与配置状态 */
+        blenderStatus: () => Promise<{
+          success: boolean
+          error?: string
+          status?: BlenderSetupStatusView
+        }>
+        /** 一键装官方 Blender Lab MCP 并写进配置。装一次要几分钟 */
+        blenderSetup: (args?: { blenderPath?: string }) => Promise<{
+          success: boolean
+          /** 主进程给的那句话：它才知道这次是装好了、缺前置、还是装挂了 */
+          message?: string
+          error?: string
+          blenderPath?: string
           statuses?: McpServerStatus[]
         }>
       }
@@ -3293,6 +3336,33 @@ declare global {
     disabled?: boolean
     serverName?: string
     serverVersion?: string
+  }
+
+  /**
+   * 一条 Blender 前置依赖的检查结果。
+   *
+   * `found` 要原样显示：「Blender 4.5，需要 5.1+」比「版本不符」有用得多，
+   * 用户据此知道该升级还是该换一个路径。
+   */
+  interface BlenderPrerequisiteView {
+    id: 'blender' | 'git' | 'python'
+    ok: boolean
+    found?: string
+    path?: string
+    problem?: 'missing' | 'too-old'
+  }
+
+  /** 官方 Blender Lab MCP 的一键状态。见主进程 `capabilities/mcp/blenderSetup.ts` */
+  interface BlenderSetupStatusView {
+    state: 'configured' | 'ready' | 'blocked' | 'unsupported'
+    prerequisites: BlenderPrerequisiteView[]
+    /** 一键会用的 Blender。blocked 时可能没有 */
+    blenderPath?: string
+    installRoot: string
+    /** configured 时：配置里记的那个 Blender */
+    configuredBlenderPath?: string
+    /** configured 时：那条 server 的 id。界面拿它去 statuses 里查连上没有 */
+    configuredServerId?: string
   }
 
   /** 盒子对外暴露的 MCP server 状态 */

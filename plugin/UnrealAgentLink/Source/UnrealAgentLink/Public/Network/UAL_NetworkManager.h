@@ -72,6 +72,13 @@ private:
 	/** 只在「连着 → 断了」这个跳变上播一次，重连失败的每一次重试不再播 */
 	void BroadcastDisconnectedOnce();
 
+	/**
+	 * 连不上时把「这台机器的代理会拦住本机连接」这句话说出来，整个会话只说一次。
+	 *
+	 * 详情见 UAL_ProxyDiagnostics.h。
+	 */
+	void LogProxyRemedyOnce();
+
 private:
 	FCriticalSection SendMutex;
 	TSharedPtr<IWebSocket> Socket;
@@ -91,5 +98,10 @@ private:
 	FUALOnDisconnected DisconnectedDelegate;
 	/** 上一次广播出去的是「连着」还是「断了」。防止重连失败时每次重试都播一遍断开 */
 	bool bBroadcastedConnected = false;
+
+	/** Init 时算好的代理告警文本；空串表示这台机器没有会拦住回环连接的代理 */
+	FString ProxyRemedy;
+	/** 代理告警已经播过了 */
+	bool bLoggedProxyRemedy = false;
 };
 

@@ -11,6 +11,8 @@ vi.mock('../../core/projectTargetContext', async (importOriginal) =>
 import { buildSystemPrompt, resolveAgentTools, type SessionContext } from '../../core/createAgent'
 import {
   createToolSearch,
+  groupDomainTerms,
+  RESIDENT_TOOL_GROUPS,
   RESIDENT_TOOL_NAMES,
   TOOL_SEARCH_RULES,
   toolDefinitionBytes,
@@ -47,6 +49,15 @@ function loadedNames(result: Awaited<ReturnType<UnrealAgentTool<never>['execute'
   return (JSON.parse(text.text) as { loaded: { name: string }[] }).loaded.map((tool) => tool.name)
 }
 
+/** 常驻判据的唯一真相：点名的 30 个 + 宿主交互 + 整组常驻的那几组 */
+function residentNames(): Set<string> {
+  return new Set(
+    createToolSearch(catalog, () => catalog)
+      .getTools()
+      .map((tool) => tool.name)
+  )
+}
+
 describe('真实工具库检索回归', () => {
   it('文档的 30 个和宿主交互工具全部常驻，领域工具继续按需加载', () => {
     const document = readFileSync('docs/常驻工具集选定-2026-09-17.md', 'utf8')
@@ -57,27 +68,61 @@ describe('真实工具库检索回归', () => {
     expect(RESIDENT_TOOL_NAMES).toHaveLength(30)
     expect([...RESIDENT_TOOL_NAMES].sort()).toEqual(recommended.sort())
     const search = createToolSearch(catalog, () => catalog)
-    expect(
-      search
-        .getTools()
-        .map((tool) => tool.name)
-        .sort()
-    ).toEqual(
-      [
-        ...RESIDENT_TOOL_NAMES,
-        ...BROWSER_TOOL_NAMES,
-        'ask_user',
-        'voice_report',
-        'set_session_project',
-        'search_tools'
-      ].sort()
-    )
+    /*
+     * 2026-09-21：这条原来钉的是「常驻集恰好等于这 34 个名字」。现在常驻分两路
+     * —— 点名的（文档 §3）和**整组**的（`RESIDENT_TOOL_GROUPS`，按 prompt cache
+     * 的账算出来的小组）—— 所以断言换成「两路都在、且只有这两路」。
+     *
+     * 换成集合关系而不是补一份新的名字清单：整组常驻是按组算的，把组里的成员
+     * 抄成名单，以后往 `ue.editor` 加一个工具就要改测试，而那恰恰是不该改的地方。
+     */
+    const named = [
+      ...RESIDENT_TOOL_NAMES,
+      ...BROWSER_TOOL_NAMES,
+      'ask_user',
+      'voice_report',
+      'set_session_project',
+      'search_tools'
+    ]
+    const resident = search.getTools()
+    expect(resident.map((tool) => tool.name)).toEqual(expect.arrayContaining(named))
+    for (const tool of resident)
+      expect(
+        named.includes(tool.name) || RESIDENT_TOOL_GROUPS.has(toolSearchGroup(tool)),
+        `${tool.name} 既不在点名清单里，所属组 ${toolSearchGroup(tool)} 也不是整组常驻`
+      ).toBe(true)
     // `ue_get_actor` / `ue_screenshot` 曾经在这份「不该常驻」名单里，2026-09-17 按
     // 「完全没有替代」改为常驻（文档 §3.8 / §4.2），所以从这里移走 —— 留着就是
     // 用测试把一个已经被推翻的结论钉死。写操作和图操作仍然按需加载。
     for (const name of ['material_get_graph', 'blueprint_compile', 'ue_spawn_actor']) {
       expect(search.getTools().some((tool) => tool.name === name)).toBe(false)
     }
+  })
+
+  /*
+   * 拆组和整组常驻都是**无声**改错的地方：多一个 `ue.content` 工具没归子组、
+   * 或者一个组没有领域词，表现都是「模型偶尔搜不到它」，没人会去查。
+   */
+  it('ue.content 的每个工具都归进了子组', () => {
+    const orphans = catalog
+      .filter((tool) => tool.unrealBox.namespace === 'ue.content')
+      .filter((tool) => toolSearchGroup(tool) === 'ue.content')
+      .map((tool) => tool.name)
+    expect(
+      orphans,
+      `这些 ue.content 工具还没归子组：${orphans.join('、')}。` +
+        '在 toolSearch.ts 的 UE_CONTENT_SUBGROUPS 里按「导入 / 整理 / 体检」归位。'
+    ).toEqual([])
+  })
+
+  it('每个在用的工具组都查得到领域词', () => {
+    const groups = [...new Set(catalog.map((tool) => toolSearchGroup(tool)))]
+    const blank = groups.filter((group) => !groupDomainTerms(group)).sort()
+    expect(
+      blank,
+      `这些组在 DOMAIN_TERMS 里一行都回退不到：${blank.join('、')}。` +
+        '缺一行的后果是无声的 —— 那一组的中文查询只能指望描述里刚好有字面词。'
+    ).toEqual([])
   })
 
   /*
@@ -110,7 +155,9 @@ describe('真实工具库检索回归', () => {
    * 剩下 `browser` / `host` 允许不被覆盖：它们是宿主交互工具，本来就常驻、不参与折叠。
    */
   it('每个按需工具组都至少被一个技能引用到', async () => {
-    const resident = new Set<string>(RESIDENT_TOOL_NAMES)
+    // 常驻判据现在有两路（点名 + 整组），所以这里必须问真正的常驻集，
+    // 不能只拿文档那 30 个名字 —— 否则整组常驻的组会被当成「没人引用的按需组」
+    const resident = residentNames()
     const groups = new Set<string>()
     for (const tool of catalog) if (!resident.has(tool.name)) groups.add(toolSearchGroup(tool))
     const covered = new Set<string>()
@@ -211,15 +258,36 @@ describe('真实工具库检索回归', () => {
     const initial = createToolSearch(tools, () => tools).getTools()
     const coreBytes = initial.reduce((sum, tool) => sum + toolDefinitionBytes(tool), 0)
     /*
-     * 常驻集合扩容也不能悄悄吞下整个工具库；动态区另受 64 KB 约束。
+     * 常驻集合扩容也不能悄悄吞下整个工具库。
      *
      * 2026-09-17：54,962 → 73,804。涨的是按「完全没有替代」补进常驻的三个
      * （`ue_get_actor` / `ue_screenshot` / `ue_playtest`，见文档 §3.8），约 18,800 字节。
-     * 上限跟着从 64,000 抬到 80,000 —— **这是一次记录在案的抬高，不是默认可以再抬**。
-     * 再要抬之前先做这件事：`ue_screenshot` 的描述 81% 是中文散文（2,008/2,481 token），
-     * 瘦下来约能退回 4,600 字节，够把这个数压回七万以内。
+     * 上限跟着从 64,000 抬到 80,000。
+     *
+     * 2026-09-21 整组常驻（`RESIDENT_TOOL_GROUPS`）让总量涨到约 103 KB。
+     * **没有把 80,000 那条线往上挪** —— 那会是「用被守的东西去放宽守门的线」。
+     * 改成分开量两笔，每一笔都还钉在自己该在的地方：
+     *
+     * 1. **点名常驻**（文档 §3 那 30 个 + 宿主交互）还守原来的 80,000。这条线
+     *    守的是「别靠往清单里塞名字把前缀撑大」，它一个字节都没有放松。
+     * 2. **整组常驻**单独一条 30,000。它守的是另一件事：整组常驻是按
+     *    prompt cache 的账算出来的（每加载一组要全价重写一次前缀，约 1.25×P₀
+     *    ≈ 37,500 token，顶得上 17 轮白带着一个 6 KB 的组），所以**只有小组够格**。
+     *    这条线一旦要抬，等于有人想把一个大组塞进常驻 —— 那必须先拿出它的实测 p，
+     *    而不是改个数字。逐组的盈亏平衡 p 写在 `RESIDENT_TOOL_GROUPS` 的注释里。
+     *
+     * 两条分开还有个好处：以后是哪一路在涨，一眼就看得出来，而一条合并的线只会
+     * 说「总量超了」。真要把折叠整个关掉，应该明着关（`agentToolSearchEnabled`），
+     * 不是从这里一次抬一点漏过去。
      */
-    expect(coreBytes).toBeLessThan(80_000)
+    const byGroup = initial.filter(
+      (tool) =>
+        !(RESIDENT_TOOL_NAMES as readonly string[]).includes(tool.name) &&
+        RESIDENT_TOOL_GROUPS.has(toolSearchGroup(tool))
+    )
+    const groupBytes = byGroup.reduce((sum, tool) => sum + toolDefinitionBytes(tool), 0)
+    expect(groupBytes).toBeLessThan(30_000)
+    expect(coreBytes - groupBytes).toBeLessThan(80_000)
     if (process.env.TOOL_SEARCH_MEASURE !== '1') return
     const [cl100k, o200k] = await Promise.all([
       import('gpt-tokenizer/encoding/cl100k_base'),

@@ -25,7 +25,7 @@ import {
 import { buildUserInstructionsSection } from '../capabilities/userInstructions'
 import type { SkillMetadata } from '../../agent-v3/capabilities/skillsService/SkillsService'
 import type { McpClientManager } from '../capabilities/mcp/McpClientManager'
-import { buildMcpSection } from '../capabilities/mcp/promptSection'
+import { buildMcpSection, installableIntegrations } from '../capabilities/mcp/promptSection'
 import { createAskUserTool, type AskUserToolDeps } from '../tools/builtin/askUser'
 import { createVoiceReportTool, type VoiceReportToolDeps } from '../tools/builtin/voiceReport'
 import {
@@ -558,6 +558,28 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   // 不会让同一条会话的前后两轮拿着两套工具
   ctx.disabledToolNames ??= appSettings.agentDisabledTools
   ctx.residentTools ??= appSettings.agentResidentTools
+  /*
+   * 工具池**已经被收窄过一次**的会话不折叠，哪怕设置里开着。2026-09-21 加。
+   *
+   * 在一个收窄过的池子上再折一次，收益按数量级掉、代价一分不少：折叠省的是前缀
+   * 字节（有 prompt cache，首轮之后每轮只收 0.1×），而每加载一组要**全价重写一次
+   * 前缀**（约 1.25×P₀）。池子越小能省的越少，那一次重写却是固定成本。四条收窄：
+   *
+   * - **只读 / Ask**：`applyFinalToolPolicy` 只留 `risk === 'safe'`，写工具压根不在池里。
+   * - **`toolNames` / `namespaces` 白名单**：调用方已经点名了它该拿哪些工具。
+   *   文档 §5.4 把这条记成待决问题 —— 「白名单给了、但被折叠了所以模型看不见」。
+   *   这就是那个答案。
+   *
+   * 它们还共享一个更难查的失败方式：这类会话**短**（文档 §5.2：30% 的会话只调
+   * 1~2 次工具），一次额外往返就是 +50%~100% 的往返数。
+   *
+   * **`isSubAgent` 本身不在这个名单里。** 收窄的是白名单，不是「子任务」这个身份 ——
+   * `runSubAgent` 的 `namespaces` / `toolNames` / `readOnly` 都是可选的，不带白名单
+   * 派出去的子任务拿的是**完整工具池**，那恰恰是折叠最划算的场景。按身份关等于
+   * 把一个没发生的收窄当成发生了。
+   */
+  if (ctx.readOnly || ctx.mode === 'ask' || ctx.toolNames?.length || ctx.namespaces?.length)
+    ctx.toolSearchEnabled = false
   const runtime = await resolveAgentModel(ctx.modelRequest, ctx.thinkingLevel)
   const { selection, streamFn, models, summaryModel } = runtime
 
@@ -1251,13 +1273,18 @@ export function buildSystemPrompt(
     ...buildNotebookSection(ctx)
   ]
 
+  // `undefined` 和 `[]` 在下面是两个意思，别在这里替它兜底成空数组
+  const mcpStatuses = ctx.mcp?.getStatuses()
+
   return (
     lines.join('\n') +
     buildSkillsSection(skills) +
     buildSkillLearningSection(skills, ctx.skillLearning ?? 'ask') +
-    // 用户配的 MCP server 及其真实连接状态。一个都没配时是空串。
-    // 「连不上」必须让模型知道 —— 否则它会把「工具不在」答成「我没这个能力」。
-    buildMcpSection(ctx.mcp?.getStatuses()) +
+    // 用户配的 MCP server 及其真实连接状态，外加设置页此刻能一键装上的集成。
+    // 没有 MCP 管理器时整段是空串 —— 那是「不知道」，不是「一个都没配」。
+    // 「连不上」和「装一下就有」都必须让模型知道 —— 否则它会把
+    // 「工具不在」答成「我没这个能力」，而那是假话。
+    buildMcpSection(mcpStatuses, installableIntegrations(mcpStatuses ?? [])) +
     // 用户自己写的常驻说明。放在环境块**之前**：它是规矩，而环境块是事实，
     // 两者混在一起模型分不清哪句该照做、哪句只是背景
     buildUserInstructionsSection(ctx.userInstructions ?? '') +
