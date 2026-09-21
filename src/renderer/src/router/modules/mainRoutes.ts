@@ -351,8 +351,12 @@ const mainRoutes: RouteRecordRaw = {
     },
 
     /**
-     * 服务器管理
-     * standalone 节点统一管理页面（连接配置、Vault 管理、平台治理）
+     * 服务器管理（TODO，入口已隐藏）
+     * standalone 节点统一管理页面（连接配置、Vault 管理、平台治理）。
+     *
+     * 目前只有客户端这一半：服务端不在本仓库，社区版没有可连的对象，
+     * 所以设置里的入口先注释掉（见 ProfileAsset.vue）。路由留着，方便手动输地址调试。
+     * 放出来之前要补：服务端开源、API Key 不再明文存 localStorage、这页的测试。
      */
     {
       path: '/server-management',

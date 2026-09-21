@@ -358,6 +358,11 @@ const getAppName = (path: string) => {
   return parts[parts.length - 1] || path
 }
 
+// 已经配过应用的类别数，挂在折叠标题上
+const configuredAppCount = computed(
+  () => ASSET_CATEGORIES.filter((cat) => !!defaultApps.value[cat.key]).length
+)
+
 // 获取资产类别的翻译标签
 const getCategoryLabel = (categoryKey: string): string => {
   const key = `profile.asset.categories.${categoryKey}` as any
@@ -586,11 +591,14 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Server Management Group (only show when network vault is enabled) -->
+    <!--
+      TODO(服务器管理): 入口暂时隐藏。/server-management 整页只是 standalone 服务端的客户端，
+      而服务端不在本仓库里，社区版用户点进去只会看到一排禁用按钮。等服务端开源、
+      并补上凭据安全存储（当前 API Key 明文存 localStorage）和该页测试之后再放出来。
+      页面代码与路由保留，不删。
     <div v-if="enableNetworkVault" class="settings-group">
       <h3 class="group-title">{{ $t('profileAssetSettings.serverGroup.title') }}</h3>
       <div class="settings-card">
-        <!-- Server Management Row (navigate to dedicated page) -->
         <div class="setting-row app-row" @click="$router.push('/server-management')">
           <div class="row-icon">
             <PhHardDrives />
@@ -605,52 +613,66 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+    -->
 
-    <!-- Default Apps Group -->
-    <div class="settings-group">
-      <div class="group-title-collapsible" @click="defaultAppsCollapsed = !defaultAppsCollapsed">
-        <PhCaretRight
-          weight="fill"
-          class="collapse-icon"
-          :class="{ collapsed: defaultAppsCollapsed }"
-        />
-        <h3 class="group-title">{{ $t('profile.asset.defaultApps') }}</h3>
-      </div>
-      <div v-show="!defaultAppsCollapsed" class="settings-card">
-        <div
-          v-for="cat in ASSET_CATEGORIES"
-          :key="cat.key"
-          class="setting-row app-row"
-          @click="handleSelectApp(cat.key)"
-        >
-          <div class="row-icon category-icon">
-            <component :is="cat.icon" />
-          </div>
-          <div class="row-content">
-            <div class="row-title">{{ getCategoryLabel(cat.key) }}</div>
-            <div class="row-desc">{{ cat.extensions.join(', ') }}</div>
-          </div>
+    <!--
+      默认应用这块用的是 MCP 页那套折叠卡片（`.category` / `.category-head` /
+      `.category-body`）—— 同一个「设置」窗口里两种折叠样式没有道理，
+      而那一套已经是本仓库的既定写法（见 McpSettings.vue、ProfileTools.vue）。
+      已配了几个应用的数量挂在标题行上，不展开也看得见。
+    -->
+    <ul class="category-list">
+      <li class="category">
+        <div class="category-head">
+          <button
+            class="category-open"
+            :aria-expanded="!defaultAppsCollapsed"
+            @click="defaultAppsCollapsed = !defaultAppsCollapsed"
+          >
+            <PhCaretRight class="caret" :class="{ open: !defaultAppsCollapsed }" />
+            <span class="category-name">{{ $t('profile.asset.defaultApps') }}</span>
+          </button>
+          <span class="category-count"
+            >{{ configuredAppCount }} / {{ ASSET_CATEGORIES.length }}</span
+          >
+        </div>
 
-          <div class="row-control app-control">
-            <div class="current-app" :class="{ 'is-set': defaultApps[cat.key] }">
-              <span class="app-name">{{ getAppName(defaultApps[cat.key]) }}</span>
+        <div v-show="!defaultAppsCollapsed" class="category-body">
+          <div
+            v-for="cat in ASSET_CATEGORIES"
+            :key="cat.key"
+            class="setting-row app-row"
+            @click="handleSelectApp(cat.key)"
+          >
+            <div class="row-icon">
+              <component :is="cat.icon" />
             </div>
-            <div class="row-chevron">
-              <PhCaretRight v-if="!defaultApps[cat.key]" />
-              <AppButton
-                v-else
-                variant="text"
-                shape="circle"
-                class="clear-btn"
-                @click.stop="handleClearApp(cat.key)"
-              >
-                <template #icon><IconDeleteOrClear /></template>
-              </AppButton>
+            <div class="row-content">
+              <div class="row-title">{{ getCategoryLabel(cat.key) }}</div>
+              <div class="row-desc">{{ cat.extensions.join(', ') }}</div>
+            </div>
+
+            <div class="row-control app-control">
+              <div class="current-app" :class="{ 'is-set': defaultApps[cat.key] }">
+                <span class="app-name">{{ getAppName(defaultApps[cat.key]) }}</span>
+              </div>
+              <div class="row-chevron">
+                <PhCaretRight v-if="!defaultApps[cat.key]" />
+                <AppButton
+                  v-else
+                  variant="text"
+                  shape="circle"
+                  class="clear-btn"
+                  @click.stop="handleClearApp(cat.key)"
+                >
+                  <template #icon><IconDeleteOrClear /></template>
+                </AppButton>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </li>
+    </ul>
   </div>
 </template>
 
@@ -679,30 +701,116 @@ onUnmounted(() => {
     letter-spacing: 0.02em;
     width: 100%;
   }
+}
 
-  .group-title-collapsible {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-    padding: 4px;
-    margin: 0 0 0 -4px;
-    border-radius: 4px;
-    transition: background-color 0.2s;
+/* ── 折叠卡片（与 MCP / 工具页同一套）───────────────────────── */
+.category-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.category {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.category-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3);
+}
+
+.category-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--color-border-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+}
+
+.category-name {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-count {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.caret {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  transition: transform var(--motion-fast, 0.15s) var(--easing-standard, ease-in-out);
+
+  &.open {
+    transform: rotate(90deg);
+  }
+}
+
+.category-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-3) var(--space-2) var(--space-8);
+
+  /*
+   * 条目本身也照「工具」页的 `.tool-item` 写：上边线分隔、没有横向内边距、
+   * 名字用等宽（它下面那行是扩展名，本来就是标识符），图标退成一个 14px 的
+   * 纯字形 —— 原来那个 32×32 的灰底方块在一列里堆七个，比它要标示的内容还重。
+   */
+  .setting-row.app-row {
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--color-border-subtle);
+    min-height: 0;
+    border-radius: var(--radius-sm);
 
     &:hover {
-      background-color: var(--color-bg-surface-hover);
+      background: transparent;
+
+      .row-title {
+        color: var(--color-accent-text);
+      }
     }
 
-    .collapse-icon {
-      font-size: 12px;
+    .row-icon {
+      width: 16px;
+      font-size: 14px;
+      background: none;
       color: var(--color-text-muted);
-      transition: transform 0.2s;
+    }
 
-      &.collapsed {
-        transform: rotate(-90deg);
-      }
+    .row-title {
+      font-family: var(--font-family-mono);
+      font-size: var(--font-size-xs);
+      transition: color 0.15s;
+    }
+
+    .row-desc {
+      font-size: var(--font-size-xs);
+      line-height: 1.6;
     }
   }
 }
