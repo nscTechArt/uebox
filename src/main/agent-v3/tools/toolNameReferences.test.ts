@@ -80,6 +80,9 @@ const NOT_TOOL_NAMES: Record<string, string> = {
    */
   set_retarget_root: 'IKRetargeterController 的 unreal Python 方法',
   set_rotation_offset_for_retarget_pose_bone: 'IKRetargeterController 的 unreal Python 方法',
+  // 2026-09-22 反馈后写进 SKILL.md 的两个常见报错点：枚举参数传成字符串、op 下标传成名字
+  set_ik_rig: 'IKRetargeterController 的 unreal Python 方法',
+  get_retarget_op_enabled: 'IKRetargeterController 的 unreal Python 方法（5.6+ op 栈）',
   blueprint_read_only: 'blueprint_library_apply 的参数',
   // `project_` 是真前缀（project_list / project_manage），所以响应字段被当成了工具名
   project_rule_renames: 'project_rules 的响应字段',
@@ -102,6 +105,9 @@ const NOT_TOOL_NAMES: Record<string, string> = {
 
   // —— 引擎侧 Python API，不是我们的工具 ——
   load_asset: 'unreal.load_asset，Python API',
+  // ue_content_delete / ue_run_python_script 的描述点名警告「别在 Python 里循环它」，
+  // 和真工具 delete_assets 只差一个 s，但它就是 unreal.EditorAssetLibrary 的方法名
+  delete_asset: 'unreal.EditorAssetLibrary.delete_asset，Python API',
   create_asset: 'unreal.AssetToolsHelpers 的 Python API',
   add_retarget_chain: 'IKRigController 的 Python 方法',
   run_batch_retarget: 'IKRetargetBatchOperation 的 Python 方法',

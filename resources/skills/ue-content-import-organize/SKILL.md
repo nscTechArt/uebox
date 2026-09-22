@@ -214,10 +214,11 @@ reference it, and whether the destination is taken. Show that to the user, then 
 `on_conflict` defaults to `fail` — any taken destination means nothing moves; switch to `skip`
 or `auto_rename` only when the user says so.
 
-After a real run the tool has already cleaned the redirectors it left behind and saved the
-rewritten referencers (`redirectors_fixed`, `saved_count`). If `dirty_after` is non-zero, those
-are packages modified outside the command and were deliberately left alone. Every item is
-read back: `failed` means the asset is not at the destination, whatever the engine claimed.
+After a real run the rewritten referencers are saved (`saved_count`), but the redirectors it
+left behind are **not** cleaned up — `redirectors_fixed` is always 0; see *Redirectors* below.
+If `dirty_after` is non-zero, those are packages modified outside the command and were
+deliberately left alone. Every item is read back: `failed` means the asset is not at the
+destination, whatever the engine claimed.
 
 Levels (`World`) are refused — renaming a level must relocate its external actors too, which is
 a level-tool job. Redirectors are refused as sources — fix them up first.
@@ -314,12 +315,22 @@ registry scan; leftover redirectors can be cleaned there.
 
 ## Redirectors
 
-`ue_content_move` cleans its own. For history, run `ue_fixup_redirectors` with `dry_run: true`:
-`details` shows each redirector's `target` and flags `broken` ones whose target is gone. Those
-cannot be fixed up; `delete_broken: true` removes them, which turns "follows a dead link" into
-"object not found" for anything still referencing them — confirm nobody does first
-(`ue_content_dependencies` with `direction: "referencers"`). Pass `paths` to limit the run to a
-few redirectors or one folder instead of scanning all of `/Game`.
+`ue_content_move` leaves its redirectors in place on purpose; nothing cleans them unless you run
+`ue_fixup_redirectors`. Redirectors are harmless (the engine follows them), so cleanup is optional
+and can wait. Start with `dry_run: true`: `details` shows each redirector's `target` and flags
+`broken` ones whose target is gone. Those cannot be fixed up; `delete_broken: true` removes them,
+which turns "follows a dead link" into "object not found" for anything still referencing them —
+confirm nobody does first (`ue_content_dependencies` with `direction: "referencers"`). Pass
+`paths` to limit the run to a few redirectors or one folder instead of scanning all of `/Game`.
+
+A real run (`dry_run: false`) **opens a modal "Redirector Update Report" window in the editor on
+UE 5.4+ that a human must click** — its default button is *Keep Redirectors*, so tell the user
+to pick *Delete Unreferenced Redirectors*. Warn the user before running; if nobody clicks within
+10 minutes the call times out with the outcome unknown (the engine finishes when they click), so
+re-run `dry_run: true` to read back instead of repeating the fixup. When the editor cannot show
+the window (script mode, no renderer) the plugin refuses with 409 and `details.how_to`. The engine
+also saves every rewritten referencer as-is: `dirty_referencers` in the dry run names referencers
+with unsaved user edits that would be committed — have the user save or revert those first.
 
 ## Auditing
 
@@ -342,6 +353,16 @@ without loading anything. A full audit of the project belongs to `ue-project-aud
 
 ## Deleting
 
-Only accepts **specific asset object paths** — no folders. To clear a directory, run
-`ue_content_search` on it first and delete the results one by one. Deletion is irreversible and
-will ask the user for approval; name what goes, and check `referencers` first.
+`ue_content_delete` takes asset object paths **and folder package paths** in the same `paths`
+array. To remove a whole pack, pass the folder (`/Game/ThirdParty/AnimeGirl`): the tool expands
+it (subfolders included) and submits **one batch**, so the engine runs one garbage-collection
+pass. Over 500 assets in one folder it refuses and tells you to split by subfolder.
+
+Never loop `EditorAssetLibrary.delete_asset` in Python and never feed search results in one at
+a time — each call runs a full GC; on a large level that is seconds per asset and a few hundred
+assets freeze the editor for a quarter of an hour, after which every engine command times out
+together. If a delete call itself times out, the engine is most likely still deleting: do not
+resend, check `ue_session_health`, then read the folder back with `ue_content_search`.
+
+Deletion is irreversible and will ask the user for approval; name what goes, and check
+`referencers` first.

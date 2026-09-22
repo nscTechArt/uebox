@@ -303,6 +303,28 @@ describe('拒绝与异常', () => {
     expect(String(result.error)).toContain('Play')
   })
 
+  it('已在 Play 模式的拒绝要连停法一起说，并点明「下一帧才生效」', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error: 'The editor is already in Play/Simulate mode. Stop it before running a playtest.'
+    })
+
+    const result = await run()
+
+    const text = String(result.error)
+    expect(text).toContain('editor_request_end_play')
+    expect(text).toContain('下一帧')
+    expect(text).toContain('editor_play_simulate')
+  })
+
+  it('别的拒绝不带 PIE 停法', async () => {
+    callRequest.mockResolvedValue({ ok: false, error: 'A playtest is already running.' })
+
+    const result = await run()
+
+    expect(String(result.error)).not.toContain('editor_request_end_play')
+  })
+
   it('没连引擎时不发请求', async () => {
     getConnectionCount.mockReturnValue(0)
 

@@ -1,6 +1,6 @@
 ---
 name: ue-animation-retargeting
-description: Retargets body animation between skeletons, measures poses and previews results in Unreal. Use when 用户说「这批动画换个骨架」「把动画重定向到角色」「手臂穿模」「量一下低头角度」「把这段改成固定姿势」. Do not use for FBX import, Level Sequence camera tracks, Control Rig authoring, or mesh geometry editing.
+description: Retargets body animation between skeletons, measures poses and previews results in Unreal. Use when 用户说「这批动画换个骨架」「把动画重定向到角色」「把这个角色包接进 GASP / 运动匹配」「重定向后手臂没下来 / 还是 T-pose」「手臂穿模」「量一下低头角度」「把这段改成固定姿势」, or when a third-party character needs to walk, run or jump with animations made for another skeleton. Do not use for FBX import, Level Sequence camera tracks, Control Rig authoring, or mesh geometry editing.
 ---
 
 # Body animation: measure, retarget, preview
@@ -35,6 +35,33 @@ description: Retargets body animation between skeletons, measures poses and prev
 工具核对全部局部变换；七个摘要数字一致不能证明手腕、手指等全部写对。
 缺轨道按参考姿势补齐，写入和过渡范围外保持原关键帧。
 
+## 判断姿势对没对：量，不看截图，不进 PIE
+
+重定向姿势对不对，唯一可靠的通路是**导一段、量一段**：
+
+1. `anim_retarget` 传现有 retargeter 和一段短动画（idle 最好），导到临时路径；
+2. `anim_preview` 看导出的那段 0 秒那一帧，front 和 side 各一张；
+3. `anim_measure` 用 `angle_bones` 量上臂对脊柱的夹角（四个骨名：脊柱起止、上臂起止），
+   源动画和导出动画各量一次，把差值和预览图一起报给用户；对齐没有固定的度数门槛，
+   同一动作两边差得越小越好，差多少能接受由用户看图定。`bones` 能回骨骼世界坐标序列。
+
+不要用 `ue_screenshot` 拍重定向编辑器的预览窗来判断 —— 那张图是编辑器界面的一块像素，
+手臂「下来没下来」一眼看不准，2026-09-22 就有两次把 T-pose 读成已对齐、错报给用户。
+也不要为了读骨骼数值起 PIE：`ue_playtest` 回的是 PrintString 和画面，不回骨骼变换；
+在 Python 里 `editor_play_simulate()` 之后 `sleep` 只是把游戏线程挡住，世界永远是 None。
+
+## 自动对齐与手工偏移
+
+- `auto_align_all_bones` **只调一次**，调完立刻用上面的三步验。调用后连接断了就不要再调，
+  先 `ue_session_health` 看编辑器进程还在不在，还在就等它回来、再回读；报给用户时说清是哪一步断的。
+- `anim_retarget` 不传 `retargeter` 时自动建配置，**内部同样会调一次 auto_align**。
+  骨架已经在自动对齐上断过连接的，后面一律显式传现有 retargeter，别让它再建一次。
+- `set_rotation_offset_for_retarget_pose_bone` 写的是局部空间的后乘增量，回读的四元数看不出方向，
+  空间与合成顺序见 [references/api.md](references/api.md)。手工推偏移前先用 `anim_measure`
+  量出目标和源的实际夹角，再决定要不要碰它。
+- 5.6 起链设置和根设置在 op 栈上，控制器方法名先 `dir()` 再调，不要猜；
+  op 栈 API 与常见 `AttributeError` 对照表见 [references/api.md](references/api.md)。
+
 ## Failure handling
 
 - 输出已存在：先回读，再复用配置或另选新输出路径；工具不覆盖原件。
@@ -43,3 +70,7 @@ description: Retargets body animation between skeletons, measures poses and prev
 - 超时或停止：停止只是当前这段完成后不发下一段；先回读已产生的资产。
 - `unmeasurable`：报告缺骨或固定朝向限制，不能当作 0 或通过。
 - 动画能播但姿势歪：先查重定向姿势，再查链映射，最后才查参数。
+- `Failed to convert parameter`：该传枚举传了字符串（`set_ik_rig` 第一个参数要
+  `unreal.RetargetSourceOrTarget.SOURCE`），或该传 int 下标传了名字（`get_retarget_op_enabled`）。
+- 用户放弃这个角色、要把整包移出工程：`ue_content_delete` 直接传目录路径，一批提交；
+  不要在 Python 里循环 `EditorAssetLibrary.delete_asset`，那会按资产数做 GC、把编辑器占死。

@@ -8,6 +8,9 @@ Python 名字是 C++ 名字的 snake_case。下表的可用性是在本机 UE 5.
 - [版本可用性](#版本可用性)
 - [IKRigController：建 rig、定义链](#ikrigcontroller建-rig定义链)
 - [IKRetargeterController：挂 rig、映射链、调姿势](#ikretargetercontroller挂-rig映射链调姿势)
+- [5.6+ 的 op 栈：链设置和根设置搬了家](#56-的-op-栈链设置和根设置搬了家)
+- [重定向姿势偏移量的空间](#重定向姿势偏移量的空间)
+- [名字拿不准就当场问引擎](#名字拿不准就当场问引擎)
 - [批量重定向](#批量重定向)
 - [枚举](#枚举)
 - [5.2 / 5.3 的手工链定义](#52--53-的手工链定义)
@@ -19,6 +22,8 @@ Python 名字是 C++ 名字的 snake_case。下表的可用性是在本机 UE 5.
 | 两个控制器整体对脚本可见 | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `apply_auto_generated_retarget_definition` / `apply_auto_fbik` | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `auto_align_all_bones` | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| op 栈（`get_num_retarget_ops` / `get_op_controller` …） | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| `get_retarget_chain_settings` / `get_root_settings` / `get_global_settings` | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | 弃用 | 弃用 | 弃用 |
 | `duplicate_and_retarget` | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 弃用 |
 | `run_batch_retarget` | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
@@ -60,7 +65,7 @@ Python 里这两个类不存在。整个 IKRig 插件在这两版里只有 `IKRi
 
 | 调用 | 返回 | 说明 |
 |---|---|---|
-| `set_ik_rig(source_or_target, ik_rig)` | 无 | 无返回值，必须用 `get_ik_rig` 回读确认 |
+| `set_ik_rig(source_or_target, ik_rig)` | 无 | 第一个参数是枚举 `unreal.RetargetSourceOrTarget.SOURCE` / `.TARGET`，传字符串会报 `Failed to convert parameter 'source_or_target'`。无返回值，必须用 `get_ik_rig` 回读确认 |
 | `get_ik_rig(source_or_target)` | `IKRigDefinition` | |
 | `set_preview_mesh(source_or_target, mesh)` / `get_preview_mesh(...)` | | 只影响编辑器预览，不影响批量重定向结果 |
 | `auto_map_chains(auto_map_type, force_remap)` | 无 | 无返回值也不报错，**必须逐条 `get_source_chain` 回读** |
@@ -68,9 +73,73 @@ Python 里这两个类不存在。整个 IKRig 插件在这两版里只有 `IKRi
 | `get_source_chain(target_chain_name)` | `Name` | 没映射时返回 `None` |
 | `get_retarget_chain_settings(target_chain_name)` / `set_retarget_chain_settings(name, settings)` | `TargetChainSettings` / `bool` | 单链的旋转/平移/IK 开关 |
 | `get_root_settings()` / `set_root_settings(settings)` | | 根骨的位移缩放，人物高矮差很多时调这里 |
-| `auto_align_all_bones(source_or_target)` | 无 | 5.4+。先重置传入那一侧的重定向姿势，再整体对齐 |
+| `auto_align_all_bones(source_or_target, method=CHAIN_TO_CHAIN)` | 无 | 5.4+。先重置传入那一侧的重定向姿势，再整体对齐。`method` 是 `unreal.RetargetAutoAlignMethod`，见枚举表。**只调一次**：调用后连接断了就不要再调第二次，先 `ue_session_health` 看编辑器还在不在 |
+| `auto_align_bones(bones, method, source_or_target)` | 无 | 5.4+。只对给定的骨对齐 |
+| `get_retarget_poses(source_or_target)` | `Map[Name, IKRetargetPose]` | 列出这一侧所有重定向姿势；**没有** `get_all_retarget_pose_names`，键就是名字 |
+| `get_current_retarget_pose_name(source_or_target)` | `Name` | |
+| `get_rotation_offset_for_retarget_pose_bone(bone, source_or_target)` | `Quat` | 回读的是**局部空间的偏移**，见下节 |
 | `create_retarget_pose(name, source_or_target)` / `set_current_retarget_pose(name, source_or_target)` | | 一个资产里可以存多套重定向姿势 |
 | `set_rotation_offset_for_retarget_pose_bone(bone, rotation, source_or_target)` | | 逐骨写姿势偏移，5.2 / 5.3 手工对齐姿势只能用这个 |
+
+## 5.6+ 的 op 栈：链设置和根设置搬了家
+
+5.6 起重定向器是一个 **op 栈**（FK Chains、IK Chains、Pelvis Motion、Stride Warping …），
+链映射、链设置、根设置都存在各自的 op 上。控制器上老的 `get_retarget_chain_settings` /
+`set_retarget_chain_settings` / `get_root_settings` / `get_global_settings` 还在但已弃用，
+读出来不一定是正在生效的那份。
+
+| 调用 | 返回 | 说明 |
+|---|---|---|
+| `get_num_retarget_ops()` | `int` | **不是** `get_num_ops` |
+| `get_op_name(index)` / `get_index_of_op_by_name(name)` | `Name` / `int` | 遍历栈只能按下标；**没有** `get_all_op_names`，自己循环 |
+| `get_retarget_op_enabled(index)` / `set_retarget_op_enabled(index, enabled)` | `bool` | 参数是 **int 下标**，传名字会报 `Cannot nativize 'str' as 'int32'` |
+| `get_op_controller(index)` | 该 op 的控制器 | 返回的对象类型随 op 变：FK Chains 是 `IKRetargetFKChainsController`，Pelvis Motion 是 `IKRetargetPelvisMotionController`，都有 `get_settings()` / `set_settings(settings)` |
+| `add_retarget_op(op_type)` | `int` | `op_type` 是结构体名字符串，不带 `F`：`'IKRetargetFKChainsOp'`；引擎用 `FindObject` 找，短名找不到（回 -1、只打 Warning）就换完整路径 `'/Script/IKRig.IKRetargetFKChainsOp'` |
+| `add_default_ops()` | 无 | 一次加上默认整套 |
+| `auto_map_chains(type, force, op_name=None)` / `set_source_chain(src, dst, op_name=None)` / `get_source_chain(dst, op_name=None)` | | 多了 `op_name`，不给就作用于第一个带链映射的 op |
+
+读 FK 链设置的样板（5.6+）：
+
+```python
+c = unreal.IKRetargeterController.get_controller(retargeter)
+for i in range(c.get_num_retarget_ops()):
+    name = str(c.get_op_name(i))
+    ctrl = c.get_op_controller(i)
+    print(i, name, type(ctrl).__name__, c.get_retarget_op_enabled(i))
+    if isinstance(ctrl, unreal.IKRetargetFKChainsController):
+        settings = ctrl.get_settings()          # IKRetargetFKChainsOpSettings
+        for chain in settings.chains_to_retarget:
+            print('  ', chain.target_chain_name)
+```
+
+op 类型一览（结构体名，加 `add_retarget_op` 时用）：AlignPoleVector、CopyBasePose、CurveRemap、
+FKChains、FilterBone、FloorConstraint、IKChains、PelvisMotion、PinBone、AdditivePose、RootMotion、
+RunIKRig、ScaleSource、SpeedPlanting、StretchChain、StrideWarping，前缀都是 `IKRetarget`、后缀 `Op`。
+
+## 重定向姿势偏移量的空间
+
+`set_rotation_offset_for_retarget_pose_bone(bone, quat, side)` 写进去、
+`get_rotation_offset_for_retarget_pose_bone(bone, side)` 读出来的四元数是**这根骨局部空间里、
+后乘在参考姿势上的增量**：引擎按 `local = ref_pose_local * offset` 合成
+（`IKRetargetProcessor.cpp` 里 retarget pose 的应用）。所以：
+
+- 它不是世界朝向，也不是「目标方向」，回读一个 `(x, y, z, w)` 看不出手臂朝哪 —— 别拿它判断对齐没对齐；
+- 想让一根骨在全局空间转到某个方向，要先把父链的全局旋转乘回去再转成局部增量；
+- **判断姿势对不对不看这个数**：用 `anim_retarget` 导一段短动画，再 `anim_preview` 看图、
+  `anim_measure` 用 `angle_bones` 量两骨向量的夹角。这条路不需要 PIE。
+
+## 名字拿不准就当场问引擎
+
+控制器上的方法名一律 snake_case，但猜错一次就是一整个往返。先：
+
+```python
+c = unreal.IKRetargeterController.get_controller(retargeter)
+print([m for m in dir(c) if not m.startswith('_')])
+print(c.set_ik_rig.__doc__)
+```
+
+`__doc__` 里带参数类型；`Failed to convert parameter` 十有八九是该传枚举传了字符串、
+该传 int 传了名字。
 
 ## 批量重定向
 
@@ -105,6 +174,7 @@ created = unreal.IKRetargetBatchOperation.run_batch_retarget(inputs)
 |---|---|
 | `unreal.RetargetSourceOrTarget` | `SOURCE`（拷贝来源）、`TARGET`（拷贝目标） |
 | `unreal.AutoMapChainType` | `EXACT`（只配完全同名，大小写不敏感）、`FUZZY`（按编辑距离配最近的）、`CLEAR`（全清空） |
+| `unreal.RetargetAutoAlignMethod` | `CHAIN_TO_CHAIN`（默认，按链方向）、`MESH_TO_MESH`、`LOCAL_ROTATION_AXES`、`GLOBAL_ROTATION_AXES`（后两个要求两边骨轴朝向一致，否则结果离谱） |
 
 ## 5.2 / 5.3 的手工链定义
 

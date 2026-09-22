@@ -10,14 +10,8 @@ import { z } from 'zod'
 
 import { runEditorPython } from '../../../core/editorPython'
 import { assertScriptAllowed } from '../../builtin/pathBoundary'
-import {
-  describePositionalRotatorRefusal,
-  findPositionalRotatorCalls
-} from './pythonRotatorGuard'
-import {
-  noteViewportMove,
-  viewportCameraApiInScript
-} from '../ue-editor/viewportProvenance'
+import { describePositionalRotatorRefusal, findPositionalRotatorCalls } from './pythonRotatorGuard'
+import { noteViewportMove, viewportCameraApiInScript } from '../ue-editor/viewportProvenance'
 
 const RunPythonScriptParamsSchema = z.object({
   script: z.string().describe('要执行的 Python 脚本内容'),
@@ -55,7 +49,16 @@ export function createRunPythonScriptTool(): V2Tool {
 镜头朝天，引擎不报任何错。所以写 \`unreal.Rotator(roll=0, pitch=0, yaw=90)\`；带位置参数的写法
 这个工具会直接拒绝执行。摆完东西用 ue_get_actor 回读，它会把旋转翻成「正面朝哪」的人话。
 
-【注意】：脚本在编辑器主线程上同步执行，最多等待 5 分钟。超时或停止等待不代表 UE 已停止执行，先回读确认，不能直接重复修改。`,
+【注意】：脚本在编辑器主线程上同步执行，最多等待 5 分钟。超时或停止等待不代表 UE 已停止执行，先回读确认，不能直接重复修改。
+
+【三件事别在 Python 里做】
+- **PIE 起停**：editor_play_simulate() / editor_request_end_play() 都是「下一帧才生效」，脚本占着游戏线程，
+  同一脚本里 sleep 或回读永远看到旧状态（世界是 None、playing 还是 True）。要跑游戏并读结果用 ue_playtest；
+  非要停 PIE 就单独发一句、脚本返回后另起一次回读。
+- **循环 delete_asset**：每次调用都做一次完整 GC，几百个资产就把主线程占死十几分钟。删资产、清目录用
+  ue_content_delete（目录直接传，一批提交）。
+- **猜 API 名**：AttributeError 一次就是一整个往返。先 print(dir(obj)) 和 print(obj.method.__doc__) 拿到
+  真实名字和签名再调。`,
 
     inputSchema: RunPythonScriptParamsSchema,
 

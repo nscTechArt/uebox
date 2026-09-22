@@ -362,6 +362,38 @@ function describeFrameMode(mode: string | undefined): string {
   )
 }
 
+/** 插件在编辑器已处于 Play / Simulate 时回的那句（`Handle_PieRun`，409） */
+const PIE_BUSY_PATTERN = /already in Play\/Simulate mode/i
+
+/**
+ * 「编辑器已经在 Play 模式」要连停法一起说。
+ *
+ * 插件那句只说 "Stop it before running a playtest"，没说怎么停 —— 工具集里没有
+ * 停 PIE 的入口，模型只能去 Python 里摸。2026-09-22 的反馈里它摸到了
+ * `editor_request_end_play()`，然后在**同一脚本里**回读到 `playing_after: True`，
+ * 判成「停不掉」，三条验证路一起放弃。
+ *
+ * 那个回读是必然的：`RequestEndPlayMap` 只置一个排队标记，下一帧才真正停
+ * （引擎 PlayLevel.cpp）。Python 脚本占着游戏线程，脚本没返回之前那一帧永远不来。
+ * 起 PIE 同理 —— `editor_play_simulate()` 之后在脚本里 `sleep` 只是把线程挡住，
+ * 游戏世界根本没机会创建，`get_game_world()` 当然是 None。
+ *
+ * 所以这里把停法、下一帧语义、以及「多半是你自己起的」三句拼上去。
+ */
+export function withPieBusyHint(message: string): string {
+  if (!PIE_BUSY_PATTERN.test(message)) return message
+  return (
+    `${message}
+` +
+    '停法：用 ue_run_python_script 单独发一句 ' +
+    'unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).editor_request_end_play()，' +
+    '**不要在同一脚本里回读** —— 停止是下一帧才生效，脚本占着游戏线程，同一脚本里读到的永远是「还在跑」。' +
+    '脚本返回后再调一次 ue_playtest 即可。' +
+    '如果你之前在 Python 里调过 editor_play_simulate() 或 editor_request_begin_play()，这个 PIE 就是你自己起的；' +
+    '如果是用户自己按的 Play，先问一句再停。'
+  )
+}
+
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function createPlaytestTool() {
   return defineV2Tool({
@@ -419,7 +451,8 @@ cvar 也都能发。
 
 保存是另一回事——干完活记得 ue_save，那是为了别丢，不是为了让试玩看见。
 
-编辑器已经在 Play 模式时会被拒绝。`,
+编辑器已经在 Play / Simulate 模式时会被拒绝 —— 这个工具不接管别人的会话。多半是用户自己按了
+Play，或者你之前在 Python 里调过 editor_play_simulate() 没停。停法见拒绝信息。`,
 
     inputSchema: PlaytestSchema,
 
@@ -480,7 +513,7 @@ cvar 也都能发。
         }
         if (!response.ok) {
           const message = (response as unknown as { error?: string })?.error || '试玩失败'
-          return { success: false, error: message }
+          return { success: false, error: withPieBusyHint(message) }
         }
 
         // 关着截图时一张也不读。上面已经让插件别拍了，这一句管的是「插件没听懂
