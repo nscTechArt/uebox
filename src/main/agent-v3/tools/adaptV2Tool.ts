@@ -114,6 +114,8 @@ export interface AdaptOptions {
   /** 覆盖 V2 的描述。留空则沿用 */
   description?: string
   concurrency?: 'sequential' | 'parallel'
+  /** 见 `ToolSpec.requiresExplicitApproval`：每次都问，不给「总是允许」 */
+  requiresExplicitApproval?: boolean
 }
 
 /**
@@ -329,7 +331,11 @@ export function adaptV2Tool(v2: V2Tool, options: AdaptOptions): UnrealAgentTool<
         details: stripImages(result)
       }
     },
-    unrealBox: { namespace: options.namespace, risk: options.risk }
+    unrealBox: {
+      namespace: options.namespace,
+      risk: options.risk,
+      ...(options.requiresExplicitApproval ? { requiresExplicitApproval: true } : {})
+    }
   }
 
   return tool as unknown as UnrealAgentTool<unknown>

@@ -84,7 +84,9 @@ describe('ue_fixup_redirectors：指定路径与断链', () => {
       path: '/Game',
       found: 3,
       broken_count: 1,
-      fixed: 3,
+      broken_left: 0,
+      // fixed 不含删掉的断链：3 个里修了 2 个、删了 1 个，加起来才是 3
+      fixed: 2,
       remaining: 0,
       deleted_broken: 1,
       dry_run: false,
@@ -96,7 +98,9 @@ describe('ue_fixup_redirectors：指定路径与断链', () => {
 
     expect(callRequest.mock.calls[0][1]).toEqual({ delete_broken: true })
     expect(result.deleted_broken).toBe(1)
+    expect(String(result.summary)).toContain('2/3')
     expect(String(result.summary)).toContain('删除断链的 1 个')
+    expect(String(result.summary)).not.toContain('原地未动')
     expect(String(result.summary)).toContain('2 个包待保存')
   })
 
@@ -122,7 +126,7 @@ describe('ue_fixup_redirectors：指定路径与断链', () => {
 
 // 安全网 §2.3：引用者被别人签出着，FixupReferencers 改不了它。预演就要点名到文件和人
 describe('ue_fixup_redirectors：签出预检', () => {
-  it('预演带出 checkout，摘要点名被谁签出、执行时整批不会动', async () => {
+  it('预演带出 checkout，摘要点名被谁签出、对应的那几条会留在原地', async () => {
     callRequest.mockResolvedValue({
       ok: true,
       path: '/Game',
@@ -154,7 +158,10 @@ describe('ue_fixup_redirectors：签出预检', () => {
     const summary = result.summary as string
     expect(summary).toContain('/Game/Maps/Main')
     expect(summary).toContain('lisi')
-    expect(summary).toContain('执行时整批都不会动')
+    // 这条命令没有闸：引擎逐条处理，动不了的那几条留在原地，其余照清
+    expect(summary).toContain('对应的那几条重定向器会留在原地')
+    expect(summary).not.toContain('整批都不会动')
+    expect(summary).not.toContain('on_blocked')
   })
 
   it('执行后把引擎日志带回去', async () => {
@@ -166,13 +173,106 @@ describe('ue_fixup_redirectors：签出预检', () => {
       remaining: 1,
       dry_run: false,
       redirectors: ['/Game/Old/SM_A'],
+      // ≤5.3 的 FixupReferencers 把失败原因写进 FMessageLog("EditorErrors")，镜像到日志的类别就是它
       engine_log: [
-        '[LogAssetTools] Warning: package /Game/Maps/Main is already checked out by someone'
+        '[EditorErrors] Warning: /Game/Old/SM_A - Referencing package /Game/Maps/Main was not checked out'
       ]
     })
     const result = await run({})
     expect(result.engine_log).toEqual([
-      '[LogAssetTools] Warning: package /Game/Maps/Main is already checked out by someone'
+      '[EditorErrors] Warning: /Game/Old/SM_A - Referencing package /Game/Maps/Main was not checked out'
     ])
+  })
+})
+
+describe('ue_fixup_redirectors：失败与超时', () => {
+  it('插件 409 拒绝时把 details（how_to）和错误码一起带给模型', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error: 'Refusing to fix up redirectors: ...',
+      code: 409,
+      details: { found: 3, how_to: "right-click the folder and pick 'Fix Up Redirectors'" }
+    })
+    const result = await run({})
+    expect(result.success).toBe(false)
+    expect(result.code).toBe(409)
+    expect(result.details).toEqual({
+      found: 3,
+      how_to: "right-click the folder and pick 'Fix Up Redirectors'"
+    })
+  })
+
+  it('RPC 超时保住超时码，不报成确定失败', async () => {
+    const { WebSocketServiceError, WebSocketErrorCode } = await import(
+      '../../../../services/websocket/types'
+    )
+    callRequest.mockRejectedValue(
+      new WebSocketServiceError(WebSocketErrorCode.E_TIMEOUT, '请求超时: content.fixup_redirectors')
+    )
+    const result = await run({})
+    expect(result.success).toBe(false)
+    expect(result.code).toBeDefined()
+  })
+
+  it('中止信号跟着 RPC 一起下去', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      path: '/Game',
+      found: 0,
+      fixed: 0,
+      dry_run: true,
+      redirectors: []
+    })
+    const controller = new AbortController()
+    await (tool.execute as (i: unknown, o: unknown) => Promise<unknown>)(
+      { dry_run: true },
+      { abortSignal: controller.signal }
+    )
+    expect(callRequest.mock.calls[0][4]).toBe(controller.signal)
+  })
+
+  it('执行后按 broken_left 说「原地未动」，listed_note 与 load_failed 进摘要', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      path: '/Game',
+      found: 300,
+      broken_count: 2,
+      broken_left: 1,
+      fixed: 296,
+      remaining: 4,
+      deleted_broken: 1,
+      dry_run: false,
+      redirectors: [],
+      listed_note: 'Listing 200 of 300.',
+      load_failed: ['/Game/Old/SM_Corrupt', '/Game/Old/SM_Corrupt2']
+    })
+    const result = await run({ delete_broken: true })
+    const summary = String(result.summary)
+    expect(summary).toContain('296/300')
+    expect(summary).toContain('删除断链的 1 个')
+    expect(summary).toContain('1 个断链的原地未动')
+    expect(summary).toContain('2 个加载失败没处理')
+    expect(summary).toContain('Listing 200 of 300.')
+    expect(result.load_failed).toHaveLength(2)
+  })
+
+  it('引用者有未保存改动时预演就点名', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      path: '/Game',
+      found: 1,
+      fixed: 0,
+      dry_run: true,
+      redirectors: ['/Game/Old/SM_A'],
+      dirty_referencers: ['/Game/Maps/Main']
+    })
+    const result = await run({ dry_run: true })
+    expect(String(result.summary)).toContain('/Game/Maps/Main')
+    expect(String(result.summary)).toContain('未保存的改动')
+  })
+
+  it('paths 里的空串不放行', async () => {
+    const schema = tool.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+    expect(schema.safeParse({ paths: [''] }).success).toBe(false)
   })
 })

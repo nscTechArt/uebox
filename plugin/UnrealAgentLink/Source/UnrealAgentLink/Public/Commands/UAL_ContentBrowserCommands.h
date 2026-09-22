@@ -122,10 +122,18 @@ public:
 	 * 请求: { "path": "/Game", "paths": ["/Game/Old/SM_A", "/Game/Old/"], "dry_run": false, "delete_broken": false,
 	 *         "on_registry_busy": "fail"|"wait" }
 	 *        paths 给了就只处理这些（重定向器包路径或目录），不扫整个 path。
-	 * 响应: { ok, found, broken_count, fixed, remaining, deleted_broken, dry_run, redirectors:[...], details:[{path,target,broken}],
+	 * 响应: { ok, path, found, broken_count, broken_left, fixed, remaining, deleted_broken, dry_run,
+	 *         redirectors:[...], details:[{path,target,broken}], listed_note, not_redirectors:[...],
 	 *         checkout:{ scc_enabled, scc_provider, scc_available, checked, blocked, blocking:[...], states:[...], states_truncated },
-	 *         engine_log:[...], dirty_after, note }
-	 *        checkout 是每个重定向器的**引用者**能不能写（FixupReferencers 要改写它们）；engine_log 只在执行时有。
+	 *         dirty_referencers:[...], engine_log:[...], load_failed:[...], broken_after_load:[...], dirty_after, note }
+	 *        checkout 里既有每个重定向器的**引用者**（role=referencer，FixupReferencers 要改写它们）也有
+	 *        重定向器自己的包（role=redirector，引擎删它之前看它的签出状态）。
+	 *        dirty_referencers：引用者里用户改到一半没存的 —— FixupReferencers 会把它们原样落盘。
+	 *        broken 的判定按目标**对象路径**在不在注册表里；执行时只删预演和加载都判坏的，
+	 *        加载后才发现坏的进 broken_after_load、不删。fixed 不含 deleted_broken。
+	 *        dirty_after 只数这条命令新弄脏、引擎又没存成的包（引擎在删重定向器前会把改过的引用者存了）。
+	 *        engine_log / load_failed / broken_after_load 只在执行时有。
+	 *        UE 5.4+ 执行时会弹「Redirector Update Report」模态框由人点；弹不出来（脚本模式 / 无渲染器）时回 409。
 	 */
 	static void Handle_FixupRedirectors(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 

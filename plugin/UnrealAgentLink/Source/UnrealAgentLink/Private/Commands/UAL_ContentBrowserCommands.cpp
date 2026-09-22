@@ -19,6 +19,7 @@
 #include "PackageTools.h"
 #include "Editor.h"
 #include "FileHelpers.h"
+#include "Framework/Application/SlateApplication.h" // content.fixup_redirectors：报告框到不到得了人手上
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "HAL/FileManager.h"
@@ -2632,7 +2633,10 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 		TSet<FName> Seen;
 		for (const FString& Raw : Paths)
 		{
-			FString PackageName = Raw;
+			FString PackageName = Raw.TrimStartAndEnd();
+			// 尾部带 / 的是明确指目录，不先当包名去撞：关卡 `/Game/Maps/Main` 旁边
+			// 常有同名文件夹 `/Game/Maps/Main/`，先撞包会把目录里的重定向器整个漏掉
+			const bool bFolderIntent = PackageName.Len() > 1 && PackageName.EndsWith(TEXT("/"));
 			int32 DotIndex = INDEX_NONE;
 			if (PackageName.FindChar(TEXT('.'), DotIndex))
 			{
@@ -2644,17 +2648,26 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 			}
 
 			TArray<FAssetData> InPackage;
-			AssetRegistry.GetAssetsByPackageName(FName(*PackageName), InPackage);
+			if (!bFolderIntent)
+			{
+				AssetRegistry.GetAssetsByPackageName(FName(*PackageName), InPackage);
+			}
 			if (InPackage.Num() > 0)
 			{
 				bool bAny = false;
 				for (const FAssetData& Data : InPackage)
 				{
-					if (IsRedirectorClass(Data) && !Seen.Contains(Data.PackageName))
+					if (!IsRedirectorClass(Data))
+					{
+						continue;
+					}
+					// 「是不是重定向器」和「有没有重复收录」是两回事：先给了目录再给
+					// 目录里的某一条，那一条已经收过了，但它仍然是重定向器
+					bAny = true;
+					if (!Seen.Contains(Data.PackageName))
 					{
 						Seen.Add(Data.PackageName);
 						RedirectorAssets.Add(Data);
-						bAny = true;
 					}
 				}
 				if (!bAny)
@@ -2708,7 +2721,12 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 			}
 			TArray<FAssetData> TargetAssets;
 			AssetRegistry.GetAssetsByPackageName(FName(*TargetPackage), TargetAssets);
-			Info.bBroken = TargetAssets.Num() == 0;
+			// 按对象路径比，不按包：包还在、里面那个对象没了的，加载后 DestinationObject
+			// 一样是空 —— 预演不这么判，执行时就会冒出预演没警告过的「坏」
+			Info.bBroken = !TargetAssets.ContainsByPredicate([&Info](const FAssetData& Candidate)
+			{
+				return UALCompat::GetObjectPathString(Candidate).Equals(Info.Target, ESearchCase::IgnoreCase);
+			});
 		}
 		else
 		{
@@ -2784,16 +2802,35 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	// 那个重定向器就清不掉。判定和 batch_move 同一套（照抄引擎 AutoCheckOut），
 	// 只读注册表和文件属性，不加载
 	int32 BlockedReferencers = 0;
+	// FixupReferencers 会把每个引用者**原样落盘**（bCheckDirty=false、不问）：用户改到
+	// 一半还没存的引用者也一起存了，"丢弃改动"这条路就没了。事前点名，预演就报
+	TArray<FString> DirtyReferencers;
 	{
 		TArray<FUAL_PackageWriteState> In;
 		TMap<FString, int32> IndexByPackage;
 		for (const FRedirectorInfo& Info : Infos)
 		{
 			const FString RedirectorPackage = Info.Data.PackageName.ToString();
+			// 重定向器自己的包也要能写：引擎删它之前会看它的签出状态（5.5 甚至看完
+			// 照删，文件却留在磁盘上），被别人签出 / 只读的事前就得报出来
+			if (!IndexByPackage.Contains(RedirectorPackage.ToLower()))
+			{
+				FUAL_PackageWriteState Self;
+				Self.Package = RedirectorPackage;
+				Self.Role = TEXT("redirector");
+				IndexByPackage.Add(RedirectorPackage.ToLower(), In.Add(Self));
+			}
 			TArray<FString> Referencers;
 			UAL_CollectReferencers(AssetRegistry, Info.Data.PackageName, Referencers);
 			for (const FString& Referencer : Referencers)
 			{
+				if (const UPackage* Loaded = FindPackage(nullptr, *Referencer))
+				{
+					if (Loaded->IsDirty())
+					{
+						DirtyReferencers.AddUnique(Referencer);
+					}
+				}
 				if (int32* Existing = IndexByPackage.Find(Referencer.ToLower()))
 				{
 					In[*Existing].For.AddUnique(RedirectorPackage);
@@ -2811,6 +2848,18 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 		BlockedReferencers = Preflight.BlockedCount;
 		Result->SetObjectField(TEXT("checkout"), UAL_PreflightJson(Preflight));
 	}
+	if (DirtyReferencers.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> DirtyJson;
+		for (const FString& Name : DirtyReferencers)
+		{
+			DirtyJson.Add(MakeShared<FJsonValueString>(Name));
+		}
+		Result->SetArrayField(TEXT("dirty_referencers"), DirtyJson);
+	}
+	const FString DirtyReferencersNote = DirtyReferencers.Num() > 0
+		? FString::Printf(TEXT(" %d referencer package(s) have unsaved edits in the editor (dirty_referencers); FixupReferencers saves referencers to disk as-is, so those edits get committed too - save or revert them first if that is not wanted."), DirtyReferencers.Num())
+		: FString();
 
 	if (bDryRun)
 	{
@@ -2824,24 +2873,40 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 		}
 		if (BlockedReferencers > 0)
 		{
-			Note += FString::Printf(TEXT(" %d referencer package(s) cannot be written (checkout.blocking) - the redirectors they point at will not be cleaned up until that is resolved."), BlockedReferencers);
+			Note += FString::Printf(TEXT(" %d package(s) cannot be written (checkout.blocking; role tells whether it is a referencer or the redirector itself) - the redirectors involved will not be cleaned up until that is resolved; the rest still will."), BlockedReferencers);
 		}
+		Note += DirtyReferencersNote;
 		Result->SetStringField(TEXT("note"), Note);
 		UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 		return;
 	}
 
 	/**
-	 * 无人值守下直接拒绝，别去碰 `FixupReferencers`。
+	 * 报告框到不了人手上时直接拒绝，别去碰 `FixupReferencers`。
 	 *
-	 * 它收尾时无条件弹「Redirector Update Report」模态框（UE 5.4+），
-	 * 而无人值守下那个框会被取消、结果 `TOptional` 从没被设置、引擎照读不误
-	 * —— 编辑器当场崩，用户没保存的东西一起没（真机三次：5.5 一次、5.8 两次）。
-	 * 详见下面 `FixupReferencers` 调用点上方的注释。
+	 * 它收尾时无条件弹「Redirector Update Report」模态框（UE 5.4 引进）。框被自动
+	 * 取消时，5.4 只是当作「保留重定向器」；5.5 起 `SModalEditorDialog::ShowModalDialog`
+	 * 去读一个从没被设置的 `TOptional` —— 编辑器当场崩，用户没保存的东西一起没
+	 * （真机三次：5.5 一次、5.8 两次）。详见下面 `FixupReferencers` 调用点上方的注释。
+	 *
+	 * 什么时候框会被取消，照 `FSlateApplication::AddModalWindow` 的判据来：
+	 * `GIsRunningUnattendedScript`（脚本模式，窗口直接被取消）或
+	 * `!CanAddModalWindow()`（渲染器没起来，窗口根本建不出来）。`-unattended`
+	 * （`FApp::IsUnattended`）**不在其中** —— 那种编辑器照样弹框、照样有人能点。
+	 * 5.4 以前没有这个框，直接跑。
 	 *
 	 * 报 409 而不是静默跳过：调用方点名要清理，得知道为什么没清。
 	 */
-	if (FApp::IsUnattended() || GIsRunningUnattendedScript)
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4)
+	const bool bReportWindowUnreachable =
+		GIsRunningUnattendedScript
+		|| IsRunningCommandlet()
+		|| !FSlateApplication::IsInitialized()
+		|| !FSlateApplication::Get().CanAddModalWindow();
+#else
+	const bool bReportWindowUnreachable = false;
+#endif
+	if (bReportWindowUnreachable)
 	{
 		TSharedPtr<FJsonObject> RefusalDetails = MakeShared<FJsonObject>();
 		RefusalDetails->SetNumberField(TEXT("found"), RedirectorAssets.Num());
@@ -2850,38 +2915,59 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 			TEXT("Open the Content Browser, right-click the folder and pick 'Fix Up Redirectors' - or re-run this command with the editor in normal interactive mode and click the report window when it appears."));
 		UAL_CommandUtils::SendError(
 			RequestId, 409,
-			TEXT("Refusing to fix up redirectors while the editor is unattended: IAssetTools::FixupReferencers always opens a modal report window on UE 5.4+, and an unattended editor cancels that window while the engine reads its unset result - which crashes the editor. Redirectors are harmless in the meantime; the engine follows them."),
+			TEXT("Refusing to fix up redirectors: IAssetTools::FixupReferencers opens a modal report window on UE 5.4+, and this editor cannot show one (script mode or no renderer) - the window would be auto-cancelled, which on UE 5.5+ crashes the editor. Redirectors are harmless in the meantime; the engine follows them."),
 			RefusalDetails);
 		return;
 	}
 
 	// FixupReferencers 要的是加载好的对象，不是 FAssetData。坏掉的单独处理。
+	//
+	// 删不删只信「预演和加载**都**说坏」：注册表落后于磁盘时标签说坏、加载却好的，
+	// 按能修的走；标签说好、加载后为空的，预演从没警告过，不删，只报出来。
 	TArray<UObjectRedirector*> Redirectors;
 	TArray<UObject*> BrokenObjects;
+	TArray<FString> BrokenAfterLoad;
 	TArray<FString> LoadFailures;
+	int32 SkippedBroken = 0;
+	int32 RecoveredByLoad = 0;
 	for (const FRedirectorInfo& Info : Infos)
 	{
+		// 标签说坏了的、又不打算删的，不用加载：加载一个目标缺失的重定向器只会
+		// 刷一屏 LogLinker 警告，然后原地不动
+		if (Info.bBroken && !bDeleteBroken)
+		{
+			++SkippedBroken;
+			continue;
+		}
 		UObjectRedirector* Redirector = Cast<UObjectRedirector>(Info.Data.GetAsset());
 		if (!Redirector)
 		{
 			LoadFailures.Add(Info.Data.PackageName.ToString());
 			continue;
 		}
-		// 标签说目标还在，但加载后 DestinationObject 为空的也算坏
-		if (Info.bBroken || Redirector->DestinationObject == nullptr)
+		if (Redirector->DestinationObject != nullptr)
+		{
+			if (Info.bBroken)
+			{
+				++RecoveredByLoad;
+			}
+			Redirectors.Add(Redirector);
+		}
+		else if (Info.bBroken)
 		{
 			BrokenObjects.Add(Redirector);
 		}
 		else
 		{
-			Redirectors.Add(Redirector);
+			BrokenAfterLoad.Add(Info.Data.PackageName.ToString());
 		}
 	}
 
-	if (Redirectors.Num() == 0 && BrokenObjects.Num() == 0)
+	if (LoadFailures.Num() > 0 && LoadFailures.Num() == Infos.Num())
 	{
 		Result->SetBoolField(TEXT("ok"), false);
 		Result->SetNumberField(TEXT("fixed"), 0);
+		Result->SetBoolField(TEXT("dry_run"), false);
 		Result->SetStringField(
 			TEXT("error"),
 			TEXT("Found redirectors in the asset registry but none of them could be loaded."));
@@ -2901,23 +2987,28 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	 * FixupMode 用默认的 DeleteFixedUpRedirectors：改完引用就把重定向器删掉，
 	 * 这正是这个命令的目的 —— 只改引用不删，垃圾还在原地。
 	 *
-	 * ## 这一句在无人值守下**一调必崩**，所以上面先挡了一道
+	 * ## 报告框被自动取消时这一句会崩（5.5+），所以上面先挡了一道
 	 *
 	 * `AssetFixUpRedirectors.cpp` 的 `ExecuteFixUp` 收尾时无条件弹一个
-	 * 「Redirector Update Report」模态框（5.4 引进，5.4–5.8 都有），而
-	 * `SModalEditorDialog::ShowModalDialog`（`Dialogs.h:273-281`）在窗口被
-	 * 无人值守路径取消后会去读一个从没被设置的 `TOptional` ——
-	 * `Result.GetValue()` 直接断言，**编辑器当场崩掉**。
+	 * 「Redirector Update Report」模态框（5.4 引进）。5.4 的 `ShowModalDialog`
+	 * 在窗口被取消时返回默认构造的 false（保留重定向器，不崩）；5.5 起改成
+	 * `TOptional`，窗口被取消后 `Result.GetValue()` 直接断言，**编辑器当场崩掉**。
 	 * `bCheckoutDialogPrompt` 管不到它，它在那个分支之外。
 	 *
-	 * 所以：这条命令**只在交互态跑**（框会真的弹出来，由人点一下），
-	 * 无人值守下前面已经返回 409 了。`content.batch_move` 里那一步则彻底删掉。
+	 * 所以：这条命令**只在框弹得出来的时候跑**（由人点一下），
+	 * 弹不出来的前面已经返回 409 了。`content.batch_move` 里那一步则彻底删掉。
+	 *
+	 * 引擎的失败原因不走 LogAssetTools：≤5.3 走 FMessageLog("EditorErrors")、Perforce
+	 * 走 FMessageLog("SourceControl")、存盘失败走 LogFileHelpers、删不掉走 LogObjectTools；
+	 * 5.4+ 的失败只显示在报告框里，日志里什么都没有。
 	 */
+	const TSet<FName> DirtyBefore = UAL_DirtySavablePackageNames();
 	TArray<TSharedPtr<FJsonValue>> EngineLog;
 	if (Redirectors.Num() > 0)
 	{
-		// 引擎把签不出 / 只读的原因写进日志而不是返回值，这一段收下来随响应回
-		FUAL_ScopedLogCapture LogCapture({ TEXT("LogAssetTools"), TEXT("LogSourceControl") }, ELogVerbosity::Warning);
+		FUAL_ScopedLogCapture LogCapture(
+			{ TEXT("LogAssetTools"), TEXT("LogSourceControl"), TEXT("EditorErrors"), TEXT("SourceControl"), TEXT("LogFileHelpers"), TEXT("LogObjectTools") },
+			ELogVerbosity::Warning);
 		AssetToolsModule.Get().FixupReferencers(Redirectors, /*bCheckoutDialogPrompt=*/false);
 		EngineLog = LogCapture.ToJson();
 	}
@@ -2946,20 +3037,35 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 			}
 		}
 	}
-	const int32 FixedCount = FMath::Max(0, RedirectorAssets.Num() - RemainingCount);
+	// fixed 只算 FixupReferencers 修掉的；ForceDeleteObjects 删掉的另记在 deleted_broken，
+	// 两边加起来不能超过 found
+	const int32 FixedCount = FMath::Max(0, RedirectorAssets.Num() - RemainingCount - DeletedBroken);
+	// 还留在原地的「坏」：加载后确认坏但没删的 + 没打算删所以没加载的 + 预演说好加载却空的
+	const int32 BrokenLeft = (BrokenObjects.Num() - DeletedBroken) + SkippedBroken + BrokenAfterLoad.Num();
+	// 交给 FixupReferencers 却没清掉的
+	const int32 Unfixed = FMath::Max(0, RemainingCount - BrokenLeft - LoadFailures.Num());
 
-	// 改引用会把引用者标脏。不说的话调用方以为清理完就结束了，
-	// 而那些改动其实还在内存里没落盘。
-	//
-	// 判据必须和 editor.save 用同一个（`UAL_SavablePackage.h`）。这里原来自己
-	// 数了一遍且漏掉 `/Script/` 编译包，于是本命令报「还有 2 个包要存」，
-	// 而 editor.save 说「没有需要你保存的改动」—— 两个入口对同一件事给出两个答案。
-	const int32 DirtyCount = UAL_AllDirtySavablePackages().Num();
+	// 改引用会把引用者标脏；但引擎在删重定向器之前就把它们存了，正常跑完什么都不剩。
+	// 只报**这条命令新弄脏的**（引擎没存成的那几个），跑之前就脏的是用户自己改到一半
+	// 的东西，不能算在这里，更不能劝调用方去存 —— editor.save 默认 scope=touched
+	// 也不会存它们，两个入口会给出两个答案。
+	// 判据仍和 editor.save 同一个（`UAL_SavablePackage.h`）。
+	int32 DirtyCount = 0;
+	for (const FName& Name : UAL_DirtySavablePackageNames())
+	{
+		if (!DirtyBefore.Contains(Name))
+		{
+			++DirtyCount;
+		}
+	}
 
 	Result->SetBoolField(TEXT("ok"), true);
 	Result->SetNumberField(TEXT("fixed"), FixedCount);
 	Result->SetNumberField(TEXT("remaining"), RemainingCount);
 	Result->SetNumberField(TEXT("deleted_broken"), DeletedBroken);
+	// 执行后用加载确认过的口径覆盖预演的标签口径，免得一份响应里两个「坏」的数
+	Result->SetNumberField(TEXT("broken_count"), BrokenLeft + DeletedBroken);
+	Result->SetNumberField(TEXT("broken_left"), BrokenLeft);
 	Result->SetBoolField(TEXT("dry_run"), false);
 	Result->SetNumberField(TEXT("dirty_after"), DirtyCount);
 	Result->SetArrayField(TEXT("engine_log"), EngineLog);
@@ -2973,26 +3079,69 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 		}
 		Result->SetArrayField(TEXT("load_failed"), FailJson);
 	}
+	if (BrokenAfterLoad.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> AfterLoadJson;
+		for (const FString& Name : BrokenAfterLoad)
+		{
+			AfterLoadJson.Add(MakeShared<FJsonValueString>(Name));
+		}
+		Result->SetArrayField(TEXT("broken_after_load"), AfterLoadJson);
+	}
 
 	FString Note = FString::Printf(
 		TEXT("Rewrote referencers and removed %d of %d redirector(s)."),
 		FixedCount, RedirectorAssets.Num());
-	if (BrokenObjects.Num() > 0 && !bDeleteBroken)
+	if (DeletedBroken > 0)
+	{
+		Note += FString::Printf(TEXT(" Deleted %d broken redirector(s) on top of that."), DeletedBroken);
+	}
+	if (RecoveredByLoad > 0)
 	{
 		Note += FString::Printf(
-			TEXT(" %d broken redirector(s) (target missing) were left in place - pass delete_broken=true to remove them."),
-			BrokenObjects.Num());
+			TEXT(" %d flagged broken by the asset registry turned out to load fine (registry was behind the disk) and were fixed up instead of deleted."),
+			RecoveredByLoad);
 	}
-	if (RemainingCount > 0 && (RemainingCount - (bDeleteBroken ? 0 : BrokenObjects.Num())) > 0)
+	if (SkippedBroken + (BrokenObjects.Num() - DeletedBroken) > 0)
+	{
+		Note += bDeleteBroken
+			? FString::Printf(
+				TEXT(" %d broken redirector(s) could not be deleted (the delete was vetoed or an asset editor still holds them)."),
+				BrokenObjects.Num() - DeletedBroken)
+			: FString::Printf(
+				TEXT(" %d broken redirector(s) (target missing) were left in place - pass delete_broken=true to remove them."),
+				SkippedBroken);
+	}
+	if (BrokenAfterLoad.Num() > 0)
 	{
 		Note += FString::Printf(
-			TEXT(" %d could not be removed - they may still be referenced by read-only or unloadable assets (see checkout.blocking and engine_log)."),
-			RemainingCount - (bDeleteBroken ? 0 : BrokenObjects.Num()));
+			TEXT(" %d redirector(s) whose target exists in the registry came back with a null destination after loading (broken_after_load); the dry run could not predict them, so they were left in place - re-run dry_run to see them flagged."),
+			BrokenAfterLoad.Num());
 	}
+	if (LoadFailures.Num() > 0)
+	{
+		Note += FString::Printf(TEXT(" %d redirector package(s) failed to load and were skipped (load_failed)."), LoadFailures.Num());
+	}
+	if (Unfixed > 0)
+	{
+		if (BlockedReferencers == 0 && Unfixed == Redirectors.Num())
+		{
+			Note += FString::Printf(
+				TEXT(" %d were not removed although every package was writable - on UE 5.4+ that means the report window was closed with 'Keep Redirectors' (the referencers were still rewritten and saved); re-run and click 'Delete Unreferenced Redirectors'."),
+				Unfixed);
+		}
+		else
+		{
+			Note += FString::Printf(
+				TEXT(" %d could not be removed - a referencer or the redirector package itself is not writable (see checkout.blocking; engine_log carries the engine's own lines when it wrote any)."),
+				Unfixed);
+		}
+	}
+	Note += DirtyReferencersNote;
 	if (DirtyCount > 0)
 	{
 		Note += FString::Printf(
-			TEXT(" %d package(s) are now unsaved - call editor.save to persist the rewritten references."),
+			TEXT(" %d package(s) were newly dirtied by this command and the engine did not save them - call editor.save."),
 			DirtyCount);
 	}
 	Result->SetStringField(TEXT("note"), Note);

@@ -360,12 +360,15 @@ function describeState(s: PackageWriteState): string {
  * 一道闸在摘要里的口吻：预演时是「执行会怎样」，被拦下时是「为什么没动」，
  * proceed 放行时是「替你做了什么 / 后果自负」。
  */
-export type GateMode = 'preview' | 'blocked' | 'proceeded'
+export type GateMode = 'preview' | 'blocked' | 'proceeded' | 'partial'
 
 const GATE_TAIL: Record<GateMode, string> = {
   preview: '，执行时整批都不会动（默认 fail）',
   blocked: '，整批都不会动',
-  proceeded: '（proceed，照发了，引擎会整批拒绝）'
+  proceeded: '（proceed，照发了，引擎会整批拒绝）',
+  // 没有闸的命令（ue_fixup_redirectors）：引擎逐条处理，动不了的那几条对应的
+  // 重定向器留在原地，其余照常清理。没有 on_blocked / batch_size 可给
+  partial: '，对应的那几条重定向器会留在原地，其余照常处理'
 }
 
 /** 签出预检那一段。有阻塞时点名到文件和人；没阻塞时一句话带过 */
@@ -381,12 +384,16 @@ export function checkoutLines(c: CheckoutPreflight | undefined, mode: GateMode):
     }
     if (c.blocking.length > SAMPLE)
       lines.push(
-        `… 只列了前 ${SAMPLE} 个，一共 ${c.blocked} 个动不了。分批调用（batch_size 小一点）能逐批看全。`
+        mode === 'partial'
+          ? `… 只列了前 ${SAMPLE} 个，一共 ${c.blocked} 个动不了。用 paths 分目录调用能逐批看全。`
+          : `… 只列了前 ${SAMPLE} 个，一共 ${c.blocked} 个动不了。分批调用（batch_size 小一点）能逐批看全。`
       )
     lines.push(
       c.scc_enabled && c.scc_available === false
         ? '源码管理开着但连不上，先把 Provider 连好再试。'
-        : '先去签出 / 同步 / 去掉只读，或者联系签出的人；确认无误也可以 on_blocked=proceed。'
+        : mode === 'partial'
+          ? '先去签出 / 同步 / 去掉只读，或者联系签出的人，再跑一次清剩下的。'
+          : '先去签出 / 同步 / 去掉只读，或者联系签出的人；确认无误也可以 on_blocked=proceed。'
     )
   } else if (c.scc_enabled) {
     const needs = (c.states ?? []).filter((s) => s.state === 'needs_checkout').length

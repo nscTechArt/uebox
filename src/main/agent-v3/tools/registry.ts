@@ -108,6 +108,8 @@ interface Registration {
    */
   needsSender?: boolean
   concurrency?: 'sequential' | 'parallel'
+  /** 见 `ToolSpec.requiresExplicitApproval`：每次都问，不给「总是允许」 */
+  requiresExplicitApproval?: boolean
 }
 
 /**
@@ -634,6 +636,9 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'ue_fixup_redirectors',
     namespace: 'ue.content',
     risk: 'destructive',
+    // 审批只看风险不看参数：dry_run=true 那次无害的提示上点了「本次会话都允许」，
+    // 接下来 dry_run=false 那次真删东西的就直接放行了。每次都问，不给「总是允许」
+    requiresExplicitApproval: true,
     concurrency: 'sequential',
     make: () => ueEditor.createFixupRedirectorsTool()
   },
@@ -1238,7 +1243,8 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
       namespace: reg.namespace,
       risk: reg.risk,
       description: rewriteCrossReferences(v2.description ?? reg.name),
-      ...(reg.concurrency ? { concurrency: reg.concurrency } : {})
+      ...(reg.concurrency ? { concurrency: reg.concurrency } : {}),
+      ...(reg.requiresExplicitApproval ? { requiresExplicitApproval: true } : {})
     })
   }) as unknown as UnrealAgentTool<never>[]
 

@@ -11,6 +11,7 @@ import { serviceManager } from '../../../../services'
 import { callUeRawWhenRegistryReady, UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
 import { checkoutLines } from '../../ue-content/summaries'
 import type { CheckoutPreflight } from '../../ue-content/types'
+import { describeToolError } from '../../engineErrors'
 
 import { getTargetConnectionId, setTargetConnectionId } from '../../../core/projectTargetContext'
 import { projectManager } from '../../../../services/project'
@@ -369,10 +370,15 @@ export function createFixupRedirectorsTool() {
 这个工具把引用者改成直接指向新资产，然后删掉重定向器。
 
 **这一步会在编辑器里弹一个「重定向器更新报告」窗口，要有人点一下才继续。**
-引擎的清理接口在 UE 5.4+ 无条件弹这个模态框，而且**没人点的时候它会把编辑器搞崩**
-（框被自动取消后引擎去读一个没设置的返回值，真机撞过三次）。所以：
-- 用户不在电脑前、或者编辑器是无人值守启动的 → 这条命令会直接拒绝，不会去冒险；
-- 要跑就先跟用户说一声「等下编辑器会弹个框，麻烦点一下确定」。
+引擎的清理接口在 UE 5.4+ 无条件弹这个模态框；框弹不出来（脚本模式、没渲染器）时
+会被自动取消，5.5+ 引擎接着去读一个没设置的返回值，**编辑器当场崩**（真机撞过三次）。所以：
+- 编辑器弹不出这个框（脚本模式 / 无渲染器）→ 插件直接拒绝（409），不会去冒险；
+- 「用户不在电脑前」插件**检测不到**：框会一直等到有人点，10 分钟后这边超时、结果不明。
+  所以要跑就先跟用户说一声「等下编辑器会弹个框，麻烦点一下确定」；
+- 框里默认聚焦的是「Keep Redirectors」，按回车等于保留 —— 提醒用户点「Delete」那个。
+
+**它会把引用者原样落盘。** 引用者里有用户改到一半没存的，也一起存了 ——
+返回里的 dirty_referencers 会点名，预演就看得到；不想存就先让用户存或撤销。
 
 **移动过资产之后不是必须跑。** 重定向器留着是安全的：引擎跟着它转发，工程照常能用，
 打包也不受影响。它只是会堆积（多绕一跳、迁移时被拖着走），有空再清。
@@ -381,17 +387,19 @@ ue_content_move **不会**帮你清（它是无人值守跑的，清了就崩）
 
 只想清某几个：paths 给重定向器的包路径或目录，不扫整个 path。
 
-dry_run 的 details 里每条带 target（指向哪）和 broken（目标已经不存在）。
+dry_run 的 details 里每条带 target（指向哪）和 broken（目标已经不存在）。列表最多 200 条，
+超出时 listed_note 会说明只列了一部分。
 坏掉的修不了，默认原地不动；delete_broken=true 才删 —— 删了之后引用它的资产会
-从「跟着断链走」变成「找不到对象」，要先确认没人用。
+从「跟着断链走」变成「找不到对象」，要先确认没人用。只删预演和加载都判定坏的；
+加载后才发现坏的（broken_after_load）不删，只报。
 
-改完引用会让那些引用者变成未保存状态 —— 返回里的 dirty_after 就是数量，
-记得接着调 ue_save。`,
+引擎在删重定向器前就把改过的引用者存了，正常跑完不会留下未保存的包。返回里的
+dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需要接着调 ue_save。`,
 
     inputSchema: z.object({
       path: z.string().optional().describe('搜索根路径，默认 /Game。给了 paths 时忽略'),
       paths: z
-        .array(z.string())
+        .array(z.string().trim().min(1))
         .optional()
         .describe('只处理这些：重定向器的包路径（/Game/Old/SM_Rock）或目录（/Game/Old/）'),
       dry_run: z
@@ -404,7 +412,7 @@ dry_run 的 details 里每条带 target（指向哪）和 broken（目标已经�
         .describe('目标已不存在的重定向器修不了；true 则把它们删掉，默认 false 原地不动')
     }),
 
-    execute: async (input) => {
+    execute: async (input, { abortSignal } = {}) => {
       const notConnected = requireConnection()
       if (notConnected) return notConnected
 
@@ -417,12 +425,15 @@ dry_run 的 details 里每条带 target（指向哪）和 broken（目标已经�
 
         // 全工程扫描 + 逐个加载重定向器，大工程里要几分钟。
         // 注册表还在扫的时候插件会回 registry_not_ready，这里等它扫完再发；
-        // V2 适配件拿不到 report()，所以这条路只能静默等，没有进度行。
+        // V2 适配件拿不到 report()，所以没有进度行 —— 但中止信号必须带上：
+        // 用户按了停止，等注册表的轮询要退出，更不能等完之后把这条破坏性命令再发一遍。
         const response = await callUeRawWhenRegistryReady<{
           ok: boolean
           path: string
           found: number
           broken_count?: number
+          /** 执行后仍留在原地的坏重定向器（含加载后才发现坏的） */
+          broken_left?: number
           fixed: number
           remaining?: number
           deleted_broken?: number
@@ -430,35 +441,58 @@ dry_run 的 details 里每条带 target（指向哪）和 broken（目标已经�
           dirty_after?: number
           redirectors: string[]
           details?: { path: string; target?: string; broken?: boolean }[]
+          /** redirectors / details 最多列 200 条，超出时插件在这里说明 */
+          listed_note?: string
           not_redirectors?: string[]
+          /** 加载失败、跳过没处理的重定向器包 */
+          load_failed?: string[]
+          /** 预演说好、加载后目标却为空的：不删，只报 */
+          broken_after_load?: string[]
+          /** 引用者里用户改到一半没存的：FixupReferencers 会把它们原样落盘 */
+          dirty_referencers?: string[]
           note?: string
           error?: string
-          /** 引用者的签出预检（安全网 §2.3）：谁签出着、哪些只读，改引用前就知道 */
+          code?: string | number
+          /** 引用者与重定向器自身的签出预检（安全网 §2.3）：谁签出着、哪些只读，改之前就知道 */
           checkout?: CheckoutPreflight
-          /** FixupReferencers 期间 LogAssetTools 的 Warning 及以上行 */
+          /** FixupReferencers 期间引擎的 Warning 及以上行（EditorErrors / SourceControl 等） */
           engine_log?: string[]
-        }>('content.fixup_redirectors', params, { timeoutMs: 600000 })
+        }>('content.fixup_redirectors', params, {
+          timeoutMs: 600000,
+          ctx: { report: () => {}, ...(abortSignal ? { signal: abortSignal } : {}) }
+        })
 
         if (!response) {
           return { success: false, error: '插件没有响应（content.fixup_redirectors）' }
         }
         if (!response.ok) {
-          return { success: false, error: response.error ?? '清理重定向器失败' }
+          // 409 的 details.how_to（右键菜单那条路）、503 的扫描进度都在 details 里，
+          // 适配层会把 code 和 details 拼进给模型的那句话，别在这里丢掉
+          const failure = response as unknown as { details?: unknown }
+          return {
+            success: false,
+            error: response.error ?? '清理重定向器失败',
+            ...(response.code !== undefined ? { code: response.code } : {}),
+            ...(failure.details !== undefined ? { details: failure.details } : {})
+          }
         }
 
         const broken = response.broken_count ?? 0
-        const scopeLabel = params.paths ? '指定的路径' : `${response.path} 下`
-        // 预演时是「执行会怎样」，执行时是「引擎为什么没改成」—— 引用者被别人签出着，
-        // FixupReferencers 改不了它，那条重定向器就会留在 remaining 里
-        const checkout = checkoutLines(
-          response.checkout,
-          response.dry_run ? 'preview' : 'proceeded'
-        )
+        // 老插件没有 broken_left：按「断链数减去删掉的」估
+        const brokenLeft =
+          response.broken_left ?? Math.max(0, broken - (response.deleted_broken ?? 0))
+        // 看插件报的范围，不看这边发了什么：paths 全是空串时插件会退回全 /Game 扫描
+        const scopeLabel = response.path === '(paths)' ? '指定的路径' : `${response.path} 下`
+        // 这条命令没有闸：引用者被别人签出着，FixupReferencers 改不了它，那条重定向器
+        // 就留在 remaining 里，其余照常清理 —— 预演和执行都按「部分」的口吻说
+        const checkout = checkoutLines(response.checkout, 'partial')
+        const dirtyRefs = response.dirty_referencers ?? []
         return {
           success: true,
           path: response.path,
           found: response.found,
           ...(response.broken_count !== undefined ? { broken_count: response.broken_count } : {}),
+          ...(response.broken_left !== undefined ? { broken_left: response.broken_left } : {}),
           fixed: response.fixed,
           ...(response.remaining !== undefined ? { remaining: response.remaining } : {}),
           ...(response.deleted_broken !== undefined
@@ -468,7 +502,11 @@ dry_run 的 details 里每条带 target（指向哪）和 broken（目标已经�
           ...(response.dirty_after !== undefined ? { dirty_after: response.dirty_after } : {}),
           redirectors: response.redirectors,
           ...(response.details ? { details: response.details } : {}),
+          ...(response.listed_note ? { listed_note: response.listed_note } : {}),
           ...(response.not_redirectors ? { not_redirectors: response.not_redirectors } : {}),
+          ...(response.load_failed ? { load_failed: response.load_failed } : {}),
+          ...(response.broken_after_load ? { broken_after_load: response.broken_after_load } : {}),
+          ...(dirtyRefs.length > 0 ? { dirty_referencers: dirtyRefs } : {}),
           ...(response.note ? { note: response.note } : {}),
           ...(response.checkout ? { checkout: response.checkout } : {}),
           ...(response.engine_log && response.engine_log.length > 0
@@ -481,12 +519,21 @@ dry_run 的 details 里每条带 target（指向哪）和 broken（目标已经�
                 '（本次没有改动任何东西）'
               : `清理了 ${response.fixed}/${response.found} 个重定向器` +
                 (response.deleted_broken ? `，删除断链的 ${response.deleted_broken} 个` : '') +
-                (broken > 0 && !response.deleted_broken ? `，${broken} 个断链的原地未动` : '') +
+                (brokenLeft > 0 ? `，${brokenLeft} 个断链的原地未动` : '') +
+                (response.load_failed && response.load_failed.length > 0
+                  ? `，${response.load_failed.length} 个加载失败没处理`
+                  : '') +
                 (response.dirty_after ? `，${response.dirty_after} 个包待保存` : '')) +
+            (response.listed_note ? `\n只列了一部分：${response.listed_note}` : '') +
+            (dirtyRefs.length > 0
+              ? `\n⚠ ${dirtyRefs.length} 个引用者有未保存的改动，${response.dry_run ? '执行时' : '刚才'}会被原样落盘：${dirtyRefs.slice(0, 5).join('、')}${dirtyRefs.length > 5 ? ' 等' : ''}`
+              : '') +
             (checkout.length > 0 ? `\n${checkout.join('\n')}` : '')
         }
       } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
+        // 超时要保住「超时」这个事实：报告框等人点的时候这条 RPC 就是会超时，
+        // 引擎那边多半还会做完，不能报成「确定失败」让调用方重发
+        return describeToolError(error)
       }
     }
   })
