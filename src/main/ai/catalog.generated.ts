@@ -48,7 +48,7 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
   },
   {
     "id": "chatgpt",
-    "displayName": "ChatGPT Plus / Pro",
+    "displayName": "Codex",
     "group": "subscription",
     "kind": "chat",
     "protocol": "openai-codex-responses",
@@ -540,6 +540,28 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     ]
   },
   {
+    "id": "typesafe",
+    "displayName": "TypeSafe（结构化判定）",
+    "group": "judge",
+    "kind": "judge",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.typesafe.ai/v1",
+    "apiKeyUrl": "https://console.typesafe.ai/",
+    "requiresApiKey": true,
+    "defaultEnvVar": "TYPESAFE_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "jev-latest",
+        "displayName": "Jev（最新）"
+      },
+      {
+        "id": "jev-1.13.0",
+        "displayName": "Jev 1.13（锁定版本）"
+      }
+    ]
+  },
+  {
     "id": "openai-embedding",
     "displayName": "OpenAI Embeddings",
     "group": "embedding",
@@ -945,6 +967,54 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     ]
   },
   {
+    "id": "doubao-stt",
+    "displayName": "豆包语音识别 STT 2.0",
+    "group": "stt",
+    "kind": "stt",
+    "protocol": "openai-completions",
+    "baseUrl": "https://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+    "apiKeyUrl": "https://console.volcengine.com/speech/new/setting/apikeys",
+    "requiresApiKey": true,
+    "defaultEnvVar": "VOLCENGINE_SPEECH_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "volc.seedasr.sauc.duration",
+        "displayName": "豆包 STT 2.0（小时版）"
+      },
+      {
+        "id": "volc.seedasr.sauc.concurrent",
+        "displayName": "豆包 STT 2.0（并发版）"
+      }
+    ]
+  },
+  {
+    "id": "alibaba-asr",
+    "displayName": "阿里云 Qwen-Audio 语音识别",
+    "group": "stt",
+    "kind": "stt",
+    "protocol": "openai-completions",
+    "baseUrl": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+    "apiKeyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
+    "requiresApiKey": true,
+    "defaultEnvVar": "DASHSCOPE_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "qwen-audio-3.1-asr-flash-streaming",
+        "displayName": "Qwen-Audio 3.1 ASR Flash Streaming"
+      },
+      {
+        "id": "qwen-audio-3.0-asr-flash-streaming",
+        "displayName": "Qwen-Audio 3.0 ASR Flash Streaming"
+      },
+      {
+        "id": "fun-asr-realtime",
+        "displayName": "Fun-ASR Realtime"
+      }
+    ]
+  },
+  {
     "id": "doubao-realtime",
     "displayName": "豆包实时语音",
     "group": "realtime",
@@ -1003,13 +1073,80 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "supportsOAuth": true,
     "models": [
       {
+        "id": "xiaomi/mimo-v2.6-pro",
+        "displayName": "MiMo-V2.6-Pro",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "xiaomi/mimo-v2.6-flash",
+        "displayName": "MiMo-V2.6-Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "xiaomi/mimo-v2.6-pro-ultraspeed",
+        "displayName": "MiMo-V2.6-Pro-UltraSpeed",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "x-ai/grok-4.7",
+        "displayName": "Grok 4.7",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 500000,
+        "maxOutputTokens": 450000
+      },
+      {
+        "id": "prism-ml/ternary-bonsai-2-27b",
+        "displayName": "Ternary Bonsai 2 27B",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 32768
+      },
+      {
+        "id": "z-ai/glm-5.3-flashx",
+        "displayName": "GLM 5.3 FlashX",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "unbiased/pareto",
+        "displayName": "Pareto",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 262144,
+        "maxOutputTokens": 131072
+      },
+      {
         "id": "~deepseek/deepseek-pro-latest",
         "displayName": "DeepSeek Pro Latest",
         "supportsVision": false,
         "supportsTools": true,
         "supportsReasoning": true,
         "contextWindow": 1048576,
-        "maxOutputTokens": 943718
+        "maxOutputTokens": 384000
       },
       {
         "id": "~deepseek/deepseek-flash-latest",
@@ -1046,71 +1183,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1050000,
         "maxOutputTokens": 128000
-      },
-      {
-        "id": "~openai/gpt-sol-latest",
-        "displayName": "GPT Sol Latest",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "~openai/gpt-luna-latest",
-        "displayName": "GPT Luna Latest",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "~openai/gpt-astra-latest",
-        "displayName": "GPT Astra Latest",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "deepseek/deepseek-v4.1-flash",
-        "displayName": "DeepSeek V4.1 Flash",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1048576,
-        "maxOutputTokens": 384000
-      },
-      {
-        "id": "inclusionai/ling-3.0-flash-vl:free",
-        "displayName": "Ling 3.0 Flash VL (free)",
-        "supportsVision": true,
-        "supportsVideo": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 262144,
-        "maxOutputTokens": 32768
-      },
-      {
-        "id": "inclusionai/ling-3.0-flash-vl",
-        "displayName": "Ling 3.0 Flash VL",
-        "supportsVision": true,
-        "supportsVideo": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 131072,
-        "maxOutputTokens": 32768
-      },
-      {
-        "id": "nex-agi/nex-n2.5-mini:free",
-        "displayName": "Nex-N2.5-Mini (free)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 262144,
-        "maxOutputTokens": 235929
       }
     ]
   },
@@ -1126,6 +1198,51 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "AI_GATEWAY_API_KEY",
     "hasLogo": true,
     "models": [
+      {
+        "id": "xiaomi/mimo-v2.6-pro",
+        "displayName": "MiMo V2.6 Pro",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "xiaomi/mimo-v2.6-flash",
+        "displayName": "MiMo V2.6 Flash",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "xiaomi/mimo-v2.6-pro-ultraspeed",
+        "displayName": "MiMo V2.6 Pro UltraSpeed",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "spacexai/grok-4.7",
+        "displayName": "Grok 4.7",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 500000,
+        "maxOutputTokens": 500000
+      },
+      {
+        "id": "alibaba/qwen3.8-omni-flash",
+        "displayName": "Qwen 3.8 Omni Flash",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
       {
         "id": "sakana/fugu-max",
         "displayName": "Fugu Max",
@@ -1150,8 +1267,8 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsVision": true,
         "supportsTools": true,
         "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 384000
+        "contextWindow": 1048576,
+        "maxOutputTokens": 32768
       },
       {
         "id": "inception/mercury-2.5",
@@ -1188,51 +1305,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 256000,
         "maxOutputTokens": 32000
-      },
-      {
-        "id": "inclusionai/ling-3.0-flash-sante-free",
-        "displayName": "Ling 3.0 Flash Sante (Free)",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 256000,
-        "maxOutputTokens": 32000
-      },
-      {
-        "id": "openai/gpt-6-astra",
-        "displayName": "GPT-6 Astra",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "openai/gpt-6-astra-fast",
-        "displayName": "GPT-6 Astra (Fast)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "alibaba/qwen3.8-max-0902",
-        "displayName": "Qwen3.8 Max 0902",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 991000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "google/gemini-3.8-flash",
-        "displayName": "Gemini 3.8 Flash",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 65536
       }
     ]
   },
@@ -1248,6 +1320,24 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "CLOUDFLARE_API_TOKEN",
     "hasLogo": true,
     "models": [
+      {
+        "id": "unbiased/pareto",
+        "displayName": "Pareto",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 262144,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "openai/gpt-6-astra",
+        "displayName": "GPT-6 Astra",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
       {
         "id": "anthropic/claude-fable-5.1",
         "displayName": "Claude Fable 5.1",
@@ -1339,25 +1429,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1000000,
         "maxOutputTokens": 128000
-      },
-      {
-        "id": "anthropic/claude-fable-5",
-        "displayName": "Claude Fable 5",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "alibaba/qwen3.7-plus",
-        "displayName": "Qwen3.7 Plus",
-        "supportsVision": true,
-        "supportsVideo": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 64000
       }
     ]
   },
@@ -1732,6 +1803,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "hasLogo": true,
     "models": [
       {
+        "id": "grok-4.7",
+        "displayName": "Grok 4.7",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 500000,
+        "maxOutputTokens": 500000
+      },
+      {
         "id": "grok-4.6",
         "displayName": "Grok 4.6",
         "supportsVision": true,
@@ -1812,6 +1892,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "MISTRAL_API_KEY",
     "hasLogo": true,
     "models": [
+      {
+        "id": "zai-glm-5-3",
+        "displayName": "GLM-5.3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
       {
         "id": "zai-glm-5-2",
         "displayName": "GLM-5.2",
@@ -2112,15 +2201,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 131072
       },
       {
-        "id": "accounts/fireworks/models/deepseek-v4-flash-vision-exp",
-        "displayName": "DeepSeek V4 Flash Vision Exp",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 384000
-      },
-      {
         "id": "accounts/fireworks/routers/glm-latest",
         "displayName": "GLM Latest",
         "supportsVision": false,
@@ -2148,18 +2228,27 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 384000
       },
       {
-        "id": "accounts/fireworks/models/deepseek-v4-pro-0813",
-        "displayName": "DeepSeek V4 Pro 0813",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 384000
-      },
-      {
         "id": "accounts/fireworks/models/qwen3p8-2p4t-a95b",
         "displayName": "Qwen3.8 2.4T A95B",
         "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+        "displayName": "Nemotron 3.5 Lightning 30B A3B",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 262144
+      },
+      {
+        "id": "accounts/fireworks/routers/qwen-max-latest",
+        "displayName": "Qwen Max Latest (Qwen3.8 Max)",
+        "supportsVision": true,
         "supportsTools": true,
         "supportsReasoning": true,
         "contextWindow": 262144,
@@ -2360,6 +2449,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 384000
       },
       {
+        "id": "tencent/Hy4-preview",
+        "displayName": "Hy4 preview",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
         "id": "zai-org/GLM-5.3-Flash",
         "displayName": "GLM-5.3-Flash",
         "supportsVision": true,
@@ -2448,15 +2546,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1048576,
         "maxOutputTokens": 1048576
-      },
-      {
-        "id": "tencent/Hy3",
-        "displayName": "Hy3",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 262144,
-        "maxOutputTokens": 128000
       }
     ]
   },
@@ -2473,6 +2562,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "hasLogo": true,
     "models": [
       {
+        "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "displayName": "DeepSeek V4.1 Flash",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048000,
+        "maxOutputTokens": 1048000
+      },
+      {
         "id": "zai-org/GLM-5.3-Flash",
         "displayName": "GLM-5.3-Flash",
         "supportsVision": false,
@@ -2480,6 +2578,24 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1024000,
         "maxOutputTokens": 1024000
+      },
+      {
+        "id": "zai-org/GLM-5.3",
+        "displayName": "GLM-5.3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1024000,
+        "maxOutputTokens": 1024000
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+        "displayName": "DeepSeek V4 Pro 0813",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 979000,
+        "maxOutputTokens": 979000
       },
       {
         "id": "nvidia/Nemotron-3_5-Lightning",
@@ -2552,33 +2668,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1048576,
         "maxOutputTokens": 1048576
-      },
-      {
-        "id": "nvidia/nemotron-3-super-120b-a12b",
-        "displayName": "Nemotron-3-Super-120B-A12B",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 262144,
-        "maxOutputTokens": 32768
-      },
-      {
-        "id": "NousResearch/Hermes-4-405B",
-        "displayName": "Hermes-4-405B",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 131072,
-        "maxOutputTokens": 8192
-      },
-      {
-        "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-        "displayName": "Qwen3-30B-A3B-Instruct-2507",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": false,
-        "contextWindow": 262144,
-        "maxOutputTokens": 8192
       }
     ]
   },
@@ -2717,6 +2806,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "hasLogo": true,
     "models": [
       {
+        "id": "grok-4-7",
+        "displayName": "Grok 4.7",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 500000,
+        "maxOutputTokens": 200000
+      },
+      {
         "id": "deepseek-v4-1-flash",
         "displayName": "DeepSeek V4.1 Flash",
         "supportsVision": true,
@@ -2818,16 +2916,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1000000,
         "maxOutputTokens": 32768
-      },
-      {
-        "id": "gemini-3-7-flash",
-        "displayName": "Gemini 3.7 Flash",
-        "supportsVision": true,
-        "supportsVideo": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 65536
       }
     ]
   },
@@ -3197,17 +3285,17 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 128000
       },
       {
-        "id": "claude-fable-5@default",
-        "displayName": "Claude Fable 5",
-        "supportsVision": true,
+        "id": "zai-org/glm-5.2-maas",
+        "displayName": "GLM-5.2",
+        "supportsVision": false,
         "supportsTools": true,
         "supportsReasoning": true,
         "contextWindow": 1000000,
-        "maxOutputTokens": 128000
+        "maxOutputTokens": 64000
       },
       {
-        "id": "claude-opus-4-8@default",
-        "displayName": "Claude Opus 4.8",
+        "id": "claude-fable-5@default",
+        "displayName": "Claude Fable 5",
         "supportsVision": true,
         "supportsTools": true,
         "supportsReasoning": true,
@@ -3256,6 +3344,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1000000,
         "maxOutputTokens": 384000
+      },
+      {
+        "id": "kimi-k3",
+        "displayName": "Kimi K3",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 1048576
       },
       {
         "id": "glm-5.2",
@@ -3332,16 +3429,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsTools": true,
         "supportsReasoning": true,
         "contextWindow": 1000000,
-        "maxOutputTokens": 65536
-      },
-      {
-        "id": "qwen3.5-27b",
-        "displayName": "Qwen3.5 27B",
-        "supportsVision": true,
-        "supportsVideo": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 262144,
         "maxOutputTokens": 65536
       }
     ]
@@ -3452,6 +3539,16 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "ZHIPU_API_KEY",
     "hasLogo": true,
     "models": [
+      {
+        "id": "glm-5.3-flashx",
+        "displayName": "GLM-5.3-FlashX",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
       {
         "id": "glm-5.3-flash",
         "displayName": "GLM-5.3-Flash",
@@ -3565,6 +3662,87 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "hasLogo": true,
     "models": [
       {
+        "id": "zai-org/GLM-5.3-Flash",
+        "displayName": "GLM-5.3-Flash",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1049000,
+        "maxOutputTokens": 262000
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+        "displayName": "DeepSeek V4 Flash Vision Exp",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "zai-org/GLM-5.3",
+        "displayName": "GLM-5.3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1049000,
+        "maxOutputTokens": 262000
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+        "displayName": "DeepSeek V4 Pro 0813",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "Qwen/Qwen3.8-2.4T-A95B",
+        "displayName": "Qwen3.8 2.4T A95B",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1049000,
+        "maxOutputTokens": 131000
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "displayName": "DeepSeek V4 Flash 0731",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "moonshotai/Kimi-K3",
+        "displayName": "Kimi K3",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 262000
+      },
+      {
+        "id": "tencent/Hy3",
+        "displayName": "Hy3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 262144
+      },
+      {
+        "id": "meituan-longcat/LongCat-2.0",
+        "displayName": "LongCat-2.0",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1049000,
+        "maxOutputTokens": 131072
+      },
+      {
         "id": "zai-org/GLM-5.2",
         "displayName": "GLM-5.2",
         "supportsVision": false,
@@ -3574,98 +3752,17 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 262000
       },
       {
-        "id": "deepseek-ai/DeepSeek-V4-Flash",
-        "displayName": "DeepSeek V4 Flash",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 384000
-      },
-      {
-        "id": "deepseek-ai/DeepSeek-V4-Pro",
-        "displayName": "DeepSeek V4 Pro",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 384000
-      },
-      {
-        "id": "Qwen/Qwen3.6-27B",
-        "displayName": "Qwen3.6 27B",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": false,
-        "contextWindow": 262144,
-        "maxOutputTokens": 262144
-      },
-      {
-        "id": "moonshotai/Kimi-K2.6",
-        "displayName": "moonshotai/Kimi-K2.6",
+        "id": "moonshotai/Kimi-K2.7-Code",
+        "displayName": "Kimi K2.7 Code",
         "supportsVision": true,
         "supportsTools": true,
         "supportsReasoning": true,
-        "contextWindow": 262000,
-        "maxOutputTokens": 262000
-      },
-      {
-        "id": "tencent/Hy3-preview",
-        "displayName": "Hy3 preview",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
         "contextWindow": 262144,
         "maxOutputTokens": 262144
       },
       {
-        "id": "Qwen/Qwen3.6-35B-A3B",
-        "displayName": "Qwen3.6 35B-A3B",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": false,
-        "contextWindow": 262144,
-        "maxOutputTokens": 262144
-      },
-      {
-        "id": "zai-org/GLM-5.1",
-        "displayName": "zai-org/GLM-5.1",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 205000,
-        "maxOutputTokens": 205000
-      },
-      {
-        "id": "google/gemma-4-31B-it",
-        "displayName": "Gemma 4 31B IT",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": false,
-        "contextWindow": 262144,
-        "maxOutputTokens": 262144
-      },
-      {
-        "id": "google/gemma-4-26B-A4B-it",
-        "displayName": "Gemma 4 26B A4B IT",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": false,
-        "contextWindow": 262144,
-        "maxOutputTokens": 262144
-      },
-      {
-        "id": "zai-org/GLM-5V-Turbo",
-        "displayName": "zai-org/GLM-5V-Turbo",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 200000,
-        "maxOutputTokens": 131072
-      },
-      {
-        "id": "Qwen/Qwen3.5-9B",
-        "displayName": "Qwen/Qwen3.5-9B",
+        "id": "google/gemma-4-12B-it",
+        "displayName": "Gemma 4 12B IT",
         "supportsVision": false,
         "supportsTools": true,
         "supportsReasoning": false,
@@ -3676,7 +3773,7 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
   },
   {
     "id": "minimax-cn",
-    "displayName": "MiniMax (minimaxi.com)",
+    "displayName": "MiniMax (minimax.cn)",
     "group": "cn",
     "kind": "chat",
     "protocol": "anthropic-messages",
@@ -3970,75 +4067,5 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "INFINI_API_KEY",
     "hasLogo": true,
     "models": []
-  },
-  {
-    "id": "typesafe",
-    "displayName": "TypeSafe（结构化判定）",
-    "group": "judge",
-    "kind": "judge",
-    "protocol": "openai-completions",
-    "baseUrl": "https://api.typesafe.ai/v1",
-    "apiKeyUrl": "https://console.typesafe.ai/",
-    "requiresApiKey": true,
-    "defaultEnvVar": "TYPESAFE_API_KEY",
-    "hasLogo": false,
-    "models": [
-      {
-        "id": "jev-latest",
-        "displayName": "Jev（最新）"
-      },
-      {
-        "id": "jev-1.13.0",
-        "displayName": "Jev 1.13（锁定版本）"
-      }
-    ]
-  },
-  {
-    "id": "doubao-stt",
-    "displayName": "豆包语音识别 STT 2.0",
-    "group": "stt",
-    "kind": "stt",
-    "protocol": "openai-completions",
-    "baseUrl": "https://openspeech.bytedance.com/api/v3/sauc/bigmodel",
-    "apiKeyUrl": "https://console.volcengine.com/speech/new/setting/apikeys",
-    "requiresApiKey": true,
-    "defaultEnvVar": "VOLCENGINE_SPEECH_KEY",
-    "hasLogo": true,
-    "models": [
-      {
-        "id": "volc.seedasr.sauc.duration",
-        "displayName": "豆包 STT 2.0（小时版）"
-      },
-      {
-        "id": "volc.seedasr.sauc.concurrent",
-        "displayName": "豆包 STT 2.0（并发版）"
-      }
-    ]
-  },
-  {
-    "id": "alibaba-asr",
-    "displayName": "阿里云 Qwen-Audio 语音识别",
-    "group": "stt",
-    "kind": "stt",
-    "protocol": "openai-completions",
-    "baseUrl": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
-    "apiKeyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
-    "requiresApiKey": true,
-    "defaultEnvVar": "DASHSCOPE_API_KEY",
-    "hasLogo": true,
-    "models": [
-      {
-        "id": "qwen-audio-3.1-asr-flash-streaming",
-        "displayName": "Qwen-Audio 3.1 ASR Flash Streaming"
-      },
-      {
-        "id": "qwen-audio-3.0-asr-flash-streaming",
-        "displayName": "Qwen-Audio 3.0 ASR Flash Streaming"
-      },
-      {
-        "id": "fun-asr-realtime",
-        "displayName": "Fun-ASR Realtime"
-      }
-    ]
   }
 ] as CatalogEntry[])

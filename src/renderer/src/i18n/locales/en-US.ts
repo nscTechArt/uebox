@@ -627,6 +627,8 @@ export default {
       desc: 'Assign models by purpose.',
       unset: 'Not set',
       moreLabel: 'Show details',
+      expand: 'More capabilities ({count})',
+      collapse: 'Show less',
       chat: 'Chat',
       chatDesc: 'Default model for the assistant and every chat window.',
       agent: 'Agent',

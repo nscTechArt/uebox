@@ -18,7 +18,7 @@ import AppTooltip from '@renderer/components/AppTooltip.vue'
  * 单个模型的能力位和档位阶梯绝大多数人一辈子不碰。全平铺在一页上，
  * 那些天天要用的就被埋在一屏控件里了。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
 import {
@@ -58,6 +58,58 @@ const initialLoading = computed(() => state.loading.value && state.settings.valu
 
 /** 角色的展示顺序。chat 在最前，因为只配它一个就能把对话那一面跑起来 */
 const ROLES = MODEL_ROLES
+
+/**
+ * 默认露在外面的四个。
+ *
+ * 十四个角色平铺下来是一整屏下拉框，而其中十个是**可选能力**：生图、视频、
+ * 3D、音乐、听写…… 没配的人不需要看见它们，配过的人一年也调不了一次。
+ * 前四个不一样 —— chat 和 agent 不配就什么都跑不了，vision 和 summary 跟着
+ * 主模型走，是真正会被反复调的那几个。
+ *
+ * 写死成一张表而不是 `MODEL_ROLES.slice(0, 4)`：那样一来任何人调整
+ * MODEL_ROLES 的顺序，都会悄无声息地改变「默认露出哪几个」。
+ */
+const CORE_ROLES: readonly ModelRole[] = Object.freeze<ModelRole[]>([
+  'chat',
+  'agent',
+  'vision',
+  'summary'
+])
+const CORE_ROLE_SET = new Set<ModelRole>(CORE_ROLES)
+const EXTRA_ROLES = ROLES.filter((role) => !CORE_ROLE_SET.has(role))
+
+const rolesExpanded = ref(false)
+
+/**
+ * 已经配过的可选角色 —— 配过就一直留在外面，**只进不出**。
+ *
+ * 只进不出是为了「清空」那一下：如果可见性直接跟着当前绑定算，用户在折叠状态下
+ * 把生图清成未设置，那一行会当场消失 —— 他刚点完就找不到自己点的是哪儿了，
+ * 想改回去还得先展开。进了这个集合就待到关页面为止。
+ */
+const revealedExtras = ref<ReadonlySet<ModelRole>>(new Set())
+
+watch(
+  roles,
+  (value) => {
+    const next = new Set(revealedExtras.value)
+    for (const role of EXTRA_ROLES) if (value?.[role]) next.add(role)
+    if (next.size !== revealedExtras.value.size) revealedExtras.value = next
+  },
+  { deep: true, immediate: true }
+)
+
+const visibleRoles = computed(() =>
+  rolesExpanded.value
+    ? ROLES
+    : ROLES.filter((role) => CORE_ROLE_SET.has(role) || revealedExtras.value.has(role))
+)
+
+/** 折叠起来能省掉几行。为 0 时整个「更多」按钮都不出现 —— 没有可折的就别占位置 */
+const collapsibleCount = computed(
+  () => EXTRA_ROLES.filter((role) => !revealedExtras.value.has(role)).length
+)
 
 /**
  * 说明比一行长的角色，长文收进 `?` 里。
@@ -362,7 +414,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
       <div class="setting-desc">{{ $t('aiProvider.roles.desc') }}</div>
 
       <div class="role-list">
-        <div v-for="role in ROLES" :key="role" class="setting-item">
+        <div v-for="role in visibleRoles" :key="role" class="setting-item">
           <div class="setting-info">
             <div class="setting-label">
               {{ $t(`aiProvider.roles.${role}`) }}
@@ -437,6 +489,21 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
           </a-select>
         </div>
       </div>
+
+      <!-- 加载中先不出现：这时候还不知道有几个角色已经配过，数字会先写错再改 -->
+      <button
+        v-if="!initialLoading && collapsibleCount > 0"
+        type="button"
+        class="role-disclosure"
+        :aria-expanded="rolesExpanded"
+        @click="rolesExpanded = !rolesExpanded"
+      >
+        {{
+          rolesExpanded
+            ? $t('aiProvider.roles.collapse')
+            : $t('aiProvider.roles.expand', { count: collapsibleCount })
+        }}
+      </button>
     </div>
 
     <div class="provider-config-path">
@@ -672,6 +739,26 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
 
 .role-list {
   margin-top: 12px;
+}
+
+.role-disclosure {
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.role-disclosure:hover,
+.role-disclosure:focus-visible {
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
 }
 
 .provider-config-path {

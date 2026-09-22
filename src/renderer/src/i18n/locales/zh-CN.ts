@@ -616,6 +616,9 @@ export default {
       unset: '未设置',
       // 行内只留「选之前要知道的」，长文收进 More（一个 ? 图标的 tooltip）
       moreLabel: '查看详细说明',
+      // 可选能力默认折叠。配过的那几个会留在外面，所以数字是「还折着几个」而不是总数
+      expand: '更多能力（{count}）',
+      collapse: '收起',
       chat: '对话',
       chatDesc: '助手与各处聊天窗口的默认模型。',
       agent: 'Agent',

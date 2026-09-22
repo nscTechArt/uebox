@@ -205,12 +205,18 @@ export const CURATED = [
     // 不是 openai-responses：这个后端要账号 id、只发流、不落库，
     // 三条差异都写在 src/shared/aiProvider.ts 的协议注释里
     protocol: 'openai-codex-responses',
-    displayName: 'ChatGPT Plus / Pro',
+    // 叫 Codex 而不是「ChatGPT Plus / Pro」：走的就是 Codex 那个后端，
+    // 而且卡片一行放不下后面那截，截断之后反而看不出是哪一家
+    displayName: 'Codex',
     supportsOAuth: true
   },
   {
     id: 'kimi-code',
-    sourceId: 'kimi-for-coding',
+    // models.dev 把这家拆成了 global（api.kimi.ai）和 cn（api.kimi.com）两条，
+    // 原来的 `kimi-for-coding` 整个消失 —— 不跟着改，同步脚本会直接报
+    //「这些 id 在 models.dev 里找不到了」然后退出，整份目录都生不出来。
+    // 认 cn 那条：baseUrl 和取 Key 的文档地址都和我们原来预置的一字不差。
+    sourceId: 'kimi-code-plan-cn',
     group: 'subscription',
     baseUrl: 'https://api.kimi.com/coding/v1',
     protocol: 'openai-completions',
@@ -1080,7 +1086,7 @@ const MANUAL_ENTRIES = {
     }
   },
   chatgpt: {
-    name: 'ChatGPT Plus / Pro',
+    name: 'Codex',
     env: [],
     doc: 'https://developers.openai.com/codex/auth',
     // Codex 后端**没有** `/models` 接口，「导入模型」在这一家用不了 ——
