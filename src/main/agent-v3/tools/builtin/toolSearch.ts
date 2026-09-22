@@ -106,6 +106,7 @@ const CORE_NAMES = new Set<string>([
  * | 组 | 字节 | 平衡 p | 取舍 |
  * |---|---:|---:|---|
  * | `local` | 1,129 | 2.1% | 常驻 |
+ * | `mcp` | 3,187 | 6.0% | **留在折叠区**，见下 |
  * | `note` | 1,219 | 2.3% | 常驻 |
  * | `ue.mesh` | 1,309 | 2.5% | 常驻 |
  * | `ue.cpp` | 3,322 | 6.2% | 常驻 |
@@ -120,6 +121,15 @@ const CORE_NAMES = new Set<string>([
  * 线划在 6.1 KB 和 8.3 KB 之间，不是「小于 10 KB」这种整数 —— 上面三个的平衡 p
  * 已经进了 15%~20%，而 `ue.system` 在真实会话样本里是 12%（27/223 轮）。**它们是
  * 真正的边缘，留在折叠区等数据，不是被漏掉了。**
+ *
+ * `mcp`（2026-09-22 加）按平衡 p 排在 `ue.cpp` 和 `library` 之间，也就是这张表的
+ * 常驻那一侧，但**没有放进来**：整组常驻另有一条 30,000 字节的线
+ *（见 `toolSearchCatalog.test.ts` 的「测量完整真实定义」），此刻只剩约 1.5 KB 余量，
+ * 放它进去就得抬那条线 —— 而那条线的规矩是「要抬先拿实测 p，不是改个数字」，
+ * 我没有这个组的实测 p。折叠它的代价由另外两条路补上：`local-files` 技能正文里
+ * 点了 `connect_mcp_server` 的名字（技能带组是主路径），系统提示词的 MCP 那一段
+ * 也一直写着这个工具名（见 `capabilities/mcp/promptSection.ts`），
+ * 所以模型不必靠 `search_tools` 撞才知道它存在。
  *
  * ## 这里的不确定性，别当它已经定了
  *
@@ -199,6 +209,7 @@ const DOMAIN_TERMS: Record<string, string> = {
   browser: '浏览器 网页 点击 输入 browser webpage click',
   local: '本机 文件 目录 搜索 读写 local file directory search read write',
   'local.shell': '命令行 终端 脚本 执行 shell terminal command run',
+  mcp: 'mcp 接入 连接 服务 第三方 集成 插件 server connect integration',
   host: '宿主 提问 播报 会话 host ask report session',
   core: '技能 加载 搜索 子任务 skill load search task',
   web: '联网 搜索 网页 文档 web search read documentation'

@@ -436,6 +436,9 @@ describe('buildAllTools', () => {
       // 跑 shell 命令。单独一个命名空间，好让 resolveTools 在没有
       // shell 的机器上整个不注册
       'local.shell',
+      // 接入第三方 MCP server（connect_mcp_server）。和 engine 一样是盒子的
+      // 本地能力 —— 用户说「我装了个 MCP 你连一下」的时候，引擎往往还没开
+      'mcp',
       // 用户自己写的笔记。是盒子本地的数据，不依赖引擎连接 ——
       // 资产/文件夹的「详细说明」和输入框里 @ 的那篇笔记都靠它读
       'note',

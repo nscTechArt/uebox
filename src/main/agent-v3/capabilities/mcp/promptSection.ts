@@ -78,8 +78,21 @@ export function installableIntegrations(
   return [BLENDER_INSTALLABLE]
 }
 
-/** 收尾：把「可以一键装什么」那段接在后面。两处出口都要走它 */
+/**
+ * 收尾：把「可以一键装什么」和「怎么再接一台」接在后面。两处出口都要走它。
+ *
+ * 第二句（"下一条消息"）不能省：工具清单每条消息开头装配一次，`connect_mcp_server`
+ * 接进来的工具本轮不在清单里。不明说的话，模型接完就去调，拿到「工具不存在」，
+ * 然后把一次**成功**的接入报成失败 —— 用户以为白忙了，其实配置已经好了。
+ * 工具自己的返回值里也写了这件事，这里是给那一步之前的规划用的。
+ */
 function finish(lines: string[], installable: string[]): string {
+  lines.push(
+    '',
+    'To connect another server the user names, call `connect_mcp_server` with its launch command or URL (a bare port works); it probes first and only saves a config that actually handshakes.',
+    'Tools from a server connected that way arrive on the NEXT user message, not in the turn that added it.'
+  )
+
   if (installable.length > 0) {
     lines.push(
       '',

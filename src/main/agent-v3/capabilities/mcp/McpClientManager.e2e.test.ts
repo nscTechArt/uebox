@@ -129,6 +129,59 @@ describe('MCP 端到端', () => {
 })
 
 /**
+ * 会话进行中现接一台（`connect_mcp_server` 工具走的路）。
+ *
+ * 和 `connectAll` 的语义正相反：那边一台连不上不能拖垮其余的，所以吞异常；
+ * 这边是用户刚说完「你连一下」，连不上就是这次调用的结果，必须抛回他面前。
+ */
+describe('现接一台 server', () => {
+  it('连上之后工具立刻挂在这台 server 名下', async () => {
+    const live = new McpClientManager()
+    const status = await live.addServer('echo', {
+      type: 'stdio',
+      command: process.execPath,
+      args: [SERVER]
+    })
+
+    expect(status.connected).toBe(true)
+    expect(status.toolCount).toBe(2)
+    expect(live.toolsOf('echo').map((t) => t.name)).toContain('mcp_echo_echo_text')
+    await live.disconnectAll()
+  }, 30_000)
+
+  /**
+   * 失败要抛，而且**不留状态**。
+   *
+   * 留下来的话系统提示词会报一台根本不存在的 server 连不上（配置还没落盘，
+   * 失败时也不会落），用户拿着那个 id 去设置里找，什么都找不到。
+   */
+  it('连不上时抛出，并且不在状态里留下一台并不存在的 server', async () => {
+    const live = new McpClientManager()
+    await expect(
+      live.addServer('ghost', { type: 'stdio', command: 'this-command-does-not-exist-12345' })
+    ).rejects.toThrow()
+
+    expect(live.getStatuses()).toEqual([])
+    expect(live.toolsOf('ghost')).toEqual([])
+  }, 40_000)
+
+  // 覆盖反过来：那台仍然配置在盘上，抹掉状态会让它从提示词里凭空消失
+  it('覆盖一台已有的 server 失败时，留一条 FAILED 而不是让它消失', async () => {
+    const live = new McpClientManager()
+    await live.addServer('echo', { type: 'stdio', command: process.execPath, args: [SERVER] })
+
+    await expect(
+      live.addServer('echo', { type: 'stdio', command: 'this-command-does-not-exist-12345' })
+    ).rejects.toThrow()
+
+    const status = live.getStatuses().find((s) => s.id === 'echo')
+    expect(status?.connected).toBe(false)
+    expect(status?.error).toBeTruthy()
+    await live.disconnectAll()
+  }, 40_000)
+})
+
+/**
  * `readOnlyTools`：点名把纯发现类工具降级为 `safe`。
  *
  * 默认全是 `destructive` 是对的 —— server 自报的 `readOnlyHint` 不可信。

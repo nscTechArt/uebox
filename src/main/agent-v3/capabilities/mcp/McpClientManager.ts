@@ -290,6 +290,41 @@ export class McpClientManager {
     )
   }
 
+  /**
+   * 会话进行中现接一台 server。给 `connect_mcp_server` 工具用。
+   *
+   * 和 `connectAll` 的两点不同：
+   *
+   *   - **失败往外抛。** 那边是开机路径，一台连不上不能拖垮其余的；这边是
+   *     用户刚刚说「你连一下」，连不上就是这次调用的结果，必须回到他面前。
+   *   - **新来的失败了不留状态。** 那边留一条 FAILED 是对的（配置在盘上，
+   *     用户该看见它坏了）；这边配置还没落盘，留下来的话系统提示词会报一台
+   *     根本不存在的 server 连不上（见 `promptSection.ts`），用户去设置里
+   *     还找不到它。
+   *
+   * 覆盖一台已有的 server 时反过来：`connect` 第一步就会把旧连接断掉，失败后
+   * 那台**仍然配置在盘上**，所以留一条 FAILED —— 抹掉的话，用户会看到一台
+   * 明明配着、却从提示词里凭空消失的 server。
+   */
+  async addServer(id: string, config: McpServerConfig): Promise<McpServerStatus> {
+    const previous = this.statuses.get(id)
+    try {
+      await this.connect(id, config)
+    } catch (error) {
+      const message = (error as Error).message
+      await this.disconnect(id)
+      if (previous) this.statuses.set(id, { id, connected: false, toolCount: 0, error: message })
+      else this.statuses.delete(id)
+      throw error
+    }
+    return this.statuses.get(id)!
+  }
+
+  /** 某台 server 贡献的工具。名字要报给用户，所以按命名空间挑出来 */
+  toolsOf(id: string): UnrealAgentTool<unknown>[] {
+    return this.tools.get(id) ?? []
+  }
+
   private async connect(id: string, config: McpServerConfig): Promise<void> {
     await this.disconnect(id)
 

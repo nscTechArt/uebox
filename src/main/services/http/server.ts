@@ -42,7 +42,14 @@ interface ProfileSettings {
  * 评测在真实工程上跑，不能让一次实验把用户的文件改了。引擎内的操作不在此列 ——
  * 那正是要考的能力，而且资产可以重建。
  */
-const LOCAL_DISK_TOOLS = ['write_local_file', 'edit_local_file', 'run_shell_command']
+const LOCAL_DISK_TOOLS = [
+  'write_local_file',
+  'edit_local_file',
+  'run_shell_command',
+  // 接第三方 MCP 同样落在这一类：stdio 形态就是拉一个用户机器上的进程，
+  // 而且它会改盒子自己的配置 —— 评测跑完之后那台 server 还留在配置里
+  'connect_mcp_server'
+]
 
 const PROFILE_SETTINGS_KEY = 'profile_settings'
 const DEFAULT_PROFILE_SETTINGS: ProfileSettings = {

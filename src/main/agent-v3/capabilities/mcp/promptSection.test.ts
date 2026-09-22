@@ -83,6 +83,22 @@ describe('MCP 状态进系统提示词', () => {
     })
   })
 
+  /**
+   * 再接一台现在是模型自己能办的事（`connect_mcp_server`），但开着工具搜索时
+   * 它不常驻 —— 模型不知道有这个东西可搜的时候不会去搜，于是又回到那句
+   * 「我没有连接 MCP 的能力」。
+   */
+  it('告诉模型可以自己接一台，以及新工具下一条消息才到', () => {
+    const texts = [buildMcpSection([]), buildMcpSection([connected('filesystem', 7)])]
+    for (const text of texts) {
+      if (text === '') continue
+      expect(text).toContain('connect_mcp_server')
+      expect(text).toContain('NEXT user message')
+    }
+    // 连着 server 的那份一定非空，上面的 continue 不能把这条测试掏空
+    expect(buildMcpSection([connected('filesystem', 7)])).toContain('connect_mcp_server')
+  })
+
   it('连上的 server 报出 id、工具数和工具名前缀', () => {
     const text = buildMcpSection([connected('filesystem', 7)])
     expect(text).toContain('`filesystem`')

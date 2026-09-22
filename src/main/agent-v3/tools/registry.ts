@@ -35,6 +35,7 @@ import { createSearchNotebookSourcesTool } from './builtin/notebookSources'
 import { createProjectListTool, createProjectWriteTool } from './adapted/project/splitByRisk'
 import { createOrganizeProjectsTool } from './adapted/project/organizeProjects'
 import { createLocalWriteTools, createShellTool } from './builtin/localShell'
+import { mcpTools } from './builtin/mcpConnect'
 import { createBrowserTools } from './builtin/browser'
 import { isDefaultResidentTool } from './builtin/toolSearch'
 import { estimateTokens } from '../../../shared/tokenBudget'
@@ -1277,6 +1278,9 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
     ...(taskVideoTools() as unknown as UnrealAgentTool<never>[]),
     // 无头检索：只读、不开窗口、不弹审批。和 browser_* 的分工见 builtin/web.ts
     ...createWebTools(),
+    // 接入第三方 MCP server。和引擎清单一样是盒子的本地能力，不依赖引擎连接 ——
+    // 用户说「我装了个 MCP 你连一下」的时候，引擎往往还没开
+    ...mcpTools,
     ...getLocalFileTools(),
     // 检索只能搜当前绑定的知识库；存来源在未绑定时会新建知识库。
     // 两者都不进 cache —— 每条会话绑的库不一样；存来源还需要 sender 通知界面刷新。

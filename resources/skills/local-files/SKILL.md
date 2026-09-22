@@ -1,6 +1,6 @@
 ---
 name: local-files
-description: Work with files on the user's own computer — list a directory, find files by glob, search contents, read text or images, write and edit files, and run shell commands where a shell exists. Use when the user names a path outside the Unreal project, wants source or config files changed, or asks to import files from disk. Do not use for assets already inside the Unreal project.
+description: Work with files and programs on the user's own computer — list a directory, find files by glob, search contents, read text or images, write and edit files, run shell commands where a shell exists, and connect a third-party MCP server the user has installed. Use when the user names a path outside the Unreal project, wants source or config files changed, asks to import files from disk, or says they installed an MCP server and wants it connected. Do not use for assets already inside the Unreal project.
 ---
 
 # Files on the user's computer
@@ -136,6 +136,35 @@ actually inside: class, referenced packages, basic properties.
 Use it when the editor is closed, when the project will not open, or when you only need to answer
 "what is this file" without paying the cost of loading a project. When the editor *is* running and
 you need live state, the engine's own tools know more — this one only sees what was written to disk.
+
+## `connect_mcp_server` — something the user installed, wired into the box
+
+An MCP server is another program on this machine (or a service on it) that exposes its own tools.
+`connect_mcp_server` handshakes with it and, only if that succeeds, writes it into the box's
+config. Two shapes, pick by what the user's server documents:
+
+```
+connect_mcp_server(id: "filesystem", command: "npx",
+                   args: ["-y", "@modelcontextprotocol/server-filesystem", "D:/assets"])
+connect_mcp_server(id: "something", url: "9876")
+```
+
+Most servers are the first shape — a local process, launched by a command. `url` is for the
+handful that run as an HTTP service; a bare port is enough, it tries `/mcp` then the root.
+
+Three things to get right:
+
+- **Ask for the launch command, do not invent one.** "我装了 xxx MCP" is not enough to guess from.
+  The server's README has the exact line; a made-up one fails with `ENOENT` and the user reads
+  that as "this server is broken".
+- **A port that answers is not proof of an MCP endpoint.** Many tools' ports belong to their own
+  plugin channel, not to a server that speaks MCP.
+- **Its tools arrive on the next message, not this turn.** The tool list is assembled once per
+  message. Tell the user it is connected and let them send the next message; calling
+  `mcp_<id>_*` in the same turn only gets you "no such tool".
+
+Blender and Unreal's own official server are not done here — Settings → MCP installs those in one
+click, scripts and environment variables included. Point the user at that button instead.
 
 ## What is deliberately missing
 
