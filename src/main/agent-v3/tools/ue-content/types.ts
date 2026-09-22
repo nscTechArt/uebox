@@ -170,9 +170,9 @@ export interface PackageWriteState {
     | string
   checked_out_by?: string
   blocks?: boolean
-  /** 这个包是被搬的资产（source）还是它的引用者（referencer） */
-  role?: 'source' | 'referencer' | string
-  /** role=referencer 时：它引用的是这一批里的哪些源 */
+  /** 被搬的资产（source）、它的引用者（referencer），或 ue_fixup_redirectors 里要删的重定向器本身（redirector） */
+  role?: 'source' | 'referencer' | 'redirector' | string
+  /** role=referencer 时：它引用的是这一批里的哪些源（redirector 为空；链式重定向时也可能有） */
   for?: string[]
 }
 

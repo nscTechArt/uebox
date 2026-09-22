@@ -89,6 +89,25 @@ inline TSet<FName> UAL_DirtySavablePackageNames()
 }
 
 /**
+ * 快照之后新弄脏、且真的能存的包 —— 「这条命令新弄脏了什么」。
+ *
+ * 跑之前就脏的是用户自己改到一半的东西，不算命令的账，也不该劝调用方去存。
+ * 差集写在这里一份，别再各命令各写一遍（batch_move 与 fixup_redirectors 都要）。
+ */
+inline TArray<FName> UAL_NewlyDirtySavablePackageNames(const TSet<FName>& Before)
+{
+	TArray<FName> Out;
+	for (const FName& Name : UAL_DirtySavablePackageNames())
+	{
+		if (!Before.Contains(Name))
+		{
+			Out.Add(Name);
+		}
+	}
+	return Out;
+}
+
+/**
  * 「这个脏包该不该拦下一次会丢东西的操作」—— 和上面那个是**两个**判断，别合并。
  *
  * 换关卡、重启编辑器会把内存里没存的东西全丢掉且无法撤销，所以默认要拦。

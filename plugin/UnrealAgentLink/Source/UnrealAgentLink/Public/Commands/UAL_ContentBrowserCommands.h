@@ -125,7 +125,8 @@ public:
 	 * 响应: { ok, path, found, broken_count, broken_left, fixed, remaining, deleted_broken, dry_run,
 	 *         redirectors:[...], details:[{path,target,broken}], listed_note, not_redirectors:[...],
 	 *         checkout:{ scc_enabled, scc_provider, scc_available, checked, blocked, blocking:[...], states:[...], states_truncated },
-	 *         dirty_referencers:[...], engine_log:[...], load_failed:[...], broken_after_load:[...], dirty_after, note }
+	 *         dirty_referencers:[...], saved_referencers:[...], left_on_disk:[...],
+	 *         engine_log:[...], load_failed:[...], broken_after_load:[...], dirty_after, note }
 	 *        checkout 里既有每个重定向器的**引用者**（role=referencer，FixupReferencers 要改写它们）也有
 	 *        重定向器自己的包（role=redirector，引擎删它之前看它的签出状态）。
 	 *        dirty_referencers：引用者里用户改到一半没存的 —— FixupReferencers 会把它们原样落盘。

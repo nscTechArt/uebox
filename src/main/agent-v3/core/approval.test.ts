@@ -100,6 +100,72 @@ describe('createApprovalGate', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * 带 dry_run 的破坏性工具：预演按 riskFor 降成 safe，不问；在预演上点的
+   * 「本次会话都允许」不能把真正的那次一起放行 —— 记住的授权按实际风险分开记。
+   */
+  it('riskFor 把 dry_run 降成 safe；预演上的始终允许放不过真正的那次', async () => {
+    const dryRunTool = (): UnrealAgentTool<never> =>
+      ({
+        name: 't',
+        unrealBox: {
+          namespace: 'ue.content',
+          risk: 'destructive',
+          riskFor: (args: unknown) =>
+            (args as { dry_run?: unknown })?.dry_run === true ? 'safe' : 'destructive'
+        }
+      }) as unknown as UnrealAgentTool<never>
+    const remembered = new Set<string>()
+    const request = vi.fn(async (): Promise<ApprovalVerdict> => 'always')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      alwaysAllowed: remembered,
+      lookup: () => dryRunTool(),
+      request
+    })
+
+    // 预演：safe，不问
+    expect(await run(callCtx('t', { dry_run: true }))).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(0)
+
+    // 真正执行：问，用户点「始终允许」
+    expect(await run(callCtx('t', {}))).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(remembered.has('t')).toBe(true)
+    // 之后同名的真正执行不再问
+    expect(await run(callCtx('t', { dry_run: false }))).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('风险被 riskFor 降级的那次点「始终允许」，只记降级后的那一档', async () => {
+    const remembered = new Set<string>()
+    const request = vi.fn(async (): Promise<ApprovalVerdict> => 'always')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      alwaysAllowed: remembered,
+      lookup: () =>
+        ({
+          name: 't',
+          unrealBox: {
+            namespace: 'ue.content',
+            risk: 'destructive',
+            riskFor: (args: unknown) =>
+              (args as { preview?: unknown })?.preview === true ? 'mutating' : 'destructive'
+          }
+        }) as unknown as UnrealAgentTool<never>,
+      request
+    })
+    // mutating 在 ask 下要问；点了始终允许，记的是 t#mutating
+    expect(await run(callCtx('t', { preview: true }))).toBeUndefined()
+    expect(remembered.has('t#mutating')).toBe(true)
+    expect(remembered.has('t')).toBe(false)
+    // 真正的 destructive 调用仍然要问
+    expect(await run(callCtx('t', {}))).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
   it('切到只读后，旧的始终允许与完全访问均不能放行写操作', async () => {
     let readOnly = false
     const request = vi.fn(async (): Promise<ApprovalVerdict> => 'always')

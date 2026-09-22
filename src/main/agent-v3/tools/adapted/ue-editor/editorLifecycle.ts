@@ -412,10 +412,12 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
         .describe('目标已不存在的重定向器修不了；true 则把它们删掉，默认 false 原地不动')
     }),
 
-    execute: async (input, { abortSignal } = {}) => {
-      const notConnected = requireConnection()
-      if (notConnected) return notConnected
+    // 预演不改任何东西，按 safe 问；真正的那次照 destructive 问，而且预演上点的
+    // 「本次会话都允许」放不过来（审批门按实际风险分开记）
+    riskFor: (args) =>
+      (args as { dry_run?: unknown } | null)?.dry_run === true ? 'safe' : 'destructive',
 
+    execute: async (input, { abortSignal } = {}) => {
       try {
         const params: Record<string, unknown> = {}
         if (input.path) params.path = input.path
@@ -448,8 +450,12 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
           load_failed?: string[]
           /** 预演说好、加载后目标却为空的：不删，只报 */
           broken_after_load?: string[]
-          /** 引用者里用户改到一半没存的：FixupReferencers 会把它们原样落盘 */
+          /** 引用者里用户改到一半没存的：预演 = 执行时会被原样落盘；执行后 = 还没存的 */
           dirty_referencers?: string[]
+          /** 执行后：原本有未保存改动、被引擎原样落盘了的引用者 */
+          saved_referencers?: string[]
+          /** 注册表里没了但文件还在的重定向器（SCC / 只读拒了删除），已算回 remaining */
+          left_on_disk?: string[]
           note?: string
           error?: string
           code?: string | number
@@ -467,13 +473,21 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
         }
         if (!response.ok) {
           // 409 的 details.how_to（右键菜单那条路）、503 的扫描进度都在 details 里，
-          // 适配层会把 code 和 details 拼进给模型的那句话，别在这里丢掉
+          // 适配层会把 code 和 details 拼进给模型的那句话，别在这里丢掉。
+          // 但 ws 层给每条响应都塞 code（200 也塞），而插件「一个都加载不了」那条是
+          // 200 + ok:false，details 里躺着的是 200 条清单 —— 只转错误码和对象形状的 details
           const failure = response as unknown as { details?: unknown }
+          const code =
+            typeof response.code === 'number' && response.code < 400 ? undefined : response.code
+          const details =
+            failure.details !== undefined && !Array.isArray(failure.details)
+              ? failure.details
+              : undefined
           return {
             success: false,
             error: response.error ?? '清理重定向器失败',
-            ...(response.code !== undefined ? { code: response.code } : {}),
-            ...(failure.details !== undefined ? { details: failure.details } : {})
+            ...(code !== undefined ? { code } : {}),
+            ...(details !== undefined ? { details } : {})
           }
         }
 
@@ -487,6 +501,9 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
         // 就留在 remaining 里，其余照常清理 —— 预演和执行都按「部分」的口吻说
         const checkout = checkoutLines(response.checkout, 'partial')
         const dirtyRefs = response.dirty_referencers ?? []
+        const savedRefs = response.saved_referencers ?? []
+        const sample = (names: string[]): string =>
+          `${names.slice(0, 5).join('、')}${names.length > 5 ? ' 等' : ''}`
         return {
           success: true,
           path: response.path,
@@ -507,6 +524,8 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
           ...(response.load_failed ? { load_failed: response.load_failed } : {}),
           ...(response.broken_after_load ? { broken_after_load: response.broken_after_load } : {}),
           ...(dirtyRefs.length > 0 ? { dirty_referencers: dirtyRefs } : {}),
+          ...(savedRefs.length > 0 ? { saved_referencers: savedRefs } : {}),
+          ...(response.left_on_disk ? { left_on_disk: response.left_on_disk } : {}),
           ...(response.note ? { note: response.note } : {}),
           ...(response.checkout ? { checkout: response.checkout } : {}),
           ...(response.engine_log && response.engine_log.length > 0
@@ -525,8 +544,18 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
                   : '') +
                 (response.dirty_after ? `，${response.dirty_after} 个包待保存` : '')) +
             (response.listed_note ? `\n只列了一部分：${response.listed_note}` : '') +
-            (dirtyRefs.length > 0
-              ? `\n⚠ ${dirtyRefs.length} 个引用者有未保存的改动，${response.dry_run ? '执行时' : '刚才'}会被原样落盘：${dirtyRefs.slice(0, 5).join('、')}${dirtyRefs.length > 5 ? ' 等' : ''}`
+            (response.left_on_disk && response.left_on_disk.length > 0
+              ? `\n⚠ ${response.left_on_disk.length} 个重定向器文件还在磁盘上（源码管理或只读拒了删除），已算回未清理`
+              : '') +
+            // 预演：会被存；执行后：存了的和还没存的分开说，别把跑之前的预测当成已经发生
+            (response.dry_run && dirtyRefs.length > 0
+              ? `\n⚠ ${dirtyRefs.length} 个引用者有未保存的改动，执行时会被原样落盘：${sample(dirtyRefs)}`
+              : '') +
+            (!response.dry_run && savedRefs.length > 0
+              ? `\n⚠ ${savedRefs.length} 个引用者原有未保存的改动，刚才被原样落盘了：${sample(savedRefs)}`
+              : '') +
+            (!response.dry_run && dirtyRefs.length > 0
+              ? `\n${dirtyRefs.length} 个引用者的未保存改动没有被写盘（它们的重定向器没交给引擎，或保存失败）：${sample(dirtyRefs)}`
               : '') +
             (checkout.length > 0 ? `\n${checkout.join('\n')}` : '')
         }

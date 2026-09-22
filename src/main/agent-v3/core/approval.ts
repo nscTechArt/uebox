@@ -107,7 +107,11 @@ export function createApprovalGate(deps: ApprovalDeps) {
       const toolName = ctx.toolCall.name
       const tool = deps.lookup(toolName)
       const explicit = tool?.unrealBox.requiresExplicitApproval === true
-      const risk: ToolRisk = tool?.unrealBox.risk ?? 'destructive'
+      const declaredRisk: ToolRisk = tool?.unrealBox.risk ?? 'destructive'
+      // 按这次的参数算实际风险（dry_run 之类降成 safe）。「本次会话都允许」按实际
+      // 风险分开记：在预演上点的允许只对预演有效，真正的那次照样问
+      const risk: ToolRisk = tool?.unrealBox.riskFor?.(ctx.args) ?? declaredRisk
+      const allowKey = risk === declaredRisk ? toolName : `${toolName}#${risk}`
       const readOnlyBlock = (): BeforeToolCallResult | undefined =>
         deps.isReadOnly?.() && risk !== 'safe'
           ? { block: true, reason: 'This conversation is read-only. Do not perform changes.' }
@@ -117,7 +121,9 @@ export function createApprovalGate(deps: ApprovalDeps) {
 
       // 先判逐次审批，再看「本次会话都允许」的名单 —— 顺序反了的话，
       // 一个曾经被记住的工具名就能永久跳过审批。
-      if (!explicit && alwaysAllowed.has(toolName)) return undefined
+      if (!explicit && (alwaysAllowed.has(toolName) || alwaysAllowed.has(allowKey))) {
+        return undefined
+      }
 
       // 查不到元数据的工具（例如以后接进来的 MCP 工具还没登记）按最危险处理。
       // 第三方来源的工具不可信，宁可多问一次。
@@ -144,7 +150,7 @@ export function createApprovalGate(deps: ApprovalDeps) {
       if (verdict === 'always') {
         // 逐次审批的工具即使收到 always 也只按这一次批准处理 ——
         // 界面已经隐藏了那个按钮，但主进程不能依赖界面来守这条规则
-        if (!explicit) alwaysAllowed.add(toolName)
+        if (!explicit) alwaysAllowed.add(allowKey)
         return undefined
       }
       if (verdict === 'approve') return undefined

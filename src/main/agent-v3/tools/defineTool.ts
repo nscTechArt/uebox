@@ -156,6 +156,12 @@ export interface ToolMeta {
   risk: ToolRisk
   /** 见 `ToolSpec.requiresExplicitApproval` */
   requiresExplicitApproval?: boolean
+  /**
+   * 按这次的参数算实际风险。`risk` 是最坏情况；带 dry_run 这类只读开关的工具
+   * 用它把预演降成 safe —— 审批门按实际风险问，「本次会话都允许」也按实际风险记，
+   * 在预演上点的允许放不过真正的那次。
+   */
+  riskFor?: (args: unknown) => ToolRisk
 }
 
 export type UnrealAgentTool<TDetails = unknown> = AgentTool<TSchema, TDetails> & {

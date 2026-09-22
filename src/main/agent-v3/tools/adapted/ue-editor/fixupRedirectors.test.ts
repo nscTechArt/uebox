@@ -211,7 +211,31 @@ describe('ue_fixup_redirectors：失败与超时', () => {
     )
     const result = await run({})
     expect(result.success).toBe(false)
-    expect(result.code).toBeDefined()
+    const { V2_TIMEOUT_CODE } = await import('../../engineErrors')
+    expect(result.code).toBe(V2_TIMEOUT_CODE)
+  })
+
+  it('插件 200 + ok:false（一个都加载不了）：不转 200 当错误码，不把 200 条清单当 details', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error: 'Found redirectors in the asset registry but none of them could be loaded.',
+      code: 200,
+      path: '/Game',
+      found: 2,
+      redirectors: ['/Game/Old/SM_A', '/Game/Old/SM_B'],
+      details: [{ path: '/Game/Old/SM_A' }, { path: '/Game/Old/SM_B' }]
+    })
+    const result = await run({})
+    expect(result.success).toBe(false)
+    expect(result.code).toBeUndefined()
+    expect(result.details).toBeUndefined()
+  })
+
+  it('预演按 safe 算风险，真正执行按 destructive', () => {
+    const riskFor = (tool as { riskFor?: (a: unknown) => string }).riskFor
+    expect(riskFor?.({ dry_run: true })).toBe('safe')
+    expect(riskFor?.({})).toBe('destructive')
+    expect(riskFor?.({ dry_run: false })).toBe('destructive')
   })
 
   it('中止信号跟着 RPC 一起下去', async () => {
@@ -274,5 +298,78 @@ describe('ue_fixup_redirectors：失败与超时', () => {
   it('paths 里的空串不放行', async () => {
     const schema = tool.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
     expect(schema.safeParse({ paths: [''] }).success).toBe(false)
+  })
+
+  it('执行后：存了的和还没存的引用者分开说，磁盘上还在的重定向器算回未清理', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      path: '(paths)',
+      found: 2,
+      fixed: 1,
+      remaining: 1,
+      dry_run: false,
+      redirectors: ['/Game/Old/SM_A', '/Game/Old/SM_B'],
+      saved_referencers: ['/Game/Maps/Main'],
+      dirty_referencers: ['/Game/Maps/Arena'],
+      left_on_disk: ['H:/Proj/Content/Old/SM_B.uasset'],
+      broken_after_load: ['/Game/Old/SM_C']
+    })
+    const result = await run({ paths: ['/Game/Old/'] })
+    const summary = String(result.summary)
+    expect(summary).toContain('刚才被原样落盘了：/Game/Maps/Main')
+    expect(summary).toContain('没有被写盘')
+    expect(summary).toContain('/Game/Maps/Arena')
+    expect(summary).not.toContain('Arena 有未保存的改动，执行时')
+    expect(summary).toContain('1 个重定向器文件还在磁盘上')
+    expect(result.broken_after_load).toEqual(['/Game/Old/SM_C'])
+    expect(result.left_on_disk).toHaveLength(1)
+  })
+
+  it('预演的范围标签看插件报的 path：(paths) 才叫「指定的路径」', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      path: '/Game',
+      found: 3,
+      fixed: 0,
+      dry_run: true,
+      redirectors: []
+    })
+    // 这边发了 paths，插件却退回了全 /Game 扫描 —— 摘要不能说「指定的路径」
+    const result = await run({ paths: ['/Game/Old/'], dry_run: true })
+    expect(String(result.summary)).toContain('/Game 下有 3 个重定向器')
+    expect(String(result.summary)).not.toContain('指定的路径')
+  })
+
+  it('签出预检：重定向器自己的包被签出时点明「就是它本身」；超过 20 条时按 partial 的口吻分页', async () => {
+    const blocking = Array.from({ length: 21 }, (_, i) => ({
+      package: `/Game/Maps/Map${i}`,
+      state: 'checked_out_other',
+      checked_out_by: 'lisi',
+      blocks: true,
+      role: i === 0 ? 'redirector' : 'referencer',
+      for: i === 0 ? [] : ['/Game/Old/SM_A']
+    }))
+    callRequest.mockResolvedValue({
+      ok: true,
+      path: '/Game',
+      found: 1,
+      fixed: 0,
+      dry_run: true,
+      redirectors: ['/Game/Old/SM_A'],
+      checkout: {
+        scc_enabled: true,
+        scc_provider: 'Perforce',
+        scc_available: true,
+        checked: 22,
+        blocked: 21,
+        blocking
+      }
+    })
+    const summary = String((await run({ dry_run: true })).summary)
+    expect(summary).toContain('/Game/Maps/Map0：被别人签出着（lisi）（这就是要删的重定向器本身）')
+    expect(summary).toContain('用 paths 分目录调用能逐批看全')
+    expect(summary).toContain('再跑一次清剩下的')
+    expect(summary).not.toContain('batch_size')
+    expect(summary).not.toContain('on_blocked')
   })
 })

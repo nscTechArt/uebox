@@ -349,10 +349,12 @@ const STATE_TEXT: Record<string, string> = {
 function describeState(s: PackageWriteState): string {
   const base = STATE_TEXT[s.state] ?? s.state
   const who = s.state === 'checked_out_other' && s.checked_out_by ? `（${s.checked_out_by}）` : ''
-  const role =
-    s.role === 'referencer' && s.for && s.for.length > 0
+  const refs =
+    s.for && s.for.length > 0
       ? `，它引用了 ${s.for.slice(0, 3).join('、')}${s.for.length > 3 ? ' 等' : ''}`
       : ''
+  // redirector：这就是要删的重定向器自己的包（ue_fixup_redirectors），不是谁的引用者
+  const role = s.role === 'redirector' ? `（这就是要删的重定向器本身${refs}）` : refs
   return `${base}${who}${role}`
 }
 

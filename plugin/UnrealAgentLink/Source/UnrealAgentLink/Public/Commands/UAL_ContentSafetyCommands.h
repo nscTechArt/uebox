@@ -35,9 +35,9 @@ struct FUAL_PackageWriteState
 	FString CheckedOutBy;
 	/** 这一个包会不会让引擎把整批中止 */
 	bool bBlocks = false;
-	/** source | referencer */
+	/** source | referencer | redirector（fixup_redirectors：要删的重定向器自己的包） */
 	FString Role;
-	/** 引用者是为了哪些被搬的源包才进来的（RenameAssets 会一并签出引用者） */
+	/** 引用者是为了哪些被搬的源包才进来的（RenameAssets 会一并签出引用者）；redirector 角色为空 */
 	TArray<FString> For;
 };
 

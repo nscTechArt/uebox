@@ -58,6 +58,8 @@ export interface V2Tool {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   execute?: (input: any, options: any) => unknown
+  /** 见 `ToolMeta.riskFor` */
+  riskFor?: (args: unknown) => ToolRisk
 }
 
 /** 适配层传给 V2 `execute` 的第二个参数 */
@@ -91,6 +93,8 @@ export function defineV2Tool<TSchema extends z.ZodTypeAny>(definition: {
    * 写了就能拿到本轮的中止信号，把等引擎那一步也停掉。
    */
   execute: (input: z.output<TSchema>, options: V2ExecuteOptions) => unknown
+  /** 见 `ToolMeta.riskFor`。拿到的是模型给的原始参数，还没过 schema */
+  riskFor?: (args: unknown) => ToolRisk
 }): V2Tool {
   return definition as V2Tool
 }
@@ -114,8 +118,6 @@ export interface AdaptOptions {
   /** 覆盖 V2 的描述。留空则沿用 */
   description?: string
   concurrency?: 'sequential' | 'parallel'
-  /** 见 `ToolSpec.requiresExplicitApproval`：每次都问，不给「总是允许」 */
-  requiresExplicitApproval?: boolean
 }
 
 /**
@@ -334,7 +336,7 @@ export function adaptV2Tool(v2: V2Tool, options: AdaptOptions): UnrealAgentTool<
     unrealBox: {
       namespace: options.namespace,
       risk: options.risk,
-      ...(options.requiresExplicitApproval ? { requiresExplicitApproval: true } : {})
+      ...(v2.riskFor ? { riskFor: v2.riskFor } : {})
     }
   }
 
