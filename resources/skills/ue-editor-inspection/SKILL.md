@@ -52,6 +52,15 @@ top. That is the one to use when the user mentions something on screen — an er
 value in a panel, where a button is. It is a screen grab, not a render, so `resolution`,
 `world` and `warmup_frames` do nothing on that path, and there is no exposure drift.
 
+Which window it grabs: a modal dialog if one is open (even when you named a window — the
+dialog is blocking it), otherwise the window the user last worked in — a floating Blueprint
+or Material editor counts. The reply says which one you got in `window_title`; read it before
+drawing conclusions, because a shot of the wrong window looks perfectly normal. To pick one
+explicitly pass `window` with the asset name or path (`BP_Door`, `/Game/BP/BP_Door`), or
+`level` for the main level window; `window` only works together with `show_ui: true`.
+`window_source: fallback` means it fell back to the main window — do not treat that as what
+the user is looking at.
+
 ### While PIE is running it captures the game
 
 The editor world and the running game are two separate worlds. When PIE is running the capture

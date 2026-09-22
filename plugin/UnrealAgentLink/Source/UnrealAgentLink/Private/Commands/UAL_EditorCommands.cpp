@@ -36,6 +36,9 @@
 #include "Engine/GameViewportClient.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "Framework/Docking/TabManager.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "Slate/SceneViewport.h"
 #include "HighResScreenshot.h"
 #include "IImageWrapper.h"
@@ -1879,7 +1882,161 @@ void FUAL_EditorCommands::Handle_AnalyzeUProject(const TSharedPtr<FJsonObject>& 
 }
 
 /**
- * 抓当前活跃的顶层窗口，编码成 PNG 存盘。
+ * 选出要抓的那扇窗口。
+ *
+ * ## 为什么不能只看 `GetActiveTopLevelWindow()`
+ *
+ * 这条命令是用户在虚幻盒子里敲一句话触发的。敲字的那一刻，编辑器的每扇窗口都
+ * 已经失活 —— Slate 在 `ProcessWindowActivatedEvent` 收到 Deactivate 时会把
+ * `ActiveTopLevelWindow` 直接 `Reset()`（SlateApplication.cpp）。于是这里拿到的
+ * 永远是空，原来的兜底 `GetInteractiveTopLevelWindows()[0]` 又永远是主关卡窗口：
+ * 用户开着蓝图编辑器说「看看我这张图」，拍回去的却是场景，而且模型分不出来。
+ *
+ * ## 取法，按优先级
+ *
+ * 1. 正在活跃的模态弹窗 —— 「界面上弹了个框」要的就是它。点了名也一样：模态
+ *    挡着的时候别的窗口收不到输入，去 `FocusWindow()` 它是空操作，拍回来的图
+ *    还可能被弹窗压着；回 `modal` 让调用方知道被挡了。
+ * 2. `Requested` 点名的资产编辑器（名字或路径），通过它的 major tab 反查所在窗口。
+ *    编辑器停靠在主窗口里也照样正确 —— 反查回来就是主窗口，`FocusWindow()` 会把
+ *    那个标签页切到前面。`level` / `main` 点名主窗口；`pie` 点名游戏视口所在的
+ *    窗口（试玩采样用）。编辑器开着但反查不到窗口（world-centric 那类没有 major
+ *    tab）时退回主窗口、回 `fallback`，和「没开」分开 —— 否则报错里列的
+ *    「已打开的编辑器」会包含点名的那个，调用方只会拿同一个名字反复重试。
+ * 3. **用户最后用过的那扇窗口**：Slate 每次激活窗口都会
+ *    `FSlateWindowHelper::BringWindowToFront` 把它挪到 `SlateWindows` 的末尾，
+ *    所以从后往前扫第一扇普通、可见的窗口，就是失活前用户看着的那扇。
+ *    引擎自己在前台时 `GetActiveTopLevelWindow()` 也是这一扇（激活先重排再记
+ *    活跃），不用单独判。
+ * 4. 主窗口 —— 只在上面全落空时。
+ *
+ * `OutSource` 把走的是哪一条回上去（modal / requested / last_active / fallback），
+ * 和视口截图回 `camera_source` 是同一条规矩：一张图的结论对不对取决于它从哪儿拍的。
+ */
+static TSharedPtr<SWindow> UAL_PickWindowToCapture(
+	const FString& Requested,
+	bool bBringToFront,
+	FString& OutSource,
+	FString& OutError,
+	int32& OutErrorCode)
+{
+	FSlateApplication& SlateApp = FSlateApplication::Get();
+
+	if (TSharedPtr<SWindow> Modal = SlateApp.GetActiveModalWindow())
+	{
+		OutSource = TEXT("modal");
+		return Modal;
+	}
+
+	if (!Requested.IsEmpty())
+	{
+		TSharedPtr<SWindow> Root = FGlobalTabmanager::Get()->GetRootWindow();
+
+		if (Requested.Equals(TEXT("level"), ESearchCase::IgnoreCase) || Requested.Equals(TEXT("main"), ESearchCase::IgnoreCase))
+		{
+			if (Root.IsValid())
+			{
+				OutSource = TEXT("requested");
+				return Root;
+			}
+		}
+
+		// 试玩采样：游戏视口在哪扇窗口就拍哪扇。InProcess 的 PIE 视口在关卡编辑器里，
+		// 用户最后用过的却可能是浮在外面的蓝图编辑器 —— 按「最后用过」采样会
+		// 每一帧都拍到蓝图图表，游戏里发生的事一帧都没有
+		if (Requested.Equals(TEXT("pie"), ESearchCase::IgnoreCase))
+		{
+			TSharedPtr<SWindow> GameWindow = (GEngine && GEngine->GameViewport) ? GEngine->GameViewport->GetWindow() : nullptr;
+			if (GameWindow.IsValid())
+			{
+				OutSource = TEXT("requested");
+				return GameWindow;
+			}
+			if (Root.IsValid())
+			{
+				OutSource = TEXT("fallback");
+				return Root;
+			}
+		}
+
+		UAssetEditorSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+		TArray<FString> OpenNames;
+		if (Subsystem)
+		{
+			// "/Game/BP/BP_Door.BP_Door"、"/Game/BP/BP_Door"、"BP_Door" 都认
+			const FString RequestedName = FPaths::GetBaseFilename(Requested);
+			for (UObject* Asset : Subsystem->GetAllEditedAssets())
+			{
+				if (!Asset) continue;
+				OpenNames.Add(Asset->GetName());
+
+				const bool bMatch =
+					Asset->GetName().Equals(RequestedName, ESearchCase::IgnoreCase) ||
+					Asset->GetPathName().Equals(Requested, ESearchCase::IgnoreCase) ||
+					Asset->GetOutermost()->GetName().Equals(Requested, ESearchCase::IgnoreCase);
+				if (!bMatch) continue;
+
+				IAssetEditorInstance* Instance = Subsystem->FindEditorForAsset(Asset, /*bFocusIfOpen=*/false);
+				if (!Instance) continue;
+
+				// 停靠成标签页时，光把窗口拿到前面还不够 —— 标签页本身也得切到前面，
+				// 不然抓到的是同一扇窗口里别的标签
+				if (bBringToFront)
+				{
+					Instance->FocusWindow();
+				}
+
+				TSharedPtr<FTabManager> TabManager = Instance->GetAssociatedTabManager();
+				TSharedPtr<SDockTab> OwnerTab = TabManager.IsValid() ? TabManager->GetOwnerTab() : nullptr;
+				TSharedPtr<SWindow> Window = OwnerTab.IsValid() ? OwnerTab->GetParentWindow() : nullptr;
+				if (Window.IsValid())
+				{
+					OutSource = TEXT("requested");
+					return Window;
+				}
+
+				// 编辑器开着，但反查不到它的窗口：退回主窗口并说明，别报「没开」
+				if (Root.IsValid())
+				{
+					OutSource = TEXT("fallback");
+					return Root;
+				}
+			}
+		}
+
+		OutErrorCode = 404;
+		OutError = FString::Printf(
+			TEXT("No open asset editor matches '%s'. Open editors: %s"),
+			*Requested,
+			OpenNames.Num() > 0 ? *FString::Join(OpenNames, TEXT(", ")) : TEXT("(none)"));
+		return nullptr;
+	}
+
+	const TArray<TSharedRef<SWindow>>& Windows = SlateApp.GetTopLevelWindows();
+	for (int32 Index = Windows.Num() - 1; Index >= 0; --Index)
+	{
+		const TSharedRef<SWindow>& Window = Windows[Index];
+		if (Window->IsRegularWindow() && Window->IsVisible())
+		{
+			OutSource = TEXT("last_active");
+			return Window;
+		}
+	}
+
+	TArray<TSharedRef<SWindow>> Interactive = SlateApp.GetInteractiveTopLevelWindows();
+	if (Interactive.Num() > 0)
+	{
+		OutSource = TEXT("fallback");
+		return Interactive[0];
+	}
+
+	OutErrorCode = 404;
+	OutError = TEXT("No valid window to capture");
+	return nullptr;
+}
+
+/**
+ * 抓一扇编辑器窗口，编码成 PNG 存盘。选哪扇见 `UAL_PickWindowToCapture`。
  *
  * ## 为什么抽成函数
  *
@@ -1898,9 +2055,12 @@ void FUAL_EditorCommands::Handle_AnalyzeUProject(const TSharedPtr<FJsonObject>& 
  */
 static bool UAL_CaptureActiveWindowToFile(
 	const FString& DesiredName,
+	const FString& RequestedWindow,
 	bool bBringToFront,
 	FString& OutPath,
 	FIntPoint& OutSize,
+	FString& OutWindowTitle,
+	FString& OutWindowSource,
 	FString& OutError,
 	int32& OutErrorCode)
 {
@@ -1911,21 +2071,12 @@ static bool UAL_CaptureActiveWindowToFile(
 		return false;
 	}
     FSlateApplication& SlateApp = FSlateApplication::Get();
-    TSharedPtr<SWindow> TargetWindow = SlateApp.GetActiveTopLevelWindow();
-
-    // 容错：如果没有活跃窗口，找第一个交互窗口
+    TSharedPtr<SWindow> TargetWindow = UAL_PickWindowToCapture(RequestedWindow, bBringToFront, OutWindowSource, OutError, OutErrorCode);
     if (!TargetWindow.IsValid())
     {
-        TArray<TSharedRef<SWindow>> Windows = SlateApp.GetInteractiveTopLevelWindows();
-        if (Windows.Num() > 0) TargetWindow = Windows[0];
-    }
-
-    if (!TargetWindow.IsValid())
-    {
-        OutErrorCode = 404;
-        OutError = TEXT("No valid window to capture");
         return false;
     }
+    OutWindowTitle = TargetWindow->GetTitle().ToString();
 
     // 确保窗口是可见的
 	// Check IsMinimized via NativeWindow if possible
@@ -2059,16 +2210,26 @@ void FUAL_EditorCommands::Handle_CaptureAppWindow(const TSharedPtr<FJsonObject>&
     FString DesiredName;
     Payload->TryGetStringField(TEXT("filepath"), DesiredName);
 
+    // 可选：点名拍哪个资产编辑器（名字或路径），或 level / main 点名主窗口。
+    // 不传就拍用户最后用过的那扇窗口，见 UAL_PickWindowToCapture
+    FString RequestedWindow;
+    Payload->TryGetStringField(TEXT("window"), RequestedWindow);
+    RequestedWindow.TrimStartAndEndInline();
+
     FString OutputPath;
     FString Error;
+    FString WindowTitle;
+    FString WindowSource;
     FIntPoint Size(0, 0);
     int32 ErrorCode = 500;
     // 一次性命令要把窗口拿到前面：用户问的就是屏幕上那个弹窗
-    if (!UAL_CaptureActiveWindowToFile(DesiredName, /*bBringToFront=*/true, OutputPath, Size, Error, ErrorCode))
+    if (!UAL_CaptureActiveWindowToFile(DesiredName, RequestedWindow, /*bBringToFront=*/true, OutputPath, Size, WindowTitle, WindowSource, Error, ErrorCode))
     {
         UAL_CommandUtils::SendError(RequestId, ErrorCode, Error);
         return;
     }
+
+    UE_LOG(LogUALEditor, Log, TEXT("editor.capture_app_window: window='%s' (%s) -> %s"), *WindowTitle, *WindowSource, *OutputPath);
 
     TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetStringField(TEXT("path"), OutputPath);
@@ -2076,6 +2237,8 @@ void FUAL_EditorCommands::Handle_CaptureAppWindow(const TSharedPtr<FJsonObject>&
     Data->SetNumberField(TEXT("width"), Size.X);
     Data->SetNumberField(TEXT("height"), Size.Y);
     Data->SetBoolField(TEXT("saved"), true);
+    Data->SetStringField(TEXT("window_title"), WindowTitle);
+    Data->SetStringField(TEXT("window_source"), WindowSource);
     UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
 
@@ -2868,7 +3031,10 @@ namespace
 			int32 Code = 500;
 			FString Path;
 			FString Error;
-			if (UAL_CaptureActiveWindowToFile(Name, /*bBringToFront=*/false, Path, Size, Error, Code))
+			FString WindowTitle;
+			FString WindowSource;
+			// 点名 pie：拍游戏视口所在的窗口，不跟着「用户最后用过的窗口」走
+			if (UAL_CaptureActiveWindowToFile(Name, TEXT("pie"), /*bBringToFront=*/false, Path, Size, WindowTitle, WindowSource, Error, Code))
 			{
 				Shot.Path = Path;
 			}

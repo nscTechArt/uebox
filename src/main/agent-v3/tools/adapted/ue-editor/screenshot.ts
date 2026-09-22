@@ -10,6 +10,15 @@
  * 不拆成两个工具：交付物是同一个（一张图进上下文），拆开只会让模型
  * 在两个名字之间挑，而挑错的代价是拍回一张没有它要找的东西的图。
  *
+ * ## 抓窗口时抓的是哪一扇
+ *
+ * 不传 `window` 时插件拍**用户最后用过的那扇**编辑器窗口（蓝图编辑器浮在外面
+ * 就是蓝图编辑器）；有模态弹窗时拍弹窗。以前一律落到主关卡窗口：用户在盒子里
+ * 敲字的那一刻引擎所有窗口都失活，Slate 的「活跃窗口」是空，插件就退回第一扇，
+ * 而第一扇永远是主窗口 —— 用户开着蓝图说「看看我这张图」，拍回去的却是场景。
+ * 传 `window`（资产名或路径，或 `level`）可以点名。插件回 `window_title` 和
+ * `window_source`，贴进 message：拍到的是哪扇窗口，模型必须知道。
+ *
  * ## 拍哪个世界由插件自己判断
  *
  * PIE 在跑就拍**正在跑的游戏世界**（玩家视角），没在跑才拍编辑器世界。
@@ -61,7 +70,6 @@
 import { defineV2Tool, type V2Tool } from '../../adaptV2Tool'
 import { z } from 'zod'
 import { getAppWindows } from '../../../../appWindows'
-import { spawn } from 'child_process'
 import { serviceManager } from '../../../../services'
 import * as fs from 'fs/promises'
 
@@ -99,6 +107,15 @@ const ScreenshotParamsSchema = z.object({
         'true = 拍**整个编辑器窗口**：面板、菜单、报错弹窗都看得见。' +
         '「界面上弹了个框」「这个面板里显示的是什么」用 true；' +
         '看场景本身一律用 false —— 那条路直接渲染，窗口最小化或被挡住也能出图'
+    ),
+  window: z
+    .string()
+    .optional()
+    .describe(
+      '可选，只在 show_ui=true 时有效：点名拍哪个资产编辑器窗口，传资产名或路径' +
+        '（如 BP_Door、/Game/BP/BP_Door），传 level 拍主关卡窗口。' +
+        '不传就拍用户最后用过的那扇窗口（有弹窗时拍弹窗），通常就是对的；' +
+        '只有拍回来不是要看的那扇时才点名'
     ),
   world: z
     .enum(['auto', 'editor'])
@@ -262,23 +279,15 @@ function describeCamera(response: ScreenshotResponse): string {
 const PLUGIN_SCREENSHOT_TIMEOUT_MS = 30_000
 
 /**
- * 截图前把虚幻编辑器窗口抬到前面。
+ * 拍窗口前**不在这一侧抬窗口**。
  *
- * ## 为什么必须做这件事
+ * 曾经有过一段 PowerShell 对进程主窗口 `ShowWindow(SW_RESTORE)`，理由是
+ * 「插件主线程卡着时进程外还能救一下」—— 但主线程卡着时插件同样答不了这条
+ * 请求，救不到；代价却是实打实的：它激活的是**主窗口**，Slate 随即把主窗口
+ * 记成活跃窗口，插件那边「用户最后用过的窗口」就被顶掉 —— 用户在看蓝图编辑器，
+ * 拍回去的却是场景。最小化的还原交给插件：它对**选中的那扇**窗口 `Restore()`。
  *
- * 只在 `show_ui: true`（拍整个编辑器窗口）那条路上用 —— 默认路径走 SceneCapture
- * 主动渲染，跟窗口状态无关，不需要动窗口。
- *
- * 最小化的窗口抓不出东西：`PrintWindow` 对它返回的是一张白图，而且照样
- * `saved: true`，从返回值里分不出来。（更早的 HighResShot 那条路同理 ——
- * 它排队等视口重绘，而最小化时虚幻跳过绘制，那一帧永远不来。）
- * `ShowWindow(SW_RESTORE)` 能把最小化的窗口还原出来，不受前台限制、
- * 也不抢用户的键盘焦点。
- *
- * **仅此而已。** 窗口只是被别的程序盖住（没最小化）时它什么也不做 ——
- * 实测 `GetForegroundWindow()` 调用前后完全没变。以下做法都试过并排除，
- * 别再走一遍：
- *
+ * 以下做法都试过并排除，别再走一遍：
  * - `SetForegroundWindow`：受 Windows 前台限制，同一段代码两次调用一次 True
  *   一次 False，靠不住；而且会抢走用户正在打字的焦点。
  * - `AttachThreadInput` + `SetForegroundWindow`：能让 `GetForegroundWindow()`
@@ -286,56 +295,7 @@ const PLUGIN_SCREENSHOT_TIMEOUT_MS = 30_000
  * - 关节流（`Slate.bAllowThrottling 0`）、解限帧（`t.MaxFPS 0`）：与结果不相关。
  * - 靠 `render_thread_ms === 0` 探测"没在渲染"再提前报错：判据是错的，
  *   这个引擎全局量在本机任何时候都是 0，包括截图成功那次 —— 100% 误报。
- *
- * 失败一律吞掉：抬不起窗口就照常发请求，最坏退回原来的超时行为。
  */
-async function raiseEditorWindow(signal?: AbortSignal): Promise<void> {
-  if (process.platform !== 'win32') return
-  // 已经按了停止就别再抬窗口 —— 那会把用户主动切走的编辑器又弹回他面前
-  if (signal?.aborted) return
-
-  const script = [
-    '$s=@"',
-    'using System;using System.Runtime.InteropServices;',
-    'public class UAW{[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int n);}',
-    '"@',
-    'Add-Type -TypeDefinition $s',
-    '$p=Get-Process UnrealEditor -ErrorAction SilentlyContinue|' +
-      'Where-Object{$_.MainWindowHandle -ne 0}|Select-Object -First 1',
-    // 9 = SW_RESTORE：最小化的还原出来，被盖住的显示到前面。不动键盘焦点
-    'if($p){[UAW]::ShowWindow($p.MainWindowHandle,9)|Out-Null}'
-  ].join('\n')
-
-  await new Promise<void>((resolve) => {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-      windowsHide: true
-    })
-    // 抬窗口是尽力而为，卡住不该拖垮截图本身
-    const timer = setTimeout(() => {
-      child.kill()
-      resolve()
-    }, 4000)
-    child.on('exit', () => {
-      clearTimeout(timer)
-      resolve()
-    })
-    child.on('error', (error) => {
-      clearTimeout(timer)
-      console.warn('[ScreenshotTool] 抬起编辑器窗口失败，继续尝试截图:', error.message)
-      resolve()
-    })
-    // 用户在这 4 秒里按了停止：杀掉子进程，别让它抬完窗口才结束
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer)
-        child.kill()
-        resolve()
-      },
-      { once: true }
-    )
-  })
-}
 
 /**
  * 读截图，压到能进上下文的大小。
@@ -367,6 +327,14 @@ interface AppWindowShotResponse {
   width: number
   height: number
   saved: boolean
+  /** 拍到的那扇窗口的标题，老插件不回 */
+  window_title?: string
+  /**
+   * 这扇窗口是怎么选出来的：requested（点名）/ modal（弹窗，点了名也优先拍它）/
+   * last_active（用户最后用过的）/ fallback（点名的定位不到窗口，或全落空，退回主窗口）。
+   * 老插件不回
+   */
+  window_source?: string
 }
 
 /**
@@ -383,16 +351,19 @@ interface AppWindowShotResponse {
  * `FSlateApplication::TakeScreenshot`），拿的是用户屏幕上那一份。
  * 这条命令 2026-08-31 的工具体检就点名过「插件有、工具没接」，一直空着。
  *
- * 抓的是**当前活跃的顶层窗口**：有模态弹窗时就是那个弹窗，
- * 这正是「界面上弹了个框」要的东西。
+ * 抓哪扇窗口由插件定（见文件头「抓窗口时抓的是哪一扇」）：点名优先，
+ * 其次是模态弹窗，再是用户最后用过的那扇。拍到的是哪扇、怎么选的，
+ * 一并贴进 message —— 拍错窗口的图看着完全正常，模型自己看不出来。
  */
 async function captureAppWindow(
   filepath: string | undefined,
+  window: string | undefined,
   abortSignal?: AbortSignal
 ): Promise<Record<string, unknown>> {
   const wsService = serviceManager.getWebSocketService()
   const params: Record<string, unknown> = {}
   if (filepath) params.filepath = filepath
+  if (window) params.window = window
 
   console.log('[ScreenshotTool] 发送 editor.capture_app_window 请求:', params)
 
@@ -439,12 +410,54 @@ async function captureAppWindow(
     width: response.width,
     height: response.height,
     saved: true,
+    window_title: response.window_title,
+    window_source: response.window_source,
     images,
     message:
       `编辑器窗口截图（${response.width}x${response.height}）—— 画面是**用户屏幕上那一份**，` +
       `面板、菜单、弹窗都在里面。\n` +
+      describeCapturedWindow(response, window) +
       `这张图看不到场景的渲染细节（亮度、材质、阴影都按编辑器当前显示走），` +
       `要看场景本身用 show_ui=false 再拍一张。`
+  }
+}
+
+/**
+ * 把「拍到的是哪扇窗口」说给模型听。
+ *
+ * fallback 单独警告：那是所有判据都落空后退回的主窗口，和用户在看的那扇
+ * 没有关系。一张拍错窗口的图看着完全正常，模型分不出来，会拿它下结论。
+ */
+function describeCapturedWindow(
+  response: AppWindowShotResponse,
+  requestedWindow: string | undefined
+): string {
+  if (!response.window_title && !response.window_source) {
+    // 老插件不认 window：点了名却没回选窗信息，说明拍的是默认那扇，不能装作点名生效了
+    return requestedWindow
+      ? `⚠️ 当前插件版本不支持 window 参数，「${requestedWindow}」被忽略了，拍的是插件默认选的窗口，` +
+          `不一定是它。请用户更新 UnrealAgentLink 插件。\n`
+      : ''
+  }
+  const title = response.window_title ? `「${response.window_title}」` : '（标题未知）'
+  switch (response.window_source) {
+    case 'requested':
+      return `拍的是你点名的窗口${title}。\n`
+    case 'modal':
+      return requestedWindow
+        ? `⚠️ 你点名了「${requestedWindow}」，但当前有模态弹窗挡着编辑器，拍的是那个弹窗${title}。` +
+            `先处理弹窗再拍点名的窗口。\n`
+        : `拍的是当前的模态弹窗${title}。\n`
+    case 'last_active':
+      return `拍的是用户最后用过的窗口${title}。要看别的编辑器窗口就用 window 点名。\n`
+    case 'fallback':
+      return requestedWindow
+        ? `⚠️ 「${requestedWindow}」的编辑器开着，但定位不到它所在的窗口，退回了主窗口${title}——` +
+            `图里不一定有它。\n`
+        : `⚠️ 没找到用户最后用过的窗口，退回了主窗口${title}——` +
+            `这张图和用户正在看的编辑器可能不是同一扇，要看具体某个资产编辑器请用 window 点名。\n`
+    default:
+      return `拍的是窗口${title}。\n`
   }
 }
 
@@ -490,7 +503,10 @@ Print String 的屏幕字都不在画面里，哪怕正显示在用户屏幕上�
 
 用户说「界面上弹了个错」「这个面板里写的什么」「按钮在哪」——
 那些东西不在场景里，传 show_ui=true：抓的是用户屏幕上的整个编辑器窗口，
-有模态弹窗时抓的就是那个弹窗。这条路不渲染，所以没有曝光偏差，
+有模态弹窗时抓的就是那个弹窗，否则拍用户最后用过的那扇窗口（蓝图、材质
+编辑器浮在外面就拍那扇）。返回的 window_title 说了拍到的是哪扇，先核对
+再下结论；拍回来不是要看的那扇，或者要看别的编辑器，用 window 点名
+（资产名或路径，level 是主关卡窗口）。这条路不渲染，所以没有曝光偏差，
 但也看不出材质、灯光这类渲染细节，看场景一律用默认。
 
 【⚠️ 曝光和用户屏幕上不完全一致】这条路自己渲一帧，自动曝光的收敛状态
@@ -515,6 +531,8 @@ Print String 的屏幕字都不在画面里，哪怕正显示在用户屏幕上�
 - resolution: 可选，[宽度, 高度]，默认 [1920, 1080]
 - show_ui: 可选，true = 拍整个编辑器窗口（面板、菜单、弹窗），默认 false = 只拍场景。
   为 true 时 resolution / world / warmup_frames 都不起作用 —— 那条路是抓屏，不渲染
+- window: 可选，只配合 show_ui=true：点名拍哪个资产编辑器（资产名或路径），
+  或 level 拍主关卡窗口。不传就拍用户最后用过的那扇
 - world: 可选，auto（默认，PIE 在跑就拍游戏）/ editor（强制拍编辑器世界）
 - warmup_frames: 可选，预热帧数，默认 4。嫌 GI 有噪点、阴影缺角就调大
 
@@ -526,7 +544,10 @@ Print String 的屏幕字都不在画面里，哪怕正显示在用户屏幕上�
 - pending_shaders / pending_assets: 拍的时候还有多少没编译完，0 才算干净
 - streaming_in_flight: 还有多少贴图没流送完，0 才算干净
 - camera_source: viewport / player / fallback —— fallback 表示构图不可信
-- camera_location / camera_rotation: 这一帧的机位（位置单位厘米）`,
+- camera_location / camera_rotation: 这一帧的机位（位置单位厘米）
+- window_title / window_source（仅 show_ui=true）: 拍到的是哪扇窗口、怎么选的。
+  window_source=fallback 表示退回了主窗口，别当成用户看的那扇；
+  有模态弹窗时一律拍弹窗（window_source=modal），点了名也一样`,
 
     inputSchema: ScreenshotParamsSchema,
 
@@ -559,16 +580,17 @@ Print String 的屏幕字都不在画面里，哪怕正显示在用户屏幕上�
           }
         }
 
-        // 只有要拍编辑器界面时才动窗口。默认路径走 SceneCapture 主动渲染，
-        // 跟窗口状态无关 —— 那条路上抬窗口纯属打扰用户。
-        //
-        // 拍窗口这条路必须先把最小化的还原出来：PrintWindow 对最小化窗口
-        // 抓回来的是一张白图，而且照样 saved:true —— 从返回值里分不出来。
-        // 插件那边也 Restore 一次，两边都做是有意的：进程外这一下能处理
-        // 引擎主线程正卡着、来不及响应的情况
+        // 5. window 只在抓窗口那条路上有意义。渲染那条路根本不读它，
+        // 悄悄忽略等于让模型以为拍到了点名的编辑器、实际拿到的是场景
+        if (input.window && !input.show_ui) {
+          return {
+            success: false,
+            error: 'window 只配合 show_ui=true 使用：点名拍某个编辑器窗口要走抓屏那条路。要看场景就去掉 window。'
+          }
+        }
+
         if (input.show_ui) {
-          await raiseEditorWindow(abortSignal)
-          return await captureAppWindow(input.filepath, abortSignal)
+          return await captureAppWindow(input.filepath, input.window, abortSignal)
         }
 
         // 构建请求参数
@@ -596,7 +618,7 @@ Print String 的屏幕字都不在画面里，哪怕正显示在用户屏幕上�
           params,
           getTargetConnectionId(),
           PLUGIN_SCREENSHOT_TIMEOUT_MS + 8000,
-          // 这条是全仓库最慢的一次等待（抬窗口 4 秒 + 插件 30 秒 + 8 秒余量）。
+          // 这条是全仓库最慢的一次等待（插件 30 秒 + 8 秒余量）。
           // 用户按停止时把它当场作废，别让暂存池挂着一条谁也不要的请求。
           abortSignal
         )

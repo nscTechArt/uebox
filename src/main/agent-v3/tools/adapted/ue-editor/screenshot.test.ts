@@ -37,15 +37,12 @@ vi.mock('fs/promises', () => ({
   readFile: vi.fn(async () => Buffer.from('png'))
 }))
 
-// show_ui=true 会先用 PowerShell 把最小化的编辑器窗口还原出来。
-// 不挡住的话每个用例都真去 spawn 一次 powershell.exe（本机跑测试就是 win32）
+// 这一侧不再 spawn 任何进程抬窗口（原因见 screenshot.ts「拍窗口前不在这一侧抬窗口」）。
+// 谁要是又加回去，这一句会让它在测试里当场炸掉，而不是悄悄真去弹 powershell
 vi.mock('child_process', () => ({
-  spawn: vi.fn(() => ({
-    on: (event: string, cb: () => void) => {
-      if (event === 'exit') setTimeout(cb, 0)
-    },
-    kill: vi.fn()
-  }))
+  spawn: () => {
+    throw new Error('screenshot 不该再在应用侧 spawn 进程抬窗口')
+  }
 }))
 
 import { runWithEditorScreenshotScope } from '../../../core/editorScreenshotScope'
@@ -472,6 +469,124 @@ describe('拍整个编辑器窗口（show_ui=true）', () => {
     const result = await runWithEditorScreenshotScope(false, () => run({ show_ui: true }))
 
     expect(result.success).toBe(false)
+    expect(callRequest).not.toHaveBeenCalled()
+  })
+
+  /**
+   * 「拍到的是哪扇窗口」必须回上去。
+   *
+   * 2026-09-22 的反馈：用户开着蓝图编辑器说「看看我这张图」，拍回去的永远是
+   * 主关卡窗口 —— 用户在盒子里敲字那一刻引擎所有窗口都失活，Slate 的活跃窗口
+   * 是空，插件退回第一扇，而第一扇永远是主窗口。一张拍错窗口的图看着完全正常，
+   * 模型分不出来。现在插件按「用户最后用过的窗口」选，并回 window_title /
+   * window_source；这一侧要把它翻进 message，fallback 时单独警告。
+   */
+  it('点名的窗口传下去', async () => {
+    callRequest.mockResolvedValue({
+      ...WINDOW_SHOT,
+      window_title: 'BP_Door',
+      window_source: 'requested'
+    })
+
+    const result = await run({ show_ui: true, window: 'BP_Door' })
+
+    const params = callRequest.mock.calls[0][1] as Record<string, unknown>
+    expect(params.window).toBe('BP_Door')
+    expect(result.window_title).toBe('BP_Door')
+    expect(String(result.message)).toContain('点名')
+    expect(String(result.message)).toContain('BP_Door')
+  })
+
+  it('没点名就不发 window 字段', async () => {
+    callRequest.mockResolvedValue(WINDOW_SHOT)
+
+    await run({ show_ui: true })
+
+    expect(callRequest.mock.calls[0][1]).not.toHaveProperty('window')
+  })
+
+  it('拍的是用户最后用过的窗口时把标题说出来，并给出点名的路', async () => {
+    callRequest.mockResolvedValue({
+      ...WINDOW_SHOT,
+      window_title: 'BP_Chandelier',
+      window_source: 'last_active'
+    })
+
+    const result = await run({ show_ui: true })
+
+    expect(String(result.message)).toContain('BP_Chandelier')
+    expect(String(result.message)).toContain('最后用过')
+    expect(String(result.message)).toContain('window')
+  })
+
+  it('退回主窗口时挑明「可能不是用户在看的那扇」', async () => {
+    callRequest.mockResolvedValue({
+      ...WINDOW_SHOT,
+      window_title: 'Demo_Village_v2',
+      window_source: 'fallback'
+    })
+
+    const result = await run({ show_ui: true })
+
+    expect(String(result.message)).toContain('⚠️')
+    expect(String(result.message)).toContain('主窗口')
+    expect(result.window_source).toBe('fallback')
+  })
+
+  it('老插件不回窗口信息时一个字都不加', async () => {
+    callRequest.mockResolvedValue(WINDOW_SHOT)
+
+    const result = await run({ show_ui: true })
+
+    expect(String(result.message)).not.toContain('窗口「')
+    expect(String(result.message)).not.toContain('最后用过')
+  })
+
+  it('点了名但老插件不认 window 时挑明被忽略了', async () => {
+    callRequest.mockResolvedValue(WINDOW_SHOT)
+
+    const result = await run({ show_ui: true, window: 'BP_Door' })
+
+    expect(result.success).toBe(true)
+    expect(String(result.message)).toContain('⚠️')
+    expect(String(result.message)).toContain('不支持 window')
+    expect(String(result.message)).toContain('BP_Door')
+  })
+
+  it('点了名但被模态弹窗挡住时说清拍的是弹窗', async () => {
+    callRequest.mockResolvedValue({
+      ...WINDOW_SHOT,
+      window_title: '保存内容',
+      window_source: 'modal'
+    })
+
+    const result = await run({ show_ui: true, window: 'BP_Door' })
+
+    expect(String(result.message)).toContain('⚠️')
+    expect(String(result.message)).toContain('弹窗')
+    expect(String(result.message)).toContain('BP_Door')
+  })
+
+  it('点名的编辑器开着但定位不到窗口时说清退回了主窗口', async () => {
+    callRequest.mockResolvedValue({
+      ...WINDOW_SHOT,
+      window_title: 'Demo_Village_v2',
+      window_source: 'fallback'
+    })
+
+    const result = await run({ show_ui: true, window: 'M_Rock' })
+
+    expect(String(result.message)).toContain('M_Rock')
+    expect(String(result.message)).toContain('定位不到')
+  })
+
+  it('window 不配 show_ui=true 直接拒绝，不去渲场景', async () => {
+    callRequest.mockResolvedValue(EDITOR_SHOT)
+
+    const result = await run({ window: 'BP_Door' })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('show_ui')
     expect(callRequest).not.toHaveBeenCalled()
   })
 })
