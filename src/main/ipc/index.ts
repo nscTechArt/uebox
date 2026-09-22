@@ -23,6 +23,7 @@ import { registerDashScopeIPC } from './dashscope'
 import { registerVisionIPC } from './vision'
 import { registerAttachmentIPC } from './attachment'
 import { registerRealtimeVoiceIPC } from './realtimeVoice'
+import { registerSpeechToTextIPC } from './speechToText'
 import { registerVideoThumbnailIPC } from './videoThumbnail'
 import { registerVideoCompressIPC } from './videoCompress'
 import { registerAiImageIPC } from './aiImage'
@@ -115,6 +116,9 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 注册实时语音会话 IPC
   registerRealtimeVoiceIPC()
+
+  // 注册语音识别（听写）IPC。和上面那条是两路独立会话，见 speechToText.ts
+  registerSpeechToTextIPC()
 
   // 注册视频缩略图相关 IPC（视频首帧截取）
   registerVideoThumbnailIPC()

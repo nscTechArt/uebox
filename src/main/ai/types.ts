@@ -185,5 +185,19 @@ export const ROLE_FALLBACK: Readonly<Record<ModelRole, readonly ModelRole[]>> = 
    */
   realtime: Object.freeze<ModelRole[]>(['realtime']),
   music: Object.freeze<ModelRole[]>(['music']),
-  tts: Object.freeze<ModelRole[]>(['tts'])
+  tts: Object.freeze<ModelRole[]>(['tts']),
+  /*
+   * 语音识别。这张表里**唯一一个真有回落、却不能写在这里**的角色。
+   *
+   * 它没配时听写会去借「实时语音」那一路（那一路本来就带转写），可那是
+   * 两种 Provider、两套会话、两个 IPC 通道 —— 不是「换一个模型 id」这张表
+   * 能表达的事。选路写在 `ipc/speechToText.ts` 的 `resolveSttBinding` 旁边，
+   * 这里写 ['stt'] 是照实说：这个角色本身没有同类可替。
+   */
+  stt: Object.freeze<ModelRole[]>(['stt']),
+  /*
+   * 结构化判定。不回落，而且**没配不该报错** —— 见 ModelRole 上的注释：
+   * 调用方拿不到判定器时走的是原来那条确定性规则，不是失败路径。
+   */
+  judge: Object.freeze<ModelRole[]>(['judge'])
 })

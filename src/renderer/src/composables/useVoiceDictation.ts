@@ -2,17 +2,30 @@
  * 听写：把麦克风变成输入法，**只出文字，不出声音**。
  *
  * 全局热键唤起 Spotlight 用的就是这一路。和 `useRealtimeVoice`（语音助手通话）
- * 同走一条实时会话，但两者要的东西几乎不重叠：
+ * 相比，两者要的东西几乎不重叠：
  *
  * | | 语音助手 | 听写 |
  * |---|---|---|
  * | 会话 | 连续，用户自己挂断 | 一轮说完就收 |
- * | 模型 | 会回话、会调工具 | 只转写（主进程关掉了服务端自动应答） |
+ * | 模型 | 会回话、会调工具 | 只转写 |
  * | 输出 | 音频 + 字幕 + 派活 | 一条 `user-text` |
  * | 播放 | 要 AEC 回环、要播放队列 | 一个扬声器都不开 |
  *
  * 所以这里**没有**复用那 1800 行，只借它的采集 worklet。合进去的代价是那边每
  * 一条「模型在说话吗」的判断都要多带一个「这一路根本不说话」的分支。
+ *
+ * ## 两条通道，优先走识别那条
+ *
+ * - **语音识别**（`window.api.speechToText`）：厂商的纯识别接口，豆包 sauc /
+ *   阿里百炼 ASR。绑了「语音识别」角色就走它。
+ * - **实时语音**（`window.api.realtimeVoice.startDictation`）：借对话会话的转写，
+ *   靠 `create_response: false` 把模型的嘴堵上。没绑识别角色时的回落。
+ *
+ * 优先识别那条，三个理由：便宜（按识别时长计费，不烧对话 token）、快（不用等
+ * 一条对话链路握完手）、**而且豆包只有这条走得通** —— 它的全双工接口关不掉
+ * 自动应答，于是绑豆包实时语音的用户按下热键只能得到一句「这会儿用不了语音」。
+ *
+ * 选路由主进程给答案（`speechToText.audioSpec`）：角色绑定只有它读得到。
  */
 
 import { ref, type Ref } from 'vue'
@@ -21,11 +34,12 @@ import { mediaPermissionErrorKey } from '@renderer/utils/mediaPermissionError'
 import i18n from '@renderer/i18n'
 
 /**
- * 为什么会开不起来。调用方按类别处置：前两类**静默退回打字**，后两类要说给用户听。
+ * 为什么会开不起来。调用方按类别处置：前两类**静默退回打字**，后三类要说给用户听。
  *
- * - `busy`：助手页正在通话。会话是全局单例，让路而不是抢
- * - `vendor-unsupported`：绑的是豆包，它做不到「只转写不回答」
- * - `unconfigured`：压根没绑实时语音模型
+ * - `busy`：助手页正在通话。麦克风只有一个，让路而不是抢
+ * - `vendor-unsupported`：回落到实时语音那一路，而绑的是豆包 —— 它做不到
+ *   「只转写不回答」。**绑一个「语音识别」模型就能绕过这一条**
+ * - `unconfigured`：识别和实时语音两个角色都没绑
  * - `failed` / `mic-denied`：连接建不起来 / 麦克风没给权限
  */
 export type DictationFailure =
@@ -34,6 +48,27 @@ export type DictationFailure =
   | 'unconfigured'
   | 'failed'
   | 'mic-denied'
+
+/**
+ * 一条听写通道。两个实现：主进程的语音识别会话、以及实时语音那一路的听写模式。
+ *
+ * 抽这一层是为了让下面几百行**完全不关心当前连的是哪条** —— 攒首字、判轮次、
+ * 收麦克风这些事两条通道一模一样，按通道各写一遍的话，改了一处忘了另一处的
+ * 后果是「换个厂商就开始吃字」，而症状不会指向这里。
+ */
+interface DictationChannel {
+  start: () => Promise<
+    | { ok: true }
+    | {
+        ok: false
+        reason: 'busy' | 'vendor-unsupported' | 'unconfigured' | 'failed'
+        error?: string
+      }
+  >
+  stop: () => Promise<unknown>
+  sendAudio: (base64: string) => void
+  onEvent: (handler: (payload: unknown) => void) => () => void
+}
 
 export type DictationState =
   /** 没在听 */
@@ -161,6 +196,14 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
    * 主进程那边也查了一道 sender，这里是第二道：没开过就连问都不问。
    */
   let ownsSession = false
+  /**
+   * 这一轮走的是哪条通道。
+   *
+   * 开会话时定下来，收尾时照它去关 —— **不能在收尾时再判一次**：用户可能在
+   * 说话这几秒里改了模型绑定，那样关掉的就是另一条通道上的会话，而自己这条
+   * 留在主进程里一直开着。
+   */
+  let channel: DictationChannel | null = null
   let readyTimer: ReturnType<typeof setTimeout> | null = null
   /** 响度的发布节流。理由见 `LEVEL_PUBLISH_MS` */
   let levelPeak = 0
@@ -199,7 +242,9 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     // 没开过就不去关。理由见 `ownsSession`
     if (!ownsSession) return
     ownsSession = false
-    await window.api.realtimeVoice.stop().catch(() => undefined)
+    const opened = channel
+    channel = null
+    await opened?.stop().catch(() => undefined)
   }
 
   function handleEvent(payload: unknown, currentGeneration: number): void {
@@ -213,7 +258,7 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
         readyTimer = null
         state.value = 'listening'
         // 攒着的先补发，顺序不能乱 —— 乱了就是一句话被重排过的词
-        for (const packet of preroll) window.api.realtimeVoice.sendAudio(packet)
+        for (const packet of preroll) channel?.sendAudio(packet)
         preroll = []
         break
       case 'user-text':
@@ -272,7 +317,7 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
       publishLevel(rootMeanSquare(samples))
       const packet = encodePcm(samples)
       if (vendorReady) {
-        window.api.realtimeVoice.sendAudio(packet)
+        channel?.sendAudio(packet)
       } else {
         preroll.push(packet)
         // 首字缓冲要的是握手那一两秒。超过上限就丢最旧的 —— 三十秒之前说的话
@@ -304,6 +349,46 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     await audioContext.resume().catch(() => undefined)
   }
 
+  /** 语音识别那条。主进程已经在 `audioSpec` 里确认过角色绑着了 */
+  function sttChannel(): DictationChannel {
+    const api = window.api.speechToText
+    return {
+      start: () => api.start(),
+      stop: () => api.stop(),
+      sendAudio: api.sendAudio,
+      onEvent: api.onEvent
+    }
+  }
+
+  /** 实时语音那条。没绑识别角色时的回落，行为与这一档出现之前一致 */
+  function realtimeChannel(): DictationChannel {
+    const api = window.api.realtimeVoice
+    return {
+      start: () => api.startDictation(),
+      stop: () => api.stop(),
+      sendAudio: api.sendAudio,
+      onEvent: api.onEvent
+    }
+  }
+
+  /**
+   * 选通道，顺带把上行采样率问出来。
+   *
+   * 两件事一次问完：它们的答案来自主进程的同一次配置读取，而调用方正等着
+   * 拿采样率去开麦克风 —— 多一次 IPC 往返就是多几十毫秒的首字延迟。
+   */
+  async function pickChannel(): Promise<{ channel: DictationChannel; sampleRate: number }> {
+    const spec = await window.api.speechToText.audioSpec()
+    if (spec.ok) return { channel: sttChannel(), sampleRate: spec.inputSampleRate }
+    const fallback = await window.api.realtimeVoice.audioSpec()
+    // 问不出来就按 24k 开麦：OpenAI 那家两头都是 24k，豆包进 16k ——
+    // 而问不出来的场合（没绑模型）下一步就会失败，采样率用不上了
+    return {
+      channel: realtimeChannel(),
+      sampleRate: fallback.ok ? fallback.inputSampleRate : 24_000
+    }
+  }
+
   async function start(): Promise<DictationFailure | null> {
     // 已经在听：先收掉上一轮。热键按第二次走的就是这条路
     if (state.value !== 'idle') await stop()
@@ -318,11 +403,12 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
      * 采样率先问、麦克风先开、连接后建。**顺序是有意的**：建连接要几百毫秒，
      * 而用户按下热键的下一秒就在说话了。反过来写的代价是每次都吃掉开头几个字。
      */
-    const spec = await window.api.realtimeVoice.audioSpec()
+    const picked = await pickChannel()
     if (generation !== currentGeneration) return null
+    channel = picked.channel
 
     try {
-      await openMicrophone(spec.ok ? spec.inputSampleRate : 24_000, currentGeneration)
+      await openMicrophone(picked.sampleRate, currentGeneration)
     } catch (error) {
       await stop()
       const key = mediaPermissionErrorKey(error, 'microphone', window.api.platform)
@@ -331,16 +417,20 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     }
     if (generation !== currentGeneration) return null
 
-    unsubscribe = window.api.realtimeVoice.onEvent((payload) =>
-      handleEvent(payload, currentGeneration)
-    )
+    unsubscribe = picked.channel.onEvent((payload) => handleEvent(payload, currentGeneration))
 
-    const opened = await window.api.realtimeVoice.startDictation()
+    const opened = await picked.channel.start()
     if (!opened.ok) {
       if (generation !== currentGeneration) return null
       await stop()
+      /*
+       * 识别那条回 `unconfigured` 只可能是**这几百毫秒里用户把绑定改掉了**
+       * （`audioSpec` 刚说过它绑着）。没有专门的话可说，按「用不了」处理 ——
+       * 再自动回落一次实时语音的话，还得防住「两边都说没绑」的死循环，
+       * 而这个场合罕见到不值得为它多一条永远测不到的分支。
+       */
       if (opened.reason === 'unconfigured' || opened.reason === 'failed') {
-        options.onError?.(opened.error)
+        options.onError?.(opened.error || i18n.global.t('spotlightWindow.dictation.unavailable'))
       }
       return opened.reason
     }

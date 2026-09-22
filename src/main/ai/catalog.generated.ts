@@ -3970,5 +3970,75 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "INFINI_API_KEY",
     "hasLogo": true,
     "models": []
+  },
+  {
+    "id": "typesafe",
+    "displayName": "TypeSafe（结构化判定）",
+    "group": "judge",
+    "kind": "judge",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.typesafe.ai/v1",
+    "apiKeyUrl": "https://console.typesafe.ai/",
+    "requiresApiKey": true,
+    "defaultEnvVar": "TYPESAFE_API_KEY",
+    "hasLogo": false,
+    "models": [
+      {
+        "id": "jev-latest",
+        "displayName": "Jev（最新）"
+      },
+      {
+        "id": "jev-1.13.0",
+        "displayName": "Jev 1.13（锁定版本）"
+      }
+    ]
+  },
+  {
+    "id": "doubao-stt",
+    "displayName": "豆包语音识别 STT 2.0",
+    "group": "stt",
+    "kind": "stt",
+    "protocol": "openai-completions",
+    "baseUrl": "https://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+    "apiKeyUrl": "https://console.volcengine.com/speech/new/setting/apikeys",
+    "requiresApiKey": true,
+    "defaultEnvVar": "VOLCENGINE_SPEECH_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "volc.seedasr.sauc.duration",
+        "displayName": "豆包 STT 2.0（小时版）"
+      },
+      {
+        "id": "volc.seedasr.sauc.concurrent",
+        "displayName": "豆包 STT 2.0（并发版）"
+      }
+    ]
+  },
+  {
+    "id": "alibaba-asr",
+    "displayName": "阿里云 Qwen-Audio 语音识别",
+    "group": "stt",
+    "kind": "stt",
+    "protocol": "openai-completions",
+    "baseUrl": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+    "apiKeyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
+    "requiresApiKey": true,
+    "defaultEnvVar": "DASHSCOPE_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "qwen-audio-3.1-asr-flash-streaming",
+        "displayName": "Qwen-Audio 3.1 ASR Flash Streaming"
+      },
+      {
+        "id": "qwen-audio-3.0-asr-flash-streaming",
+        "displayName": "Qwen-Audio 3.0 ASR Flash Streaming"
+      },
+      {
+        "id": "fun-asr-realtime",
+        "displayName": "Fun-ASR Realtime"
+      }
+    ]
   }
 ] as CatalogEntry[])

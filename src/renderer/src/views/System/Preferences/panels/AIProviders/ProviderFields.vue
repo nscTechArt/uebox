@@ -163,13 +163,19 @@ defineEmits<{ import: [] }>()
       <p class="hint">{{ $t('aiProvider.field.vendorApiDesc') }}</p>
     </label>
 
-    <!-- 3D 与视频厂商没有 /models 端点，按了必然 404 —— 干脆不摆出来 -->
+    <!--
+      3D 与视频厂商没有 /models 端点，按了必然 404 —— 干脆不摆出来。
+      判定这一档同理：可用模型是账号上的常量，没有「列出来」这个动作。
+      语音识别也一样，而且它那一栏填的根本不是模型名（豆包那边是资源 ID）。
+    -->
     <AppButton
       v-if="
         draft.kind !== 'model3d' &&
         draft.kind !== 'video' &&
         draft.kind !== 'tts' &&
-        draft.kind !== 'music'
+        draft.kind !== 'stt' &&
+        draft.kind !== 'music' &&
+        draft.kind !== 'judge'
       "
       variant="soft"
       size="medium"

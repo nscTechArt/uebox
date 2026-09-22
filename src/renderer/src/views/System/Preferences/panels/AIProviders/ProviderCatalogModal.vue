@@ -1,14 +1,33 @@
 <script setup lang="ts">
 import AppModal from '@renderer/components/AppModal.vue'
+import AppSegmented from '@renderer/components/AppSegmented.vue'
 /**
  * 厂商目录选择器。
  *
  * 选一条就把 Base URL、协议、常见模型一起填好，用户只需要补一个 API Key。
  * 目录是编译进包里的静态数据，打开这个弹窗**不产生任何网络请求**。
+ *
+ * ## 为什么顶上有一排分页
+ *
+ * 目录长到 73 家、15 个分区之后，一条直筒滚动就撑不住了：对话类 41 家占满了
+ * 前两屏，剩下 32 家能力型厂商（生图、语音、向量化、3D…）全在第一屏之外，
+ * 而弹窗没有滚动提示 —— 表现和「目录里没有」几乎一样。
+ *
+ * 根因是一份列表塞了两种心智模型：「我从哪家买算力」和「我要配哪种能力」。
+ * 分页按后者切，页内保留前者的分区。分区表在 providerCatalogSections.ts。
  */
-import { computed, ref, watch } from 'vue'
-import type { CatalogEntry, CatalogGroup, ProviderKind } from '@core/shared/aiProvider'
+import { computed, nextTick, ref, watch } from 'vue'
+import type { CatalogEntry } from '@core/shared/aiProvider'
 import { Z_CATALOG } from './modalLayers'
+import {
+  accessOf,
+  matchesKeyword,
+  sectionOf,
+  TAB_ORDER,
+  TAB_SECTIONS,
+  tabOf,
+  type TabKey
+} from './providerCatalogSections'
 
 /**
  * 品牌图标。
@@ -46,79 +65,89 @@ const emit = defineEmits<{
 }>()
 
 const keyword = ref('')
+const activeTab = ref<TabKey>('chat')
+const scrollEl = ref<HTMLElement | null>(null)
+const activeIndex = ref(-1)
 
-// 每次打开都清掉上次的搜索词，否则弹窗会记着上次的过滤结果，看起来像目录变少了
+const searching = computed(() => keyword.value.trim().length > 0)
+
+// 每次打开都回到初始状态，否则弹窗会记着上次的搜索词和分页，
+// 看起来像目录变少了
 watch(
   () => props.visible,
   (visible) => {
-    if (visible) keyword.value = ''
+    if (visible) {
+      keyword.value = ''
+      activeTab.value = 'chat'
+      activeIndex.value = -1
+    }
   }
 )
 
-/**
- * 分组顺序：国内 → 国际 → 图片生成 → 订阅服务 → 本机 → 自建网关。
- *
- * 按**多少人会点**排，不是按「哪种方案更优雅」排。绝大多数人打开这个框是来找
- * DeepSeek、通义、OpenAI 的；本机推理零成本零配置没错，但要先装 Ollama 再拉
- * 模型，愿意走这条路的是少数。之前把本机和自定义排在最前，结果国内/国际两组
- * 被挤到可视区外面，而弹窗没有滚动提示 —— 看上去就像目录里没有这些厂商。
- *
- * 「图片生成」「向量化」紧跟在后面：它们是**按能力分**的两组，找它们的人是带着
- * 「我要配生图」「我要配知识库检索」这种明确目的来的。「自定义」不在这张表里，
- * 它单独渲染在最末尾 —— 那是「上面都没有」时的兜底，不该占掉最贵的第一屏。
- *
- * 注意这张表是**渲染白名单**：CatalogGroup 加了新值却忘了加到这里，
- * 那一组会整组不显示（而且不报错）。这不是假设 —— 「向量化」这一组加进目录
- * 之后就正好这样漏了一次：7 家厂商 20 个模型全在目录里，界面上一个都找不到。
- * 现在有 providerCatalogGroups.test.ts 守着，加了新组会直接把测试顶红。
- */
-const GROUP_ORDER: SectionKey[] = [
-  'cn',
-  'cloud',
-  'image',
-  'video',
-  'embedding',
-  'realtime',
-  'tts',
-  'music',
-  'model3d',
-  'search',
-  'subscription',
-  'local',
-  'gateway'
-]
+/** 当前关键词下各分页各命中多少家。搜索时直接显示在分页标题上 */
+const tabCounts = computed<Record<TabKey, number>>(() => {
+  const counts = Object.fromEntries(TAB_ORDER.map((tab) => [tab, 0])) as Record<TabKey, number>
+  for (const entry of props.catalog) {
+    if (!matchesKeyword(entry, keyword.value)) continue
+    const tab = tabOf(entry)
+    if (tab) counts[tab] += 1
+  }
+  return counts
+})
 
 /**
- * 分区的键：对话类按「从哪儿买算力」分，其余按用途分。
+ * 搜到的东西在别的分页里，就把人带过去。
  *
- * 两个轴合成一个键，是因为它们在界面上就是并排的一列标题 —— 但在类型上
- * 分开（CatalogGroup / ProviderKind），免得又变回一个枚举两种含义。
+ * 不这么做的话「在生图页搜 kimi」会得到一句「没有匹配的厂商」—— 那是**假话**，
+ * 目录里明明有，只是在隔壁页。分页标题上的数字会同时告诉他发生了什么。
  */
-type SectionKey = CatalogGroup | Exclude<ProviderKind, 'chat'>
-
-function sectionOf(entry: CatalogEntry): SectionKey {
-  return entry.kind === 'chat' ? (entry.group ?? 'cloud') : entry.kind
-}
+watch([() => keyword.value, () => props.catalog], () => {
+  if (!searching.value) return
+  const counts = tabCounts.value
+  if (counts[activeTab.value] > 0) return
+  const next = TAB_ORDER.find((tab) => counts[tab] > 0)
+  if (next) activeTab.value = next
+})
 
 const groups = computed(() => {
-  const query = keyword.value.trim().toLowerCase()
-  const matched = query
-    ? props.catalog.filter(
-        (entry) =>
-          entry.displayName.toLowerCase().includes(query) ||
-          entry.id.toLowerCase().includes(query) ||
-          // 也搜模型名：想找 Kimi 的人未必知道厂商叫 Moonshot
-          entry.models.some((model) =>
-            `${model.id} ${model.displayName || ''}`.toLowerCase().includes(query)
-          )
-      )
-    : props.catalog
+  const matched = props.catalog.filter((entry) => matchesKeyword(entry, keyword.value))
 
-  return GROUP_ORDER.map((key) => ({
-    key,
-    entries: matched.filter((entry) => sectionOf(entry) === key)
-  })).filter((group) => group.entries.length > 0)
+  return TAB_SECTIONS[activeTab.value]
+    .map((key) => ({
+      key,
+      entries: matched.filter((entry) => sectionOf(entry) === key)
+    }))
+    .filter((group) => group.entries.length > 0)
 })
+
+/**
+ * 键盘选取。
+ *
+ * 知道自己要什么的人根本不该看列表：敲 kimi、回车，完事。搜索时默认落在第一条
+ * 上就是为了这条路 —— 不搜索时不预选（-1），免得一打开弹窗就有个看不出来源的高亮。
+ */
+const flatEntries = computed(() => groups.value.flatMap((group) => group.entries))
+
+watch([() => keyword.value, activeTab], () => {
+  activeIndex.value = searching.value ? 0 : -1
+})
+
+function move(delta: number): void {
+  const total = flatEntries.value.length
+  if (total === 0) return
+  const from = activeIndex.value < 0 ? (delta > 0 ? -1 : 0) : activeIndex.value
+  activeIndex.value = (from + delta + total) % total
+  void nextTick(() => {
+    const el = scrollEl.value?.querySelector('.catalog-card.is-active')
+    // jsdom 里没有 scrollIntoView，测试跑到这儿会炸
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function pickActive(): void {
+  const entry = flatEntries.value[activeIndex.value]
+  if (entry) pick(entry)
+}
 
 function close(): void {
   emit('update:visible', false)
@@ -151,9 +180,24 @@ function pickCustom(): void {
         type="text"
         class="catalog-search"
         :placeholder="$t('aiProvider.catalog.searchPlaceholder')"
+        @keydown.down.prevent="move(1)"
+        @keydown.up.prevent="move(-1)"
+        @keydown.enter.prevent="pickActive"
       />
 
-      <div class="catalog-scroll">
+      <AppSegmented
+        v-model="activeTab"
+        class="catalog-tabs"
+        :options="TAB_ORDER"
+        :aria-label="$t('aiProvider.catalog.tabsLabel')"
+      >
+        <template #default="{ option }">
+          {{ $t(`aiProvider.catalog.tab.${option}`) }}
+          <span class="catalog-tab-count">{{ tabCounts[option] }}</span>
+        </template>
+      </AppSegmented>
+
+      <div ref="scrollEl" class="catalog-scroll">
         <div v-for="group in groups" :key="group.key" class="catalog-group">
           <div class="catalog-group-title">
             {{ $t(`aiProvider.catalog.group.${group.key}`) }}
@@ -164,6 +208,7 @@ function pickCustom(): void {
               :key="entry.id"
               type="button"
               class="catalog-card"
+              :class="{ 'is-active': flatEntries[activeIndex]?.id === entry.id }"
               @click="pick(entry)"
             >
               <img
@@ -178,11 +223,14 @@ function pickCustom(): void {
               </span>
               <span class="catalog-card-text">
                 <span class="catalog-card-name">{{ entry.displayName }}</span>
+                <!-- 先说「要不要去申请密钥」，模型数缩成尾巴：前者才决定「我现在能不能用上」 -->
                 <span class="catalog-card-desc">
+                  {{ $t(`aiProvider.catalog.access.${accessOf(entry)}`) }}
+                  ·
                   {{
                     entry.models.length
-                      ? $t('aiProvider.catalog.modelCount', { count: entry.models.length })
-                      : $t('aiProvider.catalog.noPresetModels')
+                      ? $t('aiProvider.catalog.modelCountShort', { count: entry.models.length })
+                      : $t('aiProvider.catalog.noPresetModelsShort')
                   }}
                 </span>
               </span>
@@ -195,7 +243,7 @@ function pickCustom(): void {
         </div>
 
         <!-- 「上面都没有」时的兜底，所以排在最后。搜索时藏起来，免得「没有匹配的厂商」旁边还杵着一张卡 -->
-        <div v-if="!keyword.trim()" class="catalog-group">
+        <div v-if="!searching" class="catalog-group">
           <div class="catalog-group-title">{{ $t('aiProvider.catalog.customGroup') }}</div>
           <button type="button" class="catalog-card catalog-card-custom" @click="pickCustom">
             <span class="catalog-card-text">
@@ -223,15 +271,15 @@ function pickCustom(): void {
 .catalog {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   height: 60vh;
 }
 
-/* 搜索框钉在顶上不跟着滚，只有下面的列表滚 */
+/* 搜索框和分页钉在顶上不跟着滚，只有下面的列表滚 */
 .catalog-scroll {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -254,10 +302,21 @@ function pickCustom(): void {
   box-shadow: 0 0 0 3px var(--color-accent-border);
 }
 
+/* 分页条比内容窄，左对齐；5 个分页在 720 宽的弹窗里一行放得下 */
+.catalog-tabs {
+  align-self: flex-start;
+}
+
+.catalog-tab-count {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .catalog-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .catalog-group-title {
@@ -270,14 +329,14 @@ function pickCustom(): void {
 .catalog-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .catalog-card {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 14px;
+  padding: 9px 12px;
   border-radius: 12px;
   border: 1px solid var(--color-border-subtle);
   background: var(--color-bg-surface-hover);
@@ -322,11 +381,12 @@ function pickCustom(): void {
 .catalog-card-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
-.catalog-card:hover {
+.catalog-card:hover,
+.catalog-card.is-active {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
@@ -347,12 +407,20 @@ function pickCustom(): void {
 
 .catalog-card-name {
   font-size: 13px;
+  line-height: 1.3;
   color: var(--color-text-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .catalog-card-desc {
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.3;
   color: var(--color-text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .catalog-empty {

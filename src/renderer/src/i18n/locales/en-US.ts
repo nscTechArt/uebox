@@ -481,8 +481,10 @@ export default {
         model3d: '3D generation',
         music: 'Music generation',
         tts: 'Text to speech',
+        stt: 'Speech to text',
         realtime: 'Realtime voice',
-        search: 'Web search'
+        search: 'Web search',
+        judge: 'Structured judgement'
       },
       model3dApi: '3D API',
       model3dApis: {
@@ -671,12 +673,23 @@ export default {
       realtimeMore:
         'Supports OpenAI gpt-realtime models and Doubao Seeduplex. Ordinary chat models do not apply.',
       realtimeMissing: 'Voice conversation unavailable',
+      stt: 'Speech to text',
+      sttDesc:
+        'Hold the voice hotkey, speak, and get text in the search box. Falls back to the realtime voice role when unset.',
+      sttMore:
+        'Doubao STT 2.0 and Alibaba Qwen-Audio ASR are built in — transcription-only endpoints that never talk back. Dictation still works when this is empty: it falls back to the realtime voice role, but only OpenAI gpt-realtime can turn off the automatic reply there, so a Doubao realtime binding reports that voice is unavailable. This role bills by audio duration, far cheaper than transcribing through a chat model.',
+      sttMissing: 'Speech to text unavailable',
       model3dMissing: '3D generation unavailable',
       search: 'Web search',
       searchDesc: 'Choose a web search service. Uses the built-in browser if unconfigured.',
       searchMore:
         'The built-in browser requires no setup. You can also use Jina or self-hosted SearXNG; charges depend on the service.',
-      searchMissing: 'Web search unavailable'
+      searchMissing: 'Web search unavailable',
+      judge: 'Structured judgement',
+      judgeDesc:
+        'Optional. A fast decision model the agent uses to sharpen its own guardrails. Leave it unset and nothing changes.',
+      judgeMore:
+        'Unlike every other role here, leaving this empty breaks nothing: each place that uses it keeps its existing deterministic rule and only upgrades when a judge is bound. The model returns typed answers with calibrated probabilities (~100ms, input billed at $0.042/M, output free) instead of text — TypeSafe Jev is the built-in option. It is a cloud service, so it is off by default.'
     },
     unsaved: {
       title: 'Unsaved changes',
@@ -688,7 +701,20 @@ export default {
     },
     catalog: {
       title: 'Add Provider',
-      searchPlaceholder: 'Search providers…',
+      searchPlaceholder: 'Search providers or models, e.g. kimi, gpt-image',
+      tabsLabel: 'Filter by purpose',
+      tab: {
+        chat: 'Chat',
+        visual: 'Image & Video',
+        voice: 'Voice',
+        creative: 'Music & 3D',
+        retrieval: 'Search & Tools'
+      },
+      access: {
+        free: 'No key needed',
+        oauth: 'Sign-in supported',
+        key: 'API key required'
+      },
       customGroup: 'Custom',
       customName: 'OpenAI / Anthropic compatible',
       customDesc: 'Enter your own API URL',
@@ -699,16 +725,18 @@ export default {
         embedding: 'Embedding (knowledge search)',
         music: 'Music generation',
         tts: 'Text to speech',
+        stt: 'Speech to text (dictation)',
         realtime: 'Realtime voice',
         model3d: '3D generation',
         video: 'Video generation',
         search: 'Web search',
+        judge: 'Structured judgement',
         gateway: 'Self-hosted Gateway',
         cn: 'China Providers',
         cloud: 'International Providers'
       },
-      modelCount: '{count} preset models',
-      noPresetModels: 'Models entered manually',
+      modelCountShort: '{count} models',
+      noPresetModelsShort: 'Custom models',
       added: 'Added',
       noMatch: 'No matching provider'
     },
@@ -6579,7 +6607,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       starting: 'Opening the microphone…',
       listening: 'Listening — sends itself when you stop',
       unheard: "Didn't catch that, say it again",
-      unavailable: 'Voice is busy right now, just type',
+      unavailable: 'Voice is unavailable right now, just type',
+      busy: 'The voice assistant is on a call — type for now',
+      vendorUnsupported:
+        'This voice model can only converse. Bind a Speech to text model in Settings → Models to dictate.',
       micIconLabel: 'Voice input active',
       autoSubmit: 'Sending in {seconds}s — edit to hold it'
     }

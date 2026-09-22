@@ -479,8 +479,10 @@ export default {
         model3d: '3D 生成',
         music: '音乐生成',
         tts: '语音合成',
+        stt: '语音识别',
         realtime: '实时语音',
-        search: '网页检索'
+        search: '网页检索',
+        judge: '结构化判定'
       },
       model3dApi: '3D 接口',
       model3dApis: {
@@ -653,11 +655,20 @@ export default {
       realtimeDesc: '选择实时语音模型，用于语音对话。',
       realtimeMore: '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex；普通对话模型不适用。',
       realtimeMissing: '语音对话不可用',
+      stt: '语音识别',
+      sttDesc: '按下语音热键说话，转成文字填进搜索框。不配就用实时语音那一路。',
+      sttMore:
+        '内置豆包 STT 2.0 与阿里云 Qwen-Audio ASR，都是只转写不回答的纯识别接口。空着也能用听写 —— 会退回实时语音那一路，但那条只有 OpenAI gpt-realtime 关得掉自动应答，绑豆包实时语音时按热键会提示用不了。这一档按识别时长计费，比借对话模型转写便宜得多。',
+      sttMissing: '语音识别不可用',
       model3dMissing: '3D 生成不可用',
       search: '网页检索',
       searchDesc: '选择网页搜索服务；未配置时使用内置浏览器。',
       searchMore: '内置浏览器无需配置；也可使用 Jina 或自建 SearXNG，费用以所选服务为准。',
-      searchMissing: '网页检索不可用'
+      searchMissing: '网页检索不可用',
+      judge: '结构化判定',
+      judgeDesc: '可选。Agent 用它收紧自己的护栏；不配就保持现在的行为，什么都不会少。',
+      judgeMore:
+        '和这一列里其他角色相反：空着不代表功能坏掉。每一处用到判定的地方都留着原来那条确定性规则，绑上只是把它换成带概率的判断。这类模型不生成文本，只回答是非 / 多选 / 评分，约 100ms，输入 $0.042/M、输出不计费，内置的是 TypeSafe Jev。它是云端服务，所以默认不启用。'
     },
     unsaved: {
       title: '有未保存的修改',
@@ -669,7 +680,21 @@ export default {
     },
     catalog: {
       title: '添加服务商',
-      searchPlaceholder: '搜索厂商…',
+      // 搜索**也搜模型名**，但这个能力不写出来没人知道，所以直接举例
+      searchPlaceholder: '搜索厂商或模型，如 kimi、gpt-image',
+      tabsLabel: '按用途筛选',
+      tab: {
+        chat: '对话',
+        visual: '生图与视频',
+        voice: '语音',
+        creative: '音乐与 3D',
+        retrieval: '检索与工具'
+      },
+      access: {
+        free: '免配置',
+        oauth: '可登录获取',
+        key: '需 API Key'
+      },
       customGroup: '自定义',
       customName: 'OpenAI / Anthropic 兼容',
       customDesc: '填写自己的 API 地址',
@@ -680,16 +705,19 @@ export default {
         embedding: '嵌入（知识库检索）',
         music: '音乐生成',
         tts: '语音合成',
+        stt: '语音识别（听写）',
         realtime: '实时语音（语音对话）',
         video: '视频生成',
         model3d: '3D 生成',
         search: '网页检索',
+        judge: '结构化判定',
         gateway: '自建网关',
         cn: '国内厂商',
         cloud: '国际厂商'
       },
-      modelCount: '预置 {count} 个模型',
-      noPresetModels: '需自行填写模型',
+      // 和 access.* 拼在一条副标题里，所以要短
+      modelCountShort: '{count} 个模型',
+      noPresetModelsShort: '自填模型',
       // 只是标记，不禁用：配两个 OpenAI（官方 + 自建网关）是常见需求
       added: '已添加',
       noMatch: '没有匹配的厂商'
@@ -6349,8 +6377,17 @@ export default {
       starting: '正在打开麦克风…',
       listening: '正在听，说完自动提交',
       unheard: '没听清，再说一遍',
-      /** 助手页正在通话，或者绑的模型做不了只转写 —— 都退回打字 */
+      /** 开不起来又没有更具体的话可说时的兜底（厂商迟迟不就绪、配置刚被改掉） */
       unavailable: '这会儿用不了语音，直接打字吧',
+      /** 助手页正在通话。麦克风只有一个，听写让路 */
+      busy: '语音助手正在通话，先打字吧',
+      /**
+       * 回落到实时语音那一路，而那家关不掉自动应答（豆包全双工）。
+       *
+       * 这一条以前和「正在通话」共用一句「这会儿用不了语音」—— 两种原因、
+       * 两种处置，却给同一句话，用户既分不清也无从下手。现在直接说怎么修。
+       */
+      vendorUnsupported: '当前语音模型只能对话；到 设置 → 模型 绑一个「语音识别」就能听写',
       micIconLabel: '语音输入中',
       /** 倒计时期间的提示。按 Esc 取消，改字也会把倒计时推迟 */
       autoSubmit: '{seconds} 秒后发送，改一下可以延后'

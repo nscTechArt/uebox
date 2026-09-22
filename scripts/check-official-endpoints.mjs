@@ -166,6 +166,8 @@ const NOT_OFFICIAL_CALLS = {
   'src/main/ipc/assistant.ts': 'Epic Games 社区的 Assistant API（dev.epicgames.com）',
   'src/main/ai/realtime/doubaoRealtime.ts':
     '豆包全双工语音的 WebSocket 端点，由用户配置 Provider 并用自己的 API Key 直连',
+  'src/main/ai/stt/doubaoStt.ts':
+    '豆包流式语音识别（sauc）的 WebSocket 端点，同上：用户自己配 Provider、自己的 API Key 直连',
   'src/main/ai/model3d.ts':
     '3D 生成厂商（Tripo / Meshy / Hyper3D Rodin），全部打 provider.baseUrl —— ' +
     '地址由用户在模型配置里填、用自己的 API Key 直连。' +

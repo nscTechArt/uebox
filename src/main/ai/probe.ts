@@ -5,7 +5,9 @@ import {
 } from '../../shared/aiProvider'
 import { resolveApiKey } from './credentials'
 import { requestEmbeddings } from './embedding'
+import { requestJudgement } from './judge'
 import { requestSpeech } from './speech'
+import { probeStt } from './stt'
 import { completeText, userMessage } from './piCompletion'
 import type { ModelConfig, ProviderConfig } from './types'
 
@@ -90,6 +92,39 @@ export async function testProvider(
       return { ok: true }
     }
 
+    /*
+     * 语音识别这一档探得**比谁都便宜**：握手、等一句「就绪」、挂断，
+     * 一个字节的音频都不送 —— 两家都是按识别时长计费，没有音频就没有账单。
+     *
+     * 而它验的恰恰是这一档最容易配错的两样：密钥对不对，以及那个既不是模型名
+     * 也不像模型名的字符串（豆包那边是资源 ID `volc.seedasr.sauc.duration`）
+     * 填对了没有。填错的表现是握手就被拒，错误码里没有一个字提到「资源 ID」。
+     */
+    if (provider.kind === 'stt') {
+      await probeStt(provider, modelId)
+      return { ok: true }
+    }
+
+    /*
+     * 判定这一档有**真正便宜的 ping**，所以它不走上面那条「测不了」的路：
+     * 一个最短的是非题，输入十几个 token（$0.042/M），输出不计费。
+     * 探测一次的成本实际为零，而且走的就是正式调用那条路（requestJudgement）。
+     *
+     * 探测时把超时放宽到 PROBE_TIMEOUT_MS：热路径上那个 4 秒是为了「宁可
+     * 回落也别拖住 agent」，而用户盯着界面等结果时，一次慢请求的正确结论是
+     * 「通了，只是慢」，不是「超时」。
+     */
+    if (provider.kind === 'judge') {
+      await requestJudgement(
+        provider,
+        modelId,
+        'ping',
+        { reachable: { type: 'noul', instructions: 'Is this text in English?' } },
+        PROBE_TIMEOUT_MS
+      )
+      return { ok: true }
+    }
+
     if (isEmbeddingModel(provider, modelId)) {
       // 向量本身用不上，探测只关心通不通；单条就够。
       // 'query' 对非对称检索模型（Jina / Voyage）意味着走查询侧的向量空间，
@@ -158,11 +193,18 @@ export async function listRemoteModels(
 ): Promise<{ ok: true; models: ModelConfig[] } | { ok: false; error: ProbeFailure }> {
   // 3D 与视频厂商没有「列出我有哪些模型」这回事。不说清楚的话用户拿到的是
   // 一句 `拉取失败：HTTP 404`，看上去像 Base URL 填错了 —— 而地址完全正确。
+  //
+  // 判定这一档同理，只是理由不同：它的可用模型是**账号上的常量**（SDK 里
+  // `client.models` 是个只读属性，不是一次请求），没有 `/models` 这个端点。
+  // 复用这个 code 是因为它对用户说的那句话恰好就是对的 ——「此服务商不支持
+  // 获取模型列表，请按其文档填写模型 ID」。名字里的 Generative 是历史，不是行为。
   if (
     provider.kind === 'music' ||
     provider.kind === 'model3d' ||
     provider.kind === 'video' ||
-    provider.kind === 'tts'
+    provider.kind === 'tts' ||
+    provider.kind === 'stt' ||
+    provider.kind === 'judge'
   ) {
     return { ok: false, error: { code: 'listUnsupportedGenerative' } }
   }

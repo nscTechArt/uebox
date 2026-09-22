@@ -218,9 +218,9 @@ async function endDictation(): Promise<void> {
 /**
  * 热键唤起：开麦。
  *
- * 开不起来的两类原因（助手页正在通话、绑的模型做不了只转写）**不报错**，
- * 退回普通打字：图标退回放大镜，状态条给一句话说明这会儿没在听。
- * 用户按热键的那一下本来就是「顺手」，顺手的操作不配弹一个错误框。
+ * 开不起来的两类原因（助手页正在通话、回落到实时语音那一路而那家关不掉
+ * 自动应答）**不报错**，退回普通打字：图标退回放大镜，状态条给一句话说明
+ * 这会儿没在听。用户按热键的那一下本来就是「顺手」，顺手的操作不配弹一个错误框。
  */
 async function beginDictation(): Promise<void> {
   dictationNotice.value = ''
@@ -228,8 +228,13 @@ async function beginDictation(): Promise<void> {
   const failure = await dictation.start()
   if (!failure) return
   dictating.value = false
-  if (failure === 'busy' || failure === 'vendor-unsupported') {
-    dictationNotice.value = t('spotlightWindow.dictation.unavailable')
+  /*
+   * 这两类都退回打字，但**给的话不一样**。合成一句「这会儿用不了语音」的时候，
+   * 用户看不出该等一等（通话完就好了）还是该去改配置，而后者不改就永远用不了。
+   */
+  if (failure === 'busy') dictationNotice.value = t('spotlightWindow.dictation.busy')
+  if (failure === 'vendor-unsupported') {
+    dictationNotice.value = t('spotlightWindow.dictation.vendorUnsupported')
   }
   // 其余几类 `start` 已经通过 onError 把话说清楚了，这里不再覆盖它
 }

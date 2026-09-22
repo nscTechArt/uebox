@@ -60,6 +60,8 @@ const LOGO_ALIAS = {
   'openai-realtime': 'openai',
   'doubao-tts': 'bytedance',
   'alibaba-tts': 'alibaba',
+  'doubao-stt': 'bytedance',
+  'alibaba-asr': 'alibaba',
   'doubao-realtime': 'bytedance'
 
   // 3D 那三家（hyper3d / tripo / meshy）在 models.dev 里没有条目，也没有可借用的
@@ -167,6 +169,8 @@ const KEY_PAGE = {
   // 火山的**语音**控制台，不是方舟那个 —— 两条产品线的凭据互不通用
   'doubao-tts': 'https://console.volcengine.com/speech/new/setting/apikeys',
   'alibaba-tts': 'https://bailian.console.aliyun.com/?apiKey=1',
+  'doubao-stt': 'https://console.volcengine.com/speech/new/setting/apikeys',
+  'alibaba-asr': 'https://bailian.console.aliyun.com/?apiKey=1',
   'doubao-realtime': 'https://console.volcengine.com/speech/app',
 
   // ── 3D 生成 ──
@@ -324,6 +328,16 @@ export const CURATED = [
     baseUrl: 'https://s.jina.ai',
     displayName: 'Jina AI（网页检索）'
   },
+
+  // ── 结构化判定 ──
+  // 这一组的「模型」不生成文本，只回答带类型的问题（是非 / 多选 / 评分）。
+  // 详见 src/shared/aiProvider.ts 里 ProviderKind 的 `judge` 注释。
+  {
+    id: 'typesafe',
+    group: 'judge',
+    baseUrl: 'https://api.typesafe.ai/v1',
+    displayName: 'TypeSafe（结构化判定）'
+  },
   {
     id: 'openai-embedding',
     group: 'embedding',
@@ -468,6 +482,22 @@ export const CURATED = [
     group: 'tts',
     baseUrl: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference',
     displayName: '阿里云 Qwen-Audio 3.0 语音合成'
+  },
+
+  // ── 语音识别 ──
+  // 这一组只转写、不回话。与上面那两家是**同一个控制台、同一把密钥**，
+  // 单独列条目是因为地址不同（一个 Provider = 一个地址 + 一套凭据 + 一种用途）。
+  {
+    id: 'doubao-stt',
+    group: 'stt',
+    baseUrl: 'https://openspeech.bytedance.com/api/v3/sauc/bigmodel',
+    displayName: '豆包语音识别 STT 2.0'
+  },
+  {
+    id: 'alibaba-asr',
+    group: 'stt',
+    baseUrl: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference',
+    displayName: '阿里云 Qwen-Audio 语音识别'
   },
   {
     id: 'doubao-realtime',
@@ -946,6 +976,45 @@ const MANUAL_ENTRIES = {
       }
     }
   },
+  /*
+   * ── 语音识别 ──
+   * models.dev 只收会生成文本的模型，这两条都不在里面。
+   *
+   * 豆包那边的「模型 id」**是资源 ID**，不是模型名：小时版和并发版对应两种
+   * 计费方式，填哪个取决于用户买的是哪种，猜不出来 —— 所以两个都列出来让他选。
+   * 真正的模型名（`bigmodel`）写死在适配器里，见 `ai/stt/doubaoStt.ts`。
+   */
+  'doubao-stt': {
+    name: '豆包语音识别 STT 2.0',
+    env: ['VOLCENGINE_SPEECH_KEY'],
+    doc: 'https://www.volcengine.com/docs/6561/1354869',
+    models: {
+      'volc.seedasr.sauc.duration': {
+        id: 'volc.seedasr.sauc.duration',
+        name: '豆包 STT 2.0（小时版）'
+      },
+      'volc.seedasr.sauc.concurrent': {
+        id: 'volc.seedasr.sauc.concurrent',
+        name: '豆包 STT 2.0（并发版）'
+      }
+    }
+  },
+  'alibaba-asr': {
+    name: '阿里云 Qwen-Audio 语音识别',
+    env: ['DASHSCOPE_API_KEY'],
+    doc: 'https://help.aliyun.com/zh/model-studio/fun-asr-realtime-websocket-api',
+    models: {
+      'qwen-audio-3.1-asr-flash-streaming': {
+        id: 'qwen-audio-3.1-asr-flash-streaming',
+        name: 'Qwen-Audio 3.1 ASR Flash Streaming'
+      },
+      'qwen-audio-3.0-asr-flash-streaming': {
+        id: 'qwen-audio-3.0-asr-flash-streaming',
+        name: 'Qwen-Audio 3.0 ASR Flash Streaming'
+      },
+      'fun-asr-realtime': { id: 'fun-asr-realtime', name: 'Fun-ASR Realtime' }
+    }
+  },
   'doubao-realtime': {
     name: '豆包实时语音',
     env: ['VOLCENGINE_SPEECH_KEY'],
@@ -1189,6 +1258,22 @@ const MANUAL_ENTRIES = {
       'black-forest-labs/FLUX.1-dev': imageModel('black-forest-labs/FLUX.1-dev', 'FLUX.1 dev')
     }
   },
+  // ── 结构化判定 ──
+  // models.dev 只收会生成文本的模型，这一家压根不在里面 —— 它的「模型」
+  // 收 `{ state, questions }` 回 `{ answers }`，没有 messages 也没有 token 流。
+  typesafe: {
+    name: 'TypeSafe',
+    env: ['TYPESAFE_API_KEY'],
+    doc: 'https://console.typesafe.ai/',
+    models: {
+      // 别名，跟着厂商滚动。默认给这个 —— 判定的问题是我们写死在代码里的，
+      // 版本锁死收益不大，而新版本修的正是 jaggedness 上那些已知短板。
+      'jev-latest': { id: 'jev-latest', name: 'Jev（最新）' },
+      // 要可复现的判定时绑这个：同一份 state 同一组问题，换了版本答案会变
+      'jev-1.13.0': { id: 'jev-1.13.0', name: 'Jev 1.13（锁定版本）' }
+    }
+  },
+
   infini: {
     name: '无问芯穹 Infini-AI',
     env: ['INFINI_API_KEY'],
@@ -1205,8 +1290,10 @@ const GROUP_KIND = {
   model3d: 'model3d',
   realtime: 'realtime',
   tts: 'tts',
+  stt: 'stt',
   music: 'music',
-  search: 'search'
+  search: 'search',
+  judge: 'judge'
 }
 
 const isCheck = process.argv.includes('--check')
@@ -1279,6 +1366,28 @@ function pickModel3dModels(models) {
  * 详见 `src/shared/aiProvider.ts` 里 ProviderKind 的 `search` 注释。
  */
 function pickSearchModels(models) {
+  return Object.values(models).map((item) => ({ id: item.id, displayName: item.name || item.id }))
+}
+
+/**
+ * 判定分组的预置模型。
+ *
+ * 和检索一样只有 id 和显示名：没有上下文窗口可填（厂商的 64k 是**请求体**
+ * 上限，不是对话窗口，填进 `limit.context` 会被当成对话模型的窗口去做
+ * 压缩决策）、不调工具、也没有发布日期筛选。
+ */
+function pickJudgeModels(models) {
+  return Object.values(models).map((item) => ({ id: item.id, displayName: item.name || item.id }))
+}
+
+/**
+ * 语音识别分组的预置模型。
+ *
+ * 和检索、判定一样只有 id 和显示名。这一档还多一层理由：豆包那边这一栏填的
+ * 根本不是模型名，是**资源 ID**（`volc.seedasr.sauc.duration`）—— 给它配
+ * 上下文窗口、发布日期这些字段没有任何意义。
+ */
+function pickSttModels(models) {
   return Object.values(models).map((item) => ({ id: item.id, displayName: item.name || item.id }))
 }
 
@@ -1663,7 +1772,11 @@ async function main() {
                     ? pickVideoModels(source.models)
                     : item.group === 'search'
                       ? pickSearchModels(source.models)
-                      : pickModels(source.models, item.id)
+                      : item.group === 'judge'
+                        ? pickJudgeModels(source.models)
+                        : item.group === 'stt'
+                          ? pickSttModels(source.models)
+                          : pickModels(source.models, item.id)
     const hasLogo = skipLogos
       ? existsSync(join(LOGO_DIR, `${item.id}.svg`))
       : isCheck

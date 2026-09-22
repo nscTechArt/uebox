@@ -62,25 +62,54 @@ function stubWebAudio(): void {
 
 let emit: (event: VoiceSessionEvent) => void
 let sentAudio: string[]
+/** 这一轮的音频去了哪条通道。选错通道是这一块最贵的 bug，用例必须看得见 */
+let usedChannel: 'stt' | 'realtime' | null
 
+/**
+ * 两条通道都摆出来。
+ *
+ * `sttAudioSpec` 决定走哪条：回 `ok` 就走语音识别，回 `ok: false` 就回落到
+ * 实时语音那一路 —— 和主进程的判据一模一样（绑没绑「语音识别」角色）。
+ */
 function stubApi(
   startDictation: () => Promise<unknown> = async () => ({
     ok: true,
     inputSampleRate: 24_000,
     outputSampleRate: 24_000,
     connectionId: 1
-  })
+  }),
+  options: {
+    sttAudioSpec?: () => Promise<unknown>
+    sttStart?: () => Promise<unknown>
+  } = {}
 ): void {
   sentAudio = []
+  usedChannel = null
   emit = () => {}
   vi.stubGlobal('window', {
     api: {
       platform: 'win32',
+      speechToText: {
+        audioSpec: options.sttAudioSpec || (async () => ({ ok: false })),
+        start: options.sttStart || (async () => ({ ok: true, inputSampleRate: 16_000 })),
+        stop: async () => ({ ok: true }),
+        sendAudio: (base64: string) => {
+          usedChannel = 'stt'
+          sentAudio.push(base64)
+        },
+        onEvent: (handler: (payload: VoiceSessionEvent) => void) => {
+          emit = handler
+          return () => {}
+        }
+      },
       realtimeVoice: {
         audioSpec: async () => ({ ok: true, inputSampleRate: 24_000, outputSampleRate: 24_000 }),
         startDictation,
         stop: async () => ({ ok: true }),
-        sendAudio: (base64: string) => sentAudio.push(base64),
+        sendAudio: (base64: string) => {
+          usedChannel = 'realtime'
+          sentAudio.push(base64)
+        },
         onEvent: (handler: (payload: VoiceSessionEvent) => void) => {
           emit = handler
           return () => {}
@@ -224,6 +253,46 @@ describe('听写', () => {
      */
     emit({ type: 'ready' })
     expect(sentAudio).toEqual([])
+  })
+
+  /**
+   * 绑了「语音识别」就走它，**不再去借实时语音那一路**。
+   *
+   * 这条错了不会报错：实时语音那一路对 OpenAI 用户照样能出字，只是每说一句话
+   * 都白烧一轮对话 token；而对豆包用户是直接用不了（它关不掉自动应答）。
+   */
+  it('绑了语音识别就走识别那条通道', async () => {
+    stubApi(undefined, { sttAudioSpec: async () => ({ ok: true, inputSampleRate: 16_000 }) })
+    const dictation = useVoiceDictation({ onText: vi.fn() })
+    expect(await dictation.start()).toBeNull()
+
+    emit({ type: 'ready' })
+    feedPacket(1)
+    expect(usedChannel).toBe('stt')
+  })
+
+  /** 没绑识别角色时行为要和这一档出现之前**一模一样** */
+  it('没绑语音识别就回落到实时语音那一路', async () => {
+    const dictation = useVoiceDictation({ onText: vi.fn() })
+    expect(await dictation.start()).toBeNull()
+
+    emit({ type: 'ready' })
+    feedPacket(1)
+    expect(usedChannel).toBe('realtime')
+  })
+
+  /** 识别那条也会遇到「助手页正在通话」—— 麦克风只有一个。同样静默退回打字 */
+  it('识别那条回 busy 时不当成错误', async () => {
+    stubApi(undefined, {
+      sttAudioSpec: async () => ({ ok: true, inputSampleRate: 16_000 }),
+      sttStart: async () => ({ ok: false, reason: 'busy' })
+    })
+    const onError = vi.fn()
+    const dictation = useVoiceDictation({ onText: vi.fn(), onError })
+
+    expect(await dictation.start()).toBe('busy')
+    expect(onError).not.toHaveBeenCalled()
+    expect(dictation.state.value).toBe('idle')
   })
 
   /** 会话被主进程关掉（助手页把它抢走了）时要自己收干净 */

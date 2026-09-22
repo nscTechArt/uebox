@@ -270,6 +270,20 @@ export type ProviderKind =
   /** 双向实时语音会话（常驻 WebSocket） */
   | 'realtime'
   | 'tts'
+  /**
+   * 流式语音识别。**只出文字，一个音都不出。**
+   *
+   * 它和 `realtime` 的区别不是「实时不实时」—— 两档都是常驻 WebSocket、都是
+   * 边说边出字。区别是**会不会回话**：`realtime` 那一档的端点判停之后要生成
+   * 回答（豆包全双工的上行事件表里根本没有关掉它的开关），而听写要的只有
+   * 转写结果，模型一张嘴就全是多余的。
+   *
+   * 这一档存在之前，Spotlight 的听写是借 `realtime` 跑的（OpenAI 那家能用
+   * `create_response: false` 把嘴堵上），代价是：绑豆包的用户按热键只能得到
+   * 一句「这会儿用不了语音」，而豆包自己是有纯识别接口的，同一个域名、
+   * 同一把密钥。
+   */
+  | 'stt'
   | 'music'
   /**
    * 网页检索。
@@ -284,6 +298,22 @@ export type ProviderKind =
    * 自然就不问了。
    */
   | 'search'
+  /**
+   * 结构化判定。**不生成文本，只回答带类型的问题。**
+   *
+   * 发一份 state 和一组问题，拿回每个问题的答案外加一个概率分布：
+   * 是非题回 0~1，多选题回选中项 + 每项概率，评分题回档位 + 分布。
+   * 代表实现是 TypeSafe 的 Jev（约 100ms、输入 $0.042/M、输出免费）。
+   *
+   * 它为什么不能塞进 `chat`：那一档的每条路径 —— pi 构造模型、
+   * `completeText`、探测用的对话 ping、`/models` 拉取 —— 全都假设端点吃
+   * messages 吐 token。这一档的端点收 `{ state, questions }` 吐
+   * `{ answers }`，一条都对不上，混进去只会拿到一串 400。
+   *
+   * 它也不是 `embedding`：向量化返回的是坐标，怎么用由调用方决定；
+   * 这一档返回的**就是结论本身**，代码拿到就能分支。
+   */
+  | 'judge'
 
 export const PROVIDER_KINDS: readonly ProviderKind[] = Object.freeze([
   'chat',
@@ -293,8 +323,10 @@ export const PROVIDER_KINDS: readonly ProviderKind[] = Object.freeze([
   'model3d',
   'realtime',
   'tts',
+  'stt',
   'music',
-  'search'
+  'search',
+  'judge'
 ])
 
 /** 这一档的请求形状由 Provider 唯一决定，界面上不该再问一遍模型 */
@@ -427,9 +459,26 @@ export type ModelRole =
   | 'model3d'
   | 'realtime'
   | 'tts'
+  /**
+   * 听写走哪条路（全局热键 → Spotlight）。
+   *
+   * **绑了就优先走它**，哪怕「实时语音」也绑着：实时那一路要整条对话链路
+   * 陪跑一遍才换回一句转写，贵、慢，而且只有 OpenAI 那家关得掉自动应答。
+   * 不绑才回落到实时那一路，行为和这一档出现之前一模一样。
+   */
+  | 'stt'
   | 'music'
   /** 网页检索走哪条路。不绑就用内置的真浏览器 —— 社区版零配置就靠这条 */
   | 'search'
+  /**
+   * Agent 执行期的快速判定。
+   *
+   * **不绑等于不启用**，不是功能坏掉：每一处用到它的地方都保留着原来那条
+   * 确定性规则，绑上只是把那条规则从「字面匹配」换成「带概率的判断」。
+   * 这是社区版承诺（不依赖官方服务器、本机模型不出机器）与这档云端能力
+   * 唯一能共存的形状。
+   */
+  | 'judge'
 
 export const MODEL_ROLES: readonly ModelRole[] = Object.freeze([
   'chat',
@@ -442,8 +491,10 @@ export const MODEL_ROLES: readonly ModelRole[] = Object.freeze([
   'model3d',
   'realtime',
   'tts',
+  'stt',
   'music',
-  'search'
+  'search',
+  'judge'
 ])
 
 /**
@@ -464,8 +515,10 @@ export const ROLE_KIND: Readonly<Record<ModelRole, ProviderKind>> = Object.freez
   model3d: 'model3d',
   realtime: 'realtime',
   tts: 'tts',
+  stt: 'stt',
   music: 'music',
-  search: 'search'
+  search: 'search',
+  judge: 'judge'
 })
 
 /**
@@ -664,6 +717,25 @@ export interface ProviderDraft {
  * 向量化整组 7 家 20 个模型全在目录里，界面上一个都找不到。
  */
 export type CatalogGroup = 'local' | 'subscription' | 'gateway' | 'cloud' | 'cn'
+
+/**
+ * 运行期能枚举的那份，供界面侧的白名单守门测试核对。
+ *
+ * 写成 `Record<CatalogGroup, true>` 再取 key，是为了让「类型加了成员、这份清单
+ * 忘了加」**直接编译不过**。写成字面量数组的话两边会悄悄分家 —— 而这份清单
+ * 正是用来防「一整组厂商在界面上消失且不报错」的，它自己先漏了就全盘落空。
+ */
+const CATALOG_GROUP_TABLE: Readonly<Record<CatalogGroup, true>> = Object.freeze({
+  cn: true,
+  cloud: true,
+  subscription: true,
+  local: true,
+  gateway: true
+})
+
+export const CATALOG_GROUPS: readonly CatalogGroup[] = Object.freeze(
+  Object.keys(CATALOG_GROUP_TABLE) as CatalogGroup[]
+)
 
 /** 内置厂商目录条目 */
 export interface CatalogEntry {

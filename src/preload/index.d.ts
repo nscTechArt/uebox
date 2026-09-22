@@ -2297,6 +2297,29 @@ declare global {
       onInterruptShortcut: (handler: () => void) => () => void
     }
     /**
+     * 听写（语音识别）。只出文字，和 `realtimeVoice` 是两路独立会话。
+     *
+     * 绑了「语音识别」角色时 Spotlight 优先走这条；没绑（`audioSpec` 回
+     * `ok: false`）才回落到 `realtimeVoice.startDictation`。
+     */
+    speechToText: {
+      /** 上行采样率；`ok: false` 表示没绑这个角色，调用方该回落 */
+      audioSpec: () => Promise<{ ok: true; inputSampleRate: number } | { ok: false }>
+      /**
+       * `reason` 分三类，调用方处置不同：`busy`（助手页正在通话）**静默退回打字**，
+       * `unconfigured`（没绑语音识别角色）**回落到实时语音那一路**，
+       * 只有 `failed` 需要把 `error` 说给用户听。
+       */
+      start: () => Promise<
+        | { ok: true; inputSampleRate: number }
+        | { ok: false; reason: 'busy' | 'unconfigured' }
+        | { ok: false; reason: 'failed'; error: string }
+      >
+      stop: () => Promise<{ ok: true }>
+      sendAudio: (base64: string) => void
+      onEvent: (handler: (payload: unknown) => void) => () => void
+    }
+    /**
      * 视觉识别 API
      * 使用 Gemini 3 Flash Preview 进行图片、视频和音频内容识别
      */

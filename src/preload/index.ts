@@ -2350,6 +2350,31 @@ const api = {
     }
   },
   /**
+   * 听写（语音识别）。**只出文字，一个音都不出。**
+   *
+   * 和上面 `realtimeVoice` 是两路独立会话：这一路连的是厂商的纯识别接口
+   * （豆包 sauc、阿里百炼 ASR），没有「让模型说一句」「打断它」那些动作。
+   * 绑了「语音识别」角色时 Spotlight 优先走这条，没绑才回落到实时语音那一路。
+   */
+  speechToText: {
+    /**
+     * 上行要多少赫兹，**在开会话之前问**；顺带回答「这一路能不能走」。
+     *
+     * `ok: false` = 没绑语音识别角色，调用方据此回落到 `realtimeVoice.startDictation`。
+     */
+    audioSpec: () => ipcRenderer.invoke('stt:audio-spec'),
+    start: () => ipcRenderer.invoke('stt:start'),
+    stop: () => ipcRenderer.invoke('stt:stop'),
+    /** base64 的 PCM16 单声道，16kHz。主进程会攒到 200ms 再往厂商发 */
+    sendAudio: (base64: string) => ipcRenderer.send('stt:audio', base64),
+    /** 返回取消订阅函数 —— 组件卸载时要调，否则换一轮会有两个监听在收 */
+    onEvent: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown): void => handler(payload)
+      ipcRenderer.on('stt:event', listener)
+      return () => ipcRenderer.removeListener('stt:event', listener)
+    }
+  },
+  /**
    * 视觉识别 API
    * 使用 Gemini 3 Flash Preview 进行图片、视频和音频内容识别
    */

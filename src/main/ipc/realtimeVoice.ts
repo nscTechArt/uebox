@@ -387,6 +387,19 @@ function speakProgress(
   markTalked()
 }
 
+/**
+ * 实时语音会话正开着吗。
+ *
+ * 给听写那一路（`ipc/speechToText.ts`）问的。两路走的是**两条独立的连接**，
+ * 技术上并不冲突 —— 冲突的是麦克风：助手页正在通话时再开一路识别，同一个人
+ * 说的同一句话会同时进两条会话，用户对着 Spotlight 说的话会被助手当成对它说的。
+ *
+ * 所以听写照旧让路（回 `busy`，界面退回打字），和这一档出现之前一模一样。
+ */
+export function isRealtimeVoiceBusy(): boolean {
+  return active !== null
+}
+
 function stop(): void {
   connectionGeneration += 1
   const previous = active
