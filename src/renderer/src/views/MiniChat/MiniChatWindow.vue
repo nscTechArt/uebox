@@ -117,6 +117,9 @@ import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
 import { useTabsStore } from '@renderer/store/modules/tabs'
 import { usePendingApprovalsStore } from '@renderer/store/modules/pendingApprovals'
 import { useAgentMode } from '@renderer/views/Assistant/composables/useAgentMode'
+import { useAutoReadAloud } from '@renderer/views/Assistant/composables/autoReadAloud'
+import { stopReadAloud } from '@renderer/views/Assistant/composables/useReadAloud'
+import { useMiniVoiceAutoPlay } from './composables/miniVoiceAutoPlay'
 import {
   countUserTurnsBefore,
   rewindTranscript
@@ -183,6 +186,13 @@ const MAX_IMAGES = 5 // Gemini 3 Flash 最多 5 张图片
 
 // 计算消息列表
 const messages = computed(() => chatMsgStore.getMessages(SESSION_ID.value))
+
+/*
+ * 回复落定后自动朗读。主窗口这件事挂在常驻布局上；小窗不走那套布局，自己挂一份。
+ * 开关不读本窗口的 store —— 它是启动时抄的旧账，理由见 `miniVoiceAutoPlay`。
+ */
+const voiceAutoPlayEnabled = useMiniVoiceAutoPlay()
+useAutoReadAloud(() => voiceAutoPlayEnabled.value)
 
 function scrollToBottomIfNeeded(): void {
   scrollToBottom()
@@ -575,6 +585,8 @@ async function handleStopGenerating(): Promise<void> {
 }
 
 async function startNewSession(): Promise<void> {
+  // 正在念的是上一场对话的话，别让它跟进新会话
+  stopReadAloud()
   if (isGenerating.value) {
     await stopCurrentResponse()
   }
@@ -715,6 +727,8 @@ function closeWindow(): void {
   if (isGenerating.value) {
     void stopCurrentResponse()
   }
+  // 窗口都收起来了，声音也该停：小窗没有主窗口那条常驻播放条，不停就没处掐
+  stopReadAloud()
   window.api.miniChat.close()
 }
 
@@ -1069,6 +1083,12 @@ onUnmounted(() => {
   color: var(--color-text-primary);
   cursor: pointer;
   padding: 8px 4px;
+  /*
+   * 全局是 border-box，而 Phosphor 图标把 1em 写在 svg 的 width/height 属性上：
+   * 18px 的盒子扣掉上下 8px 内边距，画图的地方只剩 2px 高，回形针就缩成一个点。
+   */
+  box-sizing: content-box;
+  flex: none;
   transition: color 0.15s;
 
   &:hover {

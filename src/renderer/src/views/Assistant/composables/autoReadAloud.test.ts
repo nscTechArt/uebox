@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent, h, nextTick } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 
 import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
@@ -30,10 +30,10 @@ vi.mock('./useReadAloud', () => ({
   stopReadAloud: stop
 }))
 
-function mountHost(): ReturnType<typeof mount> {
+function mountHost(enabled?: () => boolean): ReturnType<typeof mount> {
   const Host = defineComponent({
     setup() {
-      useAutoReadAloud()
+      useAutoReadAloud(enabled)
       return () => h('div')
     }
   })
@@ -110,6 +110,23 @@ describe('回复落定后自动朗读', () => {
     expect(toggle).not.toHaveBeenCalled()
 
     aiConfigStore.setVoiceAutoPlayEnabled(false)
+    await nextTick()
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it('传了开关取值函数就听它的，不看本窗口的 store（小窗那份是旧账）', async () => {
+    const chatMsgStore = useChatMessagesStore()
+    const override = ref(true)
+    useAIConfigStore().setVoiceAutoPlayEnabled(false)
+    mountHost(() => override.value)
+
+    const id = startTurn('chat-1')
+    await nextTick()
+    chatMsgStore.replaceTyping('chat-1', id, '小窗也念。', true)
+    await nextTick()
+    expect(toggle).toHaveBeenCalledExactlyOnceWith('小窗也念。', id)
+
+    override.value = false
     await nextTick()
     expect(stop).toHaveBeenCalled()
   })

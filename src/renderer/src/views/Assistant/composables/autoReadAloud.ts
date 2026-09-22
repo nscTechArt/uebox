@@ -56,10 +56,15 @@ function lastReplies(messages: Record<string, ChatMessage[]>): LastReply[] {
  *
  * 放在 setup 里而不是模块顶层：`useReadAloud` 内部要 `useI18n()`，那只有在组件
  * 上下文里才立得住。常驻布局的寿命就是应用的寿命，效果一样。
+ *
+ * `enabled` 是「自动朗读开关此刻开着没有」。默认读本窗口的设置 store；小窗是另一个
+ * 渲染进程，它的 store 只在启动时从 localStorage 抄过一次，主窗口后来拨的开关它
+ * 看不见，所以小窗自己盯着 storage 事件、把新鲜值从这儿递进来（见 `miniVoiceAutoPlay`）。
  */
-export function useAutoReadAloud(): void {
+export function useAutoReadAloud(enabled?: () => boolean): void {
   const chatMsgStore = useChatMessagesStore()
   const aiConfigStore = useAIConfigStore()
+  const autoPlayEnabled = enabled ?? ((): boolean => aiConfigStore.voiceAutoPlayEnabled)
 
   /*
    * 念的时候把「主人」记成那条消息的 id，和气泡里手动朗读用的是同一个号 ——
@@ -73,7 +78,7 @@ export function useAutoReadAloud(): void {
   const readAloud = useReadAloud(() => owner.value)
 
   function read(chatSid: string, messageId: string): void {
-    if (!aiConfigStore.voiceAutoPlayEnabled) return
+    if (!autoPlayEnabled()) return
     // 通话期间一律不念，理由见 `voiceCallState`
     if (voiceCallActive.value) return
 
@@ -110,12 +115,9 @@ export function useAutoReadAloud(): void {
   /*
    * 开关关掉就立刻停嘴。用户按下那个开关多半正是因为「它现在正在念」。
    */
-  watch(
-    () => aiConfigStore.voiceAutoPlayEnabled,
-    (enabled) => {
-      if (!enabled) readAloud.stop()
-    }
-  )
+  watch(autoPlayEnabled, (on) => {
+    if (!on) readAloud.stop()
+  })
 
   /*
    * 不注销这两个监听器 —— 它们挂在常驻布局上，活到应用关闭为止，而「回复落定了

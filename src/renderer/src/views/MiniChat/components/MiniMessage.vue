@@ -71,6 +71,20 @@
           class="tool"
           @click="emit('retry', { id: message.id, content: textContent })"
         />
+        <!-- 朗读。念的和主聊天页、自动朗读是同一份：最终答复那一段 -->
+        <AppTooltip :title="readAloud.label.value">
+          <AppButton
+            variant="text"
+            class="tool read-aloud-tool"
+            :aria-label="readAloud.label.value"
+            :aria-pressed="readAloud.active.value"
+            :class="{ 'read-aloud-active': readAloud.active.value }"
+            @click="readAloud.toggle(readableReply)"
+          >
+            <PhStop v-if="readAloud.active.value" />
+            <PhSpeakerHigh v-else />
+          </AppButton>
+        </AppTooltip>
       </div>
     </div>
   </div>
@@ -81,8 +95,10 @@
  * Mini Chat 消息气泡组件
  * 复用主聊天页的用户气泡与 Agent 思考展示，但保留更紧凑的小窗布局
  */
-import { computed, ref } from 'vue'
-import { PhArrowClockwise, PhCheck, PhCopy } from '@phosphor-icons/vue'
+import { computed, ref, watch } from 'vue'
+import { PhArrowClockwise, PhCheck, PhCopy, PhSpeakerHigh, PhStop } from '@phosphor-icons/vue'
+import AppButton from '@renderer/components/AppButton.vue'
+import AppTooltip from '@renderer/components/AppTooltip.vue'
 import MarkdownRenderer from '@renderer/views/Assistant/components/MarkdownRenderer.vue'
 import ThinkingProcess from '@renderer/views/Assistant/components/ThinkingProcess.vue'
 import AgentProcessLog from '@renderer/views/Assistant/components/AgentProcessLog.vue'
@@ -90,6 +106,9 @@ import MessageSources from '@renderer/views/Assistant/components/MessageSources.
 import UserBubble from '@renderer/views/Assistant/components/UserBubble.vue'
 import AskUserCard from '@renderer/views/Assistant/components/AskUserCard.vue'
 import { answerAgentQuestion } from '@renderer/views/Assistant/composables/agentEventDispatcher'
+import { AGENT_RESUME_ACTION } from '@renderer/views/Assistant/composables/agentHandlerShared'
+import { finalReplyText } from '@renderer/views/Assistant/composables/finalReplyText'
+import { useReadAloud } from '@renderer/views/Assistant/composables/useReadAloud'
 import type { AgentQuestionItem } from '@core/shared/agentQuestion'
 import {
   joinTimelineText,
@@ -204,6 +223,26 @@ const showMarkdown = computed(() => {
   return props.message.status === 'done' || trailingContent.value.length > 0
 })
 
+/*
+ * 手动朗读。跟主聊天页 `AIBubble` 一样的接法：以消息 id 为主人，于是自动朗读
+ * （`autoReadAloud`，小窗里由 `MiniChatWindow` 挂上）念到这条时按钮会正确显示成「停止」。
+ */
+const readAloud = useReadAloud(() => props.message.id)
+const readableReply = computed(() =>
+  finalReplyText(
+    textContent.value,
+    props.message.agentProcess,
+    props.message.actionButtons?.some((button) => button.action === AGENT_RESUME_ACTION)
+  )
+)
+/* 这一条又开始重跑了（重试、续跑）：念的是上一版，掐掉。只认 done → typing 这一个方向 */
+watch(
+  () => props.message.status,
+  (status, previous) => {
+    if (status === 'typing' && previous === 'done') readAloud.stop()
+  }
+)
+
 function handleAssistantCopy(): void {
   emit('copy', { id: props.message.id, content: textContent.value })
 
@@ -273,6 +312,19 @@ function handleAssistantCopy(): void {
   &.copied {
     color: var(--color-success-text);
   }
+}
+
+/* 把 AppButton 的按钮外形抹掉，让它和旁边两个裸图标一般大 */
+.read-aloud-tool {
+  padding: 0;
+  min-width: 0;
+  height: auto;
+  line-height: 1;
+  font-size: 13px;
+}
+
+.read-aloud-active {
+  color: var(--color-accent-text);
 }
 
 .typing-indicator {
