@@ -1420,6 +1420,8 @@ declare global {
       close: () => void
       onShow: (callback: (payload: { dictate: boolean }) => void) => () => void
       onHide: (callback: () => void) => () => void
+      /** 语音热键还按着（键盘自动重复）。keyup 收不到时靠它判松手 */
+      onHold: (callback: () => void) => () => void
     }
     database: DatabaseAPI
     dialog: DialogAPI
@@ -2219,6 +2221,8 @@ declare global {
         | { ok: false; reason: 'busy' | 'vendor-unsupported' }
         | { ok: false; reason: 'unconfigured' | 'failed'; error: string }
       >
+      /** 「按住说话」松手了：别等静音判停，现在就转写 */
+      commitAudio: () => Promise<{ ok: true }>
       stop: () => Promise<{ ok: true }>
       playbackReady: (connectionId: number) => void
       sendAudio: (base64: string) => void
@@ -2315,6 +2319,13 @@ declare global {
         | { ok: false; reason: 'busy' | 'unconfigured' }
         | { ok: false; reason: 'failed'; error: string }
       >
+      /**
+       * 「按住说话」松手了：音频到此为止，但**终稿还要**。
+       *
+       * 别拿 `stop` 代替 —— 它一进门就不再放事件，收尾包换回来的那条终稿
+       * 正好被丢掉，表现是松手之后输入框永远少最后一句。
+       */
+      flush: () => Promise<{ ok: true }>
       stop: () => Promise<{ ok: true }>
       sendAudio: (base64: string) => void
       onEvent: (handler: (payload: unknown) => void) => () => void

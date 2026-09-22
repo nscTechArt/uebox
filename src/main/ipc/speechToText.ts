@@ -136,6 +136,21 @@ export function registerSpeechToTextIPC(): void {
     active.handle.appendAudio(base64)
   })
 
+  /**
+   * 「按住说话」松手了：音频到此为止，但**终稿还要**。
+   *
+   * 和 `stt:stop` 的区别全在这儿 —— `stop` 一进门就不再往渲染层放事件，
+   * 而收尾包换回来的那条终稿正是用户刚说完的最后一句。用 `stop` 收尾的表现是
+   * 松开热键之后输入框里永远少一句，而且没有任何报错。
+   *
+   * 会话由适配器在终稿到手（或兜底超时）之后自己关，这里不用再调 `stop`。
+   */
+  ipcMain.handle('stt:flush', (event) => {
+    if (active && active.sender.id !== event.sender.id) return { ok: true }
+    active?.handle.flush()
+    return { ok: true }
+  })
+
   /** 不是自己那一路就什么都不做，但照样回 ok —— 理由见 `realtime-voice:stop` */
   ipcMain.handle('stt:stop', (event) => {
     if (active && active.sender.id !== event.sender.id) return { ok: true }

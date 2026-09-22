@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import WebSocket from 'ws'
-import { STT_INPUT_SAMPLE_RATE, type SttEvent, type SttSessionConfig } from './types'
+import {
+  STT_FLUSH_GRACE_MS,
+  STT_INPUT_SAMPLE_RATE,
+  type SttEvent,
+  type SttSessionConfig
+} from './types'
 import type { SttSessionHandle } from './types'
 
 /**
@@ -220,6 +225,8 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
   })
 
   let closed = false
+  /** 已经发过收尾包。发完还继续收终稿，但不再接受新音频 */
+  let flushed = false
   /** 真的把 socket 收掉了没有。`closed` 只表示「不再接受新事件」，两者不同步 */
   let finished = false
   let closeTimer: ReturnType<typeof setTimeout> | null = null
@@ -251,26 +258,58 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
     finish()
   }
 
+  /**
+   * 发负包告诉服务端音频到此为止。
+   *
+   * `close` 和 `flush` 都要发它，区别只在发完之后还收不收事件 —— 所以抽出来，
+   * 免得两条路各写一份、改了一处忘了另一处。
+   *
+   * 发完**不立刻 terminate**：terminate 是硬断，刚 send 进去还没刷出去的那一帧
+   * 会跟着连接一起消失，于是「好好收尾」这件事只是看起来做了。
+   */
+  function sendLastPacket(): boolean {
+    if (socket.readyState !== WebSocket.OPEN) return false
+    socket.send(
+      frame(MESSAGE_TYPE.audioOnlyRequest, FLAG_LAST_PACKET, SERIALIZATION_NONE, Buffer.alloc(0))
+    )
+    return true
+  }
+
+  /**
+   * 音频到此为止，但继续等终稿（见 `SttSessionHandle.flush`）。
+   *
+   * **不置 `closed`**，这是它和 `close` 唯一的、也是全部的区别：置了的话
+   * `emit` 会把负包换回来的那条终稿挡在门外，用户松手之后就永远少最后一句。
+   *
+   * 这里不主动 `socket.close()` —— 服务端收到负包、回完终稿会自己关，
+   * 那条 `close` 事件由下面的 `socket.on('close')` 接住。我们只留一个兜底闹钟。
+   */
+  function flush(): void {
+    if (closed || flushed) return
+    flushed = true
+    if (!sendLastPacket()) {
+      close()
+      return
+    }
+    closeTimer = setTimeout(close, STT_FLUSH_GRACE_MS)
+  }
+
   function close(): void {
     if (closed) return
     closed = true
-    if (socket.readyState === WebSocket.OPEN) {
-      /*
-       * 负包：告诉服务端音频到此为止。不发的话这条会话要等到「等包超时」
-       * （45000081）才结束 —— 小时版是按时长计费的，那段空等照样算钱。
-       *
-       * 发完**不立刻 terminate**：terminate 是硬断，刚 send 进去还没刷出去的
-       * 那一帧会跟着连接一起消失，于是「好好收尾」这件事只是看起来做了。
-       */
-      socket.send(
-        frame(MESSAGE_TYPE.audioOnlyRequest, FLAG_LAST_PACKET, SERIALIZATION_NONE, Buffer.alloc(0))
-      )
-      socket.once('close', finish)
-      closeTimer = setTimeout(finish, CLOSE_GRACE_MS)
-      socket.close()
+    if (closeTimer) clearTimeout(closeTimer)
+    closeTimer = null
+    /*
+     * 已经 flush 过就不必再发一次负包：服务端那边这条会话早就结束了，
+     * 再发一帧只会拿到一个协议错误（而那时候我们已经不看事件了）。
+     */
+    if (flushed || !sendLastPacket()) {
+      finish()
       return
     }
-    finish()
+    socket.once('close', finish)
+    closeTimer = setTimeout(finish, CLOSE_GRACE_MS)
+    socket.close()
   }
 
   socket.on('open', () => {
@@ -314,6 +353,9 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
 
   socket.on('error', (error) => fail(error.message))
   socket.on('close', () => {
+    // flush 之后服务端回完终稿就会自己关，走的正是这条。兜底闹钟得撤掉
+    if (closeTimer) clearTimeout(closeTimer)
+    closeTimer = null
     if (closed) return
     closed = true
     finish()
@@ -359,11 +401,14 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
 
   return {
     appendAudio: (base64: string) => {
-      if (closed || socket.readyState !== WebSocket.OPEN) return
+      // 收尾包之后再送音频，服务端会当协议错误。上层松手到真正收摊之间还有
+      // 一两包在路上，挡在这儿
+      if (closed || flushed || socket.readyState !== WebSocket.OPEN) return
       const pcm = Buffer.from(base64, 'base64')
       if (!pcm.length) return
       socket.send(frame(MESSAGE_TYPE.audioOnlyRequest, FLAG_NONE, SERIALIZATION_NONE, pcm))
     },
+    flush,
     close
   }
 }

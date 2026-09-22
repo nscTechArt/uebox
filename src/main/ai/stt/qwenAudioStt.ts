@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
-import { STT_INPUT_SAMPLE_RATE, type SttEvent, type SttSessionConfig } from './types'
+import {
+  STT_FLUSH_GRACE_MS,
+  STT_INPUT_SAMPLE_RATE,
+  type SttEvent,
+  type SttSessionConfig
+} from './types'
 import type { SttSessionHandle } from './types'
 
 /**
@@ -96,6 +101,8 @@ export function openQwenAudioSttSession(config: SttSessionConfig): SttSessionHan
 
   const taskId = randomUUID()
   let closed = false
+  /** 已经发过收尾包。发完还继续收终稿，但不再接受新音频 */
+  let flushed = false
   let started = false
   /** 真的把 socket 收掉了没有。`closed` 只表示「不再接受新事件」，两者不同步 */
   let finished = false
@@ -172,6 +179,9 @@ export function openQwenAudioSttSession(config: SttSessionConfig): SttSessionHan
 
   socket.on('error', (error) => fail(error.message))
   socket.on('close', () => {
+    // flush 之后厂商回完终稿就会自己关，走的正是这条。兜底闹钟得撤掉
+    if (closeTimer) clearTimeout(closeTimer)
+    closeTimer = null
     if (closed) return
     closed = true
     finish()
@@ -205,23 +215,48 @@ export function openQwenAudioSttSession(config: SttSessionConfig): SttSessionHan
     }
   }
 
-  return {
+  const handle: SttSessionHandle = {
     appendAudio: (base64: string) => {
       // `task-started` 之前送的音频厂商会丢掉。上层本来就攒着等 ready，
       // 这里再挡一道 —— 两个条件里漏一个，表现都是「每次吃掉开头几个字」
-      if (closed || !started || socket.readyState !== WebSocket.OPEN) return
+      // 收尾包之后再送音频厂商会当协议错误。松手到真正收摊之间还有一两包在路上
+      if (closed || flushed || !started || socket.readyState !== WebSocket.OPEN) return
       const pcm = Buffer.from(base64, 'base64')
       if (pcm.length) socket.send(pcm)
+    },
+    /**
+     * 音频到此为止，但继续等终稿（见 `SttSessionHandle.flush`）。
+     *
+     * **不置 `closed`** —— 这是它和 `close` 唯一的、也是全部的区别。置了的话
+     * `emit` 会把 `finish-task` 换回来的那条终稿挡在门外，用户松手之后
+     * 就永远少最后一句。
+     *
+     * 这里不主动 `socket.close()`：厂商回完 `task-finished` 会自己关，
+     * 那条由下面的 `socket.on('close')` 接住。我们只留一个兜底闹钟。
+     */
+    flush: () => {
+      if (closed || flushed) return
+      flushed = true
+      if (!started || socket.readyState !== WebSocket.OPEN) {
+        handle.close()
+        return
+      }
+      send('finish-task', { input: {} })
+      closeTimer = setTimeout(() => handle.close(), STT_FLUSH_GRACE_MS)
     },
     close: () => {
       if (closed) return
       closed = true
-      // 先好好收尾：没有 finish-task 的话这条任务要等厂商超时才结束，而那是计费的
-      if (started) send('finish-task', { input: {} })
+      if (closeTimer) clearTimeout(closeTimer)
+      closeTimer = null
+      // 先好好收尾：没有 finish-task 的话这条任务要等厂商超时才结束，而那是计费的。
+      // flush 已经发过就不再发 —— 那条任务在厂商那边早就结束了
+      if (started && !flushed) send('finish-task', { input: {} })
       closeTimer = setTimeout(finish, CLOSE_GRACE_MS)
       socket.once('close', finish)
       if (socket.readyState === WebSocket.OPEN) socket.close()
       else finish()
     }
   }
+  return handle
 }

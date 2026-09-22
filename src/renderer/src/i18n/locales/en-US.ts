@@ -6608,6 +6608,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     dictation: {
       starting: 'Opening the microphone…',
       listening: 'Listening — sends itself when you stop',
+      finishing: 'Transcribing…',
+      holding: 'Release to send',
       unheard: "Didn't catch that, say it again",
       unavailable: 'Voice is unavailable right now, just type',
       busy: 'The voice assistant is on a call — type for now',

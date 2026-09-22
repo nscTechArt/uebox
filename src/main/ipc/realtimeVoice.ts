@@ -774,6 +774,19 @@ export function registerRealtimeVoiceIPC(): void {
    * 用 `on` 而不是 `handle`：这条一秒钟要走十几次，每次都等一个 Promise 往返
    * 纯属浪费 —— 而且没有任何返回值需要等。
    */
+  /**
+   * 「按住说话」松手了：别等静音判停，现在就转写。
+   *
+   * 只有听写那一路调得到（Spotlight 没绑语音识别、回落到实时语音的时候）。
+   * 通话那一路靠服务端 VAD 分轮，手动截断会把一句还没说完的话切掉 ——
+   * 所以那边没有对应的界面入口。
+   */
+  ipcMain.handle('realtime-voice:commit-audio', (event) => {
+    if (!active || active.sender.id !== event.sender.id) return { ok: true }
+    active.handle.commitAudio?.()
+    return { ok: true }
+  })
+
   ipcMain.on('realtime-voice:audio', (event, base64: string) => {
     /*
      * 查 sender，理由和 `:text` `:floor` 那几条一样，但这一条更要紧：被抢掉的

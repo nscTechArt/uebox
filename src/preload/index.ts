@@ -280,6 +280,17 @@ const api = {
       const handler = (): void => callback()
       ipcRenderer.on('spotlight:hide', handler)
       return () => ipcRenderer.removeListener('spotlight:hide', handler)
+    },
+    /**
+     * 语音热键还按着（键盘自动重复，约 31ms 一次）。
+     *
+     * 「按住说话」的收尾主要靠渲染层自己收到的 keyup；这条是**兜底**：
+     * 窗口没抢到焦点时 keyup 不会来，那就只能靠「重复不再来了」判松手。
+     */
+    onHold: (callback: () => void) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('spotlight:hold', handler)
+      return () => ipcRenderer.removeListener('spotlight:hold', handler)
     }
   },
   database: {
@@ -2257,6 +2268,8 @@ const api = {
      * `vendor-unsupported` 是「退回打字」，不是报错，调用方要能分辨。
      */
     startDictation: () => ipcRenderer.invoke('realtime-voice:start-dictation'),
+    /** 「按住说话」松手了：别等静音判停，现在就转写。只有听写那一路用 */
+    commitAudio: () => ipcRenderer.invoke('realtime-voice:commit-audio'),
     stop: () => ipcRenderer.invoke('realtime-voice:stop'),
     playbackReady: (connectionId: number) =>
       ipcRenderer.send('realtime-voice:playback-ready', connectionId),
@@ -2364,6 +2377,13 @@ const api = {
      */
     audioSpec: () => ipcRenderer.invoke('stt:audio-spec'),
     start: () => ipcRenderer.invoke('stt:start'),
+    /**
+     * 「按住说话」松手了：音频到此为止，但**终稿还要**。
+     *
+     * 别拿 `stop` 代替 —— 它一进门就不再放事件，收尾包换回来的那条终稿
+     * 正好被丢掉，表现是松手之后输入框永远少最后一句。
+     */
+    flush: () => ipcRenderer.invoke('stt:flush'),
     stop: () => ipcRenderer.invoke('stt:stop'),
     /** base64 的 PCM16 单声道，16kHz。主进程会攒到 200ms 再往厂商发 */
     sendAudio: (base64: string) => ipcRenderer.send('stt:audio', base64),

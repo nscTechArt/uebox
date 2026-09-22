@@ -64,6 +64,8 @@ let emit: (event: VoiceSessionEvent) => void
 let sentAudio: string[]
 /** 这一轮的音频去了哪条通道。选错通道是这一块最贵的 bug，用例必须看得见 */
 let usedChannel: 'stt' | 'realtime' | null
+/** 收尾包发到哪条通道上了。「松开发送」全靠它，发错通道等于没发 */
+let flushed: Array<'stt' | 'realtime'>
 
 /**
  * 两条通道都摆出来。
@@ -85,6 +87,7 @@ function stubApi(
 ): void {
   sentAudio = []
   usedChannel = null
+  flushed = []
   emit = () => {}
   vi.stubGlobal('window', {
     api: {
@@ -92,6 +95,10 @@ function stubApi(
       speechToText: {
         audioSpec: options.sttAudioSpec || (async () => ({ ok: false })),
         start: options.sttStart || (async () => ({ ok: true, inputSampleRate: 16_000 })),
+        flush: async () => {
+          flushed.push('stt')
+          return { ok: true }
+        },
         stop: async () => ({ ok: true }),
         sendAudio: (base64: string) => {
           usedChannel = 'stt'
@@ -105,6 +112,10 @@ function stubApi(
       realtimeVoice: {
         audioSpec: async () => ({ ok: true, inputSampleRate: 24_000, outputSampleRate: 24_000 }),
         startDictation,
+        commitAudio: async () => {
+          flushed.push('realtime')
+          return { ok: true }
+        },
         stop: async () => ({ ok: true }),
         sendAudio: (base64: string) => {
           usedChannel = 'realtime'
@@ -304,6 +315,67 @@ describe('听写', () => {
 
     emit({ type: 'closed' })
     await Promise.resolve()
+    expect(dictation.state.value).toBe('idle')
+  })
+
+  /**
+   * 「按住说话、松开发送」的核心：**松手时不能把还在路上的终稿丢掉**。
+   *
+   * 红灯用例：用 `stop` 收尾。它一进门就不再放事件，而用户刚说完的最后一句
+   * 正好在那之后才到 —— 表现是每次松手输入框都少最后一句，而且一声不吭。
+   */
+  it('松手时发收尾包，并且等到终稿才收摊', async () => {
+    const onText = vi.fn()
+    const dictation = useVoiceDictation({ onText })
+    await dictation.start()
+    emit({ type: 'ready' })
+
+    const settled = dictation.finish()
+    // `finish` 在发收尾包之前先 await 了收麦克风那一步，所以不止一个微任务
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // 收尾包得先发出去，否则厂商还在等那档静音判停
+    expect(flushed).toEqual(['realtime'])
+    // 还没收摊 —— 终稿还没来
+    expect(dictation.state.value).toBe('finishing')
+
+    // 厂商回终稿，然后把会话关了
+    emit({ type: 'user-text', text: '把选中的 actor 缩放两倍', final: true })
+    emit({ type: 'closed' })
+    await settled
+
+    expect(onText).toHaveBeenCalledWith('把选中的 actor 缩放两倍')
+    expect(dictation.state.value).toBe('idle')
+  })
+
+  /**
+   * 终稿可能永远不来（网断了、厂商吞了）。卡在「识别中」不动比少一句话更糟 ——
+   * 用户完全没法判断该等还是该重说。
+   */
+  it('终稿一直不来也会到点收摊，不会卡死', async () => {
+    vi.useFakeTimers()
+    try {
+      const dictation = useVoiceDictation({ onText: vi.fn() })
+      await dictation.start()
+      emit({ type: 'ready' })
+
+      const settled = dictation.finish()
+      // flush 是个 await，得让微任务跑完才进到等待那一段
+      await vi.advanceTimersByTimeAsync(0)
+      expect(dictation.state.value).toBe('finishing')
+
+      await vi.advanceTimersByTimeAsync(3_000)
+      await settled
+      expect(dictation.state.value).toBe('idle')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /** 没在听的时候松手（短按、或者压根没开起来）不该去碰厂商 */
+  it('没在听时 finish 不发收尾包', async () => {
+    const dictation = useVoiceDictation({ onText: vi.fn() })
+    await dictation.finish()
+    expect(flushed).toEqual([])
     expect(dictation.state.value).toBe('idle')
   })
 })

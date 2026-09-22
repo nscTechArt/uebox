@@ -102,6 +102,7 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 let unsubscribeShow: (() => void) | null = null
 let unsubscribeHide: (() => void) | null = null
+let unsubscribeHold: (() => void) | null = null
 
 /* ── 语音听写 ───────────────────────────────────────────────────────────── */
 
@@ -131,6 +132,54 @@ let submitTimer: ReturnType<typeof setInterval> | null = null
  */
 let submitArmed = false
 
+/* ── 按住说话 ──────────────────────────────────────────────────────────────
+ *
+ * 按下 Alt+Q 弹窗开麦，**松开就发**。实测（2026-09-22）两个信号都拿得到：
+ *
+ * - 窗口抢到焦点之后，物理松手的 `keyup` 会落到渲染层（`up q` / `up Alt`）
+ * - Windows 的键盘自动重复让 `globalShortcut` 每 31 毫秒回调一次，主进程
+ *   压成 `spotlight:hold` 推过来
+ *
+ * keyup 当主（准、即时），重复当兜底（窗口没抢到焦点时 keyup 不会来）。
+ *
+ * ## 点一下也得能用
+ *
+ * 不是所有人都愿意按着说话，而「按下就松开」是个太自然的动作，不能让它变成
+ * 「录了 0.2 秒然后发了个空」。所以短按走原来那条路：继续听，靠 VAD 判停 +
+ * 两秒倒计时。长短的分界见 `HOLD_TAP_THRESHOLD_MS`。
+ */
+
+/**
+ * 按下到松开短于这么久，当成「点一下」而不是「按住说话」。
+ *
+ * 350ms 是「手指没停就弹起来」和「有意按住」之间比较稳的一条线：人有意按住
+ * 最短也有半秒，而无意识的一按通常一百多毫秒。
+ *
+ * 给小了的代价是点一下被当成按住 —— 那会当场提交一句没说完的话（多半是空的）；
+ * 给大了的代价只是按住说话的人头 350 毫秒说的话走的是 VAD 那条路，照样收得到。
+ * 两边不对称，所以宁可给大。
+ */
+const HOLD_TAP_THRESHOLD_MS = 350
+
+/**
+ * 超过这么久没收到「还按着」的信号，就当松手了。
+ *
+ * 只在 keyup 收不到时才走到（窗口没抢到焦点）。比主进程那边的重复窗口
+ * （600ms）再宽一点：主进程判「还是同一次按住」用的是它，这边判「松手了」
+ * 要晚于它，否则会出现「主进程还认为按着、界面已经发出去了」。
+ */
+const HOLD_RELEASE_GRACE_MS = 800
+
+/**
+ * 正按着热键。松手（或兜底超时）时置假。
+ *
+ * 用 `ref` 是因为状态条要跟着它变：按着的时候说「松开即发送」，
+ * 点一下那条路说「说完自动提交」—— 两句话指向的操作完全不同。
+ */
+const holdingHint = ref(false)
+let holdStartedAt = 0
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+
 const dictation = useVoiceDictation({
   // 和语音通话读同一个偏好。不带的话浏览器给系统默认设备，用户挑的那个麦白挑了
   microphoneDeviceId: () => useAIConfigStore().voiceMicrophoneDeviceId,
@@ -159,13 +208,21 @@ const micPulse = computed(() => Math.min(1, Math.sqrt(dictation.level.value * 6)
 
 const dictationHint = computed(() => {
   if (dictationNotice.value) return dictationNotice.value
+  // 松手之后麦克风已经关了，但最后一句还在识别。这一档要盖过下面所有判断 ——
+  // 显示成「没在听」的话，用户会以为那句话被吞了，于是重说一遍
+  if (dictation.state.value === 'finishing') return t('spotlightWindow.dictation.finishing')
   if (submitCountdown.value > 0) {
     return t('spotlightWindow.dictation.autoSubmit', { seconds: submitCountdown.value })
   }
   if (!dictating.value) return ''
-  return dictation.state.value === 'listening'
-    ? t('spotlightWindow.dictation.listening')
-    : t('spotlightWindow.dictation.starting')
+  if (dictation.state.value !== 'listening') return t('spotlightWindow.dictation.starting')
+  /*
+   * 还按着热键：这一路松手就发，不走 VAD 也不走倒计时 —— 所以不能沿用
+   * 「说完自动提交」那句话，它会让人以为可以松手了慢慢等。
+   */
+  return holdingHint.value
+    ? t('spotlightWindow.dictation.holding')
+    : t('spotlightWindow.dictation.listening')
 })
 
 function clearSubmitCountdown(): void {
@@ -183,6 +240,12 @@ function clearSubmitCountdown(): void {
 function startSubmitCountdown(): void {
   clearSubmitCountdown()
   if (!query.value.trim()) return
+  /*
+   * **还按着热键就不起倒计时。** 按住说话时 VAD 照样会在中途断出一句
+   * （说到一半停下来想词），那一下会把倒计时点着；用户还按着、话没说完，
+   * 两秒后半句指令就自己发出去了。这一路的提交时机只有一个：松手。
+   */
+  if (holdingHint.value) return
   submitCountdown.value = Math.round(DICTATION_SUBMIT_DELAY_MS / 1000)
   submitTimer = setInterval(() => {
     submitCountdown.value -= 1
@@ -209,6 +272,7 @@ async function submitDictated(): Promise<void> {
  */
 async function endDictation(): Promise<void> {
   clearSubmitCountdown()
+  releaseHoldWatch()
   submitArmed = false
   dictating.value = false
   if (dictation.state.value === 'idle') return
@@ -237,6 +301,75 @@ async function beginDictation(): Promise<void> {
     dictationNotice.value = t('spotlightWindow.dictation.vendorUnsupported')
   }
   // 其余几类 `start` 已经通过 onError 把话说清楚了，这里不再覆盖它
+}
+
+/** 开始盯着「还按着没有」。热键唤起时调一次 */
+function watchHold(): void {
+  releaseHoldWatch()
+  holdingHint.value = true
+  holdStartedAt = Date.now()
+  armHoldTimeout()
+  // 捕获阶段：别让输入框自己的处理把这一下吃掉
+  window.addEventListener('keyup', onHoldKeyUp, true)
+}
+
+function armHoldTimeout(): void {
+  if (holdTimer) clearTimeout(holdTimer)
+  holdTimer = setTimeout(releaseHold, HOLD_RELEASE_GRACE_MS)
+}
+
+function releaseHoldWatch(): void {
+  holdingHint.value = false
+  if (holdTimer) clearTimeout(holdTimer)
+  holdTimer = null
+  window.removeEventListener('keyup', onHoldKeyUp, true)
+}
+
+/**
+ * 任意一个键弹起来就算松手。
+ *
+ * **不去认「是不是 Q」**：热键是用户自己配的，渲染层不知道它是哪个组合。
+ * 而按住说话期间用户不会在键盘上干别的，所以「第一个弹起来的键」就是
+ * 这个和弦里的某一个 —— 实测先到的是 `up q`，然后才是 `up Alt`。
+ */
+function onHoldKeyUp(): void {
+  releaseHold()
+}
+
+/** 主进程说还按着（键盘自动重复）。把兜底闹钟往后推 */
+function handleHold(): void {
+  if (!holdingHint.value) return
+  armHoldTimeout()
+}
+
+/**
+ * 松手了。
+ *
+ * 短按走原来那条路（继续听 + VAD + 两秒倒计时）；长按就是「按住说话」，
+ * 当场收尾并把话交出去。
+ */
+function releaseHold(): void {
+  if (!holdingHint.value) return
+  const heldMs = Date.now() - holdStartedAt
+  releaseHoldWatch()
+  if (heldMs < HOLD_TAP_THRESHOLD_MS) return
+  void submitHeld()
+}
+
+/**
+ * 按住说话的收尾：等最后一句的终稿回来，然后发。
+ *
+ * 用 `finish()` 不用 `endDictation()` —— 后者走的是 `stop`，会把还在路上的
+ * 那条终稿丢掉，表现是松手之后永远少最后一句。
+ */
+async function submitHeld(): Promise<void> {
+  clearSubmitCountdown()
+  submitArmed = false
+  await dictation.finish()
+  dictating.value = false
+  const message = query.value.trim()
+  if (!message) return
+  spotlightAPI.execute('ai', { message })
 }
 
 /**
@@ -437,6 +570,9 @@ function handleShow(payload: { dictate: boolean }): void {
    * 输入框清空了，`start()` 自己会收掉上一轮 —— 效果是「刚才没说清，重来」。
    */
   if (payload.dictate) {
+    // 先开始盯松手，再开麦：反过来的话，用户按一下就松（短按）时，
+    // 那一下 keyup 会落在「还没开始盯」的空档里，于是永远等不到松手
+    watchHold()
     void beginDictation()
   } else {
     void endDictation()
@@ -460,11 +596,14 @@ onMounted(() => {
   // 监听主进程事件
   unsubscribeShow = spotlightAPI.onShow(handleShow)
   unsubscribeHide = spotlightAPI.onHide(handleHide)
+  // 键盘自动重复推过来的「还按着」。keyup 收不到时靠它判松手
+  unsubscribeHold = spotlightAPI.onHold(handleHold)
 })
 
 onUnmounted(() => {
   unsubscribeShow?.()
   unsubscribeHide?.()
+  unsubscribeHold?.()
   if (searchTimeout) clearTimeout(searchTimeout)
   void endDictation()
 })

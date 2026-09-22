@@ -65,6 +65,15 @@ interface DictationChannel {
         error?: string
       }
   >
+  /**
+   * 音频到此为止，但**终稿还要**。「按住说话、松开发送」靠它。
+   *
+   * 两条通道的实现不是一回事：识别那条发收尾包（厂商回完终稿自己关），
+   * 实时语音那条发 `input_audio_buffer.commit`（会话还开着）。共同点是
+   * **都不该用 `stop` 代替** —— `stop` 一进门就不再放事件，而用户刚说完的
+   * 最后一句正好在那之后才到。
+   */
+  flush: () => Promise<unknown>
   stop: () => Promise<unknown>
   sendAudio: (base64: string) => void
   onEvent: (handler: (payload: unknown) => void) => () => void
@@ -77,6 +86,13 @@ export type DictationState =
   | 'starting'
   /** 厂商就绪，正在听 */
   | 'listening'
+  /**
+   * 松手了，麦克风已经关掉，正在等最后一句的终稿。
+   *
+   * 单独一档而不是直接回 idle：界面要能说出「在识别」和「没在听」的区别 ——
+   * 都显示成「没在听」的话，用户会以为刚说的最后一句被吞了，于是重说一遍。
+   */
+  | 'finishing'
 
 export interface VoiceDictation {
   state: Ref<DictationState>
@@ -88,6 +104,13 @@ export interface VoiceDictation {
    * 重复调用安全：已经在听就先收掉上一轮再来（热键按第二次就是这条路）。
    */
   start: () => Promise<DictationFailure | null>
+  /**
+   * 松手了：停止采集、告诉厂商说完了、等最后一句的终稿回来，然后收摊。
+   *
+   * 「按住说话、松开发送」用它，**不要用 `stop`** —— `stop` 会把还在路上的
+   * 那条终稿丢掉，表现是松手之后输入框永远少最后一句。
+   */
+  finish: () => Promise<void>
   /** 收掉。重复调用无害 */
   stop: () => Promise<void>
 }
@@ -156,6 +179,18 @@ const READY_TIMEOUT_MS = 20_000
  */
 const LEVEL_PUBLISH_MS = 60
 
+/**
+ * 松手之后最多等厂商这么久出终稿。
+ *
+ * 比适配器那边的 `STT_FLUSH_GRACE_MS`（2 秒）略大：那一档到点会主动把会话关掉，
+ * 关掉就会有 `closed` 事件把这里叫醒。反过来给小了的话，这边先超时收摊，
+ * 而终稿在两百毫秒后才到 —— 那句话就白说了。
+ *
+ * 到点也不是白等：有多少交多少。卡在「正在识别」不动比少一句话更糟，
+ * 用户完全没法判断该等还是该重说。
+ */
+const FINISH_TIMEOUT_MS = 2_500
+
 /** 这一包多响。只用来驱动图标动画，不参与任何判停 —— 判停在服务端 */
 function rootMeanSquare(samples: Int16Array): number {
   if (samples.length === 0) return 0
@@ -208,6 +243,13 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
   /** 响度的发布节流。理由见 `LEVEL_PUBLISH_MS` */
   let levelPeak = 0
   let levelPublishedAt = 0
+  /**
+   * `finish()` 正等着终稿。厂商把会话关掉时由 `handleEvent` 叫醒它。
+   *
+   * 用一个回调而不是轮询 `state`：终稿到手和会话关闭之间只隔几毫秒，
+   * 轮询的那个间隔全都是白等，而这一路等的就是「松手到发出去」那点时间。
+   */
+  let settleFinish: (() => void) | null = null
 
   function publishLevel(value: number): void {
     levelPeak = Math.max(levelPeak, value)
@@ -229,6 +271,59 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     levelPublishedAt = 0
   }
 
+  /**
+   * 松手了：停止采集、告诉厂商说完了、**等那条终稿回来**，然后才收摊。
+   *
+   * ## 为什么不能直接 `stop`
+   *
+   * 用户松开热键的那一刻，最后一句话还在厂商那边转写。`stop` 一进门就不再放
+   * 事件，于是输入框里永远少最后一句 —— 而且一声不吭，用户只会以为自己没说清。
+   *
+   * ## 为什么要先把麦克风关掉
+   *
+   * 收尾包发出去之后再送音频，厂商会当协议错误。而松手到收摊之间还有一两包
+   * 在路上（worklet 20ms 一包）。两头都挡了一道：这里停采集，适配器那边
+   * `flushed` 之后也不再往外发。
+   *
+   * ## 超时是必须的
+   *
+   * 终稿可能永远不来（网断了、厂商吞了）。卡在「正在识别」不动比少一句话更糟 ——
+   * 用户完全没法判断该等还是该重说。所以到点就收，有多少交多少。
+   */
+  async function finish(): Promise<void> {
+    if (state.value === 'idle' || !ownsSession) {
+      await stop()
+      return
+    }
+    state.value = 'finishing'
+    // 先断采集：收尾包之后再送音频是协议错误
+    await releaseAudio()
+
+    const currentGeneration = generation
+    await channel?.flush().catch(() => undefined)
+    if (generation !== currentGeneration) return
+
+    /*
+     * 等终稿。两个出口：厂商回完终稿把会话关了（`handleEvent` 的 `closed`
+     * 会来叫 `settleFinish`），或者到点了。
+     */
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        settleFinish = null
+        resolve()
+      }, FINISH_TIMEOUT_MS)
+      settleFinish = () => {
+        clearTimeout(timer)
+        settleFinish = null
+        resolve()
+      }
+    })
+
+    // 这几百毫秒里用户又按了一次热键，新一轮已经开起来了 —— 别去关它
+    if (generation !== currentGeneration) return
+    await stop()
+  }
+
   async function stop(): Promise<void> {
     generation += 1
     vendorReady = false
@@ -237,6 +332,8 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     readyTimer = null
     unsubscribe?.()
     unsubscribe = null
+    // 还在等终稿的那个 Promise 得放掉，否则它会一直挂到超时
+    settleFinish?.()
     state.value = 'idle'
     await releaseAudio()
     // 没开过就不去关。理由见 `ownsSession`
@@ -274,6 +371,8 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
         void stop()
         break
       case 'closed':
+        // `finish()` 正等着的就是这一下：终稿已经在上面那个 case 里交出去了
+        settleFinish?.()
         void stop()
         break
       default:
@@ -354,6 +453,8 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     const api = window.api.speechToText
     return {
       start: () => api.start(),
+      // 收尾包发出去，但会话留着等终稿 —— 用 `stop` 的话那条终稿会被丢掉
+      flush: () => api.flush(),
       stop: () => api.stop(),
       sendAudio: api.sendAudio,
       onEvent: api.onEvent
@@ -365,6 +466,8 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     const api = window.api.realtimeVoice
     return {
       start: () => api.startDictation(),
+      // 别等那档 900ms 的静音判停，现在就转写
+      flush: () => api.commitAudio(),
       stop: () => api.stop(),
       sendAudio: api.sendAudio,
       onEvent: api.onEvent
@@ -455,5 +558,5 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     return null
   }
 
-  return { state, level, start, stop }
+  return { state, level, start, finish, stop }
 }

@@ -17,5 +17,9 @@ export const spotlightAPI = {
   },
   onHide(callback: () => void): () => void {
     return window.api.spotlight.onHide(callback)
+  },
+  /** 语音热键还按着。每次键盘自动重复来一下，约 31ms 一次 */
+  onHold(callback: () => void): () => void {
+    return window.api.spotlight.onHold(callback)
   }
 }

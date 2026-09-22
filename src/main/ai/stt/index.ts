@@ -97,7 +97,13 @@ export function openSttSession(
   let buffered: Buffer[] = []
   let bufferedBytes = 0
 
-  const flush = (): void => {
+  /**
+   * 把攒着的那点音频送出去。
+   *
+   * 叫 `drain` 不叫 `flush`：`flush` 在这一层已经是**句柄上的那个语义**
+   * （告诉厂商说完了、等终稿），两个同名的东西做着不同的事，读代码时分不清。
+   */
+  const drain = (): void => {
     if (!bufferedBytes) return
     const packet = Buffer.concat(buffered, bufferedBytes)
     buffered = []
@@ -111,12 +117,22 @@ export function openSttSession(
       if (!pcm.length) return
       buffered.push(pcm)
       bufferedBytes += pcm.length
-      if (bufferedBytes >= PACKET_BYTES) flush()
+      if (bufferedBytes >= PACKET_BYTES) drain()
+    },
+    flush: () => {
+      /*
+       * 攒着的先送出去，**而且必须赶在收尾包之前**。
+       *
+       * 「按住说话」松手时走的就是这条，那时候缓冲里正压着最后不到 200 毫秒的
+       * 音频 —— 而中文里 200 毫秒足够一个字，缺的正好是一句话的末尾。
+       * 顺序反了的话，适配器 `flushed` 之后就不再往外发，这包直接掉地上。
+       */
+      drain()
+      session.flush()
     },
     close: () => {
-      // 攒着的先送出去。丢掉的话，用户最后那 200 毫秒说的字就没了 ——
-      // 而中文里 200 毫秒足够一个字，缺的正好是一句话的末尾
-      flush()
+      // 攒着的先送出去。理由同上
+      drain()
       session.close()
     }
   }

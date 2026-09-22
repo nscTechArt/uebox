@@ -154,6 +154,17 @@ export interface VoiceAnnouncement {
 export interface VoiceSessionHandle {
   /** 送一段用户音频。base64 的 PCM16 单声道，采样率见 `audioSpec` */
   appendAudio: (base64: string) => void
+  /**
+   * 「我说完了，别等静音了，现在就转写。」
+   *
+   * **只有听写那一路用**（按住热键说话，松开即发）：松手这个动作已经把
+   * 「说完了」表达清楚了，再让服务端空等那档静音判停就是让人干等。
+   * 通话那一路靠服务端 VAD 分轮，手动截断会把话说一半就切掉。
+   *
+   * 选填：豆包 3.0 的上行事件表里没有对应事件，那家的适配器不实现它。
+   * 而听写本来也走不到豆包实时那条线（它关不掉自动应答）。
+   */
+  commitAudio?: () => void
   /** 用户在语音会话底部直接键入的文字。 */
   sendText: (text: string) => void
   /**

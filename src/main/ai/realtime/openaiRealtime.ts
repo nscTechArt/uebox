@@ -426,6 +426,20 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
       // 服务端 VAD 开着，所以不用手动 commit —— 它自己判断一句话说完了没有
       send({ type: 'input_audio_buffer.append', audio: base64 })
     },
+    /**
+     * 「我说完了，别等静音了，现在就转写。」
+     *
+     * 只有听写那一路用得上：用户松开热键这个动作本身已经把「说完了」表达得
+     * 清清楚楚，再让服务端空等 900 毫秒的静音（`OPENAI_DICTATION_TURN_DETECTION`）
+     * 纯属让人干等 —— 而这一路松手之后就直接提交给 Agent，那 900 毫秒全在
+     * 用户眼皮底下。
+     *
+     * 通话那一路**不该调**：那边靠服务端 VAD 分轮，手动 commit 会把一句
+     * 还没说完的话提前截断。
+     */
+    commitAudio() {
+      send({ type: 'input_audio_buffer.commit' })
+    },
     sendText(text) {
       send(buildOpenAiConversationItem({ role: 'user', text }))
       responses.request()

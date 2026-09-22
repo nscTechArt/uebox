@@ -433,13 +433,61 @@ class SpotlightWindowManager {
   }
 
   /**
+   * 按住不放时，两次热键回调最多隔这么久还算「同一次按住」。
+   *
+   * Windows 的键盘自动重复实测约 31ms 一次（2026-09-22 真机日志），首次重复前
+   * 还有 250~500ms 的启动延迟，而那个延迟用户能在系统里改。所以阈值按**最慢**的
+   * 那一档给足：600ms 内又来了一次就当还按着。
+   *
+   * 给小了的代价是把一次按住误判成两次按下 —— 录音会在用户说话中途重启。
+   * 给大了的代价只是松手后多等一会儿才收尾，而收尾主要靠渲染层的 keyup，
+   * 这个阈值只是收不到 keyup 时的兜底。两边不对称，所以宁可给大。
+   */
+  private static readonly HOLD_REPEAT_WINDOW_MS = 600
+
+  private lastDictateFireAt = 0
+
+  /**
    * 语音热键唤起：弹出窗口并直接进听写态。
    *
-   * **不是 `toggle`。** 已经开着的时候再按一次不该把窗口关掉 —— 那一下多半是
+   * ## 自动重复必须在这里压掉
+   *
+   * 按住 Alt+Q 不放，Windows 的键盘自动重复会让 `globalShortcut` 每 31 毫秒
+   * 回调一次 —— 而「按住说话」的整个前提就是用户会一直按着。不压的话每秒 31 次
+   * `show()`，每次都重发 `spotlight:show`，渲染层每次都把录音推倒重来：
+   * 用户对着一个反复重启的麦克风说话，一个字都留不下。
+   *
+   * 所以只有**第一次**按下才真去开窗口开麦；后面那一串重复只更新时间戳，
+   * 渲染层据此知道「还按着」（`spotlight:hold`）。
+   *
+   * ## 隔开之后再按，才算新的一轮
+   *
+   * **不是 `toggle`。** 已经开着的时候重新按一次不该把窗口关掉 —— 那一下多半是
    * 「刚才没说清，再说一遍」。窗口留着，`spotlight:show` 再发一次，
    * 渲染层据此收掉当前这轮录音重新开始（见 `SpotlightWindow.vue`）。
    */
   showForDictation(): void {
+    const now = Date.now()
+    /*
+     * 「还按着」要同时满足两件事：离上一次触发够近，**而且窗口真的正开着**。
+     *
+     * 只看时间的话有个洞：窗口刚被关掉（用户按了 Esc、或者程序退出中），
+     * 600 毫秒内再按一次热键会被当成「还按着」而整个吞掉 —— 按下去什么都不发生，
+     * 而用户只会以为热键坏了。而真的在按住不放时，窗口必然是开着的。
+     */
+    const alive = Boolean(
+      this.isShowing && this.spotlightWindow && !this.spotlightWindow.isDestroyed()
+    )
+    const held =
+      alive && now - this.lastDictateFireAt < SpotlightWindowManager.HOLD_REPEAT_WINDOW_MS
+    this.lastDictateFireAt = now
+
+    if (held) {
+      // 还按着。窗口和麦克风都已经开着了，这里只报个信号，别碰它们
+      this.spotlightWindow?.webContents.send('spotlight:hold')
+      return
+    }
+
     this.pendingDictate = true
     this.show()
   }
