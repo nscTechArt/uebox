@@ -1192,15 +1192,21 @@ const toolItems = computed(() => {
 /**
  * 面板里显示的推理正文：外部折进来的优先，没有才用过程条目里推出来的那份。
  * 两份同时存在时，外部那份是完整的 reasoning，过程里的只是零星 notify。
+ *
+ * 判空用正则而**不是** `.trim()`：`props.thinking` 是流式增长的，每来一批增量都
+ * 要重算一次这个 computed，而 `.trim()` 每次都复制一整份 —— 一段两万字的推理
+ * 摊下来就是几百 KB/秒的临时字符串。`/\S/` 只扫到第一个非空白字符就停。
  */
-const displayThinking = computed(() => props.thinking?.trim() || currentThinking.value)
+const displayThinking = computed(() =>
+  props.thinking && /\S/.test(props.thinking) ? props.thinking : currentThinking.value
+)
 
 const shouldRenderProcessLog = computed(() => {
   return (
+    // `displayThinking` 兜底就是 `currentThinking`，所以它真时这条已经覆盖了那一支
     !!displayThinking.value ||
     reportItems.value.length > 0 ||
     progressBubbles.value.length > 0 ||
-    !!currentThinking.value ||
     toolItems.value.length > 0
   )
 })
@@ -1252,16 +1258,18 @@ const headerDisplayTitle = computed(() => {
      * 用户看到的是「思考中」底下列着 ue_get_actor 跑完了。收起时这一行也才有信息量。
      * 小窗比主聊天页窄得多，截得更短。
      */
-    const latest = reportItems.value[reportItems.value.length - 1]
-    return latest ? trimReportText(latest.text, 24) : headerTitle.value
+    // 判的是截出来那句话，不是条目在不在：子任务那一路直接往 `reportItems` 里塞
+    // `{ text: lane.title }`，绕开了 `pushReport` 的空串过滤，所以 `latest` 有
+    // 而 `latest.text` 是空串是真会发生的 —— 那时候表头会是一片空白
+    const latest = trimReportText(reportItems.value[reportItems.value.length - 1]?.text ?? '', 24)
+    return latest || headerTitle.value
   }
 
-  const latestReport = reportItems.value[reportItems.value.length - 1]
-  if (latestReport) {
-    return trimReportText(latestReport.text, 72)
-  }
-
-  return headerTitle.value
+  const latestReport = trimReportText(
+    reportItems.value[reportItems.value.length - 1]?.text ?? '',
+    72
+  )
+  return latestReport || headerTitle.value
 })
 
 function updateDuration(): void {

@@ -3308,13 +3308,13 @@ onMounted(() => {
 /* 审批策略与思考程度。挨着模式选择器，但视觉上退一档 —— 它们是模式的
    从属选项，不该和「Chat / Agent」抢注意力。
    两个选择器共用同一套样式：它们在同一行里并排，各写一份迟早会漂移 */
-.approval-selector .mode-trigger,
-.thinking-selector .mode-trigger,
 /* 没有这个锚点，弹窗的 bottom: 100% 会贴到整个输入框上沿，欢迎页直接顶出窗口 */
 .agent-model-selector {
   position: relative;
 }
 
+.approval-selector .mode-trigger,
+.thinking-selector .mode-trigger,
 .agent-model-selector .mode-trigger {
   color: var(--color-text-primary);
 }

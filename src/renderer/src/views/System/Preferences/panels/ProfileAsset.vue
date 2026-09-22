@@ -4,9 +4,10 @@ import AppButton from '@renderer/components/AppButton.vue'
  * 资产库设置组件
  */
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+// PhHardDrives 跟着服务器管理那一块一起注释掉了：模板注释在编译期就被剥掉，
+// 留着这个 import 就是一条 no-unused-vars，而 lint 棘轮只准变小。入口放出来时一起加回来
 import {
   PhCaretRight,
-  PhHardDrives,
   PhInfo,
   PhLightning,
   PhTrash as IconDeleteOrClear
@@ -641,7 +642,10 @@ onUnmounted(() => {
           class="setting-row app-row"
           @click="handleSelectApp(cat.key)"
         >
-          <div class="row-icon">
+          <!-- category-icon 是那块 32x32 的底色方块。上面几组的行图标是裸字形，
+               这一组一行一个文件类型，方块能让眼睛顺着列扫下来 —— 样式一直在，
+               去掉这个类名只会让它变成一条没人引用的死规则 -->
+          <div class="row-icon category-icon">
             <component :is="cat.icon" />
           </div>
           <div class="row-content">
@@ -714,6 +718,13 @@ onUnmounted(() => {
   border-left: none;
   border-right: none;
   font-family: inherit;
+  /*
+   * 左右内边距归零。`<button>` 自带 `padding-inline: 6px`，不清的话这一行标题
+   * 连同它那条下划线会比上面三组的 `<h3>` 往右缩 6 像素 —— 同一页四个分组标题
+   * 三个对齐一个不对齐，比四个都不对齐更显眼。`padding-bottom` 让 `.group-title`
+   * 那条继续管（下划线和文字的间距靠它）
+   */
+  padding: 0 0 var(--space-2);
 
   &:focus-visible {
     outline: 2px solid var(--color-border-focus);
@@ -722,7 +733,7 @@ onUnmounted(() => {
 
   .caret {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--color-text-muted);
     transition: transform var(--motion-fast, 0.15s) var(--easing-standard, ease-in-out);
 
