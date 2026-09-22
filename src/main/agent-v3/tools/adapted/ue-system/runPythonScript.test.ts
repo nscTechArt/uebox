@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { adaptV2Tool } from '../../adaptV2Tool'
 import { createRunPythonScriptTool } from './runPythonScript'
 import { runEditorPython } from '../../../core/editorPython'
+import {
+  lastViewportMove,
+  resetViewportProvenance
+} from '../ue-editor/viewportProvenance'
 
 vi.mock('../../../core/editorPython', () => ({ runEditorPython: vi.fn() }))
 vi.mock('../../builtin/pathBoundary', () => ({ assertScriptAllowed: () => undefined }))
@@ -27,6 +31,7 @@ const errorTextOf = async (input: unknown): Promise<string> => {
 
 beforeEach(() => {
   mockRun.mockReset()
+  resetViewportProvenance()
 })
 
 describe('ue_run_python_script', () => {
@@ -70,6 +75,43 @@ describe('ue_run_python_script', () => {
     const text = await errorTextOf({ script: 'foo()' })
     expect(text).toContain('NameError')
     expect(text).not.toContain('ue_session_health')
+  })
+
+  /**
+   * unreal.Rotator 的位置参数顺序是 (roll, pitch, yaw)，按 (pitch, yaw, roll) 写会静默转错方向。
+   * 真机上 78 个部件因此全摆错 —— 这里必须在发给引擎之前拦下来，一个字都不能执行。
+   */
+  it('unreal.Rotator 用位置参数时拒绝执行，并告诉模型改成关键字', async () => {
+    const text = await errorTextOf({
+      script: 'a = unreal.Rotator(0.0, 90.0, 0.0)'
+    })
+    expect(mockRun).not.toHaveBeenCalled()
+    expect(text).toContain('(roll, pitch, yaw)')
+    expect(text).toContain('unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0)')
+  })
+
+  it('关键字写法照常执行', async () => {
+    mockRun.mockResolvedValue({ success: true, stdout: 'ok' })
+    await adapted().execute('test', { script: 'a = unreal.Rotator(roll=0, pitch=0, yaw=90)' })
+    expect(mockRun).toHaveBeenCalledTimes(1)
+  })
+
+  /** 脚本动了用户的视口相机，ue_screenshot 拍视口时要能说出「最后是这次脚本动的」 */
+  it('脚本调了视口相机 API 就记一笔', async () => {
+    mockRun.mockResolvedValue({ success: true, stdout: 'ok' })
+    await adapted().execute('test', {
+      script: 'ues.set_level_viewport_camera_info(loc, unreal.Rotator(roll=0, pitch=0, yaw=90))'
+    })
+    expect(lastViewportMove()).toMatchObject({
+      tool: 'ue_run_python_script',
+      detail: '脚本里调了 set_level_viewport_camera_info'
+    })
+  })
+
+  it('普通脚本不记视口', async () => {
+    mockRun.mockResolvedValue({ success: true, stdout: 'ok' })
+    await adapted().execute('test', { script: 'print(1)' })
+    expect(lastViewportMove()).toBeNull()
   })
 
   /** 用户自己按的停止，不是引擎卡了 —— 不能冲他喊「请重启编辑器」 */

@@ -359,4 +359,5 @@ export const UE_ROTATION_NOTE = `【旋转约定】UE 的旋转是 (pitch, yaw, 
 - yaw 绕 Z：0 = 朝 +X，90 = 朝 +Y，180 = 朝 -X，-90 = 朝 -Y。
 - roll 绕 X：正值右倾。方向光的 roll 没有意义，保持 0；平面/雾卡片用 roll=±90 立起来。
 不想自己算正负号就别算：方向光给 sun: { elevation, azimuth }，其他东西给 face_direction: { x, y, z }（一个世界方向向量，比如「朝向相机」= 相机位置 - 自己位置），工具替你换成旋转。
-改完看返回体里的「朝向」那一句，它是从引擎回读的旋转算出来的，和你填的没有关系。`
+改完看返回体里的「朝向」那一句，它是从引擎回读的旋转算出来的，和你填的没有关系。
+⚠️ 这个 (pitch, yaw, roll) 顺序**只对这里的 JSON 参数成立**。UE Python 里 unreal.Rotator 的位置参数是 (roll, pitch, yaw)，写 Python 一律用关键字 unreal.Rotator(roll=…, pitch=…, yaw=…)，位置写法 ue_run_python_script 会拒绝。`

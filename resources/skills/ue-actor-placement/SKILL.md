@@ -228,6 +228,13 @@ cameras and scene captures all shoot along +X. The conventions that get people:
 - **yaw:** 0 faces +X, 90 faces +Y, 180 faces -X, -90 faces -Y.
 - **roll:** positive tilts right. It means nothing on a directional light — leave it 0.
   A plane or fog card uses `roll: ±90` to stand upright.
+- **That `(pitch, yaw, roll)` order is for JSON parameters only.** In UE Python,
+  `unreal.Rotator`'s *positional* arguments are `(roll, pitch, yaw)` — it follows
+  `MakeRotator`. `unreal.Rotator(0, 90, 0)` gives you pitch=90, not yaw=90: a 5 m wall
+  lies flat, the viewport camera points at the sky, and nothing errors. Always write
+  `unreal.Rotator(roll=0, pitch=0, yaw=90)`; `ue_run_python_script` refuses the
+  positional form outright. Read placements back with `ue_get_actor`, which translates
+  the rotation into words ("front faces +Y") instead of three bare numbers.
 
 This has actually happened: a sun set to `(pitch 30, yaw 180, roll -135)`, several rounds of
 "the scene looks washed out" spent adjusting fog and exposure, and the user pointing out the

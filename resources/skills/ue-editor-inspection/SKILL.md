@@ -140,7 +140,12 @@ Do **not** fall back to computing camera coordinates and setting them from Pytho
 trap: `unreal.Rotator`'s positional arguments are `(roll, pitch, yaw)`, so passing
 `(pitch, yaw, roll)` silently drops your yaw into the pitch slot and aims the camera at the ground.
 Nothing errors; every step reports success; you only find out by looking at the picture. If you
-genuinely need a custom angle, pass `direction` and `distance` to this tool instead.
+genuinely need a custom angle, pass `direction` and `distance` to this tool instead. If you must
+script the camera, write `unreal.Rotator(roll=…, pitch=…, yaw=…)` with keywords —
+`ue_run_python_script` refuses the positional form. Whenever a tool of yours moved the viewport,
+the next `ue_screenshot` of it says so ("the viewport was last moved 12 s ago by
+`ue_run_python_script`"): a sky-only frame after that line means your camera call, not a missing
+scene.
 
 `direction` is `current` (default), `horizontal`, or `top`. There is deliberately no
 `front`/`left`/`right` — the engine does not know which face of a prop is its front, so those would

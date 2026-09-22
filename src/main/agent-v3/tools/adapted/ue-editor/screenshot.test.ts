@@ -50,6 +50,7 @@ vi.mock('child_process', () => ({
 
 import { runWithEditorScreenshotScope } from '../../../core/editorScreenshotScope'
 import { createScreenshotTool } from './screenshot'
+import { noteViewportMove, resetViewportProvenance } from './viewportProvenance'
 
 type ToolResult = Record<string, unknown>
 type Executable = { execute: (input: unknown) => Promise<ToolResult> }
@@ -73,6 +74,7 @@ beforeEach(() => {
   callRequest.mockReset()
   getConnectionCount.mockReset()
   getConnectionCount.mockReturnValue(1)
+  resetViewportProvenance()
 })
 
 describe('拍的是哪个世界', () => {
@@ -295,6 +297,38 @@ describe('机位来源', () => {
 
     expect(result).not.toHaveProperty('camera_source')
     expect(String(result.message)).not.toContain('兜底机位')
+  })
+
+  /**
+   * 真机上模型用 Python 把视口写成朝天，拍回一片云后怀疑的是场景而不是自己那行代码。
+   * 拍视口那一帧要说清「这个视口最后是哪次调用动的」，把怀疑对象指回去。
+   */
+  it('拍视口那一帧说清视口最后是谁动的', async () => {
+    noteViewportMove('ue_run_python_script', '脚本里调了 set_level_viewport_camera_info')
+    callRequest.mockResolvedValue({
+      ...EDITOR_SHOT,
+      camera_source: 'viewport',
+      camera_rotation: { pitch: 90, yaw: 0, roll: 0 }
+    })
+
+    const result = await run({})
+
+    expect(String(result.message)).toContain('仰视 90°')
+    expect(String(result.message)).toContain('视口最后一次是')
+    expect(String(result.message)).toContain('ue_run_python_script')
+  })
+
+  it('没人动过视口就不提', async () => {
+    callRequest.mockResolvedValue({ ...EDITOR_SHOT, camera_source: 'viewport' })
+    const result = await run({})
+    expect(String(result.message)).not.toContain('视口最后一次是')
+  })
+
+  it('兜底机位不是视口，不说视口是谁动的', async () => {
+    noteViewportMove('ue_focus_viewport', '对准 BP_Chair')
+    callRequest.mockResolvedValue({ ...EDITOR_SHOT, camera_source: 'fallback' })
+    const result = await run({})
+    expect(String(result.message)).not.toContain('视口最后一次是')
   })
 })
 

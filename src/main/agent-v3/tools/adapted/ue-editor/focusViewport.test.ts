@@ -26,6 +26,7 @@ vi.mock('../../../core/projectTargetContext', () => ({
 }))
 
 import { createFocusViewportTool, summarizeFocus } from './focusViewport'
+import { lastViewportMove, resetViewportProvenance } from './viewportProvenance'
 
 type ToolResult = Record<string, unknown>
 type Executable = { execute: (input: unknown) => Promise<ToolResult> }
@@ -53,6 +54,7 @@ const okResponse = (extra: Record<string, unknown> = {}): Record<string, unknown
 beforeEach(() => {
   callRequest.mockReset()
   getConnectionCount.mockReturnValue(1)
+  resetViewportProvenance()
 })
 
 describe('请求构造', () => {
@@ -119,6 +121,20 @@ describe('把「看着成功其实没用」的情况说出来', () => {
     const result = await focus({ names: ['BP_Chair'] })
 
     expect(String(result.message)).toContain('没变')
+    // 没动就不记 —— 否则截图会说「视口最后是它动的」，而它什么都没干
+    expect(lastViewportMove()).toBeNull()
+  })
+
+  /** 动了视口就记一笔，ue_screenshot 拍视口时会说「最后是 ue_focus_viewport 对准 BP_Chair」 */
+  it('动了视口就记下是谁、对准了什么', async () => {
+    callRequest.mockResolvedValue(okResponse({ region: 'bottom' }))
+
+    await focus({ names: ['BP_Chair'], region: 'bottom' })
+
+    expect(lastViewportMove()).toMatchObject({
+      tool: 'ue_focus_viewport',
+      detail: '对准 BP_Chair 的 bottom'
+    })
   })
 
   it('机位跑到几公里外 —— 包围盒被巨大组件撑开的典型症状', async () => {

@@ -45,6 +45,7 @@ import { serviceManager } from '../../../../services'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { describeCameraAim } from '../../ueOrientation'
+import { noteViewportMove } from './viewportProvenance'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
 import {
   describeUnmatchedTargets,
@@ -322,6 +323,14 @@ region 不是 whole 时相机会自动**水平平视**（不再沿用视口原�
             code: raw?.__rpc?.code ?? raw?.code,
             details: raw?.details
           }
+        }
+
+        // 视口被我们挪了，记一笔 —— ue_screenshot 拍视口时会说「最后是谁动的」
+        if (response.moved !== false) {
+          const who = (response.focused ?? []).join('、') || '目标'
+          const part =
+            response.region && response.region !== 'whole' ? ` 的 ${response.region}` : ''
+          noteViewportMove('ue_focus_viewport', `对准 ${who}${part}`)
         }
 
         return {

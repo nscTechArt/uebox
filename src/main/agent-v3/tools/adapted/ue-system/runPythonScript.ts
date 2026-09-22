@@ -10,6 +10,14 @@ import { z } from 'zod'
 
 import { runEditorPython } from '../../../core/editorPython'
 import { assertScriptAllowed } from '../../builtin/pathBoundary'
+import {
+  describePositionalRotatorRefusal,
+  findPositionalRotatorCalls
+} from './pythonRotatorGuard'
+import {
+  noteViewportMove,
+  viewportCameraApiInScript
+} from '../ue-editor/viewportProvenance'
 
 const RunPythonScriptParamsSchema = z.object({
   script: z.string().describe('要执行的 Python 脚本内容'),
@@ -42,6 +50,11 @@ export function createRunPythonScriptTool(): V2Tool {
 \`print(unreal.EditorAssetLibrary.rename_asset.__doc__)\`，一次调用拿到签名，
 比改一个参数试一次快得多。
 
+【旋转一律写关键字】\`unreal.Rotator\` 的**位置参数顺序是 (roll, pitch, yaw)**，跟 JSON / 蓝图的
+(pitch, yaw, roll) 相反。\`unreal.Rotator(0, 90, 0)\` 得到的是 pitch=90 不是 yaw=90 —— 墙横着躺、
+镜头朝天，引擎不报任何错。所以写 \`unreal.Rotator(roll=0, pitch=0, yaw=90)\`；带位置参数的写法
+这个工具会直接拒绝执行。摆完东西用 ue_get_actor 回读，它会把旋转翻成「正面朝哪」的人话。
+
 【注意】：脚本在编辑器主线程上同步执行，最多等待 5 分钟。超时或停止等待不代表 UE 已停止执行，先回读确认，不能直接重复修改。`,
 
     inputSchema: RunPythonScriptParamsSchema,
@@ -54,6 +67,20 @@ export function createRunPythonScriptTool(): V2Tool {
       // 边界漏一个出口就不成其为边界，而这是除 shell 之外最宽的那个。
       const denied = assertScriptAllowed(input.script)
       if (denied) return { success: false, error: denied }
+
+      // unreal.Rotator(a, b, c) 的位置参数顺序是 (roll, pitch, yaw)，按直觉传会静默转错方向。
+      // 真机上 78 个部件因此全摆错。这里拦下来让模型改成关键字，比事后回读便宜得多。
+      const rotatorHits = findPositionalRotatorCalls(input.script)
+      if (rotatorHits.length > 0) {
+        return { success: false, error: describePositionalRotatorRefusal(rotatorHits) }
+      }
+
+      // 脚本要动关卡视口相机 —— 先记一笔，ue_screenshot 拍视口时会把它说出来。
+      // 跑成没跑成都记：「跑成了但改坏了」正是要抓的情形
+      const cameraApi = viewportCameraApiInScript(input.script)
+      if (cameraApi) {
+        noteViewportMove('ue_run_python_script', `脚本里调了 ${cameraApi}`)
+      }
 
       const result = await runEditorPython(
         input.script,

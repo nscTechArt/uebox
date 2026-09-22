@@ -72,6 +72,7 @@ import {
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { compressForContext } from '../../contextImage'
 import { describeCameraAim } from '../../ueOrientation'
+import { describeViewportProvenance } from './viewportProvenance'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
 
 // ============================================================================
@@ -234,6 +235,9 @@ function describeCamera(response: ScreenshotResponse): string {
         : ''
   const aimLine = aim ? `\n这一帧的机位${source ? `（${source}）` : ''}：${aim}。` : ''
 
+  // 拍的是用户视口时，说清这个视口最后一次是被哪次调用挪的。真机上模型用 Python
+  // 把镜头写成朝天，拍回一片云后怀疑的是场景而不是自己那行代码
+  if (response.camera_source === 'viewport') return aimLine + describeViewportProvenance()
   if (response.camera_source !== 'fallback') return aimLine
   const at = response.camera_location
   const where = at ? `（${at.x}, ${at.y}, ${at.z}）厘米` : '一个固定的兜底位置'
