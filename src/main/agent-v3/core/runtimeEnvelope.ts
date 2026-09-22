@@ -114,7 +114,7 @@ const WEEKDAYS = Object.freeze([
 const pad = (value: number): string => String(value).padStart(2, '0')
 
 /**
- * 本机挂钟时间，写成模型不用再算一遍的样子：`2026-09-22 01:54:03 UTC+08:00 (Monday)`。
+ * 本机挂钟时间，写成模型不用再算一遍的样子：`2026-09-22 01:54:03 UTC+08:00 (Tuesday)`。
  *
  * 三件东西缺一不可，每一件都对应一种真机上见过的错：
  * - **时区偏移**。没有它，模型只能猜用户在哪个时区，而它猜的通常是 UTC。

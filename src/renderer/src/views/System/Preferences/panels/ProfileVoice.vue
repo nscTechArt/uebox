@@ -10,10 +10,7 @@ import AppSwitch from '@renderer/components/AppSwitch.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
-import {
-  REALTIME_ECHO_GUARDS,
-  type RealtimeEchoGuard
-} from '@core/shared/realtimeEchoGuard'
+import { REALTIME_ECHO_GUARDS, type RealtimeEchoGuard } from '@core/shared/realtimeEchoGuard'
 
 const aiConfigStore = useAIConfigStore()
 const { t } = useI18n()
