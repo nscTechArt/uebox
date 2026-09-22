@@ -462,7 +462,10 @@ describe('ModelManagerModal 的树按用途分组', () => {
       'aiProvider.field.kinds.chat',
       'aiProvider.field.kinds.image'
     ])
-    expect(wrapper.findAll('.tree-provider').map((n) => n.text())).toEqual(['DEEPSEEK', 'SEEDREAM'])
+    expect(wrapper.findAll('.tree-provider-name').map((n) => n.text())).toEqual([
+      'DEEPSEEK',
+      'SEEDREAM'
+    ])
   })
 
   it('组的顺序按用途固定，不看 Provider 数组里谁先谁后', () => {
@@ -506,13 +509,16 @@ describe('ModelManagerModal 的树按用途分组', () => {
     const imageTitle = wrapper.findAll('.tree-group-title')[1]
 
     await imageTitle.trigger('click')
-    expect(wrapper.findAll('.tree-provider').map((n) => n.text())).toEqual(['DEEPSEEK'])
+    expect(wrapper.findAll('.tree-provider-name').map((n) => n.text())).toEqual(['DEEPSEEK'])
     expect(imageTitle.attributes('aria-expanded')).toBe('false')
     // 折叠只影响这一组，标题本身还在，才有地方再点开
     expect(groupTitles(wrapper)).toHaveLength(2)
 
     await imageTitle.trigger('click')
-    expect(wrapper.findAll('.tree-provider').map((n) => n.text())).toEqual(['DEEPSEEK', 'SEEDREAM'])
+    expect(wrapper.findAll('.tree-provider-name').map((n) => n.text())).toEqual([
+      'DEEPSEEK',
+      'SEEDREAM'
+    ])
     expect(imageTitle.attributes('aria-expanded')).toBe('true')
   })
 
@@ -531,7 +537,55 @@ describe('ModelManagerModal 的树按用途分组', () => {
     selectedId.value = 'seedream'
     await flushPromises()
 
-    expect(wrapper.findAll('.tree-provider').map((n) => n.text())).toEqual(['DEEPSEEK', 'SEEDREAM'])
+    expect(wrapper.findAll('.tree-provider-name').map((n) => n.text())).toEqual([
+      'DEEPSEEK',
+      'SEEDREAM'
+    ])
+  })
+
+  it('搜服务商名：不匹配的整条连同空掉的组一起收起来', async () => {
+    const wrapper = mountManager(
+      makeState([], {
+        providers: computed(() => [providerOf('deepseek', 'chat'), providerOf('seedream', 'image')])
+      })
+    )
+
+    await wrapper.get('.tree-search').setValue('seed')
+
+    expect(wrapper.findAll('.tree-provider-name').map((n) => n.text())).toEqual(['SEEDREAM'])
+    expect(groupTitles(wrapper)).toEqual(['aiProvider.field.kinds.image'])
+  })
+
+  /** 想找 Kimi K3 的人未必记得它挂在哪条服务商底下 */
+  it('搜模型名也能把它所属的那条服务商捞出来', async () => {
+    const withModel = {
+      ...providerOf('kimi-code', 'chat'),
+      models: [{ id: 'k3-256k', displayName: 'Kimi K3-256K' }]
+    } as ProviderView
+    const wrapper = mountManager(
+      makeState([], {
+        providers: computed(() => [providerOf('deepseek', 'chat'), withModel])
+      })
+    )
+
+    await wrapper.get('.tree-search').setValue('k3')
+
+    expect(wrapper.findAll('.tree-provider-name').map((n) => n.text())).toEqual(['KIMI-CODE'])
+  })
+
+  /** 命中的东西藏在折叠着的组里，等于告诉用户「没找到」 */
+  it('搜索时折叠的组一律展开', async () => {
+    const wrapper = mountManager(
+      makeState([], {
+        providers: computed(() => [providerOf('deepseek', 'chat'), providerOf('seedream', 'image')])
+      })
+    )
+
+    await wrapper.findAll('.tree-group-title')[1].trigger('click')
+    expect(wrapper.findAll('.tree-provider')).toHaveLength(1)
+
+    await wrapper.get('.tree-search').setValue('seed')
+    expect(wrapper.findAll('.tree-provider-name').map((n) => n.text())).toEqual(['SEEDREAM'])
   })
 
   it('新建中的草稿归到它用途对应的组里，那一组原本没有 Provider 也会出现', () => {
@@ -550,7 +604,7 @@ describe('ModelManagerModal 的树按用途分组', () => {
     // 新建那条在「生图」组里，计数也算上它
     expect(wrapper.findAll('.tree-group-count').map((n) => n.text())).toEqual(['1', '1'])
     const imageGroup = wrapper.findAll('.tree-group')[1]
-    expect(imageGroup.find('.tree-provider.active').text()).toBe('P1')
+    expect(imageGroup.find('.tree-provider.active .tree-provider-name').text()).toBe('P1')
   })
 
   it('新建草稿在表单里换了用途，树上跟着搬到新的组', async () => {

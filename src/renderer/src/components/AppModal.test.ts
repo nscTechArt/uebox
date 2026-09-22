@@ -96,6 +96,28 @@ describe('AppModal', () => {
   })
 
   /**
+   * 标题原来只认 `title` prop：`v-if="title"` 把 `<h2>` 整个挡掉，连里面的
+   * `#title` 插槽一起不渲染。于是自己拼标题的弹窗（「模型与服务商」那个）
+   * 头部只剩一个关闭叉，而且叉子滑到了最左边 —— 它成了这一行唯一的 flex 子元素。
+   */
+  it('用 #title 插槽拼的标题照样渲染，并且挂得上 aria-labelledby', () => {
+    mountModal({ title: undefined }, { title: '<span>模型与服务商</span>' })
+
+    const labelledby = panel()?.getAttribute('aria-labelledby')
+    expect(labelledby).toBeTruthy()
+    expect(document.getElementById(labelledby as string)?.textContent?.trim()).toBe('模型与服务商')
+  })
+
+  /** 叉子靠右是 `.app-modal__close { margin-left: auto }` 管的；scoped 样式进不了 jsdom，测不到 */
+  it('标题和插槽都没有时，头部只剩关闭叉，也不挂 aria-labelledby', () => {
+    mountModal({ title: undefined })
+
+    expect(q('.app-modal__title')).toBeNull()
+    expect(q('.app-modal__close')).not.toBeNull()
+    expect(panel()?.getAttribute('aria-labelledby')).toBeNull()
+  })
+
+  /**
    * 背景不锁的话，弹窗开着时滚鼠标滚的是后面的页面，
    * 关掉之后发现自己已经滚到了别的地方。
    */

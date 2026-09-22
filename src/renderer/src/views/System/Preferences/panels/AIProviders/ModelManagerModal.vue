@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppButton from '@renderer/components/AppButton.vue'
 import AppModal from '@renderer/components/AppModal.vue'
+import { PhCaretRight } from '@phosphor-icons/vue'
 /**
  * 模型管理弹窗 —— **只有这一层**。
  *
@@ -23,6 +24,7 @@ import ProviderFields from './ProviderFields.vue'
 import ModelFields from './ModelFields.vue'
 import { Z_CONFIRM, Z_MANAGER } from './modalLayers'
 import { describeProbeFailure } from './probeCopy'
+import { logoFallbackText, providerLogoUrl } from './providerLogos'
 
 const props = defineProps<{ open: boolean; state: AiProvidersState }>()
 const emit = defineEmits<{ 'update:open': [value: boolean]; addProvider: [] }>()
@@ -105,9 +107,28 @@ async function savePending(): Promise<void> {
  * 新建中的那条也归到它的用途组里（`draft.kind` 改了会跟着搬），否则它孤零零
  * 挂在最底下，用户在表单里选了「生图」却看见它待在「对话」下面。
  */
+const keyword = ref('')
+
+/**
+ * 搜索也搜模型名：想找 Kimi K3 的人未必记得它挂在「Kimi Code（会员）」下面。
+ * 新建中的那条永远留着 —— 它还没名字可搜，搜着搜着让它消失等于弄丢用户正在填的东西。
+ */
+function matchesKeyword(provider: ProviderView): boolean {
+  const needle = keyword.value.trim().toLowerCase()
+  if (!needle) return true
+  return (
+    provider.displayName.toLowerCase().includes(needle) ||
+    provider.id.toLowerCase().includes(needle) ||
+    provider.models.some((model) =>
+      `${model.id} ${model.displayName || ''}`.toLowerCase().includes(needle)
+    )
+  )
+}
+
 const groups = computed(() => {
   const byKind = new Map<ProviderKind, ProviderView[]>()
   for (const provider of providers.value) {
+    if (!matchesKeyword(provider)) continue
     byKind.set(provider.kind, [...(byKind.get(provider.kind) ?? []), provider])
   }
   const newKind = isNew.value && draft.value ? draft.value.kind : null
@@ -131,7 +152,9 @@ function toggleGroup(kind: ProviderKind): void {
   collapsed.value = next
 }
 
+/** 搜索时一律展开：命中的东西藏在折叠着的组里，等于告诉用户「没找到」 */
 function isCollapsed(kind: ProviderKind): boolean {
+  if (keyword.value.trim()) return false
   return collapsed.value.has(kind)
 }
 
@@ -331,6 +354,13 @@ function addProvider(): void {
     <div class="manager">
       <!-- 左：Provider → 模型 的树。选中什么右边就换成什么 -->
       <nav class="tree">
+        <input
+          v-model="keyword"
+          type="text"
+          class="tree-search"
+          :placeholder="$t('aiProvider.list.searchPlaceholder')"
+        />
+
         <div class="tree-scroll">
           <section v-for="group in groups" :key="group.kind" class="tree-group">
             <button
@@ -339,7 +369,7 @@ function addProvider(): void {
               :aria-expanded="!isCollapsed(group.kind)"
               @click="toggleGroup(group.kind)"
             >
-              <span class="tree-caret" :class="{ open: !isCollapsed(group.kind) }">›</span>
+              <PhCaretRight class="tree-caret" :class="{ open: !isCollapsed(group.kind) }" />
               <span class="tree-group-name">{{ $t(`aiProvider.field.kinds.${group.kind}`) }}</span>
               <span class="tree-group-count">{{
                 group.providers.length + (group.hasNew ? 1 : 0)
@@ -354,6 +384,15 @@ function addProvider(): void {
                   :class="{ active: selectedId === provider.id && !isNew }"
                   @click="pickProvider(provider.id)"
                 >
+                  <span class="tree-logo">
+                    <img
+                      v-if="providerLogoUrl(provider.id)"
+                      :src="providerLogoUrl(provider.id)"
+                      alt=""
+                      aria-hidden="true"
+                    />
+                    <template v-else>{{ logoFallbackText(provider.displayName) }}</template>
+                  </span>
                   <span class="tree-provider-name">{{ provider.displayName }}</span>
                   <!-- 改过还没存的那条带个点，否则「切走会丢东西」只有拦截弹窗才说得出来 -->
                   <span
@@ -385,7 +424,18 @@ function addProvider(): void {
               <!-- 新建中的那条还不在 providers 里，单独渲染一次，放在它用途对应的组里 -->
               <template v-if="group.hasNew && draft">
                 <button type="button" class="tree-provider active" @click="focus = 'provider'">
-                  {{ draft.displayName || draft.id || $t('aiProvider.editor.addTitle') }}
+                  <span class="tree-logo">
+                    <img
+                      v-if="draft.id && providerLogoUrl(draft.id)"
+                      :src="providerLogoUrl(draft.id)"
+                      alt=""
+                      aria-hidden="true"
+                    />
+                    <template v-else>{{ logoFallbackText(draft.displayName || '?') }}</template>
+                  </span>
+                  <span class="tree-provider-name">
+                    {{ draft.displayName || draft.id || $t('aiProvider.editor.addTitle') }}
+                  </span>
                 </button>
                 <button
                   v-for="(model, index) in draft.models"
@@ -514,9 +564,14 @@ function addProvider(): void {
  *
  * 所以只留一个 vh 值。两列各自内部滚动，内容多少都不影响外框。
  */
+/*
+ * 左列 280 而不是 220：220 的时候「火山方舟 Seedream（豆包）」这种名字全靠
+ * 省略号收尾，同一个组里三条都截在「火山方舟 Seed…」，根本分不出谁是谁。
+ * 右列少掉的 60px 没人心疼 —— 那边的表单本来就一路空到右边缘。
+ */
 .manager {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 280px 1fr;
   height: 70vh;
 }
 
@@ -528,11 +583,29 @@ function addProvider(): void {
   border-right: 1px solid var(--color-border);
 }
 
+/* 左内边距别留 0：留 0 的话整棵树贴死弹窗边，组标题 hover 时那块底色直接怼到边缘上 */
 .tree-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 8px 12px 0;
+  padding: 4px 8px 12px;
+}
+
+.tree-search {
+  flex-shrink: 0;
+  margin: 12px 8px 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-bg-sunken);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.tree-search:focus {
+  border-color: var(--color-accent-border);
 }
 
 /* 组与组之间留一点空，标题才不会看起来像上一组的最后一条 */
@@ -540,12 +613,19 @@ function addProvider(): void {
   margin-top: 8px;
 }
 
+/*
+ * 组标题贴最左，条目往里缩一级 —— 层级靠**位置**表达。
+ *
+ * 之前组标题 `padding-left: 0` 加上 caret 10px + gap 4px，组名正好从 14px 开始；
+ * 而条目的 `padding-left` 也是 14px。两级标题左边缘精确对齐在同一条线上，
+ * 整列就塌成了一串没有骨架的字，只剩字号和颜色在交替闪。
+ */
 .tree-group-title {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   width: 100%;
-  padding: 4px 0px;
+  padding: 5px 4px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -563,11 +643,10 @@ function addProvider(): void {
   color: var(--color-text-secondary);
 }
 
+/* 原来是个 `›` 字符转 90°，瘦得看不出折没折起来，得盯着找 */
 .tree-caret {
-  display: inline-block;
-  width: 10px;
-  font-size: 13px;
-  line-height: 1;
+  flex-shrink: 0;
+  font-size: 12px;
   transition: transform 0.15s ease-in-out;
 }
 
@@ -592,9 +671,9 @@ function addProvider(): void {
 .tree-provider {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 14px;
+  padding: 4px 8px 4px 24px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -610,6 +689,42 @@ function addProvider(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * 圆形的品牌标。
+ *
+ * 这一列原来是纯文字：二十多条长短不一的中文名叠在一起，找一家只能逐行读。
+ * 图标是一眼能认的那一层，圆底是为了把各家宽高比差得很远的字形（方的 OpenAI、
+ * 扁的 Groq、细长的 llama.cpp）统一到同一个视觉重量上。
+ */
+.tree-logo {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-bg-sunken);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tree-logo img {
+  width: 12px;
+  height: 12px;
+  object-fit: contain;
+  /* 各家的 svg 是单色字形，按当前明暗主题校成黑 / 白 */
+  filter: brightness(0);
+}
+
+/* 别写成 `:global([data-theme='dark']) .tree-logo img` —— scoped 块里 Vue 会把
+   `:global(...)` 后面的部分丢掉，编译出来是光秃秃的 `[data-theme='dark']`，
+   也就是 <html> 自己，整个应用会被 invert 刷白。祖先选择器直接写就行。 */
+[data-theme='dark'] .tree-logo img {
+  filter: brightness(0) invert(1);
 }
 
 .tree-dirty {
@@ -628,13 +743,13 @@ function addProvider(): void {
   background: var(--color-bg-selected);
 }
 
-/* 模型缩进一级，一眼看得出从属关系 */
+/* 模型再缩一级，对齐到它所属那条服务商的名字上（24 缩进 + 20 图标 + 8 间隙） */
 .tree-model {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 6px 10px 6px 24px;
+  padding: 3px 8px 3px 52px;
   border: none;
   border-radius: 8px;
   background: transparent;

@@ -19,6 +19,7 @@ import AppSegmented from '@renderer/components/AppSegmented.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { CatalogEntry } from '@core/shared/aiProvider'
 import { Z_CATALOG } from './modalLayers'
+import { catalogLogoUrl } from './providerLogos'
 import {
   accessOf,
   matchesKeyword,
@@ -29,22 +30,9 @@ import {
   type TabKey
 } from './providerCatalogSections'
 
-/**
- * 品牌图标。
- *
- * eager + query=url 让打包器把 39 个 svg 收进产物并给出最终地址；
- * 不能用运行时拼路径 —— 那样打包后会 404。
- */
-const LOGO_URLS = import.meta.glob('@renderer/assets/provider-logos/*.svg', {
-  eager: true,
-  query: '?url',
-  import: 'default'
-}) as Record<string, string>
-
 function logoFor(entry: CatalogEntry): string | undefined {
   if (!entry.hasLogo) return undefined
-  const key = Object.keys(LOGO_URLS).find((path) => path.endsWith(`/${entry.id}.svg`))
-  return key ? LOGO_URLS[key] : undefined
+  return catalogLogoUrl(entry.id)
 }
 
 const props = defineProps<{

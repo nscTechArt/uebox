@@ -20,7 +20,16 @@
  * 底色 `--color-bg-raised`、标题 `--color-text-primary`、头尾分隔线 `--color-border`
  * ——和原来 `antd-override.css` 里给 `.ant-modal-*` 的那几条一致。
  */
-import { computed, nextTick, onBeforeUnmount, ref, useId, watch, type CSSProperties } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  useId,
+  useSlots,
+  watch,
+  type CSSProperties
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppButton from './AppButton.vue'
@@ -87,6 +96,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const slots = useSlots()
+
+/** 标题可以来自 `title` prop，也可以来自 `#title` 插槽 —— 两条路都要认 */
+const hasTitle = computed(() => Boolean(props.title || slots.title))
 
 const panelRef = ref<HTMLElement | null>(null)
 const titleId = `app-modal-title-${useId()}`
@@ -220,12 +234,18 @@ onBeforeUnmount(() => {
           class="app-modal__panel"
           role="dialog"
           aria-modal="true"
-          :aria-labelledby="title ? titleId : undefined"
+          :aria-labelledby="hasTitle ? titleId : undefined"
           tabindex="-1"
           :style="{ width: panelWidth }"
         >
-          <header v-if="title || closable" class="app-modal__header">
-            <h2 v-if="title" :id="titleId" class="app-modal__title">
+          <header v-if="hasTitle || closable" class="app-modal__header">
+            <!--
+              条件是「prop 或者插槽」，不能只看 prop。只看 prop 的话，用
+              `<template #title>` 自己拼标题的弹窗会**整个标题不见**（插槽根本没被
+              渲染），头部只剩一个关闭叉——而且叉子会滑到最左边，因为它成了这一行
+              里唯一的 flex 子元素。「模型与服务商」那个弹窗就是这么丢了标题的。
+            -->
+            <h2 v-if="hasTitle" :id="titleId" class="app-modal__title">
               <slot name="title">{{ title }}</slot>
             </h2>
             <button
@@ -332,8 +352,11 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
+/* margin-left: auto 是给「没有标题、只有一个叉」的弹窗兜底的：
+   没有它，叉子会落在这一行的最左边（唯一的 flex 子元素） */
 .app-modal__close {
   flex: none;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;

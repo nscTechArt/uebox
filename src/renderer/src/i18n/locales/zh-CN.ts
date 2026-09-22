@@ -393,6 +393,8 @@ export default {
       modelCount: '{count} 个模型',
       empty: '还没有服务商',
       add: '+ 添加服务商',
+      // 也搜模型名：想找 Kimi K3 的人未必记得它挂在「Kimi Code（会员）」下面
+      searchPlaceholder: '搜索服务商或模型',
       // 密钥没配好是最常见的故障，而它在列表上完全看不出来
       keyReady: '密钥已配置',
       keyMissing: '缺少密钥',
@@ -616,9 +618,6 @@ export default {
       unset: '未设置',
       // 行内只留「选之前要知道的」，长文收进 More（一个 ? 图标的 tooltip）
       moreLabel: '查看详细说明',
-      // 可选能力默认折叠。配过的那几个会留在外面，所以数字是「还折着几个」而不是总数
-      expand: '更多能力（{count}）',
-      collapse: '收起',
       chat: '对话',
       chatDesc: '助手与各处聊天窗口的默认模型。',
       agent: 'Agent',
