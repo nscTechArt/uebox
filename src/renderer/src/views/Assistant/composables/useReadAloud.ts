@@ -4,6 +4,9 @@ import { speechAPI } from '@renderer/api/speech'
 import { aiProviderAPI } from '@renderer/api/aiProvider'
 import { message } from '@renderer/utils/messageManager'
 import { splitSpeechText, type SpeechAudio } from '@core/shared/speech'
+import type { SpeechBriefingStyle } from '@core/shared/speechBriefing'
+import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
+import { briefForSpeech } from './speechBriefing'
 import { speechText } from './speechText'
 import { SpeechPcmPlayer } from './speechPcmPlayer'
 import { speechCache } from './speechCache'
@@ -16,6 +19,11 @@ const changingPlayback = ref(false)
 let currentRun: symbol | null = null
 let requestId: string | null = null
 let audio: SpeechPcmPlayer | null = null
+/*
+ * 「压缩没成、改念原文」这句提示一个窗口只说一次。它多半意味着轻量模型没绑，
+ * 那是要用户去设置里改一次的事，不是每次朗读都要念叨的事。
+ */
+let briefingFallbackWarned = false
 
 /** 掐掉当前这一段朗读，不管是哪条气泡起的头。接通语音时要用（见 `voiceCallState`） */
 export function stopReadAloud(): void {
@@ -63,7 +71,15 @@ export function useSpeechPlayback(): {
   }
 }
 
-export function useReadAloud(messageId?: () => string): {
+/**
+ * @param messageId 这条朗读的主人（消息 id），同一条回复重挂载后还能控制它的播放
+ * @param briefingStyle 播报风格此刻的值。默认读本窗口的设置 store；小窗那份 store
+ *   是启动时抄的旧账，它得自己从 localStorage 读新鲜的递进来（见 `miniVoiceAutoPlay`）
+ */
+export function useReadAloud(
+  messageId?: () => string,
+  briefingStyle?: () => SpeechBriefingStyle
+): {
   active: ComputedRef<boolean>
   loading: ComputedRef<boolean>
   label: ComputedRef<string>
@@ -74,6 +90,8 @@ export function useReadAloud(messageId?: () => string): {
   const fallbackOwner = Symbol('read-aloud')
   const owner = computed(() => messageId?.() ?? fallbackOwner)
   const { t } = useI18n()
+  const aiConfigStore = useAIConfigStore()
+  const style = briefingStyle ?? ((): SpeechBriefingStyle => aiConfigStore.voiceBriefingStyle)
   const active = computed(() => activeOwner.value === owner.value)
   const loading = computed(() => active.value && generating.value)
   const label = computed(() =>
@@ -90,9 +108,8 @@ export function useReadAloud(messageId?: () => string): {
       return
     }
     stopReading()
-    const plainText = speechText(text)
-    const chunks = splitSpeechText(plainText)
-    if (!chunks.length) {
+    const plain = speechText(text)
+    if (!splitSpeechText(plain).length) {
       message.info(t('assistant.readAloud.empty'))
       return
     }
@@ -105,6 +122,22 @@ export function useReadAloud(messageId?: () => string): {
       const player = new SpeechPcmPlayer()
       audio = player
       await player.ready
+      /*
+       * 先压再合成。压是要等模型的，这段时间按钮显示「正在合成」，用户点一下照样
+       * 能掐掉 —— 掐掉后 run 已经换了，下面的检查会让这次静静退出。
+       * 压坏了、压出来念不出声，`briefForSpeech` 自己会退回原文。
+       */
+      const briefed = await briefForSpeech(text, style(), {
+        plainText: plain,
+        onFallback: (reason) => {
+          if (reason !== 'error' || briefingFallbackWarned) return
+          briefingFallbackWarned = true
+          message.warning(t('assistant.readAloud.briefingFallback'))
+        }
+      })
+      if (currentRun !== run) return
+      const plainText = briefed === text ? plain : speechText(briefed)
+      const chunks = splitSpeechText(plainText)
       const settings = await aiProviderAPI.getSettings()
       if (currentRun !== run) return
       const binding = settings.roles.tts

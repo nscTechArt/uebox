@@ -7,14 +7,20 @@ import { speechAPI } from '@renderer/api/speech'
 import { message } from '@renderer/utils/messageManager'
 import { aiProviderAPI } from '@renderer/api/aiProvider'
 import { speechCache } from './speechCache'
+import { briefForSpeech } from './speechBriefing'
+import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
 
 vi.mock('@renderer/api/aiProvider', () => ({ aiProviderAPI: { getSettings: vi.fn() } }))
 
 vi.mock('@renderer/api/speech', () => ({
   speechAPI: { synthesize: vi.fn(), cancel: vi.fn(async () => {}) }
 }))
-vi.mock('@renderer/utils/messageManager', () => ({ message: { error: vi.fn(), info: vi.fn() } }))
+vi.mock('@renderer/utils/messageManager', () => ({
+  message: { error: vi.fn(), info: vi.fn(), warning: vi.fn() }
+}))
 vi.mock('./speechPcmPlayer', () => ({ SpeechPcmPlayer: vi.fn() }))
+// 默认原样放行：压不压是 speechBriefing 自己的单测管的事
+vi.mock('./speechBriefing', () => ({ briefForSpeech: vi.fn(async (text: string) => text) }))
 const frame = { base64: 'AAAAAA==', format: 'pcm_s16le' as const, sampleRate: 24000 as const }
 const players: {
   enqueue: ReturnType<typeof vi.fn>
@@ -72,6 +78,75 @@ beforeEach(() => {
 afterEach(() => {
   wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
   vi.clearAllMocks()
+})
+
+describe('念之前先压一遍', () => {
+  it('按当前播报风格压，合成的是口播稿；压的期间按钮显示「正在合成」', async () => {
+    useAIConfigStore().setVoiceBriefingStyle('concise')
+    let release!: () => void
+    vi.mocked(briefForSpeech).mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          release = () => resolve('压过的稿子')
+        })
+    )
+    const { reading } = reader('m1')
+    const run = reading.toggle('很长的原文')
+    await flushPromises()
+    expect(briefForSpeech).toHaveBeenCalledWith(
+      '很长的原文',
+      'concise',
+      expect.objectContaining({ plainText: '很长的原文' })
+    )
+    expect(reading.loading.value).toBe(true)
+    expect(speechAPI.synthesize).not.toHaveBeenCalled()
+    release()
+    await flushPromises()
+    expect(speechAPI.synthesize).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '压过的稿子' }),
+      expect.any(Function)
+    )
+    players[0].end()
+    await run
+  })
+
+  it('压的期间点了停止，稿子回来也不合成', async () => {
+    useAIConfigStore().setVoiceBriefingStyle('detailed')
+    let release!: () => void
+    vi.mocked(briefForSpeech).mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          release = () => resolve('稿子')
+        })
+    )
+    const { reading } = reader('m2')
+    const run = reading.toggle('很长的原文')
+    await flushPromises()
+    reading.stop()
+    release()
+    await run
+    expect(speechAPI.synthesize).not.toHaveBeenCalled()
+    expect(reading.active.value).toBe(false)
+  })
+
+  /** 压缩没成多半是轻量模型没绑，提示一次让用户去设置里改；只回空稿不算，那不是配置问题 */
+  it('压缩出错只提示一次，回空稿不提示', async () => {
+    useAIConfigStore().setVoiceBriefingStyle('concise')
+    vi.mocked(briefForSpeech).mockImplementation(async (text, _style, options) => {
+      options?.onFallback?.(text.startsWith('出错') ? 'error' : 'empty')
+      return text
+    })
+    const { reading } = reader('m3')
+    // 三段正文各不相同，否则第三次会命中语音缓存、根本不再合成
+    for (const text of ['空稿', '出错一次', '出错两次']) {
+      const run = reading.toggle(text)
+      await flushPromises()
+      players.at(-1)!.end()
+      await run
+    }
+    expect(message.warning).toHaveBeenCalledTimes(1)
+    expect(speechAPI.synthesize).toHaveBeenCalledTimes(3)
+  })
 })
 
 describe('回复流式朗读', () => {

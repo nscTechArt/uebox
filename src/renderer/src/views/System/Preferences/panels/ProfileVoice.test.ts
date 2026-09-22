@@ -25,6 +25,26 @@ describe('回声门限', () => {
   })
 })
 
+describe('播报风格', () => {
+  /**
+   * 默认必须是「完整」：前两档每次朗读都要花一次轻量模型调用、音频要等它回来，
+   * 老用户听到的东西不能因为升级就变了。
+   */
+  it('默认原文照念，和自动播放放在同一组，选了就存下来', async () => {
+    const store = useAIConfigStore()
+    const wrapper = mount(ProfileVoice, { global: { mocks: { $t: (key: string) => key } } })
+    expect(store.voiceBriefingStyle).toBe('full')
+    const section = wrapper.findAll('section')[1]
+    const segmented = section.get('[aria-label="profile.voice.briefingStyle"]')
+    expect(segmented.text()).toContain('profile.voice.briefingConcise')
+    expect(section.text()).toContain('profile.voice.briefingFullHint')
+    await segmented.findAll('button')[0].trigger('click')
+    expect(store.voiceBriefingStyle).toBe('concise')
+    expect(section.text()).toContain('profile.voice.briefingConciseHint')
+    wrapper.unmount()
+  })
+})
+
 describe('独立的语音自动结束设置', () => {
   it('语音和语音助手分组，自动播放默认关闭并独立保存', async () => {
     const store = useAIConfigStore()

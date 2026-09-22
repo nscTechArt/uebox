@@ -109,6 +109,7 @@ import { answerAgentQuestion } from '@renderer/views/Assistant/composables/agent
 import { AGENT_RESUME_ACTION } from '@renderer/views/Assistant/composables/agentHandlerShared'
 import { finalReplyText } from '@renderer/views/Assistant/composables/finalReplyText'
 import { useReadAloud } from '@renderer/views/Assistant/composables/useReadAloud'
+import { readVoiceBriefingStyle } from '../composables/miniVoiceAutoPlay'
 import type { AgentQuestionItem } from '@core/shared/agentQuestion'
 import {
   joinTimelineText,
@@ -226,8 +227,13 @@ const showMarkdown = computed(() => {
 /*
  * 手动朗读。跟主聊天页 `AIBubble` 一样的接法：以消息 id 为主人，于是自动朗读
  * （`autoReadAloud`，小窗里由 `MiniChatWindow` 挂上）念到这条时按钮会正确显示成「停止」。
+ * 播报风格不读本窗口的 store —— 它是启动时抄的旧账，理由见 `miniVoiceAutoPlay`。
+ * 只在开念那一刻读一次 localStorage，不给每条气泡都挂一个 storage 监听。
  */
-const readAloud = useReadAloud(() => props.message.id)
+const readAloud = useReadAloud(
+  () => props.message.id,
+  () => readVoiceBriefingStyle()
+)
 const readableReply = computed(() =>
   finalReplyText(
     textContent.value,

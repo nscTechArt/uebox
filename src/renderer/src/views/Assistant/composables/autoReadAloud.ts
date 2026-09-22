@@ -26,6 +26,7 @@
 
 import { ref, watch } from 'vue'
 
+import type { SpeechBriefingStyle } from '@core/shared/speechBriefing'
 import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
 import { useChatMessagesStore, type ChatMessage } from '@renderer/store/modules/chatMessages'
 
@@ -60,8 +61,12 @@ function lastReplies(messages: Record<string, ChatMessage[]>): LastReply[] {
  * `enabled` 是「自动朗读开关此刻开着没有」。默认读本窗口的设置 store；小窗是另一个
  * 渲染进程，它的 store 只在启动时从 localStorage 抄过一次，主窗口后来拨的开关它
  * 看不见，所以小窗自己盯着 storage 事件、把新鲜值从这儿递进来（见 `miniVoiceAutoPlay`）。
+ * `briefingStyle` 同理，是播报风格此刻的值。
  */
-export function useAutoReadAloud(enabled?: () => boolean): void {
+export function useAutoReadAloud(
+  enabled?: () => boolean,
+  briefingStyle?: () => SpeechBriefingStyle
+): void {
   const chatMsgStore = useChatMessagesStore()
   const aiConfigStore = useAIConfigStore()
   const autoPlayEnabled = enabled ?? ((): boolean => aiConfigStore.voiceAutoPlayEnabled)
@@ -75,7 +80,7 @@ export function useAutoReadAloud(enabled?: () => boolean): void {
    * 「停止」还挂在第一条的气泡上。气泡那边传的是 `props.id`，本来就是响应式的。
    */
   const owner = ref('')
-  const readAloud = useReadAloud(() => owner.value)
+  const readAloud = useReadAloud(() => owner.value, briefingStyle)
 
   function read(chatSid: string, messageId: string): void {
     if (!autoPlayEnabled()) return

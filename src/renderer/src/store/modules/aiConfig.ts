@@ -4,6 +4,11 @@ import {
   normalizeRealtimeEchoGuard,
   type RealtimeEchoGuard
 } from '../../../../shared/realtimeEchoGuard'
+import {
+  DEFAULT_SPEECH_BRIEFING_STYLE,
+  normalizeSpeechBriefingStyle,
+  type SpeechBriefingStyle
+} from '../../../../shared/speechBriefing'
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { usePersistOptions } from '../../hooks/usePersistOptions'
@@ -208,6 +213,8 @@ export interface AIConfigState {
   voiceAutoHangupEnabled?: boolean
   // 回声门限档位（默认「外放」）。含义见 shared/realtimeEchoGuard.ts
   voiceEchoGuard?: RealtimeEchoGuard
+  // 播报风格（默认「完整」）。含义见 shared/speechBriefing.ts
+  voiceBriefingStyle?: SpeechBriefingStyle
 
   // 自定义 Provider BYOK（自带 Key，本地存储）
   openAICompatibleByok?: CustomProviderByokConfig
@@ -564,6 +571,17 @@ export const useAIConfigStore = defineStore(
     }
 
     /**
+     * 播报风格。旧配置没这个字段，一律按「原文照念」读 —— 不改老用户听到的东西。
+     */
+    const voiceBriefingStyle = computed(() =>
+      normalizeSpeechBriefingStyle(config.value.voiceBriefingStyle)
+    )
+
+    function setVoiceBriefingStyle(style: SpeechBriefingStyle): void {
+      config.value.voiceBriefingStyle = normalizeSpeechBriefingStyle(style)
+    }
+
+    /**
      * MiniChat 窗口透明度（默认 1.0）
      */
     const miniChatOpacity = computed(() => {
@@ -713,6 +731,7 @@ export const useAIConfigStore = defineStore(
         voiceAutoHangupEnabled: true,
         voiceMicrophoneDeviceId: '',
         voiceEchoGuard: DEFAULT_REALTIME_ECHO_GUARD,
+        voiceBriefingStyle: DEFAULT_SPEECH_BRIEFING_STYLE,
         openAICompatibleByok: {
           enabled: false,
           mode: 'openai-compatible',
@@ -843,6 +862,8 @@ export const useAIConfigStore = defineStore(
       voiceAutoPlayEnabled,
       voiceEchoGuard,
       setVoiceEchoGuard,
+      voiceBriefingStyle,
+      setVoiceBriefingStyle,
       setVoiceAutoPlayEnabled,
       setVoiceMicrophoneDeviceId,
       setVoiceAutoHangupEnabled,

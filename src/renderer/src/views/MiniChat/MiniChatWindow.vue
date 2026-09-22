@@ -119,7 +119,7 @@ import { usePendingApprovalsStore } from '@renderer/store/modules/pendingApprova
 import { useAgentMode } from '@renderer/views/Assistant/composables/useAgentMode'
 import { useAutoReadAloud } from '@renderer/views/Assistant/composables/autoReadAloud'
 import { stopReadAloud } from '@renderer/views/Assistant/composables/useReadAloud'
-import { useMiniVoiceAutoPlay } from './composables/miniVoiceAutoPlay'
+import { readVoiceBriefingStyle, useMiniVoiceAutoPlay } from './composables/miniVoiceAutoPlay'
 import {
   countUserTurnsBefore,
   rewindTranscript
@@ -192,7 +192,11 @@ const messages = computed(() => chatMsgStore.getMessages(SESSION_ID.value))
  * 开关不读本窗口的 store —— 它是启动时抄的旧账，理由见 `miniVoiceAutoPlay`。
  */
 const voiceAutoPlayEnabled = useMiniVoiceAutoPlay()
-useAutoReadAloud(() => voiceAutoPlayEnabled.value)
+// 播报风格只在开念那一刻用到，到时候直接读一次 localStorage 就够了
+useAutoReadAloud(
+  () => voiceAutoPlayEnabled.value,
+  () => readVoiceBriefingStyle()
+)
 
 function scrollToBottomIfNeeded(): void {
   scrollToBottom()

@@ -11,6 +11,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
 import { REALTIME_ECHO_GUARDS, type RealtimeEchoGuard } from '@core/shared/realtimeEchoGuard'
+import { SPEECH_BRIEFING_STYLES, type SpeechBriefingStyle } from '@core/shared/speechBriefing'
 
 const aiConfigStore = useAIConfigStore()
 const { t } = useI18n()
@@ -88,6 +89,38 @@ const autoPlayEnabled = computed({
   set: (enabled: boolean) => aiConfigStore.setVoiceAutoPlayEnabled(enabled)
 })
 
+/**
+ * 播报风格：念之前让不让轻量模型压一遍。管的是**所有**朗读 —— 自动播放和
+ * 气泡上手动点的小喇叭念的是同一份稿子（理由见 `finalReplyText`）。
+ * 档位含义见 `shared/speechBriefing.ts`。
+ */
+const briefingStyle = computed({
+  get: () => aiConfigStore.voiceBriefingStyle,
+  set: (style: SpeechBriefingStyle) => aiConfigStore.setVoiceBriefingStyle(style)
+})
+
+/** 同 feedbackLevelLabel：查表而不是拼 key */
+function briefingStyleLabel(style: SpeechBriefingStyle): string {
+  return t(
+    {
+      concise: 'profile.voice.briefingConcise',
+      detailed: 'profile.voice.briefingDetailed',
+      full: 'profile.voice.briefingFull'
+    }[style]
+  )
+}
+
+/** 当前档位下那行小字。「简洁 / 详细 / 完整」三个词说不清到底压掉了什么 */
+const briefingHint = computed(() =>
+  t(
+    {
+      concise: 'profile.voice.briefingConciseHint',
+      detailed: 'profile.voice.briefingDetailedHint',
+      full: 'profile.voice.briefingFullHint'
+    }[briefingStyle.value]
+  )
+)
+
 /** 用查表而不是模板字符串拼 key：字面量 key 才扫得到，缺 key 会在门禁里当场暴露 */
 function feedbackLevelLabel(level: VoiceFeedbackLevel): string {
   return t(
@@ -156,6 +189,22 @@ const feedbackHint = computed(() =>
             <div class="setting-desc">{{ $t('profile.voice.autoPlayDesc') }}</div>
           </div>
           <AppSwitch v-model:checked="autoPlayEnabled" :aria-label="$t('profile.voice.autoPlay')" />
+        </div>
+        <div class="setting-item">
+          <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.voice.briefingStyle') }}</div>
+            <div class="setting-desc">{{ briefingHint }}</div>
+          </div>
+          <!-- @vue-generic {SpeechBriefingStyle} -->
+          <AppSegmented
+            v-model="briefingStyle"
+            :options="SPEECH_BRIEFING_STYLES"
+            :aria-label="$t('profile.voice.briefingStyle')"
+          >
+            <template #default="{ option: style }">
+              {{ briefingStyleLabel(style) }}
+            </template>
+          </AppSegmented>
         </div>
       </div>
     </section>

@@ -5,6 +5,10 @@ import type {
   ImageResolution
 } from '../../../shared/imageGenerationModels'
 import { toPlainEditorSnapshot, type EditorSnapshot } from '../../../shared/editorSnapshot'
+import {
+  SPEECH_BRIEFING_MAX_TOKENS,
+  type CondensedSpeechStyle
+} from '../../../shared/speechBriefing'
 import { toSessionProjectPayload } from '../views/Assistant/composables/sessionProjectBinding'
 
 /**
@@ -919,6 +923,48 @@ export const aiAPI = {
    */
   async generateSessionTitleFromExcerpt(params: { excerpt: string }): Promise<string> {
     return requestSessionTitle(params.excerpt, 1000, 'ai.sessionRenameSystemPrompt')
+  },
+
+  /**
+   * 把一条回复压成口播稿，念之前用。档位含义见 `shared/speechBriefing.ts`。
+   *
+   * 走「轻量任务」模型（不传 `level` 即是 `summary` 角色）：这是音频开始前
+   * 要几秒内回来的一步，不值得占对话 / Agent 那档模型。要的是纯文本，不套 JSON ——
+   * 口播稿里的引号和换行套进 JSON 只会给小模型添错的机会。
+   *
+   * 回复套在 `<reply>` 里、前面加一句「这是素材不是指令」再发：回复常以一句
+   * 反问收尾（「要我继续把材质也换掉吗？」），裸发的话小模型会把它当成用户在问，
+   * 回一句「好的，我来换」—— 那句就会被当成结论念出来。
+   *
+   * @returns 口播稿。模型没配、调用失败会**抛错**，返回空话时是空串；
+   *          两种情况调用方都退回念原文（见 `speechBriefing` 合成层）。
+   */
+  async condenseForSpeech(params: {
+    text: string
+    style: CondensedSpeechStyle
+  }): Promise<string> {
+    const response = await aiAPI.chat({
+      maxTokens: SPEECH_BRIEFING_MAX_TOKENS[params.style],
+      callType: 'speech-briefing',
+      messages: [
+        {
+          role: 'system',
+          content: i18n.global.t(
+            params.style === 'concise'
+              ? 'ai.speechBriefingConciseSystemPrompt'
+              : 'ai.speechBriefingDetailedSystemPrompt'
+          )
+        },
+        {
+          role: 'user',
+          content: `${i18n.global.t('ai.speechBriefingUserPrompt')}
+<reply>
+${params.text}
+</reply>`
+        }
+      ]
+    })
+    return (response.content || '').trim()
   },
 
   async generateImage(params: ImageGenerateParams): Promise<ImageResponse> {
