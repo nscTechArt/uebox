@@ -59,6 +59,30 @@ export class ToolAbortedError extends Error {
 }
 
 /**
+ * 这次停下来是不是用户自己要的。
+ *
+ * 停止按钮和「删除会话」都走 `agent.abort()`：在途的模型请求和工具会以
+ * `AbortError`（`This operation was aborted`）抛出来。落进普通的失败分支的话，
+ * 用户删掉一条正在跑的会话会收到一条英文原文的红色报错。中止是意图达成，不是故障。
+ *
+ * 同时看 `name` 和文案：pi 把中止编码成 `state.errorMessage` 字符串，
+ * 到那一层已经没有 Error 对象可看了。
+ *
+ * 放在这个文件而不是 `core/resume.ts`（它原来在那儿）：这条判断是关于**中止**的，
+ * 不是关于续跑的。`runAbortable` 现在要用它，而让 `tools/` 去依赖 `core/resume`
+ * 只为了一个字符串判断，方向是反的。
+ */
+export function isUserAbort(error: unknown): boolean {
+  if (!error) return false
+  if (typeof error === 'string') return /abort/i.test(error)
+
+  const candidate = error as { name?: unknown; message?: unknown }
+  if (candidate.name === 'AbortError') return true
+
+  return typeof candidate.message === 'string' && /abort/i.test(candidate.message)
+}
+
+/**
  * 跑一次工具，同时盯着中止信号。
  *
  * @param toolName 出现在错误信息里，用户和模型都看得见
@@ -88,6 +112,29 @@ export async function runAbortable<T>(
     // 两边都挂上了处理函数，工具稍后失败也算「已处理」，不会变成主进程里的
     // unhandledRejection。
     return await Promise.race([work, aborted])
+  } catch (error) {
+    /*
+     * 赛跑不是唯一一条中止路径，而且它**不是主要那条**。
+     *
+     * 真机数据：2326 个会话里中止产生的 tool result，1500 条写着
+     * `Operation aborted`，只有 42 条是上面那个 `ToolAbortedError`。
+     * 也就是说 97% 的中止走的是另一条路 —— 工具体内部自己的 fetch /
+     * `callRequest` 先看见了同一个 signal，当场 reject 出一个原生的
+     * `AbortError`，比我们的 abort 监听器**早到一个微任务**，于是它赢了
+     * `Promise.race`，原样冒到模型那儿。
+     *
+     * 那句 `Operation aborted` 是纯噪音：它没说是谁停的，更没说
+     * **那条命令可能已经发到引擎并且生效了** —— 而这恰恰是模型下一步必须
+     * 知道的事（见 `ToolAbortedError` 的注释和 `engineErrors.ts` 开头记的
+     * 那类事故：按「失败」重试会多出第二个 Actor）。
+     *
+     * 所以这里补一道收口：信号确实中止了、而且抛出来的东西长得像中止，
+     * 就换成那条写清楚了的消息。两个条件缺一不可 ——
+     * **只判 `signal.aborted` 会把「中止的同时恰好真失败了」也吞掉**，
+     * 那会把一条真实的错误原因换成一句「用户停止了」。
+     */
+    if (signal.aborted && isUserAbort(error)) throw new ToolAbortedError(toolName)
+    throw error
   } finally {
     signal.removeEventListener('abort', onAbort)
   }

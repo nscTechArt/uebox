@@ -33,22 +33,10 @@ import { ASK_USER_TOOL_NAME } from '../tools/toolNames'
 /**
  * 这次停下来是不是用户自己要的。
  *
- * 停止按钮和「删除会话」都走 `agent.abort()`：在途的模型请求和工具会以
- * `AbortError`（`This operation was aborted`）抛出来。落进普通的失败分支的话，
- * 用户删掉一条正在跑的会话会收到一条英文原文的红色报错。中止是意图达成，不是故障。
- *
- * 同时看 `name` 和文案：pi 把中止编码成 `state.errorMessage` 字符串，
- * 到那一层已经没有 Error 对象可看了。
+ * 定义搬到了 `tools/abortable.ts` —— 那条判断是关于**中止**的，不是关于续跑的，
+ * 而 `runAbortable` 也要用它。这里保留转出口，调用方（`ipc/agentV3.ts`）不必改。
  */
-export function isUserAbort(error: unknown): boolean {
-  if (!error) return false
-  if (typeof error === 'string') return /abort/i.test(error)
-
-  const candidate = error as { name?: unknown; message?: unknown }
-  if (candidate.name === 'AbortError') return true
-
-  return typeof candidate.message === 'string' && /abort/i.test(candidate.message)
-}
+export { isUserAbort } from '../tools/abortable'
 
 interface MessageLike {
   role?: string

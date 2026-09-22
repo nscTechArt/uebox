@@ -90,3 +90,39 @@ describe('runAbortable', () => {
     expect(unhandled).not.toHaveBeenCalled()
   })
 })
+
+describe('原生 AbortError 的收口', () => {
+  it('工具体自己抛出的原生中止，换成写清楚了的那条消息', async () => {
+    const controller = new AbortController()
+    const native = Object.assign(new Error('Operation aborted'), { name: 'AbortError' })
+
+    await expect(
+      runAbortable('ue_spawn_actor', controller.signal, async () => {
+        controller.abort()
+        // 工具体内部的 fetch/callRequest 看见同一个 signal，比我们的监听器早一步
+        throw native
+      })
+    ).rejects.toBeInstanceOf(ToolAbortedError)
+  })
+
+  it('中止的同时真失败了，保留真实原因', async () => {
+    const controller = new AbortController()
+
+    // 只判 signal.aborted 的话这条会被吞成「用户停止了」，把真实原因弄丢
+    await expect(
+      runAbortable('blueprint_compile', controller.signal, async () => {
+        controller.abort()
+        throw new Error('蓝图编译未通过（状态 Error）')
+      })
+    ).rejects.toThrow('蓝图编译未通过')
+  })
+
+  it('没中止时的失败原样抛出，不碰', async () => {
+    const controller = new AbortController()
+    await expect(
+      runAbortable('t', controller.signal, async () => {
+        throw new Error('引擎没有响应')
+      })
+    ).rejects.toThrow('引擎没有响应')
+  })
+})
