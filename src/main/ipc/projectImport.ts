@@ -56,6 +56,7 @@ import {
 import UnrealPathManagerUtil from '../utils/UnrealPathManager'
 import type { NamingRulesConfig } from '../../renderer/src/types/namingRules'
 import { resolveProjectFilePath } from './projectImportPath'
+import { readEngineAssociationFromDisk } from '../services/project/projectEngineSync'
 import { vaultAccessKeyHeadersFromUrl } from '../networkV2/vaultAccessKeys'
 import {
   compareAssetToResolvedProjectEngineVersion,
@@ -1504,8 +1505,9 @@ export async function importUAssetsBatchToProject(
   const contentBase = path.join(path.dirname(projectFile), 'Content')
   await ensureDir(contentBase)
 
+  // 渲染层传来的记录可能是升级引擎之前抄的，闸门按磁盘上的 .uproject 判
   const projectEngine = await resolveProjectEngineVersion(
-    project.EngineAssociation || null,
+    (await readEngineAssociationFromDisk(project)) ?? project.EngineAssociation ?? null,
     UnrealPathManagerUtil
   )
 
@@ -1795,7 +1797,7 @@ ipcMain.handle(
   async (_, project: ProjectImportProjectRecord, sources: ProjectImportBatchSource[]) => {
     try {
       const engine = await resolveProjectEngineVersion(
-        project.EngineAssociation || null,
+        (await readEngineAssociationFromDisk(project)) ?? project.EngineAssociation ?? null,
         UnrealPathManagerUtil
       )
       const assets = getAssetsByKeys(

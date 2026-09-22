@@ -23,6 +23,7 @@ import UnrealProcessDetector from '../../utils/UnrealProcessDetector'
 import { ensurePluginIgnored } from '../../utils/pluginVcsIgnore'
 import { toNativeProjectPath } from '../../utils/projectPath'
 import { readUeJsonFile } from '../../utils/ueTextFile'
+import { syncProjectEngineAssociations } from '../../services/project/projectEngineSync'
 
 /**
  * 确保项目中安装并启用了 UnrealAgentLink 插件（项目级安装）
@@ -716,7 +717,8 @@ export const registerProjectIPC = (): void => {
   ipcMain.handle('db:project:getAll', async () => {
     try {
       const db = getPublicDatabase()
-      const list = getAllProjects(db)
+      // 库里的引擎版本是登记时抄的，用户在 Launcher 里升过版本这里才对得上磁盘
+      const list = await syncProjectEngineAssociations(db, getAllProjects(db))
       return { success: true, data: list }
     } catch (error) {
       return { success: false, error: (error as Error).message }
