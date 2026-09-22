@@ -1677,8 +1677,11 @@ bool UAL_CommandUtils::SetStructProperty(FStructProperty* StructProp, UObject* O
 			}
 			for (const auto& Pair : Value->AsObject()->Values)
 			{
-				const FString* Real = RealNames.Find(Pair.Key.ToLower());
-				Normalized->SetField(Real ? *Real : Pair.Key, Pair.Value);
+				// 5.8 起 FJsonObject 的键是 UE::TSharedString 而不是 FString。两边都能
+				// 解引用成 const TCHAR*，从那儿造 FString 在 5.0-5.8 上都成立
+				const FString Key(*Pair.Key);
+				const FString* Real = RealNames.Find(Key.ToLower());
+				Normalized->SetField(Real ? *Real : Key, Pair.Value);
 			}
 		}
 
