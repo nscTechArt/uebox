@@ -475,6 +475,13 @@ export function createAgentCompletionHandlers(
     const isAssistantRoute =
       routePath === '/dev-assistant' || routePath.startsWith('/dev-assistant/')
     const canRetitleTab = isAssistantRoute && targetChatSid === sid.value
+    /*
+     * 现在就把路径抄下来。`route` 是响应式的，而下面两条起名都是异步的
+     * （轻量模型一次要几秒），等标题回来时用户多半已经点开了别的会话 ——
+     * 那时候再读 `route.fullPath` 拿到的是**别人**的标签页，改的也是别人的名字。
+     * `canRetitleTab` 是这一刻算的，路径也得是这一刻的，两者必须同一时刻。
+     */
+    const retitleTabPath = route?.fullPath || ''
 
     const session = chatStore.sessionById(targetChatSid)
     const defaultTitle = !session || session.title === t('assistant.agentMode.unnamedSession')
@@ -487,7 +494,7 @@ export function createAgentCompletionHandlers(
         chatStore.updateTitle(targetChatSid, autoTitle)
         if (canRetitleTab) {
           tabsStore.updateTabTitleByPath(
-            route.fullPath,
+            retitleTabPath,
             chatStore.sessionById(targetChatSid)?.title || t('assistant.agentMode.unnamedSession')
           )
         }
@@ -498,7 +505,7 @@ export function createAgentCompletionHandlers(
           applyTitle: (id, title) => {
             chatStore.updateTitle(id, title)
             if (canRetitleTab) {
-              tabsStore.updateTabTitleByPath(route.fullPath, title)
+              tabsStore.updateTabTitleByPath(retitleTabPath, title)
             }
           }
         })
@@ -512,7 +519,7 @@ export function createAgentCompletionHandlers(
       void retitleSession(targetChatSid, chatMsgStore.getMessages(targetChatSid), (title) => {
         chatStore.updateTitle(targetChatSid, title)
         if (canRetitleTab) {
-          tabsStore.updateTabTitleByPath(route.fullPath, title)
+          tabsStore.updateTabTitleByPath(retitleTabPath, title)
         }
       })
     }

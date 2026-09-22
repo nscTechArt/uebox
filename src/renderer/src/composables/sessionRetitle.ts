@@ -64,28 +64,32 @@ export function buildLastRoundExcerpt(
   messages: readonly ExcerptMessage[],
   maxChars: number = MAX_EXCERPT_CHARS
 ): string {
-  const texts = messages.map((message) => ({ role: message.role, text: toText(message.content) }))
-
-  let userIndex = -1
-  for (let i = texts.length - 1; i >= 0; i -= 1) {
-    if (texts[i].role === 'user' && texts[i].text) {
-      userIndex = i
+  /*
+   * 从尾巴往前扫，用到哪条才转哪条。
+   *
+   * 整条先 `map` 一遍最直白，但这个函数开了「自动生成新标题」之后是**每轮收尾都跑
+   * 一次**的，而它拿到的是整条会话的全部消息。一条聊了一百多轮、回答动辄几 KB 的
+   * 会话，那一遍 `map` 就是几百 KB 的 trim/filter/join 临时对象，而且随轮数一直涨 ——
+   * 花在这儿的正好是界面在渲染最后那段答复的时刻。真正要用的只有两条。
+   */
+  let userText = ''
+  let answerText = ''
+  // 用户那条之后**最后**一条助手消息才是收尾的结论，中间可能夹着几条过程消息；
+  // 倒着扫时它先出现，所以第一个撞上的就是它
+  let lastAnyText = ''
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const text = toText(messages[i].content)
+    if (!text) continue
+    if (!lastAnyText) lastAnyText = text
+    if (messages[i].role === 'user') {
+      userText = text
       break
     }
+    if (!answerText) answerText = text
   }
 
   // 一条消息都没有（或全是空壳）：没什么可起名的
-  if (userIndex < 0) {
-    const lastText = [...texts].reverse().find((item) => item.text)?.text
-    return lastText ? lastText.slice(0, maxChars) : ''
-  }
-
-  const userText = texts[userIndex].text
-  // 这一轮的回答：用户那条之后**最后**一条助手消息。中间可能夹着几条过程消息，
-  // 最后那条才是收尾的结论
-  const answerText =
-    [...texts.slice(userIndex + 1)].reverse().find((item) => item.role === 'assistant' && item.text)
-      ?.text ?? ''
+  if (!userText) return lastAnyText ? lastAnyText.slice(0, maxChars) : ''
 
   const budget = Math.max(0, maxChars - USER_LABEL.length - ASSISTANT_LABEL.length - 1)
   const [userBudget, answerBudget] = splitBudget(userText.length, answerText.length, budget)

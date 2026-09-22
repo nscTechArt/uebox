@@ -32,6 +32,7 @@ interface ChatMessagesPersistenceOptions {
 const MUTATING_ACTIONS = new Set([
   'ensureContainer',
   'pushUser',
+  'insertUserBefore',
   'pushAssistantTyping',
   'pushAssistant',
   'replaceTyping',

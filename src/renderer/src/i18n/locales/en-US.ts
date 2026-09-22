@@ -103,6 +103,7 @@ export default {
     smartName: 'Smart name',
     smartNameEmpty: 'This chat has no messages yet — nothing to name it from',
     smartNameFailed: 'Naming failed. Type a name yourself, or check the light-task model.',
+    smartNameBusy: 'Already naming this chat — try again in a moment',
     moveToProject: 'Move to project',
     removeFromProject: 'Work outside a project',
     newProjectGroup: 'New project group…',
@@ -2885,7 +2886,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       echoGuardStrong: 'Speakers up close',
       echoGuardHeadsetHint: 'Headset or lapel mic. Highest sensitivity; picks up quiet speech.',
       echoGuardSpeakerHint: 'Speakers at a distance from the mic. Suppresses most echo. Default.',
-      echoGuardStrongHint: 'Speakers close to the mic, or it responds to its own output. Strongest suppression; quiet speech may be dropped.',
+      echoGuardStrongHint:
+        'Speakers close to the mic, or it responds to its own output. Strongest suppression; quiet speech may be dropped.',
       assistantTitle: 'Voice assistant',
       generalTitle: 'General',
       autoPlay: 'Auto play',

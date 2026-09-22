@@ -697,6 +697,11 @@ async function smartName(): Promise<void> {
   )
   if (outcome === 'empty') message.warning(t('chatSidebar.smartNameEmpty'))
   if (outcome === 'failed') message.error(t('chatSidebar.smartNameFailed'))
+  // `skipped` 也要说一声，而且和「失败」分开说。开了「自动生成新标题」的话，每轮
+  // 收尾都有一次起名在途，撞上了就被这条会话的在途标记挡掉 —— 静默处理的表现是
+  // 弹窗关了、名字没变、屏幕上一个字都没有，用户只能再点一次碰运气。
+  // 用 info 不用 error：它不是坏了，等一下再点就有
+  if (outcome === 'skipped') message.info(t('chatSidebar.smartNameBusy'))
 }
 
 // ==================== 归入工程 ====================
@@ -1733,7 +1738,6 @@ function getChatInitial(title: string): string {
     background: var(--color-warning-text);
   }
 }
-
 
 // 智能命名靠左推开，和右边主按钮分两组
 .rename-modal__smart {

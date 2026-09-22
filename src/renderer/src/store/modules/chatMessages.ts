@@ -331,15 +331,18 @@ export const useChatMessagesStore = defineStore(
      *
      * 认不出那条锚（已经落定、或者根本不在这条会话里）就退回追加 ——
      * 位置不完美总好过消息直接丢了。
+     *
+     * 实现是「先照常 `pushUser`，再挪位置」，**不是自己拼一条**。消息 id 那串
+     * 格式是有人读的（`pushAssistantTyping` 从用户消息 id 上切前缀当 startTime），
+     * 各写一份的话改一处忘一处，语音插进来的消息就没了起始时间。
      */
     function insertUserBefore(sid: string, beforeId: string, content: ChatMessageContent): string {
-      ensureContainer(sid)
-      const id = `${Date.now()}-u-${Math.random().toString(16).slice(2)}`
-      const message: ChatMessage = { id, role: 'user', content, status: 'done' }
+      const id = pushUser(sid, content)
       const arr = messagesBySid.value[sid]
       const at = arr.findIndex((item) => item.id === beforeId)
-      if (at < 0) arr.push(message)
-      else arr.splice(at, 0, message)
+      // 锚不在：`pushUser` 追加的位置就是要的位置，不用动
+      if (at < 0) return id
+      arr.splice(at, 0, arr.pop()!)
       return id
     }
 

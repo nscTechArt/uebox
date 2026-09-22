@@ -103,6 +103,8 @@ export default {
     smartName: '智能命名',
     smartNameEmpty: '这条会话还没有对话内容，起不了名',
     smartNameFailed: '起名失败，自己写一个，或去检查轻量任务模型',
+    /** 这条会话已经有一次起名在途（多半是「自动生成新标题」那一路）。等一下再点就有 */
+    smartNameBusy: '正在起名，稍等一下再试',
     moveToProject: '归入工程',
     removeFromProject: '不在项目中工作',
     newProjectGroup: '新建工程分组…',
