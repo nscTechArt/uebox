@@ -23,6 +23,7 @@ describe('MiniChatWindow theme styles', () => {
 
 describe('MiniChatWindow read aloud', () => {
   it('mounts the auto read-aloud watcher with the storage-synced switch', () => {
-    expect(source).toMatch(/useAutoReadAloud\(\(\) => voiceAutoPlayEnabled\.value\)/)
+    // 第二个参数（播报风格）让调用换了行，只认第一个参数是不是那个开关
+    expect(source).toMatch(/useAutoReadAloud\(\s*\(\) => voiceAutoPlayEnabled\.value/)
   })
 })
