@@ -28,6 +28,13 @@ describe('最终答复那一段', () => {
     expect(finalReplyText('错误: aborted', [], true)).toBe('')
   })
 
+  it('正文以换行开口时不把最终答复念两遍', () => {
+    const leading: AgentProcessItem[] = [
+      { type: 'text', data: { text: '\n\n一共三个资产。' }, timestamp: 1 }
+    ]
+    expect(finalReplyText('一共三个资产。', leading)).toBe('一共三个资产。')
+  })
+
   it('正常回复里谈到错误不算崩了', () => {
     expect(finalReplyText('Error: means an error in this example.')).toBe(
       'Error: means an error in this example.'

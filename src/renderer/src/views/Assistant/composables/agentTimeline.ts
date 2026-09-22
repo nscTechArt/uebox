@@ -237,12 +237,19 @@ export function joinTimelineText(items: AgentProcessItem[]): string {
  * 兜底分支把整条 content 又画了一遍，屏幕上一模一样的回复出现两次。
  * 那个 bug 已经修在源头（`utils/typingPlaceholder.ts`），这里留一道：
  * 认得出「多余的在前面」就只补那一截，而不是整段重影。
+ *
+ * 比对前两边都去掉首尾空白：收尾写进 content 的是 trim 过的全文，时间线里存的是
+ * 原始增量 —— 模型在工具调用之后开口常带着一个换行。不去的话两边谁也不是
+ * 谁的前缀，整条 content 被当成「多出来的」退回去，气泡里重影一段，自动朗读把
+ * 最终答复念两遍。
  */
 export function resolveTrailingContent(content: string, timelineText: string): string {
-  if (!timelineText) return content
-  if (!content) return ''
-  if (timelineText.startsWith(content)) return ''
-  if (content.startsWith(timelineText)) return content.slice(timelineText.length)
-  if (content.endsWith(timelineText)) return content.slice(0, -timelineText.length)
+  const timeline = timelineText.trim()
+  if (!timeline) return content
+  const body = content.trim()
+  if (!body) return ''
+  if (timeline.startsWith(body)) return ''
+  if (body.startsWith(timeline)) return body.slice(timeline.length)
+  if (body.endsWith(timeline)) return body.slice(0, -timeline.length)
   return content
 }

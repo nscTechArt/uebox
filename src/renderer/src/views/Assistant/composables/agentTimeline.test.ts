@@ -227,6 +227,17 @@ describe('resolveTrailingContent', () => {
   it('没有时间线正文时原样返回 content', () => {
     expect(resolveTrailingContent('普通对话的回复', '')).toBe('普通对话的回复')
   })
+
+  /**
+   * 收尾写进 content 的是 trim 过的全文，时间线里是带着原始空白的增量：
+   * 模型在工具调用之后常以换行开口。首尾空白不该让两边「对不上」——
+   * 对不上的代价是整段重影，自动朗读把答复念两遍。
+   */
+  it('只差首尾空白时视为一致', () => {
+    expect(resolveTrailingContent('AB', '\n\nAB')).toBe('')
+    expect(resolveTrailingContent('AB', 'AB\n')).toBe('')
+    expect(resolveTrailingContent('AB\n\n用户已停止生成', '\n\nAB')).toBe('\n\n用户已停止生成')
+  })
 })
 
 describe('agentStream 把正文记进时间线', () => {
