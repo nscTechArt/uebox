@@ -6,8 +6,21 @@ vi.mock('@renderer/i18n', () => ({ default: { global: { t: (key: string) => key 
 import { useVoiceDictation } from './useVoiceDictation'
 import type { VoiceSessionEvent } from '@core/main/ai/realtime/types'
 
-/** 收下 worklet 抛回来的那个回调，测试里冒充麦克风往里灌包 */
-let workletPort: { onmessage: ((message: { data: ArrayBuffer }) => void) | null }
+type WorkletPort = { onmessage: ((message: { data: ArrayBuffer }) => void) | null }
+
+/**
+ * 每开一轮麦克风就是一个新的 `AudioWorkletNode`，也就是一条新端口。
+ *
+ * **一轮一条，不能共用一个对象。** 共用的话「上一轮在路上的包被丢掉」那条用例
+ * 就是假的：拿到手的 `onmessage` 其实是新一轮的那个闭包，把轮次判断整个删掉
+ * 用例照样绿 —— 而它守的正是「上一轮的音频别混进这一句」。
+ */
+let workletPorts: WorkletPort[] = []
+
+/** 当前这一轮在用的那条 */
+function livePort(): WorkletPort {
+  return workletPorts[workletPorts.length - 1]
+}
 
 /**
  * 把 Web Audio 那一套顶掉。
@@ -16,8 +29,8 @@ let workletPort: { onmessage: ((message: { data: ArrayBuffer }) => void) | null 
  * （攒包、补发顺序、只认终稿）一个都不在音频线程上。
  */
 function stubWebAudio(): void {
-  workletPort = { onmessage: null }
-  const node = { port: workletPort, connect: vi.fn(() => node) }
+  workletPorts = []
+  const node = { connect: vi.fn(() => node) }
   const gain = { gain: { value: 1 }, connect: vi.fn(() => gain) }
   const source = { connect: vi.fn(() => node) }
 
@@ -29,12 +42,19 @@ function stubWebAudio(): void {
       createMediaStreamSource = vi.fn(() => source)
       createGain = vi.fn(() => gain)
       close = vi.fn(async () => undefined)
+      resume = vi.fn(async () => undefined)
     }
   )
-  vi.stubGlobal('AudioWorkletNode', class {
-    port = workletPort
-    connect = vi.fn(() => gain)
-  })
+  vi.stubGlobal(
+    'AudioWorkletNode',
+    class {
+      port: WorkletPort = { onmessage: null }
+      connect = vi.fn(() => gain)
+      constructor() {
+        workletPorts.push(this.port)
+      }
+    }
+  )
   vi.stubGlobal('navigator', {
     mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [] })) }
   })
@@ -72,7 +92,7 @@ function stubApi(
 
 /** 灌一包假音频进去。内容无所谓，只看它去了哪儿 */
 function feedPacket(value: number): void {
-  workletPort.onmessage?.({ data: new Int16Array([value]).buffer })
+  livePort().onmessage?.({ data: new Int16Array([value]).buffer })
 }
 
 beforeEach(() => {
@@ -169,7 +189,11 @@ describe('听写', () => {
 
   /** 没绑实时语音模型是要说给用户听的那一类，得把原话带出来 */
   it('没配模型时把厂商那句话交给调用方', async () => {
-    stubApi(async () => ({ ok: false, reason: 'unconfigured', error: '还没有配置「实时语音」模型。' }))
+    stubApi(async () => ({
+      ok: false,
+      reason: 'unconfigured',
+      error: '还没有配置「实时语音」模型。'
+    }))
     const onError = vi.fn()
     const dictation = useVoiceDictation({ onText: vi.fn(), onError })
 
@@ -185,11 +209,20 @@ describe('听写', () => {
     const dictation = useVoiceDictation({ onText: vi.fn() })
     await dictation.start()
     emit({ type: 'ready' })
-    const stalePort = workletPort
+    const stalePort = livePort()
 
     await dictation.start()
     sentAudio.length = 0
+    // 上一轮的那一包这会儿才到
     stalePort.onmessage?.({ data: new Int16Array([9]).buffer })
+    expect(sentAudio).toEqual([])
+
+    /*
+     * **也不准偷偷躺进新一轮的缓冲里。** 少了这一句用例就是假的：把轮次判断
+     * 整个删掉它照样绿 —— 那一包只是从「当场发出去」变成「攒着，等 ready 再发」，
+     * 而补发之后它照样混进了用户的下一句话。
+     */
+    emit({ type: 'ready' })
     expect(sentAudio).toEqual([])
   })
 

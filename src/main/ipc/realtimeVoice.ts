@@ -27,10 +27,7 @@ import {
   summarizeProjects
 } from '../ai/realtime/frontDesk'
 import { OPENAI_AUDIO, openOpenAiRealtimeSession } from '../ai/realtime/openaiRealtime'
-import {
-  normalizeRealtimeEchoGuard,
-  type RealtimeEchoGuard
-} from '../../shared/realtimeEchoGuard'
+import { normalizeRealtimeEchoGuard, type RealtimeEchoGuard } from '../../shared/realtimeEchoGuard'
 import type {
   AudioSpec,
   RealtimeConversationMessage,
@@ -715,7 +712,15 @@ export function registerRealtimeVoiceIPC(): void {
         // 给了就等于允许它绕过「用户确认」直接动工程
         instructions: '',
         tools: [],
-        echoGuard: normalizeRealtimeEchoGuard(undefined),
+        /*
+         * **这一路按耳机档算，不按默认的外放档。**
+         *
+         * 回声门限抬高是为了压住「喇叭放出去的声音又被麦克风收回来」，而听写
+         * 一个扬声器都不开 —— 这里根本没有回声可挡，抬高门限就只剩代价：
+         * 0.65 的门限顶不过去的小音量语音会被服务端当成没人说话，表现是用户
+         * 对着一个写着「正在听」的窗口说完一整句，输入框一个字都没出现。
+         */
+        echoGuard: 'headset',
         onEvent: (payload) => {
           if (generation !== connectionGeneration) return
           if (sender.isDestroyed()) {
@@ -756,8 +761,15 @@ export function registerRealtimeVoiceIPC(): void {
    * 用 `on` 而不是 `handle`：这条一秒钟要走十几次，每次都等一个 Promise 往返
    * 纯属浪费 —— 而且没有任何返回值需要等。
    */
-  ipcMain.on('realtime-voice:audio', (_event, base64: string) => {
-    active?.handle.appendAudio(base64)
+  ipcMain.on('realtime-voice:audio', (event, base64: string) => {
+    /*
+     * 查 sender，理由和 `:text` `:floor` 那几条一样，但这一条更要紧：被抢掉的
+     * 那一头要过几十毫秒才停得下来（`stop()` 里还夹着一次 `AudioContext.close()`），
+     * 这中间它的 worklet 照样 20 毫秒一包往上送。不查的话那几包会落进**接手**的
+     * 那路会话里，跟新主人的第一句话混在一起 —— 转写出来是两个人在同时说话。
+     */
+    if (!active || active.sender.id !== event.sender.id) return
+    active.handle.appendAudio(base64)
   })
 
   /**
@@ -1063,8 +1075,11 @@ export function registerRealtimeVoiceIPC(): void {
    */
   ipcMain.on(
     'realtime-voice:tool-result',
-    (_event, results: { callId: string; output: string }[]) => {
-      active?.handle.sendToolResults(results)
+    (event, results: { callId: string; output: string }[]) => {
+      // 同 `:audio`：被抢掉的那一头手上可能还压着一轮工具结果，
+      // 交到接手那路会话里就是一条对不上任何调用的 `function_call_output`
+      if (!active || active.sender.id !== event.sender.id) return
+      active.handle.sendToolResults(results)
     }
   )
 
@@ -1100,7 +1115,19 @@ export function registerRealtimeVoiceIPC(): void {
     }
   })
 
-  ipcMain.handle('realtime-voice:stop', () => {
+  /**
+   * 挂断。**只有会话的主人挂得了它。**
+   *
+   * 这条以前不查 sender，而收尾这件事每一个入口都要做一次 —— 听写开不起来要收、
+   * Spotlight 关窗要收、组件卸载也要收。于是「助手页正在通话时打开一次 Spotlight」
+   * 就把通话挂了，而 `stop()` 和 `yieldSessionTo` 不一样，它不通知原主：
+   * 界面停在「正在听」，麦克风一直开着，PCM 往一条已经没了的连接里发。
+   *
+   * 不是自己的会话就什么都不做，但照样回 `ok` —— 对调用方来说「我这一路停了」
+   * 是真的（它本来就没有一路），回错误只会让它去处置一件不存在的事。
+   */
+  ipcMain.handle('realtime-voice:stop', (event) => {
+    if (active && active.sender.id !== event.sender.id) return { ok: true }
     stop()
     return { ok: true }
   })

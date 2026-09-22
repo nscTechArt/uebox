@@ -82,6 +82,7 @@ import {
 import type { Component } from 'vue'
 import { spotlightAPI } from '@renderer/api/spotlight'
 import { useVoiceDictation } from '@renderer/composables/useVoiceDictation'
+import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
 import type { SpotlightSearchResult as ResultItem } from '@core/shared/spotlight'
 
 /**
@@ -121,8 +122,18 @@ const submitCountdown = ref(0)
 const dictationNotice = ref('')
 
 let submitTimer: ReturnType<typeof setInterval> | null = null
+/**
+ * 这一轮听到过话没有。
+ *
+ * 「倒计时该不该重起」判的是它，**不是「倒计时还在跑吗」**。用户把输入框整句删掉
+ * 重打时，倒计时已经被自己停掉了（空内容不该提交），拿「还在跑吗」当判据的话
+ * 它从此再也起不来 —— 状态条还写着「说完自动提交」，而那句话永远不会发出去。
+ */
+let submitArmed = false
 
 const dictation = useVoiceDictation({
+  // 和语音通话读同一个偏好。不带的话浏览器给系统默认设备，用户挑的那个麦白挑了
+  microphoneDeviceId: () => useAIConfigStore().voiceMicrophoneDeviceId,
   onText: (text) => {
     /*
      * 追加而不是覆盖。VAD 把一段长指令切成两轮是常事（中间停顿想词超过了
@@ -131,6 +142,7 @@ const dictation = useVoiceDictation({
     query.value = query.value ? `${query.value} ${text}` : text
     dictationNotice.value = ''
     nextTick(adjustHeight)
+    submitArmed = true
     startSubmitCountdown()
   },
   onUnheard: () => {
@@ -188,10 +200,18 @@ async function submitDictated(): Promise<void> {
   spotlightAPI.execute('ai', { message })
 }
 
-/** 收掉听写。重复调用无害 */
+/**
+ * 收掉听写。重复调用无害。
+ *
+ * **没在听就什么都不做。** 这一路的 `stop()` 会去关主进程那条全局会话，而
+ * 普通打字唤起 Spotlight（以及每一次关窗、回车、卸载）走的也是这个出口 ——
+ * 不拦的话，开一次搜索框就把助手页正在进行的通话挂断了，而且原主收不到任何事件。
+ */
 async function endDictation(): Promise<void> {
   clearSubmitCountdown()
+  submitArmed = false
   dictating.value = false
+  if (dictation.state.value === 'idle') return
   await dictation.stop()
 }
 
@@ -218,8 +238,9 @@ async function beginDictation(): Promise<void> {
  * 处理输入并自动调整高度
  */
 function handleInput(): void {
-  // 用户动手了：自动提交往后推。正在改一句话的时候被抢着发出去是最糟的一种失败
-  if (submitCountdown.value > 0) startSubmitCountdown()
+  // 用户动手了：自动提交往后推。正在改一句话的时候被抢着发出去是最糟的一种失败。
+  // 判据见 `submitArmed` —— 不能拿「倒计时还在跑吗」来判
+  if (submitArmed) startSubmitCountdown()
   adjustHeight()
   handleSearch()
 }
@@ -356,10 +377,9 @@ function closeWindow(): void {
  * 处理 Enter 键
  */
 function handleEnter(): void {
-  // 手动回车压过倒计时。用户已经确认过了，没必要再让他等完那两秒
-  clearSubmitCountdown()
-  void dictation.stop()
-  dictating.value = false
+  // 手动回车压过倒计时。用户已经确认过了，没必要再让他等完那两秒。
+  // 走 `endDictation` 而不是自己拼一遍：收尾以后要加的每一步都只写在那一处
+  void endDictation()
   executeSelected()
 }
 
@@ -402,6 +422,8 @@ function handleShow(payload: { dictate: boolean }): void {
   selectedIndex.value = 0
   dictationNotice.value = ''
   clearSubmitCountdown()
+  // 新的一次唤起，上一轮「听到过话」不算数了
+  submitArmed = false
   nextTick(() => {
     inputRef.value?.focus()
   })

@@ -281,6 +281,10 @@ class SpotlightWindowManager {
       this.isReady = false
       this.pendingShow = false
       this.isShowing = false
+      // 这一条和 `pendingShow` 是一对：那次显示没发生，它要的听写态也跟着作废。
+      // 漏了的话它会一直挂到**下一次**显示 —— 而下一次多半是普通打字唤起的，
+      // 表现是用户按了搜索热键，窗口开着并且麦克风亮了
+      this.pendingDictate = false
     })
 
     const rendererFilePath = join(__dirname, '../renderer/index.html')

@@ -411,6 +411,13 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
 
   socket.on('close', () => {
     closed = true
+    /*
+     * **这里也要 dispose。** 连接是对面断的（掉线、服务端超时）时先走到这儿，
+     * `closed` 一置真，后面上层调 `handle.close()` 就被那句 `if (closed) return`
+     * 挡掉了 —— 于是 `response.create` 的那个五秒回执定时器没人清：五秒后它在一条
+     * 已经没了的会话上醒来，打一行「没等到回执」，还可能顺手再排一个。
+     */
+    responses.dispose()
     config.onEvent({ type: 'closed' })
   })
 

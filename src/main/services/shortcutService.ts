@@ -204,6 +204,22 @@ export class ShortcutService {
 
   private handleShortcutAction(actionKey: string): void {
     console.log(`Triggered global shortcut action: ${actionKey}`)
+
+    /*
+     * 语音下指令：弹 Spotlight 并直接开始听写，说完填进输入框由用户确认。
+     * 走 Spotlight 而不是隐形录音，是因为 Agent 拿到的是会动工程的指令 ——
+     * 中间那一眼「它听成了什么」值一次弹窗。
+     *
+     * **在找主窗口之前处理。** 下面那个「够大才算主窗口」的启发式按
+     * 1000x900 筛，而主窗口的 minHeight 是 800 —— 用户把它拉到 850 高、
+     * 或者收进托盘，这条热键就整个失灵，一声不吭。而弹 Spotlight 跟主窗口
+     * 在不在一点关系都没有。
+     */
+    if (actionKey === 'voice.spotlight_dictate') {
+      spotlightManager.showForDictation()
+      return
+    }
+
     // 找到主窗口：主窗口特征是尺寸较大（minWidth=1350, minHeight=800），且不是 alwaysOnTop
     // Spotlight 窗口特征：固定 600x400，alwaysOnTop=true
     const mainWindow = getAppWindows().find((w) => {
@@ -236,12 +252,6 @@ export class ShortcutService {
         // 打断正在说话的语音助手。窗口不抢焦点 —— 用这个键的场景多半是
         // 手在别处、眼睛没看屏幕，把窗口弹到最前面反而是打扰
         mainWindow.webContents.send('voice:interrupt-via-shortcut')
-        break
-      case 'voice.spotlight_dictate':
-        // 语音下指令：弹 Spotlight 并直接开始听写，说完填进输入框由用户确认。
-        // 走 Spotlight 而不是隐形录音，是因为 Agent 拿到的是会动工程的指令 ——
-        // 中间那一眼「它听成了什么」值一次弹窗
-        spotlightManager.showForDictation()
         break
       // Add other global actions
     }

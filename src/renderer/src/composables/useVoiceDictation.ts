@@ -61,6 +61,13 @@ export interface VoiceDictationOptions {
   /** 听清一整句了。**只给终稿** —— 中间态会让输入框在用户眼皮底下反复改写 */
   onText: (text: string) => void
   /**
+   * 用哪个麦克风（偏好设置 → 语音）。不给就用系统默认那个。
+   *
+   * 和通话那一路读的是同一个偏好：用户挑了头戴麦，说话却从笔记本内置麦走，
+   * 转写回来是一片糊的，而界面上没有任何东西说明用错了设备。
+   */
+  microphoneDeviceId?: () => string
+  /**
    * 这一段没听清。
    *
    * 和「出错」分开：没听清不该把会话关掉，再说一遍就行。但也不能静默 ——
@@ -71,13 +78,48 @@ export interface VoiceDictationOptions {
   onError?: (message: string) => void
 }
 
-/** 把一包 PCM16 转成 base64。两家协议共同的形状 */
+/**
+ * 把一包 PCM16 转成 base64。两家协议共同的形状。
+ *
+ * 一次 `apply` 而不是逐字节 `+=`：这是条热路（20 毫秒一包，每包 960 字节），
+ * 逐字节拼等于每秒近五万次字符串拼接，而这个回调里还挤着算响度和一次 IPC。
+ * 960 个实参离 `apply` 的上限（几万）还远得很。
+ */
 function encodePcm(pcm: Int16Array): string {
   const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i])
-  return btoa(binary)
+  return btoa(String.fromCharCode.apply(null, bytes as unknown as number[]))
 }
+
+/** 一包麦克风数据多少毫秒。和 `pcmCapture.worklet.js` 里的 `PACKET_MS` 必须一致 */
+const PACKET_MS = 20
+
+/**
+ * 连接建好之前最多攒这么久的音频。
+ *
+ * 首字缓冲要的是「握手那一两秒」，而这个上限防的是另一件事：厂商把 socket 收下了、
+ * `ready` 却永远不来（网关吞掉了 `session.update`）。没有上限的话，缓冲会按
+ * 每秒五十包一直涨到用户自己按 Esc 为止。
+ */
+const PREROLL_MAX_MS = 30_000
+
+/**
+ * 等厂商就绪最多等这么久。
+ *
+ * 超了就收摊。没有这道闸的表现最难自查：界面写着「正在打开麦克风…」，
+ * 系统的录音指示灯亮着，而那条会话其实早就死了 —— 用户对着它说完一整句，
+ * 输入框一个字都不会出现，也没有任何报错。
+ */
+const READY_TIMEOUT_MS = 20_000
+
+/**
+ * 响度最多这么久往界面上发一次。
+ *
+ * worklet 是 20 毫秒一包，每包都写一次响应式变量就是每秒 50 次重渲染 —— 而麦克风
+ * 图标上挂着一条 80 毫秒的 transition，那 50 次里一多半根本画不出来。
+ * 中间那两包**取峰值**再发，所以一个短促的爆破音不会正好落在被跳过的那一包里。
+ * 和通话那一路（`useRealtimeVoice.publishInputLevel`）同一个道理、同一个数。
+ */
+const LEVEL_PUBLISH_MS = 60
 
 /** 这一包多响。只用来驱动图标动画，不参与任何判停 —— 判停在服务端 */
 function rootMeanSquare(samples: Int16Array): number {
@@ -110,6 +152,28 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
    */
   let preroll: string[] = []
   let vendorReady = false
+  /**
+   * 主进程那条会话是**我们**开起来的吗。
+   *
+   * 会话是全局单例，两个窗口共用；而收尾这件事每个出口都要做一次（开不起来要收、
+   * 关窗要收、组件卸载也要收）。没这个标记的话，那几次收尾会去关一条压根不属于
+   * 自己的会话 —— 表现是助手页正在通话时打开一次 Spotlight，通话当场断掉。
+   * 主进程那边也查了一道 sender，这里是第二道：没开过就连问都不问。
+   */
+  let ownsSession = false
+  let readyTimer: ReturnType<typeof setTimeout> | null = null
+  /** 响度的发布节流。理由见 `LEVEL_PUBLISH_MS` */
+  let levelPeak = 0
+  let levelPublishedAt = 0
+
+  function publishLevel(value: number): void {
+    levelPeak = Math.max(levelPeak, value)
+    const now = Date.now()
+    if (now - levelPublishedAt < LEVEL_PUBLISH_MS) return
+    levelPublishedAt = now
+    level.value = levelPeak
+    levelPeak = 0
+  }
 
   async function releaseAudio(): Promise<void> {
     stream?.getTracks().forEach((track) => track.stop())
@@ -118,16 +182,23 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     await context?.close().catch(() => undefined)
     context = null
     level.value = 0
+    levelPeak = 0
+    levelPublishedAt = 0
   }
 
   async function stop(): Promise<void> {
     generation += 1
     vendorReady = false
     preroll = []
+    if (readyTimer) clearTimeout(readyTimer)
+    readyTimer = null
     unsubscribe?.()
     unsubscribe = null
     state.value = 'idle'
     await releaseAudio()
+    // 没开过就不去关。理由见 `ownsSession`
+    if (!ownsSession) return
+    ownsSession = false
     await window.api.realtimeVoice.stop().catch(() => undefined)
   }
 
@@ -138,6 +209,8 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     switch (event.type) {
       case 'ready':
         vendorReady = true
+        if (readyTimer) clearTimeout(readyTimer)
+        readyTimer = null
         state.value = 'listening'
         // 攒着的先补发，顺序不能乱 —— 乱了就是一句话被重排过的词
         for (const packet of preroll) window.api.realtimeVoice.sendAudio(packet)
@@ -171,8 +244,16 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     const audioContext = new AudioContext({ sampleRate: inputSampleRate })
     context = audioContext
 
+    // 用户在偏好设置里挑的那个。不给这个字段的话浏览器给系统默认设备 ——
+    // 挑了头戴麦却从内置麦走，转写回来是糊的，而界面上没有一处说明用错了设备
+    const deviceId = options.microphoneDeviceId?.()
     const media = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      audio: {
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
     })
     if (generation !== currentGeneration) {
       media.getTracks().forEach((track) => track.stop())
@@ -188,22 +269,39 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     node.port.onmessage = (message) => {
       if (generation !== currentGeneration) return
       const samples = new Int16Array(message.data as ArrayBuffer)
-      level.value = rootMeanSquare(samples)
+      publishLevel(rootMeanSquare(samples))
       const packet = encodePcm(samples)
       if (vendorReady) {
         window.api.realtimeVoice.sendAudio(packet)
       } else {
         preroll.push(packet)
+        // 首字缓冲要的是握手那一两秒。超过上限就丢最旧的 —— 三十秒之前说的话
+        // 早就不是「这一句的开头」了，而留着它只会让缓冲一直涨（见 PREROLL_MAX_MS）
+        const maxPackets = Math.ceil(PREROLL_MAX_MS / PACKET_MS)
+        if (preroll.length > maxPackets) preroll.splice(0, preroll.length - maxPackets)
       }
     }
     /*
-     * **必须接到 destination**，否则 Chromium 判定这条图没有出口，
-     * 整条链不会被调度 —— 表现是 worklet 一包都不产出，而且没有任何报错。
-     * 听写不播放任何东西，所以 gain 归零：接上去但一个音都不发出来。
+     * **不接 destination。** 上一版在这儿挂了一条 gain 归零的链子接到出口，
+     * 理由写的是「不接的话 Chromium 认为这条图没有出口，整条链不会被调度」——
+     * 那句话是错的，实测过：24kHz 下让一个 `MediaStreamAudioSourceNode` 喂
+     * worklet，接不接出口 `process()` 都是每秒 ~188 次，一次不差
+     * （Electron 44 / Chromium；两种顺序各跑一遍排掉 AudioContext 冷启动那一下）。
+     *
+     * 通话那一路（`useRealtimeVoice`）本来就没接，而它天天在真机上跑 ——
+     * 两个文件对同一件事写着相反的话，照错的那句走的人迟早会把对的那边也「修」坏。
+     *
+     * 接上去不是没代价：听写一个音都不播，却要为此按 16/24kHz 占住一个输出设备。
      */
-    const silence = audioContext.createGain()
-    silence.gain.value = 0
-    source.connect(node).connect(silence).connect(audioContext.destination)
+    source.connect(node)
+
+    /*
+     * 全局热键唤起这一路**没有用户手势**，而 Chromium 的自动播放策略会让这种
+     * AudioContext 停在 `suspended` —— 停着的图一块都不渲染，表现是麦克风灯亮着、
+     * 界面写着「正在听」，而 worklet 一包都不产出，也没有任何报错。
+     * 已经在跑时 `resume()` 是空操作，所以无条件调一次就行。
+     */
+    await audioContext.resume().catch(() => undefined)
   }
 
   async function start(): Promise<DictationFailure | null> {
@@ -238,14 +336,31 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     )
 
     const opened = await window.api.realtimeVoice.startDictation()
-    if (generation !== currentGeneration) return null
     if (!opened.ok) {
+      if (generation !== currentGeneration) return null
       await stop()
       if (opened.reason === 'unconfigured' || opened.reason === 'failed') {
         options.onError?.(opened.error)
       }
       return opened.reason
     }
+
+    /*
+     * 会话开起来了，从这一刻起关它是我们的事。
+     *
+     * **认领在判轮次之前**：这一轮就算已经被下一次热键顶掉，会话在主进程里也是
+     * 真的开着的。不认领的话它永远留在 `active` 上，之后每一次听写都被自己上一轮
+     * 挡成 `busy`，直到重启。认领了就总有人去关它 —— 顶掉它的那一轮收尾时会关。
+     */
+    ownsSession = true
+    if (generation !== currentGeneration) return null
+
+    // 厂商迟迟不 ready 就收摊，别留一个亮着录音灯的死会话（见 READY_TIMEOUT_MS）
+    readyTimer = setTimeout(() => {
+      if (generation !== currentGeneration || vendorReady) return
+      void stop()
+      options.onError?.(i18n.global.t('spotlightWindow.dictation.unavailable'))
+    }, READY_TIMEOUT_MS)
 
     return null
   }

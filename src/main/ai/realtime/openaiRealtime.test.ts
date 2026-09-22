@@ -51,7 +51,9 @@ describe('session.update 首帧', () => {
 
   it('服务端判停，音色只在配了的时候才发', () => {
     const withoutVoice = buildOpenAiSessionUpdate(CONFIG) as {
-      session: { audio: { input: { turn_detection: { type: string } }; output: Record<string, unknown> } }
+      session: {
+        audio: { input: { turn_detection: { type: string } }; output: Record<string, unknown> }
+      }
     }
     expect(withoutVoice.session.audio.input.turn_detection.type).toBe('server_vad')
     expect(withoutVoice.session.audio.output).not.toHaveProperty('voice')
@@ -122,8 +124,11 @@ describe('session.update 首帧', () => {
     expect(turnDetection).not.toHaveProperty('create_response')
     expect(turnDetection).not.toHaveProperty('silence_duration_ms')
     expect(
-      (buildOpenAiSessionUpdate(CONFIG) as { session: { audio: { input: { transcription: object } } } })
-        .session.audio.input.transcription
+      (
+        buildOpenAiSessionUpdate(CONFIG) as {
+          session: { audio: { input: { transcription: object } } }
+        }
+      ).session.audio.input.transcription
     ).not.toHaveProperty('prompt')
   })
 
