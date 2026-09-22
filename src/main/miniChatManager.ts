@@ -234,6 +234,14 @@ class MiniChatWindowManager {
 
     this.miniChatWindow.on('closed', () => {
       this.miniChatWindow = null
+      /*
+       * 没人来取就作废。初始消息改成「等渲染层来取」之后，这条路上**唯一**的
+       * 清空点就是那次索取 —— 窗口在 Vue 挂起来之前被关掉（加载失败、用户手快），
+       * 消息就一直压在这儿。下次开小窗时它会被当成那一次的初始消息发出去并自动提交：
+       * 用户看到的是上一件事的问题凭空派给了 Agent。
+       */
+      this.pendingMessage = null
+      this.pendingContext = null
     })
 
     const rendererFilePath = join(__dirname, '../renderer/index.html')
@@ -301,13 +309,16 @@ class MiniChatWindowManager {
      * 两件事同步挨着。所以它开口要的那一刻，必然已经接得住 —— 顺序由它自己保证，
      * 不由主进程这边的猜测保证。回应在 `mini-chat:request-initial-message` 里。
      *
-     * 上下文那条路同理，但它本来就没有「清空」的副作用，保持原样。
+     * 上下文那条路**一模一样**，所以也一起等它来取。
+     *
+     * 那条路看着像是安全的（「反正没有清空的副作用」），其实 `deliverContext()`
+     * 发完就把 `pendingContext` 置空了 —— 同样的 200 毫秒赌输一次，侧边对话就
+     * 开成了一个跟原会话失联的空窗口：它不知道自己是从哪条 agent 会话分出来的，
+     * 而且一样不报错。渲染层的 `requestInitialContext()` 和消息那条挨着发，
+     * 接住它的是 `mini-chat:request-initial-context`。
      */
     if (needsCreate || this.miniChatWindow.webContents.isLoading()) {
-      this.miniChatWindow.webContents.once('did-finish-load', () => {
-        logger.info('[MiniChat] 页面加载完成，初始消息等渲染层来取')
-        setTimeout(() => this.deliverContext(), 500)
-      })
+      logger.info('[MiniChat] 窗口还在建/在加载，初始消息和上下文都等渲染层来取')
     } else if (this.pendingMessage) {
       // 窗口已加载，直接发送
       logger.info(`[MiniChat] 直接发送消息: ${this.pendingMessage.text.substring(0, 50)}...`)
@@ -331,8 +342,8 @@ class MiniChatWindowManager {
     this.pendingContext = context
     this.show()
 
-    // 窗口本来就开着（show 不会重新加载）时立刻投递；正在加载的那条路
-    // 由 show() 里的 did-finish-load 和渲染层的主动索取兜底
+    // 窗口本来就开着（show 不会重新加载）时立刻投递 —— 那时候渲染层早挂好了，
+    // 推过去有人接。还在加载的那条路不推，等它自己来取（见 show() 里那段）
     if (this.miniChatWindow && !this.miniChatWindow.webContents.isLoading()) {
       this.deliverContext()
     }

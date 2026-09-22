@@ -182,6 +182,14 @@ export class AgentBrowserService {
   private surface: BrowserSurface | null = null
   private tabs = new Map<string, BrowserSurface>()
   private groupWindow: BrowserWindow | null = null
+  /**
+   * 组窗口的 `webContents.id`，建窗口时钉下来。
+   *
+   * 销毁之后再穿 `window.webContents` 会抛，而注销登记恰好都发生在销毁前后 ——
+   * 抛在 Electron 的事件派发里就是主进程整个退出（同 `ensureGroupWindow` 里
+   * `closed` 回调那段注释）。存一份就不用再赌读的时候它还在。
+   */
+  private groupWindowContentsId: number | null = null
   private mode: AgentBrowserMode | null = null
   private browserSession: Session | null = null
   private debuggerAttached = false
@@ -356,13 +364,10 @@ export class AgentBrowserService {
     this.surface = null
     this.debuggerAttached = false
     if (!surface) return
-    this.tabs.delete(surface.id)
-    if (surface.view) {
-      const host = surface.window ?? findMainWindow()
-      if (host && !host.isDestroyed()) host.contentView.removeChildView(surface.view)
-      unregisterNonAppWindow(surface.contentsId)
-      if (options.destroy && !surface.contents.isDestroyed()) surface.contents.close()
-    }
+    // 拆干净这件事只写一份（见 `dropSurface`）。上一版在这儿抄了一遍，
+    // 而两份已经漂了：那一份把注销登记关在 `if (surface.view)` 里，
+    // 于是没有 view 的 surface 会在登记表里留一条永远清不掉的记录
+    this.dropSurface(surface, options)
     this.surface = [...this.tabs.values()].at(-1) ?? null
     this.debuggerAttached = debuggerAttachedOn(this.surface?.contents)
     if (!this.surface) this.destroyGroupWindow()
@@ -371,11 +376,14 @@ export class AgentBrowserService {
 
   private destroyGroupWindow(): void {
     const window = this.groupWindow
+    const contentsId = this.groupWindowContentsId
     this.groupWindow = null
-    if (window && !window.isDestroyed()) {
-      unregisterNonAppWindow(window.webContents.id)
-      window.destroy()
-    }
+    this.groupWindowContentsId = null
+    // 注销用存下来的 id，不现读 `window.webContents` —— 窗口和它的 webContents
+    // 是两个独立的销毁标记，只查前一个的话销毁中途那一小段照样抛，
+    // 而这个方法是从 `contents.on('destroyed')` 里调进来的：抛在那儿主进程就没了
+    if (contentsId !== null) unregisterNonAppWindow(contentsId)
+    if (window && !window.isDestroyed()) window.destroy()
   }
 
   groupState(): BrowserGroupState {
@@ -814,8 +822,17 @@ export class AgentBrowserService {
   private ensureSurface(): BrowserSurface {
     if (this.surface && !this.surface.contents.isDestroyed()) return this.surface
     // 当前 surface 已经死了：先摘掉再建新的，否则它会永远留在 `this.tabs` 里，
-    // 把后面每一次 `groupState()` / `persistUrl()` 都变成一次主进程退出
-    if (this.surface) this.dropSurface(this.surface)
+    // 把后面每一次 `groupState()` / `persistUrl()` 都变成一次主进程退出。
+    //
+    // **摘完要连引用一起断。** 下面几步都可能抛（找不到主窗口就直接 throw），
+    // 抛出去时 `this.surface` 还指着一条已经不在 `this.tabs` 里的 surface ——
+    // 之后 `groupState()` 报的 `activeTabId` 在它自己给的 tabs 列表里找不到，
+    // `persistUrl` 的 `indexOf` 回 -1 被夹成 0，而 `debuggerAttached` 停在死值上
+    if (this.surface) {
+      this.dropSurface(this.surface)
+      this.surface = null
+      this.debuggerAttached = false
+    }
 
     const mode = this.currentMode()
     const host = mode === 'embedded' ? findMainWindow() : this.ensureGroupWindow()
@@ -864,6 +881,7 @@ export class AgentBrowserService {
      * 下次打开又给恢复出来。
      */
     const windowContentsId = window.webContents.id
+    this.groupWindowContentsId = windowContentsId
     registerNonAppWindow(windowContentsId)
     if (process.platform !== 'darwin') window.setMenu(null)
     const rendererFile = join(__dirname, '../renderer/index.html')
@@ -879,6 +897,7 @@ export class AgentBrowserService {
     window.on('closed', () => {
       if (this.groupWindow !== window) return
       this.groupWindow = null
+      this.groupWindowContentsId = null
       unregisterNonAppWindow(windowContentsId)
       void this.close().catch((error: unknown) => logger.warn(String(error)))
     })

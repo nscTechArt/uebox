@@ -132,10 +132,7 @@ describe('Mini Chat 的初始消息', () => {
 
     // 渲染层挂好了，开口要
     rendererMounts()
-    expect(sent).toContainEqual([
-      'mini-chat:initial-message',
-      { text: '我这个场景怎么是个黑的?' }
-    ])
+    expect(sent).toContainEqual(['mini-chat:initial-message', { text: '我这个场景怎么是个黑的?' }])
   })
 
   /**
@@ -156,7 +153,9 @@ describe('Mini Chat 的初始消息', () => {
     rendererMounts()
 
     expect(
-      sent.filter(([channel]) => channel === 'mini-chat:initial-message').map(([, payload]) => payload)
+      sent
+        .filter(([channel]) => channel === 'mini-chat:initial-message')
+        .map(([, payload]) => payload)
     ).toEqual([{ text: '把选中的 actor 缩放两倍' }])
   })
 

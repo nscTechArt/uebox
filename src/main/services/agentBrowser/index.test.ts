@@ -264,12 +264,17 @@ vi.mock('../../appWindows', () => ({
   registerNonAppWindow: (id: number) => registry.registered.push(id),
   unregisterNonAppWindow: (id: number) => registry.unregistered.push(id),
   sendToAppWindows: (channel: string, payload: unknown) => broadcasts.push({ channel, payload }),
+  /*
+   * 照抄真实实现的两道检查。**只抄一道是自欺**：这个 helper 存在的全部理由就是
+   * 「窗口还活着但它的 webContents 已经没了」那一小段，假的只查窗口那一个标记的话，
+   * 它正好把要验的那种情况放过去了。
+   */
   sendToWindow: (
-    window: { isDestroyed: () => boolean } | null,
+    window: { isDestroyed: () => boolean; webContents: { isDestroyed: () => boolean } } | null,
     channel: string,
     payload: unknown
   ) => {
-    if (!window || window.isDestroyed()) return
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return
     windowBroadcasts.push({ channel, payload })
   },
   findMainWindow: () => ({
@@ -748,6 +753,10 @@ describe('生命周期', () => {
     expect(registry.unregistered).toContain(deadId)
     // 活着的那个标签再来一次导航事件 —— 这是真机上把盒子带走的那条路
     expect(() => instance.toolbar('reload')).not.toThrow()
+
+    // 独立窗口那一路也要收到状态。这条广播走的是 `sendToWindow`，
+    // 而它会穿过一个刚死过一个标签的窗口 —— 没有它这个收集器就是个摆设
+    expect(windowBroadcasts.at(-1)).toMatchObject({ channel: 'agent-browser:state' })
   })
 
   /** 当前页面自己关掉之后再 open：死 surface 不能留在表里，否则后面每次广播都抛 */
