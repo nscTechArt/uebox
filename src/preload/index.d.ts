@@ -3333,11 +3333,11 @@ declare global {
         status: () => Promise<McpServerHostView>
         /** 换新令牌，旧的客户端配置随即失效 */
         rotateToken: () => Promise<{ success: boolean; status: McpServerHostView }>
-        /** 只存端口 / 暴露范围，不启停服务 */
+        /** 保存端口 / 暴露范围；运行中变更会自动重启服务 */
         saveConfig: (args: {
           port?: number
           includeMutating?: boolean
-        }) => Promise<{ success: boolean; status: McpServerHostView }>
+        }) => Promise<{ success: boolean; error?: string; status: McpServerHostView }>
       }
     }
     /**

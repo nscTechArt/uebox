@@ -1,3 +1,5 @@
+import { unwrapResult } from '@renderer/common/utils'
+
 /**
  * MCP 的渲染层 API。
  *
@@ -358,8 +360,9 @@ export const mcpServerAPI = {
   rotateToken() {
     return window.api.agentV3.mcpServer.rotateToken()
   },
-  /** 只存配置，不启停服务。界面上改完就调，别等到点开启才落盘 */
-  saveConfig(args: { port?: number; includeMutating?: boolean }) {
-    return window.api.agentV3.mcpServer.saveConfig(args)
+  /** 保存配置；运行中变更会自动重启，失败时抛出具体原因给界面 */
+  async saveConfig(args: { port?: number; includeMutating?: boolean }) {
+    const result = await window.api.agentV3.mcpServer.saveConfig(args)
+    return unwrapResult({ ...result, data: result.status })
   }
 }

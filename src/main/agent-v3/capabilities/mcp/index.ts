@@ -104,9 +104,8 @@ export function currentStatuses(): McpServerStatus[] {
 
 // ── 对外暴露（MCP Server）────────────────────────────────────────────────
 //
-// 默认关闭。它能删资产、跑任意 Python，必须由用户显式开启。
-// 开过一次就记住（hostStore），之后随盒子自动起来 —— 外部客户端的配置
-// 是长期配置，不能要求用户每次开机进设置点一遍。
+// 是否开机自启及外部客户端权限都由 hostStore 持久化；外部客户端的配置
+// 是长期配置，地址与凭据跨重启保持稳定。
 
 type ToolList = Parameters<McpServerHost['start']>[0]
 
@@ -181,6 +180,24 @@ export async function saveMcpServerConfig(
   const next = { ...(await readHostSettings()), ...patch }
   await writeHostSettings(next)
   return next
+}
+
+/** 保存后让运行中的服务立即采用新端口或权限；未启动和无变化时不重启。 */
+export async function applyMcpServerConfig(
+  patch: Partial<Pick<McpHostSettings, 'port' | 'includeMutating'>>,
+  buildTools: () => ToolList
+): Promise<McpServerHostStatus> {
+  const previous = await readHostSettings()
+  const next = await saveMcpServerConfig(patch)
+  if (
+    !serverHost.status().running ||
+    (previous.port === next.port && previous.includeMutating === next.includeMutating)
+  ) {
+    return serverHost.status()
+  }
+  // 先撤销旧会话的工具权限，再构建新清单；切到只读时不能让旧写会话继续跑。
+  await serverHost.stop()
+  return startMcpServer(buildTools(), { port: next.port, includeMutating: next.includeMutating })
 }
 
 /** 用户在界面上点停止：除了停掉，还要记住「下次别自动起」 */

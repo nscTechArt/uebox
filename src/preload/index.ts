@@ -1591,7 +1591,7 @@ const api = {
       status: () => ipcRenderer.invoke('agent-v3:mcp-server:status'),
       /** 换新令牌，旧的客户端配置随即失效 */
       rotateToken: () => ipcRenderer.invoke('agent-v3:mcp-server:rotate-token'),
-      /** 只存端口 / 暴露范围，不启停服务 */
+      /** 保存端口 / 暴露范围；运行中变更会自动重启服务 */
       saveConfig: (args: { port?: number; includeMutating?: boolean }) =>
         ipcRenderer.invoke('agent-v3:mcp-server:save-config', args)
     }

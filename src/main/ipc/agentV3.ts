@@ -71,7 +71,7 @@ import {
   mcpServerStatus,
   readHostSettings,
   rotateHostToken,
-  saveMcpServerConfig,
+  applyMcpServerConfig,
   type McpServerHostOptions,
   type McpServerHostStatus,
   type McpServerConfig,
@@ -2911,11 +2911,11 @@ export function registerAgentV3IPC(): void {
   )
 
   // ── 对外暴露 UE 能力（MCP Server）──────────────────────────────────────
-  // 默认关闭。开启后 Claude Code / Cursor 等外部客户端能直接操作虚幻引擎。
+  // 按持久化配置运行。开启后 Claude Code / Cursor 等外部客户端能直接操作虚幻引擎。
   ipcMain.handle('agent-v3:mcp-server:start', async (_event, args: McpServerHostOptions = {}) => {
     try {
       // 传全量工具，由 selectExposedTools 按 options 收窄 ——
-      // 默认只暴露只读工具
+      // 按用户保存的权限档位暴露工具
       const status = await startMcpServer(buildAllTools(), args)
       return { success: true, status: await withHostSettings(status) }
     } catch (error) {
@@ -2931,7 +2931,7 @@ export function registerAgentV3IPC(): void {
   ipcMain.handle('agent-v3:mcp-server:status', async () => withHostSettings(mcpServerStatus()))
 
   /**
-   * 只存端口 / 暴露范围，不动服务。
+   * 保存端口 / 暴露范围。运行中有变化时自动重启服务，让新权限立即生效。
    *
    * 界面上改完就调这里。原来这两项只有 start 会写盘，用户改完不点开启
    * 就切走，下次回来全变回默认值。
@@ -2939,8 +2939,14 @@ export function registerAgentV3IPC(): void {
   ipcMain.handle(
     'agent-v3:mcp-server:save-config',
     async (_event, args: { port?: number; includeMutating?: boolean } = {}) => {
-      await saveMcpServerConfig(args)
-      return { success: true, status: await withHostSettings(mcpServerStatus()) }
+      const wasRunning = mcpServerStatus().running
+      const status = await applyMcpServerConfig(args, buildAllTools)
+      const success = !wasRunning || status.running
+      return {
+        success,
+        ...(!success ? { error: status.error ?? 'MCP 服务重启失败' } : {}),
+        status: await withHostSettings(status)
+      }
     }
   )
 

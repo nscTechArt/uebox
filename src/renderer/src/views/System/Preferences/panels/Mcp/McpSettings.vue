@@ -32,8 +32,8 @@ import AppCheckbox from '@renderer/components/AppCheckbox.vue'
  * 现在标题直接叫「端口和权限」，当前档位（只读/可写）挂在标题上 ——
  * 不展开也看得见，第一屏还少一块。
  *
- * 安全警告同理：默认只有一行短的（只监听本机 / 要令牌 / 只读），
- * **打开写权限时才展开那段长的** —— 风险变了才提示，而不是每次进来都吓一遍。
+ * 安全警告同理：默认只有一行短的（只监听本机 / 要令牌 / 可写），
+ * **可写时在权限设置里展开那段长的** —— 风险相关的位置明确提示。
  * 常驻的警告等于没有警告。
  */
 import { PhCaretRight } from '@phosphor-icons/vue'
@@ -72,11 +72,11 @@ const EMPTY_HOST: McpServerHostView = {
   exposedTools: 0,
   url: '',
   clientConfig: '',
-  settings: { enabled: false, port: 17861, token: '', includeMutating: false }
+  settings: { enabled: false, port: 17861, token: '', includeMutating: true }
 }
 
 const host = ref<McpServerHostView>({ ...EMPTY_HOST })
-const includeMutating = ref(false)
+const includeMutating = ref(true)
 const port = ref(17861)
 const hostBusy = ref(false)
 const copied = ref('')
@@ -930,29 +930,33 @@ async function reconnect(): Promise<void> {
  * 原来这两项**只有点「开启」才会写进 mcp-server.json** —— 用户改完不开启
  * 就切走页面，下次回来全变回默认值，看起来就是「配置没有持久化」。
  * 端口非法时不写：写进去下次开机自启会拿一个必然失败的端口。
+ * 服务运行中修改权限会由主进程自动重启，旧会话立即失效。
  */
 const configSaved = ref(false)
 const configError = ref('')
 
 async function persistConfig(): Promise<void> {
-  if (portError.value) return
+  if (hostBusy.value || portError.value) return
+  hostBusy.value = true
   configError.value = ''
+  configSaved.value = false
   try {
-    const result = await mcpServerAPI.saveConfig({
+    const status = await mcpServerAPI.saveConfig({
       port: port.value,
       includeMutating: includeMutating.value
     })
     // 只更新 host（配置片段要跟着新端口走），不回灌本地表单 ——
     // 用户可能正在输入
-    if (result?.status) {
-      host.value = { ...host.value, ...result.status, settings: result.status.settings }
-    }
+    host.value = { ...host.value, ...status, settings: status.settings }
     // 失焦即落盘是个看不见的动作。不给回执的话，用户改完端口只能干等着，
     // 没法分辨「存好了」和「什么都没发生」；失败时更糟 —— 原来只进 console
     configSaved.value = true
     setTimeout(() => (configSaved.value = false), 2000)
   } catch (error) {
     configError.value = (error as Error).message
+    await refreshHost()
+  } finally {
+    hostBusy.value = false
   }
 }
 
@@ -1813,8 +1817,7 @@ onMounted(load)
                 </div>
                 <AppSwitch
                   v-model:checked="includeMutating"
-                  :disabled="host.running"
-                  :title="host.running ? t('mcp.server.stopToChange') : ''"
+                  :disabled="hostBusy"
                   @change="persistConfig"
                 />
               </div>
@@ -1843,7 +1846,7 @@ onMounted(load)
                   v-model.number="port"
                   class="threshold-input"
                   type="number"
-                  :disabled="host.running"
+                  :disabled="host.running || hostBusy"
                   :title="host.running ? t('mcp.server.stopToChange') : ''"
                   min="1024"
                   @blur="persistConfig"

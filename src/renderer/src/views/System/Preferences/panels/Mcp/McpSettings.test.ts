@@ -34,6 +34,7 @@ const TOKEN = '643fc00c1621ac16897808a3ce7551d056c9d9de127e6c6c'
 
 const HOST_VIEW = {
   running: false,
+  error: undefined as string | undefined,
   exposedTools: 0,
   url: 'http://127.0.0.1:17861/',
   // 和主进程 clientConfigSnippet() 生成的形状一致
@@ -50,7 +51,7 @@ const HOST_VIEW = {
     null,
     2
   ),
-  settings: { enabled: false, port: 17861, token: TOKEN, includeMutating: false }
+  settings: { enabled: false, port: 17861, token: TOKEN, includeMutating: true }
 }
 
 const RUNNING = { ...HOST_VIEW, running: true, exposedTools: 69 }
@@ -196,21 +197,22 @@ describe('渐进披露', () => {
     expect(wrapper.text()).not.toContain(TOKEN)
   })
 
-  it('长安全警告默认不出现 —— 常驻的警告等于没有警告', async () => {
+  it('可写风险警告只在展开权限设置后出现', async () => {
     const wrapper = await mountPanel()
     expect(wrapper.find('.warning').exists()).toBe(false)
 
     await openAdvanced(wrapper)
-    // 展开也还不出现：风险没变
-    expect(wrapper.find('.warning').exists()).toBe(false)
+    expect(wrapper.find('.warning').exists()).toBe(true)
   })
 
-  it('打开权限开关时才展开那段警告', async () => {
+  it('切到只读时隐藏风险警告，切回可写后重新显示', async () => {
     const wrapper = await mountPanel()
     await openAdvanced(wrapper)
 
     await flipScopeToggle(wrapper)
+    expect(wrapper.find('.warning').exists()).toBe(false)
 
+    await flipScopeToggle(wrapper)
     expect(wrapper.find('.warning').exists()).toBe(true)
   })
 
@@ -225,7 +227,7 @@ describe('渐进披露', () => {
 
     const label = wrapper.findAll('.host .category-open').map((b) => b.text())
     expect(label.some((l) => l.includes('权限'))).toBe(true)
-    expect(wrapper.find('.scope-tag').text()).toBe('只读')
+    expect(wrapper.find('.scope-tag').text()).toBe('可写')
   })
 
   it('端口和权限都收在折叠区里，展开才有', async () => {
@@ -404,7 +406,7 @@ describe('对外暴露的功能本身', () => {
     await input.trigger('blur')
     await flushPromises()
 
-    expect(saveConfig).toHaveBeenCalledWith({ port: 18888, includeMutating: false })
+    expect(saveConfig).toHaveBeenCalledWith({ port: 18888, includeMutating: true })
     expect(start).not.toHaveBeenCalled()
   })
 
@@ -413,7 +415,45 @@ describe('对外暴露的功能本身', () => {
     await openAdvanced(wrapper)
     await flipScopeToggle(wrapper)
 
-    expect(saveConfig).toHaveBeenCalledWith({ port: 17861, includeMutating: true })
+    expect(saveConfig).toHaveBeenCalledWith({ port: 17861, includeMutating: false })
+  })
+
+  it('服务运行中也能切权限，由保存接口重启并保持主开关开启', async () => {
+    const wrapper = await mountPanel()
+    await flipMainToggle(wrapper)
+    await openAdvanced(wrapper)
+    start.mockClear()
+
+    const toggles = wrapper.findAll('.host [role="switch"]')
+    expect(toggles[toggles.length - 1].attributes('disabled')).toBeUndefined()
+    await flipScopeToggle(wrapper)
+
+    expect(saveConfig).toHaveBeenCalledWith({ port: 17861, includeMutating: false })
+    expect(start).not.toHaveBeenCalled()
+    expect(stop).not.toHaveBeenCalled()
+    expect(wrapper.find('.running-row').exists()).toBe(true)
+    expect(wrapper.find('.scope-tag').text()).toBe('只读')
+  })
+
+  it('运行中切权限重启失败时显示错误和真实停服状态', async () => {
+    const wrapper = await mountPanel()
+    await flipMainToggle(wrapper)
+    await openAdvanced(wrapper)
+    saveConfig.mockImplementationOnce(async (patch: Record<string, unknown>) => {
+      current = {
+        ...current,
+        running: false,
+        error: '重启失败',
+        settings: { ...current.settings, ...patch }
+      }
+      return { success: false, error: '重启失败', status: { ...current } }
+    })
+
+    await flipScopeToggle(wrapper)
+
+    expect(wrapper.find('.running-row').exists()).toBe(false)
+    expect(wrapper.find('.category-body .error').text()).toContain('重启失败')
+    expect(wrapper.text()).not.toContain('已保存')
   })
 
   /**

@@ -299,9 +299,9 @@ export default {
     server: {
       title: 'Share Unreal Engine capabilities',
       label: 'Open to external clients',
-      // One line at the top level. Risk detail unfolds only when write tools are enabled.
+      // One line at the top level; the permission settings show full details when writable.
       shortNote:
-        'Let Claude Code or Cursor drive your engine. Loopback only, token required, read-only by default.',
+        'Let Claude Code or Cursor drive your engine. Loopback only, token required, writable by default.',
       securityNote:
         'External calls do NOT go through the approval prompt — write operations run immediately. Local file and shell tools are never exposed. If the token leaks, whoever has it can change your project.',
       securityNoteIdle:
@@ -311,7 +311,7 @@ export default {
       scopeWritable:
         'Currently writable: external clients can create, edit, and delete your assets.',
       stopToChange:
-        'Cannot be changed while the service is running; turn the switch above off first.',
+        'The port cannot be changed while the service is running; turn the switch above off first.',
       port: 'Port',
       portDesc: 'The port external clients connect to.',
       portInvalid: 'Port must be between 1024 and 65535',

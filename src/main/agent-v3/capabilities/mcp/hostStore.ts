@@ -62,7 +62,7 @@ function newToken(): string {
  * 读配置，缺什么补什么。
  *
  * 和 `mcp.json` 一样是用户可见、可手改的文件，所以解析要宽容：
- * 任何一个字段坏掉都不该让服务起不来，坏的字段回落到默认值即可。
+ * 任何一个字段坏掉都不该让服务起不来；非法权限值按只读处理。
  *
  * 首次读取会生成 token 并落盘 —— 界面在服务还没启动时就要能显示
  * 完整的客户端配置片段，token 不能等到 start 才有。
@@ -83,7 +83,9 @@ export async function readHostSettings(): Promise<McpHostSettings> {
     enabled: resolveEnabled(raw),
     port: Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_HOST_PORT,
     token: token || newToken(),
-    includeMutating: raw.includeMutating === true,
+    // 新配置默认可写；老配置里明确的 false 仍是用户的只读选择。
+    // 非法值按只读处理，避免手改配置时意外放开权限。
+    includeMutating: raw.includeMutating === undefined || raw.includeMutating === true,
     defaultOnApplied: true
   }
 
@@ -106,10 +108,8 @@ export async function readHostSettings(): Promise<McpHostSettings> {
  * 名叫「对外暴露虚幻引擎能力」的开关。CLI 和第三方 MCP 客户端是两件事，
  * 却共用同一个开关，这个耦合本身就是错的。
  *
- * 另外三条安全属性一条没动，风险面并没有真的变大：
- *   - 只监听 127.0.0.1；
- *   - 强制 token；
- *   - **默认只暴露只读工具**，「同时开放写操作」仍然要用户显式勾。
+ * 服务仍只监听 127.0.0.1，并强制 token。写工具是否开放由
+ * `includeMutating` 决定，老配置里明确的只读选择会保留。
  * 而引擎的本地通道本来就一直开着（插件桥接的 17860 是常驻的）。
  *
  * ## 老用户怎么迁移

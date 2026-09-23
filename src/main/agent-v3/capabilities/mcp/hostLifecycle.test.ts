@@ -23,6 +23,7 @@ vi.mock('electron', () => ({ app: { getPath: () => userData } }))
 import { defineTool, type UnrealAgentTool } from '../../tools/defineTool'
 import { z } from 'zod'
 import {
+  applyMcpServerConfig,
   autoStartMcpServer,
   disableMcpServer,
   mcpServerStatus,
@@ -41,6 +42,18 @@ const TOOLS = [
     description: '测试工具',
     input: z.object({}),
     execute: async () => ({ text: 'ok' })
+  }) as unknown as UnrealAgentTool<never>
+]
+
+const WRITABLE_TOOLS = [
+  ...TOOLS,
+  defineTool({
+    name: 'ue_create_actor',
+    namespace: 'ue.actor',
+    risk: 'mutating',
+    description: '测试写工具',
+    input: z.object({}),
+    execute: async () => ({ text: 'created' })
   }) as unknown as UnrealAgentTool<never>
 ]
 
@@ -131,6 +144,60 @@ describe('对外服务的开关往返', () => {
 })
 
 describe('配置的持久化', () => {
+  it('运行中切换权限会自动重启，保留端口令牌并更新外部工具清单', async () => {
+    const port = nextPort()
+    const started = await startMcpServer(WRITABLE_TOOLS, { port, includeMutating: false })
+    expect(started.exposedTools).toBe(1)
+
+    const oldClient = new Client({ name: 'before-change', version: '1' }, { capabilities: {} })
+    await oldClient.connect(
+      new StreamableHTTPClientTransport(new URL(started.url!), {
+        requestInit: { headers: { Authorization: `Bearer ${started.token}` } }
+      })
+    )
+
+    const unchanged = await applyMcpServerConfig({ includeMutating: false }, () => WRITABLE_TOOLS)
+    expect(unchanged.running).toBe(true)
+    expect((await oldClient.listTools()).tools).toHaveLength(1)
+
+    const writable = await applyMcpServerConfig({ includeMutating: true }, () => WRITABLE_TOOLS)
+    expect(writable).toMatchObject({ running: true, url: started.url, token: started.token })
+    expect(writable.exposedTools).toBe(2)
+    await oldClient.close().catch(() => undefined)
+
+    const newClient = new Client({ name: 'after-change', version: '1' }, { capabilities: {} })
+    await newClient.connect(
+      new StreamableHTTPClientTransport(new URL(writable.url!), {
+        requestInit: { headers: { Authorization: `Bearer ${started.token}` } }
+      })
+    )
+    expect((await newClient.listTools()).tools.map((tool) => tool.name)).toContain(
+      'ue_create_actor'
+    )
+    await newClient.close()
+
+    const readonly = await applyMcpServerConfig({ includeMutating: false }, () => WRITABLE_TOOLS)
+    expect(readonly.running).toBe(true)
+    expect(readonly.exposedTools).toBe(1)
+    expect(onDisk()).toMatchObject({
+      enabled: true,
+      port,
+      token: started.token,
+      includeMutating: false
+    })
+  }, 20_000)
+
+  it('重建工具清单失败时停止旧服务，不留下已撤销的写权限', async () => {
+    await startMcpServer(WRITABLE_TOOLS, { port: nextPort(), includeMutating: true })
+    await expect(
+      applyMcpServerConfig({ includeMutating: false }, () => {
+        throw new Error('工具清单构建失败')
+      })
+    ).rejects.toThrow('工具清单构建失败')
+    expect(mcpServerStatus().running).toBe(false)
+    expect((await readHostSettings()).includeMutating).toBe(false)
+  })
+
   /**
    * 用户报的「配置没有持久化」。
    *

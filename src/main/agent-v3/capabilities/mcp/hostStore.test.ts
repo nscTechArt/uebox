@@ -38,13 +38,25 @@ describe('对外 MCP server 的持久化配置', () => {
    * 代价却是随包发的命令行开箱不可用 —— 而用户完全想不到要去「MCP 设置」里
    * 开一个叫「对外暴露虚幻引擎能力」的开关才能敲 uebox。
    *
-   * 另外三条安全属性一条没动：只监听回环、强制 token、**默认只暴露只读工具**。
+   * 服务仍只监听回环、强制 token；新配置的权限默认可写。
    */
-  it('没配过时默认：自动启动、只读、默认端口', async () => {
+  it('没配过时默认：自动启动、可写、默认端口', async () => {
     const settings = await readHostSettings()
     expect(settings.enabled).toBe(true)
-    expect(settings.includeMutating).toBe(false)
+    expect(settings.includeMutating).toBe(true)
     expect(settings.port).toBe(DEFAULT_HOST_PORT)
+  })
+
+  it('老配置明确选过只读时继续尊重，只缺权限字段才用可写默认值', async () => {
+    writeFileSync(
+      file(),
+      '{"defaultOnApplied":true,"enabled":true,"token":"abc","includeMutating":false}',
+      'utf8'
+    )
+    expect((await readHostSettings()).includeMutating).toBe(false)
+
+    writeFileSync(file(), '{"defaultOnApplied":true,"enabled":true,"token":"abc"}', 'utf8')
+    expect((await readHostSettings()).includeMutating).toBe(true)
   })
 
   describe('「默认开」对老配置的迁移', () => {
@@ -116,7 +128,7 @@ describe('对外 MCP server 的持久化配置', () => {
     expect(settings.token.length).toBeGreaterThanOrEqual(32)
   })
 
-  it('enabled / includeMutating 只认 true —— "true" 字符串不算', async () => {
+  it('enabled / includeMutating 只认布尔值 —— 非法权限值按只读处理', async () => {
     // 带上迁移标记，否则 enabled 会走「老配置按默认开」那条路，测不到类型判断
     writeFileSync(file(), '{"defaultOnApplied":true,"enabled":"true","includeMutating":1}', 'utf8')
     const settings = await readHostSettings()
