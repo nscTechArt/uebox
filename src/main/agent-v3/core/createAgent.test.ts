@@ -1261,15 +1261,15 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('not a secret')
   })
 
-  // 套餐网关会注入「你是虚幻盒子创作者模型」；这里再写 creator-plan/xxx 就两条打架，
+  // 套餐网关会注入「你是 Box-Chat」；这里再写 creator-plan/xxx 就两条打架，
   // 模型会在思考过程里把两段提示词摆出来比
-  it('接的是 Creator Plan：说法和网关一致，不写来源 ID', () => {
+  it('接的是 Box Plan：说法和网关一致，不写来源 ID', () => {
     const prompt = buildSystemPrompt(base, [], {
       providerId: 'creator-plan',
-      modelId: 'uebox-agent'
+      modelId: 'uebox-chat'
     })
 
-    expect(prompt).toContain('UEBox Creator (uebox-agent)')
+    expect(prompt).toContain('Box-Chat (uebox-chat)')
     expect(prompt).not.toContain('creator-plan/')
   })
 

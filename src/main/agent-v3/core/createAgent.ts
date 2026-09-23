@@ -1342,10 +1342,10 @@ function buildRuntimeSection(
   return [
     ...(model
       ? [
-          // 套餐那头的网关会注入「你是虚幻盒子创作者模型」。这里再写 creator-plan/uebox-agent
+          // 套餐那头的网关会注入「你是 Box-Chat」。这里再写 creator-plan/uebox-chat
           // 加一句「直说」，两条说法打架，模型会在思考里把两段提示词摆出来比，全给用户看见了
           isPlanProvider(model.providerId)
-            ? `You are running on UEBox Creator (${model.modelId}), from the user's Creator Plan subscription, which they chose in Unreal Box's settings and can change there.`
+            ? `You are running on Box-Chat (${model.modelId}), from the user's Box Plan subscription, which they chose in Unreal Box's settings and can change there.`
             : `You are running on ${model.providerId}/${model.modelId}, which the user chose in Unreal Box's settings and can change there. Unreal Box is open source and this is not a secret: if they ask what model you are, say so plainly instead of deflecting.`
         ]
       : []),
