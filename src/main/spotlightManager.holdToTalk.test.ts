@@ -70,7 +70,11 @@ vi.mock('electron', () => ({
   app: { getPath: () => 'C:/tmp' }
 }))
 
-vi.mock('node:fs', () => ({ existsSync: () => false, readFileSync: vi.fn(), writeFileSync: vi.fn() }))
+vi.mock('node:fs', () => ({
+  existsSync: () => false,
+  readFileSync: vi.fn(),
+  writeFileSync: vi.fn()
+}))
 vi.mock('fs', () => ({ existsSync: () => false, readFileSync: vi.fn(), writeFileSync: vi.fn() }))
 vi.mock('./appWindows', () => ({ getAppWindows: () => [] }))
 vi.mock('./services', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))

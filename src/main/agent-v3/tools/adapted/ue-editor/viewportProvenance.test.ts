@@ -54,6 +54,8 @@ describe('viewportCameraApiInScript', () => {
   })
 
   it('普通脚本不算', () => {
-    expect(viewportCameraApiInScript('print(unreal.EditorLevelLibrary.get_all_level_actors())')).toBeNull()
+    expect(
+      viewportCameraApiInScript('print(unreal.EditorLevelLibrary.get_all_level_actors())')
+    ).toBeNull()
   })
 })

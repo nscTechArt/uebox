@@ -10,10 +10,7 @@
 
 import { onScopeDispose, ref, type Ref } from 'vue'
 
-import {
-  normalizeSpeechBriefingStyle,
-  type SpeechBriefingStyle
-} from '@core/shared/speechBriefing'
+import { normalizeSpeechBriefingStyle, type SpeechBriefingStyle } from '@core/shared/speechBriefing'
 import { StorageUtils } from '@renderer/common/utils/storage'
 
 /** 与 `aiConfig` store 的 persist key 一致 */

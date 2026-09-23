@@ -11,8 +11,9 @@ import { describe, expect, it } from 'vitest'
  * 白字形在浅色模式里消失，黑字形在深色模式里消失。
  *
  * 正确做法是 .mono-icon（CSS mask）：只取图片的形状，颜色来自 currentColor。
- * ProviderCatalogModal 是明确例外：provider-logos 可能被 Vite 内联成 data URL，
- * 放进 CSS mask 变量后解析失败，只能用原生 img + 主题 filter。
+ * 厂商品牌标是明确例外：provider-logos 可能被 Vite 内联成 data URL，放进 CSS mask
+ * 变量后解析失败，只能用原生 img + 主题 filter。例外按「有没有 import providerLogos」
+ * 认，不按文件名 —— 图标查表是共用的，第三个地方用上它不该再把这条测试顶红。
  *
  * 这个测试守两条，防止其他地方图省事又写回 <img>：
  *
@@ -86,17 +87,18 @@ describe('单色图标', () => {
     for (const file of sourceFiles()) {
       // 注释要先剥掉 —— 否则「解释我们为什么不再这么写」的那段注释
       // 本身就会被当成违规抓出来
-      const text = readFileSync(resolve(ROOT, file), 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/^[ \t]*\/\/.*$/gm, '')
+      const raw = readFileSync(resolve(ROOT, file), 'utf8')
+      const text = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+      // 用厂商品牌标的那些文件（providerLogos 查表）吃例外，见文件头
+      const usesProviderLogos = /from\s+['"][^'"]*providerLogos['"]/.test(raw)
       for (const m of text.matchAll(/filter:\s*([^;]*)/g)) {
         const value = m[1]
         // drop-shadow 只是投影，不改图标本身的颜色，放行
         if (/^\s*drop-shadow/.test(value)) continue
-        const isProviderCatalogThemeFilter =
-          file.endsWith('ProviderCatalogModal.vue') &&
+        const isProviderLogoThemeFilter =
+          usesProviderLogos &&
           (value.trim() === 'brightness(0)' || value.trim() === 'brightness(0) invert(1)')
-        if (!isProviderCatalogThemeFilter && /\binvert\(|\bbrightness\(0\)/.test(value))
+        if (!isProviderLogoThemeFilter && /\binvert\(|\bbrightness\(0\)/.test(value))
           offenders.push(`${file}: filter: ${value.trim()}`)
       }
     }

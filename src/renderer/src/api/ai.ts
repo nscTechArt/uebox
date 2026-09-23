@@ -939,10 +939,7 @@ export const aiAPI = {
    * @returns 口播稿。模型没配、调用失败会**抛错**，返回空话时是空串；
    *          两种情况调用方都退回念原文（见 `speechBriefing` 合成层）。
    */
-  async condenseForSpeech(params: {
-    text: string
-    style: CondensedSpeechStyle
-  }): Promise<string> {
+  async condenseForSpeech(params: { text: string; style: CondensedSpeechStyle }): Promise<string> {
     const response = await aiAPI.chat({
       maxTokens: SPEECH_BRIEFING_MAX_TOKENS[params.style],
       callType: 'speech-briefing',

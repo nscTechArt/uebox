@@ -2,10 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { adaptV2Tool } from '../../adaptV2Tool'
 import { createRunPythonScriptTool } from './runPythonScript'
 import { runEditorPython } from '../../../core/editorPython'
-import {
-  lastViewportMove,
-  resetViewportProvenance
-} from '../ue-editor/viewportProvenance'
+import { lastViewportMove, resetViewportProvenance } from '../ue-editor/viewportProvenance'
 
 vi.mock('../../../core/editorPython', () => ({ runEditorPython: vi.fn() }))
 vi.mock('../../builtin/pathBoundary', () => ({ assertScriptAllowed: () => undefined }))

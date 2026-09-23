@@ -585,7 +585,8 @@ Print String 的屏幕字都不在画面里，哪怕正显示在用户屏幕上�
         if (input.window && !input.show_ui) {
           return {
             success: false,
-            error: 'window 只配合 show_ui=true 使用：点名拍某个编辑器窗口要走抓屏那条路。要看场景就去掉 window。'
+            error:
+              'window 只配合 show_ui=true 使用：点名拍某个编辑器窗口要走抓屏那条路。要看场景就去掉 window。'
           }
         }
 

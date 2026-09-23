@@ -2909,7 +2909,8 @@ export default {
       briefingDetailed: '详细',
       briefingFull: '完整',
       briefingConciseHint: '轻量模型压成三句话以内：做了什么、结果如何、要你做什么。',
-      briefingDetailedHint: '轻量模型提炼要点：结论、关键步骤、需要你决定的事，去掉代码和过程解说。',
+      briefingDetailedHint:
+        '轻量模型提炼要点：结论、关键步骤、需要你决定的事，去掉代码和过程解说。',
       briefingFullHint: '原文照念，不经模型压缩。',
       feedback: '助手反馈',
 

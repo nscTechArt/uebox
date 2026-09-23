@@ -83,7 +83,9 @@ describe('describePositionalRotatorRefusal', () => {
   })
 
   it('两个参数时不瞎猜映射，只给模板', () => {
-    const text = describePositionalRotatorRefusal(findPositionalRotatorCalls('unreal.Rotator(0, 90)'))
+    const text = describePositionalRotatorRefusal(
+      findPositionalRotatorCalls('unreal.Rotator(0, 90)')
+    )
     expect(text).toContain('unreal.Rotator(roll=…, pitch=…, yaw=…)')
   })
 })
