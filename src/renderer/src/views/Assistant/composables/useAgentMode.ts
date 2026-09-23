@@ -28,6 +28,7 @@ import {
 } from './notebookRagContext'
 import { buildLibraryContextMessage, type LibraryChatContext } from './libraryChatContext'
 import { buildCurrentUEProjectContext } from './ueProjectContext'
+import { describeMediaFiles, mergeTurnContext, type ChatMediaFile } from './turnAttachments'
 import { toSessionProjectPayload } from './sessionProjectBinding'
 import { resolvePermissionMode, toApprovalMode } from './sessionPermissionMode'
 import {
@@ -84,6 +85,8 @@ type ExecuteAgentOptions = {
    * 最近连上的那个。排队期间新连上一个工程，执行时就跑到别人身上去了。
    */
   sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
+  /** 这一轮带着的音视频。只带路径，由 agent 自己决定怎么看 —— 见 `turnAttachments.ts` */
+  mediaFiles?: ChatMediaFile[]
 }
 
 export function useAgentMode(params: UseAgentModeParams) {
@@ -659,9 +662,21 @@ export function useAgentMode(params: UseAgentModeParams) {
     const runId = registerSessionHandlers(agentSessionId, chatSid, reportOutcome)
 
     try {
-      const currentUserMessage = isCurrent
+      const historyUserMessage = isCurrent
         ? fullConversationHistory.value[fullConversationHistory.value.length - 1]
         : { role: 'user', content: preparedUserMessage }
+
+      // 附件上下文并进用户这条：内核只收最后一条，单独推一条的话它从来到不了模型
+      const mediaNote = describeMediaFiles(effectiveOptions.mediaFiles ?? [])
+      const currentUserMessage = historyUserMessage
+        ? {
+            ...historyUserMessage,
+            content: mergeTurnContext(historyUserMessage.content as ChatMessageContent, [
+              ...(excelContext ? [excelContext] : []),
+              ...(mediaNote ? [mediaNote] : [])
+            ])
+          }
+        : undefined
       const finalMessages = currentUserMessage
         ? [JSON.parse(JSON.stringify(currentUserMessage))]
         : []

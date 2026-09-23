@@ -751,6 +751,7 @@ import {
   type ModelThinkingSupport
 } from '../composables/thinkingLevels'
 import { buildAgentModelCatalog, type AgentModelOption } from '../composables/agentModelSelection'
+import type { ChatMediaFile } from '../composables/turnAttachments'
 import { resolveFollowUpAction } from '../composables/followUpQueue'
 import { resolveComposerKeyAction } from '../composables/sendShortcut'
 import { formatTokenCount } from '../composables/tokenUsageFormat'
@@ -873,8 +874,10 @@ const emit = defineEmits<{
       excelContext?: string
       /** Excel 文件元数据，用于在 UserBubble 中显示 */
       excelFiles?: Array<{ fileName: string; rowCount?: number }>
-      /** 文档文件元数据，用于在 UserBubble 中显示 */
-      docFiles?: Array<{ fileName: string }>
+      /** 文档与音视频的元数据，用于在 UserBubble 中显示 */
+      docFiles?: Array<{ fileName: string; kind: 'document' | 'video' | 'audio' }>
+      /** 音视频只带路径，由 agent 自己决定怎么看（见 `turnAttachments.ts`） */
+      mediaFiles?: ChatMediaFile[]
       /** 内嵌文档（PDF base64 数据，供 Gemini 直接处理） */
       inlineDocuments?: Array<{ fileName: string; mimeType: string; base64Data: string }>
     }
@@ -1924,6 +1927,11 @@ interface PendingDocFile {
   extraImages?: string[]
   /** 正在做什么。视频那条要跑一阵，界面上得说清此刻卡在哪一步 */
   statusNote?: string
+  /**
+   * 音视频：拖进来只登记路径，不预先分析。路径随消息交给 agent，
+   * 它会带着用户的问题自己去看（见 `turnAttachments.ts`）
+   */
+  deferredMedia?: 'video' | 'audio'
   parsing: boolean
   error?: string
 }
@@ -1956,10 +1964,13 @@ const isSendDisabled = computed(() => {
   // 禁用条件：外部禁用、正在上传/解析、或者没有内容和附件
   if (props.disabled) return true
   if (isUploading.value || isParsingExcel.value) return true
+  // 文档还在解析时发出去，那份会被悄悄漏掉 —— 等它好了再发
+  if (pendingDocFiles.value.some((f) => f.parsing)) return true
   const hasContent = composerContent.value.trim().length > 0
   const hasImages = pendingImages.value.length > 0
   const hasExcel = pendingExcelFiles.value.some((f) => f.content && !f.error)
-  return !hasContent && !hasImages && !hasExcel
+  const hasDocs = pendingDocFiles.value.some((f) => !f.error && (f.content || f.deferredMedia))
+  return !hasContent && !hasImages && !hasExcel && !hasDocs
 })
 
 const placeholderText = computed(() => {
@@ -2277,7 +2288,21 @@ async function addDocFiles(files: File[]): Promise<void> {
       // ArrayBuffer 再序列化过 IPC。网页里拖来的 File 拿不到路径，才退回 buffer
       const filePath = window.api.getPathForFile(file) || ''
 
-      if (filePath) {
+      const mediaKind = CHAT_VIDEO_EXTENSIONS.has(ext)
+        ? 'video'
+        : CHAT_AUDIO_EXTENSIONS.has(ext)
+          ? 'audio'
+          : undefined
+
+      if (filePath && mediaKind) {
+        // 音视频不在这里看：路径随消息交给 agent，它带着用户的问题自己去看
+        pendingDocFiles.value[currentIndex] = {
+          ...pending,
+          filePath,
+          parsing: false,
+          deferredMedia: mediaKind
+        }
+      } else if (filePath) {
         // 进度回调按这条路径认领对应的那一格，所以要先记下来再发起解析
         pendingDocFiles.value[currentIndex] = { ...pending, filePath }
         const result = await window.api.attachment.ingest(filePath)
@@ -2549,10 +2574,15 @@ function handleSend(event?: Event): void {
     .filter((f) => f.content && !f.parsing && !f.error)
     .map((f) => ({ fileName: f.fileName, rowCount: f.rowCount }))
 
-  // 收集文档文件元数据（用于 UserBubble 显示）
+  // 音视频只带路径
+  const mediaFiles: ChatMediaFile[] = pendingDocFiles.value
+    .filter((f) => f.deferredMedia && f.filePath && !f.error)
+    .map((f) => ({ filePath: f.filePath!, fileName: f.fileName, kind: f.deferredMedia! }))
+
+  // 收集文档与音视频的元数据（用于 UserBubble 显示）
   const docFiles = pendingDocFiles.value
-    .filter((f) => f.content && !f.parsing && !f.error)
-    .map((f) => ({ fileName: f.fileName }))
+    .filter((f) => !f.parsing && !f.error && (f.content || f.deferredMedia))
+    .map((f) => ({ fileName: f.fileName, kind: f.deferredMedia ?? ('document' as const) }))
 
   // 发送消息（包含可能的强制来源列表）
   emit('send', {
@@ -2562,7 +2592,8 @@ function handleSend(event?: Event): void {
     forcedSources: mentionedSources.value.length > 0 ? [...mentionedSources.value] : undefined,
     excelContext,
     excelFiles: excelFiles.length > 0 ? excelFiles : undefined,
-    docFiles: docFiles.length > 0 ? docFiles : undefined
+    docFiles: docFiles.length > 0 ? docFiles : undefined,
+    mediaFiles: mediaFiles.length > 0 ? mediaFiles : undefined
   })
 
   // 清空状态

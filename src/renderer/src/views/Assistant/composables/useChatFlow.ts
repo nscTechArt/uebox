@@ -3,7 +3,12 @@ import { message } from '@renderer/utils/messageManager'
 import { aiAPI } from '../../../api/ai'
 import { agentV3API } from '../../../api/agentV3'
 import type { EditorSnapshot } from '@core/shared/editorSnapshot'
-import type { ChatMessageContent, MentionedSource } from '../../../store/modules/chatMessages'
+import type {
+  ChatMessageContent,
+  ExcelFileInfo,
+  MentionedSource
+} from '../../../store/modules/chatMessages'
+import { bubbleAttachments, type ChatMediaFile } from './turnAttachments'
 import { fileToBase64 } from '../../../utils/imageUpload'
 import {
   buildMultimodalContent,
@@ -70,6 +75,7 @@ export interface UseChatFlowParams {
       onFinished?: (outcome: AgentRunOutcome) => void
       editorSnapshot?: EditorSnapshot | null
       sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
+      mediaFiles?: ChatMediaFile[]
     }
   ) => Promise<void>
   scrollToBottom: () => void
@@ -77,7 +83,7 @@ export interface UseChatFlowParams {
   pushUser: (
     content: ChatMessageContent,
     mentionedSources?: MentionedSource[],
-    excelFiles?: Array<{ fileName: string; rowCount?: number }>
+    excelFiles?: ExcelFileInfo[]
   ) => void
   pushAssistantTyping: () => string
 }
@@ -264,6 +270,7 @@ export function useChatFlow(params: UseChatFlowParams) {
       editorSnapshot?: EditorSnapshot | null
       sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
       excelContext?: string
+      mediaFiles?: ChatMediaFile[]
     },
     buildContent: () => ChatMessageContent
   ): Promise<void> {
@@ -288,7 +295,8 @@ export function useChatFlow(params: UseChatFlowParams) {
 
     await executeAgent(buildContent(), payload.excelContext, {
       editorSnapshot: snapshot ?? null,
-      ...(sessionProject ? { sessionProject } : {})
+      ...(sessionProject ? { sessionProject } : {}),
+      ...(payload.mediaFiles?.length ? { mediaFiles: payload.mediaFiles } : {})
     })
   }
 
@@ -299,6 +307,10 @@ export function useChatFlow(params: UseChatFlowParams) {
     forcedSources?: NotebookSourceItem[]
     excelContext?: string
     excelFiles?: Array<{ fileName: string; rowCount?: number }>
+    /** 文档与音视频的元数据，气泡上显示用 */
+    docFiles?: Array<{ fileName: string; kind?: 'document' | 'video' | 'audio' }>
+    /** 随消息带过去的音视频路径，agent 自己决定怎么看 */
+    mediaFiles?: ChatMediaFile[]
     /** 实时语音必须走 Agent，即使用户此前停在生图模式。 */
     forceAgent?: boolean
     /** 语音转写已经作为普通用户气泡显示，交给 Agent 执行时不要再显示一遍。 */
@@ -323,8 +335,19 @@ export function useChatFlow(params: UseChatFlowParams) {
     const forcedSources = payload.forcedSources || []
     const excelContext = allowRichInputs ? payload.excelContext : undefined
     const excelFiles = allowRichInputs ? payload.excelFiles : undefined
+    const mediaFiles = allowRichInputs ? (payload.mediaFiles ?? []) : []
+    const attachmentChips = allowRichInputs
+      ? bubbleAttachments(excelFiles, payload.docFiles)
+      : undefined
 
-    if (!text && images.length === 0 && imageFiles.length === 0 && !excelContext) return
+    if (
+      !text &&
+      images.length === 0 &&
+      imageFiles.length === 0 &&
+      !excelContext &&
+      mediaFiles.length === 0
+    )
+      return
 
     const messageContent = buildMultimodalContent(text, images)
     const displayText = generateDisplayTitle(text, images, isImageGenerationMode.value)
@@ -368,10 +391,12 @@ export function useChatFlow(params: UseChatFlowParams) {
         forcedSources.length > 0
           ? forcedSources.map((s) => ({ id: s.id, title: s.title, type: s.type }))
           : undefined
-      if (!payload.suppressUserMessage) pushUser(messageContent, mentionedSources, excelFiles)
+      if (!payload.suppressUserMessage) pushUser(messageContent, mentionedSources, attachmentChips)
       updateContextChips(displayText)
       ensureSessionWithTitle(sid.value, displayText)
-      void deliverWithEditorSnapshot(payload, () => withSourceScope(messageContent, forcedSources))
+      void deliverWithEditorSnapshot({ ...payload, mediaFiles }, () =>
+        withSourceScope(messageContent, forcedSources)
+      )
     }
 
     nextTick(() => {

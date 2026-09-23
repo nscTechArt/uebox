@@ -40,6 +40,7 @@ import { useTabsStore } from '@renderer/store/modules/tabs'
 import { appExecuteAgent } from './appAgentRunner'
 import { buildMultimodalContent, ensureSessionWithTitle } from './chatSendPrimitives'
 import { dequeueFollowUp, listFollowUps } from './followUpQueue'
+import { bubbleAttachments, type ChatMediaFile } from './turnAttachments'
 
 /**
  * 排着的一条要发出去时，需要的全部东西。
@@ -53,6 +54,9 @@ export interface FollowUpPayload {
   forcedSources?: Array<{ id: string; title: string; type: string }>
   excelContext?: string
   excelFiles?: Array<{ fileName: string; rowCount?: number }>
+  docFiles?: Array<{ fileName: string; kind?: 'document' | 'video' | 'audio' }>
+  /** 随消息带过去的音视频路径，agent 自己决定怎么看 */
+  mediaFiles?: ChatMediaFile[]
   /**
    * 入队那一刻抓好的编辑器快照（闪存）。
    *
@@ -128,7 +132,7 @@ export function useFollowUpDelivery(): void {
       chatSid,
       content,
       sources.length > 0 ? sources : undefined,
-      payload.excelFiles
+      bubbleAttachments(payload.excelFiles, payload.docFiles)
     )
     ensureSessionWithTitle(chatSid, displayText, {
       chatStore,
@@ -140,7 +144,8 @@ export function useFollowUpDelivery(): void {
       chatSid,
       // 原样透传，**不重抓**：负载里有这个键就说明入队那一刻已经定过了
       ...('editorSnapshot' in payload ? { editorSnapshot: payload.editorSnapshot } : {}),
-      ...(payload.sessionProject ? { sessionProject: payload.sessionProject } : {})
+      ...(payload.sessionProject ? { sessionProject: payload.sessionProject } : {}),
+      ...(payload.mediaFiles?.length ? { mediaFiles: payload.mediaFiles } : {})
     })
   }
 

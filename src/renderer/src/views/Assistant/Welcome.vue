@@ -877,7 +877,7 @@ function toggleVoice(): void {
 }
 
 type ComposerSendPayload = Parameters<typeof handleSend>[0] & {
-  docFiles?: Array<{ fileName: string }>
+  docFiles?: Array<{ fileName: string; kind?: 'document' | 'video' | 'audio' }>
   inlineDocuments?: Array<{ fileName: string; mimeType: string; base64Data: string }>
 }
 
@@ -924,6 +924,7 @@ function isSteerable(payload: ComposerSendPayload): boolean {
     payload.content.trim().length > 0 &&
     (payload.forcedSources?.length || 0) === 0 &&
     !payload.excelContext &&
+    (payload.docFiles?.length || 0) === 0 &&
     (payload.inlineDocuments?.length || 0) === 0
   )
 }

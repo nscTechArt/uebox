@@ -30,10 +30,13 @@
               <span class="source-title">{{ source.title }}</span>
             </div>
           </div>
-          <!-- Excel 文件标签区域 -->
+          <!-- 附件标签区域：Excel、文档、音视频 -->
           <div v-if="excelFiles && excelFiles.length > 0" class="excel-files">
             <div v-for="(file, index) in excelFiles" :key="index" class="excel-tag">
-              <PhFileXls class="excel-icon" />
+              <PhFileVideo v-if="file.kind === 'video'" class="excel-icon" />
+              <PhFileAudio v-else-if="file.kind === 'audio'" class="excel-icon" />
+              <PhFileText v-else-if="file.kind === 'document'" class="excel-icon" />
+              <PhFileXls v-else class="excel-icon" />
               <span class="excel-name">{{ file.fileName }}</span>
               <span v-if="file.rowCount" class="excel-rows">{{
                 t('assistantUserBubble.excelRows', { count: file.rowCount })
@@ -71,12 +74,21 @@ import AppButton from '@renderer/components/AppButton.vue'
 import { computed, ref, nextTick } from 'vue'
 import type {
   ChatMessageContent,
+  ExcelFileInfo,
   MultimodalContentItem,
   MentionedSource
 } from '@renderer/store/modules/chatMessages'
 import { useI18n } from 'vue-i18n'
 import { openImageViewer } from '@renderer/services/imageViewer'
-import { PhCheck, PhCopy, PhFileXls, PhPencilSimple } from '@phosphor-icons/vue'
+import {
+  PhCheck,
+  PhCopy,
+  PhFileAudio,
+  PhFileText,
+  PhFileVideo,
+  PhFileXls,
+  PhPencilSimple
+} from '@phosphor-icons/vue'
 
 const { t } = useI18n()
 
@@ -92,8 +104,8 @@ const props = defineProps<{
   content: ChatMessageContent
   /** @提及的来源列表 */
   mentionedSources?: MentionedSource[]
-  /** 上传的 Excel 文件列表 */
-  excelFiles?: Array<{ fileName: string; rowCount?: number }>
+  /** 附带的文件列表。名字是存量，现在 Excel、文档、音视频都在里面，按 kind 选图标 */
+  excelFiles?: ExcelFileInfo[]
 }>()
 
 const emit = defineEmits<{

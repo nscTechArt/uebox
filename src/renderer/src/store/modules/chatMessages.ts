@@ -54,6 +54,11 @@ export interface MentionedSource {
 export interface ExcelFileInfo {
   fileName: string
   rowCount?: number
+  /**
+   * 附件种类，气泡据此选图标。名字沿用 Excel 是存量 —— 它早就不只装表格了。
+   * 不填按 Excel 算，兼容已经存下来的老消息
+   */
+  kind?: 'excel' | 'document' | 'video' | 'audio'
 }
 
 /**
