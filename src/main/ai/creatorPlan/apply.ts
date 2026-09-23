@@ -102,6 +102,12 @@ export function planRoleSpecs(
   return out
 }
 
+/** 清单里的显示名；`beta: true` 的角色（目前是音乐）在名字后标「Beta」 */
+function displayNameOf(spec: PlanRoleSpec): string {
+  const name = spec.display_name ?? spec.model
+  return spec.beta === true ? `${name} (Beta)` : name
+}
+
 function chatModel(spec: CreatorPlanChatSpec): ModelConfig {
   const efforts = new Set(spec.reasoning_efforts ?? [])
   return {
@@ -184,7 +190,7 @@ function toModelConfig(role: ModelRole, spec: PlanRoleSpec): ModelConfig {
   if (kind === 'chat') return chatModel(spec as unknown as CreatorPlanChatSpec)
   return {
     id: spec.model,
-    displayName: spec.display_name ?? spec.model,
+    displayName: displayNameOf(spec),
     ...MODEL_OF_KIND[kind](spec)
   }
 }
@@ -296,7 +302,7 @@ export function planRoleChanges(
       {
         role,
         model: spec.model,
-        modelDisplayName: spec.display_name ?? spec.model,
+        modelDisplayName: displayNameOf(spec),
         current:
           binding && provider
             ? {

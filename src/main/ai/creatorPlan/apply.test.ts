@@ -145,6 +145,24 @@ describe('planProviders', () => {
 })
 
 describe('planProviders 非对话角色', () => {
+  it('清单标了 beta 的角色，显示名后面带「(Beta)」', () => {
+    const beta: CreatorPlanManifest = {
+      ...fullManifest,
+      roles: {
+        ...fullManifest.roles,
+        music: { ...fullManifest.roles.music!, display_name: 'Creator · Music', beta: true }
+      }
+    }
+    const music = planProviders(beta, keyRef).find((p) => p.id === 'creator-plan-music')!
+    expect(music.models[0]!.displayName).toBe('Creator · Music (Beta)')
+    const change = planRoleChanges({ version: 3, providers: [], roles: {} }, beta).find(
+      (c) => c.role === 'music'
+    )!
+    expect(change.modelDisplayName).toBe('Creator · Music (Beta)')
+    const video = planProviders(beta, keyRef).find((p) => p.id === 'creator-plan-video')!
+    expect(video.models[0]!.displayName).not.toContain('Beta')
+  })
+
   it('一类一个来源，id 固定、共用一把 Key，各类的调用形状写在模型或来源上', () => {
     const providers = planProviders(fullManifest, keyRef)
     expect(providers.map((p) => [p.kind, p.id])).toEqual([
