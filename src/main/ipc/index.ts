@@ -13,6 +13,7 @@ import { registerAgentV3IPC } from './agentV3'
 import { registerAgentBrowserIPC } from './agentBrowser'
 import { registerUpdaterIPC } from './updater'
 import { registerCliIPC } from './cli'
+import { registerObjectStorageIPC } from './objectStorage'
 import { registerSpotlightIPC } from './spotlight'
 import { registerWebSocketIPC } from './websocket'
 import { registerAIGCIPC } from './aigc'
@@ -86,6 +87,7 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
   // 注册更新相关IPC
   registerUpdaterIPC()
   registerCliIPC()
+  registerObjectStorageIPC()
 
   // 注册 Spotlight 搜索相关 IPC
   registerSpotlightIPC()

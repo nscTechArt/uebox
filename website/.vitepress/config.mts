@@ -189,6 +189,7 @@ export default defineConfig({
           text: '参考',
           items: [
             { text: '设置速查', link: '/guide/settings' },
+            { text: '对象存储', link: '/guide/object-storage' },
             { text: '快捷键', link: '/guide/shortcuts' },
             { text: '出问题了', link: '/guide/troubleshooting' },
             { text: '文件都放在哪', link: '/guide/where-is-my-data' }

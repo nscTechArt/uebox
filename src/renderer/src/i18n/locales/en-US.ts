@@ -2588,6 +2588,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       asset: 'Asset Library',
       plugin: 'Plugins',
       cli: 'Command line',
+      objectStorage: 'Object storage',
       namingRules: 'Naming Rules',
       about: 'About'
     },
@@ -2983,6 +2984,68 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       settingSaveFailed: 'Failed to save setting',
       // Save button
       saveChanges: 'Save Changes'
+    },
+    objectStorage: {
+      title: 'Object storage',
+      enable: 'Enable object storage',
+      enableDesc:
+        'Connect your own S3-compatible bucket. Features that need files in the cloud use it; today that is video and audio in chat',
+      connectedSummary: '{provider} · {bucket} ({region})',
+      edit: 'Edit',
+      advanced: 'Advanced settings',
+      hideAdvanced: 'Hide advanced settings',
+      privacyNote: 'Files leave this machine and are read via links by the services that use them',
+      connection: 'Connection',
+      preset: 'Provider',
+      presets: {
+        aws: 'Amazon S3',
+        aliyun: 'Alibaba Cloud OSS',
+        tencent: 'Tencent Cloud COS',
+        r2: 'Cloudflare R2',
+        minio: 'MinIO',
+        custom: 'Other S3-compatible'
+      },
+      region: 'Region',
+      bucket: 'Bucket',
+      endpoint: 'Endpoint',
+      endpointHint:
+        'Without the bucket name. For R2, put in your own account ID. The model provider must reach this address from the internet, so a local or intranet MinIO will not work.',
+      accessKeyId: 'Access key ID',
+      secret: 'Secret access key',
+      secretSaved: 'Saved. Leave blank to keep it',
+      secretPlaceholder: 'Stored in secure storage on this machine, never shown again',
+      prefix: 'Key prefix',
+      publicBaseUrl: 'Public base URL (optional)',
+      publicBaseUrlHint:
+        'Optional: links are signed, so the model can read files in a private bucket. They last 7 days and renew automatically. A public URL never expires and is the most cache-friendly, but the bucket must allow public reads.',
+      pathStyle: 'Path-style addressing',
+      pathStyleDesc: 'Turn on for MinIO and R2; leave off for Alibaba Cloud, Tencent Cloud and AWS',
+      test: 'Test connection',
+      save: 'Save',
+      saved: 'Saved',
+      saveFailed: 'Save failed',
+      loadFailed: 'Failed to load settings: {error}',
+      autoClean: 'Auto-clean (days)',
+      autoCleanDesc: 'At startup, delete files older than this many days. 0 turns it off',
+      objects: 'Uploaded files',
+      summary: '{count} files · {size}',
+      selectAll: 'Select all',
+      refresh: 'Refresh',
+      removeSelected: 'Delete selected ({count})',
+      cleanOldPrefix: 'Delete older than',
+      cleanOld: 'days',
+      removeAll: 'Delete all',
+      empty: 'Nothing uploaded yet',
+      listFailed: 'Failed to list files',
+      removeSelectedTitle: 'Delete {count} selected files?',
+      removeAllTitle: 'Delete all {count} files under the prefix?',
+      cleanTitle: 'Delete files uploaded more than {days} days ago?',
+      removeHint:
+        'They are removed from the bucket and cannot be recovered. Conversations that referenced them will no longer show them to the model.',
+      removeOk: 'Delete',
+      removed: 'Deleted {count} files',
+      removedPartly: 'Deleted {removed}; {failed} could not be deleted',
+      removeFailed: 'Delete failed'
     },
     cli: {
       title: 'Command line',
@@ -5045,6 +5108,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     }
   },
   assistantInputComposer: {
+    mediaUploading: 'Uploading {percent}%',
     voice: {
       start: 'Start voice session',
       cancelConnection: 'Cancel connection',
@@ -5203,6 +5267,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         'No video-capable model configured, so {name} was sampled into frames instead (no audio, no motion between frames)',
       videoNeedsLocalFile:
         'Drop the video from a folder or pick it with the paperclip — a video dragged straight from a web page has no file path',
+      mediaUploadFailed:
+        '{name} could not be pre-uploaded to object storage; it will be retried on send: {error}',
       unsupportedFile: 'These files cannot be attached: {name}',
       noWikiBound: 'No knowledge base is currently bound',
       compacted: 'Compacted: {before} messages → {after}, about {saved} tokens saved',

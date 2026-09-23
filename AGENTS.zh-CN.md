@@ -192,6 +192,20 @@ pnpm verify             # 约 3.5 分钟 —— 完整门禁
     （`readUeTextFile` / `readUeJsonFile` / `decodeUeText`），写回去用不带 BOM 的 UTF-8
     （引擎没有 BOM 时按 UTF-8 解，5.0–5.8 一致）。门禁见 `scripts/check-ue-file-reads.mjs`。
 
+13. **多媒体进模型：先走对象存储，走不通再退。** 图片、视频、音频 —— 凡是用户交给模型
+    的多媒体，先传到用户自己配的对象存储（设置 → 对象存储），给模型一个链接。只有存储
+    没配、模型收不了这一类的链接、或者这次上传失败，才退回旧路：图片走 base64，
+    音视频只给本地路径、由 agent 用 `analyze_video` 去看。base64 跟着整条 transcript
+    每轮重发，一大就撞请求预算（`requestBudget.ts` 从最大的开始丢），还会撞厂商的
+    体积上限；链接只有几百字节。退的每一步都不许打断这一轮：判断出错、上传失败，
+    只让那一个文件降级，消息照发。
+    做决定的地方只有一处：`src/main/agent-v3/core/promptMedia.ts`
+    （`preparePromptImages` / `preparePromptMedia`）；引用在发送时由 `streamFn.ts`
+    改写成 `image_url` / `video_url` / `input_audio`。接新的媒体类型就接进这个文件，
+    **不要另开一条上传路径**。
+    工具产出的图（编辑器截图、联系表）**不走这条**：一轮工具循环里截图很多，每张都先
+    上传会拖慢每一步，编辑器画面也不该默认进第三方存储（见 `screenshot.ts` 文件头）。
+
 ## 6. 提交与 PR
 
 - Conventional Commits + **中文**描述，和现有历史保持一致：

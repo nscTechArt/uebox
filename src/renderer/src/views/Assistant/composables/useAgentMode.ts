@@ -28,7 +28,7 @@ import {
 } from './notebookRagContext'
 import { buildLibraryContextMessage, type LibraryChatContext } from './libraryChatContext'
 import { buildCurrentUEProjectContext } from './ueProjectContext'
-import { describeMediaFiles, mergeTurnContext, type ChatMediaFile } from './turnAttachments'
+import { mergeTurnContext, type ChatMediaFile } from './turnAttachments'
 import { toSessionProjectPayload } from './sessionProjectBinding'
 import { resolvePermissionMode, toApprovalMode } from './sessionPermissionMode'
 import {
@@ -85,7 +85,7 @@ type ExecuteAgentOptions = {
    * 最近连上的那个。排队期间新连上一个工程，执行时就跑到别人身上去了。
    */
   sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
-  /** 这一轮带着的音视频。只带路径，由 agent 自己决定怎么看 —— 见 `turnAttachments.ts` */
+  /** 这一轮带着的音视频路径。怎么让模型看由主进程决定，见主进程 `core/promptMedia.ts` */
   mediaFiles?: ChatMediaFile[]
 }
 
@@ -667,14 +667,14 @@ export function useAgentMode(params: UseAgentModeParams) {
         : { role: 'user', content: preparedUserMessage }
 
       // 附件上下文并进用户这条：内核只收最后一条，单独推一条的话它从来到不了模型
-      const mediaNote = describeMediaFiles(effectiveOptions.mediaFiles ?? [])
+      // 音视频不在这里拼：怎么让模型看（传对象存储换链接，还是只给路径）由主进程定
       const currentUserMessage = historyUserMessage
         ? {
             ...historyUserMessage,
-            content: mergeTurnContext(historyUserMessage.content as ChatMessageContent, [
-              ...(excelContext ? [excelContext] : []),
-              ...(mediaNote ? [mediaNote] : [])
-            ])
+            content: mergeTurnContext(
+              historyUserMessage.content as ChatMessageContent,
+              excelContext ? [excelContext] : []
+            )
           }
         : undefined
       const finalMessages = currentUserMessage
@@ -813,6 +813,7 @@ export function useAgentMode(params: UseAgentModeParams) {
           ...(effectiveOptions.editorSnapshot !== undefined
             ? { editorSnapshot: effectiveOptions.editorSnapshot }
             : {}),
+          ...(effectiveOptions.mediaFiles?.length ? { mediaFiles: effectiveOptions.mediaFiles } : {}),
           // 绑了知识库才给模型检索工具。上面注入的那份是**这一轮**的地基（顺带出引用），
           // 工具管的是它看完之后想换个说法再查 —— 那件事注入做不到
           notebook: notebookRagTarget?.notebookId

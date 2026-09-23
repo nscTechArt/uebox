@@ -8,6 +8,7 @@ import {
   PhBookOpenText,
   PhChartBar,
   PhChatCircle,
+  PhCloudArrowUp,
   PhDatabase,
   PhTerminalWindow,
   PhFileText,
@@ -173,6 +174,11 @@ const menuGroups: MenuGroup[] = [
         key: 'notebook',
         labelKey: 'profile.menu.notebook',
         icon: PhBookOpenText
+      },
+      {
+        key: 'objectStorage',
+        labelKey: 'profile.menu.objectStorage',
+        icon: PhCloudArrowUp
       },
       {
         key: 'plugin',

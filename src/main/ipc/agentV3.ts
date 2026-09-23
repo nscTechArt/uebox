@@ -9,6 +9,12 @@ import { randomUUID } from 'crypto'
 
 import type { ImageContent } from '@earendil-works/pi-ai'
 import { admitPromptImages } from '../agent-v3/core/admitPromptImages'
+import {
+  mediaRefText,
+  preparePromptImages,
+  preparePromptMedia,
+  type PromptMediaFile
+} from '../agent-v3/core/promptMedia'
 import { formatAttachmentBlock, savePromptAttachments } from '../agent-v3/core/promptAttachments'
 import { runAgentV3Smoke } from '../agent-v3/smoke'
 import {
@@ -370,6 +376,13 @@ export interface AgentV3ExecuteArgs {
    * 会被静默丢掉 —— 界面显示图发出去了，模型却什么也没看到。
    */
   images?: ImageContent[]
+  /**
+   * 随这轮一起带的音视频（本地路径）。
+   *
+   * 配了对象存储、当前模型又能直接看视频，就传上去换成链接随消息发；
+   * 否则只给路径，agent 需要时自己用 `analyze_video` 去看。见 `core/promptMedia.ts`。
+   */
+  mediaFiles?: PromptMediaFile[]
   /**
    * 这条会话归属的工程（侧边栏分组用的那个戳）。
    *
@@ -1613,14 +1626,39 @@ export function registerAgentV3IPC(): void {
       // 闪存块排在附件块前面、信封后面：三块都是「机器核对过的事实」，
       // 按「这一轮的环境 → 用户带来的东西 → 用户说的话」由外向内排
       const snapshotBlock = editorSnapshotBlock(args.editorSnapshot, scope, sessionId)
-      // 落盘用的是原图（工具要拿它干活），进上下文的那份要过关口 ——
-      // 渲染层压过，但那是尽力而为，见 admitPromptImages
-      const admitted = await admitPromptImages(args.images)
-      const userText = [snapshotBlock, attachmentBlock, ...admitted.notices, promptText]
+      /*
+       * 多媒体先走对象存储，走不通再退（AGENTS.md 第 5 节，见 promptMedia.ts）。
+       *
+       * 图片：传得上去的变成引用，发请求时换成 image_url 链接；传不上去的交回
+       * base64 那条路 —— 进上下文前要过关口，渲染层压过但那是尽力而为，见 admitPromptImages。
+       * 音视频：传得上去的变成引用，传不上去的只给路径。
+       * 引用都是独立的文本块，发请求时才在 streamFn 里换成厂商认的多媒体块。
+       */
+      const pictures = await preparePromptImages(args.images ?? [], selection)
+      const admitted = await admitPromptImages(pictures.inline)
+      const media = await preparePromptMedia(args.mediaFiles ?? [], selection, (note) =>
+        emit('agent-v3:notice', { sessionId, message: note, level: 'info' })
+      )
+      run.controller.signal.throwIfAborted()
+      const userText = [snapshotBlock, attachmentBlock, ...admitted.notices, media.note, promptText]
         .filter(Boolean)
         .join('\n\n')
+      const promptWithEnvelope = withRuntimeEnvelope(userText, envelope)
 
-      await agent.prompt(withRuntimeEnvelope(userText, envelope), admitted.images)
+      const mediaRefs = [...pictures.refs, ...media.refs]
+      if (mediaRefs.length === 0) {
+        await agent.prompt(promptWithEnvelope, admitted.images)
+      } else {
+        await agent.prompt({
+          role: 'user',
+          content: [
+            { type: 'text', text: promptWithEnvelope },
+            ...mediaRefs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
+            ...admitted.images
+          ],
+          timestamp: Date.now()
+        })
+      }
 
       // pi 把 provider 失败编码进事件流而不是抛异常，所以 prompt() 正常返回
       // 也可能什么都没发生。agent.state.errorMessage 是权威判据 ——

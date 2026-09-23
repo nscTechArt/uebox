@@ -2,6 +2,7 @@ import type { StreamFn } from '@earendil-works/pi-agent-core'
 import {
   createModels,
   getSupportedThinkingLevels,
+  type Api,
   type Context,
   type Model,
   type ModelThinkingLevel,
@@ -20,6 +21,13 @@ import {
 import type { AiProviderSettings, ModelRequest, ModelRole } from '../../ai/types'
 import { classifyProviderError } from '../host/providerError'
 import { toPiProvider } from './piModel'
+import {
+  contextHasMediaRefs,
+  mediaUrlKinds,
+  replaceMediaRefs,
+  rewriteMediaInPayload
+} from './promptMedia'
+import { isObjectRemoved, mediaUrlFor } from '../../services/objectStorage/objectStorageService'
 import {
   budgetFor,
   noteOversizedRequest,
@@ -260,6 +268,8 @@ export async function resolveAgentModel(
   }
 
   const reasoning = toPiReasoning(thinkingLevel)
+  // 对话里的多媒体引用，这个模型能直接收哪几类链接，见 promptMedia.ts
+  const urlKinds = mediaUrlKinds(settings, selection.providerId, selection.modelId)
 
   return {
     selection,
@@ -281,9 +291,26 @@ export async function resolveAgentModel(
             `已丢掉 ${projected.droppedImages} 张图（最大的优先），换成占位文字`
         )
       }
-      const stream = models.streamSimple(model, projected.context, {
+      // 收不了的那几类先换成说明，剩下的（如果还有）在 onPayload 里换成链接
+      const outgoing = replaceMediaRefs(projected.context, urlKinds)
+      const hasMedia = contextHasMediaRefs(outgoing)
+      const previousOnPayload = options?.onPayload
+      const stream = models.streamSimple(model, outgoing, {
         ...options,
-        ...(reasoning ? { reasoning } : {})
+        ...(reasoning ? { reasoning } : {}),
+        ...(hasMedia
+          ? {
+              onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
+                const upstream = await previousOnPayload?.(payload, payloadModel)
+                const current = upstream === undefined ? payload : upstream
+                const rewritten = await rewriteMediaInPayload(current, {
+                  urlFor: mediaUrlFor,
+                  isRemoved: isObjectRemoved
+                })
+                return rewritten === undefined ? upstream : rewritten
+              }
+            }
+          : {})
       })
       // 没量出来（bytes < 0）就没有可学的数 —— 别拿一个假数去调这家的预算
       if (projected.bytes >= 0) {

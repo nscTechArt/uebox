@@ -1,12 +1,13 @@
 /**
  * 这一轮带着的附件，怎么变成 agent 真正收到的那条用户消息。
  *
- * ## 音视频只带路径，不预先分析
+ * ## 音视频不预先分析，只把路径交给主进程
  *
  * 原来拖进来那一刻就让视频模型看一遍，把描述塞进对话。两个毛病：那时用户还一个字
  * 没打，模型只能泛泛描述，用户真正要问的细节多半不在里面；而且拖进来就花一次调用。
- * agent 自己有 `analyze_video`，能带着用户的问题去看 —— 把路径交给它就够了。
- * 当前模型看不了视频时，它自己会说，不需要这边先替它判断、再抽帧兜底。
+ * 现在路径随消息交给主进程：配了对象存储、当前模型又能看视频，就换成链接让它在
+ * 同一轮里直接看；否则只给路径，agent 自己用 `analyze_video` 去看
+ * （见主进程 `agent-v3/core/promptMedia.ts`）。
  *
  * ## 为什么附件上下文要并进用户那条消息
  *
@@ -24,24 +25,11 @@ import type {
 /** 附件种类。卡片据此选图标和颜色 */
 export type AttachmentKind = NonNullable<ExcelFileInfo['kind']>
 
-/** 随消息带过去的音视频。只有路径，内容由 agent 自己去看 */
+/** 随消息带过去的音视频。只有路径，怎么让模型看由主进程决定 */
 export interface ChatMediaFile {
   filePath: string
   fileName: string
   kind: 'video' | 'audio'
-}
-
-/** 音视频附件写成给 agent 看的一段话：是什么、在哪、怎么看 */
-export function describeMediaFiles(files: ChatMediaFile[]): string | undefined {
-  if (files.length === 0) return undefined
-  const lines = files.map(
-    (file) => `- ${file.kind === 'video' ? '视频' : '音频'}：${file.fileName}（本地路径：${file.filePath}）`
-  )
-  return [
-    '【用户附带的音视频】',
-    ...lines,
-    '这些文件没有预先分析。需要知道内容时，用 `analyze_video` 去看（`video_path` 填上面的路径，`question` 填用户想知道的）。'
-  ].join('\n')
 }
 
 /**

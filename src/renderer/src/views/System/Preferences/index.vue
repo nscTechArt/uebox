@@ -22,6 +22,7 @@ import McpSettings from './panels/Mcp/McpSettings.vue'
 import ProfileProject from './panels/ProfileProject.vue'
 import ProfilePlugin from './panels/ProfilePlugin.vue'
 import ProfileCli from './panels/ProfileCli.vue'
+import ProfileObjectStorage from './panels/ProfileObjectStorage.vue'
 import ProfileAsset from './panels/ProfileAsset.vue'
 import ProfileNotebook from './panels/ProfileNotebook.vue'
 import ProfileNamingRules from './panels/ProfileNamingRules.vue'
@@ -94,6 +95,9 @@ const pageHeaders: Record<string, { titleKey: string; descKey?: string }> = {
   cli: {
     titleKey: 'profile.cli.title',
     descKey: 'profile.cli.description'
+  },
+  objectStorage: {
+    titleKey: 'profile.objectStorage.title'
   },
   asset: {
     titleKey: 'profile.asset.title'
@@ -233,6 +237,9 @@ function handleMenuChange(key: string): void {
 
             <!-- 资产设置 -->
             <ProfileAsset v-else-if="activeKey === 'asset'" />
+
+            <!-- 对象存储：聊天里的音视频传上去换链接，模型直接看 -->
+            <ProfileObjectStorage v-else-if="activeKey === 'objectStorage'" />
 
             <!-- 知识库设置 -->
             <ProfileNotebook v-else-if="activeKey === 'notebook'" />

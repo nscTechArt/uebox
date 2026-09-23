@@ -215,6 +215,24 @@ until it is met:
     `decodeUeText`); write back as UTF-8 without a BOM (with no BOM the engine decodes as
     UTF-8, identically on 5.0-5.8). Gate: `scripts/check-ue-file-reads.mjs`.
 
+13. **Media going to a model tries object storage first, and falls back only when that
+    does not work.** Images, video, audio — anything a user hands to a model — is
+    uploaded to the user's own object storage (Settings → Object storage) and sent as a
+    link. Only when storage is not configured, the model cannot take a link for that
+    kind, or the upload fails does it fall back to the old path: base64 for images, a
+    local path plus the `analyze_video` tool for video and audio. Base64 is resent with
+    the whole transcript on every turn, runs into the request budget
+    (`requestBudget.ts` drops the largest first) and hits provider size caps; a link is a
+    few hundred bytes. Every step of the fallback must be silent to the turn: a failed
+    check or upload degrades that one file, never aborts the message.
+    The single place that decides is `src/main/agent-v3/core/promptMedia.ts`
+    (`preparePromptImages` / `preparePromptMedia`); references are rewritten into
+    `image_url` / `video_url` / `input_audio` at send time in `streamFn.ts`. A new media
+    type plugs into that file — do not add a second upload path.
+    Tool output (editor screenshots, contact sheets) is **not** covered: a tool loop
+    produces many of them, uploading each would slow every step, and editor pixels must
+    not reach third-party storage by default (see the header of `screenshot.ts`).
+
 ## 6. Commits and PRs
 
 - Conventional Commits with a **Chinese** description, matching existing history:

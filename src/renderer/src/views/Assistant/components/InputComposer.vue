@@ -76,7 +76,7 @@
         :key="`doc-${index}`"
         :file-name="doc.fileName"
         :kind="docKind(doc)"
-        :busy="doc.parsing"
+        :busy="doc.parsing || doc.uploading"
         :note="doc.statusNote"
         :error="doc.error"
         removable
@@ -740,6 +740,7 @@ import {
 } from '../composables/thinkingLevels'
 import { buildAgentModelCatalog, type AgentModelOption } from '../composables/agentModelSelection'
 import type { AttachmentKind, ChatMediaFile } from '../composables/turnAttachments'
+import { objectStorageAPI } from '@renderer/api/objectStorage'
 import { resolveFollowUpAction } from '../composables/followUpQueue'
 import { resolveComposerKeyAction } from '../composables/sendShortcut'
 import { formatTokenCount } from '../composables/tokenUsageFormat'
@@ -1918,6 +1919,10 @@ interface PendingDocFile {
    * 它会带着用户的问题自己去看（见 `turnAttachments.ts`）
    */
   deferredMedia?: 'video' | 'audio'
+  /**
+   * 正在传对象存储（配了才有）。不挡发送：发送时主进程会接上同一次上传
+   */
+  uploading?: boolean
   parsing: boolean
   error?: string
 }
@@ -2288,6 +2293,7 @@ async function addDocFiles(files: File[]): Promise<void> {
           parsing: false,
           deferredMedia: mediaKind
         }
+        void startMediaUpload(filePath, file.name)
       } else if (filePath) {
         // 进度回调按这条路径认领对应的那一格，所以要先记下来再发起解析
         pendingDocFiles.value[currentIndex] = { ...pending, filePath }
@@ -2378,6 +2384,40 @@ onMounted(() => {
   const off = window.api.attachment?.onProgress(({ filePath, note }) => {
     const target = pendingDocFiles.value.find((f) => f.parsing && f.filePath === filePath)
     if (target) target.statusNote = note
+  })
+  if (off) onUnmounted(off)
+})
+
+/**
+ * 配了对象存储就趁用户打字的工夫先传。
+ *
+ * 失败了不挂在卡片上当错误：发送时主进程会再试一次，再不行就只给路径，
+ * 这条消息照样发得出去。这里只提一句，免得用户以为已经传好了。
+ */
+async function startMediaUpload(filePath: string, fileName: string): Promise<void> {
+  if (!(await objectStorageAPI.ready())) return
+  const find = (): PendingDocFile | undefined =>
+    pendingDocFiles.value.find((f) => f.filePath === filePath && f.deferredMedia)
+  const target = find()
+  if (!target) return
+  target.uploading = true
+  target.statusNote = t('assistantInputComposer.mediaUploading', { percent: 0 })
+  const result = await objectStorageAPI.upload(filePath)
+  const current = find()
+  if (!current) return
+  current.uploading = false
+  current.statusNote = undefined
+  if (!result.success) {
+    message.warning(
+      t('assistantInputComposer.toast.mediaUploadFailed', { name: fileName, error: result.error })
+    )
+  }
+}
+
+onMounted(() => {
+  const off = objectStorageAPI.onUploadProgress(({ filePath, percent }) => {
+    const target = pendingDocFiles.value.find((f) => f.uploading && f.filePath === filePath)
+    if (target) target.statusNote = t('assistantInputComposer.mediaUploading', { percent })
   })
   if (off) onUnmounted(off)
 })

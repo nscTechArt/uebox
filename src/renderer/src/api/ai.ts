@@ -330,6 +330,8 @@ export interface AgentExecuteParams {
    * 键不存在才表示这个入口还没接闪存。
    */
   editorSnapshot?: EditorSnapshot | null
+  /** 随这轮带的音视频（本地路径）。怎么让模型看由主进程决定，见 `core/promptMedia.ts` */
+  mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
 }
 
 export interface TtsNovelCreateRequest {
@@ -1053,6 +1055,16 @@ ${params.text}
         // （都不拼块），但少传一个键能让「这个入口还没接闪存」在日志里看得出来
         ...(params.editorSnapshot !== undefined
           ? { editorSnapshot: toPlainEditorSnapshot(params.editorSnapshot) }
+          : {}),
+        // 拍成普通对象：store 里那份可能是响应式代理，过不了 IPC 的结构化克隆
+        ...(params.mediaFiles?.length
+          ? {
+              mediaFiles: params.mediaFiles.map(({ filePath, fileName, kind }) => ({
+                filePath,
+                fileName,
+                kind
+              }))
+            }
           : {})
       })
       .then((result: { success?: boolean; error?: string; code?: string } | undefined) => {

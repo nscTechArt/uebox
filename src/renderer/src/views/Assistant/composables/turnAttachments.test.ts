@@ -3,7 +3,7 @@
  *
  * 两层原因，这里各钉一条：
  * - 附件上下文作为单独一条推进历史，而内核只收最后一条 —— 并进用户那条才到得了模型。
- * - 视频要带着**路径**过去，agent 才能自己用 `analyze_video` 去看。
+ * - 气泡上要看得见带了什么，用户才能确认附件真的发出去了。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -11,26 +11,8 @@ import { describe, expect, it } from 'vitest'
 import {
   attachmentExtension,
   bubbleAttachments,
-  describeMediaFiles,
   mergeTurnContext
 } from './turnAttachments'
-
-describe('describeMediaFiles', () => {
-  it('把本地路径原样交给 agent，并指明用哪个工具看', () => {
-    const note = describeMediaFiles([
-      { filePath: 'D:\\素材\\9月19日.mp4', fileName: '9月19日.mp4', kind: 'video' },
-      { filePath: 'D:\\素材\\旁白.m4a', fileName: '旁白.m4a', kind: 'audio' }
-    ])
-
-    expect(note).toContain('视频：9月19日.mp4（本地路径：D:\\素材\\9月19日.mp4）')
-    expect(note).toContain('音频：旁白.m4a（本地路径：D:\\素材\\旁白.m4a）')
-    expect(note).toContain('analyze_video')
-  })
-
-  it('没有音视频就不产出任何东西', () => {
-    expect(describeMediaFiles([])).toBeUndefined()
-  })
-})
 
 describe('mergeTurnContext', () => {
   it('附件放在用户的话前面，并成同一条', () => {

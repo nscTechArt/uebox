@@ -92,6 +92,8 @@ const GENERIC_EVENT_CHANNELS = new Set([
   // 两条会话抢同一个资产。必须让用户看见 —— 他可能开着两个窗口，
   // 以为两边在干不同的活
   'agent-v3:lock-conflict',
+  // 这一轮开跑前的准备进度（音视频传对象存储）。几百 MB 要传好一阵，不说一声像卡住了
+  'agent-v3:notice',
   // agent 反问用户。界面在时间线上长一张选项卡片，用户点完经 question-reply 回传
   'agent-v3:question-required',
   // 这条会话**真的**空出来了（锁放了、run 摘了）。界面上排队的跟进消息等的是
@@ -1383,6 +1385,8 @@ const api = {
       editorScreenshotEnabled?: boolean
       /** 随这轮一起发的图片。pi 的 prompt(input, images?) 原生支持 */
       images?: Array<{ type: 'image'; data: string; mimeType: string }>
+      /** 随这轮带的音视频（本地路径）。主进程决定传对象存储换链接，还是只给路径 */
+      mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
       /**
        * 这条会话归属的 UE 工程（侧边栏分组用的那个戳）。
        *
@@ -1733,6 +1737,30 @@ const api = {
     addToPath: () => ipcRenderer.invoke('cli:add-to-path'),
     removeFromPath: () => ipcRenderer.invoke('cli:remove-from-path'),
     reveal: () => ipcRenderer.invoke('cli:reveal')
+  },
+  /**
+   * 对象存储（用户自己的 S3 兼容桶）。聊天里的音视频传上去换链接，模型直接看。
+   * Secret 只进不出：读配置只回 `hasSecret`
+   */
+  objectStorage: {
+    get: () => ipcRenderer.invoke('object-storage:get'),
+    save: (input: unknown) => ipcRenderer.invoke('object-storage:save', input),
+    test: (input: unknown) => ipcRenderer.invoke('object-storage:test', input),
+    ready: () => ipcRenderer.invoke('object-storage:ready'),
+    list: () => ipcRenderer.invoke('object-storage:list'),
+    remove: (keys: string[]) => ipcRenderer.invoke('object-storage:remove', keys),
+    clean: (days: number) => ipcRenderer.invoke('object-storage:clean', days),
+    upload: (filePath: string) => ipcRenderer.invoke('object-storage:upload', filePath),
+    onUploadProgress: (
+      callback: (payload: { filePath: string; percent: number; note: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _e: unknown,
+        payload: { filePath: string; percent: number; note: string }
+      ): void => callback(payload)
+      ipcRenderer.on('object-storage:upload-progress', listener)
+      return () => ipcRenderer.removeListener('object-storage:upload-progress', listener)
+    }
   },
   updater: {
     /**

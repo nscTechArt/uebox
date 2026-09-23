@@ -19,6 +19,8 @@
 | `app-settings.json`                     | 应用设置                            |
 | `models.json`                           | AI 服务商与模型配置（**不含密钥**） |
 | `ai-provider-secrets.bin`               | 加密后的密钥                        |
+| `object-storage.json`                   | 对象存储的连接配置（**不含密钥**）  |
+| `object-storage-index.json`             | 传到对象存储的文件登记              |
 | `instructions.md`                       | 给助手的常驻说明                    |
 | `skills/`                               | 技能目录                            |
 | `disabled-skills.json`                  | 关掉了哪些技能                      |

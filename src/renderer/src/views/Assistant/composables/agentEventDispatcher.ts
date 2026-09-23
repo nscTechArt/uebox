@@ -552,6 +552,12 @@ export function initAgentEventDispatcher(): void {
     notify(data.sessionId, data.message, data.level || 'info')
   })
 
+  // ── 开跑前的准备（音视频传对象存储）───────────────────────────────
+  on('agent-v3:notice', (data: { sessionId: string; message: string; level: string }) => {
+    if (!data?.sessionId || !data.message) return
+    notify(data.sessionId, data.message, data.level || 'info')
+  })
+
   // ── 结束 ────────────────────────────────────────────────────────────
   on('agent-v3:done', (data: { sessionId: string }) => {
     if (!data?.sessionId) return

@@ -29,6 +29,12 @@ import type {
   MiniChatInitialMessage
 } from '../shared/editorSnapshot'
 import type { CliPathChangeResult, CliStatus } from '../shared/cli'
+import type {
+  ObjectStorageConfigView,
+  ObjectStorageEntry,
+  ObjectStorageRemoveResult,
+  ObjectStorageSaveInput
+} from '../shared/objectStorage'
 import type { DroppedPathVerdict } from '../shared/droppedPath'
 import type { ImportFailureReport } from '../shared/projectImport'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
@@ -1764,6 +1770,23 @@ declare global {
       removeFromPath: () => Promise<CliPathChangeResult>
       reveal: () => Promise<{ ok: boolean; message?: string }>
     }
+    /** 对象存储（用户自己的 S3 兼容桶）。Secret 只进不出 */
+    objectStorage: {
+      get: () => Promise<ObjectStorageConfigView>
+      save: (
+        input: ObjectStorageSaveInput
+      ) => Promise<{ success: boolean; view?: ObjectStorageConfigView; error?: string }>
+      test: (input: ObjectStorageSaveInput) => Promise<{ ok: boolean; message: string }>
+      /** 开着且配完整了 */
+      ready: () => Promise<boolean>
+      list: () => Promise<{ success: boolean; objects?: ObjectStorageEntry[]; error?: string }>
+      remove: (keys: string[]) => Promise<ObjectStorageRemoveResult>
+      clean: (days: number) => Promise<ObjectStorageRemoveResult>
+      upload: (filePath: string) => Promise<{ success: boolean; key?: string; error?: string }>
+      onUploadProgress: (
+        callback: (payload: { filePath: string; percent: number; note: string }) => void
+      ) => () => void
+    }
     updater: {
       checkForUpdates: () => Promise<{ success: boolean; error?: string }>
       downloadUpdate: () => Promise<{ success: boolean; error?: string }>
@@ -2874,6 +2897,8 @@ declare global {
         editorScreenshotEnabled?: boolean
         /** 随这轮一起发的图片。pi 的 prompt(input, images?) 原生支持 */
         images?: Array<{ type: 'image'; data: string; mimeType: string }>
+        /** 随这轮带的音视频（本地路径）。主进程决定传对象存储换链接，还是只给路径 */
+        mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
         /** 这条会话归属的 UE 工程；主进程只知道「谁连着」，归属得由渲染层带下来 */
         sessionProject?: AgentV3SessionProject | null
         /** 这条会话绑着的知识库。绑了主进程才给 search_notebook_sources 工具 */
