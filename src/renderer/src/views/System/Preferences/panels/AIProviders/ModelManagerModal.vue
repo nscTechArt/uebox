@@ -14,7 +14,7 @@ import { PhCaretRight } from '@phosphor-icons/vue'
  * 两个详情面板各自成组件（ProviderFields / ModelFields），
  * 免得又长回一个什么都干的大组件。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
@@ -93,6 +93,7 @@ function discardPending(): void {
 async function savePending(): Promise<void> {
   const action = pending.value
   if (!(await doSave())) return
+  message.success(t('aiProvider.messages.saved'))
   pending.value = null
   action?.()
 }
@@ -222,12 +223,16 @@ async function doSave(): Promise<boolean> {
     message.error(result.error || t('aiProvider.messages.saveFailed'))
     return false
   }
-  message.success(t('aiProvider.messages.saved'))
   return true
 }
 
+// 保存后留在弹窗里，结果写进 test-status，方便接着测试连接
 async function handleSave(): Promise<void> {
-  if (await doSave()) emit('update:open', false)
+  testStatus.value = null
+  if (!(await doSave())) return
+  // 新建的 Provider 存完 selectedId 会变，上面的 watch 会清 testStatus，等它跑完再写
+  await nextTick()
+  testStatus.value = { type: 'success', text: t('aiProvider.messages.saved') }
 }
 
 /**

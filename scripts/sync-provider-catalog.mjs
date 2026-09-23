@@ -35,6 +35,15 @@ const LOGO_URL = (id) => `https://models.dev/logos/${id}.svg`
 const LOGO_ALIAS = {
   chatgpt: 'openai',
   'kimi-code': 'moonshotai',
+  'xiaomi-token-plan': 'xiaomi',
+  'alibaba-token-plan': 'alibaba',
+  'alibaba-coding-plan': 'alibaba',
+  'zhipuai-coding-plan': 'zhipuai',
+  'volcengine-coding-plan': 'bytedance',
+  'tencent-coding-plan': 'tencent',
+  'tencent-token-plan': 'tencent',
+  'minimax-token-plan': 'minimax',
+  'stepfun-step-plan': 'stepfun',
 
   // 生图条目是同一家厂商的另一个入口（见 CURATED 里的「图片生成」一段），
   // 用母公司的标，免得目录里出现一排没有图标的方块
@@ -143,6 +152,16 @@ const KEY_PAGE = {
   'minimax-cn': 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
   baidu: 'https://console.bce.baidu.com/iam/#/iam/apikey',
   tencent: 'https://console.cloud.tencent.com/tokenhub/apikey',
+  xiaomi: 'https://platform.xiaomimimo.com/#/console/api-keys',
+  'xiaomi-token-plan': 'https://platform.xiaomimimo.com/token-plan',
+  'alibaba-token-plan': 'https://bailian.console.aliyun.com/?tab=model#/api-key',
+  'alibaba-coding-plan': 'https://bailian.console.aliyun.com/?tab=model#/api-key',
+  'zhipuai-coding-plan': 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
+  'volcengine-coding-plan': 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
+  'tencent-coding-plan': 'https://console.cloud.tencent.com/lkeap/api',
+  'tencent-token-plan': 'https://console.cloud.tencent.com/lkeap/api',
+  'minimax-token-plan': 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
+  'stepfun-step-plan': 'https://platform.stepfun.com/interface-key',
   bytedance: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
   stepfun: 'https://platform.stepfun.com/interface-key',
   infini: 'https://cloud.infini-ai.com/genstudio/model',
@@ -222,6 +241,67 @@ export const CURATED = [
     protocol: 'openai-completions',
     displayName: 'Kimi Code（会员）',
     supportsOAuth: true
+  },
+
+  // Token / Coding Plan：包月套餐，用套餐专属的 Key 和 Base URL，与按量计费的同名厂商
+  // 不是同一个账户，Key 也不通用，所以各自单列。
+  {
+    id: 'xiaomi-token-plan',
+    sourceId: 'xiaomi-token-plan-cn',
+    group: 'subscription',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+    displayName: '小米 MiMo Token Plan'
+  },
+  {
+    id: 'alibaba-token-plan',
+    sourceId: 'alibaba-token-plan-cn',
+    group: 'subscription',
+    baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    displayName: '阿里云百炼 Token Plan'
+  },
+  {
+    id: 'alibaba-coding-plan',
+    sourceId: 'alibaba-coding-plan-cn',
+    group: 'subscription',
+    baseUrl: 'https://coding.dashscope.aliyuncs.com/v1',
+    displayName: '阿里云百炼 Coding Plan'
+  },
+  {
+    id: 'zhipuai-coding-plan',
+    group: 'subscription',
+    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    displayName: '智谱 GLM Coding Plan'
+  },
+  {
+    id: 'volcengine-coding-plan',
+    group: 'subscription',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+    displayName: '火山方舟 Coding Plan'
+  },
+  {
+    id: 'tencent-coding-plan',
+    group: 'subscription',
+    baseUrl: 'https://api.lkeap.cloud.tencent.com/coding/v3',
+    displayName: '腾讯云 Coding Plan'
+  },
+  {
+    id: 'tencent-token-plan',
+    group: 'subscription',
+    baseUrl: 'https://api.lkeap.cloud.tencent.com/plan/v3',
+    displayName: '腾讯云 Token Plan'
+  },
+  {
+    id: 'minimax-token-plan',
+    sourceId: 'minimax-cn-coding-plan',
+    group: 'subscription',
+    baseUrl: 'https://api.minimax.cn/anthropic/v1',
+    displayName: 'MiniMax Token Plan'
+  },
+  {
+    id: 'stepfun-step-plan',
+    group: 'subscription',
+    baseUrl: 'https://api.stepfun.com/step_plan/v1',
+    displayName: '阶跃星辰 Step Plan'
   },
 
   // ── 图片生成 ──
@@ -590,7 +670,13 @@ export const CURATED = [
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3'
   },
   { id: 'stepfun', group: 'cn', baseUrl: 'https://api.stepfun.com/v1' },
-  { id: 'infini', group: 'cn', baseUrl: 'https://cloud.infini-ai.com/maas/v1' }
+  { id: 'infini', group: 'cn', baseUrl: 'https://cloud.infini-ai.com/maas/v1' },
+  {
+    id: 'xiaomi',
+    group: 'cn',
+    displayName: '小米 MiMo',
+    baseUrl: 'https://api.xiaomimimo.com/v1'
+  }
 ]
 
 /** models.dev 的 npm 包 → 我们的协议。默认按 openai-completions 处理 */

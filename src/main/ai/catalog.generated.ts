@@ -255,6 +255,686 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     ]
   },
   {
+    "id": "xiaomi-token-plan",
+    "displayName": "小米 MiMo Token Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+    "apiKeyUrl": "https://platform.xiaomimimo.com/token-plan",
+    "requiresApiKey": true,
+    "defaultEnvVar": "XIAOMI_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "mimo-v2.6-pro",
+        "displayName": "MiMo-V2.6-Pro",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.6-flash",
+        "displayName": "MiMo-V2.6-Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.5",
+        "displayName": "MiMo-V2.5",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.5-pro",
+        "displayName": "MiMo-V2.5-Pro",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      }
+    ]
+  },
+  {
+    "id": "alibaba-token-plan",
+    "displayName": "阿里云百炼 Token Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    "apiKeyUrl": "https://bailian.console.aliyun.com/?tab=model#/api-key",
+    "requiresApiKey": true,
+    "defaultEnvVar": "ALIBABA_TOKEN_PLAN_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "deepseek-v4.1-flash",
+        "displayName": "DeepSeek V4.1 Flash",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "qwen3.8-flash",
+        "displayName": "Qwen3.8 Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "glm-5.3",
+        "displayName": "GLM-5.3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "deepseek-v4-pro-0813",
+        "displayName": "DeepSeek V4 Pro 0813",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "qwen3.8-max",
+        "displayName": "Qwen3.8 Max",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "deepseek-v4-flash-0731",
+        "displayName": "DeepSeek V4 Flash 0731",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "glm-5.2",
+        "displayName": "GLM-5.2",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "displayName": "Kimi K2.7 Code",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 262144
+      },
+      {
+        "id": "qwen3.7-plus",
+        "displayName": "Qwen3.7 Plus",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 65536
+      },
+      {
+        "id": "qwen3.7-max",
+        "displayName": "Qwen3.7 Max",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "qwen3.6-flash",
+        "displayName": "Qwen3.6 Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 65536
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "displayName": "DeepSeek V4 Flash",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      }
+    ]
+  },
+  {
+    "id": "alibaba-coding-plan",
+    "displayName": "阿里云百炼 Coding Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+    "apiKeyUrl": "https://bailian.console.aliyun.com/?tab=model#/api-key",
+    "requiresApiKey": true,
+    "defaultEnvVar": "ALIBABA_CODING_PLAN_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "qwen3.7-plus",
+        "displayName": "Qwen3.7 Plus",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "qwen3.7-max",
+        "displayName": "Qwen3.7 Max",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 65536
+      },
+      {
+        "id": "qwen3.6-flash",
+        "displayName": "Qwen3.6 Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 65536
+      },
+      {
+        "id": "qwen3.6-plus",
+        "displayName": "Qwen3.6 Plus",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 65536
+      },
+      {
+        "id": "qwen3.5-plus",
+        "displayName": "Qwen3.5 Plus",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 65536
+      },
+      {
+        "id": "MiniMax-M2.5",
+        "displayName": "MiniMax-M2.5",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 196608,
+        "maxOutputTokens": 24576
+      },
+      {
+        "id": "glm-5",
+        "displayName": "GLM-5",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 202752,
+        "maxOutputTokens": 16384
+      },
+      {
+        "id": "qwen3-coder-next",
+        "displayName": "Qwen3 Coder Next",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 262144,
+        "maxOutputTokens": 65536
+      },
+      {
+        "id": "kimi-k2.5",
+        "displayName": "Kimi K2.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 32768
+      },
+      {
+        "id": "qwen3-max-2026-01-23",
+        "displayName": "Qwen3 Max",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 262144,
+        "maxOutputTokens": 32768
+      }
+    ]
+  },
+  {
+    "id": "zhipuai-coding-plan",
+    "displayName": "智谱 GLM Coding Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "apiKeyUrl": "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+    "requiresApiKey": true,
+    "defaultEnvVar": "ZHIPU_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "glm-5.3-flash",
+        "displayName": "GLM-5.3-Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "glm-5.3-highspeed",
+        "displayName": "GLM-5.3 Highspeed",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "glm-5.3",
+        "displayName": "GLM-5.3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      }
+    ]
+  },
+  {
+    "id": "volcengine-coding-plan",
+    "displayName": "火山方舟 Coding Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    "apiKeyUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    "requiresApiKey": true,
+    "defaultEnvVar": "ARK_CODING_PLAN_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "glm-5.3-flash",
+        "displayName": "GLM-5.3-Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "glm-5.3",
+        "displayName": "GLM-5.3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "kimi-k3",
+        "displayName": "Kimi K3",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "doubao-seed-2.1-turbo",
+        "displayName": "Seed 2.1 Turbo",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 256000,
+        "maxOutputTokens": 256000
+      },
+      {
+        "id": "doubao-seed-evolving",
+        "displayName": "Seed Evolving",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 256000,
+        "maxOutputTokens": 256000
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "displayName": "Kimi K2.7 Code",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 262144
+      },
+      {
+        "id": "minimax-m3",
+        "displayName": "MiniMax-M3",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 512000
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "displayName": "DeepSeek V4 Flash",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "displayName": "DeepSeek V4 Pro",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 384000
+      },
+      {
+        "id": "doubao-seed-2.0-lite",
+        "displayName": "Seed 2.0 Lite",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 256000,
+        "maxOutputTokens": 32000
+      }
+    ]
+  },
+  {
+    "id": "tencent-coding-plan",
+    "displayName": "腾讯云 Coding Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.lkeap.cloud.tencent.com/coding/v3",
+    "apiKeyUrl": "https://console.cloud.tencent.com/lkeap/api",
+    "requiresApiKey": true,
+    "defaultEnvVar": "TENCENT_CODING_PLAN_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "hunyuan-2.0-thinking",
+        "displayName": "Tencent HY 2.0 Think",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 131072,
+        "maxOutputTokens": 16384
+      },
+      {
+        "id": "hunyuan-t1",
+        "displayName": "Hunyuan-T1",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 131072,
+        "maxOutputTokens": 16384
+      },
+      {
+        "id": "hunyuan-turbos",
+        "displayName": "Hunyuan-TurboS",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 131072,
+        "maxOutputTokens": 16384
+      },
+      {
+        "id": "tc-code-latest",
+        "displayName": "Auto",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 131072,
+        "maxOutputTokens": 16384
+      },
+      {
+        "id": "hunyuan-2.0-instruct",
+        "displayName": "Tencent HY 2.0 Instruct",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 131072,
+        "maxOutputTokens": 16384
+      },
+      {
+        "id": "minimax-m2.5",
+        "displayName": "MiniMax-M2.5",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 204800,
+        "maxOutputTokens": 32768
+      },
+      {
+        "id": "glm-5",
+        "displayName": "GLM-5",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 202752,
+        "maxOutputTokens": 16384
+      },
+      {
+        "id": "kimi-k2.5",
+        "displayName": "Kimi-K2.5",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 32768
+      }
+    ]
+  },
+  {
+    "id": "tencent-token-plan",
+    "displayName": "腾讯云 Token Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.lkeap.cloud.tencent.com/plan/v3",
+    "apiKeyUrl": "https://console.cloud.tencent.com/lkeap/api",
+    "requiresApiKey": true,
+    "defaultEnvVar": "TENCENT_TOKEN_PLAN_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "hy4-preview",
+        "displayName": "Hy4 preview",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1024000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "hy3",
+        "displayName": "Hy3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 256000,
+        "maxOutputTokens": 128000
+      }
+    ]
+  },
+  {
+    "id": "minimax-token-plan",
+    "displayName": "MiniMax Token Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "anthropic-messages",
+    "baseUrl": "https://api.minimax.cn/anthropic/v1",
+    "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    "requiresApiKey": true,
+    "defaultEnvVar": "MINIMAX_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "MiniMax-M3",
+        "displayName": "MiniMax-M3",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 512000
+      },
+      {
+        "id": "MiniMax-M2.7-highspeed",
+        "displayName": "MiniMax-M2.7-highspeed",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 204800,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "MiniMax-M2.7",
+        "displayName": "MiniMax-M2.7",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 204800,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "MiniMax-M2.5-highspeed",
+        "displayName": "MiniMax-M2.5-highspeed",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 204800,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "MiniMax-M2.5",
+        "displayName": "MiniMax-M2.5",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 204800,
+        "maxOutputTokens": 131072
+      }
+    ]
+  },
+  {
+    "id": "stepfun-step-plan",
+    "displayName": "阶跃星辰 Step Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.stepfun.com/step_plan/v1",
+    "apiKeyUrl": "https://platform.stepfun.com/interface-key",
+    "requiresApiKey": true,
+    "defaultEnvVar": "STEPFUN_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "step-5-preview",
+        "displayName": "Step 5 Preview",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 1000000
+      },
+      {
+        "id": "step-3.7-flash",
+        "displayName": "Step 3.7 Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 256000,
+        "maxOutputTokens": 256000
+      },
+      {
+        "id": "step-router-v1",
+        "displayName": "Step Router v1",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": false,
+        "contextWindow": 256000,
+        "maxOutputTokens": 256000
+      },
+      {
+        "id": "step-3.5-flash-2603",
+        "displayName": "Step 3.5 Flash 2603",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 256000,
+        "maxOutputTokens": 256000
+      },
+      {
+        "id": "step-3.5-flash",
+        "displayName": "Step 3.5 Flash",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 256000,
+        "maxOutputTokens": 256000
+      }
+    ]
+  },
+  {
     "id": "openai-image",
     "displayName": "OpenAI GPT Image",
     "group": "image",
@@ -4129,5 +4809,77 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "INFINI_API_KEY",
     "hasLogo": true,
     "models": []
+  },
+  {
+    "id": "xiaomi",
+    "displayName": "小米 MiMo",
+    "group": "cn",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.xiaomimimo.com/v1",
+    "apiKeyUrl": "https://platform.xiaomimimo.com/#/console/api-keys",
+    "requiresApiKey": true,
+    "defaultEnvVar": "XIAOMI_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "mimo-v2.6-pro",
+        "displayName": "MiMo-V2.6-Pro",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.6-flash",
+        "displayName": "MiMo-V2.6-Flash",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.6-pro-ultraspeed",
+        "displayName": "MiMo-V2.6-Pro-UltraSpeed",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.5-pro-ultraspeed",
+        "displayName": "MiMo-V2.5-Pro-UltraSpeed",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.5",
+        "displayName": "MiMo-V2.5",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      },
+      {
+        "id": "mimo-v2.5-pro",
+        "displayName": "MiMo-V2.5-Pro",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      }
+    ]
   }
 ] as CatalogEntry[])
