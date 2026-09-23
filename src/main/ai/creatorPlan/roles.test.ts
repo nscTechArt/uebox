@@ -374,8 +374,11 @@ describe('语音合成（06-audio）', () => {
     expect(calls[0].body).not.toHaveProperty('voice')
   })
 
-  it('单次上限取清单 max_input_chars（放宽到 600 字以上）', async () => {
-    planState.manifest = { roles: { tts: { model: 'uebox-tts', max_input_chars: 2000 } } }
+  it('单次上限取模型上的 ttsMaxInputChars（导入时来自清单 max_input_chars）', async () => {
+    const limited = {
+      ...provider,
+      models: [{ id: 'uebox-tts', ttsVoice: 'uebox-voice-f2', ttsMaxInputChars: 2000 }]
+    }
     stubFetch(() =>
       sse([
         { type: 'speech.audio.delta', audio: Buffer.from([1, 2]).toString('base64') },
@@ -383,10 +386,14 @@ describe('语音合成（06-audio）', () => {
       ])
     )
     await expect(
-      requestSpeech(provider, 'uebox-tts', '字'.repeat(1500), new AbortController().signal)
+      requestSpeech(limited, 'uebox-tts', '字'.repeat(1500), new AbortController().signal)
     ).resolves.toBeUndefined()
     await expect(
-      requestSpeech(provider, 'uebox-tts', '字'.repeat(2001), new AbortController().signal)
+      requestSpeech(limited, 'uebox-tts', '字'.repeat(2001), new AbortController().signal)
+    ).rejects.toThrow('TTS_INVALID_TEXT')
+    // 没写上限的按 600 字
+    await expect(
+      requestSpeech(provider, 'uebox-tts', '字'.repeat(601), new AbortController().signal)
     ).rejects.toThrow('TTS_INVALID_TEXT')
   })
 

@@ -36,7 +36,8 @@ import {
   type GeneratedVideo,
   type VideoImageRole
 } from '../../../ai/video'
-import { readSettings } from '../../../ai/store'
+import { readSettings, readSettingsSync } from '../../../ai/store'
+import { isPlanProvider } from '../../../../shared/creatorPlan'
 import { downloadAndSaveAIGCAsset } from '../../../services/aigc/assetSaver'
 import { describeMissingVideoModel, listVideoModels, pickVideoModel } from './videoModels'
 import { loadReferenceAudio, loadReferenceImages, VIDEO_REFERENCE_BUDGET } from './references'
@@ -345,14 +346,33 @@ export interface GeneratedVideoDetails extends Record<string, unknown> {
   save_error?: string
 }
 
+/**
+ * 「视频生成」绑的是不是创作者 Token Plan。那边失败、取消都退额度（协议 05-tasks），
+ * 说明里的「失败也扣」要跟着改。同步读配置，理由同 generate3dModel.ts 的 tripoIsBound；
+ * 换绑之后工具表由 registry.ts 订阅配置变更重建。
+ */
+function planVideoBound(): boolean {
+  try {
+    const binding = readSettingsSync().roles.video
+    return !!binding && isPlanProvider(binding.providerId)
+  } catch {
+    return false
+  }
+}
+
 export function createGenerateVideoTool(): UnrealAgentTool<GeneratedVideoDetails> {
+  const plan = planVideoBound()
   return defineTool<typeof GenerateVideoInput, GeneratedVideoDetails>({
     name: 'generate_video',
     namespace: 'aigc',
     risk: 'mutating',
     description: `用 AI 生成一段视频，存进素材库并在对话窗口里可播放。
 
-【非常贵，而且很慢】一次三到十五分钟，**按秒 × 分辨率计费，失败也扣**。
+【非常贵，而且很慢】一次三到十五分钟，${
+      plan
+        ? '**按秒 × 分辨率占用创作者 Token Plan 的视频额度，失败、取消都退回**'
+        : '**按秒 × 分辨率计费，失败也扣**'
+    }。
 调用前先确认用户真的要视频；参数拿不准就问，不要靠多试几次去凑。
 一次只出一条，看过之后再决定要不要重来。
 

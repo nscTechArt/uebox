@@ -14,7 +14,7 @@
  * 读坏了按空状态处理 —— 丢的只是还原信息和缓存，不该让设置页打不开。
  */
 
-import { promises as fs } from 'fs'
+import { promises as fs, readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { app } from 'electron'
 import { MODEL_ROLES, type ModelRole } from '../../../shared/aiProvider'
@@ -80,6 +80,18 @@ export function normalizePlanState(raw: unknown): PlanState {
 export async function readPlanState(): Promise<PlanState> {
   try {
     return normalizePlanState(JSON.parse(await fs.readFile(statePath(), 'utf-8')))
+  } catch {
+    return { ...EMPTY_PLAN_STATE, originals: {} }
+  }
+}
+
+/**
+ * 同步版。**只给「造工具时要看一眼清单」用**（工具注册是同步的，见 store.ts 的 readSettingsSync）：
+ * `generate_3d_model` 按清单 `model3d.options` 决定暴露哪些扩展开关。
+ */
+export function readPlanStateSync(): PlanState {
+  try {
+    return normalizePlanState(JSON.parse(readFileSync(statePath(), 'utf-8')))
   } catch {
     return { ...EMPTY_PLAN_STATE, originals: {} }
   }

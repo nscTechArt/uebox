@@ -168,6 +168,7 @@ function normalizeModel(
     contextWindow: positiveInt(source.contextWindow),
     maxOutputTokens: positiveInt(source.maxOutputTokens),
     ttsVoice: kind === 'tts' ? str(source.ttsVoice) || defaultSpeechVoice(id) : undefined,
+    ttsMaxInputChars: kind === 'tts' ? positiveInt(source.ttsMaxInputChars) : undefined,
     realtimeVoice:
       kind === 'realtime'
         ? str(source.realtimeVoice) ||

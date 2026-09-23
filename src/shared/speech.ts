@@ -24,11 +24,11 @@ export interface SpeechChunk extends SpeechAudio {
 export type SpeechResult = { success: true; data: null } | { success: false; error: string }
 
 /** Keep every character, including supplementary Unicode characters, across requests. */
-export function splitSpeechText(text: string): string[] {
+export function splitSpeechText(text: string, maxChars: number = MAX_SPEECH_CHARS): string[] {
   const chars = Array.from(text.trim())
   const chunks: string[] = []
   while (chars.length) {
-    let end = Math.min(chars.length, MAX_SPEECH_CHARS)
+    let end = Math.min(chars.length, Math.max(1, Math.floor(maxChars)))
     if (end < chars.length) {
       for (let i = end - 1; i >= end / 2; i--) {
         if (/[。！？；.!?;\n]/u.test(chars[i])) {

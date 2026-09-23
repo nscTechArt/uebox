@@ -135,7 +135,8 @@ const str = (value: unknown): string | undefined =>
  * - embedding：`jina-embeddings` 发 `task`（协议 03 的字段同名同值），维度按清单固定发
  * - image：`uebox-images`（`imageGeneration.ts`）
  * - video / model3d / music：Provider 上的 `uebox-tasks`（见 PLAN_PROVIDER_EXTRA）
- * - realtime / tts：音色取清单（realtime 取第一个，tts 取 default_voice）
+ * - realtime / tts：音色取清单（realtime 取第一个，tts 取 default_voice）；tts 的单次字数上限
+ *   写进 ttsMaxInputChars，渲染层按它切段
  * - stt / search / judge：按来源 id（`isPlanProvider`）选分支，模型上不用额外字段
  */
 const MODEL_OF_KIND: Readonly<
@@ -157,7 +158,12 @@ const MODEL_OF_KIND: Readonly<
   tts: (spec: PlanRoleSpec) => {
     const voice =
       str(spec.default_voice) ?? (Array.isArray(spec.voices) ? str(spec.voices[0]) : undefined)
-    return voice ? { ttsVoice: voice } : {}
+    return {
+      ...(voice ? { ttsVoice: voice } : {}),
+      ...(typeof spec.max_input_chars === 'number' && spec.max_input_chars > 0
+        ? { ttsMaxInputChars: Math.floor(spec.max_input_chars) }
+        : {})
+    }
   },
   stt: () => ({}),
   search: () => ({}),

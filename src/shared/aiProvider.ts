@@ -455,6 +455,13 @@ export interface ModelConfig {
   realtimeVoice?: string
   /** Voice ID for Doubao TTS 2.0. */
   ttsVoice?: string
+  /**
+   * 语音合成单次最多送多少字。不填按 `MAX_SPEECH_CHARS`（600）。
+   *
+   * 目前只有创作者 Token Plan 写它（清单 `tts.max_input_chars`，导入和刷新清单时更新）：
+   * 渲染层按它切段，主进程按它拦。放在模型上而不是另查清单缓存，是因为渲染层只读得到这份配置。
+   */
+  ttsMaxInputChars?: number
 }
 
 /**

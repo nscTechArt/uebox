@@ -34,6 +34,8 @@ import {
   type Model3dVendorOptions
 } from '../../../ai/model3d'
 import { readSettings, readSettingsSync } from '../../../ai/store'
+import { readPlanStateSync } from '../../../ai/creatorPlan/planState'
+import { isPlanProvider } from '../../../../shared/creatorPlan'
 import { downloadAndSaveAIGCAsset } from '../../../services/aigc/assetSaver'
 import { compressForContext } from '../contextImage'
 import { loadReferenceImages, MODEL3D_REFERENCE_BUDGET } from './references'
@@ -319,8 +321,65 @@ const TRIPO_DESCRIPTION_NOTE = `
 - 只有主角和特写才值得开 \`geometry_quality: detailed\` / \`texture_quality: detailed\`
 `
 
+/**
+ * 创作者 Token Plan 的扩展开关（协议 05-tasks 的 `options`）。键名和协议一致，
+ * 说明不带厂商名；只暴露清单 `model3d.options` 里列了的那几个。
+ * `bounding_box` / `rest_pose` 是通用参数，但在套餐那边也走 options，没列就一并摘掉。
+ */
+const PLAN_OPTION_FIELDS = {
+  negative_prompt: z
+    .string()
+    .max(255)
+    .optional()
+    .describe('不想要的东西，几个词就够（上限 255 字）。最值钱的用法是去掉底座、支架、背景板。'),
+  texture_quality: z
+    .enum(['standard', 'detailed'])
+    .optional()
+    .describe('贴图精细档，默认 standard。主角和特写才值得调到 detailed。'),
+  smart_low_poly: z
+    .boolean()
+    .optional()
+    .describe('出面向实时渲染的低面数干净拓扑。游戏资产最想要的一档，复杂造型上可能失败。'),
+  auto_size: z.boolean().optional().describe('按真实世界尺寸缩放成品。整批资产要尺寸一致时打开。'),
+  generate_parts: z.boolean().optional().describe('按部件拆分输出，而不是一整块。')
+} as const
+
+/** 套餐那边走 options、但在工具入参里是通用参数的两个 */
+const PLAN_GENERAL_OPTION_KEYS = ['bounding_box', 'rest_pose'] as const
+
+/**
+ * 「3D 生成」绑的是不是创作者 Token Plan；是的话带上缓存清单里的 `options`。
+ * 同步读，理由同 tripoIsBound。清单没缓存时按「没有扩展开关」处理。
+ */
+function planModel3dOptions(): string[] | null {
+  try {
+    const binding = readSettingsSync().roles.model3d
+    if (!binding || !isPlanProvider(binding.providerId)) return null
+    const options = (readPlanStateSync().manifest?.roles?.model3d as { options?: unknown } | null)
+      ?.options
+    return Array.isArray(options)
+      ? options.filter((key): key is string => typeof key === 'string')
+      : []
+  } catch {
+    return null
+  }
+}
+
+/** 套餐那一段说明：失败退回，以及这次能用哪几个扩展开关 */
+function planDescriptionNote(options: string[]): string {
+  const extra = Object.keys(PLAN_OPTION_FIELDS).filter((key) => options.includes(key))
+  return `
+【这次绑的是创作者 Token Plan】失败、取消都会退回额度。${
+    extra.length > 0
+      ? `当前套餐多出这几个开关：${extra.map((key) => `\`${key}\``).join('、')}。按用途开，不要一次全打开。`
+      : ''
+  }
+`
+}
+
 export function createGenerate3dModelTool(): UnrealAgentTool<Generated3dModelDetails> {
   const tripo = tripoIsBound()
+  const planOptions = tripo ? null : planModel3dOptions()
 
   /*
    * 绑的不是 Tripo 就把那一段参数摘掉。
@@ -332,7 +391,9 @@ export function createGenerate3dModelTool(): UnrealAgentTool<Generated3dModelDet
    */
   const input = tripo
     ? Generate3dModelInput
-    : (Generate3dModelInput.omit(TRIPO_ONLY_KEYS) as unknown as typeof Generate3dModelInput)
+    : planOptions
+      ? planInput(planOptions)
+      : (Generate3dModelInput.omit(TRIPO_ONLY_KEYS) as unknown as typeof Generate3dModelInput)
 
   return defineTool<typeof Generate3dModelInput, Generated3dModelDetails>({
     name: 'generate_3d_model',
@@ -340,7 +401,11 @@ export function createGenerate3dModelTool(): UnrealAgentTool<Generated3dModelDet
     risk: 'mutating',
     description: `用 AI 生成一个 3D 网格，存进素材库并在对话窗口里可以转着看。
 
-【要花钱，而且不快】一次几十秒到几分钟，每次调用扣用户的额度，**失败也扣**。
+【要花钱，而且不快】一次几十秒到几分钟，${
+      planOptions
+        ? '每次调用占用创作者 Token Plan 的 3D 次数，**失败、取消都退回**'
+        : '每次调用扣用户的额度，**失败也扣**'
+    }。
 一次只出一个，看过再决定要不要重来。
 
 【出来的是静态网格，没有骨骼】图生 3D 全都如此，再好看也不能直接做动画。
@@ -379,7 +444,7 @@ Tripo、Meshy 三家，各家支持的参数不同，选了对方没有的会明
 
 【出完之后】网格存在素材库的 AIGC/模型 下，返回值 \`model_path\` 是绝对路径，
 交给 \`ue_content_import\` 就能进工程。
-${tripo ? TRIPO_DESCRIPTION_NOTE : ''}
+${tripo ? TRIPO_DESCRIPTION_NOTE : ''}${planOptions ? planDescriptionNote(planOptions) : ''}
 `,
     input,
     execute: async (args, ctx) => {
@@ -631,4 +696,19 @@ function baseNameOf(name: string | undefined, prompt: string, jobToken?: string)
     .replace(/[:~]/g, '_')
     .slice(0, NAME_MAX_LENGTH)
   return fromJob || 'model'
+}
+
+/**
+ * 绑的是套餐时的入参表：摘掉 Tripo 那一组，换上清单 `options` 列了的套餐开关；
+ * `bounding_box` / `rest_pose` 没列也摘掉。类型上仍按全量算，理由同 createGenerate3dModelTool 里那次 `as`。
+ */
+function planInput(options: string[]): typeof Generate3dModelInput {
+  const drop: Record<string, true> = { ...TRIPO_ONLY_KEYS }
+  for (const key of PLAN_GENERAL_OPTION_KEYS) if (!options.includes(key)) drop[key] = true
+  const add = Object.fromEntries(
+    Object.entries(PLAN_OPTION_FIELDS).filter(([key]) => options.includes(key))
+  )
+  return Generate3dModelInput.omit(drop as never).extend(
+    add
+  ) as unknown as typeof Generate3dModelInput
 }

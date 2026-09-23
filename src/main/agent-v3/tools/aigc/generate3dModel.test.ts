@@ -32,6 +32,29 @@ vi.mock('../../../ai/store', () => ({
   readSettingsSync: () => readSettingsSync()
 }))
 
+/** 缓存的套餐清单。绑了套餐 3D 时按它的 options 决定暴露哪些扩展开关 */
+const planOptions: { value: unknown } = { value: ['negative_prompt', 'auto_size'] }
+vi.mock('../../../ai/creatorPlan/planState', () => ({
+  readPlanStateSync: () => ({
+    manifest: { roles: { model3d: { model: 'uebox-3d', options: planOptions.value } } }
+  })
+}))
+
+function planBoundSettings(): unknown {
+  return {
+    version: 3,
+    providers: [
+      {
+        id: 'creator-plan-model3d',
+        kind: 'model3d',
+        model3dApi: 'uebox-tasks',
+        models: [{ id: 'uebox-3d' }]
+      }
+    ],
+    roles: { model3d: { providerId: 'creator-plan-model3d', modelId: 'uebox-3d' } }
+  }
+}
+
 function tripoBoundSettings(): unknown {
   return {
     version: 3,
@@ -422,6 +445,45 @@ describe('Tripo 专属开关的暴露面', () => {
     })
 
     expect(paramNames(createGenerate3dModelTool())).not.toContain('negative_prompt')
+  })
+})
+
+describe('创作者 Token Plan 的扩展开关', () => {
+  const paramNames = (built: { parameters: unknown }): string[] =>
+    Object.keys((built.parameters as { properties: Record<string, unknown> }).properties)
+
+  it('只露清单 options 列了的键，说明不带厂商名；失败退回写进说明', () => {
+    readSettingsSync.mockReturnValue(planBoundSettings())
+    try {
+      const built = createGenerate3dModelTool()
+      const names = paramNames(built)
+      expect(names).toEqual(expect.arrayContaining(['negative_prompt', 'auto_size', 'prompt']))
+      for (const hidden of ['smart_low_poly', 'geometry_quality', 'bounding_box', 'rest_pose']) {
+        expect(names).not.toContain(hidden)
+      }
+      const props = (built.parameters as { properties: Record<string, { description?: string }> })
+        .properties
+      expect(props.negative_prompt.description).not.toContain('Tripo')
+      expect(built.description).toContain('失败、取消都退回')
+      expect(built.description).not.toContain('**失败也扣**')
+    } finally {
+      readSettingsSync.mockImplementation(() => tripoBoundSettings())
+    }
+  })
+
+  it('清单列了 bounding_box 时照常露出；别的来源说明保持「失败也扣」', () => {
+    planOptions.value = ['bounding_box']
+    readSettingsSync.mockReturnValue(planBoundSettings())
+    try {
+      expect(paramNames(createGenerate3dModelTool())).toContain('bounding_box')
+    } finally {
+      planOptions.value = ['negative_prompt', 'auto_size']
+      readSettingsSync.mockImplementation(() => tripoBoundSettings())
+    }
+    readSettingsSync
+      .mockReturnValueOnce(rodinBoundSettings())
+      .mockReturnValueOnce(rodinBoundSettings())
+    expect(createGenerate3dModelTool().description).toContain('**失败也扣**')
   })
 })
 

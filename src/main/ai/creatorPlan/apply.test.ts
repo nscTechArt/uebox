@@ -179,6 +179,7 @@ describe('planProviders 非对话角色', () => {
     expect(byKind.music.musicApi).toBe('uebox-tasks')
     expect(byKind.realtime.models[0].realtimeVoice).toBe('uebox-voice-f1')
     expect(byKind.tts.models[0].ttsVoice).toBe('uebox-voice-f2')
+    expect(byKind.tts.models[0].ttsMaxInputChars).toBe(2000)
     expect(byKind.judge.models).toEqual([{ id: 'uebox-judge', displayName: 'uebox-judge' }])
   })
 
@@ -202,7 +203,10 @@ describe('planProviders 非对话角色', () => {
     expect(find('creator-plan-video').videoApi).toBe('uebox-tasks')
     expect(find('creator-plan-model3d').model3dApi).toBe('uebox-tasks')
     expect(find('creator-plan-music').musicApi).toBe('uebox-tasks')
-    expect(find('creator-plan-tts').models[0].ttsVoice).toBe('uebox-voice-f2')
+    expect(find('creator-plan-tts').models[0]).toMatchObject({
+      ttsVoice: 'uebox-voice-f2',
+      ttsMaxInputChars: 2000
+    })
     expect(find('creator-plan-realtime').models[0].realtimeVoice).toBe('uebox-voice-f1')
     // 同一份清单再刷新一次：什么都没变，原样返回（不白写盘）
     expect(refreshPlanModels(settings, fullManifest)).toBe(settings)

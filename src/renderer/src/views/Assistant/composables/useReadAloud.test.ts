@@ -414,6 +414,24 @@ describe('回复流式朗读', () => {
     expect(reading.active.value).toBe(false)
     logError.mockRestore()
   })
+  it('套餐来源按模型上的 ttsMaxInputChars 切段，别的来源 600 字', async () => {
+    vi.mocked(aiProviderAPI.getSettings).mockResolvedValue({
+      roles: { tts: { providerId: 'creator-plan-tts', modelId: 'uebox-tts' } },
+      providers: [
+        {
+          id: 'creator-plan-tts',
+          models: [{ id: 'uebox-tts', ttsVoice: 'uebox-voice-f1', ttsMaxInputChars: 2000 }]
+        }
+      ]
+    } as unknown as Awaited<ReturnType<typeof aiProviderAPI.getSettings>>)
+    const { reading } = reader()
+    const run = reading.toggle('字'.repeat(1500))
+    await flushPromises()
+    expect(speechAPI.synthesize).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(speechAPI.synthesize).mock.calls[0][0].text).toHaveLength(1500)
+    reading.stop()
+    await run
+  })
   it('prefetches the next segment while queued audio is playing', async () => {
     const { reading } = reader()
     const run = reading.toggle('字'.repeat(601))

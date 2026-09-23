@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto'
 import { defaultSpeechVoice, MAX_SPEECH_CHARS, type SpeechAudio } from '../../shared/speech'
 import { requestQwenAudioSpeech } from './speechQwenAudio'
 import { isPlanProvider } from '../../shared/creatorPlan'
-import { cachedPlanSpec, specLimit } from './creatorPlan/cachedSpec'
 import { requestPlanSpeech } from './creatorPlan/speech'
 import { resolveApiKey } from './credentials'
 import { readSettings } from './store'
@@ -18,10 +17,10 @@ export async function requestSpeech(
   signal: AbortSignal,
   onAudio: (chunk: SpeechAudio) => void = () => {}
 ): Promise<void> {
-  // 创作者 Token Plan 单次上限按清单的 max_input_chars（协议 06-audio），其余家 600 字
+  // 创作者 Token Plan 单次上限按清单的 max_input_chars（协议 06-audio，导入时写进模型），其余家 600 字
   const plan = isPlanProvider(provider.id)
   const limit = plan
-    ? (specLimit(await cachedPlanSpec('tts'), 'max_input_chars') ?? MAX_SPEECH_CHARS)
+    ? (provider.models.find((model) => model.id === modelId)?.ttsMaxInputChars ?? MAX_SPEECH_CHARS)
     : MAX_SPEECH_CHARS
   if (!text.trim() || Array.from(text).length > limit) {
     throw new Error('TTS_INVALID_TEXT')

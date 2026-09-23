@@ -3,7 +3,8 @@ import { useI18n } from 'vue-i18n'
 import { speechAPI } from '@renderer/api/speech'
 import { aiProviderAPI } from '@renderer/api/aiProvider'
 import { message } from '@renderer/utils/messageManager'
-import { splitSpeechText, type SpeechAudio } from '@core/shared/speech'
+import { MAX_SPEECH_CHARS, splitSpeechText, type SpeechAudio } from '@core/shared/speech'
+import { isPlanProvider } from '@core/shared/creatorPlan'
 import type { SpeechBriefingStyle } from '@core/shared/speechBriefing'
 import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
 import { briefForSpeech } from './speechBriefing'
@@ -138,12 +139,18 @@ export function useReadAloud(
       })
       if (currentRun !== run) return
       const plainText = briefed === text ? plain : speechText(briefed)
-      const chunks = splitSpeechText(plainText)
       const settings = await aiProviderAPI.getSettings()
       if (currentRun !== run) return
       const binding = settings.roles.tts
       const provider = settings.providers.find((item) => item.id === binding?.providerId)
       const model = provider?.models.find((item) => item.id === binding?.modelId)
+      // 创作者 Token Plan 单次能收的字数在清单里（max_input_chars），按它切；别的来源 600 字
+      const chunks = splitSpeechText(
+        plainText,
+        provider && isPlanProvider(provider.id)
+          ? (model?.ttsMaxInputChars ?? MAX_SPEECH_CHARS)
+          : MAX_SPEECH_CHARS
+      )
       const cacheKey = JSON.stringify([plainText, binding, provider?.baseUrl, model?.ttsVoice])
       const cached = speechCache.get(cacheKey)
       if (cached) {

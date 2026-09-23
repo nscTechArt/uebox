@@ -23,7 +23,11 @@ vi.mock('../../../ai/video', () => ({
     job.providerId ? `${job.providerId}:${job.id}` : job.id,
   supportsReferenceMedia: (api: string | undefined) => api !== 'minimax-video'
 }))
-vi.mock('../../../ai/store', () => ({ readSettings: () => readSettings() }))
+const readSettingsSync = vi.fn((): unknown => ({ version: 3, providers: [], roles: {} }))
+vi.mock('../../../ai/store', () => ({
+  readSettings: () => readSettings(),
+  readSettingsSync: () => readSettingsSync()
+}))
 vi.mock('../../../services/aigc/assetSaver', () => ({
   downloadAndSaveAIGCAsset: (...args: unknown[]) => downloadAndSaveAIGCAsset(...args)
 }))
@@ -404,5 +408,19 @@ describe('失败时的话术', () => {
     generateVideo.mockRejectedValue(new Error('Provider「x」没有指定视频接口形状。'))
 
     await expect(run({ prompt: '猫' })).rejects.toThrow(/配置问题，不是提示词问题/)
+  })
+})
+
+describe('说明里的扣费口径', () => {
+  it('绑的是创作者 Token Plan：失败、取消都退回；别的来源保持「失败也扣」', () => {
+    expect(tool.description).toContain('**按秒 × 分辨率计费，失败也扣**')
+    readSettingsSync.mockReturnValueOnce({
+      version: 3,
+      providers: [],
+      roles: { video: { providerId: 'creator-plan-video', modelId: 'uebox-video' } }
+    })
+    const plan = createGenerateVideoTool()
+    expect(plan.description).toContain('失败、取消都退回')
+    expect(plan.description).not.toContain('失败也扣')
   })
 })
