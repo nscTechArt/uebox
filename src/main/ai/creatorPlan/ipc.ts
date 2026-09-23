@@ -44,6 +44,7 @@ import {
   revokeKey,
   startDeviceAuthorization
 } from './client'
+import { readOrCreateDeviceId } from './deviceId'
 import { CREATOR_PLAN_KEYS_URL, CREATOR_PLAN_ORIGIN } from './endpoint'
 import { clearPlanState, readPlanState, updatePlanState, writePlanState } from './planState'
 import { planConnection, refreshPlan } from './refresh'
@@ -126,7 +127,8 @@ export function registerCreatorPlanIPC(): void {
       try {
         const start = await startDeviceAuthorization(CREATOR_PLAN_ORIGIN, {
           deviceName: hostname(),
-          clientVersion: app.getVersion()
+          clientVersion: app.getVersion(),
+          deviceId: await readOrCreateDeviceId(app.getPath('userData'))
         })
         if (!event.sender.isDestroyed()) event.sender.send('creator-plan:device-code', start.prompt)
         if (start.prompt.verificationUri) void shell.openExternal(start.prompt.verificationUri)

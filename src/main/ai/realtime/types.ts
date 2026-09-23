@@ -63,13 +63,17 @@ export type VoiceSessionEvent =
    * 豆包那边先试它自己的「打招呼」事件让它念，等不到音频才发这个当退路
    * （见 `doubaoRealtime.ts` 的 `buildDoubaoGreeting`）。OpenAI 那家不发这个 ——
    * 它有 `response.create`，模型自己转述。
+   *
+   * `engine: 'tts'`：用「语音合成」角色念，没绑或合成失败再退回系统语音。只有创作者
+   * Token Plan 的来源发它 —— 那条线路只插文字不开口（协议 07「兼容性说明」），
+   * 播报一律交给这边念。不带就是系统语音（豆包那条退路）。
    */
-  | { type: 'speak'; text: string }
+  | { type: 'speak'; text: string; engine?: 'tts' }
   /**
    * 一条播报发出去了（豆包念或本机念），把原话交给渲染层写进「语音助手」对话。
    *
-   * 只有豆包这条线发：它念的是我们给的定稿，没有文字增量可写。OpenAI 那家由模型
-   * 转述，转述的字幕走 `assistant-text` 本来就进对话了，再发这个就是两条。
+   * 豆包这条线和创作者 Token Plan 的来源发：念的是我们给的定稿，没有文字增量可写。
+   * 其余 OpenAI 那家由模型转述，转述的字幕走 `assistant-text` 本来就进对话了，再发这个就是两条。
    */
   | { type: 'announced'; text: string }
   /**
@@ -147,8 +151,9 @@ export interface RealtimeSessionConfig {
   /**
    * 创作者 Token Plan 的来源（协议 07-realtime，OpenAI Realtime GA 的事件子集）。
    *
-   * 走 OpenAI 这支适配器，差别只有两处：转写模型只认 `uebox-stt`（给别的名字服务端回 error）；
-   * 握手被拒（401 Key 失效）和会话里的订阅 / 额度错误换成说清下一步的文案。
+   * 走 OpenAI 这支适配器，差别有三处：转写模型只认 `uebox-stt`（给别的名字服务端回 error）；
+   * 握手被拒（401 Key 失效）和会话里的订阅 / 额度错误换成说清下一步的文案；
+   * 播报不靠 `response.create` 让模型开口，交给渲染层用语音合成角色念（见 `announce`）。
    */
   plan?: boolean
   tools: RealtimeToolDefinition[]

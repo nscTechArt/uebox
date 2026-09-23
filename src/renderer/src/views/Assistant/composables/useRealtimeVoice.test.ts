@@ -273,6 +273,8 @@ describe('measurePcmLevel', () => {
  */
 /** 排进播放队列的分片数。打断之后到的残片不该让它涨 */
 let playedChunkCount = 0
+/** 排进播放队列的那些节点。用例调它们的 `onended` 模拟喇叭播完 */
+let playedSources: Array<{ onended: (() => void) | null }> = []
 
 /** 本机语音合成念过的那些。`onend` 由测试自己触发，模拟念完 */
 let localUtterances: Array<{ text: string; onend: (() => void) | null }> = []
@@ -285,6 +287,7 @@ let micPort: { onmessage: ((event: { data: ArrayBuffer }) => void) | null } | nu
 
 function stubAudioDevices(): void {
   playedChunkCount = 0
+  playedSources = []
   localUtterances = []
   speakerFrame = new Float32Array(1024)
   micPort = null
@@ -316,7 +319,9 @@ function stubAudioDevices(): void {
     createBuffer = vi.fn(() => ({ getChannelData: () => new Float32Array(1), duration: 0 }))
     createBufferSource = vi.fn(() => {
       playedChunkCount += 1
-      return { connect: vi.fn(), start: vi.fn(), stop: vi.fn() }
+      const source = { connect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null }
+      playedSources.push(source)
+      return source
     })
     /** 回声门限量的是它 —— 默认「喇叭没在响」，用例用 `harness.speaker()` 改 */
     createAnalyser = vi.fn(() => ({
@@ -1345,6 +1350,120 @@ describe('useRealtimeVoice', () => {
     expect(harness.api.reportFloor).toHaveBeenLastCalledWith({
       userSpeaking: false,
       assistantSpeaking: false
+    })
+  })
+
+  /*
+   * 创作者 Token Plan 的实时语音主线路只插文字不开口（协议 07「兼容性说明」），
+   * 主进程把播报交过来，由「语音合成」角色念。
+   */
+  describe('speak 事件带 engine: tts（创作者 Token Plan）', () => {
+    /** 假的语音合成 IPC：`script` 决定这次合成回几片音频、成没成 */
+    function stubSpeech(
+      script: (request: { requestId: string; text: string }) => {
+        chunks: number
+        result: { success: true; data: null } | { success: false; error: string }
+        hold?: Promise<void>
+      }
+    ): Record<string, ReturnType<typeof vi.fn>> {
+      let onChunk: ((chunk: unknown) => void) | null = null
+      const speech = {
+        onChunk: vi.fn((handler: (chunk: unknown) => void) => {
+          onChunk = handler
+          return () => {
+            onChunk = null
+          }
+        }),
+        synthesize: vi.fn(async (request: { requestId: string; text: string }) => {
+          const { chunks, result, hold } = script(request)
+          for (let i = 0; i < chunks; i++) {
+            onChunk?.({
+              requestId: request.requestId,
+              base64: SILENT_PCM,
+              format: 'pcm_s16le',
+              sampleRate: 24000
+            })
+          }
+          await hold
+          return result
+        }),
+        cancel: vi.fn().mockResolvedValue(undefined)
+      }
+      ;(window.api as unknown as { speech: typeof speech }).speech = speech
+      return speech
+    }
+
+    it('用语音合成角色念：PCM 进播放队列，念的期间算模型在说，最后一片播完才收', async () => {
+      const harness = await connect()
+      const speech = stubSpeech(() => ({ chunks: 2, result: { success: true, data: null } }))
+
+      await harness.emit({ type: 'speak', text: '场景改好了。', engine: 'tts' })
+
+      expect(speech.synthesize).toHaveBeenCalledWith(
+        expect.objectContaining({ text: '场景改好了。' })
+      )
+      expect(localUtterances).toEqual([])
+      expect(harness.playedChunks()).toBe(2)
+      expect(harness.voice.speaking.value).toBe(true)
+      expect(harness.api.reportFloor).toHaveBeenLastCalledWith({
+        userSpeaking: false,
+        assistantSpeaking: true
+      })
+
+      playedSources[0].onended?.()
+      expect(harness.voice.speaking.value).toBe(true)
+      playedSources[1].onended?.()
+      expect(harness.voice.speaking.value).toBe(false)
+      expect(harness.voice.phase.value).toBe('listening')
+      expect(harness.api.reportFloor).toHaveBeenLastCalledWith({
+        userSpeaking: false,
+        assistantSpeaking: false
+      })
+    })
+
+    it('语音合成角色没绑 / 合成失败、一个字都没出声：退回系统语音，播报不丢', async () => {
+      const harness = await connect()
+      stubSpeech(() => ({ chunks: 0, result: { success: false, error: 'TTS_NOT_CONFIGURED' } }))
+
+      await harness.emit({ type: 'speak', text: '场景改好了。', engine: 'tts' })
+
+      expect(localUtterances.map((item) => item.text)).toEqual(['场景改好了。'])
+      expect(harness.api.reportFloor).toHaveBeenLastCalledWith({
+        userSpeaking: false,
+        assistantSpeaking: true
+      })
+    })
+
+    it('用户插话：掐掉还在合成的那条，之后到的音频不再排进喇叭', async () => {
+      const harness = await connect()
+      let release: () => void = () => {}
+      const hold = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const speech = stubSpeech(() => ({ chunks: 1, result: { success: true, data: null }, hold }))
+
+      await harness.emit({ type: 'speak', text: '在处理工程。', engine: 'tts' })
+      expect(harness.playedChunks()).toBe(1)
+
+      await harness.emit({ type: 'interrupted' })
+      expect(speech.cancel).toHaveBeenCalledWith(speech.synthesize.mock.calls[0][0].requestId)
+      expect(harness.voice.speaking.value).toBe(false)
+
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // 被掐掉的不算失败：不退回系统语音
+      expect(localUtterances).toEqual([])
+      expect(harness.playedChunks()).toBe(1)
+    })
+
+    it('不带 engine 的 speak 照旧用系统语音（豆包那条退路不变）', async () => {
+      const harness = await connect()
+      const speech = stubSpeech(() => ({ chunks: 1, result: { success: true, data: null } }))
+
+      await harness.emit({ type: 'speak', text: '做完了。' })
+
+      expect(speech.synthesize).not.toHaveBeenCalled()
+      expect(localUtterances.map((item) => item.text)).toEqual(['做完了。'])
     })
   })
 

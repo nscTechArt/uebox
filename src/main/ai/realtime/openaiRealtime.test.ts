@@ -510,6 +510,71 @@ describe('创作者 Token Plan', () => {
     expect((await run('going away')).at(-1)).toEqual({ type: 'closed' })
   })
 
+  /*
+   * 协议 07「兼容性说明」：主线路只插文字再 response.create，模型可能等到用户下次开口才回。
+   * 播报（任务结果、进度、反问、防冷场）不能押在这上面。
+   */
+  describe('播报', () => {
+    /** 连一个本机假服务端，接通后播一条，回服务端收到的帧和会话吐出的事件 */
+    const announceOnce = async (
+      plan: boolean
+    ): Promise<{ frames: Record<string, unknown>[]; events: VoiceSessionEvent[] }> => {
+      const server = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+      await new Promise<void>((resolve) => server.once('listening', () => resolve()))
+      const frames: Record<string, unknown>[] = []
+      server.on('connection', (socket) =>
+        socket.on('message', (raw) => frames.push(JSON.parse(String(raw))))
+      )
+      const { port } = server.address() as { port: number }
+      const events: VoiceSessionEvent[] = []
+      const handle = await new Promise<ReturnType<typeof openOpenAiRealtimeSession>>((resolve) => {
+        const opened = openOpenAiRealtimeSession({
+          ...CONFIG,
+          baseUrl: `ws://127.0.0.1:${port}/v1/realtime`,
+          model: plan ? 'uebox-realtime' : 'gpt-realtime',
+          ...(plan ? { plan: true } : {}),
+          onEvent: (event) => {
+            events.push(event)
+            if (event.type === 'ready') queueMicrotask(() => resolve(opened))
+          }
+        })
+      })
+      handle.announce({ speech: '场景改好了。', context: '[系统通知] 任务 t1 完成：场景改好了。' })
+      await vi.waitFor(() => expect(frames.length).toBeGreaterThanOrEqual(3))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      handle.close()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      // 首帧是 session.update，只看播报带出来的那几帧
+      return { frames: frames.slice(1), events }
+    }
+
+    it('创作者 Token Plan：不请模型开口；上下文成对写进去，原话交给渲染层用语音合成角色念', async () => {
+      const { frames, events } = await announceOnce(true)
+      expect(frames.map((frame) => frame.type)).toEqual([
+        'conversation.item.create',
+        'conversation.item.create'
+      ])
+      expect(frames.map((frame) => (frame.item as { role: string }).role)).toEqual([
+        'user',
+        'assistant'
+      ])
+      expect(JSON.stringify(frames[1])).toContain('场景改好了。')
+      expect(events).toContainEqual({ type: 'announced', text: '场景改好了。' })
+      expect(events).toContainEqual({ type: 'speak', text: '场景改好了。', engine: 'tts' })
+    })
+
+    it('别的来源不变：写一条上下文再 response.create，让模型自己转述，不念原话', async () => {
+      const { frames, events } = await announceOnce(false)
+      expect(frames.map((frame) => frame.type)).toEqual([
+        'conversation.item.create',
+        'response.create'
+      ])
+      expect(events.some((event) => event.type === 'speak' || event.type === 'announced')).toBe(
+        false
+      )
+    })
+  })
+
   it('工具调用照旧从 response.done.output 取（协议 07：两处都带，取一处即可）', () => {
     expect(
       translate({

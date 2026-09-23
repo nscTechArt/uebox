@@ -469,9 +469,21 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
      * 不用 `speech`：OpenAI Realtime 没有「照读这段文本」的事件，硬要逐字念
      * 得自己接一路 TTS。而且它转述得比逐字念自然 —— 豆包那边逐字念是**被迫**的，
      * 不是更优解。两家听感会有差别，这是协议差异，不是 bug。
+     *
+     * **创作者 Token Plan 例外**：它的主线路只插一条文字再 `response.create`，模型可能等到
+     * 用户下次开口才回（协议 07「兼容性说明」）—— 任务跑完了语音一声不吭。所以那边不请模型开口：
+     * 上下文成对写进去（模型记得这句是自己说的），原话交给渲染层用语音合成角色逐字念。
      */
-    announce({ context }) {
-      send(buildOpenAiConversationItem({ role: 'user', text: context }))
+    announce(notice) {
+      if (config.plan) {
+        send(buildOpenAiConversationItem({ role: 'user', text: notice.context }))
+        send(buildOpenAiConversationItem({ role: 'assistant', text: notice.speech }))
+        // 没有模型转述的字幕，原话要自己写进「语音助手」对话
+        config.onEvent({ type: 'announced', text: notice.speech })
+        config.onEvent({ type: 'speak', text: notice.speech, engine: 'tts' })
+        return
+      }
+      send(buildOpenAiConversationItem({ role: 'user', text: notice.context }))
       responses.request()
     },
     /**

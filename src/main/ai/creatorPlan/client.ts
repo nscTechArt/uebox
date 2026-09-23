@@ -61,13 +61,15 @@ async function postJson(
 
 export async function startDeviceAuthorization(
   origin: string,
-  client: { deviceName: string; clientVersion: string },
+  client: { deviceName: string; clientVersion: string; deviceId?: string },
   fetchImpl: Fetch = fetch
 ): Promise<DeviceStart> {
   const res = await postJson(fetchImpl, `${origin}/v1/connect/device`, {
     client: 'uebox',
     client_version: client.clientVersion.slice(0, 32),
-    device_name: client.deviceName.slice(0, 64)
+    device_name: client.deviceName.slice(0, 64),
+    // 同一台设备重新授权时服务端吊销它的旧 Key（见 deviceId.ts）
+    ...(client.deviceId ? { device_id: client.deviceId } : {})
   })
   if (!res.ok) throw new CreatorPlanError('network', `${origin}（HTTP ${res.status}）`)
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null

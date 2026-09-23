@@ -6,6 +6,9 @@
  * - 断开先在服务端吊销 Key 再删本机的；吊销失败照常断开，回一个标记
  * - 卡片状态走 If-None-Match，304 用缓存；401 记成授权失效
  */
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CreatorPlanManifest } from '../../../shared/creatorPlan'
 import type { AiProviderSettings } from '../types'
@@ -17,9 +20,11 @@ let planState: PlanState
 /** 按发生顺序记下「吊销」「删本机 Key」，守先后 */
 const log: string[] = []
 const openExternal = vi.fn()
+/** 设备标识落在这里（deviceId.ts 真读真写） */
+const userDataDir = mkdtempSync(join(tmpdir(), 'creator-plan-ipc-'))
 
 vi.mock('electron', () => ({
-  app: { getVersion: () => '1.0.0' },
+  app: { getVersion: () => '1.0.0', getPath: () => userDataDir },
   shell: { openExternal: (url: string) => openExternal(url) },
   ipcMain: {
     handle: (channel: string, fn: (...args: unknown[]) => unknown) => handlers.set(channel, fn)
@@ -181,6 +186,24 @@ describe('creator-plan IPC', () => {
     const result = (await invoke('creator-plan:apply', ['chat'])) as { ok: boolean; code?: string }
     expect(result).toMatchObject({ ok: false, code: 'not_connected' })
     expect(settings).toBe(before)
+  })
+
+  it('连接时带上本机的设备标识；再连一次（断开过、失败过）还是同一个', async () => {
+    const { calls } = stubFetch({
+      '/v1/connect/device': () => new Response('{}', { status: 503 })
+    })
+    const deviceIdOf = (index: number): unknown =>
+      JSON.parse(String(calls[index]!.init!.body)).device_id
+
+    expect(await invoke('creator-plan:connect')).toMatchObject({ ok: false, code: 'network' })
+    await invoke('creator-plan:disconnect')
+    expect(await invoke('creator-plan:connect')).toMatchObject({ ok: false, code: 'network' })
+
+    const devices = calls.filter((call) => call.url.endsWith('/v1/connect/device'))
+    expect(devices).toHaveLength(2)
+    const first = deviceIdOf(calls.indexOf(devices[0]!))
+    expect(first).toMatch(/^[0-9a-f-]{36}$/)
+    expect(deviceIdOf(calls.indexOf(devices[1]!))).toBe(first)
   })
 })
 

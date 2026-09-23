@@ -66,6 +66,21 @@ describe('startDeviceAuthorization', () => {
       expiresIn: 600
     })
   })
+
+  it('有设备标识就带上 device_id（同一台设备重新授权，服务端吊销旧 Key）', async () => {
+    const { fetchImpl, calls } = scripted([json({ device_code: 'dc_1', user_code: 'BCDF-GHJK' })])
+    await startDeviceAuthorization(
+      ORIGIN,
+      { deviceName: 'W', clientVersion: '1', deviceId: 'd6c1f0a2-0000-4000-8000-000000000001' },
+      fetchImpl
+    )
+    expect(calls[0]!.body).toEqual({
+      client: 'uebox',
+      client_version: '1',
+      device_name: 'W',
+      device_id: 'd6c1f0a2-0000-4000-8000-000000000001'
+    })
+  })
 })
 
 describe('pollForKey', () => {

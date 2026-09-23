@@ -12,6 +12,8 @@ import {
   isLocalVoiceTool
 } from '@core/shared/voiceFrontDesk'
 import type { RealtimeEchoGuard } from '@core/shared/realtimeEchoGuard'
+import { splitSpeechText } from '@core/shared/speech'
+import { speechAPI } from '@renderer/api/speech'
 // 采集 worklet 是个叶子资产，语音通话和 Spotlight 听写都用它，所以住在共享目录
 import workletUrl from '@renderer/composables/pcmCapture.worklet.js?url'
 
@@ -58,8 +60,11 @@ export type VoiceEvent =
   /** 用户这句说完了（服务端判停），识别结果还没到。只有 OpenAI 那家发 */
   | { type: 'user-speech-done' }
   | { type: 'turn-done' }
-  /** 主进程让这边**自己念**这段话（豆包等不到自己的音频时的退路，见 `speakLocally`） */
-  | { type: 'speak'; text: string }
+  /**
+   * 主进程让这边**自己念**这段话（见 `speakLocally`）。豆包等不到自己的音频时的退路；
+   * `engine: 'tts'` 是创作者 Token Plan 的播报，用语音合成角色念（见 `speakWithTts`）
+   */
+  | { type: 'speak'; text: string; engine?: 'tts' }
   /** 一条播报发出去了，原话写进「语音助手」对话 */
   | { type: 'announced'; text: string }
   /** 替 Agent 问用户的那句念出去了 / 用户在界面上答掉了（主进程任务表发的） */
@@ -834,7 +839,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
 
   /** 「它在出声」= 播放队列里还排着东西，或者本机语音合成正念着 */
   function syncSpeaking(): boolean {
-    speaking.value = scheduled.length > 0 || localUtterance !== null
+    speaking.value = scheduled.length > 0 || localSpeechActive()
     return speaking.value
   }
 
@@ -905,7 +910,8 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
    *
    * 豆包没有「主动开口」的路（见主进程 `doubaoRealtime.ts` 的 `buildDoubaoAnnouncement`），
    * 任务的进度、结果、反问只能在这儿念。用的是系统自带的中文语音，和模型的嗓音不一样 ——
-   * 这是已知代价，接厂商 TTS 是另一件事。OpenAI 那家不走这里，它的模型自己转述。
+   * 这是已知代价，接厂商 TTS 是另一件事。OpenAI 那家不走这里，它的模型自己转述；
+   * 创作者 Token Plan 走 `speakWithTts`，只在语音合成角色念不出来时退到这儿。
    *
    * 念的期间：算「模型在说」（播报纪律不叠第二条进来）、球体按定值呼吸、
    * 回声门限按 `LOCAL_SPEECH_LEVEL` 设防。用户插话（`interrupted`）或挂断时掐掉。
@@ -941,7 +947,83 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
     synth.speak(utterance)
   }
 
+  /**
+   * 正用「语音合成」角色念的那一条（创作者 Token Plan 的播报，见 `speakWithTts`）。
+   *
+   * `synthesized`：合成完了，只等喇叭把排着的播完 —— 最后一片的 `onended` 才算念完。
+   */
+  let ttsSpeech: { requestId: string; synthesized: boolean } | null = null
+  let ttsSeq = 0
+
+  /** 这边自己在念（系统语音或语音合成角色），不是厂商在说 */
+  function localSpeechActive(): boolean {
+    return localUtterance !== null || ttsSpeech !== null
+  }
+
+  /**
+   * 用「语音合成」角色念一段话。
+   *
+   * 创作者 Token Plan 的实时语音主线路只插文字不开口（协议 07「兼容性说明」），播报只能这边念。
+   * 比系统语音好在两处：嗓音是套餐的音色；合成出来的 PCM 走 `play`，和厂商音频同一条播放图 ——
+   * 过回声消除的回环、响度现场量、打断时 `stopPlayback` 一并清掉，所以**不用**像系统语音那样
+   * 掐上行（`muteUplinkNow` 只看 `localUtterance`）。
+   *
+   * 角色没绑、合成失败、一个字都没出声：退回系统语音，这条播报不能丢。念到一半坏了不重头念。
+   */
+  async function speakWithTts(text: string): Promise<void> {
+    stopLocalSpeech()
+    const current = { requestId: `realtime-announce-${++ttsSeq}`, synthesized: false }
+    ttsSpeech = current
+    phase.value = 'speaking'
+    syncSpeaking()
+    reportFloor(reportedFloor.userSpeaking, true)
+
+    let played = false
+    try {
+      // 单次有字数上限（普通家 600 字，套餐按清单）。播报都短，切段只是保险
+      for (const part of splitSpeechText(text)) {
+        await speechAPI.synthesize({ requestId: current.requestId, text: part }, (audio) => {
+          if (ttsSpeech !== current) return
+          played = true
+          play(audio.base64, audio.sampleRate)
+        })
+        if (ttsSpeech !== current) return
+      }
+    } catch (error) {
+      // 被掐掉的（用户插话、挂断）不算失败
+      if (ttsSpeech !== current) return
+      console.warn('[Realtime Voice] 语音合成没念出来:', error)
+      if (!played) {
+        ttsSpeech = null
+        speakLocally(text)
+        return
+      }
+    }
+    if (ttsSpeech !== current) return
+    current.synthesized = true
+    // 喇叭已经排空（或者压根没出音频）就当场收；否则等最后一片的 onended
+    if (scheduled.length > 0) return
+    finishTtsSpeech()
+    if (!active.value) return
+    reportFloor(reportedFloor.userSpeaking, pendingToolCalls > 0)
+    hangUpIfFarewellSpoken()
+  }
+
+  function finishTtsSpeech(): void {
+    ttsSpeech = null
+    syncSpeaking()
+    if (active.value) phase.value = 'listening'
+  }
+
   function stopLocalSpeech(): void {
+    if (ttsSpeech) {
+      const { requestId } = ttsSpeech
+      ttsSpeech = null
+      // 已经排进喇叭的那些由调用方的 `stopPlayback` 清；这里只掐还在合成的
+      void Promise.resolve()
+        .then(() => speechAPI.cancel(requestId))
+        .catch(() => {})
+    }
     if (!localUtterance) return
     localUtterance = null
     window.speechSynthesis?.cancel()
@@ -990,7 +1072,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
    * 用「按游标依次排」而不是收到就播：分片是几十毫秒一个，各自 `start()` 的话
    * 段与段之间会有肉眼可见的调度抖动，听起来是持续的咔哒声。
    */
-  function play(base64: string): void {
+  function play(base64: string, sampleRate = outputSampleRate): void {
     if (!playContext) return
     // 压缩流当 PCM 播会产生满幅随机噪声。即使厂商回退格式，也绝不能送进扬声器。
     if (detectEncodedAudio(base64)) {
@@ -1001,7 +1083,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
     if (playContext.state === 'suspended') void playContext.resume()
     const samples = decodePcm16Le(base64)
 
-    const buffer = playContext.createBuffer(1, samples.length, outputSampleRate)
+    const buffer = playContext.createBuffer(1, samples.length, sampleRate)
     const channel = buffer.getChannelData(0)
     channel.set(samples)
 
@@ -1022,7 +1104,9 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
        * 用户同时听见两个声音，而且新那句还会被自己的回声打断。
        */
       if (scheduled.length === 0 && active.value) {
-        reportFloor(reportedFloor.userSpeaking, pendingToolCalls > 0 || localUtterance !== null)
+        // 语音合成那一路合成完了、最后一片也播完了 —— 这条播报才算念完
+        if (ttsSpeech?.synthesized) finishTtsSpeech()
+        reportFloor(reportedFloor.userSpeaking, pendingToolCalls > 0 || localSpeechActive())
         // 告别的最后一片播完了 —— 这才是挂断的时机
         hangUpIfFarewellSpoken()
       }
@@ -1195,7 +1279,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
    */
   function hangUpIfFarewellSpoken(): void {
     if (!hangUpWhenDoneSpeaking || !active.value) return
-    if (pendingToolCalls > 0 || scheduled.length > 0 || localUtterance) return
+    if (pendingToolCalls > 0 || scheduled.length > 0 || localSpeechActive()) return
     hangUpWhenDoneSpeaking = false
     console.log('[Realtime Voice] 用户说了再见，告别念完了，挂断')
     void stop()
@@ -1486,7 +1570,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
          * 最后那条不是多余的：分片成批到，这条事件到的时候队列里往往还排着好几秒。
          * 播完的那一刻由 `play()` 里的 `onended` 再报一次。
          */
-        reportFloor(false, pendingToolCalls > 0 || localUtterance !== null || scheduled.length > 0)
+        reportFloor(false, pendingToolCalls > 0 || localSpeechActive() || scheduled.length > 0)
         await commitAssistantTurn()
         // 这一轮说完了。之后再到的增量是**下一轮**的，不再算「已经在回用户那句」
         assistantRepliedSinceUserSpoke = false
@@ -1496,7 +1580,8 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
         if (eventGeneration === generation) hangUpIfFarewellSpoken()
         break
       case 'speak':
-        speakLocally(event.text)
+        if (event.engine === 'tts') void speakWithTts(event.text)
+        else speakLocally(event.text)
         break
       case 'announced':
         options.onAnnouncement?.(event.text)
