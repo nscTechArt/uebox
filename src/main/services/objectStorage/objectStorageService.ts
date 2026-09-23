@@ -23,6 +23,12 @@
  * 本机上传登记在 `userData/object-storage-index.json`，用来在列表里显示原文件名、
  * 以及记住哪些对象已经清理掉了 —— 对话里还引用着它们，得换成一句说明，
  * 不能把一个 404 的链接发给厂商、让整轮请求失败。
+ *
+ * ## `uebox` 预设
+ *
+ * 创作者 Token Plan 自带的存储，不用 AK/SK。预设是它时，上传、列举、删除、测试都转给
+ * `ai/creatorPlan/storageBackend.ts`；按键要链接、问对象在不在，先看键是不是套餐存储的，
+ * 是就由那边回答（换回自己的桶以后，对话里引用的套餐对象也还认得）。调用方无感。
  */
 
 import { createHash } from 'node:crypto'
@@ -31,6 +37,7 @@ import path from 'node:path'
 import { app } from 'electron'
 
 import { deleteLiteralKey, resolveApiKey, saveLiteralKey } from '../../ai/credentials'
+import * as planStorage from '../../ai/creatorPlan/storageBackend'
 import { isPrivateAddress } from '../agentBrowser/urlPolicy'
 import { writeSessionFile } from '../../agent-v3/core/atomicSessionFile'
 import {
@@ -40,7 +47,8 @@ import {
   type ObjectStorageConfig,
   type ObjectStorageConfigView,
   type ObjectStorageEntry,
-  type ObjectStorageSaveInput
+  type ObjectStorageSaveInput,
+  type ObjectStorageUsage
 } from '../../../shared/objectStorage'
 import {
   deleteObject,
@@ -168,6 +176,7 @@ async function targetFor(config: ObjectStorageConfig, secretOverride?: string): 
 /** 开着、而且配完整了。聊天发送时据此决定走链接还是只带路径 */
 export async function isObjectStorageReady(): Promise<boolean> {
   const config = await readObjectStorageConfig()
+  if (config.preset === 'uebox') return config.enabled && planStorage.isPlanStorageReady()
   if (!config.enabled || missingFields(config).length > 0) return false
   return hasSecret()
 }
@@ -207,6 +216,8 @@ function updateIndex(change: (index: UploadIndex) => UploadIndex): Promise<void>
 
 /** 这个键是不是已经从桶里清理掉了 */
 export async function isObjectRemoved(key: string): Promise<boolean> {
+  const plan = await planStorage.isPlanObjectRemoved(key)
+  if (plan !== undefined) return plan
   return (await readIndex()).removed.includes(key)
 }
 
@@ -345,6 +356,9 @@ async function doUpload(
   report: (progress: UploadProgress) => void
 ): Promise<{ key: string; reused: boolean }> {
   const config = await readObjectStorageConfig()
+  if (config.preset === 'uebox') {
+    return planStorage.uploadToPlan(filePath, contentTypeFor(filePath), say, report)
+  }
   const target = await targetFor(config)
   const stat = await fs.stat(filePath)
   const fileName = path.basename(filePath)
@@ -405,6 +419,8 @@ async function touchUpload(key: string): Promise<void> {
  * @returns 配置不可用时返回 null，调用方把引用换成说明
  */
 export async function mediaUrlFor(key: string, now = Date.now()): Promise<string | null> {
+  const planUrl = await planStorage.planMediaUrl(key)
+  if (planUrl !== undefined) return planUrl
   const config = await readObjectStorageConfig()
   if (config.publicBaseUrl) {
     return `${config.publicBaseUrl}/${key.split('/').map(encodeURIComponent).join('/')}`
@@ -445,6 +461,7 @@ export async function testObjectStorage(input: ObjectStorageSaveInput): Promise<
 }> {
   const { secretAccessKey, ...rest } = input
   const config = sanitize(rest)
+  if (config.preset === 'uebox') return planStorage.testPlanStorage()
   try {
     const target = await targetFor(config, secretAccessKey)
     const key = `${config.prefix}.uebox-connection-test-${Date.now()}.txt`
@@ -493,6 +510,7 @@ function ownsKey(config: ObjectStorageConfig, key: string): boolean {
 
 export async function listStoredObjects(): Promise<ObjectStorageEntry[]> {
   const config = await readObjectStorageConfig()
+  if (config.preset === 'uebox') return planStorage.listPlanObjects()
   const target = await targetFor(config)
   const index = await readIndex()
   const names = new Map(index.uploads.map((item) => [item.key, item.fileName]))
@@ -512,6 +530,11 @@ export async function removeStoredObjects(keys: string[]): Promise<{
   failed: Array<{ key: string; error: string }>
 }> {
   const config = await readObjectStorageConfig()
+  if (config.preset === 'uebox') {
+    const result = await planStorage.removePlanObjects(keys)
+    if (result.removed > 0) forgetSettledUploads()
+    return result
+  }
   const target = await targetFor(config)
   const failed: Array<{ key: string; error: string }> = []
   const done: string[] = []
@@ -557,6 +580,12 @@ export async function cleanOlderThan(days: number): Promise<{
   })
   if (stale.length === 0) return { removed: 0, failed: [] }
   return removeStoredObjects(stale.map((item) => item.key))
+}
+
+/** 套餐存储的用量；自己的桶没有这一项，回 null */
+export async function objectStorageUsage(): Promise<ObjectStorageUsage | null> {
+  const config = await readObjectStorageConfig()
+  return config.preset === 'uebox' ? planStorage.planStorageUsage() : null
 }
 
 /** 启动时按设置自动清一次。没开、没配好、没网都安静跳过 —— 这不值得打扰用户 */

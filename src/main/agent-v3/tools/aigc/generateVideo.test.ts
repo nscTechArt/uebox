@@ -218,6 +218,18 @@ describe('参数与前置检查', () => {
       expect(generateVideo).not.toHaveBeenCalled()
     })
 
+    it('套餐存储（uebox）不看留在配置里的旧桶地址：旧桶是内网也照传', async () => {
+      readObjectStorageConfig.mockResolvedValue({
+        preset: 'uebox',
+        endpoint: 'http://192.168.1.5:9000',
+        publicBaseUrl: ''
+      })
+
+      await run({ prompt: '猫', reference_videos: [clip] })
+      expect(uploadMediaFile).toHaveBeenCalled()
+      expect(generateVideo).toHaveBeenCalled()
+    })
+
     it('选的是不收参考视频的厂商时，传之前就拦下', async () => {
       readSettings.mockResolvedValue({
         version: 3,

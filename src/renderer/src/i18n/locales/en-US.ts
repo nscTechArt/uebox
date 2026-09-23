@@ -812,6 +812,16 @@ export default {
       previewManaged: 'Managed by plan',
       apply: 'Apply',
       applied: 'Applied',
+      storage: {
+        label: 'Object storage',
+        spec: '{quota} · kept {days} days after last use',
+        off: 'Now: off',
+        provider: 'Provided by Creator Token Plan. No keys needed.',
+        usage: '{used} of {quota} used',
+        retention: 'kept {days} days after last use',
+        switchBack:
+          'To go back to your own bucket, click "Re-import" on the plan card in Settings → Models and uncheck "Object storage".'
+      },
       errors: {
         cancelled: 'Cancelled',
         denied: 'Denied in the browser',

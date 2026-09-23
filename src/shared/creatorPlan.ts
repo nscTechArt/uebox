@@ -53,6 +53,8 @@ export interface CreatorPlanManifest {
   api: { base_url: string }
   /** 为 null 表示套餐不含这个角色（或服务端还没开放） */
   roles: Partial<Record<ModelRole, unknown>>
+  /** 对象存储（10-storage.md）。`enabled` 为假时导入预览里不提供这一项 */
+  storage?: CreatorPlanStorageSpec | null
   /** 要下线的虚拟模型。命中正在用的模型时提示用户 */
   deprecations?: Array<{
     model: string
@@ -122,6 +124,35 @@ export interface CreatorPlanRoleChange {
 export interface CreatorPlanPreview {
   summary: CreatorPlanSummary
   changes: CreatorPlanRoleChange[]
+  /** 套餐带对象存储时才有 */
+  storage?: CreatorPlanStoragePreview | null
+}
+
+/** 清单里的 storage 一项 */
+export interface CreatorPlanStorageSpec {
+  enabled: boolean
+  quota_bytes: number
+  used_bytes: number
+  max_object_bytes: number
+  retention_days: number
+}
+
+/** 导入预览里「对象存储」那一行 */
+export interface CreatorPlanStoragePreview {
+  quotaBytes: number
+  maxObjectBytes: number
+  retentionDays: number
+  /**
+   * 现在用的是什么：套餐的（plan）、自己配好的桶（own，带服务商预设和桶名）、没开（none）
+   */
+  current: { kind: 'plan' } | { kind: 'none' } | { kind: 'own'; preset: string; bucket: string }
+  /** 没开或本来就是套餐的勾；自己配好了桶的不勾 */
+  defaultSelected: boolean
+}
+
+/** creator-plan:apply 的第二个参数。不传 storage = 不动对象存储 */
+export interface CreatorPlanApplyOptions {
+  storage?: boolean
 }
 
 export interface CreatorPlanState {

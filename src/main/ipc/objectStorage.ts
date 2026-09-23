@@ -13,6 +13,7 @@ import {
   getObjectStorageView,
   isObjectStorageReady,
   listStoredObjects,
+  objectStorageUsage,
   removeStoredObjects,
   runAutoClean,
   saveObjectStorageConfig,
@@ -46,7 +47,9 @@ export function registerObjectStorageIPC(): void {
 
   ipcMain.handle('object-storage:list', async () => {
     try {
-      return { success: true, objects: await listStoredObjects() }
+      // 套餐存储顺带回用量（服务端算的，含别的机器传的）；自己的桶回 null
+      const objects = await listStoredObjects()
+      return { success: true, objects, usage: await objectStorageUsage().catch(() => null) }
     } catch (error) {
       return { success: false, error: errorText(error) }
     }

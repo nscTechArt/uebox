@@ -8,6 +8,7 @@
 
 import type { ModelRole } from '@core/shared/aiProvider'
 import type {
+  CreatorPlanApplyOptions,
   CreatorPlanDevicePrompt,
   CreatorPlanDisconnectResult,
   CreatorPlanPreview,
@@ -41,7 +42,11 @@ export const creatorPlanAPI = {
   state: () => call<CreatorPlanState>((api) => api.state()),
   connect: () => call<CreatorPlanPreview>((api) => api.connect()),
   preview: () => call<CreatorPlanPreview>((api) => api.preview()),
-  apply: (roles: ModelRole[]) => call<CreatorPlanState>((api) => api.apply([...roles])),
+  /** options.storage：预览里「对象存储」勾没勾。预览里没有这一行就不传，主进程不动对象存储 */
+  apply: (roles: ModelRole[], options?: CreatorPlanApplyOptions) =>
+    call<CreatorPlanState>((api) =>
+      options ? api.apply([...roles], { ...options }) : api.apply([...roles])
+    ),
   disconnect: () => call<CreatorPlanDisconnectResult>((api) => api.disconnect()),
   /** 对话里套餐错误提示上的「管理订阅」：主进程用缓存的清单地址打开，不发请求 */
   openManage: async (): Promise<void> => {

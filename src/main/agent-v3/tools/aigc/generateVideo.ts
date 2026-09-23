@@ -217,8 +217,12 @@ async function resolveReferenceVideos(
   if (!(await storage.isObjectStorageReady())) return { problem: objectStorageGuide(local) }
   // 链接的主机就是公开域名或 endpoint（见 mediaUrlFor），传之前就能判断 ——
   // 传完几百 MB 才说「方舟拉不到」，用户白等好几分钟
+  // 套餐存储（uebox）的链接在套餐的公网域名下；配置里留着的是换过去之前那个桶的地址，不作数
   const config = await storage.readObjectStorageConfig()
-  if (storage.isPrivateEndpoint(config.publicBaseUrl || config.endpoint)) {
+  if (
+    config.preset !== 'uebox' &&
+    storage.isPrivateEndpoint(config.publicBaseUrl || config.endpoint)
+  ) {
     return {
       problem:
         '对象存储是本机或内网地址，方舟从公网拉不到这段参考视频。（没有上传，也没有扣费。）' +

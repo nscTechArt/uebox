@@ -31,7 +31,7 @@ import type {
 import type { CliPathChangeResult, CliStatus } from '../shared/cli'
 import type {
   ObjectStorageConfigView,
-  ObjectStorageEntry,
+  ObjectStorageListResult,
   ObjectStorageRemoveResult,
   ObjectStorageSaveInput
 } from '../shared/objectStorage'
@@ -1781,7 +1781,7 @@ declare global {
       test: (input: ObjectStorageSaveInput) => Promise<{ ok: boolean; message: string }>
       /** 开着且配完整了 */
       ready: () => Promise<boolean>
-      list: () => Promise<{ success: boolean; objects?: ObjectStorageEntry[]; error?: string }>
+      list: () => Promise<ObjectStorageListResult>
       remove: (keys: string[]) => Promise<ObjectStorageRemoveResult>
       clean: (days: number) => Promise<ObjectStorageRemoveResult>
       upload: (filePath: string) => Promise<{ success: boolean; key?: string; error?: string }>
@@ -2114,7 +2114,8 @@ declare global {
         >
       >
       apply: (
-        roles: import('../shared/aiProvider').ModelRole[]
+        roles: import('../shared/aiProvider').ModelRole[],
+        options?: import('../shared/creatorPlan').CreatorPlanApplyOptions
       ) => Promise<
         import('../shared/creatorPlan').CreatorPlanResult<
           import('../shared/creatorPlan').CreatorPlanState

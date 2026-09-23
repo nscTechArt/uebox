@@ -6,7 +6,8 @@
  *                            （码通过 creator-plan:device-code 事件推给渲染层）
  *   creator-plan:cancel      取消正在进行的授权
  *   creator-plan:preview     已连接时重新拉清单，回导入预览
- *   creator-plan:apply       按用户勾选的角色落盘，先记下被接管角色的原绑定
+ *   creator-plan:apply       按用户勾选的角色落盘，先记下被接管角色的原绑定；
+ *                            勾了「对象存储」就换成套餐的存储（storage.ts）
  *   creator-plan:disconnect  在服务端吊销 Key → 删来源、还原绑定、删本机 Key
  *   creator-plan:open-manage 打开清单里的 manage_url（对话里的套餐错误提示用）
  *
@@ -17,6 +18,7 @@ import { hostname } from 'node:os'
 import { app, ipcMain, shell } from 'electron'
 import type { ModelRole } from '../../../shared/aiProvider'
 import type {
+  CreatorPlanApplyOptions,
   CreatorPlanDisconnectResult,
   CreatorPlanManifest,
   CreatorPlanPreview,
@@ -45,6 +47,7 @@ import {
 import { CREATOR_PLAN_KEYS_URL, CREATOR_PLAN_ORIGIN } from './endpoint'
 import { clearPlanState, readPlanState, updatePlanState, writePlanState } from './planState'
 import { planConnection, refreshPlan } from './refresh'
+import { applyPlanStorage, planStoragePreview, restorePlanStorage } from './storage'
 
 /** 正在进行的设备授权，用来取消 */
 let pending: AbortController | null = null
@@ -75,7 +78,8 @@ async function fetchFresh(baseUrl: string, apiKey: string): Promise<CreatorPlanM
 async function preview(manifest: CreatorPlanManifest): Promise<CreatorPlanPreview> {
   return {
     summary: planSummary(manifest),
-    changes: planRoleChanges(await readSettings(), manifest)
+    changes: planRoleChanges(await readSettings(), manifest),
+    storage: await planStoragePreview(manifest)
   }
 }
 
@@ -164,7 +168,11 @@ export function registerCreatorPlanIPC(): void {
 
   ipcMain.handle(
     'creator-plan:apply',
-    async (_event, roles: ModelRole[]): Promise<CreatorPlanResult<CreatorPlanState>> => {
+    async (
+      _event,
+      roles: ModelRole[],
+      options?: CreatorPlanApplyOptions
+    ): Promise<CreatorPlanResult<CreatorPlanState>> => {
       try {
         const manifest = pendingManifest
         if (!manifest) return { ok: false, code: 'not_connected', error: 'Connect first' }
@@ -180,6 +188,7 @@ export function registerCreatorPlanIPC(): void {
         const written = await writeSettings(
           applyPlan(current, manifest, { kind: 'literal', id: PLAN_KEY_ID }, selected)
         )
+        await applyPlanStorage(manifest, options?.storage)
         pendingManifest = null
         return {
           ok: true,
@@ -213,6 +222,7 @@ export function registerCreatorPlanIPC(): void {
         const revoked = conn?.apiKey ? await revokeKey(conn.baseUrl, conn.apiKey) : false
         const planState = await readPlanState()
         await writeSettings(removePlan(await readSettings(), planState.originals))
+        await restorePlanStorage()
         await deleteLiteralKey(PLAN_KEY_ID)
         await clearPlanState()
         return { ok: true, data: { revoked, keysUrl: CREATOR_PLAN_KEYS_URL } }

@@ -58,6 +58,18 @@ vi.mock('./planState', () => ({
   }
 }))
 
+/** 对象存储那一项的挂接：细节在 storage.test.ts，这里只守 IPC 有没有把它接上 */
+const storage = {
+  planStoragePreview: vi.fn(async () => null as unknown),
+  applyPlanStorage: vi.fn(async () => {}),
+  /** 还原那一刻 log 里已经有什么：守「吊销之后、删 Key 之前」 */
+  restorePlanStorage: vi.fn(async () => {
+    restoredAt.push([...log])
+  })
+}
+const restoredAt: string[][] = []
+vi.mock('./storage', () => storage)
+
 const { registerCreatorPlanIPC } = await import('./ipc')
 const { PLAN_KEY_ID, PLAN_PROVIDER_ID } = await import('./apply')
 const { CREATOR_PLAN_KEYS_URL } = await import('./endpoint')
@@ -306,5 +318,37 @@ describe('卡片状态：清单缓存', () => {
     await invoke('creator-plan:open-manage')
     expect(openExternal).toHaveBeenCalledWith('https://plan.example/account/billing')
     expect(calls).toEqual([])
+  })
+})
+
+describe('对象存储这一项', () => {
+  beforeEach(() => {
+    settings = { ...settings, providers: [mine, planProvider] }
+    storage.applyPlanStorage.mockClear()
+  })
+
+  it('预览带上存储那一行；应用时把勾选原样交下去', async () => {
+    const row = { quotaBytes: 1, maxObjectBytes: 1, retentionDays: 30, current: { kind: 'none' } }
+    storage.planStoragePreview.mockResolvedValueOnce(row)
+    stubFetch({ '/plan': () => ok(manifest) })
+    const preview = (await invoke('creator-plan:preview')) as { data: { storage: unknown } }
+    expect(preview.data.storage).toEqual(row)
+    await invoke('creator-plan:apply', ['chat'], { storage: true })
+    expect(storage.applyPlanStorage).toHaveBeenCalledWith(manifest, true)
+  })
+
+  it('老的调用方不带第二个参数：交下去的是 undefined（不动对象存储）', async () => {
+    stubFetch({ '/plan': () => ok(manifest) })
+    await invoke('creator-plan:preview')
+    await invoke('creator-plan:apply', ['chat'])
+    expect(storage.applyPlanStorage).toHaveBeenCalledWith(manifest, undefined)
+  })
+
+  it('断开：删 Key 之前把对象存储还原', async () => {
+    stubFetch({ '/auth/revoke': () => new Response(null, { status: 204 }) })
+    restoredAt.length = 0
+    await invoke('creator-plan:disconnect')
+    expect(restoredAt).toEqual([['revoke']])
+    expect(log).toEqual(['revoke', `delete:${PLAN_KEY_ID}`])
   })
 })

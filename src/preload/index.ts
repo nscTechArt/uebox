@@ -2085,7 +2085,9 @@ const api = {
     connect: () => ipcRenderer.invoke('creator-plan:connect'),
     cancel: () => ipcRenderer.invoke('creator-plan:cancel'),
     preview: () => ipcRenderer.invoke('creator-plan:preview'),
-    apply: (roles: string[]) => ipcRenderer.invoke('creator-plan:apply', roles),
+    /** options.storage：导入预览里勾没勾「对象存储」；不传 = 不动对象存储 */
+    apply: (roles: string[], options?: { storage?: boolean }) =>
+      ipcRenderer.invoke('creator-plan:apply', roles, options),
     disconnect: () => ipcRenderer.invoke('creator-plan:disconnect'),
     /** 打开清单里的 manage_url。对话里的套餐错误提示用 */
     openManage: () => ipcRenderer.invoke('creator-plan:open-manage'),

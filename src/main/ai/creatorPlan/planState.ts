@@ -8,6 +8,8 @@
  *   etag          上次清单的 ETag，下次拉带 If-None-Match
  *   manifest      上次拉到的清单。304 时用它；断网时卡片也还有东西可显示
  *   unauthorized  上次拉清单回了 401（Key 被吊销或删掉）
+ *   storageOriginal  导入时对象存储被换成套餐存储之前的配置，断开时照着还原（见 storage.ts）；
+ *                 没有这一项 = 对象存储不归套餐管
  *
  * 读坏了按空状态处理 —— 丢的只是还原信息和缓存，不该让设置页打不开。
  */
@@ -17,6 +19,7 @@ import { dirname, join } from 'path'
 import { app } from 'electron'
 import { MODEL_ROLES, type ModelRole } from '../../../shared/aiProvider'
 import type { CreatorPlanManifest } from '../../../shared/creatorPlan'
+import type { ObjectStorageConfig } from '../../../shared/objectStorage'
 import type { OriginalBindings } from './apply'
 
 const STATE_FILE = 'creator-plan.json'
@@ -26,6 +29,7 @@ export interface PlanState {
   etag: string | null
   manifest: CreatorPlanManifest | null
   unauthorized: boolean
+  storageOriginal?: ObjectStorageConfig
 }
 
 export const EMPTY_PLAN_STATE: PlanState = Object.freeze({
@@ -65,7 +69,11 @@ export function normalizePlanState(raw: unknown): PlanState {
       manifest && manifest.schema === 1 && manifest.plan && typeof manifest.roles === 'object'
         ? manifest
         : null,
-    unauthorized: source.unauthorized === true
+    unauthorized: source.unauthorized === true,
+    // 形状交给对象存储服务的 sanitize 去校，这里只保证是个对象
+    ...(source.storageOriginal && typeof source.storageOriginal === 'object'
+      ? { storageOriginal: source.storageOriginal as ObjectStorageConfig }
+      : {})
   }
 }
 

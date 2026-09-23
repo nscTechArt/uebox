@@ -792,6 +792,16 @@ export default {
       previewManaged: '套餐管理中',
       apply: '应用',
       applied: '已应用',
+      storage: {
+        label: '对象存储',
+        spec: '{quota} 空间 · 最后一次用到后留 {days} 天',
+        off: '现在：未开启',
+        provider: '创作者 Token Plan 提供，不用填密钥',
+        usage: '已用 {used} / {quota}',
+        retention: '最后一次用到后留 {days} 天',
+        switchBack:
+          '想换回自己的桶：到「设置 → 模型」的套餐卡片点「重新导入」，取消勾选「对象存储」。'
+      },
       errors: {
         cancelled: '已取消',
         denied: '在浏览器里被拒绝了',

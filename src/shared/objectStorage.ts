@@ -8,8 +8,17 @@
  * 没配就不走这条路：音视频只带本地路径，由 agent 自己用 `analyze_video` 去看。
  */
 
-/** 预设只决定默认 endpoint / region / 寻址方式，签名都是同一套 SigV4 */
-export type ObjectStoragePreset = 'aws' | 'aliyun' | 'tencent' | 'r2' | 'minio' | 'custom'
+/**
+ * 预设只决定默认 endpoint / region / 寻址方式，签名都是同一套 SigV4。
+ *
+ * `uebox` 例外：创作者 Token Plan 自带的存储，不用 AK/SK，走套餐的申请 → 上传 → 确认三步
+ * （`src/main/ai/creatorPlan/storageBackend.ts`）。它只由套餐卡片的导入开启，不在下拉框里；
+ * 开启时其余字段原样留着，换回自己的桶时不用重填。
+ */
+export type ObjectStoragePreset = 'aws' | 'aliyun' | 'tencent' | 'r2' | 'minio' | 'custom' | 'uebox'
+
+/** 只能由创作者 Token Plan 开启的预设，设置页的下拉框里不列 */
+export const PLAN_OBJECT_STORAGE_PRESET = 'uebox' satisfies ObjectStoragePreset
 
 export interface ObjectStorageConfig {
   enabled: boolean
@@ -92,7 +101,9 @@ export const OBJECT_STORAGE_PRESETS: Record<
     forcePathStyle: true
   },
   minio: { endpoint: 'http://127.0.0.1:9000', region: 'us-east-1', forcePathStyle: true },
-  custom: { endpoint: '', region: 'us-east-1', forcePathStyle: false }
+  custom: { endpoint: '', region: 'us-east-1', forcePathStyle: false },
+  // 地址来自套餐清单的 base_url，这里没有可填的
+  uebox: { endpoint: '', region: '', forcePathStyle: false }
 }
 
 /**
@@ -120,5 +131,22 @@ export interface ObjectStorageRemoveResult {
   success: boolean
   removed?: number
   failed?: Array<{ key: string; error: string }>
+  error?: string
+}
+
+/** 套餐存储的用量（`GET /storage/usage`）。自己的桶没有这一项 */
+export interface ObjectStorageUsage {
+  quotaBytes: number
+  usedBytes: number
+  objectCount: number
+  /** 最后一次用到之后保留多少天，取自清单 `storage.retention_days` */
+  retentionDays: number | null
+}
+
+export interface ObjectStorageListResult {
+  success: boolean
+  objects?: ObjectStorageEntry[]
+  /** 只有套餐存储有 */
+  usage?: ObjectStorageUsage | null
   error?: string
 }

@@ -9,15 +9,19 @@
 import type {
   ObjectStorageConfigView,
   ObjectStorageEntry,
+  ObjectStorageListResult,
   ObjectStorageRemoveResult,
-  ObjectStorageSaveInput
+  ObjectStorageSaveInput,
+  ObjectStorageUsage
 } from '../../../shared/objectStorage'
 
 export type {
   ObjectStorageConfigView,
   ObjectStorageEntry,
+  ObjectStorageListResult,
   ObjectStorageRemoveResult,
-  ObjectStorageSaveInput
+  ObjectStorageSaveInput,
+  ObjectStorageUsage
 }
 
 export interface UploadProgressEvent {
@@ -44,8 +48,8 @@ export const objectStorageAPI = {
     return (await window.api.objectStorage?.ready()) ?? false
   },
 
-  list: (): Promise<{ success: boolean; objects?: ObjectStorageEntry[]; error?: string }> =>
-    window.api.objectStorage.list(),
+  /** 套餐存储时顺带回用量（usage），自己的桶没有 */
+  list: (): Promise<ObjectStorageListResult> => window.api.objectStorage.list(),
 
   remove: (keys: string[]): Promise<ObjectStorageRemoveResult> =>
     window.api.objectStorage.remove([...keys]),

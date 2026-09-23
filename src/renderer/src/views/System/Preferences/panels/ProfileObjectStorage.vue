@@ -26,11 +26,13 @@ import {
   objectStorageAPI,
   type ObjectStorageConfigView,
   type ObjectStorageEntry,
-  type ObjectStorageRemoveResult
+  type ObjectStorageRemoveResult,
+  type ObjectStorageUsage
 } from '@renderer/api/objectStorage'
 import {
   DEFAULT_OBJECT_STORAGE_CONFIG,
   OBJECT_STORAGE_PRESETS,
+  PLAN_OBJECT_STORAGE_PRESET,
   type ObjectStorageConfig,
   type ObjectStoragePreset
 } from '@core/shared/objectStorage'
@@ -57,14 +59,32 @@ const removing = ref(false)
 const editing = ref(false)
 const showAdvanced = ref(false)
 
-/** 这几家的 Endpoint 没法从 Region 推出来（R2 要账户 ID，自建的地址各不相同） */
-const MANUAL_ENDPOINT_PRESETS: ObjectStoragePreset[] = ['r2', 'minio', 'custom']
+/**
+ * 这几家的 Endpoint 没法从 Region 推出来（R2 要账户 ID，自建的地址各不相同）。
+ * 套餐存储没有 Endpoint，也不许推：开关一存就会把留着的自己桶的地址冲掉
+ */
+const MANUAL_ENDPOINT_PRESETS: ObjectStoragePreset[] = [
+  'r2',
+  'minio',
+  'custom',
+  PLAN_OBJECT_STORAGE_PRESET
+]
 const needsEndpoint = computed(() => MANUAL_ENDPOINT_PRESETS.includes(form.preset))
 
 /** 必填的都有了、Secret 也存过了 —— 以存下来的为准，不看表单里正在改的 */
 const configured = ref(false)
-const showForm = computed(() => form.enabled && (!configured.value || editing.value))
-const showFiles = computed(() => form.enabled && configured.value && !editing.value)
+/**
+ * 创作者 Token Plan 提供的存储：没有表单可填，只由套餐卡片的导入开启 / 断开时还原。
+ * 这时连接那一层换成一行说明和用量，文件那一层照旧。
+ */
+const planManaged = computed(() => form.preset === PLAN_OBJECT_STORAGE_PRESET)
+const planUsage = ref<ObjectStorageUsage | null>(null)
+const showForm = computed(
+  () => form.enabled && !planManaged.value && (!configured.value || editing.value)
+)
+const showFiles = computed(
+  () => form.enabled && (configured.value || planManaged.value) && !editing.value
+)
 const connectionSummary = computed(() =>
   t('profile.objectStorage.connectedSummary', {
     provider: t(`profile.objectStorage.presets.${form.preset}`),
@@ -74,10 +94,12 @@ const connectionSummary = computed(() =>
 )
 
 const presetOptions = computed(() =>
-  (Object.keys(OBJECT_STORAGE_PRESETS) as ObjectStoragePreset[]).map((value) => ({
-    value,
-    label: t(`profile.objectStorage.presets.${value}`)
-  }))
+  (Object.keys(OBJECT_STORAGE_PRESETS) as ObjectStoragePreset[])
+    .filter((value) => value !== PLAN_OBJECT_STORAGE_PRESET)
+    .map((value) => ({
+      value,
+      label: t(`profile.objectStorage.presets.${value}`)
+    }))
 )
 
 const totalSize = computed(() => objects.value.reduce((sum, item) => sum + item.size, 0))
@@ -213,6 +235,7 @@ async function refreshList(): Promise<void> {
       return
     }
     objects.value = result.objects ?? []
+    planUsage.value = result.usage ?? null
   } finally {
     listing.value = false
   }
@@ -298,7 +321,31 @@ onMounted(load)
     </section>
 
     <!-- 第二层：连到哪。配好了收成一行 -->
-    <section v-if="form.enabled && configured && !editing" class="settings-section">
+    <section v-if="form.enabled && planManaged" class="settings-section">
+      <h4 class="section-title">{{ $t('profile.objectStorage.connection') }}</h4>
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label">{{ $t('aiProvider.creatorPlan.storage.provider') }}</div>
+          <div v-if="planUsage" class="setting-desc">
+            {{
+              $t('aiProvider.creatorPlan.storage.usage', {
+                used: formatSize(planUsage.usedBytes),
+                quota: formatSize(planUsage.quotaBytes)
+              })
+            }}
+            <template v-if="planUsage.retentionDays">
+              ·
+              {{
+                $t('aiProvider.creatorPlan.storage.retention', { days: planUsage.retentionDays })
+              }}
+            </template>
+          </div>
+          <div class="setting-desc">{{ $t('aiProvider.creatorPlan.storage.switchBack') }}</div>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="form.enabled && configured && !planManaged && !editing" class="settings-section">
       <h4 class="section-title">{{ $t('profile.objectStorage.connection') }}</h4>
       <div class="setting-item">
         <div class="setting-info">

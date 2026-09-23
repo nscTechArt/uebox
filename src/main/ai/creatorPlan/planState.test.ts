@@ -34,4 +34,10 @@ describe('normalizePlanState', () => {
       unauthorized: true
     })
   })
+
+  it('对象存储的原配置原样留着（断开时要照着还原）；不是对象的丢掉', () => {
+    const original = { enabled: true, preset: 'r2', bucket: 'b' }
+    expect(normalizePlanState({ storageOriginal: original }).storageOriginal).toEqual(original)
+    expect(normalizePlanState({ storageOriginal: 'x' })).not.toHaveProperty('storageOriginal')
+  })
 })

@@ -13,6 +13,7 @@ import { useI18n } from 'vue-i18n'
 import AppButton from '@renderer/components/AppButton.vue'
 import AppCheckbox from '@renderer/components/AppCheckbox.vue'
 import AppModal from '@renderer/components/AppModal.vue'
+import CreatorPlanStorageRow from './CreatorPlanStorageRow.vue'
 import { message } from '@renderer/utils/messageManager'
 import { creatorPlanAPI } from '@renderer/api/creatorPlan'
 import type { ModelRole } from '@core/shared/aiProvider'
@@ -34,6 +35,8 @@ const connecting = ref(false)
 const prompt = ref<CreatorPlanDevicePrompt | null>(null)
 const preview = ref<CreatorPlanPreview | null>(null)
 const selected = ref<ModelRole[]>([])
+/** 预览里「对象存储」勾没勾。套餐不带存储时预览里没有这一行，也就不传 */
+const storageSelected = ref(false)
 const applying = ref(false)
 const confirmingDisconnect = ref(false)
 /** 断开时服务端没吊销成功：网页端 Key 列表的地址，提示用户手动吊销 */
@@ -55,6 +58,7 @@ async function load(): Promise<void> {
 function openPreview(data: CreatorPlanPreview): void {
   preview.value = data
   selected.value = data.changes.filter((c) => c.defaultSelected).map((c) => c.role)
+  storageSelected.value = data.storage?.defaultSelected ?? false
 }
 
 async function connect(): Promise<void> {
@@ -84,7 +88,10 @@ function toggle(role: ModelRole, checked: boolean): void {
 
 async function apply(): Promise<void> {
   applying.value = true
-  const result = await creatorPlanAPI.apply(selected.value)
+  const result = await creatorPlanAPI.apply(
+    selected.value,
+    preview.value?.storage ? { storage: storageSelected.value } : undefined
+  )
   applying.value = false
   if (!result.ok) {
     message.error(errorText(result.code, result.error))
@@ -309,6 +316,11 @@ onUnmounted(() => unsubscribe?.())
             <span v-else>{{ $t('aiProvider.creatorPlan.previewUnset') }}</span>
           </span>
         </div>
+        <CreatorPlanStorageRow
+          v-if="preview.storage"
+          v-model:checked="storageSelected"
+          :storage="preview.storage"
+        />
       </div>
     </AppModal>
 
