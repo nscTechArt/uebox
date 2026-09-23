@@ -1261,6 +1261,18 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('not a secret')
   })
 
+  // 套餐网关会注入「你是虚幻盒子创作者模型」；这里再写 creator-plan/xxx 就两条打架，
+  // 模型会在思考过程里把两段提示词摆出来比
+  it('接的是 Creator Plan：说法和网关一致，不写来源 ID', () => {
+    const prompt = buildSystemPrompt(base, [], {
+      providerId: 'creator-plan',
+      modelId: 'uebox-agent'
+    })
+
+    expect(prompt).toContain('UEBox Creator (uebox-agent)')
+    expect(prompt).not.toContain('creator-plan/')
+  })
+
   // 无头场景（HTTP server、旧调用点）不传身份就整句不出现，而不是印 undefined
   it('没传模型身份时不印半句残缺的话', () => {
     const prompt = buildSystemPrompt(base)

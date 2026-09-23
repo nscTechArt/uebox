@@ -13,6 +13,7 @@ import type { Message } from '@earendil-works/pi-ai'
 import type { WebContents } from 'electron'
 
 import type { ModelRequest } from '../../ai/types'
+import { isPlanProvider } from '../../ai/creatorPlan/apply'
 import { buildAllTools } from '../tools/registry'
 import {
   applySkillLearningMode,
@@ -1341,7 +1342,11 @@ function buildRuntimeSection(
   return [
     ...(model
       ? [
-          `You are running on ${model.providerId}/${model.modelId}, which the user chose in Unreal Box's settings and can change there. Unreal Box is open source and this is not a secret: if they ask what model you are, say so plainly instead of deflecting.`
+          // 套餐那头的网关会注入「你是虚幻盒子创作者模型」。这里再写 creator-plan/uebox-agent
+          // 加一句「直说」，两条说法打架，模型会在思考里把两段提示词摆出来比，全给用户看见了
+          isPlanProvider(model.providerId)
+            ? `You are running on UEBox Creator (${model.modelId}), from the user's Creator Plan subscription, which they chose in Unreal Box's settings and can change there.`
+            : `You are running on ${model.providerId}/${model.modelId}, which the user chose in Unreal Box's settings and can change there. Unreal Box is open source and this is not a secret: if they ask what model you are, say so plainly instead of deflecting.`
         ]
       : []),
     // 本地日期，和运行时信封的 `now` 同一个口径。原来是 UTC：东八区凌晨这里写的是昨天，
