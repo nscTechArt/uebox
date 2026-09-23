@@ -297,4 +297,68 @@ describe('语音 IPC 生命周期', () => {
     await expect(starting).resolves.toMatchObject({ ok: false })
     expect(mock.connections).toHaveLength(0)
   })
+
+  /** 还没开好时，别的窗口来一句 stop（比如被让掉的 Spotlight 收尾）不能把这一路取消掉 */
+  it('开到一半时别的窗口来 stop：不取消', async () => {
+    const { invoke } = await harness()
+    let resolveSettings: (value: typeof settings) => void = () => {}
+    mock.readSettings.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSettings = resolve
+        })
+    )
+    const starting = invoke('start')
+    await mock.handlers.get('realtime-voice:stop')!({ sender: { id: 2 } })
+    resolveSettings(settings)
+
+    await expect(starting).resolves.toMatchObject({ ok: true })
+    expect(mock.connections).toHaveLength(1)
+  })
+
+  /**
+   * 通话和听写同时在等密钥：谁后开完都不能把先开的那路从 `active` 上盖掉 ——
+   * 被盖掉的那路没人再管，一直开着计费。通话优先，听写让路
+   */
+  it('通话和听写同时在开：只留一路，被让掉的那路关掉', async () => {
+    const { invoke } = await harness()
+    const spotlight = { id: 2, isDestroyed: () => false, send: vi.fn() }
+    let resolveCall: (value: typeof settings) => void = () => {}
+    mock.readSettings.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCall = resolve
+        })
+    )
+    const call = invoke('start')
+    const dictation = mock.handlers.get('realtime-voice:start-dictation')!({ sender: spotlight })
+
+    await expect(dictation).resolves.toMatchObject({ ok: true })
+    resolveCall(settings)
+    await expect(call).resolves.toMatchObject({ ok: true })
+
+    expect(mock.connections).toHaveLength(2)
+    // 听写那路（先开的）被通话让掉并关掉了，Spotlight 收到一声 closed
+    expect(mock.connections[0].handle.close).toHaveBeenCalled()
+    expect(spotlight.send).toHaveBeenCalledWith('realtime-voice:event', { type: 'closed' })
+  })
+
+  it('听写等密钥期间通话先接上了：听写回 busy，不盖掉通话', async () => {
+    const { invoke } = await harness()
+    const spotlight = { id: 2, isDestroyed: () => false, send: vi.fn() }
+    let resolveDictation: (value: typeof settings) => void = () => {}
+    mock.readSettings.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveDictation = resolve
+        })
+    )
+    const dictation = mock.handlers.get('realtime-voice:start-dictation')!({ sender: spotlight })
+    await expect(invoke('start')).resolves.toMatchObject({ ok: true })
+    resolveDictation(settings)
+
+    await expect(dictation).resolves.toMatchObject({ ok: false, reason: 'busy' })
+    expect(mock.connections).toHaveLength(1)
+    expect(mock.connections[0].handle.close).not.toHaveBeenCalled()
+  })
 })

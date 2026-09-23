@@ -5,6 +5,7 @@ import { StorageUtils } from '@renderer/common/utils/storage'
 import {
   readVoiceAutoPlayFlag,
   readVoiceBriefingStyle,
+  readVoiceMicrophoneDeviceId,
   useMiniVoiceAutoPlay
 } from './miniVoiceAutoPlay'
 
@@ -82,5 +83,24 @@ describe('小窗读播报风格', () => {
     expect(readVoiceBriefingStyle()).toBe('concise')
     writeStyle('detailed')
     expect(readVoiceBriefingStyle()).toBe('detailed')
+  })
+})
+
+describe('常驻窗口读麦克风选择', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => localStorage.clear())
+
+  // 没存过就交回调用方自己那份 store，不当成「选了系统默认」
+  it('没存过返回 null', () => {
+    expect(readVoiceMicrophoneDeviceId()).toBeNull()
+  })
+
+  /** Spotlight 常驻：设置里换了麦，下一次热键听写就得用新的，不能按启动时抄的那份 */
+  it('读到的是主窗口此刻存的那个设备', () => {
+    localStorage.setItem(
+      'ai-config-store',
+      StorageUtils.encrypt({ config: { voiceMicrophoneDeviceId: 'usb-headset' } })
+    )
+    expect(readVoiceMicrophoneDeviceId()).toBe('usb-headset')
   })
 })

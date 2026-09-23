@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const broadcasts = vi.hoisted(() => vi.fn())
+
 /**
  * 「这一次唤起要不要开麦」这一位的传递。
  *
@@ -85,7 +87,7 @@ vi.mock('electron', () => ({
   ipcMain: { on: () => undefined, handle: () => undefined },
   app: { getPath: () => '/tmp' }
 }))
-vi.mock('./appWindows', () => ({ getAppWindows: () => [] }))
+vi.mock('./appWindows', () => ({ getAppWindows: () => [], sendToAppWindows: broadcasts }))
 vi.mock('./security', () => ({ protectRendererWindow: () => undefined }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
 vi.mock('./services', () => ({
@@ -141,5 +143,24 @@ describe('Spotlight 的听写位', () => {
     windows[windows.length - 1].finishLoad()
 
     expect(lastDictate()).toBe(false)
+  })
+
+  /**
+   * 页面还在加载时先按了语音热键、紧接着又按了打字热键：最后一次按的算。
+   * 原来打字那一下不清这一位，加载完一弹出来就开了麦。
+   */
+  it('加载中先按语音、再按打字：以打字为准，不开麦', () => {
+    spotlightManager.showForDictation()
+    spotlightManager.toggle()
+    windows[windows.length - 1].finishLoad()
+
+    expect(lastDictate()).toBe(false)
+  })
+
+  /** 开麦之前让别的窗口停下朗读：念出来的话会被麦克风收进去、转写成指令的一部分 */
+  it('语音热键开麦时广播一声，让正在朗读的窗口停下', () => {
+    broadcasts.mockClear()
+    spotlightManager.showForDictation()
+    expect(broadcasts).toHaveBeenCalledWith('voice:dictation-started')
   })
 })

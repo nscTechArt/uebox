@@ -26,4 +26,16 @@ describe('MiniChatWindow read aloud', () => {
     // 第二个参数（播报风格）让调用换了行，只认第一个参数是不是那个开关
     expect(source).toMatch(/useAutoReadAloud\(\s*\(\) => voiceAutoPlayEnabled\.value/)
   })
+
+  /*
+   * 重试、编辑会把旧答复删掉重来。那条要是正在念，气泡一删就没人能停它了
+   * （小窗没有常驻播放条），旧答复会盖着新答复一直念完 —— 删之前先停
+   */
+  it.each(['handleBubbleRetry', 'handleUserConfirmEdit'])('%s 删消息之前先停朗读', (name) => {
+    const body = source.slice(source.indexOf(`async function ${name}`))
+    const stopAt = body.indexOf('stopReadAloud()')
+    const deleteAt = body.indexOf('deleteMessagesFromIndex(')
+    expect(stopAt).toBeGreaterThan(-1)
+    expect(stopAt).toBeLessThan(deleteAt)
+  })
 })

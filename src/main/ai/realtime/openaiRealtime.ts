@@ -203,7 +203,14 @@ const RESPONSE_CREATE_TIMEOUT_MS = 5_000
  * 比这次请求没发出去糟得多。真正的修法是不让它发生（见 `createResponseGate`），
  * 这里只是不让残留的竞态毁掉通话。整包已经由 `logFrame` 打在日志里了。
  */
-const HARMLESS_ERROR_CODES = new Set(['conversation_already_has_active_response'])
+const HARMLESS_ERROR_CODES = new Set([
+  'conversation_already_has_active_response',
+  /*
+   * 听写「松手即发」时补的那次 commit 撞上了空缓冲：用户说完停顿了一下，服务端的判停
+   * 已经先提交过了。那一段的转写正在路上 —— 当成故障的话会话当场被关，它就丢了
+   */
+  'input_audio_buffer_commit_empty'
+])
 
 export interface ResponseGate {
   /** 请求模型开口。已经有一轮在跑就先压着，等它结束再补发 */

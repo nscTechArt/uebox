@@ -146,6 +146,8 @@ class MiniChatWindowManager {
 
     // 渲染进程主动请求初始消息（备用机制）
     ipcMain.on('mini-chat:request-initial-message', () => {
+      // 渲染层开口要了，说明监听已经挂好 —— 从这一刻起才能直接推
+      this.rendererReady = true
       logger.info(`[MiniChat] 收到渲染进程请求, pendingMessage=${!!this.pendingMessage}`)
       if (this.pendingMessage && this.miniChatWindow && !this.miniChatWindow.isDestroyed()) {
         logger.info(
@@ -169,6 +171,7 @@ class MiniChatWindowManager {
     // 和初始消息一样的备用机制：窗口挂载完了主动来要一次，
     // 免得 did-finish-load 那一发早于 Vue 组件挂载
     ipcMain.on('mini-chat:request-initial-context', () => {
+      this.rendererReady = true
       this.deliverContext()
     })
 
@@ -232,8 +235,18 @@ class MiniChatWindowManager {
       }
     })
 
+    // 这个窗口自己的引用：`close()` 把字段先置空、150ms 后才真关，这中间新建的窗口
+    // 不能被旧窗口的 `closed` 连同它的待发消息一起抹掉
+    const win = this.miniChatWindow
+    this.rendererReady = false
+    win.webContents.on('did-start-loading', () => {
+      if (this.miniChatWindow === win) this.rendererReady = false
+    })
+
     this.miniChatWindow.on('closed', () => {
+      if (this.miniChatWindow !== win) return
       this.miniChatWindow = null
+      this.rendererReady = false
       /*
        * 没人来取就作废。初始消息改成「等渲染层来取」之后，这条路上**唯一**的
        * 清空点就是那次索取 —— 窗口在 Vue 挂起来之前被关掉（加载失败、用户手快），
@@ -317,7 +330,9 @@ class MiniChatWindowManager {
      * 而且一样不报错。渲染层的 `requestInitialContext()` 和消息那条挨着发，
      * 接住它的是 `mini-chat:request-initial-context`。
      */
-    if (needsCreate || this.miniChatWindow.webContents.isLoading()) {
+    // 「加载完」不等于「Vue 挂好了」：页面加载完到 onMounted 注册监听之间还有一段
+    // （路由懒加载、先预读聊天记录）。只认渲染层自己开口要过这一个信号
+    if (needsCreate || !this.rendererReady) {
       logger.info('[MiniChat] 窗口还在建/在加载，初始消息和上下文都等渲染层来取')
     } else if (this.pendingMessage) {
       // 窗口已加载，直接发送
@@ -344,7 +359,7 @@ class MiniChatWindowManager {
 
     // 窗口本来就开着（show 不会重新加载）时立刻投递 —— 那时候渲染层早挂好了，
     // 推过去有人接。还在加载的那条路不推，等它自己来取（见 show() 里那段）
-    if (this.miniChatWindow && !this.miniChatWindow.webContents.isLoading()) {
+    if (this.miniChatWindow && this.rendererReady) {
       this.deliverContext()
     }
   }
@@ -382,6 +397,8 @@ class MiniChatWindowManager {
 
   // 待发送的初始消息
   private pendingMessage: MiniChatInitialMessage | null = null
+  /** 当前窗口的渲染层来要过初始消息 / 上下文了（监听已挂好），可以直接推 */
+  private rendererReady = false
 
   /** 待投递的侧边上下文。窗口还没加载完时先存着 */
   private pendingContext: SideChatContext | null = null

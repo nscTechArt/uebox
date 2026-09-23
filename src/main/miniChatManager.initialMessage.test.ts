@@ -56,10 +56,20 @@ const fakeWindow = {
   getBounds: () => ({ x: 0, y: 0, width: 400, height: 600 })
 }
 
+/** 每次 new 出来的窗口各一份，连同它自己的 `closed` 回调 —— 新旧窗口得分得清 */
+const createdWindows: Array<{ closed: Array<() => void> }> = []
+
 vi.mock('electron', () => ({
   BrowserWindow: class {
     constructor() {
-      return fakeWindow
+      const closed: Array<() => void> = []
+      createdWindows.push({ closed })
+      return {
+        ...fakeWindow,
+        on: (event: string, callback: () => void) => {
+          if (event === 'closed') closed.push(callback)
+        }
+      }
     }
     static getAllWindows = (): unknown[] => []
     static getFocusedWindow = (): unknown => null
@@ -83,13 +93,17 @@ vi.mock('./services', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi
 vi.mock('./security', () => ({ protectRendererWindow: vi.fn() }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
 
-async function loadManager(): Promise<{
+type Manager = {
   show: (message?: unknown) => void
-}> {
+  showWithContext: (context: unknown) => void
+  close: () => void
+}
+
+async function loadManager(): Promise<Manager> {
   vi.resetModules()
   const { miniChatManager } = await import('./miniChatManager')
   miniChatManager.initialize()
-  return miniChatManager as unknown as { show: (message?: unknown) => void }
+  return miniChatManager as unknown as Manager
 }
 
 /** 渲染层挂载完成：注册了监听，然后开口要一次。两件事在 onMounted 里同步挨着 */
@@ -115,6 +129,7 @@ beforeEach(() => {
   sent = []
   finishLoad = null
   loading = true
+  createdWindows.length = 0
 })
 
 afterEach(() => {
@@ -185,5 +200,53 @@ describe('Mini Chat 的初始消息', () => {
 
     manager.show({ text: '第二句' })
     expect(sent).toContainEqual(['mini-chat:initial-message', { text: '第二句' }])
+  })
+})
+
+describe('Mini Chat 的投递时机', () => {
+  /**
+   * 页面加载完到 Vue 挂好之间还有一段（路由懒加载、先预读聊天记录）。
+   * 第二次唤起正好落在这段里的话，原来按「不在加载」就直接推并清掉 —— 推给了没人接的通道
+   */
+  it('页面加载完、渲染层还没来要之前又唤起一次：照样等它来取', async () => {
+    const manager = await loadManager()
+    manager.show()
+    pageLoads()
+    loading = false
+
+    manager.show({ text: 'Spotlight 刚说的那句' })
+    expect(sent.filter(([channel]) => channel === 'mini-chat:initial-message')).toEqual([])
+
+    rendererMounts()
+    expect(sent).toContainEqual(['mini-chat:initial-message', { text: 'Spotlight 刚说的那句' }])
+  })
+
+  it('侧边上下文同理：连点两次，第二份也等渲染层来取', async () => {
+    const manager = await loadManager()
+    manager.showWithContext({ agentSessionId: 'a' })
+    pageLoads()
+    loading = false
+    manager.showWithContext({ agentSessionId: 'b' })
+    expect(sent.filter(([channel]) => channel === 'mini-chat:initial-context')).toEqual([])
+
+    ipcHandlers.get('mini-chat:request-initial-context')?.({})
+    expect(sent).toContainEqual(['mini-chat:initial-context', { agentSessionId: 'b' }])
+  })
+
+  /**
+   * `close()` 先把字段置空、150ms 后才真关窗口。这中间新建的窗口不能被旧窗口的
+   * `closed` 抹掉 —— 不然新窗口的待发消息没了，窗口本身也成了管不到的孤儿
+   */
+  it('关旧窗口的那一下不影响紧接着新开的窗口', async () => {
+    const manager = await loadManager()
+    manager.show()
+    manager.close()
+    manager.show({ text: '新窗口里的问题' })
+    // 旧窗口这时候才真关掉
+    createdWindows[0].closed.forEach((callback) => callback())
+
+    rendererMounts()
+    expect(sent).toContainEqual(['mini-chat:initial-message', { text: '新窗口里的问题' }])
+    expect(createdWindows).toHaveLength(2)
   })
 })

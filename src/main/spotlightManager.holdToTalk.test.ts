@@ -1,6 +1,8 @@
 /** @vitest-environment node */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const broadcasts = vi.hoisted(() => vi.fn())
+
 /**
  * 「按住 Alt+Q 说话」时，热键回调会被键盘自动重复刷爆。
  *
@@ -76,7 +78,7 @@ vi.mock('node:fs', () => ({
   writeFileSync: vi.fn()
 }))
 vi.mock('fs', () => ({ existsSync: () => false, readFileSync: vi.fn(), writeFileSync: vi.fn() }))
-vi.mock('./appWindows', () => ({ getAppWindows: () => [] }))
+vi.mock('./appWindows', () => ({ getAppWindows: () => [], sendToAppWindows: broadcasts }))
 vi.mock('./services', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 vi.mock('./security', () => ({ protectRendererWindow: vi.fn() }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
@@ -135,10 +137,42 @@ describe('语音热键按住不放', () => {
   it('隔开之后再按，算新的一轮', async () => {
     const manager = await loadManager()
     manager.showForDictation()
-    vi.advanceTimersByTime(1_000)
+    vi.advanceTimersByTime(1_200)
     manager.showForDictation()
 
     expect(shows()).toBe(2)
     expect(holds()).toBe(0)
+  })
+
+  /**
+   * 系统里「重复延迟」调到最慢一档（约 1 秒）：首次自动重复要等一秒才来。
+   * 原来 600ms 的窗口会把它当成新的一次按下，录音在用户说话中途重启。
+   */
+  it('首次重复要等一秒的也还算同一次按住', async () => {
+    const manager = await loadManager()
+    manager.showForDictation()
+    vi.advanceTimersByTime(1_000)
+    manager.showForDictation()
+
+    expect(shows()).toBe(1)
+    expect(holds()).toBe(1)
+  })
+
+  /** 渲染层收到了真 keyup：马上再按就是新的一轮，不用等重复窗口过去 */
+  it('收到松手信号后立刻再按，算新的一轮', async () => {
+    const manager = await loadManager()
+    const { ipcMain } = await import('electron')
+    const on = vi.mocked(ipcMain.on)
+    on.mockClear()
+    ;(manager as unknown as { registerIPC: () => void }).registerIPC()
+    const released = on.mock.calls.find(([channel]) => channel === 'spotlight:hold-released')?.[1]
+
+    manager.showForDictation()
+    vi.advanceTimersByTime(300)
+    ;(released as () => void)()
+    vi.advanceTimersByTime(200)
+    manager.showForDictation()
+
+    expect(shows()).toBe(2)
   })
 })

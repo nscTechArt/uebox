@@ -21,5 +21,9 @@ export const spotlightAPI = {
   /** 语音热键还按着。每次键盘自动重复来一下，约 31ms 一次 */
   onHold(callback: () => void): () => void {
     return window.api.spotlight.onHold(callback)
+  },
+  /** 真收到了 keyup：这一次按住结束，下一次按下是新的一轮 */
+  holdReleased(): void {
+    window.api.spotlight.holdReleased()
   }
 }

@@ -1,5 +1,5 @@
 import { BrowserWindow, globalShortcut, screen, ipcMain, app } from 'electron'
-import { getAppWindows } from './appWindows'
+import { getAppWindows, sendToAppWindows } from './appWindows'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { is } from '@electron-toolkit/utils'
@@ -155,6 +155,12 @@ class SpotlightWindowManager {
     // 关闭 Spotlight 窗口
     ipcMain.on('spotlight:close', () => {
       this.hide()
+    })
+
+    // 渲染层收到了语音热键的 keyup：这一次按住确实结束了。清掉时间戳，
+    // 下一次按下不管隔多近都是新的一轮（「还按着」的时间窗只给收不到 keyup 时兜底）
+    ipcMain.on('spotlight:hold-released', () => {
+      this.lastDictateFireAt = 0
     })
 
     // 执行操作后关闭
@@ -436,14 +442,15 @@ class SpotlightWindowManager {
    * 按住不放时，两次热键回调最多隔这么久还算「同一次按住」。
    *
    * Windows 的键盘自动重复实测约 31ms 一次（2026-09-22 真机日志），首次重复前
-   * 还有 250~500ms 的启动延迟，而那个延迟用户能在系统里改。所以阈值按**最慢**的
-   * 那一档给足：600ms 内又来了一次就当还按着。
+   * 还有一段启动延迟，用户能在系统里改：四档约 250 / 500 / 750 / 1000ms。
+   * 所以阈值按**最慢**的那一档给足：1100ms 内又来了一次就当还按着。
+   * （原来是 600ms，只盖住了前两档 —— 调慢了的用户按住说话会在中途被重启一次。）
    *
    * 给小了的代价是把一次按住误判成两次按下 —— 录音会在用户说话中途重启。
-   * 给大了的代价只是松手后多等一会儿才收尾，而收尾主要靠渲染层的 keyup，
-   * 这个阈值只是收不到 keyup 时的兜底。两边不对称，所以宁可给大。
+   * 给大了的代价是松手后很快又按的那一下被当成「还按着」，但渲染层收到 keyup 时
+   * 会发 `spotlight:hold-released` 把时间戳清掉，所以这个窗口只在收不到 keyup 时起作用。
    */
-  private static readonly HOLD_REPEAT_WINDOW_MS = 600
+  private static readonly HOLD_REPEAT_WINDOW_MS = 1_100
 
   private lastDictateFireAt = 0
 
@@ -489,6 +496,8 @@ class SpotlightWindowManager {
     }
 
     this.pendingDictate = true
+    // 别的窗口正在朗读的话先停：念出来的话会被这边的麦克风收进去，当成指令的一部分
+    sendToAppWindows('voice:dictation-started')
     this.show()
   }
 
@@ -499,6 +508,9 @@ class SpotlightWindowManager {
     if (this.isShowing) {
       this.hide()
     } else {
+      // 最后一次按的是打字热键：窗口还没加载完时先按过的听写不再作数，
+      // 否则加载完一弹出来就开了麦
+      this.pendingDictate = false
       this.show()
     }
   }

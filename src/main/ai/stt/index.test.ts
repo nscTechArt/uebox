@@ -113,3 +113,55 @@ describe('上行攒包', () => {
     expect(sent).toHaveLength(0)
   })
 })
+
+/**
+ * 测试连接。豆包的「就绪」是连接一开就报的，不等服务端回话 —— 资源 ID 不认、
+ * 没开通这类拒绝在随后第一帧里才来。就绪即成功的话，配错的绑定也会亮绿灯
+ */
+describe('probeStt', () => {
+  const provider = {
+    id: 'doubao',
+    displayName: '豆包',
+    kind: 'stt' as const,
+    protocol: 'openai-completions' as const,
+    baseUrl: 'https://openspeech.bytedance.com',
+    apiKey: { kind: 'none' as const },
+    models: []
+  }
+
+  it('就绪之后带内来了拒绝：报失败', async () => {
+    vi.useFakeTimers()
+    try {
+      const { probeStt } = await import('./index')
+      doubao.mockImplementation((config: { onEvent: (event: unknown) => void }) => {
+        const onEvent = config.onEvent
+        setTimeout(() => onEvent({ type: 'ready' }), 10)
+        setTimeout(() => onEvent({ type: 'error', message: '资源未授权' }), 60)
+        return { appendAudio: vi.fn(), close: vi.fn() }
+      })
+      const probing = probeStt(provider as never, 'volc.x')
+      const outcome = expect(probing).rejects.toThrow('资源未授权')
+      await vi.advanceTimersByTimeAsync(2_000)
+      await outcome
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('就绪之后一直没有拒绝：算通', async () => {
+    vi.useFakeTimers()
+    try {
+      const { probeStt } = await import('./index')
+      doubao.mockImplementation((config: { onEvent: (event: unknown) => void }) => {
+        const onEvent = config.onEvent
+        setTimeout(() => onEvent({ type: 'ready' }), 10)
+        return { appendAudio: vi.fn(), close: vi.fn() }
+      })
+      const probing = probeStt(provider as never, 'volc.x')
+      await vi.advanceTimersByTimeAsync(2_000)
+      await expect(probing).resolves.toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

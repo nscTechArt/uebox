@@ -106,7 +106,15 @@ export interface DoubaoSttFrame {
   /** 错误帧里的错误码；正常回包没有这一位 */
   code?: number
   payload: unknown
+  /** 服务端标了「这是最后一包结果」（flags 第二位）。收尾之后见到它就可以关了 */
+  last: boolean
 }
+
+/**
+ * 「没听到人说话」这类码。不是故障：按住热键没开口、声音太小，都会回这个。
+ * 当成错误的话，状态条上是一句「识别服务报错（20000003）」，听写也跟着关了。
+ */
+const NOTHING_HEARD_CODES = new Set([20000003, 45000002])
 
 /**
  * 拆一个服务端下行帧。
@@ -139,7 +147,12 @@ export function decodeDoubaoSttFrame(data: Buffer): DoubaoSttFrame | null {
   const raw = compression === COMPRESSION_GZIP && body.length ? gunzipSync(body) : body
   const text = raw.toString('utf8')
   const payload = serialization === SERIALIZATION_JSON && text ? safeJson(text) : text
-  return { kind: messageType === MESSAGE_TYPE.serverError ? 'error' : 'response', code, payload }
+  return {
+    kind: messageType === MESSAGE_TYPE.serverError ? 'error' : 'response',
+    code,
+    payload,
+    last: (flags & 0b0010) !== 0
+  }
 }
 
 function safeJson(text: string): unknown {
@@ -342,10 +355,17 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
       const decoded = decodeDoubaoSttFrame(buffer)
       if (!decoded) return
       if (decoded.kind === 'error') {
+        if (decoded.code !== undefined && NOTHING_HEARD_CODES.has(decoded.code)) {
+          nothingHeard()
+          return
+        }
         fail(describeError(decoded.code, decoded.payload))
         return
       }
       accept(decoded.payload)
+      // 收尾之后等到了最后一包：终稿已经在上面交出去了，不用再干等服务端关连接
+      //（它不一定关，干等就是每次松手都白等两秒兜底）
+      if (decoded.last && flushed) close()
     } catch (error) {
       fail(error instanceof Error ? error.message : String(error))
     }
@@ -361,6 +381,12 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
     finish()
   })
 
+  /** 没听到人说话：报一声「没听清」，不当故障。已经在收尾的话顺手关掉 */
+  function nothingHeard(): void {
+    emit({ type: 'asr-failed' })
+    if (flushed) close()
+  }
+
   /** 一包识别结果。终稿逐句交出去，中间态整段交出去 */
   function accept(payload: unknown): void {
     const body = payload as {
@@ -368,6 +394,10 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
       code?: number
     }
     if (typeof body?.code === 'number' && body.code !== CODE_SUCCESS) {
+      if (NOTHING_HEARD_CODES.has(body.code)) {
+        nothingHeard()
+        return
+      }
       fail(describeError(body.code, payload))
       return
     }

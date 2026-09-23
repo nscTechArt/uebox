@@ -255,6 +255,20 @@ describe('translate', () => {
     ).toEqual([])
   })
 
+  /** 听写松手补的 commit 撞上空缓冲（判停已经先提交了）：那段转写还在路上，不能当故障关会话 */
+  it('空缓冲上的 commit 不算故障', () => {
+    expect(
+      translate({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          code: 'input_audio_buffer_commit_empty',
+          message: 'Error committing input audio buffer: buffer too small.'
+        }
+      })
+    ).toEqual([])
+  })
+
   /** 事件种类几十个，绝大多数与我们无关。安静忽略，而不是刷日志或报错 */
   it.each(['session.created', 'session.updated', 'rate_limits.updated', 'response.created'])(
     '%s 忽略掉',

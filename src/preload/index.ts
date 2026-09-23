@@ -293,7 +293,9 @@ const api = {
       const handler = (): void => callback()
       ipcRenderer.on('spotlight:hold', handler)
       return () => ipcRenderer.removeListener('spotlight:hold', handler)
-    }
+    },
+    /** 渲染层收到了语音热键的 keyup：告诉主进程「这一次按住结束了」，下一次按下算新的一轮 */
+    holdReleased: () => ipcRenderer.send('spotlight:hold-released')
   },
   database: {
     // 用户相关操作
@@ -2410,6 +2412,19 @@ const api = {
       const listener = (): void => handler()
       ipcRenderer.on('voice:interrupt-via-shortcut', listener)
       return () => ipcRenderer.removeListener('voice:interrupt-via-shortcut', listener)
+    },
+    /** 主窗口的语音通话接通 / 挂断了。主进程转给每个窗口 —— 小窗据此在通话期间不自动朗读 */
+    setCallActive: (active: boolean) => ipcRenderer.send('realtime-voice:call-active', active),
+    onCallActive: (handler: (active: boolean) => void) => {
+      const listener = (_event: unknown, active: unknown): void => handler(active === true)
+      ipcRenderer.on('realtime-voice:call-active', listener)
+      return () => ipcRenderer.removeListener('realtime-voice:call-active', listener)
+    },
+    /** Spotlight 开始听写了。正在朗读的窗口得停下，不然念的话会被当成指令转写进去 */
+    onDictationStarted: (handler: () => void) => {
+      const listener = (): void => handler()
+      ipcRenderer.on('voice:dictation-started', listener)
+      return () => ipcRenderer.removeListener('voice:dictation-started', listener)
     }
   },
   /**

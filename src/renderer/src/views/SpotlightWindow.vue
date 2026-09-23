@@ -83,6 +83,7 @@ import type { Component } from 'vue'
 import { spotlightAPI } from '@renderer/api/spotlight'
 import { useVoiceDictation } from '@renderer/composables/useVoiceDictation'
 import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
+import { readVoiceMicrophoneDeviceId } from '@renderer/views/MiniChat/composables/miniVoiceAutoPlay'
 import type { SpotlightSearchResult as ResultItem } from '@core/shared/spotlight'
 
 /**
@@ -131,6 +132,12 @@ let submitTimer: ReturnType<typeof setInterval> | null = null
  * 它从此再也起不来 —— 状态条还写着「说完自动提交」，而那句话永远不会发出去。
  */
 let submitArmed = false
+/**
+ * 「松手即发」那一路在等终稿时，别的出口（倒计时、回车、关窗、再按一次热键）
+ * 抢先收了尾，它醒来就不能再发一遍 —— 同一句指令会被 agent 执行两次。
+ * 每个收尾出口把它加一，`submitHeld` 醒来对不上号就什么都不做。
+ */
+let submitRound = 0
 
 /* ── 按住说话 ──────────────────────────────────────────────────────────────
  *
@@ -165,10 +172,10 @@ const HOLD_TAP_THRESHOLD_MS = 350
  * 超过这么久没收到「还按着」的信号，就当松手了。
  *
  * 只在 keyup 收不到时才走到（窗口没抢到焦点）。比主进程那边的重复窗口
- * （600ms）再宽一点：主进程判「还是同一次按住」用的是它，这边判「松手了」
- * 要晚于它，否则会出现「主进程还认为按着、界面已经发出去了」。
+ * （1100ms，盖住系统里最慢那档首次重复延迟）再宽一点：主进程判「还是同一次按住」
+ * 用的是它，这边判「松手了」要晚于它，否则会出现「主进程还认为按着、界面已经发出去了」。
  */
-const HOLD_RELEASE_GRACE_MS = 800
+const HOLD_RELEASE_GRACE_MS = 1_300
 
 /**
  * 正按着热键。松手（或兜底超时）时置假。
@@ -178,11 +185,15 @@ const HOLD_RELEASE_GRACE_MS = 800
  */
 const holdingHint = ref(false)
 let holdStartedAt = 0
+/** 最后一次收到「还按着」的时刻。收不到 keyup 时靠它判按了多久（见 `releaseHold`） */
+let lastHoldSignalAt = 0
 let holdTimer: ReturnType<typeof setTimeout> | null = null
 
 const dictation = useVoiceDictation({
-  // 和语音通话读同一个偏好。不带的话浏览器给系统默认设备，用户挑的那个麦白挑了
-  microphoneDeviceId: () => useAIConfigStore().voiceMicrophoneDeviceId,
+  // 和语音通话读同一个偏好。不带的话浏览器给系统默认设备，用户挑的那个麦白挑了。
+  // 每次开麦都从主窗口写的那份读：这个窗口常驻，自己那份 store 是启动时抄的，换了麦它不知道
+  microphoneDeviceId: () =>
+    readVoiceMicrophoneDeviceId() ?? useAIConfigStore().voiceMicrophoneDeviceId,
   onText: (text) => {
     /*
      * 追加而不是覆盖。VAD 把一段长指令切成两轮是常事（中间停顿想词超过了
@@ -194,11 +205,20 @@ const dictation = useVoiceDictation({
     submitArmed = true
     startSubmitCountdown()
   },
+  // 这两条的提示会盖住倒计时那句话 —— 倒计时不停的话，用户看着「没听清，再说一遍」，
+  // 前半句却在两秒后自己发了出去。停掉，留在输入框里等他回车或接着说
   onUnheard: () => {
+    clearSubmitCountdown()
     dictationNotice.value = t('spotlightWindow.dictation.unheard')
   },
   onError: (message) => {
+    clearSubmitCountdown()
     dictationNotice.value = message || t('spotlightWindow.dictation.unavailable')
+    dictating.value = false
+  },
+  // 那一头把会话关了（厂商断开、被助手页的通话顶掉）：图标退回放大镜。
+  // 已经点着的倒计时照走 —— 它显示自己的提示，不看这一位
+  onClosed: () => {
     dictating.value = false
   }
 })
@@ -246,6 +266,8 @@ function startSubmitCountdown(): void {
    * 两秒后半句指令就自己发出去了。这一路的提交时机只有一个：松手。
    */
   if (holdingHint.value) return
+  // 松手之后在等终稿（`submitHeld`）：那一路自己会发，终稿到了不能再点一个倒计时
+  if (dictation.state.value === 'finishing') return
   submitCountdown.value = Math.round(DICTATION_SUBMIT_DELAY_MS / 1000)
   submitTimer = setInterval(() => {
     submitCountdown.value -= 1
@@ -271,6 +293,7 @@ async function submitDictated(): Promise<void> {
  * 不拦的话，开一次搜索框就把助手页正在进行的通话挂断了，而且原主收不到任何事件。
  */
 async function endDictation(): Promise<void> {
+  submitRound += 1
   clearSubmitCountdown()
   releaseHoldWatch()
   submitArmed = false
@@ -287,6 +310,7 @@ async function endDictation(): Promise<void> {
  * 这会儿没在听。用户按热键的那一下本来就是「顺手」，顺手的操作不配弹一个错误框。
  */
 async function beginDictation(): Promise<void> {
+  submitRound += 1
   dictationNotice.value = ''
   dictating.value = true
   const failure = await dictation.start()
@@ -308,6 +332,7 @@ function watchHold(): void {
   releaseHoldWatch()
   holdingHint.value = true
   holdStartedAt = Date.now()
+  lastHoldSignalAt = holdStartedAt
   armHoldTimeout()
   // 捕获阶段：别让输入框自己的处理把这一下吃掉
   window.addEventListener('keyup', onHoldKeyUp, true)
@@ -315,7 +340,9 @@ function watchHold(): void {
 
 function armHoldTimeout(): void {
   if (holdTimer) clearTimeout(holdTimer)
-  holdTimer = setTimeout(releaseHold, HOLD_RELEASE_GRACE_MS)
+  // 兜底闹钟响 = 收不到 keyup、重复也不来了。按了多久只能按最后一次「还按着」算 ——
+  // 拿「现在」算的话，一次轻点也会被算成按了 1.3 秒，当成按住说话在半句处收麦
+  holdTimer = setTimeout(() => releaseHold(lastHoldSignalAt), HOLD_RELEASE_GRACE_MS)
 }
 
 function releaseHoldWatch(): void {
@@ -333,12 +360,15 @@ function releaseHoldWatch(): void {
  * 这个和弦里的某一个 —— 实测先到的是 `up q`，然后才是 `up Alt`。
  */
 function onHoldKeyUp(): void {
+  // 真松手了：告诉主进程，下一次按下立刻算新的一轮，不用等它的重复窗口过去
+  if (holdingHint.value) spotlightAPI.holdReleased()
   releaseHold()
 }
 
 /** 主进程说还按着（键盘自动重复）。把兜底闹钟往后推 */
 function handleHold(): void {
   if (!holdingHint.value) return
+  lastHoldSignalAt = Date.now()
   armHoldTimeout()
 }
 
@@ -348,9 +378,9 @@ function handleHold(): void {
  * 短按走原来那条路（继续听 + VAD + 两秒倒计时）；长按就是「按住说话」，
  * 当场收尾并把话交出去。
  */
-function releaseHold(): void {
+function releaseHold(releasedAt = Date.now()): void {
   if (!holdingHint.value) return
-  const heldMs = Date.now() - holdStartedAt
+  const heldMs = releasedAt - holdStartedAt
   releaseHoldWatch()
   if (heldMs < HOLD_TAP_THRESHOLD_MS) return
   void submitHeld()
@@ -365,7 +395,11 @@ function releaseHold(): void {
 async function submitHeld(): Promise<void> {
   clearSubmitCountdown()
   submitArmed = false
+  const round = ++submitRound
   await dictation.finish()
+  // 等的这段时间里别的出口已经收了尾（并且发过了），或者新一轮已经开始
+  if (round !== submitRound) return
+  clearSubmitCountdown()
   dictating.value = false
   const message = query.value.trim()
   if (!message) return

@@ -101,6 +101,25 @@ describe('豆包语音识别下行帧', () => {
   it('半包不抛，回 null', () => {
     expect(decodeDoubaoSttFrame(Buffer.from([0x11, 0x90]))).toBeNull()
   })
+
+  /**
+   * 最后一包结果是 flags 第二位标的（0b0011 = 有序号 + 最后一包）。认不出它的话，
+   * 松手之后只能干等服务端关连接 —— 它不一定关，每次松手就白等两秒兜底
+   */
+  it('认得出「最后一包」', () => {
+    const body = gzipSync(Buffer.from(JSON.stringify({ result: { text: '完' } }), 'utf8'))
+    const frame = (flags: number): Buffer =>
+      serverFrame({
+        messageType: 0b1001,
+        flags,
+        serialization: 0b0001,
+        compression: 0b0001,
+        sequence: 3,
+        body
+      })
+    expect(decodeDoubaoSttFrame(frame(0b0011))?.last).toBe(true)
+    expect(decodeDoubaoSttFrame(frame(0b0001))?.last).toBe(false)
+  })
 })
 
 describe('地址归一化', () => {

@@ -142,6 +142,15 @@ export function openSttSession(
 const PROBE_TIMEOUT_MS = 20_000
 
 /**
+ * 就绪之后再等这么久，看厂商会不会在带内回一个拒绝。
+ *
+ * 豆包那边的「就绪」是连接一开、请求发出去就报的，**不等服务端回话** —— 资源 ID
+ * 不认、没开通这类拒绝是随后第一帧里才来的。就绪即成功的话，测试连接会给一个
+ * 配错了的绑定亮绿灯，之后每次听写都失败。
+ */
+const PROBE_ACK_GRACE_MS = 1_500
+
+/**
  * 「测试连接」。
  *
  * 开一条真会话、等厂商说就绪、然后收掉 —— 不送一个字节的音频。
@@ -156,10 +165,12 @@ export async function probeStt(provider: ProviderConfig, modelId: string): Promi
   await new Promise<void>((resolve, reject) => {
     let settled = false
     let session: SttSessionHandle | null = null
+    let grace: ReturnType<typeof setTimeout> | null = null
     const done = (error?: Error): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (grace) clearTimeout(grace)
       // 先置 settled 再关：关会话自己会发一条 `closed`，不挡的话它会把
       // 一次成功的探测覆盖成「服务端断开了连接」
       session?.close()
@@ -170,7 +181,8 @@ export async function probeStt(provider: ProviderConfig, modelId: string): Promi
     session = openSttSession(
       { apiKey, baseUrl: provider.baseUrl, model: modelId, headers: provider.headers },
       (event) => {
-        if (event.type === 'ready') done()
+        // 就绪之后稍等一下，带内的拒绝来了就按失败报（见 PROBE_ACK_GRACE_MS）
+        if (event.type === 'ready' && !grace) grace = setTimeout(() => done(), PROBE_ACK_GRACE_MS)
         // 握手没过、资源 ID 不对都走这条。原话直接交上去 —— 厂商那句比我们能编的准
         if (event.type === 'error') done(new Error(event.message))
         if (event.type === 'closed') done(new Error('服务端断开了连接'))

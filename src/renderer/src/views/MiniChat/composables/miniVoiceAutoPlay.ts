@@ -17,7 +17,11 @@ import { StorageUtils } from '@renderer/common/utils/storage'
 const STORAGE_KEY = 'ai-config-store'
 
 interface PersistedVoiceConfig {
-  config?: { voiceAutoPlayEnabled?: boolean; voiceBriefingStyle?: unknown }
+  config?: {
+    voiceAutoPlayEnabled?: boolean
+    voiceBriefingStyle?: unknown
+    voiceMicrophoneDeviceId?: unknown
+  }
 }
 
 function readPersisted(storage: Pick<Storage, 'getItem'>): PersistedVoiceConfig | null {
@@ -35,6 +39,19 @@ export function readVoiceBriefingStyle(
   storage: Pick<Storage, 'getItem'> = localStorage
 ): SpeechBriefingStyle {
   return normalizeSpeechBriefingStyle(readPersisted(storage)?.config?.voiceBriefingStyle)
+}
+
+/**
+ * 从 localStorage 直接读一次麦克风选择；读不到返回 null（调用方退回自己那份 store）。
+ *
+ * Spotlight 也是常驻的独立窗口，毛病一样：它那份 store 是启动时抄的，用户之后在设置里
+ * 换了麦，热键听写还按旧设备开 —— 旧设备拔了的话 `{ exact }` 直接报错，每次都失败。
+ */
+export function readVoiceMicrophoneDeviceId(
+  storage: Pick<Storage, 'getItem'> = localStorage
+): string | null {
+  const value = readPersisted(storage)?.config?.voiceMicrophoneDeviceId
+  return typeof value === 'string' ? value : null
 }
 
 /**

@@ -134,6 +134,11 @@ export interface VoiceDictationOptions {
   onUnheard?: () => void
   /** 会话本身出问题了，带一句能说给用户看的话 */
   onError?: (message: string) => void
+  /**
+   * 会话被那一头关掉了（厂商断开、被助手页的通话顶掉），不是我们自己收的尾。
+   * 不告诉界面的话，它会一直挂着麦克风图标、写着「正在打开麦克风…」，而其实什么都没在听。
+   */
+  onClosed?: () => void
 }
 
 /**
@@ -250,6 +255,14 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
    * 轮询的那个间隔全都是白等，而这一路等的就是「松手到发出去」那点时间。
    */
   let settleFinish: (() => void) | null = null
+  /**
+   * `finish()` 在等厂商就绪。松手时 `ready` 还没来的话，这之前说的话全攒在 preroll 里；
+   * 这时候就发收尾包，适配器会直接把会话关掉（socket 还没开 / 任务还没开始），
+   * 那句话整句丢掉。所以先等 `ready` 把 preroll 补发出去，再收尾。
+   */
+  let settleReady: (() => void) | null = null
+  /** 正在开的那一轮。松手时会话还没开好，`finish()` 得等它开完再收尾，不能直接当没开过 */
+  let pendingStart: Promise<DictationFailure | null> | null = null
 
   function publishLevel(value: number): void {
     levelPeak = Math.max(levelPeak, value)
@@ -291,6 +304,13 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
    * 用户完全没法判断该等还是该重说。所以到点就收，有多少交多少。
    */
   async function finish(): Promise<void> {
+    // 按得很短：会话还在开（连接 IPC 没回来）。等它开完 —— 直接当没开过收掉的话，
+    // 这一句话连同主进程那头刚开好的会话一起没了
+    if (pendingStart && state.value === 'starting' && !ownsSession) {
+      const startedAt = generation
+      await pendingStart.catch(() => null)
+      if (generation !== startedAt) return
+    }
     if (state.value === 'idle' || !ownsSession) {
       await stop()
       return
@@ -300,6 +320,21 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     await releaseAudio()
 
     const currentGeneration = generation
+    if (!vendorReady) {
+      // 见 `settleReady`：先等厂商就绪、把攒着的音频补发出去，再收尾
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          settleReady = null
+          resolve()
+        }, READY_TIMEOUT_MS)
+        settleReady = () => {
+          clearTimeout(timer)
+          settleReady = null
+          resolve()
+        }
+      })
+      if (generation !== currentGeneration) return
+    }
     await channel?.flush().catch(() => undefined)
     if (generation !== currentGeneration) return
 
@@ -332,8 +367,9 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     readyTimer = null
     unsubscribe?.()
     unsubscribe = null
-    // 还在等终稿的那个 Promise 得放掉，否则它会一直挂到超时
+    // 还在等终稿 / 等就绪的那个 Promise 得放掉，否则它会一直挂到超时
     settleFinish?.()
+    settleReady?.()
     state.value = 'idle'
     await releaseAudio()
     // 没开过就不去关。理由见 `ownsSession`
@@ -353,10 +389,12 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
         vendorReady = true
         if (readyTimer) clearTimeout(readyTimer)
         readyTimer = null
-        state.value = 'listening'
+        // 已经松手在收尾的话别改回「在听」：麦克风早关了，`finish()` 正等着这一下
+        if (state.value !== 'finishing') state.value = 'listening'
         // 攒着的先补发，顺序不能乱 —— 乱了就是一句话被重排过的词
         for (const packet of preroll) channel?.sendAudio(packet)
         preroll = []
+        settleReady?.()
         break
       case 'user-text':
         // 只认终稿。中间态写进输入框的话，用户会看着自己的话被改来改去，
@@ -370,11 +408,14 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
         options.onError?.(event.message || '')
         void stop()
         break
-      case 'closed':
+      case 'closed': {
         // `finish()` 正等着的就是这一下：终稿已经在上面那个 case 里交出去了
+        const expected = state.value === 'finishing'
         settleFinish?.()
         void stop()
+        if (!expected) options.onClosed?.()
         break
+      }
       default:
         break
     }
@@ -492,7 +533,16 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
     }
   }
 
-  async function start(): Promise<DictationFailure | null> {
+  function start(): Promise<DictationFailure | null> {
+    const run = runStart()
+    pendingStart = run
+    void run.finally(() => {
+      if (pendingStart === run) pendingStart = null
+    })
+    return run
+  }
+
+  async function runStart(): Promise<DictationFailure | null> {
     // 已经在听：先收掉上一轮。热键按第二次走的就是这条路
     if (state.value !== 'idle') await stop()
 
@@ -546,7 +596,17 @@ export function useVoiceDictation(options: VoiceDictationOptions): VoiceDictatio
      * 挡成 `busy`，直到重启。认领了就总有人去关它 —— 顶掉它的那一轮收尾时会关。
      */
     ownsSession = true
-    if (generation !== currentGeneration) return null
+    if (generation !== currentGeneration) {
+      // 被收掉而**没有**新一轮接手（按了 Esc、短按松手）：没人会再来关它，这里关。
+      // 不关的话主进程那头一直开着，下一次热键会被自己挡成「正忙」
+      // `state` 在上面那几个 await 期间可能被 stop() 改回 idle，TS 的收窄看不见这一点
+      if ((state.value as string) === 'idle') {
+        ownsSession = false
+        if (channel === picked.channel) channel = null
+        await picked.channel.stop().catch(() => undefined)
+      }
+      return null
+    }
 
     // 厂商迟迟不 ready 就收摊，别留一个亮着录音灯的死会话（见 READY_TIMEOUT_MS）
     readyTimer = setTimeout(() => {

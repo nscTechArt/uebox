@@ -371,6 +371,56 @@ describe('听写', () => {
     }
   })
 
+  /**
+   * 按得很短：厂商还没 ready 就松手了，说的话全攒在 preroll 里。
+   * 原来这时直接发收尾包 —— 适配器看 socket 还没开就把会话关了，那句话整句丢掉。
+   * 现在先等 ready 把攒着的补发出去，再收尾。
+   */
+  it('ready 之前松手：先等 ready 补发攒着的音频，再发收尾包', async () => {
+    const onText = vi.fn()
+    const dictation = useVoiceDictation({ onText })
+    await dictation.start()
+    feedPacket(1)
+    feedPacket(2)
+
+    const settled = dictation.finish()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // 还没 ready：不能先发收尾包
+    expect(flushed).toEqual([])
+    expect(dictation.state.value).toBe('finishing')
+
+    emit({ type: 'ready' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sentAudio).toHaveLength(2)
+    expect(flushed).toEqual(['realtime'])
+    // 麦克风早关了，ready 不能把状态改回「在听」
+    expect(dictation.state.value).toBe('finishing')
+
+    emit({ type: 'user-text', text: '撤销', final: true })
+    emit({ type: 'closed' })
+    await settled
+    expect(onText).toHaveBeenCalledWith('撤销')
+  })
+
+  /** 那一头关的（厂商断开、被助手页顶掉）要告诉界面；自己收尾时的 closed 不算 */
+  it('被那一头关掉时通知界面，松手收尾时不通知', async () => {
+    const onClosed = vi.fn()
+    const dictation = useVoiceDictation({ onText: vi.fn(), onClosed })
+    await dictation.start()
+    emit({ type: 'ready' })
+    emit({ type: 'closed' })
+    expect(onClosed).toHaveBeenCalledTimes(1)
+
+    onClosed.mockClear()
+    await dictation.start()
+    emit({ type: 'ready' })
+    const settled = dictation.finish()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    emit({ type: 'closed' })
+    await settled
+    expect(onClosed).not.toHaveBeenCalled()
+  })
+
   /** 没在听的时候松手（短按、或者压根没开起来）不该去碰厂商 */
   it('没在听时 finish 不发收尾包', async () => {
     const dictation = useVoiceDictation({ onText: vi.fn() })

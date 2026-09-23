@@ -51,9 +51,14 @@ export function registerSpeechToTextIPC(): void {
       if (!binding || !hasSttAdapter(binding.baseUrl)) return { ok: false as const }
       return { ok: true as const, inputSampleRate: STT_INPUT_SAMPLE_RATE }
     } catch {
-      // 绑了但 Provider 被删了。这里不报错，让渲染层去走实时语音那一路 ——
-      // 那条路上的报错信息更全，它会告诉用户去哪儿改
-      return { ok: false as const }
+      /*
+       * 绑了，但密钥取不出来（换了机器解不开、环境变量没了、命令跑失败）。
+       *
+       * **不能**回 ok:false：渲染层会悄悄改走实时语音那一路 —— 要么用上更贵的通道，
+       * 要么报一句「去绑一个语音识别模型」（明明绑着）。这里说「走得通」，让
+       * `stt:start` 再解析一次，把真正的原因（密钥坏了、去哪儿改）原话带给用户。
+       */
+      return { ok: true as const, inputSampleRate: STT_INPUT_SAMPLE_RATE }
     }
   })
 
@@ -98,6 +103,13 @@ export function registerSpeechToTextIPC(): void {
     try {
       const sender = event.sender
       const handle = openSttSession(binding, (payload) => {
+        /*
+         * 只转**当前这一路**的事件。被收掉的那一路要等关闭握手（最长一秒）才吐
+         * `closed`，这时渲染层多半已经开了新的一轮、监听也挂好了 —— 旧的 `closed`
+         * 转过去会被当成新一轮被关，刚开的听写当场就没了。
+         * 松手收尾（flush）的那一路一直留在 `active` 上直到它自己关，终稿照样送得到。
+         */
+        if (active?.handle !== handle) return
         // 这一路的事件全都要转给渲染层 —— 它只有五种，每一种界面上都有对应的动作
         if (sender.isDestroyed()) {
           stop()
@@ -110,6 +122,9 @@ export function registerSpeechToTextIPC(): void {
           if (active?.handle === handle) active = null
         }
       })
+      // 上面等密钥的那一下里，别的 start 可能已经开好了一路：先收掉它，不留两路
+      //（留下的那路没人再管，一直开着计费，事件还往同一个窗口里灌）
+      stop()
       active = { handle, sender }
       return { ok: true as const, inputSampleRate: STT_INPUT_SAMPLE_RATE }
     } catch (error) {

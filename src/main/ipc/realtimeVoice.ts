@@ -34,6 +34,7 @@ import type {
   VoiceSessionHandle
 } from '../ai/realtime/types'
 import { projectManager } from '../services/project'
+import { sendToAppWindows } from '../appWindows'
 import { completeText, resolveBinding, userMessage } from '../ai/piCompletion'
 import { CONDENSE_SYSTEM_PROMPT, acceptCondensed } from '../ai/realtime/spokenSummary'
 import { LIST_OPEN_EDITORS, LIST_PROJECTS, LOOK_AT_EDITOR } from '../../shared/voiceFrontDesk'
@@ -116,6 +117,11 @@ export async function runLocalVoiceTool(name: string): Promise<string> {
 /** 同一时间只允许一个会话。开两个的表现是两个模型抢着说话，而且账单翻倍 */
 let active: { handle: VoiceSessionHandle; sender: WebContents } | null = null
 let connectionGeneration = 0
+/**
+ * 正在开（还在等密钥）的那一路是哪个窗口发起的。这时 `active` 还是空的，
+ * 别的窗口来一句 stop 不能把它顺手取消掉 —— 见 `realtime-voice:stop`
+ */
+let startingSender: number | null = null
 
 /**
  * 谁在说话。渲染层报上来，播报纪律靠它判断能不能插话。
@@ -530,6 +536,13 @@ function activatePlayback(): void {
 }
 
 export function registerRealtimeVoiceIPC(): void {
+  /*
+   * 「正在通话」这一位只在主窗口的渲染进程里有，而小窗是另一个渲染进程：它照样会在
+   * 通话期间把回复念出来，念进正开着的麦克风。主窗口报上来，这里转给每个窗口
+   */
+  ipcMain.on('realtime-voice:call-active', (_event, active: unknown) => {
+    sendToAppWindows('realtime-voice:call-active', active === true)
+  })
   ipcMain.on('realtime-voice:playback-ready', (event, connectionId: number) => {
     if (!active || active.sender.id !== event.sender.id || connectionId !== connectionGeneration)
       return
@@ -592,10 +605,19 @@ export function registerRealtimeVoiceIPC(): void {
       yieldSessionTo(event.sender.id)
       // 不 await：任务要等用户先开口交代，那是几秒之后的事，别拿它拖首字
       void primeToolRisks()
-      const generation = connectionGeneration
+      let generation = connectionGeneration
+      startingSender = event.sender.id
       try {
-        const binding = await resolveRealtimeBinding()
+        const binding = await resolveRealtimeBinding().finally(() => {
+          if (startingSender === event.sender.id) startingSender = null
+        })
         if (generation !== connectionGeneration) return { ok: false, error: '语音连接已取消。' }
+        // 等密钥的这一下里 Spotlight 的听写可能已经开起来了（它不动代数）。通话优先：
+        // 把它让掉再接着开，不然两路同时挂在 `active` 上，先开的那路成了没人管的孤儿
+        if (active) {
+          yieldSessionTo(event.sender.id)
+          generation = connectionGeneration
+        }
         const sender = event.sender
         const history = selectConversationHistory(args?.history)
         const { handle, audio } = openSession(
@@ -697,8 +719,11 @@ export function registerRealtimeVoiceIPC(): void {
 
     const generation = connectionGeneration
     let binding: Awaited<ReturnType<typeof resolveRealtimeBinding>>
+    startingSender = event.sender.id
     try {
-      binding = await resolveRealtimeBinding()
+      binding = await resolveRealtimeBinding().finally(() => {
+        if (startingSender === event.sender.id) startingSender = null
+      })
     } catch (error) {
       return {
         ok: false as const,
@@ -706,7 +731,11 @@ export function registerRealtimeVoiceIPC(): void {
         error: error instanceof Error ? error.message : String(error)
       }
     }
-    if (generation !== connectionGeneration) return { ok: false as const, reason: 'busy' as const }
+    // 等密钥的这一下里，助手页的通话可能已经接上了（它不动代数，只看 active）——
+    // 再接着开就会把它的 `active` 盖掉，那通电话变成没人管的孤儿、一直计费
+    if (generation !== connectionGeneration || active) {
+      return { ok: false as const, reason: 'busy' as const }
+    }
 
     /*
      * 豆包做不了「只转写不回答」：3.0 的上行事件表里没有关掉自动应答的开关，
@@ -1154,6 +1183,10 @@ export function registerRealtimeVoiceIPC(): void {
    */
   ipcMain.handle('realtime-voice:stop', (event) => {
     if (active && active.sender.id !== event.sender.id) return { ok: true }
+    // 还没开好、是别的窗口在开：不是你的，别取消（比如被让掉的 Spotlight 收尾时顺手来一句 stop）
+    if (!active && startingSender !== null && startingSender !== event.sender.id) {
+      return { ok: true }
+    }
     stop()
     return { ok: true }
   })

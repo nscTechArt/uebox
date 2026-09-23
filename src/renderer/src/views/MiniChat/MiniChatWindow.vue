@@ -118,6 +118,7 @@ import { useTabsStore } from '@renderer/store/modules/tabs'
 import { usePendingApprovalsStore } from '@renderer/store/modules/pendingApprovals'
 import { useAgentMode } from '@renderer/views/Assistant/composables/useAgentMode'
 import { useAutoReadAloud } from '@renderer/views/Assistant/composables/autoReadAloud'
+import { followVoiceCallFromOtherWindows } from '@renderer/views/Assistant/composables/voiceCallState'
 import { stopReadAloud } from '@renderer/views/Assistant/composables/useReadAloud'
 import { readVoiceBriefingStyle, useMiniVoiceAutoPlay } from './composables/miniVoiceAutoPlay'
 import {
@@ -197,6 +198,8 @@ useAutoReadAloud(
   () => voiceAutoPlayEnabled.value,
   () => readVoiceBriefingStyle()
 )
+// 「通话期间不自动朗读」：通话开在主窗口，这边得跟着它的状态走，否则念进它正开着的麦克风
+const stopFollowingVoiceCall = followVoiceCallFromOtherWindows()
 
 function scrollToBottomIfNeeded(): void {
   scrollToBottom()
@@ -639,6 +642,9 @@ async function handleBubbleRetry(payload: { id: string; content: string }): Prom
 
   const userMsg = messages.value[userMsgIndex]
 
+  // 要重生成的那条正在被念的话，气泡一删就没人管它了（小窗没有常驻播放条），
+  // 旧答复会盖着新答复一直念完
+  stopReadAloud()
   chatMsgStore.deleteMessagesFromIndex(SESSION_ID.value, msgIndex)
 
   // 这里原来还去删一次后端 SQLite 的对话历史。Agent 压根不往那张表写，
@@ -684,6 +690,8 @@ async function handleUserConfirmEdit(payload: {
         : payload.newContent
   }
 
+  // 同重试：后面的答复要删掉重来，还在念的那条先停
+  stopReadAloud()
   chatMsgStore.deleteMessagesFromIndex(SESSION_ID.value, msgIndex)
 
   fullConversationHistory.value = buildAgentHistoryUntil(msgIndex - 1)
@@ -887,6 +895,7 @@ onMounted(() => {
 onUnmounted(() => {
   for (const dispose of ipcDisposers) dispose()
   ipcDisposers = []
+  stopFollowingVoiceCall()
 })
 </script>
 
