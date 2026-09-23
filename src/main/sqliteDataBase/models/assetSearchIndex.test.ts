@@ -21,7 +21,8 @@ import {
   initAssetSearchIndexModel,
   isAssetSearchIndexReady,
   prepareIndexText,
-  syncAssetSearchIndex
+  syncAssetSearchIndex,
+  withAssetReplaceGuard
 } from './assetSearchIndex'
 import { searchAssetsByCriteria } from './assetSearch'
 
@@ -282,5 +283,41 @@ describe('索引新鲜度', () => {
 
     const status = getAssetSearchIndexStatus(db)
     expect(status).toMatchObject({ indexed: 2, pending: 0, total: 2, ready: true })
+  })
+})
+
+/**
+ * 网络协作库用 INSERT OR REPLACE 按 assetKey 覆盖写入。撞上时旧行被删、换了新 id，
+ * 而 SQLite 默认不为这种隐式删除触发 DELETE 触发器 —— 旧 id 的全文条目就成了孤儿。
+ */
+describe('按 assetKey 覆盖写入', () => {
+  const ftsRows = (): number =>
+    (db.prepare('SELECT COUNT(*) AS n FROM assetSearchIndex').get() as { n: number }).n
+  const replace = (name: string): void => {
+    db.prepare(
+      `INSERT OR REPLACE INTO assetData (assetKey, folderKey, assetName, isDelete) VALUES ('k1', 'k_all', ?, 0)`
+    ).run(name)
+  }
+
+  it('不包的话会留下孤儿条目（复现问题本身）', () => {
+    insertAsset('k1', 'SM_Rock')
+    sync()
+    replace('SM_Tree')
+    sync()
+
+    expect(ftsRows()).toBe(2)
+  })
+
+  it('包上之后旧条目在下一轮同步时被清掉', () => {
+    insertAsset('k1', 'SM_Rock')
+    sync()
+    withAssetReplaceGuard(db, 'k1', () => replace('SM_Tree'))
+    sync()
+
+    expect(ftsRows()).toBe(1)
+    const hits = db
+      .prepare('SELECT rowid FROM assetSearchIndex WHERE assetSearchIndex MATCH ?')
+      .all(buildFtsMatchQuery('rock'))
+    expect(hits).toEqual([])
   })
 })

@@ -65,6 +65,14 @@ export interface AssetSearchParams {
   limit?: number
   /** 跳过前几个，用来翻页。缺省 0 */
   offset?: number
+  /**
+   * 类型/格式过滤落空时要不要自动放宽。缺省 true（单库调用方的老行为）。
+   *
+   * 跨库的调用方必须传 false、自己在**所有库都落空**时再放宽：逐库放宽的话，
+   * 一个库有真命中、另一个库落空放宽，放宽出来的不相干资产就混进了结果里
+   * （真机上查 SkeletalMesh，3 个库各自放宽，count 776 里只有 600 是真的）。
+   */
+  relax?: boolean
 }
 
 export interface AssetSearchSuccessResult {

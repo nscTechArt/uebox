@@ -22,7 +22,7 @@ import type Database from 'better-sqlite3'
  * 失败一律静默跳过 —— 标签只是锦上添花，为它把整次搜索搞失败不值当。
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function attachTagNames(assets: any[]): void {
+export function attachTagNames(assets: any[]): void {
   if (!Array.isArray(assets) || assets.length === 0) return
 
   const allIds = new Set<number>()
@@ -90,33 +90,14 @@ function clampLimit(raw: unknown): number {
 }
 
 /**
- * @param db 在哪个保管库里搜。不给就是用户当前的那个。
+ * 工具参数 → 底层筛选条件（不含关键词和分页）。
  *
- * 之所以能指定：AIGC 生成的图/视频/模型存在**另一个保管库**里
- * （system_vault_aigc，有自己的 vault-data.db），当前库根本查不到它们。
- * 不开这个口子，agent 就只能在生成的那一轮里靠返回值里的路径用图 ——
- * 换一个会话之后，用户在界面上看得见的 AI 素材，对 agent 是不存在的。
- *
- * @param vaultPath 这个库的根目录。**给了 db 就要一起给它**：备份类型的库
- * 数据库里存的是相对保管库的路径，不知道库在哪就拼不出真路径，
- * 会退而按当前活跃库去拼 —— 那正是跨库搜索里最容易错的一步。
+ * 抽出来是因为跨库的相关度检索（models/assetRankedSearch.ts）要用**完全相同**的筛选口径 ——
+ * 两处各写一份的话，别名展开、类型名匹配这些坑迟早只修了一边。
  */
-export async function searchAssets(
-  params: AssetSearchParams,
-  db?: Database.Database,
-  vaultPath?: string
-): Promise<AssetSearchResult> {
-  const { query, assetType, fileSize, fileFormat, engineVersion, hasNoTags } = params
-
-  const limit = clampLimit(params.limit)
-  const offset = Math.max(0, Math.floor(Number(params.offset) || 0))
-
-  // 构建搜索条件
-  const criteria: AssetSearchCriteria = {
-    keyword: query,
-    limit,
-    offset
-  }
+export function buildSearchCriteria(params: AssetSearchParams): AssetSearchCriteria {
+  const { assetType, fileSize, fileFormat, engineVersion, hasNoTags } = params
+  const criteria: AssetSearchCriteria = {}
 
   // 无标签过滤
   if (hasNoTags === true) {
@@ -231,6 +212,39 @@ export async function searchAssets(
     criteria.engineVersions = Array.isArray(engineVersion) ? engineVersion : [engineVersion]
   }
 
+  return criteria
+}
+
+/**
+ * @param db 在哪个保管库里搜。不给就是用户当前的那个。
+ *
+ * 之所以能指定：AIGC 生成的图/视频/模型存在**另一个保管库**里
+ * （system_vault_aigc，有自己的 vault-data.db），当前库根本查不到它们。
+ * 不开这个口子，agent 就只能在生成的那一轮里靠返回值里的路径用图 ——
+ * 换一个会话之后，用户在界面上看得见的 AI 素材，对 agent 是不存在的。
+ *
+ * @param vaultPath 这个库的根目录。**给了 db 就要一起给它**：备份类型的库
+ * 数据库里存的是相对保管库的路径，不知道库在哪就拼不出真路径，
+ * 会退而按当前活跃库去拼 —— 那正是跨库搜索里最容易错的一步。
+ */
+export async function searchAssets(
+  params: AssetSearchParams,
+  db?: Database.Database,
+  vaultPath?: string
+): Promise<AssetSearchResult> {
+  const { query, assetType, fileSize, fileFormat, engineVersion, hasNoTags } = params
+  const relax = params.relax !== false
+
+  const limit = clampLimit(params.limit)
+  const offset = Math.max(0, Math.floor(Number(params.offset) || 0))
+
+  const criteria: AssetSearchCriteria = {
+    ...buildSearchCriteria(params),
+    keyword: query,
+    limit,
+    offset
+  }
+
   try {
     const database = db ?? getVaultDatabase()
 
@@ -285,7 +299,7 @@ export async function searchAssets(
     // 调用方会把贴图和动画当成材质报给用户。
     let relaxedTotalMatchCount = 0
     let didRelax = false
-    if (Array.isArray(assets) && assets.length === 0 && hadTypeOrFormatFilter) {
+    if (relax && Array.isArray(assets) && assets.length === 0 && hadTypeOrFormatFilter) {
       didRelax = true
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { assetTypes, fileExtensions, formatMatch, ...rest } = criteria

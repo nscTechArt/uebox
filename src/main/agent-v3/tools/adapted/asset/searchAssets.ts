@@ -1,18 +1,47 @@
 /**
  * 资产搜索原子工具
  * 封装 AssetSearcher 的能力供 Agent 使用
+ *
+ * ## 两种模式
+ *
+ * - **有关键词**：每个库按相关度取前 offset+limit 个（models/assetRankedSearch.ts），
+ *   全部库按同一个排序键归并，再取这一页。最相关的那个在哪个库都能排到第一页。
+ * - **没有关键词**（浏览 / 只按条件筛）：没有相关度可比，照旧当前库在前、首尾相接。
+ *
+ * 原来关键词也是首尾相接的，于是**当前库永远占满前几页**。真机上用户站在 AIGC 库
+ * （155 个 AI 图）里搜 horse / grass / SM_Env，8 次里 7 次首页全是 AIGC 的图和 mp3，
+ * FPS 库里 3562 个真命中一个都没露面，模型只能换词重搜、一页页翻。
+ * 在 5k~500k 资产的库上实测，这个排法下精确命中的名次随库变大线性变差（第 119 → 第 4018 名），
+ * 而按相关度归并始终排第一。
  */
 
 import { defineV2Tool, type V2Tool } from '../../adaptV2Tool'
 import { z } from 'zod'
-import { searchAssets } from '../../../../agent/tools/app-control/asset-manager/AssetSearcher'
+import {
+  attachTagNames,
+  buildSearchCriteria,
+  searchAssets
+} from '../../../../agent/tools/app-control/asset-manager/AssetSearcher'
 import { formatAssets } from '../../../../agent/tools/app-control/asset-manager/AssetFormatter'
 import type { AssetSearchParams } from '../../../../agent/tools/app-control/asset-manager/types'
 import { getPublicDatabase, getVaultDatabase } from '../../../../sqliteDataBase'
 import { getDeletedAssetData } from '../../../../sqliteDataBase/models/assetData'
+import {
+  compareScores,
+  getAssetRowsByIds,
+  rankedSearchVault,
+  semanticOnlyIds
+} from '../../../../sqliteDataBase/models/assetRankedSearch'
+import { isAssetVectorEnabled } from '../../../../sqliteDataBase/models/assetVectorIndex'
+import { buildFtsTerms } from '../../../../sqliteDataBase/models/ftsText'
 import { getTagByName } from '../../../../sqliteDataBase/models/tag'
+import {
+  embedSearchQuery,
+  semanticRecall
+} from '../../../../sqliteDataBase/services/assetSemanticService'
+import type { VaultInfo } from '../../../../sqliteDataBase/VaultManager'
 import { resolveFolder } from './folderLookup'
-import { runAcrossVaults, VAULT_SCOPE_DESCRIPTION } from './vaultScope'
+import { runAcrossVaults, VAULT_SCOPE_DESCRIPTION, type VaultRun } from './vaultScope'
 
 /**
  * 中文关键词落空时，**工具自己把库里有什么捞出来**，而不是只丢一句提示。
@@ -36,8 +65,23 @@ const KEYWORD_MISS_HINT =
   '下面 library_sample 是库里真实存在的资产，照着它挑一个英文词再搜，不要凭空猜。' +
   '想先看清楚库里有哪些类型、哪些文件夹、哪些标签，用 library_overview —— ' +
   '它回的是全量分布，比这 20 个样本有代表性得多。' +
-  '注意：中文**标签**是搜得到的，只有名字是英文。' +
+  '注意：中文**标签**是搜得到的，只有名字是英文。'
+
+/** 库里一个开了语义的都没有时才提示去开 —— 已经开了还这么说，模型会去叫用户做一件已经做过的事 */
+const ENABLE_SEMANTIC_HINT =
   '另外：资产库设置里可以打开**语义搜索**，打开之后中文查询能直接对上英文资产名。'
+
+/**
+ * 分页窗口：offset + limit 最多到这里。
+ *
+ * 关键词这条路取前 1 万个只要 150ms 左右（50 万资产的库），这个上限保护的是浏览和
+ * 带筛选的那几条路 —— 在那里翻到第 25 万个要 5 秒多。翻到 1 万之后还没找到的东西，
+ * 靠继续翻也找不到，应该收窄条件；数量分布用 library_overview。
+ */
+const MAX_RESULT_WINDOW = 10000
+
+/** 纯语义命中最多列几个。它们没有字面依据，列多了只会把模型带偏 */
+const SEMANTIC_MATCH_LIMIT = 10
 
 const hasChinese = (value: unknown): boolean => typeof value === 'string' && /[一-龥]/.test(value)
 
@@ -48,20 +92,22 @@ const DATE_MAX = '9999-12-31 23:59:59'
 const dayStart = (value: string): string => `${value.trim().slice(0, 10)} 00:00:00`
 const dayEnd = (value: string): string => `${value.trim().slice(0, 10)} 23:59:59`
 
+/**
+ * 真正让出主进程。
+ *
+ * SQLite 调用是同步的，而 `await` 一个已完成的 Promise 只让出微任务 —— 几个大库连着搜，
+ * 同步耗时会累加起来一次性卡住界面。库与库之间让一下宏任务，界面和 IPC 才插得进来。
+ */
+const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
+const isAigcVault = (vault: VaultInfo): boolean =>
+  vault.systemKey === 'aigc' || vault.id === 'system_vault_aigc'
+
 interface SearchOutcome {
   success?: boolean
   count?: number
   error?: string
-  assets?: Array<{ name?: string; assetType?: string }>
-}
-
-/** 一个库搜完的账：总数是多少、这一页取走了哪几个 */
-interface VaultPage {
-  count: number
-  taken: Array<Record<string, unknown>>
-  /** 这个库里没有这个文件夹。不算失败，别的库可能有 */
-  folderMiss?: string
-  folderLabel?: string
+  assets?: Array<Record<string, unknown>>
 }
 
 /**
@@ -114,6 +160,40 @@ function resolveTagIds(names: string[]): { ids: number[]; unknown: string[] } {
   return { ids, unknown }
 }
 
+/** 一页里的一项，还没回库取整行 */
+interface PageItem {
+  vaultId: string
+  order: number
+  tier: 0 | 1
+  score: number
+  id: number
+  /** 没有全文索引的老库走的是老路，那边已经格式化好了 */
+  preformatted?: Record<string, unknown>
+}
+
+function compareItems(a: PageItem, b: PageItem): number {
+  return b.tier - a.tier || compareScores(a.score, b.score) || a.order - b.order || a.id - b.id
+}
+
+/** 一次跨库搜索的原始结果（放宽前后各跑一次） */
+interface Pass {
+  runs: VaultRun<void>[]
+  scopeError?: string
+  total: number
+  lowerBound: boolean
+  perVault: Record<string, number>
+  folderLabel?: string
+  /** 哪些库没认出这个文件夹、为什么。「找不到」和「有好几个同名的」是两回事，不能混成一句 */
+  folderMisses: Array<{ vault: string; reason: string }>
+  /** 关键词模式：所有库的候选，未排序 */
+  items: PageItem[]
+  /** 浏览模式：已经按首尾相接取好的这一页 */
+  browsePage: Array<Record<string, unknown>>
+  semantic: Array<{ vaultId: string; order: number; rank: number; id: number }>
+  semanticEnabled: boolean
+  indexPending: Record<string, number>
+}
+
 /**
  * 创建资产搜索工具
  * @returns 资产搜索工具实例
@@ -128,12 +208,16 @@ export function createSearchAssetsTool(): V2Tool {
 【「我库里有什么」不要用这个工具】那个问题用 library_overview —— 它回的是全量精确分布，
   几百字就说完。这里一页最多 500 个，几十万个资产的库靠翻页是数不完的，
   拿前一页去总结全库会得出错误结论，而且看不出错。
+【排序】有关键词时所有库的结果按相关度统一排：查询词在名字/标签/文件夹/类型里**全中**的排最前。
+  所以第一页就是全部库里最相关的，不用翻页去别的库里找。
 【浏览】不带任何条件调用 = 按名字列出整个库，只在需要具体资产清单时用。
-【翻页】一次最多回 500 个，默认 100。返回里的 count 是符合条件的**总数**，
-  hasMore 为 true 说明后面还有 —— 用同样的条件加上返回的 nextOffset 再调一次
-  就能接着往下看。要清点全库时照这个翻，不要靠换关键词去猜。
+【翻页】一次最多回 500 个，默认 100，最多翻到第 ${MAX_RESULT_WINDOW} 个。
+  count 是符合条件的**总数**（count_is_lower_bound 为 true 时是「至少这么多」），
+  hasMore 为 true 说明后面还有 —— 同样的条件加上 nextOffset 再调一次。
+  翻了几页还没有，说明该换条件，不是该继续翻。
 【按文件夹】folder 填文件夹名（角色）、完整路径（/ALL/角色）或 folderKey 都行，
   默认连子文件夹一起搜。「Trees 文件夹里有什么」用它，别去全库翻。
+  保管库的名字不是文件夹 —— 只搜某个库用 vault。
 【按标签】tags 填标签名（中文标签也行）。tagsMatch: "all" 要求全都有，默认任意一个命中。
   标签名库里不存在会直接报错并把名字列出来 —— 不会假装筛过了。
 【收藏 / 时间】favorite: true 只看收藏；changedAfter / changedBefore 按**最近一次变动**
@@ -154,6 +238,9 @@ export function createSearchAssetsTool(): V2Tool {
   中文关键词搜不到时**不用自己猜英文词**：这个工具会自动去掉关键词再查一次，
   在 library_sample 里把库里真实存在的资产回给你，照着挑就行。
   中文**标签**是搜得到的 —— 只有名字是英文。
+【semantic_matches】开了语义搜索的库里「意思相近、但字面上没命中」的资产单独列在这里，
+  不算进 count。它们可能不相关，用之前先看名字和类型核对。
+【index_pending】某个库刚导入了一大批、还没建完索引时会出现：那些资产这次没搜到，过一会儿再搜。
 【与其他搜索的区别】
 - 这个搜的是**盒子的素材库**（用户自己收集整理的，带标签和备注）
 - 虚幻工程里的资产用 ue_content_search
@@ -263,6 +350,16 @@ export function createSearchAssetsTool(): V2Tool {
         }
       }
 
+      if (offset + limit > MAX_RESULT_WINDOW) {
+        return {
+          success: false,
+          error:
+            `最多只能翻到第 ${MAX_RESULT_WINDOW} 个（这次要的是第 ${offset + 1}~${offset + limit} 个）。` +
+            '翻到这么深还没找到，说明该收窄条件（关键词、folder、assetType、tags）；' +
+            '想知道各类各有多少，用 library_overview。'
+        }
+      }
+
       const params: AssetSearchParams = {
         ...(input.query !== undefined ? { query: input.query } : {}),
         ...(input.fileFormat !== undefined ? { fileFormat: input.fileFormat } : {}),
@@ -270,6 +367,8 @@ export function createSearchAssetsTool(): V2Tool {
         ...(input.fileSize !== undefined ? { fileSize: input.fileSize } : {}),
         ...(input.engineVersion !== undefined ? { engineVersion: input.engineVersion } : {}),
         ...(input.hasNoTags !== undefined ? { hasNoTags: input.hasNoTags } : {}),
+        // 放宽由这一层在「所有库都落空」时统一做，库内不许各自放宽
+        relax: false,
         limit,
         offset
       }
@@ -306,105 +405,224 @@ export function createSearchAssetsTool(): V2Tool {
         }
       }
 
-      // ── 每个保管库跑一趟 ──────────────────────────────────────────────────
-      //
-      // 不带条件 = 浏览全库。
-      //
-      // 原来这里直接报错「搜索需要至少提供一个条件」，于是「我素材库里有
-      // 什么」这个**最自然的第一个问题**没法回答 —— 调用方只能搜它已经
-      // 知道存在的东西，没有任何办法先看一眼库里有些啥。
-      //
-      // 分页是**首尾相接**的：当前库排最前，它这一页没占满才轮到下一个库。
-      // `skip` / `remaining` 在回调里逐库递减 —— runAcrossVaults 保证顺序执行。
-      let skip = offset
-      let remaining = limit
-      let total = 0
-      let folderLabel: string | undefined
-      const collected: Array<Record<string, unknown>> = []
-      const perVault: Record<string, number> = {}
-      const folderMisses: string[] = []
+      // 有能搜的字符才走相关度；全是标点之类的，当浏览处理（和原来一样）
+      const rankedQuery =
+        input.query && buildFtsTerms(input.query).length > 0 ? input.query : undefined
+      const need = offset + limit
 
-      const { runs, error: scopeError } = await runAcrossVaults<VaultPage>(
-        input.vault,
-        async (db, vault) => {
-          const scoped: AssetSearchParams = {
-            ...params,
-            // 这一页占满了也照跑：不跑的话 count 会漏掉后面几个库，
-            // hasMore / nextOffset 跟着算错，翻页就永远翻不到它们
-            limit: Math.max(1, remaining),
-            offset: skip
-          }
+      // 查询向量整次调用只算一次：第一个开了语义的库用到时才算，之后的库复用
+      let embeddingPromise: Promise<number[] | null> | null = null
+      const getEmbedding = (): Promise<number[] | null> =>
+        (embeddingPromise ??= embedSearchQuery(rankedQuery ?? '').catch((error) => {
+          // 语义是加分项，失败了照常出关键词结果 —— 但要留痕，否则「语义悄悄没生效」查不出来
+          console.warn('[资产语义索引] 查询向量化失败，这次只走关键词:', error)
+          return null
+        }))
+
+      // ── 每个保管库跑一趟 ──────────────────────────────────────────────────
+      const runPass = async (passParams: AssetSearchParams): Promise<Pass> => {
+        // 浏览模式的首尾相接分页：skip / remaining 在回调里逐库递减（runAcrossVaults 顺序执行）
+        let skip = offset
+        let remaining = limit
+        const pass: Pass = {
+          runs: [],
+          total: 0,
+          lowerBound: false,
+          perVault: {},
+          folderMisses: [],
+          items: [],
+          browsePage: [],
+          semantic: [],
+          semanticEnabled: false,
+          indexPending: {}
+        }
+        let order = 0
+
+        const { runs, error } = await runAcrossVaults<void>(input.vault, async (db, vault) => {
+          await yieldToEventLoop()
+          const vaultOrder = order++
+          const scoped: AssetSearchParams = { ...passParams }
 
           // 文件夹：用户说的是名字，底层认的是 folderKey。
           // folderKey 是**每个库各一套**的，所以必须逐库解析，不能跨库复用。
           if (input.folder) {
             const resolved = resolveFolder(db, input.folder)
             if (resolved.error || !resolved.folderKey) {
-              const miss = resolved.error ?? '文件夹解析失败'
-              folderMisses.push(`${vault.name}：${miss}`)
-              return { count: 0, taken: [], folderMiss: miss }
+              pass.folderMisses.push({
+                vault: vault.name,
+                reason: resolved.error ?? '文件夹解析失败'
+              })
+              pass.perVault[vault.name] = 0
+              return
             }
             scoped.folderKey = resolved.folderKey
             scoped.includeSubfolders = input.includeSubfolders !== false
-            folderLabel ??=
+            pass.folderLabel ??=
               resolved.folder?.fullPath || resolved.folder?.folderName || resolved.folderKey
           }
 
+          if (rankedQuery) {
+            const filter = buildSearchCriteria(scoped)
+            const ranked = rankedSearchVault(db, { query: rankedQuery, need, filter })
+            if (ranked) {
+              pass.total += ranked.total
+              pass.lowerBound ||= ranked.totalIsLowerBound
+              pass.perVault[vault.name] = ranked.total
+              if (ranked.indexPending > 0) pass.indexPending[vault.name] = ranked.indexPending
+              for (const hit of ranked.hits) {
+                pass.items.push({ vaultId: vault.id, order: vaultOrder, ...hit })
+              }
+            } else {
+              // 这个库还没有全文索引表（老库第一次打开前）：走老路，排在有分数的结果后面
+              // 底层一页最多 500，而 need 最大到 1 万：按页取到 need 为止，否则深翻页会漏掉这个库
+              const legacy: Array<Record<string, unknown>> = []
+              let count = 0
+              for (let from = 0; from < need; from += 500) {
+                const size = Math.min(500, need - from)
+                const outcome = (await searchAssets(
+                  { ...scoped, limit: size, offset: from },
+                  db,
+                  vault.path
+                )) as unknown as SearchOutcome
+                if (outcome.success === false) throw new Error(outcome.error ?? '搜索失败')
+                count = outcome.count ?? 0
+                legacy.push(...(outcome.assets ?? []))
+                if ((outcome.assets ?? []).length < size || legacy.length >= count) break
+              }
+              pass.total += count
+              pass.perVault[vault.name] = count
+              legacy.forEach((asset, index) => {
+                pass.items.push({
+                  vaultId: vault.id,
+                  order: vaultOrder,
+                  tier: 0,
+                  score: Number.POSITIVE_INFINITY,
+                  id: index,
+                  preformatted: { ...asset, vault: vault.name }
+                })
+              })
+            }
+
+            // 语义那一路：只收「全文没命中」的，单独列出、不计数
+            if (isAssetVectorEnabled(db)) {
+              pass.semanticEnabled = true
+              const recalled = await semanticRecall(db, rankedQuery, undefined, getEmbedding)
+              semanticOnlyIds(db, recalled, rankedQuery, filter)
+                .slice(0, SEMANTIC_MATCH_LIMIT)
+                .forEach((id, rank) =>
+                  pass.semantic.push({ vaultId: vault.id, order: vaultOrder, rank, id })
+                )
+            }
+            return
+          }
+
+          // ── 浏览：首尾相接 ────────────────────────────────────────────────
           // vault.path 一定要跟着 db 一起传：备份库里资产的 filePath 是相对
-          // 保管库的，不给库根目录就会按**当前活跃库**去拼，跨库搜到的资产
-          // 路径就指到了另一个库的目录下
-          const outcome = (await searchAssets(scoped, db, vault.path)) as SearchOutcome
+          // 保管库的，不给库根目录就会按**当前活跃库**去拼
+          const outcome = (await searchAssets(
+            // 这一页占满了也照跑：不跑的话 count 会漏掉后面几个库，
+            // hasMore / nextOffset 跟着算错，翻页就永远翻不到它们
+            { ...scoped, limit: Math.max(1, remaining), offset: skip },
+            db,
+            vault.path
+          )) as unknown as SearchOutcome
           // 这一个库炸了就只算它自己失败（helper 会接住），别的库照常出结果
           if (outcome.success === false) throw new Error(outcome.error ?? '搜索失败')
 
           const count = outcome.count ?? 0
-          total += count
-          perVault[vault.name] = count
-
-          const taken: Array<Record<string, unknown>> = []
+          pass.total += count
+          pass.perVault[vault.name] = count
           if (remaining > 0) {
-            for (const asset of (outcome.assets ?? []).slice(0, remaining)) {
-              taken.push({ ...asset, vault: vault.name })
-            }
+            const taken = (outcome.assets ?? [])
+              .slice(0, remaining)
+              .map((asset) => ({ ...asset, vault: vault.name }))
             remaining -= taken.length
-            collected.push(...taken)
+            pass.browsePage.push(...taken)
           }
           skip = Math.max(0, skip - count)
+        })
 
-          return { count, taken, folderLabel }
-        }
-      )
+        pass.runs = runs
+        pass.scopeError = error
+        return pass
+      }
 
-      if (scopeError) return { success: false, error: scopeError }
+      let pass = await runPass(params)
+      if (pass.scopeError) return { success: false, error: pass.scopeError }
 
       // 一个库都认不出这个文件夹才算失败 —— 只在其中一个库里存在是正常的
-      if (input.folder && !folderLabel) {
+      if (input.folder && !pass.folderLabel) {
+        const asVault = pass.runs.find(
+          (run) => run.vault.name.toLowerCase() === input.folder!.trim().toLowerCase()
+        )
+        // 同名文件夹不止一个 —— 那是「认不准」，不是「没有」，原因必须原样带上
+        const ambiguous = pass.folderMisses.filter((miss) => !miss.reason.startsWith('找不到'))
+        if (ambiguous.length > 0) {
+          return {
+            success: false,
+            error: `文件夹「${input.folder}」认不准：${ambiguous
+              .map((miss) => `${miss.vault}：${miss.reason}`)
+              .join('；')}`
+          }
+        }
         return {
           success: false,
-          error: `所有保管库里都没有文件夹「${input.folder}」。${folderMisses.join('；')}`
+          error:
+            `所有保管库里都没有文件夹「${input.folder}」（查过：${pass.folderMisses.map((miss) => miss.vault).join('、')}）。` +
+            (asVault
+              ? `「${asVault.vault.name}」是一个**保管库**的名字，不是文件夹 —— 只搜这个库用 vault: "${asVault.vault.name}"。`
+              : '文件夹名要和库里的一致；不确定有哪些文件夹，用 library_overview 看。')
         }
       }
 
-      const failed = runs.filter((run) => run.error)
-      const searched = runs.filter((run) => !run.error).map((run) => run.vault.name)
+      const failedOf = (p: Pass): VaultRun<void>[] => p.runs.filter((run) => run.error)
+      const searchedOf = (p: Pass): string[] =>
+        p.runs.filter((run) => !run.error).map((run) => run.vault.name)
 
       // 一个库都没搜成 = 这次搜索失败，不是「库里没有」。
       // 报成 0 结果的话，调用方会告诉用户「你库里没这东西」—— 而真相是压根没查。
-      if (runs.length > 0 && searched.length === 0) {
+      if (pass.runs.length > 0 && searchedOf(pass).length === 0) {
         return {
           success: false,
-          error: `所有保管库都没能搜到：${failed.map((r) => `${r.vault.name}：${r.error}`).join('；')}`
+          error: `所有保管库都没能搜到：${failedOf(pass)
+            .map((r) => `${r.vault.name}：${r.error}`)
+            .join('；')}`
         }
       }
 
+      // ── 放宽：所有库合计为 0 才做，而且只做一次 ─────────────────────────
+      // 逐库放宽的话，一个库有真命中、另一个库落空放宽，不相干的资产就混进来了
+      let relaxed = false
+      if (pass.total === 0 && (params.assetType !== undefined || params.fileFormat !== undefined)) {
+        const loose = { ...params }
+        delete loose.assetType
+        delete loose.fileFormat
+        const second = await runPass(loose)
+        if (second.total > 0) {
+          pass = second
+          relaxed = true
+        }
+      }
+
+      const failed = failedOf(pass)
+      const searched = searchedOf(pass)
       const extras: Record<string, unknown> = {
-        ...(folderLabel ? { searched_folder: folderLabel } : {}),
+        ...(pass.folderLabel ? { searched_folder: pass.folderLabel } : {}),
         searched_vaults: searched,
-        ...(Object.keys(perVault).length > 1 ? { by_vault: perVault } : {}),
+        ...(Object.keys(pass.perVault).length > 1 ? { by_vault: pass.perVault } : {}),
         ...(failed.length > 0
           ? {
               // 哪个库没搜成必须说出来。不说的话「没找到」和「没搜」长得一模一样
               unsearched_vaults: failed.map((run) => `${run.vault.name}：${run.error}`)
+            }
+          : {}),
+        ...(Object.keys(pass.indexPending).length > 0 ? { index_pending: pass.indexPending } : {}),
+        ...(pass.folderMisses.some((miss) => !miss.reason.startsWith('找不到'))
+          ? {
+              // 有的库里同名文件夹不止一个，那几个库这次没搜 —— 不说的话「没找到」和「没搜」长得一样
+              folder_unresolved: pass.folderMisses
+                .filter((miss) => !miss.reason.startsWith('找不到'))
+                .map((miss) => `${miss.vault}：${miss.reason}`)
             }
           : {}),
         ...(exclude.unknown.length > 0
@@ -415,82 +633,203 @@ export function createSearchAssetsTool(): V2Tool {
           : {})
       }
 
-      const nextOffset = offset + collected.length
-      const hasMore = nextOffset < total
+      // ── 取这一页 ────────────────────────────────────────────────────────
+      let assets: Array<Record<string, unknown>>
+      let semanticMatches: Array<Record<string, unknown>> = []
+      let pageHasAigc = false
+      const vaultById = new Map(pass.runs.map((run) => [run.vault.id, run.vault]))
+
+      if (rankedQuery) {
+        const page = [...pass.items].sort(compareItems).slice(offset, offset + limit)
+        const semantic = [...pass.semantic]
+          .sort((a, b) => a.rank - b.rank || a.order - b.order)
+          .slice(0, SEMANTIC_MATCH_LIMIT)
+
+        // 只对这一页（和语义那几个）回库取整行
+        const wanted = new Map<string, Set<number>>()
+        for (const item of [...page.filter((p) => !p.preformatted), ...semantic]) {
+          if (!wanted.has(item.vaultId)) wanted.set(item.vaultId, new Set())
+          wanted.get(item.vaultId)!.add(item.id)
+        }
+        const formatted = new Map<string, Record<string, unknown>>()
+        if (wanted.size > 0) {
+          await runAcrossVaults<void>(input.vault, async (db, vault) => {
+            const ids = wanted.get(vault.id)
+            if (!ids) return
+            await yieldToEventLoop()
+            const rows = getAssetRowsByIds(db, [...ids])
+            attachTagNames(rows)
+            const out = formatAssets(rows, { vaultPath: vault.path })
+            rows.forEach((row, index) => {
+              formatted.set(`${vault.id}:${(row as { id?: number }).id}`, {
+                ...out[index],
+                vault: vault.name
+              })
+            })
+          })
+        }
+
+        assets = page
+          .map((item) => item.preformatted ?? formatted.get(`${item.vaultId}:${item.id}`))
+          .filter((asset): asset is Record<string, unknown> => !!asset)
+        pageHasAigc = page.some((item) => {
+          const vault = vaultById.get(item.vaultId)
+          return !!vault && isAigcVault(vault)
+        })
+        semanticMatches = semantic
+          .map((item) => formatted.get(`${item.vaultId}:${item.id}`))
+          .filter((asset): asset is Record<string, unknown> => !!asset)
+          .map((asset) => ({
+            name: asset.name,
+            type: asset.type,
+            assetKey: asset.assetKey,
+            vault: asset.vault,
+            ...(asset.real_path ? { real_path: asset.real_path } : {})
+          }))
+      } else {
+        assets = pass.browsePage
+        const aigcNames = new Set(
+          pass.runs.filter((run) => isAigcVault(run.vault)).map((run) => run.vault.name)
+        )
+        pageHasAigc = assets.some((asset) => aigcNames.has(String(asset.vault)))
+      }
+
+      // 字面结果已经填满一页时不带语义那几个：召回没有距离门槛，总有 10 个「最近的」，
+      // 真机数据上它们在 pine tree（65 个字面命中）这种查询里全是 AI 图，只会白占上下文。
+      // 字面结果不够一页时（horse、马 这种）才是语义该出场的时候。
+      const semanticExtras =
+        semanticMatches.length > 0 && pass.total < limit
+          ? {
+              semantic_matches: semanticMatches,
+              semantic_note:
+                'semantic_matches 是开了语义搜索的库里「意思相近、但字面上没命中」的资产，不算进 count。' +
+                '它们可能完全不相关，用之前核对名字和类型。'
+            }
+          : {}
+
+      const total = pass.total
+      const nextOffset = offset + assets.length
+      const hasMore = nextOffset < total || (pass.lowerBound && assets.length === limit)
 
       if (total > 0) {
+        const pendingNote =
+          Object.keys(pass.indexPending).length > 0
+            ? `注意：${Object.entries(pass.indexPending)
+                .map(([name, n]) => `「${name}」有 ${n} 个`)
+                .join('、')}资产刚导入、还没建完索引，这次没搜到它们，过一会儿再搜一次。`
+            : ''
         return {
           success: true,
           count: total,
-          returnedCount: collected.length,
+          ...(pass.lowerBound ? { count_is_lower_bound: true } : {}),
+          returnedCount: assets.length,
           offset,
           limit,
-          assets: collected,
+          assets,
           ...(hasMore ? { hasMore, nextOffset } : {}),
+          ...(relaxed ? { relaxed: true } : {}),
           ...extras,
+          ...semanticExtras,
           message:
-            `共 ${total} 个` +
-            (Object.keys(perVault).length > 1
-              ? `（${Object.entries(perVault)
+            (relaxed
+              ? '没有资产符合指定的类型/格式条件，已去掉这两个条件重搜 —— **下面这些不是你要的那个类型**，向用户汇报时要说明这一点。'
+              : '') +
+            `共 ${total}${pass.lowerBound ? '+' : ''} 个` +
+            (Object.keys(pass.perVault).length > 1
+              ? `（${Object.entries(pass.perVault)
                   .filter(([, n]) => n > 0)
                   .map(([name, n]) => `${name} ${n} 个`)
                   .join('，')}）`
               : '') +
-            `，这是第 ${offset + 1}~${nextOffset} 个。` +
-            (hasMore ? `要看后面的，用同样的条件加 offset=${nextOffset} 再调一次。` : '') +
-            '「AIGC 资产库」里的是 AI 生成的图/视频/模型，要导进虚幻工程走 ue_content_import（把 real_path 填进 files），不是 project_manage。' +
+            `，这是第 ${offset + 1}~${nextOffset} 个` +
+            (rankedQuery ? '（所有库按相关度统一排序）' : '') +
+            '。' +
+            (hasMore
+              ? nextOffset < MAX_RESULT_WINDOW
+                ? `要看后面的，用同样的条件加 offset=${nextOffset} 再调一次。`
+                : `已经到第 ${MAX_RESULT_WINDOW} 个的翻页上限，要找的还没出现就收窄条件。`
+              : '') +
+            pendingNote +
+            (pageHasAigc
+              ? '「AIGC 资产库」里的是 AI 生成的图/视频/模型，要导进虚幻工程走 ue_content_import（把 real_path 填进 files），不是 project_manage。'
+              : '') +
             // 版本这一句放在**返回里**而不是工具描述里：描述是每一轮都要付的前缀，
             // 而这件事只有真的搜到 .uasset 时才用得上。
             // 不说的话，挑素材那一步完全是盲的 —— 真机上 51 个导进 5.5 工程，
             // 16 个因为是 5.7 存的被整条挡回来，而事前没有任何入口看得见
-            describeEngineVersionSpread(collected)
+            describeEngineVersionSpread(assets)
         }
       }
 
       // ── 一个都没搜到 ──────────────────────────────────────────────────────
       const emptyMessage =
         `${searched.join('、')} 里都没有符合条件的资产。` +
-        (failed.length > 0 ? '注意上面 unsearched_vaults 里的库这次没能搜到。' : '')
+        (failed.length > 0 ? '注意上面 unsearched_vaults 里的库这次没能搜到。' : '') +
+        (Object.keys(pass.indexPending).length > 0
+          ? '有的库还没建完索引（见 index_pending），过一会儿再搜一次可能就有了。'
+          : '')
 
       // 中文关键词一无所获：去掉关键词再查一次，把库里真有的名字捞给调用方。
       //
-      // 这一次也要**照样搜遍所有库** —— 样本只从当前库取的话，就又回到了
-      // 「用户站在 AIGC 库里，看到的样本全是 AI 图」那个错觉。
+      // 这一次也要**照样搜遍所有库**，而且**轮流从各库取** —— 只从排在前面的库取的话，
+      // 样本就全是当前库的（用户站在 AIGC 库里，看到的样本全是 AI 图）。
       if (hasChinese(input.query)) {
-        const rest = { ...params }
+        const rest: AssetSearchParams = { ...params }
         delete rest.query
         delete rest.folderKey
         delete rest.includeSubfolders
         delete rest.limit
         delete rest.offset
+        // 样本的作用是给出库里真实存在的名字，类型落空时放宽正合适 —— 不放宽的话样本是空的，提示就成了空话
+        delete rest.relax
 
         let sampleTotal = 0
-        const sample: Array<{ name?: string; assetType?: string; vault: string }> = []
+        const perVaultSample: Array<Array<{ name?: unknown; assetType?: unknown; vault: string }>> =
+          []
         await runAcrossVaults(input.vault, async (db, vault) => {
+          await yieldToEventLoop()
           const one = (await searchAssets(
             { ...rest, limit: SAMPLE_LIMIT },
             db,
             vault.path
-          )) as SearchOutcome
+          )) as unknown as SearchOutcome
           sampleTotal += one.count ?? 0
-          for (const asset of (one.assets ?? []).slice(0, SAMPLE_LIMIT - sample.length)) {
-            sample.push({ name: asset.name, assetType: asset.assetType, vault: vault.name })
-          }
+          perVaultSample.push(
+            (one.assets ?? []).slice(0, SAMPLE_LIMIT).map((asset) => ({
+              name: asset.name,
+              assetType: asset.assetType,
+              vault: vault.name
+            }))
+          )
         })
+        const sample: Array<{ name?: unknown; assetType?: unknown; vault: string }> = []
+        for (let i = 0; sample.length < SAMPLE_LIMIT; i++) {
+          const round = perVaultSample.map((list) => list[i]).filter(Boolean)
+          if (round.length === 0) break
+          sample.push(...round.slice(0, SAMPLE_LIMIT - sample.length))
+        }
 
         return {
           success: true,
           count: 0,
           assets: [],
           ...extras,
-          hint: KEYWORD_MISS_HINT,
+          ...semanticExtras,
+          hint: KEYWORD_MISS_HINT + (pass.semanticEnabled ? '' : ENABLE_SEMANTIC_HINT),
           dropped_query: input.query,
           library_sample: sample,
           library_total: sampleTotal
         }
       }
 
-      return { success: true, count: 0, assets: [], ...extras, message: emptyMessage }
+      return {
+        success: true,
+        count: 0,
+        assets: [],
+        ...extras,
+        ...semanticExtras,
+        message: emptyMessage
+      }
     }
   })
 }

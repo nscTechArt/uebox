@@ -1,37 +1,51 @@
 /**
  * @vitest-environment node
  *
- * 中文关键词落空时的自动回退。
+ * search_assets 工具层：跨库归并、放宽、中文回退、语义单列、各种「说清楚」。
  *
- * 资产名基本是英文而用户用中文问，这是素材库最高频的一次失败。
- * 以前工具只回一句「请换成英文词再搜」—— 调用方拿到零信息，只能凭空猜词，
- * 而这条知识被摊派到 skill 里（一整节加一张实测表）。
- * 现在工具自己去掉关键词再查一次，把库里真实存在的名字回过去。
+ * 单个库里怎么按相关度取前 N 个，在 models/assetRankedSearch.test.ts 里用真 SQLite 测；
+ * 这里把它 mock 掉，只测工具怎么把各库的结果拼起来、怎么对调用方说话。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // vi.mock 会被提升到文件顶部，工厂里不能引用还没初始化的 const —— 用 vi.hoisted
-const { searchAssets, getDeletedAssetData, getTagByName, resolveFolder, vaultManager } = vi.hoisted(
-  () => ({
-    searchAssets: vi.fn(),
-    getDeletedAssetData: vi.fn(),
-    getTagByName: vi.fn(),
-    resolveFolder: vi.fn(),
-    vaultManager: {
-      getAllVaults: vi.fn(),
-      getCurrentVault: vi.fn(),
-      withVaultDatabase: vi.fn()
-    }
-  })
-)
+const {
+  searchAssets,
+  getDeletedAssetData,
+  getTagByName,
+  resolveFolder,
+  vaultManager,
+  rankedSearchVault,
+  semanticOnlyIds,
+  getAssetRowsByIds,
+  isAssetVectorEnabled,
+  semanticRecall,
+  embedSearchQuery
+} = vi.hoisted(() => ({
+  searchAssets: vi.fn(),
+  getDeletedAssetData: vi.fn(),
+  getTagByName: vi.fn(),
+  resolveFolder: vi.fn(),
+  vaultManager: {
+    getAllVaults: vi.fn(),
+    getCurrentVault: vi.fn(),
+    withVaultDatabase: vi.fn()
+  },
+  rankedSearchVault: vi.fn(),
+  semanticOnlyIds: vi.fn(),
+  getAssetRowsByIds: vi.fn(),
+  isAssetVectorEnabled: vi.fn(),
+  semanticRecall: vi.fn(),
+  embedSearchQuery: vi.fn()
+}))
 
 /** 每个库的连接要是**稳定的对象** —— 用它来判断某一趟查的是哪个库 */
 const LIBRARY_DB = { __vault: 'default' }
 const AIGC_DB = { __vault: 'aigc' }
 
-const DEFAULT_VAULT = { id: 'system_vault_default', name: '默认保管库' }
-const AIGC_VAULT = { id: 'system_vault_aigc', name: 'AIGC 资产库' }
+const DEFAULT_VAULT = { id: 'system_vault_default', name: '默认保管库', path: 'C:/v/default' }
+const AIGC_VAULT = { id: 'system_vault_aigc', name: 'AIGC 资产库', path: 'C:/v/aigc' }
 const DB_BY_VAULT: Record<string, unknown> = {
   [DEFAULT_VAULT.id]: LIBRARY_DB,
   [AIGC_VAULT.id]: AIGC_DB
@@ -51,7 +65,10 @@ const setupVaults = (vaults: Array<{ id: string; name: string }>, current = vaul
 }
 
 vi.mock('../../../../agent/tools/app-control/asset-manager/AssetSearcher', () => ({
-  searchAssets
+  searchAssets,
+  // 筛选条件原样透传，方便断言传下去的是什么
+  buildSearchCriteria: (params: Record<string, unknown>) => ({ ...params }),
+  attachTagNames: () => {}
 }))
 vi.mock('../../../../agent/tools/app-control/asset-manager/AssetFormatter', () => ({
   formatAssets: (rows: unknown[]) => rows
@@ -63,6 +80,19 @@ vi.mock('../../../../sqliteDataBase', () => ({
 }))
 vi.mock('../../../../sqliteDataBase/models/assetData', () => ({ getDeletedAssetData }))
 vi.mock('../../../../sqliteDataBase/models/tag', () => ({ getTagByName }))
+vi.mock('../../../../sqliteDataBase/models/assetRankedSearch', async (importOriginal) => ({
+  compareScores: (
+    await importOriginal<typeof import('../../../../sqliteDataBase/models/assetRankedSearch')>()
+  ).compareScores,
+  rankedSearchVault,
+  semanticOnlyIds,
+  getAssetRowsByIds
+}))
+vi.mock('../../../../sqliteDataBase/models/assetVectorIndex', () => ({ isAssetVectorEnabled }))
+vi.mock('../../../../sqliteDataBase/services/assetSemanticService', () => ({
+  semanticRecall,
+  embedSearchQuery
+}))
 vi.mock('./folderLookup', () => ({ resolveFolder }))
 
 import { createSearchAssetsTool } from './searchAssets'
@@ -81,7 +111,31 @@ const AIGC_ASSETS = [
   { name: '赛博朋克街道_2.png', assetType: 'AIGC', real_path: 'C:/vault/aigc/AIGC/图片/b.png' }
 ]
 
-/** 两个库：默认保管库 1 个资产，AIGC 库 2 个 */
+/** 库里的行：id → 整行（getAssetRowsByIds 的 mock 按 id 回） */
+const ROWS: Record<string, Record<number, Record<string, unknown>>> = {
+  default: {
+    1: { id: 1, name: 'SM_Chair_Wood', assetType: 'StaticMesh' },
+    2: { id: 2, name: 'SM_Police_Car_01', assetType: 'StaticMesh', engineVersion: '5.7.0' }
+  },
+  aigc: {
+    11: { id: 11, name: 'chair_render.png', assetType: 'AIGC' },
+    12: { id: 12, name: 'bgm.mp3', assetType: 'AIGC' },
+    13: { id: 13, name: 'horse_photo.png', assetType: 'AIGC' }
+  }
+}
+
+type Hit = { id: number; tier: 0 | 1; score: number }
+const ranked = (hits: Hit[], extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  hits,
+  total: hits.length,
+  totalIsLowerBound: false,
+  indexPending: 0,
+  pendingSearched: false,
+  route: 'candidates',
+  ...extra
+})
+
+/** 两个库：默认保管库 1 个资产，AIGC 库 2 个（浏览模式用） */
 const twoVaults = (current = DEFAULT_VAULT): void => {
   setupVaults([DEFAULT_VAULT, AIGC_VAULT], current)
   searchAssets.mockImplementation(async (_params: unknown, db: unknown) =>
@@ -108,23 +162,357 @@ beforeEach(() => {
     folderKey: 'k_tree',
     folder: { folderKey: 'k_tree', folderName: 'Trees', fullPath: '/Trees' }
   })
+  rankedSearchVault.mockReset().mockReturnValue(ranked([]))
+  semanticOnlyIds.mockReset().mockImplementation((_db: unknown, ids: number[]) => ids)
+  getAssetRowsByIds
+    .mockReset()
+    .mockImplementation((db: { __vault: string }, ids: number[]) =>
+      ids.map((id) => ROWS[db.__vault]![id]).filter(Boolean)
+    )
+  isAssetVectorEnabled.mockReset().mockReturnValue(false)
+  semanticRecall.mockReset().mockResolvedValue([])
+  embedSearchQuery.mockReset().mockResolvedValue([0.1, 0.2])
 })
 
 /** 取最后一次传给底层 searchAssets 的条件 */
 const lastCriteria = (): Record<string, unknown> =>
   searchAssets.mock.calls[searchAssets.mock.calls.length - 1]![0] as Record<string, unknown>
 
+/** 取最后一次传给 rankedSearchVault 的筛选条件 */
+const lastRankedFilter = (): Record<string, unknown> =>
+  (
+    rankedSearchVault.mock.calls[rankedSearchVault.mock.calls.length - 1]![1] as {
+      filter: Record<string, unknown>
+    }
+  ).filter
+
+/**
+ * 真机上的那一次：用户站在 AIGC 库（155 个 AI 图），搜 horse / grass / SM_Env，
+ * 8 次里 7 次首页全是 AIGC 的东西 —— 因为关键词结果也是「当前库排最前、首尾相接」。
+ */
+describe('关键词：所有库按相关度统一排序', () => {
+  it('另一个库里全中的排在当前库只中一部分的前面', async () => {
+    setupVaults([DEFAULT_VAULT, AIGC_VAULT], AIGC_VAULT)
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB
+        ? ranked([{ id: 11, tier: 0, score: -9 }])
+        : ranked([{ id: 2, tier: 1, score: -3 }])
+    )
+
+    const r = await run({ query: 'police car' })
+
+    expect(
+      (r.assets as Array<{ name: string; vault: string }>).map((a) => [a.name, a.vault])
+    ).toEqual([
+      ['SM_Police_Car_01', '默认保管库'],
+      ['chair_render.png', 'AIGC 资产库']
+    ])
+  })
+
+  it('同层按分数、同分按库顺序排', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB
+        ? ranked([
+            { id: 11, tier: 1, score: -5 },
+            { id: 12, tier: 1, score: -2 }
+          ])
+        : ranked([{ id: 1, tier: 1, score: -2 }])
+    )
+
+    const r = await run({ query: 'chair' })
+
+    expect((r.assets as Array<{ name: string }>).map((a) => a.name)).toEqual([
+      'chair_render.png',
+      'SM_Chair_Wood',
+      'bgm.mp3'
+    ])
+  })
+
+  it('每个库要的是前 offset+limit 个，工具再切出这一页', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB
+        ? ranked([
+            { id: 11, tier: 1, score: -5 },
+            { id: 12, tier: 0, score: -1 }
+          ])
+        : ranked([
+            { id: 1, tier: 1, score: -4 },
+            { id: 2, tier: 0, score: -2 }
+          ])
+    )
+
+    const r = await run({ query: 'chair', offset: 1, limit: 2 })
+
+    expect((rankedSearchVault.mock.calls[0]![1] as { need: number }).need).toBe(3)
+    expect((r.assets as Array<{ name: string }>).map((a) => a.name)).toEqual([
+      'SM_Chair_Wood',
+      'SM_Police_Car_01'
+    ])
+    expect(r.nextOffset).toBe(3)
+  })
+
+  it('count 是各库之和，by_vault 各库分列', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB
+        ? ranked([{ id: 11, tier: 1, score: -1 }], { total: 40 })
+        : ranked([{ id: 1, tier: 1, score: -1 }], { total: 3 })
+    )
+
+    const r = await run({ query: 'chair' })
+
+    expect(r.count).toBe(43)
+    expect(r.by_vault).toEqual({ 默认保管库: 3, 'AIGC 资产库': 40 })
+    expect(r.searched_vaults).toEqual(['默认保管库', 'AIGC 资产库'])
+  })
+
+  it('某个库数到上限停下时，count 标成下限', async () => {
+    rankedSearchVault.mockReturnValue(
+      ranked([{ id: 1, tier: 1, score: -1 }], { total: 1000, totalIsLowerBound: true })
+    )
+
+    const r = await run({ query: 'chair', assetType: 'StaticMesh', limit: 1 })
+
+    expect(r.count_is_lower_bound).toBe(true)
+    expect(r.hasMore).toBe(true)
+    expect(String(r.message)).toContain('1000+')
+  })
+
+  it('筛选条件逐库透传，不带 relax（放宽由工具层统一做）', async () => {
+    rankedSearchVault.mockReturnValue(ranked([{ id: 1, tier: 1, score: -1 }]))
+
+    await run({ query: 'chair', folder: 'Trees', assetType: 'StaticMesh' })
+
+    expect(lastRankedFilter()).toMatchObject({
+      folderKey: 'k_tree',
+      includeSubfolders: true,
+      assetType: 'StaticMesh',
+      relax: false
+    })
+  })
+
+  it('还没建完索引的库要说出来', async () => {
+    rankedSearchVault.mockReturnValue(
+      ranked([{ id: 1, tier: 1, score: -1 }], { indexPending: 50000 })
+    )
+
+    const r = await run({ query: 'chair' })
+
+    expect(r.index_pending).toEqual({ 默认保管库: 50000 })
+    expect(String(r.message)).toContain('还没建完索引')
+  })
+
+  it('一个库坏了不拖垮其余的，但必须说出来是哪个坏了', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) => {
+      if (db === AIGC_DB) throw new Error('库文件不存在')
+      return ranked([{ id: 1, tier: 1, score: -1 }])
+    })
+
+    const r = await run({ query: 'chair' })
+
+    expect(r.success).toBe(true)
+    expect(r.count).toBe(1)
+    expect(String((r.unsearched_vaults as string[])[0])).toContain('AIGC 资产库')
+  })
+
+  it('所有库都坏了要报失败，不能说成「库里没有」', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation(() => {
+      throw new Error('数据库没打开')
+    })
+
+    const r = await run({ query: 'chair' })
+
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('所有保管库都没能搜到')
+  })
+
+  it('vault 填库名时只搜那一个', async () => {
+    twoVaults()
+    rankedSearchVault.mockReturnValue(ranked([{ id: 11, tier: 1, score: -1 }]))
+
+    const r = await run({ query: 'street', vault: 'AIGC 资产库' })
+
+    expect(rankedSearchVault).toHaveBeenCalledTimes(1)
+    expect(rankedSearchVault.mock.calls[0]![0]).toBe(AIGC_DB)
+    expect(r.count).toBe(1)
+  })
+
+  it('vault 填了不存在的库名就报错，并把有哪些库列出来', async () => {
+    twoVaults()
+
+    const r = await run({ query: 'street', vault: '不存在的库' })
+
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('默认保管库')
+    expect(rankedSearchVault).not.toHaveBeenCalled()
+  })
+
+  it('没有全文索引表的老库退回老路，排在有分数的结果后面', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB ? null : ranked([{ id: 1, tier: 0, score: -1 }])
+    )
+
+    const r = await run({ query: 'street' })
+
+    expect((r.assets as Array<{ name: string }>).map((a) => a.name)).toEqual([
+      'SM_Chair_Wood',
+      ...AIGC_ASSETS.map((a) => a.name)
+    ])
+    expect(r.count).toBe(3)
+  })
+})
+
+describe('没有全文索引表的老库', () => {
+  it('按 500 一页取到 offset+limit 为止，深翻页不漏', async () => {
+    rankedSearchVault.mockReturnValue(null)
+    const page = (n: number): Array<{ name: string }> =>
+      Array.from({ length: n }, (_, i) => ({ name: `SM_Tree_${i}` }))
+    searchAssets.mockImplementation(async (p: { offset: number; limit: number }) => ({
+      success: true,
+      count: 3000,
+      assets: page(p.limit)
+    }))
+
+    const r = await run({ query: 'tree', offset: 600, limit: 100 })
+
+    expect(
+      searchAssets.mock.calls.map((c) => [
+        (c[0] as { offset: number }).offset,
+        (c[0] as { limit: number }).limit
+      ])
+    ).toEqual([
+      [0, 500],
+      [500, 200]
+    ])
+    expect(r.returnedCount).toBe(100)
+  })
+})
+
+describe('AIGC 导入提示只在这一页真有 AIGC 资产时出现', () => {
+  it('页里没有 AIGC 的就不说', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB ? ranked([]) : ranked([{ id: 1, tier: 1, score: -1 }])
+    )
+
+    const r = await run({ query: 'chair' })
+
+    expect(String(r.message)).not.toContain('ue_content_import')
+  })
+
+  it('页里有就说', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB ? ranked([{ id: 11, tier: 1, score: -1 }]) : ranked([])
+    )
+
+    const r = await run({ query: 'chair' })
+
+    expect(String(r.message)).toContain('ue_content_import')
+  })
+})
+
+describe('语义命中单独列出，不混进结果、不计数', () => {
+  it('纯语义命中进 semantic_matches，count 只算全文', async () => {
+    setupVaults([DEFAULT_VAULT, AIGC_VAULT], AIGC_VAULT)
+    isAssetVectorEnabled.mockImplementation((db: unknown) => db === AIGC_DB)
+    semanticRecall.mockResolvedValue([12, 13])
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB ? ranked([]) : ranked([{ id: 2, tier: 1, score: -1 }])
+    )
+
+    const r = await run({ query: 'horse' })
+
+    expect(r.count).toBe(1)
+    expect((r.assets as Array<{ name: string }>).map((a) => a.name)).toEqual(['SM_Police_Car_01'])
+    expect(
+      (r.semantic_matches as Array<{ name: string; vault: string }>).map((a) => a.name)
+    ).toEqual(['bgm.mp3', 'horse_photo.png'])
+    expect(String(r.semantic_note)).toContain('不算进 count')
+  })
+
+  it('字面结果已经填满一页时不带语义那几个 —— 它们只会白占上下文', async () => {
+    isAssetVectorEnabled.mockReturnValue(true)
+    semanticRecall.mockResolvedValue([12])
+    rankedSearchVault.mockReturnValue(
+      ranked(
+        [
+          { id: 1, tier: 1, score: -2 },
+          { id: 2, tier: 1, score: -1 }
+        ],
+        { total: 65 }
+      )
+    )
+
+    const r = await run({ query: 'pine tree', limit: 2 })
+
+    expect(r.semantic_matches).toBeUndefined()
+  })
+
+  it('查询向量整次调用只算一次，各库复用', async () => {
+    twoVaults()
+    isAssetVectorEnabled.mockReturnValue(true)
+    semanticRecall.mockImplementation(
+      async (_db: unknown, _q: string, _k: unknown, getEmbedding: () => Promise<unknown>) => {
+        await getEmbedding()
+        return []
+      }
+    )
+
+    await run({ query: 'horse' })
+
+    expect(semanticRecall).toHaveBeenCalledTimes(2)
+    expect(embedSearchQuery).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('放宽：只在所有库都落空时做一次', () => {
+  it('一个库有真命中时，别的库不放宽', async () => {
+    twoVaults()
+    rankedSearchVault.mockImplementation((db: unknown) =>
+      db === AIGC_DB ? ranked([]) : ranked([{ id: 1, tier: 1, score: -1 }])
+    )
+
+    const r = await run({ query: 'chair', assetType: 'SkeletalMesh' })
+
+    expect(r.relaxed).toBeUndefined()
+    // 每个库只搜了一次
+    expect(rankedSearchVault).toHaveBeenCalledTimes(2)
+  })
+
+  it('全部落空：去掉类型/格式重搜一次，并明说「这些不是你要的类型」', async () => {
+    rankedSearchVault.mockImplementation(
+      (_db: unknown, opts: { filter: Record<string, unknown> }) =>
+        opts.filter.assetType ? ranked([]) : ranked([{ id: 1, tier: 1, score: -1 }])
+    )
+
+    const r = await run({ query: 'chair', assetType: 'SkeletalMesh' })
+
+    expect(r.relaxed).toBe(true)
+    expect(r.count).toBe(1)
+    expect(String(r.message)).toContain('不是你要的那个类型')
+  })
+
+  it('浏览模式也一样：底层不许自己放宽', async () => {
+    await run({ assetType: 'SkeletalMesh' })
+
+    expect(lastCriteria().relax).toBe(false)
+  })
+})
+
 describe('中文关键词落空', () => {
   it('自动去掉关键词再查一次，把库里真实存在的资产回给调用方', async () => {
-    searchAssets
-      .mockResolvedValueOnce({ success: true, count: 0, assets: [] })
-      .mockResolvedValueOnce({ success: true, count: 2, assets: LIBRARY })
+    searchAssets.mockResolvedValue({ success: true, count: 2, assets: LIBRARY })
 
     const r = await run({ query: '椅子' })
 
-    expect(searchAssets).toHaveBeenCalledTimes(2)
-    // 第二次不带关键词
-    expect(searchAssets.mock.calls[1]![0]).not.toHaveProperty('query')
+    // 样本那一次不带关键词
+    expect(lastCriteria()).not.toHaveProperty('query')
     // 样本要标明每条来自哪个库 —— 否则调用方分不清它该去哪儿找
     expect(r.library_sample).toEqual(LIBRARY.map((a) => ({ ...a, vault: '默认保管库' })))
     expect(r.library_total).toBe(2)
@@ -132,9 +520,7 @@ describe('中文关键词落空', () => {
   })
 
   it('回退了必须说出来 —— 不能让调用方以为这就是搜索结果', async () => {
-    searchAssets
-      .mockResolvedValueOnce({ success: true, count: 0, assets: [] })
-      .mockResolvedValueOnce({ success: true, count: 2, assets: LIBRARY })
+    searchAssets.mockResolvedValue({ success: true, count: 2, assets: LIBRARY })
 
     const r = await run({ query: '木头' })
 
@@ -144,42 +530,86 @@ describe('中文关键词落空', () => {
   })
 
   it('其他过滤条件保留下来，回退的只是关键词', async () => {
-    searchAssets
-      .mockResolvedValueOnce({ success: true, count: 0, assets: [] })
-      .mockResolvedValueOnce({ success: true, count: 1, assets: [LIBRARY[0]] })
+    searchAssets.mockResolvedValue({ success: true, count: 1, assets: [LIBRARY[0]] })
 
     await run({ query: '椅子', assetType: 'StaticMesh' })
 
-    expect(searchAssets.mock.calls[1]![0]).toMatchObject({ assetType: 'StaticMesh' })
+    expect(lastCriteria()).toMatchObject({ assetType: 'StaticMesh' })
+  })
+
+  it('没开语义时提示可以去开；开了就不再这么说', async () => {
+    const off = await run({ query: '椅子' })
+    expect(String(off.hint)).toContain('语义搜索')
+
+    isAssetVectorEnabled.mockReturnValue(true)
+    const on = await run({ query: '椅子' })
+    expect(String(on.hint)).not.toContain('语义搜索')
+  })
+
+  it('样本那一次允许底层放宽 —— 类型落空时样本不能是空的', async () => {
+    searchAssets.mockResolvedValue({ success: true, count: 1, assets: [LIBRARY[0]] })
+
+    await run({ query: '椅子', assetType: 'Foliage' })
+
+    expect(lastCriteria().relax).toBeUndefined()
+  })
+
+  it('样本轮流从各库取 —— 只从排在前面的库取，样本本身就是偏的', async () => {
+    setupVaults([DEFAULT_VAULT, AIGC_VAULT], AIGC_VAULT)
+    searchAssets.mockImplementation(async (_params: unknown, db: unknown) =>
+      db === AIGC_DB
+        ? { success: true, count: 2, assets: AIGC_ASSETS }
+        : { success: true, count: 2, assets: LIBRARY }
+    )
+
+    const r = await run({ query: '椅子' })
+
+    expect(r.library_total).toBe(4)
+    expect((r.library_sample as Array<{ vault: string }>).map((a) => a.vault)).toEqual([
+      'AIGC 资产库',
+      '默认保管库',
+      'AIGC 资产库',
+      '默认保管库'
+    ])
   })
 })
 
 describe('不该回退的情况', () => {
   it('中文搜到了就不啰嗦 —— 中文标签本来就搜得到', async () => {
-    searchAssets.mockResolvedValueOnce({ success: true, count: 1, assets: [LIBRARY[0]] })
+    rankedSearchVault.mockReturnValue(ranked([{ id: 1, tier: 1, score: -1 }]))
 
     const r = await run({ query: '家具' })
 
-    expect(searchAssets).toHaveBeenCalledTimes(1)
+    expect(searchAssets).not.toHaveBeenCalled()
     expect(r.hint).toBeUndefined()
   })
 
   it('英文关键词落空是真的没有，不回退', async () => {
-    searchAssets.mockResolvedValueOnce({ success: true, count: 0, assets: [] })
-
     const r = await run({ query: 'spaceship' })
 
-    expect(searchAssets).toHaveBeenCalledTimes(1)
+    expect(searchAssets).not.toHaveBeenCalled()
     expect(r.library_sample).toBeUndefined()
   })
 
   it('搜索本身失败时不回退，原样把失败报上去', async () => {
-    searchAssets.mockResolvedValueOnce({ success: false, error: '数据库没打开' })
+    rankedSearchVault.mockImplementation(() => {
+      throw new Error('数据库没打开')
+    })
 
     const r = await run({ query: '椅子' })
 
-    expect(searchAssets).toHaveBeenCalledTimes(1)
+    expect(searchAssets).not.toHaveBeenCalled()
     expect(r.success).toBe(false)
+  })
+})
+
+describe('翻页窗口', () => {
+  it('offset + limit 超过 1 万直接说该收窄条件', async () => {
+    const r = await run({ query: 'tree', offset: 9950, limit: 100 })
+
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('收窄条件')
+    expect(rankedSearchVault).not.toHaveBeenCalled()
   })
 })
 
@@ -300,87 +730,34 @@ describe('回收站', () => {
 })
 
 /**
- * 用户的资产分散在**多个保管库**里，工具过去只查当前活跃的那一个。
+ * 浏览（没有关键词）没有相关度可比，仍是当前库在前、首尾相接。
  *
  * 真机上这条 bug 的样子：用户的活跃库是 AIGC 库（59 个 AI 生成的图），
  * 他的 776 个素材连同 `SoStylized` 文件夹全在默认保管库里。他说
  * 「把 SoStylized 导入到项目里」，工具如实回答「整个素材库共 59 个资产，
  * 没有 SoStylized」—— 数字是真的，结论是错的，而且**错得看不出来**。
  */
-describe('跨保管库', () => {
-  it('默认所有库一起搜，并且标明每一条来自哪个库', async () => {
+describe('浏览：跨保管库', () => {
+  it('默认所有库一起列，并且标明每一条来自哪个库', async () => {
     twoVaults()
 
-    const r = await run({ query: 'street' })
+    const r = await run({})
 
     expect(r.assets).toEqual([
       { ...LIBRARY[0], vault: '默认保管库' },
       ...AIGC_ASSETS.map((a) => ({ ...a, vault: 'AIGC 资产库' }))
     ])
-  })
-
-  it('count 是所有库之和，by_vault 说清楚各有多少', async () => {
-    twoVaults()
-
-    const r = await run({ query: 'street' })
-
     expect(r.count).toBe(3)
     expect(r.by_vault).toEqual({ 默认保管库: 1, 'AIGC 资产库': 2 })
-    expect(r.searched_vaults).toEqual(['默认保管库', 'AIGC 资产库'])
   })
 
-  it('站在 AIGC 库上时照样搜得到默认保管库 —— 这就是真机上翻车的那一次', async () => {
+  it('站在 AIGC 库上时照样列得到默认保管库', async () => {
     twoVaults(AIGC_VAULT)
 
-    const r = await run({ query: 'SoStylized' })
+    const r = await run({})
 
-    // 当前库排最前，但另一个库一个都不能少
     expect(r.count).toBe(3)
     expect(r.searched_vaults).toEqual(['AIGC 资产库', '默认保管库'])
-  })
-
-  it('vault 填库名时只搜那一个', async () => {
-    twoVaults()
-
-    const r = await run({ query: 'street', vault: 'AIGC 资产库' })
-
-    expect(searchAssets).toHaveBeenCalledTimes(1)
-    expect(searchAssets.mock.calls[0]![1]).toBe(AIGC_DB)
-    expect(r.count).toBe(2)
-  })
-
-  it('vault 填了不存在的库名就报错，并把有哪些库列出来', async () => {
-    twoVaults()
-
-    const r = await run({ query: 'street', vault: '不存在的库' })
-
-    expect(r.success).toBe(false)
-    expect(String(r.error)).toContain('默认保管库')
-    expect(searchAssets).not.toHaveBeenCalled()
-  })
-
-  it('一个库坏了不拖垮其余的，但必须说出来是哪个坏了', async () => {
-    twoVaults()
-    searchAssets.mockImplementation(async (_p: unknown, db: unknown) => {
-      if (db === AIGC_DB) throw new Error('库文件不存在')
-      return { success: true, count: 1, assets: [LIBRARY[0]] }
-    })
-
-    const r = await run({ query: 'chair' })
-
-    expect(r.success).toBe(true)
-    expect(r.count).toBe(1)
-    expect(String((r.unsearched_vaults as string[])[0])).toContain('AIGC 资产库')
-  })
-
-  it('所有库都坏了要报失败，不能说成「库里没有」', async () => {
-    twoVaults()
-    searchAssets.mockRejectedValue(new Error('数据库没打开'))
-
-    const r = await run({ query: 'chair' })
-
-    expect(r.success).toBe(false)
-    expect(String(r.error)).toContain('所有保管库都没能搜到')
   })
 
   it('文件夹只在其中一个库里存在时照样搜得到', async () => {
@@ -398,7 +775,7 @@ describe('跨保管库', () => {
     expect(r.searched_folder).toBe('/AIGC/图片')
   })
 
-  it('所有库都认不出这个文件夹才算失败', async () => {
+  it('所有库都认不出这个文件夹才算失败，报错只说一次', async () => {
     twoVaults()
     resolveFolder.mockReturnValue({ error: '找不到文件夹「不存在的」' })
 
@@ -406,24 +783,45 @@ describe('跨保管库', () => {
 
     expect(r.success).toBe(false)
     expect(String(r.error)).toContain('所有保管库里都没有文件夹')
+    expect(String(r.error)).toContain('默认保管库、AIGC 资产库')
+    expect(String(r.error)).not.toContain('create_folders')
   })
 
-  it('中文落空时的样本也要跨库取，否则样本本身就是偏的', async () => {
+  it('同名文件夹不止一个是「认不准」，不能报成「没有」，原因原样带上', async () => {
     twoVaults()
-    searchAssets.mockImplementation(async (params: { query?: string }, db: unknown) => {
-      if (params.query) return { success: true, count: 0, assets: [] }
-      return db === AIGC_DB
-        ? { success: true, count: 2, assets: AIGC_ASSETS }
-        : { success: true, count: 1, assets: [LIBRARY[0]] }
+    resolveFolder.mockReturnValue({
+      error: '库里有 2 个叫「Trees」的文件夹，不知道你要哪一个：/A/Trees、/B/Trees。'
     })
 
-    const r = await run({ query: '椅子' })
+    const r = await run({ folder: 'Trees' })
 
-    expect(r.library_total).toBe(3)
-    expect((r.library_sample as Array<{ vault: string }>).map((a) => a.vault)).toEqual([
-      '默认保管库',
-      'AIGC 资产库',
-      'AIGC 资产库'
-    ])
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('认不准')
+    expect(String(r.error)).toContain('/A/Trees')
+    expect(String(r.error)).not.toContain('都没有文件夹')
+  })
+
+  it('一个库认出来了、另一个库认不准：照常搜，但说出来哪个库没搜', async () => {
+    twoVaults()
+    resolveFolder.mockImplementation((db: unknown) =>
+      db === AIGC_DB
+        ? { error: '库里有 2 个叫「Trees」的文件夹' }
+        : { folderKey: 'k_tree', folder: { folderName: 'Trees', fullPath: '/Trees' } }
+    )
+
+    const r = await run({ folder: 'Trees' })
+
+    expect(r.success).toBe(true)
+    expect(String((r.folder_unresolved as string[])[0])).toContain('AIGC 资产库')
+  })
+
+  it('folder 填的其实是库名：直接指出来，让它用 vault', async () => {
+    twoVaults()
+    resolveFolder.mockReturnValue({ error: '找不到文件夹' })
+
+    const r = await run({ folder: 'AIGC 资产库' })
+
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('vault: "AIGC 资产库"')
   })
 })

@@ -37,6 +37,7 @@ import {
   restoreAssetData
 } from '../sqliteDataBase/models/assetData'
 import type { AssetData } from '../sqliteDataBase/models/assetData'
+import { withAssetReplaceGuard } from '../sqliteDataBase/models/assetSearchIndex'
 import {
   createAssetFolder,
   getAssetFolderByNameAndParent,
@@ -1001,7 +1002,7 @@ export function registerNetworkVaultV2Handlers(): void {
           const columns = Object.keys(assetData)
           const placeholders = columns.map((c) => `@${c}`).join(', ')
           const sql = `INSERT OR REPLACE INTO assetData (${columns.join(', ')}) VALUES (${placeholders})`
-          db.prepare(sql).run(assetData)
+          withAssetReplaceGuard(db, assetKey, () => db.prepare(sql).run(assetData))
 
           // 记录到 change_log 并广播给已连接的 Client
           syncToV2ChangeLog(
@@ -1450,9 +1451,13 @@ export function registerNetworkVaultV2Handlers(): void {
               try {
                 if (op.type === 'insert' && op.table === 'assetData') {
                   const cols = Object.keys(op.data)
-                  db.prepare(
-                    `INSERT OR REPLACE INTO assetData (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`
-                  ).run(op.data)
+                  withAssetReplaceGuard(db, op.data.assetKey, () =>
+                    db
+                      .prepare(
+                        `INSERT OR REPLACE INTO assetData (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`
+                      )
+                      .run(op.data)
+                  )
                   applied++
                 } else if (op.type === 'insert' && op.table === 'assetFolder') {
                   const cols = Object.keys(op.data)

@@ -179,23 +179,37 @@ export function getAssetSemanticStatus(db: Database.Database): AssetSemanticStat
 }
 
 /**
+ * 把查询文本算成向量。跨库搜索时每个库用的是同一个嵌入模型，
+ * 一次调用只算一次、各库复用 —— 否则开了语义的库有几个就串行调几次 embedding。
+ */
+export async function embedSearchQuery(query: string): Promise<number[] | null> {
+  const text = (query ?? '').trim()
+  if (!text) return null
+  // 'query' 而不是 'document'：Jina v3 / Voyage 这类非对称模型两边是不同的
+  // 向量空间，用错一边不报错，只是召回变差
+  const [embedding] = await embedTexts([text], 'query')
+  return embedding && embedding.length > 0 ? embedding : null
+}
+
+/**
  * 把一句自然语言查询变成一串资产 id，按语义相关度排好。
  *
  * 任何一步出问题都回空数组 —— 语义是**加分项**，不是必需品。
  * 它失败时关键词那一路照常给结果，用户不该因为 embedding 服务抽风就搜不了东西。
+ *
+ * @param getEmbedding 调用方已经有（或者能懒算出）查询向量时传进来，不再单独算一次
  */
 export async function semanticRecall(
   db: Database.Database,
   query: string,
-  k: number = SEMANTIC_RECALL_K
+  k: number = SEMANTIC_RECALL_K,
+  getEmbedding: () => Promise<number[] | null> = () => embedSearchQuery(query)
 ): Promise<number[]> {
   const text = (query ?? '').trim()
   if (!text || !isAssetVectorEnabled(db)) return []
 
   try {
-    // 'query' 而不是 'document'：Jina v3 / Voyage 这类非对称模型两边是不同的
-    // 向量空间，用错一边不报错，只是召回变差
-    const [embedding] = await embedTexts([text], 'query')
+    const embedding = await getEmbedding()
     if (!embedding || embedding.length === 0) return []
     return searchAssetVectors(db, embedding, k)
   } catch (error) {

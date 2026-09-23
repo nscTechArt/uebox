@@ -108,6 +108,40 @@ export function initAssetSearchIndexModel(db: Database.Database): void {
   }
 }
 
+/**
+ * 包住一次「按 assetKey 覆盖写入」，让索引跟得上。
+ *
+ * `INSERT OR REPLACE` 撞上 assetKey 时会**删掉旧行、插一行新 id**，而 SQLite 默认
+ * （recursive_triggers 关着）不为这种隐式删除触发 DELETE 触发器 —— 待索引队列里只记了新 id，
+ * 旧 id 的全文条目就留成了孤儿：搜得到、回表却查不到。
+ * 这里在写之前记下旧 id，写完把它也排进队列，下一轮同步时清掉。写入本身的语义一点不变。
+ */
+export function withAssetReplaceGuard<T>(
+  db: Database.Database,
+  assetKey: unknown,
+  write: () => T
+): T {
+  let oldId: number | undefined
+  try {
+    oldId = (
+      db.prepare('SELECT id FROM assetData WHERE assetKey = ?').get(assetKey) as
+        | { id: number }
+        | undefined
+    )?.id
+  } catch {
+    oldId = undefined
+  }
+  const result = write()
+  if (oldId !== undefined) {
+    try {
+      db.prepare(`INSERT OR IGNORE INTO ${DIRTY_TABLE}(assetId) VALUES (?)`).run(oldId)
+    } catch {
+      // 这个库还没有索引表（老库），没有东西要清
+    }
+  }
+  return result
+}
+
 /** 把整个库标记为待重建索引。换 embedding 之外的口径变化、或索引怀疑坏了时用 */
 export function markAllAssetsDirty(db: Database.Database): void {
   db.exec(`INSERT OR REPLACE INTO ${DIRTY_TABLE}(assetId) SELECT id FROM assetData`)
