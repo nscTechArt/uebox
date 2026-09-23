@@ -35,6 +35,17 @@ describe('地址怎么猜', () => {
     }
   })
 
+  it('主机加端口再带路径也认得，不当成协议', () => {
+    expect(httpUrlCandidates('localhost:9876/mcp')).toEqual(['http://localhost:9876/mcp'])
+    expect(httpUrlCandidates('mcp.example.com:443/v1')).toEqual(['http://mcp.example.com:443/v1'])
+    expect(httpUrlCandidates('localhost:9876?token=x')).toEqual(['http://localhost:9876/?token=x'])
+  })
+
+  it('真写了别的协议照样挡掉', () => {
+    expect(httpUrlCandidates('ws://localhost:9876/mcp')).toEqual([])
+    expect(httpUrlCandidates('file:///C:/mcp')).toEqual([])
+  })
+
   it('没写协议的主机名补 http', () => {
     expect(httpUrlCandidates('example.com')).toEqual([
       'http://example.com/mcp',

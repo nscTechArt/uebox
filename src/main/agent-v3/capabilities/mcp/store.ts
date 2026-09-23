@@ -20,6 +20,11 @@ export function mcpSettingsPath(): string {
   return join(app.getPath('userData'), FILE)
 }
 
+/** 记事本另存为 UTF-8 会带 BOM，`JSON.parse` 认不得 */
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+}
+
 function str(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -97,7 +102,7 @@ export async function readMcpSettings(): Promise<McpSettings> {
 
   let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    parsed = JSON.parse(stripBom(text))
   } catch (error) {
     console.warn('[AgentV3][MCP] mcp.json 不是合法 JSON，按空配置处理:', (error as Error).message)
     return EMPTY_MCP_SETTINGS
@@ -176,14 +181,26 @@ async function editServersRaw(
   const path = mcpSettingsPath()
 
   let raw: Record<string, unknown> = {}
+  let text: string | null = null
   try {
-    const parsed: unknown = JSON.parse(await fs.readFile(path, 'utf8'))
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      raw = parsed as Record<string, unknown>
+    text = await fs.readFile(path, 'utf8')
+  } catch (error) {
+    // 没配过就从空配置起一份新的；别的读错误（权限、占用）不能当成空的去覆盖
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (text !== null) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(stripBom(text))
+    } catch (error) {
+      // 文件坏了（手改多了个逗号之类）：**不能**按空的写回去 —— 那会把用户别的
+      // server 连同 env 里的密钥一起抹掉。读的那一路跳过它不要紧，写的这一路必须停
+      throw new Error(`mcp.json 不是合法 JSON，先修好它再改：${(error as Error).message}`)
     }
-  } catch {
-    // 没有文件、或者文件坏了：按空配置起一份新的。坏文件的情况下
-    // `readMcpSettings` 本来也已经把它当空的了，这里不比那更糟
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('mcp.json 的顶层不是一个对象，先修好它再改')
+    }
+    raw = parsed as Record<string, unknown>
   }
 
   const servers =

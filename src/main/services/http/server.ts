@@ -865,6 +865,14 @@ export class HttpServer {
         })
         return
       }
+      // 动本机磁盘、跑命令、接第三方 MCP 的同理：这里直接 execute，没有审批门
+      if (LOCAL_DISK_TOOLS.includes(name)) {
+        res.status(403).json({
+          success: false,
+          error: `${name} 会动用户本机，评测接口不执行`
+        })
+        return
+      }
 
       const { buildAllTools } = await import('../../agent-v3/tools/registry')
       const tool = buildAllTools({

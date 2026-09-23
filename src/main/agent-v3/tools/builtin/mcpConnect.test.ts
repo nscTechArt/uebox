@@ -108,6 +108,88 @@ describe('接一台 server', () => {
     expect(outcome.text).toContain('overwrite')
   })
 
+  /**
+   * 引擎发现的、插件带的 server 不在 mcp.json 里，原来的同名检查看不见它们：撞名会把正在用的
+   * 那台断掉，写进 mcp.json 还会永久盖住引擎发现。overwrite 也不行
+   */
+  it('撞上引擎 / 插件自带的 server 名：不连不写，overwrite 也不行', async () => {
+    const connect = vi.fn()
+    for (const id of ['ue-official', 'blender_tools']) {
+      const outcome = await runConnect(
+        { id, url: '9876', overwrite: true },
+        deps({ reservedIds: async () => ['blender_tools'], connect })
+      )
+      expect(outcome.isError).toBe(true)
+    }
+    expect(connect).not.toHaveBeenCalled()
+  })
+
+  // 工具检索开着时第三方组不常驻，下一条消息靠这份名单把它们装回来
+  it('接上之后把新工具登记成「这一步加载的」', async () => {
+    const outcome = await runConnect({ id: 'fs', url: '9876' }, deps())
+    expect(outcome.addedToolNames).toEqual(['mcp_x_echo'])
+  })
+
+  /** 握手那十几秒里用户按了停止：界面说停了，它就不能还连着、还写进配置 */
+  it('握手途中按了停止：接上的断开，配置不写', async () => {
+    const controller = new AbortController()
+    const persist = vi.fn(async () => undefined)
+    const disconnect = vi.fn(async () => undefined)
+    const outcome = await runConnect(
+      { id: 'fs', url: '9876' },
+      deps({
+        persist,
+        disconnect,
+        connect: async () => {
+          controller.abort()
+          return {
+            status: { id: 'fs', connected: true, toolCount: 1 },
+            toolNames: ['mcp_fs_read']
+          }
+        }
+      }),
+      controller.signal
+    )
+
+    expect(outcome.isError).toBe(true)
+    expect(persist).not.toHaveBeenCalled()
+    expect(disconnect).toHaveBeenCalledWith('fs')
+  })
+
+  // 替换要先断开旧连接；新地址接不上时不能把一台好好的 server 弄没
+  it('替换没接上：按原配置把旧的接回去，并说清楚', async () => {
+    const restore = vi.fn(async () => true)
+    const outcome = await runConnect(
+      { id: 'fs', url: '9876', overwrite: true },
+      deps({
+        existingIds: async () => ['fs'],
+        restore,
+        connect: async () => {
+          throw new Error('fetch failed')
+        }
+      })
+    )
+
+    expect(outcome.isError).toBe(true)
+    expect(restore).toHaveBeenCalledWith('fs')
+    expect(outcome.text).toContain('重新接回去')
+  })
+
+  it('新接一台失败时没有旧的可恢复，不去碰', async () => {
+    const restore = vi.fn(async () => true)
+    await runConnect(
+      { id: 'fs', url: '9876' },
+      deps({
+        restore,
+        connect: async () => {
+          throw new Error('fetch failed')
+        }
+      })
+    )
+
+    expect(restore).not.toHaveBeenCalled()
+  })
+
   it('明确 overwrite 才替换', async () => {
     const persist = vi.fn(async () => undefined)
     const outcome = await runConnect(

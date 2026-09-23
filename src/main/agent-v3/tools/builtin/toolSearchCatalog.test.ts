@@ -115,6 +115,15 @@ describe('真实工具库检索回归', () => {
     ).toEqual([])
   })
 
+  /**
+   * `mcp` 那条领域词说的是「接 MCP 这件事」。摊给每一台第三方 server 的组的话，
+   * 搜「启用插件」会把它们全捞上来，目录里也看不出是哪台 server
+   */
+  it('第三方 MCP 的组不继承「接 MCP」的领域词', () => {
+    expect(groupDomainTerms('mcp')).not.toBe('')
+    expect(groupDomainTerms('mcp.example')).toBe('')
+  })
+
   it('每个在用的工具组都查得到领域词', () => {
     const groups = [...new Set(catalog.map((tool) => toolSearchGroup(tool)))]
     const blank = groups.filter((group) => !groupDomainTerms(group)).sort()

@@ -343,11 +343,22 @@ export class McpClientManager {
           stderr: 'pipe'
         })
 
-    await withTimeout(
-      client.connect(transport),
-      CONNECT_TIMEOUT_MS,
-      `连接 MCP server "${id}" 超时（${CONNECT_TIMEOUT_MS}ms）`
-    )
+    try {
+      await withTimeout(
+        client.connect(transport),
+        CONNECT_TIMEOUT_MS,
+        `连接 MCP server "${id}" 超时（${CONNECT_TIMEOUT_MS}ms）`
+      )
+    } catch (error) {
+      /*
+       * 超时只是我们不等了，SDK 那边的握手还在跑（它自己的请求超时是 60 秒）。
+       * 这时还没登记进 `connections`，上层的 `disconnect(id)` 摸不到它 —— 不在这里关，
+       * 首次 `npx -y` 要下载半分钟的那种 server 会在 20~60 秒之间握手成功，
+       * 然后作为一个没人引用的子进程一直活到盒子退出；重试一次就再多一个
+       */
+      await client.close().catch(() => undefined)
+      throw error
+    }
 
     this.connections.set(id, { client, close: () => client.close() })
 

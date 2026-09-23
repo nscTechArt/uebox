@@ -25,6 +25,7 @@ import {
   type Attempt,
   type ConnectRequest
 } from '../../capabilities/mcp/addServer'
+import { EPIC_SERVER_ID_PREFIX } from '../../capabilities/mcp/epicToolsets'
 import type { McpServerConfig, McpServerStatus } from '../../capabilities/mcp/types'
 import { defineTool, type ToolOutcome, type UnrealAgentTool } from '../defineTool'
 
@@ -44,6 +45,19 @@ export interface ConnectDeps {
   /** 只改这一条，盘上其余内容原样不动（见 store.ts 的 `upsertMcpServer`） */
   persist: (id: string, config: McpServerConfig) => Promise<void>
   settingsPath: () => string
+  /**
+   * 连着、但**不在** mcp.json 里的 server：引擎发现的、插件带的。这些不归这个工具管 ——
+   * 撞上它们的名字会把正在用的那台断掉，写进 mcp.json 还会盖住引擎发现 / 被插件那条顶掉
+   */
+  reservedIds?: () => Promise<string[]>
+  /** 连上之后用户按了停止：把刚接上的断开，不留不写 */
+  disconnect?: (id: string) => Promise<void>
+  /**
+   * 按盘上那份配置把这台重新接回去。替换（overwrite）时握手前要先断开旧连接，
+   * 新的没接上就得把旧的接回来 —— 不然一次失败的「改地址」把一台好好的 server 弄没了。
+   * 接回去了返回 true
+   */
+  restore?: (id: string) => Promise<boolean>
 }
 
 export interface ConnectDetails {
@@ -56,16 +70,30 @@ export interface ConnectDetails {
 
 export async function runConnect(
   request: ConnectRequest & { overwrite?: boolean },
-  deps: ConnectDeps
+  deps: ConnectDeps,
+  signal?: AbortSignal
 ): Promise<ToolOutcome<ConnectDetails>> {
   const built = buildCandidates(request)
   if ('error' in built) {
     return { text: built.error, isError: true, details: { id: request.id, connected: false } }
   }
 
+  // 引擎和插件自己的 server 不是这里能接管的，overwrite 也不行：改它们去设置里改
+  const reserved = await deps.reservedIds?.().catch(() => [] as string[])
+  if (request.id.startsWith(EPIC_SERVER_ID_PREFIX) || reserved?.includes(request.id)) {
+    return {
+      text:
+        `「${request.id}」是虚幻引擎或插件自带的 server，不归这个工具管，这次什么都没做。\n` +
+        '要接的是另一台就换个标识重来；要改它本身请用户去 设置 → MCP 里改。',
+      isError: true,
+      details: { id: request.id, connected: false }
+    }
+  }
+
   // 同名的已经配过了。**不能默默盖掉** —— 那条可能是用户自己调了半天参数的，
   // 而这次调用的理由往往只是模型随手起了个和它一样的短名字（filesystem、github）。
-  if (!request.overwrite && (await deps.existingIds()).includes(request.id)) {
+  const replacing = (await deps.existingIds()).includes(request.id)
+  if (!request.overwrite && replacing) {
     return {
       text:
         `配置里已经有一台叫「${request.id}」的 server 了，这次什么都没做。\n` +
@@ -76,14 +104,37 @@ export async function runConnect(
     }
   }
 
+  /** 替换没成：把原来那台按盘上的配置接回去（mcp.json 只在成功时才写，旧配置还在） */
+  const restorePrevious = async (): Promise<string> => {
+    if (!replacing || !deps.restore) return ''
+    const back = await deps.restore(request.id).catch(() => false)
+    return back
+      ? '\n原来那台的配置没动，已经按原配置重新接回去了。'
+      : '\n原来那台也没能按原配置重新接上，请用户去 设置 → MCP 看一眼。'
+  }
+
+  const stopped = async (): Promise<ToolOutcome<ConnectDetails>> => ({
+    text: `已停止，没有接入，配置也没写。${await restorePrevious()}`,
+    isError: true,
+    details: { id: request.id, connected: false }
+  })
+
   const attempts: Attempt[] = []
   for (const candidate of built.candidates) {
+    if (signal?.aborted) return await stopped()
     let connected: Awaited<ReturnType<ConnectDeps['connect']>>
     try {
       connected = await deps.connect(request.id, candidate.config)
     } catch (error) {
       attempts.push({ target: candidate.target, error: (error as Error).message })
       continue
+    }
+
+    // 握手要十几秒，这中间用户按了停止：接上的这台断开，不写盘 ——
+    // 不然界面说停了，它却连着，下次启动还会自己起来
+    if (signal?.aborted) {
+      await deps.disconnect?.(request.id).catch(() => undefined)
+      return await stopped()
     }
 
     // 握手成功才落盘。写失败不回滚连接：这一轮它是真的能用，
@@ -113,12 +164,18 @@ export async function runConnect(
         connected: true,
         target: candidate.target,
         toolNames: connected.toolNames
-      }
+      },
+      /*
+       * 登记成「这一步加载了这些工具」。工具检索开着时第三方 server 的组不常驻，
+       * 下一条消息重建目录时靠这份名单把它们装回来 —— 不然提示里说的「下一条就能直接调」
+       * 是假的，一调就是 Tool not found
+       */
+      addedToolNames: connected.toolNames
     }
   }
 
   return {
-    text: formatFailure(request.id, attempts),
+    text: formatFailure(request.id, attempts) + (await restorePrevious()),
     isError: true,
     details: { id: request.id, connected: false, attempts }
   }
@@ -139,7 +196,22 @@ async function liveDeps(): Promise<ConnectDeps> {
     },
     existingIds: async () => Object.keys((await store.readMcpSettings()).mcpServers),
     persist: (id, config) => store.upsertMcpServer(id, config),
-    settingsPath: () => store.mcpSettingsPath()
+    settingsPath: () => store.mcpSettingsPath(),
+    reservedIds: async () => {
+      const manager = await ensureConnected()
+      const onDisk = new Set(Object.keys((await store.readMcpSettings()).mcpServers))
+      return manager
+        .getStatuses()
+        .map((status) => status.id)
+        .filter((id) => !onDisk.has(id))
+    },
+    disconnect: async (id) => (await ensureConnected()).disconnect(id),
+    restore: async (id) => {
+      const config = (await store.readMcpSettings()).mcpServers[id]
+      if (!config || config.disabled) return false
+      await (await ensureConnected()).addServer(id, config)
+      return true
+    }
   }
 }
 
@@ -202,8 +274,8 @@ const connectMcpServerTool = defineTool({
       .optional()
       .describe('同名 server 已存在时是否替换。默认 false，不会悄悄盖掉用户配好的那条')
   }),
-  execute: async (args): Promise<ToolOutcome<ConnectDetails>> =>
-    runConnect(args as ConnectRequest & { overwrite?: boolean }, await liveDeps())
+  execute: async (args, ctx): Promise<ToolOutcome<ConnectDetails>> =>
+    runConnect(args as ConnectRequest & { overwrite?: boolean }, await liveDeps(), ctx.signal)
 })
 
 export const mcpTools: UnrealAgentTool<never>[] = [

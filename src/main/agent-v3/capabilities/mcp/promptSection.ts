@@ -86,12 +86,18 @@ export function installableIntegrations(
  * 然后把一次**成功**的接入报成失败 —— 用户以为白忙了，其实配置已经好了。
  * 工具自己的返回值里也写了这件事，这里是给那一步之前的规划用的。
  */
-function finish(lines: string[], installable: string[]): string {
-  lines.push(
-    '',
-    'To connect another server the user names, call `connect_mcp_server` with its launch command or URL (a bare port works); it probes first and only saves a config that actually handshakes.',
-    'Tools from a server connected that way arrive on the NEXT user message, not in the turn that added it.'
-  )
+function finish(lines: string[], installable: string[], canConnect: boolean): string {
+  /*
+   * 手里没有 `connect_mcp_server` 就不提它（Ask / 只读模式、用户在设置里关了、子任务白名单）。
+   * 提了模型就会去调一个不存在的工具，或者答应用户一件做不到的事
+   */
+  if (canConnect) {
+    lines.push(
+      '',
+      'To connect another server the user names, call `connect_mcp_server` with its launch command or URL (a bare port works); it probes first and only saves a config that actually handshakes.',
+      'Tools from a server connected that way arrive on the NEXT user message, not in the turn that added it.'
+    )
+  }
 
   if (installable.length > 0) {
     lines.push(
@@ -124,14 +130,19 @@ function finish(lines: string[], installable: string[]): string {
  *
  * 返回值以 `\n` 开头（若非空），调用方直接拼进提示词即可。
  */
-export function buildMcpSection(statuses?: McpServerStatus[], installable: string[] = []): string {
+export function buildMcpSection(
+  statuses?: McpServerStatus[],
+  installable: string[] = [],
+  /** 这一轮手里有没有 `connect_mcp_server`。没有就不教它去调 */
+  canConnect = true
+): string {
   if (!statuses) return ''
   if (statuses.length === 0 && installable.length === 0) return ''
 
   if (statuses.length === 0) {
     // 措辞是「没有连上的」而不是「没配过」：发现流程失败时这里也会是空列表，
     // 那时候「你一个都没配」是假话，而「现在没有连上的」两种情况都成立
-    return finish(['', 'No MCP servers are connected right now.'], installable)
+    return finish(['', 'No MCP servers are connected right now.'], installable, canConnect)
   }
 
   // 停用的一并算进来：对用户来说「本该有的能力现在没有」是同一件事，
@@ -169,5 +180,5 @@ export function buildMcpSection(statuses?: McpServerStatus[], installable: strin
     )
   }
 
-  return finish(lines, installable)
+  return finish(lines, installable, canConnect)
 }

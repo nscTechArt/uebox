@@ -35,8 +35,12 @@ export const SERVER_ID_RULE = /^[a-zA-Z0-9_-]{1,32}$/
 /** 纯数字 = 用户只给了端口。真机上最常见的一种说法 */
 const BARE_PORT = /^\d{1,5}$/
 
-/** `localhost:9876` / `192.168.1.7:3000` —— 有主机有端口，就是少个协议头 */
-const HOST_PORT = /^[\w.-]+:\d{1,5}$/
+/**
+ * `localhost:9876` / `192.168.1.7:3000` / `localhost:9876/mcp` —— 有主机有端口，就是少个协议头。
+ * 端口后面可以跟路径或查询串；只认到端口为止的话，`localhost:9876/mcp` 会被当成
+ * 一个叫 localhost 的协议，然后回一句「看不懂地址」
+ */
+const HOST_PORT = /^[\w.-]+:\d{1,5}(?:[/?#]|$)/
 
 /** `http:` / `https:` / `file:` 这种开头。用来认「他到底写没写协议」 */
 const HAS_SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:/

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 const root = mkdtempSync(join(tmpdir(), 'agent-v3-mcp-'))
 vi.mock('electron', () => ({ app: { getPath: (): string => root } }))
 
-import { normalizeServer, readMcpSettings, writeMcpSettings } from './store'
+import { normalizeServer, readMcpSettings, upsertMcpServer, writeMcpSettings } from './store'
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
@@ -136,5 +136,35 @@ describe('writeMcpSettings', () => {
     })
     const back = await readMcpSettings()
     expect(back.mcpServers.fs).toMatchObject({ command: 'npx', args: ['-y', 'x'] })
+  })
+})
+
+describe('upsertMcpServer', () => {
+  it('记事本存出来带 BOM 的文件照样认得，已有的 server 不丢', async () => {
+    writeRaw(
+      String.fromCharCode(0xfeff) +
+        JSON.stringify({ mcpServers: { github: { command: 'gh-mcp' } } })
+    )
+    expect((await readMcpSettings()).mcpServers.github).toMatchObject({ command: 'gh-mcp' })
+
+    await upsertMcpServer('fs', { type: 'stdio', command: 'npx' })
+
+    const back = await readMcpSettings()
+    expect(Object.keys(back.mcpServers).sort()).toEqual(['fs', 'github'])
+  })
+
+  it('文件坏了就不写：不能按空配置覆盖，把用户别的 server 抹掉', async () => {
+    const broken = '{ "mcpServers": { "github": { "command": "gh-mcp" }, } }'
+    writeRaw(broken)
+
+    await expect(upsertMcpServer('fs', { type: 'stdio', command: 'npx' })).rejects.toThrow(
+      /mcp\.json/
+    )
+    expect(readFileSync(CONFIG_PATH, 'utf8')).toBe(broken)
+  })
+
+  it('没有文件时从空配置起一份', async () => {
+    await upsertMcpServer('fs', { type: 'stdio', command: 'npx' })
+    expect((await readMcpSettings()).mcpServers.fs).toMatchObject({ command: 'npx' })
   })
 })

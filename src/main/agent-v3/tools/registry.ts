@@ -1130,6 +1130,15 @@ export function listToolRisks(): Record<string, ToolRisk> {
 
   table[sessionHealthTool.name] = sessionHealthTool.unrealBox.risk
 
+  // 接第三方 MCP：会起本机进程、写 mcp.json。漏了它，「本轮改动」里看不见这一步
+  for (const tool of mcpTools) {
+    table[tool.name] = tool.unrealBox.risk
+  }
+  // 编译 C++ 同理（改了工程的二进制），原来也不在表里
+  for (const tool of cppTools()) {
+    table[tool.name] = tool.unrealBox.risk
+  }
+
   /*
    * 在 `resolveTools` 里现造、进不了 `REGISTRATIONS` 的那个写工具。
    *

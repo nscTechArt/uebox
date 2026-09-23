@@ -621,8 +621,14 @@ export function selectExposedTools(
   let tools = allTools
 
   // 不转发从别的 MCP server 接进来的工具：那会形成 A→盒子→B 的转发链，
-  // 权限来源变得无法追踪，出问题也说不清是谁调的。
-  tools = tools.filter((tool) => !tool.unrealBox.namespace.startsWith('mcp.'))
+  // 权限来源变得无法追踪，出问题也说不清是谁调的。`mcp` 本身（connect_mcp_server）
+  // 更不能给：它会在这台机器上起任意进程、还写进 mcp.json 每次启动都起。
+  tools = tools.filter(
+    (tool) => tool.unrealBox.namespace !== 'mcp' && !tool.unrealBox.namespace.startsWith('mcp.')
+  )
+
+  // 必须当面问过用户才能跑的工具，这一头没有审批门，一律不给
+  tools = tools.filter((tool) => tool.unrealBox.requiresExplicitApproval !== true)
 
   // core 命名空间（task / load_skill）是盒子内部编排用的，对外没有意义
   tools = tools.filter((tool) => tool.unrealBox.namespace !== 'core')

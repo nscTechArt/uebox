@@ -432,6 +432,18 @@ function resolveCandidateTools(ctx: SessionContext): UnrealAgentTool<never>[] {
  * `resolveCandidateTools()` 里的内置工具，后追加的工具因此能绕过 `/goal` 审计员的
  * `toolNames` 白名单；Ask 模式也只能靠每个追加点自己记得过滤。
  */
+/**
+ * 这一轮手里有没有 `connect_mcp_server`。判据和 `applyFinalToolPolicy` / 白名单一致 ——
+ * 系统提示教它去调一个被滤掉的工具，模型要么调空，要么答应用户一件做不到的事
+ */
+function canConnectMcpServers(ctx: SessionContext): boolean {
+  if (ctx.mode === 'ask' || ctx.readOnly) return false
+  if (ctx.toolNames && !ctx.toolNames.includes('connect_mcp_server')) return false
+  if (ctx.namespaces && !ctx.namespaces.includes('mcp')) return false
+  if (!ctx.toolSearchEnabled && ctx.disabledToolNames?.includes('connect_mcp_server')) return false
+  return true
+}
+
 function applyFinalToolPolicy(
   tools: UnrealAgentTool<never>[],
   ctx: SessionContext
@@ -1290,7 +1302,11 @@ export function buildSystemPrompt(
     // 没有 MCP 管理器时整段是空串 —— 那是「不知道」，不是「一个都没配」。
     // 「连不上」和「装一下就有」都必须让模型知道 —— 否则它会把
     // 「工具不在」答成「我没这个能力」，而那是假话。
-    buildMcpSection(mcpStatuses, installableIntegrations(mcpStatuses ?? [])) +
+    buildMcpSection(
+      mcpStatuses,
+      installableIntegrations(mcpStatuses ?? []),
+      canConnectMcpServers(ctx)
+    ) +
     // 用户自己写的常驻说明。放在环境块**之前**：它是规矩，而环境块是事实，
     // 两者混在一起模型分不清哪句该照做、哪句只是背景
     buildUserInstructionsSection(ctx.userInstructions ?? '') +

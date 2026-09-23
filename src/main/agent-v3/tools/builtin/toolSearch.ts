@@ -222,6 +222,12 @@ const DOMAIN_TERMS: Record<string, string> = {
  * 仍然属于同一摊，抄一遍只会多三份要同步的文本。
  */
 export function groupDomainTerms(group: string): string {
+  /*
+   * 第三方 MCP 的组（`mcp.<server>`）不往上找：`mcp` 那条说的是「接 MCP 这件事」
+   * （接入、连接、插件、server…），摊给每个第三方组的话，搜「启用插件」会把它们全捞上来，
+   * 目录里它们的名字也被这串通用词顶掉、看不出是哪台 server
+   */
+  if (group.startsWith('mcp.')) return ''
   let key = group
   for (;;) {
     // `Object.hasOwn` 的理由同 `toolSearchGroup`：命名空间叫 `constructor`

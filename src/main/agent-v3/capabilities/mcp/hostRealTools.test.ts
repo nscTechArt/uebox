@@ -100,7 +100,13 @@ describe('外部客户端看到的是真实工具', () => {
     const exposed = selectExposedTools(buildAllTools() as never, { includeMutating: true }).map(
       (t) => t.name
     )
-    for (const name of ['run_shell_command', 'write_local_file', 'edit_local_file']) {
+    // connect_mcp_server 会起任意本地进程并写进 mcp.json，同理
+    for (const name of [
+      'run_shell_command',
+      'write_local_file',
+      'edit_local_file',
+      'connect_mcp_server'
+    ]) {
       expect(exposed).not.toContain(name)
     }
     expect(exposed).not.toContain('task')

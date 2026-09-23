@@ -99,6 +99,13 @@ describe('MCP 状态进系统提示词', () => {
     expect(buildMcpSection([connected('filesystem', 7)])).toContain('connect_mcp_server')
   })
 
+  // Ask / 只读模式、设置里关了、子任务白名单：手里没有这个工具就不能教模型去调它
+  it('手里没有 connect_mcp_server 时不提它', () => {
+    const text = buildMcpSection([connected('filesystem', 7)], [], false)
+    expect(text).toContain('filesystem')
+    expect(text).not.toContain('connect_mcp_server')
+  })
+
   it('连上的 server 报出 id、工具数和工具名前缀', () => {
     const text = buildMcpSection([connected('filesystem', 7)])
     expect(text).toContain('`filesystem`')

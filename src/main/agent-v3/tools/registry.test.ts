@@ -22,6 +22,7 @@ import {
   allToolNames,
   buildAllTools,
   listToolCatalog,
+  listToolRisks,
   resetToolCacheForTest,
   rewriteCrossReferences
 } from './registry'
@@ -662,3 +663,17 @@ describe('listToolCatalog', () => {
  *
  * 当时的实测数据留在 `docs/常驻工具集选定-2026-09-17.md`。
  */
+
+/**
+ * 渲染层「本轮改动」按这张表认哪些调用改了东西 —— 表里没有的一律当只读略过。
+ * 漏一个写工具，它做的事就从用户眼前消失了（原来 connect_mcp_server 就不在表里）。
+ */
+describe('listToolRisks', () => {
+  it('每个会改东西的工具都在风险表里，而且级别一致', () => {
+    const table = listToolRisks()
+    const wrong = buildAllTools()
+      .filter((tool) => tool.unrealBox.risk !== 'safe' && table[tool.name] !== tool.unrealBox.risk)
+      .map((tool) => `${tool.name}:${tool.unrealBox.risk}->${table[tool.name]}`)
+    expect(wrong).toEqual([])
+  })
+})
