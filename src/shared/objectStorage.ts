@@ -95,6 +95,20 @@ export const OBJECT_STORAGE_PRESETS: Record<
   custom: { endpoint: '', region: 'us-east-1', forcePathStyle: false }
 }
 
+/**
+ * 规范化 endpoint：去掉末尾的 `/`，以及末尾多带的 `/桶名`。
+ * R2 控制台给的 S3 API 地址就是 `https://<账号>.r2.cloudflarestorage.com/<桶名>`，
+ * 原样粘进来桶名会拼两遍，列举变成读一个叫 `桶名/` 的对象，回 NoSuchKey。
+ */
+export function normalizeEndpoint(endpoint: string, bucket: string): string {
+  let result = endpoint.trim().replace(/\/+$/, '')
+  const tail = bucket.trim() && `/${bucket.trim()}`
+  if (tail && result.endsWith(tail) && /^https?:\/\/[^/]+\//.test(result)) {
+    result = result.slice(0, -tail.length)
+  }
+  return result
+}
+
 /** 规范化前缀：去掉开头的 `/`，保证非空时以 `/` 结尾 */
 export function normalizePrefix(prefix: string): string {
   const trimmed = prefix.trim().replace(/^\/+/, '')

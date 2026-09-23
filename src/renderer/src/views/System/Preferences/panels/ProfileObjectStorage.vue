@@ -37,7 +37,6 @@ import {
 import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import AppButton from '@renderer/components/AppButton.vue'
-import AppCheckbox from '@renderer/components/AppCheckbox.vue'
 import AppSwitch from '@renderer/components/AppSwitch.vue'
 
 const { t } = useI18n()
@@ -53,9 +52,7 @@ const testResult = ref<{ ok: boolean; message: string } | null>(null)
 const objects = ref<ObjectStorageEntry[]>([])
 const listing = ref(false)
 const listError = ref('')
-const selected = ref<Set<string>>(new Set())
 const removing = ref(false)
-const cleanDays = ref(7)
 /** 已经配好时连接表单收起，点「修改」才展开 */
 const editing = ref(false)
 const showAdvanced = ref(false)
@@ -84,9 +81,8 @@ const presetOptions = computed(() =>
 )
 
 const totalSize = computed(() => objects.value.reduce((sum, item) => sum + item.size, 0))
-const allSelected = computed(
-  () => objects.value.length > 0 && selected.value.size === objects.value.length
-)
+
+
 
 function applyView(view: ObjectStorageConfigView): void {
   const { hasSecret: secretSaved, ...config } = view
@@ -136,7 +132,6 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     applyView(await objectStorageAPI.get())
-    cleanDays.value = form.autoCleanDays || 7
   } catch (error) {
     message.error(t('profile.objectStorage.loadFailed', { error: (error as Error).message }))
   } finally {
@@ -216,23 +211,9 @@ async function refreshList(): Promise<void> {
       return
     }
     objects.value = result.objects ?? []
-    selected.value = new Set(
-      [...selected.value].filter((key) => objects.value.some((o) => o.key === key))
-    )
   } finally {
     listing.value = false
   }
-}
-
-function toggleOne(key: string, checked: boolean): void {
-  const next = new Set(selected.value)
-  if (checked) next.add(key)
-  else next.delete(key)
-  selected.value = next
-}
-
-function toggleAll(checked: boolean): void {
-  selected.value = checked ? new Set(objects.value.map((item) => item.key)) : new Set()
 }
 
 function reportRemoval(result: ObjectStorageRemoveResult): void {
@@ -254,24 +235,10 @@ async function runRemoval(action: () => Promise<ObjectStorageRemoveResult>): Pro
   removing.value = true
   try {
     reportRemoval(await action())
-    selected.value = new Set()
     await refreshList()
   } finally {
     removing.value = false
   }
-}
-
-function removeSelected(): void {
-  const keys = [...selected.value]
-  if (keys.length === 0) return
-  confirmDialog({
-    title: t('profile.objectStorage.removeSelectedTitle', { count: keys.length }),
-    content: t('profile.objectStorage.removeHint'),
-    okText: t('profile.objectStorage.removeOk'),
-    cancelText: t('common.cancel'),
-    danger: true,
-    onOk: () => runRemoval(() => objectStorageAPI.remove(keys))
-  })
 }
 
 function removeAll(): void {
@@ -287,8 +254,10 @@ function removeAll(): void {
   })
 }
 
-function cleanOld(): void {
-  const days = Math.max(1, Math.floor(cleanDays.value || 1))
+/** 按「自动清理」的天数现在就清一次，不再另设一个天数框 */
+function cleanNow(): void {
+  const days = form.autoCleanDays
+  if (days <= 0) return
   confirmDialog({
     title: t('profile.objectStorage.cleanTitle', { days }),
     content: t('profile.objectStorage.removeHint'),
@@ -304,11 +273,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 ** 3) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`
-}
-
-function formatTime(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
 onMounted(load)
@@ -450,84 +414,49 @@ onMounted(load)
             })
           }}
         </span>
+        <span v-else-if="!listing && !listError" class="section-meta">
+          {{ $t('profile.objectStorage.empty') }}
+        </span>
         <span class="toolbar-spacer" />
+        <AppButton
+          v-if="objects.length"
+          variant="text"
+          size="small"
+          danger
+          :disabled="removing"
+          @click="removeAll"
+        >
+          {{ $t('profile.objectStorage.removeAll') }}
+        </AppButton>
         <AppButton variant="text" size="small" :loading="listing" @click="refreshList">
           {{ $t('profile.objectStorage.refresh') }}
         </AppButton>
       </h4>
 
       <div v-if="listError" class="list-state warn">{{ listError }}</div>
-      <div v-else-if="!listing && objects.length === 0" class="list-state">
-        {{ $t('profile.objectStorage.empty') }}
-      </div>
-      <template v-else>
-        <div class="list-toolbar">
-          <AppCheckbox
-            :checked="allSelected"
-            :indeterminate="selected.size > 0 && !allSelected"
-            :aria-label="$t('profile.objectStorage.selectAll')"
-            @update:checked="toggleAll"
-          />
-          <span class="setting-desc">{{ $t('profile.objectStorage.selectAll') }}</span>
-          <span class="toolbar-spacer" />
-          <!-- 选中了才出现删除；没选时这一排只有清理 -->
-          <AppButton
-            v-if="selected.size > 0"
-            variant="soft"
-            size="small"
-            danger
-            :disabled="removing"
-            @click="removeSelected"
-          >
-            {{ $t('profile.objectStorage.removeSelected', { count: selected.size }) }}
-          </AppButton>
-          <template v-else>
-            <span class="setting-desc">{{ $t('profile.objectStorage.cleanOldPrefix') }}</span>
-            <a-input-number
-              v-model:value="cleanDays"
-              :min="1"
-              :precision="0"
-              size="small"
-              class="days-input"
-            />
-            <AppButton variant="soft" size="small" :disabled="removing" @click="cleanOld">
-              {{ $t('profile.objectStorage.cleanOld') }}
-            </AppButton>
-            <AppButton variant="text" size="small" danger :disabled="removing" @click="removeAll">
-              {{ $t('profile.objectStorage.removeAll') }}
-            </AppButton>
-          </template>
-        </div>
-        <ul class="object-list">
-          <li v-for="item in objects" :key="item.key" class="object-row">
-            <AppCheckbox
-              :checked="selected.has(item.key)"
-              :aria-label="item.fileName || item.key"
-              @update:checked="(checked: boolean) => toggleOne(item.key, checked)"
-            />
-            <div class="object-main">
-              <div class="object-name">{{ item.fileName || item.key }}</div>
-              <div class="object-key">{{ item.key }}</div>
-            </div>
-            <span class="object-meta">{{ formatSize(item.size) }}</span>
-            <span class="object-meta">{{ formatTime(item.lastModified) }}</span>
-          </li>
-        </ul>
-      </template>
 
-      <div class="setting-item auto-clean">
+      <div class="setting-item">
         <div class="setting-info">
           <div class="setting-label">{{ $t('profile.objectStorage.autoClean') }}</div>
           <div class="setting-desc">{{ $t('profile.objectStorage.autoCleanDesc') }}</div>
         </div>
-        <a-input-number
-          :value="form.autoCleanDays"
-          :min="0"
-          :max="3650"
-          :precision="0"
-          class="days-input"
-          @change="saveAutoClean"
-        />
+        <div class="setting-actions">
+          <a-input-number
+            :value="form.autoCleanDays"
+            :min="0"
+            :max="3650"
+            :precision="0"
+            class="days-input"
+            @change="saveAutoClean"
+          />
+          <AppButton
+            variant="soft"
+            :disabled="removing || form.autoCleanDays <= 0 || objects.length === 0"
+            @click="cleanNow"
+          >
+            {{ $t('profile.objectStorage.cleanNow') }}
+          </AppButton>
+        </div>
       </div>
     </section>
   </div>
@@ -635,10 +564,6 @@ onMounted(load)
   gap: var(--space-4);
 }
 
-.auto-clean {
-  margin-top: var(--space-4);
-}
-
 .test-result {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
@@ -666,12 +591,6 @@ onMounted(load)
   width: 80px;
 }
 
-.list-toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 .toolbar-spacer {
   flex: 1;
 }
@@ -685,47 +604,4 @@ onMounted(load)
   color: var(--color-warning-text);
 }
 
-.object-list {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.object-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.object-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.object-name {
-  overflow: hidden;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.object-key {
-  overflow: hidden;
-  font-family: var(--font-family-mono);
-  font-size: 11px;
-  color: var(--color-text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.object-meta {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
 </style>

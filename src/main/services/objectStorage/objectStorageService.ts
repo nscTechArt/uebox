@@ -33,6 +33,7 @@ import { app } from 'electron'
 import { deleteLiteralKey, resolveApiKey, saveLiteralKey } from '../../ai/credentials'
 import {
   DEFAULT_OBJECT_STORAGE_CONFIG,
+  normalizeEndpoint,
   normalizePrefix,
   type ObjectStorageConfig,
   type ObjectStorageConfigView,
@@ -80,7 +81,7 @@ function sanitize(raw: Partial<ObjectStorageConfig>): ObjectStorageConfig {
   return {
     enabled: merged.enabled === true,
     preset: merged.preset,
-    endpoint: String(merged.endpoint ?? '').trim(),
+    endpoint: normalizeEndpoint(String(merged.endpoint ?? ''), String(merged.bucket ?? '')),
     region: String(merged.region ?? '').trim(),
     bucket: String(merged.bucket ?? '').trim(),
     accessKeyId: String(merged.accessKeyId ?? '').trim(),
@@ -244,7 +245,12 @@ export interface UploadProgress {
  * 失败的会被摘掉，下次重试。
  */
 const uploads = new Map<string, Promise<{ key: string; reused: boolean }>>()
+/** 已经传完（或确认桶里已有）的。再要就静默复用，不再报「等它传完」 */
+const settled = new Set<string>()
 const progressListeners = new Map<string, Set<(progress: UploadProgress) => void>>()
+/** 文字进度：后来接上的调用方也要看到这次上传**此刻**在干什么，并跟着往下走 */
+const noteListeners = new Map<string, Set<(note: string) => void>>()
+const currentNote = new Map<string, string>()
 
 async function uploadIdentity(filePath: string): Promise<string> {
   const stat = await fs.stat(filePath)
@@ -262,29 +268,50 @@ export async function uploadMediaFile(
   onPercent?: (progress: UploadProgress) => void
 ): Promise<{ key: string; reused: boolean }> {
   const id = await uploadIdentity(filePath)
+  const running = uploads.get(id)
+  if (running && settled.has(id)) return running
   if (onPercent) {
     const set = progressListeners.get(id) ?? new Set()
     set.add(onPercent)
     progressListeners.set(id, set)
   }
-  const running = uploads.get(id)
+  if (onProgress) {
+    const set = noteListeners.get(id) ?? new Set()
+    set.add(onProgress)
+    noteListeners.set(id, set)
+  }
   if (running) {
-    onProgress?.(`${path.basename(filePath)} 正在上传，等它传完…`)
-    return running.finally(() => onPercent && progressListeners.get(id)?.delete(onPercent))
+    const note = currentNote.get(id)
+    if (note) onProgress?.(note)
+    return running.finally(() => {
+      if (onPercent) progressListeners.get(id)?.delete(onPercent)
+      if (onProgress) noteListeners.get(id)?.delete(onProgress)
+    })
   }
 
+  const say = (note: string): void => {
+    currentNote.set(id, note)
+    for (const listener of noteListeners.get(id) ?? []) listener(note)
+  }
   const report = (progress: UploadProgress): void => {
     for (const listener of progressListeners.get(id) ?? []) listener(progress)
   }
-  const task = doUpload(filePath, onProgress, report)
+  const task = doUpload(filePath, say, report)
   uploads.set(id, task)
-  task.catch(() => uploads.delete(id)).finally(() => progressListeners.delete(id))
+  task
+    .then(() => settled.add(id))
+    .catch(() => uploads.delete(id))
+    .finally(() => {
+      progressListeners.delete(id)
+      noteListeners.delete(id)
+      currentNote.delete(id)
+    })
   return task
 }
 
 async function doUpload(
   filePath: string,
-  onProgress: ((note: string) => void) | undefined,
+  say: (note: string) => void,
   report: (progress: UploadProgress) => void
 ): Promise<{ key: string; reused: boolean }> {
   const config = await readObjectStorageConfig()
@@ -293,15 +320,18 @@ async function doUpload(
   const fileName = path.basename(filePath)
 
   const hashing = `正在计算 ${fileName} 的指纹…`
-  onProgress?.(hashing)
+  say(hashing)
   report({ percent: 0, note: hashing })
   const digest = await hashFile(filePath)
   const key = `${config.prefix}${digest.slice(0, 32)}${path.extname(fileName).toLowerCase()}`
 
+  say(`正在确认对象存储里有没有 ${fileName}…`)
   const exists = await headObject(target, key)
-  if (!exists) {
+  if (exists) {
+    say(`对象存储里已经有 ${fileName}，直接复用`)
+  } else {
     const note = `正在上传 ${fileName}（${(stat.size / 1024 / 1024).toFixed(1)}MB）到对象存储…`
-    onProgress?.(note)
+    say(note)
     let lastPercent = -1
     await putObjectFromFile(
       target,
@@ -458,14 +488,25 @@ export async function removeStoredObjects(keys: string[]): Promise<{
   return { removed: done.length, failed }
 }
 
-/** 清理多少天前的对象 */
+/**
+ * 清理多少天没用过的对象。
+ *
+ * 「用过」取桶里的上传时间和本机最后一次复用的时间里较晚的那个：同一个文件去重后
+ * 不会再传，桶里的时间停在第一次 —— 只看它，6 天前传、今天刚在新对话里复用的文件，
+ * 明天就会被清掉，今天那段对话的链接跟着失效。
+ */
 export async function cleanOlderThan(days: number): Promise<{
   removed: number
   failed: Array<{ key: string; error: string }>
 }> {
   const cutoff = Date.now() - days * 24 * 3600 * 1000
   const objects = await listStoredObjects()
-  const stale = objects.filter((item) => Date.parse(item.lastModified) < cutoff)
+  const lastUsed = new Map((await readIndex()).uploads.map((item) => [item.key, item.uploadedAt]))
+  const stale = objects.filter((item) => {
+    const used = Date.parse(lastUsed.get(item.key) ?? '')
+    const time = Math.max(Date.parse(item.lastModified) || 0, Number.isNaN(used) ? 0 : used)
+    return time < cutoff
+  })
   if (stale.length === 0) return { removed: 0, failed: [] }
   return removeStoredObjects(stale.map((item) => item.key))
 }

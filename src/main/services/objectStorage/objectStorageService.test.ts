@@ -31,11 +31,15 @@ vi.mock('../../ai/credentials', () => ({
 const headObject = vi.fn(async () => false)
 const putObjectFromFile = vi.fn(async () => {})
 const deleteObject = vi.fn(async () => {})
+const listObjects = vi.fn(
+  async (): Promise<Array<{ key: string; size: number; lastModified: string }>> => []
+)
 vi.mock('./s3Client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./s3Client')>()),
   headObject: (...args: unknown[]) => headObject(...(args as [])),
   putObjectFromFile: (...args: unknown[]) => putObjectFromFile(...(args as [])),
-  deleteObject: (...args: unknown[]) => deleteObject(...(args as []))
+  deleteObject: (...args: unknown[]) => deleteObject(...(args as [])),
+  listObjects: (...args: unknown[]) => listObjects(...(args as []))
 }))
 
 const service = await import('./objectStorageService')
@@ -65,6 +69,16 @@ describe('配置', () => {
     expect(JSON.stringify(view)).not.toContain('SK')
     // 前缀规范化成以 / 结尾，清理时按前缀判断才不会误伤 `uebox-media-old/`
     expect(view.prefix).toBe('uebox-media/')
+  })
+
+  it('endpoint 末尾多带的桶名去掉（R2 控制台给的地址就带着）', async () => {
+    const view = await service.saveObjectStorageConfig({
+      ...CONFIG,
+      preset: 'r2',
+      endpoint: 'https://acc.r2.cloudflarestorage.com/my-bucket/',
+      forcePathStyle: true
+    })
+    expect(view.endpoint).toBe('https://acc.r2.cloudflarestorage.com')
   })
 
   it('开着、配完整了才算可用', async () => {
@@ -111,6 +125,38 @@ describe('上传', () => {
     expect(putObjectFromFile).toHaveBeenCalledTimes(1)
   })
 
+  it('拖进来时已经传完：发送时静默复用，不再报「等它传完」', async () => {
+    const file = path.join(userData, 'dragged.mp4')
+    writeFileSync(file, 'dragged video bytes')
+    await service.uploadMediaFile(file)
+
+    const notes: string[] = []
+    await service.uploadMediaFile(file, (note) => notes.push(note))
+
+    expect(notes).toEqual([])
+    expect(putObjectFromFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('还在传时接上的调用方看到的是真实阶段，并跟着往下走', async () => {
+    const file = path.join(userData, 'joining.mp4')
+    writeFileSync(file, 'joining video bytes')
+    let answer: (exists: boolean) => void = () => {}
+    headObject.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+
+    const first = service.uploadMediaFile(file)
+    await vi.waitFor(() => expect(headObject).toHaveBeenCalled())
+    const notes: string[] = []
+    const second = service.uploadMediaFile(file, (note) => notes.push(note))
+    await vi.waitFor(() => expect(notes.length).toBeGreaterThan(0))
+    answer(true)
+    await Promise.all([first, second])
+
+    expect(notes).toEqual([
+      '正在确认对象存储里有没有 joining.mp4…',
+      '对象存储里已经有 joining.mp4，直接复用'
+    ])
+  })
+
   it('桶里已经有了就不传', async () => {
     const file = path.join(userData, 'again.mp4')
     writeFileSync(file, 'another fake video')
@@ -132,6 +178,24 @@ describe('清理', () => {
     expect(deleteObject).toHaveBeenCalledTimes(1)
     expect(await service.isObjectRemoved('uebox-media/gone.mp4')).toBe(true)
     expect(await service.isObjectRemoved('other/keep.mp4')).toBe(false)
+  })
+
+  it('按最后一次用到的时间算：去重复用过的旧文件不清', async () => {
+    const file = path.join(userData, 'reused.mp4')
+    writeFileSync(file, 'reused video bytes')
+    headObject.mockResolvedValueOnce(true)
+    const { key } = await service.uploadMediaFile(file)
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString()
+    listObjects.mockResolvedValueOnce([
+      { key, size: 1, lastModified: tenDaysAgo },
+      { key: 'uebox-media/stale.mp4', size: 1, lastModified: tenDaysAgo }
+    ])
+
+    const result = await service.cleanOlderThan(7)
+
+    expect(result.removed).toBe(1)
+    expect(deleteObject).toHaveBeenCalledTimes(1)
+    expect(deleteObject.mock.calls[0]).toContain('uebox-media/stale.mp4')
   })
 })
 

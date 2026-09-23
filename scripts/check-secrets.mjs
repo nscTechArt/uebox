@@ -41,6 +41,8 @@ const patterns = [
 
 const placeholderPattern =
   /^(?:your[_-]|example|placeholder|replace[_-]?me|change[_-]?me|test[_-])/i
+/** AWS 文档里的样例密钥（`AKIAIOSFODNN7EXAMPLE` 之类）都以 EXAMPLE 结尾，签名测试要逐字用它们 */
+const awsDocExamplePattern = /EXAMPLE(?:KEY)?$/
 const findings = []
 
 /**
@@ -75,6 +77,7 @@ for (const file of trackedFiles) {
     for (const match of content.matchAll(pattern.expression)) {
       const candidate = pattern.valueGroup ? match[pattern.valueGroup] : ''
       if (candidate && placeholderPattern.test(candidate)) continue
+      if (awsDocExamplePattern.test(candidate || match[0])) continue
 
       const line = content.slice(0, match.index).split('\n').length
       findings.push({ file, line, name: pattern.name })
