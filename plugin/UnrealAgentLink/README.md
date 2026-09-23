@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.2.8-blue" />
-  <img alt="UE" src="https://img.shields.io/badge/Unreal%20Engine-5.0%20~%205.7-blueviolet" />
+  <img alt="Version" src="https://img.shields.io/badge/version-1.2.9-blue" />
+  <img alt="UE" src="https://img.shields.io/badge/Unreal%20Engine-5.0%20~%205.8-blueviolet" />
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green" />
 </p>
 
