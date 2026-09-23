@@ -82,6 +82,8 @@ export interface ToolSpec<TIn extends z.ZodTypeAny, TDetails = unknown> {
    * 打开哪个网址、往输入框里发什么内容，批准一次不能代表批准下一次。
    */
   requiresExplicitApproval?: boolean
+  /** 见 `ToolMeta.riskFor` */
+  riskFor?: (args: z.infer<TIn>) => ToolRisk
   /** 能否与同批其他工具并发执行。改同一份资源的工具要声明 sequential */
   concurrency?: 'sequential' | 'parallel'
   execute: (args: z.infer<TIn>, ctx: ToolCallContext<TDetails>) => Promise<ToolOutcome<TDetails>>
@@ -164,6 +166,27 @@ export interface ToolMeta {
   riskFor?: (args: unknown) => ToolRisk
 }
 
+const RISK_RANK: Record<ToolRisk, number> = { safe: 0, mutating: 1, destructive: 2 }
+
+/**
+ * 这一次调用的实际风险：`riskFor` 只许往下降，不许往上抬。
+ *
+ * `risk` 是声明的最坏情况，「本次会话都允许」记在工具名上时覆盖的就是它；
+ * `riskFor` 要是能抬到比它还高，那条记录就会放过一次没人批准过的更危险的调用。
+ * 审批门、子任务写操作审计、目标复核都走这一个函数，免得各自对「这次算不算写」有不同答案。
+ */
+export function effectiveRisk(meta: ToolMeta | undefined, args: unknown): ToolRisk {
+  const declared = meta?.risk ?? 'destructive'
+  let wanted: ToolRisk | undefined
+  try {
+    wanted = meta?.riskFor?.(args)
+  } catch {
+    // 参数形状不对（结束事件没配上开始事件时是 undefined）就按声明的最坏情况算
+    wanted = undefined
+  }
+  return wanted !== undefined && RISK_RANK[wanted] <= RISK_RANK[declared] ? wanted : declared
+}
+
 export type UnrealAgentTool<TDetails = unknown> = AgentTool<TSchema, TDetails> & {
   unrealBox: ToolMeta
 }
@@ -228,7 +251,8 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
     unrealBox: {
       namespace: spec.namespace,
       risk,
-      ...(spec.requiresExplicitApproval ? { requiresExplicitApproval: true } : {})
+      ...(spec.requiresExplicitApproval ? { requiresExplicitApproval: true } : {}),
+      ...(spec.riskFor ? { riskFor: spec.riskFor as (args: unknown) => ToolRisk } : {})
     }
   }
 

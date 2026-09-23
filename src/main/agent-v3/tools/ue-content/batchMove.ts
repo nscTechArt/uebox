@@ -472,6 +472,8 @@ export const batchMoveTool = defineTool<typeof MoveInput, BatchMoveAggregate>({
 【不做】关卡（World）不搬 —— 改关卡名要连外部 Actor 一起挪，用关卡工具。
 重定向器本身不搬 —— 先 ue_fixup_redirectors。`,
   input: MoveInput,
+  // dry_run 只做计划、不记账本、不动文件
+  riskFor: (args) => (args.dry_run === true ? 'safe' : 'mutating'),
   execute: async (args: MoveArgs, ctx): Promise<ToolOutcome<BatchMoveAggregate>> => {
     const moves = args.moves ?? []
     const folderMoves = args.folder_moves ?? []

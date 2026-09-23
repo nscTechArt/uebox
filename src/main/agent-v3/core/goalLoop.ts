@@ -195,6 +195,11 @@ export interface GoalLoopDeps {
    * 那会把整张工具表拖进这个文件的测试里。
    */
   mutatingTools: ReadonlySet<string>
+  /**
+   * 这一次调用按参数其实是只读的（dry_run 预演之类）。不给就只看工具名。
+   * 和 `mutatingTools` 同理由由调用方传进来（见 `effectiveRisk`）。
+   */
+  isReadOnlyCall?: (toolName: string, args: unknown) => boolean
   maxRounds?: number
   initialState?: GoalLoopState
   onStateChange?: (state: GoalLoopState) => Promise<void>
@@ -336,11 +341,24 @@ export function createGoalLoop(
     deps.report(message, level)
   }
 
+  // 结束事件不带参数，按 toolCallId 从开始事件里记下来
+  const callArgs = new Map<string, unknown>()
+
   return async (event: AgentEvent, signal?: AbortSignal): Promise<void> => {
     if (settled) return
 
+    if (event.type === 'tool_execution_start') {
+      callArgs.set(event.toolCallId, event.args)
+      return
+    }
     if (event.type === 'tool_execution_end') {
-      if (deps.mutatingTools.has(event.toolName) && !mutations.includes(event.toolName)) {
+      const args = callArgs.get(event.toolCallId)
+      callArgs.delete(event.toolCallId)
+      if (
+        deps.mutatingTools.has(event.toolName) &&
+        !deps.isReadOnlyCall?.(event.toolName, args) &&
+        !mutations.includes(event.toolName)
+      ) {
         mutations.push(event.toolName)
         await save()
       }

@@ -166,6 +166,33 @@ describe('createApprovalGate', () => {
     expect(request).toHaveBeenCalledTimes(2)
   })
 
+  /**
+   * `risk` 是声明的最坏情况，记在工具名上的「始终允许」覆盖的就是它。
+   * riskFor 要是能往上抬，那条记录就会放过一次没人批准过的更危险的调用 —— 所以只降不升。
+   */
+  it('riskFor 不能把风险抬到声明之上', async () => {
+    const request = vi.fn(async (): Promise<ApprovalVerdict> => 'approve')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      lookup: () =>
+        ({
+          name: 't',
+          unrealBox: {
+            namespace: 'ue.content',
+            risk: 'mutating',
+            riskFor: (args: unknown) =>
+              (args as { force?: unknown })?.force === true ? 'destructive' : 'mutating'
+          }
+        }) as unknown as UnrealAgentTool<never>,
+      request
+    })
+    await run(callCtx('t', { force: true }))
+    expect((request.mock.calls[0] as unknown[] | undefined)?.[0]).toMatchObject({
+      risk: 'mutating'
+    })
+  })
+
   it('切到只读后，旧的始终允许与完全访问均不能放行写操作', async () => {
     let readOnly = false
     const request = vi.fn(async (): Promise<ApprovalVerdict> => 'always')

@@ -2564,6 +2564,11 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	FString SearchPath = TEXT("/Game");
 	Payload->TryGetStringField(TEXT("path"), SearchPath);
 	SearchPath.TrimStartAndEndInline();
+	// 先把尾部的 / 去掉再判根：`//` 在注册表里会被归一成 `/`
+	while (SearchPath.Len() > 1 && SearchPath.EndsWith(TEXT("/")))
+	{
+		SearchPath.LeftChopInline(1);
+	}
 	// 根目录不接：`/` 会把 /Engine 和所有插件挂载点下的重定向器一并处理掉，远超默认的 /Game
 	if (SearchPath.IsEmpty() || SearchPath == TEXT("/"))
 	{
@@ -2583,7 +2588,9 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	// batch_move 之后只想清自己留下的那几个，全 /Game 扫一遍要几分钟。
 	TArray<FString> Paths;
 	const TArray<TSharedPtr<FJsonValue>>* PathsArray = nullptr;
-	if (Payload->TryGetArrayField(TEXT("paths"), PathsArray) && PathsArray)
+	// 给了 paths 就只看它，哪怕是空的：空清单的意思是「一个都不处理」，不是「全扫」
+	const bool bPathsGiven = Payload->TryGetArrayField(TEXT("paths"), PathsArray) && PathsArray;
+	if (bPathsGiven)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : *PathsArray)
 		{
@@ -2631,7 +2638,7 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 
 	TArray<FAssetData> RedirectorAssets;
 	TArray<FString> NotRedirectors;
-	if (Paths.Num() == 0)
+	if (!bPathsGiven)
 	{
 		CollectUnderPath(SearchPath, RedirectorAssets);
 	}
@@ -2641,23 +2648,27 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 		for (const FString& Raw : Paths)
 		{
 			FString PackageName = Raw.TrimStartAndEnd();
-			// 根目录不接（同 path）：`/` 在注册表里是一个存在的目录，会扫遍 /Engine 和所有插件
-			if (PackageName == TEXT("/"))
-			{
-				NotRedirectors.Add(Raw);
-				continue;
-			}
 			// 尾部带 / 的是明确指目录，不先当包名去撞：关卡 `/Game/Maps/Main` 旁边
 			// 常有同名文件夹 `/Game/Maps/Main/`，先撞包会把目录里的重定向器整个漏掉
 			const bool bFolderIntent = PackageName.Len() > 1 && PackageName.EndsWith(TEXT("/"));
+			// 对象路径（/Game/A.A）才去掉点后面那段；目录里不会有点，带点的目录写法
+			// 照原样去查，查不到就是不存在，别截成隔壁那个更短的目录
 			int32 DotIndex = INDEX_NONE;
-			if (PackageName.FindChar(TEXT('.'), DotIndex))
+			if (!bFolderIntent && PackageName.FindChar(TEXT('.'), DotIndex))
 			{
 				PackageName = PackageName.Left(DotIndex);
 			}
+			// 截完点再去尾部的 /：`//.` 截出来是 `//`，也要归一成 `/` 才拦得住
 			while (PackageName.Len() > 1 && PackageName.EndsWith(TEXT("/")))
 			{
 				PackageName.LeftChopInline(1);
+			}
+			// 根目录不接（同 path）：`/` 在注册表里是一个存在的目录，会扫遍 /Engine 和所有插件。
+			// 放在归一之后判，`//`、`/.` 这类写法也拦得住
+			if (PackageName.IsEmpty() || PackageName == TEXT("/"))
+			{
+				NotRedirectors.Add(Raw);
+				continue;
 			}
 
 			TArray<FAssetData> InPackage;
@@ -2791,7 +2802,23 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	}
 
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetStringField(TEXT("path"), Paths.Num() == 0 ? SearchPath : TEXT("(paths)"));
+	// 名字清单最多列 200 条（同 details），超出的只报总数 <field>_total：
+	// 几千条路径全塞进响应会把调用方的上下文撑爆
+	auto SetStringArray = [&Result](const TCHAR* Field, const TArray<FString>& Values)
+	{
+		constexpr int32 MaxListed = 200;
+		TArray<TSharedPtr<FJsonValue>> Json;
+		for (int32 Index = 0; Index < Values.Num() && Index < MaxListed; ++Index)
+		{
+			Json.Add(MakeShared<FJsonValueString>(Values[Index]));
+		}
+		Result->SetArrayField(Field, Json);
+		if (Values.Num() > MaxListed)
+		{
+			Result->SetNumberField(FString(Field) + TEXT("_total"), Values.Num());
+		}
+	};
+	Result->SetStringField(TEXT("path"), bPathsGiven ? TEXT("(paths)") : SearchPath);
 	Result->SetNumberField(TEXT("found"), RedirectorAssets.Num());
 	// broken_count 每条路各写一次：预演和「都加载失败」用标签口径，执行用加载确认后的口径
 	Result->SetArrayField(TEXT("redirectors"), Listed);
@@ -2804,12 +2831,7 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	}
 	if (NotRedirectors.Num() > 0)
 	{
-		TArray<TSharedPtr<FJsonValue>> NotJson;
-		for (const FString& Path : NotRedirectors)
-		{
-			NotJson.Add(MakeShared<FJsonValueString>(Path));
-		}
-		Result->SetArrayField(TEXT("not_redirectors"), NotJson);
+		SetStringArray(TEXT("not_redirectors"), NotRedirectors);
 	}
 
 	if (RedirectorAssets.Num() == 0)
@@ -2834,6 +2856,9 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	{
 		TArray<FUAL_PackageWriteState> In;
 		TMap<FString, int32> IndexByPackage;
+		// 坏的重定向器的引用者：不进签出预检，但脏不脏还要查 —— 标签说坏、加载却好的
+		// 会交给 FixupReferencers，它照样把这些引用者原样落盘
+		TArray<FString> BrokenReferencers;
 		for (const FRedirectorInfo& Info : Infos)
 		{
 			// 执行时会跳过这些（标签说坏、又不打算删）：它们的包和引用者不会被写，
@@ -2860,6 +2885,16 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 			}
 			TArray<FString> Referencers;
 			UAL_CollectReferencers(AssetRegistry, Info.Data.PackageName, Referencers);
+			// 坏的（打算删的）只走 ForceDeleteObjects：它不签出、不存引用者，只在内存里
+			// 把引用置空。它的引用者写不写得了和删不删得掉无关，不进预检，只记下来查脏
+			if (Info.bBroken)
+			{
+				for (const FString& Referencer : Referencers)
+				{
+					BrokenReferencers.AddUnique(Referencer);
+				}
+				continue;
+			}
 			for (const FString& Referencer : Referencers)
 			{
 				const FString ReferencerKey = Referencer.ToLower();
@@ -2868,19 +2903,39 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 					In[*Existing].For.AddUnique(RedirectorPackage);
 					continue;
 				}
-				// 每个引用者只查一次脏不脏（去重之后）
-				if (const UPackage* Loaded = FindPackage(nullptr, *Referencer))
-				{
-					if (Loaded->IsDirty())
-					{
-						DirtyReferencers.Add(Referencer);
-					}
-				}
 				FUAL_PackageWriteState State;
 				State.Package = Referencer;
 				State.Role = TEXT("referencer");
 				State.For.Add(RedirectorPackage);
 				IndexByPackage.Add(ReferencerKey, In.Add(State));
+			}
+		}
+		// 脏不脏按**最终角色**查，和 Infos 的顺序无关：链式重定向里自己也要被删的包
+		// 不算「会被原样落盘的引用者」
+		TArray<FString> ToProbe;
+		for (const FUAL_PackageWriteState& State : In)
+		{
+			if (State.Role == TEXT("referencer"))
+			{
+				ToProbe.Add(State.Package);
+			}
+		}
+		for (const FString& Referencer : BrokenReferencers)
+		{
+			// 已经在预检里的按它的最终角色算过了（要被删的重定向器包不算）
+			if (!IndexByPackage.Contains(Referencer.ToLower()))
+			{
+				ToProbe.Add(Referencer);
+			}
+		}
+		for (const FString& Package : ToProbe)
+		{
+			if (const UPackage* Loaded = FindPackage(nullptr, *Package))
+			{
+				if (Loaded->IsDirty())
+				{
+					DirtyReferencers.Add(Package);
+				}
 			}
 		}
 		FUAL_PreflightResult Preflight;
@@ -2890,13 +2945,23 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	}
 	if (DirtyReferencers.Num() > 0)
 	{
-		TArray<TSharedPtr<FJsonValue>> DirtyJson;
-		for (const FString& Name : DirtyReferencers)
-		{
-			DirtyJson.Add(MakeShared<FJsonValueString>(Name));
-		}
-		Result->SetArrayField(TEXT("dirty_referencers"), DirtyJson);
+		SetStringArray(TEXT("dirty_referencers"), DirtyReferencers);
 	}
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4)
+	// 判据见下面拒绝那一段的注释；提前算好，预演和「原地未动」的提示也要用
+	const bool bReportWindowUnreachable =
+		GIsRunningUnattendedScript
+		|| IsRunningCommandlet()
+		|| !FSlateApplication::IsInitialized()
+		|| !FSlateApplication::Get().CanAddModalWindow();
+#else
+	const bool bReportWindowUnreachable = false;
+#endif
+	const bool bFixupRefusedHere = bReportWindowUnreachable || FApp::IsUnattended();
+	// 这个编辑器里带 delete_broken=true 的真跑会被 409 拒掉，别再劝调用方这么做
+	const FString DeleteBrokenAdvice = bFixupRefusedHere
+		? TEXT("delete_broken=true is refused in this editor (-unattended, script mode or no renderer) - remove them from an interactive editor.")
+		: TEXT("pass delete_broken=true to remove them.");
 	const FString DirtyReferencersNote = DirtyReferencers.Num() > 0
 		? FString::Printf(TEXT(" %d referencer package(s) have unsaved edits in the editor (dirty_referencers); FixupReferencers saves referencers to disk as-is, so those edits get committed too - save or revert them first if that is not wanted."), DirtyReferencers.Num())
 		: FString();
@@ -2910,7 +2975,11 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 		FString Note = TEXT("Dry run - nothing was changed. Re-run with dry_run=false to rewrite referencers and delete these redirectors.");
 		if (BrokenCount > 0)
 		{
-			Note += FString::Printf(TEXT(" %d redirector(s) are broken (target no longer exists) and cannot be fixed up; pass delete_broken=true to remove them."), BrokenCount);
+			Note += FString::Printf(TEXT(" %d redirector(s) are broken (target no longer exists) and cannot be fixed up; %s"), BrokenCount, *DeleteBrokenAdvice);
+		}
+		if (bFixupRefusedHere && (bDeleteBroken || BrokenCount < Infos.Num()))
+		{
+			Note += TEXT(" This editor cannot run the real fixup (-unattended, script mode or no renderer) - dry_run=false will be refused with 409.");
 		}
 		if (BlockedReferencers > 0)
 		{
@@ -2945,17 +3014,8 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	 * 根本不会被调用，没有框也没有存盘，直接按「原地未动」回。打算删的不能这么绕：
 	 * 标签说坏但加载后目标还在的会进 FixupReferencers。
 	 */
-#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4)
-	const bool bReportWindowUnreachable =
-		GIsRunningUnattendedScript
-		|| IsRunningCommandlet()
-		|| !FSlateApplication::IsInitialized()
-		|| !FSlateApplication::Get().CanAddModalWindow();
-#else
-	const bool bReportWindowUnreachable = false;
-#endif
 	const bool bNothingWouldReachFixup = !bDeleteBroken && BrokenCount == Infos.Num();
-	if ((bReportWindowUnreachable || FApp::IsUnattended()) && !bNothingWouldReachFixup)
+	if (bFixupRefusedHere && !bNothingWouldReachFixup)
 	{
 		TSharedPtr<FJsonObject> RefusalDetails = MakeShared<FJsonObject>();
 		RefusalDetails->SetNumberField(TEXT("found"), RedirectorAssets.Num());
@@ -3075,14 +3135,29 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 		FUAL_ScopedLogCapture LogCapture(
 			{ TEXT("LogAssetTools"), TEXT("LogSourceControl"), TEXT("EditorErrors"), TEXT("SourceControl"), TEXT("LogFileHelpers"), TEXT("LogObjectTools"), TEXT("LogUObjectGlobals") },
 			ELogVerbosity::Warning);
+		// 引擎修完一个包会把包里**所有**重定向器删掉并做一次完整 GC：同包里坏的那条
+		// 可能已经被释放了。先换成弱指针，跑完只删还活着的，别把野指针交给 ForceDeleteObjects
+		TArray<TWeakObjectPtr<UObject>> BrokenWeak;
+		for (UObject* Object : BrokenObjects)
+		{
+			BrokenWeak.Add(Object);
+		}
 		if (Redirectors.Num() > 0)
 		{
 			AssetToolsModule.Get().FixupReferencers(Redirectors, /*bCheckoutDialogPrompt=*/false);
 		}
-		if (bDeleteBroken && BrokenObjects.Num() > 0)
+		TArray<UObject*> BrokenAlive;
+		for (const TWeakObjectPtr<UObject>& Weak : BrokenWeak)
+		{
+			if (UObject* Object = Weak.Get())
+			{
+				BrokenAlive.Add(Object);
+			}
+		}
+		if (bDeleteBroken && BrokenAlive.Num() > 0)
 		{
 			TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
-			ObjectTools::ForceDeleteObjects(BrokenObjects, /*bShowConfirmation=*/false);
+			ObjectTools::ForceDeleteObjects(BrokenAlive, /*bShowConfirmation=*/false);
 		}
 		EngineLog = LogCapture.ToJson();
 	}
@@ -3138,12 +3213,7 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	if (LeftOnDisk.Num() > 0)
 	{
 		AssetRegistry.ScanFilesSynchronous(LeftOnDisk, /*bForceRescan=*/true);
-		TArray<TSharedPtr<FJsonValue>> LeftJson;
-		for (const FString& Name : LeftOnDisk)
-		{
-			LeftJson.Add(MakeShared<FJsonValueString>(Name));
-		}
-		Result->SetArrayField(TEXT("left_on_disk"), LeftJson);
+		SetStringArray(TEXT("left_on_disk"), LeftOnDisk);
 	}
 
 	// 引用者：跑之前点名的那些，现在存了没有。FixupReferencers 只存交给它的那些
@@ -3175,15 +3245,6 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	Result->SetNumberField(TEXT("dirty_after"), DirtyCount);
 	Result->SetArrayField(TEXT("engine_log"), EngineLog);
 
-	auto SetStringArray = [&Result](const TCHAR* Field, const TArray<FString>& Values)
-	{
-		TArray<TSharedPtr<FJsonValue>> Json;
-		for (const FString& Value : Values)
-		{
-			Json.Add(MakeShared<FJsonValueString>(Value));
-		}
-		Result->SetArrayField(Field, Json);
-	};
 	if (LoadFailures.Num() > 0)
 	{
 		SetStringArray(TEXT("load_failed"), LoadFailures);
@@ -3194,6 +3255,7 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	}
 	// 执行后 dirty_referencers 只留「还没存」的，存了的单独一栏
 	Result->RemoveField(TEXT("dirty_referencers"));
+	Result->RemoveField(TEXT("dirty_referencers_total"));
 	if (StillDirtyReferencers.Num() > 0)
 	{
 		SetStringArray(TEXT("dirty_referencers"), StillDirtyReferencers);
@@ -3213,7 +3275,7 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 	if (RecoveredByLoad > 0)
 	{
 		Note += FString::Printf(
-			TEXT(" %d flagged broken by the asset registry turned out to load fine (registry was behind the disk) and were fixed up instead of deleted."),
+			TEXT(" %d flagged broken by the asset registry turned out to load fine, so they were handed to the fixup instead of being deleted (whether each one is gone is counted above)."),
 			RecoveredByLoad);
 	}
 	if (BrokenLeft > 0)
@@ -3223,13 +3285,13 @@ void FUAL_ContentBrowserCommands::Handle_FixupRedirectors(const TSharedPtr<FJson
 				TEXT(" %d broken redirector(s) are still there - the delete was vetoed, an asset editor still holds them, or the file is read-only / locked (see left_on_disk and engine_log)."),
 				BrokenLeft)
 			: FString::Printf(
-				TEXT(" %d broken redirector(s) (target missing) were left in place - pass delete_broken=true to remove them."),
-				BrokenLeft);
+				TEXT(" %d broken redirector(s) (target missing) were left in place - %s"),
+				BrokenLeft, *DeleteBrokenAdvice);
 	}
 	if (BrokenAfterLoad.Num() > 0)
 	{
 		Note += FString::Printf(
-			TEXT(" %d redirector(s) whose target exists in the registry came back with a null destination after loading (broken_after_load); the dry run could not predict them, so they were not deleted - re-run dry_run to see them flagged."),
+			TEXT(" %d redirector(s) whose target exists in the registry came back with a null destination after loading (broken_after_load); they were not deleted. The asset registry still lists their target, so a dry run will keep calling them healthy until the registry catches up - rescan the target's folder or restart the editor before re-running."),
 			BrokenAfterLoad.Num());
 	}
 	if (LoadFailures.Num() > 0)

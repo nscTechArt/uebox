@@ -400,6 +400,7 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
       path: z.string().optional().describe('搜索根路径，默认 /Game。给了 paths 时忽略'),
       paths: z
         .array(z.string().trim().min(1))
+        .min(1)
         .optional()
         .describe('只处理这些：重定向器的包路径（/Game/Old/SM_Rock）或目录（/Game/Old/）'),
       dry_run: z
@@ -421,7 +422,8 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
       try {
         const params: Record<string, unknown> = {}
         if (input.path) params.path = input.path
-        if (input.paths && input.paths.length > 0) params.paths = input.paths
+        // 空数组在 schema 那一层就被拒了；插件那边也把给了但为空的 paths 当「一个都不处理」
+        if (input.paths) params.paths = input.paths
         if (input.dry_run !== undefined) params.dry_run = input.dry_run
         if (input.delete_broken !== undefined) params.delete_broken = input.delete_broken
 
@@ -456,6 +458,13 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
           saved_referencers?: string[]
           /** 注册表里没了但文件还在的重定向器（SCC / 只读拒了删除），已算回 remaining */
           left_on_disk?: string[]
+          /** 上面这些名字清单最多列 200 条，超出时插件另给 <字段名>_total 报总数 */
+          not_redirectors_total?: number
+          load_failed_total?: number
+          broken_after_load_total?: number
+          dirty_referencers_total?: number
+          saved_referencers_total?: number
+          left_on_disk_total?: number
           note?: string
           error?: string
           code?: string | number
@@ -475,10 +484,14 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
           // 409 的 details.how_to（右键菜单那条路）、503 的扫描进度都在 details 里，
           // 适配层会把 code 和 details 拼进给模型的那句话，别在这里丢掉。
           // 但 ws 层给每条响应都塞 code（200 也塞），而插件「一个都加载不了」那条是
-          // 200 + ok:false，details 里躺着的是 200 条清单 —— 只转错误码和对象形状的 details
+          // 200 + ok:false，details 里躺着的是 200 条清单 —— 只转错误码和对象形状的 details。
+          // 404 也不转：这条命令自己从不回 404，那只会是老插件的「Unknown method」，
+          // 转过去会被适配层当成「查无此物」（ENGINE_NOT_FOUND），而它其实是失败
           const failure = response as unknown as { details?: unknown }
           const code =
-            typeof response.code === 'number' && response.code < 400 ? undefined : response.code
+            typeof response.code === 'number' && (response.code < 400 || response.code === 404)
+              ? undefined
+              : response.code
           const details =
             failure.details !== undefined && !Array.isArray(failure.details)
               ? failure.details
@@ -495,13 +508,18 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
         // 老插件没有 broken_left：按「断链数减去删掉的」估
         const brokenLeft =
           response.broken_left ?? Math.max(0, broken - (response.deleted_broken ?? 0))
-        // 看插件报的范围，不看这边发了什么：paths 全是空串时插件会退回全 /Game 扫描
+        // 看插件报的范围，不看这边发了什么
         const scopeLabel = response.path === '(paths)' ? '指定的路径' : `${response.path} 下`
         // 这条命令没有闸：引用者被别人签出着，FixupReferencers 改不了它，那条重定向器
         // 就留在 remaining 里，其余照常清理 —— 预演和执行都按「部分」的口吻说
         const checkout = checkoutLines(response.checkout, 'partial')
         const dirtyRefs = response.dirty_referencers ?? []
         const savedRefs = response.saved_referencers ?? []
+        // 清单被插件截到 200 条时，条数按 _total 报
+        const dirtyCount = response.dirty_referencers_total ?? dirtyRefs.length
+        const savedCount = response.saved_referencers_total ?? savedRefs.length
+        const loadFailedCount = response.load_failed_total ?? response.load_failed?.length ?? 0
+        const leftOnDiskCount = response.left_on_disk_total ?? response.left_on_disk?.length ?? 0
         const sample = (names: string[]): string =>
           `${names.slice(0, 5).join('、')}${names.length > 5 ? ' 等' : ''}`
         return {
@@ -526,6 +544,12 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
           ...(dirtyRefs.length > 0 ? { dirty_referencers: dirtyRefs } : {}),
           ...(savedRefs.length > 0 ? { saved_referencers: savedRefs } : {}),
           ...(response.left_on_disk ? { left_on_disk: response.left_on_disk } : {}),
+          // 清单被截到 200 条时的总数，原样带给模型，别让它把截断的清单当成全部
+          ...Object.fromEntries(
+            Object.entries(response).filter(
+              ([key, value]) => key.endsWith('_total') && typeof value === 'number'
+            )
+          ),
           ...(response.note ? { note: response.note } : {}),
           ...(response.checkout ? { checkout: response.checkout } : {}),
           ...(response.engine_log && response.engine_log.length > 0
@@ -539,23 +563,21 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
               : `清理了 ${response.fixed}/${response.found} 个重定向器` +
                 (response.deleted_broken ? `，删除断链的 ${response.deleted_broken} 个` : '') +
                 (brokenLeft > 0 ? `，${brokenLeft} 个断链的原地未动` : '') +
-                (response.load_failed && response.load_failed.length > 0
-                  ? `，${response.load_failed.length} 个加载失败没处理`
-                  : '') +
+                (loadFailedCount > 0 ? `，${loadFailedCount} 个加载失败没处理` : '') +
                 (response.dirty_after ? `，${response.dirty_after} 个包待保存` : '')) +
             (response.listed_note ? `\n只列了一部分：${response.listed_note}` : '') +
-            (response.left_on_disk && response.left_on_disk.length > 0
-              ? `\n⚠ ${response.left_on_disk.length} 个重定向器文件还在磁盘上（源码管理或只读拒了删除），已算回未清理`
+            (leftOnDiskCount > 0
+              ? `\n⚠ ${leftOnDiskCount} 个重定向器文件还在磁盘上（源码管理或只读拒了删除），已算回未清理`
               : '') +
             // 预演：会被存；执行后：存了的和还没存的分开说，别把跑之前的预测当成已经发生
             (response.dry_run && dirtyRefs.length > 0
-              ? `\n⚠ ${dirtyRefs.length} 个引用者有未保存的改动，执行时会被原样落盘：${sample(dirtyRefs)}`
+              ? `\n⚠ ${dirtyCount} 个引用者有未保存的改动，执行时会被原样落盘：${sample(dirtyRefs)}`
               : '') +
             (!response.dry_run && savedRefs.length > 0
-              ? `\n⚠ ${savedRefs.length} 个引用者原有未保存的改动，刚才被原样落盘了：${sample(savedRefs)}`
+              ? `\n⚠ ${savedCount} 个引用者原有未保存的改动，刚才被原样落盘了：${sample(savedRefs)}`
               : '') +
             (!response.dry_run && dirtyRefs.length > 0
-              ? `\n${dirtyRefs.length} 个引用者的未保存改动没有被写盘（它们的重定向器没交给引擎，或保存失败）：${sample(dirtyRefs)}`
+              ? `\n${dirtyCount} 个引用者的未保存改动没有被写盘（它们的重定向器没交给引擎，或保存失败）：${sample(dirtyRefs)}`
               : '') +
             (checkout.length > 0 ? `\n${checkout.join('\n')}` : '')
         }

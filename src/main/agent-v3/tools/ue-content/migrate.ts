@@ -46,6 +46,8 @@ export const migrateTool = defineUeTool<typeof MigrateInput, MigrateResponse>({
   namespace: NAMESPACE,
   method: 'content.migrate',
   risk: 'mutating',
+  // 插件的 dry_run 在 save_first 落盘之前就返回，什么都不写
+  riskFor: (args) => (args.dry_run === true ? 'safe' : 'mutating'),
   concurrency: 'sequential',
   timeoutMs: 30 * 60 * 1000,
   description: `把资产（连同它们的依赖闭包）从当前工程迁移到另一个虚幻工程，等价于编辑器右键 Migrate。

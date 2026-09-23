@@ -1243,8 +1243,10 @@ const deleteUnusedMaterialNodes = defineUeTool({
   name: 'material_delete_unused_nodes',
   namespace: NAMESPACE,
   method: 'material.delete_unused_nodes',
-  // dry_run 默认为真，但这个工具**能**删东西，风险按最坏情况声明
+  // dry_run 默认为真，但这个工具**能**删东西，风险按最坏情况声明；
+  // 只有明确传了 dry_run=false 的那次按 destructive 问
   risk: 'destructive',
+  riskFor: (args) => (args.dry_run === false ? 'destructive' : 'safe'),
   description: `找出并删除对最终输出没有贡献的材质节点。
 
 从材质主节点的各个输入反向走一遍，走不到的就是死节点。

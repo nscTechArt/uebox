@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
-import { defineTool, toToolSchema, type UnrealAgentTool } from './defineTool'
+import { defineTool, effectiveRisk, toToolSchema, type UnrealAgentTool } from './defineTool'
 
 describe('toToolSchema', () => {
   it('把 Zod schema 转成 JSON Schema', () => {
@@ -147,6 +147,27 @@ describe('defineTool', () => {
     })
 
     expect(tool.unrealBox.risk).toBe('mutating')
+  })
+
+  it('riskFor 跟着挂到 unrealBox 上，effectiveRisk 只降不升', () => {
+    const tool = defineTool({
+      name: 'move',
+      namespace: 'ue.content',
+      description: 'x',
+      input: z.object({ dry_run: z.boolean().optional(), force: z.boolean().optional() }),
+      risk: 'mutating',
+      riskFor: (args) => (args.dry_run ? 'safe' : args.force ? 'destructive' : 'mutating'),
+      execute: async () => ({ text: 'ok' })
+    })
+
+    expect(effectiveRisk(tool.unrealBox, { dry_run: true })).toBe('safe')
+    expect(effectiveRisk(tool.unrealBox, {})).toBe('mutating')
+    // 抬不上去：声明的 risk 就是最坏情况
+    expect(effectiveRisk(tool.unrealBox, { force: true })).toBe('mutating')
+    // 查不到元数据的按最危险算
+    expect(effectiveRisk(undefined, {})).toBe('destructive')
+    // riskFor 自己炸了（参数没配上，是 undefined）就按声明的算，不往外抛
+    expect(effectiveRisk(tool.unrealBox, undefined)).toBe('mutating')
   })
 
   /**

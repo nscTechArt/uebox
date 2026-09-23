@@ -710,6 +710,8 @@ export function summarizeChanges(
     // 看不见参数里的方向 —— 不在这里挡一下，一次查询也会以「启用/停用插件」
     // 的面目进台账，用户还以为插件被动过了
     if (call.name === 'ue_manage_plugin' && detail !== 'Enable' && detail !== 'Disable') continue
+    // 同理：dry_run=true 的预演（清理重定向器、删资产、搬迁……）什么都没改
+    if ((call.args as { dry_run?: unknown } | undefined)?.dry_run === true) continue
 
     const index = seenByTool.get(call.name) ?? 0
     seenByTool.set(call.name, index + 1)

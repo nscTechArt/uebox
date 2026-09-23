@@ -31,7 +31,7 @@ import { materialTools } from './index'
 
 type Executable = {
   name: string
-  unrealBox: { namespace: string; risk: string }
+  unrealBox: { namespace: string; risk: string; riskFor?: (args: unknown) => string }
   execute: (id: string, input: unknown) => Promise<unknown>
 }
 
@@ -63,7 +63,11 @@ describe('两个工具都注册进了材质工具集', () => {
    */
   it('material_delete_unused_nodes 在，且按最坏情况标 destructive', () => {
     const tool = byName('material_delete_unused_nodes')
-    expect(tool.unrealBox).toEqual({ namespace: 'ue.material', risk: 'destructive' })
+    expect(tool.unrealBox).toMatchObject({ namespace: 'ue.material', risk: 'destructive' })
+    // dry_run 默认为真：只有明确传 false 的那次才按 destructive 问
+    expect(tool.unrealBox.riskFor?.({ path: '/Game/M' })).toBe('safe')
+    expect(tool.unrealBox.riskFor?.({ path: '/Game/M', dry_run: true })).toBe('safe')
+    expect(tool.unrealBox.riskFor?.({ path: '/Game/M', dry_run: false })).toBe('destructive')
   })
 })
 

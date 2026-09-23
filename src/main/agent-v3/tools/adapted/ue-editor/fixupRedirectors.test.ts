@@ -34,7 +34,7 @@ beforeEach(() => {
 })
 
 describe('ue_fixup_redirectors：指定路径与断链', () => {
-  it('paths 原样透传，空数组不传', async () => {
+  it('paths 原样透传', async () => {
     callRequest.mockResolvedValue({
       ok: true,
       path: '(paths)',
@@ -49,10 +49,6 @@ describe('ue_fixup_redirectors：指定路径与断链', () => {
       paths: ['/Game/Old/SM_A', '/Game/Old/'],
       dry_run: true
     })
-
-    callRequest.mockClear()
-    await run({ paths: [], dry_run: true })
-    expect('paths' in (callRequest.mock.calls[0][1] as Record<string, unknown>)).toBe(false)
   })
 
   it('预演时把每条指向哪、哪些断了带回去，并在摘要里点出断链数', async () => {
@@ -298,6 +294,47 @@ describe('ue_fixup_redirectors：失败与超时', () => {
   it('paths 里的空串不放行', async () => {
     const schema = tool.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
     expect(schema.safeParse({ paths: [''] }).success).toBe(false)
+  })
+
+  it('空的 paths 不放行：插件会把省略的 paths 当成全 /Game 扫描', async () => {
+    const schema = tool.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+    expect(schema.safeParse({ paths: [] }).success).toBe(false)
+    expect(schema.safeParse({}).success).toBe(true)
+  })
+
+  it('老插件回 404（Unknown method）：不转错误码，免得被当成「查无此物」', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error: 'Unknown method: content.fixup_redirectors',
+      code: 404
+    })
+    const result = await run({})
+    expect(result.success).toBe(false)
+    expect(result.code).toBeUndefined()
+    expect(result.error).toContain('Unknown method')
+  })
+
+  it('清单被插件截断时，条数按 _total 报', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      path: '/Game',
+      found: 900,
+      fixed: 0,
+      remaining: 900,
+      dry_run: false,
+      redirectors: [],
+      left_on_disk: ['H:/Proj/Content/Old/SM_B.uasset'],
+      left_on_disk_total: 850,
+      load_failed: ['/Game/Old/SM_C'],
+      load_failed_total: 50
+    })
+    const result = await run({})
+    const summary = String(result.summary)
+    expect(summary).toContain('850 个重定向器文件还在磁盘上')
+    expect(summary).toContain('50 个加载失败没处理')
+    // 总数也原样带给模型
+    expect(result.left_on_disk_total).toBe(850)
+    expect(result.load_failed_total).toBe(50)
   })
 
   it('执行后：存了的和还没存的引用者分开说，磁盘上还在的重定向器算回未清理', async () => {

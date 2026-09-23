@@ -51,6 +51,7 @@ import { getAllProjects } from '../sqliteDataBase/models/project'
 import { projectManager } from '../services/project/projectManager'
 import { collectToolDiagnostics } from '../agent-v3/toolDiagnostics'
 import { isShellAvailable } from '../agent-v3/tools/builtin/localShell'
+import { effectiveRisk, type ToolMeta } from '../agent-v3/tools/defineTool'
 import {
   currentStatuses,
   ensureConnected,
@@ -296,7 +297,7 @@ function alwaysAllowedFor(sessionId: string): Set<string> {
 function attachGoalLoop(
   agent: Agent,
   ctx: SessionContext,
-  tools: Array<{ name: string; unrealBox: { risk: string } }>,
+  tools: Array<{ name: string; unrealBox: ToolMeta }>,
   options: SessionExecutionOptions,
   emit: (channel: string, payload: unknown) => void
 ): ReturnType<typeof createGoalLoop> | undefined {
@@ -319,6 +320,9 @@ function attachGoalLoop(
     mutatingTools: new Set(
       tools.filter((tool) => tool.unrealBox.risk !== 'safe').map((tool) => tool.name)
     ),
+    // dry_run 预演不算这一轮改过东西
+    isReadOnlyCall: (toolName, args) =>
+      effectiveRisk(tools.find((tool) => tool.name === toolName)?.unrealBox, args) === 'safe',
     runAudit: async (input) => {
       const result = await runSubAgent(ctx, {
         prompt: buildAuditPrompt(input),

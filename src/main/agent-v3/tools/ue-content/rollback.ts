@@ -484,6 +484,8 @@ C++ 默认值引用检查、重定向器清理、落盘回读）回滚一样要�
 ue_fixup_redirectors delete_broken 删掉的重定向器 —— 删了就没了，账本只记录删了什么。
 回滚本身也会写一份账本（带 rollback_of），回滚错了还能再回滚。`,
   input: RollbackInput,
+  // 只有 apply 会搬东西；list / verify / preview 都是只读
+  riskFor: (args) => (args.action === 'apply' ? 'mutating' : 'safe'),
   execute: async (args: RollbackArgs, ctx): Promise<ToolOutcome<RollbackDetails>> => {
     const projectPath = getTargetProjectPath()
     if (!projectPath) {

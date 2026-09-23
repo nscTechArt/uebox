@@ -10,7 +10,7 @@
 
 import type { BeforeToolCallContext, BeforeToolCallResult } from '@earendil-works/pi-agent-core'
 
-import type { ToolRisk, UnrealAgentTool } from '../tools/defineTool'
+import { effectiveRisk, type ToolRisk, type UnrealAgentTool } from '../tools/defineTool'
 
 /** 用户对一次审批的回应 */
 export type ApprovalVerdict =
@@ -109,8 +109,9 @@ export function createApprovalGate(deps: ApprovalDeps) {
       const explicit = tool?.unrealBox.requiresExplicitApproval === true
       const declaredRisk: ToolRisk = tool?.unrealBox.risk ?? 'destructive'
       // 按这次的参数算实际风险（dry_run 之类降成 safe）。「本次会话都允许」按实际
-      // 风险分开记：在预演上点的允许只对预演有效，真正的那次照样问
-      const risk: ToolRisk = tool?.unrealBox.riskFor?.(ctx.args) ?? declaredRisk
+      // 风险分开记：在预演上点的允许只对预演有效，真正的那次照样问。
+      // 只降不升（见 effectiveRisk）：工具名这条记录覆盖的是声明的最坏情况
+      const risk: ToolRisk = effectiveRisk(tool?.unrealBox, ctx.args)
       const allowKey = risk === declaredRisk ? toolName : `${toolName}#${risk}`
       const readOnlyBlock = (): BeforeToolCallResult | undefined =>
         deps.isReadOnly?.() && risk !== 'safe'

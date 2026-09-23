@@ -668,6 +668,20 @@ describe('插件管理', () => {
     expect(changes).toEqual([])
   })
 
+  it('dry_run=true 的预演不进台账 —— 风险表按工具定级，看不见参数', () => {
+    const changes = summarizeChanges(
+      [
+        call('ue_fixup_redirectors', { path: '/Game', dry_run: true }),
+        result('ue_fixup_redirectors'),
+        call('ue_fixup_redirectors', { path: '/Game' }),
+        result('ue_fixup_redirectors')
+      ],
+      { ue_fixup_redirectors: 'destructive' }
+    )
+
+    expect(changes.map((change) => change.toolName)).toEqual(['ue_fixup_redirectors'])
+  })
+
   it('启用和停用分得清：行上写哪个插件、净结果是启了还是停了', () => {
     const groups = groupChanges([
       {

@@ -291,6 +291,10 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
 
     inputSchema: DeleteAssetsSchema,
 
+    // dry_run 只在盒子这边展开清单，不碰引擎：按 safe 问，预演上的「本次会话都允许」放不过真删
+    riskFor: (args) =>
+      (args as { dry_run?: unknown } | null)?.dry_run === true ? 'safe' : 'destructive',
+
     execute: async (input) => {
       console.log('[DeleteAssetsTool] 收到请求:', input)
 

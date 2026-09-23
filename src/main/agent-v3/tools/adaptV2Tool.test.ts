@@ -182,3 +182,28 @@ describe('停止不必等工具跑完', () => {
     expect(received).toBe(controller.signal)
   })
 })
+
+/**
+ * 审批门读的是 `unrealBox.riskFor`，V2 工具把它写在自己身上 —— 适配这一步
+ * 漏抄，预演就又按最坏情况问，「本次会话都允许」也又记回光秃秃的工具名。
+ */
+describe('riskFor 跟着适配过去', () => {
+  it('V2 工具声明的 riskFor 原样落到 unrealBox 上', () => {
+    const riskFor = (args: unknown): 'safe' | 'destructive' =>
+      (args as { dry_run?: unknown } | null)?.dry_run === true ? 'safe' : 'destructive'
+    const tool = adaptV2Tool(
+      { inputSchema: z.object({}), execute: async () => ({ success: true }), riskFor },
+      { name: 'ue_fixup_redirectors', namespace: 'ue.content', risk: 'destructive' }
+    )
+    expect(tool.unrealBox.riskFor?.({ dry_run: true })).toBe('safe')
+    expect(tool.unrealBox.riskFor?.({})).toBe('destructive')
+  })
+
+  it('没声明就不挂', () => {
+    const tool = adaptV2Tool(
+      { inputSchema: z.object({}), execute: async () => ({ success: true }) },
+      { name: 'ue_save', namespace: 'ue.editor', risk: 'safe' }
+    )
+    expect(tool.unrealBox.riskFor).toBeUndefined()
+  })
+})

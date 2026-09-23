@@ -374,6 +374,8 @@ export interface UeToolSpec<TIn extends z.ZodTypeAny, TResponse> {
   /** UE 侧的 RPC 方法名，如 `material.create` */
   method: string
   risk?: ToolRisk
+  /** 见 `ToolMeta.riskFor`：dry_run 这类只读开关按参数降风险 */
+  riskFor?: (args: z.infer<TIn>) => ToolRisk
   concurrency?: 'sequential' | 'parallel'
   timeoutMs?: number
   /** Zod 解析后的参数 → RPC payload。省略则原样透传 */
@@ -397,6 +399,7 @@ export function defineUeTool<TIn extends z.ZodTypeAny, TResponse = unknown>(
     description: spec.description,
     input: spec.input,
     risk: spec.risk ?? 'mutating',
+    ...(spec.riskFor ? { riskFor: spec.riskFor } : {}),
     concurrency: spec.concurrency ?? 'parallel',
     execute: async (args, ctx) => {
       const params = spec.toParams ? spec.toParams(args) : (args as Record<string, unknown>)

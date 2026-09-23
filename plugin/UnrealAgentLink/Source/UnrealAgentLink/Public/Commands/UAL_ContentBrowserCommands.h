@@ -121,7 +121,7 @@ public:
 	 *
 	 * 请求: { "path": "/Game", "paths": ["/Game/Old/SM_A", "/Game/Old/"], "dry_run": false, "delete_broken": false,
 	 *         "on_registry_busy": "fail"|"wait" }
-	 *        paths 给了就只处理这些（重定向器包路径或目录），不扫整个 path。
+	 *        paths 给了就只处理这些（重定向器包路径或目录），不扫整个 path；给了空数组就什么都不处理。
 	 * 响应: { ok, path, found, broken_count, broken_left, fixed, remaining, deleted_broken, dry_run,
 	 *         redirectors:[...], details:[{path,target,broken}], listed_note, not_redirectors:[...],
 	 *         checkout:{ scc_enabled, scc_provider, scc_available, checked, blocked, blocking:[...], states:[...], states_truncated },
@@ -134,6 +134,8 @@ public:
 	 *        加载后才发现坏的进 broken_after_load、不删。fixed 不含 deleted_broken。
 	 *        dirty_after 只数这条命令新弄脏、引擎又没存成的包（引擎在删重定向器前会把改过的引用者存了）。
 	 *        engine_log / load_failed / broken_after_load 只在执行时有。
+	 *        名字清单（not_redirectors、dirty_referencers、saved_referencers、left_on_disk、load_failed、
+	 *        broken_after_load）最多列 200 条，超出时另给 <字段名>_total 报总数。
 	 *        UE 5.4+ 执行时会弹「Redirector Update Report」模态框由人点；弹不出来（脚本模式 / 无渲染器）时回 409。
 	 */
 	static void Handle_FixupRedirectors(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);

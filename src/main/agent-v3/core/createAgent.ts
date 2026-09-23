@@ -40,7 +40,7 @@ import {
   TOOL_SEARCH_RULES
 } from '../tools/builtin/toolSearch'
 import { toolSearchPrefixKey } from './toolSearchCache'
-import type { UnrealAgentTool } from '../tools/defineTool'
+import { effectiveRisk, type UnrealAgentTool } from '../tools/defineTool'
 import { OFFLINE_UE_TOOLS } from '../tools/toolNames'
 import { createApprovalGate, type ApprovalDeps, type ApprovalMode } from './approval'
 import { VIEWPORT_CAPTURE_TOOLS } from './editorScreenshotScope'
@@ -918,15 +918,21 @@ export async function runSubAgent(
    * 纪律：不认识的一律从严。
    */
   const writeToolCalls: Record<string, number> = {}
-  const riskByName = new Map(allTools.map((tool) => [tool.name, tool.unrealBox.risk]))
+  // 按这次的参数算（dry_run 预演不算写）；结束事件不带参数，从开始事件里记下来
+  const metaByName = new Map(allTools.map((tool) => [tool.name, tool.unrealBox]))
+  const argsByCall = new Map<string, unknown>()
 
   agent.subscribe((event) => {
     if (event.type === 'tool_execution_start') {
+      argsByCall.set(event.toolCallId, event.args)
       input.onProgress?.(`调用 ${event.toolName}`)
       return
     }
-    if (event.type !== 'tool_execution_end' || event.isError) return
-    if ((riskByName.get(event.toolName) ?? 'destructive') !== 'safe') {
+    if (event.type !== 'tool_execution_end') return
+    const args = argsByCall.get(event.toolCallId)
+    argsByCall.delete(event.toolCallId)
+    if (event.isError) return
+    if (effectiveRisk(metaByName.get(event.toolName), args) !== 'safe') {
       writeToolCalls[event.toolName] = (writeToolCalls[event.toolName] ?? 0) + 1
     }
   })

@@ -392,4 +392,39 @@ describe('createGoalLoop', () => {
     expect(h.audits[0]?.mutations).toEqual(['blueprint_apply_graph'])
     expect(h.audits[0]?.closing).toBe('门做好了')
   })
+
+  it('按参数只读的那次调用（dry_run 预演）不算动过东西，真正那次照算', async () => {
+    const deps = {
+      mutatingTools: new Set(['ue_fixup_redirectors']),
+      isReadOnlyCall: (_name: string, args: unknown): boolean =>
+        (args as { dry_run?: unknown } | undefined)?.dry_run === true
+    }
+    const start = (id: string, args: unknown): AgentEvent =>
+      ({
+        type: 'tool_execution_start',
+        toolCallId: id,
+        toolName: 'ue_fixup_redirectors',
+        args
+      }) as unknown as AgentEvent
+    const end = (id: string): AgentEvent =>
+      ({
+        type: 'tool_execution_end',
+        toolCallId: id,
+        toolName: 'ue_fixup_redirectors',
+        result: {},
+        isError: false
+      }) as unknown as AgentEvent
+
+    const preview = harness(['VERDICT: PASS'], deps)
+    await preview.loop(start('a', { dry_run: true }))
+    await preview.loop(end('a'))
+    await preview.loop(finishTurn('只预演了一下'))
+    expect(preview.audits[0]?.mutations).toEqual([])
+
+    const real = harness(['VERDICT: PASS'], deps)
+    await real.loop(start('b', {}))
+    await real.loop(end('b'))
+    await real.loop(finishTurn('清完了'))
+    expect(real.audits[0]?.mutations).toEqual(['ue_fixup_redirectors'])
+  })
 })
