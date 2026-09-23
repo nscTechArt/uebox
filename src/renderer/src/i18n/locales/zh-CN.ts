@@ -756,31 +756,12 @@ export default {
         canceled: '已取消',
         none: '未订阅'
       },
-      quotas: {
-        text_tokens: '对话 {used} / {limit} token',
-        images: '生图 {used} / {limit} 张',
-        video_seconds: '视频 {used} / {limit} 秒',
-        model3d_tasks: '3D {used} / {limit} 次',
-        music_tasks: '音乐 {used} / {limit} 次',
-        realtime_minutes: '实时语音 {used} / {limit} 分钟',
-        tts_characters: '语音合成 {used} / {limit} 字符',
-        stt_minutes: '语音识别 {used} / {limit} 分钟',
-        searches: '网页检索 {used} / {limit} 次'
-      },
-      quotaOther: '{key} {used} / {limit}',
-      quotaMonthly: '月额度 {limit}',
-      quotaDaily: '今天 {used} / {limit}',
+      remaining: '剩余 {percent}%',
       quotaDailyDone: '今天的用完了，{time} 恢复',
-      limited: {
-        plan_change: '中途升档：本期新增的额度按剩余天数折算，下个周期给全额。',
-        new_account: '新账户首次付款后 72 小时内限额。',
-        new_accountUntil: '新账户首次付款后 72 小时内限额，{time} 解除。'
-      },
       time: {
         today: '今天 {time}',
         tomorrow: '明天 {time}'
       },
-      resetsAt: '{date} 重置',
       pastDue: '续费扣款失败，本期额度已压低：对话只剩 20%，其他暂停。更新付款方式后立即恢复。',
       pastDueAction: '更新付款方式',
       deprecated: '{role}在用的 {model} 要下线了。',
@@ -790,7 +771,6 @@ export default {
       revokeFailed: '没能在服务端吊销这把 Key，可以去网页端手动吊销。',
       revokeOpen: '去网页端吊销',
       managedBadge: '由创作者 Token Plan 管理',
-      managedCount: '管理着 {count} 个角色',
       manage: '管理订阅',
       reimport: '重新导入',
       disconnect: '断开',

@@ -775,33 +775,12 @@ export default {
         canceled: 'Canceled',
         none: 'No subscription'
       },
-      quotas: {
-        text_tokens: 'Chat {used} / {limit} tokens',
-        images: 'Images {used} / {limit}',
-        video_seconds: 'Video {used} / {limit} s',
-        model3d_tasks: '3D {used} / {limit} runs',
-        music_tasks: 'Music {used} / {limit} runs',
-        realtime_minutes: 'Realtime voice {used} / {limit} min',
-        tts_characters: 'Speech {used} / {limit} chars',
-        stt_minutes: 'Transcription {used} / {limit} min',
-        searches: 'Web search {used} / {limit}'
-      },
-      quotaOther: '{key} {used} / {limit}',
-      quotaMonthly: 'monthly {limit}',
-      quotaDaily: 'Today {used} / {limit}',
+      remaining: '{percent}% left',
       quotaDailyDone: "Today's is used up. Back {time}",
-      limited: {
-        plan_change:
-          'Upgraded mid-period: the extra quota is prorated for the days left. Full amount next period.',
-        new_account: 'New accounts are limited for 72 hours after the first payment.',
-        new_accountUntil:
-          'New accounts are limited for 72 hours after the first payment. Lifted {time}.'
-      },
       time: {
         today: 'today at {time}',
         tomorrow: 'tomorrow at {time}'
       },
-      resetsAt: 'Resets {date}',
       pastDue:
         "Renewal payment failed, so this period's quota is cut: chat keeps 20%, everything else is paused. Update your payment method to restore it right away.",
       pastDueAction: 'Update payment method',
@@ -812,7 +791,6 @@ export default {
       revokeFailed: "Couldn't revoke this key on the server. Revoke it on the website.",
       revokeOpen: 'Revoke on the website',
       managedBadge: 'Managed by Creator Token Plan',
-      managedCount: 'Managing {count} roles',
       manage: 'Manage subscription',
       reimport: 'Re-import',
       disconnect: 'Disconnect',
