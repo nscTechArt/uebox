@@ -2909,7 +2909,7 @@ export default {
       title: '对象存储',
       enable: '启用对象存储',
       enableDesc:
-        '接入你自己的 S3 兼容存储桶。需要把文件放到云上的功能会用它，目前是对话里的视频和音频',
+        '接入你自己的 S3 兼容存储桶。需要把文件放到云上的功能会用它，目前是对话里的图片和音视频，以及生视频用的本地参考视频',
       connectedSummary: '{provider} · {bucket}（{region}）',
       edit: '修改',
       advanced: '高级设置',

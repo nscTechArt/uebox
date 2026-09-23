@@ -12,6 +12,7 @@ import { createHash, createHmac } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
+import { isIP } from 'node:net'
 
 export interface S3Target {
   endpoint: string
@@ -68,7 +69,10 @@ function amzDates(date: Date): { amzDate: string; dateStamp: string } {
 export function objectUrl(target: S3Target, key = ''): URL {
   const endpoint = new URL(target.endpoint.trim().replace(/\/+$/, ''))
   const encodedKey = key ? `/${encodeKey(key)}` : '/'
-  if (target.forcePathStyle) {
+  // IP 地址没法加桶名当子域名：`bucket.10.0.0.5` 不是合法主机名，URL 会**静默**不改，
+  // 桶名就这么丢了 —— 请求打到服务根上，报一句「桶不存在」却查不出为什么。IP 一律走路径式
+  const ipHost = isIP(endpoint.hostname.replace(/^\[|\]$/g, '')) !== 0
+  if (target.forcePathStyle || ipHost) {
     const base = endpoint.pathname.replace(/\/+$/, '')
     endpoint.pathname = `${base}/${encodeRfc3986(target.bucket)}${encodedKey === '/' ? '/' : encodedKey}`
   } else {
@@ -278,7 +282,10 @@ export async function headObject(target: S3Target, key: string): Promise<boolean
     headers,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   })
-  if (response.status === 404) return false
+  // 没有 ListBucket 权限的密钥查一个不存在的对象，S3 回的是 403 不是 404（不让你借此探测
+  // 桶里有什么）。只给了读写权限的最小化密钥很常见 —— 当成「没有」照传，
+  // 真没权限的话上传那一步会把原因说出来
+  if (response.status === 404 || response.status === 403) return false
   if (!response.ok) throw await describeFailure(response, '查询对象')
   return true
 }

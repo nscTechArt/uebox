@@ -20,7 +20,8 @@ vi.mock('../../../ai/video', () => ({
   resumeVideo: (...args: unknown[]) => resumeVideo(...args),
   // 任务号的打包格式是真实现，不该 mock —— 用户要照着它复制粘贴
   encodeVideoJob: (job: { id: string; providerId?: string }) =>
-    job.providerId ? `${job.providerId}:${job.id}` : job.id
+    job.providerId ? `${job.providerId}:${job.id}` : job.id,
+  supportsReferenceMedia: (api: string | undefined) => api !== 'minimax-video'
 }))
 vi.mock('../../../ai/store', () => ({ readSettings: () => readSettings() }))
 vi.mock('../../../services/aigc/assetSaver', () => ({
@@ -30,8 +31,10 @@ vi.mock('../../../services/aigc/assetSaver', () => ({
 const isObjectStorageReady = vi.fn()
 const uploadMediaFile = vi.fn()
 const mediaUrlFor = vi.fn()
+const readObjectStorageConfig = vi.fn()
 vi.mock('../../../services/objectStorage/objectStorageService', () => ({
   isObjectStorageReady: () => isObjectStorageReady(),
+  readObjectStorageConfig: () => readObjectStorageConfig(),
   uploadMediaFile: (...args: unknown[]) => uploadMediaFile(...args),
   mediaUrlFor: (...args: unknown[]) => mediaUrlFor(...args),
   isPrivateEndpoint: (url: string) => /\/\/(127\.|192\.168\.|localhost)/.test(url)
@@ -162,6 +165,10 @@ describe('参数与前置检查', () => {
       clip = join(dir, 'shot.mp4')
       await writeFile(clip, Buffer.alloc(1024))
       isObjectStorageReady.mockResolvedValue(true)
+      readObjectStorageConfig.mockResolvedValue({
+        endpoint: 'https://oss-cn-hangzhou.aliyuncs.com',
+        publicBaseUrl: ''
+      })
       uploadMediaFile.mockResolvedValue({ key: 'uebox-media/abc.mp4', reused: false })
       mediaUrlFor.mockResolvedValue(
         'https://bucket.oss-cn-hangzhou.aliyuncs.com/uebox-media/abc.mp4?sig'
@@ -200,10 +207,41 @@ describe('参数与前置检查', () => {
       expect(generateVideo).not.toHaveBeenCalled()
     })
 
-    it('对象存储是内网地址时拦下 —— 方舟从公网拉不到', async () => {
-      mediaUrlFor.mockResolvedValue('http://192.168.1.5:9000/bucket/abc.mp4?sig')
+    it('对象存储是内网地址时拦下 —— 方舟从公网拉不到，而且不白传', async () => {
+      readObjectStorageConfig.mockResolvedValue({
+        endpoint: 'http://192.168.1.5:9000',
+        publicBaseUrl: ''
+      })
 
       await expect(run({ prompt: '猫', reference_videos: [clip] })).rejects.toThrow(/内网/)
+      expect(uploadMediaFile).not.toHaveBeenCalled()
+      expect(generateVideo).not.toHaveBeenCalled()
+    })
+
+    it('选的是不收参考视频的厂商时，传之前就拦下', async () => {
+      readSettings.mockResolvedValue({
+        version: 3,
+        providers: [{ ...VIDEO_PROVIDER, id: 'minimax', videoApi: 'minimax-video' }],
+        roles: { video: { providerId: 'minimax', modelId: 'doubao-seedance-2-5-260628' } }
+      })
+
+      await expect(run({ prompt: '猫', reference_videos: [clip] })).rejects.toThrow(/只收图片/)
+      expect(isObjectStorageReady).not.toHaveBeenCalled()
+      expect(uploadMediaFile).not.toHaveBeenCalled()
+    })
+
+    it('上传途中按停止立刻放手，不说成上传失败', async () => {
+      uploadMediaFile.mockReturnValue(new Promise(() => {}))
+      const controller = new AbortController()
+      const pending = tool.execute(
+        'c1',
+        { prompt: '猫', reference_videos: [clip] },
+        controller.signal
+      )
+      await vi.waitFor(() => expect(uploadMediaFile).toHaveBeenCalled())
+      controller.abort(new Error('stopped'))
+
+      await expect(pending).rejects.not.toThrow(/测试连接/)
       expect(generateVideo).not.toHaveBeenCalled()
     })
 

@@ -3079,7 +3079,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       title: 'Object storage',
       enable: 'Enable object storage',
       enableDesc:
-        'Connect your own S3-compatible bucket. Features that need files in the cloud use it; today that is video and audio in chat',
+        'Connect your own S3-compatible bucket. Features that need files in the cloud use it; today that is images, video and audio in chat, plus local reference videos for video generation',
       connectedSummary: '{provider} · {bucket} ({region})',
       edit: 'Edit',
       advanced: 'Advanced settings',

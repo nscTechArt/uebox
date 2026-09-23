@@ -32,6 +32,7 @@ import {
   encodeVideoJob,
   generateVideo,
   resumeVideo,
+  supportsReferenceMedia,
   type GeneratedVideo,
   type VideoImageRole
 } from '../../../ai/video'
@@ -206,13 +207,24 @@ export function objectStorageGuide(localVideos: string[]): string {
  */
 async function resolveReferenceVideos(
   videos: string[],
-  report: (text: string) => void
+  report: (text: string) => void,
+  signal?: AbortSignal
 ): Promise<{ urls: string[] } | { problem: string }> {
   const local = videos.filter((video) => !isLinkedVideo(video))
   if (local.length === 0) return { urls: videos }
 
   const storage = await import('../../../services/objectStorage/objectStorageService')
   if (!(await storage.isObjectStorageReady())) return { problem: objectStorageGuide(local) }
+  // 链接的主机就是公开域名或 endpoint（见 mediaUrlFor），传之前就能判断 ——
+  // 传完几百 MB 才说「方舟拉不到」，用户白等好几分钟
+  const config = await storage.readObjectStorageConfig()
+  if (storage.isPrivateEndpoint(config.publicBaseUrl || config.endpoint)) {
+    return {
+      problem:
+        '对象存储是本机或内网地址，方舟从公网拉不到这段参考视频。（没有上传，也没有扣费。）' +
+        '请用户在「偏好设置 → 对象存储」换成公网可访问的桶，或填一个公开访问域名。'
+    }
+  }
 
   const urls: string[] = []
   for (const video of videos) {
@@ -235,19 +247,15 @@ async function resolveReferenceVideos(
       }
     }
     try {
-      const { key } = await storage.uploadMediaFile(video, (note) => report(note))
+      const upload = storage.uploadMediaFile(video, (note) => report(note))
+      const { key } = await (signal ? untilAborted(upload, signal) : upload)
       const url = await storage.mediaUrlFor(key)
       if (!url)
         return { problem: '参考视频传上去了，但对象存储现在签不出链接。请用户检查对象存储配置。' }
-      if (storage.isPrivateEndpoint(url)) {
-        return {
-          problem:
-            '对象存储是本机或内网地址，方舟从公网拉不到这段参考视频。' +
-            '请用户在「偏好设置 → 对象存储」换成公网可访问的桶，或填一个公开访问域名。'
-        }
-      }
       urls.push(url)
     } catch (error) {
+      // 用户按了停止：照实往外抛，不能说成「上传失败，去测连接」
+      if (signal?.aborted) throw error
       return {
         problem:
           `参考视频传到对象存储失败（没有扣费）：${error instanceof Error ? error.message : String(error)}。` +
@@ -256,6 +264,21 @@ async function resolveReferenceVideos(
     }
   }
   return { urls }
+}
+
+/**
+ * 等上传，但用户按停止时立刻放手。
+ *
+ * 上传本身不掐：同一个文件可能正被另一路（输入框里拖进来的那次）等着，
+ * 让它在后台传完，下次再用直接复用。
+ */
+function untilAborted<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    task.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 
 /**
@@ -426,6 +449,19 @@ reference 是「照着这个风格/主体重新画」。不确定就问用户，
         args.reference_audios ?? []
       )
       if (mediaProblem) return { isError: true, text: mediaProblem }
+      const modelLabel = describeBoundVideoModel(settings, chosen)
+      if ((args.reference_videos?.length ?? 0) + (args.reference_audios?.length ?? 0) > 0) {
+        const providerId = chosen?.providerId ?? settings.roles.video?.providerId
+        const provider = settings.providers.find((item) => item.id === providerId)
+        if (provider && !supportsReferenceMedia(provider.videoApi)) {
+          return {
+            isError: true,
+            text:
+              `${modelLabel} 只收图片，不收参考视频/参考音频（没有上传，也没有扣费）。` +
+              '要拿视频或音频当参考请用方舟 Seedance 2.x（model 填 seedance）。'
+          }
+        }
+      }
       const orderedImages = orderImages(args.reference_images ?? [])
       const references = await loadReferenceImages(
         orderedImages.map((item) => item.path),
@@ -435,12 +471,12 @@ reference 是「照着这个风格/主体重新画」。不确定就问用户，
       for (const audio of args.reference_audios ?? []) audios.push(await loadReferenceAudio(audio))
       const resolvedVideos = await resolveReferenceVideos(
         (args.reference_videos ?? []).map((url) => url.trim()).filter(Boolean),
-        (text) => ctx.report({ text })
+        (text) => ctx.report({ text }),
+        ctx.signal
       )
       if ('problem' in resolvedVideos) return { isError: true, text: resolvedVideos.problem }
       const videos = resolvedVideos.urls
 
-      const modelLabel = describeBoundVideoModel(settings, chosen)
       ctx.report({
         text:
           `正在用 ${modelLabel} 生成视频，通常要几分钟…` +

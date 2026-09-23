@@ -20,7 +20,14 @@ vi.mock('../../../utils/sharpLoader', () => ({
   getSharp: async () => () => ({ resize })
 }))
 
-import { loadReferenceImage, loadReferenceImages, VIDEO_REFERENCE_BUDGET } from './references'
+import { promises as fsPromises } from 'fs'
+
+import {
+  loadReferenceAudio,
+  loadReferenceImage,
+  loadReferenceImages,
+  VIDEO_REFERENCE_BUDGET
+} from './references'
 
 async function writeTempImage(name: string, bytes: Buffer): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'aigc-refs-'))
@@ -133,5 +140,19 @@ describe('多张', () => {
       'https://example.com/c.png',
       `data:image/png;base64,${Buffer.from('b').toString('base64')}`
     ])
+  })
+})
+
+describe('参考音频', () => {
+  // 超限的先按大小拒掉，不整个读进内存
+  it('超过 15MB 的不读盘就拒', async () => {
+    const path = await writeTempImage('long.wav', Buffer.alloc(16 * 1024 * 1024))
+    const readFile = vi.spyOn(fsPromises, 'readFile')
+    try {
+      await expect(loadReferenceAudio(path)).rejects.toThrow('15MB')
+      expect(readFile).not.toHaveBeenCalled()
+    } finally {
+      readFile.mockRestore()
+    }
   })
 })

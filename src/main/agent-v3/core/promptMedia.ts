@@ -17,6 +17,9 @@
  * 「走得通」要同时满足：对象存储开着且配完整、当前模型走 OpenAI 兼容协议、
  * 模型有这一类的能力（图片看「视觉」，音视频看「视频」）。
  *
+ * 链接发出去之后还有两道：音视频只随附带它的那条消息发（见 `ONE_TURN_KINDS`）；
+ * 厂商说拉不下来的，`streamFn.ts` 换成说明重发一次，之后这个对象不再给它发链接。
+ *
  * 只管**用户带进来的**。工具产出的截图不走这里：一轮工具循环里截图很多，
  * 每张都先上传会拖慢每一步，编辑器画面也不该默认进第三方存储（见 screenshot.ts）。
  *
@@ -40,6 +43,7 @@ import type { Context, ImageContent } from '@earendil-works/pi-ai'
 
 import { readSettings } from '../../ai/store'
 import type { AiProviderSettings } from '../../ai/types'
+import { classifyProviderError } from '../host/providerError'
 import {
   isObjectStorageReady,
   uploadMediaFile
@@ -178,29 +182,112 @@ export function contextHasMediaRefs(context: Context): boolean {
 }
 
 /**
- * 当前模型收不了的那几类：把引用换成说明。只换副本，不动 JSONL。
+ * 音视频只随附带它的那条用户消息发链接。
+ *
+ * 厂商每次请求都要把链接指的文件重新拉一遍 —— 十几 MB 的视频从桶里拉，
+ * 一轮工具循环几十步就拉几十次，慢，而且只要有一次没拉下来整轮就 400。
+ * 用户发了下一条消息，说明那段已经看过了，后面换成本地路径，要再看就走 `analyze_video`。
+ * 图片小，拉一次不费事，跟着对话走。
+ */
+const ONE_TURN_KINDS: ReadonlySet<PromptMediaKind> = new Set(['video', 'audio'])
+
+/** 这个引用这一次为什么不能作为链接发出去；能发返回 null */
+function refBlocker(
+  ref: PromptMediaRef,
+  inEarlierTurn: boolean,
+  allowed: ReadonlySet<PromptMediaKind>,
+  unfetchable: ReadonlySet<string>
+): string | null {
+  if (!allowed.has(ref.kind)) return `当前模型收不了${noun(ref.kind)}链接`
+  if (unfetchable.has(ref.key)) return '厂商拉不下这个链接'
+  if (inEarlierTurn && ONE_TURN_KINDS.has(ref.kind)) {
+    return '附带它的那一轮已经发给你看过，之后不再每轮重发'
+  }
+  return null
+}
+
+/**
+ * 这次发不出去的引用换成说明。只换副本，不动 JSONL。
+ *
+ * 换的说明逐字稳定：同一个引用在之后每一轮都换成同一句话，前缀缓存只在换的那一刻断一次。
  * @param allowed 这个模型能直接收链接的种类。不在里面的一律换掉
+ * @param unfetchable 厂商已经拉失败过的对象键，见 {@link noteUnfetchableMedia}
  */
 export function replaceMediaRefs(
   context: Context,
-  allowed: ReadonlySet<PromptMediaKind> = new Set()
+  allowed: ReadonlySet<PromptMediaKind> = new Set(),
+  unfetchable: ReadonlySet<string> = new Set()
 ): Context {
   if (!contextHasMediaRefs(context)) return context
+  let lastUser = -1
+  context.messages.forEach((message, index) => {
+    if (message.role === 'user') lastUser = index
+  })
   return {
     ...context,
-    messages: context.messages.map((message) => {
+    messages: context.messages.map((message, index) => {
       if (message.role !== 'user' || !Array.isArray(message.content)) return message
       return {
         ...message,
         content: message.content.map((part) => {
           if (part.type !== 'text') return part
           const ref = parseMediaRef(part.text)
-          if (!ref || allowed.has(ref.kind)) return part
-          return { ...part, text: unavailableText(ref, `当前模型收不了${noun(ref.kind)}链接`) }
+          if (!ref) return part
+          const blocker = refBlocker(ref, index < lastUser, allowed, unfetchable)
+          return blocker ? { ...part, text: unavailableText(ref, blocker) } : part
         })
       }
     })
   }
+}
+
+/** 上下文里全部引用的对象键 */
+export function mediaRefKeys(context: Context): string[] {
+  const keys: string[] = []
+  for (const message of context.messages) {
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue
+    for (const part of message.content) {
+      const ref = part.type === 'text' ? parseMediaRef(part.text) : null
+      if (ref) keys.push(ref.key)
+    }
+  }
+  return keys
+}
+
+/**
+ * 厂商说它拉不下 / 处理不了链接里的多媒体。
+ *
+ * 各家措辞不一（MIMO：`failed to download or process media content`；
+ * 百炼：`Download the media resource timed out`；OpenAI：`Failed to download image from url`），
+ * 共同点是 4xx、提到下载或拉取、提到媒体或链接。
+ */
+export function isMediaFetchError(errorMessage: string): boolean {
+  const { statusCode } = classifyProviderError(errorMessage)
+  if (statusCode === undefined || statusCode < 400 || statusCode >= 500) return false
+  return (
+    /download|fetch/i.test(errorMessage) &&
+    /media|image|video|audio|url|content|file/i.test(errorMessage)
+  )
+}
+
+/**
+ * 按厂商记下拉失败过的对象键。只在内存里，重启就忘 ——
+ * 一次网络抖动不该让这个文件永远发不出去，但同一次运行里也不该每一步都再撞一次。
+ */
+const unfetchableByProvider = new Map<string, Set<string>>()
+
+export function noteUnfetchableMedia(providerId: string, keys: readonly string[]): void {
+  const known = unfetchableByProvider.get(providerId) ?? new Set<string>()
+  keys.forEach((key) => known.add(key))
+  unfetchableByProvider.set(providerId, known)
+}
+
+export function unfetchableMediaKeys(providerId: string): ReadonlySet<string> {
+  return unfetchableByProvider.get(providerId) ?? new Set()
+}
+
+export const __testing = {
+  resetUnfetchable: (): void => unfetchableByProvider.clear()
 }
 
 interface ResolveDeps {

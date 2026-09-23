@@ -3,9 +3,16 @@
  * 对不上的话所有厂商（OSS、COS、R2、MinIO 都认同一套 SigV4）一起报 SignatureDoesNotMatch。
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { objectUrl, parseListObjects, presignGetUrl, signRequest, type S3Target } from './s3Client'
+import {
+  headObject,
+  objectUrl,
+  parseListObjects,
+  presignGetUrl,
+  signRequest,
+  type S3Target
+} from './s3Client'
 
 const AWS_EXAMPLE: S3Target = {
   endpoint: 'https://s3.amazonaws.com',
@@ -63,6 +70,14 @@ describe('寻址', () => {
     const target = { ...AWS_EXAMPLE, endpoint: 'http://127.0.0.1:9000', forcePathStyle: true }
     expect(objectUrl(target, 'k.mp4').toString()).toBe('http://127.0.0.1:9000/examplebucket/k.mp4')
   })
+
+  // `bucket.10.0.0.5` 不是合法主机名，URL 会静默不改 —— 桶名就丢了
+  it('IP 地址的端点没勾路径式也按路径式拼，桶名不丢', () => {
+    const ipv4 = { ...AWS_EXAMPLE, endpoint: 'http://10.0.0.5:7480', forcePathStyle: false }
+    expect(objectUrl(ipv4, 'k.mp4').toString()).toBe('http://10.0.0.5:7480/examplebucket/k.mp4')
+    const ipv6 = { ...AWS_EXAMPLE, endpoint: 'http://[::1]:9000', forcePathStyle: false }
+    expect(objectUrl(ipv6, 'k.mp4').toString()).toBe('http://[::1]:9000/examplebucket/k.mp4')
+  })
 })
 
 describe('parseListObjects', () => {
@@ -89,5 +104,27 @@ describe('parseListObjects', () => {
     ).toEqual({
       objects: []
     })
+  })
+})
+
+describe('headObject', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  // 没有 ListBucket 权限的最小化密钥查不存在的对象回 403。
+  // 当成查询失败的话，这种密钥一个文件都传不上去
+  it('403 当成「没有」，交给上传那一步', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 403 }))
+    )
+    await expect(headObject(AWS_EXAMPLE, 'a.mp4')).resolves.toBe(false)
+  })
+
+  it('别的失败照样报出来', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 500 }))
+    )
+    await expect(headObject(AWS_EXAMPLE, 'a.mp4')).rejects.toThrow('HTTP 500')
   })
 })

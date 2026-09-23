@@ -31,6 +31,8 @@ import path from 'node:path'
 import { app } from 'electron'
 
 import { deleteLiteralKey, resolveApiKey, saveLiteralKey } from '../../ai/credentials'
+import { isPrivateAddress } from '../agentBrowser/urlPolicy'
+import { writeSessionFile } from '../../agent-v3/core/atomicSessionFile'
 import {
   DEFAULT_OBJECT_STORAGE_CONFIG,
   normalizeEndpoint,
@@ -131,6 +133,8 @@ export async function saveObjectStorageConfig(
   await fs.mkdir(path.dirname(file), { recursive: true })
   await fs.writeFile(file, JSON.stringify(config, null, 2), 'utf-8')
   configCache = config
+  // 换了桶 / 地址 / 前缀，之前记下的「传完了」对新配置不作数
+  forgetSettledUploads()
   return getObjectStorageView()
 }
 
@@ -184,11 +188,21 @@ async function readIndex(): Promise<UploadIndex> {
   return indexCache
 }
 
-async function writeIndex(index: UploadIndex): Promise<void> {
-  indexCache = index
-  const file = userDataFile(INDEX_FILE)
-  await fs.mkdir(path.dirname(file), { recursive: true })
-  await fs.writeFile(file, JSON.stringify(index, null, 2), 'utf-8')
+/** 登记的读改写排成一队 —— 两个上传同时收尾时，后写完的那次不能拿旧快照把先写的盖掉 */
+let indexChain: Promise<unknown> = Promise.resolve()
+
+/**
+ * 改一次登记。写盘先落临时文件再替换：半截的 JSON 读回来会被当成空登记，
+ * 「已清理」那张表跟着丢，对话里引用着被删对象的消息就又会发出一条死链接
+ */
+function updateIndex(change: (index: UploadIndex) => UploadIndex): Promise<void> {
+  const next = indexChain.then(async () => {
+    const index = change(await readIndex())
+    indexCache = index
+    await writeSessionFile(userDataFile(INDEX_FILE), JSON.stringify(index, null, 2))
+  })
+  indexChain = next.catch(() => undefined)
+  return next
 }
 
 /** 这个键是不是已经从桶里清理掉了 */
@@ -252,6 +266,16 @@ const progressListeners = new Map<string, Set<(progress: UploadProgress) => void
 const noteListeners = new Map<string, Set<(note: string) => void>>()
 const currentNote = new Map<string, string>()
 
+/**
+ * 忘掉已经传完的记录，下次再要就重新确认桶里还有没有。
+ * 对象被清理、或者配置换了桶之后必须调：不然同一个文件再拖进来，
+ * 拿到的是一个已经删掉（或根本不在新桶里）的键。
+ */
+function forgetSettledUploads(): void {
+  for (const id of settled) uploads.delete(id)
+  settled.clear()
+}
+
 async function uploadIdentity(filePath: string): Promise<string> {
   const stat = await fs.stat(filePath)
   return `${path.resolve(filePath)}|${stat.size}|${stat.mtimeMs}`
@@ -269,7 +293,13 @@ export async function uploadMediaFile(
 ): Promise<{ key: string; reused: boolean }> {
   const id = await uploadIdentity(filePath)
   const running = uploads.get(id)
-  if (running && settled.has(id)) return running
+  if (running && settled.has(id)) {
+    // 静默复用也算「用过」：自动清理按最后一次用到的时间算，不记的话
+    // 一直开着的盒子里天天在用的文件，下次启动照样被当成 N 天没碰过清掉
+    const { key } = await running
+    await touchUpload(key)
+    return running
+  }
   if (onPercent) {
     const set = progressListeners.get(id) ?? new Set()
     set.add(onPercent)
@@ -349,16 +379,25 @@ async function doUpload(
   }
   report({ percent: 100, note: exists ? '桶里已经有这个文件，直接复用' : '上传完成' })
 
-  const latest = await readIndex()
-  await writeIndex({
+  await updateIndex((latest) => ({
     uploads: [
       ...latest.uploads.filter((item) => item.key !== key),
       { key, fileName, size: stat.size, uploadedAt: new Date().toISOString() }
     ],
     // 重新传上去了，就不再算「已清理」
     removed: latest.removed.filter((item) => item !== key)
-  })
+  }))
   return { key, reused: exists }
+}
+
+/** 把这个键的「最后用到」挪到现在 */
+async function touchUpload(key: string): Promise<void> {
+  await updateIndex((latest) => ({
+    ...latest,
+    uploads: latest.uploads.map((item) =>
+      item.key === key ? { ...item, uploadedAt: new Date().toISOString() } : item
+    )
+  })).catch((error) => console.warn('[对象存储] 记录复用时间失败:', error))
 }
 
 /**
@@ -389,13 +428,9 @@ export function isPrivateEndpoint(address: string): boolean {
   } catch {
     return false
   }
-  if (host === 'localhost' || host.endsWith('.local') || host === '::1' || host === '[::1]') {
-    return true
-  }
-  const parts = host.split('.').map(Number)
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false
-  const [a, b] = parts
-  return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)
+  // 和内置浏览器防 SSRF 用同一把尺子：Tailscale / CGNAT（100.64/10）、链路本地、
+  // IPv6 唯一本地这些，自己手写的那份四个网段全漏了
+  return isPrivateAddress(host)
 }
 
 /**
@@ -444,6 +479,18 @@ export async function testObjectStorage(input: ObjectStorageSaveInput): Promise<
   }
 }
 
+/** 盒子自己传的对象键：内容哈希的前 32 位 + 扩展名，见 doUpload */
+const OWN_KEY_NAME = /^[0-9a-f]{32}(\.[^/]*)?$/
+
+/**
+ * 这个键归不归盒子管。前缀留空时，列举和清理面对的是整个桶 ——
+ * 只认盒子按哈希起名的那些，用户放在同一个桶里的别的数据一概不碰。
+ */
+function ownsKey(config: ObjectStorageConfig, key: string): boolean {
+  if (config.prefix) return key.startsWith(config.prefix)
+  return OWN_KEY_NAME.test(key)
+}
+
 export async function listStoredObjects(): Promise<ObjectStorageEntry[]> {
   const config = await readObjectStorageConfig()
   const target = await targetFor(config)
@@ -451,6 +498,7 @@ export async function listStoredObjects(): Promise<ObjectStorageEntry[]> {
   const names = new Map(index.uploads.map((item) => [item.key, item.fileName]))
   const objects = await listObjects(target, config.prefix)
   return objects
+    .filter((item) => ownsKey(config, item.key))
     .map((item) => ({
       ...item,
       ...(names.has(item.key) ? { fileName: names.get(item.key) } : {})
@@ -468,9 +516,9 @@ export async function removeStoredObjects(keys: string[]): Promise<{
   const failed: Array<{ key: string; error: string }> = []
   const done: string[] = []
   for (const key of keys) {
-    // 只动自己前缀下的东西：桶里别的数据不归盒子管
-    if (config.prefix && !key.startsWith(config.prefix)) {
-      failed.push({ key, error: '不在盒子的前缀下，不动' })
+    // 只动盒子自己传的东西：桶里别的数据不归盒子管
+    if (!ownsKey(config, key)) {
+      failed.push({ key, error: '不是盒子传的对象，不动' })
       continue
     }
     try {
@@ -480,11 +528,11 @@ export async function removeStoredObjects(keys: string[]): Promise<{
       failed.push({ key, error: error instanceof Error ? error.message : String(error) })
     }
   }
-  const index = await readIndex()
-  await writeIndex({
+  await updateIndex((index) => ({
     uploads: index.uploads.filter((item) => !done.includes(item.key)),
     removed: [...new Set([...index.removed, ...done])]
-  })
+  }))
+  if (done.length > 0) forgetSettledUploads()
   return { removed: done.length, failed }
 }
 

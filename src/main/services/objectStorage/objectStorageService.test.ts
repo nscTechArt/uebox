@@ -5,7 +5,7 @@
  * - 清理掉的对象记下来，发请求时换成说明。
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -174,10 +174,72 @@ describe('清理', () => {
     const result = await service.removeStoredObjects(['uebox-media/gone.mp4', 'other/keep.mp4'])
 
     expect(result.removed).toBe(1)
-    expect(result.failed).toEqual([{ key: 'other/keep.mp4', error: '不在盒子的前缀下，不动' }])
+    expect(result.failed).toEqual([{ key: 'other/keep.mp4', error: '不是盒子传的对象，不动' }])
     expect(deleteObject).toHaveBeenCalledTimes(1)
     expect(await service.isObjectRemoved('uebox-media/gone.mp4')).toBe(true)
     expect(await service.isObjectRemoved('other/keep.mp4')).toBe(false)
+  })
+
+  it('前缀留空：列举和清理只认盒子按哈希起名的对象，桶里别的数据不碰', async () => {
+    await service.saveObjectStorageConfig({ ...CONFIG, prefix: '' })
+    const own = `${'a'.repeat(32)}.mp4`
+    const old = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
+    listObjects.mockResolvedValueOnce([
+      { key: own, size: 1, lastModified: old },
+      { key: 'backups/db.sql', size: 1, lastModified: old },
+      { key: 'photo.jpg', size: 1, lastModified: old }
+    ])
+
+    const result = await service.cleanOlderThan(7)
+
+    expect(result.removed).toBe(1)
+    expect(deleteObject).toHaveBeenCalledTimes(1)
+    expect(deleteObject.mock.calls[0]).toContain(own)
+  })
+
+  it('清理过的文件再拖进来，重新确认桶里有没有，不拿已删的键', async () => {
+    const file = path.join(userData, 'cleaned.mp4')
+    writeFileSync(file, 'cleaned video bytes')
+    const { key } = await service.uploadMediaFile(file)
+    await service.removeStoredObjects([key])
+
+    await service.uploadMediaFile(file)
+
+    expect(putObjectFromFile).toHaveBeenCalledTimes(2)
+    expect(await service.isObjectRemoved(key)).toBe(false)
+  })
+
+  it('同一个文件再用一次也记成「刚用过」', async () => {
+    const file = path.join(userData, 'touched.mp4')
+    writeFileSync(file, 'touched video bytes')
+    const { key } = await service.uploadMediaFile(file)
+    const tenDays = 10 * 24 * 3600 * 1000
+    vi.useFakeTimers({ now: Date.now() + tenDays, toFake: ['Date'] })
+    try {
+      await service.uploadMediaFile(file)
+      listObjects.mockResolvedValueOnce([
+        { key, size: 1, lastModified: new Date(Date.now() - tenDays).toISOString() }
+      ])
+      expect((await service.cleanOlderThan(7)).removed).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('两个上传同时收尾，登记里两条都在', async () => {
+    const a = path.join(userData, 'race-a.mp4')
+    const b = path.join(userData, 'race-b.mp4')
+    writeFileSync(a, 'race a bytes')
+    writeFileSync(b, 'race b bytes')
+    const [first, second] = await Promise.all([
+      service.uploadMediaFile(a),
+      service.uploadMediaFile(b)
+    ])
+    const saved = JSON.parse(
+      readFileSync(path.join(userData, 'object-storage-index.json'), 'utf-8')
+    )
+    const keys = saved.uploads.map((item: { key: string }) => item.key)
+    expect(keys).toEqual(expect.arrayContaining([first.key, second.key]))
   })
 
   it('按最后一次用到的时间算：去重复用过的旧文件不清', async () => {
@@ -207,5 +269,9 @@ describe('isPrivateEndpoint', () => {
     expect(service.isPrivateEndpoint('http://172.20.0.5')).toBe(true)
     expect(service.isPrivateEndpoint('https://s3.oss-cn-hangzhou.aliyuncs.com')).toBe(false)
     expect(service.isPrivateEndpoint('https://8.8.8.8')).toBe(false)
+    // 自己 NAS 上的 MinIO 走 Tailscale、或者 IPv6 唯一本地地址：厂商一样访问不到
+    expect(service.isPrivateEndpoint('http://100.101.2.3:9000')).toBe(true)
+    expect(service.isPrivateEndpoint('http://[fd12::5]:9000')).toBe(true)
+    expect(service.isPrivateEndpoint('http://169.254.10.1')).toBe(true)
   })
 })

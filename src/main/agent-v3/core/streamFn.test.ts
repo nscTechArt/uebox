@@ -11,14 +11,19 @@ const streamSimple = vi.fn()
 const getSupportedThinkingLevels = vi.fn()
 const PI_MODEL = { id: 'm1', provider: 'p', api: 'openai-codex-responses' }
 
-vi.mock('@earendil-works/pi-ai', () => ({
-  createModels: () => ({
-    setProvider: vi.fn(),
-    getModel: () => PI_MODEL,
-    streamSimple
-  }),
-  getSupportedThinkingLevels: (model: unknown) => getSupportedThinkingLevels(model)
-}))
+vi.mock('@earendil-works/pi-ai', async () => {
+  const actual =
+    await vi.importActual<typeof import('@earendil-works/pi-ai')>('@earendil-works/pi-ai')
+  return {
+    createAssistantMessageEventStream: actual.createAssistantMessageEventStream,
+    createModels: () => ({
+      setProvider: vi.fn(),
+      getModel: () => PI_MODEL,
+      streamSimple
+    }),
+    getSupportedThinkingLevels: (model: unknown) => getSupportedThinkingLevels(model)
+  }
+})
 
 vi.mock('./piModel', () => ({
   toPiProvider: () => ({ getModels: () => [PI_MODEL] })
@@ -39,6 +44,8 @@ const {
   budgetFor,
   __testing: __budgetTesting
 } = await import('./requestBudget')
+const { mediaRefText, parseMediaRef, __testing: __mediaTesting } = await import('./promptMedia')
+const { createAssistantMessageEventStream } = await import('@earendil-works/pi-ai')
 
 const SETTINGS = {
   version: 1 as const,
@@ -212,5 +219,105 @@ describe('出口闸', () => {
     expect(() =>
       runtime.streamFn(PI_MODEL as never, { messages: [] } as never, undefined as never)
     ).not.toThrow()
+  })
+})
+
+/**
+ * 厂商拉不下链接里的视频时，整轮不该失败：换成说明重发一次，
+ * 之后这个对象不再给这家发链接 —— 否则工具循环每一步都要再撞一次 400。
+ */
+describe('厂商拉不下多媒体链接', () => {
+  const VIDEO_SETTINGS = {
+    ...SETTINGS,
+    providers: [
+      {
+        ...SETTINGS.providers[0],
+        protocol: 'openai-completions' as const,
+        models: [{ id: 'm1', supportsVideo: true }]
+      }
+    ]
+  }
+  const REF = {
+    kind: 'video' as const,
+    key: 'uebox-media/v.avi',
+    fileName: 'v.avi',
+    filePath: 'C:\\v.avi'
+  }
+  const context = {
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '看这段' },
+          { type: 'text', text: mediaRefText(REF) }
+        ],
+        timestamp: 0
+      }
+    ]
+  }
+  const assistant = (stopReason: string, errorMessage?: string): Record<string, unknown> => ({
+    role: 'assistant',
+    content: [],
+    stopReason,
+    ...(errorMessage ? { errorMessage } : {})
+  })
+  /** 一个只推一个结局事件的流，模拟厂商这一次的回应 */
+  function streamEnding(event: Record<string, unknown>): unknown {
+    const stream = createAssistantMessageEventStream()
+    stream.push(event as never)
+    stream.end()
+    return stream
+  }
+  const sentRefs = (call: number): unknown => {
+    const sent = streamSimple.mock.calls[call][1] as typeof context
+    return parseMediaRef(sent.messages[0].content[1].text)
+  }
+
+  beforeEach(() => {
+    __mediaTesting.resetUnfetchable()
+    readSettings.mockResolvedValue(VIDEO_SETTINGS)
+  })
+
+  it('换成说明重发，调用方拿到的是重发的结果', async () => {
+    const MEDIA_400 =
+      '400: {"code":"400","message":"Param Incorrect","param":"failed to download or process media content"}'
+    streamSimple
+      .mockReturnValueOnce(
+        streamEnding({ type: 'error', reason: 'error', error: assistant('error', MEDIA_400) })
+      )
+      .mockReturnValueOnce(
+        streamEnding({ type: 'done', reason: 'stop', message: assistant('stop') })
+      )
+    const runtime = await resolveAgentModel({ role: 'agent' })
+
+    const stream = await runtime.streamFn(PI_MODEL as never, context as never, undefined as never)
+
+    await expect(stream.result()).resolves.toMatchObject({ stopReason: 'stop' })
+    expect(streamSimple).toHaveBeenCalledTimes(2)
+    expect(sentRefs(0)).toEqual(REF)
+    expect(sentRefs(1)).toBeNull()
+
+    // 下一步不再先撞一次
+    streamSimple.mockReturnValueOnce(
+      streamEnding({ type: 'done', reason: 'stop', message: assistant('stop') })
+    )
+    await runtime.streamFn(PI_MODEL as never, context as never, undefined as never)
+    expect(sentRefs(2)).toBeNull()
+  })
+
+  it('别的错误原样交回，不重发', async () => {
+    streamSimple.mockReturnValueOnce(
+      streamEnding({
+        type: 'error',
+        reason: 'error',
+        error: assistant('error', '401: {"error":{"message":"bad key"}}')
+      })
+    )
+    const runtime = await resolveAgentModel({ role: 'agent' })
+
+    const stream = await runtime.streamFn(PI_MODEL as never, context as never, undefined as never)
+
+    await expect(stream.result()).resolves.toMatchObject({ stopReason: 'error' })
+    expect(streamSimple).toHaveBeenCalledTimes(1)
   })
 })

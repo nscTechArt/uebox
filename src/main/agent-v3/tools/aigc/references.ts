@@ -205,17 +205,25 @@ export async function loadReferenceAudio(reference: string): Promise<string> {
   const denied = assertPathAllowed(value)
   if (denied) throw new ReferenceImageError(denied)
 
+  // 先看大小再读：模型给错路径指到一个几 GB 的录音上时，整个读进内存再拒绝，
+  // 主进程会先卡上好一阵
+  let size: number
+  try {
+    size = (await fs.stat(value)).size
+  } catch {
+    throw new ReferenceImageError(`参考音频读不到：${value}。确认这个文件存在。`)
+  }
+  if (size > AUDIO_REFERENCE_MAX_BYTES) {
+    throw new ReferenceImageError(
+      `参考音频 ${Math.round(size / 1024 / 1024)}MB，超过方舟单个 15MB 的上限：${value}。` +
+        '截短一些，或者放到公网直链上。'
+    )
+  }
   let bytes: Buffer
   try {
     bytes = await fs.readFile(value)
   } catch {
     throw new ReferenceImageError(`参考音频读不到：${value}。确认这个文件存在。`)
-  }
-  if (bytes.byteLength > AUDIO_REFERENCE_MAX_BYTES) {
-    throw new ReferenceImageError(
-      `参考音频 ${Math.round(bytes.byteLength / 1024 / 1024)}MB，超过方舟单个 15MB 的上限：${value}。` +
-        '截短一些，或者放到公网直链上。'
-    )
   }
   return `data:${mediaType};base64,${bytes.toString('base64')}`
 }

@@ -82,11 +82,16 @@ const presetOptions = computed(() =>
 
 const totalSize = computed(() => objects.value.reduce((sum, item) => sum + item.size, 0))
 
-
+/**
+ * 当前 endpoint 是按哪个 Region 从预设模板推出来的。只有 endpoint 还是「模板 + 这个 Region」
+ * 原样时才跟着 Region 改；高级设置里手填的（中国区、内网、加速域名）一律不碰。
+ */
+let derivedRegion = ''
 
 function applyView(view: ObjectStorageConfigView): void {
   const { hasSecret: secretSaved, ...config } = view
   Object.assign(form, config)
+  derivedRegion = config.region
   hasSecret.value = secretSaved
   secretInput.value = ''
   configured.value = Boolean(
@@ -100,27 +105,24 @@ function onPresetChange(value: ObjectStoragePreset): void {
   form.preset = value
   form.region = preset.region
   form.endpoint = preset.endpoint.replace('{region}', preset.region)
+  derivedRegion = preset.region
   form.forcePathStyle = preset.forcePathStyle
 }
 
-/** 改 region 时，endpoint 若还是预设的形状就跟着换，免得两处对不上签名就错 */
+/** 改 region 时，endpoint 若还是按模板推出来的原样就跟着换，免得两处对不上签名就错 */
 function onRegionChange(): void {
   const template = OBJECT_STORAGE_PRESETS[form.preset]?.endpoint
-  if (!template?.includes('{region}')) return
-  const [head, tail] = template.split('{region}')
-  if (form.endpoint.startsWith(head) && form.endpoint.endsWith(tail)) {
-    form.endpoint = `${head}${form.region}${tail}`
+  const region = form.region.trim()
+  if (!template?.includes('{region}') || !region) return
+  if (!form.endpoint || form.endpoint === template.replace('{region}', derivedRegion)) {
+    form.endpoint = template.replace('{region}', region)
+    derivedRegion = region
   }
 }
 
 function saveInput(): Parameters<typeof objectStorageAPI.save>[0] {
   // Endpoint 能推出来的就推一遍：用户改了 Region 没离开输入框就点保存，也不会两处对不上
-  if (!needsEndpoint.value && form.region.trim()) {
-    const template = OBJECT_STORAGE_PRESETS[form.preset].endpoint
-    if (!form.endpoint || !showAdvanced.value) {
-      form.endpoint = template.replace('{region}', form.region.trim())
-    }
-  }
+  if (!needsEndpoint.value) onRegionChange()
   return {
     ...form,
     // 留空 = 不改。只有真填了才带过去
@@ -603,5 +605,4 @@ onMounted(load)
 .list-state.warn {
   color: var(--color-warning-text);
 }
-
 </style>

@@ -581,6 +581,14 @@ const ADAPTERS: Record<VideoApi, VideoAdapter> = {
   }
 }
 
+/**
+ * 这家收不收参考视频 / 参考音频。MiniMax 只收图片（见它那个适配器）。
+ * 工具在传对象存储**之前**问一句：几百 MB 的视频传完了才被适配器拒掉，白等好几分钟
+ */
+export function supportsReferenceMedia(api: VideoApi | undefined): boolean {
+  return api !== 'minimax-video'
+}
+
 function adapterOf(provider: ProviderConfig): VideoAdapter {
   const api = provider.videoApi
   if (!api || !(api in ADAPTERS)) throw new VideoApiUnknownError(provider.id)

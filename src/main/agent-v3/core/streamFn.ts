@@ -1,8 +1,12 @@
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import {
+  createAssistantMessageEventStream,
   createModels,
   getSupportedThinkingLevels,
   type Api,
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  type AssistantMessageEventStream,
   type Context,
   type Model,
   type ModelThinkingLevel,
@@ -23,9 +27,13 @@ import { classifyProviderError } from '../host/providerError'
 import { toPiProvider } from './piModel'
 import {
   contextHasMediaRefs,
+  isMediaFetchError,
+  mediaRefKeys,
   mediaUrlKinds,
+  noteUnfetchableMedia,
   replaceMediaRefs,
-  rewriteMediaInPayload
+  rewriteMediaInPayload,
+  unfetchableMediaKeys
 } from './promptMedia'
 import { isObjectRemoved, mediaUrlFor } from '../../services/objectStorage/objectStorageService'
 import {
@@ -189,6 +197,74 @@ function watchForOversized(stream: unknown, providerId: string, bytes: number): 
     .catch(() => {})
 }
 
+/** 流里出了意外时补的那条失败消息 —— 调用方要等到一个结局，不能让它永远挂着 */
+function failedMessage(model: Model<Api>, errorMessage: string): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: [],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    },
+    stopReason: 'error',
+    errorMessage,
+    timestamp: Date.now()
+  }
+}
+
+/**
+ * 厂商说拉不下链接里的多媒体（对象存储在墙外、链接过期、格式它不认），
+ * 就把引用换成说明重发一次，这一轮照样有回答 —— 见 AGENTS.md 第 5 节第 13 条
+ * 「退的每一步都不许打断这一轮」。
+ *
+ * 只看第一个事件：pi 在 HTTP 失败时只推一个 `error`、不推 `start`，
+ * 这时调用方还什么都没收到，换一条流接上不会留下半截内容。
+ */
+function retryOnMediaFetchError(
+  first: AssistantMessageEventStream,
+  model: Model<Api>,
+  retry: () => AssistantMessageEventStream
+): AssistantMessageEventStream {
+  const out = createAssistantMessageEventStream()
+  const forward = async (iterator: AsyncIterator<AssistantMessageEvent>): Promise<void> => {
+    for (let next = await iterator.next(); !next.done; next = await iterator.next()) {
+      out.push(next.value)
+    }
+  }
+  void (async () => {
+    const iterator = first[Symbol.asyncIterator]()
+    const head = await iterator.next()
+    if (
+      !head.done &&
+      head.value.type === 'error' &&
+      head.value.reason === 'error' &&
+      isMediaFetchError(head.value.error.errorMessage ?? '')
+    ) {
+      await forward(retry()[Symbol.asyncIterator]())
+    } else {
+      if (!head.done) out.push(head.value)
+      await forward(iterator)
+    }
+    out.end()
+  })().catch((error: unknown) => {
+    // 已经推过结局的话这一条会被忽略（EventStream 结束后不再收）
+    out.push({
+      type: 'error',
+      reason: 'error',
+      error: failedMessage(model, error instanceof Error ? error.message : String(error))
+    })
+    out.end()
+  })
+  return out
+}
+
 export interface AgentModelRuntime {
   selection: PiModelSelection
   streamFn: StreamFn
@@ -291,13 +367,17 @@ export async function resolveAgentModel(
             `已丢掉 ${projected.droppedImages} 张图（最大的优先），换成占位文字`
         )
       }
-      // 收不了的那几类先换成说明，剩下的（如果还有）在 onPayload 里换成链接
-      const outgoing = replaceMediaRefs(projected.context, urlKinds)
+      // 发不出去的那几类先换成说明，剩下的（如果还有）在 onPayload 里换成链接
+      const outgoing = replaceMediaRefs(
+        projected.context,
+        urlKinds,
+        unfetchableMediaKeys(selection.providerId)
+      )
       const hasMedia = contextHasMediaRefs(outgoing)
       const previousOnPayload = options?.onPayload
-      const stream = models.streamSimple(model, outgoing, {
-        ...options,
-        ...(reasoning ? { reasoning } : {}),
+      const baseOptions = { ...options, ...(reasoning ? { reasoning } : {}) }
+      const firstTry = models.streamSimple(model, outgoing, {
+        ...baseOptions,
         ...(hasMedia
           ? {
               onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
@@ -312,6 +392,21 @@ export async function resolveAgentModel(
             }
           : {})
       })
+      const stream = hasMedia
+        ? retryOnMediaFetchError(firstTry, model, () => {
+            const keys = mediaRefKeys(outgoing)
+            console.warn(
+              `[streamFn] ${selection.providerId} 拉不下对话里的多媒体链接，换成说明重发：`,
+              keys
+            )
+            noteUnfetchableMedia(selection.providerId, keys)
+            return models.streamSimple(
+              model,
+              replaceMediaRefs(outgoing, urlKinds, new Set(keys)),
+              baseOptions
+            )
+          })
+        : firstTry
       // 没量出来（bytes < 0）就没有可学的数 —— 别拿一个假数去调这家的预算
       if (projected.bytes >= 0) {
         watchForOversized(stream, selection.providerId, projected.bytes)

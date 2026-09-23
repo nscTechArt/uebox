@@ -17,6 +17,8 @@ vi.mock('./promptAttachments', () => ({ savePromptAttachments: vi.fn() }))
 const {
   contextHasMediaRefs,
   describePromptMedia,
+  isMediaFetchError,
+  mediaRefKeys,
   mediaRefText,
   mediaUrlKinds,
   modelTakesMediaUrl,
@@ -230,6 +232,61 @@ describe('当前模型收不了链接', () => {
     const original = context()
     replaceMediaRefs(original)
     expect(contextHasMediaRefs(original)).toBe(true)
+  })
+})
+
+describe('音视频只随附带它的那一轮发', () => {
+  const ALL = new Set(['image', 'video', 'audio'] as const)
+  const IMAGE_REF = { ...REF, kind: 'image' as const, key: 'uebox-media/i.png' }
+  const user = (texts: string[]): Context['messages'][number] => ({
+    role: 'user',
+    content: texts.map((text) => ({ type: 'text' as const, text })),
+    timestamp: 1
+  })
+  const textsOf = (context: Context, index: number): string[] =>
+    (context.messages[index] as { content: Array<{ text: string }> }).content.map((p) => p.text)
+
+  // 那一轮里工具循环再多步，视频都还在；用户说了下一句才换掉
+  it('最后一条用户消息里的视频照发，之前的换成路径', () => {
+    const context: Context = {
+      messages: [user(['看这段', mediaRefText(REF)]), user(['继续'])]
+    }
+    expect(textsOf(replaceMediaRefs(context, ALL), 0)[1]).toContain('之后不再每轮重发')
+    expect(textsOf(replaceMediaRefs(context, ALL), 0)[1]).toContain(REF.filePath)
+
+    const current: Context = { messages: [user(['看这段', mediaRefText(REF)])] }
+    expect(parseMediaRef(textsOf(replaceMediaRefs(current, ALL), 0)[1])).toEqual(REF)
+  })
+
+  it('图片不受影响，跟着对话走', () => {
+    const context: Context = { messages: [user([mediaRefText(IMAGE_REF)]), user(['继续'])] }
+    expect(parseMediaRef(textsOf(replaceMediaRefs(context, ALL), 0)[0])).toEqual(IMAGE_REF)
+  })
+
+  it('厂商拉失败过的对象，哪一轮都换成说明', () => {
+    const context: Context = { messages: [user([mediaRefText(IMAGE_REF)])] }
+    const out = replaceMediaRefs(context, ALL, new Set([IMAGE_REF.key]))
+    expect(textsOf(out, 0)[0]).toContain('厂商拉不下这个链接')
+    expect(mediaRefKeys(context)).toEqual([IMAGE_REF.key])
+  })
+})
+
+describe('isMediaFetchError', () => {
+  it.each([
+    '400: {"code":"400","message":"Param Incorrect","param":"failed to download or process media content","type":""}',
+    '400 {"error":{"message":"Download the media resource timed out during the data inspection process."}}',
+    '400: {"error":{"message":"Failed to download image from url"}}'
+  ])('认得出：%s', (message) => {
+    expect(isMediaFetchError(message)).toBe(true)
+  })
+
+  it.each([
+    '401: {"error":{"message":"Incorrect API key"}}',
+    '400: {"error":{"message":"max_tokens is too large"}}',
+    '500: {"error":{"message":"failed to fetch upstream content"}}',
+    'Stream ended without finish_reason'
+  ])('不乱认：%s', (message) => {
+    expect(isMediaFetchError(message)).toBe(false)
   })
 })
 
