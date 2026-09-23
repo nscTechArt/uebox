@@ -43,7 +43,7 @@ describe('ProfileObjectStorage：套餐存储', () => {
     })
     await flushPromises()
     const text = wrapper.text()
-    expect(text).toContain('创作者 Token Plan 提供，不用填密钥')
+    expect(text).toContain('UEBox Token Plan 提供，不用填密钥')
     expect(text).toContain('已用 1.0 MB / 10.00 GB')
     expect(text).toContain('最后一次用到后留 30 天')
     expect(text).toContain('重新导入')

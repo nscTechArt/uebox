@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * 创作者 Token Plan 卡片：连接、导入预览、套餐状态、断开。
+ * UEBox Token Plan 卡片：连接、导入预览、套餐状态、断开。
  *
  * 没连接时打开设置页不会联网 —— 主进程的 state 在没有套餐来源时直接返回。
  * 应用、断开之后发 `changed`，由父组件重读模型配置（来源列表和角色绑定都变了）。
  *
- * 额度只写一句「剩余 xx%」（按对话额度算），细账去「管理订阅」的网页端看。
+ * 额度只显示一个百分比（进度条 +「本月已用 xx%」+ 重置日期），不显示 Credits 数字和单价，
+ * 细账去「管理订阅」的网页端看。怎么从清单 quotas 算出这个数见 shared 的 planUsage。
  * 续费失败（past_due）常驻一条提醒；清单说要下线的模型正在用时列出来。
  * 断开时服务端没吊销成功，留一句话和去网页端的链接。
  */
@@ -20,12 +21,11 @@ import { creatorPlanAPI } from '@renderer/api/creatorPlan'
 import type { ModelRole } from '@core/shared/aiProvider'
 import {
   formatPlanResetTime,
-  nextUtcMidnight,
+  planUsage,
   type CreatorPlanDeprecationHit,
   type CreatorPlanDevicePrompt,
   type CreatorPlanErrorCode,
   type CreatorPlanPreview,
-  type CreatorPlanQuota,
   type CreatorPlanState
 } from '@core/shared/creatorPlan'
 
@@ -140,26 +140,20 @@ const formatDate = (iso: string | null): string =>
   iso ? new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(iso)) : ''
 
 /**
- * 卡片上只写一句「剩余 xx%」，按对话额度算（清单没给对话就拿第一项）。
- * 今天的每日上限用完了，百分比再高也用不了，补一句什么时候恢复
- * （没给重置时间就按下一个 00:00 UTC，协议的日界）。
+ * 本月已用百分比。今天的每日上限用完了，百分比再低也用不了，补一句什么时候恢复（本机时间）
  */
-const mainQuota = computed<CreatorPlanQuota | null>(() => {
-  const quotas = summary.value?.quotas ?? []
-  return quotas.find((quota) => quota.key === 'text_tokens') ?? quotas[0] ?? null
-})
-const remainingText = computed(() => {
-  const quota = mainQuota.value
-  if (!quota) return ''
-  const ratio = quota.limit > 0 ? Math.max(0, 1 - quota.used / quota.limit) : 0
-  return t('aiProvider.creatorPlan.remaining', { percent: Math.round(ratio * 100) })
+const usage = computed(() => (summary.value ? planUsage(summary.value.quotas) : null))
+const usedText = computed(() => {
+  if (!usage.value) return ''
+  const used = t('aiProvider.creatorPlan.used', { percent: usage.value.usedPercent })
+  const resetsAt = summary.value?.quotaResetsAt
+  return resetsAt
+    ? `${used} · ${t('aiProvider.creatorPlan.resetsOn', { date: formatDate(resetsAt) })}`
+    : used
 })
 const dailyDoneText = computed(() => {
-  const daily = mainQuota.value?.daily
-  if (!daily || daily.used < daily.limit) return ''
-  return t('aiProvider.creatorPlan.quotaDailyDone', {
-    time: formatTime(daily.resetsAt ?? nextUtcMidnight())
-  })
+  const until = usage.value?.dailyExhaustedUntil
+  return until ? t('aiProvider.creatorPlan.dailyDone', { time: formatTime(until) }) : ''
 })
 
 function deprecationText(hit: CreatorPlanDeprecationHit): string {
@@ -216,10 +210,23 @@ onUnmounted(() => unsubscribe?.())
               {{ $t(`aiProvider.creatorPlan.status.${summary.status}`) }}
             </span>
           </span>
-          <span v-if="remainingText" class="plan-desc plan-remaining">
-            {{ remainingText
-            }}<span v-if="dailyDoneText" class="plan-warn"> · {{ dailyDoneText }}</span>
-          </span>
+          <div v-if="usage" class="plan-usage">
+            <div
+              class="plan-bar"
+              :class="{ 'plan-bar-full': usage.usedPercent >= 100 || !!dailyDoneText }"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="usage.usedPercent"
+              :aria-label="$t('aiProvider.creatorPlan.usageLabel')"
+            >
+              <span class="plan-bar-fill" :style="{ width: `${usage.usedPercent}%` }" />
+            </div>
+            <span class="plan-desc plan-used">{{ usedText }}</span>
+            <span v-if="dailyDoneText" class="plan-desc plan-warn plan-daily-done">
+              {{ dailyDoneText }}
+            </span>
+          </div>
         </template>
         <span v-else-if="state.error" class="plan-desc plan-warn">
           {{ errorText(state.error, '') }}
@@ -259,7 +266,7 @@ onUnmounted(() => unsubscribe?.())
       </div>
     </div>
 
-    <!-- 续费失败：本期额度已压低（对话 20%、其他暂停），过了宽限期就停，所以常驻提醒，不收起来 -->
+    <!-- 续费失败：本期只给 20% 的额度，过了宽限期就停，所以常驻提醒，不收起来 -->
     <div v-if="state?.connected && summary?.status === 'past_due'" class="plan-alert" role="alert">
       <span>{{ $t('aiProvider.creatorPlan.pastDue') }}</span>
       <AppButton variant="primary" size="small" @click="openManage">
@@ -402,6 +409,30 @@ onUnmounted(() => unsubscribe?.())
 
 .plan-warn {
   color: var(--color-warning-text);
+}
+
+.plan-usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 320px;
+}
+
+.plan-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--color-bg-sunken);
+}
+
+.plan-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-accent-solid);
+}
+
+.plan-bar-full .plan-bar-fill {
+  background: var(--color-warning-solid);
 }
 
 .plan-deprecations {

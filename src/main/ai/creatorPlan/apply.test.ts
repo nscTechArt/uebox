@@ -14,6 +14,7 @@ import {
   planSummary,
   recordOriginals,
   refreshPlanModels,
+  releaseDroppedRoles,
   removePlan
 } from './apply'
 
@@ -432,7 +433,74 @@ describe('removePlan 还原', () => {
   })
 })
 
+describe('releaseDroppedRoles', () => {
+  const mySearch = {
+    id: 'my-search',
+    displayName: 'My Search',
+    kind: 'search',
+    protocol: 'openai-completions',
+    baseUrl: 'https://search.example',
+    apiKey: { kind: 'none' },
+    models: [{ id: 'tavily' }]
+  } as AiProviderSettings['providers'][number]
+  const before: AiProviderSettings = {
+    ...base,
+    providers: [mine, mySearch],
+    roles: { ...base.roles, search: { providerId: 'my-search', modelId: 'tavily' } }
+  }
+  const selected = ['chat', 'search', 'stt'] as const
+  const originals = recordOriginals({}, before, fullManifest, selected)
+  const applied = applyPlan(before, fullManifest, keyRef, selected)
+  const dropped: CreatorPlanManifest = {
+    ...fullManifest,
+    roles: { ...fullManifest.roles, search: null, stt: null }
+  }
+
+  it('套餐不再给的角色还原成导入前的绑定，没有原绑定的置空；那一类的套餐来源删掉', () => {
+    const released = releaseDroppedRoles(applied, dropped, originals)
+    expect(released.roles.search).toEqual({ providerId: 'my-search', modelId: 'tavily' })
+    expect(released.roles.stt).toBeUndefined()
+    expect(released.roles.chat).toMatchObject({ providerId: PLAN_PROVIDER_ID, source: 'plan' })
+    const ids = released.providers.map((p) => p.id)
+    expect(ids).not.toContain(PLAN_PROVIDER_IDS.search)
+    expect(ids).not.toContain(PLAN_PROVIDER_IDS.stt)
+    expect(ids).toContain(PLAN_PROVIDER_ID)
+    expect(ids).toContain('my-search')
+  })
+
+  it('原来源已经删了：置空', () => {
+    const gone = { ...applied, providers: applied.providers.filter((p) => p.id !== 'my-search') }
+    expect(releaseDroppedRoles(gone, dropped, originals).roles.search).toBeUndefined()
+  })
+
+  it('订阅失效（roles 全 null）、或字段缺失而不是 null：什么都不动', () => {
+    const allNull = Object.fromEntries(Object.keys(fullManifest.roles).map((role) => [role, null]))
+    for (const status of ['active', 'canceled'] as const) {
+      const off = { ...dropped, plan: { ...dropped.plan, status }, roles: allNull }
+      expect(releaseDroppedRoles(applied, off, originals)).toBe(applied)
+    }
+    const canceled = { ...dropped, plan: { ...dropped.plan, status: 'canceled' as const } }
+    expect(releaseDroppedRoles(applied, canceled, originals)).toBe(applied)
+    const rest = { ...fullManifest.roles }
+    delete rest.search
+    delete rest.stt
+    expect(releaseDroppedRoles(applied, { ...fullManifest, roles: rest }, originals)).toBe(applied)
+    expect(releaseDroppedRoles(applied, fullManifest, originals)).toBe(applied)
+  })
+})
+
 describe('planSummary 额度', () => {
+  it('统一 Credits 排在最前', () => {
+    const summary = planSummary({
+      ...manifest,
+      quotas: {
+        text_tokens: { limit: 1000, used: 10 },
+        credits: { limit: 3_000_000_000, used: 418_805_100 }
+      }
+    })
+    expect(summary.quotas.map((q) => q.key)).toEqual(['credits', 'text_tokens'])
+  })
+
   it('逐项列出，按额度表排序，不认识的键排后面；形状不对的丢掉', () => {
     const summary = planSummary({
       ...manifest,

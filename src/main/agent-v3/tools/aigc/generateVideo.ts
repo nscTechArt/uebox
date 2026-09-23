@@ -370,7 +370,7 @@ export function createGenerateVideoTool(): UnrealAgentTool<GeneratedVideoDetails
 
 【非常贵，而且很慢】一次三到十五分钟，${
       plan
-        ? '**按秒 × 分辨率占用创作者 Token Plan 的视频额度（1080p 按 2.5 倍，参考视频的秒数也算），失败、超时退回；开始生成后取消不退**'
+        ? '**按秒 × 分辨率扣 UEBox Token Plan 的额度（参考视频的秒数也算，单价以套餐价目表为准），失败、超时退回；开始生成后取消不退**'
         : '**按秒 × 分辨率计费，失败也扣**'
     }。
 调用前先确认用户真的要视频；参数拿不准就问，不要靠多试几次去凑。

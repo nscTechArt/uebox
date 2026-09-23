@@ -1065,8 +1065,9 @@ export function planVideoBody(
 function planVideoResult(task: PlanTask, job: VideoJob): GeneratedVideo {
   const [video] = filesOfRole(task, 'video')
   if (!video) throw new VideoNoOutputError(JSON.stringify(task.files).slice(0, 500))
-  const seconds = task.usage?.video_seconds
-  return { url: video.url, job, usage: typeof seconds === 'number' ? seconds : null }
+  // 2026-09-24 起是 Credits；更早的服务端给的是秒数
+  const used = task.usage?.credits ?? task.usage?.video_seconds
+  return { url: video.url, job, usage: typeof used === 'number' ? used : null }
 }
 
 /**

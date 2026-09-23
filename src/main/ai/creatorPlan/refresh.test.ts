@@ -170,6 +170,36 @@ describe('refreshPlan', () => {
     expect(settings.providers.find((p) => p.id === PLAN_PROVIDER_ID)!.models).toHaveLength(1)
   })
 
+  it('套餐不再给某个角色（roles 里为 null）：还原成导入前的绑定，删掉那一类的套餐来源', async () => {
+    const planStt = {
+      id: `${PLAN_PROVIDER_ID}-stt`,
+      displayName: 'Creator Plan',
+      kind: 'stt',
+      protocol: 'openai-completions',
+      baseUrl: 'https://plan.example/v1',
+      apiKey: { kind: 'literal', id: PLAN_KEY_ID },
+      models: [{ id: 'uebox-stt' }]
+    } as AiProviderSettings['providers'][number]
+    const myStt = { ...mine, id: 'my-stt', kind: 'stt', models: [{ id: 'whisper' }] } as typeof mine
+    settings = {
+      ...settings,
+      providers: [...settings.providers, planStt, myStt],
+      roles: {
+        ...settings.roles,
+        stt: { providerId: planStt.id, modelId: 'uebox-stt', source: 'plan' }
+      }
+    }
+    planState = { ...planState, originals: { stt: { providerId: 'my-stt', modelId: 'whisper' } } }
+    stubFetch(
+      () =>
+        new Response(JSON.stringify({ ...manifest(spec()), roles: { agent: spec(), stt: null } }))
+    )
+    await refreshPlan()
+    expect(settings.roles.stt).toEqual({ providerId: 'my-stt', modelId: 'whisper' })
+    expect(settings.roles.agent).toMatchObject({ source: 'plan' })
+    expect(settings.providers.map((p) => p.id)).toEqual(['my-gateway', PLAN_PROVIDER_ID, 'my-stt'])
+  })
+
   it('有缓存时带 If-None-Match；304 用缓存，什么都不写', async () => {
     const cached = manifest(spec())
     planState = { ...planState, etag: '"p-1"', manifest: cached }

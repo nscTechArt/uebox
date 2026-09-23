@@ -76,7 +76,10 @@ export interface PlanTask {
   progress: number
   files: PlanTaskFile[]
   error: { code?: string; message: string } | null
-  /** 本任务占用的额度（`video_seconds` / `model3d_tasks` / `music_tasks`）。失败、取消后为 0 */
+  /**
+   * 本任务占用的额度：2026-09-24 起是 `{ credits }`，更早的服务端是 `video_seconds` / `model3d_tasks` /
+   * `music_tasks`。失败、退了的取消后为 0。只按「有没有大于 0 的值」用，不认具体键
+   */
   usage: Record<string, number> | null
 }
 

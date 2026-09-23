@@ -25,7 +25,7 @@ function planMusicBound(): boolean {
 }
 
 const PLAN_MUSIC_NOTE =
-  '当前绑的是创作者 Token Plan：每次占用一次音乐次数，失败、超时退回；已提交的音乐取消后不退额度，参数确认好再提交。'
+  '当前绑的是 UEBox Token Plan：每次按套餐价目表扣额度，失败、超时退回；已提交的音乐取消后不退额度，参数确认好再提交。'
 
 export function taskVideoTools(): UnrealAgentTool[] {
   const planMusic = planMusicBound()

@@ -2,7 +2,8 @@
  * 清单刷新：应用启动后一次，之后每 6 小时一次，打开设置页时也走这里。
  *
  * 带上次的 ETag 发 If-None-Match，没变服务端回 304，用缓存的那份。
- * 变了就更新套餐来源里各模型的能力（`refreshPlanModels`），并把清单缓存下来。
+ * 变了就更新套餐来源里各模型的能力（`refreshPlanModels`），把套餐不再给的角色还给用户
+ * （`releaseDroppedRoles`：还原成导入前的绑定），并把清单缓存下来。
  * 401 记成「授权失效」，卡片据此让用户重新连接。
  *
  * **没连接时一个请求都不发**：是否连接只看本机配置里有没有套餐来源，不问网络。
@@ -12,7 +13,7 @@
 import type { CreatorPlanErrorCode, CreatorPlanManifest } from '../../../shared/creatorPlan'
 import { resolveApiKey } from '../credentials'
 import { readSettings, writeSettings } from '../store'
-import { isPlanProvider, refreshPlanModels } from './apply'
+import { isPlanProvider, refreshPlanModels, releaseDroppedRoles } from './apply'
 import { CreatorPlanError, fetchManifestIfChanged } from './client'
 import { readPlanState, updatePlanState } from './planState'
 
@@ -63,7 +64,11 @@ export async function refreshPlan(fetchImpl: typeof fetch = fetch): Promise<Refr
 
     await updatePlanState({ etag: result.etag, manifest: result.manifest, unauthorized: false })
     const settings = await readSettings()
-    const refreshed = refreshPlanModels(settings, result.manifest)
+    const refreshed = releaseDroppedRoles(
+      refreshPlanModels(settings, result.manifest),
+      result.manifest,
+      state.originals
+    )
     if (refreshed !== settings) await writeSettings(refreshed)
     return { manifest: result.manifest, error: null }
   } catch (error) {

@@ -737,7 +737,7 @@ export default {
       waiting: '完成后本页会自动关闭，请稍候…'
     },
     creatorPlan: {
-      title: '创作者 Token Plan',
+      title: 'UEBox Token Plan',
       desc: '一个订阅配好多个角色，额度按月重置。',
       connect: '连接',
       connecting: '等待浏览器确认…',
@@ -756,13 +756,15 @@ export default {
         canceled: '已取消',
         none: '未订阅'
       },
-      remaining: '剩余 {percent}%',
-      quotaDailyDone: '今天的用完了，{time} 恢复',
+      used: '本月已用 {percent}%',
+      resetsOn: '{date} 重置',
+      usageLabel: '本月额度已用',
+      dailyDone: '今日额度已用完，{time} 恢复',
       time: {
         today: '今天 {time}',
         tomorrow: '明天 {time}'
       },
-      pastDue: '续费扣款失败，本期额度已压低：对话只剩 20%，其他暂停。更新付款方式后立即恢复。',
+      pastDue: '续费扣款失败，本期只给 20% 的额度。更新付款方式后立即恢复。',
       pastDueAction: '更新付款方式',
       deprecated: '{role}在用的 {model} 要下线了。',
       deprecatedUntil: '{role}在用的 {model} 将于 {date} 下线。',
@@ -770,7 +772,7 @@ export default {
       deprecatedReindex: '换完要重建知识库索引。',
       revokeFailed: '没能在服务端吊销这把 Key，可以去网页端手动吊销。',
       revokeOpen: '去网页端吊销',
-      managedBadge: '由创作者 Token Plan 管理',
+      managedBadge: '由 UEBox Token Plan 管理',
       manage: '管理订阅',
       reimport: '重新导入',
       disconnect: '断开',
@@ -788,7 +790,7 @@ export default {
         label: '对象存储',
         spec: '{quota} 空间 · 最后一次用到后留 {days} 天',
         off: '现在：未开启',
-        provider: '创作者 Token Plan 提供，不用填密钥',
+        provider: 'UEBox Token Plan 提供，不用填密钥',
         usage: '已用 {used} / {quota}',
         retention: '最后一次用到后留 {days} 天',
         switchBack:
@@ -799,32 +801,32 @@ export default {
         denied: '在浏览器里被拒绝了',
         expired: '确认码过期了，请重新连接',
         unauthorized: '授权已失效，请重新连接',
-        network: '连不上 Creator Plan 服务',
-        networkDetail: '连不上 Creator Plan 服务：{error}',
-        bad_response: 'Creator Plan 服务返回了无法识别的内容',
+        network: '连不上 UEBox Token Plan 服务',
+        networkDetail: '连不上 UEBox Token Plan 服务：{error}',
+        bad_response: 'UEBox Token Plan 服务返回了无法识别的内容',
         not_connected: '还没有连接',
         encryption_unavailable: '无法安全保存 Key',
         unknown: '出错了：{error}'
       },
       chat: {
         subscription_inactive: {
-          title: '创作者 Token Plan 没有生效的订阅',
+          title: 'UEBox Token Plan 没有生效的订阅',
           desc: '订阅没开，或续费失败已过宽限期。处理好再发。'
         },
         quota_exhausted: {
-          title: '这项额度本周期用完了',
+          title: '本月额度用完了',
           desc: '升级套餐，或等额度重置。'
         },
         daily_limit_reached: {
           title: '今天的额度用完了',
-          desc: '{time} 恢复。等不及可以升级套餐。'
+          desc: '{time} 恢复。单次规格超过每天的上限时，明天也一样，换小一点的规格。等不及可以升级套餐。'
         },
         role_not_in_plan: {
           title: '当前套餐不含这个角色',
           desc: '升级套餐，或在「设置 → 模型」里给这个角色换个来源。'
         },
         unauthorized: {
-          title: '创作者 Token Plan 授权失效',
+          title: 'UEBox Token Plan 授权失效',
           desc: 'Key 被吊销或删掉了。到「设置 → 模型」重新连接。'
         },
         manage: '管理订阅',

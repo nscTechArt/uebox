@@ -1,5 +1,5 @@
 /**
- * 创作者 Token Plan —— 主进程与渲染层共用的形状。
+ * UEBox Token Plan（原「创作者 Token Plan」，代码里仍叫 Creator Plan）—— 主进程与渲染层共用的形状。
  *
  * Creator Plan 是一个**用户主动开通**的付费模型服务：一把 Key 覆盖多个角色。
  * 没连接时，应用里与它有关的代码一个请求都不发（见 `src/main/ai/creatorPlan/`）。
@@ -72,7 +72,10 @@ export interface CreatorPlanManifest {
  */
 export type CreatorPlanLimitedBy = 'plan_change' | 'past_due' | 'new_account'
 
-/** 清单 quotas 里的一项。数值可以带小数（视频秒、3D 次按 0.5 计；分钟保留两位） */
+/**
+ * 清单 quotas 里的一项。2026-09-24 起服务端只发 `credits`（整数）；
+ * 更早的服务端发九个分项键，数值可以带小数
+ */
 export interface CreatorPlanManifestQuota {
   limit: number
   used: number
@@ -83,11 +86,15 @@ export interface CreatorPlanManifestQuota {
   daily?: { limit: number; used: number; resets_at?: string | null }
 }
 
+/** 统一额度（00-conventions「额度」）。有它就只看它 */
+export const CREATOR_PLAN_CREDITS_KEY = 'credits'
+
 /**
- * 额度键，顺序即卡片上的显示顺序（同 00-conventions.md 的额度表）。
- * 清单里出现不认识的键也照样显示，排在这些后面。
+ * 额度键的排序：`credits` 在前，后面是旧服务端的九个分项键（00-conventions 旧额度表的顺序）。
+ * 清单里出现不认识的键也照样留着，排在这些后面。
  */
 export const CREATOR_PLAN_QUOTA_KEYS = [
+  CREATOR_PLAN_CREDITS_KEY,
   'text_tokens',
   'images',
   'video_seconds',
@@ -108,6 +115,50 @@ export interface CreatorPlanQuota {
   limitedBy?: CreatorPlanLimitedBy
   /** 设了每日上限的项才有 */
   daily?: { limit: number; used: number; resetsAt: string | null }
+}
+
+/** 卡片上那一行：本期已用百分比，和今天的每日上限是不是已经用完 */
+export interface CreatorPlanUsage {
+  /** 0–100 的整数，向下取整：没真用完不显示 100 */
+  usedPercent: number
+  /** 今天的每日上限用完了：什么时候恢复（ISO）。没用完为 null */
+  dailyExhaustedUntil: string | null
+}
+
+const usedRatio = (quota: CreatorPlanQuota): number =>
+  quota.limit > 0 ? quota.used / quota.limit : 1
+
+/**
+ * 卡片只显示一个百分比（不显示 Credits 数字，也不显示单价）。
+ *
+ * - 有 `credits` 就只看它。
+ * - 旧服务端（还发分项额度、没有 `credits`）：取用得最多的那一项 —— 最先卡住用户的是它。
+ *   上限为 0 的项跳过（旧的 past_due 把对话以外的项压成 0，那是「暂停」不是「用完」），
+ *   全是 0 才算 100%。
+ * - 每日上限只看选中的那一项；没给重置时间按下一个 00:00 UTC（协议的日界）。
+ */
+export function planUsage(
+  quotas: readonly CreatorPlanQuota[],
+  now: number = Date.now()
+): CreatorPlanUsage | null {
+  const credits = quotas.find((quota) => quota.key === CREATOR_PLAN_CREDITS_KEY)
+  const open = quotas.filter((quota) => quota.limit > 0)
+  const pick =
+    credits ??
+    (open.length > 0 ? open : quotas).reduce<CreatorPlanQuota | null>(
+      (top, quota) => (!top || usedRatio(quota) > usedRatio(top) ? quota : top),
+      null
+    )
+  if (!pick) return null
+  const ratio = Math.min(1, Math.max(0, usedRatio(pick)))
+  const daily = pick.daily
+  return {
+    usedPercent: Math.floor(ratio * 100),
+    dailyExhaustedUntil:
+      daily && daily.limit > 0 && daily.used >= daily.limit
+        ? (daily.resetsAt ?? nextUtcMidnight(now))
+        : null
+  }
 }
 
 /** 卡片上显示的套餐摘要 */

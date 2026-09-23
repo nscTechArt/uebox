@@ -369,8 +369,8 @@ function planModel3dOptions(): string[] | null {
 function planDescriptionNote(options: string[]): string {
   const extra = Object.keys(PLAN_OPTION_FIELDS).filter((key) => options.includes(key))
   return `
-【这次绑的是创作者 Token Plan】失败、超时退回额度；**已提交的 3D 取消后不退额度**（上游会跑完、照常计费），参数确认好再提交。
-四边面、智能低模、要转格式的输出（obj、usdz、三角面 fbx）各多占 0.5 次。${
+【这次绑的是 UEBox Token Plan】失败、超时退回额度；**已提交的 3D 取消后不退额度**（上游会跑完、照常计费），参数确认好再提交。
+四边面、智能低模、要转格式的输出（obj、usdz、三角面 fbx）各另加一笔，按套餐价目表扣。${
     extra.length > 0
       ? `当前套餐多出这几个开关：${extra.map((key) => `\`${key}\``).join('、')}。按用途开，不要一次全打开。`
       : ''
@@ -404,7 +404,7 @@ export function createGenerate3dModelTool(): UnrealAgentTool<Generated3dModelDet
 
 【要花钱，而且不快】一次几十秒到几分钟，${
       planOptions
-        ? '每次调用占用创作者 Token Plan 的 3D 次数，**失败、超时退回；提交之后取消不退**'
+        ? '每次调用按套餐价目表扣 UEBox Token Plan 的额度，**失败、超时退回；提交之后取消不退**'
         : '每次调用扣用户的额度，**失败也扣**'
     }。
 一次只出一个，看过再决定要不要重来。
