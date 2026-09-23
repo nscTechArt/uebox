@@ -317,6 +317,24 @@ describe('索引里的脏数据', () => {
 })
 
 describe('索引还没追平', () => {
+  /**
+   * 打标签本身就会把资产标成待索引。待索引行原来不比对标签：刚打上 rocky 的资产
+   * 搜 rocky 反而搜不到，它原来的标签也一起失效，直到后台追平。
+   */
+  it('刚打上标签还没进索引：按标签搜得到', () => {
+    const publicDb = new Database(':memory:')
+    publicDb.exec('CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT)')
+    publicDb.prepare("INSERT INTO tags (id, name) VALUES (7, 'rocky')").run()
+    const id = insert('a', 'SM_Boulder_01')
+    sync()
+    db.prepare("INSERT INTO asset_tags (assetKey, tagId) VALUES ('a', 7)").run()
+
+    const r = rankedSearchVault(db, { query: 'rocky', need: 10, filter: {}, publicDb })!
+
+    expect(r.pendingSearched).toBe(true)
+    expect(ids(r.hits)).toEqual([id])
+  })
+
   it('刚改名还没进索引：新名字搜得到，旧名字搜不到', () => {
     const id = insert('a', 'SM_Rock_01')
     sync()

@@ -117,6 +117,11 @@ export interface AssetQueryParts {
   params: (string | number | null)[]
   /** 这次走了召回索引（全文 / 语义），`recall.score` 可用于按相关度排序 */
   usedRecall: boolean
+  /**
+   * 这次按「某文件夹及其子文件夹」圈了范围（JOIN assetFolder 或递归 CTE）。
+   * 排序那边要据此决定能不能让规划器沿排序列的索引走，见 searchAssetsByCriteria。
+   */
+  folderSubtree: boolean
 }
 
 export function buildAssetQueryParts(
@@ -528,7 +533,10 @@ export function buildAssetQueryParts(
     joinSql,
     whereSql,
     params: [...withParams, ...joinParams, ...whereParams],
-    usedRecall
+    usedRecall,
+    folderSubtree: Boolean(
+      criteria.folderKey && criteria.folderKey !== 'ALL' && criteria.includeSubfolders
+    )
   }
 }
 
@@ -558,7 +566,10 @@ export function searchAssetsByCriteria(
   db: Database.Database,
   criteria: AssetSearchCriteria
 ): AssetData[] {
-  const { withClause, joinSql, whereSql, params, usedRecall } = buildAssetQueryParts(db, criteria)
+  const { withClause, joinSql, whereSql, params, usedRecall, folderSubtree } = buildAssetQueryParts(
+    db,
+    criteria
+  )
 
   const sortBy = criteria.sortBy || (usedRecall ? 'relevance' : 'assetName')
   const sortOrder = (criteria.sortOrder || 'asc').toUpperCase()
@@ -586,12 +597,52 @@ export function searchAssetsByCriteria(
    * 再补一个名字做次序键 —— 同一次文件夹删除盖的是同一个时间戳，没有次序键的话
    * 分页翻到第二页可能重复或漏掉。
    */
+  /**
+   * 名字一律按 NOCASE 排，两个原因：
+   *
+   * - 和浏览那条路（models/assetData.ts 的 getAssetDataByFolderKey）一致。原来这里是
+   *   二进制序，大写全排在小写前面 —— 开一个筛选，列表从 a/B/c 变成 B/a/c，看着像乱了。
+   * - 名称索引（idx_assetData_assetName、idx_assetData_folderKey_isDelete_assetName）
+   *   都是 NOCASE 建的。二进制序对不上它们，52 万行的库每一页都是全表读出来再临时排序
+   *   （实测 1.3–2.2 s）；对上了，不带筛选的一页是沿索引取前 N 条，零点几毫秒。
+   *
+   * 但沿排序列的索引走，等于「按顺序把整张表过一遍，边走边筛」。规划器估不出
+   * 「某文件夹及其子文件夹」有多少行（JOIN 条件是 fullPath 前缀 LIKE），会照样选它 ——
+   * 一个只有几十个资产的文件夹，要把 52 万条索引走完才凑得出一页：从 0.6 ms 变成 3 s。
+   * 界面上只要开了任何筛选或搜索就是这条路。按类型排（idx_assetData_assetType）
+   * 原来就有同样的问题，实测 2.4 s。
+   *
+   * 所以圈了子树时给排序列套一个一元 `+`：值和排序规则不变，只是它不再对得上任何索引，
+   * 规划器只能先按文件夹取行再排。大文件夹因此也不走名称索引了（20 万行子树约 85 ms），
+   * 比原来的二进制序（160 ms）仍然快。
+   */
+  const noIndex = folderSubtree ? '+' : ''
+  const sortCol = allowedCols.has(sortBy) ? sortBy : 'assetName'
+  /**
+   * 「按时间 / 按大小」和浏览那条路（getAssetDataByFolderKey）取同一个值、同一个次序键。
+   *
+   * 界面一开筛选就从浏览切到这里。原来这里直排 modifiedTime / fileSize，浏览排的是
+   * updated_at / COALESCE(fileSize, 0)：默认视图就是「按时间倒序」，勾一个筛选，
+   * 列表顺序整个换掉，空值还会整片堆到一头。
+   *
+   * 次序键两边都补了名字：updated_at 只到秒，一次导入几百个资产盖的是同一秒，
+   * 没有次序键的话同一秒内谁先谁后看规划器心情，分页还可能重复或漏掉。
+   * 这两个值都没有索引，本来就是临时排序，多一个键不改变计划。
+   */
+  const tiedSorts: Record<string, string> = {
+    modifiedTime: 'ad.updated_at',
+    fileSize: 'COALESCE(ad.fileSize, 0)'
+  }
   const orderBy =
     sortBy === 'relevance' && usedRecall
-      ? 'ORDER BY recall.score DESC, ad.assetName ASC'
+      ? 'ORDER BY recall.score DESC, ad.assetName COLLATE NOCASE ASC'
       : sortBy === 'deletedAt'
-        ? `ORDER BY COALESCE(ad.deletedAt, ad.updated_at) ${sortOrder}, ad.assetName ASC`
-        : `ORDER BY ad.${allowedCols.has(sortBy) ? sortBy : 'assetName'} ${sortOrder}`
+        ? `ORDER BY COALESCE(ad.deletedAt, ad.updated_at) ${sortOrder}, ad.assetName COLLATE NOCASE ASC`
+        : sortCol === 'assetName'
+          ? `ORDER BY (${noIndex}ad.assetName) COLLATE NOCASE ${sortOrder}`
+          : tiedSorts[sortCol]
+            ? `ORDER BY ${noIndex}${tiedSorts[sortCol]} ${sortOrder}, ad.assetName COLLATE NOCASE ASC`
+            : `ORDER BY ${noIndex}ad.${sortCol} ${sortOrder}`
 
   const limitParts: string[] = []
   // 强制转换 limit 和 offset 类型，防止前端传递字符串导致 SQL 执行错误

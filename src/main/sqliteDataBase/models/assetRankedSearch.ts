@@ -30,7 +30,7 @@
 import type Database from 'better-sqlite3'
 import type { AssetData } from './assetData'
 import { buildAssetQueryParts, type AssetSearchCriteria } from './assetSearch'
-import { BM25_EXPR, DIRTY_TABLE, FTS_TABLE } from './assetSearchIndex'
+import { BM25_EXPR, DIRTY_TABLE, FTS_TABLE, collectTagText } from './assetSearchIndex'
 import { buildFtsAllTermsQuery, buildFtsTerms, textMatchesTerm, type FtsTerm } from './ftsText'
 
 /**
@@ -41,6 +41,9 @@ import { buildFtsAllTermsQuery, buildFtsTerms, textMatchesTerm, type FtsTerm } f
  * 比每次搜索都卡一下要好。
  */
 export const PENDING_SCAN_LIMIT = 10000
+
+/** 待索引行取标签时一次查多少个键（SQLite 的绑定参数有上限） */
+const TAG_LOOKUP_CHUNK = 900
 
 /**
  * 带筛选时，候选最多扩到 need 的这么多倍（且不少于 CANDIDATE_FLOOR × 16），还凑不够就换路。
@@ -105,6 +108,8 @@ export interface RankedSearchOptions {
   filter: AssetSearchCriteria
   /** 覆盖阈值。只给测试用：让小数据集也能走到每一条路 */
   limits?: Partial<RankedLimits>
+  /** 公共库（标签名在那边）。给了才能让待索引行按标签命中 */
+  publicDb?: Database.Database
 }
 
 export interface RankedLimits {
@@ -357,6 +362,7 @@ function collect(
 
 interface PendingRow {
   id: number
+  assetKey: string
   assetName: string | null
   folderName: string | null
   softPath: string | null
@@ -368,13 +374,18 @@ interface PendingRow {
 /**
  * 还没进索引的那几行，在 JS 里按和 FTS 一样的规则判命中、分层。
  *
- * 标签文本不在 assetData 上，这里不比对 —— 追平之前，靠标签才能命中的资产会暂时搜不到。
+ * 标签和索引里一样算「强列」。打标签本身就会把资产标成待索引 —— 不比对标签的话，
+ * 刚打上「岩石」的资产搜「岩石」反而搜不到，连它原来的标签也一起失效。
  */
-function matchPendingRows(rows: PendingRow[], terms: FtsTerm[]): RankedHit[] {
+function matchPendingRows(
+  rows: PendingRow[],
+  terms: FtsTerm[],
+  tagText: Map<string, string>
+): RankedHit[] {
   const hits: RankedHit[] = []
   for (const row of rows) {
     const type = [row.assetType, row.classNameCn].filter(Boolean).join(' ')
-    const strong = [row.assetName, row.folderName, type]
+    const strong = [row.assetName, tagText.get(row.assetKey) ?? null, row.folderName, type]
     const all = [...strong, row.note, row.softPath]
     const everyStrong = terms.every((t) => strong.some((text) => textMatchesTerm(text, t)))
     const anyHit = terms.some((t) => all.some((text) => textMatchesTerm(text, t)))
@@ -501,12 +512,17 @@ export function rankedSearchVault(
   if (pendingIds && pendingIds.size > 0) {
     const rows = db
       .prepare(
-        `SELECT ad.id, ad.assetName, ad.folderName, ad.softPath, ad.assetType, ad.classNameCn, ad.note
+        `SELECT ad.id, ad.assetKey, ad.assetName, ad.folderName, ad.softPath, ad.assetType, ad.classNameCn, ad.note
          FROM ${DIRTY_TABLE} d CROSS JOIN assetData ad ON ad.id = d.assetId
          WHERE ad.isDelete = 0`
       )
       .all() as PendingRow[]
-    const matched = matchPendingRows(rows, terms)
+    const tagText = new Map<string, string>()
+    for (let i = 0; i < rows.length; i += TAG_LOOKUP_CHUNK) {
+      const keys = rows.slice(i, i + TAG_LOOKUP_CHUNK).map((row) => row.assetKey)
+      for (const [key, text] of collectTagText(db, options.publicDb, keys)) tagText.set(key, text)
+    }
+    const matched = matchPendingRows(rows, terms, tagText)
     const pass = passingIds(
       db,
       filterSql,

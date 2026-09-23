@@ -21,7 +21,8 @@ const {
   getAssetRowsByIds,
   isAssetVectorEnabled,
   semanticRecall,
-  embedSearchQuery
+  embedSearchQuery,
+  ensureAssetSearchIndexWarm
 } = vi.hoisted(() => ({
   searchAssets: vi.fn(),
   getDeletedAssetData: vi.fn(),
@@ -37,7 +38,8 @@ const {
   getAssetRowsByIds: vi.fn(),
   isAssetVectorEnabled: vi.fn(),
   semanticRecall: vi.fn(),
-  embedSearchQuery: vi.fn()
+  embedSearchQuery: vi.fn(),
+  ensureAssetSearchIndexWarm: vi.fn()
 }))
 
 /** 每个库的连接要是**稳定的对象** —— 用它来判断某一趟查的是哪个库 */
@@ -94,6 +96,9 @@ vi.mock('../../../../sqliteDataBase/services/assetSemanticService', () => ({
   embedSearchQuery
 }))
 vi.mock('./folderLookup', () => ({ resolveFolder }))
+vi.mock('../../../../sqliteDataBase/services/assetSearchIndexService', () => ({
+  ensureAssetSearchIndexWarm
+}))
 
 import { createSearchAssetsTool } from './searchAssets'
 
@@ -280,6 +285,19 @@ describe('关键词：所有库按相关度统一排序', () => {
     expect(String(r.message)).toContain('1000+')
   })
 
+  /**
+   * 总数是全文索引表数的，可能比回得了表的多（旧的孤儿行）。翻到头那一页一个都没有时
+   * 还说「后面还有，用 offset=N 再调」，N 又正好是这一次的 offset —— 模型会一直重调。
+   */
+  it('这一页一个都没拿到时不说「后面还有」', async () => {
+    rankedSearchVault.mockReturnValue(ranked([{ id: 1, tier: 1, score: -1 }], { total: 2 }))
+
+    const r = await run({ query: 'tree', offset: 1 })
+
+    expect(r.hasMore).toBeUndefined()
+    expect(String(r.message)).not.toContain('offset=')
+  })
+
   it('筛选条件逐库透传，不带 relax（放宽由工具层统一做）', async () => {
     rankedSearchVault.mockReturnValue(ranked([{ id: 1, tier: 1, score: -1 }]))
 
@@ -302,6 +320,8 @@ describe('关键词：所有库按相关度统一排序', () => {
 
     expect(r.index_pending).toEqual({ 默认保管库: 50000 })
     expect(String(r.message)).toContain('还没建完索引')
+    // 「过一会儿再搜」得是真的：这一搜顺手把后台补齐推起来，不然队列会一直躺着
+    expect(ensureAssetSearchIndexWarm).toHaveBeenCalledWith(LIBRARY_DB, expect.anything())
   })
 
   it('一个库坏了不拖垮其余的，但必须说出来是哪个坏了', async () => {

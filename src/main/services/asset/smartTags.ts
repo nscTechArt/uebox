@@ -4,6 +4,8 @@
  * 这些智能标签不会存入数据库，而是运行时动态计算
  */
 
+import { smartTagNameKey, smartTagPatternHits } from '../../../shared/smartTagMatch'
+
 /**
  * 智能标签规则定义
  */
@@ -214,13 +216,13 @@ export function computeSmartTags(
   rules: SmartTagRule[] = DEFAULT_SMART_TAG_RULES
 ): SmartTagRule[] {
   const matchedTags: SmartTagRule[] = []
-  // 后缀族要判「到名字结尾了没有」，所以先把扩展名摘掉：
-  // `T_Rock_D.png` 的通道位是 `_D`，不摘扩展名就永远匹配不上
-  const nameUpper = assetName.replace(/\.[A-Za-z0-9]{2,5}$/, '').toUpperCase()
+  // 判据和渲染层共用一份，见 `shared/smartTagMatch.ts`（原来的错法和改法都写在那边）。
+  // 已经写进库里的错标签不会自己消失 —— 这里只管以后算出来的
+  const nameUpper = smartTagNameKey(assetName)
 
   for (const rule of rules) {
     for (const pattern of rule.patterns) {
-      if (patternHits(nameUpper, pattern.toUpperCase())) {
+      if (smartTagPatternHits(nameUpper, pattern.toUpperCase())) {
         matchedTags.push(rule)
         break // 一个规则只添加一次
       }
@@ -228,61 +230,6 @@ export function computeSmartTags(
   }
 
   return matchedTags
-}
-
-/**
- * 一条 pattern 命中没有。
- *
- * ## 原来是怎么错的
- *
- * 原来的判据里有一条 `nameUpper.includes(patternUpper)` —— **任意位置的裸子串**。
- * 它让前面两条更严的判据完全失效，结果是规则在几乎每个资产上开火，而且打出来的
- * 大半是错的。真机（5500 个资产的素材库）上抽出来的样子：
- *
- * | 资产名 | 打出的标签 |
- * |---|---|
- * | `SM_Door_01` | **Diffuse**（`_D` 撞上 `_DOOR`）、StaticMesh、**Material**（`M_` 撞上 `SM_`）|
- * | `SM_Rock_Large` | **Roughness**（`_R` 撞 `_ROCK`）|
- * | `SK_Mannequin` | **Metallic** |
- * | `A_METACITY_Ring` | **Roughness、Metallic**、Animation —— 三个里两个是撞出来的 |
- * | `T_Grass_D` | Diffuse ✓、**StaticMesh、Sound**（`S_`？没有。是 `_S` 撞 `GRASS_`）|
- *
- * 「每个 StaticMesh 都带 Material」就是 `SM_` 里那个 `M_` 造成的。
- *
- * ## 现在的判据
- *
- * 规则表里每条 pattern 都只有两种形状，没有第三种：
- *
- * - **前缀族**（`BP_` / `SM_` / `T_`，以 `_` 结尾）—— UE 约定里它在**名字开头**。
- *   只认 `startsWith`。这样 `SM_DOOR` 不再命中 `M_`、`S_`。
- * - **后缀族**（`_D` / `_NORMAL` / `_ORM`，以 `_` 开头）—— 它是**通道位**，
- *   在名字末尾或末尾数字之前（`T_Rock_D` / `T_Rock_D_01`）。所以后面必须是
- *   结尾或另一个 `_`，`_D` 才不会去撞 `_DOOR`。
- *
- * 只会减少命中，不会增加：真正以 `_D` 结尾的仍然命中，被砍掉的全是撞出来的。
- *
- * **已经写进库里的错标签不会自己消失** —— `autoTagAsset` 是导入时落库的。
- * 这次只修「以后算出来的」和运行时动态计算的那部分。
- */
-function patternHits(nameUpper: string, patternUpper: string): boolean {
-  // 前缀族：`BP_` `SM_` `MI_` …
-  if (patternUpper.endsWith('_')) return nameUpper.startsWith(patternUpper)
-
-  // 后缀族：`_D` `_NORMAL` `_ORM` …
-  if (patternUpper.startsWith('_')) {
-    let from = 0
-    for (;;) {
-      const at = nameUpper.indexOf(patternUpper, from)
-      if (at === -1) return false
-      const after = nameUpper[at + patternUpper.length]
-      // 到头了，或者下一段是新的 `_` 分节（`_D_01`）—— 两种都算这一位
-      if (after === undefined || after === '_') return true
-      from = at + 1
-    }
-  }
-
-  // 规则表里目前没有第三种形状。真加了也不该悄悄放宽成裸子串
-  return nameUpper === patternUpper
 }
 
 /**

@@ -34,6 +34,7 @@ import {
 } from '../../../../sqliteDataBase/models/assetRankedSearch'
 import { isAssetVectorEnabled } from '../../../../sqliteDataBase/models/assetVectorIndex'
 import { buildFtsTerms } from '../../../../sqliteDataBase/models/ftsText'
+import { ensureAssetSearchIndexWarm } from '../../../../sqliteDataBase/services/assetSearchIndexService'
 import { getTagByName } from '../../../../sqliteDataBase/models/tag'
 import {
   embedSearchQuery,
@@ -141,6 +142,32 @@ function describeEngineVersionSpread(assets: Array<Record<string, unknown>>): st
     '.uasset **只能导进同版本或更高版本的工程**（5.7 的资产进不了 5.5 的工程），' +
     '给某个工程挑素材时用 engineVersion 参数先筛一遍，别等导入失败了才发现。'
   )
+}
+
+/** 公共库（标签名在那边）。拿不到就当没有标签文本 —— 为它把整次搜索搞失败不值当 */
+function safePublicDb(): ReturnType<typeof getPublicDatabase> | undefined {
+  try {
+    return getPublicDatabase()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 索引没追平就推一把后台补齐。
+ *
+ * 原来每次关键词搜索走 AssetSearcher，它发现待索引队列不空会顺手推一把；排名这一路
+ * 接手之后没人推了 —— 会话中途导入一大包，队列就一直躺着，搜索一直漏掉那些资产、
+ * 一直叫模型「过一会儿再搜」。已经在跑或已经追平时这是空操作。
+ * 只推得动当前库：别的库连接用完就关，循环第一步就会自己停。
+ */
+function kickIndexWarm(db: Parameters<typeof ensureAssetSearchIndexWarm>[0]): void {
+  try {
+    ensureAssetSearchIndexWarm(db, { publicDb: safePublicDb() })
+  } catch (error) {
+    // 推不动不影响这次搜索：结果里已经如实报了还有多少没进索引
+    console.warn('[资产搜索] 推后台索引补齐失败:', error)
+  }
 }
 
 /** 标签名换 id。查不到的原样回给调用方，绝不静默丢掉 */
@@ -463,7 +490,13 @@ export function createSearchAssetsTool(): V2Tool {
 
           if (rankedQuery) {
             const filter = buildSearchCriteria(scoped)
-            const ranked = rankedSearchVault(db, { query: rankedQuery, need, filter })
+            const ranked = rankedSearchVault(db, {
+              query: rankedQuery,
+              need,
+              filter,
+              publicDb: safePublicDb()
+            })
+            if (ranked) kickIndexWarm(db)
             if (ranked) {
               pass.total += ranked.total
               pass.lowerBound ||= ranked.totalIsLowerBound
@@ -709,7 +742,10 @@ export function createSearchAssetsTool(): V2Tool {
 
       const total = pass.total
       const nextOffset = offset + assets.length
-      const hasMore = nextOffset < total || (pass.lowerBound && assets.length === limit)
+      // 这一页一个都没拿到就不说「后面还有」：总数是全文索引表数出来的，可能比回得了表的
+      // 多（旧的孤儿行、超出扫描上限的待索引行）。那样会让模型拿同一个 offset 一直重调
+      const hasMore =
+        assets.length > 0 && (nextOffset < total || (pass.lowerBound && assets.length === limit))
 
       if (total > 0) {
         const pendingNote =
@@ -741,7 +777,9 @@ export function createSearchAssetsTool(): V2Tool {
                   .map(([name, n]) => `${name} ${n} 个`)
                   .join('，')}）`
               : '') +
-            `，这是第 ${offset + 1}~${nextOffset} 个` +
+            (assets.length > 0
+              ? `，这是第 ${offset + 1}~${nextOffset} 个`
+              : `，从第 ${offset + 1} 个往后已经没有了`) +
             (rankedQuery ? '（所有库按相关度统一排序）' : '') +
             '。' +
             (hasMore

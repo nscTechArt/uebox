@@ -4,6 +4,8 @@
  * 这些智能标签不会存入数据库，而是运行时动态计算
  */
 
+import { smartTagNameKey, smartTagPatternHits } from '@core/shared/smartTagMatch'
+
 /** 智能标签的分类 */
 export type SmartTagCategory =
   | 'texture'
@@ -216,13 +218,13 @@ export function computeSmartTags(
   if (!assetName) return []
 
   const matchedTags: SmartTagRule[] = []
-  const nameUpper = assetName.toUpperCase()
+  // 和主进程同一个判据（见 `shared/smartTagMatch.ts`）。原来这里是裸子串匹配：
+  // 详情面板把 `SM_Door_01` 标成 Diffuse + Material，和导入时落库的标签对不上
+  const nameUpper = smartTagNameKey(assetName)
 
   for (const rule of rules) {
     for (const pattern of rule.patterns) {
-      const patternUpper = pattern.toUpperCase()
-      // 匹配文件名开头或包含下划线前缀的模式
-      if (nameUpper.startsWith(patternUpper) || nameUpper.includes(patternUpper)) {
+      if (smartTagPatternHits(nameUpper, pattern.toUpperCase())) {
         matchedTags.push(rule)
         break // 一个规则只添加一次
       }

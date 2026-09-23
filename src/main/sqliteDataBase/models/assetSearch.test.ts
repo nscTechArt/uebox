@@ -9,10 +9,10 @@
  */
 
 import Database from 'better-sqlite3'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { initAssetFolderModel } from './assetFolder'
-import { initAssetDataModel } from './assetData'
+import { getAssetDataByFolderKey, initAssetDataModel } from './assetData'
 import { initAssetFavoriteModel } from './assetFavorite'
 import { initAssetTagModel } from './assetTag'
 import { searchAssetsByCriteria } from './assetSearch'
@@ -234,6 +234,157 @@ describe('searchAssetsByCriteria 的参数绑定', () => {
       })
 
       expect(rows.map((r) => r.assetKey)).toEqual(['newer', 'legacy', 'old'])
+    })
+  })
+})
+
+describe('按名称排序', () => {
+  const MIXED = [
+    ['b1', 'b_rock'],
+    ['a1', 'A_Hero'],
+    ['c1', 'C_Tree'],
+    ['a2', 'a_arm']
+  ]
+
+  it.each(['asc', 'desc'] as const)(
+    '%s 不分大小写，和浏览那条路（getAssetDataByFolderKey）排得一样',
+    (sortOrder) => {
+      for (const [key, name] of MIXED) insertAsset(key, name, 'k_role')
+
+      const searched = searchAssetsByCriteria(db, { folderKey: 'k_role', sortOrder })
+      const browsed = getAssetDataByFolderKey(db, 'k_role', 'assetName', sortOrder)
+
+      const expected = ['a_arm', 'A_Hero', 'b_rock', 'C_Tree']
+      expect(searched.map((r) => r.assetName)).toEqual(
+        sortOrder === 'asc' ? expected : [...expected].reverse()
+      )
+      expect(searched.map((r) => r.assetKey)).toEqual(browsed.map((r) => r.assetKey))
+    }
+  )
+
+  it('含子文件夹时同样不分大小写', () => {
+    for (const [key, name] of MIXED) insertAsset(key, name, 'k_role')
+
+    const rows = searchAssetsByCriteria(db, { folderKey: 'k_role', includeSubfolders: true })
+
+    expect(rows.map((r) => r.assetName)).toEqual(['a_arm', 'A_Hero', 'b_rock', 'C_Tree'])
+  })
+
+  /**
+   * 守的是查询计划，不是结果。
+   *
+   * 名称索引是 NOCASE 建的，排序对不上它就是整表读出来再排；对上了又要防另一头：
+   * 规划器估不出「某文件夹及其子文件夹」有多少行，会沿名称 / 类型索引把整张表走一遍
+   * 去凑一页 —— 52 万行的库上，几十个资产的文件夹要 3 秒。夹具要够大、要 ANALYZE，
+   * 规划器才会做出和真实保管库（VaultManager 打开时补 ANALYZE）一样的选择。
+   */
+  describe('查询计划', () => {
+    beforeEach(() => {
+      const folder = db.prepare(
+        `INSERT INTO assetFolder (folderKey, fatherKey, type, folderName, fullPath, pathArray, depth, ancestorKeys, isDelete)
+         VALUES (?, 'ALL', 'folder', ?, ?, '[]', 1, '[]', 0)`
+      )
+      for (let i = 0; i < 50; i++) folder.run(`pf${i}`, `pf${i}`, `/pf${i}`)
+      const asset = db.prepare(
+        `INSERT INTO assetData (assetKey, folderKey, assetName, folderName, isDelete, assetType)
+         VALUES (?, ?, ?, 'x', 0, ?)`
+      )
+      db.transaction(() => {
+        for (let i = 0; i < 2000; i++) {
+          asset.run(`p${i}`, `pf${i % 50}`, `N${(i * 7919) % 2000}`, `T${i % 5}`)
+        }
+      })()
+      db.exec('ANALYZE')
+    })
+
+    /** 拦下主查询那一句，换成 EXPLAIN QUERY PLAN，拿到的「资产」就是计划行 */
+    function planOf(criteria: Parameters<typeof searchAssetsByCriteria>[1]): string {
+      const realPrepare = db.prepare.bind(db)
+      const spy = vi
+        .spyOn(db, 'prepare')
+        .mockImplementation(((sql: string) =>
+          realPrepare(
+            sql.includes('tagIdList') ? `EXPLAIN QUERY PLAN ${sql}` : sql
+          )) as typeof db.prepare)
+      try {
+        const rows = searchAssetsByCriteria(db, criteria) as unknown as { detail: string }[]
+        return rows.map((r) => r.detail).join(' | ')
+      } finally {
+        spy.mockRestore()
+      }
+    }
+
+    it.each(['asc', 'desc'] as const)('不圈文件夹时 %s 沿名称索引取，不临时排序', (sortOrder) => {
+      const plan = planOf({ sortOrder, limit: 20 })
+      expect(plan).toContain('idx_assetData_assetName')
+      expect(plan).not.toContain('TEMP B-TREE')
+    })
+
+    it('单个文件夹沿 (folderKey, isDelete, assetName) 复合索引取，不临时排序', () => {
+      const plan = planOf({ folderKey: 'pf1', limit: 20 })
+      expect(plan).toContain('idx_assetData_folderKey_isDelete_assetName')
+      expect(plan).not.toContain('TEMP B-TREE')
+    })
+
+    it.each(['assetName', 'assetType', 'modifiedTime', 'fileSize'] as const)(
+      '含子文件夹按 %s 排时先按文件夹取行，不沿排序列的索引把整表走一遍',
+      (sortBy) => {
+        const plan = planOf({ folderKey: 'pf1', includeSubfolders: true, sortBy, limit: 20 })
+        expect(plan).not.toMatch(/SCAN ad USING INDEX idx_assetData_(assetName|assetType)\b/)
+        expect(plan).toContain('idx_assetData_folderKey_isDelete_assetName (folderKey=?')
+      }
+    )
+  })
+})
+
+/**
+ * 界面一开筛选就从浏览（getAssetDataByFolderKey）切到搜索。两边排出来不一样的话，
+ * 勾一个筛选列表就整个换了顺序 —— 默认视图恰好是「按时间倒序」。
+ *
+ * 夹具故意让 modifiedTime 和 updated_at 的先后相反、fileSize 有 NULL 也有 0、
+ * 同一秒 / 同一大小的有好几个且名字大小写混着：直排 modifiedTime / fileSize、
+ * 或者少了次序键，都会在这里排出不同的顺序。
+ */
+describe('按时间 / 大小排序和浏览那条路一致', () => {
+  beforeEach(() => {
+    const rows: [string, string, string, string | null, number | null][] = [
+      // key, 名字, updated_at, modifiedTime, fileSize
+      ['a', 'A_new', '2026-03-01 10:00:00', null, 300],
+      ['b', 'b_mid', '2026-02-01 10:00:00', '2020-01-01T00:00:00.000Z', null],
+      ['c', 'c_tie', '2026-01-01 10:00:00', '2030-01-01T00:00:00.000Z', 100],
+      ['d', 'B_tie', '2026-01-01 10:00:00', '2010-01-01T00:00:00.000Z', 100],
+      ['e', 'a_zero', '2026-02-15 10:00:00', '2025-01-01T00:00:00.000Z', 0]
+    ]
+    for (const [key, name, updatedAt, modifiedTime, fileSize] of rows) {
+      insertAsset(key, name, 'k_role')
+      db.prepare(
+        'UPDATE assetData SET updated_at = ?, modifiedTime = ?, fileSize = ? WHERE assetKey = ?'
+      ).run(updatedAt, modifiedTime, fileSize, key)
+    }
+  })
+
+  const EXPECTED = {
+    modifiedTime: { asc: ['d', 'c', 'b', 'e', 'a'], desc: ['a', 'e', 'b', 'd', 'c'] },
+    fileSize: { asc: ['e', 'b', 'd', 'c', 'a'], desc: ['a', 'd', 'c', 'e', 'b'] }
+  }
+
+  describe.each(['modifiedTime', 'fileSize'] as const)('%s', (sortBy) => {
+    it.each(['asc', 'desc'] as const)('%s', (sortOrder) => {
+      const browsed = getAssetDataByFolderKey(db, 'k_role', sortBy, sortOrder)
+      const searched = searchAssetsByCriteria(db, { folderKey: 'k_role', sortBy, sortOrder })
+      // 含子文件夹是界面开了筛选后真正走的那条，排序列上套了一元 +
+      const searchedSubtree = searchAssetsByCriteria(db, {
+        folderKey: 'k_role',
+        includeSubfolders: true,
+        sortBy,
+        sortOrder
+      })
+
+      const keys = (rows: { assetKey?: string }[]): (string | undefined)[] =>
+        rows.map((r) => r.assetKey)
+      expect(keys(browsed)).toEqual(EXPECTED[sortBy][sortOrder])
+      expect(keys(searched)).toEqual(keys(browsed))
+      expect(keys(searchedSubtree)).toEqual(keys(browsed))
     })
   })
 })

@@ -303,7 +303,7 @@ export function syncAssetSearchIndex(
  * 关联在保管库、名字在公共库，跨库 JOIN 会直接报 no such table，所以分两步查。
  * 公共库读不出来时静默降级成「没有标签文本」—— 为标签把整个索引搞挂不值当。
  */
-function collectTagText(
+export function collectTagText(
   db: Database.Database,
   publicDb: Database.Database | undefined,
   assetKeys: string[]

@@ -339,12 +339,14 @@ export const getAssetDataByFolderKey = (
     dbSortCol = 'assetName'
   }
 
+  // 时间 / 大小也要名字做次序键：updated_at 只到秒，一次导入整批同一秒，
+  // 没有次序键就既不稳定、分页也可能重复或漏掉。搜索那条路（assetSearch.ts）用的是同一套
   const orderByClause =
     dbSortCol === 'assetName'
       ? `${dbSortCol} COLLATE NOCASE ${safeSortOrder}`
       : dbSortCol === "COALESCE(assetType, '')"
         ? `${dbSortCol} COLLATE NOCASE ${safeSortOrder}, assetName COLLATE NOCASE ASC`
-        : `${dbSortCol} ${safeSortOrder}`
+        : `${dbSortCol} ${safeSortOrder}, assetName COLLATE NOCASE ASC`
 
   // 如果不显示依赖资产，添加 isDependency = 0 条件
   const dependencyCondition = showDependencies ? '' : ' AND isDependency = 0'
