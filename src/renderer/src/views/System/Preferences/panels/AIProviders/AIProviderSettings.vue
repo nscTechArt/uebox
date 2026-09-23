@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@renderer/components/AppButton.vue'
+import CreatorPlanCard from './CreatorPlanCard.vue'
 import AppTooltip from '@renderer/components/AppTooltip.vue'
 /**
  * 本地直连 Provider 设置 —— 三层披露的第一层。
@@ -310,6 +311,9 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
     <div v-if="!initialLoading && !encryptionAvailable" class="provider-banner warning">
       {{ $t('aiProvider.banner.noEncryption') }}
     </div>
+
+    <!-- 创作者 Token Plan：一个订阅配好多个角色。应用或断开后重读来源与绑定 -->
+    <CreatorPlanCard @changed="state.load()" />
 
     <!-- 一、服务商 -->
     <div class="settings-subsection">

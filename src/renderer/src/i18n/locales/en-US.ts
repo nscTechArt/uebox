@@ -753,6 +753,55 @@ export default {
       uri: 'Verification page:',
       waiting: 'This dialog closes automatically once you are done…'
     },
+    creatorPlan: {
+      title: 'Creator Token Plan',
+      desc: 'One subscription covers several roles. Quotas reset monthly.',
+      connect: 'Connect',
+      connecting: 'Waiting for browser…',
+      cancel: 'Cancel',
+      codeTitle: 'Confirm in your browser',
+      codeDesc: 'Your browser is open. Sign in, check that this code matches, then click Approve.',
+      codeCopy: 'Click to copy',
+      notOpened: "Browser didn't open? Visit:",
+      tier: '{tier} · {interval}',
+      intervalMonth: 'Monthly',
+      intervalYear: 'Yearly',
+      status: {
+        active: 'Active',
+        trialing: 'Trial',
+        past_due: 'Payment failed. Update your payment method',
+        canceled: 'Canceled',
+        none: 'No subscription'
+      },
+      textTokens: 'Chat quota: {used} / {limit} used',
+      resetsAt: 'Resets {date}',
+      managedCount: 'Managing {count} roles',
+      manage: 'Manage subscription',
+      reimport: 'Re-import',
+      disconnect: 'Disconnect',
+      disconnectConfirm:
+        'Roles managed by the plan will become unset, and the key saved on this device will be deleted.',
+      previewTitle: 'Choose roles for the plan',
+      previewDesc:
+        'Checked roles switch to plan models. Roles you set up yourself start unchecked.',
+      previewCurrent: 'Now: {name}',
+      previewUnset: 'Now: not set',
+      previewManaged: 'Managed by plan',
+      apply: 'Apply',
+      applied: 'Applied',
+      errors: {
+        cancelled: 'Cancelled',
+        denied: 'Denied in the browser',
+        expired: 'The code expired. Connect again',
+        unauthorized: 'Authorization expired. Connect again',
+        network: "Can't reach the Creator Plan service",
+        networkDetail: "Can't reach the Creator Plan service: {error}",
+        bad_response: 'The Creator Plan service sent an unexpected response',
+        not_connected: 'Not connected yet',
+        encryption_unavailable: "Can't store the key securely",
+        unknown: 'Something went wrong: {error}'
+      }
+    },
     configPath: 'Config file',
     reveal: 'Show in Folder'
   },

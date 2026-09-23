@@ -26,7 +26,7 @@
  *   node scripts/check-official-endpoints.mjs --update  收紧基线（仅允许变小）
  */
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -185,6 +185,26 @@ const NOT_OFFICIAL_CALLS = {
 }
 
 /**
+ * 用户主动开通的官方付费服务。
+ *
+ * 和上面两类不同，这里的地址**确实是官方服务端**，不假装成第三方。它能留在社区版里，
+ * 靠的是三条约束，缺一条就不该进这张表：
+ *   1. 用户在界面上主动点「连接」之后才会用到；没连接时，启动、打开任何页面都零请求。
+ *   2. 与本地功能无关：不连接，应用的一切照常可用，不出现任何提示或门禁。
+ *   3. 进这张表的文件**只放地址常量**，不发请求 —— 下面会查：出现 fetch / axios /
+ *      net.request / ipcMain 就判为分类过期。请求代码放在别的文件、从参数拿地址，
+ *      于是域名全仓只有这一处，要审的面就只有这一处。
+ */
+const USER_ENABLED_OFFICIAL_SERVICES = {
+  'src/main/ai/creatorPlan/endpoint.ts':
+    '创作者 Token Plan 的服务地址。只有用户在「设置 → 模型」里点「连接」才会用到；' +
+    '未连接时 creator-plan:state 直接返回、不发请求（见 src/main/ai/creatorPlan/ipc.ts）'
+}
+
+/** 进了「用户主动开通」一类的文件里不许出现的东西：它只该是个地址常量 */
+const REQUEST_MARKERS = ['fetch(', 'axios', 'net.request', 'ipcMain', 'XMLHttpRequest', 'WebSocket']
+
+/**
  * 官方基址的取用方式。
  *
  * 用来给 `NOT_OFFICIAL_CALLS` 兜底：一个文件被归为「不是官方调用」，却又出现了这些
@@ -229,6 +249,15 @@ function collect() {
 
     const raw = readFileSync(file, 'utf-8')
 
+    if (repoPath in USER_ENABLED_OFFICIAL_SERVICES) {
+      const code = stripLineComments(raw)
+      const found = [...OFFICIAL_BASE_MARKERS, ...REQUEST_MARKERS].filter((marker) =>
+        code.includes(marker)
+      )
+      if (found.length > 0) misclassified.push({ file: repoPath, markers: found })
+      continue
+    }
+
     if (repoPath in NOT_OFFICIAL_CALLS) {
       const found = OFFICIAL_BASE_MARKERS.filter((marker) =>
         stripLineComments(raw).includes(marker)
@@ -246,14 +275,21 @@ function collect() {
     if (hits > 0) counts[repoPath] = hits
   }
 
+  // 表里登记了、文件却不在了：分类表跟着删，别让它变成一条永远用不上的放行
+  for (const file of Object.keys(USER_ENABLED_OFFICIAL_SERVICES)) {
+    if (!existsSync(join(ROOT, file))) misclassified.push({ file, markers: ['文件不存在'] })
+  }
+
   if (misclassified.length > 0) {
-    console.error('✖ 分类过期了：这些文件被归为「不是官方调用」，却用了官方基址：\n')
+    console.error('✖ 分类过期了：这些文件进了分类表（因此不计数），内容却和分类对不上：\n')
     for (const { file, markers } of misclassified) {
       console.error(`  · ${file} —— ${markers.join(', ')}`)
     }
     console.error(
       '\n要么它新增了官方调用（那就从 NOT_OFFICIAL_CALLS 里拿掉，让它进基线），' +
         '\n要么当初归错了（那就修正分类里写的理由）。' +
+        '\n「用户主动开通」一类的文件只许放地址常量：请求代码挪到别的文件、从参数拿地址；' +
+        '\n文件删了就把它从 USER_ENABLED_OFFICIAL_SERVICES 里一起删掉。' +
         '\n\n这条守的是分类本身：文件一旦进了分类表就不再计数，' +
         '\n所以「进了表之后偷偷加官方调用」必须被拦下来。'
     )

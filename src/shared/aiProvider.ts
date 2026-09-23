@@ -559,6 +559,11 @@ export function looksLikeEmbeddingModelId(modelId: string): boolean {
 export interface ModelBinding {
   providerId: string
   modelId: string
+  /**
+   * 这条绑定由谁管。`'plan'` = 创作者 Token Plan 导入时写的：重新导入会更新它、
+   * 断开会清掉它。用户手动改绑定时不带这个字段，那个角色就自动脱离套餐。
+   */
+  source?: 'plan'
 }
 
 export type RoleBindings = Partial<Record<ModelRole, ModelBinding>>

@@ -1,4 +1,5 @@
 import { ipcMain, shell } from 'electron'
+import { registerCreatorPlanIPC } from './creatorPlan/ipc'
 import { registerSpeechIPC } from '../ipc/speech'
 import { PROVIDER_CATALOG } from './catalog'
 import {
@@ -96,14 +97,27 @@ async function materialize(
   }
 
   // 从 literal / oauth 换成别的来源时，把原来那份密文删掉，不留孤儿。
+  // 别的来源还在用同一份密文（创作者 Token Plan 的几个来源共用一把 Key）就留着。
   if (
     (previous?.apiKey.kind === 'literal' || previous?.apiKey.kind === 'oauth') &&
-    apiKey.kind !== previous.apiKey.kind
+    apiKey.kind !== previous.apiKey.kind &&
+    !(await keyUsedElsewhere(previous.apiKey.id, draft.id))
   ) {
     await deleteLiteralKey(previous.apiKey.id)
   }
 
   return { ...rest, apiKey }
+}
+
+/** 除了 `exceptProviderId`，还有没有别的来源引用这份密文 */
+async function keyUsedElsewhere(keyId: string, exceptProviderId: string): Promise<boolean> {
+  const settings = await readSettings()
+  return settings.providers.some(
+    (provider) =>
+      provider.id !== exceptProviderId &&
+      (provider.apiKey.kind === 'literal' || provider.apiKey.kind === 'oauth') &&
+      provider.apiKey.id === keyId
+  )
 }
 
 function fail(error: unknown): { ok: false; error: string } {
@@ -131,6 +145,7 @@ function failProbe(error: unknown): { ok: false; error: ProbeFailure } {
 
 export function registerAiProviderIPC(): void {
   registerSpeechIPC()
+  registerCreatorPlanIPC()
   ipcMain.handle('ai-provider:catalog', () => PROVIDER_CATALOG)
 
   ipcMain.handle('ai-provider:get-settings', async () => {
@@ -158,7 +173,10 @@ export function registerAiProviderIPC(): void {
     try {
       const settings = await readSettings()
       const target = settings.providers.find((item) => item.id === providerId)
-      if (target?.apiKey.kind === 'literal') {
+      if (
+        target?.apiKey.kind === 'literal' &&
+        !(await keyUsedElsewhere(target.apiKey.id, providerId))
+      ) {
         await deleteLiteralKey(target.apiKey.id)
       }
 

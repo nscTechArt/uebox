@@ -2076,6 +2076,22 @@ const api = {
       return () => ipcRenderer.removeListener('ai-provider:oauth-device-code', handler)
     }
   },
+  /** 创作者 Token Plan：一把 Key 配好多个角色。没连接时这些调用都不联网 */
+  creatorPlan: {
+    state: () => ipcRenderer.invoke('creator-plan:state'),
+    /** 设备授权。码通过 onDeviceCode 推过来；用户在浏览器里允许后才 resolve */
+    connect: () => ipcRenderer.invoke('creator-plan:connect'),
+    cancel: () => ipcRenderer.invoke('creator-plan:cancel'),
+    preview: () => ipcRenderer.invoke('creator-plan:preview'),
+    apply: (roles: string[]) => ipcRenderer.invoke('creator-plan:apply', roles),
+    disconnect: () => ipcRenderer.invoke('creator-plan:disconnect'),
+    onDeviceCode: (listener: (prompt: { userCode: string; verificationUri: string }) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, prompt: unknown): void =>
+        listener(prompt as { userCode: string; verificationUri: string })
+      ipcRenderer.on('creator-plan:device-code', handler)
+      return () => ipcRenderer.removeListener('creator-plan:device-code', handler)
+    }
+  },
   /**
    * 网页读取 API
    * 给一个网址，回一段能进知识库的正文（图片/视频走视觉分析）

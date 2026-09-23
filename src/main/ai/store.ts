@@ -442,7 +442,11 @@ function normalizeRoles(raw: unknown, providers: ProviderConfig[]): AiProviderSe
       console.warn(`[AI 配置] 角色 ${role} 指向不存在的 provider «${providerId}»，已忽略`)
       continue
     }
-    out[role as ModelRole] = { providerId, modelId }
+    out[role as ModelRole] = {
+      providerId,
+      modelId,
+      ...(binding?.source === 'plan' ? { source: 'plan' as const } : {})
+    }
   }
   return out
 }

@@ -2093,6 +2093,36 @@ declare global {
         }) => void
       ) => () => void
     }
+    /** 创作者 Token Plan。没连接时这些调用都不联网 */
+    creatorPlan: {
+      state: () => Promise<
+        import('../shared/creatorPlan').CreatorPlanResult<
+          import('../shared/creatorPlan').CreatorPlanState
+        >
+      >
+      connect: () => Promise<
+        import('../shared/creatorPlan').CreatorPlanResult<
+          import('../shared/creatorPlan').CreatorPlanPreview
+        >
+      >
+      cancel: () => Promise<void>
+      preview: () => Promise<
+        import('../shared/creatorPlan').CreatorPlanResult<
+          import('../shared/creatorPlan').CreatorPlanPreview
+        >
+      >
+      apply: (
+        roles: import('../shared/aiProvider').ModelRole[]
+      ) => Promise<
+        import('../shared/creatorPlan').CreatorPlanResult<
+          import('../shared/creatorPlan').CreatorPlanState
+        >
+      >
+      disconnect: () => Promise<import('../shared/creatorPlan').CreatorPlanResult<null>>
+      onDeviceCode: (
+        callback: (prompt: import('../shared/creatorPlan').CreatorPlanDevicePrompt) => void
+      ) => () => void
+    }
     /**
      * Jina Reader / Search API
      * 用于读取网页内容和 Web 搜索
