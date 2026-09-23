@@ -1100,6 +1100,12 @@ const MANUAL_ENTRIES = {
       'gpt-6-astra': model('gpt-6-astra', 'GPT-6 Astra', true, true, CODEX_LIMIT, true, {
         release_date: '2026-09-04'
       }),
+      'gpt-6-sol': model('gpt-6-sol', 'GPT-6 Sol', true, true, CODEX_LIMIT, true, {
+        release_date: '2026-09-22'
+      }),
+      'gpt-6-luna': model('gpt-6-luna', 'GPT-6 Luna', true, true, CODEX_LIMIT, true, {
+        release_date: '2026-09-22'
+      }),
       'gpt-5.6-sol': model('gpt-5.6-sol', 'GPT-5.6 Sol', true, true, CODEX_LIMIT, true, {
         release_date: '2026-07-09'
       }),
@@ -1475,6 +1481,9 @@ const THINKING_OVERRIDES = {
   openai: {
     // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-16)
     'gpt-6-astra': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    // https://developers.openai.com/api/docs/models/gpt-6-sol / gpt-6-luna (2026-09-23)
+    'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6': {
       thinking: {
         minimal: null,
@@ -1497,6 +1506,8 @@ const THINKING_OVERRIDES = {
    */
   chatgpt: {
     'gpt-6-astra': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6-terra': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
@@ -1508,13 +1519,17 @@ const THINKING_OVERRIDES = {
 
   /*
    * Anthropic 直连。4.6 及以后的型号 pi 目录里都有（阶梯和 adaptive 位都对得上
-   * 官方那张表），只有 Fable 5.1 比快照新。
+   * 官方那张表），只有 Fable 5.1 和 Opus 5.5 比快照新。
    *
    * `adaptive` 与 `thinking` 必须成对写：少了前者请求走老式思考预算，
    * 而那条路把 xhigh 和 max 一起夹成 high —— 档位列出来了，发出去还是 high。
    */
   anthropic: {
-    'claude-fable-5-1': { adaptive: true, thinking: { xhigh: 'xhigh', max: 'max' } }
+    'claude-fable-5-1': { adaptive: true, thinking: { xhigh: 'xhigh', max: 'max' } },
+    // Opus 5.5 的思考关不掉：发 `thinking: disabled` 在任何档位都是 400，
+    // 所以 `off` 写成不存在（pi 给 Fable 5 也是这么标的）。
+    // https://platform.claude.com/docs/en/build-with-claude/effort (2026-09-23)
+    'claude-opus-5-5': { adaptive: true, thinking: { off: null, xhigh: 'xhigh', max: 'max' } }
   },
 
   // 2026-09-16: https://api-docs.deepseek.com/guides/thinking_mode/

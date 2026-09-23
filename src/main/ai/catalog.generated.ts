@@ -59,6 +59,34 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "supportsOAuth": true,
     "models": [
       {
+        "id": "gpt-6-sol",
+        "displayName": "GPT-6 Sol",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "thinkingLevelMap": {
+          "minimal": null,
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "contextWindow": 272000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "thinkingLevelMap": {
+          "minimal": null,
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "contextWindow": 272000,
+        "maxOutputTokens": 128000
+      },
+      {
         "id": "gpt-6-astra",
         "displayName": "GPT-6 Astra",
         "supportsVision": true,
@@ -1093,6 +1121,60 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 131072
       },
       {
+        "id": "anthropic/claude-opus-5.5",
+        "displayName": "Claude Opus 5.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-sol",
+        "displayName": "GPT-6 Sol",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-luna-pro",
+        "displayName": "GPT-6 Luna Pro",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-sol-pro",
+        "displayName": "GPT-6 Sol Pro",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "cohere/command-a-plus",
+        "displayName": "Command A+",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 192000,
+        "maxOutputTokens": 64000
+      },
+      {
         "id": "xiaomi/mimo-v2.6-pro-ultraspeed",
         "displayName": "MiMo-V2.6-Pro-UltraSpeed",
         "supportsVision": true,
@@ -1129,60 +1211,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1048576,
         "maxOutputTokens": 131072
-      },
-      {
-        "id": "unbiased/pareto",
-        "displayName": "Pareto",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": false,
-        "contextWindow": 262144,
-        "maxOutputTokens": 131072
-      },
-      {
-        "id": "~deepseek/deepseek-pro-latest",
-        "displayName": "DeepSeek Pro Latest",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1048576,
-        "maxOutputTokens": 384000
-      },
-      {
-        "id": "~deepseek/deepseek-flash-latest",
-        "displayName": "DeepSeek Flash Latest",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1048576,
-        "maxOutputTokens": 943718
-      },
-      {
-        "id": "sakana/fugu-max",
-        "displayName": "Fugu Max",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "sakana/fugu-ultra-v2",
-        "displayName": "Fugu Ultra v2",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "~openai/gpt-terra-latest",
-        "displayName": "GPT Terra Latest",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
       }
     ]
   },
@@ -1215,6 +1243,60 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1048576,
         "maxOutputTokens": 131072
+      },
+      {
+        "id": "anthropic/claude-opus-5.5-fast",
+        "displayName": "Claude Opus 5.5 (Fast)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "anthropic/claude-opus-5.5",
+        "displayName": "Claude Opus 5.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-sol",
+        "displayName": "GPT-6 Sol",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-sol-fast",
+        "displayName": "GPT-6 Sol (Fast)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai/gpt-6-luna-fast",
+        "displayName": "GPT-6 Luna (Fast)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
       },
       {
         "id": "xiaomi/mimo-v2.6-pro-ultraspeed",
@@ -1251,60 +1333,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1000000,
         "maxOutputTokens": 1000000
-      },
-      {
-        "id": "sakana/fugu-ultra-v2",
-        "displayName": "Fugu Ultra v2",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 1000000
-      },
-      {
-        "id": "deepseek/deepseek-v4.1-flash",
-        "displayName": "DeepSeek V4.1 Flash",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1048576,
-        "maxOutputTokens": 32768
-      },
-      {
-        "id": "inception/mercury-2.5",
-        "displayName": "Mercury 2.5",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 260000,
-        "maxOutputTokens": 65536
-      },
-      {
-        "id": "inclusionai/ling-3.0-flash-vl-free",
-        "displayName": "Ling 3.0 Flash VL (Free)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 256000,
-        "maxOutputTokens": 32000
-      },
-      {
-        "id": "inclusionai/ling-3.0-flash-vl",
-        "displayName": "Ling 3.0 Flash VL",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 256000,
-        "maxOutputTokens": 32000
-      },
-      {
-        "id": "inclusionai/ling-3.0-flash-sante",
-        "displayName": "Ling 3.0 Flash Sante",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 256000,
-        "maxOutputTokens": 32000
       }
     ]
   },
@@ -1320,6 +1348,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "CLOUDFLARE_API_TOKEN",
     "hasLogo": true,
     "models": [
+      {
+        "id": "xai/grok-4.7",
+        "displayName": "Grok 4.7",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 500000,
+        "maxOutputTokens": 500000
+      },
       {
         "id": "unbiased/pareto",
         "displayName": "Pareto",
@@ -1420,15 +1457,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 500000,
         "maxOutputTokens": 500000
-      },
-      {
-        "id": "anthropic/claude-sonnet-5",
-        "displayName": "Claude Sonnet 5",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
       }
     ]
   },
@@ -1444,6 +1472,34 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "OPENAI_API_KEY",
     "hasLogo": true,
     "models": [
+      {
+        "id": "gpt-6-sol",
+        "displayName": "GPT-6 Sol",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "thinkingLevelMap": {
+          "minimal": null,
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "thinkingLevelMap": {
+          "minimal": null,
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
       {
         "id": "gpt-6-astra",
         "displayName": "GPT-6 Astra",
@@ -1546,24 +1602,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1050000,
         "maxOutputTokens": 128000
-      },
-      {
-        "id": "gpt-5.4-pro",
-        "displayName": "GPT-5.4 Pro",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "gpt-5.3-codex-spark",
-        "displayName": "GPT-5.3 Codex Spark",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 128000,
-        "maxOutputTokens": 32000
       }
     ]
   },
@@ -1579,6 +1617,21 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "ANTHROPIC_API_KEY",
     "hasLogo": true,
     "models": [
+      {
+        "id": "claude-opus-5-5",
+        "displayName": "Claude Opus 5.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "thinkingLevelMap": {
+          "off": null,
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "adaptiveThinking": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
       {
         "id": "claude-fable-5-1",
         "displayName": "Claude Fable 5.1",
@@ -2806,6 +2859,33 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "hasLogo": true,
     "models": [
       {
+        "id": "openai-gpt-6-sol",
+        "displayName": "GPT-6 Sol",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "openai-gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "claude-opus-5-5",
+        "displayName": "Claude Opus 5.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
         "id": "grok-4-7",
         "displayName": "Grok 4.7",
         "supportsVision": true,
@@ -2888,34 +2968,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1048576,
         "maxOutputTokens": 131072
-      },
-      {
-        "id": "z-ai-glm-5-3",
-        "displayName": "GLM 5.3",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 131072
-      },
-      {
-        "id": "qwen-3-8-27b",
-        "displayName": "Qwen 3.8 27B",
-        "supportsVision": true,
-        "supportsVideo": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 262144,
-        "maxOutputTokens": 65536
-      },
-      {
-        "id": "deepseek-v4-pro-0813",
-        "displayName": "DeepSeek V4 Pro 0813",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 32768
       }
     ]
   },
@@ -2945,6 +2997,96 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "hasLogo": true,
     "models": [
       {
+        "id": "us.openai.gpt-6-luna",
+        "displayName": "GPT-6 Luna (US)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "au.anthropic.claude-opus-5-5",
+        "displayName": "Claude Opus 5.5 (AU)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "global.openai.gpt-6-sol",
+        "displayName": "GPT-6 Sol (Global)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "anthropic.claude-opus-5-5",
+        "displayName": "Claude Opus 5.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "global.openai.gpt-6-luna",
+        "displayName": "GPT-6 Luna (Global)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "us.openai.gpt-6-sol",
+        "displayName": "GPT-6 Sol (US)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "eu.anthropic.claude-opus-5-5",
+        "displayName": "Claude Opus 5.5 (EU)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "global.anthropic.claude-opus-5-5",
+        "displayName": "Claude Opus 5.5 (Global)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "jp.anthropic.claude-opus-5-5",
+        "displayName": "Claude Opus 5.5 (JP)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "us.anthropic.claude-opus-5-5",
+        "displayName": "Claude Opus 5.5 (US)",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
         "id": "us.openai.gpt-6-astra",
         "displayName": "GPT-6 Astra (US)",
         "supportsVision": true,
@@ -2961,96 +3103,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1050000,
         "maxOutputTokens": 128000
-      },
-      {
-        "id": "global.openai.gpt-6-astra",
-        "displayName": "GPT-6 Astra (Global)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1050000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "us.anthropic.claude-fable-5-1",
-        "displayName": "Claude Fable 5.1 (US)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "global.anthropic.claude-fable-5-1",
-        "displayName": "Claude Fable 5.1 (Global)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "anthropic.claude-fable-5-1",
-        "displayName": "Claude Fable 5.1",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "us.xai.grok-4.6",
-        "displayName": "Grok 4.6 (US)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 500000,
-        "maxOutputTokens": 500000
-      },
-      {
-        "id": "global.xai.grok-4.6",
-        "displayName": "Grok 4.6 (Global)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 500000,
-        "maxOutputTokens": 500000
-      },
-      {
-        "id": "xai.grok-4.6",
-        "displayName": "Grok 4.6",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 500000,
-        "maxOutputTokens": 500000
-      },
-      {
-        "id": "us.anthropic.claude-opus-5",
-        "displayName": "Claude Opus 5 (US)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "anthropic.claude-opus-5",
-        "displayName": "Claude Opus 5",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "eu.anthropic.claude-opus-5",
-        "displayName": "Claude Opus 5 (EU)",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
       }
     ]
   },
@@ -3066,6 +3118,33 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "AZURE_RESOURCE_NAME",
     "hasLogo": true,
     "models": [
+      {
+        "id": "gpt-6-sol",
+        "displayName": "GPT-6 Sol",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "claude-opus-5-5",
+        "displayName": "Claude Opus 5.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
+      {
+        "id": "gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1050000,
+        "maxOutputTokens": 128000
+      },
       {
         "id": "gpt-6-astra",
         "displayName": "GPT-6 Astra",
@@ -3146,33 +3225,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 262144,
         "maxOutputTokens": 262144
-      },
-      {
-        "id": "claude-fable-5",
-        "displayName": "Claude Fable 5",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "claude-mythos-5",
-        "displayName": "Claude Mythos 5",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "claude-opus-4-8",
-        "displayName": "Claude Opus 4.8",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
       }
     ]
   },
@@ -3188,6 +3240,15 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "GOOGLE_VERTEX_PROJECT",
     "hasLogo": true,
     "models": [
+      {
+        "id": "claude-opus-5-5@default",
+        "displayName": "Claude Opus 5.5",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000
+      },
       {
         "id": "gemini-3.8-flash",
         "displayName": "Gemini 3.8 Flash",
@@ -3292,15 +3353,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsReasoning": true,
         "contextWindow": 1000000,
         "maxOutputTokens": 64000
-      },
-      {
-        "id": "claude-fable-5@default",
-        "displayName": "Claude Fable 5",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 128000
       }
     ]
   },
@@ -4018,6 +4070,16 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "STEPFUN_API_KEY",
     "hasLogo": true,
     "models": [
+      {
+        "id": "step-5-preview",
+        "displayName": "Step 5 Preview",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 1000000
+      },
       {
         "id": "step-3.7-flash",
         "displayName": "Step 3.7 Flash",

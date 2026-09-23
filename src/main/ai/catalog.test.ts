@@ -163,6 +163,31 @@ describe('内置 Provider 目录', () => {
     expect(subscription).toMatchObject({ contextWindow: 272_000, maxOutputTokens: 128_000 })
   })
 
+  it('GPT-6 Sol / Luna 在 API 与订阅两边都列出最高两档', () => {
+    for (const providerId of ['openai', 'chatgpt']) {
+      const models = CATALOG.find((entry) => entry.id === providerId)!.models
+      for (const id of ['gpt-6-sol', 'gpt-6-luna']) {
+        expect(models.find((m) => m.id === id)?.thinkingLevelMap, `${providerId}/${id}`).toEqual({
+          minimal: null,
+          xhigh: 'xhigh',
+          max: 'max'
+        })
+      }
+    }
+  })
+
+  it('Opus 5.5 走自适应思考，且不列「关闭思考」', () => {
+    const opus = CATALOG.find((entry) => entry.id === 'anthropic')?.models.find(
+      (m) => m.id === 'claude-opus-5-5'
+    )
+    expect(opus).toMatchObject({
+      adaptiveThinking: true,
+      thinkingLevelMap: { off: null, xhigh: 'xhigh', max: 'max' },
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000
+    })
+  })
+
   it('Gemini 3.1 Pro 不再被专用生图和语音模型挤出对话目录', () => {
     const google = CATALOG.find((entry) => entry.id === 'google')!
     expect(google.models.find((m) => m.id === 'gemini-3.1-pro-preview')).toMatchObject({
