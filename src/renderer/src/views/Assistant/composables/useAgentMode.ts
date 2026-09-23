@@ -1,7 +1,11 @@
 import { computed, onMounted, onUnmounted, ref, type ComputedRef, type Ref, watch } from 'vue'
 import { message } from '@renderer/utils/messageManager'
 import { useI18n } from 'vue-i18n'
-import type { ChatMessage, ChatMessageContent } from '../../../store/modules/chatMessages'
+import type {
+  ChatMessage,
+  ChatMessageContent,
+  ExcelFileInfo
+} from '../../../store/modules/chatMessages'
 import { aiAPI, toAgentV3Images, type AgentRunController } from '../../../api/ai'
 import { buildMultimodalContent } from './chatSendPrimitives'
 import { useAIConfigStore } from '../../../store/modules/aiConfig'
@@ -28,7 +32,7 @@ import {
 } from './notebookRagContext'
 import { buildLibraryContextMessage, type LibraryChatContext } from './libraryChatContext'
 import { buildCurrentUEProjectContext } from './ueProjectContext'
-import { mergeTurnContext, type ChatMediaFile } from './turnAttachments'
+import { mergeTurnContext, type ChatMediaFile, type SteerAttachments } from './turnAttachments'
 import { toSessionProjectPayload } from './sessionProjectBinding'
 import { resolvePermissionMode, toApprovalMode } from './sessionPermissionMode'
 import {
@@ -45,7 +49,11 @@ export interface UseAgentModeParams {
   tabsStore: any
   route: any
   scrollToBottomIfNeeded: () => void
-  pushUser: (content: ChatMessageContent) => void
+  pushUser: (
+    content: ChatMessageContent,
+    mentionedSources?: undefined,
+    attachments?: ExcelFileInfo[]
+  ) => void
   pushAssistantTyping: (startTime?: number) => string
   currentAgentProcess: Ref<AgentProcessItem[]>
   /**
@@ -940,11 +948,15 @@ export function useAgentMode(params: UseAgentModeParams) {
    * `images` 是随这句话一起带的图（data URL）。**不会为它换模型**：这一轮用哪个
    * 模型在跑起来那一刻就定了，中途换等于把整段 prompt cache 作废。当前模型看不了
    * 图时，模型会照实说自己看不到 —— 比背着用户换模型诚实，代价也小得多。
+   *
+   * `attachments` 是图片以外的附件（音视频路径、文档正文），和普通发送同一套处理，
+   * 只是塞进正在跑的这一轮。
    */
   async function steerAgent(
     text: string,
     editorSnapshot?: EditorSnapshot | null,
-    images?: readonly string[]
+    images?: readonly string[],
+    attachments?: SteerAttachments
   ): Promise<boolean> {
     const sessionId = currentSessionId.value
     const trimmed = text.trim()
@@ -973,7 +985,12 @@ export function useAgentMode(params: UseAgentModeParams) {
         ...(editorSnapshot !== undefined
           ? { editorSnapshot: toPlainEditorSnapshot(editorSnapshot) }
           : {}),
-        ...(converted.images.length > 0 ? { images: converted.images } : {})
+        ...(converted.images.length > 0 ? { images: converted.images } : {}),
+        // 同上：拍平成普通对象再过桥，调用方给的可能是响应式代理
+        ...(attachments?.mediaFiles?.length
+          ? { mediaFiles: attachments.mediaFiles.map((file) => ({ ...file })) }
+          : {}),
+        ...(attachments?.contextText ? { contextText: attachments.contextText } : {})
       })
       if (!result?.success) {
         message.warning(
@@ -1004,8 +1021,13 @@ export function useAgentMode(params: UseAgentModeParams) {
      */
     // 记进正在跑的那条回复的时间线；没有流在跑（切了会话、刚好收尾）
     // 才退回普通用户气泡 —— 无论如何用户都得在对话里看见自己说过的话。
-    if (!agentStreamStore.pushUserSteer(sessionId, messageText, steerId, images)) {
-      pushUser(images?.length ? buildMultimodalContent(messageText, [...images]) : messageText)
+    const files = attachments?.files
+    if (!agentStreamStore.pushUserSteer(sessionId, messageText, steerId, images, files)) {
+      pushUser(
+        images?.length ? buildMultimodalContent(messageText, [...images]) : messageText,
+        undefined,
+        files
+      )
       // 内核已经收下了，只是界面上没有正在跑的流可以插进去 —— 对调用方来说
       // 这句话**已经送出去**了，不能当失败让它再发一遍
       return true

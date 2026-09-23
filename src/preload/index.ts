@@ -1431,6 +1431,10 @@ const api = {
       editorSnapshot?: EditorSnapshot | null
       /** 随这句插话一起带的图。这一轮的模型看不了图时它会照实说自己看不到，不换模型 */
       images?: Array<{ type: 'image'; data: string; mimeType: string }>
+      /** 随这句插话带的音视频路径，主进程按正在跑的模型决定换链接还是只给路径 */
+      mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
+      /** 已经解析好的文档 / 表格正文 */
+      contextText?: string
     }) => ipcRenderer.invoke('agent-v3:steer', args),
     /** 撤回一条还排着的插话。内核已经读走了就撤不回来，那时 success 为 false */
     cancelSteer: (args: { sessionId: string; steerId: string }) =>

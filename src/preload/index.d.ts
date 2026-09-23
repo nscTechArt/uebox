@@ -2961,6 +2961,10 @@ declare global {
          * 整段 prompt cache 作废。当前模型看不了图时，模型会照实说自己看不到。
          */
         images?: Array<{ type: 'image'; data: string; mimeType: string }>
+        /** 随这句插话带的音视频路径，主进程按正在跑的模型决定换链接还是只给路径 */
+        mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
+        /** 已经解析好的文档 / 表格正文 */
+        contextText?: string
         /** 撤回这一条要用的号。会话已经收尾、内核不收时没有它 */
       }) => Promise<{ success: boolean; error?: string; steerId?: string }>
       /**

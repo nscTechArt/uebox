@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { reactive } from 'vue'
 import type { AgentProcessItem } from '@renderer/views/Assistant/components/AgentProcessLog.types'
-import type { ExecutionContext } from '@renderer/store/modules/chatMessages'
+import type { ExcelFileInfo, ExecutionContext } from '@renderer/store/modules/chatMessages'
 import {
   EMPTY_TURN_USAGE,
   hasTurnUsage,
@@ -324,7 +324,8 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
     agentSessionId: string,
     text: string,
     steerId?: string,
-    images?: readonly string[]
+    images?: readonly string[],
+    files?: readonly ExcelFileInfo[]
   ): boolean {
     const state = getStreamByAgentSession(agentSessionId)
     if (!state) return false
@@ -337,7 +338,8 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
         cancelled: false,
         steerId,
         sessionId: agentSessionId,
-        ...(images?.length ? { images: [...images] } : {})
+        ...(images?.length ? { images: [...images] } : {}),
+        ...(files?.length ? { files: files.map((file) => ({ ...file })) } : {})
       },
       timestamp: Date.now()
     })

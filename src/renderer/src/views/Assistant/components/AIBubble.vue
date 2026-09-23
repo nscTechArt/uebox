@@ -38,6 +38,15 @@
                 alt=""
               />
             </div>
+            <div v-if="block.files?.length" class="timeline-steer-files">
+              <AttachmentCard
+                v-for="(file, index) in block.files"
+                :key="`${block.key}:file:${index}`"
+                :file-name="file.fileName"
+                :kind="file.kind ?? 'excel'"
+                :row-count="file.rowCount"
+              />
+            </div>
             <div class="timeline-steer-bubble" :class="{ cancelled: block.cancelled }">
               {{ block.text }}
             </div>
@@ -551,6 +560,7 @@ import { useI18n } from 'vue-i18n'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import AgentProcessLog from './AgentProcessLog.vue'
 import AskUserCard from './AskUserCard.vue'
+import AttachmentCard from './AttachmentCard.vue'
 import type { AgentProcessItem } from './AgentProcessLog.types'
 import ThinkingProcess from './ThinkingProcess.vue'
 import ChatModelViewer from './ChatModelViewer.vue'
@@ -1628,6 +1638,14 @@ function toggleChanges(): void {
 
 // 缩略图跟着气泡右对齐，尺寸压到刚够认出画的是什么 —— 它是佐证，不是主角
 .timeline-steer-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  max-width: 72%;
+}
+
+.timeline-steer-files {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;

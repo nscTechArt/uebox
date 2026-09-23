@@ -5239,6 +5239,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     compactFailed: 'Compaction failed',
     compactNoSession: 'This chat has not started yet',
     steerAction: 'Steer',
+    steerAttachmentsOnly: 'Attached: {names}',
+    steerImageCount: '{count} image(s)',
     steerFailed: 'Steering failed: {reason}',
     queueAction: 'Queue',
     queueCancel: 'Remove from queue',

@@ -88,3 +88,16 @@ export function attachmentExtension(fileName: string): string {
   if (dot <= 0 || dot === fileName.length - 1) return ''
   return fileName.slice(dot + 1).toUpperCase()
 }
+
+/**
+ * 插话随话带的非图片附件。
+ *
+ * 图片单独走 `images`（要内联、要过视觉关口），这里是剩下那些：音视频只带路径，
+ * 文档 / 表格带解析好的正文，`files` 只给时间线画卡片用 —— 不画的话回头看只剩
+ * 一句「看这个视频」，而「这个」是哪个再也说不清。
+ */
+export interface SteerAttachments {
+  mediaFiles?: ChatMediaFile[]
+  contextText?: string
+  files?: ExcelFileInfo[]
+}

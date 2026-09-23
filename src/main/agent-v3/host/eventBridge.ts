@@ -24,6 +24,8 @@ import { notifyAgentRun, toRunSignal } from './runObserver'
 import { rememberRunOwner } from './runOwners'
 import { stripEditorSnapshotBlock } from '../core/editorSnapshot'
 import { stripAttachmentBlock } from '../core/promptAttachments'
+import { parseMediaRef } from '../core/promptMedia'
+import { stripSteerContextBlock } from './steerQueue'
 import type { QuestionPayload } from './questionChannel'
 
 /** 发给渲染层的事件。故意做成扁平结构，渲染层不需要认识 pi 的类型。 */
@@ -133,7 +135,8 @@ function extractText(message: unknown): string {
   return content
     .filter((block): block is { type: 'text'; text: string } => {
       const b = block as { type?: string; text?: unknown }
-      return b.type === 'text' && typeof b.text === 'string'
+      // 音视频引用也是文本块，但那是给 streamFn 换链接用的标记，不是谁说的话
+      return b.type === 'text' && typeof b.text === 'string' && !parseMediaRef(b.text)
     })
     .map((block) => block.text)
     .join('')
@@ -272,9 +275,11 @@ export function projectEvent(
          * 用户的原话，而模型收到的是「闪存块 + 附件块 + 原话」。不剥的话两边永远
          * 对不上，那条插话会一直显示「未生效」—— 而它其实早就进上下文了。
          *
-         * 顺序和拼的时候一致：闪存块在最外面，附件块在它里面。
+         * 顺序和拼的时候一致：闪存块在最外面，图片附件块其次，插话带的文件块最里面。
          */
-        const userText = stripAttachmentBlock(stripEditorSnapshotBlock(extractText(event.message)))
+        const userText = stripSteerContextBlock(
+          stripAttachmentBlock(stripEditorSnapshotBlock(extractText(event.message)))
+        )
         return userText
           ? [{ channel: 'agent-v3:user-message', payload: { sessionId, text: userText } }]
           : []

@@ -739,7 +739,12 @@ import {
   type ModelThinkingSupport
 } from '../composables/thinkingLevels'
 import { buildAgentModelCatalog, type AgentModelOption } from '../composables/agentModelSelection'
-import type { AttachmentKind, ChatMediaFile } from '../composables/turnAttachments'
+import type {
+  AttachmentKind,
+  ChatMediaFile,
+  SteerAttachments
+} from '../composables/turnAttachments'
+import type { ExcelFileInfo } from '@renderer/store/modules/chatMessages'
 import { objectStorageAPI } from '@renderer/api/objectStorage'
 import { resolveFollowUpAction } from '../composables/followUpQueue'
 import { resolveComposerKeyAction } from '../composables/sendShortcut'
@@ -896,7 +901,7 @@ const emit = defineEmits<{
    * 图跟着一起走。**不会为它换模型**：这一轮用哪个模型在跑起来那一刻就定了，
    * 中途换等于把整段 prompt cache 作废。当前模型看不了图时它会照实说看不到。
    */
-  (e: 'steer', payload: { text: string; images: string[] }): void
+  (e: 'steer', payload: { text: string; images: string[]; attachments?: SteerAttachments }): void
   /** 取消一条还排着的跟进消息 */
   (e: 'cancel-queued', id: string): void
   /** 排着的这条别等了，现在就插进正在跑的那一轮 */
@@ -2659,7 +2664,21 @@ function handleStop(): void {
 /** 现在处于"可以插话"的状态（不管有没有打字）。状态条和按钮的显隐都看它 */
 const canSteerNow = computed(() => !!props.isGenerating && isAgentMode.value)
 
-const canSteer = computed(() => canSteerNow.value && content.value.trim().length > 0)
+/**
+ * 有字，或者有一件已经处理好的附件，就能插话 —— 只拖了个视频、一个字没打也行。
+ * 不看 `isSendDisabled`：别的图还在传时，打好的字和备好的附件照样先插进去，
+ * 没好的留在原地（见 `handleSteer`）。
+ */
+const canSteer = computed(
+  () =>
+    canSteerNow.value &&
+    (content.value.trim().length > 0 ||
+      pendingImages.value.some((img) => img.url && !img.uploading && !img.error) ||
+      pendingExcelFiles.value.some((f) => f.content && !f.parsing && !f.error) ||
+      pendingDocFiles.value.some(
+        (f) => !f.parsing && !f.error && (f.content || (f.deferredMedia && f.filePath))
+      ))
+)
 
 /**
  * 跑着的时候，这次回车默认走排队还是插话。
@@ -2693,22 +2712,81 @@ const followUpActionLabel = computed(() =>
 const canSendFollowUp = computed(() => canSteerNow.value && !isSendDisabled.value)
 
 /**
- * 插话。带上贴进来的图 —— 用的是和 `handleSend` 同一批「传完了、没出错」的图。
+ * 插话。图、表格、文档、音视频都跟着走 —— 挑的是和 `handleSend` 同一批
+ * 「处理完了、没出错」的，处理办法也一样，只是塞进正在跑的这一轮。
  *
- * 其余附件（Excel、PDF、@ 来源）这条通道带不走，所以**留在输入框里不清空**：
- * 用户看得见它们还在，下一次普通发送会把它们发出去。清掉的话东西会静悄悄少一半。
+ * @ 来源这条通道带不走（它是检索范围，不是这一轮的内容），**留在输入框里不清空**：
+ * 用户看得见它还在，下一次普通发送会带上它。
  */
 function handleSteer(): void {
-  const text = content.value.trim()
-  if (!text) return
+  const typed = content.value.trim()
   const ready = pendingImages.value.filter((img) => img.url && !img.uploading && !img.error)
-  const images = ready.map((img) => img.url!)
-  emit('steer', { text, images })
+  const readyExcel = pendingExcelFiles.value.filter((f) => f.content && !f.parsing && !f.error)
+  const readyDocs = pendingDocFiles.value.filter(
+    (f) => !f.parsing && !f.error && (f.content || (f.deferredMedia && f.filePath))
+  )
+
+  const images = [...ready.map((img) => img.url!), ...readyDocs.flatMap((f) => f.extraImages ?? [])]
+  const contextText = [
+    ...readyExcel.map((f) => `### 文件：${f.fileName}\n\n${f.content}`),
+    ...readyDocs.filter((f) => f.content).map((f) => f.content!)
+  ].join('\n\n---\n\n')
+  const mediaFiles: ChatMediaFile[] = readyDocs
+    .filter((f) => f.deferredMedia && f.filePath)
+    .map((f) => ({ filePath: f.filePath!, fileName: f.fileName, kind: f.deferredMedia! }))
+  const files: ExcelFileInfo[] = [
+    ...readyExcel.map((f) => ({
+      fileName: f.fileName,
+      rowCount: f.rowCount,
+      kind: 'excel' as const
+    })),
+    ...readyDocs.map((f) => ({
+      fileName: f.fileName,
+      kind: f.deferredMedia ?? ('document' as const)
+    }))
+  ]
+  if (!typed && images.length === 0 && files.length === 0) return
+
+  /*
+   * 只带附件没打字：替用户补一句说清带了什么。空着不行 —— 模型拿到一段没头没尾的
+   * 附件不知道该干嘛，而插话「已生效」的回执是按原话匹配的，空串对不上号，
+   * 这条会一直挂着「未生效」。
+   */
+  const text =
+    typed ||
+    t('assistantInputComposer.steerAttachmentsOnly', {
+      names: [
+        ...files.map((f) => f.fileName),
+        ...(ready.length > 0
+          ? [t('assistantInputComposer.steerImageCount', { count: ready.length })]
+          : [])
+      ].join('、')
+    })
+
+  emit('steer', {
+    text,
+    images,
+    ...(files.length > 0
+      ? {
+          attachments: {
+            ...(mediaFiles.length > 0 ? { mediaFiles } : {}),
+            ...(contextText ? { contextText } : {}),
+            files
+          }
+        }
+      : {})
+  })
   content.value = ''
-  // 只摘走真的发出去的那几张。还在传的、传坏的留在原地 ——
+  // 只摘走真的发出去的那些。还在传的、还在解析的、坏了的留在原地 ——
   // 一起清掉的话用户会以为它们也跟着这句话进去了
-  if (images.length > 0) {
+  if (ready.length > 0) {
     replacePendingImages(pendingImages.value.filter((img) => !ready.includes(img)))
+  }
+  if (readyExcel.length > 0) {
+    pendingExcelFiles.value = pendingExcelFiles.value.filter((f) => !readyExcel.includes(f))
+  }
+  if (readyDocs.length > 0) {
+    pendingDocFiles.value = pendingDocFiles.value.filter((f) => !readyDocs.includes(f))
   }
 }
 

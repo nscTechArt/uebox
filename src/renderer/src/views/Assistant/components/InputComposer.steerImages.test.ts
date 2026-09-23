@@ -117,6 +117,18 @@ describe('插话带图', () => {
     wrapper.unmount()
   })
 
+  it('只带附件一个字没打也能插话，替用户补一句说清带了什么', async () => {
+    const wrapper = await steeringComposer([uploaded('a')])
+    await wrapper.get('.send-btn').trigger('click')
+
+    const payload = wrapper.emitted('steer')?.[0]?.[0] as { text: string; images: string[] }
+    expect(payload.images).toEqual(['data:image/png;base64,a'])
+    // 空串对不上「已生效」回执，这条会一直挂着未生效
+    expect(payload.text).toBe('补充附件：1 张图片')
+    expect(useChatSessionsStore().getImageDraft(CHAT_SID)).toEqual([])
+    wrapper.unmount()
+  })
+
   it('还在传的那张留在原地 —— 它没跟着这句话走', async () => {
     const uploading: ChatImageDraft = {
       id: 'slow',

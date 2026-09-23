@@ -5101,6 +5101,8 @@ export default {
     compactFailed: '压缩失败',
     compactNoSession: '暂无可压缩内容',
     steerAction: '插话',
+    steerAttachmentsOnly: '补充附件：{names}',
+    steerImageCount: '{count} 张图片',
     steerFailed: '插话失败：{reason}',
     queueAction: '排队',
     queueCancel: '取消这条',

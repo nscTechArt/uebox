@@ -117,3 +117,28 @@ export function cancelSteer(
   for (const item of rest) sink.steer(item.message)
   return 'cancelled'
 }
+
+/** 插话附件块的开闭标签。拼和剥都从这里取 —— 两边各写一遍迟早会分叉 */
+const CONTEXT_OPEN = '<steer-attachments>'
+const CONTEXT_CLOSE = '</steer-attachments>'
+
+/**
+ * 插话带的附件（文档正文、音视频说明、图片关口的提示）包成一块，拼在原话前面。
+ *
+ * 普通发送不需要这一块：那条不走回执。插话要 —— 回执按**文本相等**销号
+ * （`markSteerDelivered` / `agentStream.markSteerApplied`），附件文字不剥掉的话
+ * 那条插话会一直显示「未生效」。所以这些东西要有一对能认出来的边界。
+ */
+export function formatSteerContextBlock(parts: readonly string[]): string {
+  const body = parts.filter((part) => part.trim()).join('\n\n---\n\n')
+  if (!body) return ''
+  return `${CONTEXT_OPEN}\n${body}\n${CONTEXT_CLOSE}`
+}
+
+/** 剥掉插话附件块，还原成用户打的那句话。只认开头那一处，理由同 `stripAttachmentBlock` */
+export function stripSteerContextBlock(text: string): string {
+  if (!text.startsWith(CONTEXT_OPEN)) return text
+  const end = text.indexOf(CONTEXT_CLOSE)
+  if (end < 0) return text
+  return text.slice(end + CONTEXT_CLOSE.length).replace(/^\r?\n\r?\n?/, '')
+}

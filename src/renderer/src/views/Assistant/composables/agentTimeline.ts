@@ -10,6 +10,7 @@
  */
 import type { AgentProcessItem } from '../components/AgentProcessLog.types'
 import type { AgentQuestionItem } from '@core/shared/agentQuestion'
+import type { ExcelFileInfo } from '../../../store/modules/chatMessages'
 
 export interface AgentTimelineProcessBlock {
   kind: 'process'
@@ -45,6 +46,8 @@ export interface AgentTimelineSteerBlock {
   sessionId?: string
   /** 随这句话一起插进去的图。发完输入框就清空了，这里是它唯一的去处 */
   images?: string[]
+  /** 随这句话带的文档、音视频。同上，只画卡片，内容已经交给内核了 */
+  files?: ExcelFileInfo[]
 }
 
 /**
@@ -117,10 +120,17 @@ export function splitAgentTimeline(items: AgentProcessItem[]): AgentTimelineBloc
             steerId?: unknown
             sessionId?: unknown
             images?: unknown
+            files?: unknown
           }
         | undefined
       const images = Array.isArray(data?.images)
         ? data.images.filter((url): url is string => typeof url === 'string' && url.length > 0)
+        : []
+      const files = Array.isArray(data?.files)
+        ? data.files.filter(
+            (file): file is ExcelFileInfo =>
+              typeof (file as ExcelFileInfo | undefined)?.fileName === 'string'
+          )
         : []
       blocks.push({
         kind: 'steer',
@@ -130,7 +140,8 @@ export function splitAgentTimeline(items: AgentProcessItem[]): AgentTimelineBloc
         cancelled: data?.cancelled === true,
         ...(typeof data?.steerId === 'string' ? { steerId: data.steerId } : {}),
         ...(typeof data?.sessionId === 'string' ? { sessionId: data.sessionId } : {}),
-        ...(images.length > 0 ? { images } : {})
+        ...(images.length > 0 ? { images } : {}),
+        ...(files.length > 0 ? { files } : {})
       })
       continue
     }

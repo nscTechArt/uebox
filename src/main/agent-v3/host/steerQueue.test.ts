@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   cancelSteer,
+  formatSteerContextBlock,
   markSteerDelivered,
   queueSteer,
   type PendingSteer,
-  type SteeringSink
+  type SteeringSink,
+  stripSteerContextBlock
 } from './steerQueue'
 
 /** 假内核队列。按 `steeringMode: 'all'` 的行为来：读一次把队列全端走 */
@@ -138,5 +140,24 @@ describe('cancelSteer', () => {
     expect(cancelSteer(pending, sink, id)).toBe('cancelled')
     expect(sink.queued).toEqual([])
     expect(pending).toEqual([])
+  })
+})
+
+describe('插话附件块', () => {
+  it('拼上去的块能整块剥掉，剩下的正好是原话 —— 否则回执对不上，插话永远「排队中」', () => {
+    const block = formatSteerContextBlock([
+      '【用户附带的音视频】\n- 视频：a.avi',
+      '### 文件：b.xlsx'
+    ])
+    expect(stripSteerContextBlock([block, '视频在这里'].join('\n\n'))).toBe('视频在这里')
+  })
+
+  it('什么都没带就不出块，插话还是原来那句', () => {
+    expect(formatSteerContextBlock(['', '  '])).toBe('')
+  })
+
+  it('只认开头那一处：正文里同名标签是用户自己打的字', () => {
+    const text = '看看 <steer-attachments> 这个标签'
+    expect(stripSteerContextBlock(text)).toBe(text)
   })
 })

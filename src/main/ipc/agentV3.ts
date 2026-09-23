@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto'
 import type { ImageContent } from '@earendil-works/pi-ai'
 import { admitPromptImages } from '../agent-v3/core/admitPromptImages'
 import {
+  describePromptMedia,
   mediaRefText,
   preparePromptImages,
   preparePromptMedia,
@@ -124,6 +125,7 @@ import type { ApprovalMode } from '../agent-v3/core/approval'
 import { createEventBridge } from '../agent-v3/host/eventBridge'
 import {
   cancelSteer,
+  formatSteerContextBlock,
   markSteerDelivered,
   queueSteer,
   type PendingSteer
@@ -200,6 +202,11 @@ interface ActiveAgentRun {
    * 挂在这一轮上而不是全局表里：它必须跟着这一轮一起消失，理由见 `steerQueue.ts`。
    */
   pendingSteers: PendingSteer[]
+  /**
+   * 这一轮跑的是哪个模型。插话带音视频时要据此判断能不能换成链接直接给它看 ——
+   * 插话不换模型，所以只能按正在跑的这个判断。
+   */
+  selection?: { providerId: string; modelId: string }
 }
 const activeAgents = new ActiveRuns<ActiveAgentRun>()
 const deletingSessions = new Set<string>()
@@ -1558,6 +1565,7 @@ export function registerAgentV3IPC(): void {
       run.controller.signal.throwIfAborted()
       const { agent, selection, tools, allTools } = await createUnrealAgent(ctx)
       run.agent = agent
+      run.selection = selection
       run.controller.signal.throwIfAborted()
       console.log(
         `[AgentV3] 会话 ${sessionId} 启动：model=${selection.providerId}/${selection.modelId} ` +
@@ -1933,6 +1941,7 @@ export function registerAgentV3IPC(): void {
       run.controller.signal.throwIfAborted()
       const { agent, selection, allTools } = await createUnrealAgent(ctx)
       run.agent = agent
+      run.selection = selection
       run.controller.signal.throwIfAborted()
       const store = new TranscriptStore(sessionId)
       run.store = store
@@ -2533,12 +2542,16 @@ export function registerAgentV3IPC(): void {
   ipcMain.handle(
     'agent-v3:steer',
     async (
-      _event,
+      event,
       args: {
         sessionId: string
         message: string
         editorSnapshot?: EditorSnapshot | null
         images?: ImageContent[]
+        /** 随插话带的音视频路径。和普通发送同一条路：能换链接就换，换不了只给路径 */
+        mediaFiles?: PromptMediaFile[]
+        /** 渲染层已经解析好的文档 / 表格正文 */
+        contextText?: string
       }
     ) => {
       const entry = activeAgents.get(args.sessionId)
@@ -2574,17 +2587,49 @@ export function registerAgentV3IPC(): void {
       const attachmentBlock = formatAttachmentBlock(attachments)
       // 插话带的图走同一道关口，理由同普通发送
       const admittedSteer = await admitPromptImages(args.images)
-      const text = [block, attachmentBlock, ...admittedSteer.notices, args.message]
-        .filter(Boolean)
-        .join('\n\n')
+      /*
+       * 音视频和普通发送同一条路（见 promptMedia.ts），模型按**正在跑的这一轮**判断：
+       * 插话不换模型。没记下模型就当换不了链接，只给路径。
+       */
+      const mediaFiles = args.mediaFiles ?? []
+      const media = entry.selection
+        ? await preparePromptMedia(mediaFiles, entry.selection, (note) => {
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('agent-v3:notice', {
+                sessionId: args.sessionId,
+                message: note,
+                level: 'info'
+              })
+            }
+          })
+        : { refs: [], note: describePromptMedia(mediaFiles, new Set()) }
+      // 上传要等一阵，这期间这一轮可能已经跑完了
+      if (activeAgents.get(args.sessionId) !== entry) {
+        return { success: false, error: '没有正在执行的会话' }
+      }
+      /*
+       * 图片关口的提示、音视频说明、文档正文都包进插话附件块：回执要按原话销号，
+       * 这些字得能整块剥掉（见 `formatSteerContextBlock`）。
+       */
+      const contextBlock = formatSteerContextBlock([
+        ...admittedSteer.notices,
+        media.note,
+        args.contextText ?? ''
+      ])
+      const text = [block, attachmentBlock, contextBlock, args.message].filter(Boolean).join('\n\n')
 
       /*
-       * 没带图就还是一条纯字符串，和以前一个字节都不差 —— 内容块数组只在
-       * 真的有图时才用，免得给每一条插话都换一种形状。
+       * 什么都没带就还是一条纯字符串，和以前一个字节都不差 —— 内容块数组只在
+       * 真的有图或音视频引用时才用，免得给每一条插话都换一种形状。
        */
-      const content = admittedSteer.images.length
-        ? [{ type: 'text', text }, ...admittedSteer.images]
-        : text
+      const content =
+        admittedSteer.images.length || media.refs.length
+          ? [
+              { type: 'text', text },
+              ...media.refs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
+              ...admittedSteer.images
+            ]
+          : text
 
       /*
        * 留底用的是 `args.message`（用户的原话），不是拼了闪存块和附件块的 `content`。

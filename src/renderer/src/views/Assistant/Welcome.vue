@@ -303,7 +303,11 @@ import { provideFileReview } from './composables/useFileReview'
 import { useSessionBrowser } from './composables/useSessionBrowser'
 import { useChatSessionsStore, type BoundNotebook } from '../../store/modules/chatSessions'
 import { useTabsStore } from '../../store/modules/tabs'
-import { useChatMessagesStore, type ChatMessageContent } from '../../store/modules/chatMessages'
+import {
+  useChatMessagesStore,
+  type ChatMessageContent,
+  type ExcelFileInfo
+} from '../../store/modules/chatMessages'
 import { useVaultStore } from '../../store/modules/vaultStore'
 import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
@@ -323,6 +327,7 @@ import {
   removeFollowUp,
   type FollowUpQueues
 } from './composables/followUpQueue'
+import { bubbleAttachments, type SteerAttachments } from './composables/turnAttachments'
 import {
   attachVoiceHost,
   startVoiceIn,
@@ -669,7 +674,7 @@ watch(
 function pushUser(
   content: ChatMessageContent,
   mentionedSources?: { id: string; title: string; type: string }[],
-  excelFiles?: Array<{ fileName: string; rowCount?: number }>
+  excelFiles?: ExcelFileInfo[]
 ): void {
   chatMsgStore.pushUser(sid.value, content, mentionedSources, excelFiles)
   scrollToBottomIfNeeded()
@@ -908,23 +913,23 @@ function isPlainTextOnly(payload: ComposerSendPayload): boolean {
   return (
     isSteerable(payload) &&
     (payload.images?.length || 0) === 0 &&
-    (payload.imageFiles?.length || 0) === 0
+    (payload.imageFiles?.length || 0) === 0 &&
+    !payload.excelContext &&
+    (payload.docFiles?.length || 0) === 0
   )
 }
 
 /**
  * 这条排着的消息能不能改成「立即插话」。
  *
- * 插话带得走文字和图（`agent-v3:steer` 的 `images`），带不走 Excel、PDF、
- * @ 来源那些 —— 带着它们的那条如果给了按钮，用户点下去东西会**静悄悄少一半**，
- * 所以只能排队等下一轮。
+ * 插话带得走文字、图、表格、文档和音视频（`agent-v3:steer` 的 `images` / `mediaFiles` /
+ * `contextText`），带不走 @ 来源和内嵌 PDF —— 带着它们的那条如果给了按钮，用户点下去
+ * 东西会**静悄悄少一半**，所以只能排队等下一轮。
  */
 function isSteerable(payload: ComposerSendPayload): boolean {
   return (
     payload.content.trim().length > 0 &&
     (payload.forcedSources?.length || 0) === 0 &&
-    !payload.excelContext &&
-    (payload.docFiles?.length || 0) === 0 &&
     (payload.inlineDocuments?.length || 0) === 0
   )
 }
@@ -972,7 +977,16 @@ async function handleSteerQueuedFollowUp(id: string): Promise<void> {
        * 工程对不上时主进程会整条拒绝（比如这条是在另一个工程上排的），
        * `steerAgent` 返回 false，条目留在队列里 —— 之后按它自己钉住的工程发出去。
        */
-      if (!(await steerAgent(item.text, item.payload.editorSnapshot, item.payload.images))) return
+      const queued = item.payload
+      const files = bubbleAttachments(queued.excelFiles, queued.docFiles)
+      const attachments: SteerAttachments | undefined = files
+        ? {
+            files,
+            ...(queued.mediaFiles?.length ? { mediaFiles: queued.mediaFiles } : {}),
+            ...(queued.excelContext ? { contextText: queued.excelContext } : {})
+          }
+        : undefined
+      if (!(await steerAgent(item.text, queued.editorSnapshot, queued.images, attachments))) return
       followUpQueues.value = removeFollowUp(followUpQueues.value, sid.value, id)
     }
     // 等释放中：什么都不做，留在队列里。`released` 一到自然会投递
@@ -1733,7 +1747,11 @@ function handleComposerStop(): void {
  * 社区版不该有账号门槛（AGENTS.md §1）。V3 内核自己会在快溢出时压缩，
  * 用不着用户点。
  */
-async function handleComposerSteer(payload: { text: string; images: string[] }): Promise<void> {
+async function handleComposerSteer(payload: {
+  text: string
+  images: string[]
+  attachments?: SteerAttachments
+}): Promise<void> {
   /*
    * 插话也是一次「发送」，闪存同样在这一刻抓。
    *
@@ -1745,7 +1763,12 @@ async function handleComposerSteer(payload: { text: string; images: string[] }):
     sessionProject: chatStore.getProject?.(sid.value) ?? null,
     runningSessionId: chatStore.getAgentSessionId?.(sid.value) || undefined
   })
-  await steerAgent(payload.text, captured.ok ? captured.snapshot : null, payload.images)
+  await steerAgent(
+    payload.text,
+    captured.ok ? captured.snapshot : null,
+    payload.images,
+    payload.attachments
+  )
 }
 
 /** 消息气泡上的操作按钮：报错后的「接着跑」、审查之后的「让它自证」 */
