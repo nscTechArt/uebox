@@ -463,7 +463,10 @@ export function useAgentMode(params: UseAgentModeParams) {
         handleAgentStopped(null, { sessionId: agentSessionId, runId })
         onFinished?.({ status: 'stopped', text: '' })
       },
-      onError: (error: string, data?: { statusCode?: number; code?: string; detail?: string }) => {
+      onError: (
+        error: string,
+        data?: { statusCode?: number; code?: string; detail?: string; planError?: string }
+      ) => {
         void handleAgentError(null, {
           message: error,
           sessionId: agentSessionId,

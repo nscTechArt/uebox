@@ -20,6 +20,11 @@ import {
   type PiUsageLike
 } from '../../../shared/agentUsage'
 import { classifyProviderError } from './providerError'
+import {
+  creatorPlanChatError,
+  isPlanProvider,
+  type CreatorPlanChatErrorCode
+} from '../../../shared/creatorPlan'
 import { notifyAgentRun, toRunSignal } from './runObserver'
 import { rememberRunOwner } from './runOwners'
 import { stripEditorSnapshotBlock } from '../core/editorSnapshot'
@@ -79,6 +84,12 @@ export type AgentV3Event =
         statusCode?: number
         code?: string
         detail?: string
+        /**
+         * 调的是创作者 Token Plan、且服务端回的是套餐类错误（没订阅、额度用完、
+         * 套餐不含这个角色、Key 失效）。渲染层据此给一条可点的提示，而不是通用错误。
+         * 别的来源永远不带这个字段。
+         */
+        planError?: CreatorPlanChatErrorCode
       }
     }
   /** 上下文用量条。V2 没有 —— 用户不知道离压缩还有多远 */
@@ -263,6 +274,8 @@ export function projectEvent(
         role?: string
         stopReason?: string
         errorMessage?: string
+        /** pi 的 Model.provider，即我们的来源 id（见 piModel.ts 的 toPiModel） */
+        provider?: string
       }
       if (message?.role !== 'assistant') {
         // 用户消息单发一个通道：渲染层拿它给插话打「已生效」回执，
@@ -310,10 +323,20 @@ export function projectEvent(
         // 状态码和错误码只存在于这串文本里（pi 在 provider 的 catch 里就把 SDK 的
         // error 对象压扁了）。抠出来发上去，渲染层那套按状态码分类的友好文案才有得用 ——
         // 不抠的话用户看到的是 `错误: 401: {"error":{"message":"Incorrect API key…"}}`
+        const facts = classifyProviderError(raw)
+        const planError =
+          message.provider && isPlanProvider(message.provider)
+            ? creatorPlanChatError(facts.statusCode, facts.code)
+            : null
         return [
           {
             channel: 'agent-v3:error',
-            payload: { sessionId, message: raw, ...classifyProviderError(raw) }
+            payload: {
+              sessionId,
+              message: raw,
+              ...facts,
+              ...(planError ? { planError } : {})
+            }
           }
         ]
       }

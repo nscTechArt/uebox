@@ -756,13 +756,34 @@ export default {
         canceled: '已取消',
         none: '未订阅'
       },
-      textTokens: '对话额度：已用 {used} / {limit}',
+      quotas: {
+        text_tokens: '对话 {used} / {limit} token',
+        images: '生图 {used} / {limit} 张',
+        video_seconds: '视频 {used} / {limit} 秒',
+        model3d_tasks: '3D {used} / {limit} 次',
+        music_tasks: '音乐 {used} / {limit} 次',
+        realtime_minutes: '实时语音 {used} / {limit} 分钟',
+        tts_characters: '语音合成 {used} / {limit} 字符',
+        stt_minutes: '语音识别 {used} / {limit} 分钟',
+        searches: '网页检索 {used} / {limit} 次'
+      },
+      quotaOther: '{key} {used} / {limit}',
       resetsAt: '{date} 重置',
+      pastDue: '续费没扣成功。宽限期内照常能用，过期后停用。',
+      pastDueAction: '更新付款方式',
+      deprecated: '{role}在用的 {model} 要下线了。',
+      deprecatedUntil: '{role}在用的 {model} 将于 {date} 下线。',
+      deprecatedReplace: '点「重新导入」换成 {replacement}。',
+      deprecatedReindex: '换完要重建知识库索引。',
+      revokeFailed: '没能在服务端吊销这把 Key，可以去网页端手动吊销。',
+      revokeOpen: '去网页端吊销',
+      managedBadge: '由创作者 Token Plan 管理',
       managedCount: '管理着 {count} 个角色',
       manage: '管理订阅',
       reimport: '重新导入',
       disconnect: '断开',
-      disconnectConfirm: '断开后，由套餐管理的角色会变成未设置。本机保存的 Key 会删除。',
+      disconnectConfirm:
+        '断开后，由套餐管理的角色恢复成导入前的设置。这把 Key 会在服务端吊销，本机也会删除。',
       previewTitle: '选择交给套餐的角色',
       previewDesc: '勾选的角色改用套餐模型。已手动配置的角色默认不勾。',
       previewCurrent: '现在：{name}',
@@ -781,6 +802,26 @@ export default {
         not_connected: '还没有连接',
         encryption_unavailable: '无法安全保存 Key',
         unknown: '出错了：{error}'
+      },
+      chat: {
+        subscription_inactive: {
+          title: '创作者 Token Plan 没有生效的订阅',
+          desc: '订阅没开，或续费失败已过宽限期。处理好再发。'
+        },
+        quota_exhausted: {
+          title: '这项额度本周期用完了',
+          desc: '升级套餐，或等额度重置。'
+        },
+        role_not_in_plan: {
+          title: '当前套餐不含这个角色',
+          desc: '升级套餐，或在「设置 → 模型」里给这个角色换个来源。'
+        },
+        unauthorized: {
+          title: '创作者 Token Plan 授权失效',
+          desc: 'Key 被吊销或删掉了。到「设置 → 模型」重新连接。'
+        },
+        manage: '管理订阅',
+        reconnect: '去重新连接'
       }
     },
     configPath: '配置文件',

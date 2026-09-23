@@ -555,7 +555,7 @@ import {
   fileDiff,
   type FileChange
 } from '../../../../../shared/fileChange'
-import { computed, watch, onMounted, nextTick, ref, shallowRef } from 'vue'
+import { computed, watch, onMounted, nextTick, ref, shallowRef, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import AgentProcessLog from './AgentProcessLog.vue'
@@ -595,6 +595,8 @@ import {
 import { reviewTargetsFrom } from '../composables/reviewTargets'
 import { SELF_CHECK_ACTION } from '../composables/selfCheck'
 import { AGENT_RESUME_ACTION } from '../composables/agentHandlerShared'
+import { isCreatorPlanAction, runCreatorPlanAction } from '../composables/creatorPlanChatError'
+import { routerKey } from 'vue-router'
 import type { AgentReviewFinding } from '@core/shared/agentReview'
 import type { AgentQuestionItem } from '@core/shared/agentQuestion'
 import { answerAgentQuestion, cancelUserSteer } from '../composables/agentEventDispatcher'
@@ -860,6 +862,9 @@ const emit = defineEmits<{
   (e: 'action', payload: { id: string; action: string; data?: Record<string, unknown> }): void
 }>()
 
+// 带默认值注入：没挂路由的宿主（测试、独立窗口）里不报「找不到 router」
+const router = inject(routerKey, null)
+
 /**
  * 派发按钮动作。
  *
@@ -869,6 +874,14 @@ const emit = defineEmits<{
 function emitAction(button: MessageActionButton): void {
   if (button.action === 'open-location') {
     emit('open-location', String(button.data?.folderKey ?? ''), button.data?.assetKey as string)
+    return
+  }
+  // 创作者 Token Plan 的错误提示（管理订阅、去重新连接）在这里就地处理，
+  // 不冒到页面：气泡放在哪个宿主里都能用，不用每个宿主各接一遍
+  if (isCreatorPlanAction(button.action)) {
+    void runCreatorPlanAction(button.action, () =>
+      router?.push({ path: '/preferences', query: { tab: 'models' } })
+    )
     return
   }
   emit('action', { id: props.id, action: button.action, data: button.data })

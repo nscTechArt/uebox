@@ -13,6 +13,7 @@ import {
   type SettingsView
 } from '@core/shared/aiProvider'
 import { invalidateModelLimitsCache } from '@renderer/services/notebook/contextBudget'
+import { isPlanProvider } from '@core/shared/creatorPlan'
 
 /**
  * Provider 配置的渲染层状态。
@@ -178,6 +179,14 @@ export function uniqueProviderId(baseId: string, existing: Array<{ id: string }>
   return `${baseId}-${suffix}`
 }
 
+/**
+ * 默认选中哪个来源：第一个能编辑的。套餐来源只读，选中它的话编辑弹窗右边
+ * 会摆出一张改不了的表单，删除按钮也指着它。
+ */
+function firstEditableId(list: ReadonlyArray<{ id: string }>): string | null {
+  return list.find((item) => !isPlanProvider(item.id))?.id ?? null
+}
+
 export interface AiProvidersState {
   settings: Ref<SettingsView | null>
   catalog: Ref<CatalogEntry[]>
@@ -277,7 +286,7 @@ export function useAiProviders(): AiProvidersState {
       // 选中项还在就保持不动，免得存一次盘右侧就跳回空态
       const stillThere = nextSettings.providers.some((item) => item.id === selectedId.value)
       if (!stillThere) {
-        selectedId.value = nextSettings.providers[0]?.id ?? null
+        selectedId.value = firstEditableId(nextSettings.providers)
         setDraft(null)
       }
     } finally {
@@ -286,6 +295,8 @@ export function useAiProviders(): AiProvidersState {
   }
 
   function selectProvider(providerId: string): void {
+    // 套餐来源只读，操作都走套餐卡片（主进程的保存、删除也会拦）
+    if (isPlanProvider(providerId)) return
     const provider = providers.value.find((item) => item.id === providerId)
     if (!provider) return
     selectedId.value = providerId
@@ -308,7 +319,7 @@ export function useAiProviders(): AiProvidersState {
   function cancelEdit(): void {
     if (isNew.value) {
       setDraft(null)
-      selectedId.value = providers.value[0]?.id ?? null
+      selectedId.value = firstEditableId(providers.value)
       if (selectedId.value) selectProvider(selectedId.value)
       return
     }
@@ -384,7 +395,7 @@ export function useAiProviders(): AiProvidersState {
     if (!result.ok) return { ok: false, error: result.error }
     settings.value = result.data
     if (selectedId.value === providerId) {
-      selectedId.value = result.data.providers[0]?.id ?? null
+      selectedId.value = firstEditableId(result.data.providers)
       setDraft(
         selectedId.value
           ? draftFromProvider(result.data.providers.find((i) => i.id === selectedId.value)!)

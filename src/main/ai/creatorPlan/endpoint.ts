@@ -12,3 +12,6 @@
 export const CREATOR_PLAN_ORIGIN = (
   process.env.UEBOX_CREATOR_PLAN_URL || 'https://plan.uebox.ai'
 ).replace(/\/+$/, '')
+
+/** 网页端的 API Key 列表。断开时服务端没吊销成功，引导用户来这里手动吊销 */
+export const CREATOR_PLAN_KEYS_URL = `${CREATOR_PLAN_ORIGIN}/account/keys`

@@ -479,6 +479,26 @@ describe('agentEventDispatcher', () => {
       )
     })
 
+    it('套餐错误的 planError 也交给回调；没有时不凭空加上', () => {
+      const onError = vi.fn()
+      registerAgentHandler({ sessionId: SID, chatSid: CHAT, onError })
+
+      bus.emit('agent-v3:error', {
+        sessionId: SID,
+        message: '402 {"error":{"code":"quota_exhausted"}}',
+        statusCode: 402,
+        code: 'quota_exhausted',
+        planError: 'quota_exhausted'
+      })
+      expect(onError).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.objectContaining({ planError: 'quota_exhausted' })
+      )
+
+      bus.emit('agent-v3:error', { sessionId: SID, message: 'x', statusCode: 402 })
+      expect(onError.mock.lastCall![1]).not.toHaveProperty('planError')
+    })
+
     /**
      * 刷新后重连、而且这个对话没开着的那条路径。
      *

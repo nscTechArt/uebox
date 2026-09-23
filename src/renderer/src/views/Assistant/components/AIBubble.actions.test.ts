@@ -146,4 +146,17 @@ describe('AIBubble 消息动作', () => {
     expect(wrapper.find('.resume-action').exists()).toBe(false)
     expect(wrapper.get('.action-buttons button').text()).toBe('接着跑')
   })
+
+  /*
+   * 套餐错误提示的按钮在气泡上就地处理，不冒到页面：「管理订阅」让主进程打开
+   * 清单里的 manage_url，不往上发 action。
+   */
+  it('「管理订阅」就地打开 manage_url，不冒 action', async () => {
+    const openManage = vi.fn(async () => {})
+    window.api = { ...window.api, creatorPlan: { openManage } } as unknown as typeof window.api
+    const wrapper = mountBubble('creator-plan-manage', {})
+    await wrapper.find('.action-buttons button').trigger('click')
+    expect(openManage).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('action')).toBeUndefined()
+  })
 })

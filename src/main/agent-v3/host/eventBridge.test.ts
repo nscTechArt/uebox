@@ -152,6 +152,44 @@ describe('projectEvent', () => {
     ])
   })
 
+  /*
+   * 创作者 Token Plan 的套餐错误（00-conventions.md「错误」）要带上 planError，
+   * 渲染层据此给「管理订阅」「重新连接」的提示。只认套餐来源：别家回一样的 402 不算。
+   */
+  it('套餐来源回 402 / 403 / 401：带上 planError；别的来源同样的错误不带', () => {
+    const planFailure = (provider: string, errorMessage: string): AgentV3Event['payload'] =>
+      project({
+        type: 'message_end',
+        message: { role: 'assistant', content: [], stopReason: 'error', provider, errorMessage }
+      })[0]!.payload
+
+    const body = (code: string): string =>
+      JSON.stringify({ error: { type: 'billing_error', code, message: 'x' } })
+
+    expect(planFailure('creator-plan', `402 ${body('quota_exhausted')}`)).toMatchObject({
+      statusCode: 402,
+      code: 'quota_exhausted',
+      planError: 'quota_exhausted'
+    })
+    expect(planFailure('creator-plan', `402 ${body('subscription_inactive')}`)).toMatchObject({
+      planError: 'subscription_inactive'
+    })
+    expect(planFailure('creator-plan', `403 ${body('role_not_in_plan')}`)).toMatchObject({
+      planError: 'role_not_in_plan'
+    })
+    expect(planFailure('creator-plan', `401 ${body('unauthorized')}`)).toMatchObject({
+      planError: 'unauthorized'
+    })
+    // 套餐来源的别的错误（限流）走通用文案
+    expect(planFailure('creator-plan', `429 ${body('rate_limited')}`)).not.toHaveProperty(
+      'planError'
+    )
+    // 别的来源回一样的错误码：不带
+    expect(planFailure('my-gateway', `402 ${body('quota_exhausted')}`)).not.toHaveProperty(
+      'planError'
+    )
+  })
+
   it('报错但没给原因时也要发事件，附带兜底文案', () => {
     const events = project({
       type: 'message_end',

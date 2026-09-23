@@ -4,6 +4,9 @@
  *
  * 没连接时打开设置页不会联网 —— 主进程的 state 在没有套餐来源时直接返回。
  * 应用、断开之后发 `changed`，由父组件重读模型配置（来源列表和角色绑定都变了）。
+ *
+ * 额度按清单 quotas 逐项列；续费失败（past_due）常驻一条提醒；清单说要下线的
+ * 模型正在用时列出来。断开时服务端没吊销成功，留一句话和去网页端的链接。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -14,15 +17,17 @@ import { message } from '@renderer/utils/messageManager'
 import { creatorPlanAPI } from '@renderer/api/creatorPlan'
 import type { ModelRole } from '@core/shared/aiProvider'
 import type {
+  CreatorPlanDeprecationHit,
   CreatorPlanDevicePrompt,
   CreatorPlanErrorCode,
   CreatorPlanPreview,
+  CreatorPlanQuota,
   CreatorPlanState
 } from '@core/shared/creatorPlan'
 
 const emit = defineEmits<{ (e: 'changed'): void }>()
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 
 const state = ref<CreatorPlanState | null>(null)
 const connecting = ref(false)
@@ -31,6 +36,8 @@ const preview = ref<CreatorPlanPreview | null>(null)
 const selected = ref<ModelRole[]>([])
 const applying = ref(false)
 const confirmingDisconnect = ref(false)
+/** 断开时服务端没吊销成功：网页端 Key 列表的地址，提示用户手动吊销 */
+const revokeFailedUrl = ref<string | null>(null)
 
 function errorText(code: CreatorPlanErrorCode, raw: string): string {
   if (code === 'unknown') return t('aiProvider.creatorPlan.errors.unknown', { error: raw })
@@ -96,12 +103,17 @@ async function disconnect(): Promise<void> {
     message.error(errorText(result.code, result.error))
     return
   }
+  revokeFailedUrl.value = result.data.revoked ? null : result.data.keysUrl
   await load()
   emit('changed')
 }
 
 async function openManage(): Promise<void> {
   if (summary.value) await window.api.shell.openExternal(summary.value.manageUrl)
+}
+
+async function openKeys(): Promise<void> {
+  if (revokeFailedUrl.value) await window.api.shell.openExternal(revokeFailedUrl.value)
 }
 
 async function copyCode(): Promise<void> {
@@ -112,7 +124,36 @@ const formatNumber = (value: number): string => new Intl.NumberFormat(locale.val
 const formatDate = (iso: string | null): string =>
   iso ? new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(iso)) : ''
 
+function quotaText(quota: CreatorPlanQuota): string {
+  const values = { used: formatNumber(quota.used), limit: formatNumber(quota.limit) }
+  const key = `aiProvider.creatorPlan.quotas.${quota.key}`
+  // 服务端以后加的额度项（v1 只做加法）这边还没文案，照样列出来
+  return te(key)
+    ? t(key, values)
+    : t('aiProvider.creatorPlan.quotaOther', { ...values, key: quota.key })
+}
+
+function deprecationText(hit: CreatorPlanDeprecationHit): string {
+  const role = t(`aiProvider.roles.${hit.role}`)
+  const parts = [
+    hit.removedAt
+      ? t('aiProvider.creatorPlan.deprecatedUntil', {
+          role,
+          model: hit.model,
+          date: formatDate(hit.removedAt)
+        })
+      : t('aiProvider.creatorPlan.deprecated', { role, model: hit.model })
+  ]
+  if (hit.replacedBy) {
+    parts.push(t('aiProvider.creatorPlan.deprecatedReplace', { replacement: hit.replacedBy }))
+  }
+  // 嵌入换模型，向量空间就变了，旧索引会悄悄失效
+  if (hit.role === 'embedding') parts.push(t('aiProvider.creatorPlan.deprecatedReindex'))
+  return parts.join(' ')
+}
+
 const summary = computed(() => state.value?.summary ?? null)
+const deprecations = computed(() => state.value?.deprecations ?? [])
 const tierLine = computed(() => {
   const s = summary.value
   if (!s?.tierName) return ''
@@ -146,19 +187,13 @@ onUnmounted(() => unsubscribe?.())
               {{ $t(`aiProvider.creatorPlan.status.${summary.status}`) }}
             </span>
           </span>
-          <span v-if="summary.textTokens" class="plan-desc">
-            {{
-              $t('aiProvider.creatorPlan.textTokens', {
-                used: formatNumber(summary.textTokens.used),
-                limit: formatNumber(summary.textTokens.limit)
-              })
-            }}
-            <template v-if="summary.quotaResetsAt">
-              ·
-              {{
-                $t('aiProvider.creatorPlan.resetsAt', { date: formatDate(summary.quotaResetsAt) })
-              }}
-            </template>
+          <ul v-if="summary.quotas.length > 0" class="plan-quotas">
+            <li v-for="quota in summary.quotas" :key="quota.key" class="plan-desc">
+              {{ quotaText(quota) }}
+            </li>
+          </ul>
+          <span v-if="summary.quotaResetsAt" class="plan-desc">
+            {{ $t('aiProvider.creatorPlan.resetsAt', { date: formatDate(summary.quotaResetsAt) }) }}
           </span>
           <span class="plan-desc">
             {{ $t('aiProvider.creatorPlan.managedCount', { count: state.managedRoles.length }) }}
@@ -166,6 +201,12 @@ onUnmounted(() => unsubscribe?.())
         </template>
         <span v-else-if="state.error" class="plan-desc plan-warn">
           {{ errorText(state.error, '') }}
+        </span>
+        <span v-if="!state?.connected && revokeFailedUrl" class="plan-desc plan-warn">
+          {{ $t('aiProvider.creatorPlan.revokeFailed') }}
+          <AppButton variant="link" size="small" class="plan-link" @click="openKeys">
+            {{ $t('aiProvider.creatorPlan.revokeOpen') }}
+          </AppButton>
         </span>
       </div>
 
@@ -195,6 +236,21 @@ onUnmounted(() => unsubscribe?.())
         </template>
       </div>
     </div>
+
+    <!-- 续费失败：宽限期内照常能用，但过了就停，所以常驻提醒，不收起来 -->
+    <div v-if="state?.connected && summary?.status === 'past_due'" class="plan-alert" role="alert">
+      <span>{{ $t('aiProvider.creatorPlan.pastDue') }}</span>
+      <AppButton variant="primary" size="small" @click="openManage">
+        {{ $t('aiProvider.creatorPlan.pastDueAction') }}
+      </AppButton>
+    </div>
+
+    <!-- 清单说要下线、而且正在用的模型 -->
+    <ul v-if="state?.connected && deprecations.length > 0" class="plan-deprecations">
+      <li v-for="hit in deprecations" :key="hit.role" class="plan-desc plan-warn">
+        {{ deprecationText(hit) }}
+      </li>
+    </ul>
 
     <!-- 设备授权：浏览器已自动打开，这里显示码供核对 -->
     <AppModal
@@ -307,6 +363,44 @@ onUnmounted(() => unsubscribe?.())
 
 .plan-warn {
   color: var(--color-warning-text);
+}
+
+.plan-quotas,
+.plan-deprecations {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-quotas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  column-gap: var(--space-4);
+}
+
+.plan-deprecations {
+  margin-top: var(--space-2);
+}
+
+.plan-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+  font-size: 12px;
+  color: var(--color-warning-text);
+}
+
+.plan-link {
+  height: auto;
+  padding: 0;
 }
 
 .plan-actions {

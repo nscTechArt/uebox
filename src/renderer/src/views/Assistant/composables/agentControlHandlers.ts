@@ -6,6 +6,7 @@ import {
   resolveAssistantMessage,
   resolveTargetChatSid
 } from './agentHandlerShared'
+import { creatorPlanErrorInfo, isCreatorPlanChatErrorCode } from './creatorPlanChatError'
 
 const NETWORK_ERROR_CODES = [
   'ECONNRESET',
@@ -117,6 +118,7 @@ export function createAgentControlHandlers(deps: AgentModeHandlersDeps) {
     statusCode?: number
     status?: number
     detail?: string
+    planError?: string
   }): {
     toast: string
     display: string
@@ -125,7 +127,15 @@ export function createAgentControlHandlers(deps: AgentModeHandlersDeps) {
     recoveryReason?: string
     /** 不修配置就一定会再失败的错（余额、鉴权）。据此不挂「接着跑」按钮 */
     fatal?: boolean
+    /** 代替「接着跑」挂在气泡上的按钮（套餐错误的「管理订阅」「去重新连接」） */
+    actionButtons?: Array<{ label: string; action: string }>
   } {
+    // 套餐来源的错误先认：402 在下面会被当成「服务商余额不足」，401 会被当成「密钥不对」，
+    // 而用户要做的是去管理订阅、重新连接
+    if (isCreatorPlanChatErrorCode(data.planError)) {
+      return creatorPlanErrorInfo(data.planError, t)
+    }
+
     const statusCode = data.statusCode || data.status
     const messageStr = String(data.message || '').toLowerCase()
 
@@ -255,21 +265,23 @@ export function createAgentControlHandlers(deps: AgentModeHandlersDeps) {
       // 余额不足 / 认证失败这类**不修就一定再失败**的错不挂 ——
       // 给一个点了必然再报一次的按钮，比不给更让人火大。
       const resumable = !errorInfo.fatal && data.statusCode !== 401 && !!data.sessionId
+      const resumeButtons = resumable
+        ? [
+            {
+              label: t('assistant.agentMode.resume'),
+              action: AGENT_RESUME_ACTION,
+              data: {
+                sessionId: data.sessionId,
+                recoveryTitle: errorInfo.recoveryTitle || errorInfo.toast,
+                recoveryReason: errorInfo.recoveryReason || data.message
+              }
+            }
+          ]
+        : undefined
       chatMsgStore.replaceTyping(targetChatSid, lastAssistant.id, errorInfo.display, true, {
         outcome: 'error',
-        actionButtons: resumable
-          ? [
-              {
-                label: t('assistant.agentMode.resume'),
-                action: AGENT_RESUME_ACTION,
-                data: {
-                  sessionId: data.sessionId,
-                  recoveryTitle: errorInfo.recoveryTitle || errorInfo.toast,
-                  recoveryReason: errorInfo.recoveryReason || data.message
-                }
-              }
-            ]
-          : undefined
+        // 套餐错误挂的是「管理订阅」「去重新连接」，不是「接着跑」
+        actionButtons: errorInfo.actionButtons ?? resumeButtons
       })
     }
 

@@ -151,21 +151,35 @@ export async function pollForKey(
   throw new CreatorPlanError('expired', 'The code expired')
 }
 
-/** 拉清单。`baseUrl` 是 `…/v1` */
-export async function fetchManifest(
+export type ManifestFetch =
+  | { status: 'ok'; manifest: CreatorPlanManifest; etag: string | null }
+  | { status: 'not_modified' }
+
+/**
+ * 拉清单。`baseUrl` 是 `…/v1`。
+ *
+ * 带了 `etag` 就发 `If-None-Match`，内容没变服务端回 304，这里回 `not_modified`，
+ * 由调用方用缓存的那份。拿不带 etag 的时候（连接、预览）永远是 `ok`。
+ */
+export async function fetchManifestIfChanged(
   baseUrl: string,
   apiKey: string,
+  etag: string | null,
   fetchImpl: Fetch = fetch
-): Promise<CreatorPlanManifest> {
+): Promise<ManifestFetch> {
   let res: Response
   try {
     res = await fetchImpl(`${baseUrl}/plan`, {
-      headers: { authorization: `Bearer ${apiKey}` },
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        ...(etag ? { 'if-none-match': etag } : {})
+      },
       signal: AbortSignal.timeout(15_000)
     })
   } catch (error) {
     throw networkError(`${baseUrl}/plan`, error)
   }
+  if (res.status === 304 && etag) return { status: 'not_modified' }
   if (res.status === 401) throw new CreatorPlanError('unauthorized', 'The key was revoked')
   if (!res.ok) throw new CreatorPlanError('network', `HTTP ${res.status}`)
 
@@ -173,5 +187,45 @@ export async function fetchManifest(
   if (!json || json.schema !== 1 || typeof json.roles !== 'object' || !json.plan) {
     throw new CreatorPlanError('bad_response', 'Malformed plan manifest')
   }
-  return json
+  // 响应头的 ETag 带引号（"p-7f3a"），原样回发；没给头就用清单里的
+  const header = res.headers?.get('etag')
+  return {
+    status: 'ok',
+    manifest: json,
+    etag: header || (json.etag ? `"${json.etag}"` : null)
+  }
+}
+
+/** 拉清单，不走缓存 */
+export async function fetchManifest(
+  baseUrl: string,
+  apiKey: string,
+  fetchImpl: Fetch = fetch
+): Promise<CreatorPlanManifest> {
+  const result = await fetchManifestIfChanged(baseUrl, apiKey, null, fetchImpl)
+  if (result.status !== 'ok') throw new CreatorPlanError('bad_response', 'Unexpected 304')
+  return result.manifest
+}
+
+/**
+ * 用这把 Key 在服务端吊销它自己（11-connect.md「断开」）。
+ *
+ * 不抛：断网、服务不可用、回了别的状态码都只回 false —— 断开照常进行，
+ * 界面提示用户去网页端手动吊销。401 说明它早就失效了，算吊销成功。
+ */
+export async function revokeKey(
+  baseUrl: string,
+  apiKey: string,
+  fetchImpl: Fetch = fetch
+): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/auth/revoke`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000)
+    })
+    return res.ok || res.status === 401
+  } catch {
+    return false
+  }
 }

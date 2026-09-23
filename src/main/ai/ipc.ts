@@ -1,5 +1,7 @@
 import { ipcMain, shell } from 'electron'
 import { registerCreatorPlanIPC } from './creatorPlan/ipc'
+import { startCreatorPlanRefresh } from './creatorPlan/refresh'
+import { isPlanProvider } from '../../shared/creatorPlan'
 import { registerSpeechIPC } from '../ipc/speech'
 import { PROVIDER_CATALOG } from './catalog'
 import {
@@ -120,6 +122,16 @@ async function keyUsedElsewhere(keyId: string, exceptProviderId: string): Promis
   )
 }
 
+/**
+ * 创作者 Token Plan 的来源只读：它的地址、模型、Key 都由套餐卡片管，
+ * 在这里改了或删了，卡片和配置就对不上了。界面上已经不给编辑入口，
+ * 主进程再拦一道，防止绕过界面直接调 IPC。
+ */
+const PLAN_READ_ONLY = {
+  ok: false,
+  error: '这个来源由创作者 Token Plan 管理，请在「创作者 Token Plan」卡片上操作。'
+} as const
+
 function fail(error: unknown): { ok: false; error: string } {
   if (error instanceof EncryptionUnavailableError) return { ok: false, error: error.message }
   return { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -146,6 +158,8 @@ function failProbe(error: unknown): { ok: false; error: ProbeFailure } {
 export function registerAiProviderIPC(): void {
   registerSpeechIPC()
   registerCreatorPlanIPC()
+  // 没连接时每一轮都只读本机配置，不发请求
+  startCreatorPlanRefresh()
   ipcMain.handle('ai-provider:catalog', () => PROVIDER_CATALOG)
 
   ipcMain.handle('ai-provider:get-settings', async () => {
@@ -154,6 +168,7 @@ export function registerAiProviderIPC(): void {
   })
 
   ipcMain.handle('ai-provider:save-provider', async (_event, draft: ProviderDraft) => {
+    if (isPlanProvider(String(draft?.id ?? ''))) return PLAN_READ_ONLY
     try {
       const settings = await readSettings()
       const previous = settings.providers.find((item) => item.id === draft.id)
@@ -170,6 +185,7 @@ export function registerAiProviderIPC(): void {
   })
 
   ipcMain.handle('ai-provider:delete-provider', async (_event, providerId: string) => {
+    if (isPlanProvider(String(providerId ?? ''))) return PLAN_READ_ONLY
     try {
       const settings = await readSettings()
       const target = settings.providers.find((item) => item.id === providerId)
@@ -233,6 +249,7 @@ export function registerAiProviderIPC(): void {
   ipcMain.handle(
     'ai-provider:oauth-login',
     async (event, oauthProvider: string, draft: ProviderDraft) => {
+      if (isPlanProvider(String(draft?.id ?? ''))) return PLAN_READ_ONLY
       try {
         const tokens = await runOAuthLogin(oauthProvider, (prompt) => {
           // 设备码流程要把这串码显示给用户，只能靠事件推出去

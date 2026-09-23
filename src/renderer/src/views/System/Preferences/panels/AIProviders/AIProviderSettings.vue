@@ -22,6 +22,7 @@ import AppTooltip from '@renderer/components/AppTooltip.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
+import { isPlanProvider } from '@core/shared/creatorPlan'
 import {
   findVisionCapableRole,
   MODEL_ROLES,
@@ -333,21 +334,44 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
           </div>
         </template>
         <template v-else>
-          <button
-            v-for="provider in providers"
-            :key="provider.id"
-            type="button"
-            class="source-card"
-            @click="openProvider(provider.id)"
-          >
-            <span class="source-name">{{ provider.displayName }}</span>
-            <span class="source-meta">
-              <span>{{ $t('aiProvider.list.modelCount', { count: provider.models.length }) }}</span>
-              <span class="source-key" :class="keyStatus(provider).tone">
-                {{ keyStatus(provider).text }}
+          <template v-for="provider in providers" :key="provider.id">
+            <!--
+              套餐来源只读：地址、模型、Key 都由上面的套餐卡片管，在这里改了、删了，
+              卡片和配置就对不上了。所以不给点进编辑弹窗，只标出来是谁在管。
+            -->
+            <div
+              v-if="isPlanProvider(provider.id)"
+              class="source-card source-card-managed"
+              :data-provider-id="provider.id"
+            >
+              <span class="source-name">{{ provider.displayName }}</span>
+              <span class="source-meta">
+                <span>{{
+                  $t('aiProvider.list.modelCount', { count: provider.models.length })
+                }}</span>
+                <span class="source-key none">
+                  {{ $t('aiProvider.creatorPlan.managedBadge') }}
+                </span>
               </span>
-            </span>
-          </button>
+            </div>
+            <button
+              v-else
+              type="button"
+              class="source-card"
+              :data-provider-id="provider.id"
+              @click="openProvider(provider.id)"
+            >
+              <span class="source-name">{{ provider.displayName }}</span>
+              <span class="source-meta">
+                <span>{{
+                  $t('aiProvider.list.modelCount', { count: provider.models.length })
+                }}</span>
+                <span class="source-key" :class="keyStatus(provider).tone">
+                  {{ keyStatus(provider).text }}
+                </span>
+              </span>
+            </button>
+          </template>
         </template>
 
         <button type="button" class="source-card source-add" @click="showCatalog = true">
@@ -633,6 +657,14 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
 .source-card:hover {
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
+}
+/* 套餐来源只读，不是按钮：不给悬停反馈，免得看着像能点 */
+.source-card-managed,
+.source-card-managed:hover {
+  border-style: dashed;
+  border-color: var(--color-border);
+  background: var(--color-bg-surface);
+  cursor: default;
 }
 
 .source-name {

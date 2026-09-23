@@ -2085,6 +2085,8 @@ const api = {
     preview: () => ipcRenderer.invoke('creator-plan:preview'),
     apply: (roles: string[]) => ipcRenderer.invoke('creator-plan:apply', roles),
     disconnect: () => ipcRenderer.invoke('creator-plan:disconnect'),
+    /** 打开清单里的 manage_url。对话里的套餐错误提示用 */
+    openManage: () => ipcRenderer.invoke('creator-plan:open-manage'),
     onDeviceCode: (listener: (prompt: { userCode: string; verificationUri: string }) => void) => {
       const handler = (_: Electron.IpcRendererEvent, prompt: unknown): void =>
         listener(prompt as { userCode: string; verificationUri: string })

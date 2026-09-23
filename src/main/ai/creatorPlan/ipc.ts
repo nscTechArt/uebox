@@ -6,8 +6,9 @@
  *                            （码通过 creator-plan:device-code 事件推给渲染层）
  *   creator-plan:cancel      取消正在进行的授权
  *   creator-plan:preview     已连接时重新拉清单，回导入预览
- *   creator-plan:apply       按用户勾选的角色落盘
- *   creator-plan:disconnect  删来源、清绑定、删本机 Key
+ *   creator-plan:apply       按用户勾选的角色落盘，先记下被接管角色的原绑定
+ *   creator-plan:disconnect  在服务端吊销 Key → 删来源、还原绑定、删本机 Key
+ *   creator-plan:open-manage 打开清单里的 manage_url（对话里的套餐错误提示用）
  *
  * 没连接时，这里没有任何代码会发请求：连接这件事只能由用户点按钮发起。
  */
@@ -16,29 +17,34 @@ import { hostname } from 'node:os'
 import { app, ipcMain, shell } from 'electron'
 import type { ModelRole } from '../../../shared/aiProvider'
 import type {
+  CreatorPlanDisconnectResult,
   CreatorPlanManifest,
   CreatorPlanPreview,
   CreatorPlanResult,
   CreatorPlanState
 } from '../../../shared/creatorPlan'
-import {
-  EncryptionUnavailableError,
-  deleteLiteralKey,
-  resolveApiKey,
-  saveLiteralKey
-} from '../credentials'
+import { EncryptionUnavailableError, deleteLiteralKey, saveLiteralKey } from '../credentials'
 import { invalidateSettingsCache, readSettings, writeSettings } from '../store'
 import {
   PLAN_KEY_ID,
   applyPlan,
-  isPlanProvider,
   managedRoles,
+  planDeprecationHits,
   planRoleChanges,
   planSummary,
+  recordOriginals,
   removePlan
 } from './apply'
-import { CreatorPlanError, fetchManifest, pollForKey, startDeviceAuthorization } from './client'
-import { CREATOR_PLAN_ORIGIN } from './endpoint'
+import {
+  CreatorPlanError,
+  fetchManifestIfChanged,
+  pollForKey,
+  revokeKey,
+  startDeviceAuthorization
+} from './client'
+import { CREATOR_PLAN_KEYS_URL, CREATOR_PLAN_ORIGIN } from './endpoint'
+import { clearPlanState, readPlanState, updatePlanState, writePlanState } from './planState'
+import { planConnection, refreshPlan } from './refresh'
 
 /** 正在进行的设备授权，用来取消 */
 let pending: AbortController | null = null
@@ -58,16 +64,12 @@ function fail(error: unknown): { ok: false; code: CreatorPlanError['code']; erro
   }
 }
 
-/**
- * 已连接时：套餐来源的地址和 Key。没连接回 null。
- * 来源在、Key 却取不出来（密钥库被清、换了机器）时 apiKey 为 null，按「授权失效」处理。
- */
-async function connection(): Promise<{ baseUrl: string; apiKey: string | null } | null> {
-  const settings = await readSettings()
-  const provider = settings.providers.find((p) => isPlanProvider(p.id))
-  if (!provider) return null
-  const apiKey = await resolveApiKey(provider.apiKey).catch(() => null)
-  return { baseUrl: provider.baseUrl, apiKey: apiKey || null }
+/** 拉一份新清单（不带 etag），顺手更新缓存：连接、预览时用 */
+async function fetchFresh(baseUrl: string, apiKey: string): Promise<CreatorPlanManifest> {
+  const result = await fetchManifestIfChanged(baseUrl, apiKey, null)
+  if (result.status !== 'ok') throw new CreatorPlanError('bad_response', 'Unexpected 304')
+  await updatePlanState({ etag: result.etag, manifest: result.manifest, unauthorized: false })
+  return result.manifest
 }
 
 async function preview(manifest: CreatorPlanManifest): Promise<CreatorPlanPreview> {
@@ -81,37 +83,29 @@ export function registerCreatorPlanIPC(): void {
   ipcMain.handle('creator-plan:state', async (): Promise<CreatorPlanResult<CreatorPlanState>> => {
     try {
       invalidateSettingsCache()
+      // 没连接时 refreshPlan 不发请求，直接回 null
+      const outcome = await refreshPlan()
       const settings = await readSettings()
-      const roles = managedRoles(settings)
-      const conn = await connection()
-      if (!conn) {
-        return {
-          ok: true,
-          data: { connected: false, summary: null, managedRoles: [], error: null }
-        }
-      }
-      if (!conn.apiKey) {
-        return {
-          ok: true,
-          data: { connected: true, summary: null, managedRoles: roles, error: 'unauthorized' }
-        }
-      }
-      try {
-        const manifest = await fetchManifest(conn.baseUrl, conn.apiKey)
+      if (!outcome) {
         return {
           ok: true,
           data: {
-            connected: true,
-            summary: planSummary(manifest),
-            managedRoles: roles,
-            error: null
+            connected: false,
+            summary: null,
+            managedRoles: [],
+            error: null,
+            deprecations: []
           }
         }
-      } catch (error) {
-        const code = error instanceof CreatorPlanError ? error.code : 'unknown'
-        return {
-          ok: true,
-          data: { connected: true, summary: null, managedRoles: roles, error: code }
+      }
+      return {
+        ok: true,
+        data: {
+          connected: true,
+          summary: outcome.manifest ? planSummary(outcome.manifest) : null,
+          managedRoles: managedRoles(settings),
+          error: outcome.error,
+          deprecations: planDeprecationHits(settings, outcome.manifest)
         }
       }
     } catch (error) {
@@ -134,7 +128,7 @@ export function registerCreatorPlanIPC(): void {
         if (start.prompt.verificationUri) void shell.openExternal(start.prompt.verificationUri)
 
         const issued = await pollForKey(CREATOR_PLAN_ORIGIN, start, controller.signal)
-        const manifest = await fetchManifest(issued.baseUrl, issued.apiKey)
+        const manifest = await fetchFresh(issued.baseUrl, issued.apiKey)
         // Key 先存进安全存储；来源和绑定等用户在预览里确认后才落盘
         await saveLiteralKey(PLAN_KEY_ID, issued.apiKey)
         pendingManifest = manifest
@@ -156,10 +150,10 @@ export function registerCreatorPlanIPC(): void {
     'creator-plan:preview',
     async (): Promise<CreatorPlanResult<CreatorPlanPreview>> => {
       try {
-        const conn = await connection()
+        const conn = await planConnection()
         if (!conn) return { ok: false, code: 'not_connected', error: 'Not connected' }
         if (!conn.apiKey) return { ok: false, code: 'unauthorized', error: 'Key missing' }
-        const manifest = await fetchManifest(conn.baseUrl, conn.apiKey)
+        const manifest = await fetchFresh(conn.baseUrl, conn.apiKey)
         pendingManifest = manifest
         return { ok: true, data: await preview(manifest) }
       } catch (error) {
@@ -174,13 +168,18 @@ export function registerCreatorPlanIPC(): void {
       try {
         const manifest = pendingManifest
         if (!manifest) return { ok: false, code: 'not_connected', error: 'Connect first' }
-        const settings = applyPlan(
-          await readSettings(),
-          manifest,
-          { kind: 'literal', id: PLAN_KEY_ID },
-          Array.isArray(roles) ? roles : []
+        const selected = Array.isArray(roles) ? roles : []
+        const current = await readSettings()
+        // 先记原绑定再落盘：反过来的话，写完配置、记录没写成，断开时就还原不回去了
+        const planState = await readPlanState()
+        await writePlanState({
+          ...planState,
+          originals: recordOriginals(planState.originals, current, manifest, selected),
+          unauthorized: false
+        })
+        const written = await writeSettings(
+          applyPlan(current, manifest, { kind: 'literal', id: PLAN_KEY_ID }, selected)
         )
-        const written = await writeSettings(settings)
         pendingManifest = null
         return {
           ok: true,
@@ -188,7 +187,8 @@ export function registerCreatorPlanIPC(): void {
             connected: true,
             summary: planSummary(manifest),
             managedRoles: managedRoles(written),
-            error: null
+            error: null,
+            deprecations: planDeprecationHits(written, manifest)
           }
         }
       } catch (error) {
@@ -197,14 +197,38 @@ export function registerCreatorPlanIPC(): void {
     }
   )
 
-  ipcMain.handle('creator-plan:disconnect', async (): Promise<CreatorPlanResult<null>> => {
-    try {
-      pendingManifest = null
-      await writeSettings(removePlan(await readSettings()))
-      await deleteLiteralKey(PLAN_KEY_ID)
-      return { ok: true, data: null }
-    } catch (error) {
-      return fail(error)
+  /**
+   * 断开：先在服务端吊销这把 Key，再删本机的。
+   *
+   * 吊销失败（断网、服务不可用）照常断开，回 `revoked: false`，卡片提示去网页端手动吊销。
+   * 还在套餐手里的角色还原成接管前的绑定。
+   */
+  ipcMain.handle(
+    'creator-plan:disconnect',
+    async (): Promise<CreatorPlanResult<CreatorPlanDisconnectResult>> => {
+      try {
+        pendingManifest = null
+        const conn = await planConnection()
+        // 本机连 Key 都没有了，服务端那把也吊销不了，同样提示去网页端
+        const revoked = conn?.apiKey ? await revokeKey(conn.baseUrl, conn.apiKey) : false
+        const planState = await readPlanState()
+        await writeSettings(removePlan(await readSettings(), planState.originals))
+        await deleteLiteralKey(PLAN_KEY_ID)
+        await clearPlanState()
+        return { ok: true, data: { revoked, keysUrl: CREATOR_PLAN_KEYS_URL } }
+      } catch (error) {
+        return fail(error)
+      }
     }
+  )
+
+  /**
+   * 对话里套餐错误提示上的「管理订阅」。地址取缓存的清单，不为这一下发请求；
+   * 没有缓存（从没拉成功过）就退到网页端首页。
+   */
+  ipcMain.handle('creator-plan:open-manage', async (): Promise<void> => {
+    const { manifest } = await readPlanState()
+    const url = manifest?.plan.manage_url
+    await shell.openExternal(url && /^https?:\/\//.test(url) ? url : CREATOR_PLAN_ORIGIN)
   })
 }

@@ -19,6 +19,7 @@ import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import { PROVIDER_KINDS, type ProviderKind, type ProviderView } from '@core/shared/aiProvider'
+import { isPlanProvider } from '@core/shared/creatorPlan'
 import type { AiProvidersState } from './useAiProviders'
 import ProviderFields from './ProviderFields.vue'
 import ModelFields from './ModelFields.vue'
@@ -128,7 +129,8 @@ function matchesKeyword(provider: ProviderView): boolean {
 const groups = computed(() => {
   const byKind = new Map<ProviderKind, ProviderView[]>()
   for (const provider of providers.value) {
-    if (!matchesKeyword(provider)) continue
+    // 套餐来源只读，不进编辑弹窗；它在设置页的来源列表里标着「由创作者 Token Plan 管理」
+    if (isPlanProvider(provider.id) || !matchesKeyword(provider)) continue
     byKind.set(provider.kind, [...(byKind.get(provider.kind) ?? []), provider])
   }
   const newKind = isNew.value && draft.value ? draft.value.kind : null

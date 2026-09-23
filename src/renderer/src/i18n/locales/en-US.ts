@@ -773,14 +773,35 @@ export default {
         canceled: 'Canceled',
         none: 'No subscription'
       },
-      textTokens: 'Chat quota: {used} / {limit} used',
+      quotas: {
+        text_tokens: 'Chat {used} / {limit} tokens',
+        images: 'Images {used} / {limit}',
+        video_seconds: 'Video {used} / {limit} s',
+        model3d_tasks: '3D {used} / {limit} runs',
+        music_tasks: 'Music {used} / {limit} runs',
+        realtime_minutes: 'Realtime voice {used} / {limit} min',
+        tts_characters: 'Speech {used} / {limit} chars',
+        stt_minutes: 'Transcription {used} / {limit} min',
+        searches: 'Web search {used} / {limit}'
+      },
+      quotaOther: '{key} {used} / {limit}',
       resetsAt: 'Resets {date}',
+      pastDue:
+        'Renewal payment failed. The plan keeps working during the grace period, then stops.',
+      pastDueAction: 'Update payment method',
+      deprecated: '{model} used by {role} is being retired.',
+      deprecatedUntil: '{model} used by {role} will be retired on {date}.',
+      deprecatedReplace: 'Re-import to switch to {replacement}.',
+      deprecatedReindex: 'Rebuild the knowledge index after switching.',
+      revokeFailed: "Couldn't revoke this key on the server. Revoke it on the website.",
+      revokeOpen: 'Revoke on the website',
+      managedBadge: 'Managed by Creator Token Plan',
       managedCount: 'Managing {count} roles',
       manage: 'Manage subscription',
       reimport: 'Re-import',
       disconnect: 'Disconnect',
       disconnectConfirm:
-        'Roles managed by the plan will become unset, and the key saved on this device will be deleted.',
+        'Roles managed by the plan go back to what they were before import. The key is revoked on the server and deleted from this device.',
       previewTitle: 'Choose roles for the plan',
       previewDesc:
         'Checked roles switch to plan models. Roles you set up yourself start unchecked.',
@@ -800,6 +821,26 @@ export default {
         not_connected: 'Not connected yet',
         encryption_unavailable: "Can't store the key securely",
         unknown: 'Something went wrong: {error}'
+      },
+      chat: {
+        subscription_inactive: {
+          title: 'No active Creator Token Plan subscription',
+          desc: 'The subscription is off, or renewal failed past the grace period. Sort it out, then send again.'
+        },
+        quota_exhausted: {
+          title: 'This quota is used up for the period',
+          desc: 'Upgrade the plan, or wait for the quota to reset.'
+        },
+        role_not_in_plan: {
+          title: "Your plan doesn't include this role",
+          desc: 'Upgrade the plan, or pick another source for this role in Settings → Models.'
+        },
+        unauthorized: {
+          title: 'Creator Token Plan authorization expired',
+          desc: 'The key was revoked or deleted. Reconnect in Settings → Models.'
+        },
+        manage: 'Manage subscription',
+        reconnect: 'Reconnect'
       }
     },
     configPath: 'Config file',

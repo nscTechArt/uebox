@@ -302,3 +302,50 @@ describe('AIProviderSettings 的首屏加载', () => {
     expect(scrollTo).toHaveBeenLastCalledWith({ left: 500 })
   })
 })
+
+/**
+ * 创作者 Token Plan 的来源只读：它的地址、模型、Key 都由套餐卡片管。
+ * 列表里不是按钮、点了不开编辑弹窗，只标一句「由创作者 Token Plan 管理」。
+ */
+describe('套餐来源只读', () => {
+  const withPlan: SettingsView = {
+    ...loadedSettings,
+    providers: [
+      ...loadedSettings.providers,
+      {
+        id: 'creator-plan',
+        displayName: 'Creator Plan',
+        kind: 'chat',
+        protocol: 'openai-completions',
+        baseUrl: 'https://plan.example/v1',
+        models: [{ id: 'uebox-agent' }],
+        apiKey: { kind: 'literal', hasKey: true }
+      }
+    ]
+  }
+
+  it('套餐来源显示「由创作者 Token Plan 管理」，点了不开编辑弹窗；别的来源照常能点', async () => {
+    stubAiProviderApi({ getSettings: vi.fn(async () => withPlan) })
+    const wrapper = mount(AIProviderSettings, {
+      global: {
+        stubs: {
+          ...stubs,
+          ModelManagerModal: {
+            props: ['open'],
+            template: '<div class="manager" :data-open="String(open)" />'
+          }
+        }
+      }
+    })
+    await flushPromises()
+
+    const plan = wrapper.find('[data-provider-id="creator-plan"]')
+    expect(plan.element.tagName).toBe('DIV')
+    expect(plan.text()).toContain('由创作者 Token Plan 管理')
+    await plan.trigger('click')
+    expect(wrapper.find('.manager').attributes('data-open')).toBe('false')
+
+    await wrapper.find('[data-provider-id="deepseek"]').trigger('click')
+    expect(wrapper.find('.manager').attributes('data-open')).toBe('true')
+  })
+})

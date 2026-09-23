@@ -10,6 +10,8 @@ import {
   managedRoles,
   planProviders,
   planRoleChanges,
+  planSummary,
+  recordOriginals,
   removePlan
 } from './apply'
 
@@ -194,6 +196,51 @@ describe('removePlan', () => {
     const removed = removePlan(applied)
     expect(removed.providers.map((p) => p.id)).toEqual(['my-gateway'])
     expect(removed.roles).toEqual({ chat: { providerId: 'my-gateway', modelId: 'gpt-x' } })
+  })
+})
+
+describe('recordOriginals', () => {
+  it('只记这次勾上、清单里有的角色；已经记过的不覆盖', () => {
+    const first = recordOriginals({}, base, manifest, ['chat', 'embedding'])
+    expect(first).toEqual({ chat: { providerId: 'my-gateway', modelId: 'gpt-x' } })
+    const applied = applyPlan(base, manifest, keyRef, ['chat'])
+    // 重新导入时 chat 的「现在」已经是套餐，最初那条才是用户自己的
+    expect(recordOriginals(first, applied, manifest, ['chat', 'agent'])).toEqual({
+      chat: { providerId: 'my-gateway', modelId: 'gpt-x' },
+      agent: null
+    })
+  })
+
+  it('原来就由套餐管着、又没有记录的：按「原来没设置」记', () => {
+    const managed = applyPlan(base, manifest, keyRef, ['agent'])
+    expect(recordOriginals({}, managed, manifest, ['agent'])).toEqual({ agent: null })
+  })
+})
+
+describe('removePlan 还原', () => {
+  it('还原成原绑定；原绑定的模型已经不在了 → 未设置', () => {
+    const applied = applyPlan(base, manifest, keyRef, ['chat', 'agent'])
+    const removed = removePlan(applied, {
+      chat: { providerId: 'my-gateway', modelId: 'gpt-x' },
+      agent: { providerId: 'my-gateway', modelId: 'gone' }
+    })
+    expect(removed.roles).toEqual({ chat: { providerId: 'my-gateway', modelId: 'gpt-x' } })
+  })
+})
+
+describe('planSummary 额度', () => {
+  it('逐项列出，按额度表排序，不认识的键排后面；形状不对的丢掉', () => {
+    const summary = planSummary({
+      ...manifest,
+      quotas: {
+        future_units: { limit: 5, used: 1 },
+        images: { limit: 100, used: 3 },
+        text_tokens: { limit: 1000, used: 10 },
+        broken: { limit: 'x' } as unknown as { limit: number; used: number }
+      }
+    })
+    expect(summary.quotas.map((q) => q.key)).toEqual(['text_tokens', 'images', 'future_units'])
+    expect(summary.quotas[1]).toEqual({ key: 'images', limit: 100, used: 3 })
   })
 })
 

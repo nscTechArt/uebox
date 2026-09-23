@@ -57,7 +57,10 @@ export interface AgentEventHandler {
   /** 用户主动停止回调 */
   onStopped?: () => void
   /** 错误回调。`error` 是 provider 原文，`data` 是从原文里抠出来的事实（见主进程 `providerError.ts`） */
-  onError?: (error: string, data?: { statusCode?: number; code?: string; detail?: string }) => void
+  onError?: (
+    error: string,
+    data?: { statusCode?: number; code?: string; detail?: string; planError?: string }
+  ) => void
   /** 过程通知回调（推理、压缩提示等，显示在过程日志里） */
   onNotifyUsers?: (data: NotifyUsersData) => void
   /** 一批流式内容已经写进气泡；当前可见会话可据此合并一次滚动 */
@@ -580,14 +583,17 @@ export function initAgentEventDispatcher(): void {
       statusCode?: number
       code?: string
       detail?: string
+      planError?: string
     }) => {
       if (!data?.sessionId) return
       // 状态码和错误码要一路带到处理器 —— 那边整套「401 说什么、429 说什么、
-      // 哪些错不该挂『接着跑』」的判断全靠它们，少传就等于那套判断不存在
+      // 哪些错不该挂『接着跑』」的判断全靠它们，少传就等于那套判断不存在。
+      // planError 同理：套餐来源的错误靠它换成「管理订阅」「去重新连接」的提示
       handlerFor(data.sessionId)?.onError?.(data.message || '未知错误', {
         statusCode: data.statusCode,
         code: data.code,
-        detail: data.detail
+        detail: data.detail,
+        ...(data.planError ? { planError: data.planError } : {})
       })
     }
   )

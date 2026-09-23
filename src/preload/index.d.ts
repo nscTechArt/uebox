@@ -2118,7 +2118,12 @@ declare global {
           import('../shared/creatorPlan').CreatorPlanState
         >
       >
-      disconnect: () => Promise<import('../shared/creatorPlan').CreatorPlanResult<null>>
+      disconnect: () => Promise<
+        import('../shared/creatorPlan').CreatorPlanResult<
+          import('../shared/creatorPlan').CreatorPlanDisconnectResult
+        >
+      >
+      openManage: () => Promise<void>
       onDeviceCode: (
         callback: (prompt: import('../shared/creatorPlan').CreatorPlanDevicePrompt) => void
       ) => () => void

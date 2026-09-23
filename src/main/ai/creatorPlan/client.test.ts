@@ -1,6 +1,13 @@
 /** @vitest-environment node */
 import { describe, expect, it, vi } from 'vitest'
-import { CreatorPlanError, fetchManifest, pollForKey, startDeviceAuthorization } from './client'
+import {
+  CreatorPlanError,
+  fetchManifest,
+  fetchManifestIfChanged,
+  pollForKey,
+  revokeKey,
+  startDeviceAuthorization
+} from './client'
 
 const ORIGIN = 'https://plan.example'
 const json = (body: unknown, status = 200): Response =>
@@ -126,6 +133,61 @@ describe('fetchManifest', () => {
     expect(
       await errorCode(fetchManifest(ORIGIN, 'k', scripted([json({ schema: 2 })]).fetchImpl))
     ).toBe('bad_response')
+  })
+})
+
+describe('fetchManifestIfChanged', () => {
+  const body = { schema: 1, etag: 'p-1', roles: {}, plan: { status: 'active' } }
+
+  it('带 etag 发 If-None-Match；304 → not_modified', async () => {
+    const { fetchImpl } = scripted([new Response(null, { status: 304 })])
+    const result = await fetchManifestIfChanged(`${ORIGIN}/v1`, 'k', '"p-1"', fetchImpl)
+    expect(result).toEqual({ status: 'not_modified' })
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect((init as RequestInit).headers).toEqual({
+      authorization: 'Bearer k',
+      'if-none-match': '"p-1"'
+    })
+  })
+
+  it('200：回清单和响应头里的 ETag；没给头就用清单里的 etag 加引号', async () => {
+    const withHeader = new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { etag: '"p-2"' }
+    })
+    expect(
+      await fetchManifestIfChanged(`${ORIGIN}/v1`, 'k', null, scripted([withHeader]).fetchImpl)
+    ).toMatchObject({ status: 'ok', etag: '"p-2"', manifest: { etag: 'p-1' } })
+    expect(
+      await fetchManifestIfChanged(`${ORIGIN}/v1`, 'k', null, scripted([json(body)]).fetchImpl)
+    ).toMatchObject({ status: 'ok', etag: '"p-1"' })
+  })
+
+  it('401 → unauthorized', async () => {
+    expect(
+      await errorCode(
+        fetchManifestIfChanged(ORIGIN, 'k', '"p-1"', scripted([json({}, 401)]).fetchImpl)
+      )
+    ).toBe('unauthorized')
+  })
+})
+
+describe('revokeKey', () => {
+  it('用 Key 自己认证 POST /auth/revoke；204 → true', async () => {
+    const { fetchImpl, calls } = scripted([new Response(null, { status: 204 })])
+    expect(await revokeKey(`${ORIGIN}/v1`, 'ubx-sk-abc', fetchImpl)).toBe(true)
+    expect(calls[0]!.url).toBe(`${ORIGIN}/v1/auth/revoke`)
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!
+    expect(init).toMatchObject({ method: 'POST', headers: { authorization: 'Bearer ubx-sk-abc' } })
+  })
+
+  it('401 说明早就失效，算成功；5xx、断网 → false，不抛', async () => {
+    expect(await revokeKey(ORIGIN, 'k', scripted([json({}, 401)]).fetchImpl)).toBe(true)
+    expect(await revokeKey(ORIGIN, 'k', scripted([json({}, 503)]).fetchImpl)).toBe(false)
+    const offline = vi.fn(async () => {
+      throw new TypeError('fetch failed')
+    }) as unknown as typeof fetch
+    expect(await revokeKey(ORIGIN, 'k', offline)).toBe(false)
   })
 })
 

@@ -556,3 +556,33 @@ describe('保存第一个对话 Provider 时自动绑「对话」角色', () => 
     expect(setRoles).not.toHaveBeenCalled()
   })
 })
+
+/** 创作者 Token Plan 的来源只读：编辑弹窗既不默认选中它，也选不中它 */
+describe('套餐来源不进编辑', () => {
+  const view: SettingsView = {
+    providers: [
+      provider({ id: 'creator-plan', displayName: 'Creator Plan' }),
+      provider({ id: 'deepseek', displayName: 'DeepSeek' })
+    ],
+    roles: {},
+    path: 'C:\\models.json',
+    encryptionAvailable: true,
+    configured: true
+  }
+
+  it('默认选中第一个能编辑的来源；选套餐来源不生效', async () => {
+    ;(globalThis as unknown as { window: Record<string, unknown> }).window.api = {
+      aiProvider: {
+        getSettings: vi.fn(async () => view),
+        catalog: vi.fn(async () => [])
+      }
+    }
+    const state = useAiProviders()
+    await state.load()
+    expect(state.selectedId.value).toBe('deepseek')
+
+    state.selectProvider('creator-plan')
+    expect(state.selectedId.value).toBe('deepseek')
+    expect(state.draft.value).toBeNull()
+  })
+})

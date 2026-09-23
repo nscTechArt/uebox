@@ -9,6 +9,7 @@
 import type { ModelRole } from '@core/shared/aiProvider'
 import type {
   CreatorPlanDevicePrompt,
+  CreatorPlanDisconnectResult,
   CreatorPlanPreview,
   CreatorPlanResult,
   CreatorPlanState
@@ -41,7 +42,11 @@ export const creatorPlanAPI = {
   connect: () => call<CreatorPlanPreview>((api) => api.connect()),
   preview: () => call<CreatorPlanPreview>((api) => api.preview()),
   apply: (roles: ModelRole[]) => call<CreatorPlanState>((api) => api.apply([...roles])),
-  disconnect: () => call<null>((api) => api.disconnect()),
+  disconnect: () => call<CreatorPlanDisconnectResult>((api) => api.disconnect()),
+  /** 对话里套餐错误提示上的「管理订阅」：主进程用缓存的清单地址打开，不发请求 */
+  openManage: async (): Promise<void> => {
+    await bridge()?.openManage()
+  },
   cancel: async (): Promise<void> => {
     await bridge()?.cancel()
   },
