@@ -29,6 +29,17 @@ import type { ModelConfig, ProviderConfig } from './types'
  * 两家都接受 `data:image/...;base64,...`（方舟文档明写这一条，MiniMax 只是
  * 建议大文件走直链）。所以「白盒截图 → 生成视频」这条路是通的 ——
  * 上层用 `tools/aigc/references.ts` 把本地路径读成 data URI，与生图共用一份。
+ *
+ * ## 参考视频 / 参考音频（方舟 Seedance 2.x 全模态参考）
+ *
+ * 方舟的 `content[]` 还收 `video_url`（role `reference_video`）和 `audio_url`
+ * （role `reference_audio`）。**两者收的来源不一样，这一条最容易踩：**
+ *
+ * - 视频**只收公网直链或 `asset://` 素材 ID，不收 base64**。本地视频文件没法
+ *   直接带上去 —— 得先放到一个厂商能拉到的地址上。
+ * - 音频收公网直链、`data:audio/...;base64,...`、`asset://` 三种。
+ *
+ * MiniMax 没有这两种入参，给了就报错。
  */
 
 const SUBMIT_TIMEOUT_MS = 120_000
@@ -131,9 +142,9 @@ export class VideoPayloadTooLargeError extends Error {
     readonly limit: number
   ) {
     super(
-      `参考图加起来约 ${Math.round(bytes / 1024 / 1024)}MB，超过厂商 ` +
+      `内联的参考图和参考音频加起来约 ${Math.round(bytes / 1024 / 1024)}MB，超过厂商 ` +
         `${Math.round(limit / 1024 / 1024)}MB 的请求体上限（base64 会把体积撑到 4/3）。` +
-        '请减少参考图数量，或者改用公网直链 —— 直链不计入请求体。'
+        '请减少参考图/参考音频数量，或者改用公网直链 —— 直链不计入请求体。'
     )
     this.name = 'VideoPayloadTooLargeError'
   }
@@ -259,11 +270,25 @@ export interface VideoImageInput {
   role?: VideoImageRole
 }
 
+/**
+ * 参考视频。**只收公网直链或 `asset://<ID>`**，方舟不收视频的 base64。
+ * 格式 mp4 / mov（H.264 / H.265），Seedance 2.0 单个 2–15 秒、最多 3 个，
+ * 2.5 单个 2–30 秒、最多 10 个。
+ */
+export type VideoReferenceUrl = string
+
+/** 参考音频。公网直链、`data:audio/...;base64,...`、`asset://<ID>` 三种都收 */
+export type AudioReferenceUrl = string
+
 export interface GenerateVideoRequest {
   /** 提示词。**必填** —— 各家都不接受只有图没有文字的请求 */
   prompt: string
   /** 参考图。不给就是文生视频 */
   images?: VideoImageInput[]
+  /** 参考视频（全模态参考）。只有方舟有 */
+  videos?: VideoReferenceUrl[]
+  /** 参考音频（全模态参考）。只有方舟有 */
+  audios?: AudioReferenceUrl[]
   providerId?: string
   modelId?: string
   /** 时长（秒）。不给时 MiniMax 会用缺省 5，方舟交给模型自己定 */
@@ -323,6 +348,8 @@ interface AdapterInput {
   modelId: string
   prompt: string
   images: VideoImageInput[]
+  videos: VideoReferenceUrl[]
+  audios: AudioReferenceUrl[]
   duration?: number
   resolution?: VideoResolution
   ratio?: VideoRatio
@@ -417,13 +444,34 @@ const ADAPTERS: Record<VideoApi, VideoAdapter> = {
           'Seedance 最高是 1080p。要 2K 请换用 MiniMax-H3。'
         )
       }
-      const body: Record<string, unknown> = {
-        model: input.modelId,
-        // 方舟的参考图 role 叫 reference_image；首/尾帧则不带 role（靠顺序）
-        content: contentArray(input, (role) =>
-          role === 'reference' ? 'reference_image' : undefined
+      /*
+       * 方舟把「首帧」「首尾帧」「全模态参考（参考图 / 视频 / 音频）」定为三种
+       * **互斥**场景，混着发要等任务跑起来才异步报错 —— 那时候已经排了几分钟队。
+       */
+      const hasFrame = input.images.some((image) => image.role !== 'reference')
+      const hasOmni =
+        input.videos.length > 0 ||
+        input.audios.length > 0 ||
+        input.images.some((image) => image.role === 'reference')
+      if (hasFrame && hasOmni) {
+        throw new VideoParamUnsupportedError(
+          'ark-video',
+          '首帧/尾帧与参考图、参考视频、参考音频混用',
+          '方舟把这两类定为互斥场景。要么只给首帧（+尾帧），要么全部改成参考素材、' +
+            '在提示词里写「以图 1 为首帧」这类话。'
         )
       }
+      // 方舟的参考图 role 叫 reference_image；首/尾帧则不带 role（靠顺序）
+      const content = contentArray(input, (role) =>
+        role === 'reference' ? 'reference_image' : undefined
+      )
+      for (const url of input.videos) {
+        content.push({ type: 'video_url', video_url: { url }, role: 'reference_video' })
+      }
+      for (const url of input.audios) {
+        content.push({ type: 'audio_url', audio_url: { url }, role: 'reference_audio' })
+      }
+      const body: Record<string, unknown> = { model: input.modelId, content }
       if (input.resolution) body.resolution = ARK_RESOLUTION[input.resolution]
       if (input.duration !== undefined) body.duration = input.duration
       if (input.ratio) body.ratio = input.ratio
@@ -484,6 +532,13 @@ const ADAPTERS: Record<VideoApi, VideoAdapter> = {
           'minimax-video',
           '有声/无声开关',
           'MiniMax-H3 的音轨由模型自己决定，没有这个参数。要显式控制请用方舟 Seedance。'
+        )
+      }
+      if (input.videos.length > 0 || input.audios.length > 0) {
+        throw new VideoParamUnsupportedError(
+          'minimax-video',
+          '参考视频/参考音频',
+          'MiniMax 只收图片。要拿视频或音频当参考请用方舟 Seedance 2.x。'
         )
       }
       const body: Record<string, unknown> = {
@@ -675,10 +730,34 @@ export async function submitVideo(
       )
     }
   }
+  const videos = (request.videos ?? []).map((url) => String(url || '').trim()).filter(Boolean)
+  for (const url of videos) {
+    // 方舟不收视频的 base64，本地文件更不用说 —— 在这里拦掉，别等厂商几十秒后回一句 400
+    if (!/^https?:\/\//i.test(url) && !/^asset:\/\//i.test(url)) {
+      throw new VideoRequestError(
+        0,
+        'submit',
+        `参考视频「${url.slice(0, 60)}」不是公网直链也不是 asset:// 素材 ID。` +
+          '方舟的参考视频只收这两种，不收 base64，本地视频文件没法直接带上去。'
+      )
+    }
+  }
+  const audios = (request.audios ?? []).map((url) => String(url || '').trim()).filter(Boolean)
+  for (const url of audios) {
+    if (!/^https?:\/\//i.test(url) && !/^asset:\/\//i.test(url) && !/^data:audio\//i.test(url)) {
+      throw new VideoRequestError(
+        0,
+        'submit',
+        `参考音频「${url.slice(0, 60)}」既不是公网直链、asset:// 素材 ID，也不是 data URI。` +
+          '本地文件请先经 loadReferenceAudio 读成 data URI。'
+      )
+    }
+  }
+
   // base64 撑到 4/3，超了是一次 413 —— 而 413 只表现为「生成失败」，查不出来
-  const inlineBytes = images
-    .filter((image) => /^data:image\//i.test(image.url))
-    .reduce((sum, image) => sum + inlineByteLength(image.url), 0)
+  const inlineBytes = [...images.map((image) => image.url), ...audios]
+    .filter((url) => /^data:/i.test(url))
+    .reduce((sum, url) => sum + inlineByteLength(url), 0)
   if (inlineBytes > MAX_INLINE_PAYLOAD_BYTES) {
     throw new VideoPayloadTooLargeError(inlineBytes, MAX_INLINE_PAYLOAD_BYTES)
   }
@@ -688,6 +767,8 @@ export async function submitVideo(
     modelId,
     prompt,
     images,
+    videos,
+    audios,
     duration: request.duration,
     resolution: request.resolution,
     ratio: request.ratio,

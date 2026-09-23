@@ -1,5 +1,8 @@
 /** @vitest-environment node */
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
 /**
  * 这一组守的是「花钱的工具别把钱花错地方」：
@@ -22,6 +25,16 @@ vi.mock('../../../ai/video', () => ({
 vi.mock('../../../ai/store', () => ({ readSettings: () => readSettings() }))
 vi.mock('../../../services/aigc/assetSaver', () => ({
   downloadAndSaveAIGCAsset: (...args: unknown[]) => downloadAndSaveAIGCAsset(...args)
+}))
+
+const isObjectStorageReady = vi.fn()
+const uploadMediaFile = vi.fn()
+const mediaUrlFor = vi.fn()
+vi.mock('../../../services/objectStorage/objectStorageService', () => ({
+  isObjectStorageReady: () => isObjectStorageReady(),
+  uploadMediaFile: (...args: unknown[]) => uploadMediaFile(...args),
+  mediaUrlFor: (...args: unknown[]) => mediaUrlFor(...args),
+  isPrivateEndpoint: (url: string) => /\/\/(127\.|192\.168\.|localhost)/.test(url)
 }))
 
 import { createGenerateVideoTool } from './generateVideo'
@@ -124,6 +137,105 @@ describe('参数与前置检查', () => {
     await expect(
       run({ prompt: '猫', reference_images: ['https://cdn/a.png', 'https://cdn/b.png'] })
     ).rejects.toThrow(/首帧只能给一张/)
+    expect(generateVideo).not.toHaveBeenCalled()
+  })
+
+  it('参考视频和参考音频原样传下去', async () => {
+    await run({
+      prompt: '参考视频 1 的运镜',
+      reference_images: [{ path: 'https://cdn/a.png', role: 'reference' }],
+      reference_videos: ['https://cdn/cam.mp4', 'asset://asset-1'],
+      reference_audios: ['https://cdn/bgm.mp3']
+    })
+
+    const payload = generateVideo.mock.calls[0][0]
+    expect(payload.videos).toEqual(['https://cdn/cam.mp4', 'asset://asset-1'])
+    expect(payload.audios).toEqual(['https://cdn/bgm.mp3'])
+  })
+
+  describe('本地参考视频走对象存储', () => {
+    let dir: string
+    let clip: string
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'uebox-refvideo-'))
+      clip = join(dir, 'shot.mp4')
+      await writeFile(clip, Buffer.alloc(1024))
+      isObjectStorageReady.mockResolvedValue(true)
+      uploadMediaFile.mockResolvedValue({ key: 'uebox-media/abc.mp4', reused: false })
+      mediaUrlFor.mockResolvedValue(
+        'https://bucket.oss-cn-hangzhou.aliyuncs.com/uebox-media/abc.mp4?sig'
+      )
+    })
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true })
+    })
+
+    /** 截图里那个误会的根：模型以为视频当不了参考，只剩截图一条路。缺的其实只是一个桶 */
+    it('没配对象存储时在扣费之前拦下，并引导用户去「偏好设置 → 对象存储」', async () => {
+      isObjectStorageReady.mockResolvedValue(false)
+
+      await expect(run({ prompt: '猫', reference_videos: [clip] })).rejects.toThrow(
+        /偏好设置 → 对象存储[\s\S]*测试连接/
+      )
+      expect(uploadMediaFile).not.toHaveBeenCalled()
+      expect(generateVideo).not.toHaveBeenCalled()
+    })
+
+    it('配了就先传上去，把换来的链接交给厂商；直链原样保留、顺序不变', async () => {
+      await run({ prompt: '猫', reference_videos: ['https://cdn/a.mp4', clip] })
+
+      expect(uploadMediaFile.mock.calls[0][0]).toBe(clip)
+      expect(generateVideo.mock.calls[0][0].videos).toEqual([
+        'https://cdn/a.mp4',
+        'https://bucket.oss-cn-hangzhou.aliyuncs.com/uebox-media/abc.mp4?sig'
+      ])
+    })
+
+    it('方舟不收的格式（.avi）连对象存储都不碰，直接说要转格式', async () => {
+      await expect(
+        run({ prompt: '猫', reference_videos: ['D:/renders/shot.avi'] })
+      ).rejects.toThrow(/mp4 \/ mov/)
+      expect(isObjectStorageReady).not.toHaveBeenCalled()
+      expect(generateVideo).not.toHaveBeenCalled()
+    })
+
+    it('对象存储是内网地址时拦下 —— 方舟从公网拉不到', async () => {
+      mediaUrlFor.mockResolvedValue('http://192.168.1.5:9000/bucket/abc.mp4?sig')
+
+      await expect(run({ prompt: '猫', reference_videos: [clip] })).rejects.toThrow(/内网/)
+      expect(generateVideo).not.toHaveBeenCalled()
+    })
+
+    it('上传失败时说清没扣费，并指到测试连接', async () => {
+      uploadMediaFile.mockRejectedValue(new Error('403 AccessDenied'))
+
+      await expect(run({ prompt: '猫', reference_videos: [clip] })).rejects.toThrow(
+        /没有扣费[\s\S]*403 AccessDenied[\s\S]*测试连接/
+      )
+      expect(generateVideo).not.toHaveBeenCalled()
+    })
+  })
+
+  it('首帧和参考视频/音频不能一起给', async () => {
+    await expect(
+      run({
+        prompt: '猫',
+        reference_images: ['https://cdn/a.png'],
+        reference_videos: ['https://cdn/cam.mp4']
+      })
+    ).rejects.toThrow(/互斥/)
+    expect(generateVideo).not.toHaveBeenCalled()
+  })
+
+  it('参考音频不是 wav / mp3 时在发请求之前拦下', async () => {
+    await expect(
+      run({
+        prompt: '猫',
+        reference_videos: ['https://cdn/cam.mp4'],
+        reference_audios: ['C:/a.flac']
+      })
+    ).rejects.toThrow(/wav \/ mp3/)
     expect(generateVideo).not.toHaveBeenCalled()
   })
 

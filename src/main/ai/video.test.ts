@@ -165,6 +165,64 @@ describe('方舟 Seedance', () => {
     expect(progress.usage).toBe(411300)
   })
 
+  it('参考视频与参考音频带各自的 type 和 role 进 content 数组', async () => {
+    await submitVideo(provider(), 'doubao-seedance-2-5-260628', {
+      prompt: '参考视频 1 的运镜',
+      images: [{ url: 'https://cdn/ref.png', role: 'reference' }],
+      videos: ['https://cdn/cam.mp4'],
+      audios: ['data:audio/mp3;base64,AAAA', 'asset://asset-123']
+    })
+
+    expect(requestAt('/contents/generations/tasks').json.content).toEqual([
+      { type: 'text', text: '参考视频 1 的运镜' },
+      { type: 'image_url', image_url: { url: 'https://cdn/ref.png' }, role: 'reference_image' },
+      { type: 'video_url', video_url: { url: 'https://cdn/cam.mp4' }, role: 'reference_video' },
+      {
+        type: 'audio_url',
+        audio_url: { url: 'data:audio/mp3;base64,AAAA' },
+        role: 'reference_audio'
+      },
+      { type: 'audio_url', audio_url: { url: 'asset://asset-123' }, role: 'reference_audio' }
+    ])
+  })
+
+  /** 方舟不收视频的 base64。放过去是厂商几十秒后回的一句 400 */
+  it('参考视频不是直链也不是 asset:// 时本地拦掉', async () => {
+    for (const url of ['C:/clips/a.avi', 'data:video/mp4;base64,AAAA']) {
+      await expect(
+        submitVideo(provider(), 'doubao-seedance-2-5-260628', { prompt: '猫', videos: [url] })
+      ).rejects.toThrow(/参考视频/)
+    }
+    await expect(
+      submitVideo(provider(), 'doubao-seedance-2-5-260628', {
+        prompt: '猫',
+        audios: ['C:/a.mp3']
+      })
+    ).rejects.toThrow(/参考音频/)
+    expect(sent).toHaveLength(0)
+  })
+
+  /** 首帧、首尾帧、全模态参考是方舟的三种互斥场景，混发要等排完队才异步报错 */
+  it('首帧和参考素材混用时本地拦掉', async () => {
+    await expect(
+      submitVideo(provider(), 'doubao-seedance-2-5-260628', {
+        prompt: '猫',
+        images: [{ url: 'https://cdn/a.png', role: 'first_frame' }],
+        videos: ['https://cdn/cam.mp4']
+      })
+    ).rejects.toThrow(VideoParamUnsupportedError)
+    await expect(
+      submitVideo(provider(), 'doubao-seedance-2-5-260628', {
+        prompt: '猫',
+        images: [
+          { url: 'https://cdn/a.png', role: 'first_frame' },
+          { url: 'https://cdn/b.png', role: 'reference' }
+        ]
+      })
+    ).rejects.toThrow(VideoParamUnsupportedError)
+    expect(sent).toHaveLength(0)
+  })
+
   /** 方舟最高 1080p。静默降级的话用户付了 2K 的预期、拿到 1080p 的片子 */
   it('要 2K 时明确报错，而不是悄悄降到 1080p', async () => {
     await expect(
@@ -222,6 +280,14 @@ describe('MiniMax v2', () => {
     expect(requestAt('/query/video_generation/424010985738629').method).toBe('GET')
     expect(progress.done).toBe(true)
     expect(progress.url).toBe('https://cdn/mm.mp4')
+  })
+
+  it('没有参考视频/音频入参，给了就报错而不是静默丢掉', async () => {
+    useMinimax()
+    await expect(
+      submitVideo(provider(), 'MiniMax-H3', { prompt: '猫', videos: ['https://cdn/cam.mp4'] })
+    ).rejects.toThrow(VideoParamUnsupportedError)
+    expect(sent).toHaveLength(0)
   })
 
   it('没有有声开关，给了就报错而不是静默忽略', async () => {

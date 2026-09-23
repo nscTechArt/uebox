@@ -22,8 +22,11 @@
  * 那条「AI 图 ≠ 引擎渲染」是同一个坑，而视频这边更容易被混淆。
  */
 
+import { promises as fs } from 'fs'
+import { extname, isAbsolute } from 'path'
 import { z } from 'zod'
 
+import { assertPathAllowed } from '../builtin/pathBoundary'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 import {
   encodeVideoJob,
@@ -35,7 +38,7 @@ import {
 import { readSettings } from '../../../ai/store'
 import { downloadAndSaveAIGCAsset } from '../../../services/aigc/assetSaver'
 import { describeMissingVideoModel, listVideoModels, pickVideoModel } from './videoModels'
-import { loadReferenceImages, VIDEO_REFERENCE_BUDGET } from './references'
+import { loadReferenceAudio, loadReferenceImages, VIDEO_REFERENCE_BUDGET } from './references'
 import type { AiProviderSettings } from '../../../ai/types'
 
 /** 素材库文件名的长度上限。再长的提示词截断即可，资产备注里存着全文 */
@@ -72,6 +75,24 @@ const GenerateVideoInput = z.object({
         '**首尾帧**：给一张 first_frame 加一张 last_frame，视频就从前者过渡到后者；' +
         '首帧、尾帧各最多一张，尾帧不能单独给。' +
         '**同一张图选不同的 role 出来的东西完全不同**，不确定就问用户。'
+    ),
+  reference_videos: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '参考视频（运镜、动作、节奏参考，或拿来编辑/延长）。只有方舟 Seedance 2.x 支持。' +
+        '收本地绝对路径 / http(s) 公网直链 / `asset://` 素材 ID。方舟本身只认链接，' +
+        '**本地文件会先传到用户配的对象存储换成链接**；没配对象存储时会报错并说明怎么引导用户去配。' +
+        '格式 mp4 / mov（H.264 / H.265）；Seedance 2.0 单个 2–15 秒、最多 3 个、合计 ≤15 秒，' +
+        '2.5 单个 2–30 秒、最多 10 个、合计 ≤30 秒；单个 ≤200MB。'
+    ),
+  reference_audios: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '参考音频（配乐、音色、节奏参考）。只有方舟 Seedance 2.x 支持。' +
+        '本地绝对路径 / http(s) 直链 / `asset://` 素材 ID / data URI 都收。' +
+        '只收 wav / mp3，单个 ≤15MB；Seedance 2.0 不能只给音频，至少再带一张参考图或一个参考视频。'
     ),
   duration: z
     .number()
@@ -144,6 +165,135 @@ export function checkImageRoles(items: ReferenceImageArg[]): string | undefined 
   return undefined
 }
 
+/** 方舟参考视频只认这两种容器 */
+const REFERENCE_VIDEO_EXTS = ['.mp4', '.mov']
+
+/** 方舟：单个参考视频不超过 200MB */
+const REFERENCE_VIDEO_MAX_BYTES = 200 * 1024 * 1024
+
+/** 已经是厂商能直接拉的形式：公网直链或方舟素材库的 asset:// ID */
+function isLinkedVideo(value: string): boolean {
+  return /^https?:\/\//i.test(value) || /^asset:\/\//i.test(value)
+}
+
+/**
+ * 本地参考视频要用、但对象存储没配时给模型的话。
+ *
+ * 写成「转告用户」的口吻而不是一句错误：模型拿到裸错误的第一反应是换个方案
+ * 自己凑（截图当参考图），而用户要的恰恰是拿这段视频当参考 —— 缺的只是一个桶。
+ */
+export function objectStorageGuide(localVideos: string[]): string {
+  return [
+    `参考视频 ${localVideos.map((item) => `「${item}」`).join('、')} 是本地文件，` +
+      '而方舟的参考视频只认链接、不收 base64。盒子可以把它传到**用户自己的对象存储**换一个链接，' +
+      '但对象存储还没配好。（这一步在提交之前拦下，没有扣费。）',
+    '请这样转告用户：',
+    '1. 打开「偏好设置 → 对象存储」，打开「启用对象存储」；',
+    '2. 选云厂商（阿里云 OSS / 腾讯云 COS / AWS S3 / Cloudflare R2 等），' +
+      '填 Endpoint、Region、Bucket、AccessKey ID 和 Secret；',
+    '3. 点「测试连接」，通过后保存，回来说一声就接着生成。',
+    '注意：桶必须是公网可访问的地址 —— 本机或内网的 MinIO 方舟拉不到。',
+    '不想配的话，也可以直接给一个公网直链，或上传到方舟素材库拿 asset:// ID。'
+  ].join('\n')
+}
+
+/**
+ * 把参考视频都变成方舟能拉的链接：直链和 asset:// 原样，本地文件传对象存储。
+ *
+ * 返回 `{ problem }` 时不提交 —— 这些都是扣费之前就能发现的问题。
+ * 对象存储服务动态加载：它连着 electron 和凭据库，静态引入会让工具注册表的每个测试
+ * 都去碰它（与 §7 那条 appSettingsManager 的坑同一个道理）。
+ */
+async function resolveReferenceVideos(
+  videos: string[],
+  report: (text: string) => void
+): Promise<{ urls: string[] } | { problem: string }> {
+  const local = videos.filter((video) => !isLinkedVideo(video))
+  if (local.length === 0) return { urls: videos }
+
+  const storage = await import('../../../services/objectStorage/objectStorageService')
+  if (!(await storage.isObjectStorageReady())) return { problem: objectStorageGuide(local) }
+
+  const urls: string[] = []
+  for (const video of videos) {
+    if (isLinkedVideo(video)) {
+      urls.push(video)
+      continue
+    }
+    const denied = assertPathAllowed(video)
+    if (denied) return { problem: denied }
+    const size = await fs
+      .stat(video)
+      .then((stat) => stat.size)
+      .catch(() => null)
+    if (size === null) return { problem: `参考视频读不到：${video}。确认这个文件存在。` }
+    if (size > REFERENCE_VIDEO_MAX_BYTES) {
+      return {
+        problem:
+          `参考视频 ${Math.round(size / 1024 / 1024)}MB，超过方舟单个 200MB 的上限：${video}。` +
+          '截短或降码率后再用。'
+      }
+    }
+    try {
+      const { key } = await storage.uploadMediaFile(video, (note) => report(note))
+      const url = await storage.mediaUrlFor(key)
+      if (!url)
+        return { problem: '参考视频传上去了，但对象存储现在签不出链接。请用户检查对象存储配置。' }
+      if (storage.isPrivateEndpoint(url)) {
+        return {
+          problem:
+            '对象存储是本机或内网地址，方舟从公网拉不到这段参考视频。' +
+            '请用户在「偏好设置 → 对象存储」换成公网可访问的桶，或填一个公开访问域名。'
+        }
+      }
+      urls.push(url)
+    } catch (error) {
+      return {
+        problem:
+          `参考视频传到对象存储失败（没有扣费）：${error instanceof Error ? error.message : String(error)}。` +
+          '请用户到「偏好设置 → 对象存储」点「测试连接」排查。'
+      }
+    }
+  }
+  return { urls }
+}
+
+/**
+ * 参考视频 / 参考音频的前置检查。返回 undefined 表示没问题。
+ *
+ * - 本地参考视频先看格式：方舟只收 mp4 / mov，.avi 传上去也是白传。
+ *   （要不要、能不能传对象存储是异步的事，在 `resolveReferenceVideos` 里。）
+ * - 首帧/首尾帧与全模态参考互斥（方舟硬规则；MiniMax 压根没有视频/音频入参）。
+ */
+export function checkReferenceMedia(
+  images: ReferenceImageArg[],
+  videos: string[],
+  audios: string[]
+): string | undefined {
+  for (const raw of videos) {
+    const video = raw.trim()
+    if (isLinkedVideo(video)) continue
+    if (!isAbsolute(video)) {
+      return `参考视频「${video}」不是绝对路径。给完整路径、公网直链或 asset:// 素材 ID。`
+    }
+    if (!REFERENCE_VIDEO_EXTS.includes(extname(video).toLowerCase())) {
+      return (
+        `参考视频「${video}」是 ${extname(video) || '无扩展名'} 格式，方舟只收 mp4 / mov（H.264 / H.265）。` +
+        '先转一下格式，比如 `ffmpeg -i 输入.avi -c:v libx264 -c:a aac 输出.mp4`，' +
+        '要替用户转的话先问他。'
+      )
+    }
+  }
+  const usesFrames = normalizeImages(images).some((image) => image.role !== 'reference')
+  if (usesFrames && videos.length + audios.length > 0) {
+    return (
+      '首帧/尾帧不能和参考视频、参考音频一起给 —— 厂商把这两种定为互斥用法。' +
+      '要么去掉参考视频/音频，要么把图的 role 改成 reference，在提示词里写「以图 1 为首帧」。'
+    )
+  }
+  return undefined
+}
+
 /**
  * 按首帧 → 尾帧 → 参考图排。方舟的首尾帧不带 role、靠顺序区分，
  * 所以这一步不是整洁问题，排错了首尾会对调。
@@ -197,6 +347,16 @@ reference 是「照着这个风格/主体重新画」。不确定就问用户，
 【首尾帧】用户说「从 A 变到 B」「A 过渡到 B」「镜头从这里推到那里」这类话时，
 拍两张（或拿他给的两张）：\`[{ path: A, role: 'first_frame' }, { path: B, role: 'last_frame' }]\`。
 首帧、尾帧各只能一张，只给尾帧不给首帧会被拦下来。
+
+【参考视频 / 参考音频】方舟 Seedance 2.x 支持「全模态参考」：参考图（role=reference）
++ \`reference_videos\` + \`reference_audios\` 一起给，用来参考运镜、动作、配乐，或编辑/延长一段视频。
+- 方舟的参考视频只认链接（公网直链或 asset:// 素材 ID），不收 base64。用户给的是**本地视频**时
+  直接把路径填进 \`reference_videos\`：配了对象存储，工具会自动传上去换成链接；
+  **没配时工具会在扣费之前拦下**，并告诉你怎么引导用户到「偏好设置 → 对象存储」去配 ——
+  照那段话转告用户，等他配好再调一次。别自作主张退回「截几帧当参考图」，那条路要用户点头。
+- 只收 mp4 / mov。用户给的是 .avi / .mkv 等，先让他转格式（或经他同意你用 ffmpeg 转）。
+- 首帧/首尾帧与全模态参考是**互斥**的两种用法，不能混着给：带了参考视频/音频/参考图，
+  就别再给 first_frame / last_frame（想要首帧就在提示词里写「以图 1 为首帧」）。
 
 【用哪个模型】不填 \`model\` 就用用户绑定的那个。目录里预置了火山方舟 Seedance
 （2.5 / 2.0）和 MiniMax 海螺（H3 / H3-Max）。
@@ -260,11 +420,25 @@ reference 是「照着这个风格/主体重新画」。不确定就问用户，
        */
       const roleProblem = checkImageRoles(args.reference_images ?? [])
       if (roleProblem) return { isError: true, text: roleProblem }
+      const mediaProblem = checkReferenceMedia(
+        args.reference_images ?? [],
+        args.reference_videos ?? [],
+        args.reference_audios ?? []
+      )
+      if (mediaProblem) return { isError: true, text: mediaProblem }
       const orderedImages = orderImages(args.reference_images ?? [])
       const references = await loadReferenceImages(
         orderedImages.map((item) => item.path),
         VIDEO_REFERENCE_BUDGET
       )
+      const audios: string[] = []
+      for (const audio of args.reference_audios ?? []) audios.push(await loadReferenceAudio(audio))
+      const resolvedVideos = await resolveReferenceVideos(
+        (args.reference_videos ?? []).map((url) => url.trim()).filter(Boolean),
+        (text) => ctx.report({ text })
+      )
+      if ('problem' in resolvedVideos) return { isError: true, text: resolvedVideos.problem }
+      const videos = resolvedVideos.urls
 
       const modelLabel = describeBoundVideoModel(settings, chosen)
       ctx.report({
@@ -279,6 +453,8 @@ reference 是「照着这个风格/主体重新画」。不确定就问用户，
         prompt: String(args.prompt),
         ...(chosen ? { providerId: chosen.providerId, modelId: chosen.modelId } : {}),
         ...(images.length > 0 ? { images } : {}),
+        ...(videos.length > 0 ? { videos } : {}),
+        ...(audios.length > 0 ? { audios } : {}),
         ...(args.duration !== undefined ? { duration: args.duration } : {}),
         ...(args.resolution ? { resolution: args.resolution } : {}),
         ...(args.ratio ? { ratio: args.ratio } : {}),

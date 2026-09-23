@@ -165,3 +165,57 @@ export async function loadReferenceImages(
   }
   return loaded
 }
+
+/**
+ * 参考音频的单个上限。方舟文档：单个音频不超过 15MB。
+ * 超了在本地拦，免得白等一次 400。
+ */
+const AUDIO_REFERENCE_MAX_BYTES = 15 * 1024 * 1024
+
+const AUDIO_MEDIA_TYPES: Record<string, string> = {
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mp3'
+}
+
+/**
+ * 一个参考音频 → 方舟认识的形式（生视频的全模态参考用）。
+ *
+ * 与参考图同一套路：本地绝对路径读盘转 `data:audio/...;base64,...`，直链、
+ * `asset://` 素材 ID、data URI 原样递过去。格式只收 wav / mp3 —— 方舟只认这两种，
+ * 别的格式发过去是一次白等。
+ */
+export async function loadReferenceAudio(reference: string): Promise<string> {
+  const value = String(reference || '').trim()
+  if (!value) throw new ReferenceImageError('参考音频是空字符串')
+
+  if (/^https?:\/\//i.test(value) || /^asset:\/\//i.test(value) || /^data:audio\//i.test(value)) {
+    return value
+  }
+
+  if (!isAbsolute(value)) {
+    throw new ReferenceImageError(`参考音频 "${value}" 不是绝对路径。给完整路径，不要给相对路径。`)
+  }
+  const mediaType = AUDIO_MEDIA_TYPES[extname(value).toLowerCase()]
+  if (!mediaType) {
+    throw new ReferenceImageError(
+      `参考音频只收 wav / mp3，这个是 ${extname(value) || '无扩展名'}：${value}。先转成 wav 或 mp3。`
+    )
+  }
+
+  const denied = assertPathAllowed(value)
+  if (denied) throw new ReferenceImageError(denied)
+
+  let bytes: Buffer
+  try {
+    bytes = await fs.readFile(value)
+  } catch {
+    throw new ReferenceImageError(`参考音频读不到：${value}。确认这个文件存在。`)
+  }
+  if (bytes.byteLength > AUDIO_REFERENCE_MAX_BYTES) {
+    throw new ReferenceImageError(
+      `参考音频 ${Math.round(bytes.byteLength / 1024 / 1024)}MB，超过方舟单个 15MB 的上限：${value}。` +
+        '截短一些，或者放到公网直链上。'
+    )
+  }
+  return `data:${mediaType};base64,${bytes.toString('base64')}`
+}
