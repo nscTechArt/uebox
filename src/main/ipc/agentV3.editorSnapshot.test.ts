@@ -389,6 +389,26 @@ describe('steer 的闸', () => {
     expect(typeof agent.steer.mock.calls.at(-1)?.[0]?.content).toBe('string')
     release()
   })
+
+  /**
+   * 内核发了 `agent_end` 之后就不会再读插话队列了，但这一轮要等落盘、复核走完才从表里摘掉。
+   * 这段时间进来的插话原来照样回「成功」、排进一个没人读的队列 —— 话就这么没了。
+   */
+  it('这一轮已经收尾：拒绝插话，不往死队列里塞', async () => {
+    agent.subscribe.mockClear()
+    const release = await startRun('run-6')
+    const listener = agent.subscribe.mock.calls.at(-1)?.[0] as
+      | ((event: { type: string }) => unknown)
+      | undefined
+    void listener?.({ type: 'agent_end' })
+    agent.steer.mockClear()
+
+    const result = await invoke('steer', { sessionId: 'run-6', message: '再加一句' })
+
+    expect(result.success).toBe(false)
+    expect(agent.steer).not.toHaveBeenCalled()
+    release()
+  })
 })
 
 describe('抓取 IPC', () => {

@@ -20,6 +20,7 @@ import {
   type PiUsageLike
 } from '../../../shared/agentUsage'
 import { classifyProviderError } from './providerError'
+import type { ToolRisk } from '../tools/defineTool'
 import {
   creatorPlanChatError,
   isPlanProvider,
@@ -40,7 +41,14 @@ export type AgentV3Event =
   | { channel: 'agent-v3:thinking'; payload: { sessionId: string; text: string } }
   | {
       channel: 'agent-v3:tool-call'
-      payload: { sessionId: string; toolCallId: string; toolName: string; args: unknown }
+      payload: {
+        sessionId: string
+        toolCallId: string
+        toolName: string
+        args: unknown
+        /** 按这次的参数算出来的风险（`effectiveRisk`）。预演、只读查询在这里就是 safe */
+        risk?: ToolRisk
+      }
     }
   | {
       channel: 'agent-v3:tool-progress'
@@ -427,7 +435,14 @@ export function projectEvent(
 export function createEventBridge(
   sender: WebContents,
   sessionId: string,
-  hooks?: { onUserMessage?: (text: string) => void }
+  hooks?: {
+    onUserMessage?: (text: string) => void
+    /**
+     * 这次调用按参数算的风险。改动台账靠它分辨「真删」和「预演」——
+     * 渲染层只有按工具名定级的静态表，看不见 `riskFor`
+     */
+    riskOf?: (toolName: string, args: unknown) => ToolRisk | undefined
+  }
 ) {
   const state = createProjectionState()
 
@@ -438,6 +453,10 @@ export function createEventBridge(
   return (event: AgentEvent): void => {
     const projected = projectEvent(event, sessionId, state)
     for (const item of projected) {
+      if (item.channel === 'agent-v3:tool-call' && hooks?.riskOf) {
+        const risk = hooks.riskOf(item.payload.toolName, item.payload.args)
+        if (risk) item.payload.risk = risk
+      }
       const signal = toRunSignal(item)
       if (signal) notifyAgentRun(signal)
       if (item.channel === 'agent-v3:user-message') hooks?.onUserMessage?.(item.payload.text)

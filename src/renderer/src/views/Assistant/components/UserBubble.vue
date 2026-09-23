@@ -78,11 +78,7 @@ import type {
 import { useI18n } from 'vue-i18n'
 import { openImageViewer } from '@renderer/services/imageViewer'
 import AttachmentCard from './AttachmentCard.vue'
-import {
-  PhCheck,
-  PhCopy,
-  PhPencilSimple
-} from '@phosphor-icons/vue'
+import { PhCheck, PhCopy, PhPencilSimple } from '@phosphor-icons/vue'
 
 const { t } = useI18n()
 

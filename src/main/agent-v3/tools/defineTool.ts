@@ -175,11 +175,30 @@ const RISK_RANK: Record<ToolRisk, number> = { safe: 0, mutating: 1, destructive:
  * `riskFor` 要是能抬到比它还高，那条记录就会放过一次没人批准过的更危险的调用。
  * 审批门、子任务写操作审计、目标复核都走这一个函数，免得各自对「这次算不算写」有不同答案。
  */
+/**
+ * 把顶层的 `"true"` / `"false"` 字符串当成布尔。
+ *
+ * 审批门拿到的是内核按 schema 转过的参数（`"false"` 已经是 false），而目标台账、
+ * 子任务写操作计数读的是开始事件里的**原样**参数。模型把 `dry_run` 写成字符串时，
+ * 两边就算出两个风险：审批按真删问了、也真删了，台账却记成「只读预演」。
+ * `riskFor` 只看这类开关位，在这里抹平一下两边就一致了。
+ */
+function coerceFlagStrings(args: unknown): unknown {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args
+  let out: Record<string, unknown> | null = null
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    if (value !== 'true' && value !== 'false') continue
+    out ??= { ...(args as Record<string, unknown>) }
+    out[key] = value === 'true'
+  }
+  return out ?? args
+}
+
 export function effectiveRisk(meta: ToolMeta | undefined, args: unknown): ToolRisk {
   const declared = meta?.risk ?? 'destructive'
   let wanted: ToolRisk | undefined
   try {
-    wanted = meta?.riskFor?.(args)
+    wanted = meta?.riskFor?.(coerceFlagStrings(args))
   } catch {
     // 参数形状不对（结束事件没配上开始事件时是 undefined）就按声明的最坏情况算
     wanted = undefined

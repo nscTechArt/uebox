@@ -112,13 +112,15 @@ export type RetitleOutcome = 'ok' | 'empty' | 'failed' | 'skipped'
  *
  * @param messages 这条会话的全部消息，按时间正序
  * @param applyTitle 拿到名字后怎么落（改 store、顺带改标签页标题都在这里）
+ * @param getTitle 读这条会话此刻的标题。给了的话，起名期间标题被改过就不落
  * @returns `empty` 没有可用对话内容；`skipped` 同一条会话正在起名；
  *          `failed` 模型没配 / 调用失败 / 返回废话；`ok` 已改名
  */
 export async function retitleSession(
   sessionId: string,
   messages: readonly ExcerptMessage[],
-  applyTitle: (title: string) => void
+  applyTitle: (title: string) => void,
+  getTitle?: () => string | undefined
 ): Promise<RetitleOutcome> {
   if (!sessionId) return 'empty'
   if (inFlight.has(sessionId)) return 'skipped'
@@ -127,12 +129,15 @@ export async function retitleSession(
   if (!excerpt) return 'empty'
 
   inFlight.add(sessionId)
+  // 起名要几秒。这期间用户自己改了名，模型那个晚到的名字不能盖掉它
+  const titleBefore = getTitle?.()
   try {
     // 懒加载：`api/ai` 顶层就把 i18n 实例建起来了，而这个模块会被侧边栏和
     // Agent 完成回调都引到，静态 import 会把那一整串拖进它们的单测里去
     const { aiAPI } = await import('../api/ai')
     const title = await aiAPI.generateSessionTitleFromExcerpt({ excerpt })
     if (!title) return 'failed'
+    if (getTitle && getTitle() !== titleBefore) return 'skipped'
     applyTitle(title)
     return 'ok'
   } catch (error) {

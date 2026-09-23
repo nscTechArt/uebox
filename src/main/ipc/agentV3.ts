@@ -58,7 +58,7 @@ import { getAllProjects } from '../sqliteDataBase/models/project'
 import { projectManager } from '../services/project/projectManager'
 import { collectToolDiagnostics } from '../agent-v3/toolDiagnostics'
 import { isShellAvailable } from '../agent-v3/tools/builtin/localShell'
-import { effectiveRisk, type ToolMeta } from '../agent-v3/tools/defineTool'
+import { effectiveRisk, type ToolMeta, type ToolRisk } from '../agent-v3/tools/defineTool'
 import {
   currentStatuses,
   ensureConnected,
@@ -207,6 +207,24 @@ interface ActiveAgentRun {
    * 插话不换模型，所以只能按正在跑的这个判断。
    */
   selection?: { providerId: string; modelId: string }
+  /**
+   * 这一轮已经收尾（内核发了 `agent_end`）或被叫停，只是还没从表里摘掉。
+   *
+   * 内核最后一次读插话队列在 `agent_end` 之前；之后的收尾（落盘、复核）还要一阵，
+   * 这时候进来的插话会排进一个再也没人读的队列 —— 回「成功」、话却永远丢了。
+   * 所以一见到收尾就不再收插话，让调用方把这句留着当下一轮发。
+   */
+  ending?: boolean
+  /**
+   * 插话按到达的顺序进内核。带音视频的那条要等上传，后到的纯文字不能插到它前面 ——
+   * 模型会先读到「把旧的删掉」，再读到它指的那段视频。
+   */
+  steerChain?: Promise<void>
+}
+
+/** 这一轮还收不收插话：没收尾、没被叫停 */
+function acceptsSteer(entry: ActiveAgentRun): boolean {
+  return !entry.ending && !entry.controller.signal.aborted
 }
 const activeAgents = new ActiveRuns<ActiveAgentRun>()
 const deletingSessions = new Set<string>()
@@ -304,6 +322,20 @@ function alwaysAllowedFor(sessionId: string): Set<string> {
   const created = new Set<string>()
   sessionAlwaysAllowed.set(sessionId, created)
   return created
+}
+
+/**
+ * 按工具名 + 这次的参数算风险，给事件桥往 tool-call 上挂。
+ * 不认识的工具返回 undefined，渲染层退回按工具名的静态表
+ */
+function callRiskOf(
+  tools: Array<{ name: string; unrealBox: ToolMeta }>
+): (toolName: string, args: unknown) => ToolRisk | undefined {
+  const metas = new Map(tools.map((tool) => [tool.name, tool.unrealBox]))
+  return (toolName, args) => {
+    const meta = metas.get(toolName)
+    return meta ? effectiveRisk(meta, args) : undefined
+  }
 }
 
 /** execute / continue 共用装配，复核状态与任务一起恢复。 */
@@ -1595,9 +1627,12 @@ export function registerAgentV3IPC(): void {
 
       // 插话回执顺手给影子队列销号：读进上下文的那条就撤不回来了
       const bridge = createEventBridge(sender, sessionId, {
-        onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text)
+        onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
+        riskOf: callRiskOf(allTools)
       })
       agent.subscribe(async (event) => {
+        // 同步标记，赶在下面那次落盘的 await 之前：见 `ActiveAgentRun.ending`
+        if (event.type === 'agent_end') run.ending = true
         bridge(event)
         // 每轮结束落一次盘。不是每个事件都落 —— 流式 delta 期间反复写盘
         // 会拖慢主进程，而 turn_end 已经足够细：崩溃最多丢当前这一轮。
@@ -1961,9 +1996,12 @@ export function registerAgentV3IPC(): void {
 
       // 插话回执顺手给影子队列销号：读进上下文的那条就撤不回来了
       const bridge = createEventBridge(sender, sessionId, {
-        onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text)
+        onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
+        riskOf: callRiskOf(allTools)
       })
       agent.subscribe(async (e) => {
+        // 同步标记，赶在下面那次落盘的 await 之前：见 `ActiveAgentRun.ending`
+        if (e.type === 'agent_end') run.ending = true
         bridge(e)
         if (e.type === 'turn_end' || e.type === 'agent_end') {
           await store.append(agent.state.messages)
@@ -2555,7 +2593,9 @@ export function registerAgentV3IPC(): void {
       }
     ) => {
       const entry = activeAgents.get(args.sessionId)
-      if (!entry?.agent) return { success: false, error: '没有正在执行的会话' }
+      if (!entry?.agent || !acceptsSteer(entry)) {
+        return { success: false, error: '没有正在执行的会话' }
+      }
 
       /*
        * 工程对不上就**整条拒绝**，不是丢掉快照照发。
@@ -2578,70 +2618,84 @@ export function registerAgentV3IPC(): void {
 
       const block = scope ? editorSnapshotBlock(args.editorSnapshot, scope, args.sessionId) : ''
 
-      /*
-       * 带来的图同样落一份到盘上、把路径写进去 —— 理由和普通发送那条路一模一样：
-       * 模型看得见图，但没有句柄能把它交给工具（见 promptAttachments.ts）。
-       * 落盘失败不影响这次插话，图照样进上下文。
-       */
-      const attachments = await savePromptAttachments(args.images)
-      const attachmentBlock = formatAttachmentBlock(attachments)
-      // 插话带的图走同一道关口，理由同普通发送
-      const admittedSteer = await admitPromptImages(args.images)
-      /*
-       * 音视频和普通发送同一条路（见 promptMedia.ts），模型按**正在跑的这一轮**判断：
-       * 插话不换模型。没记下模型就当换不了链接，只给路径。
-       */
-      const mediaFiles = args.mediaFiles ?? []
-      const media = entry.selection
-        ? await preparePromptMedia(mediaFiles, entry.selection, (note) => {
-            if (!event.sender.isDestroyed()) {
-              event.sender.send('agent-v3:notice', {
-                sessionId: args.sessionId,
-                message: note,
-                level: 'info'
-              })
-            }
-          })
-        : { refs: [], note: describePromptMedia(mediaFiles, new Set()) }
-      // 上传要等一阵，这期间这一轮可能已经跑完了
-      if (activeAgents.get(args.sessionId) !== entry) {
-        return { success: false, error: '没有正在执行的会话' }
+      // 排号：下面的准备（落盘、上传）各自并行，进内核那一步按到达顺序来
+      const previous = entry.steerChain ?? Promise.resolve()
+      let releaseTurn: () => void = () => {}
+      entry.steerChain = new Promise<void>((resolve) => {
+        releaseTurn = resolve
+      })
+      try {
+        /*
+         * 带来的图同样落一份到盘上、把路径写进去 —— 理由和普通发送那条路一模一样：
+         * 模型看得见图，但没有句柄能把它交给工具（见 promptAttachments.ts）。
+         * 落盘失败不影响这次插话，图照样进上下文。
+         */
+        const attachments = await savePromptAttachments(args.images)
+        const attachmentBlock = formatAttachmentBlock(attachments)
+        // 插话带的图走同一道关口，理由同普通发送
+        const admittedSteer = await admitPromptImages(args.images)
+        /*
+         * 音视频和普通发送同一条路（见 promptMedia.ts），模型按**正在跑的这一轮**判断：
+         * 插话不换模型。没记下模型就当换不了链接，只给路径。
+         */
+        const mediaFiles = args.mediaFiles ?? []
+        const media = entry.selection
+          ? await preparePromptMedia(mediaFiles, entry.selection, (note) => {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send('agent-v3:notice', {
+                  sessionId: args.sessionId,
+                  message: note,
+                  level: 'info'
+                })
+              }
+            })
+          : { refs: [], note: describePromptMedia(mediaFiles, new Set()) }
+        // 前面那条（多半在等上传）先进去，这条跟在它后面
+        await previous
+        // 上传要等一阵，这期间这一轮可能已经跑完了、或者正在收尾
+        if (activeAgents.get(args.sessionId) !== entry || !acceptsSteer(entry)) {
+          return { success: false, error: '没有正在执行的会话' }
+        }
+        /*
+         * 图片关口的提示、音视频说明、文档正文都包进插话附件块：回执要按原话销号，
+         * 这些字得能整块剥掉（见 `formatSteerContextBlock`）。
+         */
+        const contextBlock = formatSteerContextBlock([
+          ...admittedSteer.notices,
+          media.note,
+          args.contextText ?? ''
+        ])
+        const text = [block, attachmentBlock, contextBlock, args.message]
+          .filter(Boolean)
+          .join('\n\n')
+
+        /*
+         * 什么都没带就还是一条纯字符串，和以前一个字节都不差 —— 内容块数组只在
+         * 真的有图或音视频引用时才用，免得给每一条插话都换一种形状。
+         */
+        const content =
+          admittedSteer.images.length || media.refs.length
+            ? [
+                { type: 'text', text },
+                ...media.refs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
+                ...admittedSteer.images
+              ]
+            : text
+
+        /*
+         * 留底用的是 `args.message`（用户的原话），不是拼了闪存块和附件块的 `content`。
+         * 内核回执投出来的也是剥掉这两块的原话，两边要对得上才销得了号。
+         */
+        const steerId = queueSteer(entry.pendingSteers, entry.agent, args.message, {
+          role: 'user',
+          content,
+          timestamp: 0
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any)
+        return { success: true, steerId }
+      } finally {
+        releaseTurn()
       }
-      /*
-       * 图片关口的提示、音视频说明、文档正文都包进插话附件块：回执要按原话销号，
-       * 这些字得能整块剥掉（见 `formatSteerContextBlock`）。
-       */
-      const contextBlock = formatSteerContextBlock([
-        ...admittedSteer.notices,
-        media.note,
-        args.contextText ?? ''
-      ])
-      const text = [block, attachmentBlock, contextBlock, args.message].filter(Boolean).join('\n\n')
-
-      /*
-       * 什么都没带就还是一条纯字符串，和以前一个字节都不差 —— 内容块数组只在
-       * 真的有图或音视频引用时才用，免得给每一条插话都换一种形状。
-       */
-      const content =
-        admittedSteer.images.length || media.refs.length
-          ? [
-              { type: 'text', text },
-              ...media.refs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
-              ...admittedSteer.images
-            ]
-          : text
-
-      /*
-       * 留底用的是 `args.message`（用户的原话），不是拼了闪存块和附件块的 `content`。
-       * 内核回执投出来的也是剥掉这两块的原话，两边要对得上才销得了号。
-       */
-      const steerId = queueSteer(entry.pendingSteers, entry.agent, args.message, {
-        role: 'user',
-        content,
-        timestamp: 0
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
-      return { success: true, steerId }
     }
   )
 
@@ -2709,6 +2763,7 @@ export function registerAgentV3IPC(): void {
   ipcMain.handle('agent-v3:stop', async (_event, args: { sessionId: string }) => {
     const entry = activeAgents.get(args.sessionId)
     if (!entry) return { success: true, drained: true }
+    entry.ending = true
     entry.controller.abort()
     entry.agent?.abort()
     return {

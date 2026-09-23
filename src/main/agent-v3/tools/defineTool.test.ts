@@ -170,6 +170,23 @@ describe('defineTool', () => {
     expect(effectiveRisk(tool.unrealBox, undefined)).toBe('mutating')
   })
 
+  // 目标台账、子任务写操作计数读的是原样参数；审批门读的是按 schema 转过的。
+  // 模型写成字符串 "false" 时两边必须算出同一个风险，否则真删了台账却记成预演
+  it('原样参数里的 "true" / "false" 按布尔算，和审批门看到的一致', () => {
+    const tool = defineTool({
+      name: 'purge',
+      namespace: 'ue.content',
+      description: 'x',
+      input: z.object({ dry_run: z.boolean().optional() }),
+      risk: 'destructive',
+      riskFor: (args) => (args.dry_run ? 'safe' : 'destructive'),
+      execute: async () => ({ text: 'ok' })
+    })
+
+    expect(effectiveRisk(tool.unrealBox, { dry_run: 'false' })).toBe('destructive')
+    expect(effectiveRisk(tool.unrealBox, { dry_run: 'true' })).toBe('safe')
+  })
+
   /**
    * 用户按停止之后，pi 要等**这次 execute 返回**才看得见中止意图
    * （agent-loop.js：先 await tool.execute，再 `if (signal?.aborted) break`）。

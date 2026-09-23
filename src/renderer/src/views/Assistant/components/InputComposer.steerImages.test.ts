@@ -108,7 +108,7 @@ describe('插话带图', () => {
     await wrapper.get('textarea').setValue('照着这两张改')
     await wrapper.get('.send-btn').trigger('click')
 
-    expect(wrapper.emitted('steer')?.[0]?.[0]).toEqual({
+    expect(wrapper.emitted('steer')?.[0]?.[0]).toMatchObject({
       text: '照着这两张改',
       images: ['data:image/png;base64,a', 'data:image/png;base64,b']
     })
@@ -141,7 +141,7 @@ describe('插话带图', () => {
     // 有图在传时右下角是停止按钮（isSendDisabled），插话走键盘这条路
     await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
 
-    expect(wrapper.emitted('steer')?.[0]?.[0]).toEqual({
+    expect(wrapper.emitted('steer')?.[0]?.[0]).toMatchObject({
       text: '先按这张来',
       images: ['data:image/png;base64,a']
     })
@@ -150,6 +150,93 @@ describe('插话带图', () => {
         .getImageDraft(CHAT_SID)
         .map((img) => img.id)
     ).toEqual(['slow'])
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 插话把就绪的附件摘走时，还在解析的那份接着解析。解析完按文件认回自己那一格，
+ * 不能按拖进来时记下的下标写 —— 下标早就被插话挪了：原来会写到别人的格子上，
+ * 留下一张永远转圈的僵尸卡片（发送键随之一直灰着），或者写出一个空洞把整个输入框渲染炸掉。
+ */
+describe('插话摘走附件时还在解析的那份', () => {
+  it('解析完回到自己那一格，不留僵尸卡片', async () => {
+    let finishSlow: (value: { success: boolean; text: string }) => void = () => {}
+    const ingest = vi.fn(async (filePath: string) => {
+      if (filePath.endsWith('slow.pdf')) {
+        return new Promise<{ success: boolean; text: string }>((resolve) => {
+          finishSlow = resolve
+        })
+      }
+      return { success: true, text: `内容：${filePath}` }
+    })
+    const api = (window as unknown as { api?: Record<string, unknown> }).api
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...api,
+      getPathForFile: (file: File) => `C:/drop/${file.name}`,
+      attachment: { ingest, onProgress: () => () => {} }
+    }
+    try {
+      const wrapper = await steeringComposer([])
+      const drop = wrapper.get('.input-composer').trigger('drop', {
+        dataTransfer: {
+          files: [new File(['a'], 'a.txt'), new File(['b'], 'b.txt'), new File(['s'], 'slow.pdf')]
+        }
+      })
+      await vi.waitFor(() => expect(ingest).toHaveBeenCalledTimes(3))
+
+      await flushPromises()
+      await wrapper.get('textarea').setValue('看看这两份')
+      await wrapper.get('textarea').trigger('keydown', { key: 'Enter' })
+      expect(wrapper.emitted('steer')).toHaveLength(1)
+
+      finishSlow({ success: true, text: '慢的那份' })
+      await drop
+      await flushPromises()
+
+      const cards = wrapper.findAllComponents({ name: 'AttachmentCard' })
+      expect(cards.map((card) => card.props('fileName'))).toEqual(['slow.pdf'])
+      expect(cards[0].props('busy')).toBeFalsy()
+      wrapper.unmount()
+    } finally {
+      ;(window as unknown as { api?: Record<string, unknown> }).api = api
+    }
+  })
+})
+
+/** 插话没成（这一轮刚好收尾、工程对不上）时，摘走的字和附件得放回输入框 —— 不然就这么没了 */
+describe('插话没成时放回来', () => {
+  it('调 restore 把字和图放回原处', async () => {
+    const wrapper = await steeringComposer([uploaded('a')])
+    await wrapper.get('textarea').setValue('照着这张改')
+    await wrapper.get('.send-btn').trigger('click')
+
+    const payload = wrapper.emitted('steer')?.[0]?.[0] as { restore: () => void }
+    expect(useChatSessionsStore().getImageDraft(CHAT_SID)).toEqual([])
+
+    payload.restore()
+    await flushPromises()
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('照着这张改')
+    expect(
+      useChatSessionsStore()
+        .getImageDraft(CHAT_SID)
+        .map((img) => img.id)
+    ).toEqual(['a'])
+    wrapper.unmount()
+  })
+
+  it('这期间又打了字，就不拿旧的盖掉', async () => {
+    const wrapper = await steeringComposer([])
+    await wrapper.get('textarea').setValue('第一句')
+    await wrapper.get('.send-btn').trigger('click')
+    const payload = wrapper.emitted('steer')?.[0]?.[0] as { restore: () => void }
+
+    await wrapper.get('textarea').setValue('已经在打第二句')
+    payload.restore()
+    await flushPromises()
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('已经在打第二句')
     wrapper.unmount()
   })
 })

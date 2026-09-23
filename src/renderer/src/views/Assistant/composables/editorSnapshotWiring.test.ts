@@ -58,7 +58,7 @@ describe('提交那一刻抓取', () => {
    */
   it('Welcome：排队/直发的判据是 isBusy，且在抓取之后', () => {
     const captureAt = welcome.indexOf('const capture = agentV3API.captureEditorSnapshot(')
-    const decideAt = welcome.indexOf('if (agentStreamStore.isBusy(chatSid)) {')
+    const decideAt = welcome.indexOf('if (agentStreamStore.isBusy(chatSid)) {', captureAt)
 
     expect(decideAt).toBeGreaterThan(captureAt)
     // 判定和入队之间不能有 await，否则中间又开了一道窗口
@@ -78,12 +78,15 @@ describe('提交那一刻抓取', () => {
       welcome.indexOf('async function handleComposerSteer')
     )
 
-    expect(handler).toContain('agentStreamStore.isBusy(sid.value)')
+    // 按点下去那一刻所在的对话判、也按它摘 —— 插话要等上传，期间切走了 `sid` 就变了
+    expect(handler).toContain('const chatSid = sid.value')
+    expect(handler).toContain('agentStreamStore.isBusy(chatSid)')
     expect(handler).toContain('isGenerating.value')
     // 插话带的是**入队那一刻**的快照和图，不是现在的
     expect(handler).toContain('const queued = item.payload')
-    expect(handler).toContain(
-      'steerAgent(item.text, queued.editorSnapshot, queued.images, attachments)'
+    // 用户真打的字，不是队列标签上那行（纯附件的条目标签是「（附件）」）
+    expect(handler.replace(/\s+/g, ' ')).toContain(
+      'steerAgent( queued.content, queued.editorSnapshot, queued.images, attachments, runningSessionId )'
     )
   })
 
@@ -92,6 +95,19 @@ describe('提交那一刻抓取', () => {
     const handler = welcome.slice(welcome.indexOf('async function handleComposerSteer'))
 
     expect(handler.slice(0, 800)).toContain('runningSessionId')
+  })
+
+  /**
+   * 插进哪一轮在开始等闪存之前就定下来：等的那一两秒里切了对话，`currentSessionId`
+   * 就指向别人的那一轮了。插话没成时把输入框摘走的东西放回去。
+   */
+  it('Welcome：插话的目标在等之前定下，没插进去就放回输入框', () => {
+    const handler = welcome.slice(welcome.indexOf('async function handleComposerSteer'))
+    const body = handler.slice(0, handler.indexOf('\n}\n'))
+
+    expect(body.indexOf('const runningSessionId')).toBeLessThan(body.indexOf('await '))
+    expect(body.replace(/\s+/g, ' ')).toContain('payload.attachments, runningSessionId )')
+    expect(body).toContain('if (!steered) payload.restore?.()')
   })
 
   /**

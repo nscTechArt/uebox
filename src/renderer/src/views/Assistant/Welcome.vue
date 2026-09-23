@@ -964,7 +964,10 @@ function handleCancelQueuedFollowUp(id: string): void {
  * 失败提示。失败就留在原地，他可以再点、也可以就让它排着。
  */
 async function handleSteerQueuedFollowUp(id: string): Promise<void> {
-  const item = findFollowUp(followUpQueues.value, sid.value, id)
+  // 插话要等主进程传完附件，可能好几秒；这期间用户切走了，`sid` 就变了 ——
+  // 摘条目得按点的那一刻所在的对话摘，不然摘不掉，之后又当新一轮发一遍
+  const chatSid = sid.value
+  const item = findFollowUp(followUpQueues.value, chatSid, id)
   if (!item) return
 
   /*
@@ -974,7 +977,7 @@ async function handleSteerQueuedFollowUp(id: string): Promise<void> {
    * 但主进程还没走完收尾，这时候当新一轮发出去会被顶回来一句「正在执行中」，
    * 而条目已经从队列里摘掉了 —— 用户点了一下，话就没了。
    */
-  if (agentStreamStore.isBusy(sid.value)) {
+  if (agentStreamStore.isBusy(chatSid)) {
     if (isGenerating.value) {
       /*
        * 真的在跑：插进去。带上**入队那一刻**的快照，不是现在的。
@@ -991,8 +994,21 @@ async function handleSteerQueuedFollowUp(id: string): Promise<void> {
             ...(queued.excelContext ? { contextText: queued.excelContext } : {})
           }
         : undefined
-      if (!(await steerAgent(item.text, queued.editorSnapshot, queued.images, attachments))) return
-      followUpQueues.value = removeFollowUp(followUpQueues.value, sid.value, id)
+      // 用 payload 里用户真打的字，不是 `item.text` —— 那是队列标签上显示的那行，
+      // 纯附件的条目是「（附件）」，传进去 steerAgent 就补不上那句「补充附件：…」了
+      const runningSessionId = chatStore.getAgentSessionId?.(chatSid) || undefined
+      if (
+        !(await steerAgent(
+          queued.content,
+          queued.editorSnapshot,
+          queued.images,
+          attachments,
+          runningSessionId
+        ))
+      ) {
+        return
+      }
+      followUpQueues.value = removeFollowUp(followUpQueues.value, chatSid, id)
     }
     // 等释放中：什么都不做，留在队列里。`released` 一到自然会投递
     return
@@ -1000,7 +1016,7 @@ async function handleSteerQueuedFollowUp(id: string): Promise<void> {
 
   // 已经彻底空出来了：直接作为新一轮发出去 —— 用户要的是「现在就办」，现在正好办得了。
   // 负载里已经有 editorSnapshot 键，`handleSend` 会原样用，**不重抓**
-  followUpQueues.value = removeFollowUp(followUpQueues.value, sid.value, id)
+  followUpQueues.value = removeFollowUp(followUpQueues.value, chatSid, id)
   void handleSend(item.payload)
 }
 
@@ -1756,7 +1772,11 @@ async function handleComposerSteer(payload: {
   text: string
   images: string[]
   attachments?: SteerAttachments
+  /** 插话没成（这一轮刚好收尾、工程对不上……）时把摘走的字和附件放回输入框 */
+  restore?: () => void
 }): Promise<void> {
+  // 等闪存那一两秒里用户可能切了对话 —— 插进哪一轮在开始等之前就定下来
+  const runningSessionId = chatStore.getAgentSessionId?.(sid.value) || undefined
   /*
    * 插话也是一次「发送」，闪存同样在这一刻抓。
    *
@@ -1766,14 +1786,17 @@ async function handleComposerSteer(payload: {
    */
   const captured = await agentV3API.captureEditorSnapshot({
     sessionProject: chatStore.getProject?.(sid.value) ?? null,
-    runningSessionId: chatStore.getAgentSessionId?.(sid.value) || undefined
+    runningSessionId
   })
-  await steerAgent(
+  const steered = await steerAgent(
     payload.text,
     captured.ok ? captured.snapshot : null,
     payload.images,
-    payload.attachments
+    payload.attachments,
+    runningSessionId
   )
+  // 没插进去：用户打的字和附件不能就这么没了（输入框为了不卡手，发出时先摘掉了）
+  if (!steered) payload.restore?.()
 }
 
 /** 消息气泡上的操作按钮：报错后的「接着跑」、审查之后的「让它自证」 */

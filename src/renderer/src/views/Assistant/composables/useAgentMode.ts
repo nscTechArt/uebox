@@ -725,7 +725,9 @@ export function useAgentMode(params: UseAgentModeParams) {
         }
       }
 
-      const ragQuery = extractTextForNotebookRag(currentUserMessage?.content ?? preparedUserMessage)
+      // 检索按用户问的那句话，不按并进了附件全文的那条：带着一份 200KB 的表格问问题，
+      // 拿整张表去检索知识库，相关度全被表格淹掉，太长还会让向量化直接失败
+      const ragQuery = extractTextForNotebookRag(historyUserMessage?.content ?? preparedUserMessage)
       if (notebookRagTarget?.notebookId && ragQuery) {
         try {
           const ragContext = await buildNotebookRagContext({
@@ -966,9 +968,18 @@ export function useAgentMode(params: UseAgentModeParams) {
     text: string,
     editorSnapshot?: EditorSnapshot | null,
     images?: readonly string[],
-    attachments?: SteerAttachments
+    attachments?: SteerAttachments,
+    /**
+     * 插进哪一轮。调用方在自己开始等（抓闪存、传附件）之前记下的 —— 等的这几秒里
+     * 用户切了对话，`currentSessionId` 就指向别人正在跑的那一轮了
+     */
+    targetSessionId?: string
   ): Promise<boolean> {
-    const sessionId = currentSessionId.value
+    const sessionId = targetSessionId || currentSessionId.value
+    // 这一轮属于哪条对话，也在等之前定下来：回执晚到时气泡得落回它自己的对话里
+    const ownerChatSid = sessionId
+      ? agentStreamStore.getChatSidByAgentSession(sessionId) || sid.value
+      : sid.value
     // 只带附件没打字的，补一句说明。输入框和排队转插话两条路都走这里，补在这里就只有一处
     const trimmed =
       text.trim() || attachmentsOnlySteerText(t, images?.length ?? 0, attachments?.files)
@@ -1035,11 +1046,21 @@ export function useAgentMode(params: UseAgentModeParams) {
     // 才退回普通用户气泡 —— 无论如何用户都得在对话里看见自己说过的话。
     const files = attachments?.files
     if (!agentStreamStore.pushUserSteer(sessionId, messageText, steerId, images, files)) {
-      pushUser(
-        images?.length ? buildMultimodalContent(messageText, [...images]) : messageText,
-        undefined,
-        files
-      )
+      // 写回这一轮所属的那条对话，不是此刻页面上开着的那条（等的时候可能切走了）
+      if (ownerChatSid === sid.value) {
+        pushUser(
+          images?.length ? buildMultimodalContent(messageText, [...images]) : messageText,
+          undefined,
+          files
+        )
+      } else {
+        chatMsgStore.pushUser(
+          ownerChatSid,
+          images?.length ? buildMultimodalContent(messageText, [...images]) : messageText,
+          undefined,
+          files
+        )
+      }
       // 内核已经收下了，只是界面上没有正在跑的流可以插进去 —— 对调用方来说
       // 这句话**已经送出去**了，不能当失败让它再发一遍
       return true

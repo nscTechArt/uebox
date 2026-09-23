@@ -692,8 +692,11 @@ async function smartName(): Promise<void> {
   if (!sessionId) return
 
   closeRenameModal()
-  const outcome = await retitleSession(sessionId, chatMsgStore.getMessages(sessionId), (title) =>
-    chatStore.updateTitle(sessionId, title)
+  const outcome = await retitleSession(
+    sessionId,
+    chatMsgStore.getMessages(sessionId),
+    (title) => chatStore.updateTitle(sessionId, title),
+    () => chatStore.sessionById(sessionId)?.title
   )
   if (outcome === 'empty') message.warning(t('chatSidebar.smartNameEmpty'))
   if (outcome === 'failed') message.error(t('chatSidebar.smartNameFailed'))

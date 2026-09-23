@@ -24,6 +24,15 @@ describe('mergeTurnContext', () => {
     expect((merged as string).endsWith('视频里有什么')).toBe(true)
   })
 
+  // 主进程只在消息开头认 /goal；附件块垫在前面，带着表格发 /goal 就不进目标模式了
+  it('/goal 命令留在开头，附件跟在后面', () => {
+    const merged = mergeTurnContext('/goal 把关卡灯光调好', ['### 文件：lights.xlsx\n\n…'])
+
+    expect(typeof merged).toBe('string')
+    expect((merged as string).startsWith('/goal 把关卡灯光调好')).toBe(true)
+    expect(merged).toContain('lights.xlsx')
+  })
+
   it('用户只拖了附件没打字，也照样带过去', () => {
     expect(mergeTurnContext('', ['附件说明'])).toContain('附件说明')
   })

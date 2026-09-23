@@ -682,6 +682,45 @@ describe('插件管理', () => {
     expect(changes.map((change) => change.toolName)).toEqual(['ue_fixup_redirectors'])
   })
 
+  // 材质清理不写 dry_run 就是预演（riskFor: dry_run === false 才 destructive），
+  // 渲染层单看参数认不出来。主进程挂在调用上的风险优先，序号照样占上
+  it('主进程按参数算出 safe 的调用不进台账，也不打乱后面的结果配对', () => {
+    const withRisk = (item: AgentProcessItem, risk: string): AgentProcessItem => ({
+      ...item,
+      data: { ...(item.data as object), risk }
+    })
+    const changes = summarizeChanges(
+      [
+        withRisk(call('material_delete_unused_nodes', { material: '/Game/M' }), 'safe'),
+        result('material_delete_unused_nodes'),
+        withRisk(
+          call('material_delete_unused_nodes', { material: '/Game/M', dry_run: false }),
+          'destructive'
+        ),
+        result('material_delete_unused_nodes', true)
+      ],
+      { material_delete_unused_nodes: 'destructive' }
+    )
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({ risk: 'destructive', failed: true })
+  })
+
+  it('预演成功、真删失败：真删那一行配的是它自己的结果，不是预演的', () => {
+    const changes = summarizeChanges(
+      [
+        call('ue_content_delete', { paths: ['/Game/Old/'], dry_run: true }),
+        result('ue_content_delete'),
+        call('ue_content_delete', { paths: ['/Game/Old/'] }),
+        result('ue_content_delete', true)
+      ],
+      { ue_content_delete: 'destructive' }
+    )
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0].failed).toBe(true)
+  })
+
   it('启用和停用分得清：行上写哪个插件、净结果是启了还是停了', () => {
     const groups = groupChanges([
       {

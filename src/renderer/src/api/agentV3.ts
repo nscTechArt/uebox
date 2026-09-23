@@ -17,7 +17,14 @@ export type AgentV3Event =
   | { type: 'start' }
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
-  | { type: 'tool-call'; toolCallId: string; toolName: string; args: unknown }
+  | {
+      type: 'tool-call'
+      toolCallId: string
+      toolName: string
+      args: unknown
+      /** 主进程按这次参数算的风险（预演、只读查询是 safe）。老主进程不带 */
+      risk?: 'safe' | 'mutating' | 'destructive'
+    }
   | { type: 'tool-progress'; toolCallId: string; toolName: string; partial: unknown }
   | {
       type: 'tool-result'

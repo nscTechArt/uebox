@@ -11,6 +11,8 @@ export interface ToolCallEvent {
   toolCallId?: string
   sessionId?: string
   messages?: unknown[]
+  /** 主进程按这次参数算的风险，见 changeSummary.summarizeChanges */
+  risk?: string
 }
 
 export interface ToolResultEvent {
@@ -183,7 +185,8 @@ export function normalizeToolCalls(data: ToolCallEvent): Array<any> {
         function: {
           name: data.toolName,
           arguments: JSON.stringify(data.args ?? {})
-        }
+        },
+        ...(data.risk ? { risk: data.risk } : {})
       }
     ]
   }

@@ -516,12 +516,18 @@ export function createAgentCompletionHandlers(
       // 只走 else 分支 —— 上面那条路本来就在给一条还没名字的会话取名，两边一起
       // 发就是同一轮对话打两次模型，还会互相盖。不 await：标题晚几秒到没关系，
       // 这一轮的收尾不该等它。
-      void retitleSession(targetChatSid, chatMsgStore.getMessages(targetChatSid), (title) => {
-        chatStore.updateTitle(targetChatSid, title)
-        if (canRetitleTab) {
-          tabsStore.updateTabTitleByPath(retitleTabPath, title)
-        }
-      })
+      void retitleSession(
+        targetChatSid,
+        chatMsgStore.getMessages(targetChatSid),
+        (title) => {
+          chatStore.updateTitle(targetChatSid, title)
+          if (canRetitleTab) {
+            tabsStore.updateTabTitleByPath(retitleTabPath, title)
+          }
+        },
+        // 后台起名要几秒，这期间用户手动改了名就别盖掉
+        () => chatStore.sessionById(targetChatSid)?.title
+      )
     }
 
     return displayText

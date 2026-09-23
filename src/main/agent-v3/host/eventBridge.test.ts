@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
 
-import { createProjectionState, projectEvent, type AgentV3Event } from './eventBridge'
+import type { WebContents } from 'electron'
+import {
+  createEventBridge,
+  createProjectionState,
+  projectEvent,
+  type AgentV3Event
+} from './eventBridge'
 
 const SID = 'session-1'
 const project = (event: unknown): AgentV3Event[] => projectEvent(event as AgentEvent, SID)
@@ -545,5 +551,35 @@ describe('projectEvent 流式增量', () => {
         state
       )
     ).toEqual([])
+  })
+})
+
+describe('createEventBridge', () => {
+  // 渲染层的改动台账只有按工具名的静态风险表，看不见 riskFor；
+  // 这次调用按参数算的风险要跟着 tool-call 一起下去
+  it('tool-call 带上这次参数算出来的风险', () => {
+    const sent: Array<{ channel: string; payload: unknown }> = []
+    const sender = {
+      id: 1,
+      isDestroyed: () => false,
+      send: (channel: string, payload: unknown) => sent.push({ channel, payload })
+    } as unknown as WebContents
+    const bridge = createEventBridge(sender, 's1', {
+      riskOf: (_name, args) => ((args as { dry_run?: boolean }).dry_run ? 'safe' : 'destructive')
+    })
+
+    bridge({
+      type: 'tool_execution_start',
+      toolCallId: 't1',
+      toolName: 'ue_content_delete',
+      args: { dry_run: true }
+    } as AgentEvent)
+
+    expect(sent).toEqual([
+      {
+        channel: 'agent-v3:tool-call',
+        payload: expect.objectContaining({ toolCallId: 't1', risk: 'safe' })
+      }
+    ])
   })
 })

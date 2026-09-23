@@ -727,7 +727,7 @@
 import AppModal from '@renderer/components/AppModal.vue'
 import AppTooltip from '@renderer/components/AppTooltip.vue'
 import AppButton from '@renderer/components/AppButton.vue'
-import { ref, computed, watch, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onActivated, nextTick, toRaw } from 'vue'
 import { useRouter } from 'vue-router'
 import { agentV3API, type AgentV3SkillSummary } from '@/api/agentV3'
 import assetNoteAPI from '@renderer/api/assetNote'
@@ -901,7 +901,16 @@ const emit = defineEmits<{
    * 图跟着一起走。**不会为它换模型**：这一轮用哪个模型在跑起来那一刻就定了，
    * 中途换等于把整段 prompt cache 作废。当前模型看不了图时它会照实说看不到。
    */
-  (e: 'steer', payload: { text: string; images: string[]; attachments?: SteerAttachments }): void
+  (
+    e: 'steer',
+    payload: {
+      text: string
+      images: string[]
+      attachments?: SteerAttachments
+      /** 插话没成时调：把这次摘走的字和附件放回输入框 */
+      restore: () => void
+    }
+  ): void
   /** 取消一条还排着的跟进消息 */
   (e: 'cancel-queued', id: string): void
   /** 排着的这条别等了，现在就插进正在跑的那一轮 */
@@ -2204,7 +2213,11 @@ async function addExcelFiles(files: File[]): Promise<void> {
       parsing: true
     }
     pendingExcelFiles.value.push(pending)
-    const currentIndex = pendingExcelFiles.value.length - 1
+    // 解析是异步的，这期间列表可能被插话、删除改掉 —— 按文件认回自己那一格，不按下标
+    const setPending = (next: PendingExcelFile): void => {
+      const index = pendingExcelFiles.value.findIndex((item) => toRaw(item.file) === file)
+      if (index >= 0) pendingExcelFiles.value[index] = next
+    }
 
     // 异步解析
     try {
@@ -2217,30 +2230,30 @@ async function addExcelFiles(files: File[]): Promise<void> {
       })
 
       if (result.success) {
-        pendingExcelFiles.value[currentIndex] = {
+        setPending({
           ...pending,
           content: result.content,
           rowCount: result.rowCount,
           parsing: false
-        }
+        })
         // message.success(`已解析 ${file.name}（${result.rowCount} 行）`)
       } else {
-        pendingExcelFiles.value[currentIndex] = {
+        setPending({
           ...pending,
           parsing: false,
           error: result.error || '解析失败'
-        }
+        })
         message.error(
           result.error || t('assistantInputComposer.toast.parseFailed', { name: file.name })
         )
       }
     } catch (error) {
       console.error('[InputComposer] Excel 解析失败:', error)
-      pendingExcelFiles.value[currentIndex] = {
+      setPending({
         ...pending,
         parsing: false,
         error: error instanceof Error ? error.message : '解析失败'
-      }
+      })
       message.error(t('assistantInputComposer.toast.parseFailed', { name: file.name }))
     }
   }
@@ -2277,7 +2290,11 @@ async function addDocFiles(files: File[]): Promise<void> {
       parsing: true
     }
     pendingDocFiles.value.push(pending)
-    const currentIndex = pendingDocFiles.value.length - 1
+    // 解析是异步的，这期间列表可能被插话、删除改掉 —— 按文件认回自己那一格，不按下标
+    const setPending = (next: PendingDocFile): void => {
+      const index = pendingDocFiles.value.findIndex((item) => toRaw(item.file) === file)
+      if (index >= 0) pendingDocFiles.value[index] = next
+    }
 
     try {
       // 优先走绝对路径：视频要交给 ffmpeg，一段 100MB 的片子没必要先塞进
@@ -2292,34 +2309,34 @@ async function addDocFiles(files: File[]): Promise<void> {
 
       if (filePath && mediaKind) {
         // 音视频不在这里看：路径随消息交给 agent，它带着用户的问题自己去看
-        pendingDocFiles.value[currentIndex] = {
+        setPending({
           ...pending,
           filePath,
           parsing: false,
           deferredMedia: mediaKind
-        }
+        })
         void startMediaUpload(filePath, file.name)
       } else if (filePath) {
         // 进度回调按这条路径认领对应的那一格，所以要先记下来再发起解析
-        pendingDocFiles.value[currentIndex] = { ...pending, filePath }
+        setPending({ ...pending, filePath })
         const result = await window.api.attachment.ingest(filePath)
 
         if (result.success) {
-          pendingDocFiles.value[currentIndex] = {
+          setPending({
             ...pending,
             parsing: false,
             ...(result.text ? { content: result.text } : {}),
             ...(result.images ? { extraImages: result.images } : {})
-          }
+          })
           if (result.framesFallback) {
             message.info(t('assistantInputComposer.toast.videoFramesFallback', { name: file.name }))
           }
         } else {
-          pendingDocFiles.value[currentIndex] = {
+          setPending({
             ...pending,
             parsing: false,
             error: result.error || '解析失败'
-          }
+          })
           message.error(
             result.error || t('assistantInputComposer.toast.parseFailed', { name: file.name })
           )
@@ -2327,11 +2344,11 @@ async function addDocFiles(files: File[]): Promise<void> {
       } else if (CHAT_VIDEO_EXTENSIONS.has(ext) || CHAT_AUDIO_EXTENSIONS.has(ext)) {
         // 没有路径的视频没法交给 ffmpeg。与其把几十 MB 搬过 IPC 再失败，
         // 不如直接说清楚：请从本地文件选择，而不是从网页里拖
-        pendingDocFiles.value[currentIndex] = {
+        setPending({
           ...pending,
           parsing: false,
           error: t('assistantInputComposer.toast.videoNeedsLocalFile')
-        }
+        })
         message.error(t('assistantInputComposer.toast.videoNeedsLocalFile'))
       } else {
         const arrayBuffer = await file.arrayBuffer()
@@ -2342,17 +2359,17 @@ async function addDocFiles(files: File[]): Promise<void> {
         })
 
         if (result.success) {
-          pendingDocFiles.value[currentIndex] = {
+          setPending({
             ...pending,
             content: `### 文件：${file.name}\n\n${result.content}`,
             parsing: false
-          }
+          })
         } else {
-          pendingDocFiles.value[currentIndex] = {
+          setPending({
             ...pending,
             parsing: false,
             error: result.error || '解析失败'
-          }
+          })
           message.error(
             result.error || t('assistantInputComposer.toast.parseFailed', { name: file.name })
           )
@@ -2360,11 +2377,11 @@ async function addDocFiles(files: File[]): Promise<void> {
       }
     } catch (error) {
       console.error('[InputComposer] 文档处理失败:', error)
-      pendingDocFiles.value[currentIndex] = {
+      setPending({
         ...pending,
         parsing: false,
         error: error instanceof Error ? error.message : '处理失败'
-      }
+      })
       message.error(t('assistantInputComposer.toast.processFailed', { name: file.name }))
     }
   }
@@ -2748,9 +2765,22 @@ function handleSteer(): void {
   // 只带附件没打字也照发，那句说明由 `steerAgent` 补
   if (!typed && images.length === 0 && files.length === 0) return
 
+  /*
+   * 为了不卡手，发出去这一刻先把它们从输入框摘掉；插话没成（这一轮刚好收尾、
+   * 工程对不上……）时由接收方调这个放回来 —— 不然用户打的字和拖进来的附件就没了。
+   * 放回的是**这次摘走的那几样**：这期间用户又打了字、又拖了东西的，一样不动。
+   */
+  const restore = (): void => {
+    if (!content.value.trim()) content.value = typed
+    if (ready.length > 0) replacePendingImages([...ready, ...pendingImages.value])
+    if (readyExcel.length > 0) pendingExcelFiles.value = [...readyExcel, ...pendingExcelFiles.value]
+    if (readyDocs.length > 0) pendingDocFiles.value = [...readyDocs, ...pendingDocFiles.value]
+  }
+
   emit('steer', {
     text: typed,
     images,
+    restore,
     ...(files.length > 0
       ? {
           attachments: {

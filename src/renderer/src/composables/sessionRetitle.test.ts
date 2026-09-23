@@ -102,6 +102,25 @@ describe('retitleSession', () => {
     expect(applyTitle).not.toHaveBeenCalled()
   })
 
+  // 后台起名要几秒；这期间用户手动改了名，晚到的模型名字不能把它盖掉
+  it('起名期间标题被改过就不落', async () => {
+    let resolveTitle: (value: string) => void = () => {}
+    generateSessionTitleFromExcerpt.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveTitle = resolve
+      })
+    )
+    const applyTitle = vi.fn()
+    let current = '旧名字'
+
+    const pending = retitleSession('s1', round, applyTitle, () => current)
+    current = '用户刚改的名字'
+    resolveTitle('模型起的名字')
+
+    expect(await pending).toBe('skipped')
+    expect(applyTitle).not.toHaveBeenCalled()
+  })
+
   it('同一条会话在途时不重复发起', async () => {
     let resolveTitle: (value: string) => void = () => {}
     generateSessionTitleFromExcerpt.mockReturnValue(

@@ -632,9 +632,18 @@ export function extractChangeOutcomes(toolName: string, result: unknown): Change
   return outcomes.length > MAX_OUTCOME_ROWS ? [] : outcomes
 }
 
-function readToolCall(item: AgentProcessItem): { name: string; args: unknown } | null {
+const RISKS: ReadonlySet<string> = new Set<ToolRisk>(['safe', 'mutating', 'destructive'])
+
+function readToolCall(
+  item: AgentProcessItem
+): { name: string; args: unknown; risk?: ToolRisk } | null {
   const data = item.data as
-    | { function?: { name?: unknown; arguments?: unknown }; name?: unknown; args?: unknown }
+    | {
+        function?: { name?: unknown; arguments?: unknown }
+        name?: unknown
+        args?: unknown
+        risk?: unknown
+      }
     | undefined
   if (!data) return null
 
@@ -658,7 +667,9 @@ function readToolCall(item: AgentProcessItem): { name: string; args: unknown } |
     args = rawArgs
   }
 
-  return { name, args }
+  const risk =
+    typeof data.risk === 'string' && RISKS.has(data.risk) ? (data.risk as ToolRisk) : undefined
+  return risk ? { name, args, risk } : { name, args }
 }
 
 /**
@@ -701,8 +712,19 @@ export function summarizeChanges(
     const call = readToolCall(item)
     if (!call) continue
 
-    const risk = riskTable[call.name]
-    if (!risk || risk === 'safe') continue
+    const declared = riskTable[call.name]
+    if (!declared || declared === 'safe') continue
+
+    // 结果按「同名工具第几次调用」配对，所以序号要在下面几处跳过**之前**占上：
+    // 跳过的调用也有自己那条结果，不占位的话后面每一次真调用都会拿到前一次的结果
+    // （预演成功、真删失败，台账上就成了「删成了」）
+    const index = seenByTool.get(call.name) ?? 0
+    seenByTool.set(call.name, index + 1)
+
+    // 主进程按这次参数算过的风险优先（`riskFor`：预演、rollback 的 preview、
+    // 材质清理默认的 dry_run 都是 safe）。它只降不升，老记录里没有就退回按工具名的定级
+    const risk = call.risk ?? declared
+    if (risk === 'safe') continue
 
     const detail = extractChangeDetail(call.name, call.args)
 
@@ -712,9 +734,6 @@ export function summarizeChanges(
     if (call.name === 'ue_manage_plugin' && detail !== 'Enable' && detail !== 'Disable') continue
     // 同理：dry_run=true 的预演（清理重定向器、删资产、搬迁……）什么都没改
     if ((call.args as { dry_run?: unknown } | undefined)?.dry_run === true) continue
-
-    const index = seenByTool.get(call.name) ?? 0
-    seenByTool.set(call.name, index + 1)
 
     const paired = resultsByTool.get(call.name)?.[index]
     const failed = paired?.isError === true
