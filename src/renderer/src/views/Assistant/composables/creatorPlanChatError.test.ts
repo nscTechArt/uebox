@@ -164,7 +164,7 @@ describe('handleAgentError 遇到套餐错误', () => {
       planError: 'quota_exhausted'
     })
     const bubble = lastAssistant()
-    expect(String(bubble.content)).toContain('这项额度本周期用完了')
+    expect(String(bubble.content)).toContain('本月额度用完了')
     expect(bubble.actionButtons).toEqual([
       { label: '管理订阅', action: CREATOR_PLAN_MANAGE_ACTION }
     ])
@@ -208,7 +208,7 @@ describe('handleAgentError 遇到套餐错误', () => {
       statusCode: 402,
       code: 'quota_exhausted'
     })
-    expect(String(lastAssistant().content)).not.toContain('额度本周期用完')
+    expect(String(lastAssistant().content)).not.toContain('本月额度用完')
     expect(lastAssistant().actionButtons).toBeUndefined()
   })
 })

@@ -42,11 +42,7 @@ const connected: CreatorPlanState = {
     quotaResetsAt: '2026-10-01T00:00:00Z',
     cooldownEndsAt: null,
     manageUrl: 'https://plan.example/account/billing',
-    quotas: [
-      { key: 'text_tokens', limit: 1_000_000, used: 1234 },
-      { key: 'images', limit: 1500, used: 212 },
-      { key: 'future_units', limit: 9, used: 1 }
-    ]
+    quotas: [{ key: 'credits', limit: 3_000_000_000, used: 690_000_000 }]
   }
 }
 
@@ -108,15 +104,17 @@ describe('CreatorPlanCard', () => {
     expect(wrapper.text()).not.toContain('断开')
   })
 
-  it('已连接：档位、剩余百分比，以及管理 / 重新导入 / 断开', async () => {
+  it('已连接：档位、已用百分比和重置日期（不写 Credits 数字），以及管理 / 重新导入 / 断开', async () => {
     stubApi({ state: vi.fn(async () => ({ ok: true, data: connected })) })
     const wrapper = mount(CreatorPlanCard, { global: { stubs } })
     await flushPromises()
     const text = wrapper.text()
     expect(text).toContain('Pro · 月付')
     expect(text).toContain('生效中')
-    expect(text).toContain('剩余 100%')
-    expect(text).not.toContain('生图')
+    expect(wrapper.find('.plan-used').text()).toMatch(/^本月已用 23% · .*2026.*重置$/)
+    expect(wrapper.find('[role="progressbar"]').attributes('aria-valuenow')).toBe('23')
+    expect(text).not.toMatch(/690|3,000|Credits/)
+    expect(wrapper.find('.plan-daily-done').exists()).toBe(false)
     for (const label of ['管理订阅', '重新导入', '断开']) expect(text).toContain(label)
   })
 
@@ -162,25 +160,23 @@ describe('CreatorPlanCard', () => {
     await flushPromises()
     const alert = wrapper.find('.plan-alert')
     expect(alert.exists()).toBe(true)
-    expect(alert.text()).toContain('本期额度已压低')
-    expect(alert.text()).toContain('对话只剩 20%，其他暂停')
+    expect(alert.text()).toContain('本期只给 20% 的额度')
     await alert.find('button').trigger('click')
     expect(openExternal).toHaveBeenCalledWith('https://plan.example/account/billing')
   })
 
-  it('剩余按对话额度算；今天的用完了补一句什么时候恢复', async () => {
+  it('今天的每日上限用完了：补一句什么时候恢复（本机时间）', async () => {
     const tomorrow = new Date(Date.now() + 24 * 60 * 60_000).toISOString()
     const data: CreatorPlanState = {
       ...connected,
       summary: {
         ...connected.summary!,
         quotas: [
-          { key: 'images', limit: 10, used: 10 },
           {
-            key: 'text_tokens',
-            limit: 3_250_000,
-            used: 812_500,
-            daily: { limit: 928_571, used: 928_571, resetsAt: tomorrow }
+            key: 'credits',
+            limit: 1_000_000_000,
+            used: 250_000_000,
+            daily: { limit: 200_000_000, used: 200_000_000, resetsAt: tomorrow }
           }
         ]
       }
@@ -188,20 +184,29 @@ describe('CreatorPlanCard', () => {
     stubApi({ state: vi.fn(async () => ({ ok: true, data })) })
     const wrapper = mount(CreatorPlanCard, { global: { stubs } })
     await flushPromises()
-    expect(wrapper.find('.plan-remaining').text()).toMatch(
-      /^剩余 75% · 今天的用完了，明天 \d{2}:\d{2} 恢复$/
+    expect(wrapper.find('.plan-used').text()).toMatch(/^本月已用 25%/)
+    expect(wrapper.find('.plan-daily-done').text()).toMatch(
+      /^今日额度已用完，明天 \d{2}:\d{2} 恢复$/
     )
   })
 
-  it('没给对话额度：拿第一项算；用超了算 0%', async () => {
+  it('旧服务端还发分项额度：只显示一个总百分比，取用得最多的那项；用超了算 100%', async () => {
     const data: CreatorPlanState = {
       ...connected,
-      summary: { ...connected.summary!, quotas: [{ key: 'images', limit: 10, used: 12 }] }
+      summary: {
+        ...connected.summary!,
+        quotaResetsAt: null,
+        quotas: [
+          { key: 'text_tokens', limit: 1000, used: 100 },
+          { key: 'images', limit: 10, used: 12 }
+        ]
+      }
     }
     stubApi({ state: vi.fn(async () => ({ ok: true, data })) })
     const wrapper = mount(CreatorPlanCard, { global: { stubs } })
     await flushPromises()
-    expect(wrapper.find('.plan-remaining').text()).toBe('剩余 0%')
+    expect(wrapper.find('.plan-used').text()).toBe('本月已用 100%')
+    expect(wrapper.findAll('[role="progressbar"]')).toHaveLength(1)
   })
 
   it('生效中不显示续费提醒', async () => {

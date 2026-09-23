@@ -3,7 +3,7 @@
  *
  * 规则：
  * - 按角色类别（`ProviderKind`）一类一个来源，id 都以 `creator-plan` 开头，共用一把密钥
- *   （`PLAN_KEY_ID`）。界面上它们合成一张「创作者 Token Plan」卡片。
+ *   （`PLAN_KEY_ID`）。界面上它们合成一张「UEBox Token Plan」卡片。
  * - 套餐绑定的角色带 `source: 'plan'`。用户之后手动改了哪个角色，那个角色就自动
  *   脱离套餐（渲染层改绑定时不带 source），重新导入也不会覆盖它。
  * - 导入时默认只接管「没绑的」和「本来就由套餐管着的」角色；用户手动配过的，
@@ -390,17 +390,71 @@ export function removePlan(
     ModelRole,
     NonNullable<RoleBindings[ModelRole]>
   ][]) {
-    if (binding.source !== 'plan' && !isPlanProvider(binding.providerId)) {
+    if (!isPlanBinding(binding)) {
       roles[role] = binding
       continue
     }
-    const original = originals[role]
-    const provider = original && providers.find((p) => p.id === original.providerId)
-    if (original && provider?.models.some((m) => m.id === original.modelId)) {
-      roles[role] = { providerId: original.providerId, modelId: original.modelId }
-    }
+    const restored = restoredBinding(providers, originals[role])
+    if (restored) roles[role] = restored
   }
   return { ...settings, providers, roles }
+}
+
+/** 接管前的原绑定；它指向的来源或模型已经没了就回 null（置为未设置） */
+function restoredBinding(
+  providers: readonly ProviderConfig[],
+  original: ModelBinding | null | undefined
+): ModelBinding | null {
+  const provider = original && providers.find((p) => p.id === original.providerId)
+  return original && provider?.models.some((m) => m.id === original.modelId)
+    ? { providerId: original.providerId, modelId: original.modelId }
+    : null
+}
+
+const isPlanBinding = (binding: ModelBinding): boolean =>
+  binding.source === 'plan' || isPlanProvider(binding.providerId)
+
+/** 订阅还在（没取消、没失效）：这时某个角色为 null，才说明是套餐不再给它 */
+const LIVE_STATUSES: readonly string[] = ['active', 'trialing', 'past_due']
+
+/**
+ * 清单刷新时，套餐明确不再给的角色（`roles.<角色>` 为 null）还给用户：
+ * 还原成导入前的原绑定（和断开同一套），没有原绑定或原来源已删就置为未设置；
+ * 这一类角色全没了的套餐来源一并删掉，不留一个一调就 403 的来源。
+ *
+ * 例：网页检索不再对外提供（四档都是 null）、Lite 不含语音识别。
+ *
+ * 只在订阅生效、清单里还有别的角色时做：订阅失效时 roles 全是 null，那不是「不给这个角色」，
+ * 跟着删的话连接也就没了（见 refreshPlanModels）。字段缺失（不是 null）不算，按服务端没说处理。
+ * 没变化时原样返回同一个对象。
+ */
+export function releaseDroppedRoles(
+  settings: AiProviderSettings,
+  manifest: CreatorPlanManifest,
+  originals: OriginalBindings = {}
+): AiProviderSettings {
+  if (!LIVE_STATUSES.includes(manifest.plan?.status)) return settings
+  const specs = planRoleSpecs(manifest)
+  if (Object.keys(specs).length === 0) return settings
+
+  const roles: RoleBindings = { ...settings.roles }
+  for (const role of MODEL_ROLES) {
+    const binding = roles[role]
+    if (!binding || !isPlanBinding(binding) || manifest.roles?.[role] !== null) continue
+    const restored = restoredBinding(settings.providers, originals[role])
+    if (restored) roles[role] = restored
+    else delete roles[role]
+  }
+  // 这一类清单里一个角色都没有、也没有角色还绑着它的套餐来源，才删
+  const liveKinds = new Set((Object.keys(specs) as ModelRole[]).map((role) => ROLE_KIND[role]))
+  const bound = new Set(Object.values(roles).map((binding) => binding?.providerId))
+  const providers = settings.providers.filter(
+    (p) => !isPlanProvider(p.id) || liveKinds.has(p.kind) || bound.has(p.id)
+  )
+  const changed =
+    providers.length !== settings.providers.length ||
+    MODEL_ROLES.some((role) => roles[role] !== settings.roles[role])
+  return changed ? { ...settings, providers, roles } : settings
 }
 
 /**
@@ -408,6 +462,7 @@ export function removePlan(
  *
  * 只改已有的模型，不增不删：增删角色是用户在「重新导入」里做的决定；
  * 订阅失效时清单的 roles 全是 null，这里要是跟着删，来源一没，连接也就没了。
+ * 唯一的口子是订阅生效、套餐明确不再给某个角色，见 releaseDroppedRoles。
  * 没变化时原样返回同一个对象，调用方据此跳过写盘。
  */
 export function refreshPlanModels(

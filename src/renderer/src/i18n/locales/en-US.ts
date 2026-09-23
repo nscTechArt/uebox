@@ -756,7 +756,7 @@ export default {
       waiting: 'This dialog closes automatically once you are done…'
     },
     creatorPlan: {
-      title: 'Creator Token Plan',
+      title: 'UEBox Token Plan',
       desc: 'One subscription covers several roles. Quotas reset monthly.',
       connect: 'Connect',
       connecting: 'Waiting for browser…',
@@ -775,14 +775,16 @@ export default {
         canceled: 'Canceled',
         none: 'No subscription'
       },
-      remaining: '{percent}% left',
-      quotaDailyDone: "Today's is used up. Back {time}",
+      used: '{percent}% used this month',
+      resetsOn: 'Resets {date}',
+      usageLabel: 'Monthly usage',
+      dailyDone: "Today's usage is maxed out. Back {time}",
       time: {
         today: 'today at {time}',
         tomorrow: 'tomorrow at {time}'
       },
       pastDue:
-        "Renewal payment failed, so this period's quota is cut: chat keeps 20%, everything else is paused. Update your payment method to restore it right away.",
+        'Renewal payment failed, so this period only gets 20% of the usual usage. Update your payment method to restore it right away.',
       pastDueAction: 'Update payment method',
       deprecated: '{model} used by {role} is being retired.',
       deprecatedUntil: '{model} used by {role} will be retired on {date}.',
@@ -790,7 +792,7 @@ export default {
       deprecatedReindex: 'Rebuild the knowledge index after switching.',
       revokeFailed: "Couldn't revoke this key on the server. Revoke it on the website.",
       revokeOpen: 'Revoke on the website',
-      managedBadge: 'Managed by Creator Token Plan',
+      managedBadge: 'Managed by UEBox Token Plan',
       manage: 'Manage subscription',
       reimport: 'Re-import',
       disconnect: 'Disconnect',
@@ -809,7 +811,7 @@ export default {
         label: 'Object storage',
         spec: '{quota} · kept {days} days after last use',
         off: 'Now: off',
-        provider: 'Provided by Creator Token Plan. No keys needed.',
+        provider: 'Provided by UEBox Token Plan. No keys needed.',
         usage: '{used} of {quota} used',
         retention: 'kept {days} days after last use',
         switchBack:
@@ -820,32 +822,32 @@ export default {
         denied: 'Denied in the browser',
         expired: 'The code expired. Connect again',
         unauthorized: 'Authorization expired. Connect again',
-        network: "Can't reach the Creator Plan service",
-        networkDetail: "Can't reach the Creator Plan service: {error}",
-        bad_response: 'The Creator Plan service sent an unexpected response',
+        network: "Can't reach the UEBox Token Plan service",
+        networkDetail: "Can't reach the UEBox Token Plan service: {error}",
+        bad_response: 'The UEBox Token Plan service sent an unexpected response',
         not_connected: 'Not connected yet',
         encryption_unavailable: "Can't store the key securely",
         unknown: 'Something went wrong: {error}'
       },
       chat: {
         subscription_inactive: {
-          title: 'No active Creator Token Plan subscription',
+          title: 'No active UEBox Token Plan subscription',
           desc: 'The subscription is off, or renewal failed past the grace period. Sort it out, then send again.'
         },
         quota_exhausted: {
-          title: 'This quota is used up for the period',
-          desc: 'Upgrade the plan, or wait for the quota to reset.'
+          title: "This month's usage is maxed out",
+          desc: 'Upgrade the plan, or wait for it to reset.'
         },
         daily_limit_reached: {
           title: "Today's quota is used up",
-          desc: "It comes back {time}. Upgrade the plan if you can't wait."
+          desc: "It comes back {time}. If a single request is bigger than the daily cap, tomorrow won't help: use smaller settings. Upgrade the plan if you can't wait."
         },
         role_not_in_plan: {
           title: "Your plan doesn't include this role",
           desc: 'Upgrade the plan, or pick another source for this role in Settings → Models.'
         },
         unauthorized: {
-          title: 'Creator Token Plan authorization expired',
+          title: 'UEBox Token Plan authorization expired',
           desc: 'The key was revoked or deleted. Reconnect in Settings → Models.'
         },
         manage: 'Manage subscription',

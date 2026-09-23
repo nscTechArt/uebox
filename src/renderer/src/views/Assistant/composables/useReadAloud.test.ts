@@ -410,7 +410,7 @@ describe('回复流式朗读', () => {
     const { reading } = reader()
     vi.mocked(speechAPI.synthesize).mockRejectedValueOnce(new Error('TTS_PLAN_QUOTA_EXHAUSTED'))
     await reading.toggle('正文')
-    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('这项额度本周期用完了'))
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('本月额度用完了'))
     expect(reading.active.value).toBe(false)
     logError.mockRestore()
   })
