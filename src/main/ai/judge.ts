@@ -50,6 +50,8 @@
  * @see https://docs.typesafe.ai/model-jaggedness/jev-1.13
  */
 
+import { isPlanProvider } from '../../shared/creatorPlan'
+import { planCallError } from './creatorPlan/callError'
 import { resolveApiKey } from './credentials'
 import { readSettings } from './store'
 import type { ProviderConfig } from './types'
@@ -122,7 +124,18 @@ export interface ChoiceAnswer {
 
 export interface ScoreAnswer {
   type: 'score'
+  /**
+   * **期望档位**（小数）：Σ 档位下标 × 概率。TypeSafe 原样回的就是它。
+   *
+   * 创作者 Token Plan 的 `score.value` 不是它 —— 那是**概率最大的档位下标**（整数），
+   * 放在 `level` 上；这里按它回的 `probabilities` 数组重新算出期望值，两家的阈值才是
+   * 同一个意思。例：分布 [0.45, 0.10, 0.45] 期望 1.0、`level` 是 0，
+   * 「至少第 2 档」写 `score >= 1.5` 和写 `level >= 2` 结论不同，按后果挑一个。
+   */
   score: number
+  /** 概率最大的档位下标（从 0 开始）。拿不到分布时没有 */
+  level?: number
+  /** 档位下标（字符串）→ 概率 */
   probabilities: Record<string, number>
   confidence: number
 }
@@ -165,6 +178,107 @@ function extractErrorMessage(body: SystemOneResponse | null, status: number): st
 /** 拼出完整端点。baseUrl 末尾有没有斜杠都得对 */
 export function systemOneUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${SYSTEM_ONE_PATH}`
+}
+
+/**
+ * 判定请求的地址。创作者 Token Plan 是 `POST /judge`（协议 09-judge），其余按 TypeSafe 的
+ * `/systemone`。按来源 id 分：套餐来源 id 固定以 `creator-plan` 开头（见 creatorPlan/apply.ts）。
+ */
+export function judgeUrl(provider: Pick<ProviderConfig, 'id' | 'baseUrl'>): string {
+  return isPlanProvider(provider.id)
+    ? `${provider.baseUrl.replace(/\/+$/, '')}/judge`
+    : systemOneUrl(provider.baseUrl)
+}
+
+const asText = (value: unknown): string =>
+  typeof value === 'string' ? value : JSON.stringify(value)
+
+/**
+ * 我们的问题 → 套餐协议的问题。两处不同：是非题叫 `boolean` 不叫 `noul`；
+ * `instructions` 只收字符串（结构化的原样序列化成 JSON 文本）。
+ */
+export function toPlanQuestions(
+  questions: Record<string, JudgeQuestion>
+): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(questions).map(([id, question]) => [
+      id,
+      {
+        ...question,
+        type: question.type === 'noul' ? 'boolean' : question.type,
+        instructions: asText(question.instructions)
+      }
+    ])
+  )
+}
+
+/** 最大值的下标。空数组回 undefined */
+function argmax(values: number[]): number | undefined {
+  let best: number | undefined
+  values.forEach((value, index) => {
+    if (best === undefined || value > values[best]) best = index
+  })
+  return best
+}
+
+/**
+ * 套餐协议的答案 → 我们的形状。判不了的问题（值为 null）直接不出现 ——
+ * 调用方读到 undefined 本来就走「没有判定」那条路。
+ *
+ * 分数题见 ScoreAnswer 的注释：协议的 `value` 是最可能档位的下标，放到 `level`；
+ * `score` 由分布重新算成期望值，与 TypeSafe 那边同义。阈值按期望值写的调用方不用改。
+ */
+export function fromPlanAnswers(raw: Record<string, unknown>): JudgeAnswers {
+  const out: JudgeAnswers = {}
+  for (const [id, value] of Object.entries(raw)) {
+    const answer = value as Record<string, unknown> | null
+    if (!answer || typeof answer !== 'object') continue
+    const confidence = typeof answer.confidence === 'number' ? answer.confidence : 0
+    if (answer.type === 'boolean') {
+      // `probability` 是答「是」的概率，与 noul 同义
+      const noul =
+        typeof answer.probability === 'number' ? answer.probability : answer.value ? 1 : 0
+      out[id] = { type: 'noul', noul }
+    } else if (answer.type === 'choice' && typeof answer.value === 'string') {
+      out[id] = {
+        type: 'choice',
+        choice: answer.value,
+        probabilities: (answer.probabilities as Record<string, number>) ?? {},
+        confidence
+      }
+    } else if (answer.type === 'score' && typeof answer.value === 'number') {
+      const distribution = Array.isArray(answer.probabilities)
+        ? (answer.probabilities as unknown[]).map((p) => (typeof p === 'number' ? p : 0))
+        : []
+      const total = distribution.reduce((sum, p) => sum + p, 0)
+      out[id] = {
+        type: 'score',
+        score:
+          total > 0
+            ? distribution.reduce((sum, p, index) => sum + index * p, 0) / total
+            : answer.value,
+        level: answer.value,
+        probabilities: Object.fromEntries(distribution.map((p, index) => [String(index), p])),
+        confidence
+      }
+    }
+  }
+  return out
+}
+
+/** TypeSafe 的分数题没有 `level`：分布的键是档位下标时补一个最可能的档位 */
+function withLevels(answers: JudgeAnswers): JudgeAnswers {
+  for (const answer of Object.values(answers)) {
+    if (answer?.type !== 'score' || answer.level !== undefined) continue
+    const values: number[] = []
+    for (const [key, p] of Object.entries(answer.probabilities ?? {})) {
+      const index = Number(key)
+      if (Number.isInteger(index) && index >= 0 && typeof p === 'number') values[index] = p
+    }
+    const best = argmax(Array.from(values, (p) => p ?? -1))
+    if (best !== undefined) answer.level = best
+  }
+  return answers
 }
 
 /**
@@ -225,14 +339,20 @@ export async function requestJudgement(
   try {
     const apiKey = await resolveApiKey(provider.apiKey)
 
-    const response = await fetch(systemOneUrl(provider.baseUrl), {
+    const plan = isPlanProvider(provider.id)
+    const response = await fetch(judgeUrl(provider), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         ...(provider.headers ?? {})
       },
-      body: JSON.stringify({ model: modelId, state, questions }),
+      // 套餐协议的 state 只收纯文本（≤ 48000 字符），结构化的序列化成 JSON 文本发
+      body: JSON.stringify(
+        plan
+          ? { model: modelId, state: asText(state), questions: toPlanQuestions(questions) }
+          : { model: modelId, state, questions }
+      ),
       signal: controller.signal
     })
 
@@ -244,12 +364,14 @@ export async function requestJudgement(
     }
 
     if (!response.ok || !body?.answers || typeof body.answers !== 'object') {
+      const planError = plan ? planCallError(response.status, body) : null
+      if (planError) throw planError
       throw new Error(extractErrorMessage(body, response.status))
     }
 
     return {
       model: typeof body.model === 'string' ? body.model : modelId,
-      answers: body.answers as JudgeAnswers,
+      answers: plan ? fromPlanAnswers(body.answers) : withLevels(body.answers as JudgeAnswers),
       usage: body.usage
     }
   } finally {
@@ -368,11 +490,17 @@ export function confidentChoice(
   return answer.confidence >= minConfidence ? answer.choice : null
 }
 
-/** 同上，评分题版本。档位从 0 开始计 */
+/**
+ * 同上，评分题版本：回**最可能的那一档**（整数，从 0 开始计）。
+ *
+ * 取 `level`，没有时把期望值四舍五入 —— 这里要的是「是哪一档」，期望值 1.4 不是任何一档。
+ * 要按期望值卡阈值就直接读 `answer.score`（见 ScoreAnswer 的注释）。
+ */
 export function confidentScore(
   answer: JudgeAnswer | undefined,
   minConfidence: number
 ): number | null {
   if (answer?.type !== 'score') return null
-  return answer.confidence >= minConfidence ? answer.score : null
+  if (answer.confidence < minConfidence) return null
+  return answer.level ?? Math.round(answer.score)
 }

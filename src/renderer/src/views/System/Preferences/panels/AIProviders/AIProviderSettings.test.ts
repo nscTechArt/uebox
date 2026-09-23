@@ -349,3 +349,42 @@ describe('套餐来源只读', () => {
     expect(wrapper.find('.manager').attributes('data-open')).toBe('true')
   })
 })
+
+/** 套餐一类一个来源，但在来源列表里只是一张卡片，模型数加总 */
+describe('套餐来源合成一张卡片', () => {
+  const planSource = (
+    id: string,
+    kind: 'chat' | 'embedding' | 'image',
+    models: string[]
+  ): SettingsView['providers'][number] => ({
+    id,
+    displayName: 'Creator Plan',
+    kind,
+    protocol: 'openai-completions' as const,
+    baseUrl: 'https://plan.example/v1',
+    models: models.map((model) => ({ id: model })),
+    apiKey: { kind: 'literal' as const, hasKey: true }
+  })
+
+  it('多个套餐来源只显示第一张，模型数是它们的总和', async () => {
+    stubAiProviderApi({
+      getSettings: vi.fn(async () => ({
+        ...loadedSettings,
+        providers: [
+          ...loadedSettings.providers,
+          planSource('creator-plan', 'chat', ['uebox-chat', 'uebox-agent']),
+          planSource('creator-plan-embedding', 'embedding', ['uebox-embed-v1']),
+          planSource('creator-plan-image', 'image', ['uebox-image'])
+        ]
+      }))
+    })
+    const wrapper = mount(AIProviderSettings, { global: { stubs } })
+    await flushPromises()
+
+    const cards = wrapper.findAll('.source-card-managed')
+    expect(cards).toHaveLength(1)
+    expect(cards[0].attributes('data-provider-id')).toBe('creator-plan')
+    expect(cards[0].text()).toContain('4')
+    expect(wrapper.find('[data-provider-id="creator-plan-image"]').exists()).toBe(false)
+  })
+})

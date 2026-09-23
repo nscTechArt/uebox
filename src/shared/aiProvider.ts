@@ -68,6 +68,15 @@ export type ImageApi =
    * 与这里其余每一家的 `/images/generations` 没有一处相同。
    */
   | 'gemini-images'
+  /**
+   * 创作者 Token Plan（`POST /images/generations`，见 Creator Plan 协议 04-images）。
+   *
+   * 形状贴近 OpenAI，但参考图放 JSON 的 `image_urls`（https 链接或 data URI），不走
+   * multipart、也不先上传；`size` 收 `1K`/`2K`/`4K` 档位或像素值，比例单给 `aspect_ratio`。
+   * 慢的请求回 202 任务单，轮询 `GET /images/generations/{id}`，10 分钟内必定结束。
+   * 只由套餐导入写进来，用户不会手选。
+   */
+  | 'uebox-images'
 
 /**
  * 结构化输出的能力档位。
@@ -146,6 +155,11 @@ export type VideoApi =
    * @see https://platform.minimax.io/docs/api-reference/video-generation-v2-create
    */
   | 'minimax-video'
+  /**
+   * 创作者 Token Plan 的异步任务接口（`/tasks`，见 Creator Plan 协议 05-tasks）。
+   * 视频、3D、音乐共用一个客户端：`src/main/ai/creatorPlan/tasks.ts`。
+   */
+  | 'uebox-tasks'
 
 /**
  * 生成 3D 网格接口的形状。
@@ -180,6 +194,8 @@ export type Model3dApi =
    * @see https://docs.meshy.ai/en/api/image-to-3d
    */
   | 'meshy'
+  /** 创作者 Token Plan 的异步任务接口，与视频、音乐共用（见 VideoApi 同名值） */
+  | 'uebox-tasks'
 
 /** 豆包 Seeduplex 3.0 当前开放给实时对话使用的音色。 */
 export const DOUBAO_REALTIME_VOICE_IDS = Object.freeze([
@@ -857,4 +873,9 @@ export type TestProviderResult =
   | { ok: false; error: ProbeFailure }
 
 /** Music providers have distinct request and task formats. */
-export type MusicApi = 'elevenlabs-music' | 'mureka-music' | 'sunoapi-music'
+export type MusicApi =
+  | 'elevenlabs-music'
+  | 'mureka-music'
+  | 'sunoapi-music'
+  /** 创作者 Token Plan 的异步任务接口，与视频、3D 共用（见 VideoApi 同名值） */
+  | 'uebox-tasks'

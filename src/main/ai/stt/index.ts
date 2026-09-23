@@ -3,6 +3,8 @@ import { readSettings } from '../store'
 import type { ProviderConfig } from '../types'
 import { openDoubaoSttSession } from './doubaoStt'
 import { openQwenAudioSttSession } from './qwenAudioStt'
+import { openUeboxSttSession } from './ueboxStt'
+import { isPlanProvider } from '../../../shared/creatorPlan'
 import {
   STT_INPUT_SAMPLE_RATE,
   STT_PACKET_MS,
@@ -37,6 +39,11 @@ export interface SttBinding {
   /** 豆包那边是资源 ID，阿里那边是模型名。见 `SttSessionConfig.model` */
   model: string
   headers?: Record<string, string>
+  /**
+   * 创作者 Token Plan 的来源。它不按域名认（地址是套餐给的，可以是本机联调地址），
+   * 按来源 id 认 —— 见 creatorPlan/apply.ts 的 PLAN_PROVIDER_IDS
+   */
+  plan?: boolean
 }
 
 /** 认出这是不是豆包的语音服务（识别、合成、实时语音同一个域名） */
@@ -69,13 +76,14 @@ export async function resolveSttBinding(): Promise<SttBinding | null> {
     apiKey: await resolveApiKey(provider.apiKey),
     baseUrl: provider.baseUrl,
     model: binding.modelId,
-    headers: provider.headers
+    headers: provider.headers,
+    ...(isPlanProvider(provider.id) ? { plan: true } : {})
   }
 }
 
 /** 这个地址有没有对应的适配器。绑了一家我们不认识的厂商时用它提前说清楚 */
-export function hasSttAdapter(baseUrl: string): boolean {
-  return isDoubaoSpeechUrl(baseUrl) || isDashScopeUrl(baseUrl)
+export function hasSttAdapter(baseUrl: string, plan = false): boolean {
+  return plan || isDoubaoSpeechUrl(baseUrl) || isDashScopeUrl(baseUrl)
 }
 
 /**
@@ -89,10 +97,18 @@ export function openSttSession(
   binding: SttBinding,
   onEvent: (event: SttEvent) => void
 ): SttSessionHandle {
-  const config: SttSessionConfig = { ...binding, onEvent }
-  const session = isDoubaoSpeechUrl(binding.baseUrl)
-    ? openDoubaoSttSession(config)
-    : openQwenAudioSttSession(config)
+  const config: SttSessionConfig = {
+    apiKey: binding.apiKey,
+    baseUrl: binding.baseUrl,
+    model: binding.model,
+    ...(binding.headers ? { headers: binding.headers } : {}),
+    onEvent
+  }
+  const session = binding.plan
+    ? openUeboxSttSession(config)
+    : isDoubaoSpeechUrl(binding.baseUrl)
+      ? openDoubaoSttSession(config)
+      : openQwenAudioSttSession(config)
 
   let buffered: Buffer[] = []
   let bufferedBytes = 0
@@ -158,7 +174,8 @@ const PROBE_ACK_GRACE_MS = 1_500
  * 最容易配错的那两样：密钥对不对、资源 ID / 模型名认不认。
  */
 export async function probeStt(provider: ProviderConfig, modelId: string): Promise<void> {
-  if (!hasSttAdapter(provider.baseUrl)) {
+  const plan = isPlanProvider(provider.id)
+  if (!hasSttAdapter(provider.baseUrl, plan)) {
     throw new Error('认不出这个语音识别服务商。目前支持豆包语音（openspeech）与阿里云百炼。')
   }
   const apiKey = await resolveApiKey(provider.apiKey)
@@ -179,7 +196,13 @@ export async function probeStt(provider: ProviderConfig, modelId: string): Promi
     }
     const timer = setTimeout(() => done(new Error('连接超时')), PROBE_TIMEOUT_MS)
     session = openSttSession(
-      { apiKey, baseUrl: provider.baseUrl, model: modelId, headers: provider.headers },
+      {
+        apiKey,
+        baseUrl: provider.baseUrl,
+        model: modelId,
+        headers: provider.headers,
+        ...(plan ? { plan } : {})
+      },
       (event) => {
         // 就绪之后稍等一下，带内的拒绝来了就按失败报（见 PROBE_ACK_GRACE_MS）
         if (event.type === 'ready' && !grace) grace = setTimeout(() => done(), PROBE_ACK_GRACE_MS)

@@ -3,6 +3,8 @@ import { readSettings } from './store'
 import { ModelNotConfiguredError } from './resolveModel'
 import type { ModelConfig, ProviderConfig } from './types'
 import type { EmbeddingApi } from '../../shared/aiProvider'
+import { isPlanProvider } from '../../shared/creatorPlan'
+import { planCallError } from './creatorPlan/callError'
 
 /**
  * 本地直连的文本向量化。
@@ -177,6 +179,9 @@ export async function requestEmbeddings(
     }
 
     if (!response.ok || !Array.isArray(body?.data)) {
+      // 套餐来源的 402 / 403 / 401 换成说清下一步的话，别让知识库只报一句 HTTP 402
+      const planError = isPlanProvider(provider.id) ? planCallError(response.status, body) : null
+      if (planError) throw planError
       throw new Error(extractErrorMessage(body, response.status))
     }
 
@@ -250,6 +255,10 @@ export async function isEmbeddingConfigured(): Promise<boolean> {
 
 /**
  * 当前嵌入模型的标识，形如 `ollama:nomic-embed-text`。
+ *
+ * 创作者 Token Plan 的是 `creator-plan-embedding:uebox-embed-v1`：来源 id 固定
+ * （见 creatorPlan/apply.ts 的 PLAN_PROVIDER_IDS），显示名怎么改都不影响；
+ * 套餐换嵌入模型会发新 ID（`uebox-embed-v2`），标识跟着变，自然触发重建。
  *
  * 存进向量表用来判断「这批向量是不是当前模型产出的」。换了嵌入模型后
  * 维度和语义空间都变了，旧向量必须重建 —— 没有这个标识就只能靠维度判断，

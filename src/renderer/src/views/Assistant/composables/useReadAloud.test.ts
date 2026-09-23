@@ -405,6 +405,15 @@ describe('回复流式朗读', () => {
     expect(reading.active.value).toBe(false)
     logError.mockRestore()
   })
+  it('套餐额度用完时用对话里同一套文案', async () => {
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { reading } = reader()
+    vi.mocked(speechAPI.synthesize).mockRejectedValueOnce(new Error('TTS_PLAN_QUOTA_EXHAUSTED'))
+    await reading.toggle('正文')
+    expect(message.error).toHaveBeenCalledWith(expect.stringContaining('这项额度本周期用完了'))
+    expect(reading.active.value).toBe(false)
+    logError.mockRestore()
+  })
   it('prefetches the next segment while queued audio is playing', async () => {
     const { reading } = reader()
     const run = reading.toggle('字'.repeat(601))

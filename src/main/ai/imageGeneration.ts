@@ -3,6 +3,9 @@ import { ModelNotConfiguredError } from './resolveModel'
 import { readSettings } from './store'
 import { prepareReferenceUpload } from './referenceImageUpload'
 import type { ImageApi } from '../../shared/aiProvider'
+import { isPlanProvider } from '../../shared/creatorPlan'
+import { cachedPlanSpec, specLimit } from './creatorPlan/cachedSpec'
+import { CreatorPlanCallError, planCallError } from './creatorPlan/callError'
 import { getGptImageRatioForSize, getGptImageSizeTier } from '../../shared/imageGenerationModels'
 import type { ProviderConfig, ProviderProtocol } from './types'
 
@@ -94,6 +97,12 @@ const TASK_POLL_FAILURE_TOLERANCE = 5
  * 一句光秃秃的 AbortError，任务号丢了。留 60 秒的差正是为了让这一位先开火。
  */
 const TASK_TIMEOUT_MS = 240_000
+
+/**
+ * 创作者 Token Plan 的生图任务上限：协议写明「10 分钟内必定结束，超时为 failed」。
+ * 时间交给服务端判，这边只比它多等一分钟，免得我们先放弃一张正在画、已经预占了额度的图。
+ */
+const PLAN_TASK_TIMEOUT_MS = 660_000
 
 /**
  * 配置类错误共有的锚点短语。
@@ -245,9 +254,12 @@ export class ImageTaskFailedError extends Error {
  * 能去厂商控制台把图取回来。
  */
 export class ImageTaskTimeoutError extends Error {
-  constructor(readonly taskId: string) {
+  constructor(
+    readonly taskId: string,
+    timeoutMs: number = TASK_TIMEOUT_MS
+  ) {
     super(
-      `生图任务等了 ${Math.round(TASK_TIMEOUT_MS / 1000)} 秒还没画完，` +
+      `生图任务等了 ${Math.round(timeoutMs / 1000)} 秒还没画完，` +
         `可以去厂商那边用任务号 ${shortTaskId(taskId)} 取回。`
     )
     this.name = 'ImageTaskTimeoutError'
@@ -598,6 +610,11 @@ interface ImageAdapter {
   request(input: AdapterInput, signal: AbortSignal): Promise<HttpRequest>
   /** 按这家文档的响应形状取图。认不出来就回空数组，由上层报「一张都没回」 */
   images(payload: unknown): RawImage[]
+  /**
+   * 转成异步任务后最多等多久（从提交那一刻算）。不填按 TASK_TIMEOUT_MS。
+   * 外面那个整次请求的信号会跟着放宽一分钟，见 generateImages。
+   */
+  taskTimeoutMs?: number
 }
 
 /** OpenAI 系的响应：`data[]` 里要么 b64_json 要么 url */
@@ -791,6 +808,67 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
       }
     },
     images: openAiImages
+  },
+
+  /**
+   * 创作者 Token Plan。形状贴近 OpenAI，三处不同：
+   *
+   * 1. 参考图放 JSON 的 `image_urls`，只收 **https 链接或 data URI** —— 不走 multipart、
+   *    不先上传；http 直链先取回来转成 data URI
+   * 2. `size` 收 `1K` / `2K` / `4K` 档位或 `宽x高`（服务端就近取档），比例单给 `aspect_ratio`
+   * 3. 预计超过 60 秒的请求回 **202 任务单**（`{ id, status }`），轮询
+   *    `GET /images/generations/{id}` —— 这正是上面那段异步任务后处理，状态词对得上；
+   *    10 分钟内必定结束，所以任务上限放宽到 PLAN_TASK_TIMEOUT_MS
+   *
+   * 不带 `Idempotency-Key`：带了一律按任务处理，每张图都要多等至少一轮轮询；
+   * 提交只对 429 重试（「没收下」），不存在重复扣费。
+   *
+   * 协议见 Creator Plan 仓库 docs/protocol/04-images.md。
+   */
+  'uebox-images': {
+    doc: 'docs/protocol/04-images.md（Creator Plan）',
+    taskTimeoutMs: PLAN_TASK_TIMEOUT_MS,
+    async request(input, signal) {
+      const references = await Promise.all(
+        input.references.map(async (reference) => {
+          const trimmed = reference.trim()
+          if (/^https:\/\//i.test(trimmed)) return trimmed
+          if (/^http:\/\//i.test(trimmed)) {
+            return `data:image/png;base64,${await downloadAsBase64(trimmed, signal)}`
+          }
+          return toDataUri(trimmed)
+        })
+      )
+      const tier = input.size?.trim().toUpperCase()
+      const size = tier && ['1K', '2K', '4K'].includes(tier) ? tier : asSize(input.size)
+      const aspectRatio = asAspectRatio(input.aspectRatio)
+      return {
+        path: '/images/generations',
+        contentType: 'application/json',
+        body: JSON.stringify({
+          model: input.modelId,
+          prompt: input.prompt,
+          n: input.count,
+          ...(size ? { size } : {}),
+          ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+          ...(references.length > 0 ? { image_urls: references } : {}),
+          ...(typeof input.seed === 'number' ? { seed: input.seed } : {}),
+          response_format: 'b64_json'
+        })
+      }
+    },
+    images(payload) {
+      const list = (payload as { data?: unknown })?.data
+      if (!Array.isArray(list)) return []
+      return list
+        .map((item) => item as { b64_json?: unknown; url?: unknown; mime_type?: unknown })
+        .map((item) => ({
+          base64: typeof item.b64_json === 'string' ? item.b64_json : undefined,
+          url: typeof item.url === 'string' ? item.url : undefined,
+          mediaType: typeof item.mime_type === 'string' ? item.mime_type : undefined
+        }))
+        .filter((image) => image.base64 || image.url)
+    }
   },
 
   /**
@@ -1166,7 +1244,9 @@ async function awaitImageTask(
      * 任务号也跟着没了。睡满剩余时间之后还会再查最后一次才放弃。
      */
     const remaining = deadline - Date.now()
-    if (remaining <= 0) throw new ImageTaskTimeoutError(task.id)
+    if (remaining <= 0) {
+      throw new ImageTaskTimeoutError(task.id, adapter.taskTimeoutMs ?? TASK_TIMEOUT_MS)
+    }
 
     try {
       await sleep(Math.min(delay + Math.random() * TASK_POLL_JITTER_MS, remaining), signal)
@@ -1187,13 +1267,10 @@ async function awaitImageTask(
         continue
       }
       if (!response.ok) {
-        throw new ImageRequestError(
-          response.status,
-          path,
-          describeError(await response.text()),
-          url,
-          'GET'
-        )
+        const text = await response.text()
+        const planError = isPlanProvider(provider.id) ? planCallError(response.status, text) : null
+        if (planError) throw planError
+        throw new ImageRequestError(response.status, path, describeError(text), url, 'GET')
       }
 
       let payload: unknown
@@ -1217,6 +1294,7 @@ async function awaitImageTask(
       if (signal.aborted) throw new ImageTaskCancelledError(task.id)
       // 这几种是「问清楚了，就是这个结果」，再问一次还是同一份
       if (
+        error instanceof CreatorPlanCallError ||
         error instanceof ImageTaskInterruptedError ||
         error instanceof ImageResponseNotJsonError ||
         (error instanceof ImageRequestError && !isRetryable(error.status))
@@ -1270,7 +1348,7 @@ async function send(
    * 任务预算里扣的 —— 一次本来 180 秒能画完的 4K 图会被我们提前判超时，
    * 而钱在提交那一刻就已经扣了。留给外面那个 300 秒信号的 60 秒余量也会一起没掉。
    */
-  const deadline = Date.now() + TASK_TIMEOUT_MS
+  const deadline = Date.now() + (adapter.taskTimeoutMs ?? TASK_TIMEOUT_MS)
 
   let response: Response | null = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1300,12 +1378,11 @@ async function send(
 
   if (!response) throw new ImageGenerationEmptyError()
   if (!response.ok) {
-    throw new ImageRequestError(
-      response.status,
-      request.path,
-      describeError(await response.text()),
-      url
-    )
+    const text = await response.text()
+    // 套餐来源的 402 / 403 / 401：说清去哪儿处理，别只报一句 HTTP 402
+    const planError = isPlanProvider(provider.id) ? planCallError(response.status, text) : null
+    if (planError) throw planError
+    throw new ImageRequestError(response.status, request.path, describeError(text), url)
   }
 
   // 200 但不是 JSON：网关把请求接住了、回了自己的页面。直接 `response.json()`
@@ -1359,10 +1436,17 @@ export async function generateImages(
         '请改用支持多图的接入，或由用户明确选择一张。不要自行丢弃其余参考图。'
     )
   }
+  // 套餐的张数上限在清单里（max_images），超了服务端回 400；按惯例截到上限而不是报错
+  const planMax =
+    imageApi === 'uebox-images' ? specLimit(await cachedPlanSpec('image'), 'max_images') : undefined
   const input: AdapterInput = {
     modelId,
     prompt: request.prompt,
-    count: Math.min(Math.max(1, Math.floor(request.count ?? 1)), MAX_IMAGES_PER_CALL),
+    count: Math.min(
+      Math.max(1, Math.floor(request.count ?? 1)),
+      planMax ?? MAX_IMAGES_PER_CALL,
+      MAX_IMAGES_PER_CALL
+    ),
     size: request.size,
     aspectRatio: request.aspectRatio,
     seed: request.seed,
@@ -1370,7 +1454,15 @@ export async function generateImages(
     useResolutionTiers: provider.imageResolutionTiers === true
   }
 
-  return send(provider, adapter, input, withTimeout(request.signal))
+  return send(
+    provider,
+    adapter,
+    input,
+    withTimeout(
+      request.signal,
+      adapter.taskTimeoutMs ? adapter.taskTimeoutMs + 60_000 : REQUEST_TIMEOUT_MS
+    )
+  )
 }
 
 export interface ImageModelStatus {

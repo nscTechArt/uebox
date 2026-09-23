@@ -1,4 +1,5 @@
 import WebSocket from 'ws'
+import { planCallError } from '../creatorPlan/callError'
 import {
   normalizeRealtimeEchoGuard,
   type RealtimeEchoGuard
@@ -65,6 +66,9 @@ const DEFAULT_BASE_URL = 'wss://api.openai.com/v1/realtime'
  * @see https://developers.openai.com/api/docs/guides/realtime-transcription
  */
 export const OPENAI_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe'
+
+/** 创作者 Token Plan 的转写模型。协议 07：`transcription.model` 可省略，给了只能是它 */
+export const PLAN_TRANSCRIPTION_MODEL = 'uebox-stt'
 
 /**
  * 三档回声门限各自发什么。
@@ -151,7 +155,7 @@ export function buildOpenAiSessionUpdate(config: RealtimeSessionConfig): Record<
           format: { type: 'audio/pcm', rate: OPENAI_AUDIO.inputSampleRate },
           // 选填但**必须给**，理由见 OPENAI_TRANSCRIPTION_MODEL
           transcription: {
-            model: OPENAI_TRANSCRIPTION_MODEL,
+            model: config.plan ? PLAN_TRANSCRIPTION_MODEL : OPENAI_TRANSCRIPTION_MODEL,
             // 听写这一路转写就是全部产出，值得给它一份领域词表兜住行话
             ...(config.dictation ? { prompt: OPENAI_DICTATION_PROMPT } : {})
           },
@@ -410,9 +414,13 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
      * 「Unexpected server response: 404」既不说是谁返回的，也不说该去哪儿改 ——
      * 用户会去查网络、换密钥，而问题在角色绑定那一栏。
      */
-    const message = error.message.includes('404')
-      ? '此服务商不支持实时语音。请到 设置 → 模型 → 默认模型，' + '选择支持的实时语音模型。'
-      : `连接失败：${error.message}`
+    const status = Number(error.message.match(/Unexpected server response: (\d{3})/)?.[1] ?? 0)
+    const planError = config.plan ? planCallError(status, null) : null
+    const message = planError
+      ? planError.message
+      : error.message.includes('404')
+        ? '此服务商不支持实时语音。请到 设置 → 模型 → 默认模型，' + '选择支持的实时语音模型。'
+        : `连接失败：${error.message}`
     config.onEvent({ type: 'error', message })
   })
 
@@ -582,6 +590,10 @@ export function translate(event: Record<string, unknown>): VoiceSessionEvent[] {
       const error = (event.error as { message?: unknown; code?: unknown }) || {}
       // 自己人造成的、且不影响通话继续的那几种，不往上报（理由见 HARMLESS_ERROR_CODES）
       if (typeof error.code === 'string' && HARMLESS_ERROR_CODES.has(error.code)) return []
+      // 创作者 Token Plan 会话中途额度用完、订阅失效：服务端发这条 error 再以 1008 关闭（协议 07）。
+      // 这几个码只有套餐用，OpenAI 自己的码不会撞上
+      const planError = planCallError(planStatusOf(error.code), { error })
+      if (planError) return [{ type: 'error', message: planError.message }]
       const message = error.message
       return [{ type: 'error', message: typeof message === 'string' ? message : '厂商返回错误' }]
     }
@@ -591,4 +603,11 @@ export function translate(event: Record<string, unknown>): VoiceSessionEvent[] {
       // 对我们没有意义。安静地忽略，而不是刷日志
       return []
   }
+}
+
+/** 套餐错误码 → 它在 HTTP 上对应的状态码（会话里的 error 事件没有状态码） */
+function planStatusOf(code: unknown): number {
+  if (code === 'subscription_inactive' || code === 'quota_exhausted') return 402
+  if (code === 'role_not_in_plan') return 403
+  return 0
 }

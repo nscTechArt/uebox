@@ -188,7 +188,8 @@ const IMAGE_APIS: readonly ImageApi[] = [
   'grok-images',
   'siliconflow-images',
   'ark-images',
-  'gemini-images'
+  'gemini-images',
+  'uebox-images'
 ]
 
 function normalizeImageApi(value: unknown): ImageApi | undefined {
@@ -202,7 +203,7 @@ function normalizeImageApi(value: unknown): ImageApi | undefined {
  * （三家的提交/轮询/取文件全不一样），只能按 Base URL 认厂商，认不出就留空
  * 让调用时明确报「没选接口形状」。
  */
-const MODEL3D_APIS: readonly Model3dApi[] = ['rodin', 'tripo', 'meshy']
+const MODEL3D_APIS: readonly Model3dApi[] = ['rodin', 'tripo', 'meshy', 'uebox-tasks']
 
 function normalizeModel3dApi(value: unknown): Model3dApi | undefined {
   return MODEL3D_APIS.find((api) => api === value)
@@ -302,7 +303,7 @@ function migrateProtocol(protocol: ProviderProtocol, baseUrl: string): ProviderP
   return protocol
 }
 
-const VIDEO_APIS: readonly VideoApi[] = ['ark-video', 'minimax-video']
+const VIDEO_APIS: readonly VideoApi[] = ['ark-video', 'minimax-video', 'uebox-tasks']
 
 function normalizeVideoApi(value: unknown): VideoApi | undefined {
   return VIDEO_APIS.find((api) => api === value)
@@ -409,7 +410,8 @@ function normalizeProvider(raw: unknown, legacy: boolean): ProviderConfig | null
       providerKind === 'music' &&
       (source.musicApi === 'elevenlabs-music' ||
         source.musicApi === 'mureka-music' ||
-        source.musicApi === 'sunoapi-music')
+        source.musicApi === 'sunoapi-music' ||
+        source.musicApi === 'uebox-tasks')
         ? source.musicApi
         : undefined,
     videoApi:

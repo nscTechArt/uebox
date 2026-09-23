@@ -1,4 +1,7 @@
 import { JINA_KEY_MISSING_HINT, resolveJinaApiKey } from '../ai/jinaKey'
+import { CreatorPlanCallError } from '../ai/creatorPlan/callError'
+import { searchViaPlan } from '../ai/creatorPlan/search'
+import { isPlanProvider } from '../../shared/creatorPlan'
 import { judgeResults, type Relevance } from './searchRelevance'
 import {
   BUILTIN_BROWSER_PROVIDER_ID,
@@ -213,6 +216,39 @@ async function runProviders(query: string, limit: number): Promise<WebSearchResu
       return { success: true, provider: 'searxng', items: result.items }
     }
     return { success: false, error: `SearXNG：${result.error}` }
+  }
+
+  // 创作者 Token Plan：`POST /search`（协议 08-search）。来源 id 固定以 creator-plan 开头
+  if (isPlanProvider(bound.providerId)) {
+    if (!bound.apiKey) {
+      return {
+        success: false,
+        error: '创作者 Token Plan 的 Key 取不出来了。到 设置 → 模型 的套餐卡片重新连接。'
+      }
+    }
+    try {
+      const language = (await uiLanguage()) === 'zh-CN' ? 'zh-CN' : 'en'
+      const items = await searchViaPlan({
+        baseUrl: bound.baseUrl,
+        apiKey: bound.apiKey,
+        model: bound.modelId,
+        query,
+        limit,
+        language,
+        timeoutMs: SEARCH_TIMEOUT_MS
+      })
+      if (items.length === 0) return { success: false, error: '创作者 Token Plan 检索没有结果。' }
+      return { success: true, provider: 'creator-plan', items }
+    } catch (error) {
+      // 套餐那几种错误的文案本身就是「下一步怎么办」，原样给
+      if (error instanceof CreatorPlanCallError) return { success: false, error: error.message }
+      const aborted =
+        error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')
+      return {
+        success: false,
+        error: `创作者 Token Plan 检索失败：${aborted ? `超时（${SEARCH_TIMEOUT_MS / 1000} 秒）` : error instanceof Error ? error.message : String(error)}`
+      }
+    }
   }
 
   if (bound.providerId === JINA_SEARCH_PROVIDER_ID) {

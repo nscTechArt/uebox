@@ -10,6 +10,7 @@ import { briefForSpeech } from './speechBriefing'
 import { speechText } from './speechText'
 import { SpeechPcmPlayer } from './speechPcmPlayer'
 import { speechCache } from './speechCache'
+import { isCreatorPlanChatErrorCode } from './creatorPlanChatError'
 
 // One reader per renderer: clicking another reply replaces the current playback.
 const activeOwner = ref<string | symbol | null>(null)
@@ -176,6 +177,15 @@ export function useReadAloud(
     } catch (error) {
       if (currentRun !== run) return
       console.error('[ReadAloud] Playback failed', error)
+      // 创作者 Token Plan 的订阅 / 额度 / 授权错误（主进程回 TTS_PLAN_<码>）：用对话里同一套文案
+      const planCode =
+        error instanceof Error ? error.message.match(/TTS_PLAN_([A-Z_]+)/)?.[1]?.toLowerCase() : ''
+      if (isCreatorPlanChatErrorCode(planCode)) {
+        message.error(
+          `${t(`aiProvider.creatorPlan.chat.${planCode}.title`)}：${t(`aiProvider.creatorPlan.chat.${planCode}.desc`)}`
+        )
+        return
+      }
       message.error(
         t(
           error instanceof Error && error.message.includes('TTS_NOT_CONFIGURED')

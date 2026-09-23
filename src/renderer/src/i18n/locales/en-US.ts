@@ -810,6 +810,7 @@ export default {
       previewCurrent: 'Now: {name}',
       previewUnset: 'Now: not set',
       previewManaged: 'Managed by plan',
+      previewReindex: 'Knowledge base re-embeds with the new model; keyword search only until done',
       apply: 'Apply',
       applied: 'Applied',
       storage: {

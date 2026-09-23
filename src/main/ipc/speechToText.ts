@@ -48,7 +48,7 @@ export function registerSpeechToTextIPC(): void {
   ipcMain.handle('stt:audio-spec', async () => {
     try {
       const binding = await resolveSttBinding()
-      if (!binding || !hasSttAdapter(binding.baseUrl)) return { ok: false as const }
+      if (!binding || !hasSttAdapter(binding.baseUrl, binding.plan)) return { ok: false as const }
       return { ok: true as const, inputSampleRate: STT_INPUT_SAMPLE_RATE }
     } catch {
       /*
@@ -92,7 +92,7 @@ export function registerSpeechToTextIPC(): void {
       }
     }
     if (!binding) return { ok: false as const, reason: 'unconfigured' as const }
-    if (!hasSttAdapter(binding.baseUrl)) {
+    if (!hasSttAdapter(binding.baseUrl, binding.plan)) {
       return {
         ok: false as const,
         reason: 'failed' as const,

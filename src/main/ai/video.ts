@@ -3,6 +3,14 @@ import { ModelNotConfiguredError } from './resolveModel'
 import { readSettings } from './store'
 import type { VideoApi } from '../../shared/aiProvider'
 import type { ModelConfig, ProviderConfig } from './types'
+import {
+  filesOfRole,
+  resumePlanTask,
+  runPlanTask,
+  settlePlanTask,
+  type PlanTask,
+  type PlanTaskBody
+} from './creatorPlan/tasks'
 
 /**
  * 本地直连的视频生成。
@@ -423,7 +431,8 @@ const MINIMAX_RESOLUTION: Readonly<Record<VideoResolution, string>> = Object.fre
   '2k': '2K'
 })
 
-const ADAPTERS: Record<VideoApi, VideoAdapter> = {
+/** 创作者 Token Plan（`uebox-tasks`）不走这张表，走共用的任务客户端，见文件末尾 */
+const ADAPTERS: Record<Exclude<VideoApi, 'uebox-tasks'>, VideoAdapter> = {
   /**
    * 火山方舟内容生成任务（Seedance 2.5 / 2.0）。
    *
@@ -591,7 +600,9 @@ export function supportsReferenceMedia(api: VideoApi | undefined): boolean {
 
 function adapterOf(provider: ProviderConfig): VideoAdapter {
   const api = provider.videoApi
-  if (!api || !(api in ADAPTERS)) throw new VideoApiUnknownError(provider.id)
+  if (!api || api === 'uebox-tasks' || !(api in ADAPTERS)) {
+    throw new VideoApiUnknownError(provider.id)
+  }
   return ADAPTERS[api]
 }
 
@@ -857,6 +868,7 @@ export async function generateVideo(
   request: GenerateVideoRequest & { onProgress?: (note: string) => void }
 ): Promise<GeneratedVideo> {
   const { provider, modelId } = await resolveVideoBinding(request)
+  if (provider.videoApi === 'uebox-tasks') return runPlanVideo(provider, modelId, request)
   const job = await submitVideo(provider, modelId, request)
 
   const deadline = Date.now() + JOB_TIMEOUT_MS
@@ -925,6 +937,14 @@ export async function resumeVideo(
     )
   }
   const job: VideoJob = { id: decoded.id, providerId: provider.id }
+  if (provider.videoApi === 'uebox-tasks') {
+    const task = await resumePlanTask(provider, 'video', job.id, {
+      signal: request.signal,
+      onProgress: request.onProgress,
+      label: (id) => `任务号 ${encodeVideoJob({ id, providerId: provider.id })}`
+    })
+    return planVideoResult(task, job)
+  }
 
   const deadline = Date.now() + JOB_TIMEOUT_MS
   let consecutiveFailures = 0
@@ -974,4 +994,97 @@ export async function getVideoStatus(): Promise<VideoModelStatus> {
   } catch {
     return { configured: false, model: null }
   }
+}
+
+// ── 创作者 Token Plan（videoApi: 'uebox-tasks'）──────────────────────────────
+
+/**
+ * 我们的视频请求 → 协议 05-tasks 的 `uebox-video` 输入。字段几乎一一对应，`audio` → `generate_audio`。
+ *
+ * 参考图只收 https 链接或 data URI；参考视频只收 https 链接（协议不收视频的 base64，
+ * 也没有方舟的 `asset://`）；参考音频收 https 或 data URI。首尾帧与参考素材互斥、
+ * 时长范围这些组合规则由服务端按清单判（400 不计额度），这里只拦形状。
+ */
+export function planVideoBody(
+  modelId: string,
+  request: Omit<GenerateVideoRequest, 'providerId' | 'modelId'>
+): PlanTaskBody {
+  const prompt = String(request.prompt ?? '').trim()
+  if (!prompt) throw new VideoEmptyPromptError()
+
+  const images = (request.images ?? [])
+    .filter((item) => String(item?.url || '').trim())
+    .map((item) => ({ url: item.url.trim(), role: item.role ?? 'first_frame' }))
+  for (const image of images) {
+    if (!/^https:\/\//i.test(image.url) && !/^data:image\//i.test(image.url)) {
+      throw new VideoRequestError(
+        0,
+        'submit',
+        `参考图「${image.url.slice(0, 60)}」不是 https 链接也不是 data URI。` +
+          '本地文件请先经 loadReferenceImage 读成 data URI。'
+      )
+    }
+  }
+  const videos = (request.videos ?? []).map((url) => String(url || '').trim()).filter(Boolean)
+  for (const url of videos) {
+    if (!/^https:\/\//i.test(url)) {
+      throw new VideoParamUnsupportedError(
+        'uebox-tasks',
+        `参考视频「${url.slice(0, 60)}」`,
+        '创作者 Token Plan 的参考视频只收 https 链接（不收 base64，也没有 asset:// 素材 ID）。'
+      )
+    }
+  }
+  const audios = (request.audios ?? []).map((url) => String(url || '').trim()).filter(Boolean)
+  for (const url of audios) {
+    if (!/^https:\/\//i.test(url) && !/^data:audio\//i.test(url)) {
+      throw new VideoParamUnsupportedError(
+        'uebox-tasks',
+        `参考音频「${url.slice(0, 60)}」`,
+        '创作者 Token Plan 的参考音频只收 https 链接或 data URI。'
+      )
+    }
+  }
+
+  return {
+    model: modelId,
+    input: {
+      prompt,
+      ...(images.length > 0 ? { images } : {}),
+      ...(videos.length > 0 ? { videos: videos.map((url) => ({ url })) } : {}),
+      ...(audios.length > 0 ? { audios: audios.map((url) => ({ url })) } : {}),
+      ...(request.duration !== undefined ? { duration: request.duration } : {}),
+      ...(request.resolution ? { resolution: request.resolution } : {}),
+      ...(request.ratio ? { ratio: request.ratio } : {}),
+      ...(request.audio !== undefined ? { generate_audio: request.audio } : {}),
+      ...(request.seed !== undefined ? { seed: request.seed } : {})
+    }
+  }
+}
+
+function planVideoResult(task: PlanTask, job: VideoJob): GeneratedVideo {
+  const [video] = filesOfRole(task, 'video')
+  if (!video) throw new VideoNoOutputError(JSON.stringify(task.files).slice(0, 500))
+  const seconds = task.usage?.video_seconds
+  return { url: video.url, job, usage: typeof seconds === 'number' ? seconds : null }
+}
+
+/**
+ * 套餐那一支：提交（带幂等键、崩溃后按账本续上）→ 按 10 秒轮询 → 拿视频链接（7 天有效）。
+ * 用户按停止时服务端取消、额度退回；失败同样退回。见 creatorPlan/tasks.ts。
+ */
+async function runPlanVideo(
+  provider: ProviderConfig,
+  modelId: string,
+  request: GenerateVideoRequest & { onProgress?: (note: string) => void }
+): Promise<GeneratedVideo> {
+  const body = planVideoBody(modelId, request)
+  const task = await runPlanTask(provider, 'video', body, {
+    signal: request.signal,
+    onProgress: request.onProgress,
+    label: (id) => `任务号 ${encodeVideoJob({ id, providerId: provider.id })}`
+  })
+  const result = planVideoResult(task, { id: task.id, providerId: provider.id })
+  await settlePlanTask(body)
+  return result
 }

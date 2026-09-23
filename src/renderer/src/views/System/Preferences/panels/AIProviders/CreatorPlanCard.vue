@@ -314,6 +314,18 @@ onUnmounted(() => unsubscribe?.())
               }}
             </span>
             <span v-else>{{ $t('aiProvider.creatorPlan.previewUnset') }}</span>
+            <!-- 嵌入换模型，向量空间就变了：知识库要按新模型重建 -->
+            <span
+              v-if="
+                change.role === 'embedding' &&
+                change.current &&
+                !change.managed &&
+                selected.includes(change.role)
+              "
+              class="plan-warn"
+            >
+              {{ $t('aiProvider.creatorPlan.previewReindex') }}
+            </span>
           </span>
         </div>
         <CreatorPlanStorageRow

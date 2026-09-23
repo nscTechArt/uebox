@@ -253,3 +253,44 @@ describe('CreatorPlanCard', () => {
     expect(wrapper.text()).toContain('连接')
   })
 })
+
+describe('CreatorPlanCard 非对话角色', () => {
+  const embeddingRow = (defaultSelected: boolean): CreatorPlanPreview => ({
+    ...preview,
+    changes: [
+      {
+        role: 'embedding',
+        model: 'uebox-embed-v1',
+        modelDisplayName: 'uebox-embed-v1',
+        current: { providerId: 'ollama', modelId: 'bge-m3', providerName: 'Ollama' },
+        managed: false,
+        defaultSelected
+      }
+    ]
+  })
+
+  it('嵌入从别的来源换过来且勾上了：提示知识库会按新模型重建', async () => {
+    stubApi({ connect: vi.fn(async () => ({ ok: true, data: embeddingRow(true) })) })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '连接')!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('嵌入')
+    expect(wrapper.text()).toContain('知识库按新模型重建向量')
+  })
+
+  it('没勾上就不提示', async () => {
+    stubApi({ connect: vi.fn(async () => ({ ok: true, data: embeddingRow(false) })) })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '连接')!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('知识库按新模型重建向量')
+  })
+})

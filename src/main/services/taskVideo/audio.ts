@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { readSettings } from '../../ai/store'
 import { requestSpeech } from '../../ai/speech'
+import { CreatorPlanCallError } from '../../ai/creatorPlan/callError'
 import { recoverMediaFile, saveMediaFile } from './files'
 import type { Storyboard } from './schema'
 
@@ -70,7 +71,11 @@ export async function prepareVideoAudio(
           scene.narration,
           signal ?? new AbortController().signal,
           (chunk) => chunks.push(Buffer.from(chunk.base64, 'base64'))
-        )
+        ).catch((error: unknown) => {
+          // 创作者 Token Plan 的额度 / 订阅 / 授权错误：错误码后面挂着说清下一步的原话，给它
+          const cause = error instanceof Error ? error.cause : undefined
+          throw cause instanceof CreatorPlanCallError ? cause : error
+        })
         const audio = Buffer.concat(chunks)
         if (!audio.length) throw new Error('配音返回空音频。')
         await saveMediaFile(speechFile, audio)

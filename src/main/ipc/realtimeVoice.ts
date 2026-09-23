@@ -13,6 +13,7 @@ import {
   decideSilenceAction
 } from '../ai/realtime/antiSilence'
 import { readSettings } from '../ai/store'
+import { isPlanProvider } from '../../shared/creatorPlan'
 import {
   DOUBAO_AUDIO,
   isDoubaoRealtimeUrl,
@@ -459,6 +460,8 @@ async function resolveRealtimeBinding(): Promise<{
   baseUrl: string
   model: string
   voice?: string
+  /** 创作者 Token Plan 的来源：地址不是豆包的，自然走 OpenAI 那支适配器（协议 07 是它的子集） */
+  plan?: boolean
 }> {
   const settings = await readSettings()
   const binding = settings.roles.realtime
@@ -478,7 +481,8 @@ async function resolveRealtimeBinding(): Promise<{
     apiKey: await resolveApiKey(provider.apiKey),
     baseUrl: provider.baseUrl,
     model: binding.modelId,
-    voice: provider.models.find((model) => model.id === binding.modelId)?.realtimeVoice
+    voice: provider.models.find((model) => model.id === binding.modelId)?.realtimeVoice,
+    ...(isPlanProvider(provider.id) ? { plan: true } : {})
   }
 }
 
@@ -499,7 +503,7 @@ export function realtimeAudioSpec(baseUrl: string): AudioSpec {
 
 /** 按 Base URL 认出连哪一家，顺带把该家的采样率交出去 */
 function openSession(
-  binding: { apiKey: string; baseUrl: string; model: string },
+  binding: { apiKey: string; baseUrl: string; model: string; plan?: boolean },
   config: Omit<Parameters<typeof openOpenAiRealtimeSession>[0], 'apiKey' | 'baseUrl' | 'model'>
 ): { handle: VoiceSessionHandle; audio: AudioSpec } {
   const common = {
@@ -518,6 +522,7 @@ function openSession(
   return {
     handle: openOpenAiRealtimeSession({
       ...common,
+      ...(binding.plan ? { plan: true } : {}),
       // 官方地址用适配器的默认那条；自建网关按它自己的地址推一条 wss 出来
       baseUrl: /(^|\.)openai\.com/i.test(binding.baseUrl)
         ? undefined

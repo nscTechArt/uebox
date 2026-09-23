@@ -3,6 +3,16 @@ import { ModelNotConfiguredError } from './resolveModel'
 import { readSettings } from './store'
 import type { Model3dApi } from '../../shared/aiProvider'
 import type { ModelConfig, ProviderConfig } from './types'
+import { cachedPlanSpec } from './creatorPlan/cachedSpec'
+import {
+  fileNameOfUrl,
+  filesOfRole,
+  resumePlanTask,
+  runPlanTask,
+  settlePlanTask,
+  type PlanTask,
+  type PlanTaskBody
+} from './creatorPlan/tasks'
 
 /**
  * 本地直连的 3D 网格生成。
@@ -535,7 +545,8 @@ const RODIN_QUALITY: Readonly<Record<Model3dQuality, string>> = Object.freeze({
   'extra-low': 'extra-low'
 })
 
-const ADAPTERS: Record<Model3dApi, Model3dAdapter> = {
+/** 创作者 Token Plan（`uebox-tasks`）不走这张表，走共用的任务客户端，见文件末尾 */
+const ADAPTERS: Record<Exclude<Model3dApi, 'uebox-tasks'>, Model3dAdapter> = {
   /**
    * Hyper3D Rodin。
    *
@@ -1240,7 +1251,9 @@ function fileNameOf(url: string): string {
  */
 function adapterOf(provider: ProviderConfig): Model3dAdapter {
   const api = provider.model3dApi
-  if (!api || !(api in ADAPTERS)) throw new Model3dApiUnknownError(provider.id)
+  if (!api || api === 'uebox-tasks' || !(api in ADAPTERS)) {
+    throw new Model3dApiUnknownError(provider.id)
+  }
   return ADAPTERS[api]
 }
 
@@ -1623,6 +1636,7 @@ export async function generateModel3d(
   request: GenerateModel3dRequest & { onProgress?: (note: string) => void }
 ): Promise<GeneratedModel3d> {
   const { provider, modelId } = await resolveModel3dBinding(request)
+  if (provider.model3dApi === 'uebox-tasks') return runPlanModel3d(provider, modelId, request)
   const job = await submitModel3d(provider, modelId, request)
 
   const deadline = Date.now() + JOB_TIMEOUT_MS
@@ -1699,6 +1713,15 @@ export async function resumeModel3d(
         '任务本身还在那家厂商那边 —— 把它加回来，或者直接去它的控制台取结果。'
     )
   }
+  if (provider.model3dApi === 'uebox-tasks') {
+    const planJob = { ...job, providerId: provider.id }
+    const task = await resumePlanTask(provider, 'model3d', job.poll, {
+      signal: request.signal,
+      onProgress: request.onProgress,
+      label: () => `任务号 ${encodeModel3dJob(planJob)}`
+    })
+    return { files: planModel3dFiles(task), job: planJob }
+  }
 
   const deadline = Date.now() + JOB_TIMEOUT_MS
   let consecutiveFailures = 0
@@ -1760,4 +1783,137 @@ export async function getModel3dStatus(): Promise<Model3dModelStatus> {
   } catch {
     return { configured: false, model: null }
   }
+}
+
+// ── 创作者 Token Plan（model3dApi: 'uebox-tasks'）────────────────────────────
+
+/** 多图时每张带的视位，顺序与 Tripo 那支一致（正面 → 左 → 背 → 右） */
+const PLAN_VIEWS = ['front', 'left', 'back', 'right'] as const
+
+/**
+ * 我们的厂商开关 → 协议 `options` 的键。协议里没有对应键的几个（几何精细档、朝向对齐、
+ * 贴图对齐、自动修图）不在表里 —— 给了就明确报错，不静默丢掉。
+ */
+const PLAN_OPTION_KEYS: Partial<Record<keyof Model3dVendorOptions, string>> = {
+  negativePrompt: 'negative_prompt',
+  textureQuality: 'texture_quality',
+  smartLowPoly: 'smart_low_poly',
+  autoSize: 'auto_size',
+  generateParts: 'generate_parts'
+}
+
+/**
+ * 我们的 3D 请求 → 协议 05-tasks 的 `uebox-3d` 输入。
+ *
+ * - 多张参考图各带 `view`（front / left / back / right），最多 4 张
+ * - 厂商开关、`bounding_box`、`rest_pose` 都进 `options`，**只发清单 `options` 里列了的键**：
+ *   清单没列的给了就在本地报错（服务端也会回 400 unsupported_option，但那要多一次往返）。
+ *   没有缓存的清单时照发，由服务端判。
+ */
+export function planModel3dBody(
+  modelId: string,
+  request: Omit<GenerateModel3dRequest, 'providerId' | 'modelId'>,
+  allowedOptions: readonly string[] | null
+): PlanTaskBody {
+  const prompt = String(request.prompt ?? '').trim()
+  const images = (request.images ?? []).map((item) => String(item || '').trim()).filter(Boolean)
+  if (!prompt && images.length === 0) throw new Model3dEmptyInputError()
+  if (images.length > PLAN_VIEWS.length) {
+    throw new Model3dParamUnsupportedError(
+      'uebox-tasks',
+      `${images.length} 张参考图`,
+      `最多 ${PLAN_VIEWS.length} 张，按正面 → 左 → 背 → 右给。`
+    )
+  }
+  for (const image of images) {
+    if (!/^https:\/\//i.test(image) && !/^data:image\//i.test(image)) {
+      throw new Model3dParamUnsupportedError(
+        'uebox-tasks',
+        `参考图「${image.slice(0, 60)}」`,
+        '只收 https 链接或 data URI。本地文件要先读成 data URI（工具层的参考图加载器会做这件事）。'
+      )
+    }
+  }
+
+  const vendor = request.vendor ?? {}
+  const options: Record<string, unknown> = {}
+  const unsupported: string[] = []
+  for (const [name, value] of Object.entries(vendor) as [keyof Model3dVendorOptions, unknown][]) {
+    if (value === undefined || value === '') continue
+    const key = PLAN_OPTION_KEYS[name]
+    if (key) options[key] = value
+    else unsupported.push(name)
+  }
+  if (request.boundingBox) options.bounding_box = request.boundingBox
+  if (request.restPose !== undefined) options.rest_pose = request.restPose
+  if (allowedOptions) {
+    unsupported.push(...Object.keys(options).filter((key) => !allowedOptions.includes(key)))
+  }
+  if (unsupported.length > 0) {
+    throw new Model3dParamUnsupportedError(
+      'uebox-tasks',
+      unsupported.join(' / '),
+      allowedOptions
+        ? `当前套餐支持的扩展选项：${allowedOptions.join(' / ') || '无'}。去掉其余的再生成。`
+        : '创作者 Token Plan 没有这几个选项，去掉它们再生成。'
+    )
+  }
+
+  return {
+    model: modelId,
+    input: {
+      ...(prompt ? { prompt } : {}),
+      ...(images.length > 0
+        ? {
+            images: images.map((url, index) => ({
+              url,
+              ...(images.length > 1 ? { view: PLAN_VIEWS[index] } : {})
+            }))
+          }
+        : {}),
+      format: request.format ?? 'glb',
+      ...(request.quality ? { quality: request.quality } : {}),
+      ...(request.topology ? { topology: request.topology } : {}),
+      ...(request.material ? { material: request.material } : {}),
+      ...(request.seed !== undefined ? { seed: request.seed } : {}),
+      ...(Object.keys(options).length > 0 ? { options } : {})
+    }
+  }
+}
+
+/** 任务文件 → 我们的文件列表：网格在前，贴图、预览图在后（工具层按扩展名分网格与附属文件） */
+function planModel3dFiles(task: PlanTask): Model3dFile[] {
+  const files = [
+    ...filesOfRole(task, 'model'),
+    ...filesOfRole(task, 'texture'),
+    ...filesOfRole(task, 'preview')
+  ].map((file) => ({ url: file.url, name: fileNameOfUrl(file.url, `${file.role}.bin`) }))
+  if (files.length === 0) throw new Model3dNoFilesError(JSON.stringify(task.files).slice(0, 500))
+  return files
+}
+
+/**
+ * 套餐那一支：提交（带幂等键、崩溃后按账本续上）→ 按 5 秒轮询 → 拿文件链接（7 天有效）。
+ * 用户按停止时服务端取消、额度退回；失败同样退回。见 creatorPlan/tasks.ts。
+ */
+async function runPlanModel3d(
+  provider: ProviderConfig,
+  modelId: string,
+  request: GenerateModel3dRequest & { onProgress?: (note: string) => void }
+): Promise<GeneratedModel3d> {
+  const spec = await cachedPlanSpec('model3d')
+  const allowed = Array.isArray(spec?.options)
+    ? (spec.options as unknown[]).filter((key): key is string => typeof key === 'string')
+    : null
+  const body = planModel3dBody(modelId, request, allowed)
+  const tokenOf = (id: string): string =>
+    encodeModel3dJob({ poll: id, download: id, cost: null, providerId: provider.id })
+  const task = await runPlanTask(provider, 'model3d', body, {
+    signal: request.signal,
+    onProgress: request.onProgress,
+    label: (id) => `任务号 ${tokenOf(id)}`
+  })
+  const files = planModel3dFiles(task)
+  await settlePlanTask(body)
+  return { files, job: { poll: task.id, download: task.id, cost: null, providerId: provider.id } }
 }

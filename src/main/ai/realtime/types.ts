@@ -132,6 +132,13 @@ export interface RealtimeSessionConfig {
    * 「把这个 actor……缩放两倍」切成两句，于是 Agent 收到两条半截指令。
    */
   dictation?: boolean
+  /**
+   * 创作者 Token Plan 的来源（协议 07-realtime，OpenAI Realtime GA 的事件子集）。
+   *
+   * 走 OpenAI 这支适配器，差别只有两处：转写模型只认 `uebox-stt`（给别的名字服务端回 error）；
+   * 握手被拒（401 Key 失效）和会话里的订阅 / 额度错误换成说清下一步的文案。
+   */
+  plan?: boolean
   tools: RealtimeToolDefinition[]
   onEvent: (event: VoiceSessionEvent) => void
 }

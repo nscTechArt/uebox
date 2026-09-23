@@ -789,6 +789,7 @@ export default {
       previewCurrent: '现在：{name}',
       previewUnset: '现在：未设置',
       previewManaged: '套餐管理中',
+      previewReindex: '换过去后知识库按新模型重建向量，期间只能按关键词搜',
       apply: '应用',
       applied: '已应用',
       storage: {

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { defaultSpeechVoice, MAX_SPEECH_CHARS, type SpeechAudio } from '../../shared/speech'
 import { requestQwenAudioSpeech } from './speechQwenAudio'
+import { isPlanProvider } from '../../shared/creatorPlan'
+import { cachedPlanSpec, specLimit } from './creatorPlan/cachedSpec'
+import { requestPlanSpeech } from './creatorPlan/speech'
 import { resolveApiKey } from './credentials'
 import { readSettings } from './store'
 import type { ProviderConfig } from './types'
@@ -15,7 +18,12 @@ export async function requestSpeech(
   signal: AbortSignal,
   onAudio: (chunk: SpeechAudio) => void = () => {}
 ): Promise<void> {
-  if (!text.trim() || Array.from(text).length > MAX_SPEECH_CHARS) {
+  // 创作者 Token Plan 单次上限按清单的 max_input_chars（协议 06-audio），其余家 600 字
+  const plan = isPlanProvider(provider.id)
+  const limit = plan
+    ? (specLimit(await cachedPlanSpec('tts'), 'max_input_chars') ?? MAX_SPEECH_CHARS)
+    : MAX_SPEECH_CHARS
+  if (!text.trim() || Array.from(text).length > limit) {
     throw new Error('TTS_INVALID_TEXT')
   }
   const key = await resolveApiKey(provider.apiKey)
@@ -23,6 +31,7 @@ export async function requestSpeech(
   signal.throwIfAborted()
   const voice =
     provider.models.find((model) => model.id === modelId)?.ttsVoice || defaultSpeechVoice(modelId)
+  if (plan) return requestPlanSpeech(provider, modelId, voice, text, key, signal, onAudio)
   if (modelId.startsWith('qwen-audio-3.0-tts-')) {
     return requestQwenAudioSpeech(provider, modelId, voice, text, key, signal, onAudio)
   }

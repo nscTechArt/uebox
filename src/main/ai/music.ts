@@ -5,6 +5,8 @@ import { setTimeout } from 'node:timers/promises'
 import { resolveApiKey } from './credentials'
 import type { ProviderConfig } from './types'
 import { recoverMediaFile, retryMediaFile, saveMediaFile } from '../services/taskVideo/files'
+import { cachedPlanSpec } from './creatorPlan/cachedSpec'
+import { filesOfRole, runPlanTask, settlePlanTask } from './creatorPlan/tasks'
 
 interface MusicTrack {
   path: string
@@ -41,6 +43,13 @@ export function musicRequest(
     }
   if (provider.musicApi === 'mureka-music')
     return { endpoint: `${base}/instrumental/generate`, body: { model, prompt } }
+  if (provider.musicApi === 'uebox-tasks') {
+    // 协议 05-tasks：`POST /tasks`，input 里是 prompt / seconds / instrumental。实际发送走 creatorPlan/tasks.ts
+    return {
+      endpoint: `${base}/tasks`,
+      body: { model, input: { prompt, seconds: Math.round(seconds), instrumental: true } }
+    }
+  }
   if (provider.musicApi === 'sunoapi-music') {
     if (prompt.length > 3000) throw new Error('SUNO 音乐描述最多 3000 字符，请精简后继续。')
     return {
@@ -55,7 +64,7 @@ export function musicRequest(
       }
     }
   }
-  throw new Error('请在音乐来源中选择 ElevenLabs、Mureka 或 SUNO 音乐接口。')
+  throw new Error('请在音乐来源中选择 ElevenLabs、Mureka、SUNO 或创作者 Token Plan 音乐接口。')
 }
 
 interface SunoResponse {
@@ -109,6 +118,9 @@ export async function generateTaskMusic(
   signal?: AbortSignal,
   report: (text: string) => void = () => {}
 ): Promise<{ path: string; tracks: MusicTrack[]; reused: boolean }> {
+  if (provider.musicApi === 'uebox-tasks') {
+    return generatePlanMusic(provider, model, prompt, seconds, projectDir, signal, report)
+  }
   const request = musicRequest(provider, model, prompt, seconds)
   const key = await resolveApiKey(provider.apiKey)
   if (!key) throw new Error('音乐来源没有配置 API 密钥。')
@@ -329,4 +341,97 @@ export async function generateTaskMusic(
   job = { ...job, status: 'complete', path: target, tracks }
   await save()
   return { path: target, tracks, reused: false }
+}
+
+/**
+ * 创作者 Token Plan 那一支（`musicApi: 'uebox-tasks'`）。
+ *
+ * 上面几家靠「提交前先写回执、没确认的回执拒绝再提交」防重复收费；这一支换成
+ * `Idempotency-Key` + 任务账本（creatorPlan/tasks.ts）：提交可以放心重发，应用崩了之后
+ * 同一个请求再来一次会接着查原来那个任务。回执只在**文件落盘之后**写一份 complete，
+ * 让同一个请求第二次直接复用本地文件；账在落盘之后才划掉，下载到一半崩了也续得上。
+ *
+ * 时长按清单的 `seconds` 范围夹住（协议：实际时长可能偏差 ±15%），纯音乐（清单 `vocals` 为假时只能如此）。
+ */
+async function generatePlanMusic(
+  provider: ProviderConfig,
+  model: string,
+  prompt: string,
+  seconds: number,
+  projectDir: string,
+  signal: AbortSignal | undefined,
+  report: (text: string) => void
+): Promise<{ path: string; tracks: MusicTrack[]; reused: boolean }> {
+  if (!prompt.trim()) throw new Error('音乐描述不能为空。')
+  if (prompt.length > 3000) throw new Error('音乐描述最多 3000 字符，请精简后继续。')
+  const range = (await cachedPlanSpec('music'))?.seconds as
+    | { min?: unknown; max?: unknown }
+    | undefined
+  const min = typeof range?.min === 'number' ? range.min : 0
+  const max = typeof range?.max === 'number' ? range.max : Number.POSITIVE_INFINITY
+  const target = Math.round(Math.min(Math.max(seconds, min), max))
+  if (target !== Math.round(seconds)) report(`套餐支持 ${min}–${max} 秒，按 ${target} 秒生成`)
+
+  const dir = path.join(projectDir, 'music')
+  await fs.mkdir(dir, { recursive: true })
+  const hash = createHash('sha256')
+    .update(JSON.stringify({ provider: provider.id, model, prompt, seconds: target }))
+    .digest('hex')
+  const receipt = path.join(dir, `${hash}.json`)
+  try {
+    const saved = JSON.parse(await fs.readFile(receipt, 'utf8')) as MusicJob
+    if (saved.status === 'complete' && saved.tracks?.length) {
+      const sizes = await Promise.all(
+        saved.tracks.map((track) =>
+          fs.stat(track.path).then(
+            (stat) => stat.size,
+            () => 0
+          )
+        )
+      )
+      if (sizes.every((size) => size > 0)) {
+        return { path: saved.tracks[0].path, tracks: saved.tracks, reused: true }
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError))
+      throw error
+  }
+
+  const combined = signal ?? new AbortController().signal
+  const body = { model, input: { prompt, seconds: target, instrumental: true } }
+  report('正在提交音乐生成（创作者 Token Plan）')
+  const task = await runPlanTask(provider, 'music', body, {
+    signal: combined,
+    onProgress: (note) => report(`音乐生成：${note}`),
+    label: (id) => `任务 ${id}`
+  })
+  const audio = filesOfRole(task, 'audio')
+  if (audio.length === 0) throw new Error('音乐任务完成了，但没有返回音频文件。')
+
+  const tracks: MusicTrack[] = audio.map((file, index) => ({
+    path: index === 0 ? path.join(dir, `${hash}.mp3`) : path.join(dir, `${hash}-${index + 1}.mp3`),
+    url: file.url
+  }))
+  // 能力链接，不带 Key（与上面几家的 CDN 下载同一条规矩）
+  for (const [index, track] of tracks.entries()) {
+    report(`正在保存音乐 ${index + 1}/${tracks.length}`)
+    const response = await fetch(track.url!, { signal: combined, redirect: 'error' })
+    await saveMediaFile(track.path, await audioBytes(response))
+  }
+  const job: MusicJob = { status: 'complete', taskId: task.id, path: tracks[0].path, tracks }
+  const tmp = `${receipt}.${randomUUID()}.tmp`
+  await retryMediaFile(() =>
+    fs.writeFile(
+      tmp,
+      JSON.stringify(
+        { ...job, providerId: provider.id, model, prompt, requestedSeconds: target },
+        null,
+        2
+      )
+    )
+  )
+  await retryMediaFile(() => fs.rename(tmp, receipt))
+  await settlePlanTask(body)
+  return { path: tracks[0].path, tracks, reused: false }
 }

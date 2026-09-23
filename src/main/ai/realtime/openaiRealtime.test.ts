@@ -5,6 +5,7 @@ import {
   OPENAI_DICTATION_PROMPT,
   OPENAI_DICTATION_TURN_DETECTION,
   OPENAI_TRANSCRIPTION_MODEL,
+  PLAN_TRANSCRIPTION_MODEL,
   buildOpenAiConversationItem,
   buildOpenAiSessionUpdate,
   createResponseGate,
@@ -422,6 +423,61 @@ describe('打断', () => {
   it('服务端 VAD 判停时抛出「这句说完了」', () => {
     expect(translate({ type: 'input_audio_buffer.speech_stopped' })).toEqual([
       { type: 'user-speech-done' }
+    ])
+  })
+})
+
+/**
+ * 创作者 Token Plan（协议 07-realtime）走的就是这支适配器：OpenAI Realtime GA 的事件子集。
+ * 差别只在转写模型和套餐错误的文案。
+ */
+describe('创作者 Token Plan', () => {
+  it('转写模型只认 uebox-stt；音色原样发（清单里的 uebox-voice-*）；听写照旧关掉自动应答', () => {
+    const update = buildOpenAiSessionUpdate({
+      ...CONFIG,
+      model: 'uebox-realtime',
+      voice: 'uebox-voice-f1',
+      plan: true,
+      dictation: true
+    }) as {
+      session: {
+        audio: {
+          input: { transcription: { model: string }; turn_detection: Record<string, unknown> }
+          output: { voice: string }
+        }
+      }
+    }
+    expect(update.session.audio.input.transcription.model).toBe(PLAN_TRANSCRIPTION_MODEL)
+    expect(update.session.audio.output.voice).toBe('uebox-voice-f1')
+    expect(update.session.audio.input.turn_detection.create_response).toBe(false)
+    // 别的来源不受影响
+    const openai = buildOpenAiSessionUpdate(CONFIG) as typeof update
+    expect(openai.session.audio.input.transcription.model).toBe(OPENAI_TRANSCRIPTION_MODEL)
+  })
+
+  it('会话中途额度用完 / 订阅失效：error 换成说清下一步的话', () => {
+    expect(
+      translate({
+        type: 'error',
+        error: { code: 'quota_exhausted', message: 'Monthly quota used up' }
+      })
+    ).toEqual([{ type: 'error', message: expect.stringContaining('额度用完了') }])
+    expect(
+      translate({ type: 'error', error: { code: 'subscription_inactive', message: 'x' } })
+    ).toEqual([{ type: 'error', message: expect.stringContaining('管理订阅') }])
+  })
+
+  it('工具调用照旧从 response.done.output 取（协议 07：两处都带，取一处即可）', () => {
+    expect(
+      translate({
+        type: 'response.done',
+        response: {
+          output: [{ type: 'function_call', call_id: 'c1', name: 'open_level', arguments: '{}' }]
+        }
+      })
+    ).toEqual([
+      { type: 'tool-call', callId: 'c1', name: 'open_level', args: '{}' },
+      { type: 'turn-done' }
     ])
   })
 })

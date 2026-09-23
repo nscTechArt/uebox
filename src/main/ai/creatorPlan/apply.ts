@@ -2,7 +2,8 @@
  * 把 Creator Plan 的清单落成本地的来源（provider）和角色绑定。纯函数，不碰磁盘。
  *
  * 规则：
- * - 套餐生成的来源 id 固定以 `creator-plan` 开头，共用一把密钥（`PLAN_KEY_ID`）。
+ * - 按角色类别（`ProviderKind`）一类一个来源，id 都以 `creator-plan` 开头，共用一把密钥
+ *   （`PLAN_KEY_ID`）。界面上它们合成一张「创作者 Token Plan」卡片。
  * - 套餐绑定的角色带 `source: 'plan'`。用户之后手动改了哪个角色，那个角色就自动
  *   脱离套餐（渲染层改绑定时不带 source），重新导入也不会覆盖它。
  * - 导入时默认只接管「没绑的」和「本来就由套餐管着的」角色；用户手动配过的，
@@ -17,6 +18,7 @@ import {
   type ModelBinding,
   type ModelConfig,
   type ModelRole,
+  type ProviderKind,
   type RoleBindings
 } from '../../../shared/aiProvider'
 import {
@@ -39,12 +41,36 @@ export const PLAN_KEY_ID = 'creator-plan:key'
 export type OriginalBindings = Partial<Record<ModelRole, ModelBinding | null>>
 const PLAN_DISPLAY_NAME = 'Creator Plan'
 
-/** 目前只接对话类角色；其余角色的协议适配器还没写，清单里给了也先不接 */
-const SUPPORTED_ROLES: readonly ModelRole[] = MODEL_ROLES.filter(
-  (role) => ROLE_KIND[role] === 'chat'
-)
+/** 清单里的角色全都接。某个角色为 null（套餐不含）时不出现在预览里 */
+const SUPPORTED_ROLES: readonly ModelRole[] = MODEL_ROLES
+
+/**
+ * 每一类的来源 id。**这几个 id 不许改**：
+ *
+ * - 嵌入的向量是否过期按 `providerId:modelId` 判（`getEmbeddingModelTag`），
+ *   改了 `creator-plan-embedding`，用户的知识库会被整库重建；
+ * - 视频 / 3D 的任务令牌是 `providerId:任务号`，改了之前报出去的令牌就续不上。
+ *
+ * 对话类沿用最早的 `creator-plan`，老用户的绑定原样有效。显示名随便改，不影响这两件事。
+ */
+export const PLAN_PROVIDER_IDS: Readonly<Record<ProviderKind, string>> = Object.freeze({
+  chat: PLAN_PROVIDER_ID,
+  embedding: `${PLAN_PROVIDER_ID}-embedding`,
+  image: `${PLAN_PROVIDER_ID}-image`,
+  video: `${PLAN_PROVIDER_ID}-video`,
+  model3d: `${PLAN_PROVIDER_ID}-model3d`,
+  realtime: `${PLAN_PROVIDER_ID}-realtime`,
+  tts: `${PLAN_PROVIDER_ID}-tts`,
+  stt: `${PLAN_PROVIDER_ID}-stt`,
+  music: `${PLAN_PROVIDER_ID}-music`,
+  search: `${PLAN_PROVIDER_ID}-search`,
+  judge: `${PLAN_PROVIDER_ID}-judge`
+})
 
 const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+
+/** 清单里一个角色的规格。各类字段不同，公共的只有 model / display_name（见协议 01-plan） */
+export type PlanRoleSpec = { model: string; display_name?: string } & Record<string, unknown>
 
 function isChatSpec(value: unknown): value is CreatorPlanChatSpec {
   const spec = value as Partial<CreatorPlanChatSpec> | null
@@ -56,19 +82,25 @@ function isChatSpec(value: unknown): value is CreatorPlanChatSpec {
   )
 }
 
+function isRoleSpec(role: ModelRole, value: unknown): value is PlanRoleSpec {
+  if (ROLE_KIND[role] === 'chat') return isChatSpec(value)
+  const spec = value as { model?: unknown } | null
+  return !!spec && typeof spec.model === 'string' && spec.model.length > 0
+}
+
 /** 清单里这次能接的角色 → 规格 */
 export function planRoleSpecs(
   manifest: CreatorPlanManifest
-): Partial<Record<ModelRole, CreatorPlanChatSpec>> {
-  const out: Partial<Record<ModelRole, CreatorPlanChatSpec>> = {}
+): Partial<Record<ModelRole, PlanRoleSpec>> {
+  const out: Partial<Record<ModelRole, PlanRoleSpec>> = {}
   for (const role of SUPPORTED_ROLES) {
-    const spec = manifest.roles[role]
-    if (isChatSpec(spec)) out[role] = spec
+    const spec = manifest.roles?.[role]
+    if (isRoleSpec(role, spec)) out[role] = spec
   }
   return out
 }
 
-function toModelConfig(spec: CreatorPlanChatSpec): ModelConfig {
+function chatModel(spec: CreatorPlanChatSpec): ModelConfig {
   const efforts = new Set(spec.reasoning_efforts ?? [])
   return {
     id: spec.model,
@@ -90,23 +122,92 @@ function toModelConfig(spec: CreatorPlanChatSpec): ModelConfig {
   }
 }
 
-/** 清单 → 套餐的来源。现在只有对话一类，一个来源装下全部对话模型 */
+const str = (value: unknown): string | undefined =>
+  typeof value === 'string' && value ? value : undefined
+
+/**
+ * 清单规格 → 各类的 `ModelConfig`（对话类见 chatModel）。
+ *
+ * 只写落盘归一化（`store.ts` 的 normalizeModel）会留下的字段，没值就不写键：
+ * 清单刷新（`refreshPlanModels`）逐键比对，写一个会被归一化改掉的值，就会每 6 小时白写一次盘。
+ *
+ * 各类在调用时走哪条分支：
+ * - embedding：`jina-embeddings` 发 `task`（协议 03 的字段同名同值），维度按清单固定发
+ * - image：`uebox-images`（`imageGeneration.ts`）
+ * - video / model3d / music：Provider 上的 `uebox-tasks`（见 PLAN_PROVIDER_EXTRA）
+ * - realtime / tts：音色取清单（realtime 取第一个，tts 取 default_voice）
+ * - stt / search / judge：按来源 id（`isPlanProvider`）选分支，模型上不用额外字段
+ */
+const MODEL_OF_KIND: Readonly<
+  Record<ProviderKind, (spec: PlanRoleSpec) => Omit<ModelConfig, 'id' | 'displayName'>>
+> = Object.freeze({
+  chat: () => ({}),
+  embedding: (spec: PlanRoleSpec) => ({
+    embeddingApi: 'jina-embeddings' as const,
+    ...(typeof spec.dimensions === 'number' ? { embeddingDimensions: spec.dimensions } : {})
+  }),
+  image: () => ({ imageApi: 'uebox-images' as const }),
+  video: () => ({}),
+  model3d: () => ({}),
+  music: () => ({}),
+  realtime: (spec: PlanRoleSpec) => {
+    const voice = Array.isArray(spec.voices) ? str(spec.voices[0]) : undefined
+    return voice ? { realtimeVoice: voice } : {}
+  },
+  tts: (spec: PlanRoleSpec) => {
+    const voice =
+      str(spec.default_voice) ?? (Array.isArray(spec.voices) ? str(spec.voices[0]) : undefined)
+    return voice ? { ttsVoice: voice } : {}
+  },
+  stt: () => ({}),
+  search: () => ({}),
+  judge: () => ({})
+})
+
+/** Provider 级的接口形状：三类异步任务共用一个 `uebox-tasks` 客户端 */
+const PLAN_PROVIDER_EXTRA: Partial<Record<ProviderKind, Partial<ProviderConfig>>> = {
+  video: { videoApi: 'uebox-tasks' },
+  model3d: { model3dApi: 'uebox-tasks' },
+  music: { musicApi: 'uebox-tasks' }
+}
+
+function toModelConfig(role: ModelRole, spec: PlanRoleSpec): ModelConfig {
+  const kind = ROLE_KIND[role]
+  if (kind === 'chat') return chatModel(spec as unknown as CreatorPlanChatSpec)
+  return {
+    id: spec.model,
+    displayName: spec.display_name ?? spec.model,
+    ...MODEL_OF_KIND[kind](spec)
+  }
+}
+
+/** 这个角色的套餐来源 id */
+export function planProviderIdOf(role: ModelRole): string {
+  return PLAN_PROVIDER_IDS[ROLE_KIND[role]]
+}
+
+/** 清单 → 套餐的来源。一类一个，没有模型的类不生成 */
 export function planProviders(manifest: CreatorPlanManifest, apiKey: ApiKeyRef): ProviderConfig[] {
-  const specs = Object.values(planRoleSpecs(manifest))
-  const models = new Map<string, ModelConfig>()
-  for (const spec of specs) if (!models.has(spec.model)) models.set(spec.model, toModelConfig(spec))
-  if (models.size === 0) return []
-  return [
-    {
-      id: PLAN_PROVIDER_ID,
-      displayName: PLAN_DISPLAY_NAME,
-      kind: 'chat',
-      protocol: 'openai-completions',
-      baseUrl: manifest.api.base_url,
-      apiKey,
-      models: [...models.values()]
-    }
-  ]
+  const byKind = new Map<ProviderKind, Map<string, ModelConfig>>()
+  for (const [role, spec] of Object.entries(planRoleSpecs(manifest)) as [
+    ModelRole,
+    PlanRoleSpec
+  ][]) {
+    const kind = ROLE_KIND[role]
+    const models = byKind.get(kind) ?? new Map<string, ModelConfig>()
+    if (!models.has(spec.model)) models.set(spec.model, toModelConfig(role, spec))
+    byKind.set(kind, models)
+  }
+  return [...byKind.entries()].map(([kind, models]) => ({
+    id: PLAN_PROVIDER_IDS[kind],
+    displayName: PLAN_DISPLAY_NAME,
+    kind,
+    protocol: 'openai-completions' as const,
+    baseUrl: manifest.api.base_url,
+    apiKey,
+    ...PLAN_PROVIDER_EXTRA[kind],
+    models: [...models.values()]
+  }))
 }
 
 /** 清单 quotas 逐项。认识的键按额度表的顺序在前，不认识的也照样列出来 */
@@ -193,7 +294,7 @@ export function applyPlan(
   for (const role of SUPPORTED_ROLES) {
     const spec = specs[role]
     if (spec && selected.includes(role)) {
-      roles[role] = { providerId: PLAN_PROVIDER_ID, modelId: spec.model, source: 'plan' }
+      roles[role] = { providerId: planProviderIdOf(role), modelId: spec.model, source: 'plan' }
     } else if (roles[role]?.source === 'plan') {
       delete roles[role]
     }
@@ -266,8 +367,12 @@ export function refreshPlanModels(
   settings: AiProviderSettings,
   manifest: CreatorPlanManifest
 ): AiProviderSettings {
-  const specs = Object.values(planRoleSpecs(manifest))
-  const bySpec = new Map(specs.map((spec) => [spec.model, toModelConfig(spec)]))
+  const bySpec = new Map(
+    (Object.entries(planRoleSpecs(manifest)) as [ModelRole, PlanRoleSpec][]).map(([role, spec]) => [
+      spec.model,
+      toModelConfig(role, spec)
+    ])
+  )
   let changed = false
   const providers = settings.providers.map((provider) => {
     if (!isPlanProvider(provider.id)) return provider

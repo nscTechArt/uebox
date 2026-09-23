@@ -481,3 +481,68 @@ describe('目录与实现对得上', () => {
     )
   })
 })
+
+/** 创作者 Token Plan：`POST /search`（协议 08），来源 id 以 creator-plan 开头 */
+describe('创作者 Token Plan 检索', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    boundProvider.value = null
+  })
+
+  it('绑了套餐来源：POST /search，带界面语言，结果过回读校验', async () => {
+    boundProvider.value = {
+      providerId: 'creator-plan-search',
+      modelId: 'uebox-search',
+      baseUrl: 'https://plan.example/v1',
+      apiKey: 'ubx-sk-t'
+    }
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init.body)) })
+      return new Response(
+        JSON.stringify({
+          model: 'uebox-search',
+          results: [
+            {
+              title: '虚幻引擎事件分发器',
+              url: 'https://dev.epicgames.com/x',
+              snippet: '事件分发器的用法'
+            }
+          ],
+          usage: { searches: 1 }
+        })
+      )
+    })
+    const result = await searchWeb('虚幻引擎 事件分发器', { limit: 3 })
+    expect(result).toMatchObject({ success: true, provider: 'creator-plan' })
+    expect(result.items?.[0]).toMatchObject({ url: 'https://dev.epicgames.com/x' })
+    expect(requests[0].url).toBe('https://plan.example/v1/search')
+    expect(requests[0].body).toMatchObject({
+      model: 'uebox-search',
+      query: '虚幻引擎 事件分发器',
+      limit: 3,
+      language: 'zh-CN'
+    })
+    expect(browserSearch).not.toHaveBeenCalled()
+  })
+
+  it('额度用完：说清下一步，不偷偷退回内置浏览器', async () => {
+    boundProvider.value = {
+      providerId: 'creator-plan-search',
+      modelId: 'uebox-search',
+      baseUrl: 'https://plan.example/v1',
+      apiKey: 'ubx-sk-t'
+    }
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(JSON.stringify({ error: { code: 'quota_exhausted', message: 'x' } }), {
+          status: 402
+        })
+    )
+    const result = await searchWeb('虚幻引擎')
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('额度用完了')
+    expect(browserSearch).not.toHaveBeenCalled()
+  })
+})

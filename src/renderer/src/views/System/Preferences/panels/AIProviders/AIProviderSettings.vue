@@ -111,6 +111,24 @@ onMounted(() => {
 })
 
 // ==================== 服务商 ====================
+
+/**
+ * 来源卡片。套餐按角色类别生成了好几个来源（对话、嵌入、生图……一类一个），
+ * 但对用户来说它就是**一个**来源：合成一张卡片，模型数加总，放在第一个套餐来源的位置。
+ */
+const sourceCards = computed(() => {
+  const planModelCount = providers.value
+    .filter((provider) => isPlanProvider(provider.id))
+    .reduce((sum, provider) => sum + provider.models.length, 0)
+  let planShown = false
+  return providers.value.flatMap((provider) => {
+    if (!isPlanProvider(provider.id)) return [{ provider, modelCount: provider.models.length }]
+    if (planShown) return []
+    planShown = true
+    return [{ provider, modelCount: planModelCount }]
+  })
+})
+
 function openProvider(providerId: string): void {
   state.selectProvider(providerId)
   showManager.value = true
@@ -334,7 +352,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
           </div>
         </template>
         <template v-else>
-          <template v-for="provider in providers" :key="provider.id">
+          <template v-for="{ provider, modelCount } in sourceCards" :key="provider.id">
             <!--
               套餐来源只读：地址、模型、Key 都由上面的套餐卡片管，在这里改了、删了，
               卡片和配置就对不上了。所以不给点进编辑弹窗，只标出来是谁在管。
@@ -346,9 +364,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
             >
               <span class="source-name">{{ provider.displayName }}</span>
               <span class="source-meta">
-                <span>{{
-                  $t('aiProvider.list.modelCount', { count: provider.models.length })
-                }}</span>
+                <span>{{ $t('aiProvider.list.modelCount', { count: modelCount }) }}</span>
                 <span class="source-key none">
                   {{ $t('aiProvider.creatorPlan.managedBadge') }}
                 </span>
