@@ -117,14 +117,14 @@ describe('插话带图', () => {
     wrapper.unmount()
   })
 
-  it('只带附件一个字没打也能插话，替用户补一句说清带了什么', async () => {
+  it('只带附件一个字没打也能插话', async () => {
     const wrapper = await steeringComposer([uploaded('a')])
     await wrapper.get('.send-btn').trigger('click')
 
     const payload = wrapper.emitted('steer')?.[0]?.[0] as { text: string; images: string[] }
     expect(payload.images).toEqual(['data:image/png;base64,a'])
-    // 空串对不上「已生效」回执，这条会一直挂着未生效
-    expect(payload.text).toBe('补充附件：1 张图片')
+    // 那句「补充附件：…」由 steerAgent 补，输入框只交出用户打的字
+    expect(payload.text).toBe('')
     expect(useChatSessionsStore().getImageDraft(CHAT_SID)).toEqual([])
     wrapper.unmount()
   })

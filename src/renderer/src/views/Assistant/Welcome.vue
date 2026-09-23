@@ -925,10 +925,15 @@ function isPlainTextOnly(payload: ComposerSendPayload): boolean {
  * 插话带得走文字、图、表格、文档和音视频（`agent-v3:steer` 的 `images` / `mediaFiles` /
  * `contextText`），带不走 @ 来源和内嵌 PDF —— 带着它们的那条如果给了按钮，用户点下去
  * 东西会**静悄悄少一半**，所以只能排队等下一轮。
+ *
+ * 只有附件没有字的也算：那句说明由 `steerAgent` 补。
  */
 function isSteerable(payload: ComposerSendPayload): boolean {
   return (
-    payload.content.trim().length > 0 &&
+    (payload.content.trim().length > 0 ||
+      (payload.images?.length || 0) > 0 ||
+      Boolean(payload.excelContext) ||
+      (payload.docFiles?.length || 0) > 0) &&
     (payload.forcedSources?.length || 0) === 0 &&
     (payload.inlineDocuments?.length || 0) === 0
   )

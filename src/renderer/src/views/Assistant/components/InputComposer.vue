@@ -2745,26 +2745,11 @@ function handleSteer(): void {
       kind: f.deferredMedia ?? ('document' as const)
     }))
   ]
+  // 只带附件没打字也照发，那句说明由 `steerAgent` 补
   if (!typed && images.length === 0 && files.length === 0) return
 
-  /*
-   * 只带附件没打字：替用户补一句说清带了什么。空着不行 —— 模型拿到一段没头没尾的
-   * 附件不知道该干嘛，而插话「已生效」的回执是按原话匹配的，空串对不上号，
-   * 这条会一直挂着「未生效」。
-   */
-  const text =
-    typed ||
-    t('assistantInputComposer.steerAttachmentsOnly', {
-      names: [
-        ...files.map((f) => f.fileName),
-        ...(ready.length > 0
-          ? [t('assistantInputComposer.steerImageCount', { count: ready.length })]
-          : [])
-      ].join('、')
-    })
-
   emit('steer', {
-    text,
+    text: typed,
     images,
     ...(files.length > 0
       ? {

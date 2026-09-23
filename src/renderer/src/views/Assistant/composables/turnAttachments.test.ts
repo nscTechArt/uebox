@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   attachmentExtension,
+  attachmentsOnlySteerText,
   bubbleAttachments,
   mergeTurnContext
 } from './turnAttachments'
@@ -82,5 +83,23 @@ describe('attachmentExtension', () => {
     expect(attachmentExtension('README')).toBe('')
     expect(attachmentExtension('.gitignore')).toBe('')
     expect(attachmentExtension('broken.')).toBe('')
+  })
+})
+
+describe('attachmentsOnlySteerText', () => {
+  const t = (key: string, params: Record<string, unknown>): string =>
+    `${key.split('.').pop()}(${Object.values(params).join(',')})`
+
+  it('只拖了附件没打字：说清带了哪些，空串会让「已生效」回执永远对不上', () => {
+    expect(
+      attachmentsOnlySteerText(t, 2, [
+        { fileName: 'HorseRideScene.avi', kind: 'video' },
+        { fileName: '表.xlsx', kind: 'excel' }
+      ])
+    ).toBe('steerAttachmentsOnly(HorseRideScene.avi、表.xlsx、steerImageCount(2))')
+  })
+
+  it('什么都没带就是空串，调用方照旧当「没得发」', () => {
+    expect(attachmentsOnlySteerText(t, 0, [])).toBe('')
   })
 })

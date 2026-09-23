@@ -32,7 +32,12 @@ import {
 } from './notebookRagContext'
 import { buildLibraryContextMessage, type LibraryChatContext } from './libraryChatContext'
 import { buildCurrentUEProjectContext } from './ueProjectContext'
-import { mergeTurnContext, type ChatMediaFile, type SteerAttachments } from './turnAttachments'
+import {
+  attachmentsOnlySteerText,
+  mergeTurnContext,
+  type ChatMediaFile,
+  type SteerAttachments
+} from './turnAttachments'
 import { toSessionProjectPayload } from './sessionProjectBinding'
 import { resolvePermissionMode, toApprovalMode } from './sessionPermissionMode'
 import {
@@ -821,7 +826,9 @@ export function useAgentMode(params: UseAgentModeParams) {
           ...(effectiveOptions.editorSnapshot !== undefined
             ? { editorSnapshot: effectiveOptions.editorSnapshot }
             : {}),
-          ...(effectiveOptions.mediaFiles?.length ? { mediaFiles: effectiveOptions.mediaFiles } : {}),
+          ...(effectiveOptions.mediaFiles?.length
+            ? { mediaFiles: effectiveOptions.mediaFiles }
+            : {}),
           // 绑了知识库才给模型检索工具。上面注入的那份是**这一轮**的地基（顺带出引用），
           // 工具管的是它看完之后想换个说法再查 —— 那件事注入做不到
           notebook: notebookRagTarget?.notebookId
@@ -959,7 +966,9 @@ export function useAgentMode(params: UseAgentModeParams) {
     attachments?: SteerAttachments
   ): Promise<boolean> {
     const sessionId = currentSessionId.value
-    const trimmed = text.trim()
+    // 只带附件没打字的，补一句说明。输入框和排队转插话两条路都走这里，补在这里就只有一处
+    const trimmed =
+      text.trim() || attachmentsOnlySteerText(t, images?.length ?? 0, attachments?.files)
     if (!sessionId || !trimmed) return false
 
     /*

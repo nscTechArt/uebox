@@ -101,3 +101,23 @@ export interface SteerAttachments {
   contextText?: string
   files?: ExcelFileInfo[]
 }
+
+/**
+ * 只带附件没打字的插话，替用户补的那句话。没有附件时返回空串。
+ *
+ * 空着不行：模型拿到一段没头没尾的附件不知道该干嘛；而插话「已生效」的回执是
+ * 按原话匹配的，空串对不上号，这条会一直挂着「未生效」。
+ */
+export function attachmentsOnlySteerText(
+  t: (key: string, params: Record<string, unknown>) => string,
+  imageCount: number,
+  files?: readonly ExcelFileInfo[]
+): string {
+  const names = [
+    ...(files ?? []).map((file) => file.fileName),
+    ...(imageCount > 0 ? [t('assistantInputComposer.steerImageCount', { count: imageCount })] : [])
+  ]
+  return names.length > 0
+    ? t('assistantInputComposer.steerAttachmentsOnly', { names: names.join('、') })
+    : ''
+}

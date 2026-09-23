@@ -81,8 +81,9 @@ describe('提交那一刻抓取', () => {
     expect(handler).toContain('agentStreamStore.isBusy(sid.value)')
     expect(handler).toContain('isGenerating.value')
     // 插话带的是**入队那一刻**的快照和图，不是现在的
+    expect(handler).toContain('const queued = item.payload')
     expect(handler).toContain(
-      'steerAgent(item.text, item.payload.editorSnapshot, item.payload.images)'
+      'steerAgent(item.text, queued.editorSnapshot, queued.images, attachments)'
     )
   })
 
