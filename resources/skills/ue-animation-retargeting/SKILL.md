@@ -72,5 +72,5 @@ description: Retargets body animation between skeletons, measures poses and prev
 - 动画能播但姿势歪：先查重定向姿势，再查链映射，最后才查参数。
 - `Failed to convert parameter`：该传枚举传了字符串（`set_ik_rig` 第一个参数要
   `unreal.RetargetSourceOrTarget.SOURCE`），或该传 int 下标传了名字（`get_retarget_op_enabled`）。
-- 用户放弃这个角色、要把整包移出工程：`ue_content_delete` 直接传目录路径，一批提交；
-  不要在 Python 里循环 `EditorAssetLibrary.delete_asset`，那会按资产数做 GC、把编辑器占死。
+- 用户放弃这个角色、要把整包移出工程：`ue_content_delete` 直接传目录路径（结尾带 `/`），
+  先带 `dry_run: true` 拿清单给用户看、他点头再真删，一批提交；不要在 Python 里循环 `EditorAssetLibrary.delete_asset`，那会按资产数做 GC、把编辑器占死。

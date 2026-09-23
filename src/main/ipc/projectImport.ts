@@ -1505,9 +1505,11 @@ export async function importUAssetsBatchToProject(
   const contentBase = path.join(path.dirname(projectFile), 'Content')
   await ensureDir(contentBase)
 
-  // 渲染层传来的记录可能是升级引擎之前抄的，闸门按磁盘上的 .uproject 判
+  // 渲染层传来的记录可能是升级引擎之前抄的，闸门按磁盘上的 .uproject 判。
+  // 磁盘上写的是空串（源码版引擎里的工程）时退回调用方给的版本 —— 连着的编辑器
+  // 报的版本是真的，`??` 接不住空串，会把闸门判成「工程版本未知」全拒掉
   const projectEngine = await resolveProjectEngineVersion(
-    (await readEngineAssociationFromDisk(project)) ?? project.EngineAssociation ?? null,
+    (await readEngineAssociationFromDisk(project)) || project.EngineAssociation || null,
     UnrealPathManagerUtil
   )
 
@@ -1797,7 +1799,7 @@ ipcMain.handle(
   async (_, project: ProjectImportProjectRecord, sources: ProjectImportBatchSource[]) => {
     try {
       const engine = await resolveProjectEngineVersion(
-        (await readEngineAssociationFromDisk(project)) ?? project.EngineAssociation ?? null,
+        (await readEngineAssociationFromDisk(project)) || project.EngineAssociation || null,
         UnrealPathManagerUtil
       )
       const assets = getAssetsByKeys(

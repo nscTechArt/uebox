@@ -73,7 +73,7 @@ Python 里这两个类不存在。整个 IKRig 插件在这两版里只有 `IKRi
 | `get_source_chain(target_chain_name)` | `Name` | 没映射时返回 `None` |
 | `get_retarget_chain_settings(target_chain_name)` / `set_retarget_chain_settings(name, settings)` | `TargetChainSettings` / `bool` | 单链的旋转/平移/IK 开关 |
 | `get_root_settings()` / `set_root_settings(settings)` | | 根骨的位移缩放，人物高矮差很多时调这里 |
-| `auto_align_all_bones(source_or_target, method=CHAIN_TO_CHAIN)` | 无 | 5.4+。先重置传入那一侧的重定向姿势，再整体对齐。`method` 是 `unreal.RetargetAutoAlignMethod`，见枚举表。**只调一次**：调用后连接断了就不要再调第二次，先 `ue_session_health` 看编辑器还在不在 |
+| `auto_align_all_bones(source_or_target)` | 无 | 5.4+。先重置传入那一侧的重定向姿势，再整体对齐。**5.4 / 5.5 只有这一个参数**，传 `method=` 会直接 TypeError；要指定对齐方式用下面的 `auto_align_bones`。**只调一次**：调用后连接断了就不要再调第二次，先 `ue_session_health` 看编辑器还在不在 |
 | `auto_align_bones(bones, method, source_or_target)` | 无 | 5.4+。只对给定的骨对齐 |
 | `get_retarget_poses(source_or_target)` | `Map[Name, IKRetargetPose]` | 列出这一侧所有重定向姿势；**没有** `get_all_retarget_pose_names`，键就是名字 |
 | `get_current_retarget_pose_name(source_or_target)` | `Name` | |
@@ -174,7 +174,7 @@ created = unreal.IKRetargetBatchOperation.run_batch_retarget(inputs)
 |---|---|
 | `unreal.RetargetSourceOrTarget` | `SOURCE`（拷贝来源）、`TARGET`（拷贝目标） |
 | `unreal.AutoMapChainType` | `EXACT`（只配完全同名，大小写不敏感）、`FUZZY`（按编辑距离配最近的）、`CLEAR`（全清空） |
-| `unreal.RetargetAutoAlignMethod` | `CHAIN_TO_CHAIN`（默认，按链方向）、`MESH_TO_MESH`、`LOCAL_ROTATION_AXES`、`GLOBAL_ROTATION_AXES`（后两个要求两边骨轴朝向一致，否则结果离谱） |
+| `unreal.RetargetAutoAlignMethod` | `CHAIN_TO_CHAIN`（默认，按链方向）、`MESH_TO_MESH`。5.4 / 5.5 只有这两个；更新的版本可能多出 `LOCAL_ROTATION_AXES` / `GLOBAL_ROTATION_AXES`（要求两边骨轴朝向一致，否则结果离谱），用之前先 `hasattr(unreal.RetargetAutoAlignMethod, ...)` 确认 |
 
 ## 5.2 / 5.3 的手工链定义
 

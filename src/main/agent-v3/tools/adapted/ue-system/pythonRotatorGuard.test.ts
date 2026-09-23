@@ -25,6 +25,30 @@ describe('findPositionalRotatorCalls', () => {
     ).toHaveLength(0)
   })
 
+  it('多行关键字写法、每个实参后面跟注释，照样放行', () => {
+    const script = [
+      'rot = unreal.Rotator(',
+      '    roll=0.0,   # X axis',
+      '    pitch=0.0,  # Y axis',
+      '    yaw=90.0,   # Z axis',
+      ')'
+    ].join('\n')
+    expect(findPositionalRotatorCalls(script)).toHaveLength(0)
+  })
+
+  it('注释里的撇号不会让真正按位置传的那处漏网', () => {
+    const script = [
+      "r = unreal.Rotator(0.0,  # the pitch's value",
+      '    yaw, 0.0)',
+      "name = 'x'"
+    ].join('\n')
+    expect(findPositionalRotatorCalls(script)).toHaveLength(1)
+  })
+
+  it('注释里写的示例不拦', () => {
+    expect(findPositionalRotatorCalls('# unreal.Rotator(0, 90, 0) 这样写是错的')).toHaveLength(0)
+  })
+
   it('全零位置参数放行 —— 顺序无所谓', () => {
     expect(findPositionalRotatorCalls('unreal.Rotator(0, 0, 0)')).toHaveLength(0)
     expect(findPositionalRotatorCalls('unreal.Rotator(0.0, -0.0, +0)')).toHaveLength(0)
@@ -72,6 +96,15 @@ describe('findPositionalRotatorCalls', () => {
 })
 
 describe('describePositionalRotatorRefusal', () => {
+  // 实参自己带着轴名的，按名字对 —— 按 (pitch, yaw, roll) 硬映射给的「照抄版」是转乱的
+  it('实参带轴名时按名字给关键字写法', () => {
+    const text = describePositionalRotatorRefusal(
+      findPositionalRotatorCalls('r = unreal.Rotator(rot.roll, rot.pitch, rot.yaw + 90)')
+    )
+    expect(text).toContain('unreal.Rotator(roll=rot.roll, pitch=rot.pitch, yaw=rot.yaw + 90)')
+    expect(text).not.toContain('roll=rot.yaw')
+  })
+
   it('说清顺序、给出可照抄的关键字重写', () => {
     const text = describePositionalRotatorRefusal(
       findPositionalRotatorCalls('unreal.Rotator(0.0, yaw, 0.0)')

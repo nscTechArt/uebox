@@ -29,6 +29,21 @@ export async function readEngineAssociationFromDisk(project: {
 }
 
 /**
+ * 单个工程最多等多久。断开的网络盘、睡着的移动硬盘上一次 stat 能挂几十秒，
+ * 而首页列表要等这一批全部回来才显示 —— 一个掉线的盘不能把整页拖成白屏。
+ * 超时按「读不到」处理，沿用库里的值
+ */
+const DISK_READ_TIMEOUT_MS = 1_500
+
+function withinTimeout<T>(task: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms)
+  })
+  return Promise.race([task, timeout]).finally(() => clearTimeout(timer))
+}
+
+/**
  * 把一批工程记录的 EngineAssociation 对齐到磁盘，变了的回写数据库。
  *
  * 每个工程一次文件读，几十个工程也就几毫秒；GUID → 版本号那一步不在这里做
@@ -40,11 +55,16 @@ export async function readEngineAssociationFromDisk(project: {
  */
 export async function syncProjectEngineAssociations<T extends ProjectRecord>(
   db: Database.Database,
-  projects: T[]
+  projects: T[],
+  timeoutMs = DISK_READ_TIMEOUT_MS
 ): Promise<T[]> {
   await Promise.all(
     projects.map(async (project) => {
-      const onDisk = await readEngineAssociationFromDisk(project)
+      const onDisk = await withinTimeout(
+        readEngineAssociationFromDisk(project).catch(() => null),
+        timeoutMs,
+        null
+      )
       if (onDisk === null) return
       const stored = String(project.EngineAssociation || '').trim()
       if (onDisk === stored) return

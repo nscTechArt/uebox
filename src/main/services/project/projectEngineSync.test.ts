@@ -17,6 +17,18 @@ vi.mock('../../sqliteDataBase/models/project', () => ({
   updateProject: mocks.updateProject
 }))
 
+// 掉线的网络盘：解析 .uproject 路径这一步就挂住不回来
+vi.mock('../../ipc/projectImportPath', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../ipc/projectImportPath')>()
+  return {
+    ...actual,
+    resolveProjectFilePath: (project: { originPath?: string | null }) =>
+      project.originPath === '\\\\offline-nas\\Game\\Game.uproject'
+        ? new Promise(() => {})
+        : actual.resolveProjectFilePath(project)
+  }
+})
+
 import { readEngineAssociationFromDisk, syncProjectEngineAssociations } from './projectEngineSync'
 
 let projectDir = ''
@@ -122,5 +134,24 @@ describe('syncProjectEngineAssociations', () => {
     const result = await syncProjectEngineAssociations(db, records)
 
     expect(result[0].EngineAssociation).toBe(guid)
+  })
+})
+
+describe('一个工程读不回来', () => {
+  it('超时就沿用库里的值，不拖住整批', async () => {
+    writeUproject('5.8')
+    const offline = {
+      projectKey: 'nas',
+      originPath: '\\\\offline-nas\\Game\\Game.uproject',
+      EngineAssociation: '5.7'
+    }
+    const local = { projectKey: 'local', originPath: uprojectPath, EngineAssociation: '5.7' }
+
+    const list = await syncProjectEngineAssociations(db, [offline, local] as never[], 50)
+
+    expect(list.map((item: { EngineAssociation: string }) => item.EngineAssociation)).toEqual([
+      '5.7',
+      '5.8'
+    ])
   })
 })

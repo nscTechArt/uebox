@@ -20,7 +20,8 @@ vi.mock('../../../../services', () => ({
 }))
 
 vi.mock('../../../core/projectTargetContext', () => ({
-  getTargetConnectionId: () => 'conn-1'
+  getTargetConnectionId: () => 'conn-1',
+  getTargetProjectPath: () => undefined
 }))
 
 vi.mock('../../../../appWindows', () => ({

@@ -19,10 +19,16 @@ import { defineV2Tool } from '../../adaptV2Tool'
 import { z } from 'zod'
 import { serviceManager } from '../../../../services'
 
-import { toPackagePath } from '../../../core/assetLock'
+import {
+  describeConflicts,
+  getLockOwner,
+  listLocks,
+  rootSessionId,
+  toPackagePath
+} from '../../../core/assetLock'
 import { releaseProtectionBeforeDelete } from '../../../core/assetLockEnforcement'
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
-import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { UE_NOT_CONNECTED_MESSAGE, type RegistryStatus } from '../../defineUeTool'
 import { describeToolError, isEngineTimeout } from '../../engineErrors'
 // ============================================================================
 // Schema 定义
@@ -36,7 +42,7 @@ const DeleteAssetsSchema = z.object({
     .array(z.string())
     .describe(
       '要删除的路径列表，资产和目录都收。资产写对象路径，如 "/Game/Temp/TestActor.TestActor"；' +
-        '目录写包路径，如 "/Game/ThirdParty/AnimeGirl"，工具会把目录下的**全部**资产（含子目录）展开后' +
+        '目录写包路径并以 / 结尾，如 "/Game/ThirdParty/AnimeGirl/"，工具会把目录下的**全部**资产（含子目录）展开后' +
         '和其余路径合成**一批**提交，引擎只跑一遍垃圾回收。' +
         '整个目录要清掉就直接传目录，**不要**先搜再一个个传、更不要在 Python 里循环 delete_asset ——' +
         '那条路每删一个资产就做一次完整 GC，几百个资产会把编辑器主线程占死十几分钟。'
@@ -81,6 +87,8 @@ interface DeleteAssetsResponse {
 interface SearchResultItem {
   name: string
   path: string
+  /** 资产类名（`ObjectRedirector` …）。旧插件可能不回 */
+  class?: string
 }
 
 interface SearchAssetsResponse {
@@ -148,8 +156,47 @@ export function deleteTimeoutMs(pathCount: number): number {
 }
 
 type ExpandOutcome =
-  | { ok: true; assetPaths: string[]; expanded: Record<string, number> }
+  | {
+      ok: true
+      assetPaths: string[]
+      expanded: Record<string, number>
+      /** 目录里的重定向器：不删，见 `expandFolders` */
+      redirectors: string[]
+    }
   | { ok: false; error: string }
+
+type SearchCall = (
+  method: string,
+  params: Record<string, unknown>,
+  connectionId: string | undefined,
+  timeoutMs: number
+) => Promise<SearchAssetsResponse | undefined>
+
+/**
+ * 不带点、也不带结尾 `/` 的路径，是不是**同时**还是一个资产的包路径。
+ *
+ * 关卡 `/Game/Maps/Main` 旁边常有同名目录 `/Game/Maps/Main/`。目录搜索按「所在目录」
+ * 匹配，搜出来的是目录里的东西、不含那个关卡本身 —— 不问一句就会删掉目录里的一堆东西，
+ * 而用户点名要删的关卡原样留着。在父目录里按名字找一次，包路径完全相同的就是它。
+ */
+async function isAlsoPackage(
+  folder: string,
+  callRequest: SearchCall,
+  connectionId: string | undefined
+): Promise<boolean> {
+  const slash = folder.lastIndexOf('/')
+  const parent = folder.slice(0, slash)
+  const name = folder.slice(slash + 1)
+  if (!parent || !name) return false
+  const response = await callRequest(
+    'content.search',
+    { query: name, path: parent, limit: FOLDER_EXPAND_LIMIT },
+    connectionId,
+    30_000
+  )
+  const target = folder.toLowerCase()
+  return (response?.results ?? []).some((item) => item.path.toLowerCase() === target)
+}
 
 /**
  * 把目录换成它下面的对象路径。
@@ -160,12 +207,7 @@ type ExpandOutcome =
  */
 async function expandFolders(
   paths: string[],
-  callRequest: (
-    method: string,
-    params: Record<string, unknown>,
-    connectionId: string | undefined,
-    timeoutMs: number
-  ) => Promise<SearchAssetsResponse | undefined>,
+  callRequest: SearchCall,
   connectionId: string | undefined
 ): Promise<ExpandOutcome> {
   // 按包路径去重：`/Game/Dir/A`（包路径）和目录展开出的 `/Game/Dir/A.A` 是同一个资产，
@@ -178,6 +220,7 @@ async function expandFolders(
     if (!existing || (!existing.includes('.') && path.includes('.'))) assets.set(key, path)
   }
   const expanded: Record<string, number> = {}
+  const redirectors: string[] = []
 
   const explicit: string[] = []
   const folders: string[] = []
@@ -195,6 +238,11 @@ async function expandFolders(
     ;(looksLikeFolder(path) ? folders : explicit).push(path)
   }
 
+  // 结尾带 `/` 的是明说了「目录」，不用再问它是不是同名资产
+  const saidFolder = new Set(
+    folders.filter((folder) => folder.endsWith('/')).map((folder) => folder.replace(/\/+$/, ''))
+  )
+
   // 嵌套的目录只搜外层：引擎侧递归，内层会跟着出来，再搜一遍是白等一个往返
   const roots = folders
     .map((folder) => folder.replace(/\/+$/, ''))
@@ -202,6 +250,28 @@ async function expandFolders(
       (folder, _index, all) =>
         !all.some((other) => other !== folder && folder.startsWith(`${other}/`))
     )
+
+  /*
+   * `content.search` 不等注册表：编辑器刚开、还在扫的时候它照样回，只是回的是**扫到哪算哪**。
+   * 拿这份去删目录，删掉的是一部分、报的却是「目录删完了」，剩下的等扫完才冒出来。
+   * 所以展开之前问一句扫完没有；老插件没有这个命令（报错、回不了 ready 字段）就照旧往下走
+   */
+  if (roots.length > 0) {
+    const status = (await callRequest('content.registry_status', {}, connectionId, 15_000).catch(
+      () => undefined
+    )) as RegistryStatus | undefined
+    if (status?.ready === false) {
+      const progress = status.progress
+      const where =
+        progress && progress.total > 0 ? `（${progress.processed}/${progress.total}）` : ''
+      return {
+        ok: false,
+        error:
+          `编辑器的资产注册表还在扫描${where}，这时展开目录会漏掉还没扫到的资产，什么都没删。` +
+          '等扫描完再调一次（ue_session_health 能看进度）。'
+      }
+    }
+  }
 
   const responses = await Promise.all(
     roots.map((folder) =>
@@ -211,6 +281,15 @@ async function expandFolders(
         connectionId,
         30_000
       )
+    )
+  )
+
+  // 搜出了东西、又没明说是目录的：问一句它是不是还是个同名资产
+  const ambiguous = await Promise.all(
+    roots.map((folder, index) =>
+      (responses[index]?.results?.length ?? 0) > 0 && !saidFolder.has(folder)
+        ? isAlsoPackage(folder, callRequest, connectionId)
+        : Promise.resolve(false)
     )
   )
 
@@ -240,13 +319,35 @@ async function expandFolders(
       continue
     }
 
-    expanded[folder] = results.length
-    for (const item of results) addAsset(toObjectPath(item))
+    if (ambiguous[index]) {
+      const name = folder.slice(folder.lastIndexOf('/') + 1)
+      return {
+        ok: false,
+        error:
+          `${folder} 既是资产 ${name} 的包路径，又是一个有 ${results.length} 个资产的目录，` +
+          '分不清要删哪个，什么都没删。' +
+          `删那个资产就写对象路径 ${toObjectPath({ name, path: folder })}，` +
+          `删整个目录就写 ${folder}/（结尾带斜杠）。`
+      }
+    }
+
+    // 重定向器不跟着删：别处还没重存的引用正是靠它转到新位置，强删掉那些引用就断了。
+    // 这类目录多半是移走资产后留下的空壳，该走 ue_fixup_redirectors
+    let count = 0
+    for (const item of results) {
+      if (item.class === 'ObjectRedirector') {
+        redirectors.push(toObjectPath(item))
+        continue
+      }
+      addAsset(toObjectPath(item))
+      count++
+    }
+    expanded[folder] = count
   }
 
   for (const path of explicit) addAsset(path)
 
-  return { ok: true, assetPaths: Array.from(assets.values()), expanded }
+  return { ok: true, assetPaths: Array.from(assets.values()), expanded, redirectors }
 }
 
 // ============================================================================
@@ -264,8 +365,8 @@ export function createDeleteAssetsTool() {
 
 【警告】删除不可逆，删之前和用户核对清单。
 
-【整个目录】直接把目录路径放进 paths（如 "/Game/ThirdParty/AnimeGirl"），工具自己展开子目录里的
-全部资产，合成一批提交。**传目录先 dry_run=true 拿清单给用户看**（审批卡只显示目录名，看不到里面），
+【整个目录】直接把目录路径放进 paths（如 "/Game/ThirdParty/AnimeGirl/"，结尾带斜杠），工具自己展开子目录里的
+全部资产（重定向器除外，那个走 ue_fixup_redirectors），合成一批提交。**传目录先 dry_run=true 拿清单给用户看**（审批卡只显示目录名，看不到里面），
 用户点头再真删。挂载根（/Game、/Engine、/插件名）一律拒绝。**不要**用 ue_content_search 列出来一个个传，**更不要**在 Python 里循环
 EditorAssetLibrary.delete_asset —— 每次调用都做一次完整 GC，几百个资产就是十几分钟主线程占死，
 之后所有引擎命令一起超时。一个目录超过 500 个资产时工具会拒绝并让你按子目录分批。
@@ -295,7 +396,7 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
     riskFor: (args) =>
       (args as { dry_run?: unknown } | null)?.dry_run === true ? 'safe' : 'destructive',
 
-    execute: async (input) => {
+    execute: async (input, { abortSignal }) => {
       console.log('[DeleteAssetsTool] 收到请求:', input)
 
       try {
@@ -309,21 +410,48 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
 
         const connectionId = getTargetConnectionId()
 
-        const expansion = await expandFolders(
-          input.paths,
-          (method, params, conn, timeoutMs) =>
-            wsService.callRequest<SearchAssetsResponse>(method, params, conn, timeoutMs),
-          connectionId
-        )
+        // 展开阶段单独接住：这时 content.delete 还没发，出什么错都是「什么都没删」——
+        // 不能落到下面那个 catch 里被说成「引擎多半还在删、不要重发」
+        let expansion: ExpandOutcome
+        try {
+          expansion = await expandFolders(
+            input.paths,
+            (method, params, conn, timeoutMs) =>
+              wsService.callRequest<SearchAssetsResponse>(
+                method,
+                params,
+                conn,
+                timeoutMs,
+                abortSignal
+              ),
+            connectionId
+          )
+        } catch (error) {
+          if (abortSignal?.aborted) return { success: false, error: '已停止，什么都没删。' }
+          return {
+            success: false,
+            error: `展开目录失败：${describeToolError(error).error}。content.delete 没有发出去，什么都没删。`
+          }
+        }
         if (!expansion.ok) {
           return { success: false, error: expansion.error }
         }
 
-        const { assetPaths, expanded } = expansion
+        const { assetPaths, expanded, redirectors } = expansion
         const expandedFolders = Object.keys(expanded)
+        const redirectorNote =
+          redirectors.length > 0
+            ? `目录里还有 ${redirectors.length} 个重定向器没删 —— 它们在给还没重存的引用转路，` +
+              '要清掉请用 ue_fixup_redirectors（它会先把引用改过来）。'
+            : ''
 
         if (assetPaths.length === 0) {
-          return { success: false, error: '没有给任何路径。' }
+          return {
+            success: false,
+            error:
+              redirectors.length > 0 ? `没有可删的资产。${redirectorNote}` : '没有给任何路径。',
+            ...(redirectors.length > 0 ? { skipped_redirectors: redirectors } : {})
+          }
         }
 
         if (input.dry_run) {
@@ -332,11 +460,34 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
             dry_run: true,
             would_delete: assetPaths,
             expanded_folders: expanded,
+            ...(redirectors.length > 0 ? { skipped_redirectors: redirectors } : {}),
             message:
               `预演：会删除 ${assetPaths.length} 个资产，引擎什么都没动。` +
-              '把这份清单给用户核对，他同意后再不带 dry_run 调一次。'
+              '把这份清单给用户核对，他同意后再不带 dry_run 调一次。' +
+              redirectorNote
           }
         }
+
+        // 目录展开出来的资产没经过工具外层那道资产锁（它只看得见参数里的目录名）。
+        // 另一条会话锁着的，不能在这里替它撤保护、删掉
+        const mine = getLockOwner()
+        const mineRoot = mine ? rootSessionId(mine) : undefined
+        const wanted = new Set(assetPaths.map((path) => toPackagePath(path).toLowerCase()))
+        const conflicts = listLocks()
+          .filter(
+            (lock) =>
+              !lock.soft &&
+              lock.connectionId === connectionId &&
+              lock.owner !== mineRoot &&
+              wanted.has(lock.path.toLowerCase())
+          )
+          .map((lock) => ({ path: lock.path, owner: lock.owner }))
+        if (conflicts.length > 0) {
+          return { success: false, error: describeConflicts(conflicts) }
+        }
+
+        // 用户在展开这段时间按了停止：还来得及，一个都别删
+        if (abortSignal?.aborted) return { success: false, error: '已停止，什么都没删。' }
 
         // 构建请求参数
         const params = {
@@ -354,7 +505,8 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
           'content.delete',
           params,
           connectionId,
-          deleteTimeoutMs(assetPaths.length)
+          deleteTimeoutMs(assetPaths.length),
+          abortSignal
         )
 
         console.log('[DeleteAssetsTool] 收到响应:', response ? '成功' : '无数据')
@@ -373,6 +525,11 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
             result.message = `${result.message}（目录展开：${expandedFolders
               .map((folder) => `${folder} ${expanded[folder]} 个`)
               .join('、')}）`
+          }
+
+          if (redirectors.length > 0) {
+            result.skipped_redirectors = redirectors
+            result.message = `${result.message}。${redirectorNote}`
           }
 
           if (response.failed && response.failed.length > 0) {

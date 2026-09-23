@@ -17,6 +17,17 @@ import path from 'path'
  */
 
 const ipcHandlers = vi.hoisted(() => new Map<string, (...args: unknown[]) => Promise<unknown>>())
+const resolveEngine = vi.hoisted(() =>
+  vi.fn<
+    (
+      association: string | null,
+      paths: unknown
+    ) => Promise<{ displayVersion: string; comparableVersion: string }>
+  >(async () => ({
+    displayVersion: '5.5',
+    comparableVersion: '5.5'
+  }))
+)
 
 let tempRoot = ''
 
@@ -71,7 +82,7 @@ vi.mock('../utils/PathManager', () => ({
 vi.mock('../utils/UnrealPathManager', () => ({ default: {} }))
 
 vi.mock('./projectEngineVersion', () => ({
-  resolveProjectEngineVersion: async () => ({ displayVersion: '5.5', comparableVersion: '5.5' }),
+  resolveProjectEngineVersion: resolveEngine,
   compareAssetToResolvedProjectEngineVersion: (version: string) => ({
     comparison: version === '5.6' ? 1 : 0,
     assetDisplayVersion: version,
@@ -178,6 +189,32 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.rm(tempRoot, { recursive: true, force: true })
+})
+
+describe('工程引擎版本从哪来', () => {
+  /*
+   * 源码版引擎里的工程，.uproject 的 EngineAssociation 是空串。磁盘上的空串不能盖掉
+   * 调用方给的版本（连着的编辑器报上来的是真的）—— `??` 接不住空串，闸门就会按
+   * 「工程版本未知」把每个资产都判成「比工程新」而拒掉。
+   */
+  it('磁盘上是空串时退回调用方给的版本', async () => {
+    await seedVault()
+    resolveEngine.mockClear()
+
+    await importUAssetsBatchToProject(project(), [{ assetKey: assets[0].assetKey }])
+
+    expect(resolveEngine.mock.calls[0]?.[0]).toBe('5.5')
+  })
+
+  it('磁盘上写了就以磁盘为准', async () => {
+    await seedVault()
+    await fs.writeFile(path.join(projectDir, 'Test.uproject'), '{"EngineAssociation":"5.7"}')
+    resolveEngine.mockClear()
+
+    await importUAssetsBatchToProject(project(), [{ assetKey: assets[0].assetKey }])
+
+    expect(resolveEngine.mock.calls[0]?.[0]).toBe('5.7')
+  })
 })
 
 describe('importUAssetsBatchToProject 的结算口径', () => {

@@ -15,7 +15,12 @@
  *
  * 只记盒子这边发出的调用。用户自己拖视口这一层看不见，所以措辞永远留一句
  * 「此后用户也可能动过」—— 说不准的时候不说死。
+ *
+ * 按工程分开记：开着两个工程时，A 那边挪的视口不能算到 B 头上 ——
+ * 否则 B 拍出来的正常画面也会被说成「被 A 的脚本改过」，模型回头去查一段不相干的代码。
  */
+
+import { getTargetConnectionId, getTargetProjectPath } from '../../../core/projectTargetContext'
 
 export interface ViewportMoveRecord {
   /** 发起调用的工具名，例如 `ue_focus_viewport` */
@@ -26,20 +31,23 @@ export interface ViewportMoveRecord {
   at: number
 }
 
-let last: ViewportMoveRecord | null = null
+const lastByProject = new Map<string, ViewportMoveRecord>()
+
+/** 这条执行流发往哪个工程。路径跨编辑器重启稳定，优先用它 */
+const projectKey = (): string => getTargetProjectPath() ?? getTargetConnectionId() ?? ''
 
 /** 动完视口之后调一次。detail 直接拼进截图返回，写成人能读的一句 */
 export function noteViewportMove(tool: string, detail: string, now = Date.now()): void {
-  last = { tool, detail, at: now }
+  lastByProject.set(projectKey(), { tool, detail, at: now })
 }
 
 export function lastViewportMove(): ViewportMoveRecord | null {
-  return last
+  return lastByProject.get(projectKey()) ?? null
 }
 
 /** 测试用 */
 export function resetViewportProvenance(): void {
-  last = null
+  lastByProject.clear()
 }
 
 /**
@@ -74,6 +82,7 @@ const describeAge = (ms: number): string => {
  * 拼给 `ue_screenshot` 的那一句。没有记录返回空串 —— 说不准的时候不说。
  */
 export function describeViewportProvenance(now = Date.now()): string {
+  const last = lastViewportMove()
   if (!last) return ''
   return (
     `\n视口最后一次是 ${describeAge(now - last.at)}由 ${last.tool} 改的（${last.detail}）；` +

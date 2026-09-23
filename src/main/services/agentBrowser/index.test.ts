@@ -759,6 +759,20 @@ describe('生命周期', () => {
     expect(windowBroadcasts.at(-1)).toMatchObject({ channel: 'agent-browser:state' })
   })
 
+  /**
+   * 唯一的标签自己关掉：窗口连带销毁，`closed` 那头不会再存。存下来的标签组要跟着清，
+   * 不然下次进这个会话，用户已经关掉的页面又被恢复出来。
+   */
+  it('唯一的标签自己关掉：存下来的标签组跟着清', async () => {
+    const instance = new AgentBrowserService('selfclose-last')
+    await openPage(instance)
+    expect(savedUrls.has('selfclose-last')).toBe(true)
+    ;(views[0].webContents.close as () => void)()
+    await settle(Promise.resolve())
+
+    expect(savedUrls.has('selfclose-last')).toBe(false)
+  })
+
   /** 当前页面自己关掉之后再 open：死 surface 不能留在表里，否则后面每次广播都抛 */
   it('当前标签自己关掉后重新 open：旧的死 surface 不留在表里', async () => {
     const instance = new AgentBrowserService('reopen')
@@ -771,6 +785,26 @@ describe('生命周期', () => {
 
     expect(instance.groupState().tabs).toHaveLength(1)
     expect(registry.unregistered).toContain(deadId)
+  })
+
+  // 新标签加载途中自己关掉：当前页已被切回旧标签，不能把旧标签的内容当成新页面交回去
+  it('新开的标签加载时自己关掉：报失败，不拿别的标签顶上', async () => {
+    const instance = new AgentBrowserService('selfclose-onload')
+    await openPage(instance)
+    pageResults.push(SCAN_OK)
+    const pending = instance.openInNewTab('https://example.org/')
+    const outcome = pending.then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error })
+    )
+    await vi.waitFor(() => expect(views).toHaveLength(2))
+    ;(views[1].webContents.close as () => void)()
+    await vi.advanceTimersByTimeAsync(2000)
+
+    const result = await outcome
+    expect(result.ok).toBe(false)
+    expect((result as { error: { code?: string } }).error.code).toBe('PAGE_LOAD_FAILED')
+    expect(instance.groupState().tabs).toHaveLength(1)
   })
 
   it('resetSession 连认证缓存一起清 —— 只清 storage 会留下自动认证', async () => {

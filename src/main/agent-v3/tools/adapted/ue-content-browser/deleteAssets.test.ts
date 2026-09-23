@@ -28,6 +28,7 @@ vi.mock('../../../core/projectTargetContext', () => ({ getTargetConnectionId: ()
 vi.mock('../../../core/assetLockEnforcement', () => ({ releaseProtectionBeforeDelete }))
 
 import { WebSocketErrorCode, WebSocketServiceError } from '../../../../services/websocket/types'
+import { acquire, releaseAll, runWithLockOwner } from '../../../core/assetLock'
 import { V2_TIMEOUT_CODE } from '../../engineErrors'
 import {
   FOLDER_EXPAND_LIMIT,
@@ -39,11 +40,17 @@ import {
 
 type Result = Record<string, unknown>
 const tool = createDeleteAssetsTool()
-const run = (input: Record<string, unknown>): Promise<Result> =>
-  (tool.execute as (i: unknown, o: unknown) => Promise<Result>)(input, {})
+const run = (
+  input: Record<string, unknown>,
+  options: { abortSignal?: AbortSignal } = {}
+): Promise<Result> => (tool.execute as (i: unknown, o: unknown) => Promise<Result>)(input, options)
 
 const callsTo = (method: string): unknown[][] =>
   callRequest.mock.calls.filter((call) => call[0] === method)
+
+/** 展开目录用的那种搜索（query='*'），不含「是不是同名资产」那次追问 */
+const expandSearches = (): unknown[][] =>
+  callsTo('content.search').filter((call) => (call[1] as { query?: string }).query === '*')
 
 const DELETED_OK = (paths: string[]): Result => ({
   ok: true,
@@ -114,6 +121,31 @@ describe('目录展开', () => {
     expect(result.success).toBe(true)
     expect(result.expanded_folders).toEqual({ '/Game/ThirdParty/AnimeGirl': 2 })
     expect(String(result.message)).toContain('/Game/ThirdParty/AnimeGirl 2 个')
+  })
+
+  // content.search 不等注册表，扫到一半回的是半份清单；照着删就是「删完了」却还剩一半
+  it('注册表还在扫时不展开、不删', async () => {
+    callRequest.mockImplementation(async (method: string) => {
+      if (method === 'content.registry_status') {
+        return { ok: true, ready: false, progress: { total: 900, processed: 300 } }
+      }
+      return { ok: true, count: 1, total: 1, truncated: false, results: [] }
+    })
+
+    const result = await run({ paths: ['/Game/ThirdParty/AnimeGirl/'] })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('300/900')
+    expect(callsTo('content.search')).toHaveLength(0)
+    expect(callsTo('content.delete')).toHaveLength(0)
+  })
+
+  it('只点名资产、不展开目录时不问注册表', async () => {
+    callRequest.mockImplementation(async () => DELETED_OK(['/Game/Temp/A.A']))
+
+    await run({ paths: ['/Game/Temp/A.A'] })
+
+    expect(callsTo('content.registry_status')).toHaveLength(0)
   })
 
   it('搜不到东西的不带点路径原样交给引擎 —— 它可能是资产的包路径', async () => {
@@ -226,8 +258,8 @@ describe('目录展开', () => {
 
     await run({ paths: ['/Game/Pack', '/Game/Pack/Anim'] })
 
-    expect(callsTo('content.search')).toHaveLength(1)
-    expect(callsTo('content.search')[0][1]).toMatchObject({ path: '/Game/Pack' })
+    expect(expandSearches()).toHaveLength(1)
+    expect(expandSearches()[0][1]).toMatchObject({ path: '/Game/Pack' })
   })
 
   it('旧插件不回 results 字段时当空目录处理，不炸', async () => {
@@ -261,6 +293,135 @@ describe('目录展开', () => {
     expect((callsTo('content.delete')[0][1] as { paths: string[] }).paths).toEqual([
       '/Game/Dir/A.A'
     ])
+  })
+})
+
+describe('展开之后、删除之前', () => {
+  const folderWith =
+    (results: Array<Record<string, string>>) =>
+    async (method: string, params: { query?: string }): Promise<Result> => {
+      if (method === 'content.search') {
+        if (params.query !== '*') return { ok: true, count: 0, total: 0, results: [] }
+        return { ok: true, count: results.length, total: results.length, truncated: false, results }
+      }
+      return DELETED_OK([])
+    }
+
+  it('同名的关卡和目录并存：分不清就不删，让调用方写清楚', async () => {
+    callRequest.mockImplementation(async (method: string, params: { query?: string }) => {
+      if (method !== 'content.search') throw new Error('不该走到删除')
+      if (params.query === '*') {
+        return {
+          ok: true,
+          count: 1,
+          total: 1,
+          truncated: false,
+          results: [{ name: 'Sub', path: '/Game/Maps/Main/Sub', class: 'World' }]
+        }
+      }
+      return {
+        ok: true,
+        count: 2,
+        total: 2,
+        truncated: false,
+        results: [
+          { name: 'Main', path: '/Game/Maps/Main', class: 'World' },
+          { name: 'Sub', path: '/Game/Maps/Main/Sub', class: 'World' }
+        ]
+      }
+    })
+
+    const result = await run({ paths: ['/Game/Maps/Main'] })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('/Game/Maps/Main.Main')
+    expect(String(result.error)).toContain('/Game/Maps/Main/')
+    expect(callsTo('content.delete')).toHaveLength(0)
+  })
+
+  it('结尾带斜杠就是明说了目录，不再追问', async () => {
+    callRequest.mockImplementation(
+      folderWith([{ name: 'Sub', path: '/Game/Maps/Main/Sub', class: 'World' }])
+    )
+
+    await run({ paths: ['/Game/Maps/Main/'] })
+
+    expect(callsTo('content.search')).toHaveLength(1)
+    expect((callsTo('content.delete')[0][1] as { paths: string[] }).paths).toEqual([
+      '/Game/Maps/Main/Sub.Sub'
+    ])
+  })
+
+  it('目录里的重定向器不跟着删，回报出来并指向 ue_fixup_redirectors', async () => {
+    callRequest.mockImplementation(
+      folderWith([
+        { name: 'A', path: '/Game/Old/A', class: 'Texture2D' },
+        { name: 'Moved', path: '/Game/Old/Moved', class: 'ObjectRedirector' }
+      ])
+    )
+
+    const result = await run({ paths: ['/Game/Old/'] })
+
+    expect((callsTo('content.delete')[0][1] as { paths: string[] }).paths).toEqual([
+      '/Game/Old/A.A'
+    ])
+    expect(result.skipped_redirectors).toEqual(['/Game/Old/Moved.Moved'])
+    expect(String(result.message)).toContain('ue_fixup_redirectors')
+  })
+
+  it('另一条会话锁着目录里的资产：不撤它的保护、不删', async () => {
+    callRequest.mockImplementation(
+      folderWith([{ name: 'A', path: '/Game/Shared/A', class: 'Material' }])
+    )
+    expect(acquire('conn-1', 'other-session', ['/Game/Shared/A']).ok).toBe(true)
+    try {
+      const result = await runWithLockOwner('this-session', () => run({ paths: ['/Game/Shared/'] }))
+
+      expect(result.success).toBe(false)
+      expect(String(result.error)).toContain('另一条 AI 会话')
+      expect(releaseProtectionBeforeDelete).not.toHaveBeenCalled()
+      expect(callsTo('content.delete')).toHaveLength(0)
+    } finally {
+      releaseAll('other-session')
+    }
+  })
+
+  it('展开时用户按了停止：一个都不删', async () => {
+    const controller = new AbortController()
+    callRequest.mockImplementation(async (method: string) => {
+      if (method === 'content.search') {
+        controller.abort()
+        return {
+          ok: true,
+          count: 1,
+          total: 1,
+          truncated: false,
+          results: [{ name: 'A', path: '/Game/Dir/A', class: 'Texture2D' }]
+        }
+      }
+      throw new Error('不该走到删除')
+    })
+
+    const result = await run({ paths: ['/Game/Dir/'] }, { abortSignal: controller.signal })
+
+    expect(result.success).toBe(false)
+    expect(releaseProtectionBeforeDelete).not.toHaveBeenCalled()
+    expect(callsTo('content.delete')).toHaveLength(0)
+    // 停止信号也交给了引擎请求，不在盒子这边等完再发
+    expect(callsTo('content.search')[0][4]).toBe(controller.signal)
+  })
+
+  it('展开那一步超时：说清删除还没发，不说「引擎还在删」', async () => {
+    callRequest.mockRejectedValue(
+      new WebSocketServiceError(WebSocketErrorCode.E_TIMEOUT, '请求超时: content.search (x)')
+    )
+
+    const result = await run({ paths: ['/Game/Dir'] })
+
+    expect(result.success).toBe(false)
+    expect(result.code).toBeUndefined()
+    expect(String(result.error)).toContain('什么都没删')
+    expect(String(result.error)).not.toContain('还在删')
   })
 })
 

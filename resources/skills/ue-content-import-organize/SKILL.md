@@ -40,8 +40,8 @@ some assets exist only in the current editor session and will be lost when the u
 **Name them on the way in, not afterwards.** `asset_names` takes a per-file map —
 `{ "hero.fbx": "SK_Hero", "wood_color.png": "T_Wood_D" }` — and the rename happens while the
 asset is brand new and nothing references it yet, so it leaves no redirectors. Renaming later
-with `ue_content_move` makes the engine rewrite every referencer and then clean up the
-redirectors it created. A name already taken is **skipped**, not forced: the asset keeps its
+with `ue_content_move` rewrites every referencer but leaves a redirector behind at each old
+path — cleaning those up is a separate `ue_fixup_redirectors` step. A name already taken is **skipped**, not forced: the asset keeps its
 original name and the reply carries `rename_failed` plus a line in the message — read it, do
 not assume the name you asked for is the name you got. Only rename when the user asked for a
 convention; they may be looking for the file under its original name.
@@ -354,9 +354,12 @@ without loading anything. A full audit of the project belongs to `ue-project-aud
 ## Deleting
 
 `ue_content_delete` takes asset object paths **and folder package paths** in the same `paths`
-array. To remove a whole pack, pass the folder (`/Game/ThirdParty/AnimeGirl`): the tool expands
-it (subfolders included) and submits **one batch**, so the engine runs one garbage-collection
-pass. Over 500 assets in one folder it refuses and tells you to split by subfolder.
+array. To remove a whole pack, pass the folder with a trailing slash (`/Game/ThirdParty/AnimeGirl/`):
+the tool expands it (subfolders included) and submits **one batch**, so the engine runs one
+garbage-collection pass. Call it with `dry_run: true` first and show the user the list — the
+approval card only shows the folder name. Redirectors inside the folder are left alone (use
+`ue_fixup_redirectors` for those). Over 500 assets in one folder it refuses and tells you to
+split by subfolder.
 
 Never loop `EditorAssetLibrary.delete_asset` in Python and never feed search results in one at
 a time — each call runs a full GC; on a large level that is seconds per asset and a few hundred

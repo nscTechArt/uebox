@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
+import { runWithTargetConnectionId } from '../../../core/projectTargetContext'
 import {
   describeViewportProvenance,
   lastViewportMove,
@@ -34,6 +35,17 @@ describe('describeViewportProvenance', () => {
     noteViewportMove('ue_focus_viewport', '对准 BP_Chair', 0)
     expect(describeViewportProvenance(5 * 60_000)).toContain('5 分钟前')
     expect(describeViewportProvenance(3 * 3_600_000)).toContain('3 小时前')
+  })
+
+  it('两个工程各记各的：A 挪的视口不算到 B 头上', () => {
+    const inA = <T>(fn: () => T): T =>
+      runWithTargetConnectionId({ connectionId: 'a', projectPath: 'D:/A/A.uproject' }, fn)
+    const inB = <T>(fn: () => T): T =>
+      runWithTargetConnectionId({ connectionId: 'b', projectPath: 'D:/B/B.uproject' }, fn)
+
+    inA(() => noteViewportMove('ue_run_python_script', '脚本里调了 pilot_level_actor', 0))
+    expect(inB(() => describeViewportProvenance(1000))).toBe('')
+    expect(inA(() => describeViewportProvenance(1000))).toContain('pilot_level_actor')
   })
 
   it('后来的记录覆盖先前的', () => {

@@ -34,16 +34,28 @@ export interface PositionalRotatorCall {
 
 const ROTATOR_CALL = /\bRotator\s*\(/g
 
-/** 括号感知地切实参：`Rotator(math.radians(a), b)` 要切成两个而不是三个 */
+/**
+ * 括号感知地切实参：`Rotator(math.radians(a), b)` 要切成两个而不是三个。
+ *
+ * `#` 注释整段跳过：多行调用每个实参后面跟一句注释很常见，不跳的话
+ * `roll=0.0,  # X` 换行 `pitch=0.0` 会被切成「注释 + 下一个实参」一整段，关键字写法被误判成按位置传
+ */
 function splitArgs(body: string): string[] {
   const args: string[] = []
   let depth = 0
   let quote: string | null = null
   let current = ''
-  for (const ch of body) {
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]
     if (quote) {
       current += ch
       if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '#') {
+      const end = body.indexOf('\n', i)
+      if (end === -1) break
+      i = end - 1
       continue
     }
     if (ch === '"' || ch === "'") {
@@ -74,6 +86,13 @@ function readParenBody(text: string, openIndex: number): string | null {
       if (ch === quote) quote = null
       continue
     }
+    // 注释里的撇号（`# the pitch's value`）不能当成字符串开头，否则后面的括号全配错
+    if (ch === '#') {
+      const end = text.indexOf('\n', i)
+      if (end === -1) return null
+      i = end
+      continue
+    }
     if (ch === '"' || ch === "'") {
       quote = ch
       continue
@@ -87,6 +106,23 @@ function readParenBody(text: string, openIndex: number): string | null {
   return null
 }
 
+/** 这个位置是不是在一行的 `#` 注释里（引号里的 `#` 不算） */
+function inComment(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1
+  let quote: string | null = null
+  for (let i = lineStart; i < index; i++) {
+    const ch = text[i]
+    if (quote) {
+      if (ch === quote) quote = null
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (ch === '#') {
+      return true
+    }
+  }
+  return false
+}
+
 const isKeywordArg = (arg: string): boolean => /^[A-Za-z_]\w*\s*=(?!=)/.test(arg)
 const isStarArg = (arg: string): boolean => arg.startsWith('*')
 const isLiteralZero = (arg: string): boolean => /^[-+]?0+(\.0*)?$/.test(arg)
@@ -97,6 +133,8 @@ export function findPositionalRotatorCalls(script: string): PositionalRotatorCal
   ROTATOR_CALL.lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = ROTATOR_CALL.exec(script)) !== null) {
+    // 注释里写的示例不是会执行的代码
+    if (inComment(script, match.index)) continue
     const openIndex = match.index + match[0].length - 1
     const body = readParenBody(script, openIndex)
     if (body === null) continue
@@ -121,8 +159,31 @@ export function findPositionalRotatorCalls(script: string): PositionalRotatorCal
  * 改法直接按「模型多半想表达的是 (pitch, yaw, roll)」给出关键字重写，
  * 它只需照抄；真想表达别的顺序，改关键字名就行。
  */
+const AXES = ['roll', 'pitch', 'yaw'] as const
+
+/**
+ * 三个实参各自点名了一个不同的轴（`rot.roll` / `r.pitch` / `rot.yaw + 90`）时，按名字给关键字写法。
+ * 认不全就返回 null，退回按位置猜的那一版。
+ */
+function axisNamedRewrite(args: string[]): string | null {
+  if (args.length !== 3) return null
+  const byAxis = new Map<string, string>()
+  for (const arg of args) {
+    const found = AXES.filter((axis) => new RegExp(`\\b${axis}\\b`, 'i').test(arg))
+    if (found.length !== 1 || byAxis.has(found[0])) return null
+    byAxis.set(found[0], arg)
+  }
+  return `unreal.Rotator(${AXES.map((axis) => `${axis}=${byAxis.get(axis)}`).join(', ')})`
+}
+
 export function describePositionalRotatorRefusal(hits: PositionalRotatorCall[]): string {
   const lines = hits.slice(0, 5).map((h) => {
+    // 实参自己带着轴名（`rot.roll, rot.pitch, rot.yaw + 90`）时按名字对，不按位置猜 ——
+    // 那种写法本来就是 UE 的顺序，按 (pitch, yaw, roll) 硬映射给出的「照抄版」是转乱的
+    const named = axisNamedRewrite(h.args)
+    if (named) {
+      return `- 第 ${h.line} 行 \`${h.snippet}\` → 改成 \`${named}\``
+    }
     const [a = '0', b = '0', c = '0'] = h.args
     const rewrite =
       h.args.length === 3

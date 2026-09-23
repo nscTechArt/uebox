@@ -70,6 +70,8 @@ const SCREENSHOT_JPEG_QUALITY = 65
 /** 压缩后仍超过这个体积就不塞进上下文。经验值，与 UE 截图工具一致的量级 */
 const SCREENSHOT_MAX_BYTES = 180_000
 
+const PAGE_CLOSED_ITSELF = '这个页面打开后自己关掉了，没有可以读的内容。换一个地址再试。'
+
 /** 加载被主动取消。重定向和用户中途点链接都会走到这里，不是错误 */
 const ERR_ABORTED = -3
 
@@ -513,6 +515,11 @@ export class AgentBrowserService {
         throw error
       }
       await this.loadAndWait(surface.contents, target.toString())
+      // 页面加载完就自己 `window.close()` 了：`destroyed` 回调已经把当前页切到了
+      // 别的标签。往下读 overview 拿到的是那一页，模型会以为打开的就是它
+      if (surface.contents.isDestroyed() || this.surface !== surface) {
+        throw new AgentBrowserError('PAGE_LOAD_FAILED', PAGE_CLOSED_ITSELF)
+      }
       this.reveal(surface)
 
       const overview = await this.overview()
@@ -1016,12 +1023,20 @@ export class AgentBrowserService {
      * 把整个主进程带走。所以死了就当场摘掉，别留在表里。
      */
     contents.on('destroyed', () => {
+      const wasOpen = this.surface === surface || this.tabs.has(surface.id)
       if (this.surface === surface) {
         this.releaseSurface()
         this.notifyState()
       } else if (this.tabs.has(surface.id)) {
         this.dropSurface(surface)
         this.notifyState()
+      }
+      // 存下来的标签组也要跟着改，和 `closeTab` 一样：不写的话，自己关掉的页面
+      // （尤其是最后一个标签，窗口连带销毁、`closed` 那头不会再存）下次进会话又被恢复出来
+      if (wasOpen) {
+        void this.persistUrl(this.hasWindow() ? this.currentUrl() || 'about:blank' : null).catch(
+          () => undefined
+        )
       }
     })
   }
@@ -1154,6 +1169,7 @@ export class AgentBrowserService {
         contents.off('did-stop-loading', onStop)
         contents.off('did-start-loading', onStart)
         contents.off('did-fail-load', onFail)
+        contents.off('destroyed', onDestroyed)
       }
 
       const onStop = (): void => {
@@ -1186,6 +1202,13 @@ export class AgentBrowserService {
         )
       }
 
+      // 页面加载途中自己 `window.close()`：不会再有 stop / fail 事件，
+      // 不接的话要干等满 30 秒，再报一句「窗口还开着」的假话
+      const onDestroyed = (): void => {
+        cleanup()
+        reject(new AgentBrowserError('PAGE_LOAD_FAILED', PAGE_CLOSED_ITSELF))
+      }
+
       const hardTimer = setTimeout(() => {
         cleanup()
         reject(
@@ -1199,6 +1222,7 @@ export class AgentBrowserService {
       contents.on('did-stop-loading', onStop)
       contents.on('did-start-loading', onStart)
       contents.on('did-fail-load', onFail)
+      contents.on('destroyed', onDestroyed)
 
       if (!contents.isLoading()) onStop()
     })
