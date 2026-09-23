@@ -49,6 +49,7 @@ import { spotlightManager } from './spotlightManager'
 import { miniChatManager } from './miniChatManager'
 import { ShortcutService } from './services/shortcutService'
 import { serveRemoteAsset } from './networkV2/assetProxy'
+import { installSystemProxyFetch } from './utils/systemProxyFetch'
 import { shouldStartHiddenAtLaunch } from './startupVisibility'
 import { beginQuietStartup, endQuietStartup } from './startupQuiet'
 import { keepWindowTitleFixed, MAIN_WINDOW_TITLE } from './windowTitle'
@@ -519,6 +520,8 @@ protocol.registerSchemesAsPrivileged([
 // Some APIs can only be used after this event occurs.
 const appReady = shouldInitializeApp ? app.whenReady() : null
 appReady?.then(async () => {
+  // 最先装：之后所有模型、授权请求都要按系统代理走，见 systemProxyFetch.ts
+  await installSystemProxyFetch()
   initializeDockIcon(iconPng)
 
   // ==================== 测试版时间限制检查 ====================
