@@ -19,9 +19,9 @@ namespace
 	/** 大于 0 表示正在执行 UAL 命令，此时才记录 */
 	int32 GScopeDepth = 0;
 
-	FDelegateHandle GDirtyHandle;
+	FDelegateHandle GTouchedDirtyHandle;
 
-	void OnPackageMarkedDirty(UPackage* Package, bool /*bWasDirty*/)
+	void OnTouchedPackageMarkedDirty(UPackage* Package, bool /*bWasDirty*/)
 	{
 		if (GScopeDepth <= 0 || !Package)
 		{
@@ -41,19 +41,19 @@ namespace
 
 void FUAL_TouchedPackages::Initialize()
 {
-	if (GDirtyHandle.IsValid())
+	if (GTouchedDirtyHandle.IsValid())
 	{
 		return;
 	}
-	GDirtyHandle = UPackage::PackageMarkedDirtyEvent.AddStatic(&OnPackageMarkedDirty);
+	GTouchedDirtyHandle = UPackage::PackageMarkedDirtyEvent.AddStatic(&OnTouchedPackageMarkedDirty);
 }
 
 void FUAL_TouchedPackages::Shutdown()
 {
-	if (GDirtyHandle.IsValid())
+	if (GTouchedDirtyHandle.IsValid())
 	{
-		UPackage::PackageMarkedDirtyEvent.Remove(GDirtyHandle);
-		GDirtyHandle.Reset();
+		UPackage::PackageMarkedDirtyEvent.Remove(GTouchedDirtyHandle);
+		GTouchedDirtyHandle.Reset();
 	}
 	GTouchedPackageNames.Empty();
 	GScopeDepth = 0;

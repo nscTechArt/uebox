@@ -115,6 +115,11 @@ public class UnrealAgentLink : ModuleRules
 				"AutomationController", // §2.5 自动化测试：IAutomationControllerModule
 				"DeveloperSettings",    // §2.4 项目设置 schema：UDeveloperSettings 反射遍历
 
+				// 试玩机器人寻路（UAL_PieBotCommands 的 pie.nav_path）。
+				// 引擎运行时模块（Engine/Source/Runtime/NavigationSystem），5.0–5.8 都在，
+				// 不是插件模块，不引入对插件 DLL 的硬导入
+				"NavigationSystem",
+
 				// 代理诊断（UAL_ProxyDiagnostics）只用一个函数：Lws 给 WebSocket 套代理时
 				// 读的那个代理地址（5.8 与之前不是同一个函数，见该 .cpp 顶部）。
 				// 必须问同一个来源，自己另读一份 ini 会和实际行为对不上。

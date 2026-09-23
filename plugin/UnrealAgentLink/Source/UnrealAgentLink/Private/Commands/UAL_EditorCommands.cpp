@@ -306,6 +306,12 @@ void FUAL_EditorCommands::RegisterCommands(TMap<FString, TFunction<void(const TS
 		Handle_RunPlaytest(Payload, RequestId);
 	});
 
+	// pie.stop - 让 pie.run 提前收尾（报告照常由 pie.run 那个请求回）
+	CommandMap.Add(TEXT("pie.stop"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		Handle_StopPlaytest(Payload, RequestId);
+	});
+
 	// viewport.focus - 把视口镜头对准指定 Actor（等同于选中后按 F）
 	CommandMap.Add(TEXT("viewport.focus"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 	{
@@ -2846,22 +2852,57 @@ namespace
 			if (Category == BlueprintUserMessages)
 			{
 				Push(PrintStrings, Line);
+				PushTimeline(TEXT("print"), Line);
 				return;
 			}
 
 			if (Verbosity == ELogVerbosity::Error || Verbosity == ELogVerbosity::Fatal)
 			{
-				Push(Errors, FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line));
+				const FString Tagged = FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line);
+				Push(Errors, Tagged);
+				PushTimeline(TEXT("error"), Tagged);
 			}
 			else if (Verbosity == ELogVerbosity::Warning)
 			{
-				Push(Warnings, FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line));
+				const FString Tagged = FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line);
+				Push(Warnings, Tagged);
+				PushTimeline(TEXT("warning"), Tagged);
 			}
 		}
 
 		bool HasErrors() const { return Errors.Num() > 0; }
 
+		/**
+		 * 按时间顺序的全部日志，给 `pie.observe` 按游标增量读。
+		 *
+		 * 和上面三个桶**分开存**，理由是两者要的东西相反：报告要「最早那几条」
+		 * （第一条错误通常才是根因），而边跑边看的人要「刚才那一步之后冒出来的」——
+		 * 桶满了之后新日志一条都进不来，拿桶做增量读，跑到后半段就永远是空的。
+		 *
+		 * 这里满了丢**最旧**的一截。Seq 不重排，所以读的一方能从「游标之后的第一条
+		 * 已经不是游标本身」看出中间丢过东西。
+		 */
+		TArray<FUAL_EditorCommands::FPieLogLine> Timeline;
+		int32 NextSeq = 0;
+		/** PIE 真正起来的那一刻；之前的日志 At 记 0 */
+		double PlayStartedAt = 0.0;
+
 	private:
+		static constexpr int32 TimelineCap = 2000;
+
+		void PushTimeline(const TCHAR* Kind, const FString& Text)
+		{
+			if (Timeline.Num() >= TimelineCap)
+			{
+				Timeline.RemoveAt(0, TimelineCap / 4);
+			}
+			FUAL_EditorCommands::FPieLogLine& Entry = Timeline.AddDefaulted_GetRef();
+			Entry.Seq = NextSeq++;
+			Entry.At = PlayStartedAt > 0.0 ? FPlatformTime::Seconds() - PlayStartedAt : 0.0;
+			Entry.Kind = Kind;
+			Entry.Text = Text.Left(500);
+		}
+
 		static void Push(TArray<FString>& Bucket, const FString& Line)
 		{
 			// 留最早的：第一条错误通常才是根因，后面多半是它的连锁反应
@@ -2893,6 +2934,25 @@ namespace
 		/** 收尾已经开始，防止 ticker 和 EndPIE 回调重复发响应 */
 		bool bFinishing = false;
 		FString EndedBy;
+
+		/** `pie.stop` 要求提前收尾。ticker 下一次 tick 按「时间到」那条路收 */
+		bool bStopRequested = false;
+		FString StopReason;
+
+		/**
+		 * 固定步长。0 = 没开。
+		 *
+		 * 编辑器失焦时被节流到个位数 fps（实测 59.4 → 11.4），而位移跟的是
+		 * **游戏时间**不是帧数 —— 同样注入 30 帧，两台机器上角色走出去的距离能差
+		 * 1.74 倍。锁住步长之后每一帧都是同样长的游戏时间，「按住 12 帧」才在
+		 * 任何机器、前台后台都是同一件事。
+		 *
+		 * 改的是 GEngine 上的运行时值，不写 ini；会话每条退出路径都恢复原值。
+		 */
+		float FixedFps = 0.0f;
+		bool bFixedStepApplied = false;
+		bool bPrevUseFixedFrameRate = false;
+		float PrevFixedFrameRate = 30.0f;
 
 		int32 ActorsAtStart = 0;
 		FString ScreenshotPath;
@@ -2977,6 +3037,12 @@ namespace
 			bPlayStarted = false;
 			bFinishing = false;
 			EndedBy.Empty();
+			bStopRequested = false;
+			StopReason.Empty();
+			FixedFps = 0.0f;
+			bFixedStepApplied = false;
+			bPrevUseFixedFrameRate = false;
+			PrevFixedFrameRate = 30.0f;
 			ActorsAtStart = 0;
 			ScreenshotPath.Empty();
 			ScreenshotError.Empty();
@@ -3107,6 +3173,13 @@ namespace
 			FTSTicker::GetCoreTicker().RemoveTicker(GPieSession.TickerHandle);
 			GPieSession.TickerHandle.Reset();
 		}
+		// 固定步长是整个编辑器的状态，不恢复的话用户退出试玩之后编辑器一直锁帧
+		if (GPieSession.bFixedStepApplied && GEngine)
+		{
+			GEngine->bUseFixedFrameRate = GPieSession.bPrevUseFixedFrameRate;
+			GEngine->FixedFrameRate = GPieSession.PrevFixedFrameRate;
+			GPieSession.bFixedStepApplied = false;
+		}
 	}
 
 	/**
@@ -3134,6 +3207,15 @@ namespace
 		Result->SetStringField(TEXT("ended_by"), GPieSession.EndedBy);
 		Result->SetNumberField(TEXT("elapsed_seconds"), FMath::RoundToDouble(Elapsed * 10.0) / 10.0);
 		Result->SetNumberField(TEXT("requested_seconds"), GPieSession.DurationSeconds);
+		if (!GPieSession.StopReason.IsEmpty())
+		{
+			Result->SetStringField(TEXT("stop_reason"), GPieSession.StopReason);
+		}
+		if (GPieSession.bFixedStepApplied)
+		{
+			// 回报实际用的步长：不说的话调用方不知道这次的「帧」有多长
+			Result->SetNumberField(TEXT("fixed_fps"), GPieSession.FixedFps);
+		}
 
 		if (GPieSession.Capture)
 		{
@@ -3267,6 +3349,11 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 	bool bWantScreenshot = true;
 	Payload->TryGetBoolField(TEXT("screenshot"), bWantScreenshot);
 
+	// 固定步长，见 FUAL_PieSession::FixedFps。不传 = 不锁，保持老行为
+	double FixedFps = 0.0;
+	Payload->TryGetNumberField(TEXT("fixed_fps"), FixedFps);
+	FixedFps = FixedFps > 0.0 ? FMath::Clamp(FixedFps, 15.0, 120.0) : 0.0;
+
 	/**
 	 * 多帧采样。
 	 *
@@ -3399,6 +3486,16 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		GLog->AddOutputDevice(GPieSession.Capture.Get());
 	}
 
+	if (FixedFps > 0.0 && GEngine)
+	{
+		GPieSession.bPrevUseFixedFrameRate = GEngine->bUseFixedFrameRate;
+		GPieSession.PrevFixedFrameRate = GEngine->FixedFrameRate;
+		GEngine->bUseFixedFrameRate = true;
+		GEngine->FixedFrameRate = static_cast<float>(FixedFps);
+		GPieSession.FixedFps = static_cast<float>(FixedFps);
+		GPieSession.bFixedStepApplied = true;
+	}
+
 	GPieSession.StartedHandle = FEditorDelegates::PostPIEStarted.AddLambda([](bool /*bIsSimulating*/)
 	{
 		if (!GPieSession.bActive)
@@ -3407,6 +3504,10 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		}
 		GPieSession.bPlayStarted = true;
 		GPieSession.PlayStartedAt = FPlatformTime::Seconds();
+		if (GPieSession.Capture)
+		{
+			GPieSession.Capture->PlayStartedAt = GPieSession.PlayStartedAt;
+		}
 		GPieSession.ActorsAtStart = UAL_CountActors(UAL_GetPlayWorld());
 	});
 
@@ -3515,13 +3616,17 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 				&& GPieSession.Capture
 				&& GPieSession.Capture->HasErrors();
 
-			if (!bTimeUp && !bErrorStop)
+			const bool bStopRequested = GPieSession.bStopRequested;
+
+			if (!bTimeUp && !bErrorStop && !bStopRequested)
 			{
 				return true;
 			}
 
 			GPieSession.bFinishing = true;
-			GPieSession.EndedBy = bErrorStop ? TEXT("error") : TEXT("duration");
+			GPieSession.EndedBy = bErrorStop ? TEXT("error")
+				: bStopRequested ? TEXT("requested")
+				: TEXT("duration");
 
 			// 截图和数 Actor 都必须赶在 RequestEndPlayMap **之前** ——
 			// PIE 世界一销毁这两样就都没了
@@ -3563,6 +3668,79 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 			return false;
 		}),
 		0.0f);
+}
+
+void FUAL_EditorCommands::Handle_StopPlaytest(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+{
+	if (!GPieSession.bActive)
+	{
+		// 用户自己按的 Play 不归我们停 —— 和 pie.run 不接管用户会话是同一条线
+		UAL_CommandUtils::SendError(
+			RequestId, 409,
+			TEXT("No playtest started by pie.run is running. A Play session the user started is not ours to stop."));
+		return;
+	}
+
+	if (!GPieSession.bFinishing)
+	{
+		GPieSession.bStopRequested = true;
+		FString Reason;
+		if (Payload.IsValid() && Payload->TryGetStringField(TEXT("reason"), Reason))
+		{
+			GPieSession.StopReason = Reason.Left(200);
+		}
+	}
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("ok"), true);
+	Result->SetBoolField(TEXT("stopping"), true);
+	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
+}
+
+bool FUAL_EditorCommands::ReadPieSessionLogs(int32 SinceSeq, int32 MaxLines, TArray<FPieLogLine>& OutLines, int32& OutNextSeq, bool& bOutDropped)
+{
+	OutLines.Reset();
+	bOutDropped = false;
+	OutNextSeq = FMath::Max(0, SinceSeq);
+	if (!GPieSession.bActive || !GPieSession.Capture)
+	{
+		return false;
+	}
+
+	const TArray<FPieLogLine>& Timeline = GPieSession.Capture->Timeline;
+	OutNextSeq = GPieSession.Capture->NextSeq;
+	if (Timeline.Num() > 0 && Timeline[0].Seq > SinceSeq)
+	{
+		bOutDropped = true;
+	}
+
+	for (const FPieLogLine& Line : Timeline)
+	{
+		if (Line.Seq < SinceSeq)
+		{
+			continue;
+		}
+		if (OutLines.Num() >= MaxLines)
+		{
+			// 一次读不完就把游标停在没读的那条上，而不是跳过去 —— 跳过的那一截
+			// 下次谁都读不到了，而调用方以为自己看全了
+			OutNextSeq = Line.Seq;
+			break;
+		}
+		OutLines.Add(Line);
+	}
+	return true;
+}
+
+bool FUAL_EditorCommands::IsPieSessionActive(double& OutElapsed, bool& bOutPlayStarted)
+{
+	OutElapsed = 0.0;
+	bOutPlayStarted = GPieSession.bActive && GPieSession.bPlayStarted;
+	if (bOutPlayStarted)
+	{
+		OutElapsed = FPlatformTime::Seconds() - GPieSession.PlayStartedAt;
+	}
+	return GPieSession.bActive && !GPieSession.bFinishing;
 }
 
 // ============================================================================

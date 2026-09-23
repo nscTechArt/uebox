@@ -189,6 +189,8 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.content.organize': '整理 重命名 移动 删除 重定向 清理 organize rename move delete redirector',
   'ue.content.audit': '体检 依赖 引用 占用 体积 排行 报错日志 audit dependency size reference log',
   'ue.editor': '编辑器 截图 保存 撤销 运行 测试 重启 editor screenshot save undo playtest restart',
+  'ue.editor.autoplay':
+    '试玩 自动试玩 机器人 按键 操作 走到 目标 autoplay bot play input objective',
   'ue.level': '关卡 场景 大纲 世界 分区 流送 level world outliner streaming',
   'ue.system': '性能 崩溃 日志 插件 控制台 脚本 卡顿 crash log performance plugin python',
   'ue.widget': '界面 控件 按钮 文本 布局 widget umg ui layout button text',
@@ -361,6 +363,8 @@ function pickGroups(
  */
 export function toolSearchGroup(tool: GroupedTool): string {
   if (tool.name === 'ue_screenshot' || tool.name === 'ue_focus_viewport') return 'ue.actor'
+  // 实验性、说明又长（约 5 KB），不跟 ue.editor 整组常驻，要用时 search_tools 按名加载
+  if (tool.name === 'ue_autoplay') return 'ue.editor.autoplay'
   if (tool.unrealBox.namespace === 'ue.content' && Object.hasOwn(UE_CONTENT_SUBGROUPS, tool.name))
     return UE_CONTENT_SUBGROUPS[tool.name]
   return tool.unrealBox.namespace

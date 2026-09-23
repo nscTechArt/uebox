@@ -77,6 +77,7 @@ import * as ueContent from '../../agent-v3/tools/adapted/ue-content-browser'
 import { cppTools } from '../../agent-v3/tools/adapted/ue-cpp'
 import * as ueEditor from '../../agent-v3/tools/adapted/ue-editor'
 import * as ueInput from '../../agent-v3/tools/adapted/ue-input'
+import * as ueAutoplay from '../../agent-v3/tools/adapted/ue-autoplay'
 import * as ueLevel from '../../agent-v3/tools/adapted/ue-level'
 import * as ueSystem from '../../agent-v3/tools/adapted/ue-system'
 import * as ueWidget from '../../agent-v3/tools/adapted/ue-widget'
@@ -622,6 +623,19 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     risk: 'mutating',
     concurrency: 'sequential',
     make: () => ueEditor.createPlaytestTool()
+  },
+  /**
+   * 自主试玩机器人：在 pie.run 跑着的时候边看边操作。
+   *
+   * 和 ue_playtest 同级：mutating（游戏逻辑真的会执行，按钮真的会点）、
+   * sequential（同一时间只有一个 PIE 会话）。
+   */
+  {
+    name: 'ue_autoplay',
+    namespace: 'ue.editor',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueAutoplay.createAutoplayTool()
   },
   {
     name: 'ue_restart_editor',

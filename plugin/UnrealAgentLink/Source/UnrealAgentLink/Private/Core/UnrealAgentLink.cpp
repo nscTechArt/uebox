@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UnrealAgentLink.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "UnrealAgentLinkStyle.h"
 #include "UnrealAgentLinkCommands.h"
 #include "Misc/MessageDialog.h"
@@ -77,8 +79,14 @@ void FUnrealAgentLinkModule::StartupModule()
 		GLog->AddOutputDevice(LogInterceptor.Get());
 	}
 
-	// 默认连接到本地 Agent
-	const FString DefaultUrl = TEXT("ws://127.0.0.1:17860");
+	// 默认连接到本地 Agent。命令行 -UALServer=ws://host:port 可以改 ——
+	// 给测试脚本用：盒子占着 17860 时，实验工程连到别的端口，两边互不打扰
+	FString DefaultUrl = TEXT("ws://127.0.0.1:17860");
+	FString OverrideUrl;
+	if (FParse::Value(FCommandLine::Get(), TEXT("UALServer="), OverrideUrl) && !OverrideUrl.IsEmpty())
+	{
+		DefaultUrl = OverrideUrl;
+	}
 	FUAL_NetworkManager::Get().OnMessageReceived().AddRaw(this, &FUnrealAgentLinkModule::HandleSocketMessage);
 	FUAL_NetworkManager::Get().OnConnected().AddRaw(this, &FUnrealAgentLinkModule::HandleSocketConnected);
 	FUAL_NetworkManager::Get().OnDisconnected().AddRaw(this, &FUnrealAgentLinkModule::HandleSocketDisconnected);

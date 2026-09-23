@@ -140,6 +140,42 @@ public:
 	static void Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 
 	/**
+	 * pie.stop —— 让正在跑的 `pie.run` 提前收尾。
+	 *
+	 * 只停**我们自己起的**那个会话：用户自己按的 Play 不归这里管（回 409），
+	 * 这和 `pie.run` 不接管用户会话是同一条红线。
+	 *
+	 * 收尾走的是和「时间到」完全相同的那条路（截图、数 Actor、关卡组成），
+	 * 报告照常由 `pie.run` 那个请求回，只是 `ended_by` 是 "requested"。
+	 *
+	 * 请求: { "reason"?: string }
+	 * 响应: { ok, stopping: true }
+	 */
+	static void Handle_StopPlaytest(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/** 试玩会话里捕获到的一行日志，`pie.observe` 按游标增量读 */
+	struct FPieLogLine
+	{
+		int32 Seq = 0;
+		/** 开跑后第几秒（墙钟），PIE 还没起来时为 0 */
+		double At = 0.0;
+		/** "print" / "error" / "warning" */
+		FString Kind;
+		FString Text;
+	};
+
+	/**
+	 * 读 `pie.run` 会话里 `SinceSeq` 之后的日志。没有会话时返回 false。
+	 *
+	 * `bOutDropped` 为真说明游标之后有一段已经被挤出缓冲区 —— 调用方拿到的
+	 * 不是完整的一段，必须如实往上报，不能当成「中间什么也没打印」。
+	 */
+	static bool ReadPieSessionLogs(int32 SinceSeq, int32 MaxLines, TArray<FPieLogLine>& OutLines, int32& OutNextSeq, bool& bOutDropped);
+
+	/** 有没有一个由 `pie.run` 起的会话正在跑；`OutElapsed` 是开跑后的秒数 */
+	static bool IsPieSessionActive(double& OutElapsed, bool& bOutPlayStarted);
+
+	/**
 	 * viewport.focus —— 把关卡视口的镜头对准指定的 Actor（等同于选中后按 F）。
 	 *
 	 * ## 为什么是发控制台命令而不是自己算机位

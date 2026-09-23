@@ -14,6 +14,7 @@
 #include "UAL_MeshCommands.h"
 #include "UAL_AnimationCommands.h"
 #include "UAL_InputCommands.h"
+#include "UAL_PieBotCommands.h"
 #include "UAL_MessageLogCommands.h"
 #include "UAL_PCGCommands.h"
 #include "UAL_SequencerCommands.h"
@@ -154,6 +155,7 @@ void FUAL_CommandHandler::RegisterCommands()
 	FUAL_MeshCommands::RegisterCommands(CommandMap);
 	FUAL_AnimationCommands::RegisterCommands(CommandMap);
 	FUAL_InputCommands::RegisterCommands(CommandMap);
+	FUAL_PieBotCommands::RegisterCommands(CommandMap);
 	FUAL_MessageLogCommands::RegisterCommands(CommandMap);
 	FUAL_SequencerCommands::RegisterCommands(CommandMap);
 	FUAL_UndoCommands::RegisterCommands(CommandMap);

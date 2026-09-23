@@ -85,6 +85,15 @@ once `ue_playtest` has something running:
 The loop for "does this interaction actually work" is: `ue_playtest` to start, `ue_input_map` to
 learn the bindings, `ue_inject_input` to perform it, `ue_screenshot` to see the result.
 
+When the check takes more than one input — walk somewhere, then press something, then wait for
+a result — `ue_autoplay` (experimental) plays it for you in its own play session: give it a
+goal (`reach_actor` / `press` / `until_log`) or a one-sentence `objective`. Put a PrintString
+in the logic under test and pass it as `until_log`; that line appearing is the only proof, the
+bot saying it is done is not. It is reliable on flat ground and navmesh-reachable targets and
+often fails where the route needs jumping up steps or crossing gaps, so a "did not reach it"
+is more likely terrain than a bug. It moves the character directly, bypassing key bindings, so
+it never proves the player's keys work — that is still `ue_inject_input`.
+
 ### One frame cannot show you a run
 
 A single end-of-run screenshot contains no time. Whether the character moved, when the door
