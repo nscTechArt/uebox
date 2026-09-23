@@ -787,9 +787,23 @@ export default {
         searches: 'Web search {used} / {limit}'
       },
       quotaOther: '{key} {used} / {limit}',
+      quotaMonthly: 'monthly {limit}',
+      quotaDaily: 'Today {used} / {limit}',
+      quotaDailyDone: "Today's is used up. Back {time}",
+      limited: {
+        plan_change:
+          'Upgraded mid-period: the extra quota is prorated for the days left. Full amount next period.',
+        new_account: 'New accounts are limited for 72 hours after the first payment.',
+        new_accountUntil:
+          'New accounts are limited for 72 hours after the first payment. Lifted {time}.'
+      },
+      time: {
+        today: 'today at {time}',
+        tomorrow: 'tomorrow at {time}'
+      },
       resetsAt: 'Resets {date}',
       pastDue:
-        'Renewal payment failed. The plan keeps working during the grace period, then stops.',
+        "Renewal payment failed, so this period's quota is cut: chat keeps 20%, everything else is paused. Update your payment method to restore it right away.",
       pastDueAction: 'Update payment method',
       deprecated: '{model} used by {role} is being retired.',
       deprecatedUntil: '{model} used by {role} will be retired on {date}.',
@@ -844,6 +858,10 @@ export default {
           title: 'This quota is used up for the period',
           desc: 'Upgrade the plan, or wait for the quota to reset.'
         },
+        daily_limit_reached: {
+          title: "Today's quota is used up",
+          desc: "It comes back {time}. Upgrade the plan if you can't wait."
+        },
         role_not_in_plan: {
           title: "Your plan doesn't include this role",
           desc: 'Upgrade the plan, or pick another source for this role in Settings → Models.'
@@ -854,6 +872,10 @@ export default {
         },
         manage: 'Manage subscription',
         reconnect: 'Reconnect'
+      },
+      realtime: {
+        idle_timeout: 'No one spoke for a minute, so voice hung up. Tap again to keep talking.',
+        session_timeout: 'Calls last up to 30 minutes, so voice hung up. Tap again to keep talking.'
       }
     },
     configPath: 'Config file',

@@ -53,7 +53,7 @@ export async function requestPlanSpeech(
   })
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    const planError = planCallError(response.status, body)
+    const planError = planCallError(response.status, body, response.headers)
     if (planError) throw speechError(`TTS_PLAN_${planError.planError.toUpperCase()}`, planError)
     throw speechError(`TTS_HTTP_${response.status}`)
   }

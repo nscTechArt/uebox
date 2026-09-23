@@ -3,11 +3,13 @@
  *
  *   提交   `POST /tasks`，**每次都带 Idempotency-Key**：提交超时、断网后用同一个键重发，
  *          服务端只建一个任务、只占一次额度 —— 所以提交可以放心重试，不像直连厂商那样
- *          「5xx 之后不敢再发」。
+ *          「5xx 之后不敢再发」。例外是 `429 daily_limit_reached`（今天的额度用完了）：
+ *          要等到明天，不重发，和 402 / 403 一样当场报给用户。
  *   轮询   `GET /tasks/{id}`，间隔按协议：视频 10 秒、3D 5 秒、音乐 3 秒。时间上限交给服务端
  *          （到点置 failed、退额度），这边只比它多等两分钟兜底。
- *   取消   `POST /tasks/{id}/cancel`。用户按停止时调：服务端置 cancelled、**额度退回**。
- *          这和直连厂商那几支不一样 —— 那边停的只是我们的等待，钱照扣。
+ *   取消   `POST /tasks/{id}/cancel`。用户按停止时调，服务端置 cancelled。**退不退额度看回来的
+ *          `usage` 是否归零**（2026-09 起）：视频只有还在排队时取消才退；3D、音乐一经提交上游
+ *          就会跑完，取消不退。不按模型写死 —— 以后能退的情况只会变多。
  *   续上   提交前把「请求摘要 → 幂等键 / 任务号」记进 `userData/creator-plan-tasks.json`。
  *          应用崩了、被关了，同一个请求再发一次时先查这本账：有任务号就直接接着轮询，
  *          只有键就带同一个键重发（服务端回首次那个任务）—— 两种都不会再扣一次。
@@ -152,20 +154,58 @@ export class PlanTaskFailedError extends Error {
   }
 }
 
-/** 用户按了停止。`refunded` 为真：服务端已经取消、额度退回 */
+/**
+ * 取消的结局：服务端取消了、额度退回（refunded）；服务端取消了、额度不退（kept —— 上游已经在生成，
+ * 会跑完、照常计费）；取消请求没送到（unconfirmed —— 任务可能还在跑）。
+ */
+export type PlanTaskCancelOutcome = 'refunded' | 'kept' | 'unconfirmed'
+
+/** 取消了的任务退没退额度：以 `usage` 是否归零为准（05-tasks「取消」）。没给 usage 的按退了算 */
+export function cancelOutcomeOf(task: PlanTask | null): PlanTaskCancelOutcome {
+  if (task?.status !== 'cancelled') return 'unconfirmed'
+  const usage = Object.values(task.usage ?? {})
+  return usage.some((value) => typeof value === 'number' && value > 0) ? 'kept' : 'refunded'
+}
+
+/** 为什么不退：视频是「已经开始生成」，3D、音乐是「提交了就不退」 */
+const KEPT_REASON: Readonly<Record<PlanTaskKind, string>> = {
+  video: '视频已经开始生成，只有还在排队时取消才退',
+  model3d: '已提交的 3D 取消后不退额度，上游会跑完并照常计费',
+  music: '已提交的音乐取消后不退额度，上游会跑完并照常计费'
+}
+
+const CANCEL_MESSAGES: Readonly<
+  Record<PlanTaskCancelOutcome, (label: string, kind?: PlanTaskKind) => string>
+> = {
+  refunded: (label) => `已取消（${label}），占用的额度已经退回。`,
+  kept: (label, kind) =>
+    `已取消（${label}），这次的额度不退（${kind ? KEPT_REASON[kind] : '任务已经开始生成'}）。` +
+    '结果不再交付。',
+  unconfirmed: (label) =>
+    `已停止等待（${label}），但取消请求没送到服务端，任务可能还在跑 —— ` +
+    `想要结果用这个任务号取回，不要重新提交。`
+}
+
+/** 用户按了停止（或任务在别处被取消了） */
 export class PlanTaskCancelledError extends Error {
   constructor(
     readonly taskId: string,
-    readonly refunded: boolean,
-    label: string
+    readonly outcome: PlanTaskCancelOutcome,
+    label: string,
+    kind?: PlanTaskKind
   ) {
-    super(
-      refunded
-        ? `已取消（${label}），占用的额度已经退回。`
-        : `已停止等待（${label}），但取消请求没送到服务端，任务可能还在跑 —— ` +
-            `想要结果用这个任务号取回，不要重新提交。`
-    )
+    super(CANCEL_MESSAGES[outcome](label, kind))
     this.name = 'PlanTaskCancelledError'
+  }
+
+  /** 服务端已经取消、额度退回 */
+  get refunded(): boolean {
+    return this.outcome === 'refunded'
+  }
+
+  /** 服务端确认取消了（退没退都算结束） —— 账本可以划掉 */
+  get settled(): boolean {
+    return this.outcome !== 'unconfirmed'
   }
 }
 
@@ -230,7 +270,10 @@ function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
   return signal ? AbortSignal.any([signal, timeout]) : timeout
 }
 
-/** 值得用同一个键再发一次的：限流、服务端临时故障、Cloudflare 的 524（源站 100 秒没回字节） */
+/**
+ * 值得用同一个键再发一次的：限流、服务端临时故障、Cloudflare 的 524（源站 100 秒没回字节）。
+ * 每日上限的 429 在这之前已经被 planCallError 认走了，不会走到这里
+ */
 function isRetryable(status: number): boolean {
   return status === 429 || status >= 500
 }
@@ -245,7 +288,7 @@ async function call(
     signal?: AbortSignal
     fetchImpl?: typeof fetch
   }
-): Promise<{ status: number; payload: unknown; retryAfter: number | null }> {
+): Promise<{ status: number; payload: unknown; retryAfter: number | null; headers: Headers }> {
   const apiKey = await resolveApiKey(provider.apiKey)
   const response = await (options.fetchImpl ?? fetch)(
     `${provider.baseUrl.replace(/\/+$/, '')}${path}`,
@@ -273,13 +316,14 @@ async function call(
   return {
     status: response.status,
     payload,
-    retryAfter: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null
+    retryAfter: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null,
+    headers: response.headers
   }
 }
 
-/** 非 2xx → 错误。套餐那几种（402 / 403 / 401）换成说清下一步的 CreatorPlanCallError */
-function failure(status: number, path: string, payload: unknown): Error {
-  const planError = planCallError(status, payload)
+/** 非 2xx → 错误。套餐那几种（402 / 429 每日上限 / 403 / 401）换成说清下一步的 CreatorPlanCallError */
+function failure(status: number, path: string, payload: unknown, headers?: Headers): Error {
+  const planError = planCallError(status, payload, headers)
   if (planError) return planError
   const error = (payload as { error?: { code?: unknown; message?: unknown } } | null)?.error
   const detail =
@@ -296,8 +340,8 @@ function failure(status: number, path: string, payload: unknown): Error {
   )
 }
 
-function expectTask(status: number, path: string, payload: unknown): PlanTask {
-  if (status < 200 || status >= 300) throw failure(status, path, payload)
+function expectTask(status: number, path: string, payload: unknown, headers?: Headers): PlanTask {
+  if (status < 200 || status >= 300) throw failure(status, path, payload, headers)
   const task = parsePlanTask(payload)
   if (!task) throw new PlanTaskRequestError(status, path, '响应里没有任务对象')
   return task
@@ -311,7 +355,7 @@ export interface PlanTaskBody {
 
 /**
  * 提交。同一个 `idempotencyKey` 最多发 SUBMIT_ATTEMPTS 次 —— 重发是安全的，这正是带键的意义。
- * 4xx（除 429）不重发：参数不对、额度不够，再发也是同一个结果。
+ * 4xx（除限流的 429）不重发：参数不对、额度不够、今天的额度用完了，再发也是同一个结果。
  */
 export async function submitPlanTask(
   provider: ProviderConfig,
@@ -331,14 +375,17 @@ export async function submitPlanTask(
         signal: withTimeout(signal, SUBMIT_TIMEOUT_MS),
         fetchImpl: deps.fetchImpl
       })
+      // 套餐那几种先认：每日上限也是 429，但等到的是明天，不能当限流重发
+      const planError = planCallError(result.status, result.payload, result.headers)
+      if (planError) throw planError
       if (isRetryable(result.status)) {
         lastError = {
           retryAfter: result.retryAfter,
-          error: failure(result.status, '/tasks', result.payload)
+          error: failure(result.status, '/tasks', result.payload, result.headers)
         }
         continue
       }
-      return expectTask(result.status, 'POST /tasks', result.payload)
+      return expectTask(result.status, 'POST /tasks', result.payload, result.headers)
     } catch (error) {
       // 用户按了停止不算抖动；参数错、套餐错也不重发
       if (signal?.aborted || error instanceof PlanTaskRequestError) throw error
@@ -366,7 +413,7 @@ export async function getPlanTask(
     signal: withTimeout(signal, POLL_TIMEOUT_MS),
     fetchImpl: deps.fetchImpl
   })
-  return expectTask(result.status, `GET ${path}`, result.payload)
+  return expectTask(result.status, `GET ${path}`, result.payload, result.headers)
 }
 
 /**
@@ -403,7 +450,7 @@ const defaultLabel: TaskLabel = (taskId) => `任务号 ${taskId}`
 /**
  * 从一个已知的任务对象开始，按协议间隔轮询到终态。成功回任务，其余抛错。
  *
- * 用户按停止（signal abort）→ 取消服务端任务、额度退回 → 抛 PlanTaskCancelledError。
+ * 用户按停止（signal abort）→ 取消服务端任务 → 抛 PlanTaskCancelledError（退没退额度写在里面）。
  */
 export async function waitPlanTask(
   provider: ProviderConfig,
@@ -417,7 +464,7 @@ export async function waitPlanTask(
   const deadline = now() + PLAN_TASK_LIMIT_MS[kind] + DEADLINE_MARGIN_MS
   const cancel = async (): Promise<never> => {
     const cancelled = await cancelPlanTask(provider, first.id, options)
-    throw new PlanTaskCancelledError(first.id, cancelled?.status === 'cancelled', label)
+    throw new PlanTaskCancelledError(first.id, cancelOutcomeOf(cancelled), label, kind)
   }
 
   let current = first
@@ -426,7 +473,9 @@ export async function waitPlanTask(
   for (;;) {
     if (current.status === 'succeeded') return current
     if (current.status === 'failed') throw new PlanTaskFailedError(current, label)
-    if (current.status === 'cancelled') throw new PlanTaskCancelledError(current.id, true, label)
+    if (current.status === 'cancelled') {
+      throw new PlanTaskCancelledError(current.id, cancelOutcomeOf(current), label, kind)
+    }
     if (current.progress !== lastProgress) {
       lastProgress = current.progress
       options.onProgress?.(
@@ -601,7 +650,7 @@ export async function runPlanTask(
     // 还没结束的（查不到、等太久、没取消成）留在账上，下次续得上
     const ended =
       error instanceof PlanTaskFailedError ||
-      (error instanceof PlanTaskCancelledError && error.refunded)
+      (error instanceof PlanTaskCancelledError && error.settled)
     if (ended) {
       await safely(updateLedger(options, (entries) => entries.filter((e) => e.hash !== hash)))
     }

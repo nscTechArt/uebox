@@ -66,7 +66,8 @@ export type VoiceEvent =
   | { type: 'question-announced'; taskId: string }
   | { type: 'question-settled'; taskId?: string }
   | { type: 'error'; message: string }
-  | { type: 'closed' }
+  /** `reason`：服务端按规矩挂断（一分钟没人说话 / 单次 30 分钟），见 `onServerHangUp` */
+  | { type: 'closed'; reason?: 'idle_timeout' | 'session_timeout' }
 
 /**
  * 用户能理解的会话阶段。
@@ -289,6 +290,11 @@ export interface RealtimeVoiceOptions {
    * 念出来的每一句用户都该在屏幕上看得到 —— 不然他听到一句话，对话里却没有。
    */
   onAnnouncement?: (text: string) => void
+  /**
+   * 服务端按规矩挂断了（创作者 Token Plan：一分钟没人说话、单次会话满 30 分钟）。
+   * **不自动重连** —— 空闲挂断后重连也是挂着计费、没人说话；由宿主说一句，等用户再点
+   */
+  onServerHangUp?: (reason: 'idle_timeout' | 'session_timeout') => void
   /** 厂商无视 PCM 配置、返回压缩音频时给用户的安全提示 */
   unsupportedAudioMessage: string
   /** 这一段没听清时显示的话 */
@@ -1508,6 +1514,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
         await stop()
         break
       case 'closed':
+        if (event.reason) options.onServerHangUp?.(event.reason)
         await stop()
         break
       default:

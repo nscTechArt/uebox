@@ -1071,7 +1071,7 @@ function planVideoResult(task: PlanTask, job: VideoJob): GeneratedVideo {
 
 /**
  * 套餐那一支：提交（带幂等键、崩溃后按账本续上）→ 按 10 秒轮询 → 拿视频链接（7 天有效）。
- * 用户按停止时服务端取消、额度退回；失败同样退回。见 creatorPlan/tasks.ts。
+ * 失败、超时退回额度；用户按停止时服务端取消，只有还在排队时才退。见 creatorPlan/tasks.ts。
  */
 async function runPlanVideo(
   provider: ProviderConfig,

@@ -193,6 +193,44 @@ describe('提交', () => {
       tasks.submitPlanTask(video, { model: 'uebox-video', input: {} }, 'k', undefined, deps())
     ).rejects.toThrow('额度用完了')
   })
+
+  it('429 daily_limit_reached 不重发：说今天的额度用完、什么时候恢复；限流的 429 照常重发', async () => {
+    const daily = stubFetch(
+      () =>
+        new Response(JSON.stringify({ error: { code: 'daily_limit_reached', message: 'x' } }), {
+          status: 429,
+          headers: { 'Retry-After': '30000', 'X-Uebox-Daily-Reset': '2026-09-24T00:00:00Z' }
+        })
+    )
+    const error = await tasks
+      .submitPlanTask(video, { model: 'uebox-video', input: {} }, 'k', undefined, deps())
+      .catch((e: unknown) => e)
+    expect(daily).toHaveLength(1)
+    expect(slept).toEqual([])
+    expect(error).toMatchObject({
+      planError: 'daily_limit_reached',
+      detail: { dailyResetAt: '2026-09-24T00:00:00Z' }
+    })
+    expect((error as Error).message).toMatch(/今天的额度用完了，.+ 恢复/)
+
+    let attempt = 0
+    const limited = stubFetch(() => {
+      attempt += 1
+      return attempt === 1
+        ? json({ error: { code: 'rate_limited', message: 'slow down' } }, 429)
+        : json(taskObject('task_2', 'queued'), 201)
+    })
+    await tasks.submitPlanTask(video, { model: 'uebox-video', input: {} }, 'k', undefined, deps())
+    expect(limited).toHaveLength(2)
+  })
+
+  it('每日上限没收下这次提交：账上划掉，下一次（明天）是新的提交', async () => {
+    stubFetch(() => json({ error: { code: 'daily_limit_reached', message: 'x' } }, 429))
+    await expect(
+      tasks.runPlanTask(video, 'video', { model: 'uebox-video', input: { prompt: 'd' } }, deps())
+    ).rejects.toMatchObject({ planError: 'daily_limit_reached' })
+    expect(ledger().entries).toEqual([])
+  })
 })
 
 describe('等待', () => {
@@ -245,6 +283,46 @@ describe('等待', () => {
     expect(error).toBeInstanceOf(tasks.PlanTaskCancelledError)
     expect((error as InstanceType<typeof tasks.PlanTaskCancelledError>).refunded).toBe(true)
     expect(calls.at(-1)).toMatchObject({ method: 'POST', url: `${BASE}/tasks/t/cancel` })
+  })
+
+  it('取消后 usage 没归零（3D、音乐提交之后、视频开始生成之后）：说清额度不退', async () => {
+    for (const [kind, usage, reason] of [
+      ['model3d', { model3d_tasks: 1.5 }, '已提交的 3D 取消后不退额度'],
+      ['music', { music_tasks: 1 }, '已提交的音乐取消后不退额度'],
+      ['video', { video_seconds: 12.5 }, '只有还在排队时取消才退']
+    ] as const) {
+      const controller = new AbortController()
+      stubFetch((call) =>
+        call.url.endsWith('/cancel')
+          ? json(taskObject('t', 'cancelled', { usage }))
+          : json(taskObject('t', 'running'))
+      )
+      controller.abort()
+      const error = (await tasks
+        .waitPlanTask(model3d, kind, tasks.parsePlanTask(taskObject('t', 'running'))!, {
+          ...deps(),
+          signal: controller.signal
+        })
+        .catch((e: unknown) => e)) as InstanceType<typeof tasks.PlanTaskCancelledError>
+      expect(error).toBeInstanceOf(tasks.PlanTaskCancelledError)
+      expect(error.outcome).toBe('kept')
+      expect(error.refunded).toBe(false)
+      expect(error.settled).toBe(true)
+      expect(error.message).toContain('额度不退')
+      expect(error.message).toContain(reason)
+    }
+  })
+
+  it('取消得看 usage：归零算退了；没送到服务端是另一回事', () => {
+    const task = (usage: unknown): ReturnType<typeof tasks.parsePlanTask> =>
+      tasks.parsePlanTask(taskObject('t', 'cancelled', { usage }))
+    expect(tasks.cancelOutcomeOf(task({ music_tasks: 0 }))).toBe('refunded')
+    expect(tasks.cancelOutcomeOf(task(null))).toBe('refunded')
+    expect(tasks.cancelOutcomeOf(task({ video_seconds: 0.5 }))).toBe('kept')
+    expect(tasks.cancelOutcomeOf(null)).toBe('unconfirmed')
+    expect(tasks.cancelOutcomeOf(tasks.parsePlanTask(taskObject('t', 'running')))).toBe(
+      'unconfirmed'
+    )
   })
 
   it('查询抖几次不放弃；404 当场认输', async () => {
@@ -324,6 +402,21 @@ describe('崩溃后续上（本机账本）', () => {
     await expect(tasks.runPlanTask(music, 'music', body, deps())).rejects.toBeInstanceOf(
       tasks.PlanTaskFailedError
     )
+    expect(ledger().entries).toEqual([])
+  })
+
+  it('取消了、额度不退：任务也结束了，同样从账上划掉', async () => {
+    const controller = new AbortController()
+    stubFetch((call) => {
+      if (call.url.endsWith('/cancel')) {
+        return json(taskObject('task_4', 'cancelled', { usage: { music_tasks: 1 } }))
+      }
+      controller.abort()
+      return json(taskObject('task_4', 'running'), call.method === 'POST' ? 201 : 200)
+    })
+    await expect(
+      tasks.runPlanTask(music, 'music', body, { ...deps(), signal: controller.signal })
+    ).rejects.toMatchObject({ outcome: 'kept' })
     expect(ledger().entries).toEqual([])
   })
 })

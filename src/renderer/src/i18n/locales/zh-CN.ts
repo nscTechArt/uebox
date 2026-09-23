@@ -768,8 +768,20 @@ export default {
         searches: '网页检索 {used} / {limit} 次'
       },
       quotaOther: '{key} {used} / {limit}',
+      quotaMonthly: '月额度 {limit}',
+      quotaDaily: '今天 {used} / {limit}',
+      quotaDailyDone: '今天的用完了，{time} 恢复',
+      limited: {
+        plan_change: '中途升档：本期新增的额度按剩余天数折算，下个周期给全额。',
+        new_account: '新账户首次付款后 72 小时内限额。',
+        new_accountUntil: '新账户首次付款后 72 小时内限额，{time} 解除。'
+      },
+      time: {
+        today: '今天 {time}',
+        tomorrow: '明天 {time}'
+      },
       resetsAt: '{date} 重置',
-      pastDue: '续费没扣成功。宽限期内照常能用，过期后停用。',
+      pastDue: '续费扣款失败，本期额度已压低：对话只剩 20%，其他暂停。更新付款方式后立即恢复。',
       pastDueAction: '更新付款方式',
       deprecated: '{role}在用的 {model} 要下线了。',
       deprecatedUntil: '{role}在用的 {model} 将于 {date} 下线。',
@@ -823,6 +835,10 @@ export default {
           title: '这项额度本周期用完了',
           desc: '升级套餐，或等额度重置。'
         },
+        daily_limit_reached: {
+          title: '今天的额度用完了',
+          desc: '{time} 恢复。等不及可以升级套餐。'
+        },
         role_not_in_plan: {
           title: '当前套餐不含这个角色',
           desc: '升级套餐，或在「设置 → 模型」里给这个角色换个来源。'
@@ -833,6 +849,10 @@ export default {
         },
         manage: '管理订阅',
         reconnect: '去重新连接'
+      },
+      realtime: {
+        idle_timeout: '一分钟没人说话，语音已挂断。要接着聊，再点一下。',
+        session_timeout: '单次通话最长 30 分钟，已挂断。要接着聊，再点一下。'
       }
     },
     configPath: '配置文件',

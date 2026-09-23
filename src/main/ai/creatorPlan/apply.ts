@@ -27,7 +27,9 @@ import {
   isPlanProvider,
   type CreatorPlanChatSpec,
   type CreatorPlanDeprecationHit,
+  type CreatorPlanLimitedBy,
   type CreatorPlanManifest,
+  type CreatorPlanManifestQuota,
   type CreatorPlanQuota,
   type CreatorPlanRoleChange,
   type CreatorPlanSummary
@@ -216,6 +218,37 @@ export function planProviders(manifest: CreatorPlanManifest, apiKey: ApiKeyRef):
   }))
 }
 
+const LIMITED_BY: readonly CreatorPlanLimitedBy[] = ['plan_change', 'past_due', 'new_account']
+
+const isNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
+/**
+ * 清单一项 → 卡片一项。每日上限、压低的原因只在字段齐全时带上：
+ * 服务端以后加的原因代码这边不认识，就不写原因（数字照样显示）
+ */
+function planQuota(key: string, quota: CreatorPlanManifestQuota): CreatorPlanQuota {
+  const limitedBy = LIMITED_BY.find((reason) => reason === quota.limited_by)
+  const daily = quota.daily
+  return {
+    key,
+    limit: quota.limit,
+    used: quota.used,
+    ...(isNumber(quota.monthly_limit) && quota.monthly_limit > quota.limit
+      ? { monthlyLimit: quota.monthly_limit, ...(limitedBy ? { limitedBy } : {}) }
+      : {}),
+    ...(daily && isNumber(daily.limit) && isNumber(daily.used)
+      ? {
+          daily: {
+            limit: daily.limit,
+            used: daily.used,
+            resetsAt: typeof daily.resets_at === 'string' ? daily.resets_at : null
+          }
+        }
+      : {})
+  }
+}
+
 /** 清单 quotas 逐项。认识的键按额度表的顺序在前，不认识的也照样列出来 */
 function planQuotas(manifest: CreatorPlanManifest): CreatorPlanQuota[] {
   const known: readonly string[] = CREATOR_PLAN_QUOTA_KEYS
@@ -225,10 +258,10 @@ function planQuotas(manifest: CreatorPlanManifest): CreatorPlanQuota[] {
   }
   return Object.entries(manifest.quotas ?? {})
     .filter(
-      (entry): entry is [string, { limit: number; used: number }] =>
-        typeof entry[1]?.limit === 'number' && typeof entry[1]?.used === 'number'
+      (entry): entry is [string, CreatorPlanManifestQuota] =>
+        isNumber(entry[1]?.limit) && isNumber(entry[1]?.used)
     )
-    .map(([key, quota]) => ({ key, limit: quota.limit, used: quota.used }))
+    .map(([key, quota]) => planQuota(key, quota))
     .sort((a, b) => rank(a.key) - rank(b.key))
 }
 
@@ -241,6 +274,8 @@ export function planSummary(manifest: CreatorPlanManifest): CreatorPlanSummary {
     cancelAtPeriodEnd: manifest.plan.cancel_at_period_end,
     quotaResetsAt: manifest.plan.quota_resets_at,
     manageUrl: manifest.plan.manage_url,
+    cooldownEndsAt:
+      typeof manifest.plan.cooldown_ends_at === 'string' ? manifest.plan.cooldown_ends_at : null,
     quotas: planQuotas(manifest)
   }
 }

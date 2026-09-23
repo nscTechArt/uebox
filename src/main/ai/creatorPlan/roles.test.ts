@@ -318,6 +318,20 @@ describe('生图（04-images）', () => {
     stubFetch(() => planError(402, 'subscription_inactive'))
     await expect(generateImages({ prompt: 'x' })).rejects.toThrow(/订阅[\s\S]*设置 → 模型/)
   })
+
+  it('429 daily_limit_reached：不再发一次，说今天的额度用完、几点恢复', async () => {
+    const calls = stubFetch(
+      () =>
+        new Response(JSON.stringify({ error: { code: 'daily_limit_reached', message: 'x' } }), {
+          status: 429,
+          headers: { 'X-Uebox-Daily-Reset': new Date(Date.now() + 3_600_000).toISOString() }
+        })
+    )
+    await expect(generateImages({ prompt: 'x' })).rejects.toThrow(
+      /今天的额度用完了，.+ 恢复[\s\S]*设置 → 模型/
+    )
+    expect(calls).toHaveLength(1)
+  })
 })
 
 describe('语音合成（06-audio）', () => {

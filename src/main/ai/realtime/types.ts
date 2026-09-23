@@ -82,7 +82,19 @@ export type VoiceSessionEvent =
   | { type: 'question-announced'; taskId: string }
   | { type: 'question-settled'; taskId?: string }
   | { type: 'error'; message: string }
-  | { type: 'closed' }
+  /**
+   * 连接断了。`reason` 只在服务端按规矩挂断时给（创作者 Token Plan，协议 07「限制」）：
+   * `idle_timeout` 是一分钟没人说话，`session_timeout` 是单次会话到了 30 分钟。
+   * 两种都**不自动重连**（空闲挂断重连了也是空转计费），渲染层说一句，等用户再点
+   */
+  | { type: 'closed'; reason?: VoiceHangUpReason }
+
+/** 服务端按规矩挂断的原因（关闭帧的 reason / error 事件的 code） */
+export type VoiceHangUpReason = 'idle_timeout' | 'session_timeout'
+
+export function voiceHangUpReason(value: unknown): VoiceHangUpReason | null {
+  return value === 'idle_timeout' || value === 'session_timeout' ? value : null
+}
 
 export interface RealtimeToolDefinition {
   name: string

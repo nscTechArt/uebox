@@ -538,6 +538,29 @@ describe('useRealtimeVoice', () => {
    * 审批这道确认拦的是「听错一句就删了场景」。代价不对称：拒了大不了让用户
    * 再说一遍，批了可能是不可逆的。所以拿不准一律 reject。
    */
+  describe('服务端按规矩挂断', () => {
+    it('一分钟没人说话挂断：告诉宿主原因、收掉会话，不重连', async () => {
+      const onServerHangUp = vi.fn()
+      const harness = await connect({ onServerHangUp })
+      const start = window.api.realtimeVoice.start as unknown as ReturnType<typeof vi.fn>
+
+      await harness.emit({ type: 'closed', reason: 'idle_timeout' })
+
+      expect(onServerHangUp).toHaveBeenCalledWith('idle_timeout')
+      expect(harness.voice.active.value).toBe(false)
+      expect(harness.voice.error.value).toBeNull()
+      expect(start).toHaveBeenCalledOnce()
+    })
+
+    it('普通断开不带原因：不说话，照旧收掉', async () => {
+      const onServerHangUp = vi.fn()
+      const harness = await connect({ onServerHangUp })
+      await harness.emit({ type: 'closed' })
+      expect(onServerHangUp).not.toHaveBeenCalled()
+      expect(harness.voice.active.value).toBe(false)
+    })
+  })
+
   describe('高风险操作的口头审批', () => {
     it('用户明确同意就 approve', async () => {
       const onApprove = vi.fn()

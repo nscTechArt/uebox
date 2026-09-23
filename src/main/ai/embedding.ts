@@ -180,7 +180,9 @@ export async function requestEmbeddings(
 
     if (!response.ok || !Array.isArray(body?.data)) {
       // 套餐来源的 402 / 403 / 401 换成说清下一步的话，别让知识库只报一句 HTTP 402
-      const planError = isPlanProvider(provider.id) ? planCallError(response.status, body) : null
+      const planError = isPlanProvider(provider.id)
+        ? planCallError(response.status, body, response.headers)
+        : null
       if (planError) throw planError
       throw new Error(extractErrorMessage(body, response.status))
     }

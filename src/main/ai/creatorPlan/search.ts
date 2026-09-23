@@ -60,7 +60,7 @@ export async function searchViaPlan(request: PlanSearchRequest): Promise<PlanSea
     body = null
   }
   if (!response.ok) {
-    const planError = planCallError(response.status, body)
+    const planError = planCallError(response.status, body, response.headers)
     if (planError) throw planError
     const message = (body as { error?: { message?: unknown } } | null)?.error?.message
     throw new Error(`HTTP ${response.status}${typeof message === 'string' ? `：${message}` : ''}`)

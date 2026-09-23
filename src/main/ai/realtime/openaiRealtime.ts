@@ -4,12 +4,13 @@ import {
   normalizeRealtimeEchoGuard,
   type RealtimeEchoGuard
 } from '../../../shared/realtimeEchoGuard'
-import type {
-  AudioSpec,
-  RealtimeConversationMessage,
-  RealtimeSessionConfig,
-  VoiceSessionEvent,
-  VoiceSessionHandle
+import {
+  voiceHangUpReason,
+  type AudioSpec,
+  type RealtimeConversationMessage,
+  type RealtimeSessionConfig,
+  type VoiceSessionEvent,
+  type VoiceSessionHandle
 } from './types'
 
 /**
@@ -424,7 +425,7 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
     config.onEvent({ type: 'error', message })
   })
 
-  socket.on('close', () => {
+  socket.on('close', (_code: number, reason: Buffer) => {
     closed = true
     /*
      * **这里也要 dispose。** 连接是对面断的（掉线、服务端超时）时先走到这儿，
@@ -433,7 +434,10 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
      * 已经没了的会话上醒来，打一行「没等到回执」，还可能顺手再排一个。
      */
     responses.dispose()
-    config.onEvent({ type: 'closed' })
+    // 创作者 Token Plan 按规矩挂断时关闭帧的 reason 就是原因码（协议 07「限制」）。带上去，
+    // 渲染层说一句「一分钟没人说话，挂断了」，而不是一声不吭地熄掉 —— 也不自动重连
+    const hangUp = voiceHangUpReason(reason?.toString('utf-8'))
+    config.onEvent(hangUp ? { type: 'closed', reason: hangUp } : { type: 'closed' })
   })
 
   return {
@@ -590,6 +594,10 @@ export function translate(event: Record<string, unknown>): VoiceSessionEvent[] {
       const error = (event.error as { message?: unknown; code?: unknown }) || {}
       // 自己人造成的、且不影响通话继续的那几种，不往上报（理由见 HARMLESS_ERROR_CODES）
       if (typeof error.code === 'string' && HARMLESS_ERROR_CODES.has(error.code)) return []
+      // 创作者 Token Plan 按规矩挂断（一分钟没人说话 / 单次 30 分钟）：不是故障，
+      // 按「断了、原因是这个」往上报，别弹成报错。随后的 1008 关闭帧被上层当成同一次断开
+      const hangUp = voiceHangUpReason(error.code)
+      if (hangUp) return [{ type: 'closed', reason: hangUp }]
       // 创作者 Token Plan 会话中途额度用完、订阅失效：服务端发这条 error 再以 1008 关闭（协议 07）。
       // 这几个码只有套餐用，OpenAI 自己的码不会撞上
       const planError = planCallError(planStatusOf(error.code), { error })
@@ -608,6 +616,7 @@ export function translate(event: Record<string, unknown>): VoiceSessionEvent[] {
 /** 套餐错误码 → 它在 HTTP 上对应的状态码（会话里的 error 事件没有状态码） */
 function planStatusOf(code: unknown): number {
   if (code === 'subscription_inactive' || code === 'quota_exhausted') return 402
+  if (code === 'daily_limit_reached') return 429
   if (code === 'role_not_in_plan') return 403
   return 0
 }

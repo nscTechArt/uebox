@@ -27,6 +27,7 @@ const summary: CreatorPlanPreview['summary'] = {
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
   quotaResetsAt: null,
+  cooldownEndsAt: null,
   manageUrl: 'https://plan.example/account/billing',
   quotas: []
 }

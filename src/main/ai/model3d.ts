@@ -1894,7 +1894,7 @@ function planModel3dFiles(task: PlanTask): Model3dFile[] {
 
 /**
  * 套餐那一支：提交（带幂等键、崩溃后按账本续上）→ 按 5 秒轮询 → 拿文件链接（7 天有效）。
- * 用户按停止时服务端取消、额度退回；失败同样退回。见 creatorPlan/tasks.ts。
+ * 失败、超时退回额度；用户按停止时服务端取消，但**已提交的 3D 取消不退**。见 creatorPlan/tasks.ts。
  */
 async function runPlanModel3d(
   provider: ProviderConfig,

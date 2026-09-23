@@ -593,6 +593,8 @@ function createVoiceAssistant(): RealtimeVoiceState {
     onAssistantText: updateVoiceAssistantText,
     onAssistantDone: finishVoiceAssistantText,
     onAnnouncement: recordVoiceAnnouncement,
+    // 创作者 Token Plan 一分钟没人说话 / 满 30 分钟挂断：说一句，不自动重连
+    onServerHangUp: (reason) => message.info(t(`aiProvider.creatorPlan.realtime.${reason}`)),
     resolveSession: currentVoiceSession,
     listWorkers: voiceWorkers,
     listSessions: listVoiceSessions,

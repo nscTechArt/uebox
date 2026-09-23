@@ -364,7 +364,7 @@ export async function requestJudgement(
     }
 
     if (!response.ok || !body?.answers || typeof body.answers !== 'object') {
-      const planError = plan ? planCallError(response.status, body) : null
+      const planError = plan ? planCallError(response.status, body, response.headers) : null
       if (planError) throw planError
       throw new Error(extractErrorMessage(body, response.status))
     }

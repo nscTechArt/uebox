@@ -162,7 +162,7 @@ describe('projectEvent', () => {
    * 创作者 Token Plan 的套餐错误（00-conventions.md「错误」）要带上 planError，
    * 渲染层据此给「管理订阅」「重新连接」的提示。只认套餐来源：别家回一样的 402 不算。
    */
-  it('套餐来源回 402 / 403 / 401：带上 planError；别的来源同样的错误不带', () => {
+  it('套餐来源回 402 / 429 每日上限 / 403 / 401：带上 planError；别的来源同样的错误不带', () => {
     const planFailure = (provider: string, errorMessage: string): AgentV3Event['payload'] =>
       project({
         type: 'message_end',
@@ -185,6 +185,11 @@ describe('projectEvent', () => {
     })
     expect(planFailure('creator-plan', `401 ${body('unauthorized')}`)).toMatchObject({
       planError: 'unauthorized'
+    })
+    // 今天的额度用完：也是 429，但是套餐错误 —— 不按限流给「接着跑」
+    expect(planFailure('creator-plan', `429 ${body('daily_limit_reached')}`)).toMatchObject({
+      statusCode: 429,
+      planError: 'daily_limit_reached'
     })
     // 套餐来源的别的错误（限流）走通用文案
     expect(planFailure('creator-plan', `429 ${body('rate_limited')}`)).not.toHaveProperty(

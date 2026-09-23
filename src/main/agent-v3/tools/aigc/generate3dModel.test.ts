@@ -452,7 +452,7 @@ describe('创作者 Token Plan 的扩展开关', () => {
   const paramNames = (built: { parameters: unknown }): string[] =>
     Object.keys((built.parameters as { properties: Record<string, unknown> }).properties)
 
-  it('只露清单 options 列了的键，说明不带厂商名；失败退回写进说明', () => {
+  it('只露清单 options 列了的键，说明不带厂商名；退额度的口径写进说明', () => {
     readSettingsSync.mockReturnValue(planBoundSettings())
     try {
       const built = createGenerate3dModelTool()
@@ -464,7 +464,9 @@ describe('创作者 Token Plan 的扩展开关', () => {
       const props = (built.parameters as { properties: Record<string, { description?: string }> })
         .properties
       expect(props.negative_prompt.description).not.toContain('Tripo')
-      expect(built.description).toContain('失败、取消都退回')
+      expect(built.description).toContain('失败、超时退回；提交之后取消不退')
+      expect(built.description).toContain('已提交的 3D 取消后不退额度')
+      expect(built.description).not.toContain('取消都退回')
       expect(built.description).not.toContain('**失败也扣**')
     } finally {
       readSettingsSync.mockImplementation(() => tripoBoundSettings())

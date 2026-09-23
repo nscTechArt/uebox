@@ -11,7 +11,7 @@ import { briefForSpeech } from './speechBriefing'
 import { speechText } from './speechText'
 import { SpeechPcmPlayer } from './speechPcmPlayer'
 import { speechCache } from './speechCache'
-import { isCreatorPlanChatErrorCode } from './creatorPlanChatError'
+import { creatorPlanErrorText, isCreatorPlanChatErrorCode } from './creatorPlanChatError'
 
 // One reader per renderer: clicking another reply replaces the current playback.
 const activeOwner = ref<string | symbol | null>(null)
@@ -188,9 +188,7 @@ export function useReadAloud(
       const planCode =
         error instanceof Error ? error.message.match(/TTS_PLAN_([A-Z_]+)/)?.[1]?.toLowerCase() : ''
       if (isCreatorPlanChatErrorCode(planCode)) {
-        message.error(
-          `${t(`aiProvider.creatorPlan.chat.${planCode}.title`)}：${t(`aiProvider.creatorPlan.chat.${planCode}.desc`)}`
-        )
+        message.error(creatorPlanErrorText(planCode, t))
         return
       }
       message.error(

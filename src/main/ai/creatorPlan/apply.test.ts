@@ -427,6 +427,47 @@ describe('planSummary 额度', () => {
     })
     expect(summary.quotas.map((q) => q.key)).toEqual(['text_tokens', 'images', 'future_units'])
     expect(summary.quotas[1]).toEqual({ key: 'images', limit: 100, used: 3 })
+    expect(summary.cooldownEndsAt).toBeNull()
+  })
+
+  it('带上小数、每日上限、压低的原因和冷却结束时间', () => {
+    const summary = planSummary({
+      ...manifest,
+      plan: { ...manifest.plan, cooldown_ends_at: '2026-09-26T08:00:00Z' },
+      quotas: {
+        text_tokens: {
+          limit: 20_000_000,
+          used: 1_204_400,
+          monthly_limit: 40_000_000,
+          limited_by: 'new_account',
+          daily: { limit: 8_000_000, used: 1_204_400, resets_at: '2026-09-24T00:00:00Z' }
+        },
+        video_seconds: { limit: 45, used: 25.5, daily: { limit: 25, used: 2.5 } },
+        // 原因代码不认识：数字照给，不写原因
+        images: { limit: 10, used: 0, monthly_limit: 90, limited_by: 'something_new' },
+        // monthly_limit 不比 limit 大：没被压低
+        music_tasks: { limit: 8, used: 1, monthly_limit: 8, limited_by: 'plan_change' }
+      }
+    })
+    expect(summary.cooldownEndsAt).toBe('2026-09-26T08:00:00Z')
+    expect(summary.quotas).toEqual([
+      {
+        key: 'text_tokens',
+        limit: 20_000_000,
+        used: 1_204_400,
+        monthlyLimit: 40_000_000,
+        limitedBy: 'new_account',
+        daily: { limit: 8_000_000, used: 1_204_400, resetsAt: '2026-09-24T00:00:00Z' }
+      },
+      { key: 'images', limit: 10, used: 0, monthlyLimit: 90 },
+      {
+        key: 'video_seconds',
+        limit: 45,
+        used: 25.5,
+        daily: { limit: 25, used: 2.5, resetsAt: null }
+      },
+      { key: 'music_tasks', limit: 8, used: 1 }
+    ])
   })
 })
 

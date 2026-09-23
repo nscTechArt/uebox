@@ -9,9 +9,11 @@ import {
   buildOpenAiConversationItem,
   buildOpenAiSessionUpdate,
   createResponseGate,
+  openOpenAiRealtimeSession,
   translate
 } from './openaiRealtime'
-import type { RealtimeSessionConfig } from './types'
+import type { RealtimeSessionConfig, VoiceSessionEvent } from './types'
+import { WebSocketServer } from 'ws'
 import { DEFAULT_REALTIME_ECHO_GUARD } from '../../../shared/realtimeEchoGuard'
 
 const CONFIG: RealtimeSessionConfig = {
@@ -465,6 +467,47 @@ describe('创作者 Token Plan', () => {
     expect(
       translate({ type: 'error', error: { code: 'subscription_inactive', message: 'x' } })
     ).toEqual([{ type: 'error', message: expect.stringContaining('管理订阅') }])
+  })
+
+  it('今天的额度用完（daily_limit_reached）：说几点恢复，不当普通报错', () => {
+    expect(
+      translate({ type: 'error', error: { code: 'daily_limit_reached', message: 'x' } })
+    ).toEqual([{ type: 'error', message: expect.stringMatching(/今天的额度用完了，.+ 恢复/) }])
+  })
+
+  it('一分钟没人说话 / 满 30 分钟：按「断了、原因是这个」报，不当报错', () => {
+    expect(translate({ type: 'error', error: { code: 'idle_timeout', message: 'x' } })).toEqual([
+      { type: 'closed', reason: 'idle_timeout' }
+    ])
+    expect(translate({ type: 'error', error: { code: 'session_timeout', message: 'x' } })).toEqual([
+      { type: 'closed', reason: 'session_timeout' }
+    ])
+  })
+
+  it('服务端直接以 1008 关闭、reason 是 idle_timeout：closed 带上原因；别的关闭不带', async () => {
+    const run = async (reason: string): Promise<VoiceSessionEvent[]> => {
+      const server = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+      await new Promise<void>((resolve) => server.once('listening', () => resolve()))
+      server.on('connection', (socket) => socket.close(1008, reason))
+      const { port } = server.address() as { port: number }
+      const events: VoiceSessionEvent[] = []
+      await new Promise<void>((resolve) => {
+        openOpenAiRealtimeSession({
+          ...CONFIG,
+          baseUrl: `ws://127.0.0.1:${port}/v1/realtime`,
+          model: 'uebox-realtime',
+          plan: true,
+          onEvent: (event) => {
+            events.push(event)
+            if (event.type === 'closed') resolve()
+          }
+        })
+      })
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      return events
+    }
+    expect((await run('idle_timeout')).at(-1)).toEqual({ type: 'closed', reason: 'idle_timeout' })
+    expect((await run('going away')).at(-1)).toEqual({ type: 'closed' })
   })
 
   it('工具调用照旧从 response.done.output 取（协议 07：两处都带，取一处即可）', () => {

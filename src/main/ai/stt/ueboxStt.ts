@@ -64,11 +64,13 @@ export function ueboxSttErrorMessage(error: ServerEvent['error']): string {
   const planStatus =
     code === 'subscription_inactive' || code === 'quota_exhausted'
       ? 402
-      : code === 'role_not_in_plan'
-        ? 403
-        : code === 'unauthorized'
-          ? 401
-          : 0
+      : code === 'daily_limit_reached'
+        ? 429
+        : code === 'role_not_in_plan'
+          ? 403
+          : code === 'unauthorized'
+            ? 401
+            : 0
   const plan = planStatus ? planCallError(planStatus, { error: { code } }) : null
   if (plan) return plan.message
   if (code === 'idle_timeout') return '一分钟没收到声音，识别已结束。'

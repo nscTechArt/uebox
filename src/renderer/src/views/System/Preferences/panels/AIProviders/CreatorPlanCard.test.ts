@@ -40,6 +40,7 @@ const connected: CreatorPlanState = {
     currentPeriodEnd: '2026-10-01T00:00:00Z',
     cancelAtPeriodEnd: false,
     quotaResetsAt: '2026-10-01T00:00:00Z',
+    cooldownEndsAt: null,
     manageUrl: 'https://plan.example/account/billing',
     quotas: [
       { key: 'text_tokens', limit: 1_000_000, used: 1234 },
@@ -173,9 +174,78 @@ describe('CreatorPlanCard', () => {
     await flushPromises()
     const alert = wrapper.find('.plan-alert')
     expect(alert.exists()).toBe(true)
-    expect(alert.text()).toContain('续费没扣成功')
+    expect(alert.text()).toContain('本期额度已压低')
+    expect(alert.text()).toContain('对话只剩 20%，其他暂停')
     await alert.find('button').trigger('click')
     expect(openExternal).toHaveBeenCalledWith('https://plan.example/account/billing')
+  })
+
+  it('额度带小数照原样显示；每日上限跟在下面；用完了说什么时候恢复', async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60_000).toISOString()
+    const data: CreatorPlanState = {
+      ...connected,
+      summary: {
+        ...connected.summary!,
+        quotas: [
+          {
+            key: 'text_tokens',
+            limit: 40_000_000,
+            used: 4_188_051,
+            daily: { limit: 8_000_000, used: 1_204_400, resetsAt: tomorrow }
+          },
+          {
+            key: 'video_seconds',
+            limit: 45,
+            used: 25.5,
+            daily: { limit: 25, used: 25, resetsAt: tomorrow }
+          },
+          { key: 'model3d_tasks', limit: 9, used: 2.5 },
+          { key: 'realtime_minutes', limit: 30, used: 4.333333 }
+        ]
+      }
+    }
+    stubApi({ state: vi.fn(async () => ({ ok: true, data })) })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    const items = wrapper.findAll('.plan-quotas li')
+    expect(items[0].text()).toContain('对话 4,188,051 / 40,000,000 token')
+    expect(items[0].find('.plan-daily').text()).toBe('今天 1,204,400 / 8,000,000')
+    expect(items[1].text()).toContain('视频 25.5 / 45 秒')
+    expect(items[1].find('.plan-daily').text()).toMatch(/^今天的用完了，明天 \d{2}:\d{2} 恢复$/)
+    expect(items[2].text()).toBe('3D 2.5 / 9 次')
+    expect(items[2].find('.plan-daily').exists()).toBe(false)
+    expect(items[3].text()).toBe('实时语音 4.33 / 30 分钟')
+  })
+
+  it('本期上限被压低：写上月额度，并说一句原因；新账户冷却带解除时间', async () => {
+    const data: CreatorPlanState = {
+      ...connected,
+      summary: {
+        ...connected.summary!,
+        cooldownEndsAt: new Date(Date.now() + 3 * 24 * 60 * 60_000).toISOString(),
+        quotas: [
+          { key: 'images', limit: 10, used: 0, monthlyLimit: 90, limitedBy: 'plan_change' },
+          { key: 'music_tasks', limit: 1, used: 0, monthlyLimit: 8, limitedBy: 'new_account' }
+        ]
+      }
+    }
+    stubApi({ state: vi.fn(async () => ({ ok: true, data })) })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    const items = wrapper.findAll('.plan-quotas li').map((li) => li.text())
+    expect(items[0]).toBe('生图 0 / 10 张 · 月额度 90')
+    const notes = wrapper.findAll('.plan-limited').map((note) => note.text())
+    expect(notes).toHaveLength(2)
+    expect(notes[0]).toContain('中途升档')
+    expect(notes[1]).toMatch(/72 小时内限额，.+ 解除/)
+  })
+
+  it('没被压低：不写月额度，也没有原因', async () => {
+    stubApi({ state: vi.fn(async () => ({ ok: true, data: connected })) })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('月额度')
+    expect(wrapper.find('.plan-limited').exists()).toBe(false)
   })
 
   it('生效中不显示续费提醒', async () => {

@@ -5,8 +5,10 @@
  * 没连接时打开设置页不会联网 —— 主进程的 state 在没有套餐来源时直接返回。
  * 应用、断开之后发 `changed`，由父组件重读模型配置（来源列表和角色绑定都变了）。
  *
- * 额度按清单 quotas 逐项列；续费失败（past_due）常驻一条提醒；清单说要下线的
- * 模型正在用时列出来。断开时服务端没吊销成功，留一句话和去网页端的链接。
+ * 额度按清单 quotas 逐项列（可以带小数：视频秒、3D 次按半单位计）；设了每日上限的项下面
+ * 跟一行「今天 已用 / 上限」；本期上限被压低（中途升档、新账户冷却）时写一句原因。
+ * 续费失败（past_due）常驻一条提醒；清单说要下线的模型正在用时列出来。
+ * 断开时服务端没吊销成功，留一句话和去网页端的链接。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -17,13 +19,15 @@ import CreatorPlanStorageRow from './CreatorPlanStorageRow.vue'
 import { message } from '@renderer/utils/messageManager'
 import { creatorPlanAPI } from '@renderer/api/creatorPlan'
 import type { ModelRole } from '@core/shared/aiProvider'
-import type {
-  CreatorPlanDeprecationHit,
-  CreatorPlanDevicePrompt,
-  CreatorPlanErrorCode,
-  CreatorPlanPreview,
-  CreatorPlanQuota,
-  CreatorPlanState
+import {
+  formatPlanResetTime,
+  nextUtcMidnight,
+  type CreatorPlanDeprecationHit,
+  type CreatorPlanDevicePrompt,
+  type CreatorPlanErrorCode,
+  type CreatorPlanPreview,
+  type CreatorPlanQuota,
+  type CreatorPlanState
 } from '@core/shared/creatorPlan'
 
 const emit = defineEmits<{ (e: 'changed'): void }>()
@@ -127,7 +131,15 @@ async function copyCode(): Promise<void> {
   if (prompt.value) await navigator.clipboard.writeText(prompt.value.userCode)
 }
 
-const formatNumber = (value: number): string => new Intl.NumberFormat(locale.value).format(value)
+/** 额度可以带小数（视频 25.5 秒、3D 2.5 次、分钟保留两位），最多显示两位 */
+const formatNumber = (value: number): string =>
+  new Intl.NumberFormat(locale.value, { maximumFractionDigits: 2 }).format(value)
+/** 「今天 17:00」「明天 08:00」，再远的带日期。按本机时区 */
+const formatTime = (iso: string): string =>
+  formatPlanResetTime(iso, locale.value, {
+    today: (time) => t('aiProvider.creatorPlan.time.today', { time }),
+    tomorrow: (time) => t('aiProvider.creatorPlan.time.tomorrow', { time })
+  })
 const formatDate = (iso: string | null): string =>
   iso ? new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(iso)) : ''
 
@@ -135,10 +147,47 @@ function quotaText(quota: CreatorPlanQuota): string {
   const values = { used: formatNumber(quota.used), limit: formatNumber(quota.limit) }
   const key = `aiProvider.creatorPlan.quotas.${quota.key}`
   // 服务端以后加的额度项（v1 只做加法）这边还没文案，照样列出来
-  return te(key)
+  const text = te(key)
     ? t(key, values)
     : t('aiProvider.creatorPlan.quotaOther', { ...values, key: quota.key })
+  // 本期上限被压低了：把档位的月额度也写上，原因在额度表下面说
+  return quota.monthlyLimit
+    ? `${text} · ${t('aiProvider.creatorPlan.quotaMonthly', { limit: formatNumber(quota.monthlyLimit) })}`
+    : text
 }
+
+/** 每日上限那一行。用完了就说什么时候恢复（没给重置时间就按下一个 00:00 UTC，协议的日界） */
+function dailyText(daily: NonNullable<CreatorPlanQuota['daily']>): string {
+  if (daily.used >= daily.limit) {
+    return t('aiProvider.creatorPlan.quotaDailyDone', {
+      time: formatTime(daily.resetsAt ?? nextUtcMidnight())
+    })
+  }
+  return t('aiProvider.creatorPlan.quotaDaily', {
+    used: formatNumber(daily.used),
+    limit: formatNumber(daily.limit)
+  })
+}
+
+/**
+ * 本期上限为什么被压低，一种原因一句。扣款失败不在这里说 —— 下面那条常驻提醒说了，
+ * 还带着去更新付款方式的按钮。
+ */
+const limitedNotes = computed(() => {
+  const s = summary.value
+  if (!s) return []
+  const reasons = new Set(s.quotas.map((quota) => quota.limitedBy))
+  const notes: string[] = []
+  if (reasons.has('plan_change')) notes.push(t('aiProvider.creatorPlan.limited.plan_change'))
+  if (s.cooldownEndsAt) {
+    notes.push(
+      t('aiProvider.creatorPlan.limited.new_accountUntil', { time: formatTime(s.cooldownEndsAt) })
+    )
+  } else if (reasons.has('new_account')) {
+    notes.push(t('aiProvider.creatorPlan.limited.new_account'))
+  }
+  return notes
+})
 
 function deprecationText(hit: CreatorPlanDeprecationHit): string {
   const role = t(`aiProvider.roles.${hit.role}`)
@@ -196,9 +245,13 @@ onUnmounted(() => unsubscribe?.())
           </span>
           <ul v-if="summary.quotas.length > 0" class="plan-quotas">
             <li v-for="quota in summary.quotas" :key="quota.key" class="plan-desc">
-              {{ quotaText(quota) }}
+              <span>{{ quotaText(quota) }}</span>
+              <span v-if="quota.daily" class="plan-daily">{{ dailyText(quota.daily) }}</span>
             </li>
           </ul>
+          <span v-for="note in limitedNotes" :key="note" class="plan-desc plan-warn plan-limited">
+            {{ note }}
+          </span>
           <span v-if="summary.quotaResetsAt" class="plan-desc">
             {{ $t('aiProvider.creatorPlan.resetsAt', { date: formatDate(summary.quotaResetsAt) }) }}
           </span>
@@ -244,7 +297,7 @@ onUnmounted(() => unsubscribe?.())
       </div>
     </div>
 
-    <!-- 续费失败：宽限期内照常能用，但过了就停，所以常驻提醒，不收起来 -->
+    <!-- 续费失败：本期额度已压低（对话 20%、其他暂停），过了宽限期就停，所以常驻提醒，不收起来 -->
     <div v-if="state?.connected && summary?.status === 'past_due'" class="plan-alert" role="alert">
       <span>{{ $t('aiProvider.creatorPlan.pastDue') }}</span>
       <AppButton variant="primary" size="small" @click="openManage">
@@ -406,6 +459,15 @@ onUnmounted(() => unsubscribe?.())
 
 .plan-deprecations {
   margin-top: var(--space-2);
+}
+
+.plan-quotas li {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-daily {
+  font-size: 11px;
 }
 
 .plan-alert {

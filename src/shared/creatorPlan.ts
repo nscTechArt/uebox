@@ -48,8 +48,10 @@ export interface CreatorPlanManifest {
     cancel_at_period_end: boolean
     quota_resets_at: string | null
     manage_url: string
+    /** 新账户冷却的结束时间，只在冷却期内给 */
+    cooldown_ends_at?: string | null
   }
-  quotas: Partial<Record<string, { limit: number; used: number }>>
+  quotas: Partial<Record<string, CreatorPlanManifestQuota>>
   api: { base_url: string }
   /** 为 null 表示套餐不含这个角色（或服务端还没开放） */
   roles: Partial<Record<ModelRole, unknown>>
@@ -62,6 +64,23 @@ export interface CreatorPlanManifest {
     deprecated_at?: string | null
     removed_at?: string | null
   }>
+}
+
+/**
+ * 本期上限为什么低于档位的月额度（01-plan「字段规则」）：
+ * 中途升档按比例折算、扣款失败压低、新账户冷却。几条同时成立时服务端给最严的那条
+ */
+export type CreatorPlanLimitedBy = 'plan_change' | 'past_due' | 'new_account'
+
+/** 清单 quotas 里的一项。数值可以带小数（视频秒、3D 次按 0.5 计；分钟保留两位） */
+export interface CreatorPlanManifestQuota {
+  limit: number
+  used: number
+  /** 不压低时的上限。只在 limit 被压低时给 */
+  monthly_limit?: number
+  limited_by?: string
+  /** 每日上限（按 UTC 日）。没有这个字段的项不设每日上限 */
+  daily?: { limit: number; used: number; resets_at?: string | null }
 }
 
 /**
@@ -84,6 +103,11 @@ export interface CreatorPlanQuota {
   key: string
   limit: number
   used: number
+  /** limit 被压低时才有：不压低时的上限，和压低的原因 */
+  monthlyLimit?: number
+  limitedBy?: CreatorPlanLimitedBy
+  /** 设了每日上限的项才有 */
+  daily?: { limit: number; used: number; resetsAt: string | null }
 }
 
 /** 卡片上显示的套餐摘要 */
@@ -95,6 +119,8 @@ export interface CreatorPlanSummary {
   cancelAtPeriodEnd: boolean
   quotaResetsAt: string | null
   manageUrl: string
+  /** 新账户冷却的结束时间，只在冷却期内有 */
+  cooldownEndsAt: string | null
   /** 清单 quotas 逐项，按 CREATOR_PLAN_QUOTA_KEYS 排序 */
   quotas: CreatorPlanQuota[]
 }
@@ -175,17 +201,22 @@ export interface CreatorPlanDisconnectResult {
 
 /**
  * 调套餐来源时，服务端回的这几种错误在对话里给专门的提示（见 00-conventions.md「错误」）。
- * 前三种跳清单里的 manage_url；unauthorized 引导去「设置 → 模型」重新连接。
+ * 除 unauthorized 外都跳清单里的 manage_url；unauthorized 引导去「设置 → 模型」重新连接。
+ *
+ * `daily_limit_reached`（429）是每日上限：明天 00:00 UTC 就能接着用，**不重试** ——
+ * 别的 429 是限流、等几秒就好，这一个等到的是明天。
  */
 export type CreatorPlanChatErrorCode =
   | 'subscription_inactive'
   | 'quota_exhausted'
+  | 'daily_limit_reached'
   | 'role_not_in_plan'
   | 'unauthorized'
 
 const CHAT_ERRORS: Readonly<Record<string, [number, CreatorPlanChatErrorCode]>> = {
   subscription_inactive: [402, 'subscription_inactive'],
   quota_exhausted: [402, 'quota_exhausted'],
+  daily_limit_reached: [429, 'daily_limit_reached'],
   role_not_in_plan: [403, 'role_not_in_plan']
 }
 
@@ -202,6 +233,53 @@ export function creatorPlanChatError(
   if (statusCode === 401) return 'unauthorized'
   const hit = code && Object.hasOwn(CHAT_ERRORS, code) ? CHAT_ERRORS[code] : undefined
   return hit && hit[0] === statusCode ? hit[1] : null
+}
+
+/**
+ * 每日上限的重置时刻：下一个 00:00 UTC（00-conventions「每日上限」）。
+ * 响应头 `X-Uebox-Daily-Reset` 拿不到时（对话那一路只剩一行错误文本）按它算，结果一样。
+ */
+export function nextUtcMidnight(now: number = Date.now()): string {
+  const at = new Date(now)
+  return new Date(
+    Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() + 1)
+  ).toISOString()
+}
+
+/** 本地时区里的第几天，用来判「今天 / 明天」 */
+function localDay(at: Date): number {
+  return Math.floor((at.getTime() - at.getTimezoneOffset() * 60_000) / 86_400_000)
+}
+
+/**
+ * 重置时刻说给人听：「今天 17:00」「明天 08:00」，再远的带日期。按本机时区。
+ * `words` 把钟点拼成「今天 …」「明天 …」，由调用方给（渲染层走 i18n，主进程给中文）。
+ * `locale` 不给就用运行环境的默认值：每日上限的重置点离现在不到 24 小时，只会落在今天或明天，
+ * 用不上带日期的那一支。
+ */
+export function formatPlanResetTime(
+  iso: string,
+  locale: string | undefined,
+  words: { today: (time: string) => string; tomorrow: (time: string) => string },
+  now: Date = new Date()
+): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return iso
+  const time = new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(at)
+  const days = localDay(at) - localDay(now)
+  if (days === 0) return words.today(time)
+  if (days === 1) return words.tomorrow(time)
+  return new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(at)
 }
 
 export interface CreatorPlanDevicePrompt {

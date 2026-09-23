@@ -414,6 +414,16 @@ describe('回复流式朗读', () => {
     expect(reading.active.value).toBe(false)
     logError.mockRestore()
   })
+  it('今天的额度用完：说几点恢复', async () => {
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { reading } = reader()
+    vi.mocked(speechAPI.synthesize).mockRejectedValueOnce(new Error('TTS_PLAN_DAILY_LIMIT_REACHED'))
+    await reading.toggle('正文')
+    expect(message.error).toHaveBeenCalledWith(
+      expect.stringMatching(/^今天的额度用完了：.+\d{2}:\d{2} 恢复/)
+    )
+    logError.mockRestore()
+  })
   it('套餐来源按模型上的 ttsMaxInputChars 切段，别的来源 600 字', async () => {
     vi.mocked(aiProviderAPI.getSettings).mockResolvedValue({
       roles: { tts: { providerId: 'creator-plan-tts', modelId: 'uebox-tts' } },

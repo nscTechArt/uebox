@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
     reused: false
   })),
   save: vi.fn(async (source: string) => ({ filePath: `vault/${source}`, assetKey: source })),
-  assertProject: vi.fn(async () => 'verified-video-project')
+  assertProject: vi.fn(async () => 'verified-video-project'),
+  musicProvider: 'music'
 }))
 vi.mock('../../core/projectTargetContext', () => ({ getCurrentSessionId: mocks.session }))
 vi.mock('../../../services/aigc/assetSaver', () => ({ saveLocalMusicAsset: mocks.save }))
@@ -34,6 +35,10 @@ vi.mock('electron', async () => {
   }
 })
 vi.mock('../../../ai/store', () => ({
+  readSettingsSync: () => ({
+    roles: { music: { providerId: mocks.musicProvider, modelId: 'auto' } },
+    providers: []
+  }),
   readSettings: async () => ({
     roles: { music: { providerId: 'music', modelId: 'auto' } },
     providers: [{ id: 'music', kind: 'music', models: [{ id: 'auto' }] }]
@@ -85,5 +90,14 @@ describe('independent music generation', () => {
     })
     expect(mocks.assertProject).toHaveBeenCalledWith('video-project', 'session-a')
     expect((mocks.generate.mock.calls[0] as unknown as unknown[])[4]).toBe('verified-video-project')
+  })
+  it('绑的是创作者 Token Plan 时，说明写明已提交的音乐取消后不退额度', () => {
+    expect(music().description).not.toContain('Token Plan')
+    mocks.musicProvider = 'creator-plan-music'
+    try {
+      expect(music().description).toContain('已提交的音乐取消后不退额度')
+    } finally {
+      mocks.musicProvider = 'music'
+    }
   })
 })

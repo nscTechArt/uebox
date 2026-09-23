@@ -5,7 +5,7 @@ import { prepareReferenceUpload } from './referenceImageUpload'
 import type { ImageApi } from '../../shared/aiProvider'
 import { isPlanProvider } from '../../shared/creatorPlan'
 import { cachedPlanSpec, specLimit } from './creatorPlan/cachedSpec'
-import { CreatorPlanCallError, planCallError } from './creatorPlan/callError'
+import { CreatorPlanCallError, isDailyLimitResponse, planCallError } from './creatorPlan/callError'
 import { getGptImageRatioForSize, getGptImageSizeTier } from '../../shared/imageGenerationModels'
 import type { ProviderConfig, ProviderProtocol } from './types'
 
@@ -1268,7 +1268,9 @@ async function awaitImageTask(
       }
       if (!response.ok) {
         const text = await response.text()
-        const planError = isPlanProvider(provider.id) ? planCallError(response.status, text) : null
+        const planError = isPlanProvider(provider.id)
+          ? planCallError(response.status, text, response.headers)
+          : null
         if (planError) throw planError
         throw new ImageRequestError(response.status, path, describeError(text), url, 'GET')
       }
@@ -1373,6 +1375,8 @@ async function send(
      * 而且他知道自己重来了。
      */
     if (response.ok || response.status !== 429 || attempt === 1) break
+    // 套餐的每日上限也是 429，但要等到明天：再发一次只是白挨一次拒
+    if (isPlanProvider(provider.id) && (await isDailyLimitResponse(response))) break
     await sleep(1000, signal)
   }
 
@@ -1380,7 +1384,9 @@ async function send(
   if (!response.ok) {
     const text = await response.text()
     // 套餐来源的 402 / 403 / 401：说清去哪儿处理，别只报一句 HTTP 402
-    const planError = isPlanProvider(provider.id) ? planCallError(response.status, text) : null
+    const planError = isPlanProvider(provider.id)
+      ? planCallError(response.status, text, response.headers)
+      : null
     if (planError) throw planError
     throw new ImageRequestError(response.status, request.path, describeError(text), url)
   }
