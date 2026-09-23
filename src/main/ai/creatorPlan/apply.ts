@@ -1,9 +1,9 @@
 /**
- * 把 Creator Plan 的清单落成本地的来源（provider）和角色绑定。纯函数，不碰磁盘。
+ * 把 Box Plan 的清单落成本地的来源（provider）和角色绑定。纯函数，不碰磁盘。
  *
  * 规则：
  * - 按角色类别（`ProviderKind`）一类一个来源，id 都以 `creator-plan` 开头，共用一把密钥
- *   （`PLAN_KEY_ID`）。界面上它们合成一张「UEBox Token Plan」卡片。
+ *   （`PLAN_KEY_ID`）。界面上它们合成一张「Box Plan」卡片。
  * - 套餐绑定的角色带 `source: 'plan'`。用户之后手动改了哪个角色，那个角色就自动
  *   脱离套餐（渲染层改绑定时不带 source），重新导入也不会覆盖它。
  * - 导入时默认只接管「没绑的」和「本来就由套餐管着的」角色；用户手动配过的，
@@ -41,7 +41,8 @@ export const PLAN_KEY_ID = 'creator-plan:key'
 
 /** 被套餐接管前的绑定。null = 那个角色原来没设置 */
 export type OriginalBindings = Partial<Record<ModelRole, ModelBinding | null>>
-const PLAN_DISPLAY_NAME = 'Creator Plan'
+/** 套餐来源在界面上的名字。清单刷新时老用户的来源也跟着改过来（见 refreshPlanModels） */
+export const PLAN_DISPLAY_NAME = 'Box Plan'
 
 /** 清单里的角色全都接。某个角色为 null（套餐不含）时不出现在预览里 */
 const SUPPORTED_ROLES: readonly ModelRole[] = MODEL_ROLES
@@ -491,10 +492,52 @@ export function refreshPlanModels(
       return { ...model, ...next }
     })
     const baseUrl = manifest.api?.base_url || provider.baseUrl
-    if (baseUrl !== provider.baseUrl) changed = true
-    return { ...provider, baseUrl, models }
+    if (baseUrl !== provider.baseUrl || provider.displayName !== PLAN_DISPLAY_NAME) changed = true
+    return { ...provider, displayName: PLAN_DISPLAY_NAME, baseUrl, models }
   })
   return changed ? { ...settings, providers } : settings
+}
+
+/**
+ * 清单刷新时，把停用的**对话**模型换成它的接替者（协议 01-plan：对话模型直接换，不用问用户）。
+ *
+ * 例：2026-09-24 服务端把对话四个角色并成一个 `uebox-chat`，原来的 `uebox-agent`、`uebox-vision`、
+ * `uebox-fast` 列进 `deprecations`。之前导入的用户，这三个角色还绑着旧 ID，这里改绑到 `uebox-chat`，
+ * 套餐的对话来源补上新模型、删掉没人用了的旧模型。
+ *
+ * 只换「还在套餐手里、清单里这个角色给的正好是 replaced_by」的角色。嵌入不在这里换：
+ * 换了要重建知识库，得让用户知道（卡片上的 deprecation 提示）。没变化时原样返回同一个对象。
+ */
+export function migrateRetiredModels(
+  settings: AiProviderSettings,
+  manifest: CreatorPlanManifest
+): AiProviderSettings {
+  const deprecations = manifest.deprecations ?? []
+  if (deprecations.length === 0) return settings
+  const specs = planRoleSpecs(manifest)
+
+  const roles: RoleBindings = { ...settings.roles }
+  const added = new Map<string, ModelConfig>()
+  for (const role of MODEL_ROLES) {
+    const binding = roles[role]
+    const spec = specs[role]
+    if (!binding || !spec || ROLE_KIND[role] !== 'chat' || !isPlanBinding(binding)) continue
+    const hit = deprecations.find((d) => d.model === binding.modelId)
+    if (!hit || hit.replaced_by !== spec.model) continue
+    roles[role] = { ...binding, modelId: spec.model }
+    added.set(spec.model, toModelConfig(role, spec))
+  }
+  if (added.size === 0) return settings
+
+  const bound = new Set(Object.values(roles).map((binding) => binding?.modelId))
+  const retired = new Set(deprecations.map((d) => d.model))
+  const providers = settings.providers.map((provider) => {
+    if (provider.id !== PLAN_PROVIDER_IDS.chat) return provider
+    const kept = provider.models.filter((m) => !retired.has(m.id) || bound.has(m.id))
+    const missing = [...added.values()].filter((m) => !kept.some((k) => k.id === m.id))
+    return { ...provider, models: [...kept, ...missing] }
+  })
+  return { ...settings, providers, roles }
 }
 
 /** 清单 deprecations 里，有哪些是正在用的（绑在套餐来源上的角色） */

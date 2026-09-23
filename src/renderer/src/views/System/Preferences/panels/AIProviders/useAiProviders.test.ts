@@ -557,11 +557,11 @@ describe('保存第一个对话 Provider 时自动绑「对话」角色', () => 
   })
 })
 
-/** 创作者 Token Plan 的来源只读：编辑弹窗既不默认选中它，也选不中它 */
+/** Box Plan 的来源只读：编辑弹窗既不默认选中它，也选不中它 */
 describe('套餐来源不进编辑', () => {
   const view: SettingsView = {
     providers: [
-      provider({ id: 'creator-plan', displayName: 'Creator Plan' }),
+      provider({ id: 'creator-plan', displayName: 'Box Plan' }),
       provider({ id: 'deepseek', displayName: 'DeepSeek' })
     ],
     roles: {},

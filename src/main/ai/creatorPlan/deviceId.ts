@@ -1,5 +1,5 @@
 /**
- * 这台设备在 Creator Plan 眼里的标识：`userData/creator-plan-device.json`。
+ * 这台设备在 Box Plan 眼里的标识：`userData/creator-plan-device.json`。
  *
  * 设备授权时带上（协议 11-connect 的 `device_id`）。同一台设备重新授权，服务端吊销这台的旧 Key、
  * 发一把新的 —— 重装应用、反复点「连接」都不会撞 Key 数上限。
@@ -36,7 +36,7 @@ export async function readOrCreateDeviceId(userDataDir: string): Promise<string>
     await fs.rename(temp, path)
   } catch (error) {
     // 存不下也照常连接：这一次仍然带着它，只是下次会是另一个
-    console.warn('[Creator Plan] 设备标识没存上：', error)
+    console.warn('[Box Plan] 设备标识没存上：', error)
   }
   return deviceId
 }

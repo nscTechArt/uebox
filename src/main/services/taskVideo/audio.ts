@@ -72,7 +72,7 @@ export async function prepareVideoAudio(
           signal ?? new AbortController().signal,
           (chunk) => chunks.push(Buffer.from(chunk.base64, 'base64'))
         ).catch((error: unknown) => {
-          // 创作者 Token Plan 的额度 / 订阅 / 授权错误：错误码后面挂着说清下一步的原话，给它
+          // Box Plan 的额度 / 订阅 / 授权错误：错误码后面挂着说清下一步的原话，给它
           const cause = error instanceof Error ? error.cause : undefined
           throw cause instanceof CreatorPlanCallError ? cause : error
         })

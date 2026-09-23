@@ -626,6 +626,8 @@ export default {
       moreLabel: '查看详细说明',
       chat: '对话',
       chatDesc: '助手与各处聊天窗口的默认模型。',
+      chatMerged: 'Agent、视觉、轻量任务也用这个模型。',
+      chatSplit: '分别设置',
       agent: 'Agent',
       agentDesc: '处理多步任务；未选择时使用对话模型。',
       vision: '视觉',
@@ -737,7 +739,7 @@ export default {
       waiting: '完成后本页会自动关闭，请稍候…'
     },
     creatorPlan: {
-      title: 'UEBox Token Plan',
+      title: 'Box Plan',
       desc: '一个订阅配好多个角色，额度按月重置。',
       connect: '连接',
       connecting: '等待浏览器确认…',
@@ -772,7 +774,7 @@ export default {
       deprecatedReindex: '换完要重建知识库索引。',
       revokeFailed: '没能在服务端吊销这把 Key，可以去网页端手动吊销。',
       revokeOpen: '去网页端吊销',
-      managedBadge: '由 UEBox Token Plan 管理',
+      managedBadge: '由 Box Plan 管理',
       manage: '管理订阅',
       reimport: '重新导入',
       disconnect: '断开',
@@ -790,7 +792,7 @@ export default {
         label: '对象存储',
         spec: '{quota} 空间 · 最后一次用到后留 {days} 天',
         off: '现在：未开启',
-        provider: 'UEBox Token Plan 提供，不用填密钥',
+        provider: 'Box Plan 提供，不用填密钥',
         usage: '已用 {used} / {quota}',
         retention: '最后一次用到后留 {days} 天',
         switchBack:
@@ -801,16 +803,16 @@ export default {
         denied: '在浏览器里被拒绝了',
         expired: '确认码过期了，请重新连接',
         unauthorized: '授权已失效，请重新连接',
-        network: '连不上 UEBox Token Plan 服务',
-        networkDetail: '连不上 UEBox Token Plan 服务：{error}',
-        bad_response: 'UEBox Token Plan 服务返回了无法识别的内容',
+        network: '连不上 Box Plan 服务',
+        networkDetail: '连不上 Box Plan 服务：{error}',
+        bad_response: 'Box Plan 服务返回了无法识别的内容',
         not_connected: '还没有连接',
         encryption_unavailable: '无法安全保存 Key',
         unknown: '出错了：{error}'
       },
       chat: {
         subscription_inactive: {
-          title: 'UEBox Token Plan 没有生效的订阅',
+          title: 'Box Plan 没有生效的订阅',
           desc: '订阅没开，或续费失败已过宽限期。处理好再发。'
         },
         quota_exhausted: {
@@ -826,7 +828,7 @@ export default {
           desc: '升级套餐，或在「设置 → 模型」里给这个角色换个来源。'
         },
         unauthorized: {
-          title: 'UEBox Token Plan 授权失效',
+          title: 'Box Plan 授权失效',
           desc: 'Key 被吊销或删掉了。到「设置 → 模型」重新连接。'
         },
         manage: '管理订阅',

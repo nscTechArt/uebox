@@ -322,7 +322,7 @@ const TRIPO_DESCRIPTION_NOTE = `
 `
 
 /**
- * 创作者 Token Plan 的扩展开关（协议 05-tasks 的 `options`）。键名和协议一致，
+ * Box Plan 的扩展开关（协议 05-tasks 的 `options`）。键名和协议一致，
  * 说明不带厂商名；只暴露清单 `model3d.options` 里列了的那几个。
  * `bounding_box` / `rest_pose` 是通用参数，但在套餐那边也走 options，没列就一并摘掉。
  */
@@ -348,7 +348,7 @@ const PLAN_OPTION_FIELDS = {
 const PLAN_GENERAL_OPTION_KEYS = ['bounding_box', 'rest_pose'] as const
 
 /**
- * 「3D 生成」绑的是不是创作者 Token Plan；是的话带上缓存清单里的 `options`。
+ * 「3D 生成」绑的是不是 Box Plan；是的话带上缓存清单里的 `options`。
  * 同步读，理由同 tripoIsBound。清单没缓存时按「没有扩展开关」处理。
  */
 function planModel3dOptions(): string[] | null {
@@ -369,7 +369,7 @@ function planModel3dOptions(): string[] | null {
 function planDescriptionNote(options: string[]): string {
   const extra = Object.keys(PLAN_OPTION_FIELDS).filter((key) => options.includes(key))
   return `
-【这次绑的是 UEBox Token Plan】失败、超时退回额度；**已提交的 3D 取消后不退额度**（上游会跑完、照常计费），参数确认好再提交。
+【这次绑的是 Box Plan】失败、超时退回额度；**已提交的 3D 取消后不退额度**（上游会跑完、照常计费），参数确认好再提交。
 四边面、智能低模、要转格式的输出（obj、usdz、三角面 fbx）各另加一笔，按套餐价目表扣。${
     extra.length > 0
       ? `当前套餐多出这几个开关：${extra.map((key) => `\`${key}\``).join('、')}。按用途开，不要一次全打开。`
@@ -404,7 +404,7 @@ export function createGenerate3dModelTool(): UnrealAgentTool<Generated3dModelDet
 
 【要花钱，而且不快】一次几十秒到几分钟，${
       planOptions
-        ? '每次调用按套餐价目表扣 UEBox Token Plan 的额度，**失败、超时退回；提交之后取消不退**'
+        ? '每次调用按套餐价目表扣 Box Plan 的额度，**失败、超时退回；提交之后取消不退**'
         : '每次调用扣用户的额度，**失败也扣**'
     }。
 一次只出一个，看过再决定要不要重来。

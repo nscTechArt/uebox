@@ -40,7 +40,7 @@ function manifest(
     schema: 1,
     etag: 'p-1',
     plan: {
-      product: 'UEBox Creator Plan',
+      product: 'Box Plan',
       tier: 'pro',
       tier_name: 'Pro',
       status: 'active',

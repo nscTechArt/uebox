@@ -347,7 +347,7 @@ export interface GeneratedVideoDetails extends Record<string, unknown> {
 }
 
 /**
- * 「视频生成」绑的是不是创作者 Token Plan。那边失败、超时退额度，取消只有还在排队时才退
+ * 「视频生成」绑的是不是 Box Plan。那边失败、超时退额度，取消只有还在排队时才退
  * （协议 05-tasks「取消」），说明里的「失败也扣」要跟着改。同步读配置，理由同 generate3dModel.ts 的 tripoIsBound；
  * 换绑之后工具表由 registry.ts 订阅配置变更重建。
  */
@@ -370,7 +370,7 @@ export function createGenerateVideoTool(): UnrealAgentTool<GeneratedVideoDetails
 
 【非常贵，而且很慢】一次三到十五分钟，${
       plan
-        ? '**按秒 × 分辨率扣 UEBox Token Plan 的额度（参考视频的秒数也算，单价以套餐价目表为准），失败、超时退回；开始生成后取消不退**'
+        ? '**按秒 × 分辨率扣 Box Plan 的额度（参考视频的秒数也算，单价以套餐价目表为准），失败、超时退回；开始生成后取消不退**'
         : '**按秒 × 分辨率计费，失败也扣**'
     }。
 调用前先确认用户真的要视频；参数拿不准就问，不要靠多试几次去凑。

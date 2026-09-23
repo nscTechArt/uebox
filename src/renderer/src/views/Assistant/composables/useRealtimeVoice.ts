@@ -62,7 +62,7 @@ export type VoiceEvent =
   | { type: 'turn-done' }
   /**
    * 主进程让这边**自己念**这段话（见 `speakLocally`）。豆包等不到自己的音频时的退路；
-   * `engine: 'tts'` 是创作者 Token Plan 的播报，用语音合成角色念（见 `speakWithTts`）
+   * `engine: 'tts'` 是 Box Plan 的播报，用语音合成角色念（见 `speakWithTts`）
    */
   | { type: 'speak'; text: string; engine?: 'tts' }
   /** 一条播报发出去了，原话写进「语音助手」对话 */
@@ -296,7 +296,7 @@ export interface RealtimeVoiceOptions {
    */
   onAnnouncement?: (text: string) => void
   /**
-   * 服务端按规矩挂断了（创作者 Token Plan：一分钟没人说话、单次会话满 30 分钟）。
+   * 服务端按规矩挂断了（Box Plan：一分钟没人说话、单次会话满 30 分钟）。
    * **不自动重连** —— 空闲挂断后重连也是挂着计费、没人说话；由宿主说一句，等用户再点
    */
   onServerHangUp?: (reason: 'idle_timeout' | 'session_timeout') => void
@@ -911,7 +911,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
    * 豆包没有「主动开口」的路（见主进程 `doubaoRealtime.ts` 的 `buildDoubaoAnnouncement`），
    * 任务的进度、结果、反问只能在这儿念。用的是系统自带的中文语音，和模型的嗓音不一样 ——
    * 这是已知代价，接厂商 TTS 是另一件事。OpenAI 那家不走这里，它的模型自己转述；
-   * 创作者 Token Plan 走 `speakWithTts`，只在语音合成角色念不出来时退到这儿。
+   * Box Plan 走 `speakWithTts`，只在语音合成角色念不出来时退到这儿。
    *
    * 念的期间：算「模型在说」（播报纪律不叠第二条进来）、球体按定值呼吸、
    * 回声门限按 `LOCAL_SPEECH_LEVEL` 设防。用户插话（`interrupted`）或挂断时掐掉。
@@ -948,7 +948,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
   }
 
   /**
-   * 正用「语音合成」角色念的那一条（创作者 Token Plan 的播报，见 `speakWithTts`）。
+   * 正用「语音合成」角色念的那一条（Box Plan 的播报，见 `speakWithTts`）。
    *
    * `synthesized`：合成完了，只等喇叭把排着的播完 —— 最后一片的 `onended` 才算念完。
    */
@@ -963,7 +963,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
   /**
    * 用「语音合成」角色念一段话。
    *
-   * 创作者 Token Plan 的实时语音主线路只插文字不开口（协议 07「兼容性说明」），播报只能这边念。
+   * Box Plan 的实时语音主线路只插文字不开口（协议 07「兼容性说明」），播报只能这边念。
    * 比系统语音好在两处：嗓音是套餐的音色；合成出来的 PCM 走 `play`，和厂商音频同一条播放图 ——
    * 过回声消除的回环、响度现场量、打断时 `stopPlayback` 一并清掉，所以**不用**像系统语音那样
    * 掐上行（`muteUplinkNow` 只看 `localUtterance`）。

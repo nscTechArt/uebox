@@ -1354,10 +1354,10 @@ describe('useRealtimeVoice', () => {
   })
 
   /*
-   * 创作者 Token Plan 的实时语音主线路只插文字不开口（协议 07「兼容性说明」），
+   * Box Plan 的实时语音主线路只插文字不开口（协议 07「兼容性说明」），
    * 主进程把播报交过来，由「语音合成」角色念。
    */
-  describe('speak 事件带 engine: tts（创作者 Token Plan）', () => {
+  describe('speak 事件带 engine: tts（Box Plan）', () => {
     /** 假的语音合成 IPC：`script` 决定这次合成回几片音频、成没成 */
     function stubSpeech(
       script: (request: { requestId: string; text: string }) => {

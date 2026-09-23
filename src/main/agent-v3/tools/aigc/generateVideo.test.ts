@@ -412,7 +412,7 @@ describe('失败时的话术', () => {
 })
 
 describe('说明里的扣费口径', () => {
-  it('绑的是创作者 Token Plan：失败、超时退回，开始生成后取消不退；别的来源保持「失败也扣」', () => {
+  it('绑的是 Box Plan：失败、超时退回，开始生成后取消不退；别的来源保持「失败也扣」', () => {
     expect(tool.description).toContain('**按秒 × 分辨率计费，失败也扣**')
     readSettingsSync.mockReturnValueOnce({
       version: 3,

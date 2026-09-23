@@ -1,5 +1,5 @@
 /**
- * Creator Plan 对象存储的 HTTP 客户端（协议见 Creator Plan 仓库 docs/protocol/10-storage.md）。
+ * Box Plan 对象存储的 HTTP 客户端（协议见 Box Plan 仓库 docs/protocol/10-storage.md）。
  *
  *   申请   POST   {BASE}/storage/uploads              已传过直接回 url；没传过回一次性上传地址
  *   上传   PUT    upload.url                          原样带 upload.headers，发文件字节
@@ -93,7 +93,7 @@ export function describePlanStorageError(
   if (status === 401) {
     return new PlanStorageError(
       'unauthorized',
-      '创作者 Token Plan 的 Key 失效了，到「设置 → 模型」重新连接',
+      'Box Plan 的 Key 失效了，到「设置 → 模型」重新连接',
       status
     )
   }
@@ -107,7 +107,7 @@ export function describePlanStorageError(
   if (status === 402) {
     return new PlanStorageError(
       'subscription_inactive',
-      '创作者 Token Plan 没有生效的订阅，对象存储暂停上传：续订后再发',
+      'Box Plan 没有生效的订阅，对象存储暂停上传：续订后再发',
       status
     )
   }
@@ -125,7 +125,7 @@ export function describePlanStorageError(
   const detail = [code, serverMessage].filter(Boolean).join(': ')
   return new PlanStorageError(
     status === 400 ? 'invalid_request' : 'unknown',
-    `创作者 Token Plan 对象存储请求失败（HTTP ${status}${detail ? `，${detail}` : ''}）`,
+    `Box Plan 对象存储请求失败（HTTP ${status}${detail ? `，${detail}` : ''}）`,
     status
   )
 }
@@ -151,7 +151,7 @@ function networkError(url: string, error: unknown): PlanStorageError {
   } catch {
     // 地址本身就不对，原样带上
   }
-  return new PlanStorageError('network', `连不上创作者 Token Plan（${origin}，${reason}）`)
+  return new PlanStorageError('network', `连不上 Box Plan（${origin}，${reason}）`)
 }
 
 async function call(
@@ -220,7 +220,7 @@ export async function requestUpload(
   const key = str(json?.key)
   const url = str(json?.url)
   if (!json || !key || !url) {
-    throw new PlanStorageError('bad_response', '创作者 Token Plan 回了无法识别的上传申请结果')
+    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的上传申请结果')
   }
   const expiresAt = str(json.expires_at)
   if (json.exists === true) return { exists: true, key, url, expiresAt }
@@ -228,7 +228,7 @@ export async function requestUpload(
   const upload = json.upload as Record<string, unknown> | undefined
   const uploadUrl = str(upload?.url)
   if (!uploadUrl) {
-    throw new PlanStorageError('bad_response', '创作者 Token Plan 没给上传地址')
+    throw new PlanStorageError('bad_response', 'Box Plan 没给上传地址')
   }
   const headers: Record<string, string> = {}
   for (const [name, value] of Object.entries((upload?.headers as object) ?? {})) {
@@ -258,7 +258,7 @@ export async function completeUpload(
   if (!res.ok) throw await failure(res)
   const object = toStoredObject((await res.json().catch(() => null)) as Record<string, unknown>)
   if (!object) {
-    throw new PlanStorageError('bad_response', '创作者 Token Plan 回了无法识别的确认结果')
+    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的确认结果')
   }
   return object
 }
@@ -288,7 +288,7 @@ export async function listObjectsPage(
   if (!res.ok) throw await failure(res)
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
   if (!json || !Array.isArray(json.data)) {
-    throw new PlanStorageError('bad_response', '创作者 Token Plan 回了无法识别的对象列表')
+    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的对象列表')
   }
   const data = json.data
     .map((item) => toStoredObject(item as Record<string, unknown>))
@@ -321,7 +321,7 @@ export async function getUsage(
   if (!res.ok) throw await failure(res)
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
   if (!json || typeof json.used_bytes !== 'number') {
-    throw new PlanStorageError('bad_response', '创作者 Token Plan 回了无法识别的用量')
+    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的用量')
   }
   return {
     quotaBytes: Number(json.quota_bytes) || 0,
@@ -364,7 +364,7 @@ export const putFile: PutFile = (upload, filePath, size, onBytes) => {
           reject(
             new PlanStorageError(
               status === 413 ? 'payload_too_large' : 'unknown',
-              `上传到创作者 Token Plan 失败（HTTP ${status}${body ? `，${body}` : ''}）`,
+              `上传到 Box Plan 失败（HTTP ${status}${body ? `，${body}` : ''}）`,
               status
             )
           )

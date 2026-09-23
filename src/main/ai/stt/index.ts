@@ -40,7 +40,7 @@ export interface SttBinding {
   model: string
   headers?: Record<string, string>
   /**
-   * 创作者 Token Plan 的来源。它不按域名认（地址是套餐给的，可以是本机联调地址），
+   * Box Plan 的来源。它不按域名认（地址是套餐给的，可以是本机联调地址），
    * 按来源 id 认 —— 见 creatorPlan/apply.ts 的 PLAN_PROVIDER_IDS
    */
   plan?: boolean

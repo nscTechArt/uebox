@@ -12,7 +12,7 @@ async function currentSession(): Promise<string> {
 }
 
 /**
- * 「音乐生成」绑的是不是创作者 Token Plan。那边提交之后取消不退额度（协议 05-tasks「取消」），
+ * 「音乐生成」绑的是不是 Box Plan。那边提交之后取消不退额度（协议 05-tasks「取消」），
  * 说明里要写明。同步读配置，理由同 generateVideo.ts 的 planVideoBound
  */
 function planMusicBound(): boolean {
@@ -25,7 +25,7 @@ function planMusicBound(): boolean {
 }
 
 const PLAN_MUSIC_NOTE =
-  '当前绑的是 UEBox Token Plan：每次按套餐价目表扣额度，失败、超时退回；已提交的音乐取消后不退额度，参数确认好再提交。'
+  '当前绑的是 Box Plan：每次按套餐价目表扣额度，失败、超时退回；已提交的音乐取消后不退额度，参数确认好再提交。'
 
 export function taskVideoTools(): UnrealAgentTool[] {
   const planMusic = planMusicBound()

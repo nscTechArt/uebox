@@ -638,6 +638,8 @@ export default {
       moreLabel: 'Show details',
       chat: 'Chat',
       chatDesc: 'Default model for the assistant and every chat window.',
+      chatMerged: 'Agent, Vision and Quick tasks use this model too.',
+      chatSplit: 'Set separately',
       agent: 'Agent',
       agentDesc: 'For multi-step tasks. Uses the Chat model if unconfigured.',
       vision: 'Vision',
@@ -756,7 +758,7 @@ export default {
       waiting: 'This dialog closes automatically once you are done…'
     },
     creatorPlan: {
-      title: 'UEBox Token Plan',
+      title: 'Box Plan',
       desc: 'One subscription covers several roles. Quotas reset monthly.',
       connect: 'Connect',
       connecting: 'Waiting for browser…',
@@ -792,7 +794,7 @@ export default {
       deprecatedReindex: 'Rebuild the knowledge index after switching.',
       revokeFailed: "Couldn't revoke this key on the server. Revoke it on the website.",
       revokeOpen: 'Revoke on the website',
-      managedBadge: 'Managed by UEBox Token Plan',
+      managedBadge: 'Managed by Box Plan',
       manage: 'Manage subscription',
       reimport: 'Re-import',
       disconnect: 'Disconnect',
@@ -811,7 +813,7 @@ export default {
         label: 'Object storage',
         spec: '{quota} · kept {days} days after last use',
         off: 'Now: off',
-        provider: 'Provided by UEBox Token Plan. No keys needed.',
+        provider: 'Provided by Box Plan. No keys needed.',
         usage: '{used} of {quota} used',
         retention: 'kept {days} days after last use',
         switchBack:
@@ -822,16 +824,16 @@ export default {
         denied: 'Denied in the browser',
         expired: 'The code expired. Connect again',
         unauthorized: 'Authorization expired. Connect again',
-        network: "Can't reach the UEBox Token Plan service",
-        networkDetail: "Can't reach the UEBox Token Plan service: {error}",
-        bad_response: 'The UEBox Token Plan service sent an unexpected response',
+        network: "Can't reach the Box Plan service",
+        networkDetail: "Can't reach the Box Plan service: {error}",
+        bad_response: 'The Box Plan service sent an unexpected response',
         not_connected: 'Not connected yet',
         encryption_unavailable: "Can't store the key securely",
         unknown: 'Something went wrong: {error}'
       },
       chat: {
         subscription_inactive: {
-          title: 'No active UEBox Token Plan subscription',
+          title: 'No active Box Plan subscription',
           desc: 'The subscription is off, or renewal failed past the grace period. Sort it out, then send again.'
         },
         quota_exhausted: {
@@ -847,7 +849,7 @@ export default {
           desc: 'Upgrade the plan, or pick another source for this role in Settings → Models.'
         },
         unauthorized: {
-          title: 'UEBox Token Plan authorization expired',
+          title: 'Box Plan authorization expired',
           desc: 'The key was revoked or deleted. Reconnect in Settings → Models.'
         },
         manage: 'Manage subscription',

@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 /**
- * 创作者 Token Plan 的来源只读：界面上不给编辑、删除入口，主进程再拦一道，
+ * Box Plan 的来源只读：界面上不给编辑、删除入口，主进程再拦一道，
  * 防止绕过界面直接调 IPC 把卡片和配置弄得对不上。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -55,7 +55,7 @@ const invoke = (channel: string, ...args: unknown[]): Promise<{ ok: boolean; err
 
 const plan = {
   id: 'creator-plan',
-  displayName: 'Creator Plan',
+  displayName: 'Box Plan',
   kind: 'chat',
   protocol: 'openai-completions',
   baseUrl: 'https://plan.example/v1',
@@ -77,7 +77,7 @@ describe('套餐来源只读', () => {
       apiKeyInput: ''
     })
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('创作者 Token Plan')
+    expect(result.error).toContain('Box Plan')
     expect(writeSettings).not.toHaveBeenCalled()
   })
 

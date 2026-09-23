@@ -39,7 +39,7 @@ vi.mock('./planState', () => ({
 
 const { refreshPlan, startCreatorPlanRefresh, stopCreatorPlanRefresh, REFRESH_INTERVAL_MS } =
   await import('./refresh')
-const { PLAN_KEY_ID, PLAN_PROVIDER_ID } = await import('./apply')
+const { PLAN_DISPLAY_NAME, PLAN_KEY_ID, PLAN_PROVIDER_ID } = await import('./apply')
 
 const spec = (extra: Record<string, unknown> = {}): Record<string, unknown> => ({
   model: 'uebox-agent',
@@ -57,7 +57,7 @@ const manifest = (agent: Record<string, unknown> | null): CreatorPlanManifest =>
   schema: 1,
   etag: 'p-2',
   plan: {
-    product: 'UEBox Creator Plan',
+    product: 'Box Plan',
     tier: 'pro',
     tier_name: 'Pro',
     status: 'active',
@@ -88,7 +88,7 @@ const connected = (): AiProviderSettings => ({
     mine,
     {
       id: PLAN_PROVIDER_ID,
-      displayName: 'Creator Plan',
+      displayName: PLAN_DISPLAY_NAME,
       kind: 'chat',
       protocol: 'openai-completions',
       baseUrl: 'https://plan.example/v1',
@@ -164,6 +164,75 @@ describe('refreshPlan', () => {
     expect(writes).toBe(0)
   })
 
+  it('老用户的来源名（Creator Plan）跟着改成 Box Plan', async () => {
+    settings = {
+      ...settings,
+      providers: settings.providers.map((p) =>
+        p.id === PLAN_PROVIDER_ID ? { ...p, displayName: 'Creator Plan' } : p
+      )
+    }
+    stubFetch(() => new Response(JSON.stringify(manifest(spec()))))
+    await refreshPlan()
+    expect(settings.providers.find((p) => p.id === PLAN_PROVIDER_ID)!.displayName).toBe('Box Plan')
+    expect(settings.providers[0]).toBe(mine)
+  })
+
+  it('停用的对话模型：改绑到接替者，来源里补上新模型、删掉旧的', async () => {
+    const chat = spec({ model: 'uebox-chat', display_name: 'Box-Chat', supports_vision: true })
+    stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ...manifest(chat),
+            roles: { chat, agent: chat, vision: chat, summary: chat },
+            deprecations: [
+              {
+                model: 'uebox-agent',
+                replaced_by: 'uebox-chat',
+                deprecated_at: '2026-09-24T00:00:00Z',
+                removed_at: '2027-03-23T00:00:00Z'
+              }
+            ]
+          })
+        )
+    )
+    await refreshPlan()
+    expect(settings.roles.agent).toEqual({
+      providerId: PLAN_PROVIDER_ID,
+      modelId: 'uebox-chat',
+      source: 'plan'
+    })
+    const models = settings.providers.find((p) => p.id === PLAN_PROVIDER_ID)!.models
+    expect(models.map((m) => m.id)).toEqual(['uebox-chat'])
+    expect(models[0]).toMatchObject({ displayName: 'Box-Chat', supportsVision: true })
+  })
+
+  it('停用的对话模型被用户自己改绑过（不在套餐手里）：不动', async () => {
+    settings = {
+      ...settings,
+      roles: { agent: { providerId: 'my-gateway', modelId: 'gpt-x' } }
+    }
+    const chat = spec({ model: 'uebox-chat' })
+    stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            ...manifest(chat),
+            deprecations: [
+              {
+                model: 'uebox-agent',
+                replaced_by: 'uebox-chat',
+                deprecated_at: '2026-09-24T00:00:00Z',
+                removed_at: '2027-03-23T00:00:00Z'
+              }
+            ]
+          })
+        )
+    )
+    await refreshPlan()
+    expect(settings.roles.agent).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
+  })
+
   it('订阅失效（roles 全是 null）：不删模型，来源还在，连接不丢', async () => {
     stubFetch(() => new Response(JSON.stringify(manifest(null))))
     await refreshPlan()
@@ -173,7 +242,7 @@ describe('refreshPlan', () => {
   it('套餐不再给某个角色（roles 里为 null）：还原成导入前的绑定，删掉那一类的套餐来源', async () => {
     const planStt = {
       id: `${PLAN_PROVIDER_ID}-stt`,
-      displayName: 'Creator Plan',
+      displayName: 'Box Plan',
       kind: 'stt',
       protocol: 'openai-completions',
       baseUrl: 'https://plan.example/v1',

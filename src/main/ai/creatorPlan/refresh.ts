@@ -2,7 +2,8 @@
  * 清单刷新：应用启动后一次，之后每 6 小时一次，打开设置页时也走这里。
  *
  * 带上次的 ETag 发 If-None-Match，没变服务端回 304，用缓存的那份。
- * 变了就更新套餐来源里各模型的能力（`refreshPlanModels`），把套餐不再给的角色还给用户
+ * 变了就更新套餐来源里各模型的能力（`refreshPlanModels`），停用的对话模型换成接替者
+ * （`migrateRetiredModels`），把套餐不再给的角色还给用户
  * （`releaseDroppedRoles`：还原成导入前的绑定），并把清单缓存下来。
  * 401 记成「授权失效」，卡片据此让用户重新连接。
  *
@@ -13,7 +14,12 @@
 import type { CreatorPlanErrorCode, CreatorPlanManifest } from '../../../shared/creatorPlan'
 import { resolveApiKey } from '../credentials'
 import { readSettings, writeSettings } from '../store'
-import { isPlanProvider, refreshPlanModels, releaseDroppedRoles } from './apply'
+import {
+  isPlanProvider,
+  migrateRetiredModels,
+  refreshPlanModels,
+  releaseDroppedRoles
+} from './apply'
 import { CreatorPlanError, fetchManifestIfChanged } from './client'
 import { readPlanState, updatePlanState } from './planState'
 
@@ -65,7 +71,7 @@ export async function refreshPlan(fetchImpl: typeof fetch = fetch): Promise<Refr
     await updatePlanState({ etag: result.etag, manifest: result.manifest, unauthorized: false })
     const settings = await readSettings()
     const refreshed = releaseDroppedRoles(
-      refreshPlanModels(settings, result.manifest),
+      migrateRetiredModels(refreshPlanModels(settings, result.manifest), result.manifest),
       result.manifest,
       state.originals
     )
@@ -86,7 +92,7 @@ async function tick(): Promise<void> {
     await refreshPlan()
   } catch (error) {
     // 读盘、写盘出错也不该变成未处理的拒绝；下一轮再试
-    console.warn('[Creator Plan] 清单刷新失败:', error)
+    console.warn('[Box Plan] 清单刷新失败:', error)
   }
 }
 

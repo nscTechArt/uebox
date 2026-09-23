@@ -62,6 +62,27 @@ const initialLoading = computed(() => state.loading.value && state.settings.valu
 const ROLES = MODEL_ROLES
 
 /**
+ * 跟着对话走的三个角色。套餐把对话四个角色都给同一个模型（Box-Chat）时，
+ * 四个下拉框选的是同一样东西，只留「对话」一行；要分开配再点「分别设置」展开。
+ */
+const FOLLOWS_CHAT: readonly ModelRole[] = ['agent', 'vision', 'summary']
+const splitChatRoles = ref(false)
+
+/** 对话绑在套餐上，另外三个也绑着同一个模型 */
+const chatRolesMerged = computed(() => {
+  const chat = roles.value.chat
+  if (!chat || !isPlanProvider(chat.providerId)) return false
+  return FOLLOWS_CHAT.every((role) => {
+    const binding = roles.value[role]
+    return binding?.providerId === chat.providerId && binding.modelId === chat.modelId
+  })
+})
+const collapseChatRoles = computed(() => chatRolesMerged.value && !splitChatRoles.value)
+const visibleRoles = computed(() =>
+  collapseChatRoles.value ? ROLES.filter((role) => !FOLLOWS_CHAT.includes(role)) : ROLES
+)
+
+/**
  * 说明比一行长的角色，长文收进 `?` 里。
  *
  * 十个角色每个都摊三行说明，这一页就是一整屏文字压着十个小下拉框 ——
@@ -312,8 +333,15 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
     return { providerId, modelId: rest.join('::') }
   })()
 
-  const result = await state.setRole(role, binding)
-  if (!result.ok) message.error(result.error || t('aiProvider.messages.saveFailed'))
+  // 合成一行时，「对话」这一行代表四个角色：改它就四个一起改
+  const targets = role === 'chat' && collapseChatRoles.value ? ['chat', ...FOLLOWS_CHAT] : [role]
+  for (const target of targets as ModelRole[]) {
+    const result = await state.setRole(target, binding)
+    if (!result.ok) {
+      message.error(result.error || t('aiProvider.messages.saveFailed'))
+      return
+    }
+  }
 }
 </script>
 
@@ -331,8 +359,8 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
       {{ $t('aiProvider.banner.noEncryption') }}
     </div>
 
-    <!-- 创作者 Token Plan：一个订阅配好多个角色。应用或断开后重读来源与绑定 -->
-    <CreatorPlanCard @changed="state.load()" />
+    <!-- Box Plan：一个订阅配好多个角色。应用或断开后重读来源与绑定。暂时隐藏，放开时去掉 v-if -->
+    <CreatorPlanCard v-if="false" @changed="state.load()" />
 
     <!-- 一、服务商 -->
     <div class="settings-subsection">
@@ -406,7 +434,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
       <div class="setting-desc">{{ $t('aiProvider.roles.desc') }}</div>
 
       <div class="role-list">
-        <div v-for="role in ROLES" :key="role" class="setting-item">
+        <div v-for="role in visibleRoles" :key="role" class="setting-item">
           <div class="setting-info">
             <div class="setting-label">
               {{ $t(`aiProvider.roles.${role}`) }}
@@ -427,6 +455,12 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
               </span>
             </div>
             <div class="setting-desc">{{ $t(`aiProvider.roles.${role}Desc`) }}</div>
+            <div v-if="role === 'chat' && collapseChatRoles" class="setting-desc">
+              {{ $t('aiProvider.roles.chatMerged') }}
+              <button type="button" class="role-split" @click="splitChatRoles = true">
+                {{ $t('aiProvider.roles.chatSplit') }}
+              </button>
+            </div>
           </div>
           <!--
             占位与真下拉框同高（antd 的 controlHeight 就是 32px）、同宽（compact-select），
@@ -606,6 +640,19 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
   .compact-select {
     width: 100%;
   }
+}
+
+.role-split {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.role-split:hover {
+  text-decoration: underline;
 }
 
 .role-more {

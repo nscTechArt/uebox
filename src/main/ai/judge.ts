@@ -127,7 +127,7 @@ export interface ScoreAnswer {
   /**
    * **期望档位**（小数）：Σ 档位下标 × 概率。TypeSafe 原样回的就是它。
    *
-   * 创作者 Token Plan 的 `score.value` 不是它 —— 那是**概率最大的档位下标**（整数），
+   * Box Plan 的 `score.value` 不是它 —— 那是**概率最大的档位下标**（整数），
    * 放在 `level` 上；这里按它回的 `probabilities` 数组重新算出期望值，两家的阈值才是
    * 同一个意思。例：分布 [0.45, 0.10, 0.45] 期望 1.0、`level` 是 0，
    * 「至少第 2 档」写 `score >= 1.5` 和写 `level >= 2` 结论不同，按后果挑一个。
@@ -181,7 +181,7 @@ export function systemOneUrl(baseUrl: string): string {
 }
 
 /**
- * 判定请求的地址。创作者 Token Plan 是 `POST /judge`（协议 09-judge），其余按 TypeSafe 的
+ * 判定请求的地址。Box Plan 是 `POST /judge`（协议 09-judge），其余按 TypeSafe 的
  * `/systemone`。按来源 id 分：套餐来源 id 固定以 `creator-plan` 开头（见 creatorPlan/apply.ts）。
  */
 export function judgeUrl(provider: Pick<ProviderConfig, 'id' | 'baseUrl'>): string {

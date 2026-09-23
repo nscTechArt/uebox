@@ -482,8 +482,8 @@ describe('目录与实现对得上', () => {
   })
 })
 
-/** 创作者 Token Plan：`POST /search`（协议 08），来源 id 以 creator-plan 开头 */
-describe('创作者 Token Plan 检索', () => {
+/** Box Plan：`POST /search`（协议 08），来源 id 以 creator-plan 开头 */
+describe('Box Plan 检索', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     boundProvider.value = null

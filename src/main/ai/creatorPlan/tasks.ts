@@ -1,5 +1,5 @@
 /**
- * 创作者 Token Plan 的异步任务客户端（`/tasks`，协议 05-tasks）：视频、3D、音乐三处共用。
+ * Box Plan 的异步任务客户端（`/tasks`，协议 05-tasks）：视频、3D、音乐三处共用。
  *
  *   提交   `POST /tasks`，**每次都带 Idempotency-Key**：提交超时、断网后用同一个键重发，
  *          服务端只建一个任务、只占一次额度 —— 所以提交可以放心重试，不像直连厂商那样
@@ -136,9 +136,7 @@ export class PlanTaskRequestError extends Error {
     detail: string,
     readonly code?: string
   ) {
-    super(
-      `创作者 Token Plan 任务接口报错 HTTP ${status || '—'}（${path}）：${detail || '没有说明'}`
-    )
+    super(`Box Plan 任务接口报错 HTTP ${status || '—'}（${path}）：${detail || '没有说明'}`)
     this.name = 'PlanTaskRequestError'
   }
 }
@@ -571,7 +569,7 @@ function updateLedger(
 
 /** 记账失败不该让生成失败：最坏只是崩溃后续不上 */
 async function safely(action: Promise<void>): Promise<void> {
-  await action.catch((error: unknown) => console.warn('[Creator Plan] 任务账本写入失败:', error))
+  await action.catch((error: unknown) => console.warn('[Box Plan] 任务账本写入失败:', error))
 }
 
 export function planTaskHash(body: PlanTaskBody): string {

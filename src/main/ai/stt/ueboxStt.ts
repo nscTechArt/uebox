@@ -9,7 +9,7 @@ import {
 import type { SttSessionHandle } from './types'
 
 /**
- * 创作者 Token Plan 的流式识别（听写）：`wss {base}/audio/transcriptions/stream`（协议 06-audio）。
+ * Box Plan 的流式识别（听写）：`wss {base}/audio/transcriptions/stream`（协议 06-audio）。
  *
  * 桌面端直接带 `Authorization` 头，不用换临时令牌（那是给浏览器的）。
  *

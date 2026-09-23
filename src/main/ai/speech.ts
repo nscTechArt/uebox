@@ -17,7 +17,7 @@ export async function requestSpeech(
   signal: AbortSignal,
   onAudio: (chunk: SpeechAudio) => void = () => {}
 ): Promise<void> {
-  // 创作者 Token Plan 单次上限按清单的 max_input_chars（协议 06-audio，导入时写进模型），其余家 600 字
+  // Box Plan 单次上限按清单的 max_input_chars（协议 06-audio，导入时写进模型），其余家 600 字
   const plan = isPlanProvider(provider.id)
   const limit = plan
     ? (provider.models.find((model) => model.id === modelId)?.ttsMaxInputChars ?? MAX_SPEECH_CHARS)

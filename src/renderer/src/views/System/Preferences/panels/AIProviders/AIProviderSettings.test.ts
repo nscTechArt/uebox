@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import AIProviderSettings from './AIProviderSettings.vue'
 import { MODEL_ROLES, type SettingsView } from '@core/shared/aiProvider'
@@ -304,8 +304,8 @@ describe('AIProviderSettings 的首屏加载', () => {
 })
 
 /**
- * 创作者 Token Plan 的来源只读：它的地址、模型、Key 都由套餐卡片管。
- * 列表里不是按钮、点了不开编辑弹窗，只标一句「由 UEBox Token Plan 管理」。
+ * Box Plan 的来源只读：它的地址、模型、Key 都由套餐卡片管。
+ * 列表里不是按钮、点了不开编辑弹窗，只标一句「由 Box Plan 管理」。
  */
 describe('套餐来源只读', () => {
   const withPlan: SettingsView = {
@@ -314,7 +314,7 @@ describe('套餐来源只读', () => {
       ...loadedSettings.providers,
       {
         id: 'creator-plan',
-        displayName: 'Creator Plan',
+        displayName: 'Box Plan',
         kind: 'chat',
         protocol: 'openai-completions',
         baseUrl: 'https://plan.example/v1',
@@ -324,7 +324,7 @@ describe('套餐来源只读', () => {
     ]
   }
 
-  it('套餐来源显示「由 UEBox Token Plan 管理」，点了不开编辑弹窗；别的来源照常能点', async () => {
+  it('套餐来源显示「由 Box Plan 管理」，点了不开编辑弹窗；别的来源照常能点', async () => {
     stubAiProviderApi({ getSettings: vi.fn(async () => withPlan) })
     const wrapper = mount(AIProviderSettings, {
       global: {
@@ -341,7 +341,7 @@ describe('套餐来源只读', () => {
 
     const plan = wrapper.find('[data-provider-id="creator-plan"]')
     expect(plan.element.tagName).toBe('DIV')
-    expect(plan.text()).toContain('由 UEBox Token Plan 管理')
+    expect(plan.text()).toContain('由 Box Plan 管理')
     await plan.trigger('click')
     expect(wrapper.find('.manager').attributes('data-open')).toBe('false')
 
@@ -358,7 +358,7 @@ describe('套餐来源合成一张卡片', () => {
     models: string[]
   ): SettingsView['providers'][number] => ({
     id,
-    displayName: 'Creator Plan',
+    displayName: 'Box Plan',
     kind,
     protocol: 'openai-completions' as const,
     baseUrl: 'https://plan.example/v1',
@@ -386,5 +386,61 @@ describe('套餐来源合成一张卡片', () => {
     expect(cards[0].attributes('data-provider-id')).toBe('creator-plan')
     expect(cards[0].text()).toContain('4')
     expect(wrapper.find('[data-provider-id="creator-plan-image"]').exists()).toBe(false)
+  })
+})
+
+/**
+ * 套餐把对话四个角色都给同一个模型（Box-Chat）时，四个下拉框选的是同一样东西：
+ * 只留「对话」一行，改它就四个一起改；要分开配点「分别设置」。
+ */
+describe('套餐的对话四个角色合成一行', () => {
+  const bound = { providerId: 'creator-plan', modelId: 'uebox-chat', source: 'plan' as const }
+  const merged: SettingsView = {
+    ...loadedSettings,
+    providers: [
+      ...loadedSettings.providers,
+      {
+        id: 'creator-plan',
+        displayName: 'Box Plan',
+        kind: 'chat',
+        protocol: 'openai-completions',
+        baseUrl: 'https://plan.example/v1',
+        models: [{ id: 'uebox-chat', displayName: 'Box-Chat', supportsVision: true }],
+        apiKey: { kind: 'literal', hasKey: true }
+      }
+    ],
+    roles: { chat: bound, agent: bound, vision: bound, summary: bound }
+  }
+
+  function mountMerged(): { wrapper: ReturnType<typeof mount>; saved: unknown[] } {
+    const saved: unknown[] = []
+    stubAiProviderApi({
+      getSettings: vi.fn(async () => merged),
+      setRoles: vi.fn(async (roles: SettingsView['roles']) => {
+        saved.push(roles)
+        return { ok: true, data: { ...merged, roles } }
+      })
+    })
+    return { wrapper: mountSettings(), saved }
+  }
+
+  it('只显示「对话」一行，其余三行收起；点「分别设置」展开', async () => {
+    const { wrapper } = mountMerged()
+    await flushPromises()
+    expect(wrapper.findAll('.role-select')).toHaveLength(ROLE_COUNT - 3)
+    await wrapper.find('.role-split').trigger('click')
+    expect(wrapper.findAll('.role-select')).toHaveLength(ROLE_COUNT)
+  })
+
+  it('合成时改「对话」：四个角色一起改', async () => {
+    const { wrapper, saved } = mountMerged()
+    await flushPromises()
+    const chatSelect = wrapper.findComponent('.role-select') as VueWrapper
+    chatSelect.vm.$emit('change', 'deepseek::v4-flash')
+    await flushPromises()
+    const last = saved.at(-1) as SettingsView['roles']
+    for (const role of ['chat', 'agent', 'vision', 'summary'] as const) {
+      expect(last[role]).toEqual({ providerId: 'deepseek', modelId: 'v4-flash' })
+    }
   })
 })

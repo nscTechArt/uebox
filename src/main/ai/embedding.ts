@@ -258,7 +258,7 @@ export async function isEmbeddingConfigured(): Promise<boolean> {
 /**
  * 当前嵌入模型的标识，形如 `ollama:nomic-embed-text`。
  *
- * 创作者 Token Plan 的是 `creator-plan-embedding:uebox-embed-v1`：来源 id 固定
+ * Box Plan 的是 `creator-plan-embedding:uebox-embed-v1`：来源 id 固定
  * （见 creatorPlan/apply.ts 的 PLAN_PROVIDER_IDS），显示名怎么改都不影响；
  * 套餐换嵌入模型会发新 ID（`uebox-embed-v2`），标识跟着变，自然触发重建。
  *

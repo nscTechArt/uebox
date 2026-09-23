@@ -1,5 +1,5 @@
 /**
- * 创作者 Token Plan 的 IPC。
+ * Box Plan 的 IPC。
  *
  *   creator-plan:state       卡片状态。没连接时直接回，**不发请求**
  *   creator-plan:connect     设备授权 → 存 Key → 拉清单 → 回导入预览

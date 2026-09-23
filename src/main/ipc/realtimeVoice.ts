@@ -460,7 +460,7 @@ async function resolveRealtimeBinding(): Promise<{
   baseUrl: string
   model: string
   voice?: string
-  /** 创作者 Token Plan 的来源：地址不是豆包的，自然走 OpenAI 那支适配器（协议 07 是它的子集） */
+  /** Box Plan 的来源：地址不是豆包的，自然走 OpenAI 那支适配器（协议 07 是它的子集） */
   plan?: boolean
 }> {
   const settings = await readSettings()

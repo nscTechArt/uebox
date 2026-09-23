@@ -1,7 +1,7 @@
 /**
- * UEBox Token Plan（原「创作者 Token Plan」，代码里仍叫 Creator Plan）—— 主进程与渲染层共用的形状。
+ * Box Plan（原「Creator Plan」，代码里仍叫 Creator Plan）—— 主进程与渲染层共用的形状。
  *
- * Creator Plan 是一个**用户主动开通**的付费模型服务：一把 Key 覆盖多个角色。
+ * Box Plan 是一个**用户主动开通**的付费模型服务：一把 Key 覆盖多个角色。
  * 没连接时，应用里与它有关的代码一个请求都不发（见 `src/main/ai/creatorPlan/`）。
  *
  * 清单（manifest）只取这里用得到的字段；服务端多给的字段忽略。

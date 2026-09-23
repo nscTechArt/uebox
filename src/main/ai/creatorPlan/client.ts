@@ -1,8 +1,8 @@
 /**
- * 与 Creator Plan 服务端对话：设备授权、拉清单。
+ * 与 Box Plan 服务端对话：设备授权、拉清单。
  *
  * 地址一律从参数进来（见 endpoint.ts 的说明），fetch 可注入，方便测试。
- * 协议见 Creator Plan 仓库的 docs/protocol/11-connect.md 与 01-plan.md。
+ * 协议见 Box Plan 仓库的 docs/protocol/11-connect.md 与 01-plan.md。
  */
 
 import type {

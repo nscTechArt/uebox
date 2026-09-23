@@ -49,7 +49,7 @@ const BASE = 'https://plan.example/v1'
 function provider(id: string, kind: ProviderConfig['kind'], model: string): ProviderConfig {
   return {
     id,
-    displayName: 'Creator Plan',
+    displayName: 'Box Plan',
     kind,
     protocol: 'openai-completions',
     baseUrl: BASE,

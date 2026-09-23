@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 /**
- * 创作者 Token Plan 的流式识别（协议 06-audio「流式识别」）。起一个本机 WebSocket 服务当对面。
+ * Box Plan 的流式识别（协议 06-audio「流式识别」）。起一个本机 WebSocket 服务当对面。
  */
 import type { AddressInfo } from 'node:net'
 import { createServer, type Server } from 'node:http'
