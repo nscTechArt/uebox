@@ -21,6 +21,9 @@ import type {
   MultimodalContentItem
 } from '../../../store/modules/chatMessages'
 
+/** 附件种类。卡片据此选图标和颜色 */
+export type AttachmentKind = NonNullable<ExcelFileInfo['kind']>
+
 /** 随消息带过去的音视频。只有路径，内容由 agent 自己去看 */
 export interface ChatMediaFile {
   filePath: string
@@ -86,4 +89,14 @@ export function bubbleAttachments(
     ...(docFiles ?? []).map((file) => ({ fileName: file.fileName, kind: file.kind ?? 'document' }))
   ]
   return list.length > 0 ? list : undefined
+}
+
+/**
+ * 气泡附件卡片副标题里的扩展名：`clip.final.MP4` → `MP4`。
+ * 没有扩展名、或者点号开头的隐藏文件，回空串 —— 副标题只剩种类，不凭空编一个
+ */
+export function attachmentExtension(fileName: string): string {
+  const dot = fileName.lastIndexOf('.')
+  if (dot <= 0 || dot === fileName.length - 1) return ''
+  return fileName.slice(dot + 1).toUpperCase()
 }

@@ -31,17 +31,14 @@
             </div>
           </div>
           <!-- 附件标签区域：Excel、文档、音视频 -->
-          <div v-if="excelFiles && excelFiles.length > 0" class="excel-files">
-            <div v-for="(file, index) in excelFiles" :key="index" class="excel-tag">
-              <PhFileVideo v-if="file.kind === 'video'" class="excel-icon" />
-              <PhFileAudio v-else-if="file.kind === 'audio'" class="excel-icon" />
-              <PhFileText v-else-if="file.kind === 'document'" class="excel-icon" />
-              <PhFileXls v-else class="excel-icon" />
-              <span class="excel-name">{{ file.fileName }}</span>
-              <span v-if="file.rowCount" class="excel-rows">{{
-                t('assistantUserBubble.excelRows', { count: file.rowCount })
-              }}</span>
-            </div>
+          <div v-if="excelFiles && excelFiles.length > 0" class="attachment-list">
+            <AttachmentCard
+              v-for="(file, index) in excelFiles"
+              :key="index"
+              :file-name="file.fileName"
+              :kind="file.kind ?? 'excel'"
+              :row-count="file.rowCount"
+            />
           </div>
           <!-- 图片区域 -->
           <div v-if="images.length > 0" class="images-container">
@@ -80,13 +77,10 @@ import type {
 } from '@renderer/store/modules/chatMessages'
 import { useI18n } from 'vue-i18n'
 import { openImageViewer } from '@renderer/services/imageViewer'
+import AttachmentCard from './AttachmentCard.vue'
 import {
   PhCheck,
   PhCopy,
-  PhFileAudio,
-  PhFileText,
-  PhFileVideo,
-  PhFileXls,
   PhPencilSimple
 } from '@phosphor-icons/vue'
 
@@ -307,41 +301,12 @@ function handleKeydown(e: KeyboardEvent): void {
   }
 }
 
-// Excel 文件标签样式
-.excel-files {
+.attachment-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.excel-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  background: var(--color-success-bg);
-  border: 1px solid var(--color-success-border);
-  border-radius: 12px;
-  font-size: 11px;
-  color: var(--color-success-text);
-
-  .excel-icon {
-    font-size: 12px;
-    color: var(--color-success-text);
-  }
-
-  .excel-name {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .excel-rows {
-    color: var(--color-text-primary);
-    font-size: 12px;
-  }
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .images-container {

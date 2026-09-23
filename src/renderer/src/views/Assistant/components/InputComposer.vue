@@ -55,45 +55,33 @@
       </div>
     </div>
 
-    <!-- Excel 文件预览区域 -->
-    <div v-if="pendingExcelFiles.length > 0" class="excel-preview-row">
-      <div
+    <!-- 附件预览：Excel、文档、音视频，和发出去后气泡上的是同一张卡片 -->
+    <div
+      v-if="pendingExcelFiles.length > 0 || pendingDocFiles.length > 0"
+      class="attachment-preview-row"
+    >
+      <AttachmentCard
         v-for="(excel, index) in pendingExcelFiles"
-        :key="index"
-        class="excel-preview-item"
-        :class="{ parsing: excel.parsing, error: excel.error }"
-      >
-        <PhFileXls class="excel-icon" />
-        <span class="excel-name">{{ excel.fileName }}</span>
-        <span v-if="excel.parsing" class="excel-status">
-          <PhCircleNotch class="icon-spin" />
-        </span>
-        <span v-else-if="excel.rowCount" class="excel-rows">{{
-          t('assistantInputComposer.excelRows', { count: excel.rowCount })
-        }}</span>
-        <PhXCircle weight="fill" class="remove-btn" @click="removeExcelFile(index)" />
-      </div>
-    </div>
-
-    <!-- 文档文件预览区域（PDF/Word） -->
-    <div v-if="pendingDocFiles.length > 0" class="doc-preview-row">
-      <div
+        :key="`excel-${index}`"
+        :file-name="excel.fileName"
+        kind="excel"
+        :row-count="excel.rowCount"
+        :busy="excel.parsing"
+        :error="excel.error"
+        removable
+        @remove="removeExcelFile(index)"
+      />
+      <AttachmentCard
         v-for="(doc, index) in pendingDocFiles"
-        :key="index"
-        class="doc-preview-item"
-        :class="{ parsing: doc.parsing, error: doc.error }"
-      >
-        <PhFilePdf v-if="doc.fileType === 'pdf'" class="doc-icon pdf-icon" />
-        <PhFileVideo v-else-if="isMediaDoc(doc)" class="doc-icon video-icon" />
-        <PhFileDoc v-else class="doc-icon word-icon" />
-        <span class="doc-name">{{ doc.fileName }}</span>
-        <span v-if="doc.parsing" class="doc-status">
-          <PhCircleNotch class="icon-spin" />
-          <!-- 视频要跑一阵子，主进程报上来什么就显示什么 -->
-          <span v-if="doc.statusNote" class="doc-status-note">{{ doc.statusNote }}</span>
-        </span>
-        <PhXCircle weight="fill" class="remove-btn" @click="removeDocFile(index)" />
-      </div>
+        :key="`doc-${index}`"
+        :file-name="doc.fileName"
+        :kind="docKind(doc)"
+        :busy="doc.parsing"
+        :note="doc.statusNote"
+        :error="doc.error"
+        removable
+        @remove="removeDocFile(index)"
+      />
     </div>
 
     <!-- 知识库 @ 提及：已选来源标签（多选） -->
@@ -730,7 +718,7 @@
     <!-- 拖拽提示遮罩 -->
     <div v-if="isDragging" class="drag-overlay">
       <PhImage class="drag-icon" />
-      <span>{{ t('assistant.composer.dragImageHere') }}</span>
+      <span>{{ t('assistant.composer.dropFilesHere') }}</span>
     </div>
   </div>
 </template>
@@ -751,7 +739,7 @@ import {
   type ModelThinkingSupport
 } from '../composables/thinkingLevels'
 import { buildAgentModelCatalog, type AgentModelOption } from '../composables/agentModelSelection'
-import type { ChatMediaFile } from '../composables/turnAttachments'
+import type { AttachmentKind, ChatMediaFile } from '../composables/turnAttachments'
 import { resolveFollowUpAction } from '../composables/followUpQueue'
 import { resolveComposerKeyAction } from '../composables/sendShortcut'
 import { formatTokenCount } from '../composables/tokenUsageFormat'
@@ -768,11 +756,7 @@ import {
   PhCpu,
   PhEye,
   PhFile,
-  PhFileDoc,
-  PhFilePdf,
-  PhFileVideo,
   PhFileText,
-  PhFileXls,
   PhGlobe,
   PhImage,
   PhLightbulb,
@@ -817,6 +801,8 @@ import {
 } from '@renderer/utils/imageUpload'
 import { openImageViewer } from '@renderer/services/imageViewer'
 import SkillCommandMenu from './SkillCommandMenu.vue'
+import AttachmentCard from './AttachmentCard.vue'
+import { pointerStillInside } from './dragBounds'
 import { parseSkillSlashQuery, skillMention } from './skillCommands'
 import { noteToMentionSource, parseMentionQuery, stripMentionQuery } from './mentionQuery'
 import {
@@ -2373,9 +2359,11 @@ async function addDocFiles(files: File[]): Promise<void> {
   }
 }
 
-/** 模板里选图标用。音视频那一格不该顶着一个 Word 图标 */
-function isMediaDoc(doc: PendingDocFile): boolean {
-  return CHAT_VIDEO_EXTENSIONS.has(doc.fileType) || CHAT_AUDIO_EXTENSIONS.has(doc.fileType)
+/** 卡片选图标和颜色用。音视频那一格不该顶着一个 Word 图标 */
+function docKind(doc: PendingDocFile): AttachmentKind {
+  if (CHAT_VIDEO_EXTENSIONS.has(doc.fileType)) return 'video'
+  if (CHAT_AUDIO_EXTENSIONS.has(doc.fileType)) return 'audio'
+  return 'document'
 }
 
 /**
@@ -2453,7 +2441,14 @@ function handleDragOver(event: DragEvent): void {
 /**
  * 处理拖拽离开
  */
-function handleDragLeave(): void {
+function handleDragLeave(event: DragEvent): void {
+  const composer = event.currentTarget as HTMLElement | null
+  if (
+    composer &&
+    pointerStillInside(composer.getBoundingClientRect(), event.clientX, event.clientY)
+  ) {
+    return
+  }
   isDragging.value = false
 }
 
@@ -2904,134 +2899,11 @@ onMounted(() => {
   }
 }
 
-// Excel 文件预览样式
-.excel-preview-row {
+.attachment-preview-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.excel-preview-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: var(--color-success-bg);
-  border: 1px solid var(--color-success-border);
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--color-text-primary);
-  transition: all 0.2s ease;
-
-  &.parsing {
-    opacity: 0.7;
-  }
-
-  &.error {
-    background: var(--color-danger-bg);
-    border-color: var(--color-danger-border);
-  }
-
-  .excel-icon {
-    font-size: 16px;
-    color: var(--color-success-text);
-  }
-
-  .excel-name {
-    max-width: 150px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .excel-rows {
-    color: var(--color-text-primary);
-    font-size: 11px;
-  }
-
-  .excel-status {
-    color: var(--color-success-text);
-  }
-
-  .remove-btn {
-    font-size: 12px;
-    color: var(--color-text-primary);
-    cursor: pointer;
-    transition: color 0.2s ease;
-
-    &:hover {
-      color: var(--color-danger-text);
-    }
-  }
-}
-
-// 文档文件预览样式（PDF/Word）
-.doc-preview-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-bottom: 8px;
-}
-
-.doc-preview-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: var(--color-bg-surface-hover);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-subtle);
-
-  &.parsing {
-    opacity: 0.7;
-  }
-
-  &.error {
-    border-color: var(--color-danger-border);
-  }
-
-  .doc-icon {
-    font-size: 16px;
-  }
-
-  .pdf-icon {
-    color: var(--color-danger-text);
-  }
-
-  .word-icon {
-    color: var(--color-accent-text);
-  }
-
-  .doc-name {
-    max-width: 150px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .doc-pages {
-    color: var(--color-text-primary);
-    font-size: 11px;
-  }
-
-  .doc-status {
-    color: var(--color-accent-text);
-  }
-
-  .remove-btn {
-    font-size: 12px;
-    color: var(--color-text-primary);
-    cursor: pointer;
-    transition: color 0.2s ease;
-
-    &:hover {
-      color: var(--color-danger-text);
-    }
-  }
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
 }
 
 .placeholder-row {

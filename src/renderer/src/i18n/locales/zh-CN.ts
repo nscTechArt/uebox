@@ -2198,7 +2198,7 @@ export default {
       meshTri: '三角面',
       polyCount: '面数质量',
       threeDModelGen: '模型生成',
-      dragImageHere: '拖拽图片到这里',
+      dropFilesHere: '松手添加图片、文档或音视频',
       placeholder3D: '请输入3D模型描述或上传5张以内的图片',
       placeholderImage: '请输入图片描述或上传5张以内的图片',
       placeholderAgent: '给 AI 发消息或发布指令...',
@@ -4899,7 +4899,6 @@ export default {
     }
   },
   assistantInputComposer: {
-    excelRows: '{count} 行',
     voice: {
       start: '开始语音对话',
       cancelConnection: '取消连接',
@@ -7137,6 +7136,12 @@ export default {
   },
   assistantUserBubble: {
     excelRows: '{count} 行',
+    attachmentKind: {
+      video: '视频',
+      audio: '音频',
+      document: '文档',
+      excel: '表格'
+    },
     snapshotNodes: '{count} 个节点',
     snapshotActors: '{count} 个 Actor',
     snapshotAssets: '{count} 个资产',

@@ -8,7 +8,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { bubbleAttachments, describeMediaFiles, mergeTurnContext } from './turnAttachments'
+import {
+  attachmentExtension,
+  bubbleAttachments,
+  describeMediaFiles,
+  mergeTurnContext
+} from './turnAttachments'
 
 describe('describeMediaFiles', () => {
   it('把本地路径原样交给 agent，并指明用哪个工具看', () => {
@@ -82,5 +87,18 @@ describe('bubbleAttachments', () => {
 
   it('什么都没有就不挂这一排', () => {
     expect(bubbleAttachments(undefined, [])).toBeUndefined()
+  })
+})
+
+describe('attachmentExtension', () => {
+  it('取最后一个点之后的部分，转成大写', () => {
+    expect(attachmentExtension('TutorialBGM_07_Upbeat.mp3')).toBe('MP3')
+    expect(attachmentExtension('clip.final.Mp4')).toBe('MP4')
+  })
+
+  it('没有扩展名就回空串，不把整个文件名当扩展名', () => {
+    expect(attachmentExtension('README')).toBe('')
+    expect(attachmentExtension('.gitignore')).toBe('')
+    expect(attachmentExtension('broken.')).toBe('')
   })
 })

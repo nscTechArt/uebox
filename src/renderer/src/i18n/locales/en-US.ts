@@ -2245,7 +2245,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       meshTri: 'Triangle',
       polyCount: 'Poly Count',
       threeDModelGen: '3D Model Gen',
-      dragImageHere: 'Drag image here',
+      dropFilesHere: 'Drop images, documents, audio or video',
       placeholder3D: 'Enter 3D model description or upload up to 5 images',
       placeholderImage: 'Enter image description or upload up to 5 images',
       placeholderAgent: 'Send message or instruction to AI...',
@@ -5045,7 +5045,6 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     }
   },
   assistantInputComposer: {
-    excelRows: '{count} rows',
     voice: {
       start: 'Start voice session',
       cancelConnection: 'Cancel connection',
@@ -7347,6 +7346,12 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
   },
   assistantUserBubble: {
     excelRows: '{count} rows',
+    attachmentKind: {
+      video: 'Video',
+      audio: 'Audio',
+      document: 'Document',
+      excel: 'Spreadsheet'
+    },
     snapshotNodes: '{count} node(s)',
     snapshotActors: '{count} actor(s)',
     snapshotAssets: '{count} asset(s)',
