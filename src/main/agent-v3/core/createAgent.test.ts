@@ -1277,6 +1277,19 @@ describe('buildSystemPrompt', () => {
     expect(buildSystemPrompt(base)).toMatch(/Today is \d{4}-\d{2}-\d{2}\./)
   })
 
+  // 和运行时信封同一个口径：本地日期。东八区凌晨写成 UTC 的话就是「昨天」
+  it('今天按本地日期算，不是 UTC', () => {
+    vi.useFakeTimers()
+    try {
+      const localLateNight = new Date(2026, 8, 22, 1, 30)
+      vi.setSystemTime(localLateNight)
+      const expected = `${localLateNight.getFullYear()}-09-22`
+      expect(buildSystemPrompt(base)).toContain(`Today is ${expected}.`)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   /**
    * Ask 模式下写操作工具在 resolveTools 里被过滤掉了，但从来没人告诉过模型。
    * 它会照常答应「我这就去改」，然后发现手里没有那个工具 ——

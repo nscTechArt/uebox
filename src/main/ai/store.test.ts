@@ -577,6 +577,16 @@ describe('models.json 解析', () => {
       })
     })
 
+    // Opus 5.5：思考关不掉。这个 null 丢了，「自动」档就发 thinking: disabled，整轮 400
+    it('off: null 留住；off 映射成字符串没有意义，丢掉', () => {
+      expect(parse({ off: null, xhigh: 'xhigh', max: 'max' })).toEqual({
+        off: null,
+        xhigh: 'xhigh',
+        max: 'max'
+      })
+      expect(parse({ off: 'none', high: 'high' })).toEqual({ high: 'high' })
+    })
+
     it('丢掉不认识的档位名', () => {
       expect(parse({ high: 'high', turbo: 'turbo' })).toEqual({ high: 'high' })
     })

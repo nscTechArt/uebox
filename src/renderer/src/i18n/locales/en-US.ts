@@ -615,7 +615,9 @@ export default {
     /** Why the probe was skipped. Must be shown, or users read it as "it passed" */
     probeSkip: {
       generativeNoCheapCall:
-        'Connection tests would incur generation charges, so they are unavailable. Configuration is checked on first generation.'
+        'Connection tests would incur generation charges, so they are unavailable. Configuration is checked on first generation.',
+      noChatEndpoint:
+        'This kind of service has no standalone test request. Configuration is checked on first use.'
     },
     delete: {
       title: 'Delete {name}?',

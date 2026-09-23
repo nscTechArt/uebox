@@ -1,7 +1,7 @@
 /** @vitest-environment node */
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { describeProbeError, testProvider } from './probe'
+import { describeProbeError, listRemoteModels, testProvider } from './probe'
 import type { ProviderConfig } from './types'
 
 /**
@@ -133,6 +133,28 @@ describe('testProvider 的探测方式', () => {
     expect(result.ok).toBe(true)
     // ok 但带 skipped：界面据此显示成提示而不是绿勾
     expect(result.skipped).toBe('generativeNoCheapCall')
+  })
+
+  // 实时语音、网页检索都没有 /chat/completions，对话 ping 的 404 会被说成「模型不存在」
+  it('实时语音和网页检索不拿对话 ping 去测，也不去拉 /models', async () => {
+    let called = false
+    globalThis.fetch = (async () => {
+      called = true
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}) }
+    }) as unknown as typeof fetch
+
+    for (const kind of ['realtime', 'search'] as const) {
+      const provider = providerWith([{ id: 'gpt-realtime' }], kind)
+      expect(await testProvider(provider, 'gpt-realtime')).toEqual({
+        ok: true,
+        skipped: 'noChatEndpoint'
+      })
+      expect(await listRemoteModels(provider)).toEqual({
+        ok: false,
+        error: { code: 'listUnsupportedGenerative' }
+      })
+    }
+    expect(called, '不该发出任何请求').toBe(false)
   })
 
   it('用途是向量化的 Provider 打 /embeddings，不带末尾双斜杠', async () => {

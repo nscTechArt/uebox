@@ -87,6 +87,13 @@ export async function testProvider(
       return { ok: true, skipped: 'generativeNoCheapCall' }
     }
 
+    // 实时语音是常驻 WebSocket，网页检索的「模型」是去哪儿搜 —— 两家都没有
+    // /chat/completions。落到下面那句对话 ping 上，404 会被翻成「模型不存在」，
+    // 用户去改一个本来就对的模型名
+    if (provider.kind === 'realtime' || provider.kind === 'search') {
+      return { ok: true, skipped: 'noChatEndpoint' }
+    }
+
     if (provider.kind === 'tts') {
       await requestSpeech(provider, modelId, '你好', AbortSignal.timeout(PROBE_TIMEOUT_MS))
       return { ok: true }
@@ -204,7 +211,9 @@ export async function listRemoteModels(
     provider.kind === 'video' ||
     provider.kind === 'tts' ||
     provider.kind === 'stt' ||
-    provider.kind === 'judge'
+    provider.kind === 'judge' ||
+    provider.kind === 'realtime' ||
+    provider.kind === 'search'
   ) {
     return { ok: false, error: { code: 'listUnsupportedGenerative' } }
   }

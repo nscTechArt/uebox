@@ -113,11 +113,15 @@ function thinkingLevelMapFor(
   provider: ProviderConfig,
   model: ModelConfig
 ): ThinkingLevelMap | undefined {
-  return (
-    (model.thinkingLevelMap as ThinkingLevelMap | undefined) ??
+  const own = model.thinkingLevelMap as ThinkingLevelMap | undefined
+  const known =
     (catalogModel(provider, model)?.thinkingLevelMap as ThinkingLevelMap | undefined) ??
     builtinModel(provider, model)?.thinkingLevelMap
-  )
+  if (!own) return known
+  // 用户那份没提 `off` 就跟随目录：Opus 5.5 的 `off: null`（关不掉思考）是模型的事实，
+  // 以前存盘时会被滤掉 —— 丢了它，「自动」档就会发 thinking: disabled，整轮 400
+  if (!('off' in own) && known && 'off' in known) return { off: known.off, ...own }
+  return own
 }
 
 /**

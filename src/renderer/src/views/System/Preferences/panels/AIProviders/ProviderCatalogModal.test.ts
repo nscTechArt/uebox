@@ -163,6 +163,17 @@ describe('ProviderCatalogModal 搜索', () => {
     expect(wrapper.emitted('pick')?.[0]?.[0]).toMatchObject({ id: 'moonshot' })
   })
 
+  // 输入法拼字时的回车是「上屏」：不能顺手把高亮那家选上、把弹窗关了
+  it('输入法拼字时按回车不选', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.get('.catalog-search').setValue('kimi')
+    await nextTick()
+    await wrapper.get('.catalog-search').trigger('keydown.enter', { isComposing: true })
+
+    expect(wrapper.emitted('pick')).toBeUndefined()
+  })
+
   it('上下键在结果里走，走到哪高亮到哪', async () => {
     const wrapper = mountModal()
 

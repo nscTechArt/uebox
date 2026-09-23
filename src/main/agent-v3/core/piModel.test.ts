@@ -168,8 +168,34 @@ describe('toPiModel', () => {
      */
     it('用户在设置页填的阶梯优先于 pi 自带目录', () => {
       const custom = { ...provider, models: [{ id: builtin.model.id, thinkingLevelMap: mine }] }
+      // `mine` 没提 off —— off 是「思考能不能关」这个模型事实，跟随内置数据（见下一条）
+      const known = builtin.model.thinkingLevelMap ?? {}
+      const inheritedOff = 'off' in known ? { off: known.off } : {}
 
-      expect(toPiModel(custom, custom.models[0]).thinkingLevelMap).toEqual(mine)
+      expect(toPiModel(custom, custom.models[0]).thinkingLevelMap).toEqual({
+        ...inheritedOff,
+        ...mine
+      })
+    })
+
+    /**
+     * Opus 5.5 的目录阶梯是 `{off: null, xhigh, max}`：思考关不掉，发 disabled 一律 400。
+     * 老版本存盘时把 `off` 滤掉了，存下来的只剩 `{xhigh, max}` —— 用户那份没提 off，
+     * off 就得跟随目录，否则「自动」档每一轮都发 thinking: disabled。
+     */
+    it('用户那份没提 off 时跟随目录的 off: null', () => {
+      const anthropic: ProviderConfig = {
+        ...provider,
+        id: 'anthropic',
+        protocol: 'anthropic-messages',
+        models: [{ id: 'claude-opus-5-5', thinkingLevelMap: { xhigh: 'xhigh', max: 'max' } }]
+      }
+
+      expect(toPiModel(anthropic, anthropic.models[0]).thinkingLevelMap).toEqual({
+        off: null,
+        xhigh: 'xhigh',
+        max: 'max'
+      })
     })
 
     it('pi 目录里没有的模型也能靠用户填的阶梯列出档位', () => {

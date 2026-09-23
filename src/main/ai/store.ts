@@ -116,6 +116,12 @@ function normalizeThinkingLevelMap(raw: unknown): Record<string, string | null> 
   if (!raw || typeof raw !== 'object') return undefined
   const out: Record<string, string | null> = {}
   for (const [level, value] of Object.entries(raw as Record<string, unknown>)) {
+    // `off: null` = 「思考关不掉」（Opus 5.5 发 thinking: disabled 一律 400）。
+    // 它不是档位、不需要映射，但这个 null 丢了，内核就会在「自动」档下发 disabled
+    if (level === 'off') {
+      if (value === null) out.off = null
+      continue
+    }
     if (!THINKING_LEVELS.includes(level)) continue
     if (value === null) {
       out[level] = null

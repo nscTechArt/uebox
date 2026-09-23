@@ -132,7 +132,10 @@ function move(delta: number): void {
   })
 }
 
-function pickActive(): void {
+function pickActive(event?: KeyboardEvent): void {
+  // 输入法正在拼字时的回车是「上屏」，不是「选这一项」—— 不拦的话敲拼音按回车
+  // 就把高亮的那家选上、弹窗关掉了（macOS 上 key 就是 Enter）
+  if (event?.isComposing) return
   const entry = flatEntries.value[activeIndex.value]
   if (entry) pick(entry)
 }
@@ -170,7 +173,7 @@ function pickCustom(): void {
         :placeholder="$t('aiProvider.catalog.searchPlaceholder')"
         @keydown.down.prevent="move(1)"
         @keydown.up.prevent="move(-1)"
-        @keydown.enter.prevent="pickActive"
+        @keydown.enter.prevent="pickActive($event)"
       />
 
       <AppSegmented

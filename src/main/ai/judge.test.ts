@@ -101,6 +101,17 @@ describe('requestJudgement', () => {
     ).rejects.toThrow('score criteria must have 2+ levels')
   })
 
+  // 「测试连接」按状态码分类；只带厂商原话的话密钥错、模型不存在全成了「未知错误」
+  it('厂商原话和状态码一起带上', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401 }))
+    )
+    await expect(
+      requestJudgement(provider, 'jev-latest', 'x', { q: { type: 'noul', instructions: 'y' } })
+    ).rejects.toThrow(/HTTP 401 Invalid token/)
+  })
+
   it('2xx 但没有 answers 也算失败 —— 半个响应比没有响应更危险', async () => {
     vi.stubGlobal(
       'fetch',

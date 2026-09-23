@@ -155,10 +155,11 @@ interface SystemOneResponse {
 }
 
 function extractErrorMessage(body: SystemOneResponse | null, status: number): string {
-  if (typeof body?.error === 'string') return body.error
-  if (body?.error?.message) return body.error.message
-  if (body?.message) return body.message
-  return `判定请求失败：HTTP ${status || '?'}`
+  const vendor =
+    typeof body?.error === 'string' ? body.error : body?.error?.message || body?.message || ''
+  // 状态码一定带上：「测试连接」按它分出密钥错、模型不存在、限流 —— 只有厂商那句话的话
+  // 401 / 404 / 429 全被归成「未知错误」，用户不知道该往哪查
+  return `判定请求失败：HTTP ${status || '?'}${vendor ? ` ${vendor}` : ''}`
 }
 
 /** 拼出完整端点。baseUrl 末尾有没有斜杠都得对 */
@@ -281,7 +282,7 @@ export async function judgeAvailable(): Promise<boolean> {
 export interface JudgeOptions {
   timeoutMs?: number
   signal?: AbortSignal
-  /** 失败时的去向。默认丢给 electron-log，调用方可以换成自己的 logger */
+  /** 失败时的去向。默认 console.warn（主进程里进 electron-log），调用方可以换成自己的 logger */
   onError?: (error: unknown) => void
 }
 
@@ -304,12 +305,15 @@ export async function judge(
   questions: Record<string, JudgeQuestion>,
   options: JudgeOptions = {}
 ): Promise<JudgeResult | null> {
+  // 文档承诺失败有去处：不给 onError 时也要留一行日志，不然判定器配错了永远没人发现
+  const onError =
+    options.onError ?? ((error: unknown) => console.warn('[judge] 判定失败，走回落规则：', error))
   try {
     const binding = await resolveJudgeBinding()
     if (!binding) return null
 
     if (payloadTooLarge(state, questions)) {
-      options.onError?.(
+      onError(
         new Error(
           `判定请求体过大（${payloadSize(state, questions)} 字符，上限 ${MAX_PAYLOAD_CHARS}），` +
             '先在代码里筛掉与判据无关的字段'
@@ -327,7 +331,7 @@ export async function judge(
       options.signal
     )
   } catch (error) {
-    options.onError?.(error)
+    onError(error)
     return null
   }
 }

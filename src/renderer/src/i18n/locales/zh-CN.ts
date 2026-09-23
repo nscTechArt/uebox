@@ -605,7 +605,8 @@ export default {
     },
     /** 跳过探测的理由。「跳过了」必须显示出来，否则用户会当成「测通了」 */
     probeSkip: {
-      generativeNoCheapCall: '连接测试会产生生成费用，因此不提供；首次生成时会验证配置。'
+      generativeNoCheapCall: '连接测试会产生生成费用，因此不提供；首次生成时会验证配置。',
+      noChatEndpoint: '这类服务没有可以单独发的测试请求，首次使用时会验证配置。'
     },
     delete: {
       title: '删除 {name}？',

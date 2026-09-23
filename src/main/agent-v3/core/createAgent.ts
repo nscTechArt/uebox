@@ -54,6 +54,7 @@ import {
 } from './compactionCheckpoint'
 import {
   RUNTIME_ENVELOPE_RULES,
+  formatLocalNow,
   markLegacyHealthResults,
   withRuntimeEnvelope,
   type RuntimeEnvelope
@@ -1343,7 +1344,9 @@ function buildRuntimeSection(
           `You are running on ${model.providerId}/${model.modelId}, which the user chose in Unreal Box's settings and can change there. Unreal Box is open source and this is not a secret: if they ask what model you are, say so plainly instead of deflecting.`
         ]
       : []),
-    `Today is ${now.toISOString().slice(0, 10)}.`,
+    // 本地日期，和运行时信封的 `now` 同一个口径。原来是 UTC：东八区凌晨这里写的是昨天，
+    // 而信封规则说两者对不上时以这里为准 —— 模型就会报错日期
+    `Today is ${formatLocalNow(now).slice(0, 10)}.`,
     `Platform: ${process.platform}.`,
     ...(ctx.mode === 'ask'
       ? [

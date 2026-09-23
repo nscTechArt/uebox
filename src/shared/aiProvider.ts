@@ -825,7 +825,10 @@ export type ProbeErrorCode =
   | 'noDraft'
 
 /** 跳过探测的理由。同样只回码 */
-export type ProbeSkipCode = 'generativeNoCheapCall'
+export type ProbeSkipCode =
+  | 'generativeNoCheapCall'
+  /** 实时语音、网页检索：端点不吃对话请求，拿 ping 去测只会得到一句误导人的「模型不存在」 */
+  | 'noChatEndpoint'
 
 export interface ProbeFailure {
   code: ProbeErrorCode
