@@ -10,10 +10,6 @@
 
 ### 新增
 
-- 创作者 Token Plan（设置 → 模型）：设备授权连一次，对话、嵌入、生图、视频 / 3D / 音乐、
-  语音合成与识别、实时语音、网页检索、判定一起配好，对象存储也可改用套餐自带的存储，不用 AK/SK。
-  导入前先预览要接管哪些角色；断开时吊销 Key，还原接管前的绑定。卡片上只显示剩余额度百分比，
-  细账在网页端。音乐标 Beta。没连接时不发任何请求
 - 服务商目录加「订阅套餐」一组：小米 MiMo Token Plan、阿里云百炼 Token / Coding Plan、
   智谱 GLM Coding Plan、火山方舟 Coding Plan、腾讯云 Coding / Token Plan、MiniMax Token Plan、
   阶跃星辰 Step Plan。套餐 Key 与按量账户不通用，各自单列。另加按量的小米 MiMo，
