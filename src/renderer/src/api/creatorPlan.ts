@@ -1,5 +1,5 @@
 /**
- * 创作者 Token Plan IPC 的渲染层封装。
+ * Box Plan IPC 的渲染层封装。
  *
  * 和 updater.ts 同一个理由不用 unwrapResult：这些都是用户点一下的动作（连接、应用、
  * 断开），调用方要按错误码各自提示，抛出去反而逼每个调用点再包一层 try。

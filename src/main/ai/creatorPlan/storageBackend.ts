@@ -1,5 +1,5 @@
 /**
- * 对象存储的 `uebox` 预设：创作者 Token Plan 自带的存储。
+ * 对象存储的 `uebox` 预设：Box Plan 自带的存储。
  *
  * 对象存储服务（`services/objectStorage/objectStorageService.ts`）在预设是 `uebox` 时把活转到这里，
  * 调用方（promptMedia、streamFn、generateVideo、设置页）一概无感：上传拿键、按键要链接、
@@ -87,7 +87,7 @@ async function requireConnection(): Promise<PlanStorageConnection> {
   if (!conn) {
     throw new PlanStorageError(
       'unauthorized',
-      '创作者 Token Plan 没连接：到「设置 → 模型」连接后再用套餐的对象存储'
+      'Box Plan 没连接：到「设置 → 模型」连接后再用套餐的对象存储'
     )
   }
   return conn
@@ -204,7 +204,7 @@ export async function uploadToPlan(
   if (ticket.exists) {
     say(`套餐存储里已经有 ${fileName}，直接复用`)
   } else {
-    if (!ticket.upload) throw new PlanStorageError('bad_response', '创作者 Token Plan 没给上传地址')
+    if (!ticket.upload) throw new PlanStorageError('bad_response', 'Box Plan 没给上传地址')
     const note = `正在上传 ${fileName}（${sizeText(stat.size)}）到套餐存储…`
     say(note)
     let lastPercent = -1

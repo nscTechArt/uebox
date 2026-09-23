@@ -74,7 +74,7 @@ const needsEndpoint = computed(() => MANUAL_ENDPOINT_PRESETS.includes(form.prese
 /** 必填的都有了、Secret 也存过了 —— 以存下来的为准，不看表单里正在改的 */
 const configured = ref(false)
 /**
- * 创作者 Token Plan 提供的存储：没有表单可填，只由套餐卡片的导入开启 / 断开时还原。
+ * Box Plan 提供的存储：没有表单可填，只由套餐卡片的导入开启 / 断开时还原。
  * 这时连接那一层换成一行说明和用量，文件那一层照旧。
  */
 const planManaged = computed(() => form.preset === PLAN_OBJECT_STORAGE_PRESET)

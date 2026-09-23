@@ -64,7 +64,7 @@ export function musicRequest(
       }
     }
   }
-  throw new Error('请在音乐来源中选择 ElevenLabs、Mureka、SUNO 或创作者 Token Plan 音乐接口。')
+  throw new Error('请在音乐来源中选择 ElevenLabs、Mureka、SUNO 或 Box Plan 音乐接口。')
 }
 
 interface SunoResponse {
@@ -344,7 +344,7 @@ export async function generateTaskMusic(
 }
 
 /**
- * 创作者 Token Plan 那一支（`musicApi: 'uebox-tasks'`）。
+ * Box Plan 那一支（`musicApi: 'uebox-tasks'`）。
  *
  * 上面几家靠「提交前先写回执、没确认的回执拒绝再提交」防重复收费；这一支换成
  * `Idempotency-Key` + 任务账本（creatorPlan/tasks.ts）：提交可以放心重发，应用崩了之后
@@ -400,7 +400,7 @@ async function generatePlanMusic(
 
   const combined = signal ?? new AbortController().signal
   const body = { model, input: { prompt, seconds: target, instrumental: true } }
-  report('正在提交音乐生成（创作者 Token Plan）')
+  report('正在提交音乐生成（Box Plan）')
   const task = await runPlanTask(provider, 'music', body, {
     signal: combined,
     onProgress: (note) => report(`音乐生成：${note}`),

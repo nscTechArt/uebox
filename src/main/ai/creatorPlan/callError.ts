@@ -41,16 +41,15 @@ const STATIC_MESSAGES: Readonly<
   Record<Exclude<CreatorPlanChatErrorCode, 'daily_limit_reached'>, string>
 > = Object.freeze({
   subscription_inactive:
-    'UEBox Token Plan 没有生效的订阅（或续费失败已过宽限期）。' +
+    'Box Plan 没有生效的订阅（或续费失败已过宽限期）。' +
     '到 设置 → 模型 的套餐卡片点「管理订阅」处理；处理好之前重试也一样失败。',
   quota_exhausted:
-    'UEBox Token Plan 本月的额度用完了。' +
+    'Box Plan 本月的额度用完了。' +
     '到 设置 → 模型 的套餐卡片点「管理订阅」升级，或等额度重置；现在重试也一样失败。',
   role_not_in_plan:
-    '当前的 UEBox Token Plan 套餐不含这个角色。' +
+    '当前的 Box Plan 套餐不含这个角色。' +
     '到 设置 → 模型 的套餐卡片点「管理订阅」换档，或把这个角色换绑到别的来源。',
-  unauthorized:
-    'UEBox Token Plan 的授权失效了（Key 被吊销或删除）。到 设置 → 模型 的套餐卡片重新连接。'
+  unauthorized: 'Box Plan 的授权失效了（Key 被吊销或删除）。到 设置 → 模型 的套餐卡片重新连接。'
 })
 
 const resetTime = (iso: string): string =>
@@ -77,13 +76,13 @@ function limitedReason(detail: PlanErrorDetail): string {
 function messageOf(code: CreatorPlanChatErrorCode, detail: PlanErrorDetail): string {
   if (code === 'daily_limit_reached') {
     return (
-      `UEBox Token Plan 今天的额度用完了，${resetTime(detail.dailyResetAt ?? nextUtcMidnight())} 恢复。` +
+      `Box Plan 今天的额度用完了，${resetTime(detail.dailyResetAt ?? nextUtcMidnight())} 恢复。` +
       '现在重试也一样失败（单次规格超过每天的上限时，明天也一样：换小一点的规格）；' +
       '等不及可以到 设置 → 模型 的套餐卡片点「管理订阅」升级。'
     )
   }
   if (code === 'quota_exhausted' && detail.limitedBy) {
-    return `UEBox Token Plan 本月的额度用完了。${limitedReason(detail)}现在重试也一样失败。设置 → 模型 的套餐卡片上有详情。`
+    return `Box Plan 本月的额度用完了。${limitedReason(detail)}现在重试也一样失败。设置 → 模型 的套餐卡片上有详情。`
   }
   return STATIC_MESSAGES[code]
 }

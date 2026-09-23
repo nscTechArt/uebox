@@ -99,7 +99,7 @@ async function materialize(
   }
 
   // 从 literal / oauth 换成别的来源时，把原来那份密文删掉，不留孤儿。
-  // 别的来源还在用同一份密文（创作者 Token Plan 的几个来源共用一把 Key）就留着。
+  // 别的来源还在用同一份密文（Box Plan 的几个来源共用一把 Key）就留着。
   if (
     (previous?.apiKey.kind === 'literal' || previous?.apiKey.kind === 'oauth') &&
     apiKey.kind !== previous.apiKey.kind &&
@@ -123,13 +123,13 @@ async function keyUsedElsewhere(keyId: string, exceptProviderId: string): Promis
 }
 
 /**
- * 创作者 Token Plan 的来源只读：它的地址、模型、Key 都由套餐卡片管，
+ * Box Plan 的来源只读：它的地址、模型、Key 都由套餐卡片管，
  * 在这里改了或删了，卡片和配置就对不上了。界面上已经不给编辑入口，
  * 主进程再拦一道，防止绕过界面直接调 IPC。
  */
 const PLAN_READ_ONLY = {
   ok: false,
-  error: '这个来源由创作者 Token Plan 管理，请在「创作者 Token Plan」卡片上操作。'
+  error: '这个来源由 Box Plan 管理，请在「Box Plan」卡片上操作。'
 } as const
 
 function fail(error: unknown): { ok: false; error: string } {

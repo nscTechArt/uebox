@@ -876,7 +876,7 @@ function emitAction(button: MessageActionButton): void {
     emit('open-location', String(button.data?.folderKey ?? ''), button.data?.assetKey as string)
     return
   }
-  // 创作者 Token Plan 的错误提示（管理订阅、去重新连接）在这里就地处理，
+  // Box Plan 的错误提示（管理订阅、去重新连接）在这里就地处理，
   // 不冒到页面：气泡放在哪个宿主里都能用，不用每个宿主各接一遍
   if (isCreatorPlanAction(button.action)) {
     void runCreatorPlanAction(button.action, () =>

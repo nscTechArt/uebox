@@ -99,7 +99,7 @@ const TASK_POLL_FAILURE_TOLERANCE = 5
 const TASK_TIMEOUT_MS = 240_000
 
 /**
- * 创作者 Token Plan 的生图任务上限：协议写明「10 分钟内必定结束，超时为 failed」。
+ * Box Plan 的生图任务上限：协议写明「10 分钟内必定结束，超时为 failed」。
  * 时间交给服务端判，这边只比它多等一分钟，免得我们先放弃一张正在画、已经预占了额度的图。
  */
 const PLAN_TASK_TIMEOUT_MS = 660_000
@@ -811,7 +811,7 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
   },
 
   /**
-   * 创作者 Token Plan。形状贴近 OpenAI，三处不同：
+   * Box Plan。形状贴近 OpenAI，三处不同：
    *
    * 1. 参考图放 JSON 的 `image_urls`，只收 **https 链接或 data URI** —— 不走 multipart、
    *    不先上传；http 直链先取回来转成 data URI
@@ -823,10 +823,10 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
    * 不带 `Idempotency-Key`：带了一律按任务处理，每张图都要多等至少一轮轮询；
    * 提交只对 429 重试（「没收下」），不存在重复扣费。
    *
-   * 协议见 Creator Plan 仓库 docs/protocol/04-images.md。
+   * 协议见 Box Plan 仓库 docs/protocol/04-images.md。
    */
   'uebox-images': {
-    doc: 'docs/protocol/04-images.md（Creator Plan）',
+    doc: 'docs/protocol/04-images.md（Box Plan）',
     taskTimeoutMs: PLAN_TASK_TIMEOUT_MS,
     async request(input, signal) {
       const references = await Promise.all(

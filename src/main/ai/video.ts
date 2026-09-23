@@ -431,7 +431,7 @@ const MINIMAX_RESOLUTION: Readonly<Record<VideoResolution, string>> = Object.fre
   '2k': '2K'
 })
 
-/** 创作者 Token Plan（`uebox-tasks`）不走这张表，走共用的任务客户端，见文件末尾 */
+/** Box Plan（`uebox-tasks`）不走这张表，走共用的任务客户端，见文件末尾 */
 const ADAPTERS: Record<Exclude<VideoApi, 'uebox-tasks'>, VideoAdapter> = {
   /**
    * 火山方舟内容生成任务（Seedance 2.5 / 2.0）。
@@ -996,7 +996,7 @@ export async function getVideoStatus(): Promise<VideoModelStatus> {
   }
 }
 
-// ── 创作者 Token Plan（videoApi: 'uebox-tasks'）──────────────────────────────
+// ── Box Plan（videoApi: 'uebox-tasks'）──────────────────────────────
 
 /**
  * 我们的视频请求 → 协议 05-tasks 的 `uebox-video` 输入。字段几乎一一对应，`audio` → `generate_audio`。
@@ -1031,7 +1031,7 @@ export function planVideoBody(
       throw new VideoParamUnsupportedError(
         'uebox-tasks',
         `参考视频「${url.slice(0, 60)}」`,
-        '创作者 Token Plan 的参考视频只收 https 链接（不收 base64，也没有 asset:// 素材 ID）。'
+        'Box Plan 的参考视频只收 https 链接（不收 base64，也没有 asset:// 素材 ID）。'
       )
     }
   }
@@ -1041,7 +1041,7 @@ export function planVideoBody(
       throw new VideoParamUnsupportedError(
         'uebox-tasks',
         `参考音频「${url.slice(0, 60)}」`,
-        '创作者 Token Plan 的参考音频只收 https 链接或 data URI。'
+        'Box Plan 的参考音频只收 https 链接或 data URI。'
       )
     }
   }

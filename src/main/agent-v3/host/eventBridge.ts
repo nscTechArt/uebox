@@ -93,7 +93,7 @@ export type AgentV3Event =
         code?: string
         detail?: string
         /**
-         * 调的是创作者 Token Plan、且服务端回的是套餐类错误（没订阅、额度用完、
+         * 调的是 Box Plan、且服务端回的是套餐类错误（没订阅、额度用完、
          * 套餐不含这个角色、Key 失效）。渲染层据此给一条可点的提示，而不是通用错误。
          * 别的来源永远不带这个字段。
          */

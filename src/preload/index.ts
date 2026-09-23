@@ -2078,7 +2078,7 @@ const api = {
       return () => ipcRenderer.removeListener('ai-provider:oauth-device-code', handler)
     }
   },
-  /** 创作者 Token Plan：一把 Key 配好多个角色。没连接时这些调用都不联网 */
+  /** Box Plan：一把 Key 配好多个角色。没连接时这些调用都不联网 */
   creatorPlan: {
     state: () => ipcRenderer.invoke('creator-plan:state'),
     /** 设备授权。码通过 onDeviceCode 推过来；用户在浏览器里允许后才 resolve */

@@ -1,5 +1,5 @@
 /**
- * 创作者 Token Plan 的语音合成：`POST {base}/audio/speech`，`stream_format: 'sse'` +
+ * Box Plan 的语音合成：`POST {base}/audio/speech`，`stream_format: 'sse'` +
  * `response_format: 'pcm'`（协议 06-audio）。
  *
  * 输出是 16-bit 小端、单声道、24000 Hz 的裸 PCM，和现有流式接口（`SpeechAudio`）同一个格式，

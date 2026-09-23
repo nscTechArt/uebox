@@ -430,10 +430,10 @@ describe('打断', () => {
 })
 
 /**
- * 创作者 Token Plan（协议 07-realtime）走的就是这支适配器：OpenAI Realtime GA 的事件子集。
+ * Box Plan（协议 07-realtime）走的就是这支适配器：OpenAI Realtime GA 的事件子集。
  * 差别只在转写模型和套餐错误的文案。
  */
-describe('创作者 Token Plan', () => {
+describe('Box Plan', () => {
   it('转写模型只认 uebox-stt；音色原样发（清单里的 uebox-voice-*）；听写照旧关掉自动应答', () => {
     const update = buildOpenAiSessionUpdate({
       ...CONFIG,
@@ -548,7 +548,7 @@ describe('创作者 Token Plan', () => {
       return { frames: frames.slice(1), events }
     }
 
-    it('创作者 Token Plan：不请模型开口；上下文成对写进去，原话交给渲染层用语音合成角色念', async () => {
+    it('Box Plan：不请模型开口；上下文成对写进去，原话交给渲染层用语音合成角色念', async () => {
       const { frames, events } = await announceOnce(true)
       expect(frames.map((frame) => frame.type)).toEqual([
         'conversation.item.create',

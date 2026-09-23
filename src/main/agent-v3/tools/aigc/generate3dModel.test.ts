@@ -448,7 +448,7 @@ describe('Tripo 专属开关的暴露面', () => {
   })
 })
 
-describe('创作者 Token Plan 的扩展开关', () => {
+describe('Box Plan 的扩展开关', () => {
   const paramNames = (built: { parameters: unknown }): string[] =>
     Object.keys((built.parameters as { properties: Record<string, unknown> }).properties)
 

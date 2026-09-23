@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 /**
- * 守的是对社区版的承诺：没连接 Creator Plan 时，打开设置页（creator-plan:state）
+ * 守的是对社区版的承诺：没连接 Box Plan 时，打开设置页（creator-plan:state）
  * 一个请求都不发。以及：
  * - 导入时记下被接管角色的原绑定，重新导入不覆盖；断开时还原
  * - 断开先在服务端吊销 Key 再删本机的；吊销失败照常断开，回一个标记
@@ -99,7 +99,7 @@ const manifest: CreatorPlanManifest = {
   schema: 1,
   etag: 'p-1',
   plan: {
-    product: 'UEBox Creator Plan',
+    product: 'Box Plan',
     tier: 'pro',
     tier_name: 'Pro',
     status: 'active',
@@ -126,7 +126,7 @@ const mine = {
 
 const planProvider = {
   id: PLAN_PROVIDER_ID,
-  displayName: 'Creator Plan',
+  displayName: 'Box Plan',
   kind: 'chat',
   protocol: 'openai-completions',
   baseUrl: 'https://plan.example/v1',

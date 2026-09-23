@@ -144,7 +144,7 @@ export function useReadAloud(
       const binding = settings.roles.tts
       const provider = settings.providers.find((item) => item.id === binding?.providerId)
       const model = provider?.models.find((item) => item.id === binding?.modelId)
-      // 创作者 Token Plan 单次能收的字数在清单里（max_input_chars），按它切；别的来源 600 字
+      // Box Plan 单次能收的字数在清单里（max_input_chars），按它切；别的来源 600 字
       const chunks = splitSpeechText(
         plainText,
         provider && isPlanProvider(provider.id)
@@ -184,7 +184,7 @@ export function useReadAloud(
     } catch (error) {
       if (currentRun !== run) return
       console.error('[ReadAloud] Playback failed', error)
-      // 创作者 Token Plan 的订阅 / 额度 / 授权错误（主进程回 TTS_PLAN_<码>）：用对话里同一套文案
+      // Box Plan 的订阅 / 额度 / 授权错误（主进程回 TTS_PLAN_<码>）：用对话里同一套文案
       const planCode =
         error instanceof Error ? error.message.match(/TTS_PLAN_([A-Z_]+)/)?.[1]?.toLowerCase() : ''
       if (isCreatorPlanChatErrorCode(planCode)) {

@@ -130,7 +130,7 @@ function matchesKeyword(provider: ProviderView): boolean {
 const groups = computed(() => {
   const byKind = new Map<ProviderKind, ProviderView[]>()
   for (const provider of providers.value) {
-    // 套餐来源只读，不进编辑弹窗；它在设置页的来源列表里标着「由创作者 Token Plan 管理」
+    // 套餐来源只读，不进编辑弹窗；它在设置页的来源列表里标着「由 Box Plan 管理」
     if (isPlanProvider(provider.id) || !matchesKeyword(provider)) continue
     byKind.set(provider.kind, [...(byKind.get(provider.kind) ?? []), provider])
   }

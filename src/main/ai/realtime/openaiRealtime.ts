@@ -68,7 +68,7 @@ const DEFAULT_BASE_URL = 'wss://api.openai.com/v1/realtime'
  */
 export const OPENAI_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe'
 
-/** 创作者 Token Plan 的转写模型。协议 07：`transcription.model` 可省略，给了只能是它 */
+/** Box Plan 的转写模型。协议 07：`transcription.model` 可省略，给了只能是它 */
 export const PLAN_TRANSCRIPTION_MODEL = 'uebox-stt'
 
 /**
@@ -434,7 +434,7 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
      * 已经没了的会话上醒来，打一行「没等到回执」，还可能顺手再排一个。
      */
     responses.dispose()
-    // 创作者 Token Plan 按规矩挂断时关闭帧的 reason 就是原因码（协议 07「限制」）。带上去，
+    // Box Plan 按规矩挂断时关闭帧的 reason 就是原因码（协议 07「限制」）。带上去，
     // 渲染层说一句「一分钟没人说话，挂断了」，而不是一声不吭地熄掉 —— 也不自动重连
     const hangUp = voiceHangUpReason(reason?.toString('utf-8'))
     config.onEvent(hangUp ? { type: 'closed', reason: hangUp } : { type: 'closed' })
@@ -470,7 +470,7 @@ export function openOpenAiRealtimeSession(config: RealtimeSessionConfig): VoiceS
      * 得自己接一路 TTS。而且它转述得比逐字念自然 —— 豆包那边逐字念是**被迫**的，
      * 不是更优解。两家听感会有差别，这是协议差异，不是 bug。
      *
-     * **创作者 Token Plan 例外**：它的主线路只插一条文字再 `response.create`，模型可能等到
+     * **Box Plan 例外**：它的主线路只插一条文字再 `response.create`，模型可能等到
      * 用户下次开口才回（协议 07「兼容性说明」）—— 任务跑完了语音一声不吭。所以那边不请模型开口：
      * 上下文成对写进去（模型记得这句是自己说的），原话交给渲染层用语音合成角色逐字念。
      */
@@ -606,11 +606,11 @@ export function translate(event: Record<string, unknown>): VoiceSessionEvent[] {
       const error = (event.error as { message?: unknown; code?: unknown }) || {}
       // 自己人造成的、且不影响通话继续的那几种，不往上报（理由见 HARMLESS_ERROR_CODES）
       if (typeof error.code === 'string' && HARMLESS_ERROR_CODES.has(error.code)) return []
-      // 创作者 Token Plan 按规矩挂断（一分钟没人说话 / 单次 30 分钟）：不是故障，
+      // Box Plan 按规矩挂断（一分钟没人说话 / 单次 30 分钟）：不是故障，
       // 按「断了、原因是这个」往上报，别弹成报错。随后的 1008 关闭帧被上层当成同一次断开
       const hangUp = voiceHangUpReason(error.code)
       if (hangUp) return [{ type: 'closed', reason: hangUp }]
-      // 创作者 Token Plan 会话中途额度用完、订阅失效：服务端发这条 error 再以 1008 关闭（协议 07）。
+      // Box Plan 会话中途额度用完、订阅失效：服务端发这条 error 再以 1008 关闭（协议 07）。
       // 这几个码只有套餐用，OpenAI 自己的码不会撞上
       const planError = planCallError(planStatusOf(error.code), { error })
       if (planError) return [{ type: 'error', message: planError.message }]

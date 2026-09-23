@@ -1,5 +1,5 @@
 /**
- * 创作者 Token Plan 的网页检索：`POST {base}/search`（协议 08-search）。
+ * Box Plan 的网页检索：`POST {base}/search`（协议 08-search）。
  *
  * 由 `services/webSearch.ts` 在「网页检索」绑的是套餐来源时调用。地址从参数拿，
  * 不写域名（官方端点门禁）。结果字段与我们的 `WebSearchItem` 几乎一一对应：

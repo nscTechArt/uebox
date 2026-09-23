@@ -8,7 +8,7 @@ import {
 } from '@core/shared/objectStorage'
 
 /**
- * 对象存储由创作者 Token Plan 提供（`uebox` 预设）时：没有表单可填，
+ * 对象存储由 Box Plan 提供（`uebox` 预设）时：没有表单可填，
  * 连接那一层换成一行说明、用量和「怎么换回自己的桶」，文件那一层照旧。
  */
 
@@ -43,7 +43,7 @@ describe('ProfileObjectStorage：套餐存储', () => {
     })
     await flushPromises()
     const text = wrapper.text()
-    expect(text).toContain('UEBox Token Plan 提供，不用填密钥')
+    expect(text).toContain('Box Plan 提供，不用填密钥')
     expect(text).toContain('已用 1.0 MB / 10.00 GB')
     expect(text).toContain('最后一次用到后留 30 天')
     expect(text).toContain('重新导入')

@@ -11,13 +11,13 @@
 /**
  * 预设只决定默认 endpoint / region / 寻址方式，签名都是同一套 SigV4。
  *
- * `uebox` 例外：创作者 Token Plan 自带的存储，不用 AK/SK，走套餐的申请 → 上传 → 确认三步
+ * `uebox` 例外：Box Plan 自带的存储，不用 AK/SK，走套餐的申请 → 上传 → 确认三步
  * （`src/main/ai/creatorPlan/storageBackend.ts`）。它只由套餐卡片的导入开启，不在下拉框里；
  * 开启时其余字段原样留着，换回自己的桶时不用重填。
  */
 export type ObjectStoragePreset = 'aws' | 'aliyun' | 'tencent' | 'r2' | 'minio' | 'custom' | 'uebox'
 
-/** 只能由创作者 Token Plan 开启的预设，设置页的下拉框里不列 */
+/** 只能由 Box Plan 开启的预设，设置页的下拉框里不列 */
 export const PLAN_OBJECT_STORAGE_PRESET = 'uebox' satisfies ObjectStoragePreset
 
 export interface ObjectStorageConfig {

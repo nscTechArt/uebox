@@ -2095,7 +2095,7 @@ declare global {
         }) => void
       ) => () => void
     }
-    /** 创作者 Token Plan。没连接时这些调用都不联网 */
+    /** Box Plan。没连接时这些调用都不联网 */
     creatorPlan: {
       state: () => Promise<
         import('../shared/creatorPlan').CreatorPlanResult<

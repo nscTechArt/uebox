@@ -545,7 +545,7 @@ const RODIN_QUALITY: Readonly<Record<Model3dQuality, string>> = Object.freeze({
   'extra-low': 'extra-low'
 })
 
-/** 创作者 Token Plan（`uebox-tasks`）不走这张表，走共用的任务客户端，见文件末尾 */
+/** Box Plan（`uebox-tasks`）不走这张表，走共用的任务客户端，见文件末尾 */
 const ADAPTERS: Record<Exclude<Model3dApi, 'uebox-tasks'>, Model3dAdapter> = {
   /**
    * Hyper3D Rodin。
@@ -1785,7 +1785,7 @@ export async function getModel3dStatus(): Promise<Model3dModelStatus> {
   }
 }
 
-// ── 创作者 Token Plan（model3dApi: 'uebox-tasks'）────────────────────────────
+// ── Box Plan（model3dApi: 'uebox-tasks'）────────────────────────────
 
 /** 多图时每张带的视位，顺序与 Tripo 那支一致（正面 → 左 → 背 → 右） */
 const PLAN_VIEWS = ['front', 'left', 'back', 'right'] as const
@@ -1855,7 +1855,7 @@ export function planModel3dBody(
       unsupported.join(' / '),
       allowedOptions
         ? `当前套餐支持的扩展选项：${allowedOptions.join(' / ') || '无'}。去掉其余的再生成。`
-        : '创作者 Token Plan 没有这几个选项，去掉它们再生成。'
+        : 'Box Plan 没有这几个选项，去掉它们再生成。'
     )
   }
 

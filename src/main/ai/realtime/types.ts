@@ -72,7 +72,7 @@ export type VoiceSessionEvent =
   /**
    * 一条播报发出去了（豆包念或本机念），把原话交给渲染层写进「语音助手」对话。
    *
-   * 豆包这条线和创作者 Token Plan 的来源发：念的是我们给的定稿，没有文字增量可写。
+   * 豆包这条线和 Box Plan 的来源发：念的是我们给的定稿，没有文字增量可写。
    * 其余 OpenAI 那家由模型转述，转述的字幕走 `assistant-text` 本来就进对话了，再发这个就是两条。
    */
   | { type: 'announced'; text: string }
@@ -87,7 +87,7 @@ export type VoiceSessionEvent =
   | { type: 'question-settled'; taskId?: string }
   | { type: 'error'; message: string }
   /**
-   * 连接断了。`reason` 只在服务端按规矩挂断时给（创作者 Token Plan，协议 07「限制」）：
+   * 连接断了。`reason` 只在服务端按规矩挂断时给（Box Plan，协议 07「限制」）：
    * `idle_timeout` 是一分钟没人说话，`session_timeout` 是单次会话到了 30 分钟。
    * 两种都**不自动重连**（空闲挂断重连了也是空转计费），渲染层说一句，等用户再点
    */
@@ -149,7 +149,7 @@ export interface RealtimeSessionConfig {
    */
   dictation?: boolean
   /**
-   * 创作者 Token Plan 的来源（协议 07-realtime，OpenAI Realtime GA 的事件子集）。
+   * Box Plan 的来源（协议 07-realtime，OpenAI Realtime GA 的事件子集）。
    *
    * 走 OpenAI 这支适配器，差别有三处：转写模型只认 `uebox-stt`（给别的名字服务端回 error）；
    * 握手被拒（401 Key 失效）和会话里的订阅 / 额度错误换成说清下一步的文案；

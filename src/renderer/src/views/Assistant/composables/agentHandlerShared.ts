@@ -88,7 +88,7 @@ export interface ErrorEvent {
    */
   detail?: string
   /**
-   * 调的是创作者 Token Plan、服务端回了套餐类错误（主进程 eventBridge.ts 判的）。
+   * 调的是 Box Plan、服务端回了套餐类错误（主进程 eventBridge.ts 判的）。
    * 有它就给「管理订阅」「去重新连接」的提示，不走通用文案。别的来源永远没有。
    */
   planError?: string
