@@ -37,7 +37,9 @@ const SetBlueprintPropertySchema = z.object({
 /** 修改成功的属性信息 */
 interface ModifiedPropertyInfo {
   property: string
-  type: string
+  type?: string
+  /** 写完（编译后）从目标上读回来的值（ExportText）。旧版插件不带 */
+  value?: string
 }
 
 /** 修改失败的属性信息 */
@@ -56,8 +58,12 @@ interface SetBlueprintPropertyResponse {
   component_name?: string
   modified_properties: ModifiedPropertyInfo[]
   failed_properties: FailedPropertyInfo[]
+  /** 编译是否真的通过（没要求编译时为 false） */
   compiled: boolean
+  compile_status?: string
   saved: boolean
+  /** 这次改动是否进了编辑器撤销栈 */
+  undoable?: boolean
   message: string
 }
 
@@ -90,6 +96,14 @@ function parsePropertiesInput(rawProperties: unknown): Record<string, unknown> {
   return rawProperties as Record<string, unknown>
 }
 
+/** 每条失败属性一行：名字、原因、（有的话）插件给的近似名 */
+function formatFailureReasons(failed: FailedPropertyInfo[]): string[] {
+  return failed.map((p) => {
+    const hint = p.suggestions?.length ? `（可能是：${p.suggestions.join('、')}）` : ''
+    return `  - ${p.property}: ${p.error}${hint}`
+  })
+}
+
 // ============================================================================
 // 工具定义
 // ============================================================================
@@ -114,11 +128,10 @@ export function createSetBlueprintPropertyTool() {
 - 结构体：只需提供要修改的字段，其他字段保持原值
 
 【返回数据】：
-- ok: 是否成功
-- modified_properties: 成功修改的属性列表
-- failed_properties: 修改失败的属性列表（含错误信息和建议）
-- compiled: 是否已编译
-- saved: 是否已保存`,
+- success: 全写成、编译过、已保存才为 true
+- modified_properties: 值为写后读回的
+- failed_properties: 失败项（含原因和建议）
+- compiled / saved`,
 
     inputSchema: SetBlueprintPropertySchema,
 
@@ -176,10 +189,31 @@ export function createSetBlueprintPropertyTool() {
 
         console.log('[SetBlueprintPropertyTool] 收到响应:', response ? '成功' : '无数据')
 
-        if (response && response.ok) {
-          // 构建用户友好的结果
+        const modified = Array.isArray(response?.modified_properties)
+          ? response.modified_properties
+          : []
+        const failed = Array.isArray(response?.failed_properties) ? response.failed_properties : []
+
+        /*
+         * 只要有一项写成，这就是一份回执：写成的那几项必须告诉模型（不然它会再写一遍），
+         * 没写成的也要。success 只在「全部写成 +（要求编译时）编译通过 + 存下盘」时为 true ——
+         * 以前部分失败也回 success:true，模型读到成功就往下走了，失败那几项没人管。
+         *
+         * 不只信插件的 ok：旧版插件部分失败时 ok 也是 true，这里按回执内容再判一次。
+         */
+        if (response && (response.ok || modified.length > 0)) {
+          const problems: string[] = []
+          if (input.auto_compile !== false && response.compiled === false) {
+            const status = response.compile_status ? `（${response.compile_status}）` : ''
+            problems.push(`蓝图编译未通过${status}，用 blueprint_compile 查看错误`)
+          }
+          if (response.saved === false) {
+            problems.push('改动只在内存里，未能保存到磁盘')
+          }
+          const success = response.ok && failed.length === 0 && problems.length === 0
+
           const result: Record<string, unknown> = {
-            success: true,
+            success,
             blueprint_name: response.blueprint_name,
             blueprint_path: response.blueprint_path,
             target_type: response.target_type,
@@ -187,28 +221,46 @@ export function createSetBlueprintPropertyTool() {
             saved: response.saved,
             message: response.message
           }
+          if (response.compile_status) {
+            result.compile_status = response.compile_status
+          }
+          if (typeof response.undoable === 'boolean') {
+            result.undoable = response.undoable
+          }
 
           if (response.component_name) {
             result.component_name = response.component_name
           }
 
-          // 成功修改的属性
-          if (response.modified_properties.length > 0) {
-            result.modified_properties = response.modified_properties.map((p) => ({
+          // 成功修改的属性。value 是插件写完（编译后）从目标上读回来的，不是请求里的原样
+          if (modified.length > 0) {
+            result.modified_properties = modified.map((p) => ({
               name: p.property,
-              type: p.type
+              type: p.type,
+              ...(p.value !== undefined ? { value: p.value } : {})
             }))
-            result.modified_count = response.modified_properties.length
+            result.modified_count = modified.length
           }
 
           // 失败的属性（带建议）
-          if (response.failed_properties.length > 0) {
-            result.failed_properties = response.failed_properties.map((p) => ({
+          if (failed.length > 0) {
+            result.failed_properties = failed.map((p) => ({
               name: p.property,
               error: p.error,
               suggestions: p.suggestions
             }))
-            result.failed_count = response.failed_properties.length
+            result.failed_count = failed.length
+          }
+
+          if (!success) {
+            // 第一句就是成败比，不以成功开头
+            const error = [
+              `${modified.length} succeeded / ${failed.length} failed`,
+              ...problems,
+              ...formatFailureReasons(failed)
+            ].join('\n')
+            result.error = error
+            result.message = error
           }
 
           return result
@@ -228,11 +280,7 @@ export function createSetBlueprintPropertyTool() {
          * 一句话，模型对着它只能换个写法再猜一次。真机上给金币换材质就是这么
          * 试了三轮：原因（路径格式不对）插件早就说了，只是没人转告。
          */
-        const failed = Array.isArray(response?.failed_properties) ? response.failed_properties : []
-        const reasons = failed.map((p) => {
-          const hint = p.suggestions?.length ? `（可能是：${p.suggestions.join('、')}）` : ''
-          return `  - ${p.property}: ${p.error}${hint}`
-        })
+        const reasons = formatFailureReasons(failed)
         return {
           success: false,
           error: `设置蓝图属性失败：${msg}${reasons.length ? `\n${reasons.join('\n')}` : ''}`,

@@ -10,6 +10,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
 #include "Components/ActorComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/CompilerResultsLog.h"
@@ -4469,23 +4470,70 @@ void FUAL_BlueprintCommands::Handle_AddComponentToBlueprint(const TSharedPtr<FJs
 }
 
 /**
+ * 写完之后从目标对象上把值读回来。回执里报的是引擎里此刻的值，不是请求里的原样 ——
+ * 写进去被夹紧、被 setter 改写、编译后没留住，照原样回显都看不出来。
+ *
+ * 属性每次都按名字重新查：编译会重建蓝图生成类，蓝图里声明的变量对应的
+ * FProperty 会换一份，写之前拿到的指针编译后不能再用。
+ *
+ * 返回 false 表示读不到（编译后属性没了 / 目标没了）。
+ */
+static bool UAL_ReadBackPropertyText(UObject* Target, UClass* TargetClass, const FString& PropName, FString& OutText, FString& OutType)
+{
+	if (!Target)
+	{
+		return false;
+	}
+
+	FProperty* Prop = UAL_FindPropertyByAnyName(TargetClass, PropName);
+	if (!Prop)
+	{
+		Prop = UAL_FindPropertyByAnyName(Target->GetClass(), PropName);
+	}
+	if (Prop)
+	{
+		OutText.Reset();
+		Prop->ExportText_InContainer(0, OutText, Target, nullptr, Target, PPF_None);
+		OutType = Prop->GetClass()->GetName();
+		return true;
+	}
+
+	// 反射里没有、只能走 setter 写的那几个（见 UAL_CommandUtils::TrySetDerivedProperty）
+	if (PropName.Equals(TEXT("CollisionProfileName"), ESearchCase::IgnoreCase))
+	{
+		if (const UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Target))
+		{
+			OutText = Primitive->GetCollisionProfileName().ToString();
+			OutType = TEXT("CollisionProfileName");
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
  * 设置蓝图属性（支持 CDO 默认值和 SCS 组件属性）
- * 
+ *
  * 请求参数:
  *   - blueprint_path: 蓝图路径（必填）
  *   - component_name: 组件名称（可选，为空则修改蓝图默认值 CDO，否则修改指定组件）
  *   - properties: 属性键值对（必填）
  *   - auto_compile: 是否自动编译（可选，默认 true）
- * 
+ *
  * 返回:
- *   - ok: 是否成功
+ *   - ok: 全部属性写成、（要求编译时）编译通过、并且存盘成功才为 true；任何一处失败都是 false
  *   - blueprint_path: 蓝图路径
  *   - target_type: 修改的目标类型（"cdo" 或 "component"）
  *   - component_name: 组件名称（仅当修改组件时）
- *   - modified_properties: 成功修改的属性列表
+ *   - modified_properties: 成功修改的属性列表，每项带 value —— 写完（编译后）从目标上读回来的值
  *   - failed_properties: 修改失败的属性列表（含错误信息）
- *   - compiled: 是否已编译
+ *   - compiled: 编译是否真的通过（没要求编译时为 false）
+ *   - compile_status: 编译后的蓝图状态（仅当要求编译时）
  *   - saved: 是否已保存
+ *   - undoable: 这次改动是否进了撤销栈
+ *
+ * 写入包在 FUAL_ScopedTransaction 里，编译前结束事务 —— 完整编译不能留在事务里，
+ * 理由见 UAL_ScopedTransaction.h。
  */
 void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 {
@@ -4569,45 +4617,44 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
 	}
 
 	// 5. 确定目标对象（CDO 或 SCS 组件）
-	UObject* TargetObject = nullptr;
-	FString TargetType;
-	UClass* TargetClass = nullptr;
-
-	if (ComponentName.IsEmpty())
+	//
+	// 写成 lambda 是因为编译后还要再找一次：编译会换掉 CDO（以及 CDO 下的子对象），
+	// 读回值必须从编译后的那一个上读
+	auto ResolveTarget = [&Blueprint, &ComponentName](UObject*& OutObject, UClass*& OutClass)
 	{
-		// 修改蓝图默认值（CDO）
-		if (!Blueprint->GeneratedClass)
+		OutObject = nullptr;
+		OutClass = nullptr;
+
+		if (ComponentName.IsEmpty())
 		{
-			UAL_CommandUtils::SendError(RequestId, 500, TEXT("Blueprint has no generated class, please compile it first"));
+			// 修改蓝图默认值（CDO）
+			if (Blueprint->GeneratedClass)
+			{
+				OutObject = Blueprint->GeneratedClass->GetDefaultObject();
+				OutClass = Blueprint->GeneratedClass;
+			}
 			return;
 		}
-		TargetObject = Blueprint->GeneratedClass->GetDefaultObject();
-		TargetClass = Blueprint->GeneratedClass;
-		TargetType = TEXT("cdo");
-		UE_LOG(LogUALBlueprint, Log, TEXT("[blueprint.set_property] Target: CDO of %s"), *Blueprint->GetName());
-	}
-	else
-	{
+
 		// 修改 SCS 组件属性
-		USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript;
-		if (SCS)
+		if (USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript)
 		{
 			for (USCS_Node* Node : SCS->GetAllNodes())
 			{
-				if (Node && Node->GetVariableName().ToString().Equals(ComponentName, ESearchCase::IgnoreCase))
+				if (Node && Node->ComponentTemplate &&
+					Node->GetVariableName().ToString().Equals(ComponentName, ESearchCase::IgnoreCase))
 				{
-					TargetObject = Node->ComponentTemplate;
-					TargetClass = Node->ComponentClass;
-					break;
+					OutObject = Node->ComponentTemplate;
+					OutClass = Node->ComponentClass;
+					return;
 				}
 			}
 		}
-		
+
 		// Fallback: 尝试在 CDO 中查找同名子对象（针对 C++ 继承的组件）
-		if (!TargetObject && Blueprint->GeneratedClass)
+		if (Blueprint->GeneratedClass)
 		{
-			UObject* CDO = Blueprint->GeneratedClass->GetDefaultObject();
-			if (CDO)
+			if (UObject* CDO = Blueprint->GeneratedClass->GetDefaultObject())
 			{
 				TArray<UObject*> SubObjects;
 				GetObjectsWithOuter(CDO, SubObjects, false);
@@ -4615,14 +4662,32 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
 				{
 					if (SubObj && SubObj->GetName().Equals(ComponentName, ESearchCase::IgnoreCase))
 					{
-						TargetObject = SubObj;
-						TargetClass = SubObj->GetClass();
-						break;
+						OutObject = SubObj;
+						OutClass = SubObj->GetClass();
+						return;
 					}
 				}
 			}
 		}
-		
+	};
+
+	UObject* TargetObject = nullptr;
+	FString TargetType;
+	UClass* TargetClass = nullptr;
+	ResolveTarget(TargetObject, TargetClass);
+
+	if (ComponentName.IsEmpty())
+	{
+		if (!TargetObject)
+		{
+			UAL_CommandUtils::SendError(RequestId, 500, TEXT("Blueprint has no generated class, please compile it first"));
+			return;
+		}
+		TargetType = TEXT("cdo");
+		UE_LOG(LogUALBlueprint, Log, TEXT("[blueprint.set_property] Target: CDO of %s"), *Blueprint->GetName());
+	}
+	else
+	{
 		if (!TargetObject)
 		{
 			UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(TEXT("Component '%s' not found in blueprint '%s'"), *ComponentName, *Blueprint->GetName()));
@@ -4632,9 +4697,24 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
 		UE_LOG(LogUALBlueprint, Log, TEXT("[blueprint.set_property] Target: Component '%s' in %s"), *ComponentName, *Blueprint->GetName());
 	}
 
-	// 6. 应用属性
-	TArray<TSharedPtr<FJsonValue>> ModifiedPropsArray;
+	// 6. 应用属性 —— 进事务，Ctrl+Z 能一次撤回整批。
+	// TOptional 装着是为了编译前提前结束这一笔（完整编译不能在事务里，见 UAL_ScopedTransaction.h）
+	TOptional<FUAL_ScopedTransaction> Transaction;
+	Transaction.Emplace(NSLOCTEXT("UALBlueprint", "SetBlueprintProperty", "Set Blueprint Property"));
+	const bool bUndoable = Transaction->IsOutstanding();
+
+	Blueprint->Modify();
+	TargetObject->Modify();
+
 	TArray<TSharedPtr<FJsonValue>> FailedPropsArray;
+	// 成功项的回执对象，值等编译完再从目标上读回来填进去
+	TArray<TSharedPtr<FJsonObject>> ModifiedInfos;
+	auto AddModified = [&ModifiedInfos](const FString& PropName)
+	{
+		TSharedPtr<FJsonObject> ModInfo = MakeShared<FJsonObject>();
+		ModInfo->SetStringField(TEXT("property"), PropName);
+		ModifiedInfos.Add(ModInfo);
+	};
 
 	for (auto& Pair : Properties->Values)
 	{
@@ -4663,7 +4743,8 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
 				{
 					if (bDerivedOk)
 					{
-						ModifiedPropsArray.Add(MakeShared<FJsonValueString>(PropName));
+						// 以前这里塞的是裸字符串，和其余成功项的对象形状不一样，调用方按 .property 取到的是空
+						AddModified(PropName);
 					}
 					else
 					{
@@ -4722,10 +4803,7 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
 		
 		if (bSuccess)
 		{
-			TSharedPtr<FJsonObject> ModInfo = MakeShared<FJsonObject>();
-			ModInfo->SetStringField(TEXT("property"), PropName);
-			ModInfo->SetStringField(TEXT("type"), Prop->GetClass()->GetName());
-			ModifiedPropsArray.Add(MakeShared<FJsonValueObject>(ModInfo));
+			AddModified(PropName);
 			UE_LOG(LogUALBlueprint, Log, TEXT("[blueprint.set_property] Set '%s' successfully"), *PropName);
 		}
 		else
@@ -4738,21 +4816,71 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
 		}
 	}
 
-	// 7. 标记蓝图已修改
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	// 7. 标记蓝图已修改，然后结束事务（下面的完整编译不能在事务里）
+	const bool bAnyWritten = ModifiedInfos.Num() > 0;
+	if (bAnyWritten)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
+	else
+	{
+		// 一项都没写成，净改动为零：撤掉这条空记录（引擎自己也只在这种情况下 Cancel）
+		Transaction->Cancel();
+	}
+	Transaction.Reset();
 
 	// 8. 编译蓝图（如果需要）
+	// 原来调用完就无条件置 true —— 编译报错也回「已编译」。以编译后的真实状态为准，带警告也算通过
 	bool bCompiled = false;
-	if (bAutoCompile)
+	FString CompileStatus;
+	if (bAutoCompile && bAnyWritten)
 	{
 		FKismetEditorUtilities::CompileBlueprint(Blueprint);
-		bCompiled = true;
-		UE_LOG(LogUALBlueprint, Log, TEXT("[blueprint.set_property] Blueprint compiled"));
+		bCompiled = Blueprint->Status == BS_UpToDate || Blueprint->Status == BS_UpToDateWithWarnings;
+		switch (Blueprint->Status)
+		{
+		case BS_UpToDate:             CompileStatus = TEXT("UpToDate"); break;
+		case BS_UpToDateWithWarnings: CompileStatus = TEXT("UpToDateWithWarnings"); break;
+		case BS_Dirty:                CompileStatus = TEXT("Dirty"); break;
+		case BS_Error:                CompileStatus = TEXT("Error"); break;
+		case BS_Unknown:              CompileStatus = TEXT("Unknown"); break;
+		default:                      CompileStatus = TEXT("Other"); break;
+		}
+		UE_LOG(LogUALBlueprint, Log, TEXT("[blueprint.set_property] Blueprint compiled, status %s"), *CompileStatus);
 	}
 
-	// 9. 保存蓝图
+	// 9. 读回：从（编译后的）目标上把每个成功项的值读出来，回执报的是引擎里的值
+	UObject* ReadTarget = nullptr;
+	UClass* ReadClass = nullptr;
+	ResolveTarget(ReadTarget, ReadClass);
+
+	TArray<TSharedPtr<FJsonValue>> ModifiedPropsArray;
+	for (const TSharedPtr<FJsonObject>& ModInfo : ModifiedInfos)
+	{
+		const FString PropName = ModInfo->GetStringField(TEXT("property"));
+		FString ValueText;
+		FString TypeName;
+		if (UAL_ReadBackPropertyText(ReadTarget, ReadClass, PropName, ValueText, TypeName))
+		{
+			ModInfo->SetStringField(TEXT("type"), TypeName);
+			ModInfo->SetStringField(TEXT("value"), ValueText);
+			ModifiedPropsArray.Add(MakeShared<FJsonValueObject>(ModInfo));
+		}
+		else
+		{
+			// 写进去了，编译后却在目标上找不到 —— 状态说不清，不能算成功
+			TSharedPtr<FJsonObject> FailInfo = MakeShared<FJsonObject>();
+			FailInfo->SetStringField(TEXT("property"), PropName);
+			FailInfo->SetStringField(TEXT("error"), bCompiled
+				? TEXT("written, but it could not be read back from the target after compiling - the value may not have survived the compile")
+				: TEXT("written, but it could not be read back from the target"));
+			FailedPropsArray.Add(MakeShared<FJsonValueObject>(FailInfo));
+		}
+	}
+
+	// 10. 保存蓝图（一项都没写成就不动磁盘）
 	bool bSaved = false;
-	UPackage* Package = Blueprint->GetOutermost();
+	UPackage* Package = bAnyWritten ? Blueprint->GetOutermost() : nullptr;
 	if (Package)
 	{
 		const FString PackageName = Package->GetName();
@@ -4772,42 +4900,61 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
 		}
 	}
 
-	// 10. 构建响应
+	// 11. 构建响应
+	const int32 NumOk = ModifiedPropsArray.Num();
+	const int32 NumFailed = FailedPropsArray.Num();
+	const bool bCompileFailed = bAutoCompile && bAnyWritten && !bCompiled;
+	const bool bSaveFailed = bAnyWritten && !bSaved;
+	// 原来是「没有失败 或 有一项成功」—— 部分失败也回 ok:true。现在任何一处失败都不算成功
+	const bool bOk = NumOk > 0 && NumFailed == 0 && !bCompileFailed && !bSaveFailed;
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetBoolField(TEXT("ok"), FailedPropsArray.Num() == 0 || ModifiedPropsArray.Num() > 0);
+	Result->SetBoolField(TEXT("ok"), bOk);
 	Result->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
 	Result->SetStringField(TEXT("blueprint_name"), Blueprint->GetName());
 	Result->SetStringField(TEXT("target_type"), TargetType);
-	
+
 	if (!ComponentName.IsEmpty())
 	{
 		Result->SetStringField(TEXT("component_name"), ComponentName);
 	}
-	
+
 	Result->SetArrayField(TEXT("modified_properties"), ModifiedPropsArray);
 	Result->SetArrayField(TEXT("failed_properties"), FailedPropsArray);
 	Result->SetBoolField(TEXT("compiled"), bCompiled);
-	Result->SetBoolField(TEXT("saved"), bSaved);
-	
-	// 生成消息
-	FString Message;
-	if (ModifiedPropsArray.Num() > 0 && FailedPropsArray.Num() == 0)
+	if (!CompileStatus.IsEmpty())
 	{
-		Message = FString::Printf(TEXT("Successfully set %d properties on %s '%s'"), 
-			ModifiedPropsArray.Num(), *TargetType, ComponentName.IsEmpty() ? *Blueprint->GetName() : *ComponentName);
+		Result->SetStringField(TEXT("compile_status"), CompileStatus);
 	}
-	else if (ModifiedPropsArray.Num() > 0 && FailedPropsArray.Num() > 0)
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	Result->SetBoolField(TEXT("undoable"), bUndoable && bAnyWritten);
+
+	// 生成消息。有任何失败时第一句就是「N succeeded / M failed」，不以成功开头
+	const FString TargetLabel = ComponentName.IsEmpty() ? Blueprint->GetName() : ComponentName;
+	FString Message;
+	if (bOk)
 	{
-		Message = FString::Printf(TEXT("Partially set properties: %d succeeded, %d failed"), 
-			ModifiedPropsArray.Num(), FailedPropsArray.Num());
+		Message = FString::Printf(TEXT("Set %d properties on %s '%s'"), NumOk, *TargetType, *TargetLabel);
 	}
 	else
 	{
-		Message = FString::Printf(TEXT("Failed to set any properties"));
+		Message = FString::Printf(TEXT("%d succeeded / %d failed on %s '%s'"), NumOk, NumFailed, *TargetType, *TargetLabel);
+		if (NumFailed > 0)
+		{
+			Message += TEXT(" - see failed_properties");
+		}
+		if (bCompileFailed)
+		{
+			Message += FString::Printf(TEXT("; the blueprint failed to compile afterwards (status %s) - run blueprint_compile for the errors"), *CompileStatus);
+		}
+		if (bSaveFailed)
+		{
+			Message += TEXT("; changes are in memory only, the package could not be saved");
+		}
 	}
 	Result->SetStringField(TEXT("message"), Message);
 
-	int32 Code = (FailedPropsArray.Num() == 0) ? 200 : (ModifiedPropsArray.Num() > 0 ? 207 : 400);
+	const int32 Code = bOk ? 200 : (NumOk > 0 ? 207 : 400);
 	UAL_CommandUtils::SendResponse(RequestId, Code, Result);
 }
 
