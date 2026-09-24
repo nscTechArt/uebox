@@ -17,6 +17,12 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { z } from 'zod'
 
+import {
+  formatInterruptedWrites,
+  summarizeDoneWrites,
+  WriteLedger,
+  type WriteEntry
+} from '../../core/writeLedger'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 
 /**
@@ -83,6 +89,12 @@ export interface SubAgentResult {
    * 自己把场景读一遍对账（实测里就这么白走了三轮批量查询）。
    */
   writeToolCalls?: Record<string, number>
+  /**
+   * 同一份记录，带上对象（按参数认出来的路径/名字）。
+   *
+   * 「material_apply ×8」回读不了，「material_apply ×8（BossA）」可以。
+   */
+  writes?: WriteEntry[]
   /** 这一路是不是以只读模式跑的 */
   readOnly?: boolean
 }
@@ -101,10 +113,13 @@ export function formatWriteAudit(result: SubAgentResult): string {
       : '【本次子任务的写操作】无，它只调用了只读工具。'
   }
 
-  const list = entries
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, count]) => `${name} ×${count}`)
-    .join('、')
+  // 有台账就用台账（带对象）；老调用方只给了计数，照旧只列工具名
+  const list = result.writes
+    ? summarizeDoneWrites(result.writes)
+    : entries
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => `${name} ×${count}`)
+        .join('、')
   return `【本次子任务的写操作】${list}。这些改动**已经发生**，需要的话自己回读确认，或用 ue_undo 回滚。`
 }
 
@@ -125,6 +140,8 @@ export interface TaskToolDeps {
     seedMessages: AgentMessage[]
     signal?: AbortSignal
     onProgress?: (text: string) => void
+    /** 写操作台账，被停下时由 task 自己读出来交给父 agent */
+    ledger?: WriteLedger
   }) => Promise<SubAgentResult>
 
   /** 取当前父 agent 的 transcript。延迟到调用时取，拿到的才是最新的 */
@@ -222,8 +239,14 @@ export function createTaskTool(deps: TaskToolDeps): UnrealAgentTool<SubAgentResu
         }
       }
 
+      // 台账握在这里而不是等结果：用户按停止时子任务没有结果可等，
+      // 这份记录是父 agent 知道「该回读什么」的唯一来源
+      const ledger = new WriteLedger()
+      ctx.setAbortNote?.(() => formatInterruptedWrites(ledger.list(), Boolean(read_only)))
+
       const result = await deps.runSubAgent({
         prompt,
+        ledger,
         ...(namespaces ? { namespaces } : {}),
         ...(read_only ? { readOnly: true } : {}),
         seedMessages,

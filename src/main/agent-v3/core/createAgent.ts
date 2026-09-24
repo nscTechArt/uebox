@@ -68,6 +68,7 @@ import {
   type ThinkingLevelChoice
 } from './streamFn'
 import { currentTurnHasImages } from './visionRouting'
+import { WriteLedger } from './writeLedger'
 import {
   getTargetConnectionId,
   getTargetProjectPath,
@@ -862,6 +863,13 @@ export async function runSubAgent(
     seedMessages: AgentMessage[]
     signal?: AbortSignal
     onProgress?: (text: string) => void
+    /**
+     * 写操作台账，由调用方持有。
+     *
+     * 放在调用方手上而不是只跟结果一起回去：子任务被停下时根本没有结果，
+     * 而那恰恰是父 agent 最需要知道「它已经动了什么」的时候（见 `writeLedger.ts`）。
+     */
+    ledger?: WriteLedger
   }
 ): Promise<SubAgentResult> {
   input.signal?.throwIfAborted()
@@ -931,24 +939,22 @@ export async function runSubAgent(
    * 那正是这份计数要消灭的东西。查不到元数据的工具按写操作算，和审批门同一条
    * 纪律：不认识的一律从严。
    */
-  const writeToolCalls: Record<string, number> = {}
-  // 按这次的参数算（dry_run 预演不算写）；结束事件不带参数，从开始事件里记下来
+  const ledger = input.ledger ?? new WriteLedger()
+  // 按这次的参数算（dry_run 预演不算写）
   const metaByName = new Map(allTools.map((tool) => [tool.name, tool.unrealBox]))
-  const argsByCall = new Map<string, unknown>()
 
   agent.subscribe((event) => {
     if (event.type === 'tool_execution_start') {
-      argsByCall.set(event.toolCallId, event.args)
+      // 开始事件先记成「在途」：被停下时它是最该回读的那条。只有结束事件
+      // 成功才转成「已完成」—— 被审批门挡下、工具不在清单里的，结束事件都是失败，会被划掉
+      if (effectiveRisk(metaByName.get(event.toolName), event.args) !== 'safe') {
+        ledger.start(event.toolCallId, event.toolName, event.args)
+      }
       input.onProgress?.(`调用 ${event.toolName}`)
       return
     }
     if (event.type !== 'tool_execution_end') return
-    const args = argsByCall.get(event.toolCallId)
-    argsByCall.delete(event.toolCallId)
-    if (event.isError) return
-    if (effectiveRisk(metaByName.get(event.toolName), args) !== 'safe') {
-      writeToolCalls[event.toolName] = (writeToolCalls[event.toolName] ?? 0) + 1
-    }
+    ledger.end(event.toolCallId, !event.isError)
   })
 
   const onAbort = (): void => agent.abort()
@@ -995,7 +1001,8 @@ export async function runSubAgent(
         return {
           text: extractFinalText(agent.state.messages, input.seedMessages.length),
           messageCount: agent.state.messages.length - input.seedMessages.length,
-          writeToolCalls,
+          writeToolCalls: ledger.counts(),
+          writes: ledger.list(),
           readOnly: Boolean(input.readOnly)
         }
       }

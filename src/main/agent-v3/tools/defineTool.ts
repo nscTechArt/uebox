@@ -62,6 +62,14 @@ export interface ToolCallContext<TDetails = unknown> {
    * 只在本次 execute 期间有效，返回后调用无效。
    */
   report: (partial: ToolOutcome<TDetails>) => void
+  /**
+   * 登记「用户中途按停止时要补充的话」。中止那一刻调用一次，拼在
+   * 「不代表它没执行，先回读现场」后面。
+   *
+   * 给那些手上握着「已经做了什么」的工具用 —— `task` 用它交出子任务的写操作台账，
+   * 不然父 agent 只知道要回读、不知道回读什么。
+   */
+  setAbortNote?: (note: () => string | undefined) => void
 }
 
 export interface ToolSpec<TIn extends z.ZodTypeAny, TDetails = unknown> {
@@ -232,6 +240,7 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
 
       /** 进度回调的串行链。见下面 report 里的说明 */
       let reportChain: Promise<void> = Promise.resolve()
+      let abortNote: (() => string | undefined) | undefined
 
       // 不 try/catch：异常直接交给 pi，由它标记 isError 并喂回模型。
       // 自己吞掉再返回一个"看起来成功"的结果，会让循环以为工具跑通了。
@@ -240,24 +249,31 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
       // 真去读它的只有个位数，其余都是「等引擎回话为止」—— 于是用户按下停止
       // 之后要一直等到这次调用自己结束。赛跑放在这里，所有工具一次覆盖，
       // 工具体照旧可以自己读 `ctx.signal` 提前收尾（那样更干净）。
-      const outcome = await runAbortable(spec.name, signal, () =>
-        spec.execute(parsed, {
-          toolCallId,
-          signal,
-          // 进度回调只喂界面，不进模型上下文（进上下文的是最终那份），
-          // 所以不必让工具体等压缩跑完。但**必须串成一条链**：两次 report
-          // 各自异步解析的话，后发的可能先回，界面上就是进度倒退。
-          // 末尾的 catch 也不能省 —— 压缩抛异常时这条链是没人接的 Promise，
-          // 在主进程里就是一次 unhandledRejection，而丢一条进度不该有这种代价。
-          report: (partial) => {
-            reportChain = reportChain
-              .then(() => toAgentResult(partial))
-              .then((result) => onUpdate?.(result))
-              .catch((error: unknown) => {
-                console.warn(`[${spec.name}] 进度回调失败（不影响工具本身）:`, error)
-              })
-          }
-        })
+      const outcome = await runAbortable(
+        spec.name,
+        signal,
+        () =>
+          spec.execute(parsed, {
+            toolCallId,
+            signal,
+            setAbortNote: (note) => {
+              abortNote = note
+            },
+            // 进度回调只喂界面，不进模型上下文（进上下文的是最终那份），
+            // 所以不必让工具体等压缩跑完。但**必须串成一条链**：两次 report
+            // 各自异步解析的话，后发的可能先回，界面上就是进度倒退。
+            // 末尾的 catch 也不能省 —— 压缩抛异常时这条链是没人接的 Promise，
+            // 在主进程里就是一次 unhandledRejection，而丢一条进度不该有这种代价。
+            report: (partial) => {
+              reportChain = reportChain
+                .then(() => toAgentResult(partial))
+                .then((result) => onUpdate?.(result))
+                .catch((error: unknown) => {
+                  console.warn(`[${spec.name}] 进度回调失败（不影响工具本身）:`, error)
+                })
+            }
+          }),
+        () => abortNote?.()
       )
 
       // 工具用 isError 表达失败时（不想自己 throw），转成异常给 pi。

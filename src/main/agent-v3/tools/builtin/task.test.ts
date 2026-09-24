@@ -190,3 +190,73 @@ describe('task 子 agent 工具', () => {
     expect((tool as { executionMode?: string }).executionMode).toBe('parallel')
   })
 })
+
+/**
+ * 2026-09-24 用户反馈：子任务被停下，父 agent 只拿到「不代表它没执行，先回读现场」，
+ * 不知道回读什么 —— 搜了 55 项资产、读了蓝图、AnimGraph 和 CDO 才确认骨架、网格、
+ * 三个蒙太奇早就落地了。停下那一刻就要把已经发生和在途的写操作交出去。
+ */
+describe('task 被停下时交出写操作台账', () => {
+  it('已完成和在途的写操作连同对象进中止信息', async () => {
+    const controller = new AbortController()
+    const { tool } = makeTool({
+      runSubAgent: vi.fn(async (input) => {
+        input.ledger?.start('c1', 'ue_create_asset', { asset_path: '/Game/Zombie/SK_Male' })
+        input.ledger?.end('c1', true)
+        input.ledger?.start('c2', 'blueprint_apply_graph', {
+          blueprint_path: '/Game/Zombie/ABP_Male'
+        })
+        input.ledger?.start('c3', 'ue_get_actor', {})
+        input.ledger?.end('c3', false)
+        setTimeout(() => controller.abort(), 0)
+        return new Promise(() => {})
+      }) as TaskToolDeps['runSubAgent']
+    })
+
+    const error = await tool
+      .execute('t', { prompt: '接小怪动画' }, controller.signal)
+      .catch((e: Error) => e)
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toContain('不代表它没执行')
+    expect(message).toContain('已完成（已经生效）：ue_create_asset ×1（/Game/Zombie/SK_Male）')
+    expect(message).toContain('在途')
+    expect(message).toContain('blueprint_apply_graph ×1（/Game/Zombie/ABP_Male）')
+    expect(message).not.toContain('ue_get_actor')
+  })
+
+  it('只读子任务停下时说清楚它不可能写过', async () => {
+    const controller = new AbortController()
+    const { tool } = makeTool({
+      runSubAgent: vi.fn(async () => {
+        setTimeout(() => controller.abort(), 0)
+        return new Promise(() => {})
+      }) as TaskToolDeps['runSubAgent']
+    })
+
+    const error = await tool
+      .execute('t', { prompt: '评审', read_only: true }, controller.signal)
+      .catch((e: Error) => e)
+
+    expect((error as Error).message).toContain('只读模式')
+  })
+
+  it('正常结束时写操作那一行带上对象', async () => {
+    const { tool } = makeTool({
+      runSubAgent: vi.fn(async (input) => {
+        input.ledger?.start('c1', 'material_apply', { targets: { names: ['BossA'] } })
+        input.ledger?.end('c1', true)
+        return {
+          text: '换好了',
+          messageCount: 3,
+          writeToolCalls: input.ledger?.counts() ?? {},
+          writes: input.ledger?.list() ?? []
+        }
+      }) as TaskToolDeps['runSubAgent']
+    })
+
+    const result = await tool.execute('t', { prompt: '换材质' })
+    expect(JSON.stringify(result.content)).toContain('material_apply ×1（BossA）')
+  })
+})

@@ -48,11 +48,16 @@
  * 按错误文本判断是「今天能跑、改一个标点就静默失效」的接口。
  */
 export class ToolAbortedError extends Error {
-  constructor(toolName: string) {
+  /**
+   * @param note 工具自己补的一段话，接在「先回读现场」后面，说明**回读什么**。
+   *   `task` 用它交出子任务停下前的写操作台账（见 `core/writeLedger.ts`）
+   */
+  constructor(toolName: string, note?: string) {
     super(
       `用户停止了这一轮，${toolName} 没有等到结果。` +
         '这**不代表它没执行** —— 命令可能已经发到引擎并且生效了。' +
-        '接着往下做之前先回读现场状态确认，不要直接当作没发生重做一遍。'
+        '接着往下做之前先回读现场状态确认，不要直接当作没发生重做一遍。' +
+        (note ?? '')
     )
     this.name = 'ToolAbortedError'
   }
@@ -92,18 +97,29 @@ export function isUserAbort(error: unknown): boolean {
 export async function runAbortable<T>(
   toolName: string,
   signal: AbortSignal | undefined,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  /** 中止那一刻取一次，拼进错误信息。取的时机要早：之后在途的调用会陆续以失败收尾 */
+  abortNote?: () => string | undefined
 ): Promise<T> {
   if (!signal) return run()
   // 已经停了就别再发一条命令出去。pi 通常会在下一个工具开始前自己退出循环，
   // 但同一批里并发派发的工具不走那条检查，只能在这里挡。
   if (signal.aborted) throw new ToolAbortedError(toolName)
 
+  // 取备注本身不能再抛 —— 为了补一句说明把中止变成一次真失败，得不偿失
+  const note = (): string | undefined => {
+    try {
+      return abortNote?.()
+    } catch {
+      return undefined
+    }
+  }
+
   const work = run()
 
   let onAbort: () => void = () => {}
   const aborted = new Promise<never>((_, reject) => {
-    onAbort = (): void => reject(new ToolAbortedError(toolName))
+    onAbort = (): void => reject(new ToolAbortedError(toolName, note()))
     signal.addEventListener('abort', onAbort, { once: true })
   })
 
@@ -133,7 +149,7 @@ export async function runAbortable<T>(
      * **只判 `signal.aborted` 会把「中止的同时恰好真失败了」也吞掉**，
      * 那会把一条真实的错误原因换成一句「用户停止了」。
      */
-    if (signal.aborted && isUserAbort(error)) throw new ToolAbortedError(toolName)
+    if (signal.aborted && isUserAbort(error)) throw new ToolAbortedError(toolName, note())
     throw error
   } finally {
     signal.removeEventListener('abort', onAbort)
