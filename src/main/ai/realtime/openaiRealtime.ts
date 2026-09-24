@@ -214,7 +214,12 @@ const HARMLESS_ERROR_CODES = new Set([
    * 听写「松手即发」时补的那次 commit 撞上了空缓冲：用户说完停顿了一下，服务端的判停
    * 已经先提交过了。那一段的转写正在路上 —— 当成故障的话会话当场被关，它就丢了
    */
-  'input_audio_buffer_commit_empty'
+  'input_audio_buffer_commit_empty',
+  /*
+   * 打断时发的 response.cancel 晚到了一步：那一轮在服务端已经结束（response.done 还在路上、
+   * 本地音频还在播）。协议 07 把它和上面两个列在一起，会话不受影响
+   */
+  'response_cancel_not_active'
 ])
 
 export interface ResponseGate {

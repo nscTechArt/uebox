@@ -7,13 +7,32 @@
  * 套餐那几种是 `TTS_PLAN_<错误码大写>`，原文挂在 `cause` 上（`CreatorPlanCallError`）。
  */
 
-import type { SpeechAudio } from '../../../shared/speech'
+import { MAX_SPEECH_CHARS, type SpeechAudio } from '../../../shared/speech'
 import type { ProviderConfig } from '../types'
 import { planCallError } from './callError'
 
-/** 单次合成的上限。和别家一样 90 秒 */
+/**
+ * 单次合成的上限，按别家一段 600 字（`MAX_SPEECH_CHARS`）定的：90 秒、20 MiB 音频。
+ * 套餐一段能收到清单的 `max_input_chars`（2000 字），念出来要七八分钟、二十多 MB，
+ * 按字数等比放宽（见 speechLimits），不然长回复念到一半就被自己的上限掐断
+ */
 const REQUEST_TIMEOUT_MS = 90_000
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024
+/** SSE 行缓冲（base64 比 PCM 大三分之一，再留余量） */
+const MAX_BUFFER_BYTES = 30 * 1024 * 1024
+
+export function speechLimits(text: string): {
+  timeoutMs: number
+  maxAudioBytes: number
+  maxBufferBytes: number
+} {
+  const scale = Math.max(1, text.length / MAX_SPEECH_CHARS)
+  return {
+    timeoutMs: Math.ceil(REQUEST_TIMEOUT_MS * scale),
+    maxAudioBytes: Math.ceil(MAX_AUDIO_BYTES * scale),
+    maxBufferBytes: Math.ceil(MAX_BUFFER_BYTES * scale)
+  }
+}
 
 /** 套餐的音色是虚拟 ID（`uebox-voice-*`）；别的值（落盘归一化补的豆包缺省音色）不发，服务端用 default_voice */
 export function planVoice(voice: string | undefined): string | undefined {
@@ -34,6 +53,7 @@ export async function requestPlanSpeech(
   onAudio: (chunk: SpeechAudio) => void,
   fetchImpl: typeof fetch = fetch
 ): Promise<void> {
+  const limits = speechLimits(text)
   const response = await fetchImpl(`${provider.baseUrl.replace(/\/+$/, '')}/audio/speech`, {
     method: 'POST',
     headers: {
@@ -49,7 +69,7 @@ export async function requestPlanSpeech(
       response_format: 'pcm',
       stream_format: 'sse'
     }),
-    signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+    signal: AbortSignal.any([signal, AbortSignal.timeout(limits.timeoutMs)])
   })
   if (!response.ok) {
     const body = await response.text().catch(() => '')
@@ -87,7 +107,7 @@ export async function requestPlanSpeech(
         bytes = bytes.subarray(0, bytes.length - 1)
       }
       size += bytes.length
-      if (size > MAX_AUDIO_BYTES) throw speechError('TTS_AUDIO_TOO_LARGE')
+      if (size > limits.maxAudioBytes) throw speechError('TTS_AUDIO_TOO_LARGE')
       signal.throwIfAborted()
       if (bytes.length)
         onAudio({ base64: bytes.toString('base64'), format: 'pcm_s16le', sampleRate: 24000 })
@@ -111,7 +131,7 @@ export async function requestPlanSpeech(
         accept(line.trimEnd())
         if (finished) break
       }
-      if (buffer.length > 30 * 1024 * 1024) throw speechError('TTS_AUDIO_TOO_LARGE')
+      if (buffer.length > limits.maxBufferBytes) throw speechError('TTS_AUDIO_TOO_LARGE')
       if (done) {
         if (buffer.trim()) accept(buffer.trimEnd())
         break

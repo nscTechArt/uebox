@@ -272,6 +272,20 @@ describe('translate', () => {
     ).toEqual([])
   })
 
+  /** 打断晚了一步，那一轮在服务端已经结束：协议 07 列为会话不受影响，不能挂断 */
+  it('取消一轮已经结束的回复不算故障', () => {
+    expect(
+      translate({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          code: 'response_cancel_not_active',
+          message: 'Cancellation failed: no active response found'
+        }
+      })
+    ).toEqual([])
+  })
+
   /** 事件种类几十个，绝大多数与我们无关。安静忽略，而不是刷日志或报错 */
   it.each(['session.created', 'session.updated', 'rate_limits.updated', 'response.created'])(
     '%s 忽略掉',
