@@ -68,6 +68,7 @@ import { animationTools } from './ue-animation'
 import { contentOrganizeTools } from './ue-content'
 import { pcgTools } from './ue-pcg'
 import { sequencerTools } from './ue-sequencer'
+import { inspectTools } from './ue-inspect'
 
 // ── V2 工具工厂 ──────────────────────────────────────────────────────────
 import * as noteTools from '../../agent-v3/tools/adapted/note'
@@ -1125,6 +1126,9 @@ export function listToolRisks(): Record<string, ToolRisk> {
   for (const tool of animationTools()) {
     table[tool.name] = tool.unrealBox.risk
   }
+  for (const tool of inspectTools()) {
+    table[tool.name] = tool.unrealBox.risk
+  }
 
   for (const tool of contentOrganizeTools()) {
     table[tool.name] = tool.unrealBox.risk
@@ -1280,6 +1284,8 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
     // 网格工具走插件 RPC（mesh.*）。它和 Sequencer 相反 —— 走 C++ 不走 Python，
     ...meshTools(),
     ...animationTools(),
+    // 细粒度只读：组件级回读（actor.inspect_components）、材质图切片（复用 material.get_graph）
+    ...inspectTools(),
     // 内容浏览器整理（content.naming_audit / batch_move / dependencies / migrate）。
     // 同样走 C++；ue_content_move 从 REGISTRATIONS 里的单资产适配件换成了这里的批量版
     ...contentOrganizeTools(),

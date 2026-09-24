@@ -191,6 +191,17 @@ One limit worth knowing: **it changes what the user is looking at**, and it repl
 selection (selecting is how focusing works). Use it to verify a visual result or to show someone
 something — not reflexively.
 
+## Reading one component, not the first match
+
+`ue_get_actor(properties)` takes top-level names and reads the first component that has the
+property. When an actor has two meshes — an old hidden driver and a new visible one — that is
+the wrong one half the time. `ue_inspect_components` reads per component: the material each
+slot actually renders with, the overlay material, Custom Depth and stencil (outlines),
+visibility, mesh and anim blueprint, plus any dotted property path
+(`BodyInstance.CollisionProfileName`). With `blueprint_path` it reads the class defaults and
+component templates instead (`object_properties` for CDO fields such as montage mappings).
+It is read-only, so read-only sub-tasks get it too — no Python needed.
+
 ## "It looks right in the editor but wrong when I play" — check the levels first
 
 A world is usually more than one level. Sublevels have **two independent switches**: visible in

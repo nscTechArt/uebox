@@ -247,7 +247,8 @@ describe('buildAllTools', () => {
 
   it('材质工具走 V3 原生重写版，不是适配版', () => {
     const material = buildAllTools().filter((t) => t.unrealBox.namespace === 'ue.material')
-    expect(material).toHaveLength(19)
+    // 20 = 原来 19 个 + material_graph_slice（ue-inspect 里，只读，大图按段读）
+    expect(material).toHaveLength(20)
     expect(material.map((t) => t.name)).toContain('material_create')
   })
 

@@ -40,6 +40,11 @@ model, two-sided, parent, and every parameter's current value). Both endpoints o
 connection may be real node ids, so `material_apply_graph` also appends to an existing
 graph.
 
+On a large master material (hundreds of nodes) `material_get_graph` lists only part of the
+graph. When you care about one input, read that part in full with `material_graph_slice`:
+`from: ["OpacityMask"]` (or a node id / guid) walks upstream `depth` layers, follows named
+reroutes, and lists the nodes where it stopped so you can continue from there.
+
 **Repairing something that renders wrong is a different job from editing it.** Start with
 `material_compile`, not with the graph — a material that does not compile cannot respond to
 any experiment you run, so every theory tested before that point is untestable.

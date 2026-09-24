@@ -19,6 +19,7 @@
 #include "UAL_PCGCommands.h"
 #include "UAL_SequencerCommands.h"
 #include "UAL_SequenceDiffCommands.h"
+#include "UAL_ComponentInspectCommands.h"
 #include "UAL_UndoCommands.h"
 #include "UAL_WidgetCommands.h"
 #include "UAL_AssetLockState.h"
@@ -160,6 +161,7 @@ void FUAL_CommandHandler::RegisterCommands()
 	FUAL_MessageLogCommands::RegisterCommands(CommandMap);
 	FUAL_SequencerCommands::RegisterCommands(CommandMap);
 	FUAL_SequenceDiffCommands::RegisterCommands(CommandMap);
+	FUAL_ComponentInspectCommands::RegisterCommands(CommandMap);
 	FUAL_UndoCommands::RegisterCommands(CommandMap);
 	FUAL_WidgetCommands::RegisterCommands(CommandMap);
 	// PCG 是可选插件，命令始终注册 —— PCG 没启用时由 pcg.status 如实汇报，
