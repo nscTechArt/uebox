@@ -254,6 +254,74 @@ describe('ue_save', () => {
     expect(String(result.summary)).not.toContain('不是你改的')
   })
 
+  /**
+   * scope=list 点名 3 个、存了 1 个：另外 2 个以前无声消失，模型会以为 3 个都落盘了。
+   * 现在插件总回 not_loaded[] / skipped[]，第一句要先报数。
+   */
+  it('scope=list 部分没加载 / 没改动时，第一句是部分完成并逐条说原因', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      scope: 'list',
+      saved_count: 1,
+      saved: [{ package: '/Game/A', is_level: false }],
+      failed_count: 0,
+      not_loaded: ['/Game/B'],
+      not_loaded_count: 1,
+      skipped: [{ asset: '/Game/C', reason: 'No unsaved changes - already up to date on disk' }],
+      skipped_count: 1,
+      still_dirty_count: 0
+    })
+
+    const result = await save({ scope: 'list', assets: ['/Game/A', '/Game/B', '/Game/C'] })
+
+    const summary = String(result.summary)
+    expect(summary.startsWith('⚠️ 部分完成：1 个成功 / 0 个失败 / 2 个跳过')).toBe(true)
+    expect(summary).toContain('/Game/B：没加载')
+    expect(summary).toContain('/Game/C：没有未保存的改动')
+    expect(result.success).toBe(true)
+    expect(result.not_loaded).toEqual(['/Game/B'])
+    expect(result.skipped).toEqual(['/Game/C'])
+    expect(Object.keys(result)[0]).toBe('summary')
+  })
+
+  it('scope=list 一个没存、但有没加载的，也先报数', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      scope: 'list',
+      saved_count: 0,
+      saved: [],
+      not_loaded: ['/Game/B'],
+      skipped: [{ asset: '/Game/C', reason: 'No unsaved changes - already up to date on disk' }],
+      still_dirty_count: 0
+    })
+
+    const result = await save({ scope: 'list', assets: ['/Game/B', '/Game/C'] })
+
+    expect(String(result.summary).startsWith('⚠️ 部分完成：0 个成功 / 0 个失败 / 2 个跳过')).toBe(
+      true
+    )
+  })
+
+  it('有失败时 error 第一句带上已存下的数量', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      scope: 'touched',
+      saved_count: 2,
+      saved: [
+        { package: '/Game/A', is_level: false },
+        { package: '/Game/B', is_level: false }
+      ],
+      failed: [{ package: '/Game/C', error: 'read-only' }],
+      failed_count: 1,
+      still_dirty_count: 1
+    })
+
+    const result = await save({})
+
+    expect(String(result.error).startsWith('⚠️ 部分完成：2 个成功 / 1 个失败')).toBe(true)
+    expect(String(result.error)).toContain('/Game/C：read-only')
+  })
+
   it('没连引擎时不发请求', async () => {
     getConnectionCount.mockReturnValue(0)
 

@@ -210,11 +210,12 @@ export function createManagePluginTool(): V2Tool {
         const action = input.action ?? 'Query'
         const pluginName = response.plugin_name || input.plugin_name
 
-        // 回读校验。只在「这次真的要改状态」时做：
-        // 运行时状态已经等于目标状态，说明编辑器里就是这样，没有任何东西
-        // 等着重启生效，也就没有可校验的落盘动作。
+        // 回读校验。Enable / Disable 一律做，不看运行时状态：
+        // 插件启停要重启才生效，运行时状态和 .uproject 经常对不上。刚 disable 过、
+        // 还没重启时 is_enabled 仍是 true —— 这时再 enable，以前按「运行时已是目标」
+        // 跳过校验直接报「插件已启用」，而磁盘上还挂着那条 disable，重启后插件照样被关。
         const wantEnabled = action === 'Enable'
-        const needsVerify = action !== 'Query' && response.is_enabled !== wantEnabled
+        const needsVerify = action !== 'Query'
         if (needsVerify) {
           const uprojectPath = await resolveUprojectPath(response)
           if (!uprojectPath) {
@@ -240,6 +241,30 @@ export function createManagePluginTool(): V2Tool {
             }
           }
 
+          // 老插件包不给 default_enabled：.uproject 里没有条目时判断不了默认状态。
+          // 运行中的编辑器已经是目标状态时，最可能是「默认就这样、从没写过条目」，
+          // 不能判成失败；但也没法确认，照实说
+          if (
+            read.state === 'absent' &&
+            response.default_enabled === undefined &&
+            response.is_enabled === wantEnabled
+          ) {
+            return {
+              success: true,
+              plugin_name: pluginName,
+              is_enabled: response.is_enabled,
+              requires_restart: false,
+              friendly_name: response.friendly_name,
+              uproject_path: uprojectPath,
+              uproject_state: read.state,
+              uproject_verified: false,
+              message:
+                `编辑器里插件 ${pluginName} 当前是${wantEnabled ? '启用' : '禁用'}的，` +
+                '.uproject 里没有它的条目（按引擎默认状态走）。当前插件包给不出默认状态，' +
+                '没法确认重启后是否仍是这样。'
+            }
+          }
+
           if (!isDiskStateConsistent(read.state, wantEnabled, response.default_enabled)) {
             return {
               success: false,
@@ -258,29 +283,24 @@ export function createManagePluginTool(): V2Tool {
             }
           }
 
+          // 运行中的编辑器已经是目标状态时，磁盘也对得上就没有东西等着重启生效
+          const needsRestart = response.is_enabled !== wantEnabled
           return {
             success: true,
             plugin_name: pluginName,
             is_enabled: response.is_enabled,
-            requires_restart: true,
+            requires_restart: needsRestart,
             friendly_name: response.friendly_name,
             uproject_path: uprojectPath,
             uproject_state: read.state,
             message:
               `插件已在 .uproject 里${wantEnabled ? '启用' : '禁用'}（已回读文件确认）；` +
-              '需要重启编辑器以生效'
+              (needsRestart ? '需要重启编辑器以生效' : '运行中的编辑器也已是这个状态，不用重启')
           }
         }
 
-        const messageParts: string[] = []
-
-        if (action === 'Enable') {
-          messageParts.push('插件已启用')
-        } else if (action === 'Disable') {
-          messageParts.push('插件已禁用')
-        } else {
-          messageParts.push(response.is_enabled ? '插件已启用' : '插件未启用')
-        }
+        // 走到这里只剩 Query：Enable / Disable 都在上面按回读结果返回了
+        const messageParts: string[] = [response.is_enabled ? '插件已启用' : '插件未启用']
 
         if (response.requires_restart) {
           messageParts.push('需要重启编辑器以生效')

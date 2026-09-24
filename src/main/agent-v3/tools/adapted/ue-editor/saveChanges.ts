@@ -23,6 +23,7 @@ import { serviceManager } from '../../../../services'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { describeFailures, partialHeadline, type PartialFailure } from '../../partialResult'
 
 interface PackageEntry {
   package: string
@@ -38,11 +39,43 @@ interface SaveResponse {
   saved_count: number
   saved: PackageEntry[]
   failed?: Array<{ package: string; error: string }>
+  failed_count?: number
   still_dirty_count: number
   note?: string
+  /**
+   * scope=list 时点了名却没存的两类。老插件没有这两个字段 ——
+   * 那时它们无声消失，这里只能按缺省（空）处理
+   */
+  not_loaded?: string[]
+  not_loaded_count?: number
+  skipped?: Array<{ asset: string; reason?: string }>
+  skipped_count?: number
   /** 插件用 code>=400 回错时才有（scope=list 一个都没加载、scope 拼错） */
   error?: string
-  details?: { not_loaded?: string[] }
+  details?: { not_loaded?: string[]; skipped?: Array<{ asset: string; reason?: string }> }
+}
+
+/** 插件给的跳过原因是英文，常见那条翻一下；认不出的原样给 */
+function skipReason(reason: string | undefined): string {
+  if (!reason) return '未给原因'
+  if (/no unsaved changes/i.test(reason)) return '没有未保存的改动，磁盘上已经是这个状态'
+  return reason
+}
+
+/**
+ * scope=list 点了名却没写盘的条目。没加载的和加载了但不脏的都算「跳过」：
+ * 它们都不是失败，但也都没被这次调用写过，第一句就得说出来（AGENTS.md §5 第 14 条）
+ */
+function listSkips(response: SaveResponse): PartialFailure[] {
+  const notLoaded = (response.not_loaded ?? []).map((asset) => ({
+    item: asset,
+    reason: '没加载（内存里没有它，也就谈不上有未保存的改动）'
+  }))
+  const skipped = (response.skipped ?? []).map((entry) => ({
+    item: entry.asset,
+    reason: skipReason(entry.reason)
+  }))
+  return [...notLoaded, ...skipped]
 }
 
 interface DirtyResponse {
@@ -150,6 +183,14 @@ export function createSaveChangesTool() {
         }
 
         const failed = response.failed ?? []
+        const skips = listSkips(response)
+        const skipFields =
+          skips.length > 0
+            ? {
+                not_loaded: response.not_loaded ?? [],
+                skipped: (response.skipped ?? []).map((entry) => entry.asset)
+              }
+            : {}
 
         // 一个都没存不是错误：多半是本来就没有未保存的改动。
         // 报成失败会让模型去排查一个不存在的问题。
@@ -194,12 +235,23 @@ export function createSaveChangesTool() {
                 '重新 load_asset 查内存是查不出来的，要看文件时间戳。'
               : ''
 
+          // 点名的里有没加载 / 被跳过的：第一句先报数，再说原因。
+          // summary 放在第一个键 —— 适配层把整个对象 JSON 化，键序就是模型读到的顺序
+          const headline = partialHeadline({
+            succeeded: 0,
+            failed: 0,
+            skipped: skips.length,
+            unit: '个'
+          })
           return {
+            summary: [headline, summary + pythonHint, describeFailures(skips, '跳过的')]
+              .filter(Boolean)
+              .join('\n'),
             success: true,
             saved_count: 0,
             scope,
-            still_dirty_count: response.still_dirty_count,
-            summary: summary + pythonHint
+            ...skipFields,
+            still_dirty_count: response.still_dirty_count
           }
         }
 
@@ -233,7 +285,25 @@ export function createSaveChangesTool() {
         const written = response.saved.filter((entry) => !entry.deleted)
         const deleted = response.saved.filter((entry) => entry.deleted)
 
+        // 有失败或跳过时，第一句是「N 成功 / M 失败 / K 跳过」，不以「已保存」开头
+        const headline = partialHeadline({
+          succeeded: response.saved.length,
+          failed: failed.length,
+          skipped: skips.length,
+          unit: '个'
+        })
+        const body =
+          `已保存 ${written.length} 个` +
+          (deleted.length > 0
+            ? `，另有 ${deleted.length} 个空包已删除（里面的 Actor/资产已被删，文件随之移除）`
+            : '') +
+          (failed.length > 0 ? `，${failed.length} 个失败` : '') +
+          (response.still_dirty_count > 0
+            ? `。另有 ${response.still_dirty_count} 处未保存（非你所改，已刻意留着）`
+            : '')
+
         return {
+          summary: [headline, body, describeFailures(skips, '跳过的')].filter(Boolean).join('\n'),
           success: failed.length === 0,
           scope: response.scope,
           saved_count: written.length,
@@ -244,18 +314,13 @@ export function createSaveChangesTool() {
                 deleted: deleted.map((entry) => ({ package: entry.package, note: entry.note }))
               }
             : {}),
-          ...(failed.length > 0 ? { failed, error: failureReason } : {}),
+          // 有失败时整条会被当成错误抛给模型，只剩 error 这一句 —— 已存下几个也得在里面
+          ...(failed.length > 0
+            ? { failed, error: [headline, failureReason].filter(Boolean).join('\n') }
+            : {}),
+          ...skipFields,
           still_dirty_count: response.still_dirty_count,
-          ...(response.note ? { note: response.note } : {}),
-          summary:
-            `已保存 ${written.length} 个` +
-            (deleted.length > 0
-              ? `，另有 ${deleted.length} 个空包已删除（里面的 Actor/资产已被删，文件随之移除）`
-              : '') +
-            (failed.length > 0 ? `，${failed.length} 个失败` : '') +
-            (response.still_dirty_count > 0
-              ? `。另有 ${response.still_dirty_count} 处未保存（非你所改，已刻意留着）`
-              : '')
+          ...(response.note ? { note: response.note } : {})
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

@@ -38,6 +38,7 @@ import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { deriveConnectionsFromPins } from './getBlueprintGraph'
 import type { BlueprintGraphNodeInfo } from './getBlueprintGraph'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { withPartialHeadline, type PartialFailure } from '../../partialResult'
 
 /**
  * 这里直接走裸 RPC，拿到的是**插件的原始形状**（`node_id` / `pos_x` / `pos_y`），
@@ -349,6 +350,8 @@ export function createTidyBlueprintGraphTool() {
          * 否则新节点全落在原点上。所以这里复制完重新读一遍，再进排版。
          */
         let duplicated: GetterCopyRequest['copies'] = []
+        // 复制 getter 没成时的原因。不影响排版，但要进失败清单
+        let copyError: string | undefined
         if (input.duplicate_getters !== false) {
           const request = buildGetterCopyRequest(nodes)
           if (request) {
@@ -378,6 +381,8 @@ export function createTidyBlueprintGraphTool() {
                 nodes = refreshedNodes.filter((node) => !isCommentNode(node))
                 comments = refreshedNodes.filter(isCommentNode)
               }
+            } else {
+              copyError = applied?.error ?? '插件没有给原因'
             }
           }
         }
@@ -429,6 +434,9 @@ export function createTidyBlueprintGraphTool() {
          * 节点已经排好了，框没跟上顶多是说明贴偏了，如实报出来就行。
          */
         let commentsMoved = 0
+        // 挪框失败的单独记：原来和「没框住节点、本来就不动」的混成一个数，
+        // 失败被说成了「保持原位」，像是有意为之
+        const commentFailures: PartialFailure[] = []
         const commentPlans = planCommentBoxes(comments, nodes, layouted)
         for (const plan of commentPlans) {
           const commentParams: Record<string, unknown> = {
@@ -441,39 +449,73 @@ export function createTidyBlueprintGraphTool() {
           }
           if (input.graph_name) commentParams.graph_name = input.graph_name
 
-          const moved = await wsService.callRequest<{ ok?: boolean }>(
+          const moved = await wsService.callRequest<{ ok?: boolean; error?: string }>(
             'blueprint.set_comment',
             commentParams,
             getTargetConnectionId(),
             30000
           )
-          if (moved?.ok) commentsMoved += 1
+          if (moved?.ok) {
+            commentsMoved += 1
+          } else {
+            const title = comments.find((c) => c.node_id === plan.node_id)?.title
+            commentFailures.push({
+              item: `注释框 ${title ? `「${title}」` : plan.node_id}`,
+              reason: moved?.error ?? '插件没有响应或没给原因'
+            })
+          }
         }
 
         const copyTotal = duplicated.reduce((sum, item) => sum + item.copies, 0)
-        const commentsLeft = comments.length - commentsMoved
+        // 只有「没框住任何节点」的才叫保持原位；挪失败的另算
+        const commentsLeft = comments.length - commentPlans.length
+
+        /*
+         * AGENTS.md §5 第 14 条：有一件没办成，第一句就不说成功。
+         * 挪不动的节点、挪不动的框、没复制成的 getter 都算。
+         */
+        const notFound = applied.not_found ?? []
+        const failures: PartialFailure[] = [
+          ...notFound.map((id) => ({
+            item: `节点 ${id}`,
+            reason: '没找到（图可能在这期间被改过）'
+          })),
+          ...commentFailures,
+          ...(copyError ? [{ item: '复制纯 getter', reason: copyError }] : [])
+        ]
+        const body =
+          `已重新排版 ${applied.moved}/${nodes.length} 个节点，现在顺着执行流从左到右。` +
+          (copyTotal
+            ? `就近复制了 ${copyTotal} 个纯 getter（${duplicated
+                .map((item) => item.name)
+                .join('、')}），省掉横跨整张图的长线。`
+            : '') +
+          (commentsMoved ? `${commentsMoved} 个注释框跟着它框住的逻辑一起挪了。` : '') +
+          (commentsLeft ? `${commentsLeft} 个注释框没框住任何节点，保持原位。` : '') +
+          (commentFailures.length ? `${commentFailures.length} 个注释框没挪成，还在原处。` : '') +
+          (notFound.length ? `有 ${notFound.length} 个节点没找到（图可能在这期间被改过）。` : '') +
+          '逻辑没有任何改动，用 ue_screenshot 可以看一眼效果。'
 
         return {
+          summary: withPartialHeadline(
+            body,
+            {
+              succeeded: applied.moved + commentsMoved + (duplicated.length ? 1 : 0),
+              failed: failures.length,
+              unit: '项'
+            },
+            failures
+          ),
           success: true,
           moved: applied.moved,
           node_count: nodes.length,
           ...(duplicated.length ? { duplicated_getters: duplicated } : {}),
           ...(commentsMoved ? { comments_moved: commentsMoved } : {}),
           ...(commentsLeft ? { comments_left_in_place: commentsLeft } : {}),
-          ...(applied.not_found?.length ? { not_found: applied.not_found } : {}),
-          summary:
-            `已重新排版 ${applied.moved}/${nodes.length} 个节点，现在顺着执行流从左到右。` +
-            (copyTotal
-              ? `就近复制了 ${copyTotal} 个纯 getter（${duplicated
-                  .map((item) => item.name)
-                  .join('、')}），省掉横跨整张图的长线。`
-              : '') +
-            (commentsMoved ? `${commentsMoved} 个注释框跟着它框住的逻辑一起挪了。` : '') +
-            (commentsLeft ? `${commentsLeft} 个注释框没框住任何节点，保持原位。` : '') +
-            (applied.not_found?.length
-              ? `有 ${applied.not_found.length} 个节点没找到（图可能在这期间被改过）。`
-              : '') +
-            '逻辑没有任何改动，用 ue_screenshot 可以看一眼效果。'
+          ...(commentFailures.length ? { comments_failed: commentFailures } : {}),
+          ...(copyError ? { getter_copy_error: copyError } : {}),
+          ...(failures.length ? { failed_count: failures.length } : {}),
+          ...(notFound.length ? { not_found: notFound } : {})
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

@@ -9,6 +9,7 @@ import {
   unmatchedTargetFields,
   type UnmatchedTargetsResponse
 } from '../../unmatchedTargets'
+import { partialHeadline } from '../../partialResult'
 /**
  * Property Match Rule Schema - 属性匹配规则
  */
@@ -53,6 +54,22 @@ interface OrganizeActorsResponse extends UnmatchedTargetsResponse {
   count: number
   total_found: number
   actors: ActorResult[]
+}
+
+/**
+ * 回执里的文件夹以插件读回的 `actors[].folder_path` 为准，不回显请求。
+ * 引擎会规整路径（首尾斜杠、大小写合并到已有文件夹），读回来的才是大纲里真正的样子。
+ * 老插件或没有 actors 时退回请求值，并标明未经读回。
+ */
+export function describeActualFolders(actors: ActorResult[], requested: string): string {
+  const counts = new Map<string, number>()
+  for (const actor of actors) {
+    if (typeof actor.folder_path !== 'string') continue
+    counts.set(actor.folder_path, (counts.get(actor.folder_path) ?? 0) + 1)
+  }
+  if (counts.size === 0) return `"${requested}"（未经引擎读回）`
+  if (counts.size === 1) return `"${[...counts.keys()][0]}"`
+  return [...counts.entries()].map(([folder, n]) => `"${folder}"（${n} 个）`).join('、')
 }
 
 export function createOrganizeActorsTool(): V2Tool {
@@ -133,16 +150,40 @@ export function createOrganizeActorsTool(): V2Tool {
 
           const count = response.count ?? 0
           const totalFound = response.total_found ?? count
+          const actors = response.actors || []
+
+          // 一个都没挪动不是成功：匹配到了 Actor 却一个没设上
+          if (count === 0) {
+            return {
+              success: false,
+              error:
+                `组织Actor到文件夹失败：匹配到 ${totalFound} 个 Actor，但一个都没移进文件夹。` +
+                describeUnmatchedTargets(response),
+              total_found: totalFound
+            }
+          }
+
+          // count < total_found：有的匹配到了却没设上，第一句先报数（AGENTS.md §5 第 14 条）
+          const headline = partialHeadline({
+            succeeded: count,
+            failed: Math.max(0, totalFound - count),
+            unit: '个 Actor'
+          })
+          const folders = describeActualFolders(actors, input.folder_path)
 
           return {
+            message:
+              (headline ? `${headline}\n` : '') +
+              `已将 ${count} 个Actor归类到文件夹 ${folders}。` +
+              (headline
+                ? `另有 ${totalFound - count} 个匹配到的 Actor 没有设上，插件未给出原因。`
+                : '') +
+              describeUnmatchedTargets(response),
             success: true,
             count,
             total_found: totalFound,
-            actors: response.actors || [],
-            ...unmatchedTargetFields(response),
-            message:
-              `成功将 ${count} 个Actor归类到文件夹 "${input.folder_path}"。` +
-              describeUnmatchedTargets(response)
+            actors,
+            ...unmatchedTargetFields(response)
           }
         }
 

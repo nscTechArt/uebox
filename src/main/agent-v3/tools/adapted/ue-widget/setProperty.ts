@@ -60,6 +60,12 @@ interface SetPropertyResponse {
   property_name: string
   message: string
   /**
+   * 写完从控件上读回来的值（新版插件，目前 Visibility 有）。
+   * 回执以它为准，不以请求为准 —— 原来 SelfHitTestInvisible 会被设成
+   * HitTestInvisible，而回执照抄输入，谁也发现不了
+   */
+  value?: unknown
+  /**
    * 插件把失败原因写在这里 —— 由 WebSocket 那层从 code>=400 的响应里补上
    * （`services/websocket/server.ts` 的 `routeMessage`）。原来这个字段被丢掉，
    * 模型只拿到「设置属性失败」六个字：不知道是控件没找到、类型不对，
@@ -75,7 +81,7 @@ export function setPropertyTool() {
 
 【支持的属性】：
 - Text: TextBlock 的文本内容（字符串）
-- Visibility: 可见性（Visible/Hidden/Collapsed）
+- Visibility: 可见性，只认 Visible / Collapsed / Hidden / HitTestInvisible / SelfHitTestInvisible
 - IsEnabled: 是否启用（布尔值）
 - ToolTipText: 提示文本（字符串）
 - Percent: ProgressBar 的百分比（0.0-1.0）
@@ -134,11 +140,28 @@ export function setPropertyTool() {
           }
         }
 
+        // 引擎读回来的值和请求的不一样时，第一句就说（AGENTS.md §5 第 14 条）
+        const readBack = response.value
+        const requested = input.value
+        const differs =
+          readBack !== undefined &&
+          (typeof requested === 'string' ||
+            typeof requested === 'number' ||
+            typeof requested === 'boolean') &&
+          String(readBack).toLowerCase() !== String(requested).toLowerCase()
+        const message = differs
+          ? `⚠️ ${response.property_name} 请求的是 ${String(requested)}，` +
+            `引擎里实际是 ${String(readBack)}。${response.message ?? ''}`
+          : readBack !== undefined
+            ? `${response.property_name} 现在是 ${String(readBack)}`
+            : response.message
+
         return {
+          message,
           ok: true,
           widget_name: response.widget_name,
           property_name: response.property_name,
-          message: response.message
+          ...(readBack !== undefined ? { value: readBack } : {})
         }
       } catch (error) {
         return {

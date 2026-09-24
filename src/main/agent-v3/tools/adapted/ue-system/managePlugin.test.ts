@@ -241,17 +241,58 @@ describe('ue_manage_plugin 的回读校验', () => {
     expect(callRequest).toHaveBeenCalledTimes(1)
   })
 
-  it('Enable 一个本来就启用着的插件，不需要回读', async () => {
+  /**
+   * 以前「运行时已是目标状态」就跳过回读。刚 disable 过、还没重启时 is_enabled 仍是 true，
+   * 再 enable 就被当成「已启用」—— 磁盘上那条 disable 还挂着，重启后插件照样被关。
+   * 这里模拟老插件：它同样按内存判断、没写盘就回了成功。
+   */
+  it('运行时已启用、但 .uproject 里挂着 disable 时，Enable 不许报成功', async () => {
+    await writeUproject([{ Name: 'PythonScriptPlugin', Enabled: false }])
     callRequest.mockResolvedValueOnce({
       plugin_name: 'PythonScriptPlugin',
       is_enabled: true,
-      requires_restart: false
+      requires_restart: false,
+      uproject_path: uprojectPath,
+      default_enabled: false
+    })
+
+    const r = await run({ plugin_name: 'PythonScriptPlugin', action: 'Enable' })
+
+    expect(r.success).toBe(false)
+    expect(r.uproject_state).toBe('disabled')
+  })
+
+  it('Enable 一个本来就启用着的插件：回读磁盘确认，不要求重启', async () => {
+    await writeUproject([{ Name: 'PythonScriptPlugin', Enabled: true }])
+    callRequest.mockResolvedValueOnce({
+      plugin_name: 'PythonScriptPlugin',
+      is_enabled: true,
+      requires_restart: false,
+      uproject_path: uprojectPath,
+      default_enabled: false
     })
 
     const r = await run({ plugin_name: 'PythonScriptPlugin', action: 'Enable' })
 
     expect(r.success).toBe(true)
-    expect(callRequest).toHaveBeenCalledTimes(1)
+    expect(r.requires_restart).toBe(false)
+    expect(String(r.message)).toContain('不用重启')
+  })
+
+  it('老插件包不给默认状态、条目又不存在时，运行时已是目标就不判失败，但标明未确认', async () => {
+    await writeUproject([])
+    callRequest.mockResolvedValueOnce({
+      plugin_name: 'Niagara',
+      is_enabled: true,
+      requires_restart: false,
+      uproject_path: uprojectPath
+    })
+
+    const r = await run({ plugin_name: 'Niagara', action: 'Enable' })
+
+    expect(r.success).toBe(true)
+    expect(r.uproject_verified).toBe(false)
+    expect(String(r.message)).toContain('没法确认')
   })
 
   it('引擎侧自己报了失败（落盘失败/只读文件）时原样透传', async () => {

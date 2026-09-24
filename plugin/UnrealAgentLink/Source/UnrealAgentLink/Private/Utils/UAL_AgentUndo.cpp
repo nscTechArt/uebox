@@ -582,6 +582,11 @@ int32 FUAL_AgentUndo::Undo(int32 Steps, TArray<FString>& OutTitles, FTouched& Ou
 	const int32 Available = UAL_ActiveUndoCount();
 	if (Available == 0)
 	{
+		// 以前这里静默回 0 步、ok=true。调用方说「撤 3 步」，回执是「成功，0 步」——
+		// 模型会当成撤完了。OutError 非空时响应里 ok=false，这句话会原样带给调用方
+		OutError = Steps > 0
+			? FString::Printf(TEXT("Nothing to undo: %d step(s) requested, 0 available on the agent undo stack."), Steps)
+			: FString(TEXT("Nothing to undo: the agent undo stack is empty."));
 		return 0;
 	}
 
@@ -623,6 +628,13 @@ int32 FUAL_AgentUndo::Undo(int32 Steps, TArray<FString>& OutTitles, FTouched& Ou
 		OutError = FString::Printf(
 			TEXT("Stopped after %d of %d steps - the editor refused to undo further."), Undone, Target);
 	}
+	// 要的比栈上有的多：以前被 FMath::Min 静默夹掉，回执只说「撤了 2 步」，
+	// 看不出请求的是 5 步。响应结构在 UAL_UndoCommands.cpp，这里只能把请求数写进 error
+	else if (Steps > Available && OutError.IsEmpty())
+	{
+		OutError = FString::Printf(
+			TEXT("Requested %d steps but only %d were available; undid %d."), Steps, Available, Undone);
+	}
 
 	return Undone;
 }
@@ -641,6 +653,10 @@ int32 FUAL_AgentUndo::Redo(int32 Steps, TArray<FString>& OutTitles, FTouched& Ou
 	const int32 Available = GUALAgentBuffer->GetUndoCount();
 	if (Available == 0)
 	{
+		// 同 Undo：没东西可重做要明说，不能回「成功，0 步」
+		OutError = Steps > 0
+			? FString::Printf(TEXT("Nothing to redo: %d step(s) requested, 0 available."), Steps)
+			: FString(TEXT("Nothing to redo."));
 		return 0;
 	}
 
@@ -679,6 +695,11 @@ int32 FUAL_AgentUndo::Redo(int32 Steps, TArray<FString>& OutTitles, FTouched& Ou
 	{
 		OutError = FString::Printf(
 			TEXT("Stopped after %d of %d steps - the editor refused to redo further."), Redone, Target);
+	}
+	else if (Steps > Available && OutError.IsEmpty())
+	{
+		OutError = FString::Printf(
+			TEXT("Requested %d steps but only %d were available; redid %d."), Steps, Available, Redone);
 	}
 
 	return Redone;

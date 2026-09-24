@@ -26,6 +26,7 @@ import { z } from 'zod'
 
 import { callUe } from '../defineUeTool'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
+import { withPartialHeadline } from '../partialResult'
 
 const NAMESPACE = 'ue.sequencer'
 
@@ -108,7 +109,14 @@ interface CameraKeysOutput {
   camera_label: string
   camera_created: boolean
   sequence_created: boolean
+  /** 这条 Transform 轨道写完后的关键帧数，插件从通道读回。旧插件发的是请求里的键数 */
   key_count: number
+  /** 这次真正写进去的键数。旧插件不发 */
+  written_keys?: number
+  /** 没写的键（不是对象、缺 frame、location/rotation 都没给）。旧插件不发 */
+  skipped_keys?: number
+  /** index 是排好序后发给插件的数组下标 */
+  skipped_key_reasons?: { index: number; reason: string }[]
   range: [number, number]
   /** 清掉的旧关键帧数量。0 表示这条轨道原本是空的 */
   replaced_keys: number
@@ -118,6 +126,8 @@ interface CameraKeysOutput {
   /** 这次删掉了几个用户原有的切轨段 */
   removed_cut_sections: number
   level_saved: boolean
+  /** 序列资产是否存盘成功。旧插件不发 —— 缺这个字段就当「不知道」，不说已存盘 */
+  sequence_saved?: boolean
   warnings?: string[]
   geometry?: { space: 'world'; length_unit: 'cm'; rotation_unit: 'deg' }
 }
@@ -186,7 +196,13 @@ export function createSequenceCameraKeysTool(): UnrealAgentTool<CameraKeysOutput
 
       const lines = [
         '关键帧参照系：world 世界空间；位置 cm，旋转 deg。',
-        `${d.sequence_created ? '已新建' : '已写入'} ${d.sequence_path}`,
+        `${d.sequence_created ? '已新建' : '已写入'} ${d.sequence_path}${
+          d.sequence_saved === true
+            ? '，序列已存盘'
+            : d.sequence_saved === false
+              ? '，但序列**没**存盘成功'
+              : ''
+        }`,
         // 没新建相机就没动过关卡，说「已保存」是假话 —— 那会让用户以为
         // 他关卡里别的未保存改动也落盘了
         `相机：${d.camera_label}（${
@@ -194,7 +210,13 @@ export function createSequenceCameraKeysTool(): UnrealAgentTool<CameraKeysOutput
             ? `新建在关卡里，关卡${d.level_saved ? '已保存' : '**未**保存'}`
             : '复用关卡里已有的，没有改动关卡'
         }）`,
-        `${d.key_count} 个关键帧，播放范围 [${d.range[0]}, ${d.range[1]})`
+        // key_count 是插件从通道读回的轨道键数。和这次写入的数对不上时两个都报：
+        // replace_existing_keys=false 时旧键还在，轨道上的数会更多
+        `${
+          d.written_keys === undefined || d.written_keys === d.key_count
+            ? `${d.key_count} 个关键帧`
+            : `写入 ${d.written_keys} 个关键帧，轨道上现有 ${d.key_count} 个`
+        }，播放范围 [${d.range[0]}, ${d.range[1]})`
       ]
 
       // 覆盖了用户的东西必须说，而且要说在前面
@@ -218,8 +240,23 @@ export function createSequenceCameraKeysTool(): UnrealAgentTool<CameraKeysOutput
 
       lines.push('', '跑一次 sequence_audit 确认 PASS 再交给用户。')
 
+      // 有键没写进去时第一句不许是成功（AGENTS.md §5 第 14 条）
+      const text = withPartialHeadline(
+        lines.join('\n'),
+        {
+          succeeded: d.written_keys ?? d.key_count,
+          failed: 0,
+          skipped: d.skipped_keys ?? 0,
+          unit: '个关键帧'
+        },
+        (d.skipped_key_reasons ?? []).map((k) => ({
+          item: `按帧排序后的第 ${k.index + 1} 个键`,
+          reason: k.reason
+        }))
+      )
+
       return {
-        text: lines.join('\n'),
+        text,
         details: { ...d, geometry: { space: 'world', length_unit: 'cm', rotation_unit: 'deg' } }
       }
     }

@@ -27,8 +27,18 @@ interface LevelResponse {
   is_dirty?: boolean
   is_temporary?: boolean
   actor_count?: number
+  /** 实际落盘的那张关卡的包名（新插件按引擎写出的文件换算，不回显请求） */
   saved_as?: string
+  /** 新插件才有：实际写出的 .umap 绝对路径 */
+  saved_file?: string
+  /**
+   * 新插件才有。level.save 存的是「当前关卡」—— 用户把某个子关卡设成当前时，
+   * 存的是那个子关卡，持久关卡没动
+   */
+  saved_level_is_persistent?: boolean
   saved?: boolean
+  /** level.new 给了 save_as 但存盘失败时的原因（新插件） */
+  save_error?: string
   note?: string
 }
 
@@ -135,11 +145,22 @@ export function createSaveLevelTool() {
           const message = (response as unknown as { error?: string })?.error || '保存关卡失败'
           return { success: false, error: message }
         }
+        // 存的是子关卡时第一句就要说：用户以为存了「这张关卡」，其实持久关卡还是脏的
+        const sublevelOnly = response.saved_level_is_persistent === false
         return {
+          summary: sublevelOnly
+            ? `⚠️ 只保存了当前子关卡 ${response.saved_as}，持久关卡 ${response.package} 和其他子关卡没有保存` +
+              (response.is_dirty ? '（持久关卡仍有未保存改动，用 ue_save 存）' : '')
+            : `关卡已保存到 ${response.saved_as}`,
           success: true,
           package: response.package,
           saved_as: response.saved_as,
-          summary: `关卡已保存到 ${response.saved_as}`
+          ...(response.saved_file ? { saved_file: response.saved_file } : {}),
+          ...(response.saved_level_is_persistent !== undefined
+            ? { saved_level_is_persistent: response.saved_level_is_persistent }
+            : {}),
+          ...(response.is_dirty !== undefined ? { is_dirty: response.is_dirty } : {}),
+          ...(response.note ? { note: response.note } : {})
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -218,14 +239,23 @@ export function createNewLevelTool() {
           const message = (response as unknown as { error?: string })?.error || '新建关卡失败'
           return { success: false, error: message }
         }
+        // 给了 save_as 却没存上：关卡已经换成新的了（撤不回），但落盘这一步没成，第一句就说
+        const saveFailed = Boolean(input.save_as) && !response.saved
         return {
+          summary: response.saved
+            ? `已新建并保存关卡 ${response.saved_as ?? response.package}`
+            : saveFailed
+              ? `⚠️ 新关卡已建好，但没存到 ${input.save_as}：` +
+                (response.save_error || '插件没给原因') +
+                '。它现在只在内存里，用 ue_save_level 给 path 再存一次'
+              : '已新建空关卡（仅在内存里，还没有文件）',
           success: true,
           package: response.package,
           saved: response.saved,
-          ...(response.note ? { note: response.note } : {}),
-          summary: response.saved
-            ? `已新建并保存关卡 ${response.package}`
-            : '已新建空关卡（仅在内存里，还没有文件）'
+          ...(response.saved_as ? { saved_as: response.saved_as } : {}),
+          ...(response.saved_file ? { saved_file: response.saved_file } : {}),
+          ...(response.save_error ? { save_error: response.save_error } : {}),
+          ...(response.note ? { note: response.note } : {})
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

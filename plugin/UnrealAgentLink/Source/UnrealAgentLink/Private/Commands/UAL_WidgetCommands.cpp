@@ -233,6 +233,24 @@ void FUAL_WidgetCommands::Handle_Create(const TSharedPtr<FJsonObject>& Payload, 
 		return;
 	}
 	
+	/**
+	 * 根控件类型在建资产**之前**就认好，认不出来直接 400。
+	 *
+	 * 原来认不出来就悄悄换成 CanvasPanel，回执里却照抄请求的 root_type ——
+	 * 调用方以为根是 VerticalBox，接着按竖排去加子控件，全叠在左上角。
+	 * FindWidgetClass 除了常用表还会按 U 前缀动态找任意 UWidget 子类，
+	 * 这样都找不到就是真写错了，退回默认只会把错藏起来。
+	 * 放在 CreateAsset 前面，是为了拒绝时不留下一个半成品资产。
+	 */
+	UClass* RootClass = FindWidgetClass(RootType);
+	if (!RootClass)
+	{
+		UAL_CommandUtils::SendError(RequestId, 400,
+			FString::Printf(TEXT("Unknown root_type '%s'. Use a UWidget class name without the U prefix, e.g. CanvasPanel / VerticalBox / HorizontalBox / Overlay / ScrollBox / GridPanel / UniformGridPanel / WrapBox / SizeBox / Border."),
+				*RootType));
+		return;
+	}
+
 	// 事务包裹
 	const FUAL_ScopedTransaction Transaction(NSLOCTEXT("UAL", "CreateWidget", "Agent Create Widget"));
 	
@@ -263,13 +281,7 @@ void FUAL_WidgetCommands::Handle_Create(const TSharedPtr<FJsonObject>& Payload, 
 	UWidgetTree* WidgetTree = WidgetBP->WidgetTree;
 	if (WidgetTree)
 	{
-		// 创建根控件
-		UClass* RootClass = FindWidgetClass(RootType);
-		if (!RootClass)
-		{
-			RootClass = UCanvasPanel::StaticClass(); // 默认 CanvasPanel
-		}
-		
+		// 创建根控件（RootClass 在建资产前已经校验过）
 		UWidget* RootWidget = WidgetTree->ConstructWidget<UWidget>(RootClass);
 		if (RootWidget)
 		{
@@ -284,14 +296,34 @@ void FUAL_WidgetCommands::Handle_Create(const TSharedPtr<FJsonObject>& Payload, 
 	// 保存资产
 	TArray<UPackage*> PackagesToSave;
 	PackagesToSave.Add(WidgetBP->GetOutermost());
-	FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false);
-	
+	// 返回值原来被丢掉，回执里也就没有 saved —— 只读目录、源码管理没签出时
+	// 资产只在内存里，关编辑器就没了，调用方却以为已经落盘
+	const bool bSaved = FEditorFileUtils::PromptForCheckoutAndSave(PackagesToSave, false, false)
+		== FEditorFileUtils::PR_Success;
+
 	// 构建响应
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("ok"), true);
 	Result->SetStringField(TEXT("name"), WidgetBP->GetName());
 	Result->SetStringField(TEXT("path"), WidgetBP->GetPathName());
-	Result->SetStringField(TEXT("root_type"), RootType);
+	// root_type 从树上读回来，不回显请求：报的是引擎里此刻真正的根
+	UWidget* ActualRoot = WidgetTree ? WidgetTree->RootWidget : nullptr;
+	const FString ActualRootType = ActualRoot ? ActualRoot->GetClass()->GetName() : FString();
+	Result->SetStringField(TEXT("root_type"), ActualRootType);
+	Result->SetStringField(TEXT("requested_root_type"), RootType);
+	if (!ActualRoot)
+	{
+		Result->SetStringField(TEXT("warning"),
+			TEXT("The Widget Blueprint was created but has no root widget - the root could not be constructed."));
+	}
+	else if (ActualRoot->GetClass() != RootClass)
+	{
+		// 按类比、不按名字比：别名（Text → TextBlock）类名不同但就是请求的那个，不该报警
+		Result->SetStringField(TEXT("warning"),
+			FString::Printf(TEXT("Requested root_type '%s' (%s) but the root widget is '%s'."),
+				*RootType, *RootClass->GetName(), *ActualRootType));
+	}
+	Result->SetBoolField(TEXT("saved"), bSaved);
 	
 	UE_LOG(LogUALWidget, Log, TEXT("widget.create: name=%s, path=%s"), *Name, *WidgetBP->GetPathName());
 	
@@ -603,6 +635,18 @@ void FUAL_WidgetCommands::Handle_AddChild(const TSharedPtr<FJsonObject>& Payload
 	// 根据父容器类型选择添加方式
 	FString SlotType;
 	TSharedPtr<FJsonObject> SlotData = MakeShared<FJsonObject>();
+	// 这个父容器的槽位真正认了哪些参数。没进这张表、调用方又传了的，
+	// 最后进 ignored_fields —— 原来一律 ok:true，给 VBox 传 anchors 就静默丢掉
+	TSet<FString> AppliedFields;
+	auto MarkApplied = [&AppliedFields](std::initializer_list<const TCHAR*> Fields)
+	{
+		for (const TCHAR* Field : Fields)
+		{
+			AppliedFields.Add(Field);
+		}
+	};
+	// 单内容容器（Button/Border/SizeBox）原有的子控件被顶掉时记下来
+	TSharedPtr<FJsonObject> ReplacedChild;
 	
 	// CanvasPanel
 	if (UCanvasPanel* Canvas = Cast<UCanvasPanel>(Parent))
@@ -639,6 +683,7 @@ void FUAL_WidgetCommands::Handle_AddChild(const TSharedPtr<FJsonObject>& Payload
 			Slot->SetSize(FVector2D(W, H));
 		}
 		
+		MarkApplied({ TEXT("anchors"), TEXT("position"), TEXT("size") });
 		SlotType = TEXT("CanvasPanelSlot");
 		SlotData = BuildCanvasSlotJson(Slot);
 	}
@@ -705,6 +750,7 @@ void FUAL_WidgetCommands::Handle_AddChild(const TSharedPtr<FJsonObject>& Payload
 			Slot->SetPadding(FMargin(Left, Top, Right, Bottom));
 		}
 		
+		MarkApplied({ TEXT("size_rule"), TEXT("h_align"), TEXT("v_align"), TEXT("padding") });
 		SlotType = TEXT("VerticalBoxSlot");
 		SlotData = BuildVerticalSlotJson(Slot);
 	}
@@ -742,7 +788,37 @@ void FUAL_WidgetCommands::Handle_AddChild(const TSharedPtr<FJsonObject>& Payload
 			Slot->SetPadding(FMargin(Left, Top, Right, Bottom));
 		}
 		
+		// 对齐原来只在 VBox / Overlay 分支里设，HBox 收了 h_align/v_align 却不管 ——
+		// 工具描述写着「VerticalBox/HorizontalBox 用 alignment」，传了就该生效
+		FString HAlign;
+		if (Payload->TryGetStringField(TEXT("h_align"), HAlign))
+		{
+			if (HAlign.Equals(TEXT("Left"), ESearchCase::IgnoreCase))
+				Slot->SetHorizontalAlignment(EHorizontalAlignment::HAlign_Left);
+			else if (HAlign.Equals(TEXT("Center"), ESearchCase::IgnoreCase))
+				Slot->SetHorizontalAlignment(EHorizontalAlignment::HAlign_Center);
+			else if (HAlign.Equals(TEXT("Right"), ESearchCase::IgnoreCase))
+				Slot->SetHorizontalAlignment(EHorizontalAlignment::HAlign_Right);
+			else
+				Slot->SetHorizontalAlignment(EHorizontalAlignment::HAlign_Fill);
+		}
+
+		FString VAlign;
+		if (Payload->TryGetStringField(TEXT("v_align"), VAlign))
+		{
+			if (VAlign.Equals(TEXT("Top"), ESearchCase::IgnoreCase))
+				Slot->SetVerticalAlignment(EVerticalAlignment::VAlign_Top);
+			else if (VAlign.Equals(TEXT("Center"), ESearchCase::IgnoreCase))
+				Slot->SetVerticalAlignment(EVerticalAlignment::VAlign_Center);
+			else if (VAlign.Equals(TEXT("Bottom"), ESearchCase::IgnoreCase))
+				Slot->SetVerticalAlignment(EVerticalAlignment::VAlign_Bottom);
+			else
+				Slot->SetVerticalAlignment(EVerticalAlignment::VAlign_Fill);
+		}
+
+		MarkApplied({ TEXT("size_rule"), TEXT("h_align"), TEXT("v_align"), TEXT("padding") });
 		SlotType = TEXT("HorizontalBoxSlot");
+		SlotData = BuildHorizontalSlotJson(Slot);
 	}
 	// Overlay
 	else if (UOverlay* Overlay = Cast<UOverlay>(Parent))
@@ -792,14 +868,22 @@ void FUAL_WidgetCommands::Handle_AddChild(const TSharedPtr<FJsonObject>& Payload
 			Slot->SetPadding(FMargin(Left, Top, Right, Bottom));
 		}
 		
+		MarkApplied({ TEXT("h_align"), TEXT("v_align"), TEXT("padding") });
 		SlotType = TEXT("OverlaySlot");
 	}
 	// Button/Border/SizeBox 等单内容容器 (ContentWidget)
 	else if (UContentWidget* ContentWidget = Cast<UContentWidget>(Parent))
 	{
-		// 如果已经有内容，移除旧内容
+		// 单内容容器只能放一个子控件，已有内容就顶掉。顶掉照做（按钮换文字是常见操作），
+		// 但必须进回执：原来静默清掉，调用方以为按钮里的图标还在
 		if (ContentWidget->GetChildrenCount() > 0)
 		{
+			if (UWidget* OldContent = ContentWidget->GetContent())
+			{
+				ReplacedChild = MakeShared<FJsonObject>();
+				ReplacedChild->SetStringField(TEXT("name"), OldContent->GetName());
+				ReplacedChild->SetStringField(TEXT("class"), OldContent->GetClass()->GetName());
+			}
 			ContentWidget->ClearChildren();
 		}
 		
@@ -835,13 +919,35 @@ void FUAL_WidgetCommands::Handle_AddChild(const TSharedPtr<FJsonObject>& Payload
 	
 	// 如果是 TextBlock，设置文本
 	FString Text;
+	UTextBlock* NewTextBlock = Cast<UTextBlock>(NewWidget);
 	if (Payload->TryGetStringField(TEXT("text"), Text))
 	{
-		UTextBlock* TextBlock = Cast<UTextBlock>(NewWidget);
-		if (TextBlock)
+		if (NewTextBlock)
 		{
-			TextBlock->SetText(FText::FromString(Text));
+			NewTextBlock->SetText(FText::FromString(Text));
+			AppliedFields.Add(TEXT("text"));
 		}
+	}
+
+	// 调用方传了、这个父容器 / 控件类型却不认的参数
+	TArray<TSharedPtr<FJsonValue>> IgnoredFields;
+	TArray<FString> IgnoredSlotFields;
+	static const TCHAR* OptionalSlotFields[] = {
+		TEXT("anchors"), TEXT("position"), TEXT("size"), TEXT("size_rule"),
+		TEXT("h_align"), TEXT("v_align"), TEXT("padding")
+	};
+	for (const TCHAR* Field : OptionalSlotFields)
+	{
+		if (Payload->HasField(Field) && !AppliedFields.Contains(Field))
+		{
+			IgnoredFields.Add(MakeShared<FJsonValueString>(Field));
+			IgnoredSlotFields.Add(Field);
+		}
+	}
+	const bool bTextIgnored = Payload->HasField(TEXT("text")) && !AppliedFields.Contains(TEXT("text"));
+	if (bTextIgnored)
+	{
+		IgnoredFields.Add(MakeShared<FJsonValueString>(TEXT("text")));
 	}
 	
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
@@ -853,9 +959,37 @@ void FUAL_WidgetCommands::Handle_AddChild(const TSharedPtr<FJsonObject>& Payload
 	Result->SetStringField(TEXT("parent"), Parent->GetName());
 	Result->SetStringField(TEXT("parent_type"), ParentType);
 	Result->SetStringField(TEXT("slot_type"), SlotType);
-	if (SlotData->Values.Num() > 0)
+	if (SlotData.IsValid() && SlotData->Values.Num() > 0)
 	{
 		Result->SetObjectField(TEXT("slot_data"), SlotData);
+	}
+	// 文本从控件上读回来，不回显请求
+	if (NewTextBlock)
+	{
+		Result->SetStringField(TEXT("text"), NewTextBlock->GetText().ToString());
+	}
+	if (IgnoredFields.Num() > 0)
+	{
+		Result->SetArrayField(TEXT("ignored_fields"), IgnoredFields);
+		// AGENTS.md §5 第 14 条：有没办成的，顶层带 failed_count
+		Result->SetNumberField(TEXT("failed_count"), IgnoredFields.Num());
+		TArray<FString> Notes;
+		if (IgnoredSlotFields.Num() > 0)
+		{
+			Notes.Add(FString::Printf(TEXT("parent '%s' (%s) gives a %s, which does not take %s"),
+				*Parent->GetName(), *ParentType, *SlotType, *FString::Join(IgnoredSlotFields, TEXT(", "))));
+		}
+		if (bTextIgnored)
+		{
+			Notes.Add(FString::Printf(TEXT("'text' only applies to TextBlock, this is a %s - add a TextBlock child to it"),
+				*NewWidget->GetClass()->GetName()));
+		}
+		Result->SetStringField(TEXT("ignored_note"),
+			FString::Printf(TEXT("Not applied: %s."), *FString::Join(Notes, TEXT("; "))));
+	}
+	if (ReplacedChild.IsValid())
+	{
+		Result->SetObjectField(TEXT("replaced_child"), ReplacedChild);
 	}
 	
 	UE_LOG(LogUALWidget, Log, TEXT("widget.add_child: type=%s, name=%s, parent=%s (%s)"), 
@@ -1221,7 +1355,9 @@ void FUAL_WidgetCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Payl
 	
 	bool bSuccess = false;
 	FString ResultMessage;
-	
+	// 写完读回来的值。有的分支才填，填了就进回执的 value 字段
+	TSharedPtr<FJsonValue> ReadBackValue;
+
 	// 处理常见属性（类型安全）
 	if (PropertyName.Equals(TEXT("Text"), ESearchCase::IgnoreCase))
 	{
@@ -1239,18 +1375,65 @@ void FUAL_WidgetCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Payl
 	}
 	else if (PropertyName.Equals(TEXT("Visibility"), ESearchCase::IgnoreCase))
 	{
+		/**
+		 * 精确匹配枚举名，认不出来就拒。
+		 *
+		 * 原来是 Contains 链：认不出来的值一律落成 Visible，而
+		 * "SelfHitTestInvisible" 先撞上 Contains("HitTestInvisible")，
+		 * 设成了 HitTestInvisible —— 子控件跟着点不动了。回执还照抄输入，
+		 * 调用方看到的是自己要的那个值，永远发现不了。
+		 */
+		struct FUAL_VisibilityName
+		{
+			const TCHAR* Name;
+			ESlateVisibility Value;
+		};
+		static const FUAL_VisibilityName VisibilityNames[] = {
+			{ TEXT("Visible"), ESlateVisibility::Visible },
+			{ TEXT("Collapsed"), ESlateVisibility::Collapsed },
+			{ TEXT("Hidden"), ESlateVisibility::Hidden },
+			{ TEXT("HitTestInvisible"), ESlateVisibility::HitTestInvisible },
+			{ TEXT("SelfHitTestInvisible"), ESlateVisibility::SelfHitTestInvisible },
+		};
+
 		FString VisValue;
 		if (Payload->TryGetStringField(TEXT("value"), VisValue))
 		{
-			ESlateVisibility NewVis = ESlateVisibility::Visible;
-			if (VisValue.Contains(TEXT("Hidden"))) NewVis = ESlateVisibility::Hidden;
-			else if (VisValue.Contains(TEXT("Collapsed"))) NewVis = ESlateVisibility::Collapsed;
-			else if (VisValue.Contains(TEXT("HitTestInvisible"))) NewVis = ESlateVisibility::HitTestInvisible;
-			else if (VisValue.Contains(TEXT("SelfHitTestInvisible"))) NewVis = ESlateVisibility::SelfHitTestInvisible;
-			
-			Widget->SetVisibility(NewVis);
-			bSuccess = true;
-			ResultMessage = FString::Printf(TEXT("Set Visibility to: %s"), *VisValue);
+			VisValue.TrimStartAndEndInline();
+			// 兼容带枚举前缀的写法（ESlateVisibility::Hidden）
+			VisValue.RemoveFromStart(TEXT("ESlateVisibility::"));
+
+			const FUAL_VisibilityName* Matched = nullptr;
+			for (const FUAL_VisibilityName& Entry : VisibilityNames)
+			{
+				if (VisValue.Equals(Entry.Name, ESearchCase::IgnoreCase))
+				{
+					Matched = &Entry;
+					break;
+				}
+			}
+
+			if (Matched)
+			{
+				Widget->SetVisibility(Matched->Value);
+				bSuccess = true;
+				// 写完从控件上读回来，回执报引擎里的值
+				const FString ActualVis = StaticEnum<ESlateVisibility>()
+					? StaticEnum<ESlateVisibility>()->GetNameStringByValue((int64)Widget->GetVisibility())
+					: FString(Matched->Name);
+				ReadBackValue = MakeShared<FJsonValueString>(ActualVis);
+				ResultMessage = FString::Printf(TEXT("Visibility is now: %s"), *ActualVis);
+			}
+			else
+			{
+				ResultMessage = FString::Printf(
+					TEXT("Visibility 只认 Visible / Collapsed / Hidden / HitTestInvisible / SelfHitTestInvisible，收到的是 \"%s\"。"),
+					*VisValue);
+			}
+		}
+		else
+		{
+			ResultMessage = TEXT("Visibility 要传字符串：Visible / Collapsed / Hidden / HitTestInvisible / SelfHitTestInvisible。");
 		}
 	}
 	else if (PropertyName.Equals(TEXT("IsEnabled"), ESearchCase::IgnoreCase))
@@ -1473,7 +1656,11 @@ void FUAL_WidgetCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Payl
 	Result->SetStringField(TEXT("widget_name"), WidgetName);
 	Result->SetStringField(TEXT("property_name"), PropertyName);
 	Result->SetStringField(TEXT("message"), ResultMessage);
-	
+	if (ReadBackValue.IsValid())
+	{
+		Result->SetField(TEXT("value"), ReadBackValue);
+	}
+
 	UE_LOG(LogUALWidget, Log, TEXT("widget.set_property: widget=%s, property=%s"), *WidgetName, *PropertyName);
 	
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);

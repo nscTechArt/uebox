@@ -674,26 +674,55 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 	// 收集导入结果（提前声明，用于汇总视频和普通文件的导入结果）
 	TArray<TSharedPtr<FJsonValue>> ImportedResults;
 	int32 SuccessCount = 0;
-	int32 TotalRequestCount = 0;
-	
+	/**
+	 * 按**输入文件**数的成败，和上面按资产数的 SuccessCount 分开。
+	 *
+	 * 一个 FBX 能导出网格 + 材质 + 贴图好几个资产，自动生成的 PBR 材质也会进
+	 * ImportedResults —— 拿资产数当「成功了几个文件」，5 个文件挂了 4 个照样能
+	 * 数出 ok=true、imported 6/5。AGENTS.md §5 第 14 条：回执按调用方给的那份清单
+	 * 逐条交代，每个输入文件要么在成功里，要么在 failed 里带着原因。
+	 */
+	int32 SucceededFileCount = 0;
+	const int32 TotalRequestCount = FilesArray->Num();
+	TArray<TSharedPtr<FJsonValue>> FailedFiles;
+	FString FirstFailReason;
+	auto AddFailedFile = [&FailedFiles, &FirstFailReason](const FString& File, const FString& Reason)
+	{
+		TSharedPtr<FJsonObject> Failed = MakeShared<FJsonObject>();
+		Failed->SetStringField(TEXT("file"), File);
+		Failed->SetStringField(TEXT("reason"), Reason);
+		FailedFiles.Add(MakeShared<FJsonValueObject>(Failed));
+		if (FirstFailReason.IsEmpty())
+		{
+			FirstFailReason = FString::Printf(TEXT("%s: %s"), *File, *Reason);
+		}
+	};
+
 	// === 第一阶段：分离视频文件和其他文件 ===
 	TArray<FString> VideoFiles;
 	TArray<FString> OtherFiles;
 	
+	int32 EntryIndex = -1;
 	for (const TSharedPtr<FJsonValue>& FileValue : *FilesArray)
 	{
+		++EntryIndex;
 		FString FilePath;
-		if (FileValue->TryGetString(FilePath) && !FilePath.IsEmpty())
+		if (!FileValue.IsValid() || !FileValue->TryGetString(FilePath) || FilePath.IsEmpty())
+		{
+			// 空条目以前直接跳过，却仍算在调用方的清单里 —— 数不上号，照实记一笔
+			AddFailedFile(FString::Printf(TEXT("#%d"), EntryIndex), TEXT("empty or non-string entry in 'files'"));
+			continue;
+		}
 		{
 			// 验证文件存在
 			if (!FPaths::FileExists(FilePath))
 			{
 				UE_LOG(LogUALContentCmd, Warning, TEXT("File not found: %s"), *FilePath);
+				// 以前只进日志、也不算进 requested_count，调用方看到的是「全部成功」
+				AddFailedFile(FilePath, TEXT("file not found on disk"));
 				continue;
 			}
-			
-			TotalRequestCount++;
-			
+
 			// 检查是否是视频文件
 			if (IsVideoFile(FilePath))
 			{
@@ -738,15 +767,21 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 					Item->SetStringField(TEXT("source_file"), VideoFilePath);
 					ImportedResults.Add(MakeShared<FJsonValueObject>(Item));
 					SuccessCount++;
+					SucceededFileCount++;
 					
 					UE_LOG(LogUALContentCmd, Log, TEXT("Successfully imported video: %s -> %s"), 
 						*VideoFilePath, *ImportedMediaSource->GetPathName());
+				}
+				else
+				{
+					AddFailedFile(VideoFilePath, TEXT("video import reported success but returned no FileMediaSource"));
 				}
 			}
 			else
 			{
 				UE_LOG(LogUALContentCmd, Error, TEXT("Failed to import video file: %s - %s"), 
 					*VideoFilePath, *ImportError);
+				AddFailedFile(VideoFilePath, ImportError.IsEmpty() ? FString(TEXT("video import failed (no reason given)")) : ImportError);
 			}
 		}
 	}
@@ -777,6 +812,8 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 				{
 					FirstRejectReason = ObjError;
 				}
+				// rejected[] 留着给老调用方；failed[] 是这批每个没办成的输入文件的全集
+				AddFailedFile(FilePath, ObjError);
 				continue;
 			}
 		}
@@ -825,7 +862,9 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 	if (ImportTasks.Num() == 0 && VideoFiles.Num() == 0)
 	{
 		UAL_CommandUtils::SendError(RequestId, 400,
-			FirstRejectReason.IsEmpty() ? FString(TEXT("No valid files to import")) : FirstRejectReason);
+			!FirstRejectReason.IsEmpty() ? FirstRejectReason
+			: !FirstFailReason.IsEmpty() ? FirstFailReason
+			: FString(TEXT("No valid files to import")));
 		return;
 	}
 	// === 第四阶段：执行标准导入任务 ===
@@ -852,6 +891,9 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 			// 获取源文件名（不含扩展名），用于查找规范化名称
 			const FString SourceBaseName = FPaths::GetBaseFilename(Task->Filename);
 			
+			// 这个文件至少落下一个能加载的资产才算这个输入文件成功
+			bool bAnyAssetLoaded = false;
+
 			// 复制数组以避免在重命名操作中修改原数组导致崩溃
 			// ("Array has changed during ranged-for iteration" bug fix)
 			TArray<FString> ObjectPathsCopy = Task->ImportedObjectPaths;
@@ -921,8 +963,10 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 							bool bRenameSuccess = AssetToolsRef.RenameAssets(RenameData);
 							if (bRenameSuccess)
 							{
-								FinalAssetName = *NormalizedName;
-								FinalAssetPath = PackagePath / *NormalizedName;
+								// 改名后从对象本身回读。原来拼的是 PackagePath/Name —— 那是包路径，
+								// 不是对象路径（少了 .Name），和改名前、视频分支给的格式都对不上
+								FinalAssetName = ImportedAsset->GetName();
+								FinalAssetPath = ImportedAsset->GetPathName();
 								UE_LOG(LogUALContentCmd, Log, TEXT("Successfully renamed asset to: %s"), *FinalAssetPath);
 							}
 							else
@@ -939,6 +983,7 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 					Item->SetStringField(TEXT("class"), ImportedAsset->GetClass()->GetName());
 					ImportedResults.Add(MakeShared<FJsonValueObject>(Item));
 					SuccessCount++;
+					bAnyAssetLoaded = true;
 					
 					// 🎨 收集纹理和网格体，用于PBR材质生成
 					if (UTexture2D* Texture = Cast<UTexture2D>(ImportedAsset))
@@ -994,15 +1039,28 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 					}
 				}
 			}
+
+			if (bAnyAssetLoaded)
+			{
+				SucceededFileCount++;
+			}
+			else
+			{
+				AddFailedFile(Task->Filename, TEXT("the engine reported imported object paths but none of them could be loaded"));
+			}
 		}
 		else
 		{
 			UE_LOG(LogUALContentCmd, Warning, TEXT("No assets imported from: %s"), *Task->Filename);
+			// 引擎一个资产都没产出：格式没有对应的导入器，或导入器自己报错了（原因在 Output Log）
+			AddFailedFile(Task->Filename, TEXT("the engine imported nothing from this file (no importer for this format, or the importer failed - see Output Log)"));
 		}
 	}
 	
 	// 🚀 自动生成PBR材质（如果导入了纹理）
 	TArray<UMaterialInstanceConstant*> CreatedMaterials;
+	// 自动生成的附带资产单独数，不算进「输入文件成功了几个」
+	int32 AutoGeneratedCount = 0;
 	if (ImportedTextures.Num() > 0)
 	{
 		UE_LOG(LogUALContentCmd, Log, 
@@ -1041,6 +1099,7 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 					MatItem->SetBoolField(TEXT("auto_generated"), true);
 					ImportedResults.Add(MakeShared<FJsonValueObject>(MatItem));
 					SuccessCount++;
+					AutoGeneratedCount++;
 				}
 			}
 		}
@@ -1103,7 +1162,7 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 	}
 
 	// Show notification (Ensure logic runs on GameThread)
-	if (SuccessCount > 0)
+	if (SucceededFileCount > 0)
 	{
 		// Capture by value
 		AsyncTask(ENamedThreads::GameThread, [SuccessCount]()
@@ -1133,20 +1192,32 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 
 	// 返回结果
 	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
-	Response->SetBoolField(TEXT("ok"), SuccessCount > 0);
-	if (SuccessCount == 0)
+	// ok 只看输入文件：自动生成的 PBR 材质是附带产物，不能把一批全挂的导入撑成 ok
+	Response->SetBoolField(TEXT("ok"), SucceededFileCount > 0);
+	if (SucceededFileCount == 0)
 	{
 		// 体检拦下来的，原因是具体的，别用那句什么都没说的通用错误盖掉
-		Response->SetStringField(TEXT("error"), FirstRejectReason.IsEmpty()
-			? FString(TEXT("Failed to import assets. Possible reasons: 1) File type not supported by installed plugins, 2) Invalid file path. Check Output Log for details."))
-			: FirstRejectReason);
+		Response->SetStringField(TEXT("error"),
+			!FirstRejectReason.IsEmpty() ? FirstRejectReason
+			: !FirstFailReason.IsEmpty() ? FirstFailReason
+			: FString(TEXT("Failed to import assets. Possible reasons: 1) File type not supported by installed plugins, 2) Invalid file path. Check Output Log for details.")));
 	}
 	if (RejectedFiles.Num() > 0)
 	{
 		Response->SetArrayField(TEXT("rejected"), RejectedFiles);
 		Response->SetNumberField(TEXT("rejected_count"), RejectedFiles.Num());
 	}
+	// failed_count 按输入文件数，含 rejected 里那些；有失败才出现，和 rejected 一个规矩
+	if (FailedFiles.Num() > 0)
+	{
+		Response->SetArrayField(TEXT("failed"), FailedFiles);
+		Response->SetNumberField(TEXT("failed_count"), FailedFiles.Num());
+	}
+	// imported_count 是 imported[] 里的资产数（一个文件可能出好几个资产），
+	// succeeded_count 才是「几个输入文件导成了」，和 requested_count 同一把尺子
 	Response->SetNumberField(TEXT("imported_count"), SuccessCount);
+	Response->SetNumberField(TEXT("succeeded_count"), SucceededFileCount);
+	Response->SetNumberField(TEXT("auto_generated_count"), AutoGeneratedCount);
 	Response->SetNumberField(TEXT("requested_count"), TotalRequestCount);
 	Response->SetArrayField(TEXT("imported"), ImportedResults);
 	Response->SetNumberField(TEXT("saved_count"), ImportSavedCount);
@@ -1571,11 +1642,18 @@ void FUAL_ContentBrowserCommands::Handle_DeleteAssets(
 	 */
 	TMap<FString, FString> FailureReasons;
 
+	int32 EntryIndex = -1;
 	for (const TSharedPtr<FJsonValue>& PathValue : *PathsArray)
 	{
+		++EntryIndex;
 		FString AssetPath;
-		if (!PathValue->TryGetString(AssetPath) || AssetPath.IsEmpty())
+		if (!PathValue.IsValid() || !PathValue->TryGetString(AssetPath) || AssetPath.IsEmpty())
 		{
+			// 空条目以前静默跳过，却照样算在 requested_count 里 —— 调用方数 3 条、
+			// 回执里只交代了 2 条。用序号占位记进 failed，每条输入都有下落
+			const FString Placeholder = FString::Printf(TEXT("#%d"), EntryIndex);
+			FailedPaths.Add(Placeholder);
+			FailureReasons.Add(Placeholder, TEXT("empty or non-string entry in 'paths'"));
 			continue;
 		}
 		
@@ -1822,6 +1900,9 @@ void FUAL_ContentBrowserCommands::Handle_DeleteAssets(
 	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
 	Response->SetBoolField(TEXT("ok"), DeletedPathCount > 0);
 	Response->SetNumberField(TEXT("deleted_count"), DeletedPathCount);
+	// 顶层 failed_count 一律给（0 也给）：部分删除时 ok 仍是 true，
+	// 调用方不该靠「failed 数组存不存在」去猜有没有失败（AGENTS.md §5 第 14 条）
+	Response->SetNumberField(TEXT("failed_count"), FailedPaths.Num());
 	Response->SetNumberField(TEXT("requested_count"), PathsArray->Num());
 	Response->SetNumberField(TEXT("engine_deleted_objects"), DeletedCount);
 
@@ -2182,10 +2263,17 @@ void FUAL_ContentBrowserCommands::Handle_NormalizedImport(
 	
 	// 收集文件路径
 	TArray<FString> FilePaths;
+	/**
+	 * 没递给导入器的输入条目（文件不存在 / 空条目），每条一句原因。
+	 *
+	 * 以前只进日志，total_files / failed_count 都不含它们 —— 给 5 个文件、
+	 * 2 个路径写错，回执是「3/3 成功」，调用方以为全进来了。
+	 */
+	TArray<FString> MissingFileErrors;
 	for (const TSharedPtr<FJsonValue>& FileValue : *FilesArray)
 	{
 		FString FilePath;
-		if (FileValue->TryGetString(FilePath) && !FilePath.IsEmpty())
+		if (FileValue.IsValid() && FileValue->TryGetString(FilePath) && !FilePath.IsEmpty())
 		{
 			// 验证文件存在
 			if (FPaths::FileExists(FilePath))
@@ -2195,13 +2283,20 @@ void FUAL_ContentBrowserCommands::Handle_NormalizedImport(
 			else
 			{
 				UE_LOG(LogUALContentCmd, Warning, TEXT("File not found: %s"), *FilePath);
+				MissingFileErrors.Add(FString::Printf(TEXT("File not found: %s"), *FilePath));
 			}
+		}
+		else
+		{
+			MissingFileErrors.Add(TEXT("Empty or non-string entry in 'files'"));
 		}
 	}
 	
 	if (FilePaths.Num() == 0)
 	{
-		UAL_CommandUtils::SendError(RequestId, 400, TEXT("No valid files to import"));
+		UAL_CommandUtils::SendError(RequestId, 400, MissingFileErrors.Num() > 0
+			? FString::Printf(TEXT("No valid files to import. %s"), *FString::Join(MissingFileErrors, TEXT("; ")))
+			: FString(TEXT("No valid files to import")));
 		return;
 	}
 	
@@ -2254,10 +2349,13 @@ void FUAL_ContentBrowserCommands::Handle_NormalizedImport(
 	
 	// 构建响应
 	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+	// ok 仍只看导入器本身（调用方 ok=false 时会丢掉 imported[]，已经进来的就看不到了）；
+	// 找不到的文件照实算进 total_files / failed_count / errors，数字和调用方给的清单对得上
 	Response->SetBoolField(TEXT("ok"), bSuccess);
-	Response->SetNumberField(TEXT("total_files"), Session.TotalFiles);
+	Response->SetNumberField(TEXT("total_files"), Session.TotalFiles + MissingFileErrors.Num());
 	Response->SetNumberField(TEXT("success_count"), Session.SuccessCount);
-	Response->SetNumberField(TEXT("failed_count"), Session.FailedCount);
+	Response->SetNumberField(TEXT("failed_count"), Session.FailedCount + MissingFileErrors.Num());
+	Session.Errors.Append(MissingFileErrors);
 	
 	// 添加导入的资产信息
 	TArray<TSharedPtr<FJsonValue>> ImportedArray;

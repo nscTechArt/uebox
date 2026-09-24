@@ -1623,16 +1623,47 @@ void FUAL_PieBotCommands::Handle_MoveTo(const TSharedPtr<FJsonObject>& Payload, 
 		return;
 	}
 
-	FinishMove(TEXT("replaced"), TEXT("a new move replaced this one"));
-	GMoveJob = FUAL_MoveJob();
-	for (const TSharedPtr<FJsonValue>& Value : *PointArray)
+	// 路径点先全部验完再动手。原来不是对象的点悄悄丢掉：全丢光时 Points 为空，
+	// 下一帧 TickMove 直接判「reached」，调用方拿到 ok:true 和「到了」，角色一步没动。
+	// 只丢一部分也不行 —— 少一个拐点就是另一条路线，可能正好撞墙或掉下平台。
+	// 缺坐标分量同理：ReadVectorDirect 会拿 0 补，等于往世界原点走。
+	// 所以有一个坏点就整单 400，而且放在 FinishMove 之前，不打断正在跑的那次移动
+	TArray<FVector> Points;
+	TArray<FString> BadPoints;
+	for (int32 Index = 0; Index < PointArray->Num(); ++Index)
 	{
+		const TSharedPtr<FJsonValue>& Value = (*PointArray)[Index];
 		const TSharedPtr<FJsonObject>* Obj = nullptr;
-		if (Value.IsValid() && Value->TryGetObject(Obj) && Obj)
+		double X = 0.0, Y = 0.0, Z = 0.0;
+		if (!Value.IsValid() || !Value->TryGetObject(Obj) || !Obj || !Obj->IsValid())
 		{
-			GMoveJob.Points.Add(UAL_CommandUtils::ReadVectorDirect(*Obj));
+			BadPoints.Add(FString::Printf(TEXT("#%d is not an object"), Index));
+		}
+		else if (!(*Obj)->TryGetNumberField(TEXT("x"), X) || !(*Obj)->TryGetNumberField(TEXT("y"), Y) ||
+			!(*Obj)->TryGetNumberField(TEXT("z"), Z))
+		{
+			BadPoints.Add(FString::Printf(TEXT("#%d is missing a numeric x/y/z"), Index));
+		}
+		else
+		{
+			Points.Add(FVector(X, Y, Z));
 		}
 	}
+	if (BadPoints.Num() > 0)
+	{
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetNumberField(TEXT("skipped_points"), BadPoints.Num());
+		Details->SetNumberField(TEXT("valid_points"), Points.Num());
+		UAL_CommandUtils::SendError(RequestId, 400,
+			FString::Printf(TEXT("%d of %d points are malformed (%s). Nothing was moved; every point needs {x,y,z}."),
+				BadPoints.Num(), PointArray->Num(), *FString::Join(BadPoints, TEXT("; "))),
+			Details);
+		return;
+	}
+
+	FinishMove(TEXT("replaced"), TEXT("a new move replaced this one"));
+	GMoveJob = FUAL_MoveJob();
+	GMoveJob.Points = MoveTemp(Points);
 	double Number = 0.0;
 	if (Payload->TryGetNumberField(TEXT("accept_radius"), Number)) GMoveJob.AcceptRadius = static_cast<float>(Number);
 	if (Payload->TryGetNumberField(TEXT("final_radius"), Number)) GMoveJob.FinalRadius = static_cast<float>(Number);

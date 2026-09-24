@@ -233,6 +233,26 @@ until it is met:
     produces many of them, uploading each would slow every step, and editor pixels must
     not reach third-party storage by default (see the header of `screenshot.ts`).
 
+14. **A write tool's receipt reports the engine's state after the write, and a partial
+    failure never opens with success.** The model treats a receipt as fact: it stops at
+    "success" and assumes anything unmentioned does not exist. A receipt may be incomplete;
+    it may not be wrong. Two parts:
+    - **Read state back after the write.** Any field describing the result (value, type,
+      container, pins, links, instance-editable, compiled) is read from the engine after
+      every mutation — compile included — has finished. Never echo the request payload,
+      and never serialize a snapshot taken halfway through. Names and paths the caller
+      passed as lookup keys may be echoed. Counter-examples: `is_array` echoed from input
+      while `container` actually built an array; pins serialized before links were made;
+      `bCompiled = true` without checking the compile result. If a state cannot be read
+      back, say `needs_compile` / `unknown` — do not guess for the engine.
+    - **If anything failed, the first line does not say success.** On the C++ side, any
+      failure puts `failed_count` at the top level. On the TS side, the first line of the
+      text the model reads is "N succeeded / M failed", followed by each failure's reason
+      — never ✅ first with failures tucked into a later array. Total failure throws.
+    A new or changed write tool needs a test where the engine returns a value different
+    from the input, asserting the receipt follows the engine; batch tools add a
+    partial-failure test.
+
 ## 6. Commits and PRs
 
 - Conventional Commits with a **Chinese** description, matching existing history:

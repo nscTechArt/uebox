@@ -33,6 +33,7 @@ import {
 } from '../../ueOrientation'
 import { describeToolError } from '../../engineErrors'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { withPartialHeadline, describeFailures, type PartialFailure } from '../../partialResult'
 import {
   describeUnmatchedTargets,
   unmatchedTargetFields,
@@ -277,6 +278,14 @@ interface ActorResult {
     hit_actor?: string
     reason?: string
   }
+  /** 新插件：这个 Actor 没落到目标值上时为 false，并附目标值和原因。location 等仍是引擎回读值 */
+  applied?: boolean
+  warning?: string
+  requested?: {
+    location?: { x: number; y: number; z: number }
+    rotation?: { pitch: number; yaw: number; roll: number }
+    scale?: { x: number; y: number; z: number }
+  }
 }
 
 /**
@@ -291,6 +300,9 @@ interface SetTransformUnifiedResponse extends WorldScopedResponse, UnmatchedTarg
   reported?: number
   report_limit?: number
   actors?: ActorResult[]
+  /** 新插件：没落到目标变换上的 Actor 个数和名单（名单有上限，个数没有） */
+  failed_count?: number
+  failed?: Array<{ name?: string; path?: string; reason?: string }>
   error?: string
   /** 插件有时把失败原因放在 message 而不是 error 上，两个都要看 */
   message?: string
@@ -1094,14 +1106,30 @@ targets: { filter: {} }, operation: { multiply: { location: { x: 100, y: 100, z:
         if (isSuccess) {
           const count = affectedCount
 
+          /*
+           * 没落到目标值上的那些（新插件逐个标 applied: false 并给 failed[]）。
+           * 老插件不回读，这里自然是空的 —— 不能凭入参替它补。
+           */
+          const landed = (response.actors ?? []).filter((a) => a.applied !== false)
+          const failures: PartialFailure[] =
+            Array.isArray(response.failed) && response.failed.length > 0
+              ? response.failed.map((f) => ({
+                  item: f.name || f.path || '(未命名)',
+                  reason: f.reason
+                }))
+              : (response.actors ?? [])
+                  .filter((a) => a.applied === false)
+                  .map((a) => ({ item: a.name || a.path || '(未命名)', reason: a.warning }))
+          const failedCount = Math.max(response.failed_count ?? 0, failures.length)
+
           // 构建结果摘要
           let summary = `成功变换 ${count} 个 Actor`
-          if (response.actors && response.actors.length > 0) {
-            const actorNames = response.actors
+          if (landed.length > 0) {
+            const actorNames = landed
               .slice(0, 5)
               .map((a) => a.name)
               .join(', ')
-            if (response.actors.length > 5) {
+            if (landed.length > 5) {
               summary += `：${actorNames} 等`
             } else if (actorNames) {
               summary += `：${actorNames}`
@@ -1151,9 +1179,30 @@ targets: { filter: {} }, operation: { multiply: { location: { x: 100, y: 100, z:
 
           const snap = operation.snap_to_floor ? describeSnap(response) : ''
 
+          const body =
+            summary +
+            describeUnmatchedTargets(response) +
+            describeWorld(response) +
+            placement +
+            orientation +
+            snap
+
           return {
+            // 有没到位的就先说部分完成（AGENTS.md §5 第 14 条）。message 放第一个键：
+            // 适配层把整个对象 JSON 化给模型，第一眼看到的就是它
+            message: withPartialHeadline(
+              body,
+              {
+                succeeded: count,
+                failed: failedCount,
+                skipped: unmatchedTargetFields(response).unmatched_count ?? 0,
+                unit: '个 Actor'
+              },
+              failures
+            ),
             success: true,
             count,
+            ...(failedCount > 0 ? { failed_count: failedCount } : {}),
             actors: response.actors,
             ...(truncated
               ? { reported, report_limit: response.report_limit, actors_truncated: true }
@@ -1161,20 +1210,20 @@ targets: { filter: {} }, operation: { multiply: { location: { x: 100, y: 100, z:
             ...(resolved.usedSemantic ? { resolved_rotation: operation.set?.rotation } : {}),
             ...unmatchedTargetFields(response),
             ...worldFields(response),
-            message:
-              summary +
-              describeUnmatchedTargets(response) +
-              describeWorld(response) +
-              placement +
-              orientation +
-              snap,
             _aiInstruction: '变换操作完成。如果所有任务已完成，请调用 done 工具汇报结果。'
           }
         } else {
+          const failureList = describeFailures(
+            (response?.failed ?? []).map((f) => ({
+              item: f.name || f.path || '(未命名)',
+              reason: f.reason
+            })),
+            '没到位的'
+          )
           const msg =
-            (response as RpcFailureShape)?.error ||
-            (response as RpcFailureShape)?.message ||
-            '变换失败，未收到有效响应'
+            ((response as RpcFailureShape)?.error ||
+              (response as RpcFailureShape)?.message ||
+              '变换失败，未收到有效响应') + (failureList ? `\n${failureList}` : '')
 
           const code =
             (response as RpcFailureShape)?.__rpc?.code ?? (response as RpcFailureShape)?.code

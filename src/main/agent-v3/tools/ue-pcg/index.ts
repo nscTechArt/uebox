@@ -26,6 +26,7 @@ import { z } from 'zod'
 import { layoutPcgNodes, type PcgLayoutEdge, type PcgLayoutNode } from './layout'
 import { callUe, defineUeTool } from '../defineUeTool'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
+import { withPartialHeadline, type PartialFailure } from '../partialResult'
 import { formatCmWithMeters, type Vec3Like } from '../ueUnits'
 
 const NAMESPACE = 'ue.pcg'
@@ -210,6 +211,36 @@ pcg_spawn_volume 放到关卡里 → pcg_execute 跑一次看结果。`,
   })
 })
 
+interface PcgNodeWriteResponse {
+  node_id?: string
+  updated_properties?: unknown[]
+  failed_properties?: Array<{ name: string; error?: string }>
+}
+
+/**
+ * add_node / update_node 的回执。
+ *
+ * 全成功时原样给 JSON —— 引脚、坐标都是回读的，模型接下来连线要用。
+ * 有属性没设上时第一句先说「部分完成」：裸 JSON 里 failed_properties 排在
+ * 引脚列表后面，模型常常读不到那儿（AGENTS.md §5 第 14 条）。
+ * 全失败由插件回 400，走抛错那条路。
+ */
+function nodeWriteOutcome(response: PcgNodeWriteResponse): {
+  text: string
+  details: PcgNodeWriteResponse
+} {
+  const failed = response.failed_properties ?? []
+  const failures: PartialFailure[] = failed.map((f) => ({ item: f.name, reason: f.error }))
+  return {
+    text: withPartialHeadline(
+      JSON.stringify(response),
+      { succeeded: response.updated_properties?.length ?? 0, failed: failed.length },
+      failures
+    ),
+    details: response
+  }
+}
+
 const pcgAddNode = defineUeTool({
   name: 'pcg_add_node',
   namespace: NAMESPACE,
@@ -224,8 +255,8 @@ node_type 先用 pcg_list_node_types 确认存在。
 
 ${PROPERTY_PATH_HELP}
 
-属性写错不会让整个调用失败 —— 返回里的 failed_properties 会逐条说明哪个没设上、
-以及最接近的正确名字。
+部分属性写错时节点照样加上，failed_properties 逐条说明哪个没设上、以及最接近的
+正确名字；一个都设不上则整体失败，节点不留。
 
 不指定 x / y 的话节点会全叠在原点，加完记得用 pcg_tidy_graph 排一下。`,
   input: z.object({
@@ -238,7 +269,8 @@ ${PROPERTY_PATH_HELP}
       .record(z.string(), z.unknown())
       .optional()
       .describe('要设置的属性，键名来自 pcg_get_node_schema。如 { "PointsPerSquaredMeter": 0.1 }')
-  })
+  }),
+  toOutcome: (response) => nodeWriteOutcome(response as PcgNodeWriteResponse)
 })
 
 const pcgUpdateNode = defineUeTool({
@@ -252,15 +284,16 @@ ${PROPERTY_PATH_HELP}
 
 多配几个树种就把下标往后排（\`MeshEntries[1]\`、\`[2]\`…），数组会自动扩容。
 
-所有属性都设不上时会整体失败并回滚，部分成功时返回 updated_properties 和
-failed_properties 两份清单。`,
+所有属性都设不上时整体失败、什么都不改（标题和注释也不改），部分成功时返回
+updated_properties 和 failed_properties 两份清单。`,
   input: z.object({
     graph_path: GraphPathSchema,
     node_id: z.string().describe('节点 id，来自 pcg_get_graph'),
     title: z.string().optional().describe('新的节点标题'),
     comment: z.string().optional().describe('节点上的注释文字'),
     properties: z.record(z.string(), z.unknown()).optional().describe('要改的属性')
-  })
+  }),
+  toOutcome: (response) => nodeWriteOutcome(response as PcgNodeWriteResponse)
 })
 
 const pcgRemoveNode = defineUeTool({
@@ -332,7 +365,14 @@ interface PcgApplyGraphResponse {
   mode?: 'merge' | 'replace'
   /** replace 模式下清掉了几个旧节点 */
   cleared_nodes?: number
-  nodes: Array<{ alias: string; node_id: string; type: string; applied_properties?: unknown[] }>
+  nodes: Array<{
+    alias: string
+    node_id: string
+    type: string
+    /** 这次新建的（false 表示按别名复用了已有节点） */
+    created?: boolean
+    applied_properties?: unknown[]
+  }>
   edges: Array<{ from: string; from_pin: string; to: string; to_pin: string }>
   graph_edges_after: Array<{ from_node: string; from_pin: string; to_node: string; to_pin: string }>
   /** 写完之后图里**实际**有哪些节点。merge 模式下会包含本次没提到的旧节点 */
@@ -396,11 +436,13 @@ const pcgApplyGraph = defineUeTool<typeof ApplyGraphSchema, PcgApplyGraphRespons
 1. **图不存在会自动建**，不用先调 pcg_create_graph。返回里的 created_graph
    会告诉你是不是新建的 —— 如果你没想新建却看到 true，多半是路径写错了
 2. **默认是重建（replace）**：声明什么，图里就是什么，旧节点先清干净。
-   清不干净会整个失败并回滚，不会留半张脏图。
+   清不干净就停下，声明里的东西一样都不写。
    往已有图上补东西才用 mode="merge"，那时返回的 graph_nodes_after 会点出
    哪些是这次没声明、但还留在图里的节点
 3. **可以重复执行**。节点按 id 别名匹配，已存在就复用并更新，不会长出重复节点
-4. **全成功或全回滚**。任何一项失败，整批不生效，并逐条告诉你哪一项、为什么
+4. **失败不回滚**。类型名、id、连线端点这类错误在动图之前查掉，那时图原样不动；
+   属性写不进、引脚连不上要写了才知道，那时**图已经改了**，报错里会带着
+   graph_nodes_after / graph_edges_after 说明图现在的样子 —— 修好失败项再跑一遍即可
 5. **每一项都回读校验**。连线会读回整张图确认边真的在，属性会读回实际值
 
 引脚名一般不用填，工具会自动选那个方向上唯一的可见引脚。
@@ -616,6 +658,8 @@ interface PcgGraphParametersResponse {
   updated: string[]
   removed: string[]
   failed?: Array<{ name: string; error: string }>
+  /** 有失败时才有 */
+  failed_count?: number
 }
 
 const GraphParameterTypes = [
@@ -680,11 +724,12 @@ const pcgGraphParameters = defineUeTool<typeof GraphParametersSchema, PcgGraphPa
           .join('\n')
       : '（这张图现在一个用户参数都没有）'
 
-    // 失败的要进正文。只写在 details 里等于没说 —— 模型读不到，
-    // 会拿着一份「成功」的回执继续往下走
-    const failed = response.failed?.length
-      ? '\n\n没办成的：\n' + response.failed.map((f) => `- ${f.name}：${f.error}`).join('\n')
-      : ''
+    // 失败的要进正文，而且**第一句**就要说（AGENTS.md §5 第 14 条）。
+    // 上一版失败清单排在「新建 N 个」和整份参数表后面，插件回 207 时
+    // 模型读到的开头仍是一句成功，常常看不到末尾
+    const failed = response.failed ?? []
+    const failures: PartialFailure[] = failed.map((f) => ({ item: f.name, reason: f.error }))
+    const succeeded = response.added.length + response.updated.length + response.removed.length
 
     /**
      * 新建参数时才提示，改值时不提示。
@@ -702,12 +747,17 @@ const pcgGraphParameters = defineUeTool<typeof GraphParametersSchema, PcgGraphPa
         '那种情况要改组件上的那一份，或者把体积删了重摆。'
       : ''
 
+    const body =
+      (changes.length ? `${changes.join('，')}。\n\n` : '') +
+      `${response.graph_path} 现在的用户参数（共 ${response.parameter_count} 个）：\n${list}`
+
     return {
       text:
-        (changes.length ? `${changes.join('，')}。\n\n` : '') +
-        `${response.graph_path} 现在的用户参数（共 ${response.parameter_count} 个）：\n${list}` +
-        failed +
-        ordering,
+        withPartialHeadline(
+          body,
+          { succeeded, failed: response.failed_count ?? failed.length, unit: '个参数' },
+          failures
+        ) + ordering,
       details: response
     }
   }
@@ -726,6 +776,8 @@ interface Vec3 {
 interface PcgSpawnVolumeResponse {
   actor_label: string
   graph_assigned: boolean
+  /** 调了 SetGraph，但这版引擎读不回组件上挂的图 —— 没法确认 */
+  graph_assigned_unverified?: boolean
   graph_path?: string
   /** 画刷的**真实**包围盒。actor 位置不等于采样盒中心 */
   actual_bounds?: { center: Vec3; extent: Vec3; min: Vec3; max: Vec3 }
@@ -765,7 +817,10 @@ z 也要给够：地形有起伏，盒子太矮会从中间穿过去，只在少
     return {
       text:
         `已放置 ${response.actor_label}` +
-        (response.graph_assigned ? `，已挂图 ${response.graph_path}` : '（未挂图）') +
+        (response.graph_assigned
+          ? `，已挂图 ${response.graph_path}` +
+            (response.graph_assigned_unverified ? '（这版引擎读不回组件上的图，未能确认挂上）' : '')
+          : '（未挂图）') +
         (b
           ? `\n采样盒实际范围：中心 (${b.center.x}, ${b.center.y}, ${b.center.z})，` +
             `半径 (${b.extent.x}, ${b.extent.y}, ${b.extent.z})，` +
@@ -855,6 +910,20 @@ const TidyGraphSchema = z.object({ graph_path: GraphPathSchema })
 interface TidyGraphDetails {
   moved: number
   not_found?: string[]
+  failed_count?: number
+}
+
+/** pcg.set_node_positions 的回执。failed / skipped / 计数只在有失败时出现 */
+interface SetNodePositionsResponse {
+  moved?: number
+  not_found?: string[]
+  /** 找到了节点、写了坐标，但回读对不上 */
+  failed?: Array<{ item: string; error?: string }>
+  /** 条目格式不对（不是对象、没有 node_id） */
+  skipped?: Array<{ item: string; error?: string }>
+  /** 所有没挪成的：not_found + failed + skipped */
+  failed_count?: number
+  skipped_count?: number
 }
 
 const pcgTidyGraph = defineTool<typeof TidyGraphSchema, TidyGraphDetails>({
@@ -892,17 +961,34 @@ const pcgTidyGraph = defineTool<typeof TidyGraphSchema, TidyGraphDetails>({
       { x: anchor.x, y: anchor.y }
     )
 
-    const applied = await callUe<{ moved?: number; not_found?: string[] }>(
-      'pcg.set_node_positions',
-      { graph_path, positions }
-    )
+    const applied = await callUe<SetNodePositionsResponse>('pcg.set_node_positions', {
+      graph_path,
+      positions
+    })
 
+    const moved = applied.moved ?? 0
     const notFound = applied.not_found ?? []
+    // 没挪成的逐条列，第一句先说部分完成（AGENTS.md §5 第 14 条）。
+    // 旧插件只回 not_found、没有 failed_count，那时按 not_found 算
+    const failures: PartialFailure[] = [
+      ...notFound.map((id) => ({ item: id, reason: '图里没找到（图可能已经变了）' })),
+      ...(applied.failed ?? []).map((f) => ({ item: f.item, reason: f.error })),
+      ...(applied.skipped ?? []).map((f) => ({ item: f.item, reason: f.error }))
+    ]
+    const skipped = applied.skipped_count ?? applied.skipped?.length ?? 0
+    const failedCount = applied.failed_count ?? failures.length
+
     return {
-      text:
-        `已重排 ${applied.moved ?? 0}/${nodes.length} 个节点。` +
-        (notFound.length ? `\n以下节点没找到（图可能已经变了）：${notFound.join(', ')}` : ''),
-      details: { moved: applied.moved ?? 0, ...(notFound.length ? { not_found: notFound } : {}) }
+      text: withPartialHeadline(
+        `已重排 ${moved}/${nodes.length} 个节点。`,
+        { succeeded: moved, failed: failedCount - skipped, skipped, unit: '个节点' },
+        failures
+      ),
+      details: {
+        moved,
+        ...(notFound.length ? { not_found: notFound } : {}),
+        ...(failedCount ? { failed_count: failedCount } : {})
+      }
     }
   }
 })

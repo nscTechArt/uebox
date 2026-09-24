@@ -570,8 +570,22 @@ void FUAL_PCGCommands::ApplyProperties(
 	TArray<TSharedPtr<FJsonValue>>& OutUpdated,
 	TArray<TSharedPtr<FJsonValue>>& OutFailed)
 {
-	if (!Settings || !Properties.IsValid())
+	if (!Properties.IsValid())
 	{
+		return;
+	}
+
+	// 没有设置对象也要逐条记失败。上一版在这里直接 return，调用方拿到的是
+	// 两份空清单 —— add_node 就此回 200，给的属性一个没写、也没人说
+	if (!Settings)
+	{
+		for (const auto& Pair : Properties->Values)
+		{
+			TSharedPtr<FJsonObject> Failure = MakeShared<FJsonObject>();
+			Failure->SetStringField(TEXT("name"), UAL_JsonKey(Pair.Key));
+			Failure->SetStringField(TEXT("error"), TEXT("the node has no settings object to write to"));
+			OutFailed.Add(MakeShared<FJsonValueObject>(Failure));
+		}
 		return;
 	}
 
@@ -1069,7 +1083,62 @@ void FUAL_PCGCommands::Handle_AddNode(const TSharedPtr<FJsonObject>& Payload, co
 	TSharedPtr<FJsonObject> Properties;
 	if (UAL_CommandUtils::TryGetObjectFieldFlexible(Payload, TEXT("properties"), Properties))
 	{
-		ApplyProperties(Add.OutObject(TEXT("DefaultNodeSettings")), Properties, Updated, Failed);
+		// DefaultNodeSettings 这个输出参数拿不到时，从节点上再取一次 ——
+		// 两边都拿不到才算真没有，ApplyProperties 会逐条记成失败
+		UObject* Settings = Add.OutObject(TEXT("DefaultNodeSettings"));
+		if (!Settings)
+		{
+			Settings = GetNodeSettings(Node);
+		}
+		ApplyProperties(Settings, Properties, Updated, Failed);
+	}
+
+	if (Updated.Num() == 0 && Failed.Num() > 0)
+	{
+		/**
+		 * 给的属性一个都没设上 —— 和 update_node 一样按失败处理，不回 200。
+		 *
+		 * 但节点已经加进图了，而 `Transaction.Cancel()` 只丢撤销记录、不回退改动
+		 * （见 UAL_SequencerCommands 里那段长注释）。所以真把它删掉，再回读确认；
+		 * 删不掉就在错误里说清它还在、叫什么，别让调用方以为图没动过。
+		 */
+		const FString CreatedId = NodeIdOf(Node);
+		UALReflect::FCall Remove(Graph, TEXT("RemoveNode"));
+		if (Remove.IsValid())
+		{
+			Remove.Obj(TEXT("InNode"), Node);
+			Remove.Invoke();
+		}
+		TArray<UObject*> After;
+		CollectAllNodes(Graph, After);
+		const bool bStillThere = After.Contains(Node);
+
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetArrayField(TEXT("failed_properties"), Failed);
+		Details->SetNumberField(TEXT("failed_count"), Failed.Num());
+		if (bStillThere)
+		{
+			Graph->MarkPackageDirty();
+			Details->SetStringField(TEXT("node_id"), CreatedId);
+			UAL_CommandUtils::SendError(RequestId, 400,
+				FString::Printf(
+					TEXT("None of the given properties could be set, and the node %s that was already added could not be ")
+					TEXT("removed again - it is still in %s with default settings. Fix it with pcg.update_node or remove it ")
+					TEXT("with pcg.remove_node. Call pcg.get_node_schema for the valid property names."),
+					*CreatedId, *GraphPath),
+				Details);
+			return;
+		}
+
+		// 加了又删，图回到了原样，这时丢掉撤销记录才是对的
+		Transaction.Cancel();
+		UAL_CommandUtils::SendError(RequestId, 400,
+			FString::Printf(
+				TEXT("None of the given properties could be set, so the node was not kept (the graph is unchanged). ")
+				TEXT("Call pcg.get_node_schema for the valid names of %s."),
+				*SettingsClass->GetName()),
+			Details);
+		return;
 	}
 
 	Graph->MarkPackageDirty();
@@ -1078,6 +1147,10 @@ void FUAL_PCGCommands::Handle_AddNode(const TSharedPtr<FJsonObject>& Payload, co
 	Data->SetStringField(TEXT("graph_path"), GraphPath);
 	Data->SetArrayField(TEXT("updated_properties"), Updated);
 	Data->SetArrayField(TEXT("failed_properties"), Failed);
+	if (Failed.Num() > 0)
+	{
+		Data->SetNumberField(TEXT("failed_count"), Failed.Num());
+	}
 
 	UE_LOG(LogUALPCG, Log, TEXT("Added %s to %s as %s"),
 		*SettingsClass->GetName(), *GraphPath, *NodeIdOf(Node));
@@ -1121,18 +1194,9 @@ void FUAL_PCGCommands::Handle_UpdateNode(const TSharedPtr<FJsonObject>& Payload,
 	Graph->Modify();
 	Node->Modify();
 
-	FString Title;
-	if (Payload->TryGetStringField(TEXT("title"), Title))
-	{
-		UALReflect::SetNameProp(Node, TEXT("NodeTitle"), FName(*Title));
-	}
-
-	FString Comment;
-	if (Payload->TryGetStringField(TEXT("comment"), Comment))
-	{
-		UALReflect::SetStringProp(Node, TEXT("NodeComment"), Comment);
-	}
-
+	// 标题 / 注释放到属性校验**之后**再写。上一版先写了它们，属性全失败时回 400
+	// 「一个都没设上」，而标题其实已经改了 —— Cancel 只丢撤销记录、不回退，
+	// 回执和图对不上。先过属性这关，失败出口就真的什么都没动过
 	TArray<TSharedPtr<FJsonValue>> Updated;
 	TArray<TSharedPtr<FJsonValue>> Failed;
 	TSharedPtr<FJsonObject> Properties;
@@ -1156,11 +1220,37 @@ void FUAL_PCGCommands::Handle_UpdateNode(const TSharedPtr<FJsonObject>& Payload,
 		Transaction.Cancel();
 		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
 		Details->SetArrayField(TEXT("failed_properties"), Failed);
+		Details->SetNumberField(TEXT("failed_count"), Failed.Num());
 		UAL_CommandUtils::SendError(RequestId, 400,
-			FString::Printf(TEXT("None of the given properties could be set on '%s'. Call pcg.get_node_schema for the valid names."),
+			FString::Printf(TEXT("None of the given properties could be set on '%s', so nothing was changed ")
+				TEXT("(title / comment were not applied either). Call pcg.get_node_schema for the valid names."),
 				*NodeId),
 			Details);
 		return;
+	}
+
+	// 标题 / 注释写失败也进 failed 清单。返回里的 title / comment 由 BuildNodeJson 回读，
+	// 所以即便这里没报错，调用方看到的也是引擎里的真值
+	const auto FailField = [&Failed](const TCHAR* Name, const TCHAR* Why)
+	{
+		TSharedPtr<FJsonObject> Failure = MakeShared<FJsonObject>();
+		Failure->SetStringField(TEXT("name"), Name);
+		Failure->SetStringField(TEXT("error"), Why);
+		Failed.Add(MakeShared<FJsonValueObject>(Failure));
+	};
+
+	FString Title;
+	if (Payload->TryGetStringField(TEXT("title"), Title) &&
+		!UALReflect::SetNameProp(Node, TEXT("NodeTitle"), FName(*Title)))
+	{
+		FailField(TEXT("title"), TEXT("this node has no writable NodeTitle"));
+	}
+
+	FString Comment;
+	if (Payload->TryGetStringField(TEXT("comment"), Comment) &&
+		!UALReflect::SetStringProp(Node, TEXT("NodeComment"), Comment))
+	{
+		FailField(TEXT("comment"), TEXT("this node has no writable NodeComment"));
 	}
 
 	Graph->MarkPackageDirty();
@@ -1169,6 +1259,10 @@ void FUAL_PCGCommands::Handle_UpdateNode(const TSharedPtr<FJsonObject>& Payload,
 	Data->SetStringField(TEXT("graph_path"), GraphPath);
 	Data->SetArrayField(TEXT("updated_properties"), Updated);
 	Data->SetArrayField(TEXT("failed_properties"), Failed);
+	if (Failed.Num() > 0)
+	{
+		Data->SetNumberField(TEXT("failed_count"), Failed.Num());
+	}
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
@@ -1224,14 +1318,34 @@ void FUAL_PCGCommands::Handle_RemoveNode(const TSharedPtr<FJsonObject>& Payload,
 			FString::Printf(TEXT("PCG API mismatch: %s"), *Remove.GetError()));
 		return;
 	}
+	const FString RemovedId = NodeIdOf(Node);
 	Remove.Obj(TEXT("InNode"), Node);
 	Remove.Invoke();
+
+	// **回读确认它真的不在了。** Invoke 只说明函数调到了，不说明节点被摘掉 ——
+	// apply_graph 的 replace 清图就实测过「调了 RemoveNode、节点还在」。
+	// 按指针比，不走 FindNodeById：那条路还会认 Input / Output 别名，这里不需要
+	TArray<UObject*> After;
+	CollectAllNodes(Graph, After);
+	if (After.Contains(Node))
+	{
+		// 不 Cancel：RemoveNode 可能已经断掉了一部分连线，Cancel 不回退改动，
+		// 只会让这些改动连撤销都撤不回来
+		Graph->MarkPackageDirty();
+		UAL_CommandUtils::SendError(RequestId, 500,
+			FString::Printf(
+				TEXT("RemoveNode ran but '%s' is still in %s. Its links may have been partly cut - ")
+				TEXT("call pcg.get_graph to see the current state."),
+				*RemovedId, *GraphPath));
+		return;
+	}
 
 	Graph->MarkPackageDirty();
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("graph_path"), GraphPath);
-	Data->SetStringField(TEXT("removed_node_id"), NodeId);
+	Data->SetStringField(TEXT("removed_node_id"), RemovedId);
+	Data->SetNumberField(TEXT("node_count_after"), After.Num());
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
@@ -1526,18 +1640,36 @@ void FUAL_PCGCommands::Handle_SetNodePositions(const TSharedPtr<FJsonObject>& Pa
 
 	int32 Moved = 0;
 	TArray<TSharedPtr<FJsonValue>> NotFound;
+	// 格式不对的条目和写不进去的节点也要单列。上一版这两种都是静默 continue /
+	// 不看 SetIntProp 返回值就 ++Moved，于是「重排 5/5」里可能有几个根本没动
+	TArray<TSharedPtr<FJsonValue>> Skipped;
+	TArray<TSharedPtr<FJsonValue>> Failed;
+	bool bWroteAnything = false;
 
-	for (const TSharedPtr<FJsonValue>& Value : *Positions)
+	const auto Record = [](TArray<TSharedPtr<FJsonValue>>& List, const FString& Item, const FString& Why)
 	{
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("item"), Item);
+		Entry->SetStringField(TEXT("error"), Why);
+		List.Add(MakeShared<FJsonValueObject>(Entry));
+	};
+
+	for (int32 Index = 0; Index < Positions->Num(); ++Index)
+	{
+		const TSharedPtr<FJsonValue>& Value = (*Positions)[Index];
+		const FString Where = FString::Printf(TEXT("positions[%d]"), Index);
+
 		const TSharedPtr<FJsonObject>* Entry = nullptr;
 		if (!Value.IsValid() || !Value->TryGetObject(Entry) || !Entry || !(*Entry).IsValid())
 		{
+			Record(Skipped, Where, TEXT("entry is not an object"));
 			continue;
 		}
 
 		FString NodeId;
 		if (!(*Entry)->TryGetStringField(TEXT("node_id"), NodeId) || NodeId.IsEmpty())
 		{
+			Record(Skipped, Where, TEXT("entry has no 'node_id'"));
 			continue;
 		}
 
@@ -1557,16 +1689,47 @@ void FUAL_PCGCommands::Handle_SetNodePositions(const TSharedPtr<FJsonObject>& Pa
 		(*Entry)->TryGetNumberField(TEXT("y"), Y);
 
 		Node->Modify();
-		UALReflect::SetIntProp(Node, TEXT("PositionX"), X);
-		UALReflect::SetIntProp(Node, TEXT("PositionY"), Y);
+		bWroteAnything = true;
+		const bool bSetX = UALReflect::SetIntProp(Node, TEXT("PositionX"), X);
+		const bool bSetY = UALReflect::SetIntProp(Node, TEXT("PositionY"), Y);
+
+		// 只数回读对得上的。返回 true 也回读一次，和属性写入同一个道理
+		int32 ReadX = 0, ReadY = 0;
+		const bool bReadBack = UALReflect::GetIntProp(Node, TEXT("PositionX"), ReadX) &&
+			UALReflect::GetIntProp(Node, TEXT("PositionY"), ReadY);
+		if (!bSetX || !bSetY || !bReadBack || ReadX != X || ReadY != Y)
+		{
+			Record(Failed, NodeId, FString::Printf(
+				TEXT("position did not stick: asked (%d, %d), node reads (%d, %d)"), X, Y, ReadX, ReadY));
+			continue;
+		}
 		++Moved;
 	}
 
+	const int32 FailedCount = NotFound.Num() + Failed.Num() + Skipped.Num();
+
 	if (Moved == 0)
 	{
-		Transaction.Cancel();
-		UAL_CommandUtils::SendError(RequestId, 404,
-			TEXT("None of the given node_ids exist in this graph. Call pcg.get_graph for the current ids."));
+		// 一个写都没发生时撤销记录是空的，丢掉无妨；写过（哪怕回读对不上）就留着，
+		// Cancel 不回退改动，只会让它连撤销都撤不了
+		if (!bWroteAnything)
+		{
+			Transaction.Cancel();
+		}
+		else
+		{
+			Graph->MarkPackageDirty();
+		}
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetArrayField(TEXT("not_found"), NotFound);
+		Details->SetArrayField(TEXT("failed"), Failed);
+		Details->SetArrayField(TEXT("skipped"), Skipped);
+		Details->SetNumberField(TEXT("failed_count"), FailedCount);
+		UAL_CommandUtils::SendError(RequestId, NotFound.Num() == FailedCount ? 404 : 400,
+			NotFound.Num() == FailedCount
+				? TEXT("None of the given node_ids exist in this graph. Call pcg.get_graph for the current ids.")
+				: TEXT("No node was moved. See not_found / failed / skipped for why."),
+			Details);
 		return;
 	}
 
@@ -1576,6 +1739,15 @@ void FUAL_PCGCommands::Handle_SetNodePositions(const TSharedPtr<FJsonObject>& Pa
 	Data->SetStringField(TEXT("graph_path"), GraphPath);
 	Data->SetNumberField(TEXT("moved"), Moved);
 	Data->SetArrayField(TEXT("not_found"), NotFound);
+	if (FailedCount > 0)
+	{
+		// failed_count 是所有没挪成的：not_found + failed + skipped。skipped_count 单拎出来，
+		// TS 那边的第一句要把「格式不对被跳过」和「没挪成」分开说
+		Data->SetArrayField(TEXT("failed"), Failed);
+		Data->SetArrayField(TEXT("skipped"), Skipped);
+		Data->SetNumberField(TEXT("failed_count"), FailedCount);
+		Data->SetNumberField(TEXT("skipped_count"), Skipped.Num());
+	}
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
@@ -1659,27 +1831,87 @@ void FUAL_PCGCommands::Handle_SpawnVolume(const TSharedPtr<FJsonObject>& Payload
 		Actor->SetActorLabel(Label);
 	}
 
+	/**
+	 * 挂图失败时把刚生成的体积拆掉再报错。
+	 *
+	 * 上一版在这里 `Transaction.Cancel()` 然后回 500 —— 但 Cancel 只丢撤销记录、
+	 * 不回退改动，体积还留在关卡里，而且连 Ctrl+Z 都撤不掉。调用方看到 500 会再调一次，
+	 * 关卡里就多出一个没挂图的野体积。
+	 * 拆掉之后回读确认；拆不掉就在错误里给出它的路径，让调用方知道它还在。
+	 */
+	const auto AbortAndCleanUp = [&](const FString& Why)
+	{
+		const FString ActorPath = Actor->GetPathName();
+		const FString ActorLabelNow = Actor->GetActorLabel();
+		bool bDestroyed = false;
+#if WITH_EDITOR
+		bDestroyed = World->EditorDestroyActor(Actor, true);
+#else
+		bDestroyed = Actor->Destroy();
+#endif
+		// 返回值之外再看一眼对象状态。IsValid 在 5.0 起对「待销毁」一律给 false
+		bDestroyed = bDestroyed || !IsValid(Actor);
+
+		if (bDestroyed)
+		{
+			// 生成又销毁，关卡回到原样，这时丢掉撤销记录才是对的
+			Transaction.Cancel();
+			UAL_CommandUtils::SendError(RequestId, 500,
+				Why + TEXT(" The volume that had been spawned was removed again; the level is unchanged."));
+			return;
+		}
+
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetStringField(TEXT("actor_path"), ActorPath);
+		Details->SetStringField(TEXT("actor_label"), ActorLabelNow);
+		UAL_CommandUtils::SendError(RequestId, 500,
+			FString::Printf(
+				TEXT("%s The volume '%s' was already spawned and could not be removed - it is still in the level ")
+				TEXT("without a graph. Delete it or assign a graph to it by hand."),
+				*Why, *ActorLabelNow),
+			Details);
+	};
+
 	bool bGraphAssigned = false;
+	bool bGraphReadBackUnavailable = false;
 	if (Graph)
 	{
 		UObject* Component = UALReflect::GetObjectProp(Actor, TEXT("PCGComponent"));
 		if (!Component)
 		{
-			Transaction.Cancel();
-			UAL_CommandUtils::SendError(RequestId, 500, TEXT("Spawned PCGVolume has no PCGComponent"));
+			AbortAndCleanUp(TEXT("Spawned PCGVolume has no PCGComponent."));
 			return;
 		}
 
 		UALReflect::FCall SetGraph(Component, TEXT("SetGraph"));
 		if (!SetGraph.IsValid())
 		{
-			Transaction.Cancel();
-			UAL_CommandUtils::SendError(RequestId, 500,
-				FString::Printf(TEXT("PCG API mismatch: %s"), *SetGraph.GetError()));
+			AbortAndCleanUp(FString::Printf(TEXT("PCG API mismatch: %s."), *SetGraph.GetError()));
 			return;
 		}
 		SetGraph.Obj(TEXT("InGraph"), Graph);
 		SetGraph.Invoke();
+
+		// **回读组件上真正挂着的图。** Invoke 只说明调到了。
+		// 走 GraphInstance → Graph 这条 UPROPERTY 链而不是 GetGraph()，理由见
+		// Handle_SceneReport：GetGraph 在 5.5 上不是 UFUNCTION，反射找不到
+		//
+		// 这条属性链不存在（某个版本改了名）时是「读不回来」，不是「没挂上」——
+		// 为这个拆掉体积就是把一次成功报成失败。如实标 unverified 交给调用方
+		if (!Component->GetClass()->FindPropertyByName(TEXT("GraphInstance")))
+		{
+			bGraphReadBackUnavailable = true;
+		}
+		UObject* Instance = UALReflect::GetObjectProp(Component, TEXT("GraphInstance"));
+		UObject* AssignedGraph = Instance ? UALReflect::GetObjectProp(Instance, TEXT("Graph")) : nullptr;
+		if (!bGraphReadBackUnavailable && AssignedGraph != Graph)
+		{
+			AbortAndCleanUp(FString::Printf(
+				TEXT("SetGraph ran but the component's graph reads back as %s instead of %s."),
+				AssignedGraph ? *AssignedGraph->GetPathName() : TEXT("(none)"),
+				*Graph->GetPathName()));
+			return;
+		}
 		bGraphAssigned = true;
 	}
 
@@ -1703,6 +1935,10 @@ void FUAL_PCGCommands::Handle_SpawnVolume(const TSharedPtr<FJsonObject>& Payload
 	if (bGraphAssigned)
 	{
 		Data->SetStringField(TEXT("graph_path"), GraphPath);
+	}
+	if (bGraphReadBackUnavailable)
+	{
+		Data->SetBoolField(TEXT("graph_assigned_unverified"), true);
 	}
 
 	UE_LOG(LogUALPCG, Log, TEXT("Spawned PCG volume %s"), *Actor->GetActorLabel());
@@ -1897,6 +2133,23 @@ void FUAL_PCGCommands::Handle_Execute(const TSharedPtr<FJsonObject>& Payload, co
 	Payload->TryGetNumberField(TEXT("timeout_seconds"), TimeoutSeconds);
 	TimeoutSeconds = FMath::Clamp(TimeoutSeconds, 1.0, 300.0);
 
+	// 两个入口先探一遍再动手（verbose 那段会改节点设置）。
+	// 清理入口缺了就不跑：不先清掉上一轮，轮询时读到的 bGenerated 可能是上一轮的 true，
+	// 于是会把「上次的残留」报成「这次生成完成」—— 宁可直说跑不了
+	{
+		UALReflect::FCall ProbeCleanup(Component, TEXT("CleanupLocal"));
+		UALReflect::FCall ProbeGenerate(Component, TEXT("GenerateLocal"));
+		if (!ProbeCleanup.IsValid() || !ProbeGenerate.IsValid())
+		{
+			UAL_CommandUtils::SendError(RequestId, 500,
+				FString::Printf(
+					TEXT("PCG API mismatch: %s. Nothing was generated - without clearing the previous result first, ")
+					TEXT("a finished run cannot be told apart from the last run's leftovers."),
+					!ProbeCleanup.IsValid() ? *ProbeCleanup.GetError() : *ProbeGenerate.GetError()));
+			return;
+		}
+	}
+
 	// 日志抓取要在下发生成**之前**挂上，跨整个异步过程活着
 	TSharedPtr<FPCGLogCapture> LogCapture = MakeShared<FPCGLogCapture>();
 
@@ -1924,26 +2177,44 @@ void FUAL_PCGCommands::Handle_Execute(const TSharedPtr<FJsonObject>& Payload, co
 		}
 	}
 
-	// 先 Cleanup 再 Generate。不清一遍的话 bGenerated 可能上一轮就是 true，
-	// 我们就没法分辨「这次跑完了」和「上次的残留」
+	/**
+	 * 先 Cleanup 再 Generate，而且**等 bGenerated 真的落回 false 才下发 Generate**。
+	 *
+	 * 不清一遍的话 bGenerated 可能上一轮就是 true，我们就没法分辨「这次跑完了」
+	 * 和「上次的残留」。上一版清了就立刻 Generate：CleanupLocal 是排进 PCG 调度器的
+	 * 异步任务，调用返回时 bGenerated 往往还是上一轮的 true，第一次轮询就会
+	 * 把残留当成这次的结果报回去。
+	 *
+	 * 所以分两段：清理落地（bGenerated == false）之前不下发生成；下发之后
+	 * 再读到的 true 才一定是这一轮的。清理是同步完成的话第一段直接跳过。
+	 */
 	{
 		UALReflect::FCall Cleanup(Component, TEXT("CleanupLocal"));
-		if (Cleanup.IsValid())
-		{
-			Cleanup.Bool(TEXT("bRemoveComponents"), true);
-			Cleanup.Invoke();
-		}
+		Cleanup.Bool(TEXT("bRemoveComponents"), true);
+		Cleanup.Invoke();
 	}
 
-	UALReflect::FCall Generate(Component, TEXT("GenerateLocal"));
-	if (!Generate.IsValid())
+	const auto IssueGenerate = [](UObject* Target) -> bool
 	{
-		UAL_CommandUtils::SendError(RequestId, 500,
-			FString::Printf(TEXT("PCG API mismatch: %s"), *Generate.GetError()));
-		return;
+		UALReflect::FCall Generate(Target, TEXT("GenerateLocal"));
+		if (!Generate.IsValid())
+		{
+			return false;
+		}
+		Generate.Bool(TEXT("bForce"), true);
+		return Generate.Invoke();
+	};
+
+	// 共享给 ticker：Generate 下发了没有
+	TSharedRef<bool> bGenerateIssued = MakeShared<bool>(false);
+	{
+		bool bStillGenerated = false;
+		UALReflect::GetBoolProp(Component, TEXT("bGenerated"), bStillGenerated);
+		if (!bStillGenerated)
+		{
+			*bGenerateIssued = IssueGenerate(Component);
+		}
 	}
-	Generate.Bool(TEXT("bForce"), true);
-	Generate.Invoke();
 
 	// PCG 生成是异步的，不能在这里同步等 —— 阻塞 GameThread 只会让它永远跑不完。
 	// 挂一个 ticker 轮询 bGenerated，跑完或超时再回响应。
@@ -1953,7 +2224,8 @@ void FUAL_PCGCommands::Handle_Execute(const TSharedPtr<FJsonObject>& Payload, co
 
 	FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateLambda(
-			[RequestId, WeakActor, WeakComponent, StartTime, TimeoutSeconds, ActorLabel, LogCapture](float) -> bool
+			[RequestId, WeakActor, WeakComponent, StartTime, TimeoutSeconds, ActorLabel, LogCapture,
+				bGenerateIssued, IssueGenerate](float) -> bool
 			{
 				AActor* LiveActor = WeakActor.Get();
 				UObject* LiveComponent = WeakComponent.Get();
@@ -1968,6 +2240,36 @@ void FUAL_PCGCommands::Handle_Execute(const TSharedPtr<FJsonObject>& Payload, co
 				UALReflect::GetBoolProp(LiveComponent, TEXT("bGenerated"), bGenerated);
 
 				const double Elapsed = FPlatformTime::Seconds() - StartTime;
+
+				// ---- 第一段：等上一轮的产物清掉 ----
+				if (!*bGenerateIssued)
+				{
+					if (bGenerated)
+					{
+						if (Elapsed < TimeoutSeconds)
+						{
+							return true; // 清理还没落地，继续等
+						}
+						UAL_CommandUtils::SendError(RequestId, 504,
+							FString::Printf(
+								TEXT("The previous generation result on '%s' was not cleared within %.0fs, so a new run was ")
+								TEXT("not started (its completion could not be told apart from the old result). ")
+								TEXT("The old output may be partly removed. Try pcg.execute again with a longer timeout_seconds."),
+								*ActorLabel, TimeoutSeconds));
+						return false;
+					}
+					if (!IssueGenerate(LiveComponent))
+					{
+						UAL_CommandUtils::SendError(RequestId, 500,
+							TEXT("PCG API mismatch: GenerateLocal disappeared after cleanup. The previous result was cleared ")
+							TEXT("and nothing new was generated."));
+						return false;
+					}
+					*bGenerateIssued = true;
+					return true; // 下一拍再读 bGenerated —— 这一拍读到的是下发前的值
+				}
+
+				// ---- 第二段：等这一轮生成完 ----
 				if (!bGenerated && Elapsed < TimeoutSeconds)
 				{
 					return true; // 继续轮询
@@ -2061,7 +2363,21 @@ void FUAL_PCGCommands::Handle_Execute(const TSharedPtr<FJsonObject>& Payload, co
  *   声明不会长出重复节点**，这条对"改一改再跑一遍"至关重要
  * - 连线用别名，也认 "Input" / "Output"
  * - 属性走路径写入，支持 `A.B[0].C`
- * - 每一项都回读校验，任何一项失败整批回滚（事务），并逐条报出原因
+ * - 每一项都回读校验，并逐条报出原因
+ *
+ * ## 失败时图是什么样
+ *
+ * **事务回滚不了。** `Transaction.Cancel()` 只把撤销记录丢掉，从不回放 ——
+ * 改过的东西原样留着，而且连 Ctrl+Z 都没了（见 UAL_SequencerCommands 里那段长注释）。
+ * 上一版在清图、建节点、连线之后 Cancel，然后回「整批回滚，什么都没变」，
+ * 而图其实已经被清空了一半。所以现在分两段：
+ *
+ * 1. **只读预检**：节点缺 id / type、类型名不存在、连线缺端点、端点找不到 ——
+ *    这些不动图就能判掉的，全在动手前判完。有一项不对就原样不动地报回去，
+ *    这时说「什么都没变」才是真话（连图都还没建）
+ * 2. **动手之后**才暴露的失败（属性写不进、引脚连不上、清图清不干净）不 Cancel：
+ *    整批留在撤销栈里、一步可撤，并把图**现在**的样子（graph_nodes_after /
+ *    graph_edges_after）和已经做了什么一起报回去
  */
 void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 {
@@ -2078,37 +2394,7 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 	}
 	GraphPath = NormalizePath(GraphPath);
 
-	// 图不存在就顺手建一张。「声明这张图长什么样」里本来就包含「这张图存在」，
-	// 硬要求先调一次 create_graph 只是多一次往返和一个能踩的坑。
-	// 路径打错的后果只是多一个空图资产，看得见也删得掉 —— 比直接失败轻。
-	bool bCreated = false;
-	FString LoadError;
-	UObject* Graph = nullptr;
-
-	// GraphExists 而不是 DoesPackageExist。后者只看磁盘，于是「本轮刚建、还没存盘」
-	// 的图会走进下面的新建分支，把自己的节点、连线和用户参数整个盖掉 ——
-	// 真机上表现为「merge 却清了我的节点」「用户参数变成 0 个」。见 GraphExists 的注释
-	if (!GraphExists(GraphPath))
-	{
-		FString CreateError;
-		Graph = CreateGraphAsset(GraphPath, CreateError);
-		if (!Graph)
-		{
-			UAL_CommandUtils::SendError(RequestId, 500, CreateError);
-			return;
-		}
-		bCreated = true;
-	}
-	else
-	{
-		Graph = LoadGraph(GraphPath, LoadError);
-		if (!Graph)
-		{
-			UAL_CommandUtils::SendError(RequestId, 404, LoadError);
-			return;
-		}
-	}
-
+	// 空声明先挡掉。上一版这一步排在自动建图之后，空调用也会留下一张新图
 	const TArray<TSharedPtr<FJsonValue>>* NodeSpecs = nullptr;
 	Payload->TryGetArrayField(TEXT("nodes"), NodeSpecs);
 	const TArray<TSharedPtr<FJsonValue>>* EdgeSpecs = nullptr;
@@ -2138,16 +2424,221 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 	Payload->TryGetStringField(TEXT("mode"), Mode);
 	const bool bReplace = !Mode.Equals(TEXT("merge"), ESearchCase::IgnoreCase);
 
+	// 图不存在就顺手建一张。「声明这张图长什么样」里本来就包含「这张图存在」，
+	// 硬要求先调一次 create_graph 只是多一次往返和一个能踩的坑。
+	// 路径打错的后果只是多一个空图资产，看得见也删得掉 —— 比直接失败轻。
+	//
+	// GraphExists 而不是 DoesPackageExist。后者只看磁盘，于是「本轮刚建、还没存盘」
+	// 的图会走进新建分支，把自己的节点、连线和用户参数整个盖掉 ——
+	// 真机上表现为「merge 却清了我的节点」「用户参数变成 0 个」。见 GraphExists 的注释
+	//
+	// 这里只**加载**已有的图；真要新建推迟到预检通过之后，预检失败不留下空图
+	UObject* Graph = nullptr;
+	if (GraphExists(GraphPath))
+	{
+		FString LoadError;
+		Graph = LoadGraph(GraphPath, LoadError);
+		if (!Graph)
+		{
+			UAL_CommandUtils::SendError(RequestId, 404, LoadError);
+			return;
+		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> Failures;
+
+	const auto Fail = [&Failures](const FString& What, const FString& Why)
+	{
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("item"), What);
+		Entry->SetStringField(TEXT("error"), Why);
+		Failures.Add(MakeShared<FJsonValueObject>(Entry));
+	};
+
+	// ══ 第一段：只读预检 ══════════════════════════════════════════════════
+	//
+	// 这一段不碰图。能在这里判掉的失败，都不该等到清图、建节点之后才发现
+
+	struct FNodePlan
+	{
+		FString Alias;
+		UClass* SettingsClass = nullptr;
+		TSharedPtr<FJsonObject> Spec;
+	};
+	struct FEdgePlan
+	{
+		FString FromAlias;
+		FString ToAlias;
+		FString FromPin;
+		FString ToPin;
+	};
+
+	TArray<FNodePlan> NodePlans;
+	// FString 作键的 TSet 默认大小写不敏感，和下面 ByAlias 的查找口径一致
+	TSet<FString> DeclaredAliases;
+
+	for (const TSharedPtr<FJsonValue>& Value : NodeSpecs ? *NodeSpecs : TArray<TSharedPtr<FJsonValue>>())
+	{
+		const TSharedPtr<FJsonObject>* Spec = nullptr;
+		if (!Value.IsValid() || !Value->TryGetObject(Spec) || !Spec)
+		{
+			Fail(TEXT("(node)"), TEXT("node entry is not an object"));
+			continue;
+		}
+
+		FString Alias;
+		if (!(*Spec)->TryGetStringField(TEXT("id"), Alias) || Alias.IsEmpty())
+		{
+			Fail(TEXT("(node)"), TEXT("every node needs an 'id' to reference it from 'edges'"));
+			continue;
+		}
+
+		FString TypeName;
+		if (!(*Spec)->TryGetStringField(TEXT("type"), TypeName) || TypeName.IsEmpty())
+		{
+			Fail(Alias, TEXT("missing 'type'"));
+			continue;
+		}
+
+		FString ResolveError;
+		UClass* SettingsClass = ResolveSettingsClass(TypeName, ResolveError);
+		if (!SettingsClass)
+		{
+			Fail(Alias, ResolveError);
+			continue;
+		}
+
+		FNodePlan Plan;
+		Plan.Alias = Alias;
+		Plan.SettingsClass = SettingsClass;
+		Plan.Spec = *Spec;
+		NodePlans.Add(Plan);
+		DeclaredAliases.Add(Alias);
+	}
+
+	UObject* ExistingInput = Graph ? UALReflect::GetObjectProp(Graph, TEXT("InputNode")) : nullptr;
+	UObject* ExistingOutput = Graph ? UALReflect::GetObjectProp(Graph, TEXT("OutputNode")) : nullptr;
+
+	// 连线端点在动手之后能不能找到。和下面写入阶段的查找顺序一致：
+	// 先别名（声明的节点 + Input / Output），再退回按真实 node_id 找
+	const auto EndpointProblem = [&](const FString& Alias) -> FString
+	{
+		if (DeclaredAliases.Contains(Alias) ||
+			Alias.Equals(ALIAS_INPUT, ESearchCase::IgnoreCase) ||
+			Alias.Equals(ALIAS_OUTPUT, ESearchCase::IgnoreCase))
+		{
+			return FString();
+		}
+		UObject* Found = Graph ? FindNodeById(Graph, Alias) : nullptr;
+		if (!Found)
+		{
+			return FString::Printf(TEXT("unknown node '%s' - not declared in 'nodes' and not an existing node id"), *Alias);
+		}
+		// replace 会先清掉 Input / Output 以外的一切，指着旧节点的边到时候就悬空了
+		if (bReplace && Found != ExistingInput && Found != ExistingOutput)
+		{
+			return FString::Printf(
+				TEXT("'%s' is an existing node, but mode=replace removes it before edges are made. ")
+				TEXT("Declare it in 'nodes' or use mode=merge."),
+				*Alias);
+		}
+		return FString();
+	};
+
+	TArray<FEdgePlan> EdgePlans;
+	for (const TSharedPtr<FJsonValue>& Value : EdgeSpecs ? *EdgeSpecs : TArray<TSharedPtr<FJsonValue>>())
+	{
+		const TSharedPtr<FJsonObject>* Spec = nullptr;
+		if (!Value.IsValid() || !Value->TryGetObject(Spec) || !Spec)
+		{
+			Fail(TEXT("(edge)"), TEXT("edge entry is not an object"));
+			continue;
+		}
+
+		FEdgePlan Plan;
+		(*Spec)->TryGetStringField(TEXT("from"), Plan.FromAlias);
+		(*Spec)->TryGetStringField(TEXT("to"), Plan.ToAlias);
+		(*Spec)->TryGetStringField(TEXT("from_pin"), Plan.FromPin);
+		(*Spec)->TryGetStringField(TEXT("to_pin"), Plan.ToPin);
+
+		const FString EdgeLabel = FString::Printf(TEXT("%s -> %s"), *Plan.FromAlias, *Plan.ToAlias);
+
+		if (Plan.FromAlias.IsEmpty() || Plan.ToAlias.IsEmpty())
+		{
+			Fail(EdgeLabel, TEXT("edges need both 'from' and 'to'"));
+			continue;
+		}
+
+		FString Problem = EndpointProblem(Plan.FromAlias);
+		if (Problem.IsEmpty())
+		{
+			Problem = EndpointProblem(Plan.ToAlias);
+		}
+		if (!Problem.IsEmpty())
+		{
+			Fail(EdgeLabel, Problem);
+			continue;
+		}
+
+		EdgePlans.Add(Plan);
+	}
+
+	if (Failures.Num() > 0)
+	{
+		// 这时候确实什么都没动：图没建、没清、没写
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetArrayField(TEXT("failures"), Failures);
+		Details->SetNumberField(TEXT("failed_count"), Failures.Num());
+		UAL_CommandUtils::SendError(RequestId, 400,
+			FString::Printf(
+				TEXT("%d item(s) are invalid. Nothing was changed - these were caught before touching the graph."),
+				Failures.Num()),
+			Details);
+		return;
+	}
+
+	// ══ 第二段：动手 ══════════════════════════════════════════════════════
+
+	bool bCreated = false;
+	if (!Graph)
+	{
+		FString CreateError;
+		Graph = CreateGraphAsset(GraphPath, CreateError);
+		if (!Graph)
+		{
+			UAL_CommandUtils::SendError(RequestId, 500, CreateError);
+			return;
+		}
+		bCreated = true;
+	}
+
 	FUAL_ScopedTransaction Transaction(NSLOCTEXT("UALPCG", "ApplyPCGGraph", "Apply PCG Graph"));
 	Graph->Modify();
+
+	UObject* InputNode = UALReflect::GetObjectProp(Graph, TEXT("InputNode"));
+	UObject* OutputNode = UALReflect::GetObjectProp(Graph, TEXT("OutputNode"));
+
+	/** 写完（或写到一半）之后图里实际有什么。成功和失败两条出口都要带 */
+	const auto AttachGraphAfter = [Graph](const TSharedPtr<FJsonObject>& Target)
+	{
+		TArray<TSharedPtr<FJsonValue>> AllEdges;
+		CollectEdges(Graph, AllEdges);
+		Target->SetArrayField(TEXT("graph_edges_after"), AllEdges);
+
+		TArray<UObject*> NodesAfter;
+		CollectAllNodes(Graph, NodesAfter);
+		TArray<TSharedPtr<FJsonValue>> NodesAfterJson;
+		for (UObject* Node : NodesAfter)
+		{
+			NodesAfterJson.Add(MakeShared<FJsonValueObject>(BuildNodeJson(Node)));
+		}
+		Target->SetArrayField(TEXT("graph_nodes_after"), NodesAfterJson);
+	};
 
 	int32 ClearedNodes = 0;
 	TArray<TSharedPtr<FJsonValue>> ClearFailures;
 	if (bReplace)
 	{
-		UObject* InputNode = UALReflect::GetObjectProp(Graph, TEXT("InputNode"));
-		UObject* OutputNode = UALReflect::GetObjectProp(Graph, TEXT("OutputNode"));
-
 		// 一次性批量删，而不是逐个调 RemoveNode：RemoveNodes 内部会先把所有
 		// 关联边断干净再摘节点，逐个删时前一个节点残留的边会挡住后一个
 		TArray<UObject*> ToRemove;
@@ -2188,15 +2679,22 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 
 		if (ClearFailures.Num() > 0)
 		{
-			Transaction.Cancel();
+			// 不 Cancel：已经删掉的那几个回不来，Cancel 只会让它们连撤销都撤不回。
+			// 声明里的节点和连线一个都没写 —— 半清的图上再往下写只会更难收拾
+			Graph->MarkPackageDirty();
 			TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
 			Details->SetArrayField(TEXT("still_present"), ClearFailures);
+			Details->SetNumberField(TEXT("cleared_nodes"), ClearedNodes);
+			Details->SetNumberField(TEXT("failed_count"), ClearFailures.Num());
+			Details->SetBoolField(TEXT("created_graph"), bCreated);
+			AttachGraphAfter(Details);
 			UAL_CommandUtils::SendError(RequestId, 500,
 				FString::Printf(
-					TEXT("mode=replace could not clear %d node(s) from the graph, so nothing was written ")
-					TEXT("(a half-cleared graph is worse than an untouched one). ")
-					TEXT("Remove them with pcg.remove_node and try again."),
-					ClearFailures.Num()),
+					TEXT("mode=replace removed %d old node(s) but could not clear %d more, so none of the declared ")
+					TEXT("nodes or edges were written. The %d removed node(s) are gone (one undo step brings them back); ")
+					TEXT("graph_nodes_after shows what is left. Remove the rest with pcg.remove_node and try again, ")
+					TEXT("or use mode=merge."),
+					ClearedNodes, ClearFailures.Num(), ClearedNodes),
 				Details);
 			return;
 		}
@@ -2204,58 +2702,24 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 
 	// 别名 → 真实节点。预置两个端点，让连线里能直接写 Input / Output
 	TMap<FString, UObject*> ByAlias;
-	if (UObject* InputNode = UALReflect::GetObjectProp(Graph, TEXT("InputNode")))
+	if (InputNode)
 	{
 		ByAlias.Add(TEXT("Input"), InputNode);
 	}
-	if (UObject* OutputNode = UALReflect::GetObjectProp(Graph, TEXT("OutputNode")))
+	if (OutputNode)
 	{
 		ByAlias.Add(TEXT("Output"), OutputNode);
 	}
 
 	TArray<TSharedPtr<FJsonValue>> NodeResults;
 	TArray<TSharedPtr<FJsonValue>> EdgeResults;
-	TArray<TSharedPtr<FJsonValue>> Failures;
-
-	const auto Fail = [&Failures](const FString& What, const FString& Why)
-	{
-		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-		Entry->SetStringField(TEXT("item"), What);
-		Entry->SetStringField(TEXT("error"), Why);
-		Failures.Add(MakeShared<FJsonValueObject>(Entry));
-	};
+	int32 CreatedNodes = 0;
 
 	// ---- 节点 ----
-	for (const TSharedPtr<FJsonValue>& Value : NodeSpecs ? *NodeSpecs : TArray<TSharedPtr<FJsonValue>>())
+	for (const FNodePlan& Plan : NodePlans)
 	{
-		const TSharedPtr<FJsonObject>* Spec = nullptr;
-		if (!Value.IsValid() || !Value->TryGetObject(Spec) || !Spec)
-		{
-			Fail(TEXT("(node)"), TEXT("node entry is not an object"));
-			continue;
-		}
-
-		FString Alias;
-		if (!(*Spec)->TryGetStringField(TEXT("id"), Alias) || Alias.IsEmpty())
-		{
-			Fail(TEXT("(node)"), TEXT("every node needs an 'id' to reference it from 'edges'"));
-			continue;
-		}
-
-		FString TypeName;
-		if (!(*Spec)->TryGetStringField(TEXT("type"), TypeName) || TypeName.IsEmpty())
-		{
-			Fail(Alias, TEXT("missing 'type'"));
-			continue;
-		}
-
-		FString ResolveError;
-		UClass* SettingsClass = ResolveSettingsClass(TypeName, ResolveError);
-		if (!SettingsClass)
-		{
-			Fail(Alias, ResolveError);
-			continue;
-		}
+		const FString& Alias = Plan.Alias;
+		UClass* SettingsClass = Plan.SettingsClass;
 
 		// 复用同别名的既有节点。不这么做的话，同一份声明跑两遍会长出两套节点，
 		// 而"改一改再跑一遍"正是使用这个工具最自然的方式
@@ -2281,6 +2745,7 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 			}
 		}
 
+		bool bNewNode = false;
 		if (!Node)
 		{
 			UALReflect::FCall Add(Graph, TEXT("AddNodeOfType"));
@@ -2293,29 +2758,35 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 			Add.Invoke();
 
 			Node = Add.OutObject(TEXT("ReturnValue"));
-			Settings = Add.OutObject(TEXT("DefaultNodeSettings"));
 			if (!Node)
 			{
 				Fail(Alias, FString::Printf(TEXT("PCG refused to create a %s node"), *SettingsClass->GetName()));
 				continue;
 			}
+			Settings = Add.OutObject(TEXT("DefaultNodeSettings"));
+			if (!Settings)
+			{
+				Settings = GetNodeSettings(Node);
+			}
 			// 别名写进 NodeTitle，下次 apply 才认得出这是同一个节点
 			UALReflect::SetNameProp(Node, TEXT("NodeTitle"), FName(*Alias));
+			bNewNode = true;
+			++CreatedNodes;
 		}
 
 		int32 X = 0, Y = 0;
-		if ((*Spec)->TryGetNumberField(TEXT("x"), X))
+		if (Plan.Spec->TryGetNumberField(TEXT("x"), X))
 		{
 			UALReflect::SetIntProp(Node, TEXT("PositionX"), X);
 		}
-		if ((*Spec)->TryGetNumberField(TEXT("y"), Y))
+		if (Plan.Spec->TryGetNumberField(TEXT("y"), Y))
 		{
 			UALReflect::SetIntProp(Node, TEXT("PositionY"), Y);
 		}
 
 		TArray<TSharedPtr<FJsonValue>> Updated, FailedProps;
 		TSharedPtr<FJsonObject> Properties;
-		if (UAL_CommandUtils::TryGetObjectFieldFlexible(*Spec, TEXT("properties"), Properties))
+		if (UAL_CommandUtils::TryGetObjectFieldFlexible(Plan.Spec, TEXT("properties"), Properties))
 		{
 			ApplyProperties(Settings, Properties, Updated, FailedProps);
 		}
@@ -2332,83 +2803,54 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 
 		ByAlias.Add(Alias, Node);
 
+		// 位置、标题、引脚都由 BuildNodeJson 从节点上回读
 		TSharedPtr<FJsonObject> Result = BuildNodeJson(Node);
 		Result->SetStringField(TEXT("alias"), Alias);
+		Result->SetBoolField(TEXT("created"), bNewNode);
 		Result->SetArrayField(TEXT("applied_properties"), Updated);
 		NodeResults.Add(MakeShared<FJsonValueObject>(Result));
 	}
 
 	// ---- 连线 ----
-	for (const TSharedPtr<FJsonValue>& Value : EdgeSpecs ? *EdgeSpecs : TArray<TSharedPtr<FJsonValue>>())
+	for (const FEdgePlan& Plan : EdgePlans)
 	{
-		const TSharedPtr<FJsonObject>* Spec = nullptr;
-		if (!Value.IsValid() || !Value->TryGetObject(Spec) || !Spec)
-		{
-			Fail(TEXT("(edge)"), TEXT("edge entry is not an object"));
-			continue;
-		}
-
-		FString FromAlias, ToAlias, FromPin, ToPin;
-		(*Spec)->TryGetStringField(TEXT("from"), FromAlias);
-		(*Spec)->TryGetStringField(TEXT("to"), ToAlias);
-		(*Spec)->TryGetStringField(TEXT("from_pin"), FromPin);
-		(*Spec)->TryGetStringField(TEXT("to_pin"), ToPin);
-
-		const FString EdgeLabel = FString::Printf(TEXT("%s -> %s"), *FromAlias, *ToAlias);
-
-		if (FromAlias.IsEmpty() || ToAlias.IsEmpty())
-		{
-			Fail(EdgeLabel, TEXT("edges need both 'from' and 'to'"));
-			continue;
-		}
+		const FString EdgeLabel = FString::Printf(TEXT("%s -> %s"), *Plan.FromAlias, *Plan.ToAlias);
 
 		// 别名找不到就退回按真实 node_id 找，两种写法都认
-		UObject* FromNode = ByAlias.FindRef(FromAlias);
+		UObject* FromNode = ByAlias.FindRef(Plan.FromAlias);
 		if (!FromNode)
 		{
-			FromNode = FindNodeById(Graph, FromAlias);
+			FromNode = FindNodeById(Graph, Plan.FromAlias);
 		}
-		UObject* ToNode = ByAlias.FindRef(ToAlias);
+		UObject* ToNode = ByAlias.FindRef(Plan.ToAlias);
 		if (!ToNode)
 		{
-			ToNode = FindNodeById(Graph, ToAlias);
+			ToNode = FindNodeById(Graph, Plan.ToAlias);
 		}
 
+		// 预检过了还找不到，只可能是上面那个节点没建出来 —— 它的失败已经记过了
 		if (!FromNode || !ToNode)
 		{
-			Fail(EdgeLabel, FString::Printf(TEXT("unknown node '%s'"),
-				!FromNode ? *FromAlias : *ToAlias));
+			Fail(EdgeLabel, FString::Printf(TEXT("node '%s' was not created, so this edge was skipped"),
+				!FromNode ? *Plan.FromAlias : *Plan.ToAlias));
 			continue;
 		}
 
+		FString FromPin = Plan.FromPin;
+		FString ToPin = Plan.ToPin;
 		FString ConnectError;
-		if (!ConnectEdge(Graph, FromNode, FromAlias, ToNode, ToAlias, FromPin, ToPin, ConnectError))
+		if (!ConnectEdge(Graph, FromNode, Plan.FromAlias, ToNode, Plan.ToAlias, FromPin, ToPin, ConnectError))
 		{
 			Fail(EdgeLabel, ConnectError);
 			continue;
 		}
 
 		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-		Result->SetStringField(TEXT("from"), FromAlias);
+		Result->SetStringField(TEXT("from"), Plan.FromAlias);
 		Result->SetStringField(TEXT("from_pin"), FromPin);
-		Result->SetStringField(TEXT("to"), ToAlias);
+		Result->SetStringField(TEXT("to"), Plan.ToAlias);
 		Result->SetStringField(TEXT("to_pin"), ToPin);
 		EdgeResults.Add(MakeShared<FJsonValueObject>(Result));
-	}
-
-	if (Failures.Num() > 0)
-	{
-		// 整批回滚。半张图比没有图更难收拾 —— 调用方看不出哪些生效了哪些没有，
-		// 只能靠 get_graph 一个个比对
-		Transaction.Cancel();
-
-		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
-		Details->SetArrayField(TEXT("failures"), Failures);
-		UAL_CommandUtils::SendError(RequestId, 400,
-			FString::Printf(TEXT("%d item(s) failed; the whole batch was rolled back. Nothing changed."),
-				Failures.Num()),
-			Details);
-		return;
 	}
 
 	Graph->MarkPackageDirty();
@@ -2427,18 +2869,27 @@ void FUAL_PCGCommands::Handle_ApplyGraph(const TSharedPtr<FJsonObject>& Payload,
 	// 回读整张图一起返回，省掉调用方紧接着再来一次 get_graph。
 	// **节点也要回读** —— merge 模式下这次没提到的旧节点还在图里，
 	// 只报本次写入的那几个会让调用方以为图就长这样
-	TArray<TSharedPtr<FJsonValue>> AllEdges;
-	CollectEdges(Graph, AllEdges);
-	Data->SetArrayField(TEXT("graph_edges_after"), AllEdges);
+	AttachGraphAfter(Data);
 
-	TArray<UObject*> NodesAfter;
-	CollectAllNodes(Graph, NodesAfter);
-	TArray<TSharedPtr<FJsonValue>> NodesAfterJson;
-	for (UObject* Node : NodesAfter)
+	if (Failures.Num() > 0)
 	{
-		NodesAfterJson.Add(MakeShared<FJsonValueObject>(BuildNodeJson(Node)));
+		// 动手之后才失败的：不 Cancel（它不回退，只会让已做的改动撤不回来），
+		// 如实说图已经变了、变成了什么样。整批是一个撤销步
+		Data->SetArrayField(TEXT("failures"), Failures);
+		Data->SetNumberField(TEXT("failed_count"), Failures.Num());
+		UAL_CommandUtils::SendError(RequestId, 400,
+			FString::Printf(
+				TEXT("%d item(s) failed after the graph had already been changed, and the changes were NOT rolled back: ")
+				TEXT("%s%s%d node(s) written (%d newly created), %d edge(s) connected. graph_nodes_after / graph_edges_after ")
+				TEXT("show the graph as it is now; the whole apply is one undo step. Fix the failed items and run ")
+				TEXT("pcg.apply_graph again - nodes are matched by id, so nothing gets duplicated."),
+				Failures.Num(),
+				bCreated ? TEXT("created the graph, ") : TEXT(""),
+				*(bReplace ? FString::Printf(TEXT("cleared %d old node(s), "), ClearedNodes) : FString()),
+				NodeResults.Num(), CreatedNodes, EdgeResults.Num()),
+			Data);
+		return;
 	}
-	Data->SetArrayField(TEXT("graph_nodes_after"), NodesAfterJson);
 
 	UE_LOG(LogUALPCG, Log, TEXT("Applied %d nodes / %d edges to %s"),
 		NodeResults.Num(), EdgeResults.Num(), *GraphPath);
@@ -3041,11 +3492,14 @@ void FUAL_PCGCommands::Handle_GraphParameters(const TSharedPtr<FJsonObject>& Pay
 	if (Payload->TryGetArrayField(TEXT("remove"), RemoveArray) && RemoveArray)
 	{
 		TArray<FName> ToRemove;
-		for (const TSharedPtr<FJsonValue>& Item : *RemoveArray)
+		for (int32 Index = 0; Index < RemoveArray->Num(); ++Index)
 		{
+			const TSharedPtr<FJsonValue>& Item = (*RemoveArray)[Index];
 			FString Name;
 			if (!Item.IsValid() || !Item->TryGetString(Name) || Name.IsEmpty())
 			{
+				// 格式不对的也要记。上一版静默跳过，调用方以为删了
+				Fail(FString::Printf(TEXT("remove[%d]"), Index), TEXT("entry is not a non-empty string"));
 				continue;
 			}
 			if (!Bag->FindPropertyDescByName(FName(*Name)))
@@ -3054,11 +3508,22 @@ void FUAL_PCGCommands::Handle_GraphParameters(const TSharedPtr<FJsonObject>& Pay
 				continue;
 			}
 			ToRemove.Add(FName(*Name));
-			RemovedJson.Add(MakeShared<FJsonValueString>(Name));
 		}
 		if (ToRemove.Num() > 0)
 		{
 			Bag->RemovePropertiesByName(ToRemove);
+
+			// 删完逐个回读，确实不在了才算删掉。上一版在调用**之前**就把名字塞进
+			// removed，删没删成都报「删掉了」
+			for (const FName& Name : ToRemove)
+			{
+				if (Bag->FindPropertyDescByName(Name))
+				{
+					Fail(Name.ToString(), TEXT("still on the graph after removal"));
+					continue;
+				}
+				RemovedJson.Add(MakeShared<FJsonValueString>(Name.ToString()));
+			}
 		}
 	}
 
@@ -3066,11 +3531,13 @@ void FUAL_PCGCommands::Handle_GraphParameters(const TSharedPtr<FJsonObject>& Pay
 	const TArray<TSharedPtr<FJsonValue>>* ParamArray = nullptr;
 	if (Payload->TryGetArrayField(TEXT("parameters"), ParamArray) && ParamArray)
 	{
-		for (const TSharedPtr<FJsonValue>& Item : *ParamArray)
+		for (int32 Index = 0; Index < ParamArray->Num(); ++Index)
 		{
+			const TSharedPtr<FJsonValue>& Item = (*ParamArray)[Index];
 			const TSharedPtr<FJsonObject>* Spec = nullptr;
 			if (!Item.IsValid() || !Item->TryGetObject(Spec) || !Spec)
 			{
+				Fail(FString::Printf(TEXT("parameters[%d]"), Index), TEXT("entry is not an object"));
 				continue;
 			}
 
@@ -3191,6 +3658,22 @@ void FUAL_PCGCommands::Handle_GraphParameters(const TSharedPtr<FJsonObject>& Pay
 	if (FailedJson.Num() > 0)
 	{
 		Data->SetArrayField(TEXT("failed"), FailedJson);
+		Data->SetNumberField(TEXT("failed_count"), FailedJson.Num());
+	}
+
+	// 要求改了东西、却一件都没办成 —— 整体失败，不回 207。
+	// 「部分完成：0 成功」读起来还是像办了点什么
+	const bool bNothingDone = AddedJson.Num() == 0 && UpdatedJson.Num() == 0 && RemovedJson.Num() == 0;
+	if (FailedJson.Num() > 0 && bNothingDone)
+	{
+		// 回读确认过一件没成，包是原样的，这时丢掉空的撤销记录才对
+		Transaction.Cancel();
+		UAL_CommandUtils::SendError(RequestId, 400,
+			FString::Printf(TEXT("None of the %d requested parameter change(s) could be made; see failed. ")
+				TEXT("parameters lists what the graph has now."),
+				FailedJson.Num()),
+			Data);
+		return;
 	}
 
 	UAL_CommandUtils::SendResponse(RequestId, FailedJson.Num() > 0 ? 207 : 200, Data);

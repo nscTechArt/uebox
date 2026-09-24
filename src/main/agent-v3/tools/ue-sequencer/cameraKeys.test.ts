@@ -177,6 +177,43 @@ describe('返回给用户的话', () => {
     expect(textOf(await call())).toContain('sequence_audit')
   })
 
+  it('序列存盘结果照引擎说：成功才说已存盘，失败要说，旧插件不报就不提', async () => {
+    mockUe.mockResolvedValueOnce({ ...OK, sequence_saved: true })
+    expect(textOf(await call())).toContain('序列已存盘')
+
+    mockUe.mockResolvedValueOnce({ ...OK, sequence_saved: false })
+    const failed = textOf(await call())
+    expect(failed).toContain('序列**没**存盘成功')
+    expect(failed).not.toContain('序列已存盘')
+
+    mockUe.mockResolvedValueOnce(OK)
+    expect(textOf(await call())).not.toContain('存盘')
+  })
+
+  /** 键数以插件从通道读回的为准，不是请求里给了几个 */
+  it('轨道键数和写入数对不上时两个都报', async () => {
+    mockUe.mockResolvedValueOnce({ ...OK, written_keys: 3, key_count: 5 })
+    expect(textOf(await call({ replace_existing_keys: false }))).toContain(
+      '写入 3 个关键帧，轨道上现有 5 个'
+    )
+  })
+
+  it('有键被跳过时第一句不是成功，逐条列出原因', async () => {
+    mockUe.mockResolvedValueOnce({
+      ...OK,
+      key_count: 2,
+      written_keys: 2,
+      skipped_keys: 1,
+      skipped_key_reasons: [{ index: 1, reason: '第 120 帧 location 和 rotation 都没给' }]
+    })
+    const text = textOf(await call())
+
+    expect(text.split('\n')[0]).toBe(
+      '⚠️ 部分完成：2 个关键帧成功 / 0 个关键帧失败 / 1 个关键帧跳过。'
+    )
+    expect(text).toContain('按帧排序后的第 2 个键：第 120 帧 location 和 rotation 都没给')
+  })
+
   it('失败时带上原因', async () => {
     mockUe.mockRejectedValueOnce(new Error('创建序列失败'))
     await expect(call()).rejects.toThrow(/创建序列失败/)

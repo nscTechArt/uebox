@@ -85,6 +85,11 @@ interface CameraCutsOutput {
   binding_broken: boolean
   /** 这次删掉了几个用户原有的切轨段。只有 rebuild=true 时才可能非 0 */
   removed_sections: number
+  /**
+   * 写完后序列资产是否存盘成功。没改动时不发；旧插件也不发 ——
+   * 缺这个字段就当「不知道」，回执里不说已存盘
+   */
+  sequence_saved?: boolean
   candidates?: string[]
   warnings?: string[]
 }
@@ -126,18 +131,31 @@ export function createSequenceCameraCutsTool(): UnrealAgentTool<CameraCutsOutput
         return { text: '失败：引擎没有返回结果', isError: true }
       }
 
+      // 「已存盘」只在插件明说存成功时才讲。存盘失败要说；旧插件不报这个字段，
+      // 那就什么都不说 —— 回执可以不全，不能说错（AGENTS.md §5 第 14 条）
+      const saveNote =
+        d.sequence_saved === true
+          ? '序列已存盘。'
+          : d.sequence_saved === false
+            ? '⚠️ 序列**没**存盘成功，改动只在编辑器内存里，关掉编辑器前要手动保存。'
+            : ''
+
       const lines = d.already_covered
         ? [`${d.sequence_path} 的相机切轨本来就盖满了 [${d.range[0]}, ${d.range[1]})，没有改动。`]
         : [
             `已给 ${d.sequence_path} 补上相机切轨：`,
-            `切到「${d.camera_binding}」，覆盖 [${d.range[0]}, ${d.range[1]})，序列已存盘。`
+            `切到「${d.camera_binding}」，覆盖 [${d.range[0]}, ${d.range[1]})。${saveNote}`
           ]
 
-      // 删了用户的东西要说在前面，而且要说清楚撤不回来
+      // 删了用户的东西要说在前面。存了盘才撤不回来；没存成功时 Ctrl+Z 还来得及
       if (d.removed_sections > 0) {
         lines.push(
           `⚠️ 原有的 ${d.removed_sections} 个切轨段已被删除并替换。` +
-            `序列已存盘，这一步撤不回来。`
+            (d.sequence_saved === true
+              ? '序列已存盘，这一步撤不回来。'
+              : d.sequence_saved === false
+                ? '序列没存上盘，现在 Ctrl+Z 还能撤回。'
+                : '')
         )
       }
 

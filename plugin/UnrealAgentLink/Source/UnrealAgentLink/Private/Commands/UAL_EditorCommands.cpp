@@ -1730,17 +1730,50 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 	// 设置配置
 	GConfig->SetString(*Section, *Key, *Value, ConfigFileName);
 	
-	// 刷新到磁�?
+	// 刷新到磁盘。Flush 没有返回值（5.0-5.4 都是 void），写盘失败的唯一痕迹是
+	// FConfigFile::Dirty 没被清掉 —— WriteInternal 末尾是 `Dirty = !bResult`。
+	// -nowrite / NoSave 的文件也会留着 Dirty，那种情况同样算「没落盘」，照实说
 	GConfig->Flush(false, ConfigFileName);
+	const FConfigFile* WrittenFile = GConfig->FindConfigFile(ConfigFileName);
+	const bool bPersisted = WrittenFile && !WrittenFile->Dirty;
+
+	// 回执里的 value 从引擎读回，不回显请求（AGENTS.md §5 第 14 条）
+	FString ReadBack;
+	const bool bReadBack = GConfig->GetString(*Section, *Key, ReadBack, ConfigFileName);
 
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("config_name"), ConfigName);
 	Result->SetStringField(TEXT("section"), Section);
 	Result->SetStringField(TEXT("key"), Key);
-	Result->SetStringField(TEXT("value"), Value);
+	Result->SetStringField(TEXT("requested_value"), Value);
+	Result->SetBoolField(TEXT("read_back"), bReadBack);
+	if (bReadBack)
+	{
+		Result->SetStringField(TEXT("value"), ReadBack);
+	}
+	Result->SetBoolField(TEXT("persisted"), bPersisted);
 	Result->SetStringField(TEXT("file_path"), ConfigFileName);
 
-	UE_LOG(LogUALEditor, Log, TEXT("project.set_config: %s [%s] %s = %s"), *ConfigName, *Section, *Key, *Value);
+	if (!bReadBack || ReadBack != Value)
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 500,
+			bReadBack
+				? FString::Printf(TEXT("project.set_config: wrote \"%s\" but the engine reads back \"%s\" for [%s] %s"), *Value, *ReadBack, *Section, *Key)
+				: FString::Printf(TEXT("project.set_config: the value was written but [%s] %s cannot be read back from %s"), *Section, *Key, *ConfigName),
+			Result);
+		return;
+	}
+	if (!bPersisted)
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 500,
+			FString::Printf(TEXT("project.set_config: [%s] %s is set in memory but writing %s to disk failed (read-only file, source control lock, or -nowrite). It will be lost when the editor restarts."), *Section, *Key, *ConfigFileName),
+			Result);
+		return;
+	}
+
+	UE_LOG(LogUALEditor, Log, TEXT("project.set_config: %s [%s] %s = %s"), *ConfigName, *Section, *Key, *ReadBack);
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 }
@@ -2357,6 +2390,19 @@ void FUAL_EditorCommands::Handle_Save(const TSharedPtr<FJsonObject>& Payload, co
 
 	TArray<UPackage*> ToSave;
 
+	// scope=list 时点了名却没存的条目，分两类都要回报：没加载的、加载了但没改动的。
+	// 以前只有「一个都没解析到」才报 NotFound，列了 5 个存了 3 个时另外 2 个无声消失，
+	// 调用方会以为 5 个都落盘了（AGENTS.md §5 第 14 条）
+	TArray<TSharedPtr<FJsonValue>> NotLoadedJson;
+	TArray<TSharedPtr<FJsonValue>> SkippedJson;
+	auto AddSkipped = [&SkippedJson](const FString& Asset, const FString& Reason)
+	{
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("asset"), Asset);
+		Entry->SetStringField(TEXT("reason"), Reason);
+		SkippedJson.Add(MakeShared<FJsonValueObject>(Entry));
+	};
+
 	if (Scope == TEXT("list"))
 	{
 		const TArray<TSharedPtr<FJsonValue>>* AssetsArray = nullptr;
@@ -2366,12 +2412,13 @@ void FUAL_EditorCommands::Handle_Save(const TSharedPtr<FJsonObject>& Payload, co
 			return;
 		}
 
-		TArray<FString> NotFound;
+		int32 ResolvedCount = 0;
 		for (const TSharedPtr<FJsonValue>& Value : *AssetsArray)
 		{
 			FString AssetPath;
 			if (!Value.IsValid() || !Value->TryGetString(AssetPath) || AssetPath.IsEmpty())
 			{
+				AddSkipped(TEXT("(empty or non-string entry)"), TEXT("Not an asset path"));
 				continue;
 			}
 
@@ -2387,21 +2434,29 @@ void FUAL_EditorCommands::Handle_Save(const TSharedPtr<FJsonObject>& Payload, co
 			if (!Package)
 			{
 				// 没加载就谈不上有改动，直说而不是静默跳过
-				NotFound.Add(AssetPath);
+				NotLoadedJson.Add(MakeShared<FJsonValueString>(AssetPath));
+				continue;
+			}
+			++ResolvedCount;
+			if (!Package->IsDirty())
+			{
+				// 加载了但没有未保存的改动：磁盘上已经是这个状态，不用存，但要说一声
+				AddSkipped(AssetPath, TEXT("No unsaved changes - already up to date on disk"));
 				continue;
 			}
 			ToSave.AddUnique(Package);
 		}
 
-		if (ToSave.Num() == 0)
+		if (ResolvedCount == 0)
 		{
 			TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
-			TArray<TSharedPtr<FJsonValue>> NotFoundJson;
-			for (const FString& Path : NotFound)
+			Details->SetArrayField(TEXT("not_loaded"), NotLoadedJson);
+			Details->SetNumberField(TEXT("not_loaded_count"), NotLoadedJson.Num());
+			if (SkippedJson.Num() > 0)
 			{
-				NotFoundJson.Add(MakeShared<FJsonValueString>(Path));
+				Details->SetArrayField(TEXT("skipped"), SkippedJson);
+				Details->SetNumberField(TEXT("skipped_count"), SkippedJson.Num());
 			}
-			Details->SetArrayField(TEXT("not_loaded"), NotFoundJson);
 			UAL_CommandUtils::SendError(
 				RequestId, 404,
 				TEXT("None of the listed assets are loaded in memory, so none of them have unsaved changes."),
@@ -2626,9 +2681,18 @@ void FUAL_EditorCommands::Handle_Save(const TSharedPtr<FJsonObject>& Payload, co
 	Result->SetStringField(TEXT("scope"), Scope);
 	Result->SetNumberField(TEXT("saved_count"), SavedJson.Num());
 	Result->SetArrayField(TEXT("saved"), SavedJson);
+	Result->SetNumberField(TEXT("failed_count"), FailedJson.Num());
 	if (FailedJson.Num() > 0)
 	{
 		Result->SetArrayField(TEXT("failed"), FailedJson);
+	}
+	if (Scope == TEXT("list"))
+	{
+		// 始终带上，空数组也带：调用方靠它确认「点名的每一个都有下落」
+		Result->SetNumberField(TEXT("not_loaded_count"), NotLoadedJson.Num());
+		Result->SetArrayField(TEXT("not_loaded"), NotLoadedJson);
+		Result->SetNumberField(TEXT("skipped_count"), SkippedJson.Num());
+		Result->SetArrayField(TEXT("skipped"), SkippedJson);
 	}
 
 	/**

@@ -10,6 +10,7 @@ import { serviceManager } from '../../../../services'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { describeFailures, withPartialHeadline, type PartialFailure } from '../../partialResult'
 // ============================================================================
 // Schema 定义
 // ============================================================================
@@ -112,12 +113,31 @@ interface IsolatedItem {
   destination: string
 }
 
+/** 没导成的一个输入文件。旧插件的 rejected 也是这个形状 */
+interface FailedFile {
+  file: string
+  reason?: string
+}
+
 /** 导入资产响应数据 (UE 插件返回) */
 interface ImportAssetsResponse {
   ok: boolean
+  /** imported[] 里的资产数 —— 一个 FBX 能出好几个，不是文件数 */
   imported_count: number
   requested_count: number
   imported: ImportedItem[]
+  /** 几个输入文件导成了。旧插件没有这个字段 */
+  succeeded_count?: number
+  /** 每个没导成的输入文件（不存在 / 体检拒收 / 引擎没产出）。旧插件没有 */
+  failed?: FailedFile[]
+  failed_count?: number
+  /** 体检拒收的（畸形 OBJ）。新插件里它们同时也在 failed 里 */
+  rejected?: FailedFile[]
+  rejected_count?: number
+  /** 有资产没落盘：关掉编辑器就没了 */
+  save_warning?: string
+  saved_count?: number
+  error?: string
   isolated?: IsolatedItem[]
   isolate_note?: string
   reused?: ReusedItem[]
@@ -181,8 +201,10 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
 
 【返回数据】：
 - ok: 是否成功
-- imported_count: 实际导入数量（包含被复用的那些，别只看这个数）
+- imported_count: imported 里的资产数（一个文件可能出好几个资产，也包含被复用的那些，别只看这个数）
 - imported: 导入的资产信息列表，reused=true 的是复用的旧资产
+- failed / failed_count: 没导成的输入文件和原因（文件不存在、格式被拒、引擎没产出），只在有的时候出现
+- save_warning: 有资产没写进磁盘，关掉编辑器就没了 —— 出现了就告诉用户去手动保存
 - isolated / isolate_note: 哪些文件被放进了子文件夹，以及实际落点
 - reused / reused_count / reuse_warning: 哪些资产是复用的旧的，不是这次新建的
 - rename_failed: asset_names 里没改成的那些（只在有的时候出现）`,
@@ -279,12 +301,19 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
 
         console.log('[ImportAssetsTool] 收到响应:', response ? '成功' : '无数据')
 
+        const outcome = importOutcome(response, filesArray.length)
+
         if (response && response.ok) {
           // 「导入成功」这句话不能盖住「贴图是旧的」和「东西不在你以为的目录里」。
           // 模型只读 message 的时候也得看得见这两件事，所以拼进正文，不只挂字段
           const notes: string[] = [
-            `成功导入 ${response.imported_count}/${response.requested_count} 个文件`
+            `导入了 ${outcome.succeeded}/${outcome.requested} 个文件，` +
+              `共 ${response.imported_count} 个资产`
           ]
+          // 没落盘的排在最前面几行：关掉编辑器这些就没了，比别的提醒都要紧
+          if (response.save_warning) {
+            notes.push(`⚠️ ${response.save_warning}`)
+          }
           if (response.isolated?.length) {
             const where = response.isolated
               .map((item) => `${item.file} → ${item.destination}`)
@@ -316,6 +345,10 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
 
           return {
             success: true,
+            ...(outcome.failed > 0
+              ? { failed: outcome.failures, failed_count: outcome.failed }
+              : {}),
+            ...(response.save_warning ? { save_warning: response.save_warning } : {}),
             ...(renamedAway.length > 0
               ? { rename_failed: renamedAway.map(([from, to]) => ({ file: from, wanted: to })) }
               : {}),
@@ -332,7 +365,11 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
                   reuse_warning: response.reuse_warning
                 }
               : {}),
-            message: notes.join('\n')
+            message: withPartialHeadline(
+              notes.join('\n'),
+              { succeeded: outcome.succeeded, failed: outcome.failed, unit: '个文件' },
+              outcome.failures
+            )
           }
         }
 
@@ -342,9 +379,11 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
         const code = (response as any)?.__rpc?.code ?? (response as any)?.code
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const details = (response as any)?.details
+        // 一个都没导成：每个文件的原因都带上，别只剩插件挑的第一条
+        const reasons = describeFailures(outcome.failures)
         return {
           success: false,
-          error: `导入资产失败：${msg}`,
+          error: `导入资产失败：${msg}${reasons ? `\n${reasons}` : ''}`,
           code,
           details,
           raw: response
@@ -358,4 +397,44 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
       }
     }
   })
+}
+
+/**
+ * 按**输入文件**数成败，给第一句话用。
+ *
+ * 插件的 imported_count 数的是资产（一个 FBX 出网格 + 材质 + 贴图，自动生成的
+ * PBR 材质也算），拿它和 requested_count 比会得出「成功导入 6/5」。新插件回
+ * succeeded_count / failed[]（failed 已含 rejected）；旧插件只有 rejected[]，
+ * 而且不存在的文件既不报也不算进 requested_count —— 那部分按「发下去几个、
+ * 插件认了几个」的差补上，至少数目是对的。
+ */
+export function importOutcome(
+  response: ImportAssetsResponse | undefined,
+  sentCount: number
+): { requested: number; succeeded: number; failed: number; failures: PartialFailure[] } {
+  const toFailure = (f: FailedFile): PartialFailure => ({ item: f.file, reason: f.reason })
+  if (!response) return { requested: sentCount, succeeded: 0, failed: 0, failures: [] }
+
+  let requested: number
+  let failed: number
+  let failures: PartialFailure[]
+  if (typeof response.failed_count === 'number' || Array.isArray(response.failed)) {
+    failures = (response.failed ?? []).map(toFailure)
+    failed = response.failed_count ?? failures.length
+    requested = response.requested_count ?? sentCount
+  } else {
+    // 旧插件
+    failures = (response.rejected ?? []).map(toFailure)
+    const unreported = Math.max(0, sentCount - (response.requested_count ?? sentCount))
+    if (unreported > 0) {
+      failures.push({
+        item: `另有 ${unreported} 个文件`,
+        reason: '插件没导入、也没说原因（旧版插件遇到不存在的路径就是这样），核对路径后重导'
+      })
+    }
+    failed = (response.rejected_count ?? response.rejected?.length ?? 0) + unreported
+    requested = Math.max(sentCount, response.requested_count ?? 0)
+  }
+  const succeeded = response.succeeded_count ?? Math.max(0, requested - failed)
+  return { requested, succeeded, failed, failures }
 }

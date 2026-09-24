@@ -78,14 +78,23 @@ Use this after meaningful Blueprint graph or structure changes to validate the r
         console.log('[CompileBlueprintTool] Response received:', response ? 'ok' : 'empty')
 
         if (response?.ok) {
+          /*
+           * 要求保存却没存上，第一句就得说（AGENTS.md §5 第 14 条）。原来一律
+           * 「compiled successfully」—— 编译过了、文件只读没写进去，关编辑器改动就没了，
+           * 模型却以为已经落盘。没要求保存（save:false）时 saved 本来就是 false，不算失败。
+           */
+          const saveFailed = input.save !== false && response.saved === false
           return {
+            message: saveFailed
+              ? `⚠️ 蓝图已编译通过（${response.status}），但未能保存到磁盘：${response.path}。` +
+                '改动只在内存里，关编辑器就没了。'
+              : `Blueprint compiled successfully (${response.status}) at ${response.path}`,
             success: true,
             status: response.status,
             saved: response.saved,
             path: response.path,
             diagnostics: response.diagnostics ?? [],
-            diagnostics_count: response.diagnostics?.length ?? 0,
-            message: `Blueprint compiled successfully (${response.status}) at ${response.path}`
+            diagnostics_count: response.diagnostics?.length ?? 0
           }
         }
 

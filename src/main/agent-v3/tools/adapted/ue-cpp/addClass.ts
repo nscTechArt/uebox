@@ -55,10 +55,20 @@ const InputSchema = z.object({
     )
 })
 
+/**
+ * 引擎的 FailedToHotReload 是「代码加成功了，只是没能热加载」—— 部分完成，不是没建成。
+ * 抛成错误会让模型以为什么都没发生，转头再建一次，撞「文件已存在」或建出第二个类
+ */
+function nothingCreated(response: CppAddClassResponse): boolean {
+  return response.result !== 'Succeeded' && response.result !== 'FailedToHotReload'
+}
+
 function summarize(response: CppAddClassResponse): string {
   if (response.result !== 'Succeeded') {
     return [
-      `✗ 建类失败（${response.result ?? '未知原因'}）`,
+      response.result === 'FailedToHotReload'
+        ? '⚠️ 部分完成：类文件已写出，但没能编进编辑器（FailedToHotReload）'
+        : `✗ 建类失败（${response.result ?? '未知原因'}）`,
       response.fail_reason || '引擎没有给出原因。',
       response.result === 'FailedToHotReload'
         ? '注意：**文件可能已经写出去了**，只是没能编进来。先去看一眼那两个文件在不在，别重复创建。'
@@ -102,6 +112,17 @@ export function createCppAddClassTool(): UnrealAgentTool<CppAddClassResponse> {
       '源码管理登记和编译 —— 自己写会漏掉这些，产出也和引擎建的不一样。\n' +
       '【纯蓝图工程会被拒】那种工程加第一个 C++ 类必须用户手动做一次，我做不了。\n' +
       '【建完还要做什么】返回里会说有没有顺手编译。没编就填完实现后调 cpp_compile。',
-    toOutcome: (response) => ({ text: summarize(response), details: response })
+    /*
+     * 没建成就标 isError。正文第一个字已经是 ✗，但不标的话宿主和熔断器都当它成功了：
+     * 模型拿着同一组参数反复重建，一次都不会被拦。和 cpp_compile 不同，这里的入参
+     * 就是类名，重试同一组参数本来就该被拦 —— 没有「改完代码再调同一个调用」的正常路径。
+     * ToolFailure 的消息就是这段正文，引擎给的原因不会丢。
+     * FailedToHotReload 不算：文件已经写出去了，见 nothingCreated。
+     */
+    toOutcome: (response) => ({
+      text: summarize(response),
+      details: response,
+      ...(nothingCreated(response) ? { isError: true } : {})
+    })
   })
 }

@@ -391,7 +391,7 @@ void FUAL_SystemCommands::Handle_ManagePlugin(const TSharedPtr<FJsonObject>& Pay
 	 * SetPluginEnabled 只动内存，落盘必须自己调 SaveCurrentProjectToDisk ——
 	 * 见本文件上面那段事故说明。
 	 */
-	auto SetPluginEnabledAndSave = [&PluginName, &Message](bool bEnable) -> bool
+	auto SetPluginEnabledAndSave = [&PluginName, &Message](bool bEnable, bool bForceWrite) -> bool
 	{
 		FText FailReason;
 		if (!IProjectManager::Get().SetPluginEnabled(PluginName, bEnable, FailReason))
@@ -400,7 +400,9 @@ void FUAL_SystemCommands::Handle_ManagePlugin(const TSharedPtr<FJsonObject>& Pay
 			return false;
 		}
 
-		if (!IProjectManager::Get().IsCurrentProjectDirty())
+		// bForceWrite：磁盘上的 .uproject 和目标不一致（比如被外部改过），
+		// 内存描述符却已经是目标值、不算脏 —— 这时不写盘，磁盘就永远停在旧状态
+		if (!bForceWrite && !IProjectManager::Get().IsCurrentProjectDirty())
 		{
 			// 描述符没变化：目标状态已经写在 .uproject 里了（或者和默认一致），
 			// 不用写盘。后面的回读会确认这一点。
@@ -421,22 +423,38 @@ void FUAL_SystemCommands::Handle_ManagePlugin(const TSharedPtr<FJsonObject>& Pay
 	bool bAttemptedChange = false;
 	bool bTargetEnabled = bCurrentlyEnabled;
 
-	if (NormalizedAction == TEXT("enable"))
+	/**
+	 * 「已经是目标状态、不用动」要按**磁盘上的 .uproject** 判断，不能看内存里的 IsEnabled()。
+	 *
+	 * 插件的启停要重启才生效，所以内存状态和 .uproject 经常对不上：刚 disable 过、
+	 * 还没重启时，IsEnabled() 仍是 true。这时再 enable，老代码以为「已经启用」直接跳过写盘，
+	 * 磁盘上还挂着那条 disable，回执却是 200 —— 重启后插件照样被关掉。
+	 * 读不出来（Unreadable）就当不一致，老老实实走一遍写盘 + 回读。
+	 */
+	FString PreReadError;
+	const EUAL_UprojectPluginState PreDiskState = UAL_ReadUprojectPluginState(UprojectPath, PluginName, PreReadError);
+	auto DiskAlreadyAt = [PreDiskState, bDefaultEnabled](bool bEnable) -> bool
 	{
-		if (!bCurrentlyEnabled)
+		switch (PreDiskState)
 		{
-			bAttemptedChange = true;
-			bTargetEnabled = true;
-			bSuccess = SetPluginEnabledAndSave(true);
+		case EUAL_UprojectPluginState::Enabled:
+			return bEnable;
+		case EUAL_UprojectPluginState::Disabled:
+			return !bEnable;
+		case EUAL_UprojectPluginState::Absent:
+			return bDefaultEnabled == bEnable;
+		default:
+			return false;
 		}
-	}
-	else if (NormalizedAction == TEXT("disable"))
+	};
+
+	if (NormalizedAction == TEXT("enable") || NormalizedAction == TEXT("disable"))
 	{
-		if (bCurrentlyEnabled)
+		bTargetEnabled = NormalizedAction == TEXT("enable");
+		if (!DiskAlreadyAt(bTargetEnabled) || bCurrentlyEnabled != bTargetEnabled)
 		{
 			bAttemptedChange = true;
-			bTargetEnabled = false;
-			bSuccess = SetPluginEnabledAndSave(false);
+			bSuccess = SetPluginEnabledAndSave(bTargetEnabled, /*bForceWrite=*/!DiskAlreadyAt(bTargetEnabled));
 		}
 	}
 	else if (NormalizedAction == TEXT("query"))
@@ -477,10 +495,14 @@ void FUAL_SystemCommands::Handle_ManagePlugin(const TSharedPtr<FJsonObject>& Pay
 	{
 		if (bUprojectVerified)
 		{
-			bRequiresRestart = true;
-			Message = bTargetEnabled
-				? TEXT("Plugin enabled in .uproject (verified on disk). Restart required.")
-				: TEXT("Plugin disabled in .uproject (verified on disk). Restart required.");
+			// 只是把 .uproject 里挂着的反向改动撤回来时，运行中的编辑器本来就是目标状态，不用重启
+			bRequiresRestart = bCurrentlyEnabled != bTargetEnabled;
+			Message = FString::Printf(
+				TEXT("Plugin %s in .uproject (verified on disk). %s"),
+				bTargetEnabled ? TEXT("enabled") : TEXT("disabled"),
+				bRequiresRestart
+					? TEXT("Restart required.")
+					: TEXT("The running editor already has it in this state, so no restart is needed."));
 		}
 		else
 		{
@@ -491,6 +513,24 @@ void FUAL_SystemCommands::Handle_ManagePlugin(const TSharedPtr<FJsonObject>& Pay
 				? FString::Printf(TEXT("Wrote .uproject but could not read it back to verify: %s"), *ReadError)
 				: FString::Printf(TEXT("Wrote .uproject but the plugin entry is still '%s' on disk. Nothing was changed."),
 					UAL_UprojectStateToString(DiskState));
+		}
+	}
+	else if (!bAttemptedChange && NormalizedAction != TEXT("query"))
+	{
+		// 没动任何东西（磁盘和内存都已是目标）也要以回读为准：回读对不上就不许回 200
+		if (!bUprojectVerified)
+		{
+			bSuccess = false;
+			Message = DiskState == EUAL_UprojectPluginState::Unreadable
+				? FString::Printf(TEXT("Could not read .uproject to verify the plugin state: %s"), *ReadError)
+				: FString::Printf(TEXT("The plugin entry is '%s' in .uproject, which does not match the requested state."),
+					UAL_UprojectStateToString(DiskState));
+		}
+		else
+		{
+			Message = bTargetEnabled
+				? TEXT("Plugin is already enabled in .uproject (verified on disk). Nothing was changed.")
+				: TEXT("Plugin is already disabled in .uproject (verified on disk). Nothing was changed.");
 		}
 	}
 

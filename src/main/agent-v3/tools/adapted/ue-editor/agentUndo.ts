@@ -25,6 +25,7 @@ import { serviceManager } from '../../../../services'
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { describeToolError } from '../../engineErrors'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { withPartialHeadline } from '../../partialResult'
 
 interface HistoryEntry {
   step: number
@@ -217,16 +218,24 @@ Actor，就先 ue_get_actor 查一下它还在不在，**别急着保存**：保
           return { success: false, error: `插件没有响应（${method}）` }
         }
 
-        // 一步都没动不是错误：多半是本来就没有可撤销的步骤。
-        // 报成失败会让模型去排查一个不存在的问题。
+        // 本来就没有可撤的步骤时，一步没动不是故障：报成失败会让模型去排查一个
+        // 不存在的问题。新插件这时也会带 error（「Nothing to undo」），照样放进正文。
+        // 但栈上明明还有步骤、却一步都没动 —— 那是编辑器拒绝了，是真失败
+        const leftOnStack = direction === 'redo' ? response.redoable : response.remaining
         if (response.steps_applied === 0) {
+          if (response.error && leftOnStack > 0) {
+            return {
+              success: false,
+              error: `一步都没有${verb}：${response.error}（栈上还有 ${leftOnStack} 步）`
+            }
+          }
           return {
             success: true,
             steps_applied: 0,
             remaining: response.remaining,
             redoable: response.redoable,
             summary: response.error
-              ? `没有${verb}任何步骤：${response.error}`
+              ? `没有${verb}任何步骤（没有可${verb}的步骤）：${response.error}`
               : `没有可${verb}的步骤。`
           }
         }
@@ -242,8 +251,47 @@ Actor，就先 ue_get_actor 查一下它还在不在，**别急着保存**：保
               '。其中的关卡 Actor 可能被整体还原甚至撤没，拿不准就查一遍实际状态'
             : ''
 
+        const body =
+          `已${verb} ${response.steps_applied} 步` +
+          (response.affected_packages.length > 0
+            ? `，影响 ${response.affected_packages.length} 个资产（需要 ue_save 才会落盘）`
+            : '') +
+          objectNote +
+          `。还可撤销 ${response.remaining} 步、可重做 ${response.redoable} 步。`
+
+        /*
+         * 撤了几步、然后停住（或者要的比栈上多）。
+         *
+         * 以前这里回 `success: false`，适配层对失败只留 error —— 「已经撤了 2 步」
+         * 这件事丢了。模型以为一步没撤，重试，于是又多撤两步。
+         * 现在不当失败抛：第一句说部分完成，正文照样先说撤了几步、动了哪些资产，
+         * 再说为什么停。要的步数只有调用方知道（没填 = 全部，那剩下的都算没撤成）。
+         */
+        if (response.error) {
+          const requested = typeof input.steps === 'number' && input.steps > 0 ? input.steps : 0
+          const shortfall = requested > 0 ? requested - response.steps_applied : leftOnStack
+          return {
+            summary: withPartialHeadline(
+              body,
+              { succeeded: response.steps_applied, failed: Math.max(shortfall, 1), unit: '步' },
+              [{ item: `没${verb}成的部分`, reason: response.error }]
+            ),
+            success: true,
+            partial: true,
+            action: response.action,
+            steps_applied: response.steps_applied,
+            ...(requested > 0 ? { steps_requested: requested } : {}),
+            step_titles: response.step_titles,
+            remaining: response.remaining,
+            redoable: response.redoable,
+            affected_packages: response.affected_packages,
+            ...(objects.length > 0 ? { affected_objects: objects } : {}),
+            stop_reason: response.error
+          }
+        }
+
         return {
-          success: !response.error,
+          success: true,
           action: response.action,
           steps_applied: response.steps_applied,
           step_titles: response.step_titles,
@@ -251,14 +299,7 @@ Actor，就先 ue_get_actor 查一下它还在不在，**别急着保存**：保
           redoable: response.redoable,
           affected_packages: response.affected_packages,
           ...(objects.length > 0 ? { affected_objects: objects } : {}),
-          ...(response.error ? { error: response.error } : {}),
-          summary:
-            `已${verb} ${response.steps_applied} 步` +
-            (response.affected_packages.length > 0
-              ? `，影响 ${response.affected_packages.length} 个资产（需要 ue_save 才会落盘）`
-              : '') +
-            objectNote +
-            `。还可撤销 ${response.remaining} 步、可重做 ${response.redoable} 步。`
+          summary: body
         }
       } catch (error) {
         // 超时要留码：撤销可能已经生效，报成明确失败会让调用方重试，于是多撤一步

@@ -209,15 +209,78 @@ describe('ue_undo', () => {
     expect(String(result.summary)).toContain('没有可撤销的步骤')
   })
 
-  it('中途撤不动时把插件给的原因带上', async () => {
+  /**
+   * 撤了 1 步然后停住：不能报成失败。失败在适配层只剩 error，「已经撤了 1 步」就丢了，
+   * 模型以为一步没撤、重试，于是多撤一步（AGENTS.md §5 第 14 条）。
+   */
+  it('中途撤不动时：第一句说部分完成，先说撤了几步，再带上插件给的原因', async () => {
     callRequest.mockResolvedValue(
-      okResponse({ steps_applied: 1, remaining: 1, error: 'Stopped after 1 of 2 steps' })
+      okResponse({ ok: false, steps_applied: 1, remaining: 1, error: 'Stopped after 1 of 2 steps' })
     )
 
     const result = await undo({ steps: 2 })
 
+    expect(result.success).toBe(true)
+    expect(result.steps_applied).toBe(1)
+    expect(result.steps_requested).toBe(2)
+    const summary = String(result.summary)
+    expect(summary.split('\n')[0]).toBe('⚠️ 部分完成：1 步成功 / 1 步失败。')
+    expect(summary).toContain('已撤销 1 步')
+    expect(summary).toContain('Stopped after 1 of 2 steps')
+    // summary 是返回对象的第一个键 —— 适配层 JSON 化后模型第一眼看到的就是它
+    expect(Object.keys(result)[0]).toBe('summary')
+  })
+
+  it('要的比栈上多：撤了能撤的，缺口算进失败', async () => {
+    callRequest.mockResolvedValue(
+      okResponse({
+        ok: false,
+        steps_applied: 2,
+        remaining: 0,
+        error: 'Requested 5 steps but only 2 were available; undid 2.'
+      })
+    )
+
+    const result = await undo({ steps: 5 })
+
+    expect(String(result.summary).split('\n')[0]).toBe('⚠️ 部分完成：2 步成功 / 3 步失败。')
+    expect(String(result.summary)).toContain('only 2 were available')
+  })
+
+  it('栈上还有步骤却一步都没撤动：这是真失败', async () => {
+    callRequest.mockResolvedValue(
+      okResponse({
+        ok: false,
+        steps_applied: 0,
+        step_titles: [],
+        remaining: 3,
+        error: 'Stopped after 0 of 3 steps - the editor refused to undo further.'
+      })
+    )
+
+    const result = await undo({})
+
     expect(result.success).toBe(false)
-    expect(result.error).toBe('Stopped after 1 of 2 steps')
+    expect(String(result.error)).toContain('refused')
+  })
+
+  it('新插件在栈空时带 error：仍不算失败，但正文说清楚一步没撤', async () => {
+    callRequest.mockResolvedValue(
+      okResponse({
+        ok: false,
+        steps_applied: 0,
+        step_titles: [],
+        remaining: 0,
+        redoable: 0,
+        error: 'Nothing to undo: 3 step(s) requested, 0 available on the agent undo stack.'
+      })
+    )
+
+    const result = await undo({ steps: 3 })
+
+    expect(result.success).toBe(true)
+    expect(String(result.summary)).toContain('没有撤销任何步骤')
+    expect(String(result.summary)).toContain('3 step(s) requested')
   })
 
   it('插件没响应时报错而不是当成撤了 0 步', async () => {

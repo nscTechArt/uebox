@@ -172,6 +172,52 @@ describe('组件层级要带回去', () => {
   })
 })
 
+describe('属性没写进去要摆在第一句', () => {
+  /**
+   * 插件一直在回 failed_properties，工具层原来把它丢了、照说「成功添加」——
+   * 模型以为 Intensity 已经配好，接着往下做（AGENTS.md §5 第 14 条）。
+   */
+  it('部分属性失败时第一句是部分完成，失败原因逐条列出', async () => {
+    callRequest.mockResolvedValue({
+      ...okResponse,
+      failed_properties: ['Intensity: no such property on this component class'],
+      message: "Added component 'Trigger' ... but 1 of its properties were NOT applied"
+    })
+
+    const result = await run({
+      ...BASE_INPUT,
+      component_properties: { Mobility: 'Movable', Intensity: 5000 }
+    })
+
+    expect(Object.keys(result)[0]).toBe('message')
+    const message = String(result.message)
+    expect(message.split('\n')[0]).toBe('⚠️ 部分完成：1 个属性成功 / 1 个属性失败。')
+    expect(message).toContain('- Intensity：no such property on this component class')
+    expect(message).not.toContain('成功为蓝图')
+    expect(result.failed_count).toBe(1)
+    expect(result.failed_properties).toEqual([
+      { item: 'Intensity', reason: 'no such property on this component class' }
+    ])
+  })
+
+  it('没存上盘时第一句就说', async () => {
+    callRequest.mockResolvedValue({ ...okResponse, saved: false })
+
+    const result = await run(BASE_INPUT)
+
+    expect(String(result.message)).toMatch(/^⚠️ 未能保存到磁盘/)
+  })
+
+  it('全部写成时不带 ⚠️，也不塞空的 failed_properties', async () => {
+    callRequest.mockResolvedValue(okResponse)
+
+    const result = await run({ ...BASE_INPUT, component_properties: { Mobility: 'Movable' } })
+
+    expect(String(result.message)).not.toContain('⚠️')
+    expect(result).not.toHaveProperty('failed_properties')
+  })
+})
+
 describe('连不上引擎', () => {
   it('没有连接时直说，不发请求', async () => {
     getConnectionCount.mockReturnValue(0)

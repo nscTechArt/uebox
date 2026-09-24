@@ -160,10 +160,20 @@ void FUAL_ActorCommands::RegisterCommands(TMap<FString, TFunction<void(const TSh
 //   Handle_SetProperty:      3172-3330
 //   Handle_SetTransformUnified: 3332-3529
 
-TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJsonObject>& Item)
+/**
+ * 生成一个 Actor；失败时把原因写进 OutFailReason。
+ *
+ * 以前失败只回 nullptr，批量里那一项变成 `created[i] = null`，调用方只知道
+ * 「第 3 个没建出来」，不知道是资产路径写错、类加载不到还是网格挂不上 ——
+ * 只能原样重试，而原样重试必然再失败一次（AGENTS.md §5 第 14 条）。
+ *
+ * 做成文件内的自由函数而不是改成员签名：头文件在 Public 下，改它会牵动其他调用方。
+ */
+static TSharedPtr<FJsonObject> UAL_SpawnSingleActorWithReason(const TSharedPtr<FJsonObject>& Item, FString& OutFailReason)
 {
 	if (!Item.IsValid())
 	{
+		OutFailReason = TEXT("instance is not a JSON object");
 		return nullptr;
 	}
 
@@ -176,12 +186,14 @@ TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJ
 
 	if (AssetId.IsEmpty() && PresetName.IsEmpty() && ClassPath.IsEmpty())
 	{
+		OutFailReason = TEXT("instance needs one of asset_id / preset / class");
 		return nullptr; // Skip invalid
 	}
 
 	UWorld* World = UAL_CommandUtils::GetLiveWorld();
 	if (!World)
 	{
+		OutFailReason = TEXT("World not available");
 		return nullptr;
 	}
 
@@ -193,6 +205,9 @@ TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJ
 		if (!UAL_CommandUtils::ResolveSpawnFromAssetId(AssetId, Resolved, ResolveError))
 		{
 			UE_LOG(LogUALActor, Warning, TEXT("Spawn failed to resolve asset_id=%s error=%s"), *AssetId, *ResolveError);
+			OutFailReason = ResolveError.IsEmpty()
+				? FString::Printf(TEXT("could not resolve asset_id '%s'"), *AssetId)
+				: ResolveError;
 			return nullptr;
 		}
 	}
@@ -201,6 +216,7 @@ TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJ
 		UAL_CommandUtils::FUALSpawnPreset Preset;
 		if (!UAL_CommandUtils::ResolvePreset(PresetName, Preset))
 		{
+			OutFailReason = FString::Printf(TEXT("unknown preset '%s'"), *PresetName);
 			return nullptr;
 		}
 		Resolved.SpawnClass = Preset.Class;
@@ -233,6 +249,9 @@ TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJ
 
 	if (Resolved.SpawnClass == nullptr)
 	{
+		OutFailReason = !ClassPath.IsEmpty()
+			? FString::Printf(TEXT("class '%s' could not be loaded"), *ClassPath)
+			: FString(TEXT("could not resolve a class to spawn"));
 		return nullptr;
 	}
 
@@ -265,6 +284,7 @@ TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJ
 	
 	if (!Actor)
 	{
+		OutFailReason = FString::Printf(TEXT("SpawnActor returned null for class %s"), *Resolved.SpawnClass->GetName());
 		return nullptr;
 	}
 
@@ -280,6 +300,8 @@ TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJ
 
 	if (!UAL_CommandUtils::SetStaticMeshIfNeeded(Actor, MeshPath))
 	{
+		OutFailReason = FString::Printf(TEXT("mesh '%s' could not be loaded or applied; the actor was removed"),
+			MeshPath ? MeshPath : TEXT(""));
 		Actor->Destroy();
 		return nullptr;
 	}
@@ -312,6 +334,12 @@ TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJ
 	return Data;
 }
 
+TSharedPtr<FJsonObject> FUAL_ActorCommands::SpawnSingleActor(const TSharedPtr<FJsonObject>& Item)
+{
+	FString Unused;
+	return UAL_SpawnSingleActorWithReason(Item, Unused);
+}
+
 void FUAL_ActorCommands::Handle_SpawnActor(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 {
 #if WITH_EDITOR
@@ -342,25 +370,50 @@ void FUAL_ActorCommands::Handle_SpawnActor(const TSharedPtr<FJsonObject>& Payloa
 		}
 
 		TArray<TSharedPtr<FJsonValue>> Created;
+		TArray<TSharedPtr<FJsonValue>> Failed;
 		int32 SuccessCount = 0;
 
-		for (const TSharedPtr<FJsonValue>& Val : *Instances)
+		for (int32 Index = 0; Index < Instances->Num(); ++Index)
 		{
-			const TSharedPtr<FJsonObject> Item = Val->AsObject();
-			if (TSharedPtr<FJsonObject> Res = SpawnSingleActor(Item))
+			const TSharedPtr<FJsonValue>& Val = (*Instances)[Index];
+			const TSharedPtr<FJsonObject> Item = Val.IsValid() ? Val->AsObject() : nullptr;
+			FString FailReason;
+			if (TSharedPtr<FJsonObject> Res = UAL_SpawnSingleActorWithReason(Item, FailReason))
 			{
 				Created.Add(MakeShared<FJsonValueObject>(Res));
 				SuccessCount++;
 			}
 			else
 			{
+				// created[i] 保持 null（老调用方按下标对位），原因另记在 failed 里 ——
+				// 光一个 null，调用方分不清「路径写错」和「引擎拒绝生成」
 				Created.Add(MakeShared<FJsonValueNull>());
+				TSharedPtr<FJsonObject> Fail = MakeShared<FJsonObject>();
+				Fail->SetNumberField(TEXT("index"), Index);
+				Fail->SetStringField(TEXT("reason"), FailReason.IsEmpty() ? FString(TEXT("spawn failed")) : FailReason);
+				Failed.Add(MakeShared<FJsonValueObject>(Fail));
 			}
 		}
 
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 		Data->SetArrayField(TEXT("created"), Created);
 		Data->SetNumberField(TEXT("count"), SuccessCount);
+		Data->SetNumberField(TEXT("failed_count"), Failed.Num());
+		if (Failed.Num() > 0)
+		{
+			Data->SetArrayField(TEXT("failed"), Failed);
+		}
+		if (SuccessCount == 0)
+		{
+			// 一个都没建出来：错误正文里带上第一条原因，调用方不用再去翻 failed[]
+			FString FirstReason;
+			if (Failed.Num() > 0)
+			{
+				Failed[0]->AsObject()->TryGetStringField(TEXT("reason"), FirstReason);
+			}
+			Data->SetStringField(TEXT("error"), FString::Printf(
+				TEXT("No actor spawned (%d requested). First failure: %s"), Instances->Num(), *FirstReason));
+		}
 
 		UAL_CommandUtils::SendResponse(RequestId, SuccessCount > 0 ? 200 : 500, Data);
 		return;
@@ -376,7 +429,8 @@ void FUAL_ActorCommands::Handle_SpawnActor(const TSharedPtr<FJsonObject>& Payloa
 		return;
 	}
 
-	TSharedPtr<FJsonObject> Data = SpawnSingleActor(Payload);
+	FString SingleFailReason;
+	TSharedPtr<FJsonObject> Data = UAL_SpawnSingleActorWithReason(Payload, SingleFailReason);
 	if (Data.IsValid())
 	{
 #if WITH_EDITOR
@@ -400,7 +454,9 @@ void FUAL_ActorCommands::Handle_SpawnActor(const TSharedPtr<FJsonObject>& Payloa
 	}
 	else
 	{
-		UAL_CommandUtils::SendError(RequestId, 500, TEXT("Spawn failed"));
+		UAL_CommandUtils::SendError(RequestId, 500, SingleFailReason.IsEmpty()
+			? FString(TEXT("Spawn failed"))
+			: FString::Printf(TEXT("Spawn failed: %s"), *SingleFailReason));
 	}
 }
 
@@ -476,6 +532,7 @@ void FUAL_ActorCommands::Handle_DestroyActor(const TSharedPtr<FJsonObject>& Payl
 
 		int32 SuccessCount = 0;
 		TArray<TSharedPtr<FJsonValue>> Deleted;
+		TArray<TSharedPtr<FJsonValue>> Failed;
 		for (AActor* Actor : TargetSet)
 		{
 			if (!Actor)
@@ -505,17 +562,48 @@ void FUAL_ActorCommands::Handle_DestroyActor(const TSharedPtr<FJsonObject>& Payl
 				}
 				Deleted.Add(MakeShared<FJsonValueObject>(Obj));
 			}
+			else
+			{
+				// 找到了却没删掉（EditorDestroyActor 返回 false：WorldSettings、
+				// 被锁的、引擎不让删的）。以前这种直接从两张表里消失，
+				// 回执只剩「6 / 7」，调用方不知道是哪一个、为什么
+				TSharedPtr<FJsonObject> Fail = MakeShared<FJsonObject>();
+				Fail->SetStringField(TEXT("name"), FriendlyName);
+				Fail->SetStringField(TEXT("path"), ActorPath);
+				if (!ActorClass.IsEmpty())
+				{
+					Fail->SetStringField(TEXT("class"), ActorClass);
+				}
+				Fail->SetStringField(TEXT("reason"), TEXT("the editor refused to destroy this actor"));
+				Failed.Add(MakeShared<FJsonValueObject>(Fail));
+			}
 		}
 
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 		Data->SetNumberField(TEXT("count"), SuccessCount);
 		Data->SetNumberField(TEXT("target_count"), TargetSet.Num());
 		Data->SetArrayField(TEXT("deleted_actors"), Deleted);
+		Data->SetNumberField(TEXT("failed_count"), Failed.Num());
+		if (Failed.Num() > 0)
+		{
+			Data->SetArrayField(TEXT("failed"), Failed);
+		}
 		// 点名删 7 个只找到 6 个时，第 7 个的名字必须出现在响应里。
 		// 这条链路是不可逆的：静默少删一个，调用方会告诉用户「删完了」
 		UAL_CommandUtils::AddUnmatchedTargets(Data, Unmatched);
 
-		const int32 Code = SuccessCount > 0 ? 200 : 404;
+		// 找到了但一个都没删掉是「失败」，不是「没找到」—— 404 在调用方那里会被读成
+		// 合法的空结果（见 TS 侧 EngineNotFoundError）
+		int32 Code = 200;
+		if (SuccessCount == 0)
+		{
+			Code = Failed.Num() > 0 ? 500 : 404;
+			if (Failed.Num() > 0)
+			{
+				Data->SetStringField(TEXT("error"), FString::Printf(
+					TEXT("None of the %d matched actors could be destroyed"), Failed.Num()));
+			}
+		}
 		UAL_CommandUtils::SendResponse(RequestId, Code, Data);
 		return;
 	}
@@ -911,6 +999,7 @@ void FUAL_ActorCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Paylo
 	});
 
 	int32 SuccessActors = 0;
+	int32 FailedWrites = 0;
 	TArray<TSharedPtr<FJsonValue>> ActorResults;
 
 	for (AActor* Actor : TargetArray)
@@ -928,6 +1017,7 @@ void FUAL_ActorCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Paylo
 
 		TSharedPtr<FJsonObject> Updated = MakeShared<FJsonObject>();
 		TArray<TSharedPtr<FJsonValue>> Errors;
+		TArray<TSharedPtr<FJsonValue>> ReadbackUnavailable;
 
 		TArray<FString> CandidateNames;
 		UAL_CommandUtils::CollectPropertyNames(Actor, CandidateNames);
@@ -1312,7 +1402,10 @@ void FUAL_ActorCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Paylo
 				}
 				else
 				{
-					Updated->SetField(PropName, DesiredValue);
+					// 写进去了但读不回来（结构体/对象引用等序列化不了的类型）。
+					// 以前这里把请求值原样当回读值塞进 updated —— 那等于替引擎作答，
+					// 引擎实际夹紧/改写过的值调用方永远看不到。宁可不给值，明说读不回来
+					ReadbackUnavailable.Add(MakeShared<FJsonValueString>(PropName));
 				}
 				continue;
 			}
@@ -1328,15 +1421,28 @@ void FUAL_ActorCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Paylo
 			Errors.Add(MakeShared<FJsonValueObject>(Err));
 		}
 
-		if (Updated->Values.Num() > 0)
+		if (Updated->Values.Num() > 0 || ReadbackUnavailable.Num() > 0)
 		{
 			Actor->Modify();
 			SuccessActors++;
 			ActorObj->SetObjectField(TEXT("updated"), Updated);
 		}
+		if (ReadbackUnavailable.Num() > 0)
+		{
+			ActorObj->SetArrayField(TEXT("readback_unavailable"), ReadbackUnavailable);
+		}
 		if (Errors.Num() > 0)
 		{
 			ActorObj->SetArrayField(TEXT("errors"), Errors);
+		}
+		// errors 里混着 warning（如 ActorLabel 撞名加了后缀）—— 那条其实写成了，不算失败
+		for (const TSharedPtr<FJsonValue>& ErrVal : Errors)
+		{
+			const TSharedPtr<FJsonObject>* ErrObj = nullptr;
+			if (ErrVal.IsValid() && ErrVal->TryGetObject(ErrObj) && ErrObj && (*ErrObj)->HasField(TEXT("error")))
+			{
+				FailedWrites++;
+			}
 		}
 
 		ActorResults.Add(MakeShared<FJsonValueObject>(ActorObj));
@@ -1344,10 +1450,23 @@ void FUAL_ActorCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Paylo
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetNumberField(TEXT("count"), SuccessActors);
+	// failed_count 数的是「没写进去的属性」条数，不是 Actor 数：
+	// 3 个 Actor 各有 1 条写失败时，count 依旧是 3，只看 count 会以为全成了
+	Data->SetNumberField(TEXT("failed_count"), FailedWrites);
 	Data->SetArrayField(TEXT("actors"), ActorResults);
 	UAL_CommandUtils::AddUnmatchedTargets(Data, Unmatched);
 
 	UAL_CommandUtils::AddWorldInfo(Data);
+
+	// 一条都没写进去就是失败。以前这里恒回 200，调用方看到的是「成功修改 0 个」
+	if (SuccessActors == 0)
+	{
+		Data->SetBoolField(TEXT("ok"), false);
+		Data->SetStringField(TEXT("error"), FString::Printf(
+			TEXT("No property was applied (%d property write(s) failed); see actors[].errors"), FailedWrites));
+		UAL_CommandUtils::SendResponse(RequestId, 400, Data);
+		return;
+	}
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
 
@@ -1429,7 +1548,9 @@ void FUAL_ActorCommands::Handle_SetTransformUnified(const TSharedPtr<FJsonObject
 #endif
 
 	int32 AffectedCount = 0;
+	int32 FailedCount = 0;
 	TArray<TSharedPtr<FJsonValue>> Affected;
+	TArray<TSharedPtr<FJsonValue>> Failed;
 	const int32 MaxReport = 100;
 
 	for (AActor* Actor : TargetSet)
@@ -1520,23 +1641,76 @@ void FUAL_ActorCommands::Handle_SetTransformUnified(const TSharedPtr<FJsonObject
 		}
 
 		Actor->Modify();
-		Actor->SetActorLocationAndRotation(NewLocation, NewRotation, false, nullptr, ETeleportType::TeleportPhysics);
+		const bool bMoved = Actor->SetActorLocationAndRotation(NewLocation, NewRotation, false, nullptr, ETeleportType::TeleportPhysics);
 		Actor->SetActorScale3D(NewScale);
 
-		TSharedPtr<FJsonObject> SnapInfo;
-		if (bSnapToFloor)
+		/*
+		 * 写完立刻回读，和目标值比一遍。
+		 *
+		 * SetActorLocationAndRotation 在没有 RootComponent 时返回 false、什么都不动；
+		 * 挂在父级下、被约束的组件也可能落不到目标上。以前回执里写的是这里算出来的
+		 * NewLocation —— 引擎没动，回执照样说「到了」（AGENTS.md §5 第 14 条）。
+		 *
+		 * 旋转用四元数比：同一个朝向有多种欧拉角写法（pitch 100 ≡ pitch 80 + yaw/roll 180），
+		 * 按分量比会把引擎规范化过的等价旋转误判成没到位。
+		 * 比较要在贴地**之前**做 —— 贴地本来就会改 z。
+		 */
+		FString MismatchReason;
+		if (!bMoved)
 		{
-			if (UAL_SnapToFloor::SnapActor(Actor, World, SnapInfo))
+			MismatchReason = Actor->GetRootComponent()
+				? TEXT("the engine refused to move this actor")
+				: TEXT("actor has no root component, so it has no transform to set");
+		}
+		else
+		{
+			TArray<FString> Off;
+			if (!Actor->GetActorLocation().Equals(NewLocation, 0.1))
 			{
-				NewLocation = Actor->GetActorLocation();
+				Off.Add(TEXT("location"));
 			}
-			else
+			if (!Actor->GetActorQuat().Equals(NewRotation.Quaternion(), 1.e-4f))
+			{
+				Off.Add(TEXT("rotation"));
+			}
+			if (!Actor->GetActorScale3D().Equals(NewScale, 1.e-3f))
+			{
+				Off.Add(TEXT("scale"));
+			}
+			if (Off.Num() > 0)
+			{
+				MismatchReason = FString::Printf(
+					TEXT("%s did not land on the requested value (attached to a parent, constrained, or clamped by the engine)"),
+					*FString::Join(Off, TEXT("/")));
+			}
+		}
+
+		TSharedPtr<FJsonObject> SnapInfo;
+		if (bSnapToFloor && MismatchReason.IsEmpty())
+		{
+			if (!UAL_SnapToFloor::SnapActor(Actor, World, SnapInfo))
 			{
 				SnapMissCount++;
 			}
 		}
 
-		AffectedCount++;
+		if (!MismatchReason.IsEmpty())
+		{
+			FailedCount++;
+			if (Failed.Num() < MaxReport)
+			{
+				TSharedPtr<FJsonObject> Fail = MakeShared<FJsonObject>();
+				Fail->SetStringField(TEXT("name"), UAL_CommandUtils::GetActorFriendlyName(Actor));
+				Fail->SetStringField(TEXT("path"), Actor->GetPathName());
+				Fail->SetStringField(TEXT("reason"), MismatchReason);
+				Failed.Add(MakeShared<FJsonValueObject>(Fail));
+			}
+		}
+		else
+		{
+			AffectedCount++;
+		}
+
 		if (Affected.Num() < MaxReport)
 		{
 			TSharedPtr<FJsonObject> Obj = UAL_CommandUtils::BuildActorInfo(Actor);
@@ -1546,9 +1720,21 @@ void FUAL_ActorCommands::Handle_SetTransformUnified(const TSharedPtr<FJsonObject
 				{
 					Obj->SetObjectField(TEXT("snap"), SnapInfo);
 				}
-				Obj->SetObjectField(TEXT("location"), UAL_CommandUtils::MakeVectorJson(NewLocation));
-				Obj->SetObjectField(TEXT("rotation"), UAL_CommandUtils::MakeRotatorJson(NewRotation));
-				Obj->SetObjectField(TEXT("scale"), UAL_CommandUtils::MakeVectorJson(NewScale));
+				// 回执里的变换一律是引擎此刻的值（贴地之后），不是这里算出来的目标值
+				Obj->SetObjectField(TEXT("location"), UAL_CommandUtils::MakeVectorJson(Actor->GetActorLocation()));
+				Obj->SetObjectField(TEXT("rotation"), UAL_CommandUtils::MakeRotatorJson(Actor->GetActorRotation()));
+				Obj->SetObjectField(TEXT("scale"), UAL_CommandUtils::MakeVectorJson(Actor->GetActorScale3D()));
+				if (!MismatchReason.IsEmpty())
+				{
+					// 没到位的那个，把目标值也给出来，调用方才看得出差在哪
+					TSharedPtr<FJsonObject> Requested = MakeShared<FJsonObject>();
+					Requested->SetObjectField(TEXT("location"), UAL_CommandUtils::MakeVectorJson(NewLocation));
+					Requested->SetObjectField(TEXT("rotation"), UAL_CommandUtils::MakeRotatorJson(NewRotation));
+					Requested->SetObjectField(TEXT("scale"), UAL_CommandUtils::MakeVectorJson(NewScale));
+					Obj->SetObjectField(TEXT("requested"), Requested);
+					Obj->SetBoolField(TEXT("applied"), false);
+					Obj->SetStringField(TEXT("warning"), MismatchReason);
+				}
 				Affected.Add(MakeShared<FJsonValueObject>(Obj));
 			}
 		}
@@ -1556,6 +1742,11 @@ void FUAL_ActorCommands::Handle_SetTransformUnified(const TSharedPtr<FJsonObject
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetNumberField(TEXT("count"), AffectedCount);
+	Data->SetNumberField(TEXT("failed_count"), FailedCount);
+	if (Failed.Num() > 0)
+	{
+		Data->SetArrayField(TEXT("failed"), Failed);
+	}
 	if (Affected.Num() > 0)
 	{
 		Data->SetArrayField(TEXT("actors"), Affected);
@@ -1569,5 +1760,20 @@ void FUAL_ActorCommands::Handle_SetTransformUnified(const TSharedPtr<FJsonObject
 	UAL_CommandUtils::AddUnmatchedTargets(Data, Unmatched);
 
 	UAL_CommandUtils::AddWorldInfo(Data);
+
+	// 一个都没到位就是失败，不能回 200 让调用方读成「变换完成」
+	if (AffectedCount == 0 && FailedCount > 0)
+	{
+		Data->SetBoolField(TEXT("ok"), false);
+		FString FirstReason;
+		if (Failed.Num() > 0)
+		{
+			Failed[0]->AsObject()->TryGetStringField(TEXT("reason"), FirstReason);
+		}
+		Data->SetStringField(TEXT("error"), FString::Printf(
+			TEXT("None of the %d actors reached the requested transform: %s"), FailedCount, *FirstReason));
+		UAL_CommandUtils::SendResponse(RequestId, 500, Data);
+		return;
+	}
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }

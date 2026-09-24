@@ -806,6 +806,12 @@ void FUAL_LevelCommands::Handle_SaveLevel(const TSharedPtr<FJsonObject>& Payload
 
 	bool bSaved = false;
 	FString SavedAs;
+	FString OutSavedFilename;
+
+	// SaveLevel 存的是「当前关卡」—— 用户在 Levels 窗格里把某个子关卡设成当前时，
+	// 落盘的是那个子关卡，不是持久关卡。回执得说实际存的是谁，不能拿持久关卡的包名顶上
+	ULevel* LevelToSave = World->GetCurrentLevel();
+	const bool bSavingPersistent = LevelToSave && LevelToSave->IsPersistentLevel();
 
 	if (!TargetPath.IsEmpty())
 	{
@@ -827,15 +833,11 @@ void FUAL_LevelCommands::Handle_SaveLevel(const TSharedPtr<FJsonObject>& Payload
 			return;
 		}
 
-		FString OutSavedFilename;
-		bSaved = FEditorFileUtils::SaveLevel(World->GetCurrentLevel(), Filename, &OutSavedFilename);
-		SavedAs = PackageName;
+		bSaved = FEditorFileUtils::SaveLevel(LevelToSave, Filename, &OutSavedFilename);
 	}
 	else
 	{
-		FString OutSavedFilename;
-		bSaved = FEditorFileUtils::SaveLevel(World->GetCurrentLevel(), FString(), &OutSavedFilename);
-		SavedAs = World->GetOutermost()->GetName();
+		bSaved = FEditorFileUtils::SaveLevel(LevelToSave, FString(), &OutSavedFilename);
 	}
 
 	if (!bSaved)
@@ -846,9 +848,28 @@ void FUAL_LevelCommands::Handle_SaveLevel(const TSharedPtr<FJsonObject>& Payload
 		return;
 	}
 
+	// 包名以引擎实际写出的文件为准；拿不到文件名（老版本不回填）才退回到那张关卡当前所在的包
+	if (OutSavedFilename.IsEmpty()
+		|| !FPackageName::TryConvertFilenameToLongPackageName(OutSavedFilename, SavedAs))
+	{
+		SavedAs = LevelToSave ? LevelToSave->GetOutermost()->GetName() : World->GetOutermost()->GetName();
+	}
+
 	TSharedPtr<FJsonObject> Result = UAL_CurrentLevelJson();
 	Result->SetBoolField(TEXT("ok"), true);
 	Result->SetStringField(TEXT("saved_as"), SavedAs);
+	if (!OutSavedFilename.IsEmpty())
+	{
+		Result->SetStringField(TEXT("saved_file"), FPaths::ConvertRelativePathToFull(OutSavedFilename));
+	}
+	Result->SetBoolField(TEXT("saved_level_is_persistent"), bSavingPersistent);
+	if (!bSavingPersistent)
+	{
+		// 存的是子关卡：持久关卡和其他子关卡的改动都还没落盘，上面的 is_dirty 说的是持久关卡
+		Result->SetStringField(
+			TEXT("note"),
+			TEXT("The current level is a sublevel, so only that sublevel was saved. The persistent level and other sublevels were not saved; use editor.save to save them."));
+	}
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 }
 
@@ -927,14 +948,38 @@ void FUAL_LevelCommands::Handle_NewLevel(const TSharedPtr<FJsonObject>& Payload,
 		return;
 	}
 
-	// 传 false：要不要保存当前关卡由上面那道脏检查和调用方决定，
-	// 不在这里偷偷替他存
-	UEditorLoadingAndSavingUtils::NewBlankMap(/*bSaveExistingMap=*/false);
-
-	UWorld* World = UAL_CommandUtils::GetTargetWorld();
-	if (!World)
+	// save_as 在建图之前就校验：路径不合法时先报错，别等新图建好了才静默变成 saved:false，
+	// 那时旧关卡已经换掉了，调用方还以为照他给的路径存好了
+	FString SaveAs;
+	FString SaveAsPackage;
+	FString SaveAsFilename;
+	if (Payload->TryGetStringField(TEXT("save_as"), SaveAs) && !SaveAs.IsEmpty())
 	{
-		UAL_CommandUtils::SendError(RequestId, 500, TEXT("Creating a new level failed"));
+		SaveAsPackage = SaveAs;
+		int32 DotIndex = INDEX_NONE;
+		if (SaveAsPackage.FindChar(TEXT('.'), DotIndex))
+		{
+			SaveAsPackage = SaveAsPackage.Left(DotIndex);
+		}
+
+		if (!FPackageName::TryConvertLongPackageNameToFilename(
+				SaveAsPackage, SaveAsFilename, FPackageName::GetMapPackageExtension()))
+		{
+			UAL_CommandUtils::SendError(
+				RequestId, 400,
+				FString::Printf(TEXT("Not a valid package path for save_as: %s (expected something like \"/Game/Maps/MyLevel\"). No new level was created."), *SaveAs));
+			return;
+		}
+	}
+
+	// 传 false：要不要保存当前关卡由上面那道脏检查和调用方决定，
+	// 不在这里偷偷替他存。
+	// 必须看返回值：建图失败时 GetTargetWorld() 拿到的还是旧世界，非空检查拦不住
+	UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(/*bSaveExistingMap=*/false);
+	UWorld* World = UAL_CommandUtils::GetTargetWorld();
+	if (!NewWorld || !World || World != NewWorld)
+	{
+		UAL_CommandUtils::SendError(RequestId, 500, TEXT("Creating a new level failed - the editor is still on the previous level"));
 		return;
 	}
 
@@ -942,30 +987,35 @@ void FUAL_LevelCommands::Handle_NewLevel(const TSharedPtr<FJsonObject>& Payload,
 
 	// 新关卡默认在 /Temp/ 下、没有文件。给了 save_as 就顺手落盘，
 	// 否则调用方得记着"这张关卡还不存在"，很容易忘
-	FString SaveAs;
 	bool bSaved = false;
-	if (Payload->TryGetStringField(TEXT("save_as"), SaveAs) && !SaveAs.IsEmpty())
+	FString SavedFilename;
+	if (!SaveAsFilename.IsEmpty())
 	{
-		FString PackageName = SaveAs;
-		int32 DotIndex = INDEX_NONE;
-		if (PackageName.FindChar(TEXT('.'), DotIndex))
-		{
-			PackageName = PackageName.Left(DotIndex);
-		}
-
-		FString Filename;
-		if (FPackageName::TryConvertLongPackageNameToFilename(
-				PackageName, Filename, FPackageName::GetMapPackageExtension()))
-		{
-			FString OutSavedFilename;
-			bSaved = FEditorFileUtils::SaveLevel(World->GetCurrentLevel(), Filename, &OutSavedFilename);
-		}
+		bSaved = FEditorFileUtils::SaveLevel(World->GetCurrentLevel(), SaveAsFilename, &SavedFilename);
 	}
 
 	TSharedPtr<FJsonObject> Result = UAL_CurrentLevelJson();
 	Result->SetBoolField(TEXT("ok"), true);
 	Result->SetBoolField(TEXT("saved"), bSaved);
-	if (!bSaved)
+	if (bSaved)
+	{
+		// 回执里的包名来自存完之后的世界，不回显 save_as
+		Result->SetStringField(TEXT("saved_as"), World->GetOutermost()->GetName());
+		if (!SavedFilename.IsEmpty())
+		{
+			Result->SetStringField(TEXT("saved_file"), FPaths::ConvertRelativePathToFull(SavedFilename));
+		}
+	}
+	else if (!SaveAsFilename.IsEmpty())
+	{
+		// 给了 save_as 却没存上：新关卡已经建好（没法撤回），但存盘这一步失败了，要说出来
+		Result->SetStringField(TEXT("save_error"),
+			FString::Printf(TEXT("The new level was created but saving it to %s failed - the file may be read-only, checked out by source control, or the path is not writable."), *SaveAsPackage));
+		Result->SetStringField(
+			TEXT("note"),
+			TEXT("The new level exists in memory only. Save it with level.save and a \"path\" before relying on it."));
+	}
+	else
 	{
 		Result->SetStringField(
 			TEXT("note"),

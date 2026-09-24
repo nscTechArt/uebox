@@ -18,6 +18,7 @@
  */
 
 import { humanBytes } from '../adapted/ue-content-browser/formatBytes'
+import { describeFailures, withPartialHeadline } from '../partialResult'
 import type {
   AutoAnsweredDialog,
   BatchMoveResponse,
@@ -656,6 +657,12 @@ export function summarizeDependencies(r: DependenciesResponse): string {
 
 export function summarizeMigrate(r: MigrateResponse): string {
   const lines: string[] = []
+  // 执行时有没拷成的，第一句就得说（AGENTS.md §5 第 14 条）。插件这时回 ok:false，
+  // 以前整份响应被 callUe 压成一句「未提供失败原因」，模型以为一个都没拷
+  const copyFailed = !r.dry_run && r.failed > 0
+  if (copyFailed && r.copied === 0) {
+    lines.push(`❌ 一个文件都没拷成：${r.failed} 个失败，目标 ${r.destination_content_dir}`)
+  }
   if (r.dry_run) {
     lines.push(
       `【预演，没有拷贝任何文件】${r.root_count} 个根资产连同依赖共 ${r.planned} 个文件（${humanBytes(r.total_bytes)}）将拷到 ${r.destination_content_dir}` +
@@ -677,7 +684,10 @@ export function summarizeMigrate(r: MigrateResponse): string {
     lines.push(`根资产（前 ${Math.min(SAMPLE, roots.length)} 条）：`)
     for (const f of roots.slice(0, SAMPLE)) lines.push(`- ${f.package}：${f.status}`)
   }
-  const bad = r.files.filter((f) => f.status === 'failed' || f.status === 'external_skipped')
+  // 拷失败的由下面的 withPartialHeadline 逐条列原因；这里只剩插件内容没拷的那类
+  const bad = r.files.filter(
+    (f) => (f.status === 'failed' && !copyFailed) || f.status === 'external_skipped'
+  )
   if (bad.length > 0) {
     lines.push('')
     lines.push(`没拷成的（前 ${Math.min(SAMPLE, bad.length)} 条）：`)
@@ -696,5 +706,16 @@ export function summarizeMigrate(r: MigrateResponse): string {
     for (const note of r.notes) lines.push(note)
   }
   if (r.files_truncated) lines.push('（文件太多，details.files 只保留前 500 条）')
-  return lines.join('\n')
+  const body = lines.join('\n')
+  if (!copyFailed) return body
+  const failures = r.files
+    .filter((f) => f.status === 'failed')
+    .map((f) => ({ item: f.package, reason: f.error }))
+  // 一个都没拷成时第一句已经是上面那句 ❌，不再套「部分完成」，只把原因接上
+  if (r.copied === 0) return [body, describeFailures(failures)].filter(Boolean).join('\n')
+  return withPartialHeadline(
+    body,
+    { succeeded: r.copied, failed: r.failed, unit: '个文件' },
+    failures
+  )
 }

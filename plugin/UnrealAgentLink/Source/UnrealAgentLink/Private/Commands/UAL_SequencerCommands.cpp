@@ -1456,6 +1456,86 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 		return;
 	}
 
+	// 关键帧先整批解析、验完，再动手。
+	//
+	// 原来是边写边 continue：不是对象的、缺 frame 的键悄悄跳过，回执里没有一个字；
+	// location / rotation 都没给的键照样 ++，key_count 说写了 N 个、通道里其实少几个。
+	// 全部跳过时 MinFrame 停在 MAX_int32，播放范围被设成一段乱码 —— 而那时序列和
+	// 相机都已经建出来了。现在坏键逐条报原因；一个能写的都没有就 400，什么都不动
+	struct FParsedCameraKey
+	{
+		int32 DisplayFrame = 0;
+		bool bHasLocation = false;
+		bool bHasRotation = false;
+		FVector Location = FVector::ZeroVector;
+		FRotator Rotation = FRotator::ZeroRotator;
+	};
+	TArray<FParsedCameraKey> ParsedKeys;
+	TArray<TSharedPtr<FJsonValue>> SkippedKeyReasons;
+	auto SkipKey = [&SkippedKeyReasons](int32 Index, const FString& Reason)
+	{
+		TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+		Item->SetNumberField(TEXT("index"), Index);
+		Item->SetStringField(TEXT("reason"), Reason);
+		SkippedKeyReasons.Add(MakeShared<FJsonValueObject>(Item));
+	};
+	for (int32 Index = 0; Index < KeyArray->Num(); ++Index)
+	{
+		const TSharedPtr<FJsonValue>& Value = (*KeyArray)[Index];
+		const TSharedPtr<FJsonObject>* KeyObj = nullptr;
+		if (!Value.IsValid() || !Value->TryGetObject(KeyObj) || !KeyObj || !KeyObj->IsValid())
+		{
+			SkipKey(Index, TEXT("不是对象"));
+			continue;
+		}
+
+		double FrameNumber = 0.0;
+		if (!(*KeyObj)->TryGetNumberField(TEXT("frame"), FrameNumber))
+		{
+			SkipKey(Index, TEXT("缺 frame 或不是数字"));
+			continue;
+		}
+
+		FParsedCameraKey Parsed;
+		Parsed.DisplayFrame = static_cast<int32>(FrameNumber);
+		// 用 TryGetObjectField 判断而不是 HasField：location 给成字符串或数组时
+		// ReadVector 会退回零向量，原来会往通道里悄悄写一个 (0,0,0) 的键
+		const TSharedPtr<FJsonObject>* LocationObj = nullptr;
+		const TSharedPtr<FJsonObject>* RotationObj = nullptr;
+		Parsed.bHasLocation = (*KeyObj)->TryGetObjectField(TEXT("location"), LocationObj) &&
+			LocationObj && LocationObj->IsValid();
+		Parsed.bHasRotation = (*KeyObj)->TryGetObjectField(TEXT("rotation"), RotationObj) &&
+			RotationObj && RotationObj->IsValid();
+		if (!Parsed.bHasLocation && !Parsed.bHasRotation)
+		{
+			SkipKey(Index, FString::Printf(
+				TEXT("第 %d 帧 location 和 rotation 都没给（或不是对象），这个键写不出任何东西"),
+				Parsed.DisplayFrame));
+			continue;
+		}
+		if (Parsed.bHasLocation)
+		{
+			Parsed.Location = UAL_CommandUtils::ReadVector(*KeyObj, TEXT("location"));
+		}
+		if (Parsed.bHasRotation)
+		{
+			Parsed.Rotation = UAL_CommandUtils::ReadRotator(*KeyObj, TEXT("rotation"));
+		}
+		ParsedKeys.Add(Parsed);
+	}
+	if (ParsedKeys.Num() == 0)
+	{
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetNumberField(TEXT("skipped_keys"), SkippedKeyReasons.Num());
+		Details->SetArrayField(TEXT("skipped_key_reasons"), SkippedKeyReasons);
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("%d 个关键帧没有一个能写：每个键都要有数字 frame，并且至少给 location 或 rotation 之一。")
+			TEXT("什么都没有改动。"),
+			KeyArray->Num()),
+			Details);
+		return;
+	}
+
 	double Fps = 30.0;
 	Payload->TryGetNumberField(TEXT("fps"), Fps);
 	FString Interpolation = TEXT("linear");
@@ -1673,40 +1753,40 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	int32 MinFrame = MAX_int32;
 	int32 MaxFrame = MIN_int32;
 
-	for (const TSharedPtr<FJsonValue>& Value : *KeyArray)
+	// 坏键在「先探」里已经筛掉了，这里每个键至少写一组通道，MinFrame 一定会被改写
+	for (const FParsedCameraKey& Key : ParsedKeys)
 	{
-		const TSharedPtr<FJsonObject>* KeyObj = nullptr;
-		if (!Value.IsValid() || !Value->TryGetObject(KeyObj) || !KeyObj)
-		{
-			continue;
-		}
+		const FFrameNumber Tick = DisplayToTick(MovieScene, Key.DisplayFrame);
+		MinFrame = FMath::Min(MinFrame, Key.DisplayFrame);
+		MaxFrame = FMath::Max(MaxFrame, Key.DisplayFrame);
 
-		double FrameNumber = 0.0;
-		if (!(*KeyObj)->TryGetNumberField(TEXT("frame"), FrameNumber))
+		if (Key.bHasLocation)
 		{
-			continue;
+			AddDoubleKey(Channels[0], Tick, Key.Location.X, Interpolation);
+			AddDoubleKey(Channels[1], Tick, Key.Location.Y, Interpolation);
+			AddDoubleKey(Channels[2], Tick, Key.Location.Z, Interpolation);
 		}
-		const int32 DisplayFrame = static_cast<int32>(FrameNumber);
-		const FFrameNumber Tick = DisplayToTick(MovieScene, DisplayFrame);
-		MinFrame = FMath::Min(MinFrame, DisplayFrame);
-		MaxFrame = FMath::Max(MaxFrame, DisplayFrame);
-
-		if ((*KeyObj)->HasField(TEXT("location")))
+		if (Key.bHasRotation)
 		{
-			const FVector Location = UAL_CommandUtils::ReadVector(*KeyObj, TEXT("location"));
-			AddDoubleKey(Channels[0], Tick, Location.X, Interpolation);
-			AddDoubleKey(Channels[1], Tick, Location.Y, Interpolation);
-			AddDoubleKey(Channels[2], Tick, Location.Z, Interpolation);
-		}
-		if ((*KeyObj)->HasField(TEXT("rotation")))
-		{
-			const FRotator Rotation = UAL_CommandUtils::ReadRotator(*KeyObj, TEXT("rotation"));
-			AddDoubleKey(Channels[3], Tick, Rotation.Roll, Interpolation);
-			AddDoubleKey(Channels[4], Tick, Rotation.Pitch, Interpolation);
-			AddDoubleKey(Channels[5], Tick, Rotation.Yaw, Interpolation);
+			AddDoubleKey(Channels[3], Tick, Key.Rotation.Roll, Interpolation);
+			AddDoubleKey(Channels[4], Tick, Key.Rotation.Pitch, Interpolation);
+			AddDoubleKey(Channels[5], Tick, Key.Rotation.Yaw, Interpolation);
 		}
 		++WrittenKeys;
 	}
+
+	// 回执里的键数从通道里读回来，不拿循环计数冒充（AGENTS.md §5 第 14 条）。
+	// 六条通道上出现过的不同时刻就是这条轨道现在的关键帧数；
+	// replace_existing_keys=false 时会把原有的键一起算进去，这正是轨道的真实状态
+	TSet<int32> KeyTicks;
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		for (const FFrameNumber& Time : Channels[Index]->GetTimes())
+		{
+			KeyTicks.Add(Time.Value);
+		}
+	}
+	const int32 TrackKeyCount = KeyTicks.Num();
 
 	// ── 播放范围与段范围 ──────────────────────────────────────────────────
 	double PlaybackEndRaw = 0.0;
@@ -1802,7 +1882,13 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 		}
 	}
 
-	SaveSequenceAsset(Sequence);
+	// 存盘结果原来直接丢掉，模型拿到的回执和存成功时一模一样
+	const bool bSequenceSaved = SaveSequenceAsset(Sequence);
+	if (!bSequenceSaved)
+	{
+		Warnings.Add(MakeShared<FJsonValueString>(
+			TEXT("序列资产没保存成功，关键帧只在编辑器内存里 —— 关掉编辑器前要手动保存这条序列，否则会丢。")));
+	}
 
 	// ── 回传 ──────────────────────────────────────────────────────────────
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -1810,7 +1896,15 @@ void FUAL_SequencerCommands::Handle_CameraKeys(const TSharedPtr<FJsonObject>& Pa
 	Data->SetStringField(TEXT("camera_label"), CameraLabel);
 	Data->SetBoolField(TEXT("camera_created"), bCameraCreated);
 	Data->SetBoolField(TEXT("sequence_created"), bSequenceCreated);
-	Data->SetNumberField(TEXT("key_count"), WrittenKeys);
+	// key_count 是从通道读回的轨道键数；written_keys 是这次真正写进去的请求键数
+	Data->SetNumberField(TEXT("key_count"), TrackKeyCount);
+	Data->SetNumberField(TEXT("written_keys"), WrittenKeys);
+	Data->SetNumberField(TEXT("skipped_keys"), SkippedKeyReasons.Num());
+	if (SkippedKeyReasons.Num() > 0)
+	{
+		Data->SetArrayField(TEXT("skipped_key_reasons"), SkippedKeyReasons);
+	}
+	Data->SetBoolField(TEXT("sequence_saved"), bSequenceSaved);
 	Data->SetNumberField(TEXT("replaced_keys"), ReplacedKeys);
 	Data->SetBoolField(TEXT("camera_cut_bound"), bCameraCutBound);
 	Data->SetBoolField(TEXT("kept_existing_cuts"), bKeptExistingCuts);
@@ -2014,6 +2108,8 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 	// 不调 `FTransaction::Apply()`，改动照样留在原地，反而连撤都撤不了。
 	TArray<TSharedPtr<FJsonValue>> Warnings;
 	int32 RemovedSections = 0;
+	// 本来就盖满时什么都没改、也没存，不发这个字段
+	bool bSequenceSaved = false;
 	if (!bAlreadyCovered)
 	{
 		// 事务开在自己的作用域里，存盘留在它外面 —— 存盘本身不可撤销，
@@ -2055,7 +2151,13 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 			CutSection->SetRange(Playback);
 		}
 
-		SaveSequenceAsset(Sequence);
+		// 存盘结果原来直接丢掉，TS 侧照样说「序列已存盘」
+		bSequenceSaved = SaveSequenceAsset(Sequence);
+		if (!bSequenceSaved)
+		{
+			Warnings.Add(MakeShared<FJsonValueString>(
+				TEXT("序列资产没保存成功，切轨只在编辑器内存里 —— 关掉编辑器前要手动保存这条序列，否则会丢。")));
+		}
 	}
 
 	// 删了用户的东西必须报数，而且要报在结果里而不是只写日志
@@ -2078,6 +2180,10 @@ void FUAL_SequencerCommands::Handle_CameraCuts(const TSharedPtr<FJsonObject>& Pa
 	Data->SetBoolField(TEXT("already_covered"), bAlreadyCovered);
 	Data->SetBoolField(TEXT("binding_broken"), bBindingBroken);
 	Data->SetNumberField(TEXT("removed_sections"), RemovedSections);
+	if (!bAlreadyCovered)
+	{
+		Data->SetBoolField(TEXT("sequence_saved"), bSequenceSaved);
+	}
 
 	TArray<TSharedPtr<FJsonValue>> RangeArray;
 	RangeArray.Add(MakeShared<FJsonValueNumber>(PlaybackStart));

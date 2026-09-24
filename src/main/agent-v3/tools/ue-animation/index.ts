@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { compressForContext, describeResize } from '../contextImage'
 import { callUe } from '../defineUeTool'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
+import { withPartialHeadline } from '../partialResult'
 
 const asset = z.string().trim().min(1).describe('UE 资产路径，如 /Game/Anim/Talk_01')
 const metrics = z.enum([
@@ -154,24 +155,59 @@ const retarget = defineTool({
       throw new Error('输出路径不能重复')
     const outputs: Result[] = []
     let retargeter = input.retargeter
-    for (const item of input.animations) {
+    const total = input.animations.length
+    for (const [index, item] of input.animations.entries()) {
       if (ctx.signal?.aborted) break
-      // Do not cancel the pending RPC: the engine finishes this item; no later item is sent.
-      const result = await callUe<Result>(
-        'anim.retarget',
-        {
-          source_mesh: input.source_mesh,
-          target_mesh: input.target_mesh,
-          ...item,
-          ...(retargeter ? { retargeter } : {})
-        },
-        { timeoutMs: 30 * 60_000 }
-      )
+      let result: Result
+      try {
+        // Do not cancel the pending RPC: the engine finishes this item; no later item is sent.
+        result = await callUe<Result>(
+          'anim.retarget',
+          {
+            source_mesh: input.source_mesh,
+            target_mesh: input.target_mesh,
+            ...item,
+            ...(retargeter ? { retargeter } : {})
+          },
+          { timeoutMs: 30 * 60_000 }
+        )
+      } catch (error) {
+        // 一段都没导出：整批失败，原样抛
+        if (outputs.length === 0) throw error
+        // 前面已经导出的资产是真的写进工程了。原来这里直接抛，模型只看到一条错误，
+        // 以为整批没成、换个路径重跑，工程里就多出一份重复资产。
+        // 失败后照旧不发下一段 —— 同一对骨架，一段失败（缺链、没对齐）后面多半也一样，
+        // 每段还要跑好几分钟。没发的算跳过，和失败一起列在第一句（AGENTS.md §5 第 14 条）
+        const reason = error instanceof Error ? error.message : String(error)
+        const notAttempted = input.animations.slice(index + 1)
+        const failures = [
+          { item: `${item.animation} → ${item.output_path}`, reason },
+          ...notAttempted.map((rest) => ({
+            item: `${rest.animation} → ${rest.output_path}`,
+            reason: '前一段失败后没有发出'
+          }))
+        ]
+        const partial = {
+          outputs,
+          stopped: false,
+          failed_count: 1,
+          skipped_count: notAttempted.length,
+          failures
+        }
+        return {
+          text: withPartialHeadline(
+            `已导出 ${outputs.length}/${total} 段（不要重跑已导出的这些）：${JSON.stringify(outputs)}`,
+            { succeeded: outputs.length, failed: 1, skipped: notAttempted.length, unit: '段' },
+            failures
+          ),
+          details: partial
+        }
+      }
       outputs.push(result)
       if (typeof result.retargeter === 'string') retargeter = result.retargeter
       if (!ctx.signal?.aborted)
         ctx.report({
-          text: `已导出 ${outputs.length}/${input.animations.length} 段：${item.output_path}`
+          text: `已导出 ${outputs.length}/${total} 段：${item.output_path}`
         })
     }
     const result = { outputs, stopped: Boolean(ctx.signal?.aborted) }

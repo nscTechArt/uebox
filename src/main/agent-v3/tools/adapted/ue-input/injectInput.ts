@@ -163,10 +163,17 @@ export function createInjectInputTool(): V2Tool {
         }
 
         const warnings = response.warnings ?? []
+        // accepted:false = 游戏视口没处理这个键（被 UI 吃掉、焦点不在游戏视口……）。
+        // 这时说「已发送」，模型会接着去查游戏逻辑为什么没反应，而键根本没进去。
+        // 老插件不回 accepted，按原话说
+        const notAccepted = !hasAction && response.accepted === false
         const summary = [
           hasAction
             ? `已对动作 ${response.action} 注入（${response.value_type}）`
-            : `已发送按键 ${response.key}（${response.event}）`,
+            : notAccepted
+              ? `⚠️ 按键 ${response.key}（${response.event}）没被游戏视口接受，角色不会有反应。` +
+                '多半是 UI 挡住了输入或焦点不在游戏视口'
+              : `已发送按键 ${response.key}（${response.event}）`,
           response.frames && response.frames > 1 ? `持续 ${response.frames} 帧` : '',
           response.interrupted ? '⚠️ 中途 PIE 停了，没跑满' : ''
         ]
@@ -174,6 +181,15 @@ export function createInjectInputTool(): V2Tool {
           .join('；')
 
         return {
+          // message 放第一个键：适配层把整个对象 JSON 化，键序就是模型读到的顺序。
+          // 警告放在最前面：模型读 message 是从头读的，把「这次结论不可信」
+          // 压在末尾等于没说。键没被接受时那句本身就是结论，排在警告之前
+          message:
+            (notAccepted ? summary + '\n\n' : '') +
+            (warnings.length > 0 ? warnings.join('\n') + '\n\n' : '') +
+            (notAccepted ? '' : summary + '\n\n') +
+            response.layer_note +
+            (response.held_note ? '\n\n' + response.held_note : ''),
           success: true,
           injected_at: response.injected_at,
           ...(response.action ? { action: response.action } : {}),
@@ -185,15 +201,7 @@ export function createInjectInputTool(): V2Tool {
           ...(response.viewport_ignores_input ? { viewport_ignores_input: true } : {}),
           ...(response.move_input_ignored ? { move_input_ignored: true } : {}),
           ...(warnings.length > 0 ? { warnings } : {}),
-          ...worldFields(response),
-          // 警告放在最前面：模型读 message 是从头读的，把「这次结论不可信」
-          // 压在末尾等于没说
-          message:
-            (warnings.length > 0 ? warnings.join('\n') + '\n\n' : '') +
-            summary +
-            '\n\n' +
-            response.layer_note +
-            (response.held_note ? '\n\n' + response.held_note : '')
+          ...worldFields(response)
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

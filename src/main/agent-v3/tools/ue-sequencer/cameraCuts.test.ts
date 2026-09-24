@@ -18,6 +18,7 @@ const OK = {
   already_covered: false,
   binding_broken: false,
   removed_sections: 0,
+  sequence_saved: true,
   warnings: []
 }
 
@@ -119,6 +120,31 @@ describe('返回给用户的话', () => {
   it('提醒模型自查', async () => {
     mockUe.mockResolvedValueOnce(OK)
     expect(textOf(await call())).toContain('sequence_audit')
+  })
+
+  /** 存盘结果以引擎回的为准：插件原来丢掉 SavePackages 的返回值，这里无条件说「已存盘」 */
+  it('插件说存盘成功才说已存盘', async () => {
+    mockUe.mockResolvedValueOnce(OK)
+    expect(textOf(await call())).toContain('序列已存盘')
+  })
+
+  it('存盘失败时说没存上，不说已存盘', async () => {
+    mockUe.mockResolvedValueOnce({ ...OK, sequence_saved: false, removed_sections: 2 })
+    const text = textOf(await call({ rebuild: true }))
+
+    expect(text).toContain('没**存盘成功')
+    expect(text).not.toContain('序列已存盘')
+    expect(text).not.toContain('撤不回来')
+  })
+
+  it('旧插件不报 sequence_saved 时不替它说已存盘', async () => {
+    const legacy: Record<string, unknown> = { ...OK, removed_sections: 1 }
+    delete legacy.sequence_saved
+    mockUe.mockResolvedValueOnce(legacy)
+    const text = textOf(await call({ rebuild: true }))
+
+    expect(text).not.toContain('已存盘')
+    expect(text).toContain('1 个切轨段已被删除')
   })
 
   it('失败时带上原因', async () => {

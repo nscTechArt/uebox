@@ -648,8 +648,13 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 			if (!GJob || GJob->Path != TEXT("hotreload")) return;
 
 			const bool bOk = !ECompilationResult::Failed(CompileResult);
+			// UpToDate = UBT 判定没有要编的东西，一行都没编。和 Live Coding 那条路一样报 NoChanges，
+			// 否则「改了代码却没进编译」会被说成编译成功，调用方就去验一个根本没生效的改动
+			const TCHAR* ResultName = CompileResult == ECompilationResult::UpToDate
+				? TEXT("NoChanges")
+				: (bOk ? TEXT("Success") : TEXT("Failure"));
 			TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-			Data->SetStringField(TEXT("result"), bOk ? TEXT("Success") : TEXT("Failure"));
+			Data->SetStringField(TEXT("result"), ResultName);
 			// UBT 的完整 stdout。诊断解析在 TS 侧做 —— 那是纯字符串处理，
 			// 放在能跑单测的地方比放在要出九个包才能验的地方划算
 			Data->SetStringField(TEXT("output"), FinalOutput);

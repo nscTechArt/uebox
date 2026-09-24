@@ -225,3 +225,103 @@ describe('导入时命名 asset_names', () => {
     expect(callRequest).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * AGENTS.md §5 第 14 条。插件回的 failed / rejected / save_warning 以前一个都没透出来，
+ * 正文开头是「成功导入 3/5」—— 而那个 3 数的还是资产，不是文件。
+ */
+describe('部分失败与落盘', () => {
+  it('第一句是部分完成（按文件数），失败原因逐条列出，落盘警告在前几行', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      // 引擎给的资产数和输入文件数对不上：一个 FBX 出了网格 + 材质 + 贴图
+      imported_count: 4,
+      succeeded_count: 2,
+      requested_count: 5,
+      imported: [],
+      failed_count: 3,
+      failed: [
+        { file: 'C:/a/missing.png', reason: 'file not found on disk' },
+        { file: 'C:/a/bad.obj', reason: 'face references vertex 9 but only 8 exist' },
+        { file: 'C:/a/x.abc', reason: 'the engine imported nothing from this file' }
+      ],
+      rejected: [{ file: 'C:/a/bad.obj', reason: 'face references vertex 9 but only 8 exist' }],
+      rejected_count: 1,
+      save_warning: '2 个资产已导入但未能写入磁盘，关闭编辑器后会丢失，请在编辑器里手动保存。'
+    })
+
+    const r = await run(
+      withDefaults({
+        files: ['C:/a/hero.fbx', 'C:/a/wood.png', 'C:/a/missing.png', 'C:/a/bad.obj', 'C:/a/x.abc']
+      })
+    )
+
+    expect(r.success).toBe(true)
+    expect(r.failed_count).toBe(3)
+    expect(r.save_warning).toContain('未能写入磁盘')
+    const lines = String(r.message).split('\n')
+    // rejected 已经在 failed 里，不能再数一遍
+    expect(lines[0]).toBe('⚠️ 部分完成：2 个文件成功 / 3 个文件失败。')
+    expect(lines[1]).toBe('导入了 2/5 个文件，共 4 个资产')
+    expect(lines[2]).toContain('未能写入磁盘')
+    expect(String(r.message)).toContain('C:/a/missing.png：file not found on disk')
+    expect(String(r.message)).not.toContain('成功导入')
+  })
+
+  it('旧插件：只有 rejected，不存在的文件没报也没算 —— 按发下去的数补上', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      imported_count: 3,
+      requested_count: 3,
+      imported: [],
+      rejected: [{ file: 'C:/a/bad.obj', reason: 'malformed' }],
+      rejected_count: 1
+    })
+
+    const r = await run(
+      withDefaults({ files: ['C:/a/1.png', 'C:/a/2.png', 'C:/a/bad.obj', 'C:/a/gone.png'] })
+    )
+
+    const message = String(r.message)
+    expect(message.split('\n')[0]).toBe('⚠️ 部分完成：2 个文件成功 / 2 个文件失败。')
+    expect(message).toContain('C:/a/bad.obj：malformed')
+    expect(message).toContain('另有 1 个文件')
+    expect(r.failed_count).toBe(2)
+  })
+
+  it('一个都没导成：原因逐条进 error', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error: 'C:/a/gone.png: file not found on disk',
+      imported_count: 0,
+      succeeded_count: 0,
+      requested_count: 2,
+      imported: [],
+      failed_count: 2,
+      failed: [
+        { file: 'C:/a/gone.png', reason: 'file not found on disk' },
+        { file: 'C:/a/x.abc', reason: 'the engine imported nothing from this file' }
+      ]
+    })
+
+    const r = await run(withDefaults({ files: ['C:/a/gone.png', 'C:/a/x.abc'] }))
+
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('C:/a/x.abc：the engine imported nothing')
+  })
+
+  it('全部成功时不多出 failed 字段，也不带部分完成', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      imported_count: 1,
+      succeeded_count: 1,
+      requested_count: 1,
+      imported: []
+    })
+
+    const r = await run(withDefaults({ files: ['C:/a/wood.png'] }))
+
+    expect('failed' in r).toBe(false)
+    expect(String(r.message)).not.toContain('部分完成')
+  })
+})

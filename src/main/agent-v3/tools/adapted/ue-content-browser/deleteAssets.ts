@@ -30,6 +30,7 @@ import { releaseProtectionBeforeDelete } from '../../../core/assetLockEnforcemen
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE, type RegistryStatus } from '../../defineUeTool'
 import { describeToolError, isEngineTimeout } from '../../engineErrors'
+import { withPartialHeadline } from '../../partialResult'
 // ============================================================================
 // Schema 定义
 // ============================================================================
@@ -78,6 +79,8 @@ interface DeleteAssetsResponse {
   deleted: string[]
   /** 每条失败的路径和**查出来的**原因（只读位 / agent 撤销栈 / 具体引用者） */
   failed?: Array<{ path: string; reason?: string }>
+  /** 没删掉的条数（含空条目）。旧插件没有这个字段 */
+  failed_count?: number
   /** 这次为了删成而丢掉的 agent 撤销步骤标题 */
   dropped_agent_undo_steps?: string[]
   error?: string
@@ -386,7 +389,7 @@ EditorAssetLibrary.delete_asset —— 每次调用都做一次完整 GC，几�
 【参数】paths（必填，资产对象路径或目录包路径混放）、dry_run（只展开不删，传目录时先来一次）、
 drop_agent_undo（见上，默认 false）。
 
-【返回】ok、deleted_count（按路径算）、deleted、failed:[{path, reason}]、
+【返回】ok、deleted_count（按路径算）、deleted、failed:[{path, reason}]、failed_count、
 expanded_folders（每个目录展开出多少个资产）、
 dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须转述给用户**）。`,
 
@@ -512,6 +515,8 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
         console.log('[DeleteAssetsTool] 收到响应:', response ? '成功' : '无数据')
 
         if (response && response.ok) {
+          // 旧插件不回 failed_count，按 failed 数组算
+          const failedCount = response.failed_count ?? response.failed?.length ?? 0
           const result: Record<string, unknown> = {
             success: true,
             deleted_count: response.deleted_count,
@@ -532,9 +537,9 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
             result.message = `${result.message}。${redirectorNote}`
           }
 
-          if (response.failed && response.failed.length > 0) {
-            result.failed = response.failed
-            result.message = `${result.message}，${response.failed.length} 个失败`
+          if (failedCount > 0) {
+            result.failed = response.failed ?? []
+            result.failed_count = failedCount
           }
 
           // 丢掉的撤销步骤要顶到消息里，不能只躺在字段里等模型自己去翻 ——
@@ -546,6 +551,14 @@ dropped_agent_undo_steps（这次丢掉的撤销步骤标题，**有的话必须
               `${result.message}。为此丢掉了你自己的 ${dropped.length} 步撤销记录` +
               `（${dropped.join('、')}），这几步再也撤不回来了，请在回复里告诉用户`
           }
+
+          // 删掉一部分时第一句不能是「已删除」：失败原因以前拼在一长串后面，
+          // 模型读到「已删除 6/7」就收工了（AGENTS.md §5 第 14 条）
+          result.message = withPartialHeadline(
+            String(result.message),
+            { succeeded: response.deleted_count, failed: failedCount, unit: '个资产' },
+            (response.failed ?? []).map((f) => ({ item: f.path, reason: f.reason }))
+          )
 
           return result
         }

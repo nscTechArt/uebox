@@ -10,6 +10,7 @@ import { serviceManager } from '../../../../services'
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { WIDGET_TYPE_HINT } from './widgetTypes'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { withPartialHeadline, type PartialFailure } from '../../partialResult'
 
 const CreateWidgetSchema = z.object({
   name: z.string().describe('Widget Blueprint 名称（必填）'),
@@ -21,7 +22,17 @@ interface CreateWidgetResponse {
   ok: boolean
   name: string
   path: string
+  /**
+   * 根控件的类名。新版插件是建完从 WidgetTree 上读回来的；
+   * 旧版插件照抄请求（认不出来的类型悄悄换成 CanvasPanel 也照抄），不能当事实
+   */
   root_type: string
+  /** 新版插件才有。有它说明 root_type 是读回来的 */
+  requested_root_type?: string
+  /** 根控件没建出来，或建出来的类和请求的不是一个 */
+  warning?: string
+  /** 新版插件才有。false = 资产只在内存里，关编辑器就没了 */
+  saved?: boolean
   /** 插件写的失败原因，由 WebSocket 那层从 code>=400 的响应补上。不透传等于把诊断扔了 */
   error?: string
 }
@@ -97,12 +108,37 @@ export function createWidgetTool() {
           }
         }
 
+        /*
+         * AGENTS.md §5 第 14 条：回执报引擎里的状态。旧版插件的 root_type 是照抄请求的
+         * （认不出来的类型被换成 CanvasPanel 也照抄），所以没有 requested_root_type
+         * 时不把它当事实说。根没建对、没存上盘，都要摆在第一句。
+         */
+        const verified = response.requested_root_type !== undefined
+        const failures: PartialFailure[] = []
+        if (response.warning) failures.push({ item: '根控件', reason: response.warning })
+        if (response.saved === false) {
+          failures.push({ item: '保存', reason: '资产只在内存里，没写到磁盘，关编辑器就没了' })
+        }
+        const rootText = verified
+          ? response.root_type
+            ? `根控件是 ${response.root_type}`
+            : '没有根控件'
+          : `根控件类型未核实（插件版本较旧，root_type 是请求值 ${rootType}）`
+        const body = `Widget Blueprint "${response.name}" 已创建于 ${response.path}，${rootText}。`
+        const steps = 1 + (verified ? 1 : 0) + (response.saved !== undefined ? 1 : 0)
+
         return {
+          message: withPartialHeadline(
+            body,
+            { succeeded: steps - failures.length, failed: failures.length, unit: '步' },
+            failures
+          ),
           ok: true,
           name: response.name,
           path: response.path,
           root_type: response.root_type,
-          message: `Widget Blueprint "${response.name}" 已创建于 ${response.path}`
+          ...(verified ? {} : { root_type_verified: false }),
+          ...(response.saved !== undefined ? { saved: response.saved } : {})
         }
       } catch (error) {
         return {

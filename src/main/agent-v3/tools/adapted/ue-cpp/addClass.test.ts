@@ -96,14 +96,26 @@ describe('cpp_add_class', () => {
 
     expect(text).toContain('文件可能已经写出去了')
     expect(text).toContain('别重复创建')
+    // 部分完成：第一句不说「建类失败」，也不抛成错误
+    expect(text.startsWith('⚠️ 部分完成')).toBe(true)
   })
 
-  it('失败时把引擎给的原因带上，不自己编一个', async () => {
-    const text = await run({
-      result: 'InvalidInput',
-      fail_reason: '类名 3Foo 不合法：名字不能以数字开头'
-    })
+  /**
+   * 没建成要标 isError（defineTool 把它转成 ToolFailure 抛出）。以前正文是 ✗
+   * 却按成功返回，熔断器看不见，同一组参数可以无限重试。
+   */
+  it('失败时标 isError，并把引擎给的原因带上，不自己编一个', async () => {
+    await expect(
+      run({
+        result: 'InvalidInput',
+        fail_reason: '类名 3Foo 不合法：名字不能以数字开头'
+      })
+    ).rejects.toThrow('不能以数字开头')
+  })
 
-    expect(text).toContain('不能以数字开头')
+  it('FailedToAddCode 也标 isError', async () => {
+    await expect(run({ result: 'FailedToAddCode', fail_reason: 'disk full' })).rejects.toThrow(
+      /✗ 建类失败[\s\S]*disk full/
+    )
   })
 })

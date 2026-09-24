@@ -10,6 +10,7 @@ import { serviceManager } from '../../../../services'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { withPartialHeadline, type PartialFailure } from '../../partialResult'
 // ============================================================================
 // Schema 定义
 // ============================================================================
@@ -84,6 +85,13 @@ interface AddComponentResponse {
   attach_warning?: string
   saved: boolean
   /**
+   * 没写进去的组件属性。插件现在给的是 `"属性名: 原因"` 字符串；
+   * 也接受 `{ property, error }` 对象，插件那边改了形状这里不用跟着改
+   */
+  failed_properties?: Array<
+    string | { property?: string; name?: string; error?: string; reason?: string }
+  >
+  /**
    * 完整组件层级（name / class / attach_to / depth / source）。
    *
    * 插件一直在回这个字段，而工具层原来把它丢了 —— 于是调用方明明手里
@@ -135,6 +143,23 @@ function parsePropertiesInput(rawProperties: unknown): Record<string, unknown> |
     return undefined
   }
   return rawProperties as Record<string, unknown>
+}
+
+/** 把插件回的失败属性拍成统一的 { item, reason } */
+function toPropertyFailures(raw: AddComponentResponse['failed_properties']): PartialFailure[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((entry) => {
+    if (typeof entry === 'string') {
+      const at = entry.indexOf(':')
+      return at > 0
+        ? { item: entry.slice(0, at).trim(), reason: entry.slice(at + 1).trim() }
+        : { item: entry }
+    }
+    return {
+      item: entry.property ?? entry.name ?? '(未知属性)',
+      reason: entry.error ?? entry.reason
+    }
+  })
 }
 
 // ============================================================================
@@ -241,7 +266,34 @@ depth 是层级深度。不需要再调 blueprint_describe 复核，更不用写
 
         if (response && response.ok) {
           const misattached = response.attached === false && Boolean(response.attach_warning)
+          /*
+           * AGENTS.md §5 第 14 条：组件加上了、属性有几项没写进去，第一句就得说。
+           * 插件一直在回 failed_properties，这里原来把它丢了、照说「成功添加」——
+           * 模型以为 Mobility / Intensity 都配好了，接着往下做。
+           */
+          const propertyFailures = toPropertyFailures(response.failed_properties)
+          const requestedProps =
+            params.component_properties && typeof params.component_properties === 'object'
+              ? Object.keys(params.component_properties).length
+              : propertyFailures.length
+          const baseMessage = misattached
+            ? `⚠️ 组件 "${response.component_name}" 已加到蓝图 "${response.blueprint_name}"，` +
+              `但**没有挂到你要求的位置**：${response.attach_warning}`
+            : `为蓝图 "${response.blueprint_name}" 添加了组件 "${response.component_name}" ` +
+              `(${response.component_class})，挂在 ${response.attached_to || '根组件'} 下`
+          // 没存上盘也放在最前面：关编辑器就没了
+          const savedNote = response.saved === false ? '⚠️ 未能保存到磁盘，改动只在内存里。' : ''
+          const message = withPartialHeadline(
+            savedNote + baseMessage,
+            {
+              succeeded: Math.max(0, requestedProps - propertyFailures.length),
+              failed: propertyFailures.length,
+              unit: '个属性'
+            },
+            propertyFailures
+          )
           return {
+            message,
             success: true,
             blueprint_name: response.blueprint_name,
             component_name: response.component_name,
@@ -253,11 +305,9 @@ depth 是层级深度。不需要再调 blueprint_describe 复核，更不用写
             saved: response.saved,
             // 完整层级原样带上：调用方不用再调 describe，更不用写 Python 读 SCS
             ...(response.all_components ? { all_components: response.all_components } : {}),
-            message: misattached
-              ? `组件 "${response.component_name}" 已加到蓝图 "${response.blueprint_name}"，` +
-                `但**没有挂到你要求的位置**：${response.attach_warning}`
-              : `成功为蓝图 "${response.blueprint_name}" 添加组件 "${response.component_name}" ` +
-                `(${response.component_class})，挂在 ${response.attached_to || '根组件'} 下`
+            ...(propertyFailures.length
+              ? { failed_properties: propertyFailures, failed_count: propertyFailures.length }
+              : {})
           }
         }
 

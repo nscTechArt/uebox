@@ -334,11 +334,15 @@ describe('pcg_apply_graph', () => {
     expect(lastCall().params.mode).toBeUndefined()
   })
 
-  it('整批失败时错误里带着逐条原因', async () => {
+  it('预检失败时错误里带着逐条原因', async () => {
     callRequest.mockResolvedValue({
       ok: false,
-      error: '2 item(s) failed; the whole batch was rolled back. Nothing changed.',
-      details: { failures: [{ item: 'spawner -> Output', error: 'pin types incompatible' }] },
+      error:
+        '1 item(s) are invalid. Nothing was changed - these were caught before touching the graph.',
+      details: {
+        failures: [{ item: 'spawner -> Output', error: "unknown node 'spawner'" }],
+        failed_count: 1
+      },
       __rpc: { code: 400 }
     })
 
@@ -347,7 +351,103 @@ describe('pcg_apply_graph', () => {
         graph_path: '/Game/PCG/G',
         edges: [{ from: 'spawner', to: 'Output' }]
       })
-    ).rejects.toThrow(/rolled back[\s\S]*pin types incompatible/)
+    ).rejects.toThrow(/Nothing was changed[\s\S]*unknown node 'spawner'/)
+  })
+
+  /**
+   * 事务的 Cancel 不回退改动。动手之后才失败时图已经变了，
+   * 错误里必须说「没回滚」并带上图现在的样子，而不是「什么都没变」。
+   */
+  it('写到一半失败时如实说图已经改了，并带上图现在的样子', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error:
+        '1 item(s) failed after the graph had already been changed, and the changes were NOT rolled back: ' +
+        'cleared 2 old node(s), 1 node(s) written (1 newly created), 0 edge(s) connected.',
+      details: {
+        failed_count: 1,
+        failures: [{ item: 'sampler -> Output', error: 'pin types incompatible' }],
+        cleared_nodes: 2,
+        graph_nodes_after: [{ node_id: 'PCGSurfaceSampler_0', type: 'PCGSurfaceSamplerSettings' }]
+      },
+      __rpc: { code: 400 }
+    })
+
+    const run = byName('pcg_apply_graph').execute('c', {
+      graph_path: '/Game/PCG/G',
+      nodes: [{ id: 'sampler', type: 'SurfaceSampler' }],
+      edges: [{ from: 'sampler', to: 'Output' }]
+    })
+
+    await expect(run).rejects.toThrow(/NOT rolled back/)
+    await expect(run).rejects.toThrow(/graph_nodes_after[\s\S]*PCGSurfaceSampler_0/)
+    await expect(run).rejects.not.toThrow(/Nothing changed/)
+  })
+})
+
+describe('逐节点写入的回执', () => {
+  it('pcg_add_node 有属性没设上时，第一句就说部分完成', async () => {
+    callRequest.mockResolvedValue({
+      node_id: 'PCGSurfaceSampler_0',
+      type: 'PCGSurfaceSamplerSettings',
+      updated_properties: [{ name: 'PointsPerSquaredMeter', value: 0.1 }],
+      failed_properties: [{ name: 'Densty', error: 'no such property. Did you mean Density?' }],
+      failed_count: 1
+    })
+
+    const result = await byName('pcg_add_node').execute('c', {
+      graph_path: '/Game/PCG/G',
+      node_type: 'SurfaceSampler',
+      properties: { PointsPerSquaredMeter: 0.1, Densty: 1 }
+    })
+
+    const text = textOf(result)
+    expect(text.split('\n')[0]).toBe('⚠️ 部分完成：1 项成功 / 1 项失败。')
+    expect(text).toContain('Densty：no such property. Did you mean Density?')
+  })
+
+  it('pcg_update_node 报引擎回读的值，不报请求值', async () => {
+    // 请求 0.123456789，引擎 float 存储后回读成 0.12345679 —— 回执要跟引擎走
+    callRequest.mockResolvedValue({
+      node_id: 'PCGSurfaceSampler_0',
+      type: 'PCGSurfaceSamplerSettings',
+      title: 'Sampler',
+      updated_properties: [{ name: 'PointsPerSquaredMeter', value: 0.12345679 }],
+      failed_properties: []
+    })
+
+    const result = await byName('pcg_update_node').execute('c', {
+      graph_path: '/Game/PCG/G',
+      node_id: 'PCGSurfaceSampler_0',
+      properties: { PointsPerSquaredMeter: 0.123456789 }
+    })
+
+    const text = textOf(result)
+    expect(text).not.toContain('部分完成')
+    expect(text).toContain('0.12345679')
+    expect(text).not.toContain('0.123456789')
+  })
+
+  it('pcg_update_node 一个属性都没设上时抛错，并说明标题也没改', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error:
+        "None of the given properties could be set on 'X', so nothing was changed (title / comment were not applied either).",
+      details: {
+        failed_properties: [{ name: 'Nope', error: 'no such property' }],
+        failed_count: 1
+      },
+      __rpc: { code: 400 }
+    })
+
+    await expect(
+      byName('pcg_update_node').execute('c', {
+        graph_path: '/Game/PCG/G',
+        node_id: 'X',
+        title: 'New',
+        properties: { Nope: 1 }
+      })
+    ).rejects.toThrow(/nothing was changed \(title \/ comment were not applied either\)/)
   })
 })
 
@@ -378,6 +478,19 @@ describe('pcg_spawn_volume', () => {
     const text = textOf(result)
     expect(text).toContain('-12600')
     expect(text).toContain('z 从 0 到 8000')
+  })
+
+  it('读不回组件上的图时不说成确认挂上了', async () => {
+    callRequest.mockResolvedValue({
+      actor_label: 'PCG_Forest',
+      graph_assigned: true,
+      graph_assigned_unverified: true,
+      graph_path: '/Game/PCG/G'
+    })
+
+    const result = await byName('pcg_spawn_volume').execute('c', { graph_path: '/Game/PCG/G' })
+
+    expect(textOf(result)).toContain('未能确认挂上')
   })
 })
 
@@ -685,8 +798,47 @@ describe('pcg_tidy_graph', () => {
 
     const result = await byName('pcg_tidy_graph').execute('c', { graph_path: '/Game/PCG/G' })
 
-    expect(textOf(result)).toContain('S')
+    const text = textOf(result)
+    // 有节点没排到时第一句不许是「已重排」
+    expect(text.split('\n')[0]).toBe('⚠️ 部分完成：1 个节点成功 / 1 个节点失败。')
+    expect(text).toContain('- S：图里没找到')
     expect(result.details).toMatchObject({ moved: 1, not_found: ['S'] })
+  })
+
+  it('写了但回读对不上的、格式不对被跳过的，分开计数', async () => {
+    callRequest
+      .mockResolvedValueOnce({
+        graph_path: '/Game/PCG/G',
+        node_count: 1,
+        edge_count: 0,
+        nodes: [
+          {
+            node_id: 'S',
+            type: 'PCGSurfaceSamplerSettings',
+            x: 0,
+            y: 0,
+            input_pins: [],
+            output_pins: []
+          }
+        ],
+        edges: []
+      })
+      .mockResolvedValueOnce({
+        moved: 3,
+        not_found: [],
+        failed: [{ item: 'T', error: 'position did not stick: asked (400, 0), node reads (0, 0)' }],
+        skipped: [{ item: 'positions[4]', error: "entry has no 'node_id'" }],
+        failed_count: 2,
+        skipped_count: 1
+      })
+
+    const result = await byName('pcg_tidy_graph').execute('c', { graph_path: '/Game/PCG/G' })
+
+    const text = textOf(result)
+    expect(text.split('\n')[0]).toBe('⚠️ 部分完成：3 个节点成功 / 1 个节点失败 / 1 个节点跳过。')
+    expect(text).toContain('node reads (0, 0)')
+    expect(text).toContain("positions[4]：entry has no 'node_id'")
+    expect(result.details).toMatchObject({ moved: 3, failed_count: 2 })
   })
 })
 
@@ -805,6 +957,88 @@ describe('pcg_graph_parameters', () => {
     expect(text).toContain('没办成的')
     expect(text).toContain('Radius')
     expect(text).toContain('already exists')
+  })
+
+  /**
+   * 插件回 207 + failed 时，第一句必须是部分完成。上一版开头是「新建 1 个（Density）」，
+   * 失败清单排在整份参数表之后，模型读到开头就收工了（AGENTS.md §5 第 14 条）。
+   */
+  it('部分失败时第一句是部分完成，不是成功', async () => {
+    callRequest.mockResolvedValueOnce({
+      graph_path: '/Game/PCG/Forest',
+      parameters: [{ name: 'Density', type: 'double', value: 1 }],
+      parameter_count: 1,
+      added: ['Density'],
+      updated: [],
+      removed: [],
+      failed: [
+        { name: 'Radius', error: "already exists as 'float'" },
+        { name: 'remove[0]', error: 'entry is not a non-empty string' }
+      ],
+      failed_count: 2
+    })
+
+    const result = await byName('pcg_graph_parameters').execute('c', {
+      graph_path: '/Game/PCG/Forest',
+      parameters: [
+        { name: 'Density', type: 'double', value: 1 },
+        { name: 'Radius', type: 'double' }
+      ]
+    })
+
+    const text = textOf(result)
+    expect(text.split('\n')[0]).toBe('⚠️ 部分完成：1 个参数成功 / 2 个参数失败。')
+    expect(text.indexOf('部分完成')).toBeLessThan(text.indexOf('新建 1 个'))
+    expect(text).toContain('remove[0]：entry is not a non-empty string')
+  })
+
+  it('全成功时不出现部分完成', async () => {
+    callRequest.mockResolvedValueOnce(RESPONSE)
+    const result = await byName('pcg_graph_parameters').execute('c', {
+      graph_path: '/Game/PCG/Forest',
+      parameters: [{ name: 'Density', type: 'double', value: 1 }]
+    })
+    expect(textOf(result)).not.toContain('部分完成')
+  })
+
+  it('参数值按引擎回读的报，不按请求值', async () => {
+    // 请求写 2.5 进 int32 参数，引擎截成 2 —— 清单里必须是 2
+    callRequest.mockResolvedValueOnce({
+      graph_path: '/Game/PCG/Forest',
+      parameters: [{ name: 'Count', type: 'int32', value: 2 }],
+      parameter_count: 1,
+      added: [],
+      updated: ['Count'],
+      removed: []
+    })
+
+    const result = await byName('pcg_graph_parameters').execute('c', {
+      graph_path: '/Game/PCG/Forest',
+      parameters: [{ name: 'Count', value: 2.5 }]
+    })
+
+    const text = textOf(result)
+    expect(text).toContain('Count（int32）= 2')
+    expect(text).not.toContain('2.5')
+  })
+
+  it('要求的改动一件都没办成时插件回 400，原样抛给模型', async () => {
+    callRequest.mockResolvedValueOnce({
+      ok: false,
+      error: 'None of the 1 requested parameter change(s) could be made; see failed.',
+      details: {
+        failed: [{ name: 'Ghost', error: 'no such parameter on this graph' }],
+        failed_count: 1
+      },
+      __rpc: { code: 400 }
+    })
+
+    await expect(
+      byName('pcg_graph_parameters').execute('c', {
+        graph_path: '/Game/PCG/Forest',
+        remove: ['Ghost']
+      })
+    ).rejects.toThrow(/None of the 1 requested[\s\S]*Ghost/)
   })
 
   it('老引擎上的 501 原样抛给模型，附替代方案', async () => {

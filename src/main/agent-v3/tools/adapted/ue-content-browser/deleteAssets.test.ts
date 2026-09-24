@@ -461,3 +461,52 @@ describe('说明', () => {
     expect(tool.description).toContain('delete_asset')
   })
 })
+
+/**
+ * AGENTS.md §5 第 14 条：删掉一部分时第一句不能是「已删除」。
+ * 以前失败数拼在一长串后面（「已删除 2/3 个资产，1 个失败」），模型读到开头就收工。
+ */
+describe('部分失败', () => {
+  it('第一句是部分完成，失败原因逐条跟上，failed_count 透出', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      deleted_count: 2,
+      requested_count: 3,
+      failed_count: 1,
+      deleted: ['/Game/A.A', '/Game/B.B'],
+      failed: [{ path: '/Game/C.C', reason: 'still referenced by: /Game/Maps/Main' }]
+    })
+
+    const result = await run({ paths: ['/Game/A.A', '/Game/B.B', '/Game/C.C'] })
+
+    expect(result.success).toBe(true)
+    expect(result.failed_count).toBe(1)
+    const message = String(result.message)
+    expect(message.split('\n')[0]).toMatch(/^⚠️ 部分完成：2 个资产成功 \/ 1 个资产失败/)
+    expect(message).toContain('/Game/C.C：still referenced by: /Game/Maps/Main')
+  })
+
+  it('旧插件不回 failed_count 时按 failed 数组数', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      deleted_count: 1,
+      requested_count: 2,
+      deleted: ['/Game/A.A'],
+      failed: [{ path: '/Game/B.B', reason: 'read-only on disk' }]
+    })
+
+    const result = await run({ paths: ['/Game/A.A', '/Game/B.B'] })
+
+    expect(result.failed_count).toBe(1)
+    expect(String(result.message).startsWith('⚠️ 部分完成')).toBe(true)
+  })
+
+  it('全删掉了照常说已删除，不多出失败字段', async () => {
+    callRequest.mockResolvedValue({ ...DELETED_OK(['/Game/A.A']), failed_count: 0 })
+
+    const result = await run({ paths: ['/Game/A.A'] })
+
+    expect(String(result.message).startsWith('已删除 1/1')).toBe(true)
+    expect('failed_count' in result).toBe(false)
+  })
+})

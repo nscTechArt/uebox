@@ -13,6 +13,7 @@ import { CM_FIELD_NOTE, UE_UNIT_NOTE, describePlacementScale } from '../../ueUni
 import { UE_ROTATION_NOTE, describeOrientations } from '../../ueOrientation'
 import { describeToolError } from '../../engineErrors'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { withPartialHeadline, describeFailures, type PartialFailure } from '../../partialResult'
 const BUILTIN_PRESET_SET = new Set([
   'cube',
   'sphere',
@@ -171,6 +172,9 @@ interface SpawnActorV2Response extends WorldScopedResponse {
         asset_id?: string
       })[]
     | null
+  /** 没建出来的那几项（新插件才有）。老插件只在 created 里留 null，不给原因 */
+  failed_count?: number
+  failed?: Array<{ index: number; reason?: string }>
 }
 
 /**
@@ -485,6 +489,49 @@ export function buildSpawnPayload(input: SpawnActorParams): ActorSpawnPayload {
   }
 }
 
+/**
+ * 这一批里没建出来的是哪几项、为什么。
+ *
+ * 新插件在 `failed[]` 里逐项给下标和原因；老插件只在 `created[i]` 留一个 null。
+ * 两种都认，下标一律按发出去的 instances 对位 —— 模型重试时照这个下标改那一项。
+ *
+ * 个数取三者最大：插件自报的 failed_count、名单长度、「请求数 − 成功数」。
+ * 最后一项兜的是 created 被截短或压根没回的老插件：数不出是谁，也不能当没有。
+ */
+export function collectSpawnFailures(
+  response: Pick<SpawnActorV2Response, 'created' | 'failed' | 'failed_count'> | undefined,
+  instances: SpawnActorNormalizedInstance[],
+  succeeded: number
+): { failedCount: number; failures: PartialFailure[] } {
+  const label = (index: number): string => {
+    const item = instances[index]
+    const what = item?.name ?? item?.asset_id ?? item?.preset ?? item?.class
+    return `instances[${index}]${what ? `（${what}）` : ''}`
+  }
+
+  let failures: PartialFailure[]
+  if (Array.isArray(response?.failed) && response.failed.length > 0) {
+    failures = response.failed.map((f) => ({ item: label(f.index), reason: f.reason }))
+  } else {
+    const created = Array.isArray(response?.created) ? response.created : []
+    failures = created
+      .map((made, index) => (made === null || made === undefined ? index : -1))
+      .filter((index) => index >= 0)
+      .map((index) => ({ item: label(index) }))
+  }
+
+  const failedCount = Math.max(
+    response?.failed_count ?? 0,
+    failures.length,
+    instances.length - succeeded,
+    0
+  )
+  if (failures.length === 0 && failedCount > 0) {
+    failures = [{ item: `${failedCount} 项`, reason: '引擎没建出来，插件没说是哪几项' }]
+  }
+  return { failedCount, failures }
+}
+
 export function createSpawnActorTool(): V2Tool {
   return defineV2Tool({
     description: `在虚幻引擎场景中创建 Actor（单体/批量统一入口），对应插件接口 actor.spawn v2.0。
@@ -612,17 +659,33 @@ ${UE_ROTATION_NOTE}`,
             })
           )
 
+          /*
+           * 请求 5 个、建出 3 个时，第一句先说部分完成，再列没建出来的下标和原因
+           * （AGENTS.md §5 第 14 条）。以前这里一律「成功创建 3 个 Actor」，
+           * 另外两个只是 created 里的 null，模型读完第一句就收工了。
+           */
+          const { failedCount, failures } = collectSpawnFailures(response, payload.instances, count)
+          const body =
+            (response?.message || `已创建 ${count} 个 Actor`) +
+            describeWorld(response) +
+            placement +
+            orientation +
+            describePivotRisk(payload.instances)
+
           return {
+            // message 放第一个键：适配层把整个对象 JSON 化给模型，第一眼看到的就是它
+            message: withPartialHeadline(
+              body,
+              { succeeded: count, failed: failedCount, unit: '个 Actor' },
+              failures
+            ),
             success: true,
             count,
+            ...(failedCount > 0
+              ? { failed_count: failedCount, requested: payload.instances.length }
+              : {}),
             created,
             ...worldFields(response),
-            message:
-              (response?.message || `成功创建 ${count} 个 Actor`) +
-              describeWorld(response) +
-              placement +
-              orientation +
-              describePivotRisk(payload.instances),
             _aiInstruction: 'Actor 创建完成。如果所有任务已完成，请调用 done 工具汇报结果。'
           }
         }
@@ -631,10 +694,19 @@ ${UE_ROTATION_NOTE}`,
         const code = (response as any)?.__rpc?.code ?? (response as any)?.code
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const details = (response as any)?.details
+        // 全军覆没时把逐项原因也带上，别只剩一句「创建失败」
+        const failureList = describeFailures(
+          collectSpawnFailures(response, payload.instances, 0).failures.filter(
+            (f) => f.reason !== undefined
+          ),
+          '没建出来的'
+        )
         return {
           success: false,
           created,
-          error: response?.error || response?.message || '创建 Actor 失败，未收到成功确认',
+          error:
+            (response?.error || response?.message || '创建 Actor 失败，未收到成功确认') +
+            (failureList ? `\n${failureList}` : ''),
           code,
           details,
           raw: response

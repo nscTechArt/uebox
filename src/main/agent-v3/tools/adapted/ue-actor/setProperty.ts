@@ -15,6 +15,7 @@ import {
   unmatchedTargetFields,
   type UnmatchedTargetsResponse
 } from '../../unmatchedTargets'
+import { withPartialHeadline, type PartialFailure } from '../../partialResult'
 // ============================================================================
 // Schema 定义
 // ============================================================================
@@ -85,10 +86,18 @@ export interface SetPropertyPayload {
   properties: Record<string, unknown>
 }
 
-/** 单个属性错误信息 */
+/**
+ * 单个属性错误信息。
+ *
+ * `errors` 里混着 warning（ActorLabel 撞名自动加了后缀）：那种只有 `warning` 没有 `error`，
+ * 属性其实写进去了，不能算进失败。
+ */
 interface PropertyError {
   property: string
-  error: string
+  error?: string
+  warning?: string
+  requested?: string
+  actual?: string
   suggestions?: string[]
   expected_type?: string
   current_value?: unknown
@@ -100,14 +109,34 @@ interface ActorPropertyResult {
   class: string
   path: string
   updated?: Record<string, unknown>
+  /** 写进去了、但值读不回来的属性名（新插件才有）。这些不给值，免得拿请求值冒充回读 */
+  readback_unavailable?: string[]
   errors?: PropertyError[]
 }
 
 /** Set Property 响应数据 */
 interface SetPropertyResponse extends UnmatchedTargetsResponse {
   count: number
+  /** 没写进去的属性条数（新插件才有；老插件从 errors 里数） */
+  failed_count?: number
   actors: ActorPropertyResult[]
+  ok?: boolean
+  success?: boolean
   error?: string
+}
+
+/** 这个 Actor 上真正写进去的属性条数：有回读值的 + 写了但读不回来的 */
+function appliedWrites(actor: ActorPropertyResult): number {
+  return Object.keys(actor.updated ?? {}).length + (actor.readback_unavailable?.length ?? 0)
+}
+
+/** 一条属性失败写成给模型看的一行 */
+function describePropertyError(actor: ActorPropertyResult, err: PropertyError): string {
+  let msg = `${actor.name}.${err.property}: ${err.error}`
+  if (err.suggestions && err.suggestions.length > 0) {
+    msg += ` (建议: ${err.suggestions.slice(0, 3).join(', ')})`
+  }
+  return msg
 }
 
 // ============================================================================
@@ -311,40 +340,89 @@ PIE 里设了只是改一份跑完就没的副本。
 
           const actors = response.actors ?? []
 
-          // 收集所有错误
+          // 收集失败和警告。只有带 `error` 的才是失败；只带 `warning` 的属性其实写进去了
           const allErrors: string[] = []
+          const failures: PartialFailure[] = []
+          const warnings: string[] = []
           actors.forEach((actor) => {
-            if (actor.errors && actor.errors.length > 0) {
-              actor.errors.forEach((err) => {
-                let errMsg = `${actor.name}.${err.property}: ${err.error}`
-                if (err.suggestions && err.suggestions.length > 0) {
-                  errMsg += ` (建议: ${err.suggestions.slice(0, 3).join(', ')})`
-                }
-                allErrors.push(errMsg)
-              })
-            }
+            actor.errors?.forEach((err) => {
+              if (err.error) {
+                allErrors.push(describePropertyError(actor, err))
+                failures.push({ item: `${actor.name}.${err.property}`, reason: err.error })
+              } else if (err.warning) {
+                warnings.push(
+                  `${actor.name}.${err.property}: ${err.warning}` +
+                    (err.actual ? `（实际为 ${err.actual}）` : '')
+                )
+              }
+            })
           })
 
-          // 构建摘要
-          const updatedCount = actors.filter(
-            (a) => a.updated && Object.keys(a.updated).length > 0
-          ).length
-          let summary = `成功修改 ${updatedCount} 个 Actor 的属性`
-          if (allErrors.length > 0) {
-            summary += `，${allErrors.length} 个属性设置失败`
+          const updatedCount = actors.filter((a) => appliedWrites(a) > 0).length
+          const writesApplied = actors.reduce((sum, a) => sum + appliedWrites(a), 0)
+          const failedWrites = response.failed_count ?? allErrors.length
+
+          /*
+           * 一条都没写进去 = 失败，要抛给模型。
+           *
+           * 以前这里回 `success: false` 却不带 `error`，适配层只拿得到 message，
+           * 模型看到的是「失败：成功修改 0 个 Actor 的属性」—— 既自相矛盾，
+           * 也没说哪条属性为什么不行。逐条原因放进 error。
+           */
+          if (updatedCount === 0) {
+            const reasons =
+              allErrors.length > 0
+                ? allErrors.join('；')
+                : response.error || '引擎没有回任何写入结果'
+            return {
+              success: false,
+              error: `属性一个都没改成：${reasons}` + describeUnmatchedTargets(response),
+              actors,
+              ...unmatchedTargetFields(response)
+            }
           }
 
+          let body = `已修改 ${updatedCount} 个 Actor 的属性（写入 ${writesApplied} 项）`
+          const unreadable = actors.flatMap((a) =>
+            (a.readback_unavailable ?? []).map((p) => `${a.name}.${p}`)
+          )
+          if (unreadable.length > 0) {
+            body += `。其中 ${unreadable.join('、')} 已写入但引擎读不回当前值，需要确认就用 ue_get_actor 查`
+          }
+          if (warnings.length > 0) {
+            body += `。注意：${warnings.join('；')}`
+          }
+          body += describeUnmatchedTargets(response)
+
+          /*
+           * 有写失败的属性时第一句就说部分完成（AGENTS.md §5 第 14 条）。
+           * 只有点名没找到、属性全写成时，按 Actor 数报「跳过」。
+           */
+          const unmatched = unmatchedTargetFields(response).unmatched_count ?? 0
+          const message =
+            failedWrites > 0
+              ? withPartialHeadline(
+                  body,
+                  { succeeded: writesApplied, failed: failedWrites, unit: '项属性' },
+                  failures
+                )
+              : withPartialHeadline(body, {
+                  succeeded: updatedCount,
+                  failed: 0,
+                  skipped: unmatched,
+                  unit: '个 Actor'
+                })
+
           return {
-            success: updatedCount > 0,
+            // message 放第一个键：适配层把整个对象 JSON 化给模型，第一眼看到的就是它
+            message,
+            success: true,
             count: updatedCount,
+            ...(failedWrites > 0 ? { failed_count: failedWrites } : {}),
             actors,
             errors: allErrors.length > 0 ? allErrors : undefined,
             ...unmatchedTargetFields(response),
-            message: summary + describeUnmatchedTargets(response),
-            _aiInstruction:
-              updatedCount > 0
-                ? '属性修改完成。如果所有任务已完成，请调用 done 工具汇报结果。'
-                : undefined
+            _aiInstruction: '属性修改完成。如果所有任务已完成，请调用 done 工具汇报结果。'
           }
         }
 

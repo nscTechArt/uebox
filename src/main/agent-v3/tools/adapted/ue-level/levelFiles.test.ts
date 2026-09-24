@@ -120,6 +120,33 @@ describe('ue_save_level', () => {
     expect(callRequest.mock.calls[0][1]).toEqual({ path: '/Game/Maps/Copy' })
     expect(String(result.summary)).toContain('/Game/Maps/Copy')
   })
+
+  /**
+   * SaveLevel 存的是「当前关卡」。当前关卡是子关卡时，插件报的是实际存下的
+   * 子关卡包名 —— 回执要跟着引擎走，而且第一句不能说成「关卡已保存」。
+   */
+  it('当前关卡是子关卡时，第一句说只存了子关卡，包名跟引擎走', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      package: '/Game/Maps/Main',
+      is_dirty: true,
+      saved_as: '/Game/Maps/Main_Lighting',
+      saved_file: 'D:/Proj/Content/Maps/Main_Lighting.umap',
+      saved_level_is_persistent: false,
+      actor_count: 10
+    })
+
+    const result = await exec(createSaveLevelTool, {})
+
+    const summary = String(result.summary)
+    expect(summary.startsWith('⚠️')).toBe(true)
+    expect(summary).toContain('/Game/Maps/Main_Lighting')
+    expect(summary).toContain('持久关卡 /Game/Maps/Main')
+    expect(result.saved_as).toBe('/Game/Maps/Main_Lighting')
+    expect(result.saved_file).toBe('D:/Proj/Content/Maps/Main_Lighting.umap')
+    // 序列化后第一段就是 summary —— 适配层按键序 JSON 化给模型
+    expect(Object.keys(result)[0]).toBe('summary')
+  })
 })
 
 describe('ue_open_level — 会丢东西的操作', () => {
@@ -208,5 +235,49 @@ describe('ue_new_level', () => {
 
     expect(result.saved).toBe(true)
     expect(String(result.summary)).toContain('/Game/Maps/New')
+  })
+
+  it('存盘包名跟插件回读的 saved_as 走，不回显 save_as', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      package: '/Game/Maps/Renamed',
+      saved: true,
+      saved_as: '/Game/Maps/Renamed'
+    })
+
+    const result = await exec(createNewLevelTool, { save_as: '/Game/Maps/New.New' })
+
+    expect(String(result.summary)).toContain('/Game/Maps/Renamed')
+    expect(String(result.summary)).not.toContain('/Game/Maps/New.New')
+  })
+
+  /**
+   * 给了 save_as 却没存上：新关卡已经建好（旧关卡已换掉），不能只回一句
+   * 「已新建空关卡」—— 模型会以为照它给的路径存好了。
+   */
+  it('给了 save_as 但没存上时，第一句带 ⚠️ 和原因', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      package: '/Temp/Untitled_1',
+      saved: false,
+      save_error: 'saving it to /Game/Maps/New failed - read-only'
+    })
+
+    const result = await exec(createNewLevelTool, { save_as: '/Game/Maps/New' })
+
+    const summary = String(result.summary)
+    expect(summary.startsWith('⚠️')).toBe(true)
+    expect(summary).toContain('/Game/Maps/New')
+    expect(summary).toContain('read-only')
+    expect(result.saved).toBe(false)
+  })
+
+  it('老插件没有 save_error 时，给了 save_as 没存上也不说成功落盘', async () => {
+    callRequest.mockResolvedValue({ ok: true, package: '/Temp/Untitled_1', saved: false })
+
+    const result = await exec(createNewLevelTool, { save_as: '/Game/Maps/New' })
+
+    expect(String(result.summary).startsWith('⚠️')).toBe(true)
+    expect(String(result.summary)).toContain('插件没给原因')
   })
 })

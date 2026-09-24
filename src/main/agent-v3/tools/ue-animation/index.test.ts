@@ -176,4 +176,22 @@ describe('animation tool contracts', () => {
     ).rejects.toThrow('重复')
     expect(callUe).not.toHaveBeenCalled()
   })
+  // 第 2 段失败时第 1 段已经写进工程了：不能整批抛错把它藏掉，第一句也不能是成功
+  it('keeps finished outputs when a later item fails, and leads with the partial headline', async () => {
+    vi.mocked(callUe)
+      .mockResolvedValueOnce({ path: '/Game/B1' })
+      .mockRejectedValueOnce(new Error('unmapped chains'))
+    const result = await tool('anim_retarget').execute('t', {
+      source_mesh: '/Game/S',
+      target_mesh: '/Game/T',
+      animations
+    })
+    const text = (result.content[0] as { text: string }).text
+    expect(text.split('\n')[0]).toBe('⚠️ 部分完成：1 段成功 / 1 段失败 / 1 段跳过。')
+    expect(text).toContain('/Game/B1')
+    expect(text).toContain('/Game/A2 → /Game/B2：unmapped chains')
+    expect(text).toContain('/Game/A3 → /Game/B3：前一段失败后没有发出')
+    expect(result.details).toMatchObject({ failed_count: 1, skipped_count: 1 })
+    expect(callUe).toHaveBeenCalledTimes(2)
+  })
 })

@@ -34,8 +34,17 @@ interface SetConfigResponse {
   config_name: string
   section: string
   key: string
-  value: string
+  /**
+   * 新插件：写完、刷盘之后从 GConfig 读回来的值（read_back=true 时才有）。
+   * 老插件：请求里的 value 原样回显，并不代表引擎里是这个值
+   */
+  value?: string
   file_path: string
+  /** 新插件才有。老插件缺这几个字段，据此判断 value 是不是回显 */
+  read_back?: boolean
+  requested_value?: string
+  /** 刷盘后配置文件是否已不脏（= 真写到磁盘上了） */
+  persisted?: boolean
 }
 
 // ============================================================================
@@ -106,10 +115,50 @@ export function createSetConfigTool() {
             const msg = (response as any)?.error || (response as any)?.message || '设置配置失败'
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const code = (response as any)?.__rpc?.code ?? (response as any)?.code
+            // 插件在回读对不上 / 刷盘失败时把回读结果放在 details 里，一起交给模型
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const details = (response as any)?.details as Partial<SetConfigResponse> | undefined
+            const readBackNote =
+              details && details.read_back === true && details.value !== undefined
+                ? `\n引擎里现在的值：${details.value}`
+                : ''
             return {
               success: false,
-              error: `设置配置失败：${msg}`,
+              error: `设置配置失败：${msg}${readBackNote}`,
               code
+            }
+          }
+
+          // 老插件没有 read_back 字段，它回的 value 只是请求的回显，不能当成引擎里的值报
+          if (response.read_back === undefined) {
+            return {
+              success: true,
+              config_name: response.config_name,
+              section: response.section,
+              key: response.key,
+              requested_value: value,
+              file_path: response.file_path,
+              verified: false,
+              message:
+                `已请求把配置项 "${key}" 设为 ${value}，但当前插件版本不回读，` +
+                '写没写进去未经引擎确认。需要确认时用 ue_get_config 读一次。'
+            }
+          }
+
+          // 新插件回读成功才会走到这里；仍按回读值再核一遍，对不上就不说成功
+          if (
+            response.read_back !== true ||
+            response.value !== value ||
+            response.persisted === false
+          ) {
+            return {
+              success: false,
+              error:
+                response.read_back !== true
+                  ? `设置配置失败：写入后读不回 [${section}] ${key}`
+                  : response.value !== value
+                    ? `设置配置失败：请求的是 ${value}，引擎读回的是 ${response.value}`
+                    : `设置配置失败：[${section}] ${key} 只改在内存里，没写到磁盘，重启编辑器就会丢`
             }
           }
 
@@ -120,7 +169,8 @@ export function createSetConfigTool() {
             key: response.key,
             value: response.value,
             file_path: response.file_path,
-            message: `配置项 "${key}" 已设置为: ${response.value}`
+            verified: true,
+            message: `配置项 "${key}" 已写入磁盘，引擎读回的值: ${response.value}`
           }
         }
 

@@ -8,7 +8,8 @@
 
 import { z } from 'zod'
 
-import { defineUeTool } from '../defineUeTool'
+import { defineTool, type ToolOutcome } from '../defineTool'
+import { callUeRawWhenRegistryReady } from '../defineUeTool'
 import { NAMESPACE } from './namingAudit'
 import { summarizeMigrate } from './summaries'
 import type { MigrateResponse } from './types'
@@ -41,15 +42,16 @@ const MigrateInput = z.object({
     .describe('源资产有未保存改动时先保存再拷，默认 true。false 会拷到磁盘上旧的那份')
 })
 
-export const migrateTool = defineUeTool<typeof MigrateInput, MigrateResponse>({
+/** 大工程的依赖闭包动辄几千个文件，拷到机械盘上要很久 */
+const MIGRATE_TIMEOUT_MS = 30 * 60 * 1000
+
+export const migrateTool = defineTool<typeof MigrateInput, MigrateResponse>({
   name: 'ue_content_migrate',
   namespace: NAMESPACE,
-  method: 'content.migrate',
   risk: 'mutating',
   // 插件的 dry_run 在 save_first 落盘之前就返回，什么都不写
   riskFor: (args) => (args.dry_run === true ? 'safe' : 'mutating'),
   concurrency: 'sequential',
-  timeoutMs: 30 * 60 * 1000,
   description: `把资产（连同它们的依赖闭包）从当前工程迁移到另一个虚幻工程，等价于编辑器右键 Migrate。
 
 【怎么用】paths 给资产或目录，destination 给目标工程的 .uproject / 工程目录 / Content 目录。
@@ -65,15 +67,50 @@ export const migrateTool = defineUeTool<typeof MigrateInput, MigrateResponse>({
 【不做】不会打开目标工程、不会在目标工程里修引用。拷完在那边打开工程让注册表扫一遍即可。
 本工程内部的搬迁请用 ue_content_move。`,
   input: MigrateInput,
-  toParams: (args) => {
+  execute: async (args, ctx) => {
     const params: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(args)) {
       if (value !== undefined) params[key] = value
     }
-    return params
-  },
-  toOutcome: (response) => ({
-    text: summarizeMigrate(response),
-    details: response
-  })
+    // 不用 callUe（defineUeTool 走的就是它）：插件只要有一个文件没拷成就回 ok:false，
+    // 而且不带顶层 error —— callUe 会把它压成「content.migrate 失败：未提供失败原因」，
+    // 已经拷过去的数量和逐文件的失败原因一起扔掉。模型以为什么都没拷，重跑一遍
+    // 又撞同一批失败。同 batchMove.ts 的 callBatch
+    const response = await callUeRawWhenRegistryReady<MigrateResponse>('content.migrate', params, {
+      timeoutMs: MIGRATE_TIMEOUT_MS,
+      ctx
+    })
+    return migrateOutcome(response)
+  }
 })
+
+interface RpcFailure {
+  ok?: boolean
+  error?: string
+  message?: string
+  code?: string | number
+  __rpc?: { code?: string | number }
+}
+
+/**
+ * 插件响应 → 给模型的结果。
+ *
+ * 两种 ok:false 要分开：参数错、目标不对这类是插件 SendError 回来的，**没有 files**，
+ * 照旧当失败抛；拷了一半的那种带着完整的 files / copied，按部分完成来写。
+ * 只有一个都没拷成、又确实有失败时才算工具失败 —— 全部因为目标已存在而跳过不是失败，
+ * 预演更不是。
+ */
+export function migrateOutcome(response: MigrateResponse): ToolOutcome<MigrateResponse> {
+  if (!Array.isArray((response as Partial<MigrateResponse>).files)) {
+    const shape = response as unknown as RpcFailure
+    const code = shape.__rpc?.code ?? shape.code
+    throw new Error(
+      `content.migrate 失败：${shape.error || shape.message || '未提供失败原因'}` +
+        (code !== undefined ? `（错误码 ${code}）` : '')
+    )
+  }
+  const text = summarizeMigrate(response)
+  const nothingCopied = !response.dry_run && response.copied === 0
+  const isError = nothingCopied && (response.failed > 0 || response.skipped === 0)
+  return { text, details: response, ...(isError ? { isError: true } : {}) }
+}

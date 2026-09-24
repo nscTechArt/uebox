@@ -412,11 +412,44 @@ namespace UALAnimation
         if (!bValid)
         {
             // Cancel() alone does not undo changes. Explicitly restore tracks before dropping the transaction.
+            // 还原本身也会失败：原来 SetKeys 的返回值直接丢掉，却照样报「original tracks restored」。
+            // 现在每条轨道还原后按写入时同样的容差读回比对，没还原上的逐个记名
+            TArray<FString> NotRestored;
             for (int32 B = 0; B < Ref.GetRawBoneNum(); ++B)
-                if (HadTrack[B]) SetKeys(Ref.GetBoneName(B), Before[B]);
-                else if (Model->IsValidBoneTrackName(Ref.GetBoneName(B))) Controller.RemoveBoneTrack(Ref.GetBoneName(B));
-            Controller.CloseBracket(); Transaction.Cancel();
-            Error = TEXT("Pose readback failed; original tracks restored, not saved"); return nullptr;
+            {
+                const FName Name = Ref.GetBoneName(B);
+                if (HadTrack[B])
+                {
+                    bool bRestored = SetKeys(Name, Before[B]);
+                    TArray<FTransform> Actual;
+                    if (bRestored) Model->GetBoneTrackTransforms(Name, Actual);
+                    bRestored = bRestored && Actual.Num() == Count;
+                    for (int32 F = 0; bRestored && F < Count; ++F) bRestored = Actual[F].Equals(Before[B][F], 0.0001);
+                    if (!bRestored) NotRestored.Add(Name.ToString());
+                }
+                else if (Model->IsValidBoneTrackName(Name))
+                {
+                    Controller.RemoveBoneTrack(Name);
+                    if (Model->IsValidBoneTrackName(Name)) NotRestored.Add(Name.ToString());
+                }
+            }
+            Controller.CloseBracket();
+            if (NotRestored.Num() == 0)
+            {
+                Transaction.Cancel();
+                Error = TEXT("Pose readback failed; original tracks restored and verified by readback, not saved"); return nullptr;
+            }
+            // 没还原干净时**不** Cancel：Cancel 只把撤销记录丢掉、不回滚，
+            // 丢了这条记录用户连 Ctrl+Z 都没有。让事务照常提交，并把没还原的骨头说出来
+            const int32 Shown = FMath::Min(NotRestored.Num(), 8);
+            FString Names = FString::Join(TArray<FString>(NotRestored.GetData(), Shown), TEXT(", "));
+            if (NotRestored.Num() > Shown) Names += FString::Printf(TEXT(" ... (+%d)"), NotRestored.Num() - Shown);
+            Error = FString::Printf(
+                TEXT("Pose readback failed, and restoring the original tracks also failed for %d bone(s): %s. ")
+                TEXT("The animation in memory is modified but NOT saved. Do not save it; press Ctrl+Z in the editor, ")
+                TEXT("or discard changes and reload the asset, then inspect before retrying."),
+                NotRestored.Num(), *Names);
+            return nullptr;
         }
         Controller.CloseBracket();
         FJson Result = MakeShared<FJsonObject>();

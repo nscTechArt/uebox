@@ -325,6 +325,9 @@ describe('就近复制纯 getter', () => {
     expect(result.success).toBe(true)
     expect(result.duplicated_getters).toBeUndefined()
     expect(String(result.summary)).not.toContain('就近复制')
+    // 复制没成要进失败清单，第一句不说成功
+    expect(String(result.summary)).toMatch(/^⚠️ 部分完成/)
+    expect(String(result.summary)).toContain('复制纯 getter：建不出来')
   })
 })
 
@@ -403,6 +406,44 @@ describe('不该被排版碰的东西', () => {
     expect(payload.enclose_nodes).toEqual(['GUID-A', 'GUID-B', 'GUID-C'])
     expect(result.comments_moved).toBe(1)
     expect(String(result.summary)).toContain('注释框跟着它框住的逻辑一起挪')
+  })
+
+  /**
+   * 挪框失败原来和「没框住节点、本来就不动」混成一个数，被说成「保持原位」——
+   * 像是有意为之。失败要单独数、第一句就说（AGENTS.md §5 第 14 条）。
+   */
+  it('挪框失败算失败，不说成保持原位', async () => {
+    const withComment = {
+      ...GRAPH,
+      nodes: [
+        ...GRAPH.nodes,
+        {
+          node_id: 'GUID-COMMENT',
+          class: 'EdGraphNode_Comment',
+          title: '这一段在算间距',
+          comment_text: '这一段在算间距',
+          pos_x: -50,
+          pos_y: -50,
+          node_width: 600,
+          node_height: 400,
+          pins: []
+        }
+      ]
+    }
+    callRequest
+      .mockResolvedValueOnce(withComment)
+      .mockResolvedValueOnce({ ok: true, moved: 3 })
+      .mockResolvedValueOnce({ ok: false, error: 'Comment node not found' })
+
+    const result = await run()
+
+    const summary = String(result.summary)
+    expect(Object.keys(result)[0]).toBe('summary')
+    expect(summary.split('\n')[0]).toBe('⚠️ 部分完成：3 项成功 / 1 项失败。')
+    expect(summary).toContain('「这一段在算间距」：Comment node not found')
+    expect(summary).not.toContain('没框住任何节点')
+    expect(result.comments_left_in_place).toBeUndefined()
+    expect(result.failed_count).toBe(1)
   })
 
   /**

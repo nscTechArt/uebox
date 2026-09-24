@@ -16,6 +16,7 @@ import {
   unmatchedTargetFields,
   type UnmatchedTargetsResponse
 } from '../../unmatchedTargets'
+import { withPartialHeadline, describeFailures, type PartialFailure } from '../../partialResult'
 /**
  * 系统关键 Actor 类名列表（用于删除后检测是否误删）
  * 这些 Actor 通常不应被普通删除操作删除
@@ -113,6 +114,9 @@ interface DestroyActorResponse extends WorldScopedResponse, UnmatchedTargetsResp
   count?: number
   target_count?: number
   deleted_actors?: Array<{ name?: string; path?: string; class?: string } | string>
+  /** 找到了但引擎没删掉的（新插件才有）。老插件只能从 count < target_count 看出来 */
+  failed_count?: number
+  failed?: Array<{ name?: string; path?: string; class?: string; reason?: string }>
 }
 
 /**
@@ -297,11 +301,48 @@ selection: true 表示删掉用户此刻在视口/大纲里选中的那些 —�
           )
         }
 
-        if (isSuccess) {
+        /*
+         * 找到了却没删掉的。新插件逐个给 failed[]；老插件只回 count 和 target_count，
+         * 差值就是没删掉的个数，只是说不出是谁。
+         */
+        const failures: PartialFailure[] = (response?.failed ?? []).map((f) => ({
+          item: f.name || f.path || '(未命名)',
+          reason: f.reason
+        }))
+        const failedCount = Math.max(
+          response?.failed_count ?? failures.length,
+          targetCount !== undefined ? targetCount - count : 0,
+          0
+        )
+        const unmatched = unmatchedTargetFields(response).unmatched_count ?? 0
+
+        // 回了 count 就按 count 说话：「ok 但删了 0 个」是失败。
+        // 没回 count 的极老插件只能信它的 ok
+        const deletedSome = count > 0 || (isSuccess && response?.count === undefined)
+
+        if (isSuccess && deletedSome) {
+          const body =
+            `已删除 ${count} 个 Actor` +
+            // 点名删 7 个只删掉 6 个时，第 7 个的名字必须出现在这句话里。
+            // 删除不可逆：静默少删一个，用户是照着「删完了」往下干的
+            describeUnmatchedTargets(response) +
+            describeWorld(response)
+          // 老插件只给了差值没给名单时，也得有一条说明，不能只剩一个数字
+          const listed =
+            failures.length === 0 && failedCount > 0
+              ? [{ item: `${failedCount} 个 Actor`, reason: '引擎没删掉，插件没说是哪几个' }]
+              : failures
           return {
+            // 有没删掉的就先说部分完成，不能先说「成功删除 6 / 7」（AGENTS.md §5 第 14 条）
+            message: withPartialHeadline(
+              body,
+              { succeeded: count, failed: failedCount, skipped: unmatched, unit: '个 Actor' },
+              listed
+            ),
             success: true,
             count,
             target_count: targetCount,
+            ...(failedCount > 0 ? { failed_count: failedCount, failed: response?.failed } : {}),
             deleted_actors: deletedActors,
             warning:
               criticalDeleted.length > 0
@@ -309,13 +350,6 @@ selection: true 表示删掉用户此刻在视口/大纲里选中的那些 —�
                 : undefined,
             ...unmatchedTargetFields(response),
             ...worldFields(response),
-            message:
-              (response?.message ||
-                `成功删除 ${count}${targetCount !== undefined ? ` / ${targetCount}` : ''} 个 Actor`) +
-              // 点名删 7 个只删掉 6 个时，第 7 个的名字必须出现在这句话里。
-              // 删除不可逆：静默少删一个，用户是照着「删完了」往下干的
-              describeUnmatchedTargets(response) +
-              describeWorld(response),
             _aiInstruction: 'Actor 删除完成。如果所有任务已完成，请调用 done 工具汇报结果。'
           }
         }
@@ -324,10 +358,13 @@ selection: true 表示删掉用户此刻在视口/大纲里选中的那些 —�
         const code = (response as any)?.__rpc?.code ?? (response as any)?.code
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const details = (response as any)?.details
+        const failureList = describeFailures(failures, '没删掉的')
         return {
           success: false,
           deleted_actors: deletedActors,
-          error: response?.error || response?.message || '删除 Actor 失败，未收到成功确认',
+          error:
+            (response?.error || response?.message || '删除 Actor 失败，未收到成功确认') +
+            (failureList ? `\n${failureList}` : ''),
           code,
           details,
           raw: response
