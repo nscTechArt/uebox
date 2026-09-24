@@ -138,7 +138,14 @@ export function taskVideoTools(): UnrealAgentTool[] {
           seconds,
           dir,
           ctx.signal,
-          (text) => ctx.report({ text })
+          (text) => ctx.report({ text }),
+          // 用户按停止时，外层的中止处理比这里的错误先返回：任务号只能靠中止说明带出去
+          (taskId) =>
+            ctx.setAbortNote?.(
+              () =>
+                `套餐音乐任务 ${taskId} 已经提交：停止时会请服务端取消（提交后取消不退额度）；` +
+                '同样的请求别处还在等的话它会继续跑 —— 再发一次完全相同的请求就能接回它，不会重复扣费。'
+            )
         )
         const { saveLocalMusicAsset } = await import('../../../services/aigc/assetSaver')
         const tracks: ((typeof result.tracks)[number] & {

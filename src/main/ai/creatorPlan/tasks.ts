@@ -7,7 +7,8 @@
  *          要等到明天，不重发，和 402 / 403 一样当场报给用户。
  *   轮询   `GET /tasks/{id}`，间隔按协议：视频 10 秒、3D 5 秒、音乐 3 秒。时间上限交给服务端
  *          （到点置 failed、退额度），这边只比它多等两分钟兜底。
- *   取消   `POST /tasks/{id}/cancel`。用户按停止时调，服务端置 cancelled。**退不退额度看回来的
+ *   取消   `POST /tasks/{id}/cancel`。用户按停止时调（同一进程里同样的请求共用一个任务，只有最后一个
+ *          停下的才真的取消，见 runPlanTask），服务端置 cancelled。**退不退额度看回来的
  *          `usage` 是否归零**（2026-09 起）：视频只有还在排队时取消才退；3D、音乐一经提交上游
  *          就会跑完，取消不退。不按模型写死 —— 以后能退的情况只会变多。
  *   续上   提交前把「请求摘要 → 幂等键 / 任务号」记进 `userData/creator-plan-tasks.json`。
@@ -448,6 +449,26 @@ export interface WaitOptions extends PlanTaskDeps {
 
 const defaultLabel: TaskLabel = (taskId) => `任务号 ${taskId}`
 
+/** 这个错误说明任务已经到了终态、账可以结了：失败了，或者取消已确认（退没退额度已定） */
+function endsTask(error: unknown): boolean {
+  return (
+    error instanceof PlanTaskFailedError ||
+    (error instanceof PlanTaskCancelledError && error.settled)
+  )
+}
+
+/** 用户按了停止：取消服务端任务，回一个写明退没退额度的错误 */
+async function cancelledError(
+  provider: ProviderConfig,
+  kind: PlanTaskKind,
+  taskId: string,
+  options: WaitOptions
+): Promise<PlanTaskCancelledError> {
+  const cancelled = await cancelPlanTask(provider, taskId, options)
+  const label = (options.label ?? defaultLabel)(taskId)
+  return new PlanTaskCancelledError(taskId, cancelOutcomeOf(cancelled), label, kind)
+}
+
 /**
  * 从一个已知的任务对象开始，按协议间隔轮询到终态。成功回任务，其余抛错。
  *
@@ -464,8 +485,7 @@ export async function waitPlanTask(
   const label = (options.label ?? defaultLabel)(first.id)
   const deadline = now() + PLAN_TASK_LIMIT_MS[kind] + DEADLINE_MARGIN_MS
   const cancel = async (): Promise<never> => {
-    const cancelled = await cancelPlanTask(provider, first.id, options)
-    throw new PlanTaskCancelledError(first.id, cancelOutcomeOf(cancelled), label, kind)
+    throw await cancelledError(provider, kind, first.id, options)
   }
 
   let current = first
@@ -585,10 +605,15 @@ export interface RunOptions extends WaitOptions {
 
 /**
  * 提交（或续上）→ 等到终态。成功回任务（账由调用方落盘后用 settlePlanTask 划），
- * 失败、取消成功时自己划掉；其余错误（查不到、等太久）留在账上，下次续得上。
+ * 失败、取消成功时自己划掉；其余错误（查不到、等太久、提交重试用完还是 429 / 5xx、
+ * 提交途中被停）留在账上，下次续得上。
  *
  * 续上的判据是请求摘要：同样的模型 + 同样的输入，账上又有没结束的那一笔，
  * 就不再新建 —— 有任务号直接查，没任务号（提交那一下崩了）带原来的键重发。
+ *
+ * 同一个进程里同样的请求同时来几个，共用一个任务（只扣一次，结果一样）：
+ * 谁按停止谁先走，任务照跑；最后一个也停了才真的取消（见 joinShared）。
+ * 还没提交（或提交途中）就被停的，抛原始的中止错误 —— 这时还没有任务号可报。
  */
 export async function runPlanTask(
   provider: ProviderConfig,
@@ -597,7 +622,130 @@ export async function runPlanTask(
   options: RunOptions = {}
 ): Promise<PlanTask> {
   const hash = planTaskHash(body)
+  let shared = sharedRuns.get(hash)
+  /** 刚被所有人停掉的那个任务号：取消没确认的话它还在账上，新的这次不能去接它 */
+  let cancelledTaskId: string | undefined
+  // 所有人都停了、正在取消的那次不能再接，也不能马上另起一次：新起的会从账上读到
+  // 这个正被取消的任务号接着查，拿到的是别人的「已取消」。等它收完尾（取消结论落了账）再说
+  while (shared?.controller.signal.aborted) {
+    await shared.promise.catch(() => undefined)
+    cancelledTaskId = shared.cancelledTaskId ?? cancelledTaskId
+    shared = sharedRuns.get(hash)
+  }
+  // 自己已经停了、又没有正在跑的可接：什么都不做。起一次的话会去续账上的任务，
+  // 续上又立刻被中止 —— 那就把一个本来接得回来的、已经付过钱的任务取消掉了
+  if (options.signal?.aborted && !shared) throw abortReasonOf(options.signal)
+  if (!shared) {
+    const controller = new AbortController()
+    const run: SharedRun = { controller, waiters: new Set(), promise: Promise.resolve(null!) }
+    run.promise = runTracked(
+      provider,
+      kind,
+      body,
+      hash,
+      {
+        ...options,
+        signal: controller.signal,
+        onProgress: (note) => run.waiters.forEach((w) => w.onProgress?.(note)),
+        onSubmitted: (task) => {
+          run.submitted = task
+          run.waiters.forEach((w) => w.onSubmitted?.(task))
+        }
+      },
+      cancelledTaskId
+    )
+      .catch((error: unknown) => {
+        if (error instanceof PlanTaskCancelledError) run.cancelledTaskId = error.taskId
+        throw error
+      })
+      .finally(() => {
+        if (sharedRuns.get(hash) === run) sharedRuns.delete(hash)
+      })
+    sharedRuns.set(hash, run)
+    shared = run
+  }
+  return joinShared(shared, options)
+}
+
+interface SharedRun {
+  promise: Promise<PlanTask>
+  /** 只有所有等待者都停了才触发：取消服务端任务 */
+  controller: AbortController
+  waiters: Set<RunOptions>
+  submitted?: PlanTask
+  /** 所有人都停了、取消了的那个任务号（取消没确认时它还留在账上） */
+  cancelledTaskId?: string
+}
+
+/** 本进程里正在跑的请求，按请求摘要（见 runPlanTask） */
+const sharedRuns = new Map<string, SharedRun>()
+
+function abortReasonOf(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('This operation was aborted', 'AbortError')
+}
+
+/**
+ * 同样的请求别处还在等，这一个先停了：任务没取消，照常在跑。带上任务号，要结果可以接着取
+ */
+export class PlanTaskLeftError extends Error {
+  constructor(
+    readonly taskId: string,
+    label: string
+  ) {
+    super(
+      `已停止等待（${label}）。同样的请求别处还在等，任务没有取消、照常在跑；` +
+        '要结果的话稍后用这个任务号接着取，不要重新提交。'
+    )
+    this.name = 'PlanTaskLeftError'
+  }
+}
+
+/**
+ * 以一个等待者的身份等共用的那次运行。自己的信号 abort 了就先走，任务还在为别人跑：
+ * 已经提交了的抛 PlanTaskLeftError（带任务号），还没提交的抛原始的中止错误。
+ * 最后一个走的人触发取消，拿到的是取消的结论（PlanTaskCancelledError）。
+ */
+function joinShared(run: SharedRun, waiter: RunOptions): Promise<PlanTask> {
+  const signal = waiter.signal
+  const leftError = (): unknown =>
+    run.submitted
+      ? new PlanTaskLeftError(run.submitted.id, (waiter.label ?? defaultLabel)(run.submitted.id))
+      : abortReasonOf(signal!)
+  if (signal?.aborted && run.waiters.size > 0) return Promise.reject(leftError())
+  run.waiters.add(waiter)
+  if (run.submitted) waiter.onSubmitted?.(run.submitted)
+  return new Promise<PlanTask>((resolve, reject) => {
+    const leave = (): void => {
+      run.waiters.delete(waiter)
+      if (run.waiters.size === 0) run.controller.abort(signal?.reason)
+      else reject(leftError())
+    }
+    // 信号早已中止的走不到这里：runPlanTask 没有可接的就直接拒绝，有人在等就在上面先拒绝
+    signal?.addEventListener('abort', leave, { once: true })
+    run.promise.then(resolve, reject).finally(() => {
+      signal?.removeEventListener('abort', leave)
+      run.waiters.delete(waiter)
+    })
+  })
+}
+
+async function runTracked(
+  provider: ProviderConfig,
+  kind: PlanTaskKind,
+  body: PlanTaskBody,
+  hash: string,
+  options: RunOptions,
+  /** 刚被停掉的任务号：账上那笔正是它时不去接（取消没确认，接上只会拿到别人的「已取消」），重新提交 */
+  skipTaskId?: string
+): Promise<PlanTask> {
   const now = options.now ?? Date.now
+  const forget = (): Promise<void> =>
+    safely(updateLedger(options, (entries) => entries.filter((e) => e.hash !== hash)))
+  /** 取消成了（退没退额度已确定）这笔账就结了；没确认的留着，下次还能接上 */
+  const settleCancel = async (error: PlanTaskCancelledError): Promise<never> => {
+    if (error.settled) await forget()
+    throw error
+  }
   const path = await ledgerPath(options).catch(() => null)
   const pending = path
     ? (await readLedger(path)).find(
@@ -607,10 +755,14 @@ export async function runPlanTask(
     : undefined
 
   let task: PlanTask | null = null
-  if (pending?.taskId) {
+  if (pending?.taskId && pending.taskId !== skipTaskId) {
+    const pendingId = pending.taskId
     options.onProgress?.('接着查上次没取完的任务（不重新提交、不再扣费）…')
-    task = await getPlanTask(provider, pending.taskId, options.signal, options).catch(
-      (error: unknown) => {
+    task = await getPlanTask(provider, pendingId, options.signal, options).catch(
+      async (error: unknown) => {
+        if (options.signal?.aborted) {
+          return settleCancel(await cancelledError(provider, kind, pendingId, options))
+        }
         // 账上那笔在服务端已经不在了（过了保留期），按新请求处理；别的错照抛
         if (error instanceof PlanTaskRequestError && error.status === 404) return null
         throw error
@@ -619,6 +771,7 @@ export async function runPlanTask(
   }
 
   if (!task) {
+    // 账上只有键（提交那一下崩了）才用原来的键重发；有任务号却没接（被停掉的那个）就换新键
     const key = pending && !pending.taskId ? pending.key : randomUUID()
     // 先记账再提交：提交那一下崩了，下次还能用同一个键把任务要回来
     await safely(
@@ -629,10 +782,18 @@ export async function runPlanTask(
     )
     task = await submitPlanTask(provider, body, key, options.signal, options).catch(
       async (error: unknown) => {
-        // 服务端明确没收下（参数错、额度不够）：这笔账作废
-        if (error instanceof PlanTaskRequestError || error instanceof CreatorPlanCallError) {
-          await safely(updateLedger(options, (entries) => entries.filter((e) => e.hash !== hash)))
-        }
+        // 提交途中被停：不知道服务端收没收下，也就没有任务号可取消。不为这个再发一次 ——
+        // 没收下的话那一下会新建任务，音乐、3D 提交后取消不退额度。键留在账上，
+        // 同样的请求再来一次就用这个键接上（收下了的话是幂等重放，不会重复扣费）
+        if (options.signal?.aborted) throw error
+        // 服务端明确没收下（参数错、额度不够、套餐错）：这笔账作废。
+        // 429 / 5xx / 524 重试用完不算 —— 前面哪一次可能已经收下了，留着键，下次同样的请求不会重复扣费
+        const refused =
+          error instanceof CreatorPlanCallError ||
+          (error instanceof PlanTaskRequestError &&
+            error.status >= 400 &&
+            !isRetryable(error.status))
+        if (refused) await forget()
         throw error
       }
     )
@@ -649,12 +810,7 @@ export async function runPlanTask(
     return await waitPlanTask(provider, kind, task, options)
   } catch (error) {
     // 还没结束的（查不到、等太久、没取消成）留在账上，下次续得上
-    const ended =
-      error instanceof PlanTaskFailedError ||
-      (error instanceof PlanTaskCancelledError && error.settled)
-    if (ended) {
-      await safely(updateLedger(options, (entries) => entries.filter((e) => e.hash !== hash)))
-    }
+    if (endsTask(error)) await forget()
     throw error
   }
 }
@@ -688,6 +844,9 @@ export function fileNameOfUrl(url: string, fallback: string): string {
 
 /**
  * 按任务号接着取（工具的 `resume_job_id`）。不提交、不扣费；等到终态的规矩同 waitPlanTask。
+ *
+ * 到了终态就把账上这个任务号划掉：不然之后同样的请求（用户要「再来一个」）会被当成续上，
+ * 拿回这一次的结果或失败。视频、3D 本来就在拿到结果时划账（见 settlePlanTask）。
  */
 export async function resumePlanTask(
   provider: ProviderConfig,
@@ -695,6 +854,27 @@ export async function resumePlanTask(
   taskId: string,
   options: WaitOptions = {}
 ): Promise<PlanTask> {
-  const task = await getPlanTask(provider, taskId, options.signal, options)
-  return waitPlanTask(provider, kind, task, options)
+  const forget = (): Promise<void> =>
+    safely(updateLedger(options, (entries) => entries.filter((e) => e.taskId !== taskId)))
+  // 同一个任务在本进程里正被别人等着（runPlanTask 的共享运行）：一起等，停的时候按「最后一个走的
+  // 才取消」来 —— 自己单独轮询的话，这边一按停止就把别人还要的任务取消了
+  for (const run of sharedRuns.values()) {
+    if (!run.controller.signal.aborted && run.submitted?.id === taskId)
+      return joinShared(run, options)
+  }
+  try {
+    const task = await getPlanTask(provider, taskId, options.signal, options).catch(
+      async (error: unknown) => {
+        // 第一次查就被停了：和 runTracked 续账上那笔一样，任务号是知道的，取消它
+        if (options.signal?.aborted) throw await cancelledError(provider, kind, taskId, options)
+        throw error
+      }
+    )
+    const done = await waitPlanTask(provider, kind, task, options)
+    await forget()
+    return done
+  } catch (error) {
+    if (endsTask(error)) await forget()
+    throw error
+  }
 }

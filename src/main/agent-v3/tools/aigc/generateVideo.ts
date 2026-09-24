@@ -522,7 +522,14 @@ reference 是「照着这个风格/主体重新画」。不确定就问用户，
         ...(typeof args.seed === 'number' ? { seed: args.seed } : {}),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
         // 厂商报的状态词转给界面，几分钟里不至于什么都不显示
-        onProgress: (note) => ctx.report({ text: `视频生成中：${note}` })
+        onProgress: (note) => ctx.report({ text: `视频生成中：${note}` }),
+        // 用户按停止时，外层的中止处理比这里的错误先返回：任务号只能靠中止说明带出去
+        onSubmitted: (token) =>
+          ctx.setAbortNote?.(
+            () =>
+              `套餐任务 ${token} 已经提交：停止时会请服务端取消（退不退额度以服务端为准）；` +
+              `同样的请求别处还在等的话它会继续跑 —— 要结果用 resume_job_id=${token} 接着取，不要重新提交。`
+          )
       }).catch((error: unknown) => {
         throw new Error(describeVideoFailure(error, modelLabel))
       })

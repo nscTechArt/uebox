@@ -116,10 +116,21 @@ export async function generateTaskMusic(
   seconds: number,
   projectDir: string,
   signal?: AbortSignal,
-  report: (text: string) => void = () => {}
+  report: (text: string) => void = () => {},
+  /** 套餐任务提交之后回一次任务号：调用方据此在「用户按停止」时报出来 */
+  onSubmitted?: (taskId: string) => void
 ): Promise<{ path: string; tracks: MusicTrack[]; reused: boolean }> {
   if (provider.musicApi === 'uebox-tasks') {
-    return generatePlanMusic(provider, model, prompt, seconds, projectDir, signal, report)
+    return generatePlanMusic(
+      provider,
+      model,
+      prompt,
+      seconds,
+      projectDir,
+      signal,
+      report,
+      onSubmitted
+    )
   }
   const request = musicRequest(provider, model, prompt, seconds)
   const key = await resolveApiKey(provider.apiKey)
@@ -360,7 +371,8 @@ async function generatePlanMusic(
   seconds: number,
   projectDir: string,
   signal: AbortSignal | undefined,
-  report: (text: string) => void
+  report: (text: string) => void,
+  onSubmitted?: (taskId: string) => void
 ): Promise<{ path: string; tracks: MusicTrack[]; reused: boolean }> {
   if (!prompt.trim()) throw new Error('音乐描述不能为空。')
   if (prompt.length > 3000) throw new Error('音乐描述最多 3000 字符，请精简后继续。')
@@ -404,6 +416,7 @@ async function generatePlanMusic(
   const task = await runPlanTask(provider, 'music', body, {
     signal: combined,
     onProgress: (note) => report(`音乐生成：${note}`),
+    onSubmitted: (task) => onSubmitted?.(task.id),
     label: (id) => `任务 ${id}`
   })
   const audio = filesOfRole(task, 'audio')

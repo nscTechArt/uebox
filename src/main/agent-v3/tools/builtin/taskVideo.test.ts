@@ -92,7 +92,7 @@ describe('independent music generation', () => {
     expect((mocks.generate.mock.calls[0] as unknown as unknown[])[4]).toBe('verified-video-project')
   })
   it('绑的是 Box Plan 时，说明写明已提交的音乐取消后不退额度', () => {
-    expect(music().description).not.toContain('Token Plan')
+    expect(music().description).not.toContain('已提交的音乐取消后不退额度')
     mocks.musicProvider = 'creator-plan-music'
     try {
       expect(music().description).toContain('已提交的音乐取消后不退额度')

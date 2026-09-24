@@ -509,7 +509,14 @@ ${tripo ? TRIPO_DESCRIPTION_NOTE : ''}${planOptions ? planDescriptionNote(planOp
         ...(typeof args.seed === 'number' ? { seed: args.seed } : {}),
         vendor: vendorOptionsOf(args),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
-        onProgress: (note) => ctx.report({ text: `3D 生成中：${note}` })
+        onProgress: (note) => ctx.report({ text: `3D 生成中：${note}` }),
+        // 用户按停止时，外层的中止处理比这里的错误先返回：任务号只能靠中止说明带出去
+        onSubmitted: (token) =>
+          ctx.setAbortNote?.(
+            () =>
+              `套餐任务 ${token} 已经提交：停止时会请服务端取消（退不退额度以服务端为准）；` +
+              `同样的请求别处还在等的话它会继续跑 —— 要结果用 resume_job_id=${token} 接着取，不要重新提交。`
+          )
       }).catch((error: unknown) => {
         throw new Error(describeModel3dFailure(error, modelLabel))
       })

@@ -425,3 +425,19 @@ describe('说明里的扣费口径', () => {
     expect(plan.description).not.toContain('失败也扣')
   })
 })
+
+describe('套餐任务提交之后按停止', () => {
+  it('中止说明里带上任务号和怎么接着取 —— 外层的中止处理比工具自己的错误先返回', async () => {
+    generateVideo.mockImplementationOnce(
+      async (request: { onSubmitted?: (token: string) => void }) => {
+        request.onSubmitted?.('creator-plan-video:task_1')
+        return new Promise(() => {})
+      }
+    )
+    const controller = new AbortController()
+    const pending = tool.execute('c1', { prompt: '猫' }, controller.signal)
+    await vi.waitFor(() => expect(generateVideo).toHaveBeenCalled())
+    controller.abort()
+    await expect(pending).rejects.toThrow(/resume_job_id=creator-plan-video:task_1/)
+  })
+})

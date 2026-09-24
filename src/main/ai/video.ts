@@ -865,7 +865,11 @@ async function resolveVideoBinding(request: { providerId?: string; modelId?: str
  * @throws {VideoTimeoutError} 超过 30 分钟仍未完成
  */
 export async function generateVideo(
-  request: GenerateVideoRequest & { onProgress?: (note: string) => void }
+  request: GenerateVideoRequest & {
+    onProgress?: (note: string) => void
+    /** 套餐任务提交之后回一次任务令牌：调用方据此在「用户按停止」时报出任务号 */
+    onSubmitted?: (jobToken: string) => void
+  }
 ): Promise<GeneratedVideo> {
   const { provider, modelId } = await resolveVideoBinding(request)
   if (provider.videoApi === 'uebox-tasks') return runPlanVideo(provider, modelId, request)
@@ -1077,12 +1081,18 @@ function planVideoResult(task: PlanTask, job: VideoJob): GeneratedVideo {
 async function runPlanVideo(
   provider: ProviderConfig,
   modelId: string,
-  request: GenerateVideoRequest & { onProgress?: (note: string) => void }
+  request: GenerateVideoRequest & {
+    onProgress?: (note: string) => void
+    /** 套餐任务提交之后回一次任务令牌：调用方据此在「用户按停止」时报出任务号 */
+    onSubmitted?: (jobToken: string) => void
+  }
 ): Promise<GeneratedVideo> {
   const body = planVideoBody(modelId, request)
   const task = await runPlanTask(provider, 'video', body, {
     signal: request.signal,
     onProgress: request.onProgress,
+    onSubmitted: (task) =>
+      request.onSubmitted?.(encodeVideoJob({ id: task.id, providerId: provider.id })),
     label: (id) => `任务号 ${encodeVideoJob({ id, providerId: provider.id })}`
   })
   const result = planVideoResult(task, { id: task.id, providerId: provider.id })

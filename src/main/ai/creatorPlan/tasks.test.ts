@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProviderConfig } from '../types'
+import type { PlanTaskBody } from './tasks'
 
 const dirs = vi.hoisted(() => ({ userData: '' }))
 
@@ -393,6 +394,104 @@ describe('崩溃后续上（本机账本）', () => {
     expect(calls[0].headers['Idempotency-Key']).toBe(entry.key)
   })
 
+  it('提交重试用完还是 5xx：前面哪次可能已经收下了，键留在账上，下次同样的请求带同一个键', async () => {
+    const first = stubFetch(() => json({ error: { code: 'upstream_unavailable' } }, 503))
+    await expect(tasks.runPlanTask(music, 'music', body, deps())).rejects.toBeInstanceOf(
+      tasks.PlanTaskRequestError
+    )
+    const [entry] = ledger().entries
+    expect(entry.key).toBe(first[0].headers['Idempotency-Key'])
+
+    const calls = stubFetch((call) =>
+      call.method === 'POST'
+        ? json(taskObject('task_5', 'queued'), 201)
+        : json(taskObject('task_5', 'succeeded'))
+    )
+    await tasks.runPlanTask(music, 'music', body, deps())
+    expect(calls[0].headers['Idempotency-Key']).toBe(entry.key)
+  })
+
+  it('按任务号续取到终态：账上这一笔划掉，之后同样的请求重新提交', async () => {
+    stubFetch((call) => {
+      if (call.method === 'POST') return json(taskObject('task_6', 'queued'), 201)
+      throw new TypeError('fetch failed')
+    })
+    await expect(tasks.runPlanTask(music, 'music', body, deps())).rejects.toBeInstanceOf(
+      tasks.PlanTaskInterruptedError
+    )
+    stubFetch(() => json(taskObject('task_6', 'succeeded')))
+    await tasks.resumePlanTask(music, 'music', 'task_6', deps())
+    expect(ledger().entries).toEqual([])
+  })
+
+  it('提交那一下被用户停了、恰好又撞上 400：不知道服务端收没收下，键留在账上，不作废', async () => {
+    const controller = new AbortController()
+    const calls = stubFetch(() => {
+      controller.abort()
+      return json({ error: { code: 'invalid_request', message: 'x' } }, 400)
+    })
+    await expect(
+      tasks.runPlanTask(music, 'music', body, { ...deps(), signal: controller.signal })
+    ).rejects.toThrow()
+    expect(calls).toHaveLength(1)
+    expect(ledger().entries).toMatchObject([{ key: calls[0].headers['Idempotency-Key'] }])
+  })
+
+  it('续账上那笔时第一次查就被停了：任务号是知道的，取消它', async () => {
+    stubFetch((call) => {
+      if (call.method === 'POST') return json(taskObject('task_P', 'queued'), 201)
+      throw new TypeError('fetch failed')
+    })
+    await expect(tasks.runPlanTask(music, 'music', body, deps())).rejects.toBeInstanceOf(
+      tasks.PlanTaskInterruptedError
+    )
+    const controller = new AbortController()
+    const calls = stubFetch((call) => {
+      if (call.url.endsWith('/cancel')) return json(taskObject('task_P', 'cancelled'))
+      controller.abort()
+      throw new DOMException('aborted', 'AbortError')
+    })
+    await expect(
+      tasks.runPlanTask(music, 'music', body, { ...deps(), signal: controller.signal })
+    ).rejects.toBeInstanceOf(tasks.PlanTaskCancelledError)
+    expect(calls.map((call) => call.url)).toEqual([
+      `${BASE}/tasks/task_P`,
+      `${BASE}/tasks/task_P/cancel`
+    ])
+    expect(ledger().entries).toEqual([])
+  })
+
+  it('带着已经停了的信号来、又没有正在跑的可接：什么都不发，不去碰账上那笔', async () => {
+    stubFetch((call) => {
+      if (call.method === 'POST') return json(taskObject('task_Q', 'queued'), 201)
+      throw new TypeError('fetch failed')
+    })
+    await expect(tasks.runPlanTask(music, 'music', body, deps())).rejects.toBeInstanceOf(
+      tasks.PlanTaskInterruptedError
+    )
+    const stopped = new AbortController()
+    stopped.abort()
+    const calls = stubFetch(() => json(taskObject('task_Q', 'running')))
+    await expect(
+      tasks.runPlanTask(music, 'music', body, { ...deps(), signal: stopped.signal })
+    ).rejects.toThrow()
+    expect(calls).toEqual([])
+    expect(ledger().entries).toMatchObject([{ taskId: 'task_Q' }])
+  })
+
+  it('按任务号续取时第一次查就被停了：取消它', async () => {
+    const controller = new AbortController()
+    const calls = stubFetch((call) => {
+      if (call.url.endsWith('/cancel')) return json(taskObject('task_R', 'cancelled'))
+      controller.abort()
+      throw new DOMException('aborted', 'AbortError')
+    })
+    await expect(
+      tasks.resumePlanTask(music, 'music', 'task_R', { ...deps(), signal: controller.signal })
+    ).rejects.toBeInstanceOf(tasks.PlanTaskCancelledError)
+    expect(calls.at(-1)!.url).toBe(`${BASE}/tasks/task_R/cancel`)
+  })
+
   it('失败的任务从账上划掉，下一次是新的一次生成', async () => {
     stubFetch((call) =>
       call.method === 'POST'
@@ -418,6 +517,180 @@ describe('崩溃后续上（本机账本）', () => {
       tasks.runPlanTask(music, 'music', body, { ...deps(), signal: controller.signal })
     ).rejects.toMatchObject({ outcome: 'kept' })
     expect(ledger().entries).toEqual([])
+  })
+})
+
+/**
+ * 同一个进程里同样的请求同时来几个。共享状态是模块级的，每条用例用自己的请求体，
+ * 失败时也把挂着的运行收掉，免得一条回归把后面的用例一起拖红
+ */
+describe('同样的请求同时来几个', () => {
+  const bodyOf = (tag: string): PlanTaskBody => ({
+    model: 'uebox-music',
+    input: { prompt: 'epic', seconds: 60, instrumental: true, tag }
+  })
+
+  it('共用一个任务、只提交一次；停掉一个不取消，另一个照常拿到结果，停的那个拿到任务号', async () => {
+    const shared = bodyOf('share')
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const calls = stubFetch(async (call) => {
+      if (call.method === 'POST') return json(taskObject('task_S', 'queued'), 201)
+      await gate
+      return json(taskObject('task_S', 'succeeded'))
+    })
+    const stopB = new AbortController()
+    try {
+      const a = tasks.runPlanTask(music, 'music', shared, deps())
+      const b = tasks.runPlanTask(music, 'music', shared, { ...deps(), signal: stopB.signal })
+      await vi.waitFor(() => expect(calls.some((call) => call.method === 'GET')).toBe(true))
+      stopB.abort()
+      await expect(b).rejects.toMatchObject({ name: 'PlanTaskLeftError', taskId: 'task_S' })
+      release()
+      expect((await a).id).toBe('task_S')
+    } finally {
+      release()
+    }
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1)
+    expect(calls.some((call) => call.url.endsWith('/cancel'))).toBe(false)
+  })
+
+  it('都停了：最后一个走的时候才取消，只取消一次', async () => {
+    const shared = bodyOf('all-stop')
+    const calls = stubFetch(async (call) => {
+      if (call.url.endsWith('/cancel')) return json(taskObject('task_T', 'cancelled'))
+      if (call.method === 'POST') return json(taskObject('task_T', 'queued'), 201)
+      // 轮询间隔在这里是 0：让出一个真的时钟周期，不然轮询把事件循环占满
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      return json(taskObject('task_T', 'running'))
+    })
+    const stopA = new AbortController()
+    const stopB = new AbortController()
+    try {
+      const a = tasks.runPlanTask(music, 'music', shared, { ...deps(), signal: stopA.signal })
+      const b = tasks.runPlanTask(music, 'music', shared, { ...deps(), signal: stopB.signal })
+      await vi.waitFor(() => expect(calls.some((call) => call.method === 'GET')).toBe(true))
+      stopA.abort()
+      const left = await a.catch((error: unknown) => error)
+      expect(left).toBeInstanceOf(tasks.PlanTaskLeftError)
+      expect(left).toMatchObject({ taskId: 'task_T' })
+      expect((left as Error).message).toContain('任务号 task_T')
+      expect(calls.some((call) => call.url.endsWith('/cancel'))).toBe(false)
+      stopB.abort()
+      await expect(b).rejects.toBeInstanceOf(tasks.PlanTaskCancelledError)
+    } finally {
+      stopA.abort()
+      stopB.abort()
+    }
+    expect(calls.filter((call) => call.url.endsWith('/cancel'))).toHaveLength(1)
+  })
+
+  it('上一次正在取消时同样的请求又来了：等它收完尾再重新提交，不接那个被取消的任务', async () => {
+    const shared = bodyOf('retry-after-stop')
+    let releaseCancel = (): void => undefined
+    const cancelGate = new Promise<void>((resolve) => (releaseCancel = resolve))
+    let posts = 0
+    const calls = stubFetch(async (call) => {
+      if (call.url.endsWith('/cancel')) {
+        await cancelGate
+        return json(taskObject('task_old', 'cancelled'))
+      }
+      if (call.method === 'POST') {
+        posts += 1
+        return json(taskObject(posts === 1 ? 'task_old' : 'task_new', 'queued'), 201)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      return json(
+        call.url.endsWith('/task_new')
+          ? taskObject('task_new', 'succeeded')
+          : taskObject('task_old', 'running')
+      )
+    })
+    const stopA = new AbortController()
+    try {
+      const a = tasks.runPlanTask(music, 'music', shared, { ...deps(), signal: stopA.signal })
+      await vi.waitFor(() => expect(calls.some((call) => call.method === 'GET')).toBe(true))
+      stopA.abort()
+      await vi.waitFor(() => expect(calls.some((call) => call.url.endsWith('/cancel'))).toBe(true))
+      const b = tasks.runPlanTask(music, 'music', shared, deps())
+      releaseCancel()
+      await expect(a).rejects.toBeInstanceOf(tasks.PlanTaskCancelledError)
+      expect((await b).id).toBe('task_new')
+    } finally {
+      stopA.abort()
+      releaseCancel()
+    }
+    expect(posts).toBe(2)
+  })
+
+  it('停掉的那次正在取消、取消又没确认：同样的请求这时来了，不接那个任务，重新提交', async () => {
+    const shared = bodyOf('unconfirmed')
+    let releaseCancel = (): void => undefined
+    const cancelGate = new Promise<void>((resolve) => (releaseCancel = resolve))
+    let posts = 0
+    const calls = stubFetch(async (call) => {
+      // 取消请求没送到：结论是 unconfirmed，账上那笔留着
+      if (call.url.endsWith('/cancel')) {
+        await cancelGate
+        return json({ error: { message: 'down' } }, 503)
+      }
+      if (call.method === 'POST') {
+        posts += 1
+        return json(taskObject(posts === 1 ? 'task_u1' : 'task_u2', 'queued'), 201)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      return json(
+        call.url.endsWith('/task_u2')
+          ? taskObject('task_u2', 'succeeded')
+          : taskObject('task_u1', 'running')
+      )
+    })
+    const stopA = new AbortController()
+    try {
+      const a = tasks.runPlanTask(music, 'music', shared, { ...deps(), signal: stopA.signal })
+      await vi.waitFor(() => expect(calls.some((call) => call.method === 'GET')).toBe(true))
+      stopA.abort()
+      await vi.waitFor(() => expect(calls.some((call) => call.url.endsWith('/cancel'))).toBe(true))
+      const b = tasks.runPlanTask(music, 'music', shared, deps())
+      const before = calls.length
+      releaseCancel()
+      await expect(a).rejects.toMatchObject({ outcome: 'unconfirmed' })
+      expect((await b).id).toBe('task_u2')
+      // 新的这次一眼都没看被停掉的 task_u1
+      expect(calls.slice(before).some((call) => call.url.endsWith('/task_u1'))).toBe(false)
+    } finally {
+      stopA.abort()
+      releaseCancel()
+    }
+  })
+
+  it('按任务号续取同一个正在共享的任务：一起等，续取的人停了不取消别人还要的任务', async () => {
+    const shared = bodyOf('resume-join')
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const calls = stubFetch(async (call) => {
+      if (call.method === 'POST' && !call.url.endsWith('/cancel')) {
+        return json(taskObject('task_J', 'queued'), 201)
+      }
+      await gate
+      return json(taskObject('task_J', 'succeeded'))
+    })
+    const stopResume = new AbortController()
+    try {
+      const a = tasks.runPlanTask(music, 'music', shared, deps())
+      await vi.waitFor(() => expect(calls.some((call) => call.method === 'GET')).toBe(true))
+      const resumed = tasks.resumePlanTask(music, 'music', 'task_J', {
+        ...deps(),
+        signal: stopResume.signal
+      })
+      stopResume.abort()
+      await expect(resumed).rejects.toBeInstanceOf(tasks.PlanTaskLeftError)
+      release()
+      expect((await a).id).toBe('task_J')
+    } finally {
+      release()
+    }
+    expect(calls.some((call) => call.url.endsWith('/cancel'))).toBe(false)
   })
 })
 
@@ -485,7 +758,12 @@ describe('视频分支（videoApi: uebox-tasks）', () => {
               })
             )
       )
-      const result = await drive(generateVideo({ prompt: '城门' }))
+      const submitted: string[] = []
+      const result = await drive(
+        generateVideo({ prompt: '城门', onSubmitted: (token) => submitted.push(token) })
+      )
+      // 提交后把任务令牌交给调用方：用户按停止时工具靠它在中止说明里报出任务号
+      expect(submitted).toEqual(['creator-plan-video:task_v'])
       expect(result).toEqual({
         url: 'https://plan.example/files/t/task_v/video.mp4',
         job: { id: 'task_v', providerId: 'creator-plan-video' },

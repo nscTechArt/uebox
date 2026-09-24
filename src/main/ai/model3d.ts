@@ -1633,7 +1633,11 @@ async function resolveModel3dBinding(request: GenerateModel3dRequest): Promise<{
  * @throws {Model3dTimeoutError} 超过 10 分钟仍未完成
  */
 export async function generateModel3d(
-  request: GenerateModel3dRequest & { onProgress?: (note: string) => void }
+  request: GenerateModel3dRequest & {
+    onProgress?: (note: string) => void
+    /** 套餐任务提交之后回一次任务令牌：调用方据此在「用户按停止」时报出任务号 */
+    onSubmitted?: (jobToken: string) => void
+  }
 ): Promise<GeneratedModel3d> {
   const { provider, modelId } = await resolveModel3dBinding(request)
   if (provider.model3dApi === 'uebox-tasks') return runPlanModel3d(provider, modelId, request)
@@ -1899,7 +1903,11 @@ function planModel3dFiles(task: PlanTask): Model3dFile[] {
 async function runPlanModel3d(
   provider: ProviderConfig,
   modelId: string,
-  request: GenerateModel3dRequest & { onProgress?: (note: string) => void }
+  request: GenerateModel3dRequest & {
+    onProgress?: (note: string) => void
+    /** 套餐任务提交之后回一次任务令牌：调用方据此在「用户按停止」时报出任务号 */
+    onSubmitted?: (jobToken: string) => void
+  }
 ): Promise<GeneratedModel3d> {
   const spec = await cachedPlanSpec('model3d')
   const allowed = Array.isArray(spec?.options)
@@ -1911,6 +1919,7 @@ async function runPlanModel3d(
   const task = await runPlanTask(provider, 'model3d', body, {
     signal: request.signal,
     onProgress: request.onProgress,
+    onSubmitted: (task) => request.onSubmitted?.(tokenOf(task.id)),
     label: (id) => `任务号 ${tokenOf(id)}`
   })
   const files = planModel3dFiles(task)
