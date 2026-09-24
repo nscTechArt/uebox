@@ -22,6 +22,7 @@
  *
  *   - `sequence_describe`     —— 读一条序列的结构
  *   - `sequence_audit`        —— 出片前体检（五位评审一致排第一优先级）
+ *   - `sequence_diff`         —— 两条序列逐绑定对比：受保护资产改没改、风格迁移覆盖全没全
  *   - `sequence_camera_keys`  —— 写相机关键帧，任意运镜都走这里
  *   - `sequence_camera_cuts`  —— 给已有序列补相机切轨
  *
@@ -51,6 +52,7 @@ import { createSequenceAuditTool } from './audit'
 import { createSequenceCameraCutsTool } from './cameraCuts'
 import { createSequenceCameraKeysTool } from './cameraKeys'
 import { createSequenceDescribeTool } from './describe'
+import { createSequenceDiffTool } from './diff'
 import type { UnrealAgentTool } from '../defineTool'
 
 export function sequencerTools(): UnrealAgentTool<never>[] {
@@ -58,6 +60,7 @@ export function sequencerTools(): UnrealAgentTool<never>[] {
   return [
     createSequenceDescribeTool(),
     createSequenceAuditTool(),
+    createSequenceDiffTool(),
     createSequenceCameraKeysTool(),
     createSequenceCameraCutsTool()
   ] as unknown as UnrealAgentTool<never>[]
@@ -67,4 +70,5 @@ export { createSequenceAuditTool } from './audit'
 export { createSequenceCameraCutsTool } from './cameraCuts'
 export { createSequenceCameraKeysTool } from './cameraKeys'
 export { createSequenceDescribeTool } from './describe'
+export { createSequenceDiffTool } from './diff'
 export * from './findings'

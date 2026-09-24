@@ -1,6 +1,6 @@
 ---
 name: ue-sequencer
-description: Author any camera move in a Level Sequence by writing keyframes the model computes itself — orbit, dolly, follow, figure-of-eight, handheld shake, crane — plus diagnose why a sequence renders black, read what is inside one, and repair a missing Camera Cuts track. Use when the user says "绕着它转一圈"、"给我个运镜"、"镜头推近一点"、"甩起来那种"、"渲出来是黑的"、"按播放没反应"、"轨道变红了"、"绑定丢了", asks what is inside a sequence, or asks whether a sequence is ready to render. Also read this skill's engine-disconnect rule whenever any Unreal tool reports no connected project. Do not use for running the render itself — rendering is always the user's own decision — nor for focal-length animation, retiming, or rebinding a possessable, none of which are implemented yet.
+description: Author any camera move in a Level Sequence by writing keyframes the model computes itself — orbit, dolly, follow, figure-of-eight, handheld shake, crane — plus diagnose why a sequence renders black, read what is inside one, compare two sequences (what changed, whether a protected original was touched, whether a migrated character kept every animated state), and repair a missing Camera Cuts track. Use when the user says "绕着它转一圈"、"给我个运镜"、"镜头推近一点"、"甩起来那种"、"渲出来是黑的"、"按播放没反应"、"轨道变红了"、"绑定丢了"、"原版动没动"、"迁过去的齐不齐", asks what is inside a sequence, or asks whether a sequence is ready to render. Also read this skill's engine-disconnect rule whenever any Unreal tool reports no connected project. Do not use for running the render itself — rendering is always the user's own decision — nor for focal-length animation, retiming, or rebinding a possessable, none of which are implemented yet.
 ---
 
 # Sequencer
@@ -24,7 +24,7 @@ description: Author any camera move in a Level Sequence by writing keyframes the
 
 一句「编辑器好像崩了，你重开一下，我等你」比十次工具调用有用。
 
-## 四个工具：两个只读，两个写入
+## 五个工具：三个只读，两个写入
 
 只读：
 
@@ -38,6 +38,16 @@ description: Author any camera move in a Level Sequence by writing keyframes the
 - `detail="outline"`（默认）：绑定名/类型 + 轨道数。**先用这个**
 - `detail="tracks"`：加上段和时间范围
 - `detail="keys"`：加上关键帧，**必须同时用 `bindings` 点名**，否则会被拒绝
+
+**`sequence_diff(base_path, compare_path, binding_map?, bindings?)`** —— 两条序列逐绑定对比。
+**问「改了什么」「原版动没动」「迁过去的东西齐不齐」时用它。**
+
+- 不给 `binding_map`：找差异。受保护资产拿备份和当前比，文件哈希对不上时靠它说清差在哪；
+  自己改完拿改前副本和改后比，确认只动了该动的。报到关键帧的值、插值和切线
+- 给 `binding_map`（源绑定 → 目标绑定）：覆盖检查。风格迁移、换显示层之后，
+  逐条轨道判已继承 / 已适配 / 缺失 / 无法判断。**`sequence_audit` PASS 不代表迁移齐了** ——
+  它查的是能不能渲，不是描边、覆层、材质槽参数这些状态还在不在
+- 「无法判断」= 目标绑定不在序列里，状态可能由运行时逻辑接管。别说成缺失，也别说成已继承
 
 写入：
 
