@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import AIProviderSettings from './AIProviderSettings.vue'
-import { MODEL_ROLES, type SettingsView } from '@core/shared/aiProvider'
+import {
+  applyRolePatch,
+  MODEL_ROLES,
+  type RoleBindingsPatch,
+  type SettingsView
+} from '@core/shared/aiProvider'
 
 /**
  * 角色数量取自 `MODEL_ROLES` 而不是写死。
@@ -324,7 +329,7 @@ describe('套餐来源只读', () => {
     ]
   }
 
-  it('套餐来源显示「由 Box Plan 管理」，点了不开编辑弹窗；别的来源照常能点', async () => {
+  it('套餐来源显示「由 Box Plan 管理」，点了不开编辑弹窗而是打开目录的 Box Plan 页；别的来源照常能点', async () => {
     stubAiProviderApi({ getSettings: vi.fn(async () => withPlan) })
     const wrapper = mount(AIProviderSettings, {
       global: {
@@ -333,6 +338,10 @@ describe('套餐来源只读', () => {
           ModelManagerModal: {
             props: ['open'],
             template: '<div class="manager" :data-open="String(open)" />'
+          },
+          ProviderCatalogModal: {
+            props: ['visible', 'initialTab'],
+            template: '<div class="catalog" :data-open="String(visible)" :data-tab="initialTab" />'
           }
         }
       }
@@ -340,10 +349,11 @@ describe('套餐来源只读', () => {
     await flushPromises()
 
     const plan = wrapper.find('[data-provider-id="creator-plan"]')
-    expect(plan.element.tagName).toBe('DIV')
     expect(plan.text()).toContain('由 Box Plan 管理')
     await plan.trigger('click')
     expect(wrapper.find('.manager').attributes('data-open')).toBe('false')
+    expect(wrapper.find('.catalog').attributes('data-open')).toBe('true')
+    expect(wrapper.find('.catalog').attributes('data-tab')).toBe('plan')
 
     await wrapper.find('[data-provider-id="deepseek"]').trigger('click')
     expect(wrapper.find('.manager').attributes('data-open')).toBe('true')
@@ -400,6 +410,15 @@ describe('套餐的对话四个角色合成一行', () => {
     providers: [
       ...loadedSettings.providers,
       {
+        id: 'text-only',
+        displayName: 'Text Only',
+        kind: 'chat',
+        protocol: 'openai-completions',
+        baseUrl: 'https://text.example/v1',
+        models: [{ id: 'plain', displayName: 'Plain' }],
+        apiKey: { kind: 'none' }
+      },
+      {
         id: 'creator-plan',
         displayName: 'Box Plan',
         kind: 'chat',
@@ -416,9 +435,10 @@ describe('套餐的对话四个角色合成一行', () => {
     const saved: unknown[] = []
     stubAiProviderApi({
       getSettings: vi.fn(async () => merged),
-      setRoles: vi.fn(async (roles: SettingsView['roles']) => {
-        saved.push(roles)
-        return { ok: true, data: { ...merged, roles } }
+      // 和主进程一样按补丁合并（null 清空），不是拿补丁当整张表
+      setRoles: vi.fn(async (patch: RoleBindingsPatch) => {
+        saved.push(patch)
+        return { ok: true, data: { ...merged, roles: applyRolePatch(merged.roles, patch) } }
       })
     })
     return { wrapper: mountSettings(), saved }
@@ -438,9 +458,29 @@ describe('套餐的对话四个角色合成一行', () => {
     const chatSelect = wrapper.findComponent('.role-select') as VueWrapper
     chatSelect.vm.$emit('change', 'deepseek::v4-flash')
     await flushPromises()
+    expect(saved).toHaveLength(1)
     const last = saved.at(-1) as SettingsView['roles']
     for (const role of ['chat', 'agent', 'vision', 'summary'] as const) {
       expect(last[role]).toEqual({ providerId: 'deepseek', modelId: 'v4-flash' })
     }
+  })
+
+  it('合成时改成看不懂图的模型：视觉留在原来的模型上，其余三个一起改', async () => {
+    const { wrapper, saved } = mountMerged()
+    await flushPromises()
+    const chatSelect = wrapper.findComponent('.role-select') as VueWrapper
+    chatSelect.vm.$emit('change', 'text-only::plain')
+    await flushPromises()
+    expect(saved).toHaveLength(1)
+    const last = saved[0] as SettingsView['roles']
+    for (const role of ['chat', 'agent', 'summary'] as const) {
+      expect(last[role]).toEqual({ providerId: 'text-only', modelId: 'plain' })
+    }
+    // 只发改了的角色：视觉不在里面，主进程那边保持原来的 Box-Chat
+    expect('vision' in last).toBe(false)
+    // 存完之后四个不再一样：展开成四行，视觉那一行还是 Box-Chat
+    const values = wrapper.findAll('.role-select').map((node) => node.attributes('data-value'))
+    expect(values).toHaveLength(ROLE_COUNT)
+    expect(values[MODEL_ROLES.indexOf('vision')]).toBe('creator-plan::uebox-chat')
   })
 })

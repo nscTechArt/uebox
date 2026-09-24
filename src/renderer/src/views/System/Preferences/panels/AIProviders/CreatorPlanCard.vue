@@ -16,6 +16,7 @@ import AppButton from '@renderer/components/AppButton.vue'
 import AppCheckbox from '@renderer/components/AppCheckbox.vue'
 import AppModal from '@renderer/components/AppModal.vue'
 import CreatorPlanStorageRow from './CreatorPlanStorageRow.vue'
+import { Z_CONFIRM } from './modalLayers'
 import { message } from '@renderer/utils/messageManager'
 import { creatorPlanAPI } from '@renderer/api/creatorPlan'
 import type { ModelRole } from '@core/shared/aiProvider'
@@ -259,10 +260,16 @@ onUnmounted(() => unsubscribe?.())
           <AppButton variant="soft" @click="reimport">
             {{ $t('aiProvider.creatorPlan.reimport') }}
           </AppButton>
-          <AppButton variant="text" danger @click="confirmingDisconnect = true">
-            {{ $t('aiProvider.creatorPlan.disconnect') }}
-          </AppButton>
         </template>
+        <!-- Key 失效了也得能断开：不然要移除套餐、还原原绑定，只能先重新授权一遍 -->
+        <AppButton
+          v-if="state?.connected && !connecting"
+          variant="text"
+          danger
+          @click="confirmingDisconnect = true"
+        >
+          {{ $t('aiProvider.creatorPlan.disconnect') }}
+        </AppButton>
       </div>
     </div>
 
@@ -283,6 +290,7 @@ onUnmounted(() => unsubscribe?.())
 
     <!-- 设备授权：浏览器已自动打开，这里显示码供核对 -->
     <AppModal
+      :z-index="Z_CONFIRM"
       :open="prompt !== null"
       :title="$t('aiProvider.creatorPlan.codeTitle')"
       hide-footer
@@ -308,9 +316,11 @@ onUnmounted(() => unsubscribe?.())
 
     <!-- 导入预览：选哪些角色交给套餐 -->
     <AppModal
+      :z-index="Z_CONFIRM"
       :open="preview !== null"
       :title="$t('aiProvider.creatorPlan.previewTitle')"
       :ok-text="$t('aiProvider.creatorPlan.apply')"
+      :ok-disabled="!!preview && preview.changes.length === 0 && !preview.storage"
       :confirm-loading="applying"
       centered
       @ok="apply"
@@ -359,6 +369,7 @@ onUnmounted(() => unsubscribe?.())
     </AppModal>
 
     <AppModal
+      :z-index="Z_CONFIRM"
       :open="confirmingDisconnect"
       :title="$t('aiProvider.creatorPlan.disconnect')"
       :ok-text="$t('aiProvider.creatorPlan.disconnect')"

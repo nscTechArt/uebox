@@ -64,11 +64,22 @@ const modalStub = defineComponent({
   }
 })
 
-function mountModal(): ReturnType<typeof mount<typeof ProviderCatalogModal>> {
+/** 套餐卡片一挂上就要走 IPC 问状态，这里只看它在不在、事件转没转出去 */
+const planCardStub = defineComponent({
+  name: 'CreatorPlanCard',
+  emits: ['changed'],
+  setup(_, { emit }) {
+    return () => h('button', { class: 'plan-card-stub', onClick: () => emit('changed') })
+  }
+})
+
+function mountModal(
+  extraProps: { initialTab?: 'chat' | 'plan' } = {}
+): ReturnType<typeof mount<typeof ProviderCatalogModal>> {
   return mount(ProviderCatalogModal, {
-    props: { visible: true, catalog },
+    props: { visible: true, catalog, ...extraProps },
     global: {
-      stubs: { AppModal: modalStub },
+      stubs: { AppModal: modalStub, CreatorPlanCard: planCardStub },
       mocks: { $t: (key: string) => key }
     }
   })
@@ -213,5 +224,55 @@ describe('ProviderCatalogModal 卡片副标题', () => {
     expect(descOf('OpenAI')).toContain('aiProvider.catalog.access.key')
     expect(descOf('OpenAI')).toContain('aiProvider.catalog.noPresetModelsShort')
     expect(descOf('Moonshot AI')).toContain('aiProvider.catalog.modelCountShort')
+  })
+})
+
+/** Box Plan 不是目录里的一条，但对用户来说就是又一家服务商，入口放在目录最后一页 */
+describe('ProviderCatalogModal Box Plan 页', () => {
+  const tabs = (wrapper: ReturnType<typeof mountModal>): ReturnType<typeof wrapper.findAll> =>
+    wrapper.findAll('.app-segmented__item')
+
+  it('排在最后一页，没点进去之前不挂套餐卡片（打开目录不该顺带问一次套餐状态）', async () => {
+    const wrapper = mountModal()
+
+    expect(tabs(wrapper).at(-1)!.text()).toBe('aiProvider.creatorPlan.title')
+    expect(wrapper.find('.plan-card-stub').exists()).toBe(false)
+
+    await tabs(wrapper).at(-1)!.trigger('click')
+
+    expect(wrapper.find('.plan-card-stub').exists()).toBe(true)
+    expect(cardNames(wrapper)).toEqual([])
+    // 这一页只放套餐卡片：没有「自定义端点」，也不说「没有匹配的厂商」
+    expect(wrapper.find('.catalog-card-custom').exists()).toBe(false)
+    expect(wrapper.find('.catalog-empty').exists()).toBe(false)
+  })
+
+  it('切走再切回来卡片不卸载 —— 等浏览器确认的那一半授权不能丢', async () => {
+    const wrapper = mountModal()
+    await tabs(wrapper).at(-1)!.trigger('click')
+    await tabs(wrapper)[0].trigger('click')
+
+    expect(wrapper.find('.plan-card-stub').exists()).toBe(true)
+    expect(cardNames(wrapper)).toContain('OpenAI')
+  })
+
+  it('initialTab 指定 plan 时直接落在 Box Plan 页，卡片的 changed 转成 plan-changed', async () => {
+    const wrapper = mountModal({ initialTab: 'plan' })
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ visible: true })
+    await nextTick()
+
+    await wrapper.get('.plan-card-stub').trigger('click')
+    expect(wrapper.emitted('plan-changed')).toHaveLength(1)
+  })
+
+  it('在 Box Plan 页打字就是在搜厂商，跳到有命中的那页', async () => {
+    const wrapper = mountModal()
+    await tabs(wrapper).at(-1)!.trigger('click')
+
+    await wrapper.get('.catalog-search').setValue('seedream')
+    await nextTick()
+
+    expect(cardNames(wrapper)).toEqual(['Seedream'])
   })
 })

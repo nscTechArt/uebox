@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import AppButton from '@renderer/components/AppButton.vue'
-import CreatorPlanCard from './CreatorPlanCard.vue'
 import AppTooltip from '@renderer/components/AppTooltip.vue'
 /**
  * 本地直连 Provider 设置 —— 三层披露的第一层。
@@ -24,6 +23,7 @@ import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
 import { isPlanProvider } from '@core/shared/creatorPlan'
 import {
+  bindingSeesImages,
   findVisionCapableRole,
   MODEL_ROLES,
   type CatalogEntry,
@@ -43,6 +43,8 @@ const state = useAiProviders()
 const { catalog, providers, roles, configured, encryptionAvailable, configPath } = state
 
 const showCatalog = ref(false)
+/** 目录打开时停在哪一页：点套餐来源进来直接落在 Box Plan 页 */
+const catalogTab = ref<'chat' | 'plan'>('chat')
 const showManager = ref(false)
 
 /**
@@ -173,6 +175,12 @@ function handlePickCustom(): void {
 
 /** 管理弹窗里点「+ 添加 Provider」：回到目录挑一家 */
 function handleAddFromManager(): void {
+  openCatalog()
+}
+
+/** Box Plan 的入口在目录弹窗最后一页，连上之后点它的来源卡片也回到那一页 */
+function openCatalog(tab: 'chat' | 'plan' = 'chat'): void {
+  catalogTab.value = tab
   showCatalog.value = true
 }
 
@@ -333,15 +341,23 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
     return { providerId, modelId: rest.join('::') }
   })()
 
-  // 合成一行时，「对话」这一行代表四个角色：改它就四个一起改
-  const targets = role === 'chat' && collapseChatRoles.value ? ['chat', ...FOLLOWS_CHAT] : [role]
-  for (const target of targets as ModelRole[]) {
-    const result = await state.setRole(target, binding)
-    if (!result.ok) {
-      message.error(result.error || t('aiProvider.messages.saveFailed'))
-      return
-    }
-  }
+  // 合成一行时，「对话」这一行代表四个角色：改它就四个一起改，一次写盘。
+  // 视觉例外：选的模型看不懂图就不动它 —— 视觉绑定主进程不再查能力位（见 findVisionCapableRole），
+  // 平时靠视觉下拉框只列看得懂图的模型把关，这一行的候选没过那道筛
+  const targets: ModelRole[] =
+    role === 'chat' && collapseChatRoles.value
+      ? [
+          'chat',
+          ...FOLLOWS_CHAT.filter(
+            (r) =>
+              r !== 'vision' ||
+              !binding ||
+              bindingSeesImages({ roles: roles.value, providers: providers.value }, binding)
+          )
+        ]
+      : [role]
+  const result = await state.setRole(targets, binding)
+  if (!result.ok) message.error(result.error || t('aiProvider.messages.saveFailed'))
 }
 </script>
 
@@ -358,9 +374,6 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
     <div v-if="!initialLoading && !encryptionAvailable" class="provider-banner warning">
       {{ $t('aiProvider.banner.noEncryption') }}
     </div>
-
-    <!-- Box Plan：一个订阅配好多个角色。应用或断开后重读来源与绑定。暂时隐藏，放开时去掉 v-if -->
-    <CreatorPlanCard v-if="false" @changed="state.load()" />
 
     <!-- 一、服务商 -->
     <div class="settings-subsection">
@@ -382,13 +395,15 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
         <template v-else>
           <template v-for="{ provider, modelCount } in sourceCards" :key="provider.id">
             <!--
-              套餐来源只读：地址、模型、Key 都由上面的套餐卡片管，在这里改了、删了，
-              卡片和配置就对不上了。所以不给点进编辑弹窗，只标出来是谁在管。
+              套餐来源不进编辑弹窗：地址、模型、Key 都由套餐卡片管，在编辑弹窗里改了、删了，
+              卡片和配置就对不上了。点它打开目录的 Box Plan 页，看额度、重新导入、断开都在那儿。
             -->
-            <div
+            <button
               v-if="isPlanProvider(provider.id)"
+              type="button"
               class="source-card source-card-managed"
               :data-provider-id="provider.id"
+              @click="openCatalog('plan')"
             >
               <span class="source-name">{{ provider.displayName }}</span>
               <span class="source-meta">
@@ -397,7 +412,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
                   {{ $t('aiProvider.creatorPlan.managedBadge') }}
                 </span>
               </span>
-            </div>
+            </button>
             <button
               v-else
               type="button"
@@ -418,7 +433,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
           </template>
         </template>
 
-        <button type="button" class="source-card source-add" @click="showCatalog = true">
+        <button type="button" class="source-card source-add" @click="openCatalog()">
           {{ $t('aiProvider.list.add') }}
         </button>
       </div>
@@ -533,10 +548,12 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
 
     <ProviderCatalogModal
       v-model:visible="showCatalog"
+      :initial-tab="catalogTab"
       :catalog="catalog"
       :existing-ids="providers.map((item) => item.id)"
       @pick="handlePickCatalog"
       @pick-custom="handlePickCustom"
+      @plan-changed="state.load()"
     />
   </section>
 </template>
@@ -721,13 +738,9 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
-/* 套餐来源只读，不是按钮：不给悬停反馈，免得看着像能点 */
-.source-card-managed,
-.source-card-managed:hover {
+/* 套餐来源用虚线和普通服务商区分开：它归 Box Plan 管，不进编辑弹窗 */
+.source-card-managed {
   border-style: dashed;
-  border-color: var(--color-border);
-  background: var(--color-bg-surface);
-  cursor: default;
 }
 
 .source-name {

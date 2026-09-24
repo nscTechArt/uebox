@@ -15,9 +15,13 @@ import AppSegmented from '@renderer/components/AppSegmented.vue'
  *
  * 根因是一份列表塞了两种心智模型：「我从哪家买算力」和「我要配哪种能力」。
  * 分页按后者切，页内保留前者的分区。分区表在 providerCatalogSections.ts。
+ *
+ * 最后一页是 Box Plan：它不是目录里的一条（没有 Base URL 可填，走浏览器授权），
+ * 但对用户来说就是「又一家服务商」，所以和厂商摆在同一个入口里。这一页只放套餐卡片。
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import type { CatalogEntry } from '@core/shared/aiProvider'
+import CreatorPlanCard from './CreatorPlanCard.vue'
 import { Z_CATALOG } from './modalLayers'
 import { catalogLogoUrl } from './providerLogos'
 import {
@@ -35,8 +39,14 @@ function logoFor(entry: CatalogEntry): string | undefined {
   return catalogLogoUrl(entry.id)
 }
 
+/** 目录的五页之外再加一页 Box Plan */
+type CatalogModalTab = TabKey | 'plan'
+const MODAL_TABS: readonly CatalogModalTab[] = [...TAB_ORDER, 'plan']
+
 const props = defineProps<{
   visible: boolean
+  /** 打开时停在哪一页，默认「对话」。点已连上的套餐来源时直接落在 Box Plan 页 */
+  initialTab?: CatalogModalTab
   catalog: CatalogEntry[]
   /** 已经添加过的 provider id。只做标记，不禁用 —— 配两个 OpenAI 是常见需求 */
   existingIds?: string[]
@@ -50,10 +60,21 @@ const emit = defineEmits<{
   (event: 'pick', entry: CatalogEntry): void
   /** 选了「自定义端点」 */
   (event: 'pick-custom'): void
+  /** Box Plan 应用或断开了：来源和角色绑定都变了，父组件要重读 */
+  (event: 'plan-changed'): void
 }>()
 
 const keyword = ref('')
-const activeTab = ref<TabKey>('chat')
+const activeTab = ref<CatalogModalTab>('chat')
+const onPlanTab = computed(() => activeTab.value === 'plan')
+/**
+ * 套餐卡片第一次切到那一页才挂载（打开目录不该顺带问一次套餐状态），挂上之后就不卸：
+ * 连接要等浏览器确认，这期间切页或关掉目录，卡片一卸载授权结果就没人接了
+ */
+const planMounted = ref(false)
+watch(onPlanTab, (on) => {
+  if (on) planMounted.value = true
+})
 const scrollEl = ref<HTMLElement | null>(null)
 const activeIndex = ref(-1)
 
@@ -66,7 +87,7 @@ watch(
   (visible) => {
     if (visible) {
       keyword.value = ''
-      activeTab.value = 'chat'
+      activeTab.value = props.initialTab ?? 'chat'
       activeIndex.value = -1
     }
   }
@@ -92,12 +113,15 @@ const tabCounts = computed<Record<TabKey, number>>(() => {
 watch([() => keyword.value, () => props.catalog], () => {
   if (!searching.value) return
   const counts = tabCounts.value
-  if (counts[activeTab.value] > 0) return
-  const next = TAB_ORDER.find((tab) => counts[tab] > 0)
+  const current = activeTab.value
+  if (current !== 'plan' && counts[current] > 0) return
+  // 在 Box Plan 页打字就是要搜厂商：哪页都没命中也回到对话页，让「没有匹配」说出来
+  const next = TAB_ORDER.find((tab) => counts[tab] > 0) ?? (current === 'plan' ? 'chat' : null)
   if (next) activeTab.value = next
 })
 
 const groups = computed(() => {
+  if (activeTab.value === 'plan') return []
   const matched = props.catalog.filter((entry) => matchesKeyword(entry, keyword.value))
 
   return TAB_SECTIONS[activeTab.value]
@@ -179,16 +203,21 @@ function pickCustom(): void {
       <AppSegmented
         v-model="activeTab"
         class="catalog-tabs"
-        :options="TAB_ORDER"
+        :options="MODAL_TABS"
         :aria-label="$t('aiProvider.catalog.tabsLabel')"
       >
         <template #default="{ option }">
-          {{ $t(`aiProvider.catalog.tab.${option}`) }}
-          <span class="catalog-tab-count">{{ tabCounts[option] }}</span>
+          <template v-if="option === 'plan'">{{ $t('aiProvider.creatorPlan.title') }}</template>
+          <template v-else>
+            {{ $t(`aiProvider.catalog.tab.${option}`) }}
+            <span class="catalog-tab-count">{{ tabCounts[option] }}</span>
+          </template>
         </template>
       </AppSegmented>
 
       <div ref="scrollEl" class="catalog-scroll">
+        <CreatorPlanCard v-if="planMounted" v-show="onPlanTab" @changed="emit('plan-changed')" />
+
         <div v-for="group in groups" :key="group.key" class="catalog-group">
           <div class="catalog-group-title">
             {{ $t(`aiProvider.catalog.group.${group.key}`) }}
@@ -234,7 +263,7 @@ function pickCustom(): void {
         </div>
 
         <!-- 「上面都没有」时的兜底，所以排在最后。搜索时藏起来，免得「没有匹配的厂商」旁边还杵着一张卡 -->
-        <div v-if="!searching" class="catalog-group">
+        <div v-if="!searching && !onPlanTab" class="catalog-group">
           <div class="catalog-group-title">{{ $t('aiProvider.catalog.customGroup') }}</div>
           <button type="button" class="catalog-card catalog-card-custom" @click="pickCustom">
             <span class="catalog-card-text">
@@ -244,7 +273,7 @@ function pickCustom(): void {
           </button>
         </div>
 
-        <div v-if="groups.length === 0" class="catalog-empty">
+        <div v-if="groups.length === 0 && !onPlanTab" class="catalog-empty">
           {{ $t('aiProvider.catalog.noMatch') }}
         </div>
       </div>
@@ -293,7 +322,7 @@ function pickCustom(): void {
   box-shadow: 0 0 0 3px var(--color-accent-border);
 }
 
-/* 分页条比内容窄，左对齐；5 个分页在 720 宽的弹窗里一行放得下 */
+/* 分页条比内容窄，左对齐；6 个分页在 720 宽的弹窗里一行放得下 */
 .catalog-tabs {
   align-self: flex-start;
 }

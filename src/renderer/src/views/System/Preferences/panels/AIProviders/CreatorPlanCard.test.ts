@@ -13,10 +13,10 @@ import type { CreatorPlanPreview, CreatorPlanState } from '@core/shared/creatorP
 const stubs = {
   // 只渲染打开的弹窗，并把「确定」做成一个可点的按钮
   AppModal: {
-    props: ['open', 'okText'],
+    props: ['open', 'okText', 'okDisabled'],
     emits: ['ok', 'cancel'],
     template:
-      '<div v-if="open" class="modal"><slot /><button class="modal-ok" @click="$emit(\'ok\')">{{ okText }}</button></div>'
+      '<div v-if="open" class="modal"><slot /><button class="modal-ok" :disabled="okDisabled" @click="$emit(\'ok\')">{{ okText }}</button></div>'
   }
 }
 
@@ -141,6 +141,24 @@ describe('CreatorPlanCard', () => {
     expect(wrapper.find('.modal').exists()).toBe(false)
   })
 
+  it('预览里什么都没有（订阅失效、角色全空、也不带存储）：「应用」点不了，免得删光套餐来源', async () => {
+    const api = stubApi({
+      state: vi.fn(async () => ({ ok: true, data: connected })),
+      preview: vi.fn(async () => ({ ok: true, data: { ...preview, changes: [], storage: null } }))
+    })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '重新导入')!
+      .trigger('click')
+    await flushPromises()
+    const ok = wrapper.find('.modal-ok')
+    expect(ok.attributes('disabled')).toBeDefined()
+    await ok.trigger('click')
+    expect(api.apply).not.toHaveBeenCalled()
+  })
+
   it('用户在浏览器里取消：不弹错误，也不弹预览', async () => {
     stubApi({ connect: vi.fn(async () => ({ ok: false, code: 'cancelled', error: 'x' })) })
     const wrapper = mount(CreatorPlanCard, { global: { stubs } })
@@ -151,6 +169,17 @@ describe('CreatorPlanCard', () => {
       .trigger('click')
     await flushPromises()
     expect(wrapper.find('.modal').exists()).toBe(false)
+  })
+
+  it('Key 失效（unauthorized）：给「连接」，也给「断开」—— 不用先重新授权才能移除套餐', async () => {
+    stubApi({
+      state: vi.fn(async () => ({ ok: true, data: { ...connected, error: 'unauthorized' } }))
+    })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels).toContain('连接')
+    expect(labels).toContain('断开')
   })
 
   it('续费失败（past_due）：常驻提醒，点了去管理订阅', async () => {
