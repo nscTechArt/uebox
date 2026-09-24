@@ -122,6 +122,39 @@ describe('blueprint_set_variable_meta', () => {
     expect(String(result.message)).toContain('实例可编辑=true')
   })
 
+  /**
+   * 引擎侧改完会顺带编译 —— 实例认的是生成类上的属性，不编译就还是旧标记
+   * （2026-09-24 用户反馈：回执说可编辑，实例赋值却被拒）。
+   * 编译失败时生成类可能没换新，这时必须把话说出来，不能只报「已更新」。
+   */
+  it('编译有错时带回错误数和警告，提示先编译再赋值', async () => {
+    callRequest.mockResolvedValue({
+      ...ok,
+      compiled: true,
+      compile_error_count: 2,
+      warning: 'The variable is not on the compiled class yet'
+    })
+    const result = await runMeta({
+      blueprint_path: '/Game/BP_Door',
+      name: 'OpenSpeed',
+      instance_editable: true
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.compile_error_count).toBe(2)
+    expect(result.warning).toContain('compiled class')
+    expect(String(result.message)).toContain('blueprint_compile')
+  })
+
+  it('编译干净时不塞多余字段', async () => {
+    callRequest.mockResolvedValue({ ...ok, compiled: true, compile_error_count: 0 })
+    const result = await runMeta({ blueprint_path: '/Game/BP_Door', name: 'OpenSpeed', category: '门' })
+
+    expect('compile_error_count' in result).toBe(false)
+    expect('warning' in result).toBe(false)
+    expect(String(result.message)).not.toContain('blueprint_compile')
+  })
+
   it('引擎报错时把 details 一起带回 —— 那里有可用变量名', async () => {
     callRequest.mockResolvedValue({
       ok: false,

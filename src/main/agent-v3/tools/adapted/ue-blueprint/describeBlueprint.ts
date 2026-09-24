@@ -8,6 +8,7 @@ import { serviceManager } from '../../../../services'
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { extractBlueprintGraphRefs, pickPreferredGraphName } from './graphDiscovery'
 import { resolveBlueprintPathInput } from './resolveBlueprintPath'
+import { formatVariableType } from './addBlueprintVariable'
 
 const DescribeBlueprintSchema = z.object({
   blueprint_path: z
@@ -36,6 +37,11 @@ interface ComponentInfo {
 interface VariableInfo {
   name: string
   type: string
+  /** 没有这两个字段时 MeshComponent 和 MeshComponent[] 读出来一样 */
+  is_array?: boolean
+  container?: 'array' | 'set' | 'map'
+  sub_category_object?: string
+  /** 细节面板上「实例可编辑」那个勾（以前插件写死 true） */
   editable: boolean
   default_value?: string
 }
@@ -178,7 +184,7 @@ reported here, so do not fall back to running Python to read the SCS tree.`,
             })
             .join('; ')
           const variableSummary = response.variables
-            .map((variable) => `${variable.name}: ${variable.type}`)
+            .map((variable) => `${variable.name}: ${formatVariableType(variable)}`)
             .join(', ')
           const graphSummary =
             graphNames.length > 0 ? `, ${graphNames.length} graphs [${graphNames.join(', ')}]` : ''

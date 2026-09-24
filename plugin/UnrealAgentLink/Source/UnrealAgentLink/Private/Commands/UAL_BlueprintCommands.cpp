@@ -1806,15 +1806,36 @@ static bool UAL_ReadPinTypeFromParamObject(
  * @return 这个类型能不能被填回去。`false` 表示只写了个信息性的类别名
  *         （delegate / wildcard 这类），调用方不该拿它去重建。
  */
+/** 容器名，和 UAL_ResolvePinType 认的 container 入参同一套词；单值回 nullptr */
+static const TCHAR* UAL_ContainerName(const FEdGraphPinType& PinType)
+{
+	switch (PinType.ContainerType)
+	{
+	case EPinContainerType::Array: return TEXT("array");
+	case EPinContainerType::Set:   return TEXT("set");
+	case EPinContainerType::Map:   return TEXT("map");
+	default:                       return nullptr;
+	}
+}
+
+/** 人读的类型名：bool / bool[] / set<bool> / map<bool, ...>。报错和回执摘要用 */
+static FString UAL_DisplayTypeName(const FString& BaseType, const FEdGraphPinType& PinType)
+{
+	switch (PinType.ContainerType)
+	{
+	case EPinContainerType::Array: return BaseType + TEXT("[]");
+	case EPinContainerType::Set:   return FString::Printf(TEXT("set<%s>"), *BaseType);
+	case EPinContainerType::Map:   return FString::Printf(TEXT("map<%s, ...>"), *BaseType);
+	default:                       return BaseType;
+	}
+}
+
 static bool UAL_WritePinTypeJson(const FEdGraphPinType& PinType, const TSharedPtr<FJsonObject>& Out)
 {
 	// 容器先写，标量类型判断和它无关
-	switch (PinType.ContainerType)
+	if (const TCHAR* ContainerName = UAL_ContainerName(PinType))
 	{
-	case EPinContainerType::Array: Out->SetStringField(TEXT("container"), TEXT("array")); break;
-	case EPinContainerType::Set:   Out->SetStringField(TEXT("container"), TEXT("set"));   break;
-	case EPinContainerType::Map:   Out->SetStringField(TEXT("container"), TEXT("map"));   break;
-	default: break;
+		Out->SetStringField(TEXT("container"), ContainerName);
 	}
 
 	const FName Cat = PinType.PinCategory;
@@ -4913,11 +4934,22 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 			{
 				FBlueprintEditorUtils::PropertyValueToString_Direct(NewProp, static_cast<const uint8*>(Scratch), AppliedDefault);
 			}
-			else
+			else if (PinType.ContainerType == EPinContainerType::None)
 			{
 				DefaultError = FString::Printf(
 					TEXT("'%s' is not a valid literal for type '%s'. Use Unreal's own text form: 90.0 for numbers, true/false for bool, (X=0,Y=0,Z=0) for structs, /Game/Path/Asset.Asset for asset references"),
 					*DefaultValueStr, *TypeStr);
+			}
+			else
+			{
+				/**
+				 * 容器变量要按容器说。以前这里只报标量类型名，于是 bool 数组填 "false"
+				 * 得到的是「'false' 不是合法的 bool 字面量……bool 请写 true/false」——
+				 * 前后两句自相矛盾，真正的原因（它是数组）一个字没提（2026-09-24 用户反馈）。
+				 */
+				DefaultError = FString::Printf(
+					TEXT("'%s' is not a valid literal for '%s' (a %s variable, not a single %s). Container defaults use Unreal's parenthesised list form, e.g. (true,false) or (1.0,2.0); leave default_value empty for an empty container. If you meant a single value, recreate the variable without container / is_array"),
+					*DefaultValueStr, *UAL_DisplayTypeName(TypeStr, PinType), UAL_ContainerName(PinType), *TypeStr);
 			}
 			NewProp->DestroyValue(Scratch);
 			FMemory::Free(Scratch);
@@ -4950,7 +4982,13 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 	TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
 	VarObj->SetStringField(TEXT("name"), VarNameStr);
 	VarObj->SetStringField(TEXT("type"), PinType.PinCategory.ToString());
-	VarObj->SetBoolField(TEXT("is_array"), bIsArray);
+	// 容器从解析出来的 PinType 读，不回显入参：`container` 优先于 `is_array`，
+	// 两个都传且矛盾时回显 is_array 会把一个数组说成标量（2026-09-24 用户反馈）
+	VarObj->SetBoolField(TEXT("is_array"), PinType.ContainerType == EPinContainerType::Array);
+	if (const TCHAR* ContainerName = UAL_ContainerName(PinType))
+	{
+		VarObj->SetStringField(TEXT("container"), ContainerName);
+	}
 	if (PinType.PinSubCategoryObject.IsValid())
 	{
 		if (const UObject* Obj = PinType.PinSubCategoryObject.Get())
@@ -5693,7 +5731,20 @@ TArray<TSharedPtr<FJsonValue>> FUAL_BlueprintCommands::CollectVariablesInfo(UBlu
 		TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
 		VarObj->SetStringField(TEXT("name"), Var.VarName.ToString());
 		VarObj->SetStringField(TEXT("type"), Var.VarType.PinCategory.ToString());
-		VarObj->SetBoolField(TEXT("editable"), true);
+		// 没有这两个字段，MeshComponent 和 MeshComponent[] 读出来一模一样
+		VarObj->SetBoolField(TEXT("is_array"), Var.VarType.ContainerType == EPinContainerType::Array);
+		if (const TCHAR* ContainerName = UAL_ContainerName(Var.VarType))
+		{
+			VarObj->SetStringField(TEXT("container"), ContainerName);
+		}
+		if (const UObject* Sub = Var.VarType.PinSubCategoryObject.Get())
+		{
+			VarObj->SetStringField(TEXT("sub_category_object"), Sub->GetPathName());
+		}
+		// 以前这里写死 true。按细节面板那个勾算：有 Edit 且没有 DisableEditOnInstance
+		// （和 UAL_BuildVariableMetaJson 的 instance_editable 同一口径）
+		VarObj->SetBoolField(TEXT("editable"),
+			(Var.PropertyFlags & CPF_Edit) != 0 && (Var.PropertyFlags & CPF_DisableEditOnInstance) == 0);
 		
 		// 尝试获取默认值
 		if (!Var.DefaultValue.IsEmpty())
@@ -6605,7 +6656,8 @@ void FUAL_BlueprintCommands::Handle_CreateGraphDeclarative(const TSharedPtr<FJso
 		{
 			NodeInfo->SetBoolField(TEXT("reused"), true);
 		}
-		NodeInfo->SetArrayField(TEXT("pins"), UAL_BuildPinsJson(NewNode));
+		// pins 不在这里填：此刻默认值还没写、线还没连、也还没编译，
+		// 这时的引脚快照全是「空的初始态」。回执末尾按 GUID 重新找节点再填
 		CreatedNodesInfo.Add(MakeShared<FJsonValueObject>(NodeInfo));
 	}
 
@@ -7222,6 +7274,29 @@ void FUAL_BlueprintCommands::Handle_CreateGraphDeclarative(const TSharedPtr<FJso
 			WarningsArray.Add(MakeShared<FJsonValueString>(W));
 		}
 		Result->SetArrayField(TEXT("warnings"), WarningsArray);
+	}
+
+	/**
+	 * 引脚快照放到最后：默认值、连线、清旧节点、编译都做完之后再读。
+	 *
+	 * 以前是建完节点当场就序列化，回执里 `default_value` 是 None、`linked_count` 全是 0，
+	 * 和同一份回执里的 `connection_count` 自相矛盾（2026-09-24 用户反馈），
+	 * 调用方只能再读一遍整图才敢信。
+	 *
+	 * 按 GUID 重新找节点而不是拿 NodeIdMap 里的指针：编译可能 ReconstructNode，
+	 * 引脚对象会整批换掉，节点本身保留 GUID。
+	 */
+	for (const TSharedPtr<FJsonValue>& InfoValue : CreatedNodesInfo)
+	{
+		const TSharedPtr<FJsonObject> NodeInfo = InfoValue.IsValid() ? InfoValue->AsObject() : nullptr;
+		if (!NodeInfo.IsValid())
+		{
+			continue;
+		}
+		if (UEdGraphNode* FinalNode = UAL_FindNodeByGuid(Graph, NodeInfo->GetStringField(TEXT("node_id"))))
+		{
+			NodeInfo->SetArrayField(TEXT("pins"), UAL_BuildPinsJson(FinalNode));
+		}
 	}
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
@@ -8088,6 +8163,19 @@ void FUAL_BlueprintCommands::Handle_SetVariableMeta(const TSharedPtr<FJsonObject
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+	/**
+	 * 改完就编译，不留给调用方。
+	 *
+	 * 上面那几个接口改的都是 NewVariables 里的变量描述，结构性修改只重建骨架类；
+	 * 关卡里摆着的实例认的是 GeneratedClass 上的 FProperty 标记，不编译就还是旧的。
+	 * 2026-09-24 的用户反馈：回执写着「实例可编辑=true」，紧接着给实例赋值被拒
+	 * `cannot be edited on instances`，编一次才好 —— 回执先于事实报了成功。
+	 * 联机复制同理，必须编译才生效。
+	 */
+	FCompilerResultsLog CompileResults;
+	CompileResults.bSilentMode = true;
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &CompileResults);
+
 	// 改完重新查一遍再回：上面几个接口都可能被引擎二次调整
 	// （比如 expose_on_spawn 会顺带打开可见性），回请求里的值会骗人。
 	FString AfterAvailable;
@@ -8098,9 +8186,28 @@ void FUAL_BlueprintCommands::Handle_SetVariableMeta(const TSharedPtr<FJsonObject
 	Result->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
 	Result->SetStringField(TEXT("name"), VarNameStr);
 	Result->SetArrayField(TEXT("applied"), Applied);
+	Result->SetBoolField(TEXT("compiled"), true);
+	Result->SetNumberField(TEXT("compile_error_count"), CompileResults.NumErrors);
 	if (After)
 	{
-		Result->SetObjectField(TEXT("variable"), UAL_BuildVariableMetaJson(*After));
+		TSharedPtr<FJsonObject> VarJson = UAL_BuildVariableMetaJson(*After);
+
+		// 实例可编辑以生成类上的属性为准 —— 实例赋值时引擎查的就是它。
+		// 编译有错时生成类可能没换新，这时两边会不一致，照实回
+		const FProperty* ClassProp = Blueprint->GeneratedClass
+			? FindFProperty<FProperty>(Blueprint->GeneratedClass, VarName)
+			: nullptr;
+		if (ClassProp)
+		{
+			VarJson->SetBoolField(TEXT("instance_editable"),
+				ClassProp->HasAnyPropertyFlags(CPF_Edit) && !ClassProp->HasAnyPropertyFlags(CPF_DisableEditOnInstance));
+		}
+		else
+		{
+			Result->SetStringField(TEXT("warning"), TEXT(
+				"The variable is not on the compiled class yet (compile failed?). Instances cannot use the new settings until blueprint_compile succeeds."));
+		}
+		Result->SetObjectField(TEXT("variable"), VarJson);
 	}
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 }

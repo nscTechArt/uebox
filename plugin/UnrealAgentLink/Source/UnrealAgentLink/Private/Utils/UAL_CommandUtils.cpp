@@ -1698,25 +1698,62 @@ bool UAL_CommandUtils::SetStructProperty(FStructProperty* StructProp, UObject* O
 		 * 一次结构体大小的临时分配换这个，值。
 		 */
 		UScriptStruct* Struct = StructProp->Struct;
-		if (Ptr && Struct)
+
+		// bWriteBack=false 是试导：只看能不能成，不落到对象上
+		auto ImportViaScratch = [&](bool bWriteBack) -> bool
 		{
 			void* Scratch = FMemory::Malloc(Struct->GetStructureSize(), Struct->GetMinAlignment());
 			Struct->InitializeStruct(Scratch);
 			Struct->CopyScriptStruct(Scratch, Ptr);
 
 			const bool bImported = FJsonObjectConverter::JsonObjectToUStruct(Normalized, Struct, Scratch, 0, 0);
-			if (bImported)
+			if (bImported && bWriteBack)
 			{
 				Struct->CopyScriptStruct(Ptr, Scratch);
 			}
 
 			Struct->DestroyStruct(Scratch);
 			FMemory::Free(Scratch);
+			return bImported;
+		};
 
-			if (bImported)
+		/**
+		 * `BodyInstance.CollisionProfileName` 不能按字段写。
+		 *
+		 * 它确实是 FBodyInstance 上的 UPROPERTY，通用导入写得进去 —— 但只改了名字，
+		 * 预设里的碰撞开关、对象类型、各通道响应**都不会**载入，结果是「报成功、
+		 * 碰撞没变」（头文件 TrySetDerivedProperty 注释里说的正是这个坑）。
+		 * 2026-09-24 的用户反馈 `{"BodyInstance": {"CollisionProfileName": "NoCollision"}}`
+		 * 在旧版本上被拒，通用导入上线后就会掉进这个坑，所以在这里截下来走 setter。
+		 *
+		 * 顺序：先试导其余字段（不成就原样不动地报错）→ 设预设（它会重置各通道）→
+		 * 再把其余字段写上去，调用方同时给的自定义字段才不会被预设盖掉。
+		 */
+		UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Obj);
+		if (Ptr && Struct && Primitive && Struct == FBodyInstance::StaticStruct() &&
+			Normalized->HasField(TEXT("CollisionProfileName")))
+		{
+			const TSharedPtr<FJsonValue> Profile = Normalized->TryGetField(TEXT("CollisionProfileName"));
+			Normalized->RemoveField(TEXT("CollisionProfileName"));
+			const bool bHasRest = Normalized->Values.Num() > 0;
+
+			if (!bHasRest || ImportViaScratch(false))
 			{
-				return true;
+				bool bHandled = false;
+				if (!TrySetDerivedProperty(Obj, TEXT("CollisionProfileName"), Profile, OutError, bHandled))
+				{
+					return false;
+				}
+				if (!bHasRest || ImportViaScratch(true))
+				{
+					return true;
+				}
 			}
+			// 其余字段导不进去：落到下面的统一报错
+		}
+		else if (Ptr && Struct && ImportViaScratch(true))
+		{
+			return true;
 		}
 
 		// 失败时把这个结构体有哪些字段说出来 —— 十有八九是字段名写错了。

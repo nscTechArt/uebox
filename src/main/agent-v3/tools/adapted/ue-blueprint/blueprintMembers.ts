@@ -117,9 +117,14 @@ interface SetVariableMetaResponse {
   blueprint_path: string
   name: string
   applied: string[]
+  compiled?: boolean
+  compile_error_count?: number
+  /** 编译没把变量带进生成类时才有：实例还用不上新设置 */
+  warning?: string
   variable?: {
     name: string
     type: string
+    /** 以编译后生成类上的属性为准，实例赋值查的就是它 */
     instance_editable: boolean
     blueprint_read_only: boolean
     category: string
@@ -139,7 +144,7 @@ export function createSetBlueprintVariableMetaTool() {
 
 只改你传的字段，没传的原样不动。想只改分组就只传 category。
 
-改完不用编译，但要 ue_save 才落盘。`,
+改完会自动编译一次，实例马上就能按新设置赋值；落盘仍要 ue_save。`,
 
     inputSchema: SetVariableMetaSchema,
 
@@ -170,14 +175,20 @@ export function createSetBlueprintVariableMetaTool() {
         if (isFailure(response)) return response
 
         const v = response.variable
+        const compileErrors = response.compile_error_count ?? 0
         return {
           success: true,
           blueprint_path: response.blueprint_path,
           applied: response.applied,
           variable: v,
+          ...(compileErrors > 0 ? { compile_error_count: compileErrors } : {}),
+          ...(response.warning ? { warning: response.warning } : {}),
           message:
             `已更新 ${response.name}：${response.applied.join('、')}` +
-            (v ? `（现在：实例可编辑=${v.instance_editable}，分组="${v.category}"）` : '')
+            (v ? `（现在：实例可编辑=${v.instance_editable}，分组="${v.category}"）` : '') +
+            (compileErrors > 0
+              ? `。蓝图编译有 ${compileErrors} 个错误，先 blueprint_compile 看清再给实例赋值`
+              : '')
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

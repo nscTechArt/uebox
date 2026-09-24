@@ -49,10 +49,26 @@ export interface AddBlueprintVariableResponse {
   variable: {
     name: string
     type: string
+    /** 从引擎解析出的类型读，不是入参回声：container 优先于 is_array */
     is_array: boolean
+    /** 单值时没有 */
+    container?: 'array' | 'set' | 'map'
     sub_category_object?: string
     default_value?: string
   }
+}
+
+/** 人读的类型：bool / bool[] / set<bool> / map<bool, ...>，和插件报错里的写法一致 */
+export function formatVariableType(v: {
+  type: string
+  is_array?: boolean
+  container?: string
+}): string {
+  const container = v.container ?? (v.is_array ? 'array' : '')
+  if (container === 'array') return `${v.type}[]`
+  if (container === 'set') return `set<${v.type}>`
+  if (container === 'map') return `map<${v.type}, ...>`
+  return v.type
 }
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
@@ -112,7 +128,7 @@ export function createAddBlueprintVariableTool() {
           success: true,
           blueprint_path: response.blueprint_path,
           variable: response.variable,
-          message: `已添加变量 ${response.variable.name}（${response.variable.type}${response.variable.is_array ? '[]' : ''}）到 ${response.blueprint_path}`
+          message: `已添加变量 ${response.variable.name}（${formatVariableType(response.variable)}）到 ${response.blueprint_path}`
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

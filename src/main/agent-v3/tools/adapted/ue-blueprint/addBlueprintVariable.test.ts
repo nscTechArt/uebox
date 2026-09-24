@@ -26,7 +26,7 @@ vi.mock('../../../core/projectTargetContext', () => ({
   getTargetConnectionId: () => 'conn-1'
 }))
 
-import { createAddBlueprintVariableTool } from './addBlueprintVariable'
+import { createAddBlueprintVariableTool, formatVariableType } from './addBlueprintVariable'
 
 type ToolResult = Record<string, unknown>
 type Executable = { execute: (input: unknown) => Promise<ToolResult> }
@@ -77,6 +77,23 @@ describe('blueprint_add_variable 的默认值', () => {
     expect((result.variable as Record<string, unknown>).default_value).toBe('90.000000')
   })
 
+  /**
+   * 2026-09-24 用户反馈：传了 container:"array" 又留着 is_array:false，
+   * 引擎按 container 建了数组，回执却说标量。现在插件从 PinType 回 container，
+   * 摘要要按它写成 MeshComponent[]，不能再按入参的 is_array 猜。
+   */
+  it('摘要按插件回的 container 写类型', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      blueprint_path: '/Game/BP_Door.BP_Door',
+      variable: { name: 'SourceMesh', type: 'object', is_array: true, container: 'array' }
+    })
+
+    const result = await run(INPUT)
+
+    expect(String(result.message)).toContain('object[]')
+  })
+
   it('插件说默认值没落地时算失败，并把原因带上', async () => {
     callRequest.mockResolvedValue({
       ok: false,
@@ -90,5 +107,18 @@ describe('blueprint_add_variable 的默认值', () => {
     expect(result.success).toBe(false)
     expect(String(result.error)).toContain('not a valid literal')
     expect(result.code).toBe(400)
+  })
+})
+
+describe('formatVariableType', () => {
+  it('单值、数组、集合、映射各有写法', () => {
+    expect(formatVariableType({ type: 'bool' })).toBe('bool')
+    expect(formatVariableType({ type: 'bool', container: 'array' })).toBe('bool[]')
+    expect(formatVariableType({ type: 'bool', container: 'set' })).toBe('set<bool>')
+    expect(formatVariableType({ type: 'bool', container: 'map' })).toBe('map<bool, ...>')
+  })
+
+  it('旧插件只回 is_array 时退回它', () => {
+    expect(formatVariableType({ type: 'object', is_array: true })).toBe('object[]')
   })
 })
