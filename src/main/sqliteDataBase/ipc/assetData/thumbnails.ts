@@ -24,6 +24,7 @@ import { getAssetFolderByKey, updateAssetFolder } from '../../models/assetFolder
 import type { AssetFolder } from '../../models/assetFolder'
 import { getSharp } from '../../../utils/sharpLoader'
 import { isInsideDirectory } from '../../../utils/pathContainment'
+import { projectThumbnailCandidates } from '../../../utils/projectPath'
 import { denyMediaRead, isPlainFileName } from './thumbnailGuard'
 
 interface ThumbnailRepairStats {
@@ -1089,21 +1090,15 @@ async function savePluginThumbnailFromSource(
   }
 }
 
-function getProjectThumbnailCandidates(projectDir: string, projectName: string): string[] {
-  return [join(projectDir, `${projectName}.png`), join(projectDir, 'Saved', 'AutoScreenshot.png')]
-}
-
 async function saveProjectThumbnailFromSource(
   sourcePath: string,
   assetKey: string,
   remoteCandidatePath?: string
 ): Promise<string | null> {
   try {
-    const projectDir = dirname(sourcePath)
-    const projectName = basename(sourcePath, extname(sourcePath))
     const found =
       remoteCandidatePath ||
-      getProjectThumbnailCandidates(projectDir, projectName).find((candidate) =>
+      projectThumbnailCandidates(dirname(sourcePath), sourcePath).find((candidate) =>
         existsSync(candidate)
       )
     if (!found) return null

@@ -77,3 +77,19 @@ export function toNativeProjectPath(projectPath: string): string {
   const trimmed = String(projectPath ?? '').trim()
   return trimmed ? path.normalize(trimmed) : ''
 }
+
+/**
+ * 工程封面的候选图片，按优先级排列，与 UE 项目浏览器一致：工程根目录下的
+ * `<Name>.png` 是在编辑器里显式设置的缩略图，优先于编辑器自动截的
+ * `Saved/AutoScreenshot.png`。导入和封面自动同步共用这一份，免得两边漂开。
+ */
+export function projectThumbnailCandidates(
+  projectDir: string,
+  uprojectPath?: string | null
+): string[] {
+  const candidates = uprojectPath
+    ? [path.join(projectDir, `${path.parse(uprojectPath).name}.png`)]
+    : []
+  candidates.push(path.join(projectDir, 'Saved', 'AutoScreenshot.png'))
+  return candidates
+}

@@ -37,6 +37,7 @@ import type {
 } from '../shared/objectStorage'
 import type { DroppedPathVerdict } from '../shared/droppedPath'
 import type { ImportFailureReport } from '../shared/projectImport'
+import type { ProjectCoverMode } from '../shared/projectCover'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
 import type { NotebookContextLevel } from '../shared/notebookContext'
 import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
@@ -303,6 +304,7 @@ declare global {
     originPath?: string | null
     projectConfig?: string | null
     image?: string | null
+    coverMode?: ProjectCoverMode | null
     note?: string | null
     isPinned?: number | null
     created_at?: string
@@ -715,6 +717,13 @@ declare global {
       ) => Promise<{ success: boolean; data: any[]; error?: string }>
     }
     project: {
+      saveCover: (
+        projectKey: string,
+        image: Uint8Array
+      ) => Promise<{ success: boolean; data: string; error?: string }>
+      restoreAutomaticCover: (
+        projectKey: string
+      ) => Promise<{ success: boolean; data: boolean; error?: string }>
       importByFilePath: (filePath: string) => Promise<{
         success: boolean
         data?: ProjectRecord
@@ -1139,15 +1148,6 @@ declare global {
   interface PathAPI {
     getPublicThumbnailUrl: (
       filename: string
-    ) => Promise<{ success: boolean; data?: string; error?: string }>
-    /**
-     * 保存图片到公共 thumbnails 目录（用于项目封面等）
-     * @param imageData 图片二进制数据（number[] 格式）
-     * @param prefix 文件名前缀
-     */
-    savePublicThumbnail: (
-      imageData: number[],
-      prefix: string
     ) => Promise<{ success: boolean; data?: string; error?: string }>
     getVaultThumbnailFilePath: (
       filename: string

@@ -7,6 +7,25 @@ import { BaseFileProcessor, FileMetadata } from './BaseFileProcessor'
 import { analyzeFromFile } from '../uasset-reader-new'
 import { PathManager } from '../PathManager'
 import { getSharp } from '../sharpLoader'
+import { projectThumbnailCandidates } from '../projectPath'
+
+/**
+ * `processUproject` 的返回形状。登记工程要读 name / assetKey / engineAssociation /
+ * metadata.projectInfo，这里写清楚：哪天字段改名，是这里编译报错，而不是用户
+ * 拿到一张 `projectName` 是 "undefined" 的卡片。
+ */
+export interface UprojectMeta extends Partial<FileMetadata> {
+  name: string
+  assetKey: string
+  engineAssociation?: string
+  category?: string
+  description?: string
+  imgLocalPath: string
+  originPath: string
+  classKey: string
+  status: string
+  metadata: Record<string, unknown> & { projectInfo: unknown }
+}
 
 /**
  * 红蓝对调的重组矩阵。
@@ -771,7 +790,10 @@ export class UnrealAssetProcessor extends BaseFileProcessor {
   /**
    * 处理.uproject文件
    */
-  private async processUproject(filePath: string): Promise<Record<string, any>> {
+  async processUproject(
+    filePath: string,
+    options?: { includeThumbnail?: boolean }
+  ): Promise<UprojectMeta> {
     try {
       const projectInfo = await this.parseUproject(filePath)
       const basicInfo = await this.getBasicFileInfo(filePath)
@@ -785,7 +807,7 @@ export class UnrealAssetProcessor extends BaseFileProcessor {
         engineAssociation: projectInfo.EngineAssociation,
         category: projectInfo.Category,
         description: projectInfo.Description,
-        imgLocalPath: this.getProjectThumbnail(filePath),
+        imgLocalPath: options?.includeThumbnail === false ? '' : this.getProjectThumbnail(filePath),
         assetKey: uuidv4(),
         originPath: filePath,
         classKey: 'uproject',
@@ -813,10 +835,7 @@ export class UnrealAssetProcessor extends BaseFileProcessor {
    */
   private getProjectThumbnail(filePath: string): string {
     try {
-      const name = basename(filePath, '.uproject')
-      const projectDir = dirname(filePath)
-
-      const candidates = this.getProjectThumbnailCandidates(projectDir, name)
+      const candidates = projectThumbnailCandidates(dirname(filePath), filePath)
       const found = candidates.find((p) => fse.existsSync(p))
 
       if (found) {
@@ -831,16 +850,6 @@ export class UnrealAssetProcessor extends BaseFileProcessor {
       console.warn(`获取项目缩略图失败 ${filePath}:`, error)
       return ''
     }
-  }
-
-  // 项目缩略图候选路径策略：优先同名png，其次 Saved/AutoScreenshot
-  private getProjectThumbnailCandidates(projectDir: string, name: string): string[] {
-    const list: string[] = []
-    const sameNamePng = join(projectDir, `${name}.png`)
-    const autoShot = join(projectDir, 'Saved', 'AutoScreenshot.png')
-    list.push(sameNamePng)
-    list.push(autoShot)
-    return list
   }
 
   /**

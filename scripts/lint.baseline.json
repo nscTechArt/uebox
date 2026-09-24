@@ -244,7 +244,7 @@
     "warnings": 0
   },
   "src/main/sqliteDataBase/models/project.ts": {
-    "errors": 4,
+    "errors": 3,
     "warnings": 0
   },
   "src/main/sqliteDataBase/models/projectCollection.ts": {
@@ -284,7 +284,7 @@
     "warnings": 0
   },
   "src/main/utils/fileProcessor/UnrealAssetProcessor.ts": {
-    "errors": 20,
+    "errors": 19,
     "warnings": 0
   },
   "src/main/utils/PathManager.ts": {
@@ -720,7 +720,7 @@
     "warnings": 0
   },
   "src/renderer/src/views/Home/components/Project/ProjectSection.vue": {
-    "errors": 22,
+    "errors": 21,
     "warnings": 0
   },
   "src/renderer/src/views/Home/components/Project/RenameProjectModal.vue": {

@@ -8,7 +8,6 @@ import {
   getProjectById,
   getAllProjects,
   updateProject,
-  deleteProjectByKey,
   projectExists,
   searchProjects,
   getProjectByPath,
@@ -16,7 +15,6 @@ import {
 } from '../models/project'
 import { getAppWindows } from '../../appWindows'
 import { UnrealAssetProcessor } from '../../utils/fileProcessor/UnrealAssetProcessor'
-import ThumbnailManager from '../../utils/ThumbnailManager'
 import { appSettingsManager } from '../../appSettingsManager'
 import UnrealPathManagerUtil from '../../utils/UnrealPathManager'
 import UnrealProcessDetector from '../../utils/UnrealProcessDetector'
@@ -24,6 +22,7 @@ import { ensurePluginIgnored } from '../../utils/pluginVcsIgnore'
 import { toNativeProjectPath } from '../../utils/projectPath'
 import { readUeJsonFile } from '../../utils/ueTextFile'
 import { syncProjectEngineAssociations } from '../../services/project/projectEngineSync'
+import { getProjectCoverService } from '../../services/project/projectCoverRuntime'
 
 /**
  * 确保项目中安装并启用了 UnrealAgentLink 插件（项目级安装）
@@ -546,24 +545,6 @@ export interface RegisterProjectResult {
 }
 
 /**
- * `UnrealAssetProcessor.processUproject` 的返回形状里我们真正用到的那几个字段。
- *
- * 那个方法是 private 的，只能绕着类型访问；与其把整个结果当成
- * `Record<string, any>`（后面每一处取值都不再有任何检查），不如在这里
- * 把用到的字段写清楚 —— 哪天上游改了字段名，是这里报错，而不是用户
- * 拿到一张 `projectName` 是 "undefined" 的卡片。
- */
-interface UprojectMeta {
-  assetKey?: string
-  name?: string
-  engineAssociation?: string
-  imgLocalPath?: string
-  metadata?: { projectInfo?: unknown }
-}
-
-type UprojectProcessor = { processUproject(filePath: string): Promise<UprojectMeta> }
-
-/**
  * 把一个 `.uproject` 登记进项目库。
  *
  * ## 为什么要抽出来
@@ -584,8 +565,8 @@ export async function registerProjectByUproject(filePath: string): Promise<Regis
     // 统一成本机写法再入库：UE 插件上报的是 `I:/UE Project/X.uproject`，
     // 文件对话框给的是 `I:\UE Project\X.uproject`，同一个工程两种写法
     const uprojectPath = toNativeProjectPath(filePath)
-    const processor = new UnrealAssetProcessor() as unknown as UprojectProcessor
-    const projectMeta = await processor.processUproject(uprojectPath)
+    const processor = new UnrealAssetProcessor()
+    const projectMeta = await processor.processUproject(uprojectPath, { includeThumbnail: false })
 
     const record: ProjectRecord = {
       projectKey: String(projectMeta.assetKey),
@@ -595,7 +576,8 @@ export async function registerProjectByUproject(filePath: string): Promise<Regis
       projectPath: path.dirname(uprojectPath),
       originPath: uprojectPath,
       projectConfig: '',
-      image: String(projectMeta.imgLocalPath || ''),
+      image: '',
+      coverMode: 'auto',
       note: ''
     }
 
@@ -611,6 +593,8 @@ export async function registerProjectByUproject(filePath: string): Promise<Regis
     }
 
     const id = createProject(db, record)
+    // 不等封面：后台扫描可能正排着别的工程的截图解码，登记不能跟着卡住；封面好了会再发库变更通知
+    void getProjectCoverService().syncProject(record.projectKey)
     const saved = getProjectById(db, id)
     notifyProjectLibraryChanged()
 
@@ -637,6 +621,31 @@ export async function registerProjectByUproject(filePath: string): Promise<Regis
  * 注册项目数据相关的IPC处理函数（公共数据库）
  */
 export const registerProjectIPC = (): void => {
+  ipcMain.handle('db:project:saveCover', async (_, projectKey: string, image: Uint8Array) => {
+    try {
+      if (
+        !(image instanceof Uint8Array) ||
+        image.byteLength === 0 ||
+        image.byteLength > 32 * 1024 * 1024
+      ) {
+        throw new Error('Invalid cover image')
+      }
+      const data = await getProjectCoverService().save(projectKey, image)
+      return { success: true, data }
+    } catch (error) {
+      return { success: false, data: '', error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle('db:project:restoreAutomaticCover', async (_, projectKey: string) => {
+    try {
+      await getProjectCoverService().restoreAutomatic(projectKey)
+      return { success: true, data: true }
+    } catch (error) {
+      return { success: false, data: false, error: (error as Error).message }
+    }
+  })
+
   // 导入单个 .uproject 文件并写入数据库（存在则更新）
   ipcMain.handle('db:project:importByFilePath', async (_, filePath: string) => {
     void _
@@ -706,7 +715,11 @@ export const registerProjectIPC = (): void => {
       void _
       try {
         const db = getPublicDatabase()
-        const ok = updateProject(db, projectKey, updates)
+        // 封面只能走 saveCover / restoreAutomaticCover：直接改索引会被封面服务的磁盘记录悄悄改回去
+        const safeUpdates = { ...updates }
+        delete safeUpdates.image
+        delete safeUpdates.coverMode
+        const ok = updateProject(db, projectKey, safeUpdates)
         return { success: true, data: ok }
       } catch (error) {
         return { success: false, error: (error as Error).message }
@@ -739,13 +752,7 @@ export const registerProjectIPC = (): void => {
   ipcMain.handle('db:project:delete', async (_, projectKey: string) => {
     void _
     try {
-      const db = getPublicDatabase()
-      // 先获取记录，以便清理缩略图（按文件名）
-      const row = getProjectByKey(db, projectKey)
-      if (row?.image) {
-        await ThumbnailManager.deletePublicThumbnailByFilename(row.image)
-      }
-      const ok = deleteProjectByKey(db, projectKey)
+      const ok = await getProjectCoverService().remove(projectKey)
       return { success: true, data: ok }
     } catch (error) {
       return { success: false, error: (error as Error).message }

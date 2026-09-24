@@ -580,20 +580,19 @@ async function writeUproject(
 }
 
 /**
- * 把模板缩略图拷成工程封面。
+ * 把模板缩略图拷成工程的初始封面。
  *
- * `<工程目录>/<工程名>.png` 是 UE 认的工程图标位置，也正是盒子导入工程时找封面
- * 的第一个候选（`UnrealAssetProcessor.getProjectThumbnailCandidates`）。不拷的话，
- * 新建的工程在首页是一张空白卡片，和手动导入的工程长得不一样。
+ * 拷到 `Saved/AutoScreenshot.png` 而不是 `<工程名>.png`：后者是显式设置的缩略图，
+ * 优先级更高（`projectThumbnailCandidates`），拷过去封面就永远停在模板图上。
+ * 放在自动截图的位置，UE 关闭编辑器时会用真实截图覆盖它，封面随之自动更新。
+ * 不拷的话，新建的工程在首页是一张空白卡片，和手动导入的工程长得不一样。
  */
-async function copyThumbnail(
-  template: EngineTemplate,
-  projectDir: string,
-  projectName: string
-): Promise<void> {
+async function copyThumbnail(template: EngineTemplate, projectDir: string): Promise<void> {
   const source = path.join(template.dir, 'Media', `${template.templateName}.png`)
   if (!(await exists(source))) return
-  await fs.copyFile(source, path.join(projectDir, `${projectName}.png`))
+  const target = path.join(projectDir, 'Saved', 'AutoScreenshot.png')
+  await fs.mkdir(path.dirname(target), { recursive: true })
+  await fs.copyFile(source, target)
 }
 
 /**
@@ -647,7 +646,7 @@ export async function instantiateEngineTemplate(options: {
   }
 
   const uprojectPath = await writeUproject(template, projectDir, projectName)
-  await copyThumbnail(template, projectDir, projectName)
+  await copyThumbnail(template, projectDir)
 
   // 回读校验：写完不读一遍就报成功，等于把「文件真的落盘了吗」这个问题
   // 留给用户去发现

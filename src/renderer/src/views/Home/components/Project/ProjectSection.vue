@@ -232,32 +232,14 @@
     @success="handleCollectionNameSuccess"
   />
 
-  <!-- 图片裁剪弹窗 -->
-  <AppModal
-    v-model:open="cropperModalVisible"
-    :title="t('page.home.project.cropCover')"
-    :width="600"
-    :mask-closable="false"
-    :destroy-on-close="true"
-    :ok-text="t('common.confirm')"
-    :cancel-text="t('common.cancel')"
-    @ok="handleCropConfirm"
-    @cancel="handleCropCancel"
-  >
-    <div style="width: 100%; height: 400px">
-      <VueCropper
-        ref="cropperRef"
-        :img="cropperImage"
-        :auto-crop="true"
-        :auto-crop-width="600"
-        :auto-crop-height="600"
-        :center-box="true"
-        :fixed="true"
-        :fixed-number="[1, 1]"
-        :info="false"
-      />
-    </div>
-  </AppModal>
+  <ProjectCoverModal
+    v-if="cropperModalVisible"
+    :open="cropperModalVisible"
+    :project-key="coverProjectKey"
+    :image="cropperImage"
+    @update:open="handleCoverOpenChange"
+    @success="refreshProjectSectionData"
+  />
 </template>
 
 <script setup lang="ts">
@@ -285,8 +267,9 @@ import {
   PhStorefront,
   PhTrash
 } from '@phosphor-icons/vue'
-import 'vue-cropper/dist/index.css'
-import { VueCropper } from 'vue-cropper/dist/vue-cropper.es.js'
+import ProjectCoverModal from './ProjectCoverModal.vue'
+import { projectCoverAPI } from '@renderer/api/projectCover'
+import { projectCoverMode, type ProjectCoverMode } from '@core/shared/projectCover'
 import { rankProjectSearch } from '@renderer/utils/projectSearch'
 import { useProjects } from '@renderer/hooks/useProjects'
 import { useConnectedProjects } from '@renderer/composables/useBridgeStatus'
@@ -445,6 +428,9 @@ const openingProjects = ref<Set<string>>(new Set())
 // 没建过收藏夹的用户几乎立刻就放行，而那时工程还没拉回来，空态会闪一下
 // 「暂无项目，拖一个 .uproject 进来」，正好对着已经导入了十几个工程的人说。
 const initLoading = ref(true)
+let libraryRefreshPending = false
+let refreshInFlight: Promise<void> | null = null
+let refreshQueued = false
 
 const loadCollections = async () => {
   try {
@@ -495,8 +481,22 @@ const handleClickCreateProject = () => {
   createFromTemplateVisible.value = true
 }
 
-const refreshProjectSectionData = async () => {
-  await Promise.all([loadAllProjects(), loadCollections()])
+const refreshProjectSectionData = (): Promise<void> => {
+  if (refreshInFlight) {
+    refreshQueued = true
+    return refreshInFlight
+  }
+  refreshInFlight = (async () => {
+    try {
+      do {
+        refreshQueued = false
+        await Promise.all([loadAllProjects(), loadCollections()])
+      } while (refreshQueued)
+    } finally {
+      refreshInFlight = null
+    }
+  })()
+  return refreshInFlight
 }
 
 const reload = async () => {
@@ -517,17 +517,22 @@ onMounted(async () => {
   // Agent 建的工程、UE 连上时补登记的工程，都在用户没操作这个页面的时候进库，
   // 不听这个事件的话卡片要等到下次切页面才出现
   unsubscribeLibraryChanged = window.api.database.project.onLibraryChanged(() => {
-    // 首屏那一趟还在跑就别另起一趟：两边写同一个 projects ref，谁后回来谁说了算，
-    // 慢的那趟（首屏要给每个工程拉缩略图）会把新工程盖没
-    if (initLoading.value) return
+    // 首屏加载期间合并通知，等当前读取结束再补读，避免旧结果覆盖新封面。
+    if (initLoading.value) {
+      libraryRefreshPending = true
+      return
+    }
     void refreshProjectSectionData()
   })
 
   try {
-    await Promise.all([loadCollections(), loadAllProjects()])
-    // 自编译引擎的版本号还要再去主进程查一趟。等它回来，恢复出来的版本筛选
-    // 才对得上选项表 —— 否则校验会把「UE 5.8」当成不存在的版本清掉
-    await ensureEngineLabels(projects.value.map((p: ProjectRecord) => p.EngineAssociation))
+    do {
+      libraryRefreshPending = false
+      await refreshProjectSectionData()
+      // 自编译引擎的版本号还要再去主进程查一趟。等它回来，恢复出来的版本筛选
+      // 才对得上选项表 —— 否则校验会把「UE 5.8」当成不存在的版本清掉
+      await ensureEngineLabels(projects.value.map((p: ProjectRecord) => p.EngineAssociation))
+    } while (libraryRefreshPending && unsubscribeLibraryChanged)
   } finally {
     // finally：哪一趟炸了都不能把页面永远停在骨架屏上
     initLoading.value = false
@@ -537,6 +542,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // Let the current read finish, but discard notifications queued for this page.
+  refreshQueued = false
   if (unsubscribeLibraryChanged) {
     unsubscribeLibraryChanged()
     unsubscribeLibraryChanged = null
@@ -1208,7 +1215,8 @@ const buildMenuItems = (
   pinned: boolean,
   slnPath: string | null,
   ualink: UnrealAgentLinkStatus | null,
-  memberships: ProjectCollectionRecord[]
+  memberships: ProjectCollectionRecord[],
+  coverMode: ProjectCoverMode = 'auto'
 ): MenuItem[] => {
   const items: MenuItem[] = [
     // === 第一区：高频启动与访问 ===
@@ -1236,6 +1244,14 @@ const buildMenuItems = (
     { key: 'rename', label: t('page.home.project.menu.rename'), icon: PhPencilSimple },
     { key: 'change-cover', label: t('page.home.project.menu.changeCover'), icon: PhImage }
   )
+
+  if (coverMode === 'custom') {
+    items.push({
+      key: 'restore-auto-cover',
+      label: t('page.home.project.menu.restoreAutoCover'),
+      icon: PhArrowClockwise
+    })
+  }
 
   // UnrealAgentLink 的装/删。状态还没查出来时先不显示，免得闪一下改文案
   if (ualink) {
@@ -1292,7 +1308,7 @@ const handleProjectContextMenu = async (e: MouseEvent, item: ProjectRecord): Pro
   const memberships = collectionsOfProject(item.projectKey)
 
   // 先显示基础菜单（不含 sln 与插件选项）
-  menuItems.value = buildMenuItems(pinned, null, null, memberships)
+  menuItems.value = buildMenuItems(pinned, null, null, memberships, projectCoverMode(item))
   contextMenuRef.value?.show(e.clientX, e.clientY)
 
   // 异步检测是否为 C++ 工程
@@ -1326,7 +1342,8 @@ const handleProjectContextMenu = async (e: MouseEvent, item: ProjectRecord): Pro
     pinned,
     activeSlnPath.value,
     activeUalinkStatus.value,
-    memberships
+    memberships,
+    projectCoverMode(item)
   )
 }
 
@@ -1370,8 +1387,7 @@ const renameInput = ref('')
 // 裁剪弹窗状态
 const cropperModalVisible = ref(false)
 const cropperImage = ref<string>('')
-const cropperRef = ref<InstanceType<typeof VueCropper> | null>(null)
-const coverUploading = ref(false)
+const coverProjectKey = ref('')
 
 const renderCleanupPreview = (summary: string, lines: string[], moreText?: string) =>
   h('div', { style: 'display: grid; gap: 8px;' }, [
@@ -1619,6 +1635,16 @@ const handleMenuClick = async (key: string) => {
   } else if (key === 'change-cover') {
     // 直接打开文件选择器
     handleSelectCoverFile()
+  } else if (key === 'restore-auto-cover') {
+    const projectKey = activeProject.value.projectKey
+    try {
+      await projectCoverAPI.restoreAutomatic(projectKey)
+      message.success(t('page.home.project.messages.autoCoverRestored'))
+      await refreshProjectSectionData()
+    } catch (error) {
+      console.warn('[ProjectCover] Restore failed:', error)
+      message.error(t('page.home.project.messages.autoCoverRestoreFailed'))
+    }
   }
 }
 
@@ -1631,102 +1657,26 @@ const handleRenameSuccess = async () => {
  * 打开文件选择器选择封面图片
  */
 const handleSelectCoverFile = async (): Promise<void> => {
+  const projectKey = activeProject.value?.projectKey
+  if (!projectKey) return
   try {
-    const result = await window.api.dialog.showOpenDialog({
-      title: t('page.home.project.messages.selectCoverTitle'),
-      properties: ['openFile'],
-      filters: [
-        {
-          name: t('page.home.project.messages.imageFile'),
-          extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif']
-        }
-      ]
-    })
-    if (result?.canceled || !result?.filePaths?.[0]) return
-
-    const filePath = result.filePaths[0]
-    // 读取文件内容并转为 base64 供裁剪器显示
-    const fileData = await (window as any).api.fs.readFile(filePath, {
-      encoding: 'base64',
-      maxLines: -1,
-      maxBytes: -1
-    })
-
-    if (fileData?.success && fileData.content) {
-      // 获取文件扩展名
-      const ext = filePath.split('.').pop()?.toLowerCase() || 'jpeg'
-      const mimeType = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : 'image/jpeg'
-      cropperImage.value = `data:${mimeType};base64,${fileData.content}`
-      cropperModalVisible.value = true
-    } else {
-      message.error(t('page.home.project.messages.readImageFailed'))
-    }
-  } catch (error: unknown) {
-    const errMsg =
-      error instanceof Error ? error.message : t('page.home.project.messages.selectFileFailed')
-    message.error(errMsg)
+    const image = await projectCoverAPI.selectImage()
+    if (!image) return
+    coverProjectKey.value = projectKey
+    cropperImage.value = image
+    cropperModalVisible.value = true
+  } catch (error) {
+    console.warn('[ProjectCover] Read failed:', error)
+    message.error(t('page.home.project.messages.readImageFailed'))
   }
 }
 
-/**
- * 确认裁剪并保存封面到本地
- */
-const handleCropConfirm = async (): Promise<void> => {
-  if (!activeProject.value || !cropperRef.value) {
-    cropperModalVisible.value = false
-    return
-  }
-
-  try {
-    coverUploading.value = true
-
-    // 获取裁剪后的图片 blob
-    const blob: Blob = await new Promise<Blob>((resolve) => {
-      cropperRef.value!.getCropBlob((data: Blob) => resolve(data))
-    })
-
-    // 转换为 Uint8Array，再转为 number[] 以便 IPC 传输
-    const arrayBuffer = await blob.arrayBuffer()
-    const uint8Array = new Uint8Array(arrayBuffer)
-    const imageData = Array.from(uint8Array)
-
-    // 保存到本地公共 thumbnails 目录
-    const saveRes = await window.api.path.savePublicThumbnail(imageData, 'project_cover')
-    if (!saveRes?.success || !saveRes.data) {
-      message.error(t('page.home.project.messages.coverSaveFailed'))
-      return
-    }
-
-    // 保存文件名到数据库
-    const res = await window.api.database.project.update(activeProject.value.projectKey, {
-      image: saveRes.data // 存储文件名，读取时会转换为 file:/// URL
-    })
-    const ok = typeof res === 'boolean' ? res : Boolean((res as { success?: boolean })?.success)
-    if (ok) {
-      message.success(t('page.home.project.messages.coverUpdated'))
-      await loadAllProjects()
-      await loadCollections()
-    } else {
-      message.error(t('page.home.project.messages.coverSaveFailed'))
-    }
-  } catch (error: unknown) {
-    console.error('保存封面失败:', error)
-    const errMsg =
-      error instanceof Error ? error.message : t('page.home.project.messages.coverUploadFailed')
-    message.error(errMsg)
-  } finally {
-    coverUploading.value = false
-    cropperModalVisible.value = false
+const handleCoverOpenChange = (open: boolean): void => {
+  cropperModalVisible.value = open
+  if (!open) {
     cropperImage.value = ''
+    coverProjectKey.value = ''
   }
-}
-
-/**
- * 取消裁剪
- */
-const handleCropCancel = (): void => {
-  cropperModalVisible.value = false
-  cropperImage.value = ''
 }
 
 // 双击运行 .uproject 文件（通过 IPC 调用主进程）

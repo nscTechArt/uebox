@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import type { ProjectCoverMode } from '../../../shared/projectCover'
 
 import {
   projectComparisonKey,
@@ -18,6 +19,7 @@ export interface ProjectRecord {
   originPath?: string | null // .uproject 文件绝对路径
   projectConfig?: string | null // INI 汇总/JSON 快照
   image?: string | null // 封面文件名或路径
+  coverMode?: ProjectCoverMode | null // 索引；封面服务的磁盘记录是来源
   note?: string | null
   isPinned?: number | null // 置顶标记：0/1
   sort_order?: number | null // 排序顺序
@@ -44,6 +46,7 @@ export const initProjectModel = (db: Database.Database): void => {
       originPath TEXT,
       projectConfig TEXT,
       image TEXT,
+      coverMode TEXT,
       note TEXT,
       isPinned INTEGER NOT NULL DEFAULT 0,
       sort_order REAL NOT NULL DEFAULT 0.0,
@@ -54,13 +57,15 @@ export const initProjectModel = (db: Database.Database): void => {
 
   db.exec(createTableSQL)
 
+  // Existing cover provenance is migrated by the cover service into a disk record first.
+  const columns = db.pragma('table_info(projects)') as Array<{ name: string }>
+  if (!columns.some((column) => column.name === 'coverMode')) {
+    db.exec('ALTER TABLE projects ADD COLUMN coverMode TEXT')
+  }
+
   // 迁移：为已存在的表添加 sort_order 列（如果没有）
   try {
-    // 检查列是否存在
-    const tableInfo = db.pragma(`table_info(${TABLE_NAME})`)
-    const hasSortOrder = tableInfo.some((col: any) => col.name === 'sort_order')
-
-    if (!hasSortOrder) {
+    if (!columns.some((column) => column.name === 'sort_order')) {
       console.log('检测到旧版数据库，正在添加 sort_order 列...')
       db.exec(`ALTER TABLE ${TABLE_NAME} ADD COLUMN sort_order REAL NOT NULL DEFAULT 0.0`)
       console.log('sort_order 列添加成功')
@@ -98,8 +103,8 @@ export const createProject = (db: Database.Database, record: ProjectRecord): num
   const stmt = db.prepare(`
     INSERT INTO ${TABLE_NAME} (
       projectKey, projectName, EngineAssociation, projectData,
-      projectPath, originPath, projectConfig, image, note, isPinned, sort_order
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      projectPath, originPath, projectConfig, image, coverMode, note, isPinned, sort_order
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const info = stmt.run(
     record.projectKey,
@@ -110,6 +115,7 @@ export const createProject = (db: Database.Database, record: ProjectRecord): num
     record.originPath ?? null,
     record.projectConfig ?? null,
     record.image ?? null,
+    record.coverMode ?? null,
     record.note ?? null,
     record.isPinned ?? 0,
     record.sort_order ?? 0.0
@@ -138,6 +144,7 @@ export const updateProject = (
   if (updates.originPath !== undefined) assign('originPath', updates.originPath)
   if (updates.projectConfig !== undefined) assign('projectConfig', updates.projectConfig)
   if (updates.image !== undefined) assign('image', updates.image)
+  if (updates.coverMode !== undefined) assign('coverMode', updates.coverMode)
   if (updates.note !== undefined) assign('note', updates.note)
   if (updates.isPinned !== undefined) assign('isPinned', updates.isPinned)
   if (updates.sort_order !== undefined) assign('sort_order', updates.sort_order)
@@ -296,7 +303,10 @@ export const mergeDuplicateProjectPaths = (db: Database.Database): void => {
     for (const field of ['image', 'note'] as const) {
       if (keep[field]) continue
       const donor = dupes.find((dupe) => dupe[field])
-      if (donor) inherited[field] = donor[field]
+      if (donor) {
+        inherited[field] = donor[field]
+        if (field === 'image') inherited.coverMode = donor.coverMode ?? null
+      }
     }
     if (Object.keys(inherited).length > 0) updateProject(db, keep.projectKey, inherited)
 

@@ -354,14 +354,18 @@ describe('listEngineTemplates / instantiateEngineTemplate', () => {
     expect(ini).not.toContain('TP_BlankBP')
   })
 
-  it('工程封面拷成 <工程名>.png —— 首页卡片靠它，不拷就是一张空白卡', async () => {
+  it('模板图拷成 Saved/AutoScreenshot.png —— 首页卡片靠它，UE 截了真图还能自动换掉', async () => {
     const result = await instantiateEngineTemplate({
       template: await findTemplate('TP_BlankBP'),
       projectName: 'MyGame',
       targetDir: root
     })
 
-    await expect(fs.access(path.join(result.projectDir, 'MyGame.png'))).resolves.toBeUndefined()
+    await expect(
+      fs.access(path.join(result.projectDir, 'Saved', 'AutoScreenshot.png'))
+    ).resolves.toBeUndefined()
+    // 拷成 <工程名>.png 会压过自动截图，封面就永远停在模板图上
+    await expect(fs.access(path.join(result.projectDir, 'MyGame.png'))).rejects.toThrow()
   })
 
   it('共享内容包落到 Content/<包名>/ —— 落错地方模板资产就是丢失引用', async () => {

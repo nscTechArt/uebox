@@ -230,40 +230,6 @@ export class ThumbnailManager {
     }
   }
 
-  /**
-   * 保存图片到公共 thumbnails 目录（用于项目封面等全局数据）
-   * @param imageData 图片二进制数据（Uint8Array 或 Buffer）
-   * @param prefix 文件名前缀（如 'project_cover'）
-   * @param ext 文件扩展名，默认 'jpg'
-   * @returns 保存后的文件名
-   */
-  static async savePublicThumbnail(
-    imageData: Uint8Array | Buffer,
-    prefix: string,
-    ext: string = 'jpg'
-  ): Promise<string | null> {
-    try {
-      const pathManager = PathManager.getInstance()
-      const thumbnailsDir = pathManager.getPublicThumbnailsPath()
-
-      // 确保目录存在
-      await fs.mkdir(thumbnailsDir, { recursive: true })
-
-      // 生成唯一文件名
-      const uniqueId = uuidv4().slice(0, 8)
-      const fileName = `${prefix}_${Date.now()}_${uniqueId}.${ext}`
-      const filePath = pathManager.getPublicThumbnailFilePath(fileName)
-
-      // 写入文件
-      await fs.writeFile(filePath, imageData)
-
-      return fileName
-    } catch (error) {
-      console.error('[ThumbnailManager] Failed to save public thumbnail:', error)
-      return null
-    }
-  }
-
   // ─────────── URL / 文件名解析 ───────────
 
   /**
@@ -288,32 +254,6 @@ export class ThumbnailManager {
   }
 
   // ─────────── 删除 ───────────
-
-  /**
-   * 删除公共缩略图（按文件名）
-   */
-  static async deletePublicThumbnailByFilename(filename?: string | null): Promise<boolean> {
-    if (!filename) return true
-    const pathManager = PathManager.getInstance()
-    const abs = pathManager.getPublicThumbnailFilePath(filename)
-    try {
-      await fs.unlink(abs)
-      return true
-    } catch (err: unknown) {
-      // 若文件不存在，视为已删除
-      const code = (err as NodeJS.ErrnoException)?.code
-      if (code === 'ENOENT' || code === 'ENOTDIR') return true
-      return false
-    }
-  }
-
-  /**
-   * 删除公共缩略图（按 file:/// URL）
-   */
-  static async deletePublicThumbnailByUrl(url?: string | null): Promise<boolean> {
-    const filename = this.extractFilenameFromFileUrl(url)
-    return await this.deletePublicThumbnailByFilename(filename)
-  }
 
   /**
    * 删除当前保管库中的缩略图（按文件名）

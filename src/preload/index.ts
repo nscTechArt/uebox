@@ -560,6 +560,10 @@ const api = {
     },
     // 项目相关操作（公共数据库）
     project: {
+      saveCover: (projectKey: string, image: Uint8Array) =>
+        ipcRenderer.invoke('db:project:saveCover', projectKey, image),
+      restoreAutomaticCover: (projectKey: string) =>
+        ipcRenderer.invoke('db:project:restoreAutomaticCover', projectKey),
       importByFilePath: (filePath: string) =>
         ipcRenderer.invoke('db:project:importByFilePath', filePath),
       scanDirectory: (startPath: string) =>
@@ -859,13 +863,6 @@ const api = {
   path: {
     getPublicThumbnailUrl: (filename: string) =>
       ipcRenderer.invoke('path:getPublicThumbnailUrl', filename),
-    /**
-     * 保存图片到公共 thumbnails 目录（用于项目封面等）
-     * @param imageData 图片二进制数据（number[] 格式）
-     * @param prefix 文件名前缀
-     */
-    savePublicThumbnail: (imageData: number[], prefix: string) =>
-      ipcRenderer.invoke('path:savePublicThumbnail', imageData, prefix),
     getVaultThumbnailFilePath: (filename: string) =>
       ipcRenderer.invoke('path:getVaultThumbnailFilePath', filename)
   },

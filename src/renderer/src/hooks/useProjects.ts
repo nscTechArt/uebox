@@ -25,11 +25,15 @@ export function useProjects() {
   const keyword = ref('')
 
   const filteredProjects = computed(() => rankProjectSearch(projects.value, keyword.value))
+  let loadGeneration = 0
 
   async function loadAllProjects() {
+    // Imports and library-change notifications can load concurrently; only the latest may publish.
+    const generation = ++loadGeneration
     loading.value = true
     try {
       const res = await window.api.database.project.getAll()
+      if (generation !== loadGeneration) return
       if (res?.success) {
         const rows = res.data || []
         // 数据库存储的 image 可能是：
@@ -57,6 +61,7 @@ export function useProjects() {
             return p
           })
         )
+        if (generation !== loadGeneration) return
         projects.value = mapped
         loadFailed.value = false
       } else {
@@ -64,10 +69,11 @@ export function useProjects() {
         message.error(res?.error || '加载项目列表失败')
       }
     } catch (err: any) {
+      if (generation !== loadGeneration) return
       loadFailed.value = true
       message.error(err?.message || '加载项目列表异常')
     } finally {
-      loading.value = false
+      if (generation === loadGeneration) loading.value = false
     }
   }
 
