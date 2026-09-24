@@ -1,10 +1,11 @@
 /**
  * 清单刷新：应用启动后一次，之后每 6 小时一次，打开设置页时也走这里。
  *
- * 带上次的 ETag 发 If-None-Match，没变服务端回 304，用缓存的那份。
- * 变了就更新套餐来源里各模型的能力（`refreshPlanModels`），停用的对话模型换成接替者
- * （`migrateRetiredModels`），把套餐不再给的角色还给用户
- * （`releaseDroppedRoles`：还原成导入前的绑定），并把清单缓存下来。
+ * 带上次的 ETag 发 If-None-Match，没变服务端回 304，用缓存的那份；变了就把新清单缓存下来。
+ * 不管 200 还是 304，都拿这份清单和配置对一遍账：更新套餐来源里各模型的能力
+ * （`refreshPlanModels`），停用的对话模型换成接替者（`migrateRetiredModels`），把套餐不再给的
+ * 角色还给用户（`releaseDroppedRoles`：还原成导入前的绑定），不再带的存储也还原
+ * （`releaseDroppedStorage`）。配置已经一致时一次盘都不写。
  * 401 记成「授权失效」，卡片据此让用户重新连接。
  *
  * **没连接时一个请求都不发**：是否连接只看本机配置里有没有套餐来源，不问网络。
@@ -13,7 +14,7 @@
 
 import type { CreatorPlanErrorCode, CreatorPlanManifest } from '../../../shared/creatorPlan'
 import { resolveApiKey } from '../credentials'
-import { readSettings, writeSettings } from '../store'
+import { readSettings, updateSettings } from '../store'
 import {
   isPlanProvider,
   migrateRetiredModels,
@@ -22,6 +23,7 @@ import {
 } from './apply'
 import { CreatorPlanError, fetchManifestIfChanged } from './client'
 import { readPlanState, updatePlanState } from './planState'
+import { releaseDroppedStorage } from './storage'
 
 export const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000
 /** 启动后等一会儿再拉：别和启动时的一堆读盘抢 */
@@ -63,20 +65,38 @@ export async function refreshPlan(fetchImpl: typeof fetch = fetch): Promise<Refr
       state.manifest ? state.etag : null,
       fetchImpl
     )
+    // 联网这段时间里用户可能断开了（状态文件已清）：不再把清单写回去、也不再对账
+    if (!(await planConnection())) return null
+    let manifest: CreatorPlanManifest | null
     if (result.status === 'not_modified') {
       if (state.unauthorized) await updatePlanState({ unauthorized: false })
-      return { manifest: state.manifest, error: null }
+      manifest = (await readPlanState()).manifest
+    } else {
+      await updatePlanState({ etag: result.etag, manifest: result.manifest, unauthorized: false })
+      manifest = result.manifest
     }
+    if (!manifest) return { manifest: null, error: null }
+    // 原绑定也按联网之后的来：这期间重新导入可能刚记下新的
+    const { originals } = await readPlanState()
 
-    await updatePlanState({ etag: result.etag, manifest: result.manifest, unauthorized: false })
-    const settings = await readSettings()
-    const refreshed = releaseDroppedRoles(
-      migrateRetiredModels(refreshPlanModels(settings, result.manifest), result.manifest),
-      result.manifest,
-      state.originals
-    )
-    if (refreshed !== settings) await writeSettings(refreshed)
-    return { manifest: result.manifest, error: null }
+    // 304 也要对一遍账：清单可能是连接 / 重新导入预览时缓存的（没落到配置上），
+    // 或者上次写配置失败了，或者是老版本缓存的、它还不会迁移。没变化时三个函数原样返回，不写盘。
+    // 和用户改角色排在同一队里读改写（updateSettings），不拿旧快照盖掉用户刚改的。
+    // 写失败不影响这次的结论：清单照样回给卡片，下一轮（304 也算）再对
+    try {
+      const cached = manifest
+      await updateSettings((settings) =>
+        releaseDroppedRoles(
+          migrateRetiredModels(refreshPlanModels(settings, cached), cached),
+          cached,
+          originals
+        )
+      )
+      await releaseDroppedStorage(manifest)
+    } catch (error) {
+      console.warn('[Box Plan] 清单对账没写成，下一轮再试:', error)
+    }
+    return { manifest, error: null }
   } catch (error) {
     const code = error instanceof CreatorPlanError ? error.code : 'unknown'
     if (code === 'unauthorized' && !state.unauthorized)

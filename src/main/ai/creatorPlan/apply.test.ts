@@ -386,6 +386,16 @@ describe('applyPlan', () => {
     expect(second.roles.vision).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
   })
 
+  it('取消勾选、或清单里没了的角色有原绑定：还原成原绑定，不是清空', () => {
+    const originals = { chat: { providerId: 'my-gateway', modelId: 'gpt-x' } }
+    const first = applyPlan(base, manifest, keyRef, ['chat'], originals)
+    const unticked = applyPlan(first, manifest, keyRef, [], originals)
+    expect(unticked.roles.chat).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
+    const shrunk = { ...manifest, roles: { ...manifest.roles, chat: null } }
+    const dropped = applyPlan(first, shrunk, keyRef, ['chat'], originals)
+    expect(dropped.roles.chat).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
+  })
+
   it('重复导入不会叠出两个套餐来源', () => {
     const twice = applyPlan(applyPlan(base, manifest, keyRef, ['agent']), manifest, keyRef, [
       'agent'
@@ -413,6 +423,20 @@ describe('recordOriginals', () => {
     expect(recordOriginals(first, applied, manifest, ['chat', 'agent'])).toEqual({
       chat: { providerId: 'my-gateway', modelId: 'gpt-x' },
       agent: null
+    })
+  })
+
+  it('用户后来自己改过（已脱离套餐）再重新导入：按现在的记，不留最早那条', () => {
+    const first = recordOriginals({}, base, manifest, ['chat'])
+    const applied = applyPlan(base, manifest, keyRef, ['chat'], first)
+    const other = { ...mine, id: 'openai', models: [{ id: 'gpt-y' }] }
+    const moved: AiProviderSettings = {
+      ...applied,
+      providers: [...applied.providers, other],
+      roles: { ...applied.roles, chat: { providerId: 'openai', modelId: 'gpt-y' } }
+    }
+    expect(recordOriginals(first, moved, manifest, ['chat'])).toEqual({
+      chat: { providerId: 'openai', modelId: 'gpt-y' }
     })
   })
 

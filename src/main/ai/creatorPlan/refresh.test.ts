@@ -2,7 +2,7 @@
 /**
  * 清单自动刷新：
  * - 没连接时一个请求都不发（启动那一轮、每 6 小时那一轮都是）
- * - 200 更新套餐来源里各模型的能力、缓存清单和 ETag；304 什么都不写
+ * - 200 更新套餐来源里各模型的能力、缓存清单和 ETag；304 照缓存那份对账，配置已一致就什么都不写
  * - 401 记成授权失效
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,17 +13,24 @@ import type { PlanState } from './planState'
 let settings: AiProviderSettings
 let planState: PlanState
 let writes = 0
+let failWrites = false
 
 vi.mock('electron', () => ({ app: { getPath: () => '' } }))
 
 vi.mock('../store', () => ({
   readSettings: async () => settings,
-  writeSettings: async (next: AiProviderSettings) => {
+  updateSettings: async (change: (current: AiProviderSettings) => AiProviderSettings) => {
+    const next = change(settings)
+    if (next === settings) return settings
+    if (failWrites) throw new Error('EPERM')
     writes += 1
     settings = next
     return next
   }
 }))
+
+const releaseDroppedStorage = vi.hoisted(() => vi.fn(async (manifest: unknown) => void manifest))
+vi.mock('./storage', () => ({ releaseDroppedStorage }))
 
 vi.mock('../credentials', () => ({
   resolveApiKey: async () => 'ubx-sk-local'
@@ -119,6 +126,7 @@ function stubFetch(respond: () => Response): ReturnType<typeof vi.fn> {
 
 beforeEach(() => {
   writes = 0
+  failWrites = false
   planState = { originals: {}, etag: null, manifest: null, unauthorized: false }
   settings = connected()
 })
@@ -276,6 +284,60 @@ describe('refreshPlan', () => {
     expect(await refreshPlan()).toEqual({ manifest: cached, error: null })
     const init = fetchImpl.mock.calls[0]![1] as RequestInit
     expect((init.headers as Record<string, string>)['if-none-match']).toBe('"p-1"')
+    expect(writes).toBe(0)
+  })
+
+  it('304 但配置还没跟上缓存的清单（预览时缓存的、老版本缓存的）：照缓存那份对账', async () => {
+    settings = {
+      ...settings,
+      providers: settings.providers.map((p) =>
+        p.id === PLAN_PROVIDER_ID ? { ...p, displayName: 'Creator Plan' } : p
+      )
+    }
+    planState = { ...planState, etag: '"p-1"', manifest: manifest(spec()) }
+    stubFetch(() => new Response(null, { status: 304 }))
+    await refreshPlan()
+    expect(settings.providers.find((p) => p.id === PLAN_PROVIDER_ID)!.displayName).toBe('Box Plan')
+    expect(writes).toBe(1)
+  })
+
+  it('200 和 304 都把清单交给存储那边看一眼（套餐不再带存储时还原）', async () => {
+    releaseDroppedStorage.mockClear()
+    stubFetch(() => new Response(JSON.stringify(manifest(spec()))))
+    await refreshPlan()
+    expect(releaseDroppedStorage).toHaveBeenLastCalledWith(expect.objectContaining({ etag: 'p-2' }))
+    const cached = manifest(spec())
+    planState = { ...planState, etag: '"p-1"', manifest: cached }
+    stubFetch(() => new Response(null, { status: 304 }))
+    await refreshPlan()
+    expect(releaseDroppedStorage).toHaveBeenLastCalledWith(cached)
+  })
+
+  it('写配置失败：清单照样回给卡片，不当成刷新失败（下一轮 304 也会再对账）', async () => {
+    settings = {
+      ...settings,
+      providers: settings.providers.map((p) =>
+        p.id === PLAN_PROVIDER_ID ? { ...p, displayName: 'Creator Plan' } : p
+      )
+    }
+    const cached = manifest(spec())
+    planState = { ...planState, etag: '"p-1"', manifest: cached }
+    failWrites = true
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    stubFetch(() => new Response(null, { status: 304 }))
+    expect(await refreshPlan()).toEqual({ manifest: cached, error: null })
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('联网期间用户断开了：不把清单写回状态文件，也不对账', async () => {
+    stubFetch(() => {
+      settings = { version: 3, providers: [mine], roles: {} }
+      planState = { originals: {}, etag: null, manifest: null, unauthorized: false }
+      return new Response(JSON.stringify(manifest(spec())), { headers: { etag: '"p-9"' } })
+    })
+    expect(await refreshPlan()).toBeNull()
+    expect(planState).toEqual({ originals: {}, etag: null, manifest: null, unauthorized: false })
     expect(writes).toBe(0)
   })
 

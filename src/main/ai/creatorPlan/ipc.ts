@@ -26,7 +26,7 @@ import type {
   CreatorPlanState
 } from '../../../shared/creatorPlan'
 import { EncryptionUnavailableError, deleteLiteralKey, saveLiteralKey } from '../credentials'
-import { invalidateSettingsCache, readSettings, writeSettings } from '../store'
+import { invalidateSettingsCache, readSettings, updateSettings } from '../store'
 import {
   PLAN_KEY_ID,
   applyPlan,
@@ -182,13 +182,11 @@ export function registerCreatorPlanIPC(): void {
         const current = await readSettings()
         // 先记原绑定再落盘：反过来的话，写完配置、记录没写成，断开时就还原不回去了
         const planState = await readPlanState()
-        await writePlanState({
-          ...planState,
-          originals: recordOriginals(planState.originals, current, manifest, selected),
-          unauthorized: false
-        })
-        const written = await writeSettings(
-          applyPlan(current, manifest, { kind: 'literal', id: PLAN_KEY_ID }, selected)
+        const originals = recordOriginals(planState.originals, current, manifest, selected)
+        await writePlanState({ ...planState, originals, unauthorized: false })
+        // 落盘排进队里、在最新的配置上应用：和后台清单对账同时发生时，谁都不拿旧快照盖掉对方
+        const written = await updateSettings((latest) =>
+          applyPlan(latest, manifest, { kind: 'literal', id: PLAN_KEY_ID }, selected, originals)
         )
         await applyPlanStorage(manifest, options?.storage)
         pendingManifest = null
@@ -223,7 +221,7 @@ export function registerCreatorPlanIPC(): void {
         // 本机连 Key 都没有了，服务端那把也吊销不了，同样提示去网页端
         const revoked = conn?.apiKey ? await revokeKey(conn.baseUrl, conn.apiKey) : false
         const planState = await readPlanState()
-        await writeSettings(removePlan(await readSettings(), planState.originals))
+        await updateSettings((latest) => removePlan(latest, planState.originals))
         await restorePlanStorage()
         await deleteLiteralKey(PLAN_KEY_ID)
         await clearPlanState()

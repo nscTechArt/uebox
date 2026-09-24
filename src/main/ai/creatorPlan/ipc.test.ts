@@ -37,6 +37,10 @@ vi.mock('../store', () => ({
   writeSettings: async (next: AiProviderSettings) => {
     settings = next
     return next
+  },
+  updateSettings: async (change: (current: AiProviderSettings) => AiProviderSettings) => {
+    settings = change(settings)
+    return settings
   }
 }))
 
@@ -67,6 +71,7 @@ vi.mock('./planState', () => ({
 const storage = {
   planStoragePreview: vi.fn(async () => null as unknown),
   applyPlanStorage: vi.fn(async () => {}),
+  releaseDroppedStorage: vi.fn(async () => {}),
   /** 还原那一刻 log 里已经有什么：守「吊销之后、删 Key 之前」 */
   restorePlanStorage: vi.fn(async () => {
     restoredAt.push([...log])

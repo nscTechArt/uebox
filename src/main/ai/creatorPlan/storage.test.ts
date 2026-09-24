@@ -3,8 +3,8 @@
  * 套餐连接和对象存储：
  * - 清单不带存储，预览里没有这一项
  * - 没开的默认勾，自己配好了桶的默认不勾
- * - 勾了：先记原配置再换成 `uebox`；重新导入不覆盖最初那份
- * - 取消勾选 / 断开：还是套餐存储的照原样还原；用户自己换过的不动
+ * - 勾了：先记原配置再换成 `uebox`；还是套餐存储时重新导入不覆盖那份记录
+ * - 取消勾选 / 断开 / 套餐明确不带存储了：还是套餐存储的照原样还原；用户自己换过的不动
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CreatorPlanManifest } from '../../../shared/creatorPlan'
@@ -38,7 +38,8 @@ vi.mock('./planState', () => ({
   }
 }))
 
-const { applyPlanStorage, planStoragePreview, restorePlanStorage } = await import('./storage')
+const { applyPlanStorage, planStoragePreview, releaseDroppedStorage, restorePlanStorage } =
+  await import('./storage')
 
 const MY_BUCKET: ObjectStorageConfig = {
   ...DEFAULT_OBJECT_STORAGE_CONFIG,
@@ -148,6 +149,55 @@ describe('导入与还原', () => {
     await applyPlanStorage(manifest(), undefined)
     expect(saves).toEqual([])
     expect(planState.storageOriginal).toBeUndefined()
+  })
+
+  it('中间换成了自己的新桶再重新导入：记录按新桶重记，断开回到新桶', async () => {
+    config = { ...MY_BUCKET }
+    await applyPlanStorage(manifest(), true)
+    config = { ...MY_BUCKET, bucket: 'another' }
+    await applyPlanStorage(manifest(), true)
+    expect(planState.storageOriginal).toEqual({ ...MY_BUCKET, bucket: 'another' })
+    await restorePlanStorage()
+    expect(config).toEqual({ ...MY_BUCKET, bucket: 'another' })
+  })
+
+  it('套餐不再带存储（预览里没这一项）：还是套餐存储的照原来那份还原', async () => {
+    config = { ...MY_BUCKET }
+    await applyPlanStorage(manifest(), true)
+    await applyPlanStorage(manifest(false), undefined)
+    expect(config).toEqual(MY_BUCKET)
+    expect(planState.storageOriginal).toBeUndefined()
+  })
+
+  it('清单里没有 storage 字段（服务端没说）：这次导入没带这一项就不动', async () => {
+    config = { ...MY_BUCKET }
+    await applyPlanStorage(manifest(), true)
+    const silent = manifest()
+    delete silent.storage
+    await applyPlanStorage(silent, undefined)
+    expect(config.preset).toBe('uebox')
+  })
+
+  it('清单刷新：订阅还在、套餐明确不带存储了，不等重新导入就还原', async () => {
+    config = { ...MY_BUCKET }
+    await applyPlanStorage(manifest(), true)
+    const withRoles = (m: CreatorPlanManifest): CreatorPlanManifest => ({
+      ...m,
+      roles: { tts: { model: 'uebox-tts' } }
+    })
+    // 清单里一个角色都没有：不完整的清单，不据此动配置
+    await releaseDroppedStorage(manifest(false))
+    expect(config.preset).toBe('uebox')
+    await releaseDroppedStorage(withRoles(manifest(false)))
+    expect(config).toEqual(MY_BUCKET)
+    // 订阅失效时不算「不带」：什么都不动
+    await applyPlanStorage(manifest(), true)
+    const lapsed: CreatorPlanManifest = {
+      ...withRoles(manifest(false)),
+      plan: { ...manifest().plan, status: 'canceled' }
+    }
+    await releaseDroppedStorage(lapsed)
+    expect(config.preset).toBe('uebox')
   })
 
   it('用户在设置页自己换回了桶：断开时不动，只丢记录', async () => {

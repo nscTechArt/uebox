@@ -4,10 +4,11 @@
  * 和角色绑定同一个思路：
  * - 清单 `storage.enabled` 为假，导入预览里就没有这一项。
  * - 默认勾不勾：没开对象存储、或者本来就是套餐的，勾；自己配好了桶的，不勾。
- * - 换之前把原来的整份配置记进套餐的状态文件（`planState.storageOriginal`），重新导入不覆盖最初那份。
+ * - 换之前把原来的整份配置记进套餐的状态文件（`planState.storageOriginal`）。重新导入时还是套餐存储的，
+ *   不覆盖那份记录；用户中间换回过自己的桶的，按现在的重记。
  *   只换预设、打开开关；桶名、地址这些原样留在配置里，Secret 在安全存储里也不动。
- * - 重新导入时取消勾选、或者断开：还是套餐存储的，照着原来那份还原。
- *   用户自己在设置页换过的（预设已经不是 `uebox`），不动，只把记录丢掉。
+ * - 重新导入时取消勾选、断开、或者套餐明确不再带存储（清单刷新时自动，见 releaseDroppedStorage）：
+ *   还是套餐存储的，照着原来那份还原。用户自己在设置页换过的（预设已经不是 `uebox`），不动，只把记录丢掉。
  *
  * 都只动本机文件，不发请求。
  */
@@ -19,6 +20,7 @@ import {
   readObjectStorageConfig,
   saveObjectStorageConfig
 } from '../../services/objectStorage/objectStorageService'
+import { isLivePlan, planRoleSpecs } from './apply'
 import { readPlanState, writePlanState } from './planState'
 
 /** 自己的桶配好了没：开着、必填的都有、Secret 存过 */
@@ -73,30 +75,58 @@ export async function restorePlanStorage(): Promise<void> {
     )
   }
   if (state.storageOriginal) {
-    const next = { ...state }
-    delete next.storageOriginal
-    await writePlanState(next)
+    // 写之前重读一次，只摘掉这一项：拿开头那份整份写回的话，这中间别处写的（断开清掉了状态、
+    // 导入记下了原绑定）会被盖回旧的
+    const latest = await readPlanState()
+    if (latest.storageOriginal) {
+      const next = { ...latest }
+      delete next.storageOriginal
+      await writePlanState(next)
+    }
   }
+}
+
+/**
+ * 清单明确说套餐不带存储了（`storage: null` 或 `enabled: false`）。
+ * 字段缺失不算 —— 按服务端没说处理，和 releaseDroppedRoles 同一个口径。
+ */
+function storageDropped(manifest: CreatorPlanManifest): boolean {
+  return manifest.storage === null || manifest.storage?.enabled === false
+}
+
+/**
+ * 清单刷新时：订阅还在、套餐明确不再带存储（降级了），还是套餐存储的就照原来那份还原。
+ * 不等用户重新导入 —— 配置停在 uebox 的话设置页不给表单，只能整个断开才换得回自己的桶。
+ * 只动本机文件，不发请求。
+ */
+export async function releaseDroppedStorage(manifest: CreatorPlanManifest): Promise<void> {
+  if (!isLivePlan(manifest) || !storageDropped(manifest)) return
+  // 和 releaseDroppedRoles 同一道防护：清单里一个角色都没有，多半是服务端这一份不完整，不据此动配置
+  if (Object.keys(planRoleSpecs(manifest)).length === 0) return
+  if ((await readObjectStorageConfig()).preset !== PLAN_OBJECT_STORAGE_PRESET) return
+  await restorePlanStorage()
 }
 
 /**
  * 导入时落实「对象存储」这一项。
  *
- * @param wanted 预览里勾没勾；undefined = 这次导入没带这一项（老的调用方），不动
+ * @param wanted 预览里勾没勾；undefined = 这次导入没带这一项（套餐不带存储时预览里就没有它）。
+ *   套餐明确不带存储了，不管 wanted 是什么都还原；字段缺失（服务端没说）时 undefined 就不动
  */
 export async function applyPlanStorage(
   manifest: CreatorPlanManifest,
   wanted: boolean | undefined
 ): Promise<void> {
-  if (wanted === undefined) return
-  if (!wanted || manifest.storage?.enabled !== true) {
+  if (wanted === false || storageDropped(manifest)) {
     await restorePlanStorage()
     return
   }
+  if (wanted === undefined || manifest.storage?.enabled !== true) return
   const config = await readObjectStorageConfig()
   const state = await readPlanState()
-  // 先记原配置再切：反过来的话，切完了记录没写成，断开时就还原不回去了
-  if (!state.storageOriginal && config.preset !== PLAN_OBJECT_STORAGE_PRESET) {
+  // 先记原配置再切：反过来的话，切完了记录没写成，断开时就还原不回去了。
+  // 现在不是套餐存储的，按现在的记（用户后来换了自己的新桶，断开时该回到新桶，不是最早那份）
+  if (config.preset !== PLAN_OBJECT_STORAGE_PRESET) {
     await writePlanState({ ...state, storageOriginal: config })
   }
   await saveObjectStorageConfig({ ...config, enabled: true, preset: PLAN_OBJECT_STORAGE_PRESET })

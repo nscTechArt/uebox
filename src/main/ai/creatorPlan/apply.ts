@@ -323,14 +323,16 @@ export function planRoleChanges(
  * 应用清单：换上套餐的来源，把选中的角色绑过去。
  *
  * 选中的角色 → 绑到套餐（source: 'plan'）。
- * 本来由套餐管着、这次没选中的 → 解绑（用户取消勾选，就是不要套餐管它了）。
- * 本来由套餐管着、但清单里已经没有的 → 解绑。
+ * 本来由套餐管着、这次没选中的 → 还给用户（用户取消勾选，就是不要套餐管它了）。
+ * 本来由套餐管着、但清单里已经没有的 → 还给用户（协议 01-plan：保持原来的配置，不要清空）。
+ * 「还给用户」和断开同一套：还原成接管前的原绑定，没有或原来源已删才置为未设置。
  */
 export function applyPlan(
   settings: AiProviderSettings,
   manifest: CreatorPlanManifest,
   apiKey: ApiKeyRef,
-  selected: readonly ModelRole[]
+  selected: readonly ModelRole[],
+  originals: OriginalBindings = {}
 ): AiProviderSettings {
   const specs = planRoleSpecs(manifest)
   const providers = [
@@ -344,7 +346,9 @@ export function applyPlan(
     if (spec && selected.includes(role)) {
       roles[role] = { providerId: planProviderIdOf(role), modelId: spec.model, source: 'plan' }
     } else if (roles[role]?.source === 'plan') {
-      delete roles[role]
+      const restored = restoredBinding(providers, originals[role])
+      if (restored) roles[role] = restored
+      else delete roles[role]
     }
   }
   return { ...settings, providers, roles }
@@ -353,7 +357,8 @@ export function applyPlan(
 /**
  * 导入前记下这次要被接管的角色原来绑的是什么。
  *
- * 已经记过的角色不再覆盖：重新导入时它的「现在」是套餐，最初那条才是用户自己的配置。
+ * 还在套餐手里的角色，已经记过的不再覆盖：重新导入时它的「现在」是套餐，最初那条才是用户自己的配置。
+ * 已经脱离套餐的（用户后来自己改过、清空过）按现在的记：那才是用户最新的选择。
  * 原来就由套餐管着、又没记录的（这个功能之前导入的），按「原来没设置」记。
  */
 export function recordOriginals(
@@ -365,12 +370,12 @@ export function recordOriginals(
   const specs = planRoleSpecs(manifest)
   const next: OriginalBindings = { ...originals }
   for (const role of SUPPORTED_ROLES) {
-    if (!specs[role] || !selected.includes(role) || Object.hasOwn(next, role)) continue
+    if (!specs[role] || !selected.includes(role)) continue
     const binding = settings.roles[role]
+    const managed = !!binding && isPlanBinding(binding)
+    if (managed && Object.hasOwn(next, role)) continue
     next[role] =
-      binding && binding.source !== 'plan' && !isPlanProvider(binding.providerId)
-        ? { providerId: binding.providerId, modelId: binding.modelId }
-        : null
+      binding && !managed ? { providerId: binding.providerId, modelId: binding.modelId } : null
   }
   return next
 }
@@ -418,6 +423,11 @@ const isPlanBinding = (binding: ModelBinding): boolean =>
 /** 订阅还在（没取消、没失效）：这时某个角色为 null，才说明是套餐不再给它 */
 const LIVE_STATUSES: readonly string[] = ['active', 'trialing', 'past_due']
 
+/** 订阅还在：这时清单里的 null 才是「套餐不再给」，而不是订阅失效把什么都清空了 */
+export function isLivePlan(manifest: CreatorPlanManifest): boolean {
+  return LIVE_STATUSES.includes(manifest.plan?.status)
+}
+
 /**
  * 清单刷新时，套餐明确不再给的角色（`roles.<角色>` 为 null）还给用户：
  * 还原成导入前的原绑定（和断开同一套），没有原绑定或原来源已删就置为未设置；
@@ -434,7 +444,7 @@ export function releaseDroppedRoles(
   manifest: CreatorPlanManifest,
   originals: OriginalBindings = {}
 ): AiProviderSettings {
-  if (!LIVE_STATUSES.includes(manifest.plan?.status)) return settings
+  if (!isLivePlan(manifest)) return settings
   const specs = planRoleSpecs(manifest)
   if (Object.keys(specs).length === 0) return settings
 
