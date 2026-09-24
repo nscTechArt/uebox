@@ -1,5 +1,6 @@
 #include "UAL_AnimationCommands.h"
 #include "UAL_CommandUtils.h"
+#include "UAL_BoneRoles.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
 #include "Misc/EngineVersionComparison.h"
@@ -44,8 +45,43 @@ namespace UALAnimation
     static FString Missing(const TArray<FName>& Names, const TArray<FName>& Required)
     {
         TArray<FString> Result;
-        for (FName Name : Required) if (!Names.Contains(Name)) Result.Add(Name.ToString());
+        for (FName Name : Required) if (Name.IsNone() || !Names.Contains(Name)) Result.Add(Name.ToString());
         return FString::Join(Result, TEXT(", "));
+    }
+    /**
+     * 解析骨骼角色（见 UAL_BoneRoles.h）。bone_map 写错时返回 false 并给出原因 ——
+     * 用户点了名却被悄悄换成别的骨头，比报错更糟。
+     */
+    bool ResolveRoles(const FJson& Input, const TArray<FName>& Names, UAL_BoneRoles::FBoneRoles& Out, FString& Error)
+    {
+        TMap<FString, FString> Explicit;
+        const TSharedPtr<FJsonObject>* Map = nullptr;
+        if (Input.IsValid() && Input->TryGetObjectField(TEXT("bone_map"), Map) && Map && Map->IsValid())
+            for (const auto& Entry : (*Map)->Values)
+            {
+                FString Bone;
+                if (!Entry.Value.IsValid() || !Entry.Value->TryGetString(Bone)) { Error = TEXT("bone_map values must be bone names"); return false; }
+                Explicit.Add(Entry.Key, Bone);
+            }
+        Out = UAL_BoneRoles::Resolve(Names, Explicit);
+        if (Out.Errors.Num() > 0) { Error = TEXT("bone_map: ") + FString::Join(Out.Errors, TEXT("; ")); return false; }
+        return true;
+    }
+    /** 回执里的角色表：模型据此知道每个角色落在哪根骨头上、哪些是按命名约定猜的 */
+    static void WriteRoles(const FJson& Result, const UAL_BoneRoles::FBoneRoles& Roles)
+    {
+        FJson Map = MakeShared<FJsonObject>();
+        FValues Guessed, Unresolved;
+        for (const FString& Role : UAL_BoneRoles::AllRoles())
+        {
+            const UAL_BoneRoles::FResolved* Found = Roles.Roles.Find(Role);
+            if (!Found) { Unresolved.Add(MakeShared<FJsonValueString>(Role)); continue; }
+            Map->SetStringField(Role, Found->Bone.ToString());
+            if (Found->Via == TEXT("alias")) Guessed.Add(MakeShared<FJsonValueString>(Role));
+        }
+        Result->SetObjectField(TEXT("bone_roles"), Map);
+        Result->SetArrayField(TEXT("bone_roles_by_naming_convention"), Guessed);
+        Result->SetArrayField(TEXT("bone_roles_unresolved"), Unresolved);
     }
     static FJson Series(const TArray<double>& Values, const TArray<int32>& Frames, const TCHAR* Unit)
     {
@@ -94,6 +130,12 @@ namespace UALAnimation
         for (int32 I = 0; I < RefSkel.GetNum(); ++I)
             if (!Tracks.Contains(RefSkel.GetBoneName(I))) MissingTracks.Add(MakeShared<FJsonValueString>(RefSkel.GetBoneName(I).ToString()));
         Result->SetArrayField(TEXT("missing_tracks"), MissingTracks);
+        TArray<FName> Names;
+        for (int32 I = 0; I < RefSkel.GetNum(); ++I) Names.Add(RefSkel.GetBoneName(I));
+        UAL_BoneRoles::FBoneRoles Roles;
+        if (!ResolveRoles(Input, Names, Roles, Error)) return nullptr;
+        WriteRoles(Result, Roles);
+        auto R = [&Roles](const TCHAR* Role) { return Roles.Bone(Role); };
         bool bDescribe = false;
         Input->TryGetBoolField(TEXT("describe"), bDescribe);
         if (bDescribe) return Result;
@@ -117,14 +159,12 @@ namespace UALAnimation
 
         FAnimPose Ref;
         UAnimPoseExtensions::GetReferencePose(Anim->GetSkeleton(), Ref);
-        TArray<FName> Names;
-        UAnimPoseExtensions::GetBoneNames(Ref, Names);
-        const FString MissingAxes = Missing(Names, {TEXT("clavicle_l"), TEXT("clavicle_r"), TEXT("foot_l"), TEXT("ball_l"), TEXT("pelvis")});
+        const FString MissingAxes = Roles.Missing({TEXT("clavicle_l"), TEXT("clavicle_r"), TEXT("foot_l"), TEXT("ball_l"), TEXT("pelvis")});
         FVector Forward = FVector::ZeroVector;
         if (MissingAxes.IsEmpty())
         {
-            Forward = Horizontal(FVector::CrossProduct(FVector::UpVector, Position(Ref, TEXT("clavicle_r")) - Position(Ref, TEXT("clavicle_l"))));
-            if (FVector::DotProduct(Forward, Horizontal(Position(Ref, TEXT("ball_l")) - Position(Ref, TEXT("foot_l")))) < 0) Forward *= -1;
+            Forward = Horizontal(FVector::CrossProduct(FVector::UpVector, Position(Ref, R(TEXT("clavicle_r"))) - Position(Ref, R(TEXT("clavicle_l")))));
+            if (FVector::DotProduct(Forward, Horizontal(Position(Ref, R(TEXT("ball_l"))) - Position(Ref, R(TEXT("foot_l"))))) < 0) Forward *= -1;
         }
         FAnimPoseEvaluationOptions Options;
         Options.bExtractRootMotion = true;
@@ -150,10 +190,10 @@ namespace UALAnimation
         bool bFixedFacing = !Forward.IsNearlyZero() && MissingAxes.IsEmpty();
         if (bFixedFacing)
         {
-            const FVector PelvisForward = Bone(Ref, TEXT("pelvis")).GetRotation().UnrotateVector(Forward);
+            const FVector PelvisForward = Bone(Ref, R(TEXT("pelvis"))).GetRotation().UnrotateVector(Forward);
             for (const auto& P : Poses)
             {
-                const FVector Facing = Horizontal(Bone(P, TEXT("pelvis")).GetRotation().RotateVector(PelvisForward));
+                const FVector Facing = Horizontal(Bone(P, R(TEXT("pelvis"))).GetRotation().RotateVector(PelvisForward));
                 if (Facing.IsNearlyZero() || Angle(Forward, Facing) > 5.0) bFixedFacing = false;
             }
         }
@@ -177,19 +217,21 @@ namespace UALAnimation
             FJson Entries = MakeShared<FJsonObject>();
             for (const FString& Side : Sides)
             {
+                TArray<FString> RequiredRoles;
+                auto Limb = [&Side](const TCHAR* Base) { return FString(Base) + TEXT("_") + Side; };
+                if (Metric == TEXT("elbow_out_deg")) RequiredRoles = {Limb(TEXT("upperarm")), Limb(TEXT("lowerarm"))};
+                if (Metric == TEXT("toe_out_deg")) RequiredRoles = {Limb(TEXT("foot")), Limb(TEXT("ball"))};
+                if (Metric == TEXT("knee_bend_deg")) RequiredRoles = {Limb(TEXT("thigh")), Limb(TEXT("calf")), Limb(TEXT("foot"))};
+                if (Metric == TEXT("gaze_pitch_deg")) RequiredRoles = {TEXT("head")};
+                if (Metric == TEXT("vertical_range_cm")) RequiredRoles = {TEXT("pelvis"), TEXT("chest")};
+                if (Metric == TEXT("torso_yaw_deg")) RequiredRoles = {TEXT("clavicle_l"), TEXT("clavicle_r")};
+                if (Metric == TEXT("hand_step_cm")) RequiredRoles = {Limb(TEXT("hand"))};
                 TArray<FName> Required;
-                auto Limb = [&Side](const TCHAR* Base) { return FName(*(FString(Base) + TEXT("_") + Side)); };
-                if (Metric == TEXT("elbow_out_deg")) Required = {Limb(TEXT("upperarm")), Limb(TEXT("lowerarm"))};
-                if (Metric == TEXT("toe_out_deg")) Required = {Limb(TEXT("foot")), Limb(TEXT("ball"))};
-                if (Metric == TEXT("knee_bend_deg")) Required = {Limb(TEXT("thigh")), Limb(TEXT("calf")), Limb(TEXT("foot"))};
-                if (Metric == TEXT("gaze_pitch_deg")) Required = {TEXT("head")};
-                if (Metric == TEXT("vertical_range_cm")) Required = {TEXT("pelvis"), TEXT("spine_05")};
-                if (Metric == TEXT("torso_yaw_deg")) Required = {TEXT("clavicle_l"), TEXT("clavicle_r")};
-                if (Metric == TEXT("hand_step_cm")) Required = {Limb(TEXT("hand"))};
-                const FString Absent = Missing(Names, Required);
+                for (const FString& Role : RequiredRoles) Required.Add(Roles.Bone(Role));
+                const FString Absent = Roles.Missing(RequiredRoles);
                 const bool bNeedsFacing = Metric == TEXT("elbow_out_deg") || Metric == TEXT("toe_out_deg") || Metric == TEXT("torso_yaw_deg");
                 FJson Entry;
-                if (!Absent.IsEmpty()) Entry = Failure(TEXT("Missing bones: ") + Absent);
+                if (!Absent.IsEmpty()) Entry = Failure(TEXT("Missing bone roles: ") + Absent + TEXT(" (no bone matched the Manny name or common naming conventions; name them with bone_map)"));
                 else if ((bNeedsFacing && !bFixedFacing) || (Metric == TEXT("gaze_pitch_deg") && Forward.IsNearlyZero()))
                     Entry = Failure(TEXT("Missing/degenerate reference axes or pelvis facing differs by more than 5 degrees; fixed-facing metric is not applicable. ") + MissingAxes);
                 else
@@ -220,8 +262,8 @@ namespace UALAnimation
                         }
                         else if (Metric == TEXT("gaze_pitch_deg"))
                         {
-                            const FVector LocalForward = Bone(Ref, TEXT("head")).GetRotation().UnrotateVector(Forward);
-                            Value = Bone(P, TEXT("head")).GetRotation().RotateVector(LocalForward).Rotation().Pitch;
+                            const FVector LocalForward = Bone(Ref, Required[0]).GetRotation().UnrotateVector(Forward);
+                            Value = Bone(P, Required[0]).GetRotation().RotateVector(LocalForward).Rotation().Pitch;
                         }
                         else if (Metric == TEXT("vertical_range_cm"))
                         {
@@ -260,8 +302,9 @@ namespace UALAnimation
             FJson Sequences = MakeShared<FJsonObject>();
             for (const auto& V : *RequestedBones)
             {
-                const FName Name(*V->AsString());
-                if (!Names.Contains(Name)) { Sequences->SetObjectField(V->AsString(), Failure(TEXT("Missing bone"))); continue; }
+                // 骨名或角色名都认：Biped 上 bones: ["pelvis"] 量的是 Bip001-Pelvis
+                const FName Name = Roles.Lookup(V->AsString(), Names);
+                if (Name.IsNone()) { Sequences->SetObjectField(V->AsString(), Failure(TEXT("Missing bone"))); continue; }
                 FValues Points;
                 for (const auto& P : Poses) Points.Add(MakeShared<FJsonValueObject>(UAL_CommandUtils::MakeVectorJson(Position(P, Name))));
                 Sequences->SetArrayField(V->AsString(), Points);
@@ -272,7 +315,7 @@ namespace UALAnimation
         if (Input->TryGetArrayField(TEXT("angle_bones"), AngleBones))
         {
             TArray<FName> Required;
-            for (const auto& V : *AngleBones) Required.Add(FName(*V->AsString()));
+            for (const auto& V : *AngleBones) Required.Add(Roles.Lookup(V->AsString(), Names));
             if (Required.Num() != 4 || !Missing(Names, Required).IsEmpty()) Result->SetObjectField(TEXT("angle_deg"), Failure(TEXT("Four existing bones required")));
             else
             {

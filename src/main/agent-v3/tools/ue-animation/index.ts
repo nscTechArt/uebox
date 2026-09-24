@@ -16,23 +16,43 @@ const metrics = z.enum([
 ])
 type Result = Record<string, unknown>
 
+/**
+ * 骨骼角色 → 骨名的显式映射。
+ *
+ * 插件先按 Manny 名、再按常见命名约定（Biped、Mixamo、Unity、Blender）自己认，
+ * 认不出或认错时用这个点名。键不在这里用 enum 钉死：两个工具各带一份 23 项的
+ * 枚举会把常驻组撑过预算（见 toolSearchCatalog.test.ts），而插件对未知角色
+ * 本来就明确报错（`UAL_BoneRoles.h` 的 `Resolve`），不会静默忽略。
+ */
+const boneMap = z
+  .record(z.string(), z.string().min(1))
+  .optional()
+  .describe(
+    '角色→骨名，只在自动认错/认不出时传。角色：pelvis chest head，clavicle upperarm lowerarm hand thigh calf foot ball 加 _l/_r。例 {"chest":"Bip001-Spine2"}'
+  )
+
 const measure = defineTool({
   name: 'anim_measure',
   namespace: 'ue.animation',
   risk: 'safe',
   description:
-    '测量 Manny / MetaHuman 身体动画。先量数字再看图。组件空间，厘米/度；视线只测头不测眼。缺骨或身体转身导致固定朝向指标不适用时返回 unmeasurable，不能当作通过。describe=true 只读帧率、帧数和缺失轨道。默认量七项；frames 不传采全部帧。',
+    '测量人形身体动画。先量数字再看图。组件空间，厘米/度；视线只测头不测眼。' +
+    '骨头按角色认：先 Manny 名，再按 Biped / Mixamo / Unity / Blender 命名约定；回执的 bone_roles 是认到的骨头，' +
+    'bone_roles_by_naming_convention 是按约定猜的，量之前核一眼，认错了用 bone_map 点名。' +
+    '缺角色或身体转身导致固定朝向指标不适用时返回 unmeasurable，不能当作通过。' +
+    'describe=true 只读帧率、帧数、缺失轨道和角色表。默认量七项；frames 不传采全部帧。bones / angle_bones 收骨名或角色名。',
   input: z.object({
     path: asset,
     describe: z.boolean().default(false),
     metrics: z.array(metrics).min(1).optional(),
     frames: z.array(z.number().int().min(0)).min(1).max(10000).optional(),
-    bones: z.array(z.string().min(1)).max(32).optional(),
+    bones: z.array(z.string().min(1)).max(32).optional().describe('要回世界坐标序列的骨名或角色名'),
     angle_bones: z
       .array(z.string().min(1))
       .length(4)
       .optional()
-      .describe('两条骨向量的起点、终点，共四个骨名')
+      .describe('两条骨向量的起点、终点，共四个骨名或角色名'),
+    bone_map: boneMap
   }),
   execute: async (input, ctx) => {
     const result = await callUe<Result>('anim.measure', input, {
@@ -49,15 +69,18 @@ const preview = defineTool({
   risk: 'safe',
   concurrency: 'sequential',
   description:
-    '给骨骼网格播放动画的指定时刻，返回一张姿势预览图。秒制时间；同骨架。一次一张，用 front/side/three_quarter 机位。与 anim_measure 同帧对照，不凭单张图断言整段动画正确。',
+    '给骨骼网格播放动画的指定时刻，返回一张姿势预览图。秒制时间；同骨架。一次一张，用 front/side/three_quarter 机位。' +
+    '机位按锁骨和脚算身体正面（骨头认法同 anim_measure，可传 bone_map）；认不出时按网格 +Y 当正面并在回执里说明。' +
+    '与 anim_measure 同帧对照，不凭单张图断言整段动画正确。',
   input: z.object({
     mesh: asset,
     animation: asset,
     time: z.number().min(0),
-    camera: z.enum(['front', 'side', 'three_quarter']).default('three_quarter')
+    camera: z.enum(['front', 'side', 'three_quarter']).default('three_quarter'),
+    bone_map: boneMap
   }),
   execute: async (input, ctx) => {
-    const result = await callUe<{ path: string }>('anim.preview', input, {
+    const result = await callUe<{ path: string; camera_basis?: string }>('anim.preview', input, {
       timeoutMs: 120_000,
       signal: ctx.signal
     })
@@ -65,7 +88,12 @@ const preview = defineTool({
     // CaptureAnimationPreview），原样 base64 塞进上下文是几 MB —— 视口截图和
     // Widget 预览都压过再进，这条也一样，理由见 `tools/contextImage.ts`
     const preview = await compressForContext(await readFile(result.path))
-    const head = `姿势预览：${input.animation}，${input.time} 秒，${input.camera}。${result.path}`
+    // 认不出身体朝向时插件按网格 +Y 摆机位 —— 这张「front」未必是正面，得让模型知道
+    const basis =
+      result.camera_basis === 'mesh_plus_y_assumed'
+        ? '\n这副骨架上认不出锁骨和脚，机位按网格 +Y 当正面摆的，front/side 未必是身体的正面/侧面；需要准确机位就传 bone_map。'
+        : ''
+    const head = `姿势预览：${input.animation}，${input.time} 秒，${input.camera}。${result.path}${basis}`
     const resized = preview && describeResize(preview)
     return {
       text: preview

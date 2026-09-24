@@ -1,6 +1,7 @@
 #include "Misc/EngineVersionComparison.h"
 #if !UE_VERSION_OLDER_THAN(5, 5, 0)
 #include "UAL_CommandUtils.h"
+#include "UAL_BoneRoles.h"
 #include "UAL_EditorCommands.h"
 #include "AnimPose.h"
 #include "Animation/AnimSequence.h"
@@ -25,6 +26,7 @@
 namespace UALAnimation
 {
     using FJson = TSharedPtr<FJsonObject>;
+    bool ResolveRoles(const FJson& Input, const TArray<FName>& Names, UAL_BoneRoles::FBoneRoles& Out, FString& Error);
     template<typename T> static T* Asset(const FJson& Input, const TCHAR* Field)
     {
         FString Path;
@@ -38,17 +40,38 @@ namespace UALAnimation
         double Time = -1;
         Input->TryGetNumberField(TEXT("time"), Time);
         FString Camera = TEXT("three_quarter"); Input->TryGetStringField(TEXT("camera"), Camera);
-        if (!Mesh || !Animation || Mesh->GetSkeleton() != Animation->GetSkeleton() || !FMath::IsFinite(Time) || Time < 0 || Time > Animation->GetPlayLength() || (Camera != TEXT("front") && Camera != TEXT("side") && Camera != TEXT("three_quarter")))
-        { FailureReason = TEXT("Same-skeleton mesh/animation, valid time and camera required"); return nullptr; }
+        // 原来这里五种错误共用一句话，模型分不清是路径错、骨架不同还是时间越界，只能挨个猜
+        if (!Mesh) { FailureReason = TEXT("mesh is not a loadable SkeletalMesh"); return nullptr; }
+        if (!Animation) { FailureReason = TEXT("animation is not a loadable AnimSequence"); return nullptr; }
+        if (Mesh->GetSkeleton() != Animation->GetSkeleton())
+        {
+            FailureReason = FString::Printf(TEXT("mesh and animation use different skeletons (%s vs %s); retarget first or pick a mesh on the animation's skeleton"),
+                Mesh->GetSkeleton() ? *Mesh->GetSkeleton()->GetPathName() : TEXT("none"),
+                Animation->GetSkeleton() ? *Animation->GetSkeleton()->GetPathName() : TEXT("none"));
+            return nullptr;
+        }
+        if (!FMath::IsFinite(Time) || Time < 0 || Time > Animation->GetPlayLength())
+        { FailureReason = FString::Printf(TEXT("time must be within [0, %.3f] seconds"), Animation->GetPlayLength()); return nullptr; }
+        if (Camera != TEXT("front") && Camera != TEXT("side") && Camera != TEXT("three_quarter"))
+        { FailureReason = TEXT("camera must be front, side or three_quarter"); return nullptr; }
         FAnimPose Reference;
         UAnimPoseExtensions::GetReferencePose(Animation->GetSkeleton(), Reference);
         TArray<FName> Names; UAnimPoseExtensions::GetBoneNames(Reference, Names);
-        for (FName Name : {FName(TEXT("clavicle_l")), FName(TEXT("clavicle_r")), FName(TEXT("foot_l")), FName(TEXT("ball_l"))})
-            if (!Names.Contains(Name)) { FailureReason = TEXT("Preview camera requires Manny/MetaHuman reference bones"); return nullptr; }
+        UAL_BoneRoles::FBoneRoles Roles;
+        if (!ResolveRoles(Input, Names, Roles, FailureReason)) return nullptr;
         auto RefPosition = [&Reference](FName Name) { return UAnimPoseExtensions::GetBonePose(Reference, Name, EAnimPoseSpaces::World).GetLocation(); };
-        FVector Forward = FVector::CrossProduct(FVector::UpVector, RefPosition(TEXT("clavicle_r")) - RefPosition(TEXT("clavicle_l"))).GetSafeNormal();
-        if (FVector::DotProduct(Forward, RefPosition(TEXT("ball_l")) - RefPosition(TEXT("foot_l"))) < 0) Forward *= -1;
-        if (Forward.IsNearlyZero()) { FailureReason = TEXT("Degenerate reference camera direction"); return nullptr; }
+
+        // 机位朝向：认得出锁骨和左脚时按身体算（原来的做法）；认不出时退到网格 +Y ——
+        // UE 骨骼网格的约定正面。以前这里直接 400，非 Manny 骨架一张图都拿不到。
+        // 回执写明用的是哪种，模型据此判断「正面」图是不是真的正面
+        FString Basis = TEXT("bone_roles");
+        FVector Forward = FVector::ZeroVector;
+        if (Roles.Missing({TEXT("clavicle_l"), TEXT("clavicle_r"), TEXT("foot_l"), TEXT("ball_l")}).IsEmpty())
+        {
+            Forward = FVector::CrossProduct(FVector::UpVector, RefPosition(Roles.Bone(TEXT("clavicle_r"))) - RefPosition(Roles.Bone(TEXT("clavicle_l")))).GetSafeNormal();
+            if (FVector::DotProduct(Forward, RefPosition(Roles.Bone(TEXT("ball_l"))) - RefPosition(Roles.Bone(TEXT("foot_l")))) < 0) Forward *= -1;
+        }
+        if (Forward.IsNearlyZero()) { Forward = FVector::YAxisVector; Basis = TEXT("mesh_plus_y_assumed"); }
 
         // An isolated transient world avoids dirtying the open level or capturing unrelated actors.
         FPreviewScene Scene(FPreviewScene::ConstructionValues().SetEditor(true));
@@ -80,6 +103,7 @@ namespace UALAnimation
         if (!bCaptured) { FailureReason = Error; return nullptr; }
         FJson Result = MakeShared<FJsonObject>(); Result->SetStringField(TEXT("path"), Path);
         Result->SetNumberField(TEXT("time"), Time); Result->SetStringField(TEXT("camera"), Camera);
+        Result->SetStringField(TEXT("camera_basis"), Basis);
         return Result;
     }
 

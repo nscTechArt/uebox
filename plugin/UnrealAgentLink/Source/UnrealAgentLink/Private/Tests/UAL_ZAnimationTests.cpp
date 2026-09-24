@@ -23,11 +23,15 @@ namespace UALAnimation
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUALAnimationMeasurements, "UnrealAgentLink.Animation.Measurements",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FUALAnimationMeasurements::RunTest(const FString& Parameters)
+/**
+ * 合成一段走位动画：13 根骨按 Manny 的顺序（root pelvis spine_05 head clavicle_l clavicle_r
+ * upperarm_l lowerarm_l hand_l thigh_l calf_l foot_l ball_l），名字由调用方给 ——
+ * 同一组姿势换成 Biped 骨名，七项读数必须一模一样。
+ */
+static UAnimSequence* SyntheticWalk(const TArray<FName>& Names)
 {
+    check(Names.Num() == 13);
     USkeleton* Skeleton = NewObject<USkeleton>();
-    TArray<FName> Names = {TEXT("root"), TEXT("pelvis"), TEXT("spine_05"), TEXT("head"), TEXT("clavicle_l"), TEXT("clavicle_r"),
-        TEXT("upperarm_l"), TEXT("lowerarm_l"), TEXT("hand_l"), TEXT("thigh_l"), TEXT("calf_l"), TEXT("foot_l"), TEXT("ball_l")};
     const double Knee = FMath::DegreesToRadians(21.0);
     const FVector Foot(40 * FMath::Sin(Knee), -10, 50 - 40 * FMath::Cos(Knee));
     TArray<FVector> Positions = {FVector::ZeroVector, FVector(0, 0, 100), FVector(0, 0, 140), FVector(0, 0, 175),
@@ -46,6 +50,7 @@ bool FUALAnimationMeasurements::RunTest(const FString& Parameters)
     Controller.OpenBracket(FText::FromString(TEXT("Synthetic measurements")), false);
     Controller.SetFrameRate(FFrameRate(30, 1), false);
     Controller.SetNumberOfFrames(10, false);
+    enum { Pelvis = 1, Chest = 2, Head = 3, HandL = 8, BallL = 12 };
     for (int32 B = 0; B < Names.Num(); ++B)
     {
         Controller.AddBoneCurve(Names[B], false);
@@ -54,16 +59,25 @@ bool FUALAnimationMeasurements::RunTest(const FString& Parameters)
         {
             FVector Position = Positions[B];
             FQuat Rotation = FQuat::Identity;
-            if (Names[B] == TEXT("head")) Rotation = FRotator(-10.5, 0, 0).Quaternion();
-            if (Names[B] == TEXT("pelvis")) Position.Z += 4.1 * Frame / 10.0;
-            if (Names[B] == TEXT("spine_05")) Position.Z += 2.3 * Frame / 10.0;
-            if (Names[B] == TEXT("hand_l") && Frame == 10) Position.X += 25;
-            if (Names[B] == TEXT("ball_l")) Position = Foot + FRotator(0, 11, 0).RotateVector(FVector(15, 0, 0));
+            if (B == Head) Rotation = FRotator(-10.5, 0, 0).Quaternion();
+            if (B == Pelvis) Position.Z += 4.1 * Frame / 10.0;
+            if (B == Chest) Position.Z += 2.3 * Frame / 10.0;
+            if (B == HandL && Frame == 10) Position.X += 25;
+            if (B == BallL) Position = Foot + FRotator(0, 11, 0).RotateVector(FVector(15, 0, 0));
             P.Add(FVector3f(Position)); Q.Add(FQuat4f(Rotation)); S.Add(FVector3f::OneVector);
         }
         Controller.SetBoneTrackKeys(Names[B], P, Q, S, false);
     }
     Controller.NotifyPopulated(); Controller.CloseBracket(false);
+    return Animation;
+}
+
+bool FUALAnimationMeasurements::RunTest(const FString& Parameters)
+{
+    TArray<FName> Names = {TEXT("root"), TEXT("pelvis"), TEXT("spine_05"), TEXT("head"), TEXT("clavicle_l"), TEXT("clavicle_r"),
+        TEXT("upperarm_l"), TEXT("lowerarm_l"), TEXT("hand_l"), TEXT("thigh_l"), TEXT("calf_l"), TEXT("foot_l"), TEXT("ball_l")};
+    UAnimSequence* Animation = SyntheticWalk(Names);
+    IAnimationDataController& Controller = Animation->GetController();
     FString Error;
     TSharedPtr<FJsonObject> Input = MakeShared<FJsonObject>();
     const auto Result = UALAnimation::MeasureSequence(Animation, Input, Error);
@@ -150,4 +164,44 @@ bool FUALAnimationMeasurements::RunTest(const FString& Parameters)
     }
     return true;
 }
+// 2026-09-24 用户反馈：Biped 骨架上七项默认指标全部 unmeasurable（Missing bones: pelvis, spine_05）。
+// 同一组姿势只换骨名，读数必须和 Manny 那份一致
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUALAnimationMeasurementsBiped, "UnrealAgentLink.Animation.MeasurementsBiped",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FUALAnimationMeasurementsBiped::RunTest(const FString& Parameters)
+{
+    UAnimSequence* Animation = SyntheticWalk({TEXT("Bip001"), TEXT("Bip001-Pelvis"), TEXT("Bip001-Spine2"), TEXT("Bip001-Head"),
+        TEXT("Bip001-L-Clavicle"), TEXT("Bip001-R-Clavicle"), TEXT("Bip001-L-UpperArm"), TEXT("Bip001-L-Forearm"),
+        TEXT("Bip001-L-Hand"), TEXT("Bip001-L-Thigh"), TEXT("Bip001-L-Calf"), TEXT("Bip001-L-Foot"), TEXT("Bip001-L-Toe0")});
+    FString Error;
+    TSharedPtr<FJsonObject> Input = MakeShared<FJsonObject>();
+    const auto Result = UALAnimation::MeasureSequence(Animation, Input, Error);
+    if (!TestTrue(TEXT("Biped measurement succeeds: ") + Error, Result.IsValid())) return false;
+    const auto Metrics = Result->GetObjectField(TEXT("metrics"));
+    auto Check = [this](const TCHAR* Name, double Actual, double Expected) { TestTrue(Name, FMath::IsNearlyEqual(Actual, Expected, 0.1)); };
+    Check(TEXT("Biped elbow 36"), Metrics->GetObjectField(TEXT("elbow_out_deg"))->GetObjectField(TEXT("l"))->GetNumberField(TEXT("max")), 36);
+    Check(TEXT("Biped toe -11"), Metrics->GetObjectField(TEXT("toe_out_deg"))->GetObjectField(TEXT("l"))->GetNumberField(TEXT("max")), -11);
+    Check(TEXT("Biped knee 21"), Metrics->GetObjectField(TEXT("knee_bend_deg"))->GetObjectField(TEXT("l"))->GetNumberField(TEXT("max")), 21);
+    Check(TEXT("Biped head -10.5"), Metrics->GetObjectField(TEXT("gaze_pitch_deg"))->GetNumberField(TEXT("max")), -10.5);
+    Check(TEXT("Biped pelvis range 4.1"), Metrics->GetObjectField(TEXT("vertical_range_cm"))->GetNumberField(TEXT("pelvis_range")), 4.1);
+    Check(TEXT("Biped chest range 2.3"), Metrics->GetObjectField(TEXT("vertical_range_cm"))->GetNumberField(TEXT("chest_range")), 2.3);
+    TestEqual(TEXT("Chest role reported"), Result->GetObjectField(TEXT("bone_roles"))->GetStringField(TEXT("chest")), FString(TEXT("Bip001-Spine2")));
+    TestTrue(TEXT("Guessed roles are flagged"), Result->GetArrayField(TEXT("bone_roles_by_naming_convention")).Num() > 0);
+
+    // 角色名当骨名用：bones: ["pelvis"] 量到 Bip001-Pelvis
+    TArray<TSharedPtr<FJsonValue>> Bones = {MakeShared<FJsonValueString>(TEXT("pelvis"))};
+    Input->SetArrayField(TEXT("bones"), Bones);
+    const auto WithBones = UALAnimation::MeasureSequence(Animation, Input, Error);
+    TestTrue(TEXT("Role name works in bones"), WithBones.IsValid() && WithBones->GetObjectField(TEXT("bone_positions_cm"))->HasTypedField<EJson::Array>(TEXT("pelvis")));
+
+    // 点错名是报错，不是静默换骨头
+    TSharedPtr<FJsonObject> Map = MakeShared<FJsonObject>();
+    Map->SetStringField(TEXT("chest"), TEXT("NoSuchBone"));
+    Input->SetObjectField(TEXT("bone_map"), Map);
+    TestFalse(TEXT("Wrong bone_map is an error"), UALAnimation::MeasureSequence(Animation, Input, Error).IsValid());
+    TestTrue(TEXT("Error names the role"), Error.Contains(TEXT("chest")));
+    return true;
+}
+
 #endif

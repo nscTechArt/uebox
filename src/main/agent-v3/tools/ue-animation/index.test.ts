@@ -77,6 +77,43 @@ describe('animation tool contracts', () => {
     expect(result.content.some((part) => part.type === 'image')).toBe(false)
     expect(JSON.stringify(result.content)).toContain('anim_measure')
   })
+  // 2026-09-24 用户反馈：Biped 骨架上默认指标全 unmeasurable。自动认不出时要能点名，
+  // 且只点一两个角色就行
+  it('accepts a partial bone_map and forwards it to the plugin', async () => {
+    vi.mocked(callUe).mockResolvedValue({ metrics: {} })
+    await tool('anim_measure').execute('t', {
+      path: '/Game/A',
+      bone_map: { chest: 'Bip001-Spine2' }
+    })
+    expect(callUe).toHaveBeenCalledWith(
+      'anim.measure',
+      expect.objectContaining({ bone_map: { chest: 'Bip001-Spine2' } }),
+      expect.anything()
+    )
+  })
+  // 认不出身体朝向时机位按网格 +Y 摆，「front」未必是正面 —— 不说的话模型会照着侧面图下正面的结论
+  it('tells the model when the preview camera direction was assumed', async () => {
+    vi.mocked(callUe).mockResolvedValue({
+      path: '/tmp/preview.png',
+      camera_basis: 'mesh_plus_y_assumed'
+    })
+    vi.mocked(readFile).mockResolvedValue(Buffer.from('pixels'))
+    vi.mocked(compressForContext).mockResolvedValue({
+      data: 'c21hbGw=',
+      mimeType: 'image/jpeg',
+      width: 768,
+      height: 432,
+      sourceWidth: 768,
+      sourceHeight: 432
+    })
+    const result = await tool('anim_preview').execute('t', {
+      mesh: '/Game/M',
+      animation: '/Game/A',
+      time: 0,
+      camera: 'front'
+    })
+    expect(JSON.stringify(result.content)).toContain('+Y')
+  })
   it('rejects an inverted pose interval before sending a write', async () => {
     await expect(
       tool('anim_write_pose').execute('t', {
