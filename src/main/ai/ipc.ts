@@ -15,14 +15,17 @@ import {
 } from './credentials'
 import { OAuthCancelledError, runOAuthLogin, yieldsPermanentKey } from './oauth'
 import { listRemoteModels, testProvider } from './probe'
-import { invalidateSettingsCache, readSettings, settingsPath, writeSettings } from './store'
+import { invalidateSettingsCache, readSettings, settingsPath, updateSettings } from './store'
 import { isLocalModelConfigured } from './resolveModel'
 import type { AiProviderSettings, ProviderConfig } from './types'
-import type {
-  ProbeFailure,
-  ProviderDraft,
-  ProviderView,
-  SettingsView
+import {
+  applyRolePatch,
+  sanitizeRolePatch,
+  unsavedRoles,
+  type ProbeFailure,
+  type ProviderDraft,
+  type ProviderView,
+  type SettingsView
 } from '../../shared/aiProvider'
 
 /**
@@ -72,11 +75,15 @@ async function toView(settings: AiProviderSettings): Promise<SettingsView> {
  * 把草稿落成可存盘的 ProviderConfig，必要时写入密钥库。
  *
  * 密钥输入框留空时的含义**取决于原来是哪一档**，见 ProviderDraft.apiKeyInput 的注释。
+ *
+ * 换掉的旧密文不在这里删，只回它的 id（`staleKeyId`）：保存要等配置真的落了盘再删 ——
+ * 先删的话写盘一失败，来源还指着一份已经没了的密文；测试连接、拉模型列表也会走这里，
+ * 它们根本不该删东西。
  */
 async function materialize(
   draft: ProviderDraft,
   previous: ProviderConfig | undefined
-): Promise<ProviderConfig> {
+): Promise<{ provider: ProviderConfig; staleKeyId: string | null }> {
   const { apiKeyInput, ...rest } = draft
   const parsed = parseApiKeyInput(apiKeyInput || '')
 
@@ -98,17 +105,24 @@ async function materialize(
     apiKey = await saveLiteralKey(id, parsed.value)
   }
 
-  // 从 literal / oauth 换成别的来源时，把原来那份密文删掉，不留孤儿。
-  // 别的来源还在用同一份密文（Box Plan 的几个来源共用一把 Key）就留着。
-  if (
-    (previous?.apiKey.kind === 'literal' || previous?.apiKey.kind === 'oauth') &&
-    apiKey.kind !== previous.apiKey.kind &&
-    !(await keyUsedElsewhere(previous.apiKey.id, draft.id))
-  ) {
-    await deleteLiteralKey(previous.apiKey.id)
-  }
+  // 从 literal / oauth 换成别的来源时，原来那份密文成了孤儿，由保存方在落盘后删掉。
+  // 新旧同一个 id（明文和登录令牌都按 provider:<id> 存）时新的已经覆盖了它，不能删
+  const previousId =
+    previous?.apiKey.kind === 'literal' || previous?.apiKey.kind === 'oauth'
+      ? previous.apiKey.id
+      : null
+  const currentId = apiKey.kind === 'literal' || apiKey.kind === 'oauth' ? apiKey.id : null
+  const staleKeyId =
+    previousId && apiKey.kind !== previous?.apiKey.kind && previousId !== currentId
+      ? previousId
+      : null
 
-  return { ...rest, apiKey }
+  return { provider: { ...rest, apiKey }, staleKeyId }
+}
+
+/** 落盘之后删掉换下来的旧密文；别的来源还在用同一份（Box Plan 的几个来源共用一把 Key）就留着 */
+async function dropStaleKey(keyId: string | null, providerId: string): Promise<void> {
+  if (keyId && !(await keyUsedElsewhere(keyId, providerId))) await deleteLiteralKey(keyId)
 }
 
 /** 除了 `exceptProviderId`，还有没有别的来源引用这份密文 */
@@ -131,6 +145,13 @@ const PLAN_READ_ONLY = {
   ok: false,
   error: '这个来源由 Box Plan 管理，请在「Box Plan」卡片上操作。'
 } as const
+
+/** 换上（或加上）一个来源 */
+function withProvider(providers: ProviderConfig[], provider: ProviderConfig): ProviderConfig[] {
+  return providers.some((item) => item.id === provider.id)
+    ? providers.map((item) => (item.id === provider.id ? provider : item))
+    : [...providers, provider]
+}
 
 function fail(error: unknown): { ok: false; error: string } {
   if (error instanceof EncryptionUnavailableError) return { ok: false, error: error.message }
@@ -170,15 +191,15 @@ export function registerAiProviderIPC(): void {
   ipcMain.handle('ai-provider:save-provider', async (_event, draft: ProviderDraft) => {
     if (isPlanProvider(String(draft?.id ?? ''))) return PLAN_READ_ONLY
     try {
-      const settings = await readSettings()
-      const previous = settings.providers.find((item) => item.id === draft.id)
-      const provider = await materialize(draft, previous)
-
-      const providers = previous
-        ? settings.providers.map((item) => (item.id === provider.id ? provider : item))
-        : [...settings.providers, provider]
-
-      return { ok: true, data: await toView(await writeSettings({ ...settings, providers })) }
+      const previous = (await readSettings()).providers.find((item) => item.id === draft.id)
+      const { provider, staleKeyId } = await materialize(draft, previous)
+      // 落盘这一步排进队里、在最新的配置上改：materialize 要等密钥库，这期间后台对账可能写过
+      const saved = await updateSettings((settings) => ({
+        ...settings,
+        providers: withProvider(settings.providers, provider)
+      }))
+      await dropStaleKey(staleKeyId, provider.id)
+      return { ok: true, data: await toView(saved) }
     } catch (error) {
       return fail(error)
     }
@@ -187,27 +208,39 @@ export function registerAiProviderIPC(): void {
   ipcMain.handle('ai-provider:delete-provider', async (_event, providerId: string) => {
     if (isPlanProvider(String(providerId ?? ''))) return PLAN_READ_ONLY
     try {
-      const settings = await readSettings()
-      const target = settings.providers.find((item) => item.id === providerId)
-      if (
-        target?.apiKey.kind === 'literal' &&
-        !(await keyUsedElsewhere(target.apiKey.id, providerId))
-      ) {
-        await deleteLiteralKey(target.apiKey.id)
-      }
-
-      const providers = settings.providers.filter((item) => item.id !== providerId)
+      const target = (await readSettings()).providers.find((item) => item.id === providerId)
       // 指向它的角色绑定由 normalizeSettings 自动丢弃，这里不用手动清。
-      return { ok: true, data: await toView(await writeSettings({ ...settings, providers })) }
+      const saved = await updateSettings((current) => ({
+        ...current,
+        providers: current.providers.filter((item) => item.id !== providerId)
+      }))
+      // 配置落了盘再删密文：先删的话写盘一失败，来源还在、Key 却没了
+      if (target?.apiKey.kind === 'literal') await dropStaleKey(target.apiKey.id, providerId)
+      return { ok: true, data: await toView(saved) }
     } catch (error) {
       return fail(error)
     }
   })
 
-  ipcMain.handle('ai-provider:set-roles', async (_event, roles: AiProviderSettings['roles']) => {
+  /**
+   * 只收改了的那几个角色（null = 清空），在队里、在最新的配置上合并。
+   * 收整张表的话，渲染层手里那份旧表会把后台刚写的（套餐清单对账）或上一次还没回来的改动盖掉
+   */
+  ipcMain.handle('ai-provider:set-roles', async (_event, raw: unknown) => {
     try {
-      const settings = await readSettings()
-      return { ok: true, data: await toView(await writeSettings({ ...settings, roles })) }
+      const patch = sanitizeRolePatch(raw)
+      const saved = await updateSettings((settings) => ({
+        ...settings,
+        roles: applyRolePatch(settings.roles, patch)
+      }))
+      const lost = unsavedRoles(saved.roles, patch)
+      if (lost.length > 0) {
+        return {
+          ok: false,
+          error: `没存上（${lost.join('、')}）：选的来源或模型已经不在了，重新打开设置页再选一次。`
+        }
+      }
+      return { ok: true, data: await toView(saved) }
     } catch (error) {
       return fail(error)
     }
@@ -217,7 +250,7 @@ export function registerAiProviderIPC(): void {
     try {
       const settings = await readSettings()
       const previous = settings.providers.find((item) => item.id === draft.id)
-      return await testProvider(await materialize(draft, previous), modelId)
+      return await testProvider((await materialize(draft, previous)).provider, modelId)
     } catch (error) {
       return failProbe(error)
     }
@@ -227,7 +260,7 @@ export function registerAiProviderIPC(): void {
     try {
       const settings = await readSettings()
       const previous = settings.providers.find((item) => item.id === draft.id)
-      return await listRemoteModels(await materialize(draft, previous))
+      return await listRemoteModels((await materialize(draft, previous)).provider)
     } catch (error) {
       return failProbe(error)
     }
@@ -260,27 +293,24 @@ export function registerAiProviderIPC(): void {
           return { ok: true, data: { key: tokens.accessToken } }
         }
 
-        const settings = await readSettings()
-        const previous = settings.providers.find((item) => item.id === draft.id)
+        const previous = (await readSettings()).providers.find((item) => item.id === draft.id)
         // 密钥 id 跟着 provider id 走，与 literal 那条路保持一致
-        const apiKey = await saveOAuthTokens(`provider:${draft.id}`, oauthProvider, tokens)
-
-        // 换成 oauth 之前如果存过明文密钥，把那份密文删掉，不留孤儿
-        if (previous?.apiKey.kind === 'literal') {
-          await deleteLiteralKey(previous.apiKey.id)
-        }
+        const tokenId = `provider:${draft.id}`
+        const apiKey = await saveOAuthTokens(tokenId, oauthProvider, tokens)
 
         const { apiKeyInput: _ignored, ...rest } = draft
         void _ignored
         const provider: ProviderConfig = { ...rest, apiKey }
-        const providers = previous
-          ? settings.providers.map((item) => (item.id === provider.id ? provider : item))
-          : [...settings.providers, provider]
-
-        return {
-          ok: true,
-          data: { settings: await toView(await writeSettings({ ...settings, providers })) }
+        const saved = await updateSettings((current) => ({
+          ...current,
+          providers: withProvider(current.providers, provider)
+        }))
+        // 换成 oauth 之前如果存过明文密钥，落盘后把那份删掉，不留孤儿。
+        // 明文默认也存在 provider:<id> 下 —— 和刚存的令牌是同一个 id，那就已经被覆盖了，不能删
+        if (previous?.apiKey.kind === 'literal' && previous.apiKey.id !== tokenId) {
+          await dropStaleKey(previous.apiKey.id, draft.id)
         }
+        return { ok: true, data: { settings: await toView(saved) } }
       } catch (error) {
         if (error instanceof OAuthCancelledError) return { ok: false, error: error.message }
         return fail(error)

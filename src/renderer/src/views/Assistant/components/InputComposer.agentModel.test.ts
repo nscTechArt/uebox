@@ -26,7 +26,10 @@ describe('InputComposer Agent model selector', () => {
     expect(composer).toContain(
       '() => !!props.disabled || !!props.isGenerating || agentModelSaving.value'
     )
-    expect(composer).toMatch(/await aiProviderAPI\.setAgentRole\(\s+settings\.roles/)
+    // 只把选中的那个模型交出去；别的角色由主进程在最新配置上保留，不从这里带整张表
+    expect(composer).toMatch(
+      /await aiProviderAPI\.setAgentRole\(\s+\{\s+providerId: option\.providerId/
+    )
     expect(composer).toMatch(/setAgentRole\([\s\S]*?await loadThinkingSupport\(\)/)
   })
 

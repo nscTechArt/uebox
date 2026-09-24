@@ -592,6 +592,56 @@ export interface ModelBinding {
 export type RoleBindings = Partial<Record<ModelRole, ModelBinding>>
 
 /**
+ * 改角色绑定只发改了的那几个：值为 null 表示清空。主进程在最新的配置上合并，
+ * 不拿渲染层手里可能已经过期的整张表盖掉后台刚写的（套餐清单对账会改写角色）。
+ */
+export type RoleBindingsPatch = Partial<Record<ModelRole, ModelBinding | null>>
+
+/**
+ * 把渲染层发来的补丁洗干净：只认已知角色；绑定只留 providerId / modelId 两个字符串，
+ * 别的（包括 `source: 'plan'` —— 用户手动改的绑定按规矩不带它）一律丢掉；形状不对的整条丢掉
+ */
+export function sanitizeRolePatch(raw: unknown): RoleBindingsPatch {
+  const patch: RoleBindingsPatch = {}
+  if (!raw || typeof raw !== 'object') return patch
+  for (const [role, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!MODEL_ROLES.includes(role as ModelRole)) continue
+    if (value === null) {
+      patch[role as ModelRole] = null
+      continue
+    }
+    const binding = value as { providerId?: unknown; modelId?: unknown } | undefined
+    if (typeof binding?.providerId === 'string' && typeof binding.modelId === 'string') {
+      patch[role as ModelRole] = { providerId: binding.providerId, modelId: binding.modelId }
+    }
+  }
+  return patch
+}
+
+export function applyRolePatch(roles: RoleBindings, patch: RoleBindingsPatch): RoleBindings {
+  const next: RoleBindings = { ...roles }
+  for (const [role, binding] of Object.entries(patch) as [ModelRole, ModelBinding | null][]) {
+    if (binding) next[role] = binding
+    else delete next[role]
+  }
+  return next
+}
+
+/**
+ * 补丁里要设上的角色，落盘之后哪些没留住（指向的来源或模型已经不在了，被归一化丢掉）。
+ * 不报出来的话渲染层当成存上了，下拉框照样显示选中的，重开设置页才发现没了
+ */
+export function unsavedRoles(saved: RoleBindings, patch: RoleBindingsPatch): ModelRole[] {
+  return (Object.entries(patch) as [ModelRole, ModelBinding | null][])
+    .filter(
+      ([role, binding]) =>
+        binding &&
+        (saved[role]?.providerId !== binding.providerId || saved[role]?.modelId !== binding.modelId)
+    )
+    .map(([role]) => role)
+}
+
+/**
  * 「谁来看这张图」的候选顺序。
  *
  * 「视觉」是**兜底**，不是收费站：主模型自己看得懂图（GPT-5、Claude、Gemini

@@ -10,6 +10,7 @@ import {
   type ProviderKind,
   type ProviderView,
   type RoleBindings,
+  type RoleBindingsPatch,
   type SettingsView
 } from '@core/shared/aiProvider'
 import { invalidateModelLimitsCache } from '@renderer/services/notebook/contextBudget'
@@ -225,7 +226,7 @@ export interface AiProvidersState {
   importModels: () => Promise<{ ok: boolean; count?: number; error?: ProbeFailure }>
   oauthLogin: (oauthProvider: string) => Promise<{ ok: boolean; saved?: boolean; error?: string }>
   setRole: (
-    role: ModelRole,
+    role: ModelRole | readonly ModelRole[],
     binding: { providerId: string; modelId: string } | null
   ) => Promise<{ ok: boolean; error?: string }>
   revealConfig: () => Promise<void>
@@ -450,22 +451,27 @@ export function useAiProviders(): AiProvidersState {
   }
 
   /**
-   * 改一个角色的绑定，立即落盘。
+   * 改一个（或一组）角色的绑定，立即落盘。一组的话一次写盘，要么全改，要么全不改。
+   *
+   * 只发改了的角色，主进程在最新的配置上合并：套餐清单的后台对账会改写配置
+   * （停用模型换成接替者、套餐不再给的角色还给用户）却不通知这一页，发整张表的话，
+   * 页面手里那份旧表就把对账的结果盖掉了；连着快改两下，后一次也会盖掉前一次。
    *
    * 失败必须回给调用方：绑定下拉框在「未设置」时是**非受控**的（value 传
    * undefined，ant-design-vue 会退回它自己的内部状态），存不进去也照样显示选中值。
    * 这里不出声，用户看到的就是「明明选好了，重开一看全没了」。
    */
   async function setRole(
-    role: ModelRole,
+    role: ModelRole | readonly ModelRole[],
     binding: { providerId: string; modelId: string } | null
   ): Promise<{ ok: boolean; error?: string }> {
-    const next: RoleBindings = plainCopy(roles.value)
-    if (binding) next[role] = { providerId: binding.providerId, modelId: binding.modelId }
-    else delete next[role]
+    const patch: RoleBindingsPatch = {}
+    for (const target of typeof role === 'string' ? [role] : role) {
+      patch[target] = binding ? { providerId: binding.providerId, modelId: binding.modelId } : null
+    }
 
     try {
-      const result = await window.api.aiProvider.setRoles(next)
+      const result = await window.api.aiProvider.setRoles(patch)
       if (!result.ok) return { ok: false, error: result.error }
       settings.value = result.data
       // 换了模型，按角色缓存的那套窗口/输出上限立刻作废 —— 不然知识库那边的预算

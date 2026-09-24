@@ -2035,7 +2035,7 @@ const api = {
     saveProvider: (draft: unknown) => ipcRenderer.invoke('ai-provider:save-provider', draft),
     deleteProvider: (providerId: string) =>
       ipcRenderer.invoke('ai-provider:delete-provider', providerId),
-    setRoles: (roles: unknown) => ipcRenderer.invoke('ai-provider:set-roles', roles),
+    setRoles: (patch: unknown) => ipcRenderer.invoke('ai-provider:set-roles', patch),
     /** 连通性测试。用草稿而不是已存配置，让用户存盘前就能验 */
     test: (draft: unknown, modelId: string) =>
       ipcRenderer.invoke('ai-provider:test', draft, modelId),

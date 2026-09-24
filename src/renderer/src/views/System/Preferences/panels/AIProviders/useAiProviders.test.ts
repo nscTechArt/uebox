@@ -142,22 +142,60 @@ describe('setRole', () => {
     configured: true
   })
 
+  /** 主进程那边此刻存着的角色表：getSettings 读它，setRoles 成功就换掉它 */
+  let mainRoles: RoleBindings = {}
+
   /** 装一个和真 IPC 一样挑剔的 setRoles：负载克隆不了就 reject */
   function mockApi(setRoles: (roles: RoleBindings) => Promise<unknown>): RoleBindings[] {
     const seen: RoleBindings[] = []
+    mainRoles = {}
     ;(globalThis as unknown as { window: Record<string, unknown> }).window.api = {
       aiProvider: {
-        getSettings: vi.fn(async () => settingsView({})),
+        getSettings: vi.fn(async () => settingsView(structuredClone(mainRoles))),
         catalog: vi.fn(async () => []),
         setRoles: vi.fn(async (roles: RoleBindings) => {
           // 结构化克隆：代理对象过不去，和 Electron 的表现一致
           seen.push(structuredClone(roles))
-          return setRoles(roles)
+          // 主进程的合并规则：null 清空，其余覆盖
+          const merged: RoleBindings = { ...mainRoles }
+          for (const [role, binding] of Object.entries(roles)) {
+            if (binding) merged[role as keyof RoleBindings] = binding
+            else delete merged[role as keyof RoleBindings]
+          }
+          const result = (await setRoles(merged)) as { ok?: boolean }
+          if (result?.ok) mainRoles = structuredClone(merged)
+          return result
         })
       }
     }
     return seen
   }
+
+  it('页面上的角色表旧了（后台对账改过配置）：只发改了的角色，不把对账结果盖回去', async () => {
+    const seen = mockApi(async (roles) => ({ ok: true, data: settingsView(roles) }))
+    const state = useAiProviders()
+    await state.load()
+    // 页面加载之后，后台把 agent 迁到了新模型，没通知这一页
+    mainRoles = { agent: { providerId: 'deepseek', modelId: 'v4-new' } }
+    await state.setRole('chat', { providerId: 'deepseek', modelId: 'v4-flash' })
+    expect(seen[0]).toEqual({ chat: { providerId: 'deepseek', modelId: 'v4-flash' } })
+    expect(mainRoles.agent).toEqual({ providerId: 'deepseek', modelId: 'v4-new' })
+  })
+
+  it('一组角色一次发出去；清空发 null', async () => {
+    const seen = mockApi(async (roles) => ({ ok: true, data: settingsView(roles) }))
+    const state = useAiProviders()
+    await state.load()
+    await state.setRole(['chat', 'agent'], { providerId: 'deepseek', modelId: 'v4-flash' })
+    await state.setRole('agent', null)
+    expect(seen).toEqual([
+      {
+        chat: { providerId: 'deepseek', modelId: 'v4-flash' },
+        agent: { providerId: 'deepseek', modelId: 'v4-flash' }
+      },
+      { agent: null }
+    ])
+  })
 
   it('第二个角色也存得进去 —— 负载里不能夹带响应式代理', async () => {
     let stored: RoleBindings = {}
@@ -175,10 +213,7 @@ describe('setRole', () => {
 
     expect(first).toEqual({ ok: true })
     expect(second).toEqual({ ok: true })
-    expect(seen[1]).toEqual({
-      chat: { providerId: 'deepseek', modelId: 'v4-flash' },
-      agent: { providerId: 'deepseek', modelId: 'v4-pro' }
-    })
+    expect(seen[1]).toEqual({ agent: { providerId: 'deepseek', modelId: 'v4-pro' } })
     // 先配的那个不能被后配的挤掉
     expect(stored.chat).toEqual({ providerId: 'deepseek', modelId: 'v4-flash' })
   })

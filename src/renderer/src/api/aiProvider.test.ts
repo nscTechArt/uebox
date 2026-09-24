@@ -31,25 +31,23 @@ describe('aiProviderAPI', () => {
     await expect(aiProviderAPI.getSettings()).resolves.toBe(value)
   })
 
-  it('切换 Agent 时保留其它角色，并发送可结构化克隆的普通对象', async () => {
+  it('切换 Agent 只发 agent 这一个（主进程在最新配置上合并，别的角色不动），发的是普通对象', async () => {
     const roles: RoleBindings = {
       chat: { providerId: 'p', modelId: 'chat' },
       vision: { providerId: 'p', modelId: 'vision' }
     }
     setRoles.mockImplementation(async (payload: RoleBindings) => ({
       ok: true,
-      data: settings(payload)
+      data: settings({ ...roles, ...payload })
     }))
 
-    const result = await aiProviderAPI.setAgentRole(roles, {
+    const result = await aiProviderAPI.setAgentRole({
       providerId: 'p2',
       modelId: 'agent::pro'
     })
 
     const payload = setRoles.mock.calls[0][0] as RoleBindings
     expect(structuredClone(payload)).toEqual({
-      chat: { providerId: 'p', modelId: 'chat' },
-      vision: { providerId: 'p', modelId: 'vision' },
       agent: { providerId: 'p2', modelId: 'agent::pro' }
     })
     expect(roles.agent).toBeUndefined()
@@ -59,7 +57,7 @@ describe('aiProviderAPI', () => {
   it('主进程拒绝保存时把真实原因交给界面', async () => {
     setRoles.mockResolvedValue({ ok: false, error: 'models.json 只读' })
 
-    await expect(aiProviderAPI.setAgentRole({}, { providerId: 'p', modelId: 'm' })).rejects.toThrow(
+    await expect(aiProviderAPI.setAgentRole({ providerId: 'p', modelId: 'm' })).rejects.toThrow(
       'models.json 只读'
     )
   })

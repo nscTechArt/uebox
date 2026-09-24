@@ -1182,7 +1182,6 @@ async function selectAgentModel(option: AgentModelOption): Promise<void> {
   agentModelSaving.value = true
   try {
     agentModelSettings.value = await aiProviderAPI.setAgentRole(
-      settings.roles,
       {
         providerId: option.providerId,
         modelId: option.modelId

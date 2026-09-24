@@ -2065,8 +2065,9 @@ declare global {
       ) => Promise<
         import('../shared/aiProvider').AiProviderResult<import('../shared/aiProvider').SettingsView>
       >
+      /** 只发改了的角色，null = 清空；主进程在最新的配置上合并 */
       setRoles: (
-        roles: import('../shared/aiProvider').RoleBindings
+        patch: import('../shared/aiProvider').RoleBindingsPatch
       ) => Promise<
         import('../shared/aiProvider').AiProviderResult<import('../shared/aiProvider').SettingsView>
       >

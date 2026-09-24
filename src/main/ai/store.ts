@@ -1,4 +1,5 @@
 import { defaultSpeechVoice } from '../../shared/speech'
+import { randomUUID } from 'crypto'
 import { promises as fs } from 'fs'
 import { existsSync, readFileSync } from 'fs'
 import { dirname, join } from 'path'
@@ -486,9 +487,15 @@ export function normalizeSettings(raw: unknown): AiProviderSettings {
 }
 
 let cache: AiProviderSettings | null = null
+/**
+ * 缓存换过几次（写入、清缓存各加一）。读盘要 await：读开始之后若有人写过，
+ * 读回来的是写之前的内容，不能拿它盖掉写入方设好的新缓存 —— 下一次读改写就会把旧快照写回盘上
+ */
+let cacheGeneration = 0
 
 export async function readSettings(): Promise<AiProviderSettings> {
   if (cache) return cache
+  const generation = cacheGeneration
 
   const path = settingsPath()
   if (!existsSync(path)) {
@@ -496,16 +503,20 @@ export async function readSettings(): Promise<AiProviderSettings> {
     return cache
   }
 
+  let loaded: AiProviderSettings
   try {
     const raw = await fs.readFile(path, 'utf-8')
-    cache = normalizeSettings(JSON.parse(raw))
+    loaded = normalizeSettings(JSON.parse(raw))
   } catch (error) {
     // 用户手改坏了 JSON 不该让应用起不来，但也不能悄悄覆盖他的文件 ——
     // 内存里按空配置走，磁盘原样保留，让他有机会自己改回来。
     console.error(`[AI 配置] ${path} 解析失败，本次按空配置运行（文件未改动）:`, error)
-    cache = { version: 1, providers: [], roles: {} }
+    loaded = { version: 1, providers: [], roles: {} }
   }
-  return cache
+  // 读的这段时间里有人写过（或又清过缓存）：这份可能是写之前的，作废重来
+  if (generation !== cacheGeneration) return readSettings()
+  cache = loaded
+  return loaded
 }
 
 /**
@@ -541,15 +552,66 @@ export async function writeSettings(settings: AiProviderSettings): Promise<AiPro
   const normalized = normalizeSettings(settings)
   const path = settingsPath()
   await fs.mkdir(dirname(path), { recursive: true })
-  await fs.writeFile(path, `${JSON.stringify(normalized, null, 2)}\n`, 'utf-8')
+  // 先写临时文件再改名：原地写的话，同一刻来读的（设置页的 get-settings 会清缓存重读）
+  // 会读到半截 JSON，按「解析失败 → 空配置」处理，再有人拿这份空配置写回就全没了
+  const content = `${JSON.stringify(normalized, null, 2)}\n`
+  const temporary = `${path}.${randomUUID()}.tmp`
+  try {
+    await fs.writeFile(temporary, content, 'utf-8')
+    await replaceFile(temporary, path, content)
+  } finally {
+    await fs.rm(temporary, { force: true }).catch(() => undefined)
+  }
   cache = normalized
+  cacheGeneration += 1
   notifyChanged()
   return normalized
+}
+
+/**
+ * 用临时文件替换 models.json。Windows 上改名要求目标文件以「允许删除」的共享方式打开，
+ * 有些程序（.NET 应用、部分编辑器、备份 / 索引 / 杀毒）占着它却不给这个共享，改名报 EPERM / EBUSY，
+ * 原地写却能成功。先等一等重试，还不行就退回原地写 —— 宁可冒一次读到半截的险，也不让保存失败
+ */
+async function replaceFile(temporary: string, path: string, content: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.rename(temporary, path)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(code)) throw error
+      if (attempt >= 2) {
+        await fs.writeFile(path, content, 'utf-8')
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt))
+    }
+  }
+}
+
+let updateQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * 读改写排成一队：后台的套餐清单对账和用户改角色同时发生时，各自拿旧快照写回，
+ * 后写的会把先写的盖掉。`change` 原样返回同一个对象表示没变化，不写盘。
+ */
+export function updateSettings(
+  change: (current: AiProviderSettings) => AiProviderSettings
+): Promise<AiProviderSettings> {
+  const run = updateQueue.then(async () => {
+    const current = await readSettings()
+    const next = change(current)
+    return next === current ? current : writeSettings(next)
+  })
+  updateQueue = run.catch(() => undefined)
+  return run
 }
 
 /** 让下一次 readSettings 重新读盘。用户在外部编辑过文件后调用 */
 export function invalidateSettingsCache(): void {
   cache = null
+  cacheGeneration += 1
   notifyChanged()
 }
 
