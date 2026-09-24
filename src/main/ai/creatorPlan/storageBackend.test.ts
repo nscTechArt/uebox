@@ -119,7 +119,7 @@ describe('上传', () => {
       (p) => percents.push(p.percent),
       { fetch, put }
     )
-    expect(result).toEqual({ key: KEY, reused: false })
+    expect(result).toMatchObject({ key: KEY, reused: false })
     expect(calls).toEqual(['POST /v1/storage/uploads', `POST /v1/storage/uploads/${KEY}/complete`])
     expect(put).toHaveBeenCalledWith(
       { method: 'PUT', url: 'http://staging.example/x', headers: { 'Content-Type': 'video/mp4' } },
@@ -143,10 +143,51 @@ describe('上传', () => {
       fetch,
       put
     })
-    expect(result).toEqual({ key: KEY, reused: true })
+    expect(result).toMatchObject({ key: KEY, reused: true })
     expect(put).not.toHaveBeenCalled()
     expect(calls).toEqual(['POST /v1/storage/uploads'])
     expect(await backend.planMediaUrl(KEY)).toBe(LINK)
+  })
+
+  it('续期时服务端说对象不在了、重传又失败：错误上标出来，调用方不能再拿旧键顶上', async () => {
+    const { fetch } = fakeFetch(() =>
+      json(200, {
+        exists: false,
+        key: KEY,
+        url: LINK,
+        upload: { method: 'PUT', url: 'http://staging.example/x', headers: {} }
+      })
+    )
+    const put = vi.fn(async () => {
+      throw new Error('存储满了')
+    })
+    await expect(
+      backend.uploadToPlan(writeFile('clip.mp4', 10), 'video/mp4', noop, noop, {
+        fetch,
+        put,
+        sha256: 'a'.repeat(64)
+      })
+    ).rejects.toMatchObject({ message: '存储满了', planObjectGone: true })
+  })
+
+  it('给了算过的指纹：不再读文件，照它申请；回的结果带着指纹', async () => {
+    let sent: Record<string, unknown> = {}
+    const { fetch, calls } = fakeFetch((_url, init) => {
+      sent = JSON.parse(String(init.body)) as Record<string, unknown>
+      return json(200, { exists: true, key: KEY, url: LINK, expires_at: FUTURE })
+    })
+    const notes: string[] = []
+    const result = await backend.uploadToPlan(
+      writeFile('clip.mp4', 10),
+      'video/mp4',
+      (note) => notes.push(note),
+      noop,
+      { fetch, sha256: 'a'.repeat(64) }
+    )
+    expect(result).toEqual({ key: KEY, reused: true, sha256: 'a'.repeat(64) })
+    expect(sent.sha256).toBe('a'.repeat(64))
+    expect(notes.some((note) => note.includes('指纹'))).toBe(false)
+    expect(calls).toEqual(['POST /v1/storage/uploads'])
   })
 
   it('超过清单的单个文件上限：不发请求，直接说清楚', async () => {

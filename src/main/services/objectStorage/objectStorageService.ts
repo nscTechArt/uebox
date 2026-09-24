@@ -214,10 +214,24 @@ function updateIndex(change: (index: UploadIndex) => UploadIndex): Promise<void>
   return next
 }
 
+/**
+ * 自己的桶里还有这个键的一份：现在用的是自己的桶，登记里传过它、也没清理掉。
+ *
+ * 套餐存储的键和自己桶的键是同一种取法（内容哈希 + 扩展名），前缀留空时同一个文件两边的键
+ * 一模一样。内容相同，哪边活着都能用：套餐那份活着就用套餐的，套餐那份没了、自己桶里还有
+ * 才用自己的 —— 不能反过来一刀切给某一边，不然总有一边活着的对象被当成「已清理」
+ */
+async function ownBucketHasLiveCopy(key: string): Promise<boolean> {
+  if ((await readObjectStorageConfig()).preset === 'uebox') return false
+  const index = await readIndex()
+  return !index.removed.includes(key) && index.uploads.some((item) => item.key === key)
+}
+
 /** 这个键是不是已经从桶里清理掉了 */
 export async function isObjectRemoved(key: string): Promise<boolean> {
   const plan = await planStorage.isPlanObjectRemoved(key)
-  if (plan !== undefined) return plan
+  if (plan === false) return false
+  if (plan === true) return !(await ownBucketHasLiveCopy(key))
   return (await readIndex()).removed.includes(key)
 }
 
@@ -266,12 +280,15 @@ export interface UploadProgress {
  * 进行中和已完成的上传，按「路径 + 大小 + 修改时间」认。
  *
  * 拖进输入框就开传，按发送时多半还没传完 —— 发送那一路拿到的是同一个 Promise，
- * 接着等就行，不会再传第二遍；传完了的直接复用，连指纹都不用再算。
+ * 接着等就行，不会再传第二遍；传完了的直接复用，连指纹都不用再算（套餐存储例外：
+ * 复用时带着记下的指纹再申请一次，保留期才续得上，见 uploadMediaFile）。
  * 失败的会被摘掉，下次重试。
  */
-const uploads = new Map<string, Promise<{ key: string; reused: boolean }>>()
+const uploads = new Map<string, Promise<{ key: string; reused: boolean; sha256?: string }>>()
 /** 已经传完（或确认桶里已有）的。再要就静默复用，不再报「等它传完」 */
 const settled = new Set<string>()
+/** 传进套餐存储的文件的指纹：套餐存储复用时要重新申请一次续期，有它就不用再读文件 */
+const planHashes = new Map<string, string>()
 const progressListeners = new Map<string, Set<(progress: UploadProgress) => void>>()
 /** 文字进度：后来接上的调用方也要看到这次上传**此刻**在干什么，并跟着往下走 */
 const noteListeners = new Map<string, Set<(note: string) => void>>()
@@ -285,6 +302,25 @@ const currentNote = new Map<string, string>()
 function forgetSettledUploads(): void {
   for (const id of settled) uploads.delete(id)
   settled.clear()
+  planHashes.clear()
+}
+
+/**
+ * 续期失败时能不能还用上次的键：只有「没问到」才行 —— 断网、超时、限流、服务端 5xx，
+ * 对象多半还在。授权失效、订阅停了、服务端刚说对象不在了（重传又失败）这些，上次的键已经不能用，
+ * 顶上去只会把一条死链接发给模型，真正的原因（比如存储满了）还看不见
+ */
+function transientRenewalError(error: unknown): boolean {
+  const detail = error as {
+    code?: unknown
+    status?: unknown
+    name?: unknown
+    planObjectGone?: unknown
+  }
+  if (!detail || detail.planObjectGone === true) return false
+  if (detail.code === 'network') return true
+  if (detail.name === 'TimeoutError' || detail.name === 'AbortError') return true
+  return typeof detail.status === 'number' && (detail.status === 429 || detail.status >= 500)
 }
 
 async function uploadIdentity(filePath: string): Promise<string> {
@@ -303,13 +339,27 @@ export async function uploadMediaFile(
   onPercent?: (progress: UploadProgress) => void
 ): Promise<{ key: string; reused: boolean }> {
   const id = await uploadIdentity(filePath)
-  const running = uploads.get(id)
+  let running = uploads.get(id)
+  /** 套餐存储续期时，上一次的结果：只在没问到（断网、超时、5xx）时还用它，见 transientRenewalError */
+  let renewedFrom: typeof running
+  /** 传进套餐存储的那次算过的指纹。有它说明上次走的是套餐存储 */
+  const planSha256 = planHashes.get(id)
   if (running && settled.has(id)) {
-    // 静默复用也算「用过」：自动清理按最后一次用到的时间算，不记的话
-    // 一直开着的盒子里天天在用的文件，下次启动照样被当成 N 天没碰过清掉
-    const { key } = await running
-    await touchUpload(key)
-    return running
+    if (!planSha256) {
+      // 静默复用也算「用过」：自动清理按最后一次用到的时间算，不记的话
+      // 一直开着的盒子里天天在用的文件，下次启动照样被当成 N 天没碰过清掉
+      const { key } = await running
+      await touchUpload(key)
+      return running
+    }
+    // 套餐存储：「最后用到」和服务端的保留期都只在申请上传（uploads）那一步续上，
+    // touchUpload 记的是自己桶的索引，对套餐的键不起作用。带着算过的指纹再申请一次
+    // （不再读文件；服务端已有就直接回）。这里到下面 uploads.set 之间不能有 await：
+    // 同一个文件同时来两次，后来的那次得看到这次新起的上传、接着等，而不是再起一个
+    renewedFrom = running
+    settled.delete(id)
+    planHashes.delete(id)
+    running = undefined
   }
   if (onPercent) {
     const set = progressListeners.get(id) ?? new Set()
@@ -337,10 +387,21 @@ export async function uploadMediaFile(
   const report = (progress: UploadProgress): void => {
     for (const listener of progressListeners.get(id) ?? []) listener(progress)
   }
-  const task = doUpload(filePath, say, report)
+  const upload = doUpload(filePath, say, report, planSha256)
+  const fallback = renewedFrom
+  const task = fallback
+    ? upload.catch(async (error: unknown) => {
+        if (!transientRenewalError(error)) throw error
+        console.warn('[对象存储] 套餐存储续期没成，先用上次的结果:', error)
+        return fallback
+      })
+    : upload
   uploads.set(id, task)
   task
-    .then(() => settled.add(id))
+    .then((result) => {
+      settled.add(id)
+      if (result.sha256) planHashes.set(id, result.sha256)
+    })
     .catch(() => uploads.delete(id))
     .finally(() => {
       progressListeners.delete(id)
@@ -353,11 +414,14 @@ export async function uploadMediaFile(
 async function doUpload(
   filePath: string,
   say: (note: string) => void,
-  report: (progress: UploadProgress) => void
-): Promise<{ key: string; reused: boolean }> {
+  report: (progress: UploadProgress) => void,
+  planSha256?: string
+): Promise<{ key: string; reused: boolean; sha256?: string }> {
   const config = await readObjectStorageConfig()
   if (config.preset === 'uebox') {
-    return planStorage.uploadToPlan(filePath, contentTypeFor(filePath), say, report)
+    return planStorage.uploadToPlan(filePath, contentTypeFor(filePath), say, report, {
+      sha256: planSha256
+    })
   }
   const target = await targetFor(config)
   const stat = await fs.stat(filePath)
@@ -419,8 +483,15 @@ async function touchUpload(key: string): Promise<void> {
  * @returns 配置不可用时返回 null，调用方把引用换成说明
  */
 export async function mediaUrlFor(key: string, now = Date.now()): Promise<string | null> {
-  const planUrl = await planStorage.planMediaUrl(key)
-  if (planUrl !== undefined) return planUrl
+  // 和 isObjectRemoved 按同一个结论走：套餐那份还在才用它的链接。只看登记里有没有链接不够 ——
+  // 断开之后过了到期时间，登记里链接还在，那份却已经没了，发出去就是 404
+  const planGone = await planStorage.isPlanObjectRemoved(key)
+  if (planGone === false) {
+    const planUrl = await planStorage.planMediaUrl(key)
+    if (planUrl) return planUrl
+  }
+  // 套餐那份没了：自己桶里还有同样内容的一份才签自己的，否则就是清理掉了
+  if (planGone === true && !(await ownBucketHasLiveCopy(key))) return null
   const config = await readObjectStorageConfig()
   if (config.publicBaseUrl) {
     return `${config.publicBaseUrl}/${key.split('/').map(encodeURIComponent).join('/')}`

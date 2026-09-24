@@ -170,8 +170,11 @@ export async function uploadToPlan(
   contentType: string,
   say: (note: string) => void,
   report: (progress: { percent: number; note: string }) => void,
-  deps: PlanStorageDeps = {}
-): Promise<{ key: string; reused: boolean }> {
+  deps: PlanStorageDeps & {
+    /** 这个文件的指纹已经算过（同一次运行里复用）：不再读一遍文件 */
+    sha256?: string
+  } = {}
+): Promise<{ key: string; reused: boolean; sha256: string }> {
   const conn = await requireConnection()
   const { manifest } = await readPlanState()
   const maxObjectBytes = manifest?.storage?.max_object_bytes
@@ -186,10 +189,13 @@ export async function uploadToPlan(
     throw describePlanStorageError(413, 'payload_too_large', undefined, { maxObjectBytes })
   }
 
-  const hashing = `正在计算 ${fileName} 的指纹…`
-  say(hashing)
-  report({ percent: 0, note: hashing })
-  const sha256 = await hashFile(filePath)
+  let sha256 = deps.sha256
+  if (!sha256) {
+    const hashing = `正在计算 ${fileName} 的指纹…`
+    say(hashing)
+    report({ percent: 0, note: hashing })
+    sha256 = await hashFile(filePath)
+  }
 
   say(`正在确认套餐存储里有没有 ${fileName}…`)
   const ticket = await requestUpload(
@@ -204,26 +210,32 @@ export async function uploadToPlan(
   if (ticket.exists) {
     say(`套餐存储里已经有 ${fileName}，直接复用`)
   } else {
-    if (!ticket.upload) throw new PlanStorageError('bad_response', 'Box Plan 没给上传地址')
-    const note = `正在上传 ${fileName}（${sizeText(stat.size)}）到套餐存储…`
-    say(note)
-    let lastPercent = -1
-    await (deps.put ?? putFile)(ticket.upload, filePath, stat.size, (sent, total) => {
-      const percent = total > 0 ? Math.floor((sent / total) * 100) : 100
-      if (percent === lastPercent) return
-      lastPercent = percent
-      report({ percent, note })
-    })
-    const done = await completeUpload(conn, ticket.key, deps.fetch)
-    expiresAt = done.expiresAt ?? expiresAt
-    url = done.url
+    try {
+      if (!ticket.upload) throw new PlanStorageError('bad_response', 'Box Plan 没给上传地址')
+      const note = `正在上传 ${fileName}（${sizeText(stat.size)}）到套餐存储…`
+      say(note)
+      let lastPercent = -1
+      await (deps.put ?? putFile)(ticket.upload, filePath, stat.size, (sent, total) => {
+        const percent = total > 0 ? Math.floor((sent / total) * 100) : 100
+        if (percent === lastPercent) return
+        lastPercent = percent
+        report({ percent, note })
+      })
+      const done = await completeUpload(conn, ticket.key, deps.fetch)
+      expiresAt = done.expiresAt ?? expiresAt
+      url = done.url
+    } catch (error) {
+      // 服务端刚说过这个对象不在了：重传再失败，调用方不能再拿上一次的键顶上 —— 那个键已经死了
+      if (error && typeof error === 'object') Object.assign(error, { planObjectGone: true })
+      throw error
+    }
   }
   report({ percent: 100, note: ticket.exists ? '套餐存储里已经有这个文件，直接复用' : '上传完成' })
 
   await updateIndex((objects) => {
     objects[ticket.key] = { url, fileName, size: stat.size, expiresAt }
   })
-  return { key: ticket.key, reused: ticket.exists }
+  return { key: ticket.key, reused: ticket.exists, sha256 }
 }
 
 // ==================== 链接与存活 ====================
