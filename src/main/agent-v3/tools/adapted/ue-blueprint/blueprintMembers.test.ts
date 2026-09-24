@@ -148,7 +148,11 @@ describe('blueprint_set_variable_meta', () => {
 
   it('编译干净时不塞多余字段', async () => {
     callRequest.mockResolvedValue({ ...ok, compiled: true, compile_error_count: 0 })
-    const result = await runMeta({ blueprint_path: '/Game/BP_Door', name: 'OpenSpeed', category: '门' })
+    const result = await runMeta({
+      blueprint_path: '/Game/BP_Door',
+      name: 'OpenSpeed',
+      category: '门'
+    })
 
     expect('compile_error_count' in result).toBe(false)
     expect('warning' in result).toBe(false)
