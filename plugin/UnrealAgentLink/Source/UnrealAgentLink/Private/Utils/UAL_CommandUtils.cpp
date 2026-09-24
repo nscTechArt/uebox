@@ -1730,8 +1730,14 @@ bool UAL_CommandUtils::SetStructProperty(FStructProperty* StructProp, UObject* O
 		 * 再把其余字段写上去，调用方同时给的自定义字段才不会被预设盖掉。
 		 */
 		UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Obj);
+		// "Custom" 不是预设，是「用同一对象里给的各通道」的意思，没有模板可载，
+		// setter 那条路会拒掉它 —— 照旧和 CollisionEnabled / CollisionResponses 一起按字段写
+		FString ProfileStr;
+		const bool bCustomProfile =
+			Normalized->TryGetStringField(TEXT("CollisionProfileName"), ProfileStr) &&
+			FName(*ProfileStr) == UCollisionProfile::CustomCollisionProfileName;
 		if (Ptr && Struct && Primitive && Struct == FBodyInstance::StaticStruct() &&
-			Normalized->HasField(TEXT("CollisionProfileName")))
+			Normalized->HasField(TEXT("CollisionProfileName")) && !bCustomProfile)
 		{
 			const TSharedPtr<FJsonValue> Profile = Normalized->TryGetField(TEXT("CollisionProfileName"));
 			Normalized->RemoveField(TEXT("CollisionProfileName"));

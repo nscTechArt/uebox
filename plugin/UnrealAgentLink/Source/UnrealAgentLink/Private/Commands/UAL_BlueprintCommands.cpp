@@ -4947,9 +4947,13 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 				 * 得到的是「'false' 不是合法的 bool 字面量……bool 请写 true/false」——
 				 * 前后两句自相矛盾，真正的原因（它是数组）一个字没提（2026-09-24 用户反馈）。
 				 */
+				// Map 的字面量是键值对的列表，和数组 / 集合的平铺列表不是一个写法
+				const TCHAR* ListForm = PinType.ContainerType == EPinContainerType::Map
+					? TEXT("a list of (Key,Value) pairs, e.g. ((\"A\",1),(\"B\",2))")
+					: TEXT("a parenthesised list, e.g. (true,false) or (1.0,2.0)");
 				DefaultError = FString::Printf(
-					TEXT("'%s' is not a valid literal for '%s' (a %s variable, not a single %s). Container defaults use Unreal's parenthesised list form, e.g. (true,false) or (1.0,2.0); leave default_value empty for an empty container. If you meant a single value, recreate the variable without container / is_array"),
-					*DefaultValueStr, *UAL_DisplayTypeName(TypeStr, PinType), UAL_ContainerName(PinType), *TypeStr);
+					TEXT("'%s' is not a valid literal for '%s' (a %s variable, not a single %s). Container defaults use Unreal's text form: %s; leave default_value empty for an empty container. If you meant a single value, recreate the variable without container / is_array"),
+					*DefaultValueStr, *UAL_DisplayTypeName(TypeStr, PinType), UAL_ContainerName(PinType), *TypeStr, ListForm);
 			}
 			NewProp->DestroyValue(Scratch);
 			FMemory::Free(Scratch);
@@ -8161,7 +8165,9 @@ void FUAL_BlueprintCommands::Handle_SetVariableMeta(const TSharedPtr<FJsonObject
 		return;
 	}
 
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	// 只标脏，不走 MarkBlueprintAsStructurallyModified：那个会先跑一遍骨架编译，
+	// 紧接着下面的完整编译又会重建一次，白编一遍
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 
 	/**
 	 * 改完就编译，不留给调用方。

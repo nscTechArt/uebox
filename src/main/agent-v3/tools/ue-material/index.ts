@@ -352,7 +352,7 @@ const applyMaterial = defineUeTool({
 slots: [{ "slot_index": 1, "path": "/Game/MI_Skin" }, { "slot_name": "Cloth", "path": "/Game/MI_Cloth" }]
 没点名的槽原样保留。某个 Actor 上有一条对不上（越界、槽名不存在）就整个跳过、一个槽都不改。
 回执逐槽给出旧材质和新材质，用它核对即可，不必再读一遍槽位表。
-slots 和 path 二选一。插件太旧不认 slots 时会报「缺少材质路径」，那就逐槽调用。
+slots 和 path / slot_index / slot_name 二选一，同时给会被拒。插件太旧不认 slots 时会报「缺少材质路径」，那就逐槽调用。
 
 被跳过的 Actor 会连原因一起回来（没有网格组件、还没指定网格、槽位越界），照着原因改。`,
   input: z.object({

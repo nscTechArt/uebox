@@ -1370,13 +1370,13 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 			OutError = TEXT("each slot needs slot_index or slot_name");
 			return false;
 		}
-		const int32 Index = static_cast<int32>(IndexNum);
-		if (Index < 0)
+		// 先按 double 判再转：小数会被悄悄截断成别的槽，超出 int32 的值转换是未定义行为
+		if (IndexNum < 0 || IndexNum > MAX_int32 || FMath::FloorToDouble(IndexNum) != IndexNum)
 		{
-			OutError = FString::Printf(TEXT("slot_index must be >= 0, got %d"), Index);
+			OutError = FString::Printf(TEXT("slot_index must be a whole number >= 0, got %s"), *FString::SanitizeFloat(IndexNum));
 			return false;
 		}
-		Out.Index = Index;
+		Out.Index = static_cast<int32>(IndexNum);
 		return true;
 	};
 
@@ -1395,10 +1395,11 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 
 	if (bBatch)
 	{
-		if (bHasMaterialPath)
+		// 顶层的 slot_index / slot_name 在多槽写法里没有落处，悄悄忽略就是少改一个槽还报成功
+		if (bHasMaterialPath || Payload->HasField(TEXT("slot_index")) || Payload->HasField(TEXT("slot_name")))
 		{
 			UAL_CommandUtils::SendError(RequestId, 400, TEXT(
-				"Give either material_path (one slot) or slots (several slots), not both"));
+				"With slots, put every slot inside slots; do not also give top-level material_path, slot_index or slot_name"));
 			return;
 		}
 		if (SlotsArray->Num() == 0)
@@ -1722,7 +1723,19 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 		 * 有一条不成立（越界、槽名不存在、槽名和索引撞到同一个槽）就整个 Actor 跳过，
 		 * 一个槽都不改 —— 半套材质比原样更难收拾，而且回执说不清哪些已经变了。
 		 */
-		const TArray<FName> SlotNames = Mesh->GetMaterialSlotNames();
+		// 槽名单要拷一份整表，只在用得上时取：多槽回执、按槽名点名、或者要报错时。
+		// 单槽按索引刷几百个 Actor 的常见路径上不取
+		const bool bReportSlotNames = bBatch || !SlotRequests[0].Name.IsNone();
+		TArray<FName> SlotNames;
+		bool bSlotNamesLoaded = false;
+		auto EnsureSlotNames = [&]()
+		{
+			if (!bSlotNamesLoaded)
+			{
+				SlotNames = Mesh->GetMaterialSlotNames();
+				bSlotNamesLoaded = true;
+			}
+		};
 		TArray<int32> ResolvedIndices;
 		TArray<FString> SlotProblems;
 		const TCHAR* ProblemKind = nullptr;
@@ -1757,6 +1770,7 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 		if (SlotProblems.Num() > 0)
 		{
 			// 槽名单封顶，理由同 UAL_JoinNamesCapped：这句会进模型上下文
+			EnsureSlotNames();
 			TArray<FString> NameList;
 			for (int32 i = 0; i < SlotNames.Num() && i < 20; ++i)
 			{
@@ -1781,6 +1795,10 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 #endif
 		// 逐槽回旧值和新值：调用方拿它核对，不用再读一遍整张槽位表
 		TArray<TSharedPtr<FJsonValue>> SlotsJson;
+		if (bReportSlotNames)
+		{
+			EnsureSlotNames();
+		}
 		for (int32 i = 0; i < SlotRequests.Num(); ++i)
 		{
 			const int32 Index = ResolvedIndices[i];
