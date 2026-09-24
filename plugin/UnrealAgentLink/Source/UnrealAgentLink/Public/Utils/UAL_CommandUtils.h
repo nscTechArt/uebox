@@ -2,6 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
+// 命令文件几乎都要读写 JSON 字符串。以前各自靠 unity build 同一块里别的 .cpp 顺带引进来 ——
+// 新增一个 .cpp 就会把分块重新洗一遍，UAL_WidgetCommands.cpp 在 5.0 上就这样突然找不到 TJsonReader
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 /**
  * 把 JSON 对象的键取成 FString。

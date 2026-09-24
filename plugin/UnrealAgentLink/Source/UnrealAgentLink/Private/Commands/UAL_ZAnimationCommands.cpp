@@ -61,7 +61,7 @@ namespace UALAnimation
             {
                 FString Bone;
                 if (!Entry.Value.IsValid() || !Entry.Value->TryGetString(Bone)) { Error = TEXT("bone_map values must be bone names"); return false; }
-                Explicit.Add(Entry.Key, Bone);
+                Explicit.Add(UAL_JsonKey(Entry.Key), Bone);
             }
         Out = UAL_BoneRoles::Resolve(Names, Explicit);
         if (Out.Errors.Num() > 0) { Error = TEXT("bone_map: ") + FString::Join(Out.Errors, TEXT("; ")); return false; }
