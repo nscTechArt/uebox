@@ -289,3 +289,93 @@ describe('material_apply 的正文', () => {
     expect(text).not.toContain('⚠️')
   })
 })
+
+/**
+ * 多槽（2026-09-24 用户反馈）：一个 Boss 15 个槽，两组槽各换一种材质、
+ * 透明槽原样保留。以前只能连调 8 次，调完还得回读整张槽位表核对。
+ */
+describe('material_apply 的多槽写法', () => {
+  const runWith = async (input: unknown, response: unknown): Promise<string> => {
+    callRequest.mockResolvedValue(response)
+    const result = await byName('material_apply').execute('c1', input)
+    return result.content.map((c) => c.text).join('\n')
+  }
+
+  it('slots 里每一项的 path 都改名成 material_path，顶层不带 material_path', async () => {
+    await runWith(
+      {
+        targets: { names: ['Boss'] },
+        component_name: '骨骼',
+        slots: [
+          { slot_index: 1, path: '/Game/MI_Skin' },
+          { slot_name: 'Cloth', path: '/Game/MI_Cloth' }
+        ]
+      },
+      { applied_count: 1, target_count: 1, actors: [] }
+    )
+    const [method, params] = callRequest.mock.calls.at(-1) as [string, Record<string, unknown>]
+    expect(method).toBe('material.apply')
+    expect(params.slots).toEqual([
+      { slot_index: 1, material_path: '/Game/MI_Skin' },
+      { slot_name: 'Cloth', material_path: '/Game/MI_Cloth' }
+    ])
+    expect('material_path' in params).toBe(false)
+    expect('path' in params).toBe(false)
+  })
+
+  it('单槽写法照旧，不再给 slot_index 塞默认值（插件那头默认 0）', async () => {
+    await runWith({ targets: { names: ['Cube'] }, path: '/Game/M_Gold' }, { applied_count: 1 })
+    const [, params] = callRequest.mock.calls.at(-1) as [string, Record<string, unknown>]
+    expect(params.material_path).toBe('/Game/M_Gold')
+    expect('slot_index' in params).toBe(false)
+    expect('slots' in params).toBe(false)
+  })
+
+  it('正文逐槽列出旧 → 新，并说明没列出的槽没动', async () => {
+    const text = await runWith(
+      { targets: { names: ['Boss'] }, slots: [{ slot_index: 1, path: '/Game/MI_Skin' }] },
+      {
+        applied_count: 1,
+        target_count: 1,
+        actors: [
+          {
+            name: 'Boss',
+            component: '骨骼',
+            slots: [
+              {
+                slot_index: 1,
+                slot_name: 'Skin',
+                previous: '/Game/Old/MI_A.MI_A',
+                material: '/Game/MI_Skin'
+              },
+              { slot_index: 13, previous: '', material: '/Game/MI_Skin' }
+            ]
+          }
+        ]
+      }
+    )
+    expect(text).toContain('槽 1（Skin）：MI_A → MI_Skin')
+    expect(text).toContain('槽 13：（空） → MI_Skin')
+    expect(text).toContain('没列出的槽没有动')
+  })
+
+  it('只改一个槽时不重复列一遍', async () => {
+    const text = await apply({
+      applied_count: 1,
+      target_count: 1,
+      actors: [
+        { name: 'Cube', component: 'SM', slots: [{ slot_index: 0, material: '/Game/M_Gold' }] }
+      ]
+    })
+    expect(text).not.toContain('逐槽改动')
+  })
+
+  it('逐槽明细封顶', async () => {
+    const actors = Array.from({ length: 10 }, (_, i) => ({
+      name: `Boss_${i}`,
+      slots: Array.from({ length: 8 }, (_, j) => ({ slot_index: j, material: '/Game/M' }))
+    }))
+    const text = await apply({ applied_count: 10, target_count: 10, actors })
+    expect(text).toContain('还有 50 个槽')
+  })
+})

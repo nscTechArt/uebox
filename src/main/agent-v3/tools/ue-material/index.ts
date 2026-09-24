@@ -264,6 +264,79 @@ const duplicateMaterial = defineUeTool<z.ZodTypeAny, DuplicateMaterialResponse>(
   })
 })
 
+interface AppliedSlot {
+  slot_index?: number
+  slot_name?: string
+  /** 改之前这个槽实际用的材质路径；空串表示没有 */
+  previous?: string
+  material?: string
+}
+
+/** 路径只留资产名：/Game/M/MI_Skin.MI_Skin → MI_Skin */
+const assetName = (path: string | undefined): string => {
+  if (!path) return '（空）'
+  const last = path.split('/').pop() ?? path
+  return last.split('.').pop() || last
+}
+
+/**
+ * 多槽时逐槽列出「旧 → 新」。
+ *
+ * 2026-09-24 的用户反馈：换完 8 个槽还得回读整张槽位表，才能确认没点名的
+ * 透明槽没被动过。插件现在逐槽回旧值和新值，这里把它放进正文。
+ * 只改一个槽时不列 —— 那一行和上面的「已应用」是同一句话。
+ * 封顶 30 行：一个 filter 命中几十个 Actor、每个十几个槽，全列就是几百行。
+ */
+export function describeAppliedSlots(
+  actors: Array<{ name?: string; path?: string; slots?: AppliedSlot[] }>,
+  labelOf: (a: { name?: string; path?: string }) => string
+): string[] {
+  const MAX_SLOT_LINES = 30
+  const multi = actors.filter((a) => (a.slots?.length ?? 0) > 1)
+  if (multi.length === 0) return []
+
+  const lines: string[] = []
+  let shown = 0
+  let hidden = 0
+  for (const a of multi) {
+    for (const slot of a.slots ?? []) {
+      if (shown >= MAX_SLOT_LINES) {
+        hidden++
+        continue
+      }
+      const slotLabel = slot.slot_name
+        ? `槽 ${slot.slot_index ?? '?'}（${slot.slot_name}）`
+        : `槽 ${slot.slot_index ?? '?'}`
+      lines.push(
+        `  - ${labelOf(a)} ${slotLabel}：${assetName(slot.previous)} → ${assetName(slot.material)}`
+      )
+      shown++
+    }
+  }
+  if (hidden > 0) lines.push(`  …还有 ${hidden} 个槽，详见 details`)
+  return ['逐槽改动（没列出的槽没有动）：', ...lines]
+}
+
+/**
+ * 单槽照旧：path → material_path。
+ * 多槽时每一项的 path 也要改名 —— 插件那头认的是 material_path。
+ */
+function toApplyMaterialParams(args: unknown): Record<string, unknown> {
+  const { path, slots, ...rest } = args as {
+    path?: string
+    slots?: Array<{ path: string } & Record<string, unknown>>
+  } & Record<string, unknown>
+  return {
+    ...rest,
+    ...(path !== undefined ? { material_path: path } : {}),
+    ...(slots
+      ? {
+          slots: slots.map(({ path: slotPath, ...slot }) => ({ ...slot, material_path: slotPath }))
+        }
+      : {})
+  }
+}
+
 const applyMaterial = defineUeTool({
   name: 'material_apply',
   namespace: NAMESPACE,
@@ -274,6 +347,12 @@ const applyMaterial = defineUeTool({
 只认**关卡里的 Actor**。要改的是蓝图资产里组件的默认材质（比如让所有金币都变金色），
 用 blueprint_set_property：component_name 填组件名，properties 填
 { "OverrideMaterials": ["/Game/Materials/M_Gold"] }。
+
+**同一组件要改好几个槽，用 slots 一次改完**，别逐槽连调：
+slots: [{ "slot_index": 1, "path": "/Game/MI_Skin" }, { "slot_name": "Cloth", "path": "/Game/MI_Cloth" }]
+没点名的槽原样保留。某个 Actor 上有一条对不上（越界、槽名不存在）就整个跳过、一个槽都不改。
+回执逐槽给出旧材质和新材质，用它核对即可，不必再读一遍槽位表。
+slots 和 path 二选一。插件太旧不认 slots 时会报「缺少材质路径」，那就逐槽调用。
 
 被跳过的 Actor 会连原因一起回来（没有网格组件、还没指定网格、槽位越界），照着原因改。`,
   input: z.object({
@@ -290,8 +369,28 @@ const applyMaterial = defineUeTool({
           .describe('过滤条件')
       })
       .describe('目标 Actor 选择器'),
-    path: z.string().describe('材质资产路径，如 /Game/Materials/MI_Wood'),
-    slot_index: z.number().int().min(0).optional().default(0).describe('材质槽索引，默认 0'),
+    path: z
+      .string()
+      .optional()
+      .describe('材质资产路径，如 /Game/Materials/MI_Wood。只改一个槽时用；改多个槽用 slots'),
+    slot_index: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('材质槽索引，默认 0。和 slot_name 二选一'),
+    slot_name: z.string().optional().describe('材质槽名（如 Body）。和 slot_index 二选一'),
+    slots: z
+      .array(
+        z.object({
+          slot_index: z.number().int().min(0).optional().describe('材质槽索引'),
+          slot_name: z.string().optional().describe('材质槽名。和 slot_index 二选一'),
+          path: z.string().describe('这个槽要换成的材质资产路径')
+        })
+      )
+      .min(1)
+      .optional()
+      .describe('一次改多个槽，每项一个槽。和 path / slot_index / slot_name 二选一'),
     component_name: z
       .string()
       .optional()
@@ -300,7 +399,7 @@ const applyMaterial = defineUeTool({
           '并在回执里告诉你挑中了哪个、旁边还有哪些。UI 组件（WidgetComponent）不会被自动挑中，要刷它就在这里点名'
       )
   }),
-  toParams: toMaterialPath,
+  toParams: toApplyMaterialParams,
   /**
    * 匹配到的 Actor 数和真正应用成功的数**经常不一样**：没有网格组件、
    * 组件上没有网格、槽位越界的 Actor 会被引擎侧跳过。
@@ -323,6 +422,8 @@ const applyMaterial = defineUeTool({
         mesh_component_count?: number
         /** 没被刷到的那几个的名字，已封顶。要改刷它们就把名字填进 component_name */
         other_components?: string
+        /** 逐槽的旧值和新值。老插件没有 */
+        slots?: AppliedSlot[]
       }>
       /** path 和成功名单那边同理：标签不唯一，重试要按路径点名 */
       skipped?: Array<{ name?: string; path?: string; reason?: string }>
@@ -436,6 +537,7 @@ const applyMaterial = defineUeTool({
     const lines = [
       `材质已应用到 ${applied}/${targets} 个 Actor${nameList ? `：${nameList}` : ''}。`
     ]
+    lines.push(...describeAppliedSlots(actors, labelOf))
     if (partial.length > 0) {
       lines.push(`⚠️ 其中 ${partial.length} 个 Actor 身上不止一个网格组件，只刷了挑中的那一个：`)
       for (const a of partial.slice(0, 5)) {

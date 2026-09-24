@@ -453,6 +453,8 @@ namespace
 		const TCHAR* const NoPaintableMesh = TEXT("no paintable mesh component");
 		const TCHAR* const NoMaterialSlots = TEXT("mesh has no material slots");
 		const TCHAR* const SlotOutOfRange = TEXT("slot_index out of range");
+		const TCHAR* const SlotNameNotFound = TEXT("slot_name not found");
+		const TCHAR* const DuplicateSlot = TEXT("same slot named twice");
 	}
 
 	/**
@@ -1323,22 +1325,152 @@ void FUAL_MaterialCommands::Handle_CreateMaterial(
 void FUAL_MaterialCommands::Handle_ApplyMaterial(
 	const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 {
-	// 1. 解析必填参数: material_path
-	FString MaterialPath;
-	if (!Payload->TryGetStringField(TEXT("material_path"), MaterialPath) || MaterialPath.IsEmpty())
+	/**
+	 * 1. 要改的槽位清单。
+	 *
+	 * 两种写法归一成同一份清单，后面只有一条路径：
+	 *   - 单槽：`material_path` + `slot_index`（默认 0）或 `slot_name`
+	 *   - 多槽：`slots: [{slot_index | slot_name, material_path}, ...]`
+	 *
+	 * 多槽是 2026-09-24 用户反馈要的：一个 Boss 15 个槽，两组槽各用一种材质、
+	 * 其余 7 个透明槽必须原样保留。单槽接口只能连调 8 次，
+	 * 而「全量写 OverrideMaterials」会把透明槽一起覆盖掉。没点名的槽一律不碰。
+	 */
+	struct FSlotRequest
 	{
-		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing required field: material_path"));
-		return;
-	}
-	MaterialPath = NormalizePath(MaterialPath);
+		/** 按索引点名时有效；按槽名点名时是 INDEX_NONE，到了具体网格上再解析 */
+		int32 Index = INDEX_NONE;
+		FName Name = NAME_None;
+		UMaterialInterface* Material = nullptr;
+		FString MaterialPath;
+	};
+	TArray<FSlotRequest> SlotRequests;
 
-	// 2. 加载材质
-	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
-	if (!Material)
+	// 槽位选择器：slot_index 和 slot_name 二选一。
+	// bDefaultToZero 只给单槽的老写法用 —— 多槽清单里默认成 0 等于悄悄改掉 0 号槽
+	auto ReadSlotSelector = [](const TSharedPtr<FJsonObject>& Obj, bool bDefaultToZero,
+		FSlotRequest& Out, FString& OutError) -> bool
 	{
-		UAL_CommandUtils::SendError(RequestId, 404, 
-			FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
-		return;
+		FString SlotName;
+		const bool bHasName = Obj->TryGetStringField(TEXT("slot_name"), SlotName) && !SlotName.IsEmpty();
+		double IndexNum = 0;
+		const bool bHasIndex = Obj->TryGetNumberField(TEXT("slot_index"), IndexNum);
+		if (bHasName && bHasIndex)
+		{
+			OutError = TEXT("give either slot_index or slot_name, not both");
+			return false;
+		}
+		if (bHasName)
+		{
+			Out.Name = FName(*SlotName);
+			return true;
+		}
+		if (!bHasIndex && !bDefaultToZero)
+		{
+			OutError = TEXT("each slot needs slot_index or slot_name");
+			return false;
+		}
+		const int32 Index = static_cast<int32>(IndexNum);
+		if (Index < 0)
+		{
+			OutError = FString::Printf(TEXT("slot_index must be >= 0, got %d"), Index);
+			return false;
+		}
+		Out.Index = Index;
+		return true;
+	};
+
+	// 2. 加载材质。任何一个找不到就整单拒绝 —— 此时还什么都没改
+	auto LoadMaterial = [](const FString& RawPath, FSlotRequest& Out) -> bool
+	{
+		Out.MaterialPath = NormalizePath(RawPath);
+		Out.Material = LoadObject<UMaterialInterface>(nullptr, *Out.MaterialPath);
+		return Out.Material != nullptr;
+	};
+
+	FString MaterialPath;
+	const bool bHasMaterialPath = Payload->TryGetStringField(TEXT("material_path"), MaterialPath) && !MaterialPath.IsEmpty();
+	const TArray<TSharedPtr<FJsonValue>>* SlotsArray = nullptr;
+	const bool bBatch = Payload->TryGetArrayField(TEXT("slots"), SlotsArray) && SlotsArray;
+
+	if (bBatch)
+	{
+		if (bHasMaterialPath)
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, TEXT(
+				"Give either material_path (one slot) or slots (several slots), not both"));
+			return;
+		}
+		if (SlotsArray->Num() == 0)
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, TEXT("slots is empty"));
+			return;
+		}
+		for (int32 i = 0; i < SlotsArray->Num(); ++i)
+		{
+			const TSharedPtr<FJsonObject>* EntryPtr = nullptr;
+			if (!(*SlotsArray)[i].IsValid() || !(*SlotsArray)[i]->TryGetObject(EntryPtr) || !EntryPtr || !EntryPtr->IsValid())
+			{
+				UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+					TEXT("slots[%d] must be an object like {\"slot_index\": 1, \"material_path\": \"/Game/M\"}"), i));
+				return;
+			}
+			FSlotRequest Req;
+			FString SelectorError;
+			if (!ReadSlotSelector(*EntryPtr, false, Req, SelectorError))
+			{
+				UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(TEXT("slots[%d]: %s"), i, *SelectorError));
+				return;
+			}
+			FString EntryPath;
+			if (!(*EntryPtr)->TryGetStringField(TEXT("material_path"), EntryPath) || EntryPath.IsEmpty())
+			{
+				UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(TEXT("slots[%d]: missing material_path"), i));
+				return;
+			}
+			if (!LoadMaterial(EntryPath, Req))
+			{
+				UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(
+					TEXT("slots[%d]: material not found: %s (nothing was changed)"), i, *Req.MaterialPath));
+				return;
+			}
+			// 字面上重复的点名当场拒绝：同一个槽给两种材质，哪个算数都是猜。
+			// 槽名和索引指向同一个槽的情况要到具体网格上才知道，在下面按 Actor 查
+			for (const FSlotRequest& Prev : SlotRequests)
+			{
+				if ((Req.Index != INDEX_NONE && Req.Index == Prev.Index) ||
+					(!Req.Name.IsNone() && Req.Name == Prev.Name))
+				{
+					UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+						TEXT("slots[%d] names the same slot as an earlier entry"), i));
+					return;
+				}
+			}
+			SlotRequests.Add(Req);
+		}
+	}
+	else
+	{
+		if (!bHasMaterialPath)
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing required field: material_path (or slots)"));
+			return;
+		}
+		FSlotRequest Req;
+		FString SelectorError;
+		if (!ReadSlotSelector(Payload, true, Req, SelectorError))
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, SelectorError);
+			return;
+		}
+		if (!LoadMaterial(MaterialPath, Req))
+		{
+			UAL_CommandUtils::SendError(RequestId, 404,
+				FString::Printf(TEXT("Material not found: %s"), *Req.MaterialPath));
+			return;
+		}
+		MaterialPath = Req.MaterialPath;
+		SlotRequests.Add(Req);
 	}
 
 	// 3. 解析 targets 选择器
@@ -1368,8 +1500,6 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 	}
 
 	// 6. 解析可选参数
-	int32 SlotIndex = 0;
-	Payload->TryGetNumberField(TEXT("slot_index"), SlotIndex);
 	// 指定组件名时只碰这一个；不给就按优先级挑一个（根组件 → 骨骼网格 → 其余，
 	// 同档按名字定序）。不是「第一个」—— GetComponents 的顺序是哈希序，靠不住
 	FString ComponentName;
@@ -1585,10 +1715,59 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 				FString::Printf(TEXT("mesh component '%s' has no material slots (no mesh assigned yet?)"), *Mesh->GetName()));
 			continue;
 		}
-		if (SlotIndex < 0 || SlotIndex >= NumMaterials)
+		/**
+		 * 把每条请求落到这个网格的槽位上，**全部**核对通过才动手。
+		 *
+		 * 槽名按网格解析：同名槽在不同网格上的索引可以不一样。
+		 * 有一条不成立（越界、槽名不存在、槽名和索引撞到同一个槽）就整个 Actor 跳过，
+		 * 一个槽都不改 —— 半套材质比原样更难收拾，而且回执说不清哪些已经变了。
+		 */
+		const TArray<FName> SlotNames = Mesh->GetMaterialSlotNames();
+		TArray<int32> ResolvedIndices;
+		TArray<FString> SlotProblems;
+		const TCHAR* ProblemKind = nullptr;
+		for (const FSlotRequest& Req : SlotRequests)
 		{
-			Skip(Actor, UALSkipKind::SlotOutOfRange,
-				FString::Printf(TEXT("slot_index %d out of range, '%s' has %d slot(s)"), SlotIndex, *Mesh->GetName(), NumMaterials));
+			int32 Index = Req.Index;
+			if (!Req.Name.IsNone())
+			{
+				Index = Mesh->GetMaterialIndex(Req.Name);
+				if (Index == INDEX_NONE)
+				{
+					SlotProblems.Add(FString::Printf(TEXT("slot_name '%s' not found"), *Req.Name.ToString()));
+					if (!ProblemKind) ProblemKind = UALSkipKind::SlotNameNotFound;
+					ResolvedIndices.Add(INDEX_NONE);
+					continue;
+				}
+			}
+			else if (Index >= NumMaterials)
+			{
+				SlotProblems.Add(FString::Printf(TEXT("slot_index %d out of range"), Index));
+				if (!ProblemKind) ProblemKind = UALSkipKind::SlotOutOfRange;
+				ResolvedIndices.Add(INDEX_NONE);
+				continue;
+			}
+			if (ResolvedIndices.Contains(Index))
+			{
+				SlotProblems.Add(FString::Printf(TEXT("slot %d is named twice (by slot_name and slot_index)"), Index));
+				if (!ProblemKind) ProblemKind = UALSkipKind::DuplicateSlot;
+			}
+			ResolvedIndices.Add(Index);
+		}
+		if (SlotProblems.Num() > 0)
+		{
+			// 槽名单封顶，理由同 UAL_JoinNamesCapped：这句会进模型上下文
+			TArray<FString> NameList;
+			for (int32 i = 0; i < SlotNames.Num() && i < 20; ++i)
+			{
+				NameList.Add(FString::Printf(TEXT("%d=%s"), i, *SlotNames[i].ToString()));
+			}
+			const FString NameListText = NameList.Num() > 0
+				? FString::Printf(TEXT(" [%s%s]"), *FString::Join(NameList, TEXT(", ")), SlotNames.Num() > 20 ? TEXT(", ...") : TEXT(""))
+				: FString();
+			Skip(Actor, ProblemKind, FString::Printf(
+				TEXT("%s on '%s', which has %d slot(s)%s; nothing was changed on this actor"),
+				*FString::Join(SlotProblems, TEXT(", ")), *Mesh->GetName(), NumMaterials, *NameListText));
 			continue;
 		}
 
@@ -1600,7 +1779,27 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 #if WITH_EDITOR
 		Mesh->Modify();
 #endif
-		Mesh->SetMaterial(SlotIndex, Material);
+		// 逐槽回旧值和新值：调用方拿它核对，不用再读一遍整张槽位表
+		TArray<TSharedPtr<FJsonValue>> SlotsJson;
+		for (int32 i = 0; i < SlotRequests.Num(); ++i)
+		{
+			const int32 Index = ResolvedIndices[i];
+			const UMaterialInterface* Previous = Mesh->GetMaterial(Index);
+			Mesh->SetMaterial(Index, SlotRequests[i].Material);
+
+			TSharedPtr<FJsonObject> SlotInfo = MakeShared<FJsonObject>();
+			SlotInfo->SetNumberField(TEXT("slot_index"), Index);
+			if (SlotNames.IsValidIndex(Index))
+			{
+				SlotInfo->SetStringField(TEXT("slot_name"), SlotNames[Index].ToString());
+			}
+			SlotInfo->SetStringField(TEXT("previous"), Previous ? Previous->GetPathName() : FString());
+			SlotInfo->SetStringField(TEXT("material"), SlotRequests[i].MaterialPath);
+			SlotsJson.Add(MakeShared<FJsonValueObject>(SlotInfo));
+
+			UE_LOG(LogUALMaterial, Log, TEXT("Applied material %s to %s (%s) at slot %d"),
+				*SlotRequests[i].Material->GetName(), *UAL_CommandUtils::GetActorFriendlyName(Actor), *Mesh->GetName(), Index);
+		}
 
 		AppliedCount++;
 
@@ -1609,7 +1808,11 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 		ActorInfo->SetStringField(TEXT("name"), UAL_CommandUtils::GetActorFriendlyName(Actor));
 		ActorInfo->SetStringField(TEXT("path"), Actor->GetPathName());
 		ActorInfo->SetStringField(TEXT("component"), Mesh->GetName());
-		ActorInfo->SetNumberField(TEXT("slot_index"), SlotIndex);
+		if (!bBatch)
+		{
+			ActorInfo->SetNumberField(TEXT("slot_index"), ResolvedIndices[0]);
+		}
+		ActorInfo->SetArrayField(TEXT("slots"), SlotsJson);
 		/*
 		 * 这个 Actor 上**还有别的网格组件**时必须说出来。
 		 *
@@ -1629,16 +1832,20 @@ void FUAL_MaterialCommands::Handle_ApplyMaterial(
 				UAL_JoinNamesCapped(MeshComponents, 5, Mesh));
 		}
 		ActorsJson.Add(MakeShared<FJsonValueObject>(ActorInfo));
-
-		UE_LOG(LogUALMaterial, Log, TEXT("Applied material %s to %s (%s) at slot %d"),
-			*Material->GetName(), *UAL_CommandUtils::GetActorFriendlyName(Actor), *Mesh->GetName(), SlotIndex);
 	}
 
 	// 8. 构建响应
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetNumberField(TEXT("applied_count"), AppliedCount);
 	Data->SetNumberField(TEXT("target_count"), TargetSet.Num());
-	Data->SetStringField(TEXT("material_path"), MaterialPath);
+	if (bBatch)
+	{
+		Data->SetNumberField(TEXT("slot_request_count"), SlotRequests.Num());
+	}
+	else
+	{
+		Data->SetStringField(TEXT("material_path"), MaterialPath);
+	}
 	Data->SetArrayField(TEXT("actors"), ActorsJson);
 	/** `原因 ×N、原因 ×M` —— 完整、去重、很短，正文和 error 都用它 */
 	/**

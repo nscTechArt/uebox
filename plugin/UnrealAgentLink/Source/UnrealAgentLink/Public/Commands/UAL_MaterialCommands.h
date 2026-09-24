@@ -69,13 +69,15 @@ public:
 	 * 
 	 * 请求参数：
 	 * - targets: Actor 选择器（统一格式：names/paths/filter）
-	 * - material_path: 材质资产路径（必填）
+	 * - material_path: 材质资产路径（单槽写法必填，与 slots 二选一）
 	 * - slot_index: 材质槽索引（可选，默认 0）
 	 * - slot_name: 材质槽名称（可选，与 slot_index 二选一）
+	 * - slots: 多槽写法 [{slot_index | slot_name, material_path}]，一次改同一组件的多个槽，
+	 *   没点名的槽不动；某个 Actor 上有一条对不上就整个跳过，一个槽都不改
 	 * 
 	 * 响应数据：
 	 * - applied_count: 成功应用的 Actor 数量
-	 * - actors: 受影响的 Actor 信息列表
+	 * - actors: 受影响的 Actor 信息列表，每个带 slots: [{slot_index, slot_name, previous, material}]
 	 * 
 	 * @param Payload 请求参数
 	 * @param RequestId 请求 ID
