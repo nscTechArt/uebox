@@ -24,7 +24,7 @@ import {
   newTeamState,
   type TeamState
 } from './teamSession'
-import { buildAcceptancePrompt, buildProducerBrief } from './teamPrompt'
+import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './teamPrompt'
 import { parseGoalCommand, parseVerdict } from '../goalLoop'
 import type { SubAgentResult } from '../../tools/builtin/task'
 
@@ -480,5 +480,15 @@ describe('提示词只写环境，不写方法论', () => {
     const prompt = buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })
     expect(prompt).toMatch(/Complete game loop/)
     expect(prompt).toMatch(/VERDICT: PASS/)
+  })
+
+  /** 2026-09-26：自动曝光下调灯，截图发白却归给「截图偏差」收工；验收员没看画面 */
+  it('制作人和队员都知道先锁曝光；验收员要在游戏跑着时看画面', () => {
+    const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
+    const member = buildMemberFraming({ name: 'a', persona: 'p', workspaceDir: 'w' }).join('\n')
+    for (const text of [brief, member]) expect(text).toMatch(/Metering Mode set to Manual/)
+    const prompt = buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })
+    expect(prompt).toMatch(/screenshots while the game is running/)
+    expect(prompt).toMatch(/Basic art is part of the bar/)
   })
 })

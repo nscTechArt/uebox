@@ -29,6 +29,17 @@ export const DELIVERY_STANDARD = [
   '- No obvious bugs: no crash, no freeze, no soft-lock; blueprints and C++ compile with zero errors.'
 ]
 
+/**
+ * 曝光。制作人和队员都拿到，因为谁都可能去截图看画面。
+ *
+ * 2026-09-26 科幻塔防：关卡美术在自动曝光下调了四轮灯，每次截图都「一片蓝、发白」，
+ * 最后认定是「截图自动曝光补偿，实际视口更暗」，存盘收工 —— 用户的视口一样亮。
+ * 自动曝光会把压暗的场景再拉亮，视口、截图、游戏各自收敛到不同的地方，
+ * 凭眼睛调灯没有基准。这是引擎的事实，不是做法：先锁住曝光，眼睛才可信。
+ */
+export const EXPOSURE_NOTE =
+  "- Unreal's auto exposure re-brightens a darkened scene and settles differently in the editor viewport, in screenshots and in the running game, so lighting judged by eye under it has no reference. Lock exposure before any lighting or look work — an unbound PostProcessVolume with Metering Mode set to Manual and Apply Physical Camera Exposure off — then tune Exposure Compensation until the scene reads well. Once it is locked, a screenshot shows what the player will see."
+
 export function buildProducerBrief(input: { objective: string; workspaceDir: string }): string {
   return [
     '',
@@ -48,6 +59,7 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     '- Teammates do not see this conversation. What they know is what you send them, what is in the workspace, and what is on the board.',
     '- The Unreal editor is one seat. Editor writes from different teammates queue automatically; anything off the editor — documents, code files, generated images and models, data tables — proceeds in parallel.',
     "- Build in a new project you create. Never modify the user's existing projects.",
+    EXPOSURE_NOTE,
     '- If the editor crashes, Unreal Box reopens the project on its own and tells you. Whatever was not saved is lost, so save as work lands.',
     '- Every time a teammate hands back work that changed something, Unreal Box snapshots the project. `team_snapshot` lists them and can roll the project back to one.',
     '- You are not done until `team_deliver` passes: an acceptance agent that did not build the game plays it against the bar above. On FAIL, fix what it found and deliver again. On BLOCKED, stop and tell the user what is needed.',
@@ -73,6 +85,7 @@ export function buildMemberFraming(input: {
     'A message that starts with `[team mail m…]` is from a teammate or the producer, not from the user. If it asks you something, answer with team_message and `reply_to` set to that id — someone may be waiting on it.',
     'Your tool list is fixed for your role and does not change while you work. If a tool you need is missing, say which one and why.',
     'Editor writes may wait in a queue while a teammate is using the editor. That is normal, not a failure.',
+    EXPOSURE_NOTE.slice(2),
     'You cannot talk to the user and cannot hire teammates.',
     'Your reply ends your turn: once you answer, you stop working until someone sends you more. So work through the whole assignment before you reply — do not stop to ask whether to continue. Stop early only when you are truly blocked, when the next step would spend money or delete things, or when your instructions contradict each other; then say exactly what you need. For smaller questions, make a sensible call, note it in your report, and keep going (or ask with team_message and carry on meanwhile).',
     '`team_status` shows the project as it really is — assets on disk, who is working on what, who holds which assets, what actually changed recently. Check it instead of trusting an old note.',
@@ -108,6 +121,7 @@ export function buildAcceptancePrompt(input: {
     '- Run it. Compile, play it in the editor, try the loop from start to a win or a loss and back again. A clean compile is not a game that works.',
     '- Judge against the game the team set out to make, not the one you would have made. 70–80% is the bar; rough edges are expected, a broken loop is not.',
     '- "Should work" and partial progress are not evidence.',
+    '- Look at it the way the player does: take screenshots while the game is running (`ue_screenshot` shoots the player view then; `show_ui: true` includes the HUD). Basic art is part of the bar — a scene that looks unfinished, washed out or unreadable fails that line whatever the report or the task board says. If the brightness looks off, check whether exposure is locked (a PostProcessVolume set to Manual) before blaming the screenshot.',
     '',
     'End your reply with exactly one line, nothing after it — one of:',
     'VERDICT: PASS — <what you played and saw>',
