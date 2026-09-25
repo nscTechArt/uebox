@@ -13,8 +13,16 @@ import { awaitProjectLive } from '../agent-v3/tools/adapted/project/awaitProject
 import { watchEditorCrashes, type EditorWatchOptions } from '../agent-v3/core/team/editorWatch'
 import { serviceManager } from '../services'
 import { projectManager } from '../services/project'
-import { ensureUnrealAgentLinkPlugin } from '../sqliteDataBase/ipc/project'
 import UnrealProcessDetector from '../utils/UnrealProcessDetector'
+
+/**
+ * 装插件那一步按需再加载：它所在的模块一加载就要连数据库、读应用设置，
+ * 静态引进来会让只想测 IPC 的单测也得先搭一整套 electron 环境。
+ */
+async function ensurePlugin(uproject: string): Promise<void> {
+  const { ensureUnrealAgentLinkPlugin } = await import('../sqliteDataBase/ipc/project')
+  await ensureUnrealAgentLinkPlugin(uproject)
+}
 
 /** 重开之后最多等插件多久。大工程冷启动（着色器编译）要好几分钟 */
 const RECONNECT_WAIT_MS = 8 * 60_000
@@ -65,7 +73,7 @@ export function startTeamEditorWatch(
       isRunning: async (uproject) =>
         (await UnrealProcessDetector.findRunningProjectByPath(uproject)) !== null,
       reopen: async (uproject) => {
-        await ensureUnrealAgentLinkPlugin(uproject)
+        await ensurePlugin(uproject)
         const error = await shell.openPath(uproject)
         if (error) throw new Error(error)
       },

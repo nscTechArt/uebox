@@ -334,6 +334,46 @@ describe('团队工具', () => {
     expect(formatMail('【留言】', [])).toBe('')
   })
 
+  it('快照：改了东西的活交回就自动存一份，编号写进回话；只读的活不存', async () => {
+    const saved: string[] = []
+    const snapshots = {
+      save: async (message: string) => {
+        saved.push(message)
+        return { id: `s${saved.length}`, at: 0, message }
+      },
+      list: async () => [],
+      rollback: async () => 'rolled'
+    }
+    let writes: Record<string, number> = { ue_spawn_actor: 2 }
+    const t = tools({
+      snapshots,
+      runMember: async () => ({ text: '好了', messageCount: 1, writeToolCalls: writes })
+    })
+    await t.team_hire!({ name: '地编', role: 'a' })
+    await expect(t.team_send!({ to: '地编', message: '搭灰盒\n细节' })).resolves.toContain(
+      '【快照】已存 s1（地编：搭灰盒）'
+    )
+    writes = {}
+    await t.team_send!({ to: '地编', message: '看看有没有问题' })
+    expect(saved).toEqual(['地编：搭灰盒'])
+    expect(Object.keys(t)).toContain('team_snapshot')
+  })
+
+  it('回滚要给编号；没接快照的会话没有这个工具', async () => {
+    const withSnapshots = tools({
+      snapshots: {
+        save: async () => null,
+        list: async () => [],
+        rollback: async (id) => `已退回快照 ${id}。`
+      }
+    })
+    await expect(withSnapshots.team_snapshot!({ action: 'rollback' })).rejects.toThrow(/要给 id/)
+    await expect(withSnapshots.team_snapshot!({ action: 'rollback', id: 'abc1' })).resolves.toBe(
+      '已退回快照 abc1。'
+    )
+    expect(Object.keys(tools())).not.toContain('team_snapshot')
+  })
+
   it('任务板渲染：计数、负责人、证据', () => {
     const text = renderBoard([
       { id: 't1', title: '灰盒', status: 'done', owner: '地编', evidence: 'a.png', updatedAt: 0 },

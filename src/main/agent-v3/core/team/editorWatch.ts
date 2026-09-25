@@ -26,6 +26,27 @@
 
 import { projectPathKey } from '../projectPathKey'
 
+/**
+ * 盒子自己要关编辑器的时候（回滚快照）先在这里登记一声，看护就不会把那次断开
+ * 当成崩溃、抢着再开一个。按工程路径记，到点作废。
+ */
+const expectedCloses = new Map<string, number>()
+
+export function expectEditorClose(projectDir: string, withinMs = 2 * 60_000): void {
+  expectedCloses.set(projectPathKey(projectDir), Date.now() + withinMs)
+}
+
+function isExpectedClose(projectDir: string): boolean {
+  const key = projectPathKey(projectDir)
+  const until = expectedCloses.get(key)
+  if (until === undefined) return false
+  if (until < Date.now()) {
+    expectedCloses.delete(key)
+    return false
+  }
+  return true
+}
+
 export interface EditorWatchDeps {
   /** 订阅 WebSocket 事件，返回退订函数（`websocketService.onEvent`） */
   onEvent: (
@@ -84,6 +105,7 @@ export function watchEditorCrashes(deps: EditorWatchDeps, options: EditorWatchOp
     const projectDir = byConnection.get(connectionId)
     byConnection.delete(connectionId)
     if (graceful.delete(connectionId) || !projectDir || !deps.isOurs(projectDir)) return
+    if (isExpectedClose(projectDir)) return
 
     const key = projectPathKey(projectDir)
     if (recovering.has(key)) return

@@ -48,6 +48,7 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     '- The Unreal editor is one seat. Editor writes from different teammates queue automatically; anything off the editor — documents, code files, generated images and models, data tables — proceeds in parallel.',
     "- Build in a new project you create. Never modify the user's existing projects.",
     '- If the editor crashes, Unreal Box reopens the project on its own and tells you. Whatever was not saved is lost, so save as work lands.',
+    '- Every time a teammate hands back work that changed something, Unreal Box snapshots the project. `team_snapshot` lists them and can roll the project back to one.',
     '- You are not done until `team_deliver` passes: an acceptance agent that did not build the game plays it against the bar above. On FAIL, fix what it found and deliver again. On BLOCKED, stop and tell the user what is needed.',
     '- After it passes, reply with a delivery report: what was built, how to play it, known gaps, and a polish list for the user — where to start and which parameters to tune.',
     '</team_mode>'

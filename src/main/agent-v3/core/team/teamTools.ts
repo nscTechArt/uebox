@@ -1,7 +1,8 @@
 /**
- * 工作室模式的四个工具：招人、派活、任务板、交付。
+ * 工作室模式的工具：招人、派活、任务板、交付、快照，外加队员用的留言。
  *
- * 制作人拿全部四个；队员只拿任务板（它们不招人、不派活、不交付）。
+ * 制作人拿招人、派活、任务板、交付、快照；队员只拿任务板和留言
+ * （它们不招人、不派活、不交付，也不能回滚整个工程）。
  *
  * ## 为什么队员是「有记忆的子 Agent」而不是一条条独立会话
  *
@@ -25,6 +26,7 @@ import {
 } from '../../tools/builtin/task'
 import { parseVerdict, type GoalVerdict } from '../goalLoop'
 import { formatInterruptedWrites, WriteLedger } from '../writeLedger'
+import { snapshotMessage, type TeamSnapshots } from './snapshots'
 import {
   PRODUCER,
   TASK_STATUSES,
@@ -40,7 +42,8 @@ export const TEAM_TOOL_NAMES = [
   'team_send',
   'team_board',
   'team_deliver',
-  'team_message'
+  'team_message',
+  'team_snapshot'
 ] as const
 
 export interface RunMemberInput {
@@ -71,6 +74,8 @@ export interface TeamToolDeps {
   }) => Promise<string>
   /** 验收有了结论。宿主用它记「这一局有没有过验收」 */
   onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
+  /** 工程快照。没有（比如测试里）就不给 `team_snapshot`、也不自动存 */
+  snapshots?: TeamSnapshots
 }
 
 // ── 任务板 ──────────────────────────────────────────────────────────────
@@ -293,9 +298,11 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
         const result = await run
         // 队员们留给制作人的话，跟着这一件活的回话一起带回去
         const toProducer = formatMail('【队员给你的留言】', await deps.store.takeInbox(PRODUCER))
+        const snapshot = await autoSnapshot(deps, member.name, message, result)
         return {
           text:
             `${member.name} 回话：\n${result.text}\n\n${formatWriteAudit(result)}` +
+            (snapshot ? `\n${snapshot}` : '') +
             (toProducer ? `\n\n${toProducer}` : ''),
           details: result
         }
@@ -357,6 +364,79 @@ export function createMessageTool(store: TeamStore, from: string): UnrealAgentTo
   })
 }
 
+// ── 快照 ────────────────────────────────────────────────────────────────
+
+/**
+ * 队员交回一件改了东西的活，就存一份快照。只读的、什么都没写的不存 ——
+ * 那样的快照和上一份一模一样，只会把列表撑长。
+ *
+ * 存失败（没装 git、磁盘满）不影响这件活本身，只在回话里说一句。
+ */
+async function autoSnapshot(
+  deps: TeamToolDeps,
+  who: string,
+  what: string,
+  result: SubAgentResult
+): Promise<string> {
+  if (!deps.snapshots || Object.keys(result.writeToolCalls ?? {}).length === 0) return ''
+  try {
+    const snapshot = await deps.snapshots.save(snapshotMessage(who, what))
+    return snapshot ? `【快照】已存 ${snapshot.id}（${snapshot.message}）` : ''
+  } catch (error) {
+    return `【快照】这次没存上：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+function createSnapshotTool(snapshots: TeamSnapshots): UnrealAgentTool<unknown> {
+  const snapshotInput = z.object({
+    action: z
+      .enum(['list', 'save', 'rollback'])
+      .describe('list = 看最近的快照；save = 现在存一份；rollback = 把工程退回某一份'),
+    id: z.string().optional().describe('rollback 时给：list 里的快照编号'),
+    note: z.string().optional().describe('save 时给：这一份是什么状态')
+  })
+
+  return defineTool<typeof snapshotInput, unknown>({
+    name: 'team_snapshot',
+    namespace: 'core',
+    // 回滚会关掉编辑器、改写工程文件
+    risk: 'destructive',
+    concurrency: 'sequential',
+    description:
+      '工程快照。每个队员交回一件改了东西的活，盒子都会自动存一份（回话里有编号）。' +
+      'rollback 把工程的源文件（Content、Config、Source……）整个退回那一份：会先把当前状态也存一份（能反悔），' +
+      '然后关掉编辑器、退回文件、重新打开工程。编辑器里没保存的改动会丢，正在动编辑器的队员会失败 —— ' +
+      '回滚前先让大家停手。',
+    input: snapshotInput,
+    execute: async ({ action, id, note }, ctx) => {
+      if (action === 'list') {
+        const list = await snapshots.list(20)
+        return {
+          text: list.length
+            ? list
+                .map(
+                  (s) =>
+                    `- ${s.id} ${new Date(s.at).toLocaleString('zh-CN', { hour12: false })} ${s.message}`
+                )
+                .join('\n')
+            : '还没有快照。',
+          details: list
+        }
+      }
+      if (action === 'save') {
+        const snapshot = await snapshots.save(snapshotMessage('制作人', note ?? '手动快照'))
+        return {
+          text: snapshot ? `已存快照 ${snapshot.id}。` : '和上一份相比没有变化，没有新存。',
+          details: snapshot
+        }
+      }
+      if (!id) throw new Error('rollback 要给 id（先用 list 看编号）')
+      const text = await snapshots.rollback(id, (line) => ctx.report({ text: line }))
+      return { text, details: { id } }
+    }
+  })
+}
+
 // ── 交付 ────────────────────────────────────────────────────────────────
 
 function createDeliverTool(deps: TeamToolDeps): UnrealAgentTool<GoalVerdict | null> {
@@ -410,6 +490,7 @@ export function createTeamTools(
     createHireTool(deps, now),
     createSendTool(deps),
     createBoardTool(deps.store),
-    createDeliverTool(deps)
+    createDeliverTool(deps),
+    ...(deps.snapshots ? [createSnapshotTool(deps.snapshots)] : [])
   ] as unknown as UnrealAgentTool<never>[]
 }

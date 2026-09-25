@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildCrashNotice,
+  expectEditorClose,
   watchEditorCrashes,
   type EditorWatchDeps,
   type EditorWatchEvent
@@ -114,6 +115,14 @@ describe('编辑器看护', () => {
     const h = harness({ waitLive: async () => false })
     await h.fire('system.disconnected', {}, 'c1')
     expect(h.events.map((e) => e.kind)).toEqual(['crashed', 'gave-up'])
+  })
+
+  it('盒子自己关的（回滚快照）：事先登记过，就不当崩溃', async () => {
+    const h = harness()
+    expectEditorClose('I:/Game')
+    await h.fire('system.disconnected', {}, 'c1')
+    expect(h.reopened).toEqual([])
+    expect(h.events).toEqual([])
   })
 
   it('停了就退订', () => {

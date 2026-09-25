@@ -118,6 +118,7 @@ import { createTeamStore } from '../agent-v3/core/team/teamStore'
 import type { TeamStateView } from '../../shared/agentTeam'
 import { buildCrashNotice, type EditorWatchEvent } from '../agent-v3/core/team/editorWatch'
 import { startTeamEditorWatch } from './teamEditorWatch'
+import { createTeamSnapshots } from './teamSnapshots'
 import {
   applyVerdict,
   createTeamGate,
@@ -420,6 +421,7 @@ async function prepareTeam(
   ctx.team = {
     objective: team.objective,
     store,
+    snapshots: createTeamSnapshots(),
     onVerdict: async (verdict) => {
       options.team = applyVerdict(options.team ?? team, verdict)
       await saveExecutionOptions(ctx.sessionId, options)

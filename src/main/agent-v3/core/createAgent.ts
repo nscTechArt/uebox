@@ -78,6 +78,7 @@ import { releaseAll, runWithLockOwner } from './assetLock'
 import { AUDITOR_TOOLS, type GoalVerdict } from './goalLoop'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
 import { memberFileBase, type TeamMember, type TeamStore } from './team/teamStore'
+import type { TeamSnapshots } from './team/snapshots'
 import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
 import { pacedStreamFn } from './team/requestGate'
 
@@ -242,6 +243,8 @@ export interface SessionContext {
     store: TeamStore
     /** 验收有了结论。宿主用它记「这一局过没过验收」 */
     onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
+    /** 工程快照（存、列、回滚）。宿主提供，回滚要关编辑器再打开 */
+    snapshots?: TeamSnapshots
   }
   /**
    * 这个子 agent 是工作室里的一个队员：人设进系统提示词，手上多一个任务板工具。
@@ -1155,7 +1158,8 @@ function teamToolsFor(
       })
       return result.text
     },
-    ...(team.onVerdict ? { onVerdict: team.onVerdict } : {})
+    ...(team.onVerdict ? { onVerdict: team.onVerdict } : {}),
+    ...(team.snapshots ? { snapshots: team.snapshots } : {})
   })
 }
 
