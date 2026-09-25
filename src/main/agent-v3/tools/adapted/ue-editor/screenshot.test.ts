@@ -591,3 +591,34 @@ describe('拍整个编辑器窗口（show_ui=true）', () => {
     expect(callRequest).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * 2026-09-26 科幻塔防：关卡美术在自动曝光下调了四轮灯，截图每张都发白，
+ * 最后把它归给「截图偏差」收工。插件现在回这一帧用的是哪种曝光。
+ */
+describe('曝光锁没锁', () => {
+  it('自动曝光：当场说明暗没有基准，并给出锁曝光的做法', async () => {
+    callRequest.mockResolvedValue({ ...EDITOR_SHOT, exposure: 'auto', exposure_source: 'default' })
+    const result = await run({})
+    expect(result.exposure).toBe('auto')
+    expect(String(result.message)).toMatch(/自动曝光[\s\S]*Metering Mode = Manual/)
+  })
+
+  it('锁住了：说一句明暗可信', async () => {
+    callRequest.mockResolvedValue({
+      ...EDITOR_SHOT,
+      exposure: 'manual',
+      exposure_source: 'post_process_volume'
+    })
+    const result = await run({})
+    expect(String(result.message)).toContain('曝光已锁')
+    expect(String(result.message)).not.toContain('自动曝光')
+  })
+
+  it('老插件不回曝光时一个字都不加', async () => {
+    callRequest.mockResolvedValue(EDITOR_SHOT)
+    const result = await run({})
+    expect(result).not.toHaveProperty('exposure')
+    expect(String(result.message)).not.toMatch(/曝光/)
+  })
+})

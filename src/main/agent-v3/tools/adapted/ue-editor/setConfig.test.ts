@@ -113,3 +113,65 @@ describe('ue_set_config', () => {
     expect(String(r.message)).toContain('未经引擎确认')
   })
 })
+
+/**
+ * 2026-09-26 科幻塔防：默认 GameMode 设了三遍，工程的 DefaultEngine.ini 里一个字都没有 ——
+ * 老插件写的是本机那一层（Saved/Config），不进打包。新插件写工程的 Default*.ini 并从磁盘读回。
+ */
+describe('ue_set_config 写工程设置文件', () => {
+  const GM = {
+    config_name: 'Engine',
+    section: '/Script/EngineSettings.GameMapsSettings',
+    key: 'GlobalDefaultGameMode',
+    value: '/Game/Core/BP_GM.BP_GM_C'
+  }
+
+  it('走设置类写进 Default*.ini：说清写到哪个文件、编辑器里已经生效', async () => {
+    callRequest.mockResolvedValue({
+      ...GM,
+      requested_value: GM.value,
+      read_back: true,
+      value: GM.value,
+      persisted: true,
+      file_path: 'I:/Proj/Config/DefaultEngine.ini',
+      via: 'settings_object',
+      applied_live: true
+    })
+    const r = await run(GM)
+    expect(r.success).toBe(true)
+    expect(String(r.message)).toContain('DefaultEngine.ini')
+    expect(String(r.message)).toContain('已经生效')
+  })
+
+  it('规范写法和请求不逐字相同（true → True）也算成功：插件已按规范写法核对', async () => {
+    callRequest.mockResolvedValue({
+      ...BASE,
+      requested_value: 'true',
+      read_back: true,
+      value: 'True',
+      persisted: true,
+      file_path: 'I:/Proj/Config/DefaultEngine.ini',
+      via: 'settings_object',
+      applied_live: true
+    })
+    const r = await run({ ...INPUT, value: 'true' })
+    expect(r.success).toBe(true)
+    expect(r.value).toBe('True')
+  })
+
+  it('只写了文件里的一个键：说清已加载的设置要重启才看得到', async () => {
+    callRequest.mockResolvedValue({
+      ...BASE,
+      requested_value: 'True',
+      read_back: true,
+      value: 'True',
+      persisted: true,
+      file_path: 'I:/Proj/Config/DefaultEngine.ini',
+      via: 'ini',
+      applied_live: false
+    })
+    const r = await run()
+    expect(r.success).toBe(true)
+    expect(String(r.message)).toContain('重启编辑器')
+  })
+})

@@ -186,6 +186,30 @@ interface ScreenshotResponse {
   /** 拍这一帧用的相机位置，单位厘米 */
   camera_location?: { x: number; y: number; z: number }
   camera_rotation?: { pitch: number; yaw: number; roll: number }
+  /** 这一帧的曝光锁没锁。老插件不回 */
+  exposure?: 'manual' | 'auto'
+  /** 谁定的：viewport / post_process_volume / project_setting / default */
+  exposure_source?: string
+}
+
+/**
+ * 曝光锁没锁，说给模型听。
+ *
+ * 自动曝光下这张图的明暗没有基准：截图、视口、游戏各自收敛到不同亮度，
+ * 压暗的场景还会被拉回来。2026-09-26 科幻塔防里关卡美术不知道这一点，
+ * 调了四轮灯，最后把发白归给「截图偏差」收工。插件现在回这一帧用的是哪种曝光，
+ * 自动的就当场说；锁住的说一句明暗可信。老插件不回就一个字不加。
+ */
+function describeExposure(response: ScreenshotResponse): string {
+  if (response.exposure === 'manual') {
+    return '\n曝光已锁（手动），这张图的明暗就是玩家看到的。'
+  }
+  if (response.exposure !== 'auto') return ''
+  return (
+    '\n⚠️ 这一帧是**自动曝光**：明暗会自己收敛，和视口、游戏里不一定一样，压暗的场景也会被拉亮。' +
+    '要判断亮度、调灯光，先放一个无边界 PostProcessVolume（Metering Mode = Manual、' +
+    '关 Apply Physical Camera Exposure）锁住曝光，再调 Exposure Compensation。'
+  )
 }
 
 /**
@@ -715,12 +739,14 @@ PostProcessVolume），截图、视口、游戏各自收敛到不同亮度，还
             ...(response.camera_source ? { camera_source: response.camera_source } : {}),
             ...(response.camera_location ? { camera_location: response.camera_location } : {}),
             ...(response.camera_rotation ? { camera_rotation: response.camera_rotation } : {}),
+            ...(response.exposure ? { exposure: response.exposure } : {}),
             message:
               (response.saved
                 ? `截图已成功获取（${response.width}x${response.height}${scope}）`
                 : `截图已获取但是保存失败: ${response.save_error}`) +
               readiness +
               camera +
+              describeExposure(response) +
               uiLayer
           }
         }

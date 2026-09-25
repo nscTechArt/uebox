@@ -45,6 +45,14 @@ interface SetConfigResponse {
   requested_value?: string
   /** 刷盘后配置文件是否已不脏（= 真写到磁盘上了） */
   persisted?: boolean
+  /**
+   * 新插件（2026-09-26 起）才有：怎么写进工程的 Default*.ini 的。
+   * settings_object = 走设置类，和项目设置界面同一条路，编辑器里当场生效；
+   * ini = 只写了文件里这一个键。有这个字段时 value / persisted 都是**从磁盘上的
+   * Default*.ini 读回来**的，插件已经按引擎的规范写法核对过。
+   */
+  via?: 'settings_object' | 'ini'
+  applied_live?: boolean
 }
 
 // ============================================================================
@@ -79,7 +87,8 @@ export function createSetConfigTool() {
 - bCreateCompressedCookedPackages: 是否创建压缩的 Cooked 包（"True"/"False"）
 
 【注意事项】：
-- 修改配置后可能需要重启编辑器才能生效
+- 写的是工程的 Config/Default*.ini（跟着工程走、进打包），EditorPerProjectUserSettings 除外（本机设置）
+- 返回里 applied_live=false 时，已经加载的设置要重启编辑器才会看到
 - 某些配置项修改后需要重新构建项目`,
 
     inputSchema: SetConfigSchema,
@@ -126,6 +135,32 @@ export function createSetConfigTool() {
               success: false,
               error: `设置配置失败：${msg}${readBackNote}`,
               code
+            }
+          }
+
+          // 新插件：写进工程的 Default*.ini，并从磁盘读回、按引擎的规范写法核对过。
+          // 规范写法可能和请求不逐字相同（true → True），所以这里信插件的 persisted
+          if (response.via) {
+            if (response.persisted !== true) {
+              return {
+                success: false,
+                error: `设置配置失败：[${section}] ${key} 没写进 ${response.file_path}`
+              }
+            }
+            return {
+              success: true,
+              config_name: response.config_name,
+              section: response.section,
+              key: response.key,
+              value: response.value,
+              file_path: response.file_path,
+              verified: true,
+              applied_live: response.applied_live === true,
+              message:
+                `配置项 "${key}" 已写进工程设置文件 ${response.file_path}，读回的值：${response.value}。` +
+                (response.applied_live
+                  ? '编辑器里已经生效。'
+                  : '已经加载的设置要重启编辑器才会看到。')
             }
           }
 

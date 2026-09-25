@@ -49,6 +49,9 @@
 #include "Misc/Paths.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Interfaces/Interface_PostProcessVolume.h"
+#include "HAL/IConsoleManager.h"
 // BuildProjectInfo 里的 runMode 用 FApp::IsUnattended / FApp::CanEverRender，
 // IsRunningCommandlet 在 CoreGlobals。两个都在 Core 模块下，不新增模块依赖
 #include "Misc/App.h"
@@ -428,7 +431,89 @@ struct FUALSceneCaptureSetup
 	 * fallback = 没找到视口，用的是兜底机位，**画面内容不可据此下结论**。
 	 */
 	const TCHAR* CameraSource = TEXT("viewport");
+
+	/**
+	 * 这一帧的曝光是锁住的还是自动的，以及是谁定的。**也必须回给调用方**。
+	 *
+	 * 自动曝光下截图、视口、游戏各自收敛到不同亮度，还会把压暗的场景拉回来。
+	 * 2026-09-26 科幻塔防：关卡美术在自动曝光下调了四轮灯，每张图都发白，最后认定
+	 * 「是截图的偏差」收工 —— 它不知道这张图是不是自动曝光，只能猜。
+	 *
+	 * Exposure：manual（锁住了，明暗可信）/ auto。
+	 * ExposureSource：viewport（编辑器视口自己的固定曝光）/ post_process_volume /
+	 * project_setting（项目设置里关了自动曝光或设成手动）/ default（引擎默认的自动曝光）。
+	 * 相机组件自己的后期不在这里看 —— PIE 时玩家相机若另设了曝光，以这里为下限参考。
+	 */
+	const TCHAR* Exposure = TEXT("auto");
+	const TCHAR* ExposureSource = TEXT("default");
 };
+
+/**
+ * 这台相机此刻吃到的曝光设置：先看编辑器视口的固定曝光，再看罩住机位的后期盒子
+ * （优先级最高的那个说了算），最后看项目设置。
+ */
+static void UAL_ResolveExposure(
+	UWorld* World,
+	const FVector& ViewLocation,
+	const FEditorViewportClient* SourceViewport,
+	bool bEditorWorldCapture,
+	FUALSceneCaptureSetup& OutSetup)
+{
+	if (bEditorWorldCapture && SourceViewport && SourceViewport->ExposureSettings.bFixed)
+	{
+		OutSetup.Exposure = TEXT("manual");
+		OutSetup.ExposureSource = TEXT("viewport");
+		return;
+	}
+
+	bool bFound = false;
+	float BestPriority = 0.f;
+	bool bBestManual = false;
+	for (IInterface_PostProcessVolume* Volume : World->PostProcessVolumes)
+	{
+		if (!Volume)
+		{
+			continue;
+		}
+		const FPostProcessVolumeProperties Props = Volume->GetProperties();
+		if (!Props.bIsEnabled || Props.BlendWeight <= 0.f || !Props.Settings)
+		{
+			continue;
+		}
+		if (!Props.bIsUnbound && !Volume->EncompassesPoint(ViewLocation, 0.f, nullptr))
+		{
+			continue;
+		}
+		const FPostProcessSettings& S = *Props.Settings;
+		const bool bSaysMethod = S.bOverride_AutoExposureMethod;
+		const bool bLocksRange = S.bOverride_AutoExposureMinBrightness && S.bOverride_AutoExposureMaxBrightness
+			&& FMath::IsNearlyEqual(S.AutoExposureMinBrightness, S.AutoExposureMaxBrightness);
+		if (!bSaysMethod && !bLocksRange)
+		{
+			continue;
+		}
+		if (!bFound || Props.Priority > BestPriority)
+		{
+			bFound = true;
+			BestPriority = Props.Priority;
+			bBestManual = (bSaysMethod && S.AutoExposureMethod == EAutoExposureMethod::AEM_Manual) || bLocksRange;
+		}
+	}
+	if (bFound)
+	{
+		OutSetup.Exposure = bBestManual ? TEXT("manual") : TEXT("auto");
+		OutSetup.ExposureSource = TEXT("post_process_volume");
+		return;
+	}
+
+	static IConsoleVariable* DefaultAuto = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure"));
+	static IConsoleVariable* DefaultMethod = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DefaultFeature.AutoExposure.Method"));
+	if ((DefaultAuto && DefaultAuto->GetInt() == 0) || (DefaultMethod && DefaultMethod->GetInt() == 2))
+	{
+		OutSetup.Exposure = TEXT("manual");
+		OutSetup.ExposureSource = TEXT("project_setting");
+	}
+}
 
 /**
  * 建好 RenderTarget 和 SceneCapture 组件，摆好机位和曝光。**不渲染**。
@@ -525,6 +610,7 @@ static bool UAL_SetupSceneCapture(
 	// 调用方显式给了机位（PIE 玩家视角）时，找没找到视口都无关紧要。
 	OutSetup.CameraSource =
 		InViewLocation.IsSet() ? TEXT("player") : (bFoundViewport ? TEXT("viewport") : TEXT("fallback"));
+	UAL_ResolveExposure(World, ViewLocation, SourceViewport, bEditorWorldCapture, OutSetup);
 
 	// RenderTarget：RGBA8_SRGB 出来的就是常规 8 位色，直接能编码成 PNG
 	UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
@@ -978,6 +1064,9 @@ static bool UAL_TickAsyncCapture(TSharedPtr<FUALAsyncCaptureJob> Job)
 	// 对着要看的东西（顺带也是一次单位核对：机位和物体不在同一个数量级
 	// 就说明有一边搞错了米和厘米）。
 	Data->SetStringField(TEXT("camera_source"), Job->Setup.CameraSource);
+	// 曝光锁没锁：决定这张图的明暗能不能当真（见 FUALSceneCaptureSetup::Exposure）
+	Data->SetStringField(TEXT("exposure"), Job->Setup.Exposure);
+	Data->SetStringField(TEXT("exposure_source"), Job->Setup.ExposureSource);
 	TSharedPtr<FJsonObject> CameraLocation = MakeShared<FJsonObject>();
 	CameraLocation->SetNumberField(TEXT("x"), Job->Setup.ViewLocation.X);
 	CameraLocation->SetNumberField(TEXT("y"), Job->Setup.ViewLocation.Y);
@@ -1673,6 +1762,47 @@ void FUAL_EditorCommands::Handle_GetConfig(const TSharedPtr<FJsonObject>& Payloa
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 }
 
+namespace UALSetConfig
+{
+	/**
+	 * 节名是 `/Script/<模块>.<类>` 时，找那个类和键对应的 config 属性。
+	 *
+	 * 键按属性名认，也按 `ConsoleVariable` 元数据认 —— RendererSettings 这类设置在 ini 里
+	 * 的键是 `r.DefaultFeature.AutoExposure`，属性名却是 `bDefaultFeatureAutoExposure`。
+	 */
+	static FProperty* FindConfigProperty(const FString& Section, const FString& Key, UClass*& OutClass)
+	{
+		OutClass = nullptr;
+		if (!Section.StartsWith(TEXT("/Script/")))
+		{
+			return nullptr;
+		}
+		UClass* Class = FindObject<UClass>(nullptr, *Section);
+		if (!Class)
+		{
+			return nullptr;
+		}
+		for (TFieldIterator<FProperty> It(Class); It; ++It)
+		{
+			FProperty* Prop = *It;
+			if (!Prop->HasAnyPropertyFlags(CPF_Config))
+			{
+				continue;
+			}
+			bool bMatches = Prop->GetName().Equals(Key, ESearchCase::IgnoreCase);
+#if WITH_EDITORONLY_DATA
+			bMatches = bMatches || Prop->GetMetaData(TEXT("ConsoleVariable")).Equals(Key, ESearchCase::IgnoreCase);
+#endif
+			if (bMatches)
+			{
+				OutClass = Class;
+				return Prop;
+			}
+		}
+		return nullptr;
+	}
+}
+
 void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 {
 	FString ConfigName;
@@ -1727,9 +1857,118 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 		return;
 	}
 
-	// 设置配置
+	/*
+	 * 工程设置写进工程的 Config/Default*.ini，不写 GEngineIni。
+	 *
+	 * GEngineIni 在编辑器里是 Saved/Config/<平台>Editor/Engine.ini —— 本机的运行时那一层，
+	 * 不进版本管理、不进打包。2026-09-26 科幻塔防真机：AI 把默认 GameMode 设了三遍，
+	 * DefaultEngine.ini 里一个字都没有（打包版照样用模板的设置）；5.5 上连 Saved 那份
+	 * 都没写成，回执报「写盘失败」，模型以为是文件只读。项目设置界面改的是 Default*.ini，
+	 * 这里跟它走同一条路：
+	 *
+	 * 1. 节名对得上一个设置类、键对得上它的 config 属性（数组除外）：改类默认对象、
+	 *    PostEditChangeProperty、UpdateSinglePropertyInConfigFile。编辑器里当场生效 ——
+	 *    默认 GameMode 不用重启就换了，r.xxx 由 DeveloperSettings 推到控制台变量。
+	 * 2. 其余的键：只把这一个键写进 Default*.ini（UpdateSinglePropertyInSection，
+	 *    文件里其他内容原样保留），同时写进内存里的配置，这次会话读得到。
+	 *
+	 * 写完从磁盘重新读一遍 Default*.ini，读回来的不是写进去的值就照实报失败。
+	 * EditorPerProjectUserSettings 本来就是每人一份的本机设置，走下面原来那条路。
+	 */
+	if (!ConfigName.Equals(TEXT("EditorPerProjectUserSettings"), ESearchCase::IgnoreCase))
+	{
+		FString Canonical = TEXT("Editor");
+		if (ConfigName.Equals(TEXT("Engine"), ESearchCase::IgnoreCase))
+		{
+			Canonical = TEXT("Engine");
+		}
+		else if (ConfigName.Equals(TEXT("Game"), ESearchCase::IgnoreCase))
+		{
+			Canonical = TEXT("Game");
+		}
+
+		FString DefaultIni;
+		FString Expected = Value;
+		FString Via;
+		UClass* SettingsClass = nullptr;
+		FProperty* Prop = UALSetConfig::FindConfigProperty(Section, Key, SettingsClass);
+		if (Prop && !Prop->IsA(FArrayProperty::StaticClass()))
+		{
+			UObject* CDO = SettingsClass->GetDefaultObject();
+			if (!FBlueprintEditorUtils::PropertyValueFromString(Prop, Value, reinterpret_cast<uint8*>(CDO), CDO))
+			{
+				UAL_CommandUtils::SendError(RequestId, 400,
+					FString::Printf(TEXT("project.set_config: \"%s\" is not a valid value for [%s] %s (type %s)"),
+						*Value, *Section, *Key, *Prop->GetCPPType()));
+				return;
+			}
+			FPropertyChangedEvent Changed(Prop, EPropertyChangeType::ValueSet);
+			CDO->PostEditChangeProperty(Changed);
+			DefaultIni = CDO->GetDefaultConfigFilename();
+			CDO->UpdateSinglePropertyInConfigFile(Prop, DefaultIni);
+			// 引擎规范化后的写法（布尔是 True/False、软引用是完整路径），拿它和磁盘上的比
+			FBlueprintEditorUtils::PropertyValueToString(Prop, reinterpret_cast<const uint8*>(CDO), Expected, CDO);
+			Via = TEXT("settings_object");
+		}
+		else
+		{
+			DefaultIni = FPaths::ConvertRelativePathToFull(
+				FPaths::ProjectConfigDir() / FString::Printf(TEXT("Default%s.ini"), *Canonical));
+			FConfigFile Single;
+			Single.SetString(*Section, *Key, *Value);
+			Single.UpdateSinglePropertyInSection(*DefaultIni, *Key, *Section);
+			GConfig->SetString(*Section, *Key, *Value, ConfigFileName);
+			Via = TEXT("ini");
+		}
+
+		FConfigFile OnDisk;
+		OnDisk.Read(DefaultIni);
+		FString OnDiskValue;
+		const bool bOnDisk = OnDisk.GetString(*Section, *Key, OnDiskValue);
+		const bool bPersistedToDefault = bOnDisk && OnDiskValue.Equals(Expected, ESearchCase::IgnoreCase);
+
+		TSharedPtr<FJsonObject> DefaultResult = MakeShared<FJsonObject>();
+		DefaultResult->SetStringField(TEXT("config_name"), ConfigName);
+		DefaultResult->SetStringField(TEXT("section"), Section);
+		DefaultResult->SetStringField(TEXT("key"), Key);
+		DefaultResult->SetStringField(TEXT("requested_value"), Value);
+		DefaultResult->SetBoolField(TEXT("read_back"), bOnDisk);
+		if (bOnDisk)
+		{
+			DefaultResult->SetStringField(TEXT("value"), OnDiskValue);
+		}
+		DefaultResult->SetBoolField(TEXT("persisted"), bPersistedToDefault);
+		DefaultResult->SetStringField(TEXT("file_path"), DefaultIni);
+		DefaultResult->SetStringField(TEXT("via"), Via);
+		DefaultResult->SetBoolField(TEXT("applied_live"), Via == TEXT("settings_object"));
+
+		if (!bPersistedToDefault)
+		{
+			FString Why;
+			if (IFileManager::Get().IsReadOnly(*DefaultIni))
+			{
+				Why = TEXT(" (the file is read-only, probably locked by source control)");
+			}
+			else if (bOnDisk)
+			{
+				Why = FString::Printf(TEXT(" (it reads back \"%s\")"), *OnDiskValue);
+			}
+			UAL_CommandUtils::SendError(
+				RequestId, 500,
+				FString::Printf(TEXT("project.set_config: [%s] %s was not written to %s%s"),
+					*Section, *Key, *DefaultIni, *Why),
+				DefaultResult);
+			return;
+		}
+
+		UE_LOG(LogUALEditor, Log, TEXT("project.set_config: %s [%s] %s = %s (via %s)"), *DefaultIni, *Section, *Key, *OnDiskValue, *Via);
+		UAL_CommandUtils::SendResponse(RequestId, 200, DefaultResult);
+		return;
+	}
+
+	// 设置配置（EditorPerProjectUserSettings：本机那一层）
 	GConfig->SetString(*Section, *Key, *Value, ConfigFileName);
-	
+
 	// 刷新到磁盘。Flush 没有返回值（5.0-5.4 都是 void），写盘失败的唯一痕迹是
 	// FConfigFile::Dirty 没被清掉 —— WriteInternal 末尾是 `Dirty = !bResult`。
 	// -nowrite / NoSave 的文件也会留着 Dirty，那种情况同样算「没落盘」，照实说
