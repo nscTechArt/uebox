@@ -13,8 +13,16 @@ const { getAllTags, getAllTagGroups, getAssetCountsByTag } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../../sqliteDataBase', () => ({
-  getPublicDatabase: () => ({}),
-  getVaultDatabase: () => ({})
+  getPublicDatabase: () => ({})
+}))
+/** 两个保管库：计数要跨库相加，不能只看活跃库 */
+vi.mock('./vaultScope', () => ({
+  runAcrossVaults: async (_scope: unknown, op: (db: unknown) => unknown) => ({
+    runs: [
+      { vault: { id: 'v1', name: '默认保管库' }, value: await op({}) },
+      { vault: { id: 'v2', name: 'AIGC 资产库' }, value: [] }
+    ]
+  })
 }))
 vi.mock('../../../../sqliteDataBase/models/tag', () => ({ getAllTags }))
 vi.mock('../../../../sqliteDataBase/models/tagGroup', () => ({ getAllTagGroups }))
@@ -48,6 +56,11 @@ describe('list_tags', () => {
     expect(tags[0]).toMatchObject({ assets: 12, group: '用途' })
     // 一个资产都没挂的标签算 0，不是 undefined —— 它正是整理时该被提议合并的那种
     expect(tags[2].assets).toBe(0)
+  })
+
+  it('计数是所有保管库合计：活跃库里没打标签，别的库里有，也不能报 0', async () => {
+    const tags = (await run({})).tags as Array<{ name: string; assets: number }>
+    expect(tags.find((t) => t.name === '角色')?.assets).toBe(12)
   })
 
   it('没分组的标签不硬塞一个组名', async () => {

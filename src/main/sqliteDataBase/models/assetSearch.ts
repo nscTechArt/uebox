@@ -226,18 +226,17 @@ export function buildAssetQueryParts(
   const userId = criteria.userId ?? null
   const vaultId = criteria.vaultId ?? null
   if (criteria.favoriteStatus && criteria.favoriteStatus !== 'all') {
-    if (criteria.favoriteStatus === 'favorite') {
-      joins.push(
-        'INNER JOIN asset_favorites afav ON afav.assetKey = ad.assetKey AND (afav.userId IS ? OR afav.userId IS NULL) AND (afav.vaultId IS ? OR afav.vaultId IS NULL)'
-      )
-      joinParams.push(userId, vaultId)
-    } else {
-      joins.push(
-        'LEFT JOIN asset_favorites afav ON afav.assetKey = ad.assetKey AND (afav.userId IS ? OR afav.userId IS NULL) AND (afav.vaultId IS ? OR afav.vaultId IS NULL)'
-      )
-      whereClauses.push('afav.assetKey IS NULL')
-      joinParams.push(userId, vaultId)
-    }
+    // 没给 userId / vaultId = 不按它筛。界面收藏时写的是 userId=1 + 当前库 id，
+    // 调用方（比如 agent 的 search_assets）不带这两个时，原来的 `IS NULL` 会把它们全挡掉 ——
+    // 概况里数得出 3 个收藏，筛选却一个也搜不到。用 EXISTS 也顺带避免多条收藏记录把资产连成多行
+    const favExists = `EXISTS (
+      SELECT 1 FROM asset_favorites afav
+      WHERE afav.assetKey = ad.assetKey
+        AND (? IS NULL OR afav.userId IS ? OR afav.userId IS NULL)
+        AND (? IS NULL OR afav.vaultId IS ? OR afav.vaultId IS NULL)
+    )`
+    whereClauses.push(criteria.favoriteStatus === 'favorite' ? favExists : `NOT ${favExists}`)
+    whereParams.push(userId, userId, vaultId, vaultId)
   }
 
   // ── 关键词：有全文索引走 FTS5，没有才退回 LIKE ─────────────────────────
