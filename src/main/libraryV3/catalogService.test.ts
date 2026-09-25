@@ -238,6 +238,33 @@ describe('CatalogService', () => {
     expect(statuses.at(-1)).toMatchObject({ status: { signedOut: false } })
   })
 
+  it('takes the dependency closure from the server in one request per asset', async () => {
+    const key = await addDemo({ closure: true })
+    const closure = await service.closureOf(key, 1)
+    expect(closure).toMatchObject({ count: 3, missing: 1, complete: true })
+    expect(closure?.nodes.filter((node) => !node.missing).map((node) => node.id)).toEqual([1, 2, 3])
+    const requests = fake.requests.filter((request) => request.path.endsWith('/dependencies'))
+    expect(requests).toHaveLength(1)
+  })
+
+  it('reports no closure when the server cannot compute one', async () => {
+    const key = await addDemo()
+    expect(await service.closureOf(key, 1)).toBeNull()
+  })
+
+  it('keeps favourites per library on this computer and forgets them with the library', async () => {
+    const key = await addDemo()
+    await service.setFavorite(key, 'asset', 5, true)
+    await service.setFavorite(key, 'folder', 2, true)
+    await service.setFavorite(key, 'asset', 5, true)
+    expect(await service.getFavorites(key)).toEqual({ assets: [5], folders: [2] })
+    await service.setFavorite(key, 'asset', 5, false)
+    expect(await service.getFavorites(key)).toEqual({ assets: [], folders: [2] })
+    await service.removeLibrary(key)
+    const config = JSON.parse(await readFile(join(dir, 'catalog-libraries.json'), 'utf8'))
+    expect(config.favorites?.[key]).toBeUndefined()
+  })
+
   it('reports an invalid token as unauthorized', async () => {
     fake = await startFakeCatalog()
     service = makeService()
@@ -251,7 +278,11 @@ describe('CatalogService', () => {
     const key = await addDemo()
     await service.folders(key, 0)
     const props = await service.resolveRepository(key, { dirId: 2, path: 'Content/Props' })
-    expect(props).toEqual({ repositoryId: 'repo-props', candidates: ['repo-props', 'repo-env'] })
+    expect(props).toEqual({
+      repositoryId: 'repo-props',
+      candidates: ['repo-props', 'repo-env'],
+      names: {}
+    })
     const content = await service.resolveRepository(key, { dirId: 1, path: 'Content' })
     expect(content.repositoryId).toBeNull()
   })

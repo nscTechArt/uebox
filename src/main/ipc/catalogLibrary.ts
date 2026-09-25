@@ -119,8 +119,15 @@ export function registerCatalogLibraryIPC(): void {
   )
   ipcMain.handle(
     'catalogLibrary:facets',
-    (_event, key: string, query: unknown, fields?: CatalogFacetField[]) =>
-      run(() => service().facets(key, asQuery(query), Array.isArray(fields) ? fields : undefined))
+    (_event, key: string, query: unknown, fields?: CatalogFacetField[], limit?: number) =>
+      run(() =>
+        service().facets(
+          key,
+          asQuery(query),
+          Array.isArray(fields) ? fields : undefined,
+          Math.max(1, Math.min(Number(limit) || 50, 500))
+        )
+      )
   )
   ipcMain.handle('catalogLibrary:detail', (_event, key: string, id: number) =>
     run(() => service().detail(key, Number(id)))
@@ -135,6 +142,55 @@ export function registerCatalogLibraryIPC(): void {
       key: string,
       ops: Parameters<ReturnType<typeof getCatalogService>['editAnnotations']>[1]
     ) => run(() => service().editAnnotations(key, Array.isArray(ops) ? ops : []))
+  )
+  ipcMain.handle('catalogLibrary:listTags', (_event, key: string) =>
+    run(() => service().listTags(key))
+  )
+  ipcMain.handle(
+    'catalogLibrary:putTag',
+    (_event, key: string, name: string, patch: { color?: string | null; group?: string | null }) =>
+      run(() => {
+        const clean: { color?: string | null; group?: string | null } = {}
+        if (patch && 'color' in patch)
+          clean.color = typeof patch.color === 'string' ? patch.color : null
+        if (patch && 'group' in patch)
+          clean.group = typeof patch.group === 'string' ? patch.group : null
+        return service().putTag(key, String(name ?? ''), clean)
+      })
+  )
+  ipcMain.handle('catalogLibrary:deleteTag', (_event, key: string, name: string) =>
+    run(() => service().deleteTag(key, String(name ?? '')))
+  )
+  ipcMain.handle(
+    'catalogLibrary:searchFolders',
+    (_event, key: string, q: string, limit?: number, dir?: number) =>
+      run(() =>
+        service().searchFolders(
+          key,
+          String(q ?? ''),
+          Number(limit) || 50,
+          Number.isInteger(dir) ? (dir as number) : 0
+        )
+      )
+  )
+  ipcMain.handle('catalogLibrary:closure', (_event, key: string, id: number) =>
+    run(() => service().closureOf(key, Number(id)))
+  )
+  ipcMain.handle('catalogLibrary:unclaimed', (_event, key: string) =>
+    run(() => service().unclaimed(key))
+  )
+  ipcMain.handle('catalogLibrary:claim', (_event, key: string, from: string, to: string) =>
+    run(() => service().claim(key, String(from ?? ''), String(to ?? '')))
+  )
+  ipcMain.handle('catalogLibrary:favorites', (_event, key: string) =>
+    run(() => service().getFavorites(key))
+  )
+  ipcMain.handle(
+    'catalogLibrary:setFavorite',
+    (_event, key: string, kind: 'asset' | 'folder', id: number, on: boolean) =>
+      run(() =>
+        service().setFavorite(key, kind === 'folder' ? 'folder' : 'asset', Number(id), on === true)
+      )
   )
   ipcMain.handle(
     'catalogLibrary:download',

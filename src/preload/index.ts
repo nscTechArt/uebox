@@ -1622,12 +1622,26 @@ const api = {
       ipcRenderer.invoke('catalogLibrary:folderByPath', key, path),
     listWindow: (key: string, query: unknown, start: number, limit: number) =>
       ipcRenderer.invoke('catalogLibrary:listWindow', key, query, start, limit),
-    facets: (key: string, query: unknown, fields?: string[]) =>
-      ipcRenderer.invoke('catalogLibrary:facets', key, query, fields),
+    facets: (key: string, query: unknown, fields?: string[], limit?: number) =>
+      ipcRenderer.invoke('catalogLibrary:facets', key, query, fields, limit),
     detail: (key: string, id: number) => ipcRenderer.invoke('catalogLibrary:detail', key, id),
     probeAnnotations: (key: string) => ipcRenderer.invoke('catalogLibrary:probeAnnotations', key),
     editAnnotations: (key: string, ops: unknown[]) =>
       ipcRenderer.invoke('catalogLibrary:editAnnotations', key, ops),
+    listTags: (key: string) => ipcRenderer.invoke('catalogLibrary:listTags', key),
+    putTag: (key: string, name: string, patch: unknown) =>
+      ipcRenderer.invoke('catalogLibrary:putTag', key, name, patch),
+    deleteTag: (key: string, name: string) =>
+      ipcRenderer.invoke('catalogLibrary:deleteTag', key, name),
+    searchFolders: (key: string, q: string, limit?: number, dir?: number) =>
+      ipcRenderer.invoke('catalogLibrary:searchFolders', key, q, limit, dir),
+    closure: (key: string, id: number) => ipcRenderer.invoke('catalogLibrary:closure', key, id),
+    unclaimed: (key: string) => ipcRenderer.invoke('catalogLibrary:unclaimed', key),
+    claim: (key: string, from: string, to: string) =>
+      ipcRenderer.invoke('catalogLibrary:claim', key, from, to),
+    favorites: (key: string) => ipcRenderer.invoke('catalogLibrary:favorites', key),
+    setFavorite: (key: string, kind: 'asset' | 'folder', id: number, on: boolean) =>
+      ipcRenderer.invoke('catalogLibrary:setFavorite', key, kind, id, on),
     download: (key: string, input: unknown) =>
       ipcRenderer.invoke('catalogLibrary:download', key, input),
     resolveRepository: (key: string, folder: { dirId: number; path: string }) =>

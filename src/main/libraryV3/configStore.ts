@@ -6,7 +6,11 @@
  */
 import { promises as fs } from 'node:fs'
 import { dirname } from 'node:path'
-import type { CatalogLibraryRecord, CatalogServerRecord } from '../../shared/catalogLibrary'
+import type {
+  CatalogFavorites,
+  CatalogLibraryRecord,
+  CatalogServerRecord
+} from '../../shared/catalogLibrary'
 
 export interface CatalogConfig {
   version: 1
@@ -14,6 +18,8 @@ export interface CatalogConfig {
   libraries: CatalogLibraryRecord[]
   /** 资产库页面上次选中的服务器库（null = 本地库）；只是界面偏好 */
   activeKey?: string | null
+  /** 服务器库的收藏：本机、本人的书签，键是库的本机键。服务器不知道，也不需要知道 */
+  favorites?: Record<string, CatalogFavorites>
 }
 
 const EMPTY: CatalogConfig = { version: 1, servers: [], libraries: [] }
@@ -32,7 +38,8 @@ export class CatalogConfigStore {
         version: 1,
         servers: Array.isArray(parsed.servers) ? parsed.servers : [],
         libraries: Array.isArray(parsed.libraries) ? parsed.libraries : [],
-        activeKey: typeof parsed.activeKey === 'string' ? parsed.activeKey : null
+        activeKey: typeof parsed.activeKey === 'string' ? parsed.activeKey : null,
+        favorites: parsed.favorites && typeof parsed.favorites === 'object' ? parsed.favorites : {}
       }
     } catch {
       this.cache = { ...EMPTY, servers: [], libraries: [] }
@@ -46,7 +53,13 @@ export class CatalogConfigStore {
       version: 1,
       servers: current.servers.map((server) => ({ ...server })),
       libraries: current.libraries.map((library) => ({ ...library })),
-      activeKey: current.activeKey ?? null
+      activeKey: current.activeKey ?? null,
+      favorites: Object.fromEntries(
+        Object.entries(current.favorites ?? {}).map(([key, value]) => [
+          key,
+          { assets: [...value.assets], folders: [...value.folders] }
+        ])
+      )
     }
     mutate(next)
     this.cache = next

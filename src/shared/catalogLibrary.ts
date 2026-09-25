@@ -145,6 +145,8 @@ export interface CatalogAssetDetail extends CatalogAssetSummary {
   dependencies: Array<{ id: number; path: string }>
   dependenciesTruncated: boolean
   dependentsCount: number
+  /** 文件头里的导入（硬 / 软），库里没有的 id 为 null（缺失的依赖）；老服务端没有 */
+  imports?: Array<{ package: string; kind: string; id: number | null; path: string | null }>
   annotations?: CatalogAnnotations | null
   previews?: { s512?: string; poster?: string; media?: string[] } | null
   /** 主进程改写的大图地址 */
@@ -202,7 +204,13 @@ export interface CatalogRemoteLibrary {
   epoch: number
   generation: number
   counts: { assets: number; bytes: number; dirs: number }
-  members: Array<{ memberId: number; repositoryId: string; branch: string }>
+  /** name：服务端给了仓库名就带上（界面显示用），没给时界面退回 id */
+  members: Array<{
+    memberId: number
+    repositoryId: string
+    branch: string
+    repositoryName?: string | null
+  }>
   complete?: boolean
   role?: string | null
 }
@@ -214,6 +222,10 @@ export interface CatalogCapabilities {
   events: boolean | null
   changes: boolean | null
   closure: boolean | null
+  /** 按文件夹名搜索（…/folders/search）；null = 还没试过 */
+  folderSearch: boolean | null
+  /** 标签注册表（…/tags）；null = 还没试过 */
+  tagRegistry: boolean | null
   lore: boolean
 }
 
@@ -391,4 +403,46 @@ export function normalizeListQuery(query: CatalogListQuery): string {
     `e=${list(query.engine)}`,
     `t=${list(query.tag)}`
   ].join('&')
+}
+
+/** 服务端标签注册表的一项（GET …/tags）：只管颜色和分组，标签本身挂在资产的注释上 */
+export interface CatalogTagDef {
+  name: string
+  color?: string | null
+  group?: string | null
+}
+
+/** 本机为某个服务器库记的收藏（按人、按机器，不上服务器）：资产 id 与文件夹 dirId */
+export interface CatalogFavorites {
+  assets: number[]
+  folders: number[]
+}
+
+/** 一个资产的完整依赖闭包（服务端 …/dependencies?closure=true）：count / bytes 含根 */
+export interface CatalogClosure {
+  count: number
+  bytes: number
+  missing: number
+  complete: boolean
+  nodes: Array<{
+    id: number | null
+    path: string | null
+    name: string
+    missing: boolean
+    level: number
+    size: number | null
+  }>
+}
+
+/** 文件已不在、还没被认领的注释（…/annotations/unclaimed） */
+export interface CatalogUnclaimed {
+  path: string
+  note: string | null
+  color: string | null
+  tags: string[]
+  updatedBy: string | null
+  updatedMs: number | null
+  deletedMs: number | null
+  hash: string | null
+  suggestions: Array<{ id: number; path: string }>
 }

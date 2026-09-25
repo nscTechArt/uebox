@@ -61,7 +61,12 @@ import type {
   CatalogProbeResult,
   CatalogRemoteLibrary,
   CatalogServerView,
-  CatalogWindow
+  CatalogWindow,
+  CatalogTagDef,
+  CatalogFavorites,
+  CatalogFolder,
+  CatalogClosure,
+  CatalogUnclaimed
 } from '../shared/catalogLibrary'
 
 /** 服务端资产库 IPC 的统一返回形状（见 src/main/ipc/catalogLibrary.ts） */
@@ -2942,7 +2947,8 @@ declare global {
       facets: (
         key: string,
         query: CatalogListQuery,
-        fields?: CatalogFacetField[]
+        fields?: CatalogFacetField[],
+        limit?: number
       ) => Promise<CatalogIpcResult<CatalogFacets>>
       detail: (key: string, id: number) => Promise<CatalogIpcResult<CatalogAssetDetail>>
       probeAnnotations: (key: string) => Promise<CatalogIpcResult<boolean>>
@@ -2956,6 +2962,29 @@ declare global {
           removeTags?: string[]
         }>
       ) => Promise<CatalogIpcResult<{ accepted: number; journalSeq: number | null }>>
+      listTags: (key: string) => Promise<CatalogIpcResult<CatalogTagDef[]>>
+      putTag: (
+        key: string,
+        name: string,
+        patch: { color?: string | null; group?: string | null }
+      ) => Promise<CatalogIpcResult<void>>
+      deleteTag: (key: string, name: string) => Promise<CatalogIpcResult<void>>
+      searchFolders: (
+        key: string,
+        q: string,
+        limit?: number,
+        dir?: number
+      ) => Promise<CatalogIpcResult<CatalogFolder[] | null>>
+      closure: (key: string, id: number) => Promise<CatalogIpcResult<CatalogClosure | null>>
+      unclaimed: (key: string) => Promise<CatalogIpcResult<CatalogUnclaimed[] | null>>
+      claim: (key: string, from: string, to: string) => Promise<CatalogIpcResult<void>>
+      favorites: (key: string) => Promise<CatalogIpcResult<CatalogFavorites>>
+      setFavorite: (
+        key: string,
+        kind: 'asset' | 'folder',
+        id: number,
+        on: boolean
+      ) => Promise<CatalogIpcResult<CatalogFavorites>>
       download: (
         key: string,
         input: { ids: number[]; targetRoot: string; withDependencies: boolean }
@@ -2963,7 +2992,13 @@ declare global {
       resolveRepository: (
         key: string,
         folder: { dirId: number; path: string }
-      ) => Promise<CatalogIpcResult<{ repositoryId: string | null; candidates: string[] }>>
+      ) => Promise<
+        CatalogIpcResult<{
+          repositoryId: string | null
+          candidates: string[]
+          names: Record<string, string>
+        }>
+      >
       import: (
         key: string,
         input: {

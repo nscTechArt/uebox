@@ -37,6 +37,8 @@ export interface FakeCatalogOptions {
   previews?: boolean
   annotations?: boolean
   changes?: boolean
+  /** …/dependencies?closure=true：资产 n 依赖 n+1、n+2（三个一组） */
+  closure?: boolean
 }
 
 export interface FakeCatalog {
@@ -265,6 +267,41 @@ export async function startFakeCatalog(options: FakeCatalogOptions = {}): Promis
         dependencies: dependency ? [{ id: dependency.id, path: dependency.path }] : [],
         dependenciesTruncated: false,
         dependentsCount: 2
+      })
+    }
+
+    const dependencies = /^\/assets\/(\d+)\/dependencies$/.exec(rest)
+    if (dependencies) {
+      if (!options.closure) return missing()
+      const root = Number(dependencies[1])
+      const chain = assets.filter((asset) => asset.id >= root && asset.id < root + 3)
+      return json(200, {
+        ...meta(),
+        root: `a:${root}`,
+        direction: 'out',
+        closure:
+          query.closure === 'true'
+            ? {
+                count: chain.length,
+                bytes: chain.reduce((sum, a) => sum + a.size, 0),
+                missing: 1,
+                complete: true
+              }
+            : null,
+        nodes: [
+          ...chain.map((asset, level) => ({
+            key: `a:${asset.id}`,
+            id: asset.id,
+            name: asset.name,
+            path: asset.path,
+            missing: false,
+            level,
+            size: asset.size
+          })),
+          { key: 'p:/Game/Gone', id: null, name: 'Gone', path: null, missing: true, level: 1 }
+        ],
+        edges: [],
+        truncated: false
       })
     }
 

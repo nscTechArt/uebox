@@ -18,10 +18,12 @@ import {
   type CatalogAssetDetail,
   type CatalogAssetSummary,
   type CatalogCapabilities,
+  type CatalogClosure,
   type CatalogConnectInput,
   type CatalogConnectResult,
   type CatalogFacetField,
   type CatalogFacets,
+  type CatalogFavorites,
   type CatalogFolder,
   type CatalogJobProgress,
   type CatalogLibraryEvent,
@@ -33,8 +35,10 @@ import {
   type CatalogRemoteLibrary,
   type CatalogServerRecord,
   type CatalogServerView,
+  type CatalogTagDef,
   type CatalogTotal,
   type CatalogTrust,
+  type CatalogUnclaimed,
   type CatalogWindow
 } from '../../shared/catalogLibrary'
 import { CatalogConfigStore } from './configStore'
@@ -227,6 +231,8 @@ export class CatalogService {
         events: null,
         changes: null,
         closure: null,
+        folderSearch: null,
+        tagRegistry: null,
         lore: false
       },
       dirPaths: new Map([[0, '']]),
@@ -599,6 +605,7 @@ export class CatalogService {
     const library = this.libraries.get(key)
     await this.config.update((next) => {
       next.libraries = next.libraries.filter((existing) => existing.key !== key)
+      if (next.favorites) delete next.favorites[key]
     })
     this.libraries.delete(key)
     this.pages.dropLibrary(key)
@@ -1451,6 +1458,153 @@ export class CatalogService {
     }
   }
 
+  // ---------------------------------------------------------------- tag registry
+
+  private tagsPath(library: LibraryRuntime, name?: string): string {
+    const base = `/v1/libraries/${encodeURIComponent(library.record.libraryId)}/tags`
+    return name === undefined ? base : `${base}/${encodeURIComponent(name)}`
+  }
+
+  private noteTagRegistry(library: LibraryRuntime, error: unknown): void {
+    if (error instanceof CatalogHttpError && error.code === 'route-missing') {
+      library.capabilities.tagRegistry = false
+      this.emitStatus(library)
+    }
+  }
+
+  /** 标签注册表：只有颜色和分组；一个标签在不在某个资产上，看资产的注释 */
+  async listTags(key: string): Promise<CatalogTagDef[]> {
+    const { library, server } = await this.library(key)
+    try {
+      const body = await this.request<{ items?: CatalogTagDef[] }>(
+        library,
+        server,
+        this.tagsPath(library)
+      )
+      if (library.capabilities.tagRegistry !== true) {
+        library.capabilities.tagRegistry = true
+        this.emitStatus(library)
+      }
+      return (body.items ?? []).filter((item) => typeof item?.name === 'string')
+    } catch (error) {
+      this.noteTagRegistry(library, error)
+      throw this.wrap(error)
+    }
+  }
+
+  /** 登记或修改一个标签（writer）。null 清掉那一项，不给的保持不变 */
+  async putTag(
+    key: string,
+    name: string,
+    patch: { color?: string | null; group?: string | null }
+  ): Promise<void> {
+    const { library, server } = await this.library(key)
+    const trimmed = name.trim()
+    if (
+      !trimmed ||
+      trimmed.length > 64 ||
+      [...trimmed].some((char) => char === ',' || char.charCodeAt(0) < 32)
+    )
+      throw new CatalogServiceError('bad-request', 'Invalid tag name')
+    try {
+      await this.request(library, server, this.tagsPath(library, trimmed), {
+        method: 'PUT',
+        body: patch
+      })
+    } catch (error) {
+      this.noteTagRegistry(library, error)
+      throw this.wrap(error)
+    }
+  }
+
+  /** 从注册表删掉（writer）；资产上已经挂着的同名标签不动 */
+  async deleteTag(key: string, name: string): Promise<void> {
+    const { library, server } = await this.library(key)
+    try {
+      await this.request(library, server, this.tagsPath(library, name), { method: 'DELETE' })
+    } catch (error) {
+      this.noteTagRegistry(library, error)
+      throw this.wrap(error)
+    }
+  }
+
+  // ---------------------------------------------------------------- folder-name search
+
+  /**
+   * 按文件夹名搜索。服务端还在加这条路由（GET …/folders/search?q=&limit=，回 {items:[FolderItem]}）；
+   * 没有时回 null，界面保留"服务器还不支持"的提示。
+   */
+  async searchFolders(
+    key: string,
+    q: string,
+    limit = 50,
+    dir = 0
+  ): Promise<CatalogFolder[] | null> {
+    const { library, server } = await this.library(key)
+    if (library.capabilities.folderSearch === false) return null
+    const query = q.trim()
+    if (!query) return []
+    try {
+      const body = await this.request<{ items?: CatalogFolder[]; folders?: CatalogFolder[] }>(
+        library,
+        server,
+        `/v1/libraries/${encodeURIComponent(library.record.libraryId)}/folders/search`,
+        {
+          query: {
+            q: query,
+            limit: String(Math.max(1, Math.min(limit, 100))),
+            ...(dir > 0 ? { dir: String(dir) } : {})
+          }
+        }
+      )
+      if (library.capabilities.folderSearch !== true) {
+        library.capabilities.folderSearch = true
+        this.emitStatus(library)
+      }
+      const items = body.items ?? body.folders ?? []
+      for (const folder of items) this.rememberPath(library, folder.dirId, folder.path)
+      return items
+    } catch (error) {
+      if (
+        error instanceof CatalogHttpError &&
+        (error.code === 'route-missing' || error.code === 'bad-request')
+      ) {
+        library.capabilities.folderSearch = false
+        this.emitStatus(library)
+        return null
+      }
+      throw this.wrap(error)
+    }
+  }
+
+  // ---------------------------------------------------------------- favourites (local only)
+
+  async getFavorites(key: string): Promise<CatalogFavorites> {
+    await this.ensureLoaded()
+    const stored = (await this.config.read()).favorites?.[key]
+    return { assets: [...(stored?.assets ?? [])], folders: [...(stored?.folders ?? [])] }
+  }
+
+  async setFavorite(
+    key: string,
+    kind: 'asset' | 'folder',
+    id: number,
+    on: boolean
+  ): Promise<CatalogFavorites> {
+    await this.library(key)
+    if (!Number.isInteger(id) || id < 0) throw new CatalogServiceError('bad-request', 'Invalid id')
+    const next = await this.config.update((config) => {
+      const favorites = (config.favorites ??= {})
+      const entry = (favorites[key] ??= { assets: [], folders: [] })
+      const list = kind === 'asset' ? entry.assets : entry.folders
+      const index = list.indexOf(id)
+      if (on && index < 0) list.push(id)
+      if (!on && index >= 0) list.splice(index, 1)
+    })
+    const stored = next.favorites?.[key]
+    return { assets: [...(stored?.assets ?? [])], folders: [...(stored?.folders ?? [])] }
+  }
+
   // ---------------------------------------------------------------- lore: download and import
 
   private async loreContext(server: ServerRuntime, signal: AbortSignal): Promise<ShadowContext> {
@@ -1505,12 +1659,65 @@ export class CatalogService {
    * 依赖闭包。服务端有 `POST /closure` 且每项带仓库时直接用；没有就按详情里的一跳依赖
    * 做有上限的广度优先（深度 ≤5、≤2000 个），每一步都是一次有界请求。
    */
+  /**
+   * 一个资产的完整依赖闭包：服务端 `…/dependencies?closure=true` 一次给全（含根）。
+   * 老服务端不认 closure 参数（回来的 closure 为空）或没有这条路由时回 null，调用方退回逐层走。
+   */
+  async closureOf(key: string, id: number): Promise<CatalogClosure | null> {
+    const { library, server } = await this.library(key)
+    try {
+      const body = await this.request<{
+        closure?: { count: number; bytes: number; missing: number; complete: boolean } | null
+        truncated?: boolean
+        nodes?: Array<{
+          id: number | null
+          path: string | null
+          name?: string
+          missing?: boolean
+          level?: number
+          size?: number | null
+        }>
+      }>(
+        library,
+        server,
+        `/v1/libraries/${encodeURIComponent(library.record.libraryId)}/assets/${id}/dependencies`,
+        { query: { closure: 'true', limit: String(MAX_CLOSURE) } }
+      )
+      if (!body.closure) return null
+      return {
+        count: body.closure.count,
+        bytes: body.closure.bytes,
+        missing: body.closure.missing,
+        complete: body.closure.complete && !body.truncated,
+        nodes: (body.nodes ?? []).map((node) => ({
+          id: node.id,
+          path: node.path,
+          name: node.name ?? node.path ?? '',
+          missing: node.missing === true,
+          level: node.level ?? 0,
+          size: node.size ?? null
+        }))
+      }
+    } catch (error) {
+      if (
+        error instanceof CatalogHttpError &&
+        (error.code === 'route-missing' || error.code === 'bad-request')
+      )
+        return null
+      throw this.wrap(error)
+    }
+  }
+
   private async closure(
     key: string,
     ids: number[],
     withDependencies: boolean,
     signal: AbortSignal
   ): Promise<Array<{ id: number; path: string; repository: string; dirId: number }>> {
+    if (withDependencies) {
+      const fromServer = await this.serverClosure(key, ids, signal)
+      if (fromServer) return fromServer
+    }
     const out = new Map<number, { id: number; path: string; repository: string; dirId: number }>()
     let frontier = [...new Set(ids)]
     for (
@@ -1532,6 +1739,89 @@ export class CatalogService {
       frontier = next
     }
     return [...out.values()]
+  }
+
+  /**
+   * 用服务端算好的闭包（每个根一次请求），再补上物化要用的仓库和文件夹 id：
+   * 库只有一个成员时仓库就是它；多成员时逐个问详情（有上限）。任何一个根拿不到闭包就回 null。
+   */
+  private async serverClosure(
+    key: string,
+    ids: number[],
+    signal: AbortSignal
+  ): Promise<Array<{ id: number; path: string; repository: string; dirId: number }> | null> {
+    const { library } = await this.library(key)
+    const nodes = new Map<number, string>()
+    for (const id of [...new Set(ids)]) {
+      signal.throwIfAborted()
+      const closure = await this.closureOf(key, id)
+      if (!closure) return null
+      for (const node of closure.nodes)
+        if (node.id !== null && node.path && !node.missing) nodes.set(node.id, node.path)
+      if (nodes.size >= MAX_CLOSURE) break
+    }
+    const single = library.members.length === 1 ? library.members[0].repositoryId : null
+    const folderIds = new Map<string, number>()
+    const out: Array<{ id: number; path: string; repository: string; dirId: number }> = []
+    for (const [id, path] of [...nodes].slice(0, MAX_CLOSURE)) {
+      signal.throwIfAborted()
+      let repository = single
+      let dirId: number | undefined
+      if (!repository) {
+        const detail = await this.detail(key, id)
+        repository = detail.repository
+        dirId = detail.dirId
+      }
+      if (dirId === undefined) {
+        const folder = posix.dirname(path)
+        dirId = folderIds.get(folder)
+        if (dirId === undefined) {
+          dirId = (await this.folderByPath(key, folder)).dirId
+          folderIds.set(folder, dirId)
+        }
+      }
+      out.push({ id, path, repository, dirId })
+    }
+    return out
+  }
+
+  // ---------------------------------------------------------------- unclaimed annotations
+
+  /** 文件已不在（删除，或配不上的移动）的注释；没有这条路由时回 null */
+  async unclaimed(key: string): Promise<CatalogUnclaimed[] | null> {
+    const { library, server } = await this.library(key)
+    try {
+      const body = await this.request<{ items?: CatalogUnclaimed[] }>(
+        library,
+        server,
+        `/v1/libraries/${encodeURIComponent(library.record.libraryId)}/annotations/unclaimed`,
+        { query: { limit: '200' } }
+      )
+      return body.items ?? []
+    } catch (error) {
+      if (
+        error instanceof CatalogHttpError &&
+        (error.code === 'route-missing' || error.code === 'forbidden')
+      )
+        return null
+      throw this.wrap(error)
+    }
+  }
+
+  /** 把一条待认领的注释挪到某个资产上（标签、备注合并进去，目标原有的备注和颜色优先） */
+  async claim(key: string, from: string, to: string): Promise<void> {
+    const { library, server } = await this.library(key)
+    try {
+      await this.request(
+        library,
+        server,
+        `/v1/libraries/${encodeURIComponent(library.record.libraryId)}/annotations/claim`,
+        { method: 'POST', body: { from, to } }
+      )
+      this.invalidate(library, { dirIds: [], paths: [posix.dirname(to)] }, 'local-write')
+    } catch (error) {
+      throw this.wrap(error)
+    }
   }
 
   /** 同一文件夹里同名不同扩展名的分片（.uexp / .ubulk …），从目录服务的列表里找 */
@@ -1647,14 +1937,22 @@ export class CatalogService {
   async resolveRepository(
     key: string,
     folder: { dirId: number; path: string }
-  ): Promise<{ repositoryId: string | null; candidates: string[] }> {
+  ): Promise<{
+    repositoryId: string | null
+    candidates: string[]
+    /** 仓库 id → 显示名（服务端给了 repositoryName 就用，没有时界面显示 id） */
+    names: Record<string, string>
+  }> {
     const { library } = await this.library(key)
     if (library.members.length === 0) {
       const server = this.servers.get(library.record.serverId)
       if (server) await this.fetchRemoteLibraries(server).catch(() => undefined)
     }
     const candidates = library.members.map((member) => member.repositoryId)
-    if (candidates.length === 1) return { repositoryId: candidates[0], candidates }
+    const names: Record<string, string> = {}
+    for (const member of library.members)
+      if (member.repositoryName) names[member.repositoryId] = member.repositoryName
+    if (candidates.length === 1) return { repositoryId: candidates[0], candidates, names }
     const window = await this.listWindow(
       key,
       { dir: folder.dirId, recursive: true, sort: 'name' },
@@ -1662,7 +1960,7 @@ export class CatalogService {
       20
     ).catch(() => null)
     const seen = new Set((window?.items ?? []).map((item) => item.repository))
-    return { repositoryId: seen.size === 1 ? [...seen][0] : null, candidates }
+    return { repositoryId: seen.size === 1 ? [...seen][0] : null, candidates, names }
   }
 
   /**

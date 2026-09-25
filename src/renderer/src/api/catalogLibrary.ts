@@ -22,7 +22,11 @@ import type {
   CatalogProbeResult,
   CatalogRemoteLibrary,
   CatalogServerView,
-  CatalogWindow
+  CatalogWindow,
+  CatalogTagDef,
+  CatalogFavorites,
+  CatalogClosure,
+  CatalogUnclaimed
 } from '@core/shared/catalogLibrary'
 
 export interface CatalogActionResult<T> {
@@ -109,9 +113,10 @@ export const catalogLibraryAPI = {
   async facets(
     key: string,
     query: CatalogListQuery,
-    fields?: CatalogFacetField[]
+    fields?: CatalogFacetField[],
+    limit?: number
   ): Promise<CatalogFacets> {
-    return unwrap(await bridge().facets(key, plain(query), fields ? [...fields] : undefined))
+    return unwrap(await bridge().facets(key, plain(query), fields ? [...fields] : undefined, limit))
   },
   async detail(key: string, id: number): Promise<CatalogAssetDetail> {
     return unwrap(await bridge().detail(key, id))
@@ -122,7 +127,11 @@ export const catalogLibraryAPI = {
   async resolveRepository(
     key: string,
     folder: { dirId: number; path: string }
-  ): Promise<{ repositoryId: string | null; candidates: string[] }> {
+  ): Promise<{
+    repositoryId: string | null
+    candidates: string[]
+    names: Record<string, string>
+  }> {
     return unwrap(await bridge().resolveRepository(key, { dirId: folder.dirId, path: folder.path }))
   },
 
@@ -177,6 +186,50 @@ export const catalogLibraryAPI = {
     }>
   ): Promise<CatalogActionResult<{ accepted: number; journalSeq: number | null }>> {
     return action(() => bridge().editAnnotations(key, plain(ops)))
+  },
+  async listTags(key: string): Promise<CatalogTagDef[]> {
+    return unwrap(await bridge().listTags(key))
+  },
+  putTag(
+    key: string,
+    name: string,
+    patch: { color?: string | null; group?: string | null }
+  ): Promise<CatalogActionResult<void>> {
+    return action(() => bridge().putTag(key, name, plain(patch)))
+  },
+  deleteTag(key: string, name: string): Promise<CatalogActionResult<void>> {
+    return action(() => bridge().deleteTag(key, name))
+  },
+  /** null = 服务器还没有按文件夹名搜索 */
+  async searchFolders(
+    key: string,
+    q: string,
+    limit?: number,
+    dir?: number
+  ): Promise<CatalogFolder[] | null> {
+    return unwrap(await bridge().searchFolders(key, q, limit, dir))
+  },
+  /** null = 服务端还不会算闭包 */
+  async closure(key: string, id: number): Promise<CatalogClosure | null> {
+    return unwrap(await bridge().closure(key, id))
+  },
+  /** null = 服务端没有待认领注释这条路由，或你没权限看 */
+  async unclaimed(key: string): Promise<CatalogUnclaimed[] | null> {
+    return unwrap(await bridge().unclaimed(key))
+  },
+  claim(key: string, from: string, to: string): Promise<CatalogActionResult<void>> {
+    return action(() => bridge().claim(key, from, to))
+  },
+  async favorites(key: string): Promise<CatalogFavorites> {
+    return unwrap(await bridge().favorites(key))
+  },
+  async setFavorite(
+    key: string,
+    kind: 'asset' | 'folder',
+    id: number,
+    on: boolean
+  ): Promise<CatalogFavorites> {
+    return unwrap(await bridge().setFavorite(key, kind, id, on))
   },
   download(
     key: string,
