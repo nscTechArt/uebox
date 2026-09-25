@@ -32,6 +32,8 @@ const status = (overrides: Record<string, unknown> = {}): Record<string, unknown
     events: true,
     changes: true,
     closure: null,
+    folderSearch: null,
+    tagRegistry: null,
     lore: true
   },
   ...overrides

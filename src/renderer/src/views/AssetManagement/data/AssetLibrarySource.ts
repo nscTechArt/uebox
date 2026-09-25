@@ -14,6 +14,7 @@
  * 不在各处判断"是不是服务器库"。
  */
 import type { AssetImportStatusSummary } from '@core/shared/assetDependency'
+import type { CatalogUnclaimed } from '@core/shared/catalogLibrary'
 
 export type SortBy = 'assetName' | 'modifiedTime' | 'fileSize' | 'assetType'
 export type SortOrder = 'asc' | 'desc'
@@ -67,8 +68,12 @@ export interface LibraryCapabilities {
   folderSearch: boolean
   /** 依赖关系图页 */
   dependencyGraph: boolean
-  /** 标签管理（本地标签库） */
+  /** 标签管理（本地标签库，或服务端的标签注册表） */
   tagManagement: boolean
+  /** 给文件夹设颜色（本地库属于改结构；服务端库是注释） */
+  folderColor: boolean
+  /** 百度网盘 / WebDAV：本地库的导入来源，在它们里面挑文件进当前库 */
+  cloudDrives: boolean
   /** 按类型排序 */
   sortByType: boolean
   /** 筛选栏里各组是否可用 */
@@ -82,6 +87,11 @@ export interface LibraryCapabilities {
     showDependencies: boolean
     /** 服务端分面：引擎版本 */
     engine: boolean
+    /**
+     * 标签筛选能做到哪一步：'full' = 本地库的全部（包含 / 排除 / 全部命中 / 无标签）；
+     * 'include-any' = 只能"带其中任一标签"（服务端的 tag 参数）
+     */
+    tagMode: 'full' | 'include-any'
   }
   /** 不可用的原因（i18n 键），按能力名查 */
   reasons: Record<string, CapabilityReason>
@@ -99,6 +109,8 @@ export interface LibraryFolderApi {
   getByKey(folderKey: string): Promise<AssetFolder | undefined>
   getChildCount(fatherKey: string): Promise<number>
   getPathArray(folderKey: string): Promise<string[]>
+  /** 文件夹颜色（null 清除）；能力看 capabilities.folderColor */
+  setColor(folderKey: string, color: string | null): Promise<{ ok: boolean; error?: string }>
 }
 
 export interface LibraryAssetApi {
@@ -142,6 +154,72 @@ export interface LibraryAnnotationApi {
 /** 引擎版本等服务端分面（本地库没有） */
 export interface LibraryFacetApi {
   engines(criteria: LibraryListCriteria): Promise<Array<{ value: string; n: number }>>
+  /** 标签分面（名字 + 挂在多少个资产上），给服务器库的标签筛选用 */
+  tags(criteria: LibraryListCriteria): Promise<Array<{ value: string; n: number }>>
+}
+
+/**
+ * 收藏。本地库存在保管库里；服务端库存在本机（按库、按资产 id），服务器不知道。
+ * 形状照搬 favoriteAPI，方便原来的调用点直接换。
+ */
+export interface LibraryFavoritesApi {
+  add(assetKey: string): Promise<boolean>
+  remove(assetKey: string): Promise<boolean>
+  addFolder(folderKey: string): Promise<boolean>
+  removeFolder(folderKey: string): Promise<boolean>
+  batchCheck(assetKeys: string[]): Promise<Record<string, boolean>>
+  isFolderFavorite(folderKey: string): Promise<boolean>
+  /** vaultId 只对本地库有意义（切保管库的那一刻，当前保管库可能还没换过来） */
+  count(vaultId?: string): Promise<number>
+  /** 收藏的文件夹，列表能直接显示的形状 */
+  folders(): Promise<Array<Record<string, unknown>>>
+}
+
+/** 标签管理页用的标签组 / 标签（与本地标签库同形） */
+export interface RegistryTagGroup {
+  id: number
+  name: string
+  color?: string
+  sort_order?: number
+  tagCount?: number
+}
+export interface RegistryTag {
+  id: number
+  name: string
+  color?: string
+  group_id?: number | null
+  is_favorite?: boolean
+}
+
+/**
+ * 标签管理页的后端。本地 = 公共标签库；服务端 = 库的标签注册表（名字 + 颜色 + 分组名）。
+ * 服务端做不到的（改名已在用的标签、常用）由 abilities 说明，页面据此隐藏或禁用。
+ */
+export interface LibraryTagRegistryApi {
+  readonly abilities: {
+    /** 能改名（服务端：只有还没挂在任何资产上的标签） */
+    renameUnused: boolean
+    renameUsed: boolean
+    favorite: boolean
+  }
+  groups(): Promise<RegistryTagGroup[]>
+  tags(): Promise<RegistryTag[]>
+  usageCounts(): Promise<Record<number, number>>
+  createGroup(name: string, sortOrder: number, color?: string): Promise<number | null>
+  renameGroup(id: number, name: string): Promise<boolean>
+  deleteGroup(id: number): Promise<boolean>
+  createTag(name: string, groupId: number | null, favorite: boolean): Promise<number | null>
+  renameTag(id: number, name: string): Promise<boolean>
+  deleteTags(ids: number[]): Promise<number>
+  update(id: number, patch: { group_id?: number | null; is_favorite?: boolean }): Promise<boolean>
+  toggleFavorite(id: number): Promise<boolean>
+  moveToGroup(ids: number[], groupId: number | null): Promise<number>
+  /**
+   * 服务器库：文件已不在（删除，或移动后没配上）的标签和备注，等人认领到某个资产上。
+   * 本地库没有这回事（不实现）。null = 服务端没有这条路由或你看不到。
+   */
+  unclaimed?(): Promise<CatalogUnclaimed[] | null>
+  claim?(from: string, to: string): Promise<boolean>
 }
 
 export interface AssetLibrarySource {
@@ -154,6 +232,8 @@ export interface AssetLibrarySource {
   readonly search: LibrarySearchApi
   readonly annotations: LibraryAnnotationApi | null
   readonly facets: LibraryFacetApi | null
+  readonly favorites: LibraryFavoritesApi
+  readonly tagRegistry: LibraryTagRegistryApi
 }
 
 /** 树的虚拟根（与本地库一致：ALL 永远在第一位、自动展开） */

@@ -173,7 +173,8 @@
             <label class="ue-meta-label">{{ $t('assetLib.details.format') }}</label>
             <div class="ue-meta-value">{{ asset?.fileExtension || '—' }}</div>
           </div>
-          <div class="ue-meta-row">
+          <!-- 没有创建时间的来源（服务器库只记修改时间）就不占一行空的「—」 -->
+          <div v-if="asset?.created_at" class="ue-meta-row">
             <label class="ue-meta-label">{{ $t('assetLib.details.created') }}</label>
             <div class="ue-meta-value">{{ asset?.created_at || '—' }}</div>
           </div>
@@ -242,7 +243,7 @@
             <label class="meta-label">{{ $t('assetLib.details.format') }}</label>
             <div class="meta-value">{{ asset?.fileExtension || '—' }}</div>
           </div>
-          <div class="meta-row">
+          <div v-if="asset?.created_at" class="meta-row">
             <label class="meta-label">{{ $t('assetLib.details.created') }}</label>
             <div class="meta-value">{{ asset?.created_at || '—' }}</div>
           </div>

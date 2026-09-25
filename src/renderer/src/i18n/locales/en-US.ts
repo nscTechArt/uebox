@@ -1438,12 +1438,18 @@ export default {
     reasons: {
       structure: 'The server manages the structure of a server library',
       favorite: 'Favourites work in local libraries only',
+      favoriteFilter:
+        'Server-library favourites are kept on this computer: see My favourites on the left',
+      cloudDrives:
+        'Cloud drives feed local libraries; drag files in to import into a server library',
+      tagInUse: 'This tag is on {count} asset(s); remove it from them first',
+      tagFavorite: 'Server-library tags have no favourites',
       trash: 'The server keeps deleted assets; they cannot be viewed in Unreal Box yet',
       scan: 'Server libraries need no scan; changes arrive by themselves',
       folderSearch: 'The server does not search folder names yet',
       dependencyGraph:
         'The dependency graph does not read server libraries yet; see the dependency list above',
-      tagManagement: 'The server manages the tag list of a server library',
+      tagManagement: 'The server has no tag registry yet',
       sortByType: 'The server cannot sort by type yet',
       nativeDrag: 'The file is still on the server: right-click "Import to project" first',
       richNotes: 'Server libraries keep a one-line note only',
@@ -1453,9 +1459,21 @@ export default {
       offline: 'Cannot reach the server',
       folderAnnotations: 'Folders in a server library have no tags or notes.'
     },
+    unclaimed: {
+      notice:
+        '{count} tag/note record(s) belong to files no longer in the library (deleted, or moved without a match)',
+      show: 'Show',
+      hide: 'Hide',
+      claimTo: 'Move to {name}',
+      noSuggestion: 'No file with the same content',
+      claimed: 'Moved to {name}',
+      claimFailed: 'Could not move it: you may lack write access to that repository'
+    },
     filter: {
       allEngines: 'All engines',
-      enginesWithCount: '{count} engine versions'
+      enginesWithCount: '{count} engine versions',
+      anyTag: 'Any tag',
+      noTags: 'No tags on these assets yet'
     },
     add: {
       title: 'Add a server library',
@@ -1525,6 +1543,9 @@ export default {
       pickFolder: 'Choose folder',
       noFolder: 'None selected',
       withDependencies: 'Include dependencies',
+      closure: '{count} asset(s) with dependencies, about {size}.',
+      closureMissing: '{count} more dependencies are not in the library.',
+      closureIncomplete: 'The dependency chain is deep; some far ones may be left out.',
       hint: 'Files are copied, so editing them in the project does not touch the server.',
       start: 'Start'
     },

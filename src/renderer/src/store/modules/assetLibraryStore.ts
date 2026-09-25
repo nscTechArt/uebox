@@ -90,7 +90,9 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
     return serverCapabilities({
       annotations: status?.capabilities.annotations ?? null,
       lore: status?.capabilities.lore ?? false,
-      online: status?.online !== false
+      online: status?.online !== false,
+      folderSearch: status?.capabilities.folderSearch ?? null,
+      tagRegistry: status?.capabilities.tagRegistry ?? null
     })
   })
   const source = computed<AssetLibrarySource>(() => activeLibrarySource.value)
@@ -231,6 +233,8 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
             events: null,
             changes: null,
             closure: null,
+            folderSearch: null,
+            tagRegistry: null,
             lore: false
           }
         }

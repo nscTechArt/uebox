@@ -78,6 +78,7 @@
               :selected="isSelected(tag)"
               :renaming="renamingTagId === tag.id"
               :rename-value="renamingTagName"
+              :hide-favorite="hideFavorite"
               @select="handleChipSelect(tag, $event)"
               @rename-input="renamingTagName = $event"
               @submit-rename="handleSubmitTagRename"
@@ -101,6 +102,7 @@
           :selected="isSelected(tag)"
           :renaming="renamingTagId === tag.id"
           :rename-value="renamingTagName"
+          :hide-favorite="hideFavorite"
           @select="handleChipSelect(tag, $event)"
           @rename-input="renamingTagName = $event"
           @submit-rename="handleSubmitTagRename"
@@ -145,7 +147,7 @@
             </AppMenu>
           </template>
         </AppDropdown>
-        <AppButton size="small" @click="handleBatchFavorite">
+        <AppButton v-if="!hideFavorite" size="small" @click="handleBatchFavorite">
           {{ $t('tagDisplay.batch.setFavorite') }}
         </AppButton>
         <AppButton size="small" danger @click="handleBatchDelete">
@@ -195,6 +197,8 @@ interface Props {
   quickFilter: 'all' | 'ungrouped' | 'favorite' | 'unused' | null
   renamingTagId: number | null
   renamingTagName: string
+  /** 标签库没有「常用」（服务器库）：星标和「设为常用」不出现 */
+  hideFavorite?: boolean
 }
 
 interface Emits {

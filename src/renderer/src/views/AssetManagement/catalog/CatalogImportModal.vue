@@ -31,7 +31,7 @@
         <a-select
           v-else
           v-model:value="repositoryId"
-          :options="candidates.map((value) => ({ value, label: value }))"
+          :options="repositoryOptions"
           :placeholder="t('catalogLibrary.import.pickRepository')"
         />
       </label>
@@ -75,6 +75,15 @@ const { t } = useI18n()
 
 const files = ref<string[]>([])
 const repositoryId = ref<string | undefined>(undefined)
+/** 仓库 id → 名字（服务端给 repositoryName 时有）；没有名字的显示 id */
+const repositoryNames = ref<Record<string, string>>({})
+const repositoryOptions = computed(() =>
+  candidates.value.map((value) => ({
+    value,
+    label: repositoryNames.value[value] ?? value,
+    title: value
+  }))
+)
 const candidates = ref<string[]>([])
 const resolving = ref(false)
 const commitMessage = ref('')
@@ -91,6 +100,7 @@ async function resolve(): Promise<void> {
       path: props.folder.path
     })
     candidates.value = result.candidates
+    repositoryNames.value = result.names ?? {}
     repositoryId.value = result.repositoryId ?? undefined
   } catch (failure) {
     error.value = catalogErrorOf(t, failure)

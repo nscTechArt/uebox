@@ -507,6 +507,36 @@
         <PhTagChevron />
         <span>{{ t('assetLib.filter.tags') }}</span>
       </button>
+      <!-- 服务器库：按名字筛，「带其中任一标签」；取值和数量来自标签分面 -->
+      <AppDropdown
+        v-else-if="libraryCaps.filters.tagMode === 'include-any'"
+        :trigger="['click']"
+        placement="bottomLeft"
+      >
+        <button
+          class="filter-dropdown-btn"
+          :class="{ active: includeTagsProxy.length > 0 }"
+          @click="loadTagOptions"
+        >
+          <PhTagChevron />
+          <span>{{ tagButtonLabel }}</span>
+          <PhCaretDown class="dropdown-arrow" />
+        </button>
+        <template #overlay>
+          <AppMenu class="server-tag-menu" @click="handleServerTagSelect">
+            <AppMenuItem key="" item-key="">{{ t('catalogLibrary.filter.anyTag') }}</AppMenuItem>
+            <AppMenuDivider />
+            <AppMenuItem v-if="tagOptions.length === 0" key="__none" item-key="__none" disabled>
+              {{ t('catalogLibrary.filter.noTags') }}
+            </AppMenuItem>
+            <AppMenuItem v-for="option in tagOptions" :key="option.value" :item-key="option.value">
+              <PhCheck v-if="includeTagsProxy.includes(option.value)" class="check-icon" />
+              <span class="option-label" :title="option.value">{{ option.value }}</span>
+              <span class="option-count">{{ option.n }}</span>
+            </AppMenuItem>
+          </AppMenu>
+        </template>
+      </AppDropdown>
       <a-popover
         v-else
         v-model:open="showTagSelector"
@@ -725,6 +755,32 @@ async function loadEngineOptions(): Promise<void> {
   } catch {
     engineOptions.value = []
   }
+}
+/** 服务器库的标签选项：标签分面（当前文件夹 + 搜索词范围内），多选即「带其中任一」 */
+const tagOptions = ref<Array<{ value: string; n: number }>>([])
+async function loadTagOptions(): Promise<void> {
+  const facets = getActiveLibrarySource().facets
+  if (!facets) return
+  try {
+    tagOptions.value = await facets.tags({
+      folderKey: props.folderKey,
+      includeSubfolders: true,
+      keyword: props.keyword?.trim() || undefined
+    })
+  } catch {
+    tagOptions.value = []
+  }
+}
+const handleServerTagSelect = ({ key }: { key: string }): void => {
+  if (key === '__none') return
+  if (!key) {
+    includeTagsProxy.value = []
+    return
+  }
+  const current = includeTagsProxy.value
+  includeTagsProxy.value = current.includes(key)
+    ? current.filter((value) => value !== key)
+    : [...current, key]
 }
 const handleEngineSelect = ({ key }: { key: string }): void => {
   if (!key) {
@@ -1724,6 +1780,16 @@ const toggleAssetType = (classNameCn: string): void => {
       }
     }
   }
+}
+
+/* 标签名可能很长（中文长名）：一行截断，完整名字在悬浮提示里 */
+.option-label {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .option-count {

@@ -1407,11 +1407,15 @@ export default {
     reasons: {
       structure: '服务器库的结构由服务端管理',
       favorite: '收藏只对本地库生效',
+      favoriteFilter: '服务器库的收藏记在本机，请在左侧「我的收藏」里看',
+      cloudDrives: '网盘是本地库的导入来源；服务器库请把文件拖进来导入',
+      tagInUse: '这个标签还挂在 {count} 个资产上，先在资产上去掉它',
+      tagFavorite: '服务器库的标签没有「常用」',
       trash: '服务器库的回收站由服务端保留，暂不能在盒子里查看',
       scan: '服务器库不需要扫描，变化会自动推过来',
       folderSearch: '服务器还不支持按文件夹名搜索',
       dependencyGraph: '服务器库的依赖图还没有接入，先看上面的依赖列表',
-      tagManagement: '服务器库的标签表由服务端管理',
+      tagManagement: '服务器还没有标签注册表',
       sortByType: '服务器还不支持按类型排序',
       nativeDrag: '文件还在服务器上：先右键"导入到工程"',
       richNotes: '服务器库只支持一句话备注',
@@ -1421,9 +1425,20 @@ export default {
       offline: '连不上服务器',
       folderAnnotations: '服务器库的文件夹没有标签和备注。'
     },
+    unclaimed: {
+      notice: '有 {count} 条标签 / 备注的文件已不在库里（删除，或移动后没配上）',
+      show: '查看',
+      hide: '收起',
+      claimTo: '认领到 {name}',
+      noSuggestion: '没有相同内容的文件',
+      claimed: '已挪到 {name}',
+      claimFailed: '认领失败：可能没有这个仓库的写权限'
+    },
     filter: {
       allEngines: '全部引擎',
-      enginesWithCount: '{count} 个引擎版本'
+      enginesWithCount: '{count} 个引擎版本',
+      anyTag: '不限标签',
+      noTags: '这里的资产还没有标签'
     },
     add: {
       title: '添加服务器资产库',
@@ -1489,6 +1504,9 @@ export default {
       pickFolder: '选择文件夹',
       noFolder: '未选择',
       withDependencies: '连同依赖一起',
+      closure: '连同依赖共 {count} 个资产，约 {size}。',
+      closureMissing: '另有 {count} 个依赖库里没有。',
+      closureIncomplete: '依赖层级很深，可能还有更远的没算进来。',
       hint: '文件是复制进去的，在工程里改动不会影响服务器。',
       start: '开始'
     },

@@ -1031,7 +1031,6 @@ import {
   resolveAssetFilePath
 } from '@renderer/utils/thumbnails'
 import { resolveAssetAccess, resolveAssetUrlWithFallback } from '@renderer/utils/assetAccess'
-import { favoriteAPI } from '@renderer/api/favorite'
 import { useAssetNavigationStore } from '../../store/modules/assetNavigationStore'
 import { useGlobalAudioStore } from '@renderer/store/modules/globalAudio'
 import {
@@ -3450,6 +3449,8 @@ interface ListCriteria {
   folderKey?: string
   includeSubfolders: boolean
   keyword: string
+  /** 服务器库按名字筛标签 */
+  tagNames?: string[]
   tagFilter: { includeTagIds: number[]; excludeTagIds: number[]; matchMode: 'any' | 'all' }
   favoriteStatus?: string
   /** 只看回收站里的 */
@@ -3506,6 +3507,9 @@ const buildListCriteria = (options: {
     folderKey,
     includeSubfolders: includeSubfolders ?? false,
     keyword: filterForm.keyword,
+    // 服务器库的标签按名字筛（只能「带其中任一」）；本地库按 id，走下面的 tagFilter
+    tagNames:
+      libraryCaps.value.filters.tagMode === 'include-any' ? [...filterForm.includeTags] : [],
     tagFilter: {
       includeTagIds: filterForm.includeTags.map(Number).filter((n) => !isNaN(n)),
       excludeTagIds: filterForm.excludeTags.map(Number).filter((n) => !isNaN(n)),
@@ -5138,7 +5142,8 @@ const handleFavoritesShortcut = async () => {
      */
     const foldersRequest = hasAssetLevelQuery.value
       ? undefined
-      : favoriteAPI.getFavoriteFoldersWithDetails(FAVORITE_USER_ID, currentVault.value.id)
+      : // 走数据源：服务器库的收藏记在本机，本地库的在保管库里
+        getActiveLibrarySource().favorites.folders()
 
     const [favoriteAssets, favoriteFolders = []] = await Promise.all([
       searchAssetsWithCriteria(buildListCriteria({ scope: 'favorites' })),

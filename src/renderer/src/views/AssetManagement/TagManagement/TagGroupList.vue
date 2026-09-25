@@ -25,6 +25,7 @@
         <span class="count-badge">{{ ungroupedTagCount }}</span>
       </div>
       <div
+        v-if="!hideFavorite"
         class="filter-item"
         :class="{
           'filter-item-active': quickFilter === 'favorite' && selectedGroupId === null,
@@ -158,6 +159,8 @@ interface Props {
   unusedTagCount: number
   quickFilter: QuickFilter
   renamingGroupId: number | null
+  /** 标签库没有「常用」（服务器库）：不显示这一项 */
+  hideFavorite?: boolean
   renamingName: string
 }
 

@@ -57,6 +57,21 @@
       >
         {{ t('catalogLibrary.download.withDependencies') }}
       </AppCheckbox>
+      <!-- 服务端算好的完整闭包：放进去的是哪些、多大、缺什么，开始之前就知道 -->
+      <p v-if="withDependencies && closureSummary" class="closure">
+        {{
+          t('catalogLibrary.download.closure', {
+            count: closureSummary.count,
+            size: formatSize(closureSummary.bytes)
+          })
+        }}
+        <span v-if="closureSummary.missing > 0" class="closure-warn">{{
+          t('catalogLibrary.download.closureMissing', { count: closureSummary.missing })
+        }}</span>
+        <span v-if="!closureSummary.complete" class="closure-warn">{{
+          t('catalogLibrary.download.closureIncomplete')
+        }}</span>
+      </p>
       <p class="hint">{{ t('catalogLibrary.download.hint') }}</p>
       <AppAlert v-if="error" type="error" :message="error" show-icon />
     </div>
@@ -80,6 +95,7 @@ import AppSpin from '@renderer/components/AppSpin.vue'
 import { catalogLibraryAPI } from '@renderer/api/catalogLibrary'
 import type { CatalogAssetSummary } from '@core/shared/catalogLibrary'
 import { catalogErrorText } from './catalogErrors'
+import { formatSize } from './catalogDisplay'
 
 const props = defineProps<{ open: boolean; libraryKey: string; items: CatalogAssetSummary[] }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'started', jobId: string): void }>()
@@ -94,6 +110,50 @@ const error = ref<string | null>(null)
 const busy = ref(false)
 const projects = ref<Array<{ name: string; path: string }>>([])
 const projectsLoading = ref(false)
+
+/**
+ * 选中的资产连同依赖一共多少（服务端 …/dependencies?closure=true，每个资产一次请求）。
+ * 选得太多（> CLOSURE_PREVIEW_LIMIT）就不预先算了，开始后主进程照样按闭包取。
+ * 服务端不会算闭包时为 null，这一行不出现。
+ */
+const CLOSURE_PREVIEW_LIMIT = 20
+const closureSummary = ref<{
+  count: number
+  bytes: number
+  missing: number
+  complete: boolean
+} | null>(null)
+let closureRequest = 0
+async function loadClosure(): Promise<void> {
+  const request = ++closureRequest
+  closureSummary.value = null
+  if (props.items.length === 0 || props.items.length > CLOSURE_PREVIEW_LIMIT) return
+  try {
+    const closures = await Promise.all(
+      props.items.map((item) => catalogLibraryAPI.closure(props.libraryKey, item.id))
+    )
+    if (request !== closureRequest || closures.some((closure) => closure === null)) return
+    const sizes = new Map<number, number>()
+    const missing = new Set<string>()
+    let complete = true
+    for (const closure of closures) {
+      if (!closure) continue
+      complete &&= closure.complete
+      for (const node of closure.nodes) {
+        if (node.missing) missing.add(node.name)
+        else if (node.id !== null) sizes.set(node.id, node.size ?? 0)
+      }
+    }
+    closureSummary.value = {
+      count: sizes.size,
+      bytes: [...sizes.values()].reduce((sum, size) => sum + size, 0),
+      missing: missing.size,
+      complete
+    }
+  } catch {
+    closureSummary.value = null
+  }
+}
 
 const projectOptions = computed(() =>
   projects.value.map((project) => ({
@@ -130,6 +190,7 @@ watch(
     if (!open) return
     error.value = null
     void loadProjects()
+    void loadClosure()
   },
   { immediate: true }
 )
@@ -191,6 +252,17 @@ async function start(): Promise<void> {
     color: var(--color-text-muted);
     font-family: inherit;
   }
+}
+
+.closure {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.closure-warn {
+  margin-left: var(--space-2);
+  color: var(--color-warning-text);
 }
 
 .folder-row {
