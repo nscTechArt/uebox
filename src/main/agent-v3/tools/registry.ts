@@ -26,6 +26,7 @@
 import { aigcTools } from './aigc'
 import { taskVideoTools } from './builtin/taskVideo'
 import { engineTools } from './builtin/engines'
+import { projectPackageTools } from './builtin/projectPackage'
 import { createWebTools } from './builtin/web'
 import { createLocalFileTools } from './builtin/localFiles'
 import { createInspectUassetTool } from './builtin/inspectUasset'
@@ -1139,6 +1140,10 @@ export function listToolRisks(): Record<string, ToolRisk> {
     table[tool.name] = tool.unrealBox.risk
   }
 
+  for (const tool of projectPackageTools()) {
+    table[tool.name] = tool.unrealBox.risk
+  }
+
   for (const tool of aigcTools()) {
     table[tool.name] = tool.unrealBox.risk
   }
@@ -1295,6 +1300,8 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
     // 引擎清单是盒子的本地能力（扫安装记录、查进程），不依赖引擎连接，
     // 所以命名空间不是 ue.* —— 引擎没连上时它照样在
     ...engineTools,
+    // 打包成可执行文件、拿打包版冒烟。不依赖编辑器，所以不在 ue.* 下（断开引擎时也能用）
+    ...projectPackageTools(),
     // 会话体检。命名空间在 `ue.system` 下，但它**不依赖引擎连接** ——
     // 进程检测在盒子这一侧做，所以它同时进了 `createAgent.ts` 的
     // `OFFLINE_UE_TOOLS` 豁免名单：连不上的时候正是最需要它的时候。

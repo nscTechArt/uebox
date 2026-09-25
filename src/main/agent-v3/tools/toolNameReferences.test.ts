@@ -86,6 +86,7 @@ const NOT_TOOL_NAMES: Record<string, string> = {
   blueprint_read_only: 'blueprint_library_apply 的参数',
   // `project_` 是真前缀（project_list / project_manage），所以响应字段被当成了工具名
   project_rule_renames: 'project_rules 的响应字段',
+  project_path: 'project_package 的参数（工程目录）',
   material_name: 'material_create 的参数',
   widget_name: 'widget_* 那组工具的参数',
   sequence_path: 'sequence_* 那组工具的参数',

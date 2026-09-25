@@ -1078,9 +1078,10 @@ export async function runSubAgent(
  * 验收员手上的工具：`/goal` 审计员那一套，再加真能「玩」的两个。
  *
  * 审计员只要能回读和跑一遍；交付验收要从开始玩到胜负再重来，
- * 光 `ue_playtest` 模拟不了玩家输入，所以带上自动试玩和注入输入。
+ * 光 `ue_playtest` 模拟不了玩家输入，所以带上自动试玩和注入输入；
+ * 交了打包版的话，再拿 `project_smoke_test` 起一次打包版看会不会崩。
  */
-const ACCEPTANCE_TOOLS = [...AUDITOR_TOOLS, 'ue_autoplay', 'ue_inject_input']
+const ACCEPTANCE_TOOLS = [...AUDITOR_TOOLS, 'ue_autoplay', 'ue_inject_input', 'project_smoke_test']
 
 /** 队员的锁主。不带 `:sub-`，所以不会被 `rootSessionId` 归回制作人 */
 function memberLockOwner(sessionId: string, name: string): string {
@@ -1135,7 +1136,7 @@ function teamToolsFor(
         }
       })
     },
-    runAcceptance: async ({ report, howToPlay, projectPath, signal, onProgress }) => {
+    runAcceptance: async ({ report, howToPlay, projectPath, packageExe, signal, onProgress }) => {
       // 验收员什么都不带：不看制作过程，只看交付说明和游戏本身。
       // 不给审批通道，理由同 `/goal` 的审计员：它的授权边界就是那份工具白名单
       const result = await runSubAgent(ctx, {
@@ -1143,7 +1144,8 @@ function teamToolsFor(
           objective: team.objective,
           report,
           howToPlay,
-          ...(projectPath ? { projectPath } : {})
+          ...(projectPath ? { projectPath } : {}),
+          ...(packageExe ? { packageExe } : {})
         }),
         toolNames: ACCEPTANCE_TOOLS,
         withoutApproval: true,

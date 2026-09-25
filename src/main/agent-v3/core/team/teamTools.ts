@@ -65,6 +65,7 @@ export interface TeamToolDeps {
     report: string
     howToPlay: string
     projectPath?: string
+    packageExe?: string
     signal?: AbortSignal
     onProgress: (text: string) => void
   }) => Promise<string>
@@ -362,7 +363,11 @@ function createDeliverTool(deps: TeamToolDeps): UnrealAgentTool<GoalVerdict | nu
   const deliverInput = z.object({
     report: z.string().min(1).describe('交付说明：做了什么、玩法是什么、已知缺口'),
     how_to_play: z.string().min(1).describe('怎么玩：打开哪个关卡、操作键位、胜负条件'),
-    project_path: z.string().optional().describe('这次新建的工程目录')
+    project_path: z.string().optional().describe('这次新建的工程目录'),
+    package_exe: z
+      .string()
+      .optional()
+      .describe('打包出来的 exe（project_package 的结果）。给了的话验收员会拿它冒烟')
   })
 
   return defineTool<typeof deliverInput, GoalVerdict | null>({
@@ -374,11 +379,12 @@ function createDeliverTool(deps: TeamToolDeps): UnrealAgentTool<GoalVerdict | nu
       '交付验收。一个没参与制作的验收员会按交付标准真去玩一遍，回 PASS / FAIL / BLOCKED。' +
       'PASS 之前不算交付；FAIL 就按它说的修完再交；BLOCKED 就停下来告诉用户缺什么。',
     input: deliverInput,
-    execute: async ({ report, how_to_play, project_path }, ctx) => {
+    execute: async ({ report, how_to_play, project_path, package_exe }, ctx) => {
       const text = await deps.runAcceptance({
         report,
         howToPlay: how_to_play,
         ...(project_path ? { projectPath: project_path } : {}),
+        ...(package_exe ? { packageExe: package_exe } : {}),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
         onProgress: (line) => ctx.report({ text: line })
       })

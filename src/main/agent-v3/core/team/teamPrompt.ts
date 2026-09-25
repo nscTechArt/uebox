@@ -80,6 +80,7 @@ export function buildAcceptancePrompt(input: {
   report: string
   howToPlay: string
   projectPath?: string
+  packageExe?: string
 }): string {
   return [
     'You are the acceptance tester for a game an AI studio just delivered.',
@@ -87,6 +88,7 @@ export function buildAcceptancePrompt(input: {
     '',
     `<objective>${escapeXml(input.objective)}</objective>`,
     ...(input.projectPath ? [`Project: ${escapeXml(input.projectPath)}`] : []),
+    ...(input.packageExe ? [`Packaged build: ${escapeXml(input.packageExe)}`] : []),
     '',
     'The producer handed it over with this:',
     `<delivery_report>${escapeXml(input.report)}</delivery_report>`,
@@ -94,6 +96,8 @@ export function buildAcceptancePrompt(input: {
     '',
     'The bar:',
     ...DELIVERY_STANDARD,
+    '',
+    'If there is a packaged build, also run `project_smoke_test` on it: a build that will not start is not delivered.',
     '',
     'Judge the game in front of you, not the report:',
     '- Run it. Compile, play it in the editor, try the loop from start to a win or a loss and back again. A clean compile is not a game that works.',

@@ -209,7 +209,8 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.input': '输入 按键 操作 映射 input action key mapping',
   asset: '盒子素材库 保管库 标签 文件夹 asset library vault tag folder',
   library: '蓝图库 材质库 片段 收藏 snippet library',
-  project: '工程 项目 创建 打开 启动 project create open launch',
+  project:
+    '工程 项目 创建 打开 启动 打包 发布 可执行文件 冒烟 project create open launch package build exe smoke',
   engine: '引擎 版本 安装 路径 engine version install path',
   aigc: '生成 图片 视频 三维 generate image video 3d',
   'video.production': '剪辑 成片 字幕 配音 合成 时间线 video edit subtitle voiceover render',
