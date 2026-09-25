@@ -301,15 +301,15 @@ export default {
       label: 'Open to external clients',
       // One line at the top level; the permission settings show full details when writable.
       shortNote:
-        'Let Claude Code or Cursor drive your engine. Loopback only, token required, writable by default.',
+        "Give Codex or Claude Code every tool Unreal Box's assistant has. Loopback only, token required, writable by default.",
       securityNote:
-        'External calls do NOT go through the approval prompt — write operations run immediately. Local file and shell tools are never exposed. If the token leaks, whoever has it can change your project.',
+        "External clients get the same tools as Unreal Box's assistant, including local file access and shell commands. Unreal Box shows no approval prompt; the client's own approval settings decide what gets stopped. If the token leaks, whoever has it can change your project and the files on this computer.",
       securityNoteIdle:
-        'Once enabled, external calls do NOT go through the approval prompt — write operations run immediately. Local file and shell tools are never exposed. If the token leaks, whoever has it can change your project.',
+        "Once enabled, external clients get the same tools as Unreal Box's assistant, including local file access and shell commands. Unreal Box shows no approval prompt; the client's own approval settings decide what gets stopped. If the token leaks, whoever has it can change your project and the files on this computer.",
       includeMutating: 'External client permissions',
       scopeReadOnly: 'Currently read-only. Turn on to allow creating, editing, and deleting.',
       scopeWritable:
-        'Currently writable: external clients can create, edit, and delete your assets.',
+        'Currently writable: external clients can edit and delete your assets, read and write local files, and run commands.',
       stopToChange:
         'The port cannot be changed while the service is running; turn the switch above off first.',
       port: 'Port',

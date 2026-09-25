@@ -660,11 +660,8 @@ appReady?.then(async () => {
     // 是长期配置；要求用户每次开机再进设置点一次「开启」，那份配置就等于废的。
     // 动态 import 是为了不把整棵工具树拉进启动路径的静态依赖图。
     void (async () => {
-      const [{ autoStartMcpServer }, { buildAllTools }] = await Promise.all([
-        import('./agent-v3/capabilities/mcp'),
-        import('./agent-v3/tools/registry')
-      ])
-      await autoStartMcpServer(() => buildAllTools())
+      const { autoStartMcpServer, mcpSessionSource } = await import('./agent-v3/capabilities/mcp')
+      await autoStartMcpServer(() => mcpSessionSource)
     })().catch((e) => logger.warn('[MCP-Server] 自动启动失败:', e))
 
     installOfflineNetworkPolicy({ enforce: false })

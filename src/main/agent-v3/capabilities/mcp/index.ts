@@ -7,14 +7,20 @@
 
 import { McpClientManager } from './McpClientManager'
 import { discoverEpicMcpServersFromRuntime } from './epicToolsets'
-import { McpServerHost, type McpServerHostOptions, type McpServerHostStatus } from './McpServerHost'
+import {
+  McpServerHost,
+  type McpServerHostOptions,
+  type McpServerHostStatus,
+  type McpToolSource
+} from './McpServerHost'
+import type { UnrealAgentTool } from '../../tools/defineTool'
 import { readHostSettings, writeHostSettings, type McpHostSettings } from './hostStore'
 import { readMcpSettings } from './store'
 import type { McpServerStatus } from './types'
 
 export { McpClientManager } from './McpClientManager'
 export { McpServerHost, selectExposedTools } from './McpServerHost'
-export type { McpServerHostOptions, McpServerHostStatus } from './McpServerHost'
+export type { McpServerHostOptions, McpServerHostStatus, McpToolSource } from './McpServerHost'
 export {
   DEFAULT_HOST_PORT,
   mcpHostSettingsPath,
@@ -107,7 +113,23 @@ export function currentStatuses(): McpServerStatus[] {
 // 是否开机自启及外部客户端权限都由 hostStore 持久化；外部客户端的配置
 // 是长期配置，地址与凭据跨重启保持稳定。
 
-type ToolList = Parameters<McpServerHost['start']>[0]
+type ToolList = UnrealAgentTool<never>[]
+
+/**
+ * 外部会话的工具与说明：和盒子助手同一条装配路，见 `hostSession.ts`。
+ *
+ * 动态 import：那边拉着整棵工具树和 createAgent，不能进开机路径的静态依赖图。
+ */
+export const mcpSessionSource: McpToolSource = async (request) =>
+  (await import('./hostSession')).setupMcpSession(request)
+
+/**
+ * 固定清单先按用户关掉的名单滤一遍；按会话装配的来源在装配时自己滤
+ * （`applyFinalToolPolicy`，和盒子助手是同一处）。
+ */
+async function narrowed(source: McpToolSource): Promise<McpToolSource> {
+  return Array.isArray(source) ? withoutDisabledTools(source) : source
+}
 
 /**
  * 去掉用户在「设置 → 工具」里关掉的那些。
@@ -138,7 +160,7 @@ const serverHost = new McpServerHost()
  * 地址和凭据必须跨重启稳定，否则用户粘进 Claude Code 的那份配置隔天就失效。
  */
 export async function startMcpServer(
-  tools: ToolList,
+  tools: McpToolSource,
   options: McpServerHostOptions = {}
 ): Promise<McpServerHostStatus> {
   const saved = await readHostSettings()
@@ -148,7 +170,7 @@ export async function startMcpServer(
     includeMutating: options.includeMutating ?? saved.includeMutating
   }
 
-  const status = await serverHost.start(await withoutDisabledTools(tools), {
+  const status = await serverHost.start(await narrowed(tools), {
     ...options,
     port: next.port,
     token: next.token,
@@ -185,7 +207,7 @@ export async function saveMcpServerConfig(
 /** 保存后让运行中的服务立即采用新端口或权限；未启动和无变化时不重启。 */
 export async function applyMcpServerConfig(
   patch: Partial<Pick<McpHostSettings, 'port' | 'includeMutating'>>,
-  buildTools: () => ToolList
+  buildTools: () => McpToolSource
 ): Promise<McpServerHostStatus> {
   const previous = await readHostSettings()
   const next = await saveMcpServerConfig(patch)
@@ -216,12 +238,12 @@ export function mcpServerStatus(): McpServerHostStatus {
  *
  * 失败只记日志：对外暴露是可选能力，端口被占用不该让盒子起不来。
  */
-export async function autoStartMcpServer(buildTools: () => ToolList): Promise<void> {
+export async function autoStartMcpServer(buildTools: () => McpToolSource): Promise<void> {
   const settings = await readHostSettings().catch(() => undefined)
   if (!settings?.enabled) return
 
   try {
-    const status = await serverHost.start(await withoutDisabledTools(buildTools()), {
+    const status = await serverHost.start(await narrowed(buildTools()), {
       port: settings.port,
       token: settings.token,
       includeMutating: settings.includeMutating

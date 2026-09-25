@@ -12,12 +12,12 @@
  *
  * ## 安全
  *
- * 这个 server 能删资产、跑任意 Python、改项目配置。所以：
+ * 这个 server 能删资产、跑任意 Python 和 shell 命令、读写本机文件。所以：
  *
- *   - **默认关闭**，用户在设置里显式开启
  *   - **只监听 127.0.0.1** —— 绑 0.0.0.0 等于把引擎控制权开放给局域网
  *   - **强制 token**，随机生成，握手时校验
- *   - **按命名空间白名单**收窄暴露范围，默认只给只读工具
+ *   - **审批交给客户端**：工具清单带标准注解（只读 / 破坏性），由 Codex、
+ *     Claude Code 按各自的审批策略拦。用户可以在设置里整体收窄成只读
  *
  * 社区版不得引入任何远程上报（AGENTS.md §1）—— 这个 server 全程本地回环，
  * 不联网、不上报。
@@ -36,7 +36,11 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import {
   CallToolRequestSchema,
   isInitializeRequest,
-  ListToolsRequestSchema
+  ListToolsRequestSchema,
+  type ClientCapabilities,
+  type ElicitRequestFormParams,
+  type ElicitResult,
+  type ToolAnnotations
 } from '@modelcontextprotocol/sdk/types.js'
 
 import { runWithTargetConnectionId } from '../../core/projectTargetContext'
@@ -85,6 +89,8 @@ const MAX_INIT_BODY_BYTES = 1 << 20
 interface Session {
   server: Server
   transport: StreamableHTTPServerTransport
+  /** 这条会话能调的工具。按会话装配：浏览器、ask_user 这些工具带着会话自己的状态 */
+  tools: UnrealAgentTool<never>[]
   /** 最后一次请求结束的时刻，空闲回收看它 */
   lastActiveAt: number
   /** 正在处理中的请求数。>0 时绝不回收 —— 长请求不是空闲 */
@@ -112,6 +118,38 @@ export interface McpServerHostOptions {
   token?: string
 }
 
+/**
+ * 一条外部会话的装配结果：它能用哪些工具、握手时下发什么说明。
+ *
+ * 由宿主层按会话现造（见 `hostSession.ts`）—— 和盒子助手每轮装配工具走的是
+ * 同一条路，外部客户端拿到的就是盒子助手手上那一套。
+ */
+export interface McpSessionSetup {
+  tools: UnrealAgentTool<never>[]
+  /** MCP `initialize` 结果里的 `instructions`，客户端拿它当系统提示的一部分 */
+  instructions?: string
+}
+
+export interface McpSessionRequest {
+  /** 这条会话的 id，也是 MCP 的 `Mcp-Session-Id` */
+  sessionId: string
+  /** 用户把对外服务收窄成了只读（没开 `includeMutating`）。等同盒子里的 Ask 模式 */
+  readOnly: boolean
+  /** 客户端在 initialize 里声明的能力。预览清单时没有 */
+  clientCapabilities?: ClientCapabilities
+  /** 向客户端发起一次表单询问（MCP elicitation）。只在客户端声明支持时给 */
+  elicit?: (params: ElicitRequestFormParams, signal?: AbortSignal) => Promise<ElicitResult>
+}
+
+/**
+ * 工具从哪来。
+ *
+ * 给数组就是所有会话共用一份固定清单（测试、调试入口）；给函数就每条会话现造一份。
+ */
+export type McpToolSource =
+  | UnrealAgentTool<never>[]
+  | ((request: McpSessionRequest) => Promise<McpSessionSetup>)
+
 export interface McpServerHostStatus {
   running: boolean
   url?: string
@@ -125,6 +163,8 @@ export class McpServerHost {
   private token?: string
   private port?: number
   private exposed: UnrealAgentTool<never>[] = []
+  private source: McpToolSource = []
+  private options: McpServerHostOptions = {}
   private lastError?: string
   /** 按 MCP session id 索引。每个 initialize 请求造一条 */
   private sessions = new Map<string, Session>()
@@ -133,16 +173,30 @@ export class McpServerHost {
   /**
    * 起服务。
    *
-   * @param allTools 注册表里的全部工具，由调用方提供 —— 这个类不自己去 build，
-   *                 否则会把工具树的依赖拉进来，也不方便测试。
+   * @param source 工具从哪来，由调用方提供 —— 这个类不自己去 build，
+   *               否则会把工具树的依赖拉进来，也不方便测试。
    */
   async start(
-    allTools: UnrealAgentTool<never>[],
+    source: McpToolSource,
     options: McpServerHostOptions = {}
   ): Promise<McpServerHostStatus> {
     await this.stop()
 
-    this.exposed = selectExposedTools(allTools, options)
+    this.source = source
+    this.options = options
+    // 状态里那个「暴露了几个工具」要在没人连上之前就能报，所以先按一条
+    // 不存在的会话预览一次。按会话现造的工具这里造出来就丢，不留状态
+    this.exposed = selectExposedTools(
+      Array.isArray(source)
+        ? source
+        : (
+            await source({
+              sessionId: `mcp-preview-${randomUUID()}`,
+              readOnly: !options.includeMutating
+            })
+          ).tools,
+      options
+    )
     this.token = options.token || randomBytes(24).toString('hex')
 
     this.http = createServer((req, res) => {
@@ -267,20 +321,32 @@ export class McpServerHost {
       return
     }
 
-    const session = await this.createSession()
+    let session: Session
+    try {
+      session = await this.createSession(body.params.capabilities)
+    } catch (error) {
+      jsonRpcError(res, 500, -32603, `会话装配失败：${(error as Error).message}`)
+      return
+    }
     // body 已经被我们读掉了，必须原样交给 transport —— 它自己再读一次
     // 会拿到一个空流，然后报「请求体为空」
     await this.handleWithSession(session, req, res, body)
   }
 
   /** 造一条新会话：一个 Server、一个 Transport，注册进表里 */
-  private async createSession(): Promise<Session> {
-    // 先把壳造出来，再往里填 —— 下面两个回调都要引用这条会话本身，
+  private async createSession(clientCapabilities: ClientCapabilities): Promise<Session> {
+    // 先把壳造出来，再往里填 —— 下面几个回调都要引用这条会话本身，
     // 而它们最早也要等到 `handleRequest` 才会被调到（那时字段已经填完了）。
     const session = {} as Session
 
+    // id 由我们先定，而不是等 transport 在握手时现生成：工具要在握手**之前**
+    // 按这个 id 装配（浏览器窗口、提问都挂在会话 id 上）
+    const sessionId = `mcp-${randomUUID()}`
+    const setup = await this.setupSession(session, sessionId, clientCapabilities)
+    session.tools = setup.tools
+
     session.transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
+      sessionIdGenerator: () => sessionId,
       // session id 是在 handleRequest 里现生成的，注册进表要等到那一刻
       onsessioninitialized: (id) => {
         this.sessions.set(id, session)
@@ -291,7 +357,7 @@ export class McpServerHost {
       }
     })
 
-    session.server = this.buildServer()
+    session.server = this.buildServer(session, setup.instructions)
     await session.server.connect(session.transport)
 
     // 传输层因为任何原因关掉（网络断、close()）都要把表清干净，
@@ -332,6 +398,30 @@ export class McpServerHost {
     }
   }
 
+  /** 按来源装配一条会话的工具和说明，再过一遍暴露范围 */
+  private async setupSession(
+    session: Session,
+    sessionId: string,
+    clientCapabilities: ClientCapabilities
+  ): Promise<McpSessionSetup> {
+    if (Array.isArray(this.source)) return { tools: this.exposed }
+
+    const setup = await this.source({
+      sessionId,
+      readOnly: !this.options.includeMutating,
+      clientCapabilities,
+      // 只有客户端说了支持才给：不支持的客户端收到 elicitation 请求只会报错，
+      // 而 ask_user 会挂在那儿等一个不会来的回答
+      ...(clientCapabilities.elicitation
+        ? {
+            elicit: (params: ElicitRequestFormParams, signal?: AbortSignal) =>
+              session.server.elicitInput(params, signal ? { signal } : undefined)
+          }
+        : {})
+    })
+    return { ...setup, tools: selectExposedTools(setup.tools, this.options) }
+  }
+
   /** 回收闲置会话。在飞的请求一律跳过 */
   private sweepIdleSessions(): void {
     const now = Date.now()
@@ -346,11 +436,12 @@ export class McpServerHost {
 
   // ── MCP 协议实现 ──────────────────────────────────────────────────────────
 
-  /** 每条会话一个 Server 实例。工具清单是共享的只读快照，不复制 */
-  private buildServer(): Server {
+  /** 每条会话一个 Server 实例，工具清单是这条会话自己的那份 */
+  private buildServer(session: Session, instructions?: string): Server {
     const mcp = new Server(
       { name: 'unreal-box', version: '1.0.0' },
       {
+        ...(instructions ? { instructions } : {}),
         capabilities: {
           tools: {},
           // 契约声明。外部客户端先读它，才知道这个盒子认不认 `_meta.unrealBox`
@@ -362,16 +453,19 @@ export class McpServerHost {
     )
 
     mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: this.exposed.map((tool) => ({
+      tools: session.tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
         // 工具带的已经是 JSON Schema，原样给出去
         inputSchema: tool.parameters as { type: 'object' },
+        annotations: describeToolAnnotations(tool),
         _meta: { unrealBox: describeToolMeta(tool) }
       }))
     }))
 
-    mcp.setRequestHandler(CallToolRequestSchema, async (request) => this.callTool(request))
+    mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
+      this.callTool(session, request, extra.signal)
+    )
     return mcp
   }
 
@@ -380,10 +474,14 @@ export class McpServerHost {
    *
    * 三件事按顺序：找工具 → 定目标工程 → 在目标上下文里执行。
    */
-  private async callTool(request: {
-    params: { name: string; arguments?: unknown; _meta?: Record<string, unknown> }
-  }): Promise<CallToolOutcome> {
-    const tool = this.exposed.find((t) => t.name === request.params.name)
+  private async callTool(
+    session: Session,
+    request: {
+      params: { name: string; arguments?: unknown; _meta?: Record<string, unknown> }
+    },
+    signal?: AbortSignal
+  ): Promise<CallToolOutcome> {
+    const tool = session.tools.find((t) => t.name === request.params.name)
     if (!tool) {
       return failure(`工具 ${request.params.name} 不存在或未暴露`, 'TOOL_UNAVAILABLE')
     }
@@ -405,9 +503,11 @@ export class McpServerHost {
       // 没指定目标就**不进上下文**，保持与改动之前完全一致的行为：
       // 旧的第三方客户端（Claude Code / Cursor）不发这个字段，
       // 它们的调用照旧落到「恰好一个连接才回退」那条路上。
+      // 客户端取消（notifications/cancelled）会触发这个 signal —— 和用户在盒子里按停止
+      // 走同一条路，等待类的工具（体检里的等待、浏览器）能立刻停下
       const result = target
-        ? await runWithTargetConnectionId(target, () => tool.execute(callId, args))
-        : await tool.execute(callId, args)
+        ? await runWithTargetConnectionId(target, () => tool.execute(callId, args, signal))
+        : await tool.execute(callId, args, signal)
 
       const structured = toStructuredContent(tool.name, result.details)
       return {
@@ -462,6 +562,8 @@ export class McpServerHost {
     this.port = undefined
     this.token = undefined
     this.exposed = []
+    this.source = []
+    this.options = {}
 
     if (this.sweeper) {
       clearInterval(this.sweeper)
@@ -534,7 +636,7 @@ function failure(message: string, code: string): CallToolOutcome {
  *
  * 用途是**发现和说明**，不是权限：外部调用方据此知道「这个工具要不要指定
  * 工程」「它会不会改东西」。真正的范围检查仍然在服务端每次调用时做
- * （`selectExposedTools` 决定了 `this.exposed` 里有什么）。
+ * （`selectExposedTools` 决定了每条会话的 `tools` 里有什么）。
  */
 function describeToolMeta(tool: UnrealAgentTool<never>): Record<string, unknown> {
   const namespace = tool.unrealBox.namespace
@@ -545,6 +647,29 @@ function describeToolMeta(tool: UnrealAgentTool<never>): Record<string, unknown>
     // （见 tools/toolNames.ts 的 OFFLINE_UE_TOOLS）
     projectScoped: namespace.startsWith('ue.') && !OFFLINE_UE_TOOLS.has(tool.name),
     requiresExplicitApproval: tool.unrealBox.requiresExplicitApproval === true
+  }
+}
+
+/**
+ * MCP 标准的工具注解。审批交给客户端（Codex / Claude Code）按这些提示自己决定。
+ *
+ * 盒子自己的审批门在这一头不跑，所以这里的提示必须往严里写：
+ * 要求逐次审批的工具一律标成破坏性，客户端才会每次都问。
+ */
+function describeToolAnnotations(tool: UnrealAgentTool<never>): ToolAnnotations {
+  const { namespace, risk, requiresExplicitApproval } = tool.unrealBox
+  // `task` 自己声明 safe（派子任务本身不改东西），但子任务在盒子里跑、不过客户端的审批，
+  // 它能做的就是整个工具池能做的。对外按最坏情况标
+  const delegates = tool.name === 'task'
+  return {
+    readOnlyHint: risk === 'safe' && requiresExplicitApproval !== true && !delegates,
+    destructiveHint: risk === 'destructive' || requiresExplicitApproval === true || delegates,
+    // 转发来的第三方工具、联网读写的工具，碰的都是盒子之外的东西
+    openWorldHint:
+      namespace === 'mcp' ||
+      namespace.startsWith('mcp.') ||
+      namespace === 'web' ||
+      namespace === 'browser'
   }
 }
 
@@ -611,8 +736,17 @@ function describeListenError(error: Error, port: number): string {
 /**
  * 挑出要暴露的工具。
  *
- * 默认只给只读的 —— 把「删除资产」「执行任意 Python」直接开放给外部客户端，
- * 一个配错的 agent 就能把用户项目搞坏。要开放写权限必须显式声明。
+ * 外部客户端拿到的就是盒子助手手上那一套 —— 本地文件、shell、浏览器、转发来的
+ * 第三方 MCP 工具、`task` / `load_skill` 都在内。两边拿同一套工具，在 Codex 里
+ * 和在盒子里做同一件事，差别只剩模型和打法，这是能拿来对比的前提。
+ *
+ * 审批交给客户端：盒子的审批门只在自己的 agent 循环里跑，这一头是
+ * `tool.execute()` 直接调用。工具清单里的 `annotations` 如实标出只读 / 破坏性，
+ * 客户端按它自己的审批策略决定问不问（见 `describeToolAnnotations`）。
+ *
+ * 只剩两道收窄，都是用户自己的选择：
+ *   - `includeMutating` 关掉 = 只读，等同盒子里的 Ask 模式
+ *   - 命名空间白名单
  */
 export function selectExposedTools(
   allTools: UnrealAgentTool<never>[],
@@ -620,44 +754,16 @@ export function selectExposedTools(
 ): UnrealAgentTool<never>[] {
   let tools = allTools
 
-  // 不转发从别的 MCP server 接进来的工具：那会形成 A→盒子→B 的转发链，
-  // 权限来源变得无法追踪，出问题也说不清是谁调的。`mcp` 本身（connect_mcp_server）
-  // 更不能给：它会在这台机器上起任意进程、还写进 mcp.json 每次启动都起。
-  tools = tools.filter(
-    (tool) => tool.unrealBox.namespace !== 'mcp' && !tool.unrealBox.namespace.startsWith('mcp.')
-  )
-
-  // 必须当面问过用户才能跑的工具，这一头没有审批门，一律不给
-  tools = tools.filter((tool) => tool.unrealBox.requiresExplicitApproval !== true)
-
-  // core 命名空间（task / load_skill）是盒子内部编排用的，对外没有意义
-  tools = tools.filter((tool) => tool.unrealBox.namespace !== 'core')
-
-  // 本地文件与 shell 一律不对外，勾了 includeMutating 也不行。
-  //
-  // 两个理由，任一成立都足够：
-  //
-  //   1. **没有审批门**。盒子内部调 `run_shell_command` 会走 approval 弹窗；
-  //      MCP 这一头是 `tool.execute()` 直接调用，没有任何拦截。也就是说
-  //      勾上「同时开放写操作工具」等于把这台机器的任意命令执行权
-  //      交给任何拿到 token 的进程 —— 而界面上写的是「这个服务能操作你的
-  //      引擎项目」，两者不是一个量级。
-  //   2. **没有价值**。会连上来的客户端（Claude Code、Cursor、Cline）
-  //      本来就自带读写文件和跑命令的能力，转发我们这一份只是多一条
-  //      追不到源头的路径。
-  //
-  // 这个服务的卖点是**虚幻引擎**能力，不是通用的机器控制。
-  tools = tools.filter(
-    (tool) => tool.unrealBox.namespace !== 'local' && !tool.unrealBox.namespace.startsWith('local.')
-  )
-
   if (options.namespaces?.length) {
     const allowed = new Set(options.namespaces)
     tools = tools.filter((tool) => allowed.has(tool.unrealBox.namespace))
   }
 
   if (!options.includeMutating) {
-    tools = tools.filter((tool) => tool.unrealBox.risk === 'safe')
+    // 要求逐次审批的工具即使声明 safe 也不算只读（浏览器那几个动的是用户的登录态）
+    tools = tools.filter(
+      (tool) => tool.unrealBox.risk === 'safe' && tool.unrealBox.requiresExplicitApproval !== true
+    )
   }
 
   return tools

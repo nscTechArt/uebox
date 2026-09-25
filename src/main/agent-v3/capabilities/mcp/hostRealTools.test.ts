@@ -25,8 +25,23 @@ vi.mock('../../core/projectTargetContext', async (importOriginal) =>
   targetContextMock(importOriginal)
 )
 
+vi.mock('../../../appSettingsManager', () => ({
+  appSettingsManager: { getSettings: () => ({ agentDisabledTools: [] }) }
+}))
+vi.mock('../../../services/project/projectManager', () => ({
+  projectManager: { getInteractiveProjects: () => [] }
+}))
+vi.mock('../../tools/builtin/localShell', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  isShellAvailable: async () => true
+}))
+vi.mock('./index', () => ({
+  ensureConnected: async () => ({ getTools: () => [], getStatuses: () => [] })
+}))
+
 import { buildAllTools } from '../../tools/registry'
-import { McpServerHost, selectExposedTools } from './McpServerHost'
+import { setupMcpSession } from './hostSession'
+import { McpServerHost } from './McpServerHost'
 
 const hosts: McpServerHost[] = []
 const clients: Client[] = []
@@ -88,31 +103,48 @@ describe('外部客户端看到的是真实工具', () => {
   }, 60_000)
 
   /**
-   * 危险的东西**永远**不对外，勾了 includeMutating 也不行。
-   *
-   * MCP 这一头没有审批门 —— `McpServerHost` 是 `tool.execute()` 直接调用，
-   * 盒子内部那套 approval 弹窗完全不参与。所以 `run_shell_command` 一旦暴露，
-   * 等于把任意命令执行权交给任何拿到 token 的进程。
-   *
-   * 这条如果挂了，说明有人给对外暴露加了新的命名空间又忘了想这件事。
+   * 开了写操作就和盒子助手手上一样全：本地文件、shell、接第三方 MCP 都在。
+   * 审批交给客户端，按工具注解拦 —— 这条挂了说明又有人在对外那一层砍了一刀，
+   * 两边工具对不上，Codex 和盒子的效果就没法比。
    */
-  it('本地文件与 shell 工具在任何配置下都不对外', async () => {
-    const exposed = selectExposedTools(buildAllTools() as never, { includeMutating: true }).map(
-      (t) => t.name
-    )
-    // connect_mcp_server 会起任意本地进程并写进 mcp.json，同理
+  it('开了写操作后本地文件、shell、接第三方 MCP 都对外', async () => {
+    const names = await listRealTools({ includeMutating: true })
     for (const name of [
       'run_shell_command',
       'write_local_file',
       'edit_local_file',
+      'read_local_file',
+      'inspect_uasset_file',
       'connect_mcp_server'
     ]) {
-      expect(exposed).not.toContain(name)
+      expect(names).toContain(name)
     }
-    expect(exposed).not.toContain('task')
-    expect(exposed).not.toContain('load_skill')
+  }, 60_000)
 
-    // 走一遍真实协议，确认过滤发生在 listTools 之前而不是只在这个纯函数里
-    expect(await listRealTools({ includeMutating: true })).not.toContain('run_shell_command')
+  /**
+   * 按会话装配走的是盒子助手那条路（`resolveAgentTools`），比注册表多出
+   * 技能、task、浏览器这些现造的工具。它们的 schema 同样要过 MCP 的校验。
+   */
+  it('按会话装配的完整工具池能被外部客户端列出来，并带着盒子的系统提示', async () => {
+    const host = new McpServerHost()
+    hosts.push(host)
+    const status = await host.start(setupMcpSession, { includeMutating: true })
+    expect(status.running).toBe(true)
+
+    const client = new Client({ name: 'external', version: '1.0.0' }, { capabilities: {} })
+    clients.push(client)
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(status.url!), {
+        requestInit: { headers: { Authorization: `Bearer ${status.token}` } }
+      })
+    )
+
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    expect(names).toContain('task')
+    expect(names).toContain('browser_open')
+    expect(names).toContain('run_shell_command')
+    // 没声明 elicitation 的客户端不给 ask_user —— 给了只会挂在那儿等
+    expect(names).not.toContain('ask_user')
+    expect(client.getInstructions()).toContain('You are the AI assistant inside Unreal Box')
   }, 60_000)
 })

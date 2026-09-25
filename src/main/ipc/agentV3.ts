@@ -72,13 +72,14 @@ import {
   readHostSettings,
   rotateHostToken,
   applyMcpServerConfig,
+  mcpSessionSource,
   type McpServerHostOptions,
   type McpServerHostStatus,
   type McpServerConfig,
   type McpSettings
 } from '../agent-v3/capabilities/mcp'
 import { clientConfigSnippet, hostUrl } from '../agent-v3/capabilities/mcp/hostStore'
-import { buildAllTools, listToolCatalog, listToolRisks } from '../agent-v3/tools/registry'
+import { listToolCatalog, listToolRisks } from '../agent-v3/tools/registry'
 import {
   restoreAssetSnapshot,
   snapshotAsset,
@@ -2914,9 +2915,8 @@ export function registerAgentV3IPC(): void {
   // 按持久化配置运行。开启后 Claude Code / Cursor 等外部客户端能直接操作虚幻引擎。
   ipcMain.handle('agent-v3:mcp-server:start', async (_event, args: McpServerHostOptions = {}) => {
     try {
-      // 传全量工具，由 selectExposedTools 按 options 收窄 ——
-      // 按用户保存的权限档位暴露工具
-      const status = await startMcpServer(buildAllTools(), args)
+      // 每条外部会话按盒子助手的装配路现造工具，再按用户保存的权限档位收窄
+      const status = await startMcpServer(mcpSessionSource, args)
       return { success: true, status: await withHostSettings(status) }
     } catch (error) {
       return { success: false, error: (error as Error).message }
@@ -2940,7 +2940,7 @@ export function registerAgentV3IPC(): void {
     'agent-v3:mcp-server:save-config',
     async (_event, args: { port?: number; includeMutating?: boolean } = {}) => {
       const wasRunning = mcpServerStatus().running
-      const status = await applyMcpServerConfig(args, buildAllTools)
+      const status = await applyMcpServerConfig(args, () => mcpSessionSource)
       const success = !wasRunning || status.running
       return {
         success,
@@ -2961,7 +2961,7 @@ export function registerAgentV3IPC(): void {
     const settings = await rotateHostToken()
     if (!wasRunning) return { success: true, status: await withHostSettings(mcpServerStatus()) }
 
-    const status = await startMcpServer(buildAllTools(), {
+    const status = await startMcpServer(mcpSessionSource, {
       port: settings.port,
       includeMutating: settings.includeMutating
     })
