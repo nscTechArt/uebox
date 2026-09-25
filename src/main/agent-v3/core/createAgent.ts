@@ -78,7 +78,7 @@ import { releaseAll, runWithLockOwner } from './assetLock'
 import { AUDITOR_TOOLS, type GoalVerdict } from './goalLoop'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
 import { memberFileBase, type TeamMember, type TeamStore } from './team/teamStore'
-import { createBoardTool, createTeamTools } from './team/teamTools'
+import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
 
 /**
  * 一次引擎体检的结果 —— 「此刻这条会话够不够得着引擎，够得着的是哪个工程」。
@@ -1080,7 +1080,11 @@ function teamToolsFor(
   pool: UnrealAgentTool<never>[]
 ): UnrealAgentTool<never>[] {
   if (ctx.teamMember) {
-    return [createBoardTool(ctx.teamMember.store) as unknown as UnrealAgentTool<never>]
+    // 队员拿任务板和留言：交接、提问都靠这两样，它看不到制作人的对话
+    return [
+      createBoardTool(ctx.teamMember.store),
+      createMessageTool(ctx.teamMember.store, ctx.teamMember.name)
+    ] as unknown as UnrealAgentTool<never>[]
   }
   const team = ctx.team
   if (!team || ctx.isSubAgent) return []

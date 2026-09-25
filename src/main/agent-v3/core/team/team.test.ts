@@ -9,11 +9,11 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
 import { parseTeamCommand } from './teamCommand'
 import { editorKeyActive, runWithEditorKey, withEditorKey } from './editorKey'
-import { createTeamStore, memberFileBase, type TeamStore } from './teamStore'
+import { createTeamStore, memberFileBase, PRODUCER, type TeamStore } from './teamStore'
 import {
-  createSlots,
+  createMessageTool,
   createTeamTools,
-  MAX_PARALLEL_MEMBERS,
+  formatMail,
   renderBoard,
   type TeamToolDeps
 } from './teamTools'
@@ -107,37 +107,6 @@ describe('编辑器钥匙', () => {
       await Promise.resolve()
       expect(editorKeyActive()).toBe(true)
     })
-  })
-})
-
-describe('队员名额', () => {
-  it('满了就排队，放一个进一个', async () => {
-    const slots = createSlots(1)
-    const first = await slots.acquire()
-    let second: (() => void) | undefined
-    const waiting = slots.acquire().then((release) => (second = release))
-    await Promise.resolve()
-    expect(second).toBeUndefined()
-    first()
-    await waiting
-    expect(slots.running()).toBe(1)
-    second!()
-    expect(slots.running()).toBe(0)
-  })
-
-  it('排队中被停下就退出，不占名额；重复放手不会多放', async () => {
-    const slots = createSlots(1)
-    const held = await slots.acquire()
-    const controller = new AbortController()
-    const waiting = slots.acquire(controller.signal)
-    controller.abort()
-    await expect(waiting).rejects.toBeTruthy()
-    held()
-    held()
-    expect(slots.running()).toBe(0)
-    const again = await slots.acquire()
-    expect(slots.running()).toBe(1)
-    again()
   })
 })
 
@@ -307,30 +276,6 @@ describe('团队工具', () => {
     expect(overlapOthers).toBe(true)
   })
 
-  /**
-   * 真机上三个队员并行，同时打到套餐网关，三个请求一起被挂 5 分钟再断开。
-   * 同一时间最多 MAX_PARALLEL_MEMBERS 个队员在跑，多的排队而不是报错。
-   */
-  it('同一时间最多两个队员在跑，第三个排队，最后都干完', async () => {
-    let running = 0
-    let peak = 0
-    const t = tools({
-      runMember: async () => {
-        running++
-        peak = Math.max(peak, running)
-        await new Promise((r) => setTimeout(r, 10))
-        running--
-        return ok('ok')
-      }
-    })
-    for (const name of ['A', 'B', 'C']) await t.team_hire!({ name, role: name })
-    const results = await Promise.all(
-      ['A', 'B', 'C'].map((to) => t.team_send!({ to, message: 'go' }))
-    )
-    expect(peak).toBe(MAX_PARALLEL_MEMBERS)
-    expect(results).toHaveLength(3)
-  })
-
   it('交付：验收结论交给宿主；读不出结论按没过说', async () => {
     const verdicts: unknown[] = []
     const pass = tools({ onVerdict: (v) => void verdicts.push(v) })
@@ -345,6 +290,48 @@ describe('团队工具', () => {
       /按未通过处理/
     )
     expect(verdicts).toEqual([{ kind: 'pass', reason: '玩通了' }, null])
+  })
+
+  it('留言：队员接活时收到留给它的；制作人在回话里收到留给它的；各只送一次', async () => {
+    const received: string[] = []
+    const t = tools({
+      runMember: async ({ message }) => {
+        received.push(message)
+        return ok('好了')
+      }
+    })
+    await t.team_hire!({ name: '程序', role: 'a' })
+    await t.team_hire!({ name: '美术', role: 'b' })
+    const fromArtist = createMessageTool(store, '美术')
+    await fromArtist.execute('m1', { to: '程序', text: '角色模型在 /Game/Hero' } as never)
+    await fromArtist.execute('m2', { to: PRODUCER, text: '贴图还差两张' } as never)
+
+    const reply = await t.team_send!({ to: '程序', message: '接上角色' })
+    expect(received[0]).toBe('【队友给你的留言】\n- 美术：角色模型在 /Game/Hero\n\n接上角色')
+    expect(reply).toContain('【队员给你的留言】\n- 美术：贴图还差两张')
+
+    // 送过的不再送
+    await t.team_send!({ to: '程序', message: '再来' })
+    expect(received[1]).toBe('再来')
+    expect((await store.mail()).every((m) => m.deliveredAt)).toBe(true)
+  })
+
+  it('留言给不存在的人、给自己都拒；制作人的名字不能被招走', async () => {
+    const t = tools()
+    await t.team_hire!({ name: '美术', role: 'b' })
+    const tool = createMessageTool(store, '美术')
+    await expect(tool.execute('m', { to: '路人', text: 'x' } as never)).rejects.toThrow(
+      /没有「路人」/
+    )
+    await expect(tool.execute('m', { to: '美术', text: 'x' } as never)).rejects.toThrow(/自己/)
+    await expect(t.team_hire!({ name: 'Producer', role: 'x' })).rejects.toThrow(/留给制作人/)
+  })
+
+  it('留言排版：制作人显示成中文名', () => {
+    expect(formatMail('【留言】', [{ id: 'm1', from: PRODUCER, to: 'A', text: 'hi', at: 0 }])).toBe(
+      '【留言】\n- 制作人：hi'
+    )
+    expect(formatMail('【留言】', [])).toBe('')
   })
 
   it('任务板渲染：计数、负责人、证据', () => {

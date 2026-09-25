@@ -26,24 +26,22 @@ import {
 import { parseVerdict, type GoalVerdict } from '../goalLoop'
 import { formatInterruptedWrites, WriteLedger } from '../writeLedger'
 import {
+  PRODUCER,
   TASK_STATUSES,
   type BoardTask,
   type MemberTier,
+  type TeamMail,
   type TeamMember,
   type TeamStore
 } from './teamStore'
 
-export const TEAM_TOOL_NAMES = ['team_hire', 'team_send', 'team_board', 'team_deliver'] as const
-
-/**
- * 同一时间最多几个队员在跑。
- *
- * 真机上撞过：三个队员并行，各自一个六七万 token 的请求同时打到小米 MiMo Token Plan，
- * 网关不回 429，而是把三个请求挂住，5 分钟后一起断开（`ERR_CONNECTION_CLOSED`）。
- * 编程套餐普遍按账号限并发，而且不公布数字（社区实测 3 路就可能被限）。
- * 2 路是「还算并行、又不容易撞墙」的折中；多派的排队，不报错。
- */
-export const MAX_PARALLEL_MEMBERS = 2
+export const TEAM_TOOL_NAMES = [
+  'team_hire',
+  'team_send',
+  'team_board',
+  'team_deliver',
+  'team_message'
+] as const
 
 export interface RunMemberInput {
   member: TeamMember
@@ -72,49 +70,6 @@ export interface TeamToolDeps {
   }) => Promise<string>
   /** 验收有了结论。宿主用它记「这一局有没有过验收」 */
   onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
-  /** 同一时间最多几个队员在跑，默认 `MAX_PARALLEL_MEMBERS` */
-  maxParallelMembers?: number
-}
-
-/**
- * 计数信号量。排队中途被停下就退出队列，不占名额。
- */
-export function createSlots(limit: number): {
-  acquire: (signal?: AbortSignal) => Promise<() => void>
-  running: () => number
-} {
-  let running = 0
-  const waiting: Array<() => void> = []
-  const grant = (): (() => void) => {
-    running++
-    let released = false
-    return () => {
-      if (released) return
-      released = true
-      running--
-      waiting.shift()?.()
-    }
-  }
-  return {
-    running: () => running,
-    acquire: (signal) => {
-      signal?.throwIfAborted()
-      if (running < limit) return Promise.resolve(grant())
-      return new Promise((resolve, reject) => {
-        const wake = (): void => {
-          signal?.removeEventListener('abort', onAbort)
-          resolve(grant())
-        }
-        const onAbort = (): void => {
-          const index = waiting.indexOf(wake)
-          if (index >= 0) waiting.splice(index, 1)
-          reject(signal?.reason ?? new Error('Operation aborted'))
-        }
-        signal?.addEventListener('abort', onAbort, { once: true })
-        waiting.push(wake)
-      })
-    }
-  }
 }
 
 // ── 任务板 ──────────────────────────────────────────────────────────────
@@ -216,6 +171,9 @@ function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<
       '岗位、人设、工具范围都由你决定，盒子不预设任何角色。',
     input: hireInput,
     execute: async ({ name, role, model, namespaces, read_only }) => {
+      if (name.trim().toLowerCase() === PRODUCER) {
+        throw new Error(`"${PRODUCER}" 是留给制作人（你）的名字，换一个`)
+      }
       if (namespaces?.length) {
         const unknown = namespaces.filter((ns) => !deps.namespaces.includes(ns))
         if (unknown.length) {
@@ -249,14 +207,22 @@ function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<
 
 // ── 派活 ────────────────────────────────────────────────────────────────
 
+/** 留言拼成一段给模型看的话。以留言人打头，一眼看得出是谁说的 */
+export function formatMail(title: string, mails: TeamMail[]): string {
+  if (mails.length === 0) return ''
+  const who = (name: string): string => (name === PRODUCER ? '制作人' : name)
+  return [title, ...mails.map((m) => `- ${who(m.from)}：${m.text}`)].join('\n')
+}
+
 function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
   /**
    * 同一个队员一次只干一件活。它的记忆是一条对话，两件活同时往里写会串台，
    * 所以同一个人的第二件活排在第一件后面；不同的人照常并行。
+   *
+   * 不同队员之间**不设人数上限**：真正扛不住并发的是模型套餐，那一层由
+   * `requestGate.ts` 按网关的实际反应自适应调度，队员在编辑器里干活、等工具的时候不占名额。
    */
   const busy = new Map<string, Promise<unknown>>()
-  const limit = deps.maxParallelMembers ?? MAX_PARALLEL_MEMBERS
-  const slots = createSlots(limit)
 
   const sendInput = z.object({
     to: z.string().min(1).describe('队员名'),
@@ -274,8 +240,8 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
     concurrency: 'parallel',
     description:
       '给一个队员派活或者说话，等它干完回话。它记得你之前发给它的所有内容。' +
-      `同一轮里发给不同队员的会并行跑，但同一时间最多 ${limit} 个队员在干活（模型套餐限并发），多的自动排队；` +
-      '发给同一个人的按顺序排队。' +
+      '同一轮里发给不同队员的会并行跑，发给同一个人的按顺序排队。' +
+      '队员之间、队员给你的留言会在回话里一并带回。' +
       '回话末尾附一行它实际做过的写操作，那是记账记出来的，不是它自己说的。',
     input: sendInput,
     execute: async ({ to, message }, ctx) => {
@@ -295,20 +261,18 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
       const run = previous
         .catch(() => undefined)
         .then(async () => {
-          if (slots.running() >= limit) {
-            ctx.report({ text: `${member.name} · 排队中：同时最多 ${limit} 个队员在干活` })
-          }
-          const release = await slots.acquire(ctx.signal)
           const ledger = new WriteLedger()
           ctx.setAbortNote?.(() => formatInterruptedWrites(ledger.list(), member.readOnly))
           // 上次被停在半截工具调用上的话，那条调用没有结果 —— 摘掉，不然它一睁眼
           // 看到的就是一条凭空的失败（同 `task` 的理由，见 stripPendingToolCalls）
           const history = stripPendingToolCalls(await deps.store.history(member.name))
+          // 它不在的时候队友给它的留言，这次接活时一起交给它
+          const inbox = formatMail('【队友给你的留言】', await deps.store.takeInbox(member.name))
           let latest: AgentMessage[] | undefined
           try {
             return await deps.runMember({
               member,
-              message,
+              message: inbox ? `${inbox}\n\n${message}` : message,
               history,
               ledger,
               ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -319,7 +283,6 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
               }
             })
           } finally {
-            release()
             // 被停下也要存：它已经干了一半的活，下次派活时得记得
             if (latest) await deps.store.saveHistory(member.name, latest)
           }
@@ -327,12 +290,67 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
       busy.set(key, run)
       try {
         const result = await run
+        // 队员们留给制作人的话，跟着这一件活的回话一起带回去
+        const toProducer = formatMail('【队员给你的留言】', await deps.store.takeInbox(PRODUCER))
         return {
-          text: `${member.name} 回话：\n${result.text}\n\n${formatWriteAudit(result)}`,
+          text:
+            `${member.name} 回话：\n${result.text}\n\n${formatWriteAudit(result)}` +
+            (toProducer ? `\n\n${toProducer}` : ''),
           details: result
         }
       } finally {
         if (busy.get(key) === run) busy.delete(key)
+      }
+    }
+  })
+}
+
+// ── 留言 ────────────────────────────────────────────────────────────────
+
+/**
+ * 队员的留言工具。每个队员一份，留言人就是它自己。
+ *
+ * 不做成「当场问、当场答」：两个队员同时问对方会互相等死，
+ * 而收件人可能正在编辑器里干别的活。留言在收件人下一次接活时送到；
+ * 发给制作人的，在任何一件活交回时带给它。
+ */
+export function createMessageTool(store: TeamStore, from: string): UnrealAgentTool<TeamMail> {
+  const messageInput = z.object({
+    to: z.string().min(1).describe(`收件人：队员名，或者 "${PRODUCER}" 表示制作人`),
+    text: z.string().min(1).describe('要说的话。对方看不到你的对话，需要的背景写进来')
+  })
+
+  return defineTool<typeof messageInput, TeamMail>({
+    name: 'team_message',
+    namespace: 'core',
+    // 只写盒子自己的信箱，只读的队员（评审、试玩）也要能提意见
+    risk: 'safe',
+    concurrency: 'parallel',
+    description:
+      `给队友或制作人（"${PRODUCER}"）留言：交接产出、提问、提醒对方你改了什么。` +
+      '不是当场对话：对方下一次接活时才会看到，制作人在任何一件活交回时看到。' +
+      '要对方马上动手的事，留言给制作人，由它来派。',
+    input: messageInput,
+    execute: async ({ to, text }) => {
+      const toProducer = to.trim().toLowerCase() === PRODUCER
+      if (!toProducer) {
+        const target = await store.findMember(to)
+        if (!target) {
+          const roster = await store.roster()
+          throw new Error(
+            `团队里没有「${to}」。现有：${roster.map((m) => m.name).join('、') || '（无）'}；` +
+              `给制作人留言用 "${PRODUCER}"`
+          )
+        }
+        if (target.name.toLowerCase() === from.toLowerCase()) throw new Error('不用给自己留言')
+        to = target.name
+      }
+      const mail = await store.post(from, toProducer ? PRODUCER : to, text)
+      return {
+        text: toProducer
+          ? '已留言给制作人，它会在你这件活交回时看到。'
+          : `已留言给 ${to}，它下一次接活时会看到。`,
+        details: mail
       }
     }
   })

@@ -82,6 +82,25 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await fs.rename(tmp, file)
 }
 
+/** 留言的收件人是制作人时用的名字。队员叫这个名字会被招人工具拒掉 */
+export const PRODUCER = 'producer'
+
+/**
+ * 一条留言。队员之间、队员给制作人都走这里。
+ *
+ * 是信箱而不是当场对话：两个队员同时问对方，当场对话会互相等死；
+ * 留言在收件人**下一次接活**时送到（制作人则是任何一件活交回时）。
+ */
+export interface TeamMail {
+  id: string
+  from: string
+  to: string
+  text: string
+  at: number
+  /** 送到的时刻。没送到就没有 */
+  deliveredAt?: number
+}
+
 export interface TeamStore {
   readonly dirs: TeamDirs
   ensure(): Promise<void>
@@ -94,11 +113,22 @@ export interface TeamStore {
   patchBoard(patches: BoardPatch[]): Promise<BoardTask[]>
   history(name: string): Promise<AgentMessage[]>
   saveHistory(name: string, messages: AgentMessage[]): Promise<void>
+  /** 全部留言（含已送到的），界面按时间显示 */
+  mail(): Promise<TeamMail[]>
+  post(from: string, to: string, text: string): Promise<TeamMail>
+  /** 取走发给这个人、还没送到的留言，并标成已送到 */
+  takeInbox(name: string): Promise<TeamMail[]>
 }
 
-export function createTeamStore(dirs: TeamDirs, now: () => number = Date.now): TeamStore {
+export function createTeamStore(
+  dirs: TeamDirs,
+  now: () => number = Date.now,
+  /** 名册、任务板、留言有变化。宿主拿它推给界面 */
+  onChange?: () => void
+): TeamStore {
   const rosterFile = join(dirs.stateDir, 'roster.json')
   const boardFile = join(dirs.stateDir, 'board.json')
+  const mailFile = join(dirs.stateDir, 'mail.json')
   const historyFile = (name: string): string =>
     join(dirs.stateDir, 'members', `${memberFileBase(name)}.json`)
 
@@ -108,6 +138,10 @@ export function createTeamStore(dirs: TeamDirs, now: () => number = Date.now): T
     const next = chain.then(fn, fn)
     chain = next.catch(() => undefined)
     return next
+  }
+  const changed = <T>(value: T): T => {
+    onChange?.()
+    return value
   }
 
   const sameName = (a: string, b: string): boolean =>
@@ -131,7 +165,7 @@ export function createTeamStore(dirs: TeamDirs, now: () => number = Date.now): T
         if (index >= 0) list[index] = member
         else list.push(member)
         await writeJson(rosterFile, list)
-      }),
+      }).then(changed),
     board: () => readJson<BoardTask[]>(boardFile, []),
     patchBoard: (patches) =>
       serial(async () => {
@@ -151,12 +185,32 @@ export function createTeamStore(dirs: TeamDirs, now: () => number = Date.now): T
         }
         await writeJson(boardFile, list)
         return list
-      }),
+      }).then(changed),
     history: (name) => readJson<AgentMessage[]>(historyFile(name), []),
     saveHistory: (name, messages) =>
       serial(async () => {
         await fs.mkdir(join(dirs.stateDir, 'members'), { recursive: true })
         await writeJson(historyFile(name), messages)
-      })
+      }),
+    mail: () => readJson<TeamMail[]>(mailFile, []),
+    post: (from, to, text) =>
+      serial(async () => {
+        await fs.mkdir(dirs.stateDir, { recursive: true })
+        const list = await readJson<TeamMail[]>(mailFile, [])
+        const mail: TeamMail = { id: `m${list.length + 1}`, from, to, text, at: now() }
+        list.push(mail)
+        await writeJson(mailFile, list)
+        return mail
+      }).then(changed),
+    takeInbox: (name) =>
+      serial(async () => {
+        const list = await readJson<TeamMail[]>(mailFile, [])
+        const taken = list.filter((m) => !m.deliveredAt && sameName(m.to, name))
+        if (taken.length === 0) return taken
+        const at = now()
+        for (const m of taken) m.deliveredAt = at
+        await writeJson(mailFile, list)
+        return taken
+      }).then(changed)
   }
 }
