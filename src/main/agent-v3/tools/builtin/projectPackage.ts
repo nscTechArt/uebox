@@ -31,6 +31,7 @@ import { z } from 'zod'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 import { getTargetProjectPath } from '../../core/projectTargetContext'
 import UnrealPathManagerUtil from '../../../utils/UnrealPathManager'
+import { readUeJsonFile } from '../../../utils/ueTextFile'
 
 // ── 纯函数：参数、阶段、日志 ────────────────────────────────────────────
 
@@ -125,10 +126,9 @@ async function findUproject(projectDir: string): Promise<string> {
 
 /** 这个工程用哪个引擎：自编译引擎按 GUID 查注册表，安装版按版本号对 */
 async function engineRootFor(uproject: string): Promise<string> {
-  // trim 连开头的 BOM 一起去掉（BOM 在 JS 里算空白），有的编辑器存 .uproject 会带它
-  const raw = await fs.readFile(uproject, 'utf8')
+  // 引擎存 .uproject 时遇到中文工程名、中文描述会整份存成 UTF-16LE，按 utf-8 读就是乱码
   const association = String(
-    (JSON.parse(raw.trim()) as { EngineAssociation?: unknown }).EngineAssociation ?? ''
+    (await readUeJsonFile<{ EngineAssociation?: unknown }>(uproject)).EngineAssociation ?? ''
   )
   if (!association)
     throw new Error(`${basename(uproject)} 没写 EngineAssociation，不知道用哪个引擎`)
