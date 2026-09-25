@@ -373,6 +373,20 @@ describe('点通知', () => {
     expect(created[0].show).toHaveBeenCalled()
   })
 
+  // 报错后 agent_end 还会补一个 done，不能让「任务完成」把「任务失败」顶掉
+  it('报错之后收尾的 done 不再弹任务完成', () => {
+    notifyAgentRun({ type: 'error', sessionId: 'agent-session-7', message: 'Request timed out.' })
+    notifyAgentRun({ type: 'done', sessionId: 'agent-session-7' })
+
+    expect(created).toHaveLength(1)
+    expect(created[0].close).not.toHaveBeenCalled()
+
+    // 下一轮正常跑完照样弹
+    notifyAgentRun({ type: 'started', sessionId: 'agent-session-7' })
+    notifyAgentRun({ type: 'done', sessionId: 'agent-session-7' })
+    expect(created).toHaveLength(2)
+  })
+
   /*
    * **同一条会话**也能同时挂着两条通知：上一轮的「任务失败」还留在通知中心，
    * 这一轮又卡在审批上。按会话认的话，后点的会把先点的顶掉，先点的那条既
