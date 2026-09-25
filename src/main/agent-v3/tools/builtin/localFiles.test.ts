@@ -59,6 +59,14 @@ describe('读到图片时挂上路径', () => {
     })
   })
 
+  it('路径也写进给模型的文字里 —— 并行读图时靠它分清哪张是哪个文件', () => {
+    const imagePath = resolve('/素材/参考图.png')
+    const out = withViewedImageDetails(imageResult(), imagePath)
+
+    expect(out.content[0]).toEqual({ type: 'text', text: `图片文件：${imagePath}` })
+    expect(out.content.filter((block) => block.type === 'image')).toHaveLength(1)
+  })
+
   it('相对路径按用户目录补全 —— 界面拿到相对路径读不到文件', () => {
     const out = withViewedImageDetails(imageResult(), 'Pictures/a.png')
 
