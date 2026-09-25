@@ -472,7 +472,8 @@ function readUndoableFlag(result: unknown): boolean | null {
 const DETAIL_KEYS: Record<string, readonly string[]> = {
   run_shell_command: ['command'],
   ue_run_console_command: ['command'],
-  ue_run_python_script: ['script'],
+  // 跑 skill 自带脚本时没有 script 原文，报出是哪个脚本
+  ue_run_python_script: ['script', 'skill_script'],
   ue_manage_plugin: ['action']
 }
 

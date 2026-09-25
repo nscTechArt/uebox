@@ -12,11 +12,65 @@ import { runEditorPython } from '../../../core/editorPython'
 import { assertScriptAllowed } from '../../builtin/pathBoundary'
 import { describePositionalRotatorRefusal, findPositionalRotatorCalls } from './pythonRotatorGuard'
 import { noteViewportMove, viewportCameraApiInScript } from '../ue-editor/viewportProvenance'
+import { discoverEnabledSkills } from '../../../capabilities/skills'
+import { readSkillResource } from '../../../capabilities/skillsService/SkillsService'
+import { getSessionProjectPath, getTargetProjectPath } from '../../../core/projectTargetContext'
 
 const RunPythonScriptParamsSchema = z.object({
-  script: z.string().describe('要执行的 Python 脚本内容'),
+  script: z
+    .string()
+    .optional()
+    .describe('要执行的 Python 脚本内容。和 skill + skill_script 二选一'),
+  skill: z
+    .string()
+    .optional()
+    .describe('跑某个 skill 自带的脚本时，skill 名（skill 正文里点名了脚本才这么用）'),
+  skill_script: z
+    .string()
+    .optional()
+    .describe('skill 目录下的脚本相对路径，如 scripts/import_motion_clips.py'),
+  args: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      '传给 skill 脚本的参数，脚本里以全局变量 SKILL_ARGS（dict）读取。参数名按 skill 正文写'
+    ),
   description: z.string().optional().describe('脚本用途描述，用于日志记录')
 })
+
+/**
+ * 把 skill 自带的脚本读出来，前面接上参数。
+ *
+ * ## 为什么不让模型自己 read_skill_resource 再把全文贴进 script
+ *
+ * 一百多行的脚本整段转抄一遍，模型会「顺手」改几处 —— 路径改成它以为对的、
+ * 常量改成它猜的值。skill 里的脚本是在真机上跑通过的那份，转抄一次就不是了。
+ * 按路径执行，跑的就是盘上那一份，参数走 SKILL_ARGS，脚本正文一个字不经过模型。
+ *
+ * 参数拼成 `SKILL_ARGS = json.loads("...")`：JSON.stringify 出来的字符串字面量
+ * 恰好也是合法的 Python 字符串字面量，中文路径、反斜杠、引号都不用另外转义。
+ */
+export async function resolveSkillScript(
+  skill: string,
+  relativePath: string,
+  args: Record<string, unknown> | undefined
+): Promise<{ script: string } | { error: string }> {
+  if (!relativePath.replace(/\\/g, '/').startsWith('scripts/') || !relativePath.endsWith('.py')) {
+    return { error: `skill_script 必须是 scripts/ 下的 .py 文件，收到 ${relativePath}` }
+  }
+  const skills = await discoverEnabledSkills(getSessionProjectPath() ?? getTargetProjectPath())
+  const result = await readSkillResource(skills, skill, relativePath)
+  if ('error' in result) {
+    const available = result.availableResources?.length
+      ? `可用：${result.availableResources.join(', ')}`
+      : ''
+    return { error: `读不到 ${skill}/${relativePath}：${result.error}。${available}` }
+  }
+  const argsJson = JSON.stringify(JSON.stringify(args ?? {}))
+  return {
+    script: `import json as _skill_json\nSKILL_ARGS = _skill_json.loads(${argsJson})\n${result.content}`
+  }
+}
 
 /**
  * 创建执行 Python 脚本工具
@@ -58,35 +112,60 @@ export function createRunPythonScriptTool(): V2Tool {
 - **循环 delete_asset**：每次调用都做一次完整 GC，几百个资产就把主线程占死十几分钟。删资产、清目录用
   ue_content_delete（目录直接传，一批提交）。
 - **猜 API 名**：AttributeError 一次就是一整个往返。先 print(dir(obj)) 和 print(obj.method.__doc__) 拿到
-  真实名字和签名再调。`,
+  真实名字和签名再调。
+
+【skill 里带了脚本就直接跑它】skill 正文点名了 scripts/ 下的脚本时，传 skill + skill_script（+ args），
+不要读出来再抄进 script —— 跑的就是盘上跑通过的那一份。args 在脚本里是全局变量 SKILL_ARGS。`,
 
     inputSchema: RunPythonScriptParamsSchema,
 
     execute: async (input, options?: { abortSignal?: AbortSignal }) => {
-      console.log('[RunPythonScriptTool] 收到请求:', { description: input.description })
+      console.log('[RunPythonScriptTool] 收到请求:', {
+        description: input.description,
+        skill: input.skill,
+        skill_script: input.skill_script
+      })
+
+      const usesSkill = Boolean(input.skill || input.skill_script)
+      if (usesSkill === Boolean(input.script)) {
+        return {
+          success: false,
+          error: 'script 和 skill + skill_script 二选一：要么给脚本内容，要么点名 skill 里的脚本'
+        }
+      }
+      let script = input.script ?? ''
+      if (usesSkill) {
+        if (!input.skill || !input.skill_script) {
+          return { success: false, error: 'skill 和 skill_script 要一起给' }
+        }
+        const resolved = await resolveSkillScript(input.skill, input.skill_script, input.args)
+        if ('error' in resolved) return { success: false, error: resolved.error }
+        script = resolved.script
+      }
+      // 下面的检查一律对**实际要跑的那份**做 —— skill 脚本同样过边界和旋转检查
 
       // 这段脚本跑在 UE 进程里，但 UE 的 Python 有完整的 open() ——
       // 本地文件工具那边挡着的凭据目录，从这里读一样读得到。
       // 边界漏一个出口就不成其为边界，而这是除 shell 之外最宽的那个。
-      const denied = assertScriptAllowed(input.script)
+      const denied = assertScriptAllowed(script)
       if (denied) return { success: false, error: denied }
 
       // unreal.Rotator(a, b, c) 的位置参数顺序是 (roll, pitch, yaw)，按直觉传会静默转错方向。
       // 真机上 78 个部件因此全摆错。这里拦下来让模型改成关键字，比事后回读便宜得多。
-      const rotatorHits = findPositionalRotatorCalls(input.script)
+      const rotatorHits = findPositionalRotatorCalls(script)
       if (rotatorHits.length > 0) {
         return { success: false, error: describePositionalRotatorRefusal(rotatorHits) }
       }
 
       // 脚本要动关卡视口相机 —— 先记一笔，ue_screenshot 拍视口时会把它说出来。
       // 跑成没跑成都记：「跑成了但改坏了」正是要抓的情形
-      const cameraApi = viewportCameraApiInScript(input.script)
+      const cameraApi = viewportCameraApiInScript(script)
       if (cameraApi) {
         noteViewportMove('ue_run_python_script', `脚本里调了 ${cameraApi}`)
       }
 
       const result = await runEditorPython(
-        input.script,
+        script,
         input.description || 'Python 脚本',
         300_000,
         options?.abortSignal

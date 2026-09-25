@@ -2529,6 +2529,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         'Could not connect to the model service. Check your network, VPN, proxy, or model source URL.',
       usedSkills: 'Skills used in this response',
       userSkill: 'User Skill',
+      projectSkill: 'Project Skill',
       builtinSkill: 'Built-in Skill'
     },
     // The browser split pane on the right, in embedded mode

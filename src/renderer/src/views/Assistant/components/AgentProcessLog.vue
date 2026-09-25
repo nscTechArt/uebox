@@ -1373,6 +1373,7 @@ function formatDoneToolCall(args: unknown): string {
 }
 
 function formatSkillSourceLabel(source: unknown): string {
+  if (source === 'project') return '工程 Skill'
   if (source === 'user') return '用户 Skill'
   if (source === 'builtin') return '内置 Skill'
   return 'Skill'

@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'fs/promises'
 import { extname, join, resolve, sep } from 'path'
 
-export type SkillSource = 'user' | 'plugin' | 'builtin'
+export type SkillSource = 'project' | 'user' | 'plugin' | 'builtin'
 
 export interface SkillMetadata {
   name: string

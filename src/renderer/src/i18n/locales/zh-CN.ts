@@ -2473,6 +2473,7 @@ export default {
       networkErrorDesc: '无法连接到模型服务。请检查网络、VPN、代理或模型来源地址。',
       usedSkills: '本轮使用的 Skills',
       userSkill: '用户 Skill',
+      projectSkill: '工程 Skill',
       builtinSkill: '内置 Skill'
     },
     // 嵌入模式下右侧那块浏览器分屏

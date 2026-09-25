@@ -522,3 +522,46 @@ describe('技能正文的读与写', () => {
     }
   })
 })
+
+/**
+ * 工程自带的 skill（`<工程根>/.uebox/skills`）。
+ *
+ * 那次数字人动作导入：工程 `Scripts/` 里现成的导入脚本 agent 从没看见过 ——
+ * 跨工程的目录放不下只属于一个工程的做法，所以工程自己得有一层。
+ */
+describe('工程自带的 skill', () => {
+  const projectRoot = join(root, 'MyProject')
+  const projectSkill = (name: string, description: string): void => {
+    const dir = join(projectRoot, '.uebox', 'skills', name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${description}\n---\n\n正文\n`
+    )
+  }
+  projectSkill('doubao-motion-import', '导入数字人动作。')
+  // 和用户目录里那条同名：工程的要胜出
+  projectSkill('ue-content-import', '本工程的导入规矩。')
+
+  it('给了工程路径才会出现，来源标成 project', async () => {
+    const without = await discoverEnabledSkills()
+    expect(without.some((s) => s.name === 'doubao-motion-import')).toBe(false)
+
+    const withProject = await discoverEnabledSkills(projectRoot)
+    const found = withProject.find((s) => s.name === 'doubao-motion-import')
+    expect(found?.source).toBe('project')
+  })
+
+  it('给 .uproject 文件路径也认', async () => {
+    const skills = await discoverEnabledSkills(join(projectRoot, 'MyProject.uproject'))
+    expect(skills.some((s) => s.name === 'doubao-motion-import')).toBe(true)
+  })
+
+  it('同名时工程的盖过用户的', async () => {
+    const skills = await discoverEnabledSkills(projectRoot)
+    const hits = skills.filter((s) => s.name === 'ue-content-import')
+    expect(hits).toHaveLength(1)
+    expect(hits[0].source).toBe('project')
+    expect(hits[0].description).toBe('本工程的导入规矩。')
+  })
+})

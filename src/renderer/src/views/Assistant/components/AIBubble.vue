@@ -905,7 +905,10 @@ function resumeReason(button: MessageActionButton): string {
     : t('assistant.agentMode.resumeReasonUnknown')
 }
 
-function getSkillSourceLabel(source?: 'user' | 'builtin'): string {
+function getSkillSourceLabel(source?: 'project' | 'user' | 'builtin'): string {
+  if (source === 'project') {
+    return t('assistant.agentMode.projectSkill')
+  }
   if (source === 'user') {
     return t('assistant.agentMode.userSkill')
   }
