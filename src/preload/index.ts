@@ -1594,6 +1594,63 @@ const api = {
     }
   },
   /**
+   * 服务端资产库（新后端 asset-catalog）。通道全部是 catalogLibrary:*，
+   * 返回 { success, data?, error?, errorCode? }；令牌从不经过这里。
+   */
+  catalogLibrary: {
+    list: () => ipcRenderer.invoke('catalogLibrary:list'),
+    servers: () => ipcRenderer.invoke('catalogLibrary:servers'),
+    probe: (address: string, caFingerprint?: string | null, caPem?: string | null) =>
+      ipcRenderer.invoke('catalogLibrary:probe', address, caFingerprint ?? null, caPem ?? null),
+    connect: (input: unknown) => ipcRenderer.invoke('catalogLibrary:connect', input),
+    remoteLibraries: (serverId: string) =>
+      ipcRenderer.invoke('catalogLibrary:remoteLibraries', serverId),
+    add: (serverId: string, libraries: Array<{ id: string; name: string }>) =>
+      ipcRenderer.invoke('catalogLibrary:add', serverId, libraries),
+    remove: (key: string) => ipcRenderer.invoke('catalogLibrary:remove', key),
+    signIn: (serverId: string, input: unknown) =>
+      ipcRenderer.invoke('catalogLibrary:signIn', serverId, input),
+    signOut: (serverId: string) => ipcRenderer.invoke('catalogLibrary:signOut', serverId),
+    setLoreRemote: (serverId: string, remote: string | null) =>
+      ipcRenderer.invoke('catalogLibrary:setLoreRemote', serverId, remote),
+    status: (key: string) => ipcRenderer.invoke('catalogLibrary:status', key),
+    watch: (key: string) => ipcRenderer.invoke('catalogLibrary:watch', key),
+    unwatch: (key: string) => ipcRenderer.invoke('catalogLibrary:unwatch', key),
+    folders: (key: string, parent: number) =>
+      ipcRenderer.invoke('catalogLibrary:folders', key, parent),
+    folderByPath: (key: string, path: string) =>
+      ipcRenderer.invoke('catalogLibrary:folderByPath', key, path),
+    listWindow: (key: string, query: unknown, start: number, limit: number) =>
+      ipcRenderer.invoke('catalogLibrary:listWindow', key, query, start, limit),
+    facets: (key: string, query: unknown, fields?: string[]) =>
+      ipcRenderer.invoke('catalogLibrary:facets', key, query, fields),
+    detail: (key: string, id: number) => ipcRenderer.invoke('catalogLibrary:detail', key, id),
+    probeAnnotations: (key: string) => ipcRenderer.invoke('catalogLibrary:probeAnnotations', key),
+    editAnnotations: (key: string, ops: unknown[]) =>
+      ipcRenderer.invoke('catalogLibrary:editAnnotations', key, ops),
+    download: (key: string, input: unknown) =>
+      ipcRenderer.invoke('catalogLibrary:download', key, input),
+    resolveRepository: (key: string, folder: { dirId: number; path: string }) =>
+      ipcRenderer.invoke('catalogLibrary:resolveRepository', key, folder),
+    import: (key: string, input: unknown) =>
+      ipcRenderer.invoke('catalogLibrary:import', key, input),
+    cancelJob: (jobId: string) => ipcRenderer.invoke('catalogLibrary:cancelJob', jobId),
+    clearCache: (key?: string | null) =>
+      ipcRenderer.invoke('catalogLibrary:clearCache', key ?? null),
+    getActive: () => ipcRenderer.invoke('catalogLibrary:getActive'),
+    setActive: (key: string | null) => ipcRenderer.invoke('catalogLibrary:setActive', key),
+    pickFiles: () => ipcRenderer.invoke('catalogLibrary:pickFiles'),
+    pickFolder: () => ipcRenderer.invoke('catalogLibrary:pickFolder'),
+    pickCaFile: () => ipcRenderer.invoke('catalogLibrary:pickCaFile'),
+    onEvent: (listener: (event: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, event: unknown): void => listener(event)
+      ipcRenderer.on('catalogLibrary:event', handler)
+      return () => {
+        ipcRenderer.removeListener('catalogLibrary:event', handler)
+      }
+    }
+  },
+  /**
    * 通用事件监听器 - 监听主进程发送的事件
    */
   on: (channel: string, listener: (...args: any[]) => void) => {
