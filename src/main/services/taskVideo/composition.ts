@@ -26,6 +26,16 @@ export async function stageComposition(projectDir: string, scene: Scene): Promis
     if (size > 300 * 1024 * 1024) throw new Error('单镜头素材超过 300 MB，请剪短视频素材。')
     assets.push({ name: asset.name, bytes: await fs.readFile(file) })
   }
+  // 版本目录只装声明过的素材，没声明的在渲染时只会变成一句内部路径的 ENOENT。
+  // 这里先对一遍，报出是哪个镜头缺哪个名字
+  const missing = referencedAssets(html.toString('utf8')).filter(
+    (name) => !names.has(name.toLowerCase())
+  )
+  if (missing.length)
+    throw new Error(
+      `镜头 ${scene.id} 引用了 ${missing.map((name) => `assets/${name}`).join('、')}，` +
+        '但没在 compositionAssets 里声明。请补上 {"name":"文件名","source":"本地绝对路径"}。'
+    )
   const hash = createHash('sha256').update(html)
   for (const asset of assets) hash.update(asset.name).update(asset.bytes)
   const dir = path.join(projectDir, 'compositions', hash.digest('hex'))
@@ -34,6 +44,27 @@ export async function stageComposition(projectDir: string, scene: Scene): Promis
   for (const asset of assets)
     await retryMediaFile(() => fs.writeFile(path.join(dir, 'assets', asset.name), asset.bytes))
   return path.join(dir, 'index.html')
+}
+
+/**
+ * HTML 里真正会加载的 `assets/xxx`：只认 src / href / poster 属性和 CSS url()，
+ * 注释、正文、脚本字符串里顺手写到的路径不算 —— 那些不会被请求，不该拦。
+ */
+export function referencedAssets(html: string): string[] {
+  const found = new Set<string>()
+  const live = html.replace(/<!--[\s\S]*?-->/g, '')
+  const pattern =
+    /(?:\b(?:src|href|poster)\s*=\s*["']?|url\(\s*["']?)(?:\.\/)?assets\/([^"'()\s?#<>]+)/gi
+  for (const match of live.matchAll(pattern)) {
+    let name = match[1]
+    try {
+      name = decodeURIComponent(name)
+    } catch {
+      // 编码坏了就按原样比对
+    }
+    found.add(name)
+  }
+  return [...found]
 }
 
 /** File requests may only read the immutable scene copy and the two shipped runtimes. */
@@ -55,6 +86,18 @@ export async function compositionFile(url: string, root: string, runtime: string
   return real
 }
 
+export interface CompositionSample {
+  path: string
+  /** 镜头内帧号（30fps） */
+  frame: number
+  /** 全片时间，秒 */
+  time: number
+  /** 镜头内时间，秒 */
+  sceneTime: number
+  /** true = 调用方点名要的时间点；false = 默认的起中后尾四张 */
+  requested: boolean
+}
+
 export async function renderComposition(options: {
   source: string
   output: string
@@ -64,8 +107,11 @@ export async function renderComposition(options: {
   signal?: AbortSignal
   report?: (text: string) => void
   previewOnly?: boolean
+  /** 镜头内的秒数（不是全片时间），换算由调用方负责 */
   sampleTimes?: number[]
-}): Promise<string[]> {
+  /** 本镜头在全片里的起点，只用于给取样图命名，让文件名就是全片时间 */
+  timeOffset?: number
+}): Promise<CompositionSample[]> {
   const { BrowserWindow, session, app } = await import('electron')
   const root = path.dirname(options.source)
   const runtime = app.isPackaged
@@ -120,7 +166,16 @@ export async function renderComposition(options: {
       headers['Content-Length'] = String(bytes.length)
       return new Response(new Uint8Array(bytes), { headers })
     } catch (error) {
-      failures.add(String(error))
+      // 运行时兜底：stageComposition 扫不到的引用（例如脚本里拼出来的路径）走到这里
+      const missing = (error as NodeJS.ErrnoException)?.code === 'ENOENT'
+      const relative = missing
+        ? path.relative(root, fileURLToPath(request.url)).split(path.sep).join('/')
+        : ''
+      failures.add(
+        relative.startsWith('assets/')
+          ? `镜头 HTML 引用的 ${relative} 不存在：请在该镜头的 compositionAssets 里声明它（name 与路径里的文件名一致）。`
+          : String(error)
+      )
       return new Response('Missing or denied asset', { status: 403 })
     }
   })
@@ -195,10 +250,15 @@ export async function renderComposition(options: {
       Math.floor(count * 0.7),
       Math.max(0, count - 7)
     ])
+    const requested = new Set<number>()
     for (const time of options.sampleTimes ?? []) {
-      if (time >= 0 && time < options.duration) samples.add(Math.floor(time * 30))
+      if (time >= 0 && time < options.duration) {
+        const frame = Math.min(count - 1, Math.floor(time * 30))
+        samples.add(frame)
+        requested.add(frame)
+      }
     }
-    const previews: string[] = []
+    const previews: CompositionSample[] = []
     if (!options.previewOnly) {
       encoder = spawn(
         options.ffmpeg,
@@ -268,9 +328,20 @@ export async function renderComposition(options: {
       const raster =
         size.width === width && size.height === height ? capture : capture.resize({ width, height })
       if (samples.has(frame)) {
-        const preview = path.join(path.dirname(options.output), `frame-${frame}.png`)
+        // 文件名直接写全片时间：拿到一张图不看返回结构也知道它是哪一刻
+        const time = (options.timeOffset ?? 0) + frame / 30
+        const preview = path.join(
+          path.dirname(options.output),
+          `t${time.toFixed(2).padStart(6, '0')}s-frame${frame}.png`
+        )
         await fs.writeFile(preview, raster.toPNG())
-        previews.push(preview)
+        previews.push({
+          path: preview,
+          frame,
+          time: Number(time.toFixed(3)),
+          sceneTime: Number((frame / 30).toFixed(3)),
+          requested: requested.has(frame)
+        })
       }
       if (encoder)
         await new Promise<void>((resolve, reject) =>
@@ -289,4 +360,41 @@ export async function renderComposition(options: {
     isolated.protocol.unhandle('file')
     isolated.webRequest.onBeforeRequest(null)
   }
+}
+
+/**
+ * 把全片时间换算到各镜头内。以前同一组 sampleTimes 原样套给每个镜头，
+ * 结果 t=25 在 11 秒的开场镜里被悄悄丢掉，而 t=5 在每个镜头各取一次 ——
+ * 文件夹标着 hook，画面却是别的镜头（AgentFeedback 2026-09-25）。
+ */
+export function planSampleTimes(
+  scenes: Pick<Scene, 'id' | 'kind' | 'duration'>[],
+  times: number[]
+): {
+  scenes: { start: number; local: number[] }[]
+  dropped: { time: number; reason: string }[]
+} {
+  let start = 0
+  const planned = scenes.map((scene) => {
+    const entry = { start: Number(start.toFixed(3)), local: [] as number[] }
+    start += scene.duration
+    return entry
+  })
+  const dropped: { time: number; reason: string }[] = []
+  for (const time of times) {
+    const index = scenes.findIndex(
+      (_scene, i) => time >= planned[i].start && time < planned[i].start + scenes[i].duration
+    )
+    if (index < 0) {
+      dropped.push({ time, reason: `超出全片时长 ${Number(start.toFixed(3))} 秒` })
+    } else if (scenes[index].kind !== 'composition') {
+      dropped.push({
+        time,
+        reason: `落在 ${scenes[index].kind} 镜头 ${scenes[index].id}，取样只覆盖 composition 镜头`
+      })
+    } else {
+      planned[index].local.push(time - planned[index].start)
+    }
+  }
+  return { scenes: planned, dropped }
 }

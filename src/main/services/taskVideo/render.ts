@@ -181,9 +181,10 @@ export async function renderTaskVideo(
         ratio: storyboard.ratio,
         duration,
         signal,
-        report
+        report,
+        timeOffset: totalDuration - duration
       })
-      previews.push(...frames)
+      previews.push(...frames.map((sample) => sample.path))
       await runVideoProcess(
         ffmpeg,
         [
