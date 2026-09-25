@@ -192,6 +192,8 @@
             />
           </button>
         </div>
+        <!-- 工作室模式（/team）的任务板。只有工作室会话才有，默认收成一行 -->
+        <TeamBoardPanel v-if="teamBoard.team.value" :team="teamBoard.team.value" />
         <InputComposer
           :is-generating="isGenerating"
           :is-image-generation-mode="isImageGenerationMode"
@@ -302,6 +304,8 @@ import FileReviewPane from './components/FileReviewPane.vue'
 import { provideFileReview } from './composables/useFileReview'
 import { useSessionBrowser } from './composables/useSessionBrowser'
 import { useChatSessionsStore, type BoundNotebook } from '../../store/modules/chatSessions'
+import TeamBoardPanel from './components/TeamBoardPanel.vue'
+import { useTeamBoard } from './composables/useTeamBoard'
 import { useTabsStore } from '../../store/modules/tabs'
 import {
   useChatMessagesStore,
@@ -471,6 +475,8 @@ const props = defineProps({
 })
 
 const sid = ref<string>('')
+/** 工作室模式的任务板。不是工作室的会话 team 为 null，面板不出现 */
+const teamBoard = useTeamBoard(sid)
 const {
   review: fileReview,
   select: selectFileReview,

@@ -7,6 +7,7 @@
 
 import type { AgentTurnUsage } from '@core/shared/agentUsage'
 import type { AgentReviewResult, AgentReviewTarget } from '@core/shared/agentReview'
+import type { TeamStateView } from '@core/shared/agentTeam'
 import type { AgentQuestion, AgentQuestionAction } from '@core/shared/agentQuestion'
 import type { EditorSnapshotCaptureResult } from '@core/shared/editorSnapshot'
 import { unwrapResult } from '@renderer/common/utils'
@@ -412,6 +413,12 @@ export const agentV3API = {
    */
   reviewChanges(targets: AgentReviewTarget[]): Promise<AgentReviewResult> {
     return window.api.agentV3.reviewChanges({ targets })
+  },
+
+  /** 工作室模式的任务板。不是工作室的会话、或者查不到时给 null */
+  async teamState(sessionId: string): Promise<TeamStateView | null> {
+    const result = await window.api.agentV3.teamState({ sessionId })
+    return result?.team ?? null
   },
 
   invalidateProviders() {

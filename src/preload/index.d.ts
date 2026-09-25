@@ -21,6 +21,7 @@ import type {
   DependencyGraphNode
 } from '../shared/assetDependency'
 import type { AgentTurnUsage } from '../shared/agentUsage'
+import type { TeamStateView } from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
 import type { SideChatContext } from '../shared/sideChat'
 import type {
@@ -3055,6 +3056,10 @@ declare global {
       }>
       /** 全部强制解锁 —— 逃生口。锁卡死时用户唯一的出路 */
       releaseAllLocks: () => Promise<{ success: boolean; released: number }>
+      /** 工作室模式（`/team`）的任务板面板。不是工作室的会话 team 为 null */
+      teamState: (args: {
+        sessionId: string
+      }) => Promise<{ success: boolean; team: TeamStateView | null }>
       /** 改某条会话的审批档位。运行中也立刻生效，下一个工具调用就按新档位走 */
       setApprovalMode: (args: {
         sessionId: string

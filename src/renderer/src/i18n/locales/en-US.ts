@@ -2337,6 +2337,29 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       user: 'User',
       assistant: 'Assistant'
     },
+    teamBoard: {
+      title: 'Team',
+      summary: '{members} members · {done}/{total} tasks done',
+      objective: 'Goal',
+      noMembers: 'The producer has not hired anyone yet',
+      noTasks: 'The task board is empty',
+      evidence: 'Evidence: ',
+      mail: 'Notes',
+      producer: 'Producer',
+      fast: 'fast',
+      readOnly: 'read-only',
+      verdict: {
+        pass: 'Accepted',
+        fail: 'Rejected',
+        blocked: 'Blocked'
+      },
+      status: {
+        todo: 'To do',
+        doing: 'Doing',
+        done: 'Done',
+        blocked: 'Blocked'
+      }
+    },
     composer: {
       imageGen: 'Image Gen',
       exitImageGen: 'Exit image generation mode',

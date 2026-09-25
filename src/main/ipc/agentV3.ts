@@ -115,6 +115,7 @@ import {
 import { parseTeamCommand } from '../agent-v3/core/team/teamCommand'
 import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
 import { createTeamStore } from '../agent-v3/core/team/teamStore'
+import type { TeamStateView } from '../../shared/agentTeam'
 import {
   applyVerdict,
   createTeamGate,
@@ -402,10 +403,16 @@ function attachGoalLoop(
  * 只读模式不进工作室：理由同 `/goal`（`checkGoalPreconditions`）—— 什么都改不了的
  * 团队做不出游戏，这一轮按普通对话跑。
  */
-async function prepareTeam(ctx: SessionContext, options: SessionExecutionOptions): Promise<void> {
+async function prepareTeam(
+  ctx: SessionContext,
+  options: SessionExecutionOptions,
+  emit: (channel: string, payload: unknown) => void
+): Promise<void> {
   const team = options.team
   if (!team || options.mode === 'ask') return
-  const store = createTeamStore(teamDirsFor(ctx.sessionId))
+  // 名册、任务板、留言一变就告诉界面去重读 —— 任务板面板靠它跟上，不用轮询
+  const changed = (): void => emit('agent-v3:team-board', { sessionId: ctx.sessionId })
+  const store = createTeamStore(teamDirsFor(ctx.sessionId), Date.now, changed)
   await store.ensure()
   ctx.pacedRequests = true
   ctx.team = {
@@ -414,7 +421,27 @@ async function prepareTeam(ctx: SessionContext, options: SessionExecutionOptions
     onVerdict: async (verdict) => {
       options.team = applyVerdict(options.team ?? team, verdict)
       await saveExecutionOptions(ctx.sessionId, options)
+      changed()
     }
+  }
+}
+
+/** 面板上最多显示多少条留言。它是近况，不是档案 —— 全量在 `<会话>.team/mail.json` */
+const TEAM_PANEL_MAIL = 30
+
+/** 任务板面板要的一整份。不是工作室的会话返回 null */
+async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
+  const team = (await loadExecutionOptions(sessionId))?.team
+  if (!team) return null
+  const store = createTeamStore(teamDirsFor(sessionId))
+  const [members, board, mail] = await Promise.all([store.roster(), store.board(), store.mail()])
+  return {
+    objective: team.objective,
+    verdict: team.verdict,
+    deliveries: team.deliveries,
+    members,
+    board,
+    mail: mail.slice(-TEAM_PANEL_MAIL)
   }
 }
 
@@ -1240,6 +1267,12 @@ export function registerAgentV3IPC(): void {
 
   ipcMain.handle('agent-v3:locks', async () => ({ success: true, locks: listLocks() }))
 
+  /** 工作室模式的任务板面板：名册、任务、留言、验收结论。不是工作室的会话给 null */
+  ipcMain.handle('agent-v3:team-state', async (_event, args: { sessionId?: string }) => {
+    if (typeof args?.sessionId !== 'string' || !args.sessionId) return { success: true, team: null }
+    return { success: true, team: await readTeamState(args.sessionId) }
+  })
+
   /**
    * 强制全部解锁 —— 界面上那个逃生口。
    *
@@ -1669,7 +1702,7 @@ export function registerAgentV3IPC(): void {
         ...(team ? { team } : {})
       }
       await saveExecutionOptions(sessionId, options)
-      await prepareTeam(ctx, options)
+      await prepareTeam(ctx, options, emit)
       run.controller.signal.throwIfAborted()
       const { agent, selection, tools, allTools } = await createUnrealAgent(ctx)
       run.agent = agent
@@ -2054,7 +2087,7 @@ export function registerAgentV3IPC(): void {
     try {
       run.controller.signal.throwIfAborted()
       // 续跑照样是工作室：团队、任务板、队员的记忆都在盘上，接着用
-      await prepareTeam(ctx, options)
+      await prepareTeam(ctx, options, emit)
       const { agent, selection, allTools } = await createUnrealAgent(ctx)
       run.agent = agent
       run.selection = selection

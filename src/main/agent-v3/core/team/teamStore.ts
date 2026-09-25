@@ -18,33 +18,18 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 
-export type MemberTier = 'strong' | 'fast'
+import {
+  PRODUCER,
+  TASK_STATUSES,
+  type BoardTask,
+  type MemberTier,
+  type TaskStatus,
+  type TeamMail,
+  type TeamMember
+} from '../../../../shared/agentTeam'
 
-export interface TeamMember {
-  name: string
-  /** 人设和职责，由制作人现场写。盒子不给模板 */
-  persona: string
-  tier: MemberTier
-  /** 工具命名空间白名单。省略 = 和制作人同一套 */
-  namespaces?: string[]
-  readOnly: boolean
-  hiredAt: number
-}
-
-export const TASK_STATUSES = ['todo', 'doing', 'done', 'blocked'] as const
-export type TaskStatus = (typeof TASK_STATUSES)[number]
-
-export interface BoardTask {
-  id: string
-  title: string
-  owner?: string
-  status: TaskStatus
-  deps?: string[]
-  /** 做完的证据：截图路径、试玩结论、资产路径…… 没有证据的「做完」看不出真假 */
-  evidence?: string
-  note?: string
-  updatedAt: number
-}
+export { PRODUCER, TASK_STATUSES }
+export type { BoardTask, MemberTier, TaskStatus, TeamMail, TeamMember }
 
 export type BoardPatch = Partial<Omit<BoardTask, 'updatedAt'>> & { id: string }
 
@@ -80,25 +65,6 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   const tmp = `${file}.tmp`
   await fs.writeFile(tmp, JSON.stringify(value), 'utf8')
   await fs.rename(tmp, file)
-}
-
-/** 留言的收件人是制作人时用的名字。队员叫这个名字会被招人工具拒掉 */
-export const PRODUCER = 'producer'
-
-/**
- * 一条留言。队员之间、队员给制作人都走这里。
- *
- * 是信箱而不是当场对话：两个队员同时问对方，当场对话会互相等死；
- * 留言在收件人**下一次接活**时送到（制作人则是任何一件活交回时）。
- */
-export interface TeamMail {
-  id: string
-  from: string
-  to: string
-  text: string
-  at: number
-  /** 送到的时刻。没送到就没有 */
-  deliveredAt?: number
 }
 
 export interface TeamStore {

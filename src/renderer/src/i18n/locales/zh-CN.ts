@@ -2286,6 +2286,29 @@ export default {
       user: '用户',
       assistant: '助手'
     },
+    teamBoard: {
+      title: '团队',
+      summary: '{members} 人 · 任务 {done}/{total} 完成',
+      objective: '目标',
+      noMembers: '制作人还没招人',
+      noTasks: '任务板是空的',
+      evidence: '证据：',
+      mail: '留言',
+      producer: '制作人',
+      fast: '快档',
+      readOnly: '只读',
+      verdict: {
+        pass: '验收通过',
+        fail: '验收未过',
+        blocked: '验收卡住'
+      },
+      status: {
+        todo: '待办',
+        doing: '进行中',
+        done: '完成',
+        blocked: '卡住'
+      }
+    },
     composer: {
       imageGen: '图片生成',
       exitImageGen: '退出图片生成模式',

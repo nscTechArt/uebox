@@ -4,6 +4,7 @@ import {
   type Api,
   type AssistantMessage,
   type AssistantMessageEvent,
+  type AssistantMessageEventStream,
   type Model
 } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
@@ -46,7 +47,7 @@ const message = (over: Partial<AssistantMessage> = {}): AssistantMessage =>
   }) as AssistantMessage
 
 /** 按脚本吐事件的假流：'hang' 表示从此不再吐 */
-function scripted(steps: Array<AssistantMessageEvent | 'hang'>) {
+function scripted(steps: Array<AssistantMessageEvent | 'hang'>): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream()
   void (async () => {
     for (const step of steps) {

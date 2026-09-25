@@ -89,6 +89,9 @@ const GENERIC_EVENT_CHANNELS = new Set([
   // （agentStream 的 markSteerApplied 对不上就忽略），不走这条通道说一声的话，
   // 用户看到的是模型莫名其妙又干起来了
   'agent-v3:goal',
+  // 工作室模式的名册、任务板、留言变了。只带 sessionId，面板自己去重读 ——
+  // 任务板在两轮之间也要活着，所以不挂在按运行订阅的那套事件上
+  'agent-v3:team-board',
   // 两条会话抢同一个资产。必须让用户看见 —— 他可能开着两个窗口，
   // 以为两边在干不同的活
   'agent-v3:lock-conflict',
@@ -1452,6 +1455,8 @@ const api = {
     stop: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:stop', args),
     /** 当前被 agent 独占的资产。界面上那个「AI 锁定了 N 个资产」读它 */
     locks: () => ipcRenderer.invoke('agent-v3:locks'),
+    /** 工作室模式（`/team`）的任务板面板：名册、任务、留言、验收结论 */
+    teamState: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-state', args),
     /**
      * 全部强制解锁 —— 逃生口。
      *
