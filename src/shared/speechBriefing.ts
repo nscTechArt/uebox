@@ -42,12 +42,6 @@ export const SPEECH_BRIEFING_SKIP_UNDER: Record<CondensedSpeechStyle, number> = 
   detailed: 400
 }
 
-/** 各档给模型的输出上限。留了余量：被 maxTokens 截断的口播稿会念到半句戛然而止 */
-export const SPEECH_BRIEFING_MAX_TOKENS: Record<CondensedSpeechStyle, number> = {
-  concise: 240,
-  detailed: 800
-}
-
 /** 需不需要走一趟模型。`full` 永远不走，其余两档看字数 */
 export function shouldBriefForSpeech(style: SpeechBriefingStyle, spokenLength: number): boolean {
   return style !== 'full' && spokenLength >= SPEECH_BRIEFING_SKIP_UNDER[style]
