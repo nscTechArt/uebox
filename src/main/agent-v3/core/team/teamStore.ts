@@ -1,0 +1,162 @@
+/**
+ * 工作室模式的落盘状态：队员名册、任务板、每个队员自己的对话。
+ *
+ * ## 放两个地方
+ *
+ * - **盒子自己的账**（名册、任务板、队员对话）放在会话目录旁边的 `<会话>.team/`。
+ *   模型只能通过工具动它 —— 任务板是界面要读的数据，队员对话是它们的记忆，
+ *   都不该被一次随手的文件编辑写坏。
+ * - **团队的共享工作区**放在 `<userData>/team/<会话>/`。立项书、美术圣经、参考图、
+ *   决策日志……里面放什么由模型决定，所有队员都能读写。
+ *   它在工程之外，因为工程是跑到半路才建的，而立项在建工程之前。
+ *   `pathBoundary.ts` 为它单独开了口子。
+ *
+ * 断点续跑靠这些文件：盒子重启后，名册、任务板和每个队员记得的东西都还在。
+ */
+
+import type { AgentMessage } from '@earendil-works/pi-agent-core'
+import { promises as fs } from 'fs'
+import { join } from 'path'
+
+export type MemberTier = 'strong' | 'fast'
+
+export interface TeamMember {
+  name: string
+  /** 人设和职责，由制作人现场写。盒子不给模板 */
+  persona: string
+  tier: MemberTier
+  /** 工具命名空间白名单。省略 = 和制作人同一套 */
+  namespaces?: string[]
+  readOnly: boolean
+  hiredAt: number
+}
+
+export const TASK_STATUSES = ['todo', 'doing', 'done', 'blocked'] as const
+export type TaskStatus = (typeof TASK_STATUSES)[number]
+
+export interface BoardTask {
+  id: string
+  title: string
+  owner?: string
+  status: TaskStatus
+  deps?: string[]
+  /** 做完的证据：截图路径、试玩结论、资产路径…… 没有证据的「做完」看不出真假 */
+  evidence?: string
+  note?: string
+  updatedAt: number
+}
+
+export type BoardPatch = Partial<Omit<BoardTask, 'updatedAt'>> & { id: string }
+
+export interface TeamDirs {
+  /** 盒子自己的账 */
+  stateDir: string
+  /** 团队共享工作区 */
+  workspaceDir: string
+}
+
+/**
+ * 队员名 → 文件名。名字是模型起的（「美术总监」「Level Designer」都可能），
+ * 只留字母、数字、下划线和横线，其余换成下划线。
+ */
+export function memberFileBase(name: string): string {
+  const safe = name
+    .trim()
+    .replace(/[^\p{L}\p{N}_-]/gu, '_')
+    .slice(0, 40)
+  return safe || 'member'
+}
+
+async function readJson<T>(file: string, fallback: T): Promise<T> {
+  try {
+    return JSON.parse(await fs.readFile(file, 'utf8')) as T
+  } catch {
+    return fallback
+  }
+}
+
+/** 先写临时文件再改名：写到一半进程没了，旧文件还是完整的 */
+async function writeJson(file: string, value: unknown): Promise<void> {
+  const tmp = `${file}.tmp`
+  await fs.writeFile(tmp, JSON.stringify(value), 'utf8')
+  await fs.rename(tmp, file)
+}
+
+export interface TeamStore {
+  readonly dirs: TeamDirs
+  ensure(): Promise<void>
+  roster(): Promise<TeamMember[]>
+  findMember(name: string): Promise<TeamMember | undefined>
+  /** 同名覆盖：制作人可以改一个队员的人设或工具范围 */
+  putMember(member: TeamMember): Promise<void>
+  board(): Promise<BoardTask[]>
+  /** 按 id 合并；没有的新建（缺 title 时拒绝）。返回合并后的整张板 */
+  patchBoard(patches: BoardPatch[]): Promise<BoardTask[]>
+  history(name: string): Promise<AgentMessage[]>
+  saveHistory(name: string, messages: AgentMessage[]): Promise<void>
+}
+
+export function createTeamStore(dirs: TeamDirs, now: () => number = Date.now): TeamStore {
+  const rosterFile = join(dirs.stateDir, 'roster.json')
+  const boardFile = join(dirs.stateDir, 'board.json')
+  const historyFile = (name: string): string =>
+    join(dirs.stateDir, 'members', `${memberFileBase(name)}.json`)
+
+  // 并行派活时几个队员会同时改任务板。读-改-写串起来，免得后写的盖掉先写的
+  let chain: Promise<unknown> = Promise.resolve()
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = chain.then(fn, fn)
+    chain = next.catch(() => undefined)
+    return next
+  }
+
+  const sameName = (a: string, b: string): boolean =>
+    a.trim().toLowerCase() === b.trim().toLowerCase()
+
+  return {
+    dirs,
+    async ensure() {
+      await fs.mkdir(join(dirs.stateDir, 'members'), { recursive: true })
+      await fs.mkdir(dirs.workspaceDir, { recursive: true })
+    },
+    roster: () => readJson<TeamMember[]>(rosterFile, []),
+    async findMember(name) {
+      return (await readJson<TeamMember[]>(rosterFile, [])).find((m) => sameName(m.name, name))
+    },
+    putMember: (member) =>
+      serial(async () => {
+        await fs.mkdir(dirs.stateDir, { recursive: true })
+        const list = await readJson<TeamMember[]>(rosterFile, [])
+        const index = list.findIndex((m) => sameName(m.name, member.name))
+        if (index >= 0) list[index] = member
+        else list.push(member)
+        await writeJson(rosterFile, list)
+      }),
+    board: () => readJson<BoardTask[]>(boardFile, []),
+    patchBoard: (patches) =>
+      serial(async () => {
+        await fs.mkdir(dirs.stateDir, { recursive: true })
+        const list = await readJson<BoardTask[]>(boardFile, [])
+        for (const patch of patches) {
+          const index = list.findIndex((task) => task.id === patch.id)
+          const defined = Object.fromEntries(
+            Object.entries(patch).filter(([, value]) => value !== undefined)
+          ) as BoardPatch
+          if (index >= 0) {
+            list[index] = { ...list[index]!, ...defined, updatedAt: now() }
+          } else {
+            if (!patch.title) throw new Error(`任务 ${patch.id} 是新的，需要给 title`)
+            list.push({ status: 'todo', ...defined, title: patch.title, updatedAt: now() })
+          }
+        }
+        await writeJson(boardFile, list)
+        return list
+      }),
+    history: (name) => readJson<AgentMessage[]>(historyFile(name), []),
+    saveHistory: (name, messages) =>
+      serial(async () => {
+        await fs.mkdir(join(dirs.stateDir, 'members'), { recursive: true })
+        await writeJson(historyFile(name), messages)
+      })
+  }
+}

@@ -6,6 +6,8 @@ import {
   filterSlashCommands,
   matchRunCommand,
   parseGoalCommandDraft,
+  parseTeamCommandDraft,
+  buildTeamCommandDraft,
   slashCommandInsertion
 } from './slashCommands'
 
@@ -14,14 +16,20 @@ describe('slashCommands', () => {
    * 这张表是给用户看的承诺，**每一条都必须真的接了实现**。
    *
    * 加了却没接实现，就是把「敲了以为生效」从一个隐蔽的坑变成写在界面上的谎。
-   * 三条分别落在：主进程 `core/goalLoop.ts` 的 `parseGoalCommand`、
+   * 四条分别落在：主进程 `core/goalLoop.ts` 的 `parseGoalCommand`、
+   * 主进程 `core/team/teamCommand.ts` 的 `parseTeamCommand`、
    * `Welcome.vue` 的 `handleCreateImage`、`InputComposer.vue` 的 `isWikiCommand`。
    *
    * `/ask` 删掉了：只读已经是审批下拉里的一档，会话级、看得见、能改回来，
    * 比一次性前缀好；留着两条路会让「我到底是不是只读」变成要靠猜。
    */
   it('只收真的接了实现的命令', () => {
-    expect(BUILTIN_SLASH_COMMANDS.map((command) => command.name)).toEqual(['goal', 'image', 'wiki'])
+    expect(BUILTIN_SLASH_COMMANDS.map((command) => command.name)).toEqual([
+      'goal',
+      'team',
+      'image',
+      'wiki'
+    ])
   })
 
   /** 带参数的填进输入框，不带参数的当场跑 —— 判据就是有没有参数占位 */
@@ -111,5 +119,14 @@ describe('slashCommands', () => {
     expect(parseGoalCommandDraft('/goal 做一扇门')).toBe('做一扇门')
     expect(parseGoalCommandDraft('/goals 做一扇门')).toBeNull()
     expect(buildGoalCommandDraft('做一扇门')).toBe('/goal 做一扇门')
+  })
+
+  it('/team 草稿同一个折法，和 /goal 互不串', () => {
+    expect(parseTeamCommandDraft('/team ')).toBe('')
+    expect(parseTeamCommandDraft('/team 做一个塔防游戏')).toBe('做一个塔防游戏')
+    expect(parseTeamCommandDraft('/teams 做一个塔防游戏')).toBeNull()
+    expect(parseTeamCommandDraft('/goal 做一个塔防游戏')).toBeNull()
+    expect(parseGoalCommandDraft('/team 做一个塔防游戏')).toBeNull()
+    expect(buildTeamCommandDraft('做一个塔防游戏')).toBe('/team 做一个塔防游戏')
   })
 })

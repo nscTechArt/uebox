@@ -54,6 +54,7 @@ import {
 } from '../core/assetLock'
 import { enforceAfterWrite, suspendForWrite } from '../core/assetLockEnforcement'
 import { getTargetConnectionId } from '../core/projectTargetContext'
+import { editorKeyActive, withEditorKey } from '../core/team/editorKey'
 import {
   ASK_USER_TOOL_NAME,
   BROWSER_TOOL_NAMES,
@@ -1326,7 +1327,9 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
   // （defineTool 和 adaptV2Tool，后者自己拼对象不走前者），而 callUe 也不是
   // 收口 —— adapted/ 下 73 个工具直接调 WebSocket。这个数组是全部工具唯一
   // 汇合的地方，包在这里才做到「以后加新工具不可能忘记加锁」。
-  const guarded = all.map(withAssetLock)
+  // 先过资产锁（拿不到立刻失败），再排编辑器钥匙（拿不到就等）。反过来的话，
+  // 一个注定被锁挡下的调用要先排完队才知道自己白等了
+  const guarded = all.map((tool) => withAssetLock(withEditorKeyGate(tool)))
 
   assertUniqueNames(guarded)
   if (!deps.sender && !deps.notebook) cache = guarded
@@ -1424,6 +1427,30 @@ function withAssetLock(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
         await enforceAfterWrite(held)
       }
     }
+  } as UnrealAgentTool<never>
+}
+
+/**
+ * 工作室模式下，改编辑器的工具要先拿到编辑器钥匙（见 `core/team/editorKey.ts`）。
+ *
+ * 只套 `ue.*` 的写工具：读不改状态，并发读没有害处；`ue.*` 以外的写工具
+ * （本地文件、素材库、生图）不经过编辑器，本来就该并行。
+ * 不在工作室模式里（`editorKeyActive()` 为假）就原样透传，普通会话零改变。
+ */
+function withEditorKeyGate(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
+  if (tool.unrealBox.risk === 'safe' || !tool.unrealBox.namespace.startsWith('ue.')) return tool
+
+  const inner = tool.execute.bind(tool)
+  return {
+    ...tool,
+    execute: (toolCallId, params, signal, onUpdate) =>
+      editorKeyActive()
+        ? withEditorKey(
+            getTargetConnectionId() ?? 'default',
+            () => inner(toolCallId, params, signal, onUpdate),
+            signal
+          )
+        : inner(toolCallId, params, signal, onUpdate)
   } as UnrealAgentTool<never>
 }
 

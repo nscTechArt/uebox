@@ -74,6 +74,11 @@ import {
   getTargetProjectPath,
   runWithTargetConnectionId
 } from './projectTargetContext'
+import { releaseAll, runWithLockOwner } from './assetLock'
+import { AUDITOR_TOOLS, type GoalVerdict } from './goalLoop'
+import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
+import { memberFileBase, type TeamMember, type TeamStore } from './team/teamStore'
+import { createBoardTool, createTeamTools } from './team/teamTools'
 
 /**
  * 一次引擎体检的结果 —— 「此刻这条会话够不够得着引擎，够得着的是哪个工程」。
@@ -225,6 +230,23 @@ export interface SessionContext {
   onCompacting?: (info: { tokensBefore: number }) => void
   /** 子 agent 内部只跑一层，不再向下派生 —— 防止无限递归 */
   isSubAgent?: boolean
+  /**
+   * 工作室模式（`/team`），只有制作人（主会话）带。
+   *
+   * 带了它，制作人手上多出招人、派活、任务板、交付四个工具，系统提示词里多一段
+   * 交付标准和团队环境。见 `core/team/` 和 docs/AI游戏工作室设计-2026-09-25.md。
+   */
+  team?: {
+    objective: string
+    store: TeamStore
+    /** 验收有了结论。宿主用它记「这一局过没过验收」 */
+    onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
+  }
+  /**
+   * 这个子 agent 是工作室里的一个队员：人设进系统提示词，手上多一个任务板工具。
+   * 由 `runSubAgent` 的 `member` 设进来，产品路径别的地方不传。
+   */
+  teamMember?: { name: string; persona: string; store: TeamStore }
   /** 子 agent 的工具命名空间白名单 */
   namespaces?: string[]
   /**
@@ -643,6 +665,9 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     taskTool,
     ctx.toolSearchEnabled ? (content) => search!.loadFromSkill(content) : undefined
   )
+  // 工作室模式的工具排在授权过滤之后追加：招人时要把制作人手上有哪些命名空间
+  // 写进描述，得先有那份清单。它们全是 `core` / safe，过滤本来也不会拿掉它们
+  onlineTools.push(...teamToolsFor(ctx, onlineTools))
   const offlineTools = onlineTools.filter(
     (tool) => !tool.unrealBox.namespace.startsWith('ue.') || OFFLINE_UE_TOOLS.has(tool.name)
   )
@@ -870,12 +895,24 @@ export async function runSubAgent(
      * 而那恰恰是父 agent 最需要知道「它已经动了什么」的时候（见 `writeLedger.ts`）。
      */
     ledger?: WriteLedger
+    /**
+     * 工作室里的一个队员（见 `core/team/`）。带了它，子 agent 的系统提示词换成队员的
+     * 人设，手上多一个任务板工具；`fast` 档换成用户绑的对话模型。
+     */
+    member?: TeamMember
+    /** 跑完（含被停下）时交回它的全部消息。队员靠它记住干过的活 */
+    keepMessages?: (messages: AgentMessage[]) => void
   }
 ): Promise<SubAgentResult> {
   input.signal?.throwIfAborted()
   // task 声明为 parallel，多个子 agent 可能同时在跑 —— sessionId 必须唯一，
   // 否则日志和以后的会话持久化会互相覆盖。
-  const subId = `${parent.sessionId}:sub-${++subAgentSeq}`
+  //
+  // 队员例外：同一个队员一次只干一件活（`team_send` 排着队），用固定的 id，
+  // 这样它每次派活的请求都落在同一个 prompt cache 上
+  const subId = input.member
+    ? `${parent.sessionId}:mate-${memberFileBase(input.member.name)}`
+    : `${parent.sessionId}:sub-${++subAgentSeq}`
 
   const { agent, allTools } = await createUnrealAgent({
     ...parent,
@@ -890,8 +927,16 @@ export async function runSubAgent(
     // 每个纯文本子任务都会被钉在视觉模型上 —— 那未必是用户挑来跑工具的那个。
     modelRequest: {
       ...parent.modelRequest,
-      hasImages: currentTurnHasImages(input.seedMessages)
+      hasImages: currentTurnHasImages(input.seedMessages),
+      // `fast` 档的队员走用户绑的对话模型；没绑会按角色回落链退回 agent 模型
+      ...(input.member?.tier === 'fast' ? { role: 'chat' as const } : {})
     },
+    // 工作室的四个工具只给制作人。队员拿自己那份身份，验收员、`task` 子任务什么都不拿
+    team: undefined,
+    teamMember:
+      input.member && parent.team
+        ? { name: input.member.name, persona: input.member.persona, store: parent.team.store }
+        : undefined,
     // 复用父 agent 已发现的 skill 清单，不重复扫盘
     ...(parent.skills ? { skills: parent.skills } : {}),
     /*
@@ -1009,7 +1054,87 @@ export async function runSubAgent(
     )
   } finally {
     input.signal?.removeEventListener('abort', onAbort)
+    input.keepMessages?.(agent.state.messages)
   }
+}
+
+/**
+ * 验收员手上的工具：`/goal` 审计员那一套，再加真能「玩」的两个。
+ *
+ * 审计员只要能回读和跑一遍；交付验收要从开始玩到胜负再重来，
+ * 光 `ue_playtest` 模拟不了玩家输入，所以带上自动试玩和注入输入。
+ */
+const ACCEPTANCE_TOOLS = [...AUDITOR_TOOLS, 'ue_autoplay', 'ue_inject_input']
+
+/** 队员的锁主。不带 `:sub-`，所以不会被 `rootSessionId` 归回制作人 */
+function memberLockOwner(sessionId: string, name: string): string {
+  return `${sessionId}:mate-${memberFileBase(name)}`
+}
+
+/**
+ * 工作室模式的工具：制作人拿招人、派活、任务板、交付四个，队员只拿任务板，
+ * 其余会话一个都没有。
+ */
+function teamToolsFor(
+  ctx: SessionContext,
+  pool: UnrealAgentTool<never>[]
+): UnrealAgentTool<never>[] {
+  if (ctx.teamMember) {
+    return [createBoardTool(ctx.teamMember.store) as unknown as UnrealAgentTool<never>]
+  }
+  const team = ctx.team
+  if (!team || ctx.isSubAgent) return []
+
+  const namespaces = [...new Set(pool.map((tool) => tool.unrealBox.namespace))]
+    .filter((ns) => ns !== 'core')
+    .sort()
+
+  return createTeamTools({
+    store: team.store,
+    objective: team.objective,
+    namespaces,
+    runMember: async ({ member, message, history, signal, onProgress, ledger, keepMessages }) => {
+      // 队员用自己的锁主：两个队员改同一个资产会被挡下，而不是像 `task` 那样
+      // 父子共用一把锁、互相不设防。它这件活干完就放锁 —— 队员的「一轮」就是一件活
+      const owner = memberLockOwner(ctx.sessionId, member.name)
+      return runWithLockOwner(owner, async () => {
+        try {
+          return await runSubAgent(ctx, {
+            prompt: message,
+            member,
+            seedMessages: history,
+            ledger,
+            onProgress,
+            keepMessages,
+            ...(member.namespaces ? { namespaces: member.namespaces } : {}),
+            ...(member.readOnly ? { readOnly: true } : {}),
+            ...(signal ? { signal } : {})
+          })
+        } finally {
+          releaseAll(owner)
+        }
+      })
+    },
+    runAcceptance: async ({ report, howToPlay, projectPath, signal, onProgress }) => {
+      // 验收员什么都不带：不看制作过程，只看交付说明和游戏本身。
+      // 不给审批通道，理由同 `/goal` 的审计员：它的授权边界就是那份工具白名单
+      const result = await runSubAgent(ctx, {
+        prompt: buildAcceptancePrompt({
+          objective: team.objective,
+          report,
+          howToPlay,
+          ...(projectPath ? { projectPath } : {})
+        }),
+        toolNames: ACCEPTANCE_TOOLS,
+        withoutApproval: true,
+        seedMessages: [],
+        onProgress,
+        ...(signal ? { signal } : {})
+      })
+      return result.text
+    },
+    ...(team.onVerdict ? { onVerdict: team.onVerdict } : {})
+  })
 }
 
 /** 取子 agent 最后一条 assistant 消息的文本作为返回值 */
@@ -1272,7 +1397,17 @@ export function buildSystemPrompt(
     )
   }
 
-  if (ctx.isSubAgent) {
+  if (ctx.teamMember) {
+    // 队员不继承制作人的对话（它的起始消息是它自己跟制作人的往来），
+    // 下面那段「你能看到完整对话」对它是错的，整段换掉
+    lines.push(
+      ...buildMemberFraming({
+        name: ctx.teamMember.name,
+        persona: ctx.teamMember.persona,
+        workspaceDir: ctx.teamMember.store.dirs.workspaceDir
+      })
+    )
+  } else if (ctx.isSubAgent) {
     lines.push(
       '',
       'You are a sub-agent working on a task handed over by the main agent, and you can see the full conversation that led here.',
@@ -1319,6 +1454,13 @@ export function buildSystemPrompt(
     // 用户自己写的常驻说明。放在环境块**之前**：它是规矩，而环境块是事实，
     // 两者混在一起模型分不清哪句该照做、哪句只是背景
     buildUserInstructionsSection(ctx.userInstructions ?? '') +
+    // 工作室模式的交付标准和团队环境。和用户的常驻说明一样是「规矩」，排在环境块之前
+    (ctx.team && !ctx.isSubAgent
+      ? buildProducerBrief({
+          objective: ctx.team.objective,
+          workspaceDir: ctx.team.store.dirs.workspaceDir
+        }) + '\n'
+      : '') +
     `\n<environment>\n${environment.join('\n')}\n</environment>\n`
   )
 }

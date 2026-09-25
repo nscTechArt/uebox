@@ -257,6 +257,16 @@
       >
         <PhTarget /> {{ t('assistant.composer.goalMode') }}
       </button>
+      <button
+        v-if="isTeamMode"
+        type="button"
+        class="tool-indicator goal-mode"
+        :title="t('assistant.composer.exitTeamMode')"
+        aria-pressed="true"
+        @click="cancelTeamMode"
+      >
+        <PhUsersThree /> {{ t('assistant.composer.teamMode') }}
+      </button>
       <a-textarea
         ref="textareaRef"
         v-model:value="composerContent"
@@ -778,6 +788,7 @@ import {
   PhSliders,
   PhStop,
   PhTarget,
+  PhUsersThree,
   PhWarning,
   PhX,
   PhXCircle,
@@ -813,8 +824,10 @@ import { parseSkillSlashQuery, skillMention } from './skillCommands'
 import { noteToMentionSource, parseMentionQuery, stripMentionQuery } from './mentionQuery'
 import {
   buildGoalCommandDraft,
+  buildTeamCommandDraft,
   matchRunCommand,
   parseGoalCommandDraft,
+  parseTeamCommandDraft,
   slashCommandInsertion,
   type SlashCommand
 } from './slashCommands'
@@ -987,15 +1000,30 @@ const goalCommandText = computed(() =>
   isImageGenerationMode.value ? null : parseGoalCommandDraft(content.value)
 )
 const isGoalMode = computed(() => goalCommandText.value !== null)
+// `/team ` 同一个折法：命令前缀收成标签，输入框里只剩那一句话
+const teamCommandText = computed(() =>
+  isImageGenerationMode.value ? null : parseTeamCommandDraft(content.value)
+)
+const isTeamMode = computed(() => teamCommandText.value !== null)
 const composerContent = computed<string>({
-  get: () => goalCommandText.value ?? content.value,
+  get: () => goalCommandText.value ?? teamCommandText.value ?? content.value,
   set: (value) => {
-    content.value = isGoalMode.value ? buildGoalCommandDraft(value) : value
+    content.value = isGoalMode.value
+      ? buildGoalCommandDraft(value)
+      : isTeamMode.value
+        ? buildTeamCommandDraft(value)
+        : value
   }
 })
 
 function cancelGoalMode(): void {
   const objective = parseGoalCommandDraft(content.value)
+  if (objective === null) return
+  content.value = objective
+}
+
+function cancelTeamMode(): void {
+  const objective = parseTeamCommandDraft(content.value)
   if (objective === null) return
   content.value = objective
 }

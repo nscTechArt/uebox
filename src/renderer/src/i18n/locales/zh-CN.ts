@@ -2291,6 +2291,8 @@ export default {
       exitImageGen: '退出图片生成模式',
       goalMode: '目标',
       exitGoalMode: '退出目标模式',
+      teamMode: '团队',
+      exitTeamMode: '退出团队模式',
       modelGen: '模型生成',
       preset: '生成预设',
       presetQuick: '快速',
@@ -5122,6 +5124,8 @@ export default {
     },
     slashCommands: {
       goal: '目标模式 —— 做完自动复核，没达成就接着改',
+      team: '团队模式 —— 一句话，自己组队做到可玩交付',
+      teamArg: '<一句话>',
       image: '切到图片生成模式',
       compact: '压缩这条会话的历史，腾出上下文',
       goalArg: '<目标>',

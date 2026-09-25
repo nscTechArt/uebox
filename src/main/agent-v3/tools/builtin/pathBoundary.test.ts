@@ -91,6 +91,21 @@ describe('userData 里的 skills 例外', () => {
     'C:/Users/me/AppData/Roaming/unreal-box/skills-backup/secrets.txt'
   ])('userData 里的其余位置一律照旧挡住：%s', (p) => expect(isDenied(p)).toBe(true))
 
+  /**
+   * `team/` 是工作室模式的共享工作区（见 `core/team/teamStore.ts`）。
+   * 盒子自己的团队账（名册、任务板、队员对话）在 `agent-v3-sessions/<会话>.team/`，照旧挡着。
+   */
+  it.each([
+    'C:/Users/me/AppData/Roaming/unreal-box/team/abc/立项书.md',
+    '/Users/me/Library/Application Support/unreal-box/team/abc/art/ref.png'
+  ])('放行团队工作区：%s', (p) => expect(isDenied(p)).toBe(false))
+
+  it.each([
+    'C:/Users/me/AppData/Roaming/unreal-box/agent-v3-sessions/abc.team/roster.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/team/../ai-provider-secrets.bin',
+    'C:/Users/me/AppData/Roaming/unreal-box/teams/x.txt'
+  ])('团队工作区以外照旧挡住：%s', (p) => expect(isDenied(p)).toBe(true))
+
   // 例外只解除 userData 那三条，不解除别的 —— 否则在 skills 下摆一个
   // `.ssh` 目录就能把整份清单绕过去
   it('例外不为别的规则开门', () => {

@@ -170,3 +170,40 @@ describe('buildSubtaskView', () => {
     expect(view.absorbed.size).toBe(0)
   })
 })
+
+describe('工作室模式的泳道', () => {
+  const call = (callId: string, name: string, args: Record<string, unknown>): AgentProcessItem => ({
+    type: 'tool-call',
+    data: { id: callId, type: 'function', function: { name, arguments: JSON.stringify(args) } },
+    timestamp: 1
+  })
+
+  it('派给队员的活也是一条泳道，标题标上是谁在干；进度去掉「团队：」前缀', () => {
+    const view = buildSubtaskView([
+      call('s1', 'team_send', { to: '地编', message: '搭一个灰盒关卡\n要有起点和终点' }),
+      {
+        type: 'notify-users',
+        data: {
+          message: '团队：地编 · 调用 ue_spawn_actor',
+          notifyType: 'progress',
+          toolCallId: 's1',
+          toolName: 'team_send'
+        },
+        timestamp: 2
+      }
+    ])
+    expect(view.lanes).toHaveLength(1)
+    expect(view.lanes[0]).toMatchObject({
+      title: '地编：搭一个灰盒关卡',
+      latest: '地编 · 调用 ue_spawn_actor',
+      steps: 1
+    })
+  })
+
+  it('交付验收单独一条泳道', () => {
+    const view = buildSubtaskView([
+      call('d1', 'team_deliver', { report: '做完了', how_to_play: 'WASD 移动' })
+    ])
+    expect(view.lanes[0]).toMatchObject({ title: '交付验收', prompt: '做完了\n\nWASD 移动' })
+  })
+})

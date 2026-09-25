@@ -66,6 +66,19 @@ const optionsSchema = z.object({
       mutations: z.array(z.string()),
       settled: z.boolean()
     })
+    .optional(),
+  /**
+   * 工作室模式（`/team`）。和 `goal` 不同，它**跨轮**：用户在团队干活途中插一句
+   * 「主角换成猫」，这条会话还是工作室，不能一句普通消息就把团队解散了。
+   * 见 `core/team/teamSession.ts`。
+   */
+  team: z
+    .object({
+      objective: z.string().min(1),
+      verdict: z.enum(['pass', 'fail', 'blocked']).nullable(),
+      deliveries: z.number().int().min(0),
+      nudges: z.number().int().min(0)
+    })
     .optional()
 })
 

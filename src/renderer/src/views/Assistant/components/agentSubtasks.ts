@@ -20,15 +20,18 @@ import {
   parseStructuredValue
 } from './agentToolCallData'
 
-/** 子 agent 工具在注册表里的名字 */
-const SUBTASK_TOOL_NAME = 'task'
+/**
+ * 起子 agent 的工具。`task` 是普通子任务；`team_send` 是工作室模式里派给队员的活，
+ * `team_deliver` 是独立验收员在玩 —— 三者都是「另一个 agent 在底下干活」，泳道一样画。
+ */
+const SUBTASK_TOOL_NAMES = new Set(['task', 'team_send', 'team_deliver'])
 
 /**
  * 进度行在扁平时间线上带着说话人前缀（`子任务：调用 xxx`）——
  * 没有它，混在主时间线里的那行没人知道是谁在说。
  * 进了泳道卡片就成了重复：卡片本身就是那一路。
  */
-const SPEAKER_PREFIX = /^子任务\s*[：:]\s*/
+const SPEAKER_PREFIX = /^(子任务|团队|验收)\s*[：:]\s*/
 
 /** 标题太长会把卡片撑成一段话。完整 prompt 点开卡片就能看 */
 const TITLE_MAX_LENGTH = 90
@@ -120,9 +123,30 @@ export function pickTitleLine(prompt: string): string {
   return firstLine(substantive || lines.find(Boolean) || prompt, TITLE_MAX_LENGTH)
 }
 
-function readPrompt(args: unknown): string {
+/**
+ * 派给这一路的话。三个工具的参数形状不一样：
+ * `task` 是 `{ prompt }`，`team_send` 是 `{ to, message }`，`team_deliver` 是 `{ report, how_to_play }`。
+ */
+function readPrompt(toolName: string, args: unknown): string {
   const parsed = parseStructuredValue(args)
-  return typeof parsed?.prompt === 'string' ? parsed.prompt.trim() : ''
+  const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+  if (toolName === 'team_send') return text(parsed?.message)
+  if (toolName === 'team_deliver') {
+    return [text(parsed?.report), text(parsed?.how_to_play)].filter(Boolean).join('\n\n')
+  }
+  return text(parsed?.prompt)
+}
+
+/** 卡片标题。队员那一路标上是谁在干，验收那一路直接说是验收 */
+function laneTitle(toolName: string, args: unknown, prompt: string): string {
+  if (toolName === 'team_deliver') return '交付验收'
+  if (toolName === 'team_send') {
+    const to = parseStructuredValue(args)?.to
+    const who = typeof to === 'string' && to.trim() ? to.trim() : ''
+    const line = pickTitleLine(prompt)
+    return who ? firstLine(`${who}：${line}`, TITLE_MAX_LENGTH) : line
+  }
+  return pickTitleLine(prompt)
 }
 
 /**
@@ -155,18 +179,20 @@ export function buildSubtaskView(items: readonly AgentProcessItem[]): SubtaskVie
 
     if (item.type === 'tool-call') {
       const data = (item.data ?? {}) as Record<string, unknown>
-      if (normalizeToolName(getToolName(data)) !== SUBTASK_TOOL_NAME) return
+      const toolName = normalizeToolName(getToolName(data))
+      if (!SUBTASK_TOOL_NAMES.has(toolName)) return
       // 同一个 toolCallId 只开一条泳道：断线重连时同一条事件可能补发
       if (byCallId.has(callId)) {
         absorbed.add(index)
         return
       }
 
-      const prompt = readPrompt(getToolArgs(data))
+      const args = getToolArgs(data)
+      const prompt = readPrompt(toolName, args)
       const lane: SubtaskLane = {
         callId,
         index: lanes.length + 1,
-        title: pickTitleLine(prompt),
+        title: laneTitle(toolName, args, prompt),
         prompt,
         status: 'running',
         startedAt: item.timestamp,

@@ -42,7 +42,7 @@ import { posix } from 'path'
  *
  * 里面躺着 `ai-provider-secrets.bin`（用户绑的 API key）、`chat-history`、
  * `agent-v3-sessions` —— 整个目录默认全拒，只开 `USER_DATA_EXCEPTIONS`
- * 那两个口子。
+ * 那几个口子。
  */
 const USER_DATA_FRAGMENTS = [
   '/appdata/roaming/unreal-box',
@@ -51,7 +51,7 @@ const USER_DATA_FRAGMENTS = [
 ]
 
 /**
- * userData 里允许碰的两个子目录。**只有这两个**，其余一律照旧拒绝。
+ * userData 里允许碰的三个子目录。**只有这三个**，其余一律照旧拒绝。
  *
  * ## `skills/` —— 用户自己写的 skill
  *
@@ -81,10 +81,18 @@ const USER_DATA_FRAGMENTS = [
  * `vaults-old/` 这种前缀撞上的不算。`..` 在 `canonical` 里已经折叠掉了，
  * 从例外目录跳回 userData 根同样挡住。
  *
+ * ## `team/` —— 工作室模式的共享工作区
+ *
+ * `/team` 的队员们在 `<userData>/team/<会话>/` 里放立项书、美术圣经、参考图、
+ * 决策日志（见 `core/team/teamStore.ts`）。它在工程外面，因为工程是跑到半路才建的。
+ * 不开口子的话，制作人被告知「这是你们的工作区」，第一次写文件就撞上「这里存放的是
+ * 凭据」。开得起是因为里面全是团队自己写的文档；名册、任务板、队员对话这些
+ * 盒子自己的账不在这里，在会话目录旁边，照旧挡着。
+ *
  * 命令和 Python 也允许素材库，以支持图片尺寸检查、裁切等处理；skills 仍不开。
  * 命令逐处排除素材库前缀后继续检查敏感位置，不能用一个素材路径放行整条命令。
  */
-const USER_DATA_EXCEPTION_SUBPATHS = ['skills', 'database/vaults']
+const USER_DATA_EXCEPTION_SUBPATHS = ['skills', 'database/vaults', 'team']
 
 const USER_DATA_EXCEPTIONS = USER_DATA_FRAGMENTS.flatMap((fragment) =>
   USER_DATA_EXCEPTION_SUBPATHS.map((subpath) => `${fragment}/${subpath}/`)

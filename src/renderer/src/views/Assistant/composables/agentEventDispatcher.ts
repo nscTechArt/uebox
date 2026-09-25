@@ -665,6 +665,10 @@ export async function cancelUserSteer(agentSessionId: string, steerId: string): 
  * 说成「子任务」才对得上他看到的现象：主对话停着不动，底下有东西在跑。
  */
 function progressLabel(toolName: string): string {
+  // 工作室模式同理：`team_send` 的进度是某个队员在干活（文本里带着队员名），
+  // `team_deliver` 的是独立验收员在玩
+  if (toolName === 'team_send') return '团队'
+  if (toolName === 'team_deliver') return '验收'
   return toolName === 'task' ? '子任务' : toolName
 }
 

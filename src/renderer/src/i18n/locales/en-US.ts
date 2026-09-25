@@ -2342,6 +2342,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       exitImageGen: 'Exit image generation mode',
       goalMode: 'Goal',
       exitGoalMode: 'Exit goal mode',
+      teamMode: 'Team',
+      exitTeamMode: 'Exit team mode',
       modelGen: 'Model Gen',
       preset: 'Preset',
       presetQuick: 'Quick',
@@ -5272,6 +5274,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     slashCommands: {
       goal: 'Goal mode — audits its own work and keeps going until it passes',
+      team: 'Team mode — one line in, it builds a team and works to a playable delivery',
+      teamArg: '<one line>',
       image: 'Switch to image generation',
       compact: 'Compact this session history to free up context',
       goalArg: '<objective>',

@@ -32,8 +32,8 @@ export interface ChatMediaFile {
   kind: 'video' | 'audio'
 }
 
-/** 和主进程 `parseGoalCommand` 同一个认法 */
-const GOAL_COMMAND = /^\s*\/goal\b/
+/** 和主进程 `parseGoalCommand` / `parseTeamCommand` 同一个认法 */
+const MODE_COMMAND = /^\s*\/(goal|team)\b/
 
 /**
  * 把附件上下文并进用户这条消息。
@@ -59,10 +59,10 @@ export function mergeTurnContext(
     type: 'text',
     text: `【用户这条消息附带的文件】\n\n${contexts.join('\n\n---\n\n')}`
   }
-  // `/goal …` 是给主进程认的命令，只认消息开头（`parseGoalCommand`）。附件块垫在它前面，
+  // `/goal …`、`/team …` 是给主进程认的命令，只认消息开头。附件块垫在它前面，
   // 带着表格发 /goal 就不进目标模式了 —— 这种时候附件跟在命令那段后面
   const first = items[0]
-  if (first?.type === 'text' && GOAL_COMMAND.test(first.text ?? '')) items.splice(1, 0, block)
+  if (first?.type === 'text' && MODE_COMMAND.test(first.text ?? '')) items.splice(1, 0, block)
   else items.unshift(block)
 
   // 只有文字的话仍然回一段纯文本，和不带附件时的消息形状一致

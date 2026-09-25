@@ -61,6 +61,13 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
     descriptionKey: 'assistantInputComposer.slashCommands.goal'
   },
   {
+    // 工作室模式：制作人自己组队、分工，一路做到交付。见 docs/AI游戏工作室设计-2026-09-25.md
+    name: 'team',
+    kind: 'insert',
+    argHintKey: 'assistantInputComposer.slashCommands.teamArg',
+    descriptionKey: 'assistantInputComposer.slashCommands.team'
+  },
+  {
     name: 'image',
     kind: 'run',
     argHintKey: '',
@@ -136,6 +143,18 @@ export function parseGoalCommandDraft(value: string): string | null {
 /** 把界面上的目标文字还原为主进程认得的 `/goal <目标>` 命令。 */
 export function buildGoalCommandDraft(objective: string): string {
   return `${GOAL_COMMAND_PREFIX}${objective}`
+}
+
+const TEAM_COMMAND_PREFIX = slashCommandInsertion('team')
+
+/** 同 `parseGoalCommandDraft`，认的是 `/team ` */
+export function parseTeamCommandDraft(value: string): string | null {
+  return value.startsWith(TEAM_COMMAND_PREFIX) ? value.slice(TEAM_COMMAND_PREFIX.length) : null
+}
+
+/** 把界面上的一句话还原为主进程认得的 `/team <一句话>` 命令。 */
+export function buildTeamCommandDraft(objective: string): string {
+  return `${TEAM_COMMAND_PREFIX}${objective}`
 }
 
 /**

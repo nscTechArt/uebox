@@ -112,6 +112,15 @@ import {
   createGoalLoop,
   parseGoalCommand
 } from '../agent-v3/core/goalLoop'
+import { parseTeamCommand } from '../agent-v3/core/team/teamCommand'
+import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
+import { createTeamStore } from '../agent-v3/core/team/teamStore'
+import {
+  applyVerdict,
+  createTeamGate,
+  newTeamState,
+  teamDirsFor
+} from '../agent-v3/core/team/teamSession'
 import {
   createRuntimeScopeId,
   formatLocalNow,
@@ -384,6 +393,58 @@ function attachGoalLoop(
   })
   agent.subscribe(loop)
   return loop
+}
+
+/**
+ * 工作室模式（`/team`）挂到这一轮的 ctx 上。必须在 `createUnrealAgent` 之前：
+ * 团队工具和制作人的那段提示词是装配时就定下来的。
+ *
+ * 只读模式不进工作室：理由同 `/goal`（`checkGoalPreconditions`）—— 什么都改不了的
+ * 团队做不出游戏，这一轮按普通对话跑。
+ */
+async function prepareTeam(ctx: SessionContext, options: SessionExecutionOptions): Promise<void> {
+  const team = options.team
+  if (!team || options.mode === 'ask') return
+  const store = createTeamStore(teamDirsFor(ctx.sessionId))
+  await store.ensure()
+  ctx.team = {
+    objective: team.objective,
+    store,
+    onVerdict: async (verdict) => {
+      options.team = applyVerdict(options.team ?? team, verdict)
+      await saveExecutionOptions(ctx.sessionId, options)
+    }
+  }
+}
+
+/** 交付闸：没过验收就收尾时，替制作人补一句（见 `core/team/teamSession.ts`） */
+function attachTeamGate(
+  agent: Agent,
+  ctx: SessionContext,
+  options: SessionExecutionOptions,
+  emit: (channel: string, payload: unknown) => void
+): void {
+  if (!ctx.team || !options.team) return
+  agent.subscribe(
+    createTeamGate({
+      getState: () => options.team!,
+      setState: async (next) => {
+        options.team = next
+        await saveExecutionOptions(ctx.sessionId, options)
+      },
+      followUp: (text) => agent.followUp({ role: 'user', content: text, timestamp: 0 }),
+      report: (message) =>
+        emit('agent-v3:notice', { sessionId: ctx.sessionId, message, level: 'info' })
+    })
+  )
+}
+
+/**
+ * 工作室模式下整轮跑在编辑器钥匙的作用域里：制作人和它派出去的每个队员，
+ * 改编辑器都要排队（见 `core/team/editorKey.ts`）。普通会话原样执行。
+ */
+function withTeamScope<T>(options: SessionExecutionOptions, fn: () => Promise<T>): Promise<T> {
+  return options.team && options.mode !== 'ask' ? runWithEditorKey(fn) : fn()
 }
 
 export interface AgentV3ExecuteArgs {
@@ -1427,7 +1488,9 @@ export function registerAgentV3IPC(): void {
     // `/goal <目标>`：命令词在这里吃掉，模型收到的是目标本身。
     // 认在主进程而不是让渲染层多带一个字段，见 `parseGoalCommand` 的注释。
     const goalObjective = parseGoalCommand(prompt)
-    const promptText = goalObjective ?? prompt
+    // `/team <一句话>`：开启工作室模式。和 `/goal` 并列，同样只吃掉命令词
+    const teamObjective = goalObjective ? null : parseTeamCommand(prompt)
+    const promptText = goalObjective ?? teamObjective ?? prompt
 
     const emit = (channel: string, payload: unknown): void => {
       if (!sender.isDestroyed()) sender.send(channel, payload)
@@ -1540,7 +1603,17 @@ export function registerAgentV3IPC(): void {
        * 随便再发一条消息就把它冲掉了 —— 下次「从断点继续」又顺着渲染层那份旧戳
        * 把归属复活，而工具当时已经跟用户说过「已解除」。
        */
-      const carried = (await loadExecutionOptions(sessionId))?.sessionProject
+      const previousOptions = await loadExecutionOptions(sessionId)
+      const carried = previousOptions?.sessionProject
+      /*
+       * 工作室是**跨轮**的：`/team` 开过之后，用户后面随口插的每一句都还在团队里。
+       * 交付闸的提醒次数按真人消息清零 —— 用户说了新话，就该重新给制作人两次机会。
+       */
+      const team = teamObjective
+        ? newTeamState(teamObjective)
+        : previousOptions?.team
+          ? { ...previousOptions.team, nudges: 0 }
+          : undefined
 
       /*
        * 落盘的是**归属表**里那份，不是文件里那份。
@@ -1591,9 +1664,11 @@ export function registerAgentV3IPC(): void {
                 settled: false
               }
             }
-          : {})
+          : {}),
+        ...(team ? { team } : {})
       }
       await saveExecutionOptions(sessionId, options)
+      await prepareTeam(ctx, options)
       run.controller.signal.throwIfAborted()
       const { agent, selection, tools, allTools } = await createUnrealAgent(ctx)
       run.agent = agent
@@ -1652,6 +1727,7 @@ export function registerAgentV3IPC(): void {
        * 按 `tools` 记的话那些改动一条都不入账 —— 审计员会对着一张空台账签字。
        */
       attachGoalLoop(agent, ctx, allTools, options, emit)
+      attachTeamGate(agent, ctx, options, emit)
 
       // 信封拼在用户这句话前面一起发出去，于是它跟着这条消息一起落进 JSONL，
       // 之后再也不会被改写 —— 这正是「只追加、不回头改前缀」的落点。
@@ -1690,17 +1766,19 @@ export function registerAgentV3IPC(): void {
 
       const mediaRefs = [...pictures.refs, ...media.refs]
       if (mediaRefs.length === 0) {
-        await agent.prompt(promptWithEnvelope, admitted.images)
+        await withTeamScope(options, () => agent.prompt(promptWithEnvelope, admitted.images))
       } else {
-        await agent.prompt({
-          role: 'user',
-          content: [
-            { type: 'text', text: promptWithEnvelope },
-            ...mediaRefs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
-            ...admitted.images
-          ],
-          timestamp: Date.now()
-        })
+        await withTeamScope(options, () =>
+          agent.prompt({
+            role: 'user',
+            content: [
+              { type: 'text', text: promptWithEnvelope },
+              ...mediaRefs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
+              ...admitted.images
+            ],
+            timestamp: Date.now()
+          })
+        )
       }
 
       // pi 把 provider 失败编码进事件流而不是抛异常，所以 prompt() 正常返回
@@ -1974,6 +2052,8 @@ export function registerAgentV3IPC(): void {
 
     try {
       run.controller.signal.throwIfAborted()
+      // 续跑照样是工作室：团队、任务板、队员的记忆都在盘上，接着用
+      await prepareTeam(ctx, options)
       const { agent, selection, allTools } = await createUnrealAgent(ctx)
       run.agent = agent
       run.selection = selection
@@ -2019,6 +2099,7 @@ export function registerAgentV3IPC(): void {
       // 同 execute：改动台账要看**全量**工具名，不能只看这一轮开局那份 ——
       // 续跑里模型照样可能中途把工程打开、拿到引擎工具再开始改东西
       const goalLoop = attachGoalLoop(agent, ctx, allTools, options, emit)
+      attachTeamGate(agent, ctx, options, emit)
       if (goalLoop) {
         emit('agent-v3:goal', {
           sessionId,
@@ -2038,7 +2119,7 @@ export function registerAgentV3IPC(): void {
           return { success: true, restoredMessages: plan.messages.length }
         }
       }
-      await agent.continue()
+      await withTeamScope(options, () => agent.continue())
 
       // 同 execute：provider 失败编码在 state 里，不抛异常
       if (agent.state.errorMessage) {
