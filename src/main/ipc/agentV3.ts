@@ -116,6 +116,8 @@ import { parseTeamCommand } from '../agent-v3/core/team/teamCommand'
 import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
 import { createTeamStore } from '../agent-v3/core/team/teamStore'
 import type { TeamStateView } from '../../shared/agentTeam'
+import { buildCrashNotice, type EditorWatchEvent } from '../agent-v3/core/team/editorWatch'
+import { startTeamEditorWatch } from './teamEditorWatch'
 import {
   applyVerdict,
   createTeamGate,
@@ -465,6 +467,54 @@ function attachTeamGate(
         emit('agent-v3:notice', { sessionId: ctx.sessionId, message, level: 'info' })
     })
   )
+}
+
+/** 正在看护的编辑器，按会话记。一轮结束（`finally` 里）就停 */
+const editorWatchBySession = new Map<string, () => void>()
+
+function stopEditorWatch(sessionId: string): void {
+  editorWatchBySession.get(sessionId)?.()
+  editorWatchBySession.delete(sessionId)
+}
+
+/** 给用户看的那一句（界面提示）。给制作人看的在 `buildCrashNotice` */
+function watchNotice(event: EditorWatchEvent): string {
+  if (event.kind === 'crashed') {
+    return `编辑器崩溃了${event.reason ? `（${event.reason.slice(0, 120)}）` : ''}，正在自动重开工程…`
+  }
+  if (event.kind === 'recovered') {
+    return `编辑器已经重开并连上（用时 ${Math.round(event.waitedMs / 1000)} 秒），已告诉制作人。`
+  }
+  return `编辑器没能自动恢复：${event.why}`
+}
+
+/**
+ * 工作室模式下看护这一局的编辑器：崩了自动重开，并把经过告诉制作人
+ * （见 `core/team/editorWatch.ts`）。只管这一局此刻在干的那个工程。
+ */
+function attachEditorWatch(
+  agent: Agent,
+  ctx: SessionContext,
+  run: ActiveAgentRun,
+  emit: (channel: string, payload: unknown) => void
+): void {
+  if (!ctx.team) return
+  stopEditorWatch(ctx.sessionId)
+  const isOurs = (projectDir: string): boolean => {
+    const current = run.scope?.connectedProject?.projectPath
+    return Boolean(current) && projectPathKey(current!) === projectPathKey(projectDir)
+  }
+  const stop = startTeamEditorWatch(isOurs, {
+    onEvent: (event) => {
+      emit('agent-v3:notice', {
+        sessionId: ctx.sessionId,
+        message: watchNotice(event),
+        level: event.kind === 'recovered' ? 'info' : 'warning'
+      })
+      agent.steer({ role: 'user', content: buildCrashNotice(event), timestamp: Date.now() })
+    }
+  })
+  editorWatchBySession.set(ctx.sessionId, stop)
 }
 
 /**
@@ -1762,6 +1812,7 @@ export function registerAgentV3IPC(): void {
        */
       attachGoalLoop(agent, ctx, allTools, options, emit)
       attachTeamGate(agent, ctx, options, emit)
+      attachEditorWatch(agent, ctx, run, emit)
 
       // 信封拼在用户这句话前面一起发出去，于是它跟着这条消息一起落进 JSONL，
       // 之后再也不会被改写 —— 这正是「只追加、不回头改前缀」的落点。
@@ -1862,6 +1913,7 @@ export function registerAgentV3IPC(): void {
       notifyAgentRun({ type: 'error', sessionId, message })
       return { success: false, error: message }
     } finally {
+      stopEditorWatch(sessionId)
       activeAgents.release(sessionId)
       // 资产锁的**唯一**释放点。用户按停止、模型报错、异常抛穿都走这里；
       // 进程崩了则整张锁表跟着消失 —— 所以不需要 TTL 和心跳。
@@ -1940,6 +1992,7 @@ export function registerAgentV3IPC(): void {
       }
       return { success: false, error: (error as Error).message }
     } finally {
+      stopEditorWatch(args.sessionId)
       activeAgents.release(args.sessionId)
       releaseAll(args.sessionId)
       notifyAgentRun({ type: 'released', sessionId: args.sessionId })
@@ -2134,6 +2187,7 @@ export function registerAgentV3IPC(): void {
       // 续跑里模型照样可能中途把工程打开、拿到引擎工具再开始改东西
       const goalLoop = attachGoalLoop(agent, ctx, allTools, options, emit)
       attachTeamGate(agent, ctx, options, emit)
+      attachEditorWatch(agent, ctx, run, emit)
       if (goalLoop) {
         emit('agent-v3:goal', {
           sessionId,
@@ -2676,6 +2730,7 @@ export function registerAgentV3IPC(): void {
       // 厂商的原始报错至少能拿去排查
       return { success: false, reason: 'error', error: (error as Error).message }
     } finally {
+      stopEditorWatch(sessionId)
       activeAgents.release(sessionId)
     }
   })
