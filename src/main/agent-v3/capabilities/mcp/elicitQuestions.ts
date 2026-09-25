@@ -48,7 +48,8 @@ export function toElicitation(questions: AskUserQuestion[]): ElicitRequestFormPa
 
   return {
     mode: 'form',
-    message: questions.length === 1 ? questions[0].question : questions.map((q) => q.question).join('\n'),
+    message:
+      questions.length === 1 ? questions[0].question : questions.map((q) => q.question).join('\n'),
     requestedSchema: {
       type: 'object',
       properties: properties as ElicitRequestFormParams['requestedSchema']['properties']

@@ -57,7 +57,12 @@ export function skillDirectories(pluginSkillDirs: string[] = [], projectRoot?: s
     ? join(process.resourcesPath, 'skills')
     : join(app.getAppPath(), 'resources', 'skills')
   const projectDir = projectSkillsDir(projectRoot)
-  return [...(projectDir ? [projectDir] : []), userSkillsDir(), ...pluginSkillDirs, builtinSkillsDir]
+  return [
+    ...(projectDir ? [projectDir] : []),
+    userSkillsDir(),
+    ...pluginSkillDirs,
+    builtinSkillsDir
+  ]
 }
 
 /**

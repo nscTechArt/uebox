@@ -858,13 +858,10 @@ describe('McpServerHost 按会话装配', () => {
 
   it('只读档如实传给装配函数，装配结果还会再按只读收窄一遍', async () => {
     const flags: boolean[] = []
-    const client = await connect(
-      async (request) => {
-        flags.push(request.readOnly)
-        return { tools: TOOLS }
-      },
-      {}
-    )
+    const client = await connect(async (request) => {
+      flags.push(request.readOnly)
+      return { tools: TOOLS }
+    }, {})
     expect(flags.every(Boolean)).toBe(true)
     const names = (await client.listTools()).tools.map((t) => t.name)
     expect(names).not.toContain('ue_destroy_actor')
@@ -878,7 +875,11 @@ describe('McpServerHost 按会话装配', () => {
     }
 
     await connect(source)
-    await connect(source, { includeMutating: true }, { capabilities: { elicitation: { form: {} } } })
+    await connect(
+      source,
+      { includeMutating: true },
+      { capabilities: { elicitation: { form: {} } } }
+    )
     expect(withElicit).toEqual([false, true])
   }, 30_000)
 

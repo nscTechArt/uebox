@@ -162,7 +162,10 @@ describe('跑 skill 自带的脚本', () => {
     expect(sent).toContain('print("from disk")')
     // 中文、反斜杠原样到得了 Python：拿同一套 JSON 规则解回来验
     const literal = sent.match(/loads\((".*")\)/)![1]
-    expect(JSON.parse(JSON.parse(literal))).toEqual({ source_dir: 'G:/动作\\新版', overwrite: true })
+    expect(JSON.parse(JSON.parse(literal))).toEqual({
+      source_dir: 'G:/动作\\新版',
+      overwrite: true
+    })
   })
 
   it('script 和 skill 脚本不能同时给，也不能都不给', async () => {

@@ -5,9 +5,7 @@ import type {
   ImageResolution
 } from '../../../shared/imageGenerationModels'
 import { toPlainEditorSnapshot, type EditorSnapshot } from '../../../shared/editorSnapshot'
-import {
-  type CondensedSpeechStyle
-} from '../../../shared/speechBriefing'
+import { type CondensedSpeechStyle } from '../../../shared/speechBriefing'
 import { toSessionProjectPayload } from '../views/Assistant/composables/sessionProjectBinding'
 
 /**

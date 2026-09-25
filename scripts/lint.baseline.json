@@ -692,7 +692,7 @@
     "warnings": 0
   },
   "src/renderer/src/views/Assistant/Welcome.vue": {
-    "errors": 16,
+    "errors": 14,
     "warnings": 0
   },
   "src/renderer/src/views/BlueprintLibrary/BlueprintEditor.test.ts": {

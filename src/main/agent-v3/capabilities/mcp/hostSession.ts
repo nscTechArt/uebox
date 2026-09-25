@@ -130,7 +130,10 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
   // 说明按真实连接状态写：工具可以先给全，但环境块不能说一句假话
   const instructions =
     PREFACE +
-    buildSystemPrompt({ ...ctx, ueConnected: projectManager.getInteractiveProjects().length > 0 }, skills)
+    buildSystemPrompt(
+      { ...ctx, ueConnected: projectManager.getInteractiveProjects().length > 0 },
+      skills
+    )
 
   return { tools, instructions }
 }

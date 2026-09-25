@@ -155,7 +155,9 @@ describe('还是不碰 .uasset', () => {
 /** 纯动画 FBX 要靠 skeleton 才导得进来，插件认的就是这个字段名 */
 describe('动画 FBX 的 skeleton', () => {
   it('给了就原样发给插件', async () => {
-    await run(withDefaults({ files: ['C:/a/idle.fbx'], skeleton: '/Game/Body/metahuman_base_skel' }))
+    await run(
+      withDefaults({ files: ['C:/a/idle.fbx'], skeleton: '/Game/Body/metahuman_base_skel' })
+    )
 
     expect(sentParams().skeleton).toBe('/Game/Body/metahuman_base_skel')
   })

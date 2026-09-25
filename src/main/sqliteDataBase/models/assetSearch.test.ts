@@ -116,16 +116,16 @@ describe('searchAssetsByCriteria 的参数绑定', () => {
       'INSERT INTO asset_favorites (assetKey, itemType, userId, vaultId) VALUES (?, ?, ?, ?)'
     ).run('a1', 'asset', 1, 'vault-1')
 
-    expect(searchAssetsByCriteria(db, { favoriteStatus: 'favorite' }).map((r) => r.assetKey)).toEqual(
-      ['a1']
-    )
+    expect(
+      searchAssetsByCriteria(db, { favoriteStatus: 'favorite' }).map((r) => r.assetKey)
+    ).toEqual(['a1'])
     expect(
       searchAssetsByCriteria(db, { favoriteStatus: 'unfavorite' }).map((r) => r.assetKey)
     ).toEqual(['a2'])
     // 带了 id 就照旧按它筛
-    expect(
-      searchAssetsByCriteria(db, { favoriteStatus: 'favorite', vaultId: 'vault-2' })
-    ).toEqual([])
+    expect(searchAssetsByCriteria(db, { favoriteStatus: 'favorite', vaultId: 'vault-2' })).toEqual(
+      []
+    )
   })
   /**
    * 「只看主资产」这个筛选原来只有浏览那条路认得。它一旦生效，列表就因为
