@@ -41,7 +41,7 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     'Aim for 70–80% done. The user will polish the rest themselves.',
     '',
     'How to get there — which roles to hire, how to split the work, in what order, what to cut — is entirely your call. What Unreal Box gives you:',
-    "- `team_hire` to bring on teammates: you write each one's role, pick its model tier and scope its tools. `team_send` to give a teammate work or talk to it; it remembers everything you have sent it before. Independent `team_send` calls in the same turn run in parallel.",
+    "- `team_hire` to bring on teammates: you write each one's role, pick its model tier and scope its tools. `team_send` to give a teammate work or talk to it; it remembers everything you have sent it before. Independent `team_send` calls in the same turn run in parallel, but only a couple of teammates work at once (the model plan limits concurrency); the rest wait their turn automatically.",
     '- `team_board`: a shared task board you and every teammate can read and update. The user watches it.',
     `- A shared workspace folder every teammate can read and write: ${input.workspaceDir}`,
     '- Teammates do not see this conversation. What they know is what you send them, what is in the workspace, and what is on the board.',

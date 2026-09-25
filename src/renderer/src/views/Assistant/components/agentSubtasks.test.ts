@@ -200,6 +200,32 @@ describe('工作室模式的泳道', () => {
     })
   })
 
+  /** 真机截图：三张卡的标题都是制作人写在每份开头的同一句背景 */
+  it('几路共用的开场白不当标题，取各自真正的任务', () => {
+    const preamble = '工程 TDGuardians 已在 UE 5.8 中打开并连上（I:/UE Project/TDGuardians）。'
+    const view = buildSubtaskView([
+      call('a', 'team_send', { to: '玩法主程', message: `${preamble}\n实现塔、敌人和波次` }),
+      call('b', 'team_send', { to: '关卡美术', message: `${preamble}\n搭一条敌人行进路线` }),
+      call('c', 'team_send', { to: 'UI程序', message: `${preamble}\n做金币和生命的 HUD` })
+    ])
+    expect(view.lanes.map((lane) => lane.title)).toEqual([
+      '玩法主程：实现塔、敌人和波次',
+      '关卡美术：搭一条敌人行进路线',
+      'UI程序：做金币和生命的 HUD'
+    ])
+  })
+
+  it('每一路都只有那一句时，退回原样，不留空标题', () => {
+    const view = buildSubtaskView([
+      call('a', 'team_send', { to: 'A', message: '同一句话，没有别的' }),
+      call('b', 'team_send', { to: 'B', message: '同一句话，没有别的' })
+    ])
+    expect(view.lanes.map((lane) => lane.title)).toEqual([
+      'A：同一句话，没有别的',
+      'B：同一句话，没有别的'
+    ])
+  })
+
   it('交付验收单独一条泳道', () => {
     const view = buildSubtaskView([
       call('d1', 'team_deliver', { report: '做完了', how_to_play: 'WASD 移动' })

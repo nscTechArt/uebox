@@ -35,6 +35,16 @@ import {
 
 export const TEAM_TOOL_NAMES = ['team_hire', 'team_send', 'team_board', 'team_deliver'] as const
 
+/**
+ * 同一时间最多几个队员在跑。
+ *
+ * 真机上撞过：三个队员并行，各自一个六七万 token 的请求同时打到小米 MiMo Token Plan，
+ * 网关不回 429，而是把三个请求挂住，5 分钟后一起断开（`ERR_CONNECTION_CLOSED`）。
+ * 编程套餐普遍按账号限并发，而且不公布数字（社区实测 3 路就可能被限）。
+ * 2 路是「还算并行、又不容易撞墙」的折中；多派的排队，不报错。
+ */
+export const MAX_PARALLEL_MEMBERS = 2
+
 export interface RunMemberInput {
   member: TeamMember
   message: string
@@ -62,6 +72,49 @@ export interface TeamToolDeps {
   }) => Promise<string>
   /** 验收有了结论。宿主用它记「这一局有没有过验收」 */
   onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
+  /** 同一时间最多几个队员在跑，默认 `MAX_PARALLEL_MEMBERS` */
+  maxParallelMembers?: number
+}
+
+/**
+ * 计数信号量。排队中途被停下就退出队列，不占名额。
+ */
+export function createSlots(limit: number): {
+  acquire: (signal?: AbortSignal) => Promise<() => void>
+  running: () => number
+} {
+  let running = 0
+  const waiting: Array<() => void> = []
+  const grant = (): (() => void) => {
+    running++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      running--
+      waiting.shift()?.()
+    }
+  }
+  return {
+    running: () => running,
+    acquire: (signal) => {
+      signal?.throwIfAborted()
+      if (running < limit) return Promise.resolve(grant())
+      return new Promise((resolve, reject) => {
+        const wake = (): void => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve(grant())
+        }
+        const onAbort = (): void => {
+          const index = waiting.indexOf(wake)
+          if (index >= 0) waiting.splice(index, 1)
+          reject(signal?.reason ?? new Error('Operation aborted'))
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+        waiting.push(wake)
+      })
+    }
+  }
 }
 
 // ── 任务板 ──────────────────────────────────────────────────────────────
@@ -202,6 +255,8 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
    * 所以同一个人的第二件活排在第一件后面；不同的人照常并行。
    */
   const busy = new Map<string, Promise<unknown>>()
+  const limit = deps.maxParallelMembers ?? MAX_PARALLEL_MEMBERS
+  const slots = createSlots(limit)
 
   const sendInput = z.object({
     to: z.string().min(1).describe('队员名'),
@@ -219,7 +274,8 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
     concurrency: 'parallel',
     description:
       '给一个队员派活或者说话，等它干完回话。它记得你之前发给它的所有内容。' +
-      '同一轮里发给不同队员的会并行跑；发给同一个人的按顺序排队。' +
+      `同一轮里发给不同队员的会并行跑，但同一时间最多 ${limit} 个队员在干活（模型套餐限并发），多的自动排队；` +
+      '发给同一个人的按顺序排队。' +
       '回话末尾附一行它实际做过的写操作，那是记账记出来的，不是它自己说的。',
     input: sendInput,
     execute: async ({ to, message }, ctx) => {
@@ -239,6 +295,10 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
       const run = previous
         .catch(() => undefined)
         .then(async () => {
+          if (slots.running() >= limit) {
+            ctx.report({ text: `${member.name} · 排队中：同时最多 ${limit} 个队员在干活` })
+          }
+          const release = await slots.acquire(ctx.signal)
           const ledger = new WriteLedger()
           ctx.setAbortNote?.(() => formatInterruptedWrites(ledger.list(), member.readOnly))
           // 上次被停在半截工具调用上的话，那条调用没有结果 —— 摘掉，不然它一睁眼
@@ -259,6 +319,7 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
               }
             })
           } finally {
+            release()
             // 被停下也要存：它已经干了一半的活，下次派活时得记得
             if (latest) await deps.store.saveHistory(member.name, latest)
           }

@@ -10,7 +10,13 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 import { parseTeamCommand } from './teamCommand'
 import { editorKeyActive, runWithEditorKey, withEditorKey } from './editorKey'
 import { createTeamStore, memberFileBase, type TeamStore } from './teamStore'
-import { createTeamTools, renderBoard, type TeamToolDeps } from './teamTools'
+import {
+  createSlots,
+  createTeamTools,
+  MAX_PARALLEL_MEMBERS,
+  renderBoard,
+  type TeamToolDeps
+} from './teamTools'
 import {
   applyVerdict,
   createTeamGate,
@@ -101,6 +107,37 @@ describe('编辑器钥匙', () => {
       await Promise.resolve()
       expect(editorKeyActive()).toBe(true)
     })
+  })
+})
+
+describe('队员名额', () => {
+  it('满了就排队，放一个进一个', async () => {
+    const slots = createSlots(1)
+    const first = await slots.acquire()
+    let second: (() => void) | undefined
+    const waiting = slots.acquire().then((release) => (second = release))
+    await Promise.resolve()
+    expect(second).toBeUndefined()
+    first()
+    await waiting
+    expect(slots.running()).toBe(1)
+    second!()
+    expect(slots.running()).toBe(0)
+  })
+
+  it('排队中被停下就退出，不占名额；重复放手不会多放', async () => {
+    const slots = createSlots(1)
+    const held = await slots.acquire()
+    const controller = new AbortController()
+    const waiting = slots.acquire(controller.signal)
+    controller.abort()
+    await expect(waiting).rejects.toBeTruthy()
+    held()
+    held()
+    expect(slots.running()).toBe(0)
+    const again = await slots.acquire()
+    expect(slots.running()).toBe(1)
+    again()
   })
 })
 
@@ -268,6 +305,30 @@ describe('团队工具', () => {
     ])
     expect(overlapSame).toBe(false)
     expect(overlapOthers).toBe(true)
+  })
+
+  /**
+   * 真机上三个队员并行，同时打到套餐网关，三个请求一起被挂 5 分钟再断开。
+   * 同一时间最多 MAX_PARALLEL_MEMBERS 个队员在跑，多的排队而不是报错。
+   */
+  it('同一时间最多两个队员在跑，第三个排队，最后都干完', async () => {
+    let running = 0
+    let peak = 0
+    const t = tools({
+      runMember: async () => {
+        running++
+        peak = Math.max(peak, running)
+        await new Promise((r) => setTimeout(r, 10))
+        running--
+        return ok('ok')
+      }
+    })
+    for (const name of ['A', 'B', 'C']) await t.team_hire!({ name, role: name })
+    const results = await Promise.all(
+      ['A', 'B', 'C'].map((to) => t.team_send!({ to, message: 'go' }))
+    )
+    expect(peak).toBe(MAX_PARALLEL_MEMBERS)
+    expect(results).toHaveLength(3)
   })
 
   it('交付：验收结论交给宿主；读不出结论按没过说', async () => {

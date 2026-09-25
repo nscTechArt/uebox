@@ -115,12 +115,34 @@ function firstLine(text: string, maxLength: number): string {
  * 那样几张卡的标题会完全一样。跳过整行括起来的说明和只有标记的行；
  * 全都跳完了（整段 prompt 就是一句框架说明）就退回首行，总比空着强。
  */
-export function pickTitleLine(prompt: string): string {
-  const lines = prompt.split('\n').map((line) => line.replace(MARKER_PREFIX, '').trim())
+export function pickTitleLine(prompt: string, shared: ReadonlySet<string> = new Set()): string {
+  const lines = promptLines(prompt)
   const substantive = lines.find(
-    (line) => line.length >= MIN_TITLE_LENGTH && !FRAMING_LINE.test(line)
+    (line) => line.length >= MIN_TITLE_LENGTH && !FRAMING_LINE.test(line) && !shared.has(line)
   )
   return firstLine(substantive || lines.find(Boolean) || prompt, TITLE_MAX_LENGTH)
+}
+
+function promptLines(prompt: string): string[] {
+  return prompt.split('\n').map((line) => line.replace(MARKER_PREFIX, '').trim())
+}
+
+/**
+ * 同一批里、在两路以上的任务书里都出现过的行。
+ *
+ * 真机上撞到的：制作人给三个队员派活，每份开头都是同一句背景
+ * 「工程 TDGuardians 已在 UE 5.8 中打开并连上」，三张卡的标题就一模一样。
+ * `FRAMING_LINE` 只认得出括起来的那种框架说明，写成普通句子的共同开场白
+ * 只有和别的几路对照才看得出来。
+ */
+function sharedLines(prompts: readonly string[]): Set<string> {
+  const seen = new Map<string, number>()
+  for (const prompt of prompts) {
+    for (const line of new Set(promptLines(prompt).filter(Boolean))) {
+      seen.set(line, (seen.get(line) ?? 0) + 1)
+    }
+  }
+  return new Set([...seen].filter(([, count]) => count >= 2).map(([line]) => line))
 }
 
 /**
@@ -138,15 +160,20 @@ function readPrompt(toolName: string, args: unknown): string {
 }
 
 /** 卡片标题。队员那一路标上是谁在干，验收那一路直接说是验收 */
-function laneTitle(toolName: string, args: unknown, prompt: string): string {
+function laneTitle(
+  toolName: string,
+  args: unknown,
+  prompt: string,
+  shared?: ReadonlySet<string>
+): string {
   if (toolName === 'team_deliver') return '交付验收'
   if (toolName === 'team_send') {
     const to = parseStructuredValue(args)?.to
     const who = typeof to === 'string' && to.trim() ? to.trim() : ''
-    const line = pickTitleLine(prompt)
+    const line = pickTitleLine(prompt, shared)
     return who ? firstLine(`${who}：${line}`, TITLE_MAX_LENGTH) : line
   }
-  return pickTitleLine(prompt)
+  return pickTitleLine(prompt, shared)
 }
 
 /**
@@ -172,6 +199,8 @@ export function buildSubtaskView(items: readonly AgentProcessItem[]): SubtaskVie
   const laneAt = new Map<number, SubtaskLane>()
   const absorbed = new Set<number>()
   const byCallId = new Map<string, SubtaskLane>()
+  /** 标题要和同类的几路对照着取（见 `sharedLines`），所以先记下来，最后统一再取一次 */
+  const origins: Array<{ lane: SubtaskLane; toolName: string; args: unknown }> = []
 
   items.forEach((item, index) => {
     const callId = readCallId(item)
@@ -201,6 +230,7 @@ export function buildSubtaskView(items: readonly AgentProcessItem[]): SubtaskVie
         summary: ''
       }
       lanes.push(lane)
+      origins.push({ lane, toolName, args })
       byCallId.set(callId, lane)
       laneAt.set(index, lane)
       absorbed.add(index)
@@ -228,6 +258,14 @@ export function buildSubtaskView(items: readonly AgentProcessItem[]): SubtaskVie
       absorbed.add(index)
     }
   })
+
+  for (const toolName of new Set(origins.map((origin) => origin.toolName))) {
+    const group = origins.filter((origin) => origin.toolName === toolName)
+    if (group.length < 2) continue
+    const shared = sharedLines(group.map((origin) => origin.lane.prompt))
+    if (shared.size === 0) continue
+    for (const { lane, args } of group) lane.title = laneTitle(toolName, args, lane.prompt, shared)
+  }
 
   return { lanes, laneAt, absorbed }
 }
