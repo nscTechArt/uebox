@@ -188,6 +188,25 @@ describe('userData 里的保管库例外', () => {
     expect(assertScriptAllowed(source)).toBeUndefined()
   })
 
+  /**
+   * 2026-09-26 真机反馈：队员把脚本写进团队工作区再用 powershell -File 去跑，
+   * 被当成凭据位置拒掉。工作区是团队自己写的文档和脚本，命令里也要放行。
+   */
+  it.each([
+    String.raw`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\me\AppData\Roaming\unreal-box\team\abc\clear_ro.ps1"`,
+    'cat ~/AppData/Roaming/unreal-box/team/abc/GDD.md'
+  ])('团队工作区的命令放行：%s', (source) => {
+    expect(assertCommandAllowed(source)).toBeUndefined()
+  })
+
+  it.each([
+    'cat ~/AppData/Roaming/unreal-box/team/../ai-provider-secrets.bin',
+    'cat ~/AppData/Roaming/unreal-box/teams/x.txt',
+    'cat ~/AppData/Roaming/unreal-box/agent-v3-sessions/abc.team/roster.json'
+  ])('团队工作区以外照旧挡住：%s', (source) => {
+    expect(assertCommandAllowed(source)).toBeDefined()
+  })
+
   it.each([
     'cat ~/AppData/Roaming/unreal-box/ai-provider-secrets.bin',
     'cat ~/AppData/Roaming/unreal-box/database/app-data.db',

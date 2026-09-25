@@ -197,3 +197,50 @@ describe('describeConflicts', () => {
     expect(text).toContain('虚幻编辑器')
   })
 })
+
+/**
+ * 工作室模式：同一个团队里的制作人（锁主 = 会话）和队员（锁主 = `<会话>:mate-<名字>`）。
+ * 2026-09-26 真机反馈：三张材质被一把目录「锁」拦下、改默认 GameMode 被 GameMode 蓝图的锁拦下、
+ * 报错只说「另一条 AI 会话」—— 队友之间撞锁时说不清是谁。
+ */
+describe('工作室模式的锁', () => {
+  it('目录参数不当资产锁：往同一个目录里建东西不会互相挡', () => {
+    expect(
+      extractPackagePaths({ material_name: 'M_Rock', destination_path: '/Game/Materials' })
+    ).toEqual([])
+    expect(extractPackagePaths({ folder: '/Game/UI', asset_path: '/Game/UI/WBP_Card' })).toEqual([
+      '/Game/UI/WBP_Card'
+    ])
+  })
+
+  it('写 ini 的参数：值里的资产引用不锁（改配置不碰那个资产）', () => {
+    expect(
+      extractPackagePaths({
+        config_name: 'Engine',
+        section: '/Script/EngineSettings.GameMapsSettings',
+        key: 'GlobalDefaultGameMode',
+        value: '/Game/Core/BP_GameMode.BP_GameMode_C'
+      })
+    ).toEqual([])
+  })
+
+  it('撞上队友的锁：说清是哪个队友、什么时候放，不说「另一条 AI 会话」', () => {
+    const text = describeConflicts([{ path: '/Game/Core/BP_GM', owner: 's1:mate-玩法主程' }], 's1')
+    expect(text).toContain('队友「玩法主程」')
+    expect(text).toContain('team_message')
+    expect(text).not.toContain('另一条 AI 会话')
+    expect(describeConflicts([{ path: '/Game/A', owner: 's1' }], 's1:mate-美术')).toContain(
+      '制作人'
+    )
+  })
+
+  it('队友之间撞锁不弹「两个窗口抢资产」的提示；跨会话照旧弹', () => {
+    const notify = vi.fn()
+    setLockConflictNotifier(notify)
+    acquire(CONN, 's1:mate-美术', ['/Game/A'])
+    acquire(CONN, 's1', ['/Game/A'])
+    expect(notify).not.toHaveBeenCalled()
+    acquire(CONN, 's2', ['/Game/A'])
+    expect(notify).toHaveBeenCalledTimes(1)
+  })
+})

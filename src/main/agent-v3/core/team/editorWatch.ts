@@ -80,6 +80,9 @@ export interface EditorWatchOptions {
   onEvent: (event: EditorWatchEvent) => void
   /** 断开后等多久再看进程（崩溃报告和进程退出都要一点时间） */
   graceMs?: number
+  /** 断开了但进程还在：最多再看多久、多久看一次（见 handleDisconnect） */
+  hangWatchMs?: number
+  hangPollMs?: number
   maxReopens?: number
   windowMs?: number
 }
@@ -88,6 +91,8 @@ export function watchEditorCrashes(deps: EditorWatchDeps, options: EditorWatchOp
   const now = deps.now ?? Date.now
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const graceMs = options.graceMs ?? 5_000
+  const hangWatchMs = options.hangWatchMs ?? 5 * 60_000
+  const hangPollMs = options.hangPollMs ?? 10_000
   const maxReopens = options.maxReopens ?? 3
   const windowMs = options.windowMs ?? 60 * 60_000
   const since = now()
@@ -115,8 +120,29 @@ export function watchEditorCrashes(deps: EditorWatchDeps, options: EditorWatchOp
       if (stopped) return
       const uproject = await deps.findUproject(projectDir)
       if (!uproject) return
-      // 进程还在：卡住或网络抖动，插件会自己连回来
-      if (await deps.isRunning(uproject)) return
+      /*
+       * 进程还在：可能只是卡了一阵（插件缓过来会自己重连），也可能正卡在崩溃处理里
+       * （2026-09-26 真机：引擎断言崩了，进程挂着写崩溃报告，socket 被盒子按僵尸连接断掉）。
+       * 所以不马上下结论，接着看几分钟：连回来了就没事；进程退了就按崩溃处理；
+       * 一直卡着就告诉制作人，别让全队对着一个不答话的编辑器干等。
+       */
+      if (await deps.isRunning(uproject)) {
+        const deadline = now() + hangWatchMs
+        for (;;) {
+          await sleep(hangPollMs)
+          if (stopped) return
+          if ([...byConnection.values()].some((dir) => projectPathKey(dir) === key)) return
+          if (!(await deps.isRunning(uproject))) break
+          if (now() >= deadline) {
+            options.onEvent({
+              kind: 'gave-up',
+              projectDir,
+              why: `编辑器进程还在，但 ${Math.round(hangWatchMs / 60_000)} 分钟没答话、也没重连（可能卡在崩溃处理或弹窗上）。没有自动处理，需要人看一眼`
+            })
+            return
+          }
+        }
+      }
 
       options.onEvent({
         kind: 'crashed',

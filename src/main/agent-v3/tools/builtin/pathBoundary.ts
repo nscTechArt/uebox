@@ -259,12 +259,23 @@ export function normalizeCommand(command: string): string {
  */
 const COMMAND_FRAGMENTS = DENY_FRAGMENTS.map((fragment) => fragment.replace(/ /g, '/'))
 
-const COMMAND_VAULT_PREFIXES = USER_DATA_FRAGMENTS.map(
-  (fragment) =>
-    new RegExp(
-      `${fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/database/vaults(?=$|[/\\s'"\x60),;|&<>])`,
-      'g'
-    )
+/**
+ * 命令和 Python 里放行的 userData 子目录：素材库，加上工作室模式的共享工作区。
+ *
+ * 工作区那条是 2026-09-26 真机反馈补的：队员把 PowerShell 脚本写进团队工作区再
+ * `powershell -File` 去跑，被当成「凭据位置」拒掉 —— 而报错还明令不许换写法重试，
+ * 唯一的替代路就这样被堵死。skills 仍然不开。
+ */
+const COMMAND_ALLOWED_SUBPATHS = ['database/vaults', 'team']
+
+const COMMAND_VAULT_PREFIXES = USER_DATA_FRAGMENTS.flatMap((fragment) =>
+  COMMAND_ALLOWED_SUBPATHS.map(
+    (subpath) =>
+      new RegExp(
+        `${fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/${subpath}(?=$|[/\\s'"\x60),;|&<>])`,
+        'g'
+      )
+  )
 )
 
 /** 一段源码（shell 命令 / Python 脚本）里有没有提到敏感位置 */

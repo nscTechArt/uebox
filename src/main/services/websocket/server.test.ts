@@ -331,6 +331,45 @@ describe('多工程并发', () => {
   })
 })
 
+/**
+ * 2026-09-26 真机反馈：编辑器崩在引擎断言里，socket 和心跳都在，请求一条都不答。
+ * 盒子一直当它连着，全队干等二十分钟。按「答不答话」判活。
+ */
+describe('僵尸连接', () => {
+  it('连续三次请求超时、中间一次都没答：断开', async () => {
+    await connectPlugin() // 这个插件只收不答
+    await waitForConnections(1)
+    for (let i = 0; i < 3; i++) {
+      await expect(service.callRequest('content.search', {}, undefined, 30)).rejects.toMatchObject({
+        code: 'E_TIMEOUT'
+      })
+    }
+    await waitForConnections(0)
+  })
+
+  it('还有请求在路上（长操作占着游戏线程）时超时不算，不断开', async () => {
+    await connectPlugin()
+    await waitForConnections(1)
+    const long = service.callRequest('content.import', {}, undefined, 60_000)
+    long.catch(() => undefined)
+    for (let i = 0; i < 3; i++) {
+      await expect(service.callRequest('content.search', {}, undefined, 30)).rejects.toMatchObject({
+        code: 'E_TIMEOUT'
+      })
+    }
+    expect(service.getConnectionCount()).toBe(1)
+    const id = service.getConnectionManager().getAllConnections()[0]!.id
+    await expect(service.probeConnection(id)).resolves.toBe('busy')
+  })
+
+  it('探活：不答话就是 dead', async () => {
+    await connectPlugin()
+    await waitForConnections(1)
+    const id = service.getConnectionManager().getAllConnections()[0]!.id
+    await expect(service.probeConnection(id, 30)).resolves.toBe('dead')
+  })
+})
+
 describe('断线善后', () => {
   /**
    * 心跳超时和正常断开必须走同一条流程。

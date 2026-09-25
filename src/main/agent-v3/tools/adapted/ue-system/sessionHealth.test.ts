@@ -36,8 +36,13 @@ const {
   getAllProjects,
   getRunningProjects,
   getTargetConnectionId,
-  getTargetProjectPath
+  getTargetProjectPath,
+  probeConnection,
+  dropConnection
 } = vi.hoisted(() => ({
+  // 探活默认都答话；要模拟僵尸连接就让它回 dead
+  probeConnection: vi.fn(async (): Promise<'alive' | 'busy' | 'dead'> => 'alive'),
+  dropConnection: vi.fn(),
   getAllConnections: vi.fn((): Array<{ id: string }> => []),
   getAllProjects: vi.fn((): ProjectRow[] => []),
   getRunningProjects: vi.fn((): ProcessRow[] => []),
@@ -47,7 +52,11 @@ const {
 
 vi.mock('../../../../services', () => ({
   serviceManager: {
-    getWebSocketService: () => ({ getConnectionManager: () => ({ getAllConnections }) })
+    getWebSocketService: () => ({
+      getConnectionManager: () => ({ getAllConnections }),
+      probeConnection,
+      dropConnection
+    })
   }
 }))
 
@@ -110,11 +119,44 @@ function connect(connectionId: string, projectPath: string, projectName = 'MyGam
 }
 
 beforeEach(() => {
+  probeConnection.mockReset()
+  probeConnection.mockResolvedValue('alive')
+  dropConnection.mockReset()
   getAllConnections.mockReturnValue([])
   getAllProjects.mockReturnValue([])
   getRunningProjects.mockReturnValue([])
   getTargetConnectionId.mockReturnValue(undefined)
   getTargetProjectPath.mockReturnValue(undefined)
+})
+
+/**
+ * 2026-09-26 真机反馈：编辑器崩在引擎断言里，socket 和心跳都还在，这里照报 connected、
+ * 连 connection_id 都和崩溃前一样，而每一条真正的请求都超时。
+ */
+describe('报 connected 之前先探活', () => {
+  it('连接不答话：当场断开，state 按断开后的情况算，并说清发生了什么', async () => {
+    connect('zombie-1', 'D:/Projects/MyGame')
+    getRunningProjects.mockReturnValue([])
+    probeConnection.mockResolvedValue('dead')
+    dropConnection.mockImplementation(() => {
+      getAllConnections.mockReturnValue([])
+      getAllProjects.mockReturnValue([])
+    })
+
+    const text = await runText()
+    expect(dropConnection).toHaveBeenCalledWith('zombie-1', expect.any(String))
+    expect(text).toMatch(/^state=not_running/)
+    expect(text).toMatch(/没有答话.*已经断开/)
+  })
+
+  it('正在处理别的请求：算忙，不断开', async () => {
+    connect('busy-1', 'D:/Projects/MyGame')
+    probeConnection.mockResolvedValue('busy')
+    const text = await runText()
+    expect(dropConnection).not.toHaveBeenCalled()
+    expect(text).toMatch(/^state=connected/)
+    expect(text).toMatch(/正在处理别的请求/)
+  })
 })
 
 describe('三种状态各自的下一步', () => {

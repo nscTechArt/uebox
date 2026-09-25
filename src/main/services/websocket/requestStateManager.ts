@@ -161,6 +161,13 @@ export class RequestStateManager {
    * 当客户端断开连接时，拒绝该客户端的所有待处理请求
    * @param clientId 客户端ID
    */
+  /** 发给这个客户端、还在等回包的请求有几条 */
+  pendingCount(clientId: string): number {
+    let count = 0
+    for (const pending of this.pendingRequests.values()) if (pending.clientId === clientId) count++
+    return count
+  }
+
   rejectByClient(clientId: string): void {
     const toReject: string[] = []
 

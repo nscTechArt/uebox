@@ -51,7 +51,8 @@ import {
   describeConflicts,
   extractPackagePaths,
   getLockOwner,
-  locksOwnedBy
+  locksOwnedBy,
+  sameTeam
 } from '../core/assetLock'
 import { enforceAfterWrite, suspendForWrite } from '../core/assetLockEnforcement'
 import { getTargetConnectionId } from '../core/projectTargetContext'
@@ -1379,6 +1380,25 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
  */
 const LEVEL_SCOPED_NAMESPACES = new Set(['ue.actor', 'ue.level'])
 
+/** 工作室模式撞上队友的锁时，最多等多久、多久看一次 */
+const TEAM_LOCK_WAIT_MS = 90_000
+const TEAM_LOCK_POLL_MS = 2_000
+
+function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason ?? new Error('Operation aborted'))
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal?.reason ?? new Error('Operation aborted'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 function withAssetLock(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
   if (tool.unrealBox.risk === 'safe') return tool
 
@@ -1392,11 +1412,34 @@ function withAssetLock(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
       const owner = getLockOwner()
       if (!owner) return inner(toolCallId, params, signal, onUpdate)
 
-      const paths = extractPackagePaths(params)
-      if (paths.length > 0) {
-        const result = acquire(getTargetConnectionId(), owner, paths)
-        if (!result.ok) throw new Error(describeConflicts(result.conflicts))
+      /*
+       * 工作室模式（`editorKeyActive()`）两处不一样，都是 2026-09-26 真机反馈逼出来的：
+       *
+       * - **只挡、不翻只读位**（软锁）。只读位本来是防用户在编辑器里手动保存盖掉 AI 的改动；
+       *   可团队里每个队员各有锁主，队员 A 锁着的包在磁盘上变成只读，制作人一句
+       *   `ue_save(touched)` 就撞上「File is read-only」，而工具集里没有东西能清它。
+       * - **撞上队友的锁先等一会儿**。团队并行时撞锁是常态，立刻失败只会让模型改排任务、
+       *   几轮之后再回来补；等一小会儿多半就等到了。等不到再报，报的时候说清是哪个队友。
+       */
+      const team = editorKeyActive()
+      const lock = async (wanted: string[], soft: boolean): Promise<void> => {
+        const connection = getTargetConnectionId()
+        let result = acquire(connection, owner, wanted, { soft: soft || team })
+        const deadline = Date.now() + TEAM_LOCK_WAIT_MS
+        while (
+          !result.ok &&
+          team &&
+          Date.now() < deadline &&
+          result.conflicts.every((conflict) => sameTeam(conflict.owner, owner))
+        ) {
+          await sleepUnlessAborted(TEAM_LOCK_POLL_MS, signal)
+          result = acquire(connection, owner, wanted, { soft: true })
+        }
+        if (!result.ok) throw new Error(describeConflicts(result.conflicts, owner))
       }
+
+      const paths = extractPackagePaths(params)
+      if (paths.length > 0) await lock(paths, false)
 
       // Actor / 关卡类工具**参数里没有资产路径**，但它们改的是当前关卡那个包。
       // 用哨兵把它也锁上，否则两条会话可以同时往同一张关卡里塞 actor，
@@ -1405,10 +1448,7 @@ function withAssetLock(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
       // 走**软锁**：只挡另一条 AI 会话、只出提示，不翻只读位。用户在主视口里
       // 干活是常态，把关卡的手动保存也拦下来，代价和收益完全不成比例。
       if (LEVEL_SCOPED_NAMESPACES.has(tool.unrealBox.namespace)) {
-        const result = acquire(getTargetConnectionId(), owner, [CURRENT_LEVEL_LOCK], {
-          soft: true
-        })
-        if (!result.ok) throw new Error(describeConflicts(result.conflicts))
+        await lock([CURRENT_LEVEL_LOCK], true)
       }
 
       // 开合的范围是**这条会话手上的全部锁**，不是这次调用参数里那几个 ——

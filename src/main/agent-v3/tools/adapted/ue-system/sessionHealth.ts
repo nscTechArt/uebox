@@ -404,6 +404,37 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
 
       const waited = Math.round((Date.now() - startedAt) / 1000)
 
+      /*
+       * 报 connected 之前真的探一下活。2026-09-26 真机反馈：编辑器崩在引擎断言里，
+       * socket 和心跳还在，这里照报 connected、还给出崩溃前那个 connection_id，
+       * 而每一条真正的请求都超时 —— 模型信了它，全队干等二十分钟。
+       * 探不通的当场断开（看护会接着处理：真死了就重开，只是卡住会自己重连），
+       * state 按断开之后的情况算；正在处理别的请求的不去插队，算忙。
+       */
+      const ws = serviceManager.getWebSocketService()
+      const probes = await Promise.all(
+        connections.map(async (conn) => ({
+          conn,
+          verdict: await ws.probeConnection(conn.connection_id)
+        }))
+      )
+      const dead = probes.filter((p) => p.verdict === 'dead').map((p) => p.conn)
+      const busy = probes.filter((p) => p.verdict === 'busy').map((p) => p.conn)
+      for (const conn of dead) ws.dropConnection(conn.connection_id, '健康检查探活不通')
+      if (dead.length > 0) ({ connections, target } = snapshotConnections())
+      const probeNotes = [
+        ...(dead.length
+          ? [
+              `探活：${dead.map((c) => c.project_name).join('、')} 的连接还在、但只读命令没有答话（多半是编辑器崩了或卡死），已经断开。上面的 state 是断开之后的情况。`
+            ]
+          : []),
+        ...(busy.length
+          ? [
+              `探活：${busy.map((c) => c.project_name).join('、')} 正在处理别的请求，这次没去插队探它。`
+            ]
+          : [])
+      ]
+
       const connectedPaths = new Set(
         connections.flatMap((conn) => pathKeys(conn.project_path, conn.project_name))
       )
@@ -442,7 +473,9 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
       // 省略的话模型分不清「这是旧格式」还是「这一轮没戳」，而 `none` 天然
       // 对不上任何信封，正好落在「不能当作当前状态」那一侧。
       return {
-        text: `state=${state}\n${HEALTH_SCOPE_FIELD}=${scopeId ?? 'none'}\n\n${details.summary}`,
+        text:
+          `state=${state}\n${HEALTH_SCOPE_FIELD}=${scopeId ?? 'none'}\n\n${details.summary}` +
+          (probeNotes.length ? `\n\n${probeNotes.join('\n')}` : ''),
         details
       }
     }

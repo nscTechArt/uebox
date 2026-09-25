@@ -31,7 +31,10 @@ function harness(over: Partial<EditorWatchDeps> = {}): Harness {
   const events: EditorWatchEvent[] = []
   const reopened: string[] = []
   let running = false
+  // 假时钟：sleep 就是把时间往前拨，「看几分钟」的循环不用真等
+  let clock = 0
   const deps: EditorWatchDeps = {
+    now: () => clock,
     onEvent: (method, callback) => {
       handlers.set(method, callback)
       return () => handlers.delete(method)
@@ -43,14 +46,16 @@ function harness(over: Partial<EditorWatchDeps> = {}): Harness {
     waitLive: async () => true,
     crashReason: async () => 'Access violation',
     isOurs: (dir) => dir === 'I:/Game',
-    sleep: async () => undefined,
+    sleep: async (ms) => {
+      clock += ms
+    },
     ...over
   }
   const stop = watchEditorCrashes(deps, { onEvent: (e) => events.push(e) })
   const fire = async (method: string, payload: unknown, id?: string): Promise<void> => {
     handlers.get(method)?.(payload, id)
-    // 让 handleDisconnect 里那串 await 跑完
-    for (let i = 0; i < 10; i++) await Promise.resolve()
+    // 让 handleDisconnect 里那串 await 跑完（含「看几分钟」那个循环）
+    for (let i = 0; i < 400; i++) await Promise.resolve()
   }
   return {
     events,
@@ -81,11 +86,36 @@ describe('编辑器看护', () => {
     expect(h.events).toEqual([])
   })
 
-  it('断了但进程还在：卡住或网络抖动，插件自己会连回来，不再开一个', async () => {
+  it('断了但进程一直在、也没连回来：不再开一个，几分钟后告诉制作人它卡住了', async () => {
     const h = harness()
     h.setRunning(true)
     await h.fire('system.disconnected', {}, 'c1')
     expect(h.reopened).toEqual([])
+    expect(h.events).toEqual([expect.objectContaining({ kind: 'gave-up' })])
+    expect((h.events[0] as { why: string }).why).toMatch(/没答话、也没重连/)
+  })
+
+  it('断了、进程还挂着写崩溃报告，过一会儿才退出：按崩溃处理，重开', async () => {
+    let checks = 0
+    const h = harness({ isRunning: async () => ++checks < 4 })
+    await h.fire('system.disconnected', {}, 'c1')
+    expect(h.reopened).toEqual(['I:/Game/Game.uproject'])
+    expect(h.events.map((e) => e.kind)).toEqual(['crashed', 'recovered'])
+  })
+
+  it('断了但插件自己连回来了：什么都不做', async () => {
+    // 看进程的那一刻，插件正好重连上来、报了 project.info
+    const hooks = { reconnect: (): void => undefined }
+    const h = harness({
+      isRunning: async () => {
+        hooks.reconnect()
+        return true
+      }
+    })
+    hooks.reconnect = () => h.handlers.get('project.info')?.({ projectPath: 'I:/Game' }, 'c9')
+    await h.fire('system.disconnected', {}, 'c1')
+    expect(h.reopened).toEqual([])
+    expect(h.events).toEqual([])
   })
 
   it('不是这一局的工程：不管', async () => {

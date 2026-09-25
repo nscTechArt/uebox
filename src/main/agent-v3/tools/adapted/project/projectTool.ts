@@ -40,6 +40,7 @@ import type {
   MissingDependencyState
 } from '../../../../../shared/projectImport'
 import { serviceManager } from '../../../../services'
+import UnrealProcessDetector from '../../../../utils/UnrealProcessDetector'
 import { projectManager } from '../../../../services/project'
 import { getAssetDataByKey, type AssetData } from '../../../../sqliteDataBase/models/assetData'
 import { VaultType } from '../../../../sqliteDataBase/VaultManager'
@@ -635,7 +636,9 @@ async function openProject(projectKey: string): Promise<OpenProjectResult> {
     }
   }
 
-  if (alreadyRunning(uprojectPath)) {
+  const running = await alreadyRunning(uprojectPath)
+  if (running === 'stuck') return stuckEditorResult(uprojectPath)
+  if (running === 'yes') {
     console.log(`[ProjectTool] ${project.projectName} 已经开着，不再启动一次`)
     return {
       success: true,
@@ -739,7 +742,9 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
     }
   }
 
-  if (alreadyRunning(uprojectPath)) {
+  const runningByPath = await alreadyRunning(uprojectPath)
+  if (runningByPath === 'stuck') return stuckEditorResult(uprojectPath)
+  if (runningByPath === 'yes') {
     console.log(`[ProjectTool] ${uprojectPath} 已经开着，不再启动一次`)
     return { success: true, openedPath: uprojectPath, details: ['♻️ 这个工程本来就开着'] }
   }
@@ -796,9 +801,41 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
  * 已经开着时直接跳过启动那一步：后面的等待和切目标照常做，
  * 于是「这个工程本来就开着」和「我刚把它打开」对调用方是同一种结果。
  */
-function alreadyRunning(uprojectPath: string): boolean {
+/**
+ * 这个工程是不是已经开着：连接表里有它，还得**真的答话**。
+ *
+ * 2026-09-26 真机反馈：编辑器崩了、进程都没了，连接表里还挂着一条僵尸记录，
+ * 这里信了它，回「本来就开着」不肯启动。现在：
+ * - 连着且答话（或者正忙着处理别的请求）→ `yes`
+ * - 连接不答话、进程也没了 → 把僵尸连接断掉，当没开（`no`），照常启动
+ * - 连接不答话、进程还在 → `stuck`：多半卡在崩溃处理或弹窗上。这时再启动一个
+ *   就是两个编辑器抢同一个工程（反馈里正好出现过），宁可停下来说清楚
+ */
+async function alreadyRunning(uprojectPath: string): Promise<'yes' | 'no' | 'stuck'> {
   // `isSameProject` 自己会削掉 `.uproject` 并抹平大小写和斜杠方向，原样传进去就行
-  return Boolean(findLiveConnection(uprojectPath))
+  const connectionId = findLiveConnection(uprojectPath)
+  if (!connectionId) return 'no'
+  const ws = serviceManager.getWebSocketService()
+  if ((await ws.probeConnection(connectionId)) !== 'dead') return 'yes'
+  ws.dropConnection(connectionId, 'open_project 探活不通')
+  const process = await UnrealProcessDetector.findRunningProjectByPath(uprojectPath).catch(
+    () => null
+  )
+  return process ? 'stuck' : 'no'
+}
+
+async function stuckEditorResult(uprojectPath: string): Promise<OpenProjectResult> {
+  const process = await UnrealProcessDetector.findRunningProjectByPath(uprojectPath).catch(
+    () => null
+  )
+  return {
+    success: false,
+    openedPath: uprojectPath,
+    error:
+      `这个工程的编辑器进程还在${process ? `（PID ${process.pid}）` : ''}，但不答话 —— ` +
+      '多半卡在崩溃处理或弹窗上。再启动一个会变成两个编辑器抢同一个工程，所以没有启动。' +
+      '请用户看一眼编辑器窗口（关掉崩溃报告或弹窗），或者结束那个进程后再打开。'
+  }
 }
 
 /** `open_project` 的返回形状。多出来的几个字段全是「打开之后怎么样了」 */

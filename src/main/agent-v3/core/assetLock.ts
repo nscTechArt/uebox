@@ -164,6 +164,26 @@ export function rootSessionId(sessionId: string): string {
 }
 
 /**
+ * 工作室模式里队员的锁主是 `<会话>:mate-<队员>`（见 `createAgent.ts` 的 `memberLockOwner`），
+ * 制作人的锁主是会话本身。两者同属一个团队。
+ */
+const MATE = ':mate-'
+
+export function teamRootOf(owner: string): string {
+  return owner.split(MATE)[0] ?? owner
+}
+
+export function sameTeam(a: string, b: string): boolean {
+  return teamRootOf(a) === teamRootOf(b)
+}
+
+/** 冲突里占着锁的那一方叫什么：队友名，或者制作人 */
+export function holderLabel(owner: string): string {
+  const at = owner.indexOf(MATE)
+  return at >= 0 ? `队友「${owner.slice(at + MATE.length)}」` : '制作人'
+}
+
+/**
  * 把执行流标记成属于某条会话。
  *
  * 和 `runWithTargetConnectionId` 一样用 AsyncLocalStorage 而不是模块级变量：
@@ -225,6 +245,14 @@ function looksLikeAssetPath(value: string): boolean {
  * `packagePath` …），而且新工具随时会引入新的写法。按**值的形状**判断
  * 才不会随着工具增加而漂。
  */
+/**
+ * 这些参数装的是**目录**，不是资产：「建在 /Game/Materials 下」锁的应该是新建出来的那个资产，
+ * 不是整个目录。锁目录的后果是两个队员往同一个目录里建东西互相挡（2026-09-26 真机反馈：
+ * 三张材质全被一把 `/Game/Materials` 的「锁」拦下）。
+ */
+const FOLDER_KEYS =
+  /^(destination|dest|folder|directory|dir|target_folder|output_folder|package_folder|path_prefix|root_path)(_?path)?$/i
+
 export function extractPackagePaths(params: unknown): string[] {
   const found = new Set<string>()
 
@@ -242,7 +270,15 @@ export function extractPackagePaths(params: unknown): string[] {
       return
     }
     if (typeof node === 'object') {
-      for (const value of Object.values(node as Record<string, unknown>)) walk(value, depth + 1)
+      const record = node as Record<string, unknown>
+      // 写 ini 的参数（section + key/value）：值里的资产路径只是配置里的一个引用，
+      // 改配置不碰那个资产。锁它会把「设默认 GameMode」挡在 GameMode 蓝图的锁后面
+      const isConfigWrite = 'section' in record && ('key' in record || 'config_name' in record)
+      for (const [key, value] of Object.entries(record)) {
+        if (FOLDER_KEYS.test(key)) continue
+        if (isConfigWrite && key === 'value') continue
+        walk(value, depth + 1)
+      }
     }
   }
 
@@ -276,6 +312,8 @@ export function acquire(
 
   if (conflicts.length > 0) {
     for (const conflict of conflicts) {
+      // 同一个团队里的队员互相等锁是日常，不是用户要处理的「两个窗口抢资产」，不弹提示
+      if (sameTeam(conflict.owner, root)) continue
       const dedupeKey = `${root} ${conflict.path.toLowerCase()}`
       if (notified.has(dedupeKey)) continue
       notified.add(dedupeKey)
@@ -385,7 +423,16 @@ export function forceReleaseAll(): number {
  * 也明确告诉模型别去猜原因：它曾经把「另一条 agent 会话占着」误说成
  * 「你先在编辑器里关掉这个资产」，把用户支去做一件没用的事。
  */
-export function describeConflicts(conflicts: LockConflict[]): string {
+export function describeConflicts(conflicts: LockConflict[], requester?: string): string {
+  // 工作室模式：占着它的是同一个团队里的队友或制作人。说清是谁、什么时候放、怎么商量 ——
+  // 「另一条 AI 会话」在团队里既不准确也没法照着做（2026-09-26 真机反馈）
+  if (requester && conflicts.every((c) => sameTeam(c.owner, requester))) {
+    return [
+      '以下资产正被**队友**改着，本次调用未做任何改动：',
+      ...conflicts.map((c) => `  - ${describeLockPath(c.path)}（${holderLabel(c.owner)}）`),
+      '锁在它这件活交回时释放，已经等过一会儿了还没放。先做别的活；急的话用 team_message 跟它商量交接。'
+    ].join('\n')
+  }
   const lines = conflicts.map((c) => `  - ${describeLockPath(c.path)}`)
   return [
     '以下资产正被**盒子里的另一条 AI 会话**修改中，本次调用未做任何改动：',

@@ -40,6 +40,11 @@ type InboundHandler = (message: MessageEnvelope, connectionId: string) => Promis
  * WebSocket 服务类
  * 实现与 Unreal Engine 实例的通讯
  */
+/** 同一条连接连续这么多次请求超时，就当它死了（见 `trackLiveness`） */
+const ZOMBIE_TIMEOUT_STREAK = 3
+/** 探活等多久。只读的项目信息，活着的编辑器一两秒内就答 */
+const PROBE_TIMEOUT_MS = 8_000
+
 export class WebSocketService implements IWebSocketService {
   private server?: WebSocketServer
   private connectionManager: ConnectionManager
@@ -350,7 +355,8 @@ export class WebSocketService implements IWebSocketService {
       )
     }
 
-    if (!signal) return promise
+    const tracked = this.trackLiveness(promise, targetId, method)
+    if (!signal) return tracked
 
     const onAbort = (): void => {
       this.requestStateManager.rejectRequest(
@@ -364,7 +370,74 @@ export class WebSocketService implements IWebSocketService {
     signal.addEventListener('abort', onAbort, { once: true })
     // 监听器必须摘干净。信号活得比这条请求久（一整轮对话共用一个），
     // 攒着不摘的话一轮里几十次调用就是几十个死监听器挂在同一个信号上。
-    return promise.finally(() => signal.removeEventListener('abort', onAbort))
+    return tracked.finally(() => signal.removeEventListener('abort', onAbort))
+  }
+
+  /** 每条连接连续超时了几次。任何一次正常回包就清零 */
+  private readonly timeoutStreaks = new Map<string, number>()
+
+  /**
+   * 僵尸连接：socket 还开着、心跳也还回，但请求一条都不答。
+   *
+   * 2026-09-26 真机反馈：编辑器崩在引擎自己的断言里，崩溃处理还没走完，进程和
+   * socket 都挂着 —— 心跳由网络线程答，照样通过；可游戏线程已经死了，每一条请求
+   * 都超时。盒子一直当它连着：健康检查报 connected、`open_project` 说「本来就开着」
+   * 不肯重开，全队停摆二十分钟。
+   *
+   * 所以按「答不答话」而不是「socket 在不在」判活：同一条连接连续
+   * `ZOMBIE_TIMEOUT_STREAK` 次请求超时、中间一次都没答上，就把它当死了断掉。
+   * 断开之后：编辑器真死了，看护会重开工程（工作室模式）；只是卡了一阵的话，
+   * 插件缓过来会自己重连。两种结局都比一直抱着一条死连接强。
+   */
+  private trackLiveness<T>(promise: Promise<T>, connectionId: string, method: string): Promise<T> {
+    return promise.then(
+      (value) => {
+        this.timeoutStreaks.delete(connectionId)
+        return value
+      },
+      (error: unknown) => {
+        if (error instanceof WebSocketServiceError && error.code === WebSocketErrorCode.E_TIMEOUT) {
+          const streak = (this.timeoutStreaks.get(connectionId) ?? 0) + 1
+          this.timeoutStreaks.set(connectionId, streak)
+          // 还有别的请求在路上（比如一次长导入正占着游戏线程）：短请求超时是因为它忙，
+          // 不是因为它死了。这时候断开会把那次长操作的回包也一起丢掉
+          const busy = this.requestStateManager.pendingCount(connectionId) > 0
+          if (streak >= ZOMBIE_TIMEOUT_STREAK && !busy) {
+            logger.warn(
+              `[WebSocketService] 连接连续 ${streak} 次请求超时（最后一次 ${method}），按僵尸连接断开: ${connectionId}`
+            )
+            this.timeoutStreaks.delete(connectionId)
+            this.handleDisconnect(connectionId)
+          }
+        }
+        throw error
+      }
+    )
+  }
+
+  /**
+   * 这条连接此刻答不答话：发一条只读命令，限时等回包。
+   * 健康检查、`open_project` 判断「连着」之前用它，别再只看 socket 在不在。
+   */
+  async probeConnection(
+    connectionId: string,
+    timeoutMs = PROBE_TIMEOUT_MS
+  ): Promise<'alive' | 'busy' | 'dead'> {
+    // 有请求在路上就是忙，不去插队探它（探不通也说明不了死没死）
+    if (this.requestStateManager.pendingCount(connectionId) > 0) return 'busy'
+    try {
+      await this.callRequest('system.get_project_info', {}, connectionId, timeoutMs)
+      return 'alive'
+    } catch {
+      return 'dead'
+    }
+  }
+
+  /** 把一条确认不答话的连接断掉，走和正常断开同一条善后流程 */
+  dropConnection(connectionId: string, reason: string): void {
+    logger.warn(`[WebSocketService] 断开不答话的连接（${reason}）: ${connectionId}`)
+    this.timeoutStreaks.delete(connectionId)
+    this.handleDisconnect(connectionId)
   }
 
   /**

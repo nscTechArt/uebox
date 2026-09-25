@@ -288,6 +288,12 @@ export function createShellTool(): UnrealAgentTool<never> {
         : 'Live Coding 开着时 UBT 会直接拒绝执行，关着时它会转而产出带后缀的热重载 DLL，' +
           '两种都不是你要的干净重编。') +
       '**不要自己去杀编辑器进程。**\n' +
+      // 2026-09-26 真机反馈：`powershell -Command "… $_.IsReadOnly …"` 连试三次，$_ 每次都被
+      // bash 先展开成 `/usr/bin/bash.`，报错也看不出是引号的锅
+      (process.platform === 'win32'
+        ? '【调 PowerShell】这里是 bash：双引号里的 $_、$env:X 会先被 bash 展开掉。' +
+          "把 -Command 后面整段用单引号包起来（-Command '…'），长的写成 .ps1 再用 -File 执行。\n"
+        : '') +
       '【输出】过长会截断。命令失败时把 stderr 原文读清楚再决定下一步。'
   })
 }
