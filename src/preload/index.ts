@@ -1628,6 +1628,7 @@ const api = {
     probeAnnotations: (key: string) => ipcRenderer.invoke('catalogLibrary:probeAnnotations', key),
     editAnnotations: (key: string, ops: unknown[]) =>
       ipcRenderer.invoke('catalogLibrary:editAnnotations', key, ops),
+    loreInfo: () => ipcRenderer.invoke('catalogLibrary:loreInfo'),
     listTags: (key: string) => ipcRenderer.invoke('catalogLibrary:listTags', key),
     putTag: (key: string, name: string, patch: unknown) =>
       ipcRenderer.invoke('catalogLibrary:putTag', key, name, patch),

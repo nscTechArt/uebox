@@ -2962,6 +2962,14 @@ declare global {
           removeTags?: string[]
         }>
       ) => Promise<CatalogIpcResult<{ accepted: number; journalSeq: number | null }>>
+      loreInfo: () => Promise<
+        CatalogIpcResult<{
+          path: string | null
+          version: string | null
+          pinned: boolean
+          problem: string | null
+        }>
+      >
       listTags: (key: string) => Promise<CatalogIpcResult<CatalogTagDef[]>>
       putTag: (
         key: string,

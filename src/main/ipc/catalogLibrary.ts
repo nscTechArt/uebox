@@ -11,7 +11,7 @@ import type {
   CatalogFacetField,
   CatalogListQuery
 } from '../../shared/catalogLibrary'
-import { getCatalogService } from '../libraryV3'
+import { getCatalogService, resolveLore } from '../libraryV3'
 import { CatalogServiceError } from '../libraryV3/catalogService'
 
 type Result<T> = { success: true; data: T } | { success: false; error: string; errorCode: string }
@@ -142,6 +142,18 @@ export function registerCatalogLibraryIPC(): void {
       key: string,
       ops: Parameters<ReturnType<typeof getCatalogService>['editAnnotations']>[1]
     ) => run(() => service().editAnnotations(key, Array.isArray(ops) ? ops : []))
+  )
+  // 随包的 lore.exe 找没找到、哈希对不对（导入 / 取回都靠它；打包后的自检也用这个）
+  ipcMain.handle('catalogLibrary:loreInfo', () =>
+    run(async () => {
+      const lore = await resolveLore()
+      return {
+        path: lore.binary?.path ?? null,
+        version: lore.binary?.version ?? null,
+        pinned: lore.binary?.pinned ?? false,
+        problem: lore.problem
+      }
+    })
   )
   ipcMain.handle('catalogLibrary:listTags', (_event, key: string) =>
     run(() => service().listTags(key))
