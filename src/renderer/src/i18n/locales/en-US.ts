@@ -2339,7 +2339,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     teamBoard: {
       title: 'Team',
-      summary: '{members} members · {done}/{total} tasks done',
+      summary: '{members} members · {done}/{total} tasks marked done',
+      selfReportedHint:
+        'Marked by the teammate, not checked by Unreal Box — the acceptance verdict is what counts',
       objective: 'Goal',
       noMembers: 'The producer has not hired anyone yet',
       noTasks: 'The task board is empty',
@@ -2362,6 +2364,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         todo: 'To do',
         doing: 'Doing',
         done: 'Done',
+        selfReported: 'Self-reported',
         blocked: 'Blocked'
       }
     },

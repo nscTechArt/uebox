@@ -52,8 +52,8 @@
       <ul v-if="sortedTasks.length" class="tasks">
         <li v-for="task in sortedTasks" :key="task.id" class="task">
           <div class="task-line">
-            <AppTag :tone="STATUS_TONE[task.status]">
-              {{ t(`assistant.teamBoard.status.${task.status}`) }}
+            <AppTag :tone="STATUS_TONE[task.status]" :title="statusHint(task.status)">
+              {{ statusLabel(task.status) }}
             </AppTag>
             <span class="task-title">{{ task.title }}</span>
             <span v-if="task.owner" class="task-owner">@{{ task.owner }}</span>
@@ -128,6 +128,24 @@ const sortedTasks = computed(() =>
 )
 
 const recentMail = computed(() => props.team.mail.slice(-MAIL_SHOWN).reverse())
+
+/**
+ * 「完成」是队员自己标的，盒子不核实。2026-09-26 真机：美术队员标了完成，
+ * 证据里自己写着材质没建，用户看到「完成」却对着一块纯色蓝板。
+ * 所以验收通过之前一律叫「自报完成」，真正的完成以验收结论为准。
+ */
+const accepted = computed(() => props.team.verdict === 'pass')
+
+function statusLabel(status: TaskStatus): string {
+  if (status === 'done' && !accepted.value) return t('assistant.teamBoard.status.selfReported')
+  return t(`assistant.teamBoard.status.${status}`)
+}
+
+function statusHint(status: TaskStatus): string | undefined {
+  return status === 'done' && !accepted.value
+    ? t('assistant.teamBoard.selfReportedHint')
+    : undefined
+}
 
 function who(name: string): string {
   return name === PRODUCER ? t('assistant.teamBoard.producer') : name

@@ -52,4 +52,22 @@ describe('TeamBoardPanel', () => {
     const receipts = wrapper.findAll('.mail-receipt').map((node) => node.text())
     expect(receipts).toEqual(['已读', '在信箱里'])
   })
+
+  /** 2026-09-26：队员标了完成，证据里自己写着没做完；用户看到「完成」就信了 */
+  it('验收通过之前，队员标的完成叫「自报完成」；通过之后才叫完成', async () => {
+    const before = mount(TeamBoardPanel, { props: { team } })
+    await before.find('.team-board-head').trigger('click')
+    const doneTag = (w: typeof before): string =>
+      w
+        .findAll('.task')
+        .find((node) => node.text().includes('灰盒关卡'))!
+        .find('.task-line')
+        .text()
+    expect(doneTag(before)).toContain('自报完成')
+
+    const after = mount(TeamBoardPanel, { props: { team: { ...team, verdict: 'pass' } } })
+    await after.find('.team-board-head').trigger('click')
+    expect(doneTag(after)).not.toContain('自报')
+    expect(doneTag(after)).toContain('完成')
+  })
 })

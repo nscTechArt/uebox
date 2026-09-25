@@ -2288,7 +2288,8 @@ export default {
     },
     teamBoard: {
       title: '团队',
-      summary: '{members} 人 · 任务 {done}/{total} 完成',
+      summary: '{members} 人 · 任务 {done}/{total} 标了完成',
+      selfReportedHint: '队员自己标的，盒子没核实；以验收结论为准',
       objective: '目标',
       noMembers: '制作人还没招人',
       noTasks: '任务板是空的',
@@ -2311,6 +2312,7 @@ export default {
         todo: '待办',
         doing: '进行中',
         done: '完成',
+        selfReported: '自报完成',
         blocked: '卡住'
       }
     },
