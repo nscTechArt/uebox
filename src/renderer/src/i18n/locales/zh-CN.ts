@@ -1566,7 +1566,18 @@ export default {
       throttled: '尝试太频繁，请稍后再试。',
       'lore-missing': 'lore.exe 不可用',
       'no-lore-remote': '这台服务器没有配置 Lore 地址。',
-      'bad-remote': 'Lore 地址格式不对（应以 lores:// 开头）。'
+      'bad-remote': 'Lore 地址格式不对（应以 lores:// 开头）。',
+      'port-blocked':
+        '{target} 没有回应，多半是防火墙挡住了。请管理员在服务器上放行：TCP 8084（登录）、TCP 8083（资产目录）、TCP 和 UDP 8441（Lore 传文件）。',
+      'port-closed':
+        '{target} 拒绝连接：服务器上这个端口没有服务在运行（服务没启动，或端口号不对）。',
+      'host-not-found': '找不到主机 {target}：检查地址拼写，或直接用服务器的 IP。',
+      'host-unreachable':
+        '到不了 {target}：检查这台电脑和服务器是否在同一网络（或 VPN 是否已连上）。',
+      'tls-handshake':
+        '{target} 在建立安全连接前就断开了：这个端口可能不是 HTTPS 服务，或者中间有防火墙 / 代理软件拦截（「全局代理」「TUN 模式」会接管局域网地址，请把服务器地址设为直连）。',
+      'cert-name-mismatch':
+        '证书是这台服务器的，但上面没有你填的地址（{target}）。请改用证书上的名字连接，或请管理员把这个地址加进证书。'
     }
   },
   common: {

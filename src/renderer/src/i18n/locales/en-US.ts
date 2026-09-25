@@ -1607,6 +1607,17 @@ export default {
       throttled: 'Too many attempts. Try again shortly.',
       'lore-missing': 'lore.exe is unavailable',
       'no-lore-remote': 'This server has no Lore address.',
+      'port-blocked':
+        '{target} does not answer; a firewall is most likely dropping it. Ask the admin to allow TCP 8084 (sign-in), TCP 8083 (catalog) and TCP + UDP 8441 (Lore transfers) on the server.',
+      'port-closed':
+        '{target} refused the connection: nothing is listening on that port (the service is down, or the port is wrong).',
+      'host-not-found': 'Cannot find host {target}: check the spelling, or use the server IP.',
+      'host-unreachable':
+        'Cannot reach {target}: check this computer is on the same network as the server (or the VPN is connected).',
+      'tls-handshake':
+        '{target} dropped the connection before the secure handshake finished: the port may not be HTTPS, or a firewall or proxy tool is intercepting it (global proxy / TUN modes take over LAN addresses; set the server address to direct).',
+      'cert-name-mismatch':
+        'The certificate belongs to this server but does not list the address you entered ({target}). Connect with a name on the certificate, or ask the admin to add this address to it.',
       'bad-remote': 'The Lore address is not valid (it starts with lores://).'
     }
   },

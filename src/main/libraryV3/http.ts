@@ -41,6 +41,8 @@ export class CatalogHttpError extends Error {
   readonly retryAfterMs: number | null
   /** 网络错误的系统错误码（ECONNREFUSED、ECONNRESET…） */
   readonly errno: string | null
+  /** 连的是哪里（主机:端口），给"连不上"的诊断文案用 */
+  target: string | null = null
 
   constructor(
     code: CatalogErrorCode,
@@ -227,6 +229,13 @@ export class CatalogHttp {
   private readonly tokenProvider: TokenProvider | null
   private readonly agent: http.Agent | https.Agent
 
+  /** 给错误标上"连的是哪里"（主机:端口，没写端口按协议补） */
+  private withTarget(error: CatalogHttpError): CatalogHttpError {
+    const url = new URL(this.base)
+    error.target = `${url.hostname}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`
+    return error
+  }
+
   constructor(base: string, trust: CatalogTrust, tokenProvider: TokenProvider | null = null) {
     const url = new URL(base)
     assertTransportAllowed(url, trust)
@@ -311,16 +320,32 @@ export class CatalogHttp {
       }
       options.signal?.addEventListener('abort', onAbort, { once: true })
       request.setTimeout(timeoutMs, () => {
-        request.destroy(new CatalogHttpError('timeout', 0, `No answer within ${timeoutMs} ms`))
+        request.destroy(
+          this.withTarget(new CatalogHttpError('timeout', 0, `No answer within ${timeoutMs} ms`))
+        )
       })
       request.on('error', (error: NodeJS.ErrnoException) => {
         options.signal?.removeEventListener('abort', onAbort)
         if (error instanceof CatalogHttpError) {
           reject(error)
         } else if (tlsErrorCode(error)) {
-          reject(new CatalogHttpError('tls', 0, `TLS verification failed: ${error.message}`))
+          reject(
+            this.withTarget(
+              new CatalogHttpError(
+                'tls',
+                0,
+                `TLS verification failed: ${error.message}`,
+                null,
+                error.code ?? null
+              )
+            )
+          )
         } else {
-          reject(new CatalogHttpError('network', 0, error.message, null, error.code ?? null))
+          reject(
+            this.withTarget(
+              new CatalogHttpError('network', 0, error.message, null, error.code ?? null)
+            )
+          )
         }
       })
       request.on('close', () => options.signal?.removeEventListener('abort', onAbort))

@@ -32,11 +32,27 @@ const KNOWN = new Set([
   'bad-remote'
 ])
 
+/** 连不上的几种：文案里要带上"哪台机器的哪个端口"（或证书上的名字），用户好转给管理员 */
+const WITH_TARGET = new Set([
+  'port-blocked',
+  'port-closed',
+  'host-not-found',
+  'host-unreachable',
+  'cert-name-mismatch',
+  'tls-handshake'
+])
+
 export function catalogErrorText(
   t: Translate,
   code: string | null | undefined,
   raw?: string | null
 ): string {
+  if (code && WITH_TARGET.has(code)) {
+    // 主进程给的是 "码: 对象"（探测）或直接是对象（其他调用）
+    const text = raw ?? ''
+    const target = text.startsWith(`${code}:`) ? text.slice(code.length + 1).trim() : text
+    return t(`catalogLibrary.errors.${code}`, { target })
+  }
   if (code && KNOWN.has(code)) {
     const base = t(`catalogLibrary.errors.${code}`)
     // 网络 / TLS 这几类把原话附上，便于用户转给管理员

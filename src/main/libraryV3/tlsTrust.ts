@@ -36,6 +36,11 @@ export interface ChainProbe {
   /** 不额外信任任何东西时，系统信任库能否验证 */
   systemTrusted: boolean
   authorizationError: string | null
+  /**
+   * 证书上的名字对不上填的地址时，列出证书上的名字（"DNS:a.lan, IP Address:10.0.0.5"）；
+   * 对得上为 null。指纹固定只证明"是这家部署的证书"，主机名照样要核对。
+   */
+  nameMismatch: string | null
 }
 
 function derToPem(der: Buffer): string {
@@ -112,8 +117,18 @@ export async function probeCertificateChain(
       const authorizationError = socket.authorizationError
         ? String(socket.authorizationError)
         : null
+      const leaf = socket.getPeerCertificate()
+      const identityError = leaf && leaf.raw ? tls.checkServerIdentity(host, leaf) : undefined
+      const nameMismatch = identityError
+        ? leaf.subjectaltname || (leaf.subject?.CN ? `CN=${leaf.subject.CN}` : '')
+        : null
       socket.end()
-      resolve({ chain, systemTrusted: socket.authorized === true, authorizationError })
+      resolve({
+        chain,
+        systemTrusted: socket.authorized === true,
+        authorizationError,
+        nameMismatch
+      })
     })
     socket.once('error', (error) => {
       clearTimeout(timer)

@@ -42,6 +42,7 @@ import {
   type CatalogWindow
 } from '../../shared/catalogLibrary'
 import { CatalogConfigStore } from './configStore'
+import { diagnoseConnectError, targetOf } from './netDiagnose'
 import { DiskLru } from './diskLru'
 import { CatalogHttp, CatalogHttpError, isLoopbackHost } from './http'
 import { PageCache, type DirtySet, type PageScope } from './pageCache'
@@ -98,6 +99,13 @@ interface LibraryRuntime {
   watchers: number
   lastSearchInvalidate: number
   signedOut: boolean
+}
+
+/** 连不上时的一句话：能诊断出是哪一种就用对应的码（防火墙、端口没开、名字对不上……） */
+function unreachableText(error: unknown, url: string): string {
+  const target = error instanceof CatalogHttpError && error.target ? error.target : targetOf(url)
+  const problem = diagnoseConnectError(error, target)
+  return problem ? `${problem.code}: ${problem.detail}` : `unreachable: ${errorText(error)}`
 }
 
 export class CatalogServiceError extends Error {
@@ -335,7 +343,7 @@ export class CatalogService {
       try {
         probe = await probeCertificateChain(url)
       } catch (error) {
-        result.error = `unreachable: ${errorText(error)}`
+        result.error = unreachableText(error, url)
         return result
       }
       result.chain = probe.chain.map((certificate) => ({
@@ -359,6 +367,12 @@ export class CatalogService {
         }
         if (!pinned) {
           result.error = 'fingerprint-mismatch'
+          return result
+        }
+        // 证书确实是这家部署的，但上面没有这个地址：连的时候标准校验会失败，现在就说清楚
+        if (probe.nameMismatch !== null) {
+          const names = probe.nameMismatch.replace(/(?:DNS|IP Address):/g, '').trim()
+          result.error = `cert-name-mismatch: ${parsed.hostname} ↔ ${names}`
           return result
         }
         result.pinnedFingerprint = pinned.fingerprint256
@@ -407,7 +421,7 @@ export class CatalogService {
           result.kind = 'unknown'
         }
       } else {
-        result.error = `unreachable: ${errorText(error)}`
+        result.error = unreachableText(error, url)
       }
     } finally {
       http.destroy()
@@ -720,7 +734,14 @@ export class CatalogService {
   private wrap(error: unknown): Error {
     if (error instanceof CatalogServiceError) return error
     if (error instanceof SignedOutError) return new CatalogServiceError('signed-out', error.message)
-    if (error instanceof CatalogHttpError) return new CatalogServiceError(error.code, error.message)
+    if (error instanceof CatalogHttpError) {
+      // 连不上的几种说清楚是哪一种（消息是"主机:端口"，界面拼进文案里给管理员看）
+      if (error.target && ['network', 'timeout', 'tls'].includes(error.code)) {
+        const problem = diagnoseConnectError(error, error.target)
+        if (problem) return new CatalogServiceError(problem.code, problem.detail)
+      }
+      return new CatalogServiceError(error.code, error.message)
+    }
     return new CatalogServiceError('unknown', errorText(error))
   }
 

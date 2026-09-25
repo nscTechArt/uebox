@@ -159,8 +159,10 @@ describe('CatalogService', () => {
     const offline = await service.listWindow(key, query, 0, 100)
     expect(offline.stale).toBe(true)
     expect(offline.items).toHaveLength(100)
+    // 服务端停了：对方机器在、端口没人听 —— 说成"端口没开"，带上主机:端口
     await expect(service.listWindow(key, query, 300, 100)).rejects.toMatchObject({
-      code: 'network'
+      code: 'port-closed',
+      message: `127.0.0.1:${fake.port}`
     })
     const status = await service.status(key)
     expect(status.online).toBe(false)
