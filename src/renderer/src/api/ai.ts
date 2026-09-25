@@ -495,7 +495,8 @@ export function parseGeneratedTitle(raw: string): string {
 
   // 长得就是 JSON 却没解析出 title：那是模型给了个结构化的废话（`{"title":null}`），
   // 别把这行 JSON 当标题塞进侧边栏 —— 回空串，调用方留着截断标题
-  if (fenced || embeddedObject) return ''
+  // 以 `{` / `[` / ``` 开头却没解析出来：多半是 maxTokens 截断的半截 JSON，首行只剩一个 `{`
+  if (fenced || embeddedObject || /^(?:[{[]|```)/.test(content)) return ''
 
   return normalizeSessionTitle(content.split(/\r?\n/).find((line) => line.trim()))
 }
@@ -520,7 +521,7 @@ async function requestSessionTitle(
   const lang = i18n.global.locale.value === 'zh-CN' ? '中文' : 'English'
 
   const response = await aiAPI.chat({
-    maxTokens: 64,
+    maxTokens: 128,
     callType: 'session-title',
     responseFormat: {
       type: 'json_schema',
