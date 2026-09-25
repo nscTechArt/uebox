@@ -461,3 +461,20 @@ describe('splitAgentTimeline —— 提问卡片', () => {
     expect(blocks.map((b) => b.kind)).toEqual(['text', 'question', 'text'])
   })
 })
+
+describe('splitAgentTimeline 推理块', () => {
+  it('按位置从推理全文里取正文；没传全文（朗读、语音历史）就不出推理块', () => {
+    const items = [
+      { type: 'thinking' as const, data: { start: 0, end: 2 }, timestamp: 1 },
+      { type: 'text' as const, data: { text: '好' }, timestamp: 2 },
+      { type: 'thinking' as const, data: { start: 2, end: 4 }, timestamp: 3 }
+    ]
+
+    expect(splitAgentTimeline(items, '先看再改').map((b) => b.kind)).toEqual([
+      'thinking',
+      'text',
+      'thinking'
+    ])
+    expect(splitAgentTimeline(items).map((b) => b.kind)).toEqual(['text'])
+  })
+})

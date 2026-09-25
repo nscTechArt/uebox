@@ -25,6 +25,15 @@ export interface AgentTimelineTextBlock {
 }
 
 /**
+ * 模型的一段推理。一轮一个框，显示在它发生的那一步。
+ */
+export interface AgentTimelineThinkingBlock {
+  kind: 'thinking'
+  key: string
+  text: string
+}
+
+/**
  * 用户在运行途中插的那句话。
  *
  * 单独成块，不并进相邻的过程框 —— 它是**用户说的**，混在工具调用列表里
@@ -67,6 +76,7 @@ export interface AgentTimelineQuestionBlock {
 export type AgentTimelineBlock =
   | AgentTimelineProcessBlock
   | AgentTimelineTextBlock
+  | AgentTimelineThinkingBlock
   | AgentTimelineSteerBlock
   | AgentTimelineQuestionBlock
 
@@ -75,13 +85,25 @@ function readTimelineText(item: AgentProcessItem): string {
   return typeof text === 'string' ? text : ''
 }
 
+/** `thinking` 条目只记位置，正文要到消息的 `thinking` 全文里去取 */
+function readTimelineThinking(item: AgentProcessItem, thinking: string): string {
+  const data = item.data as { start?: unknown; end?: unknown } | undefined
+  if (typeof data?.start !== 'number' || typeof data?.end !== 'number') return ''
+  return thinking.slice(data.start, data.end)
+}
+
+/** 时间线上有没有记推理的位置。没有的老消息仍然把推理整段放在顶部 */
+export function hasTimelineThinking(items: AgentProcessItem[] | undefined): boolean {
+  return !!items?.some((item) => item.type === 'thinking')
+}
+
 /**
  * 切块。
  *
  * key 里带块序号而不是随机数：流式过程中块只会**往后追加**，前面的 key 不变，
  * Vue 才不会每来一个增量就把已经画好的块整个重建（重建会丢掉折叠状态和滚动位置）。
  */
-export function splitAgentTimeline(items: AgentProcessItem[]): AgentTimelineBlock[] {
+export function splitAgentTimeline(items: AgentProcessItem[], thinking = ''): AgentTimelineBlock[] {
   const blocks: AgentTimelineBlock[] = []
   let pendingText = ''
   let pendingTextAt = 0
@@ -109,6 +131,13 @@ export function splitAgentTimeline(items: AgentProcessItem[]): AgentTimelineBloc
     }
 
     flushText()
+
+    if (item.type === 'thinking') {
+      const text = readTimelineThinking(item, thinking)
+      if (!/\S/.test(text)) continue
+      blocks.push({ kind: 'thinking', key: `thinking:${item.timestamp}:${blocks.length}`, text })
+      continue
+    }
 
     if (item.type === 'user-steer') {
       const text = readTimelineText(item)
@@ -186,11 +215,12 @@ export function splitAgentTimeline(items: AgentProcessItem[]): AgentTimelineBloc
  */
 export function reconcileAgentTimeline(
   previous: AgentTimelineBlock[],
-  items: AgentProcessItem[]
+  items: AgentProcessItem[],
+  thinking = ''
 ): AgentTimelineBlock[] {
   const previousByKey = new Map(previous.map((block) => [block.key, block]))
 
-  return splitAgentTimeline(items).map((next) => {
+  return splitAgentTimeline(items, thinking).map((next) => {
     const prior = previousByKey.get(next.key)
     return prior && isSameTimelineBlock(prior, next) ? prior : next
   })
@@ -199,7 +229,10 @@ export function reconcileAgentTimeline(
 function isSameTimelineBlock(previous: AgentTimelineBlock, next: AgentTimelineBlock): boolean {
   if (previous.kind !== next.kind) return false
 
-  if (previous.kind === 'text' && next.kind === 'text') {
+  if (
+    (previous.kind === 'text' && next.kind === 'text') ||
+    (previous.kind === 'thinking' && next.kind === 'thinking')
+  ) {
     return previous.text === next.text
   }
 

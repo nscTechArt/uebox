@@ -1,9 +1,9 @@
 <template>
   <div class="ai-bubble">
     <div class="content">
-      <!-- 思考过程 -->
+      <!-- 没在时间线上记推理位置的老消息：整段推理还放在顶部 -->
       <ThinkingProcess
-        v-if="thinking"
+        v-if="thinking && !timelineHasThinking"
         :content="thinking"
         :is-thinking="status === 'typing' && !content.trim()"
       />
@@ -19,6 +19,12 @@
             :items="block.items"
             :is-thinking="block.key === liveProcessBlockKey"
             :start-time="blockStartTime(block)"
+          />
+          <!-- 一轮推理一个框，显示在它发生的那一步 -->
+          <ThinkingProcess
+            v-else-if="block.kind === 'thinking'"
+            :content="block.text"
+            :is-thinking="block.key === liveBlockKey"
           />
           <!--
             用户在跑的途中插的那句话，就显示在它发生的位置。
@@ -605,6 +611,7 @@ import { basenameOf, shortDirOf, useFilePathMenu } from '@renderer/composables/u
 import {
   joinTimelineText,
   reconcileAgentTimeline,
+  hasTimelineThinking,
   resolveTrailingContent,
   type AgentTimelineBlock,
   type AgentTimelineSteerBlock
@@ -696,12 +703,14 @@ const shouldShowAgentProcessLog = computed(() => props.agentProcess !== undefine
 const timelineBlocks = shallowRef<AgentTimelineBlock[]>([])
 
 watch(
-  () => props.agentProcess,
-  (items) => {
-    timelineBlocks.value = reconcileAgentTimeline(timelineBlocks.value, items || [])
+  () => [props.agentProcess, props.thinking] as const,
+  ([items, thinking]) => {
+    timelineBlocks.value = reconcileAgentTimeline(timelineBlocks.value, items || [], thinking)
   },
   { immediate: true }
 )
+
+const timelineHasThinking = computed(() => hasTimelineThinking(props.agentProcess))
 
 /**
  * 还在跑的那一段过程。
@@ -712,17 +721,22 @@ watch(
  * 末尾的插话要跳过：用户插一句话不打断执行，刚才那一步还在跑，
  * 转圈却停了的话看起来像是「我一说话它就卡住了」。
  */
-const liveProcessBlockKey = computed<string | null>(() => {
+const liveBlockKey = computed<string | null>(() => {
   if (props.status !== 'typing') return null
   for (let i = timelineBlocks.value.length - 1; i >= 0; i--) {
     const block = timelineBlocks.value[i]
     // 提问卡片和插话一样跳过：agent 这会儿正阻塞在「等你回答」上，它确实还在跑，
     // 转圈停掉会让人以为出问题了
     if (block.kind === 'steer' || block.kind === 'question') continue
-    return block.kind === 'process' ? block.key : null
+    return block.kind === 'process' || block.kind === 'thinking' ? block.key : null
   }
   return null
 })
+
+/** 正在想的时候转圈的是那一轮推理框，过程框这时已经跑完了 */
+const liveProcessBlockKey = computed(() =>
+  liveBlockKey.value?.startsWith('process:') ? liveBlockKey.value : null
+)
 
 /**
  * 每段过程的计时起点。
@@ -806,6 +820,10 @@ const showTrailingContent = computed(() => {
   const text = trailingContent.value
   // 正文已经在时间线里逐段显示过了，这里只补差额，没差额就别开一个空块
   if (shouldShowAgentProcessLog.value && hasTimelineText.value) return text.trim().length > 0
+  // 时间线上已经有东西在转圈了，就不再挂一行「思考中...」占位字
+  if (props.status === 'typing' && timelineBlocks.value.length > 0 && isTypingPlaceholder(text)) {
+    return false
+  }
   return !(props.status === 'typing' && !text.trim() && props.agentProcess !== undefined)
 })
 

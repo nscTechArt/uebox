@@ -14,7 +14,7 @@
         跑完之后它变回独立的「思考过程」，回头翻记录时两样东西分得开。
       -->
       <ThinkingProcess
-        v-if="message.thinking && !foldThinkingIntoProcess"
+        v-if="message.thinking && !foldThinkingIntoProcess && !timelineHasThinking"
         class="thinking-block"
         :content="message.thinking"
         :is-thinking="message.status === 'typing' && !textContent.trim()"
@@ -34,6 +34,13 @@
                 ? message.thinking
                 : undefined
             "
+          />
+          <!-- 一轮推理一个框，显示在它发生的那一步 -->
+          <ThinkingProcess
+            v-else-if="block.kind === 'thinking'"
+            class="thinking-block"
+            :content="block.text"
+            :is-thinking="block.key === liveThinkingBlockKey"
           />
           <!-- agent 反问用户。和主聊天页同一张卡片，答完就地变只读 -->
           <AskUserCard
@@ -115,6 +122,7 @@ import {
   joinTimelineText,
   resolveTrailingContent,
   splitAgentTimeline,
+  hasTimelineThinking,
   type AgentTimelineBlock
 } from '@renderer/views/Assistant/composables/agentTimeline'
 import type { ChatMessage, ChatMessageContent } from '@renderer/store/modules/chatMessages'
@@ -156,7 +164,18 @@ const isThinkingPlaceholder = computed(() => {
 })
 
 // ==================== 过程 / 正文交替时间线 ====================
-const timelineBlocks = computed(() => splitAgentTimeline(props.message.agentProcess || []))
+const timelineBlocks = computed(() =>
+  splitAgentTimeline(props.message.agentProcess || [], props.message.thinking)
+)
+
+const timelineHasThinking = computed(() => hasTimelineThinking(props.message.agentProcess))
+
+/** 最后一块是推理、而且还在跑，就是它在转圈 */
+const liveThinkingBlockKey = computed<string | null>(() => {
+  if (props.message.status !== 'typing') return null
+  const last = timelineBlocks.value[timelineBlocks.value.length - 1]
+  return last && last.kind === 'thinking' ? last.key : null
+})
 
 /** 只有最后一段过程还在跑，前面那些已经结束了 */
 const liveProcessBlockKey = computed<string | null>(() => {
@@ -167,7 +186,10 @@ const liveProcessBlockKey = computed<string | null>(() => {
 
 /** 运行中：推理正文折进那条活着的过程条，小窗一屏只留一行状态 */
 const foldThinkingIntoProcess = computed(
-  () => Boolean(props.message.thinking) && liveProcessBlockKey.value !== null
+  () =>
+    Boolean(props.message.thinking) &&
+    !timelineHasThinking.value &&
+    liveProcessBlockKey.value !== null
 )
 
 function blockStartTime(block: AgentTimelineBlock): number | undefined {
