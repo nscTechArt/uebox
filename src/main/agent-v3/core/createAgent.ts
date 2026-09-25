@@ -79,6 +79,7 @@ import { AUDITOR_TOOLS, type GoalVerdict } from './goalLoop'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
 import { memberFileBase, type TeamMember, type TeamStore } from './team/teamStore'
 import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
+import { pacedStreamFn } from './team/requestGate'
 
 /**
  * 一次引擎体检的结果 —— 「此刻这条会话够不够得着引擎，够得着的是哪个工程」。
@@ -247,6 +248,11 @@ export interface SessionContext {
    * 由 `runSubAgent` 的 `member` 设进来，产品路径别的地方不传。
    */
   teamMember?: { name: string; persona: string; store: TeamStore }
+  /**
+   * 模型请求走自适应调度（`core/team/requestGate.ts`）。工作室模式打开，子 agent 继承。
+   * 几个队员同时请模型时，按网关的实际承受力排队，卡死的请求退避重发。
+   */
+  pacedRequests?: boolean
   /** 子 agent 的工具命名空间白名单 */
   namespaces?: string[]
   /**
@@ -618,7 +624,17 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   if (ctx.readOnly || ctx.mode === 'ask' || ctx.toolNames?.length || ctx.namespaces?.length)
     ctx.toolSearchEnabled = false
   const runtime = await resolveAgentModel(ctx.modelRequest, ctx.thinkingLevel)
-  const { selection, streamFn, models, summaryModel } = runtime
+  const { selection, models, summaryModel } = runtime
+  // 工作室模式：模型请求按网关的实际反应自适应排队、卡死重发（见 `core/team/requestGate.ts`）。
+  // 子 agent 经 `...parent` 继承这个开关，队员、验收员、`task` 子任务共用同一个名额池
+  const streamFn = ctx.pacedRequests
+    ? pacedStreamFn(runtime.streamFn, {
+        onRetry: ({ attempt, reason, model }) =>
+          console.warn(
+            `[AgentV3] 会话 ${ctx.sessionId} 模型请求第 ${attempt} 次重发（${model.provider}/${model.id}）：${reason.slice(0, 160)}`
+          )
+      })
+    : runtime.streamFn
 
   // skill 清单在 system prompt 里常驻，正文按需加载（渐进披露）。
   // 子 agent 复用父 agent 已经发现的清单，不重复扫盘。

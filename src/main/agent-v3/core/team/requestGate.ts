@@ -1,0 +1,411 @@
+/**
+ * 模型请求的自适应调度：按网关的实际反应决定同时放几个请求出去。
+ *
+ * ## 为什么要有它
+ *
+ * 真机塔防题：三个队员并行，各自一个六七万 token 的请求同时打到小米 MiMo Token Plan，
+ * 网关不回 429，而是把三个请求挂住，5 分钟后一起断开（`ERR_CONNECTION_CLOSED`）。
+ * 编程套餐普遍按账号限并发，数字不公布、还随负载变（社区实测 3 路就可能被限，
+ * 有时 9 路才限）—— 写死一个上限，不是浪费就是撞墙。
+ *
+ * 所以不猜，量：把网关当成一条会拥塞的链路，用 TCP 拥塞控制那一套（AIMD）。
+ *
+ * - **加性增**：请求顺利、首包时间正常，名额慢慢涨（每成功一次 +1/名额数，
+ *   约等于「每一轮全部成功就 +1」）。
+ * - **乘性减**：出现过载信号 —— 429 / 5xx、连接被掐、长时间没有首包 —— 名额砍半，
+ *   并且整体冷却一小段（指数退避），给网关喘口气。
+ * - **延迟梯度**：首包时间明显高于这家网关的基线（近期最小值的 3 倍）时，
+ *   说明它在排队了，还没报错也先轻轻收一点（×0.9）。思路同 Netflix
+ *   concurrency-limits 的 Gradient 算法：拿延迟当拥塞的早期信号。
+ *
+ * 请求级调度而不是按队员限人数：队员在编辑器里干活、等工具的时候不占名额，
+ * 只有真正在等模型回话的那一刻才算。
+ *
+ * ## 卡死检测
+ *
+ * 那一次的 5 分钟全是白等：请求发出去就没有回音。这里给首包和包间隔各设一个超时，
+ * 到点就当过载处理 —— 放弃这一次、退避后重发。只在**还没往下游推过任何内容**时重发，
+ * 推过半截再重来会让调用方看到重复的开头。
+ *
+ * 只在工作室模式里生效（`SessionContext.pacedRequests`），普通会话零改变。
+ */
+
+import {
+  createAssistantMessageEventStream,
+  type Api,
+  type AssistantMessage,
+  type AssistantMessageEvent,
+  type AssistantMessageEventStream,
+  type Context,
+  type Model
+} from '@earendil-works/pi-ai'
+import type { StreamFn } from '@earendil-works/pi-agent-core'
+
+import { classifyProviderError } from '../../host/providerError'
+
+export interface GateConfig {
+  initialLimit: number
+  minLimit: number
+  maxLimit: number
+  /** 基线还没量出来时，等首包最多多久 */
+  firstEventTimeoutMs: number
+  /** 首包超时的上下限：量出基线后取「基线 × 6」夹在这两者之间 */
+  firstEventTimeoutFloorMs: number
+  firstEventTimeoutCeilMs: number
+  /** 开始推内容之后，两个事件之间最多隔多久 */
+  idleTimeoutMs: number
+  /** 过载时最多重发几次 */
+  maxRetries: number
+  /** 退避：第 n 次连续过载冷却 min(cap, base × 2^n)，再乘一个 [0.5, 1) 的抖动 */
+  backoffBaseMs: number
+  backoffCapMs: number
+}
+
+export const DEFAULT_GATE_CONFIG: GateConfig = {
+  initialLimit: 4,
+  minLimit: 1,
+  maxLimit: 16,
+  firstEventTimeoutMs: 120_000,
+  firstEventTimeoutFloorMs: 60_000,
+  firstEventTimeoutCeilMs: 180_000,
+  idleTimeoutMs: 180_000,
+  maxRetries: 4,
+  backoffBaseMs: 2_000,
+  backoffCapMs: 30_000
+}
+
+/** 基线取最近这么多次首包时间里的最小值 */
+const BASELINE_WINDOW = 20
+/** 至少这么多个样本才开始按延迟梯度收名额 */
+const MIN_SAMPLES_FOR_GRADIENT = 5
+/** 首包时间超过基线的这个倍数，算网关在排队 */
+const LATENCY_TOLERANCE = 3
+
+export type Outcome =
+  | { kind: 'ok'; firstEventMs: number }
+  | { kind: 'overload' }
+  /** 和负载无关的失败（参数错、鉴权错、用户停下）：不动名额 */
+  | { kind: 'neutral' }
+
+export interface LimiterSnapshot {
+  limit: number
+  inFlight: number
+  queued: number
+  baselineMs: number | null
+  coolingDownMs: number
+}
+
+/**
+ * AIMD 名额。一家网关一个，所有工作室会话共用 —— 套餐的并发是按账号算的。
+ */
+export class AdaptiveLimiter {
+  private limit: number
+  private inFlight = 0
+  private readonly queue: Array<{ grant: () => void; signal?: AbortSignal }> = []
+  private samples: number[] = []
+  private consecutiveOverloads = 0
+  private coolUntil = 0
+  private timer: ReturnType<typeof setTimeout> | undefined
+
+  constructor(
+    readonly config: GateConfig = DEFAULT_GATE_CONFIG,
+    private readonly now: () => number = Date.now,
+    private readonly random: () => number = Math.random
+  ) {
+    this.limit = config.initialLimit
+  }
+
+  snapshot(): LimiterSnapshot {
+    return {
+      limit: this.limit,
+      inFlight: this.inFlight,
+      queued: this.queue.length,
+      baselineMs: this.baseline(),
+      coolingDownMs: Math.max(0, this.coolUntil - this.now())
+    }
+  }
+
+  /** 这一次该等首包多久：量出基线后按基线放宽，量不出来用默认值 */
+  firstEventTimeout(): number {
+    const base = this.baseline()
+    const c = this.config
+    if (base === null) return c.firstEventTimeoutMs
+    return Math.min(c.firstEventTimeoutCeilMs, Math.max(c.firstEventTimeoutFloorMs, base * 6))
+  }
+
+  /** 拿一个名额。排队中被停下就退出队列，不占名额 */
+  acquire(signal?: AbortSignal): Promise<(outcome: Outcome) => void> {
+    signal?.throwIfAborted()
+    return new Promise((resolve, reject) => {
+      const entry = {
+        signal,
+        grant: (): void => {
+          signal?.removeEventListener('abort', onAbort)
+          this.inFlight++
+          let done = false
+          resolve((outcome) => {
+            if (done) return
+            done = true
+            this.inFlight--
+            this.record(outcome)
+            this.pump()
+          })
+        }
+      }
+      const onAbort = (): void => {
+        const index = this.queue.indexOf(entry)
+        if (index >= 0) this.queue.splice(index, 1)
+        reject(signal?.reason ?? new Error('Operation aborted'))
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      this.queue.push(entry)
+      this.pump()
+    })
+  }
+
+  private baseline(): number | null {
+    return this.samples.length ? Math.min(...this.samples) : null
+  }
+
+  private record(outcome: Outcome): void {
+    const c = this.config
+    if (outcome.kind === 'overload') {
+      this.limit = Math.max(c.minLimit, this.limit / 2)
+      this.consecutiveOverloads++
+      const backoff = Math.min(
+        c.backoffCapMs,
+        c.backoffBaseMs * 2 ** (this.consecutiveOverloads - 1)
+      )
+      // 抖动：几个同时被掐的请求别在同一刻一起重来，那正是把网关再次打满的方式
+      this.coolUntil = this.now() + backoff * (0.5 + this.random() / 2)
+      return
+    }
+    if (outcome.kind !== 'ok') return
+
+    this.consecutiveOverloads = 0
+    const base = this.baseline()
+    this.samples.push(outcome.firstEventMs)
+    if (this.samples.length > BASELINE_WINDOW) this.samples.shift()
+    if (
+      base !== null &&
+      this.samples.length >= MIN_SAMPLES_FOR_GRADIENT &&
+      outcome.firstEventMs > base * LATENCY_TOLERANCE
+    ) {
+      this.limit = Math.max(c.minLimit, this.limit * 0.9)
+      return
+    }
+    this.limit = Math.min(c.maxLimit, this.limit + 1 / this.limit)
+  }
+
+  private pump(): void {
+    const wait = this.coolUntil - this.now()
+    if (wait > 0) {
+      // 冷却中：到点再放。只挂一个定时器
+      if (!this.timer && this.queue.length) {
+        this.timer = setTimeout(() => {
+          this.timer = undefined
+          this.pump()
+        }, wait)
+      }
+      return
+    }
+    while (this.queue.length && this.inFlight < Math.max(1, Math.floor(this.limit))) {
+      this.queue.shift()!.grant()
+    }
+  }
+}
+
+// ── 过载判断 ────────────────────────────────────────────────────────────
+
+const OVERLOAD_STATUS = new Set([408, 429, 500, 502, 503, 504, 529])
+const OVERLOAD_TEXT =
+  /rate.?limit|too many requests|overload|capacity|concurrency|ERR_CONNECTION_(CLOSED|RESET|ABORTED)|ERR_EMPTY_RESPONSE|ERR_TIMED_OUT|ECONNRESET|ETIMEDOUT|socket hang up|timed? ?out|限流|并发|繁忙|过载/i
+
+/** 这个报错是不是「网关扛不住了」。鉴权、参数、上下文超长这类不算 */
+export function isOverloadError(errorMessage: string): boolean {
+  const { statusCode } = classifyProviderError(errorMessage)
+  if (statusCode !== undefined) return OVERLOAD_STATUS.has(statusCode)
+  return OVERLOAD_TEXT.test(errorMessage)
+}
+
+// ── 流包装 ──────────────────────────────────────────────────────────────
+
+const limiters = new Map<string, AdaptiveLimiter>()
+
+/** 一家网关一个名额池。按 provider 分：套餐并发按账号算，同一家的几个模型共用 */
+export function limiterFor(model: Model<Api>): AdaptiveLimiter {
+  const key = model.provider
+  let limiter = limiters.get(key)
+  if (!limiter) {
+    limiter = new AdaptiveLimiter()
+    limiters.set(key, limiter)
+  }
+  return limiter
+}
+
+function failed(model: Model<Api>, errorMessage: string): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: [],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    },
+    stopReason: 'error',
+    errorMessage,
+    timestamp: Date.now()
+  }
+}
+
+type Next = IteratorResult<AssistantMessageEvent> | 'timeout'
+
+function nextWithin(iterator: AsyncIterator<AssistantMessageEvent>, ms: number): Promise<Next> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    iterator.next().finally(() => clearTimeout(timer)),
+    new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), ms)
+    })
+  ])
+}
+
+export interface PacedStreamDeps {
+  limiterFor?: (model: Model<Api>) => AdaptiveLimiter
+  /** 每次重发前告诉宿主一声（写日志、给界面一条提示） */
+  onRetry?: (info: { attempt: number; reason: string; model: Model<Api> }) => void
+}
+
+/**
+ * 给一个 streamFn 套上调度：排队拿名额、盯首包和包间隔、过载就退避重发。
+ */
+export function pacedStreamFn(inner: StreamFn, deps: PacedStreamDeps = {}): StreamFn {
+  const pick = deps.limiterFor ?? limiterFor
+
+  return (model: Model<Api>, context: Context, options) => {
+    const out = createAssistantMessageEventStream()
+    const outer = options?.signal
+    const limiter = pick(model)
+
+    void (async () => {
+      let lastReason = ''
+      for (let attempt = 0; attempt <= limiter.config.maxRetries; attempt++) {
+        if (outer?.aborted) break
+        let release: (outcome: Outcome) => void
+        try {
+          release = await limiter.acquire(outer)
+        } catch {
+          break
+        }
+
+        // 自己的中止器接在外面那个后面：超时要能单独掐掉这一次，而不连带整轮
+        const controller = new AbortController()
+        const forwardAbort = (): void => controller.abort(outer?.reason)
+        outer?.addEventListener('abort', forwardAbort, { once: true })
+        const started = Date.now()
+        let forwarded = 0
+        let firstEventMs: number | undefined
+
+        try {
+          const stream = await inner(model, context, { ...options, signal: controller.signal })
+          const iterator = stream[Symbol.asyncIterator]()
+          for (;;) {
+            const next = await nextWithin(
+              iterator,
+              forwarded === 0 ? limiter.firstEventTimeout() : limiter.config.idleTimeoutMs
+            )
+            if (next === 'timeout') {
+              controller.abort(new Error('stalled'))
+              lastReason =
+                forwarded === 0
+                  ? `等了 ${Math.round((Date.now() - started) / 1000)} 秒没有首包`
+                  : '回话中途断流'
+              release({ kind: 'overload' })
+              break
+            }
+            if (next.done) {
+              // 流结束却没给结局：当普通失败交给调用方，不重发
+              release({ kind: 'neutral' })
+              out.push({ type: 'error', reason: 'error', error: failed(model, '模型流意外结束') })
+              out.end()
+              return
+            }
+            const event = next.value
+            if (event.type === 'error') {
+              const message = event.error.errorMessage ?? ''
+              const overload =
+                event.reason === 'error' && !outer?.aborted && isOverloadError(message)
+              if (overload && forwarded === 0) {
+                lastReason = message
+                release({ kind: 'overload' })
+                break
+              }
+              release(overload ? { kind: 'overload' } : { kind: 'neutral' })
+              out.push(event)
+              out.end()
+              return
+            }
+            firstEventMs ??= Date.now() - started
+            out.push(event)
+            forwarded++
+            if (event.type === 'done') {
+              release({ kind: 'ok', firstEventMs })
+              out.end()
+              return
+            }
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (forwarded === 0 && !outer?.aborted && isOverloadError(message)) {
+            lastReason = message
+            release!({ kind: 'overload' })
+          } else {
+            release!({ kind: 'neutral' })
+            out.push({ type: 'error', reason: 'error', error: failed(model, message) })
+            out.end()
+            return
+          }
+        } finally {
+          outer?.removeEventListener('abort', forwardAbort)
+        }
+
+        // 推过半截内容就不能重来了：调用方会看到重复的开头
+        if (forwarded > 0) {
+          out.push({
+            type: 'error',
+            reason: 'error',
+            error: failed(model, `模型网关${lastReason}，这一次的回话没收完`)
+          })
+          out.end()
+          return
+        }
+        if (attempt < limiter.config.maxRetries) {
+          deps.onRetry?.({ attempt: attempt + 1, reason: lastReason, model })
+        }
+      }
+
+      if (outer?.aborted) {
+        out.push({ type: 'error', reason: 'aborted', error: failed(model, 'Operation aborted') })
+      } else {
+        out.push({
+          type: 'error',
+          reason: 'error',
+          error: failed(
+            model,
+            `模型网关连续 ${limiter.config.maxRetries + 1} 次扛不住（最后一次：${lastReason}）。` +
+              '可能是套餐的并发或频率上限，稍后再试，或换一个并发更高的模型服务。'
+          )
+        })
+      }
+      out.end()
+    })()
+
+    return out as AssistantMessageEventStream
+  }
+}

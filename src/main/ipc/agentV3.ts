@@ -407,6 +407,7 @@ async function prepareTeam(ctx: SessionContext, options: SessionExecutionOptions
   if (!team || options.mode === 'ask') return
   const store = createTeamStore(teamDirsFor(ctx.sessionId))
   await store.ensure()
+  ctx.pacedRequests = true
   ctx.team = {
     objective: team.objective,
     store,
