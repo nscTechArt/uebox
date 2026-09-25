@@ -2760,6 +2760,7 @@ declare global {
         notifyApprovalRequired: boolean
         notifyQuestionRequired: boolean
         hideWindowOnProjectLaunch: boolean
+        autoRecoverEditorCrash: boolean
       }>
       /** 更新应用设置 */
       set: (settings: {
@@ -2775,6 +2776,7 @@ declare global {
         notifyApprovalRequired?: boolean
         notifyQuestionRequired?: boolean
         hideWindowOnProjectLaunch?: boolean
+        autoRecoverEditorCrash?: boolean
       }) => Promise<{ success: boolean }>
       /** 设置开机自启 */
       setAutoLaunch: (enabled: boolean) => Promise<{ success: boolean }>

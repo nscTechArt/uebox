@@ -116,3 +116,21 @@ describe('交互式编辑器 vs 无头进程', () => {
     expect(manager.getNonInteractiveProjects()).toEqual([])
   })
 })
+
+/** 崩溃看门人靠这个知道「连上来的是哪个工程」；监听器抛错不能拖垮登记本身 */
+describe('onProjectAdded', () => {
+  it('登记时通知，退订后不再通知', () => {
+    const seen: string[] = []
+    const off = manager.onProjectAdded((project) => seen.push(project.connectionId))
+    manager.onProjectAdded(() => {
+      throw new Error('boom')
+    })
+
+    manager.addProject('c1', info())
+    off()
+    manager.addProject('c2', info())
+
+    expect(seen).toEqual(['c1'])
+    expect(manager.getProject('c2')).toBeDefined()
+  })
+})

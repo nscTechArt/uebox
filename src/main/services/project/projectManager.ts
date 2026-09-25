@@ -13,6 +13,15 @@ import { logger } from '../logger'
 export class ProjectManager {
   /** 工程列表：connectionId -> ProjectInfo */
   private projects = new Map<string, ProjectInfo>()
+  private addedListeners: Array<(project: ProjectInfo) => void> = []
+
+  /** 插件报上工程信息时通知（同一条连接重报也会再通知一次）。返回退订函数 */
+  onProjectAdded(listener: (project: ProjectInfo) => void): () => void {
+    this.addedListeners.push(listener)
+    return () => {
+      this.addedListeners = this.addedListeners.filter((item) => item !== listener)
+    }
+  }
 
   /**
    * 归一化插件名列表：
@@ -61,6 +70,13 @@ export class ProjectManager {
     }
 
     this.projects.set(connectionId, projectInfo)
+    for (const listener of this.addedListeners) {
+      try {
+        listener(projectInfo)
+      } catch (error) {
+        logger.error('[ProjectManager] 工程登记监听器出错:', error)
+      }
+    }
     logger.info(
       `[ProjectManager] 工程已添加: ${projectInfo.projectName} (${connectionId}), 引擎版本: ${projectInfo.engineVersion}` +
         // 无头进程一定要在日志里认出来 —— 否则下次又是「盒子说连着、用户说没开」

@@ -3209,6 +3209,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         'Install and enable the connection plugin when opening a project.',
       autoEnableUnrealAgentLinkEnabled: 'Automatic plugin installation enabled',
       autoEnableUnrealAgentLinkDisabled: 'Automatic plugin installation disabled',
+      crashRecovery: 'Crash recovery',
+      autoRecoverEditorCrash: 'Reopen the editor after a crash',
+      autoRecoverEditorCrashDesc:
+        'Closes the crash reporter, backs up unsaved autosaves, and reopens the project. Stops after a second crash within 5 minutes.',
       repairCleanup: 'Clean up old plugins',
       repairCleanupDesc:
         'Remove old connection plugins from engine folders. Close Unreal Editor first.',

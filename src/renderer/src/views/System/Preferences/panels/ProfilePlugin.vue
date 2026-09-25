@@ -11,6 +11,8 @@ const { t } = useI18n()
 
 const pluginSourceUrl = 'https://github.com/ueboxai/unreal-agent-link'
 const autoEnableUnrealAgentLink = ref(true)
+/** 编辑器崩溃后自动重开。真相源在主进程，见 `services/editorCrashWatch` */
+const autoRecoverEditorCrash = ref(true)
 const isLoadingSettings = ref(true)
 const isRepairingResidue = ref(false)
 
@@ -41,6 +43,7 @@ onMounted(async () => {
   try {
     const settings = await window.api.appSettings.get()
     autoEnableUnrealAgentLink.value = settings.autoEnableUnrealAgentLink
+    autoRecoverEditorCrash.value = settings.autoRecoverEditorCrash !== false
   } catch (error) {
     console.error('Failed to load plugin settings:', error)
   } finally {
@@ -64,6 +67,17 @@ watch(autoEnableUnrealAgentLink, async (newValue) => {
     )
   } catch (error) {
     console.error('Failed to save plugin settings:', error)
+    message.error(t('profile.plugin.settingSaveFailed'))
+  }
+})
+
+// 不弹「已保存」：开关本身就是反馈，下一次崩溃时的行为才是它的结果
+watch(autoRecoverEditorCrash, async (newValue) => {
+  if (isLoadingSettings.value) return
+  try {
+    await window.api.appSettings.set({ autoRecoverEditorCrash: newValue })
+  } catch (error) {
+    console.error('Failed to save crash recovery setting:', error)
     message.error(t('profile.plugin.settingSaveFailed'))
   }
 })
@@ -181,6 +195,21 @@ async function repairEngineResidue(): Promise<void> {
             </div>
           </div>
           <AppSwitch v-model:checked="autoEnableUnrealAgentLink" />
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <h4 class="section-title">{{ $t('profile.plugin.crashRecovery') }}</h4>
+      <div class="settings-list">
+        <div class="setting-item">
+          <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.plugin.autoRecoverEditorCrash') }}</div>
+            <div class="setting-desc">
+              {{ $t('profile.plugin.autoRecoverEditorCrashDesc') }}
+            </div>
+          </div>
+          <AppSwitch v-model:checked="autoRecoverEditorCrash" />
         </div>
       </div>
     </section>

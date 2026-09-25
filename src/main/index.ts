@@ -40,6 +40,7 @@ import {
 } from './mainWindowLifecycle'
 import { agentBrowser } from './services/agentBrowser'
 import { startAgentNotifications } from './services/agentNotifications'
+import { startEditorCrashWatch } from './services/editorCrashWatch'
 import { closeSearchBrowser } from './services/browserSearch'
 import { windowStateManager } from './windowStateManager'
 import { fitMacWindow, mainWindowChrome } from './mainWindowAppearance'
@@ -697,6 +698,9 @@ appReady?.then(async () => {
 
     // 初始化自动更新服务（仅在非开发环境或明确启用时）
     if (!is.dev || process.env.ENABLE_AUTO_UPDATE === 'true') {
+    // 编辑器崩溃看门人：认出崩溃、关掉崩溃报告窗口、重开工程，并告诉等着的 agent
+    startEditorCrashWatch(createWindow)
+
       try {
         await autoUpdaterService.initialize()
         logger.info('自动更新服务初始化完成')

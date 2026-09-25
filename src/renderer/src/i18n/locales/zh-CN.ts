@@ -3032,6 +3032,10 @@ export default {
       autoEnableUnrealAgentLinkDesc: '打开工程时安装并启用连接插件。',
       autoEnableUnrealAgentLinkEnabled: '自动安装插件已开启',
       autoEnableUnrealAgentLinkDisabled: '自动安装插件已关闭',
+      crashRecovery: '崩溃恢复',
+      autoRecoverEditorCrash: '编辑器崩溃后自动重开',
+      autoRecoverEditorCrashDesc:
+        '关掉崩溃报告窗口，备份未保存的自动存档，再重新打开工程。5 分钟内再崩一次就不再重开。',
       repairCleanup: '清理旧版插件',
       repairCleanupDesc: '清理引擎目录中的旧版连接插件；请先关闭虚幻编辑器。',
       repairCleanupAction: '清理旧版插件',

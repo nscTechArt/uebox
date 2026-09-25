@@ -36,6 +36,8 @@ const deleteProject = vi.fn((id: string) => knownProjects.delete(id))
 vi.mock('../project', () => ({
   projectManager: {
     hasProject: (id: string): boolean => knownProjects.has(id),
+    getProject: (id: string): { connectionId: string } | undefined =>
+      knownProjects.has(id) ? { connectionId: id } : undefined,
     deleteProject: (id: string): void => {
       deleteProject(id)
     }
@@ -43,7 +45,7 @@ vi.mock('../project', () => ({
 }))
 
 import { WebSocketService } from './server'
-import { WebSocketErrorCode } from './types'
+import { WebSocketErrorCode, WebSocketServiceError } from './types'
 
 /** 入站消息的去处。这些用例只关心传输层，不关心路由到哪 */
 const onInbound = vi.fn(async () => undefined)
@@ -228,6 +230,43 @@ describe('请求生命周期', () => {
   })
 
   /**
+   * 断线之后问崩溃看门人一句：崩了的话，模型拿到的是原因和下一步，不只是「断开了」。
+   */
+  it('断线时把看门人的说明拼进给模型的那半句', async () => {
+    const explainer = vi.fn(async () => '【编辑器崩溃】已经重新打开')
+    service.setDisconnectExplainer(explainer)
+    const socket = await connectPlugin()
+    await waitForConnections(1)
+    const id = service.getConnectionManager().getAllConnections()[0].id
+
+    const pending = service.callRequest('actor.spawn', {}, id, 60_000)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    socket.terminate()
+
+    const error = (await pending.catch((caught: unknown) => caught)) as WebSocketServiceError
+    expect(error).toMatchObject({ code: WebSocketErrorCode.E_CONNECTION_CLOSED })
+    // 面向用户那句不变，说明只进 agentHint
+    expect(error.message).toMatch(/不要用同样的参数直接重试/)
+    expect(error.message).not.toMatch(/已经重新打开/)
+    expect(error.agentHint).toMatch(/已经重新打开/)
+    expect(explainer).toHaveBeenCalledWith(id)
+  })
+
+  it('看门人说不是崩溃时原样抛', async () => {
+    service.setDisconnectExplainer(async () => undefined)
+    const socket = await connectPlugin()
+    await waitForConnections(1)
+
+    const pending = service.callRequest('actor.spawn', {}, undefined, 60_000)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    socket.terminate()
+
+    const error = (await pending.catch((caught: unknown) => caught)) as WebSocketServiceError
+    expect(error).toMatchObject({ code: WebSocketErrorCode.E_CONNECTION_CLOSED })
+    expect(error.agentHint).toBeUndefined()
+  })
+
+  /**
    * 超大响应必须**归因到具体请求**再拒绝。
    *
    * 原来是「太大就 return」，那个 Promise 谁也不去动，调用方等满超时，
@@ -360,6 +399,37 @@ describe('断线善后', () => {
     await waitForConnections(0)
 
     expect(deleteProject).toHaveBeenCalledTimes(1)
+  })
+
+  /** 停服拆掉的连接，编辑器好好的：告诉看门人别去查 */
+  it('停服时的断线事件标明是盒子自己停的', async () => {
+    const events: unknown[] = []
+    service.onEvent('system.disconnected', (payload) => events.push(payload))
+    await connectPlugin()
+    await waitForConnections(1)
+
+    await service.stopServer()
+
+    expect(events).toMatchObject([{ serverStopping: true }])
+    // afterEach 还会再停一次，重新起一个给它停
+    await service.startServer(0)
+  })
+
+  /** 崩溃看门人靠断线事件里的工程认「断的是哪个」；正常关闭时工程早删了，这里是空的 */
+  it('断线事件带上删之前的工程记录', async () => {
+    const events: unknown[] = []
+    service.onEvent('system.disconnected', (payload) => events.push(payload))
+    const socket = await connectPlugin()
+    await waitForConnections(1)
+    const id = service.getConnectionManager().getAllConnections()[0].id
+    knownProjects.add(id)
+
+    socket.terminate()
+    await waitForConnections(0)
+
+    expect(events).toEqual([
+      { connectionId: id, project: { connectionId: id }, serverStopping: false }
+    ])
   })
 
   /**

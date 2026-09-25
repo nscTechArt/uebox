@@ -46,6 +46,7 @@ export class WebSocketService implements IWebSocketService {
   private requestStateManager: RequestStateManager
   private onInbound: InboundHandler
   private eventListeners: EventListener[] = []
+  private disconnectExplainer?: (connectionId: string) => Promise<string | undefined>
   private serverState: ServerState = ServerState.Idle
   private currentPort: number = DEFAULT_CONFIG.port
   private startedAt?: number
@@ -192,7 +193,7 @@ export class WebSocketService implements IWebSocketService {
       // 退出应用时无所谓，但 `ws:stop` 这个 IPC 和 `serviceManager.restart()`
       // 是运行期就能走到的，那时候这个残留就是实打实的「状态永远在线」。
       for (const connection of this.connectionManager.getAllConnections()) {
-        this.handleDisconnect(connection.id)
+        this.handleDisconnect(connection.id, true)
       }
 
       // 清理请求状态管理器
@@ -350,7 +351,8 @@ export class WebSocketService implements IWebSocketService {
       )
     }
 
-    if (!signal) return promise
+    const explained = this.withDisconnectExplanation(promise, targetId)
+    if (!signal) return explained
 
     const onAbort = (): void => {
       this.requestStateManager.rejectRequest(
@@ -364,7 +366,47 @@ export class WebSocketService implements IWebSocketService {
     signal.addEventListener('abort', onAbort, { once: true })
     // 监听器必须摘干净。信号活得比这条请求久（一整轮对话共用一个），
     // 攒着不摘的话一轮里几十次调用就是几十个死监听器挂在同一个信号上。
-    return promise.finally(() => signal.removeEventListener('abort', onAbort))
+    return explained.finally(() => signal.removeEventListener('abort', onAbort))
+  }
+
+  /**
+   * 在途命令因为断线失败时，问一句「是怎么断的」。
+   *
+   * 断线那一刻只知道连接没了；是不是崩了、崩在哪、编辑器有没有被重开，要等崩溃看门人
+   * 看完进程和崩溃报告才知道（`services/editorCrashWatch`）。这条命令的失败晚几秒给出去，
+   * 换模型拿到的是「崩了、原因、已经在重开、别原样重试」，而不是一句「断开了」。
+   *
+   * 看门人没注册、或者它说不是崩溃，原样抛出。
+   */
+  setDisconnectExplainer(
+    explainer: ((connectionId: string) => Promise<string | undefined>) | undefined
+  ): void {
+    this.disconnectExplainer = explainer
+  }
+
+  private async withDisconnectExplanation<T>(
+    promise: Promise<T>,
+    connectionId: string
+  ): Promise<T> {
+    try {
+      return await promise
+    } catch (error) {
+      const explainer = this.disconnectExplainer
+      if (
+        !explainer ||
+        !(error instanceof WebSocketServiceError) ||
+        error.code !== WebSocketErrorCode.E_CONNECTION_CLOSED
+      ) {
+        throw error
+      }
+      const extra = await explainer(connectionId).catch(() => undefined)
+      if (!extra) throw error
+      throw new WebSocketServiceError(
+        error.code,
+        error.message,
+        error.agentHint ? `${error.agentHint}\n${extra}` : extra
+      )
+    }
   }
 
   /**
@@ -649,7 +691,7 @@ export class WebSocketService implements IWebSocketService {
    * 处理断开连接
    * 注意：如果是心跳超时导致的断开，项目已经在心跳超时回调中被删除了
    */
-  private handleDisconnect(connectionId: string): void {
+  private handleDisconnect(connectionId: string, serverStopping = false): void {
     // 幂等：同一个连接可能从多条路走到这里 —— socket 的 close、socket 的 error、
     // 心跳超时回调。以前每条路各做各的（心跳那条还漏了「拒绝待处理请求」），
     // 现在全部汇到这一个函数，靠连接是否还在池子里来去重。
@@ -665,12 +707,20 @@ export class WebSocketService implements IWebSocketService {
     // 而不是各自等满自己的超时。
     this.requestStateManager.rejectByClient(connectionId)
 
-    if (projectManager.hasProject(connectionId)) {
+    // 删之前先留一份：崩溃看门人要知道断的是哪个工程。插件正常关闭时会先发
+    // project.closed、工程早就删了，这里拿到的是 undefined —— 那正好说明不是崩溃
+    const project = projectManager.getProject(connectionId)
+    if (project) {
       projectManager.deleteProject(connectionId)
     }
 
     // 触发断开事件
-    this.emitToListeners('system.disconnected', { connectionId }, connectionId)
+    // `serverStopping`：是盒子自己停服拆的连接，编辑器好好的，看门人不用去查
+    this.emitToListeners(
+      'system.disconnected',
+      { connectionId, project, serverStopping },
+      connectionId
+    )
 
     // 同 handleConnection：不广播 ws:status。上面 deleteProject 已经发过
     // `ws:projects-changed` 了。而且停服是一个连接一个连接地走到这里的，

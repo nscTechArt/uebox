@@ -2832,6 +2832,7 @@ const api = {
       notifyApprovalRequired: boolean
       notifyQuestionRequired: boolean
       hideWindowOnProjectLaunch: boolean
+      autoRecoverEditorCrash: boolean
     }> => ipcRenderer.invoke('app-settings:get'),
     /**
      * 更新应用设置
@@ -2849,6 +2850,7 @@ const api = {
       notifyApprovalRequired?: boolean
       notifyQuestionRequired?: boolean
       hideWindowOnProjectLaunch?: boolean
+      autoRecoverEditorCrash?: boolean
     }): Promise<{ success: boolean }> => ipcRenderer.invoke('app-settings:set', settings),
     /**
      * 设置开机自启
