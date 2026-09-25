@@ -1518,7 +1518,9 @@ export default {
         done: '完成',
         failed: '失败'
       },
-      failedDetail: '失败：{reason}'
+      failedDetail: '失败：{reason}',
+      downloadDone: '已放进目标位置：{count} 个文件',
+      importDone: '已提交到服务器库：{count} 个文件'
     },
     errors: {
       unknown: '操作没有完成。',

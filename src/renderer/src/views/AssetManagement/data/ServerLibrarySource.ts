@@ -133,8 +133,12 @@ export function softPathOf(path: string): string {
   return `/${withoutExt}`
 }
 
+/** 和本地库的时间字段同一种写法（`YYYY-MM-DD HH:mm:ss`，本机时区），界面原样显示 */
 function iso(ms: number | null | undefined): string | undefined {
-  return typeof ms === 'number' && ms > 0 ? new Date(ms).toISOString() : undefined
+  if (typeof ms !== 'number' || ms <= 0) return undefined
+  const d = new Date(ms)
+  const two = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`
 }
 
 /** 服务端一行 → 本地资产行的形状（多出来的字段带 catalog 前缀，给下载 / 导入用） */

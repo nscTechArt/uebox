@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useAssetLibraryStore } from './assetLibraryStore'
+import { jobPercent, useAssetLibraryStore } from './assetLibraryStore'
 import { useImportTasksStore } from './importTasks'
 import {
   getActiveLibrarySource,
@@ -12,6 +12,7 @@ import {
 } from '@renderer/views/AssetManagement/data/activeLibrarySource'
 
 vi.mock('@renderer/i18n', () => ({ default: { global: { t: (key: string) => key } } }))
+vi.mock('@renderer/utils/messageManager', () => ({ message: { success: vi.fn(), error: vi.fn() } }))
 
 type Listener = (event: unknown) => void
 let listeners: Listener[]
@@ -148,7 +149,7 @@ describe('assetLibraryStore', () => {
       job: { jobId: 'j1', type: 'import', phase: 'pushing', done: 2, total: 4 }
     })
     expect(tasks.tasks.get('j1')).toMatchObject({
-      progress: 50,
+      progress: 85,
       status: 'running',
       taskType: 'vault-import'
     })
@@ -173,5 +174,13 @@ describe('assetLibraryStore', () => {
     await store.init()
     expect(store.isServer).toBe(false)
     expect(getActiveLibrarySource().kind).toBe('local')
+  })
+
+  it('never reports 100% before the job is done, so the task bar keeps showing it', () => {
+    const job = { jobId: 'x', type: 'import' as const, done: 1, total: 1 }
+    expect(jobPercent({ ...job, phase: 'copying' })).toBe(60)
+    expect(jobPercent({ ...job, phase: 'pushing' })).toBe(85)
+    expect(jobPercent({ ...job, phase: 'materialising', done: 1, total: 2 })).toBe(38)
+    expect(jobPercent({ ...job, phase: 'done' })).toBe(100)
   })
 })

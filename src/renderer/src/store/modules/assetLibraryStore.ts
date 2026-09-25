@@ -16,6 +16,7 @@ import type {
 } from '@core/shared/catalogLibrary'
 import { catalogLibraryAPI } from '@renderer/api/catalogLibrary'
 import i18n from '@renderer/i18n'
+import { message } from '@renderer/utils/messageManager'
 import { useImportTasksStore } from './importTasks'
 import type {
   AssetLibrarySource,
@@ -32,6 +33,34 @@ import {
 } from '@renderer/views/AssetManagement/data/activeLibrarySource'
 
 export type LibraryInvalidation = Extract<CatalogLibraryEvent, { kind: 'invalidate' }>
+
+/**
+ * 作业的百分比按阶段走：文件数只在复制 / 物化阶段有意义，之后还有暂存、提交、推送。
+ * 没到 done 就不给 100 —— 导入任务条把 100% 当作已完成、直接收起。
+ */
+const PHASE_RANGE: Record<CatalogJobProgress['phase'], [number, number]> = {
+  preparing: [0, 5],
+  syncing: [5, 15],
+  materialising: [15, 60],
+  copying: [15, 60],
+  staging: [60, 75],
+  committing: [75, 85],
+  pushing: [85, 95],
+  done: [100, 100],
+  failed: [0, 0]
+}
+
+export function jobPercent(job: CatalogJobProgress): number {
+  if (job.phase === 'done') return 100
+  const [from, to] = PHASE_RANGE[job.phase] ?? [0, 95]
+  const fraction =
+    job.phase === 'copying' || job.phase === 'materialising'
+      ? job.total > 0
+        ? Math.min(1, job.done / job.total)
+        : 0
+      : 0
+  return Math.min(95, Math.round(from + (to - from) * fraction))
+}
 
 export const useAssetLibraryStore = defineStore('assetLibrary', () => {
   const serverLibraries = ref<CatalogLibraryView[]>([])
@@ -85,8 +114,7 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
       job.phase === 'failed'
         ? t('catalogLibrary.jobs.failedDetail', { reason: job.error ?? '' })
         : t(`catalogLibrary.jobs.phase.${job.phase}`)
-    const progress =
-      job.phase === 'done' ? 100 : job.total > 0 ? Math.round((job.done / job.total) * 100) : 0
+    const progress = jobPercent(job)
     const status = job.phase === 'failed' ? 'error' : job.phase === 'done' ? 'completed' : 'running'
     if (!tasks.tasks.get(job.jobId)) {
       tasks.addTask({
@@ -104,8 +132,21 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
     } else {
       tasks.updateTask(job.jobId, { progress, stageText, status, total: job.total, done: job.done })
     }
-    // 成功的几秒后自己消失；失败的留着，等用户看见原因
-    if (job.phase === 'done') setTimeout(() => tasks.removeTask(job.jobId), 4000)
+    // 成功的：任务条把它收起，这里给一句结果；失败的留在任务条上，等用户看见原因
+    if (job.phase === 'done') {
+      const count = job.outputPaths?.length ?? job.total
+      message.success(
+        t(
+          job.type === 'import'
+            ? 'catalogLibrary.jobs.importDone'
+            : 'catalogLibrary.jobs.downloadDone',
+          {
+            count
+          }
+        )
+      )
+      setTimeout(() => tasks.removeTask(job.jobId), 4000)
+    }
   }
 
   function onEvent(event: CatalogLibraryEvent): void {
@@ -120,7 +161,9 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
     }
     if (event.key !== activeServerKey.value) return
     const current = activeLibrarySource.value
-    if (event.scope === 'all' && current instanceof ServerLibrarySource) current.forget()
+    // 渲染进程这边只记着看过的文件夹计数；任何变化都让它们作废（取数走主进程的页缓存，
+    // 没受影响的页直接命中，代价只是几次 IPC）
+    if (current instanceof ServerLibrarySource) current.forget()
     lastInvalidation.value = event
     invalidationCount.value += 1
   }

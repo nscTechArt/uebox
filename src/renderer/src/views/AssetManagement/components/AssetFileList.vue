@@ -4148,6 +4148,8 @@ const handleRightClick = (event: MouseEvent, file: any) => {
   event.stopPropagation()
 
   currentRightClickAsset.value = file
+  // 服务器库在空白处 / 文件夹上没有可做的事：不弹一个空菜单
+  if (currentContextMenuItems.value.length === 0) return
   contextMenuRef.value?.show(event.clientX, event.clientY)
 }
 
@@ -4163,6 +4165,8 @@ const handleEmptyAreaRightClick = (event: MouseEvent) => {
   event.stopPropagation()
 
   currentRightClickAsset.value = null // 清空当前选中的资产
+  // 服务器库在空白处 / 文件夹上没有可做的事：不弹一个空菜单
+  if (currentContextMenuItems.value.length === 0) return
   contextMenuRef.value?.show(event.clientX, event.clientY)
 }
 

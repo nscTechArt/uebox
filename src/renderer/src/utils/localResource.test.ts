@@ -32,13 +32,14 @@ describe('toLocalResourceUrl', () => {
     expect(toLocalResourceUrl('/home/me/cover.png')).toBe('local-resource://home/me/cover.png')
   })
 
-  it('http/https/data/blob/uebox-asset 原样返回', () => {
+  it('http/https/data/blob/uebox-asset/uebox-preview 原样返回', () => {
     const passthrough = [
       'https://cdn.example.com/a.png',
       'http://127.0.0.1:8766/a.png',
       'data:image/png;base64,AAAA',
       'blob:file:///abc',
       'uebox-asset://file?path=a',
+      'uebox-preview://thumb/ab/s256?l=k&u=x',
       'local-resource://C:/a.png'
     ]
     for (const url of passthrough) {

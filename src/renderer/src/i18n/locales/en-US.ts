@@ -1554,7 +1554,9 @@ export default {
         done: 'Done',
         failed: 'Failed'
       },
-      failedDetail: 'Failed: {reason}'
+      failedDetail: 'Failed: {reason}',
+      downloadDone: 'Copied to the target: {count} file(s)',
+      importDone: 'Committed to the server library: {count} file(s)'
     },
     errors: {
       unknown: 'The operation did not finish.',

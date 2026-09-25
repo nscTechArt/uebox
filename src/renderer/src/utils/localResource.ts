@@ -9,7 +9,7 @@
  */
 
 /** 已经能直接加载的协议，原样返回 */
-const PASSTHROUGH_SCHEME = /^(local-resource|uebox-asset|https?|data|blob):/i
+const PASSTHROUGH_SCHEME = /^(local-resource|uebox-asset|uebox-preview|https?|data|blob):/i
 
 /**
  * 把路径转换为正确编码的 file:// URL。

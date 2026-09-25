@@ -464,6 +464,7 @@
             v-model:show-dependencies="showDependencies"
             v-model:engine-versions="filterForm.engineVersions"
             v-model:keyword="filterForm.keyword"
+            :folder-key="selectedKeys[0]"
             :expanded="filterPanelExpanded"
             @apply-filter="handleFilter"
             @reset-filter="handleResetFilter"
@@ -1076,6 +1077,19 @@ const baiduyunStore = useBaiduyunStore()
 const webdavStore = useWebdavStore()
 const assetViewStore = useAssetViewStore()
 const selectionStore = useAssetSelectionStore()
+/**
+ * 当前数据源（本地库 / 服务器库）和它能做什么。界面按能力显示、禁用（并给一句原因），
+ * 不判断库的种类。服务器库不走主进程的切换保管库，vaultStore.currentVault 仍是本地库。
+ */
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+/** 树的标签页状态按数据源分开存：本地库和服务器库的文件夹键互不相认 */
+const treeStateKey = (tabId: string): string =>
+  libraryStore.source.kind === 'local' ? tabId : `${tabId}@${libraryStore.source.id}`
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
 const route = useRoute()
 const isAssetPageActive = useAssetSideButtons(
   (event) => handleSideMouseButtons(event),
@@ -1135,7 +1149,9 @@ const handleServerSignedIn = async (): Promise<void> => {
   await libraryStore.loadServerLibraries()
   if (libraryStore.activeServerKey) await libraryStore.activateServer(libraryStore.activeServerKey)
   await refreshFolderTreePreservingExpansion()
-  await loadCurrentFolderAssets()
+  // 搜索框里还有词：登录失效前那次搜索没搜成，重新搜一遍，而不是退回浏览
+  if (filterForm.keyword?.trim()) await performRecursiveSearch(filterForm.keyword)
+  else await loadCurrentFolderAssets()
 }
 
 /**
@@ -1188,19 +1204,6 @@ const handleBatchThumbnailDone = async (): Promise<void> => {
 // 获取当前保管库信息
 const vaultStore = useVaultStore()
 const currentVault = computed(() => vaultStore.currentVault)
-/**
- * 当前数据源（本地库 / 服务器库）和它能做什么。界面按能力显示、禁用（并给一句原因），
- * 不判断库的种类。服务器库不走主进程的切换保管库，vaultStore.currentVault 仍是本地库。
- */
-const libraryStore = useAssetLibraryStore()
-const libraryCaps = computed(() => libraryStore.capabilities)
-/** 树的标签页状态按数据源分开存：本地库和服务器库的文件夹键互不相认 */
-const treeStateKey = (tabId: string): string =>
-  libraryStore.source.kind === 'local' ? tabId : `${tabId}@${libraryStore.source.id}`
-const capabilityReason = (name: string): string => {
-  const key = libraryCaps.value.reasons[name]
-  return key ? t(key) : ''
-}
 const isHttpNetworkVault = computed(
   () => libraryCaps.value.vaultFeatures && isHttpNetworkVaultKind(currentVault.value)
 )
@@ -3419,6 +3422,15 @@ const filterForm = reactive<{
   favoriteStatus: 'all',
   includeSubfolders: false // 默认不搜索子文件夹，提升首屏加载性能
 })
+
+/** 换了数据源：新库不支持的筛选（例如本地库没有引擎分面）清掉，免得看不见的条件还在起作用 */
+watch(
+  () => libraryStore.source,
+  () => {
+    if (!libraryCaps.value.filters.engine && filterForm.engineVersions.length > 0)
+      filterForm.engineVersions = []
+  }
+)
 
 /**
  * 写收藏时用的用户 id。
@@ -8041,6 +8053,14 @@ const handleUploadProjectArchive = async (): Promise<void> => {
             &.active {
               background: var(--color-bg-selected);
               color: var(--color-text-selected);
+            }
+
+            // 当前库做不到的动作（例如服务器库的标签管理）：看得出点不了，原因在悬浮提示里
+            &:disabled,
+            &:disabled:hover {
+              background: transparent;
+              color: var(--color-text-disabled);
+              cursor: not-allowed;
             }
 
             svg {

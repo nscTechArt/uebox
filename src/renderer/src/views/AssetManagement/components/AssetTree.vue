@@ -1840,6 +1840,12 @@ onMounted(() => {
           }
         }
 
+        // 标签和计数各有自己的文字色，得分别压成禁用色才看得出点不了
+        &.disabled .shortcut-label,
+        &.disabled .shortcut-badge {
+          color: var(--color-text-disabled);
+        }
+
         &.selected {
           background: var(--color-bg-selected);
           color: var(--color-text-primary);
@@ -1956,14 +1962,6 @@ onMounted(() => {
         }
       }
     }
-  }
-
-  .shortcut-item.disabled {
-    cursor: not-allowed;
-  }
-
-  .shortcut-item.disabled .shortcut-label {
-    color: var(--color-text-disabled);
   }
 
   // 资产文件夹标题样式

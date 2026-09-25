@@ -55,11 +55,14 @@
               <div class="card-header">
                 <div
                   class="icon-wrapper"
-                  :class="{ active: formData.vaultType === VaultType.REFERENCE }"
+                  :class="{ active: !serverMode && formData.vaultType === VaultType.REFERENCE }"
                 >
                   <PhLink />
                 </div>
-                <PhCheck v-if="formData.vaultType === VaultType.REFERENCE" class="check-icon" />
+                <PhCheck
+                  v-if="!serverMode && formData.vaultType === VaultType.REFERENCE"
+                  class="check-icon"
+                />
               </div>
               <div class="card-body">
                 <h3 class="card-title">{{ $t('createVaultModal.mode.reference.title') }}</h3>
@@ -76,11 +79,14 @@
               <div class="card-header">
                 <div
                   class="icon-wrapper"
-                  :class="{ active: formData.vaultType === VaultType.BACKUP }"
+                  :class="{ active: !serverMode && formData.vaultType === VaultType.BACKUP }"
                 >
                   <PhCopy />
                 </div>
-                <PhCheck v-if="formData.vaultType === VaultType.BACKUP" class="check-icon" />
+                <PhCheck
+                  v-if="!serverMode && formData.vaultType === VaultType.BACKUP"
+                  class="check-icon"
+                />
               </div>
               <div class="card-body">
                 <h3 class="card-title">{{ $t('createVaultModal.mode.backup.title') }}</h3>
@@ -100,12 +106,15 @@
               <div class="card-header">
                 <div
                   class="icon-wrapper network"
-                  :class="{ active: formData.vaultType === VaultType.NETWORK }"
+                  :class="{ active: !serverMode && formData.vaultType === VaultType.NETWORK }"
                 >
                   <PhHardDrives />
                 </div>
 
-                <PhCheck v-if="formData.vaultType === VaultType.NETWORK" class="check-icon" />
+                <PhCheck
+                  v-if="!serverMode && formData.vaultType === VaultType.NETWORK"
+                  class="check-icon"
+                />
               </div>
               <div class="card-body">
                 <h3 class="card-title">{{ $t('createVaultModal.mode.network.title') }}</h3>

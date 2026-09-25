@@ -659,6 +659,8 @@ const props = defineProps<{
   tagMatchMode?: 'any' | 'all'
   hasNoTags?: boolean
   keyword: string
+  /** 当前文件夹：服务器库的引擎分面按它和搜索词统计 */
+  folderKey?: string
   favoriteStatus?: string | undefined
   /** 显不显示导入时自动带进来的依赖资产。true（默认）= 都显示 */
   showDependencies?: boolean
@@ -715,7 +717,11 @@ async function loadEngineOptions(): Promise<void> {
   const facets = getActiveLibrarySource().facets
   if (!facets) return
   try {
-    engineOptions.value = await facets.engines({ includeSubfolders: true })
+    engineOptions.value = await facets.engines({
+      folderKey: props.folderKey,
+      includeSubfolders: true,
+      keyword: props.keyword?.trim() || undefined
+    })
   } catch {
     engineOptions.value = []
   }
@@ -1379,6 +1385,14 @@ const toggleAssetType = (classNameCn: string): void => {
   &.active {
     background: var(--color-bg-selected);
     color: var(--color-text-selected);
+  }
+
+  // 当前库做不到的筛选：看得出点不了，原因在悬浮提示里
+  &:disabled,
+  &:disabled:hover {
+    background: transparent;
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
   }
 
   .dropdown-arrow {
