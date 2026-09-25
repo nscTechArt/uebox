@@ -51,6 +51,10 @@ database/
 tools/ffmpeg.exe
 tools/FBX2glTF.exe
 
+# 官方 lore.exe（38 MB）不进 git：只提交 resources/lore/lore-cli.json 里的版本和 SHA-256，
+# 二进制由 `node scripts/fetch-lore-cli.mjs` 核对后放进 resources/lore/<平台>/
+resources/lore/*/
+
 .tmp
 tmp/
 

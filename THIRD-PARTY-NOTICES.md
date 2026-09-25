@@ -57,6 +57,17 @@ LGPL-3.0-or-later。完整条款见 [`LGPL-3.0.txt`](licenses/LGPL-3.0.txt) 及�
 并保留上游版权声明；不能仅凭本文件就认定源码交付已完成。
 如需取得本发行版对应的源码材料，请联系 [admin@uebox.ai](mailto:admin@uebox.ai)。
 
+## Lore CLI (lore.exe) — MIT
+
+服务端资产库的导入（提交、推送）和下载（稀疏取文件）由 Epic Games 的官方 Lore 命令行完成，
+字节只走 Lore 自己的 QUIC/TLS 通道。随包提供未修改的官方 Windows 二进制 `lore 0.9.0+783`
+（release [v0.9.0](https://github.com/EpicGames/lore/releases/tag/v0.9.0)，
+commit `3c8f346435aab021dd5da3a048ada7c8fb647385`），安装后位于 `resources/lore/win32-x64/lore.exe`。
+版本与 SHA-256 记录在 [`resources/lore/lore-cli.json`](resources/lore/lore-cli.json)，
+二进制不进本仓库，由 `scripts/fetch-lore-cli.mjs` 核对哈希后放入。完整许可证见
+[`licenses/Lore-MIT.txt`](licenses/Lore-MIT.txt)（Copyright (c) 2026 Epic Games, Inc.）。
+本体的 Apache-2.0 不替代它。
+
 ## 其他双许可组件
 
 | 组件 | 上游许可选项 | 本项目采用 |
