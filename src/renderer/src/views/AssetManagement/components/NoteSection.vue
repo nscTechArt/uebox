@@ -3,12 +3,18 @@
     <div class="inspector-group-title">{{ $t('assetLib.details.note') }}</div>
 
     <!-- 第一层：一句话备注。纯文本，就地改，图快 -->
-    <div v-if="!isEditing" class="note-content-wrapper" @click="handleNoteClick">
+    <div
+      v-if="!isEditing"
+      class="note-content-wrapper"
+      :class="{ readonly }"
+      :title="readonly ? readonlyReason : undefined"
+      @click="!readonly && handleNoteClick()"
+    >
       <div v-if="!note" class="note-placeholder">
-        {{ $t('assetLib.details.addNotePlaceholder') }}
+        {{ readonly ? readonlyReason || '—' : $t('assetLib.details.addNotePlaceholder') }}
       </div>
       <div v-else class="note-content">{{ note }}</div>
-      <PhPencilSimple class="note-edit-hint" />
+      <PhPencilSimple v-if="!readonly" class="note-edit-hint" />
     </div>
     <div v-else class="note-editor-wrapper">
       <a-textarea
@@ -25,33 +31,35 @@
       <div class="note-editor-hint">{{ $t('assetLib.details.noteEditHint') }}</div>
     </div>
 
-    <!-- 第二层：详细说明。图、视频、表格这些放不进上面那个框的东西 -->
-    <div v-if="richNoteLoading" class="rich-note-loading">
-      <AppSpin size="small" />
-    </div>
-
-    <button v-else-if="richNote" class="rich-note-card" @click="handleOpenRichNote">
-      <img v-if="richNoteCover" class="rich-note-cover" :src="richNoteCover" alt="" />
-      <div v-else class="rich-note-cover placeholder"><PhArticle /></div>
-      <div class="rich-note-text">
-        <div class="rich-note-title">{{ richNote.title }}</div>
-        <div class="rich-note-meta">{{ richNoteMeta }}</div>
+    <!-- 第二层：详细说明。图、视频、表格这些放不进上面那个框的东西（只有本地笔记库有） -->
+    <template v-if="!hideRichNote">
+      <div v-if="richNoteLoading" class="rich-note-loading">
+        <AppSpin size="small" />
       </div>
-      <PhCaretRight class="rich-note-go" />
-    </button>
 
-    <AppButton
-      v-else
-      variant="soft"
-      size="small"
-      block
-      class="rich-note-create"
-      :loading="creatingRichNote"
-      @click="handleCreateRichNote"
-    >
-      <template #icon><PhArticle /></template>
-      {{ $t('assetLib.details.writeDetailedNote') }}
-    </AppButton>
+      <button v-else-if="richNote" class="rich-note-card" @click="handleOpenRichNote">
+        <img v-if="richNoteCover" class="rich-note-cover" :src="richNoteCover" alt="" />
+        <div v-else class="rich-note-cover placeholder"><PhArticle /></div>
+        <div class="rich-note-text">
+          <div class="rich-note-title">{{ richNote.title }}</div>
+          <div class="rich-note-meta">{{ richNoteMeta }}</div>
+        </div>
+        <PhCaretRight class="rich-note-go" />
+      </button>
+
+      <AppButton
+        v-else
+        variant="soft"
+        size="small"
+        block
+        class="rich-note-create"
+        :loading="creatingRichNote"
+        @click="handleCreateRichNote"
+      >
+        <template #icon><PhArticle /></template>
+        {{ $t('assetLib.details.writeDetailedNote') }}
+      </AppButton>
+    </template>
   </div>
 </template>
 
@@ -92,6 +100,12 @@ const props = defineProps<{
    */
   saveNote: (note: string) => Promise<boolean>
   saveNoteId: (noteId: number | null) => Promise<boolean>
+  /** 只读（例如服务器库里只有读权限）：不能就地改 */
+  readonly?: boolean
+  /** 只读时的一句原因 */
+  readonlyReason?: string
+  /** 不显示详细说明（它在本地笔记库里；服务器库没有）。布尔属性缺省为 false，本地库照旧 */
+  hideRichNote?: boolean
 }>()
 
 const { t } = useI18n()

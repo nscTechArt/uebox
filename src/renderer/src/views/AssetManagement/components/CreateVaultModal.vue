@@ -23,8 +23,8 @@
 
       <!-- 表单区域 -->
       <div class="form-content">
-        <!-- 1. 资产库名称 -->
-        <div class="form-group">
+        <!-- 1. 资产库名称（服务器库的名字来自服务端，这一栏不出现） -->
+        <div v-if="!serverMode" class="form-group">
           <label class="form-label">{{ $t('createVaultModal.form.nameLabel') }}</label>
           <div class="input-wrapper">
             <input
@@ -49,7 +49,7 @@
             <!-- 引用模式卡片 -->
             <div
               class="mode-card"
-              :class="{ active: formData.vaultType === VaultType.REFERENCE }"
+              :class="{ active: !serverMode && formData.vaultType === VaultType.REFERENCE }"
               @click="selectVaultType(VaultType.REFERENCE)"
             >
               <div class="card-header">
@@ -70,7 +70,7 @@
             <!-- 拷贝模式卡片 -->
             <div
               class="mode-card"
-              :class="{ active: formData.vaultType === VaultType.BACKUP }"
+              :class="{ active: !serverMode && formData.vaultType === VaultType.BACKUP }"
               @click="selectVaultType(VaultType.BACKUP)"
             >
               <div class="card-header">
@@ -93,7 +93,7 @@
               v-if="enableNetworkVault"
               class="mode-card network-card"
               :class="{
-                active: formData.vaultType === VaultType.NETWORK
+                active: !serverMode && formData.vaultType === VaultType.NETWORK
               }"
               @click="selectVaultType(VaultType.NETWORK)"
             >
@@ -112,11 +112,31 @@
                 <p class="card-desc">{{ $t('createVaultModal.mode.network.desc') }}</p>
               </div>
             </div>
+
+            <!-- 服务器资产库：在线浏览，不在本机建库 -->
+            <div class="mode-card" :class="{ active: serverMode }" @click="serverMode = true">
+              <div class="card-header">
+                <div class="icon-wrapper" :class="{ active: serverMode }">
+                  <PhCloud />
+                </div>
+                <PhCheck v-if="serverMode" class="check-icon" />
+              </div>
+              <div class="card-body">
+                <h3 class="card-title">{{ $t('catalogLibrary.create.title') }}</h3>
+                <p class="card-desc">{{ $t('catalogLibrary.create.desc') }}</p>
+              </div>
+            </div>
           </div>
 
           <!-- 动态提示信息 -->
           <div class="mode-hint">
-            <template v-if="formData.vaultType === VaultType.REFERENCE">
+            <template v-if="serverMode">
+              <div class="hint-info">
+                <PhCloud class="hint-icon" />
+                <span>{{ $t('catalogLibrary.create.hint') }}</span>
+              </div>
+            </template>
+            <template v-else-if="formData.vaultType === VaultType.REFERENCE">
               <div class="hint-warning">
                 <PhWarning class="hint-icon" />
                 <span>{{ $t('createVaultModal.mode.reference.hint') }}</span>
@@ -139,7 +159,10 @@
 
         <!-- 3. 路径选择 (动态展开) -->
         <Transition name="expand">
-          <div v-if="formData.vaultType === VaultType.BACKUP" class="form-group path-group">
+          <div
+            v-if="!serverMode && formData.vaultType === VaultType.BACKUP"
+            class="form-group path-group"
+          >
             <label class="form-label">{{ $t('createVaultModal.path.saveLocationLabel') }}</label>
             <div class="path-selector">
               <div class="path-display" :class="{ 'is-placeholder': !formData.customPath }">
@@ -161,7 +184,10 @@
 
         <!-- 4. 网络模式子选项 -->
         <Transition name="expand">
-          <div v-if="formData.vaultType === VaultType.NETWORK" class="form-group path-group">
+          <div
+            v-if="!serverMode && formData.vaultType === VaultType.NETWORK"
+            class="form-group path-group"
+          >
             <!-- 子模式切换 -->
             <div class="network-sub-tabs">
               <button
@@ -474,8 +500,13 @@
         </Transition>
       </div>
 
+      <!-- 服务器资产库：地址 / 邀请链接 → 证书信任 → 登录 → 选库 -->
+      <div v-if="serverMode" class="form-content server-connect">
+        <ServerLibraryConnectForm @added="handleServerAdded" @close="handleCancel" />
+      </div>
+
       <!-- 底部操作栏 -->
-      <div class="modal-footer">
+      <div v-if="!serverMode" class="modal-footer">
         <button class="btn-cancel" @click="handleCancel">
           {{ $t('createVaultModal.footer.cancelButton') }}
         </button>
@@ -526,6 +557,7 @@ import {
   PhFileText,
   PhFolderOpen,
   PhHardDrives,
+  PhCloud,
   PhLink,
   PhPlus,
   PhTrash,
@@ -541,6 +573,7 @@ import {
   type VaultInfo
 } from '../../../store/modules/vaultStore'
 import NetworkAuthModal from './NetworkAuthModal.vue'
+import ServerLibraryConnectForm from '../catalog/ServerLibraryConnectForm.vue'
 import { isBrowsableAbsolutePath } from '../utils/networkBrowsePath'
 import {
   readStoredNetworkVaultPreference,
@@ -560,6 +593,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:open': [value: boolean]
   created: [vault: VaultInfo]
+  /** 添加了服务器资产库（库键） */
+  serverLibraryAdded: [keys: string[]]
 }>()
 
 const { t } = useI18n()
@@ -759,7 +794,17 @@ const isFormValid = computed(() => {
  * @param type - 资产库类型枚举值
  */
 const selectVaultType = (type: VaultType): void => {
+  serverMode.value = false
   formData.vaultType = type
+}
+
+/** 选中"服务器资产库"卡片：走连接表单，不创建本地保管库 */
+const serverMode = ref(false)
+const handleServerAdded = (keys: string[]): void => {
+  serverMode.value = false
+  emit('serverLibraryAdded', keys)
+  visible.value = false
+  emit('update:open', false)
 }
 
 /**
@@ -2215,5 +2260,9 @@ select.root-select {
     border-color: var(--color-danger-border);
     color: var(--color-danger-text);
   }
+}
+
+.server-connect {
+  padding-top: 0;
 }
 </style>

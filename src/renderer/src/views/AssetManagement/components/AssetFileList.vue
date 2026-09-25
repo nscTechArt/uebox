@@ -685,6 +685,13 @@
       :image="recropImage"
       @confirm="onRecropConfirm"
     />
+    <CatalogDownloadModal
+      v-if="libraryStore.activeServerKey"
+      :open="serverDownloadOpen"
+      :library-key="libraryStore.activeServerKey"
+      :items="serverDownloadItems"
+      @close="serverDownloadOpen = false"
+    />
   </div>
 </template>
 
@@ -754,6 +761,9 @@ import assetDataAPI from '@renderer/api/assetData'
 import { startNativeFileDrag } from '@renderer/api/nativeFileDrag'
 import { handleExternalAssetDrag } from '../utils/externalAssetDrag'
 import { useImportTasksStore } from '@renderer/store/modules/importTasks'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import CatalogDownloadModal from '../catalog/CatalogDownloadModal.vue'
+import type { CatalogAssetSummary } from '@core/shared/catalogLibrary'
 import { assetFolderAPI } from '@renderer/api/assetFolder'
 import assetTagAPI from '@renderer/api/assetTag'
 import folderTagAPI from '@renderer/api/folderTag'
@@ -1132,6 +1142,73 @@ const tabsStore = useTabsStore()
 const selectionStore = useAssetSelectionStore()
 const { t, locale } = useI18n()
 
+// ---- 当前数据源能做什么（服务器库时，本地库的改动类操作不出现）
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
+const checkFavorites = (
+  ids: string[],
+  userId: number,
+  vaultId?: string
+): Promise<Record<string, boolean>> =>
+  libraryCaps.value.canFavorite
+    ? favoriteAPI.batchCheckFavorites(ids, userId, vaultId)
+    : Promise.resolve({})
+const checkFolderFavorite = (id: string, userId: number, vaultId?: string): Promise<boolean> =>
+  libraryCaps.value.canFavorite
+    ? favoriteAPI.isFolderFavorite(id, userId, vaultId)
+    : Promise.resolve(false)
+
+/** 服务器库的"导入到工程"：选中的（或右键的那一个）资产交给下载对话框（lore 取文件再复制进工程） */
+const serverDownloadOpen = ref(false)
+const serverDownloadItems = ref<CatalogAssetSummary[]>([])
+/** 服务器库的行（ServerLibrarySource.mapAsset）里给下载用的那几个字段 */
+interface ServerRow {
+  type?: string
+  assetKey?: string
+  id?: string
+  catalogId?: number
+  catalogPath?: string
+  catalogDirId?: number
+  catalogRepository?: string
+  name?: string
+  assetName?: string
+  ext?: string
+  className?: string | null
+  engineVersion?: string | null
+  fileSize?: number
+}
+const toCatalogItem = (row: ServerRow): CatalogAssetSummary => ({
+  id: Number(row.catalogId),
+  path: String(row.catalogPath ?? ''),
+  name: String(row.name ?? row.assetName ?? ''),
+  dirId: Number(row.catalogDirId ?? 0),
+  repository: String(row.catalogRepository ?? ''),
+  ext: String(row.ext ?? ''),
+  class: row.className ?? null,
+  engine: row.engineVersion ?? null,
+  size: Number(row.fileSize ?? 0),
+  modifiedMs: 0,
+  tags: []
+})
+const openServerDownload = (): void => {
+  const clicked = currentRightClickAsset.value as ServerRow | null
+  const rows = (selectedItems.value as ServerRow[]).filter(
+    (item) => item.type !== 'folder' && item.catalogId !== undefined
+  )
+  const chosen =
+    clicked && rows.some((row) => getItemId(row) === getItemId(clicked))
+      ? rows
+      : clicked
+        ? [clicked]
+        : rows
+  serverDownloadItems.value = chosen.filter((row) => row.catalogId !== undefined).map(toCatalogItem)
+  if (serverDownloadItems.value.length > 0) serverDownloadOpen.value = true
+}
+
 /**
  * 判断当前是否处于回收站（最近删除）视图
  */
@@ -1182,6 +1259,11 @@ const handlePluginIconError = (src?: string): void => {
 const handleThumbImgError = (event: Event, file: any) => {
   const el = event.target as HTMLImageElement | HTMLVideoElement
   if (!el || !el.src) return
+  // 服务器库的缩略图取不到（没有图、签名过期、离线）：记下来，改画图标，不再重试
+  if (el.src.startsWith('uebox-preview:')) {
+    failedListThumbnails.value = new Set(failedListThumbnails.value).add(el.src)
+    return
+  }
   if (
     el.src.includes('listThumbnail=400') &&
     (!el.src.includes('_thumb') ||
@@ -2457,6 +2539,8 @@ watch(
   () => props.files,
   async (newFiles) => {
     if (!newFiles || newFiles.length === 0) return
+    // 服务器库的行在本机没有文件，不做视频封面处理
+    if (!libraryCaps.value.canEditStructure) return
 
     const folderIds = newFiles
       .filter((file: any) => file.type === 'folder')
@@ -2470,7 +2554,7 @@ watch(
         const statusMap: Record<string, boolean> = {}
         for (const folderId of folderIds) {
           try {
-            const isFav = await favoriteAPI.isFolderFavorite(folderId, userId, vaultId)
+            const isFav = await checkFolderFavorite(folderId, userId, vaultId)
             statusMap[folderId] = isFav
           } catch {
             statusMap[folderId] = false
@@ -2561,6 +2645,8 @@ const getThumbnailUrl = (file: Parameters<typeof getThumbnailSourceUrl>[0]): str
 
 const getThumbnailSourceUrl = (file: Record<string, string | undefined>): string | undefined => {
   if (file?.type === 'folder') return undefined
+  // 数据源直接给了缩略图地址（服务器库：uebox-preview://，主进程按内容哈希缓存）
+  if (file?.thumbnailUrl) return file.thumbnailUrl
 
   const fileName = file?.assetName || ''
   const fileNameLower = fileName.toLowerCase()
@@ -3044,7 +3130,7 @@ const onContainerPointerDown = (event: PointerEvent) => {
 
   // Only start drag-prep when the pointer was already on a selected item
   // before the current pointerdown updates selection state.
-  maybeDrag.value = wasOnSelectedItem && !event.altKey
+  maybeDrag.value = wasOnSelectedItem && !event.altKey && libraryCaps.value.canEditStructure
   if (maybeDrag.value) {
     // 捕获指针，确保移动事件持续触发
     ;(event.target as HTMLElement).setPointerCapture(event.pointerId)
@@ -3464,6 +3550,29 @@ const emptyAreaMenuItems = computed<MenuItem[]>(() => [
 // 当前右键菜单项
 // 当前右键菜单项
 const currentContextMenuItems = computed(() => {
+  // 不能改结构的库（服务器库）：只留"导入到工程"（经 lore 下载）和"跳转到所在目录"
+  if (!libraryCaps.value.canEditStructure) {
+    const clicked = currentRightClickAsset.value as { type?: string } | null
+    if (!clicked || clicked.type === 'folder') {
+      return []
+    }
+    return [
+      {
+        key: 'import-to-project',
+        // 不可用时把原因写在菜单项里（菜单项没有悬浮提示）
+        label: libraryCaps.value.canSendToProject
+          ? t('assetLib.contextMenu.importToProject')
+          : `${t('assetLib.contextMenu.importToProject')}（${capabilityReason('canSendToProject')}）`,
+        icon: PhDownloadSimple,
+        disabled: !libraryCaps.value.canSendToProject
+      },
+      {
+        key: 'locate-in-folder',
+        label: t('assetLib.contextMenu.locateInFolder'),
+        icon: PhFolderOpen
+      }
+    ]
+  }
   // 回收站视图：显示专用菜单（恢复、彻底删除）
   if (isTrashView.value) {
     if (!currentRightClickAsset.value) {
@@ -4209,6 +4318,10 @@ const handleContextMenuClick = async (key: string, _item: MenuItem) => {
       }
       break
     case 'import-to-project':
+      if (!libraryCaps.value.canEditStructure) {
+        openServerDownload()
+        break
+      }
       // 检查是否有多个选中项，且右键点击的文件在选中范围内
       if (currentRightClickAsset.value) {
         const clickedId = getItemId(currentRightClickAsset.value)
@@ -5719,7 +5832,7 @@ onMounted(async () => {
       try {
         const userId = 1
         const vaultId = currentVault.value?.id
-        const statusMap = await favoriteAPI.batchCheckFavorites(assetIds, userId, vaultId)
+        const statusMap = await checkFavorites(assetIds, userId, vaultId)
         favoriteStatusMap.value = statusMap || {}
       } catch {
         favoriteStatusMap.value = {}
@@ -5741,7 +5854,7 @@ onMounted(async () => {
         const statusMap: Record<string, boolean> = {}
         for (const folderId of folderIds) {
           try {
-            const isFav = await favoriteAPI.isFolderFavorite(folderId, userId, vaultId)
+            const isFav = await checkFolderFavorite(folderId, userId, vaultId)
             statusMap[folderId] = isFav
           } catch {
             statusMap[folderId] = false
@@ -5904,7 +6017,7 @@ watch(
         try {
           const userId = 1
           const vaultId = currentVault.value?.id
-          const statusMap = await favoriteAPI.batchCheckFavorites(assetIds, userId, vaultId)
+          const statusMap = await checkFavorites(assetIds, userId, vaultId)
           favoriteStatusMap.value = statusMap || {}
         } catch {
           favoriteStatusMap.value = {}
@@ -6330,6 +6443,11 @@ async function handleWebdavDrop(event: DragEvent): Promise<void> {
 }
 
 function handleAssetDragStart(event: DragEvent, file: AssetDataRow | FolderItem): void {
+  if (!libraryCaps.value.canEditStructure) {
+    event.preventDefault()
+    if (event.altKey && !libraryCaps.value.nativeDrag) message.info(capabilityReason('nativeDrag'))
+    return
+  }
   isExternalAssetDrag = handleExternalAssetDrag(
     event,
     () => {

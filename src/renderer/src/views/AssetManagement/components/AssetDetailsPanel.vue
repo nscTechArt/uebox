@@ -52,7 +52,7 @@
             ></video>
             <img v-else :src="previewUrl" :alt="$t('assetLib.details.previewImage')" />
             <!-- 悬停时显示操作图标 -->
-            <div v-if="showEditIcon" class="edit-icon-overlay">
+            <div v-if="showEditIcon && libraryCaps.canEditStructure" class="edit-icon-overlay">
               <PhVideoCamera
                 class="record-icon"
                 :title="$t('assetDetailsPanel.preview.recordCoverTitle')"
@@ -118,7 +118,7 @@
             </div>
 
             <!-- 悬停时显示编辑图标（允许为任何文件添加封面） -->
-            <div v-if="showEditIcon" class="edit-icon-overlay">
+            <div v-if="showEditIcon && libraryCaps.canEditStructure" class="edit-icon-overlay">
               <PhVideoCamera
                 class="record-icon"
                 :title="$t('assetDetailsPanel.preview.recordCoverTitle')"
@@ -372,7 +372,7 @@
             v-for="tag in currentTags"
             :key="tag.id"
             size="medium"
-            removable
+            :removable="libraryCaps.tagModel !== 'none'"
             :title="tag.name"
             :remove-label="$t('common.remove')"
             @remove="removeTag(tag.id)"
@@ -380,6 +380,7 @@
             {{ tag.name }}
           </AppTag>
           <AppTag
+            v-if="libraryCaps.tagModel !== 'none'"
             size="medium"
             variant="dashed"
             interactive
@@ -389,6 +390,17 @@
           >
             {{ $t('assetLib.details.addTag') }}
           </AppTag>
+          <span v-else class="capability-reason">{{ capabilityReason('tagModel') }}</span>
+          <!-- 服务器库的标签按名字存：直接输入名字 -->
+          <div v-if="nameTagInputOpen" class="name-tag-input">
+            <a-input
+              v-model:value="nameTagDraft"
+              size="small"
+              :placeholder="$t('catalogLibrary.detail.addTagPlaceholder')"
+              @press-enter="confirmNameTag"
+              @blur="confirmNameTag"
+            />
+          </div>
 
           <!-- 标签选择模态框 -->
           <TagSelectorModal
@@ -438,6 +450,9 @@
         :default-title="asset?.assetName || ''"
         :save-note="handleSaveAssetNote"
         :save-note-id="handleSaveAssetNoteId"
+        :readonly="!libraryCaps.canEditNotes"
+        :readonly-reason="capabilityReason('canEditNotes')"
+        :hide-rich-note="!libraryCaps.richNotes"
       />
 
       <!-- 导入依赖 -->
@@ -498,6 +513,7 @@
           </button>
 
           <AppButton
+            v-if="libraryCaps.dependencyGraph"
             variant="soft"
             size="small"
             block
@@ -550,7 +566,7 @@
             ></video>
             <img v-else :src="folderPreviewUrl" :alt="folder.name" />
             <!-- 悬停时显示操作图标 -->
-            <div v-if="showEditIcon" class="edit-icon-overlay">
+            <div v-if="showEditIcon && libraryCaps.canEditStructure" class="edit-icon-overlay">
               <PhVideoCamera
                 class="record-icon"
                 :title="$t('assetDetailsPanel.preview.recordCoverTitle')"
@@ -576,7 +592,7 @@
               <PhFolder weight="fill" class="folder-icon-large-svg" />
             </div>
             <!-- 悬停时显示编辑图标 -->
-            <div v-if="showEditIcon" class="edit-icon-overlay">
+            <div v-if="showEditIcon && libraryCaps.canEditStructure" class="edit-icon-overlay">
               <PhVideoCamera
                 class="record-icon"
                 :title="$t('assetDetailsPanel.preview.recordCoverTitle')"
@@ -620,8 +636,11 @@
         </div>
       </div>
 
-      <!-- 文件夹标签容器 -->
-      <div class="inspector-group tag-container">
+      <!-- 文件夹标签容器（服务器库的文件夹只存颜色，没有标签和备注） -->
+      <p v-if="libraryCaps.tagModel !== 'registry'" class="capability-reason folder-reason">
+        {{ $t('catalogLibrary.reasons.folderAnnotations') }}
+      </p>
+      <div v-else class="inspector-group tag-container">
         <div class="inspector-group-title">{{ $t('assetLib.details.tags') }}</div>
         <div class="tag-list">
           <!-- 显示当前文件夹的标签列表 -->
@@ -657,6 +676,7 @@
       </div>
 
       <NoteSection
+        v-if="libraryCaps.tagModel === 'registry'"
         :note="folderNoteContent"
         :note-id="folderNoteId"
         :default-title="folder?.name || ''"
@@ -787,6 +807,8 @@ import { useWebdavStore } from '@renderer/store/modules/webdav'
 import { useAssetViewStore } from '@renderer/store/modules/assetViewStore'
 import { ensureFFmpeg } from '@renderer/utils/ffmpegGuard'
 import { resolveErrorText } from '../utils/assetVaultHelpers'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import { getActiveLibrarySource } from '../data/activeLibrarySource'
 
 const props = defineProps<{
   visible?: boolean
@@ -1340,7 +1362,7 @@ const loadImportStatus = async (assetKey: string | undefined): Promise<void> => 
 
   importsLoading.value = true
   try {
-    const summary = await assetDataAPI.getImportStatus(assetKey)
+    const summary = await getActiveLibrarySource().assets.getImportStatus(assetKey)
     // 用户可能已经点到别的资产上了，迟到的结果直接丢掉
     if (requestId !== importStatusRequestId) return
     importStatus.value = summary
@@ -1365,7 +1387,7 @@ watch(
 const handleImportClick = async (item: (typeof importItems.value)[number]): Promise<void> => {
   if (item.status !== 'in-vault' || !item.assetKey) return
   try {
-    const target = await assetDataAPI.getById(item.assetKey)
+    const target = await getActiveLibrarySource().assets.getById(item.assetKey)
     if (!target) {
       message.warning(t('assetLib.details.dependencyNotFound'))
       return
@@ -1501,6 +1523,37 @@ const fileTypeIcon = computed(() => {
 // 优先级：customPoster > imgLocalPath > 图片文件路径 (originPath/filePath) > thumbnail
 const vaultStore = useVaultStore()
 const currentVault = computed(() => vaultStore.currentVault)
+
+// ---- 当前数据源能做什么（服务器库：标签和备注按名字存在服务端，没有封面编辑和依赖图）
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
+const nameTagInputOpen = ref(false)
+const nameTagDraft = ref('')
+
+/** 按名字的标签（服务器库）：写到服务端，再按回来的结果显示 */
+const editNameTags = async (op: { addTags?: string[]; removeTags?: string[] }): Promise<void> => {
+  const assetKey = props.asset?.assetKey
+  const annotations = getActiveLibrarySource().annotations
+  if (!assetKey || !annotations) return
+  const result = await annotations.edit({ assetKey }, op)
+  if (!result.ok) {
+    message.error(t('catalogLibrary.detail.editFailed', { reason: result.error ?? '' }))
+    return
+  }
+  await loadAssetTags(String(assetKey))
+}
+
+const confirmNameTag = async (): Promise<void> => {
+  const tag = nameTagDraft.value.trim()
+  nameTagInputOpen.value = false
+  nameTagDraft.value = ''
+  if (!tag || currentTags.value.some((existing) => existing.name === tag)) return
+  await editNameTags({ addTags: [tag] })
+}
 // 获取缩略图基础路径：网络库使用 networkPath，其他类型使用本地 path
 const getThumbnailBasePath = (): string | undefined => {
   const vault = currentVault.value
@@ -1515,6 +1568,9 @@ const getThumbnailBasePath = (): string | undefined => {
 const previewUrl = computed(() => {
   const displayAsset = props.asset
   if (!displayAsset) return undefined
+  // 数据源直接给了地址（服务器库：uebox-preview://）
+  const readyUrl = (displayAsset as { thumbnailUrl?: string | null }).thumbnailUrl
+  if (readyUrl) return readyUrl
 
   const isNetworkVault = currentVault.value?.vaultType === VaultType.NETWORK
 
@@ -2112,6 +2168,19 @@ let noteRequestId = 0
 const loadAssetTags = async (assetKey: string) => {
   if (props.asset?.assetKey !== assetKey) return
   const requestId = ++tagsRequestId
+  const annotations = getActiveLibrarySource().annotations
+  if (libraryCaps.value.tagModel !== 'registry' && annotations) {
+    try {
+      const { tags } = await annotations.get({ assetKey })
+      if (requestId !== tagsRequestId) return
+      selectedTagIds.value = []
+      // 名字标签没有 id：用负数占位，删除时按名字找回
+      currentTags.value = tags.map((name, index) => ({ id: -(index + 1), name }))
+    } catch {
+      if (requestId === tagsRequestId) currentTags.value = []
+    }
+    return
+  }
   try {
     const resp = await (window as any).api.database.assetTag.getTagIdsByAssetKey(assetKey)
     if (requestId !== tagsRequestId) return
@@ -2147,6 +2216,18 @@ const loadAssetTags = async (assetKey: string) => {
 const loadAssetNote = async (assetKey: string) => {
   if (props.asset?.assetKey !== assetKey) return
   const requestId = ++noteRequestId
+  const annotations = getActiveLibrarySource().annotations
+  if (libraryCaps.value.tagModel !== 'registry' && annotations) {
+    try {
+      const { note } = await annotations.get({ assetKey })
+      if (requestId !== noteRequestId) return
+      noteContent.value = note
+      assetNoteId.value = null
+    } catch {
+      if (requestId === noteRequestId) noteContent.value = ''
+    }
+    return
+  }
   try {
     const resp = await (window as any).api.database.assetData.getById(assetKey)
     if (requestId !== noteRequestId) return
@@ -2399,7 +2480,15 @@ const updateFolderFields = async (updates: Record<string, unknown>): Promise<boo
 
 const handleSaveAssetNote = (note: string): Promise<boolean> =>
   persistNoteField(
-    () => updateAssetFields({ note }),
+    async () => {
+      const annotations = getActiveLibrarySource().annotations
+      const assetKey = props.asset?.assetKey
+      if (libraryCaps.value.tagModel !== 'registry' && annotations && assetKey) {
+        const result = await annotations.edit({ assetKey }, { note })
+        return result.ok
+      }
+      return await updateAssetFields({ note })
+    },
     () => {
       noteContent.value = note
     }
@@ -2554,6 +2643,10 @@ watch(
 
 // 弹窗确认：设置资产的标签集合
 const handleOpenAssetTagModal = async (): Promise<void> => {
+  if (libraryCaps.value.tagModel === 'names') {
+    nameTagInputOpen.value = true
+    return
+  }
   try {
     tagModalOpen.value = true
   } catch (error) {
@@ -2586,6 +2679,11 @@ const handleTagSelectionConfirm = async (tagIds: number[]) => {
 const removeTag = async (tagId: number) => {
   const assetKey = (props.asset as any)?.assetKey
   if (!assetKey) return
+  if (libraryCaps.value.tagModel === 'names') {
+    const name = currentTags.value.find((tag) => tag.id === tagId)?.name
+    if (name) await editNameTags({ removeTags: [name] })
+    return
+  }
   try {
     const res = await (window as any).api.database.assetTag.remove(assetKey, tagId)
     if (res?.success) {
@@ -3795,5 +3893,19 @@ const handleOpenDependencyGraph = () => {
       color: var(--color-text-secondary);
     }
   }
+}
+
+.capability-reason {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.folder-reason {
+  margin: var(--space-2) 0;
+}
+
+.name-tag-input {
+  width: 100%;
+  margin-top: var(--space-1);
 }
 </style>

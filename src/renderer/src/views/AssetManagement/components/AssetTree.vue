@@ -21,8 +21,13 @@
 
         <div
           class="shortcut-item"
-          :class="{ selected: selectedShortcut === 'favorites' }"
-          @click="handleShortcutClick('favorites')"
+          :class="{
+            selected: selectedShortcut === 'favorites',
+            disabled: !libraryCaps.canFavorite
+          }"
+          :title="libraryCaps.canFavorite ? undefined : capabilityReason('canFavorite')"
+          :aria-disabled="!libraryCaps.canFavorite"
+          @click="libraryCaps.canFavorite && handleShortcutClick('favorites')"
         >
           <span class="shortcut-label">{{ t('assetLib.shortcuts.favorites') }}</span>
           <span class="shortcut-badge">{{ favoriteCount }}</span>
@@ -36,8 +41,13 @@
         <div
           v-if="supportsDeletedShortcut"
           class="shortcut-item"
-          :class="{ selected: selectedShortcut === 'recent' || selectedShortcut === 'deleted' }"
-          @click="handleShortcutClick('recent')"
+          :class="{
+            selected: selectedShortcut === 'recent' || selectedShortcut === 'deleted',
+            disabled: !libraryCaps.hasTrash
+          }"
+          :title="libraryCaps.hasTrash ? undefined : capabilityReason('hasTrash')"
+          :aria-disabled="!libraryCaps.hasTrash"
+          @click="libraryCaps.hasTrash && handleShortcutClick('recent')"
         >
           <span class="shortcut-label">{{ t('assetLib.shortcuts.recent') }}</span>
         </div>
@@ -77,7 +87,13 @@
       <div class="folder-search">
         <a-input
           v-model:value="searchQuery"
-          :placeholder="t('assetLib.folder.searchPlaceholder')"
+          :placeholder="
+            libraryCaps.folderSearch
+              ? t('assetLib.folder.searchPlaceholder')
+              : capabilityReason('folderSearch')
+          "
+          :disabled="!libraryCaps.folderSearch"
+          :title="libraryCaps.folderSearch ? undefined : capabilityReason('folderSearch')"
           allow-clear
           size="small"
         >
@@ -180,6 +196,14 @@
       v-model:open="importProjectModalVisible"
       :source="importProjectSource"
     />
+    <!-- 服务器库：同一个"导入到工程"菜单项，经 lore 取文件再复制进工程 -->
+    <CatalogDownloadModal
+      v-if="libraryStore.activeServerKey"
+      :open="serverDownloadOpen"
+      :library-key="libraryStore.activeServerKey"
+      :items="serverDownloadItems"
+      @close="serverDownloadOpen = false"
+    />
 
     <!-- 添加文件夹对话框 -->
     <AppModal
@@ -256,6 +280,10 @@ import {
 import TagSelectorModal from '@renderer/components/TagSelector/TagSelectorModal.vue'
 import ColorPickerModal from './modals/ColorPickerModal.vue'
 import ImportToProjectModal from './modals/ImportToProjectModal.vue'
+import CatalogDownloadModal from '../catalog/CatalogDownloadModal.vue'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import { getActiveLibrarySource } from '../data/activeLibrarySource'
+import type { CatalogAssetSummary } from '@core/shared/catalogLibrary'
 
 import icPluginsIcon from '@renderer/assets/icon/ic_plugins.svg'
 import { toLocalResourceUrl } from '@renderer/utils/localResource'
@@ -486,6 +514,48 @@ const favoriteCount = computed(() => favoriteStore.totalCount)
 const selectedShortcut = ref<string | null>(null)
 const selectionStore = useAssetSelectionStore()
 
+// 当前数据源能做什么（服务器库时一些本地库功能在原位禁用，并给一句原因）
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
+const serverDownloadOpen = ref(false)
+const serverDownloadItems = ref<CatalogAssetSummary[]>([])
+
+/** 服务器库的文件夹"下载到工程"：列出其下的资产（有上限），交给下载对话框 */
+const openServerFolderDownload = async (folderKey: string): Promise<void> => {
+  const items: CatalogAssetSummary[] = []
+  for (let offset = 0; offset < 2000; offset += 200) {
+    const rows = (await getActiveLibrarySource().search.assets({
+      folderKey,
+      includeSubfolders: true,
+      limit: 200,
+      offset
+    })) as Array<Record<string, unknown>>
+    for (const row of rows) {
+      items.push({
+        id: Number(row.catalogId),
+        path: String(row.catalogPath ?? ''),
+        name: String(row.name ?? ''),
+        dirId: Number(row.catalogDirId ?? 0),
+        repository: String(row.catalogRepository ?? ''),
+        ext: String(row.ext ?? ''),
+        class: (row.className as string) ?? null,
+        engine: (row.engineVersion as string) ?? null,
+        size: Number(row.fileSize ?? 0),
+        modifiedMs: 0,
+        tags: []
+      })
+    }
+    if (rows.length < 200) break
+  }
+  if (items.length === 0) return
+  serverDownloadItems.value = items
+  serverDownloadOpen.value = true
+}
+
 // 折叠状态
 const shortcutsCollapsed = ref(false)
 const syncCollapsed = ref(false)
@@ -546,6 +616,18 @@ const contextMenuItems = computed<MenuItem[]>(() => {
   // 检查当前右键节点是否为 ALL 目录（ALL 目录不允许重命名和删除）
   const isAllFolder = currentRightClickNode.value === 'ALL'
 
+  // 不能改结构的库（服务器库）：只留"导入到工程"，走服务器下载
+  if (!libraryCaps.value.canEditStructure) {
+    return [
+      {
+        key: 'import-to-project',
+        label: t('assetLib.contextMenu.importToProject'),
+        icon: PhDownloadSimple,
+        disabled: isAllFolder || !currentRightClickNode.value || !libraryCaps.value.canSendToProject
+      }
+    ]
+  }
+
   const items: MenuItem[] = [
     {
       key: 'import-to-project',
@@ -599,7 +681,7 @@ const contextMenuItems = computed<MenuItem[]>(() => {
   //   )
   // }
 
-  if (currentVault.value?.vaultType === 'network') {
+  if (libraryCaps.value.vaultFeatures && currentVault.value?.vaultType === 'network') {
     items.push(
       {
         key: 'divider-ctx-network',
@@ -848,6 +930,10 @@ const handleContextMenuClick = async (key: string, _item: MenuItem) => {
     case 'import-to-project': {
       const folderKey = currentRightClickNode.value
       if (!folderKey || folderKey === 'ALL') break
+      if (!libraryCaps.value.canEditStructure) {
+        await openServerFolderDownload(folderKey)
+        break
+      }
       const node = findNodeByKey(folderKey)
       if (!node) break
       importProjectSource.value = { ...node, id: folderKey, name: node.title }
@@ -1870,6 +1956,14 @@ onMounted(() => {
         }
       }
     }
+  }
+
+  .shortcut-item.disabled {
+    cursor: not-allowed;
+  }
+
+  .shortcut-item.disabled .shortcut-label {
+    color: var(--color-text-disabled);
   }
 
   // 资产文件夹标题样式

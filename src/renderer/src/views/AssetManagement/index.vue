@@ -58,11 +58,7 @@
         </AppAlert>
 
         <AppAlert
-          v-if="
-            currentVault?.vaultType === 'network' &&
-            currentVault?.syncStatus === 'offline' &&
-            !needsNetworkUpgrade
-          "
+          v-if="isNetworkVault && currentVault?.syncStatus === 'offline' && !needsNetworkUpgrade"
           type="warning"
           show-icon
           :closable="false"
@@ -79,6 +75,39 @@
                 @click="handleNetworkAction"
               >
                 {{ t('assetManagement.retryConnect') }}
+              </AppButton>
+            </div>
+          </template>
+        </AppAlert>
+
+        <AppAlert
+          v-if="
+            libraryStore.isServer &&
+            (libraryStore.signedOut || libraryStore.activeStatus?.online === false)
+          "
+          type="warning"
+          show-icon
+          :closable="false"
+          banner
+          class="server-library-banner"
+        >
+          <template #message>
+            <div class="server-library-banner-row">
+              <span>{{
+                libraryStore.signedOut
+                  ? t('catalogLibrary.view.signedOut')
+                  : t('catalogLibrary.view.offlineBanner')
+              }}</span>
+              <AppButton
+                size="small"
+                variant="link"
+                @click="libraryStore.signedOut ? (serverSignInOpen = true) : handleServerRetry()"
+              >
+                {{
+                  libraryStore.signedOut
+                    ? t('catalogLibrary.add.signIn')
+                    : t('assetManagement.retryConnect')
+                }}
               </AppButton>
             </div>
           </template>
@@ -298,13 +327,23 @@
                       {{ t('assetLib.sort.sizeDesc') }}
                     </AppMenuItem>
                     <AppMenuDivider />
-                    <AppMenuItem key="type-asc" item-key="type-asc">
+                    <AppMenuItem
+                      key="type-asc"
+                      item-key="type-asc"
+                      :disabled="!libraryCaps.sortByType"
+                      :title="libraryCaps.sortByType ? undefined : capabilityReason('sortByType')"
+                    >
                       <PhCheck
                         v-if="sortConfig.sortBy === 'assetType' && sortConfig.sortOrder === 'asc'"
                       />
                       {{ t('assetLib.sort.typeAsc') }}
                     </AppMenuItem>
-                    <AppMenuItem key="type-desc" item-key="type-desc">
+                    <AppMenuItem
+                      key="type-desc"
+                      item-key="type-desc"
+                      :disabled="!libraryCaps.sortByType"
+                      :title="libraryCaps.sortByType ? undefined : capabilityReason('sortByType')"
+                    >
                       <PhCheck
                         v-if="sortConfig.sortBy === 'assetType' && sortConfig.sortOrder === 'desc'"
                       />
@@ -333,7 +372,12 @@
               <button
                 class="action-btn"
                 :class="{ active: tagManagementOpen }"
-                :title="t('assetLib.shortcuts.tagManagement')"
+                :title="
+                  libraryCaps.tagManagement
+                    ? t('assetLib.shortcuts.tagManagement')
+                    : capabilityReason('tagManagement')
+                "
+                :disabled="!libraryCaps.tagManagement"
                 @click="tagManagementOpen = true"
               >
                 <PhTag />
@@ -418,6 +462,7 @@
             v-model:has-no-tags="filterForm.hasNoTags"
             v-model:favorite-status="filterForm.favoriteStatus"
             v-model:show-dependencies="showDependencies"
+            v-model:engine-versions="filterForm.engineVersions"
             v-model:keyword="filterForm.keyword"
             :expanded="filterPanelExpanded"
             @apply-filter="handleFilter"
@@ -473,7 +518,11 @@
               </AppButton>
               <!-- 次级动作：统一圆形图标 + 左侧 tooltip，主按钮才是 primary -->
               <div id="asset-import-actions" class="sub-actions">
-                <AppTooltip :title="t('assetManagement.batchThumbnails')" placement="left">
+                <AppTooltip
+                  v-if="libraryCaps.canEditStructure"
+                  :title="t('assetManagement.batchThumbnails')"
+                  placement="left"
+                >
                   <AppButton
                     variant="soft"
                     shape="circle"
@@ -520,25 +569,41 @@
                     <template #icon><PhFileZip /></template>
                   </AppButton>
                 </AppTooltip>
-                <AppTooltip :title="t('assetManagement.importFolder')" placement="left">
+                <AppTooltip
+                  :title="
+                    libraryCaps.canImport
+                      ? t('assetManagement.importFolder')
+                      : capabilityReason('canImport')
+                  "
+                  placement="left"
+                >
                   <AppButton
                     variant="soft"
                     shape="circle"
                     size="large"
                     class="sub-btn"
                     :aria-label="t('assetManagement.importFolder')"
+                    :disabled="!libraryCaps.canImport"
                     @click="handleUploadFolder"
                   >
                     <template #icon><PhFolderPlus /></template>
                   </AppButton>
                 </AppTooltip>
-                <AppTooltip :title="t('assetManagement.importFile')" placement="left">
+                <AppTooltip
+                  :title="
+                    libraryCaps.canImport
+                      ? t('assetManagement.importFile')
+                      : capabilityReason('canImport')
+                  "
+                  placement="left"
+                >
                   <AppButton
                     variant="soft"
                     shape="circle"
                     size="large"
                     class="sub-btn"
                     :aria-label="t('assetManagement.importFile')"
+                    :disabled="!libraryCaps.canImport"
                     @click="handleUploadFiles"
                   >
                     <template #icon><PhFilePlus /></template>
@@ -557,6 +622,21 @@
         </template>
         <!-- 扫描进度条 - 仅在此页面显示 -->
         <StatusBar />
+        <!-- 服务器库：导入前确认仓库和提交说明；登录失效时重新登录 -->
+        <CatalogImportModal
+          v-if="libraryStore.isServer && libraryStore.activeServerKey"
+          :open="serverImportOpen"
+          :library-key="libraryStore.activeServerKey"
+          :folder="serverImportFolder"
+          :initial-files="serverImportFiles"
+          @close="serverImportOpen = false"
+        />
+        <CatalogSignInModal
+          :open="serverSignInOpen"
+          :server="libraryStore.activeServer?.server ?? null"
+          @close="serverSignInOpen = false"
+          @signed-in="handleServerSignedIn"
+        />
       </div>
 
       <!-- 详情面板的拖拽分隔条 -->
@@ -940,6 +1020,10 @@ defineOptions({
 })
 import { AssetContextKey, type AssetContext } from './context'
 import { useVaultStore, VaultType } from '../../store/modules/vaultStore'
+import { useAssetLibraryStore } from '../../store/modules/assetLibraryStore'
+import { getActiveLibrarySource } from './data/activeLibrarySource'
+import CatalogImportModal from './catalog/CatalogImportModal.vue'
+import CatalogSignInModal from './catalog/CatalogSignInModal.vue'
 import {
   buildDirectFileUrl,
   buildThumbnailUrl,
@@ -1004,6 +1088,87 @@ const isAssetPageActive = useAssetSideButtons(
 const batchThumbnailModalOpen = ref(false)
 const tagManagementOpen = ref(false)
 const importMenuOpen = ref(false)
+
+// ---- 服务器库：导入确认、重新登录、实时刷新
+const serverImportOpen = ref(false)
+const serverImportFiles = ref<string[]>([])
+const serverSignInOpen = ref(false)
+const serverImportFolder = ref<{
+  dirId: number
+  path: string
+  name: string
+  nDirect: number
+  nSubtree: number
+  bytes: number
+  nDirs: number
+}>({
+  dirId: 0,
+  path: '',
+  name: '',
+  nDirect: 0,
+  nSubtree: 0,
+  bytes: 0,
+  nDirs: 0
+})
+watch(serverImportOpen, async (open) => {
+  if (!open) return
+  const key = selectedKeys.value[0] || ALL_FOLDER
+  const record = (await getActiveLibrarySource()
+    .folders.getByKey(key)
+    .catch(() => undefined)) as
+    | (AssetFolder & { catalogDirId?: number; catalogPath?: string })
+    | undefined
+  serverImportFolder.value = {
+    ...serverImportFolder.value,
+    dirId: record?.catalogDirId ?? 0,
+    path: record?.catalogPath ?? '',
+    name: record?.folderName ?? ''
+  }
+})
+
+const handleServerRetry = async (): Promise<void> => {
+  await libraryStore.refreshStatus()
+  await loadCurrentFolderAssets()
+}
+
+const handleServerSignedIn = async (): Promise<void> => {
+  await libraryStore.loadServerLibraries()
+  if (libraryStore.activeServerKey) await libraryStore.activateServer(libraryStore.activeServerKey)
+  await refreshFolderTreePreservingExpansion()
+  await loadCurrentFolderAssets()
+}
+
+/**
+ * 服务器库内容变了：把已经加载的那几页按原样重取一遍（没受影响的页主进程直接命中缓存），
+ * 展开过的树节点重载子文件夹。不回到顶部、不收起树。
+ */
+watch(
+  () => libraryStore.invalidationCount,
+  async () => {
+    if (!libraryStore.isServer || assetViewStore.mode !== 'assets') return
+    const pages = Math.max(1, currentPage.value)
+    const folderKey = selectedKeys.value[0]
+    if (isSearching.value || !folderKey) {
+      await loadCurrentFolderAssets()
+    } else {
+      const token = beginListRequest()
+      try {
+        await loadBrowsePage(folderKey, 1, false, token)
+        for (let page = 2; page <= pages && hasMore.value; page += 1) {
+          await loadBrowsePage(folderKey, page, true, token)
+        }
+      } catch (error) {
+        console.warn('[服务器库] 刷新可见页失败:', error)
+      }
+    }
+    // 父节点先刷：子节点的刷新要挂在新的父节点上
+    const depth = (key: string): number => findNodeByKey(key)?.path.split('/').length ?? 99
+    for (const key of [...expandedKeys.value].sort((a, b) => depth(a) - depth(b))) {
+      await refreshNodeChildren(key).catch(() => undefined)
+    }
+  }
+)
+
 const handleFabClick = (): void => {
   importMenuOpen.value = !importMenuOpen.value
 }
@@ -1023,7 +1188,22 @@ const handleBatchThumbnailDone = async (): Promise<void> => {
 // 获取当前保管库信息
 const vaultStore = useVaultStore()
 const currentVault = computed(() => vaultStore.currentVault)
-const isHttpNetworkVault = computed(() => isHttpNetworkVaultKind(currentVault.value))
+/**
+ * 当前数据源（本地库 / 服务器库）和它能做什么。界面按能力显示、禁用（并给一句原因），
+ * 不判断库的种类。服务器库不走主进程的切换保管库，vaultStore.currentVault 仍是本地库。
+ */
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+/** 树的标签页状态按数据源分开存：本地库和服务器库的文件夹键互不相认 */
+const treeStateKey = (tabId: string): string =>
+  libraryStore.source.kind === 'local' ? tabId : `${tabId}@${libraryStore.source.id}`
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
+const isHttpNetworkVault = computed(
+  () => libraryCaps.value.vaultFeatures && isHttpNetworkVaultKind(currentVault.value)
+)
 const getNetworkSyncMessageKey = (vaultId?: string): string =>
   `network-sync-progress:${vaultId || 'unknown'}`
 let networkSyncProgressHandler: ((...args: unknown[]) => void) | null = null
@@ -1031,12 +1211,15 @@ let networkSyncCompleteHandler: ((...args: unknown[]) => void) | null = null
 let networkSyncStatusHandler: ((...args: unknown[]) => void) | null = null
 const needsNetworkUpgrade = computed(
   () =>
+    libraryCaps.value.vaultFeatures &&
     currentVault.value?.vaultType === VaultType.NETWORK &&
     currentVault.value?.networkMigrationState === 'legacy_pending'
 )
 
 // 网络库检测和扫描
-const isNetworkVault = computed(() => currentVault.value?.vaultType === VaultType.NETWORK)
+const isNetworkVault = computed(
+  () => libraryCaps.value.vaultFeatures && currentVault.value?.vaultType === VaultType.NETWORK
+)
 
 /**
  * 传给主进程 `importFolderStructureWithMetadata` 的拷贝并发数。
@@ -3183,6 +3366,7 @@ const routingFilterCount = computed((): number => {
   if (filterForm.excludeTags && filterForm.excludeTags.length > 0) count++
   if (filterForm.hasNoTags) count++
   if (filterForm.favoriteStatus && filterForm.favoriteStatus !== 'all') count++
+  if (filterForm.engineVersions.length > 0) count += filterForm.engineVersions.length
   return count
 })
 
@@ -3218,7 +3402,10 @@ const filterForm = reactive<{
   keyword: string
   favoriteStatus?: FavoriteStatus
   includeSubfolders: boolean // 是否搜索子文件夹（性能优化：默认 false）
+  /** 引擎版本（只有服务器库的筛选里有这一组） */
+  engineVersions: string[]
 }>({
+  engineVersions: [],
   fileCategory: undefined,
   assetTypes: [],
   sizeRange: undefined,
@@ -3267,6 +3454,8 @@ interface ListCriteria {
   offset?: number
   classNameCnFilters?: string[]
   fileExtensions?: string[]
+  /** 服务器库：引擎版本分面 */
+  engineVersions?: string[]
   sizeRange?: { min?: number; max?: number }
   dateRange?: { start: string; end: string }
 }
@@ -3351,6 +3540,11 @@ const buildListCriteria = (options: {
     criteria.classNameCnFilters = [...filterForm.assetTypes]
   }
 
+  // 引擎版本只有服务器库有（服务端分面）
+  if (libraryCaps.value.filters.engine && filterForm.engineVersions.length > 0) {
+    criteria.engineVersions = [...filterForm.engineVersions]
+  }
+
   if (filterForm.fileCategory) {
     const category = ASSET_CATEGORIES.find((c) => c.key === filterForm.fileCategory)
     if (category) {
@@ -3382,14 +3576,10 @@ const buildListCriteria = (options: {
 
 /** 跑一次统一查询，并把行转成文件列表认识的形状 */
 const searchAssetsWithCriteria = async (criteria: ListCriteria): Promise<SearchedAssetRow[]> => {
-  const response = (await window.electron.ipcRenderer.invoke(
-    'db:assetSearch:search',
-    criteria
-  )) as { success?: boolean; error?: string; data?: SearchedAssetRow[] }
-  if (!response || !response.success) {
-    throw new Error(response?.error || 'Unknown error')
-  }
-  return (response.data || []).map((asset) => ({
+  const rows = (await getActiveLibrarySource().search.assets(
+    criteria as never
+  )) as unknown as SearchedAssetRow[]
+  return rows.map((asset) => ({
     ...asset,
     id: asset.assetKey,
     name: asset.assetName,
@@ -3444,7 +3634,8 @@ const performSearchWithPagination = async (isLoadMore = false): Promise<void> =>
     filterForm.includeTags?.length ||
     filterForm.excludeTags?.length ||
     filterForm.sizeRange ||
-    filterForm.hasNoTags
+    filterForm.hasNoTags ||
+    filterForm.engineVersions.length > 0
   )
   const shouldIncludeSubfolders =
     filterForm.includeSubfolders || hasActiveSearch || hasActiveFilters
@@ -3478,15 +3669,18 @@ const performSearchWithPagination = async (isLoadMore = false): Promise<void> =>
       !criteria.fileExtensions?.length &&
       !criteria.sizeRange
 
-    const folderSearch = shouldSearchFolders
-      ? window.electron.ipcRenderer.invoke('db:assetFolder:search', {
-          folderKey: criteria.folderKey,
-          // 注意：文件夹搜索不使用 includeSubfolders，只搜索当前文件夹的直接子文件夹
-          includeSubfolders: false,
-          keyword: criteria.keyword,
-          limit: 1000 // 文件夹不分页，设置一个较大上限
-        })
-      : undefined
+    const folderSearch =
+      shouldSearchFolders && libraryCaps.value.folderSearch
+        ? getActiveLibrarySource()
+            .search.folders({
+              folderKey: criteria.folderKey,
+              // 注意：文件夹搜索不使用 includeSubfolders，只搜索当前文件夹的直接子文件夹
+              includeSubfolders: false,
+              keyword: criteria.keyword,
+              limit: 1000 // 文件夹不分页，设置一个较大上限
+            })
+            .then((data) => ({ success: true, data }))
+        : undefined
 
     // 并行请求：如果是第一页，同时搜索文件夹（不分页，上限1000）和文件（分页）
     const [fileItems, folderResponse] = await Promise.all([
@@ -4088,9 +4282,10 @@ const handleFolderSelect = async (folder: any) => {
   // Load lightweight counts instead of full folder contents.
   try {
     const showDependencies = localStorage.getItem('assetManagement.showDependencies') !== 'false'
+    const librarySource = getActiveLibrarySource()
     const [filesCount, foldersCount] = await Promise.all([
-      assetDataAPI.getCountByFolderKey(folderKey, showDependencies),
-      assetFolderAPI.getChildCount(folderKey)
+      librarySource.assets.getCountByFolderKey(folderKey, showDependencies),
+      librarySource.folders.getChildCount(folderKey)
     ])
 
     if (requestToken !== folderSelectionRequestToken) {
@@ -4587,9 +4782,10 @@ const loadBrowsePage = async (
   const pageLimit = pageSize.value
   const offset = (page - 1) * pageLimit
 
+  const librarySource = getActiveLibrarySource()
   const [folderCount, assetCount] = await Promise.all([
-    assetFolderAPI.getChildCount(selectedFolderKey),
-    assetDataAPI.getCountByFolderKey(selectedFolderKey, showDependencies)
+    librarySource.folders.getChildCount(selectedFolderKey),
+    librarySource.assets.getCountByFolderKey(selectedFolderKey, showDependencies)
   ])
 
   if (requestToken !== browseListRequestToken) {
@@ -5205,7 +5401,7 @@ watch(
 
     // 保存旧标签页的树状态
     if (previousTabId !== currentTabId) {
-      saveTreeState(previousTabId, {
+      saveTreeState(treeStateKey(previousTabId), {
         selectedKeys: selectedKeys.value,
         expandedKeys: expandedKeys.value,
         currentPath: currentPath.value,
@@ -5219,7 +5415,7 @@ watch(
     selectionStore.setTabId?.(currentTabId)
 
     // 恢复新标签页的树状态
-    const savedState = restoreTreeState(currentTabId)
+    const savedState = restoreTreeState(treeStateKey(currentTabId))
     if (savedState) {
       selectedKeys.value = savedState.selectedKeys
       expandedKeys.value = savedState.expandedKeys
@@ -5300,7 +5496,7 @@ watch(
   [selectedKeys, expandedKeys, currentPath],
   () => {
     const tabId = (route.query._tab_id as string) || 'default'
-    saveTreeState(tabId, {
+    saveTreeState(treeStateKey(tabId), {
       selectedKeys: selectedKeys.value,
       expandedKeys: expandedKeys.value,
       currentPath: currentPath.value,
@@ -5466,13 +5662,15 @@ const handleNavigateToAllFolder = async (): Promise<void> => {
 
 // 添加全局鼠标侧键监听器，实现资产库页面的历史导航控制
 onMounted(async () => {
+  // 先定下数据源：上次看的是服务器库，树和列表就从服务器库取
+  await libraryStore.init()
   // 设置当前标签页 ID，用于状态隔离
   const tabId = (route.query._tab_id as string) || 'default'
   assetViewStore.setTabId(tabId)
   navStore.setTabId?.(tabId)
   selectionStore.setTabId?.(tabId)
   // 恢复树状态
-  const savedState = restoreTreeState(tabId)
+  const savedState = restoreTreeState(treeStateKey(tabId))
   if (savedState) {
     selectedKeys.value = savedState.selectedKeys
     expandedKeys.value = savedState.expandedKeys
@@ -5703,7 +5901,7 @@ onUnmounted(() => {
   }
   // 保存当前标签页的树状态
   const tabId = (route.query._tab_id as string) || 'default'
-  saveTreeState(tabId, {
+  saveTreeState(treeStateKey(tabId), {
     selectedKeys: selectedKeys.value,
     expandedKeys: expandedKeys.value,
     currentPath: currentPath.value,
@@ -5868,8 +6066,10 @@ const findPathToNode = (nodes: any[], targetKey: string, currentPath: any[] = []
 const breadcrumbItems = computed(() => {
   const items: Array<{ name: string; path: string; key?: string; isVault?: boolean }> = []
 
-  // 首先添加当前资产库
-  if (currentVault.value) {
+  // 首先添加当前资产库（服务器库时是服务器库的名字）
+  if (libraryStore.activeServer) {
+    items.push({ name: libraryStore.activeServer.name, path: 'vault', isVault: true })
+  } else if (currentVault.value) {
     items.push({
       name:
         currentVault.value.isSystem && currentVault.value.systemKey === 'default'
@@ -6567,6 +6767,17 @@ const handleWebImageCapture = async (files: File[]): Promise<void> => {
 
 // 处理拖拽导入逻辑
 const handleDragImport = async (filePaths: string[]) => {
+  // 服务器库：同一个导入入口，走 lore 以本人身份提交（先确认仓库和提交说明）
+  if (libraryStore.isServer) {
+    importMenuOpen.value = false
+    if (!libraryCaps.value.canImport) {
+      message.warning(capabilityReason('canImport'))
+      return
+    }
+    serverImportFiles.value = filePaths
+    serverImportOpen.value = true
+    return
+  }
   const importVaultId = currentVault.value?.id
   if (!importVaultId) return
   importMenuOpen.value = false
@@ -7191,6 +7402,7 @@ const handleResetFilter = async () => {
     filterForm.hasNoTags = false
     filterForm.favoriteStatus = 'all'
     filterForm.keyword = ''
+    filterForm.engineVersions = []
 
     // 「只看主资产」也是筛选条件，「重置」得连它一起清掉，
     // 否则重置完列表还是短的、chip 还挂着。它自己的 watch 会重新加载一次，
@@ -7340,6 +7552,7 @@ const handleUploadFolder = async () => {
 
 /** 整包上传只对 HTTP 资产服务器库有意义：本地库和 SMB 库直接复制文件就是最快的 */
 const isHttpServerVault = computed(() => {
+  if (!libraryCaps.value.vaultFeatures) return false
   const networkPath = vaultStore.currentVault?.networkPath || ''
   return networkPath.startsWith('http://') || networkPath.startsWith('https://')
 })
@@ -8223,5 +8436,16 @@ const handleUploadProjectArchive = async (): Promise<void> => {
     display: flex;
     gap: 8px;
   }
+}
+
+.server-library-banner {
+  flex-shrink: 0;
+}
+
+.server-library-banner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
 </style>

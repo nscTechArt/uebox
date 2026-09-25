@@ -1,8 +1,8 @@
 import { ref, triggerRef } from 'vue'
 import type { TreeNode } from '../types'
-import assetDataAPI from '@renderer/api/assetData'
 import { assetFolderAPI } from '@renderer/api/assetFolder'
 import { message } from '@renderer/utils/messageManager'
+import { getActiveLibrarySource } from '../data/activeLibrarySource'
 
 /**
  * 资产树形菜单 Hook
@@ -25,7 +25,7 @@ export function useAssetTree() {
     try {
       loading.value = true
       console.log('[loadRootFolders] 开始加载根文件夹...')
-      const folders = await assetFolderAPI.getRootFolders()
+      const folders = await getActiveLibrarySource().folders.getRootFolders()
       console.log('[loadRootFolders] 获取到的文件夹数据:', folders, '数量:', folders?.length || 0)
       const mappedFolders = (folders || []).map((folder) => ({
         key: folder.folderKey,
@@ -74,7 +74,7 @@ export function useAssetTree() {
    */
   const loadChildFolders = async (parentKey: string) => {
     try {
-      const folders = await assetFolderAPI.getByFatherKey(parentKey)
+      const folders = await getActiveLibrarySource().folders.getByFatherKey(parentKey)
       return (folders || []).map((folder) => ({
         key: folder.folderKey,
         title: folder.folderName,
@@ -526,7 +526,7 @@ export function useAssetTree() {
   ) => {
     try {
       console.log('[loadAssetsByFolder] 开始加载资产, folderKey:', folderKey)
-      const assets = await assetDataAPI.getByFolderKey(
+      const assets = await getActiveLibrarySource().assets.getByFolderKey(
         folderKey,
         sortBy,
         sortOrder,
@@ -551,7 +551,7 @@ export function useAssetTree() {
     offset?: number
   ) => {
     try {
-      const folders = await assetFolderAPI.getByFatherKey(
+      const folders = await getActiveLibrarySource().folders.getByFatherKey(
         folderKey,
         sortBy,
         sortOrder,
@@ -635,7 +635,7 @@ export function useAssetTree() {
 
     try {
       // 从数据库获取节点信息
-      const folderData = await assetFolderAPI.getByKey(nodeKey)
+      const folderData = await getActiveLibrarySource().folders.getByKey(nodeKey)
       if (!folderData) {
         console.warn('无法从数据库获取节点信息:', nodeKey)
         return null
@@ -803,7 +803,7 @@ export function useAssetTree() {
 
     try {
       // 使用新的高效API获取路径数组
-      const pathArray = await assetFolderAPI.getPathArray(targetFolderKey)
+      const pathArray = await getActiveLibrarySource().folders.getPathArray(targetFolderKey)
       console.log('获取到路径数组:', pathArray)
 
       // 🔧 修复：pathArray 为空时也需要回退到递归方式
@@ -818,7 +818,7 @@ export function useAssetTree() {
 
     // 回退：通过 fatherKey 链递归构建路径
     try {
-      const folderData = await assetFolderAPI.getByKey(targetFolderKey)
+      const folderData = await getActiveLibrarySource().folders.getByKey(targetFolderKey)
       console.log('获取到文件夹数据:', folderData)
 
       if (!folderData) {
