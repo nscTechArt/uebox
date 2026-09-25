@@ -205,6 +205,25 @@ pnpm dev:ue-verify      # 不是 pnpm dev
 
 产物落在 `/Game/UAVerify/`，每轮开始会先清掉。
 
+## game-studio/bench.mjs —— 一句话做游戏的题库
+
+```bash
+node tests/manual/game-studio/bench.mjs new tower-defense            # 默认 /team
+node tests/manual/game-studio/bench.mjs new tower-defense --arm goal # 对照组
+node tests/manual/game-studio/bench.mjs collect .test/game-studio/runs/<运行目录>
+node tests/manual/game-studio/bench.mjs report
+```
+
+8 个题材、每题一句话，量「从一句话到可玩 MVP」能做到几成。题库、评分表、跑法见
+[docs/AI游戏工作室-题库与评分表.md](../../docs/AI游戏工作室-题库与评分表.md)。
+
+**题由人在盒子里发，不由脚本发。** 调试端点没有 `/team`、`/goal` 的循环，
+审批还是评测专用的（本机磁盘一律拒绝）—— 做游戏要建工程、写 C++，拿它跑的就不是产品。
+脚本只管前后两头：`new` 建记录并打印要粘贴的那一行，`collect` 从会话记录算过程指标、
+回引擎做编译和 30 秒冒烟试玩，`report` 汇总。引擎那半要 `pnpm dev:ue-verify` 起的盒子。
+
+**人工评分是主判据**，自动核验只是辅助 —— 「好不好玩、像不像样」没有脚本能判。
+
 ## judge-probe.mjs
 
 ```bash
