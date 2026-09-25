@@ -93,8 +93,18 @@ export function parseChatCompletion(raw: string): string {
 
 function apiError(raw: string, status: number): string {
   try {
-    const message = JSON.parse(raw)?.error?.message
-    if (typeof message === 'string' && message) return message
+    const parsed = JSON.parse(raw)
+    const error = parsed?.error ?? parsed
+    const message = error?.message
+    if (typeof message === 'string' && message) {
+      // 「Param Incorrect」这类笼统报错，真正的原因常在 param / code 里，一起带上
+      const extra = [error.param, error.code]
+        .filter(
+          (v) => (typeof v === 'string' || typeof v === 'number') && String(v) && v !== message
+        )
+        .map(String)
+      return `HTTP ${status}: ${message}${extra.length ? `（${extra.join('；')}）` : ''}`
+    }
   } catch {
     // 非 JSON 错误页，下面给出截断后的正文
   }
@@ -160,7 +170,8 @@ async function analyzeOpenAICompatible(
     }
     mediaPart = { type: 'input_audio', input_audio: { data, format } }
   } else {
-    mediaPart = { type: 'video_url', video_url: { url: `data:;base64,${data}` } }
+    // 带上 MIME：空类型的 data URL 部分厂商（如 MiMo）解不开，只回一句 Param Incorrect
+    mediaPart = { type: 'video_url', video_url: { url: `data:${mimeType};base64,${data}` } }
   }
   const body = {
     model: model.id,

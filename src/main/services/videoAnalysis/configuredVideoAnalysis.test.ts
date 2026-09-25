@@ -61,7 +61,7 @@ describe('配置的视频模型', () => {
     expect(body.model).toBe('qwen3.5-omni-plus')
     expect(body.messages[0].content[0]).toEqual({
       type: 'video_url',
-      video_url: { url: 'data:;base64,AAAA' }
+      video_url: { url: 'data:video/mp4;base64,AAAA' }
     })
     expect(body.modalities).toEqual(['text'])
   })
@@ -115,7 +115,7 @@ it.each(['openai-completions', 'google-generative-ai'] as const)(
     const body = JSON.parse(fetchMock.mock.calls[0][1].body)
     if (protocol === 'openai-completions') {
       expect(body.messages[0].content).toEqual([
-        { type: 'video_url', video_url: { url: 'data:;base64,BBBB' } },
+        { type: 'video_url', video_url: { url: 'data:video/mp4;base64,BBBB' } },
         { type: 'text', text: '镜头如何运动' }
       ])
     } else {
@@ -140,4 +140,27 @@ it('没有视频内容时直接报错，不发请求', async () => {
     error: '没有拿到视频内容'
   })
   expect(fetchMock).not.toHaveBeenCalled()
+})
+
+it('远端报 Param Incorrect 时把 param、code 和状态码一起带出来', async () => {
+  mocks.readSettings.mockResolvedValue(settings())
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: '400',
+            message: 'Param Incorrect',
+            param: 'failed to download or process media content'
+          }
+        }),
+        { status: 400 }
+      )
+    )
+  )
+  const result = await analyzeVideoWithConfiguredModel({ data: 'AAAA', mimeType: 'video/mp4' })
+  expect(result?.success).toBe(false)
+  expect(result?.error).toContain('HTTP 400: Param Incorrect')
+  expect(result?.error).toContain('failed to download or process media content')
 })
