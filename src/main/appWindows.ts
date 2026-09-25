@@ -46,23 +46,24 @@ export function getAppWindows(): BrowserWindow[] {
   return BrowserWindow.getAllWindows().filter((window) => isAppWindow(window))
 }
 
+/** 主窗口的 `webContents.id`，由创建主窗口的地方登记 */
+let mainWindowId: number | undefined
+
+export function registerMainWindow(webContentsId: number): void {
+  mainWindowId = webContentsId
+}
+
 /**
  * 主窗口。
  *
- * 判据是「非置顶的大窗口」—— MiniChat 固定 400×600 且置顶，Spotlight 680×90
- * 且置顶，主窗口 minWidth 1350 / minHeight 800。
- *
- * 原来散在各处的版本为了躲开 Agent 浏览器，把门槛抬到了 1000×900 —— 那是把
- * 「区分窗口种类」和「排除远程页面」两件事混在一条尺寸判据上，而用户既能把
- * 浏览器窗口拉大，也能把主窗口拉到 1400×850。现在排除交给上面的登记表，
- * 尺寸判据回到只需要区分盒子自己那几种窗口的宽松值。
+ * 认登记过的那一个，不按尺寸猜。原来的判据是「非置顶的大窗口」，可主窗口
+ * 能缩到 1024×640，MiniChat 又能取消置顶再拉大 —— 两边尺寸一交叉就认错。
+ * 主窗口关掉重建时 id 会变，重建时重新登记即可；登记的窗口没了就返回 undefined，
+ * 调用方据此重建。
  */
 export function findMainWindow(): BrowserWindow | undefined {
-  return getAppWindows().find((window) => {
-    if (window.isAlwaysOnTop()) return false
-    const [width, height] = window.getSize()
-    return width >= 800 && height >= 600
-  })
+  if (mainWindowId === undefined) return undefined
+  return getAppWindows().find((window) => window.webContents.id === mainWindowId)
 }
 
 /**
@@ -96,4 +97,5 @@ export function sendToWindow(
 /** 测试用：清掉登记表 */
 export function resetNonAppWindowsForTest(): void {
   nonAppWindowIds.clear()
+  mainWindowId = undefined
 }

@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron'
 import { globalShortcut, Menu, MenuItemConstructorOptions } from 'electron'
-import { getAppWindows } from '../appWindows'
+import { findMainWindow } from '../appWindows'
 import { getPublicDatabase } from '../sqliteDataBase'
 import { getAllShortcuts } from '../sqliteDataBase/models/shortcut'
 import { getSetting } from '../sqliteDataBase/models/settings'
@@ -210,23 +210,14 @@ export class ShortcutService {
      * 走 Spotlight 而不是隐形录音，是因为 Agent 拿到的是会动工程的指令 ——
      * 中间那一眼「它听成了什么」值一次弹窗。
      *
-     * **在找主窗口之前处理。** 下面那个「够大才算主窗口」的启发式按
-     * 1000x900 筛，而主窗口的 minHeight 是 800 —— 用户把它拉到 850 高、
-     * 或者收进托盘，这条热键就整个失灵，一声不吭。而弹 Spotlight 跟主窗口
-     * 在不在一点关系都没有。
+     * 在找主窗口之前处理：弹 Spotlight 跟主窗口在不在一点关系都没有。
      */
     if (actionKey === 'voice.spotlight_dictate') {
       spotlightManager.showForDictation()
       return
     }
 
-    // 找到主窗口：主窗口特征是尺寸较大（minWidth=1350, minHeight=800），且不是 alwaysOnTop
-    // Spotlight 窗口特征：固定 600x400，alwaysOnTop=true
-    const mainWindow = getAppWindows().find((w) => {
-      if (w.isDestroyed()) return false
-      const [width, height] = w.getSize()
-      return !w.isAlwaysOnTop() && width >= 1000 && height >= 900
-    })
+    const mainWindow = findMainWindow()
 
     if (!mainWindow) return
 

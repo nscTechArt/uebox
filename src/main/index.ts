@@ -32,7 +32,7 @@ import {
   getProjectCoverService,
   stopProjectCoverSync
 } from './services/project/projectCoverRuntime'
-import { findMainWindow } from './appWindows'
+import { findMainWindow, registerMainWindow } from './appWindows'
 import {
   keepMainWindowInTray,
   minimizeCurrentMainWindow,
@@ -118,8 +118,8 @@ function createWindow(): void {
     height: windowState.height,
     x: windowState.x,
     y: windowState.y,
-    minWidth: 1500, // 打开界面最小宽
-    minHeight: 900, // 打开界面最小高
+    minWidth: 1024, // 打开界面最小宽
+    minHeight: 640, // 打开界面最小高
     show: false,
     title: MAIN_WINDOW_TITLE,
     ...mainWindowChrome(process.platform),
@@ -338,6 +338,8 @@ function createWindow(): void {
     rendererFilePath,
     is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
   )
+
+  registerMainWindow(mainWindow.webContents.id)
 
   // 设置主窗口到更新服务
   autoUpdaterService.setMainWindow(mainWindow)
@@ -696,11 +698,11 @@ appReady?.then(async () => {
     // 放在窗口创建之后 —— 它要问「盒子的窗口在不在前台」
     startAgentNotifications(createWindow)
 
-    // 初始化自动更新服务（仅在非开发环境或明确启用时）
-    if (!is.dev || process.env.ENABLE_AUTO_UPDATE === 'true') {
     // 编辑器崩溃看门人：认出崩溃、关掉崩溃报告窗口、重开工程，并告诉等着的 agent
     startEditorCrashWatch(createWindow)
 
+    // 初始化自动更新服务（仅在非开发环境或明确启用时）
+    if (!is.dev || process.env.ENABLE_AUTO_UPDATE === 'true') {
       try {
         await autoUpdaterService.initialize()
         logger.info('自动更新服务初始化完成')
