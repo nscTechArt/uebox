@@ -1877,6 +1877,14 @@ async function importAssetsToProject(
     folderOffset?: number
     /** 点名导进哪个工程。不给就跟着这一轮绑定的连接走（老行为） */
     target?: { projectKey?: string; projectPath?: string }
+    /** 外部 FBX 按动画导入到这个骨架 */
+    skeleton?: string
+    fbxImportAs?: string
+    animFrameRate?: number
+    /** 覆盖同名资产（仅外部格式文件） */
+    overwrite?: boolean
+    /** assetKey → 导入后的资产名 */
+    assetNames?: Record<string, string>
   }
 ): Promise<ProjectImportResult> {
   const placeInScene = options?.placeInScene === true
@@ -2156,10 +2164,15 @@ async function importAssetsToProject(
           continue
         }
 
+        const wantedName = options?.assetNames?.[assetKey]
         const result = await importExternalFilesToProject({
           files: [sourcePath],
           destinationPath,
-          overwrite: false,
+          overwrite: options?.overwrite === true,
+          skeleton: options?.skeleton,
+          fbxImportAs: options?.fbxImportAs,
+          animFrameRate: options?.animFrameRate,
+          ...(wantedName ? { nameOverrides: { [path.basename(sourcePath)]: wantedName } } : {}),
           // 显式带上目标工程那条连接：点名导入时环境里绑的可能是**另一个**工程，
           // 让底层去猜就是「静默导进别人的工程」
           targetConnectionId: connectionId
@@ -2446,6 +2459,39 @@ export function createProjectTool(): V2Tool {
         .describe(
           'UE 内部目标路径（对外部文件导入生效；.uasset 文件按原始路径复制；默认 /Game/Imported）'
         ),
+      skeleton: z
+        .string()
+        .optional()
+        .describe(
+          '仅 import_assets：素材库里的 FBX 按**动画**导入到这个骨架（资产路径，如 .../Body/metahuman_base_skel）。' +
+            '导动作/动画 FBX 时必填，不给引擎什么都导不出来；导模型时别填'
+        ),
+      fbxImportAs: z
+        .enum(['auto', 'static_mesh', 'skeletal_mesh', 'animation'])
+        .optional()
+        .describe(
+          '仅 import_assets 的外部 FBX，正常不填：给了 skeleton 默认 animation，否则 auto。' +
+            '网格绑到现有骨架填 skeletal_mesh（配 skeleton）'
+        ),
+      animFrameRate: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('仅 import_assets 的外部 FBX 动画：按这个帧率重采样（如 30/60）。不给用引擎默认'),
+      overwrite: z
+        .boolean()
+        .optional()
+        .describe(
+          '仅 import_assets 的外部格式文件：同名资产就地替换（引用不断）。' +
+            '「用素材库新动画替换项目里现有的」= overwrite:true + assetNames 指向现有资产名 + destinationPath 指向它所在目录'
+        ),
+      assetNames: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          '仅 import_assets 的外部格式文件：{ assetKey: 导入后的资产名 }，盖过自动规范化的名字。只写名字不带路径'
+        ),
       scenePlacement: ScenePlacementSchema.optional().describe(
         '导入后自动放入场景时的布局参数（仅 import_assets_to_scene 时使用）'
       ),
@@ -2574,7 +2620,12 @@ export function createProjectTool(): V2Tool {
                 folder: input.folder,
                 includeSubfolders: input.includeSubfolders,
                 folderOffset: input.folderOffset,
-                target: { projectKey: input.projectKey, projectPath: input.projectPath }
+                target: { projectKey: input.projectKey, projectPath: input.projectPath },
+                skeleton: input.skeleton,
+                fbxImportAs: input.fbxImportAs,
+                animFrameRate: input.animFrameRate,
+                overwrite: input.overwrite,
+                assetNames: input.assetNames
               }
             )
           }

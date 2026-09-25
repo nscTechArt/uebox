@@ -152,6 +152,34 @@ describe('还是不碰 .uasset', () => {
  * `normalized_names: [{original, normalized}]`），以及**改名到底成没成**
  * 必须回读 —— 目标名被占用时插件会跳过改名、保留原名，而响应长得和成功一样。
  */
+/** 纯动画 FBX 要靠 skeleton 才导得进来，插件认的就是这个字段名 */
+describe('动画 FBX 的 skeleton', () => {
+  it('给了就原样发给插件', async () => {
+    await run(withDefaults({ files: ['C:/a/idle.fbx'], skeleton: '/Game/Body/metahuman_base_skel' }))
+
+    expect(sentParams().skeleton).toBe('/Game/Body/metahuman_base_skel')
+  })
+
+  it('不给就不提', async () => {
+    await run(withDefaults({ files: ['C:/a/hero.fbx'] }))
+
+    expect('skeleton' in sentParams()).toBe(false)
+    expect('fbx_import_as' in sentParams()).toBe(false)
+  })
+
+  it('网格绑现有骨架：fbx_import_as 一起发', async () => {
+    await run(
+      withDefaults({
+        files: ['C:/a/coat.fbx'],
+        skeleton: '/Game/Body/metahuman_base_skel',
+        fbx_import_as: 'skeletal_mesh'
+      })
+    )
+
+    expect(sentParams().fbx_import_as).toBe('skeletal_mesh')
+  })
+})
+
 describe('导入时命名 asset_names', () => {
   it('转成插件认的 normalized_names 数组', async () => {
     await run(

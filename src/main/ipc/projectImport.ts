@@ -2207,6 +2207,14 @@ export async function importExternalFilesToProject(params: {
   destinationPath?: string
   overwrite?: boolean
   targetConnectionId?: string
+  /** FBX 按动画导入到这个骨架（见 content.import 的 skeleton） */
+  skeleton?: string
+  /** FBX 导成什么（见 content.import 的 fbx_import_as） */
+  fbxImportAs?: string
+  /** 动画重采样帧率（见 content.import 的 anim_frame_rate） */
+  animFrameRate?: number
+  /** 按源文件名（含扩展名）指定资产名，盖过自动规范化的名字 —— 覆盖现有资产要靠它对上名 */
+  nameOverrides?: Record<string, string>
 }): Promise<{
   success: boolean
   imported?: Array<{
@@ -2229,7 +2237,11 @@ export async function importExternalFilesToProject(params: {
       files,
       destinationPath = '/Game/Imported',
       overwrite = false,
-      targetConnectionId
+      targetConnectionId,
+      skeleton,
+      fbxImportAs,
+      animFrameRate,
+      nameOverrides
     } = params
 
     // 检查 WebSocket 连接
@@ -2335,7 +2347,7 @@ export async function importExternalFilesToProject(params: {
         // 构造 normalized_names
         const normalizedNames = files.map((f) => ({
           original: path.basename(f.originalPath),
-          normalized: f.normalizedName
+          normalized: nameOverrides?.[path.basename(f.originalPath)] || f.normalizedName
         }))
 
         console.log(
@@ -2357,7 +2369,10 @@ export async function importExternalFilesToProject(params: {
             destination_path: targetDir,
             overwrite,
             // 传递规范化名称信息给 UE 插件（如果插件支持）
-            normalized_names: normalizedNames
+            normalized_names: normalizedNames,
+            ...(skeleton ? { skeleton } : {}),
+            ...(fbxImportAs ? { fbx_import_as: fbxImportAs } : {}),
+            ...(animFrameRate ? { anim_frame_rate: animFrameRate } : {})
           },
           targetConnectionId,
           120000 // 导入可能需要较长时间，设置 2 分钟超时
