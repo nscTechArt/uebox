@@ -15,6 +15,7 @@ import {
   DEFAULT_GATE_CONFIG,
   isOverloadError,
   pacedStreamFn,
+  STALL_GUARD_CONFIG,
   type GateConfig,
   type Outcome
 } from './requestGate'
@@ -240,5 +241,25 @@ describe('调度包装', () => {
     expect(calls).toBe(1)
     expect(types).toHaveLength(1)
     expect(types[0]).toMatch(/^error:/)
+  })
+})
+
+/** 普通会话：一个人一条会话，排队只会平白加延迟；只防「发出去就没回音」 */
+describe('普通会话的卡死防护', () => {
+  it('不排队：再多请求同时发也都放行，过载也不收名额', async () => {
+    const limiter = new AdaptiveLimiter(STALL_GUARD_CONFIG)
+    const releases = await Promise.all(Array.from({ length: 20 }, () => limiter.acquire()))
+    expect(limiter.snapshot()).toMatchObject({ inFlight: 20, queued: 0 })
+    releases[0]!({ kind: 'overload' })
+    expect(limiter.snapshot().limit).toBe(64)
+    for (const release of releases.slice(1)) release({ kind: 'neutral' })
+  })
+
+  it('首包照样盯；推过内容之后给长思考留足时间，比工作室宽', () => {
+    expect(STALL_GUARD_CONFIG.firstEventTimeoutCeilMs).toBe(
+      DEFAULT_GATE_CONFIG.firstEventTimeoutCeilMs
+    )
+    expect(STALL_GUARD_CONFIG.idleTimeoutMs).toBeGreaterThan(DEFAULT_GATE_CONFIG.idleTimeoutMs)
+    expect(STALL_GUARD_CONFIG.maxRetries).toBeLessThan(DEFAULT_GATE_CONFIG.maxRetries)
   })
 })

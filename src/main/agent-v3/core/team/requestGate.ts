@@ -27,7 +27,8 @@
  * 到点就当过载处理 —— 放弃这一次、退避后重发。只在**还没往下游推过任何内容**时重发，
  * 推过半截再重来会让调用方看到重复的开头。
  *
- * 只在工作室模式里生效（`SessionContext.pacedRequests`），普通会话零改变。
+ * 工作室模式（`SessionContext.pacedRequests`）用整套：名额 + 卡死检测 + 重发。
+ * 普通会话只用卡死检测和重发（`stallGuardStreamFn`），不排队 —— 见那里的注释。
  */
 
 import {
@@ -72,6 +73,26 @@ export const DEFAULT_GATE_CONFIG: GateConfig = {
   maxRetries: 4,
   backoffBaseMs: 2_000,
   backoffCapMs: 30_000
+}
+
+/**
+ * 普通会话的配置：不排队，只防「发出去就没回音」。
+ *
+ * - 名额钉死在一个用不满的数上：一个人一条会话，排队只会平白加延迟。
+ * - 首包超时和工作室一样。pi 在**收到响应头**时就推 `start`，所以这里等的是
+ *   「网关接没接这个请求」—— 真机那次 5 分钟白等就是卡在这一步。
+ * - 包间隔放宽到 10 分钟：推理模型在 `start` 之后可能好几分钟一个字不吐
+ *   （有的接口不流式吐思考），按工作室的 3 分钟掐会把正常的长思考当成卡死。
+ *   这一段超时本来也不重发（推过内容了），掐了只是把白等换成报错。
+ * - 少重发两次：有人在屏幕前等着，失败要早点说出来。
+ */
+export const STALL_GUARD_CONFIG: GateConfig = {
+  ...DEFAULT_GATE_CONFIG,
+  initialLimit: 64,
+  minLimit: 64,
+  maxLimit: 64,
+  idleTimeoutMs: 600_000,
+  maxRetries: 2
 }
 
 /** 基线取最近这么多次首包时间里的最小值 */
@@ -274,6 +295,26 @@ function nextWithin(iterator: AsyncIterator<AssistantMessageEvent>, ms: number):
       timer = setTimeout(() => resolve('timeout'), ms)
     })
   ])
+}
+
+const guards = new Map<string, AdaptiveLimiter>()
+
+/** 普通会话一家网关一个：不和工作室的名额池混用，退避冷却也各算各的 */
+function stallGuardFor(model: Model<Api>): AdaptiveLimiter {
+  let guard = guards.get(model.provider)
+  if (!guard) {
+    guard = new AdaptiveLimiter(STALL_GUARD_CONFIG)
+    guards.set(model.provider, guard)
+  }
+  return guard
+}
+
+/** 普通会话的包装：卡死检测 + 还没推内容时退避重发，不排队 */
+export function stallGuardStreamFn(
+  inner: StreamFn,
+  deps: Omit<PacedStreamDeps, 'limiterFor'> = {}
+): StreamFn {
+  return pacedStreamFn(inner, { ...deps, limiterFor: stallGuardFor })
 }
 
 export interface PacedStreamDeps {
