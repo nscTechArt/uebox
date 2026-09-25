@@ -8,6 +8,7 @@
     @keydown="handleKeydown"
     @mousedown="handleMouseDown"
     @auxclick.prevent
+    @contextmenu="handleContextMenu"
   >
     <div class="messages-container">
       <div v-for="m in reversedMessages" :key="m.id" class="message-item-flipper">
@@ -67,6 +68,7 @@
 import AIBubble from './AIBubble.vue'
 import UserBubble from './UserBubble.vue'
 import { computed, ref, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { AgentProcessItem } from './AgentProcessLog.types'
 import type {
   ChatMessageContent,
@@ -412,6 +414,24 @@ function handleItemResize(): void {
 // ==================== 鼠标中键拖动滚动处理 ====================
 // 使用自定义 hook 处理中键自动滚动
 const { handleMouseDown } = useAutoScroll(scrollerRef)
+
+// 右键菜单：编辑框里给完整菜单，正文里选中了文字给「复制」
+const { t } = useI18n()
+function handleContextMenu(event: MouseEvent): void {
+  const ipc = window.electron?.ipcRenderer
+  if (!ipc) return
+  const target = event.target as HTMLElement | null
+  const editable = !!target?.closest('input, textarea, [contenteditable="true"]')
+  if (!editable && !window.getSelection()?.toString().trim()) return
+  event.preventDefault()
+  ipc.send('app:show-input-context-menu', {
+    cut: t('common.cut'),
+    copy: t('common.copy'),
+    paste: t('common.paste'),
+    selectAll: t('common.selectAll'),
+    readonly: editable ? '' : '1'
+  })
+}
 
 // 暴露方法给父组件
 defineExpose({
