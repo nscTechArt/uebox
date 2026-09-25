@@ -74,7 +74,7 @@ import {
   getTargetProjectPath,
   runWithTargetConnectionId
 } from './projectTargetContext'
-import { releaseAll, runWithLockOwner } from './assetLock'
+import { releaseAll, runWithLockOwner, teamRootOf } from './assetLock'
 import { AUDITOR_TOOLS, type GoalVerdict } from './goalLoop'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
 import { memberFileBase, type TeamMember, type TeamStore } from './team/teamStore'
@@ -82,6 +82,7 @@ import type { TeamSnapshots } from './team/snapshots'
 import type { TeamLive } from './team/teamLive'
 import { PRODUCER } from './team/teamStore'
 import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
+import { createStatusTool } from './team/teamStatus'
 import { pacedStreamFn } from './team/requestGate'
 
 /**
@@ -1159,7 +1160,12 @@ function teamToolsFor(
     // 队员拿任务板和留言：交接、提问都靠这两样，它看不到制作人的对话
     return [
       createBoardTool(ctx.teamMember.store),
-      createMessageTool(ctx.teamMember.store, ctx.teamMember.name, ctx.teamMember.live)
+      createMessageTool(ctx.teamMember.store, ctx.teamMember.name, ctx.teamMember.live),
+      createStatusTool({
+        store: ctx.teamMember.store,
+        sessionId: teamRootOf(ctx.sessionId),
+        ...(ctx.teamMember.live ? { live: ctx.teamMember.live } : {})
+      })
     ] as unknown as UnrealAgentTool<never>[]
   }
   const team = ctx.team
@@ -1171,6 +1177,7 @@ function teamToolsFor(
 
   return createTeamTools({
     store: team.store,
+    sessionId: ctx.sessionId,
     objective: team.objective,
     namespaces,
     runMember: async ({ member, message, history, signal, onProgress, ledger, keepMessages }) => {

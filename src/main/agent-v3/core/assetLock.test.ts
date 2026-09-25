@@ -99,7 +99,11 @@ describe('acquire', () => {
 
     const result = acquire(CONN, 's2', ['/Game/A'])
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.conflicts).toEqual([{ path: '/Game/A', owner: 's1' }])
+    if (!result.ok) {
+      expect(result.conflicts).toEqual([
+        { path: '/Game/A', owner: 's1', since: expect.any(Number) }
+      ])
+    }
   })
 
   it('同一个主人重复拿是幂等的', () => {
@@ -147,7 +151,9 @@ describe('acquire', () => {
 
     // 模型会重试，重试不该把界面刷屏
     expect(notify).toHaveBeenCalledTimes(1)
-    expect(notify).toHaveBeenCalledWith({ path: '/Game/A', owner: 's1', requester: 's2' })
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/Game/A', owner: 's1', requester: 's2' })
+    )
   })
 })
 

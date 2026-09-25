@@ -20,6 +20,8 @@
 import { promises as fs } from 'fs'
 import { join } from 'path'
 
+import { contentInventory, formatCounts } from './inventory'
+
 /** 不进快照的东西：UE 生成的目录、IDE 文件、快照仓库自己 */
 export const SNAPSHOT_EXCLUDES = [
   '/Binaries/',
@@ -71,6 +73,25 @@ export interface SnapshotStore {
   list(limit?: number): Promise<Snapshot[]>
   /** 把工程的源文件退回到这一份。新建的文件删掉，被忽略的（缓存、Saved）不动 */
   restore(id: string): Promise<void>
+}
+
+/** `git diff --name-status` → 「新增 3 · 修改 2 · 删除 1」。没变化给空串 */
+export function summarizeChanges(nameStatus: string): string {
+  let added = 0
+  let modified = 0
+  let deleted = 0
+  for (const line of nameStatus.split('\n')) {
+    const code = line.trim()[0]
+    if (code === 'A') added++
+    else if (code === 'D') deleted++
+    else if (code === 'M' || code === 'R' || code === 'C') modified++
+  }
+  const parts = [
+    added ? `新增 ${added}` : '',
+    modified ? `修改 ${modified}` : '',
+    deleted ? `删除 ${deleted}` : ''
+  ].filter(Boolean)
+  return parts.join(' · ')
 }
 
 /** 快照的提交说明只要一行：谁、干了什么。多行的派活内容只取第一句 */
@@ -126,7 +147,14 @@ export function createSnapshotStore(projectDir: string, git: GitRunner): Snapsho
       const staged = await git([...base, 'diff', '--cached', '--quiet'], projectDir)
       const hasHead = (await git([...base, 'rev-parse', '--verify', 'HEAD'], projectDir)).code === 0
       if (staged.code === 0 && hasHead) return null
-      await run(['commit', '--quiet', '--allow-empty', '-m', message])
+      // 标签要说「这一份里是什么」，不只是「谁触发的」—— 回滚时是照着它选的。
+      // 2026-09-26 真机反馈：标签只有队员留言的开头，看到编号完全不知道那一份里有什么
+      const changes = summarizeChanges(await run(['diff', '--cached', '--name-status']))
+      const inventory = await contentInventory(projectDir, 0).catch(() => null)
+      const subject = [message, changes, inventory ? formatCounts(inventory) : '']
+        .filter(Boolean)
+        .join('｜')
+      await run(['commit', '--quiet', '--allow-empty', '-m', subject])
       const [latest] = await this.list(1)
       return latest ?? null
     },

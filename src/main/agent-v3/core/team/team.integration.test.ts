@@ -148,7 +148,13 @@ describe('工作室模式装配', () => {
 
     // 队员：只拿白名单里的命名空间 + 任务板和留言；没有招人、派活、子任务
     const member = requests[2]!
-    expect(member.tools.sort()).toEqual(['read_state', 'team_board', 'team_message', 'write_state'])
+    expect(member.tools.sort()).toEqual([
+      'read_state',
+      'team_board',
+      'team_message',
+      'team_status',
+      'write_state'
+    ])
     expect(member.system).toContain('<role>负责所有材质</role>')
     expect(member.system).not.toContain('<team_mode>')
     expect(write).toHaveBeenCalledOnce()

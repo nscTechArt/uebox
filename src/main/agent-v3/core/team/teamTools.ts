@@ -25,7 +25,8 @@ import {
   type SubAgentResult
 } from '../../tools/builtin/task'
 import { parseVerdict, type GoalVerdict } from '../goalLoop'
-import { formatInterruptedWrites, WriteLedger } from '../writeLedger'
+import { formatInterruptedWrites, summarizeDoneWrites, WriteLedger } from '../writeLedger'
+import { createStatusTool } from './teamStatus'
 import { snapshotMessage, type TeamSnapshots } from './snapshots'
 import type { TeamLive } from './teamLive'
 import {
@@ -44,7 +45,8 @@ export const TEAM_TOOL_NAMES = [
   'team_board',
   'team_deliver',
   'team_message',
-  'team_snapshot'
+  'team_snapshot',
+  'team_status'
 ] as const
 
 export interface RunMemberInput {
@@ -79,6 +81,8 @@ export interface TeamToolDeps {
   snapshots?: TeamSnapshots
   /** 当场对话：插话、回执、后台派活（`teamLive.ts`）。没有就退回纯信箱 */
   live?: TeamLive
+  /** 团队的根会话 id。`team_status` 用它从锁表里挑出本团队的锁；没有就不给 `team_status` */
+  sessionId?: string
 }
 
 // ── 任务板 ──────────────────────────────────────────────────────────────
@@ -274,6 +278,7 @@ function createSendTool(
         // 它不在的时候队友给它的留言，这次接活时一起交给它
         const inbox = formatMail('【队友给你的留言】', await deps.store.takeInbox(member.name))
         let latest: AgentMessage[] | undefined
+        deps.live?.setAssignment(member.name, message)
         try {
           return await deps.runMember({
             member,
@@ -288,6 +293,7 @@ function createSendTool(
             }
           })
         } finally {
+          deps.live?.setAssignment(member.name, null)
           // 被停下也要存：它已经干了一半的活，下次派活时得记得
           if (latest) await deps.store.saveHistory(member.name, latest)
         }
@@ -295,6 +301,14 @@ function createSendTool(
     busy.set(key, run)
     try {
       const result = await run
+      // 按台账记下它实际改了什么 —— `team_status` 的「最近改动」读它，不靠队员自己说
+      await deps.store
+        .recordActivity({
+          who: member.name,
+          what: message.split('\n').find((line) => line.trim()) ?? '',
+          writes: result.writes ? summarizeDoneWrites(result.writes) : ''
+        })
+        .catch(() => undefined)
       const snapshot = await autoSnapshot(deps, member.name, message, result)
       return {
         result,
@@ -314,7 +328,7 @@ function createSendTool(
     risk: 'safe',
     concurrency: 'parallel',
     description:
-      '给一个队员派活。它记得你之前发给它的所有内容。' +
+      '给一个队员派活 —— 队员空闲时，这是唯一能让它开工的办法（team_message 只是说话）。它记得你之前发给它的所有内容。' +
       '默认等它干完回话；wait=false 派到后台就回来，你可以接着派别人、用 team_message 跟正在干活的队员当场说话，' +
       '它干完的结论作为留言送到你这里（你想收工时，盒子会等所有后台的活交回来）。' +
       '同一轮里发给不同队员的会并行跑；发给同一个人的按顺序排队。' +
@@ -422,8 +436,8 @@ export function createMessageTool(
     risk: 'safe',
     concurrency: 'parallel',
     description:
-      `给队友或制作人（"${PRODUCER}"）发话：交接产出、提问、提醒对方你改了什么。` +
-      '对方正在干活的话，这句会插进它的下一步；没在干活就进信箱，下次接活时看到。' +
+      `给队友或制作人（"${PRODUCER}"）说话：交接产出、提问、提醒对方你改了什么。**它不派活** —— ` +
+      '对方正在干活的话，这句会插进它的下一步；对方空闲的话只是进信箱，不会让它开工（要它干活用 team_send）。' +
       'wait=read 等回执（对方真的读到），wait=reply 等对方回话。',
     input: messageInput,
     execute: async ({ to, text, reply_to, wait, wait_seconds }, ctx) => {
@@ -457,6 +471,13 @@ export function createMessageTool(
 
       const { mail, delivery } = await live.send(from, target, text, reply_to)
       const lines = [`已发出 ${mail.id}。${deliveryNote(target, delivery)}`]
+      // 2026-09-26 真机反馈：制作人给空闲的队员发 team_message 当派活，其实只进了信箱，
+      // 白等一整轮才发现得再用 team_send 发一遍
+      if (delivery === 'queued' && from === PRODUCER && target !== PRODUCER) {
+        lines.push(
+          `⚠️ ${target} 现在空闲：这条只是留言，不会让它开工。要它干活用 team_send（可以 wait=false 放到后台）。`
+        )
+      }
       const ms = Math.min(
         WAIT_MAX_MS,
         wait_seconds ? wait_seconds * 1000 : wait === 'read' ? WAIT_READ_MS : WAIT_REPLY_MS
@@ -630,6 +651,16 @@ export function createTeamTools(
     createDeliverTool(deps),
     // 制作人也能当场跟正在干活的队员说话（配合 team_send 的 wait=false）
     createMessageTool(deps.store, PRODUCER, deps.live),
-    ...(deps.snapshots ? [createSnapshotTool(deps.snapshots)] : [])
+    ...(deps.snapshots ? [createSnapshotTool(deps.snapshots)] : []),
+    ...(deps.sessionId
+      ? [
+          createStatusTool({
+            store: deps.store,
+            sessionId: deps.sessionId,
+            ...(deps.live ? { live: deps.live } : {}),
+            ...(deps.snapshots ? { snapshots: deps.snapshots } : {})
+          })
+        ]
+      : [])
   ] as unknown as UnrealAgentTool<never>[]
 }

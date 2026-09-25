@@ -43,6 +43,7 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     'How to get there — which roles to hire, how to split the work, in what order, what to cut — is entirely your call. What Unreal Box gives you:',
     "- `team_hire` to bring on teammates: you write each one's role, pick its model tier and scope its tools. `team_send` gives a teammate work; it remembers everything you have sent it before. By default you wait for it to finish; with `wait: false` it works in the background while you carry on, and its result comes back to you as a note. Independent `team_send` calls in the same turn run in parallel; Unreal Box paces the model requests to what the provider can take. `team_message` talks to a teammate while it works (it reads it at its next step) and can wait for a read receipt or a reply; teammates can message each other and you the same way.",
     '- `team_board`: a shared task board you and every teammate can read and update. The user watches it.',
+    '- `team_status`: the project as it really is right now — assets on disk, who is working on what, who holds which assets, what actually changed. When a teammate and your own check disagree, this is the tie-breaker.',
     `- A shared workspace folder every teammate can read and write: ${input.workspaceDir}`,
     '- Teammates do not see this conversation. What they know is what you send them, what is in the workspace, and what is on the board.',
     '- The Unreal editor is one seat. Editor writes from different teammates queue automatically; anything off the editor — documents, code files, generated images and models, data tables — proceeds in parallel.',
@@ -72,7 +73,9 @@ export function buildMemberFraming(input: {
     'A message that starts with `[team mail m…]` is from a teammate or the producer, not from the user. If it asks you something, answer with team_message and `reply_to` set to that id — someone may be waiting on it.',
     'Your tool list is fixed for your role and does not change while you work. If a tool you need is missing, say which one and why.',
     'Editor writes may wait in a queue while a teammate is using the editor. That is normal, not a failure.',
-    'You cannot talk to the user and cannot hire teammates. When something needs a decision above you, report it to the producer instead of assuming.',
+    'You cannot talk to the user and cannot hire teammates.',
+    'Your reply ends your turn: once you answer, you stop working until someone sends you more. So work through the whole assignment before you reply — do not stop to ask whether to continue. Stop early only when you are truly blocked, when the next step would spend money or delete things, or when your instructions contradict each other; then say exactly what you need. For smaller questions, make a sensible call, note it in your report, and keep going (or ask with team_message and carry on meanwhile).',
+    '`team_status` shows the project as it really is — assets on disk, who is working on what, who holds which assets, what actually changed recently. Check it instead of trusting an old note.',
     'Finish every assignment with one paragraph: what you did, the evidence (paths, screenshots, playtest results), what is left, and what the producer needs to know.'
   ]
 }

@@ -75,6 +75,9 @@ export interface TeamLive {
   /** 制作人正卡在「等这个队员交活」上（同步派活）。这时候它没法当场回这个队员的话 */
   awaiting(member: string): () => void
   isAwaiting(member: string): boolean
+  /** 这个队员手上正在干的那件活（派活时登记，交活时清掉） */
+  setAssignment(member: string, text: string | null): void
+  assignments(): Array<{ member: string; text: string; since: number }>
   /** 后台派出去的活 */
   track(member: string, job: Promise<unknown>): void
   pendingJobs(): Array<{ member: string; startedAt: number }>
@@ -88,6 +91,7 @@ export function createTeamLive(store: TeamStore): TeamLive {
   const readers = new Map<string, Array<() => void>>()
   const awaited = new Map<string, number>()
   const jobs = new Set<{ member: string; startedAt: number }>()
+  const current = new Map<string, { member: string; text: string; since: number }>()
   let settleWaiters: Array<() => void> = []
 
   /** 落盘失败（目录被删、磁盘满）不影响对话本身，吞掉；返回的 Promise 给要等它落盘的人 */
@@ -209,6 +213,13 @@ export function createTeamLive(store: TeamStore): TeamLive {
     },
 
     isAwaiting: (member) => awaited.has(key(member)),
+
+    setAssignment(member, text) {
+      if (text === null) current.delete(key(member))
+      else current.set(key(member), { member, text, since: Date.now() })
+    },
+
+    assignments: () => [...current.values()].map((a) => ({ ...a })),
 
     track(member, job) {
       const entry = { member, startedAt: Date.now() }

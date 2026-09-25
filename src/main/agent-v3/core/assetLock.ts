@@ -73,6 +73,8 @@ export interface LockConflict {
   path: string
   /** 现在持有它的那条会话 */
   owner: string
+  /** 它从什么时候占着的。报错里说「已占 N 分钟」，省得调用方盲等 */
+  since?: number
 }
 
 export type AcquireResult = { ok: true } | { ok: false; conflicts: LockConflict[] }
@@ -307,7 +309,9 @@ export function acquire(
   const conflicts: LockConflict[] = []
   for (const path of wanted) {
     const held = locks.get(keyOf(connectionId, path))
-    if (held && held.owner !== root) conflicts.push({ path, owner: held.owner })
+    if (held && held.owner !== root) {
+      conflicts.push({ path, owner: held.owner, since: held.acquiredAt })
+    }
   }
 
   if (conflicts.length > 0) {
@@ -429,7 +433,11 @@ export function describeConflicts(conflicts: LockConflict[], requester?: string)
   if (requester && conflicts.every((c) => sameTeam(c.owner, requester))) {
     return [
       '以下资产正被**队友**改着，本次调用未做任何改动：',
-      ...conflicts.map((c) => `  - ${describeLockPath(c.path)}（${holderLabel(c.owner)}）`),
+      ...conflicts.map(
+        (c) =>
+          `  - ${describeLockPath(c.path)}（${holderLabel(c.owner)}` +
+          `${c.since ? `，已占 ${Math.max(1, Math.round((Date.now() - c.since) / 60_000))} 分钟` : ''}）`
+      ),
       '锁在它这件活交回时释放，已经等过一会儿了还没放。先做别的活；急的话用 team_message 跟它商量交接。'
     ].join('\n')
   }

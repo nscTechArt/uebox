@@ -44,13 +44,17 @@ describe.skipIf(!hasGit)('工程快照', () => {
   it('存、没变化就不存、改了再存；只收源文件，不碰工程自己的 git', async () => {
     const store = createSnapshotStore(project, git)
     const first = await store.save('开工')
-    expect(first?.message).toBe('开工')
+    // 标签说清「这一份里是什么」：谁触发的、改了几个文件、工程里有什么
+    expect(first?.message).toBe('开工｜新增 3｜共 1 · 关卡 1')
     expect(await store.save('什么都没改')).toBeNull()
 
     write('Content/Maps/Main.umap', 'v2')
     const second = await store.save(snapshotMessage('地编', '改关卡\n细节…'))
-    expect(second?.message).toBe('地编：改关卡')
-    expect((await store.list()).map((s) => s.message)).toEqual(['地编：改关卡', '开工'])
+    expect(second?.message).toBe('地编：改关卡｜修改 1｜共 1 · 关卡 1')
+    expect((await store.list()).map((s) => s.message.split('｜')[0])).toEqual([
+      '地编：改关卡',
+      '开工'
+    ])
 
     // 工程根目录下没有冒出一个 .git
     expect(existsSync(join(project, '.git'))).toBe(false)

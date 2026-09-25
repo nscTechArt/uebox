@@ -88,6 +88,19 @@ export interface TeamStore {
   markRead(ids: string[]): Promise<void>
   /** 塞进去了但对方没来得及读就收工了：退回信箱，下次接活时再交 */
   requeue(ids: string[]): Promise<void>
+  /** 记一笔「谁交了一件活、实际改了什么」。`team_status` 的「最近改动」读它 */
+  recordActivity(entry: Omit<TeamActivity, 'at'>): Promise<void>
+  activity(limit?: number): Promise<TeamActivity[]>
+}
+
+/** 一件交回来的活实际改了什么（按写操作台账记，不是队员自己说的） */
+export interface TeamActivity {
+  who: string
+  at: number
+  /** 派活内容的第一句 */
+  what: string
+  /** 写操作台账的摘要，例如「material_create ×3（M_Rock、M_Metal…）」 */
+  writes: string
 }
 
 export function createTeamStore(
@@ -99,6 +112,7 @@ export function createTeamStore(
   const rosterFile = join(dirs.stateDir, 'roster.json')
   const boardFile = join(dirs.stateDir, 'board.json')
   const mailFile = join(dirs.stateDir, 'mail.json')
+  const activityFile = join(dirs.stateDir, 'activity.json')
   const historyFile = (name: string): string =>
     join(dirs.stateDir, 'members', `${memberFileBase(name)}.json`)
 
@@ -209,6 +223,15 @@ export function createTeamStore(
     requeue: (ids) =>
       updateMail(ids, (m) => {
         if (!m.readAt) delete m.deliveredAt
-      })
+      }),
+    recordActivity: (entry) =>
+      serial(async () => {
+        await fs.mkdir(dirs.stateDir, { recursive: true })
+        const list = await readJson<TeamActivity[]>(activityFile, [])
+        list.push({ ...entry, at: now() })
+        // 只留最近这些：它是「最近改动」，不是审计日志
+        await writeJson(activityFile, list.slice(-200))
+      }),
+    activity: async (limit = 20) => (await readJson<TeamActivity[]>(activityFile, [])).slice(-limit)
   }
 }

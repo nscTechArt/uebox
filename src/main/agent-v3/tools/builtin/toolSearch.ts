@@ -170,7 +170,8 @@ export const ALWAYS_RESIDENT_TOOL_NAMES = new Set<string>([
   'team_board',
   'team_deliver',
   'team_message',
-  'team_snapshot'
+  'team_snapshot',
+  'team_status'
 ])
 
 /** 没人动过设置时，这个工具是不是常驻。设置页拿它当每一条的默认值 */
