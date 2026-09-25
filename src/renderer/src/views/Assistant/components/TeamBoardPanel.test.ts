@@ -19,7 +19,7 @@ const team: TeamStateView = {
   ],
   mail: [
     { id: 'm1', from: '试玩', to: 'producer', text: '第三波卡死', at: 1 },
-    { id: 'm2', from: '试玩', to: '玩法主程', text: '塔没伤害', at: 2 }
+    { id: 'm2', from: '试玩', to: '玩法主程', text: '塔没伤害', at: 2, deliveredAt: 3, readAt: 4 }
   ]
 }
 
@@ -48,5 +48,8 @@ describe('TeamBoardPanel', () => {
     const routes = wrapper.findAll('.mail-route').map((node) => node.text())
     expect(routes[0]).toBe('试玩 → 玩法主程')
     expect(routes[1]).not.toContain('producer')
+    // 回执：读到了的显示已读，还在信箱里的照实说
+    const receipts = wrapper.findAll('.mail-receipt').map((node) => node.text())
+    expect(receipts).toEqual(['已读', '在信箱里'])
   })
 })

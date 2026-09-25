@@ -81,9 +81,13 @@ export interface TeamStore {
   saveHistory(name: string, messages: AgentMessage[]): Promise<void>
   /** 全部留言（含已送到的），界面按时间显示 */
   mail(): Promise<TeamMail[]>
-  post(from: string, to: string, text: string): Promise<TeamMail>
-  /** 取走发给这个人、还没送到的留言，并标成已送到 */
+  post(from: string, to: string, text: string, replyTo?: string): Promise<TeamMail>
+  /** 取走发给这个人、还没送到的留言，并标成已送到、已读（下一次接活时整段交给它） */
   takeInbox(name: string): Promise<TeamMail[]>
+  markDelivered(ids: string[]): Promise<void>
+  markRead(ids: string[]): Promise<void>
+  /** 塞进去了但对方没来得及读就收工了：退回信箱，下次接活时再交 */
+  requeue(ids: string[]): Promise<void>
 }
 
 export function createTeamStore(
@@ -109,6 +113,14 @@ export function createTeamStore(
     onChange?.()
     return value
   }
+  const updateMail = (ids: string[], apply: (mail: TeamMail) => void): Promise<void> =>
+    ids.length === 0
+      ? Promise.resolve()
+      : serial(async () => {
+          const list = await readJson<TeamMail[]>(mailFile, [])
+          for (const mail of list) if (ids.includes(mail.id)) apply(mail)
+          await writeJson(mailFile, list)
+        }).then(changed)
 
   const sameName = (a: string, b: string): boolean =>
     a.trim().toLowerCase() === b.trim().toLowerCase()
@@ -159,11 +171,18 @@ export function createTeamStore(
         await writeJson(historyFile(name), messages)
       }),
     mail: () => readJson<TeamMail[]>(mailFile, []),
-    post: (from, to, text) =>
+    post: (from, to, text, replyTo) =>
       serial(async () => {
         await fs.mkdir(dirs.stateDir, { recursive: true })
         const list = await readJson<TeamMail[]>(mailFile, [])
-        const mail: TeamMail = { id: `m${list.length + 1}`, from, to, text, at: now() }
+        const mail: TeamMail = {
+          id: `m${list.length + 1}`,
+          from,
+          to,
+          text,
+          at: now(),
+          ...(replyTo ? { replyTo } : {})
+        }
         list.push(mail)
         await writeJson(mailFile, list)
         return mail
@@ -174,9 +193,22 @@ export function createTeamStore(
         const taken = list.filter((m) => !m.deliveredAt && sameName(m.to, name))
         if (taken.length === 0) return taken
         const at = now()
-        for (const m of taken) m.deliveredAt = at
+        for (const m of taken) {
+          m.deliveredAt = at
+          m.readAt = at
+        }
         await writeJson(mailFile, list)
         return taken
-      }).then(changed)
+      }).then(changed),
+    markDelivered: (ids) => updateMail(ids, (m) => (m.deliveredAt ??= now())),
+    markRead: (ids) =>
+      updateMail(ids, (m) => {
+        m.deliveredAt ??= now()
+        m.readAt ??= now()
+      }),
+    requeue: (ids) =>
+      updateMail(ids, (m) => {
+        if (!m.readAt) delete m.deliveredAt
+      })
   }
 }

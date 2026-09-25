@@ -422,6 +422,26 @@ describe('交付闸', () => {
     expect(g.followUps).toEqual([])
   })
 
+  it('后台还有队员在干活：先等它交回来（结论插进下一步），不催验收', async () => {
+    let state = newTeamState('x')
+    const followUps: string[] = []
+    let asked = 0
+    const run = createTeamGate({
+      getState: () => state,
+      setState: async (next) => {
+        state = next
+      },
+      followUp: (text) => followUps.push(text),
+      report: () => undefined,
+      awaitTeam: async () => (++asked === 1 ? { continued: true } : { followUp: '还有人在干' })
+    })
+    await run(turnEnd('stop'))
+    expect(followUps).toEqual([])
+    await run(turnEnd('stop'))
+    expect(followUps).toEqual(['还有人在干'])
+    expect(state.nudges).toBe(0)
+  })
+
   it('过了验收或验收员说要用户来：放行', async () => {
     for (const verdict of ['pass', 'blocked'] as const) {
       const g = gate({ ...newTeamState('x'), verdict })

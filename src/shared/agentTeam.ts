@@ -37,10 +37,10 @@ export interface BoardTask {
 export const PRODUCER = 'producer'
 
 /**
- * 一条留言。队员之间、队员给制作人都走这里。
+ * 一条留言。制作人和队员之间、队员之间都走这里。
  *
- * 是信箱而不是当场对话：两个队员同时问对方，当场对话会互相等死；
- * 留言在收件人**下一次接活**时送到（制作人则是任何一件活交回时）。
+ * 收件人正在干活就插进它的下一步（当场送到），没在干活就进信箱、下次接活时交给它。
+ * 「送到」和「读到」分开记，读到就是回执。见 `main/agent-v3/core/team/teamLive.ts`。
  */
 export interface TeamMail {
   id: string
@@ -48,8 +48,12 @@ export interface TeamMail {
   to: string
   text: string
   at: number
-  /** 送到的时刻。没送到就没有 */
+  /** 回的是哪一条留言 */
+  replyTo?: string
+  /** 送到的时刻：塞进了对方正在跑的上下文，或者下一次接活时交给了它。没送到就没有 */
   deliveredAt?: number
+  /** 对方真的读到的时刻（这条进了它的上下文）。回执就看它 */
+  readAt?: number
 }
 
 export type TeamVerdict = 'pass' | 'fail' | 'blocked'

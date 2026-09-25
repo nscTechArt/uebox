@@ -27,6 +27,7 @@ import {
 import { parseVerdict, type GoalVerdict } from '../goalLoop'
 import { formatInterruptedWrites, WriteLedger } from '../writeLedger'
 import { snapshotMessage, type TeamSnapshots } from './snapshots'
+import type { TeamLive } from './teamLive'
 import {
   PRODUCER,
   TASK_STATUSES,
@@ -76,6 +77,8 @@ export interface TeamToolDeps {
   onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
   /** 工程快照。没有（比如测试里）就不给 `team_snapshot`、也不自动存 */
   snapshots?: TeamSnapshots
+  /** 当场对话：插话、回执、后台派活（`teamLive.ts`）。没有就退回纯信箱 */
+  live?: TeamLive
 }
 
 // ── 任务板 ──────────────────────────────────────────────────────────────
@@ -220,7 +223,9 @@ export function formatMail(title: string, mails: TeamMail[]): string {
   return [title, ...mails.map((m) => `- ${who(m.from)}：${m.text}`)].join('\n')
 }
 
-function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
+function createSendTool(
+  deps: TeamToolDeps
+): UnrealAgentTool<SubAgentResult | { dispatched: string }> {
   /**
    * 同一个队员一次只干一件活。它的记忆是一条对话，两件活同时往里写会串台，
    * 所以同一个人的第二件活排在第一件后面；不同的人照常并行。
@@ -235,22 +240,87 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
     message: z
       .string()
       .min(1)
-      .describe('给它的活或者话。它看不到你和用户的对话，需要的背景要写进来，或者放进工作区')
+      .describe('给它的活或者话。它看不到你和用户的对话，需要的背景要写进来，或者放进工作区'),
+    wait: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe(
+        'true = 等它干完再回来（默认）；false = 派到后台就回来，你接着干别的、还能用 team_message 跟它当场说话，' +
+          '它干完的结论会作为留言送到你这里'
+      )
   })
 
-  return defineTool<typeof sendInput, SubAgentResult>({
+  /** 真正派活：带上记忆和信箱，跑完存记忆、存快照，拼好回话 */
+  const assign = async (
+    member: TeamMember,
+    message: string,
+    ctx: {
+      signal?: AbortSignal
+      report: (partial: { text: string }) => void
+      setAbortNote?: (note: () => string | undefined) => void
+    }
+  ): Promise<{ result: SubAgentResult; text: string }> => {
+    const key = member.name.toLowerCase()
+    const previous = busy.get(key) ?? Promise.resolve()
+    const run = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const ledger = new WriteLedger()
+        ctx.setAbortNote?.(() => formatInterruptedWrites(ledger.list(), member.readOnly))
+        // 上次被停在半截工具调用上的话，那条调用没有结果 —— 摘掉，不然它一睁眼
+        // 看到的就是一条凭空的失败（同 `task` 的理由，见 stripPendingToolCalls）
+        const history = stripPendingToolCalls(await deps.store.history(member.name))
+        // 它不在的时候队友给它的留言，这次接活时一起交给它
+        const inbox = formatMail('【队友给你的留言】', await deps.store.takeInbox(member.name))
+        let latest: AgentMessage[] | undefined
+        try {
+          return await deps.runMember({
+            member,
+            message: inbox ? `${inbox}\n\n${message}` : message,
+            history,
+            ledger,
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+            // 界面给这类进度统一加「团队：」前缀，这里只标是哪个队员
+            onProgress: (text) => ctx.report({ text: `${member.name} · ${text}` }),
+            keepMessages: (messages) => {
+              latest = messages
+            }
+          })
+        } finally {
+          // 被停下也要存：它已经干了一半的活，下次派活时得记得
+          if (latest) await deps.store.saveHistory(member.name, latest)
+        }
+      })
+    busy.set(key, run)
+    try {
+      const result = await run
+      const snapshot = await autoSnapshot(deps, member.name, message, result)
+      return {
+        result,
+        text:
+          `${member.name} 回话：\n${result.text}\n\n${formatWriteAudit(result)}` +
+          (snapshot ? `\n${snapshot}` : '')
+      }
+    } finally {
+      if (busy.get(key) === run) busy.delete(key)
+    }
+  }
+
+  return defineTool<typeof sendInput, SubAgentResult | { dispatched: string }>({
     name: 'team_send',
     namespace: 'core',
     // 队员自己的工具照样过审批门；派活这个动作本身不改任何东西
     risk: 'safe',
     concurrency: 'parallel',
     description:
-      '给一个队员派活或者说话，等它干完回话。它记得你之前发给它的所有内容。' +
-      '同一轮里发给不同队员的会并行跑，发给同一个人的按顺序排队。' +
-      '队员之间、队员给你的留言会在回话里一并带回。' +
+      '给一个队员派活。它记得你之前发给它的所有内容。' +
+      '默认等它干完回话；wait=false 派到后台就回来，你可以接着派别人、用 team_message 跟正在干活的队员当场说话，' +
+      '它干完的结论作为留言送到你这里（你想收工时，盒子会等所有后台的活交回来）。' +
+      '同一轮里发给不同队员的会并行跑；发给同一个人的按顺序排队。' +
       '回话末尾附一行它实际做过的写操作，那是记账记出来的，不是它自己说的。',
     input: sendInput,
-    execute: async ({ to, message }, ctx) => {
+    execute: async ({ to, message, wait }, ctx) => {
       const member = await deps.store.findMember(to)
       if (!member) {
         const roster = await deps.store.roster()
@@ -262,52 +332,35 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
         )
       }
 
-      const key = member.name.toLowerCase()
-      const previous = busy.get(key) ?? Promise.resolve()
-      const run = previous
-        .catch(() => undefined)
-        .then(async () => {
-          const ledger = new WriteLedger()
-          ctx.setAbortNote?.(() => formatInterruptedWrites(ledger.list(), member.readOnly))
-          // 上次被停在半截工具调用上的话，那条调用没有结果 —— 摘掉，不然它一睁眼
-          // 看到的就是一条凭空的失败（同 `task` 的理由，见 stripPendingToolCalls）
-          const history = stripPendingToolCalls(await deps.store.history(member.name))
-          // 它不在的时候队友给它的留言，这次接活时一起交给它
-          const inbox = formatMail('【队友给你的留言】', await deps.store.takeInbox(member.name))
-          let latest: AgentMessage[] | undefined
-          try {
-            return await deps.runMember({
-              member,
-              message: inbox ? `${inbox}\n\n${message}` : message,
-              history,
-              ledger,
-              ...(ctx.signal ? { signal: ctx.signal } : {}),
-              // 界面给这类进度统一加「团队：」前缀，这里只标是哪个队员
-              onProgress: (text) => ctx.report({ text: `${member.name} · ${text}` }),
-              keepMessages: (messages) => {
-                latest = messages
-              }
-            })
-          } finally {
-            // 被停下也要存：它已经干了一半的活，下次派活时得记得
-            if (latest) await deps.store.saveHistory(member.name, latest)
-          }
-        })
-      busy.set(key, run)
-      try {
-        const result = await run
-        // 队员们留给制作人的话，跟着这一件活的回话一起带回去
-        const toProducer = formatMail('【队员给你的留言】', await deps.store.takeInbox(PRODUCER))
-        const snapshot = await autoSnapshot(deps, member.name, message, result)
+      if (!wait && deps.live) {
+        const live = deps.live
+        // 后台跑：进度照样冒到这次调用的泳道上，结论作为留言送回制作人
+        const job = assign(member, message, ctx).then(
+          ({ text }) => live.send(member.name, PRODUCER, `【交活】${text}`),
+          (error: unknown) =>
+            live.send(
+              member.name,
+              PRODUCER,
+              `【没干完】${member.name} 这件活停下了：${error instanceof Error ? error.message : String(error)}`
+            )
+        )
+        live.track(member.name, job)
         return {
-          text:
-            `${member.name} 回话：\n${result.text}\n\n${formatWriteAudit(result)}` +
-            (snapshot ? `\n${snapshot}` : '') +
-            (toProducer ? `\n\n${toProducer}` : ''),
-          details: result
+          text: `已派给 ${member.name}，在后台干。它干完的结论会作为留言送到你这里；想当场跟它说话用 team_message。`,
+          details: { dispatched: member.name }
         }
+      }
+
+      // 同步等：这段时间制作人没法当场回这个队员的话（它在等队员交活），登记一下，
+      // 队员那边要等制作人回复时会被告知「写进结论里交回来」，而不是白等到超时
+      const done = deps.live?.awaiting(member.name)
+      try {
+        const { result, text } = await assign(member, message, ctx)
+        // 队员们留给制作人、还没送到的话，跟着这一件活的回话一起带回去
+        const toProducer = formatMail('【队员给你的留言】', await deps.store.takeInbox(PRODUCER))
+        return { text: text + (toProducer ? `\n\n${toProducer}` : ''), details: result }
       } finally {
-        if (busy.get(key) === run) busy.delete(key)
+        done?.()
       }
     }
   })
@@ -315,54 +368,138 @@ function createSendTool(deps: TeamToolDeps): UnrealAgentTool<SubAgentResult> {
 
 // ── 留言 ────────────────────────────────────────────────────────────────
 
+/** 等回执、等回复的默认时长和上限 */
+const WAIT_READ_MS = 3 * 60_000
+const WAIT_REPLY_MS = 10 * 60_000
+const WAIT_MAX_MS = 30 * 60_000
+
 /**
- * 队员的留言工具。每个队员一份，留言人就是它自己。
+ * 留言工具。制作人和每个队员各一份，留言人就是它自己。
  *
- * 不做成「当场问、当场答」：两个队员同时问对方会互相等死，
- * 而收件人可能正在编辑器里干别的活。留言在收件人下一次接活时送到；
- * 发给制作人的，在任何一件活交回时带给它。
+ * 对方正在干活，这条就插进它的下一步（和用户插话同一条路）；没在干活就进信箱，
+ * 下次接活时交给它。`wait` 决定发完要不要等：等它读到（回执），或者等它回话。
+ * 死锁怎么拆见 `teamLive.ts`。
  */
-export function createMessageTool(store: TeamStore, from: string): UnrealAgentTool<TeamMail> {
+export function createMessageTool(
+  store: TeamStore,
+  from: string,
+  live?: TeamLive
+): UnrealAgentTool<unknown> {
   const messageInput = z.object({
     to: z.string().min(1).describe(`收件人：队员名，或者 "${PRODUCER}" 表示制作人`),
-    text: z.string().min(1).describe('要说的话。对方看不到你的对话，需要的背景写进来')
+    text: z.string().min(1).describe('要说的话。对方看不到你的对话，需要的背景写进来'),
+    reply_to: z.string().optional().describe('在回哪一条留言（对方留言开头的 m 编号）'),
+    wait: z
+      .enum(['none', 'read', 'reply'])
+      .optional()
+      .default('none')
+      .describe(
+        'none = 发完就走（默认）；read = 等到对方真的读到（回执）；reply = 等对方回话。' +
+          '等的时候如果有人给你发话，会先把那句交给你'
+      ),
+    wait_seconds: z
+      .number()
+      .int()
+      .min(10)
+      .max(WAIT_MAX_MS / 1000)
+      .optional()
+      .describe('最多等几秒。默认 read 180、reply 600')
   })
 
-  return defineTool<typeof messageInput, TeamMail>({
+  const deliveryNote = (to: string, delivery: string): string =>
+    delivery === 'handed'
+      ? `${to} 正在等消息，已当场交给它。`
+      : delivery === 'live'
+        ? `${to} 正在干活，已插进它的下一步。`
+        : to === PRODUCER
+          ? '制作人这会儿没在跑，已放进它的信箱。'
+          : `${to} 这会儿没在干活，已放进它的信箱，下次接活时会看到。`
+
+  return defineTool<typeof messageInput, unknown>({
     name: 'team_message',
     namespace: 'core',
     // 只写盒子自己的信箱，只读的队员（评审、试玩）也要能提意见
     risk: 'safe',
     concurrency: 'parallel',
     description:
-      `给队友或制作人（"${PRODUCER}"）留言：交接产出、提问、提醒对方你改了什么。` +
-      '不是当场对话：对方下一次接活时才会看到，制作人在任何一件活交回时看到。' +
-      '要对方马上动手的事，留言给制作人，由它来派。',
+      `给队友或制作人（"${PRODUCER}"）发话：交接产出、提问、提醒对方你改了什么。` +
+      '对方正在干活的话，这句会插进它的下一步；没在干活就进信箱，下次接活时看到。' +
+      'wait=read 等回执（对方真的读到），wait=reply 等对方回话。',
     input: messageInput,
-    execute: async ({ to, text }) => {
+    execute: async ({ to, text, reply_to, wait, wait_seconds }, ctx) => {
       const toProducer = to.trim().toLowerCase() === PRODUCER
+      let target = PRODUCER
       if (!toProducer) {
-        const target = await store.findMember(to)
-        if (!target) {
+        const member = await store.findMember(to)
+        if (!member) {
           const roster = await store.roster()
           throw new Error(
             `团队里没有「${to}」。现有：${roster.map((m) => m.name).join('、') || '（无）'}；` +
-              `给制作人留言用 "${PRODUCER}"`
+              `给制作人发话用 "${PRODUCER}"`
           )
         }
-        if (target.name.toLowerCase() === from.toLowerCase()) throw new Error('不用给自己留言')
-        to = target.name
+        target = member.name
       }
-      const mail = await store.post(from, toProducer ? PRODUCER : to, text)
-      return {
-        text: toProducer
-          ? '已留言给制作人，它会在你这件活交回时看到。'
-          : `已留言给 ${to}，它下一次接活时会看到。`,
-        details: mail
+      if (target.toLowerCase() === from.toLowerCase()) throw new Error('不用给自己发话')
+
+      // 制作人正等着这个队员交活时，没法当场回它的话 —— 干等只会等到超时
+      if (wait === 'reply' && target === PRODUCER && live?.isAwaiting(from)) {
+        throw new Error(
+          '制作人正在等你交这件活，没法当场回你。把问题写进你的结论交回去；' +
+            '能自己判断的，先按你的判断做并写明理由'
+        )
       }
+
+      if (!live) {
+        const mail = await store.post(from, target, text, reply_to)
+        return { text: deliveryNote(target, 'queued'), details: mail }
+      }
+
+      const { mail, delivery } = await live.send(from, target, text, reply_to)
+      const lines = [`已发出 ${mail.id}。${deliveryNote(target, delivery)}`]
+      const ms = Math.min(
+        WAIT_MAX_MS,
+        wait_seconds ? wait_seconds * 1000 : wait === 'read' ? WAIT_READ_MS : WAIT_REPLY_MS
+      )
+
+      if (wait === 'read' && delivery !== 'handed') {
+        if (delivery === 'queued') {
+          lines.push('对方没在跑，要等它下次接活才读得到，这次不等回执。')
+        } else {
+          const outcome = await live.waitRead(mail.id, ms, ctx.signal)
+          lines.push(
+            outcome === 'read'
+              ? `回执：${target} 已读到。`
+              : `回执：${Math.round(ms / 1000)} 秒内 ${target} 还没读到（它可能卡在一次很长的工具调用里）。`
+          )
+        }
+      }
+
+      if (wait === 'reply') {
+        if (delivery === 'queued' && !(toProducer && live.isRunning(PRODUCER))) {
+          lines.push('对方没在跑，这次等不到回话；它下次接活时会看到。')
+        } else {
+          ctx.report({ text: `等 ${who(target)} 回话…` })
+          const outcome = await live.waitReply(from, mail.id, ms, ctx.signal)
+          if (outcome.kind === 'reply') {
+            lines.push(`${who(target)} 回话（${outcome.mail.id}）：\n${outcome.mail.text}`)
+          } else if (outcome.kind === 'incoming') {
+            lines.push(
+              '还没等到回话，先有人给你发了话（可能正是在问你）。先处理它，需要的话再发一次、接着等：',
+              formatMail('', outcome.mails).trim()
+            )
+          } else {
+            lines.push(`${Math.round(ms / 1000)} 秒内 ${who(target)} 没回话。`)
+          }
+        }
+      }
+
+      return { text: lines.join('\n'), details: mail }
     }
   })
 }
+
+const who = (name: string): string => (name === PRODUCER ? '制作人' : name)
 
 // ── 快照 ────────────────────────────────────────────────────────────────
 
@@ -491,6 +628,8 @@ export function createTeamTools(
     createSendTool(deps),
     createBoardTool(deps.store),
     createDeliverTool(deps),
+    // 制作人也能当场跟正在干活的队员说话（配合 team_send 的 wait=false）
+    createMessageTool(deps.store, PRODUCER, deps.live),
     ...(deps.snapshots ? [createSnapshotTool(deps.snapshots)] : [])
   ] as unknown as UnrealAgentTool<never>[]
 }

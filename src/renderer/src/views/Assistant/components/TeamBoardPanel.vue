@@ -71,6 +71,7 @@
           <li v-for="mail in recentMail" :key="mail.id">
             <span class="mail-route">{{ who(mail.from) }} → {{ who(mail.to) }}</span>
             <span class="mail-text">{{ mail.text }}</span>
+            <span class="mail-receipt">{{ receipt(mail) }}</span>
           </li>
         </ul>
       </div>
@@ -87,6 +88,7 @@ import AppTag from '@renderer/components/AppTag.vue'
 import {
   PRODUCER,
   type TaskStatus,
+  type TeamMail,
   type TeamStateView,
   type TeamVerdict
 } from '@core/shared/agentTeam'
@@ -129,6 +131,13 @@ const recentMail = computed(() => props.team.mail.slice(-MAIL_SHOWN).reverse())
 
 function who(name: string): string {
   return name === PRODUCER ? t('assistant.teamBoard.producer') : name
+}
+
+/** 回执：读到了、塞进去了还没读、还在信箱里 */
+function receipt(mail: TeamMail): string {
+  if (mail.readAt) return t('assistant.teamBoard.receipt.read')
+  if (mail.deliveredAt) return t('assistant.teamBoard.receipt.delivered')
+  return t('assistant.teamBoard.receipt.queued')
 }
 </script>
 
@@ -310,6 +319,13 @@ function who(name: string): string {
 .mail-text {
   color: var(--color-text-primary);
   overflow-wrap: anywhere;
+}
+
+.mail-receipt {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
 }
 
 .empty {

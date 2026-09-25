@@ -79,6 +79,8 @@ import { AUDITOR_TOOLS, type GoalVerdict } from './goalLoop'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
 import { memberFileBase, type TeamMember, type TeamStore } from './team/teamStore'
 import type { TeamSnapshots } from './team/snapshots'
+import type { TeamLive } from './team/teamLive'
+import { PRODUCER } from './team/teamStore'
 import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
 import { pacedStreamFn } from './team/requestGate'
 
@@ -245,12 +247,14 @@ export interface SessionContext {
     onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
     /** 工程快照（存、列、回滚）。宿主提供，回滚要关编辑器再打开 */
     snapshots?: TeamSnapshots
+    /** 当场对话：谁在跑、插话、回执、后台派活（`core/team/teamLive.ts`） */
+    live?: TeamLive
   }
   /**
    * 这个子 agent 是工作室里的一个队员：人设进系统提示词，手上多一个任务板工具。
    * 由 `runSubAgent` 的 `member` 设进来，产品路径别的地方不传。
    */
-  teamMember?: { name: string; persona: string; store: TeamStore }
+  teamMember?: { name: string; persona: string; store: TeamStore; live?: TeamLive }
   /**
    * 模型请求走自适应调度（`core/team/requestGate.ts`）。工作室模式打开，子 agent 继承。
    * 几个队员同时请模型时，按网关的实际承受力排队，卡死的请求退避重发。
@@ -864,6 +868,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       markLegacyHealthResults(messages) as unknown as Message[]
   })
 
+  attachTeamLive(ctx, agent)
+
   return {
     agent,
     selection,
@@ -954,7 +960,12 @@ export async function runSubAgent(
     team: undefined,
     teamMember:
       input.member && parent.team
-        ? { name: input.member.name, persona: input.member.persona, store: parent.team.store }
+        ? {
+            name: input.member.name,
+            persona: input.member.persona,
+            store: parent.team.store,
+            ...(parent.team.live ? { live: parent.team.live } : {})
+          }
         : undefined,
     // 复用父 agent 已发现的 skill 清单，不重复扫盘
     ...(parent.skills ? { skills: parent.skills } : {}),
@@ -1086,6 +1097,51 @@ export async function runSubAgent(
  */
 const ACCEPTANCE_TOOLS = [...AUDITOR_TOOLS, 'ue_autoplay', 'ue_inject_input', 'project_smoke_test']
 
+/**
+ * 工作室里「谁在跑」：制作人和每个队员开跑时登记、收工时注销，别人发来的话才能当场插进来；
+ * 插进来的那条真正进了它的上下文，才记成「已读」（回执）。见 `core/team/teamLive.ts`。
+ *
+ * 验收员、`task` 子任务不登记：它们不收留言。
+ */
+function attachTeamLive(ctx: SessionContext, agent: Agent): void {
+  const live = ctx.teamMember?.live ?? (ctx.isSubAgent ? undefined : ctx.team?.live)
+  const name = ctx.teamMember?.name ?? (ctx.isSubAgent ? undefined : PRODUCER)
+  if (!live || !name) return
+
+  let detach: (() => Promise<void>) | undefined
+  agent.subscribe((event) => {
+    if (event.type === 'agent_start') {
+      void detach?.()
+      detach = live.attach(name, {
+        steer: (text) => agent.steer({ role: 'user', content: text, timestamp: Date.now() })
+      })
+      return
+    }
+    if (event.type === 'message_start') {
+      const message = event.message as { role?: string; content?: unknown }
+      if (message.role !== 'user') return
+      const text =
+        typeof message.content === 'string'
+          ? message.content
+          : Array.isArray(message.content)
+            ? message.content
+                .map((block) =>
+                  (block as { type?: string }).type === 'text'
+                    ? ((block as { text?: string }).text ?? '')
+                    : ''
+                )
+                .join('')
+            : ''
+      if (text.includes('[team mail ')) void live.consumed(name, text)
+      return
+    }
+    if (event.type === 'agent_end') {
+      void detach?.()
+      detach = undefined
+    }
+  })
+}
+
 /** 队员的锁主。不带 `:sub-`，所以不会被 `rootSessionId` 归回制作人 */
 function memberLockOwner(sessionId: string, name: string): string {
   return `${sessionId}:mate-${memberFileBase(name)}`
@@ -1103,7 +1159,7 @@ function teamToolsFor(
     // 队员拿任务板和留言：交接、提问都靠这两样，它看不到制作人的对话
     return [
       createBoardTool(ctx.teamMember.store),
-      createMessageTool(ctx.teamMember.store, ctx.teamMember.name)
+      createMessageTool(ctx.teamMember.store, ctx.teamMember.name, ctx.teamMember.live)
     ] as unknown as UnrealAgentTool<never>[]
   }
   const team = ctx.team
@@ -1159,7 +1215,8 @@ function teamToolsFor(
       return result.text
     },
     ...(team.onVerdict ? { onVerdict: team.onVerdict } : {}),
-    ...(team.snapshots ? { snapshots: team.snapshots } : {})
+    ...(team.snapshots ? { snapshots: team.snapshots } : {}),
+    ...(team.live ? { live: team.live } : {})
   })
 }
 

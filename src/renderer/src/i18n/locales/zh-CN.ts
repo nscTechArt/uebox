@@ -2297,6 +2297,11 @@ export default {
       producer: '制作人',
       fast: '快档',
       readOnly: '只读',
+      receipt: {
+        read: '已读',
+        delivered: '已送达',
+        queued: '在信箱里'
+      },
       verdict: {
         pass: '验收通过',
         fail: '验收未过',

@@ -2348,6 +2348,11 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       producer: 'Producer',
       fast: 'fast',
       readOnly: 'read-only',
+      receipt: {
+        read: 'read',
+        delivered: 'delivered',
+        queued: 'in inbox'
+      },
       verdict: {
         pass: 'Accepted',
         fail: 'Rejected',

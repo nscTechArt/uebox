@@ -68,15 +68,31 @@ export interface TeamGateDeps {
   setState: (next: TeamState) => Promise<void>
   followUp: (text: string) => void
   report: (message: string) => void
+  /**
+   * 制作人想收尾时，还有后台的活没交回来、或者信箱里有没看的留言：先把这些处理掉。
+   * `continued` = 等到了一件活交回来，结论已经插进制作人的下一步，循环会自己接着跑；
+   * `followUp` = 要补一句话让它接着干。都没有就给 null。
+   */
+  awaitTeam?: (signal?: AbortSignal) => Promise<{ continued?: boolean; followUp?: string } | null>
 }
 
-export function createTeamGate(deps: TeamGateDeps): (event: AgentEvent) => Promise<void> {
-  return async (event) => {
+export function createTeamGate(
+  deps: TeamGateDeps
+): (event: AgentEvent, signal?: AbortSignal) => Promise<void> {
+  return async (event, signal) => {
     if (event.type !== 'turn_end') return
     // 还在调工具 = 没打算收尾
     if (event.toolResults.length > 0) return
     const { stopReason } = event.message as { stopReason?: string }
     if (stopReason !== 'stop') return
+
+    // 后台还有队员在干活：团队没收工，制作人不能先走
+    const team = await deps.awaitTeam?.(signal)
+    if (team?.continued) return
+    if (team?.followUp) {
+      deps.followUp(team.followUp)
+      return
+    }
 
     const state = deps.getState()
     // 过了就放行；BLOCKED 是验收员说「这得用户来」，也放行让制作人把话说完
