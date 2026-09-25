@@ -7,6 +7,7 @@ import { serviceManager } from '../../../../services'
 import { projectManager } from '../../../../services/project'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
+import { decodeXml as decodeXML } from '../../../../services/editorCrashWatch/crashReport'
 // Schema
 const GetCrashLogsParamsSchema = z.object({
   projectPath: z
@@ -24,20 +25,6 @@ interface CrashReport {
   callStack: string
   logSnippet: string
   source: 'CrashContext' | 'LogFile' | 'PluginRPC'
-}
-
-/**
- * 简单的 XML 实体解码
- */
-function decodeXML(str: string): string {
-  return str
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#10;/g, '\n')
-    .replace(/&#13;/g, '\r')
 }
 
 /**

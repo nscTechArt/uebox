@@ -61,6 +61,7 @@ import {
 } from '../../../core/runtimeEnvelope'
 import UnrealPathManagerUtil from '../../../../utils/UnrealPathManager'
 import UnrealProcessDetector from '../../../../utils/UnrealProcessDetector'
+import { recentEditorCrashes, type EditorCrash } from '../../../../services/editorCrashWatch/watch'
 
 /** 一个正在跑的编辑器进程（盒子扫出来的，不经过 RPC） */
 interface EditorProcess {
@@ -104,7 +105,21 @@ export interface SessionHealthReport {
    * 判据分辨「这是这一轮的观测吗」。
    */
   runtime_scope_id?: string
+  /** 最近十分钟里崩掉的编辑器（盒子的崩溃看门人认出来的），新的在前 */
+  recent_crashes?: RecentCrash[]
   summary: string
+}
+
+interface RecentCrash {
+  project_name: string
+  project_path: string
+  seconds_ago: number
+  crash_type?: string
+  error?: string
+  /** 盒子有没有把它重开：relaunched / disabled / crash_loop / already_running / no_uproject / failed */
+  relaunch: EditorCrash['relaunch']
+  /** 未保存的自动存档备份到了哪（有才给） */
+  autosave_backup?: string
 }
 
 /**
@@ -344,6 +359,58 @@ function isSatisfied(connections: EditorConnection[], targetPath: string | undef
   return connections.some((conn) => conn.is_current_target)
 }
 
+/**
+ * 最近的崩溃。放在 summary 最前面：「编辑器在跑但没连上」和「编辑器刚崩完、盒子正在重开」
+ * 下一步都是等，但后者模型必须知道 —— 连上之后不能拿同样的参数把刚才那一步再跑一遍。
+ */
+function collectCrashes(targetPath: string | undefined): RecentCrash[] {
+  const target = normalizePath(targetPath)
+  const now = Date.now()
+  return recentEditorCrashes()
+    .filter((crash) => {
+      if (!target) return true
+      const dir = normalizePath(crash.editor.projectDir)
+      return target === dir || target.startsWith(`${dir}/`)
+    })
+    .map((crash) => ({
+      project_name: crash.editor.projectName,
+      project_path: crash.editor.projectDir,
+      seconds_ago: Math.max(0, Math.round((now - crash.at) / 1000)),
+      ...(crash.report?.crashType ? { crash_type: crash.report.crashType } : {}),
+      ...(crash.report?.errorMessage ? { error: crash.report.errorMessage } : {}),
+      relaunch: crash.relaunch,
+      ...(crash.restore ? { autosave_backup: crash.restore.backupDir } : {})
+    }))
+}
+
+const RELAUNCH_TEXT: Record<EditorCrash['relaunch'], string> = {
+  relaunched: '盒子已经自动重开了它',
+  disabled: '自动重开在设置里关着，没有重开',
+  crash_loop: '5 分钟内第二次崩溃，没有再自动重开（可能一打开就崩）',
+  already_running: '编辑器已经被重新打开',
+  no_uproject: '没找到 .uproject，没能自动重开',
+  failed: '自动重开失败'
+}
+
+function describeCrashes(crashes: RecentCrash[]): string[] {
+  if (crashes.length === 0) return []
+  return [
+    '**最近有编辑器崩溃：**',
+    ...crashes.map(
+      (crash) =>
+        `- ${crash.project_name} ${crash.seconds_ago} 秒前崩了` +
+        (crash.crash_type ? `（${crash.crash_type}）` : '') +
+        (crash.error ? `：${crash.error}` : '') +
+        `。${RELAUNCH_TEXT[crash.relaunch]}。` +
+        (crash.autosave_backup
+          ? `未保存的自动存档备份在 ${crash.autosave_backup}，要告诉用户。`
+          : '')
+    ),
+    '连上之后先查清崩溃前那一步做到了哪，**不要用同样的参数重试**。',
+    ''
+  ]
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> {
@@ -453,6 +520,7 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
         targetPath && !connections.some((conn) => conn.is_current_target) ? targetPath : undefined
 
       const scopeId = getRuntimeScopeId()
+      const crashes = collectCrashes(targetPath)
 
       const details: SessionHealthReport = {
         success: true,
@@ -463,7 +531,11 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
         ...(staleTarget ? { session_project_not_connected: staleTarget } : {}),
         waited_seconds: waited,
         ...(scopeId ? { runtime_scope_id: scopeId } : {}),
-        summary: describe(state, processes, connections, staleTarget, waited)
+        ...(crashes.length > 0 ? { recent_crashes: crashes } : {}),
+        summary: [
+          ...describeCrashes(crashes),
+          describe(state, processes, connections, staleTarget, waited)
+        ].join('\n')
       }
 
       // state 和作用域戳各占一行：summary 是给人看的散文，模型要的那个三取一的值

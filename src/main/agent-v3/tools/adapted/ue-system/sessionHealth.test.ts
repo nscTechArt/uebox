@@ -38,11 +38,13 @@ const {
   getTargetConnectionId,
   getTargetProjectPath,
   probeConnection,
-  dropConnection
+  dropConnection,
+  recentEditorCrashes
 } = vi.hoisted(() => ({
   // 探活默认都答话；要模拟僵尸连接就让它回 dead
   probeConnection: vi.fn(async (): Promise<'alive' | 'busy' | 'dead'> => 'alive'),
   dropConnection: vi.fn(),
+  recentEditorCrashes: vi.fn((): unknown[] => []),
   getAllConnections: vi.fn((): Array<{ id: string }> => []),
   getAllProjects: vi.fn((): ProjectRow[] => []),
   getRunningProjects: vi.fn((): ProcessRow[] => []),
@@ -88,6 +90,10 @@ vi.mock('../../../../utils/UnrealPathManager', () => ({
   }
 }))
 
+vi.mock('../../../../services/editorCrashWatch/watch', () => ({
+  recentEditorCrashes: () => recentEditorCrashes()
+}))
+
 import { createSessionHealthTool } from './sessionHealth'
 import { HEALTH_SCOPE_FIELD, runWithRuntimeScope } from '../../../core/runtimeEnvelope'
 
@@ -127,6 +133,7 @@ beforeEach(() => {
   getRunningProjects.mockReturnValue([])
   getTargetConnectionId.mockReturnValue(undefined)
   getTargetProjectPath.mockReturnValue(undefined)
+  recentEditorCrashes.mockReturnValue([])
 })
 
 /**
@@ -574,5 +581,57 @@ describe('运行时作用域戳', () => {
     const connected = String((await run()).summary)
     expect(connected).toContain('只代表')
     expect(connected).toContain('runtime-status')
+  })
+})
+
+/**
+ * 编辑器刚崩完、盒子正在重开时，下一步同样是「等」—— 但模型必须知道是崩了：
+ * 连上之后不能拿同样的参数把刚才那一步再跑一遍。
+ */
+describe('最近的崩溃', () => {
+  const crash = {
+    editor: {
+      connectionId: 'c',
+      projectName: 'MyGame',
+      projectDir: 'I:/Dev/MyGame',
+      connectedAt: 0
+    },
+    report: {
+      folder: 'x',
+      crashType: 'Crash',
+      errorMessage: 'EXCEPTION_ACCESS_VIOLATION',
+      callStackHead: '',
+      time: 0
+    },
+    reporterClosed: true,
+    restore: {
+      backupDir: 'I:/Dev/MyGame/Saved/UEBoxCrashRecovery/1',
+      packageCount: 1,
+      missingFiles: []
+    },
+    relaunch: 'relaunched',
+    at: Date.now() - 30_000
+  }
+
+  it('放在 summary 最前面，带原因、重开结果、存档备份和别原样重试', async () => {
+    recentEditorCrashes.mockReturnValue([crash])
+    const result = await run()
+    const summary = String(result.summary)
+
+    expect(summary.startsWith('**最近有编辑器崩溃')).toBe(true)
+    expect(summary).toContain('EXCEPTION_ACCESS_VIOLATION')
+    expect(summary).toContain('自动重开了它')
+    expect(summary).toContain('UEBoxCrashRecovery')
+    expect(summary).toContain('不要用同样的参数重试')
+    expect(result.recent_crashes).toMatchObject([
+      { project_name: 'MyGame', relaunch: 'relaunched' }
+    ])
+  })
+
+  it('这一轮绑了别的工程时不报这条', async () => {
+    recentEditorCrashes.mockReturnValue([crash])
+    getTargetProjectPath.mockReturnValue('I:/Dev/Other/Other.uproject')
+    const result = await run()
+    expect(result.recent_crashes).toBeUndefined()
   })
 })

@@ -301,15 +301,15 @@ export default {
       label: 'Open to external clients',
       // One line at the top level; the permission settings show full details when writable.
       shortNote:
-        'Let Claude Code or Cursor drive your engine. Loopback only, token required, writable by default.',
+        "Give Codex or Claude Code every tool Unreal Box's assistant has. Loopback only, token required, writable by default.",
       securityNote:
-        'External calls do NOT go through the approval prompt — write operations run immediately. Local file and shell tools are never exposed. If the token leaks, whoever has it can change your project.',
+        "External clients get the same tools as Unreal Box's assistant, including local file access and shell commands. Unreal Box shows no approval prompt; the client's own approval settings decide what gets stopped. If the token leaks, whoever has it can change your project and the files on this computer.",
       securityNoteIdle:
-        'Once enabled, external calls do NOT go through the approval prompt — write operations run immediately. Local file and shell tools are never exposed. If the token leaks, whoever has it can change your project.',
+        "Once enabled, external clients get the same tools as Unreal Box's assistant, including local file access and shell commands. Unreal Box shows no approval prompt; the client's own approval settings decide what gets stopped. If the token leaks, whoever has it can change your project and the files on this computer.",
       includeMutating: 'External client permissions',
       scopeReadOnly: 'Currently read-only. Turn on to allow creating, editing, and deleting.',
       scopeWritable:
-        'Currently writable: external clients can create, edit, and delete your assets.',
+        'Currently writable: external clients can edit and delete your assets, read and write local files, and run commands.',
       stopToChange:
         'The port cannot be changed while the service is running; turn the switch above off first.',
       port: 'Port',
@@ -803,8 +803,8 @@ export default {
       previewTitle: 'Choose roles for the plan',
       previewDesc:
         'Checked roles switch to plan models. Roles you set up yourself start unchecked.',
-      previewCurrent: 'Now: {name}',
-      previewUnset: 'Now: not set',
+      previewCurrent: 'Replaces: {name}',
+      previewUnset: 'Replaces: not set',
       previewManaged: 'Managed by plan',
       previewReindex: 'Knowledge base re-embeds with the new model; keyword search only until done',
       apply: 'Apply',
@@ -812,7 +812,7 @@ export default {
       storage: {
         label: 'Object storage',
         spec: '{quota} · kept {days} days after last use',
-        off: 'Now: off',
+        off: 'Replaces: off',
         provider: 'Provided by Box Plan. No keys needed.',
         usage: '{used} of {quota} used',
         retention: 'kept {days} days after last use',
@@ -2559,6 +2559,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         'Could not connect to the model service. Check your network, VPN, proxy, or model source URL.',
       usedSkills: 'Skills used in this response',
       userSkill: 'User Skill',
+      projectSkill: 'Project Skill',
       builtinSkill: 'Built-in Skill'
     },
     // The browser split pane on the right, in embedded mode
@@ -3238,6 +3239,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         'Install and enable the connection plugin when opening a project.',
       autoEnableUnrealAgentLinkEnabled: 'Automatic plugin installation enabled',
       autoEnableUnrealAgentLinkDisabled: 'Automatic plugin installation disabled',
+      crashRecovery: 'Crash recovery',
+      autoRecoverEditorCrash: 'Reopen the editor after a crash',
+      autoRecoverEditorCrashDesc:
+        'Closes the crash reporter, backs up unsaved autosaves, and reopens the project. Stops after a second crash within 5 minutes.',
       repairCleanup: 'Clean up old plugins',
       repairCleanupDesc:
         'Remove old connection plugins from engine folders. Close Unreal Editor first.',

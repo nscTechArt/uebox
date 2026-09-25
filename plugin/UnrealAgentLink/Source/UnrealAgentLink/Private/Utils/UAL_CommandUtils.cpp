@@ -1249,6 +1249,24 @@ FString UAL_CommandUtils::GetActorFriendlyName(AActor* Actor)
 #endif
 }
 
+FString UAL_CommandUtils::NormalizeAssetPath(const FString& InputPath)
+{
+	FString Result = InputPath.TrimStartAndEnd();
+
+	if (Result.EndsWith(TEXT(".uasset")))
+	{
+		Result = Result.LeftChop(7);
+	}
+
+	Result.ReplaceInline(TEXT("\\"), TEXT("/"));
+	while (Result.Contains(TEXT("//")))
+	{
+		Result.ReplaceInline(TEXT("//"), TEXT("/"));
+	}
+
+	return Result;
+}
+
 TSharedPtr<FJsonObject> UAL_CommandUtils::MakeVectorJson(const FVector& Vec)
 {
 	TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();

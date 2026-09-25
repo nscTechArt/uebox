@@ -16,6 +16,8 @@ import {
   estimateMessagesTokens,
   measureCompaction,
   splitAtRecentBudget,
+  precompactionThreshold,
+  resetPrecompactionsForTest,
   UNREAL_BOX_COMPACTION
 } from './compaction'
 
@@ -96,13 +98,13 @@ describe('splitAtRecentBudget', () => {
 })
 
 describe('compactionThreshold', () => {
-  it('大窗口按七成 —— 1M 窗口不该等到 98% 才压', () => {
-    expect(compactionThreshold(1_000_000)).toBe(700_000)
-    expect(compactionThreshold(200_000)).toBe(140_000)
+  it('大窗口按八成五 —— 1M 窗口不该等到 98% 才压', () => {
+    expect(compactionThreshold(1_000_000)).toBe(850_000)
+    expect(compactionThreshold(200_000)).toBe(170_000)
   })
 
-  it('小窗口退回「窗口 - 保留额度」—— 七成那条线会把摘要 prompt 自己挤掉', () => {
-    // 32K 窗口：七成是 22.4K，比 32K-16.4K=15.6K 更晚，取更早的那条
+  it('小窗口退回「窗口 - 保留额度」—— 八成五那条线会把摘要 prompt 自己挤掉', () => {
+    // 32K 窗口：八成五是 27.2K，比 32K-16.4K=15.6K 更晚，取更早的那条
     expect(compactionThreshold(32_000)).toBe(32_000 - UNREAL_BOX_COMPACTION.reserveTokens)
   })
 })
@@ -161,10 +163,10 @@ describe('createAutoCompact', () => {
     expect(generateSummary).toHaveBeenCalled()
   })
 
-  it('窗口用到七成就压，不等到贴着上限才动手', async () => {
+  it('窗口用到八成五就压，不等到贴着上限才动手', async () => {
     generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要' })
-    // 8 条 40000 字符 ≈ 80K token，窗口 100K → 已过 70K 线，但远没到 pi 的 83.6K
-    const compact = createAutoCompact(deps(100_000))
+    // 8 条 40000 字符 ≈ 80K token，窗口 90K → 已过 76.5K 线，但没到 pi 的 73.6K 之外那条
+    const compact = createAutoCompact(deps(90_000))
 
     const messages = longHistory()
     const result = await compact(messages)
@@ -173,7 +175,7 @@ describe('createAutoCompact', () => {
     expect(result.length).toBeLessThan(messages.length)
   })
 
-  it('七成以下不压 —— 压缩仍是兜底不是常态', async () => {
+  it('四成用量不压，也不在后台写 —— 压缩仍是兜底不是常态', async () => {
     generateSummary.mockReset()
     // 同一段历史（≈80K），窗口放到 200K → 只用了四成
     const compact = createAutoCompact(deps(200_000))
@@ -536,5 +538,106 @@ describe('createAutoCompact —— 摘要检查点', () => {
     await compact(messages)
 
     expect(generateSummary).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createAutoCompact —— 后台提前写摘要', () => {
+  const hashMessages = (messages: AgentMessage[]): string =>
+    `${messages.length}:${JSON.stringify(messages).length}`
+
+  // longHistory ≈ 80K token：120K 窗口下是 67%，过了后台线没过压缩线；90K 窗口下过了压缩线
+  const BELOW = 120_000
+  const ABOVE = 90_000
+
+  const keyed = (
+    contextWindow: number,
+    extra: Partial<Parameters<typeof createAutoCompact>[0]> = {}
+  ): Parameters<typeof createAutoCompact>[0] => ({
+    ...deps(contextWindow),
+    hashMessages,
+    precompactKey: 's1',
+    ...extra
+  })
+
+  const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('后台线在压缩线之前', () => {
+    expect(precompactionThreshold(200_000)).toBe(120_000)
+    expect(precompactionThreshold(200_000)).toBeLessThan(compactionThreshold(200_000))
+  })
+
+  it('过了后台线：开始写摘要，但原样返回、不换上，只写一次', async () => {
+    resetPrecompactionsForTest()
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '后台摘要' })
+    const onCompacting = vi.fn()
+    const compact = createAutoCompact(keyed(BELOW, { onCompacting }))
+    const messages = longHistory()
+
+    expect(await compact(messages)).toBe(messages)
+    expect(await compact(messages)).toBe(messages)
+    await flush()
+
+    expect(generateSummary).toHaveBeenCalledTimes(1)
+    expect(onCompacting).not.toHaveBeenCalled()
+  })
+
+  it('撞线时直接换上写好的那份，不当场再写，也不弹「正在压缩」', async () => {
+    resetPrecompactionsForTest()
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '后台摘要' })
+    const messages = longHistory()
+    await createAutoCompact(keyed(BELOW))(messages)
+    await flush()
+
+    // agent 每条用户消息重建一次：换一个新的钩子，仍然拿得到那份摘要
+    const save = vi.fn(async () => undefined)
+    const onCompacting = vi.fn()
+    const result = await createAutoCompact(keyed(ABOVE, { onCompacting, checkpoint: { save } }))(
+      messages
+    )
+
+    expect(generateSummary).toHaveBeenCalledTimes(1)
+    expect(onCompacting).not.toHaveBeenCalled()
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(String((result[0] as { content: string }).content)).toContain('后台摘要')
+  })
+
+  it('撞线时还没写完：提示用户在等，等它写完换上', async () => {
+    resetPrecompactionsForTest()
+    let finish: (value: unknown) => void = () => undefined
+    generateSummary.mockReset().mockReturnValue(new Promise((resolve) => (finish = resolve)))
+    const messages = longHistory()
+    await createAutoCompact(keyed(BELOW))(messages)
+
+    const onCompacting = vi.fn()
+    const pending = createAutoCompact(keyed(ABOVE, { onCompacting }))(messages)
+    await flush()
+    expect(onCompacting).toHaveBeenCalledTimes(1)
+
+    finish({ ok: true, value: '晚到的摘要' })
+    const result = await pending
+    expect(generateSummary).toHaveBeenCalledTimes(1)
+    expect(String((result[0] as { content: string }).content)).toContain('晚到的摘要')
+  })
+
+  it('历史被改过，写好的那份对不上：丢掉，当场重压', async () => {
+    resetPrecompactionsForTest()
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要' })
+    await createAutoCompact(keyed(BELOW))(longHistory())
+    await flush()
+
+    // 长度要差不多，否则总量掉到压缩线以下，测的就不是这条路了
+    const edited = [msg('user', 'y'.repeat(40_001)), ...longHistory().slice(1)]
+    const result = await createAutoCompact(keyed(ABOVE))(edited)
+
+    expect(generateSummary).toHaveBeenCalledTimes(2)
+    expect(result.length).toBeLessThan(edited.length)
+  })
+
+  it('没给归属（子 agent）就不在后台写', async () => {
+    resetPrecompactionsForTest()
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要' })
+    await createAutoCompact({ ...deps(BELOW), hashMessages })(longHistory())
+    await flush()
+    expect(generateSummary).not.toHaveBeenCalled()
   })
 })

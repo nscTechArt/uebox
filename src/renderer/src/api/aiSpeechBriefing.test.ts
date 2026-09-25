@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { SPEECH_BRIEFING_MAX_TOKENS } from '@core/shared/speechBriefing'
 import { aiAPI } from './ai'
 
 /**
- * 口播稿压缩那次调用本身：走轻量模型、按档位选提示词和输出上限、回复套在 <reply> 里当素材。
+ * 口播稿压缩那次调用本身：走轻量模型、按档位选提示词、不设输出上限、请模型别思考、回复套在 <reply> 里当素材。
  * 该不该压、压坏了怎么办在 `speechBriefing` 合成层，不在这里。
  */
 
@@ -15,14 +14,15 @@ beforeEach(() => {
 })
 
 describe('aiAPI.condenseForSpeech', () => {
-  it.each(['concise', 'detailed'] as const)('%s 档：轻量模型、本档提示词和上限', async (style) => {
+  it.each(['concise', 'detailed'] as const)('%s 档：轻量模型、本档提示词、不限输出、不思考', async (style) => {
     chatCompletion.mockResolvedValue({ success: true, data: { content: '  稿子  \n' } })
     expect(await aiAPI.condenseForSpeech({ text: '正文', style })).toBe('稿子')
 
     const args = chatCompletion.mock.calls[0][0]
     expect(args.role).toBe('summary')
     expect(args.callType).toBe('speech-briefing')
-    expect(args.maxTokens).toBe(SPEECH_BRIEFING_MAX_TOKENS[style])
+    expect(args.maxTokens).toBeUndefined()
+    expect(args.reasoning).toBe('off')
     expect(args.responseFormat).toBeUndefined()
     const [system] = args.messages
     expect(system.role).toBe('system')

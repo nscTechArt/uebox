@@ -99,6 +99,11 @@ interface AppSettings {
    * 会以为盒子自己退出了 —— 这个代价只该由主动去开它的人承担。
    */
   hideWindowOnProjectLaunch: boolean
+  /**
+   * 编辑器崩溃后自动收拾现场：关掉崩溃报告窗口、备份未保存的自动存档、重新打开工程。
+   * 见 `services/editorCrashWatch`。
+   */
+  autoRecoverEditorCrash: boolean
 }
 
 /**
@@ -128,7 +133,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   notifyApprovalRequired: true,
   notifyQuestionRequired: true,
   // 默认不藏。用户开着盒子的窗口是他自己的决定，一次「打开工程」不该顺手收走它
-  hideWindowOnProjectLaunch: false
+  hideWindowOnProjectLaunch: false,
+  // 默认开着。崩溃报告窗口不点就一直挡着，agent 那一轮活也就停在那儿；
+  // 重开之前会把未保存的自动存档备份好，不替用户决定恢复不恢复
+  autoRecoverEditorCrash: true
 }
 
 /** 只保留字符串项；不是数组就当空名单 */
@@ -192,7 +200,8 @@ class AppSettingsManager {
           notifyTurnComplete: mergedSettings.notifyTurnComplete,
           notifyApprovalRequired: mergedSettings.notifyApprovalRequired,
           notifyQuestionRequired: mergedSettings.notifyQuestionRequired,
-          hideWindowOnProjectLaunch: mergedSettings.hideWindowOnProjectLaunch
+          hideWindowOnProjectLaunch: mergedSettings.hideWindowOnProjectLaunch,
+          autoRecoverEditorCrash: mergedSettings.autoRecoverEditorCrash
         }
       }
     } catch (error) {
@@ -416,6 +425,17 @@ class AppSettingsManager {
    */
   getHideWindowOnProjectLaunch(): boolean {
     return this.settings.hideWindowOnProjectLaunch === true
+  }
+
+  /** 设置「编辑器崩溃后自动重开」 */
+  setAutoRecoverEditorCrash(enabled: boolean): void {
+    this.saveSettings({ autoRecoverEditorCrash: enabled })
+    logger.info(`编辑器崩溃后自动重开已${enabled ? '启用' : '禁用'}`)
+  }
+
+  /** 读「编辑器崩溃后自动重开」。缺值按开着算 */
+  getAutoRecoverEditorCrash(): boolean {
+    return this.settings.autoRecoverEditorCrash !== false
   }
 
   /**

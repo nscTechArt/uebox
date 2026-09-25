@@ -6,7 +6,6 @@ import type {
 } from '../../../shared/imageGenerationModels'
 import { toPlainEditorSnapshot, type EditorSnapshot } from '../../../shared/editorSnapshot'
 import {
-  SPEECH_BRIEFING_MAX_TOKENS,
   type CondensedSpeechStyle
 } from '../../../shared/speechBriefing'
 import { toSessionProjectPayload } from '../views/Assistant/composables/sessionProjectBinding'
@@ -102,6 +101,8 @@ export interface ChatRequestParams {
   timeout?: number
   /** 调用类型标识，用于选择对应的模型绑定（如 notebook-mindmap、notebook-report） */
   callType?: string
+  /** 请模型别思考。关不掉的模型会夹到它支持的最低一档 */
+  reasoning?: 'off'
   /** 透传给 OpenAI 兼容后端的额外请求体参数，如 { enable_thinking: false } */
   extra_body?: Record<string, unknown>
   /** extra_body 的驼峰别名 */
@@ -495,7 +496,8 @@ export function parseGeneratedTitle(raw: string): string {
 
   // 长得就是 JSON 却没解析出 title：那是模型给了个结构化的废话（`{"title":null}`），
   // 别把这行 JSON 当标题塞进侧边栏 —— 回空串，调用方留着截断标题
-  if (fenced || embeddedObject) return ''
+  // 以 `{` / `[` / ``` 开头却没解析出来：多半是 maxTokens 截断的半截 JSON，首行只剩一个 `{`
+  if (fenced || embeddedObject || /^(?:[{[]|```)/.test(content)) return ''
 
   return normalizeSessionTitle(content.split(/\r?\n/).find((line) => line.trim()))
 }
@@ -520,7 +522,7 @@ async function requestSessionTitle(
   const lang = i18n.global.locale.value === 'zh-CN' ? '中文' : 'English'
 
   const response = await aiAPI.chat({
-    maxTokens: 64,
+    maxTokens: 128,
     callType: 'session-title',
     responseFormat: {
       type: 'json_schema',
@@ -639,7 +641,8 @@ export const aiAPI = {
       role: levelToRole(params.level),
       maxTokens: params.maxTokens,
       callType: params.callType,
-      responseFormat: params.responseFormat
+      responseFormat: params.responseFormat,
+      ...(params.reasoning ? { reasoning: params.reasoning } : {})
     })
 
     if (!result.success) {
@@ -943,8 +946,10 @@ export const aiAPI = {
    */
   async condenseForSpeech(params: { text: string; style: CondensedSpeechStyle }): Promise<string> {
     const response = await aiAPI.chat({
-      maxTokens: SPEECH_BRIEFING_MAX_TOKENS[params.style],
+      // 不设输出上限：长度由提示词管。设了的话推理模型的思考也算在里面，
+      // 吃光了正文就回空，朗读静静退回念原文（「简洁」听起来和「完整」一样）
       callType: 'speech-briefing',
+      reasoning: 'off',
       messages: [
         {
           role: 'system',

@@ -40,6 +40,9 @@ describe('parseGeneratedTitle', () => {
     expect(parseGeneratedTitle('')).toBe('')
     expect(parseGeneratedTitle('   ')).toBe('')
     expect(parseGeneratedTitle('{"title":null}')).toBe('')
+    // maxTokens 截断的半截 JSON，不能把首行的 `{` 当标题
+    expect(parseGeneratedTitle('{\n  "title": "竖屏游戏上下')).toBe('')
+    expect(parseGeneratedTitle('```json\n{"title": "竖屏')).toBe('')
   })
 })
 

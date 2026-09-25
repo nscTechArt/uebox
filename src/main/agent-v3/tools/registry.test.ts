@@ -455,6 +455,8 @@ describe('buildAllTools', () => {
       // 输入映射查询（input.*）。键位是运行时状态不是配置 ——
       // 挂着哪些输入上下文由游戏逻辑随时增删，
       'ue.input',
+      // 地形与地形 RVT（landscape.*）。C++ 实现：UE 的 Python 建不出地形
+      'ue.landscape',
       'ue.level',
       'ue.material',
       // 网格走插件 RPC（mesh.*）—— C++ 实现，和 Sequencer 的 Python 路线相反。

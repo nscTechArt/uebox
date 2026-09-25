@@ -67,6 +67,7 @@ import {
 import type { ToolRisk, UnrealAgentTool } from './defineTool'
 import { materialTools } from './ue-material'
 import { meshTools } from './ue-mesh'
+import { landscapeTools } from './ue-landscape'
 import { animationTools } from './ue-animation'
 import { contentOrganizeTools } from './ue-content'
 import { pcgTools } from './ue-pcg'
@@ -1126,6 +1127,9 @@ export function listToolRisks(): Record<string, ToolRisk> {
   for (const tool of meshTools()) {
     table[tool.name] = tool.unrealBox.risk
   }
+  for (const tool of landscapeTools()) {
+    table[tool.name] = tool.unrealBox.risk
+  }
   for (const tool of animationTools()) {
     table[tool.name] = tool.unrealBox.risk
   }
@@ -1290,6 +1294,8 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
     ...sequencerTools(),
     // 网格工具走插件 RPC（mesh.*）。它和 Sequencer 相反 —— 走 C++ 不走 Python，
     ...meshTools(),
+    // 地形与地形 RVT（landscape.*）。同样走 C++：UE 的 Python 建不出地形
+    ...landscapeTools(),
     ...animationTools(),
     // 细粒度只读：组件级回读（actor.inspect_components）、材质图切片（复用 material.get_graph）
     ...inspectTools(),

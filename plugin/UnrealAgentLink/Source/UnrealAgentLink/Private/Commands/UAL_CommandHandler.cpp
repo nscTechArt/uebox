@@ -17,6 +17,7 @@
 #include "UAL_PieBotCommands.h"
 #include "UAL_MessageLogCommands.h"
 #include "UAL_PCGCommands.h"
+#include "UAL_LandscapeCommands.h"
 #include "UAL_SequencerCommands.h"
 #include "UAL_SequenceDiffCommands.h"
 #include "UAL_ComponentInspectCommands.h"
@@ -167,6 +168,7 @@ void FUAL_CommandHandler::RegisterCommands()
 	// PCG 是可选插件，命令始终注册 —— PCG 没启用时由 pcg.status 如实汇报，
 	// 而不是让命令整个消失（那样调用方只会拿到「未知方法」，看不出原因）
 	FUAL_PCGCommands::RegisterCommands(CommandMap);
+	FUAL_LandscapeCommands::RegisterCommands(CommandMap);
 
 	// locks.set —— 盒子推「哪些资产 AI 正在改」，用来画内容浏览器角标。
 	// 不是「命令」而是状态推送，但走同一条 req 通道，没必要为它另开协议

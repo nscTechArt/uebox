@@ -13,6 +13,9 @@
  * `question` 是 agent 反问用户的那张选项卡片，同理：它发生在某两步之间，
  * 而且答完之后**要留在原地**。做成弹窗的话，用户回头看不到自己当初选了什么，
  * 而那恰恰是他后来想确认「为什么做成这样」时唯一的凭据。
+ *
+ * `thinking` 是模型的一段推理，`data` 只记 `{ start, end }` —— 它在消息 `thinking`
+ * 全文里的位置。每一轮的推理因此显示在它发生的那一步，而不是全挤在顶部。
  */
 export interface AgentProcessItem {
   type:
@@ -24,6 +27,7 @@ export interface AgentProcessItem {
     | 'text'
     | 'user-steer'
     | 'question'
+    | 'thinking'
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any
   timestamp: number

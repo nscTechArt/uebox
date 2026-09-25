@@ -48,6 +48,7 @@ export function registerAppSettingsIPC(setAppIconTheme: SetAppIconTheme): void {
         notifyApprovalRequired?: boolean
         notifyQuestionRequired?: boolean
         hideWindowOnProjectLaunch?: boolean
+        autoRecoverEditorCrash?: boolean
       }
     ) => {
       if (typeof settings.autoLaunch === 'boolean') {
@@ -106,6 +107,9 @@ export function registerAppSettingsIPC(setAppIconTheme: SetAppIconTheme): void {
       }
       if (typeof settings.hideWindowOnProjectLaunch === 'boolean') {
         appSettingsManager.setHideWindowOnProjectLaunch(settings.hideWindowOnProjectLaunch)
+      }
+      if (typeof settings.autoRecoverEditorCrash === 'boolean') {
+        appSettingsManager.setAutoRecoverEditorCrash(settings.autoRecoverEditorCrash)
       }
       return { success: true }
     }

@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { adaptV2Tool } from '../../adaptV2Tool'
 import { createRunPythonScriptTool } from './runPythonScript'
 import { runEditorPython } from '../../../core/editorPython'
@@ -6,6 +9,19 @@ import { lastViewportMove, resetViewportProvenance } from '../ue-editor/viewport
 
 vi.mock('../../../core/editorPython', () => ({ runEditorPython: vi.fn() }))
 vi.mock('../../builtin/pathBoundary', () => ({ assertScriptAllowed: () => undefined }))
+
+// skill 脚本从临时目录里读：一个正常的，一个带位置参数 Rotator 的
+const skillDir = mkdtempSync(join(tmpdir(), 'run-python-skill-'))
+mkdirSync(join(skillDir, 'scripts'), { recursive: true })
+writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: doubao-motion-import\ndescription: x\n---\n')
+writeFileSync(join(skillDir, 'scripts', 'import.py'), 'print("from disk")\n')
+writeFileSync(join(skillDir, 'scripts', 'bad_rotator.py'), 'r = unreal.Rotator(0, 90, 0)\n')
+afterAll(() => rmSync(skillDir, { recursive: true, force: true }))
+vi.mock('../../../capabilities/skills', () => ({
+  discoverEnabledSkills: async () => [
+    { name: 'doubao-motion-import', description: 'x', path: skillDir, source: 'project' }
+  ]
+}))
 
 const mockRun = vi.mocked(runEditorPython)
 
@@ -123,5 +139,54 @@ describe('ue_run_python_script', () => {
     const text = await errorTextOf({ script: 'pass' })
     expect(text).toContain('先回读再操作')
     expect(text).not.toContain('请用户重启编辑器')
+  })
+})
+
+/**
+ * 按路径跑 skill 自带的脚本。
+ *
+ * 守的是：跑的是盘上那一份（正文不经过模型转抄），参数以 SKILL_ARGS 进去，
+ * 而且 skill 脚本和手写脚本过同一套检查。
+ */
+describe('跑 skill 自带的脚本', () => {
+  it('读盘上的脚本，前面接上 SKILL_ARGS', async () => {
+    mockRun.mockResolvedValue({ success: true, stdout: 'ok' })
+    await adapted().execute('test', {
+      skill: 'doubao-motion-import',
+      skill_script: 'scripts/import.py',
+      args: { source_dir: 'G:/动作\\新版', overwrite: true }
+    })
+
+    const sent = mockRun.mock.calls[0][0]
+    expect(sent).toContain('SKILL_ARGS = _skill_json.loads(')
+    expect(sent).toContain('print("from disk")')
+    // 中文、反斜杠原样到得了 Python：拿同一套 JSON 规则解回来验
+    const literal = sent.match(/loads\((".*")\)/)![1]
+    expect(JSON.parse(JSON.parse(literal))).toEqual({ source_dir: 'G:/动作\\新版', overwrite: true })
+  })
+
+  it('script 和 skill 脚本不能同时给，也不能都不给', async () => {
+    expect(
+      await errorTextOf({
+        script: 'pass',
+        skill: 'doubao-motion-import',
+        skill_script: 'scripts/import.py'
+      })
+    ).toContain('二选一')
+    expect(await errorTextOf({})).toContain('二选一')
+    expect(mockRun).not.toHaveBeenCalled()
+  })
+
+  it('只收 scripts/ 下的 .py', async () => {
+    expect(
+      await errorTextOf({ skill: 'doubao-motion-import', skill_script: 'references/notes.md' })
+    ).toContain('scripts/')
+  })
+
+  it('skill 脚本同样过旋转检查', async () => {
+    expect(
+      await errorTextOf({ skill: 'doubao-motion-import', skill_script: 'scripts/bad_rotator.py' })
+    ).toContain('Rotator')
+    expect(mockRun).not.toHaveBeenCalled()
   })
 })

@@ -197,6 +197,28 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   }
 
   /**
+   * 追加推理，同时在时间线上记下这一段推理落在哪儿。
+   *
+   * 一次回答里模型会想好几轮（想 → 调工具 → 再想），全文只有一根累积字符串的话，
+   * 界面只能把所有推理挤进顶部一个框。时间线上记的是这一段在 `currentThinking`
+   * 里的起止位置，不是再存一份正文 —— 推理动辄几万字，存两份会把落盘的聊天记录撑大一倍。
+   * 连续的推理并进同一段，段与段之间天然被工具调用和正文切开。
+   */
+  function appendThinkingTo(state: AgentStreamState, delta: string): void {
+    if (!delta) return
+    const start = state.currentThinking.length
+    state.currentThinking += delta
+    const end = state.currentThinking.length
+
+    const last = state.agentProcess[state.agentProcess.length - 1]
+    if (last && last.type === 'thinking') {
+      last.data.end = end
+      return
+    }
+    state.agentProcess.push({ type: 'thinking', data: { start, end }, timestamp: Date.now() })
+  }
+
+  /**
    * 把正文增量记进过程时间线。
    *
    * `currentText` 那根累积字符串仍然是正文的全文（复制、落库、发回模型都用它），
@@ -256,12 +278,12 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
         if (thinkEnd === -1) {
           // 没有找到结束标签，保留最后可能不完整的部分
           const safeEnd = Math.max(i, state.buffer.length - 8)
-          state.currentThinking += state.buffer.slice(i, safeEnd)
+          appendThinkingTo(state, state.buffer.slice(i, safeEnd))
           state.buffer = state.buffer.slice(safeEnd)
           break
         } else {
           // 找到结束标签，提取 thinking 内容
-          state.currentThinking += state.buffer.slice(i, thinkEnd)
+          appendThinkingTo(state, state.buffer.slice(i, thinkEnd))
           state.inThinkingBlock = false
           i = thinkEnd + 8
           state.buffer = state.buffer.slice(i)
@@ -291,7 +313,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
       console.warn('[AgentStreamStore] 找不到流式状态:', agentSessionId)
       return
     }
-    state.currentThinking += delta
+    appendThinkingTo(state, delta)
   }
 
   /**
@@ -514,7 +536,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
         // 漏掉的话这句话会被记到下一段里，显示成「先调工具后说话」——顺序反了
         appendTimelineText(state, flushed)
       } else {
-        state.currentThinking += flushed
+        appendThinkingTo(state, flushed)
       }
       return flushed
     }

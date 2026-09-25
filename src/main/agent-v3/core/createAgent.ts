@@ -648,7 +648,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   // 子 agent 复用父 agent 已经发现的清单，不重复扫盘。
   // 裁剪放在这里而不是发现处：子 agent 拿到的清单已经裁过，再裁一次是空转。
   const skills = applySkillLearningMode(
-    ctx.skills ?? (await discoverEnabledSkills()),
+    // 会话归属的工程优先：它才是「这条对话在干哪个工程的活」；没有归属才看连着的那个
+    ctx.skills ?? (await discoverEnabledSkills(ctx.sessionProject?.path ?? ctx.project?.path)),
     ctx.skillLearning ?? 'ask'
   )
 
@@ -764,6 +765,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       ...(ctx.isSubAgent
         ? {}
         : {
+            precompactKey: ctx.sessionId,
             checkpoint: {
               ...(checkpoint ? { initial: checkpoint } : {}),
               save: (next) => {

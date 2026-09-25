@@ -121,6 +121,7 @@ export async function briefForSpeech(
   }
   // 模型只回了标点之类念不出声的东西：也退回原文，而且不记 —— 下次再给它一次机会
   if (!splitSpeechText(speechText(brief)).length) {
+    console.warn('[ReadAloud] 口播稿压缩回了空稿，改念原文:', JSON.stringify(brief))
     options.onFallback?.('empty')
     return text
   }

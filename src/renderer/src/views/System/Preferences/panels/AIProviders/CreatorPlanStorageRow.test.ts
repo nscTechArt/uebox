@@ -96,7 +96,7 @@ describe('导入预览：对象存储', () => {
     const text = wrapper.text()
     expect(text).toContain('对象存储')
     expect(text).toContain('10 GB 空间 · 最后一次用到后留 30 天')
-    expect(text).toContain('现在：未开启')
+    expect(text).toContain('接管：未开启')
     await wrapper.find('.modal-ok').trigger('click')
     await flushPromises()
     expect(apply).toHaveBeenCalledWith(['agent'], { storage: true })
@@ -106,7 +106,7 @@ describe('导入预览：对象存储', () => {
     const { wrapper, apply } = await openPreview(
       previewWith(storage({ kind: 'own', preset: 'aliyun', bucket: 'my-bucket' }, false))
     )
-    expect(wrapper.text()).toContain('现在：my-bucket · 阿里云 OSS')
+    expect(wrapper.text()).toContain('接管：my-bucket · 阿里云 OSS')
     const boxes = wrapper.findAll('[role="checkbox"]')
     const storageBox = boxes[boxes.length - 1]!
     expect(storageBox.attributes('aria-checked')).toBe('false')

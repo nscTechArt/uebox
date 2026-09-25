@@ -290,6 +290,15 @@ export function startAgentNotifications(createWindow: () => void = () => {}): ()
 
   const buffer = new TextBuffer()
 
+  /*
+   * 这一轮已经报过错的会话。
+   *
+   * 模型报错时事件桥先发 `error`，紧跟着 `agent_end` 还会再发一个 `done`。
+   * 两者共用 `turn:<会话>` 这个 key，不拦的话「任务完成」会把刚弹的「任务失败」
+   * 收掉顶替 —— 用户看到的是跑完了，实际是挂了。
+   */
+  const failed = new Set<string>()
+
   const unsubscribe = observeAgentRuns((signal) => {
     // 助手正文攒着，跑完当通知正文用。一条只写「完成了」的通知，
     // 用户还是得切回来才知道它到底干了什么
@@ -308,8 +317,14 @@ export function startAgentNotifications(createWindow: () => void = () => {}): ()
     // 会话真的空出来了，攒的正文没有下一个用处了
     if (signal.type === 'released') {
       buffer.clear(signal.sessionId)
+      failed.delete(signal.sessionId)
       return
     }
+
+    if (signal.type === 'started') failed.delete(signal.sessionId)
+    if (signal.type === 'error') failed.add(signal.sessionId)
+    // 报错后那个收尾的 `done` 不算「跑完了」，见上面 `failed` 的注释
+    if (signal.type === 'done' && failed.delete(signal.sessionId)) return
 
     const plan = decideNotification({
       signal,

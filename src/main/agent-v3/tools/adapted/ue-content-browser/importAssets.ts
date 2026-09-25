@@ -42,6 +42,32 @@ const ImportAssetsSchema = z.object({
         '如 100 或 0.01。只影响网格，贴图/音频忽略它'
     ),
   /**
+   * 纯动画 FBX（动捕、数字人动作包）不给骨架，引擎自动化导入什么都不产出、
+   * 也不写日志 —— 插件以前还把 FBX 写死成静态网格，两头都导不进来。
+   */
+  skeleton: z
+    .string()
+    .optional()
+    .describe(
+      '只对 FBX 生效：目标骨架资产路径，如 /Game/MetaHumans/Common/Female/Medium/NormalWeight/Body/metahuman_base_skel。' +
+        '给了（且没填 fbx_import_as）就把 FBX 按**动画**导入到这个骨架（只出 AnimSequence）。' +
+        '导入只有动画没有网格的 FBX 时必须给'
+    ),
+  frame_rate: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('只对 FBX 动画生效：按这个帧率重采样（如 30/60）。不给用引擎默认（按源文件帧率）'),
+  fbx_import_as: z
+    .enum(['auto', 'static_mesh', 'skeletal_mesh', 'animation'])
+    .optional()
+    .describe(
+      '只对 FBX 生效，正常不用填：给了 skeleton 默认 animation，否则 auto（引擎按内容判断静态/骨骼网格）。' +
+        'skeletal_mesh + skeleton = 网格绑到现有骨架（换装、同骨架角色）；' +
+        'static_mesh = 带骨骼的也压成静态网格'
+    ),
+  /**
    * 内嵌同名贴图互相覆盖 —— FBX/GLB 里的贴图叫 Color/Normal/Roughness 是常态，
    * 两个模型进同一个文件夹，网格会被改名成 _1，贴图不会，第二份被静默跳过，
    * 于是两个模型共用第一份贴图。UV 不同就是一片碎块。
@@ -182,6 +208,10 @@ export function createImportAssetsTool() {
   别让用户自己去引擎里改
 - asset_names: 导入后各叫什么名字，{ "Hero.fbx": "SK_Hero" }
 - isolate: 网格是否各进各的子文件夹，默认 auto，正常不用填
+- skeleton: FBX 挂到哪个现有骨架。导动作/动画 FBX 时必填
+- fbx_import_as: FBX 导成什么，正常不填；网格要绑现有骨架时填 skeletal_mesh（配 skeleton）
+- overwrite + asset_names：直接以目标名导入、就地替换现有资产（引用不断）。
+  「用新动画替换项目里现有的」就这么做：{ "idle.fbx": "现有资产名" }，overwrite=true
 
 【名字在导入时就起对，别导完再改】
 用 asset_names 一次到位：{ "hero.fbx": "SK_Hero", "wood_color.png": "T_Wood_D" }。
@@ -278,6 +308,9 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
           destination_path: input.destination_path,
           overwrite: input.overwrite,
           ...(typeof input.scale === 'number' ? { scale: input.scale } : {}),
+          ...(input.skeleton ? { skeleton: input.skeleton } : {}),
+          ...(input.fbx_import_as ? { fbx_import_as: input.fbx_import_as } : {}),
+          ...(input.frame_rate ? { anim_frame_rate: input.frame_rate } : {}),
           // 不填就不提 —— 让插件用它的 auto，别在这儿复制一份默认值出来
           ...(input.isolate ? { isolate: input.isolate } : {}),
           ...(nameEntries.length > 0
@@ -338,7 +371,8 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
           if (renamedAway.length > 0) {
             notes.push(
               `⚠️ 这些名字没改成：${renamedAway.map(([from, to]) => `${from} → ${to}`).join('、')}。` +
-                '多半是目标名已经被占用（插件这时会保留原名）。' +
+                '多半是目标名已经被占用（插件这时会保留原名；要替换现有资产就加 overwrite=true）；' +
+                '一个 FBX 里有多段动画（take）时，每段会叫「名字_段名」，不会正好叫你给的名字。' +
                 `实际落地的名字看 imported[]；要改成别的名字用 ue_content_move。`
             )
           }

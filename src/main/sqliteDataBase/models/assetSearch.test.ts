@@ -104,6 +104,29 @@ describe('searchAssetsByCriteria 的参数绑定', () => {
 
     expect(rows.map((r) => r.assetKey)).toEqual(['a2'])
   })
+
+  /**
+   * 界面收藏时写 userId=1 + 当前库 id；agent 搜的时候这两个都不带。
+   * 原来「不带」被当成「必须是 NULL」，于是概况说有 3 个收藏，筛选一个也搜不到。
+   */
+  it('不带 userId / vaultId 时，界面写入的带 id 的收藏也要筛得出来', () => {
+    insertAsset('a1', 'SM_Hero', 'k_role')
+    insertAsset('a2', 'SM_Cape', 'k_role')
+    db.prepare(
+      'INSERT INTO asset_favorites (assetKey, itemType, userId, vaultId) VALUES (?, ?, ?, ?)'
+    ).run('a1', 'asset', 1, 'vault-1')
+
+    expect(searchAssetsByCriteria(db, { favoriteStatus: 'favorite' }).map((r) => r.assetKey)).toEqual(
+      ['a1']
+    )
+    expect(
+      searchAssetsByCriteria(db, { favoriteStatus: 'unfavorite' }).map((r) => r.assetKey)
+    ).toEqual(['a2'])
+    // 带了 id 就照旧按它筛
+    expect(
+      searchAssetsByCriteria(db, { favoriteStatus: 'favorite', vaultId: 'vault-2' })
+    ).toEqual([])
+  })
   /**
    * 「只看主资产」这个筛选原来只有浏览那条路认得。它一旦生效，列表就因为
    * hasActiveFilters 变真而转去走搜索，而搜索不认这个条件 —— 用户看到筛选开着、

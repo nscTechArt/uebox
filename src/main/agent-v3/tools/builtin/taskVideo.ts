@@ -191,7 +191,7 @@ export function taskVideoTools(): UnrealAgentTool[] {
       risk: 'mutating',
       concurrency: 'sequential',
       description:
-        '对 composition 镜头生成起、中、后、尾四张真实时间轴取样图，检查画布、字体、缺失素材、脚本错误；不调用收费模型。逐张检查通过后再完整渲染。静态取样不能证明全部动画或听感。',
+        '对 composition 镜头生成起、中、后、尾四张真实时间轴取样图，检查画布、字体、缺失素材、脚本错误；不调用收费模型。逐张检查通过后再完整渲染。静态取样不能证明全部动画或听感。sampleTimes 是全片时间（秒），自动落到所在镜头；每张图返回全片时间 time、镜头内时间 sceneTime，文件名也带全片时间。落在非 composition 镜头或超出全片的时间点会列在 droppedTimes 里。',
       input: z.object({
         projectDir: z.string(),
         storyboard: VideoStoryboard,
@@ -200,7 +200,7 @@ export function taskVideoTools(): UnrealAgentTool[] {
       execute: async ({ projectDir, storyboard, sampleTimes }, ctx) => {
         const { assertVideoProject } = await import('../../../services/taskVideo/project')
         const dir = await assertVideoProject(projectDir, await currentSession())
-        const { stageComposition, renderComposition } = await import(
+        const { stageComposition, renderComposition, planSampleTimes } = await import(
           '../../../services/taskVideo/composition'
         )
         const { promises: fs } = await import('node:fs')
@@ -208,13 +208,20 @@ export function taskVideoTools(): UnrealAgentTool[] {
         const { randomUUID } = await import('node:crypto')
         const folder = join(dir, `review-${randomUUID()}`)
         await fs.mkdir(folder)
-        const previews: { sceneId: string; paths: string[] }[] = []
-        for (const scene of storyboard.scenes) {
+        const plan = planSampleTimes(storyboard.scenes, sampleTimes ?? [])
+        const previews: {
+          sceneId: string
+          start: number
+          end: number
+          frames: { time: number; sceneTime: number; requested: boolean; path: string }[]
+        }[] = []
+        for (const [index, scene] of storyboard.scenes.entries()) {
           if (scene.kind !== 'composition') continue
           const source = await stageComposition(dir, scene)
           const sceneDir = join(folder, scene.id)
           await fs.mkdir(sceneDir)
-          const paths = await renderComposition({
+          const { start, local } = plan.scenes[index]
+          const samples = await renderComposition({
             source,
             output: join(sceneDir, 'preview.mp4'),
             ffmpeg: '',
@@ -222,12 +229,27 @@ export function taskVideoTools(): UnrealAgentTool[] {
             duration: scene.duration,
             signal: ctx.signal,
             previewOnly: true,
-            sampleTimes
+            sampleTimes: local,
+            timeOffset: start
           })
-          previews.push({ sceneId: scene.id, paths })
+          previews.push({
+            sceneId: scene.id,
+            start,
+            end: Number((start + scene.duration).toFixed(3)),
+            frames: samples.map(({ time, sceneTime, requested, path }) => ({
+              time,
+              sceneTime,
+              requested,
+              path
+            }))
+          })
         }
         if (!previews.length) throw new Error('请先设计 composition 镜头，再进行画面验收。')
-        return { text: JSON.stringify({ previews }), details: { previews } }
+        const result = {
+          previews,
+          ...(plan.dropped.length ? { droppedTimes: plan.dropped } : {})
+        }
+        return { text: JSON.stringify(result), details: result }
       }
     }),
     defineTool({

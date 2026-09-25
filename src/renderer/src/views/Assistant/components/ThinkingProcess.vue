@@ -32,12 +32,11 @@ const { t } = useI18n()
 // 思考正文可能很长，默认收起，避免执行中的持续 Markdown 更新抢占页面交互。
 const isCollapsed = ref(true)
 
-const title = computed(() => {
-  if (props.isThinking) {
-    return t('assistant.thinking.processing') || '思考中...'
-  }
-  return t('assistant.thinking.finished') || '思考过程'
-})
+const title = computed(() =>
+  props.isThinking
+    ? t('assistant.thinking.processing') || '思考中...'
+    : t('assistant.thinking.finished') || '思考过程'
+)
 
 function toggleCollapse(): void {
   isCollapsed.value = !isCollapsed.value

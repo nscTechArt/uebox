@@ -46,7 +46,7 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   // 用户来这一页找的时候想的是其中一件，合在一起只会让他在 39 条里翻
   { id: 'blueprint', namespaces: ['ue.blueprint'] },
   { id: 'material', namespaces: ['ue.material'] },
-  { id: 'scene', namespaces: ['ue.actor', 'ue.level'] },
+  { id: 'scene', namespaces: ['ue.actor', 'ue.level', 'ue.landscape'] },
   { id: 'content', namespaces: ['ue.content'] },
   { id: 'editor', namespaces: ['ue.editor', 'ue.input'] },
   { id: 'ui', namespaces: ['ue.widget'] },

@@ -33,14 +33,15 @@
  *   - `write.ts` 里那三个 Actor 操作**留着**，但身份变了：不再是准入表，
  *     而是「CLI 额外再核实一遍」的加强档（白名单重建参数 + 外部回读）。
  *
- * ## 两件仍然不给
+ * ## 一件仍然不给
  *
  *   - **要求逐次审批的工具**（`requiresExplicitApproval`）：它的前提就是
- *     有人当场看着，CLI 这头没有界面。目前只有 `browser_interact`。
- *   - **`local.*` / `mcp.*` / `core`**：这三类在盒子的 MCP 服务那一层就没暴露
- *     （见 `McpServerHost.selectExposedTools`），CLI 这里看都看不到。理由是
- *     外部 harness 本来就自带跑命令和读写文件的能力，转发我们这一份不增加
- *     任何能力，只多一条追不到源头的路径。
+ *     有人当场看着，CLI 这头没有界面。目前是 `browser_interact` 和
+ *     `connect_mcp_server`。
+ *
+ * 盒子的 MCP 服务现在把盒子助手手上的工具全给出来（本地文件、shell、`task`
+ * 都在，见 `McpServerHost.selectExposedTools`）。CLI 这里照常按风险分：
+ * 只读的直接能调，其余要 `--allow-write`。
  *
  * ## 元数据缺失一律当成不在范围内
  *

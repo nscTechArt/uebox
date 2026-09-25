@@ -120,6 +120,14 @@ public class UnrealAgentLink : ModuleRules
 				// 不是插件模块，不引入对插件 DLL 的硬导入
 				"NavigationSystem",
 
+				// 地形与地形 RVT（UAL_LandscapeCommands）。三个都是引擎本体模块
+				// （Runtime/Landscape、Editor/LandscapeEditor、Editor/VirtualTexturingEditor），
+				// 5.0–5.8 都在、不是插件 —— 新建地形的 Import、高度图读取、
+				// RVT 体积边界计算只有这几处导出
+				"Landscape",
+				"LandscapeEditor",
+				"VirtualTexturingEditor",
+
 				// 代理诊断（UAL_ProxyDiagnostics）只用一个函数：Lws 给 WebSocket 套代理时
 				// 读的那个代理地址（5.8 与之前不是同一个函数，见该 .cpp 顶部）。
 				// 必须问同一个来源，自己另读一份 ini 会和实际行为对不上。

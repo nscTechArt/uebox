@@ -20,17 +20,18 @@
 import { z } from 'zod'
 
 import { defineV2Tool, type V2Tool } from '../../adaptV2Tool'
-import { getPublicDatabase, getVaultDatabase } from '../../../../sqliteDataBase'
+import { getPublicDatabase } from '../../../../sqliteDataBase'
 import { getAssetCountsByTag } from '../../../../sqliteDataBase/models/assetTag'
 import { getAllTags } from '../../../../sqliteDataBase/models/tag'
 import { getAllTagGroups } from '../../../../sqliteDataBase/models/tagGroup'
+import { runAcrossVaults } from './vaultScope'
 
 /** 一次最多回多少个标签。标签几百个的库不少见，全倒出来只会挤爆上下文 */
 const DEFAULT_LIMIT = 200
 
 interface TagLine {
   name: string
-  /** 挂了几个资产（已删除的不算） */
+  /** 挂了几个资产，所有保管库合计（已删除的不算） */
   assets: number
   /** 所属标签组；用户没分组时是「未分组」 */
   group?: string
@@ -68,9 +69,14 @@ export function createListTagsTool(): V2Tool {
           .map((g) => [g.id as number, g.name])
       )
 
-      const countByTagId = new Map(
-        getAssetCountsByTag(getVaultDatabase()).map((row) => [row.tagId, row.count])
-      )
+      // 标签在公共库、关联在各保管库。只数活跃库的话，用户站在一个没打标签的库里
+      // 会看到每个标签都是 0 —— 而 library_overview / search_assets 默认是全库算的，三边对不上
+      const countByTagId = new Map<number, number>()
+      const { runs } = await runAcrossVaults(undefined, (db) => getAssetCountsByTag(db))
+      for (const row of runs.flatMap((run) => run.value ?? [])) {
+        countByTagId.set(row.tagId, (countByTagId.get(row.tagId) ?? 0) + row.count)
+      }
+      const unsearched = runs.filter((run) => run.error)
 
       const matched = tags.filter((tag) =>
         keyword
@@ -99,6 +105,10 @@ export function createListTagsTool(): V2Tool {
         returnedCount: page.length,
         ...(lines.length > page.length ? { truncated: true } : {}),
         tags: page,
+        // 有库没数到时计数偏小，得说出来，不然会被当成「这个标签没人用」
+        ...(unsearched.length > 0
+          ? { unsearched_vaults: unsearched.map((run) => `${run.vault.name}：${run.error}`) }
+          : {}),
         message:
           `库里一共 ${tags.length} 个标签` +
           (keyword ? `，其中 ${lines.length} 个名字里含「${input.query}」` : '') +

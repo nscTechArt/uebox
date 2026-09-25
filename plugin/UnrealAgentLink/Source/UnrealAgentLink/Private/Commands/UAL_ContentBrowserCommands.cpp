@@ -25,6 +25,9 @@
 #include "HAL/FileManager.h"
 #include "AssetImportTask.h"
 #include "Factories/FbxImportUI.h"
+#include "Animation/Skeleton.h"
+#include "Factories/FbxAnimSequenceImportData.h"
+#include "Factories/FbxSkeletalMeshImportData.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
@@ -643,6 +646,58 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 		ScaleOverride = -1.0;
 	}
 	
+	// 目标骨架：只对 FBX 生效。给了就按「动画导入到这个骨架」处理。
+	// 只有动画没有网格的 FBX（动捕、数字人动作包）自动化导入时引擎必须知道骨架，
+	// 不给的话导入器什么都不产出、也不写日志 —— 调用方只能看到一句「没导进来」
+	USkeleton* TargetSkeleton = nullptr;
+	FString SkeletonPath;
+	if (Payload->TryGetStringField(TEXT("skeleton"), SkeletonPath) && !SkeletonPath.IsEmpty())
+	{
+		// 允许只给包路径（/Game/X/SK_Foo），补成对象路径（/Game/X/SK_Foo.SK_Foo）
+		FString SkeletonObjectPath = SkeletonPath;
+		if (!SkeletonObjectPath.Contains(TEXT(".")))
+		{
+			SkeletonObjectPath += TEXT(".") + FPackageName::GetShortName(SkeletonObjectPath);
+		}
+		TargetSkeleton = LoadObject<USkeleton>(nullptr, *SkeletonObjectPath);
+		if (!TargetSkeleton)
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+				TEXT("skeleton not found or not a Skeleton asset: %s (give the Skeleton asset path, e.g. /Game/Characters/Mannequin/SK_Mannequin_Skeleton)"),
+				*SkeletonPath));
+			return;
+		}
+	}
+	
+	// FBX 按什么导：auto | static_mesh | skeletal_mesh | animation。
+	// 不给时：给了 skeleton 就是 animation（最常见：动作包挂到现有骨架），否则 auto。
+	// skeletal_mesh + skeleton = 网格绑到现有骨架（换装、同骨架角色）
+	FString FbxImportAs;
+	Payload->TryGetStringField(TEXT("fbx_import_as"), FbxImportAs);
+	FbxImportAs = FbxImportAs.ToLower();
+	if (FbxImportAs.IsEmpty())
+	{
+		FbxImportAs = TargetSkeleton ? TEXT("animation") : TEXT("auto");
+	}
+	if (FbxImportAs != TEXT("auto") && FbxImportAs != TEXT("static_mesh")
+		&& FbxImportAs != TEXT("skeletal_mesh") && FbxImportAs != TEXT("animation"))
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("invalid fbx_import_as '%s' (use auto / static_mesh / skeletal_mesh / animation)"), *FbxImportAs));
+		return;
+	}
+	if (FbxImportAs == TEXT("animation") && !TargetSkeleton)
+	{
+		// 自动化导入纯动画必须有骨架，不拦的话引擎静默产出空
+		UAL_CommandUtils::SendError(RequestId, 400,
+			TEXT("fbx_import_as=animation needs 'skeleton' (the target Skeleton asset path)"));
+		return;
+	}
+	
+	// FBX 动画重采样帧率。不给用引擎默认（按源文件帧率）
+	int32 AnimFrameRate = 0;
+	Payload->TryGetNumberField(TEXT("anim_frame_rate"), AnimFrameRate);
+	
 	// 解析 normalized_names 数组，建立文件名到规范化名称的映射
 	// 格式: [{ "original": "原始文件名.ext", "normalized": "规范化名称" }, ...]
 	TMap<FString, FString> NormalizedNameMap;
@@ -830,6 +885,17 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 		Task->bSave = false;
 		Task->bReplaceExisting = bOverwrite;
 		
+		// 覆盖 + 点名：直接以目标名导入，引擎就地替换现有资产（引用不断）。
+		// 走「先按文件名导、再改名」的话，目标名已存在 → 改名被跳过，
+		// 等于新建了一份、旧的一个字没动 —— 「替换项目里现有的动画」就是这样没做成的
+		if (bOverwrite)
+		{
+			if (const FString* WantedName = NormalizedNameMap.Find(FPaths::GetBaseFilename(FilePath)))
+			{
+				Task->DestinationName = *WantedName;
+			}
+		}
+		
 		// 获取文件扩展名
 		FString Extension = FPaths::GetExtension(FilePath).ToLower();
 		
@@ -837,14 +903,61 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 		if (Extension == TEXT("fbx"))
 		{
 			UFbxImportUI* ImportUI = NewObject<UFbxImportUI>();
-			
-			// 禁用自动检测，明确指定为静态网格体
-			ImportUI->bAutomatedImportShouldDetectType = false;
-			ImportUI->MeshTypeToImport = FBXIT_StaticMesh;
-			
-			// 自动导入材质和纹理
 			ImportUI->bImportMaterials = true;
 			ImportUI->bImportTextures = true;
+			
+			// 两条导入管线读的字段不一样，两边都得照顾到：
+			// - 旧 FbxFactory 看 bAutomatedImportShouldDetectType，自己探测后覆盖 MeshTypeToImport
+			// - Interchange（5.5+ 默认）经 InterchangeFbxAssetImportDataConverter 转换，
+			//   **只看** MeshTypeToImport / bImportAsSkeletal / bImportMesh，探测开关不管用。
+			//   MeshTypeToImport 默认值是 FBXIT_StaticMesh，不改的话照样全压成静态网格
+			if (FbxImportAs == TEXT("animation"))
+			{
+				// 只要 AnimSequence，不建网格/材质
+				ImportUI->bAutomatedImportShouldDetectType = false;
+				ImportUI->MeshTypeToImport = FBXIT_Animation;
+				ImportUI->bImportAsSkeletal = true;
+				ImportUI->bImportMesh = false;
+				ImportUI->bImportAnimations = true;
+				ImportUI->bImportMaterials = false;
+				ImportUI->bImportTextures = false;
+			}
+			else if (FbxImportAs == TEXT("skeletal_mesh"))
+			{
+				ImportUI->bAutomatedImportShouldDetectType = false;
+				ImportUI->MeshTypeToImport = FBXIT_SkeletalMesh;
+				ImportUI->bImportAsSkeletal = true;
+				ImportUI->bImportMesh = true;
+				ImportUI->bImportAnimations = true;
+			}
+			else if (FbxImportAs == TEXT("static_mesh"))
+			{
+				ImportUI->bAutomatedImportShouldDetectType = false;
+				ImportUI->MeshTypeToImport = FBXIT_StaticMesh;
+			}
+			else
+			{
+				// auto。以前写死静态网格：骨骼网格被拍扁、纯动画 FBX 什么都导不出来。
+				// FBXIT_MAX 让 Interchange 走「各类型都导」分支；旧管线会探测后覆盖掉它
+				ImportUI->bAutomatedImportShouldDetectType = true;
+				ImportUI->MeshTypeToImport = FBXIT_MAX;
+				ImportUI->bImportAnimations = true;
+			}
+			if (AnimFrameRate > 0)
+			{
+				ImportUI->AnimSequenceImportData->bUseDefaultSampleRate = false;
+				ImportUI->AnimSequenceImportData->CustomSampleRate = AnimFrameRate;
+			}
+			// 挂到现有骨架（skeletal_mesh / animation）；null 就新建骨架
+			ImportUI->Skeleton = TargetSkeleton;
+			
+			// scale 对静态网格在导入后改 BuildScale3D（见下面），骨骼网格和动画没有
+			// 那个口子，只能导入时给 —— 以前这两类给了 scale 也被静默忽略
+			if (ScaleOverride > 0)
+			{
+				ImportUI->SkeletalMeshImportData->ImportUniformScale = ScaleOverride;
+				ImportUI->AnimSequenceImportData->ImportUniformScale = ScaleOverride;
+			}
 			
 			// 应用到任务
 			Task->Options = ImportUI;
@@ -1052,8 +1165,24 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 		else
 		{
 			UE_LOG(LogUALContentCmd, Warning, TEXT("No assets imported from: %s"), *Task->Filename);
-			// 引擎一个资产都没产出：格式没有对应的导入器，或导入器自己报错了（原因在 Output Log）
-			AddFailedFile(Task->Filename, TEXT("the engine imported nothing from this file (no importer for this format, or the importer failed - see Output Log)"));
+			const bool bIsFbx = FPaths::GetExtension(Task->Filename).ToLower() == TEXT("fbx");
+			if (bIsFbx && TargetSkeleton)
+			{
+				// 骨架给了还是空的：几乎都是骨骼名对不上
+				AddFailedFile(Task->Filename, FString::Printf(
+					TEXT("animation import onto skeleton %s produced nothing - the FBX's bone names/hierarchy most likely don't match this skeleton, or the file has no animation take"),
+					*TargetSkeleton->GetPathName()));
+			}
+			else if (bIsFbx)
+			{
+				// 最常见的是只有动画没有网格的 FBX：自动化导入不知道挂哪个骨架，就什么都不建
+				AddFailedFile(Task->Filename, TEXT("the engine imported nothing from this FBX. If it contains only animation (no mesh), import again with 'skeleton' set to the target Skeleton asset path"));
+			}
+			else
+			{
+				// 引擎一个资产都没产出：格式没有对应的导入器，或导入器自己报错了（原因在 Output Log）
+				AddFailedFile(Task->Filename, TEXT("the engine imported nothing from this file (no importer for this format, or the importer failed - see Output Log)"));
+			}
 		}
 	}
 	

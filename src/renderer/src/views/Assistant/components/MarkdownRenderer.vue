@@ -2,6 +2,7 @@
   <!-- 使用 morphdom 增量更新，不再使用 v-html -->
   <div
     ref="rootRef"
+    v-bind="$attrs"
     class="markdown-body"
     :class="{ 'thinking-placeholder': isThinkingPlaceholder }"
   ></div>
@@ -41,6 +42,9 @@
 </template>
 
 <script setup lang="ts">
+// 根节点不止一个（正文 + 弹窗 + 菜单），外面传的 class 手动落到正文 div 上
+defineOptions({ inheritAttrs: false })
+
 import AppModal from '@renderer/components/AppModal.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'

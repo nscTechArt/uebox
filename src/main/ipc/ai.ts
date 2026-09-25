@@ -28,6 +28,8 @@ interface ChatCompletionArgs {
   maxTokens?: number
   callType?: string
   responseFormat?: ResponseFormatRequest
+  /** 请模型别思考（关不掉的夹到最低档），见 piCompletion 的 `reasoning` */
+  reasoning?: 'off'
 }
 
 interface ChatStreamArgs extends ChatCompletionArgs {
@@ -108,7 +110,8 @@ export function registerAiIPC(): void {
           messages: convertToPiMessages(raw),
           temperature: args.temperature ?? 0.7,
           ...(args.maxTokens && args.maxTokens > 0 ? { maxTokens: args.maxTokens } : {}),
-          ...(plan.samplingParams ? { samplingParams: plan.samplingParams } : {})
+          ...(plan.samplingParams ? { samplingParams: plan.samplingParams } : {}),
+          ...(args.reasoning ? { reasoning: args.reasoning } : {})
         })
       )
 

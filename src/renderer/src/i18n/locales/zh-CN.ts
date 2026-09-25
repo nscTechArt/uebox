@@ -297,17 +297,17 @@ export default {
       title: '共享虚幻引擎能力',
       label: '开放给外部客户端',
       // 第一层只给一行；可写时在权限设置中显示完整风险说明。
-      shortNote: '让 Claude Code、Cursor 直接操作你的引擎。仅本机可连，需令牌，默认可写。',
+      shortNote: '让 Codex、Claude Code 用上盒子助手的全部工具。仅本机可连，需令牌，默认可写。',
       securityNote:
-        '外部客户端调用不会弹审批窗，写操作会直接执行。读写本地文件和执行命令的工具任何情况下都不对外。令牌一旦泄露，拿到的人就能改你的工程。',
+        '外部客户端拿到的工具和盒子助手一样全，包括读写本机文件和执行命令。盒子不弹审批窗，拦不拦由客户端自己的审批设置决定。令牌一旦泄露，拿到的人就能改你的工程和电脑上的文件。',
       // 服务停着的时候要用将来时。主开关明明是关的，却读到一句「会直接执行」，
       // 三处状态互相打架，用户只会以为自己开着一个危险的东西
       securityNoteIdle:
-        '开启之后，外部客户端调用不会弹审批窗，写操作会直接执行。读写本地文件和执行命令的工具任何情况下都不对外。令牌一旦泄露，拿到的人就能改你的工程。',
+        '开启之后，外部客户端拿到的工具和盒子助手一样全，包括读写本机文件和执行命令。盒子不弹审批窗，拦不拦由客户端自己的审批设置决定。令牌一旦泄露，拿到的人就能改你的工程和电脑上的文件。',
       includeMutating: '外部客户端的权限',
       // 当前档位要直接说出来，别让用户从开关的明暗去推
       scopeReadOnly: '当前只读。打开后允许外部客户端创建、修改和删除。',
-      scopeWritable: '当前可写：外部客户端能创建、修改和删除你的资产。',
+      scopeWritable: '当前可写：外部客户端能改动和删除你的资产、读写本机文件、执行命令。',
       // 端口仍需停止服务才能修改，权限切换会自动重启。
       stopToChange: '服务运行中无法修改端口，请先关闭上面的开关。',
       port: '端口',
@@ -782,8 +782,8 @@ export default {
         '断开后，由套餐管理的角色恢复成导入前的设置。这把 Key 会在服务端吊销，本机也会删除。',
       previewTitle: '选择交给套餐的角色',
       previewDesc: '勾选的角色改用套餐模型。已手动配置的角色默认不勾。',
-      previewCurrent: '现在：{name}',
-      previewUnset: '现在：未设置',
+      previewCurrent: '接管：{name}',
+      previewUnset: '接管：未设置',
       previewManaged: '套餐管理中',
       previewReindex: '换过去后知识库按新模型重建向量，期间只能按关键词搜',
       apply: '应用',
@@ -791,7 +791,7 @@ export default {
       storage: {
         label: '对象存储',
         spec: '{quota} 空间 · 最后一次用到后留 {days} 天',
-        off: '现在：未开启',
+        off: '接管：未开启',
         provider: 'Box Plan 提供，不用填密钥',
         usage: '已用 {used} / {quota}',
         retention: '最后一次用到后留 {days} 天',
@@ -2503,6 +2503,7 @@ export default {
       networkErrorDesc: '无法连接到模型服务。请检查网络、VPN、代理或模型来源地址。',
       usedSkills: '本轮使用的 Skills',
       userSkill: '用户 Skill',
+      projectSkill: '工程 Skill',
       builtinSkill: '内置 Skill'
     },
     // 嵌入模式下右侧那块浏览器分屏
@@ -3061,6 +3062,10 @@ export default {
       autoEnableUnrealAgentLinkDesc: '打开工程时安装并启用连接插件。',
       autoEnableUnrealAgentLinkEnabled: '自动安装插件已开启',
       autoEnableUnrealAgentLinkDisabled: '自动安装插件已关闭',
+      crashRecovery: '崩溃恢复',
+      autoRecoverEditorCrash: '编辑器崩溃后自动重开',
+      autoRecoverEditorCrashDesc:
+        '关掉崩溃报告窗口，备份未保存的自动存档，再重新打开工程。5 分钟内再崩一次就不再重开。',
       repairCleanup: '清理旧版插件',
       repairCleanupDesc: '清理引擎目录中的旧版连接插件；请先关闭虚幻编辑器。',
       repairCleanupAction: '清理旧版插件',

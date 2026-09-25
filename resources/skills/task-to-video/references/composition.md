@@ -9,7 +9,8 @@
 2. 按返回 `storyboard.scenes[].duration` 编排 HTML；转为 `kind: composition`，设置真实 `source`，保留对应旁白、id、时长。
 3. 调用 `preview_task_video`，检查每镜头返回的四个时间点。修改受影响的 HTML。
 
-   一个 HTML 编排多段时，额外传 `sampleTimes` 秒数数组（最多 24 个），覆盖每段的揭示、停留和衔接，不能只看全片四张图。
+   一个 HTML 编排多段时，额外传 `sampleTimes` 秒数数组（最多 24 个，**全片时间**，自动落到所在镜头），覆盖每段的揭示、停留和衔接，不能只看全片四张图。
+   每张取样图带 `time`（全片）和 `sceneTime`（镜头内），文件名也以全片时间开头；核对时以这两个数为准。没取到的时间点列在 `droppedTimes`。
 4. 调用 `render_task_video`。音频从同一工程缓存复用；每次保留新版本。
 
 ## 输入

@@ -23,31 +23,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogUALMesh, Log, All);
 
 namespace
 {
-	/**
-	 * 资产路径归一。
-	 *
-	 * 与 `FUAL_MaterialCommands::NormalizePath` 形状相同 —— 那份是私有静态成员，
-	 * 挪进 `UAL_CommandUtils` 会动到一个 4000 行的文件。等第三处需要时再收敛，
-	 * 现在两份都很短，重复的代价低于跨文件重构的冲突风险。
-	 */
-	FString NormalizeAssetPath(const FString& InputPath)
-	{
-		FString Result = InputPath.TrimStartAndEnd();
-
-		if (Result.EndsWith(TEXT(".uasset")))
-		{
-			Result = Result.LeftChop(7);
-		}
-
-		Result.ReplaceInline(TEXT("\\"), TEXT("/"));
-		while (Result.Contains(TEXT("//")))
-		{
-			Result.ReplaceInline(TEXT("//"), TEXT("/"));
-		}
-
-		return Result;
-	}
-
 	FString PathOf(const UObject* Obj)
 	{
 		return Obj ? Obj->GetPathName() : FString();
@@ -448,7 +423,7 @@ void FUAL_MeshCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payload, 
 		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing required field: path"));
 		return;
 	}
-	Path = NormalizeAssetPath(Path);
+	Path = UAL_CommandUtils::NormalizeAssetPath(Path);
 
 	UObject* Asset = LoadObject<UObject>(nullptr, *Path);
 	if (!Asset)

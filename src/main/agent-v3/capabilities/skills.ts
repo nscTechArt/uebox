@@ -28,7 +28,7 @@
  * 3. 深挖：agent 调 `read_skill_resource(name, path)` 读 references/ 下的文件
  */
 
-import { join, resolve, sep } from 'path'
+import { basename, dirname, join, resolve, sep } from 'path'
 import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { app } from 'electron'
 import { z } from 'zod'
@@ -47,15 +47,40 @@ import { defineTool, type ToolOutcome, type UnrealAgentTool } from '../tools/def
 /**
  * skill 搜索路径。**顺序即优先级** —— 同名时先发现的胜出：
  *
+ *   0. 当前工程自带的（`<工程根>/.uebox/skills`，见 `projectSkillsDir`）
  *   1. 用户自己写的（可以覆盖内置和插件的同名 skill）
  *   2. 插件带来的
  *   3. 随包内置的
  */
-export function skillDirectories(pluginSkillDirs: string[] = []): string[] {
+export function skillDirectories(pluginSkillDirs: string[] = [], projectRoot?: string): string[] {
   const builtinSkillsDir = app.isPackaged
     ? join(process.resourcesPath, 'skills')
     : join(app.getAppPath(), 'resources', 'skills')
-  return [userSkillsDir(), ...pluginSkillDirs, builtinSkillsDir]
+  const projectDir = projectSkillsDir(projectRoot)
+  return [...(projectDir ? [projectDir] : []), userSkillsDir(), ...pluginSkillDirs, builtinSkillsDir]
+}
+
+/**
+ * 工程自带的 skill 目录：`<工程根>/.uebox/skills`。
+ *
+ * ## 为什么要有这一层
+ *
+ * 用户目录和内置目录都是**跨工程**的，而有一类知识只属于某一个工程：
+ * 「这个数字人的 13 条动作要这样导、12 条是 additive、导完还要做静止姿势校正」，
+ * 连同干这件事的脚本。放内置等于发给所有用户，放用户目录等于在每个工程里都冒出来。
+ * 真机上撞到过：工程 `Scripts/` 里明明有 `import_motion_clips.py`，agent 五条导入
+ * API 全失败后让用户手动导 —— 它从没想过去翻那个目录。放进 skill 清单，它每轮都看得见。
+ *
+ * 优先级最高：同一个工程里，团队写下的做法比通用做法更贴近现场。
+ *
+ * @param projectRoot 工程根目录，或 `.uproject` 文件路径
+ */
+export function projectSkillsDir(projectRoot?: string): string | undefined {
+  if (!projectRoot) return undefined
+  const root = projectRoot.toLowerCase().endsWith('.uproject') ? dirname(projectRoot) : projectRoot
+  // 防一手：路径说不清就不认，免得在盘根下找 .uebox
+  if (!root || basename(root) === '') return undefined
+  return join(root, '.uebox', 'skills')
 }
 
 /**
@@ -83,14 +108,19 @@ export function userSkillsDir(): string {
  * 失败返回空数组而不是抛 —— skill 是增强能力，目录不存在或某个 SKILL.md
  * 写坏了不该让整个 agent 起不来。
  */
-export async function discoverSkillsOnDisk(): Promise<SkillMetadata[]> {
+export async function discoverSkillsOnDisk(projectRoot?: string): Promise<SkillMetadata[]> {
   try {
     // 插件的 skill 一并纳入。插件目录读不出来时按「没有插件」继续，
     // 不该让一个坏插件把内置 skill 也一起废掉。
     const { enabledPluginSkillDirs } = await import('./plugins/registry')
     const pluginDirs = await enabledPluginSkillDirs().catch(() => [])
-    const sources: SkillSource[] = ['user', ...pluginDirs.map(() => 'plugin' as const), 'builtin']
-    return await discoverSkills(skillDirectories(pluginDirs), sources)
+    const sources: SkillSource[] = [
+      ...(projectSkillsDir(projectRoot) ? ['project' as const] : []),
+      'user',
+      ...pluginDirs.map(() => 'plugin' as const),
+      'builtin'
+    ]
+    return await discoverSkills(skillDirectories(pluginDirs, projectRoot), sources)
   } catch (error) {
     console.warn('[AgentV3] Skill 发现失败，按无 skill 继续:', error)
     return []
@@ -108,8 +138,11 @@ export async function discoverSkillsOnDisk(): Promise<SkillMetadata[]> {
  * `discoverSkillsOnDisk()`。开关这种东西，失效的方向只能是「多关掉」，
  * 不能是「悄悄还开着」。
  */
-export async function discoverEnabledSkills(): Promise<SkillMetadata[]> {
-  const [skills, disabled] = await Promise.all([discoverSkillsOnDisk(), readDisabledSkills()])
+export async function discoverEnabledSkills(projectRoot?: string): Promise<SkillMetadata[]> {
+  const [skills, disabled] = await Promise.all([
+    discoverSkillsOnDisk(projectRoot),
+    readDisabledSkills()
+  ])
   return skills.filter((skill) => !disabled.has(skill.name))
 }
 
@@ -457,7 +490,9 @@ name and follow that procedure rather than improvising.
 When the user writes \`$<skill-name>\`, that is an explicit selection: call \`load_skill\` with
 that exact skill name before answering or acting.
 When a skill body points at a file under \`references/\`, \`scripts/\` or \`assets/\`, call
-\`read_skill_resource\` with the skill name and that relative path.
+\`read_skill_resource\` with the skill name and that relative path. A Python script under
+\`scripts/\` that the skill tells you to run goes to \`ue_run_python_script\` by \`skill\` +
+\`skill_script\` (+ \`args\`) — do not copy its text into \`script\`.
 
 <available_skills>
 ${list}

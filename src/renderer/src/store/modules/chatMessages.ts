@@ -96,7 +96,7 @@ export interface ExecutionContext {
 
 export interface ResponseMetadataSkill {
   name: string
-  source?: 'user' | 'builtin'
+  source?: 'project' | 'user' | 'builtin'
   directory?: string
 }
 

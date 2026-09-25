@@ -32,7 +32,7 @@ import {
   getProjectCoverService,
   stopProjectCoverSync
 } from './services/project/projectCoverRuntime'
-import { findMainWindow } from './appWindows'
+import { findMainWindow, registerMainWindow } from './appWindows'
 import {
   keepMainWindowInTray,
   minimizeCurrentMainWindow,
@@ -40,6 +40,7 @@ import {
 } from './mainWindowLifecycle'
 import { agentBrowser } from './services/agentBrowser'
 import { startAgentNotifications } from './services/agentNotifications'
+import { startEditorCrashWatch } from './services/editorCrashWatch'
 import { closeSearchBrowser } from './services/browserSearch'
 import { windowStateManager } from './windowStateManager'
 import { fitMacWindow, mainWindowChrome } from './mainWindowAppearance'
@@ -117,8 +118,8 @@ function createWindow(): void {
     height: windowState.height,
     x: windowState.x,
     y: windowState.y,
-    minWidth: 1500, // 打开界面最小宽
-    minHeight: 900, // 打开界面最小高
+    minWidth: 1024, // 打开界面最小宽
+    minHeight: 640, // 打开界面最小高
     show: false,
     title: MAIN_WINDOW_TITLE,
     ...mainWindowChrome(process.platform),
@@ -337,6 +338,8 @@ function createWindow(): void {
     rendererFilePath,
     is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
   )
+
+  registerMainWindow(mainWindow.webContents.id)
 
   // 设置主窗口到更新服务
   autoUpdaterService.setMainWindow(mainWindow)
@@ -660,11 +663,8 @@ appReady?.then(async () => {
     // 是长期配置；要求用户每次开机再进设置点一次「开启」，那份配置就等于废的。
     // 动态 import 是为了不把整棵工具树拉进启动路径的静态依赖图。
     void (async () => {
-      const [{ autoStartMcpServer }, { buildAllTools }] = await Promise.all([
-        import('./agent-v3/capabilities/mcp'),
-        import('./agent-v3/tools/registry')
-      ])
-      await autoStartMcpServer(() => buildAllTools())
+      const { autoStartMcpServer, mcpSessionSource } = await import('./agent-v3/capabilities/mcp')
+      await autoStartMcpServer(() => mcpSessionSource)
     })().catch((e) => logger.warn('[MCP-Server] 自动启动失败:', e))
 
     installOfflineNetworkPolicy({ enforce: false })
@@ -697,6 +697,9 @@ appReady?.then(async () => {
     // 系统通知：agent 跑完 / 卡在审批或反问上时提醒用户回来。
     // 放在窗口创建之后 —— 它要问「盒子的窗口在不在前台」
     startAgentNotifications(createWindow)
+
+    // 编辑器崩溃看门人：认出崩溃、关掉崩溃报告窗口、重开工程，并告诉等着的 agent
+    startEditorCrashWatch(createWindow)
 
     // 初始化自动更新服务（仅在非开发环境或明确启用时）
     if (!is.dev || process.env.ENABLE_AUTO_UPDATE === 'true') {

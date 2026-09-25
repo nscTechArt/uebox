@@ -25,6 +25,7 @@ import {
 import type { AiProviderSettings, ModelRequest, ModelRole } from '../../ai/types'
 import { classifyProviderError } from '../host/providerError'
 import { toPiProvider } from './piModel'
+import { labelToolResultImages } from './toolImageLabels'
 import {
   contextHasMediaRefs,
   isMediaFetchError,
@@ -368,11 +369,14 @@ export async function resolveAgentModel(
         )
       }
       // 发不出去的那几类先换成说明，剩下的（如果还有）在 onPayload 里换成链接
-      const outgoing = replaceMediaRefs(
+      const replaced = replaceMediaRefs(
         projected.context,
         urlKinds,
         unfetchableMediaKeys(selection.providerId)
       )
+      // 放在出口闸之后：被预算丢掉的图已换成文字，序号才和真正发出去的附图对得上
+      const labeled = labelToolResultImages(replaced.messages)
+      const outgoing = labeled === replaced.messages ? replaced : { ...replaced, messages: labeled }
       const hasMedia = contextHasMediaRefs(outgoing)
       const previousOnPayload = options?.onPayload
       const baseOptions = { ...options, ...(reasoning ? { reasoning } : {}) }

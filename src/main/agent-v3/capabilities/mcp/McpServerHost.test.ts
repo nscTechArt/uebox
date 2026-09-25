@@ -26,7 +26,12 @@ vi.mock('../../../services/project/projectManager', () => ({
 import { getTargetConnectionId } from '../../core/projectTargetContext'
 import { defineTool, type ToolRisk, type UnrealAgentTool } from '../../tools/defineTool'
 import { CLI_CONTRACT_VERSION } from './externalTarget'
-import { McpServerHost, selectExposedTools } from './McpServerHost'
+import {
+  McpServerHost,
+  selectExposedTools,
+  type McpSessionRequest,
+  type McpSessionSetup
+} from './McpServerHost'
 
 function fakeTool(
   name: string,
@@ -85,28 +90,37 @@ describe('selectExposedTools', () => {
     expect(names).toContain('ue_destroy_actor')
   })
 
-  // A→盒子→B 的转发链会让权限来源无法追踪
-  it('不转发从别的 MCP server 接进来的工具', () => {
+  /**
+   * 外部客户端拿到的就是盒子助手手上那一套：本地文件、shell、转发来的第三方 MCP 工具、
+   * task 都在。两边工具一致，在 Codex 里和在盒子里做同一件事才能拿来对比。
+   * 审批交给客户端，按工具注解拦（见下面「工具注解」那组）。
+   */
+  it('开了写操作就全都给，不再按命名空间砍', () => {
     const names = selectExposedTools(TOOLS, { includeMutating: true }).map((t) => t.name)
+    expect(names).toEqual(TOOLS.map((t) => t.name))
+  })
+
+  it('只读档只留只读工具 —— 本地文件里也只留读的那几个', () => {
+    const names = selectExposedTools(TOOLS, {}).map((t) => t.name)
+    expect(names).toContain('read_local_file')
+    expect(names).not.toContain('write_local_file')
+    expect(names).not.toContain('run_shell_command')
     expect(names).not.toContain('mcp_other_thing')
   })
 
-  it('core 命名空间不对外 —— 那是内部编排用的', () => {
-    const names = selectExposedTools(TOOLS, { includeMutating: true }).map((t) => t.name)
-    expect(names).not.toContain('task')
-  })
-
-  /**
-   * MCP 这一头没有审批门（`McpServerHost` 直接调 `tool.execute`），
-   * 所以暴露 shell 等于把任意命令执行权交给任何拿到 token 的进程。
-   * 而界面上承诺的是「操作你的引擎项目」，不是「操作你的电脑」。
-   */
-  it('本地文件与 shell 一律不对外，includeMutating 也不放行', () => {
-    const names = selectExposedTools(TOOLS, { includeMutating: true }).map((t) => t.name)
-    expect(names).not.toContain('run_shell_command')
-    expect(names).not.toContain('write_local_file')
-    // 只读的也不给：外部客户端本来就自带读文件的能力，转发只是多一条路径
-    expect(names).not.toContain('read_local_file')
+  // 浏览器那几个声明 safe，但动的是用户真实的登录态，只读档不算它
+  it('要求逐次审批的工具不进只读档', () => {
+    const browser = defineTool({
+      name: 'browser_interact',
+      namespace: 'browser',
+      risk: 'safe',
+      requiresExplicitApproval: true,
+      description: '测试',
+      input: z.object({}),
+      execute: async () => ({ text: 'ok' })
+    }) as unknown as UnrealAgentTool<never>
+    expect(selectExposedTools([browser], {})).toEqual([])
+    expect(selectExposedTools([browser], { includeMutating: true })).toEqual([browser])
   })
 
   it('命名空间白名单能进一步收窄', () => {
@@ -182,6 +196,8 @@ describe('McpServerHost 端到端', () => {
     expect(listed.tools.map((t) => t.name).sort()).toEqual([
       'boom',
       'material_describe',
+      'read_local_file',
+      'task',
       'ue_get_actor',
       'ue_session_health'
     ])
@@ -784,5 +800,148 @@ describe('McpServerHost 公共结果', () => {
     const result = await client.callTool({ name: 'material_describe', arguments: {} })
 
     expect(result.structuredContent).toBeUndefined()
+  }, 30_000)
+})
+
+/**
+ * 按会话装配：外部客户端和盒子助手走同一条装配路（`hostSession.ts`）。
+ *
+ * 这里验的是协议层接得对不对：每条会话各拿一份、说明在握手时下发、
+ * 只读档和 elicitation 能力如实传给装配函数、取消能传到工具里。
+ */
+describe('McpServerHost 按会话装配', () => {
+  const hosts: McpServerHost[] = []
+  const clients: Client[] = []
+
+  afterEach(async () => {
+    await Promise.all(clients.splice(0).map((c) => c.close().catch(() => undefined)))
+    await Promise.all(hosts.splice(0).map((h) => h.stop()))
+  })
+
+  async function connect(
+    source: Parameters<McpServerHost['start']>[0],
+    options: Parameters<McpServerHost['start']>[1] = { includeMutating: true },
+    capabilities: ConstructorParameters<typeof Client>[1] = { capabilities: {} }
+  ): Promise<Client> {
+    const host = new McpServerHost()
+    hosts.push(host)
+    const status = await host.start(source, options)
+    const client = new Client({ name: 'test', version: '1.0.0' }, capabilities)
+    clients.push(client)
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(status.url!), {
+        requestInit: { headers: { Authorization: `Bearer ${status.token!}` } }
+      })
+    )
+    return client
+  }
+
+  it('每条会话各装配一次，会话 id 就是 MCP 的会话 id', async () => {
+    const seen: string[] = []
+    const source = async (request: McpSessionRequest): Promise<McpSessionSetup> => {
+      seen.push(request.sessionId)
+      return { tools: TOOLS }
+    }
+
+    const a = await connect(source)
+    const transport = (a as unknown as { transport: { sessionId?: string } }).transport
+    // 第一条是 start 时的预览，第二条才是真连上的会话
+    expect(seen).toHaveLength(2)
+    expect(seen[1]).toBe(transport.sessionId)
+    expect(seen[1]).toMatch(/^mcp-/)
+  }, 30_000)
+
+  it('握手时下发说明', async () => {
+    const client = await connect(async () => ({ tools: TOOLS, instructions: '盒子的规矩' }))
+    expect(client.getInstructions()).toBe('盒子的规矩')
+  }, 30_000)
+
+  it('只读档如实传给装配函数，装配结果还会再按只读收窄一遍', async () => {
+    const flags: boolean[] = []
+    const client = await connect(
+      async (request) => {
+        flags.push(request.readOnly)
+        return { tools: TOOLS }
+      },
+      {}
+    )
+    expect(flags.every(Boolean)).toBe(true)
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    expect(names).not.toContain('ue_destroy_actor')
+  }, 30_000)
+
+  it('客户端声明了 elicitation 才给提问通道', async () => {
+    const withElicit: boolean[] = []
+    const source = async (request: McpSessionRequest): Promise<McpSessionSetup> => {
+      if (request.clientCapabilities) withElicit.push(Boolean(request.elicit))
+      return { tools: TOOLS }
+    }
+
+    await connect(source)
+    await connect(source, { includeMutating: true }, { capabilities: { elicitation: { form: {} } } })
+    expect(withElicit).toEqual([false, true])
+  }, 30_000)
+
+  it('客户端取消调用时，工具收到的 signal 跟着中止', async () => {
+    let aborted: Promise<boolean> | undefined
+    const waiting = defineTool({
+      name: 'wait_forever',
+      namespace: 'ue.system',
+      risk: 'safe',
+      description: '一直等到被取消',
+      input: z.object({}),
+      execute: async (_input, ctx) => {
+        aborted = new Promise((resolve) =>
+          ctx.signal?.addEventListener('abort', () => resolve(true), { once: true })
+        )
+        await aborted
+        return { text: 'cancelled' }
+      }
+    }) as unknown as UnrealAgentTool<never>
+
+    const client = await connect(async () => ({ tools: [waiting] }))
+    const controller = new AbortController()
+    const call = client.callTool({ name: 'wait_forever', arguments: {} }, undefined, {
+      signal: controller.signal
+    })
+    await vi.waitFor(() => expect(aborted).toBeDefined())
+    controller.abort()
+    await expect(call).rejects.toThrow()
+    await expect(aborted).resolves.toBe(true)
+  }, 30_000)
+})
+
+/** 审批交给客户端，所以工具注解必须如实、而且往严里标 */
+describe('McpServerHost 工具注解', () => {
+  const hosts: McpServerHost[] = []
+  const clients: Client[] = []
+
+  afterEach(async () => {
+    await Promise.all(clients.splice(0).map((c) => c.close().catch(() => undefined)))
+    await Promise.all(hosts.splice(0).map((h) => h.stop()))
+  })
+
+  it('只读 / 破坏性 / 派子任务各自标对', async () => {
+    const host = new McpServerHost()
+    hosts.push(host)
+    const status = await host.start(TOOLS, { includeMutating: true })
+    const client = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} })
+    clients.push(client)
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(status.url!), {
+        requestInit: { headers: { Authorization: `Bearer ${status.token!}` } }
+      })
+    )
+    const byName = new Map((await client.listTools()).tools.map((t) => [t.name, t.annotations]))
+
+    expect(byName.get('ue_get_actor')).toMatchObject({ readOnlyHint: true, destructiveHint: false })
+    expect(byName.get('material_create')).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false
+    })
+    expect(byName.get('run_shell_command')).toMatchObject({ destructiveHint: true })
+    // task 声明 safe，但子任务能动整个工具池、不过客户端的审批
+    expect(byName.get('task')).toMatchObject({ readOnlyHint: false, destructiveHint: true })
+    expect(byName.get('mcp_other_thing')).toMatchObject({ openWorldHint: true })
   }, 30_000)
 })

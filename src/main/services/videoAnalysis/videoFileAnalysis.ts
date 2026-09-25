@@ -117,7 +117,13 @@ export async function analyzeLocalVideoFile(args: {
     // 上面已经查过有模型，这里的 null 只可能是配置在两次读取之间被改掉了
     if (!analyzed) return { success: false, error: NO_VIDEO_MODEL_HINT }
     if (!analyzed.success) {
-      return { success: false, model: modelLabel, error: analyzed.error || '视频分析失败' }
+      const reason = analyzed.error || '视频分析失败'
+      // 远端说参数不对 / 处理不了媒体时，光转述一句 Param Incorrect 没法行动：报出模型和体积，给下一步
+      const hint = /param|media|video|HTTP 4(00|13)\b/i.test(reason)
+        ? `（${modelLabel} 收了 ${(buffer.length / 1024 / 1024).toFixed(1)}MB 的 ${path.extname(filePath) || '视频'}。` +
+          '可先用 ffmpeg 裁短或压小再试，或在「设置 → 模型」换一个勾了视频能力的模型）'
+        : ''
+      return { success: false, model: modelLabel, error: reason + hint }
     }
 
     return {

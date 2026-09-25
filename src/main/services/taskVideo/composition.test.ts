@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
-import { stageComposition, compositionFile } from './composition'
+import { stageComposition, compositionFile, planSampleTimes, referencedAssets } from './composition'
 import { VideoScene } from './schema'
 
 const folders: string[] = []
@@ -89,4 +89,48 @@ it('rejects ambiguous asset names and traversal at the input boundary', async ()
       })
     )
   ).rejects.toThrow('重复')
+})
+
+it('names the scene and the undeclared asset instead of failing later with a raw ENOENT', async () => {
+  const dir = await fixture()
+  const source = path.join(dir, 'hook.html')
+  await fs.writeFile(source, '<video src="assets/aifilm.mp4"></video><img src="./assets/ok.png">')
+  const image = path.join(dir, 'ok.png')
+  await fs.writeFile(image, 'pixels')
+  const scene = VideoScene.parse({
+    id: 'hook',
+    kind: 'composition',
+    source,
+    sourceNote: '',
+    title: '',
+    caption: '',
+    duration: 4,
+    compositionAssets: [{ name: 'ok.png', source: image }]
+  })
+  await expect(stageComposition(dir, scene)).rejects.toThrow(
+    /镜头 hook 引用了 assets\/aifilm\.mp4，但没在 compositionAssets 里声明/
+  )
+})
+it('finds asset references in attributes and CSS but not in absolute URLs', () => {
+  expect(
+    referencedAssets(
+      `<img src="assets/a%20b.png"><div style="background:url('assets/bg.jpg')"></div>` +
+        `<script src="https://cdn.example/assets/x.js"></script>` +
+        `<!-- old: assets/draft.png --><p>see assets/logo.png</p>`
+    )
+  ).toEqual(['a b.png', 'bg.jpg'])
+})
+it('maps whole-film sample times into the scene that contains them and reports the rest', () => {
+  const plan = planSampleTimes(
+    [
+      { id: 'hook', kind: 'composition', duration: 10 },
+      { id: 'card', kind: 'text', duration: 5 },
+      { id: 'outro', kind: 'composition', duration: 10 }
+    ],
+    [5, 12, 16, 40]
+  )
+  expect(plan.scenes.map((scene) => scene.start)).toEqual([0, 10, 15])
+  expect(plan.scenes[0].local).toEqual([5])
+  expect(plan.scenes[2].local).toEqual([1])
+  expect(plan.dropped.map((item) => item.time)).toEqual([12, 40])
 })

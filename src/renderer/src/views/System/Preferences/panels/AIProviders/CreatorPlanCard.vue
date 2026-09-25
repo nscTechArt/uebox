@@ -90,6 +90,18 @@ function toggle(role: ModelRole, checked: boolean): void {
     : selected.value.filter((item) => item !== role)
 }
 
+const allSelected = computed(
+  () =>
+    !!preview.value &&
+    preview.value.changes.every((c) => selected.value.includes(c.role)) &&
+    (!preview.value.storage || storageSelected.value)
+)
+
+function toggleAll(checked: boolean): void {
+  selected.value = checked && preview.value ? preview.value.changes.map((c) => c.role) : []
+  if (preview.value?.storage) storageSelected.value = checked
+}
+
 async function apply(): Promise<void> {
   applying.value = true
   const result = await creatorPlanAPI.apply(
@@ -328,6 +340,9 @@ onUnmounted(() => unsubscribe?.())
     >
       <div v-if="preview" class="preview">
         <p class="plan-desc">{{ $t('aiProvider.creatorPlan.previewDesc') }}</p>
+        <AppCheckbox :checked="allSelected" @update:checked="toggleAll">
+          {{ $t('common.selectAll') }}
+        </AppCheckbox>
         <div v-for="change in preview.changes" :key="change.role" class="preview-row">
           <AppCheckbox
             :checked="selected.includes(change.role)"
@@ -336,7 +351,6 @@ onUnmounted(() => unsubscribe?.())
             {{ $t(`aiProvider.roles.${change.role}`) }}
           </AppCheckbox>
           <span class="preview-meta">
-            <span>{{ change.modelDisplayName }}</span>
             <span v-if="change.managed">{{ $t('aiProvider.creatorPlan.previewManaged') }}</span>
             <span v-else-if="change.current">
               {{
@@ -507,6 +521,9 @@ onUnmounted(() => unsubscribe?.())
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* 角色多，列表在弹窗内滚动，别把弹窗撑出窗口 */
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .preview-row {
@@ -524,5 +541,11 @@ onUnmounted(() => unsubscribe?.())
   align-items: flex-end;
   font-size: 12px;
   color: var(--color-text-muted);
+  text-align: right;
+}
+
+.preview-row > :first-child {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 </style>

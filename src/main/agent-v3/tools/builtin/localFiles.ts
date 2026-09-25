@@ -233,8 +233,12 @@ function withViewedImageDetails(
   if (!IMAGE_EXTENSION.test(absolute)) return result
 
   const name = absolute.split(/[\\/]/).pop() || absolute
+  // 路径也要给模型：pi 回的文字只有「Read image file [image/jpeg]」，
+  // 并行读几张图时模型分不清哪张是哪个文件（details 只给界面看，不进上下文）
+  const source = { type: 'text', text: `图片文件：${absolute}` }
   return {
     ...result,
+    content: [source, ...content],
     details: {
       message: `看了图片 ${name}`,
       /** 界面用：默认收起，用户点一下才加载 —— agent 一次可能连着看好几张 */

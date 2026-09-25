@@ -130,8 +130,8 @@ describe('CreatorPlanCard', () => {
     await flushPromises()
 
     expect(wrapper.find('.modal').exists()).toBe(true)
-    expect(wrapper.text()).toContain('现在：gpt-x · Mine')
-    expect(wrapper.text()).toContain('现在：未设置')
+    expect(wrapper.text()).toContain('接管：gpt-x · Mine')
+    expect(wrapper.text()).toContain('接管：未设置')
 
     await wrapper.find('.modal-ok').trigger('click')
     await flushPromises()

@@ -1168,8 +1168,8 @@ watch(
 )
 
 // Notebook 模式下的来源点击处理
-const onSourceClick = inject<(source: any) => void>('onSourceClick')
-const handleSourceClick = (source: any): void => {
+const onSourceClick = inject<((source: unknown) => void) | null>('onSourceClick', null)
+const handleSourceClick = (source: unknown): void => {
   if (onSourceClick) {
     onSourceClick(source)
   }

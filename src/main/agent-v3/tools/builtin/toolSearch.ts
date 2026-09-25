@@ -201,6 +201,8 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.editor.autoplay':
     '试玩 自动试玩 机器人 按键 操作 走到 目标 autoplay bot play input objective',
   'ue.level': '关卡 场景 大纲 世界 分区 流送 level world outliner streaming',
+  'ue.landscape':
+    '地形 地表 高度图 虚拟纹理 rvt 融合 landscape terrain heightmap virtual texture blend',
   'ue.system': '性能 崩溃 日志 插件 控制台 脚本 卡顿 crash log performance plugin python',
   'ue.widget': '界面 控件 按钮 文本 布局 widget umg ui layout button text',
   'ue.animation': '动画 骨骼 运动 animation skeleton motion',

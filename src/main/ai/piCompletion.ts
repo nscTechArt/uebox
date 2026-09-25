@@ -2,7 +2,8 @@ import {
   contentText,
   createModels,
   type AssistantMessage,
-  type Message
+  type Message,
+  type ThinkingLevel
 } from '@earendil-works/pi-ai'
 import { toPiProvider } from '../agent-v3/core/piModel'
 import {
@@ -91,6 +92,11 @@ export interface CompletionRequest {
   maxTokens?: number
   /** 原样并进请求体的额外字段（如 response_format）。只有 OpenAI 兼容那几家会读 */
   samplingParams?: Record<string, unknown>
+  /**
+   * 请模型别思考。关不掉的模型（有些推理模型只有档位没有开关）pi 会夹到它支持的
+   * 最低一档（`clampThinkingLevel`），不报错。不给就按模型自己的默认。
+   */
+  reasoning?: 'off'
 }
 
 /** 一条纯文本的用户消息。单轮调用点占多数，省得每处都拼一遍 */
@@ -148,19 +154,23 @@ export async function complete(
   request: CompletionRequest
 ): Promise<AssistantMessage> {
   const { models, model } = resolveModel(provider, modelId)
-  const message = await models.complete(
-    model,
-    {
-      ...(request.system ? { systemPrompt: request.system } : {}),
-      messages: request.messages
-    },
-    {
-      ...(request.signal ? { signal: request.signal } : {}),
-      ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
-      ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
-      ...(request.samplingParams ? { samplingParams: request.samplingParams } : {})
-    }
-  )
+  const context = {
+    ...(request.system ? { systemPrompt: request.system } : {}),
+    messages: request.messages
+  }
+  const options = {
+    ...(request.signal ? { signal: request.signal } : {}),
+    ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+    ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
+    ...(request.samplingParams ? { samplingParams: request.samplingParams } : {})
+  }
+  // 思考档位只有 simple 那条路认。`off` 不在 pi 的类型里但运行时认，理由见 streamFn 的 toPiReasoning
+  const message = request.reasoning
+    ? await models.completeSimple(model, context, {
+        ...options,
+        reasoning: request.reasoning as unknown as ThinkingLevel
+      })
+    : await models.complete(model, context, options)
   throwIfFailed(message)
   return message
 }
