@@ -281,7 +281,13 @@ export class CatalogService {
     address: string,
     caFingerprint?: string | null,
     caPem?: string | null
-  ): Promise<CatalogProbeResult & { trust?: CatalogTrust | null; caPem?: string }> {
+  ): Promise<
+    CatalogProbeResult & {
+      trust?: CatalogTrust | null
+      caPem?: string
+      loreCa?: CatalogServerRecord['loreCa']
+    }
+  > {
     let url: string
     try {
       url = normalizeAddress(address)
@@ -298,7 +304,11 @@ export class CatalogService {
       }
     }
     const parsed = new URL(url)
-    const result: CatalogProbeResult & { trust: CatalogTrust | null; caPem?: string } = {
+    const result: CatalogProbeResult & {
+      trust: CatalogTrust | null
+      caPem?: string
+      loreCa?: CatalogServerRecord['loreCa']
+    } = {
       url,
       kind: 'unknown',
       chain: [],
@@ -368,6 +378,13 @@ export class CatalogService {
       })
       result.wellKnown = wellKnown
       result.kind = 'member'
+      const loreCa = this.loreCaFrom(wellKnown, caFingerprint, result.trust)
+      if (loreCa === 'mismatch') {
+        result.error = 'fingerprint-mismatch'
+        return result
+      }
+      result.loreCa = loreCa
+      if (loreCa && !result.pinnedFingerprint) result.pinnedFingerprint = loreCa.fingerprint256
     } catch (error) {
       if (
         error instanceof CatalogHttpError &&
@@ -390,6 +407,29 @@ export class CatalogService {
       http.destroy()
     }
     return result
+  }
+
+  /**
+   * lore.exe 要信的部署 CA。well-known 给了 caPem 就用它，但邀请链接带了指纹时必须对得上
+   * （成员面是回环 HTTP 时，这是唯一一道校验）；没给 caPem 就沿用成员面固定的那张。
+   */
+  private loreCaFrom(
+    wellKnown: WellKnown,
+    caFingerprint: string | null | undefined,
+    trust: CatalogTrust | null
+  ): CatalogServerRecord['loreCa'] | 'mismatch' {
+    const pem = wellKnown.lore?.caPem
+    const wanted = normalizeFingerprint(caFingerprint ?? null)
+    if (pem && isCaPem(pem)) {
+      const fingerprint256 = pemFingerprint(pem)
+      if (wanted && fingerprint256 !== wanted) return 'mismatch'
+      const declared = normalizeFingerprint(wellKnown.lore?.caSha256 ?? null)
+      if (declared && declared !== fingerprint256) return 'mismatch'
+      return { caPem: pem, fingerprint256 }
+    }
+    if (trust?.kind === 'pinned-ca')
+      return { caPem: trust.caPem, fingerprint256: trust.fingerprint256 }
+    return null
   }
 
   /** 只在"有指纹要比对、链里又没有根 CA"时用：拿回来的 caPem 只拿来比指纹，不直接信 */
@@ -460,6 +500,7 @@ export class CatalogService {
       loreCliVersion: wellKnown?.lore?.cliVersion ?? null,
       loreCliSha256: wellKnown?.lore?.cliSha256 ?? null,
       trust,
+      loreCa: probe.loreCa ?? existing?.loreCa ?? null,
       authMode: input.authMode,
       member: input.member?.trim() || null,
       addedAt: existing?.addedAt ?? this.now()
@@ -617,6 +658,7 @@ export class CatalogService {
       for (const library of this.libraries.values()) {
         if (library.record.serverId === serverId) {
           library.lastError = null
+          library.signedOut = false
           this.emitStatus(library)
         }
       }
@@ -1416,11 +1458,16 @@ export class CatalogService {
     if (!lore.binary)
       throw new CatalogServiceError('lore-missing', lore.problem ?? 'lore.exe is not available')
     let caFile: string | null = null
-    if (server.record.trust.kind === 'pinned-ca') {
+    const ca =
+      server.record.loreCa ??
+      (server.record.trust.kind === 'pinned-ca'
+        ? { caPem: server.record.trust.caPem, fingerprint256: server.record.trust.fingerprint256 }
+        : null)
+    if (ca) {
       const dir = join(this.options.shadowRoot, 'ca')
       await fs.mkdir(dir, { recursive: true })
-      caFile = join(dir, caFileName(server.record.trust.fingerprint256))
-      await fs.writeFile(caFile, server.record.trust.caPem, 'utf8')
+      caFile = join(dir, caFileName(ca.fingerprint256))
+      await fs.writeFile(caFile, ca.caPem, 'utf8')
     }
     return {
       binary: lore.binary.path,

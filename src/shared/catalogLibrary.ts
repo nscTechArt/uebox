@@ -42,6 +42,11 @@ export interface CatalogServerRecord {
   loreCliVersion: string | null
   loreCliSha256: string | null
   trust: CatalogTrust
+  /**
+   * lore.exe 用的部署 CA（SSL_CERT_FILE）。成员面走回环 HTTP 时它不同于 trust；
+   * 取自 well-known 的 caPem，有邀请指纹时必须对得上。
+   */
+  loreCa?: { caPem: string; fingerprint256: string } | null
   authMode: CatalogAuthMode
   /** password 模式下的成员名；token 模式下是令牌里的 subject（能解出来的话） */
   member: string | null
@@ -274,7 +279,7 @@ export interface CatalogProbeResult {
   wellKnown: {
     serverVersion?: string
     catalog?: string
-    lore?: { remote?: string; cliVersion?: string; cliSha256?: string }
+    lore?: { remote?: string; cliVersion?: string; cliSha256?: string; caSha256?: string }
     auth?: { login?: string; refresh?: string; cliTokenPage?: string }
   } | null
   error: string | null

@@ -48,6 +48,8 @@ export interface FakeCatalog {
   assets: FakeAsset[]
   changes: Array<{ gen: number; path: string; op: string }>
   previewHits: number
+  /** 当前认的令牌；测试里换掉它就等于服务端把旧令牌作废了 */
+  token: string
   close(): Promise<void>
   reopen(): Promise<void>
 }
@@ -55,7 +57,6 @@ export interface FakeCatalog {
 const PREVIEW_BYTES = Buffer.from('RIFF\u0000\u0000\u0000\u0000WEBPVP8 fake', 'binary')
 
 export async function startFakeCatalog(options: FakeCatalogOptions = {}): Promise<FakeCatalog> {
-  const token = options.token ?? 'good-token'
   const count = options.assets ?? 450
   const assets: FakeAsset[] = []
   for (let index = 0; index < count; index += 1) {
@@ -94,6 +95,7 @@ export async function startFakeCatalog(options: FakeCatalogOptions = {}): Promis
     assets,
     changes: [],
     previewHits: 0,
+    token: options.token ?? 'good-token',
     close: async () => undefined,
     reopen: async () => undefined
   }
@@ -167,7 +169,7 @@ export async function startFakeCatalog(options: FakeCatalogOptions = {}): Promis
       return
     }
     if (!url.pathname.startsWith('/v1/')) return missing()
-    if (request.headers.authorization !== `Bearer ${token}`)
+    if (request.headers.authorization !== `Bearer ${state.token}`)
       return json(401, { error: 'unknown token' })
 
     if (url.pathname === '/v1/libraries') {

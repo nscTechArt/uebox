@@ -225,6 +225,19 @@ describe('CatalogService', () => {
     ])
   })
 
+  it('marks the library signed out when the token is revoked, and clears it after signing in again', async () => {
+    const key = await addDemo()
+    fake.token = 'rotated-token'
+    await expect(
+      service.listWindow(key, { dir: 0, recursive: true, q: 'x' }, 0, 50)
+    ).rejects.toMatchObject({ code: 'unauthorized' })
+    expect((await service.status(key)).signedOut).toBe(true)
+    const serverId = key.split(':')[0]
+    await service.signIn(serverId, { identityToken: 'rotated-token' })
+    const statuses = events.filter((event) => event.kind === 'status' && event.key === key)
+    expect(statuses.at(-1)).toMatchObject({ status: { signedOut: false } })
+  })
+
   it('reports an invalid token as unauthorized', async () => {
     fake = await startFakeCatalog()
     service = makeService()
