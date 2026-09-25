@@ -803,8 +803,8 @@ export default {
       previewTitle: 'Choose roles for the plan',
       previewDesc:
         'Checked roles switch to plan models. Roles you set up yourself start unchecked.',
-      previewCurrent: 'Now: {name}',
-      previewUnset: 'Now: not set',
+      previewCurrent: 'Replaces: {name}',
+      previewUnset: 'Replaces: not set',
       previewManaged: 'Managed by plan',
       previewReindex: 'Knowledge base re-embeds with the new model; keyword search only until done',
       apply: 'Apply',
@@ -812,7 +812,7 @@ export default {
       storage: {
         label: 'Object storage',
         spec: '{quota} · kept {days} days after last use',
-        off: 'Now: off',
+        off: 'Replaces: off',
         provider: 'Provided by Box Plan. No keys needed.',
         usage: '{used} of {quota} used',
         retention: 'kept {days} days after last use',
