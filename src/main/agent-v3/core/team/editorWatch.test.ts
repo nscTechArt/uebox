@@ -78,6 +78,30 @@ describe('编辑器看护', () => {
     expect(h.events[0]).toMatchObject({ reason: 'Access violation' })
   })
 
+  describe('重开让给盒子的崩溃看门人 —— 两边各开一个就是同一工程两个编辑器', () => {
+    it('看门人已经重开：这里不再开，只等连回来', async () => {
+      const h = harness({ crashHandledElsewhere: async () => 'reopening' })
+      await h.fire('system.disconnected', {}, 'c1')
+      expect(h.reopened).toEqual([])
+      expect(h.events.map((e) => e.kind)).toEqual(['crashed', 'recovered'])
+    })
+
+    it('看门人认了崩溃但不重开：不自己开，把原因告诉制作人', async () => {
+      const h = harness({
+        crashHandledElsewhere: async () => ({ declined: '用户在设置里关了自动重开' })
+      })
+      await h.fire('system.disconnected', {}, 'c1')
+      expect(h.reopened).toEqual([])
+      expect(h.events[1]).toMatchObject({ kind: 'gave-up', why: '用户在设置里关了自动重开' })
+    })
+
+    it('看门人没认成崩溃（没有崩溃报告）：这里自己重开', async () => {
+      const h = harness({ crashHandledElsewhere: async () => null })
+      await h.fire('system.disconnected', {}, 'c1')
+      expect(h.reopened).toEqual(['I:/Game/Game.uproject'])
+    })
+  })
+
   it('插件先说了 project.closed 再断：是人关的，不重开', async () => {
     const h = harness()
     await h.fire('project.closed', {}, 'c1')

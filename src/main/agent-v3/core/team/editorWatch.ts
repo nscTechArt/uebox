@@ -22,6 +22,12 @@
  * 由宿主传一个判断「这是不是这一局在干的工程」的函数进来。
  *
  * 一小时内最多重开 3 次：反复崩就别再拉起来了，停下交给人。
+ *
+ * ## 重开先让给盒子的崩溃看门人
+ *
+ * 盒子本身也有一个看门人（`services/editorCrashWatch`，对所有编辑器生效）。两边各自
+ * 重开会开出两个编辑器，所以它认出崩溃时由它重开，这里只负责告诉制作人、等连回来；
+ * 它没认成崩溃（没崩溃报告，比如进程被杀）时才由这里重开。见 `crashHandledElsewhere`。
  */
 
 import { projectPathKey } from '../projectPathKey'
@@ -67,6 +73,21 @@ export interface EditorWatchDeps {
   crashReason: (projectDir: string, since: number) => Promise<string | null>
   /** 这是不是这一局在干的工程 */
   isOurs: (projectDir: string) => boolean
+  /**
+   * 盒子的崩溃看门人（`services/editorCrashWatch`）对这次崩溃怎么处理的。
+   *
+   * 它对所有交互式编辑器生效：认出崩溃后关报告窗口、备份自动存档、重开工程。
+   * 这里再各自重开一次，同一个工程就会开出两个编辑器 —— 所以重开让给它：
+   * - `'reopening'`：它已经重开了（或编辑器已经回来了），这里只等连回来
+   * - `{ declined }`：它认了崩溃但不重开（用户关了自动重开、反复崩、重开失败），原因转给制作人
+   * - `null`：它没认成崩溃（没有崩溃报告），由这里自己重开
+   *
+   * 不传就一律自己来（测试、没有看门人的环境）。
+   */
+  crashHandledElsewhere?: (
+    projectDir: string,
+    since: number
+  ) => Promise<'reopening' | { declined: string } | null>
   now?: () => number
   sleep?: (ms: number) => Promise<void>
 }
@@ -115,6 +136,7 @@ export function watchEditorCrashes(deps: EditorWatchDeps, options: EditorWatchOp
     const key = projectPathKey(projectDir)
     if (recovering.has(key)) return
     recovering.add(key)
+    const lostAt = now()
     try {
       await sleep(graceMs)
       if (stopped) return
@@ -150,19 +172,29 @@ export function watchEditorCrashes(deps: EditorWatchDeps, options: EditorWatchOp
         reason: await deps.crashReason(projectDir, since).catch(() => null)
       })
 
-      const t = now()
-      while (reopens.length && t - reopens[0]! > windowMs) reopens.shift()
-      if (reopens.length >= maxReopens) {
-        options.onEvent({
-          kind: 'gave-up',
-          projectDir,
-          why: `一小时内已经重开过 ${reopens.length} 次，反复崩溃，不再自动重开`
-        })
+      const elsewhere = deps.crashHandledElsewhere
+        ? await deps.crashHandledElsewhere(projectDir, lostAt)
+        : null
+      if (stopped) return
+      if (elsewhere && elsewhere !== 'reopening') {
+        options.onEvent({ kind: 'gave-up', projectDir, why: elsewhere.declined })
         return
       }
-      reopens.push(t)
 
-      await deps.reopen(uproject)
+      const t = now()
+      if (elsewhere !== 'reopening') {
+        while (reopens.length && t - reopens[0]! > windowMs) reopens.shift()
+        if (reopens.length >= maxReopens) {
+          options.onEvent({
+            kind: 'gave-up',
+            projectDir,
+            why: `一小时内已经重开过 ${reopens.length} 次，反复崩溃，不再自动重开`
+          })
+          return
+        }
+        reopens.push(t)
+        await deps.reopen(uproject)
+      }
       const live = await deps.waitLive(projectDir)
       if (stopped) return
       options.onEvent(
