@@ -23,6 +23,10 @@ knobs the user tunes in the details panel.
 
 Nothing writes to disk. Call `ue_save` when done.
 
+No landscape in the level (`pcg_scene_report` says 0)? Build one with `landscape_create`
+before scattering — skill `ue-landscape`. It splits World Partition levels into streaming
+proxies the same way the editor does, so samplers find the surface.
+
 ## Five traps that report success and produce nothing
 
 **A sampler fed from the graph Input samples nothing.** It needs an explicit landscape

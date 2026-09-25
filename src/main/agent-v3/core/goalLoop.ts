@@ -60,6 +60,8 @@ export const AUDITOR_TOOLS: readonly string[] = [
   // 「做完的东西在游戏里到底在不在」——挂在子关卡里的环境不加载时，
   // 截图和 actor 查询都看不出问题，只有关卡组成能看出来
   'ue_get_levels',
+  // 地形尺寸和 RVT 五项体检 ——「RVT 配好了」只有它验得了
+  'landscape_list',
   'ue_get_project_info',
   'ue_screenshot',
   // 内容浏览器

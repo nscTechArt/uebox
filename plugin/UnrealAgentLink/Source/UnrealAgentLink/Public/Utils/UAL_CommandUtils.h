@@ -262,6 +262,13 @@ public:
 	static FString JsonValueToImportText(const TSharedPtr<FJsonValue>& Value);
 	static TSharedPtr<FJsonObject> BuildSelectedProps(AActor* Actor, const TArray<FString>& WantedProps);
 
+	/**
+	 * 资产路径归一：去首尾空白、去 `.uasset`、反斜杠换正斜杠、连续斜杠压成一个。
+	 * 不动对象名后缀（`/Game/X/A.A`）—— 要包路径的调用方自己按最后一个 `/` 之后的 `.` 截。
+	 * `FUAL_MaterialCommands::NormalizePath` 是同形状的一份，那个文件太大暂未收过来。
+	 */
+	static FString NormalizeAssetPath(const FString& InputPath);
+
 	// Network Helpers
 	static void SendResponse(const FString& RequestId, int32 Code, const TSharedPtr<FJsonObject>& Data = nullptr);
 	static void SendError(const FString& RequestId, int32 Code, const FString& Message);
