@@ -716,6 +716,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       ...(ctx.isSubAgent
         ? {}
         : {
+            precompactKey: ctx.sessionId,
             checkpoint: {
               ...(checkpoint ? { initial: checkpoint } : {}),
               save: (next) => {

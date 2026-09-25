@@ -5,8 +5,12 @@
  * V2 的 `ContextManager` / `MessageCompression` 为了省 token 一上来就裁剪历史，
  * 代价是模型丢失早期结论、反复重做已经做过的探测。
  *
- * 触发点见 `compactionThreshold`：窗口用满 70% 就压，小窗口下退回 pi 原来那条
+ * 触发点见 `compactionThreshold`：窗口用满 85% 就压，小窗口下退回 pi 原来那条
  * 「窗口 - reserveTokens」。保留额度（reserveTokens）只负责摘要 prompt 和输出本身。
+ *
+ * 摘要**提前在后台写**：用到 60%（`PRECOMPACT_AT_RATIO`）就开始，到 85% 直接换上。
+ * 原来是撞线那一刻当场写，把十几万 token 摘要一遍要好一阵，界面就停在那儿 ——
+ * 真机上用户在做视频时插一句话，正好撞上，以为卡死了。
  */
 
 import {
@@ -44,19 +48,58 @@ export const UNREAL_BOX_COMPACTION: CompactionSettings = Object.freeze({
  * 也**不能**靠把 `reserveTokens` 调大来提前触发：那个值同时决定摘要的
  * maxTokens（pi 取 0.8×），1M 窗口会算出 24 万的摘要上限。两个用途得分开。
  */
-export const COMPACT_AT_RATIO = 0.7
+export const COMPACT_AT_RATIO = 0.85
+
+/**
+ * 用到多少开始在后台写摘要。
+ *
+ * 离 `COMPACT_AT_RATIO` 留 25 个点：摘要要写几十秒，这期间模型照常调工具，
+ * 上下文还在涨。留得太窄，撞线时摘要还没好，又退回当场等。
+ *
+ * 当初把压缩线定在 70%，防的是「一步跨过去」—— 塞两张截图直接超窗，压缩没
+ * 机会跑。线推到 85% 以后这个风险由后台摘要兜：到线时摘要多半已经写好，
+ * 换上就是，不用再当场写。
+ */
+export const PRECOMPACT_AT_RATIO = 0.6
 
 /**
  * 这个窗口下超过多少 token 就压。
  *
  * 取比例线和 pi 原来那条固定余量线里**更早的那个**：小窗口（8K、32K）下
- * 70% 反而比「窗口 - 16K」更晚，那时仍该按余量走，否则摘要 prompt 自己就放不下。
+ * 85% 反而比「窗口 - 16K」更晚，那时仍该按余量走，否则摘要 prompt 自己就放不下。
  */
 export function compactionThreshold(contextWindow: number): number {
   return Math.min(
     contextWindow * COMPACT_AT_RATIO,
     contextWindow - UNREAL_BOX_COMPACTION.reserveTokens
   )
+}
+
+/** 超过多少 token 就在后台开始写摘要。永远不晚于压缩线 */
+export function precompactionThreshold(contextWindow: number): number {
+  return Math.min(contextWindow * PRECOMPACT_AT_RATIO, compactionThreshold(contextWindow))
+}
+
+/**
+ * 后台写好、还没换上的摘要。
+ *
+ * 放在模块级、按会话存，因为 agent 每条用户消息重建一次 —— 存在闭包里的话，
+ * 用户一插话，写了一半的摘要就跟着旧 agent 一起丢了，而那正是最该用上它的时候。
+ */
+interface Precompaction {
+  /** 基于哪一代检查点写的。检查点在这期间换过，这份就作废 */
+  baseEpoch: number
+  /** 写好了是新检查点，没写成是 undefined */
+  result: Promise<CheckpointState | undefined>
+  /** 已经写完（成败都算）。撞线时还没写完才需要提示用户在等 */
+  done: boolean
+}
+
+const precompactions = new Map<string, Precompaction>()
+
+/** 测试用：清掉模块级的后台摘要 */
+export function resetPrecompactionsForTest(): void {
+  precompactions.clear()
 }
 
 /** 压缩时给摘要模型的额外指示。UE 领域里哪些东西丢不得。 */
@@ -106,6 +149,12 @@ export interface CompactionDeps {
   checkpoint?: CompactionCheckpointPort
   /** 算一段消息的指纹。由宿主注入，见 `compactionCheckpoint.hashMessages` */
   hashMessages?: (messages: AgentMessage[]) => string
+  /**
+   * 后台摘要按什么归属。一般就是会话 id。
+   * 不给就不在后台写，撞线时当场写 —— 子 agent 和调试入口都是一次性的，用不上。
+   * 还要求给了 `hashMessages`：没有指纹，就没法确认写好的摘要还对得上当前历史。
+   */
+  precompactKey?: string
 }
 
 /**
@@ -291,50 +340,134 @@ export function createAutoCompact(deps: CompactionDeps) {
       // 的同时弹出「正在压缩上下文」。
       deps.onUsage?.({ tokens, contextWindow: deps.contextWindow })
 
-      if (!UNREAL_BOX_COMPACTION.enabled || tokens <= compactionThreshold(deps.contextWindow)) {
-        return base
+      if (!UNREAL_BOX_COMPACTION.enabled) return base
+
+      const epoch = checkpoint?.contextEpoch ?? 0
+      const key = deps.hashMessages ? deps.precompactKey : undefined
+      let pending = key ? precompactions.get(key) : undefined
+      // 检查点在这期间换过（当场压过一次、历史被改过），那份摘要描述的是旧的一代
+      if (key && pending && pending.baseEpoch !== epoch) {
+        precompactions.delete(key)
+        pending = undefined
       }
 
-      // 切不出头部就别宣布压缩：`compactMessages` 这时只会回 `too-short`，
-      // 而 `onCompacting` 已经发出去了，界面上是一次没有下文的「正在压缩」。
-      if (splitAtRecentBudget(base, UNREAL_BOX_COMPACTION.keepRecentTokens).head.length === 0) {
-        return base
-      }
-
-      deps.onCompacting?.({ tokensBefore: tokens })
-
-      const outcome = await compactMessages(base, deps, {
-        // 迭代式摘要：下一次压缩把上一次的摘要一起喂进去更新，
-        // 而不是对着已经压过的历史再压一次。
-        ...(checkpoint ? { previousSummary: checkpoint.summary } : {}),
-        ...(signal ? { signal } : {})
-      })
-      // 压不动就原样返回 —— 宁可这一轮撞上下文上限拿到厂商的明确报错，
-      // 也不能让整个循环崩掉。
-      if (!outcome.ok) return base
-
-      // 新切点换算回**原始历史**的下标：outcome.messages 是 [摘要, ...尾巴]，
-      // 而那条尾巴永远是 messages 的一个后缀，不管 base 有没有被投影过。
-      const cutIndex = messages.length - (outcome.messages.length - 1)
-      if (cutIndex > 0) {
-        const next: CheckpointState = {
-          contextEpoch: (checkpoint?.contextEpoch ?? 0) + 1,
-          summary: outcome.summary,
-          cutIndex,
-          sourceHash: deps.hashMessages?.(messages.slice(0, cutIndex)) ?? '',
-          createdAt: Date.now()
+      if (tokens <= compactionThreshold(deps.contextWindow)) {
+        if (key && !pending && tokens > precompactionThreshold(deps.contextWindow)) {
+          startPrecompaction(key, messages, base, epoch)
         }
-        // 先记在内存里，再看要不要落盘 —— 没有落盘通道的场景（子 agent、
-        // 调试入口）同样受益：这一轮剩下的请求直接复用，不再反复摘要。
-        checkpoint = next
-        if (next.sourceHash) await deps.checkpoint?.save(next)
+        return base
       }
 
-      return outcome.messages
+      // 撞线了。后台那份能用就直接换上，省掉当场写摘要的那段停顿
+      let announced = false
+      if (key && pending) {
+        precompactions.delete(key)
+        if (!pending.done) {
+          deps.onCompacting?.({ tokensBefore: tokens })
+          announced = true
+        }
+        const ready = await pending.result
+        if (ready && checkpointApplies(messages, ready, deps.hashMessages)) {
+          checkpoint = ready
+          await deps.checkpoint?.save(ready)
+          const projected = applyCheckpoint(messages, ready)
+          // 摘要写好之后又涨了太多、换上仍然超线，才往下走当场再压一次
+          const after = tokens - (estimateMessagesTokens(base) - estimateMessagesTokens(projected))
+          if (after <= compactionThreshold(deps.contextWindow)) return projected
+          return await compactNow(messages, projected, tokens, announced, signal)
+        }
+      }
+
+      return await compactNow(messages, base, tokens, announced, signal)
     } catch {
       // transformContext 抛异常会中断低层循环且不产生正常事件序列。
       return messages
     }
+  }
+
+  /**
+   * 在后台写一份摘要，写好了存着，不换上。
+   *
+   * 不换上是有意的：换上就改了前缀，缓存整段作废，而且 60% 时离窗口还远，
+   * 原文多留一会儿，模型就多看得到一会儿细节。等真撞线了再换。
+   * 不接这一轮的 abort 信号：用户停掉这一轮，摘要照样有用。
+   */
+  function startPrecompaction(
+    key: string,
+    messages: AgentMessage[],
+    base: AgentMessage[],
+    baseEpoch: number
+  ): void {
+    const entry: Precompaction = {
+      baseEpoch,
+      done: false,
+      result: summarize(messages, base, checkpoint).then(
+        (value) => {
+          entry.done = true
+          return value
+        },
+        () => {
+          entry.done = true
+          return undefined
+        }
+      )
+    }
+    precompactions.set(key, entry)
+  }
+
+  /** 把 base 的头部换成摘要，换算成原始历史下标上的检查点。不成返回 undefined */
+  async function summarize(
+    messages: AgentMessage[],
+    base: AgentMessage[],
+    previous: CheckpointState | undefined,
+    signal?: AbortSignal
+  ): Promise<CheckpointState | undefined> {
+    const outcome = await compactMessages(base, deps, {
+      // 迭代式摘要：下一次压缩把上一次的摘要一起喂进去更新，
+      // 而不是对着已经压过的历史再压一次。
+      ...(previous ? { previousSummary: previous.summary } : {}),
+      ...(signal ? { signal } : {})
+    })
+    if (!outcome.ok) return undefined
+    // 新切点换算回**原始历史**的下标：outcome.messages 是 [摘要, ...尾巴]，
+    // 而那条尾巴永远是 messages 的一个后缀，不管 base 有没有被投影过。
+    const cutIndex = messages.length - (outcome.messages.length - 1)
+    if (cutIndex <= 0) return undefined
+    return {
+      contextEpoch: (previous?.contextEpoch ?? 0) + 1,
+      summary: outcome.summary,
+      cutIndex,
+      sourceHash: deps.hashMessages?.(messages.slice(0, cutIndex)) ?? '',
+      createdAt: Date.now()
+    }
+  }
+
+  /** 当场压：原来唯一的那条路，现在只在后台那份用不上时才走 */
+  async function compactNow(
+    messages: AgentMessage[],
+    base: AgentMessage[],
+    tokens: number,
+    announced: boolean,
+    signal?: AbortSignal
+  ): Promise<AgentMessage[]> {
+    // 切不出头部就别宣布压缩：`compactMessages` 这时只会回 `too-short`，
+    // 而 `onCompacting` 已经发出去了，界面上是一次没有下文的「正在压缩」。
+    if (splitAtRecentBudget(base, UNREAL_BOX_COMPACTION.keepRecentTokens).head.length === 0) {
+      return base
+    }
+
+    if (!announced) deps.onCompacting?.({ tokensBefore: tokens })
+
+    const next = await summarize(messages, base, checkpoint, signal)
+    // 压不动就原样返回 —— 宁可这一轮撞上下文上限拿到厂商的明确报错，
+    // 也不能让整个循环崩掉。
+    if (!next) return base
+
+    // 先记在内存里，再看要不要落盘 —— 没有落盘通道的场景（子 agent、
+    // 调试入口）同样受益：这一轮剩下的请求直接复用，不再反复摘要。
+    checkpoint = next
+    if (next.sourceHash) await deps.checkpoint?.save(next)
+    return applyCheckpoint(messages, next)
   }
 }
 
