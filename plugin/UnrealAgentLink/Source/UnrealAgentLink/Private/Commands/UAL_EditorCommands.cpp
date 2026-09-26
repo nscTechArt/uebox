@@ -50,6 +50,7 @@
 #include "Misc/EngineVersion.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "UObject/EnumProperty.h"
 #include "Interfaces/Interface_PostProcessVolume.h"
 #include "HAL/IConsoleManager.h"
 // BuildProjectInfo 里的 runMode 用 FApp::IsUnattended / FApp::CanEverRender，
@@ -1801,6 +1802,64 @@ namespace UALSetConfig
 		}
 		return nullptr;
 	}
+
+	/** 属性背后的枚举（TEnumAsByte 的字节属性或 enum class 属性）；不是枚举给 nullptr */
+	static UEnum* EnumOf(const FProperty* Prop)
+	{
+		if (const FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+		{
+			return EnumProp->GetEnum();
+		}
+		if (const FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+		{
+			return ByteProp->Enum;
+		}
+		return nullptr;
+	}
+
+	/** 枚举属性当前值的数字写法。带 ConsoleVariable 的属性，引擎往 ini 里写的是这个 */
+	static bool EnumNumber(const FProperty* Prop, const void* Container, FString& Out)
+	{
+		const void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Container);
+		if (const FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+		{
+			Out = LexToString(EnumProp->GetUnderlyingProperty()->GetSignedIntPropertyValue(ValuePtr));
+			return true;
+		}
+		if (const FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+		{
+			if (ByteProp->Enum)
+			{
+				Out = LexToString(static_cast<int32>(ByteProp->GetPropertyValue(ValuePtr)));
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * 磁盘上读回来的值是不是就是属性现在的值。
+	 *
+	 * 带 ConsoleVariable 元数据的属性，引擎存盘时用 PPF_ConsoleVariable 导出：枚举写成
+	 * 数字、布尔写成 1/0。拿引擎平常的写法（枚举名、True/False）去比，写成功了也对不上。
+	 */
+	static bool SameAsDisk(const FProperty* Prop, const void* Container, const FString& Expected, const FString& OnDisk)
+	{
+		if (OnDisk.Equals(Expected, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+		FString Number;
+		if (EnumNumber(Prop, Container, Number) && OnDisk.TrimStartAndEnd() == Number)
+		{
+			return true;
+		}
+		if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Prop))
+		{
+			return FCString::ToBool(*OnDisk) == BoolProp->GetPropertyValue_InContainer(Container);
+		}
+		return false;
+	}
 }
 
 void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
@@ -1890,12 +1949,39 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 		FString DefaultIni;
 		FString Expected = Value;
 		FString Via;
+		FString DiskKey = Key;
 		UClass* SettingsClass = nullptr;
 		FProperty* Prop = UALSetConfig::FindConfigProperty(Section, Key, SettingsClass);
 		if (Prop && !Prop->IsA(FArrayProperty::StaticClass()))
 		{
 			UObject* CDO = SettingsClass->GetDefaultObject();
-			if (!FBlueprintEditorUtils::PropertyValueFromString(Prop, Value, reinterpret_cast<uint8*>(CDO), CDO))
+			// 枚举给的是数字（ini 里、get_config 读回来的就是数字）：换成枚举名再解析，
+			// PropertyValueFromString 只认名字
+			FString Parsed = Value;
+			if (UEnum* Enum = UALSetConfig::EnumOf(Prop))
+			{
+				if (Value.IsNumeric())
+				{
+					const FString Name = Enum->GetNameStringByValue(FCString::Atoi64(*Value));
+					if (!Name.IsEmpty())
+					{
+						Parsed = Name;
+					}
+				}
+			}
+			// 解析失败时引擎已经把属性写成了 0：先存一份，失败就原样放回去，不能报「没改」却改了
+			void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(CDO);
+			TArray<uint8> Backup;
+			Backup.SetNumZeroed(Prop->GetSize());
+			Prop->InitializeValue(Backup.GetData());
+			Prop->CopyCompleteValue(Backup.GetData(), ValuePtr);
+			const bool bParsed = FBlueprintEditorUtils::PropertyValueFromString(Prop, Parsed, reinterpret_cast<uint8*>(CDO), CDO);
+			if (!bParsed)
+			{
+				Prop->CopyCompleteValue(ValuePtr, Backup.GetData());
+			}
+			Prop->DestroyValue(Backup.GetData());
+			if (!bParsed)
 			{
 				UAL_CommandUtils::SendError(RequestId, 400,
 					FString::Printf(TEXT("project.set_config: \"%s\" is not a valid value for [%s] %s (type %s)"),
@@ -1909,6 +1995,14 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 			// 引擎规范化后的写法（布尔是 True/False、软引用是完整路径），拿它和磁盘上的比
 			FBlueprintEditorUtils::PropertyValueToString(Prop, reinterpret_cast<const uint8*>(CDO), Expected, CDO);
 			Via = TEXT("settings_object");
+#if WITH_EDITORONLY_DATA
+			// 带 ConsoleVariable 的属性，引擎在 ini 里用控制台变量名当键
+			const FString CVarName = Prop->GetMetaData(TEXT("ConsoleVariable"));
+			if (!CVarName.IsEmpty())
+			{
+				DiskKey = CVarName;
+			}
+#endif
 		}
 		else
 		{
@@ -1924,8 +2018,12 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 		FConfigFile OnDisk;
 		OnDisk.Read(DefaultIni);
 		FString OnDiskValue;
-		const bool bOnDisk = OnDisk.GetString(*Section, *Key, OnDiskValue);
-		const bool bPersistedToDefault = bOnDisk && OnDiskValue.Equals(Expected, ESearchCase::IgnoreCase);
+		const bool bOnDisk = OnDisk.GetString(*Section, *DiskKey, OnDiskValue) ||
+			OnDisk.GetString(*Section, *Key, OnDiskValue);
+		const bool bPersistedToDefault = bOnDisk &&
+			(Via == TEXT("settings_object")
+				? UALSetConfig::SameAsDisk(Prop, SettingsClass->GetDefaultObject(), Expected, OnDiskValue)
+				: OnDiskValue.Equals(Expected, ESearchCase::IgnoreCase));
 
 		TSharedPtr<FJsonObject> DefaultResult = MakeShared<FJsonObject>();
 		DefaultResult->SetStringField(TEXT("config_name"), ConfigName);

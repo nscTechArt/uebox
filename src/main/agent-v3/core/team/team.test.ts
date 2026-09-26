@@ -101,6 +101,24 @@ describe('编辑器钥匙', () => {
     await expect(after).resolves.toBe('after')
   })
 
+  it('排在最后的人被停下、前面的人还没放手：新来的人照样排队，不和前面的人同时跑', async () => {
+    let release!: () => void
+    let holderDone = false
+    const holder = withEditorKey('c2', async () => {
+      await new Promise<void>((r) => (release = r))
+      holderDone = true
+    })
+    const controller = new AbortController()
+    const waiter = withEditorKey('c2', async () => 'never', controller.signal)
+    controller.abort()
+    await expect(waiter).rejects.toBeTruthy()
+
+    const late = withEditorKey('c2', async () => holderDone)
+    release()
+    await holder
+    await expect(late).resolves.toBe(true)
+  })
+
   it('只在标过的执行流里生效', async () => {
     expect(editorKeyActive()).toBe(false)
     await runWithEditorKey(async () => {

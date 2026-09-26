@@ -25,7 +25,7 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { createWriteStream, promises as fs } from 'fs'
 import { constants, setPriority } from 'os'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 import { z } from 'zod'
 
 import { defineTool, type UnrealAgentTool } from '../defineTool'
@@ -62,12 +62,23 @@ export function buildUatArgs(input: {
   ]
 }
 
-/** 给 cmd.exe 的一个参数加引号：有空格的整体包起来，`-key=值` 只包值 */
+/**
+ * 给 cmd.exe 的一个参数加引号：只要带了安全字符以外的东西就整体（`-key=值` 只包值）包起来。
+ *
+ * 命令行是交给 `cmd /s /c` 原样执行的，没包起来的 `&` `^` `|` `<` `>` `(` `)` 会被 cmd
+ * 当成命令符号 —— 工程在 `D:\R&D\` 下就会被拆成两条命令，模型给的 output_dir 还能借此
+ * 塞进任意命令。引号里 `%` 照样会被展开、`"` 没法转义，这两种直接拒绝。
+ */
 export function quoteForCmd(arg: string): string {
-  if (!/[\s"]/.test(arg)) return arg
+  if (/["%\r\n]/.test(arg)) {
+    throw new Error(`参数里有命令行没法安全传递的字符（" % 或换行）：${arg}`)
+  }
+  if (/^[\w\-.:/\\=+,@]*$/.test(arg)) return arg
   const eq = arg.indexOf('=')
-  if (arg.startsWith('-') && eq > 0) return `${arg.slice(0, eq + 1)}"${arg.slice(eq + 1)}"`
-  return `"${arg}"`
+  // 结尾的反斜杠会把收尾的引号转义掉，吞掉后面的参数
+  const wrap = (value: string): string => `"${value.replace(/\\+$/, '')}"`
+  if (arg.startsWith('-') && eq > 0) return `${arg.slice(0, eq + 1)}${wrap(arg.slice(eq + 1))}`
+  return wrap(arg)
 }
 
 /** UAT 在每个阶段开头打的那一行 → 给人看的阶段名 */
@@ -178,7 +189,10 @@ function lowerPriority(child: ChildProcess): void {
 function killTree(child: ChildProcess): void {
   if (!child.pid || child.exitCode !== null) return
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).on(
+      'error',
+      () => undefined
+    )
   } else {
     try {
       process.kill(-child.pid, 'SIGTERM')
@@ -188,17 +202,21 @@ function killTree(child: ChildProcess): void {
   }
 }
 
-/** 打包出来的 .exe（Windows 归档目录下的第一层或第二层）。找不到给 null */
+/**
+ * 打包出来的可执行文件：Windows 是归档目录下第一到三层的 .exe，Mac 是 .app 包。
+ * 找不到给 null
+ */
 async function findPackagedExe(archiveDir: string): Promise<string | null> {
+  const mac = process.platform === 'darwin'
   const queue = [archiveDir]
   for (let depth = 0; depth < 3 && queue.length; depth++) {
     const next: string[] = []
     for (const dir of queue) {
       for (const entry of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
         const full = join(dir, entry.name)
-        if (entry.isFile() && /\.exe$/i.test(entry.name) && !/CrashReport/i.test(entry.name)) {
-          return full
-        }
+        if (/CrashReport/i.test(entry.name)) continue
+        if (mac && entry.isDirectory() && /\.app$/i.test(entry.name)) return full
+        if (!mac && entry.isFile() && /\.exe$/i.test(entry.name)) return full
         if (entry.isDirectory() && entry.name !== 'Engine') next.push(full)
       }
     }
@@ -260,16 +278,23 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
       })
 
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const outputDir = output_dir ?? join(projectDir, 'Saved', 'UEBoxBuilds', stamp)
+      // resolve 顺带去掉结尾的斜杠：带着它拼进命令行会把收尾的引号转义掉
+      const outputDir = resolve(output_dir ?? join(projectDir, 'Saved', 'UEBoxBuilds', stamp))
       await fs.mkdir(outputDir, { recursive: true })
       const logPath = join(outputDir, 'uat.log')
-      const log = createWriteStream(logPath)
       const args = buildUatArgs({
         uproject,
         configuration,
         archiveDir: outputDir,
         platform: process.platform === 'darwin' ? 'Mac' : 'Win64'
       })
+      // 先把命令行拼出来：带了没法安全传递的字符就在起进程之前报错
+      const commandLine = `"${[runUat, ...args].map(quoteForCmd).join(' ')}"`
+      // 前面几步 await 的时候用户可能已经点了停止，这时候别再起一个跑几十分钟的进程
+      ctx.signal?.throwIfAborted()
+      const log = createWriteStream(logPath)
+      // 写日志失败（磁盘满、目录不可写）不能变成未捕获异常 —— 那会把整个应用关掉
+      log.on('error', () => undefined)
 
       const started = Date.now()
       ctx.report({ text: `开始打包 ${basename(uproject, '.uproject')}（${configuration}）` })
@@ -279,7 +304,7 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
         process.platform === 'win32'
           ? spawn(
               'cmd.exe',
-              ['/d', '/s', '/c', `"${[runUat, ...args].map(quoteForCmd).join(' ')}"`],
+              ['/d', '/s', '/c', commandLine],
               {
                 windowsVerbatimArguments: true,
                 windowsHide: true,

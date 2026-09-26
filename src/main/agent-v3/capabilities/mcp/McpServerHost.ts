@@ -642,12 +642,21 @@ function describeToolMeta(tool: UnrealAgentTool<never>): Record<string, unknown>
   const namespace = tool.unrealBox.namespace
   return {
     namespace,
-    risk: tool.unrealBox.risk,
+    // uebox CLI 只看这一项决定要不要 --allow-write，所以这里也要按对外的最坏情况报
+    risk: delegatesToSubAgent(tool) ? 'destructive' : tool.unrealBox.risk,
     // 要不要带工程路径。ue.* 里有两个例外，它们不依赖引擎连接
     // （见 tools/toolNames.ts 的 OFFLINE_UE_TOOLS）
     projectScoped: namespace.startsWith('ue.') && !OFFLINE_UE_TOOLS.has(tool.name),
     requiresExplicitApproval: tool.unrealBox.requiresExplicitApproval === true
   }
+}
+
+/**
+ * `task` 自己声明 safe（派子任务本身不改东西），但子任务在盒子里跑、不过客户端的审批，
+ * 它能做的就是整个工具池能做的。对外（注解和元数据）一律按最坏情况报
+ */
+function delegatesToSubAgent(tool: UnrealAgentTool<never>): boolean {
+  return tool.name === 'task'
 }
 
 /**
@@ -658,9 +667,7 @@ function describeToolMeta(tool: UnrealAgentTool<never>): Record<string, unknown>
  */
 function describeToolAnnotations(tool: UnrealAgentTool<never>): ToolAnnotations {
   const { namespace, risk, requiresExplicitApproval } = tool.unrealBox
-  // `task` 自己声明 safe（派子任务本身不改东西），但子任务在盒子里跑、不过客户端的审批，
-  // 它能做的就是整个工具池能做的。对外按最坏情况标
-  const delegates = tool.name === 'task'
+  const delegates = delegatesToSubAgent(tool)
   return {
     readOnlyHint: risk === 'safe' && requiresExplicitApproval !== true && !delegates,
     destructiveHint: risk === 'destructive' || requiresExplicitApproval === true || delegates,

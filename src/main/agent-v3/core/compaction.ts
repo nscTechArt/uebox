@@ -366,7 +366,12 @@ export function createAutoCompact(deps: CompactionDeps) {
           deps.onCompacting?.({ tokensBefore: tokens })
           announced = true
         }
-        const ready = await pending.result
+        const ready = await untilAborted(pending.result, signal)
+        if (ready === ABORTED) {
+          // 用户停了这一轮：后台那份照样写完留给下一轮，这一轮不再干等
+          precompactions.set(key, pending)
+          return base
+        }
         if (ready && checkpointApplies(messages, ready, deps.hashMessages)) {
           checkpoint = ready
           await deps.checkpoint?.save(ready)
@@ -422,6 +427,9 @@ export function createAutoCompact(deps: CompactionDeps) {
     previous: CheckpointState | undefined,
     signal?: AbortSignal
   ): Promise<CheckpointState | undefined> {
+    // 后台写摘要时 messages 是 pi 的活数组，写的这段时间里循环还在往后追加；
+    // 切点必须按调用这一刻的长度算，否则会把没进摘要的那几条一起切掉
+    const total = messages.length
     const outcome = await compactMessages(base, deps, {
       // 迭代式摘要：下一次压缩把上一次的摘要一起喂进去更新，
       // 而不是对着已经压过的历史再压一次。
@@ -431,7 +439,7 @@ export function createAutoCompact(deps: CompactionDeps) {
     if (!outcome.ok) return undefined
     // 新切点换算回**原始历史**的下标：outcome.messages 是 [摘要, ...尾巴]，
     // 而那条尾巴永远是 messages 的一个后缀，不管 base 有没有被投影过。
-    const cutIndex = messages.length - (outcome.messages.length - 1)
+    const cutIndex = total - (outcome.messages.length - 1)
     if (cutIndex <= 0) return undefined
     return {
       contextEpoch: (previous?.contextEpoch ?? 0) + 1,
@@ -515,4 +523,26 @@ export function splitAtRecentBudget(
 function isOrphanToolResult(message: AgentMessage): boolean {
   const role = (message as { role?: string }).role
   return role === 'toolResult'
+}
+
+const ABORTED = Symbol('aborted')
+
+/** 等一个不接 abort 的 promise，但这一轮被停掉时立刻放手 */
+function untilAborted<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T | typeof ABORTED> {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.resolve(ABORTED)
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => resolve(ABORTED)
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      }
+    )
+  })
 }

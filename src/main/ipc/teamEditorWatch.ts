@@ -7,11 +7,13 @@
 
 import { shell } from 'electron'
 import { promises as fs } from 'fs'
-import { join } from 'path'
+import { basename, dirname, extname, join } from 'path'
 
 import { awaitProjectLive } from '../agent-v3/tools/adapted/project/awaitProjectLive'
 import { watchEditorCrashes, type EditorWatchOptions } from '../agent-v3/core/team/editorWatch'
 import { serviceManager } from '../services'
+import { findFreshCrash } from '../services/editorCrashWatch/crashReport'
+import { stashPackageRestoreData } from '../services/editorCrashWatch/restoreData'
 import { projectManager } from '../services/project'
 import UnrealProcessDetector from '../utils/UnrealProcessDetector'
 
@@ -40,7 +42,9 @@ async function crashHandledElsewhere(): Promise<{ declined: string } | null> {
 
 async function findUproject(projectDir: string): Promise<string | null> {
   try {
-    const name = (await fs.readdir(projectDir)).find((entry) => entry.endsWith('.uproject'))
+    const name = (await fs.readdir(projectDir)).find((entry) =>
+      entry.toLowerCase().endsWith('.uproject')
+    )
     return name ? join(projectDir, name) : null
   } catch {
     return null
@@ -48,24 +52,16 @@ async function findUproject(projectDir: string): Promise<string | null> {
 }
 
 /**
- * 开跑之后新出现的那次崩溃写了什么。`Saved/Crashes/<目录>/CrashContext.runtime-xml`
- * 里的 `ErrorMessage` 就是编辑器崩溃弹窗上那句话。
+ * 开跑之后新出现的那次崩溃写了什么（编辑器崩溃弹窗上那句话）。
+ *
+ * 读报告交给盒子崩溃看门人的那套：引擎按 AutoDetect 写这份 XML，工程路径或报错里
+ * 有中文时是 UTF-16，按 UTF-8 读就一个字也认不出；它还会跳过 ensure / 卡顿报告。
  */
 async function crashReason(projectDir: string, since: number): Promise<string | null> {
-  const root = join(projectDir, 'Saved', 'Crashes')
-  let newest: { dir: string; at: number } | undefined
-  for (const entry of await fs.readdir(root, { withFileTypes: true }).catch(() => [])) {
-    if (!entry.isDirectory()) continue
-    const dir = join(root, entry.name)
-    const at = (await fs.stat(dir)).mtimeMs
-    if (at >= since && (!newest || at > newest.at)) newest = { dir, at }
-  }
-  if (!newest) return null
-  const xml = await fs
-    .readFile(join(newest.dir, 'CrashContext.runtime-xml'), 'utf8')
-    .catch(() => '')
-  const message = /<ErrorMessage>([\s\S]*?)<\/ErrorMessage>/.exec(xml)?.[1]?.trim()
-  return message ? message.slice(0, 400) : null
+  const uproject = await findUproject(projectDir)
+  const projectName = uproject ? basename(uproject, extname(uproject)) : basename(projectDir)
+  const crash = await findFreshCrash(projectDir, projectName, since).catch(() => null)
+  return crash?.errorMessage || null
 }
 
 export function startTeamEditorWatch(
@@ -84,6 +80,9 @@ export function startTeamEditorWatch(
       isRunning: async (uproject) =>
         (await UnrealProcessDetector.findRunningProjectByPath(uproject)) !== null,
       reopen: async (uproject) => {
+        // 和盒子看门人重开前一样：先把自动存档的恢复记录挪走（备份留着），不然编辑器
+        // 一起来就停在模态的「Restore Packages」窗口上等人点，插件连不回来
+        await stashPackageRestoreData(dirname(uproject)).catch(() => null)
         await ensurePlugin(uproject)
         const error = await shell.openPath(uproject)
         if (error) throw new Error(error)

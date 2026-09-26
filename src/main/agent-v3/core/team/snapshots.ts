@@ -71,8 +71,15 @@ export interface SnapshotStore {
   /** 存一份。和上一份比没变化就不存，返回 null */
   save(message: string): Promise<Snapshot | null>
   list(limit?: number): Promise<Snapshot[]>
-  /** 把工程的源文件退回到这一份。新建的文件删掉，被忽略的（缓存、Saved）不动 */
-  restore(id: string): Promise<void>
+  /** 编号 → 完整提交号。编号不对、没有这一份就抛错。回滚前先用它确认，别白关编辑器 */
+  resolve(id: string): Promise<string>
+  /**
+   * 把工程的源文件退回到这一份。新建的文件删掉，被忽略的（缓存、Saved）不动。
+   *
+   * 退回本身存成一份新快照、叠在最上面，不挪历史：退回之前的每一份都还在
+   * `list()` 里，「反悔」就是再退回一次。
+   */
+  restore(id: string): Promise<Snapshot | null>
 }
 
 /** `git diff --name-status` → 「新增 3 · 修改 2 · 删除 1」。没变化给空串 */
@@ -140,44 +147,72 @@ export function createSnapshotStore(projectDir: string, git: GitRunner): Snapsho
       await fs.writeFile(join(gitDir, 'info', 'exclude'), `${SNAPSHOT_EXCLUDES.join('\n')}\n`)
     })())
 
+  // 几个队员交活时会同时存快照，回滚也可能撞上；git 同一时间只能有一个人动索引
+  // （index.lock），这里排成一队
+  let queue: Promise<unknown> = Promise.resolve()
+  const serial = <T>(work: () => Promise<T>): Promise<T> => {
+    const next = queue.then(work, work)
+    queue = next.catch(() => undefined)
+    return next
+  }
+
+  const saveNow = async (message: string): Promise<Snapshot | null> => {
+    await ensure()
+    await run(['add', '--all', '--', '.'])
+    const staged = await git([...base, 'diff', '--cached', '--quiet'], projectDir)
+    const hasHead = (await git([...base, 'rev-parse', '--verify', 'HEAD'], projectDir)).code === 0
+    if (staged.code === 0 && hasHead) return null
+    // 标签要说「这一份里是什么」，不只是「谁触发的」—— 回滚时是照着它选的。
+    // 2026-09-26 真机反馈：标签只有队员留言的开头，看到编号完全不知道那一份里有什么
+    const changes = summarizeChanges(await run(['diff', '--cached', '--name-status']))
+    const inventory = await contentInventory(projectDir, 0).catch(() => null)
+    const subject = [message, changes, inventory ? formatCounts(inventory) : '']
+      .filter(Boolean)
+      .join('｜')
+    await run(['commit', '--quiet', '--allow-empty', '-m', subject])
+    const [latest] = await list(1)
+    return latest ?? null
+  }
+
+  const list = async (limit = 20): Promise<Snapshot[]> => {
+    await ensure()
+    const hasHead = (await git([...base, 'rev-parse', '--verify', 'HEAD'], projectDir)).code === 0
+    if (!hasHead) return []
+    const out = await run(['log', `-n${limit}`, '--format=%h%x09%ct%x09%s'])
+    return out
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [id = '', at = '0', ...rest] = line.split('\t')
+        return { id, at: Number(at) * 1000, message: rest.join('\t') }
+      })
+  }
+
+  const resolve = async (id: string): Promise<string> => {
+    await ensure()
+    if (!/^[0-9a-f]{4,40}$/i.test(id)) throw new Error(`快照编号不对：${id}`)
+    const result = await git(
+      [...base, 'rev-parse', '--verify', '--quiet', `${id}^{commit}`],
+      projectDir
+    )
+    if (result.code !== 0) throw new Error(`没有快照 ${id}`)
+    return result.stdout.trim()
+  }
+
   return {
-    async save(message) {
-      await ensure()
-      await run(['add', '--all', '--', '.'])
-      const staged = await git([...base, 'diff', '--cached', '--quiet'], projectDir)
-      const hasHead = (await git([...base, 'rev-parse', '--verify', 'HEAD'], projectDir)).code === 0
-      if (staged.code === 0 && hasHead) return null
-      // 标签要说「这一份里是什么」，不只是「谁触发的」—— 回滚时是照着它选的。
-      // 2026-09-26 真机反馈：标签只有队员留言的开头，看到编号完全不知道那一份里有什么
-      const changes = summarizeChanges(await run(['diff', '--cached', '--name-status']))
-      const inventory = await contentInventory(projectDir, 0).catch(() => null)
-      const subject = [message, changes, inventory ? formatCounts(inventory) : '']
-        .filter(Boolean)
-        .join('｜')
-      await run(['commit', '--quiet', '--allow-empty', '-m', subject])
-      const [latest] = await this.list(1)
-      return latest ?? null
-    },
-    async list(limit = 20) {
-      await ensure()
-      const hasHead = (await git([...base, 'rev-parse', '--verify', 'HEAD'], projectDir)).code === 0
-      if (!hasHead) return []
-      const out = await run(['log', `-n${limit}`, '--format=%h%x09%ct%x09%s'])
-      return out
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => {
-          const [id = '', at = '0', ...rest] = line.split('\t')
-          return { id, at: Number(at) * 1000, message: rest.join('\t') }
-        })
-    },
-    async restore(id) {
-      await ensure()
-      if (!/^[0-9a-f]{4,40}$/i.test(id)) throw new Error(`快照编号不对：${id}`)
-      await run(['reset', '--hard', '--quiet', id])
-      // 快照之后新建的源文件也要删掉，不然退回去的工程里还躺着新资产的半截引用。
-      // 不带 -x：被排除的缓存、Saved 原样留着
-      await run(['clean', '-fd', '--quiet'])
-    }
+    save: (message) => serial(() => saveNow(message)),
+    list,
+    resolve,
+    restore: (id) =>
+      serial(async () => {
+        const full = await resolve(id)
+        // 不用 reset --hard：那会把 HEAD 挪回去，之后的快照（包括回滚前自动存的那份）
+        // 就从 list() 里消失、再也退不回去。这里只把工作区换成那一份的内容，再提交成新的一份
+        await run(['read-tree', '-u', '--reset', full])
+        // 那一份之后新建、还没进过快照的源文件也删掉，不然退回去的工程里还躺着新资产的
+        // 半截引用。不带 -x：被排除的缓存、Saved 原样留着
+        await run(['clean', '-fd', '--quiet'])
+        return saveNow(`退回快照 ${id}`)
+      })
   }
 }

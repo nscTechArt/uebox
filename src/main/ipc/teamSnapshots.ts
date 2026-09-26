@@ -98,14 +98,13 @@ export function createTeamSnapshots(): TeamSnapshots {
       const uproject = await findUproject(dir)
       if (!uproject) throw new Error(`${dir} 里没有 .uproject`)
       // 先确认有这一份，再动编辑器 —— 编号写错不该白白关掉编辑器
-      const known = await store.list(500)
-      if (!known.some((snapshot) => snapshot.id.startsWith(id) || id.startsWith(snapshot.id))) {
+      try {
+        await store.resolve(id)
+      } catch (error) {
+        const known = await store.list(5).catch(() => [])
         throw new Error(
-          `没有快照 ${id}。最近的：${
-            known
-              .slice(0, 5)
-              .map((s) => s.id)
-              .join('、') || '（无）'
+          `${error instanceof Error ? error.message : String(error)}。最近的：${
+            known.map((s) => s.id).join('、') || '（无）'
           }`
         )
       }
@@ -122,11 +121,21 @@ export function createTeamSnapshots(): TeamSnapshots {
       }
 
       report(`退回快照 ${id}…`)
-      await store.restore(id)
+      // 编辑器已经关了：退回失败也要把它重新打开，不能让用户对着一个关掉的编辑器
+      let restoreError: unknown
+      await store.restore(id).catch((error: unknown) => {
+        restoreError = error
+      })
 
       report('重新打开工程…')
       await ensurePlugin(uproject)
       const opened = await shell.openPath(uproject)
+      if (restoreError) {
+        const reason = restoreError instanceof Error ? restoreError.message : String(restoreError)
+        throw new Error(
+          `退回快照 ${id} 失败：${reason}。${opened ? `重新打开工程也失败了：${opened}` : '已经把工程重新打开。'}`
+        )
+      }
       if (opened) throw new Error(`文件已经退回快照 ${id}，但打开工程失败：${opened}`)
       const live = await awaitProjectLive({ projectPath: dir, timeoutMs: RECONNECT_WAIT_MS })
 

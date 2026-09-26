@@ -62,7 +62,11 @@ export async function withEditorKey<T>(
     return await fn()
   } finally {
     release()
-    if (tails.get(key) === tail) tails.delete(key)
+    // 排队中途被停下时，前面的人可能还拿着钥匙：要等整条链真放空了才能清掉队尾，
+    // 否则下一个来的人拿到一条空链，直接和前面那位同时动编辑器
+    void tail.then(() => {
+      if (tails.get(key) === tail) tails.delete(key)
+    })
   }
 }
 
