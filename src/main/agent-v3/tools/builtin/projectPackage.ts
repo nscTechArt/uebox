@@ -278,8 +278,8 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
       })
 
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      // resolve 顺带去掉结尾的斜杠：带着它拼进命令行会把收尾的引号转义掉
-      const outputDir = resolve(output_dir ?? join(projectDir, 'Saved', 'UEBoxBuilds', stamp))
+      // 相对路径按工程目录算；resolve 顺带去掉结尾的斜杠：带着它拼进命令行会把收尾的引号转义掉
+      const outputDir = resolve(projectDir, output_dir ?? join('Saved', 'UEBoxBuilds', stamp))
       await fs.mkdir(outputDir, { recursive: true })
       const logPath = join(outputDir, 'uat.log')
       const args = buildUatArgs({
@@ -288,8 +288,9 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
         archiveDir: outputDir,
         platform: process.platform === 'darwin' ? 'Mac' : 'Win64'
       })
-      // 先把命令行拼出来：带了没法安全传递的字符就在起进程之前报错
-      const commandLine = `"${[runUat, ...args].map(quoteForCmd).join(' ')}"`
+      // 先把命令行拼出来：带了没法安全传递的字符就在起进程之前报错。只有 Windows 走 cmd
+      const commandLine =
+        process.platform === 'win32' ? `"${[runUat, ...args].map(quoteForCmd).join(' ')}"` : ''
       // 前面几步 await 的时候用户可能已经点了停止，这时候别再起一个跑几十分钟的进程
       ctx.signal?.throwIfAborted()
       const log = createWriteStream(logPath)

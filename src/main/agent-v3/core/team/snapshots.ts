@@ -208,10 +208,18 @@ export function createSnapshotStore(projectDir: string, git: GitRunner): Snapsho
         const full = await resolve(id)
         // 不用 reset --hard：那会把 HEAD 挪回去，之后的快照（包括回滚前自动存的那份）
         // 就从 list() 里消失、再也退不回去。这里只把工作区换成那一份的内容，再提交成新的一份
-        await run(['read-tree', '-u', '--reset', full])
-        // 那一份之后新建、还没进过快照的源文件也删掉，不然退回去的工程里还躺着新资产的
-        // 半截引用。不带 -x：被排除的缓存、Saved 原样留着
-        await run(['clean', '-fd', '--quiet'])
+        try {
+          await run(['read-tree', '-u', '--reset', full])
+          // 那一份之后新建、还没进过快照的源文件也删掉，不然退回去的工程里还躺着新资产的
+          // 半截引用。不带 -x：被排除的缓存、Saved 原样留着
+          await run(['clean', '-fd', '--quiet'])
+        } catch (error) {
+          // 中途失败（文件被 ShaderCompileWorker 之类占着）会留下半新半旧的工作区，下一次
+          // 自动快照还会把它当正常状态存下。退回最新那一份（回滚前刚存的），能退多少退多少
+          await run(['read-tree', '-u', '--reset', 'HEAD']).catch(() => undefined)
+          const reason = error instanceof Error ? error.message : String(error)
+          throw new Error(`${reason}（已尽量把文件退回到回滚之前的样子）`)
+        }
         return saveNow(`退回快照 ${id}`)
       })
   }

@@ -201,6 +201,13 @@ interface ScreenshotResponse {
  * 自动的就当场说；锁住的说一句明暗可信。老插件不回就一个字不加。
  */
 function describeExposure(response: ScreenshotResponse): string {
+  if (response.exposure === 'manual' && response.exposure_source === 'viewport') {
+    // 锁的只是编辑器视口自己的固定曝光，游戏里（PIE、打包版）不认它
+    return (
+      '\n⚠️ 这一帧的曝光是**编辑器视口自己锁的**，只在编辑器里生效：PIE 和打包版照样按工程/后处理的设置走，' +
+      '明暗不一定是玩家看到的。要让游戏里也一样，放一个无边界 PostProcessVolume（Metering Mode = Manual）锁住曝光。'
+    )
+  }
   if (response.exposure === 'manual') {
     return '\n曝光已锁（手动），这张图的明暗就是玩家看到的。'
   }

@@ -125,6 +125,8 @@ export function watchEditorCrashes(deps: EditorWatchDeps, options: EditorWatchOp
   const graceful = new Set<string>()
   const recovering = new Set<string>()
   const reopens: number[] = []
+  // 每个工程上一次报过崩溃的时刻：再崩时只找这之后的报告，别把上一次的原因再报一遍
+  const reportedAt = new Map<string, number>()
   let stopped = false
 
   const handleDisconnect = async (connectionId: string): Promise<void> => {
@@ -166,11 +168,11 @@ export function watchEditorCrashes(deps: EditorWatchDeps, options: EditorWatchOp
         }
       }
 
-      options.onEvent({
-        kind: 'crashed',
-        projectDir,
-        reason: await deps.crashReason(projectDir, since).catch(() => null)
-      })
+      const reason = await deps
+        .crashReason(projectDir, Math.max(since, reportedAt.get(key) ?? 0))
+        .catch(() => null)
+      reportedAt.set(key, now())
+      options.onEvent({ kind: 'crashed', projectDir, reason })
 
       const elsewhere = deps.crashHandledElsewhere
         ? await deps.crashHandledElsewhere(projectDir, lostAt)

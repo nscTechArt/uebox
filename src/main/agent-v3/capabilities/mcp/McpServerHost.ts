@@ -354,6 +354,7 @@ export class McpServerHost {
       // 客户端发 DELETE 主动结束
       onsessionclosed: (id) => {
         this.sessions.delete(id)
+        releaseSessionBrowser(id)
       }
     })
 
@@ -365,6 +366,8 @@ export class McpServerHost {
     session.transport.onclose = () => {
       const id = session.transport.sessionId
       if (id) this.sessions.delete(id)
+      // 这条会话的工具按会话 id 开过内置浏览器的话，窗口跟着会话一起关，不然留到进程结束
+      releaseSessionBrowser(sessionId)
     }
 
     session.lastActiveAt = Date.now()
@@ -629,6 +632,15 @@ function failure(message: string, code: string): CallToolOutcome {
     isError: true,
     _meta: { unrealBox: { errorCode: code } }
   }
+}
+
+/**
+ * 关掉某条 MCP 会话开过的内置浏览器。按需加载：浏览器服务要 electron，单测里不该被连带拉起
+ */
+function releaseSessionBrowser(sessionId: string): void {
+  void import('../../../services/agentBrowser')
+    .then(({ deleteSessionBrowser }) => deleteSessionBrowser(sessionId))
+    .catch(() => undefined)
 }
 
 /**

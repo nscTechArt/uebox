@@ -190,8 +190,11 @@ describe('团队的账', () => {
     await store.saveHistory('美术总监', messages)
     expect(await store.history('美术总监')).toEqual(messages)
     expect(await store.history('没这个人')).toEqual([])
-    expect(memberFileBase('Level Designer/../x')).toBe('Level_Designer____x')
+    expect(memberFileBase('Level Designer/../x')).toMatch(/^Level_Designer____x-[0-9a-f]{8}$/)
     expect(memberFileBase('美术总监')).toBe('美术总监')
+    // 只差标点的两个名字不能落到同一个文件、同一把锁
+    expect(memberFileBase('Art Lead')).not.toBe(memberFileBase('Art.Lead'))
+    expect(memberFileBase('Art Lead')).not.toBe(memberFileBase('Art_Lead'))
   })
 })
 

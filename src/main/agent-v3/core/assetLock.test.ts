@@ -219,6 +219,14 @@ describe('工作室模式的锁', () => {
     ])
   })
 
+  it('移动 / 改名的目标路径照样锁：搬过去会盖掉那里的资产', () => {
+    expect(
+      extractPackagePaths({
+        moves: [{ source: '/Game/Old/SM_X', destination: '/Game/Props/SM_Rock' }]
+      }).sort()
+    ).toEqual(['/Game/Old/SM_X', '/Game/Props/SM_Rock'])
+  })
+
   it('写 ini 的参数：值里的资产引用不锁（改配置不碰那个资产）', () => {
     expect(
       extractPackagePaths({

@@ -408,7 +408,9 @@ export class WebSocketService implements IWebSocketService {
           // 还有别的请求在路上（比如一次长导入正占着游戏线程）：短请求超时是因为它忙，
           // 不是因为它死了。这时候断开会把那次长操作的回包也一起丢掉
           const busy = this.requestStateManager.pendingCount(connectionId) > 0
-          if (streak >= ZOMBIE_TIMEOUT_STREAK && !busy) {
+          // 但忙也有个头：超时攒到两倍还没一条回话，就不是「在忙」了 —— 几个队员轮流
+          // 往一个卡死的编辑器发请求时，每次超时都恰好有别人的请求在路上
+          if (streak >= ZOMBIE_TIMEOUT_STREAK && (!busy || streak >= ZOMBIE_TIMEOUT_STREAK * 2)) {
             logger.warn(
               `[WebSocketService] 连接连续 ${streak} 次请求超时（最后一次 ${method}），按僵尸连接断开: ${connectionId}`
             )

@@ -2051,6 +2051,12 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 			{
 				Why = FString::Printf(TEXT(" (it reads back \"%s\")"), *OnDiskValue);
 			}
+			// 设置对象那条路先改了类默认对象、推了 PostEditChange：编辑器里已经换成新值了，
+			// 只是没存进文件。回执要说出来，不能让模型以为什么都没变
+			if (Via == TEXT("settings_object"))
+			{
+				Why += TEXT(". The new value IS already applied live in this editor session, but it is not saved and will be lost on restart");
+			}
 			UAL_CommandUtils::SendError(
 				RequestId, 500,
 				FString::Printf(TEXT("project.set_config: [%s] %s was not written to %s%s"),

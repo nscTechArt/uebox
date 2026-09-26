@@ -14,6 +14,7 @@
  * 断点续跑靠这些文件：盒子重启后，名册、任务板和每个队员记得的东西都还在。
  */
 
+import { createHash } from 'crypto'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { promises as fs } from 'fs'
 import { join } from 'path'
@@ -45,11 +46,12 @@ export interface TeamDirs {
  * 只留字母、数字、下划线和横线，其余换成下划线。
  */
 export function memberFileBase(name: string): string {
-  const safe = name
-    .trim()
-    .replace(/[^\p{L}\p{N}_-]/gu, '_')
-    .slice(0, 40)
-  return safe || 'member'
+  const trimmed = name.trim()
+  const safe = trimmed.replace(/[^\p{L}\p{N}_-]/gu, '_').slice(0, 40)
+  // 换过字符或截过的名字带上原名的短指纹：「Art Lead」和「Art.Lead」不能共用一份记忆和一把锁
+  if (safe && safe === trimmed) return safe
+  const tag = createHash('sha1').update(trimmed).digest('hex').slice(0, 8)
+  return `${safe || 'member'}-${tag}`
 }
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {

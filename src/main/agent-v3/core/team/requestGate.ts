@@ -408,7 +408,12 @@ export function pacedStreamFn(inner: StreamFn, deps: PacedStreamDeps = {}): Stre
             release!({ kind: 'overload' })
           } else {
             release!({ kind: 'neutral' })
-            out.push({ type: 'error', reason: 'error', error: failed(model, message) })
+            // 用户点了停止、内层流随之抛 AbortError：报成中止，不是模型出错
+            out.push(
+              outer?.aborted
+                ? { type: 'error', reason: 'aborted', error: failed(model, 'Operation aborted') }
+                : { type: 'error', reason: 'error', error: failed(model, message) }
+            )
             out.end()
             return
           }

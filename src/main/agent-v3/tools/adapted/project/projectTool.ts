@@ -638,13 +638,17 @@ async function openProject(projectKey: string): Promise<OpenProjectResult> {
 
   const running = await alreadyRunning(uprojectPath)
   if (running === 'stuck') return stuckEditorResult(uprojectPath)
-  if (running === 'yes') {
+  if (running === 'yes' || running === 'busy') {
     console.log(`[ProjectTool] ${project.projectName} 已经开着，不再启动一次`)
     return {
       success: true,
       projectName: project.projectName ?? undefined,
       openedPath: uprojectPath,
-      details: ['♻️ 这个工程本来就开着']
+      details: [
+        running === 'busy'
+          ? '♻️ 这个工程本来就开着，但它手上还有请求没回话 —— 要是一直不回，可能已经卡死，用 ue_session_health 看一眼'
+          : '♻️ 这个工程本来就开着'
+      ]
     }
   }
 
@@ -744,9 +748,17 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
 
   const runningByPath = await alreadyRunning(uprojectPath)
   if (runningByPath === 'stuck') return stuckEditorResult(uprojectPath)
-  if (runningByPath === 'yes') {
+  if (runningByPath === 'yes' || runningByPath === 'busy') {
     console.log(`[ProjectTool] ${uprojectPath} 已经开着，不再启动一次`)
-    return { success: true, openedPath: uprojectPath, details: ['♻️ 这个工程本来就开着'] }
+    return {
+      success: true,
+      openedPath: uprojectPath,
+      details: [
+        runningByPath === 'busy'
+          ? '♻️ 这个工程本来就开着，但它手上还有请求没回话 —— 要是一直不回，可能已经卡死，用 ue_session_health 看一眼'
+          : '♻️ 这个工程本来就开着'
+      ]
+    }
   }
 
   console.log(`[ProjectTool] 即将打开: ${uprojectPath}`)
@@ -811,12 +823,15 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
  * - 连接不答话、进程还在 → `stuck`：多半卡在崩溃处理或弹窗上。这时再启动一个
  *   就是两个编辑器抢同一个工程（反馈里正好出现过），宁可停下来说清楚
  */
-async function alreadyRunning(uprojectPath: string): Promise<'yes' | 'no' | 'stuck'> {
+async function alreadyRunning(uprojectPath: string): Promise<'yes' | 'busy' | 'no' | 'stuck'> {
   // `isSameProject` 自己会削掉 `.uproject` 并抹平大小写和斜杠方向，原样传进去就行
   const connectionId = findLiveConnection(uprojectPath)
   if (!connectionId) return 'no'
   const ws = serviceManager.getWebSocketService()
-  if ((await ws.probeConnection(connectionId)) !== 'dead') return 'yes'
+  const verdict = await ws.probeConnection(connectionId)
+  // 忙 = 有请求在路上、没去探：既可能在跑长操作，也可能已经卡死，不能直接说「开着、好着」
+  if (verdict === 'busy') return 'busy'
+  if (verdict !== 'dead') return 'yes'
   ws.dropConnection(connectionId, 'open_project 探活不通')
   const process = await UnrealProcessDetector.findRunningProjectByPath(uprojectPath).catch(
     () => null

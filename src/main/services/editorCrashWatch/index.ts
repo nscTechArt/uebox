@@ -45,7 +45,8 @@ async function attachProcess(watch: EditorCrashWatch, project: ProjectInfo): Pro
   const dir = normalizeDir(project.projectPath)
   const matches: Array<{ pid: number; uproject: string }> = []
   for (const row of await listUnrealProcesses()) {
-    if (!/^UnrealEditor/i.test(row.name)) continue
+    // 和 watch.ts 的 isEditorRow 同一个口径：UnrealEditor-Cmd 是跑批的命令行，不是这个编辑器
+    if (!/^UnrealEditor/i.test(row.name) || /-Cmd/i.test(row.name)) continue
     const uproject = UnrealProcessDetector.extractProjectPath(row.commandLine)
     if (uproject && normalizeDir(path.dirname(uproject)) === dir) {
       matches.push({ pid: row.pid, uproject })
