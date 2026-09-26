@@ -685,6 +685,13 @@
       :image="recropImage"
       @confirm="onRecropConfirm"
     />
+    <CatalogDownloadModal
+      v-if="libraryStore.activeServerKey"
+      :open="serverDownloadOpen"
+      :library-key="libraryStore.activeServerKey"
+      :items="serverDownloadItems"
+      @close="serverDownloadOpen = false"
+    />
   </div>
 </template>
 
@@ -737,7 +744,8 @@ import AssetThumbnailGenerator from './AssetThumbnailGenerator.vue'
 import { useAssetContext } from '../composables/useAssetContext'
 import { useFileSelection } from '../composables/useFileSelection'
 import { useVirtualScroll } from '../composables/useVirtualScroll'
-import { favoriteAPI } from '@renderer/api/favorite'
+import { getActiveLibrarySource } from '../data/activeLibrarySource'
+import type { LibraryFavoritesApi } from '../data/AssetLibrarySource'
 import { useFavoriteStore } from '@renderer/store/modules/favoriteStore'
 import TagSelectorModal from '@renderer/components/TagSelector/TagSelectorModal.vue'
 import { useVaultStore, VaultType } from '@renderer/store/modules/vaultStore'
@@ -754,6 +762,9 @@ import assetDataAPI from '@renderer/api/assetData'
 import { startNativeFileDrag } from '@renderer/api/nativeFileDrag'
 import { handleExternalAssetDrag } from '../utils/externalAssetDrag'
 import { useImportTasksStore } from '@renderer/store/modules/importTasks'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import CatalogDownloadModal from '../catalog/CatalogDownloadModal.vue'
+import type { CatalogAssetSummary } from '@core/shared/catalogLibrary'
 import { assetFolderAPI } from '@renderer/api/assetFolder'
 import assetTagAPI from '@renderer/api/assetTag'
 import folderTagAPI from '@renderer/api/folderTag'
@@ -1132,6 +1143,70 @@ const tabsStore = useTabsStore()
 const selectionStore = useAssetSelectionStore()
 const { t, locale } = useI18n()
 
+// ---- 当前数据源能做什么（服务器库时，本地库的改动类操作不出现）
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
+/**
+ * 收藏走当前数据源：本地库存在保管库里（和原来一样，用户 1 + 当前保管库），
+ * 服务器库存在本机、按库和资产 id 记。调用点不用分辨是哪一种。
+ */
+const favorites = (): LibraryFavoritesApi => getActiveLibrarySource().favorites
+const checkFavorites = (ids: string[]): Promise<Record<string, boolean>> =>
+  libraryCaps.value.canFavorite ? favorites().batchCheck(ids) : Promise.resolve({})
+const checkFolderFavorite = (id: string): Promise<boolean> =>
+  libraryCaps.value.canFavorite ? favorites().isFolderFavorite(id) : Promise.resolve(false)
+
+/** 服务器库的"导入到工程"：选中的（或右键的那一个）资产交给下载对话框（lore 取文件再复制进工程） */
+const serverDownloadOpen = ref(false)
+const serverDownloadItems = ref<CatalogAssetSummary[]>([])
+/** 服务器库的行（ServerLibrarySource.mapAsset）里给下载用的那几个字段 */
+interface ServerRow {
+  type?: string
+  assetKey?: string
+  id?: string
+  catalogId?: number
+  catalogPath?: string
+  catalogDirId?: number
+  catalogRepository?: string
+  name?: string
+  assetName?: string
+  ext?: string
+  className?: string | null
+  engineVersion?: string | null
+  fileSize?: number
+}
+const toCatalogItem = (row: ServerRow): CatalogAssetSummary => ({
+  id: Number(row.catalogId),
+  path: String(row.catalogPath ?? ''),
+  name: String(row.name ?? row.assetName ?? ''),
+  dirId: Number(row.catalogDirId ?? 0),
+  repository: String(row.catalogRepository ?? ''),
+  ext: String(row.ext ?? ''),
+  class: row.className ?? null,
+  engine: row.engineVersion ?? null,
+  size: Number(row.fileSize ?? 0),
+  modifiedMs: 0,
+  tags: []
+})
+const openServerDownload = (): void => {
+  const clicked = currentRightClickAsset.value as ServerRow | null
+  const rows = (selectedItems.value as ServerRow[]).filter(
+    (item) => item.type !== 'folder' && item.catalogId !== undefined
+  )
+  const chosen =
+    clicked && rows.some((row) => getItemId(row) === getItemId(clicked))
+      ? rows
+      : clicked
+        ? [clicked]
+        : rows
+  serverDownloadItems.value = chosen.filter((row) => row.catalogId !== undefined).map(toCatalogItem)
+  if (serverDownloadItems.value.length > 0) serverDownloadOpen.value = true
+}
+
 /**
  * 判断当前是否处于回收站（最近删除）视图
  */
@@ -1182,6 +1257,11 @@ const handlePluginIconError = (src?: string): void => {
 const handleThumbImgError = (event: Event, file: any) => {
   const el = event.target as HTMLImageElement | HTMLVideoElement
   if (!el || !el.src) return
+  // 服务器库的缩略图取不到（没有图、签名过期、离线）：记下来，改画图标，不再重试
+  if (el.src.startsWith('uebox-preview:')) {
+    failedListThumbnails.value = new Set(failedListThumbnails.value).add(el.src)
+    return
+  }
   if (
     el.src.includes('listThumbnail=400') &&
     (!el.src.includes('_thumb') ||
@@ -2457,6 +2537,8 @@ watch(
   () => props.files,
   async (newFiles) => {
     if (!newFiles || newFiles.length === 0) return
+    // 服务器库的行在本机没有文件，不做视频封面处理
+    if (!libraryCaps.value.canEditStructure) return
 
     const folderIds = newFiles
       .filter((file: any) => file.type === 'folder')
@@ -2465,12 +2547,10 @@ watch(
 
     if (folderIds.length > 0) {
       try {
-        const userId = 1
-        const vaultId = currentVault.value?.id
         const statusMap: Record<string, boolean> = {}
         for (const folderId of folderIds) {
           try {
-            const isFav = await favoriteAPI.isFolderFavorite(folderId, userId, vaultId)
+            const isFav = await checkFolderFavorite(folderId)
             statusMap[folderId] = isFav
           } catch {
             statusMap[folderId] = false
@@ -2561,6 +2641,8 @@ const getThumbnailUrl = (file: Parameters<typeof getThumbnailSourceUrl>[0]): str
 
 const getThumbnailSourceUrl = (file: Record<string, string | undefined>): string | undefined => {
   if (file?.type === 'folder') return undefined
+  // 数据源直接给了缩略图地址（服务器库：uebox-preview://，主进程按内容哈希缓存）
+  if (file?.thumbnailUrl) return file.thumbnailUrl
 
   const fileName = file?.assetName || ''
   const fileNameLower = fileName.toLowerCase()
@@ -3044,7 +3126,7 @@ const onContainerPointerDown = (event: PointerEvent) => {
 
   // Only start drag-prep when the pointer was already on a selected item
   // before the current pointerdown updates selection state.
-  maybeDrag.value = wasOnSelectedItem && !event.altKey
+  maybeDrag.value = wasOnSelectedItem && !event.altKey && libraryCaps.value.canEditStructure
   if (maybeDrag.value) {
     // 捕获指针，确保移动事件持续触发
     ;(event.target as HTMLElement).setPointerCapture(event.pointerId)
@@ -3464,6 +3546,63 @@ const emptyAreaMenuItems = computed<MenuItem[]>(() => [
 // 当前右键菜单项
 // 当前右键菜单项
 const currentContextMenuItems = computed(() => {
+  // 不能改结构的库（服务器库）：只留"导入到工程"（经 lore 下载）和"跳转到所在目录"
+  if (!libraryCaps.value.canEditStructure) {
+    const clicked = currentRightClickAsset.value as {
+      type?: string
+      id?: string
+      folderKey?: string
+      assetKey?: string
+    } | null
+    if (!clicked) return []
+    // 收藏：服务器库的收藏记在本机，和本地库一样的菜单项
+    if (clicked.type === 'folder') {
+      const folderKey = String(clicked.id || clicked.folderKey || '')
+      const items: MenuItem[] = []
+      if (libraryCaps.value.folderColor)
+        items.push({
+          key: 'set-color-folder',
+          label: t('assetLib.contextMenu.setColor', '修改颜色'),
+          icon: PhPalette
+        })
+      if (libraryCaps.value.canFavorite)
+        items.push(
+          getFolderFavoriteStatus(folderKey)
+            ? {
+                key: 'unfavorite-folder',
+                label: t('assetLib.contextMenu.removeFromFav'),
+                icon: PhStar
+              }
+            : { key: 'favorite-folder', label: t('assetLib.contextMenu.addToFav'), icon: PhStar }
+        )
+      return items
+    }
+    const items: MenuItem[] = [
+      {
+        key: 'import-to-project',
+        // 不可用时把原因写在菜单项里（菜单项没有悬浮提示）
+        label: libraryCaps.value.canSendToProject
+          ? t('assetLib.contextMenu.importToProject')
+          : `${t('assetLib.contextMenu.importToProject')}（${capabilityReason('canSendToProject')}）`,
+        icon: PhDownloadSimple,
+        disabled: !libraryCaps.value.canSendToProject
+      },
+      {
+        key: 'locate-in-folder',
+        label: t('assetLib.contextMenu.locateInFolder'),
+        icon: PhFolderOpen
+      }
+    ]
+    if (libraryCaps.value.canFavorite) {
+      const assetKey = String(clicked.assetKey || clicked.id || '')
+      items.push(
+        getFavoriteStatus(assetKey)
+          ? { key: 'unfavorite', label: t('assetLib.contextMenu.removeFromFav'), icon: PhStar }
+          : { key: 'favorite', label: t('assetLib.contextMenu.addToFav'), icon: PhStar }
+      )
+    }
+    return items
+  }
   // 回收站视图：显示专用菜单（恢复、彻底删除）
   if (isTrashView.value) {
     if (!currentRightClickAsset.value) {
@@ -3774,12 +3913,11 @@ const handleColorPickerConfirm = async (color: string | null): Promise<void> => 
       }
     } else {
       // 批量更新文件夹颜色
-      const promises = targetKeys.map((k) =>
-        (window as any).api.database.assetFolder.update(k, { color })
-      )
+      // 走数据源：本地库改保管库里的文件夹记录，服务器库写注释（folderPath + color）
+      const promises = targetKeys.map((k) => getActiveLibrarySource().folders.setColor(k, color))
       const results = await Promise.all(promises)
 
-      const successCount = results.filter((r) => r?.success === true || r?.updated === true).length
+      const successCount = results.filter((r) => r.ok).length
 
       if (successCount > 0) {
         // 批量更新本地数据
@@ -4039,6 +4177,8 @@ const handleRightClick = (event: MouseEvent, file: any) => {
   event.stopPropagation()
 
   currentRightClickAsset.value = file
+  // 服务器库在空白处 / 文件夹上没有可做的事：不弹一个空菜单
+  if (currentContextMenuItems.value.length === 0) return
   contextMenuRef.value?.show(event.clientX, event.clientY)
 }
 
@@ -4054,6 +4194,8 @@ const handleEmptyAreaRightClick = (event: MouseEvent) => {
   event.stopPropagation()
 
   currentRightClickAsset.value = null // 清空当前选中的资产
+  // 服务器库在空白处 / 文件夹上没有可做的事：不弹一个空菜单
+  if (currentContextMenuItems.value.length === 0) return
   contextMenuRef.value?.show(event.clientX, event.clientY)
 }
 
@@ -4209,6 +4351,10 @@ const handleContextMenuClick = async (key: string, _item: MenuItem) => {
       }
       break
     case 'import-to-project':
+      if (!libraryCaps.value.canEditStructure) {
+        openServerDownload()
+        break
+      }
       // 检查是否有多个选中项，且右键点击的文件在选中范围内
       if (currentRightClickAsset.value) {
         const clickedId = getItemId(currentRightClickAsset.value)
@@ -5546,12 +5692,12 @@ const handleToggleFavorite = async (isFavorite: boolean) => {
     const promises = assetsToProcess.map((asset) => {
       const assetId = asset.assetKey
       if (isFavorite) {
-        return favoriteAPI
-          .add(assetId, userId, vaultId)
+        return favorites()
+          .add(assetId)
           .then(() => ({ id: assetId, success: true }))
       } else {
-        return favoriteAPI
-          .remove(assetId, userId, vaultId)
+        return favorites()
+          .remove(assetId)
           .then(() => ({ id: assetId, success: true }))
       }
     })
@@ -5629,12 +5775,12 @@ const handleToggleFolderFavorite = async (isFavorite: boolean) => {
     const promises = foldersToProcess.map((folder) => {
       const folderKey = folder.id
       if (isFavorite) {
-        return favoriteAPI
-          .addFolder(folderKey, userId, vaultId)
+        return favorites()
+          .addFolder(folderKey)
           .then(() => ({ id: folderKey, success: true }))
       } else {
-        return favoriteAPI
-          .removeFolder(folderKey, userId, vaultId)
+        return favorites()
+          .removeFolder(folderKey)
           .then(() => ({ id: folderKey, success: true }))
       }
     })
@@ -5717,9 +5863,7 @@ onMounted(async () => {
       .filter(Boolean)
     if (assetIds.length > 0) {
       try {
-        const userId = 1
-        const vaultId = currentVault.value?.id
-        const statusMap = await favoriteAPI.batchCheckFavorites(assetIds, userId, vaultId)
+        const statusMap = await checkFavorites(assetIds)
         favoriteStatusMap.value = statusMap || {}
       } catch {
         favoriteStatusMap.value = {}
@@ -5735,13 +5879,11 @@ onMounted(async () => {
       .filter(Boolean)
     if (folderIds.length > 0) {
       try {
-        const userId = 1
-        const vaultId = currentVault.value?.id
         // 逐个检查文件夹收藏状态（目前没有批量接口）
         const statusMap: Record<string, boolean> = {}
         for (const folderId of folderIds) {
           try {
-            const isFav = await favoriteAPI.isFolderFavorite(folderId, userId, vaultId)
+            const isFav = await checkFolderFavorite(folderId)
             statusMap[folderId] = isFav
           } catch {
             statusMap[folderId] = false
@@ -5902,9 +6044,7 @@ watch(
         .filter(Boolean)
       if (assetIds.length > 0) {
         try {
-          const userId = 1
-          const vaultId = currentVault.value?.id
-          const statusMap = await favoriteAPI.batchCheckFavorites(assetIds, userId, vaultId)
+          const statusMap = await checkFavorites(assetIds)
           favoriteStatusMap.value = statusMap || {}
         } catch {
           favoriteStatusMap.value = {}
@@ -6074,7 +6214,7 @@ const toggleFavoritesForSelectedIds = async (fileIds: string[]): Promise<void> =
         promises.push(
           ...assets.map(async (f) => {
             const k = String(f.assetKey || f.id)
-            await favoriteAPI.remove(k, userId, vaultId)
+            await favorites().remove(k)
             setFavoriteStatus(k, false)
           })
         )
@@ -6085,7 +6225,7 @@ const toggleFavoritesForSelectedIds = async (fileIds: string[]): Promise<void> =
         promises.push(
           ...folders.map(async (f) => {
             const k = String(f.id)
-            await favoriteAPI.removeFolder(k, userId, vaultId)
+            await favorites().removeFolder(k)
             setFolderFavoriteStatus(k, false)
           })
         )
@@ -6103,7 +6243,7 @@ const toggleFavoritesForSelectedIds = async (fileIds: string[]): Promise<void> =
           ...assets.map(async (f) => {
             const k = String(f.assetKey || f.id)
             if (!getFavoriteStatus(k)) {
-              await favoriteAPI.add(k, userId, vaultId)
+              await favorites().add(k)
               setFavoriteStatus(k, true)
             }
           })
@@ -6116,7 +6256,7 @@ const toggleFavoritesForSelectedIds = async (fileIds: string[]): Promise<void> =
           ...folders.map(async (f) => {
             const k = String(f.id)
             if (!getFolderFavoriteStatus(k)) {
-              await favoriteAPI.addFolder(k, userId, vaultId)
+              await favorites().addFolder(k)
               setFolderFavoriteStatus(k, true)
             }
           })
@@ -6330,6 +6470,11 @@ async function handleWebdavDrop(event: DragEvent): Promise<void> {
 }
 
 function handleAssetDragStart(event: DragEvent, file: AssetDataRow | FolderItem): void {
+  if (!libraryCaps.value.canEditStructure) {
+    event.preventDefault()
+    if (event.altKey && !libraryCaps.value.nativeDrag) message.info(capabilityReason('nativeDrag'))
+    return
+  }
   isExternalAssetDrag = handleExternalAssetDrag(
     event,
     () => {

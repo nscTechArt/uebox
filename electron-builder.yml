@@ -51,6 +51,14 @@ extraResources:
   # 不发 npm 包，只随安装包走。
   - from: packages/cli/bundle
     to: cli
+  # 官方 Lore CLI（MIT），服务端资产库的导入 / 下载用（src/main/libraryV3/loreCli.ts）。
+  # 二进制不进 git，由 scripts/fetch-lore-cli.mjs 按 lore-cli.json 的 SHA-256 放入；
+  # build:win 先跑 --check，缺了就不出包。运行时每次启动都会再核对一次哈希。
+  - from: resources/lore
+    to: lore
+    filter:
+      - lore-cli.json
+      - '*/lore.exe'
   # 不携带 FFmpeg、FBX2glTF、Poppler。FFmpeg 由用户自行安装；
   # PDF 文字提取走本地 anydoc，FBX 预览走渲染层 FBXLoader。
   # 分发说明和对应源码入口见 THIRD-PARTY-NOTICES.md。

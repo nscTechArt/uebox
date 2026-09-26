@@ -390,8 +390,47 @@
         </button>
       </a-popover>
 
+      <!-- 引擎版本（服务器库的分面，带数量） -->
+      <AppDropdown v-if="libraryCaps.filters.engine" :trigger="['click']" placement="bottomLeft">
+        <button
+          class="filter-dropdown-btn"
+          :class="{ active: engineVersionsProxy.length > 0 }"
+          @click="loadEngineOptions"
+        >
+          <PhGameController />
+          <span>{{ engineButtonLabel }}</span>
+          <PhCaretDown class="dropdown-arrow" />
+        </button>
+        <template #overlay>
+          <AppMenu @click="handleEngineSelect">
+            <AppMenuItem key="" item-key="">{{
+              t('catalogLibrary.filter.allEngines')
+            }}</AppMenuItem>
+            <AppMenuDivider />
+            <AppMenuItem
+              v-for="option in engineOptions"
+              :key="option.value"
+              :item-key="option.value"
+            >
+              <PhCheck v-if="engineVersionsProxy.includes(option.value)" class="check-icon" />
+              {{ option.value }}
+              <span class="option-count">{{ option.n }}</span>
+            </AppMenuItem>
+          </AppMenu>
+        </template>
+      </AppDropdown>
+
       <!-- 文件大小下拉 -->
-      <AppDropdown :trigger="['click']" placement="bottomLeft">
+      <button
+        v-if="!libraryCaps.filters.size"
+        class="filter-dropdown-btn"
+        disabled
+        :title="capabilityReason('filters.size')"
+      >
+        <PhDatabase />
+        <span>{{ t('assetLib.filter.allSizes') }}</span>
+      </button>
+      <AppDropdown v-else :trigger="['click']" placement="bottomLeft">
         <button class="filter-dropdown-btn" :class="{ active: sizeRangeProxy }">
           <PhDatabase />
           <span>{{ sizeRangeLabel }}</span>
@@ -422,7 +461,16 @@
       </AppDropdown>
 
       <!-- 收藏状态下拉 -->
-      <AppDropdown :trigger="['click']" placement="bottomLeft">
+      <button
+        v-if="!libraryCaps.filters.favorite"
+        class="filter-dropdown-btn"
+        disabled
+        :title="capabilityReason('filters.favorite')"
+      >
+        <PhStar />
+        <span>{{ t('assetLib.filter.all') }}</span>
+      </button>
+      <AppDropdown v-else :trigger="['click']" placement="bottomLeft">
         <button
           class="filter-dropdown-btn"
           :class="{ active: favoriteStatusProxy && favoriteStatusProxy !== 'all' }"
@@ -450,7 +498,47 @@
       </AppDropdown>
 
       <!-- 标签选择 - 使用 Popover 直接显示 -->
+      <button
+        v-if="!libraryCaps.filters.tags"
+        class="filter-dropdown-btn"
+        disabled
+        :title="capabilityReason('filters.tags')"
+      >
+        <PhTagChevron />
+        <span>{{ t('assetLib.filter.tags') }}</span>
+      </button>
+      <!-- 服务器库：按名字筛，「带其中任一标签」；取值和数量来自标签分面 -->
+      <AppDropdown
+        v-else-if="libraryCaps.filters.tagMode === 'include-any'"
+        :trigger="['click']"
+        placement="bottomLeft"
+      >
+        <button
+          class="filter-dropdown-btn"
+          :class="{ active: includeTagsProxy.length > 0 }"
+          @click="loadTagOptions"
+        >
+          <PhTagChevron />
+          <span>{{ tagButtonLabel }}</span>
+          <PhCaretDown class="dropdown-arrow" />
+        </button>
+        <template #overlay>
+          <AppMenu class="server-tag-menu" @click="handleServerTagSelect">
+            <AppMenuItem key="" item-key="">{{ t('catalogLibrary.filter.anyTag') }}</AppMenuItem>
+            <AppMenuDivider />
+            <AppMenuItem v-if="tagOptions.length === 0" key="__none" item-key="__none" disabled>
+              {{ t('catalogLibrary.filter.noTags') }}
+            </AppMenuItem>
+            <AppMenuItem v-for="option in tagOptions" :key="option.value" :item-key="option.value">
+              <PhCheck v-if="includeTagsProxy.includes(option.value)" class="check-icon" />
+              <span class="option-label" :title="option.value">{{ option.value }}</span>
+              <span class="option-count">{{ option.n }}</span>
+            </AppMenuItem>
+          </AppMenu>
+        </template>
+      </AppDropdown>
       <a-popover
+        v-else
         v-model:open="showTagSelector"
         trigger="click"
         placement="bottomLeft"
@@ -483,6 +571,12 @@
       <button
         class="filter-dropdown-btn"
         :class="{ active: mainAssetsOnly }"
+        :disabled="!libraryCaps.filters.showDependencies"
+        :title="
+          libraryCaps.filters.showDependencies
+            ? undefined
+            : capabilityReason('filters.showDependencies')
+        "
         @click="mainAssetsOnly = !mainAssetsOnly"
       >
         <PhStack />
@@ -571,8 +665,11 @@ import {
   PhStar,
   PhTagChevron,
   PhX,
-  PhCircleNotch
+  PhCircleNotch,
+  PhGameController
 } from '@phosphor-icons/vue'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import { activeLibrarySource, getActiveLibrarySource } from '../data/activeLibrarySource'
 import TagSelector from './TagSelector.vue'
 import dayjs from 'dayjs'
 import { ASSET_CATEGORIES } from '@renderer/constants/assetCategories'
@@ -592,10 +689,14 @@ const props = defineProps<{
   tagMatchMode?: 'any' | 'all'
   hasNoTags?: boolean
   keyword: string
+  /** 当前文件夹：服务器库的引擎分面按它和搜索词统计 */
+  folderKey?: string
   favoriteStatus?: string | undefined
   /** 显不显示导入时自动带进来的依赖资产。true（默认）= 都显示 */
   showDependencies?: boolean
   expanded?: boolean
+  /** 引擎版本（只有服务器库有这一组） */
+  engineVersions?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -610,6 +711,7 @@ const emit = defineEmits<{
   (e: 'update:hasNoTags', val: boolean): void
   (e: 'update:favoriteStatus', val?: string): void
   (e: 'update:showDependencies', val: boolean): void
+  (e: 'update:engineVersions', val: string[]): void
   (e: 'update:keyword', val: string): void
   (e: 'apply-filter'): void
   (e: 'reset-filter'): void
@@ -620,6 +722,76 @@ const emit = defineEmits<{
 
 // ========== 国际化 ==========
 const { t } = useI18n()
+
+// ========== 当前数据源能筛什么（不能的那几组原位禁用，并给一句原因） ==========
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
+
+const engineVersionsProxy = computed({
+  get: () => props.engineVersions ?? [],
+  set: (val: string[]) => emit('update:engineVersions', val)
+})
+const engineOptions = ref<Array<{ value: string; n: number }>>([])
+const engineButtonLabel = computed((): string => {
+  const selected = engineVersionsProxy.value
+  if (selected.length === 0) return t('catalogLibrary.filter.allEngines')
+  if (selected.length === 1) return selected[0]
+  return t('catalogLibrary.filter.enginesWithCount', { count: selected.length })
+})
+/** 引擎版本的取值和数量来自服务端分面（整个库） */
+async function loadEngineOptions(): Promise<void> {
+  const facets = getActiveLibrarySource().facets
+  if (!facets) return
+  try {
+    engineOptions.value = await facets.engines({
+      folderKey: props.folderKey,
+      includeSubfolders: true,
+      keyword: props.keyword?.trim() || undefined
+    })
+  } catch {
+    engineOptions.value = []
+  }
+}
+/** 服务器库的标签选项：标签分面（当前文件夹 + 搜索词范围内），多选即「带其中任一」 */
+const tagOptions = ref<Array<{ value: string; n: number }>>([])
+async function loadTagOptions(): Promise<void> {
+  const facets = getActiveLibrarySource().facets
+  if (!facets) return
+  try {
+    tagOptions.value = await facets.tags({
+      folderKey: props.folderKey,
+      includeSubfolders: true,
+      keyword: props.keyword?.trim() || undefined
+    })
+  } catch {
+    tagOptions.value = []
+  }
+}
+const handleServerTagSelect = ({ key }: { key: string }): void => {
+  if (key === '__none') return
+  if (!key) {
+    includeTagsProxy.value = []
+    return
+  }
+  const current = includeTagsProxy.value
+  includeTagsProxy.value = current.includes(key)
+    ? current.filter((value) => value !== key)
+    : [...current, key]
+}
+const handleEngineSelect = ({ key }: { key: string }): void => {
+  if (!key) {
+    engineVersionsProxy.value = []
+    return
+  }
+  const current = engineVersionsProxy.value
+  engineVersionsProxy.value = current.includes(key)
+    ? current.filter((value) => value !== key)
+    : [...current, key]
+}
 
 // ========== 响应式代理 ==========
 const fileCategoryProxy = computed({
@@ -824,7 +996,8 @@ const hasActiveFilters = computed((): boolean => {
     dateRangeProxy.value?.length ||
     (favoriteStatusProxy.value && favoriteStatusProxy.value !== 'all') ||
     mainAssetsOnly.value ||
-    hasActiveTags.value
+    hasActiveTags.value ||
+    engineVersionsProxy.value.length > 0
   )
 })
 
@@ -919,6 +1092,7 @@ watch(
   [
     fileCategoryProxy,
     assetTypesProxy,
+    engineVersionsProxy,
     sizeRangeProxy,
     dateRangeProxy,
     favoriteStatusProxy,
@@ -949,7 +1123,12 @@ onMounted(async () => {
 })
 
 // ========== 资产类型选项列表（动态从数据库获取） ==========
-import assetDataAPI from '@renderer/api/assetData'
+
+// 换了库（本地 ↔ 服务器库）：类型和引擎的取值都要重取
+watch(activeLibrarySource, () => {
+  classOptions.value = []
+  engineOptions.value = []
+})
 
 /** 资产类型选项（包含中英文） */
 interface ClassOption {
@@ -1001,7 +1180,7 @@ async function loadClassOptions(): Promise<void> {
   classOptionsLoading.value = true
   try {
     // 使用优化后的 API，直接从数据库获取去重后的资产类型
-    const types = await assetDataAPI.getDistinctAssetTypes()
+    const types = await getActiveLibrarySource().assets.getDistinctAssetTypes()
 
     // 构建选项列表
     classOptions.value = types
@@ -1262,6 +1441,14 @@ const toggleAssetType = (classNameCn: string): void => {
   &.active {
     background: var(--color-bg-selected);
     color: var(--color-text-selected);
+  }
+
+  // 当前库做不到的筛选：看得出点不了，原因在悬浮提示里
+  &:disabled,
+  &:disabled:hover {
+    background: transparent;
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
   }
 
   .dropdown-arrow {
@@ -1593,5 +1780,22 @@ const toggleAssetType = (classNameCn: string): void => {
       }
     }
   }
+}
+
+/* 标签名可能很长（中文长名）：一行截断，完整名字在悬浮提示里 */
+.option-label {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.option-count {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
 }
 </style>

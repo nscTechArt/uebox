@@ -1416,6 +1416,211 @@ export default {
     searchPlaceholder: 'Type to search...',
     legacyEventGraph: 'Event graph imported from the old format'
   },
+  catalogLibrary: {
+    switcher: {
+      badge: 'Server',
+      state: {
+        online: 'Connected',
+        offline: 'Cannot reach the server',
+        signedOut: 'Sign in again',
+        unknown: 'Not connected'
+      },
+      signIn: 'Sign in again',
+      clearCache: 'Clear local cache',
+      cacheCleared: 'Cleared the pages this library cached on this computer',
+      remove: 'Remove from list'
+    },
+    create: {
+      title: 'Server library',
+      desc: "Connect to your team's asset server and browse online, with nothing mirrored locally",
+      hint: 'Files stay on the server: browsing fetches pages, downloads and imports go through Lore.'
+    },
+    reasons: {
+      structure: 'The server manages the structure of a server library',
+      favorite: 'Favourites work in local libraries only',
+      favoriteFilter:
+        'Server-library favourites are kept on this computer: see My favourites on the left',
+      cloudDrives:
+        'Cloud drives feed local libraries; drag files in to import into a server library',
+      tagInUse: 'This tag is on {count} asset(s); remove it from them first',
+      tagFavorite: 'Server-library tags have no favourites',
+      trash: 'The server keeps deleted assets; they cannot be viewed in Unreal Box yet',
+      scan: 'Server libraries need no scan; changes arrive by themselves',
+      folderSearch: 'The server does not search folder names yet',
+      dependencyGraph:
+        'The dependency graph does not read server libraries yet; see the dependency list above',
+      tagManagement: 'The server has no tag registry yet',
+      sortByType: 'The server cannot sort by type yet',
+      nativeDrag: 'The file is still on the server: right-click "Import to project" first',
+      richNotes: 'Server libraries keep a one-line note only',
+      filterUnsupported: 'The server does not support this filter yet',
+      annotations: 'Only members with write access can change tags and notes',
+      lore: 'Import and download need a Lore address and the bundled lore.exe',
+      offline: 'Cannot reach the server',
+      folderAnnotations: 'Folders in a server library have no tags or notes.'
+    },
+    unclaimed: {
+      notice:
+        '{count} tag/note record(s) belong to files no longer in the library (deleted, or moved without a match)',
+      show: 'Show',
+      hide: 'Hide',
+      claimTo: 'Move to {name}',
+      noSuggestion: 'No file with the same content',
+      claimed: 'Moved to {name}',
+      claimFailed: 'Could not move it: you may lack write access to that repository'
+    },
+    filter: {
+      allEngines: 'All engines',
+      enginesWithCount: '{count} engine versions',
+      anyTag: 'Any tag',
+      noTags: 'No tags on these assets yet'
+    },
+    add: {
+      title: 'Add a server library',
+      addressLead: 'Enter the server address, or paste the invite link your administrator sent.',
+      address: 'Server address or invite link',
+      addressPlaceholder: 'https://assets.studio.lan:8084',
+      fingerprint: 'Deployment CA fingerprint (SHA-256, part of the invite link)',
+      fingerprintPlaceholder: 'Optional when the system already trusts the certificate',
+      caFile: 'Import CA file',
+      caLoaded: 'CA file loaded',
+      trustHint:
+        'Your administrator provides the fingerprint or CA file. The app compares it exactly and refuses to connect on a mismatch.',
+      next: 'Connect',
+      back: 'Back',
+      trustPinned:
+        'Certificate matched the fingerprint. This deployment CA is trusted for this server only.',
+      trustSystem: 'Certificate verified by the system trust store.',
+      trustLoopback: 'Local address. Plain connections are only allowed on this computer.',
+      authMode: 'Sign-in method',
+      mode: {
+        password: 'Account',
+        invite: 'Invite code',
+        token: 'Identity token'
+      },
+      member: 'Member name',
+      password: 'Password',
+      inviteCode: 'Invite code',
+      newPassword: 'Choose a password (8 characters or more)',
+      token: 'Identity token',
+      tokenPlaceholder: 'Paste the token from your administrator or lab',
+      tokenHint: 'The token is stored encrypted on this computer. Paste a new one when it expires.',
+      loreRemote: 'Lore address (for import and download, optional)',
+      signIn: 'Sign in',
+      chooseLead: 'Signed in as {member}. Choose the libraries to add:',
+      chooseLeadAnonymous: 'Signed in. Choose the libraries to add:',
+      noLibraries: 'This account can see no libraries on this server.',
+      libraryCounts: '{assets} assets · {state}',
+      addLibraries: 'Add {count} libraries'
+    },
+    signIn: {
+      title: 'Sign in to {server} again'
+    },
+    view: {
+      signedOut: 'Your server library session has expired. Sign in again to continue.',
+      offlineBanner:
+        'Cannot reach the server. Showing pages you have already viewed; search and import are unavailable.',
+      remove: 'Remove from list',
+      removeTitle: 'Remove "{name}" from this computer?',
+      removeContent:
+        'Only the local connection and cache are removed. The library on the server is not affected.'
+    },
+    detail: {
+      addTagPlaceholder: 'Type a tag name and press Enter',
+      editFailed: 'Change not saved: {reason}'
+    },
+    download: {
+      title: 'Import {count} assets to a project',
+      lead: 'Fetches the files through Lore and copies them, with their dependencies, to the target (Content/… maps to /Game/…).',
+      more: '{count} more',
+      target: 'Put into',
+      targets: {
+        project: 'UE project',
+        folder: 'Folder'
+      },
+      pickProject: 'Choose a project',
+      noProjects: 'Your project library is empty.',
+      pickFolder: 'Choose folder',
+      noFolder: 'None selected',
+      withDependencies: 'Include dependencies',
+      closure: '{count} asset(s) with dependencies, about {size}.',
+      closureMissing: '{count} more dependencies are not in the library.',
+      closureIncomplete: 'The dependency chain is deep; some far ones may be left out.',
+      hint: 'Files are copied, so editing them in the project does not touch the server.',
+      start: 'Start'
+    },
+    import: {
+      title: 'Import into the server library',
+      lead: 'Commits to {folder} as you.',
+      pickFiles: 'Choose files',
+      picked: '{count} files selected',
+      repository: 'Commit to repository',
+      pickRepository: 'Choose a repository',
+      message: 'Commit message',
+      messagePlaceholder: 'Optional',
+      hint: '.uexp and .ubulk files next to a .uasset or .umap are committed with it. After the push, assets appear once the server has indexed them.',
+      start: 'Import'
+    },
+    jobs: {
+      download: 'Importing from the server library to a project',
+      import: 'Importing into the server library',
+      phase: {
+        preparing: 'Preparing',
+        syncing: 'Syncing',
+        copying: 'Copying',
+        staging: 'Staging',
+        committing: 'Committing',
+        pushing: 'Pushing',
+        materialising: 'Fetching files',
+        done: 'Done',
+        failed: 'Failed'
+      },
+      failedDetail: 'Failed: {reason}',
+      downloadDone: 'Copied to the target: {count} file(s)',
+      importDone: 'Committed to the server library: {count} file(s)'
+    },
+    errors: {
+      unknown: 'The operation did not finish.',
+      'invalid-address': 'The address is not valid.',
+      'insecure-http': 'Plain http only works for this computer. Use https for other machines.',
+      insecure: 'This address is not safe. Connection refused.',
+      unreachable: 'Cannot reach this address',
+      'untrusted-certificate':
+        'The certificate is not trusted. Ask your administrator for an invite link (with fingerprint) or the CA file.',
+      'fingerprint-mismatch':
+        'The certificate fingerprint does not match. This may be a different server. Connection refused.',
+      'ca-file-not-ca': 'This file is not a CA certificate.',
+      'ca-file-not-pem': 'This file is not a PEM certificate.',
+      'not-a-catalog': 'This address is not an Unreal Box asset server.',
+      'no-member-surface': 'This server has no account sign-in. Paste an identity token instead.',
+      'missing-password': 'Enter the password.',
+      'missing-token': 'Paste the identity token.',
+      'signed-out': 'Your session has expired. Sign in again.',
+      unauthorized: 'The account, password or token is not right.',
+      forbidden: 'You do not have permission.',
+      'not-found': 'Not found, or you cannot see it.',
+      'route-missing': 'This server does not support this yet.',
+      network: 'Network error',
+      timeout: 'The server did not answer in time.',
+      tls: 'Secure connection failed',
+      unavailable: 'The server is temporarily unavailable.',
+      throttled: 'Too many attempts. Try again shortly.',
+      'lore-missing': 'lore.exe is unavailable',
+      'no-lore-remote': 'This server has no Lore address.',
+      'port-blocked':
+        '{target} does not answer; a firewall is most likely dropping it. Ask the admin to allow TCP 8084 (sign-in), TCP 8083 (catalog) and TCP + UDP 8441 (Lore transfers) on the server.',
+      'port-closed':
+        '{target} refused the connection: nothing is listening on that port (the service is down, or the port is wrong).',
+      'host-not-found': 'Cannot find host {target}: check the spelling, or use the server IP.',
+      'host-unreachable':
+        'Cannot reach {target}: check this computer is on the same network as the server (or the VPN is connected).',
+      'tls-handshake':
+        '{target} dropped the connection before the secure handshake finished: the port may not be HTTPS, or a firewall or proxy tool is intercepting it (global proxy / TUN modes take over LAN addresses; set the server address to direct).',
+      'cert-name-mismatch':
+        'The certificate belongs to this server but does not list the address you entered ({target}). Connect with a name on the certificate, or ask the admin to add this address to it.',
+      'bad-remote': 'The Lore address is not valid (it starts with lores://).'
+    }
+  },
   common: {
     close: 'Close',
     confirm: 'Confirm',

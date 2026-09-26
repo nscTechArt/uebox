@@ -2,7 +2,15 @@
   <div ref="vaultSwitcherRef" class="vault-switcher" :class="{ expanded: isExpanded }">
     <!-- 当前选中的保管库 -->
     <div class="vault-current" @click="toggleDropdown">
-      <div class="vault-info">
+      <div v-if="activeServer" class="vault-info">
+        <div class="vault-icon"><PhCloud /></div>
+        <div class="vault-details">
+          <div class="vault-name-row">
+            <div class="vault-name">{{ activeServer.name }}</div>
+          </div>
+        </div>
+      </div>
+      <div v-else class="vault-info">
         <div class="vault-icon">
           <img
             v-if="isIconUrl(currentVault?.icon)"
@@ -18,11 +26,26 @@
         </div>
       </div>
       <div class="vault-actions">
-        <span class="vault-status" :class="`vault-type-${currentVault?.vaultType || 'reference'}`">
+        <template v-if="activeServer">
+          <span class="vault-status vault-type-server">{{
+            t('catalogLibrary.switcher.badge')
+          }}</span>
+          <span
+            class="server-state-dot"
+            :class="`state-${serverState(activeServer.key)}`"
+            :title="t(`catalogLibrary.switcher.state.${serverState(activeServer.key)}`)"
+          ></span>
+        </template>
+        <span
+          v-else
+          class="vault-status"
+          :class="`vault-type-${currentVault?.vaultType || 'reference'}`"
+        >
           {{ getVaultTypeLabel(currentVault?.vaultType) }}
         </span>
         <span
           v-if="
+            !activeServer &&
             currentVault?.vaultType === 'network' &&
             currentVault?.syncStatus === 'offline' &&
             currentVault?.networkMigrationState !== 'legacy_pending'
@@ -43,7 +66,7 @@
             v-for="vault in vaults"
             :key="vault.id"
             class="vault-item draggable"
-            :class="{ active: vault.id === currentVault?.id }"
+            :class="{ active: !activeServer && vault.id === currentVault?.id }"
             :data-vault-id="vault.id"
             @click="handleVaultSelect(vault)"
           >
@@ -99,6 +122,38 @@
               {{ t('vaultSwitcher.offline') }}
             </div>
             <div class="vault-more-btn" @click.stop="handleContextMenu($event, vault)">
+              <PhDotsThree />
+            </div>
+          </div>
+        </div>
+
+        <!-- 服务器资产库：和本地库同一个列表，徽标"服务器"加连接状态点 -->
+        <div v-if="serverLibraries.length > 0" class="vault-list server-vault-list">
+          <div
+            v-for="library in serverLibraries"
+            :key="library.key"
+            class="vault-item"
+            :class="{ active: activeServer?.key === library.key }"
+            :data-server-library="library.key"
+            @click="handleServerSelect(library)"
+          >
+            <div class="drag-handle"></div>
+            <div class="vault-icon"><PhCloud /></div>
+            <div class="vault-details">
+              <div class="vault-name-row">
+                <div class="vault-name">{{ library.name }}</div>
+              </div>
+              <div class="vault-path">{{ library.server.label }}</div>
+            </div>
+            <div class="vault-status-badge vault-type-server">
+              {{ t('catalogLibrary.switcher.badge') }}
+            </div>
+            <span
+              class="server-state-dot"
+              :class="`state-${serverState(library.key)}`"
+              :title="t(`catalogLibrary.switcher.state.${serverState(library.key)}`)"
+            ></span>
+            <div class="vault-more-btn" @click.stop="handleServerContextMenu($event, library)">
               <PhDotsThree />
             </div>
           </div>
@@ -175,15 +230,43 @@
       </div>
     </div>
 
+    <div
+      v-show="serverMenuLibrary !== null"
+      class="context-menu"
+      :style="contextMenuStyle"
+      @click.stop
+    >
+      <div class="context-menu-item" @click="handleServerSignIn">
+        {{ t('catalogLibrary.switcher.signIn') }}
+      </div>
+      <div class="context-menu-item" @click="handleServerClearCache">
+        {{ t('catalogLibrary.switcher.clearCache') }}
+      </div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item danger" @click="handleServerRemove">
+        {{ t('catalogLibrary.switcher.remove') }}
+      </div>
+    </div>
+    <CatalogSignInModal
+      :open="serverSignInLibrary !== null"
+      :server="serverSignInLibrary?.server ?? null"
+      @close="serverSignInLibrary = null"
+      @signed-in="handleServerSignedIn"
+    />
+
     <!-- 遮罩层 -->
     <div
-      v-show="isExpanded || contextMenuVisible"
+      v-show="isExpanded || contextMenuVisible || serverMenuLibrary !== null"
       class="vault-overlay"
       @click="handleOverlayClick"
     ></div>
 
     <!-- 创建保管库模态框 -->
-    <CreateVaultModal v-model:open="showCreateModal" @created="handleVaultCreated" />
+    <CreateVaultModal
+      v-model:open="showCreateModal"
+      @created="handleVaultCreated"
+      @server-library-added="handleServerLibraryAdded"
+    />
 
     <AppModal
       v-model:open="showBrowsePathModal"
@@ -418,6 +501,10 @@ import {
 } from '@phosphor-icons/vue'
 import { useVaultStore, type VaultInfo, VaultType } from '../../../store/modules/vaultStore'
 import CreateVaultModal from './CreateVaultModal.vue'
+import CatalogSignInModal from '../catalog/CatalogSignInModal.vue'
+import { catalogLibraryAPI } from '@renderer/api/catalogLibrary'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import type { CatalogLibraryView } from '@core/shared/catalogLibrary'
 import ChangeIconModal from './ChangeIconModal.vue'
 import DeleteVaultModal from './DeleteVaultModal.vue'
 import Sortable from 'sortablejs'
@@ -430,6 +517,100 @@ const { t } = useI18n()
 // 计算属性
 const vaults = computed(() => vaultStore.vaults)
 const currentVault = computed(() => vaultStore.currentVault)
+
+// ---- 服务器资产库：同一个切换器里的条目
+const libraryStore = useAssetLibraryStore()
+const serverLibraries = computed(() => libraryStore.serverLibraries)
+const activeServer = computed(() => libraryStore.activeServer)
+const serverMenuLibrary = ref<CatalogLibraryView | null>(null)
+const serverSignInLibrary = ref<CatalogLibraryView | null>(null)
+
+/** 连接状态点：在线 / 离线 / 需要重新登录 / 还不知道 */
+const serverState = (key: string): 'online' | 'offline' | 'signedOut' | 'unknown' => {
+  const library = serverLibraries.value.find((candidate) => candidate.key === key)
+  if (library && !library.server.signedIn) return 'signedOut'
+  const status = libraryStore.statuses[key]
+  if (!status) return 'unknown'
+  if (status.signedOut) return 'signedOut'
+  return status.online ? 'online' : 'offline'
+}
+
+const handleServerSelect = async (library: CatalogLibraryView): Promise<void> => {
+  closeDropdown()
+  if (activeServer.value?.key === library.key) return
+  await libraryStore.activateServer(library.key)
+  emit('vaultChanged', currentVault.value as VaultInfo)
+  window.dispatchEvent(new CustomEvent('navigate-to-all-folder'))
+}
+
+const handleServerContextMenu = (event: MouseEvent, library: CatalogLibraryView): void => {
+  event.stopPropagation()
+  serverMenuLibrary.value = library
+  contextMenuStyle.value = {
+    top: `${event.clientY - 40}px`,
+    left: `${event.clientX - 210}px`
+  }
+}
+
+const handleServerSignIn = (): void => {
+  serverSignInLibrary.value = serverMenuLibrary.value
+  serverMenuLibrary.value = null
+}
+
+const handleServerSignedIn = async (): Promise<void> => {
+  await libraryStore.loadServerLibraries()
+  const key = libraryStore.activeServerKey
+  if (key) {
+    await libraryStore.activateServer(key)
+    emit('vaultChanged', currentVault.value as VaultInfo)
+    window.dispatchEvent(new CustomEvent('navigate-to-all-folder'))
+  }
+}
+
+const handleServerClearCache = async (): Promise<void> => {
+  const library = serverMenuLibrary.value
+  serverMenuLibrary.value = null
+  if (!library) return
+  const result = await catalogLibraryAPI.clearCache(library.key)
+  if (result.success) message.success(t('catalogLibrary.switcher.cacheCleared'))
+}
+
+const handleServerRemove = (): void => {
+  const library = serverMenuLibrary.value
+  serverMenuLibrary.value = null
+  if (!library) return
+  confirmDialog({
+    title: t('catalogLibrary.view.removeTitle', { name: library.name }),
+    content: t('catalogLibrary.view.removeContent'),
+    okText: t('catalogLibrary.view.remove'),
+    danger: true,
+    onOk: async () => {
+      const wasActive = activeServer.value?.key === library.key
+      const ok = await libraryStore.removeServerLibrary(library.key)
+      if (!ok) {
+        message.error(t('catalogLibrary.errors.unknown'))
+        return
+      }
+      if (wasActive) {
+        emit('vaultChanged', currentVault.value as VaultInfo)
+        window.dispatchEvent(new CustomEvent('navigate-to-all-folder'))
+      }
+    }
+  })
+}
+
+/** 新建弹窗里添加了服务器库：切过去 */
+const handleServerLibraryAdded = async (keys: string[]): Promise<void> => {
+  showCreateModal.value = false
+  await libraryStore.loadServerLibraries()
+  if (keys[0]) {
+    await libraryStore.activateServer(keys[0])
+    emit('vaultChanged', currentVault.value as VaultInfo)
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('navigate-to-all-folder'))
+    }, 300)
+  }
+}
 // 加载状态（保留以备后续使用）
 // const isLoading = ref(false)
 
@@ -654,6 +835,16 @@ const closeDropdown = () => {
 
 // 选择保管库
 const handleVaultSelect = async (vault: VaultInfo) => {
+  // 从服务器库回到本地库：数据源换回来；本地当前库没变的话不用再切一次
+  if (activeServer.value) {
+    libraryStore.activateLocal()
+    if (vault.id === currentVault.value?.id) {
+      closeDropdown()
+      emit('vaultChanged', vault)
+      window.dispatchEvent(new CustomEvent('navigate-to-all-folder'))
+      return
+    }
+  }
   if (vault.id === currentVault.value?.id) {
     closeDropdown()
     return
@@ -776,6 +967,7 @@ const handleContextMenu = (event: MouseEvent, vault: VaultInfo): void => {
 // 关闭右键菜单
 const closeContextMenu = () => {
   contextMenuVisible.value = false
+  serverMenuLibrary.value = null
   // 移除 selectedVault.value = null 的逻辑，避免后续操作获取不到选中的保管库
 }
 
@@ -1355,6 +1547,7 @@ onUnmounted(() => {
 // 处理遮罩层点击
 const handleOverlayClick = () => {
   closeDropdown()
+  serverMenuLibrary.value = null
   // 只有在点击遮罩层关闭菜单时才清空选中项
   if (contextMenuVisible.value) {
     contextMenuVisible.value = false
@@ -1499,6 +1692,11 @@ const handleOverlayClick = () => {
         &.vault-type-network {
           color: var(--color-warning-text);
           background: var(--color-warning-bg);
+        }
+
+        &.vault-type-server {
+          color: var(--color-accent-text);
+          background: var(--color-accent-bg);
         }
 
         &.vault-offline {
@@ -1759,6 +1957,11 @@ const handleOverlayClick = () => {
           &.vault-offline {
             color: var(--color-text-on-solid);
             background: var(--color-danger-solid);
+          }
+
+          &.vault-type-server {
+            color: var(--color-accent-text);
+            background: var(--color-accent-bg);
           }
         }
 
@@ -2047,5 +2250,29 @@ const handleOverlayClick = () => {
       background: var(--color-text-muted);
     }
   }
+}
+
+.server-state-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-muted);
+
+  &.state-online {
+    background: var(--color-success-solid);
+  }
+
+  &.state-offline {
+    background: var(--color-danger-solid);
+  }
+
+  &.state-signedOut {
+    background: var(--color-warning-solid);
+  }
+}
+
+.server-vault-list {
+  border-top: 1px solid var(--color-border-subtle);
 }
 </style>

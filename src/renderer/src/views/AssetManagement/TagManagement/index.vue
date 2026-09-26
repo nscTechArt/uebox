@@ -1,5 +1,36 @@
 <template>
   <div class="tag-management">
+    <!--
+      服务器库：文件已不在（删除、或移动后没配上）的标签和备注。只在有的时候出现一行，
+      展开能看到是哪些、能认领到服务端建议的那个资产（同样字节的文件）上。
+    -->
+    <div v-if="unclaimed.length > 0" class="unclaimed-notice">
+      <button type="button" class="unclaimed-toggle" @click="unclaimedOpen = !unclaimedOpen">
+        {{ t('catalogLibrary.unclaimed.notice', { count: unclaimed.length }) }}
+        <span class="unclaimed-action">{{
+          unclaimedOpen ? t('catalogLibrary.unclaimed.hide') : t('catalogLibrary.unclaimed.show')
+        }}</span>
+      </button>
+      <ul v-if="unclaimedOpen" class="unclaimed-list">
+        <li v-for="item in unclaimed" :key="item.path" class="unclaimed-item">
+          <span class="unclaimed-path" :title="item.path">{{ item.path }}</span>
+          <span v-if="item.tags.length" class="unclaimed-tags">{{ item.tags.join('、') }}</span>
+          <AppButton
+            v-if="item.suggestions.length > 0"
+            size="small"
+            :title="item.suggestions[0].path"
+            @click="handleClaim(item.path, item.suggestions[0].path)"
+          >
+            {{
+              t('catalogLibrary.unclaimed.claimTo', { name: baseName(item.suggestions[0].path) })
+            }}
+          </AppButton>
+          <span v-else class="unclaimed-none">{{
+            t('catalogLibrary.unclaimed.noSuggestion')
+          }}</span>
+        </li>
+      </ul>
+    </div>
     <div class="tag-management-container" :class="{ 'dragging-active': isDragging }">
       <!-- 左侧标签组列表 -->
       <TagGroupList
@@ -12,6 +43,7 @@
         :unused-tag-count="unusedTagCount"
         :quick-filter="quickFilter"
         :renaming-group-id="renamingGroupId"
+        :hide-favorite="!registry.abilities.favorite"
         @select-group="handleSelectGroup"
         @create-group="handleCreateGroup"
         @start-rename-group="handleStartRenameGroup"
@@ -34,6 +66,7 @@
         :selected-group-name="selectedGroupName"
         :quick-filter="quickFilter"
         :renaming-tag-id="renamingTagId"
+        :hide-favorite="!registry.abilities.favorite"
         @create-tag="handleCreateTag"
         @start-rename="handleStartRename"
         @delete-tag="handleDeleteTag"
@@ -56,10 +89,14 @@ import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import { useI18n } from 'vue-i18n'
 import TagGroupList from './TagGroupList.vue'
+import AppButton from '@renderer/components/AppButton.vue'
+import type { CatalogUnclaimed } from '@core/shared/catalogLibrary'
 import TagDisplay from './TagDisplay.vue'
 import type { TagGroup, Tag } from './types'
 import { DEFAULT_TAG_GROUP_COLOR } from './types'
 import { useTagStatsStore } from '@renderer/store/modules/tagStatsStore'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import type { LibraryTagRegistryApi } from '../data/AssetLibrarySource'
 
 type QuickFilter = 'all' | 'ungrouped' | 'favorite' | 'unused' | null
 
@@ -87,6 +124,22 @@ const renamingTagSubmitting = ref(false)
 
 const tagStatsStore = useTagStatsStore()
 const { t } = useI18n()
+
+/**
+ * 标签从哪里来：本地库是公共标签库，服务器库是那个库的标签注册表。
+ * 页面只认 registry 的这组方法；做不到的（服务器库的「常用」、改名已在用的标签）看 abilities。
+ */
+const libraryStore = useAssetLibraryStore()
+const registry = computed((): LibraryTagRegistryApi => libraryStore.source.tagRegistry)
+
+/** 服务器库：已挂在资产上的标签不能在这里改名 / 删除（要逐个改资产），说一句原因 */
+const blockedByUsage = (tag: Tag | undefined): boolean => {
+  if (!tag?.id || registry.value.abilities.renameUsed) return false
+  const count = usageCounts.value[tag.id] ?? 0
+  if (count === 0) return false
+  message.warning(t('catalogLibrary.reasons.tagInUse', { count }))
+  return true
+}
 
 // 计算属性
 const selectedGroupName = computed(() => {
@@ -140,16 +193,16 @@ const handleCreateGroup = async () => {
   handleCancelGroupRename()
   const defaultName = generateDefaultGroupName()
   try {
-    const result = await window.api.database.tagGroup.create({
-      name: defaultName,
-      color: DEFAULT_TAG_GROUP_COLOR,
-      sort_order: tagGroups.value.length + 1
-    })
+    const createdId = await registry.value.createGroup(
+      defaultName,
+      tagGroups.value.length + 1,
+      DEFAULT_TAG_GROUP_COLOR
+    )
 
-    if (result.success) {
+    if (createdId !== null) {
       message.success(t('tagManagement.messages.groupCreated'))
       await loadGroups()
-      const newId = result.data?.id ?? null
+      const newId = createdId || null
       if (newId) {
         renamingGroupId.value = newId
         const createdGroup = tagGroups.value.find((group) => group.id === newId)
@@ -184,8 +237,7 @@ const handleDeleteGroup = async (id: number) => {
     danger: true,
     async onOk() {
       try {
-        const result = await window.api.database.tagGroup.delete(id)
-        if (result.success) {
+        if (await registry.value.deleteGroup(id)) {
           message.success(t('tagManagement.messages.groupDeleted'))
           if (selectedGroupId.value === id) {
             selectedGroupId.value = null
@@ -228,8 +280,7 @@ const handleSubmitGroupRename = async ({ id, name }: { id: number; name: string 
 
   renamingSubmitting.value = true
   try {
-    const result = await window.api.database.tagGroup.update(id, { name: trimmedName })
-    if (result.success) {
+    if (await registry.value.renameGroup(id, trimmedName)) {
       message.success(t('tagManagement.messages.groupNameUpdated'))
       handleCancelGroupRename()
       await loadGroups()
@@ -275,16 +326,16 @@ const handleCreateTag = async (): Promise<void> => {
   handleCancelTagRename()
   const defaultName = generateDefaultTagName()
   try {
-    const result = await window.api.database.tag.create({
-      name: defaultName,
-      group_id: quickFilter.value ? null : selectedGroupId.value,
-      is_favorite: quickFilter.value === 'favorite'
-    })
+    const createdId = await registry.value.createTag(
+      defaultName,
+      quickFilter.value ? null : selectedGroupId.value,
+      quickFilter.value === 'favorite'
+    )
 
-    if (result.success) {
+    if (createdId !== null) {
       await loadTags()
       await loadGroups()
-      const newId = result.data?.id ?? null
+      const newId = createdId || null
       if (newId) {
         // 进入重命名模式
         renamingTagId.value = newId
@@ -326,8 +377,7 @@ const handleSubmitTagRename = async (payload: { id: number; name: string }): Pro
 
   renamingTagSubmitting.value = true
   try {
-    const result = await window.api.database.tag.update(payload.id, { name: trimmedName })
-    if (result.success) {
+    if (await registry.value.renameTag(payload.id, trimmedName)) {
       handleCancelTagRename()
       await loadTags()
     } else {
@@ -354,14 +404,15 @@ const handleCancelTagRename = (): void => {
  */
 const handleStartRename = (tag: Tag): void => {
   handleCancelTagRename() // 先取消可能正在进行的重命名
+  if (blockedByUsage(tag)) return
   renamingTagId.value = tag.id ?? null
   renamingTagName.value = tag.name
 }
 
 const handleDeleteTag = async (id: number) => {
+  if (blockedByUsage(tags.value.find((tag) => tag.id === id))) return
   try {
-    const result = await window.api.database.tag.delete(id)
-    if (result.success) {
+    if ((await registry.value.deleteTags([id])) > 0) {
       message.success(t('tagManagement.messages.tagDeleted'))
       await loadTags()
       await loadGroups()
@@ -375,8 +426,7 @@ const handleDeleteTag = async (id: number) => {
 
 const handleToggleFavorite = async (tag: Tag) => {
   try {
-    const result = await window.api.database.tag.toggleFavorite(tag.id!)
-    if (result.success) {
+    if (await registry.value.toggleFavorite(tag.id!)) {
       message.success(
         tag.is_favorite
           ? t('tagManagement.messages.favoriteRemoved')
@@ -415,16 +465,7 @@ const handleDropTag = async (tag: Tag, groupId: number) => {
       return
     }
 
-    const result = await window.api.database.tag.update(tag.id!, {
-      name: tag.name,
-      group_id: groupId,
-      is_favorite: tag.is_favorite
-    })
-
-    if (result.success) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const _targetGroup = tagGroups.value.find((g) => g.id === groupId)
-      // message.success(`标签已移动到「${targetGroup?.name || '未知分组'}」`)
+    if (await registry.value.update(tag.id!, { group_id: groupId })) {
       await loadTags()
       await loadGroups()
     } else {
@@ -448,14 +489,7 @@ const handleDropToUngrouped = async (tag: Tag) => {
       return
     }
 
-    const result = await window.api.database.tag.update(tag.id!, {
-      name: tag.name,
-      group_id: null,
-      is_favorite: tag.is_favorite
-    })
-
-    if (result.success) {
-      // message.success('标签已移动到未分组')
+    if (await registry.value.update(tag.id!, { group_id: null })) {
       await loadTags()
       await loadGroups()
     } else {
@@ -479,13 +513,7 @@ const handleDropToFavorite = async (tag: Tag) => {
       return
     }
 
-    const result = await window.api.database.tag.update(tag.id!, {
-      name: tag.name,
-      group_id: tag.group_id,
-      is_favorite: true
-    })
-
-    if (result.success) {
+    if (await registry.value.update(tag.id!, { is_favorite: true })) {
       message.success(t('tagManagement.messages.tagSetFavorite'))
       await loadTags()
       await loadGroups()
@@ -501,11 +529,11 @@ const handleDropToFavorite = async (tag: Tag) => {
 // 数据加载
 const loadGroups = async () => {
   try {
-    const result = await window.api.database.tagGroup.getAllWithCount()
-    if (result.success) {
-      tagGroups.value = result.data
+    const groups = (await registry.value.groups()) as TagGroup[]
+    {
+      tagGroups.value = groups
       if (renamingGroupId.value !== null) {
-        const renamingGroup = result.data.find((group) => group.id === renamingGroupId.value)
+        const renamingGroup = groups.find((group) => group.id === renamingGroupId.value)
         if (renamingGroup) {
           renamingGroupName.value = renamingGroup.name
         } else {
@@ -520,9 +548,9 @@ const loadGroups = async () => {
 
 const loadTags = async () => {
   try {
-    const result = await window.api.database.tag.getAll()
-    if (result.success) {
-      tags.value = result.data
+    const loaded = (await registry.value.tags()) as Tag[]
+    {
+      tags.value = loaded
       // 同步标签总数到 store，供其它视图展示
       tagStatsStore.setTotalCount(Array.isArray(tags.value) ? tags.value.length : 0)
     }
@@ -538,16 +566,7 @@ const loadTags = async () => {
  */
 const loadUsageCounts = async (): Promise<void> => {
   try {
-    const result = await window.api.database.assetTag.getUsageCounts()
-    if (!result.success) {
-      usageCounts.value = {}
-      return
-    }
-    const next: Record<number, number> = {}
-    result.data.forEach((row) => {
-      next[row.tagId] = row.count
-    })
-    usageCounts.value = next
+    usageCounts.value = await registry.value.usageCounts()
   } catch (error) {
     console.error('加载标签用量失败:', error)
     usageCounts.value = {}
@@ -561,11 +580,9 @@ const handleBatchMove = async (payload: {
 }): Promise<void> => {
   if (payload.ids.length === 0) return
   try {
-    const result = await window.api.database.tag.moveToGroup(payload.ids, payload.groupId)
-    if (result.success) {
-      message.success(
-        t('tagDisplay.batch.moved', { count: result.data?.updatedCount ?? payload.ids.length })
-      )
+    const moved = await registry.value.moveToGroup(payload.ids, payload.groupId)
+    if (moved > 0) {
+      message.success(t('tagDisplay.batch.moved', { count: moved }))
       await loadTags()
       await loadGroups()
     } else {
@@ -582,9 +599,7 @@ const handleBatchFavorite = async (ids: number[]): Promise<void> => {
   try {
     // 批量「设为常用」是单向的：已经是常用的跳过，避免把它们反向取消
     const targets = ids.filter((id) => !tags.value.find((tag) => tag.id === id)?.is_favorite)
-    await Promise.all(
-      targets.map((id) => window.api.database.tag.update(id, { is_favorite: true }))
-    )
+    await Promise.all(targets.map((id) => registry.value.update(id, { is_favorite: true })))
     message.success(t('tagDisplay.batch.favorited'))
     await loadTags()
   } catch (error) {
@@ -603,11 +618,9 @@ const handleBatchDelete = (ids: number[]): void => {
     danger: true,
     async onOk() {
       try {
-        const result = await window.api.database.tag.batchDelete(ids)
-        if (result.success) {
-          message.success(
-            t('tagDisplay.batch.deleted', { count: result.data?.deletedCount ?? ids.length })
-          )
+        const deleted = await registry.value.deleteTags(ids)
+        if (deleted > 0 || ids.length === 0) {
+          message.success(t('tagDisplay.batch.deleted', { count: deleted }))
           await loadTags()
           await loadGroups()
           await loadUsageCounts()
@@ -622,11 +635,37 @@ const handleBatchDelete = (ids: number[]): void => {
   })
 }
 
+// ==================== 待认领的注释（服务器库） ====================
+const unclaimed = ref<CatalogUnclaimed[]>([])
+const unclaimedOpen = ref(false)
+const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
+
+const loadUnclaimed = async (): Promise<void> => {
+  try {
+    unclaimed.value = (await registry.value.unclaimed?.()) ?? []
+  } catch {
+    unclaimed.value = []
+  }
+}
+
+const handleClaim = async (from: string, to: string): Promise<void> => {
+  if (!registry.value.claim) return
+  if (await registry.value.claim(from, to)) {
+    message.success(t('catalogLibrary.unclaimed.claimed', { name: baseName(to) }))
+    await loadUnclaimed()
+    await loadTags()
+    await loadUsageCounts()
+  } else {
+    message.error(t('catalogLibrary.unclaimed.claimFailed'))
+  }
+}
+
 // 初始化
 onMounted(async () => {
   await loadGroups()
   await loadTags()
   await loadUsageCounts()
+  await loadUnclaimed()
 })
 </script>
 
@@ -642,11 +681,81 @@ onMounted(async () => {
   min-height: 0;
   overflow: hidden;
 
+  display: flex;
+  flex-direction: column;
+
   .tag-management-container {
     display: flex;
+    flex: 1;
     height: 100%;
     min-height: 0;
   }
+}
+
+.unclaimed-notice {
+  flex-shrink: 0;
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  font-size: var(--font-size-sm);
+}
+
+.unclaimed-toggle {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.unclaimed-action {
+  margin-left: auto;
+  text-decoration: underline;
+}
+
+.unclaimed-list {
+  max-height: 160px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.unclaimed-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  color: var(--color-text-secondary);
+}
+
+.unclaimed-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unclaimed-tags,
+.unclaimed-none {
+  flex-shrink: 0;
+  max-width: 30%;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /*

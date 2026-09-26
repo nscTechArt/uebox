@@ -48,6 +48,33 @@ import type {
   LibraryPackageProblemDto
 } from '../shared/libraryPackage'
 
+import type {
+  CatalogAssetDetail,
+  CatalogConnectInput,
+  CatalogConnectResult,
+  CatalogFacetField,
+  CatalogFacets,
+  CatalogFolder,
+  CatalogLibraryEvent,
+  CatalogLibraryStatus,
+  CatalogLibraryView,
+  CatalogListQuery,
+  CatalogProbeResult,
+  CatalogRemoteLibrary,
+  CatalogServerView,
+  CatalogWindow,
+  CatalogTagDef,
+  CatalogFavorites,
+  CatalogFolder,
+  CatalogClosure,
+  CatalogUnclaimed
+} from '../shared/catalogLibrary'
+
+/** 服务端资产库 IPC 的统一返回形状（见 src/main/ipc/catalogLibrary.ts） */
+type CatalogIpcResult<T> =
+  | { success: true; data: T; error?: undefined; errorCode?: undefined }
+  | { success: false; data?: undefined; error: string; errorCode: string }
+
 export {}
 
 declare global {
@@ -2873,6 +2900,134 @@ declare global {
       } | null>
       selectionComplete: (bounds: { x: number; y: number; width: number; height: number }) => void
       selectionCancelled: () => void
+    }
+    /**
+     * 服务端资产库（新后端 asset-catalog）：在线分页浏览，本机只缓存看过的页和图。
+     * 令牌只在主进程；这里只回"有没有登录"。
+     */
+    catalogLibrary: {
+      list: () => Promise<CatalogIpcResult<CatalogLibraryView[]>>
+      servers: () => Promise<CatalogIpcResult<CatalogServerView[]>>
+      probe: (
+        address: string,
+        caFingerprint?: string | null,
+        caPem?: string | null
+      ) => Promise<CatalogIpcResult<CatalogProbeResult>>
+      connect: (input: CatalogConnectInput) => Promise<CatalogIpcResult<CatalogConnectResult>>
+      remoteLibraries: (serverId: string) => Promise<CatalogIpcResult<CatalogRemoteLibrary[]>>
+      add: (
+        serverId: string,
+        libraries: Array<{ id: string; name: string }>
+      ) => Promise<CatalogIpcResult<CatalogLibraryView[]>>
+      remove: (key: string) => Promise<CatalogIpcResult<void>>
+      signIn: (
+        serverId: string,
+        input: {
+          member?: string | null
+          password?: string | null
+          inviteCode?: string | null
+          identityToken?: string | null
+        }
+      ) => Promise<CatalogIpcResult<CatalogServerView>>
+      signOut: (serverId: string) => Promise<CatalogIpcResult<void>>
+      setLoreRemote: (serverId: string, remote: string | null) => Promise<CatalogIpcResult<void>>
+      status: (key: string) => Promise<CatalogIpcResult<CatalogLibraryStatus>>
+      watch: (key: string) => Promise<CatalogIpcResult<CatalogLibraryStatus>>
+      unwatch: (key: string) => Promise<CatalogIpcResult<void>>
+      folders: (
+        key: string,
+        parent: number
+      ) => Promise<
+        CatalogIpcResult<{ folder: CatalogFolder | null; items: CatalogFolder[]; stale: boolean }>
+      >
+      folderByPath: (key: string, path: string) => Promise<CatalogIpcResult<CatalogFolder>>
+      listWindow: (
+        key: string,
+        query: CatalogListQuery,
+        start: number,
+        limit: number
+      ) => Promise<CatalogIpcResult<CatalogWindow>>
+      facets: (
+        key: string,
+        query: CatalogListQuery,
+        fields?: CatalogFacetField[],
+        limit?: number
+      ) => Promise<CatalogIpcResult<CatalogFacets>>
+      detail: (key: string, id: number) => Promise<CatalogIpcResult<CatalogAssetDetail>>
+      probeAnnotations: (key: string) => Promise<CatalogIpcResult<boolean>>
+      editAnnotations: (
+        key: string,
+        ops: Array<{
+          path?: string
+          folderPath?: string
+          set?: Record<string, unknown>
+          addTags?: string[]
+          removeTags?: string[]
+        }>
+      ) => Promise<CatalogIpcResult<{ accepted: number; journalSeq: number | null }>>
+      loreInfo: () => Promise<
+        CatalogIpcResult<{
+          path: string | null
+          version: string | null
+          pinned: boolean
+          problem: string | null
+        }>
+      >
+      listTags: (key: string) => Promise<CatalogIpcResult<CatalogTagDef[]>>
+      putTag: (
+        key: string,
+        name: string,
+        patch: { color?: string | null; group?: string | null }
+      ) => Promise<CatalogIpcResult<void>>
+      deleteTag: (key: string, name: string) => Promise<CatalogIpcResult<void>>
+      searchFolders: (
+        key: string,
+        q: string,
+        limit?: number,
+        dir?: number
+      ) => Promise<CatalogIpcResult<CatalogFolder[] | null>>
+      closure: (key: string, id: number) => Promise<CatalogIpcResult<CatalogClosure | null>>
+      unclaimed: (key: string) => Promise<CatalogIpcResult<CatalogUnclaimed[] | null>>
+      claim: (key: string, from: string, to: string) => Promise<CatalogIpcResult<void>>
+      favorites: (key: string) => Promise<CatalogIpcResult<CatalogFavorites>>
+      setFavorite: (
+        key: string,
+        kind: 'asset' | 'folder',
+        id: number,
+        on: boolean
+      ) => Promise<CatalogIpcResult<CatalogFavorites>>
+      download: (
+        key: string,
+        input: { ids: number[]; targetRoot: string; withDependencies: boolean }
+      ) => Promise<CatalogIpcResult<string>>
+      resolveRepository: (
+        key: string,
+        folder: { dirId: number; path: string }
+      ) => Promise<
+        CatalogIpcResult<{
+          repositoryId: string | null
+          candidates: string[]
+          names: Record<string, string>
+        }>
+      >
+      import: (
+        key: string,
+        input: {
+          files: string[]
+          folderPath: string
+          repositoryId: string
+          message?: string | null
+        }
+      ) => Promise<CatalogIpcResult<string>>
+      cancelJob: (jobId: string) => Promise<CatalogIpcResult<void>>
+      clearCache: (key?: string | null) => Promise<CatalogIpcResult<void>>
+      getActive: () => Promise<CatalogIpcResult<string | null>>
+      setActive: (key: string | null) => Promise<CatalogIpcResult<void>>
+      pickFiles: () => Promise<CatalogIpcResult<string[]>>
+      pickFolder: () => Promise<CatalogIpcResult<string | null>>
+      pickCaFile: () => Promise<CatalogIpcResult<string | null>>
+      /** 订阅主进程推来的失效 / 状态 / 作业进度；返回取消订阅 */
+      onEvent: (listener: (event: CatalogLibraryEvent) => void) => () => void
     }
     /**
      * Agent V3 —— 扁平单 agent + pi 内核。

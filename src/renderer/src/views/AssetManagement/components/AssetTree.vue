@@ -21,8 +21,13 @@
 
         <div
           class="shortcut-item"
-          :class="{ selected: selectedShortcut === 'favorites' }"
-          @click="handleShortcutClick('favorites')"
+          :class="{
+            selected: selectedShortcut === 'favorites',
+            disabled: !libraryCaps.canFavorite
+          }"
+          :title="libraryCaps.canFavorite ? undefined : capabilityReason('canFavorite')"
+          :aria-disabled="!libraryCaps.canFavorite"
+          @click="libraryCaps.canFavorite && handleShortcutClick('favorites')"
         >
           <span class="shortcut-label">{{ t('assetLib.shortcuts.favorites') }}</span>
           <span class="shortcut-badge">{{ favoriteCount }}</span>
@@ -36,8 +41,13 @@
         <div
           v-if="supportsDeletedShortcut"
           class="shortcut-item"
-          :class="{ selected: selectedShortcut === 'recent' || selectedShortcut === 'deleted' }"
-          @click="handleShortcutClick('recent')"
+          :class="{
+            selected: selectedShortcut === 'recent' || selectedShortcut === 'deleted',
+            disabled: !libraryCaps.hasTrash
+          }"
+          :title="libraryCaps.hasTrash ? undefined : capabilityReason('hasTrash')"
+          :aria-disabled="!libraryCaps.hasTrash"
+          @click="libraryCaps.hasTrash && handleShortcutClick('recent')"
         >
           <span class="shortcut-label">{{ t('assetLib.shortcuts.recent') }}</span>
         </div>
@@ -52,19 +62,17 @@
       </div>
 
       <div v-show="!syncCollapsed" class="sync-list">
+        <!-- 网盘是本地库的导入来源；服务器库不从这里进文件（拖进来或用导入按钮，经 Lore 提交） -->
         <div
+          v-for="drive in ['baiduyun', 'webdav'] as const"
+          :key="drive"
           class="sync-item"
-          :class="{ selected: selectedShortcut === 'baiduyun' }"
-          @click="handleShortcutClick('baiduyun')"
+          :class="{ selected: selectedShortcut === drive, disabled: !libraryCaps.cloudDrives }"
+          :title="libraryCaps.cloudDrives ? undefined : capabilityReason('cloudDrives')"
+          :aria-disabled="!libraryCaps.cloudDrives"
+          @click="libraryCaps.cloudDrives && handleShortcutClick(drive)"
         >
-          <span class="sync-label">{{ t('assetLib.network.baiduyun') }}</span>
-        </div>
-        <div
-          class="sync-item"
-          :class="{ selected: selectedShortcut === 'webdav' }"
-          @click="handleShortcutClick('webdav')"
-        >
-          <span class="sync-label">{{ t('assetLib.network.webdav') }}</span>
+          <span class="sync-label">{{ t(`assetLib.network.${drive}`) }}</span>
         </div>
       </div>
     </div>
@@ -77,7 +85,13 @@
       <div class="folder-search">
         <a-input
           v-model:value="searchQuery"
-          :placeholder="t('assetLib.folder.searchPlaceholder')"
+          :placeholder="
+            libraryCaps.folderSearch
+              ? t('assetLib.folder.searchPlaceholder')
+              : capabilityReason('folderSearch')
+          "
+          :disabled="!libraryCaps.folderSearch"
+          :title="libraryCaps.folderSearch ? undefined : capabilityReason('folderSearch')"
           allow-clear
           size="small"
         >
@@ -180,6 +194,14 @@
       v-model:open="importProjectModalVisible"
       :source="importProjectSource"
     />
+    <!-- 服务器库：同一个"导入到工程"菜单项，经 lore 取文件再复制进工程 -->
+    <CatalogDownloadModal
+      v-if="libraryStore.activeServerKey"
+      :open="serverDownloadOpen"
+      :library-key="libraryStore.activeServerKey"
+      :items="serverDownloadItems"
+      @close="serverDownloadOpen = false"
+    />
 
     <!-- 添加文件夹对话框 -->
     <AppModal
@@ -256,6 +278,10 @@ import {
 import TagSelectorModal from '@renderer/components/TagSelector/TagSelectorModal.vue'
 import ColorPickerModal from './modals/ColorPickerModal.vue'
 import ImportToProjectModal from './modals/ImportToProjectModal.vue'
+import CatalogDownloadModal from '../catalog/CatalogDownloadModal.vue'
+import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
+import { getActiveLibrarySource } from '../data/activeLibrarySource'
+import type { CatalogAssetSummary } from '@core/shared/catalogLibrary'
 
 import icPluginsIcon from '@renderer/assets/icon/ic_plugins.svg'
 import { toLocalResourceUrl } from '@renderer/utils/localResource'
@@ -369,7 +395,7 @@ const collectSearchFoldersWithAncestors = async (
     if (!folderKey || folderKey === 'ALL') return undefined
     const cached = folderMap.get(folderKey)
     if (cached) return cached
-    const folder = await assetFolderAPI.getByKey(folderKey)
+    const folder = await getActiveLibrarySource().folders.getByKey(folderKey)
     rememberFolder(folder)
     return folder
   }
@@ -403,12 +429,13 @@ const runGlobalFolderSearch = async (keyword: string, requestId: number): Promis
   if (!keyword) return
   searchLoading.value = true
   try {
-    const matches = await assetFolderAPI.search({
+    // 走数据源：本地库查文件夹表；服务器库调按文件夹名搜索（服务端没有时这个框是禁用的）
+    const matches = (await getActiveLibrarySource().search.folders({
       keyword,
       sortBy: 'folderName',
       sortOrder: 'asc',
       limit: 300
-    })
+    } as never)) as unknown as AssetFolder[]
     const folders = await collectSearchFoldersWithAncestors(matches || [])
     if (requestId !== searchRequestId) return
 
@@ -486,6 +513,53 @@ const favoriteCount = computed(() => favoriteStore.totalCount)
 const selectedShortcut = ref<string | null>(null)
 const selectionStore = useAssetSelectionStore()
 
+// 当前数据源能做什么（服务器库时一些本地库功能在原位禁用，并给一句原因）
+const libraryStore = useAssetLibraryStore()
+const libraryCaps = computed(() => libraryStore.capabilities)
+// 换了库（本地 ↔ 服务器）：收藏数跟着换 —— 服务器库的收藏是另一份，记在本机
+watch(
+  () => libraryStore.source,
+  () => void favoriteStore.refreshTotalCount(1, currentVault.value?.id)
+)
+const capabilityReason = (name: string): string => {
+  const key = libraryCaps.value.reasons[name]
+  return key ? t(key) : ''
+}
+const serverDownloadOpen = ref(false)
+const serverDownloadItems = ref<CatalogAssetSummary[]>([])
+
+/** 服务器库的文件夹"下载到工程"：列出其下的资产（有上限），交给下载对话框 */
+const openServerFolderDownload = async (folderKey: string): Promise<void> => {
+  const items: CatalogAssetSummary[] = []
+  for (let offset = 0; offset < 2000; offset += 200) {
+    const rows = (await getActiveLibrarySource().search.assets({
+      folderKey,
+      includeSubfolders: true,
+      limit: 200,
+      offset
+    })) as Array<Record<string, unknown>>
+    for (const row of rows) {
+      items.push({
+        id: Number(row.catalogId),
+        path: String(row.catalogPath ?? ''),
+        name: String(row.name ?? ''),
+        dirId: Number(row.catalogDirId ?? 0),
+        repository: String(row.catalogRepository ?? ''),
+        ext: String(row.ext ?? ''),
+        class: (row.className as string) ?? null,
+        engine: (row.engineVersion as string) ?? null,
+        size: Number(row.fileSize ?? 0),
+        modifiedMs: 0,
+        tags: []
+      })
+    }
+    if (rows.length < 200) break
+  }
+  if (items.length === 0) return
+  serverDownloadItems.value = items
+  serverDownloadOpen.value = true
+}
+
 // 折叠状态
 const shortcutsCollapsed = ref(false)
 const syncCollapsed = ref(false)
@@ -546,6 +620,26 @@ const contextMenuItems = computed<MenuItem[]>(() => {
   // 检查当前右键节点是否为 ALL 目录（ALL 目录不允许重命名和删除）
   const isAllFolder = currentRightClickNode.value === 'ALL'
 
+  // 不能改结构的库（服务器库）：只留"导入到工程"，走服务器下载
+  if (!libraryCaps.value.canEditStructure) {
+    const serverItems: MenuItem[] = [
+      {
+        key: 'import-to-project',
+        label: t('assetLib.contextMenu.importToProject'),
+        icon: PhDownloadSimple,
+        disabled: isAllFolder || !currentRightClickNode.value || !libraryCaps.value.canSendToProject
+      }
+    ]
+    // 文件夹颜色：服务器库写成注释，要 writer 权限
+    if (libraryCaps.value.folderColor && !isAllFolder)
+      serverItems.push({
+        key: 'setColor',
+        label: t('assetLib.contextMenu.setColor', '修改颜色'),
+        icon: PhPalette
+      })
+    return serverItems
+  }
+
   const items: MenuItem[] = [
     {
       key: 'import-to-project',
@@ -599,7 +693,7 @@ const contextMenuItems = computed<MenuItem[]>(() => {
   //   )
   // }
 
-  if (currentVault.value?.vaultType === 'network') {
+  if (libraryCaps.value.vaultFeatures && currentVault.value?.vaultType === 'network') {
     items.push(
       {
         key: 'divider-ctx-network',
@@ -687,11 +781,9 @@ const handleColorPickerConfirm = async (color: string | null): Promise<void> => 
   const { key } = colorPickerTarget.value
 
   try {
-    // 更新文件夹颜色
-    const result = await (window as any).api.database.assetFolder.update(key, { color })
-    // IPC 返回格式：{ success: boolean, data: boolean, error?: string }
-    // data 表示数据库是否有行被更新，success 表示操作是否成功执行
-    const ok = result?.success === true || result?.updated === true
+    // 更新文件夹颜色：走数据源（本地库改文件夹记录，服务器库写注释）
+    const result = await getActiveLibrarySource().folders.setColor(key, color)
+    const ok = result.ok
     if (ok) {
       // 实时更新树节点颜色（不需要刷新整个树或文件列表）
       assetContext.updateTreeNodeColor(key, color)
@@ -848,6 +940,10 @@ const handleContextMenuClick = async (key: string, _item: MenuItem) => {
     case 'import-to-project': {
       const folderKey = currentRightClickNode.value
       if (!folderKey || folderKey === 'ALL') break
+      if (!libraryCaps.value.canEditStructure) {
+        await openServerFolderDownload(folderKey)
+        break
+      }
       const node = findNodeByKey(folderKey)
       if (!node) break
       importProjectSource.value = { ...node, id: folderKey, name: node.title }
@@ -1754,6 +1850,12 @@ onMounted(() => {
           }
         }
 
+        // 标签和计数各有自己的文字色，得分别压成禁用色才看得出点不了
+        &.disabled .shortcut-label,
+        &.disabled .shortcut-badge {
+          color: var(--color-text-disabled);
+        }
+
         &.selected {
           background: var(--color-bg-selected);
           color: var(--color-text-primary);
@@ -1861,6 +1963,18 @@ onMounted(() => {
           .sync-label {
             color: var(--color-text-primary);
           }
+        }
+
+        &.disabled {
+          cursor: not-allowed;
+
+          &:hover {
+            background: transparent;
+          }
+        }
+
+        &.disabled .sync-label {
+          color: var(--color-text-disabled);
         }
 
         .sync-label {

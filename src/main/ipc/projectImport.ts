@@ -363,6 +363,19 @@ const copyUnrealPackageFiles = async (
 }
 
 /**
+ * 把一个包（主文件 + .uexp/.ubulk 等分片）复制到目标位置，给服务端资产库的下载用
+ * （src/main/libraryV3：文件先经 lore 物化到影子副本，再走这里复制进工程）。
+ * 返回实际复制的文件数；目标已存在且大小相同的跳过。
+ */
+export async function copyUnrealPackage(
+  sourceSeedPath: string,
+  targetSeedPath: string
+): Promise<number> {
+  const outcome = await copyUnrealPackageFiles(sourceSeedPath, targetSeedPath, '', [])
+  return outcome.copiedOrQueued
+}
+
+/**
  * 一次「整个文件夹导入工程」共用的状态。
  *
  * 不带这个 session 时，每个资产都会新建一个依赖解析器：500 个动画共用的那副骨骼

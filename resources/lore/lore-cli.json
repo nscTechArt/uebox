@@ -1,0 +1,17 @@
+{
+  "$comment": "Pinned official Lore CLI (Epic Games, MIT). The binary is not in git: `node scripts/fetch-lore-cli.mjs` places it next to this file after checking the SHA-256 below. Keep the version equal to the one pinned by the asset server (unreal-box-assets-server docs/compatibility/lore.json).",
+  "name": "lore",
+  "version": "lore 0.9.0+783",
+  "release": "v0.9.0",
+  "license": "MIT",
+  "source": "https://github.com/EpicGames/lore/tree/3c8f346435aab021dd5da3a048ada7c8fb647385",
+  "platforms": {
+    "win32-x64": {
+      "file": "lore.exe",
+      "sha256": "48f3959a8a76c693211f21bdffb21e94c1309a90351700526e46a7e16cd7886d",
+      "archive": "lore-v0.9.0-x86_64-pc-windows-msvc.zip",
+      "archiveSha256": "a75728486e8c93e1dd0eba4fb428f701cb17150a9ec00fac4be634146e793f22",
+      "url": "https://github.com/EpicGames/lore/releases/download/v0.9.0/lore-v0.9.0-x86_64-pc-windows-msvc.zip"
+    }
+  }
+}

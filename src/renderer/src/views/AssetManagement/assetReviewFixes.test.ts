@@ -192,6 +192,11 @@ describe('asset review fixes', () => {
         sortConfig: { sortBy: 'assetName', sortOrder: 'asc' },
         assetFolderAPI: { getChildCount: async () => 0 },
         assetDataAPI: { getCountByFolderKey: async () => 5000 },
+        // 列表的计数走数据源接缝（本地库就是上面这两个 API）
+        getActiveLibrarySource: () => ({
+          folders: { getChildCount: async () => 0 },
+          assets: { getCountByFolderKey: async () => 5000 }
+        }),
         getSubFolders: vi.fn(),
         loadAssetsByFolder,
         message,
@@ -257,6 +262,9 @@ describe('asset review fixes', () => {
         selectedTagIds,
         // 详细说明的关联，和文件夹那一侧的同一套「换目标先作废」状态
         assetNoteId: ref(null),
+        // 本地库：标签和备注走本地标签库（数据源接缝里没有服务端注释）
+        libraryCaps: ref({ tagModel: 'registry' }),
+        getActiveLibrarySource: () => ({ annotations: null }),
         folderNoteContent: ref(''),
         folderNoteId: ref(null),
         window: {

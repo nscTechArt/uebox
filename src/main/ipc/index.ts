@@ -37,6 +37,7 @@ import { registerScreenshotIPC } from './screenshot'
 import { registerScreenRecorderIPC } from './screenRecorder'
 import { registerNetworkVaultHandlers } from './networkVault'
 import { registerNetworkVaultV2Handlers } from './networkVaultV2'
+import { registerCatalogLibraryIPC } from './catalogLibrary'
 import { registerDiagnosticsIPC } from './diagnostics'
 // 导入assetImport以注册其IPC处理器
 import './assetImport'
@@ -165,6 +166,9 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 注册 V2 网络协作库 IPC
   registerNetworkVaultV2Handlers()
+
+  // 服务端资产库（新后端 asset-catalog：在线分页，不做本地镜像）
+  registerCatalogLibraryIPC()
 
   // Register diagnostics and import recovery IPC
   registerDiagnosticsIPC()

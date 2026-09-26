@@ -512,11 +512,11 @@
     "warnings": 0
   },
   "src/renderer/src/views/AssetManagement/components/AssetFileList.vue": {
-    "errors": 217,
+    "errors": 216,
     "warnings": 0
   },
   "src/renderer/src/views/AssetManagement/components/AssetTree.vue": {
-    "errors": 21,
+    "errors": 20,
     "warnings": 0
   },
   "src/renderer/src/views/AssetManagement/components/Baiduyun/BaiduyunDetailsPanel.vue": {

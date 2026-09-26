@@ -73,7 +73,8 @@ export function checkPackagedContent(asarPath) {
     'licenses/GPL-3.0.txt',
     'licenses/MPL-2.0.txt',
     'licenses/LGPL-2.1.txt',
-    'licenses/libvips-Windows-NOTICES.md'
+    'licenses/libvips-Windows-NOTICES.md',
+    'licenses/Lore-MIT.txt'
   ]) {
     if (!packaged.has(name)) errors.push(`app.asar 缺少发行许可证: ${name}`)
     else if (!readArchiveFile(asarPath, name).length) errors.push(`许可证文件为空: ${name}`)

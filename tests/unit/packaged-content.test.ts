@@ -92,7 +92,8 @@ const required = [
   'licenses/GPL-3.0.txt',
   'licenses/MPL-2.0.txt',
   'licenses/LGPL-2.1.txt',
-  'licenses/libvips-Windows-NOTICES.md'
+  'licenses/libvips-Windows-NOTICES.md',
+  'licenses/Lore-MIT.txt'
 ]
 async function archive(name: string, additions: string[] = [], omitted?: string): Promise<string> {
   const source = join(temp, name)

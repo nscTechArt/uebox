@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { favoriteAPI } from '@renderer/api/favorite'
 import { useVaultStore } from './vaultStore'
+import { getActiveLibrarySource } from '@renderer/views/AssetManagement/data/activeLibrarySource'
 
 export const useFavoriteStore = defineStore('favorite', {
   state: () => ({
@@ -8,13 +8,14 @@ export const useFavoriteStore = defineStore('favorite', {
     loading: false as boolean
   }),
   actions: {
-    async refreshTotalCount(userId?: number, vaultId?: string): Promise<void> {
+    async refreshTotalCount(_userId?: number, vaultId?: string): Promise<void> {
       this.loading = true
       try {
         // 如果未传入 vaultId，则使用当前保管库
         const vaultStore = useVaultStore()
         const activeVaultId = vaultId || vaultStore.currentVault?.id || null
-        const count = await favoriteAPI.getFavoriteCount(userId, activeVaultId || undefined)
+        // 资产库页面在看服务器库时，数的是那个库在本机记的收藏
+        const count = await getActiveLibrarySource().favorites.count(activeVaultId || undefined)
         this.totalCount = typeof count === 'number' ? count : 0
       } catch (err) {
         console.error('刷新收藏总数失败:', err)

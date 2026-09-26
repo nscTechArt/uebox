@@ -1385,6 +1385,201 @@ export default {
     searchPlaceholder: '输入搜索内容...',
     legacyEventGraph: '从旧版导入的事件图表'
   },
+  catalogLibrary: {
+    switcher: {
+      badge: '服务器',
+      state: {
+        online: '已连接',
+        offline: '连不上服务器',
+        signedOut: '需要重新登录',
+        unknown: '未连接'
+      },
+      signIn: '重新登录',
+      clearCache: '清空本机缓存',
+      cacheCleared: '已清空这个库在本机缓存的页',
+      remove: '从列表移除'
+    },
+    create: {
+      title: '服务器资产库',
+      desc: '连接团队的资产服务器，在线浏览，不在本机建库',
+      hint: '文件留在服务器上：浏览按页取，下载和导入经 Lore 进行。'
+    },
+    reasons: {
+      structure: '服务器库的结构由服务端管理',
+      favorite: '收藏只对本地库生效',
+      favoriteFilter: '服务器库的收藏记在本机，请在左侧「我的收藏」里看',
+      cloudDrives: '网盘是本地库的导入来源；服务器库请把文件拖进来导入',
+      tagInUse: '这个标签还挂在 {count} 个资产上，先在资产上去掉它',
+      tagFavorite: '服务器库的标签没有「常用」',
+      trash: '服务器库的回收站由服务端保留，暂不能在盒子里查看',
+      scan: '服务器库不需要扫描，变化会自动推过来',
+      folderSearch: '服务器还不支持按文件夹名搜索',
+      dependencyGraph: '服务器库的依赖图还没有接入，先看上面的依赖列表',
+      tagManagement: '服务器还没有标签注册表',
+      sortByType: '服务器还不支持按类型排序',
+      nativeDrag: '文件还在服务器上：先右键"导入到工程"',
+      richNotes: '服务器库只支持一句话备注',
+      filterUnsupported: '服务器还不支持这个筛选',
+      annotations: '只有写权限的成员能改标签和备注',
+      lore: '导入和下载需要 Lore 地址和随包的 lore.exe',
+      offline: '连不上服务器',
+      folderAnnotations: '服务器库的文件夹没有标签和备注。'
+    },
+    unclaimed: {
+      notice: '有 {count} 条标签 / 备注的文件已不在库里（删除，或移动后没配上）',
+      show: '查看',
+      hide: '收起',
+      claimTo: '认领到 {name}',
+      noSuggestion: '没有相同内容的文件',
+      claimed: '已挪到 {name}',
+      claimFailed: '认领失败：可能没有这个仓库的写权限'
+    },
+    filter: {
+      allEngines: '全部引擎',
+      enginesWithCount: '{count} 个引擎版本',
+      anyTag: '不限标签',
+      noTags: '这里的资产还没有标签'
+    },
+    add: {
+      title: '添加服务器资产库',
+      addressLead: '填服务器地址，或直接粘贴管理员发的邀请链接。',
+      address: '服务器地址或邀请链接',
+      addressPlaceholder: 'https://assets.studio.lan:8084',
+      fingerprint: '部署 CA 指纹（SHA-256，邀请链接里有）',
+      fingerprintPlaceholder: '可留空：证书能被系统信任时不需要',
+      caFile: '导入 CA 文件',
+      caLoaded: '已载入 CA 文件',
+      trustHint: '指纹或 CA 文件由管理员提供，程序逐字比对，对不上就不连。',
+      next: '连接',
+      back: '上一步',
+      trustPinned: '证书已按指纹核对，只对这台服务器信任该部署 CA。',
+      trustSystem: '证书由系统信任库验证通过。',
+      trustLoopback: '本机地址，明文连接只允许在本机使用。',
+      authMode: '登录方式',
+      mode: {
+        password: '账号密码',
+        invite: '邀请码',
+        token: '身份令牌'
+      },
+      member: '成员名',
+      password: '密码',
+      inviteCode: '邀请码',
+      newPassword: '设置密码（至少 8 位）',
+      token: '身份令牌',
+      tokenPlaceholder: '粘贴管理员或实验环境给的令牌',
+      tokenHint: '令牌加密保存在本机；过期后要重新粘贴。',
+      loreRemote: 'Lore 地址（导入和下载用，可留空）',
+      signIn: '登录',
+      chooseLead: '以 {member} 的身份登录。选择要添加的库：',
+      chooseLeadAnonymous: '已登录。选择要添加的库：',
+      noLibraries: '这个账号在该服务器上没有可见的库。',
+      libraryCounts: '{assets} 个资产 · {state}',
+      addLibraries: '添加 {count} 个库'
+    },
+    signIn: {
+      title: '重新登录 {server}'
+    },
+    view: {
+      signedOut: '服务器库的登录已失效，重新登录后继续。',
+      offlineBanner: '连不上服务器，正在显示看过的页；搜索和导入暂不可用。',
+      remove: '从列表移除',
+      removeTitle: '从本机移除"{name}"？',
+      removeContent: '只移除本机的连接和缓存，服务器上的库不受影响。'
+    },
+    detail: {
+      addTagPlaceholder: '输入标签名，回车添加',
+      editFailed: '修改没有保存：{reason}'
+    },
+    download: {
+      title: '导入 {count} 个资产到工程',
+      lead: '经 Lore 取文件，连同依赖复制到目标位置（Content/… 对应 /Game/…）。',
+      more: '还有 {count} 个',
+      target: '放到',
+      targets: {
+        project: 'UE 工程',
+        folder: '文件夹'
+      },
+      pickProject: '选择工程',
+      noProjects: '工程库里还没有工程。',
+      pickFolder: '选择文件夹',
+      noFolder: '未选择',
+      withDependencies: '连同依赖一起',
+      closure: '连同依赖共 {count} 个资产，约 {size}。',
+      closureMissing: '另有 {count} 个依赖库里没有。',
+      closureIncomplete: '依赖层级很深，可能还有更远的没算进来。',
+      hint: '文件是复制进去的，在工程里改动不会影响服务器。',
+      start: '开始'
+    },
+    import: {
+      title: '导入到服务器资产库',
+      lead: '以你的身份提交到 {folder}。',
+      pickFiles: '选择文件',
+      picked: '已选 {count} 个文件',
+      repository: '提交到仓库',
+      pickRepository: '选择仓库',
+      message: '提交说明',
+      messagePlaceholder: '可留空',
+      hint: '.uasset / .umap 旁边同名的 .uexp、.ubulk 会一起提交。推送完成后，服务端索引好就会出现在列表里。',
+      start: '开始导入'
+    },
+    jobs: {
+      download: '从服务器库导入到工程',
+      import: '导入到服务器库',
+      phase: {
+        preparing: '准备中',
+        syncing: '同步中',
+        copying: '复制中',
+        staging: '暂存中',
+        committing: '提交中',
+        pushing: '推送中',
+        materialising: '取文件中',
+        done: '完成',
+        failed: '失败'
+      },
+      failedDetail: '失败：{reason}',
+      downloadDone: '已放进目标位置：{count} 个文件',
+      importDone: '已提交到服务器库：{count} 个文件'
+    },
+    errors: {
+      unknown: '操作没有完成。',
+      'invalid-address': '地址格式不对。',
+      'insecure-http': '明文 http 只允许连本机；其他机器请用 https。',
+      insecure: '这个地址不安全，已拒绝连接。',
+      unreachable: '连不上这个地址',
+      'untrusted-certificate': '证书不被信任。向管理员要邀请链接（带指纹）或 CA 文件。',
+      'fingerprint-mismatch': '证书指纹对不上，可能连到了别的服务器，已拒绝连接。',
+      'ca-file-not-ca': '这个文件不是 CA 证书。',
+      'ca-file-not-pem': '这个文件不是 PEM 格式的证书。',
+      'not-a-catalog': '这个地址不是虚幻盒子资产服务器。',
+      'no-member-surface': '这台服务器不支持账号登录，请粘贴身份令牌。',
+      'missing-password': '请填写密码。',
+      'missing-token': '请粘贴身份令牌。',
+      'signed-out': '登录已失效，请重新登录。',
+      unauthorized: '账号、密码或令牌不对。',
+      forbidden: '没有权限。',
+      'not-found': '找不到，或你没有权限查看。',
+      'route-missing': '这台服务器还不支持这个功能。',
+      network: '网络出错',
+      timeout: '服务器没有及时响应。',
+      tls: '安全连接失败',
+      unavailable: '服务器暂时不可用。',
+      throttled: '尝试太频繁，请稍后再试。',
+      'lore-missing': 'lore.exe 不可用',
+      'no-lore-remote': '这台服务器没有配置 Lore 地址。',
+      'bad-remote': 'Lore 地址格式不对（应以 lores:// 开头）。',
+      'port-blocked':
+        '{target} 没有回应，多半是防火墙挡住了。请管理员在服务器上放行：TCP 8084（登录）、TCP 8083（资产目录）、TCP 和 UDP 8441（Lore 传文件）。',
+      'port-closed':
+        '{target} 拒绝连接：服务器上这个端口没有服务在运行（服务没启动，或端口号不对）。',
+      'host-not-found': '找不到主机 {target}：检查地址拼写，或直接用服务器的 IP。',
+      'host-unreachable':
+        '到不了 {target}：检查这台电脑和服务器是否在同一网络（或 VPN 是否已连上）。',
+      'tls-handshake':
+        '{target} 在建立安全连接前就断开了：这个端口可能不是 HTTPS 服务，或者中间有防火墙 / 代理软件拦截（「全局代理」「TUN 模式」会接管局域网地址，请把服务器地址设为直连）。',
+      'cert-name-mismatch':
+        '证书是这台服务器的，但上面没有你填的地址（{target}）。请改用证书上的名字连接，或请管理员把这个地址加进证书。'
+    }
+  },
   common: {
     close: '关闭',
     confirm: '确认',

@@ -28,6 +28,8 @@ interface Props {
   selected: boolean
   renaming: boolean
   renameValue: string
+  /** 标签库没有「常用」（服务器库）：不显示星标 */
+  hideFavorite?: boolean
 }
 
 const props = defineProps<Props>()
@@ -81,6 +83,7 @@ const handleCancel = (): void => {
     @dragend="emit('dragend')"
   >
     <button
+      v-if="!hideFavorite"
       type="button"
       class="tag-chip__star"
       :class="{ 'tag-chip__star--on': tag.is_favorite }"

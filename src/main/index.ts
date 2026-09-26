@@ -519,6 +519,16 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
       stream: true
     }
+  },
+  {
+    // 服务端资产库的缩略图（按内容哈希缓存在本机磁盘，见 src/main/libraryV3/previews.ts）
+    scheme: 'uebox-preview',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
   }
 ])
 
@@ -631,6 +641,16 @@ appReady?.then(async () => {
     } catch (error) {
       logger.warn('[uebox-asset] proxy failed:', error)
       return new Response('Asset proxy failed', { status: 502 })
+    }
+  })
+
+  protocol.handle('uebox-preview', async (request) => {
+    try {
+      const { handlePreviewRequest } = await import('./libraryV3')
+      return await handlePreviewRequest(request)
+    } catch (error) {
+      logger.warn('[uebox-preview] failed:', error)
+      return new Response('Preview failed', { status: 502 })
     }
   })
 
