@@ -114,9 +114,12 @@ channel marker file). There is exactly one update source: **public GitHub Releas
 `updateGithubRepo` in `package.json` to `owner/repo` and the build script injects the publish
 config and emits `latest.yml`; leave it empty and you get a package with no update source at all —
 it makes no update request on boot, which is also what anyone who clones and builds this repo
-gets. To release, upload `dist/`'s `.exe`, `.blockmap`, and `latest.yml` to that repository's
-Release; there is no other sync step. Runtime resolution lives in
-`src/main/services/updater/updateFeed.ts`.
+gets. Update checks read `dist/`'s `.exe`, `.blockmap`, and `latest.yml` from that repository's
+Release. Runtime resolution lives in `src/main/services/updater/updateFeed.ts`.
+
+**A release is more than the GitHub Release**: the website's download button reads the R2 mirror
+(`pnpm release:dl`), and a changed plugin is also released on its own repository. The full
+checklist is [docs/发版流程.md](docs/发版流程.md) — follow it end to end.
 
 **Do not** make the gate green by skipping, deleting, or `.skip`-ing tests, by widening ESLint
 ignores, or by loosening the coverage threshold. If a gate is genuinely wrong, say so in the PR
