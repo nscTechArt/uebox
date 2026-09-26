@@ -2,7 +2,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { CrashSummary } from './crashReport'
-import { crashNotice } from './notice'
 import type { UnrealProcessRow } from './processes'
 import {
   EditorCrashWatch,
@@ -53,7 +52,6 @@ const REPORT: CrashSummary = {
 interface Harness {
   deps: CrashWatchDeps
   watch: EditorCrashWatch
-  crashes: EditorCrash[]
   advance: (ms: number) => void
 }
 
@@ -68,7 +66,6 @@ function harness(
   let time = 10_000
   let call = 0
   const snapshots = options.processes ?? [[reporterRow(200, 100)]]
-  const crashes: EditorCrash[] = []
   const deps: CrashWatchDeps = {
     listProcesses: vi.fn(async () => snapshots[Math.min(call++, snapshots.length - 1)]),
     findFreshCrash: vi.fn(async () => (options.report === undefined ? REPORT : options.report)),
@@ -82,7 +79,6 @@ function harness(
     openProject: vi.fn(async () => options.openError),
     killProcess: vi.fn(() => true),
     autoRecover: () => options.autoRecover ?? true,
-    onCrash: (crash) => crashes.push(crash),
     now: () => time,
     sleep: async (ms) => {
       time += ms
@@ -92,32 +88,64 @@ function harness(
   return {
     deps,
     watch,
-    crashes,
     advance: (ms: number) => {
       time += ms
     }
   }
 }
 
+/** Agent 的命令因断线失败 → 来问原因 → 决定重开 */
+async function crashAndRelaunch(
+  h: Harness,
+  editor: WatchedEditor = EDITOR
+): Promise<{ text: string | undefined; crash: EditorCrash | null }> {
+  h.watch.track(editor)
+  h.watch.disconnected(editor.connectionId, false)
+  const text = await h.watch.explain(editor.connectionId)
+  const crash = await h.watch.relaunch(editor.projectDir)
+  return { text, crash }
+}
+
 describe('认崩溃', () => {
-  it('编辑器没了、有崩溃报告：关掉报告窗口，备份存档记录，重开工程', async () => {
-    const { deps, watch, crashes } = harness()
+  it('编辑器崩了：告诉 Agent 原因，问它要不要重开，自己什么都不动', async () => {
+    const { deps, watch } = harness()
     watch.track(EDITOR)
     watch.disconnected('conn-1', false)
 
     const text = await watch.explain('conn-1')
 
-    expect(deps.killProcess).toHaveBeenCalledWith(200)
-    expect(deps.stashRestoreData).toHaveBeenCalledWith(EDITOR.projectDir)
-    expect(deps.openProject).toHaveBeenCalledWith(EDITOR.uprojectPath)
-    expect(crashes).toHaveLength(1)
-    expect(crashes[0]).toMatchObject({ relaunch: 'relaunched', reporterClosed: true })
-    // 给模型的：原因、下一步、别原样重试、备份在哪
+    expect(deps.killProcess).not.toHaveBeenCalled()
+    expect(deps.stashRestoreData).not.toHaveBeenCalled()
+    expect(deps.openProject).not.toHaveBeenCalled()
     expect(text).toMatch(/EXCEPTION_ACCESS_VIOLATION/)
-    expect(text).toMatch(/wait_seconds=180/)
+    expect(text).toMatch(/relaunch_crashed_editor=true/)
     expect(text).toMatch(/不要用同样的参数重试/)
-    expect(text).toMatch(/UEBoxCrashRecovery/)
     expect(watch.recent()).toHaveLength(1)
+    expect(watch.recent()[0].relaunch).toBe('not_requested')
+  })
+
+  it('用户自己弄崩的（没有 Agent 来问）：不留记录，也重开不了', async () => {
+    const { deps, watch } = harness()
+    watch.track(EDITOR)
+    watch.disconnected('conn-1', false)
+    await vi.waitFor(() => expect(deps.findFreshCrash).toHaveBeenCalled())
+
+    expect(watch.recent()).toHaveLength(0)
+    expect(await watch.relaunch(EDITOR.projectDir)).toBeNull()
+    expect(deps.openProject).not.toHaveBeenCalled()
+  })
+
+  it('Agent 要求重开：关掉报告窗口，备份存档记录，重开工程', async () => {
+    const h = harness()
+    const { crash } = await crashAndRelaunch(h)
+
+    expect(h.deps.killProcess).toHaveBeenCalledWith(200)
+    expect(h.deps.stashRestoreData).toHaveBeenCalledWith(EDITOR.projectDir)
+    expect(h.deps.openProject).toHaveBeenCalledWith(EDITOR.uprojectPath)
+    expect(crash).toMatchObject({ relaunch: 'relaunched', reporterClosed: true })
+    // 重开过的不再开第二次
+    await h.watch.relaunch(EDITOR.projectDir)
+    expect(h.deps.openProject).toHaveBeenCalledTimes(1)
   })
 
   it('插件先报过 project.closed 的是正常关闭，连进程都不查', async () => {
@@ -130,13 +158,13 @@ describe('认崩溃', () => {
   })
 
   it('进程被人结束（没有报告、也没有报告程序守着）不算崩溃，不重开', async () => {
-    const { deps, watch, crashes } = harness({ processes: [[]], report: null })
+    const { deps, watch } = harness({ processes: [[]], report: null })
     watch.track(EDITOR)
     watch.disconnected('conn-1', false)
 
     expect(await watch.explain('conn-1')).toBeUndefined()
     expect(deps.openProject).not.toHaveBeenCalled()
-    expect(crashes).toHaveLength(0)
+    expect(watch.recent()).toHaveLength(0)
   })
 
   /**
@@ -177,85 +205,67 @@ describe('认崩溃', () => {
   })
 })
 
-describe('收拾现场的闸', () => {
-  it('设置里关了自动重开：报告窗口留给用户，工程不开', async () => {
-    const { deps, watch } = harness({ autoRecover: false })
-    watch.track(EDITOR)
-    watch.disconnected('conn-1', false)
+describe('重开的闸', () => {
+  it('设置里关了：报告窗口留给用户，工程不开', async () => {
+    const h = harness({ autoRecover: false })
+    const { crash } = await crashAndRelaunch(h)
 
-    const text = await watch.explain('conn-1')
-
-    expect(deps.killProcess).not.toHaveBeenCalled()
-    expect(deps.openProject).not.toHaveBeenCalled()
-    expect(deps.stashRestoreData).not.toHaveBeenCalled()
-    expect(text).toMatch(/设置里关掉了/)
+    expect(h.deps.killProcess).not.toHaveBeenCalled()
+    expect(h.deps.openProject).not.toHaveBeenCalled()
+    expect(h.deps.stashRestoreData).not.toHaveBeenCalled()
+    expect(crash?.relaunch).toBe('disabled')
   })
 
   it('5 分钟内重开过又崩了：不再重开，免得一打开就崩地循环', async () => {
-    const { deps, watch, advance } = harness()
-    watch.track(EDITOR)
-    watch.disconnected('conn-1', false)
-    await watch.explain('conn-1')
+    const h = harness()
+    await crashAndRelaunch(h)
 
-    advance(60_000)
-    watch.track({ ...EDITOR, connectionId: 'conn-2', connectedAt: 70_000 })
-    watch.disconnected('conn-2', false)
-    const text = await watch.explain('conn-2')
+    h.advance(60_000)
+    const { crash } = await crashAndRelaunch(h, {
+      ...EDITOR,
+      connectionId: 'conn-2',
+      connectedAt: 70_000
+    })
 
-    expect(deps.openProject).toHaveBeenCalledTimes(1)
-    expect(text).toMatch(/没有再开/)
+    expect(h.deps.openProject).toHaveBeenCalledTimes(1)
+    expect(crash?.relaunch).toBe('crash_loop')
   })
 
   it('用户已经自己开回来了（点了 Send and Restart）：不再开第二个', async () => {
-    const { deps, watch } = harness({
+    const h = harness({
       processes: [[reporterRow(200, 100)], [{ ...editorRow, pid: 300 }, reporterRow(200, 100)]]
     })
-    watch.track(EDITOR)
-    watch.disconnected('conn-1', false)
+    const { crash } = await crashAndRelaunch(h)
 
-    const text = await watch.explain('conn-1')
-
-    expect(deps.openProject).not.toHaveBeenCalled()
-    expect(text).toMatch(/已经重新开起来了/)
+    expect(h.deps.openProject).not.toHaveBeenCalled()
+    expect(crash?.relaunch).toBe('already_running')
   })
 
   it('没查到 pid 时不关任何报告窗口 —— 那个窗口可能是别的工程的', async () => {
-    const { deps, watch } = harness({ processes: [[reporterRow(201, 101)]] })
-    watch.track({ ...EDITOR, editorPid: undefined })
-    watch.disconnected('conn-1', false)
+    const h = harness({ processes: [[reporterRow(201, 101)]] })
+    await crashAndRelaunch(h, { ...EDITOR, editorPid: undefined })
 
-    await watch.explain('conn-1')
-
-    expect(deps.killProcess).not.toHaveBeenCalled()
-    expect(deps.openProject).toHaveBeenCalled()
+    expect(h.deps.killProcess).not.toHaveBeenCalled()
+    expect(h.deps.openProject).toHaveBeenCalled()
   })
 
   it('没查到 .uproject 时去工程目录里找', async () => {
-    const { deps, watch } = harness()
-    vi.mocked(deps.findUproject).mockResolvedValue(
-      'D:\\Projects\\TDGuardians\\TDGuardians.uproject'
-    )
-    watch.track({ ...EDITOR, uprojectPath: undefined })
-    watch.disconnected('conn-1', false)
+    const h = harness()
+    vi.mocked(h.deps.findUproject).mockResolvedValue(EDITOR.uprojectPath!)
+    await crashAndRelaunch(h, { ...EDITOR, uprojectPath: undefined })
 
-    await watch.explain('conn-1')
-
-    expect(deps.findUproject).toHaveBeenCalledWith(EDITOR.projectDir, EDITOR.projectName)
-    expect(deps.openProject).toHaveBeenCalledWith('D:\\Projects\\TDGuardians\\TDGuardians.uproject')
+    expect(h.deps.findUproject).toHaveBeenCalledWith(EDITOR.projectDir, EDITOR.projectName)
+    expect(h.deps.openProject).toHaveBeenCalledWith(EDITOR.uprojectPath)
   })
 
   it('重开失败要说出原因，并把恢复记录放回去', async () => {
-    const { deps, watch, crashes } = harness({ openError: '找不到关联的程序' })
-    watch.track(EDITOR)
-    watch.disconnected('conn-1', false)
+    const h = harness({ openError: '找不到关联的程序' })
+    const { crash } = await crashAndRelaunch(h)
 
-    const text = await watch.explain('conn-1')
-
-    expect(text).toMatch(/自动重开失败：找不到关联的程序/)
-    // 用户自己打开时引擎照常问要不要恢复，所以不再提「已备份、不会弹窗」
-    expect(deps.unstashRestoreData).toHaveBeenCalled()
-    expect(crashes[0].restore).toBeNull()
-    expect(text).not.toMatch(/UEBoxCrashRecovery/)
+    expect(crash).toMatchObject({ relaunch: 'failed', relaunchError: '找不到关联的程序' })
+    // 用户自己打开时引擎照常问要不要恢复
+    expect(h.deps.unstashRestoreData).toHaveBeenCalled()
+    expect(crash?.restore).toBeNull()
   })
 
   it('同一条连接重报工程信息，不丢已经查到的进程号', () => {
@@ -264,32 +274,5 @@ describe('收拾现场的闸', () => {
     watch.attachProcess('conn-1', 100, EDITOR.uprojectPath!)
     watch.track({ ...EDITOR, editorPid: undefined, uprojectPath: undefined, connectedAt: 99_000 })
     expect(watch.hasProcess('conn-1')).toBe(true)
-  })
-})
-
-describe('系统通知', () => {
-  const crash: EditorCrash = {
-    editor: EDITOR,
-    report: REPORT,
-    reporterClosed: true,
-    restore: { backupDir: 'x', packageCount: 1, missingFiles: [] },
-    relaunch: 'relaunched',
-    at: 0
-  }
-
-  it('按界面语言出文案，提到存档已备份', () => {
-    expect(crashNotice(crash, 'zh-CN')).toEqual({
-      title: 'TDGuardians 的编辑器崩溃了',
-      body: '已自动重新打开。未保存的自动存档已备份到 x'
-    })
-    expect(crashNotice(crash, 'en-US').body).toBe(
-      'Reopened automatically. Unsaved autosaves were backed up to x'
-    )
-  })
-
-  it('没重开时说清楚为什么', () => {
-    expect(crashNotice({ ...crash, relaunch: 'crash_loop', restore: null }, 'zh-CN').body).toBe(
-      '5 分钟内第二次崩溃，这次没有自动重开。'
-    )
   })
 })

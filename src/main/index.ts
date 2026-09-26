@@ -719,7 +719,7 @@ appReady?.then(async () => {
     startAgentNotifications(createWindow)
 
     // 编辑器崩溃看门人：认出崩溃、关掉崩溃报告窗口、重开工程，并告诉等着的 agent
-    startEditorCrashWatch(createWindow)
+    startEditorCrashWatch()
 
     // 初始化自动更新服务（仅在非开发环境或明确启用时）
     if (!is.dev || process.env.ENABLE_AUTO_UPDATE === 'true') {

@@ -61,7 +61,12 @@ import {
 } from '../../../core/runtimeEnvelope'
 import UnrealPathManagerUtil from '../../../../utils/UnrealPathManager'
 import UnrealProcessDetector from '../../../../utils/UnrealProcessDetector'
-import { recentEditorCrashes, type EditorCrash } from '../../../../services/editorCrashWatch/watch'
+import {
+  describeRelaunch,
+  recentEditorCrashes,
+  relaunchCrashedEditor,
+  type EditorCrash
+} from '../../../../services/editorCrashWatch/watch'
 
 /** 一个正在跑的编辑器进程（盒子扫出来的，不经过 RPC） */
 interface EditorProcess {
@@ -116,7 +121,7 @@ interface RecentCrash {
   seconds_ago: number
   crash_type?: string
   error?: string
-  /** 盒子有没有把它重开：relaunched / disabled / crash_loop / already_running / no_uproject / failed */
+  /** 重开到了哪一步：not_requested（等你决定）/ relaunched / disabled / crash_loop / already_running / no_uproject / failed */
   relaunch: EditorCrash['relaunch']
   /** 未保存的自动存档备份到了哪（有才给） */
   autosave_backup?: string
@@ -383,15 +388,6 @@ function collectCrashes(targetPath: string | undefined): RecentCrash[] {
     }))
 }
 
-const RELAUNCH_TEXT: Record<EditorCrash['relaunch'], string> = {
-  relaunched: '盒子已经自动重开了它',
-  disabled: '自动重开在设置里关着，没有重开',
-  crash_loop: '5 分钟内第二次崩溃，没有再自动重开（可能一打开就崩）',
-  already_running: '编辑器已经被重新打开',
-  no_uproject: '没找到 .uproject，没能自动重开',
-  failed: '自动重开失败'
-}
-
 function describeCrashes(crashes: RecentCrash[]): string[] {
   if (crashes.length === 0) return []
   return [
@@ -401,7 +397,7 @@ function describeCrashes(crashes: RecentCrash[]): string[] {
         `- ${crash.project_name} ${crash.seconds_ago} 秒前崩了` +
         (crash.crash_type ? `（${crash.crash_type}）` : '') +
         (crash.error ? `：${crash.error}` : '') +
-        `。${RELAUNCH_TEXT[crash.relaunch]}。` +
+        `。${describeRelaunch({ relaunch: crash.relaunch, reporterClosed: false })}` +
         (crash.autosave_backup
           ? `未保存的自动存档备份在 ${crash.autosave_backup}，要告诉用户。`
           : '')
@@ -450,12 +446,31 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
         .optional()
         .describe(
           `等待连接建立的秒数（0-${MAX_WAIT_SECONDS}，省略=不等，问完当前状态就返回）。` +
-            '连上就立刻返回，不会白等满。编辑器刚重启时给 60-120。'
-        )
+            '连上就立刻返回。编辑器刚重启时给 60-120。'
+        ),
+      relaunch_crashed_editor: z.boolean().optional().describe('你弄崩了编辑器、要接着干时传 true')
     }),
-    execute: async ({ wait_seconds: waitSeconds = 0 }, { signal, report }) => {
+    execute: async (
+      { wait_seconds: waitSeconds = 0, relaunch_crashed_editor: relaunchCrashed },
+      { signal, report }
+    ) => {
       const startedAt = Date.now()
       const targetPath = getTargetProjectPath()
+
+      let relaunchNote: string | undefined
+      if (relaunchCrashed) {
+        const pending = recentEditorCrashes().find(
+          (c) =>
+            (!targetPath ||
+              normalizePath(targetPath).startsWith(normalizePath(c.editor.projectDir))) &&
+            c.relaunch !== 'relaunched' &&
+            c.relaunch !== 'already_running'
+        )
+        const crash = pending ? await relaunchCrashedEditor(pending.editor.projectDir) : null
+        relaunchNote = crash
+          ? `重开 ${crash.editor.projectName}：${describeRelaunch(crash)}`
+          : '重开：最近没有需要重开的崩溃编辑器，什么都没做。'
+      }
       const deadline = startedAt + waitSeconds * 1000
 
       let { connections, target } = snapshotConnections()
@@ -533,6 +548,7 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
         ...(scopeId ? { runtime_scope_id: scopeId } : {}),
         ...(crashes.length > 0 ? { recent_crashes: crashes } : {}),
         summary: [
+          ...(relaunchNote ? [relaunchNote, ''] : []),
           ...describeCrashes(crashes),
           describe(state, processes, connections, staleTarget, waited)
         ].join('\n')
