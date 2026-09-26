@@ -303,15 +303,11 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
       // 不用 `start /BELOWNORMAL`：它起 .bat 走的是 `cmd /K`，跑完不退出，这里会一直等下去
       const child =
         process.platform === 'win32'
-          ? spawn(
-              'cmd.exe',
-              ['/d', '/s', '/c', commandLine],
-              {
-                windowsVerbatimArguments: true,
-                windowsHide: true,
-                cwd: dirname(runUat)
-              }
-            )
+          ? spawn('cmd.exe', ['/d', '/s', '/c', commandLine], {
+              windowsVerbatimArguments: true,
+              windowsHide: true,
+              cwd: dirname(runUat)
+            })
           : spawn(runUat, args, { detached: true })
       lowerPriority(child)
 
