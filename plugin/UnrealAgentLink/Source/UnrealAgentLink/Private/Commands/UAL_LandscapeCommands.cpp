@@ -741,7 +741,7 @@ namespace
 		for (ARuntimeVirtualTextureVolume* Candidate : Volumes)
 		{
 			AActor* Aligned = Candidate && Candidate->VirtualTextureComponent
-				? Candidate->VirtualTextureComponent->GetBoundsAlignActor()
+				? Candidate->VirtualTextureComponent->GetBoundsAlignActor().Get()
 				: nullptr;
 			if (Aligned == Landscape)
 			{
