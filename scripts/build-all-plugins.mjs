@@ -28,7 +28,8 @@ import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { createHostProject } from './make-host-project.mjs'
-import { installedEngines, RELEASE_ENGINES } from './build-plugin.mjs'
+import { installedEngines } from './build-plugin.mjs'
+import { RELEASE_ENGINES } from './plugin-package-format.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const PLUGIN_SRC = join(ROOT, 'plugin', 'UnrealAgentLink')

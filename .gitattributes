@@ -29,12 +29,12 @@
 
 # 插件那一侧（C++ / C# / .uplugin / ini）也必须钉 LF，理由和上面的 .mjs 一样，
 # 但后果更硬：分发包新鲜度门禁按**原始字节**算源码指纹
-# （scripts/build-plugin.mjs 的 sourceFingerprint，哈希 Source/Config/Content/
+# （scripts/plugin-package-format.mjs 的 sourceFingerprint，哈希 Source/Config/Content/
 # Resources 四个目录加 .uplugin）。漏掉这些扩展名的话，同一份内容在不同
 # 检出方式下行尾不同 —— 指纹就不同。
 #
 # 表现：Windows 上 core.autocrlf 默认开着，贡献者 clone 下来一个字没改，
-# 跑 pnpm verify 第 10 步就报「源码已经变了」，还得重编九个引擎版本才绿。
+# 跑插件包新鲜度检查就报「源码已经变了」，还得重编九个引擎版本才绿。
 # 2026-09-18 首次开源导出时真踩到：git archive 出的和工作区的行尾不一致。
 *.cpp text eol=lf
 *.h text eol=lf

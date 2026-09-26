@@ -64,7 +64,7 @@ const isWindows = process.platform === 'win32'
  * 严格的那一档是 `plugin:check:all`，它挂在出正式安装包的脚本上
  * （package.json 的 `build:win` / `build:mac` / `build:linux`），
  * 要求**每个**版本都新鲜 —— 发版时少一个版本，那个版本的
- * 用户就实实在在装到旧插件。判定见 scripts/build-plugin.mjs 的 checkStaleness。
+ * 用户就实实在在装到旧插件。判定见 scripts/plugin-check.mjs 的 checkStaleness。
  */
 const STEPS = [
   {

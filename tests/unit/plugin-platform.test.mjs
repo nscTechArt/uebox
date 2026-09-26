@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import AdmZip from 'adm-zip'
 import { describe, it, expect } from 'vitest'
 import { pluginPlatform, installedMacEngines } from '../../scripts/plugin-platform.mjs'
-import { zipNameForEngine, findStaleBinary, checkStaleness } from '../../scripts/build-plugin.mjs'
+import { checkStaleness } from '../../scripts/plugin-check.mjs'
+import { zipNameForEngine } from '../../scripts/plugin-package-format.mjs'
+import { findStaleBinary } from '../../scripts/build-plugin.mjs'
 
 describe('platform-specific plugin packages', () => {
   it('preserves Windows names and selects a separate Mac build script and package', () => {
