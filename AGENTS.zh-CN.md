@@ -106,9 +106,6 @@ pnpm verify             # 约 3.5 分钟 —— 完整门禁
 一次更新请求都不发，别人克隆这个仓库自己编也是这个形态。「检查更新」读的是那个仓库
 Release 上的 `.exe`、`.blockmap`、`latest.yml`。运行期解析见 `src/main/services/updater/updateFeed.ts`。
 
-**发版不只是发 GitHub Release**：官网下载按钮读的是 R2 镜像（`pnpm release:dl`），插件源码变了
-还要单独发到插件仓库。完整清单见 [docs/发版流程.md](docs/发版流程.md)，一步不落地走完。
-
 **不许**用跳过测试、删测试、加 `.skip`、扩大 ESLint ignore、降低覆盖率阈值的方式把门禁弄绿。
 如果你认为某条门禁本身有问题，在 PR 里说出来，不要绕过去。
 
