@@ -135,6 +135,8 @@ let controls: OrbitControls | null = null
 /** 模型挂在这个组下面：旋转、扶正都是动这个组，不碰模型自身的变换 */
 let modelGroup: THREE.Group | null = null
 let loadedModel: THREE.Object3D | null = null
+/** 只有骨骼没有网格（动画 FBX）时画出来的骨架，没它画面就是空的 */
+let skeletonHelper: THREE.SkeletonHelper | null = null
 let ground: THREE.Mesh | null = null
 let keyLight: THREE.DirectionalLight | null = null
 let fillLight: THREE.DirectionalLight | null = null
@@ -452,7 +454,7 @@ function mountModel(object: THREE.Object3D, clips: THREE.AnimationClip[], extens
   const stats = collectStats(object, clips)
 
   // 1. 扶正：FBX/OBJ 常见 Z-up（UE、3ds Max 导出），扁平得不像话就转 90°
-  const raw = new THREE.Box3().setFromObject(object)
+  const raw = boundsOf(object)
   const rawSize = raw.getSize(new THREE.Vector3())
   const looksLyingDown =
     rawSize.y < Math.max(rawSize.x, rawSize.z) * 0.35 && Math.max(rawSize.x, rawSize.z) > 0
@@ -461,7 +463,7 @@ function mountModel(object: THREE.Object3D, clips: THREE.AnimationClip[], extens
   object.updateMatrixWorld(true)
 
   // 2. 归一化 + 落地居中：缩到固定大小，水平居中，脚踩 y=0
-  const box = new THREE.Box3().setFromObject(object)
+  const box = boundsOf(object)
   const size = box.getSize(new THREE.Vector3())
   const center = box.getCenter(new THREE.Vector3())
   const maxDimension = Math.max(size.x, size.y, size.z) || 1
@@ -488,6 +490,16 @@ function mountModel(object: THREE.Object3D, clips: THREE.AnimationClip[], extens
   modelGroup.add(object)
   loadedModel = object
 
+  if (stats.meshCount === 0 && hasBones(object)) {
+    skeletonHelper = new THREE.SkeletonHelper(object)
+    const material = skeletonHelper.material as THREE.LineBasicMaterial
+    material.depthTest = false
+    material.transparent = true
+    skeletonHelper.renderOrder = 1
+    // 挂场景根上：helper 的矩阵直接取 root.matrixWorld，挂 modelGroup 下会把旋转叠两次
+    scene.add(skeletonHelper)
+  }
+
   if (clips.length > 0) {
     mixer = new THREE.AnimationMixer(object)
     mixer.clipAction(clips[0]).play()
@@ -497,6 +509,26 @@ function mountModel(object: THREE.Object3D, clips: THREE.AnimationClip[], extens
   if (props.viewMode && props.viewMode !== 'default') applyViewMode(props.viewMode)
   frameModel()
   emit('modelStats', stats)
+}
+
+function hasBones(object: THREE.Object3D): boolean {
+  let found = false
+  object.traverse((child) => {
+    if ((child as THREE.Bone).isBone) found = true
+  })
+  return found
+}
+
+/** 包围盒只认网格；动画 FBX 只有骨骼，得拿骨骼位置兜底，不然缩放算成 NaN */
+function boundsOf(object: THREE.Object3D): THREE.Box3 {
+  const box = new THREE.Box3().setFromObject(object)
+  if (!box.isEmpty()) return box
+  const point = new THREE.Vector3()
+  object.updateMatrixWorld(true)
+  object.traverse((child) => {
+    if ((child as THREE.Bone).isBone) box.expandByPoint(child.getWorldPosition(point))
+  })
+  return box
 }
 
 /** 统计信息在归一化之前算，包围盒报的才是模型自己的尺寸 */
@@ -539,7 +571,7 @@ function collectStats(
     })
   })
 
-  const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3())
+  const size = boundsOf(object).getSize(new THREE.Vector3())
   return {
     vertices,
     faces,
@@ -672,7 +704,7 @@ function recenterModel(): void {
   if (!loadedModel) return
   loadedModel.position.set(0, 0, 0)
   loadedModel.updateMatrixWorld(true)
-  const box = new THREE.Box3().setFromObject(loadedModel)
+  const box = boundsOf(loadedModel)
   const size = box.getSize(new THREE.Vector3())
   const center = box.getCenter(new THREE.Vector3())
   loadedModel.position.sub(center)
@@ -726,6 +758,12 @@ function disposeModel(): void {
   mixer = null
   originalMaterials.clear()
   disposeWireframeClones()
+  if (skeletonHelper) {
+    scene?.remove(skeletonHelper)
+    skeletonHelper.geometry.dispose()
+    ;(skeletonHelper.material as THREE.Material).dispose()
+    skeletonHelper = null
+  }
   if (loadedModel) {
     modelGroup?.remove(loadedModel)
     disposeObject(loadedModel)

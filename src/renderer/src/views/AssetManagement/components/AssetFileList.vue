@@ -4734,6 +4734,12 @@ const handleThumbnailGenerated = async (payload: { assetKey: string; base64: str
  */
 const handleThumbnailError = (payload: { assetKey: string; error: unknown }) => {
   console.error('[AssetFileList] 缩略图生成失败:', payload.assetKey, payload.error)
+  const item = thumbnailQueue.value.find((entry) => entry.assetKey === payload.assetKey)
+  // AIGC 自动生成的静默失败即可；用户手动点的要告诉他没成
+  if (item && !item.folderKey) {
+    const name = props.files.find((file) => file.assetKey === payload.assetKey)?.assetName
+    message.error(t('assetFileList.thumbnail.captureFailed', { name: name ?? payload.assetKey }))
+  }
   // 从队列中移除失败的项
   thumbnailQueue.value = thumbnailQueue.value.filter((item) => item.assetKey !== payload.assetKey)
 }

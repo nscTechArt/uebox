@@ -6476,7 +6476,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     thumbnail: {
       pathFailed: 'Cannot resolve local path',
-      queueAdded: 'Added to thumbnail generation queue'
+      queueAdded: 'Added to thumbnail generation queue',
+      captureFailed: 'Could not generate a thumbnail for {name}'
     },
     contextMenu: {
       recropThumbnail: 'Re-crop thumbnail'

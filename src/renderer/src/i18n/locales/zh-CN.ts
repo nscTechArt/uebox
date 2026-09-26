@@ -6305,7 +6305,8 @@ export default {
     },
     thumbnail: {
       pathFailed: '无法获取本地路径',
-      queueAdded: '已加入缩略图生成队列'
+      queueAdded: '已加入缩略图生成队列',
+      captureFailed: '缩略图生成失败：{name}'
     },
     contextMenu: {
       recropThumbnail: '重新裁剪封面'

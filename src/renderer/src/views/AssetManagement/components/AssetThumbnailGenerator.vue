@@ -23,6 +23,7 @@ const viewerRef = ref<InstanceType<typeof ModelViewer> | null>(null)
 const currentItem = ref<QueueItem | null>(null)
 const modelUrl = ref<string | null>(null)
 const isProcessing = ref(false)
+let snapshotTaken = false
 
 const processNext = (): void => {
   if (isProcessing.value) return
@@ -36,6 +37,7 @@ const processNext = (): void => {
   }
 
   isProcessing.value = true
+  snapshotTaken = false
   const item = props.queue[0] // 获取队首元素但不移除，等待处理完成后移除
   currentItem.value = item
 
@@ -49,8 +51,11 @@ const onLoad = (): void => {
   console.log('[ThumbnailGenerator] Model loaded:', currentItem.value?.assetKey)
   // 取景动画和首帧渲染要一点时间，早截会拍到空画面
   setTimeout(() => {
+    const item = currentItem.value
     viewerRef.value?.captureSnapshot()
-    // 截图是同步 emit 的，这时要么已经拿到图、要么这一个就是拍不出来
+    // 截图是同步 emit 的：拿到图 onSnapshot 已经处理完；没拿到就报错，
+    // 不然这一项永远留在队首，会被反复重载重拍
+    if (item && !snapshotTaken) emit('error', { assetKey: item.assetKey, error: 'empty snapshot' })
     if (currentItem.value) finishCurrentItem()
   }, 400)
 }
@@ -65,6 +70,7 @@ const onError = (message: string): void => {
 
 const onSnapshot = (base64: string): void => {
   if (!currentItem.value) return
+  snapshotTaken = true
   emit('generated', { assetKey: currentItem.value.assetKey, base64 })
 }
 
