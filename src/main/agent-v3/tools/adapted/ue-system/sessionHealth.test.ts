@@ -39,8 +39,10 @@ const {
   getTargetProjectPath,
   probeConnection,
   dropConnection,
-  recentEditorCrashes
+  recentEditorCrashes,
+  relaunchCrashedEditor
 } = vi.hoisted(() => ({
+  relaunchCrashedEditor: vi.fn<(projectDir: string) => Promise<unknown>>(async () => null),
   // 探活默认都答话；要模拟僵尸连接就让它回 dead
   probeConnection: vi.fn(async (): Promise<'alive' | 'busy' | 'dead'> => 'alive'),
   dropConnection: vi.fn(),
@@ -95,7 +97,7 @@ vi.mock('../../../../services/editorCrashWatch/watch', async (importOriginal) =>
     await importOriginal<typeof import('../../../../services/editorCrashWatch/watch')>()
   ).describeRelaunch,
   recentEditorCrashes: () => recentEditorCrashes(),
-  relaunchCrashedEditor: async () => null
+  relaunchCrashedEditor: (projectDir: string) => relaunchCrashedEditor(projectDir)
 }))
 
 import { createSessionHealthTool } from './sessionHealth'
@@ -630,6 +632,18 @@ describe('最近的崩溃', () => {
     expect(result.recent_crashes).toMatchObject([
       { project_name: 'MyGame', relaunch: 'relaunched' }
     ])
+  })
+
+  it('重开只认这一轮的工程：MyGame2 的会话不会把 MyGame 重新打开', async () => {
+    relaunchCrashedEditor.mockClear()
+    recentEditorCrashes.mockReturnValue([{ ...crash, relaunch: 'not_requested' }])
+    getTargetProjectPath.mockReturnValue('I:/Dev/MyGame2/MyGame2.uproject')
+    await run({ relaunch_crashed_editor: true })
+    expect(relaunchCrashedEditor).not.toHaveBeenCalled()
+
+    getTargetProjectPath.mockReturnValue('I:/Dev/MyGame/MyGame.uproject')
+    await run({ relaunch_crashed_editor: true })
+    expect(relaunchCrashedEditor).toHaveBeenCalledWith('I:/Dev/MyGame')
   })
 
   it('这一轮绑了别的工程时不报这条', async () => {

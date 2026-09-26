@@ -734,7 +734,34 @@ namespace
 		// 3. 体积：有就复用（只重算边界），没有就生成
 		TArray<ARuntimeVirtualTextureVolume*> Volumes = VolumesFor(World, Vt);
 		bool bVolumeCreated = false;
-		ARuntimeVirtualTextureVolume* Volume = Volumes.Num() > 0 ? Volumes[0] : nullptr;
+		// 只复用对齐到这块地形（或还没对齐任何东西）的体积。同一个 RVT 已经给别的地形用着时
+		// 不能把它的体积拽过来缩到这块地形上 —— 那块地形的 RVT 区域会直接变黑
+		ARuntimeVirtualTextureVolume* Volume = nullptr;
+		AActor* OtherOwner = nullptr;
+		for (ARuntimeVirtualTextureVolume* Candidate : Volumes)
+		{
+			AActor* Aligned = Candidate && Candidate->VirtualTextureComponent
+				? Candidate->VirtualTextureComponent->GetBoundsAlignActor()
+				: nullptr;
+			if (Aligned == Landscape)
+			{
+				Volume = Candidate;
+				break;
+			}
+			if (!Aligned && !Volume)
+			{
+				Volume = Candidate;
+			}
+			else if (Aligned && !OtherOwner)
+			{
+				OtherOwner = Aligned;
+			}
+		}
+		if (!Volume && OtherOwner)
+		{
+			return Fail(FString::Printf(TEXT("The %s RVT asset %s already has a volume aligned to %s. Sharing one RVT between two landscapes would move that volume and blank the other landscape's RVT; give this landscape its own RVT asset instead."),
+				Kind.Key, *Vt->GetPathName(), *OtherOwner->GetActorLabel()));
+		}
 		if (!Volume)
 		{
 			FActorSpawnParameters SpawnParams;

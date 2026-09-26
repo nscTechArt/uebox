@@ -34,6 +34,24 @@ describe('UAT 参数', () => {
     )
     expect(quoteForCmd('-cook')).toBe('-cook')
   })
+
+  it('cmd 的命令符号一律包进引号 —— R&D 目录不会被拆成两条命令', () => {
+    expect(quoteForCmd('-project=D:\\R&D\\TD\\TD.uproject')).toBe(
+      '-project="D:\\R&D\\TD\\TD.uproject"'
+    )
+    expect(quoteForCmd('-archivedirectory=C:\\tmp\\x&calc')).toBe(
+      '-archivedirectory="C:\\tmp\\x&calc"'
+    )
+    expect(quoteForCmd('D:\\a^b|c')).toBe('"D:\\a^b|c"')
+  })
+
+  it('引号里也挡不住的 % 和 " 直接拒绝；结尾反斜杠去掉，免得吞掉收尾引号', () => {
+    expect(() => quoteForCmd('-archivedirectory=C:\\%PATH%')).toThrow()
+    expect(() => quoteForCmd('C:\\a"b')).toThrow()
+    expect(quoteForCmd('-archivedirectory=D:\\My Builds\\')).toBe(
+      '-archivedirectory="D:\\My Builds"'
+    )
+  })
 })
 
 describe('读 UAT 输出', () => {

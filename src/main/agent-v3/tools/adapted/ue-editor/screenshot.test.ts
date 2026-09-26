@@ -615,6 +615,13 @@ describe('曝光锁没锁', () => {
     expect(String(result.message)).not.toContain('自动曝光')
   })
 
+  it('只是编辑器视口锁的曝光：不说「就是玩家看到的」', async () => {
+    callRequest.mockResolvedValue({ ...EDITOR_SHOT, exposure: 'manual', exposure_source: 'viewport' })
+    const result = await run({})
+    expect(String(result.message)).toContain('编辑器视口自己锁的')
+    expect(String(result.message)).not.toContain('就是玩家看到的')
+  })
+
   it('老插件不回曝光时一个字都不加', async () => {
     callRequest.mockResolvedValue(EDITOR_SHOT)
     const result = await run({})

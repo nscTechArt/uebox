@@ -361,3 +361,18 @@ export function retargetToProject(projectPath: string): RetargetOutcome {
   store.projectPath = projectManager.getProject(connectionId)?.projectPath ?? projectPath
   return { ok: true, connectionId, changed }
 }
+
+/**
+ * 这次调用实际会打到哪条连接：有目标就是目标，没有目标时和底层一样，只连着一个编辑器
+ * 就是它。编辑器钥匙按这个排队 —— 不然「没设目标」和「设了同一个编辑器」会排成两条队。
+ */
+export function effectiveConnectionId(): string | undefined {
+  const target = getTargetConnectionId()
+  if (target) return target
+  try {
+    const live = projectManager.getInteractiveProjects()
+    return live.length === 1 ? live[0].connectionId : undefined
+  } catch {
+    return undefined
+  }
+}

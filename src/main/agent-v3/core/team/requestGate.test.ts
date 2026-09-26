@@ -242,6 +242,27 @@ describe('调度包装', () => {
     expect(types).toHaveLength(1)
     expect(types[0]).toMatch(/^error:/)
   })
+
+  it('用户停下、内层流随之抛 AbortError：报成中止，不当成模型出错', async () => {
+    const controller = new AbortController()
+    const paced = wrap(
+      () =>
+        ({
+          [Symbol.asyncIterator]: () => ({
+            next: async (): Promise<never> => {
+              controller.abort()
+              throw new Error('This operation was aborted')
+            }
+          })
+        }) as unknown as AssistantMessageEventStream
+    )
+    const events: AssistantMessageEvent[] = []
+    for await (const event of await paced(model, { messages: [] }, { signal: controller.signal })) {
+      events.push(event)
+    }
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: 'error', reason: 'aborted' })
+  })
 })
 
 /** 普通会话：一个人一条会话，排队只会平白加延迟；只防「发出去就没回音」 */

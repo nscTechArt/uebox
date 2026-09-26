@@ -276,8 +276,10 @@ export function extractPackagePaths(params: unknown): string[] {
       // 写 ini 的参数（section + key/value）：值里的资产路径只是配置里的一个引用，
       // 改配置不碰那个资产。锁它会把「设默认 GameMode」挡在 GameMode 蓝图的锁后面
       const isConfigWrite = 'section' in record && ('key' in record || 'config_name' in record)
+      // 移动 / 改名（{ source, destination }）的 destination 是完整的目标资产路径，要锁
+      const isMove = 'source' in record
       for (const [key, value] of Object.entries(record)) {
-        if (FOLDER_KEYS.test(key)) continue
+        if (FOLDER_KEYS.test(key) && !isMove) continue
         if (isConfigWrite && key === 'value') continue
         walk(value, depth + 1)
       }

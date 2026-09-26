@@ -368,15 +368,17 @@ function isSatisfied(connections: EditorConnection[], targetPath: string | undef
  * 最近的崩溃。放在 summary 最前面：「编辑器在跑但没连上」和「编辑器刚崩完、盒子正在重开」
  * 下一步都是等，但后者模型必须知道 —— 连上之后不能拿同样的参数把刚才那一步再跑一遍。
  */
+/** target 是这个工程目录本身或它下面的路径。按目录边界比，`Game2` 不算 `Game` 里的 */
+function isInsideProject(target: string, projectDir: string): boolean {
+  const dir = normalizePath(projectDir)
+  return target === dir || target.startsWith(`${dir}/`)
+}
+
 function collectCrashes(targetPath: string | undefined): RecentCrash[] {
   const target = normalizePath(targetPath)
   const now = Date.now()
   return recentEditorCrashes()
-    .filter((crash) => {
-      if (!target) return true
-      const dir = normalizePath(crash.editor.projectDir)
-      return target === dir || target.startsWith(`${dir}/`)
-    })
+    .filter((crash) => !target || isInsideProject(target, crash.editor.projectDir))
     .map((crash) => ({
       project_name: crash.editor.projectName,
       project_path: crash.editor.projectDir,
@@ -461,8 +463,7 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
       if (relaunchCrashed) {
         const pending = recentEditorCrashes().find(
           (c) =>
-            (!targetPath ||
-              normalizePath(targetPath).startsWith(normalizePath(c.editor.projectDir))) &&
+            (!targetPath || isInsideProject(normalizePath(targetPath), c.editor.projectDir)) &&
             c.relaunch !== 'relaunched' &&
             c.relaunch !== 'already_running'
         )

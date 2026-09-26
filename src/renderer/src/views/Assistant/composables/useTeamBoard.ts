@@ -55,13 +55,14 @@ export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
     if (payload?.sessionId && payload.sessionId === agentSessionId.value) void refresh()
   }
 
-  window.api.on('agent-v3:team-board', onChange)
-  window.api.on('agent-v3:released', onChange)
+  // preload 的 on() 挂的是包了一层的处理器并把它返回；off() 要传回这一个，传 onChange 摘不掉
+  const boardHandler = window.api.on('agent-v3:team-board', onChange)
+  const releasedHandler = window.api.on('agent-v3:released', onChange)
   watch(agentSessionId, () => void refresh(), { immediate: true })
 
   onUnmounted(() => {
-    window.api.off('agent-v3:team-board', onChange)
-    window.api.off('agent-v3:released', onChange)
+    window.api.off('agent-v3:team-board', boardHandler)
+    window.api.off('agent-v3:released', releasedHandler)
   })
 
   return { team, active: computed(() => team.value !== null), refresh }

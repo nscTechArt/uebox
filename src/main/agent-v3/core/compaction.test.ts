@@ -633,6 +633,44 @@ describe('createAutoCompact —— 后台提前写摘要', () => {
     expect(result.length).toBeLessThan(edited.length)
   })
 
+  it('写摘要期间对话还在长：切点按开写那一刻算，新来的消息一条不丢', async () => {
+    resetPrecompactionsForTest()
+    let finish: (value: unknown) => void = () => undefined
+    generateSummary.mockReset().mockReturnValue(new Promise((resolve) => (finish = resolve)))
+    // pi 传进来的是活数组，摘要写着的时候循环照样往里 push
+    const messages = longHistory()
+    await createAutoCompact(keyed(BELOW))(messages)
+    const arrived = [msg('assistant', '新来的一条'), msg('user', '又一条')]
+    messages.push(...arrived)
+    finish({ ok: true, value: '后台摘要' })
+    await flush()
+
+    const result = await createAutoCompact(keyed(ABOVE))(messages)
+
+    expect(String((result[0] as { content: string }).content)).toContain('后台摘要')
+    // 摘要之外留下来的，正好是开写时的尾巴加上后来的两条
+    const kept = result.slice(1)
+    expect(kept.slice(-2)).toEqual(arrived)
+    const tailAtStart = splitAtRecentBudget(
+      messages.slice(0, messages.length - arrived.length),
+      UNREAL_BOX_COMPACTION.keepRecentTokens
+    ).tail
+    expect(kept.length).toBe(tailAtStart.length + arrived.length)
+  })
+
+  it('撞线时还没写完、用户点了停止：不干等，原样返回', async () => {
+    resetPrecompactionsForTest()
+    generateSummary.mockReset().mockReturnValue(new Promise(() => undefined))
+    const messages = longHistory()
+    await createAutoCompact(keyed(BELOW))(messages)
+
+    const controller = new AbortController()
+    const pending = createAutoCompact(keyed(ABOVE))(messages, controller.signal)
+    controller.abort()
+
+    expect(await pending).toBe(messages)
+  })
+
   it('没给归属（子 agent）就不在后台写', async () => {
     resetPrecompactionsForTest()
     generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要' })

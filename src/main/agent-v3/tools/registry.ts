@@ -55,7 +55,7 @@ import {
   sameTeam
 } from '../core/assetLock'
 import { enforceAfterWrite, suspendForWrite } from '../core/assetLockEnforcement'
-import { getTargetConnectionId } from '../core/projectTargetContext'
+import { effectiveConnectionId, getTargetConnectionId } from '../core/projectTargetContext'
 import { editorKeyActive, withEditorKey } from '../core/team/editorKey'
 import {
   ASK_USER_TOOL_NAME,
@@ -1499,7 +1499,7 @@ function withEditorKeyGate(tool: UnrealAgentTool<never>): UnrealAgentTool<never>
     execute: (toolCallId, params, signal, onUpdate) =>
       editorKeyActive()
         ? withEditorKey(
-            getTargetConnectionId() ?? 'default',
+            effectiveConnectionId() ?? 'default',
             () => inner(toolCallId, params, signal, onUpdate),
             signal
           )

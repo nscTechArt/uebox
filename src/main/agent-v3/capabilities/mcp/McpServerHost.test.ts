@@ -933,7 +933,8 @@ describe('McpServerHost 工具注解', () => {
         requestInit: { headers: { Authorization: `Bearer ${status.token!}` } }
       })
     )
-    const byName = new Map((await client.listTools()).tools.map((t) => [t.name, t.annotations]))
+    const listed = (await client.listTools()).tools
+    const byName = new Map(listed.map((t) => [t.name, t.annotations]))
 
     expect(byName.get('ue_get_actor')).toMatchObject({ readOnlyHint: true, destructiveHint: false })
     expect(byName.get('material_create')).toMatchObject({
@@ -943,6 +944,11 @@ describe('McpServerHost 工具注解', () => {
     expect(byName.get('run_shell_command')).toMatchObject({ destructiveHint: true })
     // task 声明 safe，但子任务能动整个工具池、不过客户端的审批
     expect(byName.get('task')).toMatchObject({ readOnlyHint: false, destructiveHint: true })
+    // uebox CLI 只按 _meta 里的 risk 判断要不要 --allow-write：这里也不能报 safe
+    const taskMeta = listed.find((t) => t.name === 'task')?._meta as
+      | { unrealBox?: { risk?: string } }
+      | undefined
+    expect(taskMeta?.unrealBox?.risk).toBe('destructive')
     expect(byName.get('mcp_other_thing')).toMatchObject({ openWorldHint: true })
   }, 30_000)
 })

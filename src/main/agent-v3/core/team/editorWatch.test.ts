@@ -78,6 +78,21 @@ describe('编辑器看护', () => {
     expect(h.events[0]).toMatchObject({ reason: 'Access violation' })
   })
 
+  it('第二次崩溃只找上一次报过之后的崩溃报告，不把上一次的原因再报一遍', async () => {
+    const asked: number[] = []
+    const h = harness({
+      crashReason: async (_dir, since) => {
+        asked.push(since)
+        return null
+      }
+    })
+    await h.fire('system.disconnected', {}, 'c1')
+    await h.fire('project.info', { projectPath: 'I:/Game' }, 'c2')
+    await h.fire('system.disconnected', {}, 'c2')
+    expect(asked).toHaveLength(2)
+    expect(asked[1]).toBeGreaterThan(asked[0])
+  })
+
   describe('重开让给盒子的崩溃看门人 —— 两边各开一个就是同一工程两个编辑器', () => {
     it('看门人已经重开：这里不再开，只等连回来', async () => {
       const h = harness({ crashHandledElsewhere: async () => 'reopening' })

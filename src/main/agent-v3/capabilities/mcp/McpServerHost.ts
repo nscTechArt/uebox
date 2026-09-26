@@ -354,6 +354,7 @@ export class McpServerHost {
       // 客户端发 DELETE 主动结束
       onsessionclosed: (id) => {
         this.sessions.delete(id)
+        releaseSessionBrowser(id)
       }
     })
 
@@ -365,6 +366,8 @@ export class McpServerHost {
     session.transport.onclose = () => {
       const id = session.transport.sessionId
       if (id) this.sessions.delete(id)
+      // 这条会话的工具按会话 id 开过内置浏览器的话，窗口跟着会话一起关，不然留到进程结束
+      releaseSessionBrowser(sessionId)
     }
 
     session.lastActiveAt = Date.now()
@@ -632,6 +635,15 @@ function failure(message: string, code: string): CallToolOutcome {
 }
 
 /**
+ * 关掉某条 MCP 会话开过的内置浏览器。按需加载：浏览器服务要 electron，单测里不该被连带拉起
+ */
+function releaseSessionBrowser(sessionId: string): void {
+  void import('../../../services/agentBrowser')
+    .then(({ deleteSessionBrowser }) => deleteSessionBrowser(sessionId))
+    .catch(() => undefined)
+}
+
+/**
  * 清单里随每个工具带出去的描述性元数据。
  *
  * 用途是**发现和说明**，不是权限：外部调用方据此知道「这个工具要不要指定
@@ -642,12 +654,21 @@ function describeToolMeta(tool: UnrealAgentTool<never>): Record<string, unknown>
   const namespace = tool.unrealBox.namespace
   return {
     namespace,
-    risk: tool.unrealBox.risk,
+    // uebox CLI 只看这一项决定要不要 --allow-write，所以这里也要按对外的最坏情况报
+    risk: delegatesToSubAgent(tool) ? 'destructive' : tool.unrealBox.risk,
     // 要不要带工程路径。ue.* 里有两个例外，它们不依赖引擎连接
     // （见 tools/toolNames.ts 的 OFFLINE_UE_TOOLS）
     projectScoped: namespace.startsWith('ue.') && !OFFLINE_UE_TOOLS.has(tool.name),
     requiresExplicitApproval: tool.unrealBox.requiresExplicitApproval === true
   }
+}
+
+/**
+ * `task` 自己声明 safe（派子任务本身不改东西），但子任务在盒子里跑、不过客户端的审批，
+ * 它能做的就是整个工具池能做的。对外（注解和元数据）一律按最坏情况报
+ */
+function delegatesToSubAgent(tool: UnrealAgentTool<never>): boolean {
+  return tool.name === 'task'
 }
 
 /**
@@ -658,9 +679,7 @@ function describeToolMeta(tool: UnrealAgentTool<never>): Record<string, unknown>
  */
 function describeToolAnnotations(tool: UnrealAgentTool<never>): ToolAnnotations {
   const { namespace, risk, requiresExplicitApproval } = tool.unrealBox
-  // `task` 自己声明 safe（派子任务本身不改东西），但子任务在盒子里跑、不过客户端的审批，
-  // 它能做的就是整个工具池能做的。对外按最坏情况标
-  const delegates = tool.name === 'task'
+  const delegates = delegatesToSubAgent(tool)
   return {
     readOnlyHint: risk === 'safe' && requiresExplicitApproval !== true && !delegates,
     destructiveHint: risk === 'destructive' || requiresExplicitApproval === true || delegates,

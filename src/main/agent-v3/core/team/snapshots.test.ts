@@ -80,6 +80,39 @@ describe.skipIf(!hasGit)('工程快照', () => {
     expect(read('Binaries/Win64/TD.dll')).toBe('bin')
   })
 
+  it('退回之后还能反悔：之后的快照都还在，再退回去一次就回来了', async () => {
+    const store = createSnapshotStore(project, git)
+    const first = await store.save('开工')
+    write('Content/New/Hero.uasset', 'new')
+    const later = await store.save('加了英雄')
+
+    const restored = await store.restore(first!.id)
+    expect(existsSync(join(project, 'Content/New/Hero.uasset'))).toBe(false)
+    expect(restored?.message).toContain('退回快照')
+    // 退回是叠上去的一份，之前那份还在列表里
+    expect((await store.list()).map((s) => s.id)).toContain(later!.id)
+
+    await store.restore(later!.id)
+    expect(read('Content/New/Hero.uasset')).toBe('new')
+  })
+
+  it('编号对不上任何一份就报错 —— 回滚前用它确认，不白关编辑器', async () => {
+    const store = createSnapshotStore(project, git)
+    const first = await store.save('开工')
+    expect(await store.resolve(first!.id)).toMatch(/^[0-9a-f]{40}$/)
+    await expect(store.resolve('abc')).rejects.toThrow(/编号不对/)
+    await expect(store.resolve('deadbeef')).rejects.toThrow(/没有快照/)
+  })
+
+  it('几个队员同时交活，一起存快照不会撞 git 的锁', async () => {
+    const store = createSnapshotStore(project, git)
+    await store.save('开工')
+    write('Content/A.uasset', 'a')
+    write('Content/B.uasset', 'b')
+    const results = await Promise.all([store.save('甲'), store.save('乙'), store.save('丙')])
+    expect(results.filter(Boolean).length).toBeGreaterThanOrEqual(1)
+  })
+
   it('快照编号不像编号就拒绝，不拿它拼命令', async () => {
     const store = createSnapshotStore(project, git)
     await store.save('开工')
