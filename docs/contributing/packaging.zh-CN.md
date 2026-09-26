@@ -28,7 +28,46 @@ ABI 卡住时再读这里。
 node scripts/build-all-plugins.mjs
 ```
 
-日常开发只编 5.5 可用 `node scripts/build-all-plugins.mjs --only 5.5`。
+日常开发选一个目标版本来出包，例如 `pnpm plugin:build --engine 5.7 --project <uproject-path>`。
+检查已有的包：
+
+```bash
+pnpm plugin:check --engine 5.7   # 只查这一个包，不需要装 Unreal
+pnpm plugin:check --all          # 发版检查：UE 5.0–5.8 全套
+```
+
+没有默认版本，缺包也不会拿别的版本顶替。包格式约定（支持版本、排除规则、zip 命名、构建标记、
+源码指纹）在 `scripts/plugin-package-format.mjs`；检查本身在 `scripts/plugin-check.mjs`。
+
+### 日常门禁
+
+`pnpm verify`、`verify:changed`、`verify:fast` 会跑 `pnpm verify:plugin`。只有改动碰到
+**打包输入**才查包 —— 打包输入就是参与源码指纹的文件：
+`plugin/UnrealAgentLink/{Source,Config,Content,Resources}/` 和 `UnrealAgentLink.uplugin`。
+先选目标：PowerShell `$env:VERIFY_PLUGIN_ENGINE = '5.7'`，bash
+`export VERIFY_PLUGIN_ENGINE=5.7`；或一次覆盖 `pnpm verify:plugin --engine 5.7`。
+
+没装 Unreal 就出不了包：把 `VERIFY_PLUGIN_ENGINE` 设为 `none`。这一步报
+`NOT RUN (declared: no Unreal on this machine)` 并放行；在 PR 里注明插件改动未经编译。
+本机探测到引擎时不接受 `none`。探测只用来拒绝 `none`、从不用来放行，所以探测出错最多
+多一次误报。
+
+已知边界：
+
+- `LICENSE` 和出包脚本（`build-plugin.mjs`、`plugin-package-format.mjs` 等）也会影响 zip，
+  但构建标记只记源码指纹，没有哪个包能证明它们改后重出过。它们靠单测和
+  `plugin:check:all` 之前的全量重出兜底。
+- 范围相对你的分支计算（`VERIFY_BASE` → `origin/main` → `main` → `HEAD`）。拉了别人改的
+  插件代码之后，本地的包可能已过期，而门禁不会提醒 —— 对着 Unreal 测之前先跑
+  `pnpm plugin:check --engine <版本>` 或重新出包。
+- 反过来，基准落后时门禁会把别人的插件改动算到你头上。最常见的是 fork 的 `main` 没同步上游：
+  失败输出里列出的文件不是你改的，就先在 GitHub 上同步 fork 的 `main`（再 `git fetch origin`），
+  或设 `VERIFY_BASE=<目标分支>`，例如 `VERIFY_BASE=upstream/main`。
+- 包检查通过只说明 zip 和源码对得上，不代表插件编得过、在编辑器里跑得通。
+- CI（`pnpm verify --ci`）不跑这一步，把它列为 NOT RUN：runner 上既没有 Unreal 也没有包。
+
+### 正式安装包
+
 全套插件准备好后再打正式安装包：
 
 ```bash
@@ -39,6 +78,9 @@ pnpm build:linux    # Linux
 
 Mac 构建在 macOS 上运行，生成带架构名的 DMG 和 ZIP。配置 `updateGithubRepo`
 后会同时生成 GitHub 更新元数据；未配置时不写入更新源。构建命令不会上传产物。
+
+这些命令会先跑 `pnpm plugin:check:all`：UE 5.0–5.8 全套必须齐全且新鲜，同平台的其他 ZIP
+也必须通过；和本机装没装 Unreal、`VERIFY_PLUGIN_ENGINE`、`VERIFY_BASE` 都无关。
 
 ---
 

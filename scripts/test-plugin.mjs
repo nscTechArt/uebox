@@ -28,7 +28,7 @@
  *   node scripts/test-plugin.mjs --engine 5.6
  *   node scripts/test-plugin.mjs --no-build           # 已经编过了，只想再跑一遍
  *
- * 默认钉 5.5，和 `plugin-check.mjs` 里 `VERIFY_ENGINES` 同一个理由：
+ * 原生测试默认钉 5.5；分发包检查则通过 `plugin:check --engine <版本>` 显式选择。
  * 本机不一定装齐九个引擎，全套跑一轮接近一小时，门禁会长期全红然后被无视。
  */
 

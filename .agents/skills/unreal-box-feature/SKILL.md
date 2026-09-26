@@ -46,7 +46,7 @@ Areas outside the seven-layer slice carry one extra obligation each:
 |---|---|---|
 | Agent tools | `src/main/agent-v3/tools/` | Define with `defineTool` / `defineUeTool`, register in `registry.ts`, test beside the tool |
 | Runtime skills | `resources/skills/**`, `packages/cli/skills/**` | Conform to `resources/skills/SKILL_STANDARD.md`; `verify:skills` enforces it |
-| UE plugin | `plugin/UnrealAgentLink/` | Source changed ⇒ rebuild the UE 5.5 zip with `pnpm plugin:build --engine 5.5 --project <uproject>`, or `plugin:check` fails. Other engine versions are rebuilt only for a release |
+| UE plugin | `plugin/UnrealAgentLink/` | Packaged inputs changed ⇒ rebuild the selected development zip (`VERIFY_PLUGIN_ENGINE` or `verify:plugin --engine`) or `verify:plugin` fails. Other engine versions are rebuilt only for a release |
 | CLI | `packages/cli/` | The gate typechecks it via `tsconfig.cli.json`; `pnpm verify:cli-package` (build + package check) is not in the gate — run it before the package is published |
 
 Add focused tests for new behavior. Include the normal path and the meaningful boundary and failure

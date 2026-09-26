@@ -58,8 +58,9 @@ pnpm verify             # 约 3.5 分钟 —— 完整门禁
 
 - 每个任务都单独过了那 30 秒，所以完整门禁一旦红，你知道是**这批**里的问题，
   而不是三小时前某个已经想不起来的任务。
-- **CI 是兜底的那张网。** `.github/workflows/quality.yml` 里除了 `pnpm verify --ci` 什么都没有，
-  而且**每次 push 都跑** —— 完整门禁加上打包和离线启动检查。门禁只在
+- **CI 是兜底的那张网。** `.github/workflows/quality.yml` 在 pull request 和向 `main` 的 push
+  上运行 `pnpm verify --ci`。共享门禁在 CI 中增加审计、打包和离线启动，插件包检查与
+  原生检查则明确报为 NOT RUN。仓库任务绿灯不等于原生验收通过。门禁只在
   `scripts/verify.mjs` 一处定义，本地和 CI 不可能漂。本地忘了跑，代价是 GitHub 上亮个红灯，
   不是让用户装到坏包。
 
@@ -75,7 +76,7 @@ pnpm verify             # 约 3.5 分钟 —— 完整门禁
 | `docs:check` | 成对的中英文档有没有一起改 |
 | `verify:skills` | `resources/skills/**` 是否符合 `resources/skills/SKILL_STANDARD.md` |
 | `verify:ue-file-reads` | 引擎写的文件（`.uproject` / `.uplugin` / 引擎 `ini`）不许按固定编码读 —— 见第 5 节 |
-| `plugin:check` | 改了插件源码就必须重新出包 —— 这一步只查 UE 5.5 |
+| `verify:plugin` | 仅本地 —— 改了会进分发包的插件输入才检查所选开发包；CI 把它列为 NOT RUN |
 | `typecheck` | `tsconfig.node.json`（主进程）+ `tsconfig.web.json`（渲染进程）+ `tsconfig.cli.json`（`packages/cli`） |
 | `test:run` | Vitest，跑全仓单测（数量不写在这里 —— 它每天都在变，写死只会变成又一个过期数字） |
 | `audit:prod` | 仅 CI —— 生产依赖没有高危漏洞 |
@@ -93,8 +94,10 @@ pnpm verify             # 约 3.5 分钟 —— 完整门禁
 另外两个变体：`pnpm verify:fast`（完整门禁，但单测那一步跳过原生产物预检）、
 `pnpm verify --with-build`（本地也跑打包与离线启动门禁，改了主进程 / 构建配置 / 依赖时用）。
 
-插件分发包新鲜度分两档。`pnpm verify` 里的 `plugin:check` **只查 UE 5.5**（开发时编的那个），
-出包：`pnpm plugin:build --engine 5.5 --project <uproject 路径>`。
+插件分发包新鲜度分两档。日常的 `pnpm verify` / `verify:changed` / `verify:fast` 走
+`verify:plugin`：只有改动碰到会进分发包的插件输入时才查包，而且只查 `VERIFY_PLUGIN_ENGINE`
+选定的那个版本；`pnpm verify --ci` 把它列为 NOT RUN。怎么选目标、没装 Unreal 时怎么声明，
+见[打包指南](docs/contributing/packaging.zh-CN.md#日常门禁)。
 严格的那一档是 `plugin:check:all`，挂在出正式安装包的脚本上
 （`build:win` / `build:mac` / `build:linux`），要求 **5.0–5.8 每个版本都新鲜**
 —— 发版时少一个版本，那个版本的用户就实实在在装到旧插件。出全套：`node scripts/build-all-plugins.mjs`。
@@ -136,7 +139,7 @@ Release 上的 `.exe`、`.blockmap`、`latest.yml`。运行期解析见 `src/mai
 |---|---|---|
 | Agent 工具 | `src/main/agent-v3/tools/` | 用 `defineTool` / `defineUeTool` 定义，在 `registry.ts` 注册；注意第 7 节的 `appSettingsManager` 坑 |
 | 运行时技能（盒子内置 Agent 和 CLI 加载的） | `resources/skills/**`、`packages/cli/skills/**` | 必须符合 `resources/skills/SKILL_STANDARD.md`，门禁步骤 `verify:skills` |
-| UE 插件 | `plugin/UnrealAgentLink/` | 改了源码就要重编 UE 5.5 的 zip，否则门禁步骤 `plugin:check` 变红（见第 3 节） |
+| UE 插件 | `plugin/UnrealAgentLink/` | 改了会进分发包的输入就要重编所选开发目标的 zip 并设置 `VERIFY_PLUGIN_ENGINE`，否则门禁步骤 `verify:plugin` 变红（见第 3 节） |
 | `uebox` 命令行 | `packages/cli/` | 门禁通过 `tsconfig.cli.json` 做类型检查；`pnpm verify:cli-package`（构建 + 发布包体检）不在门禁里，发包前自己跑 |
 
 ## 5. 硬规则

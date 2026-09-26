@@ -22,6 +22,7 @@
     "verify": "node scripts/verify.mjs",
     "verify:fast": "node scripts/verify.mjs --fast",
     "verify:changed": "node scripts/verify.mjs --changed",
+    "verify:plugin": "node scripts/verify-plugin.mjs",
     "docs:check": "node scripts/check-docs-sync.mjs",
     "site:dev": "vitepress dev website",
     "site:build": "vitepress build website",

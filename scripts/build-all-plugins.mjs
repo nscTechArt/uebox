@@ -96,7 +96,7 @@ function main() {
   }
 
   if (!existsSync(join(PLUGIN_SRC, 'UnrealAgentLink.uplugin'))) {
-    console.error('✖ 还没有插件源码，先跑：node scripts/build-plugin.mjs --sync')
+    console.error('✖ 还没有插件源码；它是本仓库的一部分，用 git 还原：git checkout -- plugin/')
     process.exit(1)
   }
 

@@ -6,10 +6,12 @@ import { createRequire } from 'node:module'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // @ts-expect-error —— 检查脚本是 .mjs，没有类型声明；这里只测它的纯函数
-import { checkStaleness } from '../../scripts/plugin-check.mjs'
+import { checkReleasePackages, checkSelectedPackage } from '../../scripts/plugin-check.mjs'
 import {
   findExcludedEntries,
+  isFingerprintedPath,
   shouldExcludeFromZip,
+  sourceFingerprint,
   zipNameForEngine
   // @ts-expect-error —— 同上
 } from '../../scripts/plugin-package-format.mjs'
@@ -129,19 +131,47 @@ describe('findExcludedEntries', () => {
 })
 
 /**
- * 分发包新鲜度的两档要求。
- *
- * ## 为什么要分档
- *
- * 这道检查原先在 `pnpm verify` 里就要求九个 zip 全部和源码一致。做不到 ——
- * 出一个包要装对应引擎、跑一遍 UBT，九个版本一轮接近一小时，而本机也不一定
- * 装齐九个引擎。结果就是它长期全红，然后被当成背景噪音跳过，等于不存在。
- *
- * 现在：日常门禁只钉 5.5（开发时实际编的那个），发版门禁（`--all`，null）
- * 要求每个包都新鲜 —— 发版少一个版本，那个版本的用户就真的装到旧插件。
- *
- * 这里钉住的是**两档的边界**：把日常那档收严会让它回到没人看的状态，
- * 把发版那档放宽则等于把七个月脱节的老问题放回来。
+ * 「哪些文件改了会让包过期」必须和源码指纹是同一个判断 ——
+ * 否则指纹变了、日常门禁却说不适用（或者反过来）。
+ */
+describe('打包输入与源码指纹一致', () => {
+  it.each([
+    'plugin/UnrealAgentLink/Source/UnrealAgentLink/Private/A.cpp',
+    'plugin/UnrealAgentLink/Config/FilterPlugin.ini',
+    'plugin/UnrealAgentLink/Content/M.uasset',
+    'plugin/UnrealAgentLink/Resources/Docs/模型导入优化方案.md',
+    'plugin/UnrealAgentLink/UnrealAgentLink.uplugin'
+  ])('算打包输入：%s', (path) => {
+    expect(isFingerprintedPath(path)).toBe(true)
+  })
+
+  it.each([
+    'plugin/UnrealAgentLink/LICENSE',
+    'plugin/UnrealAgentLink/README.md',
+    'plugin/UnrealAgentLink/Binaries/Win64/UnrealEditor-UnrealAgentLink.dll',
+    'plugin/UnrealAgentLink/SourceNotes.md',
+    'scripts/build-plugin.mjs',
+    'src/main/utils/UnrealPathManager.ts'
+  ])('不算打包输入：%s', (path) => {
+    expect(isFingerprintedPath(path)).toBe(false)
+  })
+
+  it('改打包输入会改指纹，改 LICENSE 不会', () => {
+    const dir = join(root, 'fingerprint-src')
+    mkdirSync(join(dir, 'Source'), { recursive: true })
+    writeFileSync(join(dir, 'Source/A.cpp'), 'a')
+    writeFileSync(join(dir, 'LICENSE'), 'license')
+    const before = sourceFingerprint(dir)
+    writeFileSync(join(dir, 'LICENSE'), 'license v2')
+    expect(sourceFingerprint(dir)).toBe(before)
+    writeFileSync(join(dir, 'Source/A.cpp'), 'b')
+    expect(sourceFingerprint(dir)).not.toBe(before)
+  })
+})
+
+/**
+ * 开发检查只看显式选择的那一个包；发版检查保持完整集合要求。
+ * 两档都不依赖引擎安装情况，缺少必需包始终失败。
  */
 describe('分发包新鲜度', () => {
   const FRESH = 'be0d4888d135a373'
@@ -178,101 +208,120 @@ describe('分发包新鲜度', () => {
     }
   }
 
-  describe('日常门禁（pnpm verify）—— 只钉 5.5', () => {
-    it('5.5 新鲜 —— 其余八个版本全过期也放行', () => {
+  /** 改写选中包里的构建标记；传字符串就原样写进去（用来造坏 JSON） */
+  const rewriteStamp = (name: string, stamp: Record<string, string> | string): void => {
+    const zip = new AdmZip(join(dist, name))
+    zip.updateFile(
+      '.ual-build',
+      Buffer.from(typeof stamp === 'string' ? stamp : JSON.stringify(stamp))
+    )
+    zip.writeZip(join(dist, name))
+  }
+
+  describe('显式选择 UE 5.5', () => {
+    it('5.5 新鲜 —— 其余版本过期、损坏或混进 .pdb 都不影响', () => {
       putAll(OLD, { 'UnrealAgentLink55.zip': FRESH })
-      expect(checkStaleness(FRESH, dist)).toBe(true)
+      writeFileSync(join(dist, 'UnrealAgentLink50.zip'), 'not a zip')
+      putZip('UnrealAgentLink58.zip', FRESH, ['Binaries/Win64/UnrealEditor-UnrealAgentLink.pdb'])
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(true)
     })
 
     it('5.5 过期 —— 拦住', () => {
       putZip('UnrealAgentLink55.zip', OLD)
-      expect(checkStaleness(FRESH, dist)).toBe(false)
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(false)
     })
 
     /**
      * 没有构建标记 = 判不了新旧。
      *
-     * 对不要求的版本这只是「未知」，但对要求新鲜的那个，说不清它是不是旧的
-     * 就不能算通过 —— 那等于用「不知道」冒充「没问题」。
+     * 说不清选中的包是不是旧的，就不能算通过。
      */
     it('5.5 没有构建标记 —— 判不了新旧，同样拦住', () => {
       putZip('UnrealAgentLink55.zip', null)
-      expect(checkStaleness(FRESH, dist)).toBe(false)
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(false)
     })
 
-    it('5.5 的包根本不存在 —— 拦住', () => {
+    it('5.5 的构建标记不是合法 JSON —— 拦住', () => {
+      putZip('UnrealAgentLink55.zip', FRESH)
+      rewriteStamp('UnrealAgentLink55.zip', '{invalid JSON')
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(false)
+    })
+
+    it('5.5 的包不是 zip —— 拦住', () => {
+      writeFileSync(join(dist, 'UnrealAgentLink55.zip'), 'not a zip')
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(false)
+    })
+
+    it('包名是 5.5、构建标记却是别的版本 —— 拦住', () => {
+      putZip('UnrealAgentLink55.zip', FRESH)
+      rewriteStamp('UnrealAgentLink55.zip', { fingerprint: FRESH, engine: '5.7' })
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(false)
+    })
+
+    /** 缺的是 5.5，就不能拿旁边新鲜的 5.4 顶上 */
+    it('5.5 的包根本不存在 —— 拦住，不拿别的版本顶替', () => {
       putZip('UnrealAgentLink54.zip', FRESH)
-      expect(checkStaleness(FRESH, dist, ['5.5'], 'win32', true)).toBe(false)
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(false)
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('pnpm plugin:build --engine 5.5')
+      )
     })
 
     /** 分发包目录整个不在，也不能算通过 */
     it('分发包目录不存在 —— 拦住', () => {
-      expect(checkStaleness(FRESH, join(root, '压根没有这个目录'), ['5.5'], 'win32', true)).toBe(
-        false
-      )
+      expect(checkSelectedPackage(FRESH, '5.5', join(root, '压根没有这个目录'))).toBe(false)
     })
 
-    it('要求哪些版本新鲜是可配的', () => {
-      putZip('UnrealAgentLink55.zip', FRESH)
-      putZip('UnrealAgentLink58.zip', OLD)
-      expect(checkStaleness(FRESH, dist, ['5.5', '5.8'])).toBe(false)
+    it('选中的版本混进 .pdb —— 拦住', () => {
+      putZip('UnrealAgentLink55.zip', FRESH, ['Binaries/Win64/UnrealEditor-UnrealAgentLink.pdb'])
+      expect(checkSelectedPackage(FRESH, '5.5', dist)).toBe(false)
     })
   })
 
-  describe('发版门禁（--all）—— 每个版本都要新鲜', () => {
+  describe('发版门禁 —— 每个版本都要新鲜', () => {
     it('只有 5.5 的真实形状包，也必须报告缺少其余版本', () => {
       putZip('UnrealAgentLink55.zip', FRESH)
-      expect(checkStaleness(FRESH, dist, null)).toBe(false)
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
       expect(console.error).toHaveBeenCalledWith(expect.stringContaining('UnrealAgentLink58.zip'))
     })
 
     it('包名与构建标记中的引擎版本不一致时拒绝发版', () => {
       putAll(FRESH)
-      const zip = new AdmZip(join(dist, 'UnrealAgentLink58.zip'))
-      zip.updateFile(
-        '.ual-build',
-        Buffer.from(JSON.stringify({ fingerprint: FRESH, engine: '5.5' }))
-      )
-      zip.writeZip(join(dist, 'UnrealAgentLink58.zip'))
-      expect(checkStaleness(FRESH, dist, null)).toBe(false)
+      rewriteStamp('UnrealAgentLink58.zip', { fingerprint: FRESH, engine: '5.5' })
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
     })
+
     it('九个包全新鲜 —— 放行', () => {
       putAll(FRESH)
-      expect(checkStaleness(FRESH, dist, null)).toBe(true)
+      expect(checkReleasePackages(FRESH, dist)).toBe(true)
     })
 
     /** 这正是日常门禁会放过、而发版绝不能放过的那种状态 */
     it('只有 5.5 新鲜、其余过期 —— 拦住', () => {
       putAll(OLD, { 'UnrealAgentLink55.zip': FRESH })
-      expect(checkStaleness(FRESH, dist, null)).toBe(false)
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
     })
 
     it('随便哪一个版本过期都拦得住', () => {
       putAll(FRESH, { 'UnrealAgentLink52.zip': OLD })
-      expect(checkStaleness(FRESH, dist, null)).toBe(false)
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
     })
 
     it('有一个包没有构建标记 —— 判不了新旧，拦住', () => {
       putAll(FRESH, { 'UnrealAgentLink57.zip': null })
-      expect(checkStaleness(FRESH, dist, null)).toBe(false)
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
+    })
+
+    it('全套之外的额外包过期也拦住', () => {
+      putAll(FRESH)
+      putZip('UnrealAgentLink510.zip', OLD)
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
     })
 
     /** 一个包都没有不是「没发现问题」，是没东西可发 */
     it('一个分发包都没有 —— 拦住', () => {
-      expect(checkStaleness(FRESH, dist, null)).toBe(false)
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
     })
-  })
-
-  /**
-   * 混进 .pdb 和新旧无关，两档都拦。
-   *
-   * 日常那档放宽的是**覆盖面**，不是体积规则：150MB 那次事故里坏包是从一个
-   * 扩散到七个的，只盯 5.5 会让另外八个继续带着 16MB 的调试符号躺在仓库里。
-   */
-  it('不被要求新鲜的版本混进 .pdb —— 日常门禁照样拦住', () => {
-    putZip('UnrealAgentLink55.zip', FRESH)
-    putZip('UnrealAgentLink58.zip', FRESH, ['Binaries/Win64/UnrealEditor-UnrealAgentLink.pdb'])
-    expect(checkStaleness(FRESH, dist)).toBe(false)
   })
 
   it.each([

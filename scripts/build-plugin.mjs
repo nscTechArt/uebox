@@ -19,15 +19,16 @@
  *
  * 所以这里有两件事：出包，以及让「忘了出包」变成一个会响的错误。
  * 后者（比对源码指纹和 zip 里的 `.ual-build` 判新鲜度）的检查流程在
- * `scripts/plugin-check.mjs`：`pnpm plugin:check` / `pnpm plugin:check:all`，
- * 只做验证。格式约定本身（排除规则、zip 命名、构建标记、源码指纹）在
- * `scripts/plugin-package-format.mjs`。
+ * `scripts/plugin-check.mjs`：`pnpm plugin:check --engine <版本>` /
+ * `pnpm plugin:check --all`，只做验证。格式约定本身（排除规则、zip 命名、
+ * 构建标记、源码指纹）在 `scripts/plugin-package-format.mjs`。改本文件不触发
+ * 日常包检查，原因见 verify-plugin.mjs 顶部。
  *
  * ## 用法
  *
  *   node scripts/build-plugin.mjs --engine 5.5             # 出一个版本的包
  *   node scripts/build-plugin.mjs --engine 5.5 --project <uproject 路径>
- *   node scripts/plugin-check.mjs                          # 日常：只看 5.5
+ *   node scripts/plugin-check.mjs --engine 5.7             # 只检查指定包，不需要引擎
  *   node scripts/plugin-check.mjs --all                    # 发版：每个版本都要新鲜
  *
  * ## 为什么需要一个宿主工程

@@ -60,6 +60,9 @@ pnpm verify
 这一条命令跑完 CI 会跑的所有门禁，失败时会告诉你具体该改什么。
 它还会自动把 `better-sqlite3` 切回 Electron ABI，所以你可以直接接着 `pnpm dev`。
 
+无关 UI/文档改动不需要插件 ZIP 或 Unreal；改了插件打包输入，门禁需要指定目标版本
+（没装 Unreal 时声明 `none`），详见[打包指南](docs/contributing/packaging.zh-CN.md#日常门禁)。
+
 要出安装包、发版，或者被原生模块的 ABI 卡住，见
 [打包、发布与原生模块](docs/contributing/packaging.zh-CN.md)。
 
