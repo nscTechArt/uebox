@@ -33,7 +33,6 @@
     "plugin:check:all": "node scripts/build-plugin.mjs --check --all",
     "plugin:build": "node scripts/build-plugin.mjs",
     "plugin:build:all": "node scripts/build-all-plugins.mjs",
-    "plugin:release": "node scripts/release-plugin.mjs",
     "release:app": "node scripts/release-app.mjs",
     "release:dl": "node scripts/release-dl.mjs",
     "audit:prod": "pnpm audit --prod --audit-level=high --registry=https://registry.npmjs.org",

@@ -4,7 +4,7 @@
  *
  * ## 为什么不做成 GitHub Actions
  *
- * 跟 release-plugin.mjs 同一个理由，而且更硬：`pnpm build:win` 第一步就是
+ * 出包只能在本地：`pnpm build:win` 第一步就是
  * `plugin:build:all`，要八个引擎各编一遍；GitHub 托管的 runner 装不下，UE 的
  * 授权也不允许在公共 CI 上分发引擎。退一步说，就算跳过编插件，
  * `resources/plugins/*.zip` 根本没进 git（只有 ualink-config.json 进了），
