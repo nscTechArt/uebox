@@ -11,9 +11,7 @@ import { join } from 'path'
 
 import { awaitProjectLive } from '../agent-v3/tools/adapted/project/awaitProjectLive'
 import { watchEditorCrashes, type EditorWatchOptions } from '../agent-v3/core/team/editorWatch'
-import { projectPathKey } from '../agent-v3/core/projectPathKey'
 import { serviceManager } from '../services'
-import { INSPECT_DEADLINE_MS, recentEditorCrashes } from '../services/editorCrashWatch/watch'
 import { projectManager } from '../services/project'
 import UnrealProcessDetector from '../utils/UnrealProcessDetector'
 
@@ -29,45 +27,15 @@ async function ensurePlugin(uproject: string): Promise<void> {
 /** 重开之后最多等插件多久。大工程冷启动（着色器编译）要好几分钟 */
 const RECONNECT_WAIT_MS = 8 * 60_000
 
-/** 等盒子看门人下结论最多多久：它自己最多查 30 秒，留点余量 */
-const CRASH_VERDICT_WAIT_MS = INSPECT_DEADLINE_MS + 10_000
-
 /**
- * 盒子看门人对这次崩溃的处理结果（见 `EditorWatchDeps.crashHandledElsewhere`）。
- * 用户关了「编辑器崩溃后自动重开」时，工作室模式也不重开 —— 那是用户的设置。
+ * 盒子看门人不再自己重开（重开交给 Agent 决定），工作室模式这一局就是 Agent 在干活，
+ * 由看护自己重开。只有用户在设置里关了「崩溃后重开」时不开 —— 那是用户的设置。
  */
-async function crashHandledElsewhere(
-  projectDir: string,
-  since: number
-): Promise<'reopening' | { declined: string } | null> {
+async function crashHandledElsewhere(): Promise<{ declined: string } | null> {
   const { appSettingsManager } = await import('../appSettingsManager')
-  if (!appSettingsManager.getAutoRecoverEditorCrash()) {
-    return { declined: '用户在设置里关了「编辑器崩溃后自动重开」，需要用户自己打开工程' }
-  }
-  const key = projectPathKey(projectDir)
-  const deadline = Date.now() + CRASH_VERDICT_WAIT_MS
-  for (;;) {
-    const crash = recentEditorCrashes().find(
-      (c) => c.at >= since && projectPathKey(c.editor.projectDir) === key
-    )
-    if (crash) {
-      switch (crash.relaunch) {
-        case 'relaunched':
-        case 'already_running':
-          return 'reopening'
-        case 'crash_loop':
-          return { declined: '5 分钟内又崩了一次，不再自动重开，需要人看一眼' }
-        case 'no_uproject':
-          return { declined: '找不到工程的 .uproject，没法重开' }
-        case 'failed':
-          return { declined: `重开失败：${crash.relaunchError ?? '原因未知'}` }
-        default:
-          return { declined: '用户在设置里关了「编辑器崩溃后自动重开」，需要用户自己打开工程' }
-      }
-    }
-    if (Date.now() >= deadline) return null
-    await new Promise((resolve) => setTimeout(resolve, 1_000))
-  }
+  return appSettingsManager.getAutoRecoverEditorCrash()
+    ? null
+    : { declined: '用户在设置里关了「编辑器崩溃后重开」，需要用户自己打开工程' }
 }
 
 async function findUproject(projectDir: string): Promise<string | null> {

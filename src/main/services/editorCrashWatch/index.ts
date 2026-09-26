@@ -1,5 +1,5 @@
 /**
- * 把崩溃看门人接到真东西上：连接事件、进程表、shell.openPath、系统通知、设置。
+ * 把崩溃看门人接到真东西上：连接事件、进程表、shell.openPath、设置。
  *
  * 判定和收拾现场的逻辑在 `watch.ts`（依赖全注入，可测）；这里只做接线。
  */
@@ -7,21 +7,18 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
-import { Notification, shell } from 'electron'
+import { shell } from 'electron'
 
 import { appSettingsManager } from '../../appSettingsManager'
-import { findMainWindow } from '../../appWindows'
-import { showOrCreateMainWindow } from '../../mainWindowLifecycle'
 import UnrealProcessDetector from '../../utils/UnrealProcessDetector'
 import { logger } from '../logger'
 import { serviceManager } from '..'
 import { projectManager } from '../project'
 import type { ProjectInfo } from '../project/types'
 import { findFreshCrash } from './crashReport'
-import { crashNotice } from './notice'
 import { killProcess, listUnrealProcesses } from './processes'
 import { stashPackageRestoreData, unstashPackageRestoreData } from './restoreData'
-import { EditorCrashWatch, setActiveCrashWatch, type EditorCrash } from './watch'
+import { EditorCrashWatch, setActiveCrashWatch } from './watch'
 
 function normalizeDir(value: string): string {
   return path
@@ -59,15 +56,7 @@ async function attachProcess(watch: EditorCrashWatch, project: ProjectInfo): Pro
   }
 }
 
-function notify(crash: EditorCrash, createWindow: () => void): void {
-  if (!Notification.isSupported()) return
-  const { title, body } = crashNotice(crash, appSettingsManager.getLanguage())
-  const notification = new Notification({ title, body })
-  notification.on('click', () => showOrCreateMainWindow(findMainWindow, createWindow))
-  notification.show()
-}
-
-export function startEditorCrashWatch(createWindow: () => void = () => {}): () => void {
+export function startEditorCrashWatch(): () => void {
   const ws = serviceManager.getWebSocketService()
   const watch = new EditorCrashWatch({
     listProcesses: listUnrealProcesses,
@@ -78,7 +67,6 @@ export function startEditorCrashWatch(createWindow: () => void = () => {}): () =
     openProject: async (uprojectPath) => (await shell.openPath(uprojectPath)) || undefined,
     killProcess,
     autoRecover: () => appSettingsManager.getAutoRecoverEditorCrash(),
-    onCrash: (crash) => notify(crash, createWindow),
     now: () => Date.now(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.()),
     log: (message) => logger.info(`[EditorCrashWatch] ${message}`)

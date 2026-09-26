@@ -90,8 +90,12 @@ vi.mock('../../../../utils/UnrealPathManager', () => ({
   }
 }))
 
-vi.mock('../../../../services/editorCrashWatch/watch', () => ({
-  recentEditorCrashes: () => recentEditorCrashes()
+vi.mock('../../../../services/editorCrashWatch/watch', async (importOriginal) => ({
+  describeRelaunch: (
+    await importOriginal<typeof import('../../../../services/editorCrashWatch/watch')>()
+  ).describeRelaunch,
+  recentEditorCrashes: () => recentEditorCrashes(),
+  relaunchCrashedEditor: async () => null
 }))
 
 import { createSessionHealthTool } from './sessionHealth'
@@ -620,7 +624,7 @@ describe('最近的崩溃', () => {
 
     expect(summary.startsWith('**最近有编辑器崩溃')).toBe(true)
     expect(summary).toContain('EXCEPTION_ACCESS_VIOLATION')
-    expect(summary).toContain('自动重开了它')
+    expect(summary).toContain('重新打开了这个工程')
     expect(summary).toContain('UEBoxCrashRecovery')
     expect(summary).toContain('不要用同样的参数重试')
     expect(result.recent_crashes).toMatchObject([

@@ -23,11 +23,11 @@
  *
  * 一小时内最多重开 3 次：反复崩就别再拉起来了，停下交给人。
  *
- * ## 重开先让给盒子的崩溃看门人
+ * ## 和盒子的崩溃看门人的分工
  *
- * 盒子本身也有一个看门人（`services/editorCrashWatch`，对所有编辑器生效）。两边各自
- * 重开会开出两个编辑器，所以它认出崩溃时由它重开，这里只负责告诉制作人、等连回来；
- * 它没认成崩溃（没崩溃报告，比如进程被杀）时才由这里重开。见 `crashHandledElsewhere`。
+ * 盒子本身也有一个看门人（`services/editorCrashWatch`），它只把崩溃告诉正在等命令的 Agent，
+ * 不自己重开。这里是这一局在干的工程，由这里重开；`crashHandledElsewhere` 只用来尊重
+ * 用户在设置里关掉重开的选择。
  */
 
 import { projectPathKey } from '../projectPathKey'
