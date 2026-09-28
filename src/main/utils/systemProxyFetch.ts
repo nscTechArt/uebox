@@ -87,6 +87,22 @@ export function createProxyAwareFetch(deps: ProxyAwareFetchDeps): typeof fetch {
   return proxyAwareFetch as typeof fetch
 }
 
+/** 装好之后才有：诊断日志问「这个地址这会儿走哪条路」时用 */
+let routeResolver: ((url: string) => Promise<string>) | undefined
+
+/**
+ * 这个地址这会儿走直连还是系统代理。给诊断日志用，不影响请求本身。
+ *
+ * 连接被掐时这是第一个要分清的问题：走代理的请求由 Chromium 发，报错带 `net::`
+ * 前缀；中间多了一个本机代理，断开的可能是它而不是厂商。没装（测试、启动早期）
+ * 就回 undefined。
+ */
+export async function describeFetchRoute(url: string): Promise<string | undefined> {
+  if (!routeResolver) return undefined
+  const pac = await routeResolver(url)
+  return pacWantsProxy(pac) ? `proxy (${pac.split(';')[0].trim()})` : 'direct'
+}
+
 /**
  * 在 app ready 之后调用一次。
  *
@@ -96,6 +112,7 @@ export function createProxyAwareFetch(deps: ProxyAwareFetchDeps): typeof fetch {
 export async function installSystemProxyFetch(): Promise<void> {
   const { session } = await import('electron')
   const ses = session.fromPartition('uebox-main-fetch')
+  routeResolver = (url) => ses.resolveProxy(url)
   globalThis.fetch = createProxyAwareFetch({
     directFetch: globalThis.fetch.bind(globalThis),
     proxiedFetch: ((input, init) =>

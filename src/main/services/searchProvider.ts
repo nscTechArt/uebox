@@ -1,5 +1,6 @@
 import { resolveApiKey } from '../ai/credentials'
 import { readSettings } from '../ai/store'
+import { BUILTIN_BROWSER_PROVIDER_ID } from '../../shared/aiProvider'
 
 /**
  * 「网页检索走哪条路」的解析。
@@ -13,7 +14,7 @@ import { readSettings } from '../ai/store'
  */
 
 /** 目录里预置的三条。用户自定义的 Provider 会是别的 id */
-export const BUILTIN_BROWSER_PROVIDER_ID = 'builtin-browser'
+export { BUILTIN_BROWSER_PROVIDER_ID }
 export const SEARXNG_PROVIDER_ID = 'searxng'
 export const JINA_SEARCH_PROVIDER_ID = 'jina-search'
 
@@ -38,6 +39,9 @@ export async function resolveSearchProvider(): Promise<ResolvedSearchProvider | 
     const settings = await readSettings()
     const binding = settings.roles.search
     if (!binding) return null
+    if (binding.providerId === BUILTIN_BROWSER_PROVIDER_ID) {
+      return { providerId: BUILTIN_BROWSER_PROVIDER_ID, modelId: binding.modelId, baseUrl: '' }
+    }
 
     const provider = settings.providers.find((item) => item.id === binding.providerId)
     if (!provider) return null

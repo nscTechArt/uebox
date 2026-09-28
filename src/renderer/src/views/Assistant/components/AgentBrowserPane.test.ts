@@ -85,6 +85,16 @@ afterEach(() => {
 })
 
 describe('浏览器分割线', () => {
+  it('body 下的浮层压到面板时收起原生视图，浮层关闭后恢复', async () => {
+    const overlay = document.createElement('div')
+    document.body.appendChild(overlay)
+    await paint()
+    expect(setBounds).toHaveBeenLastCalledWith(null, 'session-a')
+    overlay.remove()
+    await paint()
+    expect(setBounds).toHaveBeenLastCalledWith(expect.objectContaining({ width: 520 }), 'session-a')
+  })
+
   it('审查复用侧栏并隐藏浏览器原生视图，切回后恢复', async () => {
     await wrapper.setProps({
       reviewOpen: true,

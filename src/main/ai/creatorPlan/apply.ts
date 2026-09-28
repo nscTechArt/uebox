@@ -36,6 +36,12 @@ import {
 } from '../../../shared/creatorPlan'
 import type { AiProviderSettings, ApiKeyRef, ProviderConfig } from '../types'
 
+import {
+  PLAN_PRICING_HEADER,
+  parsePlanPricing,
+  parseVideoPricing
+} from '../../../shared/creatorPlanPricing'
+
 export { PLAN_PROVIDER_ID, isPlanProvider }
 export const PLAN_KEY_ID = 'creator-plan:key'
 
@@ -213,6 +219,17 @@ export function planProviders(manifest: CreatorPlanManifest, apiKey: ApiKeyRef):
     if (!models.has(spec.model)) models.set(spec.model, toModelConfig(role, spec))
     byKind.set(kind, models)
   }
+  const pricing: Record<string, { version: string }> = parsePlanPricing(manifest.route_pricing)
+  const video = parseVideoPricing(manifest.video_pricing)
+  if (video) pricing['uebox-video'] = video
+  const headersFor = (models: Map<string, ModelConfig>): Record<string, string> | undefined => {
+    const versions = [
+      ...new Set([...models.keys()].flatMap((id) => (pricing[id] ? [pricing[id].version] : [])))
+    ]
+    if (versions.length > 1)
+      throw new Error('This client requires a shared pricing version per provider')
+    return versions[0] ? { [PLAN_PRICING_HEADER]: versions[0] } : undefined
+  }
   return [...byKind.entries()].map(([kind, models]) => ({
     id: PLAN_PROVIDER_IDS[kind],
     displayName: PLAN_DISPLAY_NAME,
@@ -221,6 +238,7 @@ export function planProviders(manifest: CreatorPlanManifest, apiKey: ApiKeyRef):
     baseUrl: manifest.api.base_url,
     apiKey,
     ...PLAN_PROVIDER_EXTRA[kind],
+    ...(headersFor(models) ? { headers: headersFor(models) } : {}),
     models: [...models.values()]
   }))
 }
@@ -283,8 +301,29 @@ export function planSummary(manifest: CreatorPlanManifest): CreatorPlanSummary {
     manageUrl: manifest.plan.manage_url,
     cooldownEndsAt:
       typeof manifest.plan.cooldown_ends_at === 'string' ? manifest.plan.cooldown_ends_at : null,
-    quotas: planQuotas(manifest)
+    quotas: planQuotas(manifest),
+    ...(manifest.video_pricing ? { videoPricing: parseVideoPricing(manifest.video_pricing) } : {}),
+    ...(manifest.route_pricing ? { routePricing: parsePlanPricing(manifest.route_pricing) } : {})
   }
+}
+
+/** 比较已保存的接受版本；后台刷新只更新能力，绝不更新这个请求头。 */
+export function planPricingNeedsAcceptance(
+  settings: AiProviderSettings,
+  manifest: CreatorPlanManifest | null
+): boolean {
+  if (!manifest) return false
+  const pricing: Record<string, { version: string }> = parsePlanPricing(manifest.route_pricing)
+  const video = parseVideoPricing(manifest.video_pricing)
+  if (video) pricing['uebox-video'] = video
+  return settings.providers
+    .filter((provider) => isPlanProvider(provider.id))
+    .some((provider) =>
+      provider.models.some(
+        (model) =>
+          pricing[model.id] && provider.headers?.[PLAN_PRICING_HEADER] !== pricing[model.id].version
+      )
+    )
 }
 
 /** 导入预览：套餐能接的每个角色，现在是什么、默认勾不勾 */

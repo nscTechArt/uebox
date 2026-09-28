@@ -5,7 +5,7 @@ import {
   type Message,
   type ThinkingLevel
 } from '@earendil-works/pi-ai'
-import { toPiProvider } from '../agent-v3/core/piModel'
+import { thinkingOffFields, toPiProvider } from '../agent-v3/core/piModel'
 import {
   ModelNotConfiguredError,
   describeMissingRole,
@@ -164,10 +164,13 @@ export async function complete(
     ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
     ...(request.samplingParams ? { samplingParams: request.samplingParams } : {})
   }
-  // 思考档位只有 simple 那条路认。`off` 不在 pi 的类型里但运行时认，理由见 streamFn 的 toPiReasoning
+  // 思考档位只有 simple 那条路认。`off` 不在 pi 的类型里但运行时认，理由见 streamFn 的 toPiReasoning。
+  // 有几家光靠 `off` 关不掉，得在请求体里补自家字段（见 piModel 的 thinkingOffFields）
+  const offFields = request.reasoning === 'off' ? thinkingOffFields(provider.baseUrl) : undefined
   const message = request.reasoning
     ? await models.completeSimple(model, context, {
         ...options,
+        ...(offFields ? { samplingParams: { ...options.samplingParams, ...offFields } } : {}),
         reasoning: request.reasoning as unknown as ThinkingLevel
       })
     : await models.complete(model, context, options)

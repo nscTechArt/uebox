@@ -256,6 +256,33 @@ const ENDPOINT_QUIRKS: readonly {
   }
 ]
 
+/**
+ * 几家「默认就思考、关掉要发自家字段」的 OpenAI 兼容端点。
+ *
+ * 我们请模型别思考时传的是 `reasoning: 'off'`。pi 对名单外的端点按 OpenAI 原样处理：
+ * `off` 就是**什么都不发** —— 对 OpenAI 那是对的（不发 reasoning_effort 就不想），
+ * 对这几家却等于「按默认来」，而它们的默认是想。结果是静默的：轻量任务照样先想
+ * 十几秒，口播稿压缩次次超时、退回念原文，「简洁」听起来和「完整」一样。
+ *
+ * 不借 pi 的 `thinkingFormat: 'deepseek'`（它发的正是同一个字段）：那一档在**没给**
+ * 思考档位时也会发 disabled，输入框里的「自动」就从「按模型默认」变成了「不想」。
+ * 这里只在明确要 `off` 时补这一个字段，别的档位原样交给 pi。
+ *
+ * 同 ENDPOINT_QUIRKS，按 baseUrl 匹配；加一家要先看它的官方参数表。
+ */
+const THINKING_OFF_FIELDS: readonly { match: RegExp; body: Record<string, unknown> }[] = [
+  {
+    // 小米 MiMo（按量 api. 与 Token Plan token-plan-cn. 两个入口）。v2.5 / v2.6 默认开思考
+    match: /\.xiaomimimo\.com/i,
+    body: { thinking: { type: 'disabled' } }
+  }
+]
+
+/** 请这个端点别思考时，要并进请求体的字段。不需要额外字段的端点回 undefined */
+export function thinkingOffFields(baseUrl: string): Record<string, unknown> | undefined {
+  return THINKING_OFF_FIELDS.find((item) => item.match.test(baseUrl))?.body
+}
+
 function compatFor(provider: ProviderConfig, model: ModelConfig): Model<Api>['compat'] {
   /*
    * 自适应思考只有 Anthropic 那条路读得懂（`anthropic-messages` 与 Bedrock 的

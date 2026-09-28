@@ -565,6 +565,29 @@ describe('agentEventDispatcher', () => {
       unregisterAgentHandler(SID)
     })
 
+    // 连接断了、主进程过几秒自动接着跑：不说一声，用户看到的是停了半分钟又自己动起来
+    it('自动续跑时说明等多久、第几次，并且不当成出错', () => {
+      const onNotifyUsers = vi.fn()
+      const onError = vi.fn()
+      registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers, onError })
+
+      bus.emit('agent-v3:auto-resume', {
+        sessionId: SID,
+        attempt: 1,
+        maxAttempts: 2,
+        delayMs: 10_000
+      })
+
+      expect(onNotifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: expect.stringMatching(/10.*1\/2/)
+        })
+      )
+      expect(onError).not.toHaveBeenCalled()
+      unregisterAgentHandler(SID)
+    })
+
     it('工具进度带上工具名', () => {
       const onNotifyUsers = vi.fn()
       registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })

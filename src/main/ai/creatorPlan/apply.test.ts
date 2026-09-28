@@ -599,3 +599,74 @@ describe('source 字段落盘', () => {
     expect(settings.roles.agent).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
   })
 })
+
+describe('accepted route prices', () => {
+  it('video prices need explicit acceptance; refresh keeps the accepted version', async () => {
+    const { PLAN_PRICING_HEADER } = await import('../../../shared/creatorPlanPricing')
+    const { planPricingNeedsAcceptance } = await import('./apply')
+    const video = {
+      version: 'vp-one',
+      unit: 'second' as const,
+      settlement: 'actual' as const,
+      variants: { '720p': { minimum: 2, maximum: 4 } }
+    }
+    const manifest = { ...fullManifest, video_pricing: video }
+    const legacy = applyPlan(base, fullManifest, keyRef, ['video'])
+    expect(planPricingNeedsAcceptance(legacy, manifest)).toBe(true)
+    const accepted = normalizeSettings(applyPlan(legacy, manifest, keyRef, ['video']))
+    expect(
+      accepted.providers.find((p) => p.id === PLAN_PROVIDER_IDS.video)?.headers?.[
+        PLAN_PRICING_HEADER
+      ]
+    ).toBe('vp-one')
+    expect(planPricingNeedsAcceptance(accepted, manifest)).toBe(false)
+    const changed = { ...manifest, video_pricing: { ...video, version: 'vp-two' } }
+    const refreshed = refreshPlanModels(accepted, changed)
+    expect(
+      refreshed.providers.find((p) => p.id === PLAN_PROVIDER_IDS.video)?.headers?.[
+        PLAN_PRICING_HEADER
+      ]
+    ).toBe('vp-one')
+    expect(planPricingNeedsAcceptance(refreshed, changed)).toBe(true)
+    expect(planSummary(changed).videoPricing).toEqual(changed.video_pricing)
+    expect(
+      planPricingNeedsAcceptance(applyPlan(refreshed, changed, keyRef, ['video']), changed)
+    ).toBe(false)
+  })
+  const price = {
+    version: 'rp-one',
+    unit: 'token' as const,
+    minimum: { input: 2, cached_input: 0.5, output: 4 },
+    maximum: { input: 20, cached_input: 5, output: 40 }
+  }
+  const priced: CreatorPlanManifest = { ...manifest, route_pricing: { 'uebox-chat': price } }
+  it('acceptance survives settings normalization and automatic price refresh', async () => {
+    const { PLAN_PRICING_HEADER } = await import('../../../shared/creatorPlanPricing')
+    const { planPricingNeedsAcceptance } = await import('./apply')
+    const accepted = normalizeSettings(applyPlan(base, priced, keyRef, ['chat']))
+    const provider = accepted.providers.find((p) => p.id === PLAN_PROVIDER_ID)!
+    expect(provider.headers?.[PLAN_PRICING_HEADER]).toBe('rp-one')
+    expect(planPricingNeedsAcceptance(accepted, priced)).toBe(false)
+    const changed = { ...priced, route_pricing: { 'uebox-chat': { ...price, version: 'rp-two' } } }
+    const refreshed = refreshPlanModels(accepted, changed)
+    expect(
+      refreshed.providers.find((p) => p.id === PLAN_PROVIDER_ID)?.headers?.[PLAN_PRICING_HEADER]
+    ).toBe('rp-one')
+    expect(planPricingNeedsAcceptance(refreshed, changed)).toBe(true)
+    const confirmed = applyPlan(refreshed, changed, keyRef, ['chat'])
+    expect(planPricingNeedsAcceptance(confirmed, changed)).toBe(false)
+    expect(planSummary(changed).routePricing).toEqual(changed.route_pricing)
+  })
+  it('new pricing requires acceptance for a legacy connected provider', async () => {
+    const { planPricingNeedsAcceptance } = await import('./apply')
+    const legacy = applyPlan(base, manifest, keyRef, ['chat'])
+    expect(planPricingNeedsAcceptance(legacy, priced)).toBe(true)
+    expect(planPricingNeedsAcceptance(legacy, manifest)).toBe(false)
+  })
+  it('the accepted version reaches the actual chat model configuration', async () => {
+    const { toPiModel } = await import('../../agent-v3/core/piModel')
+    const provider = planProviders(priced, keyRef)[0]!
+    const model = toPiModel(provider, provider.models.find((m) => m.id === 'uebox-chat')!)
+    expect(model.headers).toMatchObject({ 'X-UEBox-Pricing-Version': 'rp-one' })
+  })
+})

@@ -317,7 +317,6 @@
         <input
           ref="fileInputRef"
           type="file"
-          accept=".bmp,.jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.docm,.ppt,.pps,.pot,.pptx,.pptm,.ppsx,.ppsm,.odt,.ods,.odp,.rtf,.epub,.xlsx,.xls,.txt,.md,.csv,.json,.mp4,.mov,.webm,.mkv,.avi,.m4v,.mp3,.wav,.flac,.ogg,.m4a,.aac,.opus,.aiff"
           multiple
           hidden
           @change="handleFileSelect"
@@ -2050,6 +2049,9 @@ async function handleFileSelect(event: Event): Promise<void> {
  * **认不出的格式要出声**。这里从前是静默丢弃：用户拖一个 mp4 进来，
  * 没有提示、没有气泡，只看见什么都没发生，于是转头去问 AI「你为什么读不了」，
  * 而 AI 也不知道有文件来过。宁可弹一句「这个格式收不了」，也不要装作无事发生。
+ *
+ * 白名单外的格式也收：拿得到本地路径就只把路径交给模型，读不读得了是它的事
+ * （见 `addDocFiles` 的「只给路径」那一支）。真正收不了的只剩网页里拖来、没有路径的。
  */
 async function routeFiles(files: File[]): Promise<void> {
   const imageFiles: File[] = []
@@ -2069,6 +2071,8 @@ async function routeFiles(files: File[]): Promise<void> {
       docFiles.push(file)
     } else if (file.type.startsWith('image/')) {
       imageFiles.push(file)
+    } else if (window.api.getPathForFile(file)) {
+      docFiles.push(file)
     } else {
       rejected.push(file.name)
     }
@@ -2343,6 +2347,14 @@ async function addDocFiles(files: File[]): Promise<void> {
           deferredMedia: mediaKind
         })
         void startMediaUpload(filePath, file.name)
+      } else if (filePath && !CHAT_DOC_EXTENSIONS.has(ext)) {
+        // 白名单外的格式不预解析，只给路径：agent 有读文件的工具，读不读得了由它判断
+        setPending({
+          ...pending,
+          filePath,
+          parsing: false,
+          content: t('assistantInputComposer.pathOnlyAttachment', { name: file.name, path: filePath })
+        })
       } else if (filePath) {
         // 进度回调按这条路径认领对应的那一格，所以要先记下来再发起解析
         setPending({ ...pending, filePath })

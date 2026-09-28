@@ -27,6 +27,7 @@ import {
   type VideoApi
 } from '../../shared/aiProvider'
 import { findCatalogEntry } from './catalog'
+import { BUILTIN_BROWSER_PROVIDER_ID } from '../../shared/aiProvider'
 
 /**
  * `models.json` 读写。
@@ -447,8 +448,10 @@ function normalizeRoles(raw: unknown, providers: ProviderConfig[]): AiProviderSe
 
     // 指向已删除的 provider 的绑定直接丢弃 —— 留着只会在调用时报一个
     // 「provider 不存在」的费解错误，不如让它表现为「未配置」。
+    // 内置浏览器不用添加，绑定可以直接指向它
+    const builtin = role === 'search' && providerId === BUILTIN_BROWSER_PROVIDER_ID
     const provider = providers.find((item) => item.id === providerId)
-    if (!provider) {
+    if (!provider && !builtin) {
       console.warn(`[AI 配置] 角色 ${role} 指向不存在的 provider «${providerId}»，已忽略`)
       continue
     }

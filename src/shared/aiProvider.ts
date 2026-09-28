@@ -331,6 +331,13 @@ export type ProviderKind =
    */
   | 'judge'
 
+/**
+ * 内置浏览器检索。它不需要地址、不需要密钥，**也不需要用户添加** ——
+ * 不进服务商列表、不进「添加服务商」目录，`search` 角色直接就能选它；
+ * 角色绑定指向它时不要求 providers 里有这一条。
+ */
+export const BUILTIN_BROWSER_PROVIDER_ID = 'builtin-browser'
+
 export const PROVIDER_KINDS: readonly ProviderKind[] = Object.freeze([
   'chat',
   'embedding',

@@ -176,6 +176,9 @@ function failProbe(error: unknown): { ok: false; error: ProbeFailure } {
   return { ok: false, error: { code: 'unknown', raw: message } }
 }
 
+/** 正在进行的那次账号登录；取消、窗口销毁、新登录都靠它把后台轮询停掉 */
+let pendingOAuth: AbortController | null = null
+
 export function registerAiProviderIPC(): void {
   registerSpeechIPC()
   registerCreatorPlanIPC()
@@ -283,11 +286,23 @@ export function registerAiProviderIPC(): void {
     'ai-provider:oauth-login',
     async (event, oauthProvider: string, draft: ProviderDraft) => {
       if (isPlanProvider(String(draft?.id ?? ''))) return PLAN_READ_ONLY
+      // 同一时间只跑一次登录：新的一次把上一次顶掉（上一次可能是窗口关了没人管的那个）
+      pendingOAuth?.abort()
+      const controller = new AbortController()
+      pendingOAuth = controller
+      const onGone = (): void => controller.abort()
+      event.sender.once('destroyed', onGone)
       try {
-        const tokens = await runOAuthLogin(oauthProvider, (prompt) => {
-          // 设备码流程要把这串码显示给用户，只能靠事件推出去
-          event.sender.send('ai-provider:oauth-device-code', prompt)
-        })
+        const tokens = await runOAuthLogin(
+          oauthProvider,
+          (prompt) => {
+            // 设备码流程要把这串码显示给用户，只能靠事件推出去
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('ai-provider:oauth-device-code', prompt)
+            }
+          },
+          controller.signal
+        )
 
         if (yieldsPermanentKey(oauthProvider)) {
           return { ok: true, data: { key: tokens.accessToken } }
@@ -314,9 +329,18 @@ export function registerAiProviderIPC(): void {
       } catch (error) {
         if (error instanceof OAuthCancelledError) return { ok: false, error: error.message }
         return fail(error)
+      } finally {
+        if (pendingOAuth === controller) pendingOAuth = null
+        if (!event.sender.isDestroyed()) event.sender.off('destroyed', onGone)
       }
     }
   )
+
+  /** 用户关掉设备码弹窗 / 点了取消：别让主进程在后台继续轮询到超时 */
+  ipcMain.handle('ai-provider:oauth-cancel', () => {
+    pendingOAuth?.abort()
+    pendingOAuth = null
+  })
 
   console.log('[AI Provider IPC] 处理器已注册')
 }

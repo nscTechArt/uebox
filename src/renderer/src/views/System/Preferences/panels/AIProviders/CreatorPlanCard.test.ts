@@ -99,7 +99,7 @@ describe('CreatorPlanCard', () => {
     stubApi()
     const wrapper = mount(CreatorPlanCard, { global: { stubs } })
     await flushPromises()
-    expect(wrapper.text()).toContain('一个订阅配好多个角色')
+    expect(wrapper.text()).toContain('使用盒子提供的订阅服务轻松配置所有模型')
     expect(wrapper.text()).toContain('连接')
     expect(wrapper.text()).not.toContain('断开')
   })
@@ -352,5 +352,75 @@ describe('CreatorPlanCard 非对话角色', () => {
       .trigger('click')
     await flushPromises()
     expect(wrapper.text()).not.toContain('知识库按新模型重建向量')
+  })
+})
+
+describe('route price acceptance', () => {
+  it('video-only pricing explains over-balance settlement before acceptance', async () => {
+    const videoPricing = {
+      version: 'vp-one',
+      unit: 'second' as const,
+      settlement: 'actual' as const,
+      variants: { '720p': { minimum: 2, maximum: 4 } }
+    }
+    const data = { ...preview, summary: { ...preview.summary, videoPricing } }
+    const api = stubApi({ connect: vi.fn(async () => ({ ok: true, data })) })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '连接')!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.plan-prices').text()).toContain('2–4 Credits/s')
+    expect(wrapper.find('.plan-prices').text()).toContain('超过余额')
+    expect(wrapper.find('.modal-ok').text()).toBe('接受价格并应用')
+    expect(api.apply).not.toHaveBeenCalled()
+    await wrapper.find('.modal-ok').trigger('click')
+    await flushPromises()
+    expect(api.apply).toHaveBeenCalledTimes(1)
+  })
+  const routePricing = {
+    'uebox-chat': {
+      version: 'rp-one',
+      unit: 'token' as const,
+      minimum: { input: 2, cached_input: 0.5, output: 4 },
+      maximum: { input: 20, cached_input: 5, output: 40 }
+    }
+  }
+  it('shows the full range and waits for user acceptance before applying', async () => {
+    const data = { ...preview, summary: { ...preview.summary, routePricing } }
+    const api = stubApi({ connect: vi.fn(async () => ({ ok: true, data })) })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '连接')!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.plan-prices').text()).toContain('2–20 Credits/token')
+    expect(wrapper.find('.plan-prices').text()).toContain('0.5–5 Credits/token')
+    expect(wrapper.find('.plan-prices').text()).toContain('4–40 Credits/token')
+    expect(api.apply).not.toHaveBeenCalled()
+    expect(wrapper.find('.modal-ok').text()).toBe('接受价格并应用')
+    await wrapper.find('.modal-ok').trigger('click')
+    await flushPromises()
+    expect(api.apply).toHaveBeenCalledTimes(1)
+  })
+  it('shows a reimport reminder for changed prices without accepting them', async () => {
+    const api = stubApi({
+      state: vi.fn(async () => ({
+        ok: true,
+        data: {
+          ...connected,
+          pricingNeedsAcceptance: true,
+          summary: { ...connected.summary!, routePricing }
+        }
+      }))
+    })
+    const wrapper = mount(CreatorPlanCard, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('当前价格尚未确认')
+    expect(api.apply).not.toHaveBeenCalled()
   })
 })

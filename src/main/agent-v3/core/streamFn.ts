@@ -24,7 +24,7 @@ import {
 } from '../../ai/resolveModel'
 import type { AiProviderSettings, ModelRequest, ModelRole } from '../../ai/types'
 import { classifyProviderError } from '../host/providerError'
-import { toPiProvider } from './piModel'
+import { thinkingOffFields, toPiProvider } from './piModel'
 import { labelToolResultImages } from './toolImageLabels'
 import {
   contextHasMediaRefs,
@@ -379,7 +379,13 @@ export async function resolveAgentModel(
       const outgoing = labeled === replaced.messages ? replaced : { ...replaced, messages: labeled }
       const hasMedia = contextHasMediaRefs(outgoing)
       const previousOnPayload = options?.onPayload
-      const baseOptions = { ...options, ...(reasoning ? { reasoning } : {}) }
+      // 「不思考」在有几家端点上光传 off 不管用，要补自家字段（见 thinkingOffFields）
+      const offFields = thinkingLevel === 'off' ? thinkingOffFields(model.baseUrl) : undefined
+      const baseOptions = {
+        ...options,
+        ...(reasoning ? { reasoning } : {}),
+        ...(offFields ? { samplingParams: { ...options?.samplingParams, ...offFields } } : {})
+      }
       const firstTry = models.streamSimple(model, outgoing, {
         ...baseOptions,
         ...(hasMedia

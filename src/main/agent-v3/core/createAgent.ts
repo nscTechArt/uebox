@@ -84,6 +84,7 @@ import { PRODUCER } from './team/teamStore'
 import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
 import { createStatusTool } from './team/teamStatus'
 import { pacedStreamFn, stallGuardStreamFn, type PacedStreamDeps } from './team/requestGate'
+import { diagnosedStreamFn, formatRequestRecord } from './requestDiagnostics'
 
 /**
  * 一次引擎体检的结果 —— 「此刻这条会话够不够得着引擎，够得着的是哪个工程」。
@@ -261,6 +262,11 @@ export interface SessionContext {
    * 几个队员同时请模型时，按网关的实际承受力排队，卡死的请求退避重发。
    */
   pacedRequests?: boolean
+  /**
+   * 这一轮已经自动续跑了几次（`core/autoResume.ts`）。只进诊断日志，
+   * 断线之后回头查能分清「第一次请求」和「续跑出去的那次」
+   */
+  autoResumeAttempt?: () => number
   /** 子 agent 的工具命名空间白名单 */
   namespaces?: string[]
   /**
@@ -636,13 +642,25 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   // 工作室模式：模型请求按网关的实际反应自适应排队、卡死重发（见 `core/team/requestGate.ts`）。
   // 子 agent 经 `...parent` 继承这个开关，队员、验收员、`task` 子任务共用同一个名额池。
   // 普通会话不排队，只防「发出去就没回音」：网关不回响应头时到点重发，而不是干等到它断开
+  //
+  // 两处都写进本地日志文件，不用 console：主进程的 console 不进 `unreal-agent.log`，
+  // 打包后等于没写 —— 真机断线之后回头查，这里原先一行都找不到
+  const { logger } = await import('../../services/electronLog')
+  const { describeFetchRoute } = await import('../../utils/systemProxyFetch')
   const onRetry: PacedStreamDeps['onRetry'] = ({ attempt, reason, model }) =>
-    console.warn(
+    logger.warn(
       `[AgentV3] 会话 ${ctx.sessionId} 模型请求第 ${attempt} 次重发（${model.provider}/${model.id}）：${reason.slice(0, 160)}`
     )
+  // 诊断包在最里层：卡死重发的每一次尝试都是一次真实请求，各记一行
+  const diagnosed = diagnosedStreamFn(runtime.streamFn, {
+    sessionId: ctx.sessionId,
+    resumeAttempt: () => ctx.autoResumeAttempt?.() ?? 0,
+    sink: (record) => logger.info(formatRequestRecord(record)),
+    describeRoute: describeFetchRoute
+  })
   const streamFn = ctx.pacedRequests
-    ? pacedStreamFn(runtime.streamFn, { onRetry })
-    : stallGuardStreamFn(runtime.streamFn, { onRetry })
+    ? pacedStreamFn(diagnosed, { onRetry })
+    : stallGuardStreamFn(diagnosed, { onRetry })
 
   // skill 清单在 system prompt 里常驻，正文按需加载（渐进披露）。
   // 子 agent 复用父 agent 已经发现的清单，不重复扫盘。

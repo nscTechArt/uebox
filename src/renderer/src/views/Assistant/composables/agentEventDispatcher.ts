@@ -31,6 +31,7 @@ import { usePendingApprovalsStore } from '@renderer/store/modules/pendingApprova
 import type { AgentTurnUsage } from '@core/shared/agentUsage'
 import type { AgentQuestion, AgentQuestionAction } from '@core/shared/agentQuestion'
 import { agentV3API } from '@renderer/api/agentV3'
+import i18n from '@renderer/i18n'
 import { isTypingPlaceholder } from '@renderer/utils/typingPlaceholder'
 
 /**
@@ -560,6 +561,25 @@ export function initAgentEventDispatcher(): void {
     if (!data?.sessionId || !data.message) return
     notify(data.sessionId, data.message, data.level || 'info')
   })
+
+  // ── 连接中途断了，主进程自动接着跑 ────────────────────────────────
+  // 这一轮没结束：失败卡片不会出现，这里只说一声为什么停了一会儿
+  on(
+    'agent-v3:auto-resume',
+    (data: { sessionId: string; attempt: number; maxAttempts: number; delayMs: number }) => {
+      if (!data?.sessionId) return
+      getStreamStore().flushBuffer(data.sessionId)
+      notify(
+        data.sessionId,
+        i18n.global.t('assistant.agentMode.autoResume', {
+          seconds: Math.round(data.delayMs / 1000),
+          attempt: data.attempt,
+          max: data.maxAttempts
+        }),
+        'warning'
+      )
+    }
+  )
 
   // ── 结束 ────────────────────────────────────────────────────────────
   on('agent-v3:done', (data: { sessionId: string }) => {

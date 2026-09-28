@@ -215,7 +215,11 @@ export async function refreshOAuthTokens(
  * 用**系统浏览器**而不是内嵌窗口：用户能看见真实地址栏，确认自己是在给
  * 对方站点授权，而不是给我们伪造的页面。
  */
-async function runPkceLogin(providerId: string, spec: PkceProviderSpec): Promise<OAuthTokens> {
+async function runPkceLogin(
+  providerId: string,
+  spec: PkceProviderSpec,
+  signal?: AbortSignal
+): Promise<OAuthTokens> {
   const { verifier, challenge } = createPkcePair()
   const state = randomBytes(32).toString('base64url')
   // 没有固定路径要求时随机化：本机上别的程序猜不到该往哪儿发伪造的授权码
@@ -229,12 +233,16 @@ async function runPkceLogin(providerId: string, spec: PkceProviderSpec): Promise
       if (settled) return
       settled = true
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
       server.close()
       if (error) rejectPromise(error)
       else resolvePromise(tokens as OAuthTokens)
     }
 
     const timer = setTimeout(() => finish(new Error('授权超时，请重试')), AUTH_TIMEOUT_MS)
+    const onAbort = (): void => finish(new OAuthCancelledError())
+    if (signal?.aborted) return onAbort()
+    signal?.addEventListener('abort', onAbort)
 
     server.on('request', (req, res) => {
       const url = new URL(req.url || '/', 'http://127.0.0.1')
@@ -373,7 +381,8 @@ export interface DeviceCodePrompt {
  */
 async function runDeviceLogin(
   spec: DeviceProviderSpec,
-  onPrompt: (prompt: DeviceCodePrompt) => void
+  onPrompt: (prompt: DeviceCodePrompt) => void,
+  signal?: AbortSignal
 ): Promise<OAuthTokens> {
   const initBody = new URLSearchParams({ client_id: spec.clientId })
   if (spec.scope) initBody.set('scope', spec.scope)
@@ -381,7 +390,8 @@ async function runDeviceLogin(
   const initResponse = await fetch(spec.deviceAuthorizationUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: initBody
+    body: initBody,
+    signal
   })
   if (!initResponse.ok) {
     throw new Error(`发起设备授权失败：HTTP ${initResponse.status}`)
@@ -406,7 +416,7 @@ async function runDeviceLogin(
   const deadline = Date.now() + (Number(init.expires_in) || 600) * 1000
 
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, intervalMs))
+    await sleep(intervalMs, signal)
 
     const pollBody = new URLSearchParams({
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
@@ -416,7 +426,8 @@ async function runDeviceLogin(
     const response = await fetch(spec.tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: pollBody
+      body: pollBody,
+      signal
     })
     const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
 
@@ -446,10 +457,35 @@ async function runDeviceLogin(
  */
 export async function runOAuthLogin(
   providerId: string,
-  onPrompt: (prompt: DeviceCodePrompt) => void = () => {}
+  onPrompt: (prompt: DeviceCodePrompt) => void = () => {},
+  signal?: AbortSignal
 ): Promise<OAuthTokens> {
   const spec = OAUTH_PROVIDERS[providerId]
   if (!spec) throw new Error(`${providerId} 不支持 OAuth 登录`)
 
-  return spec.grant === 'device' ? runDeviceLogin(spec, onPrompt) : runPkceLogin(providerId, spec)
+  try {
+    return spec.grant === 'device'
+      ? await runDeviceLogin(spec, onPrompt, signal)
+      : await runPkceLogin(providerId, spec, signal)
+  } catch (error) {
+    // fetch 被中止时抛的是 AbortError，统一成"已取消"，上层不当失败处理
+    if (signal?.aborted) throw new OAuthCancelledError()
+    throw error
+  }
+}
+
+/** 可被中止的等待：设备码轮询间隔里用户点了取消，要立刻停，不能再睡 5 秒 */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new OAuthCancelledError())
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(new OAuthCancelledError())
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }

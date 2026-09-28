@@ -54,7 +54,9 @@ const stubs = {
   'a-skeleton': { template: '<div class="skeleton-card" />' },
   'a-skeleton-button': { template: '<div class="skeleton-select" />' },
   ModelManagerModal: { template: '<div />' },
-  ProviderCatalogModal: { template: '<div />' }
+  ProviderCatalogModal: { template: '<div />' },
+  // 套餐卡片一挂上就要走 IPC 问状态
+  CreatorPlanCard: { template: '<div class="plan-card-stub" />' }
 }
 
 const loadedSettings: SettingsView = {
@@ -329,7 +331,7 @@ describe('套餐来源只读', () => {
     ]
   }
 
-  it('套餐来源显示「由 Box Plan 管理」，点了不开编辑弹窗而是打开目录的 Box Plan 页；别的来源照常能点', async () => {
+  it('套餐卡片在服务商之前；套餐来源显示「由 Box Plan 管理」，点了不开任何弹窗；别的来源照常能点', async () => {
     stubAiProviderApi({ getSettings: vi.fn(async () => withPlan) })
     const wrapper = mount(AIProviderSettings, {
       global: {
@@ -340,20 +342,22 @@ describe('套餐来源只读', () => {
             template: '<div class="manager" :data-open="String(open)" />'
           },
           ProviderCatalogModal: {
-            props: ['visible', 'initialTab'],
-            template: '<div class="catalog" :data-open="String(visible)" :data-tab="initialTab" />'
+            props: ['visible'],
+            template: '<div class="catalog" :data-open="String(visible)" />'
           }
         }
       }
     })
     await flushPromises()
 
+    const html = wrapper.html()
+    expect(html.indexOf('plan-card-stub')).toBeLessThan(html.indexOf('data-provider-id'))
+
     const plan = wrapper.find('[data-provider-id="creator-plan"]')
     expect(plan.text()).toContain('由 Box Plan 管理')
     await plan.trigger('click')
     expect(wrapper.find('.manager').attributes('data-open')).toBe('false')
-    expect(wrapper.find('.catalog').attributes('data-open')).toBe('true')
-    expect(wrapper.find('.catalog').attributes('data-tab')).toBe('plan')
+    expect(wrapper.find('.catalog').attributes('data-open')).toBe('false')
 
     await wrapper.find('[data-provider-id="deepseek"]').trigger('click')
     expect(wrapper.find('.manager').attributes('data-open')).toBe('true')

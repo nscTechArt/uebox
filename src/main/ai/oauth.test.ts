@@ -258,6 +258,31 @@ describe('设备码流程（Kimi）', () => {
 
     await expect(runOAuthLogin('kimi-code')).rejects.toThrow('授权已取消')
   })
+
+  it('中途取消时立刻停止轮询，不等到超时', async () => {
+    let polls = 0
+    globalThis.fetch = (async (url: string) => {
+      if (String(url).includes('device_authorization')) {
+        return {
+          ok: true,
+          json: async () => ({
+            device_code: 'd',
+            user_code: 'X',
+            verification_uri: 'u',
+            interval: 60
+          })
+        }
+      }
+      polls += 1
+      return { ok: false, json: async () => ({ error: 'authorization_pending' }) }
+    }) as never
+
+    const controller = new AbortController()
+    const login = runOAuthLogin('kimi-code', () => controller.abort(), controller.signal)
+
+    await expect(login).rejects.toThrow('授权已取消')
+    expect(polls).toBe(0)
+  })
 })
 
 describe('令牌续期', () => {

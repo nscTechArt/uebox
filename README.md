@@ -78,7 +78,7 @@
 | ![审查改动](website/public/shots/engine-review.png)<br>**审查改动** —— Agent 用只读工具回引擎核实后的结论 | ![让它自证](website/public/shots/engine-selfcheck.png)<br>**让它自证** —— 逐条回应查出的问题，说清哪里没做到、哪里是自己加的 |
 
 **已经在用 Codex / Claude Code / Cursor？** 打开 MCP 开关，把虚幻盒子当工具服务接上去，
-它立刻多出一百多个 UE 工具。仅本机可连，默认只读。→ [MCP](https://uebox.ai/guide/mcp)
+它立刻多出一百多个 UE 工具。仅本机可连，需令牌，默认可写。→ [MCP](https://uebox.ai/guide/mcp)
 
 它还带着这些（都能单独用）：
 

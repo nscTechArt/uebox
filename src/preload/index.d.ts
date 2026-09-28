@@ -2116,6 +2116,7 @@ declare global {
           settings?: import('../shared/aiProvider').SettingsView
         }>
       >
+      oauthCancel: () => Promise<void>
       onOAuthDeviceCode: (
         callback: (prompt: {
           userCode: string

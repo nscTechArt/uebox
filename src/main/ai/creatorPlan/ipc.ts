@@ -32,6 +32,7 @@ import {
   applyPlan,
   managedRoles,
   planDeprecationHits,
+  planPricingNeedsAcceptance,
   planRoleChanges,
   planSummary,
   recordOriginals,
@@ -110,6 +111,7 @@ export function registerCreatorPlanIPC(): void {
           summary: outcome.manifest ? planSummary(outcome.manifest) : null,
           managedRoles: managedRoles(settings),
           error: outcome.error,
+          pricingNeedsAcceptance: planPricingNeedsAcceptance(settings, outcome.manifest),
           deprecations: planDeprecationHits(settings, outcome.manifest)
         }
       }

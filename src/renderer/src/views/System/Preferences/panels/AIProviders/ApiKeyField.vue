@@ -132,6 +132,7 @@ async function handleOAuthLogin(): Promise<void> {
   const result = await props.state.oauthLogin(entry.id)
   devicePrompt.value = null
 
+  if (result.cancelled) return
   if (!result.ok) {
     message.error(result.error || t('aiProvider.messages.oauthFailed'))
     return
@@ -141,6 +142,12 @@ async function handleOAuthLogin(): Promise<void> {
   message.success(
     result.saved ? t('aiProvider.messages.oauthSaved') : t('aiProvider.messages.oauthOk')
   )
+}
+
+/** 关掉设备码弹窗、或等待中再点一次按钮，都算放弃这次登录 */
+async function cancelOAuthLogin(): Promise<void> {
+  devicePrompt.value = null
+  await props.state.cancelOAuth()
 }
 
 async function copyUserCode(): Promise<void> {
@@ -184,8 +191,7 @@ async function copyUserCode(): Promise<void> {
         v-if="oauthEntry"
         variant="soft"
         size="medium"
-        :disabled="authorizing"
-        @click="handleOAuthLogin"
+        @click="authorizing ? cancelOAuthLogin() : handleOAuthLogin()"
       >
         {{
           authorizing
@@ -226,7 +232,7 @@ async function copyUserCode(): Promise<void> {
       :title="$t('aiProvider.device.title')"
       hide-footer
       centered
-      @cancel="devicePrompt = null"
+      @cancel="cancelOAuthLogin"
     >
       <div v-if="devicePrompt" class="device-box">
         <p class="hint">{{ $t('aiProvider.device.desc') }}</p>

@@ -23,12 +23,14 @@ import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
 import { isPlanProvider } from '@core/shared/creatorPlan'
 import {
+  BUILTIN_BROWSER_PROVIDER_ID,
   bindingSeesImages,
   findVisionCapableRole,
   MODEL_ROLES,
   type CatalogEntry,
   type ModelRole
 } from '@core/shared/aiProvider'
+import CreatorPlanCard from './CreatorPlanCard.vue'
 import ProviderCatalogModal from './ProviderCatalogModal.vue'
 import ModelManagerModal from './ModelManagerModal.vue'
 import {
@@ -43,9 +45,9 @@ const state = useAiProviders()
 const { catalog, providers, roles, configured, encryptionAvailable, configPath } = state
 
 const showCatalog = ref(false)
-/** 目录打开时停在哪一页：点套餐来源进来直接落在 Box Plan 页 */
-const catalogTab = ref<'chat' | 'plan'>('chat')
 const showManager = ref(false)
+/** 套餐来源卡片点了滚回页顶的套餐卡片：看额度、重新导入、断开都在那儿 */
+const planCardEl = ref<HTMLElement | null>(null)
 
 /**
  * 首次加载还没回来。
@@ -175,13 +177,13 @@ function handlePickCustom(): void {
 
 /** 管理弹窗里点「+ 添加 Provider」：回到目录挑一家 */
 function handleAddFromManager(): void {
-  openCatalog()
+  showCatalog.value = true
 }
 
-/** Box Plan 的入口在目录弹窗最后一页，连上之后点它的来源卡片也回到那一页 */
-function openCatalog(tab: 'chat' | 'plan' = 'chat'): void {
-  catalogTab.value = tab
-  showCatalog.value = true
+function focusPlanCard(): void {
+  const el = planCardEl.value
+  // jsdom 里没有 scrollIntoView
+  if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' })
 }
 
 /**
@@ -232,9 +234,20 @@ interface RoleModelGroup {
   options: RoleModelOption[]
 }
 
-/** Provider 在菜单里只出现一次，模型名不再被一长串相同前缀挤掉。 */
+/** 内置浏览器免添加，不进「添加服务商」目录 */
+const addableCatalog = computed(() =>
+  catalog.value.filter((entry) => entry.id !== BUILTIN_BROWSER_PROVIDER_ID)
+)
+
+/**
+ * Provider 在菜单里只出现一次，模型名不再被一长串相同前缀挤掉。
+ * 内置浏览器不在 providers 里，从目录补进来 —— 检索角色直接就能选。
+ */
 const modelGroups = computed<RoleModelGroup[]>(() =>
-  providers.value.map((provider) => ({
+  [
+    ...providers.value,
+    ...catalog.value.filter((entry) => entry.id === BUILTIN_BROWSER_PROVIDER_ID)
+  ].map((provider) => ({
     id: provider.id,
     name: provider.displayName,
     options: provider.models.map((model) => {
@@ -375,6 +388,15 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
       {{ $t('aiProvider.banner.noEncryption') }}
     </div>
 
+    <!--
+      Box Plan 放在最上面：登录一次、角色全部配好，是新人最短的那条路。
+      以前它藏在「添加服务商」目录的最后一页，要先读懂 Provider、API Key 才找得到 ——
+      而正是那些概念把人挡在门外。自己配服务商的在下面，照旧。
+    -->
+    <div ref="planCardEl" class="settings-subsection">
+      <CreatorPlanCard @changed="state.load()" />
+    </div>
+
     <!-- 一、服务商 -->
     <div class="settings-subsection">
       <div class="subsection-title">{{ $t('aiProvider.sources.title') }}</div>
@@ -396,14 +418,14 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
           <template v-for="{ provider, modelCount } in sourceCards" :key="provider.id">
             <!--
               套餐来源不进编辑弹窗：地址、模型、Key 都由套餐卡片管，在编辑弹窗里改了、删了，
-              卡片和配置就对不上了。点它打开目录的 Box Plan 页，看额度、重新导入、断开都在那儿。
+              卡片和配置就对不上了。点它回到页顶的套餐卡片。
             -->
             <button
               v-if="isPlanProvider(provider.id)"
               type="button"
               class="source-card source-card-managed"
               :data-provider-id="provider.id"
-              @click="openCatalog('plan')"
+              @click="focusPlanCard"
             >
               <span class="source-name">{{ provider.displayName }}</span>
               <span class="source-meta">
@@ -433,7 +455,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
           </template>
         </template>
 
-        <button type="button" class="source-card source-add" @click="openCatalog()">
+        <button type="button" class="source-card source-add" @click="showCatalog = true">
           {{ $t('aiProvider.list.add') }}
         </button>
       </div>
@@ -548,12 +570,10 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
 
     <ProviderCatalogModal
       v-model:visible="showCatalog"
-      :initial-tab="catalogTab"
-      :catalog="catalog"
+      :catalog="addableCatalog"
       :existing-ids="providers.map((item) => item.id)"
       @pick="handlePickCatalog"
       @pick-custom="handlePickCustom"
-      @plan-changed="state.load()"
     />
   </section>
 </template>

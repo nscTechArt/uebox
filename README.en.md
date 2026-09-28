@@ -92,7 +92,7 @@ One task, four frames:
 | ![Review](website/public/shots/engine-review.png)<br>**Review** — the verdict after the agent re-read the engine with read-only tools | ![Self-check](website/public/shots/engine-selfcheck.png)<br>**Account for it** — answering each finding: what it missed, what it added on its own |
 
 **Already using Codex, Claude Code or Cursor?** Switch on the MCP server and plug UE Box in as a tool
-provider — your client gains a hundred-plus Unreal tools at once. Local connections only, read-only by default.
+provider — your client gains a hundred-plus Unreal tools at once. Local connections only, token required, writable by default.
 → [MCP](https://uebox.ai/guide/mcp)
 
 It ships with these too, each usable on its own:

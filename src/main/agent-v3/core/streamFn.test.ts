@@ -25,7 +25,8 @@ vi.mock('@earendil-works/pi-ai', async () => {
   }
 })
 
-vi.mock('./piModel', () => ({
+vi.mock('./piModel', async (importOriginal) => ({
+  thinkingOffFields: (await importOriginal<typeof import('./piModel')>()).thinkingOffFields,
   toPiProvider: () => ({ getModels: () => [PI_MODEL] })
 }))
 
@@ -128,6 +129,19 @@ describe('思考程度 → pi 的 reasoning', () => {
   it.each([['auto'], [undefined]])('%s 时完全不带 reasoning 字段', async (choice) => {
     const options = await optionsPassedToPi(choice as undefined)
     expect(options).not.toHaveProperty('reasoning')
+  })
+
+  // MiMo 默认开思考，光传 off 它照想 —— 「不思考」要在请求体里补它家的字段
+  it('选 off 时给 MiMo 补关思考的字段；auto 不补', async () => {
+    const mimo = { ...PI_MODEL, baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' }
+    const passed = async (level: 'auto' | 'off'): Promise<Record<string, unknown>> => {
+      const runtime = await resolveAgentModel({ role: 'agent' }, level)
+      runtime.streamFn(mimo as never, { messages: [] }, undefined as never)
+      return streamSimple.mock.calls.at(-1)?.[2] as Record<string, unknown>
+    }
+
+    expect((await passed('off')).samplingParams).toEqual({ thinking: { type: 'disabled' } })
+    expect(await passed('auto')).not.toHaveProperty('samplingParams')
   })
 
   // pi 的 Agent 每轮会带自己的 options（signal 之类），不能被覆盖掉

@@ -139,6 +139,7 @@ import {
 import { deleteCheckpoint } from '../agent-v3/core/compactionCheckpoint'
 import type { ApprovalMode } from '../agent-v3/core/approval'
 import { createEventBridge } from '../agent-v3/host/eventBridge'
+import { createAutoResume, type AutoResumeHooks } from '../agent-v3/core/autoResume'
 import {
   cancelSteer,
   formatSteerContextBlock,
@@ -236,6 +237,43 @@ interface ActiveAgentRun {
    * 模型会先读到「把旧的删掉」，再读到它指的那段视频。
    */
   steerChain?: Promise<void>
+}
+
+/**
+ * 自动续跑（`core/autoResume.ts`）的宿主一侧：告诉界面、记日志、续跑前落盘。
+ *
+ * 界面只拿结构化的几项，文案归渲染层（双语）。
+ */
+function autoResumeHooks(
+  sessionId: string,
+  run: ActiveAgentRun,
+  store: TranscriptStore,
+  emit: (channel: string, payload: unknown) => void
+): Pick<AutoResumeHooks, 'onScheduled' | 'onResume'> {
+  return {
+    onScheduled: (notice) => {
+      const line =
+        `[AgentV3] 会话 ${sessionId} 模型连接中断，${notice.delayMs / 1000} 秒后自动续跑` +
+        `（第 ${notice.attempt}/${notice.maxAttempts} 次）：${notice.reason.slice(0, 160)}`
+      // 进本地日志文件：console 不进 `unreal-agent.log`
+      void import('../services/electronLog')
+        .then(({ logger }) => logger.warn(line))
+        .catch(() => console.warn(line))
+      emit('agent-v3:auto-resume', {
+        sessionId,
+        attempt: notice.attempt,
+        maxAttempts: notice.maxAttempts,
+        delayMs: notice.delayMs
+      })
+    },
+    onResume: async (plan) => {
+      // 失败标记已经在 agent_end 时落盘了，这里整份重写掉 —— 不然下次恢复又读回来，
+      // 而新的消息会接在它后面，盘上的上下文从此不自洽。同「从断点继续」
+      await store.append(plan.messages, { strict: true })
+      // 又要开始收插话了：`agent_end` 那一刻标的「收尾中」只对那次失败成立
+      run.ending = false
+    }
+  }
 }
 
 /** 这一轮还收不收插话：没收尾、没被叫停 */
@@ -1834,10 +1872,15 @@ export function registerAgentV3IPC(): void {
         onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
         riskOf: callRiskOf(allTools)
       })
+      // 连接中途被掐断时自动「继续尝试」，见 `core/autoResume.ts`。
+      // 失败事件经它转交事件桥：决定续跑的那次，界面不会先看到一张失败卡片
+      const autoResume = createAutoResume({ signal: run.controller.signal })
+      ctx.autoResumeAttempt = () => autoResume.attempts
+      const deliver = autoResume.wrap(bridge)
       agent.subscribe(async (event) => {
         // 同步标记，赶在下面那次落盘的 await 之前：见 `ActiveAgentRun.ending`
         if (event.type === 'agent_end') run.ending = true
-        bridge(event)
+        deliver(event)
         // 每轮结束落一次盘。不是每个事件都落 —— 流式 delta 期间反复写盘
         // 会拖慢主进程，而 turn_end 已经足够细：崩溃最多丢当前这一轮。
         if (event.type === 'turn_end' || event.type === 'agent_end') {
@@ -1895,21 +1938,27 @@ export function registerAgentV3IPC(): void {
       const promptWithEnvelope = withRuntimeEnvelope(userText, envelope)
 
       const mediaRefs = [...pictures.refs, ...media.refs]
-      if (mediaRefs.length === 0) {
-        await withTeamScope(options, () => agent.prompt(promptWithEnvelope, admitted.images))
-      } else {
-        await withTeamScope(options, () =>
-          agent.prompt({
-            role: 'user',
-            content: [
-              { type: 'text', text: promptWithEnvelope },
-              ...mediaRefs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
-              ...admitted.images
-            ],
-            timestamp: Date.now()
-          })
-        )
-      }
+      await autoResume.run(
+        () =>
+          mediaRefs.length === 0
+            ? withTeamScope(options, () => agent.prompt(promptWithEnvelope, admitted.images))
+            : withTeamScope(options, () =>
+                agent.prompt({
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: promptWithEnvelope },
+                    ...mediaRefs.map((ref) => ({ type: 'text' as const, text: mediaRefText(ref) })),
+                    ...admitted.images
+                  ],
+                  timestamp: Date.now()
+                })
+              ),
+        agent,
+        {
+          ...autoResumeHooks(sessionId, run, store, emit),
+          resume: () => withTeamScope(options, () => agent.continue())
+        }
+      )
 
       // pi 把 provider 失败编码进事件流而不是抛异常，所以 prompt() 正常返回
       // 也可能什么都没发生。agent.state.errorMessage 是权威判据 ——
@@ -2211,10 +2260,14 @@ export function registerAgentV3IPC(): void {
         onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
         riskOf: callRiskOf(allTools)
       })
+      // 同 execute：手动「继续尝试」这一轮里再断，同样自动接着跑
+      const autoResume = createAutoResume({ signal: run.controller.signal })
+      ctx.autoResumeAttempt = () => autoResume.attempts
+      const deliver = autoResume.wrap(bridge)
       agent.subscribe(async (e) => {
         // 同步标记，赶在下面那次落盘的 await 之前：见 `ActiveAgentRun.ending`
         if (e.type === 'agent_end') run.ending = true
-        bridge(e)
+        deliver(e)
         if (e.type === 'turn_end' || e.type === 'agent_end') {
           await store.append(agent.state.messages)
           emitContextUsage(
@@ -2252,7 +2305,11 @@ export function registerAgentV3IPC(): void {
           return { success: true, restoredMessages: plan.messages.length }
         }
       }
-      await withTeamScope(options, () => agent.continue())
+      const resume = (): Promise<void> => withTeamScope(options, () => agent.continue())
+      await autoResume.run(resume, agent, {
+        ...autoResumeHooks(sessionId, run, store, emit),
+        resume
+      })
 
       // 同 execute：provider 失败编码在 state 里，不抛异常
       if (agent.state.errorMessage) {

@@ -1,5 +1,6 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import {
+  BUILTIN_BROWSER_PROVIDER_ID,
   ROLE_KIND,
   type CatalogEntry,
   type ModelConfig,
@@ -224,7 +225,11 @@ export interface AiProvidersState {
    */
   test: (modelId: string) => Promise<{ ok: boolean; error?: ProbeFailure; skipped?: ProbeSkipCode }>
   importModels: () => Promise<{ ok: boolean; count?: number; error?: ProbeFailure }>
-  oauthLogin: (oauthProvider: string) => Promise<{ ok: boolean; saved?: boolean; error?: string }>
+  oauthLogin: (
+    oauthProvider: string
+  ) => Promise<{ ok: boolean; saved?: boolean; cancelled?: boolean; error?: string }>
+  /** 放弃正在等的登录：按钮立刻复位，主进程停止轮询 */
+  cancelOAuth: () => Promise<void>
   setRole: (
     role: ModelRole | readonly ModelRole[],
     binding: { providerId: string; modelId: string } | null
@@ -240,6 +245,8 @@ export function useAiProviders(): AiProvidersState {
   const testing = ref(false)
   const importing = ref(false)
   const authorizing = ref(false)
+  /** 每次登录/取消递增；晚到的旧结果对不上号就丢掉 */
+  let oauthAttempt = 0
   const selectedId = ref<string | null>(null)
   const draft = ref<ProviderDraft | null>(null)
   const isNew = ref(false)
@@ -268,7 +275,10 @@ export function useAiProviders(): AiProvidersState {
     return JSON.stringify(draft.value) !== baseline.value
   })
 
-  const providers = computed(() => settings.value?.providers ?? [])
+  // 内置浏览器免添加：老配置里加过的也不在列表里露面，角色菜单另行补上
+  const providers = computed(() =>
+    (settings.value?.providers ?? []).filter((item) => item.id !== BUILTIN_BROWSER_PROVIDER_ID)
+  )
   const roles = computed(() => settings.value?.roles ?? {})
   const configured = computed(() => settings.value?.configured ?? false)
   const encryptionAvailable = computed(() => settings.value?.encryptionAvailable ?? true)
@@ -498,13 +508,16 @@ export function useAiProviders(): AiProvidersState {
    */
   async function oauthLogin(
     oauthProvider: string
-  ): Promise<{ ok: boolean; saved?: boolean; error?: string }> {
+  ): Promise<{ ok: boolean; saved?: boolean; cancelled?: boolean; error?: string }> {
     const payload = normalizedDraft()
     if (!payload) return { ok: false, error: 'no-draft' }
 
+    const attempt = ++oauthAttempt
     authorizing.value = true
     try {
       const result = await window.api.aiProvider.oauthLogin(oauthProvider, payload)
+      // 用户已经取消（或又发起了新的一次），这次的结果作废
+      if (attempt !== oauthAttempt) return { ok: false, cancelled: true }
       if (!result.ok) return { ok: false, error: result.error }
 
       if (result.data.key) {
@@ -521,8 +534,14 @@ export function useAiProviders(): AiProvidersState {
       }
       return { ok: true, saved: true }
     } finally {
-      authorizing.value = false
+      if (attempt === oauthAttempt) authorizing.value = false
     }
+  }
+
+  async function cancelOAuth(): Promise<void> {
+    oauthAttempt++
+    authorizing.value = false
+    await window.api.aiProvider.oauthCancel()
   }
 
   return {
@@ -551,6 +570,7 @@ export function useAiProviders(): AiProvidersState {
     test,
     importModels,
     oauthLogin,
+    cancelOAuth,
     setRole,
     revealConfig
   }

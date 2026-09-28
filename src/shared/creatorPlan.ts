@@ -8,6 +8,7 @@
  */
 
 import type { ModelRole } from './aiProvider'
+import type { CreatorPlanRoutePrice, CreatorPlanVideoPrice } from './creatorPlanPricing'
 
 /**
  * 套餐生成的来源 id 固定以它开头。放在 shared 里是因为渲染层也要认：
@@ -38,6 +39,8 @@ export interface CreatorPlanChatSpec {
 export interface CreatorPlanManifest {
   schema: 1
   etag: string
+  video_pricing?: CreatorPlanVideoPrice
+  route_pricing?: Record<string, CreatorPlanRoutePrice>
   plan: {
     product: string
     tier: string | null
@@ -174,6 +177,8 @@ export interface CreatorPlanSummary {
   cooldownEndsAt: string | null
   /** 清单 quotas 逐项，按 CREATOR_PLAN_QUOTA_KEYS 排序 */
   quotas: CreatorPlanQuota[]
+  videoPricing?: CreatorPlanVideoPrice
+  routePricing?: Record<string, CreatorPlanRoutePrice>
 }
 
 /** 清单 deprecations 命中了正在用的模型：哪个角色、哪个模型、换成什么、哪天下线 */
@@ -234,6 +239,7 @@ export interface CreatorPlanApplyOptions {
 
 export interface CreatorPlanState {
   connected: boolean
+  pricingNeedsAcceptance?: boolean
   /** 连接了才有；拉清单失败时为 null，看 error */
   summary: CreatorPlanSummary | null
   /** 当前由套餐管着的角色 */

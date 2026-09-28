@@ -310,6 +310,30 @@ let observer: ResizeObserver | null = null
 let frame = 0
 
 /**
+ * 弹窗、下拉、右键菜单都 Teleport 到 body 下，而那层网页是原生视图，永远盖在 DOM 上。
+ * 有浮层压到面板上时先把网页收起来，浮层关掉再按原位置放回。
+ */
+let overlayObserver: MutationObserver | null = null
+
+function intersects(a: DOMRect, b: DOMRect): boolean {
+  return (
+    a.width > 0 && a.height > 0 && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+  )
+}
+
+function overlayCovers(surface: HTMLElement, target: DOMRect): boolean {
+  return Array.from(document.body.children).some(
+    (node) =>
+      !node.contains(surface) &&
+      node.tagName !== 'SCRIPT' &&
+      node.tagName !== 'STYLE' &&
+      [node, ...Array.from(node.children)].some((el) =>
+        intersects(el.getBoundingClientRect(), target)
+      )
+  )
+}
+
+/**
  * 把当前位置报给主进程。
  *
  * 用 rAF 合并：拖动窗口和调分栏宽度时 resize 事件密集得多，逐个发 IPC
@@ -327,7 +351,7 @@ function measure(): void {
     }
 
     const rect = element.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) {
+    if (rect.width <= 0 || rect.height <= 0 || overlayCovers(element, rect)) {
       window.api?.agentBrowser?.setBounds?.(null, props.sessionId)
       return
     }
@@ -395,6 +419,19 @@ onMounted(() => {
   window.addEventListener('resize', measure)
   // 滚动会改变面板在视口里的位置，而那层视图不会跟着滚
   window.addEventListener('scroll', measure, true)
+  // 浮层出现/定位完成都要重查；动画中的位置变化靠 attributes 捕获
+  const app = document.getElementById('app')
+  overlayObserver = new MutationObserver((records) => {
+    // #app 里的变化（比如对话流式输出）与浮层无关，不必每次都量
+    if (records.every((r) => r.target !== document.body && app?.contains(r.target))) return
+    measure()
+  })
+  overlayObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style', 'class']
+  })
   measure()
 })
 
@@ -403,6 +440,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', measure, true)
   observer?.disconnect()
   observer = null
+  overlayObserver?.disconnect()
+  overlayObserver = null
   if (frame) cancelAnimationFrame(frame)
   // 组件没了，那层网页也不能继续浮在界面上
   if (props.sessionId) window.api?.agentBrowser?.setBounds?.(null, props.sessionId)

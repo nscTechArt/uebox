@@ -49,6 +49,10 @@ vi.mock('@earendil-works/pi-ai', () => ({
       lastCall = { model, context, options }
       return reply
     },
+    completeSimple: async (model: unknown, context: unknown, options: unknown) => {
+      lastCall = { model, context, options }
+      return reply
+    },
     stream: (model: unknown, context: unknown, options: unknown) => {
       lastCall = { model, context, options }
       return {
@@ -61,7 +65,9 @@ vi.mock('@earendil-works/pi-ai', () => ({
   })
 }))
 
-vi.mock('../agent-v3/core/piModel', () => ({
+vi.mock('../agent-v3/core/piModel', async (importOriginal) => ({
+  thinkingOffFields: (await importOriginal<typeof import('../agent-v3/core/piModel')>())
+    .thinkingOffFields,
   toPiProvider: (config: { id: string; models: Array<{ id: string }> }) => ({
     id: config.id,
     getModels: () => config.models.map((model) => ({ id: model.id, provider: config.id }))
@@ -135,6 +141,32 @@ describe('一问一答', () => {
     await expect(
       complete(settings.providers[0], 'qwen-max', { messages: [userMessage('x')] })
     ).rejects.toThrow(/模型调用失败/)
+  })
+
+  /**
+   * MiMo 默认开思考，pi 对它的 `off` 什么都不发 —— 轻量任务照样先想十几秒，
+   * 口播稿压缩次次超时退回原文。要在请求体里补 `thinking: disabled`。
+   */
+  it('reasoning=off 时给 MiMo 补关思考的字段，别家不补', async () => {
+    const mimo = { ...settings.providers[0], baseUrl: 'https://api.xiaomimimo.com/v1' }
+    await complete(mimo, 'qwen-max', {
+      messages: [userMessage('x')],
+      samplingParams: { top_p: 0.9 },
+      reasoning: 'off'
+    })
+    expect(lastCall?.options).toMatchObject({
+      reasoning: 'off',
+      samplingParams: { top_p: 0.9, thinking: { type: 'disabled' } }
+    })
+
+    await complete(settings.providers[0], 'qwen-max', {
+      messages: [userMessage('x')],
+      reasoning: 'off'
+    })
+    expect(lastCall?.options).not.toHaveProperty('samplingParams')
+
+    await complete(mimo, 'qwen-max', { messages: [userMessage('x')] })
+    expect(lastCall?.options).not.toHaveProperty('samplingParams')
   })
 
   it('取消信号与温度透到 pi', async () => {

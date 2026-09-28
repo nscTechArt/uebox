@@ -5,7 +5,7 @@
  * 没连接时打开设置页不会联网 —— 主进程的 state 在没有套餐来源时直接返回。
  * 应用、断开之后发 `changed`，由父组件重读模型配置（来源列表和角色绑定都变了）。
  *
- * 额度只显示一个百分比（进度条 +「本月已用 xx%」+ 重置日期），不显示 Credits 数字和单价，
+ * 额度显示百分比；动态线路单价在卡片及导入预览展示，确认导入才接受该版本。
  * 细账去「管理订阅」的网页端看。怎么从清单 quotas 算出这个数见 shared 的 planUsage。
  * 续费失败（past_due）常驻一条提醒；清单说要下线的模型正在用时列出来。
  * 断开时服务端没吊销成功，留一句话和去网页端的链接。
@@ -16,6 +16,7 @@ import AppButton from '@renderer/components/AppButton.vue'
 import AppCheckbox from '@renderer/components/AppCheckbox.vue'
 import AppModal from '@renderer/components/AppModal.vue'
 import CreatorPlanStorageRow from './CreatorPlanStorageRow.vue'
+import CreatorPlanPrices from './CreatorPlanPrices.vue'
 import { Z_CONFIRM } from './modalLayers'
 import { message } from '@renderer/utils/messageManager'
 import { creatorPlanAPI } from '@renderer/api/creatorPlan'
@@ -285,6 +286,17 @@ onUnmounted(() => unsubscribe?.())
       </div>
     </div>
 
+    <CreatorPlanPrices
+      v-if="
+        summary?.videoPricing || (summary?.routePricing && Object.keys(summary.routePricing).length)
+      "
+      :prices="summary?.routePricing"
+      :video="summary?.videoPricing"
+    />
+    <p v-if="state?.pricingNeedsAcceptance" class="plan-desc plan-warn" role="alert">
+      {{ $t('aiProvider.creatorPlan.pricing.changed') }}
+    </p>
+
     <!-- 续费失败：本期只给 20% 的额度，过了宽限期就停，所以常驻提醒，不收起来 -->
     <div v-if="state?.connected && summary?.status === 'past_due'" class="plan-alert" role="alert">
       <span>{{ $t('aiProvider.creatorPlan.pastDue') }}</span>
@@ -331,7 +343,14 @@ onUnmounted(() => unsubscribe?.())
       :z-index="Z_CONFIRM"
       :open="preview !== null"
       :title="$t('aiProvider.creatorPlan.previewTitle')"
-      :ok-text="$t('aiProvider.creatorPlan.apply')"
+      :ok-text="
+        $t(
+          preview?.summary.videoPricing ||
+            (preview?.summary.routePricing && Object.keys(preview.summary.routePricing).length)
+            ? 'aiProvider.creatorPlan.pricing.accept'
+            : 'aiProvider.creatorPlan.apply'
+        )
+      "
       :ok-disabled="!!preview && preview.changes.length === 0 && !preview.storage"
       :confirm-loading="applying"
       centered
@@ -340,6 +359,14 @@ onUnmounted(() => unsubscribe?.())
     >
       <div v-if="preview" class="preview">
         <p class="plan-desc">{{ $t('aiProvider.creatorPlan.previewDesc') }}</p>
+        <CreatorPlanPrices
+          v-if="
+            preview.summary.videoPricing ||
+            (preview.summary.routePricing && Object.keys(preview.summary.routePricing).length)
+          "
+          :prices="preview.summary.routePricing"
+          :video="preview.summary.videoPricing"
+        />
         <AppCheckbox :checked="allSelected" @update:checked="toggleAll">
           {{ $t('common.selectAll') }}
         </AppCheckbox>

@@ -124,7 +124,6 @@
 
             <!-- 服务器资产库：在线浏览，不在本机建库 -->
             <div
-              v-if="SHOW_SERVER_VAULT_ENTRY"
               class="mode-card"
               :class="{ active: serverMode }"
               @click="serverMode = true"
@@ -618,9 +617,6 @@ const vaultStore = useVaultStore()
 const visible = ref(props.open)
 const loading = ref(false)
 const showAuthModal = ref(false)
-
-/** 服务器资产库入口暂不对外展示；连接逻辑保留，打开这个开关即可恢复 */
-const SHOW_SERVER_VAULT_ENTRY = false
 
 const networkVaultPreference = ref(readStoredNetworkVaultPreference(localStorage))
 const enableNetworkVault = computed(() =>

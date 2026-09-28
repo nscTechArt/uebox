@@ -264,7 +264,8 @@ export function limiterFor(model: Model<Api>): AdaptiveLimiter {
   return limiter
 }
 
-function failed(model: Model<Api>, errorMessage: string): AssistantMessage {
+/** 一条「这次没说成话」的失败回话。包装层把自己发现的失败交给下游时用 */
+export function failedAssistantMessage(model: Model<Api>, errorMessage: string): AssistantMessage {
   return {
     role: 'assistant',
     content: [],
@@ -373,7 +374,11 @@ export function pacedStreamFn(inner: StreamFn, deps: PacedStreamDeps = {}): Stre
             if (next.done) {
               // 流结束却没给结局：当普通失败交给调用方，不重发
               release({ kind: 'neutral' })
-              out.push({ type: 'error', reason: 'error', error: failed(model, '模型流意外结束') })
+              out.push({
+                type: 'error',
+                reason: 'error',
+                error: failedAssistantMessage(model, '模型流意外结束')
+              })
               out.end()
               return
             }
@@ -411,8 +416,12 @@ export function pacedStreamFn(inner: StreamFn, deps: PacedStreamDeps = {}): Stre
             // 用户点了停止、内层流随之抛 AbortError：报成中止，不是模型出错
             out.push(
               outer?.aborted
-                ? { type: 'error', reason: 'aborted', error: failed(model, 'Operation aborted') }
-                : { type: 'error', reason: 'error', error: failed(model, message) }
+                ? {
+                    type: 'error',
+                    reason: 'aborted',
+                    error: failedAssistantMessage(model, 'Operation aborted')
+                  }
+                : { type: 'error', reason: 'error', error: failedAssistantMessage(model, message) }
             )
             out.end()
             return
@@ -426,7 +435,7 @@ export function pacedStreamFn(inner: StreamFn, deps: PacedStreamDeps = {}): Stre
           out.push({
             type: 'error',
             reason: 'error',
-            error: failed(model, `模型网关${lastReason}，这一次的回话没收完`)
+            error: failedAssistantMessage(model, `模型网关${lastReason}，这一次的回话没收完`)
           })
           out.end()
           return
@@ -437,12 +446,16 @@ export function pacedStreamFn(inner: StreamFn, deps: PacedStreamDeps = {}): Stre
       }
 
       if (outer?.aborted) {
-        out.push({ type: 'error', reason: 'aborted', error: failed(model, 'Operation aborted') })
+        out.push({
+          type: 'error',
+          reason: 'aborted',
+          error: failedAssistantMessage(model, 'Operation aborted')
+        })
       } else {
         out.push({
           type: 'error',
           reason: 'error',
-          error: failed(
+          error: failedAssistantMessage(
             model,
             `模型网关连续 ${limiter.config.maxRetries + 1} 次扛不住（最后一次：${lastReason}）。` +
               '可能是套餐的并发或频率上限，稍后再试，或换一个并发更高的模型服务。'

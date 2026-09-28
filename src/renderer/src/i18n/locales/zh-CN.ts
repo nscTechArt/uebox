@@ -533,7 +533,7 @@ export default {
       oauthKeyFetched: '已从 {name} 取回密钥并填入上方，点「保存」后生效',
       getKey: '去获取 API 密钥 ↗',
       oauthOpening: '浏览器已打开，请完成授权',
-      authorizing: '等待浏览器授权…',
+      authorizing: '等待浏览器授权… 点此取消',
       kind: {
         none: '不需要密钥',
         keep: '沿用已保存的密钥',
@@ -740,7 +740,7 @@ export default {
     },
     creatorPlan: {
       title: 'Box Plan',
-      desc: '一个订阅配好多个角色，额度按月重置。',
+      desc: '使用盒子提供的订阅服务轻松配置所有模型',
       connect: '连接',
       connecting: '等待浏览器确认…',
       cancel: '取消',
@@ -780,6 +780,16 @@ export default {
       disconnect: '断开',
       disconnectConfirm:
         '断开后，由套餐管理的角色恢复成导入前的设置。这把 Key 会在服务端吊销，本机也会删除。',
+      pricing: {
+        description: '按实际调用线路扣点，以下为当前价格范围。',
+        input: '输入',
+        cached_input: '缓存输入',
+        output: '输出',
+        changed: '当前价格尚未确认，请点击“重新导入”查看并接受后继续调用。',
+        videoTerms:
+          '视频先按秒价预估并占用额度，完成后按实际费用多退少补，允许超过余额。秒数包含输出及参考视频；with_video 表示带参考视频。',
+        accept: '接受价格并应用'
+      },
       previewTitle: '选择交给套餐的角色',
       previewDesc: '勾选的角色改用套餐模型。已手动配置的角色默认不勾。',
       previewCurrent: '接管：{name}',
@@ -2670,6 +2680,7 @@ export default {
       // 界面上「改方向」就是直接在输入框里继续打字
       sessionBusy: '这条对话还有一轮在跑。等它结束，或者直接在输入框里说下一步该怎么改。',
       resume: '继续尝试',
+      autoResume: '模型连接中断，{seconds} 秒后自动接着跑（第 {attempt}/{max} 次）。做完的步骤不会重做。',
       resumeReasonUnknown: '暂时无法确定具体原因，请检查模型连接后再试。',
       agentExecException: 'Agent 执行异常',
       generatedImageAlt: '生成的图片',
@@ -5294,6 +5305,8 @@ export default {
   },
   assistantInputComposer: {
     mediaUploading: '上传中 {percent}%',
+    pathOnlyAttachment:
+      '### 文件：{name}\n\n本地路径：{path}\n\n这个格式没有预先解析，需要内容就用读文件的工具自己打开。',
     voice: {
       start: '开始语音对话',
       cancelConnection: '取消连接',
@@ -5464,7 +5477,7 @@ export default {
       videoFramesFallback: '没有配置能看视频的模型，{name} 改为抽帧给模型看（没有声音和帧间运动）',
       videoNeedsLocalFile: '视频要从本地文件拖进来或用回形针选择，网页里直接拖过来拿不到文件路径',
       mediaUploadFailed: '{name} 没能提前传到对象存储，发送时会再试一次：{error}',
-      unsupportedFile: '收不了这些文件：{name}',
+      unsupportedFile: '拿不到这些文件的本地路径，先存到本地再拖进来：{name}',
       noWikiBound: '当前未绑定知识库',
       compacted: '已从 {before} 条压缩至 {after} 条，节省约 {saved} token',
       compactFailed: {

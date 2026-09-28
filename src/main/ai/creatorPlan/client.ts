@@ -11,6 +11,8 @@ import type {
   CreatorPlanManifest
 } from '../../../shared/creatorPlan'
 
+import { parsePlanPricing, parseVideoPricing } from '../../../shared/creatorPlanPricing'
+
 export class CreatorPlanError extends Error {
   constructor(
     readonly code: CreatorPlanErrorCode,
@@ -188,6 +190,12 @@ export async function fetchManifestIfChanged(
   const json = (await res.json().catch(() => null)) as CreatorPlanManifest | null
   if (!json || json.schema !== 1 || typeof json.roles !== 'object' || !json.plan) {
     throw new CreatorPlanError('bad_response', 'Malformed plan manifest')
+  }
+  try {
+    parsePlanPricing(json.route_pricing)
+    parseVideoPricing(json.video_pricing)
+  } catch {
+    throw new CreatorPlanError('bad_response', 'Malformed plan pricing')
   }
   // 响应头的 ETag 带引号（"p-7f3a"），原样回发；没给头就用清单里的
   const header = res.headers?.get('etag')

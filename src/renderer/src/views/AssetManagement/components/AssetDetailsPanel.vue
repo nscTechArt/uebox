@@ -2978,17 +2978,16 @@ const handleOpenDependencyGraph = () => {
   .edit-icon,
   .delete-icon,
   .record-icon {
+    // 类名直接挂在 Phosphor 的 <svg> 上：不留内边距的话图形会撑满整个圆，线条贴边
+    box-sizing: border-box;
     width: 28px;
     height: 28px;
+    padding: 6px;
     background: var(--color-bg-overlay);
     border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     cursor: pointer;
     transition: all 0.2s ease;
     backdrop-filter: blur(4px);
-    font-size: 14px;
     color: var(--color-text-on-solid);
 
     &:hover {

@@ -539,7 +539,7 @@ export default {
       oauthKeyFetched: 'Key fetched from {name} and filled in above — click Save to apply',
       getKey: 'Get an API key ↗',
       oauthOpening: 'Browser opened — complete the authorization there',
-      authorizing: 'Waiting for browser…',
+      authorizing: 'Waiting for browser… click to cancel',
       kind: {
         none: 'No key required',
         keep: 'Keeping the saved key',
@@ -800,6 +800,17 @@ export default {
       disconnect: 'Disconnect',
       disconnectConfirm:
         'Roles managed by the plan go back to what they were before import. The key is revoked on the server and deleted from this device.',
+      pricing: {
+        description: 'Charged at the rate of the route actually used. Current price ranges:',
+        input: 'Input',
+        cached_input: 'Cached input',
+        output: 'Output',
+        changed:
+          'Current prices are not accepted. Select Reimport to review and accept them before continuing.',
+        videoTerms:
+          'Video reserves an estimate, then adjusts to actual cost, which may exceed your balance. Seconds include output and reference videos; with_video means reference input.',
+        accept: 'Accept prices and apply'
+      },
       previewTitle: 'Choose roles for the plan',
       previewDesc:
         'Checked roles switch to plan models. Roles you set up yourself start unchecked.',
@@ -2734,6 +2745,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       sessionBusy:
         'This conversation still has a run in progress. Wait for it to finish, or just type what you want changed.',
       resume: 'Try again',
+      autoResume:
+        'Lost the connection to the model. Picking up again in {seconds}s (attempt {attempt}/{max}). Finished steps will not be redone.',
       resumeReasonUnknown: 'The exact cause is unknown. Check the model connection and try again.',
       agentExecException: 'Agent execution exception',
       generatedImageAlt: 'Generated Image',
@@ -5456,6 +5469,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
   },
   assistantInputComposer: {
     mediaUploading: 'Uploading {percent}%',
+    pathOnlyAttachment:
+      '### File: {name}\n\nLocal path: {path}\n\nThis format was not pre-parsed. Open it with a file-reading tool if you need its contents.',
     voice: {
       start: 'Start voice session',
       cancelConnection: 'Cancel connection',
@@ -5620,7 +5635,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         'Drop the video from a folder or pick it with the paperclip — a video dragged straight from a web page has no file path',
       mediaUploadFailed:
         '{name} could not be pre-uploaded to object storage; it will be retried on send: {error}',
-      unsupportedFile: 'These files cannot be attached: {name}',
+      unsupportedFile: "Can't get a local path for these files. Save them locally first: {name}",
       noWikiBound: 'No knowledge base is currently bound',
       compacted: 'Compacted: {before} messages → {after}, about {saved} tokens saved',
       compactFailed: {

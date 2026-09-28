@@ -97,6 +97,9 @@ const GENERIC_EVENT_CHANNELS = new Set([
   'agent-v3:lock-conflict',
   // 这一轮开跑前的准备进度（音视频传对象存储）。几百 MB 要传好一阵，不说一声像卡住了
   'agent-v3:notice',
+  // 模型连接中途断了，主进程过几秒自动接着跑（`core/autoResume.ts`）。
+  // 不说一声的话，用户看到的是停了半分钟又自己动起来
+  'agent-v3:auto-resume',
   // agent 反问用户。界面在时间线上长一张选项卡片，用户点完经 question-reply 回传
   'agent-v3:question-required',
   // 这条会话**真的**空出来了（锁放了、run 摘了）。界面上排队的跟进消息等的是
@@ -2127,6 +2130,8 @@ const api = {
      */
     oauthLogin: (oauthProvider: string, draft: unknown) =>
       ipcRenderer.invoke('ai-provider:oauth-login', oauthProvider, draft),
+    /** 放弃正在等的那次登录，主进程停止监听回调 / 轮询 */
+    oauthCancel: () => ipcRenderer.invoke('ai-provider:oauth-cancel'),
     /**
      * 设备码流程要显示给用户的那串码。
      *
