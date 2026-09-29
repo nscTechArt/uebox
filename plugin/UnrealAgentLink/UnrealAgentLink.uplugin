@@ -1,7 +1,7 @@
 ﻿{
     "FileVersion":  3,
-    "Version":  10209,
-    "VersionName":  "1.2.9",
+    "Version":  10210,
+    "VersionName":  "1.2.10",
     "FriendlyName":  "UnrealAgentLink",
     "Description":  "Unreal Agent Link For UEBOX",
     "Category":  "Other",
