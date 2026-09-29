@@ -5,7 +5,7 @@
  * 编译本身、卡不卡编辑器、回不回响应，全要真机。
  *
  * 这里钉的三条都是「说错话」的具体形态：
- *   - Live Coding 失败时硬凑一个诊断出来（拿不到就是拿不到）
+ *   - Live Coding 失败时硬凑一个诊断出来（UBT 日志没读到就是拿不到）
  *   - 超时被说成失败（不知道就是不知道）
  *   - 解析不出来时把原文吞掉（那才是唯一的线索）
  */
@@ -89,12 +89,54 @@ describe('cpp_compile', () => {
     expect(isError).toBeFalsy()
   })
 
+  /*
+   * 2026-09-29 SquadRush 真机：Live Coding 失败，窗口里先刷一屏 C4996 弃用警告，
+   * 真正的 error 在另一个文件里。插件读回 UBT 的 Log.txt，这里要把 error 挑出来，
+   * 警告不许挤掉它，也不许混进正文让模型去修警告。
+   */
+  it('Live Coding 失败时从 UBT 日志里给出错误，警告只报个数', async () => {
+    const warnings = Array.from(
+      { length: 60 },
+      (_, i) =>
+        `I:\\P\\UAL_MaterialCommands.cpp(${2000 + i},64): warning C4996: 'UMaterialExpression::GetOutputType': deprecated`
+    )
+    const { text } = await run({
+      result: 'Failure',
+      path: 'livecoding',
+      output:
+        'LogLiveCoding: Error: Live coding failed, please see Live console for more information',
+      build_log: [
+        ...warnings,
+        'I:\\P\\UAL_SystemCommands.cpp(174,2): error C2065: “FStringOutputDevice”: 未声明的标识符',
+        'Result: Failed (OtherCompilationError)'
+      ].join('\r\n'),
+      build_log_path: 'C:\\Users\\u\\AppData\\Local\\UnrealBuildTool\\Log.txt'
+    })
+
+    expect(text).toContain('UAL_SystemCommands.cpp:174:2')
+    expect(text).toContain('C2065')
+    expect(text).not.toContain('C4996')
+    expect(text).toContain('另有 60 条警告')
+    expect(text).toContain('Log.txt')
+  })
+
+  it('Live Coding 日志读到了但认不出 error 行时，给日志尾巴原文', async () => {
+    const { text } = await run({
+      result: 'Failure',
+      path: 'livecoding',
+      build_log: 'UnrealHeaderTool 报了个没见过的形状：Foo.Bar.Baz\r\nResult: Failed'
+    })
+
+    expect(text).toContain('Foo.Bar.Baz')
+    expect(text).not.toContain('没找到 UnrealBuildTool 的编译日志')
+  })
+
   /**
-   * 最要紧的一条。Live Coding 的编译器输出不落盘（真机验过，§12.7），
-   * 所以这里**必须**承认读不到，并把出路给出来。硬凑一个诊断是最坏的结果：
+   * 插件没读到 UBT 日志时（位置变了、失败在打补丁阶段）**必须**承认读不到，
+   * 并把出路给出来。硬凑一个诊断是最坏的结果：
    * 模型会拿着编造的行号去改一个没问题的地方。
    */
-  it('Live Coding 失败时承认读不到报错，并给出关掉它的出路', async () => {
+  it('Live Coding 失败且没有日志时承认读不到报错，并给出出路', async () => {
     const { text } = await run({
       result: 'Failure',
       path: 'livecoding',

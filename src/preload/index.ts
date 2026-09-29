@@ -100,6 +100,8 @@ const GENERIC_EVENT_CHANNELS = new Set([
   // 模型连接中途断了，主进程过几秒自动接着跑（`core/autoResume.ts`）。
   // 不说一声的话，用户看到的是停了半分钟又自己动起来
   'agent-v3:auto-resume',
+  // 模型请求卡住、网关已自动重发。不说一声的话最后一张卡片一直转圈，看着像死机
+  'agent-v3:model-retry',
   // agent 反问用户。界面在时间线上长一张选项卡片，用户点完经 question-reply 回传
   'agent-v3:question-required',
   // 这条会话**真的**空出来了（锁放了、run 摘了）。界面上排队的跟进消息等的是
@@ -1407,6 +1409,8 @@ const api = {
       notebook?: { id: string; title?: string } | null
       /** 用户按下发送那一刻的编辑器状态（闪存）。null = 用户明确去掉了 */
       editorSnapshot?: EditorSnapshot | null
+      /** 这条会话绑定的模型。不传就用执行记录里那份，都没有按全局默认绑定 */
+      sessionModel?: { providerId: string; modelId: string }
     }) => ipcRenderer.invoke('agent-v3:execute', args),
     /** 从断点续跑（上一轮报错或中断时用），保留全部上下文 */
     continue: (args: {
@@ -1521,7 +1525,11 @@ const api = {
     listTools: () => ipcRenderer.invoke('agent-v3:list-tools'),
 
     /** 当前绑定的模型支持哪几档思考。档位各家不同，输入框那个下拉据此列清单 */
-    thinkingLevels: () => ipcRenderer.invoke('agent-v3:thinking-levels'),
+    thinkingLevels: (args?: { model?: { providerId: string; modelId: string } }) =>
+      ipcRenderer.invoke('agent-v3:thinking-levels', args),
+    /** 这条会话绑定的模型（执行记录里那份）。没绑过为 null */
+    sessionModel: (args: { sessionId: string }) =>
+      ipcRenderer.invoke('agent-v3:session-model', args),
     /** 在编辑器里打开「本轮改动」列出的那个资产 —— 清单说不清材质长什么样，眼见为实 */
     openAsset: (args: { contentPath: string }) => ipcRenderer.invoke('agent-v3:open-asset', args),
     /** 审查本轮改动：问引擎「这些资产现在到底是什么状态」 */
@@ -2908,6 +2916,7 @@ const api = {
       agentBrowserMode: 'window' | 'embedded' | 'hidden'
       agentFileAccessScope: 'ue-only' | 'full'
       agentToolSearchEnabled: boolean
+      agentPersistentAutoResume: boolean
       agentDisabledTools: string[]
       agentResidentTools: Record<string, boolean>
       notifyTurnComplete: 'off' | 'unfocused' | 'always'
@@ -2926,6 +2935,7 @@ const api = {
       agentBrowserMode?: 'window' | 'embedded' | 'hidden'
       agentFileAccessScope?: 'ue-only' | 'full'
       agentToolSearchEnabled?: boolean
+      agentPersistentAutoResume?: boolean
       agentDisabledTools?: string[]
       agentResidentTools?: Record<string, boolean>
       notifyTurnComplete?: 'off' | 'unfocused' | 'always'

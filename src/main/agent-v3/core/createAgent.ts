@@ -267,6 +267,11 @@ export interface SessionContext {
    * 断线之后回头查能分清「第一次请求」和「续跑出去的那次」
    */
   autoResumeAttempt?: () => number
+  /**
+   * 模型请求卡住、被重发了一次。只进日志的话，界面上最后一张卡片一直转圈，
+   * 用户看不出是工具卡了还是模型网关没回话 —— 实测干等了近十分钟以为死机了
+   */
+  onModelRetry?: (info: { attempt: number; reason: string; model: string }) => void
   /** 子 agent 的工具命名空间白名单 */
   namespaces?: string[]
   /**
@@ -647,10 +652,12 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   // 打包后等于没写 —— 真机断线之后回头查，这里原先一行都找不到
   const { logger } = await import('../../services/electronLog')
   const { describeFetchRoute } = await import('../../utils/systemProxyFetch')
-  const onRetry: PacedStreamDeps['onRetry'] = ({ attempt, reason, model }) =>
+  const onRetry: PacedStreamDeps['onRetry'] = ({ attempt, reason, model }) => {
     logger.warn(
       `[AgentV3] 会话 ${ctx.sessionId} 模型请求第 ${attempt} 次重发（${model.provider}/${model.id}）：${reason.slice(0, 160)}`
     )
+    ctx.onModelRetry?.({ attempt, reason, model: `${model.provider}/${model.id}` })
+  }
   // 诊断包在最里层：卡死重发的每一次尝试都是一次真实请求，各记一行
   const diagnosed = diagnosedStreamFn(runtime.streamFn, {
     sessionId: ctx.sessionId,
@@ -974,8 +981,9 @@ export async function runSubAgent(
     modelRequest: {
       ...parent.modelRequest,
       hasImages: currentTurnHasImages(input.seedMessages),
-      // `fast` 档的队员走用户绑的对话模型；没绑会按角色回落链退回 agent 模型
-      ...(input.member?.tier === 'fast' ? { role: 'chat' as const } : {})
+      // `fast` 档的队员走用户绑的对话模型；没绑会按角色回落链退回 agent 模型。
+      // 会话钉住的是 agent 那一档，不能带过来 —— 带着的话钉子会顶掉 chat 的绑定
+      ...(input.member?.tier === 'fast' ? { role: 'chat' as const, pin: undefined } : {})
     },
     // 工作室的四个工具只给制作人。队员拿自己那份身份，验收员、`task` 子任务什么都不拿
     team: undefined,
@@ -1698,9 +1706,20 @@ const ENV_NOTES = {
   noPath: (name: string): string =>
     `Unreal Box has no path on record for ${name}: none was ever recorded, which is separate from whether the folder is still there. Ask the user where it is, and search their disks only when finding it is the task they gave you — starting from whatever clue they give rather than from the drive root.`,
 
+  /**
+   * 工具清单里没有 ≠ 盒子没有。
+   *
+   * 离线时 ue.* 整个不注册，模型只看得见手上那几个工具，就以为盒子不会做引擎的活，
+   * 转头拿 UBT、commandlet、手改工程文件硬干（真机：一整局游戏全走无头流水线，
+   * 从头到尾没提过「把工程打开」）。所以要说清这些工具在哪、怎么拿到、别绕开。
+   * 只在不排斥「这是 UE 工程」时给 —— 类型未知时 `unknownKind` 要求先问。
+   */
+  hiddenNotMissing:
+    'Engine tools (blueprints, materials, levels and actors, UMG, editor Python, screenshots, play-in-editor) are missing from your tool list only because nothing is connected, and they appear on their own as soon as the project connects, mid-turn included. When a task needs them, get the project open first rather than working around the editor: headless builds, commandlets and hand-edited project files are a different job, so propose one only with your reason and go ahead once the user agrees.',
+
   /** 怎么才能有引擎工具。**只在确认是 UE 工程、且此刻一个连接都没有时**才给 */
   howToConnect:
-    'To get engine tools here, the user starts Unreal Engine with the project open, and installs the UnrealAgentLink plugin if it is missing. The plugin connects to Unreal Box on its own and retries every 5 seconds — there is no "connect" button, so point them at the engine itself rather than at a control in the box. Once the project is open, `ue_session_health` reports whether the plugin has handshaked.',
+    'To get engine tools here, open the project: `project_manage` with action open_project does it when you have that tool, and installs the UnrealAgentLink plugin into the project on the way. Otherwise the user starts Unreal Engine with the project open, and installs the UnrealAgentLink plugin if it is missing. The plugin connects to Unreal Box on its own and retries every 5 seconds — there is no "connect" button, so point them at the engine itself rather than at a control in the box. Once the project is open, `ue_session_health` reports whether the plugin has handshaked.',
 
   /** 装了哪些引擎，盒子自己扫过，直接问它 */
   engineList:
@@ -1770,6 +1789,9 @@ function buildEnvironmentSection(ctx: SessionContext): string[] {
     ...(session && !session.path ? [ENV_NOTES.noPath(session.name)] : []),
 
     ENV_NOTES.engineList,
+
+    // 引擎工具只是藏着：说清在哪、怎么拿到。类型未知时让位给 `unknownKind` 的「先问」
+    ...(!session || knownUnreal ? [ENV_NOTES.hiddenNotMissing] : []),
 
     /*
      * 连接引导只在两个条件都成立时给：

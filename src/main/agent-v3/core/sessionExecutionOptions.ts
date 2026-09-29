@@ -12,6 +12,14 @@ const optionsSchema = z.object({
     .optional(),
   skillLearning: z.enum(['off', 'ask', 'auto']).optional(),
   /**
+   * 这条会话绑定的模型。第一轮开始时记下，之后一直用它 —— 用户在别的会话里
+   * 切模型只改那条会话和全局默认，回到这条会话模型不变。
+   *
+   * 缺省是本次改动之前的存量会话：下一轮按当时的全局默认补上。
+   * 「从断点继续」和后台任务不经过渲染层，只能靠这一份认回原模型。
+   */
+  model: z.object({ providerId: z.string(), modelId: z.string() }).optional(),
+  /**
    * 用户允不允许 agent 拍编辑器画面。
    *
    * 落盘是给「从断点继续」用的：那条路不经过渲染层，拿不到这一档，

@@ -5,8 +5,7 @@
  * 透传」，而是「结论有没有说清楚」：
  *
  *   - 纯蓝图工程要明确说出来，否则模型会开始写它根本编不了的代码；
- *   - Live Coding 路要主动说明「编不过时拿不到报错」，否则模型会等到编译失败
- *     才发现自己两眼一抹黑，而那时候用户已经等了一轮；
+ *   - Live Coding 路要说清编不过时报错从哪来（UBT 日志），以及什么时候会读不到；
  *   - 引擎源码路径要出现在正文里，因为它是「别凭记忆写 UE API」这条要求的落点。
  *
  * 这几条都是**文本**断言。看起来脆，但它们守的正是这个工具的全部价值 ——
@@ -70,22 +69,19 @@ describe('cpp_probe', () => {
   })
 
   /**
-   * 这条是整个工具最该守住的一条。
-   *
-   * Live Coding 的编译器报错不落盘（真机验过，），
-   * 所以模型必须**在动手之前**就知道这条路是「能编但看不见错」。
-   * 只回一个 `compile_path: 'livecoding'` 是不够的 —— 那个词本身不含这个信息。
+   * Live Coding 的报错现在从 UBT 的 Log.txt 读回（2026-09-29 起）。
+   * 插件给的原因要原样进正文 —— 模型据此判断编不过时能不能拿到行号。
    */
-  it('Live Coding 路要把「拿不到报错」这件事说出来', async () => {
+  it('Live Coding 路把插件给的诊断能力说明透传出来', async () => {
     const text = await run({
       has_code: true,
       compile_path: 'livecoding',
       compile_path_reason:
-        '这个会话启用了 Live Coding，编译走它。注意：Live Coding 的编译器报错只显示在 Live Coding 控制台窗口里，不写日志文件，所以编不过时拿不到文件名和行号。想要完整诊断，请关掉 Live Coding 后重启编辑器。'
+        '这个会话启用了 Live Coding，编译走它。编不过时会从 UnrealBuildTool 的日志（Log.txt）里捞出带文件名和行号的报错；个别情况（日志找不到、或者失败发生在打补丁阶段）只能拿到一句失败。'
     })
 
     expect(text).toContain('Live Coding')
-    expect(text).toMatch(/拿不到|看不到|不写日志/)
+    expect(text).toContain('Log.txt')
   })
 
   /**

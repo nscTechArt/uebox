@@ -2676,11 +2676,17 @@ export default {
       switchedToAgent: '已切换到 Agent',
       switchedToNormal: '已切换到 Chat',
       agentExecFailed: 'Agent 执行失败',
+      sessionModelUnavailable: '这个会话绑定的模型 {model} 已不可用，本轮改用默认模型',
       // 同一条对话已经有一轮在跑。不提 sessionId，也不提底下那个 IPC 通道叫什么 ——
       // 界面上「改方向」就是直接在输入框里继续打字
       sessionBusy: '这条对话还有一轮在跑。等它结束，或者直接在输入框里说下一步该怎么改。',
       resume: '继续尝试',
-      autoResume: '模型连接中断，{seconds} 秒后自动接着跑（第 {attempt}/{max} 次）。做完的步骤不会重做。',
+      autoResume:
+        '模型连接中断，{seconds} 秒后自动接着跑（第 {attempt}/{max} 次）。做完的步骤不会重做。',
+      modelRetry:
+        '模型网关没回话（{model}：{reason}），已自动重发，还在等。一直这样可以停止后换个模型或渠道。',
+      autoResumePersistent:
+        '模型请求失败，已开启自动断点续传：每 {seconds} 秒重试一次，最长 {minutes} 分钟。做完的步骤不会重做。',
       resumeReasonUnknown: '暂时无法确定具体原因，请检查模型连接后再试。',
       agentExecException: 'Agent 执行异常',
       generatedImageAlt: '生成的图片',
@@ -2884,6 +2890,9 @@ export default {
       archivedChatsDesc: '查看、恢复或删除已归档对话。',
       autoRetitle: '自动生成新标题',
       autoRetitleDesc: '每轮回复结束后，按刚聊的内容重起标题。',
+      persistentAutoResume: '自动断点续传',
+      persistentAutoResumeDesc:
+        '中转不稳定时，每 60 秒自动从断点接着跑，连续失败 30 分钟才停。失败的那几次不留在对话里。',
       openArchivedChats: '打开归档对话',
       // 智能追加提问设置
       followUpSuggestions: '追问建议',

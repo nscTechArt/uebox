@@ -84,4 +84,22 @@ describe('buildAgentModelCatalog', () => {
       '["gateway::one","vendor::model"]'
     )
   })
+
+  it('会话绑定的模型优先于全局绑定', () => {
+    const value = settings({
+      providers: [provider({ models: [{ id: 'gpt-5.4' }, { id: 'gpt-5.5' }] })]
+    })
+
+    const catalog = buildAgentModelCatalog(value, { providerId: 'openai', modelId: 'gpt-5.5' })
+
+    expect(catalog.selected?.modelId).toBe('gpt-5.5')
+    expect(catalog.binding).toEqual({ providerId: 'openai', modelId: 'gpt-5.5' })
+  })
+
+  it('会话绑定的模型被删了就显示全局默认 —— 主进程这一轮用的也是它', () => {
+    const catalog = buildAgentModelCatalog(settings(), { providerId: 'gone', modelId: 'x' })
+
+    expect(catalog.selected?.modelId).toBe('gpt-5.4')
+    expect(catalog.binding).toEqual({ providerId: 'openai', modelId: 'gpt-5.4' })
+  })
 })

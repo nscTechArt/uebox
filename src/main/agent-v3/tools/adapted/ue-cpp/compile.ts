@@ -4,11 +4,12 @@
  * 两条路的能力差是**不对称**的，这个工具的主要工作就是把这个差异如实讲清楚：
  *
  *   - 热重载路：编不过时能拿到 UBT 的完整输出，解析出文件名和行号；
- *   - Live Coding 路：编不过时**什么都拿不到**（编译器输出只在它自己的控制台
- *     窗口里，不落盘 —— 真机验过，）。
+ *   - Live Coding 路：编辑器日志里只有一句「失败了，去看控制台」。控制台里的报错
+ *     是它拉起的 UBT 打的，UBT 同时写进了自己的 Log.txt —— 插件失败时把那份日志
+ *     带回来（`build_log`），这里用同一个解析器捞诊断。
  *
- * 所以 Live Coding 失败时不能硬凑诊断，只能说「我读不到」，并把那条出路
- * （关掉 Live Coding 重启编辑器）递给用户。难看，但比编一个假的诊断强。
+ * 日志拿不到（位置变了、失败发生在打补丁阶段而不是编译阶段）时不能硬凑诊断，
+ * 只能说「我读不到」，并把出路递给用户。难看，但比编一个假的诊断强。
  */
 
 import { z } from 'zod'
@@ -26,14 +27,17 @@ export interface CppCompileResponse {
   compilation_result?: number
   /** `NotStarted` 时插件给的原因。一行都没编的时候，这是唯一有信息量的字段 */
   reason?: string
+  /** Live Coding 失败时插件读回来的 UBT Log.txt（只取这次编译开始之后写的） */
+  build_log?: string
+  build_log_path?: string
 }
 
 /** 冷编译能到几分钟，默认的 30 秒必然超时。插件端自己 15 分钟兜底，这里留点余量 */
 const TIMEOUT_MS = 20 * 60 * 1000
 
 const LIVE_CODING_NO_DIAGNOSTICS =
-  'Live Coding 的编译器报错只显示在 Live Coding 控制台窗口里，不写日志文件，我读不到。' +
-  '要拿到带文件名和行号的报错，请让用户在编辑器设置里关掉 Live Coding 后重启 —— 那条路我能给出完整诊断。'
+  '这次没找到 UnrealBuildTool 的编译日志，Live Coding 的报错只在它的控制台窗口里，我读不到。' +
+  '请让用户把 Live Coding 窗口里的 error 行贴过来；或者关掉 Live Coding 重启编辑器，走热重载那条路我能拿到完整诊断。'
 
 function summarize(response: CppCompileResponse): string {
   const lines: string[] = []
@@ -75,18 +79,33 @@ function summarize(response: CppCompileResponse): string {
       lines.push(`✗ 编译失败（${path}，${seconds} 秒）`)
   }
 
-  const diagnostics = parseDiagnostics(response.output ?? '')
-  if (diagnostics.length > 0) {
+  const fullOutput = [response.output, response.build_log].filter(Boolean).join('\n')
+  const diagnostics = parseDiagnostics(fullOutput)
+  const errors = diagnostics.filter((d) => d.severity === 'error')
+  if (errors.length > 0) {
+    // 有错误就只给错误。弃用警告动辄几十条，混在一起模型会跑去修警告
+    lines.push('', ...errors.map(formatDiagnostic))
+    // 从原文数，不从 diagnostics 数 —— 那份已经截到 50 条了
+    const warningCount = fullOutput.match(/\bwarning\s+[a-zA-Z]+[0-9]+\s*:/g)?.length ?? 0
+    if (warningCount > 0) lines.push(`（另有 ${warningCount} 条警告，不影响编译，已省略）`)
+  } else if (diagnostics.length > 0) {
     lines.push('', ...diagnostics.map(formatDiagnostic))
   } else if (response.result === 'Failure' || response.result === 'Unknown') {
-    if (response.path === 'livecoding') {
+    if (response.path === 'livecoding' && !response.build_log?.trim()) {
       lines.push('', LIVE_CODING_NO_DIAGNOSTICS)
+    } else if (response.path === 'livecoding') {
+      // 日志读到了但认不出 error 行（UHT 报错、UBT 自己抛异常）：给尾巴原文
+      const tail = response.build_log!.split(/\r?\n/).slice(-40).join('\n').trim()
+      lines.push('', '没能解析出结构化的错误，下面是编译日志的最后几十行原文：', tail)
     } else {
       // 解析器认不出来的错误（UHT 报错、UBT 自己抛的异常、本地化过的编译器输出）
       // 不能因为「解析失败」就在模型面前消失
       const tail = (response.output ?? '').split(/\r?\n/).slice(-40).join('\n').trim()
       lines.push('', '没能解析出结构化的错误，下面是输出的最后几十行原文：', tail || '(输出是空的)')
     }
+  }
+  if (response.build_log_path) {
+    lines.push(`（完整编译日志：${response.build_log_path}）`)
   }
 
   /*
@@ -120,10 +139,7 @@ function summarize(response: CppCompileResponse): string {
     }
   }
 
-  if (
-    response.result !== 'Success' &&
-    /C2084|already has a body|已有主体/.test(response.output ?? '')
-  ) {
+  if (response.result !== 'Success' && /C2084|already has a body|已有主体/.test(fullOutput)) {
     lines.push(
       '新增文件可能改变 Unity 合并编译顺序，暴露旧文件间的同名函数冲突；先核对诊断中的两处定义，不要据此猜动画逻辑有错。'
     )
@@ -153,8 +169,8 @@ export function createCppCompileTool(): UnrealAgentTool<CppCompileResponse> {
       '【编译期间编辑器不会卡住】异步执行，可能要几十秒到几分钟。\n' +
       '【编不过时能拿到什么】看走的哪条路（用 cpp_probe 先看）：\n' +
       '- 热重载路：完整的编译器报错，带文件名和行号。\n' +
-      '- Live Coding 路：**只知道失败了，拿不到报错内容** —— 那些只显示在 Live Coding 控制台窗口里。' +
-      '这时候要建议用户关掉 Live Coding 重启编辑器，而不是瞎猜哪一行错了。\n' +
+      '- Live Coding 路：通常也能拿到（从 UnrealBuildTool 的 Log.txt 读回）。' +
+      '偶尔读不到时工具会明说，那时候请用户贴 Live Coding 窗口里的报错，别瞎猜哪一行错了。\n' +
       '【改了 .Build.cs 或 .uproject 之后不要指望它】那类改动要完整重新链接，' +
       '得关掉编辑器在 IDE 里编一次。返回里的 needs_full_rebuild 会提醒你。',
     /*

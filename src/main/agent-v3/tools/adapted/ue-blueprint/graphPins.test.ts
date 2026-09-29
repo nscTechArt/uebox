@@ -263,6 +263,20 @@ describe('节点的重建说明', () => {
     expect(out).not.toHaveProperty('params')
   })
 
+  it('RPC 事件的复制模式要带回来 —— 丢了它写回去就变成普通事件', () => {
+    const out = describeNodeForModel(
+      node({
+        write_as: 'CustomEvent',
+        member_name: 'Server_Request',
+        replication: 'Server',
+        reliable: true
+      })
+    )
+
+    expect(out.replication).toBe('Server')
+    expect(out.reliable).toBe(true)
+  })
+
   it('重建不了的节点不给 write_as，调用方据此知道只能连它不能重写它', () => {
     const out = describeNodeForModel(node({ class: 'K2Node_Knot' }))
 

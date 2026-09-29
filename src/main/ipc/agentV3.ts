@@ -4,7 +4,7 @@
  * V2 的 `agent:*` 契约及其兼容投影层已随界面改造一起删除。
  */
 
-import { ipcMain, webContents } from 'electron'
+import { ipcMain, webContents, type WebContents } from 'electron'
 import { randomUUID } from 'crypto'
 
 import type { ImageContent } from '@earendil-works/pi-ai'
@@ -157,6 +157,11 @@ import {
   type SessionExecutionOptions
 } from '../agent-v3/core/sessionExecutionOptions'
 import {
+  pinnableSessionModel,
+  resolveSessionModel,
+  type SessionModel
+} from '../agent-v3/core/sessionModel'
+import {
   isUserAbort,
   planResume,
   repairPendingQuestions,
@@ -253,7 +258,8 @@ function autoResumeHooks(
   return {
     onScheduled: (notice) => {
       const line =
-        `[AgentV3] 会话 ${sessionId} 模型连接中断，${notice.delayMs / 1000} 秒后自动续跑` +
+        `[AgentV3] 会话 ${sessionId} ${notice.persistent ? '模型请求失败（自动断点续传）' : '模型连接中断'}，` +
+        `${notice.delayMs / 1000} 秒后自动续跑` +
         `（第 ${notice.attempt}/${notice.maxAttempts} 次）：${notice.reason.slice(0, 160)}`
       // 进本地日志文件：console 不进 `unreal-agent.log`
       void import('../services/electronLog')
@@ -263,7 +269,8 @@ function autoResumeHooks(
         sessionId,
         attempt: notice.attempt,
         maxAttempts: notice.maxAttempts,
-        delayMs: notice.delayMs
+        delayMs: notice.delayMs,
+        persistent: notice.persistent
       })
     },
     onResume: async (plan) => {
@@ -273,6 +280,21 @@ function autoResumeHooks(
       // 又要开始收插话了：`agent_end` 那一刻标的「收尾中」只对那次失败成立
       run.ending = false
     }
+  }
+}
+
+/**
+ * 设置里的「自动断点续传」开没开，每次开跑时读。
+ *
+ * 懒加载：`appSettingsManager` 会顺着 services 拉进一大串（见 AGENTS.md 第 7 节）。
+ * 读不到按关着算 —— 开关只放宽重试，关着就是原来的行为。
+ */
+async function persistentAutoResumeEnabled(): Promise<boolean> {
+  try {
+    const { appSettingsManager } = await import('../appSettingsManager')
+    return appSettingsManager.getSettings().agentPersistentAutoResume !== false
+  } catch {
+    return false
   }
 }
 
@@ -491,6 +513,28 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
   }
 }
 
+/**
+ * 模型请求卡住重发时说一声。同一次请求只说第一次重发：
+ * 重发间隔一两分钟，每次都说的话时间线上全是同一句话。
+ * 自动续跑出去的那几次也不说（`resumed > 0`）：自动断点续传每分钟续一次，
+ * 那一串已经由 `agent-v3:auto-resume` 说过一声了。
+ *
+ * 界面只拿结构化的几项，文案归渲染层（双语），同 `agent-v3:auto-resume`。
+ */
+function notifyModelRetry(
+  sender: WebContents,
+  sessionId: string,
+  info: { attempt: number; reason: string; model: string },
+  resumed: number
+): void {
+  if (info.attempt !== 1 || resumed > 0 || sender.isDestroyed()) return
+  sender.send('agent-v3:model-retry', {
+    sessionId,
+    model: info.model,
+    reason: info.reason.slice(0, 120)
+  })
+}
+
 /** 交付闸：没过验收就收尾时，替制作人补一句（见 `core/team/teamSession.ts`） */
 function attachTeamGate(
   agent: Agent,
@@ -669,6 +713,13 @@ export interface AgentV3ExecuteArgs {
    * 两者一样：都不拼块。
    */
   editorSnapshot?: EditorSnapshot | null
+  /**
+   * 这条会话绑定的模型，渲染层记在会话上随消息带下来。
+   *
+   * 不传（后台任务、Spotlight）就用执行记录里那份；那份也没有（第一轮）
+   * 就按全局默认绑定，见 `core/sessionModel.ts`。
+   */
+  sessionModel?: SessionModel
 }
 
 /**
@@ -1772,6 +1823,13 @@ export function registerAgentV3IPC(): void {
        */
       const previousOptions = await loadExecutionOptions(sessionId)
       const carried = previousOptions?.sessionProject
+      // 模型跟着会话走：别的会话里切了模型，这条会话还用自己绑的那个
+      const sessionModel = await resolveSessionModel(
+        sessionId,
+        args.sessionModel,
+        previousOptions?.model
+      )
+      if (sessionModel.pin) ctx.modelRequest = { ...ctx.modelRequest, pin: sessionModel.pin }
       /*
        * 工作室是**跨轮**的：`/team` 开过之后，用户后面随口插的每一句都还在团队里。
        * 交付闸的提醒次数按真人消息清零 —— 用户说了新话，就该重新给制作人两次机会。
@@ -1805,6 +1863,7 @@ export function registerAgentV3IPC(): void {
         ...(sessionProject !== undefined ? { sessionProject } : {}),
         thinkingLevel,
         skillLearning,
+        ...(sessionModel.record ? { model: sessionModel.record } : {}),
         // 落盘是为了「从断点继续」—— 那条路不经过渲染层，读不到这一档的话，
         // 用户点一下「接着跑」，半程就重新长出了截图能力
         editorScreenshotEnabled,
@@ -1874,8 +1933,12 @@ export function registerAgentV3IPC(): void {
       })
       // 连接中途被掐断时自动「继续尝试」，见 `core/autoResume.ts`。
       // 失败事件经它转交事件桥：决定续跑的那次，界面不会先看到一张失败卡片
-      const autoResume = createAutoResume({ signal: run.controller.signal })
+      const autoResume = createAutoResume({
+        signal: run.controller.signal,
+        persistent: await persistentAutoResumeEnabled()
+      })
       ctx.autoResumeAttempt = () => autoResume.attempts
+      ctx.onModelRetry = (info) => notifyModelRetry(sender, sessionId, info, autoResume.attempts)
       const deliver = autoResume.wrap(bridge)
       agent.subscribe(async (event) => {
         // 同步标记，赶在下面那次落盘的 await 之前：见 `ActiveAgentRun.ending`
@@ -2153,6 +2216,11 @@ export function registerAgentV3IPC(): void {
       return { success: false, error: plan.reason }
     }
 
+    // 续跑认回这条会话绑定的模型。存量会话没有记录，照旧走全局默认
+    const resumeModel = options.model
+      ? await resolveSessionModel(sessionId, undefined, options.model)
+      : {}
+
     // 应用刚重启、用户第一件事就是点「从断点继续」时，主进程这边还没有档位
     // 可言（默认是最严的一档）—— 渲染层带下来的那份才是用户设的。
     const ctx: SessionContext = {
@@ -2220,7 +2288,8 @@ export function registerAgentV3IPC(): void {
       modelRequest: {
         role: 'agent',
         agentType: 'agent-v3',
-        hasImages: currentTurnHasImages(plan.messages)
+        hasImages: currentTurnHasImages(plan.messages),
+        ...(resumeModel.pin ? { pin: resumeModel.pin } : {})
       },
       requestApproval: createApprovalRequester(sender),
       requestQuestion: createQuestionRequester(sender),
@@ -2261,8 +2330,12 @@ export function registerAgentV3IPC(): void {
         riskOf: callRiskOf(allTools)
       })
       // 同 execute：手动「继续尝试」这一轮里再断，同样自动接着跑
-      const autoResume = createAutoResume({ signal: run.controller.signal })
+      const autoResume = createAutoResume({
+        signal: run.controller.signal,
+        persistent: await persistentAutoResumeEnabled()
+      })
       ctx.autoResumeAttempt = () => autoResume.attempts
+      ctx.onModelRetry = (info) => notifyModelRetry(sender, sessionId, info, autoResume.attempts)
       const deliver = autoResume.wrap(bridge)
       agent.subscribe(async (e) => {
         // 同步标记，赶在下面那次落盘的 await 之前：见 `ActiveAgentRun.ending`
@@ -2506,9 +2579,25 @@ export function registerAgentV3IPC(): void {
    * 输入框那个下拉必须按模型现问 —— 档位是各家模型自己声明的，写死一份
    * 清单会列出这个模型根本没有的档位，选了内核会悄悄夹到最近的一档。
    */
-  ipcMain.handle('agent-v3:thinking-levels', async () =>
-    listThinkingLevels({ role: 'agent', agentType: 'agent-v3' })
-  )
+  ipcMain.handle('agent-v3:thinking-levels', async (_event, args?: { model?: SessionModel }) => {
+    // 按会话绑定的模型问；那个模型用不了时和发消息一样退回全局默认
+    const pin = await pinnableSessionModel(args?.model)
+    return listThinkingLevels({ role: 'agent', agentType: 'agent-v3', ...(pin ? { pin } : {}) })
+  })
+
+  /**
+   * 这条会话绑定的模型（执行记录里那份）。
+   *
+   * 渲染层的会话上没记模型时（存量会话、分支出来的小窗口）用它认回来，
+   * 而不是按此刻的全局默认绑上 —— 那可能已经被别的会话改过了。
+   */
+  ipcMain.handle('agent-v3:session-model', async (_event, args: { sessionId: string }) => {
+    try {
+      return (await loadExecutionOptions(args.sessionId))?.model ?? null
+    } catch {
+      return null
+    }
+  })
 
   /**
    * 在编辑器里打开「本轮改动」里的某个资产。

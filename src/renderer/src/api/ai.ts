@@ -304,6 +304,8 @@ export interface AgentExecuteParams {
    * 三处兜底必须一致）。关掉时主进程会把 `ue_screenshot` 从工具池里摘掉。
    */
   editorScreenshotEnabled?: boolean
+  /** 这条会话绑定的模型。不传主进程就用执行记录里那份，都没有按全局默认绑定 */
+  sessionModel?: { providerId: string; modelId: string } | null
   defaultEngineVersion?: string // 用户设置的默认引擎版本（如 "5.5"、"5.4"）
   askMode?: boolean // Ask 模式（只读模式）：仅使用读取类工具，不执行任何写入操作
   byokOpenAICompatible?: {
@@ -1067,6 +1069,15 @@ ${params.text}
                 fileName,
                 kind
               }))
+            }
+          : {}),
+        // 同上，会话上那份是响应式代理
+        ...(params.sessionModel
+          ? {
+              sessionModel: {
+                providerId: params.sessionModel.providerId,
+                modelId: params.sessionModel.modelId
+              }
             }
           : {})
       })

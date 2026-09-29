@@ -699,6 +699,34 @@ export function findVisionCapableRole(source: RoleBindingSource): ModelRole | nu
   return null
 }
 
+/**
+ * Agent 此刻的默认模型。没单独绑 Agent 时内核沿用 chat 角色，这里给出同一个结果。
+ *
+ * 只留 providerId / modelId：`source: 'plan'` 是全局绑定的归属标记，
+ * 抄进会话记录里没有意义。
+ */
+export function defaultAgentBinding(roles: RoleBindings): ModelBinding | null {
+  const binding = roles.agent ?? roles.chat
+  return binding ? { providerId: binding.providerId, modelId: binding.modelId } : null
+}
+
+/**
+ * 会话钉住的模型还能不能用：来源还在、是对话类来源、模型还在它的清单里。
+ *
+ * 用户可能在设置页删了那个来源或模型，套餐重新导入也会换掉模型清单。
+ * 用不了的时候由调用方退回全局默认，而不是拿一个已经不存在的模型硬打出去。
+ */
+export function isAgentBindingAvailable(
+  source: {
+    providers: readonly { id: string; kind: ProviderKind; models: readonly { id: string }[] }[]
+  },
+  binding: ModelBinding
+): boolean {
+  const provider = source.providers.find((item) => item.id === binding.providerId)
+  if (!provider || provider.kind !== ROLE_KIND.agent) return false
+  return provider.models.some((model) => model.id === binding.modelId)
+}
+
 /** 发给渲染层的 provider 形态：不含任何密钥内容 */
 export interface ProviderView {
   id: string

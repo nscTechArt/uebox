@@ -44,6 +44,21 @@ describe('Beta 开关落盘', () => {
   })
 })
 
+describe('自动断点续传开关', () => {
+  it('默认打开；旧配置里没有这个字段也算开', async () => {
+    const { appSettingsManager } = await import('./appSettingsManager')
+    expect(appSettingsManager.getSettings().agentPersistentAutoResume).toBe(true)
+  })
+
+  it('用户关掉之后重启还是关的', async () => {
+    const { appSettingsManager: first } = await import('./appSettingsManager')
+    first.setAgentPersistentAutoResume(false)
+    vi.resetModules()
+    const { appSettingsManager: restarted } = await import('./appSettingsManager')
+    expect(restarted.getSettings().agentPersistentAutoResume).toBe(false)
+  })
+})
+
 describe('工具开关落盘', () => {
   it('两份名单默认是空的：什么都没设置过就等于全部打开', async () => {
     const { appSettingsManager } = await import('./appSettingsManager')

@@ -588,6 +588,47 @@ describe('agentEventDispatcher', () => {
       unregisterAgentHandler(SID)
     })
 
+    // 自动断点续传每分钟重试一次：一串失败只说第一次，不然半小时刷三十行
+    it('自动断点续传：一串失败只提示第一次，说清间隔和最长多久', () => {
+      const onNotifyUsers = vi.fn()
+      registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+
+      for (const attempt of [1, 2, 3]) {
+        bus.emit('agent-v3:auto-resume', {
+          sessionId: SID,
+          attempt,
+          maxAttempts: 30,
+          delayMs: 60_000,
+          persistent: true
+        })
+      }
+
+      expect(onNotifyUsers).toHaveBeenCalledTimes(1)
+      expect(onNotifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'warning', message: expect.stringMatching(/60.*30/) })
+      )
+      unregisterAgentHandler(SID)
+    })
+
+    it('模型请求卡住重发：文案由界面按语言给，带上模型和原因', () => {
+      const onNotifyUsers = vi.fn()
+      registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+
+      bus.emit('agent-v3:model-retry', {
+        sessionId: SID,
+        model: 'anthropic-2/claude-opus-5-5',
+        reason: 'stalled'
+      })
+
+      expect(onNotifyUsers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'warning',
+          message: expect.stringMatching(/anthropic-2\/claude-opus-5-5.*stalled/)
+        })
+      )
+      unregisterAgentHandler(SID)
+    })
+
     it('工具进度带上工具名', () => {
       const onNotifyUsers = vi.fn()
       registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })

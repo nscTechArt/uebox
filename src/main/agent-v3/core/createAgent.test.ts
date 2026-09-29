@@ -970,6 +970,26 @@ describe('buildSystemPrompt', () => {
     )
 
     /*
+     * 离线时模型只看得见手上那几个工具，会以为盒子不会做引擎的活，转头拿 UBT /
+     * commandlet 硬干。只要不排斥「这是 UE 工程」，就得说清工具只是藏着、先开工程。
+     */
+    it.each(situations.filter((s) => !hasEngine(s) && (!s.ctx.sessionProject || knowsUnreal(s))))(
+      '没有引擎工具时说清「只是藏着」并劝先开工程：$label',
+      (s) => {
+        const env = envOf(s)
+        expect(env).toContain('missing from your tool list only because nothing is connected')
+        expect(env).toContain('get the project open first rather than working around the editor')
+      }
+    )
+
+    it.each(situations.filter((s) => s.ctx.sessionProject && !knowsUnreal(s)))(
+      '工程类型未知时不说「只是藏着」—— 让位给先问：$label',
+      (s) => {
+        expect(envOf(s)).not.toContain('get the project open first')
+      }
+    )
+
+    /*
      * 同一条教训只许有一份措辞。措辞不同的近义句对模型是潜在冲突，而且「后者胜」
      * （ConInstruct, arXiv:2511.14342），优先级会变成排版的副产品。
      */

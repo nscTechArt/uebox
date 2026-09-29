@@ -5,6 +5,11 @@ import { chatHistoryStorage } from '../../utils/chatHistoryStorage'
 import { agentV3API } from '@renderer/api/agentV3'
 import { useChatSidebarStore } from './chatSidebarStore'
 
+export interface SessionModel {
+  providerId: string
+  modelId: string
+}
+
 export interface BoundNotebook {
   notebookId: string
   title: string
@@ -86,6 +91,12 @@ export interface ChatSession {
    * 才能知道自己用了多少，那正是他想避免的。
    */
   contextUsage?: { tokens: number; contextWindow: number }
+  /**
+   * 这条会话绑定的模型。第一轮发出时记下，之后一直用它 ——
+   * 别的会话里切模型不影响这一条。缺省 = 还没发过消息（或存量会话），
+   * 界面上显示全局默认。
+   */
+  model?: SessionModel
   agentHistory?: any[]
   agentCurrentText?: string
   isImageGenerationMode?: boolean
@@ -547,6 +558,19 @@ export const useChatSessionsStore = defineStore(
       session.contextUsage = undefined
     }
 
+    function getModel(id: string): SessionModel | undefined {
+      return sessionById(id)?.model
+    }
+
+    /** 和上下文用量一样不动 `updatedAt`：换模型不是说话，不该让侧边栏重排 */
+    function setModel(id: string, model: SessionModel): void {
+      const session = sessions.value.find((item) => item.id === id)
+      if (!session) return
+      if (session.model?.providerId === model.providerId && session.model.modelId === model.modelId)
+        return
+      session.model = { providerId: model.providerId, modelId: model.modelId }
+    }
+
     function getAgentHistory(id: string): any[] {
       return sessionById(id)?.agentHistory || []
     }
@@ -656,6 +680,8 @@ export const useChatSessionsStore = defineStore(
       getContextUsage,
       setContextUsage,
       clearContextUsage,
+      getModel,
+      setModel,
       getAgentHistory,
       setAgentHistory,
       getAgentCurrentText,

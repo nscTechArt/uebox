@@ -36,6 +36,12 @@
 #include "Engine/GameViewportClient.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Brushes/SlateColorBrush.h"
+#include "Styling/CoreStyle.h"
+#include "Internationalization/Culture.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Framework/Docking/TabManager.h"
 #include "Subsystems/AssetEditorSubsystem.h"
@@ -3430,6 +3436,10 @@ namespace
 		/** 这次会话的文件名前缀，保证同一秒里的几帧不互相覆盖 */
 		FString FrameStamp;
 
+		/** 「盒子正在试玩，请勿操作」横幅，挂在游戏视口上。视口先没了就不用摘 */
+		TSharedPtr<SWidget> Banner;
+		TWeakObjectPtr<UGameViewportClient> BannerViewport;
+
 		TUniquePtr<FUAL_PieLogCapture> Capture;
 		FDelegateHandle StartedHandle;
 		FDelegateHandle EndedHandle;
@@ -3458,6 +3468,8 @@ namespace
 			Frames.Empty();
 			FrameMode = TEXT("scene");
 			FrameStamp.Empty();
+			Banner.Reset();
+			BannerViewport.Reset();
 			Capture.Reset();
 		}
 	};
@@ -3558,9 +3570,78 @@ namespace
 		return Out;
 	}
 
+	/**
+	 * 游戏视口顶上挂一条「盒子正在试玩，请勿操作」。
+	 *
+	 * 试玩机器人一跑就是几十秒，用户看见游戏窗口自己在动，顺手一碰鼠标键盘，
+	 * 机器人的判断就脏了。
+	 *
+	 * 不进截图：scene 模式的帧和收尾截图走 SceneCapture，本来就不画界面层；
+	 * window 模式抓的是整块窗口像素，横幅会一起进去被当成游戏 UI，所以那种模式不挂。
+	 * 命中测试关掉，不挡任何点击。
+	 */
+	void UAL_ShowPieBanner()
+	{
+		if (GPieSession.FrameMode == TEXT("window"))
+		{
+			return;
+		}
+		UWorld* PlayWorld = UAL_GetPlayWorld();
+		UGameViewportClient* Viewport = PlayWorld ? PlayWorld->GetGameViewport() : nullptr;
+		if (!Viewport)
+		{
+			return;
+		}
+
+		const bool bChinese = FInternationalization::Get().GetCurrentCulture()->GetName().StartsWith(TEXT("zh"));
+		const FText Message = bChinese
+			? FText::FromString(TEXT("盒子正在试玩测试，请勿操作 · 按 Esc 中止"))
+			: FText::FromString(TEXT("UEBox is playtesting - please don't touch · Esc to abort"));
+
+		static const FSlateColorBrush Background(FLinearColor(0.f, 0.f, 0.f, 0.6f));
+		FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 14);
+
+		TSharedRef<SWidget> Banner =
+			SNew(SBox)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Top)
+			.Padding(FMargin(0.f, 16.f, 0.f, 0.f))
+			.Visibility(EVisibility::HitTestInvisible)
+			[
+				SNew(SBorder)
+				.BorderImage(&Background)
+				.Padding(FMargin(16.f, 8.f))
+				[
+					SNew(STextBlock)
+					.Text(Message)
+					.Font(Font)
+					.ColorAndOpacity(FLinearColor(1.f, 0.78f, 0.25f))
+				]
+			];
+
+		// ZOrder 取大值，压在游戏自己的 HUD 上面
+		Viewport->AddViewportWidgetContent(Banner, 1000);
+		GPieSession.Banner = Banner;
+		GPieSession.BannerViewport = Viewport;
+	}
+
+	void UAL_HidePieBanner()
+	{
+		if (GPieSession.Banner.IsValid())
+		{
+			if (UGameViewportClient* Viewport = GPieSession.BannerViewport.Get())
+			{
+				Viewport->RemoveViewportWidgetContent(GPieSession.Banner.ToSharedRef());
+			}
+		}
+		GPieSession.Banner.Reset();
+		GPieSession.BannerViewport.Reset();
+	}
+
 	/** 摘掉这次会话挂的所有钩子。每条退出路径都必须走它，否则下一次会串味 */
 	void UAL_TeardownPieSession()
 	{
+		UAL_HidePieBanner();
 		if (GPieSession.Capture && GLog)
 		{
 			GLog->RemoveOutputDevice(GPieSession.Capture.Get());
@@ -3916,6 +3997,7 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 			GPieSession.Capture->PlayStartedAt = GPieSession.PlayStartedAt;
 		}
 		GPieSession.ActorsAtStart = UAL_CountActors(UAL_GetPlayWorld());
+		UAL_ShowPieBanner();
 	});
 
 	/**

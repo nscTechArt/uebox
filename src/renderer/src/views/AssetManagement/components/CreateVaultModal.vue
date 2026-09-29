@@ -123,11 +123,7 @@
             </div>
 
             <!-- 服务器资产库：在线浏览，不在本机建库 -->
-            <div
-              class="mode-card"
-              :class="{ active: serverMode }"
-              @click="serverMode = true"
-            >
+            <div class="mode-card" :class="{ active: serverMode }" @click="serverMode = true">
               <div class="card-header">
                 <div class="icon-wrapper" :class="{ active: serverMode }">
                   <PhCloud />

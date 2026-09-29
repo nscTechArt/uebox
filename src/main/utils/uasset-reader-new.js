@@ -1773,7 +1773,6 @@ ReaderUasset.prototype.fstring = function fstring(key) {
    * A reasonable FString length should not exceed 1MB (1048576 bytes).
    * If we detect an unreasonable length, return empty string to prevent crash.
    */
-
   var MAX_FSTRING_LENGTH = 1048576
   var absLength = length > 0 ? length : length * -1 * 2
   if (absLength > MAX_FSTRING_LENGTH || absLength < 0) {
@@ -2034,7 +2033,6 @@ ReaderUasset.prototype.readHeader = function readHeader() {
    * -8: UE5 version added
    * -9: contractual change for FileVersionTooNew
    */
-
   if (this.uasset.header.LegacyFileVersion > -2 || this.uasset.header.LegacyFileVersion < -9) {
     return new Error('unsupported version')
   }
@@ -2044,7 +2042,6 @@ ReaderUasset.prototype.readHeader = function readHeader() {
    * Only read LegacyUE3Version if LegacyFileVersion is not -4
    * (Per UE source: -4 indicates removal of the UE3 version)
    */
-
   if (this.uasset.header.LegacyFileVersion !== -4) {
     this.uasset.header.LegacyUE3Version = this.int32('LegacyUE3Version')
   }
@@ -2054,7 +2051,6 @@ ReaderUasset.prototype.readHeader = function readHeader() {
 
   // Check valid UE5
   this.uasset.header.FileVersionUE5 = 0
-
   if (this.uasset.header.LegacyFileVersion <= -8) {
     this.uasset.header.FileVersionUE5 = this.int32('FileVersionUE5')
   }
@@ -2221,7 +2217,6 @@ ReaderUasset.prototype.readHeader = function readHeader() {
    * PersistentGuid - 仅在非 FilterEditorOnly 且 >= VER_UE4_ADDED_PACKAGE_OWNER 时读取
    * FilterEditorOnly 通过 PackageFlags & PKG_FilterEditorOnly (0x80000000) 判断
    */
-
   if ((this.uasset.header.PackageFlags & 0x80000000) === 0) {
     if (
       this.uasset.header.FileVersionUE4 >=
@@ -2568,6 +2563,107 @@ ReaderUasset.prototype.readLocMetadataObject = function readLocMetadataObject(la
  * @see https://github.com/EpicGames/UnrealEngine/blob/5.0/Engine/Source/Runtime/Core/Private/Internationalization/GatherableTextData.cpp
  */
 ReaderUasset.prototype.readGatherableTextData = function readGatherableTextData() {
+  /** @type {number} */
+  var start = this.uasset.header.GatherableTextDataOffset
+  /** @type {number} */
+  var hexViewLength = this.uasset.hexView.length
+  /** @type {number} */
+  var sectionEnd = this.findNextSectionOffset(start)
+  /** @type {boolean[]} */
+  var layouts = [false, true]
+  /** @type {number} */
+  var idxLayout
+  /** @type {boolean} */
+  var ok
+  /** @type {(boolean|undefined)} */
+  var fallbackLayout
+
+  /*
+   * UE 5.8 assets serialize one extra int32 per SourceSiteContext. The version gate is
+   * unknown, so try the classic layout first and fall back to the extended one when the
+   * classic parse does not end exactly at the next section.
+   */
+  for (idxLayout = 0; idxLayout < layouts.length; ++idxLayout) {
+    this.currentIdx = start
+    this.uasset.hexView.length = hexViewLength
+    try {
+      ok = this.readGatherableTextDataEntries(layouts[idxLayout])
+    } catch {
+      ok = false
+    }
+    if (ok && (sectionEnd === undefined || this.currentIdx === sectionEnd)) {
+      return undefined
+    }
+    if (ok && fallbackLayout === undefined) {
+      fallbackLayout = layouts[idxLayout]
+    }
+  }
+
+  this.currentIdx = start
+  this.uasset.hexView.length = hexViewLength
+  if (fallbackLayout !== undefined) {
+    this.readGatherableTextDataEntries(fallbackLayout)
+
+    return undefined
+  }
+
+  // Neither layout parsed: skip the section rather than crash on the whole asset.
+  this.uasset.gatherableTextData = []
+
+  return undefined
+}
+
+/**
+ * Find the smallest known section offset strictly after the given offset.
+ *
+ * @function ReaderUasset#findNextSectionOffset
+ * @param {number} offset - current section offset
+ * @returns {(number|undefined)}
+ * @private
+ */
+ReaderUasset.prototype.findNextSectionOffset = function findNextSectionOffset(offset) {
+  var header = this.uasset.header
+  var candidates = [
+    header.MetadataOffset,
+    header.ImportOffset,
+    header.ExportOffset,
+    header.CellImportOffset,
+    header.CellExportOffset,
+    header.DependsOffset,
+    header.SoftPackageReferencesOffset,
+    header.SearchableNamesOffset,
+    header.ThumbnailTableOffset,
+    header.ImportTypeHierarchiesOffset,
+    header.AssetRegistryDataOffset,
+    header.TotalHeaderSize
+  ]
+  var result
+  var idx
+
+  for (idx = 0; idx < candidates.length; ++idx) {
+    if (
+      typeof candidates[idx] === 'number' &&
+      candidates[idx] > offset &&
+      (result === undefined || candidates[idx] < result)
+    ) {
+      result = candidates[idx]
+    }
+  }
+
+  return result
+}
+
+/**
+ * Read Gatherable Text Data entries at currentIdx.
+ *
+ * @function ReaderUasset#readGatherableTextDataEntries
+ * @param {boolean} hasSiteContextExtraField - true for the UE 5.8 layout with an extra int32 per site context
+ * @returns {boolean} false if the data is inconsistent with this layout
+ * @private
+ */
+ReaderUasset.prototype.readGatherableTextDataEntries = function readGatherableTextDataEntries(
+  hasSiteContextExtraField
+) {
   /** @type {GatherableTextData} */
   var gatherableTextData
   /** @type {SourceSiteContexts} */
@@ -2580,8 +2676,8 @@ ReaderUasset.prototype.readGatherableTextData = function readGatherableTextData(
   var idx = 0
   /** @type {number} */
   var count = this.uasset.header.GatherableTextDataCount
-
-  this.currentIdx = this.uasset.header.GatherableTextDataOffset
+  /** @type {number} */
+  var maxSourceSiteContexts = 100000
 
   this.uasset.gatherableTextData = []
   for (; idx < count; ++idx) {
@@ -2604,6 +2700,13 @@ ReaderUasset.prototype.readGatherableTextData = function readGatherableTextData(
     countSourceSiteContexts = this.int32(
       'GatherableTextData #' + (idx + 1) + ': CountSourceSiteContexts'
     )
+    if (
+      countSourceSiteContexts < 0 ||
+      countSourceSiteContexts > maxSourceSiteContexts ||
+      this.currentIdx > this.bytes.length
+    ) {
+      return false
+    }
     for (
       idxSourceSiteContexts = 0;
       idxSourceSiteContexts < countSourceSiteContexts;
@@ -2638,6 +2741,15 @@ ReaderUasset.prototype.readGatherableTextData = function readGatherableTextData(
           (idxSourceSiteContexts + 1) +
           ': IsOptional'
       )
+      if (hasSiteContextExtraField) {
+        sourceSiteContexts.Unknown = this.uint32(
+          'GatherableTextData #' +
+            (idx + 1) +
+            ' - SourceSiteContexts #' +
+            (idxSourceSiteContexts + 1) +
+            ': Unknown'
+        )
+      }
 
       // Read InfoMetaData as FLocMetadataObject
       sourceSiteContexts.InfoMetaData = this.readLocMetadataObject(
@@ -2650,12 +2762,15 @@ ReaderUasset.prototype.readGatherableTextData = function readGatherableTextData(
       )
 
       gatherableTextData.SourceSiteContexts.push(sourceSiteContexts)
+      if (this.currentIdx > this.bytes.length) {
+        return false
+      }
     }
 
     this.uasset.gatherableTextData.push(gatherableTextData)
   }
 
-  return undefined
+  return true
 }
 
 /**
@@ -3092,7 +3207,6 @@ ReaderUasset.prototype.readThumbnails = function readThumbnails() {
   count = this.int32('Thumbnails Count')
 
   // 检查缩略图数量是否合理（避免读取错误数据导致的大量循环）
-
   if (count <= 0 || count > 1000) {
     return
   }
@@ -3221,7 +3335,6 @@ ReaderUasset.prototype.readAssetRegistryData = function readAssetRegistryData() 
    * UE5.6+ Protection: Guard against corrupt count values causing infinite loops.
    * A reasonable AssetRegistryData count should not exceed 100000 entries.
    */
-
   var MAX_ASSET_REGISTRY_COUNT = 100000
   if (count < 0 || count > MAX_ASSET_REGISTRY_COUNT) {
     return

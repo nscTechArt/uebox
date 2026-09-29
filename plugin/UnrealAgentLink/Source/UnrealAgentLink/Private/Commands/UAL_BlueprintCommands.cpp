@@ -791,6 +791,60 @@ static TSharedPtr<FJsonObject> UAL_BuildTimelineJson(const UTimelineTemplate* Te
 	return Obj;
 }
 
+/**
+ * 自定义事件的「复制」选项 —— 细节面板里 Replicates 那个下拉框。
+ *
+ * 联机版的「客户端→服务器」请求只能靠它：蓝图里 RPC 就是一个打了网络标志的
+ * 自定义事件。编辑器没有公开的 setter，面板自己也是直接改 FunctionFlags
+ * （FBlueprintGraphActionDetails::SetNetFlags），这里照抄那套位运算。
+ * Python 读写不到这个字段（不是 BlueprintVisible），所以只能插件来做。
+ */
+static const uint32 UAL_EventNetModeFlags = FUNC_Net | FUNC_NetServer | FUNC_NetClient | FUNC_NetMulticast;
+
+static bool UAL_EventNetFlagsFromString(const FString& Mode, uint32& OutFlags)
+{
+	const FString M = Mode.ToLower();
+	if (M == TEXT("none") || M.IsEmpty())
+	{
+		OutFlags = 0;
+	}
+	else if (M == TEXT("server"))
+	{
+		OutFlags = FUNC_Net | FUNC_NetServer;
+	}
+	else if (M == TEXT("client"))
+	{
+		OutFlags = FUNC_Net | FUNC_NetClient;
+	}
+	else if (M == TEXT("multicast"))
+	{
+		OutFlags = FUNC_Net | FUNC_NetMulticast;
+	}
+	else
+	{
+		return false;
+	}
+	return true;
+}
+
+/** 反过来：给读图用，回的串必须能原样填回 replication */
+static const TCHAR* UAL_EventNetModeName(uint32 Flags)
+{
+	if (!(Flags & FUNC_Net))
+	{
+		return TEXT("None");
+	}
+	if (Flags & FUNC_NetServer)
+	{
+		return TEXT("Server");
+	}
+	if (Flags & FUNC_NetClient)
+	{
+		return TEXT("Client");
+	}
+	return TEXT("Multicast");
+}
+
 static void UAL_AnnotateNodeForRewrite(UEdGraphNode* Node, const TSharedPtr<FJsonObject>& NodeObj)
 {
 	if (const UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node))
@@ -848,6 +902,12 @@ static void UAL_AnnotateNodeForRewrite(UEdGraphNode* Node, const TSharedPtr<FJso
 		if (Params.Num() > 0)
 		{
 			NodeObj->SetArrayField(TEXT("params"), Params);
+		}
+		// 复制选项同理：读回来不带，改一改写回去就把 RPC 悄悄变回了普通事件
+		if (CustomEvent->FunctionFlags & FUNC_Net)
+		{
+			NodeObj->SetStringField(TEXT("replication"), UAL_EventNetModeName(CustomEvent->FunctionFlags));
+			NodeObj->SetBoolField(TEXT("reliable"), (CustomEvent->FunctionFlags & FUNC_NetReliable) != 0);
 		}
 		return;
 	}
@@ -2093,6 +2153,15 @@ struct FUAL_NodeSpec
 	 */
 	TArray<TSharedPtr<FJsonValue>> EventParams;
 
+	/**
+	 * CustomEvent 的复制模式：None / Server / Client / Multicast，空串＝没给。
+	 * 联机 RPC 就是它 —— 没有这个字段，Agent 只能请用户去细节面板手点。
+	 * 同样原样带着走，到造节点那一步再校验，错了顺着 OutError 整批回滚。
+	 */
+	FString EventReplication;
+	bool bHasEventReliable = false;
+	bool bEventReliable = false;
+
 	bool bHasFirstIndex = false;
 	int32 FirstIndex = 0;
 	bool bHasLastIndex = false;
@@ -2646,6 +2715,16 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			TEXT("\"params\" is only supported on class=CustomEvent (got \"%s\"). ")
 			TEXT("Function graphs take their parameters from blueprint_create_function / blueprint.function_signature; ")
 			TEXT("engine events (class=Event) have a fixed signature you cannot change."),
+			*Spec.Type);
+		return nullptr;
+	}
+
+	// 复制选项同理：引擎事件和函数的网络属性由声明方定，这里改不了
+	if ((!Spec.EventReplication.IsEmpty() || Spec.bHasEventReliable) && T != TEXT("customevent"))
+	{
+		OutError = FString::Printf(
+			TEXT("\"replication\" / \"reliable\" are only supported on class=CustomEvent (got \"%s\"). ")
+			TEXT("In Blueprints an RPC is a CustomEvent with replication=Server/Client/Multicast."),
 			*Spec.Type);
 		return nullptr;
 	}
@@ -3354,9 +3433,28 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			return nullptr;
 		}
 
+		uint32 NetFlags = 0;
+		if (!UAL_EventNetFlagsFromString(Spec.EventReplication, NetFlags))
+		{
+			OutError = FString::Printf(
+				TEXT("Unknown replication '%s' on CustomEvent '%s'. Use None, Server (Run on Server), ")
+				TEXT("Client (Run on owning Client) or Multicast"),
+				*Spec.EventReplication, *Spec.Name);
+			return nullptr;
+		}
+		// 编辑器里「可靠」勾选框只在选了复制模式后才出现，没复制的事件谈不上可靠
+		if (Spec.bEventReliable && NetFlags == 0)
+		{
+			OutError = FString::Printf(
+				TEXT("CustomEvent '%s': reliable=true needs replication=Server, Client or Multicast"), *Spec.Name);
+			return nullptr;
+		}
+
 		FGraphNodeCreator<UK2Node_CustomEvent> NodeCreator(*Graph);
 		UK2Node_CustomEvent* EventNode = NodeCreator.CreateNode();
 		EventNode->CustomFunctionName = FName(*Spec.Name);
+		EventNode->FunctionFlags &= ~(UAL_EventNetModeFlags | FUNC_NetReliable);
+		EventNode->FunctionFlags |= NetFlags | (Spec.bEventReliable ? FUNC_NetReliable : 0);
 		EventNode->NodePosX = PosX;
 		EventNode->NodePosY = PosY;
 		NodeCreator.Finalize();
@@ -6297,6 +6395,9 @@ static FUAL_NodeSpec UAL_ParseNodeSpec(const TSharedPtr<FJsonObject>& NodeObj)
 	{
 		Spec.EventParams = *ParamsArrayPtr;
 	}
+
+	NodeObj->TryGetStringField(TEXT("replication"), Spec.EventReplication);
+	Spec.bHasEventReliable = NodeObj->TryGetBoolField(TEXT("reliable"), Spec.bEventReliable);
 
 	int32 Tmp = 0;
 	if (NodeObj->TryGetNumberField(TEXT("first_index"), Tmp))

@@ -2781,6 +2781,8 @@ declare global {
         agentBrowserMode: 'window' | 'embedded' | 'hidden'
         agentFileAccessScope: 'ue-only' | 'full'
         agentToolSearchEnabled: boolean
+        /** 自动断点续传：中转不稳时每 60 秒自动续跑，最长 30 分钟 */
+        agentPersistentAutoResume: boolean
         /** 全量模式下关掉的工具名 */
         agentDisabledTools: string[]
         /** 工具搜索模式下偏离内置常驻清单的那些 */
@@ -2799,6 +2801,7 @@ declare global {
         agentBrowserMode?: 'window' | 'embedded' | 'hidden'
         agentFileAccessScope?: 'ue-only' | 'full'
         agentToolSearchEnabled?: boolean
+        agentPersistentAutoResume?: boolean
         agentDisabledTools?: string[]
         agentResidentTools?: Record<string, boolean>
         notifyTurnComplete?: 'off' | 'unfocused' | 'always'
@@ -3114,6 +3117,8 @@ declare global {
          * `null` 是用户明确去掉了，不传是这个入口还没接。
          */
         editorSnapshot?: EditorSnapshot | null
+        /** 这条会话绑定的模型。不传就用执行记录里那份，都没有按全局默认绑定 */
+        sessionModel?: { providerId: string; modelId: string }
       }) => Promise<{
         success: boolean
         error?: string
@@ -3281,11 +3286,15 @@ declare global {
        *
        * `levels` 不含 `auto` —— 那是界面额外加的「不指定」，不是模型的档位。
        */
-      thinkingLevels: () => Promise<{
+      thinkingLevels: (args?: { model?: { providerId: string; modelId: string } }) => Promise<{
         levels: AgentV3ThinkingLevel[]
         levelMap: Record<string, string | null>
         modelId: string
       } | null>
+      /** 这条会话绑定的模型（执行记录里那份）。没绑过为 null */
+      sessionModel: (args: {
+        sessionId: string
+      }) => Promise<{ providerId: string; modelId: string } | null>
       /**
        * 在编辑器里打开一个资产，并在内容浏览器里选中它。
        *

@@ -6,6 +6,7 @@ import path from 'path'
 import { app } from 'electron'
 import { logger } from '../logger'
 import { config } from '../config'
+import { evaluateMemory, TREND_WINDOW } from './memoryHealth'
 
 export interface HealthCheckResult {
   name: string
@@ -196,7 +197,8 @@ export class HealthCheckService {
    * 注册默认健康检查器
    */
   private registerDefaultCheckers(): void {
-    // 内存使用检查
+    // 内存使用检查：绝对阈值 + 趋势，规则见 memoryHealth.ts
+    const memorySamplesMB: number[] = []
     this.registerChecker({
       name: 'memory',
       async check(): Promise<HealthCheckResult> {
@@ -206,20 +208,12 @@ export class HealthCheckService {
         const heapTotalMB = memoryUsage.heapTotal / 1024 / 1024
         const usagePercentage = (heapUsedMB / heapTotalMB) * 100
 
-        let status: 'healthy' | 'unhealthy' | 'degraded' = 'healthy'
-        let message = `内存使用: ${heapUsedMB.toFixed(2)}MB / ${heapTotalMB.toFixed(2)}MB (${usagePercentage.toFixed(1)}%)`
+        memorySamplesMB.push(heapUsedMB)
+        if (memorySamplesMB.length > TREND_WINDOW) memorySamplesMB.shift()
 
-        // 调整阈值：对于Electron应用，内存使用阈值应该更合理
-        // Electron应用通常会使用50-200MB内存，这是正常的
-        // 只有当内存使用超过500MB时才认为有问题
-        const absoluteThresholdMB = 500 // 绝对阈值：500MB
-        if (heapUsedMB > absoluteThresholdMB) {
-          status = 'unhealthy'
-          message += ' - 内存使用过高'
-        } else if (heapUsedMB > absoluteThresholdMB * 0.8) {
-          status = 'degraded'
-          message += ' - 内存使用较高'
-        }
+        const { status, reason } = evaluateMemory(heapUsedMB, memorySamplesMB)
+        let message = `内存使用: ${heapUsedMB.toFixed(2)}MB / ${heapTotalMB.toFixed(2)}MB (${usagePercentage.toFixed(1)}%)`
+        if (reason) message += ` - ${reason}`
 
         return {
           name: 'memory',

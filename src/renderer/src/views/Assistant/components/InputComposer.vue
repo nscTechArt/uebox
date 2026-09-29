@@ -314,13 +314,7 @@
           </AppButton>
         </AppTooltip>
         <PhPaperclip class="tool" @click="triggerFileInput" />
-        <input
-          ref="fileInputRef"
-          type="file"
-          multiple
-          hidden
-          @change="handleFileSelect"
-        />
+        <input ref="fileInputRef" type="file" multiple hidden @change="handleFileSelect" />
         <!--
           审批策略。这是现在唯一的「让它别乱动」开关 —— 老的 Chat 模式已经删了，
           要纯对话就把审批档位调严，写操作到不了工程上。
@@ -1139,8 +1133,14 @@ const agentModelSaving = ref(false)
 const agentModelLoadError = ref(false)
 const showAgentModelDropdown = ref(false)
 
+/** 模型跟着会话走：这条会话绑过模型就显示它，没绑过（还没发过消息）显示全局默认 */
+const sessionModel = computed(() =>
+  props.chatSid ? chatSessionsStore.getModel(props.chatSid) : undefined
+)
 const agentModelCatalog = computed(() =>
-  agentModelSettings.value ? buildAgentModelCatalog(agentModelSettings.value) : null
+  agentModelSettings.value
+    ? buildAgentModelCatalog(agentModelSettings.value, sessionModel.value)
+    : null
 )
 const selectedAgentModelKey = computed(() => agentModelCatalog.value?.selected?.key ?? null)
 const currentAgentModelLabel = computed(() => {
@@ -1208,6 +1208,14 @@ async function selectAgentModel(option: AgentModelOption): Promise<void> {
   showAgentModelDropdown.value = false
   agentModelSaving.value = true
   try {
+    // 先改这条会话，再改全局默认：别的会话各自绑着自己的模型不受影响，
+    // 以后新开的会话从这个模型起步
+    if (props.chatSid) {
+      chatSessionsStore.setModel(props.chatSid, {
+        providerId: option.providerId,
+        modelId: option.modelId
+      })
+    }
     agentModelSettings.value = await aiProviderAPI.setAgentRole(
       {
         providerId: option.providerId,
@@ -1278,7 +1286,7 @@ const thinkingTriggerTitle = computed(
  */
 async function loadThinkingSupport(): Promise<void> {
   try {
-    thinkingSupport.value = await agentV3API.thinkingLevels()
+    thinkingSupport.value = await agentV3API.thinkingLevels(sessionModel.value)
   } catch (error) {
     console.warn('[输入框] 取思考档位清单失败，按全集显示:', error)
     thinkingSupport.value = null
@@ -1295,6 +1303,28 @@ onMounted(() => {
   void loadThinkingSupport()
   void loadAgentModels()
 })
+
+/*
+ * 切到一条会话时认回它绑的模型。会话上没记（存量会话、分支出来的）但主进程
+ * 执行记录里有，就抄过来 —— 不然下拉显示的是全局默认，和下一轮实际用的对不上。
+ */
+watch(
+  () => props.chatSid,
+  async (sid) => {
+    if (!sid || chatSessionsStore.getModel(sid)) return
+    const agentSessionId = chatSessionsStore.getAgentSessionId(sid)
+    if (!agentSessionId) return
+    const saved = await agentV3API.sessionModel(agentSessionId).catch(() => null)
+    if (saved && props.chatSid === sid) chatSessionsStore.setModel(sid, saved)
+  },
+  { immediate: true }
+)
+
+// 换了会话或会话换了模型，思考档位清单得按新模型重问
+watch(
+  () => [sessionModel.value?.providerId, sessionModel.value?.modelId],
+  () => void loadThinkingSupport()
+)
 
 onActivated(() => {
   void loadAgentModels()
@@ -2353,7 +2383,10 @@ async function addDocFiles(files: File[]): Promise<void> {
           ...pending,
           filePath,
           parsing: false,
-          content: t('assistantInputComposer.pathOnlyAttachment', { name: file.name, path: filePath })
+          content: t('assistantInputComposer.pathOnlyAttachment', {
+            name: file.name,
+            path: filePath
+          })
         })
       } else if (filePath) {
         // 进度回调按这条路径认领对应的那一格，所以要先记下来再发起解析

@@ -192,6 +192,32 @@ describe('整图写入', () => {
     expect(sent.params).toEqual(params)
   })
 
+  /**
+   * 2026-09-29 用户反馈：联机版要一个「在服务器上运行」的自定义事件，
+   * Agent 只能请用户去细节面板手点。和 params 同一个坑 —— schema 没有这个字段
+   * 就会被 zod 剥掉，插件那头永远收不到。
+   */
+  it('CustomEvent 的 replication / reliable 原样透传 —— 剥掉它就建不出 RPC', async () => {
+    mockApply({ ...okResponse, created_count: 1 })
+
+    await run({
+      blueprint_path: '/Game/BP_Player',
+      nodes: [
+        {
+          id: 'req',
+          class: 'CustomEvent',
+          member_name: 'Server_Request',
+          replication: 'Server',
+          reliable: true
+        }
+      ]
+    })
+
+    const sent = writeParams().nodes[0] as { replication?: unknown; reliable?: unknown }
+    expect(sent.replication).toBe('Server')
+    expect(sent.reliable).toBe(true)
+  })
+
   it('没给坐标时在 app 侧算好布局再发下去', async () => {
     // 空图：没有已有内容要让，坐标就是布局器算出来的原值
     mockApply(okResponse)

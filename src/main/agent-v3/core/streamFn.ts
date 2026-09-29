@@ -315,7 +315,7 @@ export interface ThinkingLevelOptions {
 export async function listThinkingLevels(
   request: ModelRequest = {}
 ): Promise<ThinkingLevelOptions | null> {
-  const settings = await readSettings()
+  const settings = withPin(await readSettings(), request)
   const models = getModels(settings)
   const selection = selectModel(settings, models, resolveRoleForRequest(settings, request))
   if (!selection) return null
@@ -327,15 +327,18 @@ export async function listThinkingLevels(
   }
 }
 
+/** 钉死模型：把这一角色的绑定临时换成钉死的那对，其余（密钥、provider 表）照旧 */
+function withPin(stored: AiProviderSettings, request: ModelRequest): AiProviderSettings {
+  return request.pin
+    ? { ...stored, roles: { ...stored.roles, [resolveRole(request)]: request.pin } }
+    : stored
+}
+
 export async function resolveAgentModel(
   request: ModelRequest = {},
   thinkingLevel?: ThinkingLevelChoice
 ): Promise<AgentModelRuntime> {
-  const stored = await readSettings()
-  // 台架钉死模型：把这一角色的绑定临时换成钉死的那对，其余（密钥、provider 表）照旧
-  const settings = request.pin
-    ? { ...stored, roles: { ...stored.roles, [resolveRole(request)]: request.pin } }
-    : stored
+  const settings = withPin(await readSettings(), request)
   const models = getModels(settings)
   const role = resolveRoleForRequest(settings, request)
 

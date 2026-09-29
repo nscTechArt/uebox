@@ -73,6 +73,11 @@ interface AppSettings {
   /** 实验性工具搜索。默认关闭，每次启动 Agent 时读取。 */
   agentToolSearchEnabled: boolean
   /**
+   * 自动断点续传：中转不稳时每 60 秒自动续跑，连续失败满 30 分钟才报错。
+   * 默认打开，每次开跑时读取。见 `agent-v3/core/autoResume.ts`。
+   */
+  agentPersistentAutoResume: boolean
+  /**
    * 全量模式下用户关掉的工具名。默认一个都没关。
    *
    * 记「关掉的」而不是「开着的」：以后每加一个工具，老用户的配置里没有它，
@@ -123,6 +128,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   // 加每步审批 —— 拿它当默认，换来的只是所有人第一次用都撞一次墙
   agentFileAccessScope: 'full',
   agentToolSearchEnabled: false,
+  // 默认开：它只在「这次失败重来可能就好」时才动手，关着的代价是任务半路停下等人点
+  agentPersistentAutoResume: true,
   // 默认全部打开。设置页里那一长串开关，起手状态就该等于「什么都没设置过」
   agentDisabledTools: [],
   agentResidentTools: {},
@@ -192,6 +199,8 @@ class AppSettingsManager {
           agentBrowserMode: mergedSettings.agentBrowserMode,
           agentFileAccessScope: mergedSettings.agentFileAccessScope,
           agentToolSearchEnabled: mergedSettings.agentToolSearchEnabled === true,
+          // 只有用户明确关掉才算关：旧配置里没有这个字段的，跟着默认走
+          agentPersistentAutoResume: mergedSettings.agentPersistentAutoResume !== false,
           // 配置文件被手改坏（写成对象、混进数字）时退回「什么都没关」。
           // 这两份名单只会让模型少拿到工具，读坏了宁可全给，不能让人对着一个
           // 空空如也的助手查半天
@@ -234,6 +243,13 @@ class AppSettingsManager {
   /** 先落盘再更新内存，保存失败时让设置页显示错误并保留原值。 */
   setAgentToolSearchEnabled(enabled: boolean): void {
     const next = { ...this.settings, agentToolSearchEnabled: enabled }
+    writeFileSync(this.configPath, JSON.stringify(next, null, 2))
+    this.settings = next
+  }
+
+  /** 同上：先落盘再更新内存 */
+  setAgentPersistentAutoResume(enabled: boolean): void {
+    const next = { ...this.settings, agentPersistentAutoResume: enabled }
     writeFileSync(this.configPath, JSON.stringify(next, null, 2))
     this.settings = next
   }

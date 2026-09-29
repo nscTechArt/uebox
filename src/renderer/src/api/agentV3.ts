@@ -188,8 +188,15 @@ export const agentV3API = {
   },
 
   /** 当前绑定的模型支持哪几档思考 —— 档位各家不同，界面据此列清单 */
-  thinkingLevels() {
-    return window.api.agentV3.thinkingLevels()
+  thinkingLevels(model?: { providerId: string; modelId: string } | null) {
+    return window.api.agentV3.thinkingLevels(
+      model ? { model: { providerId: model.providerId, modelId: model.modelId } } : undefined
+    )
+  },
+
+  /** 这条会话绑定的模型（主进程执行记录里那份）。没绑过为 null */
+  sessionModel(sessionId: string) {
+    return window.api.agentV3.sessionModel({ sessionId })
   },
 
   /**

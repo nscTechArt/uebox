@@ -163,6 +163,23 @@ const NodeDefinitionSchema = z.object({
       'CustomEvent 专用：事件参数。要绑事件分发器就先用 blueprint_event_dispatcher（action=list）' +
         '查到分发器的 params，逐个照抄过来 —— 名字可以不同，类型和顺序必须一致'
     ),
+  /**
+   * 自定义事件的复制模式 —— 蓝图里的 RPC。
+   *
+   * 没有它，联机逻辑写到「客户端请求服务器」这一步就得停下来请用户去细节面板
+   * 手点，Python 也写不了那个标志。
+   */
+  replication: z
+    .enum(['None', 'Server', 'Client', 'Multicast'])
+    .optional()
+    .describe(
+      'CustomEvent 专用：联机复制（RPC）。Server＝在服务器上运行（客户端→服务器请求），' +
+        'Client＝在拥有者客户端上运行，Multicast＝组播。省略＝None'
+    ),
+  reliable: z
+    .boolean()
+    .optional()
+    .describe('CustomEvent 专用：可靠 RPC，只在 replication 非 None 时有效'),
   target_class: z.string().optional().describe('Cast / SpawnActor 的目标类'),
   struct_type: z.string().optional().describe('MakeStruct / BreakStruct 的结构体'),
   raw_class: z
@@ -476,6 +493,19 @@ params，把类型和顺序照抄进这里 —— 对不上编译会报签名不
 params 只有 CustomEvent 收。函数图的参数用 blueprint_create_function 的
 inputs/outputs，或者 blueprint_function_signature；引擎自带事件（class=Event）
 的签名是固定的，改不了。
+
+## 联机 RPC（服务器上运行 / 组播）
+
+蓝图的 RPC 就是带复制选项的自定义事件，直接在这里设，不用请用户去细节面板点：
+
+{ "id": "req", "class": "CustomEvent", "member_name": "Server_RequestFire",
+  "replication": "Server", "reliable": true,
+  "params": [{ "name": "Target", "type": "object", "object_class": "Actor" }] }
+
+replication：Server（客户端→服务器）、Client（服务器→拥有者客户端）、Multicast（服务器→所有人）。
+客户端发起的 Server RPC 只在**该客户端拥有的 Actor**（玩家角色、PlayerController、
+它们持有的东西）上才会送达。已有的事件要改复制选项：删掉节点，带上 replication 重建，
+连线用 node_id 接回去。
 
 ## 事件分发器：广播和订阅
 

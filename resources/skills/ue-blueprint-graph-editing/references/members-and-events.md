@@ -12,6 +12,7 @@ Read this when the task involves any of:
 - changing a function's parameters, or deleting a function
 - changing what a blueprint inherits from
 - multiplayer replication on a variable
+- a Run on Server / Multicast event (RPC)
 
 ## Contents
 
@@ -21,6 +22,7 @@ Read this when the task involves any of:
 - Functions can be changed after they are created
 - Reparenting
 - Networked variables
+- Networked events (RPCs)
 
 ---
 
@@ -172,3 +174,25 @@ failed operation even though the call succeeded: read `messages` and fix before 
 
 Leave it alone in single-player projects — replication on a variable nothing reads is
 wasted bandwidth and a source of confusing bugs.
+
+## Networked events (RPCs)
+
+A Blueprint RPC is a `CustomEvent` with `replication` set — do it in `blueprint_apply_graph`,
+don't ask the user to click the Details panel:
+
+```json
+{ "id": "req", "class": "CustomEvent", "member_name": "Server_RequestFire",
+  "replication": "Server", "reliable": true }
+```
+
+- `Server` — Run on Server: a client asks the server to do something
+- `Client` — Run on owning Client: the server tells one player's machine
+- `Multicast` — the server tells everyone
+- `reliable` only applies when `replication` is not `None`
+
+A client's `Server` call is only delivered on an actor that client **owns** — its pawn,
+PlayerController, or something they own. Put the request there, not on a level actor.
+
+`blueprint_get_graph` returns `replication` / `reliable` on replicated events. To change an
+existing event, delete the node and recreate it with the new `replication`, wiring back to
+its neighbours by `node_id`.

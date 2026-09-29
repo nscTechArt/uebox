@@ -9,11 +9,8 @@
  *   - `has_code === false` → 纯蓝图工程，一行 C++ 都不该开始写；
  *     引擎的建类路在这种工程上会弹模态对话框，而命令跑在游戏线程上，
  *     弹出来就是编辑器和调用一起卡死。要先请用户手动加第一个类。
- *   - `compile_path === 'livecoding'` → 编得动，但**编不过时拿不到报错**
- *     （Live Coding 的编译器输出只在它自己的控制台窗口里，不落盘 ——
- *     这是真机验过的，）。
- *     知道这一点，模型就该在动手前先建议用户关掉 Live Coding，
- *     而不是等编译失败了才发现自己两眼一抹黑。
+ *   - `compile_path === 'livecoding'` → 编得动。编不过时的报错从 UBT 的 Log.txt
+ *     读回（编辑器日志里只有一句「失败了」），偶尔读不到时 cpp_compile 会明说。
  *
  * 把它塞进编译工具里，这些判断就只能在「代码已经写完」之后发生。
  *
@@ -138,8 +135,7 @@ export function createCppProbeTool(): UnrealAgentTool<CppProbeResponse> {
       '这两件事会改变你要不要动手、以及要不要先请用户改设置。\n' +
       '【返回里最重要的两条】\n' +
       '- has_code=false：纯蓝图工程，不要试图加 C++ 类，先请用户在编辑器里手动加一次（File > New C++ Class）。\n' +
-      '- compile_path=livecoding：编得动，但**编不过时拿不到文件名和行号**（Live Coding 的报错只在它自己的窗口里）。' +
-      '要完整诊断就先建议用户关掉 Live Coding 重启编辑器。\n' +
+      '- compile_path=livecoding：编得动，编不过时一般也能拿到文件名和行号（从编译日志读回），不用先请用户改设置。\n' +
       '【不会改变任何状态】它只读，不会启用 Live Coding，也不会触发编译。',
     toOutcome: (response) => ({ text: summarize(response), details: response })
   })

@@ -317,7 +317,12 @@ let overlayObserver: MutationObserver | null = null
 
 function intersects(a: DOMRect, b: DOMRect): boolean {
   return (
-    a.width > 0 && a.height > 0 && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+    a.width > 0 &&
+    a.height > 0 &&
+    a.left < b.right &&
+    a.right > b.left &&
+    a.top < b.bottom &&
+    a.bottom > b.top
   )
 }
 

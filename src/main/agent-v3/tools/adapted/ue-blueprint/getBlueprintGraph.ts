@@ -67,6 +67,9 @@ export interface BlueprintGraphNodeInfo {
    * 只回 member_name 的话，重写那一轮参数会全部消失，连在那些引脚上的线跟着断。
    */
   params?: Array<Record<string, unknown>>
+  /** 自定义事件的复制模式（RPC）。只在事件确实复制时出现 */
+  replication?: string
+  reliable?: boolean
   /**
    * Timeline 的曲线本体：时长、循环、每条轨道的关键帧和插值方式。
    *
@@ -197,6 +200,9 @@ function describeNodeForModel(node: BlueprintGraphNodeInfo): Record<string, unkn
     // 自定义事件的参数表。丢了它，写回去的事件就没有引脚，
     // 原本接在那些引脚上的线也跟着断
     ...(node.params?.length ? { params: node.params } : {}),
+    // 复制模式同理：丢了它，写回去的 RPC 就变回了普通事件，联机时悄悄失效
+    ...(node.replication ? { replication: node.replication } : {}),
+    ...(node.reliable ? { reliable: true } : {}),
     // Timeline 的曲线。字段名和 apply_graph 的 timeline 块对得上，抄过去就能写回
     ...(node.timeline ? { timeline: node.timeline } : {}),
     // 坐标要留着：放新节点时得知道往哪儿放，不然新节点全叠在原点上

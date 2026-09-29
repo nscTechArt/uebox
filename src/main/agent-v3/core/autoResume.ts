@@ -26,6 +26,17 @@
  *
  * 这提高的是任务跑完的概率，不是让断线消失 —— 两次都断，照常报错、照常留
  * 「继续尝试」按钮。
+ *
+ * ## 持续模式（设置里的「自动断点续传」）
+ *
+ * 真机：用户的中转时好时坏，一会儿断线、一会儿 `400 model_not_found`
+ * （「当前令牌未覆盖供应商」—— 中转这次没分到能用的线路）。手动点「继续」
+ * 十次里成一两次，每次失败还在对话里留一个气泡。
+ *
+ * 打开后：认的失败放宽到「中转暂时不行」这一类（见 `isRetryableUnstable`），
+ * 每 60 秒续跑一次，**连续**失败满 30 分钟才报错；中间只要成功回了一次话，
+ * 计数清零。等待期间失败照样扣下不给界面看，上下文里的失败标记照样摘掉。
+ * 鉴权、余额、上下文超长这些重来也一样的，照常直接报。
  */
 
 import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core'
@@ -40,13 +51,15 @@ export const AUTO_RESUME_DELAYS_MS: readonly number[] = [10_000, 30_000]
  *
  * - `ERR_*`：Chromium 网络栈（走系统代理的请求由它发，见 `systemProxyFetch.ts`）
  * - `ECONNRESET` / `socket hang up` / `terminated` / `other side closed`：Node 直连（undici）
+ * - `stream ended before message_stop`：pi 的 Anthropic 适配层，中转在推流中途掐了连接
+ *   （真机：模型想了两分钟，没收尾就断了）
  * - 最后一条是 `requestGate.ts` 自己的：推过内容之后包间隔超时
  *
  * 超时类（`ERR_TIMED_OUT`）不在这里：没有首包那种卡死重发已经管了，
  * 中途超时由最后一条覆盖。
  */
 const DISCONNECT_TEXT =
-  /ERR_CONNECTION_(CLOSED|RESET|ABORTED)|ERR_EMPTY_RESPONSE|ERR_NETWORK_CHANGED|ERR_HTTP2_PROTOCOL_ERROR|ERR_INCOMPLETE_CHUNKED_ENCODING|ECONNRESET|socket hang up|\bterminated\b|other side closed|这一次的回话没收完/i
+  /ERR_CONNECTION_(CLOSED|RESET|ABORTED)|ERR_EMPTY_RESPONSE|ERR_NETWORK_CHANGED|ERR_HTTP2_PROTOCOL_ERROR|ERR_INCOMPLETE_CHUNKED_ENCODING|ECONNRESET|socket hang up|\bterminated\b|other side closed|stream ended before message_stop|这一次的回话没收完/i
 
 /**
  * `requestGate` 已经重发到头的那句（「连续 N 次扛不住（最后一次：…ERR_CONNECTION_CLOSED）」）。
@@ -57,6 +70,34 @@ const GATE_EXHAUSTED = /模型网关连续 \d+ 次扛不住/
 
 export function isRecoverableDisconnect(errorMessage: string | undefined): boolean {
   return !!errorMessage && !GATE_EXHAUSTED.test(errorMessage) && DISCONNECT_TEXT.test(errorMessage)
+}
+
+/** 持续模式：每次等多久、连续失败最多几次（60 秒 × 30 = 30 分钟） */
+export const PERSISTENT_RESUME_INTERVAL_MS = 60_000
+export const PERSISTENT_RESUME_MAX_ATTEMPTS = 30
+
+/**
+ * 中转 / 厂商那头暂时不行：过一会儿再来可能就好。
+ *
+ * - 开头的状态码 429、5xx（pi 的报错是「状态码 + 响应体」）
+ * - 中转没分到线路：new-api / one-api 的「无可用渠道」、packy 的「令牌未覆盖供应商」
+ *   —— 都是 400 / 404，但不是请求本身写错了
+ */
+const UNSTABLE_TEXT =
+  /^\s*(?:\w*Error:\s*)?(?:429|5\d\d)\b|overloaded|rate.?limit|too many requests|bad gateway|service unavailable|gateway timeout|无可用渠道|no available channel|令牌未覆盖|未覆盖供应商|负载已饱和/i
+
+/** 重来多少次结果都一样的：钱、钥匙、上下文 */
+const HOPELESS_TEXT =
+  /insufficient.?quota|余额不足|额度不足|billing|invalid.?api.?key|unauthorized|context.?length|context window|prompt is too long/i
+
+/** 持续模式认的失败：断线（含卡死重发到头的那句）加上中转暂时不行 */
+export function isRetryableUnstable(errorMessage: string | undefined): boolean {
+  if (!errorMessage || HOPELESS_TEXT.test(errorMessage)) return false
+  return (
+    GATE_EXHAUSTED.test(errorMessage) ||
+    DISCONNECT_TEXT.test(errorMessage) ||
+    UNSTABLE_TEXT.test(errorMessage)
+  )
 }
 
 /** 等一会儿；中止信号一到立刻以它的原因拒绝 —— 调用方按「用户停下」处理 */
@@ -85,6 +126,8 @@ export interface AutoResumeNotice {
   delayMs: number
   /** 这次断开的原文，只给日志和界面看 */
   reason: string
+  /** 持续模式（设置里的「自动断点续传」）。界面据此只在一串失败的第一次说一声 */
+  persistent: boolean
 }
 
 interface AgentLike {
@@ -114,6 +157,8 @@ export interface AutoResumeDeps {
   signal: AbortSignal
   delaysMs?: readonly number[]
   delay?: (ms: number, signal: AbortSignal) => Promise<void>
+  /** 持续模式，见文件头。开着时 `delaysMs` 不用 */
+  persistent?: boolean
 }
 
 /**
@@ -134,7 +179,11 @@ export interface AutoResumeDeps {
  * 用户在等待期间点停止：扣下的事件直接丢掉，调用方的中止收尾会补一条「已停止」。
  */
 export function createAutoResume(deps: AutoResumeDeps): AutoResume {
-  const delays = deps.delaysMs ?? AUTO_RESUME_DELAYS_MS
+  const persistent = deps.persistent === true
+  const delays = persistent
+    ? Array<number>(PERSISTENT_RESUME_MAX_ATTEMPTS).fill(PERSISTENT_RESUME_INTERVAL_MS)
+    : (deps.delaysMs ?? AUTO_RESUME_DELAYS_MS)
+  const retryable = persistent ? isRetryableUnstable : isRecoverableDisconnect
   const delay = deps.delay ?? abortableDelay
   let used = 0
   let pending: string | undefined
@@ -144,9 +193,14 @@ export function createAutoResume(deps: AutoResumeDeps): AutoResume {
   const decide = (event: AgentEvent): boolean => {
     if (event.type !== 'message_end') return false
     const message = event.message as { role?: string; stopReason?: string; errorMessage?: string }
-    if (message.role !== 'assistant' || message.stopReason !== 'error') return false
+    if (message.role !== 'assistant') return false
+    if (message.stopReason !== 'error') {
+      // 持续模式数的是「连续」失败：回成一次话就清零，长任务里零星断几次不会攒到上限
+      if (persistent) used = 0
+      return false
+    }
     pending =
-      used < delays.length && !deps.signal.aborted && isRecoverableDisconnect(message.errorMessage)
+      used < delays.length && !deps.signal.aborted && retryable(message.errorMessage)
         ? (message.errorMessage ?? '')
         : undefined
     return pending !== undefined
@@ -182,7 +236,13 @@ export function createAutoResume(deps: AutoResumeDeps): AutoResume {
         }
         const delayMs = delays[used]
         used += 1
-        hooks.onScheduled({ attempt: used, maxAttempts: delays.length, delayMs, reason })
+        hooks.onScheduled({
+          attempt: used,
+          maxAttempts: delays.length,
+          delayMs,
+          reason,
+          persistent
+        })
         // 停止在这里就是一个拒绝：调用方的 catch 按用户中止收尾
         await delay(delayMs, deps.signal)
         pending = undefined

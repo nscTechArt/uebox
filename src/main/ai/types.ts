@@ -129,11 +129,13 @@ export interface ModelRequest {
    */
   hasImages?: boolean
   /**
-   * 台架专用：钉死 provider/model，绕过角色绑定。
+   * 钉死 provider/model，绕过角色绑定。
    *
-   * 只从本机调试端点进来（`/api/debug/agent` 的 `model` 字段）。评测要比的是
-   * 「同一个模型在两种工具池下的表现」，而用户界面上绑的 agent 模型随时会换 ——
-   * 不钉死的话，一批样本跑到一半换了模型，两臂就不再可比。产品路径不传它。
+   * 两处用它：
+   * - 会话绑定的模型（`agent-v3/core/sessionModel.ts`）—— 模型跟着会话走，
+   *   用户在别的会话里切模型不影响这一条。
+   * - 本机调试端点（`/api/debug/agent` 的 `model` 字段）。评测要比的是「同一个模型
+   *   在两种工具池下的表现」，不钉死的话一批样本跑到一半换了模型，两臂就不再可比。
    */
   pin?: { providerId: string; modelId: string }
 }

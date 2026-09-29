@@ -563,23 +563,51 @@ export function initAgentEventDispatcher(): void {
   })
 
   // ── 连接中途断了，主进程自动接着跑 ────────────────────────────────
-  // 这一轮没结束：失败卡片不会出现，这里只说一声为什么停了一会儿
+  // 这一轮没结束：失败卡片不会出现，这里只说一声为什么停了一会儿。
+  // 自动断点续传（持续模式）一串失败只说第一次：每分钟一条的话，
+  // 半小时下来时间线上是三十行一模一样的话 —— 用户要的正是别留这些
   on(
     'agent-v3:auto-resume',
-    (data: { sessionId: string; attempt: number; maxAttempts: number; delayMs: number }) => {
+    (data: {
+      sessionId: string
+      attempt: number
+      maxAttempts: number
+      delayMs: number
+      persistent?: boolean
+    }) => {
       if (!data?.sessionId) return
+      if (data.persistent && data.attempt > 1) return
       getStreamStore().flushBuffer(data.sessionId)
+      const seconds = Math.round(data.delayMs / 1000)
       notify(
         data.sessionId,
-        i18n.global.t('assistant.agentMode.autoResume', {
-          seconds: Math.round(data.delayMs / 1000),
-          attempt: data.attempt,
-          max: data.maxAttempts
-        }),
+        data.persistent
+          ? i18n.global.t('assistant.agentMode.autoResumePersistent', {
+              seconds,
+              minutes: Math.round((data.delayMs * data.maxAttempts) / 60_000)
+            })
+          : i18n.global.t('assistant.agentMode.autoResume', {
+              seconds,
+              attempt: data.attempt,
+              max: data.maxAttempts
+            }),
         'warning'
       )
     }
   )
+
+  // ── 模型请求卡住，网关已自动重发 ──────────────────────────────────
+  on('agent-v3:model-retry', (data: { sessionId: string; model: string; reason: string }) => {
+    if (!data?.sessionId) return
+    notify(
+      data.sessionId,
+      i18n.global.t('assistant.agentMode.modelRetry', {
+        model: data.model,
+        reason: data.reason
+      }),
+      'warning'
+    )
+  })
 
   // ── 结束 ────────────────────────────────────────────────────────────
   on('agent-v3:done', (data: { sessionId: string }) => {

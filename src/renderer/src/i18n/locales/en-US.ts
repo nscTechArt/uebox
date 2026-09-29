@@ -2740,6 +2740,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       switchedToAgent: 'Switched to Agent',
       switchedToNormal: 'Switched to Chat',
       agentExecFailed: 'Agent execution failed',
+      sessionModelUnavailable:
+        "This chat's model {model} is no longer available. Using the default model for this turn.",
       // No session id, no IPC channel name: "change direction" is just typing
       // into the input box
       sessionBusy:
@@ -2747,6 +2749,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       resume: 'Try again',
       autoResume:
         'Lost the connection to the model. Picking up again in {seconds}s (attempt {attempt}/{max}). Finished steps will not be redone.',
+      modelRetry:
+        'The model gateway is not responding ({model}: {reason}). Resent automatically, still waiting. If this keeps up, stop and switch to another model or provider.',
+      autoResumePersistent:
+        'The model request failed. Auto-resume is on: retrying every {seconds}s for up to {minutes} minutes. Finished steps will not be redone.',
       resumeReasonUnknown: 'The exact cause is unknown. Check the model connection and try again.',
       agentExecException: 'Agent execution exception',
       generatedImageAlt: 'Generated Image',
@@ -2980,6 +2986,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       archivedChatsDesc: 'View, restore, or delete archived chats.',
       autoRetitle: 'Auto-generate new titles',
       autoRetitleDesc: 'Rename the chat after every reply, based on what was just discussed.',
+      persistentAutoResume: 'Auto-resume on failure',
+      persistentAutoResumeDesc:
+        'When your gateway is unstable, pick up from where it stopped every 60s. Gives up after 30 minutes of failures. Failed attempts are left out of the chat.',
       openArchivedChats: 'Open archived chats',
       // Smart follow-up suggestions settings
       followUpSuggestions: 'Follow-up suggestions',

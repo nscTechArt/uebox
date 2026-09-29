@@ -76,6 +76,17 @@ describe('parseDiagnostics', () => {
     expect(parseDiagnostics(flood)).toHaveLength(50)
   })
 
+  it('截断前错误排在警告前面，警告刷屏也挤不掉排在后面的错误', () => {
+    const log = [
+      ...Array.from({ length: 80 }, (_, i) => `D:\\a.cpp(${i + 1}): warning C4996: deprecated`),
+      'D:\\b.cpp(174,2): error C2065: undeclared'
+    ].join('\n')
+
+    const out = parseDiagnostics(log)
+    expect(out).toHaveLength(50)
+    expect(out[0]).toMatchObject({ severity: 'error', file: 'D:\\b.cpp', line: 174 })
+  })
+
   /**
    * 这一行是**真的从 UBT 输出里抄下来的**（2026-09-03，UE 5.5，故意在
    * UALinkDev55.cpp 里塞了一句 static_assert(false) 之后编出来的）。

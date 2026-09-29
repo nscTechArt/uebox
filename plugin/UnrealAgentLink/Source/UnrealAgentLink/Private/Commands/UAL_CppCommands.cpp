@@ -6,6 +6,7 @@
 #include "GameProjectUtils.h"
 #include "HAL/FileManager.h"
 #include "Misc/CompilationResult.h"
+#include "Misc/FileHelper.h"
 #include "Misc/HotReloadInterface.h"
 #include "Misc/Paths.h"
 #include "ModuleDescriptor.h"
@@ -353,12 +354,65 @@ public:
 	}
 };
 
+/** 回给盒子的 UBT 日志最多多长。一次失败的 Log.txt 通常二三十 KB，报错在尾部 */
+constexpr int32 kMaxBuildLogChars = 256 * 1024;
+
+/**
+ * 读 Live Coding 这次编译的 UBT 日志。找不到或者是旧的就返回 false。
+ *
+ * Live Coding 控制台窗口里那些编译器报错，是它拉起的 UnrealBuildTool 的输出，
+ * **UBT 自己会把同样的内容写进 Log.txt**（2026-09-29 在 5.8 上对过：窗口里的
+ * error C2065 在 %LOCALAPPDATA%/UnrealBuildTool/Log.txt 里逐行都有）。
+ * 编辑器这边的 LogLiveCoding 只有一句「失败了，去看控制台」，所以只能来这里读。
+ *
+ * 两个候选位置：安装版引擎写 LocalAppData，源码版 / 老引擎写 Engine/Programs 下。
+ * 取**比这次编译开始时间新**的那一份 —— 同机别的 UBT（IDE 编译、打包）也写这个文件，
+ * 读到上一次的旧日志会把别人的报错安到这次头上，那比读不到还糟。
+ */
+bool ReadUbtLogSince(const FDateTime& SinceUtc, FString& OutLog, FString& OutPath)
+{
+	TArray<FString> Candidates;
+	const FString LocalAppData = FPlatformMisc::GetEnvironmentVariable(TEXT("LOCALAPPDATA"));
+	if (!LocalAppData.IsEmpty())
+	{
+		Candidates.Add(LocalAppData / TEXT("UnrealBuildTool/Log.txt"));
+	}
+	Candidates.Add(FPaths::EngineDir() / TEXT("Programs/UnrealBuildTool/Log.txt"));
+
+	IFileManager& FM = IFileManager::Get();
+	FDateTime Newest = FDateTime::MinValue();
+	for (const FString& Candidate : Candidates)
+	{
+		const FDateTime Stamp = FM.GetTimeStamp(*Candidate);
+		// 文件系统时间精度有限，放两秒余量
+		if (Stamp > Newest && Stamp >= SinceUtc - FTimespan::FromSeconds(2))
+		{
+			Newest = Stamp;
+			OutPath = FPaths::ConvertRelativePathToFull(Candidate);
+		}
+	}
+	if (Newest == FDateTime::MinValue()) return false;
+
+	// AllowWrite：万一 UBT 还没松手，别因为共享模式打不开
+	if (!FFileHelper::LoadFileToString(OutLog, *OutPath, FFileHelper::EHashOptions::None, FILEREAD_AllowWrite))
+	{
+		return false;
+	}
+	if (OutLog.Len() > kMaxBuildLogChars)
+	{
+		OutLog = OutLog.Right(kMaxBuildLogChars);
+	}
+	return true;
+}
+
 /** 一次编译的在途状态。同一时间只允许一个，插件端和工具的 sequential 各挡一道 */
 struct FCompileJob
 {
 	FString RequestId;
 	FString Path;
 	double StartedAt = 0.0;
+	/** 和 StartedAt 同一刻，但用来跟文件时间戳比（那是 UTC 墙钟，不是单调时钟） */
+	FDateTime StartedAtUtc;
 	FDelegateHandle CompilerFinished;
 	FTSTicker::FDelegateHandle Ticker;
 	TUniquePtr<FLiveCodingLogSink> Sink;
@@ -522,6 +576,7 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 	GJob->RequestId = RequestId;
 	GJob->Path = bLiveCoding ? TEXT("livecoding") : TEXT("hotreload");
 	GJob->StartedAt = FPlatformTime::Seconds();
+	GJob->StartedAtUtc = FDateTime::UtcNow();
 
 	const bool bNeedsFullRebuild = BuildConfigNewerThanBinaries();
 
@@ -606,6 +661,18 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 			Data->SetStringField(TEXT("result"), Result);
 			Data->SetStringField(TEXT("output"), Output);
 			Data->SetBoolField(TEXT("needs_full_rebuild"), bNeedsFullRebuild);
+
+			// 编不过（或没确认上）时把 UBT 日志带回去，解析在 TS 侧做，和热重载那条路一样
+			if (GJob->Path == TEXT("livecoding") && (Result == TEXT("Failure") || Result == TEXT("Unknown")))
+			{
+				FString BuildLog, BuildLogPath;
+				if (ReadUbtLogSince(GJob->StartedAtUtc, BuildLog, BuildLogPath))
+				{
+					Data->SetStringField(TEXT("build_log"), BuildLog);
+					Data->SetStringField(TEXT("build_log_path"), BuildLogPath);
+				}
+			}
+
 			RespondAndClear(Data);
 			return false;
 		}),
@@ -904,7 +971,7 @@ void FUAL_CppCommands::Handle_Probe(const TSharedPtr<FJsonObject>& Payload, cons
 	}
 	else if (bLcEnabledForSession)
 	{
-		Why = TEXT("这个会话启用了 Live Coding，编译走它。注意：Live Coding 的编译器报错只显示在 Live Coding 控制台窗口里，不写日志文件，所以编不过时拿不到文件名和行号。想要完整诊断，请关掉 Live Coding 后重启编辑器。");
+		Why = TEXT("这个会话启用了 Live Coding，编译走它。编不过时会从 UnrealBuildTool 的日志（Log.txt）里捞出带文件名和行号的报错；个别情况（日志找不到、或者失败发生在打补丁阶段）只能拿到一句失败。");
 	}
 	else if (LiveCodingHalfDisabled())
 	{

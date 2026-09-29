@@ -152,6 +152,8 @@ export async function forkSession(
   // 「在哪个工程里聊」「用哪种模式」不该重置
   deps.chatStore.setProject(newChatSid, source.project ?? null)
   deps.chatStore.setAgentMode(newChatSid, source.agentMode ?? true)
+  // 模型同理：分支接着源会话的活，主进程那边的执行记录也是整份抄过去的
+  if (source.model) deps.chatStore.setModel(newChatSid, source.model)
   // 截过的分支上下文比源会话短，把源那个数字抄过来会虚高 —— 下一轮内核会报
   // 真实用量盖掉它，但在那之前用户看到的是个假的百分比。不如先不显示。
   if (source.contextUsage && keepUserTurns === undefined) {

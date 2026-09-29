@@ -40,6 +40,9 @@ import {
 } from './turnAttachments'
 import { toSessionProjectPayload } from './sessionProjectBinding'
 import { resolvePermissionMode, toApprovalMode } from './sessionPermissionMode'
+import { ensureSessionModel } from './sessionModel'
+import { agentV3API } from '@renderer/api/agentV3'
+import { aiProviderAPI } from '@renderer/api/aiProvider'
 import {
   AGENT_EMPTY_RESPONSE_ECHO_TEXT,
   isEchoedAgentFallbackInput
@@ -804,6 +807,19 @@ export function useAgentMode(params: UseAgentModeParams) {
         ((isCurrent && askModeRef.value) || permissionMode === 'read-only')
       let startupFailed = false
 
+      // 模型跟着会话走：第一轮发出时绑定，之后别的会话里切模型不影响这一条
+      const { model: sessionModel, unavailable: sessionModelUnavailable } =
+        await ensureSessionModel(chatSid, {
+          chatStore,
+          sessionModelOf: (id) => agentV3API.sessionModel(id),
+          getSettings: () => aiProviderAPI.getSettings()
+        })
+      if (sessionModel && sessionModelUnavailable) {
+        message.warning(
+          t('assistant.agentMode.sessionModelUnavailable', { model: sessionModel.modelId })
+        )
+      }
+
       const controller = await aiAPI.executeAgent(
         {
           messages: finalMessages,
@@ -843,6 +859,7 @@ export function useAgentMode(params: UseAgentModeParams) {
           thinkingLevel: aiConfigStore.agentThinkingLevel,
           skillLearning: aiConfigStore.skillLearningMode,
           editorScreenshotEnabled: aiConfigStore.editorScreenshotEnabled,
+          sessionModel,
           defaultEngineVersion: localStorage.getItem('defaultEngineVersion') || undefined,
           askMode,
           byokOpenAICompatible: enabledByok || undefined

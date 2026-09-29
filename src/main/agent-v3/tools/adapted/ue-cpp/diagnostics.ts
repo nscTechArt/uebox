@@ -37,8 +37,22 @@ const MAX_DIAGNOSTICS = 50
 const CODE = /(?<severity>error|warning)\s+(?<code>[a-zA-Z]+[0-9]+)\s*:/
 const FILE_LINE = /^\s*(?<file>.*)\((?<line>\d+)(?:,\s*(?<column>\d+))?\)\s*:?\s*$/
 
-/** 解析 UBT/MSVC 的输出。认不出来的行直接忽略 —— 原文由调用方另行保留 */
+/**
+ * 解析 UBT/MSVC 的输出。认不出来的行直接忽略 —— 原文由调用方另行保留。
+ *
+ * 错误排在警告前面再截断：插件在新引擎上会先刷几十条 C4996 弃用警告，
+ * 真正的 error 在后面另一个文件里（2026-09-29 Live Coding 实测）。
+ * 按出现顺序截断的话，50 个名额全被警告占掉，错误一条都进不来。
+ */
 export function parseDiagnostics(output: string): CppDiagnostic[] {
+  const all = scan(output)
+  return [
+    ...all.filter((d) => d.severity === 'error'),
+    ...all.filter((d) => d.severity === 'warning')
+  ].slice(0, MAX_DIAGNOSTICS)
+}
+
+function scan(output: string): CppDiagnostic[] {
   const out: CppDiagnostic[] = []
 
   for (const raw of output.split(/\r?\n/)) {
@@ -69,7 +83,6 @@ export function parseDiagnostics(output: string): CppDiagnostic[] {
     }
 
     out.push(diagnostic)
-    if (out.length >= MAX_DIAGNOSTICS) break
   }
 
   return out

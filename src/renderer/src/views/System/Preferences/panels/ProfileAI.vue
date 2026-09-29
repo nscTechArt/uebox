@@ -123,6 +123,12 @@ const FILE_ACCESS_SCOPES: readonly AgentFileAccessScope[] = ['ue-only', 'full']
 const fileAccessScope = ref<AgentFileAccessScope>('full')
 
 /**
+ * 自动断点续传：中转不稳时主进程每 60 秒自动续跑。同样存在应用设置里 ——
+ * 重试发生在主进程，渲染层的 store 那边读不到。
+ */
+const persistentAutoResume = ref(true)
+
+/**
  * 应用设置读回来了没有。
  *
  * 两个档位共用一个标志，因为它们来自**同一次** `appSettings.get()`。
@@ -168,6 +174,7 @@ onMounted(async () => {
     // 其余（含旧配置里根本没有这个字段）一律落到默认的 full。
     // 两边不一致的话，界面高亮的会和实际生效的对不上
     fileAccessScope.value = settings.agentFileAccessScope === 'ue-only' ? 'ue-only' : 'full'
+    persistentAutoResume.value = settings.agentPersistentAutoResume !== false
   } catch (error) {
     console.error('读取应用设置失败:', error)
   } finally {
@@ -202,6 +209,16 @@ watch(fileAccessScope, async (scope) => {
     await window.api.appSettings.set({ agentFileAccessScope: scope })
   } catch (error) {
     console.error('设置文件访问范围失败:', error)
+  }
+})
+
+/** 改自动断点续传。下一次开跑（含点「继续」）生效，正在跑的那一轮按开跑时的算 */
+watch(persistentAutoResume, async (enabled) => {
+  if (!appSettingsLoaded.value) return
+  try {
+    await window.api.appSettings.set({ agentPersistentAutoResume: enabled })
+  } catch (error) {
+    console.error('设置自动断点续传失败:', error)
   }
 })
 
@@ -290,6 +307,17 @@ watch(fileAccessScope, async (scope) => {
             <div class="setting-desc">{{ $t('profile.ai.autoRetitleDesc') }}</div>
           </div>
           <AppSwitch v-model:checked="autoRetitleEnabled" />
+        </div>
+        <div class="setting-item">
+          <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.ai.persistentAutoResume') }}</div>
+            <div class="setting-desc">{{ $t('profile.ai.persistentAutoResumeDesc') }}</div>
+          </div>
+          <AppSwitch
+            v-model:checked="persistentAutoResume"
+            :disabled="!appSettingsLoaded"
+            :aria-label="$t('profile.ai.persistentAutoResume')"
+          />
         </div>
       </div>
     </section>

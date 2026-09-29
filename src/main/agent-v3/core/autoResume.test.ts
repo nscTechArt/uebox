@@ -5,6 +5,9 @@ import {
   abortableDelay,
   createAutoResume,
   isRecoverableDisconnect,
+  isRetryableUnstable,
+  PERSISTENT_RESUME_INTERVAL_MS,
+  PERSISTENT_RESUME_MAX_ATTEMPTS,
   type AutoResume
 } from './autoResume'
 
@@ -38,6 +41,7 @@ const done: AgentMessage = {
 
 /**
  * 一个最小的 agent：每跑一次按剧本吐一条回话，像 pi 那样发事件、把回话压进 messages。
+ * 剧本里一项给数组的，是同一次 `continue()` 里接连的几条（先干成一步、再断）。
  */
 interface ScriptedAgent {
   state: { messages: AgentMessage[] }
@@ -46,19 +50,22 @@ interface ScriptedAgent {
 }
 
 function scriptedAgent(
-  script: AgentMessage[],
+  script: Array<AgentMessage | AgentMessage[]>,
   deliver: () => (e: AgentEvent) => void
 ): ScriptedAgent {
   const state = { messages: [user, toolCall, toolResult] as AgentMessage[] }
   let turn = 0
   const step = async (): Promise<void> => {
-    const message = script[turn++]
-    state.messages = [...state.messages, message]
+    const entry = script[turn++]
+    const messages = Array.isArray(entry) ? entry : [entry]
     const emit = deliver()
-    emit({ type: 'message_start', message } as AgentEvent)
-    emit({ type: 'message_end', message } as AgentEvent)
-    emit({ type: 'turn_end', message, toolResults: [] } as AgentEvent)
-    emit({ type: 'agent_end', messages: [message] } as AgentEvent)
+    for (const message of messages) {
+      state.messages = [...state.messages, message]
+      emit({ type: 'message_start', message } as AgentEvent)
+      emit({ type: 'message_end', message } as AgentEvent)
+      emit({ type: 'turn_end', message, toolResults: [] } as AgentEvent)
+    }
+    emit({ type: 'agent_end', messages } as AgentEvent)
   }
   return { state, step, turns: () => turn }
 }
@@ -73,7 +80,10 @@ interface Harness {
   run: () => Promise<void>
 }
 
-function harness(script: AgentMessage[], signal = new AbortController().signal): Harness {
+function harness(
+  script: Array<AgentMessage | AgentMessage[]>,
+  signal = new AbortController().signal
+): Harness {
   const delays: number[] = []
   const resume = createAutoResume({
     signal,
@@ -112,6 +122,7 @@ describe('isRecoverableDisconnect', () => {
     'net::ERR_CONNECTION_RESET',
     'read ECONNRESET',
     'socket hang up',
+    'Anthropic stream ended before message_stop',
     'terminated',
     '模型网关回话中途断流，这一次的回话没收完'
   ])('连接中断算：%s', (text) => {
@@ -193,6 +204,126 @@ describe('createAutoResume', () => {
     const controller = new AbortController()
     controller.abort()
     const h = harness([failure('net::ERR_CONNECTION_CLOSED')], controller.signal)
+    await h.run()
+    expect(h.delays).toEqual([])
+    expect(kinds(h.delivered)).toContain('end:error')
+  })
+})
+
+describe('isRetryableUnstable（自动断点续传）', () => {
+  it.each([
+    'net::ERR_CONNECTION_CLOSED',
+    '模型网关连续 3 次扛不住（最后一次：net::ERR_CONNECTION_CLOSED）。',
+    '400 {"error":{"code":"model_not_found","message":"当前令牌未覆盖供应商 \\"Anthropic\\"（模型=claude-opus-5-5，已选分组=[aws-q grok-sale kimi-sale]）"}}',
+    '503 当前分组 default 下对于模型 claude-opus-5-5 无可用渠道',
+    '502 Bad Gateway',
+    '429 Too Many Requests',
+    '529 {"type":"error","error":{"type":"overloaded_error"}}'
+  ])('中转暂时不行，算：%s', (text) => {
+    expect(isRetryableUnstable(text)).toBe(true)
+  })
+
+  it.each([
+    '401 Incorrect API key',
+    '429 {"error":{"code":"insufficient_quota"}}',
+    '400 context_length_exceeded',
+    '400 {"error":{"message":"messages.0.content: Field required"}}',
+    // 状态码得在开头：报错正文里碰巧出现的数字不算
+    '400 max_tokens must be less than 8500',
+    undefined
+  ])('重来也一样的，不算：%s', (text) => {
+    expect(isRetryableUnstable(text)).toBe(false)
+  })
+})
+
+describe('createAutoResume 持续模式', () => {
+  function persistentHarness(script: Array<AgentMessage | AgentMessage[]>): Harness {
+    const delays: number[] = []
+    const resume = createAutoResume({
+      signal: new AbortController().signal,
+      persistent: true,
+      delay: async (ms) => {
+        delays.push(ms)
+      }
+    })
+    const delivered: AgentEvent[] = []
+    const deliver = resume.wrap((e) => delivered.push(e))
+    const agent = scriptedAgent(script, () => deliver)
+    const notices: number[] = []
+    const persisted: AgentMessage[][] = []
+    const run = (): Promise<void> =>
+      resume.run(agent.step, agent, {
+        onScheduled: (n) => {
+          expect(n.persistent).toBe(true)
+          notices.push(n.attempt)
+        },
+        onResume: async (plan) => {
+          persisted.push(plan.messages)
+        },
+        resume: agent.step
+      })
+    return { resume, agent, delivered, delays, notices, persisted, run }
+  }
+
+  const gatewayMiss = (): AgentMessage =>
+    failure('400 {"error":{"code":"model_not_found","message":"当前令牌未覆盖供应商"}}')
+
+  it('中转没分到线路也接：每 60 秒一次，失败一条都不给界面看', async () => {
+    const h = persistentHarness([gatewayMiss(), gatewayMiss(), gatewayMiss(), done])
+    await h.run()
+
+    expect(h.agent.turns()).toBe(4)
+    expect(h.delays).toEqual([
+      PERSISTENT_RESUME_INTERVAL_MS,
+      PERSISTENT_RESUME_INTERVAL_MS,
+      PERSISTENT_RESUME_INTERVAL_MS
+    ])
+    expect(h.notices).toEqual([1, 2, 3])
+    expect(kinds(h.delivered)).not.toContain('end:error')
+    // 上下文里一条失败标记都没留：最后是成功的那句
+    expect(h.agent.state.messages).toEqual([user, toolCall, toolResult, done])
+  })
+
+  it('连续失败到上限才报错，报的只有最后那一次', async () => {
+    const script = Array.from({ length: PERSISTENT_RESUME_MAX_ATTEMPTS + 1 }, gatewayMiss)
+    const h = persistentHarness(script)
+    await h.run()
+
+    expect(h.resume.attempts).toBe(PERSISTENT_RESUME_MAX_ATTEMPTS)
+    expect(kinds(h.delivered).filter((k) => k === 'end:error')).toHaveLength(1)
+  })
+
+  it('中间成功回过一次话，计数清零', async () => {
+    // 续跑成功干完一步（调用 + 结果），同一次 continue() 里又断了
+    const call2 = {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 'c2', name: 'run_shell_command', arguments: {} }],
+      stopReason: 'toolUse'
+    } as unknown as AgentMessage
+    const result2 = {
+      role: 'toolResult',
+      toolCallId: 'c2',
+      content: [{ type: 'text', text: 'ok' }]
+    } as unknown as AgentMessage
+    const streak = (n: number): AgentMessage[] => Array.from({ length: n }, gatewayMiss)
+    const max = PERSISTENT_RESUME_MAX_ATTEMPTS
+    // 先连着断 max-1 次，续跑成功一步又断，再连着断 max-1 次，最后成了
+    const h = persistentHarness([
+      ...streak(max - 1),
+      [call2, result2, gatewayMiss()],
+      ...streak(max - 1),
+      done
+    ])
+    await h.run()
+
+    // 不清零的话总共 2max-1 次早就超了上限，最后一次失败会被放给界面
+    expect(h.delays).toHaveLength(2 * max - 1)
+    expect(kinds(h.delivered)).not.toContain('end:error')
+    expect(h.agent.state.messages.at(-1)).toBe(done)
+  })
+
+  it('余额不足：不接，照常报', async () => {
+    const h = persistentHarness([failure('429 {"error":{"code":"insufficient_quota"}}')])
     await h.run()
     expect(h.delays).toEqual([])
     expect(kinds(h.delivered)).toContain('end:error')

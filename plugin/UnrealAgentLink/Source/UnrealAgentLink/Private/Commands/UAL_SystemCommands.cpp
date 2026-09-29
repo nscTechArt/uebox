@@ -22,6 +22,10 @@
 #include "HAL/FileManager.h"
 #include "Async/Async.h"
 #include "HAL/IConsoleManager.h"
+// FStringOutputDevice 5.7 起搬进了自己的头文件，UnrealString.h 只在旧 include 顺序下才顺带包含它
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+#include "Misc/StringOutputDevice.h"
+#endif
 
 // 性能统计宏定义
 #if defined(STATS) && STATS
