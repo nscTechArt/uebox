@@ -296,6 +296,19 @@ describe('分发包新鲜度', () => {
       expect(checkReleasePackages(FRESH, dist)).toBe(true)
     })
 
+    /**
+     * 指纹新鲜盖不住混进 .pdb —— 拦排除条目和「新不新」是两条独立的检查。
+     * 少了它，发版入口不把全部 zip 交给污染检查（比如全部新鲜就提前放行）也能全绿。
+     * checkPackages 本身的 .pdb 分支由 checkSelectedPackage 的用例覆盖。
+     */
+    it('九个包全新鲜、其中一个混进 .pdb —— 拦住', () => {
+      putAll(FRESH)
+      putZip('UnrealAgentLink58.zip', FRESH, ['Binaries/Win64/UnrealEditor-UnrealAgentLink.pdb'])
+      expect(checkReleasePackages(FRESH, dist)).toBe(false)
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('UnrealAgentLink58.zip'))
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('.pdb'))
+    })
+
     /** 这正是日常门禁会放过、而发版绝不能放过的那种状态 */
     it('只有 5.5 新鲜、其余过期 —— 拦住', () => {
       putAll(OLD, { 'UnrealAgentLink55.zip': FRESH })
