@@ -2975,6 +2975,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       models: 'Models',
       mcp: 'MCP',
       skills: 'Skills',
+      experience: 'Lessons learned',
       tools: 'Tools',
       usage: 'Usage',
       project: 'Project Library',
@@ -3112,12 +3113,12 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       // Automatic distillation
       learningTitle: 'Remember useful methods',
       learningDesc:
-        'Save reusable methods as skills and past pitfalls as experience. File writes remain subject to permissions.',
+        'Save reusable methods as skills and past pitfalls to Lessons learned. File writes remain subject to permissions.',
       learningOff: 'Off',
       learningAsk: 'Ask me',
       learningAuto: 'Automatic',
-      learningOffHint: 'Save nothing. Existing experience is kept but no longer shown.',
-      learningAskHint: 'Experience is saved and retired automatically; skills are confirmed first.',
+      learningOffHint: 'Save nothing. Existing lessons are kept but no longer shown.',
+      learningAskHint: 'Lessons are saved and retired automatically; skills are confirmed first.',
       learningAutoHint: 'Save both automatically and notify afterwards.',
       // The list
       listTitle: 'Skills',
@@ -3157,49 +3158,52 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       deleteTitle: 'Delete "{name}"?',
       deleteContent: 'The whole skill folder goes. There is no undo.',
       deletedGone: '"{name}" deleted',
-      deletedRestored: 'Your copy is gone; "{name}" is back to the original',
-      experience: {
-        title: 'Experience',
-        note: 'Pitfalls hit and worked around during real work. Shown again when the same error comes back; ones that do not help retire on their own.',
-        offNote: 'Auto-remember is off: existing experience is kept but not shown.',
-        undo: 'Undo last review',
-        undoTitle: 'Undo the last review?',
-        undoContent:
-          'The last review ran at {at}: {added} added, {retired} retired. Undoing restores everything to how it was before.',
-        undone: 'Undone',
-        undoFailed: 'Could not undo: {reason}',
-        filter: { all: 'All', global: 'General', project: 'Project' },
-        showRetired: 'Show retired',
-        loadFailed: 'Could not load: {reason}',
-        empty: 'No experience yet. Pitfalls worked around during real work show up here.',
-        emptyProject: 'This project has no experience yet.',
-        layerGlobal: 'General',
-        status: { trial: 'On trial', proven: 'Proven', retired: 'Retired' },
-        pinnedBadge: 'Pinned',
-        effect: 'Followed {adopted}x, worked {ok}x',
-        detail: {
-          how: 'What to do',
-          when: 'Shown when',
-          whenValue: 'the error contains "{pattern}"',
-          scope: 'Applies to',
-          scopeGlobal: 'All projects',
-          scopeProject: 'Only {name}',
-          engines: 'Engine versions',
-          enginesOk: 'Works on UE {versions}',
-          enginesNo: 'Does not apply to UE {versions}',
-          effect: 'Effect',
-          effectValue: 'Shown {shown}x, followed {adopted}x, worked {ok}x',
-          lift: 'Success {without}% without it, {with}% with it',
-          liftUnknown: 'Not enough comparison data yet',
-          source: 'Source',
-          pin: 'Keep pinned, never auto-retire'
-        },
-        deleteTitle: 'Delete this experience?',
-        deleteContent:
-          'It will no longer be shown. If the same pitfall comes up again, it may be learned again.',
-        deleted: 'Deleted',
-        actionFailed: 'Action failed: {reason}'
-      }
+      deletedRestored: 'Your copy is gone; "{name}" is back to the original'
+    },
+    // 经验库：做事时踩过又绕过去的坑（见 ProfileExperience.vue）
+    experience: {
+      title: 'Lessons learned',
+      description:
+        'Pitfalls hit and worked around during real work. Shown again when the same error comes back; ones that do not help retire on their own.',
+      listTitle: 'All lessons',
+      offNote: 'Auto-remember is off on the Skills page: existing lessons are kept but not shown.',
+      undo: 'Undo last review',
+      undoTitle: 'Undo the last review?',
+      undoContent:
+        'The last review ran at {at}: {added} added, {retired} retired. Undoing restores everything to how it was before.',
+      undone: 'Undone',
+      undoFailed: 'Could not undo: {reason}',
+      filter: { all: 'All', global: 'General', project: 'Project' },
+      showRetired: 'Show retired',
+      loadFailed: 'Could not load: {reason}',
+      empty: 'No experience yet. Pitfalls worked around during real work show up here.',
+      emptyProject: 'This project has no experience yet.',
+      layerGlobal: 'General',
+      status: { trial: 'On trial', proven: 'Proven', retired: 'Retired' },
+      pinnedBadge: 'Pinned',
+      effect: 'Followed {adopted}x, worked {ok}x',
+      detail: {
+        how: 'What to do',
+        when: 'Shown when',
+        whenValue: 'the error contains "{pattern}"',
+        scope: 'Applies to',
+        scopeGlobal: 'All projects',
+        scopeProject: 'Only {name}',
+        engines: 'Engine versions',
+        enginesOk: 'Works on UE {versions}',
+        enginesNo: 'Does not apply to UE {versions}',
+        effect: 'Effect',
+        effectValue: 'Shown {shown}x, followed {adopted}x, worked {ok}x',
+        lift: 'Success {without}% without it, {with}% with it',
+        liftUnknown: 'Not enough comparison data yet',
+        source: 'Source',
+        pin: 'Keep pinned, never auto-retire'
+      },
+      deleteTitle: 'Delete this experience?',
+      deleteContent:
+        'It will no longer be shown. If the same pitfall comes up again, it may be learned again.',
+      deleted: 'Deleted',
+      actionFailed: 'Action failed: {reason}'
     },
     // Usage, computed from the chat history already on disk
     usage: {
@@ -6241,6 +6245,45 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     sessionProject: {
       none: 'No project',
       pick: 'Move to project'
+    },
+    // Top bar status monitor (the heartbeat button left of the project chip)
+    statusMonitor: {
+      title: 'Status monitor',
+      tooltipIssues: 'Status monitor · {n} outside expected range',
+      attention: 'Needs attention',
+      expect: 'Expected {expect}',
+      ask: 'Ask AI',
+      askPrompt: 'The status monitor shows "{label}" at {value} (expected {expect}). Find out why.',
+      refresh: 'Refresh',
+      updatedAt: 'Updated {time}',
+      loading: 'Reading…',
+      loadFailed: "Couldn't read the editor status. Refresh to try again.",
+      pluginOutdated:
+        'The UnrealAgentLink plugin in this project is out of date. Update it and restart the editor.',
+      pending: 'No data yet',
+      unsupported: 'Not available in this version',
+      unit: {
+        seconds: '{n} s',
+        minutesSeconds: '{m} min {s} s'
+      },
+      group: {
+        startup: 'Editor',
+        pie: 'Play in Editor',
+        cache: 'Cache',
+        memory: 'Memory'
+      },
+      item: {
+        startup: 'Editor startup',
+        assetRegistry: 'Asset registry scan',
+        pluginCount: 'Enabled plugins',
+        editorHitch: 'Editor hitch rate',
+        pieFirstEnter: 'First start',
+        pieEnter: 'Latest start',
+        pieHitch: 'PIE hitch rate',
+        localCacheHit: 'Local cache hit rate',
+        cacheDisk: 'Local cache on disk',
+        availableMemory: 'Available memory'
+      }
     }
   },
   notebookNoteChatPanel: {

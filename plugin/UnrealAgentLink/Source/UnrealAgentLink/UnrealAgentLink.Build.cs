@@ -133,7 +133,12 @@ public class UnrealAgentLink : ModuleRules
 				// 必须问同一个来源，自己另读一份 ini 会和实际行为对不上。
 				// 引擎内建模块（Engine/Source/Runtime/Online/HTTP），5.0–5.8 都在，
 				// 而且 WebSockets 本身已经依赖它，不引入新的 DLL 硬导入
-				"HTTP"
+				"HTTP",
+
+				// 状态监控的本地缓存命中率（UAL_EditorHealth）：GatherDerivedDataCacheSummaryStats。
+				// 引擎内建模块（Engine/Source/Developer/DerivedDataCache），5.0–5.8 都在，
+				// 不是插件；那个函数 5.3 才有，5.0–5.2 在 .cpp 里按版本编掉
+				"DerivedDataCache"
 
 				// GameplayTags / GameplayTagsEditor 两个依赖**故意不加**。
 				//

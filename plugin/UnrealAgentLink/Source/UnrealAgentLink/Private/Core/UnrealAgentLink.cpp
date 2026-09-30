@@ -16,6 +16,7 @@
 #include "UAL_AgentUndo.h"
 #include "UAL_TouchedPackages.h"
 #include "UAL_RegistryReady.h"
+#include "UAL_EditorHealth.h"
 #include "UAL_ContentBrowserExt.h"
 #include "UAL_LevelViewportExt.h"
 #include "UAL_AssetLockState.h"
@@ -58,6 +59,9 @@ void FUnrealAgentLinkModule::StartupModule()
 	// 挂资产注册表的扫描进度事件。读注册表的命令不再死等，注册表没扫完就回 503 +
 	// 这里记下的进度，让盒子侧轮询 content.registry_status 把进度讲给用户
 	FUAL_RegistryReady::Initialize();
+
+	// 状态监控的采集器：启动耗时要赶在 OnFEngineLoopInitComplete 之前挂上，所以放在模块启动里
+	FUAL_EditorHealth::Initialize();
 
 	// 内容浏览器的「AI 正在改这个资产」角标 + 用户动手改时的提醒。
 	// 挂在 TouchedPackages 之后：它要靠那边的命令作用域区分「agent 改的」和
@@ -162,6 +166,7 @@ void FUnrealAgentLinkModule::ShutdownModule()
 
 	// 摘掉注册表进度委托，别留一个指向已卸载代码的回调
 	FUAL_RegistryReady::Shutdown();
+	FUAL_EditorHealth::Shutdown();
 
 	// 摘掉内容浏览器的角标生成器和包标脏回调，同上。
 	// 横幅要先摘 —— 它挂在视口上，绑的 lambda 指向本模块的代码

@@ -1217,6 +1217,10 @@ const api = {
       error?: string
     }> => ipcRenderer.invoke('ue:crashLogs:get', params || {})
   },
+  /** 顶栏状态监控：这条会话归属的工程现在的编辑器状况 */
+  ueEditorHealth: {
+    get: (params: { projectPath: string }) => ipcRenderer.invoke('ue:editorHealth:get', params)
+  },
   system: {
     /**
      * 获取系统信息（平台、版本、是否为 Windows 11）

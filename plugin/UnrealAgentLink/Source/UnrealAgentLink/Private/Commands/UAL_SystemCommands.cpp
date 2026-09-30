@@ -1,5 +1,6 @@
 #include "UAL_SystemCommands.h"
 #include "UAL_CommandUtils.h"
+#include "UAL_EditorHealth.h"
 
 #include "IPythonScriptPlugin.h"
 #include "Editor.h"
@@ -88,6 +89,12 @@ void FUAL_SystemCommands::RegisterCommands(TMap<FString, TFunction<void(const TS
 	CommandMap.Add(TEXT("system.capture_insights_trace"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 	{
 		Handle_CaptureInsightsTrace(Payload, RequestId);
+	});
+
+	// 状态监控：只读快照，采集在 FUAL_EditorHealth 里常驻进行
+	CommandMap.Add(TEXT("system.get_editor_health"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		UAL_CommandUtils::SendResponse(RequestId, 200, FUAL_EditorHealth::BuildReport());
 	});
 }
 

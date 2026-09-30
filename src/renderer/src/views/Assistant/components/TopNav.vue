@@ -11,6 +11,8 @@
         主进程，也就从来没有真的把 ue.* 工具指向那个工程。留着两套的结果是
         用户以为绑了、模型那边毫无变化。
       -->
+      <!-- 状态监控放在工程胶囊左边；欢迎页把胶囊挪走了，它照样留在顶栏 -->
+      <EditorStatusMonitor :session-id="sessionId" :pending-project-name="pendingProjectName" />
       <SessionProjectChip
         v-if="!hideProjectChip"
         :session-id="sessionId"
@@ -53,6 +55,7 @@ import AppMenuItem from '@renderer/components/AppMenuItem.vue'
 import { PhDotsThree } from '@phosphor-icons/vue'
 import { useI18n } from 'vue-i18n'
 import SessionProjectChip from './SessionProjectChip.vue'
+import EditorStatusMonitor from './EditorStatusMonitor.vue'
 
 /**
  * TopNav 组件属性

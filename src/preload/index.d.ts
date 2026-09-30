@@ -21,6 +21,7 @@ import type {
   DependencyGraphNode
 } from '../shared/assetDependency'
 import type { AgentTurnUsage } from '../shared/agentUsage'
+import type { EditorHealthResult } from '../shared/editorHealth'
 import type { TeamStateView } from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
 import type { SideChatContext } from '../shared/sideChat'
@@ -1665,6 +1666,10 @@ declare global {
         message?: string
         error?: string
       }>
+    }
+    /** 顶栏状态监控：这条会话归属的工程现在的编辑器状况 */
+    ueEditorHealth: {
+      get: (params: { projectPath: string }) => Promise<EditorHealthResult>
     }
     agent: AgentAPI
     projectImport: {

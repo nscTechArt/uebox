@@ -2878,6 +2878,7 @@ export default {
       models: '模型',
       mcp: 'MCP',
       skills: '技能',
+      experience: '经验库',
       tools: '工具',
       usage: '用量',
       project: '项目库',
@@ -3008,7 +3009,7 @@ export default {
       title: '技能',
       // 自动沉淀
       learningTitle: '自动记住做法',
-      learningDesc: '把可复用的做法记成技能，把踩过的坑记成经验。文件写入仍受权限控制。',
+      learningDesc: '把可复用的做法记成技能，把踩过的坑记进经验库。文件写入仍受权限控制。',
       learningOff: '关闭',
       learningAsk: '先问我',
       learningAuto: '自动',
@@ -3052,49 +3053,50 @@ export default {
       deleteTitle: '删掉「{name}」？',
       deleteContent: '这个技能的整个目录都会删掉，没有回收站。',
       deletedGone: '「{name}」已删除',
-      deletedRestored: '你的那份已删除，「{name}」退回了原版',
-      // 经验：踩过又绕过去的坑（见 ExperienceSection.vue）
-      experience: {
-        title: '经验',
-        note: '做事时踩过又绕过去的坑。再遇到同样的报错会自动提醒，不管用的会自己淘汰。',
-        offNote: '自动记住已关闭：已有的经验保留，但不会再出现。',
-        undo: '撤销上次整理',
-        undoTitle: '撤销上次整理？',
-        undoContent:
-          '上次整理在 {at}，新加了 {added} 条、淘汰了 {retired} 条。撤销后回到那之前的样子。',
-        undone: '已撤销',
-        undoFailed: '撤销失败：{reason}',
-        filter: { all: '全部', global: '通用', project: '工程' },
-        showRetired: '显示已淘汰',
-        loadFailed: '读取失败：{reason}',
-        empty: '还没有经验。做事时踩过又绕过去的坑会出现在这里。',
-        emptyProject: '这个工程还没有经验。',
-        layerGlobal: '通用',
-        status: { trial: '试用中', proven: '已验证', retired: '已淘汰' },
-        pinnedBadge: '固定',
-        effect: '照着做 {adopted} 次，成了 {ok} 次',
-        detail: {
-          how: '怎么做',
-          when: '什么时候出现',
-          whenValue: '报错里含「{pattern}」',
-          scope: '适用范围',
-          scopeGlobal: '所有工程',
-          scopeProject: '只在 {name}',
-          engines: '引擎版本',
-          enginesOk: 'UE {versions} 成立',
-          enginesNo: 'UE {versions} 不适用',
-          effect: '效果',
-          effectValue: '出现 {shown} 次，照着做 {adopted} 次，成了 {ok} 次',
-          lift: '不给时成功 {without}%，给了 {with}%',
-          liftUnknown: '对照样本还不够，暂时算不出提升',
-          source: '来源',
-          pin: '固定保留，不自动淘汰'
-        },
-        deleteTitle: '删掉这条经验？',
-        deleteContent: '删掉后不再提醒。以后再踩到同样的坑，可能会重新学到。',
-        deleted: '已删除',
-        actionFailed: '操作失败：{reason}'
-      }
+      deletedRestored: '你的那份已删除，「{name}」退回了原版'
+    },
+    // 经验库：做事时踩过又绕过去的坑（见 ProfileExperience.vue）
+    experience: {
+      title: '经验库',
+      description: '做事时踩过又绕过去的坑。再遇到同样的报错会自动提醒，不管用的会自己淘汰。',
+      listTitle: '全部经验',
+      offNote: '「技能」页的自动记住已关闭：已有的经验保留，但不会再出现。',
+      undo: '撤销上次整理',
+      undoTitle: '撤销上次整理？',
+      undoContent:
+        '上次整理在 {at}，新加了 {added} 条、淘汰了 {retired} 条。撤销后回到那之前的样子。',
+      undone: '已撤销',
+      undoFailed: '撤销失败：{reason}',
+      filter: { all: '全部', global: '通用', project: '工程' },
+      showRetired: '显示已淘汰',
+      loadFailed: '读取失败：{reason}',
+      empty: '还没有经验。做事时踩过又绕过去的坑会出现在这里。',
+      emptyProject: '这个工程还没有经验。',
+      layerGlobal: '通用',
+      status: { trial: '试用中', proven: '已验证', retired: '已淘汰' },
+      pinnedBadge: '固定',
+      effect: '照着做 {adopted} 次，成了 {ok} 次',
+      detail: {
+        how: '怎么做',
+        when: '什么时候出现',
+        whenValue: '报错里含「{pattern}」',
+        scope: '适用范围',
+        scopeGlobal: '所有工程',
+        scopeProject: '只在 {name}',
+        engines: '引擎版本',
+        enginesOk: 'UE {versions} 成立',
+        enginesNo: 'UE {versions} 不适用',
+        effect: '效果',
+        effectValue: '出现 {shown} 次，照着做 {adopted} 次，成了 {ok} 次',
+        lift: '不给时成功 {without}%，给了 {with}%',
+        liftUnknown: '对照样本还不够，暂时算不出提升',
+        source: '来源',
+        pin: '固定保留，不自动淘汰'
+      },
+      deleteTitle: '删掉这条经验？',
+      deleteContent: '删掉后不再提醒。以后再踩到同样的坑，可能会重新学到。',
+      deleted: '已删除',
+      actionFailed: '操作失败：{reason}'
     },
     // 用量：从已有对话记录里算
     usage: {
@@ -6069,6 +6071,44 @@ export default {
     sessionProject: {
       none: '未归属项目',
       pick: '归入项目'
+    },
+    // 顶栏状态监控（工程胶囊左边那个心跳按钮）
+    statusMonitor: {
+      title: '状态监控',
+      tooltipIssues: '状态监控 · {n} 项偏离预期',
+      attention: '需要注意',
+      expect: '预期 {expect}',
+      ask: '问 AI',
+      askPrompt: '状态监控里「{label}」是 {value}（预期 {expect}），帮我查查原因。',
+      refresh: '刷新',
+      updatedAt: '更新于 {time}',
+      loading: '正在读取…',
+      loadFailed: '没读到编辑器状况，稍后点刷新再试。',
+      pluginOutdated: '工程里的 UnrealAgentLink 插件版本较旧，更新插件并重启编辑器后可用。',
+      pending: '暂无数据',
+      unsupported: '此版本不提供',
+      unit: {
+        seconds: '{n} 秒',
+        minutesSeconds: '{m} 分 {s} 秒'
+      },
+      group: {
+        startup: '编辑器',
+        pie: '试玩（PIE）',
+        cache: '缓存',
+        memory: '内存'
+      },
+      item: {
+        startup: '打开编辑器',
+        assetRegistry: '资产注册表扫描',
+        pluginCount: '已启用插件',
+        editorHitch: '编辑器卡顿率',
+        pieFirstEnter: '首次进入',
+        pieEnter: '最近一次进入',
+        pieHitch: 'PIE 卡顿率',
+        localCacheHit: '本地缓存命中',
+        cacheDisk: '本地缓存占盘',
+        availableMemory: '可用内存'
+      }
     }
   },
   notebookNoteChatPanel: {

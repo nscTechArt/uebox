@@ -35,6 +35,7 @@ import { registerBackupIpc } from './backup'
 import { registerFileIPC } from './fileIPC'
 import { registerScreenshotIPC } from './screenshot'
 import { registerScreenRecorderIPC } from './screenRecorder'
+import { registerEditorHealthIPC } from './editorHealth'
 import { registerNetworkVaultHandlers } from './networkVault'
 import { registerNetworkVaultV2Handlers } from './networkVaultV2'
 import { registerCatalogLibraryIPC } from './catalogLibrary'
@@ -160,6 +161,9 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 注册屏幕录制相关 IPC
   registerScreenRecorderIPC()
+
+  // 顶栏状态监控按钮
+  registerEditorHealthIPC()
 
   // 注册局域网协作库相关 IPC
   registerNetworkVaultHandlers()
