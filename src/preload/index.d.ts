@@ -755,6 +755,8 @@ declare global {
       importByFilePath: (filePath: string) => Promise<{
         success: boolean
         data?: ProjectRecord
+        /** 工程本来就在库里：success 为 false，data 是库里那条现成记录 */
+        alreadyRegistered?: boolean
         /** 工程进库了但 UnrealAgentLink 没装上，值是原因码/原文 */
         pluginFailure?: string
         error?: string
@@ -3281,6 +3283,25 @@ declare global {
         name: string
         disabled: boolean
       }) => Promise<{ success: boolean; error?: string }>
+      /** 技能页「经验」分组：通用层 + 项目库里各工程的经验，附上次整理的摘要 */
+      listExperiences: () => Promise<{
+        success: boolean
+        entries: AgentV3Experience[]
+        lastCuration?: AgentV3CurationSummary
+        error?: string
+      }>
+      /** 固定保留一条经验（不被自动淘汰），或取消 */
+      setExperiencePinned: (args: {
+        ref: AgentV3ExperienceRef
+        pinned: boolean
+      }) => Promise<{ success: boolean; error?: string }>
+      deleteExperience: (ref: AgentV3ExperienceRef) => Promise<{ success: boolean; error?: string }>
+      /** 撤销上次整理：各目录回到那次整理之前 */
+      undoLastCuration: () => Promise<{
+        success: boolean
+        undone?: AgentV3CurationSummary
+        error?: string
+      }>
       /** 删掉用户自己那几条技能。内置和插件带的删不掉，主进程会拒 */
       deleteSkills: (
         names: string[]
@@ -3593,6 +3614,54 @@ declare global {
     source: 'user' | 'plugin' | 'builtin'
     /** 用户有没有把它关掉。关掉的仍然在清单里 —— 否则没法再打开 */
     enabled: boolean
+  }
+
+  /** 一条经验在哪。主进程只认项目库里登记过的工程路径 */
+  interface AgentV3ExperienceRef {
+    layer: 'global' | 'project'
+    projectPath?: string
+    tool: string
+    id: string
+  }
+
+  /** 技能页「经验」分组里的一条（见 main/agent-v3/experience/library.ts） */
+  interface AgentV3Experience {
+    id: string
+    title: string
+    tool: string
+    errorPattern: string
+    advice: string
+    expect: { tool?: string; param?: string }
+    source: string
+    verified?: { date: string; engine?: string }
+    status: 'trial' | 'proven' | 'retired'
+    pinned?: boolean
+    engines?: string[]
+    notFor?: string[]
+    layer: 'global' | 'project'
+    projectName?: string
+    projectPath?: string
+    stats: {
+      shown: number
+      shownOk: number
+      holdout: number
+      holdoutOk: number
+      adopted: number
+      adoptedOk: number
+      adoptedFail: number
+      ignoredStreak: number
+      lastShownAt?: string
+      /** 出场组成功率 − 对照组成功率。对照样本不够时没有 */
+      lift?: number
+    }
+  }
+
+  /** 上次整理：什么时候、新加几条、淘汰几条 */
+  interface AgentV3CurationSummary {
+    id: string
+    at: string
+    added: number
+    retired: number
   }
 
   /** 「设置 → 工具」清单里的一条。开关状态不在这儿 —— 那是应用设置里的两份名单 */

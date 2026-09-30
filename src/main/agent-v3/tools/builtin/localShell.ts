@@ -33,6 +33,7 @@ import type { UnrealAgentTool } from '../defineTool'
 import { assertInAccessScope } from './accessScope'
 import { getExecutionEnv } from './localFiles'
 import { captureFile, withFileChangeLock } from './fileChangeCapture'
+import { assertNotWritingExperience } from '../../experience/writeGuard'
 import { assertCommandAllowed, assertPathAllowed } from './pathBoundary'
 import { assertNotCopyingEngineTemplate, assertNotWritingUproject } from './projectCreationGuard'
 
@@ -142,7 +143,11 @@ function wrap(
 /** 改文件：看 `path`。敏感位置（永远挡）+ 用户设的访问范围 */
 const guardPath = async (params: Record<string, unknown>): Promise<string | undefined> => {
   const target = typeof params.path === 'string' ? params.path : ''
-  return assertPathAllowed(target) ?? (await assertInAccessScope(target))
+  return (
+    assertPathAllowed(target) ??
+    assertNotWritingExperience(target) ??
+    (await assertInAccessScope(target))
+  )
 }
 
 /**
@@ -155,6 +160,7 @@ const guardWritePath = async (params: Record<string, unknown>): Promise<string |
   const target = typeof params.path === 'string' ? params.path : ''
   return (
     assertPathAllowed(target) ??
+    assertNotWritingExperience(target) ??
     assertNotWritingUproject(target) ??
     (await assertInAccessScope(target))
   )

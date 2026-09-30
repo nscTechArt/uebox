@@ -15,6 +15,7 @@ import type { WebContents } from 'electron'
 import type { ModelRequest } from '../../ai/types'
 import { isPlanProvider } from '../../ai/creatorPlan/apply'
 import { buildAllTools } from '../tools/registry'
+import type { NotebookScope } from '../tools/builtin/notebookSources'
 import {
   applySkillLearningMode,
   buildSkillLearningSection,
@@ -85,6 +86,8 @@ import { createBoardTool, createMessageTool, createTeamTools } from './team/team
 import { createStatusTool } from './team/teamStatus'
 import { pacedStreamFn, stallGuardStreamFn, type PacedStreamDeps } from './team/requestGate'
 import { diagnosedStreamFn, formatRequestRecord } from './requestDiagnostics'
+import type { ExperienceRuntime } from '../experience/runtime'
+import { createSessionExperience } from '../experience/session'
 
 /**
  * 一次引擎体检的结果 —— 「此刻这条会话够不够得着引擎，够得着的是哪个工程」。
@@ -303,6 +306,13 @@ export interface SessionContext {
    */
   skillLearning?: SkillLearningMode
   /**
+   * 经验系统的「家」（`<userData>/experience`）：通用层经验放这里，原始账在它的 `.trail/` 下。
+   *
+   * 由宿主给，createAgent 不碰 electron。省略（测试、无头跑）就只有本工程这一层经验、
+   * 不记原始账，会话结束后整理员也就没有东西可整理。子 agent 随 `...parent` 继承。
+   */
+  experienceHome?: string
+  /**
    * 用户把界面语言设成了哪个（「偏好设置 → 通用」）。
    *
    * 只当**兜底**用，不当判据：回复语言永远跟用户这句话本身的语言走，
@@ -334,8 +344,10 @@ export interface SessionContext {
    * 给了模型也只能拿到一句「没有知识库」），以及在环境块里说清楚
    * 「你现在在哪个知识库里」—— 只给工具不说场景的话，模型多半会凭记忆
    * 先答完，而知识库里装的是用户自己传的资料，它压根没见过。
+   *
+   * `'all'`：没有「当前知识库」，检索范围是全部知识库（外部 MCP 会话）。
    */
-  notebook?: { id: string; title?: string }
+  notebook?: NotebookScope
   /**
    * 发起会话的窗口。
    *
@@ -736,6 +748,31 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   if (search) byName.set(search.tool.name, search.tool)
 
   const loopBreaker = createLoopBreaker()
+  /*
+   * 经验运行时：记原始账、报错时挂上本工程的经验、记功（见 `experience/`）。
+   *
+   * 第一次有工具结果时才造：这一轮开始时可能还没连工程，模型自己 `open_project`
+   * 之后 `ctx.project` 才有值（`prepareNextTurnWithContext` 写回的就是这个 ctx）。
+   * 造出来之后就不换了 —— 一轮里换工程是少数情况，记错一轮账的代价很小。
+   */
+  let experience: ExperienceRuntime | undefined
+  let experienceResolved = false
+  const experienceRuntime = (): ExperienceRuntime | undefined => {
+    const project = ctx.sessionProject ?? ctx.project
+    if (!experienceResolved && project?.path) {
+      experienceResolved = true
+      experience = createSessionExperience({
+        sessionId: ctx.sessionId,
+        projectRoot: project.path,
+        ...(project.engineVersion ? { engineVersion: project.engineVersion } : {}),
+        skillLearning: ctx.skillLearning ?? 'ask',
+        ...(ctx.uiLanguage ? { uiLanguage: ctx.uiLanguage } : {}),
+        ...(ctx.experienceHome ? { home: ctx.experienceHome } : {}),
+        tools: [...byName.values()]
+      })
+    }
+    return experience
+  }
   // 没有审批 UI 的审计员也必须遵守父会话的实时只读约束。
   const approvalGate = createApprovalGate({
     sessionId: ctx.sessionId,
@@ -884,7 +921,15 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       // （理由见 toolSearch.ts 顶部），于是这层包装也一起去掉 —— 熔断照常管
       // 真正的失败和原地打转，不需要为一个不会发生的状态留特例。
       loopBreaker.after(hookCtx)
-      return undefined
+      const content = hookCtx.result.content ?? []
+      const note = await experienceRuntime()?.after({
+        tool: hookCtx.toolCall.name,
+        args: hookCtx.args,
+        isError: hookCtx.isError,
+        text: content.map((part) => (part.type === 'text' ? part.text : '')).join('\n')
+      })
+      // 本工程见过这个错：把上次怎么过的挂在错误结果后面，和写文件后贴体检报告同一个手法
+      return note ? { content: [...content, { type: 'text', text: note }] } : undefined
     },
     toolExecution: 'parallel',
     steeringMode: 'all',
@@ -1323,7 +1368,7 @@ export function buildSystemPrompt(
     ctx.shellAvailable
       ? "- The user's own disk: list, search and read files; write and edit them; run bash commands"
       : "- The user's own disk: list, search and read files; write and edit them",
-    '- Unreal Box: asset library search and tagging, notebooks, project management, in-app navigation',
+    "- Unreal Box: asset library search and tagging, notebooks, project management, in-app navigation; the box itself — its assistant's past conversations, import tasks, skills, backups",
     // 检索是无头只读的，任何会话都有 —— 包括 Ask 模式和子 agent
     '- The web, read-only: `web_search` finds pages (add `site:` to narrow it), `web_read` returns a page as filtered Markdown. Neither opens a window nor needs approval.',
     // 浏览器那一行只有真的注册了才写。没注册却说「你能上网」，
@@ -1659,6 +1704,11 @@ function buildRuntimeSection(
  */
 function buildNotebookSection(ctx: SessionContext): string[] {
   if (!ctx.notebook) return []
+  if (ctx.notebook === 'all') {
+    return [
+      "Notebooks: the user's knowledge bases in Unreal Box hold material they collected themselves — you have never seen it. When a question could be covered there, search with `search_notebook_sources` (all notebooks by default, or name one) before answering from memory."
+    ]
+  }
   const name = ctx.notebook.title ? `"${ctx.notebook.title}"` : 'the current notebook'
   return [
     `Notebook: this conversation is inside ${name}. Its sources are material the user collected themselves — you have never seen them.`,

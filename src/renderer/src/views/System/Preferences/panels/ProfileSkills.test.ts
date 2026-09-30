@@ -29,7 +29,9 @@ vi.mock('@renderer/api/agentV3', () => ({
     readSkill: (...args: unknown[]) => readSkill(...args),
     writeSkill: (...args: unknown[]) => writeSkill(...args),
     setSkillDisabled: (...args: unknown[]) => setSkillDisabled(...args),
-    deleteSkills: (...args: unknown[]) => deleteSkills(...args)
+    deleteSkills: (...args: unknown[]) => deleteSkills(...args),
+    // 经验分组有自己的测试（ExperienceSection.test.ts），这里只要它能挂上
+    listExperiences: async () => ({ entries: [] })
   }
 }))
 

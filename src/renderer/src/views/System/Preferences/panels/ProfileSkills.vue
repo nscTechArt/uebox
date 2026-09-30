@@ -39,6 +39,7 @@ import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import { SKILL_CREATOR_NAME } from '@core/shared/skillLearning'
 
+import ExperienceSection from './ExperienceSection.vue'
 import {
   countSkillsBySource,
   filterSkills,
@@ -360,6 +361,9 @@ onMounted(refresh)
         </li>
       </ul>
     </section>
+
+    <!-- 经验：踩过又绕过去的坑。同一个「自动记住做法」开关管着它 -->
+    <ExperienceSection />
 
     <!-- 详情：看正文、改正文、删这一条 -->
     <!-- 不能加 hide-footer：那会把 <footer> 整个删掉，连同下面这个 footer 插槽 -->

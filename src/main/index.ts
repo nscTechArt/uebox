@@ -40,6 +40,7 @@ import {
 } from './mainWindowLifecycle'
 import { agentBrowser } from './services/agentBrowser'
 import { startAgentNotifications } from './services/agentNotifications'
+import { startExperienceCurator } from './agent-v3/experience/scheduler'
 import { startEditorCrashWatch } from './services/editorCrashWatch'
 import { closeSearchBrowser } from './services/browserSearch'
 import { windowStateManager } from './windowStateManager'
@@ -717,6 +718,9 @@ appReady?.then(async () => {
     // 系统通知：agent 跑完 / 卡在审批或反问上时提醒用户回来。
     // 放在窗口创建之后 —— 它要问「盒子的窗口在不在前台」
     startAgentNotifications(createWindow)
+
+    // 经验整理员：会话结束后从原始账里提炼经验，写进工程的 .uebox/experience（见 agent-v3/experience/）
+    startExperienceCurator()
 
     // 编辑器崩溃看门人：认出崩溃、关掉崩溃报告窗口、重开工程，并告诉等着的 agent
     startEditorCrashWatch()

@@ -211,6 +211,15 @@ import {
   type SkillLearningMode
 } from '../agent-v3/capabilities/skills'
 import { readUserInstructions } from '../agent-v3/capabilities/userInstructions'
+import {
+  deleteExperience,
+  listExperiences,
+  parseExperienceRef,
+  setExperiencePinned,
+  undoLastCuration,
+  type LibraryProject
+} from '../agent-v3/experience/library'
+import { experienceHome, experienceHomeContext } from '../agent-v3/experience/scheduler'
 import { currentMainLanguage } from '../i18n'
 
 /** 活跃会话。stop / steer 要能找到对应的 Agent 实例，停止还要能等它收尾 */
@@ -1902,6 +1911,8 @@ export function registerAgentV3IPC(): void {
         // 用户在「偏好设置 → 个性化」里写的常驻说明。每轮现读：用户改完设置
         // 立刻算数，而不是等他重开一次盒子 —— 读的是一个几 KB 的本地文件
         userInstructions: await readUserInstructions(),
+        // 经验系统的原始账（见 agent-v3/experience/）。给了才记，会话结束后整理员才有东西看
+        ...experienceHomeContext(),
         // 界面语言。同样每轮现取，用户切完语言这一轮就算数。
         // 只做兜底，不决定回复语言，见 `buildSystemPrompt` 里那条语言准则
         uiLanguage: currentMainLanguage(),
@@ -2359,6 +2370,7 @@ export function registerAgentV3IPC(): void {
       // 用户看到的是同一条会话前后两种脾气
       userInstructions: await readUserInstructions(),
       uiLanguage: currentMainLanguage(),
+      ...experienceHomeContext(),
       ...(options.notebook ? { notebook: options.notebook } : {}),
       sessionId,
       ueConnected: engineToolsAvailable(scope),
@@ -2617,6 +2629,52 @@ export function registerAgentV3IPC(): void {
       return writeSkillDocument(args.name, args.content)
     }
   )
+
+  /*
+   * 技能页的「经验」分组（见 agent-v3/experience/library.ts）。
+   *
+   * 工程名单取项目库：界面回传的工程路径要拼进写文件的路径，只认库里登记过的。
+   */
+  const experienceProjects = (): LibraryProject[] =>
+    projectLibrary().flatMap((p) =>
+      p.projectPath ? [{ name: p.projectName || p.projectPath, path: p.projectPath }] : []
+    )
+
+  ipcMain.handle('agent-v3:list-experiences', async () => {
+    try {
+      return { success: true, ...(await listExperiences(experienceHome(), experienceProjects())) }
+    } catch (error) {
+      return { success: false, entries: [], error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle(
+    'agent-v3:set-experience-pinned',
+    async (_event, args: { ref?: unknown; pinned?: unknown }) => {
+      const ref = parseExperienceRef(args?.ref)
+      if (!ref || typeof args?.pinned !== 'boolean') {
+        return { success: false, error: '参数不对：需要经验的位置和固定状态' }
+      }
+      const found = await setExperiencePinned(experienceHome(), experienceProjects(), ref, args.pinned)
+      return found ? { success: true } : { success: false, error: '这条经验已经不在了' }
+    }
+  )
+
+  ipcMain.handle('agent-v3:delete-experience', async (_event, rawRef: unknown) => {
+    const ref = parseExperienceRef(rawRef)
+    if (!ref) return { success: false, error: '参数不对：需要经验的位置' }
+    const found = await deleteExperience(experienceHome(), experienceProjects(), ref)
+    return found ? { success: true } : { success: false, error: '这条经验已经不在了' }
+  })
+
+  ipcMain.handle('agent-v3:undo-last-curation', async () => {
+    try {
+      const undone = await undoLastCuration(experienceHome(), experienceProjects())
+      return undone ? { success: true, undone } : { success: false, error: '没有可以撤销的整理' }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
 
   /** 关掉 / 打开一个技能。下一轮开始生效（清单在 agent 装配时读一次） */
   ipcMain.handle(

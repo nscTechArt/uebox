@@ -342,6 +342,39 @@ export const agentV3API = {
     if (!result.success) throw new Error(result.error || '切换失败')
   },
 
+  /**
+   * 技能页「经验」分组：通用层 + 项目库里各工程的经验，附上次整理的摘要。
+   *
+   * 读失败抛错：界面要说「读取失败」，不能显示成「还没有经验」。
+   */
+  async listExperiences(): Promise<{
+    entries: AgentV3Experience[]
+    lastCuration?: AgentV3CurationSummary
+  }> {
+    const result = await window.api.agentV3.listExperiences()
+    if (!result.success) throw new Error(result.error || '读取失败')
+    return {
+      entries: result.entries,
+      ...(result.lastCuration ? { lastCuration: result.lastCuration } : {})
+    }
+  },
+
+  async setExperiencePinned(ref: AgentV3ExperienceRef, pinned: boolean): Promise<void> {
+    const result = await window.api.agentV3.setExperiencePinned({ ref, pinned })
+    if (!result.success) throw new Error(result.error || '操作失败')
+  },
+
+  async deleteExperience(ref: AgentV3ExperienceRef): Promise<void> {
+    const result = await window.api.agentV3.deleteExperience(ref)
+    if (!result.success) throw new Error(result.error || '删除失败')
+  },
+
+  async undoLastCuration(): Promise<AgentV3CurationSummary> {
+    const result = await window.api.agentV3.undoLastCuration()
+    if (!result.success || !result.undone) throw new Error(result.error || '撤销失败')
+    return result.undone
+  },
+
   loadSession(sessionId: string): Promise<{ messages: unknown[] }> {
     return window.api.agentV3.loadSession({ sessionId })
   },

@@ -35,6 +35,14 @@ interface BridgeStatusPayload {
 
 type RendererListener = (event: unknown, ...args: any[]) => void
 
+/** 一条经验在哪：哪一层、哪个工程、哪个工具文件、哪一条。主进程会再校验一遍 */
+interface ExperienceRefArg {
+  layer: 'global' | 'project'
+  projectPath?: string
+  tool: string
+  id: string
+}
+
 const RAW_REQUEST_CHANNELS = new Set(
   `agent-v3:approval-reply agent-v3:question-reply agent-v3:mcp:get-settings
 aigc:importLocalModel aigc:save3DModelFromUrls aigc:update3DModelFolderName app:show-input-context-menu asset:confirmOverwriteResponse asset:resolveImportError
@@ -1522,6 +1530,15 @@ const api = {
       ipcRenderer.invoke('agent-v3:set-skill-disabled', args),
     /** 删掉用户自己那几条技能。内置和插件带的删不掉，主进程会拒 */
     deleteSkills: (names: string[]) => ipcRenderer.invoke('agent-v3:delete-skills', names),
+    /** 技能页「经验」分组：通用层 + 项目库里各工程的经验，附上次整理的摘要 */
+    listExperiences: () => ipcRenderer.invoke('agent-v3:list-experiences'),
+    /** 固定保留一条经验（不被自动淘汰），或取消 */
+    setExperiencePinned: (args: { ref: ExperienceRefArg; pinned: boolean }) =>
+      ipcRenderer.invoke('agent-v3:set-experience-pinned', args),
+    deleteExperience: (ref: ExperienceRefArg) =>
+      ipcRenderer.invoke('agent-v3:delete-experience', ref),
+    /** 撤销上次整理：各目录回到那次整理之前 */
+    undoLastCuration: () => ipcRenderer.invoke('agent-v3:undo-last-curation'),
     /** 工具名 → 风险等级，渲染层算「本轮改动」用 */
     toolRisks: () => ipcRenderer.invoke('agent-v3:tool-risks'),
     /** 「设置 → 工具」那一页的清单，含第三方 MCP */
