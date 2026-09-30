@@ -7,6 +7,7 @@
 #include "UAL_FocusContext.h"
 #include "UAL_SavablePackage.h"
 #include "UAL_WindowCapture.h"
+#include "UAL_ScopedDialogAutoAnswer.h"
 
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -1956,6 +1957,8 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 		FString Expected = Value;
 		FString Via;
 		FString DiskKey = Key;
+		// 写设置时替用户答掉的引擎弹框，见下面 PostEditChangeProperty 那段
+		TArray<TSharedPtr<FJsonValue>> AnsweredDialogs;
 		UClass* SettingsClass = nullptr;
 		FProperty* Prop = UALSetConfig::FindConfigProperty(Section, Key, SettingsClass);
 		if (Prop && !Prop->IsA(FArrayProperty::StaticClass()))
@@ -1995,7 +1998,24 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 				return;
 			}
 			FPropertyChangedEvent Changed(Prop, EPropertyChangeType::ValueSet);
-			CDO->PostEditChangeProperty(Changed);
+			{
+				/*
+				 * 设置对象的 PostEditChange 会弹模态框，必须替用户答掉。
+				 *
+				 * 渲染设置（URendererSettings::PostEditChangeProperty）里就有好几个
+				 * `FMessageDialog::Open`：开 Substrate 的 Beta 警告、开光追问要不要顺带开
+				 * 蒙皮缓存、开 Lumen 说已自动开网格距离场…… 编辑器交互态下这些框卡在
+				 * 游戏线程上，这条 RPC 超时，连只读的 get_config 也跟着超时。
+				 * 真机上就是这样：用户同意开 Substrate，AI 收到两次超时，以为没写进去，
+				 * 其实值早就在弹框后面等着 —— 用户得自己去编辑器里找那个框点掉。
+				 *
+				 * 答「肯定」是对的：调用方要的正是把这个值设上。点了什么记进回执，
+				 * 模型要把它原样告诉用户（比如「顺带开了蒙皮缓存」）。
+				 */
+				FUAL_ScopedDialogAutoAnswer DialogAnswer;
+				CDO->PostEditChangeProperty(Changed);
+				AnsweredDialogs = DialogAnswer.ToJson();
+			}
 			DefaultIni = CDO->GetDefaultConfigFilename();
 			CDO->UpdateSinglePropertyInConfigFile(Prop, DefaultIni);
 			// 引擎规范化后的写法（布尔是 True/False、软引用是完整路径），拿它和磁盘上的比
@@ -2045,6 +2065,10 @@ void FUAL_EditorCommands::Handle_SetConfig(const TSharedPtr<FJsonObject>& Payloa
 		DefaultResult->SetStringField(TEXT("file_path"), DefaultIni);
 		DefaultResult->SetStringField(TEXT("via"), Via);
 		DefaultResult->SetBoolField(TEXT("applied_live"), Via == TEXT("settings_object"));
+		if (AnsweredDialogs.Num() > 0)
+		{
+			DefaultResult->SetArrayField(TEXT("auto_answered_dialogs"), AnsweredDialogs);
+		}
 
 		if (!bPersistedToDefault)
 		{

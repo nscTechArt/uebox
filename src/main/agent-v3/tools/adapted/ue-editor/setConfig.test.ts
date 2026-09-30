@@ -175,3 +175,54 @@ describe('ue_set_config 写工程设置文件', () => {
     expect(String(r.message)).toContain('重启编辑器')
   })
 })
+
+/**
+ * 写渲染设置时引擎会弹模态框（开 Substrate 的 Beta 警告）。真机上老插件不答，
+ * 编辑器卡住、RPC 超时，AI 以为没写进去，转头去直接改 ini 文件。
+ */
+describe('ue_set_config 碰上引擎弹框', () => {
+  const SUBSTRATE = { ...INPUT, key: 'r.Substrate', value: 'True' }
+
+  it('插件替用户点掉的弹框原文进回执，模型才能转告用户', async () => {
+    callRequest.mockResolvedValue({
+      ...BASE,
+      key: 'r.Substrate',
+      requested_value: 'True',
+      read_back: true,
+      value: 'True',
+      persisted: true,
+      file_path: 'I:/Proj/Config/DefaultEngine.ini',
+      via: 'settings_object',
+      applied_live: true,
+      auto_answered_dialogs: [
+        { type: 'Ok', message: 'Warning: Substrate is in a Beta state.', answer: 'Ok' }
+      ]
+    })
+    const r = await run(SUBSTRATE)
+    expect(r.success).toBe(true)
+    expect(String(r.message)).toContain('Substrate is in a Beta state')
+    expect(String(r.message)).toContain('替用户点掉')
+  })
+
+  it('没弹框时不多一句', async () => {
+    callRequest.mockResolvedValue({
+      ...BASE,
+      read_back: true,
+      value: 'True',
+      persisted: true,
+      file_path: 'I:/Proj/Config/DefaultEngine.ini',
+      via: 'settings_object',
+      applied_live: true
+    })
+    const r = await run()
+    expect(String(r.message)).not.toContain('确认框')
+  })
+
+  it('超时要说可能卡在弹框上、值可能已写入，别去直接改 ini', async () => {
+    callRequest.mockRejectedValue(new Error('请求超时: project.set_config'))
+    const r = await run(SUBSTRATE)
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('确认框')
+    expect(String(r.error)).toContain('ue_get_config')
+  })
+})

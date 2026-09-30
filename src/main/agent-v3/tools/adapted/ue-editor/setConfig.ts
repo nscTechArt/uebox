@@ -53,6 +53,35 @@ interface SetConfigResponse {
    */
   via?: 'settings_object' | 'ini'
   applied_live?: boolean
+  /**
+   * 写设置时引擎弹了模态框、插件替用户答掉的那几个（开 Substrate 的 Beta 警告、
+   * 开光追时问要不要顺带开蒙皮缓存……）。有的会顺带改别的设置，得告诉用户
+   */
+  auto_answered_dialogs?: Array<{ type?: string; title?: string; message?: string; answer?: string }>
+}
+
+/** 插件替用户点掉的弹框，拼成一句给模型转告用户的话。没有就给空串 */
+export function describeAnsweredDialogs(dialogs: SetConfigResponse['auto_answered_dialogs']): string {
+  if (!dialogs?.length) return ''
+  return (
+    '\n编辑器写这项设置时弹了确认框，已替用户点掉（要原样告诉用户）：' +
+    dialogs
+      .map((d) => `\n- 「${(d.message ?? d.title ?? '').trim()}」→ ${d.answer ?? '确定'}`)
+      .join('')
+  )
+}
+
+/**
+ * 请求超时时补的那句。老插件写渲染设置时不替用户答弹框，编辑器会卡在一个模态框上：
+ * 值很可能已经在框后面写进去了，只是回执回不来 —— 别当成「没写进去」去绕路改文件。
+ */
+export function describeSetConfigTimeout(message: string): string {
+  if (!/超时|timeout/i.test(message)) return ''
+  return (
+    '\n编辑器很可能正卡在一个确认框上（改渲染设置时引擎会弹，比如开 Substrate 的 Beta 警告），' +
+    '值可能已经写进去了。请用户切到虚幻编辑器把弹框点掉，然后用 ue_get_config 读一次确认，' +
+    '不要改走直接编辑 ini 文件的路。'
+  )
 }
 
 // ============================================================================
@@ -160,7 +189,8 @@ export function createSetConfigTool() {
                 `配置项 "${key}" 已写进工程设置文件 ${response.file_path}，读回的值：${response.value}。` +
                 (response.applied_live
                   ? '编辑器里已经生效。'
-                  : '已经加载的设置要重启编辑器才会看到。')
+                  : '已经加载的设置要重启编辑器才会看到。') +
+                describeAnsweredDialogs(response.auto_answered_dialogs)
             }
           }
 
@@ -215,9 +245,10 @@ export function createSetConfigTool() {
         }
       } catch (error) {
         console.error('[SetConfigTool] 执行失败:', error)
+        const message = error instanceof Error ? error.message : String(error)
         return {
           success: false,
-          error: error instanceof Error ? error.message : String(error)
+          error: message + describeSetConfigTimeout(message)
         }
       }
     }

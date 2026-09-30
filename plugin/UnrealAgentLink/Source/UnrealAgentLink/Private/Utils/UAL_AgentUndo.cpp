@@ -6,6 +6,8 @@
 #include "Editor/EditorEngine.h"
 #include "Editor/TransBuffer.h"
 #include "Misc/ConfigCacheIni.h"
+#include "LevelEditor.h"
+#include "UnrealEdMisc.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -91,6 +93,7 @@ namespace
 
 	FDelegateHandle GUALUndoMapOpenedHandle;
 	FDelegateHandle GUALUndoPreLoadMapHandle;
+	FDelegateHandle GUALUndoTearDownHandle;
 
 	/** 引擎默认的撤销缓冲大小，跟 UEditorEngine::CreateTrans 里的常量一致 */
 	constexpr int32 UAL_DEFAULT_UNDO_BUFFER_MB = 256;
@@ -104,6 +107,29 @@ namespace
 	void UAL_OnPreLoadMap(const FString& /*MapName*/)
 	{
 		FUAL_AgentUndo::PrepareForMapChange();
+	}
+
+	/**
+	 * 引擎要拆掉一个编辑器世界了（EditorDestroyWorld 的第一步就广播这个）。
+	 *
+	 * PreLoadMap 只在**加载**新地图时触发。「另存为」一张没存过的临时关卡不加载
+	 * 任何地图：引擎把世界复制进新包、再直接拆旧的，PreLoadMap 一次都不来，
+	 * 两条撤销缓冲里引用旧 actor 的事务原样留着，引擎的旧 World 泄漏检查
+	 * （EditorServer.cpp 的 CheckForWorldGCLeaks）直接 fatal：
+	 *
+	 *     World Memory Leaks: 2 leaks objects and packages.
+	 *     -> TransBuffer /Engine/Transient.TransBuffer_1::AddReferencedObjects( StaticMeshActor ... )
+	 *
+	 * 真机上 5.5 和 5.8 都是这样崩的：AI 在临时关卡里放了个预览球，用户点保存、
+	 * 另存到 /Game/Maps，保存到一半编辑器就没了。新建关卡、打开关卡同样先拆世界，
+	 * 挂在这里一处全覆盖；PreLoadMap 那一路留着不动，两边都清也只是多清一次空缓冲。
+	 */
+	void UAL_OnMapChanged(UWorld* /*World*/, EMapChangeType ChangeType)
+	{
+		if (ChangeType == EMapChangeType::TearDownWorld)
+		{
+			FUAL_AgentUndo::PrepareForMapChange();
+		}
 	}
 
 	/** 值得记账的包吗（临时包既存不了也撤不出什么有意义的东西） */
@@ -304,6 +330,12 @@ void FUAL_AgentUndo::Initialize()
 	{
 		GUALUndoPreLoadMapHandle = FCoreUObjectDelegates::PreLoadMap.AddStatic(&UAL_OnPreLoadMap);
 	}
+	// 另存为 / 新建关卡不走 PreLoadMap，但都要先拆世界 —— 见 UAL_OnMapChanged
+	if (!GUALUndoTearDownHandle.IsValid())
+	{
+		FLevelEditorModule& LevelEditor = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor"));
+		GUALUndoTearDownHandle = LevelEditor.OnMapChanged().AddStatic(&UAL_OnMapChanged);
+	}
 }
 
 void FUAL_AgentUndo::PrepareForMapChange()
@@ -370,6 +402,15 @@ void FUAL_AgentUndo::Shutdown()
 	{
 		FCoreUObjectDelegates::PreLoadMap.Remove(GUALUndoPreLoadMapHandle);
 		GUALUndoPreLoadMapHandle.Reset();
+	}
+	if (GUALUndoTearDownHandle.IsValid())
+	{
+		// 退出流程里 LevelEditor 可能已经先卸了：只在它还在时摘
+		if (FLevelEditorModule* LevelEditor = FModuleManager::GetModulePtr<FLevelEditorModule>(TEXT("LevelEditor")))
+		{
+			LevelEditor->OnMapChanged().Remove(GUALUndoTearDownHandle);
+		}
+		GUALUndoTearDownHandle.Reset();
 	}
 
 	// 先把全局缓冲还回去再撒手。少了这一步，编辑器会带着一条即将被 GC 的
