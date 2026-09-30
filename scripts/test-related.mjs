@@ -14,66 +14,46 @@
  *   node scripts/test-related.mjs            # 对比默认 base
  *   VERIFY_BASE=origin/main node scripts/test-related.mjs
  *
- * base 解析和 lint-changed.mjs 完全一致：$VERIFY_BASE → origin/main → main → HEAD。
+ * 改动范围走 verify-change-scope.mjs，和 verify:plugin 是同一份实现。
  */
-import { execFileSync, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
+import { resolveChangeScope } from './verify-change-scope.mjs'
 
 /** vitest 的 related 只认源码和测试文件 */
 const RELEVANT = /\.(ts|mts|cts|tsx|js|mjs|cjs|jsx|vue)$/
 
-function git(args) {
-  try {
-    return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-  } catch {
-    return null
-  }
+/**
+ * 把脚本复制到临时目录再用子进程跑的测试。import 分析看不到它们和脚本的关系，
+ * 只能在这里登记 —— 新写这类测试、或给它多复制一个脚本时，要同步这张表。
+ * 测试文件直接 import 的脚本不用登记，vitest 自己算得出来。
+ */
+const SPAWNED_SCRIPT_TESTS = new Map([
+  [
+    'scripts/plugin-check.mjs',
+    ['tests/unit/plugin-commands.test.ts', 'tests/unit/verify-plugin.test.ts']
+  ],
+  ['scripts/verify.mjs', ['tests/unit/plugin-commands.test.ts']],
+  ['tests/support/plugin-release-operations.mts', ['tests/unit/plugin-commands.test.ts']]
+])
+
+let scope
+try {
+  scope = resolveChangeScope()
+} catch (error) {
+  console.error(`✖ ${error instanceof Error ? error.message : String(error)}`)
+  process.exit(1)
 }
 
-function revExists(ref) {
-  return git(['rev-parse', '--verify', '--quiet', ref]) !== null
-}
+const extraTests = scope.paths.flatMap((file) => SPAWNED_SCRIPT_TESTS.get(file) ?? [])
+const targets = [...new Set([...scope.paths.filter((file) => RELEVANT.test(file)), ...extraTests])]
 
-function resolveBase() {
-  const explicit = String(process.env.VERIFY_BASE || '').trim()
-  const candidates = explicit ? [explicit] : ['origin/main', 'main']
-
-  for (const candidate of candidates) {
-    if (!revExists(candidate)) continue
-    const mergeBase = git(['merge-base', 'HEAD', candidate])
-    return { ref: (mergeBase || candidate).trim(), label: candidate }
-  }
-
-  if (explicit) {
-    console.error(`✖ VERIFY_BASE=${explicit} 不是一个有效的 git ref。`)
-    process.exit(1)
-  }
-  return { ref: 'HEAD', label: 'HEAD（仅未提交的改动）' }
-}
-
-function changedFiles(base) {
-  const tracked = (git(['diff', '--name-status', '--diff-filter=ACMR', base]) || '')
-    .split('\n')
-    .filter((line) => line.trim())
-    // 重命名是 "R100\told\tnew"，取最后一段就是当前路径
-    .map((line) => line.split('\t').pop())
-
-  const untracked = (git(['ls-files', '--others', '--exclude-standard']) || '').split('\n')
-
-  return [...new Set([...tracked, ...untracked])]
-    .map((file) => (file || '').trim())
-    .filter((file) => file && RELEVANT.test(file))
-}
-
-const base = resolveBase()
-const files = changedFiles(base.ref)
-
-if (files.length === 0) {
-  console.log(`相关单测 — 相对 ${base.label} 没有改动任何源码，跳过。`)
+if (targets.length === 0) {
+  console.log(`相关单测 — 相对 ${scope.label} 没有改动任何源码，跳过。`)
   process.exit(0)
 }
 
-console.log(`相关单测 — 相对 ${base.label} 有 ${files.length} 个文件改动，跑与之相关的测试…`)
+console.log(`相关单测 — 相对 ${scope.label} 有 ${scope.paths.length} 个文件改动，跑与之相关的测试…`)
 
 /**
  * `--run` 必须显式给：`vitest related` 默认进 watch 模式，在门禁里会挂住不退。
@@ -88,7 +68,7 @@ const vitestBin = resolve('node_modules', 'vitest', 'vitest.mjs')
 // 而带 shell 又要给 77 个文件名逐个加引号 —— 直接调入口省掉整件事
 const result = spawnSync(
   process.execPath,
-  [vitestBin, 'related', '--run', '--passWithNoTests', ...files],
+  [vitestBin, 'related', '--run', '--passWithNoTests', ...targets],
   { stdio: 'inherit' }
 )
 

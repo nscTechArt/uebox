@@ -31,7 +31,52 @@ corresponding engines and C++ build tools, then run:
 node scripts/build-all-plugins.mjs
 ```
 
-For daily development, use `node scripts/build-all-plugins.mjs --only 5.5`.
+For daily development, pick one target version and build it, for example
+`pnpm plugin:build --engine 5.7 --project <uproject-path>`. To inspect an existing package:
+
+```bash
+pnpm plugin:check --engine 5.7   # only that package; needs no Unreal installation
+pnpm plugin:check --all          # release check: the complete UE 5.0–5.8 set
+```
+
+There is no default version, and a missing package is never replaced by another version.
+The package-format contract (supported versions, exclusion rules, zip naming, build stamp, source
+fingerprint) lives in `scripts/plugin-package-format.mjs`; the check itself is
+`scripts/plugin-check.mjs`.
+
+### The everyday gate
+
+`pnpm verify`, `verify:changed` and `verify:fast` run `pnpm verify:plugin`. It inspects a package
+only when your change touches a **packaged input** — a file covered by the source fingerprint:
+`plugin/UnrealAgentLink/{Source,Config,Content,Resources}/` and `UnrealAgentLink.uplugin`. Select
+the target first — PowerShell `$env:VERIFY_PLUGIN_ENGINE = '5.7'`, bash
+`export VERIFY_PLUGIN_ENGINE=5.7` — or override once with `pnpm verify:plugin --engine 5.7`.
+
+Without Unreal installed you cannot produce a package: set `VERIFY_PLUGIN_ENGINE` to `none`. The
+step reports `NOT RUN (declared: no Unreal on this machine)` and passes; state in the PR that the
+plugin change was not compiled. `none` is rejected when an installed engine is detected. Detection
+is only ever used to reject `none`, never to pass a check, so a misdetection costs at most a
+false alarm.
+
+Known limits:
+
+- `LICENSE` and the packaging scripts (`build-plugin.mjs`, `plugin-package-format.mjs`, …) also
+  affect the zip, but the stamp records only the source fingerprint, so no package can prove they
+  were rebuilt. Unit tests and the full rebuild before `plugin:check:all` cover them.
+- Scope is relative to your branch (`VERIFY_BASE` → `origin/main` → `main` → `HEAD`). After pulling
+  someone else's plugin changes your local package may be stale and the gate will not say so —
+  run `pnpm plugin:check --engine <version>` or rebuild before testing against Unreal.
+- Conversely, a base that is behind attributes other people's plugin changes to you. The usual
+  cause is a fork whose `main` was never synced with upstream: if the failure lists files you did
+  not touch, sync your fork's `main` on GitHub (then `git fetch origin`), or set
+  `VERIFY_BASE=<target branch>`, e.g. `VERIFY_BASE=upstream/main`.
+- A passing package check means the zip matches the source. It does not mean the plugin compiles
+  or works in the editor.
+- CI (`pnpm verify --ci`) does not run this step and lists it as NOT RUN: the runner has neither
+  Unreal nor packages.
+
+### Official installers
+
 Once all plugin packages are ready, build the official installer:
 
 ```bash
@@ -43,6 +88,10 @@ pnpm build:linux    # Linux
 Run Mac builds on macOS; they produce architecture-labelled DMG and ZIP files. Setting
 `updateGithubRepo` also generates GitHub update metadata; leaving it empty embeds no feed.
 The build command does not upload artifacts.
+
+These commands run `pnpm plugin:check:all` first: the complete UE 5.0–5.8 set must be present and
+fresh, and every other ZIP for the platform must pass too, whether or not Unreal is installed and
+regardless of `VERIFY_PLUGIN_ENGINE` or `VERIFY_BASE`.
 
 ---
 

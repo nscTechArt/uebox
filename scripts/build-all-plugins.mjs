@@ -28,7 +28,8 @@ import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { createHostProject } from './make-host-project.mjs'
-import { installedEngines, RELEASE_ENGINES } from './build-plugin.mjs'
+import { installedEngines } from './build-plugin.mjs'
+import { RELEASE_ENGINES } from './plugin-package-format.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const PLUGIN_SRC = join(ROOT, 'plugin', 'UnrealAgentLink')
@@ -95,7 +96,7 @@ function main() {
   }
 
   if (!existsSync(join(PLUGIN_SRC, 'UnrealAgentLink.uplugin'))) {
-    console.error('✖ 还没有插件源码，先跑：node scripts/build-plugin.mjs --sync')
+    console.error('✖ 还没有插件源码；它是本仓库的一部分，用 git 还原：git checkout -- plugin/')
     process.exit(1)
   }
 

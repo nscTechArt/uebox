@@ -71,7 +71,8 @@ description: Handles complaint reports produced by the in-app agent's agent-comp
 `resources/skills/**`）、动哪几个文件、测试补在哪、**哪份 skill 文档要跟着改**。
 
 最后那条是最容易漏的：工具补宽了但 `resources/skills/**` 还写着旧限制，模型照旧不会用，
-用户看到的还是没修好。插件源码动了就要重新出 5.5 的包，否则门禁第 8 步会拦。
+用户看到的还是没修好。插件的打包输入动了，要先设 `VERIFY_PLUGIN_ENGINE` 再重新出
+**那个版本**的包，否则 `verify:plugin` 会拦（规矩见 `docs/contributing/packaging.zh-CN.md`）。
 
 ## 6. 动手之前，同类扫一遍
 

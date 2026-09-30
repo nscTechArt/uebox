@@ -61,6 +61,10 @@ That one command runs every gate CI runs, and tells you exactly what to fix when
 It also restores the `better-sqlite3` Electron ABI on the way out, so you can go straight back to
 `pnpm dev`.
 
+Unrelated UI/docs work needs no plugin ZIP or Unreal installation. If you change packaged plugin
+inputs, the gate needs a target version (or `none` without Unreal) — see
+[the packaging guide](docs/contributing/packaging.md#the-everyday-gate).
+
 To produce an installer, cut a release, or get unstuck from the native module ABI, see
 [Packaging, releasing and the native module](docs/contributing/packaging.md).
 

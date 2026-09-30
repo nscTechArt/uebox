@@ -104,7 +104,7 @@ edition-private/
 # 历史上提交过 31 次，仓库 pack 里很大一块是它们的历次副本。
 #
 # 现在谁来产出：
-#   · 开发时  pnpm plugin:build --engine 5.5      （缺包时 UnrealPathManager 会说人话）
+#   · 开发时  pnpm plugin:build --engine <VERIFY_PLUGIN_ENGINE 选的版本>
 #   · 发版时  pnpm build:win 里的 plugin:build:all（九个版本一个不落）
 #
 # 历史里那 31 次副本**不清理**：重写历史会让所有已 clone 的人对不上，

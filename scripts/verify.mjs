@@ -24,7 +24,8 @@
  *   --fast         跳过重量步骤（迭代中自查；提交前仍需跑完整 verify）
  *   --changed      只查你改的东西（迭代中途的快档，见 CHANGED 的说明）
  *   --with-build   额外跑打包与离线启动门禁（改了主进程 / 构建配置 / 依赖时建议加上）
- *   --ci           CI 模式：额外跑 audit:prod、打包与离线启动门禁
+ *   --ci           仓库 CI 档案：额外跑 audit:prod、打包与离线启动门禁；
+ *                  插件包检查不跑，并明确报告为 NOT RUN
  */
 import { spawnSync } from 'node:child_process'
 
@@ -54,17 +55,18 @@ const isWindows = process.platform === 'win32'
  *
  * ciOnly: true 的步骤只在 `--ci` 下跑 —— 它们要么需要联网（audit），
  * 要么太慢不适合每次本地自查（build，本地可用 --with-build 手动触发）。
+ * localOnly（写不跑的理由）的步骤反过来，只在本地跑；`--ci` 下把它列成 NOT RUN，
+ * 让 CI 的绿灯不被误读成「这一项也查过了」。
  *
- * ## 插件分发包新鲜度在这里只查 5.5
+ * ## 插件分发包检查按改动范围决定
  *
- * 这道门禁分两档。这里跑的是 `plugin:check`，只要求开发时编的 UE 5.5 新鲜 ——
- * 要求每次改插件源码都把 5.0–5.8 全重编一遍不现实（本机不一定装齐九个引擎，
- * 一轮接近一小时），门禁会长期全红然后被无视，那就等于没有。
+ * 日常门禁走 `verify:plugin`：先看这次改动要不要查包，再读
+ * `VERIFY_PLUGIN_ENGINE`（或 `verify:plugin --engine`）。无关的 UI / 文档改动
+ * 不会打开 zip，也不会去发现本机引擎。
  *
- * 严格的那一档是 `plugin:check:all`，它挂在出正式安装包的脚本上
- * （package.json 的 `build:win` / `build:mac` / `build:linux`），
- * 要求**每个**版本都新鲜 —— 发版时少一个版本，那个版本的
- * 用户就实实在在装到旧插件。判定见 scripts/build-plugin.mjs 的 checkStaleness。
+ * 严格的那一档仍是 `plugin:check:all`，挂在出正式安装包的脚本上
+ * （`build:win` / `build:mac` / `build:linux`），要求**每个**版本都新鲜。
+ * 普通打包 / 离线启动不因此要求全套发版包。
  */
 const STEPS = [
   {
@@ -192,23 +194,11 @@ const STEPS = [
     ]
   },
   {
-    title: '插件分发包新鲜度（UE 5.5）/ plugin package freshness (UE 5.5)',
-    script: 'plugin:check',
+    title: '插件分发包（按改动）/ plugin package (scoped)',
+    script: 'verify:plugin',
+    localOnly: 'CI runner 上没有 Unreal 和插件包；插件原生构建/运行时同样未验证',
     hint: [
-      '改了 plugin/UnrealAgentLink/ 的源码就要重新出包，否则用户装到的还是旧的。',
-      '这条门禁存在的理由：源码和 resources/plugins/*.zip 曾经脱节七个月 ——',
-      'zip 里的代码停在 2026-01-06，期间的插件修复用户一个都没拿到。',
-      '',
-      '这一步只查 UE 5.5（开发时编的那个版本）：',
-      '  pnpm plugin:build --engine 5.5 --project <uproject 路径>',
-      '看已装引擎：node scripts/build-plugin.mjs --list-engines',
-      '',
-      '其余版本过期只会打印提示，不拦这里 —— 但**发版前必须全部补出**，',
-      'pnpm plugin:check:all（挂在 build:win 等脚本上）会一个不落地卡住。',
-      '出全套：node scripts/build-all-plugins.mjs',
-      '',
-      '注意：还没带构建标记的老包对非 5.5 版本只会显示「未知」，不算失败 ——',
-      '它们是并入源码之前手工出的，各自重新出一次包就会带上标记。'
+      '怎么修见上面这一步自己的输出；完整规则见 docs/contributing/packaging.zh-CN.md 的「日常门禁」。'
     ]
   },
   {
@@ -292,6 +282,7 @@ const STEPS = [
 function resolveSteps() {
   return STEPS.filter((step) => !step.ciOnly || CI || (step.withBuild && WITH_BUILD))
     .filter((step) => !(CHANGED && step.changedSkip))
+    .filter((step) => !(CI && step.localOnly))
     .map((step) => ({
       title: (CHANGED && step.changedTitle) || (FAST && step.fastTitle) || step.title,
       script: (CHANGED && step.changedScript) || (FAST && step.fastScript) || step.script,
@@ -315,6 +306,12 @@ function main() {
   const steps = resolveSteps()
   const mode = [CI && 'ci', FAST && 'fast', CHANGED && 'changed'].filter(Boolean).join(' ')
   console.log(`\n虚幻盒子 · 验收门禁（共 ${steps.length} 步）${mode ? ` [${mode}]` : ''}\n`)
+  if (CI) {
+    for (const step of STEPS.filter((s) => s.localOnly)) {
+      console.log(`  – NOT RUN：${step.title}（${step.localOnly}）`)
+    }
+    console.log('')
+  }
 
   let failedAt = 0
 

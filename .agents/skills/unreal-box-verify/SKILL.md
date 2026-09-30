@@ -18,6 +18,9 @@ when several sessions share the worktree it goes red on other people's half-writ
 gate is owed before a push, a release, or a hand-off of the whole batch — not per task. `AGENTS.md`
 §3 has the reasoning and the numbers.
 
+For plugin-related validation, follow `docs/contributing/packaging.md`, and report repository
+checks, plugin package inspection and native build/runtime acceptance as three separate results.
+
 Whichever tier you ran, use the failing step's exact output to make the smallest legitimate repair,
 then rerun that same tier. Do not declare success from a specialized command alone, and do not
 report a `verify:changed` run as if the full gate had passed — name which tier you ran.
