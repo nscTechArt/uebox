@@ -1,5 +1,9 @@
 <template>
-  <div v-if="path !== null" class="team-folder inspector-group" data-testid="team-folder-rules">
+  <div
+    v-if="path !== null && (deliveryState || rules)"
+    class="team-folder inspector-group"
+    data-testid="team-folder-rules"
+  >
     <!-- 外包：交付的一批在文件夹详情里写状态（方案 4.12） -->
     <div v-if="deliveryState" class="folder-row">
       <span class="row-value">{{ deliveryState }}</span>

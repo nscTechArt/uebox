@@ -8,6 +8,7 @@
  * - 路径：`Content/Props/SM_Chair.uasset` ↔ 软路径 `/Game/Props/SM_Chair`（插件内容是 `/<插件名>/…`）。
  */
 import { catalogLibraryAPI } from '@renderer/api/catalogLibrary'
+import i18n from '@renderer/i18n'
 import type {
   CatalogAssetDetail,
   CatalogAssetSummary,
@@ -322,15 +323,17 @@ export class ServerLibrarySource implements AssetLibrarySource {
         const start = offset ?? 0
         const page =
           typeof limit === 'number' ? sorted.slice(start, start + limit) : sorted.slice(start)
-        return page.map((folder) => mapFolder(folder, folderKeyOf(dirId)))
+        return page.map((folder) => this.named(mapFolder(folder, folderKeyOf(dirId))))
       },
       getByKey: async (folderKey) => {
         const dirId = dirIdOf(folderKey)
         const known = this.known.get(dirId)
         if (known)
-          return mapFolder(known.folder, known.parent === null ? null : folderKeyOf(known.parent))
+          return this.named(
+            mapFolder(known.folder, known.parent === null ? null : folderKeyOf(known.parent))
+          )
         const { folder } = await this.loadChildren(dirId)
-        return folder ? mapFolder(folder, null) : undefined
+        return folder ? this.named(mapFolder(folder, null)) : undefined
       },
       getChildCount: async (fatherKey) =>
         this.visibleFolders((await this.loadChildren(dirIdOf(fatherKey))).items).length,
@@ -624,6 +627,21 @@ export class ServerLibrarySource implements AssetLibrarySource {
   private visibleFolders(items: CatalogFolder[]): CatalogFolder[] {
     if (!this.capabilities.team) return [...items]
     return items.filter((folder) => !/^__External(Actors|Objects)__$/.test(folder.name))
+  }
+
+  /**
+   * 外包成员看到的外包区：`reference/` 叫「参考」，`delivery/` 叫「交付」，`delivery/7` 叫「交付 7」
+   * （方案 4.12）。只改显示的名字，路径不动。
+   */
+  private named<T extends { folderName?: string; catalogPath?: unknown }>(folder: T): T {
+    if (this.capabilities.team?.role !== 'outsourcer') return folder
+    const path = typeof folder.catalogPath === 'string' ? folder.catalogPath : ''
+    const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+    if (path === 'reference') return { ...folder, folderName: t('teamProject.outsource.reference') }
+    if (path === 'delivery') return { ...folder, folderName: t('teamProject.outsource.delivery') }
+    const batch = /^delivery\/(\d+)$/.exec(path)
+    if (batch) return { ...folder, folderName: t('teamProject.outsource.deliveryN', { n: batch[1] }) }
+    return folder
   }
 
   private rootStub(children: number): CatalogFolder {
