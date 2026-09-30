@@ -29,16 +29,23 @@ updates:
     open-pull-requests-limit: 5
     groups:
       # 开发依赖挂了顶多本地跑不起来，合并成一个 PR 就够。
+      # 只收 minor/patch：vite/vitest/eslint 这类大版本混在一组里谁也合不动，
+      # major 单独出 PR，逐个升。
       dev-dependencies:
         dependency-type: development
-        patterns:
-          - '*'
+        update-types:
+          - minor
+          - patch
       # 生产依赖会进安装包，按 minor/patch 分组，major 单独出 PR 人工看。
       prod-minor-patch:
         dependency-type: production
         update-types:
           - minor
           - patch
+        # pi-* 还在 0.x，minor 就是破坏性变更（agent-v3 直接吃它的类型），
+        # 不能跟一堆小升级捆在一起，单独出 PR 适配。
+        exclude-patterns:
+          - '@earendil-works/pi-*'
     ignore:
       # electron 跟着 electron-builder / better-sqlite3 的 ABI 走，
       # 升版本要连带 pnpm rebuild:electron，不能让机器人自己决定。
