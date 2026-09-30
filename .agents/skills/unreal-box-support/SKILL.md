@@ -82,7 +82,7 @@ description: Handles complaint reports produced by the in-app agent's agent-comp
 
 ## 7. 修
 
-照 `AGENTS.md` 的硬规则做。新行为必须有测试。做完一条跑 `pnpm verify:changed`（约 30 秒）；
+照 `AGENTS.md` 的硬规则做。新行为必须有测试。干活中间不跑门禁，提交时跑一次 `pnpm verify:changed`（约 30 秒）；
 整批要交出去之前才跑完整的 `pnpm verify`。
 
 这个仓库常有多个会话同时在改：只按路径 stage 自己的文件，别人的半成品把门禁弄红了

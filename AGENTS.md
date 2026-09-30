@@ -38,10 +38,13 @@ the project runtime even when the system Node differs.
 
 ## 3. The gate — two tiers, and which one you owe
 
-**Finishing a single task:**
+**While you work: run no gate.** Finish the feature first. At most run the one test file you are
+writing (`pnpm exec vitest run <file>`).
+
+**When the feature is done and you are about to commit:**
 
 ```bash
-pnpm verify:changed     # ~30s — only what you touched
+pnpm verify:changed     # ~30s — only what you touched; once per commit, not per edit
 ```
 
 **Before the work is published** — you are about to `git push`, cut a release, or hand the whole
@@ -51,7 +54,7 @@ batch over:
 pnpm verify             # ~3.5 min — the full gate
 ```
 
-**Do not run the full gate after every small task.** Those 3.5 minutes are almost all fixed cost:
+**Do not run any gate after every small edit, and the full gate not even per commit.** Those 3.5 minutes are almost all fixed cost:
 the full lint ratchet is 49s, both typecheck projects 45s, and the whole test suite 126s — of which
 only 43s is actually executing tests (the rest is 386 test files each building an environment).
 Paying that per task is the biggest single waste of time in this repo. With several sessions
@@ -61,8 +64,8 @@ half-written file turns **your** gate red (§5 rule 11).
 `verify:changed` is a snapshot, not a substitute — the full gate still has to pass before anything
 is published. Two things make deferring it safe:
 
-- Every task got its own 30-second check, so a red full gate points at _this_ batch, not at a task
-  someone finished three hours ago and can no longer reconstruct.
+- Every commit got its own 30-second check, so a red full gate points at _this_ batch, not at a
+  commit someone made three hours ago and can no longer reconstruct.
 - **CI is the backstop.** `.github/workflows/quality.yml` does nothing but `pnpm verify --ci`, and
   it runs on **every push** — the full gate plus packaging and the offline-boot check. The gate is
   defined in exactly one place (`scripts/verify.mjs`), so local and CI cannot drift. Forgetting to
@@ -87,7 +90,7 @@ gate no longer touches the `better-sqlite3` native binding.
 | `build:unpack` | CI only — production build + packaging + packaged-dependency closure |
 | `verify:offline-boot` | CI only — boots the packaged app, walks every page, asserts zero official-server requests |
 
-What the per-task tier actually does: `verify:changed` skips the full lint ratchet (new code is
+What the per-commit tier actually does: `verify:changed` skips the full lint ratchet (new code is
 still covered by `lint:changed`, zero tolerance), typechecks only the side you changed, and runs
 only the tests related to your diff. Everything else in the table above still runs — those steps
 are cheap.
@@ -195,7 +198,7 @@ until it is met:
       is now wrong and the change is untraceable. These commands are in the `deny` list in
       `.claude/settings.json`.
     - **Run the full `pnpm verify` only when handing off, and only one session at a time.**
-      Use `pnpm verify:changed` while you work. The gate is repo-wide: a file another session
+      Use `pnpm verify:changed` at commit time, not while you work. The gate is repo-wide: a file another session
       is halfway through will turn your gate red, and that is not yours to fix.
       **Do not edit files outside your task just to make the gate green** — say in your handoff
       whose work-in-progress is blocking it. That is more useful than finishing it for them.

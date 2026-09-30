@@ -5,8 +5,8 @@
 **动手前请先完整阅读 [AGENTS.md](AGENTS.md)**（中文版：[AGENTS.zh-CN.md](AGENTS.zh-CN.md)），
 它是本仓库对所有 AI 编码 Agent 的唯一规范来源：架构分层、硬规则、验收门禁、提交约定。
 
-一句话版本：做完一个任务跑 `pnpm verify:changed`（约 30 秒，只查你改的）；这批活要发出去之前
-再跑一次完整的 `pnpm verify`，全绿才算做完。**不要每做完一件小事就跑完整门禁**，理由见
+一句话版本：干活过程中不跑门禁，功能改完、提交时跑一次 `pnpm verify:changed`（约 30 秒，只查你改的）；
+这批活要发出去之前再跑一次完整的 `pnpm verify`，全绿才算做完。**不要每改一点就跑门禁**，理由见
 AGENTS.md 第 3 节。`git push` 和开 PR 之前先问人。
 
 本仓库不附带项目级 slash command：`.claude/` 在 `.gitignore` 里，属于各人的私有 IDE 配置，

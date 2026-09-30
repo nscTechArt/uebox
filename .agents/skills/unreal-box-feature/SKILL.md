@@ -53,9 +53,9 @@ Add focused tests for new behavior. Include the normal path and the meaningful b
 paths; prefer pure-logic tests when mounting a component is unnecessary. Read
 `docs/contributing/testing.md` when choosing the test location or harness.
 
-Run `pnpm verify:changed` after implementation (~30s, only what you touched) and fix failures
+Run no gate while implementing. When the feature is done and you are about to commit, run `pnpm verify:changed` once (~30s, only what you touched) and fix failures
 without weakening a gate. **Do not run the full `pnpm verify` here** — that tier is owed before the
-work is published, not per task; see `AGENTS.md` §3. If it goes red on a file you did not touch,
+work is published, not per task or per commit; see `AGENTS.md` §3. If it goes red on a file you did not touch,
 another session's work-in-progress is blocking it: say so in your report instead of editing that
 file (`AGENTS.md` §5 rule 11). If this feature touched the main process, build configuration, or
 dependencies, note it in your report: the eventual full run needs `pnpm verify --with-build`.

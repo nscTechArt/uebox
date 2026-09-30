@@ -9,11 +9,11 @@ Read the validation and trap sections of `AGENTS.md`. The gate has two tiers —
 situation calls for:
 
 ```bash
-pnpm verify:changed     # a single task is done — ~30s, only what was touched
+pnpm verify:changed     # about to commit — ~30s, only what was touched (not while working)
 pnpm verify             # the batch is about to be published — ~3.5 min, the full gate
 ```
 
-**Do not run the full gate after every small task.** It is ~3.5 minutes of mostly fixed cost, and
+**Do not run any gate while working, and not the full gate per commit.** It is ~3.5 minutes of mostly fixed cost, and
 when several sessions share the worktree it goes red on other people's half-written files. The full
 gate is owed before a push, a release, or a hand-off of the whole batch — not per task. `AGENTS.md`
 §3 has the reasoning and the numbers.

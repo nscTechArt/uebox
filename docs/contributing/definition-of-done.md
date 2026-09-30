@@ -9,11 +9,11 @@ template maps to it line by line. An AI agent must walk this list before claimin
 
 ## A. Gates
 
-This list is the **publish** checkpoint, not the per-task one. Finishing a single task only owes
-`pnpm verify:changed` (~30s); the full gate is owed once, before the batch goes out. See
+This list is the **publish** checkpoint, not the per-task one. Committing only owes
+`pnpm verify:changed` (~30s), and nothing is owed while you work; the full gate is owed once, before the batch goes out. See
 [AGENTS.md](../../AGENTS.md) §3.
 
-- [ ] Each task in this batch passed `pnpm verify:changed` when it was finished
+- [ ] Each commit in this batch passed `pnpm verify:changed` when it was made
 - [ ] `pnpm verify` is fully green; the last line reads `✅ 门禁全绿，可以提交了。`
 - [ ] No `.skip`, no deleted tests, no commented-out assertions, no lowered coverage thresholds,
       no widened ESLint ignores, no `/* eslint-disable */` at the top of a new file
