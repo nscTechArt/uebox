@@ -24,8 +24,8 @@
           })
         }}
       </span>
-      <AppTag v-if="team.verdict" :tone="VERDICT_TONE[team.verdict]">
-        {{ t(`assistant.teamBoard.verdict.${team.verdict}`) }}
+      <AppTag v-if="team.verdict" :tone="verdictTone" :title="verdictTitle">
+        {{ verdictLabel }}
       </AppTag>
       <PhCaretDown class="caret" :class="{ open: expanded }" />
     </button>
@@ -50,14 +50,44 @@
       <p v-else class="empty">{{ t('assistant.teamBoard.noMembers') }}</p>
 
       <ul v-if="sortedTasks.length" class="tasks">
-        <li v-for="task in sortedTasks" :key="task.id" class="task">
+        <li
+          v-for="task in sortedTasks"
+          :key="task.id"
+          class="task"
+          :class="{ 'task--old': isOld(task) }"
+        >
           <div class="task-line">
             <AppTag :tone="STATUS_TONE[task.status]" :title="statusHint(task.status)">
               {{ statusLabel(task.status) }}
             </AppTag>
             <span class="task-title">{{ task.title }}</span>
             <span v-if="task.owner" class="task-owner">@{{ task.owner }}</span>
+            <span
+              class="task-when"
+              :title="isOld(task) ? t('assistant.teamBoard.oldHint') : undefined"
+            >
+              <template v-if="task.reopenedAt">{{ t('assistant.teamBoard.reopened') }} · </template>
+              <template v-else-if="isOld(task)">{{ t('assistant.teamBoard.old') }} · </template>
+              {{ ago(task.reopenedAt ?? task.updatedAt) }}
+            </span>
+            <AppButton
+              v-if="task.status === 'blocked'"
+              class="task-reopen"
+              size="small"
+              variant="text"
+              :title="t('assistant.teamBoard.reopenHint')"
+              @click="emit('reopen', task.id)"
+            >
+              {{ t('assistant.teamBoard.reopen') }}
+            </AppButton>
           </div>
+          <p v-if="task.note" class="task-detail">
+            {{
+              task.status === 'blocked'
+                ? t('assistant.teamBoard.blockedReason')
+                : t('assistant.teamBoard.note')
+            }}{{ task.note }}
+          </p>
           <p v-if="task.evidence" class="task-detail">
             {{ t('assistant.teamBoard.evidence') }}{{ task.evidence }}
           </p>
@@ -75,6 +105,20 @@
           </li>
         </ul>
       </div>
+
+      <div class="team-board-foot">
+        <AppButton
+          size="small"
+          variant="text"
+          :disabled="running"
+          :title="
+            running ? t('assistant.teamBoard.endWhileRunning') : t('assistant.teamBoard.endHint')
+          "
+          @click="emit('end')"
+        >
+          {{ t('assistant.teamBoard.end') }}
+        </AppButton>
+      </div>
     </div>
   </section>
 </template>
@@ -84,16 +128,28 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PhCaretDown, PhUsersThree } from '@phosphor-icons/vue'
 
+import AppButton from '@renderer/components/AppButton.vue'
 import AppTag from '@renderer/components/AppTag.vue'
 import {
   PRODUCER,
+  type BoardTask,
   type TaskStatus,
   type TeamMail,
   type TeamStateView,
   type TeamVerdict
 } from '@core/shared/agentTeam'
 
-const props = defineProps<{ team: TeamStateView }>()
+const props = defineProps<{
+  team: TeamStateView
+  /** 这条会话正在跑：这时候不能结束团队模式（这一轮收尾会把团队状态写回去） */
+  running?: boolean
+}>()
+const emit = defineEmits<{
+  /** 用户把一项卡住的改回待办 */
+  reopen: [taskId: string]
+  /** 用户结束团队模式 */
+  end: []
+}>()
 const { t } = useI18n()
 
 const expanded = ref(false)
@@ -134,7 +190,52 @@ const recentMail = computed(() => props.team.mail.slice(-MAIL_SHOWN).reverse())
  * 证据里自己写着材质没建，用户看到「完成」却对着一块纯色蓝板。
  * 所以验收通过之前一律叫「自报完成」，真正的完成以验收结论为准。
  */
-const accepted = computed(() => props.team.verdict === 'pass')
+const accepted = computed(() => props.team.verdict === 'pass' && !props.team.verdictStale)
+
+/**
+ * 验收之后工程又改过：那次结论只说明当时的游戏。红牌「未过」一直挂着，
+ * 用户会以为现在还是那样（2026-09-30 真机），所以换成中性的「改动后未重验」。
+ */
+const verdictLabel = computed(() =>
+  props.team.verdictStale
+    ? t('assistant.teamBoard.verdict.stale')
+    : t(`assistant.teamBoard.verdict.${props.team.verdict}`)
+)
+const verdictTone = computed<Tone>(() =>
+  props.team.verdictStale || !props.team.verdict ? 'neutral' : VERDICT_TONE[props.team.verdict]
+)
+const verdictTitle = computed(() =>
+  props.team.verdictAt === undefined
+    ? undefined
+    : t('assistant.teamBoard.verdictTitle', {
+        count: props.team.deliveries,
+        when: ago(props.team.verdictAt)
+      })
+)
+
+/**
+ * 「进行中 / 卡住」是对「现在」的断言。这一轮开始之后没人再碰过的，
+ * 是上一轮留下的说法，灰掉 —— 2026-09-30 真机：第一轮标的 5 个「卡住」，
+ * 之后几轮一直挂着，用户分不清是现在卡着还是早就过去了。
+ */
+function isOld(task: BoardTask): boolean {
+  const since = props.team.roundStartedAt
+  return (
+    since !== undefined &&
+    task.reopenedAt === undefined &&
+    (task.status === 'doing' || task.status === 'blocked') &&
+    task.updatedAt < since
+  )
+}
+
+function ago(at: number): string {
+  const minutes = Math.round((Date.now() - at) / 60_000)
+  if (minutes < 1) return t('assistant.teamBoard.ago.justNow')
+  if (minutes < 60) return t('assistant.teamBoard.ago.minutes', { n: minutes })
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return t('assistant.teamBoard.ago.hours', { n: hours })
+  return t('assistant.teamBoard.ago.days', { n: Math.round(hours / 24) })
+}
 
 function statusLabel(status: TaskStatus): string {
   if (status === 'done' && !accepted.value) return t('assistant.teamBoard.status.selfReported')
@@ -301,8 +402,35 @@ function receipt(mail: TeamMail): string {
 }
 
 .task-owner,
+.task-when,
 .task-detail {
   color: var(--color-text-muted);
+}
+
+.task-when {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.task-reopen {
+  flex-shrink: 0;
+}
+
+/* 上一轮留下的说法：退到背景里，但还读得清 */
+.task--old {
+  .task-title {
+    color: var(--color-text-muted);
+  }
+
+  :deep(.app-tag) {
+    opacity: 0.6;
+  }
+}
+
+.team-board-foot {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .task-detail {

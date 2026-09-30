@@ -14,20 +14,27 @@
  */
 
 import { computed, onUnmounted, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import type { TeamStateView } from '@core/shared/agentTeam'
 import { agentV3API } from '@renderer/api/agentV3'
 import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
+import { message } from '@renderer/utils/messageManager'
 
 export interface UseTeamBoard {
   team: Ref<TeamStateView | null>
   /** 这条会话是不是工作室 */
   active: ComputedRef<boolean>
   refresh: () => Promise<void>
+  /** 卡住的一项改回待办，下一轮制作人会看到 */
+  reopen: (taskId: string) => Promise<void>
+  /** 结束团队模式。任务板和队员留在盘上，下次 /team 接得上 */
+  end: () => Promise<void>
 }
 
 export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
   const chatStore = useChatSessionsStore()
+  const { t } = useI18n()
   const team = ref<TeamStateView | null>(null)
   const agentSessionId = computed(() =>
     chatSid.value ? chatStore.getAgentSessionId(chatSid.value) : ''
@@ -65,5 +72,27 @@ export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
     window.api.off('agent-v3:released', releasedHandler)
   })
 
-  return { team, active: computed(() => team.value !== null), refresh }
+  // 成功不用提示：主进程会推 `agent-v3:team-board`，面板自己就变了
+  const reopen = async (taskId: string): Promise<void> => {
+    const sessionId = agentSessionId.value
+    if (!sessionId) return
+    const result = await agentV3API.teamTaskReopen(sessionId, taskId).catch(() => null)
+    if (!result?.success) message.error(t('assistant.teamBoard.reopenFailed'))
+  }
+
+  const end = async (): Promise<void> => {
+    const sessionId = agentSessionId.value
+    if (!sessionId) return
+    const result = await agentV3API.teamEnd(sessionId).catch(() => null)
+    if (result?.success) return
+    message.error(
+      t(
+        result?.errorKey === 'running'
+          ? 'assistant.teamBoard.endWhileRunning'
+          : 'assistant.teamBoard.endFailed'
+      )
+    )
+  }
+
+  return { team, active: computed(() => team.value !== null), refresh, reopen, end }
 }

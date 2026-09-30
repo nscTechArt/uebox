@@ -22,6 +22,8 @@ import {
   createTeamGate,
   MAX_TEAM_NUDGES,
   newTeamState,
+  noteWrite,
+  startTeamRound,
   type TeamState
 } from './teamSession'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './teamPrompt'
@@ -176,6 +178,14 @@ describe('团队的账', () => {
       }
     ])
     await expect(store.patchBoard([{ id: 't2' }])).rejects.toThrow(/title/)
+  })
+
+  it('用户重开的一项：有人再改它就清掉重开标记', async () => {
+    await store.patchBoard([{ id: 't1', title: '存档', status: 'blocked' }])
+    let board = await store.patchBoard([{ id: 't1', status: 'todo', reopenedAt: 5 }])
+    expect(board[0]).toMatchObject({ status: 'todo', reopenedAt: 5 })
+    board = await store.patchBoard([{ id: 't1', status: 'doing' }])
+    expect(board[0]).not.toHaveProperty('reopenedAt')
   })
 
   it('并行写任务板不丢更新', async () => {
@@ -469,6 +479,58 @@ describe('交付闸', () => {
       await g.run(turnEnd('stop'))
       expect(g.followUps).toEqual([])
     }
+  })
+
+  /** 2026-09-30 真机：第一轮标的「卡住」之后几轮一直没人动，界面上永远是红的 */
+  it('这一轮改了工程、任务板旧账没动：先提醒更新任务板，每轮只提醒一次、也占提醒名额', async () => {
+    let state: TeamState = { ...newTeamState('x'), verdict: 'pass' }
+    const followUps: string[] = []
+    const run = createTeamGate({
+      getState: () => state,
+      setState: async (next) => {
+        state = next
+      },
+      followUp: (text) => followUps.push(text),
+      report: () => undefined,
+      checkBoard: async () => '任务板旧账'
+    })
+    await run(turnEnd('stop'))
+    await run(turnEnd('stop'))
+    expect(followUps).toEqual(['任务板旧账'])
+    expect(state).toMatchObject({ nudges: 1, boardNudged: true })
+  })
+
+  it('任务板对账没事：照常走验收那一关', async () => {
+    let state = newTeamState('x')
+    const followUps: string[] = []
+    const run = createTeamGate({
+      getState: () => state,
+      setState: async (next) => {
+        state = next
+      },
+      followUp: (text) => followUps.push(text),
+      report: () => undefined,
+      checkBoard: async () => null
+    })
+    await run(turnEnd('stop'))
+    expect(followUps).toHaveLength(1)
+    expect(followUps[0]).toMatch(/acceptance/)
+  })
+
+  it('新的一轮：提醒清零、记下开局时刻；验收记下时刻', () => {
+    const round = startTeamRound({ ...newTeamState('x'), nudges: 2, boardNudged: true }, 100)
+    expect(round).toMatchObject({ nudges: 0, boardNudged: false, roundStartedAt: 100 })
+    expect(applyVerdict(round, null, 200)).toMatchObject({ verdictAt: 200 })
+  })
+
+  it('制作人改工程：只在跨过「这一轮开始」或「上次验收」时才要落盘', () => {
+    const round = startTeamRound(newTeamState('x'), 100)
+    const first = noteWrite(round, 110)
+    expect(first).toMatchObject({ lastWriteAt: 110 })
+    expect(noteWrite(first!, 120)).toBeNull()
+    // 之后验收了一次：再改就是「验收之后改过」，要记
+    const judged = applyVerdict(first!, null, 130)
+    expect(noteWrite(judged, 140)).toMatchObject({ lastWriteAt: 140 })
   })
 
   it('读不出结论的验收按没过记', () => {

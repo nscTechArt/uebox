@@ -2562,6 +2562,26 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       noTasks: 'The task board is empty',
       evidence: 'Evidence: ',
       mail: 'Notes',
+      note: 'Note: ',
+      blockedReason: 'Blocked on: ',
+      old: 'Earlier',
+      oldHint: 'Nobody has updated this since the current round began, so it may be out of date',
+      reopened: 'Reopened by you',
+      reopen: 'Reopen',
+      reopenHint: 'Move it back to To do; the producer will reassess it next round',
+      reopenFailed: 'Could not reopen this task. Try again in a moment',
+      end: 'End team mode',
+      endHint:
+        'Back to normal chat with no push to deliver. The board and teammates are kept for your next /team',
+      endWhileRunning: 'Still running. End team mode once this round finishes',
+      endFailed: 'Could not end team mode. Try again in a moment',
+      verdictTitle: 'Acceptance run #{count} · {when}',
+      ago: {
+        justNow: 'just now',
+        minutes: '{n} min ago',
+        hours: '{n} h ago',
+        days: '{n} days ago'
+      },
       producer: 'Producer',
       fast: 'fast',
       readOnly: 'read-only',
@@ -2573,7 +2593,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       verdict: {
         pass: 'Accepted',
         fail: 'Rejected',
-        blocked: 'Blocked'
+        blocked: 'Blocked',
+        stale: 'Changed since check'
       },
       status: {
         todo: 'To do',

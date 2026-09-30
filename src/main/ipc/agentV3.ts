@@ -126,8 +126,18 @@ import {
   applyVerdict,
   createTeamGate,
   newTeamState,
-  teamDirsFor
+  noteWrite,
+  startTeamRound,
+  teamDirsFor,
+  type TeamState
 } from '../agent-v3/core/team/teamSession'
+import {
+  buildBoardNudge,
+  carryOverTasks,
+  changedSince,
+  formatBoardCarryOver,
+  verdictIsStale
+} from '../agent-v3/core/team/boardRecap'
 import {
   createRuntimeScopeId,
   formatLocalNow,
@@ -502,11 +512,19 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
   const team = (await loadExecutionOptions(sessionId))?.team
   if (!team) return null
   const store = createTeamStore(teamDirsFor(sessionId))
-  const [members, board, mail] = await Promise.all([store.roster(), store.board(), store.mail()])
+  const [members, board, mail, activity] = await Promise.all([
+    store.roster(),
+    store.board(),
+    store.mail(),
+    store.activity(TEAM_ACTIVITY_LOOKBACK)
+  ])
   return {
     objective: team.objective,
     verdict: team.verdict,
+    ...(team.verdictAt !== undefined ? { verdictAt: team.verdictAt } : {}),
+    verdictStale: verdictIsStale(team.verdictAt, team.lastWriteAt, activity),
     deliveries: team.deliveries,
+    ...(team.roundStartedAt !== undefined ? { roundStartedAt: team.roundStartedAt } : {}),
     members,
     board,
     mail: mail.slice(-TEAM_PANEL_MAIL)
@@ -535,27 +553,80 @@ function notifyModelRetry(
   })
 }
 
-/** 交付闸：没过验收就收尾时，替制作人补一句（见 `core/team/teamSession.ts`） */
+/** 判「这一轮改没改过工程」「验收后改没改过」时，往回看多少条队员交活记录 */
+const TEAM_ACTIVITY_LOOKBACK = 50
+
+/**
+ * 交付闸：没过验收就收尾时，替制作人补一句（见 `core/team/teamSession.ts`）。
+ *
+ * 顺带记下制作人自己改工程的时刻（队员的改动 `team_send` 已经记在 activity 里），
+ * 收尾时拿它对任务板：这一轮改了工程、旧账却没人动，补一句（见 `core/team/boardRecap.ts`）。
+ */
 function attachTeamGate(
   agent: Agent,
   ctx: SessionContext,
   options: SessionExecutionOptions,
+  allTools: Array<{ name: string; unrealBox: ToolMeta }>,
   emit: (channel: string, payload: unknown) => void
 ): void {
-  if (!ctx.team || !options.team) return
+  const team = ctx.team
+  if (!team || !options.team) return
+  const riskOf = callRiskOf(allTools)
+  const setState = async (next: TeamState): Promise<void> => {
+    options.team = next
+    await saveExecutionOptions(ctx.sessionId, options)
+  }
+  // 开始事件上才有参数（按参数算风险，dry_run 不算写），结束事件上才知道成没成
+  const writing = new Set<string>()
+  agent.subscribe(async (event) => {
+    if (event.type === 'tool_execution_start') {
+      // 不认识的工具按写算，同审批门：不认识的一律从严
+      if ((riskOf(event.toolName, event.args) ?? 'destructive') !== 'safe') {
+        writing.add(event.toolCallId)
+      }
+      return
+    }
+    if (event.type !== 'tool_execution_end' || !writing.delete(event.toolCallId)) return
+    if (event.isError || !options.team) return
+    const next = noteWrite(options.team)
+    if (next) {
+      await setState(next)
+      // 验收标签要从「未过」变成「改动后未重验」
+      emit('agent-v3:team-board', { sessionId: ctx.sessionId })
+    }
+  })
   agent.subscribe(
     createTeamGate({
       getState: () => options.team!,
-      setState: async (next) => {
-        options.team = next
-        await saveExecutionOptions(ctx.sessionId, options)
-      },
+      setState,
       followUp: (text) => agent.followUp({ role: 'user', content: text, timestamp: 0 }),
       report: (message) =>
         emit('agent-v3:notice', { sessionId: ctx.sessionId, message, level: 'info' }),
-      awaitTeam: (signal) => awaitTeamWork(ctx, signal)
+      awaitTeam: (signal) => awaitTeamWork(ctx, signal),
+      checkBoard: async (state) => {
+        const since = state.roundStartedAt
+        if (since === undefined) return null
+        const activity = await team.store.activity(TEAM_ACTIVITY_LOOKBACK)
+        if (!changedSince(since, state.lastWriteAt, activity)) return null
+        const stale = carryOverTasks(await team.store.board(), since)
+        return stale.length > 0 ? buildBoardNudge(stale, Date.now()) : null
+      }
     })
   )
+}
+
+/**
+ * 开局摆给制作人看的任务板旧账（见 `core/team/boardRecap.ts`）。
+ * 不是工作室、没有旧账、读不到任务板都给空串 —— 它是提醒，不能挡住这一轮。
+ */
+async function teamCarryOverBlock(ctx: SessionContext, options: SessionExecutionOptions): Promise<string> {
+  const since = options.team?.roundStartedAt
+  if (!ctx.team || since === undefined) return ''
+  try {
+    return formatBoardCarryOver(carryOverTasks(await ctx.team.store.board(), since), Date.now())
+  } catch {
+    return ''
+  }
 }
 
 /** 制作人想收尾时，最多等一件后台的活多久。到点就提醒它一声，再接着等 */
@@ -1458,6 +1529,51 @@ export function registerAgentV3IPC(): void {
   })
 
   /**
+   * 用户在任务板上点「重开」：卡住的那件改回待办，下一轮开局制作人会看到
+   * （`boardRecap.ts` 的旧账里带「用户重开」）。
+   *
+   * 这一轮正跑着也允许：任务板是一份文件，这里只改一项；制作人这一轮看不到，下一轮看得到。
+   */
+  ipcMain.handle(
+    'agent-v3:team-task-reopen',
+    async (event, args: { sessionId?: string; taskId?: string }) => {
+      const sessionId = args?.sessionId
+      const taskId = args?.taskId
+      if (typeof sessionId !== 'string' || !sessionId || typeof taskId !== 'string' || !taskId) {
+        return { success: false, error: 'sessionId 和 taskId 都要给' }
+      }
+      if (!(await loadExecutionOptions(sessionId))?.team) {
+        return { success: false, error: '这条会话不是团队模式' }
+      }
+      const store = createTeamStore(teamDirsFor(sessionId))
+      if (!(await store.board()).some((task) => task.id === taskId)) {
+        return { success: false, error: `任务板上没有 ${taskId}` }
+      }
+      await store.patchBoard([{ id: taskId, status: 'todo', reopenedAt: Date.now() }])
+      event.sender.send('agent-v3:team-board', { sessionId })
+      return { success: true }
+    }
+  )
+
+  /**
+   * 结束团队模式：之后这条会话回到普通对话，交付闸不再催。
+   *
+   * 任务板、队员和他们的记忆都留在盘上 —— 下次在这条会话里 `/team` 还接得上。
+   * 正在跑的时候不让结束：这一轮手上拿着团队状态，收尾时会把它写回去，等于没结束。
+   */
+  ipcMain.handle('agent-v3:team-end', async (event, args: { sessionId?: string }) => {
+    const sessionId = args?.sessionId
+    if (typeof sessionId !== 'string' || !sessionId) return { success: false, error: '缺 sessionId' }
+    if (activeAgents.has(sessionId)) return { success: false, errorKey: 'running' }
+    const options = await loadExecutionOptions(sessionId)
+    if (!options?.team) return { success: true }
+    delete options.team
+    await saveExecutionOptions(sessionId, options)
+    event.sender.send('agent-v3:team-board', { sessionId })
+    return { success: true }
+  })
+
+  /**
    * 强制全部解锁 —— 界面上那个逃生口。
    *
    * 任何锁一旦出 bug 卡死，用户的感受是「盒子把我工程搞坏了」而不是
@@ -1835,9 +1951,9 @@ export function registerAgentV3IPC(): void {
        * 交付闸的提醒次数按真人消息清零 —— 用户说了新话，就该重新给制作人两次机会。
        */
       const team = teamObjective
-        ? newTeamState(teamObjective)
+        ? startTeamRound(newTeamState(teamObjective))
         : previousOptions?.team
-          ? { ...previousOptions.team, nudges: 0 }
+          ? startTeamRound(previousOptions.team)
           : undefined
 
       /*
@@ -1962,7 +2078,7 @@ export function registerAgentV3IPC(): void {
        * 按 `tools` 记的话那些改动一条都不入账 —— 审计员会对着一张空台账签字。
        */
       attachGoalLoop(agent, ctx, allTools, options, emit)
-      attachTeamGate(agent, ctx, options, emit)
+      attachTeamGate(agent, ctx, options, allTools, emit)
       attachEditorWatch(agent, ctx, run, emit)
 
       // 信封拼在用户这句话前面一起发出去，于是它跟着这条消息一起落进 JSONL，
@@ -1981,6 +2097,8 @@ export function registerAgentV3IPC(): void {
       // 闪存块排在附件块前面、信封后面：三块都是「机器核对过的事实」，
       // 按「这一轮的环境 → 用户带来的东西 → 用户说的话」由外向内排
       const snapshotBlock = editorSnapshotBlock(args.editorSnapshot, scope, sessionId)
+      // 任务板旧账同样是「这一轮的环境」：上一轮留下的「卡住 / 进行中」摆到制作人面前
+      const teamBlock = await teamCarryOverBlock(ctx, options)
       /*
        * 多媒体先走对象存储，走不通再退（AGENTS.md 第 5 节，见 promptMedia.ts）。
        *
@@ -1995,7 +2113,14 @@ export function registerAgentV3IPC(): void {
         emit('agent-v3:notice', { sessionId, message: note, level: 'info' })
       )
       run.controller.signal.throwIfAborted()
-      const userText = [snapshotBlock, attachmentBlock, ...admitted.notices, media.note, promptText]
+      const userText = [
+        teamBlock,
+        snapshotBlock,
+        attachmentBlock,
+        ...admitted.notices,
+        media.note,
+        promptText
+      ]
         .filter(Boolean)
         .join('\n\n')
       const promptWithEnvelope = withRuntimeEnvelope(userText, envelope)
@@ -2357,7 +2482,7 @@ export function registerAgentV3IPC(): void {
       // 同 execute：改动台账要看**全量**工具名，不能只看这一轮开局那份 ——
       // 续跑里模型照样可能中途把工程打开、拿到引擎工具再开始改东西
       const goalLoop = attachGoalLoop(agent, ctx, allTools, options, emit)
-      attachTeamGate(agent, ctx, options, emit)
+      attachTeamGate(agent, ctx, options, allTools, emit)
       attachEditorWatch(agent, ctx, run, emit)
       if (goalLoop) {
         emit('agent-v3:goal', {

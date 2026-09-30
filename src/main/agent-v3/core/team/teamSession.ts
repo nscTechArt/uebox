@@ -9,6 +9,9 @@
  *
  * 判「收尾」的口径和 `/goal` 一样（见 `goalLoop.ts`）：这一轮没再调工具、
  * 正常结束（`stopReason === 'stop'`）。报错、被停下、超长都不算。
+ *
+ * 收尾时还要对一次任务板：这一轮改了工程，上一轮的「进行中 / 卡住」却一项没动，
+ * 补一句让它更新（每轮一次，也算在上面那两次里）。见 `boardRecap.ts`。
  */
 
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
@@ -26,6 +29,17 @@ export interface TeamState {
   deliveries: number
   /** 这一轮已经被交付闸推了几次。每条真人消息清零 */
   nudges: number
+  /** 最近一次验收的时刻 */
+  verdictAt?: number
+  /** 这一轮（最近一条真人消息）开始的时刻 */
+  roundStartedAt?: number
+  /**
+   * 制作人自己最近一次改工程的时刻（队员的改动记在 `activity.json`）。
+   * 判「验收之后改没改过」「这一轮改没改过」用，不是每次写都落盘 —— 见 `noteWrite`
+   */
+  lastWriteAt?: number
+  /** 这一轮已经为任务板提醒过了。每条真人消息清零 */
+  boardNudged?: boolean
 }
 
 export const MAX_TEAM_NUDGES = 2
@@ -43,8 +57,34 @@ export function teamDirsFor(sessionId: string): TeamDirs {
 }
 
 /** 验收结论落进状态。读不出结论按 fail 算：交付闸不能被一句含糊话放过去 */
-export function applyVerdict(state: TeamState, verdict: GoalVerdict | null): TeamState {
-  return { ...state, verdict: verdict?.kind ?? 'fail', deliveries: state.deliveries + 1 }
+export function applyVerdict(
+  state: TeamState,
+  verdict: GoalVerdict | null,
+  now: number = Date.now()
+): TeamState {
+  return {
+    ...state,
+    verdict: verdict?.kind ?? 'fail',
+    verdictAt: now,
+    deliveries: state.deliveries + 1
+  }
+}
+
+/** 一条新的真人消息：新的一轮。提醒次数清零，记下这一轮从什么时候开始 */
+export function startTeamRound(state: TeamState, now: number = Date.now()): TeamState {
+  return { ...state, nudges: 0, boardNudged: false, roundStartedAt: now }
+}
+
+/**
+ * 制作人改了一次工程。要不要落盘：只有它跨过了「这一轮开始」或「上次验收」
+ * 这两条线才要 —— 那两个判断只关心「之后有没有改过」，不关心改了几次。
+ * 返回 null = 不用落盘。
+ */
+export function noteWrite(state: TeamState, now: number = Date.now()): TeamState | null {
+  const last = state.lastWriteAt
+  const line = Math.max(state.roundStartedAt ?? 0, state.verdictAt ?? 0)
+  if (last !== undefined && last > line) return null
+  return { ...state, lastWriteAt: now }
 }
 
 /**
@@ -74,6 +114,11 @@ export interface TeamGateDeps {
    * `followUp` = 要补一句话让它接着干。都没有就给 null。
    */
   awaitTeam?: (signal?: AbortSignal) => Promise<{ continued?: boolean; followUp?: string } | null>
+  /**
+   * 任务板对账：这一轮改了工程、旧账却没动的话，给出要补的那句提醒；不用提醒给 null。
+   * 见 `boardRecap.ts` 的 `buildBoardNudge`
+   */
+  checkBoard?: (state: TeamState) => Promise<string | null>
 }
 
 export function createTeamGate(
@@ -95,6 +140,16 @@ export function createTeamGate(
     }
 
     const state = deps.getState()
+    if (!state.boardNudged && state.nudges < MAX_TEAM_NUDGES && deps.checkBoard) {
+      const nudge = await deps.checkBoard(state)
+      if (nudge) {
+        await deps.setState({ ...state, nudges: state.nudges + 1, boardNudged: true })
+        deps.report('任务板还是上一轮的说法，已提醒制作人更新。')
+        deps.followUp(nudge)
+        return
+      }
+    }
+
     // 过了就放行；BLOCKED 是验收员说「这得用户来」，也放行让制作人把话说完
     if (state.verdict === 'pass' || state.verdict === 'blocked') return
     if (state.nudges >= MAX_TEAM_NUDGES) return

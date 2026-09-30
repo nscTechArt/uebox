@@ -171,7 +171,10 @@ export function createTeamStore(
             Object.entries(patch).filter(([, value]) => value !== undefined)
           ) as BoardPatch
           if (index >= 0) {
-            list[index] = { ...list[index]!, ...defined, updatedAt: now() }
+            const next: BoardTask = { ...list[index]!, ...defined, updatedAt: now() }
+            // 用户点过「重开」、这次又有人改了它：已经有人接手，重开标记就不用再提了
+            if (patch.reopenedAt === undefined) delete next.reopenedAt
+            list[index] = next
           } else {
             if (!patch.title) throw new Error(`任务 ${patch.id} 是新的，需要给 title`)
             list.push({ status: 'todo', ...defined, title: patch.title, updatedAt: now() })

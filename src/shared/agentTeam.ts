@@ -31,6 +31,11 @@ export interface BoardTask {
   evidence?: string
   note?: string
   updatedAt: number
+  /**
+   * 用户在界面上点了「重开」的时刻。制作人下一轮开局会看到它；
+   * 模型再改这一项（任何字段）就清掉 —— 那说明它已经接手了
+   */
+  reopenedAt?: number
 }
 
 /** 留言的收件人是制作人时用的名字。队员叫这个名字会被招人工具拒掉 */
@@ -63,7 +68,16 @@ export interface TeamStateView {
   objective: string
   /** 最近一次验收的结论。null = 还没交过 */
   verdict: TeamVerdict | null
+  /** 那次验收是什么时候。老数据没有 */
+  verdictAt?: number
+  /** 验收之后工程又改过：结论已经不代表现在的游戏了 */
+  verdictStale: boolean
   deliveries: number
+  /**
+   * 这一轮（最近一条真人消息）是什么时候开始的。在它之前就没再动过的
+   * 「进行中 / 卡住」是上一轮留下的说法，界面会把它们标成旧的
+   */
+  roundStartedAt?: number
   members: TeamMember[]
   board: BoardTask[]
   /** 最近的留言，旧的在前 */

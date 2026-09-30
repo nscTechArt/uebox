@@ -7,6 +7,7 @@ import type { TeamStateView } from '@core/shared/agentTeam'
 const team: TeamStateView = {
   objective: '做一个塔防游戏',
   verdict: 'fail',
+  verdictStale: false,
   deliveries: 1,
   members: [
     { name: '玩法主程', persona: '写塔和波次', tier: 'strong', readOnly: false, hiredAt: 1 },
@@ -69,5 +70,51 @@ describe('TeamBoardPanel', () => {
     await after.find('.team-board-head').trigger('click')
     expect(doneTag(after)).not.toContain('自报')
     expect(doneTag(after)).toContain('完成')
+  })
+
+  /** 2026-09-30 真机：第一轮标的「卡住」一直挂着，用户分不清是现在卡着还是早就过去了 */
+  it('这一轮开始后没人动过的「进行中 / 卡住」灰掉标「上一轮」；卡住的显示原因、能重开', async () => {
+    const wrapper = mount(TeamBoardPanel, {
+      props: {
+        team: {
+          ...team,
+          roundStartedAt: 10,
+          board: [
+            { id: 't2', title: '波次系统', status: 'doing', updatedAt: 20 },
+            { id: 't3', title: '存档', status: 'blocked', note: '等你定死亡规则', updatedAt: 3 }
+          ]
+        }
+      }
+    })
+    await wrapper.find('.team-board-head').trigger('click')
+    const [fresh, old] = wrapper.findAll('.task')
+    expect(fresh!.classes()).not.toContain('task--old')
+    expect(old!.classes()).toContain('task--old')
+    expect(old!.find('.task-when').text()).toContain('上一轮')
+    expect(old!.text()).toContain('卡住原因：等你定死亡规则')
+
+    await old!.find('.task-reopen').trigger('click')
+    expect(wrapper.emitted('reopen')).toEqual([['t3']])
+    expect(fresh!.find('.task-reopen').exists()).toBe(false)
+  })
+
+  it('验收之后又改过工程：不再挂红牌，改成「改动后未重验」；完成也回到「自报完成」', async () => {
+    const wrapper = mount(TeamBoardPanel, {
+      props: { team: { ...team, verdict: 'pass', verdictStale: true } }
+    })
+    expect(wrapper.find('.team-board-head').text()).toContain('改动后未重验')
+    await wrapper.find('.team-board-head').trigger('click')
+    expect(wrapper.text()).toContain('自报完成')
+  })
+
+  it('结束团队模式：正在跑的时候按钮不可点', async () => {
+    const idle = mount(TeamBoardPanel, { props: { team } })
+    await idle.find('.team-board-head').trigger('click')
+    await idle.find('.team-board-foot button').trigger('click')
+    expect(idle.emitted('end')).toHaveLength(1)
+
+    const running = mount(TeamBoardPanel, { props: { team, running: true } })
+    await running.find('.team-board-head').trigger('click')
+    expect(running.find('.team-board-foot button').attributes('disabled')).toBeDefined()
   })
 })

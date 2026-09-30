@@ -428,6 +428,22 @@ export const agentV3API = {
     return result?.team ?? null
   },
 
+  /**
+   * 任务板上的两个出口：重开一项、结束团队模式。
+   *
+   * 不走 `unwrapResult()`：两个都是用户点出来的动作，失败要在面板上就地说一句
+   * （「正在跑，等这一轮结束再结束」），不是抛到全局去（见 AGENTS.md 第 5 节第 5 条）。
+   */
+  teamTaskReopen(sessionId: string, taskId: string): Promise<{ success: boolean; error?: string }> {
+    return window.api.agentV3.teamTaskReopen({ sessionId, taskId })
+  },
+
+  teamEnd(
+    sessionId: string
+  ): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {
+    return window.api.agentV3.teamEnd({ sessionId })
+  },
+
   invalidateProviders() {
     return window.api.agentV3.invalidateProviders()
   },

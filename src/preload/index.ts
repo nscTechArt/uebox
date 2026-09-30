@@ -1464,6 +1464,9 @@ const api = {
     locks: () => ipcRenderer.invoke('agent-v3:locks'),
     /** 工作室模式（`/team`）的任务板面板：名册、任务、留言、验收结论 */
     teamState: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-state', args),
+    teamTaskReopen: (args: { sessionId: string; taskId: string }) =>
+      ipcRenderer.invoke('agent-v3:team-task-reopen', args),
+    teamEnd: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-end', args),
     /**
      * 全部强制解锁 —— 逃生口。
      *

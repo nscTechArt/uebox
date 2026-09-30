@@ -193,7 +193,13 @@
           </button>
         </div>
         <!-- 工作室模式（/team）的任务板。只有工作室会话才有，默认收成一行 -->
-        <TeamBoardPanel v-if="teamBoard.team.value" :team="teamBoard.team.value" />
+        <TeamBoardPanel
+          v-if="teamBoard.team.value"
+          :team="teamBoard.team.value"
+          :running="isGenerating"
+          @reopen="teamBoard.reopen"
+          @end="teamBoard.end"
+        />
         <InputComposer
           :is-generating="isGenerating"
           :is-image-generation-mode="isImageGenerationMode"

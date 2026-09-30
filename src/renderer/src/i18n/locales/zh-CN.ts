@@ -2498,6 +2498,25 @@ export default {
       noTasks: '任务板是空的',
       evidence: '证据：',
       mail: '留言',
+      note: '备注：',
+      blockedReason: '卡住原因：',
+      old: '上一轮',
+      oldHint: '这一轮开始后还没人更新过它，说法可能已经过期',
+      reopened: '你重开了',
+      reopen: '重开',
+      reopenHint: '改回待办，制作人下一轮会重新评估这一项',
+      reopenFailed: '没能重开这一项，稍后再试',
+      end: '结束团队模式',
+      endHint: '之后回到普通对话，不再催着交付；任务板和队员都保留，下次 /team 接着用',
+      endWhileRunning: '正在跑，等这一轮结束再结束团队模式',
+      endFailed: '没能结束团队模式，稍后再试',
+      verdictTitle: '第 {count} 次验收 · {when}',
+      ago: {
+        justNow: '刚刚',
+        minutes: '{n} 分钟前',
+        hours: '{n} 小时前',
+        days: '{n} 天前'
+      },
       producer: '制作人',
       fast: '快档',
       readOnly: '只读',
@@ -2509,7 +2528,8 @@ export default {
       verdict: {
         pass: '验收通过',
         fail: '验收未过',
-        blocked: '验收卡住'
+        blocked: '验收卡住',
+        stale: '改动后未重验'
       },
       status: {
         todo: '待办',

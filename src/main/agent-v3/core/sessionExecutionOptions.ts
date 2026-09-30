@@ -85,7 +85,12 @@ const optionsSchema = z.object({
       objective: z.string().min(1),
       verdict: z.enum(['pass', 'fail', 'blocked']).nullable(),
       deliveries: z.number().int().min(0),
-      nudges: z.number().int().min(0)
+      nudges: z.number().int().min(0),
+      // 下面四项是后加的（任务板旧账、验收过期，见 `team/boardRecap.ts`），老记录里没有
+      verdictAt: z.number().optional(),
+      roundStartedAt: z.number().optional(),
+      lastWriteAt: z.number().optional(),
+      boardNudged: z.boolean().optional()
     })
     .optional()
 })

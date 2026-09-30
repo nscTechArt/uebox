@@ -3223,6 +3223,15 @@ declare global {
       teamState: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; team: TeamStateView | null }>
+      /** 任务板上卡住的一项改回待办，下一轮制作人会看到 */
+      teamTaskReopen: (args: {
+        sessionId: string
+        taskId: string
+      }) => Promise<{ success: boolean; error?: string }>
+      /** 结束团队模式。正在跑的时候不行（errorKey 'running'）；任务板和队员留在盘上 */
+      teamEnd: (args: {
+        sessionId: string
+      }) => Promise<{ success: boolean; error?: string; errorKey?: 'running' }>
       /** 改某条会话的审批档位。运行中也立刻生效，下一个工具调用就按新档位走 */
       setApprovalMode: (args: {
         sessionId: string
