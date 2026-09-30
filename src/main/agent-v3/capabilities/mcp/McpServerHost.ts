@@ -42,6 +42,7 @@ import {
   type ElicitResult,
   type ToolAnnotations
 } from '@modelcontextprotocol/sdk/types.js'
+import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 
 import { runWithTargetConnectionId } from '../../core/projectTargetContext'
 import type { UnrealAgentTool } from '../../tools/defineTool'
@@ -466,9 +467,24 @@ export class McpServerHost {
       }))
     }))
 
-    mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
-      this.callTool(session, request, extra.signal)
-    )
+    mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+      // 调用方带了 progressToken 才发进度（MCP 规范：没要就不发）。
+      // `task` 这类一跑几分钟的工具，没有进度调用方只能干等，还会被自己的超时判死
+      const token = request.params._meta?.progressToken
+      let progress = 0
+      const onProgress =
+        token === undefined
+          ? undefined
+          : (message: string): void => {
+              void extra
+                .sendNotification({
+                  method: 'notifications/progress',
+                  params: { progressToken: token, progress: ++progress, message }
+                })
+                .catch(() => undefined)
+            }
+      return this.callTool(session, request, extra.signal, onProgress)
+    })
     return mcp
   }
 
@@ -482,7 +498,8 @@ export class McpServerHost {
     request: {
       params: { name: string; arguments?: unknown; _meta?: Record<string, unknown> }
     },
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onProgress?: (message: string) => void
   ): Promise<CallToolOutcome> {
     const tool = session.tools.find((t) => t.name === request.params.name)
     if (!tool) {
@@ -508,9 +525,18 @@ export class McpServerHost {
       // 它们的调用照旧落到「恰好一个连接才回退」那条路上。
       // 客户端取消（notifications/cancelled）会触发这个 signal —— 和用户在盒子里按停止
       // 走同一条路，等待类的工具（体检里的等待、浏览器）能立刻停下
-      const result = target
-        ? await runWithTargetConnectionId(target, () => tool.execute(callId, args, signal))
-        : await tool.execute(callId, args, signal)
+      // 工具的局部结果只取文字转成进度；图片不往进度里塞
+      const onUpdate = onProgress
+        ? (partial: AgentToolResult<never>): void => {
+            const text = partial.content
+              .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+              .join('\n')
+            if (text) onProgress(text)
+          }
+        : undefined
+      const execute = (): ReturnType<typeof tool.execute> =>
+        tool.execute(callId, args, signal, onUpdate)
+      const result = target ? await runWithTargetConnectionId(target, execute) : await execute()
 
       const structured = toStructuredContent(tool.name, result.details)
       return {

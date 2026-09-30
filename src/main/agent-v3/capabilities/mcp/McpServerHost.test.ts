@@ -952,3 +952,68 @@ describe('McpServerHost 工具注解', () => {
     expect(byName.get('mcp_other_thing')).toMatchObject({ openWorldHint: true })
   }, 30_000)
 })
+
+/**
+ * 进度转发。
+ *
+ * `task` 一跑几分钟，进度原来只冒泡到盒子界面，经 MCP 调用时半路就丢了：
+ * 调用方（CLI 的 ask）只能干等，还会被自己的超时判死。
+ */
+describe('McpServerHost 进度', () => {
+  const hosts: McpServerHost[] = []
+  const clients: Client[] = []
+
+  afterEach(async () => {
+    await Promise.all(clients.splice(0).map((c) => c.close().catch(() => undefined)))
+    await Promise.all(hosts.splice(0).map((h) => h.stop()))
+  })
+
+  const reporter = defineTool({
+    name: 'slow_job',
+    namespace: 'core',
+    risk: 'safe',
+    description: '会报进度的测试工具',
+    input: z.object({}),
+    execute: async (_args, ctx) => {
+      ctx.report({ text: '第一步' })
+      ctx.report({ text: '第二步' })
+      // 进度链是异步的，等它排空再返回，免得最终结果先到
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      return { text: '完成' }
+    }
+  }) as unknown as UnrealAgentTool<never>
+
+  async function open(): Promise<Client> {
+    const host = new McpServerHost()
+    hosts.push(host)
+    const status = await host.start([reporter])
+    const client = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} })
+    clients.push(client)
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(status.url!), {
+        requestInit: { headers: { Authorization: `Bearer ${status.token}` } }
+      })
+    )
+    return client
+  }
+
+  it('调用方要了进度，就按顺序收到工具报的每一条', async () => {
+    const client = await open()
+    const seen: string[] = []
+
+    const result = await client.callTool({ name: 'slow_job', arguments: {} }, undefined, {
+      onprogress: (progress) => seen.push(progress.message ?? '')
+    })
+
+    expect(seen).toEqual(['第一步', '第二步'])
+    expect(JSON.stringify(result.content)).toContain('完成')
+  }, 30_000)
+
+  it('没要进度就不发，结果照常', async () => {
+    const client = await open()
+
+    const result = await client.callTool({ name: 'slow_job', arguments: {} })
+
+    expect(JSON.stringify(result.content)).toContain('完成')
+  }, 30_000)
+})
