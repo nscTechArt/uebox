@@ -1,13 +1,14 @@
 ---
 name: uebox
-description: Drive Unreal Box and a running Unreal Engine editor from the terminal through the `uebox` CLI — check the connection, pick the target project, read selection and actors, save viewport screenshots, spawn/move/delete actors, search the box's asset library, import library assets into a project, and organise the project library. Use when the task needs the live state of an open UE editor or the box's own libraries, and `uebox --version` succeeds. Do not use for reading .uproject or asset files off disk, or when no Unreal Box is running — read the files directly instead.
+description: Drive Unreal Box and a running Unreal Engine editor from the terminal through the `uebox` CLI — check the connection, pick the target project, call any of the box's tools (read selection and actors, move/spawn/delete actors, search the asset library, import library assets into a project), save viewport screenshots, or hand a whole task to the box's own agent with `uebox ask`. Use when the task needs the live state of an open UE editor or the box's own libraries, and `uebox --version` succeeds. Do not use for reading .uproject or asset files off disk, or when no Unreal Box is running — read the files directly instead.
 ---
 
 # Driving Unreal Engine with `uebox`
 
 `uebox` is a terminal client for Unreal Box. It talks to the running box over a local
 loopback connection, and the box talks to the open Unreal Editor. Every command is one
-process: it connects, does one thing, prints, exits.
+process: it connects, does one thing, prints, exits. There is nothing to set up — it finds
+the box's config on its own.
 
 **Read-only unless you pass `--allow-write`.** With that flag you can call anything the
 box's own assistant can call — including asset-library search, importing library assets
@@ -18,15 +19,16 @@ the user asked for a change.
 ## Start here
 
 Run `uebox doctor` once at the beginning of a session, and again after any connection
-error. **Do not run it before every command** — it is a five-layer check, not a ping.
+error. **Do not run it before every command** — it is a layered check, not a ping.
 
 ```
 uebox doctor --json
 ```
 
-It reports five layers in order: config, auth, contract, tool scope, project registration.
-Whichever layer fails carries its own remedy in `error.hint`. Follow that hint rather than
-guessing; "cannot connect" and "no editor connected" need completely different next steps.
+It reports the layers in order: connection (config and auth), contract, tool scope,
+project registration. Whichever layer fails carries its own remedy in `error.hint`. Follow
+that hint rather than guessing; "cannot connect" and "no editor connected" need completely
+different next steps.
 
 ## Always read the exit code
 
@@ -39,7 +41,7 @@ Every command exits non-zero on failure, and the code says which kind:
 | 3 | Config or auth | Read `error.code` before acting — see below |
 | 4 | Box unreachable or too old | Tell the user to start/upgrade Unreal Box |
 | 5 | No single target project | Run `uebox projects list`, then pass `--project` |
-| 6 | Tool out of scope for this version | Stop; do not look for a way around it |
+| 6 | Missing `--allow-write`, or tool out of scope | See "Exit 6" below |
 | 7 | Timeout | **Verify the real state first**; do not resend |
 | 8 | Engine operation failed, or the file was not delivered | Read the message |
 | 130 | Interrupted — the engine did **not** roll anything back | Verify the real state |
@@ -50,12 +52,16 @@ Parse `ok`, then `data` or `error`. Diagnostics go to stderr and never pollute s
 Exit code 3 covers four different situations, and they need different fixes — read
 `error.code`, not just the exit code:
 
-- `CONFIG_MISSING` — never set up. Run `uebox setup`.
-- `CONFIG_UNREADABLE` — **the file is there, you just cannot read it.** Do not
-  reinstall and do not re-run setup; neither will help. In a sandbox, add that path
-  to your readable set, or use the `UEBOX_URL` / `UEBOX_TOKEN` environment variables.
-- `CONFIG_INVALID` — the file is corrupt. `error.message` says how.
-- `AUTH_FAILED` — the token was rejected. Run `uebox setup` again.
+- `CONFIG_MISSING` — no box config found. Unreal Box has never been started on this
+  machine, or it is installed somewhere unusual: pass `--config <path>` or set
+  `UEBOX_HOST_CONFIG`.
+- `CONFIG_UNREADABLE` — **the file is there, you just cannot read it.** Do not reinstall;
+  it will not help. In a sandbox, add that path to your readable set, or use the
+  `UEBOX_URL` / `UEBOX_TOKEN` environment variables.
+- `CONFIG_INVALID` — the file is corrupt, or two boxes are installed and the CLI will not
+  guess which. `error.message` says which; the hint says how to pick.
+- `AUTH_FAILED` — the token was rejected. If you set `UEBOX_TOKEN`, it is stale; otherwise
+  `uebox doctor` shows which config was read.
 
 ## Name the project whenever more than one is open
 
@@ -68,51 +74,46 @@ connected the command fails with exit 5. That is deliberate: silently retargetin
 edit the wrong level. When `uebox projects list` shows more than one project, pass
 `--project` on every command.
 
-## The three high-frequency commands
+## Two ways in: one tool, or the whole agent
+
+- **`uebox tools call <tool>`** — you decide which tool and what arguments. Use this when
+  you know the step.
+- **`uebox ask "<task>"`** — the box's own agent works out the steps and reports back.
+  Use this for a multi-step job you would otherwise script tool by tool.
+
+### Calling tools
 
 ```
-uebox selection get --json
-uebox actors list --name Cube --json
-uebox viewport screenshot --output ./artifacts/viewport.png --json
-```
-
-- **`selection get`** answers "what does the user mean by *this*". Reach for it before
-  asking the user which object they meant.
-- **`actors list`** returns `returnedCount`, `totalCount` and `truncated` together.
-  **Never report `returnedCount` as the total.** A `null` `totalCount` means the plugin did
-  not report one — that is "unknown", not "no more". Raise `--limit` (max 1000) or narrow
-  with `--name`.
-- **`viewport screenshot`** writes the file and verifies it before reporting success.
-  Read the saved file from `artifacts[0].path`; never expect image bytes on stdout.
-
-Details that decide whether a screenshot means anything: `references/screenshots.md`.
-
-## `null` means unknown, not zero
-
-Older UnrealAgentLink plugins do not report some fields. Those come back as `null`, and
-the command adds a warning saying so. Treat `null` as "this plugin version does not say" —
-reading it as `0` turns "I don't know" into a confident wrong answer.
-
-## Everything else goes through `tools`
-
-```
-uebox tools list --search blueprint --json
+uebox tools list --search actor --json
 uebox tools show ue_get_actor --json
+uebox tools call ue_get_selection --json
 uebox tools call ue_get_actor --args-file ./query.json --project "D:/Games/Demo" --json
 ```
 
 `tools list` shows the read-only tools by default; add `--allow-write` to see the ones that
 change things. `tools show` never needs the flag — call it before `tools call`, because it
-returns the real input schema. Do not invent example arguments from a tool's name.
+returns the real input schema. Do not invent arguments from a tool's name.
 
-Anything the box's own assistant can do is here, not just engine commands: the asset
-library (`search_assets`), the project library (`project_list`, `project_organize`),
-and library-to-project import (`project_manage`).
+Three tools answer most questions about the editor:
+
+- **`ue_get_selection`** answers "what does the user mean by *this*". Reach for it before
+  asking the user which object they meant.
+- **`ue_get_actor`** reads actors and their transforms. Locations are centimetres,
+  rotations degrees, scale multipliers — do not convert.
+- **`uebox viewport screenshot --output <file.png>`** writes the file and verifies it before
+  reporting success. Read the saved file from `artifacts[0].path`; never expect image bytes
+  on stdout. Details that decide whether a screenshot means anything:
+  `references/screenshots.md`.
+
+For anything with nested structure, write a UTF-8 JSON file and pass `--args-file`; this
+sidesteps quoting differences between PowerShell, cmd and bash. `--args-file -` reads
+stdin. The CLI checks only that the JSON parses to an object; types and required fields
+are validated by the box.
 
 ### Finding an asset and importing it
 
-This is the common one — the box's library is where the user's assets live, and the
-project only has what has already been imported.
+The box's library is where the user's assets live; the project only has what has already
+been imported.
 
 ```bash
 uebox tools call search_assets --args-file ./query.json --json
@@ -122,46 +123,45 @@ uebox tools call ue_content_search --args-file ./check.json --json
 
 `search_assets` returns `assetKey` values; `project_manage` takes them (or a whole
 `folder`) plus a `projectKey` from `project_list`. Read each tool's schema with
-`tools show` rather than guessing the field names — they are not the CLI's own flags.
+`tools show` rather than guessing the field names.
 
 A `.uasset` import does not need the editor open; external files (FBX, PNG, OBJ) do.
-Import replies have no `verified` field, so confirm with `ue_content_search` before
-telling the user it landed.
+Confirm with `ue_content_search` before telling the user it landed.
 
-For anything with nested structure, write a UTF-8 JSON file and pass `--args-file`; this
-sidesteps quoting differences between PowerShell, cmd and bash. `--args-file -` reads
-stdin. The CLI checks only that the JSON parses to an object; types and required fields
-are validated by the box.
+### Handing a task to the box's agent
 
-## Writing actors: the reinforced path
-
-```bash
-uebox actors spawn  --name Box1 --asset StaticMeshActor --location 0,0,50 --allow-write --json
-uebox actors move   --name Box1 --location z=200 --allow-write --json
-uebox actors delete --name Box1 --allow-write --json
+```
+uebox ask "list every point light in the level with its intensity" --json
+uebox ask "halve the intensity of every point light" --allow-write --json
 ```
 
-`--location` takes either `x,y,z` or a single named component (`z=200`, leaving x/y alone).
-`--rotation` is degrees, `--scale` is multipliers. Locations are centimetres — see the
-units note in the read commands above; do not convert.
+- **Read-only by default.** Without `--allow-write` the agent's write tools are removed,
+  not just discouraged — it can look but not change.
+- **Its reach is fixed:** engine, asset library, project library. It never gets the shell,
+  local files, the browser or third-party MCP servers, with or without the flag.
+- **It runs on the model configured in the box**, billed to that model. Do not use it for
+  a single lookup that one `tools call` would answer.
+- Progress lines go to stderr while it works; the conclusion is `data.answer`, and ends
+  with a line listing every write it made. **Report that line to the user** — it is
+  bookkeeping, not the agent's own claim.
+- For `ask`, `--timeout` is how long it may go without any progress, not total time.
 
-Four things to know before you use these:
+`uebox tools call task` is refused on purpose — use `ask`, which applies the limits above.
+
+## Changing things
+
+Writes go through `tools call --allow-write` (or `ask --allow-write`). Before you use it:
 
 - **`--allow-write` is required on every write.** Leaving it off gives exit code 6. It is
   not a formality — the CLI has no approval dialog, so this flag is the user's consent.
-  If the user has not asked for a change, do not add it.
-- **Success already means verified — on these four commands only.** They read the engine
-  back and compare before reporting success, so exit 0 means the engine's current state
-  matches what you asked for, and the reply carries a `verified` field. A write made
-  through `tools call` has no `verified` field: there, judge by what the tool itself
-  reported.
-- **Exit 8 means it did not take effect**, even though the tool itself reported no error.
-  Trust the read-back, not the tool. Report it; do not retry blindly.
-- **Only absolute values.** There is no relative move. To nudge something, read its current
-  transform with `actors list --name ...`, add your delta yourself, and set the result.
+- **Judge by what the tool reported.** Box tools read the engine back before reporting
+  success; read their reply, not your request. `ue_spawn_actor` tells you when a name was
+  taken and it used `Name_1` instead — use the name it reports from then on.
+- **Relative moves are not idempotent.** `ue_set_transform` with `add`/`multiply` moves
+  twice if resent. After a timeout, read the transform with `ue_get_actor` before deciding.
 
-To undo: `uebox actors undo --allow-write`. It undoes one step and verifies by reading the
-undo stack before and after.
+To undo: `uebox tools call ue_undo --allow-write`. `ue_undo_history` (read-only) shows the
+stack first.
 
 **Never tell the user to press Ctrl+Z to undo your change.** CLI writes land on a separate
 agent undo stack; the editor swaps its own stack back when the transaction ends. Ctrl+Z
@@ -171,16 +171,19 @@ than doing nothing.
 Two things to pass on after an undo: it only changes what is in memory, so the affected
 packages must be saved in the editor to reach disk; and that stack is shared with the agent
 running inside the box, so if anything else wrote in between, the step you undo may not be
-yours. `uebox tools call ue_undo_history` is read-only and shows the stack.
+yours.
 
-Anything not covered by these four commands goes through `tools call --allow-write`
-(next section).
+## `null` means unknown, not zero
+
+Older UnrealAgentLink plugins do not report some fields. Those come back as `null`.
+Treat `null` as "this plugin version does not say" — reading it as `0` turns "I don't know"
+into a confident wrong answer.
 
 ## After a timeout, verify — do not resend
 
 Exit code 7 means the request was sent and the outcome is unknown. Resending can perform
-an already-successful operation twice. Query the current state first (`selection get`,
-`actors list`) and decide from what you see.
+an already-successful operation twice. Query the current state first (`ue_get_selection`,
+`ue_get_actor`, `ue_content_search`) and decide from what you see.
 
 Calls that legitimately take minutes — waiting for an editor restart, for instance — need
 an explicit larger `--timeout`; the default is 120 seconds.
@@ -191,8 +194,8 @@ Two different situations share this code, and the message says which:
 
 - **"this command has not enabled writes"** — the tool is callable, you just did not pass
   `--allow-write`. Add it only if the user asked for the change.
-- **"out of scope"** — either the tool demands per-call human approval, or the box did not
-  declare what it is. Report that plainly and stop.
+- **"out of scope"** — the tool demands per-call human approval, the box did not declare
+  what it is, or it is `task` (use `ask`). Report that plainly and stop.
 
 If a write tool is missing from `tools list --allow-write` entirely, the box's MCP settings
 probably do not have "also expose mutating tools" turned on. `uebox doctor` says so; that

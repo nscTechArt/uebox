@@ -39,7 +39,7 @@ from the picture does not mean it is missing from the scene.** Do not draw concl
 ask the user to bring a level viewport forward, or to send their own screenshot.
 
 `cameraLocation` is in centimetres and can be compared against actor coordinates from
-`actors list` to confirm the camera is pointed where you think.
+`ue_get_actor` (via `uebox tools call`) to confirm the camera is pointed where you think.
 
 ## Which world was captured
 

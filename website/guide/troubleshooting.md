@@ -293,7 +293,7 @@ UnrealEditor.exe <工程>.uproject -ini:Engine:[HTTP]:HttpProxyAddress=
 uebox doctor
 ```
 
-逐层报告断在哪。第一次用要先跑 `uebox setup`。
+逐层报告断在哪。本机同时装了开发版和正式版时，用 `--config` 或 `UEBOX_HOST_CONFIG` 指定连哪一个。
 
 ### 写工具不在清单里
 
@@ -301,11 +301,11 @@ uebox doctor
 
 ### 退出码 7（超时）
 
-请求可能已经到引擎，结果不明。**不要直接重发** —— `actors` 系列会给一条回读命令，用它确认当前状态。
+请求可能已经到引擎，结果不明。**不要直接重发** —— 先用只读工具（如 `ue_get_actor`）确认当前状态。`ask` 超时说明它很久没有进度，不是跑得久。
 
 ### 撤销不掉
 
-CLI 的改动**编辑器里按 `Ctrl+Z` 碰不到**。用 `uebox actors undo --allow-write`。
+CLI 的改动**编辑器里按 `Ctrl+Z` 碰不到**。用 `uebox tools call ue_undo --allow-write`。
 
 ## MCP
 

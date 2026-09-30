@@ -6,7 +6,7 @@
 
 ## 安装
 
-随 Windows 和 macOS 安装包分发，不用单独装。
+随 Windows 和 macOS 安装包分发，不用单独装，也不用配置 —— 它自己找得到本机的虚幻盒子。
 
 **设置 → 命令行** 显示程序位置，可以复制路径或在文件夹中显示。旁边有「**加入 PATH**」，开启后新开的终端可以直接敲 `uebox`。这一项只影响当前用户，随时可以关掉。
 
@@ -14,13 +14,7 @@
 
 Linux 包不带命令行工具。
 
-## 先跑这两条
-
-```bash
-uebox setup
-```
-
-关联本机应用的配置并验证连接。没有 TTY 的环境（CI、脚本）要显式给 `--host-config <path>`。
+## 先跑一条
 
 ```bash
 uebox doctor
@@ -28,29 +22,58 @@ uebox doctor
 
 逐层检查：连接 → 接口契约 → 工具范围 → 工程注册，并指出中断的层级。加 `--project <path>` 可同时确认指定工程是否可作为目标。
 
-## 读命令
+## 两种用法
+
+| 用法                      | 适合                                   |
+| ------------------------- | -------------------------------------- |
+| `uebox ask "<要做的事>"`  | 一句话交给盒子的 Agent，它自己想步骤   |
+| `uebox tools call <工具>` | 你知道要调哪个工具，精确控制每一步     |
+
+## ask：交给盒子的 Agent
 
 ```bash
-uebox projects list                # 已注册且在线的工程
-uebox tools list                   # 可调用的工具
-uebox tools list --search material # 按名字或描述筛
-uebox tools show <name>            # 某个工具的完整描述和参数定义
-uebox selection get                # 编辑器当前选中/打开的内容
-uebox actors list                  # 关卡里的 Actor
-uebox viewport screenshot --output shot.png
+uebox ask "列出当前关卡里所有点光源和它们的强度"
+uebox ask "把所有点光源的强度调低一半" --allow-write
 ```
 
-### actors list
+- **默认只能查，不能改。** 加 `--allow-write` 才放开改动。
+- **只碰引擎、素材库和工程库。** shell、本地文件、浏览器、第三方 MCP 一律不给，加了 `--allow-write` 也不给。
+- 用的是盒子里配置的模型，费用记在那个模型的账上。
+- 干活时进度打在 stderr 上；结论末尾有一行它实际做过的写操作，那一行是记账记出来的，不是它自己说的。
+- 对 `ask` 来说，`--timeout` 算的是**多久没有任何进度**，不是总时长。
 
-| 选项               | 说明                                 |
-| ------------------ | ------------------------------------ |
-| `--name <text>`    | 按 Name/Label 精确匹配，不填扫全关卡 |
-| `--limit <n>`      | 返回上限，1–1000，默认 **50**        |
-| `--include-system` | 连引擎的记账 Actor 一起算            |
+## tools：调用单个工具
 
-位置单位是厘米，旋转是度，缩放是倍数。
+```bash
+uebox projects list                   # 已注册且在线的工程
+uebox tools list                      # 可调用的工具
+uebox tools list --search material    # 按名字或描述筛
+uebox tools show <name>               # 某个工具的完整描述和参数定义
+uebox tools call ue_get_selection     # 编辑器当前选中/打开的内容
+uebox tools call search_assets --args-file args.json
+```
 
-### viewport screenshot
+判定规则：**应用内 AI 助手可用的工具，在 CLI 中加 `--allow-write` 均可调用。** 素材库搜索、工程库管理、将素材库资产导入工程都在内。两类除外：要求逐次人工审批的工具，以及派子任务的 `task` —— 后者请用 `ask`。
+
+`--args` 中直接写 JSON 需要按所在 shell 转义，未转义的引号会被 shell 去掉：
+
+```bash
+# PowerShell
+uebox tools call ue_get_actor --args '{\"name\":\"Floor\"}'
+```
+
+```bash
+# cmd
+uebox tools call ue_get_actor --args "{""name"":""Floor""}"
+```
+
+也可以使用 `--args-file <文件>`，或 `--args-file -` 从标准输入读取。
+
+## 截图
+
+```bash
+uebox viewport screenshot --output shot.png
+```
 
 | 选项                   | 说明                                          |
 | ---------------------- | --------------------------------------------- |
@@ -58,72 +81,27 @@ uebox viewport screenshot --output shot.png
 | `--world auto\|editor` | 默认 `auto`，PIE 在跑就拍游戏世界             |
 | `--overwrite`          | 允许覆盖已存在的文件                          |
 
-## 写命令
+文件落地前核验 PNG 格式与尺寸，核验不过一律非零退出。这条路自己渲一帧，**曝光比编辑器视口偏暗约一档**，不要拿它判断过曝或欠曝。
 
-写命令都要加 `--allow-write`：
+## 改东西
 
-```bash
-uebox actors spawn --name Box1 --asset StaticMeshActor --allow-write
-uebox actors move  --name MyCube --location z=200 --allow-write
-uebox actors delete --name MyCube --allow-write
-uebox actors undo --allow-write
-```
+写操作都要加 `--allow-write`。
 
-| 选项               | 说明                                      |
-| ------------------ | ----------------------------------------- |
-| `--asset <text>`   | 生成什么：别名、`/Game/` 路径或类名       |
-| `--location x,y,z` | 位置，厘米。也可以写 `z=200` 只设一个分量 |
-| `--rotation p,y,r` | 旋转，度。也可以写 `yaw=90`               |
-| `--scale x,y,z`    | 缩放倍数。也可以写 `x=2`                  |
+应用里那个「同时开放写操作工具」的开关，是给**带审批界面**的客户端用的。CLI 这头一个弹窗都没有，`--allow-write` 就是顶替那一下的确认。应用那头没勾的话，写工具根本不在清单里 —— `uebox doctor` 会说破。
 
-### `--allow-write` 不是多余的
+核实看工具自己的返回值：盒子的工具报成功之前会回读引擎。生成 Actor 时名字被占用，回执会写明改用了哪个名字。
 
-应用里那个「同时开放写操作工具」的开关，是给**带审批界面**的客户端用的。CLI 这头一个弹窗都没有，`--allow-write` 就是顶替那一下的确认。
+::: warning 超时不要直接重发
+请求可能已经生效。先用只读工具（`ue_get_actor`、`ue_content_search`）查清楚，再决定要不要重发。
+:::
 
-应用那头没勾的话，写工具根本不在清单里 —— `uebox doctor` 会说破。
-
-### 撤销要用 undo
+### 撤销
 
 ```bash
-uebox actors undo --allow-write
+uebox tools call ue_undo --allow-write
 ```
 
 编辑器里按 `Ctrl+Z` **碰不到 CLI 做的这一步**。
-
-## 调用任意工具
-
-判定规则：**应用内 AI 助手可用的工具，在 CLI 中加 `--allow-write` 均可调用。**
-
-命名空间不参与判断，素材库搜索、工程库管理、将素材库资产导入工程均包含在内。两类除外：要求逐次人工审批的工具，以及本机文件和 shell —— 应用侧未将这两类对外暴露。
-
-```bash
-uebox tools call search_assets --args-file args.json
-```
-
-`--args` 中直接写 JSON 需要按所在 shell 转义，未转义的引号会被 shell 去掉：
-
-```bash
-# PowerShell
-uebox tools call get_actor --args '{\"name\":\"Floor\"}'
-```
-
-```bash
-# cmd
-uebox tools call get_actor --args "{""name"":""Floor""}"
-```
-
-也可以使用 `--args-file <文件>`，或 `--args-file -` 从标准输入读取。
-
-## 两条路的核实强度不同
-
-| 路径                            | 核实方式                             |
-| ------------------------------- | ------------------------------------ |
-| `actors spawn/move/delete/undo` | CLI 自己回读引擎核对，对不上就报失败 |
-| `tools call <任意工具>`         | 原样转发，核实看工具自己的返回值     |
-
-::: warning 超时不要直接重发
-两条路径相同。`actors` 系列会给出一条可直接执行的回读命令；`tools call` 只提示核实位置。**确认执行结果后再决定是否重发。**
-:::
 
 ## 目标工程怎么定
 
@@ -135,23 +113,18 @@ uebox tools call get_actor --args "{""name"":""Floor""}"
 
 前两步定出来的工程如果没连着，命令直接失败，**不会改发给别的在线工程**。
 
-## 读结果之前要知道的
-
-**`actors list`** —— 引擎的记账 Actor（HLOD、导航网格、物理体积）默认不计入，有被滤掉时警告里给真实总数。被 `--limit` 截断时也有警告。`totalCount` 为 `null` 是「插件没报总数」，不是「没有更多」。
-
-**`viewport screenshot`** —— 文件落地前核验 PNG 格式与尺寸，核验不过一律非零退出。这条路自己渲一帧，**曝光比编辑器视口偏暗约一档**，不要拿它判断过曝或欠曝。
-
 ## 公共选项
 
-| 选项                  | 说明                                       |
-| --------------------- | ------------------------------------------ |
-| `--json`              | stdout 只输出一个 JSON 对象，诊断走 stderr |
-| `--project <path>`    | 目标工程，`.uproject` 文件或其所在目录     |
-| `--timeout <秒>`      | 整条命令的期限，默认 **120**               |
-| `--lang zh-CN\|en-US` | 帮助与提示的语言                           |
-| `--config <path>`     | 指定 CLI 自己的配置文件                    |
-| `-h, --help`          | 加 `--all` 看完整帮助                      |
-| `-v, --version`       | 版本号                                     |
+| 选项                  | 说明                                                       |
+| --------------------- | ---------------------------------------------------------- |
+| `--json`              | stdout 只输出一个 JSON 对象，诊断走 stderr                 |
+| `--project <path>`    | 目标工程，`.uproject` 文件或其所在目录                     |
+| `--allow-write`       | 允许这条命令改动工程                                       |
+| `--timeout <秒>`      | 整条命令的期限，默认 **120**；`ask` 算的是多久没有进度     |
+| `--lang zh-CN\|en-US` | 帮助与提示的语言                                           |
+| `--config <path>`     | 盒子装在非常规位置时，指定它的配置文件；也可设 `UEBOX_HOST_CONFIG` |
+| `-h, --help`          | 完整帮助                                                   |
+| `-v, --version`       | 版本号                                                     |
 
 公共选项写在子命令前面或后面都行。
 
