@@ -134,7 +134,7 @@
     "lowlight": "^3.3.0",
     "mammoth": "^1.12.2",
     "markdown-it": "^15.0.1",
-    "marked": "^17.0.1",
+    "marked": "^18.0.13",
     "mermaid": "^11.17.2",
     "morphdom": "^2.7.8",
     "multer": "^2.3.0",
