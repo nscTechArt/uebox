@@ -75,6 +75,8 @@ export interface CatalogServiceOptions {
   copyPackage: (sourceSeed: string, targetSeed: string) => Promise<number>
   sessionLabel: string
   now?: () => number
+  /** 一台服务器从列表里拿掉了（最后一个库移除）：团队那边据此删掉交给 UE 的登录 */
+  onServerRemoved?: (record: CatalogServerRecord) => void
 }
 
 interface ServerRuntime {
@@ -667,7 +669,9 @@ export class CatalogService {
       runtime.events?.stop()
       await runtime.session.signOut().catch(() => undefined)
       runtime.catalog.destroy()
+      runtime.memberAuthed?.destroy()
       this.servers.delete(serverId)
+      this.options.onServerRemoved?.(runtime.record)
     }
     await this.config.update((next) => {
       next.servers = next.servers.filter((server) => server.id !== serverId)
@@ -2152,6 +2156,7 @@ export class CatalogService {
       },
       rootFolders: async (key) => (await this.folders(key, 0)).items.map((folder) => folder.name),
       signedIn: async (serverId) => await (await this.server(serverId)).session.signedIn(),
+      memberUrl: async (serverId) => (await this.server(serverId)).record.memberUrl,
       anonymousHttp: async (server, caFingerprint) => {
         const probe = await this.probe(server, caFingerprint)
         if (probe.error || !probe.trust)

@@ -12,6 +12,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, watch } from 'vue'
 import type {
   CatalogTeamLink,
+  TeamAsk,
   Person,
   TeamEvent,
   TeamJoinLink,
@@ -98,6 +99,8 @@ export const useTeamStore = defineStore('teamProject', () => {
   const revision = ref(0)
   /** 动态页的搜索（用工具栏现有的搜索框，占位换成「提交号、说明、人名或文件名」） */
   const query = ref('')
+  /** 别人问你改完没（ask.received）：按路径记着，详情「历史」段里就地回答（方案 2.16） */
+  const receivedAsks = ref<Record<string, TeamAsk>>({})
 
   let unsubscribe: (() => void) | null = null
 
@@ -240,6 +243,32 @@ export const useTeamStore = defineStore('teamProject', () => {
     openView('grid')
   }
 
+  /**
+   * 可以分享的链接（契约 4.14）→ 盒子里的那一页：
+   * `/p/{p}` 动态、`/p/{p}/submits/{n}` 动态里展开这一条、`/p/{p}/compare?from=&to=` 对比、
+   * `/p/{p}/bisect/{id}` 找坏提交、`/p/{p}/inbox` 等你处理、`/p/{p}/folders` 网格和文件夹树
+   * （UE 的「选同步哪些文件夹…」和磁盘不够的通知跳到这里，方案 3.2、4.3）
+   */
+  function openPath(path: string): void {
+    const [pathname, search = ''] = path.split('?')
+    const rest = pathname.replace(/^\/p\/[^/]+/, '')
+    const query = new URLSearchParams(search)
+    const numberOrLatest = (value: string | null): number | 'latest' | null =>
+      value === 'latest' ? 'latest' : value && /^\d+$/.test(value) ? Number(value) : null
+    const submit = /^\/submits\/(\d+)/.exec(rest)
+    const bisect = /^\/bisect\/([^/]+)/.exec(rest)
+    if (submit) openView('activity', { expand: Number(submit[1]) })
+    else if (rest.startsWith('/compare'))
+      openView('compare', {
+        from: numberOrLatest(query.get('from')),
+        to: numberOrLatest(query.get('to')) ?? 'latest'
+      })
+    else if (bisect) openView('bisect', { bisectId: bisect[1] })
+    else if (rest.startsWith('/inbox')) openView('inbox')
+    else if (rest.startsWith('/folders')) openView('grid')
+    else openView('activity')
+  }
+
   // ---------------------------------------------------------------- 查询
 
   function checkoutOf(path: string | null | undefined): CheckoutInfo | null {
@@ -331,11 +360,10 @@ export const useTeamStore = defineStore('teamProject', () => {
         (library) =>
           library.serverId === event.serverId && library.team?.projectId === event.project
       )
+      const go = (): void => openPath(event.path)
       if (target && target.key !== libraryStore.activeServerKey)
-        void libraryStore.activateServer(target.key)
-      if (event.path.includes('inbox')) openView('inbox')
-      else if (/\/submits\/(\d+)/.test(event.path))
-        openView('activity', { expand: Number(/\/submits\/(\d+)/.exec(event.path)?.[1]) })
+        void libraryStore.activateServer(target.key).then(() => setTimeout(go, 300))
+      else go()
       return
     }
     if (event.kind === 'project') {
@@ -345,6 +373,12 @@ export const useTeamStore = defineStore('teamProject', () => {
     }
     if (event.kind === 'notification') {
       const notification = event.notification
+      const ask = notification.data?.ask as TeamAsk | undefined
+      if (notification.kind === 'ask.received' && ask?.paths) {
+        const next = { ...receivedAsks.value }
+        for (const path of ask.paths) next[path] = ask
+        receivedAsks.value = next
+      }
       const text = notificationText(notification, i18n.global.t as never)
       if (event.serverId === serverId.value && notification.project === link.value?.projectId)
         void refresh(['inbox', 'checkouts', 'freeze'])
@@ -426,6 +460,7 @@ export const useTeamStore = defineStore('teamProject', () => {
     joinOpen,
     revision,
     query,
+    receivedAsks,
     link,
     key,
     serverId,
@@ -449,6 +484,7 @@ export const useTeamStore = defineStore('teamProject', () => {
     refresh,
     openView,
     backToGrid,
+    openPath,
     checkoutOf,
     restrictionOf,
     restrictionIconOf,

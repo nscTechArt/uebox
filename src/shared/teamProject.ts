@@ -400,6 +400,33 @@ export interface TeamJoinLink {
 }
 
 /**
+ * `unrealbox://open?server=<成员面地址>&path=/p/xinghai/submits/1532`（契约 4.14）：
+ * UE 里点提交号、[在虚幻盒子里看]、「选同步哪些文件夹…」都走它。path 只认 `/p/<工程>/…`。
+ */
+export function parseTeamOpenLink(raw: string): { server: string; project: string; path: string } | null {
+  let url: URL
+  try {
+    url = new URL(raw.trim())
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'unrealbox:') return null
+  const action = url.hostname || url.pathname.replace(/^\/+/, '').split('/')[0]
+  if (action !== 'open') return null
+  const server = url.searchParams.get('server')
+  const path = url.searchParams.get('path') ?? ''
+  const match = /^\/p\/([a-z0-9-]+)(\/.*)?$/.exec(path.split('?')[0])
+  if (!server || !match) return null
+  try {
+    const parsed = new URL(server)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    return { server: `${parsed.protocol}//${parsed.host}`, project: match[1], path }
+  } catch {
+    return null
+  }
+}
+
+/**
  * 解析邀请链接。认两种：盒子自己的 `unrealbox://join?server=&p=&ca=`，
  * 和网页上复制的 `https://host:8084/join?p=xinghai#ca=sha256:<hex>`。
  * 认不出来回 null（界面说「这个链接打不开」）。

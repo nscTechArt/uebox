@@ -60,7 +60,8 @@ function fakeHost(
     invalidate: () => undefined,
     rootFolders: async () => [],
     signedIn: async () => true,
-    anonymousHttp: async () => http
+    anonymousHttp: async () => http,
+    memberUrl: async () => null
   }
   return host as unknown as TeamHost & { added: typeof added }
 }

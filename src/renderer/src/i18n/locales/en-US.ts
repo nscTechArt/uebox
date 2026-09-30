@@ -8786,6 +8786,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       askedOffline: "Asked {who}. They haven't been online today.",
       requestTakeBack: 'Ask an admin to take it back',
       escalated: 'Told the admins ({admins}).',
+      stillEditing: 'Still working',
       askedRecently: 'Asked ({ago} ago)'
     },
     folder: {

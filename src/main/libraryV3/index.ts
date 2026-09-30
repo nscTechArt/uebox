@@ -72,7 +72,15 @@ export function getCatalogService(): CatalogService {
       const { copyUnrealPackage } = await import('../ipc/projectImport')
       return await copyUnrealPackage(sourceSeed, targetSeed)
     },
-    sessionLabel: `Unreal Box on ${process.env.COMPUTERNAME || 'this computer'}`
+    sessionLabel: `Unreal Box on ${process.env.COMPUTERNAME || 'this computer'}`,
+    onServerRemoved: (record) => {
+      // 离开团队：这台电脑上交给 UE 的登录一起删掉；通知流也断开
+      teamService?.stopStream(record.id)
+      if (record.memberUrl)
+        void import('./team/teamCredentials')
+          .then((module) => module.removeTeamCredential(record.memberUrl as string))
+          .catch(() => undefined)
+    }
   })
   return service
 }

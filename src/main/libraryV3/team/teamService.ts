@@ -31,6 +31,7 @@ import { runLoreChecked, runLore } from '../loreCli'
 import type { ShadowContext, ShadowCopies, ShadowTarget } from '../shadowCopy'
 import { TeamApiError, teamRequest } from './teamClient'
 import { TeamStream } from './teamEvents'
+import { needsRenewal, readTeamCredential, writeTeamCredential } from './teamCredentials'
 import { buildTeamRoute, isTeamOp, type TeamRoute } from './teamOps'
 
 /** CatalogService 交给团队门面的那几样东西（不把整个服务端运行时暴露出来） */
@@ -60,6 +61,8 @@ export interface TeamHost {
   signedIn(serverId: string): Promise<boolean>
   /** 登录前用的：按邀请链接的指纹信任这台主机，不带令牌 */
   anonymousHttp(server: string, caFingerprint: string | null): Promise<CatalogHttp>
+  /** 成员面地址（交给 UE 插件的登录文件里写它） */
+  memberUrl(serverId: string): Promise<string | null>
 }
 
 export interface TeamJoinInput {
@@ -130,6 +133,7 @@ export class TeamService {
   private readonly streams = new Map<string, TeamStream>()
   private readonly projectCache = new Map<string, { at: number; project: TeamProject }>()
   private readonly jobs = new Map<string, AbortController>()
+  private renewTimer: NodeJS.Timeout | null = null
 
   constructor(private readonly host: TeamHost) {}
 
@@ -186,6 +190,8 @@ export class TeamService {
     }
     await this.host.addLibraries(serverId, toAdd)
     this.startStream(serverId)
+    // 这台电脑上的 UE 从此不用再登录（契约 2.5）
+    void this.renewCredential(serverId, true).catch(() => undefined)
     return {
       member: me.member,
       displayName: me.displayName,
@@ -336,8 +342,43 @@ export class TeamService {
       (await this.host.libraries()).filter((record) => record.team).map((record) => record.serverId)
     )
     for (const serverId of servers) {
-      if (await this.host.signedIn(serverId).catch(() => false)) this.startStream(serverId)
+      if (!(await this.host.signedIn(serverId).catch(() => false))) continue
+      this.startStream(serverId)
+      void this.renewCredential(serverId).catch(() => undefined)
     }
+    // 交给 UE 的长令牌：每 6 小时看一眼，剩不到五分之一寿命就重领
+    if (!this.renewTimer && servers.size > 0) {
+      this.renewTimer = setInterval(
+        () => {
+          for (const serverId of servers) void this.renewCredential(serverId).catch(() => undefined)
+        },
+        6 * 60 * 60 * 1000
+      )
+      this.renewTimer.unref?.()
+    }
+  }
+
+  /**
+   * 把这台电脑的登录交给 UE 插件：领一个长令牌（`POST /v1/auth/cli-token`，最长 30 天），
+   * DPAPI 保护后写进 `%LOCALAPPDATA%\UnrealBox\team\<主机_端口>.json`（见 teamCredentials.ts）。
+   * `force` 为假时，文件里的令牌还有五分之一以上寿命就不动。
+   */
+  async renewCredential(serverId: string, force = false): Promise<string | null> {
+    const memberUrl = await this.host.memberUrl(serverId)
+    if (!memberUrl) return null
+    if (!force && !needsRenewal(await readTeamCredential(memberUrl), Date.now())) return null
+    const http = await this.host.memberHttp(serverId)
+    const grant = await teamRequest<{ member?: string; identityToken?: string; expires?: number }>(
+      http,
+      { method: 'POST', path: '/v1/auth/cli-token', body: {} }
+    )
+    if (!grant.identityToken) return null
+    return await writeTeamCredential({
+      memberUrl,
+      account: grant.member ?? null,
+      identityToken: grant.identityToken,
+      expires: typeof grant.expires === 'number' ? grant.expires : null
+    })
   }
 
   streamState(serverId: string): { connected: boolean; signedOut: boolean } {
@@ -351,6 +392,8 @@ export class TeamService {
   }
 
   dispose(): void {
+    if (this.renewTimer) clearInterval(this.renewTimer)
+    this.renewTimer = null
     for (const stream of this.streams.values()) stream.stop()
     this.streams.clear()
     for (const controller of this.jobs.values()) controller.abort()

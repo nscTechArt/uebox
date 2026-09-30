@@ -79,8 +79,13 @@ async function act<T>(call: () => Promise<Raw<unknown>>): Promise<TeamActionResu
   }
 }
 
+/** IPC 的结构化克隆不认 Vue 的响应式代理（弹窗状态、store 里的数组）：先拍平成普通对象 */
+function plain<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
+}
+
 const call = (key: string, op: string, args?: unknown) => (): Promise<Raw<unknown>> =>
-  bridge().call(key, op, args)
+  bridge().call(key, op, plain(args))
 
 export const teamAPI = {
   // ---- 读取
@@ -148,8 +153,16 @@ export const teamAPI = {
       keys: string[]
       openKey: string | null
       noProjects: boolean
-    }>(() => bridge().join(input)),
-  peek: (link: TeamJoinLink) => act<{ projectName: string | null }>(() => bridge().peek(link)),
+    }>(() => bridge().join(plain(input))),
+  // IPC 的结构化克隆不认 Vue 的响应式代理：先拍平
+  peek: (link: TeamJoinLink) =>
+    act<{ projectName: string | null }>(() =>
+      bridge().peek({
+        server: link.server,
+        project: link.project,
+        caFingerprint: link.caFingerprint
+      })
+    ),
   inviteLink: (key: string) => act<string | null>(() => bridge().inviteLink(key)),
   approve: (key: string, number: number) =>
     act<{ submit: TeamSubmit }>(call(key, 'approve', { number })),
@@ -200,11 +213,11 @@ export const teamAPI = {
   cancelCheckout: (key: string, path: string, discard: boolean) =>
     act<{ kept: string | null }>(() => bridge().cancelCheckout(key, { path, discard })),
   deliver: (key: string, input: { files: string[]; message: string; facts?: unknown[] }) =>
-    act<string>(() => bridge().deliver(key, input)),
+    act<string>(() => bridge().deliver(key, plain(input))),
   approveDelivery: (key: string, input: { id: string; paths: string[]; message: string }) =>
-    act<string>(() => bridge().approveDelivery(key, input)),
+    act<string>(() => bridge().approveDelivery(key, plain(input))),
   sendReference: (key: string, input: { company: string; paths: string[]; note: string }) =>
-    act<string>(() => bridge().sendReference(key, input)),
+    act<string>(() => bridge().sendReference(key, plain(input))),
   openPath: (path: string) => act<boolean>(() => bridge().openPath(path)),
   notify: (input: {
     key?: string

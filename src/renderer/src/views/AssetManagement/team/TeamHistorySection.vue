@@ -59,6 +59,27 @@
           {{ t('teamProject.history.cancelCheckout') }}
         </AppButton>
       </div>
+      <!-- 有人问你改完没（方案 2.16）：[取消签出] [还在改 ▾]；提交在 UE 里做 -->
+      <div v-if="mine && receivedAsk" class="ask-row">
+        <span class="checkout-text">
+          {{
+            t('teamProject.notify.askReceived', {
+              who: receivedAsk.from.name,
+              name: assetNameOf(path)
+            })
+          }}
+        </span>
+        <AppDropdown placement="bottomRight">
+          <AppButton size="small">{{ t('teamProject.ask.stillEditing') }} ▾</AppButton>
+          <template #overlay>
+            <AppMenu @click="(info) => answerStill(info.key)">
+              <AppMenuItem v-for="eta in ETAS" :key="eta" :item-key="eta">
+                {{ t(`teamProject.notify.eta.${eta}`) }}
+              </AppMenuItem>
+            </AppMenu>
+          </template>
+        </AppDropdown>
+      </div>
 
       <div v-if="loading" class="skeleton-rows">
         <span v-for="n in 3" :key="n" class="skeleton-row" />
@@ -177,6 +198,9 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PhCaretDown, PhCaretLeft } from '@phosphor-icons/vue'
 import AppButton from '@renderer/components/AppButton.vue'
+import AppDropdown from '@renderer/components/AppDropdown.vue'
+import AppMenu from '@renderer/components/AppMenu.vue'
+import AppMenuItem from '@renderer/components/AppMenuItem.vue'
 import type { TeamHistory } from '@core/shared/teamProject'
 import { teamAPI } from '@renderer/api/team'
 import { useTeamStore } from '@renderer/store/modules/teamStore'
@@ -210,6 +234,29 @@ const restoring = ref(false)
 const now = ref(Date.now())
 
 const checkout = computed(() => teamStore.checkoutOf(props.path))
+const ETAS = ['30m', '1h', 'today', 'tomorrow'] as const
+const receivedAsk = computed(() => (props.path ? teamStore.receivedAsks[props.path] : undefined))
+
+/** [还在改 ▾]：回给问的人「小王：还在改，大概 1 小时。」 */
+async function answerStill(eta: string): Promise<void> {
+  const key = teamStore.key
+  const ask = receivedAsk.value
+  if (!key || !ask) return
+  const result = await teamAPI.answerAsk(key, ask.id, { kind: 'still-editing', eta })
+  if (!result.success) {
+    message.error(t('teamProject.dialogs.failed'))
+    return
+  }
+  forgetAsk()
+}
+
+function forgetAsk(): void {
+  const path = props.path
+  if (!path) return
+  const next = { ...teamStore.receivedAsks }
+  delete next[path]
+  teamStore.receivedAsks = next
+}
 /** 外包区里 `reference/Content/…` 对应的那次「发参考」（新的在前） */
 const reference = computed(() => {
   const plain = (props.path ?? '').replace(/^reference\//, '')
@@ -311,7 +358,17 @@ async function cancelCheckout(): Promise<void> {
   // 没改过：直接取消，不问
   const result = await teamAPI.cancelCheckout(key, path, false)
   if (!result.success) message.error(t('teamProject.dialogs.failed'))
+  else await answerReleased()
   void teamStore.loadCheckouts()
+}
+
+/** 有人在等这个文件：取消签出之后告诉服务端，服务端替他签出（「SK_Hero 已为你签出。」） */
+async function answerReleased(): Promise<void> {
+  const key = teamStore.key
+  const ask = receivedAsk.value
+  if (!key || !ask) return
+  await teamAPI.answerAsk(key, ask.id, { kind: 'released' })
+  forgetAsk()
 }
 
 /** [回到这一版]：和 UE 里的同一件事 —— 在你电脑上换好，提交后别人才拿到 */
@@ -365,7 +422,8 @@ async function restore(item: HistoryItem): Promise<void> {
   }
 }
 
-.checkout-row {
+.checkout-row,
+.ask-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

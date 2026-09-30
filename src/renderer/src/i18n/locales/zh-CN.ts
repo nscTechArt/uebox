@@ -8566,6 +8566,7 @@ export default {
       askedOffline: '已问{who}。他今天没上线。',
       requestTakeBack: '请管理员收回',
       escalated: '已告诉管理员（{admins}）。',
+      stillEditing: '还在改',
       askedRecently: '已问过（{ago}前）'
     },
     folder: {

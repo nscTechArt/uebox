@@ -6,12 +6,17 @@
  * 渲染层按码选界面方案里的文案。令牌从不出主进程。
  */
 import { BrowserWindow, Notification, ipcMain, shell } from 'electron'
-import { getTeamService, TEAM_EVENT_CHANNEL } from '../libraryV3'
+import { getCatalogService, getTeamService, TEAM_EVENT_CHANNEL } from '../libraryV3'
 import { CatalogServiceError } from '../libraryV3/catalogService'
 import { TeamApiError } from '../libraryV3/team/teamClient'
 import { TeamOpError } from '../libraryV3/team/teamOps'
 import { findMainWindow, sendToAppWindows } from '../appWindows'
-import { parseTeamJoinLink, type TeamEvent, type TeamJoinLink } from '../../shared/teamProject'
+import {
+  parseTeamJoinLink,
+  parseTeamOpenLink,
+  type TeamEvent,
+  type TeamJoinLink
+} from '../../shared/teamProject'
 
 type Result<T> = { success: true; data: T } | { success: false; error: string; errorCode: string }
 
@@ -43,19 +48,48 @@ const list = (value: unknown, max = 5000): string[] =>
 /** 盒子还没准备好时收到的邀请链接（冷启动带着 unrealbox://join 进来） */
 let pendingJoinLink: TeamJoinLink | null = null
 
-/** 主进程拿到 `unrealbox://…`：交给渲染层打开「加入团队」 */
-export function handleTeamDeepLink(raw: string): boolean {
-  const link = parseTeamJoinLink(raw)
-  if (!link) return false
-  pendingJoinLink = link
-  const event: TeamEvent = { kind: 'join-link', link }
-  sendToAppWindows(TEAM_EVENT_CHANNEL, event)
+function bringMainWindowForward(): void {
   const window = findMainWindow()
   if (window && !window.isDestroyed()) {
     if (window.isMinimized()) window.restore()
     window.show()
     window.focus()
   }
+}
+
+/**
+ * 主进程拿到 `unrealbox://…`：
+ * - `join`：交给渲染层打开「加入团队」（冷启动时先记着，渲染层起来再取）；
+ * - `open`：UE 里点提交号、[在虚幻盒子里看]、「选同步哪些文件夹…」—— 打开那个工程的那一页。
+ */
+export function handleTeamDeepLink(raw: string): boolean {
+  const link = parseTeamJoinLink(raw)
+  if (link) {
+    pendingJoinLink = link
+    const event: TeamEvent = { kind: 'join-link', link }
+    sendToAppWindows(TEAM_EVENT_CHANNEL, event)
+    bringMainWindowForward()
+    return true
+  }
+  const open = parseTeamOpenLink(raw)
+  if (!open) return false
+  void getCatalogService()
+    .listServers()
+    .then((servers) => {
+      const server = servers.find(
+        (candidate) => candidate.memberUrl?.replace(/\/+$/, '') === open.server
+      )
+      if (!server) return
+      const event: TeamEvent = {
+        kind: 'open',
+        serverId: server.id,
+        project: open.project,
+        path: open.path
+      }
+      sendToAppWindows(TEAM_EVENT_CHANNEL, event)
+      bringMainWindowForward()
+    })
+    .catch(() => undefined)
   return true
 }
 
@@ -109,8 +143,14 @@ export function registerTeamIPC(): void {
     run(() => team().inviteLink(text(key, 500)))
   )
   ipcMain.handle('team:startStreams', () => run(() => team().startAll()))
+  // 重新登录之后：通知流重连，交给 UE 的登录也换新
   ipcMain.handle('team:restartStream', (_event, serverId: string) =>
-    run(async () => team().startStream(text(serverId, 200)))
+    run(async () => {
+      team().startStream(text(serverId, 200))
+      void team()
+        .renewCredential(text(serverId, 200), true)
+        .catch(() => undefined)
+    })
   )
   ipcMain.handle('team:streamState', (_event, serverId: string) =>
     run(async () => team().streamState(text(serverId, 200)))

@@ -4,7 +4,7 @@
  * `https://host/join?p=…#ca=sha256:…`；指纹只取 64 位十六进制，别的都不认。
  */
 import { describe, expect, it } from 'vitest'
-import { parseTeamJoinLink } from './teamProject'
+import { parseTeamJoinLink, parseTeamOpenLink } from './teamProject'
 
 const CA = 'ba3d4ae23e2cd60cada98a6be8bd4bdbc076084818148ccc43b79e347a031acb'
 
@@ -37,5 +37,24 @@ describe('parseTeamJoinLink', () => {
 
   it('drops a malformed fingerprint instead of trusting it', () => {
     expect(parseTeamJoinLink('https://h/join?p=x#ca=sha256:abc')?.caFingerprint).toBeNull()
+  })
+})
+
+describe('parseTeamOpenLink', () => {
+  it('opens a page of a project from UE (submit number, inbox, sync folders)', () => {
+    const server = encodeURIComponent('http://127.0.0.1:47484')
+    expect(
+      parseTeamOpenLink(`unrealbox://open?server=${server}&path=/p/xinghai/submits/1532`)
+    ).toEqual({ server: 'http://127.0.0.1:47484', project: 'xinghai', path: '/p/xinghai/submits/1532' })
+    expect(
+      parseTeamOpenLink(`unrealbox://open?server=${server}&path=${encodeURIComponent('/p/xinghai/compare?from=1460&to=latest')}`)
+        ?.path
+    ).toBe('/p/xinghai/compare?from=1460&to=latest')
+  })
+
+  it('refuses paths outside a project and other schemes', () => {
+    expect(parseTeamOpenLink('unrealbox://open?server=http://h&path=/admin')).toBeNull()
+    expect(parseTeamOpenLink('https://h/p/xinghai')).toBeNull()
+    expect(parseTeamOpenLink('unrealbox://join?server=http://h&p=x')).toBeNull()
   })
 })
