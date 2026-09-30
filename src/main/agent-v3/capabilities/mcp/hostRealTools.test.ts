@@ -143,6 +143,9 @@ describe('外部客户端看到的是真实工具', () => {
     expect(names).toContain('task')
     expect(names).toContain('browser_open')
     expect(names).toContain('run_shell_command')
+    // 外部会话没有「当前知识库」，检索按全盒子范围给，存来源也在
+    expect(names).toContain('search_notebook_sources')
+    expect(names).toContain('add_notebook_source')
     // 没声明 elicitation 的客户端不给 ask_user —— 给了只会挂在那儿等
     expect(names).not.toContain('ask_user')
     expect(client.getInstructions()).toContain('You are the AI assistant inside Unreal Box')

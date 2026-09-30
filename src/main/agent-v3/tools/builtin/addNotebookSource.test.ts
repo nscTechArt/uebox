@@ -17,6 +17,7 @@ const createdSource = vi.fn()
 const createdNotebook = vi.fn()
 const indexed = vi.fn()
 const read = vi.fn()
+const listed = vi.fn((): Array<{ notebookId: string; title: string }> => [])
 
 vi.mock('../../../sqliteDataBase', () => ({ getPublicDatabase: () => ({ fake: true }) }))
 
@@ -28,7 +29,8 @@ vi.mock('../../../sqliteDataBase/models/notebook', () => ({
   createNotebookSource: (...args: unknown[]) => {
     createdSource(...args)
     return 'src-1'
-  }
+  },
+  listNotebooks: () => listed()
 }))
 
 vi.mock('../../../sqliteDataBase/services/notebookRagService', () => ({
@@ -245,5 +247,39 @@ describe('未绑定知识库', () => {
     await expect(run({ url: 'https://example.com/empty' }, null)).rejects.toThrow('正文为空')
     expect(createdNotebook).not.toHaveBeenCalled()
     expect(createdSource).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 外部 MCP 会话（全盒子范围）没有「当前知识库」。按标题存进已有的，
+ * 否则每存一条就多一个同名知识库。
+ */
+describe('全盒子范围', () => {
+  const allTool = (): ReturnType<typeof createAddNotebookSourceTool> =>
+    createAddNotebookSourceTool('all', sender)
+
+  it('notebookTitle 对上已有知识库（不分大小写）就存进去，不新建', async () => {
+    listed.mockReturnValue([{ notebookId: 'nb-old', title: 'Nanite 资料' }])
+
+    await allTool().execute('call-1', { title: 't', content: 'c', notebookTitle: 'nanite 资料' })
+
+    expect(createdNotebook).not.toHaveBeenCalled()
+    expect(createdSource).toHaveBeenCalledWith(
+      { fake: true },
+      expect.objectContaining({ notebookId: 'nb-old' })
+    )
+  })
+
+  it('没有同名的才新建', async () => {
+    listed.mockReturnValue([{ notebookId: 'nb-old', title: '别的库' }])
+
+    await allTool().execute('call-1', { title: 't', content: 'c', notebookTitle: '新库' })
+
+    expect(createdNotebook).toHaveBeenCalledWith({ fake: true }, { title: '新库' })
+  })
+
+  it('描述里教它用 notebookTitle 指定去处，而不是让用户去 /wiki 选', () => {
+    expect(allTool().description).toContain('已有同名的就存进那一个')
+    expect(allTool().description).not.toContain('/wiki')
   })
 })

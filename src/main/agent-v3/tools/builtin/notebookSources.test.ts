@@ -2,9 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const searchNotebookRag = vi.hoisted(() => vi.fn())
+const listNotebooks = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../sqliteDataBase', () => ({ getPublicDatabase: () => ({}) }))
 vi.mock('../../../sqliteDataBase/services/notebookRagService', () => ({ searchNotebookRag }))
+vi.mock('../../../sqliteDataBase/models/notebook', () => ({ listNotebooks }))
 
 const { createSearchNotebookSourcesTool } = await import('./notebookSources')
 
@@ -36,6 +38,7 @@ async function run(input: Record<string, unknown>): Promise<{ text: string; deta
 
 beforeEach(() => {
   searchNotebookRag.mockReset()
+  listNotebooks.mockReset()
 })
 
 describe('知识库检索工具', () => {
@@ -118,5 +121,74 @@ describe('知识库检索工具', () => {
 
   it('知识库标题写进描述，模型知道自己在查哪一个', () => {
     expect(tool.description).toContain('渲染资料')
+  })
+})
+
+/**
+ * 外部 MCP 会话没有「当前知识库」：默认搜全部，可按标题点一个。
+ */
+describe('全盒子范围的知识库检索', () => {
+  const all = createSearchNotebookSourcesTool('all')
+  const notebooks = [
+    { notebookId: 'nb1', title: '渲染资料' },
+    { notebookId: 'nb2', title: '策划案' }
+  ]
+
+  async function runAll(
+    input: Record<string, unknown>
+  ): Promise<{ text: string; details?: unknown }> {
+    const result = await all.execute('call-1', input)
+    return {
+      text: (result.content as Array<{ text?: string }>).map((part) => part.text ?? '').join('\n'),
+      details: result.details
+    }
+  }
+
+  it('工具名不变，参数里多一个可选的 notebook', () => {
+    expect(all.name).toBe('search_notebook_sources')
+    expect(all.unrealBox.risk).toBe('safe')
+    expect(JSON.stringify(all.parameters)).toContain('notebook')
+  })
+
+  it('不点名就每个库都查，片段标出自哪个库；按名次交错，大库挤不掉别的库的头名', async () => {
+    listNotebooks.mockReturnValue(notebooks)
+    searchNotebookRag.mockImplementation(async (_db: unknown, id: string) =>
+      id === 'nb1'
+        ? [hit({ sourceTitle: 'A1', distance: 0.3 }), hit({ sourceTitle: 'A2', distance: 0.1 })]
+        : [hit({ sourceTitle: 'B1', distance: 0.2 })]
+    )
+
+    const { text, details } = await runAll({ query: 'x' })
+
+    expect(searchNotebookRag).toHaveBeenCalledTimes(2)
+    expect((details as Array<{ source: string }>).map((d) => d.source)).toEqual(['B1', 'A1', 'A2'])
+    expect(text).toContain('渲染资料 · A1')
+    expect(text).toContain('策划案 · B1')
+  })
+
+  it('按标题点名（不分大小写）只查那一个', async () => {
+    listNotebooks.mockReturnValue([{ notebookId: 'nb3', title: 'Nanite Notes' }, ...notebooks])
+    searchNotebookRag.mockResolvedValue([hit()])
+
+    await runAll({ query: 'x', notebook: 'nanite notes' })
+
+    expect(searchNotebookRag).toHaveBeenCalledTimes(1)
+    expect(searchNotebookRag).toHaveBeenCalledWith({}, 'nb3', 'x', { limit: 8 })
+  })
+
+  it('点了不存在的库：报错并列出现有的，让模型改对', async () => {
+    listNotebooks.mockReturnValue(notebooks)
+
+    await expect(runAll({ query: 'x', notebook: '不存在' })).rejects.toThrow(/渲染资料.*策划案/)
+    expect(searchNotebookRag).not.toHaveBeenCalled()
+  })
+
+  it('一个知识库都没有：直说，不去空查', async () => {
+    listNotebooks.mockReturnValue([])
+
+    const { text } = await runAll({ query: 'x' })
+
+    expect(text).toContain('还没有建任何知识库')
+    expect(searchNotebookRag).not.toHaveBeenCalled()
   })
 })

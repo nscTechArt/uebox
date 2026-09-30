@@ -211,6 +211,7 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.mesh': '网格 几何 模型 mesh geometry model',
   'ue.cpp': '代码 编译 类 模块 c++ compile code module',
   'ue.input': '输入 按键 操作 映射 input action key mapping',
+  box: '盒子 对话记录 会话 状态 导入 卡住 续传 技能 开关 备份 box session status import skill backup',
   asset: '盒子素材库 保管库 标签 文件夹 asset library vault tag folder',
   library: '蓝图库 材质库 片段 收藏 snippet library',
   project:

@@ -32,7 +32,8 @@ import { createLocalFileTools } from './builtin/localFiles'
 import { createInspectUassetTool } from './builtin/inspectUasset'
 import { createLocalSearchTools } from './builtin/localSearch'
 import { createAddNotebookSourceTool } from './builtin/addNotebookSource'
-import { createSearchNotebookSourcesTool } from './builtin/notebookSources'
+import { createSearchNotebookSourcesTool, type NotebookScope } from './builtin/notebookSources'
+import { createBoxTools } from './builtin/box'
 import { createProjectListTool, createProjectWriteTool } from './adapted/project/splitByRisk'
 import { createOrganizeProjectsTool } from './adapted/project/organizeProjects'
 import { createLocalWriteTools, createShellTool } from './builtin/localShell'
@@ -777,6 +778,17 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     risk: 'safe',
     make: () => ueSystem.createInsightsTraceTool()
   },
+  /**
+   * ZenServer 只读诊断：命中率、占盘、登记的工程。直接问本机的 Zen HTTP 接口，
+   * 不经过插件，也不清理任何东西。Zen 随编辑器起停，所以照常跟着引擎连接走，
+   * 不进离线名单。
+   */
+  {
+    name: 'ue_zen_server',
+    namespace: 'ue.system',
+    risk: 'safe',
+    make: () => ueSystem.createZenServerTool()
+  },
   // 下面四个都能在引擎里执行任意代码 —— 一律按不可逆处理，auto-edit 下也要问
   {
     name: 'ue_run_console_command',
@@ -1145,6 +1157,10 @@ export function listToolRisks(): Record<string, ToolRisk> {
     table[tool.name] = tool.unrealBox.risk
   }
 
+  for (const tool of createBoxTools()) {
+    table[tool.name] = tool.unrealBox.risk
+  }
+
   for (const tool of projectPackageTools()) {
     table[tool.name] = tool.unrealBox.risk
   }
@@ -1241,8 +1257,9 @@ export interface BuildToolsDeps {
    *
    * 只有绑了才注册检索工具：没绑的会话给出这个工具，模型调了只能拿到
    * 一句「没有知识库」—— 那是白费一步，而且看上去像功能坏了。
+   * `'all'` 是全盒子范围（外部 MCP 会话），见 `NotebookScope`。
    */
-  notebook?: { id: string; title?: string }
+  notebook?: NotebookScope
 }
 
 let cache: UnrealAgentTool<never>[] | undefined
@@ -1327,7 +1344,10 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
     // 用户说「我装了个 MCP 你连一下」的时候，引擎往往还没开
     ...mcpTools,
     ...getLocalFileTools(),
-    // 检索只能搜当前绑定的知识库；存来源在未绑定时会新建知识库。
+    // 盒子本身：看盒子助手的对话、盒子状态，管技能 / 第三方 MCP / 导入 / 备份。
+    // 外部 MCP 客户端靠它看见盒子，见 builtin/box.ts
+    ...createBoxTools(),
+    // 检索只能搜当前绑定的知识库（外部会话是全部）；存来源在未绑定时会新建知识库。
     // 两者都不进 cache —— 每条会话绑的库不一样；存来源还需要 sender 通知界面刷新。
     ...((deps.notebook
       ? [createSearchNotebookSourcesTool(deps.notebook)]

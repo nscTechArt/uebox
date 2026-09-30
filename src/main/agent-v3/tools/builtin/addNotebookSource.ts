@@ -2,11 +2,16 @@ import type { WebContents } from 'electron'
 import { z } from 'zod'
 
 import { getPublicDatabase } from '../../../sqliteDataBase'
-import { createNotebook, createNotebookSource } from '../../../sqliteDataBase/models/notebook'
+import {
+  createNotebook,
+  createNotebookSource,
+  listNotebooks
+} from '../../../sqliteDataBase/models/notebook'
 import { indexNotebookRag } from '../../../sqliteDataBase/services/notebookRagService'
 import { readWebPageLocally } from '../../../services/webReader'
 import { checkNavigationUrl } from '../../../services/agentBrowser/urlPolicy'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
+import type { NotebookScope } from './notebookSources'
 
 /**
  * 把查到的东西存进当前知识库。
@@ -38,7 +43,9 @@ const input = z
     notebookTitle: z
       .string()
       .optional()
-      .describe('未绑定知识库时新建的知识库标题。不填就使用来源标题')
+      .describe(
+        '未绑定知识库时存到哪个知识库：外部会话里已有同名的就存进去，否则按这个标题新建。不填就使用来源标题'
+      )
   })
   .describe('要么给 url，要么给 title + content')
 
@@ -76,15 +83,27 @@ function withSynthesisHeader(content: string): string {
   )
 }
 
+/**
+ * @param scope 会话绑的知识库；没绑是 undefined；`'all'` 是没有「当前知识库」的外部 MCP 会话 ——
+ *              它按 `notebookTitle` 找已有的同名知识库存进去，找不到才新建。盒子里没绑的对话
+ *              仍然每次新建（那里要存进已有知识库，先让用户用 /wiki 选中）
+ */
 export function createAddNotebookSourceTool(
-  notebook: { id: string; title?: string } | undefined,
+  scope: NotebookScope | undefined,
   sender: WebContents
 ): UnrealAgentTool<AddedSource> {
+  const byTitle = scope === 'all'
+  const notebook = scope === 'all' ? undefined : scope
   const destination = notebook?.title
     ? `知识库「${notebook.title}」`
     : notebook
       ? '当前知识库'
-      : '一个新知识库'
+      : byTitle
+        ? '用户的知识库'
+        : '一个新知识库'
+  const whereTo = byTitle
+    ? '【放到哪里】用 notebookTitle 指定知识库标题：已有同名的就存进那一个，没有才新建。不填就按来源标题新建 —— 用户说了要放进哪个库时一定要填。'
+    : '【放到哪里】当前会话绑定了知识库就加到那里；没绑定就新建知识库，标题默认沿用来源标题，也可以传 notebookTitle。用户点名要加到某个已有知识库而当前没绑定时，先让他用 /wiki 选中，别新建一个同名副本。'
 
   return defineTool({
     name: 'add_notebook_source',
@@ -99,7 +118,7 @@ export function createAddNotebookSourceTool(
 - 存网页：只给 url。工具自己抓正文并提取，不需要你先 web_read（已经读过也没关系，重复抓一次不影响）。
 - 存你自己写的：给 title + content，比如把几篇材料的结论综述成一篇。这种要在正文里写清楚出处。
 
-【放到哪里】当前会话绑定了知识库就加到那里；没绑定就新建知识库，标题默认沿用来源标题，也可以传 notebookTitle。用户点名要加到某个已有知识库而当前没绑定时，先让他用 /wiki 选中，别新建一个同名副本。
+${whereTo}
 
 【存之前】先确认这一条值得存 —— 知识库是用户长期要用的资料，不是搜索结果的垃圾桶。
 存不进去的（要登录、纯前端渲染、抓不到正文）如实告诉用户，别改存一段你自己编的摘要糊过去。`,
@@ -138,10 +157,19 @@ export function createAddNotebookSourceTool(
         throw new Error('这一条没有标题。来源列表上显示的就是它，给一个说得清是什么的标题。')
       }
 
-      const createdNotebook = !notebook
-      const notebookTitle = notebook?.title || args.notebookTitle?.trim() || title
+      // 全库范围：同名（不分大小写）已有的就存进去，不造同名副本
+      const wantedTitle = args.notebookTitle?.trim()
+      const existing =
+        notebook ??
+        (byTitle && wantedTitle
+          ? listNotebooks(db, { limit: 500 })
+              .filter((nb) => nb.title.trim().toLowerCase() === wantedTitle.toLowerCase())
+              .map((nb) => ({ id: nb.notebookId, title: nb.title }))[0]
+          : undefined)
+      const createdNotebook = !existing
+      const notebookTitle = existing?.title || wantedTitle || title
       const notebookId =
-        notebook?.id ||
+        existing?.id ||
         createNotebook(db, {
           title: notebookTitle
         })

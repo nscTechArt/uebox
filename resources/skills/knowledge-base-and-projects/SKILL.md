@@ -1,6 +1,6 @@
 ---
 name: knowledge-base-and-projects
-description: Read and add sources to the user's knowledge base, list and create Unreal projects from templates, tidy the project library into collections, and import assets from the box's library into an Unreal project. Use when the user wants researched material saved to a knowledge base, wants to recall material from the bound knowledge base, wants their projects grouped, sorted or pinned on the home screen, or wants assets moved from their library into an Unreal project. Do not use for a standalone note: notes are an internal knowledge-base source type and have no separate user-facing entrance.
+description: Read and add sources to the user's knowledge base, list and create Unreal projects from templates, tidy the project library into collections, import assets from the box's library into an Unreal project, and check or manage the box itself (its assistant's past conversations, stuck imports, skills, third-party MCP servers, backups). Use when the user wants researched material saved to a knowledge base, wants to recall material from the bound knowledge base, wants their projects grouped, sorted or pinned on the home screen, or wants assets moved from their library into an Unreal project, or asks about the box itself ("盒子里刚才那个对话", "导入卡住了", "关掉这个技能"). Do not use for a standalone note: notes are an internal knowledge-base source type and have no separate user-facing entrance.
 ---
 
 # Knowledge base and projects
@@ -30,8 +30,13 @@ Knowledge-base tools use the knowledge base currently bound to the conversation 
 - `add_notebook_source` adds either a web page or a text source. If no knowledge base is bound, it
   creates a new one so the result still has a real user-facing home.
 
-If the user names an existing knowledge base but the conversation is not bound to it, tell them to
-type `/wiki` and choose that target before saving. Do not create a duplicate with the same name.
+Outside the box (a client connected over MCP) there is no bound knowledge base. There
+`search_notebook_sources` searches every knowledge base unless you pass `notebook` with a title, and
+`add_notebook_source` saves into the knowledge base whose title matches `notebookTitle`, creating
+one only when none matches — pass it whenever the user said where the material goes.
+
+Inside the box, if the user names an existing knowledge base but the conversation is not bound to
+it, tell them to type `/wiki` and choose that target before saving. Do not create a duplicate with the same name.
 Never fall back to a note, a local file, or the chat transcript.
 
 For a web source, give `add_notebook_source` its URL and let the tool fetch the page. For a report
@@ -131,6 +136,23 @@ filename still shows the original name in the engine. That is normal, not a fail
 `import_assets_to_scene` is the second exception: it places actors in the **currently open level**,
 so that project does have to be running. Say that plainly before doing it — the user may have a
 level open they did not expect to be modified.
+
+## The box itself
+
+`box_status` reads the box in one call: running Unreal editors, import tasks (including stuck ones
+waiting for a decision), third-party MCP servers and whether they connect, skills and whether each is
+on, knowledge bases, backups. Pass `sections` when you only need one part.
+
+`box_sessions` reads the box assistant's own conversations — `list`, then `read` one. Use it when the
+user refers to work done in the box ("盒子里刚才让它做的那个") or you are picking up where it stopped.
+It shows what was said and which tools ran, not the result on disk: re-read the engine or library
+before you tell the user what was changed.
+
+`box_manage` changes the box: `enable_skill` / `disable_skill`, `reconnect_mcp`, `remove_mcp_server`,
+`resume_import` / `abandon_import`, `reimport_asset` / `reimport_folder`, `backup_database`. Take the
+target from `box_status`, never guess it. `abandon_import` clears the server's staging area, so the
+import can no longer be resumed; say so before doing it. Restoring or deleting backups and changing
+the box's settings are not available — tell the user where to do it in the box.
 
 ## Pointing the user at a screen
 

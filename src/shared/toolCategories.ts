@@ -71,7 +71,8 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
       'web',
       'browser',
       'notebook',
-      'note'
+      'note',
+      'box'
     ]
   }
 ]

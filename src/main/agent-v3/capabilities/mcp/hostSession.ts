@@ -22,6 +22,8 @@
  *   - **没有 `set_session_project` / `voice_report`**：前者改的是盒子侧边栏里
  *     某条对话的归属，外部会话没有那条对话；后者要有人在听语音。
  *   - **工具搜索不折叠**：MCP 的工具清单一次给全，等同盒子的全量模式。
+ *   - **知识库是全盒子范围**：外部会话不在哪个知识库页面里，检索默认搜全部、可按标题点一个；
+ *     存来源按标题存进已有知识库，而不是每存一条新建一个。
  */
 
 import type { WebContents } from 'electron'
@@ -116,6 +118,7 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
     requestApproval: async () => 'approve',
     ...(request.elicit ? { requestQuestion: elicitQuestions(request.elicit) } : {}),
     sender: broadcastSender,
+    notebook: 'all',
     mcp
   }
 
