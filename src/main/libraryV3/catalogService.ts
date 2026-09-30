@@ -41,7 +41,7 @@ import {
   type CatalogUnclaimed,
   type CatalogWindow
 } from '../../shared/catalogLibrary'
-import type { CatalogTeamLink, TeamEvent } from '../../shared/teamProject'
+import { areaToProjectPath, type CatalogTeamLink, type TeamEvent } from '../../shared/teamProject'
 import type { TeamHost } from './team/teamService'
 import { CatalogConfigStore } from './configStore'
 import { diagnoseConnectError, targetOf } from './netDiagnose'
@@ -1961,7 +1961,10 @@ export class CatalogService {
             controller.signal.throwIfAborted()
             const local = locals[index]
             if (!local) continue
-            const destination = join(root, ...paths[index].split('/'))
+            // 外包区的参考 / 交付：放进 UE 工程时去掉 reference/ 或 delivery/N/ 这一层
+            const relative =
+              library.record.team?.role === 'outsourcer' ? areaToProjectPath(paths[index]) : paths[index]
+            const destination = join(root, ...relative.split('/'))
             const ext = extname(paths[index]).toLowerCase()
             if (ext === '.uasset' || ext === '.umap') {
               await this.options.copyPackage(local, destination)

@@ -372,6 +372,17 @@ export interface TeamFact {
   previewLarge: string | null
 }
 
+/**
+ * 外包区（契约 4.10）里的路径 → 工程里的路径：`reference/Content/…`、`delivery/7/Content/…`
+ * 下面的路径和工程里一致，放进 UE 工程时去掉这一层（「路径和团队工程保持一致」，方案 4.12）。
+ * 不在这两处下面的原样返回。
+ */
+export function areaToProjectPath(path: string): string {
+  // 只认下面接着 UE 工程目录的，别的库里恰好叫 reference 的文件夹不动
+  const match = /^(?:reference|delivery\/\d+)\/((?:Content|Config|Source|Plugins)\/.+)$/.exec(path)
+  return match ? match[1] : path
+}
+
 /** 本机记着的：这个库是哪个团队工程、你在里面是什么身份、工程在你电脑上的哪里 */
 export interface CatalogTeamLink {
   projectId: string

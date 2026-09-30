@@ -4,7 +4,7 @@
  * `https://host/join?p=…#ca=sha256:…`；指纹只取 64 位十六进制，别的都不认。
  */
 import { describe, expect, it } from 'vitest'
-import { parseTeamJoinLink, parseTeamOpenLink } from './teamProject'
+import { areaToProjectPath, parseTeamJoinLink, parseTeamOpenLink } from './teamProject'
 
 const CA = 'ba3d4ae23e2cd60cada98a6be8bd4bdbc076084818148ccc43b79e347a031acb'
 
@@ -56,5 +56,17 @@ describe('parseTeamOpenLink', () => {
     expect(parseTeamOpenLink('unrealbox://open?server=http://h&path=/admin')).toBeNull()
     expect(parseTeamOpenLink('https://h/p/xinghai')).toBeNull()
     expect(parseTeamOpenLink('unrealbox://join?server=http://h&p=x')).toBeNull()
+  })
+})
+
+describe('areaToProjectPath', () => {
+  it('drops the reference / delivery N layer of an outsourcing area', () => {
+    expect(areaToProjectPath('reference/Content/Env/M_Rock.uasset')).toBe('Content/Env/M_Rock.uasset')
+    expect(areaToProjectPath('delivery/7/Content/Env/Rocks/SM_Rock_11.uasset')).toBe(
+      'Content/Env/Rocks/SM_Rock_11.uasset'
+    )
+    expect(areaToProjectPath('Content/Env/M_Rock.uasset')).toBe('Content/Env/M_Rock.uasset')
+    expect(areaToProjectPath('delivery/x/Content/a.uasset')).toBe('delivery/x/Content/a.uasset')
+    expect(areaToProjectPath('reference/moodboard/a.png')).toBe('reference/moodboard/a.png')
   })
 })

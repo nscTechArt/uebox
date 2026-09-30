@@ -9,6 +9,7 @@
  */
 import { catalogLibraryAPI } from '@renderer/api/catalogLibrary'
 import i18n from '@renderer/i18n'
+import { areaToProjectPath } from '@core/shared/teamProject'
 import type {
   CatalogAssetDetail,
   CatalogAssetSummary,
@@ -187,7 +188,8 @@ export function assetIdOf(assetKey: string | undefined | null): number | null {
 
 /** 库内路径 → UE 包路径（不带 .Object 后缀） */
 export function softPathOf(path: string): string {
-  const withoutExt = path.replace(/\.(uasset|umap)$/i, '')
+  // 外包区里 reference/Content/… 和 delivery/7/Content/… 对应的是工程里的 /Game/…
+  const withoutExt = areaToProjectPath(path).replace(/\.(uasset|umap)$/i, '')
   const parts = withoutExt.split('/')
   if (parts[0] === 'Content') return `/Game/${parts.slice(1).join('/')}`
   const content = parts.indexOf('Content')
