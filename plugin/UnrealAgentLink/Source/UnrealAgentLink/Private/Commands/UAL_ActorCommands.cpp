@@ -260,28 +260,58 @@ static TSharedPtr<FJsonObject> UAL_SpawnSingleActorWithReason(const TSharedPtr<F
 	FVector Scale = FVector(1, 1, 1);
 	UAL_CommandUtils::ReadTransformFromItem(Item, Location, Rotation, Scale);
 
-	FActorSpawnParameters Params;
+	// 名字被占用时退让到 `_1`、`_2`……，而且**对象名和 label 都要避开**。
+	//
+	// 以前只避开对象名，label 却照旧设成调用方要的那个：场上出现两个都叫
+	// MyCube 的 Actor，返回里的 name（取 label）也还是 MyCube —— 调用方完全
+	// 看不出改过名，按名字回读查到的可能是原来那个。反过来，对象名空着而 label
+	// 被占（手动改过显示名的 Actor）时 SpawnActor 根本不会失败，只查对象名就漏了
+	auto IsTaken = [World](const FString& Candidate)
+	{
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->GetFName().ToString().Equals(Candidate, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+#if WITH_EDITOR
+			if (It->GetActorLabel().Equals(Candidate, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+#endif
+		}
+		return false;
+	};
+
+	FString FinalName = DesiredName;
+	int32 Suffix = 0;
 	if (!DesiredName.IsEmpty())
 	{
-		Params.Name = FName(*DesiredName);
-		// 使用 Required_ReturnNull 先尝试精确名称，失败后自动重试带后缀的名称
+		while (Suffix < 100 && IsTaken(FinalName))
+		{
+			FinalName = FString::Printf(TEXT("%s_%d"), *DesiredName, ++Suffix);
+		}
+	}
+
+	FActorSpawnParameters Params;
+	if (!FinalName.IsEmpty())
+	{
+		Params.Name = FName(*FinalName);
 		Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Required_ReturnNull;
 	}
 
 	const FTransform SpawnTransform(Rotation, Location);
 	AActor* Actor = World->SpawnActor(Resolved.SpawnClass, &SpawnTransform, Params);
-	
-	// 如果指定了名称但创建失败，尝试自动添加后缀
-	if (!Actor && !DesiredName.IsEmpty())
+
+	// 迭代器看不见已销毁、还没被 GC 的 Actor，它们仍占着对象名 —— 接着往后退让
+	while (!Actor && !DesiredName.IsEmpty() && Suffix < 100)
 	{
-		for (int32 Suffix = 1; Suffix <= 100 && !Actor; ++Suffix)
-		{
-			FString UniqueName = FString::Printf(TEXT("%s_%d"), *DesiredName, Suffix);
-			Params.Name = FName(*UniqueName);
-			Actor = World->SpawnActor(Resolved.SpawnClass, &SpawnTransform, Params);
-		}
+		FinalName = FString::Printf(TEXT("%s_%d"), *DesiredName, ++Suffix);
+		Params.Name = FName(*FinalName);
+		Actor = World->SpawnActor(Resolved.SpawnClass, &SpawnTransform, Params);
 	}
-	
+
 	if (!Actor)
 	{
 		OutFailReason = FString::Printf(TEXT("SpawnActor returned null for class %s"), *Resolved.SpawnClass->GetName());
@@ -309,14 +339,19 @@ static TSharedPtr<FJsonObject> UAL_SpawnSingleActorWithReason(const TSharedPtr<F
 	Actor->SetActorScale3D(Scale);
 #if WITH_EDITOR
 	Actor->Modify();
-	if (!DesiredName.IsEmpty())
+	if (!FinalName.IsEmpty())
 	{
-		Actor->SetActorLabel(DesiredName);
+		Actor->SetActorLabel(FinalName);
 	}
 #endif
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("name"), UAL_CommandUtils::GetActorFriendlyName(Actor));
+	if (!DesiredName.IsEmpty() && FinalName != DesiredName)
+	{
+		Data->SetStringField(TEXT("requested_name"), DesiredName);
+		Data->SetBoolField(TEXT("renamed"), true);
+	}
 	Data->SetStringField(TEXT("path"), Actor->GetPathName());
 	Data->SetStringField(TEXT("class"), Actor->GetClass()->GetName());
 	if (!AssetId.IsEmpty())

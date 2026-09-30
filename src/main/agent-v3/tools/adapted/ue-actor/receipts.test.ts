@@ -364,3 +364,36 @@ describe('ue_set_transform 回读', () => {
     expect(actors[0].location.z).toBe(480)
   })
 })
+
+describe('ue_spawn_actor 名字被占用', () => {
+  it('插件退让到 _1 时，回执点明改了名', async () => {
+    callRequest.mockResolvedValue({
+      count: 1,
+      created: [
+        {
+          name: 'MyCube_1',
+          requested_name: 'MyCube',
+          renamed: true,
+          path: '/Game/L.L:MyCube_1',
+          class: 'StaticMeshActor'
+        }
+      ]
+    })
+
+    const result = await run(createSpawnActorTool(), { asset_id: 'cube', name: 'MyCube' })
+
+    expect(result.success).toBe(true)
+    expect(String(result.message)).toContain('MyCube → MyCube_1')
+  })
+
+  it('没改名就不多说', async () => {
+    callRequest.mockResolvedValue({
+      count: 1,
+      created: [{ name: 'MyCube', path: '/Game/L.L:MyCube', class: 'StaticMeshActor' }]
+    })
+
+    const result = await run(createSpawnActorTool(), { asset_id: 'cube', name: 'MyCube' })
+
+    expect(String(result.message)).not.toContain('已被占用')
+  })
+})

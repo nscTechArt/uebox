@@ -170,6 +170,9 @@ interface SpawnActorV2Response extends WorldScopedResponse {
         path?: string
         type?: string
         asset_id?: string
+        /** 名字被占用、插件退让到 `_1` 这类名字时才有（新插件） */
+        requested_name?: string
+        renamed?: boolean
       })[]
     | null
   /** 没建出来的那几项（新插件才有）。老插件只在 created 里留 null，不给原因 */
@@ -200,6 +203,25 @@ function describePivotRisk(instances: SpawnActorNormalizedInstance[]): string {
     '位置看着不对（浮空/陷地/没对齐）就用 ue_set_transform 的 { snap_to_floor: true } 落地，' +
     '或 ue_get_actor 带 return_bounds: true 读 bounds_min / pivot_offset，不要按标称尺寸重算。'
   )
+}
+
+/**
+ * 名字被占用时插件会退让到 `MyCube_1`，这里把它说破。
+ *
+ * 不说的话模型会按自己要的那个名字去挪、去删 —— 碰到的是场上原来那个。
+ * 超时重试之后多出来的一份也靠这一句才看得出来。
+ */
+export function describeRenames(
+  created: Array<{ name?: string; requested_name?: string; renamed?: boolean } | null> | null | undefined
+): string {
+  const renamed = (created ?? []).filter(
+    (item): item is { name: string; requested_name: string } =>
+      Boolean(item?.renamed && item.requested_name && item.name)
+  )
+  if (renamed.length === 0) return ''
+  const pairs = renamed.map((item) => `${item.requested_name} → ${item.name}`).join('、')
+  return `
+名字已被占用，改用了新名字：${pairs}。后续按新名字操作。`
 }
 
 /**
@@ -670,7 +692,8 @@ ${UE_ROTATION_NOTE}`,
             describeWorld(response) +
             placement +
             orientation +
-            describePivotRisk(payload.instances)
+            describePivotRisk(payload.instances) +
+            describeRenames(created)
 
           return {
             // message 放第一个键：适配层把整个对象 JSON 化给模型，第一眼看到的就是它
