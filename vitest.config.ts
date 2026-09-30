@@ -160,7 +160,7 @@ export default defineConfig({
 
     // 设置文件
     setupFiles: ['./tests/setup.ts'],
-    // 只在主进程跑一次，理由见文件头（CI 上 sharp 首次画字的字体缓存）
+    // 只在主进程跑一次，理由见文件头（CI 上 sharp 首次画字、better-sqlite3 首次加载）
     globalSetup: ['./tests/globalSetup.ts'],
 
     // 默认门禁只输出终端摘要，详细报告由 test:reporter 显式生成。
