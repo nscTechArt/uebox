@@ -1156,9 +1156,7 @@ function openChat(id: string): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
   border-top: 1px solid var(--color-border-subtle);
-  min-height: 56px;
   transition: none;
   justify-content: space-between;
 }

@@ -59,7 +59,7 @@ function handleGoPreferences(): void {
   position: relative;
   flex: 1;
   min-width: 0;
-  min-height: 48px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   gap: var(--space-3);
