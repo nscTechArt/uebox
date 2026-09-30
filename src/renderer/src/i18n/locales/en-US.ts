@@ -1490,10 +1490,10 @@ First work out why the install failed from the output above. If you can run comm
   },
   catalogLibrary: {
     switcher: {
-      badge: 'Server',
+      badge: 'Team',
       state: {
         online: 'Connected',
-        offline: 'Cannot reach the server',
+        offline: "Can't reach the team",
         signedOut: 'Sign in again',
         unknown: 'Not connected'
       },
@@ -8586,5 +8586,454 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
   },
   deleteVaultModal: {
     systemNotDeletable: 'The system vault cannot be deleted'
+  },
+  /**
+   * Team projects (version control and asset collaboration). The Chinese copy follows the UI/UX
+   * design word for word; the English mirrors it with the same short, result-first wording.
+   */
+  teamProject: {
+    badge: 'Team',
+    rowWithCompany: '{project} · {company}',
+    state: {
+      online: 'Connected',
+      offline: "Can't reach the team",
+      signedOut: 'Sign in again'
+    },
+    menu: {
+      signIn: 'Sign in again',
+      copyInvite: 'Copy invite link',
+      remove: 'Remove from list'
+    },
+    inviteCopied: 'Invite link copied',
+    remove: {
+      title: 'Remove {name} from the list?',
+      body: 'Only removes it from Unreal Box. The project on your computer and your check-outs stay as they are.',
+      action: 'Remove'
+    },
+    cancel: 'Cancel',
+    retry: 'Retry',
+    listSep: ', ',
+    nameSep: ', ',
+    pathsMore: '{name} and {n} more',
+    join: {
+      cardTitle: 'Join a team',
+      cardDesc: "Sign in with your work account to open the team's projects and asset libraries",
+      title: 'Join a team',
+      link: 'Invite link',
+      linkPlaceholder: 'Paste the link your admin sent you',
+      account: 'Work account',
+      password: 'Password',
+      signIn: 'Sign in',
+      signingIn: 'Signing in…',
+      errors: {
+        credentials: 'Wrong account or password',
+        unreachable: "Can't reach the team. Check the network, or ask IT",
+        disabled: 'Your account is disabled. Ask IT',
+        badLink: "This link doesn't open. Ask your admin for a new one"
+      },
+      noProjects: "You haven't been added to any project yet",
+      sendAccount: 'Send your account to IT: {account}',
+      copyAccount: 'Copy account',
+      accountCopied: 'Account copied'
+    },
+    banner: {
+      offline: "Can't reach the team (since {time}). You're seeing it as it was then.",
+      viewingOld: 'Viewing {name} (#{number}), read-only.',
+      viewingNumber: 'Viewing #{number}, read-only.',
+      backToLatest: 'Back to latest',
+      frozen: 'Frozen: {note} · submits wait for an admin',
+      waiting: ' · {n} waiting',
+      unfreeze: 'Unfreeze',
+      notLocal: "This project isn't on your computer yet.",
+      syncToLocal: 'Sync to this computer',
+      ready: 'Done.',
+      openInUe: 'Open in UE'
+    },
+    sync: {
+      title: 'Sync {name} to this computer',
+      placeAt: 'Put it in',
+      choose: 'Choose a location',
+      size: 'About {size} · {free} left on {drive}',
+      free: '{free} left on {drive}',
+      notEnough: 'Not enough room on {drive}: {need} short.',
+      haveIt: 'Already have this project on your computer?',
+      pickIt: 'Choose it',
+      existing:
+        "Only downloads what differs. Files that differ from the team's are replaced, and yours are kept aside first.",
+      start: 'Start',
+      done: 'Done.'
+    },
+    putIn: {
+      empty: 'The project is still empty.',
+      emptyWait: 'The project is still empty. Waiting for an admin to put it in.',
+      action: 'Put in a project from this computer',
+      title: 'Put in {name}',
+      from: 'From',
+      pick: 'Choose the folder with the .uproject',
+      hint: "UE's own Saved, Intermediate and DerivedDataCache aren't uploaded.",
+      notProject: 'There is no .uproject in this folder.',
+      start: 'Start',
+      done: 'Done. Submitted as #{n}.',
+      doneNoNumber: 'Done.'
+    },
+    shortcuts: {
+      activity: 'Activity',
+      checkouts: 'Checked out',
+      inbox: 'Waiting on you'
+    },
+    outsource: {
+      title: 'Outsourcing',
+      reference: 'Reference',
+      delivery: 'Delivery',
+      deliveryN: 'Delivery {n}',
+      sendTo: 'Send to outsourcer',
+      deliverEmpty: 'Drag the assets to deliver here',
+      deliverEmptyHint: 'Keep the paths the same as in Reference so references stay intact',
+      deliverTitle: 'Deliver to {name}',
+      deliverGroup: '{folder}: {n}',
+      deliverMessage: 'Note',
+      deliverDefault: '{folder} ({n})',
+      deliver: 'Deliver',
+      state: {
+        uploading: 'Uploading {p}%',
+        waiting: 'Waiting for an admin',
+        done: 'Approved {a} · Returned {r}'
+      },
+      toolbar: 'Delivery {n} · {count} items',
+      approve: 'Approve',
+      approveAll: 'Approve all',
+      reject: 'Return',
+      missingRef: 'Missing reference: {name}',
+      rejectedTag: 'Returned',
+      rejectedDetail: 'Returned: {reason} · {who}',
+      skipped: 'Skipped {n}: {parts}.',
+      skippedMissing: '{n} missing references',
+      skippedHeld: '{n} checked out by {who}',
+      approvedDone: 'Approved {n}, submitted as #{number}.',
+      approvedDoneNoNumber: 'Approved {n}.',
+      fromCompany: 'From {company} · delivery {n}',
+      sentBy: '{who} · {time}',
+      approveEmpty: 'Everything in this batch is handled.'
+    },
+    tree: {
+      restricted: 'Only {people} can submit; other people’s submits wait for them',
+      sync: 'Sync to this computer',
+      unsync: "Don't sync to this computer",
+      pending: 'This folder has {n} changes not submitted yet. Submit them in UE first.'
+    },
+    reasons: {
+      cloudDrives: 'Cloud drives feed local libraries. Team project files are submitted from UE.',
+      import: 'To add files, put them in the project on your computer and submit in UE',
+      offline: "Can't reach the team"
+    },
+    grid: {
+      edited: 'Changed by {who} · {time}'
+    },
+    person: {
+      checkedOut: '{who} has it checked out ({duration})',
+      checkedOutState: '{who} has it checked out ({duration}, {state})',
+      youCheckedOut: 'You have it checked out ({duration})',
+      online: 'online',
+      notToday: 'not online today',
+      disabled: ' (disabled)'
+    },
+    duration: {
+      minutes: '{n} min',
+      hours: '{n} h',
+      days: '{n} days'
+    },
+    time: {
+      yesterday: 'Yesterday {time}',
+      weekday: '{day} {time}',
+      date: '{m}/{d}',
+      fullDate: '{m}/{d}/{y}',
+      days: {
+        0: 'Sun',
+        1: 'Mon',
+        2: 'Tue',
+        3: 'Wed',
+        4: 'Thu',
+        5: 'Fri',
+        6: 'Sat'
+      }
+    },
+    history: {
+      title: 'History',
+      askDone: 'Ask if done',
+      takeBack: 'Take back',
+      cancelCheckout: 'Cancel check-out',
+      checkout: 'Check out',
+      hoverVersion: '#{number} · {who} · {date}',
+      viewThis: 'View this version',
+      compareLatest: 'Compare with latest',
+      restore: 'Go back to this version',
+      restoreInUe: 'Go back to this version in UE',
+      heldBy: '{who} has it checked out',
+      offline: 'Connect to see history.',
+      none: 'Not submitted yet.',
+      restored:
+        '{name} now looks like #{n} (on your computer). Check it, then submit so others get it.',
+      compareStart: 'From',
+      compareEnd: 'To',
+      diffInUe: 'See the differences in UE',
+      openInUe: 'Open in UE',
+      moved: 'Moved to {path}',
+      latest: 'Latest',
+      back: 'Back'
+    },
+    ask: {
+      askedOnline: "Asked {who}. You'll hear back when they answer.",
+      askedOffline: "Asked {who}. They haven't been online today.",
+      requestTakeBack: 'Ask an admin to take it back',
+      escalated: 'Told the admins ({admins}).',
+      askedRecently: 'Asked ({ago} ago)'
+    },
+    folder: {
+      whoCanSubmit: 'Who can submit',
+      all: 'All members',
+      only: '{people} (others wait for them)',
+      modeInherit: 'Same as parent ({what})',
+      modeAll: 'All members',
+      modeOnly: 'Only these people',
+      pickPeople: 'Choose people',
+      othersWait: 'Other people’s submits wait for them',
+      save: 'Save',
+      saved: 'In effect. UE sees it right away.',
+      checksTitle: 'Checks before submitting',
+      rules: {
+        'name-prefix': 'Names start with a type prefix',
+        'texture-power-of-two': 'Texture sides are powers of two',
+        'texture-max-size': 'Textures are at most {max}',
+        'no-broken-references': 'No broken references',
+        'file-max-size': 'Each file is at most {size}'
+      },
+      levels: {
+        off: 'Off',
+        warn: 'Warn',
+        block: 'Block',
+        inherit: 'Same as parent ({level})'
+      },
+      checksFoot: 'Checked when submitting in UE and when outsourcers deliver.',
+      prefixTypes: {
+        Texture2D: 'Texture',
+        Material: 'Material',
+        MaterialInstanceConstant: 'Material instance',
+        StaticMesh: 'Static mesh',
+        SkeletalMesh: 'Skeletal mesh',
+        Blueprint: 'Blueprint',
+        NiagaraSystem: 'Niagara'
+      },
+      addPrefix: 'Add a row',
+      maxSide: 'Texture side limit',
+      maxFile: 'File size limit (GB)'
+    },
+    activity: {
+      summary: '{period}: {n} submits',
+      periods: {
+        week: 'This week',
+        lastWeek: 'Last week',
+        month: 'This month'
+      },
+      freeze: 'Freeze',
+      longCheckouts: 'Checked out over 3 days: ',
+      longItem: '{who} {label} ({duration})',
+      longMore: 'and {n} more',
+      who: 'Who',
+      everyone: 'Everyone',
+      folder: 'Folder',
+      allFolders: 'All folders',
+      onlyMilestones: 'Milestones only',
+      compare: 'Compare',
+      today: 'Today',
+      yesterday: 'Yesterday',
+      empty: 'No one submitted in this period.',
+      error: "Couldn't load activity.",
+      offline: "Can't reach the team. This is the activity before {time}.",
+      searchPlaceholder: 'Submit number, note, person or file name',
+      loadMore: 'Earlier'
+    },
+    card: {
+      added: 'Added {n}',
+      modified: 'Changed {n}',
+      deleted: 'Deleted {n}',
+      actionAdded: 'Added',
+      actionModified: 'Changed',
+      actionDeleted: 'Deleted',
+      actionMoved: 'Changed',
+      waitingAdmins: 'Waiting for an admin',
+      waitingPeople: 'Waiting for {people}',
+      rejected: 'Returned: {reason} · {who}',
+      built: 'In build {machine}',
+      builtHover: 'The {machine} build of {time} includes it',
+      approve: 'Approve',
+      reject: 'Return',
+      copyLink: 'Copy link',
+      compareFrom: 'Compare from here',
+      comparePrevMilestone: 'Compare with previous milestone',
+      setMilestone: 'Set as milestone',
+      rename: 'Rename',
+      removeMilestone: 'Remove milestone',
+      milestoneBy: 'Set by {who} on {date}',
+      submitNo: 'Submit number {n}',
+      copied: 'Copied #{n}',
+      approved: '#{n} approved.',
+      removedMilestone: 'Removed {name}. #{n} is unchanged.',
+      linkCopied: 'Link copied',
+      more: '+{n}',
+      ofpa: '{map} · {n} actors',
+      filesFolded: '{folder}: {n}'
+    },
+    dialogs: {
+      milestoneTitle: 'Set #{n} as a milestone?',
+      milestoneName: 'Name',
+      milestonePlaceholder: 'For example: M3 review build',
+      setMilestone: 'Set as milestone',
+      renameTitle: 'Rename',
+      rename: 'Rename',
+      nameTaken: 'That name is already used.',
+      freezeTitle: 'Freeze {name}?',
+      freezeBody:
+        "While frozen, everyone's submits except admins and build machines wait for an admin.",
+      freezeNote: 'Note (everyone sees it)',
+      freezePlaceholder: 'For example: M3 review, unfreezes Friday 18:00',
+      freeze: 'Freeze',
+      unfreezeTitle: 'Unfreeze {name}?',
+      unfreezeBody:
+        'After unfreezing, submits land directly. The {n} waiting still need approving or returning.',
+      unfreeze: 'Unfreeze',
+      unfrozen: 'Unfrozen.',
+      rejectTitle: 'Return #{n}?',
+      rejectAssetsTitle: 'Return {n} assets?',
+      reason: 'Reason (they will see it)',
+      reject: 'Return',
+      takeBackTitle: "Take back {who}'s check-out?",
+      takeBackAllTitle: "Take back {who}'s {n} check-outs?",
+      takeBackBody:
+        'Their unsubmitted changes stay on their computer. Nothing is lost. Others can check it out afterwards.',
+      takeBackReason: 'Say why (optional)',
+      takeBack: 'Take back',
+      takenBack: 'Taken back. {who} will be told.',
+      sendTitle: 'Send to {company}?',
+      sendNote: 'What changed (they will see it)',
+      send: 'Send',
+      sent: 'Sent to {company}.',
+      cancelCheckoutTitle: 'Cancel check-out of {name}?',
+      cancelCheckoutBody:
+        "You changed it. Changes you don't keep are saved on your computer first; you can get them back from history.",
+      keepChanges: 'Keep changes',
+      discardChanges: 'Discard changes',
+      notAllowed: "Your role can't do this.",
+      failed: "That didn't work. Try again."
+    },
+    compare: {
+      title: 'Compare',
+      from: 'From',
+      to: 'to',
+      latest: 'Latest',
+      earlier: 'Earlier',
+      byNumber: 'By submit number…',
+      byNumberPlaceholder: '#1496',
+      recent: 'Recent submits',
+      summary: '{submits} submits',
+      milestoneTitle: '{from} → {to}: {n} submits',
+      files: 'Files',
+      submits: 'Submits',
+      fileRow: '{action} · #{n} {who}',
+      stuck: 'Still no idea what caused it?',
+      bisect: 'Find which submit broke it',
+      swapped: 'Put in order.',
+      noSuch: 'There is no submit #{n}.',
+      empty: 'Nothing changed between these two.',
+      incomplete: "A submit in this range is too large; its files aren't listed one by one."
+    },
+    bisect: {
+      title: 'Find which submit broke it',
+      startLine: '#{good} is good · #{bad} is bad · {n} submits between, about {rounds} rounds',
+      start: 'Start',
+      tryThis: 'Try this: #{n}',
+      copyNumber: 'Copy number',
+      inUe: 'In UE: Sync ▾ → By submit number…',
+      buildCmd: 'Build machine command',
+      copy: 'Copy',
+      copied: 'Copied',
+      good: 'Good',
+      bad: 'Bad',
+      skip: 'Skip',
+      undo: 'Back',
+      stop: 'Stop looking',
+      progress: 'Round {round} · about {left} left',
+      found: 'It was #{n}: {who} · {message}',
+      ambiguous: "Narrowed to #{from}–#{to}; can't tell which one.",
+      copyLink: 'Copy link'
+    },
+    checkouts: {
+      groupTitle: '{who} · {n}',
+      oldest: 'oldest {duration}',
+      takeBackAll: 'Take back all',
+      empty: 'Nobody has anything checked out.',
+      mapCard: '{map} · {n} pieces'
+    },
+    inbox: {
+      approvals: 'Waiting for your approval',
+      takeBack: 'Asked to take back',
+      deliveryRow: '{company} · delivery {n} · {count} items · {time}',
+      goSee: 'Open',
+      takeBackRow: '{asker} wants {label} · {holder}',
+      allDone: 'All handled.'
+    },
+    deleted: {
+      subtitle: 'Deleted by {who} · {time} · #{n}',
+      restore: 'Restore',
+      restoreInUe: 'Restore in UE',
+      empty: 'Nothing was deleted in the last 30 days.',
+      restored: '{name} is back on your computer. Submit in UE so others get it.'
+    },
+    check: {
+      setBy: ' (set by {who})',
+      namePrefix: '{name} should start with {prefix}.',
+      powerOfTwo: "{name}'s sides aren't powers of two.",
+      maxSize: '{name} is {value}; the limit is {max}{setBy}.',
+      brokenRefs: 'Missing references: {refs}',
+      fileSize: '{name} is larger than {max}.'
+    },
+    notify: {
+      askReceived: '{who} wants to change {name}. Are you done with it?',
+      askSubmitted: '{who} submitted {name}.',
+      askReleased: '{who} cancelled the check-out; {name} is checked out to you.',
+      askStill: '{who}: still working, about {eta}.',
+      eta: {
+        '30m': '30 minutes',
+        '1h': '1 hour',
+        today: 'end of today',
+        tomorrow: 'tomorrow'
+      },
+      inbox: '{n} thing waiting on you.',
+      takenBack:
+        '{who} took back your check-out of {name}. Your changes are still on your computer.',
+      takenBackReason:
+        '{who} took back your check-out of {name}: {reason}. Your changes are still on your computer.',
+      assigned: '{name} is checked out to you.',
+      approved: '#{n} approved. Check-out cancelled.',
+      rejected:
+        '#{n} returned by {who}: {reason}. Your changes are still on your computer; fix and submit again.',
+      conflict:
+        "#{n} doesn't merge with someone else's change. Your changes are still on your computer; fix and submit again.",
+      freezeStarted: 'Frozen: {note}. Submits from now on wait for an admin.',
+      freezeEnded: 'Unfrozen.',
+      bisectDone: 'Found it: #{n}.',
+      deliveryDecided: 'Delivery {n}: approved {a}, returned {r}.',
+      syncDone: 'Done.'
+    },
+    versions: {
+      latest: 'Latest',
+      mainline: 'Mainline'
+    },
+    jobs: {
+      sync: 'Sync {name} to this computer',
+      'put-in': 'Put in {name}',
+      deliver: 'Delivery {name} · uploading',
+      approve: 'Approve delivery {name}',
+      reference: 'Send to {name}'
+    }
   }
 }

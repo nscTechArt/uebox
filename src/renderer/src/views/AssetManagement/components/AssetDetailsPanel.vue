@@ -37,8 +37,19 @@
               <span>{{ $t('assetDetailsPanel.preview.dropToSetThumbnail') }}</span>
             </div>
           </div>
+          <!-- 团队工程 · 和最新对比：预览区变成「起点 / 终点」左右两张图（方案 4.6） -->
+          <div v-if="teamCompare" class="preview-box team-compare">
+            <figure>
+              <img v-if="teamCompare.from" :src="teamCompare.from" alt="" />
+              <figcaption>{{ $t('teamProject.history.compareStart') }}</figcaption>
+            </figure>
+            <figure>
+              <img v-if="teamCompare.to" :src="teamCompare.to" alt="" />
+              <figcaption>{{ $t('teamProject.history.compareEnd') }}</figcaption>
+            </figure>
+          </div>
           <!-- 统一预览逻辑：如果有预览图（customPoster 或 缩略图），优先显示图片 -->
-          <div v-if="previewUrl" class="preview-box has-image" @click="handlePreviewImage">
+          <div v-else-if="previewUrl" class="preview-box has-image" @click="handlePreviewImage">
             <video
               v-if="isPreviewVideo"
               ref="previewVideoRef"
@@ -141,6 +152,14 @@
           {{ asset?.fileSize != null ? formatFileSize(asset.fileSize) : '—' }}
         </div>
       </div>
+
+      <!-- 团队工程：「历史」段插在预览下面（方案 4.6） -->
+      <TeamHistorySection
+        v-if="libraryCaps.team"
+        :path="teamAssetPath"
+        @preview="teamPreview = $event"
+        @compare="teamCompare = $event"
+      />
 
       <!-- UE5 资产特殊信息 -->
       <div v-if="isUAssetFile" class="inspector-group ue-asset-info">
@@ -637,8 +656,14 @@
         </div>
       </div>
 
+      <!-- 团队工程：谁能提交、提交前检查；外包的交付状态（方案 4.7、4.12） -->
+      <TeamFolderRules v-if="libraryCaps.team" :folder-key="folder.key" />
+
       <!-- 文件夹标签容器（服务器库的文件夹只存颜色，没有标签和备注） -->
-      <p v-if="libraryCaps.tagModel !== 'registry'" class="capability-reason folder-reason">
+      <p
+        v-if="libraryCaps.tagModel !== 'registry' && !libraryCaps.team"
+        class="capability-reason folder-reason"
+      >
         {{ $t('catalogLibrary.reasons.folderAnnotations') }}
       </p>
       <div v-else class="inspector-group tag-container">
@@ -810,6 +835,8 @@ import { ensureFFmpeg } from '@renderer/utils/ffmpegGuard'
 import { resolveErrorText } from '../utils/assetVaultHelpers'
 import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
 import { getActiveLibrarySource } from '../data/activeLibrarySource'
+import TeamHistorySection from '../team/TeamHistorySection.vue'
+import TeamFolderRules from '../team/TeamFolderRules.vue'
 
 const props = defineProps<{
   visible?: boolean
@@ -1566,7 +1593,20 @@ const getThumbnailBasePath = (): string | undefined => {
   return vault.path
 }
 
+/** 团队工程：悬停历史条时临时换成那一版的图；[和最新对比] 时左右两张 */
+const teamPreview = ref<string | null>(null)
+const teamCompare = ref<{ from: string | null; to: string | null } | null>(null)
+const teamAssetPath = computed(() => {
+  const path = (props.asset as { catalogPath?: unknown } | null | undefined)?.catalogPath
+  return typeof path === 'string' ? path : null
+})
+watch(teamAssetPath, () => {
+  teamPreview.value = null
+  teamCompare.value = null
+})
+
 const previewUrl = computed(() => {
+  if (teamPreview.value) return teamPreview.value
   const displayAsset = props.asset
   if (!displayAsset) return undefined
   // 数据源直接给了地址（服务器库：uebox-preview://）
@@ -2910,6 +2950,31 @@ const handleOpenDependencyGraph = () => {
     height: 3px;
     border-radius: 0 0 var(--radius-sm) var(--radius-sm);
     z-index: 2;
+  }
+}
+
+.preview-box.team-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+
+  figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: contain;
+  }
+
+  figcaption {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
   }
 }
 

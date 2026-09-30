@@ -1761,6 +1761,51 @@ const api = {
     }
   },
   /**
+   * 团队工程（版本控制与资产协作）。通道全部是 team:*，
+   * 返回 { success, data?, error?, errorCode? }；令牌从不经过这里。
+   * `call` 只认主进程路由表里有名字的动作（src/main/libraryV3/team/teamOps.ts）。
+   */
+  team: {
+    join: (input: unknown) => ipcRenderer.invoke('team:join', input),
+    peek: (link: unknown) => ipcRenderer.invoke('team:peek', link),
+    parseLink: (raw: string) => ipcRenderer.invoke('team:parseLink', raw),
+    pendingJoinLink: () => ipcRenderer.invoke('team:pendingJoinLink'),
+    call: (key: string, op: string, args?: unknown) =>
+      ipcRenderer.invoke('team:call', key, op, args ?? {}),
+    facts: (key: string, hashes: string[], library?: string | null) =>
+      ipcRenderer.invoke('team:facts', key, hashes, library ?? null),
+    inviteLink: (key: string) => ipcRenderer.invoke('team:inviteLink', key),
+    startStreams: () => ipcRenderer.invoke('team:startStreams'),
+    restartStream: (serverId: string) => ipcRenderer.invoke('team:restartStream', serverId),
+    streamState: (serverId: string) => ipcRenderer.invoke('team:streamState', serverId),
+    localInfo: (key: string) => ipcRenderer.invoke('team:localInfo', key),
+    freeSpace: (path: string) => ipcRenderer.invoke('team:freeSpace', path),
+    inspectFolder: (path: string) => ipcRenderer.invoke('team:inspectFolder', path),
+    syncToLocal: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:syncToLocal', key, input),
+    putIn: (key: string, input: unknown) => ipcRenderer.invoke('team:putIn', key, input),
+    setFolderSynced: (key: string, folder: string, synced: boolean) =>
+      ipcRenderer.invoke('team:setFolderSynced', key, folder, synced),
+    restore: (key: string, input: unknown) => ipcRenderer.invoke('team:restore', key, input),
+    isModified: (key: string, path: string) => ipcRenderer.invoke('team:isModified', key, path),
+    cancelCheckout: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:cancelCheckout', key, input),
+    deliver: (key: string, input: unknown) => ipcRenderer.invoke('team:deliver', key, input),
+    approveDelivery: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:approveDelivery', key, input),
+    sendReference: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:sendReference', key, input),
+    openPath: (path: string) => ipcRenderer.invoke('team:openPath', path),
+    notify: (input: unknown) => ipcRenderer.invoke('team:notify', input),
+    onEvent: (listener: (event: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, event: unknown): void => listener(event)
+      ipcRenderer.on('team:event', handler)
+      return () => {
+        ipcRenderer.removeListener('team:event', handler)
+      }
+    }
+  },
+  /**
    * 通用事件监听器 - 监听主进程发送的事件
    */
   on: (channel: string, listener: (...args: any[]) => void) => {

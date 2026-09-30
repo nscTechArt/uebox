@@ -45,7 +45,8 @@ export const LOCAL_CAPABILITIES: LibraryCapabilities = {
     engine: false,
     tagMode: 'full'
   },
-  reasons: {}
+  reasons: {},
+  team: null
 }
 
 async function invokeSearch<T>(channel: string, payload: unknown): Promise<T[]> {

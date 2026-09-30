@@ -10,6 +10,7 @@
  * 只有 `previewUrl` 是主进程加的：把服务端的签名预览地址改写成本机
  * `uebox-preview://` 协议地址，渲染层不直接连服务端。
  */
+import type { CatalogTeamLink } from './teamProject'
 
 /** 连接服务端时信任谁的证书 */
 export type CatalogTrust =
@@ -60,6 +61,8 @@ export interface CatalogLibraryRecord {
   libraryId: string
   name: string
   addedAt: number
+  /** 这个库是某个团队工程（加入团队时写上）；普通服务器库没有 */
+  team?: CatalogTeamLink | null
 }
 
 /** 渲染层看到的服务器信息 —— 不含任何令牌 */
@@ -257,7 +260,13 @@ export type CatalogLibraryEvent =
 
 export interface CatalogJobProgress {
   jobId: string
-  type: 'import' | 'download'
+  /**
+   * import / download：服务器库的导入和取回。其余是团队工程的：
+   * sync 同步到本机、put-in 放入、deliver 外包交付、approve 通过交付、reference 发参考
+   */
+  type: 'import' | 'download' | 'sync' | 'put-in' | 'deliver' | 'approve' | 'reference'
+  /** 进度挂件上那一行的对象（工程名、「交付 7」的 7、外包公司名） */
+  label?: string | null
   phase:
     | 'preparing'
     | 'syncing'

@@ -16,6 +16,7 @@ if (process.platform === 'win32') {
 process.env.UV_THREADPOOL_SIZE = '16'
 
 import { app, BrowserWindow, dialog, ipcMain, Tray, Menu, protocol, screen } from 'electron'
+import { handleTeamDeepLink, teamDeepLinkFromArgv } from './ipc/team'
 import { join } from 'path'
 import os from 'os'
 import { existsSync, readdirSync } from 'fs'
@@ -394,7 +395,10 @@ function setupSingleInstanceLock(): boolean {
   }
 
   // 监听第二实例启动事件，将已有窗口置前
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    // 邀请链接「用虚幻盒子打开」：unrealbox://join?… 作为第二实例的参数进来
+    const teamLink = teamDeepLinkFromArgv(argv)
+    if (teamLink && handleTeamDeepLink(teamLink)) return
     // 找到主窗口。判据在 appWindows.ts —— 那里会先把 Agent 浏览器窗口
     // （1280×820，正好落在这条尺寸判据里）摘出去，否则用户双击图标
     // 唤起的会是一个网页
@@ -708,6 +712,19 @@ appReady?.then(async () => {
 
     // 编辑器崩溃看门人：认出崩溃、关掉崩溃报告窗口、重开工程，并告诉等着的 agent
     startEditorCrashWatch()
+
+    // 团队工程：邀请链接「用虚幻盒子打开」。只有安装版登记这个协议 —— 开发时登记的会是
+    // 这份源码的 electron.exe，把本机其他人装的盒子顶掉
+    if (app.isPackaged && !app.isDefaultProtocolClient('unrealbox'))
+      app.setAsDefaultProtocolClient('unrealbox')
+    const coldTeamLink = teamDeepLinkFromArgv(process.argv)
+    if (coldTeamLink) handleTeamDeepLink(coldTeamLink)
+    // 加入过团队的：托盘连上通知流（问他改完没、通过 / 打回、冻结……）。没加入过就什么都不做
+    setTimeout(() => {
+      void import('./libraryV3')
+        .then((module) => module.getTeamService().startAll())
+        .catch((e) => logger.warn('[team] 通知流启动失败:', e))
+    }, 4000)
 
     // 初始化自动更新服务（仅在非开发环境或明确启用时）
     if (!is.dev || process.env.ENABLE_AUTO_UPDATE === 'true') {

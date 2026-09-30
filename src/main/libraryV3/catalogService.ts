@@ -41,6 +41,8 @@ import {
   type CatalogUnclaimed,
   type CatalogWindow
 } from '../../shared/catalogLibrary'
+import type { CatalogTeamLink, TeamEvent } from '../../shared/teamProject'
+import type { TeamHost } from './team/teamService'
 import { CatalogConfigStore } from './configStore'
 import { diagnoseConnectError, targetOf } from './netDiagnose'
 import { DiskLru } from './diskLru'
@@ -79,6 +81,8 @@ interface ServerRuntime {
   record: CatalogServerRecord
   catalog: CatalogHttp
   member: CatalogHttp | null
+  /** 带身份令牌的成员面（团队工程的动态、签出……）；团队服务器才有 */
+  memberAuthed: CatalogHttp | null
   session: CatalogSession
   events: ServerEvents | null
 }
@@ -220,7 +224,10 @@ export class CatalogService {
       record.trust,
       async () => await session.identityToken()
     )
-    return { record, catalog, member, session, events: null }
+    const memberAuthed = record.memberUrl
+      ? new CatalogHttp(record.memberUrl, record.trust, async () => await session.identityToken())
+      : null
+    return { record, catalog, member, memberAuthed, session, events: null }
   }
 
   private createLibraryRuntime(record: CatalogLibraryRecord): LibraryRuntime {
@@ -528,6 +535,7 @@ export class CatalogService {
     const previous = this.servers.get(id)
     previous?.events?.stop()
     previous?.catalog.destroy()
+    previous?.memberAuthed?.destroy()
     const runtime = this.createServerRuntime(
       record,
       (wellKnown?.auth as WellKnownAuth | undefined) ?? null
@@ -592,7 +600,7 @@ export class CatalogService {
 
   async addLibraries(
     serverId: string,
-    libraries: Array<{ id: string; name: string }>
+    libraries: Array<{ id: string; name: string; team?: CatalogTeamLink | null }>
   ): Promise<CatalogLibraryView[]> {
     await this.ensureLoaded()
     if (!this.servers.has(serverId))
@@ -600,16 +608,34 @@ export class CatalogService {
     await this.config.update((next) => {
       for (const library of libraries) {
         const key = catalogLibraryKey(serverId, library.id)
-        if (next.libraries.some((existing) => existing.key === key)) continue
+        const existing = next.libraries.find((candidate) => candidate.key === key)
+        if (existing) {
+          // 重新加入：身份、公司可能变了；本机位置和同步哪些留着
+          if (library.team)
+            existing.team = {
+              ...library.team,
+              localPath: existing.team?.localPath ?? null,
+              unsynced: existing.team?.unsynced ?? []
+            }
+          continue
+        }
         next.libraries.push({
           key,
           serverId,
           libraryId: library.id,
           name: library.name || library.id,
-          addedAt: this.now()
+          addedAt: this.now(),
+          ...(library.team ? { team: library.team } : {})
         })
       }
     })
+    for (const library of libraries) {
+      const runtime = this.libraries.get(catalogLibraryKey(serverId, library.id))
+      if (runtime && library.team)
+        runtime.record.team = (await this.config.read()).libraries.find(
+          (candidate) => candidate.key === runtime.record.key
+        )?.team
+    }
     await this.ensureLoaded()
     return await this.listLibraries()
   }
@@ -2070,6 +2096,71 @@ export class CatalogService {
     }
   }
 
+  // ---------------------------------------------------------------- team projects
+
+  /** 团队工程的本机记录（身份、位置、同步哪些）改了 */
+  async updateTeamLink(key: string, patch: Partial<CatalogTeamLink>): Promise<void> {
+    await this.ensureLoaded()
+    await this.config.update((next) => {
+      const record = next.libraries.find((candidate) => candidate.key === key)
+      if (record?.team) record.team = { ...record.team, ...patch }
+    })
+    const runtime = this.libraries.get(key)
+    if (runtime?.record.team) runtime.record.team = { ...runtime.record.team, ...patch }
+  }
+
+  /** 给团队门面用的那几样（见 team/teamService.ts 的 TeamHost） */
+  teamHost(emitTeam: (event: TeamEvent) => void): TeamHost {
+    return {
+      libraries: async () => {
+        await this.ensureLoaded()
+        return (await this.config.read()).libraries
+      },
+      record: async (key) => {
+        await this.ensureLoaded()
+        const record = (await this.config.read()).libraries.find(
+          (candidate) => candidate.key === key
+        )
+        if (!record) throw new CatalogServiceError('unknown-library', 'Unknown library')
+        return record
+      },
+      memberHttp: async (serverId) => {
+        const runtime = await this.server(serverId)
+        if (!runtime.memberAuthed)
+          throw new CatalogServiceError('no-member-surface', 'This server has no team service')
+        return runtime.memberAuthed
+      },
+      catalogJson: async (serverId, path, options) => {
+        const runtime = await this.server(serverId)
+        return await runtime.catalog.json(path, { method: options?.method, body: options?.body })
+      },
+      previewUrl: (key, signed) => previewProtocolUrl(key, signed),
+      loreRemote: async (serverId) => (await this.server(serverId)).record.loreRemote,
+      loreContext: async (serverId, signal) =>
+        await this.loreContext(await this.server(serverId), signal),
+      shadows: this.shadows,
+      emitJob: (key, job) => this.emitJob(key, job),
+      emitTeam,
+      connect: async (input) => await this.connect(input),
+      addLibraries: async (serverId, libraries) => {
+        await this.addLibraries(serverId, libraries)
+      },
+      updateTeamLink: async (key, patch) => await this.updateTeamLink(key, patch),
+      invalidate: (key) => {
+        const library = this.libraries.get(key)
+        if (library) this.invalidate(library, 'all', 'local-write')
+      },
+      rootFolders: async (key) => (await this.folders(key, 0)).items.map((folder) => folder.name),
+      signedIn: async (serverId) => await (await this.server(serverId)).session.signedIn(),
+      anonymousHttp: async (server, caFingerprint) => {
+        const probe = await this.probe(server, caFingerprint)
+        if (probe.error || !probe.trust)
+          throw new CatalogServiceError(probe.error ?? 'untrusted-certificate', probe.error ?? '')
+        return new CatalogHttp(probe.url, probe.trust)
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- active library (UI preference)
 
   async getActive(): Promise<string | null> {
@@ -2104,6 +2195,7 @@ export class CatalogService {
     for (const server of this.servers.values()) {
       server.events?.stop()
       server.catalog.destroy()
+      server.memberAuthed?.destroy()
     }
   }
 }

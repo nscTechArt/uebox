@@ -10,10 +10,14 @@ import { logger } from '../services/logger'
 import { CatalogService } from './catalogService'
 import { resolveLoreBinary, type LoreBinary } from './loreCli'
 import { shadowRootFor } from './shadowRoot'
+import { TeamService } from './team/teamService'
+import type { TeamEvent } from '../../shared/teamProject'
 
 export const CATALOG_EVENT_CHANNEL = 'catalogLibrary:event'
+export const TEAM_EVENT_CHANNEL = 'team:event'
 
 let service: CatalogService | null = null
+let teamService: TeamService | null = null
 let loreCache: Promise<{ binary: LoreBinary | null; problem: string | null }> | null = null
 
 function resourcesRoots(): string[] {
@@ -73,12 +77,27 @@ export function getCatalogService(): CatalogService {
   return service
 }
 
+/** 团队工程门面（懒创建；和服务器库共用同一个 CatalogService） */
+export function getTeamService(): TeamService {
+  if (teamService) return teamService
+  teamService = new TeamService(
+    getCatalogService().teamHost((event: TeamEvent) => {
+      if (event.kind === 'stream')
+        logger.info(`[team] ${event.serverId} stream ${event.connected ? 'connected' : 'down'}`)
+      sendToAppWindows(TEAM_EVENT_CHANNEL, event)
+    })
+  )
+  return teamService
+}
+
 /** 协议处理器：没创建服务就说明没有服务端库，直接 404 */
 export async function handlePreviewRequest(request: Request): Promise<Response> {
   return await getCatalogService().previews.handle(request)
 }
 
 export function disposeCatalogService(): void {
+  teamService?.dispose()
+  teamService = null
   service?.dispose()
   service = null
 }

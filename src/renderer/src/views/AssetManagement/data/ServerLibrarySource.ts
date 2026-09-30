@@ -30,7 +30,8 @@ import {
   type RegistryTag,
   type RegistryTagGroup,
   type SortBy,
-  type SortOrder
+  type SortOrder,
+  type TeamCapability
 } from './AssetLibrarySource'
 
 export const SERVER_CAPABILITIES_BASE: LibraryCapabilities = {
@@ -80,6 +81,35 @@ export const SERVER_CAPABILITIES_BASE: LibraryCapabilities = {
     'filters.tags': 'catalogLibrary.reasons.filterUnsupported',
     'filters.favorite': 'catalogLibrary.reasons.favoriteFilter',
     'filters.showDependencies': 'catalogLibrary.reasons.filterUnsupported'
+  },
+  team: null
+}
+
+/**
+ * 团队工程在服务器库能力上的改动（界面方案 4.0 对照表）：
+ *
+ * - 「最近删除」可用（被提交删掉的文件，没有「清空」）；
+ * - 网盘置灰、拖文件进来导入置灰，悬停写为什么（文件只从 UE 进工程）；
+ * - 扫描变更、改结构照旧不出现 / 不可用。
+ */
+export function teamCapabilities(
+  base: LibraryCapabilities,
+  team: { role: TeamCapability['role']; local: boolean }
+): LibraryCapabilities {
+  return {
+    ...base,
+    hasTrash: team.role !== 'outsourcer',
+    canImport: false,
+    cloudDrives: false,
+    canScan: false,
+    canEditStructure: false,
+    reasons: {
+      ...base.reasons,
+      hasTrash: null,
+      canImport: 'teamProject.reasons.import',
+      cloudDrives: 'teamProject.reasons.cloudDrives'
+    },
+    team: { role: team.role, local: team.local }
   }
 }
 
@@ -286,7 +316,7 @@ export class ServerLibrarySource implements AssetLibrarySource {
       getByFatherKey: async (fatherKey, sortBy, sortOrder, limit, offset) => {
         const dirId = dirIdOf(fatherKey)
         const { items } = await this.loadChildren(dirId)
-        const sorted = [...items]
+        const sorted = this.visibleFolders(items)
         if (sortBy === 'fileSize') sorted.sort((a, b) => a.bytes - b.bytes)
         if (sortOrder === 'desc') sorted.reverse()
         const start = offset ?? 0
@@ -303,7 +333,7 @@ export class ServerLibrarySource implements AssetLibrarySource {
         return folder ? mapFolder(folder, null) : undefined
       },
       getChildCount: async (fatherKey) =>
-        (await this.loadChildren(dirIdOf(fatherKey))).items.length,
+        this.visibleFolders((await this.loadChildren(dirIdOf(fatherKey))).items).length,
       getPathArray: async (folderKey) => await this.pathArray(dirIdOf(folderKey)),
       setColor: async (folderKey, color) => {
         const dirId = dirIdOf(folderKey)
@@ -585,6 +615,15 @@ export class ServerLibrarySource implements AssetLibrarySource {
       500
     )
     return new Map((result.facets.tags ?? []).map((value) => [value.value, value.n]))
+  }
+
+  /**
+   * 团队工程不显示 `__ExternalActors__`、`__ExternalObjects__`（里面的文件名是哈希）：
+   * 这些 Actor 的签出、改动、历史都算在所属地图上（方案 4.4）
+   */
+  private visibleFolders(items: CatalogFolder[]): CatalogFolder[] {
+    if (!this.capabilities.team) return [...items]
+    return items.filter((folder) => !/^__External(Actors|Objects)__$/.test(folder.name))
   }
 
   private rootStub(children: number): CatalogFolder {
