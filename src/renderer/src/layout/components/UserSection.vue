@@ -37,7 +37,7 @@ function handleGoPreferences(): void {
       <span v-if="!props.collapsed" class="version">v{{ appVersion }}</span>
     </button>
     <!-- 更新角标贴在版本号这一行的最右边；按钮不能套按钮，所以和设置入口并排 -->
-    <UpdateBadge v-if="!props.collapsed" class="update-badge-slot" />
+    <UpdateBadge v-if="!props.collapsed" />
   </div>
 </template>
 
