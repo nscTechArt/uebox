@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { CatalogEntry } from '../../shared/aiProvider'
 import { GENERATED_CATALOG as CATALOG } from './catalog.generated'
+import { CODEBUDDY_BASE_URL } from './codebuddy'
 
 /**
  * 目录是 `scripts/sync-provider-catalog.mjs` 从 models.dev 生成的快照，
@@ -137,6 +138,20 @@ describe('内置 Provider 目录', () => {
     const chatgpt = CATALOG.find((entry) => entry.id === 'chatgpt')
     expect(chatgpt?.models.length).toBeGreaterThan(0)
     expect(chatgpt?.models.some((model) => model.supportsVision)).toBe(true)
+  })
+
+  /**
+   * CodeBuddy 没有 `/models`，清单空着用户登录完就无模型可选；
+   * baseUrl 必须和 codebuddy.ts 里的常量一致，否则请求头与探测的特判都对不上。
+   */
+  it('CodeBuddy 走账号登录、直连官方端点、预置了可选模型', () => {
+    const codebuddy = CATALOG.find((entry) => entry.id === 'codebuddy')
+    expect(codebuddy?.group).toBe('subscription')
+    expect(codebuddy?.protocol).toBe('openai-completions')
+    expect(codebuddy?.supportsOAuth).toBe(true)
+    expect(codebuddy?.baseUrl).toBe(CODEBUDDY_BASE_URL)
+    expect(codebuddy?.models.length).toBeGreaterThan(0)
+    expect(codebuddy?.models.every((model) => model.supportsTools)).toBe(true)
   })
 
   it('模型 id 在同一家里不重复', () => {

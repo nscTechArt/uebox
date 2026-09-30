@@ -2,13 +2,15 @@ import { createServer } from 'http'
 import type { AddressInfo } from 'net'
 import { createHash, randomBytes } from 'crypto'
 import { shell } from 'electron'
+import { refreshCodeBuddyTokens, runCodeBuddyLogin } from './codebuddy'
 
 /**
  * Provider 的账号登录。
  *
- * 支持两种授权方式，取决于各家提供哪一种：
+ * 支持三种授权方式，取决于各家提供哪一种：
  * - `pkce`：授权码 + PKCE，浏览器回调到本机（OpenRouter、ChatGPT）
  * - `device`：设备码，用户在浏览器里输一串码（Kimi）
+ * - `codebuddy`：腾讯自家的 state 轮询登录，细节在 codebuddy.ts
  *
  * 换回来的东西也分两类，直接决定了怎么存：
  * - OpenRouter 给的是**永久 API Key**，当成普通密钥加密存起来就行
@@ -26,6 +28,9 @@ import { shell } from 'electron'
  *   CLI 共享同一份会员额度
  * - ChatGPT：参数取自 openai/codex（Apache-2.0）。client_id 是 Codex CLI 的
  *   公开客户端 id，回调端口 1455 是它注册死的，**不能改**
+ * - CodeBuddy：腾讯**没有**开放 API，是照着官方 CLI 的登录与请求头直连，
+ *   协议来源与风险见 codebuddy.ts 顶部。这几条里最可能失效、也最可能引来
+ *   账号限制的一条
  */
 
 /** 授权窗口。用户要去浏览器点同意，给足时间但不能无限等 */
@@ -41,6 +46,10 @@ export interface OAuthTokens {
   expiresAt?: number
   /** 部分厂商要求请求时带上账号 id */
   accountId?: string
+  /** CodeBuddy：请求头 X-Domain */
+  domain?: string
+  /** CodeBuddy：企业版账号的 X-Enterprise-Id */
+  enterpriseId?: string
 }
 
 interface PkceProviderSpec {
@@ -76,7 +85,11 @@ interface DeviceProviderSpec {
   scope?: string
 }
 
-export type OAuthProviderSpec = PkceProviderSpec | DeviceProviderSpec
+interface CodeBuddyProviderSpec {
+  grant: 'codebuddy'
+}
+
+export type OAuthProviderSpec = PkceProviderSpec | DeviceProviderSpec | CodeBuddyProviderSpec
 
 export const OAUTH_PROVIDERS: Readonly<Record<string, OAuthProviderSpec>> = Object.freeze({
   openrouter: {
@@ -112,7 +125,8 @@ export const OAUTH_PROVIDERS: Readonly<Record<string, OAuthProviderSpec>> = Obje
     tokenUrl: 'https://auth.kimi.com/api/oauth/token',
     // @moonshot-ai/kimi-code-oauth（MIT）里的公开常量
     clientId: '17e5f671-d194-4dfb-9706-5516cb48c098'
-  }
+  },
+  codebuddy: { grant: 'codebuddy' }
 })
 
 export function getOAuthSpec(providerId: string): OAuthProviderSpec | undefined {
@@ -183,6 +197,7 @@ export async function refreshOAuthTokens(
   const spec = OAUTH_PROVIDERS[providerId]
   if (!spec) throw new Error(`${providerId} 不支持账号登录`)
   if (!tokens.refreshToken) throw new Error('没有 refresh_token，需要重新登录')
+  if (spec.grant === 'codebuddy') return refreshCodeBuddyTokens(tokens)
 
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
@@ -464,6 +479,9 @@ export async function runOAuthLogin(
   if (!spec) throw new Error(`${providerId} 不支持 OAuth 登录`)
 
   try {
+    if (spec.grant === 'codebuddy') {
+      return await runCodeBuddyLogin({ openUrl: (url) => shell.openExternal(url), signal })
+    }
     return spec.grant === 'device'
       ? await runDeviceLogin(spec, onPrompt, signal)
       : await runPkceLogin(providerId, spec, signal)

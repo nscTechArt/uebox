@@ -44,6 +44,7 @@ const LOGO_ALIAS = {
   'tencent-token-plan': 'tencent',
   'minimax-token-plan': 'minimax',
   'stepfun-step-plan': 'stepfun',
+  codebuddy: 'tencent',
 
   // 生图条目是同一家厂商的另一个入口（见 CURATED 里的「图片生成」一段），
   // 用母公司的标，免得目录里出现一排没有图标的方块
@@ -302,6 +303,17 @@ export const CURATED = [
     group: 'subscription',
     baseUrl: 'https://api.stepfun.com/step_plan/v1',
     displayName: '阶跃星辰 Step Plan'
+  },
+
+  // CodeBuddy / WorkBuddy 会员：腾讯没有开放 API，照官方 CLI 的登录与请求头直连。
+  // 协议来源与风险写在 src/main/ai/codebuddy.ts 顶部。
+  {
+    id: 'codebuddy',
+    group: 'subscription',
+    baseUrl: 'https://copilot.tencent.com/v2',
+    protocol: 'openai-completions',
+    displayName: 'CodeBuddy / WorkBuddy',
+    supportsOAuth: true
   },
 
   // ── 图片生成 ──
@@ -796,6 +808,40 @@ const model3d = (id, name, api) => ({
  *    份额不小，先手写几个主力模型；等 models.dev 收录了就把这里删掉。
  */
 const MANUAL_ENTRIES = {
+  /**
+   * CodeBuddy 会员。models.dev 没有这一家，而且它**没有** `/models` 接口，
+   * 「导入模型」用不了 —— 清单不能留空（理由同下面 chatgpt 那条）。
+   *
+   * 型号取自官方 CLI v2.143.0 `--help` 里的 --model 列表（wb2api 抓包记录，
+   * 2026-09-02）；发布日期、窗口、能否看图取 models.dev 上同名型号。
+   * 输出上限一律 64000：官方 CLI 自己就发这个数。
+   * hy3-x / kimi-k3-1 / kimi-k2.7 在别处查不到资料，不猜，用户可手填。
+   */
+  codebuddy: {
+    name: 'CodeBuddy / WorkBuddy',
+    env: [],
+    doc: 'https://www.codebuddy.cn',
+    models: Object.fromEntries(
+      [
+        ['hy4-preview', 'Hy4 Preview', false, 1_000_000, '2026-08-28'],
+        ['hy3', 'Hy3', false, 262_144, '2026-07-06'],
+        ['glm-5.3', 'GLM-5.3', false, 1_000_000, '2026-08-14'],
+        ['glm-5.3-flash', 'GLM-5.3 Flash', true, 1_000_000, '2026-08-26'],
+        ['glm-5.2', 'GLM-5.2', false, 1_000_000, '2026-06-13'],
+        ['glm-5.1', 'GLM-5.1', false, 200_000, '2026-04-07'],
+        ['glm-5v-turbo', 'GLM-5V Turbo', true, 200_000, '2026-04-01'],
+        ['minimax-m3', 'MiniMax M3', true, 204_800, '2026-06-01'],
+        ['minimax-m2.7', 'MiniMax M2.7', false, 204_800, '2026-03-18'],
+        ['kimi-k2.6', 'Kimi K2.6', true, 262_144, '2026-04-21'],
+        ['deepseek-v4-pro', 'DeepSeek V4 Pro', false, 1_000_000, '2026-04-24'],
+        ['deepseek-v4-flash', 'DeepSeek V4 Flash', false, 1_000_000, '2026-04-24']
+      ].map(([id, name, vision, context, date]) => [
+        id,
+        model(id, name, vision, true, { context, output: 64_000 }, true, { release_date: date })
+      ])
+    )
+  },
+
   // ── 视频生成 ──
   // models.dev 只收对话模型，视频条目全部手写。
   'ark-seedance': {

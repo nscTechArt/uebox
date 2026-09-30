@@ -3,6 +3,7 @@ import {
   type ProbeFailure,
   type ProbeSkipCode
 } from '../../shared/aiProvider'
+import { CODEBUDDY_ORIGIN } from './codebuddy'
 import { resolveApiKey } from './credentials'
 import { requestEmbeddings } from './embedding'
 import { requestJudgement } from './judge'
@@ -226,6 +227,11 @@ export async function listRemoteModels(
   // 说清楚该去哪儿拿，比让用户对着一句 HTTP 404 猜要好。
   if (provider.protocol === 'openai-codex-responses') {
     return { ok: false, error: { code: 'listUnsupportedCodex' } }
+  }
+
+  // CodeBuddy 同理：只有对话端点，没有 /models。目录里预置了官方 CLI 列出的型号
+  if (provider.baseUrl.startsWith(CODEBUDDY_ORIGIN)) {
+    return { ok: false, error: { code: 'listUnsupportedProtocol' } }
   }
 
   try {

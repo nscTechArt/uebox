@@ -5,6 +5,7 @@ import { execFile } from 'child_process'
 import { app, safeStorage } from 'electron'
 import type { ApiKeyRef } from './types'
 import { isExpired, refreshOAuthTokens, type OAuthTokens } from './oauth'
+import { codeBuddyRequestHeaders } from './codebuddy'
 
 /**
  * 密钥库。
@@ -231,6 +232,39 @@ export function resetShellCacheForTest(): void {
   shellCache.clear()
 }
 
+/** 取出登录令牌，过期了就续期并写回，否则每次调用都要续一遍 */
+async function resolveOAuthTokens(
+  ref: Extract<ApiKeyRef, { kind: 'oauth' }>
+): Promise<OAuthTokens> {
+  const tokens = await loadOAuthTokens(ref.id)
+  if (!tokens) {
+    throw new MissingApiKeyError('登录信息不存在，请重新登录该账号')
+  }
+  if (!isExpired(tokens)) return tokens
+
+  const refreshed = await refreshOAuthTokens(ref.provider, tokens)
+  const secrets = { ...(await loadSecrets()) }
+  secrets[ref.id] = JSON.stringify(refreshed)
+  await persist(secrets)
+  return refreshed
+}
+
+/**
+ * 发一次请求要用的凭据：密钥，加上个别账号登录要求的**每次请求**的头。
+ *
+ * 目前只有 CodeBuddy 要：它按账号 id、会话 id 认人，这些头没法写死在
+ * provider 配置里。其余一律只有密钥，与 resolveApiKey 等价。
+ */
+export async function resolveRequestAuth(
+  ref: ApiKeyRef
+): Promise<{ apiKey: string; headers?: Record<string, string> }> {
+  if (ref.kind === 'oauth' && ref.provider === 'codebuddy') {
+    const tokens = await resolveOAuthTokens(ref)
+    return { apiKey: tokens.accessToken, headers: codeBuddyRequestHeaders(tokens) }
+  }
+  return { apiKey: await resolveApiKey(ref) }
+}
+
 /**
  * 把密钥引用解析成真正的密钥。
  *
@@ -253,18 +287,7 @@ export async function resolveApiKey(ref: ApiKeyRef): Promise<string> {
   }
 
   if (ref.kind === 'oauth') {
-    const tokens = await loadOAuthTokens(ref.id)
-    if (!tokens) {
-      throw new MissingApiKeyError('登录信息不存在，请重新登录该账号')
-    }
-    if (!isExpired(tokens)) return tokens.accessToken
-
-    // 过期了就续期并写回，否则每次调用都要续一遍
-    const refreshed = await refreshOAuthTokens(ref.provider, tokens)
-    const secrets = { ...(await loadSecrets()) }
-    secrets[ref.id] = JSON.stringify(refreshed)
-    await persist(secrets)
-    return refreshed.accessToken
+    return (await resolveOAuthTokens(ref)).accessToken
   }
 
   const secrets = await loadSecrets()

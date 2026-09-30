@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../ai/credentials', () => ({
-  resolveApiKey: vi.fn(async () => 'sk-test-key')
+  resolveRequestAuth: vi.fn(async () => ({ apiKey: 'sk-test-key' }))
 }))
 
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai'
@@ -442,9 +442,26 @@ describe('toPiProvider', () => {
     expect(result?.auth.apiKey).toBe('sk-test-key')
   })
 
+  it('账号登录给的逐次请求头带进请求，用户手配的头优先', async () => {
+    const { resolveRequestAuth } = await import('../../ai/credentials')
+    vi.mocked(resolveRequestAuth).mockResolvedValueOnce({
+      apiKey: 'jwt',
+      headers: { 'X-User-Id': 'u1', 'User-Agent': 'CLI/2.143.0' }
+    })
+
+    const provider = toPiProvider({ ...openaiProvider, headers: { 'User-Agent': 'Mine' } })
+    const result = await provider.auth.apiKey!.resolve({
+      ctx: { env: async () => undefined, fileExists: async () => false },
+      signal: new AbortController().signal
+    })
+
+    expect(result?.auth.apiKey).toBe('jwt')
+    expect(result?.auth.headers).toEqual({ 'X-User-Id': 'u1', 'User-Agent': 'Mine' })
+  })
+
   it('本地推理拿不到密钥时给占位值，不让请求因为空 key 被拒', async () => {
-    const { resolveApiKey } = await import('../../ai/credentials')
-    vi.mocked(resolveApiKey).mockResolvedValueOnce('')
+    const { resolveRequestAuth } = await import('../../ai/credentials')
+    vi.mocked(resolveRequestAuth).mockResolvedValueOnce({ apiKey: '' })
 
     const provider = toPiProvider(ollamaProvider)
     const result = await provider.auth.apiKey!.resolve({

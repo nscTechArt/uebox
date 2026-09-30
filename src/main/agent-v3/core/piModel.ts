@@ -24,7 +24,7 @@ import type { Api, Model, ProviderStreams, ThinkingLevelMap } from '@earendil-wo
 
 import { findCatalogEntry } from '../../ai/catalog'
 import { resolveModelLimits } from '../../ai/modelLimits'
-import { resolveApiKey } from '../../ai/credentials'
+import { resolveRequestAuth } from '../../ai/credentials'
 import type { ProviderConfig } from '../../ai/types'
 import type { ModelConfig, ProviderProtocol } from '../../../shared/aiProvider'
 
@@ -253,6 +253,12 @@ const ENDPOINT_QUIRKS: readonly {
     // 与 pi 的默认一致，所以这里只关掉 store
     match: /ark\.[a-z-]+\.volces\.com/i,
     compat: { supportsStore: false }
+  },
+  {
+    // CodeBuddy 会员直连（见 src/main/ai/codebuddy.ts）。没有公开参数表，
+    // 照官方 CLI 的抓包：输出上限发的是 max_tokens，请求里没有 store
+    match: /copilot\.tencent\.com/i,
+    compat: { maxTokensField: 'max_tokens', supportsStore: false }
   }
 ]
 
@@ -348,13 +354,15 @@ export function toPiProvider(config: ProviderConfig): Provider<Api> {
         name: `${config.displayName} API key`,
         // 凭据的真正来源是我们自己的 credentials 模块，不是 pi 的 CredentialStore。
         // 这里忽略传入的 credential，直接按 ProviderConfig 上的引用去取。
+        // 每次请求都会调一次，所以账号登录要求的逐次请求头（CodeBuddy）也从这里带出去
         resolve: async () => {
-          const apiKey = await resolveApiKey(config.apiKey)
+          const { apiKey, headers: authHeaders } = await resolveRequestAuth(config.apiKey)
+          const headers = authHeaders ? { ...authHeaders, ...config.headers } : config.headers
           return {
             auth: {
               // 本机推理（Ollama / LM Studio）不校验密钥，但有些客户端要求非空。
               apiKey: apiKey || 'not-required',
-              ...(config.headers ? { headers: config.headers } : {})
+              ...(headers ? { headers } : {})
             },
             source: describeKeySource(config)
           }

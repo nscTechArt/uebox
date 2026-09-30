@@ -4881,5 +4881,127 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 131072
       }
     ]
+  },
+  {
+    "id": "codebuddy",
+    "displayName": "CodeBuddy / WorkBuddy",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "openai-completions",
+    "baseUrl": "https://copilot.tencent.com/v2",
+    "apiKeyUrl": "https://www.codebuddy.cn",
+    "requiresApiKey": true,
+    "hasLogo": true,
+    "supportsOAuth": true,
+    "models": [
+      {
+        "id": "hy4-preview",
+        "displayName": "Hy4 Preview",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "glm-5.3-flash",
+        "displayName": "GLM-5.3 Flash",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "glm-5.3",
+        "displayName": "GLM-5.3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "hy3",
+        "displayName": "Hy3",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "glm-5.2",
+        "displayName": "GLM-5.2",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "minimax-m3",
+        "displayName": "MiniMax M3",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "displayName": "DeepSeek V4 Pro",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "displayName": "DeepSeek V4 Flash",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "kimi-k2.6",
+        "displayName": "Kimi K2.6",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 262144,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "glm-5.1",
+        "displayName": "GLM-5.1",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 200000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "glm-5v-turbo",
+        "displayName": "GLM-5V Turbo",
+        "supportsVision": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 200000,
+        "maxOutputTokens": 64000
+      },
+      {
+        "id": "minimax-m2.7",
+        "displayName": "MiniMax M2.7",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 204800,
+        "maxOutputTokens": 64000
+      }
+    ]
   }
 ] as CatalogEntry[])
