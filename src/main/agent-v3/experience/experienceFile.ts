@@ -182,7 +182,7 @@ export function serializeExperienceFile(tool: string, entries: ExperienceEntry[]
     const lines = [
       `## ${oneLine(entry.title)}`,
       `<!-- id: ${entry.id} -->`,
-      `- key: ${entry.tool} · "${oneLine(entry.errorPattern).replace(/"/g, "'")}"`,
+      `- key: ${entry.tool} · "${oneLine(entry.errorPattern)}"`,
       `- advice: ${oneLine(entry.advice)}`,
       ...(formatExpect(entry.expect) ? [`- expect: ${formatExpect(entry.expect)}`] : []),
       `- source: ${oneLine(entry.source)}`,

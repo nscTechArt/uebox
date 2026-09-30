@@ -119,7 +119,8 @@ export function createZenServerTool(): V2Tool {
       const version = typeof info?.BuildVersion === 'string' ? info.BuildVersion : null
 
       const lines: string[] = []
-      lines.push(`ZenServer${version ? ` ${version}` : ''} 在 127.0.0.1:${port}。`)
+      // 完整串形如 5.8.13-202605190912-windows-x64-release-…，消息里只留版本号
+      lines.push(`ZenServer${version ? ` ${version.split('-')[0]}` : ''} 在 127.0.0.1:${port}。`)
       if (cache.hit_ratio_percent != null) {
         const lookups = (cache.hits ?? 0) + (cache.misses ?? 0)
         lines.push(

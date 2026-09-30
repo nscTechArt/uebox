@@ -20,6 +20,7 @@
  */
 
 import type { ExperienceEntry } from './experienceFile'
+import { patternProblem } from './specificity'
 
 export type ExperienceLayer = 'project' | 'global'
 
@@ -49,8 +50,9 @@ export function matchEntries(
       (entry) =>
         entry.status !== 'retired' &&
         entry.tool === tool &&
-        entry.errorPattern.trim() !== '' &&
-        normalizedError.includes(entry.errorPattern.toLowerCase()) &&
+        // 不只是「含有」：片段还得对这一次的报错足够具体（见 specificity.ts）。
+        // 这一道也兜住手改过的、以及这条规则之前写下的旧经验
+        patternProblem(tool, entry.errorPattern, normalizedError) === undefined &&
         !(engine && entry.notFor?.includes(engine))
     )
     .sort((a, b) => rank(b) - rank(a))

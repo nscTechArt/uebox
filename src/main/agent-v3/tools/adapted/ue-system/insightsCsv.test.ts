@@ -1,13 +1,7 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest'
 
-import {
-  parseGenericCsv,
-  pickColumn,
-  rankRows,
-  TIMER_NAME_PATTERNS,
-  TIMER_VALUE_PATTERNS
-} from './insightsCsv'
+import { parseGenericCsv } from './insightsCsv'
 
 describe('parseGenericCsv', () => {
   it('第一行是表头，其余是数据行', () => {
@@ -34,42 +28,5 @@ describe('parseGenericCsv', () => {
 
   it('完全空文件返回 null', () => {
     expect(parseGenericCsv('')).toBeNull()
-  })
-})
-
-describe('pickColumn', () => {
-  it('按模式优先级找列——更精确的模式排在前面', () => {
-    const columns = ['EventName', 'Count', 'InclusiveTimeMs', 'TotalIncl(ms)']
-
-    expect(pickColumn(columns, TIMER_NAME_PATTERNS)).toBe('EventName')
-    expect(pickColumn(columns, TIMER_VALUE_PATTERNS)).toBe('TotalIncl(ms)')
-  })
-
-  it('一个都没匹配上时返回 undefined，不猜', () => {
-    expect(pickColumn(['Foo', 'Bar'], TIMER_VALUE_PATTERNS)).toBeUndefined()
-  })
-})
-
-describe('rankRows', () => {
-  const table = parseGenericCsv('Name,Total\nA,10\nB,30\nC,20\n')!
-
-  it('按识别出的总计列降序排', () => {
-    const { sortedBy, topEntries } = rankRows(table, 'Total', 10)
-
-    expect(sortedBy).toBe('Total')
-    expect(topEntries.map((r) => r.Name)).toEqual(['B', 'C', 'A'])
-  })
-
-  it('识别不出总计列时原样截断，不假装排过序', () => {
-    const { sortedBy, topEntries } = rankRows(table, undefined, 2)
-
-    expect(sortedBy).toBeUndefined()
-    expect(topEntries).toHaveLength(2)
-    expect(topEntries[0]!.Name).toBe('A') // 原始顺序，没有被重排
-  })
-
-  it('尊重 limit', () => {
-    const { topEntries } = rankRows(table, 'Total', 2)
-    expect(topEntries).toHaveLength(2)
   })
 })

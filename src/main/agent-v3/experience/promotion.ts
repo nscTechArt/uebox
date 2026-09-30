@@ -16,7 +16,7 @@
 
 import { randomBytes } from 'crypto'
 
-import { admit, covered } from './admission'
+import { admit, patternCovered } from './admission'
 import type { ExperienceEntry } from './experienceFile'
 import type { ExperienceStore } from './store'
 
@@ -76,7 +76,7 @@ export async function recordProvenInProject(
   let added = false
   const ledger = await global.readLedger()
   await global.updateTool(entry.tool, (list) => {
-    if (covered(list, entry.tool, entry.errorPattern.toLowerCase())) return undefined
+    if (patternCovered(list, entry.tool, entry.errorPattern)) return undefined
     const next = admit(list, promoted, ledger)
     if (next) added = true
     return next

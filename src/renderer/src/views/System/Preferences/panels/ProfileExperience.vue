@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import AppSegmented from '@renderer/components/AppSegmented.vue'
 /**
- * 技能页里的「经验」分组：做事时踩过又绕过去的坑（见 main/agent-v3/experience/）。
+ * 「经验库」设置页：做事时踩过又绕过去的坑（见 main/agent-v3/experience/）。
  *
- * ## 为什么放在技能页，而不是工程详情里
+ * ## 为什么单独一页
  *
- * 经验分两层：通用的（引擎 API 这类，换个工程也成立）和本工程的。通用那层不属于
- * 任何一个工程，放进工程详情就没处安放。技能页本来就按「来源」列东西，经验沿用
- * 同一种筛法（全部 / 通用 / 工程），不另开页面，也不加设置项 —— 开关就是页头那个
- * 「自动记住做法」。
+ * 起初放在技能页里当一个分组，后来拆出来（2026-10-01 用户定）：技能是一份
+ * 「它会做什么」的说明书，经验是「它在哪儿翻过车」的记录，放在一页里两样都挤。
+ * 不放工程详情里，是因为经验分两层，通用那层不属于任何一个工程。
+ *
+ * 开关没有另起一个：仍是技能页的「自动记住做法」，它同时管技能和经验。
+ * 这一页只在关着时说一句，不再摆一份同样的开关 —— 两处都能拨，就得想清楚
+ * 两处谁说了算。
  *
  * ## 为什么每条没有开关
  *
@@ -96,9 +99,7 @@ async function refresh(): Promise<void> {
 }
 
 function layerLabel(entry: AgentV3Experience): string {
-  return entry.layer === 'global'
-    ? t('profile.skills.experience.layerGlobal')
-    : (entry.projectName ?? '')
+  return entry.layer === 'global' ? t('profile.experience.layerGlobal') : (entry.projectName ?? '')
 }
 
 function effectLine(entry: AgentV3Experience): string {
@@ -111,7 +112,7 @@ function effectLine(entry: AgentV3Experience): string {
   if (engines.length) parts.push(`UE ${engines.join(' · ')}`)
   if (entry.stats.adopted > 0) {
     parts.push(
-      t('profile.skills.experience.effect', {
+      t('profile.experience.effect', {
         adopted: entry.stats.adopted,
         ok: entry.stats.adoptedOk
       })
@@ -146,7 +147,7 @@ async function togglePin(pinned: boolean): Promise<void> {
     await refresh()
     detail.value = entries.value.find((e) => e.id === entry.id) ?? entry
   } catch (error) {
-    message.error(t('profile.skills.experience.actionFailed', { reason: reasonOf(error) }))
+    message.error(t('profile.experience.actionFailed', { reason: reasonOf(error) }))
   } finally {
     pinning.value = false
   }
@@ -156,8 +157,8 @@ function deleteDetail(): void {
   const entry = detail.value
   if (!entry) return
   confirmDialog({
-    title: t('profile.skills.experience.deleteTitle'),
-    content: t('profile.skills.experience.deleteContent'),
+    title: t('profile.experience.deleteTitle'),
+    content: t('profile.experience.deleteContent'),
     okText: t('common.delete'),
     cancelText: t('common.cancel'),
     danger: true,
@@ -166,9 +167,9 @@ function deleteDetail(): void {
         await agentV3API.deleteExperience(refOf(entry))
         detailOpen.value = false
         await refresh()
-        message.success(t('profile.skills.experience.deleted'))
+        message.success(t('profile.experience.deleted'))
       } catch (error) {
-        message.error(t('profile.skills.experience.actionFailed', { reason: reasonOf(error) }))
+        message.error(t('profile.experience.actionFailed', { reason: reasonOf(error) }))
       }
     }
   })
@@ -180,22 +181,22 @@ function undoCuration(): void {
   const last = lastCuration.value
   if (!last) return
   confirmDialog({
-    title: t('profile.skills.experience.undoTitle'),
+    title: t('profile.experience.undoTitle'),
     // 先说清楚那次改了什么，再让人决定 —— 撤销会把整理之后的统计一起退回去
-    content: t('profile.skills.experience.undoContent', {
+    content: t('profile.experience.undoContent', {
       at: new Date(last.at).toLocaleString(),
       added: last.added,
       retired: last.retired
     }),
-    okText: t('profile.skills.experience.undo'),
+    okText: t('profile.experience.undo'),
     cancelText: t('common.cancel'),
     onOk: async () => {
       try {
         await agentV3API.undoLastCuration()
         await refresh()
-        message.success(t('profile.skills.experience.undone'))
+        message.success(t('profile.experience.undone'))
       } catch (error) {
-        message.error(t('profile.skills.experience.undoFailed', { reason: reasonOf(error) }))
+        message.error(t('profile.experience.undoFailed', { reason: reasonOf(error) }))
       }
     }
   })
@@ -207,30 +208,27 @@ onMounted(refresh)
 <template>
   <section class="settings-section">
     <div class="section-head">
+      <!-- 页名和说明在页头（index.vue 的 pageHeaders），这里只是清单的小标题 -->
       <h4 class="section-title">
-        {{ $t('profile.skills.experience.title') }}
+        {{ $t('profile.experience.listTitle') }}
         <span class="count">{{ loadError ? '—' : activeCount(entries) }}</span>
       </h4>
       <AppButton v-if="lastCuration" variant="soft" size="medium" @click="undoCuration">
-        {{ $t('profile.skills.experience.undo') }}
+        {{ $t('profile.experience.undo') }}
       </AppButton>
     </div>
-    <p class="section-note">
-      {{
-        learningOff ? $t('profile.skills.experience.offNote') : $t('profile.skills.experience.note')
-      }}
-    </p>
+    <p v-if="learningOff" class="section-note off-note">{{ $t('profile.experience.offNote') }}</p>
 
     <div class="filters">
       <!-- @vue-generic {typeof SCOPES[number]} -->
       <AppSegmented
         :model-value="scope"
         :options="SCOPES"
-        :aria-label="$t('profile.skills.experience.title')"
+        :aria-label="$t('profile.experience.title')"
         @update:model-value="onScopeChange"
       >
         <template #default="{ option }">
-          {{ $t(`profile.skills.experience.filter.${option}`) }}
+          {{ $t(`profile.experience.filter.${option}`) }}
           <span class="tab-count">{{ scopeCount(option) }}</span>
         </template>
       </AppSegmented>
@@ -241,19 +239,17 @@ onMounted(refresh)
         :options="projects.map((p) => ({ value: p.path, label: p.name }))"
       />
       <AppCheckbox v-model:checked="showRetired" class="retired-toggle">
-        {{ $t('profile.skills.experience.showRetired') }}
+        {{ $t('profile.experience.showRetired') }}
       </AppCheckbox>
     </div>
 
     <p v-if="loading" class="section-note">{{ $t('profile.skills.loading') }}</p>
     <p v-else-if="loadError" class="section-note entity-error">
-      {{ $t('profile.skills.experience.loadFailed', { reason: loadError }) }}
+      {{ $t('profile.experience.loadFailed', { reason: loadError }) }}
     </p>
     <p v-else-if="visible.length === 0" class="section-note">
       {{
-        scope === 'project'
-          ? $t('profile.skills.experience.emptyProject')
-          : $t('profile.skills.experience.empty')
+        scope === 'project' ? $t('profile.experience.emptyProject') : $t('profile.experience.empty')
       }}
     </p>
     <ul v-else class="entity-list">
@@ -270,10 +266,10 @@ onMounted(refresh)
               {{ layerLabel(entry) }}
             </span>
             <span class="badge" :class="{ 'badge-proven': entry.status === 'proven' }">
-              {{ $t(`profile.skills.experience.status.${entry.status}`) }}
+              {{ $t(`profile.experience.status.${entry.status}`) }}
             </span>
             <span v-if="entry.pinned" class="badge">
-              <PhPushPin :size="10" /> {{ $t('profile.skills.experience.pinnedBadge') }}
+              <PhPushPin :size="10" /> {{ $t('profile.experience.pinnedBadge') }}
             </span>
           </div>
           <div class="entity-desc">{{ entry.advice }}</div>
@@ -285,32 +281,32 @@ onMounted(refresh)
 
     <AppModal v-model:open="detailOpen" :title="detail?.title ?? ''" :width="620" destroy-on-close>
       <dl v-if="detail" class="detail-grid">
-        <dt>{{ $t('profile.skills.experience.detail.how') }}</dt>
+        <dt>{{ $t('profile.experience.detail.how') }}</dt>
         <dd>{{ detail.advice }}</dd>
 
-        <dt>{{ $t('profile.skills.experience.detail.when') }}</dt>
+        <dt>{{ $t('profile.experience.detail.when') }}</dt>
         <dd>
           <code>{{ detail.tool }}</code>
           <span>
-            {{ $t('profile.skills.experience.detail.whenValue', { pattern: detail.errorPattern }) }}
+            {{ $t('profile.experience.detail.whenValue', { pattern: detail.errorPattern }) }}
           </span>
         </dd>
 
-        <dt>{{ $t('profile.skills.experience.detail.scope') }}</dt>
+        <dt>{{ $t('profile.experience.detail.scope') }}</dt>
         <dd>
           {{
             detail.layer === 'global'
-              ? $t('profile.skills.experience.detail.scopeGlobal')
-              : $t('profile.skills.experience.detail.scopeProject', { name: detail.projectName })
+              ? $t('profile.experience.detail.scopeGlobal')
+              : $t('profile.experience.detail.scopeProject', { name: detail.projectName })
           }}
         </dd>
 
         <template v-if="detail.engines?.length || detail.notFor?.length || detail.verified?.engine">
-          <dt>{{ $t('profile.skills.experience.detail.engines') }}</dt>
+          <dt>{{ $t('profile.experience.detail.engines') }}</dt>
           <dd>
             <span v-if="detail.engines?.length || detail.verified?.engine">
               {{
-                $t('profile.skills.experience.detail.enginesOk', {
+                $t('profile.experience.detail.enginesOk', {
                   versions: (detail.engines?.length
                     ? detail.engines
                     : [detail.verified?.engine]
@@ -320,7 +316,7 @@ onMounted(refresh)
             </span>
             <span v-if="detail.notFor?.length">
               {{
-                $t('profile.skills.experience.detail.enginesNo', {
+                $t('profile.experience.detail.enginesNo', {
                   versions: detail.notFor.join('、')
                 })
               }}
@@ -328,10 +324,10 @@ onMounted(refresh)
           </dd>
         </template>
 
-        <dt>{{ $t('profile.skills.experience.detail.effect') }}</dt>
+        <dt>{{ $t('profile.experience.detail.effect') }}</dt>
         <dd>
           {{
-            $t('profile.skills.experience.detail.effectValue', {
+            $t('profile.experience.detail.effectValue', {
               shown: detail.stats.shown,
               adopted: detail.stats.adopted,
               ok: detail.stats.adoptedOk
@@ -340,17 +336,17 @@ onMounted(refresh)
           <div class="muted">
             {{
               detailLift
-                ? $t('profile.skills.experience.detail.lift', {
+                ? $t('profile.experience.detail.lift', {
                     without: detailLift.without,
                     with: detailLift.with
                   })
-                : $t('profile.skills.experience.detail.liftUnknown')
+                : $t('profile.experience.detail.liftUnknown')
             }}
           </div>
         </dd>
 
         <template v-if="detail.source">
-          <dt>{{ $t('profile.skills.experience.detail.source') }}</dt>
+          <dt>{{ $t('profile.experience.detail.source') }}</dt>
           <dd>{{ detail.source }}</dd>
         </template>
       </dl>
@@ -363,7 +359,7 @@ onMounted(refresh)
             :disabled="pinning || detail?.status === 'retired'"
             @update:checked="togglePin"
           >
-            {{ $t('profile.skills.experience.detail.pin') }}
+            {{ $t('profile.experience.detail.pin') }}
           </AppCheckbox>
         </div>
       </template>
@@ -520,6 +516,10 @@ onMounted(refresh)
   font-size: 10px;
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.off-note {
+  color: var(--color-warning-text);
 }
 
 .entity-error {

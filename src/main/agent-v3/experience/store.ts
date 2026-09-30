@@ -17,7 +17,7 @@
  */
 
 import { promises as fs } from 'fs'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 
 import {
   fileNameForTool,
@@ -49,12 +49,22 @@ interface LedgerFile {
 
 const queues = new Map<string, Promise<unknown>>()
 
+/**
+ * 队列的键：同一个目录只能有一个。设置页拿的是项目库里的路径，会话拿的是运行时的路径，
+ * Windows 上两者大小写、斜杠可能不同 —— 按原样当键，两边的读改写就不排队，互相覆盖
+ */
+function queueKey(dir: string): string {
+  const resolved = resolve(dir).replace(/\\/g, '/')
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
 /** 同一个目录的写操作排队执行 */
 function serialized<T>(dir: string, task: () => Promise<T>): Promise<T> {
-  const previous = queues.get(dir) ?? Promise.resolve()
+  const key = queueKey(dir)
+  const previous = queues.get(key) ?? Promise.resolve()
   const next = previous.then(task, task)
   queues.set(
-    dir,
+    key,
     next.catch(() => undefined)
   )
   return next

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -150,6 +150,45 @@ describe(`${INSIGHTS_TRACE_TOOL_NAME} action=capture`, () => {
 /**
  * analyze 分支：原 `ue_analyze_insights_trace` 的全部回归防线原样保留。
  */
+const CSV_HEADER = 'Name,Count,Incl,I.Min,I.Max,I.Avg,I.Med,Excl,E.Min,E.Max,E.Avg,E.Med'
+/** 引擎会把这一行塞进每一份导出，不管 -threads 怎么筛 */
+const GPU_ROW = 'ShadowDepths,664,3.6,0,0.02,0.005,0.005,3.6,0,0.02,0.005,0.005'
+const FRAME_ROW = 'Frame,100,2.0,0.01,0.1,0.02,0.015,0.1,0,0.001,0.001,0.001'
+/** 每条线程的 CPU 计时器：名字、Incl 秒、Excl 秒。compare 用 exportScale 放大 */
+const CPU_TIMERS: Record<string, [string, number, number][]> = {
+  GameThread: [
+    ['WaitForTasks', 5.0, 5.0],
+    ['UWorld::Tick', 1.2, 1.0]
+  ],
+  'RenderThread*': [['FRDGBuilder::Execute', 0.5, 0.5]],
+  'GPU*': []
+}
+
+let exportScale = 1
+const exportCommands: string[] = []
+
+/**
+ * 假装自己是 UnrealInsights：读 -ExecOnAnalysisCompleteCmd=@= 指向的响应文件，
+ * 每行一条导出命令，按 -threads 写对应的 CSV。
+ */
+function writeExports(args: string[]): void {
+  const prefix = '-ExecOnAnalysisCompleteCmd=@='
+  const rsp = args.find((a) => a.startsWith(prefix))!.slice(prefix.length)
+  for (const line of readFileSync(rsp, 'utf-8').split('\n').filter(Boolean)) {
+    exportCommands.push(line)
+    const m = /^TimingInsights\.ExportTimerStatistics "(.+?)" -threads="(.+?)"/.exec(line)!
+    const threads = m[2]!
+    const body = [GPU_ROW]
+    if (threads === 'GameThread') body.push(FRAME_ROW)
+    for (const [name, incl, excl] of CPU_TIMERS[threads]!) {
+      const i = incl * exportScale
+      const e = excl * exportScale
+      body.push(`${name},100,${i},0,${i},${i / 100},${i / 100},${e},0,${e},${e / 100},${e / 100}`)
+    }
+    writeFileSync(m[1]!, [CSV_HEADER, ...body].join('\n') + '\n')
+  }
+}
+
 describe(`${INSIGHTS_TRACE_TOOL_NAME} action=analyze`, () => {
   let root: string
   let trace: string
@@ -170,6 +209,8 @@ describe(`${INSIGHTS_TRACE_TOOL_NAME} action=analyze`, () => {
   const analyze = (): Promise<ToolResult> => run({ action: 'analyze', utrace_path: trace })
 
   beforeEach(() => {
+    exportScale = 1
+    exportCommands.length = 0
     root = mkdtempSync(join(tmpdir(), 'uebox-insights-'))
     trace = join(root, '中文 trace.utrace')
     writeFileSync(trace, '')
@@ -179,14 +220,14 @@ describe(`${INSIGHTS_TRACE_TOOL_NAME} action=analyze`, () => {
       engine_dir: join(root, 'Engine')
     })
     mocks.engines.mockReset().mockResolvedValue([{ rootPath: root, version: '5.6.1' }])
-    mocks.spawn.mockReset().mockImplementation(() => {
+    mocks.spawn.mockReset().mockImplementation((_exe: string, args: string[]) => {
       const child = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
         stderr: new EventEmitter(),
         kill: vi.fn()
       })
       queueMicrotask(() => {
-        writeFileSync(trace.replace('.utrace', '.timerstats.csv'), 'Name,Total Time\nTick,1.5\n')
+        writeExports(args)
         child.emit('close', 0)
       })
       return child
@@ -211,11 +252,12 @@ describe(`${INSIGHTS_TRACE_TOOL_NAME} action=analyze`, () => {
       install(platform)
       expect((await analyze()).success).toBe(true)
       expect(mocks.engines).not.toHaveBeenCalled()
+      expect(mocks.spawn).toHaveBeenCalledOnce()
       expect(mocks.spawn).toHaveBeenCalledWith(
         binary,
         expect.arrayContaining([
           `-OpenTraceFile=${trace}`,
-          `-ExecOnAnalysisCompleteCmd=TimingInsights.ExportTimerStatistics "${trace.replace('.utrace', '.timerstats.csv')}"`
+          expect.stringMatching(/^-ExecOnAnalysisCompleteCmd=@=/)
         ]),
         expect.anything()
       )
@@ -230,7 +272,7 @@ describe(`${INSIGHTS_TRACE_TOOL_NAME} action=analyze`, () => {
     vi.mocked(assertFreshFile).mockImplementation(actual.assertFreshFile)
     expect((await analyze()).success).toBe(true)
     expect(assertFreshFile).toHaveBeenCalledWith(
-      trace.replace('.utrace', '.timerstats.csv'),
+      trace.replace('.utrace', '.game.csv'),
       expect.any(Number)
     )
     expect(assertFreshFile).not.toHaveBeenCalledWith(trace, expect.anything())
@@ -275,5 +317,75 @@ describe(`${INSIGHTS_TRACE_TOOL_NAME} action=analyze`, () => {
     const result = await analyze()
     expect(result.success).toBe(false)
     expect(result.error).toContain('Library not loaded')
+  })
+
+  it('一次进程导出三条线程，并减掉混进 CPU 线程的 GPU 行', async () => {
+    install('win32')
+    const r = await analyze()
+
+    expect(r.success).toBe(true)
+    expect(exportCommands.map((c) => /-threads="(.+?)"/.exec(c)![1])).toEqual([
+      'GameThread',
+      'RenderThread*',
+      'GPU*'
+    ])
+    const threads = r.threads as Record<string, { top: { name: string }[]; wait_total_ms: number }>
+    expect(threads.game!.top.map((t) => t.name)).toEqual(['UWorld::Tick'])
+    expect(threads.game!.wait_total_ms).toBe(5000)
+    expect(threads.render!.top.map((t) => t.name)).toEqual(['FRDGBuilder::Execute'])
+    expect(threads.gpu!.top.map((t) => t.name)).toEqual(['ShadowDepths'])
+    expect(r.frames).toMatchObject({ frames: 100, avg_ms: 20 })
+    expect(String(r.message)).toContain('游戏线程 100 帧')
+  })
+
+  it('时间窗口原样传给导出命令', async () => {
+    install('win32')
+    await run({ action: 'analyze', utrace_path: trace, start_seconds: 12, end_seconds: 30.5 })
+
+    expect(exportCommands).toHaveLength(3)
+    for (const c of exportCommands) expect(c).toMatch(/ -startTime=12 -endTime=30\.5$/)
+  })
+
+  it('响应文件用完就删', async () => {
+    install('win32')
+    await analyze()
+    const rspArg = (mocks.spawn.mock.calls[0]![1] as string[]).find((a) => a.includes('@='))!
+    expect(() => readFileSync(rspArg.slice(rspArg.indexOf('@=') + 2))).toThrow()
+  })
+
+  it('compare：两份依次分析，按每帧给出变慢最多的', async () => {
+    install('win32')
+    const baseline = join(root, 'before.utrace')
+    writeFileSync(baseline, '')
+    const spawnOnce = mocks.spawn.getMockImplementation()!
+    mocks.spawn.mockImplementation((exe: string, args: string[]) => {
+      // 第一次是基准，第二次（改之后）CPU 计时器翻倍
+      exportScale = mocks.spawn.mock.calls.length === 1 ? 1 : 2
+      return spawnOnce(exe, args)
+    })
+
+    const r = await run({ action: 'compare', baseline_utrace_path: baseline, utrace_path: trace })
+
+    expect(r.success).toBe(true)
+    expect(mocks.spawn).toHaveBeenCalledTimes(2)
+    const threads = r.threads as Record<
+      string,
+      { regressions: { name: string; delta_per_frame_ms: number }[] }
+    >
+    expect(threads.game!.regressions[0]).toMatchObject({
+      name: 'UWorld::Tick',
+      delta_per_frame_ms: 10
+    })
+    expect(threads.gpu!.regressions).toEqual([])
+    expect(String(r.message)).toContain('UWorld::Tick（+10 ms/帧）')
+  })
+
+  it('compare 缺基准时不起进程', async () => {
+    install('win32')
+    const r = await run({ action: 'compare', utrace_path: trace })
+
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('baseline_utrace_path')
+    expect(mocks.spawn).not.toHaveBeenCalled()
   })
 })

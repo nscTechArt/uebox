@@ -16,6 +16,7 @@ import {
   PhFolders,
   PhGear,
   PhGraduationCap,
+  PhLightbulb,
   PhIdentificationCard,
   PhInfo,
   PhLightning,
@@ -110,6 +111,13 @@ const menuGroups: MenuGroup[] = [
         // 不用拼图块：那个比喻属于「往应用上加装的东西」，而技能不是加装件，
         // 是这个助手本身的能力清单（隔壁「知识库」用翻开的书，两者不混）
         icon: PhGraduationCap
+      },
+      {
+        key: 'experience',
+        labelKey: 'profile.menu.experience',
+        // 「灯泡」—— 这一页是它踩坑之后想明白的那些事。紧挨着技能：
+        // 技能是说明书，经验是翻车记录，两样都归「它会什么」
+        icon: PhLightbulb
       },
       {
         key: 'tools',

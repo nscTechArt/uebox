@@ -11,6 +11,7 @@ import { z } from 'zod'
 import { runEditorPython } from '../../../core/editorPython'
 import { assertScriptAllowed } from '../../builtin/pathBoundary'
 import { describePositionalRotatorRefusal, findPositionalRotatorCalls } from './pythonRotatorGuard'
+import { describePythonErrorHints } from './pythonErrorHints'
 import { noteViewportMove, viewportCameraApiInScript } from '../ue-editor/viewportProvenance'
 import { discoverEnabledSkills } from '../../../capabilities/skills'
 import { readSkillResource } from '../../../capabilities/skillsService/SkillsService'
@@ -105,6 +106,12 @@ export function createRunPythonScriptTool(): V2Tool {
 
 【注意】：脚本在编辑器主线程上同步执行，最多等待 5 分钟。超时或停止等待不代表 UE 已停止执行，先回读确认，不能直接重复修改。
 
+【创建资产的三个坑】
+- AssetTools.create_asset 的 factory 参数传**实例**（unreal.LevelSequenceFactoryNew()），传类会报 Cannot nativize。
+- 重名时引擎会弹「覆写现有 Object」模态框，脚本点不了、create_asset 返回 None，取消后还会留下删不掉的僵死条目。
+  创建前先 does_asset_exist(path)，已存在就换名，不要重试同名。
+- delete_asset 返回 False 不带原因；删资产用 ue_content_delete。
+
 【三件事别在 Python 里做】
 - **PIE 起停**：editor_play_simulate() / editor_request_end_play() 都是「下一帧才生效」，脚本占着游戏线程，
   同一脚本里 sleep 或回读永远看到旧状态（世界是 None、playing 还是 True）。要跑游戏并读结果用 ue_playtest；
@@ -194,7 +201,10 @@ export function createRunPythonScriptTool(): V2Tool {
         // V3 的失败适配只保留 error/details；stdout 单独放顶层会被丢掉。
         return {
           success: false,
-          error: (result.error ?? 'Python 执行失败') + hint,
+          error:
+            (result.error ?? 'Python 执行失败') +
+            describePythonErrorHints(`${result.error ?? ''}\n${result.stdout ?? ''}`) +
+            hint,
           details: { stdout: result.stdout }
         }
       }

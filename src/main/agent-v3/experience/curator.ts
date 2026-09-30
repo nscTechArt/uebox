@@ -32,9 +32,10 @@ import { randomBytes } from 'crypto'
 import { basename } from 'path'
 
 import type { SkillLearningMode } from '../capabilities/skills'
-import { admit, covered, MAX_ACTIVE_PER_LAYER, weakest } from './admission'
+import { admit, covered, MAX_ACTIVE_PER_LAYER, patternCovered, weakest } from './admission'
 import { engineMinor, type ExperienceEntry } from './experienceFile'
 import type { ExperienceLayer, LayeredEntry } from './recall'
+import { errorProblem, patternProblem, STRICT_TOOLS } from './specificity'
 import { ExperienceStore, experienceDir } from './store'
 import type { TrailCall, TrailHeader } from './trail'
 
@@ -53,6 +54,11 @@ export interface LessonCandidate {
   /** 失败和成功之间调过的工具 */
   between: string[]
   failures: number
+  /**
+   * 同一工具在这次会话里的其他报错（指纹不同的）。片段也能对上它们，就说明太宽 ——
+   * 那几次是另外的事，同一条经验不该都管
+   */
+  siblings: string[]
 }
 
 export interface Lesson {
@@ -91,6 +97,8 @@ export function findLessonCandidates(
       if (seen.has(key)) continue
       // 已有经验对得上的，是召回的事，不是新经验
       if (covered(existing, fail.tool, fail.error)) continue
+      // 上帝工具只学 Python 异常、不学脚本自己的 bug：注定丢掉的就别花一次模型调用
+      if (errorProblem(fail.tool, fail.error)) continue
 
       const fixIndex = stream.findIndex(
         (call, j) => j > k && j <= k + PAIR_WINDOW && call.tool === fail.tool && call.ok
@@ -110,6 +118,13 @@ export function findLessonCandidates(
         failArgs: fail.args,
         fixArgs: fix.args,
         between: stream.slice(k + 1, fixIndex).map((call) => call.tool),
+        siblings: [
+          ...new Set(
+            calls
+              .filter((c) => c.tool === fail.tool && !c.ok && c.error && c.fp !== fail.fp)
+              .map((c) => c.error as string)
+          )
+        ],
         failures: window.filter((call) => call.tool === fail.tool && !call.ok).length
       })
       if (candidates.length >= MAX_CANDIDATES_PER_SESSION) return candidates
@@ -131,7 +146,8 @@ export function buildCuratorPrompt(
     '',
     'Answer with a JSON array only, no prose. One object per lesson:',
     '{"index": <case index>, "title": "<short name of the pitfall>", "errorPattern": "<copied verbatim from the normalized error>", "advice": "<what to do instead>", "expect": {"tool": "<tool to call next>", "param": "<argument that must change>"}, "scope": "engine" | "project"}',
-    '- errorPattern: a short distinctive substring (6–120 characters) copied exactly from the normalized error. Keep the identifiers that name the problem; drop the parts that would differ next time.',
+    '- errorPattern: a distinctive substring (12–120 characters) copied exactly from the normalized error. Keep the identifiers that name the problem; drop the parts that would differ next time. It must be specific enough that an unrelated error would not contain it: "has no attribute" or "not found" alone is too broad.',
+    `- For ${[...STRICT_TOOLS].join(' and ')}, which run arbitrary code: only write a lesson when the failure taught something about the engine API, never about a mistake in the script itself (a misspelled variable, a syntax error). errorPattern must include the quoted name the error is about (class, attribute, function or parameter) and cover most of the exception message.`,
     '- advice: one or two concrete, imperative sentences, at most 300 characters.',
     '- expect: the next action that shows the advice was followed. Give "tool" if another tool should be called first (it must be a tool that appears in the case), or "param" if the same tool should be retried with that argument changed. Give at least one.',
     '- scope: "engine" if the lesson is about how Unreal Engine or its API behaves and would hold in any project on this engine version; "project" if it depends on this project\'s own assets, classes, names or settings. When unsure, use "project". An engine lesson must not mention this project\'s asset paths or names.',
@@ -190,8 +206,11 @@ export function validateLesson(
   knownTools: ReadonlySet<string>
 ): Lesson | undefined {
   const pattern = lesson.errorPattern.trim().toLowerCase()
-  if (pattern.length < 6 || pattern.length > 160) return undefined
-  if (!candidate.error.includes(pattern)) return undefined
+  if (pattern.length > 160) return undefined
+  // 够不够具体：长度、有没有能区分的词，上帝工具还要带名字、覆盖大半（见 specificity.ts）
+  if (patternProblem(candidate.tool, pattern, candidate.error)) return undefined
+  // 这次会话里别的报错也对得上，说明太宽
+  if (candidate.siblings.some((other) => other.includes(pattern))) return undefined
 
   const title = lesson.title.trim()
   const advice = lesson.advice.trim()
@@ -305,7 +324,7 @@ async function writeInto(
   }
   let added = false
   await store.updateTool(entry.tool, (list) => {
-    if (covered(list, entry.tool, entry.errorPattern)) return undefined
+    if (patternCovered(list, entry.tool, entry.errorPattern)) return undefined
     const next = admit(list, entry, ledger)
     if (next) added = true
     return next
@@ -366,6 +385,11 @@ export async function curateSession(deps: CurateDeps): Promise<CurateResult> {
   for (const { layer, ...entry } of accepted) {
     const store = layer === 'global' ? global : project
     if (!store) continue
+    // 先确认真会写再拍快照：写不进去（已有同样的、名额被钉住的占满）还留一份快照，
+    // 界面就会给出一次「撤销」，点了会把这之后运行时记下的转正和计数一起退回去
+    const list = await store.readTool(entry.tool)
+    if (patternCovered(list, entry.tool, entry.errorPattern)) continue
+    if (!admit(list, entry, await store.readLedger())) continue
     if (!snapshotted.has(layer)) {
       await store.snapshot(now)
       snapshotted.add(layer)

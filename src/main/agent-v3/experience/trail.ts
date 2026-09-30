@@ -11,6 +11,7 @@
  * 7 天后由整理员清掉。userData 在 `pathBoundary` 的禁区里，干活的 agent 读不到它。
  */
 
+import { createHash } from 'crypto'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 
@@ -61,14 +62,25 @@ export interface TrailCurated {
 
 export type TrailLine = TrailHeader | TrailCall | TrailCurated
 
+/**
+ * 参数摘要：仍是合法 JSON，只把过长的字符串值截短。
+ *
+ * 不能整段截：截断的 JSON 解析不了，按参数判采纳（`runtime.ts`）、对账（`curator.ts`）
+ * 就都读成 undefined。截短的值后面带上全文的哈希 —— 只改了第 800 字之后几行的两段脚本，
+ * 摘要也必须不一样，否则「换了参数才成功」会被当成原样重试。
+ */
 export function digestArgs(args: unknown): string {
-  let text: string
   try {
-    text = JSON.stringify(args) ?? ''
+    return (
+      JSON.stringify(args, (_key, value: unknown) =>
+        typeof value === 'string' && value.length > ARGS_DIGEST_LIMIT
+          ? `${value.slice(0, ARGS_DIGEST_LIMIT)}…#${createHash('sha1').update(value).digest('hex').slice(0, 12)}`
+          : value
+      ) ?? ''
+    )
   } catch {
-    text = '<unserializable>'
+    return '<unserializable>'
   }
-  return text.length > ARGS_DIGEST_LIMIT ? `${text.slice(0, ARGS_DIGEST_LIMIT)}…` : text
 }
 
 function fileFor(dir: string, sessionId: string): string {

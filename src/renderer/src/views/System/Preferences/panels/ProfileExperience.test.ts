@@ -34,7 +34,7 @@ vi.mock('@renderer/api/agentV3', () => ({
   }
 }))
 
-import ExperienceSection from './ExperienceSection.vue'
+import ProfileExperience from './ProfileExperience.vue'
 
 const stats = {
   shown: 6,
@@ -79,7 +79,7 @@ const ENTRIES = [
 ]
 
 function mountSection(): VueWrapper {
-  return mount(ExperienceSection, {
+  return mount(ProfileExperience, {
     global: {
       mocks: { $t: (key: string) => key },
       stubs: { 'a-select': true },
@@ -112,7 +112,7 @@ describe('经验分组', () => {
     listExperiences.mockRejectedValue(new Error('磁盘坏了'))
     const wrapper = mountSection()
     await flushPromises()
-    expect(wrapper.text()).toContain('profile.skills.experience.loadFailed')
+    expect(wrapper.text()).toContain('profile.experience.loadFailed')
     expect(wrapper.find('.count').text()).toBe('—')
   })
 
@@ -121,7 +121,7 @@ describe('经验分组', () => {
     await flushPromises()
     await wrapper.find('.entity-open').trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('profile.skills.experience.detail.lift')
+    expect(document.body.textContent).toContain('profile.experience.detail.lift')
 
     const deleteButton = [...document.body.querySelectorAll('button')].find((b) =>
       b.textContent?.includes('common.delete')
@@ -139,7 +139,7 @@ describe('经验分组', () => {
   it('有可撤销的整理才给按钮，确认后才撤销', async () => {
     const plain = mountSection()
     await flushPromises()
-    expect(plain.text()).not.toContain('profile.skills.experience.undo')
+    expect(plain.text()).not.toContain('profile.experience.undo')
     plain.unmount()
 
     listExperiences.mockResolvedValue({
@@ -151,7 +151,7 @@ describe('经验分组', () => {
     await flushPromises()
     const undoButton = wrapper
       .findAll('button')
-      .find((b) => b.text().includes('profile.skills.experience.undo'))
+      .find((b) => b.text().includes('profile.experience.undo'))
     await undoButton?.trigger('click')
     expect(undoLastCuration).not.toHaveBeenCalled()
     await (confirmDialog.mock.calls[0][0] as { onOk: () => Promise<void> }).onOk()

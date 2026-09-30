@@ -14,6 +14,7 @@ import ProfileAppearance from './panels/ProfileAppearance.vue'
 import ProfileAI from './panels/ProfileAI.vue'
 import ProfilePersonalization from './panels/ProfilePersonalization.vue'
 import ProfileSkills from './panels/ProfileSkills.vue'
+import ProfileExperience from './panels/ProfileExperience.vue'
 import ProfileTools from './panels/ProfileTools.vue'
 import ProfileUsage from './panels/Usage/ProfileUsage.vue'
 import AIProviderSettings from './panels/AIProviders/AIProviderSettings.vue'
@@ -63,6 +64,10 @@ const pageHeaders: Record<string, { titleKey: string; descKey?: string }> = {
   },
   skills: {
     titleKey: 'profile.skills.title'
+  },
+  experience: {
+    titleKey: 'profile.experience.title',
+    descKey: 'profile.experience.description'
   },
   tools: {
     titleKey: 'profile.tools.title',
@@ -216,6 +221,9 @@ function handleMenuChange(key: string): void {
 
             <!-- 技能：它会做哪些事。搜索、按来源筛、自己的那些就地删 -->
             <ProfileSkills v-else-if="activeKey === 'skills'" />
+
+            <!-- 经验库：做事时踩过又绕过去的坑，两层（通用 / 各工程），自动淘汰 -->
+            <ProfileExperience v-else-if="activeKey === 'experience'" />
 
             <!-- 工具：它手上有哪些工具，按大类折叠开关；工具搜索开关也在这儿 -->
             <ProfileTools v-else-if="activeKey === 'tools'" />

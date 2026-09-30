@@ -28,6 +28,8 @@
 const ENVIRONMENTAL_PATTERNS: RegExp[] = [
   /请求超时|E_TIMEOUT|timed?[ -]?out/i,
   /没有可用的客户端连接|No Unreal Editor connection|not connected|连接已断开|编辑器已经关闭/i,
+  // Python 发出去了但没拿到结果：执行了没有都不知道，谈不上知识
+  /没有连接的虚幻引擎项目|未收到 Python 完成结果|Python 执行未确认|未确认执行结果/,
   /Operation aborted|aborted|已取消|用户按了停止/i,
   /另一条 AI 会话|正被.*修改中/,
   /Validation failed for tool/,

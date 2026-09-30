@@ -789,6 +789,16 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     risk: 'safe',
     make: () => ueSystem.createZenServerTool()
   },
+  /**
+   * 编辑器状况：启动耗时、卡顿率、进 PIE 耗时、本地缓存命中、可用内存。
+   * 只读快照，和顶栏状态监控面板同一份数据（services/editorHealth.ts）。
+   */
+  {
+    name: 'ue_editor_health',
+    namespace: 'ue.system',
+    risk: 'safe',
+    make: () => ueSystem.createEditorHealthTool()
+  },
   // 下面四个都能在引擎里执行任意代码 —— 一律按不可逆处理，auto-edit 下也要问
   {
     name: 'ue_run_console_command',

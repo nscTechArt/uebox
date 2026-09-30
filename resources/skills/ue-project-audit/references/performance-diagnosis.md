@@ -124,7 +124,8 @@ UE5 默认打开的几套系统本身就是常见的 GPU 大户，尤其是场�
 |---|---|---|
 | 三线程分级 | `ue_capture_perf_trace` | 高——直接读引擎自己的逐帧数据 |
 | 分辨率缩放验证 | `ue_run_console_command('r.ScreenPercentage N')` + 重采样 | 高——数值对比，因果关系清楚 |
-| GPU 具名 Pass 排行 | `ue_insights_trace`：先 `action="capture"`，再 `action="analyze"` | 中——依赖 Insights CLI 导出，见 SKILL.md 主文件的已知局限 |
+| GPU 具名 Pass 排行 | `ue_insights_trace`：先 `action="capture"`，再 `action="analyze"`，看 `threads.gpu` | 中——依赖 Insights CLI 导出，见 SKILL.md 主文件的已知局限 |
+| 改前改后对比 | `ue_insights_trace`：改前、改后各 capture 一份同样的操作，再 `action="compare"` | 中——同上；两次录的操作不一样时比出来的差别没有意义 |
 | Tick 对象清单 | `dumpticks` + `read_local_file` 读日志 | 低——命令能跑，但读取路径没有专门工具，纯手动拼 |
 | 资产结构线索（Nanite/实例数/贴图） | `ue_find_heavy_assets` / `ue_project_asset_ranking` / `ue_content_audit_optimization` | 高——已经是这个 skill 的核心工具 |
 | 屏幕叠加层读数（`stat gpu`/`stat game`） | `ue_screenshot(show_ui=true)`，但**没有实测过** | 低——原理上抓的就是用户屏幕那一份，叠加层应该在画面里；数字认不认得出来没人验过。读不清就直接说读不清，别猜 |

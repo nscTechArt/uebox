@@ -30,7 +30,8 @@ Turning a diagnosis into proof — duplicate the level, remove the suspect, meas
 | `ue_get_performance_stats` | is it fast right now | this instant, this editor |
 | `ue_capture_perf_trace` | is it fast over a stretch of time, and what's the bottleneck | N seconds, this editor |
 | `ue_insights_trace` (`action: capture`) | record a raw Unreal Insights trace | N seconds, this editor |
-| `ue_insights_trace` (`action: analyze`) | which timer ate the most time in a recorded trace | one `.utrace` file |
+| `ue_insights_trace` (`action: analyze`) | which timer ate the most time, per thread (game / render / GPU) | one `.utrace` file |
+| `ue_insights_trace` (`action: compare`) | did my change make it faster, and which timer moved | two `.utrace` files, before and after |
 
 `ue_project_asset_ranking` reads asset-registry tags and file sizes without loading a single
 asset, so it is safe to run over all of `/Game`. `ue_capture_perf_trace` and
@@ -53,7 +54,13 @@ or reports something that only happens sometimes, reach for the time-window tool
 - **`ue_insights_trace`**, `action: "capture"` then `action: "analyze"` — for when the question
   is finer-grained than "which subsystem" — "which specific function or render pass". `capture`
   records a full Unreal Insights trace (`.utrace`); `analyze` takes that `utrace_path` and spawns
-  Unreal Insights headlessly to export and rank timer statistics. Slower, and the Insights CLI export path has a
+  Unreal Insights headlessly to rank timers separately for the game thread, render thread and
+  GPU, plus the game thread's frame times and its longest single calls (hitch suspects).
+  Generic task waits (`WaitForTasks` and the like) are summed separately, not ranked — a thread
+  waiting on others is not the slow part. `start_seconds` / `end_seconds` narrow it to a slice
+  of the trace when the start is loading or entering PIE. `compare` takes a before
+  (`baseline_utrace_path`) and an after (`utrace_path`) trace and lists the biggest per-frame
+  changes; only compare two recordings of the same activity. Slower, and the Insights CLI export path has a
   documented flaky-empty-output issue (not this tool's bug — say so if it happens, and offer to
   retry). Reach for `ue_capture_perf_trace` first; only go here when the user needs event-level
   detail `ue_capture_perf_trace`'s five stats cannot give.
@@ -187,10 +194,11 @@ Say this plainly rather than approximating it:
   `ue_screenshot` does not help here: its default path renders the scene directly (SceneCapture),
   which never includes that overlay. See `references/performance-diagnosis.md` §8 for what to use
   instead (Insights timer ranking, or asset-structure clues) when the user needs this.
-- **Thread distribution and memory allocation traces from Insights** — `ue_insights_trace` (`analyze`)
-  only exports timer statistics (`TimingInsights.ExportTimerStatistics`). It does not export
-  `ExportThreads` or memory data; a user who needs those has to open the `.utrace` in the Unreal
-  Insights UI themselves. Say this rather than guessing at thread breakdowns from timer names.
+- **Memory and asset-loading data from Insights** — `ue_insights_trace` (`analyze`) exports timer
+  statistics per thread and nothing else. The engine has no command-line export for Memory
+  Insights or Asset Loading Insights: the `memory` / `loadtime` channels can be recorded, but the
+  user has to open the `.utrace` in the Unreal Insights UI to read them. Say this rather than
+  guessing at memory numbers from timer names.
 - **RenderDoc frame captures** — requires the separate UE4RenderDocPlugin plus a standalone
   RenderDoc install; `renderdoc.CaptureFrame` opens an interactive GUI, it does not hand back
   data. Out of scope here; tell the user to use it directly if they need draw-call-level GPU
