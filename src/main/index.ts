@@ -484,6 +484,16 @@ if (process.platform === 'win32') {
 // 应用初始化前设置单例锁
 const shouldInitializeApp = setupSingleInstanceLock()
 
+// macOS 不把 unrealbox:// 放进命令行参数，而是发 open-url（冷启动时在 ready 之前就发）。
+// 等 ready 再交给团队处理：「打开工程」那一路要读资产库配置
+if (process.platform === 'darwin' && shouldInitializeApp) {
+  app.on('open-url', (event, url) => {
+    if (!/^unrealbox:\/\//i.test(url)) return
+    event.preventDefault()
+    void app.whenReady().then(() => handleTeamDeepLink(url))
+  })
+}
+
 // 在应用启动前声明自定义协议（必须在 app.whenReady() 之前）
 // 这告诉 Electron 这是一个特权协议，允许在渲染进程中使用
 protocol.registerSchemesAsPrivileged([
