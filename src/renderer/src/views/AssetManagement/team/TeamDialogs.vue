@@ -164,6 +164,14 @@ async function cancelCheckout(discard: boolean): Promise<void> {
     error.value = failureText(result)
     return
   }
+  // 有人在等这个文件（问过你改完没）：告诉服务端你已取消签出，服务端替他签出
+  const ask = teamStore.receivedAsks[d.path]
+  if (ask) {
+    await teamAPI.answerAsk(key, ask.id, { kind: 'released' })
+    const next = { ...teamStore.receivedAsks }
+    delete next[d.path]
+    teamStore.receivedAsks = next
+  }
   closeTeamDialog(true)
   void teamStore.loadCheckouts()
 }
