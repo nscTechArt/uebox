@@ -158,7 +158,7 @@
     "vis-data": "^8.0.5",
     "vis-network": "^10.1.0",
     "vue-cropper": "^1.0.2",
-    "vue-i18n": "^9.14.5",
+    "vue-i18n": "^11.4.12",
     "vue-router": "4",
     "webdav": "^5.10.0",
     "webidl-conversions": "7.0.0",
