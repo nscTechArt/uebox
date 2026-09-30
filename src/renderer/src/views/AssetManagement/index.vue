@@ -446,7 +446,7 @@
                 />
               </div>
               <button
-                v-if="isShowingDeleted"
+                v-if="isShowingDeleted && !libraryCaps.team"
                 class="action-btn danger"
                 :title="
                   isHttpNetworkVault
