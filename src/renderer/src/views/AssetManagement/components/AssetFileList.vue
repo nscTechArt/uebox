@@ -924,6 +924,8 @@ const effectiveImportTasks = computed(() => {
     if (!visibleTaskIds.has(t.id)) return false
     // 🟢 project-import 任务使用文件夹覆盖层，不显示占位卡片
     if (t.taskType === 'project-import') return false
+    // 已结束但有问题的任务留在右下角进度挂件里等用户查看/关掉，网格里不再占一张 100% 的卡
+    if (t.status === 'error') return false
     // 🔒 保管库隔离检查：如果任务属于其他保管库，则不显示
     if (t.vaultId && currentVaultId && t.vaultId !== currentVaultId) return false
     // 如果任务没有指定 folderKey，默认显示在 ALL 文件夹

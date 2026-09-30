@@ -94,7 +94,7 @@
           缺的是什么、要不要去保管库补、能不能只导没问题的，一概不知道。
         -->
         <button
-          v-if="task.status === 'error' && task.report"
+          v-if="task.status === 'error' && (task.report || task.vaultResult)"
           type="button"
           class="detail-button"
           @click.stop="emit('inspect', task.id)"
@@ -139,6 +139,8 @@ interface ImportTask {
   cancellable?: boolean
   /** 出了什么问题、影响了谁。有它才给「查看详情」 */
   report?: ImportFailureReport
+  /** 导入资产库的结果报告，同样给「查看详情」 */
+  vaultResult?: unknown
 }
 
 const props = defineProps<{
