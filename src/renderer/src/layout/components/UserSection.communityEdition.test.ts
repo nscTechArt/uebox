@@ -13,7 +13,9 @@ function mountUserSection(): ReturnType<typeof mount> {
   return mount(UserSection, {
     props: {
       collapsed: false
-    }
+    },
+    // 更新角标依赖全局 Store，这里只测设置入口本身
+    global: { stubs: { UpdateBadge: true } }
   })
 }
 

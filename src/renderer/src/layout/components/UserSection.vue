@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { PhGear } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import UpdateBadge from './UpdateBadge.vue'
 
 const props = defineProps<{ collapsed: boolean }>()
 const router = useRouter()
@@ -25,30 +26,45 @@ function handleGoPreferences(): void {
 </script>
 
 <template>
-  <button
-    type="button"
-    :class="['preferences-shortcut', { collapsed: props.collapsed }]"
-    :aria-label="t('common.preferences')"
-    @click="handleGoPreferences"
-  >
-    <PhGear :size="22" class="preferences-icon" aria-hidden="true" />
-    <span v-if="!props.collapsed" class="version">v{{ appVersion }}</span>
-  </button>
+  <div :class="['user-section', { collapsed: props.collapsed }]">
+    <button
+      type="button"
+      :class="['preferences-shortcut', { collapsed: props.collapsed }]"
+      :aria-label="t('common.preferences')"
+      @click="handleGoPreferences"
+    >
+      <PhGear :size="22" class="preferences-icon" aria-hidden="true" />
+      <span v-if="!props.collapsed" class="version">v{{ appVersion }}</span>
+    </button>
+    <!-- 更新角标贴在版本号这一行的最右边；按钮不能套按钮，所以和设置入口并排 -->
+    <UpdateBadge v-if="!props.collapsed" class="update-badge-slot" />
+  </div>
 </template>
 
 <style scoped lang="less">
-.preferences-shortcut {
-  position: relative;
+.user-section {
   flex: none;
   width: 100%;
-  min-height: 48px;
   margin-top: auto;
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--color-border-subtle);
+
+  &:not(.collapsed) {
+    padding-right: 12px;
+  }
+}
+
+.preferences-shortcut {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: 9px 15px;
   border: 0;
-  border-top: 1px solid var(--color-border-subtle);
   background: transparent;
   color: var(--color-text-secondary);
   font: inherit;

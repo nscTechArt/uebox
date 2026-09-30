@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import AppTooltip from '@renderer/components/AppTooltip.vue'
 import {
-  PhArrowClockwise,
   PhBooks,
   PhChatCircle,
   PhCubeTransparent,
-  PhDownloadSimple,
   PhGear,
   PhCube,
   PhHardDrives,
@@ -23,11 +21,7 @@ import {
 import type { Component } from 'vue'
 import { computed, watch, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { storeToRefs } from 'pinia'
 import { useTabsStore, DEFAULT_TAB_KEY } from '@renderer/store/modules/tabs'
-import { formatUpdateVersion, useUpdateStore } from '@renderer/store/modules/updateStore'
-import { useUpdateInstall } from '@renderer/composables/useUpdateInstall'
-import { message } from '@renderer/utils/messageManager'
 import { useI18n } from '@renderer/hooks/useI18n'
 import ContextMenu from '@renderer/components/ContextMenu/ContextMenu.vue'
 import type { MenuItem } from '@renderer/components/ContextMenu/types'
@@ -661,80 +655,6 @@ watch(
   }
 )
 
-/**
- * 更新角标。
- *
- * 状态本身在全局 Store 里（store/modules/updateStore.ts），这里只负责画和点。
- * 以前这块是自己挂三个监听、只认「已下载」一种状态 —— 而下载只能从
- * 「设置 → 关于」手动发起，于是这个按钮在真实使用中几乎永远不出现。
- */
-const updateStore = useUpdateStore()
-const { confirmInstall } = useUpdateInstall()
-const {
-  phase: updatePhase,
-  latestVersion: updateVersion,
-  downloadPercent
-} = storeToRefs(updateStore)
-
-const showUpdateButton = computed(() => updateStore.hasUpdateNews)
-
-const updateVersionLabel = computed(() => formatUpdateVersion(updateVersion.value))
-
-const updateButtonText = computed(() => {
-  if (updatePhase.value === 'downloading') {
-    return t('update.downloadingPercent', { percent: downloadPercent.value })
-  }
-  if (updatePhase.value === 'downloaded') return t('update.restartToUpdate')
-  return updateVersionLabel.value
-    ? t('update.updateTo', { version: updateVersionLabel.value })
-    : t('update.newVersionAvailable')
-})
-
-const updateButtonTooltip = computed(() => {
-  if (updatePhase.value === 'downloading') {
-    return t('update.downloadingHint', { version: updateVersionLabel.value })
-  }
-  if (updatePhase.value === 'downloaded') return t('update.readyToInstall')
-  return t('update.downloadHint', { version: updateVersionLabel.value })
-})
-
-const updateButtonIcon = computed(() => {
-  if (updatePhase.value === 'downloaded') return PhArrowClockwise
-  return PhDownloadSimple
-})
-
-/**
- * 点角标。三种阶段三件事：可更新 → 开始下载；下载中 → 不响应；已下载 → 问一句再重启。
- */
-const handleUpdateClick = (): void => {
-  if (updatePhase.value === 'downloading') return
-
-  if (updatePhase.value === 'downloaded') {
-    // 弹窗和失败提示都在 useUpdateInstall 里 —— 关于页用的是同一份，
-    // 免得同一个动作按入口不同给两种反馈（原来这里失败是一声不吭的）
-    confirmInstall()
-    return
-  }
-
-  // 下载几百 MB，不能 await 着它画 loading —— 进度走 downloadPercent
-  message.info(t('update.downloadStarted'))
-  void startDownload()
-}
-
-/**
- * 下载的失败分两种，只有一种会自己报。
- *
- * 主进程真跑起来之后出的错走 update-error 事件，App.vue 统一报一次，这里不用管。
- * 但「压根没开始」（没配更新源、没有可用更新、已有下载在跑）是主进程静默返回成功、
- * 由 Store 自己判出来的 —— 没有任何事件会推过来。不在这儿报的话，用户刚被告知
- * 「开始下载」，角标却悄悄退回「有新版本」，没有一个字的解释，而且每次点都一样。
- */
-async function startDownload(): Promise<void> {
-  const result = await updateStore.download()
-  if (result.success) return
-  message.error(result.errorKey ? t(result.errorKey) : result.error || t('update.unavailable'))
-}
-
 onMounted(() => {
   nextTick(() => {
     recalcTabWidth()
@@ -846,27 +766,6 @@ onBeforeUnmount(() => {
     </div>
     <!-- 可拖动空间（确保标签页很多时仍有拖动区域） -->
     <div class="header-spacer"></div>
-    <!-- 更新角标：可更新 / 下载中 / 待重启三态共用一枚按钮 -->
-    <AppTooltip v-if="showUpdateButton" placement="bottom" :title="updateButtonTooltip">
-      <button
-        class="update-button"
-        :class="`is-${updatePhase}`"
-        :aria-disabled="updatePhase === 'downloading'"
-        @click="handleUpdateClick"
-      >
-        <!-- 下载进度直接铺在按钮底色上，不另占一条进度条的位置 -->
-        <span
-          v-if="updatePhase === 'downloading'"
-          class="update-progress"
-          :style="{ width: `${downloadPercent}%` }"
-        />
-        <span class="update-body">
-          <span v-if="updatePhase === 'available'" class="update-dot" aria-hidden="true" />
-          <component :is="updateButtonIcon" v-else class="update-icon" weight="bold" />
-          <span class="update-text">{{ updateButtonText }}</span>
-        </span>
-      </button>
-    </AppTooltip>
     <div v-if="!isMac" class="window-controls">
       <button class="window-button" @click="minimizeWindow">
         <svg width="12" height="12" viewBox="0 0 12 12">
@@ -1205,121 +1104,6 @@ onBeforeUnmount(() => {
   &:hover {
     background: var(--color-bg-surface-hover);
     color: var(--color-text-primary);
-  }
-}
-
-.update-button {
-  -webkit-app-region: no-drag;
-  position: relative;
-  display: flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 10px;
-  margin-right: 8px;
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-full);
-  background: var(--color-accent-bg);
-  color: var(--color-accent-text);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  overflow: hidden;
-  transition:
-    background var(--motion-fast) var(--easing-standard),
-    border-color var(--motion-fast) var(--easing-standard),
-    transform var(--motion-fast) var(--easing-standard);
-
-  /* 内容压在进度条之上 */
-  .update-body {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .update-icon {
-    font-size: 13px;
-    flex-shrink: 0;
-  }
-
-  .update-text {
-    white-space: nowrap;
-    /* 下载中数字每秒都在跳，等宽数字能防止按钮宽度抖动 */
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* 「有新版本」用一颗呼吸的小圆点，比图标更像通知，也更安静。
-     呼吸 8 次（约 16 秒）就停：这个阶段会一直挂到用户点下载为止，也就是
-     基本等于整个会话。`infinite` 的话标题栏里就永远有一个合成动画在跑，
-     GPU 进程再也不进空闲 —— 只是开着窗口也在掉电。吸引注意本来也只需要
-     开头那几下，之后圆点静静留着就够了 */
-  .update-dot {
-    width: 6px;
-    height: 6px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    background: currentColor;
-    animation: update-dot-pulse 2s var(--easing-standard) 8;
-  }
-
-  /* 进度条不能用 --color-accent-bg-hover：浅色下它是 #ededed，压在 #f7f7f7 的
-     按钮底色上对比度只有 1.1:1，等于看不见；而且那正是 hover 的底色，
-     真看见了也会被当成鼠标划过。改用强调实色压低透明度 —— 两套主题下都能
-     看出来，又不会盖掉上面那行字 */
-  .update-progress {
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: 0;
-    background: var(--color-accent-solid);
-    opacity: 0.28;
-    transition: width var(--motion-normal) var(--easing-standard);
-  }
-
-  &:not([aria-disabled='true']):hover {
-    background: var(--color-accent-bg-hover);
-    border-color: var(--color-accent-solid);
-  }
-
-  &:not([aria-disabled='true']):active {
-    transform: scale(0.97);
-  }
-
-  /* 下载中用 aria-disabled 而不是 disabled：原生 disabled 会连鼠标事件一起吞掉，
-     外面那层 Tooltip 就再也弹不出来了。点击本身在处理函数里已经挡住 */
-  &[aria-disabled='true'] {
-    cursor: default;
-  }
-
-  /* 已下载：这一步是唯一会重启应用的动作，给它实心底色区别开 */
-  &.is-downloaded {
-    background: var(--color-accent-solid);
-    border-color: var(--color-accent-solid);
-    color: var(--color-text-on-solid);
-
-    &:not([aria-disabled='true']):hover {
-      background: var(--color-accent-solid-hover);
-      border-color: var(--color-accent-solid-hover);
-    }
-  }
-}
-
-@keyframes update-dot-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.4;
-    transform: scale(0.8);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .update-button .update-dot {
-    animation: none;
   }
 }
 
