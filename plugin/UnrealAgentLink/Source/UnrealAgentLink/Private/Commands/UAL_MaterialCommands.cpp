@@ -1106,6 +1106,56 @@ namespace
 #endif
 	}
 
+	/**
+	 * 从 Source 顺着输入往上游走，这根线里**可能**带着 Substrate 数据吗。
+	 *
+	 * 不能只看输出类型：5.4–5.7 上 MaterialFunctionCall、StaticSwitch 都没覆写
+	 * GetOutputType，基类对不带 mask 的输出一律回 MCT_Float —— 引擎自带的
+	 * Substrate 材质函数（SMF_Coated…）、在两个 Slab 之间切的静态开关都会被当成数值。
+	 *
+	 * 所以判「来源」：上游有 Substrate 节点就可能带；碰到数据来源在别处、
+	 * 从图上看不到的节点（函数调用、命名重定向的 usage、函数输入）也按「可能」算，
+	 * 交给编译器判。只有整条上游都是看得见的普通节点，才能断定是数值。
+	 */
+	bool UAL_MayCarrySubstrate(UMaterialExpression* Source)
+	{
+		// 上限只防病态大图，正常材质远到不了
+		constexpr int32 MaxVisited = 4096;
+		TSet<UMaterialExpression*> Seen;
+		TArray<UMaterialExpression*> Stack = { Source };
+		while (Stack.Num() > 0)
+		{
+			UMaterialExpression* Current = Stack.Pop();
+			if (!Current || Seen.Contains(Current))
+			{
+				continue;
+			}
+			if (Seen.Num() >= MaxVisited)
+			{
+				return true;
+			}
+			Seen.Add(Current);
+
+			const UClass* Class = Current->GetClass();
+			if (UAL_IsSubstrateClass(Class) ||
+				Class->IsChildOf(UMaterialExpressionMaterialFunctionCall::StaticClass()) ||
+				Class->IsChildOf(UMaterialExpressionNamedRerouteUsage::StaticClass()) ||
+				Class->GetFName() == TEXT("MaterialExpressionFunctionInput"))
+			{
+				return true;
+			}
+			const int32 InputCount = UALCompat::CountInputs(Current);
+			for (int32 i = 0; i < InputCount; ++i)
+			{
+				if (FExpressionInput* In = Current->GetInput(i))
+				{
+					Stack.Add(In->Expression);
+				}
+			}
+		}
+		return false;
+	}
+
 	/** 当前编辑器里 Substrate 是否生效。r.Substrate 只在启动时读，运行中改了不算 */
 	bool UAL_IsSubstrateEnabled()
 	{
@@ -1143,6 +1193,34 @@ namespace
 	}
 
 	/**
+	 * 这个材质此刻是不是按 Substrate 解释主节点。
+	 *
+	 * - 没开 Substrate：不是。
+	 * - 5.6+（引擎做「隐藏转换」）：FrontMaterial 接了东西才是；空着的时候引擎在编译时
+	 *   自己把 BaseColor 那一排转过去，主节点照普通材质的规矩用。
+	 * - 5.4 / 5.5：开着 Substrate 就是 —— 普通引脚不受支持（5.5 改一次还会被自动转换挪走）。
+	 */
+	bool UAL_MaterialInSubstrateMode(UMaterial* Material)
+	{
+#if UAL_WITH_SUBSTRATE
+		if (!Material || !UAL_IsSubstrateEnabled())
+		{
+			return false;
+		}
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6)
+		if (Substrate::IsHiddenMaterialAssetConversionEnabled())
+		{
+			const UMaterialEditorOnlyData* Data = Material->GetEditorOnlyData();
+			return Data && Data->FrontMaterial.IsConnected();
+		}
+#endif
+		return true;
+#else
+		return false;
+#endif
+	}
+
+	/**
 	 * Substrate 开着时，主节点上这根引脚是不是被引擎忽略了。
 	 *
 	 * Substrate 下 BaseColor / Metallic / Roughness / Normal / Emissive… 这一排
@@ -1157,36 +1235,52 @@ namespace
 	 *
 	 * 判据直接用引擎的 `IsPropertyActiveInEditor`（材质编辑器灰掉引脚用的就是它），
 	 * 它会看域、混合模式、曲面细分这些，不自己抄一份规则。
+	 *
+	 * **但只问 Substrate 顶替掉的那几根。** 这个函数一度对每根主节点引脚都问一遍，
+	 * 于是 OpacityMask / Opacity 这种「因为混合模式还是 Opaque 才不生效」的也被拒了 ——
+	 * 5.7/5.8 新工程默认开着 Substrate，老式的「先连 Opacity、再改 Translucent」
+	 * 直接 400，报错还叫人去用 Substrate 节点。混合模式没对上是普通材质的老规矩，
+	 * 没开 Substrate 时从来不拦，开了也不该拦。
+	 *   · 着色那一排（BaseColor…Normal、SubsurfaceColor）：Substrate 下不生效就是被它顶替了
+	 *   · Opacity：只有混合模式本来就会用它（半透明类）却仍不生效时，才是 Substrate
+	 *     改用 Coverage 的缘故
+	 *   · OpacityMask / WPO / AO / MaterialAttributes / FrontMaterial：生效条件和
+	 *     普通材质一样，不归这里管
 	 */
 	bool UAL_RootPinIgnoredBySubstrate(UMaterial* Material, const TCHAR* PinName)
 	{
 #if UAL_WITH_SUBSTRATE
-		if (!Material || !UAL_IsSubstrateEnabled())
+		/*
+		 * 先问材质此刻是不是**按 Substrate 解释**，不是就一根都不拦。
+		 *
+		 * 真机撞过（5.8、Substrate 开着、普通半透明材质、FrontMaterial 空着）：
+		 * Roughness 灰掉是因为半透明的光照模式（VolumetricNonDirectional）本来就不用它，
+		 * 这是普通材质的老规矩；可这里只看「不生效」，就按「被 Substrate 顶替」拒了，
+		 * AI 只好把粗糙度删掉，还跟用户说「开着 Substrate 只准用这几根引脚」。
+		 * Unlit 材质的 BaseColor、各种着色模型下灰掉的引脚都是同一类。
+		 * 「不生效」有很多原因，只有材质处在 Substrate 模式时，才是 Substrate 的缘故。
+		 */
+		if (!UAL_MaterialInSubstrateMode(Material))
 		{
 			return false;
 		}
-		struct FPinProperty { const TCHAR* Name; EMaterialProperty Property; };
-		static const FPinProperty Table[] = {
-			{ TEXT("BaseColor"), MP_BaseColor },
-			{ TEXT("Metallic"), MP_Metallic },
-			{ TEXT("Specular"), MP_Specular },
-			{ TEXT("Roughness"), MP_Roughness },
-			{ TEXT("EmissiveColor"), MP_EmissiveColor },
-			{ TEXT("Opacity"), MP_Opacity },
-			{ TEXT("OpacityMask"), MP_OpacityMask },
-			{ TEXT("Normal"), MP_Normal },
-			{ TEXT("WorldPositionOffset"), MP_WorldPositionOffset },
-			{ TEXT("SubsurfaceColor"), MP_SubsurfaceColor },
-			{ TEXT("AmbientOcclusion"), MP_AmbientOcclusion },
-			{ TEXT("MaterialAttributes"), MP_MaterialAttributes },
-			{ TEXT("FrontMaterial"), MP_FrontMaterial },
+		// Substrate 模式下着色那一排一律不看 —— 全部改从 FrontMaterial 那棵树里来
+		static const TCHAR* ShadingPins[] = {
+			TEXT("BaseColor"), TEXT("Metallic"), TEXT("Specular"), TEXT("Roughness"),
+			TEXT("EmissiveColor"), TEXT("Normal"), TEXT("SubsurfaceColor"),
 		};
-		for (const FPinProperty& Entry : Table)
+		for (const TCHAR* Shading : ShadingPins)
 		{
-			if (FCString::Stricmp(Entry.Name, PinName) == 0)
+			if (FCString::Stricmp(Shading, PinName) == 0)
 			{
-				return !Material->IsPropertyActiveInEditor(Entry.Property);
+				return true;
 			}
+		}
+		if (FCString::Stricmp(PinName, TEXT("Opacity")) == 0)
+		{
+			const EBlendMode Blend = Material->BlendMode;
+			const bool bBlendUsesOpacity = Blend != BLEND_Opaque && Blend != BLEND_Masked && Blend != BLEND_Modulate;
+			return bBlendUsesOpacity && !Material->IsPropertyActiveInEditor(MP_Opacity);
 		}
 #endif
 		return false;
@@ -4076,19 +4170,20 @@ void FUAL_MaterialCommands::Handle_ConnectMaterialPins(
 					/*
 					 * 数值接进 FrontMaterial 连得上，要到编译才炸（"Could not find any Substrate
 					 * operators or BSDFs" + "Cannot force a cast between non-numeric types"），
-					 * 真机试过。只挡明确是数值、又不带 Substrate 位的；类型读不出来的
-					 * （函数调用、重路由）放行，让编译器判。
+					 * 真机试过。类型报的是数值还不够（5.4–5.7 上函数调用、静态开关也报数值，
+					 * 见 UAL_MayCarrySubstrate），还要整条上游都看不出 Substrate 来源才挡。
 					 */
 					const uint32 SourceType = SourceExpression->GetOutputs().IsValidIndex(SourceOutputIndex)
 						? UAL_OutputTypeOf(SourceExpression, SourceOutputIndex) : 0u;
-					if ((SourceType & MCT_Substrate) == 0 && (SourceType & MCT_Float) != 0)
+					if ((SourceType & MCT_Substrate) == 0 && (SourceType & MCT_Float) != 0 &&
+						!UAL_MayCarrySubstrate(SourceExpression))
 					{
 						Transaction.Cancel();
 						UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
 							TEXT("FrontMaterial takes Substrate data, but %s outputs %s. Feed the value into a Substrate "
 								 "BSDF first (e.g. SubstrateSlabBSDF.Diffuse Albedo, or SubstrateUnlitBSDF.EmissiveColor) "
 								 "and connect that BSDF's Out to Material.FrontMaterial."),
-							*SourceExpression->GetName(), *UAL_MaterialTypeName(SourceType)));
+							*SourceNode, *UAL_MaterialTypeName(SourceType)));
 						return;
 					}
 #endif
@@ -4103,13 +4198,18 @@ void FUAL_MaterialCommands::Handle_ConnectMaterialPins(
 							ActivePins.Add(Other.Name);
 						}
 					}
+					// Opacity 的去处和着色那一排不一样：Substrate 用 Coverage 表达不透明度
+					const bool bIsOpacity = FCString::Stricmp(Pin.Name, TEXT("Opacity")) == 0;
+					const TCHAR* Instead = bIsOpacity
+						? TEXT("Express opacity as coverage instead: SubstrateWeight (A = the BSDF, Weight = opacity 0..1) "
+							   "-> Material.FrontMaterial. The Opacity pin only counts in AlphaComposite.")
+						: TEXT("Shade through Substrate nodes instead: e.g. SubstrateSlabBSDF (Diffuse Albedo, F0, Roughness, "
+							   "Normal, Emissive Color ...) -> Material.FrontMaterial.");
 					Transaction.Cancel();
 					UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
-						TEXT("Substrate is enabled, and the Material output's %s pin is ignored for this material "
-							 "(with its current domain / blend mode) - a link there would have no effect. "
-							 "Shade through Substrate nodes instead: e.g. SubstrateSlabBSDF (Diffuse Albedo, F0, Roughness, "
-							 "Normal, Emissive Color ...) -> Material.FrontMaterial. Pins that do take effect here: %s"),
-						Pin.Name, *FString::Join(ActivePins, TEXT(", "))));
+						TEXT("Substrate is enabled, and the Material output's %s pin is ignored for this material - "
+							 "a link there would have no effect. %s Pins that do take effect here: %s"),
+						Pin.Name, Instead, *FString::Join(ActivePins, TEXT(", "))));
 					return;
 				}
 				Pin.Input->Connect(SourceOutputIndex, SourceExpression);

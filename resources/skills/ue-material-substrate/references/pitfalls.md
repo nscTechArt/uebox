@@ -13,7 +13,7 @@
 |---|---|---|
 | "Substrate is not enabled in this project" | the renderer is classic | ask the user, then `ue_set_config` + `ue_restart_editor` (SKILL.md step 1) |
 | "Substrate materials need Unreal Engine 5.4 or later" | old engine | build with classic pins; say what the look loses |
-| "the Material output's X pin is ignored for this material" | `FrontMaterial` is in use, X is a classic pin | move X onto the Slab: BaseColor → `Diffuse Albedo`, Roughness → `Roughness`, Normal → `Normal`, Emissive → `Emissive Color`, Metallic via `SubstrateMetalnessToDiffuseAlbedoF0` |
+| "the Material output's X pin is ignored for this material" | `FrontMaterial` is in use, X is a classic pin | move X onto the Slab: BaseColor → `Diffuse Albedo`, Roughness → `Roughness`, Normal → `Normal`, Emissive → `Emissive Color`, Metallic via `SubstrateMetalnessToDiffuseAlbedoF0`. For Opacity: wrap the BSDF in `SubstrateWeight` and feed the opacity into `Weight` |
 | "FrontMaterial takes Substrate data, but ... outputs float3" | a color went straight to the output | put a BSDF in between |
 | "property 'X': no field 'X' ... Did you mean" | wrong setting name; the node was **not** created | use a name from the list in the reply |
 | "'X' is an input pin, not a setting" | a pin was passed in `properties` | connect a value to it instead |

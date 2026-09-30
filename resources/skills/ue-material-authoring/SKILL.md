@@ -52,10 +52,12 @@ Full order of operations: **`references/diagnosing.md`**.
 
 **Nothing here writes to disk.** Call `ue_save` when the material is done.
 
-**Substrate projects (UE 5.4+).** If `material_get_graph` reports that Substrate is on, or
-the user asks for layered coats, colored glass, fuzz or thin film, switch to skill
-`ue-material-substrate`: the output there is `FrontMaterial`, and the BaseColor row of pins
-stops counting once it is wired.
+**Substrate (UE 5.4+).** A project having Substrate switched on is not a reason to build
+with Substrate. When the user asks for an ordinary material and the material output still
+lists BaseColor / Roughness / Opacity (5.6+ converts those behind the scenes), build it the
+classic way described here. Switch to skill `ue-material-substrate` when the user asks for
+Substrate by name or for layered coats, colored glass, fuzz or thin film, or when the
+material output offers only `FrontMaterial` and a few others (5.4/5.5 with Substrate on).
 
 Every tool takes `path` for the asset it acts on, `destination_path` for where a new
 asset goes, and `texture_path` / `function_path` / `collection_path` for assets it merely

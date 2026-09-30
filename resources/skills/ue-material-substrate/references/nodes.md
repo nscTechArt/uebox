@@ -65,6 +65,10 @@ A Slab that is not the bottom of a stack can only use `MSS_SimpleVolume`.
 `Clear Coat Coverage` (1), `Clear Coat Roughness` (0.1), `Normal`, `Emissive Color`,
 `Bottom Normal` (5.6+, needs `r.ClearCoatNormal=1`).
 
+`Clear Coat Coverage` is how much of the surface carries the coat (0 none, 1 all of it, a
+mask in between for worn paint). It is **not** a thickness. The node has no thickness
+input; for a thick coat use two Slabs in `SubstrateVerticalLayering` with `Top Thickness`.
+
 ### SubstrateUnlitBSDF
 
 `EmissiveColor` (0), `TransmittanceColor` (1 = background fully visible through it),

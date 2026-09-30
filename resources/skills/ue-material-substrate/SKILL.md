@@ -67,11 +67,15 @@ reports the value the engine actually stored.
 - **A warning saying the engine is older than 5.4** means Substrate cannot be used. Build
   the look with the classic pins and say which part of the request that loses.
 
-When the user only wants a plain PBR material in a Substrate project on **5.6 or later**,
-the classic pins still work: the engine converts them behind the scenes. Use Substrate
-nodes when the look needs layers, coats, fuzz, thin film or colored transmission, or when
-the project is 5.4/5.5 (there the classic pins are unsupported once Substrate is on).
-Version details: **`references/versions.md`**.
+**Substrate being on does not mean every material must use it.** When the user asks for
+an ordinary material ("普通的"、"传统做法"、plain plastic, metal, translucent) and the
+material output lists BaseColor / Roughness / Opacity, which is the case on **5.6 or
+later** while `FrontMaterial` is empty, build it with those classic pins: the engine
+converts them behind the scenes, and Opacity works as usual. Do not tell the user the
+classic pins stop working just because the project has Substrate on. Use Substrate nodes
+when the look needs layers, coats, fuzz, thin film or colored transmission, or when the
+output offers only `FrontMaterial` and a few others (5.4/5.5 with Substrate on, where the
+classic pins are unsupported). Version details: **`references/versions.md`**.
 
 ## Pick the building block
 
@@ -101,9 +105,10 @@ settings: **`references/nodes.md`**.
   `OpacityMask` (Masked), `Refraction` (translucent with distortion), `PixelDepthOffset`,
   `Displacement` (tessellation). `material_get_graph` lists only the pins in effect and
   flags leftover wires as not taking effect.
-- **Opacity is coverage.** Fade a BSDF with `SubstrateWeight` (`A` = the BSDF,
-  `Weight` = 0 transparent … 1 solid). The output's `Opacity` pin only matters in
-  AlphaComposite.
+- **In a Substrate material, opacity is coverage.** Fade a BSDF with `SubstrateWeight`
+  (`A` = the BSDF, `Weight` = 0 transparent … 1 solid). Once `FrontMaterial` is wired,
+  the output's `Opacity` pin only matters in AlphaComposite. A classic material (nothing
+  on `FrontMaterial`) keeps using the `Opacity` pin.
 - **Subsurface scattering needs Opaque or Masked.** On a translucent material the engine
   forces the blend mode back to Opaque.
 - **One BSDF output feeds one place.** Wiring the same Slab's `Out` into two operators
@@ -149,7 +154,8 @@ the out-of-budget behavior: **`references/pitfalls.md`**.
 - **"is ignored for this material"** when connecting means you wired a classic pin while
   `FrontMaterial` is in use. Move that input onto the Slab (BaseColor maps to
   `Diffuse Albedo`, Roughness to `Roughness`, Normal to `Normal`, Emissive to
-  `Emissive Color`, Metallic via `SubstrateMetalnessToDiffuseAlbedoF0`).
+  `Emissive Color`, Metallic via `SubstrateMetalnessToDiffuseAlbedoF0`, Opacity into
+  a `SubstrateWeight`'s `Weight`).
 - **A property is refused** with "no field ...": the reply lists the settable names.
   Use one of those.
 - **It compiles but looks wrong.** Check the blend mode against the table above, then

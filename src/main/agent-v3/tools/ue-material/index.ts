@@ -1083,10 +1083,20 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
     if (r.material_pins?.length) {
       lines.push('', `主节点可用引脚：${r.material_pins.join('、')}`)
     }
+    /*
+     * 按这个材质**此刻**的模式说，不按工程开没开说。
+     *
+     * 真机上这里一度只写「本项目开着 Substrate：接 FrontMaterial」，用户要一个普通
+     * 半透明塑料，AI 读完就做成了 Substrate，还告诉用户 Opacity 引脚不生效 —— 其实
+     * 5.6+ 上 FrontMaterial 空着时 BaseColor 那一排照常能用（可用引脚里就列着）。
+     */
     if (r.substrate_enabled) {
+      const classicOk = (r.material_pins ?? []).includes('BaseColor')
       lines.push(
-        '本项目开着 Substrate：Substrate 节点的输出接 Material.FrontMaterial；' +
-          'FrontMaterial 接上之后 BaseColor 那一排不再生效。'
+        classicOk
+          ? '本项目开着 Substrate，但这个材质的 FrontMaterial 还空着：普通材质照常连 BaseColor / Roughness / Opacity，' +
+              '引擎会自动转换。只有要分层、彩色透射这类效果时才换 Substrate 节点接 FrontMaterial（接上之后 BaseColor 那一排就不生效了）。'
+          : '这个材质按 Substrate 解释：着色全部从 Material.FrontMaterial 进来，BaseColor 那一排不生效。'
       )
     }
 

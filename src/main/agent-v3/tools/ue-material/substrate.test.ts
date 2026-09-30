@@ -215,6 +215,20 @@ describe('material_get_graph 的 Substrate 提示', () => {
     expect(text).toContain('Material.FrontMaterial')
   })
 
+  it('开着 Substrate 但 FrontMaterial 空着：说普通材质照常用 BaseColor 那一排，别把人往 Substrate 带', async () => {
+    // 真机：用户要普通半透明塑料，AI 读完「开着 Substrate」就做成了 Substrate
+    callRequest.mockResolvedValue({
+      ...graph,
+      nodes: [],
+      connections: [],
+      material_pins: ['BaseColor', 'Roughness', 'Opacity', 'FrontMaterial']
+    })
+    const text = textOf(await byName('material_get_graph').execute('c1', { path: '/Game/M_Plastic' }))
+
+    expect(text).toContain('普通材质照常连 BaseColor')
+    expect(text).not.toContain('按 Substrate 解释')
+  })
+
   it('没开 Substrate 的项目不多嘴', async () => {
     callRequest.mockResolvedValue({ ...graph, substrate_enabled: false, connections: [] })
     const text = textOf(await byName('material_get_graph').execute('c1', { path: '/Game/M_Old' }))
