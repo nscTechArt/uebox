@@ -86,6 +86,11 @@ export function useProjects() {
         message.success(t('actionToast.project.importOk'))
         notifyPluginInstallFailure(res)
         return res.data
+      } else if (res?.alreadyRegistered && res.data) {
+        // 已在库里不算失败：把现成那条交回去，调用方照样能选中它、放进分组
+        await loadAllProjects()
+        message.info(t('page.home.project.importToast.alreadyInLibrary', { count: 1 }))
+        return res.data
       } else {
         message.error(res?.error || t('page.home.project.importToast.fileFailedPlain'))
       }

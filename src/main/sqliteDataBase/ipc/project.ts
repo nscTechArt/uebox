@@ -650,9 +650,14 @@ export const registerProjectIPC = (): void => {
   ipcMain.handle('db:project:importByFilePath', async (_, filePath: string) => {
     void _
     const result = await registerProjectByUproject(filePath)
-    // 渲染进程只认 success / error / data 这三个字段，alreadyRegistered 是
-    // 给主进程内部调用方看的，不往外带
-    return { success: result.success, error: result.error, data: result.data }
+    // alreadyRegistered 也带出去：首页在分组里导入一个已在库里的工程时，
+    // 要拿 data 里那条现成记录把它放进分组，而不是报一句「已存在」了事
+    return {
+      success: result.success,
+      error: result.error,
+      data: result.data,
+      alreadyRegistered: result.alreadyRegistered
+    }
   })
 
   // 扫描目录中的 .uproject 文件（仅扫描，不导入）

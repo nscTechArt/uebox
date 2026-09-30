@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   importProjectChoices,
-  importBrowserEntries,
-  type ImportBrowserEntry,
+  importFilterChips,
   importProjectConnection,
   projectDirectory
 } from './importProjectChoices'
@@ -56,63 +55,59 @@ describe('import project choices', () => {
   })
 })
 
-describe('import project browser', () => {
+describe('import project filter chips', () => {
   const projects = [
-    { projectKey: 'normal', projectName: 'Plain', EngineAssociation: '5.5' },
+    { projectKey: 'plain', projectName: 'Plain' },
+    { projectKey: 'forest', projectName: 'Forest' },
+    { projectKey: 'city', projectName: 'City' }
+  ]
+  const collections = [
+    { collectionKey: 'b', name: 'Cities', items: [{ projectKey: 'city' }] },
+    // 一个工程可以同时在几个分组里
+    { collectionKey: 'a', name: '', items: [{ projectKey: 'forest' }, { projectKey: 'city' }] }
+  ]
+  const summary = (chips: ReturnType<typeof importFilterChips>): string[] =>
+    chips.map((c) => `${c.key}:${c.projects.map((p) => p.projectKey).join(',')}`)
+
+  it('lists 全部, each group in database order, then 未分组 — same as the home page', () => {
+    expect(summary(importFilterChips(projects, collections))).toEqual([
+      '__all__:plain,forest,city',
+      'b:city',
+      'a:forest,city',
+      '__ungrouped__:plain'
+    ])
+  })
+  it('counts only what the search left, keeping emptied groups visible', () => {
+    expect(summary(importFilterChips([projects[0]], collections))).toEqual([
+      '__all__:plain',
+      'b:',
+      'a:',
+      '__ungrouped__:plain'
+    ])
+  })
+  it('skips 未分组 when there are no groups at all', () => {
+    expect(summary(importFilterChips(projects, []))).toEqual(['__all__:plain,forest,city'])
+  })
+})
+
+describe('import search relevance', () => {
+  const projects = [
     {
-      projectKey: 'inside',
-      projectName: 'Forest',
-      EngineAssociation: '5.6',
+      projectKey: 'path',
+      projectName: 'UALHost55',
+      projectPath: 'H:/UnrealAgent/UALHost55',
       isPinned: 1
     },
-    {
-      projectKey: 'inside2',
-      projectName: 'City',
-      EngineAssociation: '5.5'
-    },
-    { projectKey: 'pinned', projectName: 'Pinned', EngineAssociation: '{custom}', isPinned: 1 }
+    { projectKey: 'name', projectName: 'RealBiomesDesert' }
   ]
-  // 成员关系挂在分组自己带回来的名单上 —— 一个工程可以同时在几个分组里
-  const collections = [
-    {
-      collectionKey: 'group',
-      name: 'Landscapes',
-      items: [{ projectKey: 'inside' }, { projectKey: 'inside2' }]
-    }
-  ]
-  const label = (value?: string | null): string => (value === '{custom}' ? '5.6' : value || 'N/A')
-  const browse = (query = '', version = ''): ImportBrowserEntry[] =>
-    importBrowserEntries(importProjectChoices(projects, [], ''), collections, query, version, label)
-  /** Members ride along on the collection entry so the modal can expand it without a sub-view. */
-  const members = (entries: ImportBrowserEntry[], key: string): string[] => {
-    const entry = entries.find((e) => e.key === key)
-    return entry?.kind === 'collection' ? entry.projects.map((p) => p.projectKey) : []
-  }
-  it('keeps members on their collection and pinned projects ahead of normal entries', () => {
-    expect(browse().map((e) => e.key)).toEqual(['pinned', 'group', 'normal'])
-    expect(members(browse(), 'group')).toEqual(['inside', 'inside2'])
-  })
-  it('searches members and collection names without flattening the collection', () => {
-    expect(browse('Forest').map((e) => e.key)).toEqual(['group'])
-    expect(members(browse('Forest'), 'group')).toEqual(['inside'])
-    expect(members(browse('Landscapes'), 'group')).toEqual(['inside', 'inside2'])
-  })
-  it('combines resolved custom engine versions with search and collection membership', () => {
-    expect(browse('', '5.6').map((e) => e.key)).toEqual(['pinned', 'group'])
-    expect(members(browse('', '5.6'), 'group')).toEqual(['inside'])
-    expect(browse('City', '5.6')).toEqual([])
-  })
-  it('takes membership from the collection items the database hands back', () => {
-    const entries = importBrowserEntries(
-      projects,
-      [{ collectionKey: 'legacy', items: [projects[0]], isPinned: 1 }],
-      '',
-      '',
-      label
-    )
-    expect(entries[0].key).toBe('legacy')
-    expect(entries.filter((e) => e.kind === 'project').map((e) => e.key)).toContain('inside')
-    expect(entries.filter((e) => e.kind === 'project').map((e) => e.key)).not.toContain('normal')
+  it('name matches outrank pinned and connected path matches', () => {
+    expect(
+      importProjectChoices(
+        projects,
+        [{ connectionId: 'live', projectPath: 'H:/UnrealAgent/UALHost55', isConnected: true }],
+        'real'
+      )[0].projectKey
+    ).toBe('name')
   })
   it('keeps pinned projects ahead of connected unpinned projects', () => {
     expect(
@@ -125,48 +120,5 @@ describe('import project browser', () => {
         ''
       ).map((p) => p.projectKey)
     ).toEqual(['pin', 'normal'])
-  })
-})
-
-describe('import search relevance across collection boundaries', () => {
-  const projects = [
-    {
-      projectKey: 'path',
-      projectName: 'UALHost55',
-      projectPath: 'H:/UnrealAgent/UALHost55',
-      isPinned: 1
-    },
-    { projectKey: 'name', projectName: 'RealBiomesDesert' },
-    {
-      projectKey: 'inside-path',
-      projectName: 'City',
-      projectPath: 'H:/Unreal/City',
-      isPinned: 1
-    }
-  ]
-  it('name matches outrank pinned and connected path matches', () => {
-    expect(
-      importProjectChoices(
-        projects,
-        [{ connectionId: 'live', projectPath: 'H:/UnrealAgent/UALHost55', isConnected: true }],
-        'real'
-      )[0].projectKey
-    ).toBe('name')
-  })
-  it('ranks a collection by its best match and keeps relevance inside it', () => {
-    const collections = [
-      {
-        collectionKey: 'group',
-        name: 'Samples',
-        items: [{ projectKey: 'name' }, { projectKey: 'inside-path' }]
-      }
-    ]
-    const entries = importBrowserEntries(projects, collections, 'real', '', () => '5.5')
-    expect(entries.map((e) => e.key)).toEqual(['group', 'path'])
-    const group = entries[0]
-    expect(group.kind === 'collection' && group.projects.map((p) => p.projectKey)).toEqual([
-      'name',
-      'inside-path'
-    ])
   })
 })

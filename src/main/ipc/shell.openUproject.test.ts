@@ -43,6 +43,10 @@ vi.mock('../appSettingsManager', () => ({
 vi.mock('../appWindows', () => ({ findMainWindow: () => findMainWindow() }))
 vi.mock('../sqliteDataBase/ipc/project', () => ({ ensureUnrealAgentLinkPlugin: vi.fn() }))
 vi.mock('../security', () => ({ openSafeExternalUrl: vi.fn() }))
+const findRunningProjectByPath = vi.fn<(path: string) => Promise<unknown>>()
+vi.mock('../utils/UnrealProcessDetector', () => ({
+  default: { findRunningProjectByPath: (path: string) => findRunningProjectByPath(path) }
+}))
 
 const { registerShellIPC } = await import('./shell')
 registerShellIPC()
@@ -53,6 +57,7 @@ beforeEach(() => {
   existsSync.mockReturnValue(true)
   isDestroyed.mockReturnValue(false)
   findMainWindow.mockReturnValue({ hide, isDestroyed })
+  findRunningProjectByPath.mockResolvedValue(null)
 })
 
 async function openUproject(): Promise<unknown> {
@@ -105,5 +110,34 @@ describe('shell:openUproject · 打开工程后隐藏主界面', () => {
 
     await expect(openUproject()).resolves.toEqual({ success: true })
     expect(hide).not.toHaveBeenCalled()
+  })
+})
+
+describe('shell:openUproject · 导入弹窗替用户打开工程', () => {
+  const openForImport = (): Promise<unknown> =>
+    handlers.get('shell:openUproject')!({}, 'D:/Demo/Demo.uproject', {
+      forImport: true
+    }) as Promise<unknown>
+
+  it('不藏主界面：用户正等着导入开始', async () => {
+    getHideWindowOnProjectLaunch.mockReturnValue(true)
+
+    await expect(openForImport()).resolves.toEqual({ success: true })
+    expect(openPath).toHaveBeenCalledTimes(1)
+    expect(hide).not.toHaveBeenCalled()
+  })
+
+  it('编辑器已经在跑就不再起一个，只等它连上', async () => {
+    findRunningProjectByPath.mockResolvedValue({ pid: 42 })
+
+    await expect(openForImport()).resolves.toEqual({ success: true, alreadyRunning: true })
+    expect(openPath).not.toHaveBeenCalled()
+  })
+
+  it('首页的打开不查进程 —— 那边有自己的「再启动一次」确认', async () => {
+    findRunningProjectByPath.mockResolvedValue({ pid: 42 })
+
+    await expect(openUproject()).resolves.toEqual({ success: true })
+    expect(openPath).toHaveBeenCalledTimes(1)
   })
 })

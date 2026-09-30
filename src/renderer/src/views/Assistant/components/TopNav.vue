@@ -11,7 +11,11 @@
         主进程，也就从来没有真的把 ue.* 工具指向那个工程。留着两套的结果是
         用户以为绑了、模型那边毫无变化。
       -->
-      <SessionProjectChip :session-id="sessionId" :pending-project-name="pendingProjectName" />
+      <SessionProjectChip
+        v-if="!hideProjectChip"
+        :session-id="sessionId"
+        :pending-project-name="pendingProjectName"
+      />
       <AppDropdown :trigger="['click']">
         <span class="more-btn" @click.stop>
           <PhDotsThree class="more" />
@@ -60,6 +64,8 @@ defineProps<{
   sessionId?: string
   /** 会话还没建出来时的待定工程归属（侧边栏在工程标题上点「+」新建的会话） */
   pendingProjectName?: string
+  /** 欢迎页把工程胶囊挪到问候语下面，顶栏就不再重复放一个 */
+  hideProjectChip?: boolean
 }>()
 
 const emit = defineEmits<{

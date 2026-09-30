@@ -18,6 +18,8 @@ const props = defineProps<{
   /** 已经翻译好的引擎版本，例如「UE 5.5」 */
   versionLabel: string
   connected: boolean
+  /** 这次导的东西要靠 UE 转换、而这个工程没开着 —— 只在这种时候才值得标出来 */
+  notOpened?: boolean
   selected: boolean
   disabled: boolean
 }>()
@@ -56,6 +58,9 @@ const name = computed(() => props.project.projectName || t('importToProjectModal
         <span v-if="connected" class="tag-connected">
           <span class="connected-dot" aria-hidden="true"></span>
           {{ t('importToProjectModal.connected') }}
+        </span>
+        <span v-else-if="notOpened" class="tag-not-opened">
+          {{ t('importToProjectModal.notOpened') }}
         </span>
       </div>
     </div>
@@ -155,6 +160,9 @@ const name = computed(() => props.project.projectName || t('importToProjectModal
   align-items: center;
   gap: var(--space-1);
   color: var(--color-success-text);
+}
+.tag-not-opened {
+  color: var(--color-text-muted);
 }
 .connected-dot {
   width: 6px;

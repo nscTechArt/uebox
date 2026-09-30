@@ -40,7 +40,11 @@
         </AppButton>
       </div>
       <p v-if="preparing" class="preparation-status" role="status">
-        {{ t('importToProjectModal.preparing') }}
+        {{
+          launchingProjectName
+            ? t('importToProjectModal.waitingForEditor', { name: launchingProjectName })
+            : t('importToProjectModal.preparing')
+        }}
       </p>
       <div v-if="projectsLoading" class="list-status" role="status">
         {{ t('importToProjectModal.loadingProjects') }}
@@ -72,64 +76,43 @@
         </div>
       </div>
 
-      <!-- 集合就地展开，不进下一层：挑个导入目标不该还要来回钻页面 -->
-      <div v-if="!projectsLoading && !loadFailed && sections.length > 0" class="browse-list">
-        <template v-for="section in sections" :key="section.kind + section.key">
-          <div v-if="section.kind === 'projects'" class="project-grid">
-            <ImportProjectCard
-              v-for="item in section.projects"
-              :key="item.projectKey"
-              :project="item"
-              :image="getProjectImage(item)"
-              :version-label="engineTag(item.EngineAssociation)"
-              :connected="isProjectConnected(item.projectPath)"
-              :selected="selectedProjectKey === item.projectKey"
-              :disabled="preparing"
-              @select="handleSelect"
-            />
-          </div>
-          <section v-else class="collection-group" :class="{ open: isCollectionOpen(section.key) }">
-            <button
-              type="button"
-              class="collection-header"
-              :disabled="preparing"
-              :aria-expanded="isCollectionOpen(section.key)"
-              @click="toggleCollection(section.key)"
-            >
-              <PhFolder weight="fill" class="collection-icon" aria-hidden="true" />
-              <span class="collection-name">{{
-                section.collection.name || t('homeProjectCollection.collection.untitled')
-              }}</span>
-              <span class="collection-count">{{
-                t('importToProjectModal.collectionCount', { count: section.projects.length })
-              }}</span>
-              <PhPushPin v-if="section.pinned" weight="fill" class="collection-pin" />
-              <PhCaretDown class="collection-chevron" aria-hidden="true" />
-            </button>
-            <div v-if="isCollectionOpen(section.key)" class="project-grid collection-members">
-              <ImportProjectCard
-                v-for="item in section.projects"
-                :key="item.projectKey"
-                :project="item"
-                :image="getProjectImage(item)"
-                :version-label="engineTag(item.EngineAssociation)"
-                :connected="isProjectConnected(item.projectPath)"
-                :selected="selectedProjectKey === item.projectKey"
-                :disabled="preparing"
-                @select="handleSelect"
-              />
-            </div>
-          </section>
-        </template>
+      <!-- 分组是一排筛选标签，跟首页「我的项目」同一套：全部 / 各分组 / 未分组 -->
+      <div
+        v-if="!projectsLoading && !loadFailed && filterChips.length > 1"
+        class="collection-filter"
+      >
+        <button
+          v-for="chip in filterChips"
+          :key="chip.key"
+          type="button"
+          class="filter-chip"
+          :class="{ active: activeFilterKey === chip.key, empty: chip.projects.length === 0 }"
+          :aria-pressed="activeFilterKey === chip.key"
+          :disabled="preparing"
+          @click="handleClickFilter(chip.key)"
+        >
+          <span class="chip-label">{{ chipLabel(chip) }}</span>
+          <span class="chip-count">{{ chip.projects.length }}</span>
+        </button>
+      </div>
+      <div v-if="!projectsLoading && !loadFailed && visibleProjects.length > 0" class="browse-list">
+        <div class="project-grid">
+          <ImportProjectCard
+            v-for="item in visibleProjects"
+            :key="item.projectKey"
+            :project="item"
+            :image="getProjectImage(item)"
+            :version-label="engineTag(item.EngineAssociation)"
+            :connected="isProjectConnected(item.projectPath)"
+            :not-opened="needsEditor && !isReachable(item)"
+            :selected="selectedProjectKey === item.projectKey"
+            :disabled="preparing"
+            @select="handleSelect"
+          />
+        </div>
       </div>
       <div v-else-if="!projectsLoading && !loadFailed" class="empty-state">
-        <AppEmpty
-          :description="
-            keyword || engineFilter
-              ? $t('importToProjectModal.emptyNoMatch')
-              : $t('importToProjectModal.emptyNoProjects')
-          "
-        />
+        <AppEmpty :description="emptyText" />
       </div>
     </div>
 
@@ -172,6 +155,7 @@
             :compatibility-text="compatibilityText"
             :blocked="compatibilityBlocked"
             :failed="compatibilityFailed"
+            :note="editorNote"
             @retry="refreshCompatibility"
           />
           <span v-else>{{ t('importToProjectModal.selectProjectFirst') }}</span>
@@ -183,7 +167,7 @@
             :loading="loading || preparing"
             :disabled="!selectedProject || projectsLoading || loadFailed"
             @click="handleConfirm"
-            >{{ t('importToProjectModal.startImport') }}</AppButton
+            >{{ confirmLabel }}</AppButton
           >
         </div>
       </div>
@@ -227,13 +211,14 @@
 <script setup lang="ts">
 import ImportTargetSummary from './ImportTargetSummary.vue'
 import ImportProjectCard from './ImportProjectCard.vue'
-import { PhPushPin, PhCaretDown, PhFolder, PhPlus } from '@phosphor-icons/vue'
+import { PhPlus } from '@phosphor-icons/vue'
 import {
   importProjectChoices,
-  importBrowserEntries,
+  importFilterChips,
   importProjectConnection,
-  type ImportBrowserEntry,
-  type ImportProjectChoice
+  IMPORT_FILTER_ALL,
+  IMPORT_FILTER_UNGROUPED,
+  type ImportFilterChip
 } from '../../utils/importProjectChoices'
 import { summarizeBlockedAssets, type BlockedAsset } from '../../utils/blockedAssetsSummary'
 import { checkImportCompatibility, getImportProjectCollections } from '@renderer/api/projectImport'
@@ -869,7 +854,7 @@ watch(visible, async (v) => {
     selectedProjectKey.value = null
     keyword.value = ''
     engineFilter.value = ''
-    expandedCollections.value = new Set()
+    activeFilterKey.value = IMPORT_FILTER_ALL
     await loadAllProjects()
     // 已连接工程正常靠订阅保持新鲜，但**首拉失败就没有第二次机会**：
     // /asset-management 是 keepAlive 的，这个弹窗从挂上去到应用退出都不会重挂。
@@ -894,7 +879,7 @@ const collectionsLoading = ref(false)
 const collectionsFailed = ref(false)
 const addingProject = ref(false)
 const engineFilter = ref('')
-const expandedCollections = ref<Set<string>>(new Set())
+const activeFilterKey = ref<string>(IMPORT_FILTER_ALL)
 const projectsLoading = computed(() => savedProjectsLoading.value || collectionsLoading.value)
 const loadFailed = computed(() => savedLoadFailed.value || collectionsFailed.value)
 async function loadCollections(): Promise<void> {
@@ -911,24 +896,6 @@ async function loadCollections(): Promise<void> {
 async function loadAllProjects(): Promise<void> {
   await Promise.all([loadSavedProjects(), loadCollections()])
 }
-/**
- * 集合展开与否。
- *
- * 搜索或筛版本的时候一律当展开处理：能留在列表里的集合，本来就是因为里面有东西命中了，
- * 这时候还让人点一下才看得到命中的工程，等于把搜索结果藏起来。
- */
-const isFiltering = computed(() => Boolean(keyword.value.trim() || engineFilter.value))
-const isCollectionOpen = (key: string): boolean =>
-  isFiltering.value || expandedCollections.value.has(key)
-const toggleCollection = (key: string): void => {
-  if (preparing.value) return
-  const next = new Set(expandedCollections.value)
-  if (!next.delete(key)) next.add(key)
-  expandedCollections.value = next
-}
-const expandCollection = (key: string): void => {
-  expandedCollections.value = new Set(expandedCollections.value).add(key)
-}
 const handleAddProject = async (): Promise<void> => {
   if (preparing.value || addingProject.value) return
   addingProject.value = true
@@ -937,12 +904,10 @@ const handleAddProject = async (): Promise<void> => {
     if (!added || !visible.value) return
     await loadCollections()
     if (!visible.value) return
+    // 回到「全部」并清掉筛选：刚加的工程一定在眼前
     keyword.value = ''
     engineFilter.value = ''
-    const group = collections.value.find((c) =>
-      c.items?.some((p) => p.projectKey === added.projectKey)
-    )
-    if (group) expandCollection(group.collectionKey)
+    activeFilterKey.value = IMPORT_FILTER_ALL
     await nextTick()
     handleSelect(added)
     await nextTick()
@@ -991,48 +956,37 @@ const engineOptions = computed(() => [
       label: version === 'N/A' ? t('importToProjectModal.unknownEngineVersion') : `UE ${version}`
     }))
 ])
-const browserEntries = computed(() =>
-  importBrowserEntries(
-    allProjectChoices.value,
-    collections.value,
-    keyword.value,
-    engineFilter.value,
-    engineLabel
+/** 搜索词和版本一起收窄；分组标签的计数和网格里的卡片都读这一份 */
+const searchedProjects = computed(() =>
+  importProjectChoices(projects.value, connectedProjects.value, keyword.value).filter(
+    (p) => !engineFilter.value || engineLabel(p.EngineAssociation) === engineFilter.value
   )
 )
-
-type ImportBrowserSection =
-  | { kind: 'projects'; key: string; projects: ImportProjectChoice[] }
-  | (ImportBrowserEntry & { kind: 'collection' })
-
-/**
- * 把相邻的工程并成一段。
- *
- * 集合是通栏的一条，工程是网格里的一格 —— 两者混在同一个 grid 里，通栏那条会把当前行
- * 剩下的格子撑空。分段之后既没有空洞，相关度排序也原样保留。
- */
-const sections = computed<ImportBrowserSection[]>(() => {
-  const list: ImportBrowserSection[] = []
-  for (const entry of browserEntries.value) {
-    if (entry.kind === 'collection') {
-      list.push(entry)
-      continue
-    }
-    const last = list[list.length - 1]
-    if (last?.kind === 'projects') last.projects.push(entry.project)
-    else list.push({ kind: 'projects', key: entry.key, projects: [entry.project] })
-  }
-  return list
+const filterChips = computed(() => importFilterChips(searchedProjects.value, collections.value))
+const activeChip = computed(
+  () => filterChips.value.find((chip) => chip.key === activeFilterKey.value) ?? filterChips.value[0]
+)
+/** 当前标签下看得见的工程，也是能被选中的候选：换了标签，看不见的选择就作废 */
+const visibleProjects = computed(() => activeChip.value?.projects ?? [])
+const chipLabel = (chip: ImportFilterChip): string => {
+  if (chip.key === IMPORT_FILTER_ALL) return t('page.home.project.collection.filterAll')
+  if (chip.key === IMPORT_FILTER_UNGROUPED) return t('page.home.project.collection.filterUngrouped')
+  return chip.name || t('page.home.project.unnamedCollection')
+}
+/** 再点一下已选中的分组＝回到全部，跟首页一样 */
+const handleClickFilter = (key: string): void => {
+  if (preparing.value) return
+  activeFilterKey.value = activeFilterKey.value === key ? IMPORT_FILTER_ALL : key
+}
+const emptyText = computed(() => {
+  if (keyword.value || engineFilter.value) return t('importToProjectModal.emptyNoMatch')
+  if (activeChip.value?.key !== IMPORT_FILTER_ALL)
+    return t('importToProjectModal.emptyNoProjectsInGroup')
+  return t('importToProjectModal.emptyNoProjects')
 })
 
-/** 能被选中的工程：顶层的，加上已展开集合里的。收起的集合里那些点不到，也不算候选 */
-const sortedProjects = computed(() =>
-  sections.value.flatMap((section) =>
-    section.kind === 'projects' || isCollectionOpen(section.key) ? section.projects : []
-  )
-)
 const selectedProject = computed(() =>
-  sortedProjects.value.find((item) => item.projectKey === selectedProjectKey.value)
+  visibleProjects.value.find((item) => item.projectKey === selectedProjectKey.value)
 )
 /**
  * 这次要导的资产明细，文件夹递归摊平。
@@ -1178,7 +1132,7 @@ const connectedProjects = computed(() => connectedProjectsRaw.value ?? [])
 const clearMissingSelection = (): void => {
   if (!selectedProject.value) selectedProjectKey.value = null
 }
-watch(sortedProjects, clearMissingSelection)
+watch(visibleProjects, clearMissingSelection)
 // 先把待导资产读出来（顶部计数要用），读完再让预检跑 —— 预检直接吃这份结果
 watch([() => props.source, visible], loadSourceAssets, { immediate: true })
 watch(
@@ -1213,6 +1167,108 @@ const isProjectConnected = (projectPath: string | null | undefined): boolean => 
     return connectedPath === normalizedInput
   })
 }
+
+/**
+ * 单个模型/贴图/音视频这类外部文件，只能靠 UE 编辑器转换，工程必须开着并连上盒子。
+ * 文件夹和批量另有「只导虚幻资产 / 保留原格式」的出口，不走这里。
+ */
+const needsEditor = computed((): boolean => {
+  const source = props.source
+  if (!source || source.type === 'batch' || source.type === 'folder') return false
+  if (isPluginSource(source) || getArchiveExtension(source)) return false
+  return isExternalFile(source) && !isUnrealAsset(source)
+})
+const sourceFormat = computed((): string => {
+  const source = props.source as { fileExtension?: string; assetName?: string } | undefined
+  const ext = source?.fileExtension || getExtname(source?.assetName || '')
+  return ext.replace('.', '').toUpperCase()
+})
+const isReachable = (project: ProjectRecord): boolean =>
+  Boolean(importProjectConnection(project, connectedProjects.value))
+/** 选中的工程没开着、又非开不可：按钮替用户打开，连上后接着导 */
+const needsLaunch = computed(
+  () => needsEditor.value && !!selectedProject.value && !isReachable(selectedProject.value)
+)
+const launchingProjectName = ref('')
+const launchTimedOut = ref(false)
+watch(selectedProjectKey, () => {
+  launchTimedOut.value = false
+})
+const confirmLabel = computed(() => {
+  if (launchingProjectName.value) return t('importToProjectModal.waitingForEditorButton')
+  if (needsLaunch.value) return t('importToProjectModal.openAndImport')
+  return t('importToProjectModal.startImport')
+})
+const editorNote = computed(() => {
+  if (!needsLaunch.value || launchingProjectName.value) return ''
+  if (launchTimedOut.value) return t('importToProjectModal.editorWaitTimeout')
+  return t('importToProjectModal.needsEditorNote', { format: sourceFormat.value })
+})
+
+/** UE 冷启动加上编译着色器，十分钟也不算离谱；再久就该让用户去看一眼了 */
+const EDITOR_WAIT_MS = 10 * 60 * 1000
+const waitForConnection = (project: ProjectRecord, signal: AbortSignal): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (isReachable(project)) return resolve(true)
+    const finish = (ok: boolean): void => {
+      clearTimeout(timer)
+      stop()
+      signal.removeEventListener('abort', onAbort)
+      resolve(ok)
+    }
+    const onAbort = (): void => finish(false)
+    const timer = setTimeout(() => {
+      launchTimedOut.value = true
+      finish(false)
+    }, EDITOR_WAIT_MS)
+    const stop = watch(connectedProjects, () => {
+      if (isReachable(project)) finish(true)
+    })
+    signal.addEventListener('abort', onAbort)
+  })
+
+/** 在 UE 里打开工程并等它连上盒子。返回 false 时已经跟用户说过原因 */
+const openProjectAndWait = async (
+  project: ProjectRecord,
+  signal: AbortSignal
+): Promise<boolean> => {
+  const uproject = project.originPath || ''
+  if (!/\.uproject$/i.test(uproject)) {
+    message.error(t('importToProjectModal.uprojectMissing'))
+    return false
+  }
+  launchTimedOut.value = false
+  launchingProjectName.value = project.projectName || t('importToProjectModal.unnamedProject')
+  try {
+    const res = (await window.api.invoke('shell:openUproject', uproject, { forImport: true })) as {
+      success?: boolean
+      error?: string
+      pathNotFound?: boolean
+      pluginFailure?: string
+    } | null
+    if (signal.aborted) return false
+    if (!res?.success) {
+      message.error(
+        res?.pathNotFound
+          ? t('importToProjectModal.uprojectMissing')
+          : t('importToProjectModal.openProjectFailed', { error: res?.error || '' })
+      )
+      return false
+    }
+    // 插件没装上，这个工程永远连不上盒子，干等十分钟没有意义
+    if (res.pluginFailure) {
+      message.error(t('importToProjectModal.pluginNotInstalled', { error: res.pluginFailure }))
+      return false
+    }
+    const connected = await waitForConnection(project, signal)
+    if (!connected && launchTimedOut.value)
+      message.warning(t('importToProjectModal.editorWaitTimeout'))
+    return connected
+  } finally {
+    launchingProjectName.value = ''
+  }
+}
+
 const stats = reactive({ total: 0, processed: 0, success: 0, existing: 0, error: 0 })
 const progressPercent = computed(() => {
   if (stats.total <= 0) return 0
@@ -2353,11 +2409,9 @@ const handleConfirm = async (): Promise<void> => {
   const importFolder = (...args: Parameters<typeof doFolderImport>): Promise<void> =>
     doFolderImport(args[0], args[1], args[2], args[3], args[4], args[5], signal)
 
-  // 从 sortedProjects 查找（包含合成的已连接但未添加到盒子的项目）
-  const project = sortedProjects.value.find((p) => p.projectKey === selectedProjectKey.value)
-  if (project) {
-    emit('confirm', project as ProjectRecord)
-  } else {
+  // 从 visibleProjects 查找（包含合成的已连接但未添加到盒子的项目）
+  const project = visibleProjects.value.find((p) => p.projectKey === selectedProjectKey.value)
+  if (!project) {
     message.error(t('importToProjectModal.selectProjectFirst'))
     return
   }
@@ -2368,6 +2422,8 @@ const handleConfirm = async (): Promise<void> => {
   }
   preparing.value = true
   try {
+    if (needsLaunch.value && !(await openProjectAndWait(project, signal))) return
+    emit('confirm', project as ProjectRecord)
     const payloadProject = {
       projectKey: project.projectKey,
       projectName: project.projectName || null,
@@ -2923,7 +2979,6 @@ onMounted(async () => {
   .browse-list {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
     overflow-y: auto;
     overflow-x: hidden;
     min-height: 0;
@@ -2943,72 +2998,71 @@ onMounted(async () => {
     gap: var(--space-4);
   }
 
-  /* 集合是通栏的一条，点一下就地展开成员，不跳进下一层 */
-  .collection-group {
+  /* 分组筛选条：长相照抄首页「我的项目」那一排，两边看到的是同一个东西 */
+  .collection-filter {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    /* 不能用 sunken：它和 AppCard 的 surface 是同一个灰，容器和它装的卡片一个色，
-       等于没画这个容器 —— 展开之后看不出哪几张卡属于这个集合。
-       page 比卡片再深一档，集合才真的「凹」下去 */
-    background: var(--color-bg-page);
-    padding: var(--space-3);
+    flex-wrap: wrap;
+    flex: none;
+    gap: var(--space-2);
 
-    .collection-header {
-      display: flex;
+    .filter-chip {
+      display: inline-flex;
       align-items: center;
       gap: var(--space-2);
-      min-width: 0;
-      margin: 0;
-      padding: 0;
-      border: 0;
-      background: none;
-      color: var(--color-text-primary);
-      font: inherit;
-      text-align: left;
+      max-width: 220px;
+      padding: 5px 12px;
+      border: 1px solid var(--color-border-subtle);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+      line-height: 1.4;
       cursor: pointer;
+      transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
+
+      &:hover:not(:disabled) {
+        border-color: var(--color-border);
+        color: var(--color-text-primary);
+      }
 
       &:focus-visible {
         outline: 2px solid var(--color-border-focus);
-        outline-offset: 4px;
+        outline-offset: 2px;
       }
 
       &:disabled {
         cursor: default;
       }
-    }
 
-    .collection-icon {
-      flex: none;
-      color: var(--color-folder);
-    }
+      &.active {
+        background: var(--color-accent-solid);
+        border-color: var(--color-accent-solid);
+        color: var(--color-text-on-solid);
 
-    .collection-name {
-      overflow: hidden;
-      font-weight: var(--font-weight-semibold);
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+        .chip-count {
+          color: var(--color-text-on-solid);
+          opacity: 0.8;
+        }
+      }
 
-    .collection-count,
-    .collection-pin {
-      flex: none;
-      color: var(--color-text-muted);
-      font-size: var(--font-size-xs);
-    }
+      /* 搜索把这一组滤空了：留着但压暗，让人知道这组存在、只是没匹配上 */
+      &.empty:not(.active) {
+        opacity: 0.45;
+      }
 
-    /* 箭头推到最右边，展开时转 180° */
-    .collection-chevron {
-      flex: none;
-      margin-left: auto;
-      color: var(--color-text-secondary);
-      transition: transform var(--motion-fast) var(--easing-standard);
-    }
+      .chip-label {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
 
-    &.open .collection-chevron {
-      transform: rotate(180deg);
+      .chip-count {
+        color: var(--color-text-muted);
+        font-variant-numeric: tabular-nums;
+      }
     }
   }
 }
@@ -3074,7 +3128,7 @@ onMounted(async () => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .import-project-modal .collection-chevron {
+  .import-project-modal .filter-chip {
     transition: none;
   }
 }

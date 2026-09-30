@@ -550,7 +550,8 @@ interface Props {
 
 interface Emits {
   (e: 'update:open', v: boolean): void
-  (e: 'success'): void
+  /** 带上新工程的 projectKey（进库失败时为空），首页据此放进当前分组 */
+  (e: 'success', projectKeys: string[]): void
   (e: 'cancel'): void
 }
 
@@ -922,9 +923,11 @@ const handleOk = async (row: TemplateRow): Promise<void> => {
     })
 
     // 导入工程到数据库
+    const createdKeys: string[] = []
     try {
       if (uprojectPath) {
-        await window.api.database.project.importByFilePath(uprojectPath)
+        const res = await window.api.database.project.importByFilePath(uprojectPath)
+        if (res?.success && res.data?.projectKey) createdKeys.push(res.data.projectKey)
       }
     } catch (importErr) {
       console.warn('导入工程失败:', importErr)
@@ -932,7 +935,7 @@ const handleOk = async (row: TemplateRow): Promise<void> => {
     }
 
     message.success(t('page.home.project.createFromTemplateModal.createSuccess'))
-    emit('success')
+    emit('success', createdKeys)
     emit('update:open', false)
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err)

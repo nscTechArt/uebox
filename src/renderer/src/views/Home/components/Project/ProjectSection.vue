@@ -215,13 +215,14 @@
   <!-- 从模板创建工程弹窗 -->
   <CreateProjectFromTemplateModal
     v-model:open="createFromTemplateVisible"
-    @success="handleCreateFromTemplateSuccess"
+    @success="handleImportSuccess"
   />
 
   <!-- 导入本机已有工程弹窗 -->
   <ImportProjectModal
     v-model:open="importProjectVisible"
-    @success="handleCreateFromTemplateSuccess"
+    :target-collection-name="activeCollection?.name || ''"
+    @success="handleImportSuccess"
   />
 
   <!-- 分组取名弹窗：新建和重命名共用一个 -->
@@ -507,7 +508,7 @@ const openImportModal = (): void => {
   importProjectVisible.value = true
 }
 
-defineExpose({ reload })
+defineExpose({ reload, adoptImportedProjects })
 
 onMounted(async () => {
   // 订阅放在任何 await 之前：await 期间被卸载的话，onUnmounted 摘到的是 null，
@@ -942,6 +943,51 @@ const openCollectionModal = (collectionKey: string | null, name: string): void =
  * 刚建好的分组是空的。直接选中它，用户看到的是空态里那句「把工程拖到分组按钮上」，
  * 而不是回到全部、自己猜下一步该干嘛。改名不动当前筛选。
  */
+/** 当前选中的是一个真分组（不是「全部」「未分组」）时，就是它 */
+const activeCollection = computed(() =>
+  collections.value.find((c) => c.collectionKey === activeFilterKey.value)
+)
+
+/**
+ * 在某个分组里导入工程，工程就该落在这个分组里。不然用户导完看不到卡片，
+ * 得切回「全部」去找、再拖回来。不管从哪个入口导（弹窗、选文件、拖进来）都走这里。
+ */
+async function adoptImportedProjects(
+  projectKeys: string[],
+  /** 本来就在库里的工程：同样放进分组，提示由这里统一说 */
+  existingKeys: string[] = []
+): Promise<void> {
+  const target = activeCollection.value
+  const all = [...projectKeys, ...existingKeys]
+  if (target && all.length) {
+    for (const key of all) {
+      try {
+        await window.api.database.projectCollection.addProject(key, target.collectionKey)
+      } catch (err) {
+        // 进分组失败不算导入失败：工程已经在库里了，用户在「全部」里还能找到
+        console.error('导入后加入分组失败:', err)
+      }
+    }
+  }
+  if (existingKeys.length) {
+    const count = existingKeys.length
+    if (target) {
+      message.success(
+        t('page.home.project.importToast.existingJoinedCollection', {
+          count,
+          name: target.name || ''
+        })
+      )
+    } else {
+      message.info(t('page.home.project.importToast.alreadyInLibrary', { count }))
+    }
+  }
+  await refreshProjectSectionData()
+}
+
+const handleImportSuccess = (projectKeys: string[], existingKeys: string[] = []): Promise<void> =>
+  adoptImportedProjects(projectKeys, existingKeys)
+
 const handleCollectionNameSuccess = async (payload: {
   collectionKey: string
   created: boolean
@@ -1360,8 +1406,8 @@ const handleBlankAreaContextMenu = (e: MouseEvent) => {
 const handleBlankMenuClick = async (key: string) => {
   if (key === 'import-project') {
     try {
-      await handleImportSingle()
-      await loadAllProjects()
+      const added = await handleImportSingle()
+      await adoptImportedProjects(added?.projectKey ? [added.projectKey] : [])
     } catch (err: any) {
       message.error(err?.message || '导入工程失败')
     }
@@ -1372,9 +1418,6 @@ const handleBlankMenuClick = async (key: string) => {
   }
 }
 
-const handleCreateFromTemplateSuccess = async () => {
-  await loadAllProjects()
-}
 
 const handleCreateCollection = (): void => openCollectionModal(null, '')
 

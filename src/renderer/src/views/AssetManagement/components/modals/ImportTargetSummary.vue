@@ -14,6 +14,8 @@ defineProps<{
   compatibilityText: string
   blocked: number
   failed: boolean
+  /** 底栏的补充说明，例如「GLB 要靠 UE 转换，会先在 UE 里打开这个工程」 */
+  note?: string
 }>()
 const emit = defineEmits<{ retry: [] }>()
 const { t } = useI18n()
@@ -24,6 +26,7 @@ const { t } = useI18n()
     <span class="target-name" :title="projectName">
       {{ t('importToProjectModal.targetProject', { name: projectName }) }}
     </span>
+    <span v-if="note" class="target-note">{{ note }}</span>
     <div v-if="blocked > 0 || failed" class="target-warning" role="status">
       <span>{{ compatibilityText }}</span>
       <AppButton v-if="failed" variant="text" size="small" @click="emit('retry')">
@@ -46,6 +49,10 @@ const { t } = useI18n()
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   overflow-wrap: anywhere;
+}
+.target-note {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
 }
 .target-warning {
   display: flex;

@@ -29,9 +29,15 @@ interface Props {
    * 「未归属项目」，看起来就像点了没用。
    */
   pendingProjectName?: string
+  /** 下拉菜单相对胶囊的位置：顶栏里靠右对齐，欢迎页里居中 */
+  placement?: 'bottom' | 'bottomRight'
 }
 
-const props = withDefaults(defineProps<Props>(), { sessionId: '', pendingProjectName: '' })
+const props = withDefaults(defineProps<Props>(), {
+  sessionId: '',
+  pendingProjectName: '',
+  placement: 'bottomRight'
+})
 
 const { t } = useI18n()
 const chatStore = useChatSessionsStore()
@@ -95,12 +101,21 @@ const engineVersion = computed<string>(() => {
   return live?.engineVersion || sessionProject.value?.engineVersion || ''
 })
 
-const projectOptions = computed<ConnectedProjectRef[]>(() =>
-  collectKnownProjects(chatStore.displayableSessions, [
+function isProjectConnected(name: string): boolean {
+  return connectedNames.value.has(name.trim().toLowerCase())
+}
+
+/** 已连着编辑器的工程排最前 —— 多数时候要选的就是它；其余保持原顺序 */
+const projectOptions = computed<ConnectedProjectRef[]>(() => {
+  const all = collectKnownProjects(chatStore.displayableSessions, [
     ...connectedProjects.value,
     ...sidebarStore.manualProjects
   ])
-)
+  return [
+    ...all.filter((project) => isProjectConnected(project.projectName)),
+    ...all.filter((project) => !isProjectConnected(project.projectName))
+  ]
+})
 
 const tooltip = computed<string>(() => {
   if (!projectName.value) return t('assistantTopNav.sessionProject.none')
@@ -137,7 +152,7 @@ function clearProject(): void {
 </script>
 
 <template>
-  <AppDropdown v-if="props.sessionId" :trigger="['click']" placement="bottomRight">
+  <AppDropdown v-if="props.sessionId" :trigger="['click']" :placement="props.placement">
     <AppTooltip placement="bottom" :title="tooltip">
       <span
         class="session-project-chip"
@@ -164,9 +179,13 @@ function clearProject(): void {
             :item-key="project.projectName"
             @click="assignProject(project)"
           >
-            {{ project.projectName }}
-            <span v-if="connectedNames.has(project.projectName.trim().toLowerCase())">
-              · {{ t('chatSidebar.connected') }}
+            <span
+              :class="{ 'option-connected': isProjectConnected(project.projectName) }"
+            >
+              {{ project.projectName }}
+              <template v-if="isProjectConnected(project.projectName)">
+                · {{ t('chatSidebar.connected') }}
+              </template>
             </span>
           </AppMenuItem>
           <AppMenuItem v-if="projectOptions.length === 0" disabled>
@@ -228,6 +247,10 @@ function clearProject(): void {
   text-overflow: ellipsis;
   // 没有 min-width:0 的话，flex 项不肯缩到内容以下，省略号根本不会出现
   min-width: 0;
+}
+
+.option-connected {
+  color: var(--color-success-text);
 }
 
 .chip-arrow {

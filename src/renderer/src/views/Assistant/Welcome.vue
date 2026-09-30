@@ -14,6 +14,7 @@
           :notebook-mode="notebookMode"
           :session-id="sid"
           :pending-project-name="pendingProjectName"
+          :hide-project-chip="!conversationMode"
           @side-chat="handleSideChat"
           @clear="handleClearSession"
           @export-image="exportAsImage"
@@ -80,6 +81,14 @@
           <BrandSphere :size="180" :mouse-x="sphereMouseX" :mouse-y="sphereMouseY" />
         </button>
         <h1 class="hero-title">{{ greetingMessage }}</h1>
+        <!-- 还没开聊时工程归属放在问候语下面，开聊后回到右上角 -->
+        <div class="hero-project">
+          <SessionProjectChip
+            :session-id="sid"
+            :pending-project-name="pendingProjectName"
+            placement="bottom"
+          />
+        </div>
       </section>
 
       <section v-if="!conversationMode" class="composer-section">
@@ -300,6 +309,7 @@ defineExpose({
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import TopNav from './components/TopNav.vue'
+import SessionProjectChip from './components/SessionProjectChip.vue'
 import BrandSphere from './components/BrandSphere.vue'
 import VoiceOrb from './components/VoiceOrb.vue'
 import InputComposer from './components/InputComposer.vue'
@@ -2619,7 +2629,7 @@ const {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 20px;
   animation: fadeInDown 0.4s ease-out;
 }
 
@@ -2647,6 +2657,9 @@ const {
   font-size: 32px;
   font-weight: 700;
   letter-spacing: 0.4px;
+}
+.hero-project {
+  margin-top: 12px;
 }
 
 .composer-section {

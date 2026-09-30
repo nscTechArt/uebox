@@ -21,7 +21,15 @@
 
         <header class="panel-head">
           <h2 class="panel-title">{{ t('page.home.project.importProjectModal.title') }}</h2>
-          <p class="panel-subtitle">{{ t('page.home.project.importProjectModal.subtitle') }}</p>
+          <p class="panel-subtitle">
+            {{
+              targetCollectionName
+                ? t('page.home.project.importProjectModal.subtitleIntoCollection', {
+                    name: targetCollectionName
+                  })
+                : t('page.home.project.importProjectModal.subtitle')
+            }}
+          </p>
         </header>
 
         <div class="filter-bar">
@@ -80,12 +88,18 @@
               :key="project.projectPath"
               type="button"
               class="project-row"
-              :disabled="project.isImported"
-              :aria-label="`${project.projectName}, ${t(
-                project.isImported
-                  ? 'page.home.project.importProjectModal.imported'
-                  : 'page.home.project.importProjectModal.clickToImport'
-              )}`"
+              :disabled="project.isImported && !targetCollectionName"
+              :aria-label="`${project.projectName}, ${
+                project.isImported && targetCollectionName
+                  ? t('page.home.project.importProjectModal.clickToJoin', {
+                      name: targetCollectionName
+                    })
+                  : t(
+                      project.isImported
+                        ? 'page.home.project.importProjectModal.imported'
+                        : 'page.home.project.importProjectModal.clickToImport'
+                    )
+              }`"
               @click="handleImportProject(project)"
             >
               <div class="card-thumb">
@@ -108,7 +122,13 @@
               </div>
               <span class="last-open">{{ formatLastOpenTime(project.lastOpenTime) }}</span>
               <span v-if="project.isImported" class="imported-badge">
-                {{ t('page.home.project.importProjectModal.imported') }}
+                <span class="badge-idle">{{
+                  t('page.home.project.importProjectModal.imported')
+                }}</span>
+                <!-- 在分组里时已导入的工程也能点：悬停告诉用户点了会怎样 -->
+                <span v-if="targetCollectionName" class="badge-hover">{{
+                  t('page.home.project.importProjectModal.joinCollection')
+                }}</span>
               </span>
               <span v-else class="import-action" aria-hidden="true">
                 <PhFolderPlus />
@@ -116,6 +136,20 @@
             </button>
           </div>
         </div>
+
+        <!-- 列表只认引擎最近打开过的工程；不在里面的，得有地方自己选路径 -->
+        <footer class="panel-foot">
+          <span class="foot-hint">{{ t('page.home.project.importProjectModal.dropHint') }}</span>
+          <button
+            type="button"
+            class="pick-file-btn"
+            :disabled="picking"
+            @click="handlePickFile"
+          >
+            <PhFolderOpen aria-hidden="true" />
+            {{ t('page.home.project.importProjectModal.pickFile') }}
+          </button>
+        </footer>
       </div>
     </div>
   </AppModal>
@@ -126,9 +160,10 @@ import AppSpin from '@renderer/components/AppSpin.vue'
 import AppModal from '@renderer/components/AppModal.vue'
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PhFolder, PhFolderPlus, PhMagnifyingGlass, PhSignIn, PhX } from '@phosphor-icons/vue'
+import { PhFolder, PhFolderOpen, PhFolderPlus, PhMagnifyingGlass, PhSignIn, PhX } from '@phosphor-icons/vue'
 import { message } from '@/utils/messageManager'
 import { toLocalResourceUrl } from '@renderer/utils/localResource'
+import { notifyPluginInstallFailure } from '@renderer/hooks/usePluginInstallNotice'
 
 /**
  * 把本机已有的 UE 工程收进工程库。
@@ -140,11 +175,14 @@ const { t } = useI18n()
 
 interface Props {
   open: boolean
+  /** 首页当前选中的分组名 —— 导进来的工程会直接放进去，副标题要把这件事说出来 */
+  targetCollectionName?: string
 }
 
 interface Emits {
   (e: 'update:open', v: boolean): void
-  (e: 'success'): void
+  /** 带上这次新进库的工程和本来就在库里的工程，首页据此把它们放进当前分组 */
+  (e: 'success', projectKeys: string[], existingKeys?: string[]): void
 }
 
 const props = defineProps<Props>()
@@ -163,6 +201,7 @@ interface RecentProject {
 const projects = ref<RecentProject[]>([])
 const loading = ref(false)
 const importingAll = ref(false)
+const picking = ref(false)
 const searchKeyword = ref('')
 const versionFilter = ref<string>('all')
 
@@ -211,16 +250,20 @@ const loadProjects = async (): Promise<void> => {
 }
 
 const handleImportProject = async (project: RecentProject): Promise<void> => {
-  if (project.isImported) return
+  // 已导入的工程只在分组里才可点：点它就是放进这个分组
+  if (project.isImported && !props.targetCollectionName) return
 
   try {
     const result = await window.api.database.project.importByFilePath(project.projectPath)
-    if (result?.success) {
+    if (result?.alreadyRegistered) {
+      project.isImported = true
+      emit('success', [], keysOf(result.data))
+    } else if (result?.success) {
       message.success(
         t('page.home.project.importProjectModal.importSuccess', { name: project.projectName })
       )
       project.isImported = true
-      emit('success')
+      emit('success', keysOf(result.data))
     } else {
       message.error(result?.error || t('page.home.project.importProjectModal.importFailed'))
     }
@@ -237,6 +280,7 @@ const handleImportAllProjects = async (): Promise<void> => {
   importingAll.value = true
   let successCount = 0
   let failCount = 0
+  const importedKeys: string[] = []
 
   try {
     for (const project of pending) {
@@ -244,6 +288,7 @@ const handleImportAllProjects = async (): Promise<void> => {
         const result = await window.api.database.project.importByFilePath(project.projectPath)
         if (result?.success) {
           project.isImported = true
+          importedKeys.push(...keysOf(result.data))
           successCount++
         } else {
           failCount++
@@ -256,7 +301,7 @@ const handleImportAllProjects = async (): Promise<void> => {
     importingAll.value = false
   }
 
-  if (successCount > 0) emit('success')
+  if (successCount > 0) emit('success', importedKeys)
 
   if (failCount === 0) {
     message.success(
@@ -269,6 +314,41 @@ const handleImportAllProjects = async (): Promise<void> => {
         fail: failCount
       })
     )
+  }
+}
+
+const keysOf = (record?: { projectKey?: string | null }): string[] =>
+  record?.projectKey ? [record.projectKey] : []
+
+/** 自己挑一个 .uproject。选完就算这趟办完了，关掉弹窗让用户看到卡片 */
+const handlePickFile = async (): Promise<void> => {
+  picking.value = true
+  try {
+    const ret = await window.api.dialog.showOpenDialog({
+      title: t('actionToast.project.pickUproject'),
+      properties: ['openFile'],
+      filters: [{ name: 'Unreal Project', extensions: ['uproject'] }]
+    })
+    const filePath = ret?.filePaths?.[0]
+    if (ret?.canceled || !filePath) return
+
+    const result = await window.api.database.project.importByFilePath(filePath)
+    if (result?.alreadyRegistered) {
+      emit('success', [], keysOf(result.data))
+      emit('update:open', false)
+    } else if (result?.success) {
+      message.success(t('actionToast.project.importOk'))
+      notifyPluginInstallFailure(result)
+      emit('success', keysOf(result.data))
+      emit('update:open', false)
+    } else {
+      message.error(result?.error || t('page.home.project.importProjectModal.importFailed'))
+    }
+  } catch (err) {
+    console.error('选择工程文件导入失败:', err)
+    message.error(t('page.home.project.importProjectModal.importError'))
+  } finally {
+    picking.value = false
   }
 }
 
@@ -651,9 +731,69 @@ watch(
   font-size: 15px;
 }
 
+.imported-badge .badge-hover {
+  display: none;
+}
+
+.project-row:hover:not(:disabled) .imported-badge {
+  color: var(--color-text-primary);
+
+  .badge-idle:has(+ .badge-hover) {
+    display: none;
+  }
+
+  .badge-hover {
+    display: inline;
+  }
+}
+
 .project-row:hover:not(:disabled) .import-action {
   background: var(--color-bg-raised);
   color: var(--color-text-primary);
+}
+
+.panel-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: 14px;
+}
+
+.foot-hint {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.pick-file-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  background: var(--color-bg-surface-hover);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: var(--color-border-focus);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-border-focus);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+  }
 }
 
 .state-block {

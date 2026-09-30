@@ -86,87 +86,49 @@ export function importProjectChoices(
 export interface ImportProjectCollection {
   collectionKey: string
   name?: string | null
-  isPinned?: number | null
-  sort_order?: number | null
   items?: ImportProjectChoice[]
 }
 
-export type ImportBrowserEntry =
-  | { kind: 'project'; key: string; project: ImportProjectChoice; pinned: boolean }
-  | {
-      kind: 'collection'
-      key: string
-      collection: ImportProjectCollection
-      projects: ImportProjectChoice[]
-      pinned: boolean
-    }
+/** 「全部」「未分组」不是真分组，用哨兵值占位 —— 跟首页「我的项目」那一排是同一套 */
+export const IMPORT_FILTER_ALL = '__all__'
+export const IMPORT_FILTER_UNGROUPED = '__ungrouped__'
+
+export interface ImportFilterChip {
+  key: string
+  /** 真分组的名字；「全部」「未分组」是 null，由界面自己翻译 */
+  name: string | null
+  projects: ImportProjectChoice[]
+}
 
 /**
- * Keep collection members together, including matches found by search or engine version.
+ * 分组筛选条，跟首页「我的项目」一致：全部 / 各分组 / 未分组。
  *
- * A collection entry carries its own members so the modal can expand it in place — there is
- * no drilled-in mode: picking an import target should never cost a round trip into a sub-view.
+ * projects 是已经按搜索词和版本筛过、排好序的那批 —— 每颗按钮的计数和点进去看到的
+ * 卡片读的是同一份，按钮上标着 6、点进去只有 2 的情况不会出现。
+ * 一个工程可以同时在几个分组里，所以成员只认分组自己带回来的那份名单。
  */
-export function importBrowserEntries(
+export function importFilterChips(
   projects: ImportProjectChoice[],
-  collections: ImportProjectCollection[],
-  keyword: string,
-  version: string,
-  label: (association?: string | null) => string
-): ImportBrowserEntry[] {
-  const query = keyword.trim().toLowerCase()
-  const matching = new Set(importProjectChoices(projects, [], keyword).map((p) => p.projectKey))
-  // 一个工程可以同时在几个分组里，所以成员只认分组自己带回来的那份名单
-  const members = (collection: ImportProjectCollection): ImportProjectChoice[] =>
-    projects.filter((p) => collection.items?.some((item) => item.projectKey === p.projectKey))
-  const matchesVersion = (p: ImportProjectChoice): boolean =>
-    !version || label(p.EngineAssociation) === version
-  const relevance = (entry: ImportBrowserEntry): number =>
-    entry.kind === 'project'
-      ? projectSearchRank(entry.project, query)
-      : Math.min(
-          projectSearchRank({ projectName: entry.collection.name }, query),
-          ...entry.projects.map((p) => projectSearchRank(p, query))
-        )
-  const compare = (a: ImportBrowserEntry, b: ImportBrowserEntry): number =>
-    relevance(a) - relevance(b) || Number(b.pinned) - Number(a.pinned)
-  const compareProjects = (a: ImportProjectChoice, b: ImportProjectChoice): number =>
-    projectSearchRank(a, query) - projectSearchRank(b, query) ||
-    Number(b.isPinned === 1) - Number(a.isPinned === 1)
-  const entry = (project: ImportProjectChoice): ImportBrowserEntry => ({
-    kind: 'project',
-    key: project.projectKey,
-    project,
-    pinned: project.isPinned === 1
-  })
-  const grouped = new Set(collections.flatMap((c) => members(c).map((p) => p.projectKey)))
-  const entries: ImportBrowserEntry[] = collections
-    .slice()
-    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-    .flatMap((collection) => {
-      const items = members(collection)
-        .filter(
-          (p) =>
-            matchesVersion(p) &&
-            (!query || matching.has(p.projectKey) || collection.name?.toLowerCase().includes(query))
-        )
-        .sort(compareProjects)
-      return items.length
-        ? [
-            {
-              kind: 'collection' as const,
-              key: collection.collectionKey,
-              collection,
-              projects: items,
-              pinned: collection.isPinned === 1
-            }
-          ]
-        : []
+  collections: ImportProjectCollection[]
+): ImportFilterChip[] {
+  const grouped = new Set(collections.flatMap((c) => (c.items || []).map((p) => p.projectKey)))
+  const chips: ImportFilterChip[] = [{ key: IMPORT_FILTER_ALL, name: null, projects }]
+  // 顺序照数据库给的来，跟首页那一排一致
+  for (const collection of collections) {
+    const members = new Set((collection.items || []).map((p) => p.projectKey))
+    chips.push({
+      key: collection.collectionKey,
+      name: collection.name || '',
+      projects: projects.filter((p) => members.has(p.projectKey))
     })
-  entries.push(
-    ...projects
-      .filter((p) => !grouped.has(p.projectKey) && matchesVersion(p) && matching.has(p.projectKey))
-      .map(entry)
-  )
-  return entries.sort(compare)
+  }
+  // 一个分组都没有的时候不单列「未分组」，那等于把「全部」说两遍
+  if (collections.length) {
+    chips.push({
+      key: IMPORT_FILTER_UNGROUPED,
+      name: null,
+      projects: projects.filter((p) => !grouped.has(p.projectKey))
+    })
+  }
+  return chips
 }

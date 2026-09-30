@@ -118,10 +118,11 @@ describe('import project preparation', () => {
       loading: ref(false),
       projectsLoading: ref(false),
       loadFailed: ref(false),
-      sortedProjects: ref([{ projectKey: 'target' }]),
+      visibleProjects: ref([{ projectKey: 'target' }]),
       selectedProjectKey: ref('target'),
       props: { source: { assetKey: 'one', assetName: 'One.uasset' } },
       emit: vi.fn(),
+      needsLaunch: ref(false),
       isPluginSource: () => false,
       getBasename: () => '',
       getArchiveExtension: () => '',
@@ -147,18 +148,18 @@ describe('import project preparation', () => {
   })
 
   it('clears a selected target filtered out by a search', async () => {
-    const sortedProjects = ref([{ projectKey: 'one' }])
+    const visibleProjects = ref([{ projectKey: 'one' }])
     const selectedProjectKey = ref<string | null>('one')
     const { selectedProject, clearMissingSelection } = handlers(
       ['selectedProject', 'clearMissingSelection'],
       {
         computed,
-        sortedProjects,
+        visibleProjects,
         selectedProjectKey
       }
     )
-    const stop = watch(sortedProjects, clearMissingSelection, { flush: 'sync' })
-    sortedProjects.value = []
+    const stop = watch(visibleProjects, clearMissingSelection, { flush: 'sync' })
+    visibleProjects.value = []
     expect(selectedProject.value).toBeUndefined()
     expect(selectedProjectKey.value).toBeNull()
     stop()
@@ -204,23 +205,23 @@ describe('import project preparation', () => {
 
 describe('adding an import destination', () => {
   it.each([true, false])('selects the added project only on success (%s)', async (success) => {
-    const added = { projectKey: 'added', collectionKey: 'group' }
+    const added = { projectKey: 'added' }
     const keyword = ref('old search')
     const engineFilter = ref('5.1')
-    const expandedCollections = ref(new Set<string>())
+    const activeFilterKey = ref('group')
     const handleSelect = vi.fn()
     const addingProject = ref(false)
-    const { handleAddProject } = handlers(['handleAddProject', 'expandCollection'], {
+    const { handleAddProject } = handlers(['handleAddProject'], {
       ref,
       preparing: ref(false),
       addingProject,
       visible: ref(true),
       handleImportSingle: vi.fn(async () => (success ? added : undefined)),
       loadCollections: vi.fn(async () => {}),
-      collections: ref([{ collectionKey: 'group', items: [added] }]),
       keyword,
       engineFilter,
-      expandedCollections,
+      activeFilterKey,
+      IMPORT_FILTER_ALL: '__all__',
       handleSelect,
       nextTick: async () => {},
       document: { querySelector: () => null }
@@ -228,36 +229,128 @@ describe('adding an import destination', () => {
     await handleAddProject()
     expect(addingProject.value).toBe(false)
     if (success) {
+      // Back to 全部 with no filters, so the new project is guaranteed to be on screen.
       expect(keyword.value).toBe('')
       expect(engineFilter.value).toBe('')
-      // The new project sits inside a collection, so that collection has to be open to see it.
-      expect([...expandedCollections.value]).toEqual(['group'])
+      expect(activeFilterKey.value).toBe('__all__')
       expect(handleSelect).toHaveBeenCalledWith(added)
     } else {
       expect(keyword.value).toBe('old search')
       expect(engineFilter.value).toBe('5.1')
-      expect(expandedCollections.value.size).toBe(0)
+      expect(activeFilterKey.value).toBe('group')
       expect(handleSelect).not.toHaveBeenCalled()
     }
   })
 
-  it('opens and closes a collection in place instead of navigating into it', () => {
-    const keyword = ref('')
-    const engineFilter = ref('')
-    const { toggleCollection, isCollectionOpen } = handlers(
-      ['expandedCollections', 'isFiltering', 'isCollectionOpen', 'toggleCollection'],
-      { ref, computed, preparing: ref(false), keyword, engineFilter }
-    ) as unknown as {
-      toggleCollection: (key: string) => void
-      isCollectionOpen: (key: string) => boolean
+  it('clicking the active group tag again goes back to 全部', () => {
+    const activeFilterKey = ref('__all__')
+    const { handleClickFilter } = handlers(['handleClickFilter'], {
+      preparing: ref(false),
+      activeFilterKey,
+      IMPORT_FILTER_ALL: '__all__'
+    }) as unknown as { handleClickFilter: (key: string) => void }
+    handleClickFilter('group')
+    expect(activeFilterKey.value).toBe('group')
+    handleClickFilter('group')
+    expect(activeFilterKey.value).toBe('__all__')
+  })
+})
+
+/**
+ * 单个 GLB/FBX 这类文件要靠 UE 转换。选中的工程没开着时，「打开工程并导入」替用户
+ * 在 UE 里打开，等它连上盒子再接着导 —— 以前是点完弹一句「没连上」就结束了。
+ */
+describe('opening the target project before an editor-only import', () => {
+  const project = {
+    projectKey: 'town',
+    projectName: '淘金小镇',
+    projectPath: 'H:/Town',
+    originPath: 'H:/Town/Town.uproject'
+  }
+  interface LaunchSetup {
+    api: {
+      openProjectAndWait: (p: typeof project, signal: AbortSignal) => Promise<boolean>
+      launchingProjectName: { value: string }
+      launchTimedOut: { value: boolean }
     }
-    expect(isCollectionOpen('group')).toBe(false)
-    toggleCollection('group')
-    expect(isCollectionOpen('group')).toBe(true)
-    toggleCollection('group')
-    expect(isCollectionOpen('group')).toBe(false)
-    // A search only leaves collections that matched, so hiding their members hides the result.
-    keyword.value = 'forest'
-    expect(isCollectionOpen('group')).toBe(true)
+    invoke: ReturnType<typeof vi.fn>
+    error: ReturnType<typeof vi.fn>
+    warning: ReturnType<typeof vi.fn>
+    connect: () => void
+  }
+  function setup(res: object): LaunchSetup {
+    const connectedProjects = ref<Array<Record<string, unknown>>>([])
+    const invoke = vi.fn(async () => res)
+    const error = vi.fn()
+    const warning = vi.fn()
+    const api = handlers(
+      [
+        'isReachable',
+        'launchingProjectName',
+        'launchTimedOut',
+        'EDITOR_WAIT_MS',
+        'waitForConnection',
+        'openProjectAndWait'
+      ],
+      {
+        ref,
+        watch,
+        importProjectConnection,
+        connectedProjects,
+        window: { api: { invoke } },
+        message: { error, warning },
+        t: (key: string) => key
+      }
+    ) as unknown as LaunchSetup['api']
+    const connect = (): void => {
+      connectedProjects.value = [
+        { connectionId: 'c1', projectPath: 'H:/Town/Town.uproject', isConnected: true }
+      ]
+    }
+    return { api, invoke, error, warning, connect }
+  }
+  const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('opens without hiding the box, waits for the connection, then lets the import go on', async () => {
+    const { api, invoke, connect } = setup({ success: true })
+    const pending = api.openProjectAndWait(project, new AbortController().signal)
+    await flush()
+    expect(invoke).toHaveBeenCalledWith('shell:openUproject', 'H:/Town/Town.uproject', {
+      forImport: true
+    })
+    expect(api.launchingProjectName.value).toBe('淘金小镇')
+    connect()
+    await expect(pending).resolves.toBe(true)
+    expect(api.launchingProjectName.value).toBe('')
+  })
+
+  it('does not sit waiting when the plugin could not be installed', async () => {
+    const { api, error } = setup({ success: true, pluginFailure: '没有随包插件' })
+    await expect(api.openProjectAndWait(project, new AbortController().signal)).resolves.toBe(false)
+    expect(error).toHaveBeenCalledWith('importToProjectModal.pluginNotInstalled')
+  })
+
+  it('stops waiting when the dialog is cancelled', async () => {
+    const { api } = setup({ success: true })
+    const controller = new AbortController()
+    const pending = api.openProjectAndWait(project, controller.signal)
+    await flush()
+    controller.abort()
+    await expect(pending).resolves.toBe(false)
+    expect(api.launchTimedOut.value).toBe(false)
+  })
+
+  it('gives up after the wait limit and tells the user to check UE', async () => {
+    vi.useFakeTimers()
+    try {
+      const { api, warning } = setup({ success: true })
+      const pending = api.openProjectAndWait(project, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
+      await expect(pending).resolves.toBe(false)
+      expect(api.launchTimedOut.value).toBe(true)
+      expect(warning).toHaveBeenCalledWith('importToProjectModal.editorWaitTimeout')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

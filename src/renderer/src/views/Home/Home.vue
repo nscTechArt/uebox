@@ -71,6 +71,8 @@ const handleEngineDragEnter = (): void => {
 
 const projectSectionRef = ref<{
   reload: () => Promise<void>
+  /** 刷新列表，并把新进库的工程放进首页当前选中的分组 */
+  adoptImportedProjects: (projectKeys: string[], existingKeys?: string[]) => Promise<void>
 } | null>(null)
 const dragOverlayRef = ref<HTMLElement | null>(null)
 const projectSectionTop = ref(400) // 默认值，会在 mounted 时更新
@@ -134,10 +136,16 @@ const handleDropRefresh = async (e: DragEvent): Promise<void> => {
     // 只处理 .uproject 文件和目录（扫描工程）
     // 其他文件不处理（引擎拖拽由 EngineSection 处理）
     if (uprojectFiles.length > 0) {
+      const importedKeys: string[] = []
+      const existingKeys: string[] = []
       for (const f of uprojectFiles) {
         try {
           const res = await window.api.database.project.importByFilePath(f.path)
-          if (res?.success) {
+          if (res?.alreadyRegistered && res.data?.projectKey) {
+            // 已在库里：不报错，交给首页放进当前分组并统一提示
+            existingKeys.push(res.data.projectKey)
+          } else if (res?.success) {
+            if (res.data?.projectKey) importedKeys.push(res.data.projectKey)
             message.success({
               content: t('page.home.project.importToast.fileOk', { path: f.path })
             })
@@ -153,9 +161,7 @@ const handleDropRefresh = async (e: DragEvent): Promise<void> => {
         }
       }
       // 通知外部刷新列表
-      if (projectSectionRef.value) {
-        await projectSectionRef.value.reload()
-      }
+      await projectSectionRef.value?.adoptImportedProjects(importedKeys, existingKeys)
     }
 
     // 处理目录（扫描并导入包含的 .uproject）
@@ -181,21 +187,25 @@ const handleDropRefresh = async (e: DragEvent): Promise<void> => {
         // 如果只有一个工程，直接导入
         if (foundProjects.length === 1) {
           try {
-            const res = await window.api.database.project.importByDirectory(d.path)
-            if (res?.success) {
-              const total = res?.data?.total ?? 0
+            // 按文件导而不是按目录导：要拿到新工程的 projectKey 才能放进当前分组
+            const res = await window.api.database.project.importByFilePath(foundProjects[0])
+            const importedKeys: string[] = []
+            const existingKeys: string[] = []
+            if (res?.alreadyRegistered && res.data?.projectKey) {
+              existingKeys.push(res.data.projectKey)
+            } else if (res?.success) {
+              if (res.data?.projectKey) importedKeys.push(res.data.projectKey)
               message.success({
-                content: t('page.home.project.importToast.dirOk', { count: total })
+                content: t('page.home.project.importToast.dirOk', { count: 1 })
               })
+              notifyPluginInstallFailure(res)
             } else {
               message.error({
                 content:
                   res?.error || t('page.home.project.importToast.fileFailed', { path: d.path })
               })
             }
-            if (projectSectionRef.value) {
-              await projectSectionRef.value.reload()
-            }
+            await projectSectionRef.value?.adoptImportedProjects(importedKeys, existingKeys)
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err)
             message.error({ content: t('page.home.project.importToast.dirError', { reason: msg }) })
@@ -253,56 +263,46 @@ const handleDropRefresh = async (e: DragEvent): Promise<void> => {
                 // 逐个导入选中的工程
                 let successCount = 0
                 let failCount = 0
-                let skipCount = 0
+                const importedKeys: string[] = []
+                const existingKeys: string[] = []
                 for (const filePath of selectedFiles) {
                   try {
                     const res = await window.api.database.project.importByFilePath(filePath)
-                    if (res?.success) {
+                    if (res?.alreadyRegistered && res.data?.projectKey) {
+                      // 已在库里不算失败，交给首页放进当前分组并统一提示
+                      existingKeys.push(res.data.projectKey)
+                    } else if (res?.success) {
+                      if (res.data?.projectKey) importedKeys.push(res.data.projectKey)
                       successCount++
                     } else {
-                      // 区分"已存在"和"真正的失败"
-                      if (res?.error?.includes('已存在')) {
-                        skipCount++
-                      } else {
-                        failCount++
-                      }
+                      failCount++
                     }
                   } catch {
                     failCount++
                   }
                 }
 
-                // 生成结果消息
-                const parts: string[] = []
-                if (successCount > 0)
-                  parts.push(t('page.home.project.importToast.summaryOk', { count: successCount }))
-                if (skipCount > 0)
-                  parts.push(
-                    t('page.home.project.importToast.summarySkipped', { count: skipCount })
-                  )
-                if (failCount > 0)
-                  parts.push(t('page.home.project.importToast.summaryFailed', { count: failCount }))
-
-                if (successCount > 0) {
-                  if (failCount > 0 || skipCount > 0) {
-                    message.warning({
-                      content: parts.join(t('page.home.project.importToast.summarySeparator'))
-                    })
-                  } else {
+                // 已在库里的那几个由 adoptImportedProjects 说，这里只管新导入和失败
+                if (failCount === 0) {
+                  if (successCount > 0) {
                     message.success({
                       content: t('page.home.project.importToast.partial', { count: successCount })
                     })
                   }
-                } else if (skipCount > 0) {
-                  message.info({ content: t('page.home.project.importToast.allDone') })
-                } else {
+                } else if (successCount === 0 && existingKeys.length === 0) {
                   message.error({ content: t('page.home.project.importToast.allFailed') })
+                } else {
+                  const parts: string[] = []
+                  if (successCount > 0)
+                    parts.push(t('page.home.project.importToast.summaryOk', { count: successCount }))
+                  parts.push(t('page.home.project.importToast.summaryFailed', { count: failCount }))
+                  message.warning({
+                    content: parts.join(t('page.home.project.importToast.summarySeparator'))
+                  })
                 }
 
                 cleanup()
-                if (projectSectionRef.value) {
-                  await projectSectionRef.value.reload()
-                }
+                await projectSectionRef.value?.adoptImportedProjects(importedKeys, existingKeys)
                 resolve()
               } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err)
