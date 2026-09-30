@@ -634,14 +634,14 @@ export class TeamService {
     const source = resolve(input.sourceDir)
     return this.startJob(key, 'put-in', team.projectName, async (progress, signal) => {
       const temp = `${source}.uebox-${randomUUID().slice(0, 8)}`
-      await this.lore(
-        record.serverId,
-        dirname(source),
-        ['clone', remote, temp, '--branch', 'main'],
-        signal
-      )
-      await fs.rename(join(temp, '.lore'), join(source, '.lore'))
-      await fs.rm(temp, { recursive: true, force: true })
+      // 不带 --branch main：仓库还是空的，main 还没有修订，带上它 clone 会报
+      // 「revision not found: main@latest」；不带时落在 main 上
+      try {
+        await this.lore(record.serverId, dirname(source), ['clone', remote, temp], signal)
+        await fs.rename(join(temp, '.lore'), join(source, '.lore'))
+      } finally {
+        await fs.rm(temp, { recursive: true, force: true })
+      }
       const files = await listFiles(source, (rel) => shouldSkipOnPutIn(rel))
       progress({ phase: 'staging', done: 0, total: files.length })
       const targets = join(source, '.lore', `put-in-${randomUUID().slice(0, 8)}.txt`)
