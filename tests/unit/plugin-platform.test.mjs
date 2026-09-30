@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import AdmZip from 'adm-zip'
 import { describe, it, expect } from 'vitest'
 import { pluginPlatform, installedMacEngines } from '../../scripts/plugin-platform.mjs'
-import { zipNameForEngine, findStaleBinary, checkStaleness } from '../../scripts/build-plugin.mjs'
+import { checkSelectedPackage } from '../../scripts/plugin-check.mjs'
+import { zipNameForEngine } from '../../scripts/plugin-package-format.mjs'
+import { findStaleBinary } from '../../scripts/build-plugin.mjs'
 
 describe('platform-specific plugin packages', () => {
   it('preserves Windows names and selects a separate Mac build script and package', () => {
@@ -44,10 +46,10 @@ describe('platform-specific plugin packages', () => {
         Buffer.from(JSON.stringify({ fingerprint: 'fresh', engine: '5.5', platform: 'Mac' }))
       )
       zip.writeZip(join(dir, 'UnrealAgentLink55-Mac.zip'))
-      expect(checkStaleness('fresh', dir, ['5.5'], 'darwin')).toBe(false)
+      expect(checkSelectedPackage('fresh', '5.5', dir, 'darwin')).toBe(false)
       zip.addFile('Binaries/Mac/UnrealEditor-UnrealAgentLink.dylib', Buffer.from('fixture'))
       zip.writeZip(join(dir, 'UnrealAgentLink55-Mac.zip'))
-      expect(checkStaleness('fresh', dir, ['5.5'], 'darwin')).toBe(true)
+      expect(checkSelectedPackage('fresh', '5.5', dir, 'darwin')).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

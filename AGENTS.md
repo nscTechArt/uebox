@@ -63,10 +63,12 @@ is published. Two things make deferring it safe:
 
 - Every task got its own 30-second check, so a red full gate points at _this_ batch, not at a task
   someone finished three hours ago and can no longer reconstruct.
-- **CI is the backstop.** `.github/workflows/quality.yml` does nothing but `pnpm verify --ci`, and
-  it runs on **every push** — the full gate plus packaging and the offline-boot check. The gate is
-  defined in exactly one place (`scripts/verify.mjs`), so local and CI cannot drift. Forgetting to
-  run it locally costs you a red run on GitHub, not a broken release.
+- **CI is the backstop.** `.github/workflows/quality.yml` runs `pnpm verify --ci` on pull requests
+  and pushes to `main`. The shared gate adds audit, packaging and offline boot in CI, while
+  plugin package/native checks are explicitly NOT RUN. A green repository job is not
+  native acceptance. The gate is defined in exactly one place (`scripts/verify.mjs`), so local and
+  CI cannot drift. Forgetting to run it locally costs you a red run on GitHub, not a broken
+  release.
 
 Every step tells you what to fix when it fails. You can leave the app running while it runs — the
 gate no longer touches the `better-sqlite3` native binding.
@@ -80,7 +82,7 @@ gate no longer touches the `better-sqlite3` native binding.
 | `docs:check` | Bilingual doc pairs were updated together |
 | `verify:skills` | `resources/skills/**` conforms to `resources/skills/SKILL_STANDARD.md` |
 | `verify:ue-file-reads` | Engine-authored files (`.uproject` / `.uplugin` / engine `ini`) are never read with a hard-coded encoding — see §5 |
-| `plugin:check` | Plugin source changed ⇒ the zip must be rebuilt — this step checks UE 5.5 only |
+| `verify:plugin` | Local only — plugin packaged inputs changed ⇒ inspect the selected development package; CI lists it as NOT RUN |
 | `typecheck` | `tsconfig.node.json` (main) + `tsconfig.web.json` (renderer) + `tsconfig.cli.json` (`packages/cli`) |
 | `test:run` | Vitest, whole-repo unit tests (no count here — it changes daily and would just go stale) |
 | `audit:prod` | CI only — no high-severity vulnerabilities in production deps |
@@ -100,13 +102,15 @@ Two other variants: `pnpm verify:fast` (the whole gate, but the test step skips 
 preflight) and `pnpm verify --with-build` (adds packaging and the offline-boot gate locally — use
 it when you touched the main process, build config, or dependencies).
 
-Plugin package freshness comes in two tiers. `plugin:check` inside `pnpm verify` covers **UE 5.5
-only** (the version you build during development); rebuild with
-`pnpm plugin:build --engine 5.5 --project <uproject path>`. The strict tier is
+Plugin package freshness comes in two tiers. Everyday `pnpm verify` / `verify:changed` /
+`verify:fast` run `verify:plugin`: it inspects a package only when the change touches packaged
+plugin inputs, and only the version selected by `VERIFY_PLUGIN_ENGINE`; `pnpm verify --ci` lists
+it as NOT RUN. How to select the target, and what to declare without Unreal installed, is in
+[the packaging guide](docs/contributing/packaging.md#the-everyday-gate). The strict tier is
 `plugin:check:all`, wired into the official installer scripts (`build:win` / `build:mac` /
-`build:linux`); it requires **every version, 5.0–5.8, to be
-fresh** — ship a release with one version behind and those users really do install a stale
-plugin. Rebuild the whole set with `node scripts/build-all-plugins.mjs`.
+`build:linux`); it requires **every version, 5.0–5.8, to be fresh** — ship a release with one
+version behind and those users really do install a stale plugin. Rebuild the whole set with
+`node scripts/build-all-plugins.mjs`.
 
 Shipping an official installer is one command, `pnpm build:win`, with no channels (the old
 personal / enterprise split is gone, along with `build:win:personal`, `sync:update-feed`, and the
@@ -150,7 +154,7 @@ until it is met:
 |---|---|---|
 | Agent tools | `src/main/agent-v3/tools/` | Define with `defineTool` / `defineUeTool` and register in `registry.ts`; mind the `appSettingsManager` trap in §7 |
 | Runtime skills (loaded by the in-app agent and the CLI) | `resources/skills/**`, `packages/cli/skills/**` | Conform to `resources/skills/SKILL_STANDARD.md` — gate step `verify:skills` |
-| UE plugin | `plugin/UnrealAgentLink/` | Source changed ⇒ rebuild the UE 5.5 zip, or gate step `plugin:check` fails (§3) |
+| UE plugin | `plugin/UnrealAgentLink/` | Packaged inputs changed ⇒ rebuild the selected development zip and set `VERIFY_PLUGIN_ENGINE`, or gate step `verify:plugin` fails (§3) |
 | `uebox` CLI | `packages/cli/` | Typechecked by the gate via `tsconfig.cli.json`; `pnpm verify:cli-package` (build + package check) is not in the gate — run it before publishing the package |
 
 ## 5. Hard rules

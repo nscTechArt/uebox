@@ -22,7 +22,7 @@ pnpm verify
 
 这 3.5 分钟基本是固定开销。另外门禁是全仓范围的，多个会话并行时，其他会话未完成的文件会导致门禁失败。
 
-`verify:changed` 不能替代完整门禁。CI（`.github/workflows/quality.yml`）中只有 `pnpm verify --ci`，每次 push 都会运行。
+`verify:changed` 不能替代完整门禁。CI（`.github/workflows/quality.yml`）中只有 `pnpm verify --ci`，在 PR 和向 `main` 的 push 上运行；仓库 CI 绿灯不代表插件包或原生验收通过。
 
 跑门禁不需要关闭应用。
 
@@ -37,7 +37,7 @@ pnpm verify
 | `docs:check`                | 成对的中英文档是否一起修改                                            |
 | `verify:skills`             | 技能是否符合 `SKILL_STANDARD.md`                                      |
 | `verify:ue-file-reads`      | 引擎存的文件（`.uproject` / `.uplugin` / 引擎 ini）不能用写死的编码读 |
-| `plugin:check`              | 插件源码改动后是否重新出包（只查 UE 5.5）                             |
+| `verify:plugin`             | 仅本地：改了插件打包输入才检查所选开发包；CI 列为 NOT RUN             |
 | `typecheck`                 | 主进程 + 渲染进程 + CLI                                               |
 | `test:run`                  | Vitest 全仓单测                                                       |
 
@@ -67,7 +67,7 @@ CI 另外运行 `audit:prod`、`build:unpack`、`verify:offline-boot`（社区�
 | -------------- | ------------------------------------------- | ------------------------------------------------------------ |
 | Agent 工具     | `src/main/agent-v3/tools/`                  | 用 `defineTool` / `defineUeTool` 定义，在 `registry.ts` 注册 |
 | 运行时技能     | `resources/skills/`、`packages/cli/skills/` | 符合 `SKILL_STANDARD.md`                                     |
-| UE 插件        | `plugin/UnrealAgentLink/`                   | 改了源码要重编 5.5 的 zip                                    |
+| UE 插件        | `plugin/UnrealAgentLink/`                   | 打包输入改动需重编并检查显式选择的开发目标                   |
 | `uebox` 命令行 | `packages/cli/`                             | 走 `tsconfig.cli.json` 类型检查                              |
 
 ### Agent 的五层
@@ -127,7 +127,7 @@ pnpm build:linux    # Linux
 node scripts/build-all-plugins.mjs
 ```
 
-日常开发只编 5.5：`node scripts/build-all-plugins.mjs --only 5.5`。
+日常开发只出自己选的那一个版本，例如 `pnpm plugin:build --engine 5.7 --project <uproject-path>`。门禁怎么指定目标、没装 Unreal 时怎么办，见 [`docs/contributing/packaging.zh-CN.md`](https://github.com/ueboxai/uebox/blob/main/docs/contributing/packaging.zh-CN.md) 的「日常门禁」。发版完整集合不受开发目标影响。
 
 上传是单独一步，更新源只有公开的 GitHub Releases：
 
