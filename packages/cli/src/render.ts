@@ -47,13 +47,11 @@ function renderData(data: unknown): string[] {
   if (!data || typeof data !== 'object') return [String(data ?? '')]
   const value = data as Record<string, unknown>
 
+  if (typeof value.answer === 'string') return [value.answer || '(子任务没有交回结论)']
   if (Array.isArray(value.checks)) return renderChecks(value)
   if (Array.isArray(value.projects)) return renderProjects(value)
   if (Array.isArray(value.tools)) return renderTools(value)
-  if (typeof value.hostConfigPath === 'string') return renderSetup(value)
   if ('structured' in value && 'content' in value) return renderToolCall(value)
-  if ('selectedActors' in value || 'focusedEditor' in value) return renderSelection(value)
-  if (Array.isArray(value.actors)) return renderActors(value)
   if (typeof value.output === 'string') return renderScreenshot(value)
 
   return [JSON.stringify(value, null, 2)]
@@ -100,91 +98,6 @@ function renderTools(value: Record<string, unknown>): string[] {
   const header = outOfScope
     ? `${tools.length} 个可调用工具（盒子共开放 ${value.exposedByHost} 个，另外 ${outOfScope} 个超出本版范围）：`
     : `${tools.length} 个可调用工具：`
-
-  return [header, ...lines]
-}
-
-function renderSetup(value: Record<string, unknown>): string[] {
-  const contract = value.contract as Record<string, unknown> | undefined
-  return [
-    '已关联虚幻盒子配置。',
-    `  盒子配置：${value.hostConfigPath}`,
-    `  服务地址：${value.url}`,
-    `  CLI 配置：${value.configPath}`,
-    contract?.supported ? `  接口契约：v${contract.cliContractVersion}` : '  接口契约：不支持',
-    `下一步：${value.nextCommand}`
-  ]
-}
-
-/**
- * 选中内容。
- *
- * `null` 一律渲染成「未报告」而不是「无」—— 屏幕上一个「无」会被当成
- * 「查过了，没有」，而它其实是「这个插件版本不告诉我们」。
- */
-function renderSelection(value: Record<string, unknown>): string[] {
-  const lines: string[] = []
-
-  const editor = value.focusedEditor as Record<string, unknown> | null
-  lines.push(
-    editor ? `焦点：${editor.type} ${editor.name}（${editor.path}）` : '焦点：没有打开的资产编辑器'
-  )
-
-  const graph = value.focusedGraph as Record<string, unknown> | null
-  if (graph) lines.push(`当前图：${graph.name}`)
-
-  lines.push(
-    ...renderPicked('图里选中的节点', value.selectedNodes, value.selectedNodeCount, 'title')
-  )
-  lines.push(
-    ...renderPicked('关卡里选中的 Actor', value.selectedActors, value.selectedActorCount, 'label')
-  )
-
-  const browser = value.contentBrowser as Record<string, unknown> | null
-  if (browser) {
-    lines.push(
-      ...renderPicked(
-        '内容浏览器里选中的资产',
-        browser.selectedAssets,
-        browser.selectedAssetCount,
-        'name'
-      )
-    )
-  }
-
-  return lines
-}
-
-function renderPicked(label: string, items: unknown, count: unknown, key: string): string[] {
-  if (items === null || items === undefined) return [`${label}：未报告（插件版本较旧）`]
-
-  const list = items as Array<Record<string, unknown>>
-  if (list.length === 0) return [`${label}：无`]
-
-  const names = list.map((item) => item[key] ?? item.name).join('、')
-  // 总数是 null 时不写数字，写「至少」—— 列表本身就是被截断过的那一批
-  const total = typeof count === 'number' ? `${count} 个` : `至少 ${list.length} 个（总数未报告）`
-  return [`${label}：${total} —— ${names}`]
-}
-
-function renderActors(value: Record<string, unknown>): string[] {
-  const actors = value.actors as Array<Record<string, unknown>>
-  if (actors.length === 0) return ['没有匹配的 Actor。']
-
-  const lines = actors.map((actor) => {
-    const transform = actor.transform as Record<string, unknown> | null
-    const location = transform?.location as Record<string, number> | null
-    const at = location ? `  @(${location.x}, ${location.y}, ${location.z}) 厘米` : ''
-    return `  ${actor.label ?? actor.name}  [${actor.class}]${at}`
-  })
-
-  // 三个数一起报。只说「找到 50 个」会被读成「一共 50 个」
-  const returned = value.returnedCount
-  const total = value.totalCount
-  const header =
-    typeof total === 'number'
-      ? `返回 ${returned} 个（共匹配 ${total} 个）：`
-      : `返回 ${returned} 个（总数未报告）：`
 
   return [header, ...lines]
 }

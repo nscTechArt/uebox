@@ -128,7 +128,7 @@ function parseCapability(raw: unknown): UnrealBoxCapability | undefined {
  * 把底层的连接错误翻成用户能照着做的一句话。
  *
  * 401 和「端口没人监听」都会以 `Error` 的形式冒出来，但它们是两件事：
- * 前者要去盒子里重置令牌再 `uebox setup`，后者要去把服务打开。
+ * 前者是令牌对不上（手里那把过期了，或者连错了盒子），后者要去把服务打开。
  */
 function describeConnectError(error: unknown, host: HostConnection): UeboxError {
   if (error instanceof UeboxError) return error
@@ -139,8 +139,8 @@ function describeConnectError(error: unknown, host: HostConnection): UeboxError 
     return new UeboxError(
       'AUTH_FAILED',
       `虚幻盒子拒绝了这个访问令牌（${host.url}）。`,
-      '令牌可能已经在盒子里被重置过。重新运行 uebox setup 关联一次即可 —— ' +
-        'CLI 不存令牌副本，它每次都去读盒子那份配置。'
+      '用 UEBOX_TOKEN 的话，换成盒子里现在的令牌；否则多半是连错了盒子 —— ' +
+        'uebox doctor 会显示这次读的是哪份配置。'
     )
   }
 

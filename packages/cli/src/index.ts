@@ -49,7 +49,9 @@ async function main(): Promise<void> {
   process.on('SIGINT', onInterrupt)
   process.on('SIGTERM', onInterrupt)
 
-  const result = await run(process.argv.slice(2))
+  const result = await run(process.argv.slice(2), process.env, {
+    progress: (message) => process.stderr.write(`… ${message}\n`)
+  })
 
   if (result.stdout) process.stdout.write(result.stdout)
   if (result.stderr) process.stderr.write(result.stderr)

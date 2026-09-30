@@ -43,6 +43,9 @@ function main() {
   const pkg = JSON.parse(readFileSync(join(CLI, 'package.json'), 'utf8'))
 
   console.log('[cli-bundle] 编译 TypeScript…')
+  // tsc 不删源码里已经没有的文件：删掉的命令编出来的 .js 会留在 dist 里，
+  // 下面整个拷进安装包
+  rmSync(join(CLI, 'dist'), { recursive: true, force: true })
   run('npx', ['tsc', '-p', 'tsconfig.json'], CLI)
 
   if (!existsSync(join(CLI, 'dist', 'index.js'))) {

@@ -19,7 +19,6 @@ import { UeboxError } from './errors.js'
 import type { RegisteredProject, ResolvedProject } from './project.js'
 import { resolveProject } from './project.js'
 import { fetchCatalog, requireSupported, type CatalogTool } from './tools.js'
-import type { ActorReadback, Verdict, WriteOp } from './write.js'
 
 /** 会话体检工具。`projects list` 和 `doctor` 都靠它拿连接清单 */
 const SESSION_HEALTH_TOOL = 'ue_session_health'
@@ -36,6 +35,10 @@ export interface Runtime {
   client: Client
   /** 剩余期限内跑一个 promise，超时抛 TIMEOUT */
   deadline<T>(promise: Promise<T>, what: string): Promise<T>
+  /** 期限还剩多少毫秒 */
+  remainingMs(): number
+  /** 期限是多少秒（报超时用） */
+  timeoutSeconds: number
   close(): Promise<void>
 }
 
@@ -59,6 +62,8 @@ export async function open(options: RuntimeOptions = {}): Promise<Runtime> {
     host,
     session,
     client: session.client,
+    remainingMs: () => budgetMs - (Date.now() - startedAt),
+    timeoutSeconds: options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS,
     deadline: <T>(promise: Promise<T>, what: string): Promise<T> => {
       const remaining = budgetMs - (Date.now() - startedAt)
       if (remaining <= 0) {
@@ -88,6 +93,11 @@ function timeoutError(what: string, seconds: number | undefined): UeboxError {
   )
 }
 
+/** MCP SDK 的请求超时（`ErrorCode.RequestTimeout`） */
+function isSdkTimeout(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === -32001
+}
+
 /** 取工具清单（先确认契约在） */
 export async function catalog(runtime: Runtime): Promise<CatalogTool[]> {
   requireContract(runtime.session)
@@ -104,21 +114,56 @@ export async function callTool(
   runtime: Runtime,
   name: string,
   args: Record<string, unknown>,
-  projectPath?: string
+  projectPath?: string,
+  /**
+   * 给了就改成「多久没有进度算超时」：每收到一条进度，计时从头算。
+   * 给一跑几分钟、一直在汇报的 `task` 用 —— 按整条命令的期限算，它必死无疑。
+   */
+  progress?: { onProgress: (message: string) => void }
 ): Promise<ToolCallResult> {
-  const raw = await runtime.deadline(
-    runtime.client.callTool({
-      name,
-      arguments: args,
-      _meta: {
-        unrealBox: {
-          cliContractVersion: 1,
-          ...(projectPath ? { projectPath } : {})
-        }
+  const request = {
+    name,
+    arguments: args,
+    _meta: {
+      unrealBox: {
+        cliContractVersion: 1,
+        ...(projectPath ? { projectPath } : {})
       }
-    }),
-    `调用 ${name}`
-  )
+    }
+  }
+
+  let raw: unknown
+  if (progress) {
+    try {
+      raw = await runtime.client.callTool(request, undefined, {
+        timeout: runtime.timeoutSeconds * 1000,
+        resetTimeoutOnProgress: true,
+        onprogress: (update) => {
+          if (update.message) progress.onProgress(update.message)
+        }
+      })
+    } catch (error) {
+      throw isSdkTimeout(error)
+        ? new UeboxError(
+            'TIMEOUT',
+            `${name} 超过 ${runtime.timeoutSeconds} 秒没有任何进度。`,
+            '子任务可能还在盒子里跑，也可能已经做了一部分。先去核实现场，不要直接重发；' +
+              '本来就会长时间不出声的任务请加大 --timeout。',
+            'unknown'
+          )
+        : error
+    }
+  } else {
+    // SDK 自己还有一道 60 秒的请求超时，比整条命令的期限先到 —— 那样超时会以一个
+    // 普通异常冒出来，被当成「工具失败」（退出码 8），调用方据此重发就可能做第二遍。
+    // 把它放到期限之外，让期限说了算，超时一律按「结局不明」报
+    raw = await runtime.deadline(
+      runtime.client.callTool(request, undefined, {
+        timeout: Math.max(runtime.remainingMs(), 0) + 5_000
+      }),
+      `调用 ${name}`
+    )
+  }
 
   const result = raw as ToolCallResult
 
@@ -148,19 +193,16 @@ export interface ToolCallResult {
 function toolFailure(name: string, result: ToolCallResult, code: string | undefined): UeboxError {
   const message = textOf(result) || `${name} 执行失败`
 
+  // 「按这个条件没查到」不是故障。归成一个专用码，让调用点自己决定怎么读它
+  if (code === 'ENGINE_NOT_FOUND') {
+    return new UeboxError('ENGINE_NOT_FOUND', message, undefined, 'not_started')
+  }
+
   // 引擎那侧等超时了。**这不是失败**：请求已经到引擎，操作可能已经生效。
   //
   // 外部评审抓到的：写工具内部等 60 秒，比 CLI 默认的 120 秒先到，所以真机上
   // 超时几乎总是走这条路。原来它掉进下面的 default 被标成 `failed`，
   // 调用方据此重试就可能生成第二个 Actor —— §12 整套规则要防的正是这个。
-  //
-  // 归到 TIMEOUT 之后，runWrite 的既有分支会接住它并附上回读命令
-  // 「按这个条件没查到」不是故障。归成一个专用码，让调用点自己决定怎么读它 ——
-  // 对 `actors delete` 的回读来说，查不到正是成功
-  if (code === 'ENGINE_NOT_FOUND') {
-    return new UeboxError('ENGINE_NOT_FOUND', message, undefined, 'not_started')
-  }
-
   if (code === 'ENGINE_TIMEOUT') {
     return new UeboxError(
       'TIMEOUT',
@@ -230,151 +272,4 @@ export async function targetProject(
   explicit: string | undefined
 ): Promise<ResolvedProject> {
   return resolveProject(explicit, await registeredProjects(runtime))
-}
-
-// ── 写操作 ──────────────────────────────────────────────────────────────────
-
-/** 回读用的工具。写操作全都是关卡内对象，所以三条命令共用它 */
-const ACTOR_TOOL = 'ue_get_actor'
-
-/**
- * 按名字回读一个 Actor。
- *
- * @returns 查到的那个；查不到是 `null`（**不是抛错** —— 「不在」本身就是
- *   一个有效的核实结果，删除那条命令要的正是它）
- */
-export async function readActor(
-  runtime: Runtime,
-  name: string,
-  projectPath: string
-): Promise<ActorReadback | null> {
-  let result: ToolCallResult
-  try {
-    result = await callTool(
-      runtime,
-      ACTOR_TOOL,
-      { targets: { names: [name] }, return_transform: true, limit: 1 },
-      projectPath
-    )
-  } catch (error) {
-    // 真机上抓到的：查不到的时候插件回 RPC 404，工具把它当成一次失败。
-    // 而查不到正是这里最重要的一种答案 —— 删完回读查不到 = 删成功了，
-    // 生成前查不到 = 名字可用。不接住的话，三条写命令里有两条在真机上
-    // 根本跑不通，而假盒子返回空数组，一路绿灯看不出来。
-    if (error instanceof UeboxError && error.code === 'ENGINE_NOT_FOUND') return null
-    throw error
-  }
-
-  const actors = result.structuredContent?.actors
-  if (!Array.isArray(actors) || actors.length === 0) return null
-  return actors[0] as ActorReadback
-}
-
-export interface WriteOutcome {
-  /** 工具返回的原始结果 */
-  result: ToolCallResult
-  /** 回读之后的判定 */
-  verdict: Verdict
-  /** 回读到的 Actor（删除成功时是 null） */
-  actor: ActorReadback | null
-}
-
-/**
- * 跑一条写操作：收窄参数 → （必要时）查重名 → 调用 → 回读 → 判定。
- *
- * ## 为什么一定要回读
- *
- * 「工具返回成功」和「引擎里真的变成那样了」是两件事。仓库既有的原则是
- * 问引擎的当前状态、不问模型的记忆（`core/reviewChanges.ts` 的文件头把理由
- * 说透了），写操作尤其如此 —— 报一个没核实过的 success，调用方就会在一个
- * 假前提上继续往下做。
- *
- * ## 为什么超时要单独接住
- *
- * 超时是唯一会落到 `unknown` 的路径，也是写操作真正危险的地方：请求已经发出去
- * 了，我们只是不再等。这时候**不能报失败**（调用方会重发，而重发一条已经生效的
- * 生成命令就是第二个 Actor），也不能报成功。只能把核实办法连同那条具体命令
- * 交给调用方（§12.4）。
- */
-export async function runWrite(
-  runtime: Runtime,
-  op: WriteOp,
-  args: Record<string, unknown>,
-  project: ResolvedProject
-): Promise<WriteOutcome> {
-  op.constrain(args)
-  const subject = op.subject(args)
-
-  // 不幂等的操作，动手前先确认这个名字是空的。
-  //
-  // 引擎在重名时会退让到 `MyCube_1`，所以名字被占着的时候，「MyCube 在不在」
-  // 这个判据是坏的 —— 事后查到的那个可能是本来就有的。先查一次，把判据修好
-  if (!op.idempotent) {
-    const existing = await readActor(runtime, subject, project.path)
-    if (existing) {
-      throw new UeboxError(
-        'INVALID_ARGUMENT',
-        `关卡里已经有一个叫 ${subject} 的 Actor 了。`,
-        '换一个名字。重名时引擎会退让到 ' +
-          `${subject}_1，一旦超时你就分不清场上那个是这次生成的还是原来那个 —— ` +
-          '没有可靠判据的写操作 CLI 不发。'
-      )
-    }
-  }
-
-  // 发出去的是重建过的最小参数，不是调用方给的那个对象（见 WriteOp.payload）
-  const outgoing = op.payload(args)
-
-  let result: ToolCallResult
-  try {
-    result = await callTool(runtime, op.tool, outgoing, project.path)
-  } catch (error) {
-    throw error instanceof UeboxError && error.code === 'TIMEOUT'
-      ? unknownWrite(op, subject, project, 'call')
-      : error
-  }
-
-  // 回读也可能超时，而这一段原来在 try 外面：那样用户拿到的是一句没有上下文的
-  // 「超时」，完全看不出写操作已经发出去了。这条路径比上面那条更要紧 ——
-  // 工具已经回了成功，改动多半已经落下，只是没能核实
-  let actor: ActorReadback | null
-  try {
-    actor = await readActor(runtime, subject, project.path)
-  } catch (error) {
-    throw error instanceof UeboxError && error.code === 'TIMEOUT'
-      ? unknownWrite(op, subject, project, 'readback')
-      : error
-  }
-
-  return { result, verdict: op.verify(args, actor), actor }
-}
-
-/**
- * 超时之后交给调用方的东西：一条能直接敲的回读命令，加上怎么读它的结果。
- *
- * 不做成有状态的 `uebox verify` 命令 —— 那要把「上一次尝试了什么」落盘，
- * 而信封的全部价值就是无状态（§12.4）。
- */
-function unknownWrite(
-  op: WriteOp,
-  subject: string,
-  project: ResolvedProject,
-  /** 在哪一步超的时：发请求，还是发完之后回读 */
-  stage: 'call' | 'readback'
-): UeboxError {
-  const verifyCommand = `uebox actors list --name "${subject}" --project "${project.path}"`
-
-  // 两种结局不明程度不一样，说法就得不一样。回读那一步超时的时候工具已经
-  // 回了成功，改动多半已经落下 —— 把它讲成「不知道做没做」会让人白重发一次
-  const message =
-    stage === 'call'
-      ? `${op.tool} 的执行结局不明：请求已经发给引擎了，没等到结果。`
-      : `${op.tool} 报告成功了，但随后的回读超时，没能核实引擎的实际状态。`
-
-  return new UeboxError(
-    'TIMEOUT',
-    message,
-    `不要直接重发。先用这条确认它到底做了没有：\n  ${verifyCommand}\n${op.readbackMeaning}`,
-    'unknown'
-  )
 }

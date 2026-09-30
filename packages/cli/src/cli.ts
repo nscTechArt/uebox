@@ -7,15 +7,11 @@
  */
 
 import { assertArgsInputExclusive, parse, type ParsedArgs } from './args.js'
-import { runActorsList } from './commands/actors.js'
-import { runActorsDelete, runActorsMove, runActorsSpawn } from './commands/actorsWrite.js'
+import { runAsk } from './commands/ask.js'
 import { runDoctor } from './commands/doctor.js'
 import { runProjectsList } from './commands/projects.js'
 import { runViewportScreenshot } from './commands/screenshot.js'
-import { runSelectionGet } from './commands/selection.js'
-import { runSetup } from './commands/setup.js'
 import { runToolsCall, runToolsList, runToolsShow } from './commands/tools.js'
-import { runActorsUndo } from './commands/undo.js'
 import { failure, writeJson, type Envelope } from './envelope.js'
 import { exitCodeFor, toUeboxError, UeboxError } from './errors.js'
 import { helpText, type Lang } from './help.js'
@@ -36,9 +32,18 @@ export interface RunResult {
  * 不直接写 process.stdout —— 返回字符串，由 `index.ts` 落到真实的流上。
  * 这样测试能拿到完整输出并断言「stdout 能 JSON.parse」，而不用去劫持全局。
  */
+export interface RunIO {
+  /**
+   * 长命令（`ask`）的进度往哪写。结果仍然只在最后交一次 —— 进度是给人看的，
+   * 走 stderr，不碰 stdout 上那唯一一个 JSON。
+   */
+  progress?: (message: string) => void
+}
+
 export async function run(
   argv: string[],
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  io: RunIO = {}
 ): Promise<RunResult> {
   let parsed: ParsedArgs
   try {
@@ -61,17 +66,21 @@ export async function run(
   // 光敲 `uebox` 等同于 `uebox --help`。这不是用法错误 —— 用户什么都没说错，
   // 他只是还没说要干什么，这时候该给他看清单，不是给他一个非零退出码。
   if (parsed.help || parsed.command.length === 0) {
-    return { exitCode: 0, stdout: `${helpText(lang, { all: parsed.all })}\n`, stderr: '' }
+    return { exitCode: 0, stdout: `${helpText(lang)}\n`, stderr: '' }
   }
 
   try {
-    return output(await dispatch(parsed, env), parsed.json)
+    return output(await dispatch(parsed, env, io), parsed.json)
   } catch (error) {
     return output(toEnvelope(error), parsed.json)
   }
 }
 
-async function dispatch(parsed: ParsedArgs, env: NodeJS.ProcessEnv): Promise<Envelope> {
+async function dispatch(
+  parsed: ParsedArgs,
+  env: NodeJS.ProcessEnv,
+  io: RunIO
+): Promise<Envelope> {
   const [group, sub] = parsed.command
   const shared = {
     ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
@@ -80,15 +89,14 @@ async function dispatch(parsed: ParsedArgs, env: NodeJS.ProcessEnv): Promise<Env
   }
 
   switch (group) {
-    case 'setup':
-      requireNoSubcommand(parsed, 'setup')
-      return runSetup({
-        ...(parsed.hostConfigPath ? { hostConfigPath: parsed.hostConfigPath } : {}),
-        ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
-        env,
-        // 没有 TTY 就不引导选择：被 Agent 或 CI 调用时，一个等输入的提示
-        // 会让整条命令挂在那儿，看起来像卡死
-        interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY)
+    case 'ask':
+      // 位置参数全拼起来：`uebox ask 把灯调暗` 不加引号也能用
+      return runAsk({
+        ...shared,
+        prompt: parsed.command.slice(1).join(' '),
+        allowWrite: parsed.allowWrite,
+        ...(parsed.project ? { project: parsed.project } : {}),
+        ...(io.progress ? { onProgress: io.progress } : {})
       })
 
     case 'doctor':
@@ -101,13 +109,6 @@ async function dispatch(parsed: ParsedArgs, env: NodeJS.ProcessEnv): Promise<Env
 
     case 'tools':
       return dispatchTools(parsed, sub, shared, parsed.allowWrite)
-
-    case 'selection':
-      if (sub !== 'get') throw unknownCommand(['selection get'])
-      return runSelectionGet({ ...shared, ...(parsed.project ? { project: parsed.project } : {}) })
-
-    case 'actors':
-      return dispatchActors(parsed, sub, shared)
 
     case 'viewport':
       if (sub !== 'screenshot') throw unknownCommand(['viewport screenshot'])
@@ -130,75 +131,13 @@ async function dispatch(parsed: ParsedArgs, env: NodeJS.ProcessEnv): Promise<Env
 
     default:
       throw unknownCommand([
-        'setup',
+        'ask "<要做的事>"',
         'doctor',
         'projects list',
         'tools list',
         'tools show <name>',
         'tools call <name>',
-        'selection get',
-        'actors list',
-        'actors spawn',
-        'actors move',
-        'actors delete',
-        'actors undo',
         'viewport screenshot'
-      ])
-  }
-}
-
-/**
- * `actors` 下面既有读也有写。
- *
- * 写命令的三个入口共用一份选项组装 —— 漏掉 `allowWrite` 的那一条会绕过
- * 整个准入门，所以宁可集中在一处。
- */
-async function dispatchActors(
-  parsed: ParsedArgs,
-  sub: string | undefined,
-  shared: { configPath?: string; timeoutSeconds?: number; env: NodeJS.ProcessEnv }
-): Promise<Envelope> {
-  if (sub === 'list') {
-    return runActorsList({
-      ...shared,
-      ...(parsed.project ? { project: parsed.project } : {}),
-      ...(parsed.name !== undefined ? { name: parsed.name } : {}),
-      ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
-      includeSystem: parsed.includeSystem
-    })
-  }
-
-  const writeOptions = {
-    ...shared,
-    ...(parsed.project ? { project: parsed.project } : {}),
-    ...(parsed.name !== undefined ? { name: parsed.name } : {}),
-    ...(parsed.asset !== undefined ? { asset: parsed.asset } : {}),
-    ...(parsed.location !== undefined ? { location: parsed.location } : {}),
-    ...(parsed.rotation !== undefined ? { rotation: parsed.rotation } : {}),
-    ...(parsed.scale !== undefined ? { scale: parsed.scale } : {}),
-    allowWrite: parsed.allowWrite
-  }
-
-  switch (sub) {
-    case 'spawn':
-      return runActorsSpawn(writeOptions)
-    case 'move':
-      return runActorsMove(writeOptions)
-    case 'delete':
-      return runActorsDelete(writeOptions)
-    case 'undo':
-      return runActorsUndo({
-        ...shared,
-        ...(parsed.project ? { project: parsed.project } : {}),
-        allowWrite: parsed.allowWrite
-      })
-    default:
-      throw unknownCommand([
-        'actors list',
-        'actors spawn',
-        'actors move',
-        'actors delete',
-        'actors undo'
       ])
   }
 }

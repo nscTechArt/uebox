@@ -168,15 +168,13 @@ export async function runToolsCall(
      * agent **更窄**，`--operation add` 这类完全正常的调用被 CLI 挡在半路，
      * 而挡它的理由（CLI 写不出回读判据）是 CLI 的局限，不是用户的问题。
      *
-     * 所以按入口分工：`tools call` 是对等入口，转发什么就发什么，核实由工具
-     * 自己的返回值负责（这个仓库的硬规矩：工具不回读就不许报 success）；
-     * `uebox actors spawn/move/delete` 和 `actors undo` 保留加强档 ——
-     * 那几条命令的参数形状是 CLI 自己定的，写得出外部判据。
+     * 所以 `tools call` 是对等入口，转发什么就发什么，核实由工具自己的返回值
+     * 负责（这个仓库的硬规矩：工具不回读就不许报 success）。
      *
      * ## 超时
      *
-     * 加强档能给出一条能直接敲的回读命令（§12.4）。这里给不出那么具体的一句 ——
-     * CLI 不知道「这次动的是哪个东西」，那是工具自己的语义。所以只说清楚两件事：
+     * CLI 给不出一条具体的回读命令 —— 它不知道「这次动的是哪个东西」，
+     * 那是工具自己的语义。所以只说清楚两件事：
      * **别直接重发**，以及**该去问谁**。编一句「查到 = 已生效」比不给更坏。
      */
     let result: runtime.ToolCallResult
@@ -189,7 +187,7 @@ export async function runToolsCall(
             `${tool.name} 的执行结局不明（请求已发出，未收到结果）。`,
             '不要直接重发 —— 先用只读工具查一遍它到底做了没有' +
               '（工程里的资产用 ue_content_search，工程库用 project_list，' +
-              '关卡里的对象用 uebox actors list）。确认没做才重发。',
+              '关卡里的对象用 ue_get_actor）。确认没做才重发。',
             'unknown'
           )
         : error

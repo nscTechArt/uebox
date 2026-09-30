@@ -54,19 +54,6 @@ describe('parse', () => {
     })
   })
 
-  describe('--limit', () => {
-    it('取 1–1000 的整数', () => {
-      expect(parse(['actors', 'list', '--limit', '1']).limit).toBe(1)
-      expect(parse(['actors', 'list', '--limit', '1000']).limit).toBe(1000)
-    })
-
-    it('0、1001、小数都挡下', () => {
-      for (const bad of ['0', '1001', '1.5']) {
-        expect(() => parse(['actors', 'list', '--limit', bad])).toThrow(/--limit/)
-      }
-    })
-  })
-
   it('--lang 只认两种', () => {
     expect(parse(['--lang', 'en-US', 'doctor']).lang).toBe('en-US')
     expect(() => parse(['--lang', 'fr', 'doctor'])).toThrow(/--lang/)

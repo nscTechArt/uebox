@@ -178,7 +178,7 @@ describe('连不上 / 令牌不对', () => {
     expect(result.exitCode).toBe(3)
     const envelope = JSON.parse(result.stdout)
     expect(envelope.error.code).toBe('AUTH_FAILED')
-    expect(envelope.error.hint).toContain('uebox setup')
+    expect(envelope.error.hint).toContain('uebox doctor')
   })
 
   it('服务没开时报 SERVICE_UNAVAILABLE，退出码 4', async () => {

@@ -30,8 +30,6 @@
  *   - **工具**负责回读并如实报成败，返回里写清楚做成了什么。
  *   - **CLI** 负责把「这条会改东西」变成命令行上看得见的一笔（`--allow-write`），
  *     以及超时（`unknown`）时告诉调用方怎么自己核实。
- *   - `write.ts` 里那三个 Actor 操作**留着**，但身份变了：不再是准入表，
- *     而是「CLI 额外再核实一遍」的加强档（白名单重建参数 + 外部回读）。
  *
  * ## 一件仍然不给
  *
@@ -132,8 +130,27 @@ function describe(tool: {
     requiresExplicitApproval: raw.requiresExplicitApproval === true
   }
 
+  if (tool.name === DELEGATE_TOOL) {
+    return {
+      ...base,
+      meta,
+      readOnly: false,
+      write: false,
+      unsupportedReason: '派子任务请用 uebox ask，它会把子任务限定在引擎和素材、工程库里。'
+    }
+  }
+
   return { ...base, meta, ...evaluateScope(meta) }
 }
+
+/**
+ * 盒子的「派子任务」工具。`uebox ask` 走它。
+ *
+ * 不让 `tools call` 直接调：外部会话里子任务的每一步都自动批准（客户端批了
+ * 派任务就算批了全部），直接调等于把 shell、浏览器、「要求逐次审批」的工具
+ * 一起交出去 —— 正是上面那条审批规则要挡的东西。`ask` 会带上命名空间白名单。
+ */
+export const DELEGATE_TOOL = 'task'
 
 type Scope = Pick<CatalogTool, 'readOnly' | 'write' | 'unsupportedReason'>
 

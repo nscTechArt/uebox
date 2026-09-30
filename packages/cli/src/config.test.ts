@@ -7,11 +7,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   connectionFromEnv,
+  discoverHostConfig,
   hostConfigCandidates,
   isLoopbackHost,
-  readCliConfig,
+  legacyCliConfigPath,
   readHostConfig,
-  writeCliConfig
+  resolveConnection
 } from './config.js'
 import { exitCodeFor, type UeboxError } from './errors.js'
 
@@ -70,7 +71,7 @@ describe('readHostConfig', () => {
       expect.unreachable('应该抛出')
     } catch (error) {
       expect((error as UeboxError).code).toBe('CONFIG_MISSING')
-      expect((error as UeboxError).hint).toContain('--host-config')
+      expect((error as UeboxError).hint).toContain('--config')
     }
   })
 
@@ -159,51 +160,105 @@ describe('connectionFromEnv', () => {
   })
 })
 
-describe('CLI 配置', () => {
-  it('只存路径引用，不存令牌', async () => {
-    const dir = await tempDir()
-    const path = join(dir, 'config.json')
-    await writeCliConfig(path, { version: 1, hostConfigPath: 'C:/box/mcp-server.json' })
+/** 在临时目录里摆出盒子配置，`APPDATA` 指过去，就是一台假机器 */
+async function machine(installs: Array<'dev' | 'installed'>): Promise<NodeJS.ProcessEnv> {
+  const root = await tempDir('uebox 中文-')
+  // 非 Windows 上 appDataDir 不看 APPDATA，看 XDG_CONFIG_HOME；两个都给
+  const env = { APPDATA: root, XDG_CONFIG_HOME: root, HOME: root }
+  const [dev, installed] = hostConfigCandidates(env)
+  const ports = { dev: 17861, installed: 17862 }
+  for (const which of installs) {
+    const path = which === 'dev' ? dev! : installed!
+    await fs.mkdir(join(path, '..'), { recursive: true })
+    await fs.writeFile(path, JSON.stringify({ port: ports[which], token: `t-${which}` }))
+  }
+  return env
+}
 
-    const text = await fs.readFile(path, 'utf8')
-    expect(JSON.parse(text)).toEqual({ version: 1, hostConfigPath: 'C:/box/mcp-server.json' })
-    expect(text).not.toContain('token')
+describe('零配置找盒子', () => {
+  // macOS 上 appDataDir 固定在 ~/Library，不看这两个变量，这组测试只在别处跑
+  const onMac = process.platform === 'darwin'
+
+  it.skipIf(onMac)('只装了一个就直接用它，不需要 setup', async () => {
+    const env = await machine(['installed'])
+    const host = await resolveConnection({ env, bundled: false })
+
+    expect(host.url).toBe('http://127.0.0.1:17862/')
+    expect(host.token).toBe('t-installed')
   })
 
-  it('带中文和空格的路径能存能读', async () => {
-    const dir = await tempDir('uebox 中文-')
-    const path = join(dir, 'config.json')
-    const hostConfigPath = 'D:/我的 工程/虚幻盒子/mcp-server.json'
+  it.skipIf(onMac)('两个都装着时不替用户挑，报错并给出两条指定办法', async () => {
+    const env = await machine(['dev', 'installed'])
 
-    await writeCliConfig(path, { version: 1, hostConfigPath })
-    expect((await readCliConfig(path)).hostConfigPath).toBe(hostConfigPath)
-  })
-
-  it('没配置过时报 CONFIG_MISSING 并让人去 setup', async () => {
-    const dir = await tempDir()
     try {
-      await readCliConfig(join(dir, 'config.json'))
+      await discoverHostConfig(env, false)
       expect.unreachable('应该抛出')
     } catch (error) {
-      expect((error as UeboxError).code).toBe('CONFIG_MISSING')
-      expect((error as UeboxError).hint).toContain('uebox setup')
+      expect((error as UeboxError).code).toBe('CONFIG_INVALID')
+      expect((error as UeboxError).hint).toContain('--config')
+      expect((error as UeboxError).hint).toContain('UEBOX_HOST_CONFIG')
     }
   })
 
-  it('缺 hostConfigPath 的配置算损坏', async () => {
-    const dir = await tempDir()
-    const path = join(dir, 'config.json')
-    await fs.writeFile(path, JSON.stringify({ version: 1 }))
+  /** 装机版是用正式版的 exe 启动的，属于哪个盒子没有疑问 */
+  it.skipIf(onMac)('装机版 CLI 在两个都装着时用正式版', async () => {
+    const env = await machine(['dev', 'installed'])
+    const host = await resolveConnection({ env, bundled: true })
 
-    await expect(readCliConfig(path)).rejects.toThrow(/hostConfigPath/)
+    expect(host.token).toBe('t-installed')
   })
 
-  /** 写到一半断电留下半个 JSON 的话，下次运行看到的是「配置损坏」 */
-  it('写入是原子的，不留临时文件', async () => {
-    const dir = await tempDir()
-    const path = join(dir, 'config.json')
-    await writeCliConfig(path, { version: 1, hostConfigPath: 'C:/a.json' })
+  it.skipIf(onMac)('一个都没有时报 CONFIG_MISSING，列出查过的位置', async () => {
+    const env = await machine([])
 
-    expect(await fs.readdir(dir)).toEqual(['config.json'])
+    try {
+      await discoverHostConfig(env, false)
+      expect.unreachable('应该抛出')
+    } catch (error) {
+      expect((error as UeboxError).code).toBe('CONFIG_MISSING')
+      expect((error as UeboxError).message).toContain('mcp-server.json')
+    }
+  })
+
+  it.skipIf(onMac)('UEBOX_HOST_CONFIG 和 --config 优先于自动查找', async () => {
+    const env = await machine(['dev', 'installed'])
+    const [dev] = hostConfigCandidates(env)
+
+    expect((await resolveConnection({ env: { ...env, UEBOX_HOST_CONFIG: dev } })).token).toBe(
+      't-dev'
+    )
+    expect((await resolveConnection({ env, configPath: dev })).token).toBe('t-dev')
+  })
+
+  /** 旧版 setup 在两个都装着的机器上记下过用户的选择，照旧尊重它 */
+  it.skipIf(onMac)('旧版 setup 留下的记录还在就用它', async () => {
+    const env = await machine(['dev', 'installed'])
+    const [dev] = hostConfigCandidates(env)
+    const legacy = legacyCliConfigPath(env)
+    await fs.mkdir(join(legacy, '..'), { recursive: true })
+    await fs.writeFile(legacy, JSON.stringify({ version: 1, hostConfigPath: dev }))
+
+    expect((await resolveConnection({ env, bundled: true })).token).toBe('t-dev')
+  })
+
+  /** 记录只是偏好：它指向的盒子卸载了，不该让本来找得到的盒子连不上 */
+  it.skipIf(onMac)('旧记录指向的文件没了就当没有，接着自动找', async () => {
+    const env = await machine(['installed'])
+    const legacy = legacyCliConfigPath(env)
+    await fs.mkdir(join(legacy, '..'), { recursive: true })
+    await fs.writeFile(legacy, JSON.stringify({ version: 1, hostConfigPath: 'Z:/gone.json' }))
+
+    expect((await resolveConnection({ env, bundled: false })).token).toBe('t-installed')
+  })
+
+  /** 有人把 --config 指到旧版 CLI 配置上时，顺着它记的路径找过去 */
+  it('--config 指到旧版 CLI 配置也能用', async () => {
+    const dir = await tempDir()
+    const host = join(dir, 'mcp-server.json')
+    const cli = join(dir, 'config.json')
+    await fs.writeFile(host, JSON.stringify({ port: 17863, token: 'abc' }))
+    await fs.writeFile(cli, JSON.stringify({ version: 1, hostConfigPath: host }))
+
+    expect((await readHostConfig(cli)).token).toBe('abc')
   })
 })

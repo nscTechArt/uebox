@@ -69,7 +69,7 @@
     "verify:colors": "node scripts/check-colors.mjs",
     "verify:skills": "node scripts/check-skills.mjs",
     "verify:ue-file-reads": "node scripts/check-ue-file-reads.mjs",
-    "verify:cli-package": "cd packages/cli && npx tsc -p tsconfig.json && node scripts/check-package.mjs",
+    "verify:cli-package": "cd packages/cli && npm run build && node scripts/check-package.mjs",
     "verify:offline-boot": "node scripts/verify-offline-boot.mjs",
     "build:cli": "node scripts/build-cli-bundle.mjs",
     "build:unpack": "npm run build && npm run build:cli && electron-builder --dir && npm run verify:packaged-deps",

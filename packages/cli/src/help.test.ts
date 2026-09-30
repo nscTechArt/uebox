@@ -5,13 +5,6 @@ import { helpText, type Lang } from './help.js'
 
 const LANGS: Lang[] = ['zh-CN', 'en-US']
 
-/** 两层帮助的四种组合，硬约束对每一种都成立 */
-const VARIANTS: Array<[string, Lang, { all?: boolean }]> = [
-  ['zh-CN', 'zh-CN', {}],
-  ['zh-CN --all', 'zh-CN', { all: true }],
-  ['en-US', 'en-US', {}],
-  ['en-US --all', 'en-US', { all: true }]
-]
 
 /**
  * 东亚宽字符：中文、假名、谚文、全角标点，一个占 2 列。
@@ -39,8 +32,8 @@ describe('帮助文本的硬约束', () => {
    *
    * 这条曾经破过：三段说明是从设计文档里整段搬过来的，连着强调标记一起搬了。
    */
-  it.each(VARIANTS)('%s 里没有 Markdown 标记', (_label, lang, options) => {
-    const offenders = helpText(lang, options)
+  it.each(LANGS)('%s 里没有 Markdown 标记', (lang) => {
+    const offenders = helpText(lang)
       .split('\n')
       .filter((line) => line.includes('**') || /(^|\s)`[^`]+`/.test(line))
 
@@ -51,8 +44,8 @@ describe('帮助文本的硬约束', () => {
    * 80 列。超了会在标准宽度的终端上回绕，把对齐好的两栏拧成一团 ——
    * 那比一开始就不对齐还难读。
    */
-  it.each(VARIANTS)('%s 每行都不超过 80 列', (_label, lang, options) => {
-    const tooWide = helpText(lang, options)
+  it.each(LANGS)('%s 每行都不超过 80 列', (lang) => {
+    const tooWide = helpText(lang)
       .split('\n')
       .map((line, index) => ({ line: index + 1, width: displayWidth(line), text: line }))
       .filter((entry) => entry.width > 80)
@@ -61,26 +54,13 @@ describe('帮助文本的硬约束', () => {
   })
 
   /**
-   * 默认那份要能在两屏之内读完。
+   * 一层帮助要能在三屏之内读完（30 行的终端）。
    *
-   * 加上写操作之后完整帮助有一百一十多行，在 30 行的终端上是四屏，而最要紧的
-   * 东西恰好在最底下。分层就是为了这个 —— 所以这条限制只管默认那份，
-   * 它一旦松了，分层也就白做了。
+   * 包装命令删掉之后选项只剩十来个，才合回一层；这条上限一旦松了，
+   * 就该回头看是不是又长出了不该有的命令或选项。
    */
-  it.each(LANGS)('%s 默认帮助控制在 72 行以内', (lang) => {
-    // 72 而不是 70：英文讲同样的内容就是要多一两行，那是语言密度差。
-    // 卡到中文那个数只能靠在英文里少说点，那是拿排版去换内容
-    expect(helpText(lang).split('\n').length).toBeLessThanOrEqual(72)
-  })
-
-  /** --all 那份不设上限，但也不该无限长 */
-  it.each(LANGS)('%s --all 控制在 130 行以内', (lang) => {
-    expect(helpText(lang, { all: true }).split('\n').length).toBeLessThanOrEqual(130)
-  })
-
-  /** 分层不是删内容：短的那份必须告诉用户还有更多，以及怎么看 */
-  it.each(LANGS)('%s 默认帮助指出了 --help --all', (lang) => {
-    expect(helpText(lang)).toContain('uebox --help --all')
+  it.each(LANGS)('%s 控制在 90 行以内', (lang) => {
+    expect(helpText(lang).split('\n').length).toBeLessThanOrEqual(90)
   })
 })
 
@@ -90,23 +70,16 @@ describe('帮助文本和实现保持同步', () => {
    * 这里把 `cli.ts` 分发到的每条命令都对一遍。
    */
   const COMMANDS = [
-    'setup',
+    'ask',
     'doctor',
     'projects list',
     'tools list',
     'tools show',
     'tools call',
-    'selection get',
-    'actors list',
-    'actors spawn',
-    'actors move',
-    'actors delete',
-    'actors undo',
     'viewport screenshot'
   ]
 
-  /** 命令表在默认那份里就要全 —— 一条命令查不到，等于它不存在 */
-  it.each(LANGS)('%s 默认帮助就列出了每一条命令', (lang) => {
+  it.each(LANGS)('%s 列出了每一条命令', (lang) => {
     const text = helpText(lang)
     expect(COMMANDS.filter((command) => !text.includes(command))).toEqual([])
   })
@@ -117,33 +90,20 @@ describe('帮助文本和实现保持同步', () => {
     '--config',
     '--lang',
     '--timeout',
-    '--host-config',
     '--search',
     '--args',
     '--args-file',
     '--project',
     '--name',
-    '--limit',
-    '--include-system',
     '--output',
     '--world',
     '--overwrite',
-    '--allow-write',
-    '--asset',
-    '--location',
-    '--rotation',
-    '--scale'
+    '--allow-write'
   ]
 
-  /** 专属选项在 --all 那份里，但一个都不能少 */
-  it.each(LANGS)('%s --all 列出了每一个选项', (lang) => {
-    const text = helpText(lang, { all: true })
+  it.each(LANGS)('%s 列出了每一个选项', (lang) => {
+    const text = helpText(lang)
     expect(OPTIONS.filter((option) => !text.includes(option))).toEqual([])
-  })
-
-  /** 写操作是安全边界，光在 --all 里说不够，默认那份也得提到 */
-  it.each(LANGS)('%s 默认帮助就写明了 --allow-write', (lang) => {
-    expect(helpText(lang)).toContain('--allow-write')
   })
 
   /**
