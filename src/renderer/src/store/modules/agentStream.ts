@@ -347,7 +347,8 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
     text: string,
     steerId?: string,
     images?: readonly string[],
-    files?: readonly ExcelFileInfo[]
+    files?: readonly ExcelFileInfo[],
+    textSynthetic?: boolean
   ): boolean {
     const state = getStreamByAgentSession(agentSessionId)
     if (!state) return false
@@ -356,6 +357,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
       type: 'user-steer',
       data: {
         text,
+        ...(textSynthetic ? { textSynthetic: true } : {}),
         applied: false,
         cancelled: false,
         steerId,

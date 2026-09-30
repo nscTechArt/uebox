@@ -57,6 +57,8 @@ export interface AgentTimelineSteerBlock {
   images?: string[]
   /** 随这句话带的文档、音视频。同上，只画卡片，内容已经交给内核了 */
   files?: ExcelFileInfo[]
+  /** 用户没打字，`text` 是替内核补的说明 —— 只用来对回执，不画成气泡（图/卡片自己就说明了） */
+  textSynthetic?: boolean
 }
 
 /**
@@ -150,6 +152,7 @@ export function splitAgentTimeline(items: AgentProcessItem[], thinking = ''): Ag
             sessionId?: unknown
             images?: unknown
             files?: unknown
+            textSynthetic?: unknown
           }
         | undefined
       const images = Array.isArray(data?.images)
@@ -170,7 +173,10 @@ export function splitAgentTimeline(items: AgentProcessItem[], thinking = ''): Ag
         ...(typeof data?.steerId === 'string' ? { steerId: data.steerId } : {}),
         ...(typeof data?.sessionId === 'string' ? { sessionId: data.sessionId } : {}),
         ...(images.length > 0 ? { images } : {}),
-        ...(files.length > 0 ? { files } : {})
+        ...(files.length > 0 ? { files } : {}),
+        ...(data?.textSynthetic === true && (images.length > 0 || files.length > 0)
+          ? { textSynthetic: true }
+          : {})
       })
       continue
     }

@@ -1062,7 +1062,17 @@ export function useAgentMode(params: UseAgentModeParams) {
     // 记进正在跑的那条回复的时间线；没有流在跑（切了会话、刚好收尾）
     // 才退回普通用户气泡 —— 无论如何用户都得在对话里看见自己说过的话。
     const files = attachments?.files
-    if (!agentStreamStore.pushUserSteer(sessionId, messageText, steerId, images, files)) {
+    if (
+      !agentStreamStore.pushUserSteer(
+        sessionId,
+        messageText,
+        steerId,
+        images,
+        files,
+        // 用户没打字：那句说明是补给内核的，时间线上有图/卡片，不再重复画一遍
+        !text.trim()
+      )
+    ) {
       // 写回这一轮所属的那条对话，不是此刻页面上开着的那条（等的时候可能切走了）
       if (ownerChatSid === sid.value) {
         pushUser(

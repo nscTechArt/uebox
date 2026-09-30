@@ -53,7 +53,11 @@
                 :row-count="file.rowCount"
               />
             </div>
-            <div class="timeline-steer-bubble" :class="{ cancelled: block.cancelled }">
+            <div
+              v-if="!block.textSynthetic"
+              class="timeline-steer-bubble"
+              :class="{ cancelled: block.cancelled }"
+            >
               {{ block.text }}
             </div>
             <div
