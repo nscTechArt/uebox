@@ -1,12 +1,12 @@
 ---
 name: ue-system-diagnostics
-description: Run console commands and Python inside the editor, read performance numbers, check crash reports, and enable or disable plugins. Use when the task needs something the dedicated tools cannot express, or when the user asks about performance, crashes or plugins. Do not use for ordinary asset, actor or Blueprint work — those have their own tools.
+description: Run console commands and Python inside the editor, read performance numbers, check crash reports, inspect the local ZenServer cache, and enable or disable plugins. Use when the task needs something the dedicated tools cannot express, or when the user asks about performance, crashes, shader recompiles, cache disk usage or plugins. Do not use for ordinary asset, actor or Blueprint work — those have their own tools.
 ---
 
 # System, Python and diagnostics
 
 Verified against UE 5.5.4 with UnrealAgentLink. These are the highest-privilege tools in the set:
-five tools, of which three — `ue_run_console_command`, `ue_run_python_script` and
+six tools, of which three — `ue_run_console_command`, `ue_run_python_script` and
 `ue_manage_plugin` — are marked irreversible and will ask the user for approval.
 
 ## Python is the escape hatch — and it returns output now
@@ -79,6 +79,27 @@ reports. Read `crash_report_count`:
 - `0` → nothing crashed. The attached log lines are context only. Do not tell the user their
   project crashed.
 - `> 0` → real reports from `Saved/Crashes`, worth analysing.
+
+## Local cache: ask ZenServer, not the file system
+
+`ue_zen_server` reads the local ZenServer (the engine's derived-data cache service, default
+`127.0.0.1:8558`) over its own HTTP interface: hit ratio, cache and CAS disk usage, and which
+projects it holds data for. Read-only; it never cleans anything.
+
+Reach for it when the user says the editor keeps compiling shaders, loading is slow, or the
+system drive is filling up. Three things to say with the numbers:
+
+- Hits and misses count **since ZenServer last started**, not all time. When the result says
+  `sample_too_small`, do not draw a conclusion from the ratio.
+- A low ratio right after an engine upgrade, a cache wipe or the first open of a project is
+  expected, not a fault.
+- `project_file_missing: true` means the `.uproject` is gone; that data is probably unused. Offer
+  that as a fact, not as a cleanup you will do — clearing cache means recompiling shaders next
+  time, and that is the user's call.
+
+ZenServer starts and stops with the editor. If the tool cannot reach it, the editor is closed,
+the project does not use Zen for its local cache, or the port was changed — do not go scanning
+`Zen/Data` on disk instead; the CAS folder holds so many small files that a walk takes minutes.
 
 ## Plugins
 
