@@ -9,6 +9,7 @@
  * 规则一律在服务端判断（契约第 0 节）：这里不替服务端决定谁能做什么，只转发、只搬文件。
  */
 import { promises as fs } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -425,7 +426,7 @@ export class TeamService {
 
   /** 选的位置所在的盘还剩多少（字节）；读不出来 null */
   async freeSpace(path: string): Promise<number | null> {
-    let probe = resolve(path)
+    let probe = localDir(path)
     for (let depth = 0; depth < 32; depth += 1) {
       try {
         const stats = await fs.statfs(probe)
@@ -533,7 +534,7 @@ export class TeamService {
     const project = await this.project(key, 0)
     const remote = project.loreRemote
     if (!remote) throw new TeamApiError('no-remote', 0, 'Project has no Lore remote')
-    const target = resolve(input.targetDir)
+    const target = localDir(input.targetDir)
     return this.startJob(key, 'sync', team.projectName, async (progress, signal) => {
       const unsynced = defaultUnsynced(await this.host.rootFolders(key).catch(() => []))
       const inspected = await this.inspectFolder(target)
@@ -932,4 +933,9 @@ export async function listFiles(
   }
   await walk(root)
   return out
+}
+
+/** 本机文件夹：macOS / Linux 上默认位置写成 `~/UEProjects/星海`，这里展开成绝对路径 */
+export function localDir(path: string): string {
+  return resolve(/^~(?=$|[\\/])/.test(path) ? homedir() + path.slice(1) : path)
 }

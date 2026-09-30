@@ -24,14 +24,26 @@
         <template v-else-if="free !== null">
           {{
             size !== null
-              ? t('teamProject.sync.size', { size: formatSize(size), drive, free: formatSize(free) })
-              : t('teamProject.sync.free', { drive, free: formatSize(free) })
+              ? t(drive ? 'teamProject.sync.size' : 'teamProject.sync.sizeHere', {
+                  size: formatSize(size),
+                  drive,
+                  free: formatSize(free)
+                })
+              : t(drive ? 'teamProject.sync.free' : 'teamProject.sync.freeHere', {
+                  drive,
+                  free: formatSize(free)
+                })
           }}
         </template>
       </div>
       <!-- 按需：盘不够 -->
       <div v-if="shortBy > 0" class="warn-line">
-        <i class="dot red" />{{ t('teamProject.sync.notEnough', { drive, need: formatSize(shortBy) }) }}
+        <i class="dot red" />{{
+          t(drive ? 'teamProject.sync.notEnough' : 'teamProject.sync.notEnoughHere', {
+            drive,
+            need: formatSize(shortBy)
+          })
+        }}
       </div>
       <div v-if="!existing" class="muted">
         {{ t('teamProject.sync.haveIt') }}
@@ -70,6 +82,9 @@ const size = ref<number | null>(null)
 const busy = ref(false)
 
 const projectName = computed(() => teamStore.project?.name ?? teamStore.link?.projectName ?? '')
+/** Windows 默认放 D:\UEProjects（没有 D 盘放 C:）；macOS / Linux 放 ~/UEProjects，主进程展开 ~ */
+const onWindows = window.api?.platform === 'win32'
+const sep = onWindows ? '\\' : '/'
 const drive = computed(() => (/^([A-Za-z]):/.exec(target.value)?.[1] ?? '').toUpperCase())
 const shortBy = computed(() =>
   !existing.value && free.value !== null && size.value !== null ? size.value - free.value : 0
@@ -86,8 +101,12 @@ watch(
     if (!open) return
     existing.value = false
     const name = projectName.value || 'Project'
-    const dFree = await teamAPI.freeSpace('D:\\').catch(() => null)
-    target.value = `${dFree !== null ? 'D:' : 'C:'}\\UEProjects\\${name}`
+    if (onWindows) {
+      const dFree = await teamAPI.freeSpace('D:\\').catch(() => null)
+      target.value = `${dFree !== null ? 'D:' : 'C:'}\\UEProjects\\${name}`
+    } else {
+      target.value = `~/UEProjects/${name}`
+    }
     await refreshFree()
     // 工程多大：目录服务的库计数
     const library = libraryStore.activeServer
@@ -106,7 +125,7 @@ async function pickPlace(): Promise<void> {
   if (!result.success || !result.data) return
   const name = projectName.value || 'Project'
   const inspected = await teamAPI.inspectFolder(result.data).catch(() => null)
-  target.value = inspected?.empty ? result.data : `${result.data.replace(/[\\/]+$/, '')}\\${name}`
+  target.value = inspected?.empty ? result.data : `${result.data.replace(/[\\/]+$/, '')}${sep}${name}`
   existing.value = false
   await refreshFree()
 }

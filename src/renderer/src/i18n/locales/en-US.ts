@@ -8656,6 +8656,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       size: 'About {size} · {free} left on {drive}',
       free: '{free} left on {drive}',
       notEnough: 'Not enough room on {drive}: {need} short.',
+      sizeHere: 'About {size} · {free} left',
+      freeHere: '{free} left',
+      notEnoughHere: 'Not enough room: {need} short.',
       haveIt: 'Already have this project on your computer?',
       pickIt: 'Choose it',
       existing:
