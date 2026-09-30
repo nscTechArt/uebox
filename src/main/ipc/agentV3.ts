@@ -1541,7 +1541,8 @@ export function registerAgentV3IPC(): void {
    * 用户在任务板上点「重开」：卡住的那件改回待办，下一轮开局制作人会看到
    * （`boardRecap.ts` 的旧账里带「用户重开」）。
    *
-   * 这一轮正跑着也允许：任务板是一份文件，这里只改一项；制作人这一轮看不到，下一轮看得到。
+   * 这一轮正跑着也允许：任务板是一份文件，这里只改一项。制作人下一轮开局一定看得到；
+   * 这一轮要是改过工程，收尾对账会重读任务板，当场就能看到 —— 这是好事，不用拦。
    */
   ipcMain.handle(
     'agent-v3:team-task-reopen',
@@ -2021,6 +2022,9 @@ export function registerAgentV3IPC(): void {
         ...(team ? { team } : {})
       }
       await saveExecutionOptions(sessionId, options)
+      // 新的一轮换了 roundStartedAt：界面据它把上一轮的「卡住 / 进行中」灰掉，
+      // 不推一下的话要等制作人改任务板、或者这一轮结束才刷新（2026-09-30 真机）
+      if (team) emit('agent-v3:team-board', { sessionId })
       await prepareTeam(ctx, options, emit)
       run.controller.signal.throwIfAborted()
       const { agent, selection, tools, allTools } = await createUnrealAgent(ctx)
