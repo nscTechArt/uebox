@@ -48,6 +48,8 @@ interface SearchNodesEntry {
   requires?: string[]
   /** 能不能用 value 设初始值 */
   has_value?: boolean
+  /** 节点细节面板里能设的属性 → 默认值（properties 字段认这些名字） */
+  properties?: Record<string, unknown>
   note?: string
 }
 
@@ -58,6 +60,10 @@ export interface SearchNodesResponse {
   total_types?: number
   truncated?: boolean
   nodes?: SearchNodesEntry[]
+  /** 这个编辑器里 Substrate 是否生效。老插件不回 */
+  substrate_enabled?: boolean
+  /** 搜 Substrate 而项目用不了时，插件给的原因（版本不够 / 没开 + 怎么开） */
+  substrate_note?: string
 }
 
 /** `A float(any)、B float(any)` —— 一行放得下，比每个引脚一行省一大截 */
@@ -132,6 +138,11 @@ inputs/outputs 里的 name 就是连线时用的引脚名。
 **requires** 列的是「不给就废」的额外字段：MaterialFunctionCall 少了 function_path
 一个引脚都没有，ComponentMask 少了 value 是个恒为 0 的死节点。
 **has_value=true** 表示这个类型能用 value 设初始值。
+**properties** 是节点细节面板里的设置和默认值（Slab 的 SubSurfaceType、算子的 bUseParameterBlending），
+建节点或改节点时写进 properties 字段。
+
+Substrate 节点（UE 5.4+）的 node_type 都以 Substrate 开头，搜 "Substrate" 一次全拿到；
+项目没开 Substrate 时回执会直接说怎么开。
 
 只读，不碰任何资产，也不需要先打开材质。`,
   input: SearchNodesSchema,
@@ -192,9 +203,22 @@ inputs/outputs 里的 name 就是连线时用的引脚名。
       if (node.has_value) {
         lines.push('  可以用 value 设初始值')
       }
+      const props = Object.entries(node.properties ?? {})
+      if (props.length > 0) {
+        lines.push(
+          `  设置（properties，括号里是默认值）：${props
+            .map(([k, v]) => `${k}（${typeof v === 'string' ? v : JSON.stringify(v)}）`)
+            .join('、')}`
+        )
+      }
       if (node.note) {
         lines.push(`  ※ ${node.note}`)
       }
+    }
+
+    // Substrate 用不了的原因放在最前面：下面列出来的 Substrate 节点这时一个都建不了
+    if (response.substrate_note) {
+      lines.unshift(`⚠️ ${response.substrate_note}`)
     }
 
     lines.push('\n照着上面的 node_type 和引脚名写 material_apply_graph，不要再自己猜名字。')

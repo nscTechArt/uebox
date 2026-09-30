@@ -13,6 +13,9 @@
  *   3. 清理默认 dry_run，且这个默认值要真的传到引擎
  */
 
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const callRequest = vi.fn()
@@ -149,6 +152,76 @@ describe('material_delete_unused_nodes', () => {
     callRequest.mockResolvedValue({ dry_run: true, unused_count: 0, unused: [], deleted_count: 0 })
     await byName('material_delete_unused_nodes').execute('c1', { path: '/Game/M_Wood' })
     expect(lastCall().method).toBe('material.delete_unused_nodes')
+  })
+
+  /**
+   * 名单里的 id 要能直接拿去 delete_node / set_node_value。
+   * 引擎回的是下标 id（和 add_node / get_graph 一致），回执照抄引擎、guid 一并给出。
+   */
+  it('dry_run 回执逐条列出引擎给的 node_id 和 guid，并声明一个没删', async () => {
+    callRequest.mockResolvedValue({
+      dry_run: true,
+      unused_count: 1,
+      deleted_count: 0,
+      unused: [
+        {
+          node_id: 'MaterialExpressionSubstrateHorizontalMixing_4',
+          guid: 'A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6',
+          class: 'MaterialExpressionSubstrateHorizontalMixing'
+        }
+      ]
+    })
+
+    const result = (await byName('material_delete_unused_nodes').execute('c1', {
+      path: '/Game/M_Wood'
+    })) as { content: Array<{ text: string }> }
+    const text = result.content[0].text
+
+    expect(text.split('\n')[0]).toContain('一个都没删')
+    expect(text).toContain('MaterialExpressionSubstrateHorizontalMixing_4')
+    expect(text).toContain('A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6')
+  })
+
+  it('真删时首行报引擎回来的删除数，不照抄名单长度', async () => {
+    callRequest.mockResolvedValue({
+      dry_run: false,
+      unused_count: 2,
+      deleted_count: 1,
+      unused: [
+        { node_id: 'MaterialExpressionMultiply_2', guid: 'G1', class: 'MaterialExpressionMultiply' },
+        { node_id: 'MaterialExpressionAdd_3', guid: 'G2', class: 'MaterialExpressionAdd' }
+      ]
+    })
+
+    const result = (await byName('material_delete_unused_nodes').execute('c1', {
+      path: '/Game/M_Wood',
+      dry_run: false
+    })) as { content: Array<{ text: string }> }
+
+    expect(result.content[0].text.split('\n')[0]).toContain('1 / 2')
+  })
+
+  /**
+   * 引擎侧的约定只能读源码守：插件没法在 vitest 里跑。
+   * 这条命令曾经回 `Expression->GetName()`，对象名后缀和下标对不上，
+   * 模型拿它去 delete_node 会删错节点。
+   */
+  it('插件侧 node_id 走 BuildExpressionIds，并带 guid', () => {
+    const source = readFileSync(
+      path.resolve(
+        __dirname,
+        '../../../../../plugin/UnrealAgentLink/Source/UnrealAgentLink/Private/Commands/UAL_MaterialCommands.cpp'
+      ),
+      'utf8'
+    )
+    const start = source.indexOf('void FUAL_MaterialCommands::Handle_DeleteUnusedMaterialNodes(')
+    expect(start).toBeGreaterThan(-1)
+    const rest = source.slice(start)
+    const body = rest.slice(0, rest.search(/\r?\n\}\r?\n/))
+
+    expect(body).toContain('UAL_BuildExpressionIds(Material, ExpressionToId)')
+    expect(body).not.toMatch(/SetStringField\(TEXT\("node_id"\),\s*Expression->GetName\(\)\)/)
+    expect(body).toMatch(/SetStringField\(TEXT\("guid"\)/)
   })
 })
 

@@ -1,6 +1,6 @@
 ---
 name: ue-material-authoring
-description: Create a master material, wire and rewire its graph, compile it, create instances, apply it to actors, diagnose one that renders wrong or will not compile, and scale it up with parameter collections, material functions and reference lookups. Use when the user wants a new material, wants an existing material's graph, properties or parameters changed, or says things like "接错线了改一下"、"图里有一堆没用的节点"、"这个材质显示不对"、"草是紫的没颜色"、"材质编译不过"、"全场景下雨"、"按队伍改配色"、"这串节点想复用"、"这个材质被谁用了". Do not use for Blueprint graphs, for importing textures, or for Sequencer.
+description: Create a master material, wire and rewire its graph, compile it, create instances, apply it to actors, diagnose one that renders wrong or will not compile, and scale it up with parameter collections, material functions and reference lookups. Use when the user wants a new material, wants an existing material's graph, properties or parameters changed, or says things like "接错线了改一下"、"图里有一堆没用的节点"、"这个材质显示不对"、"草是紫的没颜色"、"材质编译不过"、"全场景下雨"、"按队伍改配色"、"这串节点想复用"、"这个材质被谁用了". Do not use for Substrate graphs (Slab, FrontMaterial, layering, colored glass), for Blueprint graphs, for importing textures, or for Sequencer.
 ---
 
 # Material authoring
@@ -51,6 +51,11 @@ any experiment you run, so every theory tested before that point is untestable.
 Full order of operations: **`references/diagnosing.md`**.
 
 **Nothing here writes to disk.** Call `ue_save` when the material is done.
+
+**Substrate projects (UE 5.4+).** If `material_get_graph` reports that Substrate is on, or
+the user asks for layered coats, colored glass, fuzz or thin film, switch to skill
+`ue-material-substrate`: the output there is `FrontMaterial`, and the BaseColor row of pins
+stops counting once it is wired.
 
 Every tool takes `path` for the asset it acts on, `destination_path` for where a new
 asset goes, and `texture_path` / `function_path` / `collection_path` for assets it merely

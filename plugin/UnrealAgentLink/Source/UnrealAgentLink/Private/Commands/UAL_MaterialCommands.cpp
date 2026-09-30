@@ -1,6 +1,7 @@
 ﻿#include "UAL_MaterialCommands.h"
 #include "UAL_VersionCompat.h"
 #include "UAL_CommandUtils.h"
+#include "Utils/UAL_PropertyPath.h"
 #include "Misc/PackageName.h"
 #include "Utils/UAL_PBRMaterialHelper.h"
 
@@ -89,6 +90,18 @@
 #include "MaterialGraph/MaterialGraph.h"
 #include "MaterialShared.h"
 #include "ShaderCompiler.h"
+
+/*
+ * Substrate 从 5.4 起才有（5.3 叫 Strata，实验性，类名和引脚都不一样，不接）。
+ * 5.4 的头文件在 Classes/，5.5 起挪进 Public/，两边的 include 路径同样写
+ * "Materials/MaterialExpressionSubstrate.h"，Engine 模块两个目录都导出。
+ * 所有 Substrate 节点类都是 MinimalAPI，StaticClass() 链得上。
+ */
+#define UAL_WITH_SUBSTRATE (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4))
+#if UAL_WITH_SUBSTRATE
+#include "Materials/MaterialExpressionSubstrate.h"
+#include "RenderUtils.h"
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogUALMaterial, Log, All);
 
@@ -317,6 +330,34 @@ namespace
 	 * `EMaterialValueType` 是位域，而且每个引擎版本都在往里加东西。
 	 * 只翻译长期稳定的那几位，剩下的原样给出位值 —— 认不出来好过翻译错。
 	 */
+	/*
+	 * 引脚类型一律经这两个函数问，不要直接调 GetInputType / GetOutputType。
+	 *
+	 * 5.6 起引擎把类型查询挪到了 GetInputValueType / GetOutputValueType，
+	 * 新写的节点（Substrate 全族都是）**只覆写新函数**；旧的 GetInputType
+	 * 基类实现写死回 MCT_Float。于是 5.6+ 上照旧调旧函数，Substrate 节点的
+	 * Background / Foreground / Top 这些明明只收 Substrate 的输入全被报成
+	 * float(any)，模型照着去接一个数值，编译才报错。新函数的默认实现
+	 * 回落到旧函数，所以 5.6+ 调新函数对老节点也是对的。
+	 */
+	uint32 UAL_InputTypeOf(UMaterialExpression* Expression, int32 Index)
+	{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6)
+		return static_cast<uint32>(Expression->GetInputValueType(Index));
+#else
+		return Expression->GetInputType(Index);
+#endif
+	}
+
+	uint32 UAL_OutputTypeOf(UMaterialExpression* Expression, int32 Index)
+	{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6)
+		return static_cast<uint32>(Expression->GetOutputValueType(Index));
+#else
+		return Expression->GetOutputType(Index);
+#endif
+	}
+
 	FString UAL_MaterialTypeName(uint32 Type)
 	{
 		if (Type == 0)
@@ -343,6 +384,11 @@ namespace
 			{ MCT_StaticBool, TEXT("bool") },
 			{ MCT_MaterialAttributes, TEXT("MaterialAttributes") },
 			{ MCT_Texture2D, TEXT("Texture2D") },
+#if UAL_WITH_SUBSTRATE
+			// Substrate 节点之间、以及接 FrontMaterial 的那根线都是这个类型。
+			// 不列出来的话读回来是一个裸的 "0x20000"，没人认得
+			{ MCT_Substrate, TEXT("Substrate") },
+#endif
 			{ MCT_Unknown, TEXT("unknown") }
 		};
 		for (const FTypeBit& Entry : Table)
@@ -907,6 +953,17 @@ namespace
 			{ TEXT("AmbientOcclusion"), &Data->AmbientOcclusion, TEXT("float") },
 			{ TEXT("MaterialAttributes"), &Data->MaterialAttributes, TEXT("MaterialAttributes") }
 		});
+#if UAL_WITH_SUBSTRATE
+		/*
+		 * Substrate 材质的全部着色都从这一根进主节点。
+		 *
+		 * 项目没开 Substrate 时也照样列在这里：这张表还要给读图、删节点、
+		 * 清理未用节点当判据用。漏了它，清理会把整张 Substrate 图当成没接上的
+		 * 死节点一起摘掉 —— 这正是以前的行为。「能不能往上连」另外判，
+		 * 见 UAL_SubstrateUnavailableReason。
+		 */
+		Out.Add({ TEXT("FrontMaterial"), &Data->FrontMaterial, TEXT("Substrate") });
+#endif
 #else
 		Out.Append({
 			{ TEXT("BaseColor"), &Material->BaseColor, TEXT("float3") },
@@ -924,6 +981,229 @@ namespace
 		});
 #endif
 		return Out;
+	}
+
+	/** JSON 对象的全部键。5.8 的键类型是 UE::FSharedString，别直接 GetKeys（见 UAL_JsonKey） */
+	TArray<FString> UAL_JsonKeys(const TSharedPtr<FJsonObject>& Obj)
+	{
+		TArray<FString> Keys;
+		if (Obj.IsValid())
+		{
+			for (const auto& Pair : Obj->Values)
+			{
+				Keys.Add(UAL_JsonKey(Pair.Key));
+			}
+		}
+		return Keys;
+	}
+
+	/** 这个 UPROPERTY 是不是一根输入引脚（FExpressionInput 一族）——那是连线，不是值 */
+	bool UAL_IsPinProperty(const FProperty* Prop)
+	{
+		const FStructProperty* StructProp = CastField<FStructProperty>(Prop);
+		if (!StructProp || !StructProp->Struct)
+		{
+			return false;
+		}
+		const FString StructName = StructProp->Struct->GetName();
+		return StructName.Contains(TEXT("ExpressionInput")) || StructName.Contains(TEXT("MaterialInput"));
+	}
+
+	/**
+	 * 节点上可以按名字设的属性（细节面板里那一栏），给 search_nodes 当说明书。
+	 *
+	 * 只列节点**自己类上**声明的（UMaterialExpression 基类那些 Desc / bCollapsed
+	 * 之类不列），跳过引脚。值取 CDO 上的默认值。
+	 */
+	TSharedPtr<FJsonObject> UAL_NodeEditableProperties(UMaterialExpression* Cdo)
+	{
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		if (!Cdo)
+		{
+			return Out;
+		}
+		for (TFieldIterator<FProperty> It(Cdo->GetClass()); It; ++It)
+		{
+			const FProperty* Prop = *It;
+			if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_EditConst | CPF_Deprecated) ||
+				UAL_IsPinProperty(Prop))
+			{
+				continue;
+			}
+			const UClass* Owner = Prop->GetOwnerClass();
+			if (!Owner || Owner == UMaterialExpression::StaticClass() || !Owner->IsChildOf(UMaterialExpression::StaticClass()))
+			{
+				continue;
+			}
+			FString ReadError;
+			if (TSharedPtr<FJsonValue> Value = UALPropertyPath::GetByPath(Cdo, Prop->GetName(), ReadError))
+			{
+				Out->SetField(Prop->GetName(), Value);
+			}
+		}
+		return Out;
+	}
+
+	/**
+	 * 按属性名给节点设 UPROPERTY —— 节点细节面板里的那些设置。
+	 *
+	 * Substrate 的配方离不开它：皮肤要 Slab 的 SubsurfaceProfile，玻璃要
+	 * SubSurfaceType=Simple Volume（5.6+），控成本要算子上的 bUseParameterBlending，
+	 * Select 要 Threshold。这些都不是引脚、也不是 `value`，以前根本设不了，
+	 * 模型只能退回 Python。
+	 *
+	 * 写入走 UALPropertyPath::SetByPath（枚举、资产路径、结构体字面量都认，
+	 * 写错名字会给「你是不是想写 XXX」）。**任何一条失败就整体回 false**，
+	 * 回滚由调用方负责；成功时 OutReadback 是写完之后从对象上读回来的值。
+	 */
+	bool UAL_ApplyNodeProperties(UMaterialExpression* Expression, const TSharedPtr<FJsonObject>& Props,
+		TSharedPtr<FJsonObject>& OutReadback, FString& OutError)
+	{
+		OutReadback = MakeShared<FJsonObject>();
+		if (!Expression || !Props.IsValid())
+		{
+			return true;
+		}
+		for (const auto& Pair : Props->Values)
+		{
+			const FString Key = UAL_JsonKey(Pair.Key);
+			FString TopName = Key;
+			int32 Cut = INDEX_NONE;
+			if (TopName.FindChar(TEXT('.'), Cut) || TopName.FindChar(TEXT('['), Cut))
+			{
+				TopName.LeftInline(Cut);
+			}
+			if (UAL_IsPinProperty(FindFProperty<FProperty>(Expression->GetClass(), *TopName)))
+			{
+				OutError = FString::Printf(TEXT("'%s' is an input pin, not a setting - connect something to it instead"),
+					*Key);
+				return false;
+			}
+
+			FString SetError;
+			if (!UALPropertyPath::SetByPath(Expression, Key, Pair.Value, SetError))
+			{
+				OutError = FString::Printf(TEXT("property '%s': %s"), *Key, *SetError);
+				return false;
+			}
+			FString ReadError;
+			if (TSharedPtr<FJsonValue> Readback = UALPropertyPath::GetByPath(Expression, Key, ReadError))
+			{
+				OutReadback->SetField(Key, Readback);
+			}
+		}
+		return true;
+	}
+
+	/** 这个节点类是不是 Substrate 那一族（BSDF / 混合 / 转换 / 工具节点） */
+	bool UAL_IsSubstrateClass(const UClass* Class)
+	{
+#if UAL_WITH_SUBSTRATE
+		return Class && (Class->IsChildOf(UMaterialExpressionSubstrateBSDF::StaticClass()) ||
+			Class->IsChildOf(UMaterialExpressionSubstrateUtilityBase::StaticClass()));
+#else
+		return false;
+#endif
+	}
+
+	/** 当前编辑器里 Substrate 是否生效。r.Substrate 只在启动时读，运行中改了不算 */
+	bool UAL_IsSubstrateEnabled()
+	{
+#if UAL_WITH_SUBSTRATE
+		return Substrate::IsSubstrateEnabled();
+#else
+		return false;
+#endif
+	}
+
+	/**
+	 * Substrate 用不了的原因，用得了回空串。
+	 *
+	 * 没开 Substrate 时引擎自己的节点面板里根本不出现这些节点，编译器也不看
+	 * FrontMaterial —— 节点建得出来、线连得上、编译还是绿的，画面却毫无变化，
+	 * 回执也挑不出错。这种「成功」比一个 400 糟得多，所以建之前就挡住，
+	 * 并且把怎么打开说清楚（改完必须重启编辑器，这一点最容易漏）。
+	 */
+	FString UAL_SubstrateUnavailableReason()
+	{
+#if UAL_WITH_SUBSTRATE
+		if (UAL_IsSubstrateEnabled())
+		{
+			return FString();
+		}
+		return TEXT("Substrate is not enabled in this project, so Substrate nodes and the FrontMaterial pin "
+			"would have no effect. Enable it with r.Substrate=True under [/Script/Engine.RendererSettings] "
+			"in Config/DefaultEngine.ini (Project Settings > Rendering > Substrate), then restart the editor - "
+			"it is read only at startup. Otherwise author the material with the legacy pins (BaseColor, Metallic, ...).");
+#else
+		return FString::Printf(TEXT("Substrate materials need Unreal Engine 5.4 or later; this editor is %d.%d. "
+			"Author the material with the legacy pins (BaseColor, Metallic, ...)."),
+			ENGINE_MAJOR_VERSION, ENGINE_MINOR_VERSION);
+#endif
+	}
+
+	/**
+	 * Substrate 开着时，主节点上这根引脚是不是被引擎忽略了。
+	 *
+	 * Substrate 下 BaseColor / Metallic / Roughness / Normal / Emissive… 这一排
+	 * 全部不参与着色（材质编辑器里直接不显示），只有 FrontMaterial、
+	 * OpacityMask（Masked 时）、WPO、AO 等少数几根还算数。
+	 *
+	 * 往被忽略的引脚上连线的后果比「没效果」更绕：图里还没有 Substrate 节点时，
+	 * 第一根连到 BaseColor 的线会触发引擎的自动转换（`ConvertMaterialToSubstrateMaterial`），
+	 * 它插一个 SubstrateShadingModels 节点、把这根线**挪**过去接到 FrontMaterial 上；
+	 * 从此 FrontMaterial 有线，转换不再发生，后面连到 Metallic、Roughness 的线
+	 * 全都静静躺在主节点上不起作用 —— 每一步都回成功。
+	 *
+	 * 判据直接用引擎的 `IsPropertyActiveInEditor`（材质编辑器灰掉引脚用的就是它），
+	 * 它会看域、混合模式、曲面细分这些，不自己抄一份规则。
+	 */
+	bool UAL_RootPinIgnoredBySubstrate(UMaterial* Material, const TCHAR* PinName)
+	{
+#if UAL_WITH_SUBSTRATE
+		if (!Material || !UAL_IsSubstrateEnabled())
+		{
+			return false;
+		}
+		struct FPinProperty { const TCHAR* Name; EMaterialProperty Property; };
+		static const FPinProperty Table[] = {
+			{ TEXT("BaseColor"), MP_BaseColor },
+			{ TEXT("Metallic"), MP_Metallic },
+			{ TEXT("Specular"), MP_Specular },
+			{ TEXT("Roughness"), MP_Roughness },
+			{ TEXT("EmissiveColor"), MP_EmissiveColor },
+			{ TEXT("Opacity"), MP_Opacity },
+			{ TEXT("OpacityMask"), MP_OpacityMask },
+			{ TEXT("Normal"), MP_Normal },
+			{ TEXT("WorldPositionOffset"), MP_WorldPositionOffset },
+			{ TEXT("SubsurfaceColor"), MP_SubsurfaceColor },
+			{ TEXT("AmbientOcclusion"), MP_AmbientOcclusion },
+			{ TEXT("MaterialAttributes"), MP_MaterialAttributes },
+			{ TEXT("FrontMaterial"), MP_FrontMaterial },
+		};
+		for (const FPinProperty& Entry : Table)
+		{
+			if (FCString::Stricmp(Entry.Name, PinName) == 0)
+			{
+				return !Material->IsPropertyActiveInEditor(Entry.Property);
+			}
+		}
+#endif
+		return false;
+	}
+
+	/**
+	 * 「可用引脚」清单里该不该列这一根。建材质、读图两处的清单都走它，
+	 * 和 connect_pins 会拒的那两种情况一一对应：没开 Substrate 时的 FrontMaterial、
+	 * 开了 Substrate 时被引擎忽略的旧引脚。
+	 */
+	bool UAL_IsRootPinOffered(UMaterial* Material, const TCHAR* PinName)
+	{
+		if (FCString::Stricmp(PinName, TEXT("FrontMaterial")) == 0 && !UAL_IsSubstrateEnabled())
+		{
+			return false;
+		}
+		return !UAL_RootPinIgnoredBySubstrate(Material, PinName);
 	}
 
 	/**
@@ -1010,6 +1290,49 @@ namespace
 			// 那是因为当时没有传函数资产的路子。现在 add_node 认 function_path，
 			// 建的时候就把函数挂上，节点是完整可用的
 			NodeTypeMap.Add(TEXT("MaterialFunctionCall"), UMaterialExpressionMaterialFunctionCall::StaticClass());
+
+#if UAL_WITH_SUBSTRATE
+			/*
+			 * Substrate 节点（5.4+）。node_type 一律带 Substrate 前缀：
+			 * search_nodes 搜 "Substrate" 就能一次拿到整族，也不会和同名的旧节点
+			 * （Add / Select）撞车。
+			 *
+			 * 各节点引脚名不在这里抄，search_nodes 从 CDO 现读，逐版本自然正确。
+			 * 项目没开 Substrate 时建不了，见 UAL_SubstrateUnavailableReason。
+			 *
+			 * 不收 SubstrateConvertMaterialAttributes 和 SubstrateShadingModels：
+			 * 那两个是引擎把旧材质自动转换时用的，手写新材质用不上，
+			 * 列出来只会让模型绕开 Slab 去走转换那条路。
+			 */
+			NodeTypeMap.Add(TEXT("SubstrateSlabBSDF"), UMaterialExpressionSubstrateSlabBSDF::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateSimpleClearCoatBSDF"), UMaterialExpressionSubstrateSimpleClearCoatBSDF::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateUnlitBSDF"), UMaterialExpressionSubstrateUnlitBSDF::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateHairBSDF"), UMaterialExpressionSubstrateHairBSDF::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateEyeBSDF"), UMaterialExpressionSubstrateEyeBSDF::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateSingleLayerWaterBSDF"), UMaterialExpressionSubstrateSingleLayerWaterBSDF::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateVolumetricFogCloudBSDF"), UMaterialExpressionSubstrateVolumetricFogCloudBSDF::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateLightFunction"), UMaterialExpressionSubstrateLightFunction::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstratePostProcess"), UMaterialExpressionSubstratePostProcess::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateUI"), UMaterialExpressionSubstrateUI::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateConvertToDecal"), UMaterialExpressionSubstrateConvertToDecal::StaticClass());
+			// 组合算子：左右混（按遮罩）、上下叠（涂层）、相加、按覆盖度加权
+			NodeTypeMap.Add(TEXT("SubstrateHorizontalMixing"), UMaterialExpressionSubstrateHorizontalMixing::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateVerticalLayering"), UMaterialExpressionSubstrateVerticalLayering::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateAdd"), UMaterialExpressionSubstrateAdd::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateWeight"), UMaterialExpressionSubstrateWeight::StaticClass());
+			// 工具节点：输出的是普通数值，喂给 Slab 的引脚
+			NodeTypeMap.Add(TEXT("SubstrateMetalnessToDiffuseAlbedoF0"), UMaterialExpressionSubstrateMetalnessToDiffuseAlbedoF0::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateTransmittanceToMFP"), UMaterialExpressionSubstrateTransmittanceToMFP::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateHazinessToSecondaryRoughness"), UMaterialExpressionSubstrateHazinessToSecondaryRoughness::StaticClass());
+			NodeTypeMap.Add(TEXT("SubstrateThinFilm"), UMaterialExpressionSubstrateThinFilm::StaticClass());
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6)
+			NodeTypeMap.Add(TEXT("SubstrateSelect"), UMaterialExpressionSubstrateSelect::StaticClass());
+#endif
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+			// 5.8 引擎自己标着 Experimental
+			NodeTypeMap.Add(TEXT("SubstrateToonBSDF"), UMaterialExpressionSubstrateToonBSDF::StaticClass());
+#endif
+#endif
 			// ObjectPosition / ActorPosition / Rotator / DepthFade / ScreenPosition 这五个类在部分引擎版本上没导出
 			// （编得过链不上），已同步从调用方枚举里删掉。
 			// 没补的四个（Custom / SceneTexture / MaterialFunctionCall / Comment）
@@ -1309,9 +1632,13 @@ void FUAL_MaterialCommands::Handle_CreateMaterial(
 	TArray<TSharedPtr<FJsonValue>> AvailablePins;
 	for (const FUALRootInput& Root : UAL_CollectRootInputs(NewMaterial))
 	{
-		AvailablePins.Add(MakeShared<FJsonValueString>(Root.Name));
+		if (UAL_IsRootPinOffered(NewMaterial, Root.Name))
+		{
+			AvailablePins.Add(MakeShared<FJsonValueString>(Root.Name));
+		}
 	}
 	Data->SetArrayField(TEXT("available_pins"), AvailablePins);
+	Data->SetBoolField(TEXT("substrate_enabled"), UAL_IsSubstrateEnabled());
 
 	UE_LOG(LogUALMaterial, Log, TEXT("Created UMaterial: %s"), *NewMaterial->GetName());
 
@@ -2519,7 +2846,7 @@ void FUAL_MaterialCommands::Handle_GetMaterialGraph(
 			TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
 			InputObj->SetStringField(TEXT("name"), InputName);
 			InputObj->SetBoolField(TEXT("is_connected"), Input && Input->Expression != nullptr);
-			const FString InputType = UAL_MaterialTypeName(Expression->GetInputType(i));
+			const FString InputType = UAL_MaterialTypeName(UAL_InputTypeOf(Expression, i));
 			if (!InputType.IsEmpty())
 			{
 				InputObj->SetStringField(TEXT("type"), InputType);
@@ -2537,7 +2864,7 @@ void FUAL_MaterialCommands::Handle_GetMaterialGraph(
 			TSharedPtr<FJsonObject> OutputObj = MakeShared<FJsonObject>();
 			OutputObj->SetStringField(TEXT("name"), UAL_OutputPinName(Expression, i));
 			OutputObj->SetNumberField(TEXT("index"), i);
-			const FString OutputType = UAL_MaterialTypeName(Expression->GetOutputType(i));
+			const FString OutputType = UAL_MaterialTypeName(UAL_OutputTypeOf(Expression, i));
 			if (!OutputType.IsEmpty())
 			{
 				OutputObj->SetStringField(TEXT("type"), OutputType);
@@ -2584,6 +2911,25 @@ void FUAL_MaterialCommands::Handle_GetMaterialGraph(
 			{
 				NodeObj->SetField(TEXT("value"), NodeValue);
 			}
+
+			// 只列和默认值不同的设置（SubSurfaceType、bUseParameterBlending……），
+			// 全列的话每个节点都拖一长串默认值
+			TSharedPtr<FJsonObject> Current = UAL_NodeEditableProperties(Expression);
+			TSharedPtr<FJsonObject> Defaults = UAL_NodeEditableProperties(Expression->GetClass()->GetDefaultObject<UMaterialExpression>());
+			TSharedPtr<FJsonObject> Changed = MakeShared<FJsonObject>();
+			for (const FString& Key : UAL_JsonKeys(Current))
+			{
+				const TSharedPtr<FJsonValue> Value = Current->TryGetField(Key);
+				const TSharedPtr<FJsonValue> Default = Defaults->TryGetField(Key);
+				if (Value.IsValid() && (!Default.IsValid() || !FJsonValue::CompareEqual(*Value, *Default)))
+				{
+					Changed->SetField(Key, Value);
+				}
+			}
+			if (Changed->Values.Num() > 0)
+			{
+				NodeObj->SetObjectField(TEXT("properties"), Changed);
+			}
 		}
 
 		NodesJson.Add(MakeShared<FJsonValueObject>(NodeObj));
@@ -2597,12 +2943,25 @@ void FUAL_MaterialCommands::Handle_GetMaterialGraph(
 	// 同样走 UAL_CollectRootInputs —— 这里手写过一份，比 connect_pins 认的多两个，
 	// 于是读图说有 SubsurfaceColor、连的时候回 400 说没有。
 	// 「可用引脚」这张清单和「实际能连的引脚」必须是同一份，否则就是在骗调用方。
+	//
+	// 例外是 connect_pins 会拒的那些，这里也不列：没开 Substrate 时的 FrontMaterial，
+	// 开了 Substrate 时被引擎忽略的旧引脚（BaseColor 那一排）。
+	// 已经接在它们上面的线照样出现在下面的 connections 里 —— 读图要如实。
+	const bool bSubstrateEnabled = UAL_IsSubstrateEnabled();
 	TArray<TSharedPtr<FJsonValue>> MaterialPins;
 	for (const FUALRootInput& Root : UAL_CollectRootInputs(Material))
 	{
+		if (!UAL_IsRootPinOffered(Material, Root.Name))
+		{
+			continue;
+		}
 		MaterialPins.Add(MakeShared<FJsonValueString>(Root.Name));
 	}
 	Data->SetArrayField(TEXT("material_pins"), MaterialPins);
+
+	// Substrate 开着时着色只看 FrontMaterial；FrontMaterial 空着，引擎才拿
+	// BaseColor 那一排自动转换。调用方得先知道是哪种模式，才知道该往哪连
+	Data->SetBoolField(TEXT("substrate_enabled"), bSubstrateEnabled);
 
 	// 「使用材质属性」开着的时候，主节点上那一排引脚全是灰的，
 	// 唯一有效的输入是 MaterialAttributes 那一根。
@@ -2656,7 +3015,7 @@ void FUAL_MaterialCommands::Handle_GetMaterialGraph(
 		 */
 		if (FromExpr && FromExpr->GetOutputs().IsValidIndex(FromOutput))
 		{
-			const FString FromType = UAL_MaterialTypeName(FromExpr->GetOutputType(FromOutput));
+			const FString FromType = UAL_MaterialTypeName(UAL_OutputTypeOf(FromExpr, FromOutput));
 			if (!FromType.IsEmpty())
 			{
 				Conn->SetStringField(TEXT("from_type"), FromType);
@@ -2687,7 +3046,7 @@ void FUAL_MaterialCommands::Handle_GetMaterialGraph(
 
 			const FString InputName = UAL_InputPinName(Expression, i);
 			AddConnection(Input->Expression, Input->OutputIndex,
-				NodeIdOf(Expression), InputName, UAL_MaterialTypeName(Expression->GetInputType(i)));
+				NodeIdOf(Expression), InputName, UAL_MaterialTypeName(UAL_InputTypeOf(Expression, i)));
 		}
 	}
 
@@ -2705,6 +3064,12 @@ void FUAL_MaterialCommands::Handle_GetMaterialGraph(
 		{
 			AddConnection(Root.Input->Expression, Root.Input->OutputIndex,
 				TEXT("Material"), Root.Name, Root.ExpectedType);
+			// 连着但引擎不看的线（Substrate 下的旧引脚）要标出来，
+			// 否则读图的人会以为 Metallic 那根线在起作用
+			if (UAL_RootPinIgnoredBySubstrate(Material, Root.Name))
+			{
+				ConnectionsJson.Last()->AsObject()->SetBoolField(TEXT("ignored_by_substrate"), true);
+			}
 		}
 	}
 
@@ -2826,7 +3191,7 @@ void FUAL_MaterialCommands::Handle_SearchMaterialNodes(
 			const FString InputName = UAL_InputPinName(Cdo, i);
 			TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
 			InputObj->SetStringField(TEXT("name"), InputName);
-			const FString InputType = UAL_MaterialTypeName(Cdo->GetInputType(i));
+			const FString InputType = UAL_MaterialTypeName(UAL_InputTypeOf(Cdo, i));
 			if (!InputType.IsEmpty())
 			{
 				InputObj->SetStringField(TEXT("type"), InputType);
@@ -2844,7 +3209,7 @@ void FUAL_MaterialCommands::Handle_SearchMaterialNodes(
 			TSharedPtr<FJsonObject> OutputObj = MakeShared<FJsonObject>();
 			OutputObj->SetStringField(TEXT("name"), UAL_OutputPinName(Cdo, i));
 			OutputObj->SetNumberField(TEXT("index"), i);
-			const FString OutputType = UAL_MaterialTypeName(Cdo->GetOutputType(i));
+			const FString OutputType = UAL_MaterialTypeName(UAL_OutputTypeOf(Cdo, i));
 			if (!OutputType.IsEmpty())
 			{
 				OutputObj->SetStringField(TEXT("type"), OutputType);
@@ -2900,6 +3265,13 @@ void FUAL_MaterialCommands::Handle_SearchMaterialNodes(
 		 */
 		NodeObj->SetBoolField(TEXT("has_value"), ReadNodeValue(Cdo).IsValid());
 
+		// 细节面板里能设的属性和默认值 —— add_node / set_node_value 的 properties 认的就是这些名字
+		TSharedPtr<FJsonObject> Editable = UAL_NodeEditableProperties(Cdo);
+		if (Editable->Values.Num() > 0)
+		{
+			NodeObj->SetObjectField(TEXT("properties"), Editable);
+		}
+
 		if (!Note.IsEmpty())
 		{
 			NodeObj->SetStringField(TEXT("note"), Note);
@@ -2914,6 +3286,15 @@ void FUAL_MaterialCommands::Handle_SearchMaterialNodes(
 	Data->SetNumberField(TEXT("total_types"), NodeTypeMap.Num());
 	Data->SetBoolField(TEXT("truncated"), MatchCount > NodesJson.Num());
 	Data->SetArrayField(TEXT("nodes"), NodesJson);
+
+	// 说明书里列着 Substrate 节点、项目却没开时，建的那一步必然 400 ——
+	// 在查的时候就把原因给出来，省一次撞墙
+	Data->SetBoolField(TEXT("substrate_enabled"), UAL_IsSubstrateEnabled());
+	const FString SubstrateReason = UAL_SubstrateUnavailableReason();
+	if (!SubstrateReason.IsEmpty() && Query.Contains(TEXT("Substrate"), ESearchCase::IgnoreCase))
+	{
+		Data->SetStringField(TEXT("substrate_note"), SubstrateReason);
+	}
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
@@ -2997,6 +3378,12 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 	{
 		ExpressionClass = *FoundClass;
 	}
+	else if (NodeType.StartsWith(TEXT("Substrate"), ESearchCase::IgnoreCase) && !UAL_WITH_SUBSTRATE)
+	{
+		// 5.4 以前表里没有这一族，回一句「版本不够」，别让人去比对建议列表
+		UAL_CommandUtils::SendError(RequestId, 400, UAL_SubstrateUnavailableReason());
+		return;
+	}
 	else
 	{
 		// 返回可用的节点类型列表
@@ -3010,6 +3397,16 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 		ErrorData->SetArrayField(TEXT("suggestions"), Suggestions);
 		UAL_CommandUtils::SendResponse(RequestId, 400, ErrorData);
 		return;
+	}
+
+	if (UAL_IsSubstrateClass(ExpressionClass))
+	{
+		const FString Reason = UAL_SubstrateUnavailableReason();
+		if (!Reason.IsEmpty())
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, Reason);
+			return;
+		}
 	}
 
 	/*
@@ -3159,6 +3556,30 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 	// 设置位置
 	NewExpression->MaterialExpressionEditorX = PosX;
 	NewExpression->MaterialExpressionEditorY = PosY;
+
+	/*
+	 * 节点属性（properties）在**加进图之前**设。
+	 *
+	 * 这时它还只是一个没人引用的新对象，设失败了取消事务、交给 GC 就干干净净；
+	 * 加进图之后再失败，就得在一张失败即停、不回滚的 apply_graph 里留下一个
+	 * 设了一半的节点。
+	 */
+	TSharedPtr<FJsonObject> PropertiesReadback;
+	const TSharedPtr<FJsonObject>* PropertiesObj = nullptr;
+	if (Payload->TryGetObjectField(TEXT("properties"), PropertiesObj) && PropertiesObj && (*PropertiesObj)->Values.Num() > 0)
+	{
+		FString PropertyError;
+		if (!UAL_ApplyNodeProperties(NewExpression, *PropertiesObj, PropertiesReadback, PropertyError))
+		{
+			Transaction.Cancel();
+			NewExpression->MarkAsGarbage();
+			const TArray<FString> Editable = UAL_JsonKeys(UAL_NodeEditableProperties(ExpressionClass->GetDefaultObject<UMaterialExpression>()));
+			UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+				TEXT("%s - node was not created. Settable properties on %s: %s"),
+				*PropertyError, *NodeType, Editable.Num() ? *FString::Join(Editable, TEXT(", ")) : TEXT("(none)")));
+			return;
+		}
+	}
 
 	// 添加到材质
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
@@ -3531,6 +3952,12 @@ void FUAL_MaterialCommands::Handle_AddMaterialNode(
 		Data->SetField(TEXT("value"), CurrentValue);
 	}
 
+	// 设过的属性回读值（引擎侧的，不是入参 —— 枚举会被规范成引擎的写法）
+	if (PropertiesReadback.IsValid() && PropertiesReadback->Values.Num() > 0)
+	{
+		Data->SetObjectField(TEXT("properties"), PropertiesReadback);
+	}
+
 	UE_LOG(LogUALMaterial, Log, TEXT("Added node %s to material %s"),
 		*NodeId, *Material->GetName());
 
@@ -3635,6 +4062,56 @@ void FUAL_MaterialCommands::Handle_ConnectMaterialPins(
 			// 而引擎这边分不清大小写并没有任何好处
 			if (!bConnected && Pin.Input && FString(Pin.Name).Equals(TargetPin, ESearchCase::IgnoreCase))
 			{
+				// FrontMaterial 始终在表里（读图和清理要用），但没开 Substrate 时连上去是白连
+				if (FCString::Stricmp(Pin.Name, TEXT("FrontMaterial")) == 0)
+				{
+					const FString Reason = UAL_SubstrateUnavailableReason();
+					if (!Reason.IsEmpty())
+					{
+						Transaction.Cancel();
+						UAL_CommandUtils::SendError(RequestId, 400, Reason);
+						return;
+					}
+#if UAL_WITH_SUBSTRATE
+					/*
+					 * 数值接进 FrontMaterial 连得上，要到编译才炸（"Could not find any Substrate
+					 * operators or BSDFs" + "Cannot force a cast between non-numeric types"），
+					 * 真机试过。只挡明确是数值、又不带 Substrate 位的；类型读不出来的
+					 * （函数调用、重路由）放行，让编译器判。
+					 */
+					const uint32 SourceType = SourceExpression->GetOutputs().IsValidIndex(SourceOutputIndex)
+						? UAL_OutputTypeOf(SourceExpression, SourceOutputIndex) : 0u;
+					if ((SourceType & MCT_Substrate) == 0 && (SourceType & MCT_Float) != 0)
+					{
+						Transaction.Cancel();
+						UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+							TEXT("FrontMaterial takes Substrate data, but %s outputs %s. Feed the value into a Substrate "
+								 "BSDF first (e.g. SubstrateSlabBSDF.Diffuse Albedo, or SubstrateUnlitBSDF.EmissiveColor) "
+								 "and connect that BSDF's Out to Material.FrontMaterial."),
+							*SourceExpression->GetName(), *UAL_MaterialTypeName(SourceType)));
+						return;
+					}
+#endif
+				}
+				if (UAL_RootPinIgnoredBySubstrate(Material, Pin.Name))
+				{
+					TArray<FString> ActivePins;
+					for (const FUALRootInput& Other : RootPins)
+					{
+						if (!UAL_RootPinIgnoredBySubstrate(Material, Other.Name))
+						{
+							ActivePins.Add(Other.Name);
+						}
+					}
+					Transaction.Cancel();
+					UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+						TEXT("Substrate is enabled, and the Material output's %s pin is ignored for this material "
+							 "(with its current domain / blend mode) - a link there would have no effect. "
+							 "Shade through Substrate nodes instead: e.g. SubstrateSlabBSDF (Diffuse Albedo, F0, Roughness, "
+							 "Normal, Emissive Color ...) -> Material.FrontMaterial. Pins that do take effect here: %s"),
+						Pin.Name, *FString::Join(ActivePins, TEXT(", "))));
+					return;
+				}
 				Pin.Input->Connect(SourceOutputIndex, SourceExpression);
 				bConnected = true;
 			}
@@ -4025,19 +4502,62 @@ void FUAL_MaterialCommands::Handle_SetMaterialNodeValue(
 		Data->SetField(TEXT("old_value"), OldValue);
 	}
 
-	FString ApplyError;
-	const bool bModified = ApplyValueToNode(
-		TargetExpression, Payload->TryGetField(TEXT("value")), ApplyError);
+	/*
+	 * `value` 和 `properties` 至少给一个。只给 properties 是正常用法：
+	 * Slab、Vertical Layer 这些节点根本没有「值」，要改的全是细节面板里的设置。
+	 *
+	 * properties 先设：它失败时 value 还没动，整个请求可以干净地 400。
+	 * 反过来的话 value 已经写进去了，Cancel 事务并不会把内存里的值改回来。
+	 */
+	const TSharedPtr<FJsonValue> ValueField = Payload->TryGetField(TEXT("value"));
+	const TSharedPtr<FJsonObject>* PropertiesObj = nullptr;
+	const bool bHasProperties = Payload->TryGetObjectField(TEXT("properties"), PropertiesObj) && PropertiesObj &&
+		(*PropertiesObj)->Values.Num() > 0;
 
-	if (!bModified)
+	if (!ValueField.IsValid() && !bHasProperties)
 	{
-		// 这里原来无论如何都回 200。事务已经 Cancel 了，却还告诉调用方成功 ——
-		// 于是「把 Constant3Vector 设成红色」这种当时根本做不到的事，
-		// 每一次都被汇报成做到了，用户拿到一个黑材质而没有任何线索。
 		Transaction.Cancel();
-		UAL_CommandUtils::SendError(RequestId, 400,
-			FString::Printf(TEXT("Cannot set value on node %s: %s"), *NodeId, *ApplyError));
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Nothing to set: pass value, properties, or both"));
 		return;
+	}
+
+	if (bHasProperties)
+	{
+		TSharedPtr<FJsonObject> Readback;
+		FString PropertyError;
+		if (!UAL_ApplyNodeProperties(TargetExpression, *PropertiesObj, Readback, PropertyError))
+		{
+			/*
+			 * 前面几条可能已经写进内存了（Cancel 不回滚内存），所以这里要把
+			 * 「部分写入」说出来，而不是装作什么都没发生。
+			 */
+			Transaction.Cancel();
+			const TArray<FString> Editable = UAL_JsonKeys(UAL_NodeEditableProperties(TargetExpression->GetClass()->GetDefaultObject<UMaterialExpression>()));
+			UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+				TEXT("Cannot set properties on node %s: %s. Properties listed before the failing one may already be "
+					 "changed - re-read with material_get_graph. Settable properties: %s"),
+				*NodeId, *PropertyError, Editable.Num() ? *FString::Join(Editable, TEXT(", ")) : TEXT("(none)")));
+			return;
+		}
+		Data->SetObjectField(TEXT("properties"), Readback);
+	}
+
+	if (ValueField.IsValid())
+	{
+		FString ApplyError;
+		const bool bModified = ApplyValueToNode(TargetExpression, ValueField, ApplyError);
+
+		if (!bModified)
+		{
+			// 这里原来无论如何都回 200。事务已经 Cancel 了，却还告诉调用方成功 ——
+			// 于是「把 Constant3Vector 设成红色」这种当时根本做不到的事，
+			// 每一次都被汇报成做到了，用户拿到一个黑材质而没有任何线索。
+			Transaction.Cancel();
+			UAL_CommandUtils::SendError(RequestId, 400,
+				FString::Printf(TEXT("Cannot set value on node %s: %s%s"), *NodeId, *ApplyError,
+					bHasProperties ? TEXT(" (the properties in this request were already applied)") : TEXT("")));
+			return;
+		}
 	}
 
 	if (TSharedPtr<FJsonValue> NewValue = ReadNodeValue(TargetExpression))
@@ -4446,6 +4966,28 @@ bool FUAL_MaterialCommands::ParseBlendMode(const FString& Value, EBlendMode& Out
 		OutMode = BLEND_Modulate;
 		return true;
 	}
+	if (LowerValue == TEXT("alphacomposite") || LowerValue == TEXT("5"))
+	{
+		OutMode = BLEND_AlphaComposite;
+		return true;
+	}
+	if (LowerValue == TEXT("alphaholdout") || LowerValue == TEXT("6"))
+	{
+		OutMode = BLEND_AlphaHoldout;
+		return true;
+	}
+#if UAL_WITH_SUBSTRATE
+	/*
+	 * 彩色透射（彩色玻璃）。引擎枚举上写着 SUBSTRATE_ONLY：没开 Substrate 时
+	 * 设上去不报错，渲染却不是那回事。所以没开就当成不认识，
+	 * 让调用方从 valid_values 里看到它不在（GetValidBlendModes 同样按开关列）。
+	 */
+	if ((LowerValue == TEXT("translucentcoloredtransmittance") || LowerValue == TEXT("7")) && UAL_IsSubstrateEnabled())
+	{
+		OutMode = BLEND_TranslucentColoredTransmittance;
+		return true;
+	}
+#endif
 	
 	return false;
 }
@@ -4485,7 +5027,13 @@ bool FUAL_MaterialCommands::ParseShadingModel(const FString& Value, EMaterialSha
 
 TArray<FString> FUAL_MaterialCommands::GetValidBlendModes()
 {
-	return { TEXT("Opaque"), TEXT("Masked"), TEXT("Translucent"), TEXT("Additive"), TEXT("Modulate") };
+	TArray<FString> Modes = { TEXT("Opaque"), TEXT("Masked"), TEXT("Translucent"), TEXT("Additive"), TEXT("Modulate"),
+		TEXT("AlphaComposite"), TEXT("AlphaHoldout") };
+	if (UAL_IsSubstrateEnabled())
+	{
+		Modes.Add(TEXT("TranslucentColoredTransmittance"));
+	}
+	return Modes;
 }
 
 TArray<FString> FUAL_MaterialCommands::GetValidShadingModels()
@@ -5746,6 +6294,13 @@ void FUAL_MaterialCommands::Handle_DeleteUnusedMaterialNodes(const TSharedPtr<FJ
 		}
 	}
 
+	// node_id 必须和 get_graph / add_node 同一套（数组下标派生）。原来回的是
+	// `GetName()` —— 对象名的后缀和下标对不上（add_node 回 `..._4`，这里报 `..._0`），
+	// 模型拿它去 delete_node / set_node_value，FindExpressionById 按下标就命中了**别的**节点。
+	// 编号要在删除之前取：删完下标就变了
+	TMap<UMaterialExpression*, FString> ExpressionToId;
+	UAL_BuildExpressionIds(Material, ExpressionToId);
+
 	TArray<UMaterialExpression*> Unused;
 	TArray<TSharedPtr<FJsonValue>> UnusedJson;
 	for (UMaterialExpression* Expression : UAL_AllExpressions(Material))
@@ -5756,8 +6311,11 @@ void FUAL_MaterialCommands::Handle_DeleteUnusedMaterialNodes(const TSharedPtr<FJ
 		}
 		Unused.Add(Expression);
 
+		const FString* FoundId = ExpressionToId.Find(Expression);
 		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-		Obj->SetStringField(TEXT("node_id"), Expression->GetName());
+		Obj->SetStringField(TEXT("node_id"), FoundId ? *FoundId : Expression->GetName());
+		// 稳定 id：dry_run 和真删之间图要是动过，下标会移位，guid 不会
+		Obj->SetStringField(TEXT("guid"), Expression->GetMaterialExpressionId().ToString());
 		Obj->SetStringField(TEXT("class"), Expression->GetClass()->GetName());
 		UnusedJson.Add(MakeShared<FJsonValueObject>(Obj));
 	}
@@ -5780,7 +6338,8 @@ void FUAL_MaterialCommands::Handle_DeleteUnusedMaterialNodes(const TSharedPtr<FJ
 			 * `UMaterialExpressionCustomOutput` 那一族（ClearCoatNormal、BentNormal、
 			 * ThinTranslucent…）压根不接主节点，编译器是扫 `GetExpressions()` 找到它们的；
 			 * `UAL_CollectRootInputs` 那张表也还缺 Anisotropy / Tangent / Refraction /
-			 * PixelDepthOffset / CustomizedUVs / FrontMaterial（5.4+ Substrate 唯一那根）。
+			 * PixelDepthOffset / CustomizedUVs（FrontMaterial 已补上 —— 缺它的时候，
+			 * 这里会把整张 Substrate 图当成没用上的节点一起摘掉）。
 			 *
 			 * 判错一个节点，只从数组里摘掉还能靠撤销捞回来；再 MarkAsGarbage
 			 * 就是下一次 GC 之后彻底没了。判据补齐之前，这一步按可恢复的来。

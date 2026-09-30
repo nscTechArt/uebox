@@ -70,7 +70,20 @@ const NAMESPACE = 'ue.material'
  * （正确拼法是 `Translucent`）的下场是「设置成功」四个字加一个仍然不透明的材质。
  * 卡在 schema 上，模型至少当场就能看见自己写错了。
  */
-const BLEND_MODES = ['Opaque', 'Masked', 'Translucent', 'Additive', 'Modulate'] as const
+/**
+ * 混合模式。TranslucentColoredTransmittance 只有开了 Substrate 的项目（5.4+）才认 ——
+ * 没开时插件当成不认识回失败，valid_values 里也不会列它（引擎枚举上就写着 SUBSTRATE_ONLY）。
+ */
+const BLEND_MODES = [
+  'Opaque',
+  'Masked',
+  'Translucent',
+  'Additive',
+  'Modulate',
+  'AlphaComposite',
+  'AlphaHoldout',
+  'TranslucentColoredTransmittance'
+] as const
 const SHADING_MODELS = [
   'DefaultLit',
   'Unlit',
@@ -621,7 +634,10 @@ const setMaterialProperty = defineUeTool<z.ZodTypeAny, SetMaterialPropertyRespon
 改完要 material_compile 才会生效。
 
 做半透明要**两步**：blend_mode 设成 Translucent，再把不透明度接到主节点的 Opacity 引脚。
-只设 blend_mode 而不接 Opacity，材质依然是全不透明的 —— 这一步漏掉不会有任何报错。`,
+只设 blend_mode 而不接 Opacity，材质依然是全不透明的 —— 这一步漏掉不会有任何报错。
+
+Substrate 材质（FrontMaterial 接了东西）不走 Opacity 引脚：不透明度是 SubstrateWeight 的 Weight，
+彩色玻璃用 TranslucentColoredTransmittance（只有开了 Substrate 才认）。`,
   input: z.object({
     path: z.string().describe('母材质路径，如 /Game/Materials/M_Glass'),
     properties: z
@@ -700,6 +716,8 @@ interface GraphNode {
   reroute_name?: string
   reroute_declaration_node?: string
   reroute_error?: string
+  /** 和默认值不同的节点设置（Slab 的 SubSurfaceType、算子的 bUseParameterBlending……） */
+  properties?: Record<string, unknown>
 }
 
 interface GetGraphResponse {
@@ -716,10 +734,14 @@ interface GetGraphResponse {
     to_input?: string
     from_type?: string
     to_type?: string
+    /** 接在主节点上、但 Substrate 下引擎不看的线（BaseColor 那一排） */
+    ignored_by_substrate?: boolean
   }>
   connection_count?: number
   material_pins?: string[]
   use_material_attributes?: boolean
+  /** 这个编辑器里 Substrate 是否生效。老插件不回 */
+  substrate_enabled?: boolean
   note?: string
 }
 
@@ -757,6 +779,8 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
   图上完全看不出来，只有对比类型才看得见。
 - **use_material_attributes**：为 true 时主节点上只有 MaterialAttributes 那一根有效，
   往 BaseColor 上连线会「成功」但毫无效果。
+- **Substrate**：FrontMaterial 接了东西时着色只看它，BaseColor 那一排上残留的线
+  会标「Substrate 下不生效」。「主节点可用引脚」只列当前真正生效的那几根。
 - **reroute_declaration_node**：命名重定向的 usage 指向哪个 declaration。
   顺着连线往回追，追到 usage 不算断，接着从 declaration 往上走。
 
@@ -894,6 +918,13 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
 
         const parts = [`  ${node.node_id}`, node.class ?? '?']
         if (value) parts.push(value)
+        // 只回和默认值不同的设置，所以有就一定是有人改过的，值得印
+        const settings = Object.entries(node.properties ?? {})
+        if (settings.length > 0) {
+          parts.push(
+            `设置: ${settings.map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')}`
+          )
+        }
         if (inputs) parts.push(`in: ${inputs}`)
         if (outputs) parts.push(`out: ${outputs}`)
         if (node.guid) parts.push(node.guid)
@@ -1032,7 +1063,9 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
         // 而引脚名恰恰是重接时要填的那个词
         const fromPin =
           conn.from_pin ?? (conn.from_output !== undefined ? `<${conn.from_output}>` : '?')
-        const line = `  ${conn.from_node ?? '?'}.${fromPin} → ${conn.to_node ?? '?'}.${conn.to_input ?? '?'}${types}`
+        // 连着却不起作用的线必须点破，否则读图的人会以为 Metallic 那根还在生效
+        const ignored = conn.ignored_by_substrate ? '  ⚠️ Substrate 下不生效' : ''
+        const line = `  ${conn.from_node ?? '?'}.${fromPin} → ${conn.to_node ?? '?'}.${conn.to_input ?? '?'}${types}${ignored}`
         if (connChars + line.length + 1 > CONNECTION_CHAR_BUDGET) break
         lines.push(line)
         connChars += line.length + 1
@@ -1049,6 +1082,12 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
 
     if (r.material_pins?.length) {
       lines.push('', `主节点可用引脚：${r.material_pins.join('、')}`)
+    }
+    if (r.substrate_enabled) {
+      lines.push(
+        '本项目开着 Substrate：Substrate 节点的输出接 Material.FrontMaterial；' +
+          'FrontMaterial 接上之后 BaseColor 那一排不再生效。'
+      )
     }
 
     lines.push(
@@ -1153,16 +1192,34 @@ TextureSample、TextureObject、TextureCoordinate、ComponentMask。
 不要再用 DotProduct 绕。**通道只能升序不重复** —— "GR" / "RR" 会被拒，那个节点底下只有四个开关，换不了序。**回读一律用 RGBA 拼法**：传 "XY" 回来的是 "RG"，
 那是同一件事，不是没设上。
 
-返回体里的 new_value 是**回读**出来的实际值，不是把入参原样回显 —— 可以直接拿它确认改动落上了。`,
-  input: z.object({
-    path: z.string().describe('材质资产路径，如 /Game/Materials/M_Wood'),
-    node_id: z.string().describe('节点 ID（引擎生成，猜不出来 —— 用 material_get_graph 读）'),
-    value: MaterialValueSchema.describe(
-      '要设置的值：数值（标量节点）、贴图路径字符串（贴图节点）、' +
-        '{r,g,b,a?} 或 {x,y,z?,w?} 或 [r,g,b] 数组（颜色/向量节点）、' +
-        '{u_tiling,v_tiling}（TextureCoordinate）。给颜色节点一个数值会按灰度铺开'
-    )
-  }),
+返回体里的 new_value 是**回读**出来的实际值，不是把入参原样回显 —— 可以直接拿它确认改动落上了。
+
+**节点设置**（细节面板里那些，不是引脚）走 properties，键是 C++ 属性名：
+Slab 的 SubSurfaceType / SubsurfaceProfile / SpecularProfile，算子的 bUseParameterBlending，
+Select 的 Threshold。能设什么看 material_search_nodes 的 properties。
+value 和 properties 至少给一个；回执里的 properties 同样是引擎回读值。`,
+  input: z
+    .object({
+      path: z.string().describe('材质资产路径，如 /Game/Materials/M_Wood'),
+      node_id: z.string().describe('节点 ID（引擎生成，猜不出来 —— 用 material_get_graph 读）'),
+      value: MaterialValueSchema.optional().describe(
+        '要设置的值：数值（标量节点）、贴图路径字符串（贴图节点）、' +
+          '{r,g,b,a?} 或 {x,y,z?,w?} 或 [r,g,b] 数组（颜色/向量节点）、' +
+          '{u_tiling,v_tiling}（TextureCoordinate）。给颜色节点一个数值会按灰度铺开'
+      ),
+      properties: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .optional()
+        .describe(
+          '节点设置，如 { SubSurfaceType: "MSS_SimpleVolume" } 或 { bUseParameterBlending: true }'
+        )
+    })
+    .refine(
+      (p) => p.value !== undefined || (p.properties && Object.keys(p.properties).length > 0),
+      {
+        message: 'value 和 properties 至少给一个'
+      }
+    ),
   toParams: toMaterialPath
 })
 
@@ -1365,7 +1422,35 @@ const deleteUnusedMaterialNodes = defineUeTool({
       .default(true)
       .describe('true（默认）只列出不删除；确认名单之后传 false 才真的删')
   }),
-  toParams: toMaterialPath
+  toParams: toMaterialPath,
+  /*
+   * 名单里的 node_id 和 material_get_graph / material_add_node 同一套（数组下标派生），
+   * 可以直接喂给 material_delete_node / material_set_node_value。
+   * 旧插件回的是对象名（`..._0`），和下标 id（`..._4`）撞名时会指到别的节点 ——
+   * 所以 guid 一起列出来，真删之前图动过就用 guid。
+   */
+  toOutcome: (r: {
+    dry_run?: boolean
+    unused_count?: number
+    deleted_count?: number
+    unused?: Array<{ node_id?: string; guid?: string; class?: string }>
+  }) => {
+    const unused = r.unused ?? []
+    const count = r.unused_count ?? unused.length
+    const lines = unused.map(
+      (n) => `- ${n.node_id}（${n.class ?? '?'}${n.guid ? `，guid ${n.guid}` : ''}）`
+    )
+    if (count === 0) {
+      return { text: '没有死节点：所有节点都连到了材质输出。', details: r }
+    }
+    const head = r.dry_run
+      ? `找到 ${count} 个没用上的节点，dry_run，一个都没删：`
+      : `已删除 ${r.deleted_count ?? 0} / ${count} 个没用上的节点（下面是删除前的 id，已失效）：`
+    const tail = r.dry_run
+      ? '\n确认名单里没有你还要用的节点，再传 dry_run=false。删之前图要是改过，用 material_get_graph 重读 id。'
+      : '\n删完用 material_compile 确认图还编得过。'
+    return { text: [head, ...lines].join('\n') + tail, details: r }
+  }
 })
 
 /**

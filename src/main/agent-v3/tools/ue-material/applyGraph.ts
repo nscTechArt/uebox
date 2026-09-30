@@ -157,7 +157,34 @@ const NODE_TYPES = [
   'CollectionParameter',
   // 调用材质函数。要配套传 function_path —— 不传的话节点一个引脚都没有，
   // 症状要到连线那一步才暴露
-  'MaterialFunctionCall'
+  'MaterialFunctionCall',
+  /*
+   * Substrate（UE 5.4+，项目要开 r.Substrate）。插件按引擎版本编进去：
+   * SubstrateSelect 5.6 起才有、SubstrateToonBSDF 5.8 起才有。版本不够或项目
+   * 没开 Substrate 时，插件回的 400 会直接说原因和怎么开，所以这里不按版本裁枚举 ——
+   * 主进程并不知道连着的是哪个引擎，裁了反而让 5.8 的用户用不上。
+   */
+  'SubstrateSlabBSDF',
+  'SubstrateSimpleClearCoatBSDF',
+  'SubstrateUnlitBSDF',
+  'SubstrateHairBSDF',
+  'SubstrateEyeBSDF',
+  'SubstrateSingleLayerWaterBSDF',
+  'SubstrateVolumetricFogCloudBSDF',
+  'SubstrateToonBSDF',
+  'SubstrateLightFunction',
+  'SubstratePostProcess',
+  'SubstrateUI',
+  'SubstrateConvertToDecal',
+  'SubstrateHorizontalMixing',
+  'SubstrateVerticalLayering',
+  'SubstrateAdd',
+  'SubstrateWeight',
+  'SubstrateSelect',
+  'SubstrateMetalnessToDiffuseAlbedoF0',
+  'SubstrateTransmittanceToMFP',
+  'SubstrateHazinessToSecondaryRoughness',
+  'SubstrateThinFilm'
 ] as const
 
 export interface ApplyGraphNodeSpec {
@@ -169,7 +196,11 @@ export interface ApplyGraphNodeSpec {
   function_path?: string
   collection_path?: string
   group_name?: string
+  properties?: Record<string, NodePropertyValue>
 }
+
+/** 节点设置的值。枚举写引擎的枚举名（MSS_SimpleVolume），资产写路径 */
+export type NodePropertyValue = string | number | boolean
 
 interface AddNodeResponse {
   node_id?: string
@@ -185,6 +216,8 @@ interface AddNodeResponse {
   value?: unknown
   collection_applied?: boolean
   collection_error?: string
+  /** 设过的节点属性，引擎写完之后读回来的值 */
+  properties?: Record<string, unknown>
 }
 
 interface GraphResponse {
@@ -212,6 +245,8 @@ export interface ApplyGraphDetails {
    * guid 跟着对象走，引擎自己就是用它认节点的。
    */
   node_guids: Record<string, string>
+  /** 本地 id → 节点属性的引擎回读值。只收传了 properties 的节点 */
+  node_properties: Record<string, Record<string, unknown>>
   created: number
   connected: number
   tidied?: number
@@ -292,7 +327,15 @@ const NodeSchema = z.object({
   texture_path: z.string().optional().describe('TextureSample 的贴图资产路径'),
   function_path: z.string().optional().describe('MaterialFunctionCall 的函数资产路径'),
   collection_path: z.string().optional().describe('CollectionParameter 的 MPC 资产路径'),
-  group_name: z.string().optional().describe('参数分组名')
+  group_name: z.string().optional().describe('参数分组名'),
+  properties: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .optional()
+    .describe(
+      '节点细节面板里的设置（不是引脚，也不是 value），键是 C++ 属性名。' +
+        '如 Slab 的 { SubSurfaceType: "MSS_SimpleVolume" }、{ SubsurfaceProfile: "/Game/SSS/SP_Skin" }，' +
+        '算子的 { bUseParameterBlending: true }。能设哪些、默认是什么，material_search_nodes 的 properties 里有'
+    )
 })
 
 const InputSchema = z.object({
@@ -635,7 +678,8 @@ async function addNodes(
         ...(node.texture_path !== undefined ? { texture_path: node.texture_path } : {}),
         ...(node.function_path !== undefined ? { function_path: node.function_path } : {}),
         ...(node.collection_path !== undefined ? { collection_path: node.collection_path } : {}),
-        ...(node.group_name !== undefined ? { group_name: node.group_name } : {})
+        ...(node.group_name !== undefined ? { group_name: node.group_name } : {}),
+        ...(node.properties !== undefined ? { properties: node.properties } : {})
       },
       { signal }
     )
@@ -656,6 +700,21 @@ async function addNodes(
           ? `${node.texture_path} → 实际去找的是 ${r.resolved_texture_path}`
           : node.texture_path
       details.warnings.push(`${node.id}：贴图没设上（${tried} 加载失败），节点是空的。`)
+    }
+    /*
+     * 属性只信引擎回读。设不上的话插件整条 400、节点不建，走不到这里；
+     * 走到这里却没有回读，说明插件太老、根本不认 properties —— 那是**静默丢弃**，
+     * 必须说出来，不然 SimpleVolume 没设上的玻璃会被当成设好了。
+     */
+    if (node.properties && Object.keys(node.properties).length > 0) {
+      if (r.properties) {
+        details.node_properties[node.id] = r.properties
+      } else {
+        details.warnings.push(
+          `${node.id}（node_id=${r.node_id}）：properties 没有回读 —— 这个插件版本不认节点属性，` +
+            '那几项设置**没设上**。升级插件后用 material_set_node_value 补设。'
+        )
+      }
     }
     if (r.collection_applied === false) {
       details.warnings.push(
@@ -794,6 +853,12 @@ TextureSample 的 UV 输入叫 **Coordinates** 而不是 UVs。
 不带名字的多输出节点（Constant3Vector 等）也可以直接写通道名连出去，
 如 from: "c3.G"。不要用 DotProduct 点乘 (1,0) 那种绕法，那会让节点数翻倍。
 
+【Substrate（UE 5.4+）】
+Substrate 节点的输出一律接 Material.FrontMaterial，如 from: "slab.Out", to: "Material.FrontMaterial"。
+FrontMaterial 接上之后 BaseColor/Metallic 那一排主节点引脚不再生效（引擎会拒）。
+节点细节面板里的设置（Slab 的 SubSurfaceType、算子的 bUseParameterBlending）写在节点的 properties 里。
+做 Substrate 材质前先加载 ue-material-substrate 技能。
+
 【排版】
 默认排完版（tidy=true）—— 只挪位置，不动逻辑。用户手摆过的图不想被重排的话
 传 tidy=false，但那样新节点会落在原点上，记得自己调 material_tidy_graph。
@@ -812,6 +877,7 @@ TextureSample 的 UV 输入叫 **Coordinates** 而不是 UVs。
         path: input.path,
         node_ids: {},
         node_guids: {},
+        node_properties: {},
         created: 0,
         connected: 0,
         warnings: []
@@ -960,6 +1026,23 @@ TextureSample 的 UV 输入叫 **Coordinates** 而不是 UVs。
         lines.push(
           '稳定 id（中间做过删除或撤销之后用它指节点，node_id 会位移、guid 不会）：' +
             guids.map(([local, guid]) => `${local}=${guid}`).join('、')
+        )
+      }
+
+      // 设过的节点属性照引擎回读报 —— 枚举会被规范成引擎写法，模型要看到的是落地的值
+      const props = Object.entries(details.node_properties)
+      if (props.length > 0) {
+        lines.push(
+          '节点设置（引擎回读）：' +
+            props
+              .map(
+                ([local, p]) =>
+                  `${local} ` +
+                  Object.entries(p)
+                    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+                    .join(', ')
+              )
+              .join('；')
         )
       }
 
