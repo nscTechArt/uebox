@@ -11,7 +11,7 @@ describe('ImportProjectModal visual hierarchy', () => {
   it('uses one calm, keyboard-accessible project list instead of competing cards', () => {
     expect(source).toContain('class="project-list-inner"')
     expect(source).toContain('class="project-row"')
-    expect(source).toContain(':disabled="project.isImported"')
+    expect(source).toContain(':disabled="project.isImported && !targetCollectionName"')
     expect(source).toMatch(/\.project-row\s*\{[\s\S]*border-bottom:/)
     expect(source).toMatch(/\.project-row[\s\S]*&:focus-visible/)
     expect(source).not.toContain('grid-template-columns: repeat(2')
