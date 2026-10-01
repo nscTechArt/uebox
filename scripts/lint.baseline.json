@@ -720,7 +720,7 @@
     "warnings": 0
   },
   "src/renderer/src/views/Home/components/Project/ProjectSection.vue": {
-    "errors": 21,
+    "errors": 20,
     "warnings": 0
   },
   "src/renderer/src/views/Home/components/Project/RenameProjectModal.vue": {
