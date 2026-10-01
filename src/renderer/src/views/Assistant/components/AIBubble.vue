@@ -574,16 +574,7 @@ import {
   fileDiff,
   type FileChange
 } from '../../../../../shared/fileChange'
-import {
-  computed,
-  watch,
-  onMounted,
-  onBeforeUnmount,
-  nextTick,
-  ref,
-  shallowRef,
-  inject
-} from 'vue'
+import { computed, watch, onMounted, onBeforeUnmount, nextTick, ref, shallowRef, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import AgentProcessLog from './AgentProcessLog.vue'

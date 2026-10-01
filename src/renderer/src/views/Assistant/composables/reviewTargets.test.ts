@@ -53,7 +53,10 @@ describe('reviewTargetsFrom', () => {
 
 describe('shouldAutoReview', () => {
   const targets = (count: number): ReturnType<typeof reviewTargetsFrom> =>
-    Array.from({ length: count }, (_, i) => ({ path: `/Game/A/M_${i}`, action: 'modified' as const }))
+    Array.from({ length: count }, (_, i) => ({
+      path: `/Game/A/M_${i}`,
+      action: 'modified' as const
+    }))
 
   it('没改引擎资产就不跑 —— 引擎那边一个问题都答不上来', () => {
     expect(shouldAutoReview([])).toBe(false)

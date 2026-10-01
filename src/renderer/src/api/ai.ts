@@ -40,8 +40,7 @@ async function generateImageWithLocalModel(params: ImageGenerateParams): Promise
   return {
     ok: true,
     images: result.data.images.map((image) => ({
-      url:
-        toLocalResourceUrl(image.filePath) ?? `data:${image.mediaType};base64,${image.base64}`
+      url: toLocalResourceUrl(image.filePath) ?? `data:${image.mediaType};base64,${image.base64}`
     }))
   }
 }

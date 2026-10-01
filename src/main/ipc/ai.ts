@@ -62,7 +62,11 @@ async function saveToAigcLibrary(
 ): Promise<Array<GeneratedImageData & { filePath?: string }>> {
   const { saveAIGCAssetFromBuffer } = await import('../services/aigc/assetSaver')
   // 括号也去掉：路径要进 markdown 的 `![](...)`，`)` 会把链接提前截断
-  const baseName = prompt.replace(/[\\/:*?"<>|()[\]\s]+/g, ' ').trim().slice(0, 40) || undefined
+  const baseName =
+    prompt
+      .replace(/[\\/:*?"<>|()[\]\s]+/g, ' ')
+      .trim()
+      .slice(0, 40) || undefined
   return Promise.all(
     images.map(async (image, index) => {
       const subtype = /^image\/([a-z0-9.+-]+)/i.exec(image.mediaType)?.[1]?.toLowerCase()

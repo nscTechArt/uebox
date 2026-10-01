@@ -120,7 +120,10 @@ describe('findRequestBefore', () => {
 describe('reviewFindingText', () => {
   it('编译报错带了引擎原文就用带原文的那句', () => {
     expect(
-      reviewFindingText(finding({ code: 'compile-error', severity: 'error', detail: '引脚没连' }), t)
+      reviewFindingText(
+        finding({ code: 'compile-error', severity: 'error', detail: '引脚没连' }),
+        t
+      )
     ).toBe('assistant.review.compileErrorDetail(detail=引脚没连)')
   })
 
