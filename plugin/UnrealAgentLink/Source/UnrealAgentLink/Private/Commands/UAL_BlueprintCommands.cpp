@@ -923,18 +923,23 @@ static void UAL_AnnotateNodeForRewrite(UEdGraphNode* Node, const TSharedPtr<FJso
 		return;
 	}
 
-	if (const UK2Node_VariableGet* Getter = Cast<UK2Node_VariableGet>(Node))
+	// 读写别的蓝图的变量要带上类名（WBP_HUD_C.Health），不然写回去就变成
+	// 在自己身上找这个变量 —— 找不到被拒，或者更糟，正好自己也有个同名的
+	if (const UK2Node_Variable* VarNode = Cast<UK2Node_Variable>(Node))
 	{
-		NodeObj->SetStringField(TEXT("write_as"), TEXT("VariableGet"));
-		NodeObj->SetStringField(TEXT("member_name"), Getter->VariableReference.GetMemberName().ToString());
-		return;
-	}
-
-	if (const UK2Node_VariableSet* Setter = Cast<UK2Node_VariableSet>(Node))
-	{
-		NodeObj->SetStringField(TEXT("write_as"), TEXT("VariableSet"));
-		NodeObj->SetStringField(TEXT("member_name"), Setter->VariableReference.GetMemberName().ToString());
-		return;
+		const bool bIsGet = Node->IsA<UK2Node_VariableGet>();
+		if (bIsGet || Node->IsA<UK2Node_VariableSet>())
+		{
+			const FString VarName = VarNode->VariableReference.GetMemberName().ToString();
+			UClass* OwnerClass = VarNode->VariableReference.IsSelfContext()
+				? nullptr
+				: VarNode->VariableReference.GetMemberParentClass(VarNode->GetBlueprintClassFromNode());
+			NodeObj->SetStringField(TEXT("write_as"), bIsGet ? TEXT("VariableGet") : TEXT("VariableSet"));
+			NodeObj->SetStringField(TEXT("member_name"), OwnerClass
+				? FString::Printf(TEXT("%s.%s"), *OwnerClass->GetName(), *VarName)
+				: VarName);
+			return;
+		}
 	}
 
 	if (const UK2Node_InputAction* InputNode = Cast<UK2Node_InputAction>(Node))
@@ -2644,6 +2649,108 @@ static FMulticastDelegateProperty* UAL_FindDelegateProperty(
 }
 
 /**
+ * 把 `ClassName.VarName` 里的类名解析成类，读写别的蓝图的变量用。
+ *
+ * 比函数那条路（只按已加载的类名精确查）宽，因为调用方最自然的写法是蓝图
+ * 资产名 `WBP_HUD`，而类名叫 `WBP_HUD_C`，那个蓝图还可能压根没加载。
+ * 依次试：自己 → 已加载的类（原名 / 补 _C）→ 按资产名或路径加载蓝图。
+ *
+ * 资产名要整名相等：UAL_LoadBlueprintByPathOrName 末尾那步是路径包含匹配，
+ * `HUD` 会命中 `WBP_HUD`，在这里就等于悄悄读了另一个蓝图的变量。
+ */
+static UClass* UAL_ResolveVariableOwnerClass(UBlueprint* Blueprint, const FString& ClassPart, FString& OutError)
+{
+	if (Blueprint && Blueprint->GeneratedClass &&
+		(ClassPart == Blueprint->GeneratedClass->GetName() || ClassPart == Blueprint->GetName()))
+	{
+		return Blueprint->GeneratedClass;
+	}
+
+	FString ClassError;
+	if (UClass* Found = UAL_CommandUtils::ResolveClassFromIdentifier(ClassPart, UObject::StaticClass(), ClassError))
+	{
+		return Found;
+	}
+
+	const bool bHasClassSuffix = ClassPart.EndsWith(TEXT("_C"));
+	if (!bHasClassSuffix && !ClassPart.StartsWith(TEXT("/")))
+	{
+		FString Ignored;
+		if (UClass* Found = UAL_CommandUtils::ResolveClassFromIdentifier(ClassPart + TEXT("_C"), UObject::StaticClass(), Ignored))
+		{
+			return Found;
+		}
+	}
+
+	FString AssetName = ClassPart;
+	if (bHasClassSuffix)
+	{
+		AssetName.LeftChopInline(2);
+	}
+	UBlueprint* OwnerBP = nullptr;
+	FString ResolvedPath;
+	if (UAL_LoadBlueprintByPathOrName(AssetName, OwnerBP, ResolvedPath) && OwnerBP &&
+		(AssetName.StartsWith(TEXT("/")) || OwnerBP->GetName().Equals(AssetName, ESearchCase::IgnoreCase)))
+	{
+		if (OwnerBP->GeneratedClass)
+		{
+			return OwnerBP->GeneratedClass;
+		}
+		OutError = FString::Printf(TEXT("Blueprint %s has no generated class yet - compile it once, then retry"), *OwnerBP->GetName());
+		return nullptr;
+	}
+
+	// 死包里的同名类那种错误比「找不到」有用，原样带出去
+	OutError = ClassError.Contains(TEXT("stale"))
+		? ClassError
+		: FString::Printf(
+			TEXT("Class not found: %s (write the blueprint asset name like WBP_HUD, its path like /Game/UI/WBP_HUD, or a C++ class name)"),
+			*ClassPart);
+	return nullptr;
+}
+
+/**
+ * 在别的类上找变量。蓝图类先查骨架类：刚用 blueprint_add_variable 加上、
+ * 还没编译的变量只在骨架类上有，生成类要等编译 —— 引擎自己的
+ * UK2Node_Variable::CreatePinForVariable 也是这么兜的。FindFProperty 带父类链。
+ */
+static FProperty* UAL_FindVariableOnClass(UClass* OwnerClass, FName VarName)
+{
+	if (UBlueprint* OwnerBP = UBlueprint::GetBlueprintFromClass(OwnerClass))
+	{
+		if (UClass* Skeleton = OwnerBP->SkeletonGeneratedClass)
+		{
+			if (FProperty* Property = FindFProperty<FProperty>(Skeleton, VarName))
+			{
+				return Property;
+			}
+		}
+	}
+	return FindFProperty<FProperty>(OwnerClass, VarName);
+}
+
+/**
+ * 建一个读写别人变量的节点 —— 编辑器里从对象引脚拖出来 Get / Set 的那种，
+ * 多一根 Target 引脚接那个对象。
+ *
+ * 和委托节点同一个讲究：SetFromProperty 要在 Finalize 之前，引脚是解析
+ * VariableReference 长出来的。SetFromProperty 会把骨架类换成正式的生成类、
+ * 顺手填上变量 GUID（变量改名后节点还认得），自己拼 SetExternalMember 两样都没有。
+ */
+template <typename TNode>
+static TNode* UAL_SpawnExternalVariableNode(UEdGraph* Graph, const FProperty* Property, int32 PosX, int32 PosY)
+{
+	FGraphNodeCreator<TNode> NodeCreator(*Graph);
+	TNode* Node = NodeCreator.CreateNode();
+	Node->SetFromProperty(Property, /*bSelfContext=*/false, Property->GetOwnerClass());
+	Node->NodePosX = PosX;
+	Node->NodePosY = PosY;
+	NodeCreator.Finalize();
+	Node->ReconstructNode();
+	return Node;
+}
+
+/**
  * 建一个委托节点。
  *
  * `SetFromProperty` 必须在 `Finalize()` 之前 —— 委托节点的引脚（Target，
@@ -3109,7 +3216,117 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 	if (T == TEXT("variableget") || T == TEXT("variableset"))
 	{
 		const bool bIsGet = (T == TEXT("variableget"));
-		const FName VarName(*Spec.Name);
+
+		/**
+		 * 别的蓝图身上的变量写成 `WBP_HUD.Health` —— 编辑器里从对象引脚拖出来
+		 * 读写变量的那种节点。以前只认自己身上的，用户只好在对方蓝图里给每个
+		 * 变量包一个 Get 函数再去调（2026-10-01 用户反馈）。
+		 *
+		 * 类名指的是自己或自己的父类时不算「别人」，去掉类名走下面自己那条路：
+		 * 那条路还认组件，而且不需要 Target 上再接一个自己。
+		 */
+		FString VarNamePart = Spec.Name;
+		FString OwnerPart;
+		if (Spec.Name.Split(TEXT("."), &OwnerPart, &VarNamePart, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+		{
+			UClass* OwnerClass = UAL_ResolveVariableOwnerClass(Blueprint, OwnerPart, OutError);
+			if (!OwnerClass)
+			{
+				return nullptr;
+			}
+
+			UClass* SelfClass = Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->SkeletonGeneratedClass.Get();
+			const bool bIsSelf = SelfClass && SelfClass->IsChildOf(OwnerClass);
+			if (!bIsSelf)
+			{
+				const FName ExternalName(*VarNamePart);
+				FProperty* Property = UAL_FindVariableOnClass(OwnerClass, ExternalName);
+				UBlueprint* OwnerBP = UBlueprint::GetBlueprintFromClass(OwnerClass);
+				const FString OwnerName = OwnerBP ? OwnerBP->GetName() : OwnerClass->GetName();
+
+				// 控件只有勾了「是变量」才会在生成类上变成可见属性 —— UMG 跨蓝图
+				// 读控件最常见的卡点。没勾时属性可能压根不在，也可能在但不可见，两处都要认
+				const UWidgetBlueprint* OwnerWidgetBP = Cast<UWidgetBlueprint>(OwnerBP);
+				const bool bIsHiddenWidget = OwnerWidgetBP && OwnerWidgetBP->WidgetTree &&
+					OwnerWidgetBP->WidgetTree->FindWidget(ExternalName) &&
+					(!Property || !Property->HasAnyPropertyFlags(CPF_BlueprintVisible));
+				if (bIsHiddenWidget)
+				{
+					OutError = FString::Printf(
+						TEXT("Widget '%s' in %s is not marked 'Is Variable', so other blueprints cannot reach it. ")
+						TEXT("Tick 'Is Variable' on that widget in the UMG designer, compile %s, then retry"),
+						*VarNamePart, *OwnerName, *OwnerName);
+					return nullptr;
+				}
+
+				if (!Property)
+				{
+					OutError = FString::Printf(TEXT("Variable not found: %s has no variable named %s"), *OwnerName, *VarNamePart);
+
+					UClass* ListClass = (OwnerBP && OwnerBP->SkeletonGeneratedClass) ? OwnerBP->SkeletonGeneratedClass.Get() : OwnerClass;
+					TArray<FString> Available;
+					for (TFieldIterator<FProperty> It(ListClass, EFieldIteratorFlags::IncludeSuper); It; ++It)
+					{
+						if (It->HasAnyPropertyFlags(CPF_BlueprintVisible) && !It->HasMetaData(FBlueprintMetadata::MD_Private))
+						{
+							Available.AddUnique(It->GetName());
+						}
+					}
+					TArray<FString> Suggestions;
+					UAL_CommandUtils::SuggestProperties(VarNamePart, Available, Suggestions, 5);
+					UAL_KeepCloseSuggestions(VarNamePart, Suggestions);
+					if (Suggestions.Num() > 0)
+					{
+						OutError += FString::Printf(TEXT(" (did you mean: %s.%s?)"), *OwnerPart, *FString::Join(Suggestions, *FString::Printf(TEXT(", %s."), *OwnerPart)));
+					}
+					else
+					{
+						OutError += FString::Printf(TEXT(" (use blueprint_describe on %s to list its variables)"), *OwnerName);
+					}
+					return nullptr;
+				}
+
+				if (!Property->HasAnyPropertyFlags(CPF_BlueprintVisible))
+				{
+					OutError = FString::Printf(
+						TEXT("'%s' exists on %s but is not exposed to blueprints (no BlueprintReadWrite / BlueprintReadOnly)"),
+						*VarNamePart, *OwnerName);
+					return nullptr;
+				}
+
+				// 编辑器的规矩（BlueprintActionFilter::IsFieldInaccessible）：
+				// Private 只有自己能碰，Protected 只有子类能碰 —— 这里两样都不是
+				const bool bIsPrivate = Property->HasMetaData(FBlueprintMetadata::MD_Private);
+				if (bIsPrivate || Property->HasMetaData(FBlueprintMetadata::MD_Protected))
+				{
+					OutError = FString::Printf(
+						TEXT("'%s' on %s is %s, so other blueprints cannot read or write it. ")
+						TEXT("Make it public in %s, or call a public function on it instead"),
+						*VarNamePart, *OwnerName, bIsPrivate ? TEXT("Private") : TEXT("Protected"), *OwnerName);
+					return nullptr;
+				}
+
+				if (!bIsGet && Property->HasAnyPropertyFlags(CPF_BlueprintReadOnly))
+				{
+					OutError = FString::Printf(
+						TEXT("'%s' on %s is read-only to blueprints; it can be read (VariableGet) but not assigned (VariableSet)"),
+						*VarNamePart, *OwnerName);
+					if (Cast<UWidgetBlueprint>(OwnerBP) && CastField<FObjectProperty>(Property))
+					{
+						OutError += TEXT(". Widget variables are fixed references - get the widget and call its functions (SetText, SetVisibility...) instead");
+					}
+					return nullptr;
+				}
+
+				if (bIsGet)
+				{
+					return UAL_SpawnExternalVariableNode<UK2Node_VariableGet>(Graph, Property, PosX, PosY);
+				}
+				return UAL_SpawnExternalVariableNode<UK2Node_VariableSet>(Graph, Property, PosX, PosY);
+			}
+		}
+
+		const FName VarName(*VarNamePart);
 		const bool bIsUserVariable = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VarName) != INDEX_NONE;
 
 		/**
@@ -3153,7 +3370,7 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 
 		if (!bIsUserVariable && !bIsComponent && !InheritedProperty)
 		{
-			OutError = FString::Printf(TEXT("Variable not found: %s"), *Spec.Name);
+			OutError = FString::Printf(TEXT("Variable not found: %s"), *VarNamePart);
 
 			TArray<FString> Available;
 			for (const FBPVariableDescription& Var : Blueprint->NewVariables)
@@ -3171,8 +3388,8 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 				}
 			}
 			TArray<FString> Suggestions;
-			UAL_CommandUtils::SuggestProperties(Spec.Name, Available, Suggestions, 5);
-			UAL_KeepCloseSuggestions(Spec.Name, Suggestions);
+			UAL_CommandUtils::SuggestProperties(VarNamePart, Available, Suggestions, 5);
+			UAL_KeepCloseSuggestions(VarNamePart, Suggestions);
 			if (Suggestions.Num() > 0)
 			{
 				OutError += FString::Printf(TEXT(" (did you mean: %s?)"), *FString::Join(Suggestions, TEXT(", ")));
@@ -3180,7 +3397,8 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			else
 			{
 				OutError += FString::Printf(
-					TEXT(" (variables and components on this blueprint: %s. Create a variable with blueprint_add_variable, a component with blueprint_add_component)"),
+					TEXT(" (variables and components on this blueprint: %s. Create a variable with blueprint_add_variable, a component with blueprint_add_component. ")
+					TEXT("A variable on another blueprint is written as BlueprintName.VariableName, e.g. WBP_HUD.Health)"),
 					Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("none"));
 			}
 			return nullptr;
@@ -3195,14 +3413,14 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			{
 				OutError = FString::Printf(
 					TEXT("'%s' exists on %s but is not exposed to blueprints (no BlueprintReadWrite / BlueprintReadOnly)"),
-					*Spec.Name, *OwnerName);
+					*VarNamePart, *OwnerName);
 				return nullptr;
 			}
 			if (!bIsGet && InheritedProperty->HasAnyPropertyFlags(CPF_BlueprintReadOnly))
 			{
 				OutError = FString::Printf(
 					TEXT("'%s' is BlueprintReadOnly on %s; it can be read (VariableGet) but not assigned (VariableSet)"),
-					*Spec.Name, *OwnerName);
+					*VarNamePart, *OwnerName);
 				return nullptr;
 			}
 		}

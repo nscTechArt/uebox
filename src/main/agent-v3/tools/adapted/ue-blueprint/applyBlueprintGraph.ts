@@ -78,6 +78,7 @@ const NodeDefinitionSchema = z.object({
         '用 blueprint_search_nodes 查到的 member_name 可直接填）；' +
         'Event 用 ReceiveBeginPlay / ReceiveTick；EnhancedInputAction 写 Input Action 资产名或路径（IA_Jump）；' +
         'VariableGet 写变量名、组件名（如 Light）或父类变量名；' +
+        '别的蓝图上的变量写 蓝图名.变量名（如 WBP_HUD.Health），节点多一根 self 输入接那个对象；' +
         'Timeline 写 Timeline 自己的名字；控制节点可省略'
     ),
   timeline: z
@@ -445,6 +446,11 @@ blueprint_add_variable 建。常量不要建变量 —— 直接写 pin_defaults
 **组件也是变量**：VariableGet 的 member_name 写组件名（blueprint_describe 里
 components 的 name，如 Light、Mesh）就能拿到组件引用，接着连 SetMaterial /
 SetVisibility 之类的 Target。父类声明的变量同样直接写名字。
+
+**别的蓝图上的变量**写 蓝图名.变量名（WBP_HUD.Health、BP_Door.bIsOpen），
+不用在对方蓝图里包一个 Get 函数。节点会多一根 self 输入（编辑器里显示 Target），
+连上那个对象的引用（Create Widget 的返回值、Cast 的输出等）。对方那边：变量勾了
+Private 的读不到；控件要在 UMG 里勾「是变量」才读得到，而且控件只能读、不能 Set。
 
 ## 增强输入事件
 
