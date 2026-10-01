@@ -2195,13 +2195,23 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
      * never saved and the blueprint does not compile.
      */
     review: {
-      run: 'Review changes',
+      run: 'Ask AI to verify',
       running: 'Reviewing…',
       clean: 'Checked {count} asset(s), nothing wrong',
       found: '{count} issue(s) found',
       // Must be said out loud: with no engine, "nothing wrong" only covers naming
       engineOffline: 'Engine not connected — only naming was checked',
       failed: 'The review did not run',
+      fix: 'Ask AI to fix',
+      // Used when the compile error comes with the engine's text, which may span lines
+      compileErrorDetail: 'The blueprint fails to compile:\n{detail}',
+      /** What "Ask AI to fix" sends. It goes to the model, but through i18n — same reason as selfCheck.prompt */
+      fixPrompt: {
+        intro: 'After the last turn, the engine check found the problems below. Please fix them:',
+        rules:
+          'Confirm each one with read-only tools before changing anything. When done, recompile the ' +
+          'affected blueprints and tell me the result. If something cannot be fixed, say why — do not work around it.'
+      },
       codes: {
         missing: 'Reported as done, but it is not in the project',
         'still-there': 'Reported as deleted, but it is still there',

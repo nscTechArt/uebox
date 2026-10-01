@@ -32,6 +32,7 @@ import type {
   AgentReviewTarget
 } from '../../../shared/agentReview'
 import { REVIEW_SEVERITY_ORDER } from '../../../shared/agentReview'
+import { callUeRaw } from '../tools/defineUeTool'
 import { runEditorPython, type EditorPythonResult } from './editorPython'
 
 /** 检查项 → 严重程度。界面按这个排序着色，主进程这边只负责定级 */
@@ -287,6 +288,12 @@ output_data = {"findings": findings}
 `
 }
 
+/** `blueprint.compile` 回来的那部分 —— 只用得上状态和报错原文 */
+export interface BlueprintCompileOutcome {
+  ok?: boolean
+  diagnostics?: { type?: string; message?: string }[]
+}
+
 export interface ReviewDeps {
   /** 注入点：测试不连引擎 */
   runPython?: (
@@ -294,6 +301,89 @@ export interface ReviewDeps {
     description: string,
     timeoutMs?: number
   ) => Promise<EditorPythonResult>
+  compileBlueprint?: (path: string) => Promise<BlueprintCompileOutcome>
+}
+
+/**
+ * 每次审查最多替几个蓝图取报错原文。
+ *
+ * 编译跑在游戏线程上，一个大蓝图就要一两秒；而一轮里坏掉的蓝图多半是同一个
+ * 原因连带的，前三个的原文已经够人判断。
+ */
+const COMPILE_DETAIL_LIMIT = 3
+/** 每个蓝图带回几条报错。第一条通常才是根因，后面多是连带的 */
+const COMPILE_MESSAGES_PER_BLUEPRINT = 3
+const COMPILE_MESSAGE_MAX_CHARS = 300
+
+/**
+ * **必须带 `save: false`。** 插件那边 `save` 默认是 true —— 不写的话，一次
+ * 后台检查会在用户不知情时把他的蓝图存盘（编译通过时）。
+ */
+function defaultCompileBlueprint(path: string): Promise<BlueprintCompileOutcome> {
+  return callUeRaw<BlueprintCompileOutcome>(
+    'blueprint.compile',
+    { blueprint_path: path, save: false },
+    { timeoutMs: 30_000 }
+  )
+}
+
+/** 编译诊断里的报错原文，去重、截断，一行一条 */
+export function compileErrorText(outcome: BlueprintCompileOutcome): string {
+  const seen = new Set<string>()
+  for (const item of outcome.diagnostics ?? []) {
+    if (item?.type !== 'Error') continue
+    const message = String(item.message ?? '').trim()
+    if (!message) continue
+    seen.add(
+      message.length > COMPILE_MESSAGE_MAX_CHARS
+        ? `${message.slice(0, COMPILE_MESSAGE_MAX_CHARS)}…`
+        : message
+    )
+    if (seen.size >= COMPILE_MESSAGES_PER_BLUEPRINT) break
+  }
+  return [...seen].join('\n')
+}
+
+/**
+ * 状态灯是红的蓝图，重新编译一次把报错原文取回来。
+ *
+ * 体检脚本只读得到 `Blueprint.status`：知道坏了，不知道哪里坏。编辑器不保存
+ * 上一次的编译日志，想要原文只能再编一次 —— 所以只对已经亮红灯的编，
+ * 好好的蓝图一个都不碰。
+ *
+ * 重编之后通过了，说明那盏红灯是过期的（比如依赖的资产后来修好了），
+ * 这条直接撤掉：再报「现在是坏的」就是在说假话。取不到原文时保留原样。
+ */
+async function attachCompileErrors(
+  findings: AgentReviewFinding[],
+  compile: (path: string) => Promise<BlueprintCompileOutcome>
+): Promise<AgentReviewFinding[]> {
+  const result: AgentReviewFinding[] = []
+  let compiled = 0
+
+  for (const finding of findings) {
+    if (finding.code !== 'compile-error' || compiled >= COMPILE_DETAIL_LIMIT) {
+      result.push(finding)
+      continue
+    }
+    compiled++
+
+    // 编译是串行的：插件在游戏线程上一条一条执行，并发发出去也只是排队
+    let outcome: BlueprintCompileOutcome
+    try {
+      outcome = await compile(finding.target)
+    } catch {
+      result.push(finding)
+      continue
+    }
+
+    if (outcome?.ok === true) continue
+
+    const detail = compileErrorText(outcome ?? {})
+    result.push(detail ? { ...finding, detail } : finding)
+  }
+
+  return result
 }
 
 /**
@@ -337,10 +427,14 @@ export async function reviewChanges(
   }
 
   const engine = parseEngineFindings(engineResult.output)
+  const engineFindings = await attachCompileErrors(
+    engine.findings,
+    deps.compileBlueprint ?? defaultCompileBlueprint
+  )
   return {
     success: true,
     checked: normalized.length,
-    findings: sortFindings([...engine.findings, ...naming]),
+    findings: sortFindings([...engineFindings, ...naming]),
     engineChecked: true
   }
 }

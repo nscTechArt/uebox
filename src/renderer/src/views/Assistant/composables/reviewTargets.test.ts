@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ChangeGroup } from './changeSummary'
-import { reviewTargetsFrom } from './reviewTargets'
+import { AUTO_REVIEW_MAX_TARGETS, reviewTargetsFrom, shouldAutoReview } from './reviewTargets'
 
 function group(patch: Partial<ChangeGroup>): ChangeGroup {
   return {
@@ -48,5 +48,23 @@ describe('reviewTargetsFrom', () => {
     ])
 
     expect(targets).toHaveLength(1)
+  })
+})
+
+describe('shouldAutoReview', () => {
+  const targets = (count: number): ReturnType<typeof reviewTargetsFrom> =>
+    Array.from({ length: count }, (_, i) => ({ path: `/Game/A/M_${i}`, action: 'modified' as const }))
+
+  it('没改引擎资产就不跑 —— 引擎那边一个问题都答不上来', () => {
+    expect(shouldAutoReview([])).toBe(false)
+  })
+
+  it('改动不多时自动跑', () => {
+    expect(shouldAutoReview(targets(1))).toBe(true)
+    expect(shouldAutoReview(targets(AUTO_REVIEW_MAX_TARGETS))).toBe(true)
+  })
+
+  it('超过上限留给用户点 —— 每个资产都要在游戏线程上 load 一遍', () => {
+    expect(shouldAutoReview(targets(AUTO_REVIEW_MAX_TARGETS + 1))).toBe(false)
   })
 })

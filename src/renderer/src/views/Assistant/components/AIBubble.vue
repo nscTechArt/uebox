@@ -188,9 +188,9 @@
           </button>
 
           <!--
-            审查：一次点击两件事 —— 机器查引擎里的事实（在不在、落盘没有、编译过不过），
-            然后让模型回答机器答不了的那一半（这是不是用户要的东西）。
-            拆成两个按钮的话，用户要点两次才知道一件事的全貌。
+            审查：这一轮刚结束时自动跑一遍引擎体检（只有机器那一半，见 checkEngine），
+            结论直接挂在这里。按钮是让模型自证的入口 —— 「是不是用户要的」只有人
+            试过才知道，所以它保持手动；点它会先重查一遍引擎，再把结论交给模型。
 
             它跟标题同一行、**在收起区外面**：收起的是施工明细，审查是个动作不是明细。
             2026-09-04 那次把清单改成默认收起时它被一起卷了进去，用户得先点开清单
@@ -208,6 +208,15 @@
             <span v-if="reviewSummary" class="response-review-summary" :class="reviewSummaryTone">
               {{ reviewSummary }}
             </span>
+            <button
+              v-if="hasReviewErrors && !fixSent"
+              type="button"
+              class="response-review-run"
+              :disabled="reviewing"
+              @click="requestFix"
+            >
+              {{ t('assistant.review.fix') }}
+            </button>
             <!-- 自证请求已经作为一条消息发出去了，回复就在这条气泡下面 -->
             <span v-if="selfCheckSent" class="response-review-selfcheck">
               {{ t('assistant.selfCheck.sent') }}
@@ -565,7 +574,16 @@ import {
   fileDiff,
   type FileChange
 } from '../../../../../shared/fileChange'
-import { computed, watch, onMounted, nextTick, ref, shallowRef, inject } from 'vue'
+import {
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+  ref,
+  shallowRef,
+  inject
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import AgentProcessLog from './AgentProcessLog.vue'
@@ -602,8 +620,8 @@ import {
   collectGeneratedMusic,
   collectGeneratedMediaFromAgentArtifacts
 } from '../composables/agentGeneratedMedia'
-import { reviewTargetsFrom } from '../composables/reviewTargets'
-import { SELF_CHECK_ACTION } from '../composables/selfCheck'
+import { reviewTargetsFrom, shouldAutoReview } from '../composables/reviewTargets'
+import { REVIEW_FIX_ACTION, reviewFindingText, SELF_CHECK_ACTION } from '../composables/selfCheck'
 import { AGENT_RESUME_ACTION } from '../composables/agentHandlerShared'
 import { isCreatorPlanAction, runCreatorPlanAction } from '../composables/creatorPlanChatError'
 import { routerKey } from 'vue-router'
@@ -1422,13 +1440,67 @@ const reviewSummary = ref('')
 const reviewSummaryTone = ref<'ok' | 'warn' | 'bad'>('ok')
 /** 自证请求发出去了没有。发过就在结论后面挂一句「回复在下面」 */
 const selfCheckSent = ref(false)
+/** 「交给 AI 修」点过没有。点过就收起按钮，回复在下面 */
+const fixSent = ref(false)
+
+/** 查出了「坏了」级别的问题才给修的入口 —— 未保存、命名不需要 AI 动手 */
+const hasReviewErrors = computed(() =>
+  reviewFindings.value.some((finding) => finding.severity === 'error')
+)
 
 /**
- * 审查一次 —— **一次点击，两件事**。
+ * 问一遍引擎事实：在不在、落盘没有、编译过不过、引用断没断。不经过模型。
  *
- * 先问引擎事实（在不在、落盘没有、编译过不过、引用断没断），紧接着把这份
- * 结论摆到模型面前要它自证。两件事拆成两个按钮的话，用户得点两次才知道
- * 一件事的全貌，而中间那个状态（查完了但还没让它解释）对谁都没有用。
+ * `auto` 是这一轮刚结束时自动跑的那次，它**不出声地失败**：引擎没连、调用报错，
+ * 都什么也不显示 —— 用户没要求过这次检查，为它冒一句黄字只是噪音。
+ * 用户手动点的那次照旧把每种情况说清楚。
+ *
+ * 返回实际查了几个资产；引擎那一半没跑成时返回 null。
+ */
+async function checkEngine(auto: boolean): Promise<number | null> {
+  reviewing.value = true
+  if (!auto) {
+    reviewFindings.value = []
+    reviewSummary.value = ''
+    selfCheckSent.value = false
+  }
+  fixSent.value = false
+
+  try {
+    const result = await agentV3API.reviewChanges(reviewTargets.value)
+
+    if (!result?.engineChecked) {
+      if (auto) return null
+      // 引擎没连上时**必须**说出来：这时候「没查出问题」只代表命名没问题，
+      // 而落盘、编译、断引用这些真正会咬人的检查一项都没跑。
+      reviewFindings.value = result?.findings ?? []
+      reviewSummaryTone.value = 'warn'
+      reviewSummary.value = t('assistant.review.engineOffline')
+      return null
+    }
+
+    reviewFindings.value = result.findings ?? []
+    if (reviewFindings.value.length === 0) {
+      reviewSummaryTone.value = 'ok'
+      reviewSummary.value = t('assistant.review.clean', { count: result.checked })
+    } else {
+      reviewSummaryTone.value = hasReviewErrors.value ? 'bad' : 'warn'
+      reviewSummary.value = t('assistant.review.found', { count: reviewFindings.value.length })
+    }
+    return result.checked
+  } catch (error) {
+    if (!auto) {
+      reviewSummaryTone.value = 'bad'
+      reviewSummary.value = error instanceof Error ? error.message : t('assistant.review.failed')
+    }
+    return null
+  } finally {
+    reviewing.value = false
+  }
+}
+
+/**
+ * 用户点按钮：重新查一遍引擎，紧接着让模型自证。
  *
  * 机器的结论只留在这条气泡上，不写进消息 —— 引擎状态是**此刻**的事实，
  * 存进历史的话下次打开这条对话，会看到一份早就过期的「已保存」。
@@ -1436,53 +1508,77 @@ const selfCheckSent = ref(false)
  */
 async function runReview(): Promise<void> {
   if (reviewing.value) return
+  cancelAutoReview()
 
-  reviewing.value = true
-  reviewFindings.value = []
-  reviewSummary.value = ''
-  selfCheckSent.value = false
-
-  try {
-    const result = await agentV3API.reviewChanges(reviewTargets.value)
-    reviewFindings.value = result?.findings ?? []
-
-    if (!result?.engineChecked) {
-      // 引擎没连上时**必须**说出来：这时候「没查出问题」只代表命名没问题，
-      // 而落盘、编译、断引用这些真正会咬人的检查一项都没跑。
-      //
-      // 这种情况下也**不发自证**：未连接引擎时内核根本不注册 ue.* 只读工具
-      // （见 createAgent.ts 的 resolveTools），模型手上一个能核实的工具都没有，
-      // 那时候要它「用工具重新查一遍」，只能换回一段凭记忆编的话 ——
-      // 而凭记忆正是自证要禁掉的东西。
-      reviewSummaryTone.value = 'warn'
-      reviewSummary.value = t('assistant.review.engineOffline')
-      return
-    }
-
-    if (reviewFindings.value.length === 0) {
-      reviewSummaryTone.value = 'ok'
-      reviewSummary.value = t('assistant.review.clean', { count: result.checked })
-    } else {
-      reviewSummaryTone.value = reviewFindings.value.some((item) => item.severity === 'error')
-        ? 'bad'
-        : 'warn'
-      reviewSummary.value = t('assistant.review.found', { count: reviewFindings.value.length })
-    }
-
-    // 机器查干净了也照样要它自证 —— 那正是自证最有用的时候：
-    // 所有事实都对，但东西不是用户要的
-    requestSelfCheck(result.checked)
-  } catch (error) {
-    reviewSummaryTone.value = 'bad'
-    reviewSummary.value = error instanceof Error ? error.message : t('assistant.review.failed')
-  } finally {
-    reviewing.value = false
-  }
+  const checked = await checkEngine(false)
+  // 引擎没连时**不发自证**：未连接引擎时内核根本不注册 ue.* 只读工具
+  // （见 createAgent.ts 的 resolveTools），要它「用工具重新查一遍」只能换回
+  // 一段凭记忆编的话 —— 而凭记忆正是自证要禁掉的东西。
+  //
+  // 机器查干净了也照样要它自证 —— 那正是自证最有用的时候：
+  // 所有事实都对，但东西不是用户要的
+  if (checked !== null) requestSelfCheck(checked)
 }
 
-/** 一条结论的说法。`detail` 是引擎给的具体内容（断掉的引用、建议的前缀） */
+// ==================== 一轮结束时自动体检 ====================
+
+/**
+ * 这一轮刚结束时，静默跑一次引擎体检（只有机器那一半）。
+ *
+ * AI 说「改好了」的那一刻，正是用户最不会再去点一个按钮的时候；而没存盘、
+ * 编译挂了、引用断了这几样，用户自己要等关编辑器或者打包才撞上。体检不调
+ * 模型、不花 token，所以默认就跑。让模型自证仍然要用户自己点 —— 「是不是
+ * 我要的」只有人试过才知道。
+ *
+ * 只认**亲眼看着** typing → done 的那一下：翻历史对话时气泡一挂上来就是
+ * done，不能每打开一次旧对话就去编辑器里跑一遍。延迟一小会再确认一次，是因为
+ * `status` 会被好几条写日志的路径来回改写（见 shouldShowAgentProcessLog 的注释），
+ * 一闪而过的 done 不算结束。
+ */
+const AUTO_REVIEW_DELAY_MS = 800
+let autoReviewTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelAutoReview(): void {
+  if (autoReviewTimer) clearTimeout(autoReviewTimer)
+  autoReviewTimer = null
+}
+
+watch(
+  () => props.status,
+  (status, previous) => {
+    cancelAutoReview()
+    if (previous !== 'typing' || status !== 'done') return
+
+    autoReviewTimer = setTimeout(() => {
+      autoReviewTimer = null
+      if (props.status !== 'done' || reviewing.value) return
+      if (!shouldAutoReview(reviewTargets.value)) return
+      void checkEngine(true)
+    }, AUTO_REVIEW_DELAY_MS)
+  }
+)
+
+onBeforeUnmount(cancelAutoReview)
+
+/**
+ * 交给 AI 修：把 error 级的结论连同引擎原文作为一条用户消息发出去。
+ *
+ * 体检结论不进对话历史，用户直接说「修一下」的话模型根本不知道引擎报了什么，
+ * 所以这一步要替他把原文带过去。
+ */
+function requestFix(): void {
+  fixSent.value = true
+  emit('action', {
+    id: props.id,
+    action: REVIEW_FIX_ACTION,
+    // 响应式代理过不了 IPC/结构化克隆那道坎，深拷成普通对象再往上冒
+    data: { findings: JSON.parse(JSON.stringify(reviewFindings.value)) }
+  })
+}
+
+/** 一条结论的说法。`detail` 是引擎给的具体内容（断掉的引用、建议的前缀、编译报错原文） */
 function findingText(finding: AgentReviewFinding): string {
-  return t(`assistant.review.codes.${finding.code}`, { detail: finding.detail ?? '' })
+  return reviewFindingText(finding, t)
 }
 
 /**
@@ -2407,5 +2503,7 @@ function toggleChanges(): void {
 .response-review-text {
   min-width: 0;
   word-break: break-word;
+  /* 编译报错的引擎原文一条一行 */
+  white-space: pre-line;
 }
 </style>

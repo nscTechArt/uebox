@@ -363,8 +363,10 @@ import { forkSession } from './composables/sessionFork'
 import { countUserTurnsBefore, rewindTranscript } from './composables/transcriptRewind'
 import { openSideChat } from './composables/sideChat'
 import {
+  buildReviewFixPrompt,
   buildSelfCheckPrompt,
   findRequestBefore,
+  REVIEW_FIX_ACTION,
   SELF_CHECK_ACTION,
   type SelfCheckInput
 } from './composables/selfCheck'
@@ -1821,7 +1823,7 @@ async function handleComposerSteer(payload: {
   if (!steered) payload.restore?.()
 }
 
-/** 消息气泡上的操作按钮：报错后的「接着跑」、审查之后的「让它自证」 */
+/** 消息气泡上的操作按钮：报错后的「接着跑」、审查之后的「让它自证」「交给 AI 修」 */
 async function handleBubbleAction(payload: {
   id: string
   action: string
@@ -1829,6 +1831,11 @@ async function handleBubbleAction(payload: {
 }): Promise<void> {
   if (payload.action === SELF_CHECK_ACTION) {
     handleSelfCheck(payload.id, payload.data)
+    return
+  }
+
+  if (payload.action === REVIEW_FIX_ACTION) {
+    handleSend({ content: buildReviewFixPrompt(payload.data?.findings ?? [], t), images: [] })
     return
   }
 

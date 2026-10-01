@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import type { AgentReviewResult, AgentReviewTarget } from '@core/shared/agentReview'
@@ -14,7 +14,7 @@ vi.mock('@renderer/api/agentV3', () => ({
 }))
 
 import AIBubble from './AIBubble.vue'
-import { SELF_CHECK_ACTION } from '../composables/selfCheck'
+import { REVIEW_FIX_ACTION, SELF_CHECK_ACTION } from '../composables/selfCheck'
 
 /**
  * 审查是**一次点击两件事**：先问引擎事实，紧接着让模型自证。
@@ -33,13 +33,14 @@ const materialChange: ResponseMetadataChange = {
 }
 
 function mountBubble(
-  changes: ResponseMetadataChange[] = [materialChange]
+  changes: ResponseMetadataChange[] = [materialChange],
+  status: 'typing' | 'done' = 'done'
 ): ReturnType<typeof mount> {
   return mount(AIBubble, {
     props: {
       id: 'msg-1',
       content: '已经改好了',
-      status: 'done' as const,
+      status,
       responseMetadata: { changes }
     },
     global: {
@@ -193,5 +194,117 @@ describe('AIBubble 审查改动', () => {
     // 收起状态下点的审查，结论也要看得见
     expect(wrapper.findAll('.response-review-item')).toHaveLength(1)
     expect(wrapper.findAll('.response-changes-step')).toHaveLength(0)
+  })
+})
+
+/**
+ * 一轮刚结束时自动跑机器那一半。自证仍然要用户自己点 ——
+ * 「是不是我要的」只有人试过才知道。
+ */
+describe('AIBubble 一轮结束时自动体检', () => {
+  const clean: AgentReviewResult = { success: true, checked: 1, findings: [], engineChecked: true }
+
+  beforeEach(() => {
+    reviewChanges.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function finishTurn(wrapper: ReturnType<typeof mount>): Promise<void> {
+    await wrapper.setProps({ status: 'done' })
+    await vi.advanceTimersByTimeAsync(1000)
+  }
+
+  it('看着它从 typing 变成 done，就静默体检一次，不发自证', async () => {
+    reviewChanges.mockResolvedValue(clean)
+    const wrapper = mountBubble([materialChange], 'typing')
+
+    await finishTurn(wrapper)
+
+    expect(reviewChanges).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.response-review-summary').classes()).toContain('ok')
+    expect(wrapper.emitted('action')).toBeUndefined()
+  })
+
+  it('翻历史对话时不跑 —— 气泡一挂上来就是 done', async () => {
+    mountBubble([materialChange], 'done')
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(reviewChanges).not.toHaveBeenCalled()
+  })
+
+  it('一闪而过的 done 不算结束', async () => {
+    const wrapper = mountBubble([materialChange], 'typing')
+
+    await wrapper.setProps({ status: 'done' })
+    await vi.advanceTimersByTimeAsync(100)
+    await wrapper.setProps({ status: 'typing' })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(reviewChanges).not.toHaveBeenCalled()
+  })
+
+  it('改的资产太多就不自动跑，留给用户点', async () => {
+    const many = Array.from({ length: 21 }, (_, i) => ({
+      ...materialChange,
+      target: `/Game/A/M_${i}`
+    }))
+    const wrapper = mountBubble(many, 'typing')
+
+    await finishTurn(wrapper)
+
+    expect(reviewChanges).not.toHaveBeenCalled()
+  })
+
+  it('引擎没连时不出声 —— 用户没要过这次检查', async () => {
+    reviewChanges.mockResolvedValue({ ...clean, engineChecked: false })
+    const wrapper = mountBubble([materialChange], 'typing')
+
+    await finishTurn(wrapper)
+
+    expect(wrapper.find('.response-review-summary').exists()).toBe(false)
+  })
+
+  it('查出编译报错时带上引擎原文，并给「交给 AI 修」', async () => {
+    reviewChanges.mockResolvedValue({
+      ...clean,
+      findings: [
+        {
+          target: '/Game/A/M_Wood',
+          code: 'compile-error',
+          severity: 'error',
+          detail: 'Accessed None'
+        }
+      ]
+    })
+    const wrapper = mountBubble([materialChange], 'typing')
+
+    await finishTurn(wrapper)
+
+    expect(wrapper.find('.response-review-item').text()).toContain('Accessed None')
+    const buttons = wrapper.findAll('.response-review-run')
+    expect(buttons).toHaveLength(2)
+
+    await buttons[1].trigger('click')
+    const actions = wrapper.emitted('action') ?? []
+    expect(actions).toHaveLength(1)
+    expect(actions[0][0]).toMatchObject({ action: REVIEW_FIX_ACTION })
+    // 点过就收起，回复在下面
+    expect(wrapper.findAll('.response-review-run')).toHaveLength(1)
+  })
+
+  it('只有未保存这类小问题时不给修的入口', async () => {
+    reviewChanges.mockResolvedValue({
+      ...clean,
+      findings: [{ target: '/Game/A/M_Wood', code: 'unsaved', severity: 'warning' }]
+    })
+    const wrapper = mountBubble([materialChange], 'typing')
+
+    await finishTurn(wrapper)
+
+    expect(wrapper.findAll('.response-review-run')).toHaveLength(1)
   })
 })

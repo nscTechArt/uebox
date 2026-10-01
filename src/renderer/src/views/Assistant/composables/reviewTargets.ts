@@ -36,3 +36,17 @@ export function reviewTargetsFrom(groups: ChangeGroup[]): AgentReviewTarget[] {
 
   return targets
 }
+
+/**
+ * 自动体检的资产上限。
+ *
+ * 体检要在编辑器里把每个资产 load 一遍，跑在游戏线程上 —— 用户这时多半正
+ * 盯着编辑器看 AI 做了什么，卡一下就很显眼。超过这个数就不自动跑，留给
+ * 用户自己点。
+ */
+export const AUTO_REVIEW_MAX_TARGETS = 20
+
+/** 这一轮结束时要不要自动跑一次引擎体检。只看改了几个资产 */
+export function shouldAutoReview(targets: AgentReviewTarget[]): boolean {
+  return targets.length > 0 && targets.length <= AUTO_REVIEW_MAX_TARGETS
+}

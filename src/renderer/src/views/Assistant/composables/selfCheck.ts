@@ -45,10 +45,44 @@ export interface SelfCheckInput {
   request: string
 }
 
+/** 气泡上的「交给 AI 修」，AIBubble 发、Welcome 收 */
+export const REVIEW_FIX_ACTION = 'review-fix'
+
+/**
+ * 一条 finding 的说法。界面和发给模型的话共用这一份。
+ *
+ * 编译报错是唯一一个 detail 可有可无的：取到了引擎原文就带上，取不到就只说
+ * 「坏了」—— 文案里留一个空的冒号比不说更难看。
+ */
+export function reviewFindingText(finding: AgentReviewFinding, t: Translate): string {
+  if (finding.code === 'compile-error' && finding.detail) {
+    return t('assistant.review.compileErrorDetail', { detail: finding.detail })
+  }
+  return t(`assistant.review.codes.${finding.code}`, { detail: finding.detail ?? '' })
+}
+
 /** 一条 finding 写成一行给模型看的话 */
 function describeFinding(finding: AgentReviewFinding, t: Translate): string {
-  const text = t(`assistant.review.codes.${finding.code}`, { detail: finding.detail ?? '' })
-  return `- ${finding.target}：${text}`
+  return `- ${finding.target}：${reviewFindingText(finding, t)}`
+}
+
+/**
+ * 「交给 AI 修」发出去的那句话。
+ *
+ * 和自证是反着的：自证明令「只说明不动手」，这里就是请它动手。只带 error 级的
+ * —— 未保存、命名这类不是「坏了」，混进来模型会顺手去存盘、改名，那不是用户点
+ * 这个按钮想要的。
+ *
+ * 同样作为普通用户消息发出：体检结论不进对话历史，模型只能从这句话里知道
+ * 引擎报了什么。
+ */
+export function buildReviewFixPrompt(findings: AgentReviewFinding[], t: Translate): string {
+  const errors = findings.filter((finding) => finding.severity === 'error')
+  return [
+    t('assistant.review.fixPrompt.intro'),
+    errors.map((finding) => describeFinding(finding, t)).join('\n'),
+    t('assistant.review.fixPrompt.rules')
+  ].join('\n\n')
 }
 
 /**

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentReviewFinding } from '@core/shared/agentReview'
 
-import { buildSelfCheckPrompt, findRequestBefore } from './selfCheck'
+import {
+  buildReviewFixPrompt,
+  buildSelfCheckPrompt,
+  findRequestBefore,
+  reviewFindingText
+} from './selfCheck'
 
 /** 假的 t：把 key 和参数原样吐出来，断言不依赖具体文案 */
 const t = (key: string, params?: Record<string, unknown>): string =>
@@ -109,5 +114,36 @@ describe('findRequestBefore', () => {
   it('找不到就返回空串', () => {
     expect(findRequestBefore(messages, 'nope')).toBe('')
     expect(findRequestBefore([{ id: 'a1', role: 'assistant', content: '好' }], 'a1')).toBe('')
+  })
+})
+
+describe('reviewFindingText', () => {
+  it('编译报错带了引擎原文就用带原文的那句', () => {
+    expect(
+      reviewFindingText(finding({ code: 'compile-error', severity: 'error', detail: '引脚没连' }), t)
+    ).toBe('assistant.review.compileErrorDetail(detail=引脚没连)')
+  })
+
+  it('没取到原文时退回原来那句，不留一个空冒号', () => {
+    expect(reviewFindingText(finding({ code: 'compile-error', severity: 'error' }), t)).toBe(
+      'assistant.review.codes.compile-error(detail=)'
+    )
+  })
+})
+
+describe('buildReviewFixPrompt', () => {
+  it('只带 error 级 —— 未保存、命名不是「坏了」，混进来模型会顺手去存盘改名', () => {
+    const prompt = buildReviewFixPrompt(
+      [
+        finding({ target: '/Game/A/BP_X', code: 'compile-error', severity: 'error', detail: 'E1' }),
+        finding({ target: '/Game/A/M_Wood', code: 'unsaved', severity: 'warning' })
+      ],
+      t
+    )
+
+    expect(prompt).toContain('/Game/A/BP_X')
+    expect(prompt).toContain('detail=E1')
+    expect(prompt).not.toContain('/Game/A/M_Wood')
+    expect(prompt).toContain('assistant.review.fixPrompt.rules')
   })
 })
