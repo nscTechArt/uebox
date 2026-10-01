@@ -1322,9 +1322,13 @@ const buildMenuItems = (
   for (const collection of memberships) {
     items.push({
       key: `remove-from-collection:${collection.collectionKey}`,
-      label: t('page.home.project.menu.removeFromNamedCollection', {
-        name: collection.name || t('page.home.project.unnamedCollection')
-      }),
+      // 只在一个分组里时不必点名，多个才带上组名区分
+      label:
+        memberships.length > 1
+          ? t('page.home.project.menu.removeFromNamedCollection', {
+              name: collection.name || t('page.home.project.unnamedCollection')
+            })
+          : t('page.home.project.menu.removeFromCollection'),
       icon: PhFolderMinus
     })
   }
