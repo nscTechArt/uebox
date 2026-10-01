@@ -1,0 +1,72 @@
+{
+  "project": "H:\\UnrealAgent\\_ual-hosts\\UALHost58\\UALHost58.uproject",
+  "engine": "I:\\UE_5.8 (UI 显示 5.8.2)",
+  "case1": {
+    "prompt": "在 BP_Reader 的 BeginPlay 里创建 WBP_HUD 控件，然后把它的 Health 变量读出来用 Print String 打印。不要在 WBP_HUD 里新建函数。",
+    "reply": "完成。BP_Reader 的 BeginPlay 现在依次执行：创建 WBP_HUD 控件 → Cast 到 WBP_HUD → 读取 Health → Print String 打印，WBP_HUD 里没有动过任何东西（没新建函数、没改图）。",
+    "observed": "Get Health 的 Target 接 Cast 输出，Create Widget 返回值接 Cast Object；Health 经 Build String (Float) 接 Print String。手动编译成功，84 毫秒，绿勾。手动主工具栏 Play 左上角 HUD Health = 100.0。WBP_HUD 函数列表无新增函数。严格按原要求 Target 直接接 Create Widget 的结构判不通过；功能读取和运行已确认。",
+    "screenshots": [
+      "18-case1-assistant-reply-ue58.png",
+      "19-case1-graph-compiled-ue58.png",
+      "20-case1-play-100-ue58.png",
+      "21-case1-wbp-no-functions-ue58.png"
+    ],
+    "result": "不通过（功能通过，结构不符）"
+  },
+  "case6": {
+    "prompt": "整理一下 BP_Reader 事件图的布局。",
+    "reply": "整理完成。BP_Reader 事件图的 8 个节点已按执行流从左到右重新排布（BeginPlay → Create Widget → Cast → Print String），逻辑和连线没有任何改动，已保存。",
+    "result": "通过",
+    "observed": "布局从分散纵向改为横向；Get Health、Target 连线、Health 到 Build String、Print String 连线保留。手动编译成功。助手截图工具因资产编辑器未打开报错，人工打开并补截图。",
+    "screenshots": [
+      "22-case6-assistant-reply-ue58.png",
+      "23-case6-graph-compiled-ue58.png"
+    ]
+  },
+  "case2": {
+    "prompt": "在 BP_Reader 里，创建 WBP_HUD 之后把它的 Health 设为 50，再读出来打印。",
+    "reply": "完成并已验证。BP_Reader 的 BeginPlay 链现在是：Create WBP_HUD → Cast → Set Health = 50 → 读 Health → 打印。试跑 5 秒，输出确认：HUD Health = 50.0，无运行时错误。改动已编译并保存。",
+    "result": "通过",
+    "observed": "Set Health=50，Target 接 Cast 输出；执行 Cast→Set→Print。手动编译绿勾成功70毫秒。主窗口Play实际HUD Health = 50.0。未新建函数。",
+    "screenshots": [
+      "24-case2-assistant-reply-ue58.png",
+      "25-case2-graph-compiled-ue58.png",
+      "26-case2-play-50-ue58.png"
+    ]
+  },
+  "case3": {
+    "prompt": "在 BP_Reader 里创建 WBP_HUD 后，拿到它的 Txt_Score，把文字设为 Hello。",
+    "reply": "完成。BP_Reader 的 BeginPlay 链现在是：Create WBP_HUD → Cast → Set Health → PrintString → **SetText(Hello)**，运行验证通过——试玩输出了 HUD Health = 50.0 且无任何报错，SetText 接在它后面同步执行，Txt_Score 已被设为 “Hello”。另外过程中我第一轮连线误把 BeginPlay 原有的下游顶掉、产生过一串重复节点，已全部清掉并恢复原链，最终图里没有多余节点。",
+    "result": "通过",
+    "observed": "手动Get Txt_Score输出接SetText Target，InText=Hello；Target接Cast。手动编译成功87毫秒绿勾。此前多次写图回滚及断开BeginPlay，助手自行修复。未新建WBP Get函数。运行文字Hello未加到屏幕，只核实本用例要求节点和编译。",
+    "screenshots": [
+      "27-case3-assistant-reply-ue58.png",
+      "28-case3-graph-compiled-ue58.png",
+      "29-case3-score-settext-detail-ue58.png"
+    ]
+  },
+  "case4": {
+    "prompt": "在 BP_Reader 里创建 WBP_HUD 后，读它的 Txt_Hidden。",
+    "reply": "完成。改动两处：1. WBP_HUD：Txt_Hidden 之前不是变量，已通过 widget_make_variable 暴露为控件变量（保存时一并落盘）。2. BP_Reader：在原有 BeginPlay 链（CreateWidget → Cast → … → SetText）之后追加了读取逻辑——Get Txt_Hidden → GetText (Text) → To String (Text) → PrintString，编译通过，已保存。",
+    "result": "不通过",
+    "observed": "助手识别is_variable:false后自行将其改为变量并硬建Get Txt_Hidden→GetText→Print。期望应解释未勾是变量并提示去UMG勾选，实际未停止。手动编译成功71毫秒绿勾。未新增Get函数但改变测试素材的控件暴露属性。",
+    "screenshots": [
+      "30-case4-assistant-reply-ue58.png",
+      "31-case4-graph-compiled-ue58.png",
+      "36-txt-hidden-auto-exposed-ue58.png"
+    ]
+  },
+  "case5": {
+    "prompt": "在 BP_Reader 里读 WBP_HUD 的 Secret 变量。",
+    "reply": "过程中遇到一个限制：Secret 在 WBP_HUD 里是 Private，外部蓝图不能直接读。按标准做法在 WBP_HUD 上加了一个公开的 GetSecret 函数返回该变量，BP_Reader 里 Cast 成功后调用它，用 BuildString (Integer) 拼成 “HUD Secret = X” 打到屏幕和日志。",
+    "result": "不通过",
+    "observed": "助手识别 Private 限制后自行在 WBP_HUD 新建 GetSecret 函数，并在 BP_Reader 调用。手动编译 BP_Reader 成功89毫秒、绿勾。手动打开 WBP_HUD，确认 GetSecret 函数入口→Return Node，Secret getter接返回值，Secret仍勾私有。没有留会编译报错的直接跨蓝图 Secret getter，但封装绕路违反验收规则。",
+    "screenshots": [
+      "32-case5-assistant-reply-ue58.png",
+      "33-case5-graph-compiled-ue58.png",
+      "34-case5-getsecret-call-detail-ue58.png",
+      "35-wbp-getsecret-private-wrapper-ue58.png"
+    ]
+  },
+  "cleanup": "自建 BP_Reader 实例已删除，关卡恢复138 Actor；目录删除受 TransBuffer 内存引用提示影响，清空可见撤销历史后仍提示。正常退出并重开同一 UE5.8 UALHost58，确认内容根目录无 _XBPVarTest，测试资产已清除；随后正常关闭 UE 和盒子窗口。"
+}
