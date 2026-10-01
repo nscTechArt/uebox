@@ -305,7 +305,7 @@ uebox doctor
 
 ### 撤销不掉
 
-CLI 的改动**编辑器里按 `Ctrl+Z` 碰不到**。用 `uebox tools call ue_undo --allow-write`。
+CLI 的改动**编辑器里按 `Ctrl+Z` 碰不到**。用 `uebox tools call ue_undo --args '{"steps":1}' --allow-write`（一定带 `steps`，不带会把整条撤销栈全撤）。
 
 ## MCP
 

@@ -329,6 +329,8 @@ describe(`${INSIGHTS_TRACE_TOOL_NAME} action=analyze`, () => {
       'RenderThread*',
       'GPU*'
     ])
+    // UE 读文件名时把反斜杠当转义吃掉，响应文件里只能出现正斜杠
+    for (const c of exportCommands) expect(c).not.toContain('\\')
     const threads = r.threads as Record<string, { top: { name: string }[]; wait_total_ms: number }>
     expect(threads.game!.top.map((t) => t.name)).toEqual(['UWorld::Tick'])
     expect(threads.game!.wait_total_ms).toBe(5000)

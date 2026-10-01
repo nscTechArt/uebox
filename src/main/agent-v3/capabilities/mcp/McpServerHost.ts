@@ -363,8 +363,12 @@ export class McpServerHost {
     await session.server.connect(session.transport)
 
     // 传输层因为任何原因关掉（网络断、close()）都要把表清干净，
-    // 否则那个 id 会一直占着上限里的一格
+    // 否则那个 id 会一直占着上限里的一格。
+    // SDK 在 connect 时挂的那个 onclose 要接着调：它负责中止这条会话还在跑的请求，
+    // 换掉的话客户端走了，`ask` 派的子任务还在盒子里接着写
+    const sdkOnClose = session.transport.onclose
     session.transport.onclose = () => {
+      sdkOnClose?.()
       const id = session.transport.sessionId
       if (id) this.sessions.delete(id)
       // 这条会话的工具按会话 id 开过内置浏览器的话，窗口跟着会话一起关，不然留到进程结束

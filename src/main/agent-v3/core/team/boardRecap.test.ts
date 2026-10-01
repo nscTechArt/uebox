@@ -54,7 +54,9 @@ describe('任务板旧账', () => {
   })
 
   it('收尾提醒不冒充用户', () => {
-    expect(buildBoardNudge([board[0]!], 4 * HOUR)).toMatch(/^\[team mode · automatic check\] This is not the user speaking/)
+    expect(buildBoardNudge([board[0]!], 4 * HOUR)).toMatch(
+      /^\[team mode · automatic check\] This is not the user speaking/
+    )
   })
 })
 

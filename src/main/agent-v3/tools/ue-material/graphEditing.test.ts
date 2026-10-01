@@ -188,7 +188,11 @@ describe('material_delete_unused_nodes', () => {
       unused_count: 2,
       deleted_count: 1,
       unused: [
-        { node_id: 'MaterialExpressionMultiply_2', guid: 'G1', class: 'MaterialExpressionMultiply' },
+        {
+          node_id: 'MaterialExpressionMultiply_2',
+          guid: 'G1',
+          class: 'MaterialExpressionMultiply'
+        },
         { node_id: 'MaterialExpressionAdd_3', guid: 'G2', class: 'MaterialExpressionAdd' }
       ]
     })

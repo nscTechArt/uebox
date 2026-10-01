@@ -99,8 +99,7 @@ describe('uebox ask', () => {
       'library',
       'project',
       'ue.actor',
-      'ue.material',
-      'ue.system'
+      'ue.material'
     ])
     expect(calls[0]!.args.read_only).toBeUndefined()
   })

@@ -1431,6 +1431,8 @@ const api = {
       sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
       /** 不带的话续跑会退回默认的「每步都问」，而用户什么都没改过 */
       approvalMode?: 'ask' | 'auto-edit' | 'yolo'
+      /** 会话此刻绑的模型；用户报错后换了模型再续跑，得用新的 */
+      sessionModel?: { providerId: string; modelId: string }
     }) => ipcRenderer.invoke('agent-v3:continue', args),
     /**
      * 用户在界面上改了这条会话归属哪个工程（顶栏胶囊、侧边栏「归入工程 / 移出项目」）。

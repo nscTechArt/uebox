@@ -14,6 +14,7 @@
  *   - 默认只读（`read_only: true`）：写工具根本不进子任务的清单。
  *   - `--allow-write` 才放开改动，而且只放开**引擎、素材库、工程库**这几摊。
  *     shell、本地文件、浏览器、第三方 MCP、盒子自身的管理一律不给 ——
+ *     引擎里能跑任意代码的 `ue.system`（Python、控制台命令）这时也不给，
  *     没人盯着的时候，这些出了错没有回头路。
  *
  * 命名空间从这次的工具清单里现算，不在 CLI 里抄一份：盒子加了新的 `ue.*`
@@ -40,11 +41,18 @@ export interface AskOptions {
 /** 引擎之外、子任务也能碰的几摊：素材库、工程库、蓝图/材质库，以及技能加载 */
 const EXTRA_NAMESPACES = new Set(['asset', 'project', 'library', 'core'])
 
+/**
+ * 能在引擎里跑任意代码的那一组（Python、控制台命令、插件开关）。只读时里面只剩
+ * 查状态的工具，照给；能写时就是一个没人盯着的 shell，不给
+ */
+const CODE_NAMESPACE = 'ue.system'
+
 /** 这次子任务能用哪些命名空间 */
-export function delegateNamespaces(catalog: CatalogTool[]): string[] {
+export function delegateNamespaces(catalog: CatalogTool[], allowWrite = false): string[] {
   const namespaces = new Set<string>()
   for (const tool of catalog) {
     const ns = tool.meta.namespace
+    if (allowWrite && ns === CODE_NAMESPACE) continue
     if (ns.startsWith('ue.') || EXTRA_NAMESPACES.has(ns)) namespaces.add(ns)
   }
   return [...namespaces].sort()
@@ -77,7 +85,7 @@ export async function runAsk(options: AskOptions): Promise<Envelope> {
     }
 
     const project = await pickProject(rt, options.project)
-    const namespaces = delegateNamespaces(catalog)
+    const namespaces = delegateNamespaces(catalog, options.allowWrite)
 
     const result = await runtime.callTool(
       rt,

@@ -209,12 +209,43 @@ void FUAL_SystemCommands::Handle_ExecConsole(const TSharedPtr<FJsonObject>& Payl
 			Data->SetNumberField(TEXT("output_truncated_chars"), Output.Len() - MaxChars);
 		}
 	}
-	else
+	else if (bResult)
 	{
 		// 说清楚是「这条命令本来就不打印东西」，而不是「输出丢了」——
 		// 像 `stat unit` 是切换屏幕叠加显示的，本来就没有文字返回。
 		Data->SetStringField(TEXT("output_note"),
 			TEXT("该命令没有产生文字输出（切换类命令如 stat unit 属于正常情况；部分命令只写引擎日志，可用 messagelog 查看）。"));
+	}
+
+	// 失败要说为什么。
+	//
+	// 原来失败只回 "Failed"，盒子那边只能说「执行失败（错误码 500）」—— 调用方不知道是
+	// 命令名打错了、还是参数不对，下次照样撞；经验系统也从这样的报错里学不到任何东西。
+	// 命令名带引号：盒子按引号里的名字认「报错在说哪个命令」。
+	if (!bResult)
+	{
+		FString Verb = Command;
+		Verb.TrimStartAndEndInline();
+		int32 SpaceIndex = INDEX_NONE;
+		if (Verb.FindChar(TEXT(' '), SpaceIndex))
+		{
+			Verb.LeftInline(SpaceIndex);
+		}
+
+		FString Reason;
+		if (!Output.IsEmpty())
+		{
+			Reason = Output.Left(2000);
+		}
+		else if (!IConsoleManager::Get().FindConsoleObject(*Verb))
+		{
+			Reason = FString::Printf(TEXT("Command not recognized: '%s'"), *Verb);
+		}
+		else
+		{
+			Reason = FString::Printf(TEXT("Command '%s' exists but did not accept these arguments"), *Verb);
+		}
+		Data->SetStringField(TEXT("error"), Reason);
 	}
 
 	UAL_CommandUtils::SendResponse(RequestId, bResult ? 200 : 500, Data);

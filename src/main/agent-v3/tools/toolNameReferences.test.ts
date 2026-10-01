@@ -69,6 +69,7 @@ const NOT_TOOL_NAMES: Record<string, string> = {
   rename_asset: 'ue_run_python_script 描述里举例的 unreal Python API',
   // `rename_folder` 让 `rename` 成了已知前缀，于是这个响应字段被当成工具名
   rename_failed: 'ue_content_import 的响应字段（asset_names 里没改成的那些）',
+  project_file_missing: 'ue_zen_server 工程列表里的字段（工程文件已不在磁盘上）',
   /*
    * 这两个是 `IKRetargeterController` 的 Python 方法名，写在
    * `ue-animation-retargeting` 的 API 速查表里。

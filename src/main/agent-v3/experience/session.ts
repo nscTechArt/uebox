@@ -17,6 +17,7 @@ import type { SkillLearningMode } from '../capabilities/skills'
 import { effectiveRisk, type ToolMeta } from '../tools/defineTool'
 import { engineMinor } from './experienceFile'
 import { createExperienceRuntime, type ExperienceRuntime } from './runtime'
+import { STRICT_TOOLS } from './specificity'
 import { ExperienceStore, experienceDir } from './store'
 import { TRAIL_SUBDIR, TrailWriter } from './trail'
 
@@ -38,12 +39,17 @@ export interface SessionExperienceOptions {
  *
  * 删除这类操作不学：「删不掉就换个法子删」不是该沉淀的知识，
  * 而设计稿里「权限、删除、安全相关的规则永远不自动产生」正是这条的来由。
+ * 跑任意代码的那几个（Python、控制台命令）在注册表里也记成 destructive，
+ * 但它们正是设计稿里最该学的那类，按 `STRICT_TOOLS` 放行。
  */
-export function isLearnableMeta(meta: ToolMeta | undefined, args: unknown): boolean {
+export function isLearnableMeta(meta: ToolMeta | undefined, args: unknown, tool?: string): boolean {
   if (!meta) return false
   const ns = meta.namespace
   const engine = ns === 'ue' || ns.startsWith('ue.') || ns === 'ue-system'
-  return engine && effectiveRisk(meta, args) !== 'destructive'
+  if (!engine) return false
+  return (
+    (tool !== undefined && STRICT_TOOLS.has(tool)) || effectiveRisk(meta, args) !== 'destructive'
+  )
 }
 
 /** 工程的指纹：升级登记只需要分清是不是同一个工程，不需要知道它在哪 */
@@ -73,7 +79,7 @@ export function createSessionExperience(
     ...(engine ? { engine } : {}),
     agentId: options.sessionId,
     ...(options.random ? { random: options.random } : {}),
-    isLearnableTool: (tool, args) => isLearnableMeta(metaByName.get(tool), args),
+    isLearnableTool: (tool, args) => isLearnableMeta(metaByName.get(tool), args, tool),
     ...(options.home
       ? {
           trail: new TrailWriter(join(options.home, TRAIL_SUBDIR), {

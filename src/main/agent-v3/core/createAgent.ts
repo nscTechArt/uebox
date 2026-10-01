@@ -914,6 +914,13 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     beforeToolCall: async (hookCtx, signal) => {
       const broken = loopBreaker.before(hookCtx)
       if (broken) return broken
+      // 执行前提醒先于审批：脚本里用了本工程 / 本引擎已确认会失败的写法，
+      // 不该先让用户点一次允许、再等引擎报错（见 experience/precheck.ts）
+      const precheck = await experienceRuntime()?.before({
+        tool: hookCtx.toolCall.name,
+        args: hookCtx.args
+      })
+      if (precheck) return { block: true, reason: precheck }
       return approvalGate(hookCtx, signal)
     },
     afterToolCall: async (hookCtx) => {

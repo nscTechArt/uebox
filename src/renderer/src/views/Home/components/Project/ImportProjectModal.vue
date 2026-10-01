@@ -140,12 +140,7 @@
         <!-- 列表只认引擎最近打开过的工程；不在里面的，得有地方自己选路径 -->
         <footer class="panel-foot">
           <span class="foot-hint">{{ t('page.home.project.importProjectModal.dropHint') }}</span>
-          <button
-            type="button"
-            class="pick-file-btn"
-            :disabled="picking"
-            @click="handlePickFile"
-          >
+          <button type="button" class="pick-file-btn" :disabled="picking" @click="handlePickFile">
             <PhFolderOpen aria-hidden="true" />
             {{ t('page.home.project.importProjectModal.pickFile') }}
           </button>
@@ -160,7 +155,14 @@ import AppSpin from '@renderer/components/AppSpin.vue'
 import AppModal from '@renderer/components/AppModal.vue'
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PhFolder, PhFolderOpen, PhFolderPlus, PhMagnifyingGlass, PhSignIn, PhX } from '@phosphor-icons/vue'
+import {
+  PhFolder,
+  PhFolderOpen,
+  PhFolderPlus,
+  PhMagnifyingGlass,
+  PhSignIn,
+  PhX
+} from '@phosphor-icons/vue'
 import { message } from '@/utils/messageManager'
 import { toLocalResourceUrl } from '@renderer/utils/localResource'
 import { notifyPluginInstallFailure } from '@renderer/hooks/usePluginInstallNotice'

@@ -160,7 +160,8 @@ Writes go through `tools call --allow-write` (or `ask --allow-write`). Before yo
 - **Relative moves are not idempotent.** `ue_set_transform` with `add`/`multiply` moves
   twice if resent. After a timeout, read the transform with `ue_get_actor` before deciding.
 
-To undo: `uebox tools call ue_undo --allow-write`. `ue_undo_history` (read-only) shows the
+To undo one step: `uebox tools call ue_undo --args '{"steps":1}' --allow-write`. Always pass
+`steps` — without it `ue_undo` undoes the whole agent stack, including the box AI's edits. `ue_undo_history` (read-only) shows the
 stack first.
 
 **Never tell the user to press Ctrl+Z to undo your change.** CLI writes land on a separate

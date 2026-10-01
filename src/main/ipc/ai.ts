@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import {
   generateImages,
   getImageModelStatus,
+  type GeneratedImageData,
   type GenerateImagesRequest
 } from '../ai/imageGeneration'
 import {
@@ -47,6 +48,33 @@ function describeError(error: unknown): string {
 function turnUsage(usage: unknown): AgentTurnUsage | undefined {
   const turn = toTurnUsage(usage as Parameters<typeof toTurnUsage>[0])
   return hasTurnUsage(turn) ? turn : undefined
+}
+
+/**
+ * 出好的图存进素材库 AIGC/图片，每张带回 `filePath`。
+ *
+ * 存盘失败不算整次失败：图已经花钱出了，那张就不带 `filePath`，调用方回落到 base64。
+ * 素材库按需加载 —— 它拖着数据库，生图之外的 IPC 用不着。
+ */
+async function saveToAigcLibrary(
+  images: GeneratedImageData[],
+  prompt: string
+): Promise<Array<GeneratedImageData & { filePath?: string }>> {
+  const { saveAIGCAssetFromBuffer } = await import('../services/aigc/assetSaver')
+  // 括号也去掉：路径要进 markdown 的 `![](...)`，`)` 会把链接提前截断
+  const baseName = prompt.replace(/[\\/:*?"<>|()[\]\s]+/g, ' ').trim().slice(0, 40) || undefined
+  return Promise.all(
+    images.map(async (image, index) => {
+      const subtype = /^image\/([a-z0-9.+-]+)/i.exec(image.mediaType)?.[1]?.toLowerCase()
+      const saved = await saveAIGCAssetFromBuffer(Buffer.from(image.base64, 'base64'), 'image', {
+        suggestedName: baseName && images.length > 1 ? `${baseName}_${index + 1}` : baseName,
+        extension: subtype === 'jpeg' ? 'jpg' : subtype || 'png',
+        prompt
+      })
+      if (!saved.success) console.warn('[AI IPC] 生图存素材库失败:', saved.error)
+      return saved.success ? { ...image, filePath: saved.filePath } : image
+    })
+  )
 }
 
 export function registerAiIPC(): void {
@@ -230,16 +258,26 @@ export function registerAiIPC(): void {
    * 与聊天同理，必须走主进程：密钥不进渲染层，而且渲染层直连厂商域名会撞上 CORS。
    * 返回的是 base64 而不是 URL —— 本机 provider（Ollama、自建网关）根本不给外链，
    * 而给外链的那几家链接都是几小时后失效的临时地址，存下来的资产会集体变成裂图。
+   *
+   * `saveToLibrary`：顺手存进素材库 AIGC/图片，并带回 `filePath`。对话框生图要它 ——
+   * 一张 1K 图的 base64 动辄几百 KB，直接塞进消息正文会撑爆 markdown 渲染的长度上限，
+   * 用户看到的就是一屏 base64 字符。存成文件后消息里只放一个短路径。
    */
-  ipcMain.handle('ai:image-generate', async (_event, args: GenerateImagesRequest) => {
-    try {
-      return { success: true, data: { images: await generateImages(args) } }
-    } catch (error) {
-      const message = describeError(error)
-      console.error('[AI IPC] image-generate 失败:', message)
-      return { success: false, error: message }
+  ipcMain.handle(
+    'ai:image-generate',
+    async (_event, args: GenerateImagesRequest & { saveToLibrary?: boolean }) => {
+      try {
+        const { saveToLibrary, ...request } = args
+        const images = await generateImages(request)
+        if (!saveToLibrary) return { success: true, data: { images } }
+        return { success: true, data: { images: await saveToAigcLibrary(images, request.prompt) } }
+      } catch (error) {
+        const message = describeError(error)
+        console.error('[AI IPC] image-generate 失败:', message)
+        return { success: false, error: message }
+      }
     }
-  })
+  )
 
   /** 只看有没有绑定，不发请求。界面据此决定显示生成按钮还是引导 */
   ipcMain.handle('ai:image-model-status', async () => ({

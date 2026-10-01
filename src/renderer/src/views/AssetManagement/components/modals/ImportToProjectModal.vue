@@ -1207,7 +1207,16 @@ const editorNote = computed(() => {
 
 /** UE 冷启动加上编译着色器，十分钟也不算离谱；再久就该让用户去看一眼了 */
 const EDITOR_WAIT_MS = 10 * 60 * 1000
-const waitForConnection = (project: ProjectRecord, signal: AbortSignal): Promise<boolean> =>
+/**
+ * 编辑器本来就开着：要么还在加载、插件马上连上来，要么插件压根没启用（这时主进程
+ * 不会替它装插件，装了也得重启编辑器才生效），等多久都连不上。给两分钟就够分清
+ */
+const RUNNING_EDITOR_WAIT_MS = 2 * 60 * 1000
+const waitForConnection = (
+  project: ProjectRecord,
+  signal: AbortSignal,
+  waitMs = EDITOR_WAIT_MS
+): Promise<boolean> =>
   new Promise((resolve) => {
     if (isReachable(project)) return resolve(true)
     const finish = (ok: boolean): void => {
@@ -1220,7 +1229,7 @@ const waitForConnection = (project: ProjectRecord, signal: AbortSignal): Promise
     const timer = setTimeout(() => {
       launchTimedOut.value = true
       finish(false)
-    }, EDITOR_WAIT_MS)
+    }, waitMs)
     const stop = watch(connectedProjects, () => {
       if (isReachable(project)) finish(true)
     })
@@ -1245,6 +1254,7 @@ const openProjectAndWait = async (
       error?: string
       pathNotFound?: boolean
       pluginFailure?: string
+      alreadyRunning?: boolean
     } | null
     if (signal.aborted) return false
     if (!res?.success) {
@@ -1260,9 +1270,19 @@ const openProjectAndWait = async (
       message.error(t('importToProjectModal.pluginNotInstalled', { error: res.pluginFailure }))
       return false
     }
-    const connected = await waitForConnection(project, signal)
+    const connected = await waitForConnection(
+      project,
+      signal,
+      res.alreadyRunning ? RUNNING_EDITOR_WAIT_MS : EDITOR_WAIT_MS
+    )
     if (!connected && launchTimedOut.value)
-      message.warning(t('importToProjectModal.editorWaitTimeout'))
+      message.warning(
+        t(
+          res.alreadyRunning
+            ? 'importToProjectModal.alreadyRunningNotConnected'
+            : 'importToProjectModal.editorWaitTimeout'
+        )
+      )
     return connected
   } finally {
     launchingProjectName.value = ''

@@ -5861,6 +5861,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     waitingForEditor: 'Opening "{name}". Import starts automatically once UE is ready.',
     editorWaitTimeout:
       'UE still has not connected. Make sure the project is open in UE, then try again.',
+    alreadyRunningNotConnected:
+      'This project is already open in UE but is not connected — the UnrealAgentLink plugin is probably not enabled. Enable it, restart the editor, then try again.',
     openProjectFailed: 'Could not open the project: {error}',
     uprojectMissing:
       "Cannot find this project's .uproject file. It may have been moved or deleted.",

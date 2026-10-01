@@ -52,7 +52,17 @@ export interface TrailCall {
   /** 这次报错出场 / 被留作对照的经验 id */
   shown?: string[]
   held?: string[]
+  /**
+   * 上帝工具才记：完整的脚本 / 命令（上限 `CODE_LIMIT`）。
+   *
+   * 参数摘要只有前 800 字，而脚本改的那一行常在后面。整理员要拿失败和成功两次的
+   * 全文做行级比对，才知道「改了哪一行」（见 `curator.ts` 的 `scriptDiff`）
+   */
+  code?: string
 }
+
+/** 原始账里记脚本全文的上限。再长的脚本只记前这么多，比对时尾部的改动就看不到了 */
+export const CODE_LIMIT = 20_000
 
 /** 整理员看过前多少条调用。同一条会话结束好几轮时，下一次只看新的，不重复花钱 */
 export interface TrailCurated {
@@ -117,28 +127,42 @@ export class TrailWriter {
 export async function readTrail(
   dir: string,
   sessionId: string
-): Promise<{ header: TrailHeader; calls: TrailCall[]; curatedThrough: number } | undefined> {
+): Promise<
+  | { header: TrailHeader; calls: TrailCall[]; headers: TrailHeader[]; curatedThrough: number }
+  | undefined
+> {
   let text: string
   try {
     text = await fs.readFile(fileFor(dir, sessionId), 'utf8')
   } catch {
     return undefined
   }
+  // 每一轮新起的 TrailWriter 都写一行自己的 header；会话中途换了工程，后面的调用就归新 header。
+  // `headers[i]` 是 `calls[i]` 前面最近的那个，整理员按它分工程，不能拿第一行套整条会话
   let header: TrailHeader | undefined
+  let current: TrailHeader | undefined
   const calls: TrailCall[] = []
+  const owners: Array<TrailHeader | undefined> = []
   let curatedThrough = 0
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     try {
       const parsed = JSON.parse(line) as TrailLine
-      if (parsed.kind === 'header') header ??= parsed
-      else if (parsed.kind === 'call') calls.push(parsed)
-      else if (parsed.kind === 'curated') curatedThrough = Math.max(curatedThrough, parsed.through)
+      if (parsed.kind === 'header') {
+        header ??= parsed
+        current = parsed
+      } else if (parsed.kind === 'call') {
+        calls.push(parsed)
+        owners.push(current)
+      } else if (parsed.kind === 'curated')
+        curatedThrough = Math.max(curatedThrough, parsed.through)
     } catch {
       // 半行（写到一半断电）跳过
     }
   }
-  return header ? { header, calls, curatedThrough } : undefined
+  if (!header) return undefined
+  const first = header
+  return { header, calls, headers: owners.map((owner) => owner ?? first), curatedThrough }
 }
 
 export async function markCurated(dir: string, sessionId: string, through: number): Promise<void> {

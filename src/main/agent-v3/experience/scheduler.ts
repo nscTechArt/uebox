@@ -18,7 +18,15 @@ import { join } from 'path'
 
 import { observeAgentRuns } from '../host/runObserver'
 import { curateSession, type CurateResult } from './curator'
-import { markCurated, pruneTrails, readTrail, TRAIL_SUBDIR } from './trail'
+import { createEditorProbe, type EditorProbe } from './probe'
+import {
+  markCurated,
+  pruneTrails,
+  readTrail,
+  TRAIL_SUBDIR,
+  type TrailCall,
+  type TrailHeader
+} from './trail'
 
 /** 会话结束后等多久再整理。用户常常紧接着再发一句，那一轮结束再说 */
 export const CURATE_DELAY_MS = 60_000
@@ -59,6 +67,8 @@ export interface CuratorSchedulerDeps {
   home?: string
   delayMs?: number
   complete?: (system: string, user: string) => Promise<string>
+  /** 到引擎里验真。缺省用真的编辑器探针（见 `probe.ts`）；测试传桩 */
+  probe?: EditorProbe
   onResult?: (sessionId: string, result: CurateResult) => void
 }
 
@@ -68,21 +78,36 @@ export function startExperienceCurator(deps: CuratorSchedulerDeps = {}): () => v
   const trailDir = join(home, TRAIL_SUBDIR)
   const delay = deps.delayMs ?? CURATE_DELAY_MS
   const complete = deps.complete ?? defaultComplete
+  const probe = deps.probe ?? createEditorProbe()
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   let chain: Promise<unknown> = Promise.resolve()
 
   const curate = async (sessionId: string): Promise<void> => {
     const trail = await readTrail(trailDir, sessionId)
     if (!trail || trail.calls.length <= trail.curatedThrough) return
-    const calls = trail.calls.slice(trail.curatedThrough)
-    const result = await curateSession({
-      header: trail.header,
-      calls,
-      complete,
-      globalDir: home,
-      // 期望动作里的工具必须是这次会话真的调过的，原始账本身就是那份名单
-      knownTools: new Set(calls.map((call) => call.tool))
-    })
+    // 会话中途换过工程 / 引擎：按各自的 header 分开整理，经验才落到学到它的那个工程
+    const groups = new Map<string, { header: TrailHeader; calls: TrailCall[] }>()
+    for (let index = trail.curatedThrough; index < trail.calls.length; index++) {
+      const header = trail.headers[index]!
+      const key = `${header.projectRoot}\n${header.engineVersion ?? ''}`
+      const group = groups.get(key) ?? { header, calls: [] }
+      group.calls.push(trail.calls[index]!)
+      groups.set(key, group)
+    }
+    const result: CurateResult = { calledModel: false, written: [] }
+    for (const { header, calls } of groups.values()) {
+      const part = await curateSession({
+        header,
+        calls,
+        complete,
+        globalDir: home,
+        probe,
+        // 期望动作里的工具必须是这次会话真的调过的，原始账本身就是那份名单
+        knownTools: new Set(calls.map((call) => call.tool))
+      })
+      result.calledModel ||= part.calledModel
+      result.written.push(...part.written)
+    }
     await markCurated(trailDir, sessionId, trail.calls.length)
     if (result.written.length > 0) {
       console.log(`[Experience] 会话 ${sessionId} 整理出 ${result.written.length} 条经验`)

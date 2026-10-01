@@ -58,7 +58,12 @@ interface LooseMessage {
   isError?: boolean
 }
 
-/** 消息里的纯文本。content 可能是字符串，也可能是块数组 */
+/**
+ * 消息里的纯文本。content 可能是字符串，也可能是块数组。
+ *
+ * 音视频引用（`[[uebox-media …]]`）也是文本块，但那是给 streamFn 换链接用的标记，
+ * 里面有本机路径和对象存储的 key，不是谁说的话，不交给外部客户端
+ */
 function textOf(message: LooseMessage): string {
   const { content } = message
   if (typeof content === 'string') return content
@@ -67,10 +72,26 @@ function textOf(message: LooseMessage): string {
     .filter(
       (block): block is { type: 'text'; text: string } =>
         (block as { type?: string })?.type === 'text' &&
-        typeof (block as { text?: unknown }).text === 'string'
+        typeof (block as { text?: unknown }).text === 'string' &&
+        // 同 `promptMedia.parseMediaRef` 的判法；那个模块会拉起设置存储，不能静态引进来
+        !(block as { text: string }).text.startsWith(MEDIA_REF_PREFIX)
     )
     .map((block) => block.text)
     .join('')
+}
+
+const MEDIA_REF_PREFIX = '[[uebox-media '
+
+/** 盒子拼在用户原话前面的机器块（`<runtime-status>` 信封、任务板旧账……） */
+const LEADING_MACHINE_BLOCK = /^\s*<([a-z][\w-]*)\b[^>]*>[\s\S]*?<\/\1>\s*/i
+
+/** 用户这句话本身：剥掉前面那些机器块 */
+function userTextOf(message: LooseMessage): string {
+  let text = textOf(message)
+  for (let m = LEADING_MACHINE_BLOCK.exec(text); m; m = LEADING_MACHINE_BLOCK.exec(text)) {
+    text = text.slice(m[0].length)
+  }
+  return text
 }
 
 /** 助手这一步调了哪些工具，只要名字 */
@@ -90,7 +111,7 @@ function clip(text: string, max: number): string {
 export function renderMessage(message: LooseMessage): string | undefined {
   switch (message.role) {
     case 'user': {
-      const text = textOf(message).trim()
+      const text = userTextOf(message).trim()
       return text ? `【用户】${text}` : undefined
     }
     case 'assistant': {
@@ -161,7 +182,7 @@ export function createBoxSessionsTool(): UnrealAgentTool<unknown> {
             const first = messages.find((m) => m.role === 'user')
             return {
               sessionId: meta.sessionId,
-              title: first ? clip(textOf(first), TITLE_CHARS) || '（无文字）' : '（空对话）',
+              title: first ? clip(userTextOf(first), TITLE_CHARS) || '（无文字）' : '（空对话）',
               updatedAt: new Date(meta.modifiedAt).toISOString(),
               messageCount: meta.messageCount
             }

@@ -52,7 +52,8 @@ export function isEnvironmentalError(text: string): boolean {
  */
 function lastPythonException(text: string): string | undefined {
   if (!text.includes('Traceback (most recent call last)')) return undefined
-  const matches = text.match(/\b[A-Z][A-Za-z]*(?:Error|Exception|Warning): [^\n]*/g)
+  // 裸的 `Exception:` 也要认：UE 的 Python 绑定常抛 `Exception: Material: Failed to find property ...`
+  const matches = text.match(/\b(?:[A-Z][A-Za-z]*)?(?:Error|Exception|Warning): [^\n]*/g)
   return matches?.[matches.length - 1]
 }
 

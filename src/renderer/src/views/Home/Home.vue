@@ -294,7 +294,9 @@ const handleDropRefresh = async (e: DragEvent): Promise<void> => {
                 } else {
                   const parts: string[] = []
                   if (successCount > 0)
-                    parts.push(t('page.home.project.importToast.summaryOk', { count: successCount }))
+                    parts.push(
+                      t('page.home.project.importToast.summaryOk', { count: successCount })
+                    )
                   parts.push(t('page.home.project.importToast.summaryFailed', { count: failCount }))
                   message.warning({
                     content: parts.join(t('page.home.project.importToast.summarySeparator'))

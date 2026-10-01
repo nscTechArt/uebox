@@ -212,11 +212,13 @@ function describePivotRisk(instances: SpawnActorNormalizedInstance[]): string {
  * 超时重试之后多出来的一份也靠这一句才看得出来。
  */
 export function describeRenames(
-  created: Array<{ name?: string; requested_name?: string; renamed?: boolean } | null> | null | undefined
+  created:
+    | Array<{ name?: string; requested_name?: string; renamed?: boolean } | null>
+    | null
+    | undefined
 ): string {
-  const renamed = (created ?? []).filter(
-    (item): item is { name: string; requested_name: string } =>
-      Boolean(item?.renamed && item.requested_name && item.name)
+  const renamed = (created ?? []).filter((item): item is { name: string; requested_name: string } =>
+    Boolean(item?.renamed && item.requested_name && item.name)
   )
   if (renamed.length === 0) return ''
   const pairs = renamed.map((item) => `${item.requested_name} → ${item.name}`).join('、')

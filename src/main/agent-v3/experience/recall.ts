@@ -41,7 +41,9 @@ export function matchEntries(
   entries: LayeredEntry[],
   tool: string,
   normalizedError: string,
-  engine?: string
+  engine?: string,
+  /** 这一次报错在说的 API（上帝工具才有，见 `symbolOf`） */
+  symbol?: string
 ): LayeredEntry[] {
   const rank = (entry: LayeredEntry): number =>
     (entry.layer === 'project' ? 2 : 0) + (entry.status === 'proven' ? 1 : 0)
@@ -53,6 +55,9 @@ export function matchEntries(
         // 不只是「含有」：片段还得对这一次的报错足够具体（见 specificity.ts）。
         // 这一道也兜住手改过的、以及这条规则之前写下的旧经验
         patternProblem(tool, entry.errorPattern, normalizedError) === undefined &&
+        // 上帝工具：说的得是同一个 API。经验记着 `character.is_hidden`，
+        // 这次报的是 `character.get_actor_label`，片段再像也不是一回事
+        (!entry.symbol || entry.symbol === symbol) &&
         !(engine && entry.notFor?.includes(engine))
     )
     .sort((a, b) => rank(b) - rank(a))

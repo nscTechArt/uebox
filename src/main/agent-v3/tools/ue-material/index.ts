@@ -72,7 +72,8 @@ const NAMESPACE = 'ue.material'
  */
 /**
  * 混合模式。TranslucentColoredTransmittance 只有开了 Substrate 的项目（5.4+）才认 ——
- * 没开时插件当成不认识回失败，valid_values 里也不会列它（引擎枚举上就写着 SUBSTRATE_ONLY）。
+ * 没开时 set_property 回失败，valid_values 里也不会列它（引擎枚举上就写着 SUBSTRATE_ONLY）；
+ * material.create 则是静默忽略、建成 Opaque，所以创建回执要对一遍实际的混合模式。
  */
 const BLEND_MODES = [
   'Opaque',
@@ -151,11 +152,30 @@ const createMaterial = defineUeTool<z.ZodTypeAny, CreateMaterialResponse>({
     shading_model: z.enum(SHADING_MODELS).optional().describe('着色模型（可选，默认 DefaultLit）'),
     two_sided: z.boolean().optional().describe('是否双面渲染（可选，默认 false）')
   }),
-  toOutcome: (r) => ({
-    text: `已创建母材质 ${r.material_name}（${r.material_path}）。可用引脚：${r.available_pins?.join(', ') || '未返回'}`,
+  toOutcome: (r, args) => ({
+    text:
+      `已创建母材质 ${r.material_name}（${r.material_path}）。可用引脚：${r.available_pins?.join(', ') || '未返回'}` +
+      blendModeMismatch((args as { blend_mode?: string } | undefined)?.blend_mode, r.blend_mode),
     details: r
   })
 })
+
+/**
+ * 要的混合模式没生效时给一句话。插件建材质时不认识的混合模式直接跳过，
+ * 回的 `blend_mode` 是实际值（`BLEND_Opaque` 这种引擎枚举名）
+ */
+export function blendModeMismatch(
+  requested: string | undefined,
+  actual: string | undefined
+): string {
+  if (!requested || !actual || actual === `BLEND_${requested}` || actual === requested) return ''
+  return (
+    `
+⚠️ 要的混合模式 ${requested} 没有生效，材质实际是 ${actual.replace(/^BLEND_/, '')}` +
+    `（${requested === 'TranslucentColoredTransmittance' ? '这个模式要工程开启 Substrate' : '插件不认识这个值，可能是旧版插件'}）。` +
+    '别当成已经设好，换个模式或先开 Substrate 再用 material_set_property 改'
+  )
+}
 
 interface CreateInstanceResponse {
   instance_path: string

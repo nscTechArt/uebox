@@ -60,16 +60,24 @@ const liveProject = computed(() => {
 const result = ref<EditorHealthResult | null>(null)
 const updatedAt = ref<Date | null>(null)
 const loading = ref(false)
+/** 正在读的是哪个工程。读到一半换了工程，旧的那份回来就不能再写进来 */
+let loadingPath: string | null = null
 
 async function refresh(): Promise<void> {
   const path = liveProject.value?.projectPath
-  if (!path || loading.value) return
+  if (!path || loadingPath === path) return
+  loadingPath = path
   loading.value = true
   try {
-    result.value = await getEditorHealth(path)
+    const health = await getEditorHealth(path)
+    if (liveProject.value?.projectPath !== path) return
+    result.value = health
     updatedAt.value = new Date()
   } finally {
-    loading.value = false
+    if (loadingPath === path) {
+      loadingPath = null
+      loading.value = false
+    }
   }
 }
 

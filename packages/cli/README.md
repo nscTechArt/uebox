@@ -115,8 +115,10 @@ uebox tools call ue_get_actor --args "{""name"":""Floor""}"
 ### 撤销
 
 ```bash
-uebox tools call ue_undo --allow-write
+uebox tools call ue_undo --args '{"steps":1}' --allow-write
 ```
+
+**一定带 `steps`。** 不带就是把整条 agent 撤销栈全撤 —— 连盒子里 AI 的改动一起。
 
 **不要在编辑器里按 Ctrl+Z。** CLI 的写入落在一条**独立的 agent 撤销栈**上，事务一结束
 编辑器就换回了它自己的栈 —— 所以 Ctrl+Z 撤的是**你自己上一步手动操作**，CLI 那一步纹丝

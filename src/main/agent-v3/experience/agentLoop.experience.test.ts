@@ -54,7 +54,8 @@ describe('经验进上下文', () => {
     const tool = defineTool({
       name: 'ue_run_python_script',
       namespace: 'ue.system',
-      risk: 'mutating',
+      // 和注册表一致：跑任意代码的工具记成 destructive，也得照样学
+      risk: 'destructive',
       description: '跑脚本',
       input: z.object({ script: z.string() }),
       execute: async () => {

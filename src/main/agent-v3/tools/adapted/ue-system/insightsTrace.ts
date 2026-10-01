@@ -318,8 +318,13 @@ interface TimeWindow {
   end_seconds?: number
 }
 
+/**
+ * UE 用 `FParse::Token(Cmd, bUseEscape=true)` 读文件名：反斜杠是转义符，会被吃掉，
+ * `D:\Traces\a.csv` 读成 `D:Tracesa.csv`。Windows 也认正斜杠，一律换成 `/`
+ */
 function exportCommand(csvPath: string, threads: string, window: TimeWindow): string {
-  let cmd = `TimingInsights.ExportTimerStatistics "${csvPath.replace(/"/g, '\\"')}" -threads="${threads}"`
+  const file = csvPath.replace(/\\/g, '/').replace(/"/g, '\\"')
+  let cmd = `TimingInsights.ExportTimerStatistics "${file}" -threads="${threads}"`
   if (window.start_seconds != null) cmd += ` -startTime=${window.start_seconds}`
   if (window.end_seconds != null) cmd += ` -endTime=${window.end_seconds}`
   return cmd

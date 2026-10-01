@@ -154,3 +154,78 @@ export function subjectName(message: string): string | undefined {
     .filter((n) => !n.includes('<'))
   return names[names.length - 1]
 }
+
+/**
+ * 上帝工具的第二把钥匙：报错在说的那个 API。
+ *
+ * 工具名对 `ue_run_python_script` 几乎不起区分作用，真正的钥匙是 `character.is_hidden`
+ * 这样的「类.成员」或 `assetregistry.getassetsbyclass(class_path_name)` 这样的「函数(参数)」。
+ * 有了它，召回从「报错里含这一段」收紧到「说的是同一个 API」，还能在执行**之前**
+ * 扫脚本里有没有用到已知的错误写法（见 `precheck.ts`）。
+ *
+ * 规则照真实报错写（2026-09-30 抽样：AttributeError 38 次、TypeError 16 次 ……），
+ * 认不出的回 undefined —— 那条经验就只按片段匹配，不做执行前提醒。
+ */
+const PYTHON_SYMBOL_RULES: { pattern: RegExp; symbol: (m: RegExpMatchArray) => string }[] = [
+  {
+    pattern: /^attributeerror: '([\w.]+)' object has no attribute '(\w+)'/,
+    symbol: (m) => `${m[1]}.${m[2]}`
+  },
+  {
+    pattern: /^attributeerror: type object '([\w.]+)' has no attribute '(\w+)'/,
+    symbol: (m) => `${m[1]}.${m[2]}`
+  },
+  {
+    pattern: /^attributeerror: module '([\w.]+)' has no attribute '(\w+)'/,
+    symbol: (m) => `${m[1]}.${m[2]}`
+  },
+  {
+    pattern: /failed to convert parameter '(\w+)' when calling function '([\w.]+)'/,
+    symbol: (m) => `${m[2]}(${m[1]})`
+  },
+  {
+    pattern: /^\w+: ([\w.]+)\(\) (?:required argument|got an unexpected keyword argument) '(\w+)'/,
+    symbol: (m) => `${m[1]}(${m[2]})`
+  },
+  {
+    pattern: /^\w+: (\w+): failed to find property '(\w+)'/,
+    symbol: (m) => `${m[1]}.${m[2]}`
+  }
+]
+
+export function pythonSymbol(normalizedError: string): string | undefined {
+  for (const rule of PYTHON_SYMBOL_RULES) {
+    const match = normalizedError.match(rule.pattern)
+    if (match) return rule.symbol(match)
+  }
+  return undefined
+}
+
+/** 控制台命令的钥匙：命令名（第一个词），小写 */
+export function consoleSymbol(command: unknown): string | undefined {
+  if (typeof command !== 'string') return undefined
+  const verb = command.trim().split(/\s+/)[0]
+  return verb ? verb.toLowerCase() : undefined
+}
+
+/**
+ * 一次调用的 API 钥匙。Python 看报错，控制台看命令本身。
+ * 普通工具没有第二把钥匙，回 undefined。
+ */
+export function symbolOf(
+  tool: string,
+  normalizedError: string,
+  args?: unknown
+): string | undefined {
+  if (tool === 'ue_run_python_script') return pythonSymbol(normalizedError)
+  if (tool === 'ue_run_console_command') {
+    return consoleSymbol((args as { command?: unknown } | undefined)?.command)
+  }
+  return undefined
+}
+
+/** 「类.成员」里的成员名。函数参数那种没有可以在脚本里扫的写法，回 undefined */
+export function attributeMember(symbol: string): string | undefined {
+  const match = symbol.match(/^[\w.]*\.(\w+)$/)
+  return match?.[1]
+}

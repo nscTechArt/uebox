@@ -628,7 +628,10 @@ function attachTeamGate(
  * 开局摆给制作人看的任务板旧账（见 `core/team/boardRecap.ts`）。
  * 不是工作室、没有旧账、读不到任务板都给空串 —— 它是提醒，不能挡住这一轮。
  */
-async function teamCarryOverBlock(ctx: SessionContext, options: SessionExecutionOptions): Promise<string> {
+async function teamCarryOverBlock(
+  ctx: SessionContext,
+  options: SessionExecutionOptions
+): Promise<string> {
   const since = options.team?.roundStartedAt
   if (!ctx.team || since === undefined) return ''
   try {
@@ -848,6 +851,11 @@ export interface AgentV3ContinueArgs {
    * 一点「从断点继续」却开始每一步写操作都弹框，而他什么都没改过。
    */
   approvalMode?: ApprovalMode
+  /**
+   * 同 execute：会话此刻绑的模型。上一轮在 A 上报错、用户在输入框里换成 B 再点
+   * 「从断点继续」，续跑得用 B —— 执行记录里那份还是出错的 A
+   */
+  sessionModel?: SessionModel
 }
 
 /**
@@ -1573,7 +1581,8 @@ export function registerAgentV3IPC(): void {
    */
   ipcMain.handle('agent-v3:team-end', async (event, args: { sessionId?: string }) => {
     const sessionId = args?.sessionId
-    if (typeof sessionId !== 'string' || !sessionId) return { success: false, error: '缺 sessionId' }
+    if (typeof sessionId !== 'string' || !sessionId)
+      return { success: false, error: '缺 sessionId' }
     if (activeAgents.has(sessionId)) return { success: false, errorKey: 'running' }
     const options = await loadExecutionOptions(sessionId)
     if (!options?.team) return { success: true }
@@ -2356,10 +2365,12 @@ export function registerAgentV3IPC(): void {
       return { success: false, error: plan.reason }
     }
 
-    // 续跑认回这条会话绑定的模型。存量会话没有记录，照旧走全局默认
-    const resumeModel = options.model
-      ? await resolveSessionModel(sessionId, undefined, options.model)
-      : {}
+    // 续跑认回这条会话绑定的模型：渲染层带下来的优先（用户可能刚换过），
+    // 其次执行记录里那份。都没有的存量会话照旧走全局默认
+    const resumeModel =
+      args.sessionModel || options.model
+        ? await resolveSessionModel(sessionId, args.sessionModel, options.model)
+        : {}
 
     // 应用刚重启、用户第一件事就是点「从断点继续」时，主进程这边还没有档位
     // 可言（默认是最严的一档）—— 渲染层带下来的那份才是用户设的。
@@ -2648,7 +2659,11 @@ export function registerAgentV3IPC(): void {
     try {
       return { success: true, ...(await listExperiences(experienceHome(), experienceProjects())) }
     } catch (error) {
-      return { success: false, entries: [], error: error instanceof Error ? error.message : String(error) }
+      return {
+        success: false,
+        entries: [],
+        error: error instanceof Error ? error.message : String(error)
+      }
     }
   })
 
@@ -2659,7 +2674,12 @@ export function registerAgentV3IPC(): void {
       if (!ref || typeof args?.pinned !== 'boolean') {
         return { success: false, error: '参数不对：需要经验的位置和固定状态' }
       }
-      const found = await setExperiencePinned(experienceHome(), experienceProjects(), ref, args.pinned)
+      const found = await setExperiencePinned(
+        experienceHome(),
+        experienceProjects(),
+        ref,
+        args.pinned
+      )
       return found ? { success: true } : { success: false, error: '这条经验已经不在了' }
     }
   )

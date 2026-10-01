@@ -223,7 +223,9 @@ describe('material_get_graph 的 Substrate 提示', () => {
       connections: [],
       material_pins: ['BaseColor', 'Roughness', 'Opacity', 'FrontMaterial']
     })
-    const text = textOf(await byName('material_get_graph').execute('c1', { path: '/Game/M_Plastic' }))
+    const text = textOf(
+      await byName('material_get_graph').execute('c1', { path: '/Game/M_Plastic' })
+    )
 
     expect(text).toContain('普通材质照常连 BaseColor')
     expect(text).not.toContain('按 Substrate 解释')
@@ -268,5 +270,16 @@ describe('material_search_nodes 的 Substrate 信息', () => {
     const text = textOf(await byName('material_search_nodes').execute('c1', { query: 'Substrate' }))
 
     expect(text.split('\n')[0]).toContain('r.Substrate=True')
+  })
+})
+
+describe('material_create 回执核对混合模式', () => {
+  it('没生效时说清楚，生效了不多话', async () => {
+    const { blendModeMismatch } = await import('./index')
+    expect(blendModeMismatch('TranslucentColoredTransmittance', 'BLEND_Opaque')).toContain(
+      '没有生效'
+    )
+    expect(blendModeMismatch('Translucent', 'BLEND_Translucent')).toBe('')
+    expect(blendModeMismatch(undefined, 'BLEND_Opaque')).toBe('')
   })
 })

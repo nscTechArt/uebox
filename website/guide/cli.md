@@ -98,8 +98,10 @@ uebox viewport screenshot --output shot.png
 ### 撤销
 
 ```bash
-uebox tools call ue_undo --allow-write
+uebox tools call ue_undo --args '{"steps":1}' --allow-write
 ```
+
+**一定带 `steps`。** 不带就是把整条 agent 撤销栈全撤 —— 连盒子里 AI 的改动一起。
 
 编辑器里按 `Ctrl+Z` **碰不到 CLI 做的这一步**。
 

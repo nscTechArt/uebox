@@ -1835,7 +1835,11 @@ async function handleBubbleAction(payload: {
   }
 
   if (payload.action === REVIEW_FIX_ACTION) {
-    handleSend({ content: buildReviewFixPrompt(payload.data?.findings ?? [], t), images: [] })
+    // 走输入框那条路：这一轮还在跑（用户已经发了下一句）就排队，不能直接开第二轮
+    handleComposerSend({
+      content: buildReviewFixPrompt(payload.data?.findings ?? [], t),
+      images: []
+    })
     return
   }
 
@@ -1868,7 +1872,8 @@ function handleSelfCheck(bubbleId: string, data?: Partial<SelfCheckInput>): void
     t
   )
 
-  handleSend({ content: prompt, images: [] })
+  // 同「交给 AI 修」：会话忙着就排队
+  handleComposerSend({ content: prompt, images: [] })
 }
 
 /**

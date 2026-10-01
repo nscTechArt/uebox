@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
 import type { EditorHealthResult } from '@core/shared/editorHealth'
@@ -58,6 +58,9 @@ async function mountMonitor(sessionId = 'sid'): Promise<ReturnType<typeof mount>
   await flushPromises()
   return wrapper
 }
+
+// 不卸载的话，前面各条挂的组件都还在监听 focus，最后一条会被读好几次
+enableAutoUnmount(afterEach)
 
 beforeEach(() => {
   connected.value = [PROJECT]
@@ -122,5 +125,28 @@ describe('EditorStatusMonitor', () => {
     await flushPromises()
 
     expect(getEditorHealth).toHaveBeenCalledOnce()
+  })
+
+  it('读到一半换了工程：旧工程的结果不写到新工程名下，新工程照样去读', async () => {
+    const OTHER = {
+      ...PROJECT,
+      connectionId: 'conn-2',
+      projectName: 'Other',
+      projectPath: 'D:/Other'
+    }
+    connected.value = [PROJECT, OTHER]
+    let resolveOld: (value: EditorHealthResult) => void = () => {}
+    getEditorHealth.mockImplementationOnce(
+      () => new Promise<EditorHealthResult>((resolve) => (resolveOld = resolve))
+    )
+    const wrapper = await mountMonitor()
+
+    useChatSessionsStore().setProject('sid', { projectName: 'Other' })
+    await flushPromises()
+    expect(getEditorHealth).toHaveBeenLastCalledWith('D:/Other')
+
+    resolveOld(okResult({ startup_seconds: 900, local_ddc_hit_pct: 10 }))
+    await flushPromises()
+    expect(wrapper.find('.monitor-count').exists()).toBe(false)
   })
 })

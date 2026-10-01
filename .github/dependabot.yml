@@ -49,6 +49,5 @@ updates:
     ignore:
       # electron 跟着 electron-builder / better-sqlite3 的 ABI 走，
       # 升版本要连带 pnpm rebuild:electron，不能让机器人自己决定。
+      # 小版本也拦：44.0 → 44.4 一样会牵出原生模块重编译，统一人工升。
       - dependency-name: electron
-        update-types:
-          - version-update:semver-major

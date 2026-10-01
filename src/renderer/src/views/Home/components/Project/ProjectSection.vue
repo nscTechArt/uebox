@@ -1418,7 +1418,6 @@ const handleBlankMenuClick = async (key: string) => {
   }
 }
 
-
 const handleCreateCollection = (): void => openCollectionModal(null, '')
 
 // 重命名弹窗

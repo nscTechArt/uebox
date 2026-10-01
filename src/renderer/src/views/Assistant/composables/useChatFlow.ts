@@ -134,7 +134,7 @@ export function useChatFlow(params: UseChatFlowParams) {
   /** 从 markdown 里取图片地址：`![alt](url)` */
   function extractImageUrlFromMarkdown(markdown: string): string | null {
     if (typeof markdown !== 'string') return null
-    const match = markdown.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/)
+    const match = markdown.match(/!\[.*?\]\(((?:https?|local-resource):\/\/[^\s)]+)\)/)
     return match ? match[1] : null
   }
 
@@ -147,9 +147,7 @@ export function useChatFlow(params: UseChatFlowParams) {
         const content = msg.content
         if (typeof content === 'string') {
           const imageUrl = extractImageUrlFromMarkdown(content)
-          if (imageUrl && imageUrl.startsWith('http')) {
-            return imageUrl
-          }
+          if (imageUrl) return imageUrl
         }
       }
     }
@@ -196,7 +194,9 @@ export function useChatFlow(params: UseChatFlowParams) {
       const params: Parameters<typeof aiAPI.generateImage>[0] = {
         prompt,
         imageSize: '1K',
-        aspectRatio: '1:1'
+        aspectRatio: '1:1',
+        // 存成文件、消息里只放短路径：base64 塞进正文会超出 markdown 渲染上限，满屏乱码
+        saveToLibrary: true
       }
 
       // 有图就是图生图
@@ -208,7 +208,7 @@ export function useChatFlow(params: UseChatFlowParams) {
 
       if (response && response.images && response.images.length > 0) {
         const imageUrl = response.images[0].url
-        const markdownImage = `![${prompt}](${imageUrl})`
+        const markdownImage = `![${prompt.replace(/[[\]]/g, '')}](${imageUrl})`
         chatMsgStore.replaceTyping(currentSid, typingId, markdownImage, true)
         chatStore.appendMessage(currentSid, markdownImage)
         if (shouldMarkTaskDone(route.path, route.query?.sid, currentSid)) {

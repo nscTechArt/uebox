@@ -16,6 +16,7 @@
 import { errorFingerprint, isEnvironmentalError, normalizeError } from './errorSignature'
 import type { ExpectedAction, ExperienceEntry } from './experienceFile'
 import { applyOutcome, emptyStats, type Outcome } from './lifecycle'
+import { codeDigest, codeOf, findAvoided, formatPrecheck } from './precheck'
 import { recordProvenInProject } from './promotion'
 import {
   formatExperienceNote,
@@ -24,8 +25,9 @@ import {
   type ExperienceLayer,
   type LayeredEntry
 } from './recall'
+import { STRICT_TOOLS, symbolOf } from './specificity'
 import type { ExperienceStore } from './store'
-import { digestArgs, type TrailWriter } from './trail'
+import { CODE_LIMIT, digestArgs, type TrailWriter } from './trail'
 
 /** 出场后盯几步。超过还没再调同一个工具，就按「没有结论」收掉 */
 export const OBSERVE_WINDOW = 5
@@ -67,6 +69,11 @@ export interface ToolCallReport {
 }
 
 export interface ExperienceRuntime {
+  /**
+   * 执行前提醒（只对上帝工具）：代码里用了已验证的错误写法，回拦下的理由；放行回 undefined。
+   * 见 `precheck.ts`
+   */
+  before: (call: { tool: string; args: unknown }) => Promise<string | undefined>
   /** 回要挂在工具结果后面的文字；没有就回 undefined */
   after: (call: ToolCallReport) => Promise<string | undefined>
   /** 等所有在途的写入落盘。测试和会话收尾用 */
@@ -135,6 +142,8 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
   const now = deps.now ?? ((): string => new Date().toISOString())
   let step = 0
   let pending: Pending[] = []
+  /** 执行前拦过的代码（指纹 → 拦它的经验）。同一段再发一次就放行，跑成了说明拦错了 */
+  const blocked = new Map<string, LayeredEntry[]>()
   const writes = new Set<Promise<void>>()
 
   const storeOf = (layer: ExperienceLayer): ExperienceStore | undefined =>
@@ -246,6 +255,14 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
 
       observe(call, argsDigest, fingerprint)
 
+      const code = STRICT_TOOLS.has(call.tool) ? codeOf(call.tool, call.args) : undefined
+      const resent = code ? blocked.get(codeDigest(code)) : undefined
+      if (code && resent) {
+        blocked.delete(codeDigest(code))
+        // 拦下后原样再发、真跑成了：这次拦错了。从已验证降回试用，它就不再拦路
+        if (!call.isError) for (const entry of resent) demote(entry)
+      }
+
       const shown: LayeredEntry[] = []
       const held: LayeredEntry[] = []
       if (call.isError && !environmental && normalized) {
@@ -254,7 +271,8 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
           await readLayers(call.tool),
           call.tool,
           normalized,
-          deps.engine
+          deps.engine,
+          symbolOf(call.tool, normalized, call.args)
         )
         for (const entry of matches) {
           if (alreadyWatching.has(entry.id)) continue
@@ -287,7 +305,8 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
             ...(normalized ? { error: normalized.slice(0, 400), fp: fingerprint } : {}),
             ...(environmental ? { env: true } : {}),
             ...(shown.length ? { shown: shown.map((e) => e.id) } : {}),
-            ...(held.length ? { held: held.map((e) => e.id) } : {})
+            ...(held.length ? { held: held.map((e) => e.id) } : {}),
+            ...(code ? { code: code.slice(0, CODE_LIMIT) } : {})
           })
         )
       }
@@ -299,7 +318,57 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
     }
   }
 
+  /** 已验证的降回试用（执行前提醒拦错了） */
+  const demote = (entry: LayeredEntry): void => {
+    const store = storeOf(entry.layer)
+    if (!store) return
+    track(
+      store.updateTool(entry.tool, (entries) =>
+        entries.some((e) => e.id === entry.id && e.status === 'proven')
+          ? entries.map((e) => (e.id === entry.id ? { ...e, status: 'trial' as const } : e))
+          : undefined
+      )
+    )
+  }
+
+  const before = async (call: { tool: string; args: unknown }): Promise<string | undefined> => {
+    try {
+      if (!STRICT_TOOLS.has(call.tool) || !deps.isLearnableTool(call.tool, call.args))
+        return undefined
+      const code = codeOf(call.tool, call.args)
+      if (!code) return undefined
+      const digest = codeDigest(code)
+      // 拦过一次的原样再发：放行，结果在 after 里看
+      if (blocked.has(digest)) return undefined
+      const hits = findAvoided(code, await readLayers(call.tool), deps.engine)
+      if (hits.length === 0) return undefined
+
+      blocked.set(digest, hits)
+      // 拦下也算一次出场：之后改了代码并且成了，记一次采纳成功
+      step += 1
+      const watching = new Set(pending.map((item) => item.entry.id))
+      for (const entry of hits) {
+        if (watching.has(entry.id)) continue
+        pending.push({
+          entry,
+          arm: 'shown',
+          tool: call.tool,
+          fingerprint: '',
+          failArgs: digestArgs(call.args),
+          expect: { param: call.tool === 'ue_run_python_script' ? 'script' : 'command' },
+          startStep: step,
+          adopted: false
+        })
+      }
+      return formatPrecheck(hits, deps.engine)
+    } catch (error) {
+      console.warn('[Experience] 执行前提醒出错，已放行:', error)
+      return undefined
+    }
+  }
+
   return {
+    before,
     after,
     flush: async () => {
       while (writes.size > 0) await Promise.all([...writes])

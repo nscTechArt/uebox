@@ -69,6 +69,16 @@ export interface ExperienceEntry {
   engines?: string[]
   /** 通用层：在哪些引擎版本上照着做了还是同一个错 —— 这些版本上不再出场 */
   notFor?: string[]
+  /**
+   * 上帝工具才有：报错在说的那个 API（`character.is_hidden`）。召回时新报错得说的是同一个 API。
+   * 见 `specificity.ts` 的 `symbolOf`
+   */
+  symbol?: string
+  /**
+   * 脚本里的错误写法（`.is_hidden`），从「失败那次删掉、成功那次没有」的行里确定性抽出来。
+   * 已验证的经验据此在执行前提醒（见 `precheck.ts`）
+   */
+  avoid?: string
 }
 
 /** `5.5.4` / `UE 5.5` → `5.5`。拿不出 major.minor 的回 undefined */
@@ -143,6 +153,8 @@ export function parseExperienceFile(text: string): ExperienceEntry[] {
     const verified = fields.verified ? parseVerified(fields.verified) : undefined
     const engines = parseList(fields.engines)
     const notFor = parseList(fields['not-for'])
+    const symbol = fields.symbol?.trim()
+    const avoid = fields.avoid?.trim()
     entries.push({
       id,
       title,
@@ -155,7 +167,9 @@ export function parseExperienceFile(text: string): ExperienceEntry[] {
       status,
       ...(fields.pinned === 'yes' ? { pinned: true } : {}),
       ...(engines ? { engines } : {}),
-      ...(notFor ? { notFor } : {})
+      ...(notFor ? { notFor } : {}),
+      ...(symbol ? { symbol } : {}),
+      ...(avoid ? { avoid } : {})
     })
   }
   return entries
@@ -194,7 +208,9 @@ export function serializeExperienceFile(tool: string, entries: ExperienceEntry[]
       `- status: ${entry.status}`,
       ...(entry.pinned ? ['- pinned: yes'] : []),
       ...(entry.engines?.length ? [`- engines: ${entry.engines.join(', ')}`] : []),
-      ...(entry.notFor?.length ? [`- not-for: ${entry.notFor.join(', ')}`] : [])
+      ...(entry.notFor?.length ? [`- not-for: ${entry.notFor.join(', ')}`] : []),
+      ...(entry.symbol ? [`- symbol: ${oneLine(entry.symbol)}`] : []),
+      ...(entry.avoid ? [`- avoid: ${oneLine(entry.avoid)}`] : [])
     ]
     return lines.join('\n')
   })

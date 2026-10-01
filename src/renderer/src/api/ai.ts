@@ -7,6 +7,7 @@ import type {
 import { toPlainEditorSnapshot, type EditorSnapshot } from '../../../shared/editorSnapshot'
 import { type CondensedSpeechStyle } from '../../../shared/speechBriefing'
 import { toSessionProjectPayload } from '../views/Assistant/composables/sessionProjectBinding'
+import { toLocalResourceUrl } from '../utils/localResource'
 
 /**
  * 通过主进程调用用户配置的生图模型。图片返回包含真实 MIME 类型的 data URI，便于本地显示和保存。
@@ -28,7 +29,8 @@ async function generateImageWithLocalModel(params: ImageGenerateParams): Promise
     aspectRatio: params.aspectRatio,
     referenceImages,
     count: params.batchSize,
-    seed: params.seed
+    seed: params.seed,
+    saveToLibrary: params.saveToLibrary
   })
 
   if (result?.success !== true || !result.data) {
@@ -38,7 +40,8 @@ async function generateImageWithLocalModel(params: ImageGenerateParams): Promise
   return {
     ok: true,
     images: result.data.images.map((image) => ({
-      url: `data:${image.mediaType};base64,${image.base64}`
+      url:
+        toLocalResourceUrl(image.filePath) ?? `data:${image.mediaType};base64,${image.base64}`
     }))
   }
 }
@@ -187,6 +190,8 @@ export interface ImageGenerateParams {
   seed?: number
   batchSize?: number
   messages?: ChatMessage[]
+  /** 存进素材库，url 给 `local-resource://` 短地址而不是 data URI（存失败的那张仍是 data URI） */
+  saveToLibrary?: boolean
 }
 
 /**

@@ -540,6 +540,7 @@ export function useAgentMode(params: UseAgentModeParams) {
       currentAgentController.value = null
     }
 
+    const boundModel = chatStore.getModel?.(chatSid)
     try {
       const result = await window.api.agentV3.continue({
         sessionId: agentSessionId,
@@ -549,7 +550,11 @@ export function useAgentMode(params: UseAgentModeParams) {
         // 同理，档位也得带，而且是**这条会话**的那一份。不带的话主进程按最严的
         // 一档跑，用户设的是「帮我批准」，一点「从断点继续」却开始每一步写操作
         // 都弹框 —— 他什么都没改过
-        approvalMode: toApprovalMode(resolvePermissionMode(chatSid))
+        approvalMode: toApprovalMode(resolvePermissionMode(chatSid)),
+        // 报错之后用户可能在输入框里换了模型，续跑要用换过的那个
+        ...(boundModel
+          ? { sessionModel: { providerId: boundModel.providerId, modelId: boundModel.modelId } }
+          : {})
       })
       if (result?.success) return
 

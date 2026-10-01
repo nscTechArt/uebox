@@ -471,9 +471,7 @@ export const agentV3API = {
     return window.api.agentV3.teamTaskReopen({ sessionId, taskId })
   },
 
-  teamEnd(
-    sessionId: string
-  ): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {
+  teamEnd(sessionId: string): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {
     return window.api.agentV3.teamEnd({ sessionId })
   },
 

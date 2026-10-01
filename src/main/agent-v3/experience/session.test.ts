@@ -11,6 +11,13 @@ describe('isLearnableMeta', () => {
     expect(isLearnableMeta({ namespace: 'ue.content', risk: 'destructive' }, {})).toBe(false)
     expect(isLearnableMeta(undefined, {})).toBe(false)
   })
+
+  it('跑任意代码的工具注册成 destructive，也照样学', () => {
+    const meta = { namespace: 'ue.system', risk: 'destructive' as const }
+    expect(isLearnableMeta(meta, {}, 'ue_run_python_script')).toBe(true)
+    expect(isLearnableMeta(meta, {}, 'ue_run_console_command')).toBe(true)
+    expect(isLearnableMeta(meta, {}, 'ue_manage_plugin')).toBe(false)
+  })
 })
 
 describe('createSessionExperience', () => {

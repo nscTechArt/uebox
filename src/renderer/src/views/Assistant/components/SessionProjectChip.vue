@@ -179,9 +179,7 @@ function clearProject(): void {
             :item-key="project.projectName"
             @click="assignProject(project)"
           >
-            <span
-              :class="{ 'option-connected': isProjectConnected(project.projectName) }"
-            >
+            <span :class="{ 'option-connected': isProjectConnected(project.projectName) }">
               {{ project.projectName }}
               <template v-if="isProjectConnected(project.projectName)">
                 · {{ t('chatSidebar.connected') }}

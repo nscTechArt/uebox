@@ -2064,9 +2064,11 @@ declare global {
         aspectRatio?: string
         referenceImages?: string[]
         seed?: number
+        /** 顺手存进素材库 AIGC/图片；存上的那张带回 filePath */
+        saveToLibrary?: boolean
       }) => Promise<{
         success: boolean
-        data?: { images: Array<{ base64: string; mediaType: string }> }
+        data?: { images: Array<{ base64: string; mediaType: string; filePath?: string }> }
         error?: string
       }>
       imageModelStatus: () => Promise<{
@@ -3144,6 +3146,8 @@ declare global {
         sessionProject?: AgentV3SessionProject | null
         /** 不带的话续跑会退回默认的「每步都问」，而用户什么都没改过 */
         approvalMode?: AgentV3ApprovalMode
+        /** 会话此刻绑的模型；用户报错后换了模型再续跑，得用新的 */
+        sessionModel?: { providerId: string; modelId: string }
       }) => Promise<{ success: boolean; error?: string; restoredMessages?: number }>
       /**
        * 用户在界面上改了这条会话归属哪个工程（顶栏胶囊、侧边栏「归入工程 / 移出项目」）。

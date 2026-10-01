@@ -70,6 +70,16 @@ function serialized<T>(dir: string, task: () => Promise<T>): Promise<T> {
   return next
 }
 
+/** 文件不存在回 undefined；别的读错照常抛 */
+async function readIfExists(path: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
 async function writeAtomic(path: string, content: string): Promise<void> {
   await fs.mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.${process.pid}.tmp`
@@ -82,10 +92,19 @@ export class ExperienceStore {
 
   async readTool(tool: string): Promise<ExperienceEntry[]> {
     try {
-      return parseExperienceFile(await fs.readFile(join(this.dir, fileNameForTool(tool)), 'utf8'))
+      return await this.readToolForWrite(tool)
     } catch {
       return []
     }
+  }
+
+  /**
+   * 读改写用的读：只有「文件不存在」算空。别的读错（杀毒、同步盘占着文件）
+   * 照常抛出 —— 当成空再写回去，就是把整份经验删掉
+   */
+  private async readToolForWrite(tool: string): Promise<ExperienceEntry[]> {
+    const text = await readIfExists(join(this.dir, fileNameForTool(tool)))
+    return text === undefined ? [] : parseExperienceFile(text)
   }
 
   async readAll(): Promise<ExperienceEntry[]> {
@@ -113,7 +132,7 @@ export class ExperienceStore {
     update: (entries: ExperienceEntry[]) => ExperienceEntry[] | undefined
   ): Promise<void> {
     return serialized(this.dir, async () => {
-      const next = update(await this.readTool(tool))
+      const next = update(await this.readToolForWrite(tool))
       if (!next) return
       const path = join(this.dir, fileNameForTool(tool))
       if (next.length === 0) {
@@ -126,13 +145,16 @@ export class ExperienceStore {
 
   async readLedger(): Promise<Record<string, EntryStats>> {
     try {
-      const parsed = JSON.parse(
-        await fs.readFile(join(this.dir, LEDGER_FILE), 'utf8')
-      ) as LedgerFile
-      return parsed.entries ?? {}
+      return await this.readLedgerForWrite()
     } catch {
       return {}
     }
+  }
+
+  /** 同 `readToolForWrite`：读不了就别覆盖，免得把别的条目的计数一起清掉 */
+  private async readLedgerForWrite(): Promise<Record<string, EntryStats>> {
+    const text = await readIfExists(join(this.dir, LEDGER_FILE))
+    return text === undefined ? {} : ((JSON.parse(text) as LedgerFile).entries ?? {})
   }
 
   async statsFor(id: string): Promise<EntryStats> {
@@ -143,7 +165,7 @@ export class ExperienceStore {
     update: (entries: Record<string, EntryStats>) => Record<string, EntryStats>
   ): Promise<void> {
     return serialized(this.dir, async () => {
-      const next = update(await this.readLedger())
+      const next = update(await this.readLedgerForWrite())
       const file: LedgerFile = { version: 1, entries: next }
       await writeAtomic(join(this.dir, LEDGER_FILE), `${JSON.stringify(file, null, 1)}\n`)
     })
@@ -165,18 +187,20 @@ export class ExperienceStore {
     })
   }
 
-  /** 把当前的 markdown 和账本拷一份进 `.history/`。回快照名；目录是空的回 undefined */
-  snapshot(now: Date = new Date()): Promise<string | undefined> {
+  /**
+   * 把当前的 markdown 和账本拷一份进 `.history/`，回快照名。
+   * 目录是空的也拍一份空快照：这一层第一次写入也得能撤销，撤销就是回到空
+   */
+  snapshot(now: Date = new Date()): Promise<string> {
     return serialized(this.dir, async () => {
-      let names: string[]
+      let names: string[] = []
       try {
         names = (await fs.readdir(this.dir)).filter(
           (name) => name.endsWith('.md') || name === LEDGER_FILE
         )
-      } catch {
-        return undefined
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
-      if (names.length === 0) return undefined
 
       const id = now.toISOString().replace(/[:.]/g, '-')
       const target = join(this.dir, HISTORY_DIR, id)

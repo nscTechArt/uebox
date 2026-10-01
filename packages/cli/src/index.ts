@@ -10,7 +10,7 @@
 import { writeSync } from 'node:fs'
 
 import { run } from './cli.js'
-import { isSettled } from './interrupt.js'
+import { abortInFlight, isSettled } from './interrupt.js'
 
 /**
  * Ctrl+C。
@@ -42,8 +42,18 @@ function onInterrupt(): void {
   } catch {
     // 连 stderr 都写不了就算了，别让善后本身把进程搞崩
   }
-  process.exit(130)
+  // 先让 SDK 把「取消」发给盒子（`ask` 的子任务要靠它停下），给它一点时间送出去；
+  // 再按一次就不等了
+  if (cancelSent) process.exit(130)
+  cancelSent = true
+  abortInFlight()
+  process.exitCode = 130
+  setTimeout(() => process.exit(130), CANCEL_GRACE_MS).unref()
 }
+
+let cancelSent = false
+/** 「取消」通知送出去要的时间。只是一个 HTTP POST，本机上远用不到 */
+const CANCEL_GRACE_MS = 1_000
 
 async function main(): Promise<void> {
   process.on('SIGINT', onInterrupt)
@@ -52,6 +62,8 @@ async function main(): Promise<void> {
   const result = await run(process.argv.slice(2), process.env, {
     progress: (message) => process.stderr.write(`… ${message}\n`)
   })
+  // 中断后调用被取消时 `run` 也会收尾出一个信封，那不是真实结局：保持 130、不输出
+  if (cancelSent) return
 
   if (result.stdout) process.stdout.write(result.stdout)
   if (result.stderr) process.stderr.write(result.stderr)

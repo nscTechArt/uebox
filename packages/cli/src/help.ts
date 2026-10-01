@@ -86,7 +86,8 @@ ask：
   不加 --allow-write 只调只读工具。加了之后，盒子自己的 AI 助手能用的工具
   这里都能调，要求逐次人工审批的除外。
   超时不要直接重发：请求可能已经生效，先用只读工具查清楚再决定。
-  撤销用 tools call ue_undo --allow-write；编辑器里按 Ctrl+Z 碰不到这一步。
+  撤销用 tools call ue_undo --allow-write，args 一定带 {"steps":1}，
+  不带 steps 会把整条栈全撤；编辑器里按 Ctrl+Z 碰不到这一步。
 
 目标工程按这个顺序定：--project，从当前目录往上最近的 .uproject，
 恰好只有一个工程在线时用它。前两步定出的工程没连着就直接失败。
@@ -170,7 +171,8 @@ Writes:
   box's own assistant can use is callable, except tools needing per-call
   human approval.
   Never blind-retry after a timeout: it may have taken effect; check first.
-  Undo with tools call ue_undo --allow-write; editor Ctrl+Z won't reach it.
+  Undo with tools call ue_undo --allow-write and args {"steps":1};
+  without steps it undoes the whole stack. Editor Ctrl+Z won't reach it.
 
 The target project is: --project, else the nearest .uproject above the current
 directory, else the one online project if there is exactly one. A project from

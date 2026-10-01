@@ -11,7 +11,10 @@ const NATIVIZE = /Cannot nativize '([^']+)' as '([^']+)'/g
 /** 「传了 A 类型，引擎要 B 类型」的常见错配，按 (收到, 目标属性) 给可行动写法 */
 function hintFor(received: string, target: string, text: string): string | null {
   // Factory 要实例：报错里目标类型是 Factory 且收到的是 XxxFactory 类
-  if (/Factory/.test(received) && (target === 'Factory' || /allowed Class type: 'Factory'/.test(text))) {
+  if (
+    /Factory/.test(received) &&
+    (target === 'Factory' || /allowed Class type: 'Factory'/.test(text))
+  ) {
     return `${received} 是类，create_asset / import 的 factory 参数要传**实例**：unreal.${received}()`
   }
   if (received === 'LinearColor') {

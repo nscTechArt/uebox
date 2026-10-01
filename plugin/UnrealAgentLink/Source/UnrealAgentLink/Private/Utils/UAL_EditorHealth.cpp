@@ -66,6 +66,8 @@ namespace
 		FDelegateHandle FilesLoadedHandle;
 		FDelegateHandle StartPieHandle;
 		FDelegateHandle PostPieHandle;
+		FDelegateHandle EndPieHandle;
+		FDelegateHandle CancelPieHandle;
 		FTSTicker::FDelegateHandle TickerHandle;
 	};
 
@@ -165,6 +167,16 @@ void FUAL_EditorHealth::Initialize()
 		GHealth.PieLastEnterSeconds = Seconds;
 		++GHealth.PieEnterCount;
 	});
+	// PreBeginPIE 之后 PIE 可能根本没起来（蓝图有编译错误时用户点了取消、PIE 授权方拒绝），
+	// 这时不会有 PostPIEStarted。不在这里清掉的话 SampleHitch 一直当成「正在进 PIE」，再也不采样
+	GHealth.EndPieHandle = FEditorDelegates::EndPIE.AddLambda([](bool)
+	{
+		GHealth.PieStartAt = -1.0;
+	});
+	GHealth.CancelPieHandle = FEditorDelegates::CancelPIE.AddLambda([]()
+	{
+		GHealth.PieStartAt = -1.0;
+	});
 
 	GHealth.TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateStatic(&SampleHitch), UAL_SampleIntervalSeconds);
@@ -179,6 +191,8 @@ void FUAL_EditorHealth::Shutdown()
 	FCoreDelegates::OnFEngineLoopInitComplete.Remove(GHealth.LoopInitHandle);
 	FEditorDelegates::PreBeginPIE.Remove(GHealth.StartPieHandle);
 	FEditorDelegates::PostPIEStarted.Remove(GHealth.PostPieHandle);
+	FEditorDelegates::EndPIE.Remove(GHealth.EndPieHandle);
+	FEditorDelegates::CancelPIE.Remove(GHealth.CancelPieHandle);
 	if (GHealth.FilesLoadedHandle.IsValid())
 	{
 		if (FAssetRegistryModule* Module = FModuleManager::GetModulePtr<FAssetRegistryModule>(TEXT("AssetRegistry")))

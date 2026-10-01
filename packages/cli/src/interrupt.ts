@@ -37,4 +37,20 @@ export function isSettled(): boolean {
 /** 测试用：把标记复位 */
 export function resetSettledForTest(): void {
   settled = false
+  interrupted = new AbortController()
+}
+
+/**
+ * Ctrl+C 时中止的信号。工具调用都挂上它：SDK 看到中止会给盒子发
+ * `notifications/cancelled`，盒子那边的子任务（`ask`）跟着停下 ——
+ * 只是本地退出的话，没人盯着的子任务会在盒子里接着写
+ */
+let interrupted = new AbortController()
+
+export function interruptSignal(): AbortSignal {
+  return interrupted.signal
+}
+
+export function abortInFlight(): void {
+  interrupted.abort()
 }

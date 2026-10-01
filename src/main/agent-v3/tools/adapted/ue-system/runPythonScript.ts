@@ -95,8 +95,8 @@ export function createRunPythonScriptTool(): V2Tool {
 回读看文件时间戳（\`load_asset\` 查的是内存，查不出来）。
 
 【unreal 的 API 别靠猜，当场问它】：参数写错通常只返回 False，一个字的原因都没有
-（\`rename_asset\` 的新名要完整包路径，写成纯名字就静默失败）。没把握就先
-\`print(unreal.EditorAssetLibrary.rename_asset.__doc__)\`，一次调用拿到签名，
+（\`rename_asset\` 的新名要完整包路径，写成纯名字就静默失败）。没把握就先 \`print(dir(obj))\` 或
+\`print(unreal.EditorAssetLibrary.rename_asset.__doc__)\`，一次调用拿到名字和签名，
 比改一个参数试一次快得多。
 
 【旋转一律写关键字】\`unreal.Rotator\` 的**位置参数顺序是 (roll, pitch, yaw)**，跟 JSON / 蓝图的
@@ -106,20 +106,14 @@ export function createRunPythonScriptTool(): V2Tool {
 
 【注意】：脚本在编辑器主线程上同步执行，最多等待 5 分钟。超时或停止等待不代表 UE 已停止执行，先回读确认，不能直接重复修改。
 
-【创建资产的三个坑】
-- AssetTools.create_asset 的 factory 参数传**实例**（unreal.LevelSequenceFactoryNew()），传类会报 Cannot nativize。
-- 重名时引擎会弹「覆写现有 Object」模态框，脚本点不了、create_asset 返回 None，取消后还会留下删不掉的僵死条目。
-  创建前先 does_asset_exist(path)，已存在就换名，不要重试同名。
-- delete_asset 返回 False 不带原因；删资产用 ue_content_delete。
+【创建资产】先 does_asset_exist(path)，已存在就换名、别重试同名：重名会弹脚本点不掉的覆写框，还留僵死条目。
 
-【三件事别在 Python 里做】
+【两件事别在 Python 里做】
 - **PIE 起停**：editor_play_simulate() / editor_request_end_play() 都是「下一帧才生效」，脚本占着游戏线程，
   同一脚本里 sleep 或回读永远看到旧状态（世界是 None、playing 还是 True）。要跑游戏并读结果用 ue_playtest；
   非要停 PIE 就单独发一句、脚本返回后另起一次回读。
 - **循环 delete_asset**：每次调用都做一次完整 GC，几百个资产就把主线程占死十几分钟。删资产、清目录用
   ue_content_delete（目录直接传，一批提交）。
-- **猜 API 名**：AttributeError 一次就是一整个往返。先 print(dir(obj)) 和 print(obj.method.__doc__) 拿到
-  真实名字和签名再调。
 
 【skill 里带了脚本就直接跑它】skill 正文点名了 scripts/ 下的脚本时，传 skill + skill_script（+ args），
 不要读出来再抄进 script —— 跑的就是盘上跑通过的那一份。args 在脚本里是全局变量 SKILL_ARGS。`,

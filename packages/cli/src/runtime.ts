@@ -16,6 +16,7 @@ import {
   type Session
 } from './connection.js'
 import { UeboxError } from './errors.js'
+import { interruptSignal } from './interrupt.js'
 import type { RegisteredProject, ResolvedProject } from './project.js'
 import { resolveProject } from './project.js'
 import { fetchCatalog, requireSupported, type CatalogTool } from './tools.js'
@@ -138,6 +139,7 @@ export async function callTool(
       raw = await runtime.client.callTool(request, undefined, {
         timeout: runtime.timeoutSeconds * 1000,
         resetTimeoutOnProgress: true,
+        signal: interruptSignal(),
         onprogress: (update) => {
           if (update.message) progress.onProgress(update.message)
         }
@@ -159,7 +161,8 @@ export async function callTool(
     // 把它放到期限之外，让期限说了算，超时一律按「结局不明」报
     raw = await runtime.deadline(
       runtime.client.callTool(request, undefined, {
-        timeout: Math.max(runtime.remainingMs(), 0) + 5_000
+        timeout: Math.max(runtime.remainingMs(), 0) + 5_000,
+        signal: interruptSignal()
       }),
       `调用 ${name}`
     )

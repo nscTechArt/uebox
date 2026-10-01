@@ -5696,6 +5696,8 @@ export default {
     needsEditorNote: '{format} 要靠 UE 转换，会先在 UE 里打开这个工程',
     waitingForEditor: '正在打开「{name}」，UE 启动好后自动开始导入。',
     editorWaitTimeout: '等了很久 UE 还没连上盒子。确认工程已在 UE 里打开，再点一次。',
+    alreadyRunningNotConnected:
+      '这个工程已经在 UE 里开着，但没连上盒子 —— 多半是 UnrealAgentLink 插件没启用。启用插件、重启编辑器后再点一次。',
     openProjectFailed: '没能打开工程：{error}',
     uprojectMissing: '找不到这个工程的 .uproject 文件，它可能被移动或删除了。',
     pluginNotInstalled: 'UnrealAgentLink 插件没装上，这个工程连不上盒子：{error}',

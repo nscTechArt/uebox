@@ -68,7 +68,7 @@ export function formatBoardCarryOver(tasks: BoardTask[], now: number): string {
     '<team_board_carryover>',
     'Unreal Box note, not the user: the team task board still shows these from before the message below. The user watches the board, and it only changes when you or a teammate update it with `team_board`.',
     ...tasks.map((task) => describe(task, now)),
-    'Check each against the project as it is now (`team_status`) and update it this turn: done with evidence, back to todo, or blocked with the current reason. If the user\'s message answers what a blocked item was waiting on, it is no longer blocked.',
+    "Check each against the project as it is now (`team_status`) and update it this turn: done with evidence, back to todo, or blocked with the current reason. If the user's message answers what a blocked item was waiting on, it is no longer blocked.",
     '</team_board_carryover>'
   ].join('\n')
 }

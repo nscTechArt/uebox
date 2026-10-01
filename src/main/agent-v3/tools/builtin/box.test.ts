@@ -127,6 +127,23 @@ describe('读对话的裁剪', () => {
     expect(out).toContain('ue_x 失败')
     expect(out.length).toBeLessThan(400)
   })
+
+  it('用户消息剥掉信封等机器块，音视频引用（带本机路径）不交出去', () => {
+    const out = renderMessage({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: '<runtime-status scope="rt-1">\nnow: 2026-10-01\n</runtime-status>\n\n把灯调暗'
+        },
+        {
+          type: 'text',
+          text: '[[uebox-media {"kind":"video","key":"k","fileName":"a.mp4","filePath":"C:\\\\a.mp4"}]]'
+        }
+      ]
+    })
+    expect(out).toBe('【用户】把灯调暗')
+  })
 })
 
 describe('box_status', () => {

@@ -57,11 +57,18 @@ interface SetConfigResponse {
    * 写设置时引擎弹了模态框、插件替用户答掉的那几个（开 Substrate 的 Beta 警告、
    * 开光追时问要不要顺带开蒙皮缓存……）。有的会顺带改别的设置，得告诉用户
    */
-  auto_answered_dialogs?: Array<{ type?: string; title?: string; message?: string; answer?: string }>
+  auto_answered_dialogs?: Array<{
+    type?: string
+    title?: string
+    message?: string
+    answer?: string
+  }>
 }
 
 /** 插件替用户点掉的弹框，拼成一句给模型转告用户的话。没有就给空串 */
-export function describeAnsweredDialogs(dialogs: SetConfigResponse['auto_answered_dialogs']): string {
+export function describeAnsweredDialogs(
+  dialogs: SetConfigResponse['auto_answered_dialogs']
+): string {
   if (!dialogs?.length) return ''
   return (
     '\n编辑器写这项设置时弹了确认框，已替用户点掉（要原样告诉用户）：' +
