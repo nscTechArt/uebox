@@ -1,8 +1,10 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
-import { autoUpdate, computePosition } from '@floating-ui/dom'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { autoUpdate, computePosition, type ComputePositionReturn } from '@floating-ui/dom'
 
 import AppDropdown from './AppDropdown.vue'
+import AppMenu from './AppMenu.vue'
+import AppMenuItem from './AppMenuItem.vue'
 
 // 定位交给 @floating-ui/dom；这里测的是开关时机、点外面、键盘，不是算得准不准
 vi.mock('@floating-ui/dom', () => ({
@@ -293,6 +295,120 @@ describe('AppDropdown', () => {
 
     expect(computePosition).toHaveBeenCalledTimes(1)
     expect(floating?.style.transform).toBe('translate(320px, 72px)')
+  })
+
+  /**
+   * 回归：受控模式下带着 open=true 挂载（宿主挪位置时整个组件被卸载重建）。
+   * 会话右键菜单就挂在每一行里 —— 菜单开着时给会话归工程/置顶，行会换到
+   * 另一个分组，dropdown 带着 open=true 重新挂载。watcher 不是 immediate 的话
+   * 一次都不跑：不定位（停在左上角 0,0）、不注册「点外面关掉」的监听，
+   * 就是一个点不掉的幽灵菜单。
+   */
+  it('挂载时 open 已经是 true，也照样定位、照样能点外面关掉', async () => {
+    vi.mocked(computePosition).mockClear()
+    vi.mocked(computePosition).mockResolvedValueOnce({
+      x: 320,
+      y: 72,
+      placement: 'right-start',
+      strategy: 'absolute',
+      middlewareData: {}
+    })
+    const wrapper = mountDropdown({
+      trigger: [],
+      open: true,
+      anchorPoint: { x: 240, y: 96 },
+      placement: 'rightStart'
+    })
+    await vi.waitFor(() => {
+      expect(computePosition).toHaveBeenCalled()
+      expect(document.querySelector<HTMLElement>('.app-dropdown')?.style.transform).toBe(
+        'translate(320px, 72px)'
+      )
+    })
+
+    document.documentElement.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+  })
+
+  /**
+   * 回归：onVisibilityChange 在 await place() 期间挂起，组件若恰好在
+   * 这个微任务窗口里被卸载，onBeforeUnmount 的清理已经跑过了 ——
+   * 之后再把 pointerdown 监听器挂上 document，就是没人摘得掉的泄漏。
+   */
+  it('await 定位期间被卸载，不残留 document 监听', async () => {
+    let resolvePosition: ((v: ComputePositionReturn) => void) | undefined
+    vi.mocked(computePosition).mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePosition = resolve))
+    )
+    const addListener = vi.spyOn(document, 'addEventListener')
+    try {
+      const wrapper = mountDropdown({
+        trigger: [],
+        open: true,
+        anchorPoint: { x: 10, y: 10 }
+      })
+      await wrapper.vm.$nextTick()
+
+      // place() 正挂在 computePosition 的 promise 上 —— 此刻卸载
+      wrapper.unmount()
+      resolvePosition?.({
+        x: 10,
+        y: 10,
+        placement: 'right-start',
+        strategy: 'absolute',
+        middlewareData: {}
+      })
+      await flushPromises()
+
+      // 卸载后 Vue 的 emit 直接 return，emitted 永远是空的，证明不了什么；
+      // 直接看 await 回来之后有没有往 document 上挂 pointerdown
+      expect(addListener.mock.calls.some(([type]) => type === 'pointerdown')).toBe(false)
+    } finally {
+      addListener.mockRestore()
+    }
+  })
+
+  /**
+   * 回归：菜单项的键盘激活（Enter/空格）走 activate() → emit('click')，
+   * 不产生原生 click 冒泡 —— 光靠 @click="close" 永远收不到，
+   * 归属动作跑完了菜单还开着，就成了幽灵。
+   * AppMenuItem 激活时会冒泡 app-menu-item-activate，菜单听到就关。
+   */
+  it('菜单项激活（含键盘路径）要关掉菜单', async () => {
+    const wrapper = mountDropdown({ open: true, trigger: [] })
+    await wrapper.vm.$nextTick()
+    expect(overlay()).not.toBeNull()
+
+    overlay()!.dispatchEvent(new CustomEvent('app-menu-item-activate', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+  })
+
+  /**
+   * 回归：没有 item-key 的菜单项现在也会冒泡 app-menu-item-activate（detail 为 null）。
+   * 键盘激活不产生原生 click，菜单只能靠这条事件关掉；AppMenu 拿不到 key 就不该发 click。
+   */
+  it('无 item-key 的菜单项被键盘激活：菜单照关，AppMenu 不发 click', async () => {
+    const wrapper = mount(AppDropdown, {
+      props: { open: true, trigger: [] },
+      global: { components: { AppMenu, AppMenuItem } },
+      slots: {
+        default: '<button class="trigger">菜单</button>',
+        overlay: '<AppMenu><AppMenuItem class="keyless">无 key</AppMenuItem></AppMenu>'
+      }
+    }) as VueWrapper
+    mounted.push(wrapper)
+    await wrapper.vm.$nextTick()
+
+    const item = document.querySelector<HTMLElement>('.keyless')
+    expect(item).not.toBeNull()
+    item!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+    expect(wrapper.findComponent(AppMenu).emitted('click')).toBeUndefined()
   })
 
   it('disabled 时打不开', async () => {

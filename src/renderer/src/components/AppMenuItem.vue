@@ -42,15 +42,16 @@ function activate(event: MouseEvent | KeyboardEvent): void {
     return
   }
   emit('click', event)
-  if (props.itemKey !== undefined) {
-    // 冒泡给 AppMenu，让它发出和 a-menu 一样的 { key }
-    ;(event.currentTarget as HTMLElement).dispatchEvent(
-      new CustomEvent('app-menu-item-activate', {
-        detail: { key: String(props.itemKey) },
-        bubbles: true
-      })
-    )
-  }
+  // 冒泡通知外层「有菜单项被激活了」：AppMenu 靠它转成和 a-menu 一样的 { key }，
+  // AppDropdown 靠它关掉浮层 —— 键盘激活（Enter/空格）不产生原生 click，
+  // 没有这条事件浮层永远收不到「该关了」的信号。无 key 的项 detail 留空，
+  // AppMenu 那边会忽略，但浮层照关。
+  ;(event.currentTarget as HTMLElement).dispatchEvent(
+    new CustomEvent('app-menu-item-activate', {
+      detail: props.itemKey !== undefined ? { key: String(props.itemKey) } : undefined,
+      bubbles: true
+    })
+  )
 }
 
 function onKeydown(event: KeyboardEvent): void {

@@ -528,11 +528,14 @@ function clearSessionSelection(): void {
   selectionAnchorId.value = ''
 }
 
-/** 会话没了（删除 / 归档 / 搜索过滤）就把选择里的死 id 摘掉，批量栏随之消失 */
+/** 会话没了（删除 / 归档 / 搜索过滤）就把选择里的死 id 摘掉，批量栏随之消失；指向它的右键菜单也一并关掉 */
 watch(allSessions, (sessions) => {
+  const existing = new Set(sessions.map((session) => session.id))
+  if (contextMenuSessionId.value && !existing.has(contextMenuSessionId.value)) {
+    contextMenuSessionId.value = ''
+  }
   if (!hasSelection.value) return
 
-  const existing = new Set(sessions.map((session) => session.id))
   const next = pruneSelection(selectedSessionIds.value, existing)
   if (next.length !== selectedSessionIds.value.length) {
     selectedSessionIds.value = next

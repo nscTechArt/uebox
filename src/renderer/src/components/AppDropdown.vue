@@ -15,7 +15,7 @@
  * 不还的话焦点落回 `<body>`，键盘用户点开一个菜单又关掉，就得从页头重新 Tab。
  * 和 AppModal 是同一条道理。
  */
-import { computed, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from 'vue'
 import {
   autoUpdate,
   computePosition,
@@ -230,31 +230,43 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-watch(
-  visible,
-  async (shown) => {
-    stopAutoUpdate?.()
-    stopAutoUpdate = null
-    document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+async function onVisibilityChange(shown: boolean): Promise<void> {
+  stopAutoUpdate?.()
+  stopAutoUpdate = null
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true)
 
-    if (!shown) {
-      previouslyFocused?.focus?.()
-      previouslyFocused = null
-      return
-    }
+  if (!shown) {
+    previouslyFocused?.focus?.()
+    previouslyFocused = null
+    return
+  }
 
-    previouslyFocused = document.activeElement as HTMLElement | null
-    await place()
-    const reference = positioningAnchor()
-    if (reference && floatingRef.value) {
-      stopAutoUpdate = autoUpdate(reference, floatingRef.value, place)
-    }
-    document.addEventListener('pointerdown', onDocumentPointerDown, true)
-  },
-  // 浮层由 v-if 创建：默认的 pre watcher 会在 DOM 挂载前执行，floatingRef 还是 null，
-  // 定位直接跳过后就永远停在 (0, 0)。post 保证 Teleport 里的浮层已经可以测量。
-  { flush: 'post' }
-)
+  previouslyFocused = document.activeElement as HTMLElement | null
+  await place()
+  // await 期间组件可能已经被拆掉（或开关又翻回了关）：浮层没了还挂监听器，
+  // 就是挂在一个死掉的实例上 —— onBeforeUnmount 的清理早在它之前就跑过了，
+  // 没人再摘得下它。
+  const floating = floatingRef.value
+  if (!floating) return
+  const reference = positioningAnchor()
+  if (reference) {
+    stopAutoUpdate = autoUpdate(reference, floating, place)
+  }
+  document.addEventListener('pointerdown', onDocumentPointerDown, true)
+}
+
+// 浮层由 v-if 创建：默认的 pre watcher 会在 DOM 挂载前执行，floatingRef 还是 null，
+// 定位直接跳过后就永远停在 (0, 0)。post 保证 Teleport 里的浮层已经可以测量。
+watch(visible, onVisibilityChange, { flush: 'post' })
+
+// 受控的 dropdown 可能带着 open=true 挂载：会话右键菜单挂在每一行里，
+// 菜单开着时给会话归工程/置顶，行换到别的分组，组件整个重建。
+// 这时 watcher 一次都不跑 —— 不定位（停在左上角）、不注册「点外面关掉」的监听，
+// 就是个点不掉的幽灵菜单。挂载时已经开着就手动补一遍。
+// （不能靠 watch 的 immediate：immediate 回调在 setup 期同步执行，floatingRef 还是 null。）
+onMounted(() => {
+  if (visible.value) void onVisibilityChange(true)
+})
 
 onBeforeUnmount(() => {
   clearHoverCloseTimer()
@@ -294,6 +306,7 @@ onBeforeUnmount(() => {
       @mouseleave="onFloatingLeave"
       @keydown="onKeydown"
       @click="close"
+      @app-menu-item-activate="close"
     >
       <slot name="overlay" />
     </div>
