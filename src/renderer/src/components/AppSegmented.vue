@@ -1,9 +1,14 @@
 <script setup lang="ts" generic="T extends string | number">
-/** 分段单选。沿用 AI 助手设置的 provider-tabs 外观，供设置页共用。 */
+/**
+ * 分段单选。沿用 AI 助手设置的 provider-tabs 外观，供设置页共用。
+ *
+ * 读屏标签由调用方写原生 `aria-label`，经属性透传落到根节点的 `role="group"` 上。
+ * 不声明成 `ariaLabel` prop：vue-tsc 3.3 起 `aria-*` 按原生属性检查，
+ * 不再映射到同名 camelCase prop，声明了反而让每个调用处都报「缺必填项」。
+ */
 defineProps<{
   modelValue: T
   options: readonly T[]
-  ariaLabel: string
 }>()
 
 defineEmits<{ 'update:modelValue': [value: T] }>()
@@ -11,7 +16,7 @@ defineSlots<{ default(props: { option: T }): unknown }>()
 </script>
 
 <template>
-  <div class="app-segmented" role="group" :aria-label="ariaLabel">
+  <div class="app-segmented" role="group">
     <button
       v-for="option in options"
       :key="option"

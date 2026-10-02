@@ -6,7 +6,8 @@ import AppSegmented from './AppSegmented.vue'
 describe('AppSegmented', () => {
   it('读取当前选项，挂载时不覆盖已保存的选择', () => {
     const wrapper = mount(AppSegmented, {
-      props: { modelValue: 'detailed', options: ['concise', 'detailed'], ariaLabel: '语音反馈' }
+      props: { modelValue: 'detailed', options: ['concise', 'detailed'] },
+      attrs: { 'aria-label': '语音反馈' }
     })
 
     expect(wrapper.get('[role="group"]').attributes('aria-label')).toBe('语音反馈')
@@ -20,7 +21,8 @@ describe('AppSegmented', () => {
 
   it('点击交回原始值，父组件更新后切换选中态，按钮不提交表单', async () => {
     const wrapper = mount(AppSegmented, {
-      props: { modelValue: 7, options: [7, 30], ariaLabel: '统计范围' }
+      props: { modelValue: 7, options: [7, 30] },
+      attrs: { 'aria-label': '统计范围' }
     })
 
     await wrapper.findAll('button')[1].trigger('click')
@@ -35,7 +37,8 @@ describe('AppSegmented', () => {
 
   it('选项插槽保留翻译与数量，选项删除后不留下旧按钮', async () => {
     const wrapper = mount(AppSegmented, {
-      props: { modelValue: 'all', options: ['all', 'local'], ariaLabel: '技能来源' },
+      props: { modelValue: 'all', options: ['all', 'local'] },
+      attrs: { 'aria-label': '技能来源' },
       slots: { default: ({ option }) => h('span', option === 'all' ? '全部 8' : '本地 3') }
     })
 
