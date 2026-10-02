@@ -127,6 +127,15 @@ describe('托盘菜单模板', () => {
     ])
   })
 
+  it('会话标题是空的（或全是空白）：用「未命名对话」兜底，不画空白行', () => {
+    const items = buildTrayMenuTemplate(
+      state({ recentSessions: [{ id: 's1', title: '  ' }] }),
+      handlers(),
+      t
+    )
+    expect(labels(items)).toContain('tray.untitledChat')
+  })
+
   it('标签超过 30 字截断补省略号', () => {
     const long = 'x'.repeat(40)
     const items = buildTrayMenuTemplate(

@@ -44,6 +44,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     // 和侧边栏按钮同一个叫法（渲染层 `menu.newChat`）
     'tray.newChat': '新对话',
     'tray.recentChats': '最近对话',
+    'tray.untitledChat': '未命名对话',
     'tray.recentProjects': '最近项目',
     'tray.running': '{name}（运行中）',
     // 点了到插件连上来之间的那几十秒：还点不得，但得告诉用户它没在装死
@@ -57,6 +58,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'tray.openFailedTitle': '打不开项目',
     'tray.openFailedBody': '{name}：{error}',
     'tray.openFailedMissing': '「{name}」的工程文件已经不在了',
+    'tray.alreadyRunningTitle': '项目已经开着了',
+    'tray.alreadyRunningBody': '「{name}」已经在虚幻编辑器里打开',
     'tray.pluginFailedTitle': '项目已打开，但 AI 暂时连不上',
     'tray.pluginFailedBody': 'UnrealAgentLink 没有装上，点这里查看原因',
 
@@ -96,6 +99,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'tray.open': 'Open Unreal Box',
     'tray.newChat': 'New AI Chat',
     'tray.recentChats': 'Recent chats',
+    'tray.untitledChat': 'Untitled chat',
     'tray.recentProjects': 'Recent projects',
     'tray.running': '{name} (running)',
     'tray.launching': '{name} (starting)',
@@ -107,6 +111,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'tray.openFailedTitle': 'Could not open project',
     'tray.openFailedBody': '{name}: {error}',
     'tray.openFailedMissing': 'The project file for "{name}" no longer exists',
+    'tray.alreadyRunningTitle': 'Project already open',
+    'tray.alreadyRunningBody': '"{name}" is already open in Unreal Editor',
     'tray.pluginFailedTitle': 'Project opened, but the AI cannot connect yet',
     'tray.pluginFailedBody': 'UnrealAgentLink was not installed — click to see why',
 

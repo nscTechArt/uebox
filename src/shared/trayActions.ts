@@ -23,6 +23,9 @@ export const TRAY_ACTION_CHANNEL = 'tray:action'
  */
 export const TRAY_TAKE_PENDING_CHANNEL = 'tray:take-pending'
 
+/** 界面 → 主进程：用户在应用内的确认框里选了「仍然退出」 */
+export const TRAY_CONFIRM_QUIT_CHANNEL = 'tray:confirm-quit'
+
 /** 存着的托盘动作最多留这么久。超过就不认了 —— 一分钟后突然跳走比不跳更莫名其妙 */
 export const TRAY_PENDING_TTL_MS = 60 * 1000
 
@@ -52,3 +55,7 @@ export type TrayAction =
       originPath: string
       projectName: string
     }
+  /** 托盘「退出」时还有会话操作没收摊：界面弹应用内的确认框，确认了回 `tray:confirm-quit` */
+  | { type: 'confirm-quit'; count: number }
+  /** 系统通知用不了时，打开工程的失败原因改由界面弹出来 */
+  | { type: 'open-failed'; title: string; body: string }

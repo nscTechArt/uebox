@@ -52,10 +52,27 @@ vi.mock('@renderer/hooks/usePluginInstallNotice', () => ({
   notifyPluginInstallFailure: (payload: unknown) => notifyPluginInstallFailure(payload)
 }))
 
+const confirmDialog = vi.fn()
+const errorDialog = vi.fn()
+vi.mock('@renderer/utils/dialog', () => ({
+  confirmDialog: (options: unknown) => confirmDialog(options),
+  errorDialog: (options: unknown) => errorDialog(options)
+}))
+
+vi.mock('@renderer/i18n', () => ({
+  default: {
+    global: {
+      t: (key: string, params?: Record<string, unknown>) =>
+        params ? `${key}:${JSON.stringify(params)}` : key
+    }
+  }
+}))
+
 /** 主进程那句「托盘有动作，来取」的提醒（不带负载） */
 let firePoke: () => void = () => {}
 const off = vi.fn()
 const setRecentSessions = vi.fn(() => Promise.resolve({ success: true }))
+const confirmQuit = vi.fn(() => Promise.resolve({ success: true }))
 let pendingAction: TrayAction | null = null
 // 照抄主进程语义：取走即清
 const takePending = vi.fn(() => {
@@ -109,6 +126,9 @@ describe('托盘桥', () => {
     setRecentSessions.mockClear()
     takePending.mockClear()
     notifyPluginInstallFailure.mockClear()
+    confirmDialog.mockClear()
+    errorDialog.mockClear()
+    confirmQuit.mockClear()
     historyTabs.length = 0
     sessions.value = []
     pendingAction = null
@@ -117,7 +137,7 @@ describe('托盘桥', () => {
     window.api = {
       on: fakeOn,
       off,
-      tray: { setRecentSessions, takePending }
+      tray: { setRecentSessions, takePending, confirmQuit }
     }
   })
 
@@ -272,6 +292,58 @@ describe('托盘桥', () => {
       pluginFailure: 'UPROJECT_UNREADABLE',
       data: { originPath: 'D:/Demo/Demo.uproject', projectName: 'Demo' }
     })
+  })
+
+  it('confirm-quit：弹应用内确认框，默认停在取消；选了「仍然退出」才通知主进程', async () => {
+    mountHost()
+    pendingAction = { type: 'confirm-quit', count: 2 }
+    firePoke()
+    await nextTick()
+    await nextTick()
+
+    expect(confirmDialog).toHaveBeenCalledTimes(1)
+    const options = confirmDialog.mock.calls[0][0] as {
+      content: string
+      danger: boolean
+      focusCancel: boolean
+      onOk: () => unknown
+      afterClose: () => void
+    }
+    expect(options.content).toBe('layout.trayQuitContent:{"count":2}')
+    expect(options.danger).toBe(true)
+    expect(options.focusCancel).toBe(true)
+    expect(confirmQuit).not.toHaveBeenCalled()
+
+    // 框还开着时再点一次托盘「退出」：不叠第二个
+    pendingAction = { type: 'confirm-quit', count: 2 }
+    firePoke()
+    await nextTick()
+    await nextTick()
+    expect(confirmDialog).toHaveBeenCalledTimes(1)
+
+    await options.onOk()
+    expect(confirmQuit).toHaveBeenCalledTimes(1)
+
+    // 关掉之后再点：照常再问
+    options.afterClose()
+    pendingAction = { type: 'confirm-quit', count: 1 }
+    firePoke()
+    await nextTick()
+    await nextTick()
+    expect(confirmDialog).toHaveBeenCalledTimes(2)
+    ;(confirmDialog.mock.calls[1][0] as { afterClose: () => void }).afterClose()
+  })
+
+  it('open-failed：用应用内的错误框把原因弹出来', async () => {
+    mountHost()
+    pendingAction = { type: 'open-failed', title: '打不开项目', body: 'Demo：NO_ASSOC' }
+    firePoke()
+    await nextTick()
+    await nextTick()
+
+    expect(errorDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '打不开项目', content: 'Demo：NO_ASSOC' })
+    )
   })
 
   it('推送落空的那条挂载时取回来处理', async () => {

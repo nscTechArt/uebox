@@ -7,6 +7,9 @@ import {
 /**
  * 系统托盘菜单的界面侧接口。
  *
+ * 不走 `unwrapResult()`：这几条都是「顺手报一下 / 取一下」，失败不该抛给用户，
+ * 调用方（`trayBridge.ts`）各自咽掉记一行。
+ *
  * 用户在托盘菜单点了「新对话 / 最近那条会话 / 插件失败通知」之后，主进程把
  * 窗口拉到前台、存下那条动作，再发一句 `tray:action` 提醒（不带负载）。
  * 动作本体只有 `takePending` 一条送达路径 —— 取走即清
@@ -40,5 +43,10 @@ export const trayAPI = {
    */
   takePending(): Promise<TrayAction | null> {
     return window.api.tray.takePending()
+  },
+
+  /** 托盘「退出」的确认框里选了「仍然退出」，让主进程退出 */
+  confirmQuit(): Promise<{ success: boolean }> {
+    return window.api.tray.confirmQuit()
   }
 }

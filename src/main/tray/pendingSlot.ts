@@ -12,6 +12,8 @@ export interface PendingSlot<T> {
   put: (value: T) => void
   /** 取走并清空；没有、或已经过期，都是 null */
   take: () => T | null
+  /** 格子里还是这一条（没人取走、也没被新的顶掉）就清掉并返回 true —— 用来判断「界面没接住」 */
+  discard: (value: T) => boolean
 }
 
 export function createPendingSlot<T>(deps: { ttlMs: number; now?: () => number }): PendingSlot<T> {
@@ -28,6 +30,11 @@ export function createPendingSlot<T>(deps: { ttlMs: number; now?: () => number }
       stored = null
       if (now() - taken.at > ttlMs) return null
       return taken.value
+    },
+    discard: (value) => {
+      if (stored?.value !== value) return false
+      stored = null
+      return true
     }
   }
 }

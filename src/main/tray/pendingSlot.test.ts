@@ -52,4 +52,23 @@ describe('托盘动作暂存格', () => {
     expect(slot.take()).toBe('new')
     expect(slot.take()).toBeNull()
   })
+
+  it('discard：还是这一条才清掉，被取走或被顶掉的不动', () => {
+    const slot = createPendingSlot<{ id: number }>({ ttlMs: 1_000 })
+    const first = { id: 1 }
+    const second = { id: 2 }
+
+    slot.put(first)
+    expect(slot.discard(first)).toBe(true)
+    expect(slot.take()).toBeNull()
+
+    slot.put(first)
+    slot.put(second)
+    expect(slot.discard(first)).toBe(false)
+    expect(slot.take()).toBe(second)
+
+    slot.put(first)
+    slot.take()
+    expect(slot.discard(first)).toBe(false)
+  })
 })

@@ -37,6 +37,15 @@ export function trayOpenOutcome(
     }
   }
 
+  // 编辑器早就开着这个工程（多半没装插件，盒子认不出它在跑）：没再开第二个，
+  // 得说一声，不然点了菜单像是什么都没发生
+  if (result.alreadyRunning) {
+    return {
+      title: t('tray.alreadyRunningTitle'),
+      body: t('tray.alreadyRunningBody', { name: project.name })
+    }
+  }
+
   // 工程开了但插件没装上：这是之后「AI 连不上引擎」唯一的线索。点了回界面
   // 走和首页同一张对话框（tray:action → notifyPluginInstallFailure）
   if (result.pluginFailure) {

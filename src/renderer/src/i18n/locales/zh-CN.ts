@@ -1635,7 +1635,11 @@ export default {
     toggleTheme: '切换主题',
     userInfo: '用户信息',
     settings: '设置',
-    language: '语言'
+    language: '语言',
+    // 托盘「退出」时还有会话操作没收摊。数的是会话操作，不是全部后台任务
+    trayQuitTitle: '退出虚幻盒子？',
+    trayQuitContent: '有 {count} 项会话操作尚未完成，退出会中断它们。',
+    trayQuitOk: '仍然退出'
   },
   update: {
     newVersionAvailable: '新版本',

@@ -1677,7 +1677,11 @@ export default {
     toggleTheme: 'Toggle Theme',
     userInfo: 'User Info',
     settings: 'Settings',
-    language: 'Language'
+    language: 'Language',
+    trayQuitTitle: 'Quit Unreal Box?',
+    trayQuitContent:
+      '{count} session operation(s) are still unfinished — quitting will interrupt them.',
+    trayQuitOk: 'Quit anyway'
   },
   update: {
     newVersionAvailable: 'New Version',

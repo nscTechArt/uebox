@@ -60,6 +60,13 @@ describe('打开工程的结果 → 托盘通知', () => {
     })
   })
 
+  it('编辑器早就开着：说一声，不带界面动作', () => {
+    expect(trayOpenOutcome({ success: true, alreadyRunning: true }, project, t)).toEqual({
+      title: 'tray.alreadyRunningTitle',
+      body: 'tray.alreadyRunningBody(Demo)'
+    })
+  })
+
   it('干干净净打开了：不弹通知', () => {
     expect(trayOpenOutcome({ success: true }, project, t)).toBeNull()
   })

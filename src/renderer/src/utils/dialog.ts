@@ -64,6 +64,8 @@ export interface ConfirmDialogOptions extends BaseDialogOptions {
    */
   onOk?: () => void | Promise<unknown>
   onCancel?: () => void
+  /** 打开时焦点落在「取消」上：主按钮有破坏性时用，误按回车不该把事做了 */
+  focusCancel?: boolean
 }
 
 export interface AlertDialogOptions extends BaseDialogOptions {
@@ -73,8 +75,10 @@ export interface AlertDialogOptions extends BaseDialogOptions {
 /** 把我们的选项翻译成 antd 的形状。换底层时，要重写的只有这个函数和下面五个入口。 */
 function toAntdConfig(options: ConfirmDialogOptions | AlertDialogOptions): Record<string, unknown> {
   const { danger, ...rest } = options
-  const config: Record<string, unknown> = { ...rest }
+  const { focusCancel, ...antdRest } = rest as ConfirmDialogOptions
+  const config: Record<string, unknown> = { ...antdRest }
   if (danger) config.okType = 'danger'
+  if (focusCancel) config.autoFocusButton = 'cancel'
   return config
 }
 

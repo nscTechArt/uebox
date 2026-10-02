@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => {
       dir: string
     ) => undefined | { projectKey: string; projectName?: string; originPath?: string },
     interactiveProjects: [] as Array<{ projectPath: string }>,
+    /** 系统进程里正开着的 .uproject（没装插件、盒子认不出来的那种） */
+    runningProcessPaths: [] as string[],
     openFile: (async () => ({ success: true })) as (
       path: string
     ) => Promise<{ success: boolean; error?: string; pluginFailure?: string }>,
@@ -153,12 +155,20 @@ vi.mock('../services', () => ({
   }
 }))
 
+vi.mock('../utils/UnrealProcessDetector', () => ({
+  default: {
+    findRunningProjectByPath: async (path: string) =>
+      mocks.state.runningProcessPaths.includes(path) ? { projectPath: path } : null
+  }
+}))
+
 vi.mock('../sqliteDataBase', () => ({ getPublicDatabase: () => mocks.state.db }))
 vi.mock('../sqliteDataBase/models/project', () => ({
   getProjectByPath: (_db: unknown, dir: string) => mocks.state.findRecord(dir)
 }))
 
 import {
+  TRAY_CONFIRM_QUIT_CHANNEL,
   TRAY_SET_RECENT_SESSIONS_CHANNEL,
   TRAY_TAKE_PENDING_CHANNEL
 } from '../../shared/trayActions'
@@ -289,6 +299,7 @@ describe('trayController', () => {
     s.mainWindow = undefined
     s.fileExists = true
     s.interactiveProjects = []
+    s.runningProcessPaths = []
     s.openFile = async () => ({ success: true })
     s.listRecent = async () => []
     s.findRecord = () => undefined
@@ -743,35 +754,54 @@ describe('trayController', () => {
       expect(takePending()).toMatchObject({ type: 'plugin-failure' })
     })
 
-    it('普通打开失败：落定后叫起主窗口，原生错误对话框拿到标题和错误详情', async () => {
+    it('普通打开失败：通知已经说完了，点通知只把窗口叫回来，不再补弹同一句话', async () => {
+      s.openFile = async () => ({ success: false, error: 'NO_FILE_ASSOCIATION' })
+      await openAndSettle()
+
+      expect(s.notifications).toHaveLength(1)
+      expect(s.notifications[0].options.body).toContain('NO_FILE_ASSOCIATION')
+      s.notifications[0].emit('click')
+
+      expect(mocks.showMainWindow).toHaveBeenCalledTimes(1)
+      expect(mocks.dialogShow).not.toHaveBeenCalled()
+      expect(takePending()).toBeNull()
+    })
+
+    it('普通打开失败但通知弹不出来：原因交给界面用应用内的框弹', async () => {
       s.notifSupported = false
-      s.mainWindow = new FakeWindow()
       s.openFile = async () => ({ success: false, error: 'NO_FILE_ASSOCIATION' })
       await openAndSettle()
 
       expect(mocks.showMainWindow).toHaveBeenCalledTimes(1)
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      const [parent, options] = mocks.dialogShow.mock.calls[0] as [
-        unknown,
-        { type: string; title: string; message: string; detail: string }
-      ]
-      expect(parent).toBe(s.mainWindow)
-      expect(options.type).toBe('error')
-      expect(options.title).toBe('tray.openFailedTitle')
-      expect(options.message).toBe('tray.openFailedTitle')
-      expect(options.detail).toContain('NO_FILE_ASSOCIATION')
-      expect(takePending()).toBeNull()
+      expect(mocks.dialogShow).not.toHaveBeenCalled()
+      const action = takePending() as { type: string; title: string; body: string }
+      expect(action.type).toBe('open-failed')
+      expect(action.title).toBe('tray.openFailedTitle')
+      expect(action.body).toContain('NO_FILE_ASSOCIATION')
     })
 
-    it('主窗口已经没了：错误对话框无主弹，不炸', async () => {
-      s.notifSupported = false
-      s.openFile = async () => ({ success: false, error: 'NO_FILE_ASSOCIATION' })
-      await openAndSettle()
+    it('编辑器已经开着这个工程（盒子没认出来）：不开第二个，通知一声，菜单项不灰', async () => {
+      setPlatform('win32')
+      seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
+      s.runningProcessPaths = ['D:/A/A.uproject']
+      const openFile = vi.fn(async () => ({ success: true }))
+      s.openFile = openFile
+      const tray = newTray()
+      startTrayMenuController(tray as never, hostDeps)
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      projectItem(tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[], 'A')!.click!()
+      await flush()
 
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      const [options] = mocks.dialogShow.mock.calls[0] as [{ type: string; title: string }]
-      expect(options.type).toBe('error')
-      expect(options.title).toBe('tray.openFailedTitle')
+      expect(openFile).not.toHaveBeenCalled()
+      expect(s.notifications).toHaveLength(1)
+      expect(s.notifications[0].options.title).toBe('tray.alreadyRunningTitle')
+
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      const item = projectItem(tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[], 'A')
+      expect(item?.label).toBe('A')
+      expect(item?.enabled).not.toBe(false)
     })
   })
 
@@ -789,7 +819,11 @@ describe('trayController', () => {
       return tray.setContextMenu.mock.calls.at(-1)![0] as MenuItem[]
     }
 
-    it('没有会话操作：直接退，不拉窗口也不弹框', async () => {
+    function confirmFromUi(): unknown {
+      return s.ipcHandlers.get(TRAY_CONFIRM_QUIT_CHANNEL)!({}, undefined)
+    }
+
+    it('没有会话操作：直接退，不拉窗口也不问', async () => {
       const items = await darwinMenu()
       quitItem(items).click!()
       await flush()
@@ -799,388 +833,101 @@ describe('trayController', () => {
       expect(mocks.showMainWindow).not.toHaveBeenCalled()
     })
 
-    it('有会话操作：挂在可见主窗口上弹确认框，选项照翻', async () => {
+    it('有会话操作：窗口叫回来，确认交给界面的应用内确认框，不弹原生框', async () => {
       mocks.countActiveOperations.mockReturnValue(2)
-      const window = new FakeWindow()
-      s.mainWindow = window
-      mocks.dialogShow.mockResolvedValue({ response: 1 })
-
       const items = await darwinMenu()
       quitItem(items).click!()
       await flush()
 
       expect(mocks.showMainWindow).toHaveBeenCalledTimes(1)
-      const [parent, options] = mocks.dialogShow.mock.calls[0] as [unknown, Record<string, unknown>]
-      expect(parent).toBe(window)
-      expect(options).toMatchObject({
-        type: 'warning',
-        message: 'tray.quitConfirm:{"count":2}',
-        buttons: ['tray.quitConfirmOk', 'tray.quitConfirmCancel'],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true
-      })
-      expect(options.signal).toBeInstanceOf(AbortSignal)
+      expect(takePending()).toEqual({ type: 'confirm-quit', count: 2 })
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(mocks.dialogShow).not.toHaveBeenCalled()
       expect(mocks.appQuit).not.toHaveBeenCalled()
     })
 
-    it('按了「仍然退出」：退', async () => {
+    it('界面里选了「仍然退出」：退', async () => {
       mocks.countActiveOperations.mockReturnValue(1)
-      s.mainWindow = new FakeWindow()
-      mocks.dialogShow.mockResolvedValue({ response: 0 })
-
       const items = await darwinMenu()
       quitItem(items).click!()
-      await flush()
+      takePending()
 
+      expect(confirmFromUi()).toEqual({ success: true })
       expect(mocks.appQuit).toHaveBeenCalledTimes(1)
     })
 
-    it('窗口藏进托盘：叫回来再弹框', async () => {
+    it('界面一直没来取：退回原生确认框，默认和取消都在「取消」上', async () => {
       mocks.countActiveOperations.mockReturnValue(1)
-      const window = new FakeWindow()
-      window.visible = false
-      s.mainWindow = window
-      mocks.showMainWindow.mockImplementation(() => {
-        window.visible = true
-      })
       mocks.dialogShow.mockResolvedValue({ response: 1 })
-
       const items = await darwinMenu()
       quitItem(items).click!()
-      await flush()
+      await vi.advanceTimersByTimeAsync(8_000)
 
-      expect(mocks.dialogShow.mock.calls[0][0]).toBe(window)
+      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
+      const [options] = mocks.dialogShow.mock.calls[0] as [
+        { buttons: string[]; defaultId: number; cancelId: number }
+      ]
+      expect(options.buttons).toEqual(['tray.quitConfirmOk', 'tray.quitConfirmCancel'])
+      expect(options.defaultId).toBe(1)
+      expect(options.cancelId).toBe(1)
       expect(mocks.appQuit).not.toHaveBeenCalled()
+      // 没取走的那条清掉了，界面之后挂上来不会再弹一次
+      expect(takePending()).toBeNull()
     })
 
-    it('窗口没了、新建的还没 ready：等 ready-to-show 再拉起来弹框', async () => {
+    it('原生框里按了「仍然退出」：退；框开着时再点退出不叠第二个', async () => {
       mocks.countActiveOperations.mockReturnValue(1)
-      const created = new FakeWindow()
-      created.visible = false
-      mocks.showMainWindow.mockImplementation(() => {
-        s.mainWindow = created
-      })
-      mocks.dialogShow.mockResolvedValue({ response: 1 })
-
+      let answer: (value: { response: number }) => void = () => {}
+      mocks.dialogShow.mockImplementation(() => new Promise((resolve) => (answer = resolve)))
       const items = await darwinMenu()
       quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).not.toHaveBeenCalled()
-      expect(created.show).not.toHaveBeenCalled()
-
-      created.emit('ready-to-show')
-      await flush()
-
-      expect(created.show).toHaveBeenCalledTimes(1)
-      expect(created.focus).toHaveBeenCalledTimes(1)
-      expect(created.listenerCount('ready-to-show')).toBe(0)
-      expect(created.listenerCount('closed')).toBe(0)
-      expect(vi.getTimerCount()).toBe(0)
-      expect(mocks.dialogShow.mock.calls[0][0]).toBe(created)
-    })
-
-    it('窗口销毁 / webContents 已死：改用独立确认框', async () => {
-      for (const setup of [
-        () => {
-          s.mainWindow = new FakeWindow()
-          s.mainWindow!.destroyed = true
-        },
-        () => {
-          s.mainWindow = new FakeWindow()
-          s.mainWindow!.webContentsDestroyed = true
-        }
-      ]) {
-        vi.clearAllMocks()
-        mocks.countActiveOperations.mockReturnValue(1)
-        setup()
-
-        const items = await darwinMenu()
-        quitItem(items).click!()
-        await flush()
-
-        expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-        const [options] = mocks.dialogShow.mock.calls[0] as [{ message?: string }]
-        expect(options.message).toContain('tray.quitConfirm')
-        expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('改用独立确认框'))
-        expect(mocks.appQuit).toHaveBeenCalledTimes(1)
-      }
-    })
-
-    it('拉旧窗口回来它还是藏着：改用独立确认框', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      const window = new FakeWindow()
-      window.visible = false
-      s.mainWindow = window
-
-      const items = await darwinMenu()
+      await vi.advanceTimersByTimeAsync(8_000)
       quitItem(items).click!()
-      await flush()
-
-      expect(mocks.showMainWindow).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(8_000)
       expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      const [options] = mocks.dialogShow.mock.calls[0] as [{ message?: string }]
-      expect(options.message).toContain('tray.quitConfirm')
-      expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('改用独立确认框'))
+
+      answer({ response: 0 })
+      await flush()
       expect(mocks.appQuit).toHaveBeenCalledTimes(1)
     })
 
-    it('主窗口没了也建不回来：改用独立确认框', async () => {
+    it('原生框也弹不出来：记一笔，按用户意图直接退出', async () => {
       mocks.countActiveOperations.mockReturnValue(1)
-
+      mocks.dialogShow.mockRejectedValue(new Error('no dialog'))
       const items = await darwinMenu()
       quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      const [options] = mocks.dialogShow.mock.calls[0] as [{ message?: string }]
-      expect(options.message).toContain('tray.quitConfirm')
-      expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('改用独立确认框'))
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1)
-    })
-
-    it('等 ready 期间窗口先关了：改用独立确认框，监听摘干净', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      const created = new FakeWindow()
-      created.visible = false
-      mocks.showMainWindow.mockImplementation(() => {
-        s.mainWindow = created
-      })
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      await flush()
-
-      created.destroyed = true
-      created.emit('closed')
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      const [options] = mocks.dialogShow.mock.calls[0] as [{ message?: string }]
-      expect(options.message).toContain('tray.quitConfirm')
-      expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('改用独立确认框'))
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1)
-      expect(created.listenerCount('ready-to-show')).toBe(0)
-      expect(created.listenerCount('closed')).toBe(0)
-    })
-
-    it('等 ready 期间全局 before-quit：放弃等，不弹框不退出', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      const created = new FakeWindow()
-      created.visible = false
-      mocks.showMainWindow.mockImplementation(() => {
-        s.mainWindow = created
-      })
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      await flush()
-
-      s.beforeQuitHandlers.forEach((cb) => cb())
-      await flush()
-
-      expect(mocks.dialogShow).not.toHaveBeenCalled()
-      expect(mocks.appQuit).not.toHaveBeenCalled()
-      expect(created.listenerCount('ready-to-show')).toBe(0)
-      expect(created.listenerCount('closed')).toBe(0)
-    })
-
-    it('等 ready 一直不来：超时后改用独立确认框，监听和定时器摘干净，之后托盘「退出」还能用', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      const created = new FakeWindow()
-      created.visible = false
-      mocks.showMainWindow.mockImplementation(() => {
-        s.mainWindow = created
-      })
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).not.toHaveBeenCalled()
-
-      await vi.advanceTimersByTimeAsync(10_000)
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      const [options] = mocks.dialogShow.mock.calls[0] as [{ message?: string }]
-      expect(options.message).toContain('tray.quitConfirm')
-      expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('等就绪超时'))
-      expect(created.listenerCount('ready-to-show')).toBe(0)
-      expect(created.listenerCount('closed')).toBe(0)
-      expect(vi.getTimerCount()).toBe(0)
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1)
-
-      // 超时落定后看守已经放开：再点「退出」照常弹框
-      vi.clearAllMocks()
-      mocks.countActiveOperations.mockReturnValue(1)
-      created.visible = true
-      quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1)
-    })
-
-    it('原生框挂着时全局退出：abort 把在途框拒掉（取消落定）', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      s.mainWindow = new FakeWindow()
-      let resolveDialog!: (value: { response: number }) => void
-      mocks.dialogShow.mockImplementation(
-        (...args: unknown[]) =>
-          new Promise<{ response: number }>((resolve, reject) => {
-            resolveDialog = resolve
-            const options = args[1] as { signal: AbortSignal }
-            options.signal.addEventListener('abort', () => reject(new Error('aborted')))
-          })
-      )
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      await flush()
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-
-      s.beforeQuitHandlers.forEach((cb) => cb())
-      await flush()
-
-      resolveDialog({ response: 0 })
-      await flush()
-      expect(mocks.appQuit).not.toHaveBeenCalled()
-    })
-
-    it('原生框不吃 abort（全局退出开始后才按到「仍然退出」）：不再退第二次', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      s.mainWindow = new FakeWindow()
-      let resolveDialog!: (value: { response: number }) => void
-      let seenSignal: AbortSignal | undefined
-      mocks.dialogShow.mockImplementation(
-        (...args: unknown[]) =>
-          new Promise<{ response: number }>((resolve) => {
-            resolveDialog = resolve
-            seenSignal = (args[1] as { signal: AbortSignal }).signal
-          })
-      )
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      await flush()
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-
-      s.beforeQuitHandlers.forEach((cb) => cb())
-      expect(seenSignal?.aborted).toBe(true)
-
-      resolveDialog({ response: 0 })
-      await flush()
-      expect(mocks.appQuit).not.toHaveBeenCalled()
-    })
-
-    it('原生框被全局退出中止后退出取消了：再点托盘「退出」拿到新的、未中止的信号，按「仍然退出」能退', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      s.mainWindow = new FakeWindow()
-
-      const signals: AbortSignal[] = []
-      mocks.dialogShow.mockImplementation((...args: unknown[]) => {
-        const options = args.at(-1) as { signal: AbortSignal }
-        signals.push(options.signal)
-        // 模仿 Electron：框被中止信号关掉时按取消落定
-        return new Promise<{ response: number }>((resolve) => {
-          options.signal.addEventListener('abort', () => resolve({ response: 1 }))
-        })
-      })
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      await flush()
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-
-      // 全局退出把在途框收掉，但退出本身最后被取消了
-      s.beforeQuitHandlers.forEach((cb) => cb())
-      await flush()
-
-      expect(mocks.appQuit).not.toHaveBeenCalled()
-      expect(signals[0].aborted).toBe(true)
-
-      mocks.dialogShow.mockImplementation((...args: unknown[]) => {
-        const options = args.at(-1) as { signal: AbortSignal }
-        signals.push(options.signal)
-        return Promise.resolve({ response: 0 })
-      })
-      quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(2)
-      expect(signals[1]).not.toBe(signals[0])
-      expect(signals[1].aborted).toBe(false)
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1)
-    })
-
-    it('框弹着时再点退出：框只弹一次', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      s.mainWindow = new FakeWindow()
-      let resolveDialog!: (value: { response: number }) => void
-      mocks.dialogShow.mockImplementation(
-        () => new Promise<{ response: number }>((resolve) => (resolveDialog = resolve))
-      )
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      resolveDialog({ response: 1 })
-      await flush()
-      expect(mocks.appQuit).not.toHaveBeenCalled()
-    })
-
-    it('独立确认框也弹不出来：记一笔，按用户意图直接退出', async () => {
-      mocks.countActiveOperations.mockReturnValue(1)
-      // 主窗口建不回来 → 退回独立框；独立框再拒 → confirmTrayQuit 记一笔直接退
-      mocks.dialogShow.mockRejectedValue(new Error('native dialog gone'))
-
-      const items = await darwinMenu()
-      quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('改用独立确认框'))
-      expect(mocks.loggerWarn).toHaveBeenCalledWith(
-        expect.stringContaining('直接退出'),
-        expect.any(Error)
-      )
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1)
-    })
-
-    it('退出被取消过（before-quit 时无框在途）：再点托盘「退出」照常弹框', async () => {
-      const items = await darwinMenu()
-
-      // 一次没走成的系统退出：当时没有确认框在途，不该毒化后来的退出
-      s.beforeQuitHandlers.forEach((cb) => cb())
-
-      mocks.countActiveOperations.mockReturnValue(1)
-      s.mainWindow = new FakeWindow()
-      quitItem(items).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1) // 框默认回「仍然退出」
-
-      vi.clearAllMocks()
-      mocks.countActiveOperations.mockReturnValue(0)
-      quitItem(items).click!()
+      await vi.advanceTimersByTimeAsync(8_000)
       await flush()
 
       expect(mocks.appQuit).toHaveBeenCalledTimes(1)
+      expect(mocks.loggerWarn).toHaveBeenCalled()
+    })
+
+    it('界面取走了就不退回原生框', async () => {
+      mocks.countActiveOperations.mockReturnValue(1)
+      const items = await darwinMenu()
+      quitItem(items).click!()
+      takePending()
+      await vi.advanceTimersByTimeAsync(8_000)
+
       expect(mocks.dialogShow).not.toHaveBeenCalled()
     })
 
-    it('win32 右键现建的菜单里点退出：有会话操作先弹框，按「仍然退出」才退', async () => {
+    it('will-quit 之后界面迟到的确认不再退第二次', async () => {
+      mocks.countActiveOperations.mockReturnValue(1)
+      const items = await darwinMenu()
+      quitItem(items).click!()
+      takePending()
+      s.willQuitHandlers.forEach((handler) => handler())
+
+      confirmFromUi()
+      expect(mocks.appQuit).not.toHaveBeenCalled()
+    })
+
+    it('win32 右键现建的菜单里点退出：有会话操作同样交给界面问', async () => {
       setPlatform('win32')
       seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
       mocks.countActiveOperations.mockReturnValue(1)
-      const window = new FakeWindow()
-      s.mainWindow = window
-      mocks.dialogShow.mockResolvedValue({ response: 1 })
 
       const tray = newTray()
       startTrayMenuController(tray as never, hostDeps)
@@ -1188,21 +935,8 @@ describe('trayController', () => {
       await flush()
 
       quitItem(tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(1)
-      expect(mocks.dialogShow.mock.calls[0][0]).toBe(window)
+      expect(takePending()).toEqual({ type: 'confirm-quit', count: 1 })
       expect(mocks.appQuit).not.toHaveBeenCalled()
-
-      mocks.dialogShow.mockResolvedValue({ response: 0 })
-      s.trayHandlers.get('right-click')!()
-      await flush()
-
-      quitItem(tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]).click!()
-      await flush()
-
-      expect(mocks.dialogShow).toHaveBeenCalledTimes(2)
-      expect(mocks.appQuit).toHaveBeenCalledTimes(1)
       expect(tray.setContextMenu).not.toHaveBeenCalled()
     })
   })

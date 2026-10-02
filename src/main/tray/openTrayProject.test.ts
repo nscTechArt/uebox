@@ -146,6 +146,15 @@ describe('createTrayProjectOpener', () => {
     expect(onStateChanged).toHaveBeenCalledTimes(2)
   })
 
+  it('编辑器本来就开着：不挂「启动中」，下次还能点', async () => {
+    const { deps: d, tracker, openFile, report } = deps()
+    openFile.mockResolvedValue({ success: true, alreadyRunning: true })
+
+    await createTrayProjectOpener(d)(project)
+    expect(tracker.isLaunching('k-a')).toBe(false)
+    expect(report).toHaveBeenCalledWith({ success: true, alreadyRunning: true }, project)
+  })
+
   it('打开成功：把结果交给 report', async () => {
     const { deps: d, openFile, report } = deps()
     openFile.mockResolvedValue({ success: true, pluginFailure: 'X' })

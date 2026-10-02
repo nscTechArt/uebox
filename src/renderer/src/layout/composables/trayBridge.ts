@@ -26,13 +26,41 @@ import { useRouter } from 'vue-router'
 import { trayAPI } from '@renderer/api/tray'
 import { chatSessionRoute, generateChatSessionId } from '@renderer/common/chatRoute'
 import { notifyPluginInstallFailure } from '@renderer/hooks/usePluginInstallNotice'
+import i18n from '@renderer/i18n'
 import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
 import { useTabsStore } from '@renderer/store/modules/tabs'
+import { confirmDialog, errorDialog } from '@renderer/utils/dialog'
 import {
   TRAY_RECENT_LIMIT,
   type TrayAction,
   type TrayRecentSession
 } from '@core/shared/trayActions'
+
+/** 退出确认框开着时再点托盘「退出」不叠第二个 */
+let quitDialogOpen = false
+
+function confirmTrayQuit(count: number): void {
+  if (quitDialogOpen) return
+  quitDialogOpen = true
+  const { t } = i18n.global
+  confirmDialog({
+    title: t('layout.trayQuitTitle'),
+    content: t('layout.trayQuitContent', { count }),
+    okText: t('layout.trayQuitOk'),
+    cancelText: t('common.cancel'),
+    danger: true,
+    centered: true,
+    // 默认停在「取消」：误按回车不该把跑着的任务一起带走
+    focusCancel: true,
+    onOk: () =>
+      trayAPI.confirmQuit().catch((error) => {
+        console.error('[TrayBridge] 通知主进程退出失败', error)
+      }),
+    afterClose: () => {
+      quitDialogOpen = false
+    }
+  })
+}
 
 export function useTrayBridge(): void {
   const router = useRouter()
@@ -80,6 +108,17 @@ export function useTrayBridge(): void {
         .catch((error) => {
           console.error('[TrayBridge] 新建会话跳转失败', error)
         })
+      return
+    }
+
+    if (action.type === 'confirm-quit') {
+      confirmTrayQuit(action.count)
+      return
+    }
+
+    // 系统通知弹不出来时，打开工程的失败原因只能在这里让用户看到
+    if (action.type === 'open-failed') {
+      errorDialog({ title: action.title, content: action.body, centered: true })
       return
     }
 

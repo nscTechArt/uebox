@@ -90,7 +90,8 @@ export function buildTrayMenuTemplate(
       { label: t('tray.recentChats'), enabled: false },
       ...state.recentSessions.map(
         (session): MenuItemConstructorOptions => ({
-          label: menuLabel(session.title),
+          // 空标题画出来是一行空白，给个兜底名
+          label: menuLabel(session.title.trim() || t('tray.untitledChat')),
           click: () => handlers.openSession(session.id)
         })
       )
