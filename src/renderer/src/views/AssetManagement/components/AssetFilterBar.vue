@@ -1556,6 +1556,23 @@ const toggleAssetType = (classNameCn: string): void => {
   font-size: 14px;
 }
 
+/* 标签名可能很长（中文长名）：一行截断，完整名字在悬浮提示里 */
+.option-label {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.option-count {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 // ========== 资产类型选择器（UE 风格分组） ==========
 .asset-type-selector {
   padding: 12px;
@@ -1752,50 +1769,5 @@ const toggleAssetType = (classNameCn: string): void => {
       background: var(--color-bg-surface-hover);
     }
   }
-}
-</style>
-
-<!-- 全局样式：限制下拉菜单高度 -->
-<style lang="less">
-// 资产类型下拉菜单滚动样式
-.app-dropdown {
-  .app-menu {
-    overflow-y: auto;
-
-    // 自定义滚动条样式
-    &::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    &::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: var(--color-bg-surface-hover);
-      border-radius: 3px;
-
-      &:hover {
-        background: var(--color-bg-surface-hover);
-      }
-    }
-  }
-}
-
-/* 标签名可能很长（中文长名）：一行截断，完整名字在悬浮提示里 */
-.option-label {
-  display: inline-block;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-
-.option-count {
-  margin-left: var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  font-variant-numeric: tabular-nums;
 }
 </style>
