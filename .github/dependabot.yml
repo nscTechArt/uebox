@@ -28,6 +28,13 @@ updates:
       default-days: 7
     open-pull-requests-limit: 5
     groups:
+      # pi-* 两个包总是一起发版，一起升。
+      # 别指望分组按顺序先到先得：实测 Dependabot 把它塞进了 prod-minor-patch，
+      # 所以下面两组都显式 exclude 掉 pi-*。
+      # 它还在 0.x，minor 就是破坏性变更（agent-v3 直接吃它的类型），所以单独一组、单独适配。
+      pi:
+        patterns:
+          - '@earendil-works/pi-*'
       # 开发依赖挂了顶多本地跑不起来，合并成一个 PR 就够。
       # 只收 minor/patch：vite/vitest/eslint 这类大版本混在一组里谁也合不动，
       # major 单独出 PR，逐个升。
@@ -42,8 +49,12 @@ updates:
         update-types:
           - minor
           - patch
-        # pi-* 还在 0.x，minor 就是破坏性变更（agent-v3 直接吃它的类型），
-        # 不能跟一堆小升级捆在一起，单独出 PR 适配。
+        exclude-patterns:
+          - '@earendil-works/pi-*'
+      # 大版本也收成一个 PR，免得每周冒出一串。合不合、拆不拆，打开 PR 人工看。
+      major:
+        update-types:
+          - major
         exclude-patterns:
           - '@earendil-works/pi-*'
     ignore:

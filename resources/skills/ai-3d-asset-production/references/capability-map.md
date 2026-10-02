@@ -9,6 +9,7 @@
 - [generate_image](#generate_image)
 - [generate_3d_model](#generate_3d_model)
 - [三家 3D 厂商的实际差异](#三家-3d-厂商的实际差异)
+- [自动绑骨（rig_3d_model）](#自动绑骨rig_3d_model)
 - [Unreal 侧能做什么](#unreal-侧能做什么)
 - [Blender 侧能做什么](#blender-侧能做什么)
 
@@ -88,6 +89,24 @@ Tripo 走多图时的其余限制与单图那条完全一样（`bounding_box` �
 
 Meshy 的 `quality` 和 `topology` 在厂商侧默认是不生效的，工具已经替你打开了那一位，
 不用额外传参。Tripo 的两个系列面数量级差很多，`quality` 的档位含义随系列变。
+
+## 自动绑骨（rig_3d_model）
+
+只接了 Tripo，入参是 `generate_3d_model` 返回的 `job_id`。工具先免费检查能不能绑、
+推荐哪种骨骼，能绑才提交（约 30 额度）。
+
+| 参数 | 说明 |
+| --- | --- |
+| `source_job_id` | 那次生成的任务号，原样抄。别家生成的会明确报错 |
+| `rig_type` | biped / quadruped / hexapod / octopod / avian / serpentine / aquatic。不确定别填，按检查推荐的绑 |
+| `spec` | 默认 `mixamo`（进虚幻重定向最省事），`tripo` 是厂商原生命名 |
+| `format` | 默认 `fbx`。导入时 `ue_content_import` 的 `fbx_import_as` 填 `skeletal_mesh` |
+| `resume_job_id` | 续取一个已提交的绑骨任务，不重新扣费 |
+
+要点：
+
+- 生成时就为绑骨做准备：提示词写 T-pose，`negative_prompt` 去掉底座和粘连道具。
+- 只出骨架，不带动画。要动起来用 `anim_retarget` 把工程里现有的动画重定向过来。
 
 ## Unreal 侧能做什么
 

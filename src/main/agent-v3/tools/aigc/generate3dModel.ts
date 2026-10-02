@@ -319,6 +319,9 @@ const TRIPO_DESCRIPTION_NOTE = `
 - 整批资产要尺寸一致 → \`auto_size\`（Tripo 这边没有 \`bounding_box\`，用它替代）
 - 有参考图且在意朝向 → \`align_orientation\`
 - 只有主角和特写才值得开 \`geometry_quality: detailed\` / \`texture_quality: detailed\`
+
+【要能动的角色】生成完把返回的 \`job_id\` 交给 \`rig_3d_model\` 自动绑骨（另扣一笔）。
+要绑骨的角色，提示词里写 T-pose，并用 \`negative_prompt\` 去掉底座 —— 底座和粘连的道具会让它绑不了。
 `
 
 /**
