@@ -60,19 +60,25 @@ pending assets, or in-flight streaming requests.
 When that warning is present the materials may still be grey and the textures blurry.
 **Do not diagnose a material or texture problem from that frame.** Wait and take another.
 
-## Exposure runs dark — always
+## Brightness depends on the exposure lock
 
-This capture path renders its own frame, so auto-exposure has not converged the way it has
-in the editor viewport. Measured: about one stop darker overall, with weaker bloom. This
-warning appears on every successful capture because it is always true.
+`data.exposure` says which exposure the frame used, and the warnings spell out what follows.
 
-Trustworthy from the image: whether an object is present, where it is, what colour a
-material is, whether a light is on, shadow direction, composition.
+- `manual`: the scene uses manual exposure (an unbound PostProcessVolume, Metering Mode =
+  Manual). The capture, the editor viewport and the running game share one brightness, so
+  over- and under-exposure can be judged from the image.
+- `manual` with `exposureSource: viewport`: locked by the editor viewport only. True in the
+  editor; PIE and packaged builds still follow the project's post-process settings.
+- `auto`: every view converges on its own brightness and darkened scenes get pulled back up.
+  The image has no brightness baseline. Lock exposure first, then tune lights or Exposure
+  Compensation.
+- `null`: an older box or plugin did not report it. Treat it like `auto`.
 
-**Not** trustworthy: overall brightness, whether the scene is over- or under-exposed,
-whether exposure compensation needs changing. When a user says "it looks too dark", do not
-check it against this image and do not change light intensity or exposure settings based
-on it — the difference is in the capture, not the scene.
+Whatever the exposure, the image is reliable for whether an object is present, where it is,
+what colour a material is, whether a light is on, shadow direction and composition.
+
+Do not dismiss a "too bright" or "too dark" report as capture bias. With exposure locked, the
+capture is what the player sees.
 
 ## Overwriting
 

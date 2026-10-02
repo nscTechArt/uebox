@@ -34,6 +34,14 @@ vi.mock('../../contextImage', async (importOriginal) => ({
   compressForContext: vi.fn(async () => ({ data: 'ZmFrZQ==', mimeType: 'image/jpeg' }))
 }))
 
+// 测光的数字算得对不对在 screenshotMeasure.test.ts 里用真 sharp 测；
+// 这里只关心「开了才测、结果带到模型面前、测不成不连累截图」
+const measureScreenshot = vi.fn()
+vi.mock('./screenshotMeasure', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./screenshotMeasure')>()),
+  measureScreenshot: (...args: unknown[]) => measureScreenshot(...args)
+}))
+
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(async () => Buffer.from('png'))
 }))
@@ -69,6 +77,7 @@ const EDITOR_SHOT = {
 }
 
 beforeEach(() => {
+  measureScreenshot.mockReset()
   callRequest.mockReset()
   getConnectionCount.mockReset()
   getConnectionCount.mockReturnValue(1)
@@ -631,5 +640,95 @@ describe('曝光锁没锁', () => {
     const result = await run({})
     expect(result).not.toHaveProperty('exposure')
     expect(String(result.message)).not.toMatch(/曝光/)
+  })
+})
+
+describe('测光（measure）', () => {
+  const MEASUREMENT = {
+    luma_mean: 52,
+    luma_p5: 8,
+    luma_p50: 50,
+    luma_p95: 97,
+    clipped_high_percent: 6.4,
+    crushed_low_percent: 0.1,
+    chroma_mean: 22,
+    bands: {
+      top: { luma: 80, chroma: 12, warmth: -9, hue: '蓝' },
+      middle: { luma: 48, chroma: 25, warmth: 3, hue: '绿' },
+      bottom: { luma: 30, chroma: 28, warmth: 8, hue: '黄绿' }
+    },
+    palette: [{ hex: '#a0c0e0', percent: 31 }],
+    samples: 57600
+  }
+
+  it('不传就不测，也不多附图', async () => {
+    callRequest.mockResolvedValue(EDITOR_SHOT)
+    const result = await run({})
+
+    expect(measureScreenshot).not.toHaveBeenCalled()
+    expect(result).not.toHaveProperty('measurement')
+    expect(result.images).toHaveLength(1)
+    expect(String(result.message)).not.toContain('【测光】')
+  })
+
+  it('开了：数字进返回值和 message，明暗分区图作为第二张图附上', async () => {
+    callRequest.mockResolvedValue({ ...EDITOR_SHOT, exposure: 'manual' })
+    measureScreenshot.mockResolvedValue({
+      measurement: MEASUREMENT,
+      valueStudy: { data: 'c3R1ZHk=', mimeType: 'image/jpeg' }
+    })
+
+    const result = await run({ measure: true })
+
+    expect(measureScreenshot).toHaveBeenCalledTimes(1)
+    expect(result.measurement).toEqual(MEASUREMENT)
+    expect(result.images).toHaveLength(2)
+    const message = String(result.message)
+    expect(message).toContain('【测光】')
+    expect(message).toContain('6.4% 的像素已经爆白')
+    expect(message).toContain('三阶')
+    // 曝光锁了就不再补「没有基准」那句
+    expect(message).not.toContain('不是手动曝光')
+  })
+
+  it('没锁曝光时，测光那段也要说数字没有基准', async () => {
+    callRequest.mockResolvedValue({ ...EDITOR_SHOT, exposure: 'auto' })
+    measureScreenshot.mockResolvedValue({ measurement: MEASUREMENT, valueStudy: null })
+
+    const result = await run({ measure: true })
+
+    expect(String(result.message)).toContain('不是手动曝光')
+    // 分区图没拼成就只有原图，也不提它
+    expect(result.images).toHaveLength(1)
+    expect(String(result.message)).not.toContain('三阶')
+  })
+
+  it('测光失败不连累截图：照样成功，但说清这次没有数字', async () => {
+    callRequest.mockResolvedValue(EDITOR_SHOT)
+    measureScreenshot.mockRejectedValue(new Error('Input buffer contains unsupported image format'))
+
+    const result = await run({ measure: true })
+
+    expect(result.success).toBe(true)
+    expect(result.images).toHaveLength(1)
+    expect(result).not.toHaveProperty('measurement')
+    expect(String(result.message)).toContain('没测成')
+  })
+
+  it('截图没落盘时不去读一个不存在的文件', async () => {
+    callRequest.mockResolvedValue({ ...EDITOR_SHOT, saved: false, save_error: 'disk full' })
+
+    const result = await run({ measure: true })
+
+    expect(measureScreenshot).not.toHaveBeenCalled()
+    expect(String(result.message)).toContain('没有落盘')
+  })
+
+  it('配 show_ui=true 直接拒绝，连请求都不发', async () => {
+    const result = await run({ measure: true, show_ui: true })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('measure 只对场景截图有效')
+    expect(callRequest).not.toHaveBeenCalled()
   })
 })

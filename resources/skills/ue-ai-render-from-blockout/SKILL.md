@@ -73,15 +73,13 @@ Use the `image-generation` skill for general prompt shaping, reference roles and
 Chinese or English is fine. Preserve the user's exact requested text, counts and constraints;
 do not add creative requirements to an already specific request.
 
-## The capture is darker than the user's screen
+## State the lighting in the prompt
 
-`ue_screenshot` renders its own frame, and its auto-exposure has not converged the way the
-editor viewport's has — measured at about one stop darker, with weaker bloom.
-
-That matters here in one specific way: **state the lighting you want in the prompt**. Do not
-let the reference decide it, and do not "correct" the scene's lights because the capture looks
-dim. Composition, layout, material colour and shadow direction in the capture are trustworthy;
-overall brightness is not.
+The capture's brightness is only a baseline when the scene's exposure is locked — the
+`exposure` line in the screenshot result says whether it is. Either way, **state the lighting
+you want in the prompt** rather than letting the reference decide it: a greybox is usually lit
+by whatever the template shipped with. Composition, layout, material colour and shadow
+direction in the capture are trustworthy regardless.
 
 ## One image first
 

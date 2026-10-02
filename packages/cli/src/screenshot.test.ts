@@ -94,6 +94,8 @@ describe('viewport screenshot', () => {
       saveError?: string
       cameraSource?: string
       pendingShaders?: number
+      exposure?: string | null
+      exposureSource?: string
     } = {}
   ): FakeTool {
     const width = override.width ?? 1920
@@ -133,6 +135,8 @@ describe('viewport screenshot', () => {
             view: 'viewport',
             cameraSource: override.cameraSource ?? 'viewport',
             pendingShaders: override.pendingShaders ?? 0,
+            exposure: override.exposure === undefined ? 'auto' : override.exposure,
+            exposureSource: override.exposureSource ?? null,
             pendingAssets: 0,
             streamingInFlight: 0
           }
@@ -465,10 +469,10 @@ describe('viewport screenshot', () => {
   })
 
   describe('已知限制要说出来', () => {
-    it('永远带上曝光偏暗那条', async () => {
+    type Shot = { data: Record<string, unknown>; warnings: string[] }
+    const shoot = async (tool: FakeTool): Promise<Shot> => {
       const dir = await tempDir()
-      const box = await startBox([screenshotTool()])
-
+      const box = await startBox([tool])
       const result = await run(
         [
           'viewport',
@@ -481,8 +485,42 @@ describe('viewport screenshot', () => {
         ],
         envFor(box)
       )
+      return JSON.parse(result.stdout) as Shot
+    }
 
-      expect(JSON.parse(result.stdout).warnings.join()).toContain('偏暗')
+    it('自动曝光时说明亮度没有基准，叫它先锁', async () => {
+      const out = await shoot(screenshotTool({ exposure: 'auto' }))
+
+      expect(out.data.exposure).toBe('auto')
+      expect(out.warnings.join()).toContain('自动曝光')
+      expect(out.warnings.join()).toContain('Metering Mode = Manual')
+    })
+
+    /**
+     * 原来这里永远说「偏暗一档，别拿它判断曝光」，结果成了把发白归给截图偏差的借口。
+     * 锁了手动曝光，截图的明暗就是玩家看到的，不能再叫调用方别信。
+     */
+    it('锁了手动曝光就不再说别信亮度', async () => {
+      const out = await shoot(
+        screenshotTool({ exposure: 'manual', exposureSource: 'post_process_volume' })
+      )
+
+      expect(out.data.exposure).toBe('manual')
+      expect(out.warnings.join()).not.toContain('曝光')
+      expect(out.warnings.join()).not.toContain('偏暗')
+    })
+
+    it('只锁了编辑器视口时提醒 PIE 和打包版不认它', async () => {
+      const out = await shoot(screenshotTool({ exposure: 'manual', exposureSource: 'viewport' }))
+
+      expect(out.warnings.join()).toContain('编辑器视口自己锁的')
+    })
+
+    it('老版本没报曝光时按自动曝光对待，不替它说锁了', async () => {
+      const out = await shoot(screenshotTool({ exposure: null }))
+
+      expect(out.data.exposure).toBeNull()
+      expect(out.warnings.join()).toContain('按自动曝光对待')
     })
 
     it('兜底机位时警告构图不可信', async () => {

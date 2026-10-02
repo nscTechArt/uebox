@@ -256,6 +256,12 @@ function serializeScreenshot(details: Record<string, unknown>): Record<string, u
     pendingAssets: num(details.pending_assets),
     pendingShaders: num(details.pending_shaders),
     streamingInFlight: num(details.streaming_in_flight),
+    // 亮度能不能当真全看这两个：manual 才有基准；老插件不报就是 null，别补成 auto
+    exposure: str(details.exposure),
+    exposureSource: str(details.exposure_source),
+    // 只有调用方传了 measure 才有；数字的口径见 screenshotMeasure.ts
+    measurement:
+      details.measurement && typeof details.measurement === 'object' ? details.measurement : null,
     units: { cameraLocation: 'cm', cameraRotation: 'deg' },
     message: str(details.message)
   }

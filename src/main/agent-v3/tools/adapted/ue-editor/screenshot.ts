@@ -55,6 +55,13 @@
  * 看一眼就知道的话，而且还隔了一手转述。一并删掉的还有 `image_url`：
  * 那是个 `file:///` 本地路径，模型打不开，每次都白发。
  *
+ * ## 测光（`measure`）不是那个 `analyze` 回来了
+ *
+ * `analyze` 是让另一个模型**看图写感想**，主模型能看图之后就没有意义了。
+ * `measure` 给的是主模型自己看不出来的东西：亮度分位、爆白/死黑占比、三条横带的
+ * 冷暖、主色板，外加一张明暗分区图。纯本地计算，不调任何模型。
+ * 为什么要有、口径是什么，见 `screenshotMeasure.ts` 文件头。
+ *
  * ## 曝光：不再叫模型「别信亮度」
  *
  * 描述里原来写着「这张图亮度不准，别因为它去调灯光或曝光，那是截图偏差」。
@@ -90,6 +97,11 @@ import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { compressForContext } from '../../contextImage'
 import { describeCameraAim } from '../../ueOrientation'
 import { describeViewportProvenance } from './viewportProvenance'
+import {
+  formatMeasurement,
+  measureScreenshot,
+  type ScreenshotMeasurement
+} from './screenshotMeasure'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
 
 // ============================================================================
@@ -143,6 +155,13 @@ const ScreenshotParamsSchema = z.object({
       '可选，正式那帧之前先渲几帧预热，默认 4。Lumen 的全局光、虚拟阴影贴图、' +
         'TSR 都是**每帧攒一点历史**，帧数不够画面会有噪点、阴影缺角。' +
         '嫌图脏就调大（每帧约 16ms），赶时间可以调到 0'
+    ),
+  measure: z
+    .boolean()
+    .optional()
+    .describe(
+      '可选，调灯光、判断画面好坏时传 true：顺带测光（亮度分位、爆白/死黑、横带冷暖、色板）' +
+        '并附明暗分区图。不能配 show_ui'
     )
 })
 
@@ -501,6 +520,38 @@ function describeCapturedWindow(
   }
 }
 
+/**
+ * 对插件写出的原图测光（不是对进上下文那张压缩过的 JPEG —— 压缩会挪动分位数）。
+ *
+ * 测光失败不让截图失败：图已经拍到了，模型照样能看，只是这一次没有数字。
+ * 但必须说出来，否则它会以为测光开关没起作用、或者数字就是空的。
+ */
+async function measureSavedShot(response: ScreenshotResponse): Promise<{
+  measurement?: ScreenshotMeasurement
+  valueStudy?: { data: string; mimeType: string }
+  text: string
+}> {
+  if (!response.saved || !response.path) {
+    return { text: '\n【测光】截图没有落盘，这次没测。' }
+  }
+  try {
+    const { measurement, valueStudy } = await measureScreenshot(await fs.readFile(response.path))
+    return {
+      measurement,
+      valueStudy: valueStudy ?? undefined,
+      text: formatMeasurement(measurement, {
+        exposure: response.exposure,
+        hasValueStudy: valueStudy !== null
+      })
+    }
+  } catch (error) {
+    console.warn('[ScreenshotTool] 测光失败:', error)
+    return {
+      text: `\n【测光】没测成（${error instanceof Error ? error.message : String(error)}），这次只有图，没有数字。`
+    }
+  }
+}
+
 export function createScreenshotTool(): V2Tool {
   return defineV2Tool({
     description: `抓取虚幻引擎当前视口的截图。
@@ -560,15 +611,7 @@ PostProcessVolume），截图、视口、游戏各自收敛到不同亮度，还
 把贴图流送冲一遍、再渲几帧预热，然后才拍。等不到位的部分会写在 message 里
 （见下面的 pending_*），**看到那句警告就别拿这张图判断材质和贴图**。
 
-【参数说明】：
-- filepath: 可选，保存的文件名或路径
-- resolution: 可选，[宽度, 高度]，默认 [1920, 1080]
-- show_ui: 可选，true = 拍整个编辑器窗口（面板、菜单、弹窗），默认 false = 只拍场景。
-  为 true 时 resolution / world / warmup_frames 都不起作用 —— 那条路是抓屏，不渲染
-- window: 可选，只配合 show_ui=true：点名拍哪个资产编辑器（资产名或路径），
-  或 level 拍主关卡窗口。不传就拍用户最后用过的那扇
-- world: 可选，auto（默认，PIE 在跑就拍游戏）/ editor（强制拍编辑器世界）
-- warmup_frames: 可选，预热帧数，默认 4。嫌 GI 有噪点、阴影缺角就调大
+【参数】各参数的说明见参数定义。show_ui=true 时 resolution / world / warmup_frames 都不起作用 —— 那条路是抓屏，不渲染。
 
 【返回数据】：
 - 截图本身（作为图片附件，你能直接看到）
@@ -621,6 +664,16 @@ PostProcessVolume），截图、视口、游戏各自收敛到不同亮度，还
             success: false,
             error:
               'window 只配合 show_ui=true 使用：点名拍某个编辑器窗口要走抓屏那条路。要看场景就去掉 window。'
+          }
+        }
+
+        // 测光测的是渲染出来的场景。窗口截图是抓屏，里面是面板和菜单，
+        // 对它算亮度分位只会得到一组看着正经、其实毫无意义的数字
+        if (input.measure && input.show_ui) {
+          return {
+            success: false,
+            error:
+              'measure 只对场景截图有效：show_ui=true 抓的是编辑器窗口（面板、菜单），测光没有意义。去掉 show_ui 再测。'
           }
         }
 
@@ -722,6 +775,8 @@ PostProcessVolume），截图、视口、游戏各自收敛到不同亮度，还
           const readiness = describeReadiness(response)
           const camera = describeCamera(response)
           const uiLayer = describeUiLayer(response)
+          const measured = input.measure ? await measureSavedShot(response) : undefined
+          if (measured?.valueStudy) images.push(measured.valueStudy)
 
           return {
             success: true,
@@ -747,6 +802,8 @@ PostProcessVolume），截图、视口、游戏各自收敛到不同亮度，还
             ...(response.camera_location ? { camera_location: response.camera_location } : {}),
             ...(response.camera_rotation ? { camera_rotation: response.camera_rotation } : {}),
             ...(response.exposure ? { exposure: response.exposure } : {}),
+            ...(response.exposure_source ? { exposure_source: response.exposure_source } : {}),
+            ...(measured?.measurement ? { measurement: measured.measurement } : {}),
             message:
               (response.saved
                 ? `截图已成功获取（${response.width}x${response.height}${scope}）`
@@ -754,7 +811,8 @@ PostProcessVolume），截图、视口、游戏各自收敛到不同亮度，还
               readiness +
               camera +
               describeExposure(response) +
-              uiLayer
+              uiLayer +
+              (measured?.text ?? '')
           }
         }
 
