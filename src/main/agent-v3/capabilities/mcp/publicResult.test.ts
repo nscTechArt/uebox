@@ -295,6 +295,24 @@ describe('ue_screenshot', () => {
     expect(result.view).toBeNull()
     expect(result.cameraSource).toBeNull()
     expect(result.pendingShaders).toBeNull()
+    // 没报曝光不等于自动曝光，更不等于锁了 —— 原样给 null，由调用方按「没基准」处理
+    expect(result.exposure).toBeNull()
+    expect(result.exposureSource).toBeNull()
+  })
+
+  it('曝光锁的状态带给外部调用方：亮度能不能当真全看它', () => {
+    const result = toStructuredContent('ue_screenshot', {
+      success: true,
+      path: 'C:/tmp/a.png',
+      width: 1920,
+      height: 1080,
+      saved: true,
+      exposure: 'manual',
+      exposure_source: 'post_process_volume'
+    }) as Record<string, unknown>
+
+    expect(result.exposure).toBe('manual')
+    expect(result.exposureSource).toBe('post_process_volume')
   })
 
   it('保存失败时如实报 saved:false 并带上原因', () => {

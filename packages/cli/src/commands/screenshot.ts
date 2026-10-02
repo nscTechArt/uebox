@@ -142,6 +142,9 @@ export async function runViewportScreenshot(options: ScreenshotOptions): Promise
         cameraSource: shot.cameraSource ?? null,
         cameraLocation: shot.cameraLocation ?? null,
         cameraRotation: shot.cameraRotation ?? null,
+        // 亮度能不能当真全看这两个，见 describeExposure
+        exposure: shot.exposure ?? null,
+        exposureSource: shot.exposureSource ?? null,
         units: { cameraLocation: 'cm', cameraRotation: 'deg' }
       },
       artifacts: [artifact],
@@ -284,7 +287,7 @@ async function publish(sourcePath: string, target: string, staged: boolean): Pro
 /**
  * 这张图能不能拿来下结论。
  *
- * 三条已知限制都要说出来，不能咽掉 —— 它们决定的是「看到的东西算不算数」。
+ * 已知限制都要说出来，不能咽掉 —— 它们决定的是「看到的东西算不算数」。
  */
 function describeCaveats(shot: Record<string, unknown>): string[] {
   const warnings: string[] = []
@@ -306,13 +309,38 @@ function describeCaveats(shot: Record<string, unknown>): string[] {
     )
   }
 
-  // 这条限制与现场状态无关，永远成立，所以永远要说
-  warnings.push(
-    '这条路自己渲一帧，自动曝光的收敛状态和编辑器视口不同，实测整体偏暗一档。' +
-      '可以判断物体在不在、位置、材质颜色、灯亮没亮；不要据此判断整体过曝/欠曝或要不要调曝光。'
-  )
+  const exposure = describeExposure(shot)
+  if (exposure) warnings.push(exposure)
 
   return warnings
+}
+
+/**
+ * 亮度能不能当真，取决于场景有没有锁曝光。
+ *
+ * 这里原来**永远**说「实测偏暗一档，别拿它判断曝光」。盒子那边的同一句话
+ * 2026-09-26 成了借口：关卡美术调了四轮灯，每张都发白，最后归给截图偏差收工，
+ * 用户的视口一样亮。偏差只在自动曝光时存在；锁成手动曝光后截图、视口、游戏
+ * 同一个亮度。插件现在报这一帧用的是哪种曝光，照着它说（与盒子
+ * `screenshot.ts` 的 `describeExposure` 同一套判据）。
+ */
+function describeExposure(shot: Record<string, unknown>): string | null {
+  if (shot.exposure === 'manual' && shot.exposureSource === 'viewport') {
+    return (
+      '这一帧的曝光是编辑器视口自己锁的，只在编辑器里生效；PIE 和打包版照样按工程/后处理设置走。' +
+      '要让游戏里一致，放一个无边界 PostProcessVolume（Metering Mode = Manual）锁住曝光。'
+    )
+  }
+  if (shot.exposure === 'manual') return null
+  const head =
+    shot.exposure === 'auto'
+      ? '这一帧是自动曝光：明暗会自己收敛，和视口、游戏里不一定一样，压暗的场景也会被拉亮。'
+      : '盒子或插件版本较旧，没报这一帧的曝光模式，按自动曝光对待。'
+  return (
+    head +
+    '要判断过曝/欠曝或调灯光，先放一个无边界 PostProcessVolume（Metering Mode = Manual）锁住曝光。' +
+    '物体在不在、位置、材质颜色、灯亮没亮、阴影方向任何时候都准。'
+  )
 }
 
 function str(value: unknown): string | null {

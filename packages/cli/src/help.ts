@@ -92,7 +92,7 @@ ask：
 目标工程按这个顺序定：--project，从当前目录往上最近的 .uproject，
 恰好只有一个工程在线时用它。前两步定出的工程没连着就直接失败。
 
-截图自己渲一帧，曝光比编辑器视口偏暗约一档，不要拿它判断过曝或欠曝。
+截图的明暗只在场景锁了手动曝光时可信，看 data.exposure；自动曝光时先锁再判断。
 
 退出码：
   0     成功
@@ -178,8 +178,8 @@ The target project is: --project, else the nearest .uproject above the current
 directory, else the one online project if there is exactly one. A project from
 the first two that is not connected fails the command.
 
-Screenshots render their own frame, about a stop darker than the viewport;
-do not judge exposure from them.
+Screenshot brightness is only reliable when the scene uses manual exposure;
+check data.exposure, and lock it before judging exposure.
 
 Exit codes:
   0     ok
