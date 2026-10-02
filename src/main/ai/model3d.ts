@@ -491,6 +491,15 @@ interface JobProgress {
    * 硬造一次下载调用，就是硬造一个厂商根本没有的端点。
    */
   files?: Model3dFile[]
+  /**
+   * 完成时厂商回的原始 `output`。只有 Tripo 填。
+   *
+   * 绑骨前的检查任务**不出文件**，出的是 `riggable` / `rig_type` 两个结论 ——
+   * 只留 `files` 的话那一步的结果就被丢掉了。
+   */
+  output?: Record<string, unknown>
+  /** 厂商在任务上报的实耗额度（Tripo 的 `credits_consumed`）。没报就不填 */
+  cost?: number
 }
 
 interface Model3dAdapter {
@@ -777,11 +786,19 @@ const ADAPTERS: Record<Exclude<Model3dApi, 'uebox-tasks'>, Model3dAdapter> = {
       // SDK 的 TaskStatus 里终态有好几个，只有 success 是成功
       const failed = ['failed', 'cancelled', 'banned', 'expired', 'unknown'].includes(status)
       const done = status === 'success'
+      // 文档说是「最多两位小数」的数，按浮点取；有的网关会把它序列化成字符串
+      const credits = Number(data.credits_consumed)
       return {
         done,
         failed,
         note: failed ? status : percent !== null && !done ? `${percent}%` : '',
-        files: done ? collectTripoOutput(data.output) : undefined
+        files: done ? collectTripoOutput(data.output) : undefined,
+        ...(done && data.output && typeof data.output === 'object'
+          ? { output: data.output as Record<string, unknown> }
+          : {}),
+        ...(data.credits_consumed !== undefined && Number.isFinite(credits)
+          ? { cost: credits }
+          : {})
       }
     }
   },
@@ -1172,8 +1189,12 @@ function collectTripoOutput(output: unknown): Model3dFile[] {
   const source = (output ?? {}) as Record<string, unknown>
   const files: Model3dFile[] = []
   const seen = new Set<string>()
-  for (const field of fields) {
-    const url = source[field]
+  // V3 的动画任务可能把网格放进 `model_urls` 数组（一次多段动画），排在单个字段后面
+  const urls = [
+    ...fields.map((field) => source[field]),
+    ...(Array.isArray(source.model_urls) ? source.model_urls : [])
+  ]
+  for (const url of urls) {
     if (typeof url !== 'string' || !url || seen.has(url)) continue
     seen.add(url)
     files.push({ url, name: fileNameOf(url) })
@@ -1643,45 +1664,13 @@ export async function generateModel3d(
   if (provider.model3dApi === 'uebox-tasks') return runPlanModel3d(provider, modelId, request)
   const job = await submitModel3d(provider, modelId, request)
 
-  const deadline = Date.now() + JOB_TIMEOUT_MS
-  let ready: Model3dFile[] = []
   /*
-   * 提交之后**钱已经扣了**，任务也已经在厂商那边跑着。
-   *
-   * 这之后的每一次查询失败都只是「这一次没查到」，不代表任务死了 ——
-   * 直接抛出去的话，用户为一次网络抖动付了全款还什么都没拿到，而模型多半会
-   * 「再试一次」重新提交，于是同一个东西付两次。所以这里熬着，熬不住才认输，
-   * 且**认输时把任务号带出来**。
+   * 提交之后**钱已经扣了**，任务也已经在厂商那边跑着。查询失败怎么熬、
+   * 认输时怎么把任务号带出来，见 `awaitJob`。
    */
-  let consecutiveFailures = 0
-  for (;;) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-
-    let progress: JobProgress
-    try {
-      progress = await pollModel3d(provider, job, request.signal)
-      consecutiveFailures = 0
-    } catch (error) {
-      // 用户按了停止：任务还在跑、钱已经扣了，任务号必须活着出来
-      if (request.signal?.aborted) throw new Model3dCancelledError(job)
-      consecutiveFailures += 1
-      if (consecutiveFailures >= POLL_FAILURE_TOLERANCE)
-        throw new Model3dInterruptedError(job, error)
-      request.onProgress?.(`查询任务状态失败（第 ${consecutiveFailures} 次），任务还在跑，继续等…`)
-      if (Date.now() > deadline) throw new Model3dTimeoutError(job)
-      continue
-    }
-
-    if (progress.failed) throw new Model3dJobFailedError(progress.note)
-    if (progress.note) request.onProgress?.(progress.note)
-    if (progress.done) {
-      // Tripo / Meshy 的文件就在这份响应里，别为了走个形式再打一次
-      ready = progress.files ?? []
-      break
-    }
-    if (Date.now() > deadline) throw new Model3dTimeoutError(job)
-  }
-
+  const progress = await awaitJob(provider, job, request)
+  // Tripo / Meshy 的文件就在这份响应里，别为了走个形式再打一次
+  const ready = progress.files ?? []
   const files = ready.length > 0 ? ready : await fetchModel3dFiles(provider, job, request.signal)
   return { files, job }
 }
@@ -1757,6 +1746,228 @@ export async function resumeModel3d(
 
   const files = ready.length > 0 ? ready : await fetchModel3dFiles(provider, job, request.signal)
   return { files, job }
+}
+
+// ── 绑骨（目前只有 Tripo）──────────────────────────────────────────────────
+
+/**
+ * 骨骼类型。与 Tripo 文档列的七种一致。
+ *
+ * Python SDK 里还有一个 `others`，V3 文档没列 —— 不收，免得发一个厂商不认的值。
+ *
+ * @see https://developers.tripo3d.ai/zh/docs/animations-rig
+ */
+export const MODEL3D_RIG_TYPES = [
+  'biped',
+  'quadruped',
+  'hexapod',
+  'octopod',
+  'avian',
+  'serpentine',
+  'aquatic'
+] as const
+export type Model3dRigType = (typeof MODEL3D_RIG_TYPES)[number]
+
+/** 骨骼命名规范。`mixamo` 是虚幻 / Unity 那边重定向方案最成熟的一套 */
+export type Model3dRigSpec = 'mixamo' | 'tripo'
+
+/**
+ * 绑骨模型版本，按骨骼类型选，**不让调用方填**。
+ *
+ * 文档原话：v1.0 「仅适用于（且推荐用于）双足类人型」，v2.5 「适用于非类人型的动物」。
+ * 不传时厂商缺省是 v1.0 —— 于是一只四足动物会被拿去按人形绑，任务照样成功、照样扣
+ * 30 额度，出来一副骨头长错地方的骨架。所以这里每次都显式发。
+ */
+const TRIPO_RIG_MODEL_BIPED = 'v1.0-20240301'
+const TRIPO_RIG_MODEL_CREATURE = 'v2.5-20260210'
+
+export interface RigModel3dRequest {
+  /** 上一次生成拿到的任务号（`encodeModel3dJob` 的那个串），绑的就是那次的网格 */
+  sourceJobToken: string
+  /** 不给就用检查任务推荐的那一种 */
+  rigType?: Model3dRigType
+  /** 缺省 mixamo */
+  spec?: Model3dRigSpec
+  /** 缺省 fbx：虚幻导骨骼网格走 FBX 最稳 */
+  format?: 'glb' | 'fbx'
+  signal?: AbortSignal
+  onProgress?: (note: string) => void
+  /** 绑骨任务提交出去之后回一次任务令牌：从这一刻起钱已经扣了，调用方要能把号报出去 */
+  onSubmitted?: (jobToken: string) => void
+}
+
+export interface RiggedModel3d extends GeneratedModel3d {
+  /** 实际用的骨骼类型 */
+  rigType: Model3dRigType
+  /** 检查任务推荐的骨骼类型。与 `rigType` 不同说明调用方改过 */
+  recommendedRigType: string | null
+  spec: Model3dRigSpec
+}
+
+/** 绑的那家没有绑骨接口。参数问题不是运气问题，重试没有用 */
+export class Model3dRigUnsupportedError extends Error {
+  constructor(readonly api: string | undefined) {
+    super(
+      `自动绑骨不支持 ${api || '这个 Provider'}：目前只接了 Tripo。` +
+        '用 Tripo 生成的模型才能接着绑；别家生成的网格要在 Blender 等 DCC 里手动绑定。'
+    )
+    this.name = 'Model3dRigUnsupportedError'
+  }
+}
+
+/** 厂商检查过，说这个模型绑不了。还没提交绑骨，没有扣绑骨的钱 */
+export class Model3dNotRiggableError extends Error {
+  constructor(readonly rigType: string | null) {
+    super(
+      'Tripo 检查后判定这个模型**不能自动绑骨**（还没提交绑骨，没有扣绑骨的额度）。' +
+        '自动绑骨要的是造型清晰的角色或动物：四肢分明、没有底座和道具粘连。' +
+        '换个更干净的造型重新生成，或者在 DCC 里手动绑定。'
+    )
+    this.name = 'Model3dNotRiggableError'
+  }
+}
+
+/**
+ * 给一个**已经生成过的** Tripo 模型自动绑骨：检查 → 绑骨，出一个带骨架的网格。
+ *
+ * ## 为什么先检查
+ *
+ * 检查任务不收费（文档示例 `credits_consumed: 0.00`），绑骨一次 30 额度。
+ * 不检查直接绑，绑不了的模型要么失败、要么出一副错位的骨架 —— 两种都扣钱。
+ * 检查还顺带给出推荐的骨骼类型，而骨骼类型又决定了该用哪个绑骨模型版本。
+ *
+ * ## 中断时
+ *
+ * 检查阶段断了：绑骨还没提交，直接重来就行，所以**不带任务号**（带了会让人拿一个
+ * 检查任务的号去「取回结果」，取回的是一个没有文件的任务）。
+ * 绑骨阶段断了：任务号原样带出来，用 `resumeModel3d` 取 —— Tripo 的轮询是统一的
+ * `/tasks/{id}`，与取生成结果是同一条路。
+ *
+ * @throws {Model3dRigUnsupportedError} 那个任务不是 Tripo 生成的
+ * @throws {Model3dNotRiggableError} 厂商说绑不了
+ */
+export async function rigModel3d(request: RigModel3dRequest): Promise<RiggedModel3d> {
+  const source = decodeModel3dJob(request.sourceJobToken)
+  const provider = await providerOfJob(source, request.sourceJobToken)
+  if (provider.model3dApi !== 'tripo') throw new Model3dRigUnsupportedError(provider.model3dApi)
+  const adapter = adapterOf(provider)
+
+  const submit = async (path: string, body: Record<string, unknown>): Promise<Model3dJob> => {
+    const payload = await send(
+      provider,
+      adapter,
+      { path, body: JSON.stringify(body) },
+      withTimeout(request.signal, SUBMIT_TIMEOUT_MS)
+    )
+    const id = (payload as { data?: { task_id?: unknown } })?.data?.task_id
+    if (typeof id !== 'string' || !id) {
+      throw new Model3dRequestError(200, path, '提交成功但响应里没有任务号（厂商可能改了响应结构）')
+    }
+    // 第二位存端点名，排错时一眼看得出是哪一步
+    return { poll: id, download: path.replace(/^\//, ''), cost: null, providerId: provider.id }
+  }
+
+  // ① 检查。不扣钱，断了就重来，所以这一段的中断不往外报任务号
+  request.onProgress?.('检查能不能绑骨…')
+  const checkJob = await submit('/animations/rig-check', { input: source.poll })
+  let check: JobProgress
+  try {
+    check = await awaitJob(provider, checkJob, request)
+  } catch (error) {
+    throw new Error(
+      `绑骨前的检查没有成功：${error instanceof Error ? error.message.split('（任务号')[0] : String(error)}。` +
+        '**绑骨还没提交，没有扣绑骨的额度**，原样重试即可。'
+    )
+  }
+  const recommended = typeof check.output?.rig_type === 'string' ? check.output.rig_type : null
+  if (check.output?.riggable !== true) throw new Model3dNotRiggableError(recommended)
+
+  // ② 绑骨。从提交这一刻起钱就扣了
+  const rigType: Model3dRigType =
+    request.rigType ?? MODEL3D_RIG_TYPES.find((type) => type === recommended) ?? 'biped'
+  const spec = request.spec ?? 'mixamo'
+  const format = request.format ?? 'fbx'
+  request.onProgress?.(`按 ${rigType} 骨架绑骨…`)
+  const rigJob = await submit('/animations/rig', {
+    input: source.poll,
+    model: rigType === 'biped' ? TRIPO_RIG_MODEL_BIPED : TRIPO_RIG_MODEL_CREATURE,
+    rig_type: rigType,
+    spec,
+    out_format: format
+  })
+  request.onSubmitted?.(encodeModel3dJob(rigJob))
+  const rigged = await awaitJob(provider, rigJob, request)
+
+  const files = (rigged.files ?? []).map((file) =>
+    // CDN 地址不一定带扩展名，而上层靠扩展名分「哪个是网格」
+    /\.[a-z0-9]+$/i.test(file.name) ? file : { ...file, name: `${file.name}.${format}` }
+  )
+  if (files.length === 0) throw new Model3dNoFilesError(JSON.stringify(rigged).slice(0, 500))
+  const cost = (check.cost ?? 0) + (rigged.cost ?? 0)
+  return {
+    files,
+    job: { ...rigJob, cost: check.cost !== undefined || rigged.cost !== undefined ? cost : null },
+    rigType,
+    recommendedRigType: recommended,
+    spec
+  }
+}
+
+/** 任务号里带的厂商优先，没带才看当前绑定。理由同 `resumeModel3d` */
+async function providerOfJob(job: Model3dJob, token: string): Promise<ProviderConfig> {
+  if (!job.providerId) {
+    const settings = await readSettings()
+    const binding = settings.roles.model3d
+    const bound = binding && settings.providers.find((item) => item.id === binding.providerId)
+    if (!bound) throw new Model3dNotConfiguredError()
+    return bound
+  }
+  const provider = (await readSettings()).providers.find((item) => item.id === job.providerId)
+  if (!provider) {
+    throw new Model3dRequestError(
+      0,
+      'rig',
+      `任务号「${token}」里写的 Provider「${job.providerId}」已经不在配置里了。把它加回来再绑。`
+    )
+  }
+  return provider
+}
+
+/**
+ * 轮询一个已提交的任务直到终态。生成和绑骨共用。
+ *
+ * 提交之后**钱已经扣了**，这之后的每一次查询失败都只是「这一次没查到」，不代表
+ * 任务死了 —— 直接抛出去的话，用户为一次网络抖动付了全款还什么都没拿到，而模型多半会
+ * 「再试一次」重新提交，于是同一个东西付两次。所以这里熬着，熬不住才认输，
+ * 且**认输时把任务号带出来**；用户按停止时同理。
+ */
+async function awaitJob(
+  provider: ProviderConfig,
+  job: Model3dJob,
+  request: { signal?: AbortSignal; onProgress?: (note: string) => void }
+): Promise<JobProgress> {
+  const deadline = Date.now() + JOB_TIMEOUT_MS
+  let consecutiveFailures = 0
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+    let progress: JobProgress
+    try {
+      progress = await pollModel3d(provider, job, request.signal)
+      consecutiveFailures = 0
+    } catch (error) {
+      if (request.signal?.aborted) throw new Model3dCancelledError(job)
+      consecutiveFailures += 1
+      if (consecutiveFailures >= POLL_FAILURE_TOLERANCE)
+        throw new Model3dInterruptedError(job, error)
+      request.onProgress?.(`查询任务状态失败（第 ${consecutiveFailures} 次），任务还在跑，继续等…`)
+      if (Date.now() > deadline) throw new Model3dTimeoutError(job)
+      continue
+    }
+    if (progress.failed) throw new Model3dJobFailedError(progress.note)
+    if (progress.note) request.onProgress?.(progress.note)
+    if (progress.done) return progress
+    if (Date.now() > deadline) throw new Model3dTimeoutError(job)
+  }
 }
 
 export interface Model3dModelStatus {

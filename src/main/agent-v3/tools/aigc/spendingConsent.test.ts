@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { createGenerateImageTool } from './generateImage'
 import { createGenerateVideoTool } from './generateVideo'
 import { createGenerate3dModelTool } from './generate3dModel'
+import { createRig3dModelTool } from './rig3dModel'
 
 /**
  * 三个花钱的工具共有的一条规矩：**重做要用户点头。**
@@ -20,7 +21,8 @@ import { createGenerate3dModelTool } from './generate3dModel'
 const TOOLS = [
   ['generate_image', createGenerateImageTool()],
   ['generate_video', createGenerateVideoTool()],
-  ['generate_3d_model', createGenerate3dModelTool()]
+  ['generate_3d_model', createGenerate3dModelTool()],
+  ['rig_3d_model', createRig3dModelTool()]
 ] as const
 
 const descriptionOf = (tool: (typeof TOOLS)[number][1]): string =>
@@ -39,12 +41,12 @@ describe('花钱的工具都必须把重做的决定权交回用户', () => {
    * 光说「可以问用户」不够 —— 得明确禁止「自己决定」。
    * 模型在没有禁令时默认会把「我判断它不好」当成行动依据。
    */
-  it.each([TOOLS[1], TOOLS[2]])('%s 明确禁止自己决定重做', (_name, tool) => {
+  it.each([TOOLS[1], TOOLS[2], TOOLS[3]])('%s 明确禁止自己决定重做', (_name, tool) => {
     expect(descriptionOf(tool)).toMatch(/不要自己决定重做|不是自己猜一个再烧一次钱/)
   })
 
   /** 反过来：用户已经说了「重来」就别再问一遍，否则变成来回打断 */
-  it.each([TOOLS[0], TOOLS[2]])('%s 说明用户点过头就直接做', (_name, tool) => {
+  it.each([TOOLS[0], TOOLS[2], TOOLS[3]])('%s 说明用户点过头就直接做', (_name, tool) => {
     expect(descriptionOf(tool)).toMatch(/直接做/)
   })
 })

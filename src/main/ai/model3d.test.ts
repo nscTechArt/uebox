@@ -48,7 +48,10 @@ const {
   Model3dNoFilesError,
   Model3dRequestError,
   encodeModel3dJob,
-  decodeModel3dJob
+  decodeModel3dJob,
+  rigModel3d,
+  Model3dNotRiggableError,
+  Model3dRigUnsupportedError
 } = await import('./model3d')
 
 type Provider = Parameters<typeof submitModel3d>[0]
@@ -1139,6 +1142,131 @@ describe('tripo 的厂商特供开关', () => {
         vendor: { negativePrompt: '底座', smartLowPoly: true }
       })
     ).rejects.toThrow(/negativePrompt \/ smartLowPoly/)
+    expect(sent).toHaveLength(0)
+  })
+})
+
+/**
+ * 绑骨：检查（不收费）→ 绑骨（30 额度）。守的是三件花冤枉钱的事：
+ * 绑不了的模型照样提交、四足动物按人形版本绑、检查阶段断了却让人去「取回」一个没有文件的任务。
+ *
+ * @see https://developers.tripo3d.ai/zh/docs/animations-rig-check
+ * @see https://developers.tripo3d.ai/zh/docs/animations-rig
+ */
+describe('tripo 绑骨', () => {
+  const SOURCE = 'hyper3d:task_gen~image-to-model'
+
+  function checkReturns(output: Record<string, unknown>): void {
+    responders['GET /tasks/task_check'] = () =>
+      jsonResponse({ code: 0, data: { status: 'success', output, credits_consumed: 0 } })
+  }
+
+  async function rig(request: Partial<Parameters<typeof rigModel3d>[0]> = {}): Promise<unknown> {
+    vi.useFakeTimers()
+    const promise = rigModel3d({ sourceJobToken: SOURCE, ...request })
+    // 两段各轮询一次
+    const settled = promise.then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error })
+    )
+    await vi.advanceTimersByTimeAsync(12_000)
+    const outcome = await settled
+    if ('error' in outcome) throw outcome.error
+    return outcome.value
+  }
+
+  beforeEach(() => {
+    useApi('tripo', 'v3.1-20260211')
+    responders['POST /animations/rig-check'] = () =>
+      jsonResponse({ code: 0, data: { task_id: 'task_check' } })
+    responders['POST /animations/rig'] = () =>
+      jsonResponse({ code: 0, data: { task_id: 'task_rig' } })
+    checkReturns({ riggable: true, rig_type: 'biped' })
+    responders['GET /tasks/task_rig'] = () =>
+      jsonResponse({
+        code: 0,
+        data: {
+          status: 'success',
+          output: { model_url: 'https://cdn.tripo3d.ai/output/rigged.fbx' },
+          credits_consumed: 30
+        }
+      })
+  })
+
+  it('先检查再绑，两段都拿生成任务的 id 当 input', async () => {
+    const result = (await rig()) as Awaited<ReturnType<typeof rigModel3d>>
+
+    expect(requestAt('/animations/rig-check').json).toEqual({ input: 'task_gen' })
+    expect(requestAt('/animations/rig').json).toEqual({
+      input: 'task_gen',
+      model: 'v1.0-20240301',
+      rig_type: 'biped',
+      spec: 'mixamo',
+      out_format: 'fbx'
+    })
+    expect(result.files).toEqual([
+      { url: 'https://cdn.tripo3d.ai/output/rigged.fbx', name: 'rigged.fbx' }
+    ])
+    expect(result.job).toMatchObject({ poll: 'task_rig', providerId: 'hyper3d', cost: 30 })
+    expect(result.rigType).toBe('biped')
+  })
+
+  it('非人形按检查推荐的类型绑，并换成动物用的 v2.5 —— 缺省的 v1.0 只认双足', async () => {
+    checkReturns({ riggable: true, rig_type: 'quadruped' })
+    await rig()
+
+    expect(requestAt('/animations/rig').json).toMatchObject({
+      rig_type: 'quadruped',
+      model: 'v2.5-20260210'
+    })
+  })
+
+  it('调用方指定的类型优先，但推荐值照样报回去', async () => {
+    checkReturns({ riggable: true, rig_type: 'quadruped' })
+    const result = (await rig({ rigType: 'biped' })) as Awaited<ReturnType<typeof rigModel3d>>
+
+    expect(requestAt('/animations/rig').json).toMatchObject({ rig_type: 'biped' })
+    expect(result.recommendedRigType).toBe('quadruped')
+  })
+
+  it('检查说绑不了就停，不提交那笔 30 额度的绑骨', async () => {
+    checkReturns({ riggable: false, rig_type: 'biped' })
+
+    await expect(rig()).rejects.toThrow(Model3dNotRiggableError)
+    expect(sent.some((item) => item.url.endsWith('/animations/rig'))).toBe(false)
+  })
+
+  it('检查任务失败时说清「绑骨还没提交」，不带一个取不回东西的任务号', async () => {
+    responders['GET /tasks/task_check'] = () =>
+      jsonResponse({ code: 0, data: { status: 'failed' } })
+
+    await expect(rig()).rejects.toThrow(/绑骨还没提交/)
+    expect(sent.some((item) => item.url.endsWith('/animations/rig'))).toBe(false)
+  })
+
+  it('CDN 地址没有扩展名时按输出格式补上 —— 上层靠扩展名认网格', async () => {
+    responders['GET /tasks/task_rig'] = () =>
+      jsonResponse({
+        code: 0,
+        data: { status: 'success', output: { model_url: 'https://cdn/out/abc?sig=1' } }
+      })
+    const result = (await rig({ format: 'glb' })) as Awaited<ReturnType<typeof rigModel3d>>
+
+    expect(result.files[0].name).toBe('abc.glb')
+  })
+
+  it('绑骨提交之后才把任务号交出去', async () => {
+    const onSubmitted = vi.fn()
+    await rig({ onSubmitted })
+
+    expect(onSubmitted).toHaveBeenCalledTimes(1)
+    expect(onSubmitted.mock.calls[0][0]).toBe('hyper3d:task_rig~animations/rig')
+  })
+
+  it('别家生成的任务明确拒绝，一个请求都不发', async () => {
+    useApi('rodin', 'Gen-2')
+
+    await expect(rig()).rejects.toThrow(Model3dRigUnsupportedError)
     expect(sent).toHaveLength(0)
   })
 })

@@ -92,6 +92,8 @@ const NOT_TOOL_NAMES: Record<string, string> = {
   widget_name: 'widget_* 那组工具的参数',
   sequence_path: 'sequence_* 那组工具的参数',
   sequence_paths: 'sequence_audit 的参数（可以一次查多条）',
+  // `rig_3d_model` 让 `rig` 成了已知前缀，于是它自己的参数被当成了工具名
+  rig_type: 'rig_3d_model 的参数（骨骼类型）',
 
   // —— project_list / project_manage / project_organize 的 action 取值 ——
   list_templates: 'project_list 的 action 取值',
