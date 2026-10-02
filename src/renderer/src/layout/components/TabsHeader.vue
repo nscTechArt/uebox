@@ -21,6 +21,7 @@ import {
 import type { Component } from 'vue'
 import { computed, watch, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { generateChatSessionId } from '@renderer/common/chatRoute'
 import { useTabsStore, DEFAULT_TAB_KEY } from '@renderer/store/modules/tabs'
 import { useI18n } from '@renderer/hooks/useI18n'
 import ContextMenu from '@renderer/components/ContextMenu/ContextMenu.vue'
@@ -548,19 +549,10 @@ const handleMenuClick = (key: string) => {
 }
 
 /**
- * 生成唯一的会话ID
- */
-function generateSessionId(): string {
-  const t = Date.now().toString(36)
-  const r = Math.random().toString(36).slice(2, 8)
-  return `${t}${r}`
-}
-
-/**
  * 创建新的对话会话
  */
 const createNewChat = (): void => {
-  const sid = generateSessionId()
+  const sid = generateChatSessionId()
   router.push({ name: 'AssistantWelcome', query: { sid } })
 }
 

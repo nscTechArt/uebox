@@ -8,6 +8,7 @@ import type {
   NotificationActivatePayload,
   NotificationActivationResult
 } from '../shared/agentNotificationActivation'
+import type { TrayAction, TrayRecentSession } from '../shared/trayActions'
 import type {
   CommunityFetchResult,
   CommunityTemplate,
@@ -2776,6 +2777,13 @@ declare global {
       takePending: () => Promise<NotificationActivatePayload | null>
       /** 回话：这条激活认没认出来。没认出来主进程会把通知重新弹一条 */
       reportActivation: (result: NotificationActivationResult) => Promise<void>
+    }
+    /** 系统托盘菜单：界面报最近会话、取还没送到的托盘动作 */
+    tray: {
+      /** 最近活跃的三条对话变了，主进程据此重建菜单 */
+      setRecentSessions: (sessions: TrayRecentSession[]) => Promise<{ success: boolean }>
+      /** 取走主进程存着的那条托盘动作（取走即清）—— 唯一的送达路径 */
+      takePending: () => Promise<TrayAction | null>
     }
     /**
      * 应用设置 API

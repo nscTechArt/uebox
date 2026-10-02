@@ -27,3 +27,13 @@ export function chatSessionRoute(sid: string, openTabPaths: string[]): RouteLoca
   const existing = openTabPaths.find((path) => isSessionTab(path, sid))
   return existing ?? { name: 'AssistantWelcome', query: { sid } }
 }
+
+/**
+ * 造一个新的会话 id（时间戳 base36 + 随机串）——
+ * 侧边栏、标签页头和托盘菜单的「新对话」共用这一个实现。
+ */
+export function generateChatSessionId(): string {
+  const t = Date.now().toString(36)
+  const r = Math.random().toString(36).slice(2, 8)
+  return `${t}${r}`
+}

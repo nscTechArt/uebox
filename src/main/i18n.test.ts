@@ -42,9 +42,11 @@ describe('主进程文案表', () => {
   })
 
   it('跟着推进来的语言走', () => {
-    expect(mt('tray.show')).toBe('显示窗口')
+    expect(mt('tray.open')).toBe('打开虚幻盒子')
+    expect(mt('tray.tooltip')).toBe('虚幻盒子')
     setMainLanguage('en-US')
-    expect(mt('tray.show')).toBe('Show window')
+    expect(mt('tray.open')).toBe('Open Unreal Box')
+    expect(mt('tray.tooltip')).toBe('Unreal Box')
     expect(mt('dialog.save')).toBe('Save file')
   })
 
@@ -74,13 +76,13 @@ describe('主进程文案表', () => {
 
   it('语言真的变了才通知订阅者（托盘据此重建菜单）', () => {
     const seen: string[] = []
-    onLanguageChanged(() => seen.push(mt('tray.show')))
+    onLanguageChanged(() => seen.push(mt('tray.open')))
 
     setMainLanguage('en-US')
     // 同一个语言再推一次不该再重建一次
     setMainLanguage('en-US')
 
-    expect(seen).toEqual(['Show window'])
+    expect(seen).toEqual(['Open Unreal Box'])
   })
 
   it('一个订阅者抛错不拖累别的', () => {

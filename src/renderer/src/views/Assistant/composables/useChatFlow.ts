@@ -1,4 +1,5 @@
 import { nextTick, type Ref, type ComputedRef } from 'vue'
+import { generateChatSessionId } from '@renderer/common/chatRoute'
 import { message } from '@renderer/utils/messageManager'
 import { aiAPI } from '../../../api/ai'
 import { agentV3API } from '../../../api/agentV3'
@@ -105,16 +106,10 @@ export function useChatFlow(params: UseChatFlowParams) {
     pushAssistantTyping
   } = params
 
-  function generateSessionId(): string {
-    const t = Date.now().toString(36)
-    const r = Math.random().toString(36).slice(2, 8)
-    return `${t}${r}`
-  }
-
   function normalizeSid(raw: string): string {
     const t = String(raw || '').trim()
     if (t) return t
-    return generateSessionId()
+    return generateChatSessionId()
   }
 
   /**

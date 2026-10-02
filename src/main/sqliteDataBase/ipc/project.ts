@@ -23,6 +23,10 @@ import { toNativeProjectPath } from '../../utils/projectPath'
 import { readUeJsonFile } from '../../utils/ueTextFile'
 import { syncProjectEngineAssociations } from '../../services/project/projectEngineSync'
 import { getProjectCoverService } from '../../services/project/projectCoverRuntime'
+import {
+  notifyProjectLibraryChanged,
+  notifyProjectLibraryListeners
+} from '../../services/project/projectLibraryEvents'
 
 /**
  * 确保项目中安装并启用了 UnrealAgentLink 插件（项目级安装）
@@ -497,23 +501,6 @@ export async function upgradeAllProjectPlugins(): Promise<void> {
 }
 
 /**
- * 告诉界面「我的项目」变了，该重新读一遍。
- *
- * 为什么需要：项目库现在有三个入口会往里加东西 —— 用户在首页点导入、
- * agent 用 `project_manage` 建工程、UE 连上时补登记。后两个都发生在
- * **用户没在操作首页的时候**，不推一下的话，工程明明进库了，界面上还是空的，
- * 得切个页面或者重启才看得见。用户会认为「它说建好了但其实没有」。
- *
- * 已经有一个 `ws:projects-changed` 了，但那个说的是「哪些工程此刻连着盒子」
- * （卡片上的在线角标），和「库里有哪些工程」是两回事，不能复用。
- */
-function notifyProjectLibraryChanged(): void {
-  for (const win of getAppWindows()) {
-    win.webContents.send('db:project:library-changed')
-  }
-}
-
-/**
  * 启动时的插件升级有工程失败了。
  *
  * 和导入那条路（`RegisterProjectResult.pluginFailure`）分开发：那一条是对某次
@@ -708,6 +695,7 @@ export const registerProjectIPC = (): void => {
     try {
       const db = getPublicDatabase()
       const id = createProject(db, record)
+      notifyProjectLibraryListeners()
       return { success: true, data: id }
     } catch (error) {
       return { success: false, error: (error as Error).message }
@@ -725,6 +713,7 @@ export const registerProjectIPC = (): void => {
         delete safeUpdates.image
         delete safeUpdates.coverMode
         const ok = updateProject(db, projectKey, safeUpdates)
+        if (ok) notifyProjectLibraryListeners()
         return { success: true, data: ok }
       } catch (error) {
         return { success: false, error: (error as Error).message }

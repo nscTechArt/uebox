@@ -16,7 +16,7 @@ import {
   getOpenMenuKeys,
   type MenuItem
 } from '../../common/routeUtils'
-import { chatSessionRoute } from '../../common/chatRoute'
+import { chatSessionRoute, generateChatSessionId } from '../../common/chatRoute'
 import { useAppInfo } from '@renderer/hooks/useAppInfo'
 import routes from '../../router/modules'
 import { useI18n } from 'vue-i18n'
@@ -388,21 +388,12 @@ const handleMouseLeave = (): void => {
 }
 
 /**
- * 生成唯一的会话ID，用于区分独立标签
- */
-function generateSessionId(): string {
-  const t = Date.now().toString(36)
-  const r = Math.random().toString(36).slice(2, 8)
-  return `${t}${r}`
-}
-
-/**
  * 创建新的对话会话并跳转到虚幻AI助手欢迎页（独立tab）
  * 通过附加唯一的会话ID到查询参数，触发标签key使用fullPath从而创建新标签
  */
 const createNewChat = (projectName?: string): void => {
   emit('peek-close')
-  const sid = generateSessionId()
+  const sid = generateChatSessionId()
   // 带上工程名时，这条新会话发第一条消息就会归到那个工程下（见 sessionProjectBinding）
   const query = projectName ? { sid, project: projectName } : { sid }
   router.push({ name: 'AssistantWelcome', query })

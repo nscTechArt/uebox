@@ -248,6 +248,48 @@ describe('chat sessions pinning and project binding', () => {
     expect(store.sortedSessions.map((session) => session.id)).toEqual(['older', 'newer'])
   })
 
+  it('displayableSessions：按 updatedAt 倒序、滤掉归档和内嵌会话，底层数组顺序不动', () => {
+    const store = useChatSessionsStore()
+    store.sessions = [
+      { id: 'notebook-chat-n', title: '内嵌会话', createdAt: 99, updatedAt: 99 },
+      { id: 'pinned-old', title: '旧置顶', createdAt: 1, updatedAt: 1, pinned: true },
+      {
+        id: 'project',
+        title: '工程会话',
+        createdAt: 8,
+        updatedAt: 8,
+        project: { projectName: 'Game' }
+      },
+      { id: 'archived', title: '已归档', createdAt: 98, updatedAt: 98, archived: true },
+      {
+        id: 'library-chat-blueprint-b',
+        title: '蓝图内嵌',
+        createdAt: 100,
+        updatedAt: 100
+      },
+      { id: 'plain', title: '纯会话', createdAt: 9, updatedAt: 9 },
+      { id: 'ordinary', title: '普通会话', createdAt: 7, updatedAt: 7 }
+    ]
+    const insertedOrder = store.sessions.map((session) => session.id)
+
+    expect(store.displayableSessions.map((session) => session.id)).toEqual([
+      'plain',
+      'project',
+      'ordinary',
+      'pinned-old'
+    ])
+
+    store.sessionById('ordinary')!.updatedAt = 10
+    expect(store.displayableSessions.map((session) => session.id)).toEqual([
+      'ordinary',
+      'plain',
+      'project',
+      'pinned-old'
+    ])
+
+    expect(store.sessions.map((session) => session.id)).toEqual(insertedOrder)
+  })
+
   it('ignores a blank project name and unknown sessions', () => {
     const store = useChatSessionsStore()
     store.createSession('a', '会话 A')

@@ -324,6 +324,15 @@ function acceptsSteer(entry: ActiveAgentRun): boolean {
 const activeAgents = new ActiveRuns<ActiveAgentRun>()
 const deletingSessions = new Set<string>()
 
+/**
+ * 现在还有几项会话操作没收摊：AI 轮次、分叉 / 截断 / 压缩这类历史操作都算
+ * —— 表里的条目覆盖了从占位、进行中到收尾的整段。托盘「退出」拿它决定
+ * 要不要先问一句 —— 直接退会把干到一半的活撂在引擎里。
+ */
+export function countActiveSessionOperations(): number {
+  return activeAgents.entries().length
+}
+
 /** 在任何异步准备之前占位，停止和重入检查从这一刻起生效。 */
 function reserveRun(
   sessionId: string,

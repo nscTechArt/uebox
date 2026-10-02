@@ -174,7 +174,7 @@ class AppSettingsManager {
   constructor() {
     this.configPath = join(app.getPath('userData'), 'app-settings.json')
     this.settings = this.loadSettings()
-    // 主进程那几句（托盘菜单、原生对话框标题）跟着这份设置走。
+    // 主进程那几句（托盘菜单与悬停提示、原生对话框标题）跟着这份设置走。
     // 方向是这边推过去的：`i18n.ts` 一个 import 都不能有，理由见那个文件的头。
     setMainLanguage(this.settings.language)
   }
@@ -459,7 +459,7 @@ class AppSettingsManager {
    */
   setLanguage(language: 'zh-CN' | 'en-US'): void {
     this.saveSettings({ language })
-    // 托盘菜单要当场重建，而不是等下次启动才变成新语言
+    // 托盘菜单与悬停提示要当场重建，而不是等下次启动才变成新语言
     setMainLanguage(language)
     logger.info(`应用语言已设置为: ${language}`)
   }

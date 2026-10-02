@@ -37,7 +37,14 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
 import { defineV2Tool, type V2Tool } from '../../adaptV2Tool'
-import { getAppWindows } from '../../../../appWindows'
+/**
+ * 告诉首页「我的项目」重读一遍。
+ *
+ * 用的是 `db:project:library-changed` —— 首页收到它会同时重拉工程和合集
+ * （`refreshProjectSectionData`），正好覆盖这个工具能改的全部东西。
+ * 不推的话，分组明明写进库了，用户得切个页面才看得见，会认为 agent 在撒谎。
+ */
+import { notifyProjectLibraryChanged as notifyLibraryChanged } from '../../../../services/project/projectLibraryEvents'
 import { getPublicDatabase } from '../../../../sqliteDataBase'
 import {
   getAllProjects,
@@ -64,19 +71,6 @@ import {
 const COLLECTION_KEY_PREFIX = 'collection_'
 
 const errText = (error: unknown): string => (error instanceof Error ? error.message : String(error))
-
-/**
- * 告诉首页「我的项目」重读一遍。
- *
- * 用的是 `db:project:library-changed` —— 首页收到它会同时重拉工程和合集
- * （`refreshProjectSectionData`），正好覆盖这个工具能改的全部东西。
- * 不推的话，分组明明写进库了，用户得切个页面才看得见，会认为 agent 在撒谎。
- */
-function notifyLibraryChanged(): void {
-  for (const win of getAppWindows()) {
-    win.webContents.send('db:project:library-changed')
-  }
-}
 
 const collectionLabel = (record: ProjectCollectionRecord): string =>
   (record.name ?? '').trim() || record.collectionKey

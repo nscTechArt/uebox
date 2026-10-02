@@ -33,11 +33,7 @@ import {
   stopProjectCoverSync
 } from './services/project/projectCoverRuntime'
 import { findMainWindow, registerMainWindow } from './appWindows'
-import {
-  keepMainWindowInTray,
-  minimizeCurrentMainWindow,
-  showOrCreateMainWindow
-} from './mainWindowLifecycle'
+import { keepMainWindowInTray, showOrCreateMainWindow } from './mainWindowLifecycle'
 import { agentBrowser } from './services/agentBrowser'
 import { startAgentNotifications } from './services/agentNotifications'
 import { startExperienceCurator } from './agent-v3/experience/scheduler'
@@ -48,7 +44,9 @@ import { fitMacWindow, mainWindowChrome } from './mainWindowAppearance'
 import { prepareTrayIcon } from './trayIcon'
 import { initializeDockIcon } from './dockIcon'
 import { appSettingsManager } from './appSettingsManager'
-import { mt, onLanguageChanged } from './i18n'
+import { mt } from './i18n'
+import { startTrayMenuController } from './tray/trayController'
+import { countActiveSessionOperations } from './ipc/agentV3'
 import { serviceManager, logger } from './services'
 import { initializeApp } from './init'
 import { spotlightManager } from './spotlightManager'
@@ -256,40 +254,19 @@ function createWindow(): void {
       sendLogToRenderer(`[托盘] 最终使用图标路径: ${trayIcon}`)
       const tray = new Tray(prepareTrayIcon(trayIcon, iconPng, process.platform))
       sendLogToRenderer(`[托盘] 托盘创建成功`)
-      tray.setToolTip('Unreal Box')
       const showMainWindowFromTray = (): void => {
         showOrCreateMainWindow(findMainWindow, createWindow)
       }
-      const minimizeMainWindowFromTray = (): void => {
-        minimizeCurrentMainWindow(findMainWindow)
-      }
       /*
-       * 托盘菜单是**唯一**不能走「主进程回码、渲染层查语言包」的一类：
-       * Electron 把它交给操作系统画，渲染进程碰不到。所以这三句在主进程翻
-       * （见 `main/i18n.ts`）。
-       *
-       * 包成函数是为了能重建 —— 用户在设置里切了语言，托盘要跟着变，
-       * 而不是留着上一种语言直到下次启动。
+       * 托盘菜单与悬停提示不能走「主进程回码、渲染层查语言包」那条路：
+       * Electron 把它们交给操作系统画，渲染进程碰不到。所以托盘文案在主进程翻
+       * （见 `main/i18n.ts`）。菜单的结构、最近会话 / 最近项目、退出确认都在
+       * `tray/trayController.ts`，这里只把窗口相关的回调喂给它。
        */
-      const buildTrayMenu = (): void => {
-        tray.setContextMenu(
-          Menu.buildFromTemplate([
-            { label: mt('tray.show'), click: showMainWindowFromTray },
-            { label: mt('tray.minimize'), click: minimizeMainWindowFromTray },
-            { type: 'separator' },
-            {
-              label: mt('tray.quit'),
-              click: (): void => {
-                // 设置标志防止窗口关闭时隐藏
-                globalThis.__forceQuit__ = true
-                app.quit()
-              }
-            }
-          ])
-        )
-      }
-      buildTrayMenu()
-      onLanguageChanged(buildTrayMenu)
+      startTrayMenuController(tray, {
+        showMainWindow: showMainWindowFromTray,
+        countActiveOperations: countActiveSessionOperations
+      })
       // macOS 单击由系统展开托盘菜单，避免同时把主窗口抢到前台。
       if (process.platform !== 'darwin') tray.on('click', showMainWindowFromTray)
       globalThis.__ueAgentTray__ = tray

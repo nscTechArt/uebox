@@ -62,7 +62,13 @@ vi.mock('../../../../sqliteDataBase/models/projectCollection', () => ({
   removeProjectFromCollection,
   updateProjectCollection
 }))
-vi.mock('../../../../appWindows', () => ({ getAppWindows: () => [{ webContents: { send } }] }))
+vi.mock('../../../../appWindows', () => ({
+  getAppWindows: () => [{ webContents: { send } }],
+  sendToAppWindows: (channel: string, ...args: unknown[]) => send(channel, ...args)
+}))
+vi.mock('../../../../services/logger', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
+}))
 
 import { createOrganizeProjectsTool } from './organizeProjects'
 

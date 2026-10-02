@@ -12,6 +12,13 @@ import {
   type NotificationActivatePayload,
   type NotificationActivationResult
 } from '../shared/agentNotificationActivation'
+import {
+  TRAY_ACTION_CHANNEL,
+  TRAY_SET_RECENT_SESSIONS_CHANNEL,
+  TRAY_TAKE_PENDING_CHANNEL,
+  type TrayAction,
+  type TrayRecentSession
+} from '../shared/trayActions'
 import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { AgentReviewTarget } from '../shared/agentReview'
 import type { SideChatContext } from '../shared/sideChat'
@@ -84,6 +91,8 @@ const GENERIC_INVOKE_PREFIXES = ['library-store:']
 const GENERIC_EVENT_CHANNELS = new Set([
   // 用户点了 agent 的系统通知，界面要跳到发通知的那条会话
   NOTIFICATION_ACTIVATE_CHANNEL,
+  // 托盘有一条动作待取
+  TRAY_ACTION_CHANNEL,
   // agent-v3 的事件全部走 window.api.on（见 renderer/src/api/agentV3.ts），
   // 所以要登记在这里而不是 RAW_EVENT_CHANNELS —— 后者是 electron.ipcRenderer.on 用的。
   'agent-v3:approval-required',
@@ -2925,6 +2934,15 @@ const api = {
     /** 回话：这条激活认没认出来。没认出来主进程会把通知重新弹一条 */
     reportActivation: (result: NotificationActivationResult): Promise<void> =>
       ipcRenderer.invoke(NOTIFICATION_ACTIVATION_RESULT_CHANNEL, result)
+  },
+
+  /** 系统托盘菜单：界面报最近会话、取还没送到的托盘动作，见 shared/trayActions.ts */
+  tray: {
+    /** 最近活跃的三条对话变了，主进程据此重建菜单 */
+    setRecentSessions: (sessions: TrayRecentSession[]): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke(TRAY_SET_RECENT_SESSIONS_CHANNEL, sessions),
+    /** 取走主进程存着的那条托盘动作（取走即清）—— 唯一的送达路径 */
+    takePending: (): Promise<TrayAction | null> => ipcRenderer.invoke(TRAY_TAKE_PENDING_CHANNEL)
   },
 
   /**

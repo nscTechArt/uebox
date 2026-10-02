@@ -2,7 +2,7 @@ import type { BrowserWindow } from 'electron'
 
 type MainWindow = Pick<
   BrowserWindow,
-  'focus' | 'hide' | 'isDestroyed' | 'isMinimized' | 'minimize' | 'restore' | 'show'
+  'focus' | 'hide' | 'isDestroyed' | 'isMinimized' | 'restore' | 'show'
 >
 
 interface PreventableCloseEvent {
@@ -37,11 +37,4 @@ export function showOrCreateMainWindow(
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
-}
-
-/** 托盘菜单只操作当前仍存活的主窗口。 */
-export function minimizeCurrentMainWindow(findMainWindow: FindMainWindow): void {
-  const mainWindow = findMainWindow()
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.minimize()
 }

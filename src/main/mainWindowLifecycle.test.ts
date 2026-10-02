@@ -1,17 +1,12 @@
 /** @vitest-environment node */
 import { describe, expect, it, vi } from 'vitest'
-import {
-  keepMainWindowInTray,
-  minimizeCurrentMainWindow,
-  showOrCreateMainWindow
-} from './mainWindowLifecycle'
+import { keepMainWindowInTray, showOrCreateMainWindow } from './mainWindowLifecycle'
 
 interface WindowMock {
   focus: ReturnType<typeof vi.fn>
   hide: ReturnType<typeof vi.fn>
   isDestroyed: ReturnType<typeof vi.fn>
   isMinimized: ReturnType<typeof vi.fn>
-  minimize: ReturnType<typeof vi.fn>
   restore: ReturnType<typeof vi.fn>
   show: ReturnType<typeof vi.fn>
 }
@@ -24,7 +19,6 @@ function createWindowMock(
     hide: vi.fn(),
     isDestroyed: vi.fn(() => overrides.destroyed ?? false),
     isMinimized: vi.fn(() => overrides.minimized ?? false),
-    minimize: vi.fn(),
     restore: vi.fn(),
     show: vi.fn()
   }
@@ -74,17 +68,5 @@ describe('主窗口托盘生命周期', () => {
     expect(createMissingWindow).toHaveBeenCalledOnce()
     expect(createDestroyedWindow).toHaveBeenCalledOnce()
     expect(destroyedWindow.show).not.toHaveBeenCalled()
-  })
-
-  it('托盘最小化操作忽略不存在或已销毁的窗口', () => {
-    const mainWindow = createWindowMock()
-    const destroyedWindow = createWindowMock({ destroyed: true })
-
-    minimizeCurrentMainWindow(() => mainWindow)
-    minimizeCurrentMainWindow(() => undefined)
-    minimizeCurrentMainWindow(() => destroyedWindow)
-
-    expect(mainWindow.minimize).toHaveBeenCalledOnce()
-    expect(destroyedWindow.minimize).not.toHaveBeenCalled()
   })
 })

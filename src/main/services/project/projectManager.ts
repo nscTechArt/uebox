@@ -14,12 +14,24 @@ export class ProjectManager {
   /** 工程列表：connectionId -> ProjectInfo */
   private projects = new Map<string, ProjectInfo>()
   private addedListeners: Array<(project: ProjectInfo) => void> = []
+  private changedListeners: Array<() => void> = []
 
   /** 插件报上工程信息时通知（同一条连接重报也会再通知一次）。返回退订函数 */
   onProjectAdded(listener: (project: ProjectInfo) => void): () => void {
     this.addedListeners.push(listener)
     return () => {
       this.addedListeners = this.addedListeners.filter((item) => item !== listener)
+    }
+  }
+
+  /**
+   * 工程列表变了就通知（加 / 离线 / 删除 / 清空都经过 `notifyProjectsChanged`）。
+   * 不带参数 —— 订阅方自己去问 `getInteractiveProjects()`。返回退订函数。
+   */
+  onProjectsChanged(listener: () => void): () => void {
+    this.changedListeners.push(listener)
+    return () => {
+      this.changedListeners = this.changedListeners.filter((item) => item !== listener)
     }
   }
 
@@ -239,7 +251,18 @@ export class ProjectManager {
    * 需要看无头连接的场合只有排查，日志里有。
    */
   private notifyProjectsChanged(): void {
-    sendToAppWindows('ws:projects-changed', this.getInteractiveProjects())
+    try {
+      sendToAppWindows('ws:projects-changed', this.getInteractiveProjects())
+    } catch (error) {
+      logger.warn('[ProjectManager] 工程变更广播失败:', error)
+    }
+    for (const listener of this.changedListeners) {
+      try {
+        listener()
+      } catch (error) {
+        logger.error('[ProjectManager] 工程变更监听器出错:', error)
+      }
+    }
   }
 }
 
