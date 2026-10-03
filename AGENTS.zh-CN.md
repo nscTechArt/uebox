@@ -268,3 +268,20 @@ Release 上的 `.exe`、`.blockmap`、`latest.yml`。运行期解析见 `src/mai
 
 不要猜，也不要偷偷把任务缩小。把你试过什么、门禁报了什么、需要谁来拍板讲清楚。
 一个诚实说明「哪块没做完」的 PR，比一个绕过了难点的绿灯 PR 有用得多。
+
+## 9. Agent 技能
+
+### Issue tracker
+
+Issue 和 spec 以本地 markdown 文件的形式存放在 `.scratch/<feature-slug>/` 下。
+见 `docs/agents/issue-tracker.md`。
+
+### Triage 标签
+
+五个标准 triage 角色使用默认标签字符串（`needs-triage`、`needs-info`、
+`ready-for-agent`、`ready-for-human`、`wontfix`）。见 `docs/agents/triage-labels.md`。
+
+### 领域文档
+
+单上下文：仓库根目录一个 `CONTEXT.md`，ADR 放 `docs/adr/`。
+见 `docs/agents/domain.md`。
