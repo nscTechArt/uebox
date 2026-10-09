@@ -371,7 +371,7 @@ describe('这一轮绑的工程没连上', () => {
    * 会话挂在 MyGame 下、连着的却是 Other。不点破的话模型会拿旁边那条连接
    * 去干活 —— 那是「静默改错工程」，比报错糟糕得多。
    */
-  it('别的工程连着不等于这条会话能干活', async () => {
+  it('别的工程连着不等于这条对话能干活', async () => {
     connect('conn-other', 'I:/Dev/Other', 'Other')
     getTargetConnectionId.mockReturnValue('conn-DEAD')
     getTargetProjectPath.mockReturnValue('I:/Dev/MyGame')
@@ -383,6 +383,7 @@ describe('这一轮绑的工程没连上', () => {
     const summary = String(result.summary)
     expect(summary).toContain('I:/Dev/MyGame')
     expect(summary).toContain('没有连接')
+    expect(summary).toContain('把对话移出该工程')
   })
 
   it('目标就是连着的那条时不报警', async () => {
@@ -457,6 +458,10 @@ it('state 进模型看得见的文本', async () => {
   connect('conn-1', 'I:/Dev/MyGame')
 
   expect(await runText()).toContain('state=connected')
+})
+
+it('工具说明里讲清 connection_id 不是对话 id', () => {
+  expect(createSessionHealthTool().description).toContain('它不是对话 id')
 })
 
 /**

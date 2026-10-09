@@ -497,7 +497,7 @@ describe('资产锁接线', () => {
     return tool
   }
 
-  it('别的会话占着资产时，写工具直接抛错、不执行', async () => {
+  it('别的对话占着资产时，写工具直接抛错、不执行', async () => {
     acquire(CONN, 'other-session', ['/Game/BP_Door'])
 
     const tool = toolNamed('blueprint_set_property')
@@ -505,7 +505,7 @@ describe('资产锁接线', () => {
       runWithLockOwner('me', () =>
         tool.execute('call-1', { blueprint_path: '/Game/BP_Door', property_name: 'x', value: 1 })
       )
-    ).rejects.toThrow('另一条 AI 会话')
+    ).rejects.toThrow('另一条 AI 对话')
   })
 
   it('自己占着的资产照常放行 —— 一轮 run 里会反复碰到同一个资产', async () => {
@@ -517,7 +517,7 @@ describe('资产锁接线', () => {
       runWithLockOwner('me', () =>
         tool.execute('call-2', { blueprint_path: '/Game/BP_Door', property_name: 'x', value: 1 })
       )
-    ).rejects.not.toThrow('另一条 AI 会话')
+    ).rejects.not.toThrow('另一条 AI 对话')
   })
 
   it('safe 工具不受锁影响 —— 读不冲突，加读锁不划算', async () => {
@@ -526,7 +526,7 @@ describe('资产锁接线', () => {
     const tool = toolNamed('blueprint_describe')
     await expect(
       runWithLockOwner('me', () => tool.execute('call-3', { blueprint_path: '/Game/BP_Door' }))
-    ).rejects.not.toThrow('另一条 AI 会话')
+    ).rejects.not.toThrow('另一条 AI 对话')
   })
 
   /**

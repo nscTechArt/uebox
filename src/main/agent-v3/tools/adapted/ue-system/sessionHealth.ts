@@ -297,7 +297,7 @@ function describe(
   if (orphans.length > 0) {
     lines.push(
       '',
-      '另外这些编辑器在跑但没连上盒子（不属于这条会话，别去动它们）：',
+      '另外这些编辑器在跑但没连上盒子（不属于这条对话，别去动它们）：',
       ...listProcesses(orphans)
     )
   }
@@ -312,8 +312,8 @@ function describe(
     lines.push(
       '',
       `注意：这一轮绑定的工程是 ${staleTargetPath}，它此刻**没有连接**。` +
-        '上面那些连接属于别的工程，这条会话不该去动它们 —— ' +
-        '请用户打开并连接这个工程，或者把会话移出该工程。'
+        '上面那些连接属于别的工程，这条对话不该去动它们 —— ' +
+        '请用户打开并连接这个工程，或者把对话移出该工程。'
     )
   }
 
@@ -439,7 +439,7 @@ export function createSessionHealthTool(): UnrealAgentTool<SessionHealthReport> 
 插件才起来，大工程 30–90 秒是常态。盒子界面上没有「连接」按钮。
 
 【connection_id 是什么】盒子和编辑器之间那条 WebSocket 连接的 id，
-**编辑器每重启一次就换一个**，旧的会被清掉。它不是聊天会话 id。
+**编辑器每重启一次就换一个**，旧的会被清掉。它不是对话 id。
 编辑器重启后盒子会自动认回同一个工程的新连接，所以看到 state=connected
 就说明现在真的能干活了。`,
     input: z.object({

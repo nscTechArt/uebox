@@ -111,7 +111,7 @@ describe('team_status', () => {
     expect(text).toMatch(/程序：在干「做炮塔的开火逻辑」/)
     expect(text).toMatch(/美术：空闲（要它干活用 team_send）/)
     expect(text).toMatch(/BP_GameMode.*← .*程序/)
-    expect(text).toContain('另有 1 个资产被盒子里别的会话占着')
+    expect(text).toContain('另有 1 个资产被盒子里别的对话占着')
     expect(text).toMatch(/美术「做三张材质」：material_create ×3/)
     expect(text).toMatch(/很久没更新[\s\S]*t1 HUD @美术/)
   })

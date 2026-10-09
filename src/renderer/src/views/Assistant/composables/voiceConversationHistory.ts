@@ -43,8 +43,8 @@ export function voiceConversationHistory(messages: ChatMessage[]): ConversationT
       result.push({
         role: 'assistant',
         text: failed
-          ? '[会话状态：本轮执行失败，尚未完成。原始错误详情未传入语音。]'
-          : '[会话状态：本轮已停止，不能视为完成。]'
+          ? '[本轮状态：执行失败，尚未完成。原始错误详情未传入语音。]'
+          : '[本轮状态：已停止，不能视为完成。]'
       })
       continue
     }

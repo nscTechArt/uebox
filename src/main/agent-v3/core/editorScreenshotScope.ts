@@ -99,7 +99,7 @@ export function editorScreenshotAllowed(): boolean {
  */
 export function editorScreenshotRefusal(attempted: string): string {
   return (
-    `${attempted}被挡下了：用户把「允许编辑器截图」关掉了，这条会话里没有任何` +
+    `${attempted}被挡下了：用户把「允许编辑器截图」关掉了，这条对话里没有任何` +
     '能拍编辑器画面的工具。\n' +
     '不要换个参数再试，也不要用 ue_run_python_script、run_shell_command 或别的工具' +
     '自己去截一张 —— 那是在绕开用户明确关掉的东西。\n' +

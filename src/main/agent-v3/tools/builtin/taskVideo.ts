@@ -8,7 +8,7 @@ import { MAX_SPEECH_CHARS } from '../../../../shared/speech'
 async function currentSession(): Promise<string> {
   const { getCurrentSessionId } = await import('../../core/projectTargetContext')
   const id = getCurrentSessionId()
-  if (!id) throw new Error('音乐生成或任务成片需要在 AI 会话中调用，当前没有会话。')
+  if (!id) throw new Error('音乐生成或任务成片需要在 AI 对话中调用，当前没有对话。')
   return id
 }
 
@@ -50,7 +50,7 @@ export function taskVideoTools(): UnrealAgentTool[] {
       risk: 'mutating',
       concurrency: 'sequential',
       description:
-        '创建当前会话的视频工程，检查本地成片能力，保存完整可用会话和图片快照，并返回首段素材上下文。任务成片先调用一次；改片复用原工程。不会调用收费模型。',
+        '创建当前对话的视频工程，检查本地成片能力，保存完整可用对话和图片快照，并返回首段素材上下文。任务成片先调用一次；改片复用原工程。不会调用收费模型。',
       input: z.object({}),
       execute: async (_args, ctx) => {
         const sessionId = await currentSession()
@@ -87,7 +87,7 @@ export function taskVideoTools(): UnrealAgentTool[] {
       namespace: 'video.production',
       risk: 'safe',
       description:
-        '分页读取已创建视频工程的会话快照；offset 使用上一次返回的 nextOffset。不会读取其他会话。',
+        '分页读取已创建视频工程的对话快照；offset 使用上一次返回的 nextOffset。不会读取其他对话。',
       input: z.object({ projectDir: z.string(), offset: z.number().int().min(0).default(0) }),
       execute: async ({ projectDir, offset }) => {
         const { assertVideoProject, contextPage } = await import(
@@ -109,7 +109,7 @@ export function taskVideoTools(): UnrealAgentTool[] {
       risk: 'mutating',
       concurrency: 'sequential',
       description:
-        '直接生成纯音乐或背景音乐，使用用户绑定的音乐来源，可能收费。用户只要音乐时直接调用本工具，省略 projectDir；不需要视频技能、整理素材、读取聊天记录或检查视频环境。仅为已有视频工程配乐时传 projectDir。完成后自动保存到 AIGC/音乐；若曲目带 save_error，明确告知音乐已生成但入库失败，原文件仍可播放，不要重新生成。返回 tracks 中的全部曲目，逐首提供本地音频链接供试听，不要只交付第一首；path 是供视频默认使用的第一首。相同会话和参数复用音频或恢复 Mureka / SUNO 查询。失败时引用具体错误，不猜测密钥、余额或扣费情况；未确认原因前不得换提示词或换工具路径重试，已有任务只续查。' +
+        '直接生成纯音乐或背景音乐，使用用户绑定的音乐来源，可能收费。用户只要音乐时直接调用本工具，省略 projectDir；不需要视频技能、整理素材、读取对话记录或检查视频环境。仅为已有视频工程配乐时传 projectDir。完成后自动保存到 AIGC/音乐；若曲目带 save_error，明确告知音乐已生成但入库失败，原文件仍可播放，不要重新生成。返回 tracks 中的全部曲目，逐首提供本地音频链接供试听，不要只交付第一首；path 是供视频默认使用的第一首。相同对话和参数复用音频或恢复 Mureka / SUNO 查询。失败时引用具体错误，不猜测密钥、余额或扣费情况；未确认原因前不得换提示词或换工具路径重试，已有任务只续查。' +
         (planMusic ? PLAN_MUSIC_NOTE : ''),
       input: z.object({
         projectDir: z
@@ -189,7 +189,7 @@ export function taskVideoTools(): UnrealAgentTool[] {
       risk: 'mutating',
       concurrency: 'sequential',
       description:
-        '文字合成语音，输出可播放、可导入 UE 的 WAV。台词、对白、无线电通话、旁白都用它，多句逐句调用。用用户绑定的语音合成模型，可能收费；同样文字复用不重复扣费。不需要会话。返回 path、seconds，把 path 作为本地音频链接交给用户。',
+        '文字合成语音，输出可播放、可导入 UE 的 WAV。台词、对白、无线电通话、旁白都用它，多句逐句调用。用用户绑定的语音合成模型，可能收费；同样文字复用不重复扣费。不必在盒子的对话里调用。返回 path、seconds，把 path 作为本地音频链接交给用户。',
 
       input: z.object({
         text: z.string().min(1).max(MAX_SPEECH_CHARS)

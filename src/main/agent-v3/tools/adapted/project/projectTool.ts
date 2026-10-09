@@ -2518,7 +2518,7 @@ export function createProjectTool(): V2Tool {
     connected=true 就是「验证过能干活」，switched_target=true 就是「已经切过去了」——
     这时直接接着干，不要让用户去界面上切工程、也不要请他再发一条消息
   - 等待默认 ${DEFAULT_WAIT_MS / 1000} 秒，用 waitSeconds 调整
-  - 会话被用户归到别的工程下时不会切（那是越界），details 里会说明，照实转告用户
+  - 对话被用户归到别的工程下时不会切（那是越界），details 里会说明，照实转告用户
 - import_assets: 将资产库中的资产导入 UE 项目（需要 assetKeys **或** folder，可选 destinationPath）
   - **工程不用打开。** .uasset/.umap 是把文件拷进 <工程>/Content/ 并解析依赖，不经过引擎，
     所以别为了导资产先去 open_project —— 那会白等一趟编辑器启动。用 projectKey

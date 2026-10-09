@@ -93,6 +93,7 @@ _Avoid_：侧边对话、侧边聊天；Side chat
 **语音通话 (Voice call)**
 用户与语音助手之间的一次实时语音交流，绑定在一条对话上；有开始、有挂断，通话结束后对话还在。
 代码里叫 `voiceAssistant`，通话绑定在哪条对话上记在 `voiceChatSid`。
+语音派活工具 `dispatch_task` 的参数 `session` 是给模型的协议名，不改；它的取值是 `list_sessions` 列出的内核 session id（`agentSessionId`），不是对话 id。
 _Avoid_：语音对话、语音会话；Voice conversation、Voice session
 
 **小窗 (Mini window)**

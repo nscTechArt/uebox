@@ -537,7 +537,7 @@ function chatSidForAgentSession(agentSessionId: string): string {
    * 硬猜一条对话把会话号写上去只会把两件活搅到一条会话上 —— 那正是
    * §6.5.2 修过的「上下文不干净」最狠的一种。照实抛。
    */
-  throw new Error(`会话 ${agentSessionId} 不属于界面上任何一条对话，没法派活。`)
+  throw new Error(`session ${agentSessionId} 不属于界面上任何一条对话，没法派活。`)
 }
 
 let shared: RealtimeVoiceState | null = null

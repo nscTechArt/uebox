@@ -445,9 +445,9 @@ export function describeConflicts(conflicts: LockConflict[], requester?: string)
   }
   const lines = conflicts.map((c) => `  - ${describeLockPath(c.path)}`)
   return [
-    '以下资产正被**盒子里的另一条 AI 会话**修改中，本次调用未做任何改动：',
+    '以下资产正被**盒子里的另一条 AI 对话**修改中，本次调用未做任何改动：',
     ...lines,
     '这与用户在虚幻编辑器里的操作无关，别让用户去关闭资产或退出编辑 —— 那不会解锁。',
-    '锁在那条会话结束时自动释放。请先做别的任务，或告诉用户等它结束。反复重试不会让锁提前释放。'
+    '锁在那一轮结束时自动释放。请先做别的任务，或告诉用户等它结束。反复重试不会让锁提前释放。'
   ].join('\n')
 }

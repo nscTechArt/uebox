@@ -96,7 +96,7 @@ describe('independent music generation', () => {
     // 给视频工程配乐仍然要求会话
     await expect(
       tool.execute('mcp-4', { projectDir: 'video-project', prompt: 'calm', seconds: 30 })
-    ).rejects.toThrow('当前没有会话')
+    ).rejects.toThrow('当前没有对话')
   })
   it('keeps generated audio available if vault import fails', async () => {
     mocks.save.mockRejectedValueOnce(new Error('vault unavailable'))

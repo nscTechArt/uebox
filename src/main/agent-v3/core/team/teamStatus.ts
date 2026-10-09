@@ -120,7 +120,7 @@ export async function buildTeamStatus(deps: TeamStatusDeps): Promise<string> {
               `- ${describeLockPath(lock.path)} ← ${holderLabel(lock.owner)}（已占 ${Math.max(1, Math.round((t - lock.acquiredAt) / 60_000))} 分钟，它这件活交回时放）`
           )
         : ['- 团队里没人占着资产']),
-      ...(others > 0 ? [`- 另有 ${others} 个资产被盒子里别的会话占着`] : [])
+      ...(others > 0 ? [`- 另有 ${others} 个资产被盒子里别的对话占着`] : [])
     ].join('\n')
   )
 

@@ -43,7 +43,7 @@ const sessionsInput = z.object({
   action: z
     .enum(['list', 'read'])
     .describe('list：列出盒子助手最近的对话；read：读一条对话的内容（要 session_id）'),
-  session_id: z.string().optional().describe('read 时必填：list 返回的会话 id'),
+  session_id: z.string().optional().describe('read 时必填：list 返回的 id'),
   limit: z.number().optional().describe(`list 时回几条，默认 ${DEFAULT_SESSION_LIST}`),
   max_chars: z
     .number()
@@ -163,7 +163,7 @@ export function createBoxSessionsTool(): UnrealAgentTool<unknown> {
       '看虚幻盒子里内置助手的对话记录。\n\n' +
       '【什么时候用】用户说「盒子里刚才那个对话」「助手上次做到哪了」「看看它改了什么」时；' +
       '或者要接着盒子助手没做完的活干，先读一遍它做过什么、卡在哪。\n' +
-      '先 list 找到会话，再 read 读内容。读到的是对话正文、每步调了哪些工具、工具结果的开头 —— ' +
+      '先 list 找到对话，再 read 读内容。读到的是对话正文、每步调了哪些工具、工具结果的开头 —— ' +
       '具体改了什么以引擎和素材库的现状为准，回读确认后再下结论。',
     input: sessionsInput,
     async execute(input) {
@@ -202,7 +202,7 @@ export function createBoxSessionsTool(): UnrealAgentTool<unknown> {
       if (!sessionId) throw new Error('read 要给 session_id。先用 action: "list" 找到它。')
       const messages = (await loadTranscript(sessionId)) as LooseMessage[]
       if (messages.length === 0) {
-        throw new Error(`没有找到会话 ${sessionId}，或者它是空的。用 action: "list" 看看现有的。`)
+        throw new Error(`没有找到对话 ${sessionId}，或者它是空的。用 action: "list" 看看现有的。`)
       }
 
       const blocks = messages.map(renderMessage).filter((b): b is string => Boolean(b))

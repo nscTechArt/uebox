@@ -108,6 +108,13 @@ describe('ue_undo_history', () => {
     expect(result.success).toBe(false)
     expect(callRequest).not.toHaveBeenCalled()
   })
+
+  it('limit 的说明里讲清长对话里可能攒几百条', () => {
+    const schema = createUndoHistoryTool().inputSchema as {
+      shape: { limit: { description?: string } }
+    }
+    expect(schema.shape.limit.description).toContain('长对话里可能几百条')
+  })
 })
 
 describe('ue_undo', () => {

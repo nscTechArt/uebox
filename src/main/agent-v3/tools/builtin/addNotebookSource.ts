@@ -44,7 +44,7 @@ const input = z
       .string()
       .optional()
       .describe(
-        '未绑定知识库时存到哪个知识库：外部会话里已有同名的就存进去，否则按这个标题新建。不填就使用来源标题'
+        '未绑定知识库时存到哪个知识库：外部调用方那里已有同名知识库就存进去，否则按这个标题新建。不填就使用来源标题'
       )
   })
   .describe('要么给 url，要么给 title + content')
@@ -103,7 +103,7 @@ export function createAddNotebookSourceTool(
         : '一个新知识库'
   const whereTo = byTitle
     ? '【放到哪里】用 notebookTitle 指定知识库标题：已有同名的就存进那一个，没有才新建。不填就按来源标题新建 —— 用户说了要放进哪个库时一定要填。'
-    : '【放到哪里】当前会话绑定了知识库就加到那里；没绑定就新建知识库，标题默认沿用来源标题，也可以传 notebookTitle。用户点名要加到某个已有知识库而当前没绑定时，先让他用 /wiki 选中，别新建一个同名副本。'
+    : '【放到哪里】当前对话绑定了知识库就加到那里；没绑定就新建知识库，标题默认沿用来源标题，也可以传 notebookTitle。用户点名要加到某个已有知识库而当前没绑定时，先让他用 /wiki 选中，别新建一个同名副本。'
 
   return defineTool({
     name: 'add_notebook_source',

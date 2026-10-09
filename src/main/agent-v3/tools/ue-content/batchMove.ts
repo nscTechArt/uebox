@@ -306,7 +306,7 @@ export async function scanExternalRefs(
       truncated: false,
       note: '',
       skipped_reason:
-        '这条会话没有绑定工程路径，扫不了工程文本。用 ue_project_path_refs 传 project 手动扫。'
+        '这条对话没有绑定工程路径，扫不了工程文本。用 ue_project_path_refs 传 project 手动扫。'
     }
   }
   try {

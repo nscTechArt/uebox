@@ -79,22 +79,25 @@ describe('VOICE_TOOLS', () => {
 })
 
 describe('VOICE_INSTRUCTIONS', () => {
-  it('文件指代先读聊天历史，不无条件查看虚幻编辑器', () => {
-    expect(VOICE_INSTRUCTIONS).toContain('先从最近的聊天记录找指代')
-    expect(VOICE_INSTRUCTIONS).toContain('查看或解释聊天中的文件不要求连接虚幻编辑器')
+  it('文件指代先读对话历史，不无条件查看虚幻编辑器', () => {
+    expect(VOICE_INSTRUCTIONS).toContain('先从最近的对话记录找指代')
+    expect(VOICE_INSTRUCTIONS).toContain('查看或解释对话中的文件不要求连接虚幻编辑器')
     expect(VOICE_INSTRUCTIONS).toContain('不假装重新读过文件')
     expect(VOICE_INSTRUCTIONS).not.toContain('用户在用嘴操作编辑器')
     const tool = VOICE_TOOLS.find((item) => item.name === LOOK_AT_EDITOR)
-    expect(tool?.description).toContain('先从聊天历史解析指代')
+    expect(tool?.description).toContain('先从对话历史解析指代')
     expect(tool?.description).toContain('追问上文提到的文件、代码或报错不调用此工具')
   })
 
-  it('中途接话区分普通建议与工具审批，并指向原会话', () => {
+  it('中途接话区分普通建议与工具审批，并指向原对话', () => {
     expect(VOICE_INSTRUCTIONS).toContain('普通回复里的「要不要继续」不是工具审批')
     expect(VOICE_INSTRUCTIONS).toContain('当前语音对话')
     expect(VOICE_INSTRUCTIONS).toContain('session')
     const approval = VOICE_TOOLS.find((tool) => tool.name === APPROVE_TASK)
-    expect(approval?.description).toContain('普通聊天回复的下一步建议不走审批')
+    expect(approval?.description).toContain('普通回复的下一步建议不走审批')
+    const dispatch = VOICE_TOOLS.find((tool) => tool.name === DISPATCH_TASK)
+    const properties = dispatch?.parameters.properties as Record<string, { description?: string }>
+    expect(properties.session?.description).toContain('来自 list_sessions 的 id')
   })
 
   it('把三条会出事的纪律写进提示词', () => {
@@ -234,14 +237,14 @@ describe('summarizeOpenEditors', () => {
 })
 
 describe('summarizeEditorFocus', () => {
-  it('编辑器未连接不把聊天文件问题阻塞在打开工程上', () => {
+  it('编辑器未连接不把对话文件问题阻塞在打开工程上', () => {
     const result = summarizeEditorFocus({ connected: false })
     expect(result).toContain('无法读取编辑器选中状态')
-    expect(result).toContain('这不影响理解聊天历史或处理本地文件')
+    expect(result).toContain('这不影响理解对话历史或处理本地文件')
     expect(result).not.toContain('先让用户打开工程')
   })
 
-  it('编辑器有选中对象也不能覆盖聊天中已经明确的文件', () => {
+  it('编辑器有选中对象也不能覆盖对话中已经明确的文件', () => {
     const result = summarizeEditorFocus({
       connected: true,
       focus: {
@@ -251,7 +254,7 @@ describe('summarizeEditorFocus', () => {
       }
     })
     expect(result).toContain('主灯')
-    expect(result).toContain('不要覆盖聊天历史中已经明确的目标')
+    expect(result).toContain('不要覆盖对话历史中已经明确的目标')
   })
 
   /*

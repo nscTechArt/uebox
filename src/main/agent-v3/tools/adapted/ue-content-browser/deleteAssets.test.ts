@@ -369,7 +369,7 @@ describe('展开之后、删除之前', () => {
     expect(String(result.message)).toContain('ue_fixup_redirectors')
   })
 
-  it('另一条会话锁着目录里的资产：不撤它的保护、不删', async () => {
+  it('另一条对话锁着目录里的资产：不撤它的保护、不删', async () => {
     callRequest.mockImplementation(
       folderWith([{ name: 'A', path: '/Game/Shared/A', class: 'Material' }])
     )
@@ -378,7 +378,7 @@ describe('展开之后、删除之前', () => {
       const result = await runWithLockOwner('this-session', () => run({ paths: ['/Game/Shared/'] }))
 
       expect(result.success).toBe(false)
-      expect(String(result.error)).toContain('另一条 AI 会话')
+      expect(String(result.error)).toContain('另一条 AI 对话')
       expect(releaseProtectionBeforeDelete).not.toHaveBeenCalled()
       expect(callsTo('content.delete')).toHaveLength(0)
     } finally {

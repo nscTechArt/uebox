@@ -162,7 +162,7 @@ describe('task video context', () => {
     expect(await fs.readFile(project.entries[0].images[0], 'utf8')).toBe('image bytes')
     expect(await assertVideoProject(project.projectDir, 'session-a')).toBe(project.projectDir)
     await expect(assertVideoProject(project.projectDir, 'session-b')).rejects.toThrow(
-      '不属于当前会话'
+      '不属于当前对话'
     )
     await expect(allowedMediaPath('relative.png')).rejects.toThrow('绝对路径')
   })

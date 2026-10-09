@@ -99,9 +99,11 @@ describe('box_sessions', () => {
     expect(out).toContain('有 3 个节点')
   })
 
-  it('会话不存在：说清楚，并指去 list', async () => {
+  it('对话不存在：说清楚，并指去 list', async () => {
     transcripts.loadTranscript.mockResolvedValue([])
-    await expect(tool.execute('c', { action: 'read', session_id: 'nope' })).rejects.toThrow('list')
+    await expect(tool.execute('c', { action: 'read', session_id: 'nope' })).rejects.toThrow(
+      /没有找到对话.*list/
+    )
   })
 })
 

@@ -101,7 +101,7 @@ step 越大越新，撤销从最大的那个往回走。
       limit: z
         .number()
         .optional()
-        .describe('只要最近几步，默认 20。填 0 或负数表示全要（长会话里可能几百条）')
+        .describe('只要最近几步，默认 20。填 0 或负数表示全要（长对话里可能几百条）')
     }),
 
     execute: async (input) => {

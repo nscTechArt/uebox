@@ -212,7 +212,7 @@ export function requireSupported(
     throw new UeboxError(
       'RISK_NOT_SUPPORTED',
       `工具 ${name} 超出 CLI 的调用范围：${tool.unsupportedReason}`,
-      '这类操作请在虚幻盒子里做 —— 那边有审批界面和会话上下文。'
+      '这类操作请在虚幻盒子里做 —— 那边有审批界面和对话上下文。'
     )
   }
 
