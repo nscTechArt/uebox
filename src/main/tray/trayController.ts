@@ -17,7 +17,7 @@
  * 而且不报任何错。`rebuildMenu` 开头的 win32 判断守的就是这一条。
  *
  * 其他平台右键事件不可靠（macOS 的托盘菜单是系统自己弹的），退回
- * `setContextMenu`，靠几路信号做防抖重建：界面报上来的最近会话变了、
+ * `setContextMenu`，靠几路信号做防抖重建：界面报上来的最近对话变了、
  * `projectManager` 的工程连接变了、项目库变了、语言变了；不做定时轮询 ——
  * 没信号的变化（盘上文件没了、没装插件的工程被 UE 打开改写了 ini）等
  * 下一次信号驱动的重建自然会读到；定时器则不管托盘用没用过，都在
@@ -27,7 +27,7 @@
  *
  * 菜单项本身只会把主窗口叫到前台、把动作存进 `pending`，再发一句不带
  * 负载的 `tray:action` 提醒 —— 界面走 `tray:take-pending` 取走本体
- * （取走即清）再处理，这是唯一的送达路径。跳到那条会话、开新对话、
+ * （取走即清）再处理，这是唯一的送达路径。跳到那条对话、开新对话、
  * 弹插件失败框全是界面的事（`layout/composables/trayBridge.ts`）。
  */
 import { app, dialog, ipcMain, Menu, Notification, Tray } from 'electron'

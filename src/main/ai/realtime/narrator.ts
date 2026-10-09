@@ -24,9 +24,9 @@
 
 import type { ToolRisk } from '../../agent-v3/tools/defineTool'
 
-/** 谁在说话。语音会话没开的时候是 `off` */
+/** 谁在说话。没在通话的时候是 `off` */
 export interface VoiceFloor {
-  /** 会话开着 */
+  /** 通话进行中 */
   active: boolean
   /** 用户正在说话（识别到了非终态文本） */
   userSpeaking: boolean

@@ -391,7 +391,7 @@ describe('createVoiceTaskBus', () => {
 
   /*
    * `done` 是 agent 事件流里的最后一条，但它发出来时主进程还没把会话从
-   * activeAgents 摘掉 —— 那会儿派下一件，`agent-v3:execute` 回的是「正在执行中」，
+   * activeAgents 摘掉 —— 那会儿派下一件，`agent-v3:execute` 回的是 `SESSION_BUSY`，
    * 排队的那件就莫名其妙地失败了。要等 `released`。
    */
   it('前面那件做完，要等会话真的空出来（released）才推下一件', () => {

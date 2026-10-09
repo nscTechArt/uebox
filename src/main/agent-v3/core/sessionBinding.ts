@@ -3,7 +3,7 @@
  *
  * ## 为什么要有这个文件
  *
- * 这件事原先同时住在四个地方：渲染层的会话列表（侧边栏按它分组）、执行流的
+ * 这件事原先同时住在四个地方：渲染层的对话列表（侧边栏按它分组）、执行流的
  * AsyncLocalStorage、执行记录文件、以及渲染层随每条消息带下来的那份戳。
  * 四份都能被独立地写、独立地失败，谁也不是权威。
  *
@@ -18,7 +18,7 @@
  *
  * ## 三态，缺一不可
  *
- * - **没有记录**（`undefined`）：这条会话还没定过归属，拿渲染层的戳初始化。
+ * - **没有记录**（`undefined`）：这条对话还没定过归属，拿渲染层的戳初始化。
  * - **有对象**：归属这个工程。
  * - **`null`**：用户或模型**明确解除**过。它必须和「没有记录」分得开 ——
  *   混在一起的话，解除之后下一条消息带上来的旧戳会把归属原样复活，
@@ -47,7 +47,7 @@ function normalize(project: SessionProjectRef | null | undefined): SessionProjec
 }
 
 /**
- * 这条会话此刻的归属。没记录时返回 `undefined`。
+ * 这条对话此刻的归属。没记录时返回 `undefined`。
  *
  * 只读，不初始化 —— 初始化是 `adoptSessionBinding()` 的事，那需要调用方
  * 给出渲染层的戳和执行记录。
@@ -57,7 +57,7 @@ export function getSessionBinding(sessionId: string): SessionProjectRef | null |
 }
 
 /**
- * 定这条会话的归属。**唯一的写入口。**
+ * 定这条对话的归属。**唯一的写入口。**
  *
  * @param project 归属的工程；`null` = 明确解除
  * @returns 归一之后真正记下的那份
@@ -72,7 +72,7 @@ export function setSessionBinding(
 }
 
 /**
- * 拿到这条会话该用的归属，没记录就用给进来的那份初始化。
+ * 拿到这条对话该用的归属，没记录就用给进来的那份初始化。
  *
  * 每一轮开始时调一次，**所有**读归属的地方都从这里拿结果 —— 提示词、工具清单、
  * 越界判断、续跑，一份来源。
@@ -99,10 +99,10 @@ export function adoptSessionBinding(
    */
   const seed = known !== undefined ? known : fromRecord !== undefined ? fromRecord : fromRenderer
   /*
-   * 旧会话可能只存了名字。只补同一归属缺失的路径，绝不覆盖已知路径或明确解绑。
+   * 旧对话可能只存了名字。只补同一归属缺失的路径，绝不覆盖已知路径或明确解绑。
    *
-   * 为什么需要这一条：会话的戳只在「引擎连着那一刻」才顺带记下路径，所以从没
-   * 连过引擎的会话（非 UE 工程尤其典型）永远只有一个名字。而路径盒子其实有 ——
+   * 为什么需要这一条：对话的戳只在「引擎连着那一刻」才顺带记下路径，所以从没
+   * 连过引擎的对话（非 UE 工程尤其典型）永远只有一个名字。而路径盒子其实有 ——
    * 用户在侧栏登记过，躺在渲染层的 `manualProjects` 里。不接这一下，模型就只能
    * 跟用户说「我不知道这个工程在哪」，而那是句会让人火大的实话。
    *
@@ -129,7 +129,7 @@ export function adoptSessionBinding(
   return setSessionBinding(sessionId, seed ?? null)
 }
 
-/** 会话删掉时把记录也删掉，免得进程越跑表越长 */
+/** 对话删掉时把记录也删掉，免得进程越跑表越长 */
 export function forgetSessionBinding(sessionId: string): void {
   bindings.delete(sessionId)
 }

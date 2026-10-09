@@ -60,7 +60,7 @@ const report = ref<UsageReport | null>(null)
 /** 热力图那一年的日汇总。和上面同一个函数算出来的，不会有两份对不上的数字 */
 const yearDays = ref<UsageDay[]>([])
 
-/** 会话 id → 工程名。没绑工程的会话不进这张表，统计层会把它们归到「没绑工程」 */
+/** 对话 id → 工程名。没绑工程的对话不进这张表，统计层会把它们归到「没绑工程」 */
 function projectBySid(): Record<string, string> {
   const table: Record<string, string> = {}
   for (const session of chatSessionsStore.sessions) {

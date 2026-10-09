@@ -110,7 +110,7 @@ export function useFollowUpDelivery(): void {
      * 判「忙」不能只看流式状态。
      *
      * `done` 一到界面就把 `isStreaming` 清了，而主进程还要跑完 `finally` 里的
-     * release 才真正空出来。这个间隙里发出去会被顶回来一句「会话正在执行中」——
+     * release 才真正空出来。这个间隙里发出去会被顶回来一个 `SESSION_BUSY` ——
      * 而下面是**先出队再发**的，被顶回来的那条话就没了，用户什么都不会看到。
      */
     if (streamStore.isBusy(chatSid)) return
@@ -150,9 +150,9 @@ export function useFollowUpDelivery(): void {
   }
 
   /**
-   * 主进程说有会话空出来了。
+   * 主进程说有内核 session 空出来了。
    *
-   * 不看它带的 sessionId：那是 agent 会话号，而队列按对话（chatSid）分桶，两者的
+   * 不看它带的 sessionId：那是内核 session id，而队列按对话（chatSid）分桶，两者的
    * 映射在流式状态清理时就没了 —— 收到这条时往往已经查不到。所以把**所有**排着
    * 队的对话过一遍，各自判「我这条在不在跑」，谁空了谁发。
    */
@@ -190,7 +190,7 @@ export function useFollowUpDelivery(): void {
   /*
    * 别的窗口里跑的那一轮结束了也试一次。
    *
-   * 独立聊天窗口显示的对话可能是主窗口在跑（或者反过来），`released` 只发给发起的
+   * 独立对话窗口显示的对话可能是主窗口在跑（或者反过来），`released` 只发给发起的
    * 那个窗口，这边收不到；这边知道它空出来，靠的是主进程那张「别处在跑」的表变了
    * （见 `agentStream.isBusyElsewhere`）。
    */

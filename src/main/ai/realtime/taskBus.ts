@@ -17,7 +17,7 @@ import { clipToSentences, summarizeByRules } from './spokenSummary'
  * 「Agent 现在正卡在问用户」—— 后两者的信息压根不经过那个组件。
  *
  * 搬到这里之后，任务的真相来自 agent 自己的事件流（`host/runObserver`），
- * 不再来自渲染层的一个 Promise。语音关了又开、界面切到别的会话，
+ * 不再来自渲染层的一个 Promise。语音关了又开、界面切到别的对话，
  * 任务照跑，跑完照样播报。
  *
  * ## 结果文本从哪来
@@ -29,7 +29,7 @@ import { clipToSentences, summarizeByRules } from './spokenSummary'
  * ## 并发的规矩
  *
  * **一条 agent 会话同时只能有一件活。** 这不是我们加的限制 ——
- * `agent-v3:execute` 本来就会拒掉并发（「会话 X 正在执行中」）。
+ * `agent-v3:execute` 本来就会拒掉并发（`SESSION_BUSY`）。
  * 但不同会话可以同时跑：这既是跨会话派发的意义，也是一通电话能开好几个
  * 「灶」的前提（`bySession`、`waiting` 本来就是按会话分的 Map，一个灶一条会话）。
  *
@@ -54,7 +54,7 @@ export interface VoiceTask {
   held?: boolean
   /** 跑在哪条 agent 会话上 */
   agentSessionId: string
-  /** 会话在界面上叫什么。派到别的会话时用来说人话，没有就退回会话号 */
+  /** 对话在界面上叫什么。派到别的对话时用来说人话，没有就退回会话号 */
   sessionLabel: string
   instruction: string
   /** 登记时已经包含原始对白，排队后不得重新读取当前通话。 */
@@ -113,7 +113,7 @@ export interface VoiceTaskBusDeps {
    * 排到的那件活该开跑了。
    *
    * 真正的启动在**渲染层**（`agentV3API.execute`），主进程发不起 —— 所以这里
-   * 只是把它推出去。返回**推没推到**：语音会话关着的时候没人收，返回 false，
+   * 只是把它推出去。返回**推没推到**：通话没开着的时候没人收，返回 false，
    * 那件活就留在队里，等下次开语音时 `resume` 再推。
    */
   startRun: (task: VoiceTask) => boolean
@@ -176,7 +176,7 @@ export interface VoiceTaskBus {
    */
   progressSpeech: () => { speech: string; context: string; facts: string } | null
   flush: () => void
-  /** 语音会话关了。高优先级的攒起来（`briefOnReconnect` 再念），进度丢掉 */
+  /** 通话挂了。高优先级的攒起来（`briefOnReconnect` 再念），进度丢掉 */
   clearQueue: () => void
   /**
    * 语音重新接上了，把用户不在线期间的事交代一遍：攒下的结果 / 反问 / 审批、
@@ -562,7 +562,7 @@ export function createVoiceTaskBus(deps: VoiceTaskBusDeps): VoiceTaskBus {
    *
    * **只在 `released` 之后调**（或者压根没跑起来的时候）。`done` 不算 ——
    * 它发出来时主进程还没把会话从 activeAgents 摘掉，这会儿派下一件会被
-   * 「正在执行中」顶回来，那件活就莫名其妙地失败了。
+   * `SESSION_BUSY` 顶回来，那件活就莫名其妙地失败了。
    */
   function startNextWaiting(agentSessionId: string): void {
     if (
@@ -591,7 +591,7 @@ export function createVoiceTaskBus(deps: VoiceTaskBusDeps): VoiceTaskBus {
     }
 
     /*
-     * 没人收（语音会话关着、窗口没了）。退回队头，别让它顶着 running 占住会话 ——
+     * 没人收（通话没开着、窗口没了）。退回队头，别让它顶着 running 占住会话 ——
      * 那样下次开语音派活会排在一件永远不会开始的活后面，check_task 也一直说「还在跑」。
      * 等下次开语音，`resume` 会再推一次。
      */
@@ -1092,7 +1092,7 @@ export function createVoiceTaskBus(deps: VoiceTaskBusDeps): VoiceTaskBus {
     flush,
 
     /**
-     * 语音会话关了。进度丢掉（下次开语音再念旧进度是惊吓不是提醒）；
+     * 通话挂了。进度丢掉（下次开语音再念旧进度是惊吓不是提醒）；
      * 结果、反问、审批攒起来，接上时 `briefOnReconnect` 交代
      */
     clearQueue(): void {

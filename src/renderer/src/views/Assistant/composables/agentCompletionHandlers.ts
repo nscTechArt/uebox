@@ -167,8 +167,8 @@ export function createAgentCompletionHandlers(
    * 这一轮的摊子收掉：注销处理器、清流式状态、清引用、放开控制器。
    *
    * **过期的收尾什么都不做。** 收尾走到这里时可能已经过了好几秒（补反馈那一步
-   * 要问模型），这条 agent 会话上很可能已经开跑下一轮 —— 语音把排队的第二件活
-   * 派回同一条会话正是如此。照拆的话新那一轮的事件从此没人接：屏幕上像是断了，
+   * 要问模型），这条内核 session 上很可能已经开跑下一轮 —— 语音把排队的第二件活
+   * 派回同一条内核 session 正是如此。照拆的话新那一轮的事件从此没人接：屏幕上像是断了，
    * 后台却还在干活。
    */
   function teardownRun(agentSessionId: string, runId?: number): void {
@@ -276,7 +276,7 @@ export function createAgentCompletionHandlers(
      * 流式状态在这里先拍成快照。
      *
      * 下面几步是**异步**的（可能要让模型补一句反馈、要等工具风险表），而同一条
-     * agent 会话紧接着就可能开跑下一轮 —— 语音把排队的第二件活派回同一条会话正是
+     * 内核 session 紧接着就可能开跑下一轮 —— 语音把排队的第二件活派回同一条内核 session 正是
      * 如此。等回来再去 store 里取，取到的是**下一轮**的过程日志和用量，会被写进
      * 这一轮的气泡里。
      */
@@ -467,7 +467,7 @@ export function createAgentCompletionHandlers(
       chatStore.appendMessage(targetChatSid, finalText)
     }
 
-    // 任务跑完时用户没在看这条会话：侧边栏点个蓝点，他回头才知道哪条出结果了
+    // 任务跑完时用户没在看这条对话：侧边栏点个蓝点，他回头才知道哪条出结果了
     if (shouldMarkTaskDone(route?.path || '', route?.query?.sid, targetChatSid)) {
       chatStore.markTaskDone(targetChatSid)
     }
@@ -483,7 +483,7 @@ export function createAgentCompletionHandlers(
     const canRetitleTab = isAssistantRoute && targetChatSid === sid.value
     /*
      * 现在就把路径抄下来。`route` 是响应式的，而下面两条起名都是异步的
-     * （轻量模型一次要几秒），等标题回来时用户多半已经点开了别的会话 ——
+     * （轻量模型一次要几秒），等标题回来时用户多半已经点开了别的对话 ——
      * 那时候再读 `route.fullPath` 拿到的是**别人**的标签页，改的也是别人的名字。
      * `canRetitleTab` 是这一刻算的，路径也得是这一刻的，两者必须同一时刻。
      */
@@ -505,7 +505,7 @@ export function createAgentCompletionHandlers(
             chatStore.sessionById(targetChatSid)?.title || t('assistant.chatFlow.unnamedChat')
           )
         }
-        // 走到这里说明这条会话没经过 `ensureSessionWithTitle`（从别处起的 Agent 跑）。
+        // 走到这里说明这条对话没经过 `ensureSessionWithTitle`（从别处起的 Agent 跑）。
         // 起名的规矩和那边一份：截断的先顶上，轻量模型再换一版
         autoNameSession(targetChatSid, firstMessage, autoTitle, {
           getTitle: (id) => chatStore.sessionById(id)?.title,
@@ -520,7 +520,7 @@ export function createAgentCompletionHandlers(
     } else if (aiConfigStore.autoRetitleEnabled) {
       // 「自动生成新标题」：每轮结束按整段对话重起名，主线没变就沿用原名。
       //
-      // 只走 else 分支 —— 上面那条路本来就在给一条还没名字的会话取名，两边一起
+      // 只走 else 分支 —— 上面那条路本来就在给一条还没名字的对话取名，两边一起
       // 发就是同一轮对话打两次模型，还会互相盖。不 await：标题晚几秒到没关系，
       // 这一轮的收尾不该等它。
       void retitleSession(

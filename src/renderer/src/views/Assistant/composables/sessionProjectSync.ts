@@ -1,5 +1,5 @@
 /**
- * 模型改了会话归属 → 侧边栏跟着变。
+ * 模型改了对话归属 → 侧边栏跟着变。
  *
  * ## 为什么挂在常驻布局上，不挂在助手页面里
  *
@@ -24,10 +24,10 @@ import type { ChatSessionProject } from '@renderer/store/modules/chatSessions'
 
 export interface SessionProjectEvent {
   /**
-   * **内核**会话 id（`agent-v3:*` 全部通道用的那个），不是界面这边的 `id`。
+   * **内核 session** id（`agent-v3:*` 全部通道用的那个），不是界面这边的 `id`。
    *
    * 两者是两个不同的 uuid，见 store 里 `sessionByAgentSessionId` 的注释。
-   * 拿它直接去 `setProject` 永远查不到那条会话 —— 而 `setProject` 查不到就
+   * 拿它直接去 `setProject` 永远查不到那条对话 —— 而 `setProject` 查不到就
    * 静默 return，于是整条同步链路一声不响地什么都不做：工具报告「侧边栏已经
    * 跟着变了」，界面纹丝不动，用户下一条消息再把旧归属传下来，改动被抹掉。
    */
@@ -54,7 +54,7 @@ export function applySessionProjectEvent(
   const agentSessionId = event?.sessionId?.trim()
   if (!agentSessionId) return
 
-  // 先把内核 id 翻成界面 id。翻不出来说明这条会话不在这个窗口里（已删、或别的窗口），
+  // 先把内核 id 翻成界面 id。翻不出来说明这条对话不在这个窗口里（已删、或别的窗口），
   // 什么都不做比拿一个查不到的 id 去写要好
   const id = store.sessionByAgentSessionId(agentSessionId)?.id
   if (!id) return

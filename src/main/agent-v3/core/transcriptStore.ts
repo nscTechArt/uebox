@@ -55,7 +55,7 @@ export interface TranscriptMeta {
  * 助手消息缺用量时补上的那一份全零。
  *
  * **只用在读取侧的修复上了。** 写入侧那条路（语音直答并进 Agent transcript）
- * 已经随语音会话独立而删掉 —— 现在没有任何地方往 transcript 里塞外部消息。
+ * 已经在语音通话和 Agent 拆开时删掉 —— 现在没有任何地方往 transcript 里塞外部消息。
  * 但**盘上还留着旧版本写坏的会话**，所以这段知识和 `backfillAssistantUsage`
  * 都得留着。
  *
@@ -212,7 +212,7 @@ export class TranscriptStore {
   /**
    * 作废这个句柄：之后的 append 一律丢弃，并等在途的写入落完。
    *
-   * 用户删除一个**正在跑**的会话时必须先调它。否则 abort 之后 agent 还会发
+   * 用户删除一个**正在跑**的对话时必须先调它。否则 abort 之后 agent 还会发
    * 一次 `agent_end`，那条 append 会用 `fs.appendFile` 把刚删掉的文件**重新
    * 建出来** —— 而且没有 header，`listTranscripts` 看不见它，
    * `loadTranscript` 却读得回来：一个删不掉也列不出来的幽灵会话。
@@ -269,7 +269,7 @@ export async function loadTranscript(sessionId: string): Promise<AgentMessage[]>
  * 补上助手消息缺失的用量。
  *
  * 写入侧已经修好了（见 `NO_PROVIDER_USAGE`），但**盘上那些已经写坏的还在**。
- * 不在读的时候补一次，用过语音的会话会一直起不来，用户只能删掉对话重开 ——
+ * 不在读的时候补一次，用过语音的对话会一直起不来，用户只能删掉对话重开 ——
  * 而他并不知道该删哪一条。
  *
  * 只碰缺 `usage` 的助手消息，其余原样返回。
@@ -353,7 +353,7 @@ export type ForkTranscriptResult =
   | { ok: false; reason: 'missing' }
 
 export interface ForkTranscriptOptions {
-  /** 只复制前这么多个用户回合（「从这条往后砍掉」）。不给就整份复制 */
+  /** 只复制前这么多轮（「从这条往后砍掉」）。不给就整份复制 */
   keepUserTurns?: number
   /**
    * 拿这份消息当源，而不是去读盘。
@@ -365,12 +365,12 @@ export interface ForkTranscriptOptions {
 }
 
 /**
- * 截到第 `keepUserTurns` 个用户回合结束的位置。
+ * 截到第 `keepUserTurns` 轮结束的位置。
  *
  * 「从这条回复分叉」在内核侧就是这一刀。为什么按**用户消息的条数**切而不是按
  * 下标：界面上一轮只有一条用户气泡加一条回复气泡，内核里却是 1 条 user 加 n 条
  * assistant/toolResult（n 随这一轮调了几次工具变），两边的下标根本对不上，
- * 能对上的只有「这是第几个用户回合」。
+ * 能对上的只有「这是第几轮」。
  *
  * 切完还要 `trimDanglingToolCalls`：万一刀正好落在半截工具调用上
  * （toolCall 没有配对的 toolResult），分支里的第一次请求会被厂商直接拒。
@@ -392,11 +392,11 @@ export function sliceToUserTurns(messages: AgentMessage[], keepUserTurns: number
 /**
  * 从一个已有会话分叉出新会话：复制消息到新 sessionId 名下。
  *
- * 这就是「会话分支」在内核侧的全部 —— transcript 按 sessionId 恢复
+ * 这就是「分支」在内核侧的全部 —— transcript 按 sessionId 恢复
  * （execute 里 `agent.state.messages = loadTranscript(...)`），新文件里有什么，
  * 分支的下一轮对话就带着什么。
  *
- * 给了 `keepUserTurns` 就只复制前这么多个用户回合（「从这条往后砍掉」），
+ * 给了 `keepUserTurns` 就只复制前这么多轮（「从这条往后砍掉」），
  * 不给就整份复制。是否允许分叉（会话正在跑？）由 IPC 层裁决，这里只管复制 ——
  * 跑着的时候它会连内存里那份消息一起传进来（`sourceMessages`）。
  * `loadTranscript` + 重写（而不是直接拷文件）是为了 header 里的 sessionId
@@ -410,14 +410,14 @@ export async function forkTranscript(
   const loaded = sourceMessages ?? (await loadTranscript(sourceSessionId))
   const messages =
     typeof keepUserTurns === 'number' ? sliceToUserTurns(loaded, keepUserTurns) : loaded
-  // 空的分支等于一条没有上下文的新会话，不如不建 —— 让界面报「没有可复制的历史」，
-  // 而不是把用户送进一个看起来像分支、实际什么都不记得的会话
+  // 空的分支等于一条没有上下文的新对话，不如不建 —— 让界面报「没有可复制的历史」，
+  // 而不是把用户送进一个看起来像分支、实际什么都不记得的对话
   if (messages.length === 0) {
     return { ok: false, reason: 'missing' }
   }
 
   // 不走 TranscriptStore：它把落盘失败吞成一条日志，分支失败会被当成成功，
-  // 界面那头就得到一个指向空 transcript 的新会话。这里失败要抛出去。
+  // 界面那头就得到一个指向空 transcript 的新对话。这里失败要抛出去。
   await fs.mkdir(sessionsDir(), { recursive: true })
   const header: Header = {
     kind: 'header',
@@ -439,7 +439,7 @@ export type TruncateTranscriptResult =
   | { ok: false; reason: 'missing' }
 
 /**
- * 把一条会话自己的 transcript 截到第 `keepUserTurns` 个用户回合结束。
+ * 把一条会话自己的 transcript 截到第 `keepUserTurns` 轮结束。
  *
  * ## 为什么「重新生成」需要它
  *
@@ -448,7 +448,7 @@ export type TruncateTranscriptResult =
  * 模型看着自己刚被用户丢掉的那个答案，被要求再答一遍同一个问题 —— 用户以为
  * 是重来，对模型而言是追问，回出来的经常是「如前所述……」。
  *
- * 顺带也是会话分支正确的前提：两份历史的对齐靠「第几个用户回合」数出来
+ * 顺带也是分支正确的前提：两份历史的对齐靠「第几轮」数出来
  * （见 `sliceToUserTurns`），retry 每污染一次，这个数就错一位。
  *
  * ## 和 forkTranscript 的区别

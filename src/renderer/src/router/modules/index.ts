@@ -62,7 +62,7 @@ const miniChatRoute: RouteRecordRaw = {
 }
 
 /**
- * 从标签栏拖出来的独立聊天窗口（主进程 `chatWindowManager.ts` 用 `?sid=` 打开）。
+ * 从标签栏拖出来的独立对话窗口（主进程 `chatWindowManager.ts` 用 `?sid=` 打开）。
  *
  * standalone：不走主窗口的语言门、启动落点，也不进标签栏 —— 它只放这一条对话。
  */

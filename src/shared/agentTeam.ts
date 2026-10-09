@@ -13,7 +13,7 @@ import { ROLE_KIND, type ModelConfig, type ProbeFailure, type ProviderKind } fro
  */
 export type MemberTier = 'strong' | 'fast'
 
-/** 一个具体模型：哪个来源下的哪个模型。和会话钉的模型同一个形状 */
+/** 一个具体模型：哪个来源下的哪个模型。和对话钉的模型同一个形状 */
 export interface TeamModel {
   providerId: string
   modelId: string

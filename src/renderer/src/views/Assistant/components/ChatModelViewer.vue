@@ -63,7 +63,7 @@ const onError = (message: string): void => {
 }
 
 /**
- * 滚轮停在这个盒子里：在模型上滚是缩放，不该顺手把聊天记录也翻走。
+ * 滚轮停在这个盒子里：在模型上滚是缩放，不该顺手把对话记录也翻走。
  *
  * 光靠 OrbitControls 自己 preventDefault 挡不住 —— ChatLog 的列表是
  * `scaleY(-1)` 翻过来的，它在容器上挂了 `@wheel`，自己 preventDefault 之后

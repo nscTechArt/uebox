@@ -52,12 +52,12 @@ const MUTATING_ACTIONS = new Set([
   'clearHistorySummary',
   'copySessionMessages',
   'markTypingInterrupted',
-  // 独立聊天窗口发来的改动：只有主窗口会落盘（独立窗口的存储是只读的）
+  // 独立对话窗口发来的改动：只有主窗口会落盘（独立窗口的存储是只读的）
   'applySyncMessages'
 ])
 
 /**
- * 聊天消息专用的持久化插件。
+ * 对话消息专用的持久化插件。
  *
  * `pinia-plugin-persistedstate` 会在每次深层 mutation 后先序列化整棵 Store，之后才
  * 调 storage.setItem。把节流写在 Storage 里只能合并磁盘 IPC，拦不住最贵的

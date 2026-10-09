@@ -1,5 +1,5 @@
 /**
- * 独立聊天窗口的渲染层 API（AGENTS.md 硬规则 5：不直接碰 ipcRenderer）。
+ * 独立对话窗口的渲染层 API（AGENTS.md 硬规则 5：不直接碰 ipcRenderer）。
  *
  * 这里的调用全是「发出去就算」的：打开窗口、发同步补丁、报绑定。拿不到桥
  * （非 Electron 环境跑起来的界面、测试）时安静地什么都不做 —— 同步是锦上添花，
@@ -12,7 +12,7 @@ function bridge(): Window['api']['chatWindow'] | undefined {
   return typeof window === 'undefined' ? undefined : window.api?.chatWindow
 }
 
-/** 这个界面是不是一个独立聊天窗口（主进程用 `#/chat-window?sid=` 打开它） */
+/** 这个界面是不是一个独立对话窗口（主进程用 `#/chat-window?sid=` 打开它） */
 export function isChatWindow(): boolean {
   return typeof window !== 'undefined' && window.location.hash.startsWith('#/chat-window')
 }

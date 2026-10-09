@@ -17,8 +17,8 @@ export interface SessionModelPlan {
 /**
  * 这一轮用哪个模型。
  *
- * 优先级：渲染层带下来的（用户在这条会话里选的）→ 执行记录里的（续跑、
- * 后台任务没有渲染层）→ 全局默认（这条会话第一轮，就此绑定）。
+ * 优先级：渲染层带下来的（用户在这条对话里选的）→ 执行记录里的（续跑、
+ * 后台任务没有渲染层）→ 全局默认（这条对话第一轮，就此绑定）。
  */
 export function planSessionModel(
   settings: Pick<AiProviderSettings, 'roles' | 'providers'>,
@@ -54,7 +54,7 @@ export async function resolveSessionModel(
   return plan
 }
 
-/** 只问「这个模型现在能不能钉」，不记日志。给界面上那些按会话模型现问的下拉用 */
+/** 只问「这个模型现在能不能钉」，不记日志。给界面上那些按对话模型现问的下拉用 */
 export async function pinnableSessionModel(
   model: SessionModel | undefined
 ): Promise<SessionModel | undefined> {

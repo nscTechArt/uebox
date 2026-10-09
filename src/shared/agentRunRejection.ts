@@ -1,6 +1,6 @@
 /**
  * 主进程按码拒绝一次 Agent 请求时回的 `code`。渲染层拿它去语言包查文案，
- * `error` 原文只留给日志 —— 原文里带「会话 <uuid>」这类诊断信息，码对不上时
+ * `error` 原文只留给日志 —— 原文里带 `session <uuid>` 这类诊断信息，码对不上时
  * 渲染层会退回显示它。主进程回码处和渲染层的文案表都按这里的类型约束，
  * 两边写法不一致时类型检查报错。对应表在
  * `src/renderer/src/views/Assistant/composables/agentControlHandlers.ts`。

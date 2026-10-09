@@ -19,11 +19,11 @@ export interface BoundNotebook {
 }
 
 /**
- * 会话归属的 UE 工程。
+ * 对话归属的 UE 工程。
  *
- * 第一次发消息时，如果当时有已连接的 UE 工程，就把它盖在会话上（见
+ * 第一次发消息时，如果当时有已连接的 UE 工程，就把它盖在对话上（见
  * `views/Assistant/composables/sessionProjectBinding.ts`）；之后侧边栏按它分组。
- * 没盖上工程的会话就是「纯会话」——只是聊天，跟哪个工程都没关系。
+ * 没盖上工程的对话就是「纯对话」——只是对话，跟哪个工程都没关系。
  */
 export interface ChatSessionProject {
   projectName: string
@@ -32,7 +32,7 @@ export interface ChatSessionProject {
 }
 
 /**
- * 一条会话的权限档位。
+ * 一条对话的权限档位。
  *
  * `read-only` 是界面上那一档「只读」（工具清单里根本没有写工具），
  * 其余三档直接对应内核的审批档位。
@@ -42,7 +42,7 @@ export type ChatPermissionMode = 'read-only' | AgentV3ApprovalMode
 /**
  * 尚未发送的图片。
  *
- * File 与 data URL 都只允许留在 renderer 内存中；不能跟会话历史一起序列化，
+ * File 与 data URL 都只允许留在 renderer 内存中；不能跟对话历史一起序列化，
  * 否则几张图片就足以把持久层撑大。
  */
 export interface ChatImageDraft {
@@ -54,18 +54,18 @@ export interface ChatImageDraft {
   error?: string
 }
 
-/** 所有会话合计最多暂存 20MB 图片原始字节，避免长期切换 Tab 让内存无界增长。 */
+/** 所有对话合计最多暂存 20MB 图片原始字节，避免长期切换 Tab 让内存无界增长。 */
 export const MAX_IMAGE_DRAFT_BYTES = 20 * 1024 * 1024
 
 export interface ChatSession {
   id: string
   title: string
   createdAt: number
-  /** 最近一次内容活动；只在新建会话或新增消息时更新，用于侧边栏“最近”排序 */
+  /** 最近一次内容活动；只在新建对话或新增消息时更新，用于侧边栏“最近”排序 */
   updatedAt: number
   lastMessagePreview?: string
   boundNotebook?: BoundNotebook | null
-  /** 会话归属的 UE 工程；不存在表示纯会话 */
+  /** 对话归属的 UE 工程；不存在表示纯对话 */
   project?: ChatSessionProject | null
   /** 侧边栏置顶 */
   pinned?: boolean
@@ -78,8 +78,8 @@ export interface ChatSession {
   /**
    * 后台跑完的任务还没被看过。
    *
-   * 只在「任务完成时用户不在这条会话里」才置位，侧边栏用一个蓝点提示；
-   * 打开这条会话就自动清掉。
+   * 只在「任务完成时用户不在这条对话里」才置位，侧边栏用一个蓝点提示；
+   * 打开这条对话就自动清掉。
    */
   taskDone?: boolean
   /** 任务完成的时间 */
@@ -89,14 +89,14 @@ export interface ChatSession {
   /**
    * 上一次内核报上来的上下文用量。
    *
-   * **要跟着会话一起存盘。** 只放在内存里的话，刷新页面、切走再切回来、
+   * **要跟着对话一起存盘。** 只放在内存里的话，刷新页面、切走再切回来、
    * 重开应用之后指示器就空了 —— 用户明明有一屋子历史，却要再发一条消息
    * 才能知道自己用了多少，那正是他想避免的。
    */
   contextUsage?: { tokens: number; contextWindow: number }
   /**
-   * 这条会话绑定的模型。第一轮发出时记下，之后一直用它 ——
-   * 别的会话里切模型不影响这一条。缺省 = 还没发过消息（或存量会话），
+   * 这条对话绑定的模型。第一轮发出时记下，之后一直用它 ——
+   * 别的对话里切模型不影响这一条。缺省 = 还没发过消息（或存量对话），
    * 界面上显示全局默认。
    */
   model?: SessionModel
@@ -110,23 +110,23 @@ export const useChatSessionsStore = defineStore(
   'chat-sessions',
   () => {
     const sessions = ref<ChatSession[]>([])
-    /** 仅保留到本次应用运行结束；草稿不属于聊天记录，不写入持久层。 */
+    /** 仅保留到本次应用运行结束；草稿不属于对话记录，不写入持久层。 */
     const draftsById = ref<Record<string, string>>({})
     const imageDraftsById = ref<Record<string, ChatImageDraft[]>>({})
 
     /**
-     * 每条会话自己的权限档位。
+     * 每条对话自己的权限档位。
      *
-     * **单独一张表，不挂在 `ChatSession` 上**：会话要发出第一条消息才会进
+     * **单独一张表，不挂在 `ChatSession` 上**：对话要发出第一条消息才会进
      * `sessions`（见 Welcome 里的 `ensureSession`），而用户完全可能一开新标签
-     * 就先把权限调成只读再打字 —— 挂在会话记录上的话，那次选择会被静默丢掉。
+     * 就先把权限调成只读再打字 —— 挂在对话记录上的话，那次选择会被静默丢掉。
      *
      * 没有记录表示「跟随设置页的默认档位」，见 `composables/sessionPermissionMode.ts`。
      */
     const permissionModeById = ref<Record<string, ChatPermissionMode>>({})
 
     /**
-     * 正在手动压缩上下文的会话。
+     * 正在手动压缩上下文的对话。
      *
      * 放 store 不放输入框组件里：压缩要跑好一会儿，用户中途切走标签页再切回来，
      * 输入框是重新挂载的，局部状态归零 —— 圆环不转了、按钮又能点，看着像压完了，
@@ -148,12 +148,12 @@ export const useChatSessionsStore = defineStore(
     }
 
     /**
-     * 按**内核**会话 id 反查界面上的这条会话。
+     * 按**内核 session** id 反查界面上的这条对话。
      *
-     * 一条会话有两个 id：界面这边的 `id`（标签页、消息、草稿都用它），和内核
+     * 一条对话有两个 id：界面这边的 `id`（标签页、消息、草稿都用它），和内核
      * 那边的 `agentSessionId`（`agent-v3:*` 全部通道用它）。主进程报上来的东西
      * ——资产锁的锁主、语音派活的目标——带的都是后者，拿它去 `sessionById`
-     * 永远查不到，界面就只能显示一句「不认识的会话」。
+     * 永远查不到，界面就只能显示一句「不认识的对话」。
      */
     function sessionByAgentSessionId(agentSessionId: string): ChatSession | null {
       if (!agentSessionId) return null
@@ -165,11 +165,11 @@ export const useChatSessionsStore = defineStore(
     })
 
     /**
-     * 会话列表里该露面的那些。
+     * 对话列表里该露面的那些。
      *
      * 页面内嵌的助手（知识库详情页、蓝图库 / 材质库详情页）各自有一条固定 id
-     * 的会话，跟着那个条目走。它们不进侧边栏 —— 用户开十个蓝图就是十条，
-     * 会把他真正的对话冲得找不着，而且那些会话只在对应页面里有意义。
+     * 的对话，跟着那个条目走。它们不进侧边栏 —— 用户开十个蓝图就是十条，
+     * 会把他真正的对话冲得找不着，而且那些对话只在对应页面里有意义。
      */
     const listableSessions = computed<ChatSession[]>(() => {
       return sortedSessions.value.filter(
@@ -183,7 +183,7 @@ export const useChatSessionsStore = defineStore(
       return listableSessions.value.filter((session) => !session.archived)
     })
 
-    /** 已归档的会话，单独一区收着 */
+    /** 已归档的对话，单独一区收着 */
     const archivedSessions = computed<ChatSession[]>(() => {
       return listableSessions.value.filter((session) => session.archived)
     })
@@ -265,9 +265,9 @@ export const useChatSessionsStore = defineStore(
     }
 
     /**
-     * 原子替换一条会话的图片草稿。
+     * 原子替换一条对话的图片草稿。
      *
-     * 先扣掉这条会话的旧草稿再计算，替换/删除不会被总量上限误伤。
+     * 先扣掉这条对话的旧草稿再计算，替换/删除不会被总量上限误伤。
      */
     function trySetImageDraft(id: string, images: ChatImageDraft[]): boolean {
       if (!id) return false
@@ -298,7 +298,7 @@ export const useChatSessionsStore = defineStore(
      *
      * 单独存在的原因同 `chatMessages.dropSessions` —— 每次变更都会把整个
      * sessions 数组序列化进 localStorage，批量删除必须合并成一次变更，
-     * 不然 N 条会话就是 N 次全量写盘加 N 次列表重排。
+     * 不然 N 条对话就是 N 次全量写盘加 N 次列表重排。
      */
     function removeSessions(ids: string[]): void {
       if (ids.length === 0) return
@@ -307,8 +307,8 @@ export const useChatSessionsStore = defineStore(
       sessions.value = sessions.value.filter((session) => !doomed.has(session.id))
       ids.forEach(clearDraft)
 
-      // 档位表跟着一起清。留着的话它会随用户开会话一直长，而且哪天 id 撞上
-      // （会话 id 是外面给的）新会话会莫名其妙继承一个别人的权限档位
+      // 档位表跟着一起清。留着的话它会随用户开对话一直长，而且哪天 id 撞上
+      // （对话 id 是外面给的）新对话会莫名其妙继承一个别人的权限档位
       const nextModes = { ...permissionModeById.value }
       let removed = false
       for (const id of ids) {
@@ -356,7 +356,7 @@ export const useChatSessionsStore = defineStore(
      * 归档/取消归档。
      *
      * 和置顶一样不动 `updatedAt`：归档是收纳动作，不是新内容。
-     * 归档时顺手取消置顶——一条会话不该既在置顶区又在已归档区。
+     * 归档时顺手取消置顶——一条对话不该既在置顶区又在已归档区。
      */
     function setArchived(id: string, archived: boolean): void {
       const session = sessions.value.find((item) => item.id === id)
@@ -378,7 +378,7 @@ export const useChatSessionsStore = defineStore(
       return Boolean(session.archived)
     }
 
-    /** 标记「这条会话的任务跑完了，还没看」 */
+    /** 标记「这条对话的任务跑完了，还没看」 */
     function markTaskDone(id: string): void {
       const session = sessions.value.find((item) => item.id === id)
       if (!session || session.taskDone) return
@@ -387,7 +387,7 @@ export const useChatSessionsStore = defineStore(
       session.taskDoneAt = Date.now()
     }
 
-    /** 打开会话时清掉提示 */
+    /** 打开对话时清掉提示 */
     function clearTaskDone(id: string): void {
       const session = sessions.value.find((item) => item.id === id)
       if (!session || !session.taskDone) return
@@ -401,7 +401,7 @@ export const useChatSessionsStore = defineStore(
     }
 
     /**
-     * 老会话只存了名字时，用侧栏里那份补上路径。
+     * 老对话只存了名字时，用侧栏里那份补上路径。
      *
      * 这里**不必**防「同名不同目录」：`chatSidebarStore.addManualProject` 按归一化
      * 名字去重，同一个名字在清单里永远只有一条。真要防的话也防不在这一层 ——
@@ -423,7 +423,7 @@ export const useChatSessionsStore = defineStore(
     }
 
     /**
-     * 绑定/解绑会话所属的 UE 工程。
+     * 绑定/解绑对话所属的 UE 工程。
      *
      * 同样不动 `updatedAt`——改分组不是产生了新内容。
      */
@@ -458,11 +458,11 @@ export const useChatSessionsStore = defineStore(
      * 把归属告诉主进程。
      *
      * 归属真正的主人是主进程那张表。随消息捎带的那份戳只在表里还空着时用来
-     * 初始化，所以会话发过第一条消息之后，**只改 store 是改不动归属的** ——
+     * 初始化，所以对话发过第一条消息之后，**只改 store 是改不动归属的** ——
      * 胶囊上写着新工程，引擎命令还发往旧的那个。用户点一下就是一次明确的写，
      * 和模型调 `set_session_project` 是同一件事，该走同一条路。
      *
-     * 还没跑过的会话没有内核 id，这时不用发：它的第一条消息会带着戳下去，
+     * 还没跑过的对话没有内核 id，这时不用发：它的第一条消息会带着戳下去，
      * 主进程照那份戳初始化，结果一样。
      */
     function pushProjectToMain(session: ChatSession): void {
@@ -478,12 +478,12 @@ export const useChatSessionsStore = defineStore(
         .catch((error: unknown) => {
           // 界面已经改了，这条只是让主进程跟上。失败就让下一次改动或下一条
           // 消息的戳去补，不弹错打扰用户
-          console.warn('[chatSessions] 同步会话归属到主进程失败:', error)
+          console.warn('[chatSessions] 同步对话归属到主进程失败:', error)
         })
     }
 
     /**
-     * 解除会话的工程归属。
+     * 解除对话的工程归属。
      *
      * 这里直接写 `null` 而不是走 `setProject` 的去重：`undefined`（从没定过）
      * 和 `null`（用户明说了「不归属」）不是一回事 —— 首条消息的自动归属
@@ -503,9 +503,9 @@ export const useChatSessionsStore = defineStore(
     }
 
     /**
-     * 把某个工程下所有会话的工程名改掉（侧边栏「重命名项目」用）。
+     * 把某个工程下所有对话的工程名改掉（侧边栏「重命名项目」用）。
      *
-     * @returns 改动的会话数
+     * @returns 改动的对话数
      */
     function renameProject(projectName: string, nextName: string): number {
       const target = nextName.trim()
@@ -517,16 +517,16 @@ export const useChatSessionsStore = defineStore(
         if (!current || !sameProjectName(current, projectName)) continue
 
         // 走 `setProject` 而不是直接赋值：归属的主人在主进程那张表上，直接写
-        // store 只改了投影。只有名字的归属（侧边栏「在这个工程下新建会话」盖的
+        // store 只改了投影。只有名字的归属（侧边栏「在这个工程下新建对话」盖的
         // 就是这种）尤其要紧 —— 那时名字**就是**匹配键，表里还留着旧名字的话，
-        // 整个进程里这条会话都认不回工程，`engineAvailable` 一直是 false
+        // 整个进程里这条对话都认不回工程，`engineAvailable` 一直是 false
         setProject(session.id, { ...session.project, projectName: target })
         changed += 1
       }
       return changed
     }
 
-    /** 某个工程下的所有会话（含已归档） */
+    /** 某个工程下的所有对话（含已归档） */
     function sessionsOfProject(projectName: string): ChatSession[] {
       if (!projectName.trim()) return []
       return sessions.value.filter((session) => {
@@ -565,7 +565,7 @@ export const useChatSessionsStore = defineStore(
      * 记下内核报上来的上下文用量。
      *
      * 故意**不动 `updatedAt`** —— 那个字段决定侧边栏的排序，用量每轮更新一次，
-     * 跟着动会让会话列表因为「没说话但数字变了」而重排。
+     * 跟着动会让对话列表因为「没说话但数字变了」而重排。
      */
     function setContextUsage(id: string, usage: { tokens: number; contextWindow: number }): void {
       const session = sessions.value.find((item) => item.id === id)
@@ -640,7 +640,7 @@ export const useChatSessionsStore = defineStore(
     /**
      * 打上另一个窗口发来的同步补丁（见 `utils/chatWindowSync.ts`）。
      *
-     * 会话记录**就地改**，不换对象：界面上不少地方拿着 `sessionById` 返回的那个引用。
+     * 对话记录**就地改**，不换对象：界面上不少地方拿着 `sessionById` 返回的那个引用。
      */
     function applySyncSession(
       id: string,
@@ -764,15 +764,15 @@ export const useChatSessionsStore = defineStore(
         draftsById: Record<string, string>
       }>({
         key: 'chat-sessions',
-        // 档位要存盘：重开应用之后，用户设成只读的那条会话还得是只读的 ——
+        // 档位要存盘：重开应用之后，用户设成只读的那条对话还得是只读的 ——
         // 不存的话它会悄悄退回默认档，而他以为自己锁上了
         //
         // 草稿同理，而且更直接：用户在输入框里打了半段话没发，关掉应用再打开，
-        // 那段话本来会消失。切会话时它是留着的（内存里），偏偏关应用不留 ——
+        // 那段话本来会消失。切对话时它是留着的（内存里），偏偏关应用不留 ——
         // 对用户来说这两件事没有区别，凭什么一个记一个不记
         paths: ['sessions', 'permissionModeById', 'draftsById']
       }),
-      // 跟 chat-messages 一起落磁盘：会话里挂着 agentHistory（整条过程时间线），
+      // 跟 chat-messages 一起落磁盘：对话里挂着 agentHistory（整条过程时间线），
       // 留在 localStorage 里迟早撑爆配额。
       storage: chatHistoryStorage
     }

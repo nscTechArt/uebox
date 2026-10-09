@@ -42,7 +42,7 @@ let guardHandler: QuitGuardHandler | null = null
 /**
  * 托盘起来时把自己那套「先交界面、界面接不住退回原生框」挂上来
  * （`trayController.ts`）。全进程一份 —— 会话操作数本来就是进程级的，
- * 独立聊天窗口里跑的轮次也数在里面。
+ * 独立对话窗口里跑的轮次也数在里面。
  */
 export function setQuitGuard(handler: QuitGuardHandler | null): void {
   guardHandler = handler

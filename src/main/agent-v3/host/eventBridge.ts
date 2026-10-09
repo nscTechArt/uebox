@@ -179,7 +179,7 @@ function extractResultText(result: unknown): string {
  *
  * 除了助手消息自己的用量，还要把工具结果上挂的用量加进来 —— `task` 工具是
  * 一个子 agent，它烧掉的 token 记在工具结果上而不是主循环的助手消息里。
- * 只看助手消息的话，一个「派个子任务去改十个材质」的回合会显示成几百 token，
+ * 只看助手消息的话，「派个子任务去改十个材质」这样的一轮会显示成几百 token，
  * 而账单上是几万。
  */
 function turnUsageOf(event: Extract<AgentEvent, { type: 'turn_end' }>): AgentTurnUsage {
@@ -446,8 +446,8 @@ export function createEventBridge(
 ) {
   const state = createProjectionState()
 
-  // 记下这条会话属于谁。系统通知点开时要拉的是**这个**窗口，
-  // 不是「主窗口」—— MiniChat 里跑的会话拉主窗口等于拉错了（见 runOwners.ts）
+  // 记下这条对话属于谁。系统通知点开时要拉的是**这个**窗口，
+  // 不是「主窗口」—— MiniChat 里跑的对话拉主窗口等于拉错了（见 runOwners.ts）
   rememberRunOwner(sessionId, sender.id)
 
   return (event: AgentEvent): void => {

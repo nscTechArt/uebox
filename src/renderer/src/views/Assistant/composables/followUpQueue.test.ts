@@ -42,7 +42,7 @@ describe('排队', () => {
     expect(dequeueFollowUp(first.queues, 'chat-a').item?.text).toBe('第二条')
   })
 
-  it('一次只取一条 —— 第二条要等这一条也跑完，不然照样撞上「正在执行中」', () => {
+  it('一次只取一条 —— 第二条要等这一条也跑完，不然照样撞上 SESSION_BUSY', () => {
     const queues = seed('chat-a', '第一条', '第二条')
     const after = dequeueFollowUp(queues, 'chat-a')
     expect(listFollowUps(after.queues, 'chat-a')).toHaveLength(1)

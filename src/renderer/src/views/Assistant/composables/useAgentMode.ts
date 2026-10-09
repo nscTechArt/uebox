@@ -68,7 +68,7 @@ export interface UseAgentModeParams {
   /**
    * 嵌在库详情页里时，「用户正在看什么」。
    *
-   * 每一轮请求前算一次并注入，不写进会话历史 —— 所以带的永远是**当下**的
+   * 每一轮请求前算一次并注入，不写进对话历史 —— 所以带的永远是**当下**的
    * 选中节点，用户点了别的节点就跟着变。不在库里嵌时是 undefined。
    */
   libraryContext?: ComputedRef<LibraryChatContext | null>
@@ -77,7 +77,7 @@ export interface UseAgentModeParams {
 type ExecuteAgentOptions = {
   isRetry?: boolean
   askMode?: boolean
-  /** 供实时语音等入口在本轮收尾后取结果；不参与常规聊天 UI。 */
+  /** 供实时语音等入口在本轮收尾后取结果；不参与常规对话 UI。 */
   onFinished?: (outcome: AgentRunOutcome) => void
   /**
    * 这一轮落在**哪条对话**上。不填就是用户正对着的这条。
@@ -98,7 +98,7 @@ type ExecuteAgentOptions = {
   /**
    * 这条消息钉住的工程，通常就是快照来自的那个。
    *
-   * 不给的话会退回读会话戳 —— 而没盖过戳的会话，戳算出来的是「当前工程」=
+   * 不给的话会退回读对话戳 —— 而没盖过戳的对话，戳算出来的是「当前工程」=
    * 最近连上的那个。排队期间新连上一个工程，执行时就跑到别人身上去了。
    */
   sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
@@ -323,21 +323,21 @@ export function useAgentMode(params: UseAgentModeParams) {
   )
 
   /**
-   * 认领一条已经在跑、但界面这边没接上的会话。
+   * 认领一条已经在跑、但界面这边没接上的对话。
    *
    * 发生在**刷新页面之后**：`agentReattach` 把流式状态重建起来了（正文和推理
    * 会直接落进 Store），但工具调用、步骤、报错这几类事件要有处理器才派得下来 ——
    * 没有的话过程日志会从刷新那一刻起整段空白，出了错也没人报。
    *
    * 按 `hasActiveHandler` 挡重复：切来切去、以及「先挂载后接回」的回调，
-   * 都可能对同一条会话调到这里。
+   * 都可能对同一条对话调到这里。
    */
   function adoptRunningSession(chatSid: string): void {
     const stream = agentStreamStore.getStream(chatSid)
     if (!stream?.isStreaming || !stream.agentSessionId) return
     if (hasActiveHandler(stream.agentSessionId)) return
 
-    console.log('[Agent模式] 接管刷新前就在跑的会话:', stream.agentSessionId)
+    console.log('[Agent模式] 接管刷新前就在跑的内核 session:', stream.agentSessionId)
     currentSessionId.value = stream.agentSessionId
     currentAgentProcess.value = [...stream.agentProcess]
     registerSessionHandlers(stream.agentSessionId, chatSid)
@@ -403,7 +403,7 @@ export function useAgentMode(params: UseAgentModeParams) {
 
     setupAgentListeners()
 
-    // 刷新后主进程还在跑的那条，先认领回来再判断有没有活跃会话
+    // 刷新后主进程还在跑的那条，先认领回来再判断有没有在跑的内核 session
     adoptRunningSession(sid.value)
 
     const activeSessionId = findActiveSessionByChatSid(sid.value)
@@ -445,8 +445,8 @@ export function useAgentMode(params: UseAgentModeParams) {
    * execute（新一轮）和 continue（断点续跑）走的是同一套回调 —— 续跑对界面
    * 而言就是"这一轮继续往下跑"，没有任何该区别对待的地方。
    *
-   * 三条收尾回调都把轮次号带下去：收尾是异步的，而同一条 agent 会话紧接着就
-   * 可能开跑下一轮（语音把排队的第二件活派回同一条会话正是如此）。不带的话
+   * 三条收尾回调都把轮次号带下去：收尾是异步的，而同一条内核 session 紧接着就
+   * 可能开跑下一轮（语音把排队的第二件活派回同一条内核 session 正是如此）。不带的话
    * 迟到的收尾会把**新那一轮**的处理器和流式状态一起拆掉 —— 屏幕上像是断了，
    * 后台却还在干活。
    */
@@ -548,7 +548,7 @@ export function useAgentMode(params: UseAgentModeParams) {
 
     currentSessionId.value = agentSessionId
     agentStreamStore.initStream(chatSid, agentSessionId, typingId)
-    // 续跑同样占着这条会话，直到主进程说 `released`。
+    // 续跑同样占着这条内核 session，直到主进程说 `released`。
     // 少了它的话，续跑收到 `done` 之后、后台真正放开之前，`isBusy` 会提前变 false，
     // 排队的下一条就在那个空档里发出去、被顶回来 —— 而它已经出队了
     agentStreamStore.markAwaitingRelease(chatSid, agentSessionId)
@@ -556,7 +556,7 @@ export function useAgentMode(params: UseAgentModeParams) {
     const runId = registerSessionHandlers(agentSessionId, chatSid)
 
     // 起不来时要把刚摆好的这一摊收掉：留着的话气泡会永远转圈，
-    // 而且下一次发消息会因为残留的处理器把事件派到这个已死的会话上
+    // 而且下一次发消息会因为残留的处理器把事件派到这个已死的内核 session 上
     const abandon = (reason: string): void => {
       chatMsgStore.replaceTyping(
         chatSid,
@@ -578,9 +578,9 @@ export function useAgentMode(params: UseAgentModeParams) {
       const result = await window.api.agentV3.continue({
         sessionId: agentSessionId,
         mode: askModeRef.value || resolvePermissionMode(chatSid) === 'read-only' ? 'ask' : 'agent',
-        // 同 execute：续跑也得带上会话归属的工程，否则接着聊的那半程又只认当前连接
+        // 同 execute：续跑也得带上对话归属的工程，否则接着聊的那半程又只认当前连接
         sessionProject: toSessionProjectPayload(chatStore.getProject?.(chatSid)),
-        // 同理，档位也得带，而且是**这条会话**的那一份。不带的话主进程按最严的
+        // 同理，档位也得带，而且是**这条对话**的那一份。不带的话主进程按最严的
         // 一档跑，用户设的是「帮我批准」，一点「从断点继续」却开始每一步写操作
         // 都弹框 —— 他什么都没改过
         approvalMode: toApprovalMode(resolvePermissionMode(chatSid)),
@@ -632,7 +632,7 @@ export function useAgentMode(params: UseAgentModeParams) {
     /*
      * 这里原来先过一道 `parseAskCommand`，把 `/ask` 前缀翻成一次性的只读模式。
      * 那条路删了：审批下拉本来就有「只读」一档（`applyPermissionMode`），
-     * 而且它是**会话级、看得见、能改回来**的，比一个每轮都要重打的前缀好。
+     * 而且它是**对话级、看得见、能改回来**的，比一个每轮都要重打的前缀好。
      * 下面 `permissionMode === 'read-only'` 那句才是真正在用的判据 ——
      * 留着两条通往同一件事的路，只会让「我到底是不是只读」变得要靠猜。
      */
@@ -683,7 +683,7 @@ export function useAgentMode(params: UseAgentModeParams) {
     }
 
     /**
-     * 会话 ID 在**一个对话里必须保持不变**。
+     * 内核 session id 在**一个对话里必须保持不变**。
      *
      * 原来这里每轮 `crypto.randomUUID()` 现开一个，而 V3 是按 sessionId 恢复
      * transcript 的 —— 等于每发一条消息就换一个全新的 agent。加上界面只把
@@ -691,7 +691,7 @@ export function useAgentMode(params: UseAgentModeParams) {
      * 上一轮：问「刚才那个材质叫什么」它答不上来。
      *
      * V2 时代随机 ID 是对的（那时历史整包塞在 messages 里，ID 只用于事件路由）；
-     * 换成 pi 内核后它变成了会话身份，语义变了。
+     * 换成 pi 内核后它变成了内核 session 的身份，语义变了。
      */
     const agentSessionId = chatStore.getAgentSessionId(chatSid) || crypto.randomUUID()
     if (isCurrent) currentSessionId.value = agentSessionId
@@ -716,8 +716,8 @@ export function useAgentMode(params: UseAgentModeParams) {
      * 登记处理器要和 `initStream` 挨着，**不能等准备工作做完**（知识库检索、取默认
      * 模型都是 IPC，要好几十毫秒）。
      *
-     * 处理器就是「这条会话现在归谁」的凭证：中间这段空档里，上一轮迟到的收尾看到
-     * 的还是上一轮自己的处理器，于是认为这条会话仍归它管，把这一轮刚建好的流式状态
+     * 处理器就是「这条内核 session 现在归谁」的凭证：中间这段空档里，上一轮迟到的收尾看到
+     * 的还是上一轮自己的处理器，于是认为这条内核 session 仍归它管，把这一轮刚建好的流式状态
      * 一起清了 —— 之后正文增量找不到落点，屏幕上像是断了，后台却还在干活。
      */
     const runId = registerSessionHandlers(agentSessionId, chatSid, reportOutcome)
@@ -836,11 +836,11 @@ export function useAgentMode(params: UseAgentModeParams) {
       }
       const enabledByok = aiConfigStore.getEnabledOpenAICompatibleByok()
       /**
-       * 权限档位**问目标会话要**。
+       * 权限档位**问目标对话要**。
        *
-       * 这里原来读的是全局设置，于是 A 会话上设的只读会被 B 会话上设的完全访问
-       * 顶掉 —— 而语音那一路更糟：它跑在「语音任务」那条会话上，凭什么用
-       * 用户此刻正看着的那条会话的档位。
+       * 这里原来读的是全局设置，于是 A 对话上设的只读会被 B 对话上设的完全访问
+       * 顶掉 —— 而语音那一路更糟：它跑在「语音任务」那条对话上，凭什么用
+       * 用户此刻正看着的那条对话的档位。
        */
       const permissionMode = resolvePermissionMode(chatSid)
       // askModeRef 是调用方强制锁只读用的（小窗口就这么干），保留它的一票否决
@@ -849,7 +849,7 @@ export function useAgentMode(params: UseAgentModeParams) {
         ((isCurrent && askModeRef.value) || permissionMode === 'read-only')
       let startupFailed = false
 
-      // 模型跟着会话走：第一轮发出时绑定，之后别的会话里切模型不影响这一条
+      // 模型跟着对话走：第一轮发出时绑定，之后别的对话里切模型不影响这一条
       const { model: sessionModel, unavailable: sessionModelUnavailable } =
         await ensureSessionModel(chatSid, {
           chatStore,
@@ -873,14 +873,14 @@ export function useAgentMode(params: UseAgentModeParams) {
           model: enabledByok?.model,
           sessionId: agentSessionId,
           chatSid,
-          // 这条会话挂在哪个工程下。主进程只知道「谁连着」——不带下去的话，
+          // 这条对话挂在哪个工程下。主进程只知道「谁连着」——不带下去的话，
           // 用户在 test222 下问「这是啥项目」，模型会照着当前连接答成别的工程。
           // 必须先拍成普通对象：store 里那份是响应式代理，过不了 IPC 的结构化克隆。
           /*
            * 这一轮钉在哪个工程上。
            *
            * 调用方给了就用它 —— 那是**抓快照时**的那个工程，抓的和执行的必须是
-           * 同一个。没给才退回会话戳（老行为）。
+           * 同一个。没给才退回对话戳（老行为）。
            */
           sessionProject:
             effectiveOptions.sessionProject ??
@@ -972,7 +972,7 @@ export function useAgentMode(params: UseAgentModeParams) {
   /**
    * 停止当前这一轮。
    *
-   * 返回值是「它真的停下来了吗」：主进程会等会话收尾再回话，卡住停不下来
+   * 返回值是「它真的停下来了吗」：主进程会等内核 session 收尾再回话，卡住停不下来
    * 时回 false。只按停止按钮的调用方不用管这个值；**停完接着要重发一轮**的
    * （编辑消息、重新生成）必须看 —— 没停干净就发，新一轮会被旧的顶掉。
    */
@@ -987,8 +987,8 @@ export function useAgentMode(params: UseAgentModeParams) {
 
     if (!currentSessionId.value) {
       /*
-       * 这一轮在**别的窗口**里跑（独立聊天窗口显示着主窗口发起的那一轮，或者反过来）。
-       * 这边没有它的流式状态，但主进程按会话停，不认窗口；停下来之后的收尾
+       * 这一轮在**别的窗口**里跑（独立对话窗口显示着主窗口发起的那一轮，或者反过来）。
+       * 这边没有它的流式状态，但主进程按内核 session 停，不认窗口；停下来之后的收尾
        * （气泡写上「已停止」）由发起的那个窗口做，再同步过来。
        */
       const elsewhereSessionId = agentStreamStore.isBusyElsewhere(sid.value)
@@ -999,7 +999,7 @@ export function useAgentMode(params: UseAgentModeParams) {
           const result = await window.api.agentV3.stop({ sessionId: elsewhereSessionId })
           return result?.drained !== false
         } catch (error) {
-          console.error('[Agent模式] 停止别的窗口里的会话失败:', error)
+          console.error('[Agent模式] 停止别的窗口里的内核 session 失败:', error)
           return false
         }
       }
@@ -1127,7 +1127,7 @@ export function useAgentMode(params: UseAgentModeParams) {
      * （`markSteerApplied`），差一个字这条就永远显示「未生效」。所以外链退化出来的
      * 那行也照记 —— 那正是模型看到的东西。
      */
-    // 记进正在跑的那条回复的时间线；没有流在跑（切了会话、刚好收尾）
+    // 记进正在跑的那条回复的时间线；没有流在跑（切了对话、刚好收尾）
     // 才退回普通用户气泡 —— 无论如何用户都得在对话里看见自己说过的话。
     const files = attachments?.files
     if (
@@ -1228,7 +1228,7 @@ export function useAgentMode(params: UseAgentModeParams) {
     // chat-messages 的专用 `$persist()` 会在序列化后立即 flush 共用存储，因此
     // chat-sessions 刚写进去的 agentCurrentText 也会一起落盘。
     try {
-      // 会话那份也一起：上面刚写进去的 agentCurrentText 同样等不到 nextTick
+      // 对话那份也一起：上面刚写进去的 agentCurrentText 同样等不到 nextTick
       chatStore.$persist()
       chatMsgStore.$persist()
     } catch (error) {
@@ -1237,7 +1237,7 @@ export function useAgentMode(params: UseAgentModeParams) {
   }
 
   /**
-   * 重连是一次 IPC 往返，而聊天界面通常在它回来之前就挂载完了 ——
+   * 重连是一次 IPC 往返，而对话界面通常在它回来之前就挂载完了 ——
    * 光靠挂载时查一遍 Store 会漏掉「先挂载、后接回」的那一半。
    */
   let disposeReattachListener: (() => void) | null = null
@@ -1284,7 +1284,7 @@ export function useAgentMode(params: UseAgentModeParams) {
     }
     void window.api.agentV3
       .deleteSession({ sessionId: staleSessionId })
-      .catch((error: unknown) => console.error('[Agent模式] 删除 V3 会话失败:', error))
+      .catch((error: unknown) => console.error('[Agent模式] 删除 V3 内核 session 失败:', error))
   }
 
   return {

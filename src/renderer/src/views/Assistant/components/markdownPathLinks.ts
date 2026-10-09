@@ -1,7 +1,7 @@
 import type { StateCore, Token } from 'markdown-it'
 
 /**
- * 聊天正文里的本地 / 网络路径变成可点的链接。
+ * 对话正文里的本地 / 网络路径变成可点的链接。
  *
  * AI 回复里经常直接甩一条 `I:/UE Project/xxx/说明.html` 或 `\\nas\share\a.uasset`，
  * 用户只能手动复制到资源管理器里去找。这里把这类路径识别出来包成

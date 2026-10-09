@@ -221,7 +221,7 @@ export function buildSearchCriteria(params: AssetSearchParams): AssetSearchCrite
  * 之所以能指定：AIGC 生成的图/视频/模型存在**另一个保管库**里
  * （system_vault_aigc，有自己的 vault-data.db），当前库根本查不到它们。
  * 不开这个口子，agent 就只能在生成的那一轮里靠返回值里的路径用图 ——
- * 换一个会话之后，用户在界面上看得见的 AI 素材，对 agent 是不存在的。
+ * 换一条对话之后，用户在界面上看得见的 AI 素材，对 agent 是不存在的。
  *
  * @param vaultPath 这个库的根目录。**给了 db 就要一起给它**：备份类型的库
  * 数据库里存的是相对保管库的路径，不知道库在哪就拼不出真路径，

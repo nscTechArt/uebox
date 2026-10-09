@@ -83,7 +83,7 @@ export const BUILTIN_SLASH_COMMANDS: readonly SlashCommand[] = [
 
 /**
  * 已经有可见按钮的兼容命令，不再放进斜杠菜单制造重复入口。
- * 仍保留手动输入的识别，避免旧习惯或已保存草稿突然变成普通聊天文本。
+ * 仍保留手动输入的识别，避免旧习惯或已保存草稿突然变成普通对话文本。
  */
 const HIDDEN_RUN_COMMANDS: readonly SlashCommand[] = [
   {

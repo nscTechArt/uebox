@@ -1,5 +1,5 @@
 /**
- * 主窗口 ⇄ 独立聊天窗口的对话同步（接线部分；计算在 `chatWindowSyncCore.ts`）。
+ * 主窗口 ⇄ 独立对话窗口的对话同步（接线部分；计算在 `chatWindowSyncCore.ts`）。
  *
  * ## 分工
  *
@@ -9,7 +9,7 @@
  * - 落盘只由主窗口写。独立窗口的对话存储是只读的，它的改动靠补丁交给主窗口去存。
  *
  * 所以两边都能显示、都能发消息（谁发谁就成了那一轮的发起者），也都能停止和审批
- * （主进程按会话找，不认窗口）。
+ * （停止按内核 session 找，审批按工具调用 id 找，主进程都不认窗口）。
  *
  * ## 同步哪些对话
  *
@@ -149,7 +149,7 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
   /**
    * 独立窗口拿到主窗口那份全量之前**一个补丁都不发**。
    *
-   * 它此刻手里的是盘上读来的，最多落后主窗口两秒；页面挂载时随手改一下会话
+   * 它此刻手里的是盘上读来的，最多落后主窗口两秒；页面挂载时随手改一下对话
    * （开关模式、建消息容器），就会把这份旧的当成改动发过去，盖掉主窗口里正在打字的
    * 那条。全量一到，这边被整份换掉，之前攒的改动也就不算数了。
    */
@@ -239,7 +239,7 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
   }
 
   /**
-   * 只有会话记录、档位、草稿这些变了：消息一条都不用比。
+   * 只有对话记录、档位、草稿这些变了：消息一条都不用比。
    *
    * 草稿每敲一个字变一次，这时候把一条长对话的每条消息都序列化一遍纯属浪费。
    */
@@ -285,17 +285,17 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
   })
 
   /**
-   * 会话这边的 action 动到了哪几条被同步的对话。
+   * 对话这边的 action 动到了哪几条被同步的对话。
    *
-   * 大多数第一个参数就是会话 id；也有按别的东西批量改的（`renameProject` 按工程名），
-   * 认不出来就每条都比一遍 —— 没变的不会发，比一遍也只比会话记录那几个字段。
+   * 大多数第一个参数就是对话 id；也有按别的东西批量改的（`renameProject` 按工程名），
+   * 认不出来就每条都比一遍 —— 没变的不会发，比一遍也只比对话记录那几个字段。
    */
   function sessionActionTargets(args: unknown[]): string[] {
     const first = args[0]
     if (Array.isArray(first)) return first.filter(syncable)
     if (typeof first === 'string') {
       if (syncable(first)) return [first]
-      // 别的、没被同步的会话
+      // 别的、没被同步的对话
       if (chatStore.sessionById(first)) return []
     }
     return [...tracked.keys()]
@@ -385,9 +385,9 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
   installBusyElsewhere()
 
   /**
-   * 独立窗口把自己那条对话的内核会话 id 报给主进程。
+   * 独立窗口把自己那条对话的内核 session id 报给主进程。
    *
-   * 主进程只认内核会话 id：审批该多弹给谁，要靠它找到这个窗口。这个 id 第一条消息
+   * 主进程只认内核 session id：审批该多弹给谁，要靠它找到这个窗口。这个 id 第一条消息
    * 发出去才有、清空对话会换，所以盯着它变。第一次拿到时顺带要一遍待审批 ——
    * 拖出来那一刻主窗口那边可能正弹着确认框。
    */
@@ -407,7 +407,7 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
   /**
    * 「这条对话在别的窗口里跑着」。
    *
-   * 主进程报的是内核会话 id，判忙按的是对话 id，所以在这里对一下。会话记录里的
+   * 主进程报的是内核 session id，判忙按的是对话 id，所以在这里对一下。对话记录里的
    * 内核 id 也会变（同步过来的、刚发出第一条的），一起盯着。
    */
   function installBusyElsewhere(): void {

@@ -113,7 +113,7 @@ export function useChatFlow(params: UseChatFlowParams) {
   }
 
   /**
-   * 确保会话存在并在首次发送消息时设置标题。
+   * 确保对话存在并在首次发送消息时设置标题。
    *
    * 实现搬去了 `chatSendPrimitives` —— 后台投递那条路（没有页面挂着）要调同一份。
    */
@@ -175,7 +175,7 @@ export function useChatFlow(params: UseChatFlowParams) {
     typingId: string,
     imageBase64?: string
   ): Promise<void> {
-    // 捕获当前的会话ID
+    // 捕获当前的对话 id
     const currentSid = sid.value
 
     try {

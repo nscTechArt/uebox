@@ -13,7 +13,7 @@
  * 这不只是清理。过渡层是按 V2 的 payload 形状硬凑的，其中工具调用那条
  * **凑错了**：它发 `toolCalls: [{ toolCallId, toolName, args }]`，
  * 而界面的 `getToolName()` 只认 `data.function.name` 或 `data.name`，
- * 两个都没有 —— 于是聊天界面里每一条工具调用的名字都是空的。
+ * 两个都没有 —— 于是对话界面里每一条工具调用的名字都是空的。
  * 直连之后按界面真正认的 OpenAI 形状发，名字就回来了。
  *
  * ## 订阅方式
@@ -38,7 +38,7 @@ import { chatWindowSid, isChatWindow } from '@renderer/api/chatWindow'
 import { belongsToChat } from '@core/shared/voiceTaskSession'
 
 /**
- * 这条内核会话归不归本独立窗口：它开着的那条对话，或者这里打的电话派生的任务对话
+ * 这条内核 session 归不归本独立窗口：它开着的那条对话，或者这里打的电话派生的任务对话
  * （那些活是这个窗口派出去的，审批得在这里弹）。
  */
 function isOwnChatWindowSession(agentSessionId: string): boolean {
@@ -80,7 +80,7 @@ export interface AgentEventHandler {
   ) => void
   /** 过程通知回调（推理、压缩提示等，显示在过程日志里） */
   onNotifyUsers?: (data: NotifyUsersData) => void
-  /** 一批流式内容已经写进气泡；当前可见会话可据此合并一次滚动 */
+  /** 一批流式内容已经写进气泡；当前可见对话可据此合并一次滚动 */
   onStreamPaint?: (chatSid: string) => void
 }
 
@@ -120,8 +120,8 @@ interface NotifyUsersData {
 /**
  * 注册的处理器：sessionId -> handler。
  *
- * `runId` 是**这一轮**的身份。同一条 agent 会话会被连着跑好几轮（语音把排队的
- * 第二件活派回同一条会话就是这样），而收尾是异步的 —— 上一轮的收尾很可能在
+ * `runId` 是**这一轮**的身份。同一条内核 session 会被连着跑好几轮（语音把排队的
+ * 第二件活派回同一条内核 session 就是这样），而收尾是异步的 —— 上一轮的收尾很可能在
  * 下一轮已经开跑之后才走到「注销处理器」那一步。没有这个号的话它注销的是
  * **新那一轮**的处理器，界面从此收不到任何事件：气泡停在半截、过程日志不动，
  * 而后台还在干活。
@@ -130,10 +130,10 @@ type RegisteredHandler = AgentEventHandler & { runId: number }
 
 const handlers = new Map<string, RegisteredHandler>()
 
-/** 全局自增的轮次号。跨会话共用一根计数器就够，只要求「新的比旧的大且不相等」 */
+/** 全局自增的轮次号。跨内核 session 共用一根计数器就够，只要求「新的比旧的大且不相等」 */
 let runSeq = 0
 
-/** 每个会话的累计步数。V3 的 step 事件不带序号，序号是界面自己数的 */
+/** 每条内核 session 的累计步数。V3 的 step 事件不带序号，序号是界面自己数的 */
 const stepCounters = new Map<string, number>()
 
 let initialized = false
@@ -278,7 +278,7 @@ export function finalizeSessionCompletionForUI(sessionId: string): void {
      * 屏幕上已经有的正文 vs 流式状态里累积的正文，取**多的那个**。
      *
      * 平时两者一样（屏幕上的就是从流式状态写下去的）。不一样的是刷新后重连
-     * 那条会话、而且这个对话没开着的时候：消息里停在刷新前的半截，流式状态
+     * 那条内核 session、而且这个对话没开着的时候：消息里停在刷新前的半截，流式状态
      * 是「半截 + 刷新后新生成的」。原来这里无条件优先用消息里那份，等于把
      * 刷新之后模型说的每一句都扔了。
      */
@@ -303,7 +303,7 @@ function on<T>(channel: string, listener: (data: T) => void): void {
   window.api.on(channel, ((data: unknown) => listener(data as T)) as (...args: unknown[]) => void)
 }
 
-/** 取回处理器。所有 V3 事件都带 sessionId，拿不到就是这个会话没人管，直接丢弃 */
+/** 取回处理器。所有 V3 事件都带 sessionId，拿不到就是这条内核 session 没人管，直接丢弃 */
 function handlerFor(sessionId?: string): RegisteredHandler | undefined {
   return sessionId ? handlers.get(sessionId) : undefined
 }
@@ -460,7 +460,7 @@ export function initAgentEventDispatcher(): void {
   // 提问不是。
   //
   // 主进程这会儿正阻塞在 `ask_user` 里等回复，所以放不进去也要有交代：
-  // 流不在（这条会话已经收尾了、或者刚刷新过页面）就直接按取消回复。
+  // 流不在（这条内核 session 已经收尾了、或者刚刷新过页面）就直接按取消回复。
   // **提问那边没有超时**（见主进程 `host/questionChannel.ts`），不回这一句的话
   // 它会一直等下去，而用户根本看不到有卡片在等他。
   on(
@@ -503,7 +503,7 @@ export function initAgentEventDispatcher(): void {
       allowAlways?: boolean
     }) => {
       if (!data?.toolCallId) return
-      // 独立聊天窗口只弹它自己那条对话的：别的对话的审批主窗口那边弹着
+      // 独立对话窗口只弹它自己那条对话的：别的对话的审批主窗口那边弹着
       if (isChatWindow() && !isOwnChatWindowSession(data.sessionId)) return
       getPendingApprovalsStore().enqueue({
         sessionId: data.sessionId,
@@ -517,14 +517,14 @@ export function initAgentEventDispatcher(): void {
     }
   )
 
-  // 这次审批在别处落定了（语音口头批的、会话被中止、或者超时）：把卡片收掉。
+  // 这次审批在别处落定了（语音口头批的、内核 session 被中止、或者超时）：把卡片收掉。
   // 不收的话用户再点一下，等于对一个已经不存在的审批表态
   on('agent-v3:approval-settled', (data: { toolCallId?: string }) => {
     if (!data?.toolCallId) return
     getPendingApprovalsStore().settle(data.toolCallId)
   })
 
-  // 提问卡片在别的窗口里答过了（独立聊天窗口显示着这一轮）。卡片的「已答」记在
+  // 提问卡片在别的窗口里答过了（独立对话窗口显示着这一轮）。卡片的「已答」记在
   // 这边的流式状态里，不收的话 agent 已经接着干了，这边还写着「等你回答」，
   // 再同步过去又把那边答过的盖回去
   on(
@@ -548,9 +548,9 @@ export function initAgentEventDispatcher(): void {
     'agent-v3:context-usage',
     (data: { sessionId: string; tokens: number; contextWindow: number }) => {
       if (!data?.sessionId) return
-      // 存进**会话**而不是流式状态：流式状态每轮结束就被 cleanupStream 删掉，
+      // 存进**对话**而不是流式状态：流式状态每轮结束就被 cleanupStream 删掉，
       // 而且不落盘 —— 刷新页面或重开应用之后指示器会空着，用户得再发一条
-      // 消息才知道自己用了多少上下文。会话是持久化的，正好。
+      // 消息才知道自己用了多少上下文。对话是持久化的，正好。
       const chatSid = getStreamStore().getChatSidByAgentSession(data.sessionId)
       if (!chatSid) return
       getChatSessionsStore().setContextUsage(chatSid, {
@@ -562,7 +562,7 @@ export function initAgentEventDispatcher(): void {
 
   // ── 本轮计费用量：每次模型往返来一条，界面按轮累加 ────────────────────
   // 和 context-usage 分开存：那个是「上下文现在多大」（压缩会让它变小），
-  // 这个是「这一轮实际花了多少」（只增不减）。存进流式状态而不是会话，
+  // 这个是「这一轮实际花了多少」（只增不减）。存进流式状态而不是对话，
   // 因为它属于**这一条回复**，最后会随 responseMetadata 落进消息里。
   on('agent-v3:turn-usage', (data: { sessionId: string } & AgentTurnUsage) => {
     if (!data?.sessionId) return
@@ -711,7 +711,7 @@ export function answerAgentQuestion(
  * 少了这一步，插话只进了内核，任务对话上一个字都不会多：用户听见语音说
  * 「已经调整了」，切过去看却和原来一模一样，只能怀疑根本没插上。
  *
- * 返回 false 表示这个会话没有正在跑的流，调用方据此退回普通用户气泡。
+ * 返回 false 表示这条内核 session 没有正在跑的流，调用方据此退回普通用户气泡。
  *
  * `steerId` 是主进程给这条插话的号，时间线上的撤回按钮拿它指认要撤哪一条。
  */
@@ -839,10 +839,10 @@ export function registerAgentHandler(handler: AgentEventHandler): number {
 }
 
 /**
- * 这条会话现在还归 `runId` 那一轮管吗。
+ * 这条内核 session 现在还归 `runId` 那一轮管吗。
  *
  * 不给轮次号的调用（界面上手动停、页面卸载这类和具体某一轮无关的收尾）一律算数。
- * 给了但对不上，说明这条会话上已经换了新的一轮 —— 那一摊是新那轮的，别碰。
+ * 给了但对不上，说明这条内核 session 上已经换了新的一轮 —— 那一摊是新那轮的，别碰。
  */
 export function isCurrentRun(sessionId: string, runId?: number): boolean {
   if (runId === undefined) return true

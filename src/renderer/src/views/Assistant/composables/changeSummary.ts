@@ -505,7 +505,7 @@ function formatScalar(value: unknown): string {
 /**
  * detail 的长度上限。
  *
- * 它随聊天记录写进 localStorage（配额只有几 MB），而 `properties` 理论上
+ * 它随对话记录写进 localStorage（配额只有几 MB），而 `properties` 理论上
  * 能有任意多个键 —— 不封顶的话一次批量改属性就能把存储撑掉一块。
  * 界面那边还会再截到 80 字显示，这里管的是**存进去多少**。
  */

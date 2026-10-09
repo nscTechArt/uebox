@@ -1,15 +1,15 @@
 /**
- * 删除一条会话 —— 把它在**所有**地方的痕迹一起清掉。
+ * 删除一条对话 —— 把它在**所有**地方的痕迹一起清掉。
  *
  * ## 为什么要单独一个文件
  *
- * 一条会话的数据散在三个地方，各有各的主人：
+ * 一条对话的数据散在三个地方，各有各的主人：
  *
  * | 存的是什么 | 存在哪 | 谁写 |
  * |---|---|---|
  * | 界面上的气泡 | localStorage | `chatMessages` store |
- * | 会话本身（标题、置顶、归属工程） | localStorage | `chatSessions` store |
- * | 内核的记忆 | 主进程 `agent-v3-sessions/*.jsonl` | `TranscriptStore` |
+ * | 对话本身（标题、置顶、归属工程） | localStorage | `chatSessions` store |
+ * | 内核 session | 主进程 `agent-v3-sessions/*.jsonl` | `TranscriptStore` |
  *
  * 原来侧边栏的删除只做了中间那一件事（`removeSession` 就是一句 splice），
  * 结果是：列表里不见了，消息还在 localStorage 里，JSONL 还在盘上。用户以为
@@ -22,7 +22,7 @@
  * ## 顺序
  *
  * 先删盘上的，再清界面。反过来的话，万一中间应用崩了，留下的是一个**看不见
- * 但还在**的 JSONL；按现在的顺序，最坏也只是列表里留一条没有内核记忆的空会话
+ * 但还在**的 JSONL；按现在的顺序，最坏也只是列表里留一条没有内核 session 的空对话
  * —— 用户看得见，还能再删一次。
  */
 
@@ -35,7 +35,7 @@ export interface ChatSessionTab {
 
 export interface DeleteChatSessionDeps {
   chatSid: string
-  /** 会话绑定的内核会话 id。没有表示这条会话从没跑过 Agent，盘上没有 JSONL */
+  /** 对话绑定的内核 session id。没有表示这条对话从没跑过 Agent，盘上没有 JSONL */
   agentSessionId?: string
   deleteTranscript: (agentSessionId: string) => Promise<{ success?: boolean; error?: string }>
   dropMessages: (chatSid: string) => void
@@ -53,7 +53,7 @@ export interface ChatSessionDeleteTarget {
 export interface DeleteChatSessionsDeps {
   targets: ChatSessionDeleteTarget[]
   deleteTranscript: (agentSessionId: string) => Promise<{ success?: boolean; error?: string }>
-  /** 一次性清掉这组会话的界面消息 —— 每个 store 只许变更一次 */
+  /** 一次性清掉这组对话的界面消息 —— 每个 store 只许变更一次 */
   dropSessions: (chatSids: string[]) => void
   removeSessions: (chatSids: string[]) => void
   listTabs: () => ChatSessionTab[]
@@ -61,32 +61,32 @@ export interface DeleteChatSessionsDeps {
 }
 
 export interface DeleteChatSessionResult {
-  /** 内核记忆删失败时的原因；成功或本来就没有则为空 */
+  /** 内核 session 删失败时的原因；成功或本来就没有则为空 */
   transcriptError?: string
   /** 顺带关掉的标签页数量 */
   closedTabs: number
 }
 
 export interface DeleteChatSessionsResult {
-  /** 内核记忆删失败的会话的原因列表；成功或本来都没有则为空 */
+  /** 内核 session 删失败的对话的原因列表；成功或本来都没有则为空 */
   transcriptErrors: string[]
   /** 顺带关掉的标签页数量 */
   closedTabs: number
 }
 
 /**
- * 批量删除一组会话 —— 把它们在**所有**地方的痕迹一起清掉。
+ * 批量删除一组对话 —— 把它们在**所有**地方的痕迹一起清掉。
  *
- * 清的东西和单条版一样（内核记忆、界面消息、会话本身、遗留标签页），但
- * **界面那几处必须一次清完**：消息和会话两个 store 每次变更都会把整个库
- * 序列化进 localStorage，逐条删的话 N 条会话就是 N 次全量写盘压在主线程上，
- * 几百条会话能把界面卡住一分钟。
+ * 清的东西和单条版一样（内核 session、界面消息、对话本身、遗留标签页），但
+ * **界面那几处必须一次清完**：消息和对话两个 store 每次变更都会把整个库
+ * 序列化进 localStorage，逐条删的话 N 条对话就是 N 次全量写盘压在主线程上，
+ * 几百条对话能把界面卡住一分钟。
  *
  * ## 顺序
  *
  * 先删盘上的（并行），再清界面。反过来的话，万一中间应用崩了，留下的是
  * 一批**看不见但还在**的 JSONL；按现在的顺序，最坏也只是列表里留几条没有
- * 内核记忆的空会话 —— 用户看得见，还能再删一次。
+ * 内核 session 的空对话 —— 用户看得见，还能再删一次。
  */
 export async function deleteChatSessions(
   deps: DeleteChatSessionsDeps
@@ -94,7 +94,7 @@ export async function deleteChatSessions(
   const targets = deps.targets.filter((target) => target.chatSid)
   if (targets.length === 0) return { transcriptErrors: [], closedTabs: 0 }
 
-  // 内核记忆先删。个别删失败也继续往下走 —— 会话已经在用户眼里"删了"，
+  // 内核 session 先删。个别删失败也继续往下走 —— 对话已经在用户眼里"删了"，
   // 把它留在列表里只会让人以为点击没生效；失败原因由返回值交给调用方去说。
   const transcriptErrors: string[] = []
   await Promise.all(
@@ -115,8 +115,8 @@ export async function deleteChatSessions(
   deps.dropSessions(chatSids)
   deps.removeSessions(chatSids)
 
-  // 留着的标签页会**把会话复活**：那条 URL 还带着 `?sid=`，一点开就
-  // ensureSession 出一条同名空会话，看起来像是删除没生效。
+  // 留着的标签页会**把对话复活**：那条 URL 还带着 `?sid=`，一点开就
+  // ensureSession 出一条同名空对话，看起来像是删除没生效。
   const staleTabs = deps
     .listTabs()
     .filter((tab) => chatSids.some((id) => isSessionTab(tab.path, id)))

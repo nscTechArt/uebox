@@ -20,7 +20,7 @@
         :is-thinking="message.status === 'typing' && !textContent.trim()"
       />
       <!--
-        过程与正文按发生顺序交替，和主聊天页同一套排法：相邻的推理和工具调用并成一组，
+        过程与正文按发生顺序交替，和主对话页同一套排法：相邻的推理和工具调用并成一组，
         默认一行摘要；整轮做完之后，最后一段正文之前的东西收成「用时 · 步数」一行。
       -->
       <template v-if="message.agentProcess !== undefined">
@@ -37,7 +37,7 @@
             :live="block.key === liveStepsKey"
             :start-time="blockStartTime(block)"
           />
-          <!-- agent 反问用户。和主聊天页同一张卡片，答完就地变只读 -->
+          <!-- agent 反问用户。和主对话页同一张卡片，答完就地变只读 -->
           <AskUserCard
             v-else-if="block.kind === 'question'"
             :question="block.question"
@@ -78,7 +78,7 @@
           class="tool"
           @click="emit('retry', { id: message.id, content: textContent })"
         />
-        <!-- 朗读。念的和主聊天页、自动朗读是同一份：最终答复那一段 -->
+        <!-- 朗读。念的和主对话页、自动朗读是同一份：最终答复那一段 -->
         <AppTooltip :title="readAloud.label.value">
           <AppButton
             variant="text"
@@ -100,7 +100,7 @@
 <script setup lang="ts">
 /**
  * Mini Chat 消息气泡组件
- * 复用主聊天页的用户气泡与 Agent 思考展示，但保留更紧凑的小窗布局
+ * 复用主对话页的用户气泡与 Agent 思考展示，但保留更紧凑的小窗布局
  */
 import { computed, ref, shallowRef, watch } from 'vue'
 import { PhArrowClockwise, PhCheck, PhCopy, PhSpeakerHigh, PhStop } from '@phosphor-icons/vue'
@@ -224,7 +224,7 @@ const { runFold, runExpanded, visibleBlocks, toggleRunFold } = useRunFold({
   startTime: () => props.message.startTime
 })
 
-/** 用户答完提问卡片。逻辑与主聊天页一致，见 `AIBubble.vue` 里同名函数 */
+/** 用户答完提问卡片。逻辑与主对话页一致，见 `AIBubble.vue` 里同名函数 */
 function onQuestionAnswer(
   question: AgentQuestionItem,
   action: 'accept' | 'decline',
@@ -273,7 +273,7 @@ const showMarkdown = computed(() => {
 })
 
 /*
- * 手动朗读。跟主聊天页 `AIBubble` 一样的接法：以消息 id 为主人，于是自动朗读
+ * 手动朗读。跟主对话页 `AIBubble` 一样的接法：以消息 id 为主人，于是自动朗读
  * （`autoReadAloud`，小窗里由 `MiniChatWindow` 挂上）念到这条时按钮会正确显示成「停止」。
  * 播报风格不读本窗口的 store —— 它是启动时抄的旧账，理由见 `miniVoiceAutoPlay`。
  * 只在开念那一刻读一次 localStorage，不给每条气泡都挂一个 storage 监听。
@@ -331,7 +331,7 @@ function handleAssistantCopy(): void {
   margin-bottom: 8px;
 }
 
-// 模型说的话不再套卡片：和主聊天页一样直接铺在底上，层次靠字色深浅而不是框
+// 模型说的话不再套卡片：和主对话页一样直接铺在底上，层次靠字色深浅而不是框
 .assistant-text {
   margin-bottom: var(--space-2);
 
@@ -348,7 +348,7 @@ function handleAssistantCopy(): void {
   margin-bottom: var(--space-2);
 }
 
-// 主聊天页 96px 高的缩略图在这里一行只放得下两张，四张就叠成一大块
+// 主对话页 96px 高的缩略图在这里一行只放得下两张，四张就叠成一大块
 .assistant-shell :deep(.step-thumb:not(.small)) {
   height: 64px;
 }

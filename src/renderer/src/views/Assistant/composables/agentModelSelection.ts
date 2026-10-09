@@ -24,7 +24,7 @@ export interface AgentModelCatalog {
   groups: AgentModelGroup[]
   options: AgentModelOption[]
   /**
-   * 这一轮实际会用的绑定：会话绑定的模型优先，没有才看全局。
+   * 这一轮实际会用的绑定：对话绑定的模型优先，没有才看全局。
    * Agent 没有单独绑定时，内核会沿用 chat 角色；这里必须显示同一个实际结果。
    */
   binding: ModelBinding | null
@@ -84,7 +84,7 @@ export function buildAgentModelCatalog(
         ) ?? null)
       : null
 
-  // 会话绑的模型被删了：主进程这一轮会退回全局默认，界面也显示那一个
+  // 对话绑的模型被删了：主进程这一轮会退回全局默认，界面也显示那一个
   const sessionSelected = find(sessionBinding ?? null)
   if (sessionBinding && sessionSelected) {
     return { groups, options, binding: sessionBinding, selected: sessionSelected }

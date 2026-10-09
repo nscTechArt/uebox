@@ -48,7 +48,7 @@ export interface AgentTimelineSteerBlock {
   /** 内核已经把这句话读进上下文（收到它的 message_end 才置位） */
   applied: boolean
   /**
-   * 撤回这条要用的号和会话。缺任何一个就不给撤回按钮 ——
+   * 撤回这条要用的号和内核 session。缺任何一个就不给撤回按钮 ——
    * 画一个点了必然失败的按钮，比没有按钮更糟。
    */
   steerId?: string
@@ -306,7 +306,7 @@ export function resolveTrailingContent(content: string, timelineText: string): s
 }
 
 /**
- * 主聊天页上的一段「步骤」：相邻的几轮推理和工具调用并成一组。
+ * 主对话页上的一段「步骤」：相邻的几轮推理和工具调用并成一组。
  *
  * 推理原来一轮一个框、工具调用一段一个框，两种框在时间线上交替出现 ——
  * 一屏十来个带底色的条，正文被夹在中间透不过气。并成一组之后，

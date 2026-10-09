@@ -34,7 +34,7 @@ export type CustomProviderMode = 'openai-compatible' | 'anthropic-native'
 export type AgentFollowUpBehavior = 'queue' | 'steer'
 
 /**
- * 每个提供商的默认聊天模型
+ * 每个提供商的默认对话模型
  *
  *
  *
@@ -140,7 +140,7 @@ function buildCustomProviderState(
  * AI配置状态
  */
 export interface AIConfigState {
-  // 普通聊天模式配置
+  // 普通对话模式配置
   normalProvider: AIProvider
   normalChatModel?: string
 
@@ -152,9 +152,9 @@ export interface AIConfigState {
   imageModel?: string
 
   /**
-   * 上一次在输入框里选的权限档位。**新会话从这一档起步。**
+   * 上一次在输入框里选的权限档位。**新对话从这一档起步。**
    *
-   * 它不是「全局档位」——真正生效的那一份存在会话上
+   * 它不是「全局档位」——真正生效的那一份存在对话上
    * （`chatSessions.permissionModeById`）。这里只记「用户最近一次的选择」，
    * 好让新开的对话接着上次的习惯走，而不是每次都退回出厂档。
    */
@@ -193,7 +193,7 @@ export interface AIConfigState {
   // 编辑器截图权限开关（默认开启）
   editorScreenshotEnabled?: boolean
 
-  // MiniChat 持久会话开关（默认关闭）
+  // MiniChat 持久对话开关（默认关闭）
   miniChatPersistEnabled?: boolean
 
   // MiniChat 窗口透明度（0.4 - 1.0，默认 1.0）
@@ -229,7 +229,7 @@ export interface AIConfigState {
  *
  * 这里原来还顺手写一堆 V2 Router 时代的字段（routingPolicy、skillModeEnabled、
  * productModeSchemaVersion），外加一套「产品三档模式」的推导。V3 是扁平单 agent，
- * 那些值一个都没人读了，连同推导一起删掉 —— 会话是 Agent 还是 Chat，
+ * 那些值一个都没人读了，连同推导一起删掉 —— 对话是 Agent 还是 Chat，
  * 现在只由 `lastAskMode` 一个布尔决定。
  *
  * 参数收 `Partial` 而不是 `AIConfigState`：这两个字段在类型上是必填的，但配置是从
@@ -270,7 +270,7 @@ export const useAIConfigStore = defineStore(
     const currentProvider = computed(() => config.value.normalProvider)
 
     /**
-     * 当前普通聊天模式的提供商
+     * 当前普通对话模式的提供商
      */
     const currentNormalProvider = computed(() => {
       // 向后兼容：如果没有新字段，尝试从旧字段读取
@@ -294,7 +294,7 @@ export const useAIConfigStore = defineStore(
     })
 
     /**
-     * 当前聊天模型（向后兼容，返回普通模式的模型）
+     * 当前对话模型（向后兼容，返回普通模式的模型）
      * @deprecated 请使用 currentNormalChatModel 或 currentAgentChatModel
      */
     const currentChatModel = computed(() => {
@@ -312,7 +312,7 @@ export const useAIConfigStore = defineStore(
     })
 
     /**
-     * 当前普通聊天模式的模型
+     * 当前普通对话模式的模型
      */
     const currentNormalChatModel = computed(() => {
       // 向后兼容：如果没有新字段，尝试从旧字段读取
@@ -370,7 +370,7 @@ export const useAIConfigStore = defineStore(
     }
 
     /**
-     * 设置普通聊天模式的提供商
+     * 设置普通对话模式的提供商
      */
     function setNormalProvider(provider: AIProvider): void {
       config.value.normalProvider = provider
@@ -387,7 +387,7 @@ export const useAIConfigStore = defineStore(
     }
 
     /**
-     * 设置聊天模型（向后兼容，设置普通模式的模型）
+     * 设置对话模型（向后兼容，设置普通模式的模型）
      * @deprecated 请使用 setNormalChatModel 或 setAgentChatModel
      */
     function setChatModel(model: string): void {
@@ -395,7 +395,7 @@ export const useAIConfigStore = defineStore(
     }
 
     /**
-     * 设置普通聊天模式的模型
+     * 设置普通对话模式的模型
      */
     function setNormalChatModel(model: string): void {
       config.value.normalChatModel = model
@@ -420,11 +420,11 @@ export const useAIConfigStore = defineStore(
     // 会把他钉在已经删掉的老链路上。
 
     /**
-     * 新会话从哪一档起步 —— 就是用户上一次选的那一档。
+     * 新对话从哪一档起步 —— 就是用户上一次选的那一档。
      *
-     * 设置页那个「敏感操作确认」开关已经删了：权限现在是每条会话自己的事，
+     * 设置页那个「敏感操作确认」开关已经删了：权限现在是每条对话自己的事，
      * 在输入框里那个四档下拉上选，一个全局布尔开关既表达不了四档，
-     * 也说不清它管的到底是哪条会话。
+     * 也说不清它管的到底是哪条对话。
      *
      * 默认 `auto-edit`：全都问的话每一步写操作都要点一次，实际用不了；
      * 全放行又太危险。可撤销的自动放行、不可逆的仍然问，是唯一能默认开着的档。
@@ -517,14 +517,14 @@ export const useAIConfigStore = defineStore(
     }
 
     /**
-     * MiniChat 持久会话是否启用（默认关闭）
+     * MiniChat 持久对话是否启用（默认关闭）
      */
     const miniChatPersistEnabled = computed(() =>
       MINI_CHAT_SETTINGS_ENABLED ? (config.value.miniChatPersistEnabled ?? false) : true
     )
 
     /**
-     * 设置 MiniChat 持久会话开关
+     * 设置 MiniChat 持久对话开关
      */
     function setMiniChatPersistEnabled(enabled: boolean): void {
       config.value.miniChatPersistEnabled = enabled
@@ -619,7 +619,7 @@ export const useAIConfigStore = defineStore(
      * 每轮结束后自动重起标题（默认关闭）。
      *
      * 默认关是因为它有成本：每轮都多一次轻量模型调用，而且侧边栏那一行会跟着
-     * 每轮改名 —— 有人靠标题认会话，名字自己变来变去反而找不着。想要的人自己开。
+     * 每轮改名 —— 有人靠标题认对话，名字自己变来变去反而找不着。想要的人自己开。
      */
     const autoRetitleEnabled = computed(() => config.value.autoRetitleEnabled ?? false)
 

@@ -259,8 +259,8 @@ async function onVisibilityChange(shown: boolean): Promise<void> {
 // 定位直接跳过后就永远停在 (0, 0)。post 保证 Teleport 里的浮层已经可以测量。
 watch(visible, onVisibilityChange, { flush: 'post' })
 
-// 受控的 dropdown 可能带着 open=true 挂载：会话右键菜单挂在每一行里，
-// 菜单开着时给会话归工程/置顶，行换到别的分组，组件整个重建。
+// 受控的 dropdown 可能带着 open=true 挂载：对话右键菜单挂在每一行里，
+// 菜单开着时给对话归工程/置顶，行换到别的分组，组件整个重建。
 // 这时 watcher 一次都不跑 —— 不定位（停在左上角）、不注册「点外面关掉」的监听，
 // 就是个点不掉的幽灵菜单。挂载时已经开着就手动补一遍。
 // （不能靠 watch 的 immediate：immediate 回调在 setup 期同步执行，floatingRef 还是 null。）

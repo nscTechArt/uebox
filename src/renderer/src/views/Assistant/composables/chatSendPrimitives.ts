@@ -6,7 +6,7 @@
  * （见 `followUpDelivery.ts`），那时一个助手页都没挂着。
  *
  * 所以把不依赖视图的那部分搬到这里，两条路（页面输入框、后台投递）调同一份 ——
- * 各写一份的话，两边迟早在「会话标题怎么起」「工程戳盖不盖」上分叉。
+ * 各写一份的话，两边迟早在「对话标题怎么起」「工程戳盖不盖」上分叉。
  */
 
 import type { ChatMessageContent, MultimodalContentItem } from '../../../store/modules/chatMessages'
@@ -49,12 +49,12 @@ export interface EnsureSessionDeps {
   }
   tabsStore: { updateTabTitleByPath: (path: string, title: string) => void }
   route: { path: string; fullPath: string; query?: Record<string, unknown> }
-  /** 未命名会话的兜底标题（i18n 已经取好，这一层不认 key） */
+  /** 未命名对话的兜底标题（i18n 已经取好，这一层不认 key） */
   unnamedTitle: string
 }
 
 /**
- * 确保会话存在，并在第一条消息时把标题定下来。
+ * 确保对话存在，并在第一条消息时把标题定下来。
  *
  * 标题分两步：先把消息前 20 字截下来顶上，这一步是同步的，侧边栏立刻有字；
  * 再交给轻量模型起个真名字（`sessionAutoTitle.ts`），几秒后悄悄换掉。模型那步
@@ -81,7 +81,7 @@ export function ensureSessionWithTitle(
     }
 
     // 标签页按**发这条消息时**那个路径改，不按模型回来时用户站在哪：这一栏属于
-    // 这条会话的那个标签，用户切走了它也还在，改的仍然是对的那一个
+    // 这条对话的那个标签，用户切走了它也还在，改的仍然是对的那一个
     autoNameSession(chatSid, messageText, autoTitle, {
       getTitle: (id) => chatStore.sessionById(id)?.title,
       applyTitle: (id, title) => {
@@ -94,8 +94,8 @@ export function ensureSessionWithTitle(
   }
   chatStore.appendMessage(chatSid, messageText)
 
-  // 用户在某个工程下点「+」新建的会话（`?project=`），首次发消息时盖上工程戳，
-  // 侧边栏据此分组。没带这个参数就是「纯会话」，进侧边栏的「对话」区。
+  // 用户在某个工程下点「+」新建的对话（`?project=`），首次发消息时盖上工程戳，
+  // 侧边栏据此分组。没带这个参数就是「纯对话」，进侧边栏的「对话」区。
   stampSessionProject({
     chatSid,
     getSession: (id: string) => chatStore.sessionById(id),

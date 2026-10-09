@@ -258,7 +258,7 @@ export function setTargetConnectionId(id: string): boolean {
 }
 
 /**
- * 这条会话被钉在别的工程上了吗。
+ * 这条对话被钉在别的工程上了吗。
  *
  * 「项目对项目」那道闸原先只挡住读 `getTargetConnectionId()` 的那类工具 ——
  * 引擎工具在归属工程没连着时整个不注册，所以它们够不着。但 `project_manage`
@@ -278,17 +278,17 @@ export function isOutOfSessionScope(projectPath: string | null | undefined): boo
   return !isSameProjectPath(bound.projectPath, projectPath)
 }
 
-/** 这条会话钉着的工程路径，报错时告诉用户「你这条对话属于谁」 */
+/** 这条对话钉着的工程路径，报错时告诉用户「你这条对话属于谁」 */
 export function getSessionProjectPath(): string | undefined {
   return boundProject()?.projectPath
 }
 
 /**
- * 这条执行流所属会话的归属工程。
+ * 这条执行流所属对话的归属工程。
  *
  * 唯一的来源是 `sessionBinding` 那张表 —— 这里不存第二份。没有 `sessionId`
  * （外部 MCP 调用、无头跑）就是「没有归属」，跨工程那道闸对它不生效，
- * 那些路径本来也没有会话可言。
+ * 那些路径本来也没有对话可言。
  */
 function boundProject(): SessionProjectRef | null | undefined {
   const sessionId = storage.getStore()?.sessionId
@@ -318,7 +318,7 @@ export type RetargetOutcome =
   | { ok: true; connectionId: string; changed: boolean }
   /** 不在任何执行流上下文里（调试入口、无头跑）。目标本来就没绑，不用切 */
   | { ok: false; reason: 'no-context' }
-  /** 用户把这条会话钉在别的工程上了，切过去就是越界 */
+  /** 用户把这条对话钉在别的工程上了，切过去就是越界 */
   | { ok: false; reason: 'session-scoped'; sessionProjectPath?: string }
   /** 那个工程此刻没有交互式编辑器连着 */
   | { ok: false; reason: 'not-connected' }
@@ -338,13 +338,13 @@ export type RetargetOutcome =
  * 这一轮剩下的每条引擎命令却仍然发往旧工程 —— 用户要么得自己去界面上切，
  * 要么得再发一条消息。两样都是盒子该自己做完的事。
  *
- * ## 唯一的边界：会话被钉住时不切
+ * ## 唯一的边界：对话被钉住时不切
  *
- * 用户给会话盖过工程戳（侧边栏的工程分组）时，这一轮的引擎工具是按那个工程
- * 注册的。切到别的工程等于绕开「项目对项目」，让模型在一条挂在 A 下面的会话里
+ * 用户给对话盖过工程戳（侧边栏的工程分组）时，这一轮的引擎工具是按那个工程
+ * 注册的。切到别的工程等于绕开「项目对项目」，让模型在一条挂在 A 下面的对话里
  * 动 B 的资产。这时宁可不切，把原因原样报给模型，让它告诉用户。
  *
- * 比对拿的是**会话钉住的工程**（`sessionProjectPath`），不是此刻连着的那个：
+ * 比对拿的是**对话钉住的工程**（`sessionProjectPath`），不是此刻连着的那个：
  * 归属工程没开着时后者是空的，拿它比会把「钉在 A 但 A 没开」误判成没钉住，
  * 模型开一个 B 就溜进去了。路径都说不出来（戳上只有名字、库里也查不到）时
  * 一律不切 —— 证不明是同一个工程就不动，代价只是让模型报一句话。
@@ -361,7 +361,7 @@ export function retargetToProject(projectPath: string): RetargetOutcome {
   /*
    * 比对的前提是**说得出归属路径**。
    *
-   * 说不出来的时候（戳上只有工程名 —— 侧边栏「在这个工程下新建会话」盖的就是
+   * 说不出来的时候（戳上只有工程名 —— 侧边栏「在这个工程下新建对话」盖的就是
    * 这种，见 `sessionProjectBinding.ts` 的 `stampSessionProject`）一律放行，
    * 和 `isOutOfSessionScope()` 保持同一个方向：证不明越界就别挡。
    *

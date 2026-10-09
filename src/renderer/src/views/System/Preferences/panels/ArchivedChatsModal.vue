@@ -4,7 +4,7 @@ import AppModal from '@renderer/components/AppModal.vue'
 /**
  * 归档对话
  *
- * 归档区原来常年挂在侧边栏最底下的一个折叠标题里：天天要看的会话列表下面
+ * 归档区原来常年挂在侧边栏最底下的一个折叠标题里：天天要看的对话列表下面
  * 压着一块永远收起来的东西，占位、也提示不了任何信息。这里是它现在唯一的
  * 入口 —— 归档就是「收起来不看了」，需要的时候来偏好设置找回或者彻底删掉。
  */
@@ -38,7 +38,7 @@ const tabsStore = useTabsStore()
  * 最近归档的排最前。
  *
  * 按 `archivedAt` 而不是 `updatedAt`：这一屏回答的是「我什么时候把它收起来的」，
- * 不是「它最后一次说话是什么时候」。老会话没有这个字段，退回 updatedAt。
+ * 不是「它最后一次说话是什么时候」。老对话没有这个字段，退回 updatedAt。
  */
 const sessions = computed<ChatSession[]>(() =>
   [...chatStore.archivedSessions].sort(
@@ -61,15 +61,15 @@ function closeModal(): void {
   emit('update:visible', false)
 }
 
-/** 取消归档：会话立刻回到侧边栏的「对话」或它原来的工程下 */
+/** 取消归档：对话立刻回到侧边栏的「对话」或它原来的工程下 */
 function unarchive(session: ChatSession): void {
   chatStore.setArchived(session.id, false)
 }
 
 /**
- * 打开这条会话 —— 不改归档状态，只是去看看。
+ * 打开这条对话 —— 不改归档状态，只是去看看。
  *
- * 已经开着的标签页就切过去，否则新开一个，和侧边栏点会话是同一个走法
+ * 已经开着的标签页就切过去，否则新开一个，和侧边栏点对话是同一个走法
  * （见 SideMenu 的 openChat）。
  */
 function openChat(session: ChatSession): void {
@@ -83,9 +83,9 @@ function openChat(session: ChatSession): void {
 }
 
 /**
- * 删除会话。
+ * 删除对话。
  *
- * 和侧边栏走同一条 `deleteChatSession`：气泡、会话本身、内核记忆三处一起清，
+ * 和侧边栏走同一条 `deleteChatSession`：气泡、对话本身、内核 session 三处一起清，
  * 只从列表里划掉不算删干净。
  */
 function handleDelete(session: ChatSession): void {

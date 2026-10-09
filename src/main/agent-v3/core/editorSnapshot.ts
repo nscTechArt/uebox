@@ -50,7 +50,7 @@ export interface CaptureInput {
   /**
    * 此刻有没有任何交互式编辑器连着。
    *
-   * 用来区分「一个都没连」和「连着，但不是这条会话的工程」。作用域本身分不出来：
+   * 用来区分「一个都没连」和「连着，但不是这条对话的工程」。作用域本身分不出来：
    * 两种情况它都只是没有 `targetConnectionId`。
    */
   anyConnected: boolean

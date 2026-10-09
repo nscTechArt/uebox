@@ -109,7 +109,7 @@ function installCoreGuards(): void {
   router.beforeEach(coreBeforeEach)
 }
 
-// 独立聊天窗口里点了属于主界面的东西，主进程把它转到这里来开（见 chatWindowGuard.ts）
+// 独立对话窗口里点了属于主界面的东西，主进程把它转到这里来开（见 chatWindowGuard.ts）
 if (!isChatWindow()) {
   chatWindowAPI.onNavigate(({ path }) => {
     router.push(path).catch((error) => {

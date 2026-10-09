@@ -154,7 +154,7 @@ const props = withDefaults(
     notebookTitle?: string
     /** 知识库来源 */
     sources?: SourceItem[]
-    /** 聊天消息 */
+    /** 对话消息 */
     messages?: ChatMessage[]
     /** 是否折叠 */
     collapsed?: boolean

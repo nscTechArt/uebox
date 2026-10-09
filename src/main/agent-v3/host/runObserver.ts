@@ -73,7 +73,7 @@ export type AgentRunSignal =
    *
    * 和 `done` 不是一回事。`done` 是 agent 事件流里的最后一条，但它发出来的时候
    * `prompt()` 还没返回、`finally` 里的 release 还没跑 —— 这会儿往同一条会话
-   * 派新一轮，收到的是「正在执行中」。要接着往这条会话派活的，等这条。
+   * 派新一轮，收到的是 `SESSION_BUSY`。要接着往这条会话派活的，等这条。
    */
   | { type: 'released'; sessionId: string }
 
@@ -81,7 +81,7 @@ export type AgentRunObserver = (signal: AgentRunSignal) => void
 
 const observers = new Set<AgentRunObserver>()
 
-/** 订阅。返回退订函数 —— 不退订的话换一路语音会话会有两个观察者在收 */
+/** 订阅。返回退订函数 —— 不退订的话，换一通电话就会有两个观察者在收 */
 export function observeAgentRuns(observer: AgentRunObserver): () => void {
   observers.add(observer)
   return () => observers.delete(observer)

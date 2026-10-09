@@ -6,7 +6,7 @@
     </div>
     <div class="right">
       <!--
-        这条会话属于哪个 UE 工程。知识库里用的是**同一个** —— 知识库原来另有一套
+        这条对话属于哪个 UE 工程。知识库里用的是**同一个** —— 知识库原来另有一套
         「关联工程」（存在 notebook 表上），那套只改了这里的显示，从来没有传进
         主进程，也就从来没有真的把 ue.* 工具指向那个工程。留着两套的结果是
         用户以为绑了、模型那边毫无变化。
@@ -63,9 +63,9 @@ import EditorStatusMonitor from './EditorStatusMonitor.vue'
  */
 defineProps<{
   notebookMode?: boolean
-  /** 当前会话 ID，用于在右上角显示这条会话属于哪个 UE 工程 */
+  /** 当前对话 ID，用于在右上角显示这条对话属于哪个 UE 工程 */
   chatSid?: string
-  /** 会话还没建出来时的待定工程归属（侧边栏在工程标题上点「+」新建的会话） */
+  /** 对话还没建出来时的待定工程归属（侧边栏在工程标题上点「+」新建的对话） */
   pendingProjectName?: string
   /** 欢迎页把工程胶囊挪到问候语下面，顶栏就不再重复放一个 */
   hideProjectChip?: boolean

@@ -32,9 +32,9 @@ export const TRAY_PENDING_TTL_MS = 60 * 1000
 /** 「最近对话」「最近项目」各最多列几条 —— 主进程和界面用同一个上限 */
 export const TRAY_RECENT_LIMIT = 3
 
-/** 界面报给主进程的一条最近会话（托盘菜单只显示这么多信息） */
+/** 界面报给主进程的一条最近对话（托盘菜单只显示这么多信息） */
 export interface TrayRecentSession {
-  /** 界面会话 id（`?sid=` 那个），不是内核会话 id */
+  /** 界面上的对话 id（`?sid=` 那个），不是内核 session id */
   id: string
   title: string
 }
@@ -56,7 +56,7 @@ export type TrayAction =
       projectName: string
     }
   /**
-   * 退出时还有会话操作没收摊：界面弹应用内的确认框，确认了回 `tray:confirm-quit`。
+   * 退出时还有操作没收摊（按内核 session 算）：界面弹应用内的确认框，确认了回 `tray:confirm-quit`。
    * 托盘、`app-quit`、安装更新都走这一条；`reason: 'update'` 时框的标题和按钮换成
    * 「重启安装」那套，其余不带
    */

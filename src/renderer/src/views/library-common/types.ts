@@ -5,7 +5,7 @@
  * 领域模型（Blueprint / MaterialEntry 等）仍然留在各自模块，不在此处合并。
  */
 
-/** AI 聊天面板的展示形态：停靠 / 折叠 / 悬浮 */
+/** AI 对话面板的展示形态：停靠 / 折叠 / 悬浮 */
 export type AIPanelMode = 'docked' | 'collapsed' | 'overlay'
 
 /** Gallery 排序语义（两库行为一致：recent 按 updatedAt、name 按名称、created 按创建时间） */

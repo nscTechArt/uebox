@@ -173,9 +173,9 @@ interface BrowserSurface {
 }
 
 /**
- * 嵌入模式下，这条会话的网页挂在哪个窗口里。
+ * 嵌入模式下，这条对话的网页挂在哪个窗口里。
  *
- * 默认是主窗口。会话被拖成独立聊天窗口之后，网页要跟着它进那个窗口 ——
+ * 默认是主窗口。对话被拖成独立对话窗口之后，网页要跟着它进那个窗口 ——
  * 用户正对着的是小窗，网页留在被挡住的主窗口里等于没有。由
  * `chatWindowManager.ts` 装上；返回 undefined 就退回主窗口。
  */
@@ -249,7 +249,7 @@ export class AgentBrowserService {
     return write
   }
 
-  /** 仅在用户进入会话时恢复；冷启动不创建窗口或加载远程页面。 */
+  /** 仅在用户进入对话时恢复；冷启动不创建窗口或加载远程页面。 */
   async restore(): Promise<void> {
     if (!this.sessionId || this.hasWindow() || this.busy) return
     if (this.restoring) return this.restoring
@@ -270,7 +270,7 @@ export class AgentBrowserService {
         if (active) this.selectTab(active)
       } catch (error) {
         if (generation !== this.restoreGeneration) return
-        // 网络失败保留磁盘记录，让下次进入会话还能重试。
+        // 网络失败保留磁盘记录，让下次进入对话还能重试。
         this.detachDebugger()
         while (this.surface) this.releaseSurface({ destroy: true })
         this.notifyState()
@@ -942,7 +942,7 @@ export class AgentBrowserService {
     return window
   }
 
-  /** 嵌入模式下这条会话现在该挂在哪：开着它的独立聊天窗口，否则主窗口 */
+  /** 嵌入模式下这条对话现在该挂在哪：开着它的独立对话窗口，否则主窗口 */
   private embeddedHost(): BrowserWindow | undefined {
     const resolved = embeddedHostResolver(this.sessionId)
     if (resolved && !resolved.isDestroyed()) return resolved
@@ -950,7 +950,7 @@ export class AgentBrowserService {
   }
 
   /**
-   * 宿主变了（会话拖进 / 拖出独立窗口）：把嵌入的视图整组搬过去。
+   * 宿主变了（对话拖进 / 拖出独立窗口）：把嵌入的视图整组搬过去。
    *
    * 搬的是同一个视图，页面、历史、滚动位置、填了一半的表单都留着 —— 和 `setMode`
    * 在主窗口与浏览器窗口之间搬是同一个办法。位置用新窗口最近报过的那一份。
@@ -1098,7 +1098,7 @@ export class AgentBrowserService {
         this.notifyState()
       }
       // 存下来的标签组也要跟着改，和 `closeTab` 一样：不写的话，自己关掉的页面
-      // （尤其是最后一个标签，窗口连带销毁、`closed` 那头不会再存）下次进会话又被恢复出来
+      // （尤其是最后一个标签，窗口连带销毁、`closed` 那头不会再存）下次进对话又被恢复出来
       if (wasOpen) {
         void this.persistUrl(this.hasWindow() ? this.currentUrl() || 'about:blank' : null).catch(
           () => undefined
@@ -1392,8 +1392,8 @@ export function getSessionBrowser(sessionId?: string): AgentBrowserService {
   if (!sessionId) return agentBrowser
   let browser = sessionBrowsers.get(sessionId)
   if (!browser) {
-    // 新建之前先清掉空转的实例。界面每切一次会话就来问一次状态，
-    // 不清的话这张表会跟着用户开会话一直长到退出应用为止。
+    // 新建之前先清掉空转的实例。界面每切一次对话就来问一次状态，
+    // 不清的话这张表会跟着用户开对话一直长到退出应用为止。
     for (const [id, idle] of sessionBrowsers) {
       if (id !== sessionId && idle.isIdle()) sessionBrowsers.delete(id)
     }
@@ -1403,7 +1403,7 @@ export function getSessionBrowser(sessionId?: string): AgentBrowserService {
   return browser
 }
 
-/** 这条会话的网页换个窗口挂（只动已经开着的，没开过的不新建实例） */
+/** 这条对话的网页换个窗口挂（只动已经开着的，没开过的不新建实例） */
 export function rehostSessionBrowser(sessionId: string): void {
   sessionBrowsers.get(sessionId)?.rehostEmbedded()
 }

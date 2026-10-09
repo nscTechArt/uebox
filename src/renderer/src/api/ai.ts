@@ -48,12 +48,12 @@ async function generateImageWithLocalModel(params: ImageGenerateParams): Promise
 // ==================== 类型定义 ====================
 
 /**
- * AI聊天消息角色
+ * AI 对话消息角色
  */
 export type ChatRole = 'system' | 'user' | 'assistant'
 
 /**
- * 聊天消息内容类型
+ * 对话消息内容类型
  */
 export type ChatMessageContent =
   | string
@@ -67,7 +67,7 @@ export type ChatMessageContent =
     }>
 
 /**
- * 聊天消息
+ * 对话消息
  */
 export interface ChatMessage {
   role: ChatRole
@@ -80,7 +80,7 @@ export interface ChatMessage {
 export type CustomProviderMode = 'openai-compatible' | 'anthropic-native'
 
 /**
- * 聊天请求参数
+ * 对话请求参数
  */
 export interface ChatRequestParams {
   provider?: string
@@ -133,7 +133,7 @@ export class ChatAbortedError extends Error {
 }
 
 /**
- * 聊天响应（非流式）
+ * 对话响应（非流式）
  */
 export interface ChatResponse {
   id: string
@@ -263,7 +263,7 @@ export interface ImageHealthResponse {
  *
  * `stop()` 解析出的布尔是「它真的停下来了吗」而不是「停止指令发出去了吗」——
  * 停完立刻要重发一轮的调用方（编辑消息、重新生成）必须等到前者，否则新的
- * 一轮会撞上还没收尾的旧会话。
+ * 一轮会撞上还没收尾的旧一轮。
  */
 export interface AgentRunController {
   stop: () => Promise<boolean>
@@ -280,12 +280,12 @@ export interface AgentExecuteParams {
   tools?: any[] // OpenAI tools 格式
   maxSteps?: number
   sessionId?: string
-  chatSid?: string // 对话ID（用于会话级敏感操作自动批准）
+  chatSid?: string // 对话ID（用于对话级敏感操作自动批准）
   token?: string // 可选的用户认证令牌
   /**
    * 审批策略。三档，见内核的 `ApprovalMode`。
    *
-   * 由调用方按**这条会话**的权限档位算好传进来
+   * 由调用方按**这条对话**的权限档位算好传进来
    * （见 views/Assistant/composables/sessionPermissionMode.ts）。
    */
   approvalMode?: AgentV3ApprovalMode
@@ -308,7 +308,7 @@ export interface AgentExecuteParams {
    * 三处兜底必须一致）。关掉时主进程会把 `ue_screenshot` 从工具池里摘掉。
    */
   editorScreenshotEnabled?: boolean
-  /** 这条会话绑定的模型。不传主进程就用执行记录里那份，都没有按全局默认绑定 */
+  /** 这条对话绑定的模型。不传主进程就用执行记录里那份，都没有按全局默认绑定 */
   sessionModel?: { providerId: string; modelId: string } | null
   defaultEngineVersion?: string // 用户设置的默认引擎版本（如 "5.5"、"5.4"）
   askMode?: boolean // Ask 模式（只读模式）：仅使用读取类工具，不执行任何写入操作
@@ -319,13 +319,13 @@ export interface AgentExecuteParams {
     model: string
   }
   /**
-   * 这条会话归属的 UE 工程（侧边栏按它分组的那个戳）。
+   * 这条对话归属的 UE 工程（侧边栏按它分组的那个戳）。
    *
    * 主进程手上只有「谁连着」，归属只有渲染层知道。不带下去的话，一条挂在
-   * test222 下的会话问「这是啥项目」，模型会照着当前连接答成另一个工程。
+   * test222 下的对话问「这是啥项目」，模型会照着当前连接答成另一个工程。
    */
   sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
-  /** 这条会话绑着的知识库。主进程据此注册检索工具并在提示词里说明场景 */
+  /** 这条对话绑着的知识库。主进程据此注册检索工具并在提示词里说明场景 */
   notebook?: { id: string; title?: string } | null
   /**
    * 用户**按下发送那一刻**的编辑器状态（闪存）。
@@ -453,7 +453,7 @@ export function parseFollowUpSuggestions(raw: string): string[] {
   return normalizeFollowUps(listed)
 }
 
-/** 会话标题的硬上限。模型偶尔会无视「不超过 15 个字」，侧边栏那一栏放不下 */
+/** 对话标题的硬上限。模型偶尔会无视「不超过 15 个字」，侧边栏那一栏放不下 */
 export const MAX_SESSION_TITLE_CHARS = 24
 
 function normalizeSessionTitle(value: unknown): string {
@@ -573,7 +573,7 @@ async function requestSessionTitle(
 /**
  * 定这一轮用哪档审批策略。
  *
- * 正常路径上调用方一定会带（那是会话自己的档位）。没带时给 `auto-edit`
+ * 正常路径上调用方一定会带（那是对话自己的档位）。没带时给 `auto-edit`
  * 而不是 `ask`：`ask` 会让每一步写操作都弹窗，那是用户明确选择才该有的行为，
  * 不该是某个调用方忘了传参数的后果。
  */
@@ -644,8 +644,8 @@ export function toAgentV3Prompt(params: AgentExecuteParams): {
 
 export const aiAPI = {
   /**
-   * AI聊天补全（非流式）
-   * @param params 聊天请求参数，支持自定义 timeout
+   * AI 对话补全（非流式）
+   * @param params 对话请求参数，支持自定义 timeout
    */
   async chat(params: ChatRequestParams): Promise<ChatResponse> {
     const result = await window.api.ai.chatCompletion({
@@ -756,7 +756,7 @@ export const aiAPI = {
         if (params.signal) {
           // 中止要**等这次 invoke 到达主进程之后**再发：主进程是在 chat-stream 的
           // 处理函数里才把 controller 记进表的，抢在前面调 abortStream 会找不到
-          // 会话、变成空操作 —— 模型照跑完，用户的 token 照扣
+          // 那条流、变成空操作 —— 模型照跑完，用户的 token 照扣
           const onAbort = (): void => {
             void dispatched.then(
               () => window.api.ai.abortStream(sessionId),
@@ -781,7 +781,7 @@ export const aiAPI = {
    * 获取智能追加提问建议
    * 基于用户消息和AI回复，生成2-3个相关的追加提问建议
    * @param params.userMessage 用户消息内容
-   * @param params.assistantMessage AI会话回复内容
+   * @param params.assistantMessage AI 回复内容
    * @returns 追加提问建议数组
    */
   async getFollowUpSuggestions(params: {
@@ -843,7 +843,7 @@ export const aiAPI = {
    * 生成笔记标题
    * 基于用户提问和AI回复内容，生成一个简洁精准的笔记标题
    * @param params.userMessage 用户消息内容
-   * @param params.assistantMessage AI会话回复内容（将截断前2000字）
+   * @param params.assistantMessage AI 回复内容（将截断前2000字）
    * @returns 生成的笔记标题字符串
    */
   async generateNoteTitle(params: {
@@ -915,7 +915,7 @@ export const aiAPI = {
   },
 
   /**
-   * 给 AI 会话起名。
+   * 给 AI 对话起名。
    *
    * 只喂第一条用户消息的**前 500 字**：起名要的是「这段对话讲什么」，而第一条
    * 消息的开头就已经把它讲完了 —— 后面往往是贴进来的日志或代码，喂进去只会让
@@ -1015,7 +1015,7 @@ ${params.text}
 
     const controller: AgentRunController = {
       /**
-       * 返回值是「它真的停下来了吗」。主进程那边 stop 会等会话收尾再回话，
+       * 返回值是「它真的停下来了吗」。主进程那边 stop 会等内核 session 收尾再回话，
        * 停不下来（卡在审批框、工具没退出）时回 false —— 调用方要停完接着
        * 重发一轮的话，必须看这个值，否则新的一轮会被旧的顶掉。
        */
@@ -1061,7 +1061,7 @@ ${params.text}
         /*
          * 过桥前一律拍平。
          *
-         * 这两样都可能是 Pinia 里取出来的响应式代理（会话戳、排队里存着的快照），
+         * 这两样都可能是 Pinia 里取出来的响应式代理（对话戳、排队里存着的快照），
          * 而结构化克隆搬不动 Proxy —— Electron 抛 `An object could not be cloned.`，
          * 用户看到的是「发一条消息弹 Agent 执行异常，正文一个字都没有」。
          * 钉在这一层而不是指望每个调用方记得转：调用方有五个，还会更多。
@@ -1083,7 +1083,7 @@ ${params.text}
               }))
             }
           : {}),
-        // 同上，会话上那份是响应式代理
+        // 同上，对话上那份是响应式代理
         ...(params.sessionModel
           ? {
               sessionModel: {

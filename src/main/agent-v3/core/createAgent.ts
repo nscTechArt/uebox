@@ -92,7 +92,7 @@ import type { ExperienceRuntime } from '../experience/runtime'
 import { createSessionExperience } from '../experience/session'
 
 /**
- * 一次引擎体检的结果 —— 「此刻这条会话够不够得着引擎，够得着的是哪个工程」。
+ * 一次引擎体检的结果 —— 「此刻这条对话够不够得着引擎，够得着的是哪个工程」。
  *
  * 字段刻意和 `SessionContext` 的同名字段一致：换的时候直接摊进去，
  * 不需要在两边各维护一份映射。
@@ -139,16 +139,16 @@ export interface SessionContext {
    */
   project?: { name: string; engineVersion?: string; path?: string }
   /**
-   * 这条会话**归属**的工程（侧边栏里它挂在哪个工程下），以及它此刻连没连着。
+   * 这条对话**归属**的工程（侧边栏里它挂在哪个工程下），以及它此刻连没连着。
    *
-   * 和上面的 `project`（编辑器现在开着的那个）是两件事：会话的归属在第一条
+   * 和上面的 `project`（编辑器现在开着的那个）是两件事：对话的归属在第一条
    * 消息时就定死了，之后用户可能关了那个工程去开另一个。不把这层区分交给
    * 模型的话，用户在 test222 下问「这是啥项目」，它会照着环境块把连着的
    * UALinkDev55 一五一十答出来，还不说自己换了个工程。
    */
   sessionProject?: { name: string; engineVersion?: string; path?: string; connected: boolean }
   /**
-   * 连着、但不属于这条会话的工程名（见 `core/sessionScope.ts`）。
+   * 连着、但不属于这条对话的工程名（见 `core/sessionScope.ts`）。
    *
    * 归属工程没连上时，`ueConnected` 是 false —— 但用户那边引擎明明开着。
    * 不把这个说清楚，模型会去劝一个已经连着引擎的人「请先安装 UnrealAgentLink」。
@@ -199,7 +199,7 @@ export interface SessionContext {
   /** 宿主的实时只读约束；子任务继承同一个读取函数。 */
   isReadOnly?: () => boolean
   /**
-   * 这条会话从一开始就是只读的：写工具**根本不进它的清单**。
+   * 这条对话从一开始就是只读的：写工具**根本不进它的清单**。
    *
    * 和 `isReadOnly` 分开，因为两者管的不是同一件事：`isReadOnly` 是宿主的
    * **实时**开关（用户跑到一半切只读），只能由审批门在调用那一刻拦；
@@ -215,7 +215,7 @@ export interface SessionContext {
    * 而不是等下一条消息（见 `approval.ts` 的 `ApprovalDeps.mode`）。
    */
   approvalMode?: ApprovalMode | (() => ApprovalMode)
-  /** 本会话已被「始终允许」的工具。宿主传入才能跨轮保留 */
+  /** 这条内核 session 里已被「始终允许」的工具。宿主传入才能跨轮保留 */
   alwaysAllowed?: Set<string>
   /** 思考程度。省略等同 auto —— 不指定，随模型自己的默认 */
   thinkingLevel?: ThinkingLevelChoice
@@ -343,7 +343,7 @@ export interface SessionContext {
    */
   mcp?: McpClientManager
   /**
-   * 这条会话绑着的知识库。
+   * 这条对话绑着的知识库。
    *
    * 带上它有两件事：注册 `search_notebook_sources`（没绑就不给这个工具，
    * 给了模型也只能拿到一句「没有知识库」），以及在环境块里说清楚
@@ -354,7 +354,7 @@ export interface SessionContext {
    */
   notebook?: NotebookScope
   /**
-   * 发起会话的窗口。
+   * 发起对话的窗口。
    *
    * 笔记增删改这类工具要给渲染层发变更通知，没有它就造不出来 ——
    * 注册表会跳过那些工具而不是传 undefined 让它们运行时炸。
@@ -376,7 +376,7 @@ export interface SessionContext {
  * V3 直接不注册用不上的工具 —— 模型看不到的东西不会被误调，也不占 token。
  */
 /**
- * 这条会话能不能用浏览器。
+ * 这条对话能不能用浏览器。
  *
  * 理由见 `resolveTools` 里的注释。抽出来是因为系统提示词也要看它 ——
  * 工具没注册却在提示词里说「你可以上网」，模型会去调一个不存在的工具，
@@ -438,7 +438,7 @@ function resolveCandidateTools(ctx: SessionContext): UnrealAgentTool<never>[] {
   //     应该写进返回文本，由父 agent 决定要不要问人。
   //   - 没有提问通道（定时任务、无头跑、调试入口）：没人会看见那张卡片。
   //
-  // Ask 模式**照给**：只读会话同样会遇到「你到底想问哪一层」，而且问一句
+  // Ask 模式**照给**：只读对话同样会遇到「你到底想问哪一层」，而且问一句
   // 什么都不改，风险等级本来就是 safe。
   if (
     !ctx.isSubAgent &&
@@ -456,7 +456,7 @@ function resolveCandidateTools(ctx: SessionContext): UnrealAgentTool<never>[] {
   /*
    * 换这条对话归属的工程。同样现造，条件也一样：
    *
-   *   - 子 agent：它没有自己的会话，改的会是父会话的归属 —— 一个跑在后台的
+   *   - 子 agent：它没有自己的对话，改的会是父对话的归属 —— 一个跑在后台的
    *     子任务不该动用户在侧边栏里的组织方式。
    *   - 没有宿主通道（无头跑、调试入口）：归属住在渲染层，没人接这条通知的话
    *     改动只在这一轮算数，下一轮又弹回去。半生效比不生效更难排查。
@@ -517,7 +517,7 @@ function applyFinalToolPolicy(
 ): UnrealAgentTool<never>[] {
   let filtered = tools
 
-  // 只读会话（Ask 模式、只读子任务）手里只有 safe 工具。
+  // 只读对话（Ask 模式、只读子任务）手里只有 safe 工具。
   // 审批门那道 `isReadOnly` 仍然照常生效 —— 它挡的是跑到一半才切只读的情况。
   if (ctx.mode === 'ask' || ctx.readOnly) {
     filtered = filtered.filter((tool) => tool.unrealBox.risk === 'safe')
@@ -706,7 +706,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   // 子 agent 复用父 agent 已经发现的清单，不重复扫盘。
   // 裁剪放在这里而不是发现处：子 agent 拿到的清单已经裁过，再裁一次是空转。
   const skills = applySkillLearningMode(
-    // 会话归属的工程优先：它才是「这条对话在干哪个工程的活」；没有归属才看连着的那个
+    // 对话归属的工程优先：它才是「这条对话在干哪个工程的活」；没有归属才看连着的那个
     ctx.skills ?? (await discoverEnabledSkills(ctx.sessionProject?.path ?? ctx.project?.path)),
     ctx.skillLearning ?? 'ask'
   )
@@ -1217,7 +1217,7 @@ export async function runSubAgent(
          * `sessionBinding` 查）。而 TS 对**展开进来**的多余属性不做检查，
          * 所以写着它们既不报错也不生效：子流拿到的 `sessionId` 是 undefined，
          * `boundProject()` 查不到东西，跨工程那道闸对整个子 agent 失效 ——
-         * 钉在工程 A 的会话里，子 agent 能 open_project B 然后把整条流带过去。
+         * 钉在工程 A 的对话里，子 agent 能 open_project B 然后把整条流带过去。
          */
         ...(parent.sessionId ? { sessionId: parent.sessionId } : {})
       },
@@ -1792,9 +1792,9 @@ function buildRuntimeSection(
  * 三种情况，说法完全不一样：
  * 1. 引擎可用 —— 把工具会操作的那个工程说清楚。以前只有「没连」的分支，
  *    连上了反而一个字不说，模型得靠工具一个个去问。
- * 2. 会话归属的工程没连、别的工程连着 —— **不是**「没连引擎」。用户明明连着，
+ * 2. 对话归属的工程没连、别的工程连着 —— **不是**「没连引擎」。用户明明连着，
  *    照第 3 条那样劝他去装插件只会让人莫名其妙；正确的话是「你开的不是这条
- *    会话的工程」。同时明说别的工程不归这条会话管，免得模型好心去动它。
+ *    对话的工程」。同时明说别的工程不归这条对话管，免得模型好心去动它。
  * 3. 一个都没连 —— 走连接引导。
  */
 /**
@@ -1893,7 +1893,7 @@ function buildEnvironmentSection(ctx: SessionContext): string[] {
   /*
    * 这是个 UE 工程吗 —— 盒子**只在记着引擎版本时**才知道。
    *
-   * 会话工程是用户在侧栏点「选文件夹」挑的任意目录（`AddProjectModal` 的
+   * 对话工程是用户在侧栏点「选文件夹」挑的任意目录（`AddProjectModal` 的
    * `pickFolder` 只开 `openDirectory`，不校验 `.uproject`）。引擎版本只可能来自
    * UE 工程库里那条记录，或者曾经真的连上过。
    *
@@ -1917,7 +1917,7 @@ function buildEnvironmentSection(ctx: SessionContext): string[] {
 
   return [
     /*
-     * 「没有映射到本会话工程的连接」**不等于**「那个工程没打开」：路径键对不上
+     * 「没有映射到本对话工程的连接」**不等于**「那个工程没打开」：路径键对不上
      * （`sessionScope.ts` 里记着的那种）时工程开得好好的，这里照样是这个分支。
      * 写成「not open」模型就会照着一个它其实不知道的事实去答话。
      */

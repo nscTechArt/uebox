@@ -1,5 +1,5 @@
 /**
- * 刷新页面之后，把界面重新接回还在跑的会话。
+ * 刷新页面之后，把界面重新接回还在跑的内核 session。
  *
  * ## 为什么需要这一步
  *
@@ -11,9 +11,9 @@
  * 以及 sessionId ↔ 对话的对应关系。以前的做法是**猜**：恢复缓存时把所有残留的
  * typing 消息一律标成「会话已中断（页面刷新）」。猜错的那一半后台还在跑，甚至
  * 还在改用户的工程；而 `activeAgents` 里那个位置还占着，用户刷新后立刻再说一句，
- * 会被顶回来一句「会话正在执行中」。
+ * 会被顶回来一个 `SESSION_BUSY`。
  *
- * 这里补上那次缺失的询问：报上界面记得的会话，主进程回哪些真的活着。
+ * 这里补上那次缺失的询问：报上界面记得的内核 session id，主进程回哪些真的活着。
  *
  * ## 收尾保证
  *
@@ -55,16 +55,16 @@ export function resolveReattachSeed(message?: Pick<ChatMessage, 'content'>): str
 export interface ReattachedSession {
   chatSid: string
   agentSessionId: string
-  /** 这条会话正在写的那条回复 */
+  /** 这条对话正在写的那条回复 */
   messageId: string
 }
 
 export interface ReconcileDeps {
   /** 恢复缓存时发现的、还挂在 typing 上的回复 */
   pending: HydratedTypingMessage[]
-  /** 这条对话记着的 agent 会话 id；空字符串表示它不是 agent 跑出来的 */
+  /** 这条对话记着的内核 session id；空字符串表示它不是 agent 跑出来的 */
   agentSessionIdOf: (chatSid: string) => string
-  /** 问主进程：这些会话里哪些还活着 */
+  /** 问主进程：这些内核 session 里哪些还活着 */
   fetchRunning: (sessionIds: string[]) => Promise<string[]>
   /** 接回来：把流式状态重新建起来，让后续事件有地方落 */
   reattach: (session: ReattachedSession) => void
@@ -80,7 +80,7 @@ export interface ReconcileResult {
 /**
  * 逐条裁决刷新时残留的回复。
  *
- * 同一个对话里出现多条 typing 时，只有**最后一条**可能是活的（会话一次只跑一轮），
+ * 同一个对话里出现多条 typing 时，只有**最后一条**可能是活的（内核 session 一次只跑一轮），
  * 前面那些是更早的刷新留下的尸体，一律标中断 —— 否则它们会永远转圈。
  */
 export async function reconcileTypingMessages(deps: ReconcileDeps): Promise<ReconcileResult> {
@@ -108,7 +108,7 @@ export async function reconcileTypingMessages(deps: ReconcileDeps): Promise<Reco
       running = new Set(await deps.fetchRunning([...sessionIdByChat.values()]))
     } catch (error) {
       // 问不到就按「都停了」处理：贴一次「已中断」比留下转圈的气泡好交代
-      console.warn('[AgentReattach] 查询运行中的会话失败，按全部中断处理:', error)
+      console.warn('[AgentReattach] 查询运行中的内核 session 失败，按全部中断处理:', error)
     }
   }
 
@@ -139,7 +139,7 @@ const listeners = new Set<ReattachListener>()
 /**
  * 订阅「某条对话被接回来了」。
  *
- * 存在的理由是时序：重连要等一次 IPC 往返，而聊天界面通常在那之前就挂载完了。
+ * 存在的理由是时序：重连要等一次 IPC 往返，而对话界面通常在那之前就挂载完了。
  * 界面挂载时自己查一遍流式状态（`useAgentMode` 里做的），加上这个回调兜住
  * 「先挂载、后接回」的那一半，两边合起来才不会漏。
  */
@@ -157,7 +157,7 @@ export async function initAgentReattach(): Promise<void> {
   // 让它也来裁决的话，它问主进程只会得到「你名下没有会话」（事件是往主窗口发的），
   // 于是把主窗口正在跑的那条判死，再顺手写回盘上。这个判断不归它做。
   if (window.location.hash.includes('spotlight')) return
-  // 独立聊天窗口同理：它从盘上读到的「还在打字」多半是主窗口那边在跑的，问主进程
+  // 独立对话窗口同理：它从盘上读到的「还在打字」多半是主窗口那边在跑的，问主进程
   // 只会得到「不是你的」，判死之后还会经同步发回主窗口。它那条对话的状态以主窗口
   // 发来的全量为准（见 utils/chatWindowSync.ts）
   if (isChatWindow()) return
@@ -201,7 +201,7 @@ export async function initAgentReattach(): Promise<void> {
   })
 
   console.log(
-    `[AgentReattach] 接回 ${result.reattached.length} 条运行中的会话，` +
+    `[AgentReattach] 接回 ${result.reattached.length} 条运行中的内核 session，` +
       `标记中断 ${result.interrupted.length} 条`
   )
 }

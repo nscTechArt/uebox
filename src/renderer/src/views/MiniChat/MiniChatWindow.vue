@@ -155,8 +155,8 @@ interface PendingImage {
 }
 
 /**
- * 生成唯一会话 ID
- * 每次 MiniChat 窗口创建时使用新的会话 ID，避免历史消息累积
+ * 生成唯一对话 ID
+ * 每次 MiniChat 窗口创建时使用新的对话 ID，避免历史消息累积
  */
 function generateMiniChatSid(): string {
   return `mini-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -296,7 +296,7 @@ function getSessionPreview(content: ChatMessageContent): string {
 }
 
 /**
- * 初始化会话
+ * 初始化对话
  */
 function initSession(): void {
   chatSessionStore.ensureSession(sid.value, t('assistant.chatFlow.unnamedChat'))
@@ -474,12 +474,12 @@ async function dispatchUserMessage(
   }
 ): Promise<void> {
   /*
-   * 会话号在**提交那一刻**定死。
+   * 对话 id 在**提交那一刻**定死。
    *
    * 下面要 await 一次闪存抓取（最多 2 秒），而这期间还没进入生成态 ——
-   * 用户完全可以点标题栏那个「+」把会话重置掉。等抓取回来再读 `sid.value`
+   * 用户完全可以点标题栏那个「+」把对话重置掉。等抓取回来再读 `sid.value`
    * 的话，这条**旧对话的消息**就在**新对话**里跑起来了：用户刚清空，屏幕上却冒出
-   * 一句他以为已经丢掉的话，还带着旧会话的上下文。
+   * 一句他以为已经丢掉的话，还带着旧对话的上下文。
    */
   const chatSid = sid.value
 
@@ -515,10 +515,10 @@ async function dispatchUserMessage(
   }
 
   /*
-   * 抓取期间用户把会话重置了 —— 这条话属于那条已经被清掉的对话，就此作废。
+   * 抓取期间用户把对话重置了 —— 这条话属于那条已经被清掉的对话，就此作废。
    *
-   * 不能改投到新会话上：用户点「+」的意思是「刚才那些不算了」，把他刚打的那句
-   * 挪过来等于替他决定。也不能硬发到旧会话上：那条对话界面上已经不存在了，
+   * 不能改投到新对话上：用户点「+」的意思是「刚才那些不算了」，把他刚打的那句
+   * 挪过来等于替他决定。也不能硬发到旧对话上：那条对话界面上已经不存在了，
    * 消息发出去没有任何地方显示，模型却在后台照着它动手。
    */
   if (sid.value !== chatSid) {
@@ -549,7 +549,7 @@ async function handleInitialMessage(initialMsg: MiniChatInitialMessage): Promise
  * 接住主窗口递过来的上下文 —— 「侧边问一句」落地的那一步。
  *
  * 上下文本体是主进程里复制好的一份 transcript，这里只把新的内核 sessionId
- * 挂到当前这条界面会话上：下一句话发出去时，`useAgentMode` 会拿着它去
+ * 挂到当前这条界面对话上：下一句话发出去时，`useAgentMode` 会拿着它去
  * `agent-v3:execute`，主进程按 sessionId 恢复历史（见 ipc/agentV3.ts），
  * 模型于是带着主对话的全部来龙去脉开口。
  *
@@ -570,7 +570,7 @@ function handleInitialContext(context: SideQuestionContext): void {
   askModeRef.value = true
 }
 
-/** 当前这条会话借来的上下文。没借就是 null，横幅不显示 */
+/** 当前这条对话借来的上下文。没借就是 null，横幅不显示 */
 const sideContext = ref<SideQuestionContext | null>(null)
 
 const sideContextLabel = computed(() => {
@@ -592,7 +592,7 @@ async function handleStopGenerating(): Promise<void> {
 }
 
 async function startNewSession(): Promise<void> {
-  // 正在念的是上一场对话的话，别让它跟进新会话
+  // 正在念的是上一场对话的话，别让它跟进新对话
   stopReadAloud()
   if (isGenerating.value) {
     await stopCurrentResponse()
@@ -766,13 +766,13 @@ function scrollToBottom(): void {
 }
 
 /**
- * 处理会话重置（关闭窗口时）
- * 根据设置决定是否保存对话到主界面历史，然后清除本地消息并创建新会话
+ * 处理对话重置（关闭窗口时）
+ * 根据设置决定是否保存对话到主界面历史，然后清除本地消息并创建新对话
  */
 function handleResetChat(): void {
   console.log('[MiniChat] 重置对话:', sid.value)
 
-  // 同上：会话都重置了，没人会再来点那个确认框
+  // 同上：对话都重置了，没人会再来点那个确认框
   pendingApprovals.rejectAll()
 
   /*
@@ -797,7 +797,7 @@ function handleResetChat(): void {
   }
   console.log('[MiniChat] miniChatPersistEnabled:', miniChatPersistEnabled)
 
-  // 如果开启了持久会话，先检查是否有实际内容需要保存
+  // 如果开启了持久对话，先检查是否有实际内容需要保存
   if (!borrowed && (!MINI_CHAT_SETTINGS_ENABLED || miniChatPersistEnabled)) {
     const msgs = chatMsgStore.getMessages(sid.value)
     // 只保存有实际内容的对话（用户消息+AI回复）
@@ -811,13 +811,13 @@ function handleResetChat(): void {
       chatSessionStore.updateTitle(sid.value, title || t('assistant.chatFlow.unnamedChat'))
       console.log('[MiniChat] 对话已保存到历史, 标题:', title)
 
-      // 通知主窗口刷新会话列表
+      // 通知主窗口刷新对话列表
       console.log('[MiniChat] 发送 IPC 事件: mini-chat:session-saved')
       window.api.miniChat.sessionSaved({
         id: sid.value,
         title: title || t('assistant.chatFlow.unnamedChat'),
         // 主窗口靠这一份把消息同步进自己的 store（SideMenu 的 chat-sessions:refresh），
-        // 少传的话侧边栏会多出一条点开是空的会话
+        // 少传的话侧边栏会多出一条点开是空的对话
         messages: JSON.parse(JSON.stringify(msgs))
       })
 
@@ -827,11 +827,11 @@ function handleResetChat(): void {
       chatMsgStore.clearSessionMessages(sid.value)
     }
   } else {
-    // 临时会话模式：直接清除所有消息
+    // 临时对话模式：直接清除所有消息
     chatMsgStore.clearSessionMessages(sid.value)
   }
 
-  // 重置 Agent 会话 ID
+  // 重置内核 session id
   chatSessionStore.setAgentSessionId(sid.value, '')
 
   if (borrowed) {
@@ -841,8 +841,8 @@ function handleResetChat(): void {
     })
   }
 
-  // 借来的上下文跟着这条会话一起作废。留着的话，用户点「新对话」之后
-  // 横幅还挂着「承接了 42 条」，而新会话的内核 sessionId 已经换了 —— 那句话是假的
+  // 借来的上下文跟着这条对话一起作废。留着的话，用户点「新对话」之后
+  // 横幅还挂着「承接了 42 条」，而新对话的内核 sessionId 已经换了 —— 那句话是假的
   sideContext.value = null
   askModeRef.value = false
 
@@ -850,7 +850,7 @@ function handleResetChat(): void {
   currentAgentProcess.value = []
   fullConversationHistory.value = []
 
-  // 生成新的会话 ID，确保下次打开是全新对话
+  // 生成新的对话 id，确保下次打开是全新对话
   sid.value = generateMiniChatSid()
   initSession()
   nextTick(() => {

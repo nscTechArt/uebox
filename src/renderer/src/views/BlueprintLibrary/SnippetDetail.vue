@@ -39,7 +39,7 @@ const props = withDefaults(
     name: string
     /** 整个 payload，由调用方从条目上取 */
     payload: unknown
-    /** 条目 id，AI 会话跟着它走 */
+    /** 条目 id，AI 对话跟着它走 */
     entryId: string
     /** 「放进当前工程」正在跑 */
     applying?: boolean

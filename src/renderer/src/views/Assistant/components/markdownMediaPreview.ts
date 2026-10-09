@@ -3,7 +3,7 @@ import type { StateCore, Token } from 'markdown-it'
 import { toLocalResourceUrl } from '@renderer/utils/localResource'
 
 /**
- * 聊天正文里的图片 / 视频内联预览。
+ * 对话正文里的图片 / 视频内联预览。
  *
  * AI 回复经常只给出一条路径（「保存位置: `I:/.../UAShot.png`」），
  * 用户还得自己去文件管理器里打开。这里在识别到路径 / URL 之后，
@@ -44,7 +44,7 @@ const VIDEO_REF_IN_TEXT =
 /** 路径左边界：只有前面是空白或这些标点时才当成一条独立路径，避免把 `assets/a.png` 截成 `/a.png` */
 const LEFT_BOUNDARY = /[\s("'（「【[:：=>,，]/
 
-/** 单条消息最多插几张预览图，防止「列出目录下所有 PNG」这类回复把聊天框撑爆 */
+/** 单条消息最多插几张预览图，防止「列出目录下所有 PNG」这类回复把对话区撑爆 */
 const MAX_PREVIEWS_PER_MESSAGE = 8
 
 /**
@@ -189,7 +189,7 @@ export function buildImageHtml(options: ImageHtmlOptions): string {
  * 只给一个原生 `<video controls>`：下载、全屏、逐帧都在浏览器自带的控件里，
  * 再套一层自己的按钮既要接事件又要重做一遍这些功能。
  *
- * `preload="metadata"` 而不是 `auto`：一条聊天记录里可能有好几段视频，
+ * `preload="metadata"` 而不是 `auto`：一条对话记录里可能有好几段视频，
  * 全预加载会把几百兆读进内存，而用户多半只点其中一条。
  */
 export function buildVideoHtml(options: { src: string; preview?: boolean }): string {

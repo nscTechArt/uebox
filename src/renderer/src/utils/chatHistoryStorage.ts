@@ -1,7 +1,7 @@
 /**
  * AI 对话历史的存储适配器（pinia-plugin-persistedstate 的 `storage` 插座）。
  *
- * 后端是磁盘文件，不是 localStorage —— 后者配额只有几 MB，聊天记录写满之后
+ * 后端是磁盘文件，不是 localStorage —— 后者配额只有几 MB，对话记录写满之后
  * 会静默地再也存不上，用户下次开应用才发现历史没了。落盘在主进程
  * （`main/ipc/chatHistory.ts`），这边只负责搬字符串。
  *
@@ -33,13 +33,13 @@ export class ChatHistoryStorage implements Storage {
    * 它本来就靠 IPC 把整段消息交给主窗口（见 `layout/components/SideMenu.vue`
    * 里的 `chat-sessions:refresh`），不需要自己存盘。
    *
-   * 从标签栏拖出来的独立聊天窗口同理：它的改动经同步补丁交给主窗口，由主窗口存
+   * 从标签栏拖出来的独立对话窗口同理：它的改动经同步补丁交给主窗口，由主窗口存
    * （见 `chatWindowSync.ts`）。
    */
   private readOnly = false
 
   /**
-   * 独立聊天窗口不接排队的跟进消息。
+   * 独立对话窗口不接排队的跟进消息。
    *
    * 队列是按窗口投递的：两个窗口都从盘上读到同一批排队的话，同一句话会被两边
    * 各发一次。主窗口排的归主窗口发，独立窗口只管它自己这次打开之后排的。
@@ -151,7 +151,7 @@ export class ChatHistoryStorage implements Storage {
     for (const key of keys) {
       const value = this.cache.get(key) ?? ''
       // ponytail: 每次都写整份 JSON。一万条消息约 20MB，stringify 会有 ~150ms 卡顿
-      // （这也是换盘之前的行为）。真有人到这个量级，再按会话拆成一个会话一个文件。
+      // （这也是换盘之前的行为）。真有人到这个量级，再按对话拆成一个对话一个文件。
       void window.api?.chatHistory?.write(key, value)?.catch((error: unknown) => {
         console.error(`[ChatHistory] 写入 ${key} 失败（${value.length} 字符）:`, error)
       })

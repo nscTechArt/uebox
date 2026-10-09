@@ -50,7 +50,7 @@ interface LedgerFile {
 const queues = new Map<string, Promise<unknown>>()
 
 /**
- * 队列的键：同一个目录只能有一个。设置页拿的是项目库里的路径，会话拿的是运行时的路径，
+ * 队列的键：同一个目录只能有一个。设置页拿的是项目库里的路径，对话拿的是运行时的路径，
  * Windows 上两者大小写、斜杠可能不同 —— 按原样当键，两边的读改写就不排队，互相覆盖
  */
 function queueKey(dir: string): string {

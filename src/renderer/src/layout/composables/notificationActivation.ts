@@ -1,5 +1,5 @@
 /**
- * 用户点了 agent 的系统通知 → 跳到发那条通知的会话。
+ * 用户点了 agent 的系统通知 → 跳到发那条通知的对话。
  *
  * ## 为什么挂在常驻布局上
  *
@@ -9,8 +9,8 @@
  *
  * ## 为什么要反查
  *
- * 通知带的是**内核**会话 id（`agent-v3:*` 那套），界面上的标签页、路由、消息用的
- * 是另一个 id。拿内核 id 直接当路由参数会跳到一条空会话上，比不跳还糟。
+ * 通知带的是**内核 session** id（`agent-v3:*` 那套），界面上的标签页、路由、消息用的
+ * 是另一个 id。拿内核 id 直接当路由参数会跳到一条空对话上，比不跳还糟。
  */
 
 import { onScopeDispose } from 'vue'
@@ -23,17 +23,17 @@ import { usePendingApprovalsStore } from '@renderer/store/modules/pendingApprova
 import { useTabsStore } from '@renderer/store/modules/tabs'
 import type { NotificationActivatePayload } from '@core/shared/agentNotificationActivation'
 
-/** 笔记本里那条私有对话的会话 id 前缀。见 NotebookDetail 挂 AssistantWelcome 的地方 */
+/** 笔记本里那条私有对话的对话 id 前缀。见 NotebookDetail 挂 AssistantWelcome 的地方 */
 const NOTEBOOK_CHAT_PREFIX = 'notebook-chat-'
 /** 蓝图库 / 材质库详情页里那条对话的前缀。见 LibraryAIPanel 挂 AssistantWelcome 的地方 */
 const BLUEPRINT_CHAT_PREFIX = 'library-chat-blueprint-'
 const MATERIAL_CHAT_PREFIX = 'library-chat-material-'
 
 /**
- * 这条会话该跳去哪。
+ * 这条对话该跳去哪。
  *
  * 页面内嵌的那几条对话单独走：它们是**那个页面的一部分**，被刻意排除在标签页和
- * 侧边栏之外（`chatSessions` 的 `listableSessions`）。按普通会话跳的话会把它拽成
+ * 侧边栏之外（`chatSessions` 的 `listableSessions`）。按普通对话跳的话会把它拽成
  * 一个光秃秃的助手标签页 —— 没有来源面板、没有笔记编辑器、没有蓝图画布，
  * 而侧边栏又拒绝列出它，用户回不去。所以回它自己的页面。
  */
@@ -62,7 +62,7 @@ export function useNotificationActivation(): void {
   /*
    * 回话是主进程收通知的依据，所以只有**真跳到了**才算数。
    *
-   * 认不出这条会话，或者跳到一半失败了（守卫抛错、目标 chunk 拉不下来），
+   * 认不出这条对话，或者跳到一半失败了（守卫抛错、目标 chunk 拉不下来），
    * 都得如实说没成 —— 主进程会把通知重新弹一条。谎报的话用户既没跳过去，
    * 手上那个入口也没了（系统在他点下去那一刻就把 toast 摘走了）。
    */
@@ -70,13 +70,13 @@ export function useNotificationActivation(): void {
     const session = chatStore.sessionByAgentSessionId(sessionId)
 
     // 查不到就什么都不做：主进程已经把窗口拉到前台了，用户至少回到了盒子里。
-    // 硬跳一个猜出来的会话，只会把他从正在看的东西上扯走
+    // 硬跳一个猜出来的对话，只会把他从正在看的东西上扯走
     if (!session) {
       reportSilently(notificationKey, false)
       return
     }
 
-    // 他点的是**这一条**审批。确认框默认读队首，不指名的话另一条会话正卡着的
+    // 他点的是**这一条**审批。确认框默认读队首，不指名的话另一条对话正卡着的
     // 确认框会挡在前面，而那不是他来答的东西
     if (toolCallId) approvals.focus(toolCallId)
 
@@ -95,7 +95,7 @@ export function useNotificationActivation(): void {
          *
          * 「顶掉」现在就够得着：用户点了通知，紧接着自己点了侧边栏 —— 我们这次
          * 跳输了，可要是照 `.then` 就当跳到了，主进程会把通知收掉，而他并不在
-         * 那条会话上。
+         * 那条对话上。
          *
          * （守卫**改道**不在此列：vue-router 会跟着改道跳完再 resolve，
          * `NavigationFailureType` 里压根没有 redirected 这一项。）

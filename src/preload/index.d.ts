@@ -1457,7 +1457,7 @@ declare global {
       onPinChanged: (callback: (pinned: boolean) => void) => () => void
       onResetSession: (callback: () => void) => () => void
     }
-    /** 从标签栏拖出来的独立聊天窗口，以及它和主窗口之间的对话同步 */
+    /** 从标签栏拖出来的独立对话窗口，以及它和主窗口之间的对话同步 */
     chatWindow: {
       /** 打开这条对话的独立窗口；已经开着就提到前面。坐标是松手处的屏幕坐标 */
       open: (args: {
@@ -1467,16 +1467,16 @@ declare global {
       }) => Promise<{ success: boolean; error?: string }>
       /** 现在开在独立窗口里的对话 */
       list: () => Promise<string[]>
-      /** 独立窗口报上它那条对话的内核会话 id（审批镜像按它找窗口） */
+      /** 独立窗口报上它那条对话的内核 session id（审批镜像按它找窗口） */
       bindAgentSession: (args: { chatSid: string; agentSessionId: string }) => void
       /** 在主窗口里打开一个路由（独立窗口里点了属于主界面的东西） */
       openInMain: (path: string) => void
       push: (patch: ChatSyncPatch) => void
       /** 独立窗口要一份这条对话的最新全量，主窗口用 full 补丁回 */
       requestSnapshot: (chatSid: string) => void
-      /** 把这几条会话的待审批补发给自己 */
+      /** 把这几个内核 session 的待审批补发给自己 */
       resendApprovals: (sessionIds: string[]) => Promise<number>
-      /** 别的窗口正在跑的 agent 会话 */
+      /** 别的窗口正在跑的内核 session */
       runsElsewhere: () => Promise<string[]>
       /** 这些 on* 一律返回取消订阅的函数 */
       onChanged: (callback: (chatSids: string[]) => void) => () => void
@@ -1701,7 +1701,7 @@ declare global {
         error?: string
       }>
     }
-    /** 顶栏状态监控：这条会话归属的工程现在的编辑器状况 */
+    /** 顶栏状态监控：这条对话归属的工程现在的编辑器状况 */
     ueEditorHealth: {
       get: (params: { projectPath: string }) => Promise<EditorHealthResult>
     }
@@ -2239,7 +2239,7 @@ declare global {
       }>
     }
     /**
-     * 聊天附件解释 API
+     * 对话附件解释 API
      *
      * 视频、PDF、Word 这类文件模型吃不下，得先在本地解释成描述文本或图片帧。
      */
@@ -2342,7 +2342,7 @@ declare global {
        */
       check: () => Promise<{ configured: boolean; defaultModel: string }>
     }
-    /** 实时语音会话。密钥只在主进程，渲染层只负责麦克风与喇叭 */
+    /** 实时语音连接。密钥只在主进程，渲染层只负责麦克风与喇叭 */
     realtimeVoice: {
       /** 上行采样率。开会话之前问，麦克风要赶在连接之前开起来攒首字 */
       audioSpec: () => Promise<
@@ -2821,14 +2821,14 @@ declare global {
       getInstructions: () => Promise<{ text: string; limit: number; path: string }>
       setInstructions: (text: string) => Promise<{ success: boolean; error?: string }>
     }
-    /** agent 系统通知：用户点了之后界面要跳到那条会话 */
+    /** agent 系统通知：用户点了之后界面要跳到那条对话 */
     agentNotifications: {
       /** 取走主进程存着的那条激活（取走即清）。推送落空时靠它补回来 */
       takePending: () => Promise<NotificationActivatePayload | null>
       /** 回话：这条激活认没认出来。没认出来主进程会把通知重新弹一条 */
       reportActivation: (result: NotificationActivationResult) => Promise<void>
     }
-    /** 系统托盘菜单：界面报最近会话、取还没送到的托盘动作 */
+    /** 系统托盘菜单：界面报最近对话、取还没送到的托盘动作 */
     tray: {
       /** 最近活跃的三条对话变了，主进程据此重建菜单 */
       setRecentSessions: (sessions: TrayRecentSession[]) => Promise<{ success: boolean }>
@@ -3144,7 +3144,7 @@ declare global {
       ) => void
       /** 关掉当前页面 */
       close: (sessionId?: string) => Promise<{ success: boolean }>
-      /** 查询状态；进入会话时传 restore 恢复已保存页面 */
+      /** 查询状态；进入对话时传 restore 恢复已保存页面 */
       getState: (
         sessionId?: string,
         restore?: boolean
@@ -3162,7 +3162,7 @@ declare global {
       }>
     }
     agentV3: {
-      /** 发起一轮对话。会自动恢复该 sessionId 此前的 transcript */
+      /** 发起一轮。会自动恢复该 sessionId 此前的 transcript */
       execute: (args: {
         sessionId: string
         prompt: string
@@ -3183,9 +3183,9 @@ declare global {
         images?: Array<{ type: 'image'; data: string; mimeType: string }>
         /** 随这轮带的音视频（本地路径）。主进程决定传对象存储换链接，还是只给路径 */
         mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
-        /** 这条会话归属的 UE 工程；主进程只知道「谁连着」，归属得由渲染层带下来 */
+        /** 这条对话归属的 UE 工程；主进程只知道「谁连着」，归属得由渲染层带下来 */
         sessionProject?: AgentV3SessionProject | null
-        /** 这条会话绑着的知识库。绑了主进程才给 search_notebook_sources 工具 */
+        /** 这条对话绑着的知识库。绑了主进程才给 search_notebook_sources 工具 */
         notebook?: { id: string; title?: string } | null
         /**
          * 用户按下发送那一刻的编辑器状态（闪存）。
@@ -3194,7 +3194,7 @@ declare global {
          * `null` 是用户明确去掉了，不传是这个入口还没接。
          */
         editorSnapshot?: EditorSnapshot | null
-        /** 这条会话绑定的模型。不传就用执行记录里那份，都没有按全局默认绑定 */
+        /** 这条对话绑定的模型。不传就用执行记录里那份，都没有按全局默认绑定 */
         sessionModel?: { providerId: string; modelId: string }
       }) => Promise<{
         success: boolean
@@ -3204,7 +3204,7 @@ declare global {
         modelId?: string
         providerId?: string
         toolCount?: number
-        /** 这次会话真正拿到的工具名。数量答不了「那个工具在不在池里」，只能逐个核对 */
+        /** 这条内核 session 真正拿到的工具名。数量答不了「那个工具在不在池里」，只能逐个核对 */
         toolNames?: string[]
         ueConnected?: boolean
         restoredMessages?: number
@@ -3216,7 +3216,7 @@ declare global {
         sessionProject?: AgentV3SessionProject | null
         /** 不带的话续跑会退回默认的「每步都问」，而用户什么都没改过 */
         approvalMode?: AgentV3ApprovalMode
-        /** 会话此刻绑的模型；用户报错后换了模型再续跑，得用新的 */
+        /** 对话此刻绑的模型；用户报错后换了模型再续跑，得用新的 */
         sessionModel?: { providerId: string; modelId: string }
       }) => Promise<{
         success: boolean
@@ -3226,13 +3226,13 @@ declare global {
         restoredMessages?: number
       }>
       /**
-       * 用户在界面上改了这条会话归属哪个工程（顶栏胶囊、侧边栏「归入工程 / 移出项目」）。
+       * 用户在界面上改了这条对话归属哪个工程（顶栏胶囊、侧边栏「归入工程 / 移出项目」）。
        *
        * 必须发这一条：归属的主人是主进程那张表，而随消息捎带的那份戳只在表里
-       * 还空着时用来初始化。不发的话，会话发过第一条消息之后用户再改归属，
+       * 还空着时用来初始化。不发的话，对话发过第一条消息之后用户再改归属，
        * 主进程永远收不到 —— 胶囊上写着新工程，引擎命令还发往旧的那个。
        *
-       * `project: null` = 移出项目。`sessionId` 是**内核**会话 id。
+       * `project: null` = 移出项目。`sessionId` 是**内核** session id。
        */
       setSessionProject: (args: {
         sessionId: string
@@ -3261,7 +3261,7 @@ declare global {
         mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
         /** 已经解析好的文档 / 表格正文 */
         contextText?: string
-        /** 撤回这一条要用的号。会话已经收尾、内核不收时没有它 */
+        /** 撤回这一条要用的号。这一轮已经收尾、内核不收时没有它 */
       }) => Promise<{
         success: boolean
         /** 按码拒绝（NOT_RUNNING / PROJECT_MISMATCH）时带，渲染层查文案用 */
@@ -3290,14 +3290,14 @@ declare global {
        */
       captureEditorSnapshot: (args: {
         sessionProject?: AgentV3SessionProject | null
-        /** 这条会话正在跑时传它的 agent 会话号：排队的和插的都要跟着那一轮的工程 */
+        /** 这条对话正在跑时传它的内核 session id：排队的和插的都要跟着那一轮的工程 */
         runningSessionId?: string
       }) => Promise<{ success: true; data: EditorSnapshotCaptureResult }>
       /**
-       * 停止一条会话。**等它真的停下来**才返回。
+       * 停止一条内核 session。**等它真的停下来**才返回。
        *
        * `drained` 为 false 表示等超时了它还没停 —— 这时紧接着再 execute 一次
-       * 会被主进程以「会话正在执行中」拒掉，调用方该改成提示用户稍后再试。
+       * 会被主进程以 `SESSION_BUSY` 拒掉，调用方该改成提示用户稍后再试。
        */
       stop: (args: {
         sessionId: string
@@ -3314,15 +3314,15 @@ declare global {
       }>
       /** 全部强制解锁 —— 逃生口。锁卡死时用户唯一的出路 */
       releaseAllLocks: () => Promise<{ success: boolean; released: number }>
-      /** 目标模式（`/goal`）这条会话的目标。没有时 goal 为 null；settled = 这一轮复核已有结论 */
+      /** 目标模式（`/goal`）这条内核 session 的目标。没有时 goal 为 null；settled = 这一轮复核已有结论 */
       goalState: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; goal: { objective: string; settled: boolean } | null }>
-      /** 取消这条会话的目标。正在跑的时候不行（errorKey 'running'） */
+      /** 取消这条内核 session 的目标。正在跑的时候不行（errorKey 'running'） */
       goalEnd: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; error?: string; errorKey?: 'running' }>
-      /** 工作室模式（`/team`）的任务板面板。不是工作室的会话 team 为 null */
+      /** 工作室模式（`/team`）的任务板面板。不是工作室的内核 session team 为 null */
       teamState: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; team: TeamStateView | null }>
@@ -3342,7 +3342,7 @@ declare global {
       teamEnd: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; error?: string; errorKey?: 'running' }>
-      /** 改某条会话的审批档位。运行中也立刻生效，下一个工具调用就按新档位走 */
+      /** 改某条对话的审批档位（`sessionId` 传它当前的内核 session id）。运行中也立刻生效，下一个工具调用就按新档位走 */
       setApprovalMode: (args: {
         sessionId: string
         approvalMode: AgentV3ApprovalMode
@@ -3363,7 +3363,7 @@ declare global {
         answers?: string[]
       }) => void
       /**
-       * 刷新页面后重新接回还在跑的会话。
+       * 刷新页面后重新接回还在跑的内核 session。
        *
        * 传界面记得的那些 sessionId，回其中**真的还在主进程里跑**的那些
        * （`pendingApprovals` / `pendingQuestions` 是顺带补发的审批弹窗和
@@ -3429,7 +3429,7 @@ declare global {
         levelMap: Record<string, string | null>
         modelId: string
       } | null>
-      /** 这条会话绑定的模型（执行记录里那份）。没绑过为 null */
+      /** 这条对话绑定的模型（执行记录里那份）。没绑过为 null */
       sessionModel: (args: {
         sessionId: string
       }) => Promise<{ providerId: string; modelId: string } | null>
@@ -3472,9 +3472,9 @@ declare global {
       loadSession: (args: { sessionId: string }) => Promise<{ messages: unknown[] }>
       deleteSession: (args: { sessionId: string }) => Promise<{ success: boolean; error?: string }>
       /**
-       * 会话分支：把 transcript 复制成一个新 sessionId，之后两边各聊各的。
+       * 分支：把 transcript 复制成一个新 sessionId，之后两边各聊各的。
        *
-       * `keepUserTurns` 是「从这条往后砍掉」——只复制前这么多个用户回合；
+       * `keepUserTurns` 是「从这条往后砍掉」——只复制前这么多个用户轮次；
        * 不给就整份复制。`reason` 是失败的**类型**（'busy'=正在跑，
        * 'missing'=还没有 transcript / 截完是空的），措辞归渲染层。
        */
@@ -3486,7 +3486,7 @@ declare global {
         error?: string
       }>
       /**
-       * 把 transcript 截回前 `keepUserTurns` 个用户回合 —— 重新生成 / 编辑消息用。
+       * 把 transcript 截回前 `keepUserTurns` 轮 —— 重新生成 / 编辑消息用。
        *
        * 界面删掉气泡只动渲染层那份历史，内核每轮都从盘上恢复自己那份；不截的话
        * 模型看着刚被丢掉的答案再答一遍。`reason` 同 `forkSession`。
@@ -3696,7 +3696,7 @@ declare global {
    */
   type AgentV3SkillLearning = 'off' | 'ask' | 'auto'
 
-  /** always = 批准且本会话内该工具不再询问 */
+  /** always = 批准且本对话内该工具不再询问（按内核 session 记：重启、清空对话、切到 Ask 模式后失效，分出的新对话也不继承） */
   type AgentV3ApprovalVerdict = 'approve' | 'always' | 'reject'
 
   /**
@@ -3796,9 +3796,9 @@ declare global {
   }
 
   /**
-   * 会话归属的 UE 工程（侧边栏按它分组）。
+   * 对话归属的 UE 工程（侧边栏按它分组）。
    *
-   * 和「当前连着的工程」不是一回事：会话的归属在第一条消息时就定死了，
+   * 和「当前连着的工程」不是一回事：对话的归属在第一条消息时就定死了，
    * 之后用户可能关了那个工程去开另一个。
    */
   interface AgentV3SessionProject {

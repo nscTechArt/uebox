@@ -22,13 +22,13 @@ import { listConnectedProjects } from '../composables/ueProjectContext'
 import type { ChatSessionProject } from '@renderer/store/modules/chatSessions'
 
 interface Props {
-  /** 当前会话 ID；为空时不显示 */
+  /** 当前对话 ID；为空时不显示 */
   chatSid?: string
   /**
    * 侧边栏在工程标题上点「+」时带过来的工程名（路由参数 `?project=`）。
    *
-   * 这条会话要等第一条消息才进 store，在那之前它的归属只存在于路由上；
-   * 不认这个值的话，用户明明是在某个工程下新建的会话，右上角却写着
+   * 这条对话要等第一条消息才进 store，在那之前它的归属只存在于路由上；
+   * 不认这个值的话，用户明明是在某个工程下新建的对话，右上角却写着
    * 「未归属项目」，看起来就像点了没用。
    */
   pendingProjectName?: string
@@ -65,14 +65,14 @@ function toConnectedRefs(projects: unknown[]): ConnectedProjectRef[] {
 const connectedProjectsRaw = useConnectedProjects()
 const connectedProjects = computed(() => toConnectedRefs(connectedProjectsRaw.value ?? []))
 
-/** 待定归属：会话还没进 store 之前，先按侧边栏点「+」时选的工程显示 */
+/** 待定归属：对话还没进 store 之前，先按侧边栏点「+」时选的工程显示 */
 const pendingProject = computed<ChatSessionProject | null>(() => {
   const name = props.pendingProjectName.trim()
   return name ? { projectName: name } : null
 })
 
 /**
- * 会话上真正定过的归属。
+ * 对话上真正定过的归属。
  *
  * `undefined` 是「还没定过」，`null` 是用户明说了「不归属」—— 后者不能再回落到
  * 待定值上，否则点了「移出项目」胶囊纹丝不动。
@@ -88,7 +88,7 @@ const sessionProject = computed<ChatSessionProject | null>(() =>
 const projectName = computed<string>(() => sessionProject.value?.projectName || '')
 
 /**
- * 当前会话所属的那个已连接工程。
+ * 当前对话所属的那个已连接工程。
  *
  * 和主进程 `matchConnectedProject` 同一个规矩：戳上有路径就只认路径 ——
  * 同名的另一个工程连着不算；老戳没路径才退到名字。
@@ -104,7 +104,7 @@ const matchedConnected = computed<ConnectedProjectRef | undefined>(() => {
   return connectedProjects.value.find((item) => item.projectName.trim().toLowerCase() === name)
 })
 
-/** 当前会话所属的工程此刻是否正连着编辑器 */
+/** 当前对话所属的工程此刻是否正连着编辑器 */
 const isConnected = computed<boolean>(() => Boolean(matchedConnected.value))
 
 const engineVersion = computed<string>(
@@ -131,8 +131,8 @@ const tooltip = computed<string>(() => {
 function assignProject(project: ConnectedProjectRef): void {
   if (!props.chatSid) return
 
-  // 新开的会话在发第一条消息之前还没进 store，直接 setProject 会静默落空。
-  // 用户点了「归入项目」就是明确表态，先把这条会话建出来再盖戳。
+  // 新开的对话在发第一条消息之前还没进 store，直接 setProject 会静默落空。
+  // 用户点了「归入项目」就是明确表态，先把这条对话建出来再盖戳。
   // 标题用 useChatFlow 比对的同一个 key，免得首条消息的自动改名失效。
   chatStore.ensureSession(props.chatSid, t('assistant.chatFlow.unnamedChat'))
 
@@ -146,7 +146,7 @@ function assignProject(project: ConnectedProjectRef): void {
 function clearProject(): void {
   if (!props.chatSid) return
 
-  // 和上面同理：会话还没建出来时，「移出项目」也得留下痕迹，
+  // 和上面同理：对话还没建出来时，「移出项目」也得留下痕迹，
   // 否则待定归属还挂在路由上，首条消息一发又被盖回去。
   chatStore.ensureSession(props.chatSid, t('assistant.chatFlow.unnamedChat'))
   chatStore.clearProject(props.chatSid)

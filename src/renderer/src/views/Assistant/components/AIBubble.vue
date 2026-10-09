@@ -809,7 +809,7 @@ function onToggleRunFold(): void {
  * sessionId 从条目里取，不从 props 传：这张卡片嵌在时间线的第三层，
  * 靠 props 层层往下传的话中间每一层都要为它加一个自己用不上的参数
  * （见 `shared/agentQuestion.ts` 的说明）。取不到就只能放弃 ——
- * 主进程那边会等到超时按取消处理，但至少不会把答案送错会话。
+ * 主进程那边会等到超时按取消处理，但至少不会把答案送错对话。
  */
 function onQuestionAnswer(
   question: AgentQuestionItem,
@@ -1650,9 +1650,9 @@ function waitForSessionProject(waitMs: number): Promise<boolean> {
 }
 
 /**
- * 引擎没连上时问一句要不要打开这条会话的工程；用户同意就打开并等它连上。
+ * 引擎没连上时问一句要不要打开这条对话的工程；用户同意就打开并等它连上。
  *
- * 不知道该开哪个工程（会话没绑工程、库里没有 .uproject）、或者工程其实连着
+ * 不知道该开哪个工程（对话没绑工程、库里没有 .uproject）、或者工程其实连着
  * （那是引擎那边跑失败了，再开一个也没用）时不问，照旧显示「只做了命名检查」。
  * 返回 true 表示工程已经连上，可以重新审查。
  */

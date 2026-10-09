@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 顶栏的状态监控：这条会话归属的工程，编辑器现在的状况。
+ * 顶栏的状态监控：这条对话归属的工程，编辑器现在的状况。
  *
  * - 工程没连着编辑器：整个按钮不出现
  * - 一切正常：灰色图标
@@ -30,7 +30,7 @@ import type {
 const props = withDefaults(
   defineProps<{
     chatSid?: string
-    /** 会话还没进 store 时的待定归属，同 SessionProjectChip */
+    /** 对话还没进 store 时的待定归属，同 SessionProjectChip */
     pendingProjectName?: string
   }>(),
   { chatSid: '', pendingProjectName: '' }
@@ -144,7 +144,7 @@ function label(item: EditorHealthItem): string {
   return t(`assistantTopNav.statusMonitor.item.${item.id}`)
 }
 
-/** 把问题填进这条会话的输入框，发不发由用户决定 */
+/** 把问题填进这条对话的输入框，发不发由用户决定 */
 function askAi(item: EditorHealthItem): void {
   if (!props.chatSid) return
   chatStore.setDraft(

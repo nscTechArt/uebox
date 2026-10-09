@@ -160,9 +160,9 @@ export const initNotebookModel = (db: Database.Database): void => {
     // 字段已存在
   }
 
-  // 这里曾经还有三列 `linked_project_*`（知识库自己的「关联工程」）。它和会话身上的
+  // 这里曾经还有三列 `linked_project_*`（知识库自己的「关联工程」）。它和对话身上的
   // 工程归属重复，而且**从来没有传进主进程** —— 绑了也不会让 ue.* 工具指向那个工程，
-  // 纯粹是界面上的一行字。现在统一走会话归属（见 `agent-v3/core/sessionScope.ts`）。
+  // 纯粹是界面上的一行字。现在统一走对话归属（见 `agent-v3/core/sessionScope.ts`）。
   //
   // 老库里那三列还留着（SQLite 删列麻烦，而且没必要）：不读不写，下次建库就没有了。
 

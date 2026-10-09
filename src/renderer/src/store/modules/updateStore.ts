@@ -20,7 +20,7 @@ import { updaterAPI } from '@renderer/api/updater'
  *
  * 启动检查可能跑在渲染进程加载完之前。主进程是 `webContents.send`，
  * 没人听就是丢了。主进程那边的 status 会留着结果，所以订阅完必须再问一次快照，
- * 否则启动时查到的新版本在这个会话里永远显示不出来。
+ * 否则启动时查到的新版本，这次运行里就再也显示不出来了。
  */
 
 /** 更新流程所处的阶段。互斥，界面按它一个值决定显示什么 */
@@ -124,7 +124,7 @@ export const useUpdateStore = defineStore('update', () => {
      * 抑制的前提是「关于页会自己弹确认框」，而那个面板是 v-else-if 挂载的：
      * 用户点完检查随手切到别的设置分页，面板卸载、它的 watch(phase) 一起没了，
      * 于是提示既没 toast 也没弹窗 —— 而之后每一次后台检查都会撞上
-     * `announcedVersion === version` 提前返回，这个版本整个会话再也不会提示。
+     * `announcedVersion === version` 提前返回，这个版本这次运行里再也不会提示。
      * 那正是这个 Store 文件头说它要解决的毛病。
      */
     if (manualCheckInFlight) return
@@ -259,7 +259,7 @@ export const useUpdateStore = defineStore('update', () => {
       // 失败了不推任何事件（autoUpdater 的 handleUpdateError 只在非静默时通知），
       // 于是 phase 永远停在 checking：角标不显示（hasUpdateNews 不含 checking），
       // 关于页的 `if (isChecking.value) return` 又把按钮彻底堵死 —— 没提示、没报错，
-      // 最长要等 4 小时后的下一次后台检查，断网就是一整个会话。
+      // 最长要等 4 小时后的下一次后台检查，断网的话，整次运行都卡在这里。
       //
       // 正在查这件事本来也没什么可显示的：真查出结果会推事件过来，那时再进状态。
     } catch (error) {
@@ -289,7 +289,7 @@ export const useUpdateStore = defineStore('update', () => {
    * 事件都是在主进程 handler resolve 之前推过来的，所以 await 回来时
    * `sawEventThisRound` 还是假，就说明这一轮一个事件都没发。主进程有三条这样的
    * 分支，而且它们全都返回 success —— 不自己退回去的话 phase 永远卡在 checking，
-   * isChecking 永远为真，「检查更新」按钮这个会话就此报废。
+   * isChecking 永远为真，「检查更新」按钮在重启之前都用不了了。
    */
   function finishCheck(
     before: UpdatePhase,

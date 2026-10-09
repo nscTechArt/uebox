@@ -2,7 +2,7 @@
   <div v-if="locks.length > 0 || conflicts.length > 0" class="asset-lock-indicator">
     <!--
       冲突提示。用户必须看得见 —— 他可能开着两个窗口，以为两边在干不同的活；
-      静默失败的话他只会看到一条会话莫名其妙地绕开了任务。
+      静默失败的话他只会看到一条对话莫名其妙地绕开了任务。
     -->
     <div v-for="(conflict, index) in conflicts" :key="`${conflict.path}-${index}`" class="conflict">
       <PhWarning class="conflict-icon" />
@@ -100,7 +100,7 @@ const expanded = ref(false)
 /**
  * connectionId → 工程名。
  *
- * 锁是按连接记的，连接才是「锁在哪个工程」的真相；会话上盖的工程只是它第一次
+ * 锁是按连接记的，连接才是「锁在哪个工程」的真相；对话上盖的工程只是它第一次
  * 发消息时连着的那个，之后可能换过。只在展开、且锁涉及的连接变了时查一次。
  */
 const projectNames = ref<Record<string, { name: string; path?: string }>>({})
@@ -119,7 +119,7 @@ watch(
         projects.map((p) => [p.connectionId, { name: p.projectName, path: p.projectPath }])
       )
     } catch {
-      // 查不到就退回会话上记的工程
+      // 查不到就退回对话上记的工程
     }
   },
   { immediate: true }
@@ -171,14 +171,14 @@ function openSession(owner: string): void {
 const shortPath = (path: string): string => path.split('/').pop() || path
 
 /**
- * 锁主的 sessionId → 会话标题。
+ * 锁主的 sessionId → 对话标题。
  *
- * 主进程那边只有 id（会话标题存在渲染层的 chatSessions store 里），所以这一步
+ * 主进程那边只有 id（对话标题存在渲染层的 chatSessions store 里），所以这一步
  * 只能在这儿做 —— 而它必须做：真机上用户看到的是「被会话 b04ba478… 占用」，
  * 一串 uuid 既不告诉他是自己哪个窗口，也不告诉他该做什么。
  *
- * **先按 `agentSessionId` 查。** 锁主是内核那边的会话 id（`agent-v3:execute`
- * 收到的那个），跟界面这边的会话 `id` 不是一回事。原来直接拿它去 `sessionById`，
+ * **先按 `agentSessionId` 查。** 锁主是内核那边的 session id（`agent-v3:execute`
+ * 收到的那个），跟界面这边的对话 `id` 不是一回事。原来直接拿它去 `sessionById`，
  * 于是**每一把锁都查不到**，全部显示成「另一条对话」—— 包括用户自己此刻正在
  * 用的这条。再退回按界面 id 查一次，是因为小窗口那类入口两个 id 可能同源。
  */

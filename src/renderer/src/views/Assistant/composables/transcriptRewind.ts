@@ -9,11 +9,11 @@
  * 的那个答案，被要求再答一遍同一个问题。用户以为是重来，对模型而言是追问，
  * 答出来常常是「如前所述……」。编辑消息同理。
  *
- * ## 对齐靠「第几个用户回合」
+ * ## 对齐靠「第几轮」
  *
  * 两边的下标对不上：界面一轮是一条用户气泡加一条回复气泡，内核一轮是 1 条 user
  * 加 n 条 assistant/toolResult（n 随这一轮调了几次工具变）。能对上的只有
- * 「这是第几个用户回合」，所以两边都按它切 —— 内核那半在
+ * 「这是第几轮」，所以两边都按它切 —— 内核那半在
  * `main/agent-v3/core/transcriptStore.ts` 的 `sliceToUserTurns`。
  *
  * 同一套对齐也撑着分支（`chatBranch.ts`）：retry 每污染一次 transcript，
@@ -41,13 +41,13 @@ export function countUserTurnsBefore(messages: { role: string }[], before: numbe
 }
 
 /**
- * 把内核 transcript 截回 `keepUserTurns` 个用户回合。
+ * 把内核 transcript 截回 `keepUserTurns` 轮。
  *
  * **失败不拦重发。** 截断是为了让这一轮问得干净，不是重发的前置条件；
  * 因为它没成而把用户点的「重新生成」按下不动，比多带一轮旧上下文糟得多。
  * 所以这里只在出问题时留一条日志，返回值给测试和调用方参考。
  *
- * 没有 agentSessionId 的会话（普通对话、知识库聊天）根本没有内核那份历史，
+ * 没有 agentSessionId 的对话（普通对话、知识库对话）根本没有内核那份历史，
  * 直接跳过。
  */
 export async function rewindTranscript(
@@ -59,17 +59,17 @@ export async function rewindTranscript(
 
   try {
     const result = await truncate(agentSessionId, keepUserTurns)
-    // 'missing' 是正常的：这条会话还没落过盘（第一轮就点了重新生成），
+    // 'missing' 是正常的：这条内核 session 还没落过盘（第一轮就点了重新生成），
     // 本来就没有多余的历史要截
     if (!result.success && result.reason !== 'missing') {
       console.warn(
-        `[会话回退] transcript 截断失败（${result.reason ?? result.error}），` +
+        `[对话回退] transcript 截断失败（${result.reason ?? result.error}），` +
           '这一轮模型可能还带着被丢弃的上下文'
       )
     }
     return result
   } catch (error) {
-    console.error('[会话回退] transcript 截断异常:', error)
+    console.error('[对话回退] transcript 截断异常:', error)
     return { success: false, error: (error as Error).message }
   }
 }

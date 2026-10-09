@@ -1001,7 +1001,7 @@ describe('useRealtimeVoice', () => {
 
   /*
    * 聊天界面那条路的发起是异步的：invoke 要等整轮跑完才返回，
-   * 「会话正在执行中」这种拒绝是回调里才到的 —— 抛不出异常，得有条晚一点报的路
+   * `SESSION_BUSY` 这种拒绝是回调里才到的 —— 抛不出异常，得有条晚一点报的路
    */
   it('启动失败晚一点才知道的，通过 fail 回报也能撤销登记', async () => {
     const harness = await connect({

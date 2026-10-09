@@ -69,7 +69,7 @@ function createInitialState(chatSid: string, agentSessionId: string): AgentStrea
  * Agent 流式状态 Store
  *
  * 核心设计原则：
- * 1. 按 chatSid 隔离存储每个会话的流式状态
+ * 1. 按 chatSid 隔离存储每个对话的流式状态
  * 2. 事件分发器直接更新 Store，不依赖组件闭包
  * 3. 组件通过 computed 从 Store 读取状态
  *
@@ -94,14 +94,14 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   // ==================== Getters ====================
 
   /**
-   * 获取指定会话的流式状态
+   * 获取指定对话的流式状态
    */
   function getStream(chatSid: string): AgentStreamState | undefined {
     return streams.get(chatSid)
   }
 
   /**
-   * 检查指定会话是否正在流式生成
+   * 检查指定对话是否正在流式生成
    */
   function isStreaming(chatSid: string): boolean {
     const state = streams.get(chatSid)
@@ -109,7 +109,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   }
 
   /**
-   * 这条会话**在后台还没被释放**：已经发出去了，但主进程那边还没说「空出来了」。
+   * 这条对话**在后台还没被释放**：已经发出去了，但主进程那边还没说「空出来了」。
    *
    * 独立于 `streams` 存，因为两头都靠不住：`isStreaming` 在收到 `done` 那一刻就
    * 变 false，而 `cleanupStream` 会把整份状态删掉 —— 释放信号可能比它们晚。
@@ -123,7 +123,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
    *
    * 主进程收尾的顺序是：发 `done`（事件流最后一条）→ `prompt()` 返回 →
    * `finally` 里 `activeAgents.release()` → 发 `released`。这中间的间隙里再
-   * `execute`，会被 `reserveRun` 以「会话正在执行中」顶回来 —— 而排队投递是
+   * `execute`，会被主进程以 `SESSION_BUSY` 顶回来 —— 而排队投递是
    * **先出队再发**的，被顶回来的那条话就没了，用户什么也不会看到。
    *
    * 所以「能不能发下一条」只认这个：流还在跑，**或者**跑完了还没等到释放。
@@ -139,9 +139,9 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   /**
    * 正在**别的窗口**里跑的对话（chatSid）。
    *
-   * 独立聊天窗口显示的对话可能是主窗口发起的那一轮，反过来也一样 —— 事件只发给
+   * 独立对话窗口显示的对话可能是主窗口发起的那一轮，反过来也一样 —— 事件只发给
    * 发起的窗口，这边的流式状态里没有它，`isStreaming` 一直是 false。不看这张表的话，
-   * 这边一发消息就会被主进程顶回来一句「正在执行中」，排着的跟进消息也会抢着发。
+   * 这边一发消息就会被主进程顶回来一个 `SESSION_BUSY`，排着的跟进消息也会抢着发。
    * 由 `chatWindowSync.ts` 按主进程的通知维护。
    */
   const busyElsewhere = reactive(new Set<string>())
@@ -192,7 +192,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   /**
    * 初始化流式状态（开始新的流式生成时调用）。
    *
-   * `seed` 只有**刷新页面后重新接管一条还在跑的会话**时才传：那时正文和过程
+   * `seed` 只有**刷新页面后重新接管一条还在跑的对话**时才传：那时正文和过程
    * 时间线已经有半截了（落在消息里），不带着它们起步的话，后面的增量会从空
    * 开始累积，而界面写回消息时用的就是这根累积字符串 —— 刷新前说过的话会被
    * 后半截整段覆盖掉。
@@ -221,7 +221,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
    *
    * 一次回答里模型会想好几轮（想 → 调工具 → 再想），全文只有一根累积字符串的话，
    * 界面只能把所有推理挤进顶部一个框。时间线上记的是这一段在 `currentThinking`
-   * 里的起止位置，不是再存一份正文 —— 推理动辄几万字，存两份会把落盘的聊天记录撑大一倍。
+   * 里的起止位置，不是再存一份正文 —— 推理动辄几万字，存两份会把落盘的对话记录撑大一倍。
    * 连续的推理并进同一段，段与段之间天然被工具调用和正文切开。
    */
   function appendThinkingTo(state: AgentStreamState, delta: string): void {
@@ -352,7 +352,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
    * 记在**当前位置**而不是消息列表末尾：插话发生在某两步之间，挂到最后的话
    * 后面 agent 又干了十件事，那句话却永远浮在屏幕最下方，看起来像是没被处理。
    *
-   * 返回 false 表示这个会话没有正在跑的流 —— 调用方据此退回普通用户气泡。
+   * 返回 false 表示这个对话没有正在跑的流 —— 调用方据此退回普通用户气泡。
    *
    * `steerId` 是主进程给的号，撤回时要拿它指认是哪一条。没有它（主进程那版
    * 还没返回号、或者这条是别处补记的）时间线上就不给撤回按钮 ——
@@ -445,7 +445,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
    * （见 `host/questionChannel.ts` 的 `resendPendingQuestions`），不去重的话
    * 时间线上会长出两张一模一样的卡片，用户答了其中一张，另一张还在那儿等。
    *
-   * 返回 false 表示这个会话没有正在跑的流 —— 调用方据此知道这张卡片没地方放。
+   * 返回 false 表示这个对话没有正在跑的流 —— 调用方据此知道这张卡片没地方放。
    */
   function pushQuestion(agentSessionId: string, item: AgentQuestionItem): boolean {
     const state = getStreamByAgentSession(agentSessionId)
@@ -457,7 +457,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
     if (existing) return true
 
     // 把 sessionId 一起存进条目：卡片渲染自消息里的 agentProcess，
-    // 那份数据不带会话上下文，而用户点「提交」时必须有它才能把答案送回去
+    // 那份数据不带内核 session 上下文，而用户点「提交」时必须有它才能把答案送回去
     state.agentProcess.push({
       type: 'question',
       data: { ...item, sessionId: agentSessionId },
@@ -489,15 +489,15 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   }
 
   /**
-   * 这条会话有没有一张还没答的提问卡片。**按 chatSid 查**，给侧边栏用。
+   * 这条对话有没有一张还没答的提问卡片。**按 chatSid 查**，给侧边栏用。
    *
    * 为什么需要它：`ask_user` 没有超时（见主进程 `host/questionChannel.ts`），
    * 没人回答就一直等着。那是有意的 —— 宁可卡着也不替用户做关键选择。代价是
-   * 一次没被注意到的提问会让会话无声占着不放，而**唯一的提示是时间线上那张卡片**，
-   * 用户切到别的会话就再也看不见。
+   * 一次没被注意到的提问会让对话无声占着不放，而**唯一的提示是时间线上那张卡片**，
+   * 用户切到别的对话就再也看不见。
    *
    * 判据是「有 question 条目且还没有 action」：`resolveQuestion` 在用户答完时写上
-   * action，`closePendingQuestions` 在会话收尾时按 cancel 封掉 —— 两条路都会让
+   * action，`closePendingQuestions` 在这一轮收尾时按 cancel 封掉 —— 两条路都会让
    * 这里自然变回 false，不需要额外的清理点。
    */
   function hasPendingQuestion(chatSid: string): boolean {
@@ -507,7 +507,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   }
 
   /**
-   * 会话收尾时，把还挂着的提问卡片按「没有回答」封掉。
+   * 这一轮收尾时，把还挂着的提问卡片按「没有回答」封掉。
    *
    * 不封的话有两个后果，而且都发生在用户看不见原因的时候：
    *
@@ -689,7 +689,7 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   /**
    * 累加一次模型往返的用量。
    *
-   * 流式状态没了就丢弃：这只发生在事件比 `initStream` 早到、或者会话已经清理
+   * 流式状态没了就丢弃：这只发生在事件比 `initStream` 早到、或者对话已经清理
    * 之后还有零星事件的时候，为了一个统计数字硬造一份状态不值得。
    */
   function addTurnUsage(agentSessionId: string, usage: AgentTurnUsage): void {

@@ -133,7 +133,7 @@ interface ImportTask {
   projectName?: string
   /** 远程导入模式 */
   importMode?: 'v2-session' | 'v1-batch' | 'detecting'
-  /** V2 会话 ID */
+  /** V2 导入时，服务器上这次导入的 id */
   sessionId?: string
   /** 这个任务能不能中途叫停 */
   cancellable?: boolean

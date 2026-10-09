@@ -6,7 +6,7 @@ import {
 /**
  * agent 系统通知的界面侧接口。
  *
- * 用户点了通知，主进程把窗口拉到前台之后，界面还要跳到发那条通知的会话去
+ * 用户点了通知，主进程把窗口拉到前台之后，界面还要跳到发那条通知的对话去
  * （处理逻辑在 `layout/composables/notificationActivation.ts`）。
  */
 export const agentNotificationsAPI = {

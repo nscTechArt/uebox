@@ -36,9 +36,9 @@ export interface AgentQuestionItem {
   toolCallId: string
   questions: AgentQuestion[]
   /**
-   * 这张卡片属于哪条 agent 会话。**只有渲染层填**。
+   * 这张卡片属于哪条内核 session。**只有渲染层填**。
    *
-   * 卡片渲染自消息里的 `agentProcess`，那份数据不带会话上下文 —— 用户点了
+   * 卡片渲染自消息里的 `agentProcess`，那份数据不带内核 session 上下文 —— 用户点了
    * 「提交」时手上必须有 sessionId 才能把答案送回去。存进条目里而不是靠组件
    * 层层往下传 props：这张卡片嵌在时间线的第三层，中间每一层都得为它加一个
    * 用不上的参数。

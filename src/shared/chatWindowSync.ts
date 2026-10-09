@@ -1,5 +1,5 @@
 /**
- * 主窗口和独立聊天窗口之间同步一条对话用的补丁。
+ * 主窗口和独立对话窗口之间同步一条对话用的补丁。
  *
  * 两个窗口各有一份对话 store，谁改了就发一份补丁，主进程转给另一边
  * （见 `main/chatWindowManager.ts`）。补丁只带**变了的部分**：正在打字的那条气泡
@@ -9,7 +9,7 @@
  */
 
 export interface ChatSyncSessionPatch {
-  /** false = 这条会话记录不存在（还没发过消息，或者被删了） */
+  /** false = 这条对话记录不存在（还没发过消息，或者被删了） */
   exists: boolean
   /** 变了的字段，整个值带过来 */
   fields?: Record<string, unknown>

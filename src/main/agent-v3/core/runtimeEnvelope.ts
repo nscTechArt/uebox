@@ -64,12 +64,12 @@ export interface EnvelopeProject {
  * 引擎连接此刻的样子。**一个字段三个状态**，不是两个布尔值。
  *
  * 以前是 `engineToolsAvailable` + `connectedAtRunStart` 两个布尔，真正有意义的
- * 是它们的组合：(false, true) 才表示「用户连着，只是没连这条会话的工程」。
+ * 是它们的组合：(false, true) 才表示「用户连着，只是没连这条对话的工程」。
  * 模型得先做一次合取推导才能拿到这个事实，于是提示词里要写一句话教它怎么推 ——
  * 那句话是我们自己制造的债。三个状态直接说出来就没有那句话了。
  *
- * - `target`        工具够得着这条会话的工程
- * - `other_project` 有连接，但不是这条会话的工程（**别劝人装插件，他连着**）
+ * - `target`        工具够得着这条对话的工程
+ * - `other_project` 有连接，但不是这条对话的工程（**别劝人装插件，他连着**）
  * - `none`          这台机器上一个 UE 连接都没有
  */
 export type EngineLink = 'target' | 'other_project' | 'none'
@@ -95,9 +95,9 @@ export interface RuntimeEnvelope {
   engineLink: EngineLink
   /** 工具真正够得着的那个工程 */
   targetProject?: EnvelopeProject
-  /** 这条会话归属的工程 */
+  /** 这条对话归属的工程 */
   sessionProject?: EnvelopeProject
-  /** 连着、但不属于这条会话的工程名 */
+  /** 连着、但不属于这条对话的工程名 */
   outOfScopeProjects?: string[]
 }
 
@@ -244,7 +244,7 @@ export function withRuntimeEnvelope(prompt: string, envelope: RuntimeEnvelope | 
  *
  * 与此配套的硬约束（否则规则说了也没用）：
  * - 「没有连接」不等于「工程没打开」。`sessionScope.ts` 里 `engineAvailable`
- *   为 false 只意味着**没有映射到这条会话工程的连接**，路径键对不上时工程
+ *   为 false 只意味着**没有映射到这条对话工程的连接**，路径键对不上时工程
  *   开得好好的它也是 false。环境块必须照这个说，见 `buildEnvironmentSection`。
  * - 「工具失败」不等于「编辑器没了」。只有明说连接断了的那类错误能推出这个
  *   结论，超时/权限/参数都不能。
@@ -280,7 +280,7 @@ export const RUNTIME_ENVELOPE_RULES: readonly string[] = Object.freeze([
  * 那次健康检查会盖上一个**和任何信封都对不上**的戳，模型按规则把一份刚拿到的
  * 新鲜观测当成历史 —— 比不盖还糟。沿用最后那个 id，续跑就落在同一轮里。
  *
- * 找不到（本次改动之前的存量会话）返回 undefined，整套机制对那些会话静默失效，
+ * 找不到（本次改动之前的存量对话）返回 undefined，整套机制对那些对话静默失效，
  * 行为退回改动之前，不会更差。
  */
 export function lastRuntimeScopeId(messages: unknown[]): string | undefined {

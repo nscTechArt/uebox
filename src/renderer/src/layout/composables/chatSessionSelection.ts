@@ -1,11 +1,11 @@
 /**
- * 侧边栏会话列表的多选逻辑 —— 纯函数，不碰 Vue、不碰 store。
+ * 侧边栏对话列表的多选逻辑 —— 纯函数，不碰 Vue、不碰 store。
  *
  * 交互契约和资产库的 `useFileSelection` 一致，都是 Windows 资源管理器的标准：
  *
  * | 操作 | 行为 |
  * |---|---|
- * | 普通点击 | 没有多选时：照旧直接打开这条会话；已在多选中：只选这一条 |
+ * | 普通点击 | 没有多选时：照旧直接打开这条对话；已在多选中：只选这一条 |
  * | Ctrl / Cmd + 点击 | 把这一条加进 / 移出选择 |
  * | Shift + 点击 | 选中锚点到这一条的整段（替换之前的选择） |
  * | Esc / 批量栏的 ✕ | 清空选择 |
@@ -27,7 +27,7 @@ export interface ChatSelectionClickResult {
   /** 新锚点 */
   anchor: string
   /**
-   * 普通点击且之前没有任何选择时为 true —— 保持历史行为，直接打开这条会话。
+   * 普通点击且之前没有任何选择时为 true —— 保持历史行为，直接打开这条对话。
    * 进了多选世界后普通点击只改选择，打开交给双击。
    */
   open: boolean
@@ -55,12 +55,12 @@ export function resolveSelectionRange(
 }
 
 /**
- * 处理一条会话行上的点击，返回新的选择集、锚点和是否要打开会话。
+ * 处理一条对话行上的点击，返回新的选择集、锚点和是否要打开对话。
  *
  * @param selected 点击前的选择集
  * @param anchorId 点击前的锚点；空串表示还没有锚点
- * @param visibleIds 界面上会话行的渲染顺序（跨置顶 / 工程 / 对话区摊平）
- * @param targetId 被点的会话
+ * @param visibleIds 界面上对话行的渲染顺序（跨置顶 / 工程 / 对话区摊平）
+ * @param targetId 被点的对话
  */
 export function applySessionClick(
   selected: readonly string[],
@@ -89,7 +89,7 @@ export function applySessionClick(
 }
 
 /**
- * 把选择里已经不存在的 id 摘掉（会话被删除、归档、过滤出列表之后）。
+ * 把选择里已经不存在的 id 摘掉（对话被删除、归档、过滤出列表之后）。
  * 顺序跟随传入的选择集，剩空了批量栏自然消失。
  */
 export function pruneSelection(

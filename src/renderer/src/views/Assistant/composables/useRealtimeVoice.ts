@@ -18,7 +18,7 @@ import { speechAPI } from '@renderer/api/speech'
 import workletUrl from '@renderer/composables/pcmCapture.worklet.js?url'
 
 /**
- * 实时语音会话的渲染层这一半。
+ * 语音通话在渲染层的这一半。
  *
  * 分工：**这里只碰音频设备**（麦克风、喇叭）和前台的任务表，
  * 连接与密钥都在主进程。音频两个方向都是 base64 的 PCM16 单声道，
@@ -38,11 +38,11 @@ import workletUrl from '@renderer/composables/pcmCapture.worklet.js?url'
  *
  * ## 派发为什么不能 await
  *
- * 上一版在这儿一直等到 agent 跑完才回传工具结果，期间整条实时会话被挂着：
+ * 上一版在这儿一直等到 agent 跑完才回传工具结果，期间整个通话都卡在那里：
  * 不说话、不理插话。那就是冷场。
  *
  * 现在**立刻**回一句「已派发」，任务在后台跑。进度和结果由**主进程的任务表**
- * （`ai/realtime/taskBus.ts`）盯着 agent 的事件流，按播报纪律注入回会话。
+ * （`ai/realtime/taskBus.ts`）盯着 agent 的事件流，按播报纪律注入回实时语音连接。
  * 这边只负责一件事：报告谁在说话，好让那边知道什么时候该闭嘴。
  *
  * 完整设计。
@@ -76,7 +76,7 @@ export type VoiceEvent =
   | { type: 'closed'; reason?: 'idle_timeout' | 'session_timeout' | 'taken_over' }
 
 /**
- * 用户能理解的会话阶段。
+ * 用户能理解的通话阶段。
  *
  * `thinking` 是语音模型自己在组织回答；`executing` 是它正在调工具。
  * 两者分开，用户才能知道「没反应」和「正在查编辑器」不是一回事。
@@ -122,7 +122,7 @@ export function nextRealtimeVoicePhase(
      *
      * 上一版这里要判「是不是还在 executing」，因为那时派发是阻塞的，
      * 显示「正在听」就是撒谎。现在任务在后台跑、语音真的在听，所以判断去掉了。
-     * 后台任务的进度用户在聊天界面的 Agent 过程里看得到，不靠这个球。
+     * 后台任务的进度用户在对话界面的 Agent 过程里看得到，不靠这个球。
      */
     case 'turn-done':
       return 'listening'
@@ -136,7 +136,7 @@ export function nextRealtimeVoicePhase(
 
 /** 一条可以派活的对话，或者这通电话的一个「灶」 */
 export interface VoiceSessionRef {
-  /** agent 会话号。派活时原样传给主进程 */
+  /** 内核 session id。派活时原样传给主进程 */
   agentSessionId: string
   /** 说给用户听的名字：灶名（「灯光」），或者别的对话的标题 */
   label: string
@@ -157,7 +157,7 @@ export interface VoiceSessionRef {
   note?: string
 }
 
-/** 会话清单念成一段话。空列表也要说清楚，模型才不会接着猜 */
+/** 对话清单念成一段话。空列表也要说清楚，模型才不会接着猜 */
 export function describeSessions(sessions: VoiceSessionRef[]): string {
   const lines = sessions
     .filter((item) => item.agentSessionId)
@@ -170,7 +170,7 @@ export interface RealtimeVoiceState {
   muted: Ref<boolean>
   canInterruptByVoice: Ref<boolean>
   setMuted: (muted: boolean) => void
-  /** 会话开着 */
+  /** 通话进行中 */
   active: Ref<boolean>
   /** 正在连（点了开始、还没 ready） */
   connecting: Ref<boolean>
@@ -192,7 +192,7 @@ export interface RealtimeVoiceState {
   error: Ref<string | null>
   start: () => Promise<void>
   stop: () => Promise<void>
-  /** 保持语音连接，键盘输入成为同一条实时会话的下一轮。 */
+  /** 不挂断通话，键盘输入作为这通电话的下一轮。 */
   sendText: (text: string) => void
   /**
    * 打断它，**手动的那种**（点球体、按快捷键）。
@@ -219,7 +219,7 @@ export interface RealtimeVoiceOptions {
    *
    * 本地这一路的回声消除是固定开的（`echoCancellation` + `createAecLoopback`），
    * 这个档位管的是**厂商那一侧**的判停灵敏度 —— AEC 压不干净的残留顶过服务端
-   * VAD 的门限时，模型会把自己的尾音当成用户在说话。开会话时一次性带过去。
+   * VAD 的门限时，模型会把自己的尾音当成用户在说话。开始通话时一次性带过去。
    */
   echoGuard?: () => RealtimeEchoGuard
   /**
@@ -228,7 +228,7 @@ export interface RealtimeVoiceOptions {
    * `worker` 是模型给的灶名，空串表示它没挑 —— 挑灶的规矩（同名合并、新名并行、
    * 满了排队、不填就排最近用的那个）在实现方 `ensureVoiceWorker` 里，这一层不判断。
    *
-   * **有副作用**：灶不存在时会现建一条对话和 agent 会话号。所以只在真要派活时调，
+   * **有副作用**：灶不存在时会现建一条对话和一个内核 session id。所以只在真要派活时调，
    * 不能拿它当查询用 —— 提前调的话，开了语音没派活也会在侧边栏留一条空对话。
    */
   resolveSession: (worker?: string) => VoiceSessionRef
@@ -242,8 +242,8 @@ export interface RealtimeVoiceOptions {
    * 因为界面切走就断掉。
    *
    * 没启动起来有两种报法：当场抛异常，或者稍后调 `fail(reason)`。后者是给
-   * 「发起是异步的、失败要晚一点才知道」的入口用的 —— 聊天界面那条路就是：
-   * invoke 要等整轮跑完才返回，「会话正在执行中」这种拒绝是回调里才到的。
+   * 「发起是异步的、失败要晚一点才知道」的入口用的 —— 对话界面那条路就是：
+   * invoke 要等整轮跑完才返回，`SESSION_BUSY` 这种拒绝是回调里才到的。
    * 两种都会把那件活标成失败；已经落了终态的活再报一次是安全的。
    */
   onDispatch: (
@@ -255,7 +255,7 @@ export interface RealtimeVoiceOptions {
   /** 能派活的对话清单。不给就只有当前这条 */
   listSessions?: () => VoiceSessionRef[]
   /**
-   * 停掉某条会话上的 agent。
+   * 停掉某条内核 session 上的 agent。
    *
    * 返回**真实结果**：停不掉就返回 false，我们会照实告诉用户「没能停下」。
    * 一律报成功的话，用户以为停了、任务还在跑，那比停不掉更糟。
@@ -281,7 +281,7 @@ export interface RealtimeVoiceOptions {
    * 批错了的代价不对称：拒了大不了重来一次，批了可能是不可逆的。
    */
   onApprove?: (toolCallId: string, verdict: 'approve' | 'always' | 'reject') => void
-  /** 开语音时把普通聊天的最近历史交给实时模型。 */
+  /** 开语音时把普通对话的最近历史交给实时模型。 */
   getHistory?: () => RealtimeVoiceHistoryMessage[]
   /** 同步拍下登记时的原话，排队执行和重连不得重新取当前对白。 */
   prepareInstruction?: (instruction: string) => string
@@ -297,7 +297,7 @@ export interface RealtimeVoiceOptions {
    */
   onAnnouncement?: (text: string) => void
   /**
-   * 服务端按规矩挂断了（Box Plan：一分钟没人说话、单次会话满 30 分钟）。
+   * 服务端按规矩挂断了（Box Plan：一分钟没人说话、单次通话满 30 分钟）。
    * **不自动重连** —— 空闲挂断后重连也是挂着计费、没人说话；由宿主说一句，等用户再点
    */
   onServerHangUp?: (reason: 'idle_timeout' | 'session_timeout' | 'taken_over') => void
@@ -1126,7 +1126,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
     try {
       await options.onAssistantDone?.(text)
     } catch (error) {
-      // 聊天历史落盘失败不能把正在进行的语音连接一起掐断。
+      // 对话历史落盘失败不能把正在进行的语音连接一起掐断。
       console.warn('[Realtime Voice] 助手字幕落盘失败:', error)
     }
   }
@@ -1980,7 +1980,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
    * 这里**不挂** onBeforeUnmount。
    *
    * 原先挂了一条「组件没了就 stop」，理由是别让麦克风开着、会话计着费。
-   * 但每条对话是一个独立的 keep-alive 页面实例，切一下会话旧页面就可能被换掉 ——
+   * 但每条对话是一个独立的 keep-alive 页面实例，切一下对话，旧页面就可能被换掉 ——
    * 于是切到「语音任务」看一眼过程，通话就断了。这一路的主人是应用级的
    * `voiceAssistant.ts`，不是任何页面；挂断只由用户点球体决定，
    * 窗口整个关掉时主进程在 sender 销毁那一刻自己收尾。

@@ -142,7 +142,7 @@ async function waitUntilLive(
     // 白等一轮不说，lastError 还会是个误导人的「客户端不存在」。
     //
     // `previousProjectPath` 本来就没有时是另一回事：那说明这一轮压根没绑定
-    // 目标工程（纯对话会话），`getTargetConnectionId()` 是 undefined，
+    // 目标工程（纯对话），`getTargetConnectionId()` 是 undefined，
     // callRequest 会自己挑 —— 而且只在恰好一个连接时才挑，多连接一律拒绝。
     if (rebound || !previousProjectPath) {
       try {

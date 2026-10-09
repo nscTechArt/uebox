@@ -32,10 +32,10 @@ import {
  *
  * ## 为什么不能放在 Welcome.vue 里
  *
- * 每条对话是一个独立的 keep-alive 页面实例（缓存键带 sid）。语音会话原先由
+ * 每条对话是一个独立的 keep-alive 页面实例（缓存键带 sid）。通话状态原先由
  * Welcome.vue 里的 `useRealtimeVoice` 持有：点侧边栏切到「语音任务」那条，
  * 新页面实例的语音状态是空的，旧实例被替换掉时还顺手把麦克风关了。
- * 用户看到的就是「切一下会话，语音助手没了」。
+ * 用户看到的就是「切一下对话，语音助手没了」。
  *
  * 语音是一通电话，不是某个页面的附属品：任务跑着的时候用户要能去看
  * 「语音任务」的过程、去看资产库、去干别的，回来接着说。所以这一路放在
@@ -124,7 +124,7 @@ export function voiceChatSid(): string {
 /**
  * 这通电话开过的灶，**最近用过的排最后**。
  *
- * 只存归一后的键，其余（对话、agent 会话号）都在 store 里 —— 挂断再接上时
+ * 只存归一后的键，其余（对话、内核 session id）都在 store 里 —— 挂断再接上时
  * 灶还在，从 store 里认得回来。这个数组只负责「最近用的是哪个」这一件事。
  */
 let workerOrder: string[] = []
@@ -155,7 +155,7 @@ function workerLabelOf(key: string): string {
  * 这通电话现在有哪些灶。
  *
  * **从 store 里认**，不从内存那份数组认：挂断再开口时内存是空的，而侧边栏上
- * 那几条任务对话还在、agent 会话号也还在。只按内存算的话，接上之后模型看到
+ * 那几条任务对话还在、内核 session id 也还在。只按内存算的话，接上之后模型看到
  * 「一个灶都没有」，一派活就又开一个新的，上一通的上下文全丢了。
  */
 export function voiceWorkers(): VoiceWorkerRef[] {
@@ -185,7 +185,7 @@ export function voiceWorkers(): VoiceWorkerRef[] {
  * 三条规矩，代价都不对称：
  *
  * 1. **名字对得上就用它**（同类合并）—— 那个灶记得上一件做过什么，而且同一条
- *    agent 会话天然排队，两件同类的活不可能同时改到一处去。
+ *    内核 session 天然排队，两件同类的活不可能同时改到一处去。
  * 2. **新名字 + 还有空位 → 开新灶**，真并行。
  * 3. **新名字 + 灶满了 → 排到最久没用的那个灶后面**，并照实说。回绝的话模型还得
  *    再猜一轮，而这一轮里用户什么都听不到；排错了只是慢一点。
@@ -220,7 +220,7 @@ export function ensureVoiceWorker(raw: string): VoiceWorkerRef & { full: boolean
   return { ...openWorker(wanted ? raw : '任务'), full: false }
 }
 
-/** 真开一个灶：建对话、发一个 agent 会话号 */
+/** 真开一个灶：建对话、发一个内核 session id */
 function openWorker(raw: string): VoiceWorkerRef {
   const key = normalizeWorkerKey(raw)
   workerLabels.set(key, workerLabel(raw))
@@ -328,7 +328,7 @@ let voiceAssistantMessageId = ''
  * 而「每次开口都是独立的一条」正是靠侧边栏认人的。判据和打字那条路
  * （`useChatFlow.ensureSessionWithTitle`）一样：**标题还是占位符才改**，
  * 所以绑到一条已经聊过的对话上时不会动人家的名字。标签页标题由页面上那条
- * 「会话标题变了就同步」的 watcher 跟着改。
+ * 「对话标题变了就同步」的 watcher 跟着改。
  */
 function nameVoiceSession(text: string): void {
   const chatStore = useChatSessionsStore()
@@ -451,11 +451,11 @@ function workerNote(raw: string, picked: VoiceWorkerRef & { full: boolean }): st
 /**
  * 能派活的对话。
  *
- * 只列**已经有 agent 会话号**的 —— 没跑过 Agent 的对话给不出 id，
+ * 只列**已经有内核 session id**的 —— 没跑过 Agent 的对话给不出 id，
  * 派过去主进程也认不出来。归档的不列：用户说「另一个项目」时不会是指它。
  *
  * **别通电话的任务对话也不列。** 那是这次改动要挡的东西：模型一旦把活派进
- * 上周那通电话的任务会话，它就带着上周那份 transcript 往下推理。自己这通的
+ * 上周那通电话的任务对话，它就带着上周那份 transcript 往下推理。自己这通的
  * 不用列，不填 session 就是它（`resolveSession`）。
  */
 function listVoiceSessions(): VoiceSessionRef[] {
@@ -515,13 +515,13 @@ async function dispatchToVoiceTasks(
 }
 
 /**
- * 这个 agent 会话号对应界面上哪条对话。
+ * 这个内核 session id 对应界面上哪条对话。
  *
  * 模型可以把活派给**别的对话**（`list_sessions` + `session` 参数）。上一版不管派给谁，
- * 气泡都往那条固定的「语音任务」里写，而且顺手把它的 agent 会话号改成了别人的 ——
- * 从此这通电话自己的任务全跑到人家那条会话上去了，正是「上下文不干净」最狠的一种。
+ * 气泡都往那条固定的「语音任务」里写，而且顺手把它的内核 session id 改成了别人的 ——
+ * 从此这通电话自己的任务全跑到人家那条对话上去了，正是「上下文不干净」最狠的一种。
  *
- * 所以先按会话号回查是哪条对话；查不到才是这通电话自己那条任务对话，现登记上。
+ * 所以先按内核 session id 回查是哪条对话；查不到才是这通电话自己那条任务对话，现登记上。
  */
 function chatSidForAgentSession(agentSessionId: string): string {
   const chatStore = useChatSessionsStore()
@@ -534,7 +534,7 @@ function chatSidForAgentSession(agentSessionId: string): string {
    * 查不到 = 这个会话号不属于界面上任何一条对话。灶是在派活**之前**建好的
    * （`ensureVoiceWorker` 里就 `ensureSession` + `setAgentSessionId` 了），
    * 所以正常路径不会走到这儿。真走到了说明有人绕过了挑灶那一步，
-   * 硬猜一条对话把会话号写上去只会把两件活搅到一条会话上 —— 那正是
+   * 硬猜一条对话把会话号写上去只会把两件活搅到一条 agent 会话上 —— 那正是
    * §6.5.2 修过的「上下文不干净」最狠的一种。照实抛。
    */
   throw new Error(`session ${agentSessionId} 不属于界面上任何一条对话，没法派活。`)

@@ -216,7 +216,7 @@ const dictation = useVoiceDictation({
     dictationNotice.value = message || t('spotlightWindow.dictation.unavailable')
     dictating.value = false
   },
-  // 那一头把会话关了（厂商断开、被助手页的通话顶掉）：图标退回放大镜。
+  // 那一头把连接关了（厂商断开、被助手页的通话顶掉）：图标退回放大镜。
   // 已经点着的倒计时照走 —— 它显示自己的提示，不看这一位
   onClosed: () => {
     dictating.value = false
@@ -288,7 +288,7 @@ async function submitDictated(): Promise<void> {
 /**
  * 收掉听写。重复调用无害。
  *
- * **没在听就什么都不做。** 这一路的 `stop()` 会去关主进程那条全局会话，而
+ * **没在听就什么都不做。** 这一路的 `stop()` 会去关主进程那条全局连接，而
  * 普通打字唤起 Spotlight（以及每一次关窗、回车、卸载）走的也是这个出口 ——
  * 不拦的话，开一次搜索框就把助手页正在进行的通话挂断了，而且原主收不到任何事件。
  */

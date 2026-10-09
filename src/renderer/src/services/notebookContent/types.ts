@@ -1,6 +1,6 @@
 /**
  * 知识库内容采集的类型定义
- * 供信息图等需要「把来源和聊天记录揉成一份文本」的服务复用
+ * 供信息图等需要「把来源和对话记录揉成一份文本」的服务复用
  */
 
 /**
@@ -39,7 +39,7 @@ export interface ContentItem {
   title?: string
   /** 时间戳（用于时效性评估） */
   timestamp?: number
-  /** 角色（仅聊天消息） */
+  /** 角色（仅对话消息） */
   role?: 'user' | 'assistant'
   /** 内容优先级：high > medium > low，影响压缩预算分配 */
   priority?: 'high' | 'medium' | 'low'

@@ -95,7 +95,7 @@ async function requireConnection(): Promise<PlanStorageConnection> {
 
 /**
  * 能不能走套餐存储：连着、而且清单说套餐带存储。只看本机，不联网 ——
- * 聊天每次发送都要问一遍，离线启动门禁也不许这里发请求。
+ * 对话每次发送都要问一遍，离线启动门禁也不许这里发请求。
  */
 export async function isPlanStorageReady(): Promise<boolean> {
   const { manifest } = await readPlanState()

@@ -22,7 +22,7 @@ import { defineTool, type UnrealAgentTool } from '../defineTool'
  *
  * ## 为什么不让模型指定知识库
  *
- * `notebookId` 从会话上下文来，不进参数表。用户是在某个知识库的页面里提问的，
+ * `notebookId` 从对话上下文来，不进参数表。用户是在某个知识库的页面里提问的，
  * 「查哪个库」这件事没有歧义；开成参数只会多一种模型填错 id 的失败方式，
  * 而它填错时的表现是「查无此库」——用户看着自己的知识库明明在那儿。
  *
@@ -31,7 +31,7 @@ import { defineTool, type UnrealAgentTool } from '../defineTool'
  */
 
 /**
- * 检索范围：会话绑的那一个，或者全部知识库。
+ * 检索范围：对话绑的那一个，或者全部知识库。
  *
  * `'all'` 给外部 MCP 会话用。盒子里没绑知识库的对话仍然不给这个工具 ——
  * 那里用户要查知识库会先进知识库页面，行为不变。
@@ -150,8 +150,8 @@ const SEARCH_DESCRIPTION_TAIL =
   '只按关键词命中的没有）。答完记得说清楚结论出自哪一份资料。'
 
 /**
- * 建这个工具需要知道**查哪个知识库**，所以由 registry 在会话带着知识库（或全库范围）时才注册。
- * 没绑知识库的盒子会话根本不该看到它 —— 看到了也只能拿到一句「没有知识库」。
+ * 建这个工具需要知道**查哪个知识库**，所以由 registry 在对话带着知识库（或全库范围）时才注册。
+ * 没绑知识库的盒子对话根本不该看到它 —— 看到了也只能拿到一句「没有知识库」。
  */
 export function createSearchNotebookSourcesTool(
   scope: NotebookScope

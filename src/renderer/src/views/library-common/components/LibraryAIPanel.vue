@@ -17,15 +17,15 @@ import type { AIPanelMode } from '../types'
  *
  * ## 之前这里是什么
  *
- * `BaseAIChatPanel.vue`：一个自己另起炉灶的单轮聊天框 —— 硬编码中文系统
- * 提示词、直接调 `ipcRenderer`（绕过硬规则第 5 条）、自己一张聊天表。
+ * `BaseAIChatPanel.vue`：一个自己另起炉灶的单轮对话面板 —— 硬编码中文系统
+ * 提示词、直接调 `ipcRenderer`（绕过硬规则第 5 条）、自己一张对话记录表。
  * 它没有工具、看不见引擎、不会用技能，所以在库里问「这段逻辑为什么每帧都跑」
  * 只能对着一段文本猜。整个换掉了，不留兼容层。
  *
  * ## 「用户正在看什么」怎么告诉助手
  *
  * `context` 这个 prop 每一轮请求前被读一次，拼成一条上下文消息塞在最前面
- * （见 `Assistant/composables/libraryChatContext.ts`）。它**不进会话历史**，
+ * （见 `Assistant/composables/libraryChatContext.ts`）。它**不进对话历史**，
  * 所以带的永远是当下的选中节点，用户点了别的节点就跟着变。
  *
  * ## 为什么要 mousedown 捕获
@@ -39,7 +39,7 @@ import type { AIPanelMode } from '../types'
 
 const props = withDefaults(
   defineProps<{
-    /** 会话 id。用 `library-chat-` 打头，这样它不会混进侧边栏的会话列表 */
+    /** 对话 id。用 `library-chat-` 打头，这样它不会混进侧边栏的对话列表 */
     chatSid: string
     mode?: AIPanelMode
     /** 交给助手的上下文：当前条目 + 选中节点 */
@@ -381,7 +381,7 @@ function onResizeStart(e: MouseEvent): void {
     <!-- 停靠模式左缘拖宽手柄 -->
     <div v-show="mode !== 'overlay'" class="resize-handle" @mousedown="onResizeStart" />
 
-    <!-- 头部：只有形态按钮。会话本身的操作（清空、导出、侧边问一句）在助手自己的顶栏里 -->
+    <!-- 头部：只有形态按钮。对话本身的操作（清空、导出、侧边问一句）在助手自己的顶栏里 -->
     <div
       class="panel-header"
       :style="mode === 'overlay' ? { cursor: 'move' } : {}"
@@ -490,7 +490,7 @@ function onResizeStart(e: MouseEvent): void {
   // 助手内部自己滚，别让它把面板撑破
   overflow: hidden;
 
-  // 嵌进来的助手要把这块填满，它自己内部再分聊天区和输入区
+  // 嵌进来的助手要把这块填满，它自己内部再分对话区和输入区
   > * {
     flex: 1;
     min-height: 0;

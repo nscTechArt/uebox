@@ -1,5 +1,5 @@
 /**
- * 实时语音会话的中性词汇表。
+ * 实时语音连接的中性词汇表。
  *
  * 两家（OpenAI Realtime、豆包 Seeduplex）各有一个适配器，共用这一份形状 ——
  * 上层（IPC、渲染层）不该知道当前连的是谁。
@@ -107,7 +107,7 @@ export interface RealtimeToolDefinition {
   parameters: Record<string, unknown>
 }
 
-/** 已有普通对话在实时会话里的最小投影。富媒体不塞给语音模型，只保留文字。 */
+/** 已有普通对话在语音通话里的最小投影。富媒体不塞给语音模型，只保留文字。 */
 export interface RealtimeConversationMessage {
   role: 'user' | 'assistant'
   text: string
@@ -189,7 +189,7 @@ export interface VoiceSessionHandle {
    * 而听写本来也走不到豆包实时那条线（它关不掉自动应答）。
    */
   commitAudio?: () => void
-  /** 用户在语音会话底部直接键入的文字。 */
+  /** 通话中用户在底部输入框直接键入的文字。 */
   sendText: (text: string) => void
   /**
    * 主动播报。

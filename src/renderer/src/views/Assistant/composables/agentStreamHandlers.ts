@@ -63,7 +63,7 @@ export function createAgentStreamHandlers(
       sessionId || (targetChatSid === sid.value ? currentSessionId.value : undefined)
 
     if (!processSessionId) {
-      // 没有会话可写，Store 里不会有这条时间线，只能自己记
+      // 没有内核 session 可写，Store 里不会有这条时间线，只能自己记
       if (targetChatSid !== sid.value) return getProcessItems(targetChatSid)
       currentAgentProcess.value.push(item)
       return [...currentAgentProcess.value]

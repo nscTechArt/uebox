@@ -74,7 +74,7 @@ export const RESIDENT_TOOL_NAMES = [
 
 const CORE_NAMES = new Set<string>([
   ...RESIDENT_TOOL_NAMES,
-  // 宿主交互能力按文档 §5.6 常驻；会话归属沿用首版 Beta 的常驻行为。
+  // 宿主交互能力按文档 §5.6 常驻；对话归属沿用首版 Beta 的常驻行为。
   'ask_user',
   'voice_report',
   'set_session_project',

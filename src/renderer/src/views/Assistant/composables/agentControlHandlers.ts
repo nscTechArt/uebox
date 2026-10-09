@@ -139,9 +139,9 @@ export function createAgentControlHandlers(deps: AgentModeHandlersDeps) {
   /**
    * 这一轮的摊子收掉：注销处理器、清流式状态、清引用、放开控制器。
    *
-   * 带上轮次号的调用会先问一句「这条会话还归我管吗」：401 那条路要等刷新令牌，
-   * 回来时同一条 agent 会话上可能已经开跑下一轮（语音把排队的第二件活派回同一条
-   * 会话就是这样），照拆的话新那一轮的事件从此没人接。
+   * 带上轮次号的调用会先问一句「这条内核 session 还归我管吗」：401 那条路要等刷新令牌，
+   * 回来时同一条内核 session 上可能已经开跑下一轮（语音把排队的第二件活派回同一条
+   * 内核 session 就是这样），照拆的话新那一轮的事件从此没人接。
    */
   function teardownRun(
     agentSessionId: string | undefined,

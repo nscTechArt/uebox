@@ -30,7 +30,7 @@ export interface ChatSessionGroup {
   connected: boolean
   /**
    * 同名工程不止一个路径，这一组只装其中一个路径（`projectPath` 就是它；
-   * 为空则是这个名字下没记路径的老会话）。按名字批量操作时要用
+   * 为空则是这个名字下没记路径的老对话）。按名字批量操作时要用
    * `sessionInProjectGroup` 筛，否则会连同名的另一组一起动。
    */
   split: boolean
@@ -72,7 +72,7 @@ function sessionProjectName(session: ChatSession): string {
   return session.project?.projectName?.trim() || ''
 }
 
-/** 某个会话当前落在哪个分组里（用于打开会话时把它所在的分组展开） */
+/** 某个对话当前落在哪个分组里（用于打开对话时把它所在的分组展开） */
 export function sessionGroupKey(session: ChatSession, mode: ChatGroupMode): string {
   if (session.pinned) return PINNED_GROUP_KEY
   if (mode === 'flat') return FLAT_GROUP_KEY
@@ -84,20 +84,20 @@ export function sessionGroupKey(session: ChatSession, mode: ChatGroupMode): stri
 /**
  * 侧边栏的三个顶层区：置顶 / 项目 / 对话。
  *
- * 「项目」下面才是一个个 UE 工程，「对话」放没归工程的会话——两者同级。
+ * 「项目」下面才是一个个 UE 工程，「对话」放没归工程的对话——两者同级。
  */
 export const SECTION_PINNED_KEY = 'section:pinned'
 export const SECTION_PROJECTS_KEY = 'section:projects'
 export const SECTION_PLAIN_KEY = 'section:plain'
 
-/** 某个会话属于哪个顶层区 */
+/** 某个对话属于哪个顶层区 */
 export function sessionSectionKey(session: ChatSession, mode: ChatGroupMode): string {
   if (session.pinned) return SECTION_PINNED_KEY
   if (mode === 'flat') return SECTION_PLAIN_KEY
   return sessionProjectName(session) ? SECTION_PROJECTS_KEY : SECTION_PLAIN_KEY
 }
 
-/** 会话是否命中搜索词（标题 / 最后一条消息 / 所属工程） */
+/** 对话是否命中搜索词（标题 / 最后一条消息 / 所属工程） */
 export function matchChatSession(session: ChatSession, keyword: string): boolean {
   const needle = keyword.trim().toLowerCase()
   if (!needle) return true
@@ -202,8 +202,8 @@ interface ProjectGroupKeyResolver {
  *
  * 只按名字分的话，同一台机器上开两个同名工程（复制一份改改）会被并成一组，
  * 而主进程认归属是先比路径的 —— 两组对话其实各发往各的编辑器。
- * 但也不能一律按路径：老会话的戳常常只有名字，一律按路径会把一个工程劈成两组。
- * 拆开时，没记路径的老会话单独落在名字组里，不去猜它属于哪一个。
+ * 但也不能一律按路径：老对话的戳常常只有名字，一律按路径会把一个工程劈成两组。
+ * 拆开时，没记路径的老对话单独落在名字组里，不去猜它属于哪一个。
  */
 function projectGroupKeyResolver(
   sessions: ChatSession[],
@@ -235,7 +235,7 @@ function projectGroupKeyResolver(
 }
 
 /**
- * 这条会话是不是这个工程分组的。
+ * 这条对话是不是这个工程分组的。
  *
  * 对按名字操作的地方（归档整组、移出整组）用：拆开的分组只认自己的路径。
  */
@@ -247,10 +247,10 @@ export function sessionInProjectGroup(session: ChatSession, group: ChatSessionGr
 }
 
 /**
- * 把会话切成侧边栏要渲染的分组。
+ * 把对话切成侧边栏要渲染的分组。
  *
- * 顺序固定为：置顶 → 已连接工程 → 其余工程 → 纯会话。
- * 置顶的会话**只**出现在置顶区，不在原工程里重复一份。
+ * 顺序固定为：置顶 → 已连接工程 → 其余工程 → 纯对话。
+ * 置顶的对话**只**出现在置顶区，不在原工程里重复一份。
  */
 export function groupChatSessions(
   sessions: ChatSession[],
@@ -392,7 +392,7 @@ export function groupChatSessions(
   return groups
 }
 
-/** 收集所有会话上出现过的工程名（用于「归入工程」菜单） */
+/** 收集所有对话上出现过的工程名（用于「归入工程」菜单） */
 export function collectKnownProjects(
   sessions: ChatSession[],
   connectedProjects: ConnectedProjectRef[] = []
@@ -426,16 +426,16 @@ export function collectKnownProjects(
   )
 }
 
-/** 侧边栏会话行右上角的活动状态 */
+/** 侧边栏对话行右上角的活动状态 */
 export type SessionActivity = 'waiting' | 'running' | 'done' | 'idle'
 
 /**
- * 一条会话此刻该显示什么活动状态。
+ * 一条对话此刻该显示什么活动状态。
  *
  * 正在跑就转圈，跑完还没看就点蓝点 —— 两者互斥，正在跑的时候不该同时说「已完成」。
  *
  * **「等你回答」压过「正在跑」**，尽管此刻两者都成立（agent 阻塞在 `ask_user`
- * 里，这条会话在跑）。转圈说的是「它在忙，你等着就行」，而这里的事实正相反：
+ * 里，这条对话在跑）。转圈说的是「它在忙，你等着就行」，而这里的事实正相反：
  * 它不会自己往下走了，`ask_user` 没有超时（见主进程 `host/questionChannel.ts`），
  * 要它继续只能由人来答。这两句话不能同时显示一个，得让更要紧的那句赢。
  */

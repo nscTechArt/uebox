@@ -91,7 +91,7 @@ vault:cleanThumbnailCache vault:create vault:delete vault:getAll vault:getCurren
 
 const GENERIC_INVOKE_PREFIXES = ['library-store:']
 const GENERIC_EVENT_CHANNELS = new Set([
-  // 用户点了 agent 的系统通知，界面要跳到发通知的那条会话
+  // 用户点了 agent 的系统通知，界面要跳到发通知的那条对话
   NOTIFICATION_ACTIVATE_CHANNEL,
   // 托盘有一条动作待取
   TRAY_ACTION_CHANNEL,
@@ -113,7 +113,7 @@ const GENERIC_EVENT_CHANNELS = new Set([
   // 工作室模式的名册、任务板、留言变了。只带 sessionId，面板自己去重读 ——
   // 任务板在两轮之间也要活着，所以不挂在按运行订阅的那套事件上
   'agent-v3:team-board',
-  // 两条会话抢同一个资产。必须让用户看见 —— 他可能开着两个窗口，
+  // 两条内核 session 抢同一个资产。必须让用户看见 —— 他可能开着两个窗口，
   // 以为两边在干不同的活
   'agent-v3:lock-conflict',
   // 这一轮开跑前的准备进度（音视频传对象存储）。几百 MB 要传好一阵，不说一声像卡住了
@@ -125,14 +125,14 @@ const GENERIC_EVENT_CHANNELS = new Set([
   'agent-v3:model-retry',
   // agent 反问用户。界面在时间线上长一张选项卡片，用户点完经 question-reply 回传
   'agent-v3:question-required',
-  // 这条会话**真的**空出来了（锁放了、run 摘了）。界面上排队的跟进消息等的是
+  // 这条内核 session **真的**空出来了（锁放了、run 摘了）。界面上排队的跟进消息等的是
   // 它而不是 `done` —— `done` 发出来时 prompt() 还没返回，那会儿发下一轮
-  // 会被顶回一句「正在执行中」
+  // 会被顶回一个 `SESSION_BUSY`
   'agent-v3:released',
   // 模型把这条对话改挂到别的工程下了（`set_session_project`）。
   // 侧边栏分组和顶栏胶囊靠它跟上
   'agent-v3:session-project',
-  // 别的窗口正在跑的会话变了。独立聊天窗口显示的会话可能是主窗口发起的，
+  // 别的窗口正在跑的内核 session 变了。独立对话窗口显示的对话可能是主窗口发起的，
   // 判忙、停止都要知道它在跑
   'agent-v3:runs-elsewhere',
   // 提问卡片在别的窗口里答过了，发起窗口要把自己那张也收成只读
@@ -259,7 +259,7 @@ const api = {
     minimize: () => ipcRenderer.send('mini-chat:minimize'),
     togglePin: () => ipcRenderer.send('mini-chat:toggle-pin'),
     setOpacity: (opacity: number) => ipcRenderer.send('mini-chat:set-opacity', opacity),
-    /** messages 是给主窗口同步进自己 store 用的，少传侧边栏会多出一条空会话 */
+    /** messages 是给主窗口同步进自己 store 用的，少传侧边栏会多出一条空对话 */
     sessionSaved: (session: { id: string; title: string; messages?: unknown[] }) =>
       ipcRenderer.send('mini-chat:session-saved', session),
     requestInitialMessage: () => ipcRenderer.send('mini-chat:request-initial-message'),
@@ -299,7 +299,7 @@ const api = {
     }
   },
   /**
-   * 从标签栏拖出来的独立聊天窗口，以及它和主窗口之间的对话同步。
+   * 从标签栏拖出来的独立对话窗口，以及它和主窗口之间的对话同步。
    * 见 main/chatWindowManager.ts 文件头。
    */
   chatWindow: {
@@ -1201,7 +1201,7 @@ const api = {
       ipcRenderer.on('assistant:error', handler)
       return () => ipcRenderer.removeListener('assistant:error', handler)
     },
-    // 订阅会话ID事件
+    // 订阅对话 ID 事件
     onConversation: (listener: (id: string) => void) => {
       const handler = (_: Electron.IpcRendererEvent, payload: any) =>
         listener(String(payload || ''))
@@ -1274,7 +1274,7 @@ const api = {
       error?: string
     }> => ipcRenderer.invoke('ue:crashLogs:get', params || {})
   },
-  /** 顶栏状态监控：这条会话归属的工程现在的编辑器状况 */
+  /** 顶栏状态监控：这条对话归属的工程现在的编辑器状况 */
   ueEditorHealth: {
     get: (params: { projectPath: string }) => ipcRenderer.invoke('ue:editorHealth:get', params)
   },
@@ -1391,7 +1391,7 @@ const api = {
    * 只在嵌入模式下有用：那一档把网页挂成主窗口的子视图，而子视图浮在
    * 渲染层内容之上、不参与网页布局 —— 位置只能由界面量出来报给主进程。
    *
-   * 地址栏按会话导航；主进程统一校验 URL 和 DNS。
+   * 地址栏按内核 session 导航；主进程统一校验 URL 和 DNS。
    */
   agentBrowser: {
     tab: (
@@ -1444,7 +1444,7 @@ const api = {
   },
 
   agentV3: {
-    /** 发起一轮对话。会自动恢复该 sessionId 此前的 transcript */
+    /** 发起一轮。会自动恢复该 sessionId 此前的 transcript */
     execute: (args: {
       sessionId: string
       prompt: string
@@ -1466,7 +1466,7 @@ const api = {
       /** 随这轮带的音视频（本地路径）。主进程决定传对象存储换链接，还是只给路径 */
       mediaFiles?: Array<{ filePath: string; fileName: string; kind: 'video' | 'audio' }>
       /**
-       * 这条会话归属的 UE 工程（侧边栏分组用的那个戳）。
+       * 这条对话归属的 UE 工程（侧边栏分组用的那个戳）。
        *
        * 主进程只知道「谁连着」，不传它就只能拿当前连接当成「这个工程」——
        * 用户在 test222 下问「这是啥项目」会得到连着的那个工程的答案。
@@ -1476,11 +1476,11 @@ const api = {
         projectPath?: string
         engineVersion?: string
       } | null
-      /** 这条会话绑着的知识库。绑了主进程才给 search_notebook_sources 工具 */
+      /** 这条对话绑着的知识库。绑了主进程才给 search_notebook_sources 工具 */
       notebook?: { id: string; title?: string } | null
       /** 用户按下发送那一刻的编辑器状态（闪存）。null = 用户明确去掉了 */
       editorSnapshot?: EditorSnapshot | null
-      /** 这条会话绑定的模型。不传就用执行记录里那份，都没有按全局默认绑定 */
+      /** 这条对话绑定的模型。不传就用执行记录里那份，都没有按全局默认绑定 */
       sessionModel?: { providerId: string; modelId: string }
     }) => ipcRenderer.invoke('agent-v3:execute', args),
     /** 从断点续跑（上一轮报错或中断时用），保留全部上下文 */
@@ -1490,17 +1490,17 @@ const api = {
       sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
       /** 不带的话续跑会退回默认的「每步都问」，而用户什么都没改过 */
       approvalMode?: 'ask' | 'auto-edit' | 'yolo'
-      /** 会话此刻绑的模型；用户报错后换了模型再续跑，得用新的 */
+      /** 对话此刻绑的模型；用户报错后换了模型再续跑，得用新的 */
       sessionModel?: { providerId: string; modelId: string }
     }) => ipcRenderer.invoke('agent-v3:continue', args),
     /**
-     * 用户在界面上改了这条会话归属哪个工程（顶栏胶囊、侧边栏「归入工程 / 移出项目」）。
+     * 用户在界面上改了这条对话归属哪个工程（顶栏胶囊、侧边栏「归入工程 / 移出项目」）。
      *
      * 必须发这一条：归属的主人是主进程那张表，而随消息捎带的那份戳只在表里
-     * 还空着时用来初始化。不发的话，会话发过第一条消息之后用户再改归属，
+     * 还空着时用来初始化。不发的话，对话发过第一条消息之后用户再改归属，
      * 主进程永远收不到 —— 胶囊上写着新工程，引擎命令还发往旧的那个。
      *
-     * `project: null` = 移出项目。`sessionId` 是**内核**会话 id。
+     * `project: null` = 移出项目。`sessionId` 是**内核** session id。
      */
     setSessionProject: (args: {
       sessionId: string
@@ -1524,7 +1524,7 @@ const api = {
     /**
      * 抓一份此刻的编辑器状态（闪存）。
      *
-     * 在用户**按下发送那一刻**调，抓到的东西随消息一起提交。跑着的会话上提交
+     * 在用户**按下发送那一刻**调，抓到的东西随消息一起提交。跑着的内核 session 上提交
      * 东西时要带 `runningSessionId` —— 排队的和插的最终都落在那一轮上，
      * 必须和它盯着同一个工程。
      */
@@ -1556,7 +1556,7 @@ const api = {
      * 「有个 bug」。必须永远留一个看得见、点得到的出口。
      */
     releaseAllLocks: () => ipcRenderer.invoke('agent-v3:locks-release-all'),
-    /** 改某条会话的审批档位。运行中也立刻生效，下一个工具调用就按新档位走 */
+    /** 改某条对话的审批档位（`sessionId` 传它当前的内核 session id）。运行中也立刻生效，下一个工具调用就按新档位走 */
     setApprovalMode: (args: {
       sessionId: string
       approvalMode: 'ask' | 'auto-edit' | 'yolo'
@@ -1585,9 +1585,9 @@ const api = {
       ipcRenderer.send('agent-v3:question-reply', args)
     },
     /**
-     * 刷新页面后重新接回还在跑的会话。
+     * 刷新页面后重新接回还在跑的内核 session。
      *
-     * agent 跑在主进程，刷新只重启了界面 —— 报上界面记得的会话，
+     * agent 跑在主进程，刷新只重启了界面 —— 报上界面记得的内核 session id，
      * 主进程回哪些真的还活着（顺带补发卡在那儿的审批弹窗）。
      */
     reattach: (args: { sessionIds?: string[] }) => ipcRenderer.invoke('agent-v3:reattach', args),
@@ -1621,7 +1621,7 @@ const api = {
     /** 当前绑定的模型支持哪几档思考。档位各家不同，输入框那个下拉据此列清单 */
     thinkingLevels: (args?: { model?: { providerId: string; modelId: string } }) =>
       ipcRenderer.invoke('agent-v3:thinking-levels', args),
-    /** 这条会话绑定的模型（执行记录里那份）。没绑过为 null */
+    /** 这条对话绑定的模型（执行记录里那份）。没绑过为 null */
     sessionModel: (args: { sessionId: string }) =>
       ipcRenderer.invoke('agent-v3:session-model', args),
     /** 在编辑器里打开「本轮改动」列出的那个资产 —— 清单说不清材质长什么样，眼见为实 */
@@ -1645,10 +1645,10 @@ const api = {
     loadSession: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:load-session', args),
     deleteSession: (args: { sessionId: string }) =>
       ipcRenderer.invoke('agent-v3:delete-session', args),
-    /** 会话分支：复制成一个新 sessionId；带 keepUserTurns 就只复制到那一轮为止 */
+    /** 分支：复制成一个新 sessionId；带 keepUserTurns 就只复制到那一轮为止 */
     forkSession: (args: { sessionId: string; keepUserTurns?: number }) =>
       ipcRenderer.invoke('agent-v3:fork-session', args),
-    /** 把 transcript 截回前 keepUserTurns 个用户回合 —— 重新生成 / 编辑消息用 */
+    /** 把 transcript 截回前 keepUserTurns 个用户轮次 —— 重新生成 / 编辑消息用 */
     truncateSession: (args: { sessionId: string; keepUserTurns: number }) =>
       ipcRenderer.invoke('agent-v3:truncate-session', args),
     /** 手动压缩上下文：把早期对话换成一段摘要，腾出窗口 */
@@ -1662,7 +1662,7 @@ const api = {
      *
      * 机制在 `agent-v3/capabilities/plugins/registry.ts` 里是通的（插件的技能进
      * 发现路径、插件的 mcp.json 会被连上），但清单里那组权限声明从来没有被展示
-     * 也没有被约束 —— 于是「从文件夹安装」实际上等于「下次开会话时照那个
+     * 也没有被约束 —— 于是「从文件夹安装」实际上等于「下次起内核 session 时照那个
      * mcp.json 写的命令拉一个子进程」，全程不问用户。在补出安装确认之前，
      * 不给这条链任何 IPC 入口：一个没人调用的 `plugins.install(dir)` 挂在
      * `window.api` 上，本身就是可以被利用的面。
@@ -1927,7 +1927,7 @@ const api = {
     reveal: () => ipcRenderer.invoke('cli:reveal')
   },
   /**
-   * 对象存储（用户自己的 S3 兼容桶）。聊天里的音视频传上去换链接，模型直接看。
+   * 对象存储（用户自己的 S3 兼容桶）。对话里的音视频传上去换链接，模型直接看。
    * Secret 只进不出：读配置只回 `hasSecret`
    */
   objectStorage: {
@@ -2330,7 +2330,7 @@ const api = {
     validate: (url: string): Promise<boolean> => ipcRenderer.invoke('wechat:validate', url)
   },
   /**
-   * 聊天附件解释 API
+   * 对话附件解释 API
    *
    * 视频、PDF、Word 这类文件模型吃不下，得先在本地解释成描述文本或图片帧。
    * 解析在主进程做 —— ffmpeg 和 anydoc 原生模块都不在渲染进程这边。
@@ -2475,7 +2475,7 @@ const api = {
     }> => ipcRenderer.invoke('dashscope:generateNameFromPrompt', params)
   },
   /**
-   * 实时语音会话。
+   * 实时语音连接。
    *
    * 音频两个方向都走这里：上行 `sendAudio`（不等返回，一秒十几次），
    * 下行和其余事件都从 `onEvent` 回来。密钥只在主进程。
@@ -2516,7 +2516,7 @@ const api = {
     /** 防冷场开关（偏好设置 → 语音助手）。改了就发一次，主进程只认最后收到的值 */
     setAntiSilence: (enabled: boolean) => ipcRenderer.send('realtime-voice:anti-silence', enabled),
     setAutoHangup: (enabled: boolean) => ipcRenderer.send('realtime-voice:auto-hangup', enabled),
-    /** 语音会话不中断，键盘输入直接成为同一条实时对话的下一轮 */
+    /** 不挂断通话，键盘输入直接作为这通电话的下一轮 */
     sendText: (text: string) => ipcRenderer.send('realtime-voice:text', text),
     /** 只读工具（列工程、列已连编辑器）在主进程当场答，不进 agent */
     runLocalTool: (name: string) => ipcRenderer.invoke('realtime-voice:local-tool', { name }),
@@ -2560,7 +2560,7 @@ const api = {
       ipcRenderer.on('realtime-voice:run-task', listener)
       return () => ipcRenderer.removeListener('realtime-voice:run-task', listener)
     },
-    /** 启动失败。不标掉的话那条会话永远派不进新活 */
+    /** 启动失败。不标掉的话那条内核 session 永远派不进新活 */
     taskFailed: (args: { taskId: string; reason: string; attempt?: number }) =>
       ipcRenderer.send('realtime-voice:task-failed', args),
     describeTask: (taskId?: string) =>
@@ -2991,7 +2991,7 @@ const api = {
       ipcRenderer.invoke('personalization:setInstructions', text)
   },
 
-  /** agent 系统通知：用户点了之后界面要跳到那条会话，见 shared/agentNotificationActivation.ts */
+  /** agent 系统通知：用户点了之后界面要跳到那条对话，见 shared/agentNotificationActivation.ts */
   agentNotifications: {
     /** 取走主进程存着的那条激活（取走即清）。推送落空时靠它补回来 */
     takePending: (): Promise<NotificationActivatePayload | null> =>
@@ -3001,7 +3001,7 @@ const api = {
       ipcRenderer.invoke(NOTIFICATION_ACTIVATION_RESULT_CHANNEL, result)
   },
 
-  /** 系统托盘菜单：界面报最近会话、取还没送到的托盘动作，见 shared/trayActions.ts */
+  /** 系统托盘菜单：界面报最近对话、取还没送到的托盘动作，见 shared/trayActions.ts */
   tray: {
     /** 最近活跃的三条对话变了，主进程据此重建菜单 */
     setRecentSessions: (sessions: TrayRecentSession[]): Promise<{ success: boolean }> =>

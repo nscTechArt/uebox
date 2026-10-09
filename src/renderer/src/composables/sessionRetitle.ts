@@ -1,5 +1,5 @@
 /**
- * 按整段对话的梗概给会话重起名字。两个入口共用这一份：
+ * 按整段对话的梗概给对话重起名字。两个入口共用这一份：
  * 侧边栏重命名弹窗里的「智能命名」，和设置里的「自动生成新标题」（每轮结束后自动跑）。
  *
  * 下面先是喂给模型的那段文本怎么截，再是那次调用本身。
@@ -55,13 +55,13 @@ function clip(text: string, max: number): string {
 }
 
 /**
- * 从整条会话的消息里截出梗概。
+ * 从整条对话的消息里截出梗概。
  *
  * 提问太多装不下时，**第一个提问一定留着**（它多半交代了这段对话要干什么），
  * 其余从最近的往回装，中间省掉的用一行说明顶上，让模型知道那里还有内容。
  *
- * @param messages 会话的全部消息，按时间正序
- * @param currentTitle 会话现在的标题。给了的话模型可以沿用它，不至于每轮都换个名字
+ * @param messages 对话的全部消息，按时间正序
+ * @param currentTitle 对话现在的标题。给了的话模型可以沿用它，不至于每轮都换个名字
  * @param maxChars 字数上限，默认 {@link MAX_EXCERPT_CHARS}
  * @returns 可以直接喂给模型的节选；没有任何有效文本时是空串，调用方据此提示用户
  */
@@ -98,8 +98,8 @@ export function buildConversationExcerpt(
   /*
    * 从尾巴往前扫，用到哪条才转哪条。
    *
-   * 这个函数开了「自动生成新标题」之后是**每轮收尾都跑一次**的，拿到的是整条会话的
-   * 全部消息。助手的回答动辄几 KB，一条聊了一百多轮的会话全转一遍就是几百 KB 的
+   * 这个函数开了「自动生成新标题」之后是**每轮收尾都跑一次**的，拿到的是整条对话的
+   * 全部消息。助手的回答动辄几 KB，一条聊了一百多轮的对话全转一遍就是几百 KB 的
    * 临时字符串，而且随轮数一直涨 —— 花在这儿的正好是界面在渲染最后那段答复的时刻。
    * 所以回答只转最后一条，提问装满预算就停。
    */
@@ -143,24 +143,24 @@ export function buildConversationExcerpt(
   return lines.join('\n')
 }
 
-/** 起名在途的会话。同一条会话同时只起一次：重复发起不会更准，只会多花一次调用 */
+/** 起名在途的对话。同一条对话同时只起一次：重复发起不会更准，只会多花一次调用 */
 const inFlight = new Set<string>()
 
 export type RetitleOutcome = 'ok' | 'empty' | 'failed' | 'skipped'
 
 /**
- * 给一条会话重起名字：截节选 → 轻量模型 → 写回标题。
+ * 给一条对话重起名字：截节选 → 轻量模型 → 写回标题。
  *
  * **不抛错。** 两个调用方谁都不该因为起名失败而中断：自动那条是后台行为，
  * 手动那条只需要一句提示。失败原因通过返回值区分，怎么说给用户听由调用方决定。
  *
- * @param messages 这条会话的全部消息，按时间正序
+ * @param messages 这条对话的全部消息，按时间正序
  * @param applyTitle 拿到名字后怎么落（改 store、顺带改标签页标题都在这里）
- * @param getTitle 读这条会话此刻的标题。给了的话，起名期间标题被改过就不落
+ * @param getTitle 读这条对话此刻的标题。给了的话，起名期间标题被改过就不落
  * @param options.keepCurrentTitle 把现有标题一并给模型，主线没变就沿用它。
  *   自动那条要开：每轮都跑，不开的话标题会跟着每轮的话头来回跳。手动那条不开：
  *   用户点「智能命名」就是想要个新的，回来还是原名会以为按钮坏了
- * @returns `empty` 没有可用对话内容；`skipped` 同一条会话正在起名；
+ * @returns `empty` 没有可用对话内容；`skipped` 同一条对话正在起名；
  *          `failed` 模型没配 / 调用失败 / 返回废话；`ok` 已改名
  */
 export async function retitleSession(
@@ -189,7 +189,7 @@ export async function retitleSession(
     applyTitle(title)
     return 'ok'
   } catch (error) {
-    console.warn('[chat] 重新为会话起名失败:', error)
+    console.warn('[chat] 重新为对话起名失败:', error)
     return 'failed'
   } finally {
     inFlight.delete(chatSid)

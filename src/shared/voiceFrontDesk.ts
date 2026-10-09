@@ -56,7 +56,7 @@ export const LOOK_AT_EDITOR = 'look_at_editor'
  * 列出能派活的对话（只读，**渲染层当场答**）。
  *
  * 不在 `LOCAL_VOICE_TOOLS` 里：对话的标题只存在于界面那一侧，
- * 主进程手上只有一串会话号，念出来用户听不懂。
+ * 主进程手上只有一串内核 session id，念出来用户听不懂。
  */
 export const LIST_SESSIONS = 'list_sessions'
 
@@ -80,12 +80,12 @@ export function isLocalVoiceTool(name: string): boolean {
 /**
  * 一通电话最多同时开几个「灶」。
  *
- * 后厨（agent-v3）本来就允许多条会话并行 —— `activeAgents` 是个 Map，拦并发的是
- * **同一条会话**（`agent-v3:execute` 直接拒）。所以「一件活跑完才能跑下一件」
+ * 后厨（agent-v3）本来就允许多条内核 session 并行 —— `activeAgents` 是个 Map，拦并发的是
+ * **同一条内核 session**（`agent-v3:execute` 直接拒）。所以「一件活跑完才能跑下一件」
  * 不是引擎的限制，是前台只开了一个灶：一通电话所有的活都挤在
  * `voiceTaskChatSid` 派生的同一条任务对话上。
  *
- * 现在按灶分开，每个灶一条 agent 会话，互不相干的活真并行。
+ * 现在按灶分开，每个灶一条内核 session，互不相干的活真并行。
  * 上限存在的理由：每个灶都是一次完整的 agent 运行（烧 token、占 UE 的命令队列），
  * 而且五件事同时汇报，用耳朵根本跟不过来。
  */
@@ -98,7 +98,7 @@ export const WORKER_LABEL_MAX_CHARS = 12
  * 灶名归一 —— **只用来匹配**，不是给人看的。
  *
  * 模型不会每次都给一模一样的字符串（「灯光」/「灯光调整」/「Lighting」/「 lighting 」）。
- * 匹配不上的后果不是报错，是**悄悄多开一个灶**：同一类活散到两条 agent 会话上，
+ * 匹配不上的后果不是报错，是**悄悄多开一个灶**：同一类活散到两条内核 session 上，
  * 各带半份上下文，还可能同时改同一批资产 —— 正好是这套东西要防的事。
  */
 export function normalizeWorkerKey(raw: string): string {
@@ -131,7 +131,7 @@ export interface VoiceDispatchTurn {
  * 最多带几轮、每轮最多多少字。
  *
  * 轮数上限存在的理由不是省 token，是**别把语音闲聊灌进 Agent 的 transcript**：
- * 那正是 §6 拆分说话/干活两条会话时清掉的东西。三个来回够消解「那个」「刚才那盏」，
+ * 那正是 §6 拆分说话/干活两条内核 session 时清掉的东西。三个来回够消解「那个」「刚才那盏」，
  * 再往前的话题多半已经和这件活无关。
  *
  * 字数上限**按说话人分两档**。语音助手那一方 120 字：它的话只用来对指代，

@@ -1,5 +1,5 @@
 /**
- * 独立聊天窗口：把一条 AI 对话从主窗口的标签栏拖出来，单独成一个窗口。
+ * 独立对话窗口：把一条 AI 对话从主窗口的标签栏拖出来，单独成一个窗口。
  *
  * ## 数据怎么走
  *
@@ -11,11 +11,11 @@
  *
  * Agent 事件**不发两份**：一轮由谁发起，事件就只给谁（和原来一样），由它处理、由它
  * 收尾（起标题、标完成、发通知都只做一遍），另一边只接补丁。所以拖出去的那一刻
- * 正在跑的会话不用「搬家」，也就没有接缝处丢字、重字的问题。
+ * 正在跑的对话不用「搬家」，也就没有接缝处丢字、重字的问题。
  *
- * 这一层只补四件事：哪些会话在别的窗口里跑（判忙、停止要用）、审批多弹一份
+ * 这一层只补四件事：哪些对话在别的窗口里跑（判忙、停止要用）、审批多弹一份
  * （见 `approvalChannel.ts`）、关窗时这个窗口还在跑活就先藏起来等它跑完、
- * 这条会话的 Agent 内嵌浏览器挂进小窗（见下面 `setEmbeddedHostResolver`）。
+ * 这条对话的 Agent 内嵌浏览器挂进小窗（见下面 `setEmbeddedHostResolver`）。
  */
 
 import { BrowserWindow, ipcMain, screen, webContents, app, type IpcMainEvent } from 'electron'
@@ -44,7 +44,7 @@ interface SizeState {
   height: number
 }
 
-/** 新窗口的大小单独记，不和主窗口共用：聊天窗口一般窄而高，主窗口一般铺满 */
+/** 新窗口的大小单独记，不和主窗口共用：对话窗口一般窄而高，主窗口一般铺满 */
 function sizeStatePath(): string {
   return join(app.getPath('userData'), 'chat-window-state.json')
 }
@@ -111,10 +111,10 @@ class ChatWindowManager {
     )
 
     /*
-     * Agent 内嵌浏览器跟着会话走：会话开在小窗里，网页就挂进小窗。
+     * Agent 内嵌浏览器跟着对话走：对话开在小窗里，网页就挂进小窗。
      *
      * 网页是主进程挂在窗口上的一层原生视图。不搬的话它留在主窗口里 —— 而这条
-     * 会话的标签已经不在主窗口了，网页没人显示，用户在小窗里看不到 Agent 在操作哪个页面。
+     * 对话的标签已经不在主窗口了，网页没人显示，用户在小窗里看不到 Agent 在操作哪个页面。
      */
     setEmbeddedHostResolver((sessionId) => {
       if (!sessionId) return undefined
@@ -266,7 +266,7 @@ class ChatWindowManager {
     sendToWindow(findMainWindow(), 'chat-window:changed', this.registry.chatSids())
   }
 
-  /** 每个窗口收到的是「别的窗口正在跑的会话」—— 自己跑的它自己知道 */
+  /** 每个窗口收到的是「别的窗口正在跑的对话」—— 自己跑的它自己知道 */
   private runsElsewhereFor(webContentsId: number): string[] {
     return activeRunOwners()
       .filter((run) => run.senderId !== webContentsId)
@@ -303,7 +303,7 @@ class ChatWindowManager {
         const previous = this.registry.agentSessionOf(event.sender.id)
         const next = typeof args.agentSessionId === 'string' ? args.agentSessionId : ''
         this.registry.bindAgentSession(event.sender.id, args.chatSid, next)
-        // 换了内核会话（清空对话）：旧的那份网页回主窗口，新的那份挂进来
+        // 换了内核 session（清空对话）：旧的那份网页回主窗口，新的那份挂进来
         if (previous && previous !== next) rehostSessionBrowser(previous)
         if (next) rehostSessionBrowser(next)
       }
@@ -311,7 +311,7 @@ class ChatWindowManager {
 
     /*
      * 独立窗口里点了要去别的页面的东西（资产库定位、偏好设置、别的对话）。
-     * 那些页面属于主窗口：在小窗里打开等于把整个主界面塞进一个聊天窗口。
+     * 那些页面属于主窗口：在小窗里打开等于把整个主界面塞进一个对话窗口。
      */
     ipcMain.on('chat-window:open-in-main', (_event, args?: { path?: string }) => {
       const path = typeof args?.path === 'string' ? args.path : ''

@@ -115,7 +115,7 @@ export const BROWSER_TOOL_NAMES = [
 export const ASK_USER_TOOL_NAME = 'ask_user'
 
 /**
- * 换会话归属那个工具的名字。同上，放在零依赖模块里给注册表补名单和风险表用。
+ * 换对话归属那个工具的名字。同上，放在零依赖模块里给注册表补名单和风险表用。
  *
  * 它和 `ask_user` / `voice_report` 一样是在 `resolveTools` 里现造的（要宿主给的
  * 通道），进不了 `REGISTRATIONS`。但它是这批现造工具里**唯一一个 `mutating`**，

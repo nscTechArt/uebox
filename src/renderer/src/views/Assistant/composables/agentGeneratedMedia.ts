@@ -13,14 +13,14 @@
  * 一段按秒计费、跑了几分钟的片子，收起来之后正文里一点痕迹都没有。
  *
  * 网格是第三个补上来的，原因更直接：它此前**一次都没显示出来过**。气泡里的
- * 预览器只认会话结束事件还原出来的 `toolResults`，而那是 V2 的形状 —— V3 的
+ * 预览器只认一轮结束事件还原出来的 `toolResults`，而那是 V2 的形状 —— V3 的
  * 完成事件只带一个 sessionId，那条路上 `toolResults` 恒为空。真正有值的是
  * 过程日志，与图和视频走的是同一个来源。
  *
  * ## 为什么给的是路径不是 base64
  *
- * 这段结果会随聊天记录一起持久化。base64 图片存进去几轮就把配额撑满，
- * 之后聊天记录静默地再也存不进去（同一个坑见 `adaptV2Tool` 的 `stripImages`）。
+ * 这段结果会随对话记录一起持久化。base64 图片存进去几轮就把配额撑满，
+ * 之后对话记录静默地再也存不进去（同一个坑见 `adaptV2Tool` 的 `stripImages`）。
  * 存路径既便宜又清楚 —— 显示的是磁盘上那张原图，不是进模型上下文的 768px 压缩版。
  */
 
@@ -75,7 +75,7 @@ function collectVideoFromResult(result: unknown, urls: string[]): void {
  * 能塞进预览器的网格扩展名，与 `generate_3d_model` 的输出格式一一对应。
  *
  * `model_path` 是工具自己从一堆产物里挑出来的网格，正常不会是别的东西；
- * 这道守卫是为了老会话记录里形状不明的 `model_preview` 结果 —— 把一张贴图
+ * 这道守卫是为了老对话记录里形状不明的 `model_preview` 结果 —— 把一张贴图
  * 递进预览器不会报错，只会在气泡里挂一个空的黑框。
  */
 const MESH_EXTENSION = /\.(glb|gltf|fbx|obj|usdz|stl)$/i
@@ -108,7 +108,7 @@ export interface GeneratedMedia {
 /**
  * 本轮所有生成产物的显示地址。
  *
- * 两个来源都要看：`toolResults` 是会话结束时从消息里还原的，
+ * 两个来源都要看：`toolResults` 是一轮结束时从消息里还原的，
  * `agentProcess` 是过程日志。同一份产出在两边都出现时靠去重收敛。
  */
 export function collectGeneratedMediaFromAgentArtifacts(args: {
@@ -124,7 +124,7 @@ export function collectGeneratedMediaFromAgentArtifacts(args: {
     if (toolName === 'generate_video' || toolName === 'render_task_video')
       collectVideoFromResult(result, videos)
     if (toolName === 'generate_3d_model') collectModelFromResult(result, 'model_path', models)
-    // V2 的生成工具，早就不存在了。老会话记录里还有这种结果
+    // V2 的生成工具，早就不存在了。老对话记录里还有这种结果
     if (toolName === 'model_preview') collectModelFromResult(result, 'filePath', models)
   }
 

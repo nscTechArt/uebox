@@ -91,7 +91,7 @@ export class KnowledgeGraphService {
   /**
    * 生成知识图谱 (异步任务模式)
    * @param sources 知识库来源
-   * @param messages 聊天消息
+   * @param messages 对话消息
    * @param notebookTitle 知识库标题
    * @param notebookId 知识库ID，用于任务取消作用域
    */

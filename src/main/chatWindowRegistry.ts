@@ -1,5 +1,5 @@
 /**
- * 独立聊天窗口的登记表：哪条对话开在哪个窗口里。
+ * 独立对话窗口的登记表：哪条对话开在哪个窗口里。
  *
  * 只管「谁和谁」，不碰 Electron —— 窗口的建、关、藏在 `chatWindowManager.ts`。
  * 拆开是为了把「同步消息该转给谁、审批该多给谁看一份」这几条规则放在能单测的地方，
@@ -69,14 +69,14 @@ export class ChatWindowRegistry {
     return this.chatSidOf(webContentsId) !== undefined
   }
 
-  /** 窗口报上来它那条对话现在的内核会话 id。只认它自己那条，报别人的不算 */
+  /** 窗口报上来它那条对话现在的内核 session id。只认它自己那条，报别人的不算 */
   bindAgentSession(webContentsId: number, chatSid: string, agentSessionId: string): void {
     const entry = this.entries.get(chatSid)
     if (!entry || entry.webContentsId !== webContentsId) return
     entry.agentSessionId = agentSessionId || undefined
   }
 
-  /** 这个窗口那条对话现在的内核会话 id */
+  /** 这个窗口那条对话现在的内核 session id */
   agentSessionOf(webContentsId: number): string | undefined {
     for (const entry of this.entries.values()) {
       if (entry.webContentsId === webContentsId) return entry.agentSessionId
@@ -120,9 +120,9 @@ export class ChatWindowRegistry {
    * 审批除了发起窗口，还要给谁看一份。
    *
    *   - 发起的是独立窗口 → 主窗口也弹：主窗口是总台，用户可能正对着它；
-   *   - 这条会话开在某个独立窗口里、却是别的窗口发起的 → 那个独立窗口也弹：
+   *   - 这条对话开在某个独立窗口里、却是别的窗口发起的 → 那个独立窗口也弹：
    *     用户正看着它，确认框却弹在被挡住的主窗口上。
-   * 两边都不沾（主窗口自己的会话、MiniChat 的会话）就不镜像，和原来一样。
+   * 两边都不沾（主窗口自己的对话、MiniChat 的对话）就不镜像，和原来一样。
    */
   approvalMirrors(sessionId: string, ownerId: number, mainId: number | undefined): number[] {
     const targets = new Set<number>()

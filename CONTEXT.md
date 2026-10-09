@@ -70,6 +70,7 @@ V2 那套「按问题类型路由到专家 Agent」已经废除，理由见 `age
 背后是不是 Agent 驱动不构成区别。代码里叫 `ChatSession`，它的 id 叫 `chatSid`（局部简写 `sid`）。
 由 Agent 驱动的对话，在内核那一层对应一份 **session**，见该词条。
 别的概念的英文名不得含 "Chat"。
+代码注释里单写的「会话」多半不指对话，按 **session** 词条里的读法理解。
 _Avoid_：会话、聊天；Conversation、Session、Thread
 
 **消息 (Message)**
@@ -105,7 +106,13 @@ _Avoid_：MiniChat、Mini Chat、迷你对话
 只出现在面向开发者的界面（如调试台），面向用户的文案里不出现。
 id 命名规则：渲染层与 shared 里 `sessionId` / `agentSessionId` 指内核 session，`sid` / `chatSid` 指对话；
 网络库导入的 `sessionId` 属导入领域。
-例外：过 IPC 的载荷字段沿用原名 —— `TrayAction` 的 `open-session` 里 `sessionId` 是对话 id，`ai.chatStream` 的 `sessionId` 是单次流 id。
+例外：过 IPC 的载荷字段沿用原名 —— `TrayAction` 的 `open-session` 里 `sessionId` 是对话 id，`ai.chatStream` 的 `sessionId` 是单次流 id，`miniChat.sessionSaved` 的 `session.id` 是对话 id。
+写注释时：指内核写「内核 session」，指对话写「对话」；MCP、语音连接等其他领域沿用各自说法。
+日志、异常、调试 tag 等运行时输出里的「会话」同此约定；测试内的 mock 数据与断言字符串属代码数据，不在此列。
+存量注释里单写的「会话」按所在模块的领域读：agent 内核相关代码（`agent-v3/`、`ipc/agentV3.ts` 等）里指内核 session；
+MCP（`capabilities/mcp/`）、实时语音与听写（`ai/realtime/`、`ai/stt/`、`realtimeVoice`、`speechToText`，含 preload 的同名两节；`ai/realtime/taskBus.ts` 除外，它讲的是内核 session）、网络库导入、工程导入的代码里，各指该领域自己的会话。
+测试文件里单写的「会话」（注释、测试名、mock/断言数据）按被测对象所在领域读。
+写明「agent 会话」「会话号」的仍指内核 session。
 _Avoid_：会话、内核记忆
 
 **UnrealAgentLink**

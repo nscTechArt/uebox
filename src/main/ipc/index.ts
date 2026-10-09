@@ -118,10 +118,10 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
   // 注册聊天附件解释 IPC（视频/文档在本地先解释成模型吃得下的东西）
   registerAttachmentIPC()
 
-  // 注册实时语音会话 IPC
+  // 注册实时语音连接 IPC
   registerRealtimeVoiceIPC()
 
-  // 注册语音识别（听写）IPC。和上面那条是两路独立会话，见 speechToText.ts
+  // 注册语音识别（听写）IPC。和上面那条是两条独立的连接，见 speechToText.ts
   registerSpeechToTextIPC()
 
   // 注册视频缩略图相关 IPC（视频首帧截取）

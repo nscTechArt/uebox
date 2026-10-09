@@ -4,7 +4,7 @@
 
     挂在输入框正上方、默认收起成一行：跑起来之后用户最常问的是「做到哪了」，
     一行摘要（几个人、几件完成、验收过没过）就答了；要细看再展开。
-    不另开页面 —— 它是这条会话的一部分（见 docs/AI游戏工作室设计-2026-09-25.md 第 3 节）。
+    不另开页面 —— 它是这条对话的一部分（见 docs/AI游戏工作室设计-2026-09-25.md 第 3 节）。
   -->
   <section class="team-board" :aria-label="t('assistant.teamBoard.title')">
     <button type="button" class="team-board-head" :aria-expanded="expanded" @click="toggle">
@@ -180,7 +180,7 @@ import {
 
 const props = defineProps<{
   team: TeamStateView
-  /** 这条会话正在跑：这时候不能结束团队模式（这一轮收尾会把团队状态写回去） */
+  /** 这条对话正在跑：这时候不能结束团队模式（这一轮收尾会把团队状态写回去） */
   running?: boolean
   /** 队员能换成哪些模型。和制作人招人时的候选同一份 */
   modelChoices?: TeamModelCandidate[]

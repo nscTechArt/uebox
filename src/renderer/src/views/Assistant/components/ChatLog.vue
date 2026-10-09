@@ -125,7 +125,7 @@ export interface ChatMessage {
 }
 
 /**
- * 聊天记录组件：
+ * 对话记录组件：
  * 接收消息列表，根据角色渲染不同气泡。
  * 采用 transform: scaleY(-1) 翻转方案，实现自动贴底和稳定的流式输出体验。
  */

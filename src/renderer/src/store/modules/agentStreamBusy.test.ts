@@ -9,7 +9,7 @@ import { useAgentStreamStore } from './agentStream'
  * 光看流式状态是不够的 —— 主进程的收尾顺序是
  * 发 `done`（事件流最后一条）→ `prompt()` 返回 → 摘登记表 → 发 `released`。
  * 界面收到 `done` 就把流式标志清了，可后台还没空出来；这个间隙里发出去会被
- * 顶回来一句「会话正在执行中」，而排队投递是**先出队再发**的，
+ * 顶回来一个 `SESSION_BUSY`，而排队投递是**先出队再发**的，
  * 那条话就此消失，用户什么提示都看不到。
  */
 describe('agentStream 的「忙」判据', () => {

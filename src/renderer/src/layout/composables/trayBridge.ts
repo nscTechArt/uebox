@@ -4,13 +4,13 @@
  * 两个方向，都挂在常驻布局上（和 `notificationActivation` 同一个理由：
  * 用户切去看素材库时助手页就卸载了，托盘菜单照样会点）。
  *
- * **上报**：最近活跃的三条会话推给主进程，托盘菜单里就有得点。
- * 活跃按 `updatedAt` 算（只在新建会话、来新消息时盖一次），取自会话
- * store 的 `displayableSessions`（归档和内嵌会话已摘出去）。刻意不跟
+ * **上报**：最近活跃的三条对话推给主进程，托盘菜单里就有得点。
+ * 活跃按 `updatedAt` 算（只在新建对话、来新消息时盖一次），取自对话
+ * store 的 `displayableSessions`（归档和内嵌对话已摘出去）。刻意不跟
  * 侧边栏的排列序：托盘是「回到我刚才那条对话」的入口，而默认按工程
- * 分组的侧边栏里纯会话排在最后 —— 跟渲染序的话，从托盘新开的对话
+ * 分组的侧边栏里纯对话排在最后 —— 跟渲染序的话，从托盘新开的对话
  * 反而永远进不了「最近对话」。置顶同理只是侧边栏的整理手段，不算最近。
- * 序列化没变不重发：会话里的每条消息都会动 `updatedAt`，而主进程一次
+ * 序列化没变不重发：对话里的每条消息都会动 `updatedAt`，而主进程一次
  * 重建就要重读引擎的最近名单，没必要跟着抖。
  *
  * **下发**：菜单点了什么，主进程把窗口拉到前台、存下动作，再发一句
@@ -40,7 +40,7 @@ import {
 let quitDialogOpen = false
 
 /**
- * 托盘「退出」、`app-quit`、安装更新撞上会话操作没收摊时都弹这一个框；
+ * 托盘「退出」、`app-quit`、安装更新时，只要还有操作没收摊，都弹这一个框；
  * 安装更新只换标题和确认按钮。确认后主进程按发起的那条路退
  */
 function confirmTrayQuit(count: number, reason?: 'update'): void {
@@ -92,7 +92,7 @@ export function useTrayBridge(): void {
 
   function handleAction(action: TrayAction): void {
     if (action.type === 'open-session') {
-      // 查不到就什么都不做：窗口已经在前台了，硬跳一条猜的会话更糟
+      // 查不到就什么都不做：窗口已经在前台了，硬跳一条猜的对话更糟
       if (!chatStore.sessionById(action.sessionId)) return
       void router
         .push(
@@ -102,7 +102,7 @@ export function useTrayBridge(): void {
           )
         )
         .catch((error) => {
-          console.error('[TrayBridge] 跳转会话失败', error)
+          console.error('[TrayBridge] 跳转对话失败', error)
         })
       return
     }
@@ -111,7 +111,7 @@ export function useTrayBridge(): void {
       void router
         .push({ name: 'AssistantWelcome', query: { sid: generateChatSessionId() } })
         .catch((error) => {
-          console.error('[TrayBridge] 新建会话跳转失败', error)
+          console.error('[TrayBridge] 新建对话跳转失败', error)
         })
       return
     }

@@ -3,19 +3,19 @@ import type { ChatSessionProject } from '@renderer/store/modules/chatSessions'
 import { projectDirectory } from '@renderer/views/AssetManagement/utils/importProjectChoices'
 
 /**
- * 审查时引擎没连上：替用户把这条会话的工程打开，连上后接着审查。
+ * 审查时引擎没连上：替用户把这条对话的工程打开，连上后接着审查。
  *
- * 只认会话自己的工程 —— 没绑工程的会话、库里找不到 .uproject 的工程，
+ * 只认对话自己的工程 —— 没绑工程的对话、库里找不到 .uproject 的工程，
  * 都不知道该开哪个，照旧只说一句「引擎没连上」。
  */
 
-/** 页面把当前会话的工程递给气泡 —— 气泡只看得见自己那一条消息 */
+/** 页面把当前对话的工程递给气泡 —— 气泡只看得见自己那一条消息 */
 export const SESSION_PROJECT_KEY: InjectionKey<ComputedRef<ChatSessionProject | null>> =
   Symbol('sessionProject')
 
 type ProjectRow = Pick<ProjectRecord, 'projectName' | 'projectPath' | 'originPath'>
 
-/** 会话工程对应的 .uproject。先按目录对，对不上再按名字 —— 老会话可能只存了名字 */
+/** 对话工程对应的 .uproject。先按目录对，对不上再按名字 —— 老对话可能只存了名字 */
 export function findSessionUproject(
   project: ChatSessionProject | null | undefined,
   rows: ProjectRow[]
@@ -32,7 +32,7 @@ export function findSessionUproject(
   return match?.originPath || null
 }
 
-/** 这条会话的工程现在连着盒子没有 */
+/** 这条对话的工程现在连着盒子没有 */
 export function isSessionProjectConnected(
   project: ChatSessionProject | null | undefined,
   connected: Pick<ConnectedProject, 'projectName' | 'projectPath' | 'isConnected'>[]

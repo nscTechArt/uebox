@@ -748,7 +748,7 @@ PostProcessVolume），截图、视口、游戏各自收敛到不同亮度，还
           if (response.restore_app_window) {
             try {
               // getAppWindows()：不能把 Agent 浏览器窗口恢复到前台，
-              // 用户等的是盒子的界面。先认主窗口：「第一个窗口」可能是独立聊天窗口
+              // 用户等的是盒子的界面。先认主窗口：「第一个窗口」可能是独立对话窗口
               const mainWindow = findMainWindow() ?? getAppWindows()[0]
               if (mainWindow) {
                 if (mainWindow.isMinimized()) {

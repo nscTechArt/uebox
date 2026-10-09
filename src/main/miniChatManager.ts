@@ -175,7 +175,7 @@ class MiniChatWindowManager {
       this.deliverContext()
     })
 
-    // MiniChat 保存会话后通知主窗口刷新会话列表
+    // MiniChat 保存对话后通知主窗口刷新对话列表
     ipcMain.on('mini-chat:session-saved', (_event, sessionData: { id: string; title: string }) => {
       logger.info(`[MiniChat] 收到 mini-chat:session-saved 事件`)
       logger.info(`[MiniChat] sessionData: ${JSON.stringify(sessionData)}`)
@@ -375,11 +375,11 @@ class MiniChatWindowManager {
   }
 
   /**
-   * 关闭 Mini Chat 窗口并重置会话
+   * 关闭 Mini Chat 窗口并重置对话
    */
   close(): void {
     if (this.miniChatWindow && !this.miniChatWindow.isDestroyed()) {
-      // 通知渲染进程清除会话（会触发保存逻辑）
+      // 通知渲染进程清除对话（会触发保存逻辑）
       this.miniChatWindow.webContents.send('mini-chat:reset-session')
       // 延迟关闭窗口，给渲染进程足够时间完成保存操作
       const windowToClose = this.miniChatWindow
@@ -412,7 +412,7 @@ class MiniChatWindowManager {
   }
 
   /**
-   * 隐藏 Mini Chat 窗口（不销毁，保留会话）
+   * 隐藏 Mini Chat 窗口（不销毁，保留对话）
    */
   hide(): void {
     if (this.miniChatWindow && !this.miniChatWindow.isDestroyed()) {

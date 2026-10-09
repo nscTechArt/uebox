@@ -1,7 +1,7 @@
 /**
  * AI 对话历史的落盘。
  *
- * 界面历史（会话列表 + 消息正文）原本存在 localStorage 里，配额只有几 MB，
+ * 界面历史（对话列表 + 消息正文）原本存在 localStorage 里，配额只有几 MB，
  * 写满之后 `setItem` 抛 QuotaExceededError —— 表现是聊天记录从某一刻起
  * 静默地再也存不上。这里把它挪到 `<userData>/chat-history/` 下的两个文件。
  *

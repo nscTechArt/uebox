@@ -119,22 +119,22 @@ syncAppIconTheme()
 initMotionPreference()
 
 // 同步语言设置到 main 进程，供 Agent 使用
-// 这确保即使用户在之前的会话中更改了语言，main 进程也能获取到正确的设置
+// 这确保即使用户在上一次运行中更改了语言，main 进程也能获取到正确的设置
 window.api?.appSettings?.setLanguage(savedLocale as 'zh-CN' | 'en-US').catch((err: Error) => {
   console.warn('初始化时同步语言设置到主进程失败:', err)
 })
 
 // 对话历史存在磁盘上（见 utils/chatHistoryStorage.ts），而 pinia 的 storage 接口
 // 是同步的 —— 必须先把它读进内存，再让任何人碰 store。initAgentReattach 起手就读
-// 对话缓存，顺序错了它只会看到一片空历史，然后把还在跑的会话判成中断。
+// 对话缓存，顺序错了它只会看到一片空历史，然后把还在跑的对话判成中断。
 void chatHistoryStorage.preload().finally(() => {
-  // 审批档位改动实时送到主进程，让运行中的会话也跟着变（必须在 pinia 之后）
+  // 审批档位改动实时送到主进程，让运行中的对话也跟着变（必须在 pinia 之后）
   initApprovalModeSync()
   // 刷新页面不会停掉 agent（它跑在主进程）—— 问一次主进程谁还活着，把界面接回去
   void initAgentReattach()
-  // 拖出去的独立聊天窗口和主窗口之间同步对话（同样要等对话历史读进来）
+  // 拖出去的独立对话窗口和主窗口之间同步对话（同样要等对话历史读进来）
   installChatWindowSync()
-  // 通话可能开在别的窗口（主窗口、独立聊天窗口、小窗）：那时这边不许自动朗读
+  // 通话可能开在别的窗口（主窗口、独立对话窗口、小窗）：那时这边不许自动朗读
   followVoiceCallFromOtherWindows()
 
   app.mount('#app')

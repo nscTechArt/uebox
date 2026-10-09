@@ -6,8 +6,8 @@
  *
  * ## 为什么冲突提示不走 `agentV3.subscribe`
  *
- * 那个订阅按 sessionId 过滤 —— 而锁冲突恰恰是**跨会话**的事：被挡住的是
- * 会话 A，而用户此刻很可能正看着会话 B。按会话过滤等于把提示发给了
+ * 那个订阅按 sessionId 过滤 —— 而锁冲突恰恰是**跨内核 session** 的事：被挡住的是
+ * 内核 session A，而用户此刻很可能正看着对话 B。按 session 过滤等于把提示发给了
  * 唯一不需要看到它的那个窗口。所以这里直接挂全局事件。
  *
  * ## 为什么要轮询
@@ -22,16 +22,16 @@ import { onUnmounted, readonly, ref, type Ref } from 'vue'
 export interface AssetLock {
   path: string
   connectionId?: string
-  /** 持有它的会话 id */
+  /** 持有它的内核 session id */
   owner: string
   acquiredAt: number
 }
 
 export interface AssetLockConflict {
   path: string
-  /** 现在占着它的会话 */
+  /** 现在占着它的内核 session */
   owner: string
-  /** 被挡住的那条会话 */
+  /** 被挡住的那条内核 session */
   requester: string
 }
 
@@ -75,7 +75,7 @@ export function useAssetLocks(): UseAssetLocks {
   const onConflict = (...args: unknown[]): void => {
     const payload = args[0] as AssetLockConflict | undefined
     if (!payload?.path) return
-    // 主进程已经按 (会话, 资产) 去过重了，这里只防列表无限长
+    // 主进程已经按 (内核 session, 资产) 去过重了，这里只防列表无限长
     conflicts.value = [payload, ...conflicts.value].slice(0, MAX_CONFLICTS)
     void refresh()
   }

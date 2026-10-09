@@ -156,7 +156,7 @@ export const useTabsStore = defineStore(
         }
       }
       // 注意：不再在 Tab 已存在时覆盖标题
-      // 原因：AI助手等模块会动态设置标题（如根据会话内容），
+      // 原因：AI助手等模块会动态设置标题（如根据对话内容），
       // 如果在点击 Tab 时用路由的静态 meta.title 覆盖，会导致动态标题丢失
 
       return tabKey

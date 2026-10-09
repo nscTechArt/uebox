@@ -601,7 +601,7 @@ const blueprintSummary = computed(() => {
 
 // ========== 选中快照 ==========
 /**
- * AI 聊天面板 mousedown 时调用，快照当前选中节点信息用于 AI 上下文。
+ * AI 对话面板 mousedown 时调用，快照当前选中节点信息用于 AI 上下文。
  * 选中状态的保持由 BlueprintRenderer 中的 patchSetFocused 补丁保证。
  */
 function handleSnapshotSelection(): void {

@@ -75,16 +75,16 @@ let createMainWindow: () => void = () => {}
 /**
  * 已经点开、还在等界面回话的那些，**按 `live` 的 key 存**（一条通知一格）。
  *
- * 主进程只能确认「窗口拉起来了」，认不认得这条会话是界面才知道的事
- * （MiniChat 建的会话主窗口就不认得）。所以点开之后先不收，等回话：
+ * 主进程只能确认「窗口拉起来了」，认不认得这条对话是界面才知道的事
+ * （MiniChat 建的对话主窗口就不认得）。所以点开之后先不收，等回话：
  * 认出来了才收，没认出来就重新弹一条。
  *
  * **存 `Notification` 本身，不是回头去 `live` 里查。** 回话到达时那个 key 多半
  * 已经不在 `live` 里了 —— 用户点下去系统就把 toast 摘走，`close` 事件跟着把
  * 表项删了。回头查等于查了个空，重弹会安静地什么都不做。
  *
- * **按通知存，不是按会话存。** 一条会话可以同时挂着两条通知（上一轮的
- * 「任务失败」还留在通知中心，这一轮又卡在审批上）。按会话认的话，后点的
+ * **按通知存，不是按内核 session 存。** 一条内核 session 可以同时挂着两条通知（上一轮的
+ * 「任务失败」还留在通知中心，这一轮又卡在审批上）。按内核 session 认的话，后点的
  * 那条会把先点的顶掉，先点的既收不掉也重弹不出来。
  *
  * 带上时间戳是为了封顶：回话可能永远不来（界面把 IPC 的错咽掉了、渲染进程
@@ -105,7 +105,7 @@ function rememberAwaiting(key: string, notification: Notification): void {
  * 这一下点开的结果。
  *
  * `awaiting-ui` 是「消息发给界面了，等它回话」；`done` 是「已经办完，没有下文」
- * （MiniChat 那种一个窗口一条会话的，拉到前台就是全部）；`failed` 是「一个窗口
+ * （MiniChat 那种一个窗口一条对话的，拉到前台就是全部）；`failed` 是「一个窗口
  * 都拉不起来」。分三态而不是布尔：`done` 也当成要等回话的话，那条通知会永远
  * 挂在 `awaiting` 里等一个不会来的消息。
  */
@@ -118,7 +118,7 @@ function raise(window: BrowserWindow): void {
   window.focus()
 }
 
-/** 发起这条会话的那个窗口。不是主窗口的话（MiniChat），拉的就该是它 */
+/** 发起这条对话的那个窗口。不是主窗口的话（MiniChat），拉的就该是它 */
 function ownerWindow(sessionId: string): BrowserWindow | undefined {
   const webContentsId = runOwnerWebContentsId(sessionId)
   if (webContentsId === undefined) return undefined
@@ -131,10 +131,10 @@ function ownerWindow(sessionId: string): BrowserWindow | undefined {
  * 点通知 = 「我这就回来处理**这件事**」。
  *
  * 只把窗口拉到前台是不够的：用户回来看到的是他离开时那个页面（可能是素材库，
- * 也可能是另一条对话），而通知说的那条会话还在侧边栏里排着。他得自己想起来
+ * 也可能是另一条对话），而通知说的那条对话还在侧边栏里排着。他得自己想起来
  * 是哪一条、翻到它、点开 —— 通知等于只帮他按了一下任务栏。
  *
- * 所以除了拉窗口，还要告诉界面跳到哪条会话。带的是**内核**会话 id，
+ * 所以除了拉窗口，还要告诉界面跳到哪条对话。带的是内核 session id，
  * 界面那边按 `agentSessionId` 反查自己的那条（两个 id 的关系见 chatSessions store）。
  *
  * 返回这一下的结果，调用方据此决定收、等、还是重弹。审批和反问是挡着活的，
@@ -142,8 +142,8 @@ function ownerWindow(sessionId: string): BrowserWindow | undefined {
  */
 function revealSession(payload: NotificationActivatePayload): RevealOutcome {
   /*
-   * 会话是在别的窗口里跑的（MiniChat）：把那个窗口拉到前台就够了 —— 它一个
-   * 窗口只有一条会话，没有「跳去哪」可言。
+   * 对话是在别的窗口里跑的（MiniChat）：把那个窗口拉到前台就够了 —— 它一个
+   * 窗口只有一条对话，没有「跳去哪」可言。
    *
    * 这条路**没有下文**：什么都没发出去，而 MiniChat 那种独立窗口根本不挂
    * `MainLayout`，不会有人回话。当成 `awaiting` 等下去的话，那条通知就永远

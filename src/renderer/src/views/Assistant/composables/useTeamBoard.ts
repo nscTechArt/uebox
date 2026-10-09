@@ -6,11 +6,11 @@
  *
  * ## 什么时候重读
  *
- * - 换了会话（chatSid 变了，或者这条会话第一次拿到 agent sessionId）
+ * - 换了对话（chatSid 变了，或者这条对话第一次拿到 agent sessionId）
  * - 主进程推 `agent-v3:team-board`：名册、任务板、留言、验收结论任何一样变了
- * - 这条会话的一轮跑完（`agent-v3:released`）：兜底，万一哪次推送没接上
+ * - 这条对话的一轮跑完（`agent-v3:released`）：兜底，万一哪次推送没接上
  *
- * 不轮询：不是工作室的会话一次查询都不该多花。
+ * 不轮询：不是工作室的对话一次查询都不该多花。
  */
 
 import { computed, onUnmounted, ref, watch, type ComputedRef, type Ref } from 'vue'
@@ -32,7 +32,7 @@ import { message } from '@renderer/utils/messageManager'
 
 export interface UseTeamBoard {
   team: Ref<TeamStateView | null>
-  /** 这条会话是不是工作室 */
+  /** 这条对话是不是工作室 */
   active: ComputedRef<boolean>
   refresh: () => Promise<void>
   /** 卡住的一项改回待办，下一轮制作人会看到 */

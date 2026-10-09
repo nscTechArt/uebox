@@ -2,7 +2,7 @@ import type { BrowserGroupState, BrowserNavigationState } from '../../../../../s
 import { onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { agentBrowserAPI } from '@renderer/api/agentBrowser'
 
-/** 异步恢复结果和广播都只允许更新所属会话。 */
+/** 异步恢复结果和广播都只允许更新所属内核 session。 */
 export function useSessionBrowser(
   sessionId: Readonly<Ref<string>>,
   visible: Readonly<Ref<boolean>>,
@@ -26,7 +26,7 @@ export function useSessionBrowser(
   let revision = 0
   let stateRevision = 0
   let handler: ((...args: unknown[]) => void) | null = null
-  // 只有「进入这个会话」才允许恢复页面。折叠再展开面板不算进入 ——
+  // 只有「进入这个对话」才允许恢复页面。折叠再展开面板不算进入 ——
   // 那样每展开一次就可能把远端页面重新拉起来，用户没做过这个动作。
   const restored = new Set<string>()
 

@@ -261,7 +261,7 @@ function createWindow(): void {
       /*
        * 托盘菜单与悬停提示不能走「主进程回码、渲染层查语言包」那条路：
        * Electron 把它们交给操作系统画，渲染进程碰不到。所以托盘文案在主进程翻
-       * （见 `main/i18n.ts`）。菜单的结构、最近会话 / 最近项目、退出确认都在
+       * （见 `main/i18n.ts`）。菜单的结构、最近对话 / 最近项目、退出确认都在
        * `tray/trayController.ts`，这里只把窗口相关的回调喂给它。
        */
       startTrayMenuController(tray, {
@@ -688,7 +688,7 @@ appReady?.then(async () => {
     // （两者各自都会打一行「初始化完成」，这里不再复述）
     spotlightManager.initialize()
     miniChatManager.initialize()
-    // 从标签栏拖出来的独立聊天窗口（见 chatWindowManager.ts 文件头）
+    // 从标签栏拖出来的独立对话窗口（见 chatWindowManager.ts 文件头）
     chatWindowManager.initialize()
 
     // 初始化应用全局快捷键

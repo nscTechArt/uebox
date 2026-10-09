@@ -1,11 +1,11 @@
 /**
  * 工具结果里带的图和视频怎么读。
  *
- * 单独成文件是因为两处要读：小窗的过程日志（`AgentProcessLog`）和主聊天页的
+ * 单独成文件是因为两处要读：小窗的过程日志（`AgentProcessLog`）和主对话页的
  * 步骤组（`AgentStepGroup`）。各抄一份的话，哪天工具多一个字段就会只认一边。
  *
  * 显示的是**磁盘上那张原图**，不是进模型上下文的那张压缩版：后者为了省 token
- * 压到了 768px 宽的 JPEG，而且根本不发到渲染层（base64 会随聊天记录写进
+ * 压到了 768px 宽的 JPEG，而且根本不发到渲染层（base64 会随对话记录写进
  * localStorage，把配额撑满 —— 见 adaptV2Tool 的说明）。读盘显示既清楚又不占
  * 存储，重开应用之后也还在。
  */
@@ -73,7 +73,7 @@ export function isDeliverableImageTool(toolName: string): boolean {
  * 找出这一步产出的、能直接播放的视频。
  *
  * 与图同理走本机资源服务读磁盘上那份，而不是厂商那个临时地址 ——
- * 后者几小时后失效，聊天记录翻回来就是一个点不开的黑框。
+ * 后者几小时后失效，对话记录翻回来就是一个点不开的黑框。
  */
 export function findResultVideoUrls(result: unknown): string[] {
   const structured = parseStructuredValue(result)

@@ -69,7 +69,7 @@ const realtimeVoice = computed({
  * OpenAI 的 gpt-4o 看得懂图、o3-mini 不行；有的会推理、有的不会。
  *
  * 生图/3D/视频/实时语音那几位已经删掉了 —— 那是「这个 Provider 是干什么的」，
- * 一个 Provider 下不会有一半模型生图一半模型聊天。它们现在是 Provider 的用途。
+ * 一个 Provider 下不会有一半模型生图一半模型对话。它们现在是 Provider 的用途。
  */
 const CAPABILITIES = [
   'supportsVision',

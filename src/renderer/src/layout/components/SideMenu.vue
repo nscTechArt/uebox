@@ -174,13 +174,13 @@ onMounted(() => {
 
   updateSelectedKeys()
 
-  // 监听 MiniChat 保存会话的 IPC 事件，将数据同步到主窗口 store
+  // 监听 MiniChat 保存对话的 IPC 事件，将数据同步到主窗口 store
   const handler = window.api?.on('chat-sessions:refresh', (...args: unknown[]) => {
     const sessionData = args[0] as { id: string; title: string; messages: ChatMessage[] }
-    console.log('[SideMenu] 收到 MiniChat 会话同步事件:', sessionData.id)
+    console.log('[SideMenu] 收到 MiniChat 对话同步事件:', sessionData.id)
     console.log('[SideMenu] 消息数量:', sessionData.messages?.length)
     console.log('[SideMenu] 消息数据:', JSON.stringify(sessionData.messages?.slice(0, 2)))
-    // 创建会话
+    // 创建对话
     chatStore.ensureSession(sessionData.id, sessionData.title)
     chatStore.updateTitle(sessionData.id, sessionData.title)
     // 同步消息到本地 store（使用深拷贝确保数据独立）
@@ -194,7 +194,7 @@ onMounted(() => {
     ;(window as unknown as { __miniChatHandler?: unknown }).__miniChatHandler = handler
   }
 
-  // 展开/折叠分组、加载更多会话都会改变内容高度，滚动条指示条要跟着重算
+  // 展开/折叠分组、加载更多对话都会改变内容高度，滚动条指示条要跟着重算
   if (menuContentRef.value && typeof ResizeObserver !== 'undefined') {
     contentResizeObserver = new ResizeObserver(() => updateScrollThumb())
     contentResizeObserver.observe(menuContentRef.value)
@@ -315,7 +315,7 @@ const openCustomizeFromPopup = (): void => {
 const chatSessionListRef = ref<{ loadMore: () => boolean } | null>(null)
 
 /**
- * 当前路由正在查看的会话，用于在列表里高亮
+ * 当前路由正在查看的对话，用于在列表里高亮
  */
 const activeChatSid = computed<string>(() => {
   const sid = router.currentRoute.value.query?.sid
@@ -388,13 +388,13 @@ const handleMouseLeave = (): void => {
 }
 
 /**
- * 创建新的对话会话并跳转到虚幻AI助手欢迎页（独立tab）
- * 通过附加唯一的会话ID到查询参数，触发标签key使用fullPath从而创建新标签
+ * 创建新对话并跳转到虚幻AI助手欢迎页（独立tab）
+ * 通过附加唯一的对话ID到查询参数，触发标签key使用fullPath从而创建新标签
  */
 const createNewChat = (projectName?: string, projectPath?: string): void => {
   emit('peek-close')
   const sid = generateChatSessionId()
-  // 带上工程名时，这条新会话发第一条消息就会归到那个工程下（见 sessionProjectBinding）；
+  // 带上工程名时，这条新对话发第一条消息就会归到那个工程下（见 sessionProjectBinding）；
   // 同名工程有好几个时还会带上路径
   const query = projectName
     ? { sid, project: projectName, ...(projectPath ? { projectPath } : {}) }
@@ -403,8 +403,8 @@ const createNewChat = (projectName?: string, projectPath?: string): void => {
 }
 
 /**
- * 打开指定会话ID的聊天页
- * @param id 会话ID
+ * 打开指定对话ID的对话页
+ * @param id 对话ID
  */
 function openChat(id: string): void {
   emit('peek-close')
@@ -416,7 +416,7 @@ function openChat(id: string): void {
   )
 }
 
-// 会话的重命名、删除、置顶、归入工程都在 ChatSessionList 里，这里只负责导航。
+// 对话的重命名、删除、置顶、归入工程都在 ChatSessionList 里，这里只负责导航。
 </script>
 
 <template>
@@ -643,7 +643,7 @@ function openChat(id: string): void {
   /**
    * 侧边栏行的统一度量。
    *
-   * 工具列表是 ant Menu 渲染的，会话列表是我们自己的 DOM，两边靠这组变量对齐
+   * 工具列表是 ant Menu 渲染的，对话列表是我们自己的 DOM，两边靠这组变量对齐
    * ——行高、圆角、缩进、图标大小、悬停/选中色只在这里定义一次。
    * CSS 变量会往下继承，子组件（ChatSessionList / SidebarSectionHeader）直接用。
    */
@@ -656,7 +656,7 @@ function openChat(id: string): void {
   --sidebar-icon-size: 14px;
   /**
    * 三级字号，越往下越轻：
-   * 分区标题（项目/对话）12px 中粗 → 工具项与工程行 14px → 具体会话 13px。
+   * 分区标题（项目/对话）12px 中粗 → 工具项与工程行 14px → 具体对话 13px。
    * 层级靠字号和字重区分，不靠加箭头或加粗底色。
    */
   --sidebar-section-size: var(--font-size-sm);
@@ -721,7 +721,7 @@ function openChat(id: string): void {
       background: var(--color-bg-surface-hover);
     }
 
-    // 工具行与会话行共用一套度量，两个列表在视觉上是同一条竖列
+    // 工具行与对话行共用一套度量，两个列表在视觉上是同一条竖列
     .ant-menu-item,
     .ant-menu-submenu-title {
       width: auto;
@@ -869,7 +869,7 @@ function openChat(id: string): void {
   min-height: 0;
 }
 
-// 唯一的滚动区：工具和会话一起滚
+// 唯一的滚动区：工具和对话一起滚
 .menu-scroll {
   height: 100%;
   overflow-y: auto;

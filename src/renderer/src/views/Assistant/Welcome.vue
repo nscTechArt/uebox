@@ -170,7 +170,7 @@
 
           放在这一层里面（而不是当它的兄弟）是为了蹭 `chatComposerRef` 那个
           ResizeObserver：卡片一出来，`--composer-height` 自己就长高了，
-          聊天区按新值收缩，输入框和卡片都还在可视区里。当兄弟节点的话
+          对话区按新值收缩，输入框和卡片都还在可视区里。当兄弟节点的话
           得再写一套测量，还容易把 sticky 的输入框顶出屏幕。
         -->
         <div :ref="setApprovalDock" class="approval-dock"></div>
@@ -218,7 +218,7 @@
             <PhX :size="12" />
           </button>
         </div>
-        <!-- 工作室模式（/team）的任务板。只有工作室会话才有，默认收成一行 -->
+        <!-- 工作室模式（/team）的任务板。只有工作室对话才有，默认收成一行 -->
         <TeamBoardPanel
           v-if="teamBoard.team.value"
           :team="teamBoard.team.value"
@@ -318,7 +318,7 @@ import { storeToRefs } from 'pinia'
 function triggerInput(text: string): void {
   console.log('[Welcome] triggerInput called with:', text)
   if (!text) return
-  // 确保会话存在，参考 handleBubbleSuggest 的逻辑
+  // 确保对话存在，参考 handleBubbleSuggest 的逻辑
   chatStore.ensureSession(sid.value || normalizeSid(''), t('assistant.chatFlow.unnamedChat'))
   handleSend({ content: text, images: [] })
 }
@@ -502,7 +502,7 @@ const props = defineProps({
   /**
    * 嵌在蓝图库 / 材质库详情页里时，「用户正在看什么」。
    *
-   * 每一轮请求前注入一条上下文消息，**不进会话历史** —— 所以带的永远是
+   * 每一轮请求前注入一条上下文消息，**不进对话历史** —— 所以带的永远是
    * 当下的选中节点。页面自己算好传进来（`libraryChatContext.ts`）。
    */
   libraryContext: {
@@ -522,7 +522,7 @@ provide(
   SESSION_PROJECT_KEY,
   computed(() => chatStore.getProject?.(sid.value) ?? null)
 )
-/** 工作室模式的任务板。不是工作室的会话 team 为 null，面板不出现 */
+/** 工作室模式的任务板。不是工作室的对话 team 为 null，面板不出现 */
 const teamBoard = useTeamBoard(sid)
 /** 目标模式的目标。没有就是 null，那一行不出现 */
 const sessionGoal = useSessionGoal(sid)
@@ -539,9 +539,9 @@ if (props.chatSid) {
 const chatOnlyMode = computed<boolean>(() => props.forceChatView || props.notebookMode)
 
 /**
- * 侧边栏在工程标题上点「+」新建会话时带过来的工程名（`?project=`）。
+ * 侧边栏在工程标题上点「+」新建对话时带过来的工程名（`?project=`）。
  *
- * 会话要等第一条消息才进 store（`ensureSessionWithTitle` 里由
+ * 对话要等第一条消息才进 store（`ensureSessionWithTitle` 里由
  * `stampSessionProject` 盖戳），在那之前归属只存在于路由上，顶栏胶囊照这个显示。
  * 标签页是 keep-alive 的，所以要求 `?sid=` 对得上，免得别的标签的参数漏进来。
  */
@@ -597,9 +597,9 @@ const hasComposerImages = ref(false)
 
 /**
  * 输入框的真实高度。
- * 长文本、图片预览、@ 提及都会把输入框撑高，写死 130/210px 会让聊天区
+ * 长文本、图片预览、@ 提及都会把输入框撑高，写死 130/210px 会让对话区
  * 算出的 max-height 偏大，多出来的部分把 sticky 输入框顶出可视区。
- * 这里实测高度，聊天区按实测值收缩，输入框永远贴在窗口底部。
+ * 这里实测高度，对话区按实测值收缩，输入框永远贴在窗口底部。
  */
 const chatComposerRef = ref<HTMLElement | null>(null)
 
@@ -715,7 +715,7 @@ watch(
 )
 
 /**
- * 规整会话ID：若为空则生成一个新的ID。
+ * 规整对话ID：若为空则生成一个新的ID。
  * @param raw 原始sid字符串
  * @returns 正常化后的sid
  */
@@ -748,7 +748,7 @@ function pushAssistantTyping(startTime?: number): string {
 
 /**
  * 处理生成图片事件
- * 实现互斥逻辑：切换到图片生成模式时，自动关闭会话模式
+ * 实现互斥逻辑：切换到图片生成模式时，自动关闭对话模式
  */
 const isImageGenerationMode = ref(false)
 
@@ -756,7 +756,7 @@ const isImageGenerationMode = ref(false)
 function handleCreateImage(): void {
   if (chatOnlyMode.value) return
   isImageGenerationMode.value = true
-  // 保存到会话
+  // 保存到对话
   chatStore.setImageGenerationMode(sid.value, true)
 }
 
@@ -768,7 +768,7 @@ function handleCancelImageGeneration(): void {
 /**
  * 执行一条不带参数的内置命令（见 `components/slashCommands.ts`）。
  *
- * 结果一律用 toast 说清楚，**包括拒绝的情况**：压缩会在会话正跑着、
+ * 结果一律用 toast 说清楚，**包括拒绝的情况**：压缩会在对话正跑着、
  * 没有历史、或者压完没变小的时候拒绝，各有各的原因。一律报「失败」
  * 会让用户以为按钮坏了，而实际上内核是对的。
  */
@@ -781,7 +781,7 @@ async function handleRunCommand(name: string): Promise<void> {
   if (name !== 'compact') return
 
   /*
-   * 取会话上存着的那份 agentSessionId，**不是**流式状态里的那份：
+   * 取对话上存着的那份 agentSessionId，**不是**流式状态里的那份：
    * 压缩只在没跑的时候才允许（跑着会和自动压缩抢同一份 transcript），
    * 而那正是流式状态不存在的时候。
    */
@@ -842,13 +842,13 @@ function handleAskModeChange(enabled: boolean): void {
 }
 
 /**
- * 换会话时给它盖上权限档位，只读状态跟着**新的这条**走。
+ * 换对话时给它盖上权限档位，只读状态跟着**新的这条**走。
  *
- * 盖章：新会话继承「上一次选的那一档」，盖上之后就归它自己了 ——
+ * 盖章：新对话继承「上一次选的那一档」，盖上之后就归它自己了 ——
  * 之后别的标签页再怎么调，这条都不会跟着变（见 sessionPermissionMode.ts）。
  *
  * 对齐只读：这个组件是复用的，标签页切换只是把 `sid` 换掉，`askModeRef`
- * 还留着上一条会话的值 —— 在 A 里选了只读再切到 B，B 会被悄悄锁成只读，
+ * 还留着上一条对话的值 —— 在 A 里选了只读再切到 B，B 会被悄悄锁成只读，
  * 而它的下拉里明明写着别的档位。
  */
 watch(
@@ -859,7 +859,7 @@ watch(
   { immediate: true }
 )
 
-// ==================== 聊天流程逻辑（使用 composable）====================
+// ==================== 对话流程逻辑（使用 composable）====================
 const { handleSend, respondWithImageGeneration, normalizeSid } = useChatFlow({
   sid,
   chatStore,
@@ -880,8 +880,8 @@ const { handleSend, respondWithImageGeneration, normalizeSid } = useChatFlow({
  *
  * 每条对话是一个独立的 keep-alive 页面实例。语音原先由这个组件持有，
  * 切到「语音任务」看一眼过程，新页面的语音状态是空的、旧页面被换掉时还顺手
- * 关了麦克风 —— 用户看到的就是「切一下会话，语音助手没了」。现在球体、字幕、
- * 状态在哪个页面看都是同一份，切会话、切标签页、去别的页面都不断线。
+ * 关了麦克风 —— 用户看到的就是「切一下对话，语音助手没了」。现在球体、字幕、
+ * 状态在哪个页面看都是同一份，切对话、切标签页、去别的页面都不断线。
  *
  * 页面借给语音的只剩两件**纯显示**的事：滚到底、更新上下文标签。派活不用它 ——
  * 那走应用级的 `appAgentRunner`，助手页开着没开着都一样。
@@ -1029,7 +1029,7 @@ async function handleSteerQueuedFollowUp(id: string): Promise<void> {
    * 三种情况，不是两种。
    *
    * 中间那一档是「界面停了、后台还没放」：`isGenerating` 那时已经是 false，
-   * 但主进程还没走完收尾，这时候当新一轮发出去会被顶回来一句「正在执行中」，
+   * 但主进程还没走完收尾，这时候当新一轮发出去会被顶回来一个 `SESSION_BUSY`，
    * 而条目已经从队列里摘掉了 —— 用户点了一下，话就没了。
    */
   if (agentStreamStore.isBusy(chatSid)) {
@@ -1117,7 +1117,7 @@ function handleComposerSend(payload: ComposerSendPayload): void {
   }
 
   /*
-   * 会话号在**这一刻**定下来，后面全用它。
+   * 对话 id 在**这一刻**定下来，后面全用它。
    *
    * 下面要 await 抓取，那期间用户完全可能切到别的对话去 —— 再读 `sid.value`
    * 就把这条话发到别人那里了。
@@ -1130,17 +1130,17 @@ function handleComposerSend(payload: ComposerSendPayload): void {
    * 这是整个机制的落点：用户按下发送的那一刻，他眼前是什么就抓什么。晚一秒
    * 抓到的就可能是另一个选区，而那正是闪存要消灭的东西。
    *
-   * 会话正在跑时要带上它的 agent 会话号：这条消息最终落在那一轮或紧接着的下一轮，
-   * 得跟着那一轮盯的工程抓，不能自己按会话戳重算。
+   * 对话正在跑时要带上它的内核 session id：这条消息最终落在那一轮或紧接着的下一轮，
+   * 得跟着那一轮盯的工程抓，不能自己按对话戳重算。
    */
   /*
-   * 工程归属要**按用户指定的那个**算，不能只读会话戳。
+   * 工程归属要**按用户指定的那个**算，不能只读对话戳。
    *
    * 从侧边栏工程 A 的「+」新建对话时，归属这时候还只在路由参数上
-   * （`?project=`）—— 会话要等第一条消息发出去才进 store 盖戳（见
+   * （`?project=`）—— 对话要等第一条消息发出去才进 store 盖戳（见
    * `chatSendPrimitives` 的 `stampSessionProject`）。只读戳的话这里拿到 null，
    * 于是按「当前连接」抓，抓到的是碰巧连着的 B，还把这一轮钉死在 B 上；
-   * 稍后会话才被归入 A。用户从 A 下面点的「+」，第一句话却在 B 上执行。
+   * 稍后对话才被归入 A。用户从 A 下面点的「+」，第一句话却在 B 上执行。
    */
   const sessionProject =
     chatStore.getProject?.(chatSid) ??
@@ -1183,7 +1183,7 @@ function handleComposerSend(payload: ComposerSendPayload): void {
      *
      * 判定到入队/发送之间没有 await，`isBusy` 是同步读的，所以中间没有窗口。
      * 用 `isBusy` 而不是 `isGenerating`：界面停止输出（`done`）之后、主进程发
-     * `released` 之前，会话其实还没空出来，这时候发出去会被顶回来。
+     * `released` 之前，内核 session 其实还没空出来，这时候发出去会被顶回来。
      *
      * 跑着的时候来的 send 一律排队 —— 输入框那边已经按用户的设置判过了，
      * 想插话的话它发的是 `steer` 事件，走不到这里。
@@ -1236,7 +1236,7 @@ const handleSourceClick = (source: unknown): void => {
 /**
  * 页面挂载时初始化：
  * - 读取路由查询参数中的 sid 与 q
- * - 保证会话存在
+ * - 保证对话存在
  * - 若存在初始问题 q，则进入对话模式并追加消息
  */
 onMounted(() => {
@@ -1245,7 +1245,7 @@ onMounted(() => {
 
   // 助手永远是 Agent。
   //
-  // 这里原来读会话里存的 agentMode 和全局偏好 lastAgentMode —— 那两个都是
+  // 这里原来读对话里存的 agentMode 和全局偏好 lastAgentMode —— 那两个都是
   // Chat/Agent 下拉框写下的，而下拉框已经删了。继续读的话，存量用户磁盘上
   // 那个 false 会把他永久钉在老链路上，界面上再没有任何开关能把他弄出来。
   //
@@ -1253,7 +1253,7 @@ onMounted(() => {
   const session = chatStore.sessionById(sid.value)
   let modeToRestore = !chatOnlyMode.value
 
-  // 只读状态由上面那个 watch 按 sid 对齐 —— 它是这条会话权限档位的派生状态，
+  // 只读状态由上面那个 watch 按 sid 对齐 —— 它是这条对话权限档位的派生状态，
   // 不再是一个全局开关（存量用户磁盘上那个 lastAgentMode/lastAskMode 一律不读）
 
   // 恢复生图模式状态
@@ -1372,8 +1372,8 @@ onDeactivated(() => {
   /*
    * **不停语音，也不注销宿主。**
    *
-   * 这里原本会 `voice.stop()`，于是切一下标签页通话就断了。但语音会话是
-   * 一通电话，不是一个页面的附属品：整套前台/后厨的设计（任务表搬进主进程、
+   * 这里原本会 `voice.stop()`，于是切一下标签页通话就断了。但通话不是
+   * 哪个页面的附属品：整套前台/后厨的设计（任务表搬进主进程、
    * 界面切走照样播报）就是为了让任务跑着的时候用户能去干别的。
    * 切走就挂断，等于把这套东西的意义抹掉了。
    *
@@ -1395,7 +1395,7 @@ onDeactivated(() => {
 })
 
 /**
- * 监听当前会话标题变化并同步到标签标题。
+ * 监听当前对话标题变化并同步到标签标题。
  */
 watch(
   () => chatStore.sessionById(sid.value)?.title,
@@ -1411,17 +1411,17 @@ watch(
 )
 
 /**
- * 监听会话ID变化，恢复对应会话的Agent模式状态
+ * 监听对话ID变化，恢复对应对话的Agent模式状态
  */
 /**
- * 恢复指定会话的模式状态和滚动位置
+ * 恢复指定对话的模式状态和滚动位置
  */
 const restoreSessionState = (targetSid: string): void => {
   // 注意：不取消SSE流，让它在后台继续运行
-  // 流回调使用捕获的 currentSid 正确写入对应会话的消息列表
+  // 流回调使用捕获的 currentSid 正确写入对应对话的消息列表
   // 用户切回该Tab时会自动看到已完成的内容
 
-  // 保存当前会话的滚动位置（在切换之前）
+  // 保存当前对话的滚动位置（在切换之前）
   const currentSidValue = sid.value
   const scrollEl = chatLogRef.value?.getScrollElement()
   if (scrollEl && currentSidValue && currentSidValue !== targetSid) {
@@ -1448,7 +1448,7 @@ const restoreSessionState = (targetSid: string): void => {
     chatStore.setImageGenerationMode(targetSid, false)
   }
 
-  // 恢复目标会话的滚动位置（切换会话后）
+  // 恢复目标对话的滚动位置（切换对话后）
   nextTick(() => {
     const targetScrollEl = chatLogRef.value?.getScrollElement()
     if (!targetScrollEl) return
@@ -1463,7 +1463,7 @@ const restoreSessionState = (targetSid: string): void => {
           try {
             ;(chatLogRef.value as any).scrollToItem(targetIndex)
           } catch (e) {
-            console.warn('[会话切换] scrollToItem 失败:', e)
+            console.warn('[对话切换] scrollToItem 失败:', e)
           }
         }
       }
@@ -1483,7 +1483,7 @@ const restoreSessionState = (targetSid: string): void => {
 }
 
 /**
- * 监听会话ID变化(URL)，恢复对应会话的Agent模式状态
+ * 监听对话ID变化(URL)，恢复对应对话的Agent模式状态
  */
 watch(
   () => route.query.sid,
@@ -1517,11 +1517,11 @@ watch(
 )
 
 /**
- * 监听图片生成模式变化并同步到会话存储
+ * 监听图片生成模式变化并同步到对话存储
  */
 watch(isImageGenerationMode, (newValue) => {
   if (sid.value) {
-    console.log('[图片生成模式] 状态变化，保存到会话:', newValue)
+    console.log('[图片生成模式] 状态变化，保存到对话:', newValue)
     chatStore.setImageGenerationMode(sid.value, newValue)
   }
 })
@@ -1550,8 +1550,8 @@ function extractTextFromContent(content: ChatMessageContent): string {
 }
 
 /**
- * 确保会话存在并在首次发送消息时设置标题
- * @param chatSid 会话ID
+ * 确保对话存在并在首次发送消息时设置标题
+ * @param chatSid 对话ID
  * @param messageText 消息文本
  */
 
@@ -1561,7 +1561,7 @@ function extractTextFromContent(content: ChatMessageContent): string {
  */
 
 /**
- * 生成智能的会话标题
+ * 生成智能的对话标题
  * 优先级：有文本 > 工具使用 > 已发送图片
  * @param text 用户输入的文本
  * @param images 图片数组
@@ -1613,7 +1613,7 @@ function handleClearBoundWiki(): void {
 
 /**
  * 处理输入框图片变化事件
- * 用于动态调整聊天区域高度，防止滚动到底部按钮被图片预览遮挡
+ * 用于动态调整对话区域高度，防止滚动到底部按钮被图片预览遮挡
  * @param hasImages 是否有待发送图片
  */
 function handleComposerImagesChange(hasImages: boolean): void {
@@ -1621,7 +1621,7 @@ function handleComposerImagesChange(hasImages: boolean): void {
 }
 
 /**
- * 恢复Agent模式状态（用于会话切换时）
+ * 恢复Agent模式状态（用于对话切换时）
  */
 
 /**
@@ -1660,9 +1660,9 @@ function isImageGenerationMessage(content: string): boolean {
 /**
  * 重发之前先把跑着的那一轮停干净。
  *
- * 「重新生成」和「编辑消息」都是**开新一轮**，而一条会话同时只能跑一轮 ——
+ * 「重新生成」和「编辑消息」都是**开新一轮**，而一条对话同时只能跑一轮 ——
  * 用户在它思考的时候改了自己那句话点发送，界面照发不误，主进程只能顶回来
- * 一句「会话 xxx 正在执行中」：屏幕上多一条红字，他刚敲的那段话没了。
+ * 一个 `SESSION_BUSY`：屏幕上多一条红字，他刚敲的那段话没了。
  *
  * 停不干净（卡在审批框、工具没退出）就别发，如实说一声让他稍后再试 ——
  * 硬发下去撞到的还是那句话，只是这次是我们自己撞上去的。
@@ -1826,7 +1826,7 @@ function handleComposerStop(): void {
  * 运行中插话改方向。
  *
  * 取代了原来那个「点 token 图标手动压缩历史」——那条路是 V2 的：它压的是
- * 界面自己那份聊天记录（和模型真正看到的上下文是两回事），而且**要求登录**，
+ * 界面自己那份对话记录（和模型真正看到的上下文是两回事），而且**要求登录**，
  * 社区版不该有账号门槛（AGENTS.md §1）。V3 内核自己会在快溢出时压缩，
  * 用不着用户点。
  */
@@ -1843,7 +1843,7 @@ async function handleComposerSteer(payload: {
    * 插话也是一次「发送」，闪存同样在这一刻抓。
    *
    * 带 `runningSessionId`：插话注入的是正在跑的那一轮，快照必须来自它盯着的
-   * 那个工程 —— 自己按会话戳重算的话，没盖戳的会话会跟着「最近连上的」走，
+   * 那个工程 —— 自己按对话戳重算的话，没盖戳的对话会跟着「最近连上的」走，
    * 抓到的可能是另一个工程的编辑器。
    */
   const captured = await agentV3API.captureEditorSnapshot({
@@ -1892,7 +1892,7 @@ async function handleBubbleAction(payload: {
 }
 
 /**
- * 让它自证：把机器的审查结论拼成一句话，作为**普通用户消息**发进当前会话。
+ * 让它自证：把机器的审查结论拼成一句话，作为**普通用户消息**发进当前对话。
  *
  * 不偷偷发的原因：以后翻这段对话，会看到一段没头没尾的自我检讨，没人知道
  * 它在回应什么。发成一条看得见的消息，问和答就都留在记录里了。
@@ -1911,7 +1911,7 @@ function handleSelfCheck(bubbleId: string, data?: Partial<SelfCheckInput>): void
     t
   )
 
-  // 同「交给 AI 修」：会话忙着就排队
+  // 同「交给 AI 修」：对话忙着就排队
   handleComposerSend({ content: prompt, images: [] })
 }
 
@@ -2197,7 +2197,7 @@ function handleFollowupsReady(): void {
 }
 
 /**
- * 清空当前会话消息并重置为欢迎态。
+ * 清空当前对话消息并重置为欢迎态。
  */
 function handleClearSession(): void {
   confirmDialog({
@@ -2223,7 +2223,7 @@ function handleClearSession(): void {
 let exportingImage = false
 
 /**
- * 把当前会话从第一条到最后一条导出为一张 PNG 长图。
+ * 把当前对话从第一条到最后一条导出为一张 PNG 长图。
  */
 async function exportAsImage(): Promise<void> {
   const scrollElement = chatLogRef.value?.getScrollElement()
@@ -2255,7 +2255,7 @@ async function exportAsImage(): Promise<void> {
 }
 
 /**
- * 导出当前会话为JSON文件。
+ * 导出当前对话为JSON文件。
  */
 function exportAsJSON(): void {
   const data = messages.value.map((m) => ({
@@ -2274,7 +2274,7 @@ function exportAsJSON(): void {
 }
 
 /**
- * 导出当前会话为Markdown文件。
+ * 导出当前对话为Markdown文件。
  */
 function exportAsMarkdown(): void {
   const lines = messages.value.map((m) => {
@@ -2321,9 +2321,9 @@ watch(
   () => messages.value.length,
   (newLen, oldLen) => {
     nextTick(() => {
-      // 检测是否为批量加载（如切换会话或加载历史）
+      // 检测是否为批量加载（如切换对话或加载历史）
       const isBulkLoad = (oldLen === undefined || oldLen === 0) && newLen > 1
-      // 或者是从一个会话切换到另一个（长度变化大）
+      // 或者是从一个对话切换到另一个（长度变化大）
       const isSwitch = Math.abs(newLen - (oldLen || 0)) > 1
 
       if (isBulkLoad || isSwitch) {
@@ -2391,7 +2391,7 @@ function scrollToBottomIfNeeded(): void {
     clearTimeout(scrollIfNeededTimer)
   }
 
-  // 防抖：延迟执行，合并短时间内多次调用（特别是在打开历史会话时）
+  // 防抖：延迟执行，合并短时间内多次调用（特别是在打开历史对话时）
   scrollIfNeededTimer = setTimeout(() => {
     scrollIfNeededTimer = null
 
@@ -2553,7 +2553,7 @@ watch(
 
 // ==================== TAB 切换时保存/恢复滚动位置 ====================
 /**
- * 按会话 ID 存储滚动位置，用于 TAB 切换时恢复
+ * 按对话 ID 存储滚动位置，用于 TAB 切换时恢复
  */
 const scrollPositionCache = new Map<string, number>()
 

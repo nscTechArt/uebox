@@ -336,7 +336,7 @@ export function createFoldersTool() {
 
         const totalCount = countFolders(results)
 
-        // 通知前端刷新资产树。资产树在主窗口里；「第一个窗口」可能是独立聊天窗口
+        // 通知前端刷新资产树。资产树在主窗口里；「第一个窗口」可能是独立对话窗口
         const mainWindow = findMainWindow() ?? getAppWindows()[0]
         if (mainWindow) {
           mainWindow.webContents.send('asset-tree:refresh', {

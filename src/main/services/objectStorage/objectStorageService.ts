@@ -1,7 +1,7 @@
 /**
  * 对象存储：配置、上传、链接、查看、清理。
  *
- * ## 为什么聊天里的音视频要走它
+ * ## 为什么对话里的音视频要走它
  *
  * 多模态厂商收本地文件只有 base64 一条路（MIMO 上限 50MB）。base64 塞进对话以后，
  * 之后每一轮、工具循环的每一步都要把几十 MB 重传一遍；想把它从对话里摘掉，
@@ -173,7 +173,7 @@ async function targetFor(config: ObjectStorageConfig, secretOverride?: string): 
   }
 }
 
-/** 开着、而且配完整了。聊天发送时据此决定走链接还是只带路径 */
+/** 开着、而且配完整了。对话发送时据此决定走链接还是只带路径 */
 export async function isObjectStorageReady(): Promise<boolean> {
   const config = await readObjectStorageConfig()
   if (config.preset === 'uebox') return config.enabled && planStorage.isPlanStorageReady()

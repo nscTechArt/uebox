@@ -27,7 +27,7 @@ describe('agent-v3:released 的三段管道', () => {
 
   it('发的位置在 finally 里，和摘掉登记表、放锁同一处', () => {
     // 提前发（比如放在 done 之后）等于回到老问题：那会儿 prompt() 还没返回，
-    // 界面收到之后立刻派下一轮，撞上「会话正在执行中」
+    // 界面收到之后立刻派下一轮，撞上 `SESSION_BUSY`
     const finallyBlocks = agentV3Ipc.split('} finally {').slice(1)
     const blocksWithRelease = finallyBlocks.filter((block) =>
       block.slice(0, 600).includes("'agent-v3:released'")

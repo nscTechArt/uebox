@@ -1,6 +1,6 @@
 /**
  * 内容收集器
- * 从知识库来源和聊天历史中收集内容
+ * 从知识库来源和对话历史中收集内容
  *
  * 送什么进模型由每条来源的**上下文档位**决定（全文 / 只给摘要 / 不进上下文），
  * 换算规则集中在 `@core/shared/notebookContext`，界面上的预算计量条算的是同一份账 ——
@@ -102,8 +102,8 @@ function formatBytes(chars: number): string {
 }
 
 /**
- * 从聊天历史收集内容
- * @param messages 聊天消息列表
+ * 从对话历史收集内容
+ * @param messages 对话消息列表
  * @returns 格式化后的内容项列表
  */
 export function collectFromMessages(messages: ChatMessage[]): ContentItem[] {
@@ -155,7 +155,7 @@ export function collectFromMessages(messages: ChatMessage[]): ContentItem[] {
 /**
  * 收集所有内容
  * @param sources 知识库来源
- * @param messages 聊天消息
+ * @param messages 对话消息
  * @returns 合并后的内容项列表
  */
 export function collectAllContent(sources: SourceItem[], messages: ChatMessage[]): ContentItem[] {

@@ -42,7 +42,7 @@ import { CONDENSE_SYSTEM_PROMPT, acceptCondensed } from '../ai/realtime/spokenSu
 import { LIST_OPEN_EDITORS, LIST_PROJECTS, LOOK_AT_EDITOR } from '../../shared/voiceFrontDesk'
 
 /**
- * 实时语音会话的 IPC。
+ * 实时语音连接的 IPC。
  *
  * ## 分工
  *
@@ -216,7 +216,7 @@ function markTalked(): void {
 }
 
 /**
- * 任务表。**跨语音会话存活** —— 语音关了任务还在跑，重新开语音时
+ * 任务表。**跨通话存活** —— 挂断之后任务还在跑，重新开语音时
  * `check_task` 得答得出来。所以它是模块级的，不随 session 重建。
  */
 const taskBus = createVoiceTaskBus({
@@ -246,7 +246,7 @@ const taskBus = createVoiceTaskBus({
    * 队列排到了，让渲染层去 `agentV3API.execute`。
    *
    * 主进程发不起 agent 运行（那是渲染层的入口），所以这里只能推一条出去。
-   * 语音会话关着（或窗口没了）就推不出去 —— 返回 false，任务表把它留在队里，
+   * 通话没开着（或窗口没了）就推不出去 —— 返回 false，任务表把它留在队里，
    * 下次开语音时 `resume` 再推。
    */
   startRun: (task) => {
@@ -396,7 +396,7 @@ function speakProgress(
 }
 
 /**
- * 实时语音会话正开着吗。
+ * 实时语音连接正开着吗。
  *
  * 给听写那一路（`ipc/speechToText.ts`）问的。两路走的是**两条独立的连接**，
  * 技术上并不冲突 —— 冲突的是麦克风：助手页正在通话时再开一路识别，同一个人
@@ -1043,7 +1043,7 @@ export function registerRealtimeVoiceIPC(): void {
     }
   )
 
-  /** 启动失败。不标掉的话这条会话永远派不进新活 */
+  /** 启动失败。不标掉的话这条 agent 会话永远派不进新活 */
   ipcMain.on(
     'realtime-voice:task-failed',
     (_event, args: { taskId?: string; reason?: string; attempt?: number }) => {
@@ -1071,7 +1071,7 @@ export function registerRealtimeVoiceIPC(): void {
   })
 
   /**
-   * 要停哪条会话。
+   * 要停哪条 agent 会话。
    *
    * 这里**不停**，只回答「停谁」—— 真正的停止要走渲染层的 `agentV3API.stop`，
    * 而且要拿它的真实返回值。主进程这边先报「已停下」，用户以为停了而任务还在跑，
@@ -1131,7 +1131,7 @@ export function registerRealtimeVoiceIPC(): void {
       found: true as const,
       taskId: pending.task.id,
       toolCallId: pending.toolCallId,
-      // 渲染层要拿它去把屏幕上那张提问卡片一起收掉（answerAgentQuestion 按会话找卡片）
+      // 渲染层要拿它去把屏幕上那张提问卡片一起收掉（answerAgentQuestion 按 agent 会话找卡片）
       agentSessionId: pending.task.agentSessionId,
       questionCount: pending.task.question?.questions.length ?? 1
     }

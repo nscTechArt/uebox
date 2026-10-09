@@ -20,7 +20,7 @@ export interface KnownState {
   /** 消息 id → 对方手里那条的 JSON */
   messages: Map<string, string>
   order: string[]
-  /** 会话记录字段 → 对方手里那个值的 JSON；null = 对方那边没有这条会话记录 */
+  /** 对话记录字段 → 对方手里那个值的 JSON；null = 对方那边没有这条对话记录 */
   session: Map<string, string> | null
   permissionMode: string | null
   draft: string | null
@@ -268,7 +268,7 @@ export function applyMessagesPatch<T extends { id: string }>(
   return { messages, skipped }
 }
 
-/** 把会话记录的补丁打上去。返回新的会话记录；null = 这条会话记录不存在 */
+/** 把对话记录的补丁打上去。返回新的对话记录；null = 这条对话记录不存在 */
 export function applySessionPatch<T extends Record<string, unknown>>(
   current: T | null,
   patch: ChatSyncSessionPatch,

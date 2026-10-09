@@ -37,7 +37,7 @@ export interface MultimodalContentItem {
 }
 
 /**
- * 聊天消息内容类型（支持纯文本或多模态内容）
+ * 对话消息内容类型（支持纯文本或多模态内容）
  */
 export type ChatMessageContent = string | MultimodalContentItem[]
 
@@ -232,14 +232,14 @@ export const useChatMessagesStore = defineStore(
   () => {
     const messagesBySid = ref<Record<string, ChatMessage[]>>({})
     const stoppedBySid = ref<Record<string, boolean>>({})
-    // 压缩历史摘要缓存：只保存每个会话的历史对话摘要（assistant消息）
+    // 压缩历史摘要缓存：只保存每个对话的历史对话摘要（assistant消息）
     const historySummaryBySid = ref<Record<string, string>>({})
-    // 已压缩的user消息计数：记录每个会话已经压缩了多少条user消息
+    // 已压缩的user消息计数：记录每个对话已经压缩了多少条user消息
     const compressedUserCountBySid = ref<Record<string, number>>({})
 
     /**
-     * 获取指定会话的消息列表
-     * @param sid 会话ID
+     * 获取指定对话的消息列表
+     * @param sid 对话ID
      * @returns 消息数组（若不存在返回空数组）
      */
     function getMessages(sid: string): ChatMessage[] {
@@ -249,8 +249,8 @@ export const useChatMessagesStore = defineStore(
     }
 
     /**
-     * 确保会话消息容器存在
-     * @param sid 会话ID
+     * 确保对话消息容器存在
+     * @param sid 对话ID
      */
     function ensureContainer(sid: string): void {
       const k = String(sid || '').trim()
@@ -262,7 +262,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 推入一条用户消息
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param content 文本内容或多模态内容
      * @param mentionedSources 可选的@提及来源列表
      * @param excelFiles 可选的 Excel 文件列表
@@ -288,7 +288,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 推入一条助手"打字中"的占位消息
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @returns 占位消息ID
      */
     function pushAssistantTyping(sid: string, startTime?: number): string {
@@ -342,7 +342,7 @@ export const useChatMessagesStore = defineStore(
      * 「模型回了什么」是两条独立的管线，识别结果常常比回答的头几批文字晚到。
      * 按到达顺序追加的话，模型回答的前半句会排在用户那句上面。
      *
-     * 认不出那条锚（已经落定、或者根本不在这条会话里）就退回追加 ——
+     * 认不出那条锚（已经落定、或者根本不在这条对话里）就退回追加 ——
      * 位置不完美总好过消息直接丢了。
      *
      * 实现是「先照常 `pushUser`，再挪位置」，**不是自己拼一条**。消息 id 那串
@@ -361,7 +361,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 直接推入一条完成的助手消息
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param content 文本内容
      * @param options 可选配置（toolResults, actionButtons, agentProcess等）
      * @returns 消息ID
@@ -394,14 +394,14 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 替换助手“打字中”为最终文本或中间态
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param typingId 占位消息ID
      * @param content 替换文本内容
      * @param done 是否完成（true 则标记为 done）
      */
     /**
      * 替换助手“打字中”为最终文本或中间态，并可附加工具结果等元数据
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param typingId 占位消息ID
      * @param content 替换文本内容
      * @param done 是否完成（true 则标记为 done）
@@ -482,7 +482,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 追加文本到助手占位消息（流式）
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param typingId 占位消息ID
      * @param delta 增量文本
      */
@@ -497,7 +497,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 停止当前流式生成（标记为完成）
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param typingId 占位消息ID
      */
     function stopTyping(sid: string, typingId: string): void {
@@ -521,16 +521,16 @@ export const useChatMessagesStore = defineStore(
     }
 
     /**
-     * 查询会话是否已请求停止
-     * @param sid 会话ID
+     * 查询对话是否已请求停止
+     * @param sid 对话ID
      */
     function isStopped(sid: string): boolean {
       return !!stoppedBySid.value[String(sid || '').trim()]
     }
 
     /**
-     * 清空指定会话消息
-     * @param sid 会话ID
+     * 清空指定对话消息
+     * @param sid 对话ID
      */
     function clearSessionMessages(sid: string): void {
       const k = String(sid || '').trim()
@@ -538,7 +538,7 @@ export const useChatMessagesStore = defineStore(
       messagesBySid.value[k] = []
     }
 
-    /** 用一份独立快照替换某个会话的消息（MiniChat → 主窗口同步）。 */
+    /** 用一份独立快照替换某个对话的消息（MiniChat → 主窗口同步）。 */
     function replaceSessionMessages(sid: string, messages: ChatMessage[]): void {
       const k = String(sid || '').trim()
       if (!k || !Array.isArray(messages)) return
@@ -546,14 +546,14 @@ export const useChatMessagesStore = defineStore(
     }
 
     /**
-     * 会话被删除时，把它在这个 store 里的所有痕迹拿掉。
+     * 对话被删除时，把它在这个 store 里的所有痕迹拿掉。
      *
      * 与 `clearSessionMessages` 的区别是**删键**而不是置空：置空只清正文，
      * 留下的空数组、摘要、压缩计数会一直躺在历史文件里，删得越多攒得
-     * 越厚，而它们对应的会话早已不存在。
+     * 越厚，而它们对应的对话早已不存在。
      *
      * 四个 map 一个都不能漏 —— 只删 messagesBySid 的话，同一个 sid 万一被
-     * 复用（新会话恰好用了旧 id），历史摘要会以「上一段对话的记忆」的身份
+     * 复用（新对话恰好用了旧 id），历史摘要会以「上一段对话的记忆」的身份
      * 被注入进去。
      */
     function dropSession(sid: string): void {
@@ -561,9 +561,9 @@ export const useChatMessagesStore = defineStore(
     }
 
     /**
-     * 批量版的 `dropSession`：一次清掉一组会话在这四张 map 里的所有痕迹。
+     * 批量版的 `dropSession`：一次清掉一组对话在这四张 map 里的所有痕迹。
      *
-     * 单独存在的原因是动作语义：一批会话应当在同一个检查点里消失，不能让
+     * 单独存在的原因是动作语义：一批对话应当在同一个检查点里消失，不能让
      * 中间态落盘后留下只有摘要、没有正文的半截记录。
      */
     function dropSessions(sids: string[]): void {
@@ -579,7 +579,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 设置消息的建议列表
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param messageId 消息ID
      * @param suggestions 建议数组
      */
@@ -608,7 +608,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 设置消息的建议加载状态
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param messageId 消息ID
      * @param loading 是否正在加载
      */
@@ -659,7 +659,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 删除指定索引及之后的所有消息
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param fromIndex 起始索引（包含该索引）
      */
     function deleteMessagesFromIndex(sid: string, fromIndex: number): void {
@@ -681,7 +681,7 @@ export const useChatMessagesStore = defineStore(
      * 工具调用、进度）都攒在**这同一条**消息里，报错文案只是最后盖上去的一层。
      * 删掉按钮所在的消息，等于把那一轮用户能看见的记录全抹了：屏幕上只剩自己
      * 发的那句话和一句「从断点继续执行…」，像是任务从头开始了（其实没有，
-     * 模型上下文在主进程那份会话里，续跑照旧接着断点走）。
+     * 模型上下文在主进程的内核 session 里，续跑照旧接着断点走）。
      */
     function clearActionButtons(sid: string, messageId: string): void {
       const k = String(sid || '').trim()
@@ -695,7 +695,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 更新用户消息内容
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param messageId 消息ID
      * @param newContent 新的消息内容
      */
@@ -753,7 +753,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 获取已压缩的user消息数
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @returns 已压缩的user消息数，如果不存在则返回0
      */
     function getCompressedUserCount(sid: string): number {
@@ -764,7 +764,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 设置已压缩的user消息数
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param count 已压缩的user消息数
      */
     function setCompressedUserCount(sid: string, count: number): void {
@@ -775,7 +775,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 获取历史摘要（用于AI请求时插入）
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @returns 历史摘要文本，如果不存在则返回null
      */
     function getHistorySummary(sid: string): string | null {
@@ -786,7 +786,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 设置历史摘要（保存压缩后的摘要文本）
-     * @param sid 会话ID
+     * @param sid 对话ID
      * @param summary 摘要文本
      */
     function setHistorySummary(sid: string, summary: string): void {
@@ -797,7 +797,7 @@ export const useChatMessagesStore = defineStore(
 
     /**
      * 清空历史摘要
-     * @param sid 会话ID
+     * @param sid 对话ID
      */
     function clearHistorySummary(sid: string): void {
       const k = String(sid || '').trim()
@@ -850,7 +850,7 @@ export const useChatMessagesStore = defineStore(
     /**
      * 把一条中断的回复收尾。
      *
-     * 页面刷新后，问过主进程、确认这条会话**真的已经不在跑了**才调这里。
+     * 页面刷新后，问过主进程、确认这条对话**真的已经不在跑了**才调这里。
      * 已经收过尾（status 不是 typing）的不再动 —— 重连流程和事件流可能先后
      * 都碰到同一条消息，重复贴一遍收尾标记会在气泡里叠两行。
      */

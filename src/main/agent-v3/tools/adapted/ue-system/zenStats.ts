@@ -114,7 +114,7 @@ export function summarizeProjects(
       engine_root: typeof p.EngineRootDir === 'string' ? p.EngineRootDir : null,
       last_access: zenTicksToIso(p.LastAccessTime),
       project_file_missing: projectFile != null && !fileExists(projectFile),
-      // Zen 记的是 .uproject，会话记的可能是工程目录 —— 同一把尺子比
+      // Zen 记的是 .uproject，对话记的可能是工程目录 —— 同一把尺子比
       is_current_project: isSameProjectPath(projectFile, currentProjectPath)
     }
   })

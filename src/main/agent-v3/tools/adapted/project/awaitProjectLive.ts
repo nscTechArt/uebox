@@ -71,7 +71,7 @@ export interface ProjectLiveResult {
   probeFailed: boolean
   /** 没切成的原因。`undefined` = 切成了，或者压根不需要切 */
   retargetBlocked?: Exclude<RetargetOutcome, { ok: true }>['reason']
-  /** 被 `session-scoped` 挡下时，这条会话钉着的是哪个工程 */
+  /** 被 `session-scoped` 挡下时，这条对话钉着的是哪个工程 */
   sessionProjectPath?: string
   waitedMs: number
   /** 探针最后一次失败的原因。等超时了报给用户，省得他自己猜 */
@@ -119,7 +119,7 @@ function findLiveConnection(projectPath: string): string | undefined {
 /**
  * 等一个刚打开的工程真正能接命令，然后把这一轮切过去。
  *
- * 会话被钉在别的工程上时**立刻返回**，不空等：那种情况下就算等到了也用不了它
+ * 对话被钉在别的工程上时**立刻返回**，不空等：那种情况下就算等到了也用不了它
  * （引擎工具这一轮是按钉住的那个工程注册的），让模型早点把原因说给用户听，
  * 比让他盯着一个转三分钟的工具调用强。
  *
@@ -162,7 +162,7 @@ export async function awaitProjectLive(args: {
       }
     }
 
-    // 先问能不能切。会话钉在别的工程上时这一步就把话说死了，不用等下去
+    // 先问能不能切。对话钉在别的工程上时这一步就把话说死了，不用等下去
     const outcome = retargetToProject(args.projectPath)
     if (!outcome.ok && outcome.reason === 'session-scoped') {
       return {

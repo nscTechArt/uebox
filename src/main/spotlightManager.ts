@@ -200,7 +200,7 @@ class SpotlightWindowManager {
       }
 
       // 其他操作 → 转发给主窗口
-      // 先认登记过的主窗口：「第一个不是 Spotlight 的窗口」可能是 MiniChat 或独立聊天窗口
+      // 先认登记过的主窗口：「第一个不是 Spotlight 的窗口」可能是 MiniChat 或独立对话窗口
       const mainWindow =
         findMainWindow() ??
         getAppWindows().find((w) => w !== this.spotlightWindow && !w.isDestroyed())

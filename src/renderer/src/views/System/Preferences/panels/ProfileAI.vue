@@ -259,9 +259,9 @@ watch(persistentAutoResume, async (enabled) => {
       <h4 class="section-title">{{ $t('profile.ai.chatTitle') }}</h4>
       <div class="settings-list">
         <!--
-          「敏感操作确认」这个开关删了：权限现在是每条会话自己的事，在输入框那个
+          「敏感操作确认」这个开关删了：权限现在是每条对话自己的事，在输入框那个
           四档下拉上选（只读 / 请求批准 / 帮我批准 / 完全访问权限）。一个全局布尔
-          开关既表达不了四档，也说不清它管的到底是哪条会话。
+          开关既表达不了四档，也说不清它管的到底是哪条对话。
         -->
         <div class="setting-item">
           <div class="setting-info">

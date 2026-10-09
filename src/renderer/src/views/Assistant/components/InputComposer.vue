@@ -617,7 +617,7 @@
           "
         >
           <!--
-            圆环画在按钮外面，不画在按钮里 —— 会话阶段（连接 / 在听 / 在想 /
+            圆环画在按钮外面，不画在按钮里 —— 通话阶段（连接 / 在听 / 在想 /
             在调工具 / 在说）由它一个人交代，按钮只管颜色和按下去的手感。
             连接中不再换成 spinner 图标：麦克风图标一直在，外面的环负责表示在忙。
           -->
@@ -885,7 +885,7 @@ const emit = defineEmits<{
    * 执行一条不带参数的内置命令（菜单里的 `/image`，以及手动输入兼容的 `/compact`）。
    *
    * 命令本身在这个组件里认（面板选中、或者用户把它敲全了回车），
-   * 但真正干活的东西在会话那一层 —— 所以只把命令名冒上去。
+   * 但真正干活的东西在对话那一层 —— 所以只把命令名冒上去。
    */
   (e: 'run-command', name: string): void
   (e: 'create-image'): void
@@ -930,21 +930,21 @@ const props = defineProps<{
   isAgentMode?: boolean
   /** 是否处于 Ask 模式（只读模式） */
   askMode?: boolean
-  /** 是否隐藏模式切换芯片（开启会话后不允许切换模式） */
+  /** 是否隐藏模式切换芯片（开启对话后不允许切换模式） */
   hideChips?: boolean
   /** 知识库模式：启用 @ 提及功能 */
   notebookMode?: boolean
   /** 知识库来源列表 */
   notebookSources?: NotebookSourceItem[]
   boundNotebook?: BoundNotebook | null
-  /** 当前会话 ID。用于查内核推来的真实上下文用量 */
+  /** 当前对话 ID。用于查内核推来的真实上下文用量 */
   chatSid?: string
-  /** 页面级实时语音会话。不能由这个会随欢迎态切换而销毁的组件持有。 */
+  /** 页面级的语音通话状态。不能由这个会随欢迎态切换而销毁的组件持有。 */
   voice: RealtimeVoiceState
   /**
    * 这条对话上还排着、等下一轮发出去的跟进消息。
    *
-   * 队列本身归页面管（它要跨会话存活，而这个组件会随欢迎态切换销毁），
+   * 队列本身归页面管（它要跨对话存活，而这个组件会随欢迎态切换销毁），
    * 这里只负责把它画出来、以及把「取消这一条」冒上去。
    */
   queuedFollowUps?: ReadonlyArray<{
@@ -1045,7 +1045,7 @@ watch(
  * 默认是中间那档：全都问的话每一步写操作都要点一次，实际用不了；
  * 全放行又太危险。可撤销的自动放行、不可逆的仍然问，是唯一能长期开着的档。
  *
- * **档位跟着这条会话走**，不是全局的 —— 见 composables/sessionPermissionMode.ts。
+ * **档位跟着这条对话走**，不是全局的 —— 见 composables/sessionPermissionMode.ts。
  */
 type AgentPermissionMode = ChatPermissionMode
 
@@ -1078,7 +1078,7 @@ const approvalOptions = [
 
 const showApprovalDropdown = ref(false)
 /**
- * 显示哪一档：**问这条会话**，不问全局设置。
+ * 显示哪一档：**问这条对话**，不问全局设置。
  *
  * 没有 chatSid 的那些用法（还没落到某条对话上的输入框）退回旧行为：
  * 只读看本地状态，其余看设置页的默认档位。
@@ -1133,7 +1133,7 @@ const agentModelSaving = ref(false)
 const agentModelLoadError = ref(false)
 const showAgentModelDropdown = ref(false)
 
-/** 模型跟着会话走：这条会话绑过模型就显示它，没绑过（还没发过消息）显示全局默认 */
+/** 模型跟着对话走：这条对话绑过模型就显示它，没绑过（还没发过消息）显示全局默认 */
 const sessionModel = computed(() =>
   props.chatSid ? chatSessionsStore.getModel(props.chatSid) : undefined
 )
@@ -1208,8 +1208,8 @@ async function selectAgentModel(option: AgentModelOption): Promise<void> {
   showAgentModelDropdown.value = false
   agentModelSaving.value = true
   try {
-    // 先改这条会话，再改全局默认：别的会话各自绑着自己的模型不受影响，
-    // 以后新开的会话从这个模型起步
+    // 先改这条对话，再改全局默认：别的对话各自绑着自己的模型不受影响，
+    // 以后新开的对话从这个模型起步
     if (props.chatSid) {
       chatSessionsStore.setModel(props.chatSid, {
         providerId: option.providerId,
@@ -1305,7 +1305,7 @@ onMounted(() => {
 })
 
 /*
- * 切到一条会话时认回它绑的模型。会话上没记（存量会话、分支出来的）但主进程
+ * 切到一条对话时认回它绑的模型。对话上没记（存量对话、分支出来的）但主进程
  * 执行记录里有，就抄过来 —— 不然下拉显示的是全局默认，和下一轮实际用的对不上。
  */
 watch(
@@ -1320,7 +1320,7 @@ watch(
   { immediate: true }
 )
 
-// 换了会话或会话换了模型，思考档位清单得按新模型重问
+// 换了对话或对话换了模型，思考档位清单得按新模型重问
 watch(
   () => [sessionModel.value?.providerId, sessionModel.value?.modelId],
   () => void loadThinkingSupport()
@@ -1340,9 +1340,9 @@ function selectThinkingLevel(level: AgentV3ThinkingLevel, event: Event): void {
 }
 
 /**
- * 落到**这条会话**上，顺便记成「下次新会话的起步档位」。
+ * 落到**这条对话**上，顺便记成「下次新对话的起步档位」。
  *
- * 没有 chatSid 时只记后者 —— 那种情况下没有会话可挂，而什么都不存
+ * 没有 chatSid 时只记后者 —— 那种情况下没有对话可挂，而什么都不存
  * 等于这个下拉点了没反应。
  */
 function applyPermissionMode(mode: AgentPermissionMode): void {
@@ -1434,7 +1434,7 @@ const contextUsageLabel = computed(() => {
   return `${contextUsagePercent.value}%`
 })
 
-/** 记在 store 里按会话分开，切走标签页再回来还能看到「正在压」，见 `setCompacting` */
+/** 记在 store 里按对话分开，切走标签页再回来还能看到「正在压」，见 `setCompacting` */
 const compacting = computed(() =>
   props.chatSid ? chatSessionsStore.isCompacting(props.chatSid) : false
 )
@@ -1460,7 +1460,7 @@ const ringOffset = computed(() => {
  * 接下来换个方向，早期那堆试错留着只是占地方还让模型分心。
  */
 async function handleCompact(): Promise<void> {
-  // 先把会话定下来：压缩期间用户可能切到别的会话，await 回来再读 props.chatSid
+  // 先把对话定下来：压缩期间用户可能切到别的对话，await 回来再读 props.chatSid
   // 就会把新用量写到别人头上
   const chatSid = props.chatSid
   if (!chatSid || compacting.value) return
@@ -1756,7 +1756,7 @@ function handleClearBoundWiki(): void {
 }
 
 /**
- * `/wiki` 在知识库里没有意义 —— 它是「给这条会话绑一个知识库」，
+ * `/wiki` 在知识库里没有意义 —— 它是「给这条对话绑一个知识库」，
  * 而知识库模式下当前这个库就是答案，再绑一个别的只会自相矛盾。
  *
  * 这是**场景差异**，不是能力阉割：附件、审批档位、思考程度、斜杠命令
@@ -1893,7 +1893,7 @@ watch(skillQuery, (query, previousQuery) => {
   if (previousQuery === null) void loadSkills()
 })
 
-// 图片草稿和文字一样按会话留在运行内存中；退出应用后自然释放，不写入持久层。
+// 图片草稿和文字一样按对话留在运行内存中；退出应用后自然释放，不写入持久层。
 const localPendingImages = ref<PendingImage[]>([])
 const pendingImages = computed<PendingImage[]>(() =>
   props.chatSid ? chatSessionsStore.getImageDraft(props.chatSid) : localPendingImages.value
@@ -1924,7 +1924,7 @@ interface PendingExcelFile {
 const pendingExcelFiles = ref<PendingExcelFile[]>([])
 
 /**
- * 聊天里能直接拖进来的文档格式。
+ * 对话里能直接拖进来的文档格式。
  *
  * 与主进程 documentLoader 的 ANYDOC_EXTENSIONS 同源 —— 那边解析得了、这边却
  * 默默忽略，用户只会以为拖拽坏了。xlsx/xls 不在此列：它们另有 Excel 分支。
@@ -1956,7 +1956,7 @@ const CHAT_DOC_EXTENSIONS = new Set([
 ])
 
 /**
- * 能拖进聊天的视频格式。与主进程 `videoFileAnalysis` 的 VIDEO_EXTENSION 同源。
+ * 能拖进对话的视频格式。与主进程 `videoFileAnalysis` 的 VIDEO_EXTENSION 同源。
  *
  * 它们不会被直接发给模型 —— 主进程先让视频模型看一遍，看不了就抽帧，
  * 进对话的是描述文字或联系表。见 `services/attachmentIngest.ts`。
@@ -2330,7 +2330,7 @@ async function addExcelFiles(files: File[]): Promise<void> {
  * 添加文档或视频到待解析列表。
  *
  * 统一走主进程的 `attachment:ingest`：文档复用知识库那一套解析器
- * （同一个 PDF，知识库读得出、聊天里读不出，是最难解释的那种不一致），
+ * （同一个 PDF，知识库读得出、对话里读不出，是最难解释的那种不一致），
  * 视频先让配好的视频模型看，看不了再抽帧当图片发。
  *
  * PDF 从前是转 base64 走 `inlineDocuments` 的 —— 那条是条死路：
@@ -2802,7 +2802,7 @@ const followUpActionLabel = computed(() =>
  * 跑着的时候，输入框里已经有能发的东西。
  *
  * 只在 Agent 模式成立：普通对话的流式输出里没有队列这回事，这时候换成发送按钮
- * 点下去只会被主进程以「会话正在执行中」顶回来，那还不如留着停止按钮。
+ * 点下去只会被主进程以 `SESSION_BUSY` 顶回来，那还不如留着停止按钮。
  */
 const canSendFollowUp = computed(() => canSteerNow.value && !isSendDisabled.value)
 
@@ -2962,7 +2962,7 @@ function handleKeydown(e: KeyboardEvent): void {
    * 对**这一条**反着来。
    *
    * 两种都不能退化成「什么也不做」：这时候开新一轮会被主进程以
-   * 「会话正在执行中」顶回来，用户敲下的那段话就白打了。
+   * `SESSION_BUSY` 顶回来，用户敲下的那段话就白打了。
    */
   const action = resolveFollowUpAction(
     followUpBehavior.value,
@@ -3316,7 +3316,7 @@ onMounted(() => {
 }
 
 /*
- * 会话开着必须一眼看得出来 —— 麦克风一直开着而用户以为没开，
+ * 通话开着必须一眼看得出来 —— 麦克风一直开着而用户以为没开，
  * 是这类功能最要命的状态（既是隐私问题，也在持续计费）。
  *
  * 以前这里是整个按钮的透明度脉冲。它有两个毛病：只改透明度的状态提示

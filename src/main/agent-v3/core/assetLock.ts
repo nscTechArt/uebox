@@ -148,7 +148,7 @@ function notifyChanged(): void {
  * 注册冲突提示回调，由 ipc 层在启动时接上。
  *
  * 冲突**必须**让用户看见：他可能开着两个窗口，以为两边在干不同的活。
- * 静默失败的话，他只会看到一条会话莫名其妙地绕开了任务。
+ * 静默失败的话，他只会看到一条对话莫名其妙地绕开了任务。
  */
 export function setLockConflictNotifier(fn: ConflictNotifier | undefined): void {
   notifier = fn
@@ -423,7 +423,7 @@ export function forceReleaseAll(): number {
  * 用户 —— 真机上就出现过「这个材质被会话 b04ba478… 占用了」这种话。
  * 用户看到一串乱码，既不知道是自己哪个窗口，也没法据此决定做什么。
  *
- * 「是哪条会话」由界面上的锁指示器回答，那边能把 id 换成会话标题
+ * 「是哪条会话」由界面上的锁指示器回答，那边能把 id 换成对话标题
  * （见 `renderer/.../AssetLockIndicator.vue`）。
  *
  * 也明确告诉模型别去猜原因：它曾经把「另一条 agent 会话占着」误说成

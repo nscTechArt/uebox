@@ -359,7 +359,7 @@ function snapshotConnections(): { connections: EditorConnection[]; target?: stri
 /**
  * 这一轮盯的工程连上了没有。
  *
- * 绑了工程就只认那一个 —— 旁边别的工程连着不算数，等待要等的是**这条会话
+ * 绑了工程就只认那一个 —— 旁边别的工程连着不算数，等待要等的是**这条对话
  * 能干活**，不是「有任何连接」。没绑工程（纯对话）时任何一条连接都算连上。
  */
 function isSatisfied(connections: EditorConnection[], targetPath: string | undefined): boolean {

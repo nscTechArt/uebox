@@ -2,7 +2,7 @@
  * 目标模式（`/goal`）输入框上方那一行「当前目标」。目标跨轮，用户点掉才没。
  *
  * 真相源是主进程落盘的执行配置（`sessionExecutionOptions` 的 `goal`），这里只读。
- * 重读时机同 `useTeamBoard`：换会话、主进程推 `agent-v3:goal-state`、一轮跑完兜底。
+ * 重读时机同 `useTeamBoard`：换对话、主进程推 `agent-v3:goal-state`、一轮跑完兜底。
  */
 
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
@@ -15,7 +15,7 @@ import { message } from '@renderer/utils/messageManager'
 
 export interface UseSessionGoal {
   objective: Ref<string | null>
-  /** 取消这条会话的目标。成功不用提示：主进程推一下，那一行自己就没了 */
+  /** 取消这条对话的目标。成功不用提示：主进程推一下，那一行自己就没了 */
   cancel: () => Promise<void>
 }
 

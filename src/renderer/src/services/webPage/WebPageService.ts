@@ -63,7 +63,7 @@ export class WebPageService {
   /**
    * 生成网页
    * @param sources 知识库来源
-   * @param messages 聊天消息
+   * @param messages 对话消息
    * @param notebookId 知识库ID，用于取消作用域
    */
   async generateAsync(

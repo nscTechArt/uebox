@@ -618,7 +618,7 @@ function cancelEditing(): void {
 
 /*
  * 改名/删除平时不占位，悬停或键盘聚焦时才把宽度撑开，名字同步让出位置。
- * 这是会话列表行尾图钉/归档的同一套做法，见 layout/components/ChatSessionList.vue
+ * 这是对话列表行尾图钉/归档的同一套做法，见 layout/components/ChatSessionList.vue
  * 的 .chat-item-actions。以前是一块带描边和投影的浮层压在行上，把文件夹名遮掉一半，
  * 读不出这行叫什么。
  * 只在 hover 露出等于触屏和键盘用户永远够不到，所以 focus-within 也要露。

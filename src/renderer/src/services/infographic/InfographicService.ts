@@ -405,7 +405,7 @@ export class InfographicService {
   /**
    * 生成信息图
    * @param sources 知识库来源
-   * @param messages 聊天消息
+   * @param messages 对话消息
    * @param notebookTitle 知识库标题
    * @returns 生成的结果对象（包含标题和图片），失败返回 null
    */

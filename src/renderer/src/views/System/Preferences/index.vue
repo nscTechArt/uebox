@@ -246,7 +246,7 @@ function handleMenuChange(key: string): void {
             <!-- 资产设置 -->
             <ProfileAsset v-else-if="activeKey === 'asset'" />
 
-            <!-- 对象存储：聊天里的音视频传上去换链接，模型直接看 -->
+            <!-- 对象存储：对话里的音视频传上去换链接，模型直接看 -->
             <ProfileObjectStorage v-else-if="activeKey === 'objectStorage'" />
 
             <!-- 知识库设置 -->

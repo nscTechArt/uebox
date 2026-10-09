@@ -68,7 +68,7 @@ export function registerWindowIPC(): void {
     })
 
     // 如果找不到符合条件的主窗口，回退到 focusedWindow 或第一个非销毁窗口
-    // 登记过的主窗口优先：按尺寸猜会猜中拉大了的独立聊天窗口
+    // 登记过的主窗口优先：按尺寸猜会猜中拉大了的独立对话窗口
     const targetWindow =
       findMainWindow() ||
       mainWindow ||
