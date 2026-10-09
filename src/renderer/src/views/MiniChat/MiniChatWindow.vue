@@ -158,12 +158,12 @@ interface PendingImage {
  * 生成唯一会话 ID
  * 每次 MiniChat 窗口创建时使用新的会话 ID，避免历史消息累积
  */
-function generateSessionId(): string {
+function generateMiniChatSid(): string {
   return `mini-chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-// 动态会话 ID - 每次窗口创建时生成新 ID
-const SESSION_ID = ref(generateSessionId())
+// 动态对话 ID - 每次窗口创建时生成新 ID
+const sid = ref(generateMiniChatSid())
 
 // Stores
 const chatMsgStore = useChatMessagesStore()
@@ -186,7 +186,7 @@ const currentAgentProcess = ref<AgentProcessItem[]>([])
 const MAX_IMAGES = 5 // Gemini 3 Flash 最多 5 张图片
 
 // 计算消息列表
-const messages = computed(() => chatMsgStore.getMessages(SESSION_ID.value))
+const messages = computed(() => chatMsgStore.getMessages(sid.value))
 
 /*
  * 回复落定后自动朗读。主窗口这件事挂在常驻布局上；小窗不走那套布局，自己挂一份。
@@ -206,19 +206,19 @@ function scrollToBottomIfNeeded(): void {
 }
 
 function pushUser(content: ChatMessageContent): void {
-  chatMsgStore.pushUser(SESSION_ID.value, content)
+  chatMsgStore.pushUser(sid.value, content)
   scrollToBottom()
 }
 
 function pushAssistantTyping(startTime?: number): string {
-  const id = chatMsgStore.pushAssistantTyping(SESSION_ID.value, startTime)
+  const id = chatMsgStore.pushAssistantTyping(sid.value, startTime)
   scrollToBottom()
   return id
 }
 
 const { askModeRef, fullConversationHistory, restoreAgentModeState, executeAgent, stopAgent } =
   useAgentMode({
-    sid: SESSION_ID,
+    sid,
     messages,
     chatStore: chatSessionStore,
     chatMsgStore,
@@ -299,11 +299,11 @@ function getSessionPreview(content: ChatMessageContent): string {
  * 初始化会话
  */
 function initSession(): void {
-  chatSessionStore.ensureSession(SESSION_ID.value, t('assistant.chatFlow.unnamedChat'))
-  chatSessionStore.setAgentMode(SESSION_ID.value, true)
-  chatSessionStore.setAgentHistory(SESSION_ID.value, [])
-  chatSessionStore.setAgentCurrentText(SESSION_ID.value, '')
-  chatSessionStore.setAgentSessionId(SESSION_ID.value, '')
+  chatSessionStore.ensureSession(sid.value, t('assistant.chatFlow.unnamedChat'))
+  chatSessionStore.setAgentMode(sid.value, true)
+  chatSessionStore.setAgentHistory(sid.value, [])
+  chatSessionStore.setAgentCurrentText(sid.value, '')
+  chatSessionStore.setAgentSessionId(sid.value, '')
 }
 
 function buildAgentHistoryUntil(endIndexInclusive: number): Array<{
@@ -477,16 +477,16 @@ async function dispatchUserMessage(
    * 会话号在**提交那一刻**定死。
    *
    * 下面要 await 一次闪存抓取（最多 2 秒），而这期间还没进入生成态 ——
-   * 用户完全可以点标题栏那个「+」把会话重置掉。等抓取回来再读 `SESSION_ID.value`
+   * 用户完全可以点标题栏那个「+」把会话重置掉。等抓取回来再读 `sid.value`
    * 的话，这条**旧对话的消息**就在**新对话**里跑起来了：用户刚清空，屏幕上却冒出
    * 一句他以为已经丢掉的话，还带着旧会话的上下文。
    */
-  const submittedSessionId = SESSION_ID.value
+  const chatSid = sid.value
 
   const preview = getSessionPreview(content)
-  chatSessionStore.ensureSession(submittedSessionId, t('assistant.chatFlow.unnamedChat'))
+  chatSessionStore.ensureSession(chatSid, t('assistant.chatFlow.unnamedChat'))
   if (preview) {
-    chatSessionStore.appendMessage(submittedSessionId, preview)
+    chatSessionStore.appendMessage(chatSid, preview)
   }
 
   pushUser(content)
@@ -501,7 +501,7 @@ async function dispatchUserMessage(
   let sessionProject = submitted?.sessionProject
   if (!submitted) {
     const captured = await agentV3API.captureEditorSnapshot({
-      sessionProject: chatSessionStore.getProject?.(submittedSessionId) ?? null
+      sessionProject: chatSessionStore.getProject?.(chatSid) ?? null
     })
     snapshot = captured.ok ? captured.snapshot : null
     if (captured.ok) {
@@ -521,7 +521,7 @@ async function dispatchUserMessage(
    * 挪过来等于替他决定。也不能硬发到旧会话上：那条对话界面上已经不存在了，
    * 消息发出去没有任何地方显示，模型却在后台照着它动手。
    */
-  if (SESSION_ID.value !== submittedSessionId) {
+  if (sid.value !== chatSid) {
     console.log('[MiniChat] 对话在发送途中被重置，丢弃这条消息')
     return
   }
@@ -566,7 +566,7 @@ function handleInitialContext(context: SideQuestionContext): void {
 
   sideContext.value = context
   // sessionId 要先落进 store：下一句话发出去时 useAgentMode 拿的就是它
-  chatSessionStore.setAgentSessionId(SESSION_ID.value, context.agentSessionId)
+  chatSessionStore.setAgentSessionId(sid.value, context.agentSessionId)
   askModeRef.value = true
 }
 
@@ -645,16 +645,16 @@ async function handleBubbleRetry(payload: { id: string; content: string }): Prom
   // 要重生成的那条正在被念的话，气泡一删就没人管它了（小窗没有常驻播放条），
   // 旧答复会盖着新答复一直念完
   stopReadAloud()
-  chatMsgStore.deleteMessagesFromIndex(SESSION_ID.value, msgIndex)
+  chatMsgStore.deleteMessagesFromIndex(sid.value, msgIndex)
 
   // 这里原来还去删一次后端 SQLite 的对话历史。Agent 压根不往那张表写，
   // 这个调用一直是空转；那套存储已经整体移除。
   fullConversationHistory.value = buildAgentHistoryUntil(userMsgIndex)
-  chatSessionStore.setAgentHistory(SESSION_ID.value, fullConversationHistory.value)
+  chatSessionStore.setAgentHistory(sid.value, fullConversationHistory.value)
 
   // 内核那份历史也得倒回去，否则模型看着刚被丢掉的答案再答一遍同一个问题
   await rewindTranscript(
-    chatSessionStore.getAgentSessionId(SESSION_ID.value),
+    chatSessionStore.getAgentSessionId(sid.value),
     countUserTurnsBefore(messages.value, userMsgIndex),
     agentV3API.truncateSession
   )
@@ -692,15 +692,15 @@ async function handleUserConfirmEdit(payload: {
 
   // 同重试：后面的答复要删掉重来，还在念的那条先停
   stopReadAloud()
-  chatMsgStore.deleteMessagesFromIndex(SESSION_ID.value, msgIndex)
+  chatMsgStore.deleteMessagesFromIndex(sid.value, msgIndex)
 
   fullConversationHistory.value = buildAgentHistoryUntil(msgIndex - 1)
-  chatSessionStore.setAgentHistory(SESSION_ID.value, fullConversationHistory.value)
+  chatSessionStore.setAgentHistory(sid.value, fullConversationHistory.value)
 
   // 同 handleBubbleRetry：内核那份历史跟着倒回这条消息之前，
   // 不倒的话模型手上还留着原话，改完再问等于追加而不是替换
   await rewindTranscript(
-    chatSessionStore.getAgentSessionId(SESSION_ID.value),
+    chatSessionStore.getAgentSessionId(sid.value),
     countUserTurnsBefore(messages.value, msgIndex),
     agentV3API.truncateSession
   )
@@ -770,7 +770,7 @@ function scrollToBottom(): void {
  * 根据设置决定是否保存对话到主界面历史，然后清除本地消息并创建新会话
  */
 function handleResetChat(): void {
-  console.log('[MiniChat] 重置对话:', SESSION_ID.value)
+  console.log('[MiniChat] 重置对话:', sid.value)
 
   // 同上：会话都重置了，没人会再来点那个确认框
   pendingApprovals.rejectAll()
@@ -799,7 +799,7 @@ function handleResetChat(): void {
 
   // 如果开启了持久会话，先检查是否有实际内容需要保存
   if (!borrowed && (!MINI_CHAT_SETTINGS_ENABLED || miniChatPersistEnabled)) {
-    const msgs = chatMsgStore.getMessages(SESSION_ID.value)
+    const msgs = chatMsgStore.getMessages(sid.value)
     // 只保存有实际内容的对话（用户消息+AI回复）
     const hasContent = msgs.some((m) => m.role === 'assistant' && m.status === 'done')
     console.log('[MiniChat] hasContent:', hasContent, 'msgs count:', msgs.length)
@@ -808,13 +808,13 @@ function handleResetChat(): void {
       const firstUserMsg = msgs.find((m) => m.role === 'user')
       const content = typeof firstUserMsg?.content === 'string' ? firstUserMsg.content : ''
       const title = content.slice(0, 20) + (content.length > 20 ? '...' : '')
-      chatSessionStore.updateTitle(SESSION_ID.value, title || t('assistant.chatFlow.unnamedChat'))
+      chatSessionStore.updateTitle(sid.value, title || t('assistant.chatFlow.unnamedChat'))
       console.log('[MiniChat] 对话已保存到历史, 标题:', title)
 
       // 通知主窗口刷新会话列表
       console.log('[MiniChat] 发送 IPC 事件: mini-chat:session-saved')
       window.api.miniChat.sessionSaved({
-        id: SESSION_ID.value,
+        id: sid.value,
         title: title || t('assistant.chatFlow.unnamedChat'),
         // 主窗口靠这一份把消息同步进自己的 store（SideMenu 的 chat-sessions:refresh），
         // 少传的话侧边栏会多出一条点开是空的会话
@@ -824,15 +824,15 @@ function handleResetChat(): void {
       // 注意：不清除消息，让它们保留在 store 中供主界面历史访问
     } else {
       // 没有内容的对话直接清除
-      chatMsgStore.clearSessionMessages(SESSION_ID.value)
+      chatMsgStore.clearSessionMessages(sid.value)
     }
   } else {
     // 临时会话模式：直接清除所有消息
-    chatMsgStore.clearSessionMessages(SESSION_ID.value)
+    chatMsgStore.clearSessionMessages(sid.value)
   }
 
   // 重置 Agent 会话 ID
-  chatSessionStore.setAgentSessionId(SESSION_ID.value, '')
+  chatSessionStore.setAgentSessionId(sid.value, '')
 
   if (borrowed) {
     // 删不掉只是盘上多一份没人读的拷贝，不值得拦住用户关窗口
@@ -851,7 +851,7 @@ function handleResetChat(): void {
   fullConversationHistory.value = []
 
   // 生成新的会话 ID，确保下次打开是全新对话
-  SESSION_ID.value = generateSessionId()
+  sid.value = generateMiniChatSid()
   initSession()
   nextTick(() => {
     inputRef.value?.focus()
@@ -888,7 +888,7 @@ watch(
 let ipcDisposers: Array<() => void> = []
 
 onMounted(() => {
-  console.log('[MiniChat] onMounted 开始, SESSION_ID:', SESSION_ID.value)
+  console.log('[MiniChat] onMounted 开始, sid:', sid.value)
   restoreAgentModeState(true)
   initSession()
   inputRef.value?.focus()

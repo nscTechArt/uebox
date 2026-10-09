@@ -27,8 +27,8 @@
  * transcript，上下文越滚越脏 —— 而 Agent 每一轮都带着这份 transcript 去推理，
  * 脏进去的东西会直接影响它对下一件活的判断。
  *
- * 所以按说话那条**派生**出来：一通电话配一条任务会话（`voiceTaskSessionId`）。
- * 同一条对话里挂断再开口还是同一条 —— 那本来就是同一段事情的延续，agent 会话号
+ * 所以按说话那条**派生**出来：一通电话配一条任务对话（`voiceTaskChatSid`）。
+ * 同一条对话里挂断再开口还是同一条 —— 那本来就是同一段事情的延续，内核 session id
  * 也跟着复用；换一条对话开口就是另一条，互相看不见。
  *
  * 派生而不是每件活开一条新的：一件事往往要来回好几轮，一件活一条会让同一件事的
@@ -56,7 +56,7 @@
 
 export {
   belongsToChat,
-  isVoiceTaskSessionId,
+  isVoiceTaskChatSid,
   voiceTaskOwnerSid,
-  voiceTaskSessionId
+  voiceTaskChatSid
 } from '@core/shared/voiceTaskSession'

@@ -41,11 +41,11 @@ export function buildMultimodalContent(text: string, images: string[]): ChatMess
  */
 export interface EnsureSessionDeps {
   chatStore: {
-    ensureSession: (sessionId: string, title: string) => void
-    sessionById: (sessionId: string) => ChatSession | null
-    updateTitle: (sessionId: string, title: string) => void
-    appendMessage: (sessionId: string, text: string) => void
-    setProject: (sessionId: string, project: ChatSessionProject | null) => void
+    ensureSession: (chatSid: string, title: string) => void
+    sessionById: (chatSid: string) => ChatSession | null
+    updateTitle: (chatSid: string, title: string) => void
+    appendMessage: (chatSid: string, text: string) => void
+    setProject: (chatSid: string, project: ChatSessionProject | null) => void
   }
   tabsStore: { updateTabTitleByPath: (path: string, title: string) => void }
   route: { path: string; fullPath: string; query?: Record<string, unknown> }
@@ -64,16 +64,16 @@ export interface EnsureSessionDeps {
  * 素材库，改那个标签的标题会改到不相干的页上去。
  */
 export function ensureSessionWithTitle(
-  sessionId: string,
+  chatSid: string,
   messageText: string,
   deps: EnsureSessionDeps
 ): void {
   const { chatStore, tabsStore, route, unnamedTitle } = deps
-  chatStore.ensureSession(sessionId, unnamedTitle)
-  const session = chatStore.sessionById(sessionId)
+  chatStore.ensureSession(chatSid, unnamedTitle)
+  const session = chatStore.sessionById(chatSid)
   if (session && isUntitledChatTitle(session.title, unnamedTitle)) {
     const autoTitle = messageText.replace(/\s+/g, ' ').slice(0, 20) || unnamedTitle
-    chatStore.updateTitle(sessionId, autoTitle)
+    chatStore.updateTitle(chatSid, autoTitle)
     const isAssistantRoute =
       route.path === '/dev-assistant' || route.path.startsWith('/dev-assistant/')
     if (isAssistantRoute) {
@@ -82,7 +82,7 @@ export function ensureSessionWithTitle(
 
     // 标签页按**发这条消息时**那个路径改，不按模型回来时用户站在哪：这一栏属于
     // 这条会话的那个标签，用户切走了它也还在，改的仍然是对的那一个
-    autoNameSession(sessionId, messageText, autoTitle, {
+    autoNameSession(chatSid, messageText, autoTitle, {
       getTitle: (id) => chatStore.sessionById(id)?.title,
       applyTitle: (id, title) => {
         chatStore.updateTitle(id, title)
@@ -92,12 +92,12 @@ export function ensureSessionWithTitle(
       }
     })
   }
-  chatStore.appendMessage(sessionId, messageText)
+  chatStore.appendMessage(chatSid, messageText)
 
   // 用户在某个工程下点「+」新建的会话（`?project=`），首次发消息时盖上工程戳，
   // 侧边栏据此分组。没带这个参数就是「纯会话」，进侧边栏的「对话」区。
   stampSessionProject({
-    sessionId,
+    chatSid,
     getSession: (id: string) => chatStore.sessionById(id),
     setProject: (id: string, project: ChatSessionProject | null) =>
       chatStore.setProject(id, project),

@@ -26,3 +26,16 @@ describe('Welcome 事件连线', () => {
     expect(openTag('TopNav')).toContain('@side-question="handleSideQuestion"')
   })
 })
+
+describe('Welcome prop 连线', () => {
+  it('<TopNav> 与 <SessionProjectChip> 的对话 id 走 :chat-sid', () => {
+    for (const component of ['TopNav', 'SessionProjectChip']) {
+      expect(openTag(component)).toContain(':chat-sid="sid"')
+      expect(openTag(component)).not.toContain(':session-id')
+    }
+  })
+
+  it('<AgentBrowserPane> 的 :session-id 指内核 session，保持原名', () => {
+    expect(openTag('AgentBrowserPane')).toContain(':session-id=')
+  })
+})

@@ -16,7 +16,7 @@ import {
   type RealtimeVoiceState,
   type VoiceSessionRef
 } from './useRealtimeVoice'
-import { isVoiceTaskSessionId, voiceTaskSessionId } from './voiceSessions'
+import { isVoiceTaskChatSid, voiceTaskChatSid } from './voiceSessions'
 import { setVoiceCallActive } from './voiceCallState'
 import {
   VOICE_MAX_WORKERS,
@@ -143,7 +143,7 @@ export interface VoiceWorkerRef {
 
 /** 这次通话某个灶的活落在哪条对话上，没绑就是空串 */
 export function voiceTaskSid(workerKey: string): string {
-  return boundSid ? voiceTaskSessionId(boundSid, workerKey) : ''
+  return boundSid ? voiceTaskChatSid(boundSid, workerKey) : ''
 }
 
 /** 灶名说给用户听的那一份。存的是归一后的键，念的时候还原成模型给的写法 */
@@ -161,7 +161,7 @@ function workerLabelOf(key: string): string {
 export function voiceWorkers(): VoiceWorkerRef[] {
   if (!boundSid) return []
   const chatStore = useChatSessionsStore()
-  const prefix = voiceTaskSessionId(boundSid, '')
+  const prefix = voiceTaskChatSid(boundSid, '')
   const found = chatStore.sessions
     .filter((item) => item.id.startsWith(prefix) && !item.archived)
     .map((item) => {
@@ -461,7 +461,7 @@ function workerNote(raw: string, picked: VoiceWorkerRef & { full: boolean }): st
 function listVoiceSessions(): VoiceSessionRef[] {
   const chatStore = useChatSessionsStore()
   return chatStore.sessions
-    .filter((item) => !item.archived && !isVoiceTaskSessionId(item.id))
+    .filter((item) => !item.archived && !isVoiceTaskChatSid(item.id))
     .map((item) => ({
       agentSessionId: chatStore.getAgentSessionId(item.id),
       label: item.id === boundSid ? `【当前语音对话】${item.title}` : item.title

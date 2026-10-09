@@ -12,7 +12,7 @@
       <div class="sticky-header">
         <TopNav
           :notebook-mode="notebookMode"
-          :session-id="sid"
+          :chat-sid="sid"
           :pending-project-name="pendingProjectName"
           :hide-project-chip="!conversationMode"
           @side-question="handleSideQuestion"
@@ -84,7 +84,7 @@
         <!-- 还没开聊时工程归属放在问候语下面，开聊后回到右上角 -->
         <div class="hero-project">
           <SessionProjectChip
-            :session-id="sid"
+            :chat-sid="sid"
             :pending-project-name="pendingProjectName"
             placement="bottom"
           />
@@ -485,7 +485,7 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  sessionId: {
+  chatSid: {
     type: String,
     default: undefined
   },
@@ -533,8 +533,8 @@ const {
   selectBrowser: selectBrowserTab
 } = provideFileReview(sid)
 // Initialize sid immediately if prop is provided
-if (props.sessionId) {
-  sid.value = props.sessionId
+if (props.chatSid) {
+  sid.value = props.chatSid
 }
 const chatOnlyMode = computed<boolean>(() => props.forceChatView || props.notebookMode)
 
@@ -554,12 +554,12 @@ const pendingProjectName = computed<string>(() => {
   return name
 })
 
-// Watch for sessionId prop changes (critical for keep-alive components)
+// Watch for chatSid prop changes (critical for keep-alive components)
 watch(
-  () => props.sessionId,
+  () => props.chatSid,
   (newVal) => {
     if (newVal && newVal !== sid.value) {
-      console.log('[Welcome] sessionId prop changed:', newVal)
+      console.log('[Welcome] chatSid prop changed:', newVal)
       sid.value = newVal
     }
   }
@@ -1240,8 +1240,8 @@ const handleSourceClick = (source: unknown): void => {
  * - 若存在初始问题 q，则进入对话模式并追加消息
  */
 onMounted(() => {
-  // 优先使用 props.sessionId (如果存在)，否则从 URL query 读取
-  sid.value = normalizeSid(props.sessionId || String(route.query.sid || ''))
+  // 优先使用 props.chatSid (如果存在)，否则从 URL query 读取
+  sid.value = normalizeSid(props.chatSid || String(route.query.sid || ''))
 
   // 助手永远是 Agent。
   //
@@ -1488,8 +1488,8 @@ const restoreSessionState = (targetSid: string): void => {
 watch(
   () => route.query.sid,
   (newSid) => {
-    // 如果有 props.sessionId，则忽略 URL 的 sid 变化
-    if (props.sessionId) return
+    // 如果有 props.chatSid，则忽略 URL 的 sid 变化
+    if (props.chatSid) return
 
     const normalizedSid = normalizeSid(String(newSid || ''))
     const currentSid = sid.value
@@ -1503,10 +1503,10 @@ watch(
 )
 
 /**
- * 监听 Props Session ID 变化 (如 Notebook 切换)
+ * 监听 Props chatSid 变化 (如 Notebook 切换)
  */
 watch(
-  () => props.sessionId,
+  () => props.chatSid,
   (newSid) => {
     if (newSid && newSid !== sid.value) {
       sid.value = newSid
@@ -1551,7 +1551,7 @@ function extractTextFromContent(content: ChatMessageContent): string {
 
 /**
  * 确保会话存在并在首次发送消息时设置标题
- * @param sessionId 会话ID
+ * @param chatSid 会话ID
  * @param messageText 消息文本
  */
 

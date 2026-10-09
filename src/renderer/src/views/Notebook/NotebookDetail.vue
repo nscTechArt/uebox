@@ -2544,7 +2544,7 @@ onUnmounted(() => {
             ref="assistantWelcomeRef"
             :key="'assistant'"
             :force-chat-view="true"
-            :session-id="`notebook-chat-${notebookId}`"
+            :chat-sid="`notebook-chat-${notebookId}`"
             :notebook-mode="true"
             :notebook-sources="sources"
           />

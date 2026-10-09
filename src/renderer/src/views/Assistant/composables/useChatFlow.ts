@@ -117,8 +117,8 @@ export function useChatFlow(params: UseChatFlowParams) {
    *
    * 实现搬去了 `chatSendPrimitives` —— 后台投递那条路（没有页面挂着）要调同一份。
    */
-  function ensureSessionWithTitle(sessionId: string, messageText: string): void {
-    ensureSessionWithTitleShared(sessionId, messageText, {
+  function ensureSessionWithTitle(chatSid: string, messageText: string): void {
+    ensureSessionWithTitleShared(chatSid, messageText, {
       chatStore,
       tabsStore,
       route,

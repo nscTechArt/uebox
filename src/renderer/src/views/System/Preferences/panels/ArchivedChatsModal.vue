@@ -97,7 +97,7 @@ function handleDelete(session: ChatSession): void {
     danger: true,
     async onOk() {
       const result = await deleteChatSession({
-        sessionId: session.id,
+        chatSid: session.id,
         agentSessionId: session.agentSessionId,
         deleteTranscript: (sessionId) => window.api.agentV3.deleteSession({ sessionId }),
         dropMessages: (id) => chatMsgStore.dropSession(id),

@@ -317,7 +317,7 @@ const chatSessionListRef = ref<{ loadMore: () => boolean } | null>(null)
 /**
  * 当前路由正在查看的会话，用于在列表里高亮
  */
-const activeSessionId = computed<string>(() => {
+const activeChatSid = computed<string>(() => {
   const sid = router.currentRoute.value.query?.sid
   return typeof sid === 'string' ? sid : ''
 })
@@ -573,7 +573,7 @@ function openChat(id: string): void {
           <ChatSessionList
             ref="chatSessionListRef"
             :collapsed="false"
-            :active-session-id="activeSessionId"
+            :active-chat-sid="activeChatSid"
             @open="openChat"
             @new-chat="createNewChat"
           />

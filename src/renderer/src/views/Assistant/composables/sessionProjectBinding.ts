@@ -1,7 +1,7 @@
 import type { ChatSession, ChatSessionProject } from '@renderer/store/modules/chatSessions'
 
 export interface StampSessionProjectDeps {
-  sessionId: string
+  chatSid: string
   getSession: (id: string) => ChatSession | null
   setProject: (id: string, project: ChatSessionProject | null) => void
   /**
@@ -75,13 +75,13 @@ export function shouldStampSessionProject(session: ChatSession | null | undefine
  * 没走这些路的会话就是「纯会话」，跟着当前连接走。
  */
 export function stampSessionProject(deps: StampSessionProjectDeps): ChatSessionProject | null {
-  const { sessionId, getSession, setProject } = deps
-  if (!sessionId) return null
+  const { chatSid, getSession, setProject } = deps
+  if (!chatSid) return null
 
   const preferred = deps.preferredProjectName?.trim()
   if (!preferred) return null
 
-  if (!shouldStampSessionProject(getSession(sessionId))) {
+  if (!shouldStampSessionProject(getSession(chatSid))) {
     return null
   }
 
@@ -89,6 +89,6 @@ export function stampSessionProject(deps: StampSessionProjectDeps): ChatSessionP
   const stamped: ChatSessionProject = path
     ? { projectName: preferred, projectPath: path }
     : { projectName: preferred }
-  setProject(sessionId, stamped)
+  setProject(chatSid, stamped)
   return stamped
 }

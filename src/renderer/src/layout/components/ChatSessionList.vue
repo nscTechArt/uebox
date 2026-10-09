@@ -67,14 +67,14 @@ import type { SidebarProject } from '@renderer/store/modules/chatSidebarStore'
 interface Props {
   /** 侧边栏是否处于折叠态 */
   collapsed: boolean
-  /** 当前路由正在查看的会话 ID */
-  activeSessionId?: string
+  /** 当前路由正在查看的对话 ID */
+  activeChatSid?: string
 }
 
-const props = withDefaults(defineProps<Props>(), { activeSessionId: '' })
+const props = withDefaults(defineProps<Props>(), { activeChatSid: '' })
 
 const emit = defineEmits<{
-  (e: 'open', sessionId: string): void
+  (e: 'open', chatSid: string): void
   /**
    * 开新会话；带上工程名时，这条新会话直接归到那个工程下。
    * 同名工程被拆成几组时再带上路径，否则主进程只能按名字挑一个。
@@ -252,10 +252,10 @@ const connectedNames = computed<Set<string>>(
  * 两种模式各有各的信号：Agent 模式看流式 store，普通 Chat 模式看最后一条
  * 是不是还在打字。只看最后一条，避免为了一个小圆点去遍历整段历史。
  */
-function isSessionRunning(sessionId: string): boolean {
-  if (agentStreamStore.isStreaming(sessionId)) return true
+function isSessionRunning(chatSid: string): boolean {
+  if (agentStreamStore.isStreaming(chatSid)) return true
 
-  const messages = chatMsgStore.getMessages(sessionId)
+  const messages = chatMsgStore.getMessages(chatSid)
   const last = messages[messages.length - 1]
   return last?.role === 'assistant' && last?.status === 'typing'
 }
@@ -279,7 +279,7 @@ function isProjectConnected(projectName: string): boolean {
  * 折叠的分组里或「显示更多」后面，看着就像侧边栏没反应。
  */
 watch(
-  () => props.activeSessionId,
+  () => props.activeChatSid,
   (id) => {
     if (!id || props.collapsed) return
 
@@ -482,25 +482,25 @@ const router = useRouter()
 const listRef = ref<HTMLElement | null>(null)
 /** 拖动用的数据类型。不用 text/plain：拖到输入框上松手会把 id 当文字插进去 */
 const SESSION_DRAG_MIME = 'application/x-uebox-chat-session'
-let draggingSessionId = ''
+let draggingChatSid = ''
 
-function handleSessionDragStart(sessionId: string, event: DragEvent): void {
-  draggingSessionId = sessionId
+function handleSessionDragStart(chatSid: string, event: DragEvent): void {
+  draggingChatSid = chatSid
   if (!event.dataTransfer) return
   event.dataTransfer.effectAllowed = 'move'
-  event.dataTransfer.setData(SESSION_DRAG_MIME, sessionId)
+  event.dataTransfer.setData(SESSION_DRAG_MIME, chatSid)
 }
 
 function handleSessionDragEnd(event: DragEvent): void {
-  const sessionId = draggingSessionId
-  draggingSessionId = ''
+  const chatSid = draggingChatSid
+  draggingChatSid = ''
   const area = listRef.value?.getBoundingClientRect()
-  if (!sessionId || !area || !isDraggedOutOf(area, event)) return
-  void detachChatSession(router, sessionId, { screenX: event.screenX, screenY: event.screenY })
+  if (!chatSid || !area || !isDraggedOutOf(area, event)) return
+  void detachChatSession(router, chatSid, { screenX: event.screenX, screenY: event.screenY })
 }
 
-function openInNewWindow(sessionId: string): void {
-  void detachChatSession(router, sessionId)
+function openInNewWindow(chatSid: string): void {
+  void detachChatSession(router, chatSid)
 }
 
 function startNewChat(projectName?: string, projectPath?: string): void {
@@ -522,22 +522,22 @@ function toggleArchived(id: string): void {
  * 锚点是最近一次普通 / Ctrl 点击的那条；Shift 点击不移动锚点，
  * 可以连续拉大或缩小范围（契约见 chatSessionSelection.ts）。
  */
-const selectedSessionIds = ref<string[]>([])
+const selectedChatSids = ref<string[]>([])
 const selectionAnchorId = ref('')
-const contextMenuSessionId = ref('')
+const contextMenuChatSid = ref('')
 const contextMenuPoint = ref({ x: 0, y: 0 })
 
-const hasSelection = computed<boolean>(() => selectedSessionIds.value.length > 0)
+const hasSelection = computed<boolean>(() => selectedChatSids.value.length > 0)
 
-/** 屏幕上实际渲染出来的会话顺序（跨三个区摊平）：Shift 范围就按这条顺序取区间 */
-const visibleSessionIds = computed<string[]>(() =>
+/** 屏幕上实际渲染出来的对话顺序（跨三个区摊平）：Shift 范围就按这条顺序取区间 */
+const visibleChatSids = computed<string[]>(() =>
   sections.value.flatMap((section) =>
     section.entries.filter((entry) => entry.type === 'session').map((entry) => entry.key)
   )
 )
 
 function isSessionSelected(id: string): boolean {
-  return selectedSessionIds.value.includes(id)
+  return selectedChatSids.value.includes(id)
 }
 
 /**
@@ -549,54 +549,54 @@ function isSessionSelected(id: string): boolean {
  */
 function handleItemClick(session: ChatSession, event: MouseEvent): void {
   const result = applySessionClick(
-    selectedSessionIds.value,
+    selectedChatSids.value,
     selectionAnchorId.value,
-    visibleSessionIds.value,
+    visibleChatSids.value,
     session.id,
     { shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey }
   )
 
-  selectedSessionIds.value = result.selected
+  selectedChatSids.value = result.selected
   selectionAnchorId.value = result.anchor
   if (result.open) openChat(session.id)
 }
 
-async function openSessionContextMenu(sessionId: string, event: MouseEvent): Promise<void> {
+async function openSessionContextMenu(chatSid: string, event: MouseEvent): Promise<void> {
   // 同一行连续右键时也要重新走一次定位，否则菜单会停在上一次的鼠标位置。
-  contextMenuSessionId.value = ''
+  contextMenuChatSid.value = ''
   await nextTick()
   contextMenuPoint.value = { x: event.clientX, y: event.clientY }
-  contextMenuSessionId.value = sessionId
+  contextMenuChatSid.value = chatSid
 }
 
-function syncSessionContextMenuOpen(sessionId: string, open: boolean): void {
-  if (!open && contextMenuSessionId.value === sessionId) {
-    contextMenuSessionId.value = ''
+function syncSessionContextMenuOpen(chatSid: string, open: boolean): void {
+  if (!open && contextMenuChatSid.value === chatSid) {
+    contextMenuChatSid.value = ''
   }
 }
 
 function clearSessionSelection(): void {
-  selectedSessionIds.value = []
+  selectedChatSids.value = []
   selectionAnchorId.value = ''
 }
 
 /** 会话没了（删除 / 归档 / 搜索过滤）就把选择里的死 id 摘掉，批量栏随之消失；指向它的右键菜单也一并关掉 */
 watch(allSessions, (sessions) => {
   const existing = new Set(sessions.map((session) => session.id))
-  if (contextMenuSessionId.value && !existing.has(contextMenuSessionId.value)) {
-    contextMenuSessionId.value = ''
+  if (contextMenuChatSid.value && !existing.has(contextMenuChatSid.value)) {
+    contextMenuChatSid.value = ''
   }
   if (!hasSelection.value) return
 
-  const next = pruneSelection(selectedSessionIds.value, existing)
-  if (next.length !== selectedSessionIds.value.length) {
-    selectedSessionIds.value = next
+  const next = pruneSelection(selectedChatSids.value, existing)
+  if (next.length !== selectedChatSids.value.length) {
+    selectedChatSids.value = next
   }
 })
 
 // ==================== 批量操作：归入工程 / 归档 / 删除 ====================
 const selectedSessions = computed<ChatSession[]>(() =>
-  selectedSessionIds.value
+  selectedChatSids.value
     .map((id) => chatStore.sessionById(id))
     .filter((session): session is ChatSession => Boolean(session))
 )
@@ -611,7 +611,7 @@ const selectionHasProject = computed<boolean>(() =>
  * 和资源管理器一个规矩；不在多选里就只作用于它自己。
  */
 function actionTargets(session: ChatSession): string[] {
-  return isSessionSelected(session.id) ? [...selectedSessionIds.value] : [session.id]
+  return isSessionSelected(session.id) ? [...selectedChatSids.value] : [session.id]
 }
 
 /** 一次操作的目标里有没有挂工程的（决定右键菜单「移出工程」要不要出现） */
@@ -629,7 +629,7 @@ function archiveSessions(ids: string[], archived: boolean): void {
 
 /** 批量栏的归档：全部收进归档区，可逆，不弹确认 */
 function archiveSelectedSessions(): void {
-  archiveSessions([...selectedSessionIds.value], true)
+  archiveSessions([...selectedChatSids.value], true)
 }
 
 function assignSessionsToProject(ids: string[], project: ConnectedProjectRef): void {
@@ -645,11 +645,11 @@ function clearSessionsProject(ids: string[]): void {
 }
 
 function assignSelectedToProject(project: ConnectedProjectRef): void {
-  assignSessionsToProject([...selectedSessionIds.value], project)
+  assignSessionsToProject([...selectedChatSids.value], project)
 }
 
 function clearSelectedProject(): void {
-  clearSessionsProject([...selectedSessionIds.value])
+  clearSessionsProject([...selectedChatSids.value])
 }
 
 /**
@@ -678,7 +678,7 @@ function deleteSessionsByIds(ids: string[]): void {
     async onOk() {
       const result = await deleteChatSessions({
         targets: targets.map((session) => ({
-          sessionId: session.id,
+          chatSid: session.id,
           agentSessionId: session.agentSessionId
         })),
         deleteTranscript: (agentSessionId) =>
@@ -702,11 +702,11 @@ function deleteSessionsByIds(ids: string[]): void {
 }
 
 function openBatchProjectModal(): void {
-  openProjectModal([...selectedSessionIds.value])
+  openProjectModal([...selectedChatSids.value])
 }
 
 function deleteSelectedSessions(): void {
-  deleteSessionsByIds([...selectedSessionIds.value])
+  deleteSessionsByIds([...selectedChatSids.value])
 }
 
 // ==================== 重命名 ====================
@@ -743,15 +743,15 @@ function closeRenameModal(): void {
  * 失败什么都不做，原名继续用着 —— 弹窗已经不在了，只能用一条 toast 说明。
  */
 async function smartName(): Promise<void> {
-  const sessionId = renamingId.value
-  if (!sessionId) return
+  const chatSid = renamingId.value
+  if (!chatSid) return
 
   closeRenameModal()
   const outcome = await retitleSession(
-    sessionId,
-    chatMsgStore.getMessages(sessionId),
-    (title) => chatStore.updateTitle(sessionId, title),
-    () => chatStore.sessionById(sessionId)?.title
+    chatSid,
+    chatMsgStore.getMessages(chatSid),
+    (title) => chatStore.updateTitle(chatSid, title),
+    () => chatStore.sessionById(chatSid)?.title
   )
   if (outcome === 'empty') message.warning(t('chatSidebar.smartNameEmpty'))
   if (outcome === 'failed') message.error(t('chatSidebar.smartNameFailed'))
@@ -768,21 +768,21 @@ const projectModalOpen = ref(false)
 const projectTargetIds = ref<string[]>([])
 const projectNameInput = ref('')
 
-function assignProject(sessionId: string, project: ConnectedProjectRef): void {
+function assignProject(chatSid: string, project: ConnectedProjectRef): void {
   sidebarStore.showProject(project.projectName)
-  chatStore.setProject(sessionId, {
+  chatStore.setProject(chatSid, {
     projectName: project.projectName,
     projectPath: project.projectPath,
     engineVersion: project.engineVersion
   })
 }
 
-function clearProject(sessionId: string): void {
-  chatStore.clearProject(sessionId)
+function clearProject(chatSid: string): void {
+  chatStore.clearProject(chatSid)
 }
 
-function openProjectModal(sessionIds: string | string[]): void {
-  projectTargetIds.value = Array.isArray(sessionIds) ? [...sessionIds] : [sessionIds]
+function openProjectModal(chatSids: string | string[]): void {
+  projectTargetIds.value = Array.isArray(chatSids) ? [...chatSids] : [chatSids]
   projectNameInput.value = ''
   projectModalOpen.value = true
 }
@@ -790,8 +790,8 @@ function openProjectModal(sessionIds: string | string[]): void {
 function confirmProjectModal(): void {
   const name = projectNameInput.value.trim()
   if (projectTargetIds.value.length && name) {
-    for (const sessionId of projectTargetIds.value) {
-      assignProject(sessionId, { projectName: name })
+    for (const chatSid of projectTargetIds.value) {
+      assignProject(chatSid, { projectName: name })
     }
   }
   closeProjectModal()
@@ -840,7 +840,7 @@ function getChatInitial(title: string): string {
           type="button"
           class="chat-collapsed-item"
           :class="{
-            active: session.id === props.activeSessionId,
+            active: session.id === props.activeChatSid,
             waiting: activityOf(session) === 'waiting'
           }"
           @click="openChat(session.id)"
@@ -1094,7 +1094,7 @@ function getChatInitial(title: string): string {
           <AppDropdown
             v-else
             :trigger="[]"
-            :open="contextMenuSessionId === entry.session.id"
+            :open="contextMenuChatSid === entry.session.id"
             :anchor-point="contextMenuPoint"
             placement="rightStart"
             @update:open="syncSessionContextMenuOpen(entry.session.id, $event)"
@@ -1102,7 +1102,7 @@ function getChatInitial(title: string): string {
             <div
               class="chat-item"
               :class="{
-                active: entry.session.id === props.activeSessionId,
+                active: entry.session.id === props.activeChatSid,
                 selected: isSessionSelected(entry.session.id),
                 indent: entry.indent
               }"

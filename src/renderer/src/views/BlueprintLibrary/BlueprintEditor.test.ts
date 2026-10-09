@@ -60,12 +60,12 @@ vi.mock('@renderer/views/library-common/components/LibraryAIPanel.vue', () => ({
     name: 'LibraryAIPanelStub',
     props: {
       mode: { type: String, default: 'docked' },
-      sessionId: { type: String, default: '' },
+      chatSid: { type: String, default: '' },
       context: { type: Object, default: null }
     },
     emits: ['update:mode', 'restore', 'snapshot-selection'],
     template: `
-      <div class="bp-ai-chat-stub" :data-mode="mode" :data-session-id="sessionId">
+      <div class="bp-ai-chat-stub" :data-mode="mode" :data-chat-sid="chatSid">
         <button class="set-docked" @click="$emit('update:mode', 'docked')">Docked</button>
         <button class="set-overlay" @click="$emit('update:mode', 'overlay')">Overlay</button>
         <button class="set-collapsed" @click="$emit('update:mode', 'collapsed')">Collapsed</button>
@@ -155,6 +155,18 @@ describe('BlueprintEditor UX state flows', () => {
     expect(wrapper.find('.bp-sidebar-collapsed').exists()).toBe(false)
     expect(wrapper.get('.bp-ai-chat-stub').attributes('data-mode')).toBe('docked')
     expect(layoutUiStore.sideMenuCollapseRequestVersion).toBe(1)
+  })
+
+  it('AI 面板收到的对话 id 是 chatSid（prop 改名类型检查看不见，这里兜住）', async () => {
+    const { pinia, router, blueprint } = await seedBlueprintEditor()
+    const wrapper = mount(BlueprintEditor, {
+      global: {
+        plugins: [pinia, router]
+      }
+    })
+
+    const panel = wrapper.findComponent({ name: 'LibraryAIPanelStub' })
+    expect(panel.props('chatSid')).toBe(`library-chat-blueprint-${blueprint.id}`)
   })
 
   it('syncs the dedicated tab title from the blueprint name after the editor becomes active', async () => {

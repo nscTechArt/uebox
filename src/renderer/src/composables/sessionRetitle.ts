@@ -164,19 +164,19 @@ export type RetitleOutcome = 'ok' | 'empty' | 'failed' | 'skipped'
  *          `failed` 模型没配 / 调用失败 / 返回废话；`ok` 已改名
  */
 export async function retitleSession(
-  sessionId: string,
+  chatSid: string,
   messages: readonly ExcerptMessage[],
   applyTitle: (title: string) => void,
   getTitle?: () => string | undefined,
   options: { keepCurrentTitle?: boolean } = {}
 ): Promise<RetitleOutcome> {
-  if (!sessionId) return 'empty'
-  if (inFlight.has(sessionId)) return 'skipped'
+  if (!chatSid) return 'empty'
+  if (inFlight.has(chatSid)) return 'skipped'
 
   const excerpt = buildConversationExcerpt(messages, options.keepCurrentTitle ? getTitle?.() : '')
   if (!excerpt) return 'empty'
 
-  inFlight.add(sessionId)
+  inFlight.add(chatSid)
   // 起名要几秒。这期间用户自己改了名，模型那个晚到的名字不能盖掉它
   const titleBefore = getTitle?.()
   try {
@@ -192,7 +192,7 @@ export async function retitleSession(
     console.warn('[chat] 重新为会话起名失败:', error)
     return 'failed'
   } finally {
-    inFlight.delete(sessionId)
+    inFlight.delete(chatSid)
   }
 }
 

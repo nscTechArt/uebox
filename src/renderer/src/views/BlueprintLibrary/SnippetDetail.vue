@@ -162,7 +162,7 @@ const chatContext = computed<LibraryChatContext | null>(() => {
       <!-- 右侧：AI 面板。里面嵌的就是主助手本身 -->
       <LibraryAIPanel
         v-if="chatContext"
-        :session-id="`library-chat-blueprint-${entryId}`"
+        :chat-sid="`library-chat-blueprint-${entryId}`"
         :mode="aiPanelMode"
         :context="chatContext"
         overlay-storage-prefix="blueprint-ai-panel"

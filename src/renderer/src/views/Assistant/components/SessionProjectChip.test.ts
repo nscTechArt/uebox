@@ -28,9 +28,9 @@ const menuItemStub = {
   template: '<div class="menu-item" @click="$emit(\'click\', $event)"><slot /></div>'
 }
 
-function mountChip(sessionId: string, pendingProjectName = ''): ReturnType<typeof mount> {
+function mountChip(chatSid: string, pendingProjectName = ''): ReturnType<typeof mount> {
   return mount(SessionProjectChip, {
-    props: { sessionId, pendingProjectName },
+    props: { chatSid, pendingProjectName },
     global: {
       stubs: {
         AppDropdown: dropdownStub,

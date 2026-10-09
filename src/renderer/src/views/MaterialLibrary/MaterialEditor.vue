@@ -816,7 +816,7 @@ watch(
 
       <!-- Right Side: AI Assistant Panel。里面嵌的就是主助手本身 -->
       <LibraryAIPanel
-        :session-id="`library-chat-material-${entry.id}`"
+        :chat-sid="`library-chat-material-${entry.id}`"
         :mode="aiPanelMode"
         :context="libraryChatContext"
         overlay-storage-prefix="material-ai-panel"

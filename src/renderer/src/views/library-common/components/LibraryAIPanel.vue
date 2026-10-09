@@ -40,7 +40,7 @@ import type { AIPanelMode } from '../types'
 const props = withDefaults(
   defineProps<{
     /** 会话 id。用 `library-chat-` 打头，这样它不会混进侧边栏的会话列表 */
-    sessionId: string
+    chatSid: string
     mode?: AIPanelMode
     /** 交给助手的上下文：当前条目 + 选中节点 */
     context: LibraryChatContext | null
@@ -440,13 +440,13 @@ function onResizeStart(e: MouseEvent): void {
     -->
     <div class="panel-body" @mousedown.capture="handleBodyMouseDown">
       <!--
-        不加 :key。`Welcome.vue` 自己 watch 了 sessionId（注释写着「keep-alive
+        不加 :key。`Welcome.vue` 自己 watch 了 chatSid（注释写着「keep-alive
         下的关键」），换条目时它会自己切过去；加 key 会把整个助手连同内核连接
         一起重建，白白多一次卸载重挂。
       -->
       <AssistantWelcome
         :force-chat-view="true"
-        :session-id="sessionId"
+        :chat-sid="chatSid"
         :library-context="context"
         :custom-suggestions="suggestions"
       />

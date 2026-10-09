@@ -169,7 +169,7 @@ describe('「键存在就是已定」这条规矩', () => {
   /**
    * 抓取要等最多 2 秒，而这期间小窗口还没进入生成态 —— 用户点得动标题栏那个「+」。
    *
-   * 会话号不钉死的话，抓完再读 `SESSION_ID.value` 拿到的是**新**会话：
+   * 会话号不钉死的话，抓完再读 `sid.value` 拿到的是**新**会话：
    * 用户刚清空，屏幕上却冒出一句他以为已经丢掉的话，还带着旧会话的上下文。
    */
   it('MiniChat：会话号在提交那一刻钉死，中途被重置就丢弃这条', () => {
@@ -178,12 +178,12 @@ describe('「键存在就是已定」这条规矩', () => {
       miniChat.indexOf('async function handleInitialMessage')
     )
 
-    expect(dispatch).toContain('const submittedSessionId = SESSION_ID.value')
+    expect(dispatch).toContain('const chatSid = sid.value')
     // 抓取用钉住的那个，不是当前值
-    expect(dispatch).toContain('chatSessionStore.getProject?.(submittedSessionId)')
+    expect(dispatch).toContain('chatSessionStore.getProject?.(chatSid)')
     // 回来发现变了就整条作废 —— 既不改投新会话，也不硬发到已经不存在的旧会话
-    expect(dispatch).toContain('if (SESSION_ID.value !== submittedSessionId)')
-    const guardAt = dispatch.indexOf('if (SESSION_ID.value !== submittedSessionId)')
+    expect(dispatch).toContain('if (sid.value !== chatSid)')
+    const guardAt = dispatch.indexOf('if (sid.value !== chatSid)')
     expect(guardAt).toBeLessThan(dispatch.indexOf('await executeAgent('))
   })
 })

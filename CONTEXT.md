@@ -67,7 +67,7 @@ V2 那套「按问题类型路由到专家 Agent」已经废除，理由见 `age
 
 **对话 (Chat)**
 用户与 AI 之间的一条往来。AI 助手里的对话列在侧边栏；知识库、蓝图库、材质库的页面里各嵌着一条，不进侧边栏。
-背后是不是 Agent 驱动不构成区别。代码里叫 `ChatSession`。
+背后是不是 Agent 驱动不构成区别。代码里叫 `ChatSession`，它的 id 叫 `chatSid`（局部简写 `sid`）。
 由 Agent 驱动的对话，在内核那一层对应一份 **session**，见该词条。
 别的概念的英文名不得含 "Chat"。
 _Avoid_：会话、聊天；Conversation、Session、Thread
@@ -102,6 +102,9 @@ _Avoid_：MiniChat、Mini Chat、迷你对话
 **session**
 内核那一层的单元：Agent 实际读写的那份历史，代码里 `agentSessionId`。不翻译，中文界面也写 "session"；
 只出现在面向开发者的界面（如调试台），面向用户的文案里不出现。
+id 命名规则：渲染层与 shared 里 `sessionId` / `agentSessionId` 指内核 session，`sid` / `chatSid` 指对话；
+网络库导入的 `sessionId` 属导入领域。
+例外：过 IPC 的载荷字段沿用原名 —— `TrayAction` 的 `open-session` 里 `sessionId` 是对话 id，`ai.chatStream` 的 `sessionId` 是单次流 id。
 _Avoid_：会话、内核记忆
 
 **UnrealAgentLink**

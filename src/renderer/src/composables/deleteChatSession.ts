@@ -34,19 +34,19 @@ export interface ChatSessionTab {
 }
 
 export interface DeleteChatSessionDeps {
-  sessionId: string
+  chatSid: string
   /** 会话绑定的内核会话 id。没有表示这条会话从没跑过 Agent，盘上没有 JSONL */
   agentSessionId?: string
   deleteTranscript: (agentSessionId: string) => Promise<{ success?: boolean; error?: string }>
-  dropMessages: (sessionId: string) => void
-  removeSession: (sessionId: string) => void
+  dropMessages: (chatSid: string) => void
+  removeSession: (chatSid: string) => void
   listTabs: () => ChatSessionTab[]
   closeTab: (tabKey: string) => void
 }
 
 /** 批量删除的一个目标 */
 export interface ChatSessionDeleteTarget {
-  sessionId: string
+  chatSid: string
   agentSessionId?: string
 }
 
@@ -54,8 +54,8 @@ export interface DeleteChatSessionsDeps {
   targets: ChatSessionDeleteTarget[]
   deleteTranscript: (agentSessionId: string) => Promise<{ success?: boolean; error?: string }>
   /** 一次性清掉这组会话的界面消息 —— 每个 store 只许变更一次 */
-  dropSessions: (sessionIds: string[]) => void
-  removeSessions: (sessionIds: string[]) => void
+  dropSessions: (chatSids: string[]) => void
+  removeSessions: (chatSids: string[]) => void
   listTabs: () => ChatSessionTab[]
   closeTab: (tabKey: string) => void
 }
@@ -91,7 +91,7 @@ export interface DeleteChatSessionsResult {
 export async function deleteChatSessions(
   deps: DeleteChatSessionsDeps
 ): Promise<DeleteChatSessionsResult> {
-  const targets = deps.targets.filter((target) => target.sessionId)
+  const targets = deps.targets.filter((target) => target.chatSid)
   if (targets.length === 0) return { transcriptErrors: [], closedTabs: 0 }
 
   // 内核记忆先删。个别删失败也继续往下走 —— 会话已经在用户眼里"删了"，
@@ -111,15 +111,15 @@ export async function deleteChatSessions(
   )
 
   // 每个 store 只动一次：这是这条函数和「循环调单条版」的全部区别
-  const sessionIds = targets.map((target) => target.sessionId)
-  deps.dropSessions(sessionIds)
-  deps.removeSessions(sessionIds)
+  const chatSids = targets.map((target) => target.chatSid)
+  deps.dropSessions(chatSids)
+  deps.removeSessions(chatSids)
 
   // 留着的标签页会**把会话复活**：那条 URL 还带着 `?sid=`，一点开就
   // ensureSession 出一条同名空会话，看起来像是删除没生效。
   const staleTabs = deps
     .listTabs()
-    .filter((tab) => sessionIds.some((id) => isSessionTab(tab.path, id)))
+    .filter((tab) => chatSids.some((id) => isSessionTab(tab.path, id)))
   staleTabs.forEach((tab) => deps.closeTab(tab.key))
 
   return { transcriptErrors, closedTabs: staleTabs.length }
@@ -135,7 +135,7 @@ export async function deleteChatSession(
   deps: DeleteChatSessionDeps
 ): Promise<DeleteChatSessionResult> {
   const result = await deleteChatSessions({
-    targets: [{ sessionId: deps.sessionId, agentSessionId: deps.agentSessionId }],
+    targets: [{ chatSid: deps.chatSid, agentSessionId: deps.agentSessionId }],
     deleteTranscript: deps.deleteTranscript,
     dropSessions: (ids) => ids.forEach((id) => deps.dropMessages(id)),
     removeSessions: (ids) => ids.forEach((id) => deps.removeSession(id)),

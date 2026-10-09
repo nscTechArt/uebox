@@ -17,7 +17,7 @@ const mounted: VueWrapper[] = []
 
 function mountList(): VueWrapper {
   const wrapper = mount(ChatSessionList, {
-    props: { collapsed: false, activeSessionId: '' },
+    props: { collapsed: false, activeChatSid: '' },
     global: {
       stubs: { SidebarSectionHeader: { template: '<div><slot /><slot name="actions" /></div>' } }
     }
@@ -96,7 +96,7 @@ describe('ChatSessionList 行内操作', () => {
     store.ensureSession('s1', '一个会话')
 
     const wrapper = mount(ChatSessionList, {
-      props: { collapsed: false, activeSessionId: '' },
+      props: { collapsed: false, activeChatSid: '' },
       global: {
         stubs: {
           SidebarSectionHeader: { template: '<div><slot /><slot name="actions" /></div>' },
@@ -124,7 +124,7 @@ describe('ChatSessionList 行内操作', () => {
     store.ensureSession('s1', '一个会话')
 
     const wrapper = mount(ChatSessionList, {
-      props: { collapsed: false, activeSessionId: '' },
+      props: { collapsed: false, activeChatSid: '' },
       global: {
         stubs: {
           SidebarSectionHeader: { template: '<div><slot /><slot name="actions" /></div>' },

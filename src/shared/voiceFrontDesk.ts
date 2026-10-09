@@ -83,7 +83,7 @@ export function isLocalVoiceTool(name: string): boolean {
  * 后厨（agent-v3）本来就允许多条会话并行 —— `activeAgents` 是个 Map，拦并发的是
  * **同一条会话**（`agent-v3:execute` 直接拒）。所以「一件活跑完才能跑下一件」
  * 不是引擎的限制，是前台只开了一个灶：一通电话所有的活都挤在
- * `voiceTaskSessionId(chatSid)` 这一条 agent 会话上。
+ * `voiceTaskChatSid` 派生的同一条任务对话上。
  *
  * 现在按灶分开，每个灶一条 agent 会话，互不相干的活真并行。
  * 上限存在的理由：每个灶都是一次完整的 agent 运行（烧 token、占 UE 的命令队列），

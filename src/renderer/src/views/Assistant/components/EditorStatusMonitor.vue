@@ -29,11 +29,11 @@ import type {
 
 const props = withDefaults(
   defineProps<{
-    sessionId?: string
+    chatSid?: string
     /** 会话还没进 store 时的待定归属，同 SessionProjectChip */
     pendingProjectName?: string
   }>(),
-  { sessionId: '', pendingProjectName: '' }
+  { chatSid: '', pendingProjectName: '' }
 )
 
 const { t } = useI18n()
@@ -42,7 +42,7 @@ const connectedRaw = useConnectedProjects()
 
 /** 归属判定照 SessionProjectChip：`null` 是用户明说了不归属，不回落到待定值 */
 const projectName = computed<string>(() => {
-  const stored = props.sessionId ? chatStore.sessionById(props.sessionId)?.project : undefined
+  const stored = props.chatSid ? chatStore.sessionById(props.chatSid)?.project : undefined
   if (stored === undefined) return props.pendingProjectName.trim()
   return stored?.projectName ?? ''
 })
@@ -146,9 +146,9 @@ function label(item: EditorHealthItem): string {
 
 /** 把问题填进这条会话的输入框，发不发由用户决定 */
 function askAi(item: EditorHealthItem): void {
-  if (!props.sessionId) return
+  if (!props.chatSid) return
   chatStore.setDraft(
-    props.sessionId,
+    props.chatSid,
     t('assistantTopNav.statusMonitor.askPrompt', {
       label: label(item),
       value: formatValue(item),

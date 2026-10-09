@@ -58,7 +58,7 @@ import {
   type VoiceHost
 } from './voiceAssistant'
 import { __setAppAgentRunnerForTest } from './appAgentRunner'
-import { voiceTaskSessionId } from './voiceSessions'
+import { voiceTaskChatSid } from './voiceSessions'
 import { voiceCallActive } from './voiceCallState'
 import { answerAgentQuestion, recordUserSteer } from './agentEventDispatcher'
 import { agentV3API } from '@renderer/api/agentV3'
@@ -379,7 +379,7 @@ describe('voiceAssistant', () => {
     const first = opts.resolveSession('灯光')
     const second = opts.resolveSession('灯光')
 
-    expect(voiceTaskSid('灯光')).toBe(voiceTaskSessionId('call-1', '灯光'))
+    expect(voiceTaskSid('灯光')).toBe(voiceTaskChatSid('call-1', '灯光'))
     expect(first.agentSessionId).toBeTruthy()
     expect(second.agentSessionId).toBe(first.agentSessionId)
     expect(useChatSessionsStore().getAgentSessionId(voiceTaskSid('灯光'))).toBe(
@@ -518,9 +518,9 @@ describe('voiceAssistant', () => {
     await startVoiceIn('call-2')
     const secondCall = next.resolveSession('灯光').agentSessionId
 
-    expect(voiceTaskSid('灯光')).toBe(voiceTaskSessionId('call-2', '灯光'))
+    expect(voiceTaskSid('灯光')).toBe(voiceTaskChatSid('call-2', '灯光'))
     expect(secondCall).not.toBe(firstCall)
-    expect(useChatSessionsStore().getAgentSessionId(voiceTaskSessionId('call-1', '灯光'))).toBe(
+    expect(useChatSessionsStore().getAgentSessionId(voiceTaskChatSid('call-1', '灯光'))).toBe(
       firstCall
     )
   })
@@ -613,8 +613,8 @@ describe('voiceAssistant', () => {
   it('别通电话的任务对话不出现在可派活的清单里', async () => {
     const opts = options()
     const chatStore = useChatSessionsStore()
-    chatStore.ensureSession(voiceTaskSessionId('old-call', '灯光'), '语音任务 · 上周那件')
-    chatStore.setAgentSessionId(voiceTaskSessionId('old-call', '灯光'), 'agent-old')
+    chatStore.ensureSession(voiceTaskChatSid('old-call', '灯光'), '语音任务 · 上周那件')
+    chatStore.setAgentSessionId(voiceTaskChatSid('old-call', '灯光'), 'agent-old')
     chatStore.ensureSession('chat-9', '普通对话')
     chatStore.setAgentSessionId('chat-9', 'agent-9')
     await startVoiceIn('call-1')

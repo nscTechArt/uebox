@@ -13,7 +13,7 @@ vi.mock('@renderer/views/library-common/components/LibraryAIPanel.vue', () => ({
     name: 'LibraryAIPanelStub',
     props: {
       mode: { type: String, default: 'docked' },
-      sessionId: { type: String, default: '' },
+      chatSid: { type: String, default: '' },
       context: { type: Object, default: null }
     },
     emits: ['update:mode', 'restore', 'snapshot-selection'],
@@ -90,7 +90,7 @@ describe('SnippetDetail 交给助手的上下文', () => {
   it('会话 id 跟着条目走，而且用 library-chat- 打头', () => {
     // 前缀是「别把它列进侧边栏」和「通知点回来认得路」的依据
     const panel = mountDetail().findComponent(LibraryAIPanel)
-    expect(panel.props('sessionId')).toBe('library-chat-blueprint-entry-1')
+    expect(panel.props('chatSid')).toBe('library-chat-blueprint-entry-1')
   })
 
   it('老条目形态的 payload 不挂面板 —— 那种没有正文可给', () => {

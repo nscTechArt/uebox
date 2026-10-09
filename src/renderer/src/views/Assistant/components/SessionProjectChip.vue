@@ -23,7 +23,7 @@ import type { ChatSessionProject } from '@renderer/store/modules/chatSessions'
 
 interface Props {
   /** 当前会话 ID；为空时不显示 */
-  sessionId?: string
+  chatSid?: string
   /**
    * 侧边栏在工程标题上点「+」时带过来的工程名（路由参数 `?project=`）。
    *
@@ -37,7 +37,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  sessionId: '',
+  chatSid: '',
   pendingProjectName: '',
   placement: 'bottomRight'
 })
@@ -78,7 +78,7 @@ const pendingProject = computed<ChatSessionProject | null>(() => {
  * 待定值上，否则点了「移出项目」胶囊纹丝不动。
  */
 const storedProject = computed<ChatSessionProject | null | undefined>(() =>
-  props.sessionId ? chatStore.sessionById(props.sessionId)?.project : undefined
+  props.chatSid ? chatStore.sessionById(props.chatSid)?.project : undefined
 )
 
 const sessionProject = computed<ChatSessionProject | null>(() =>
@@ -129,14 +129,14 @@ const tooltip = computed<string>(() => {
 })
 
 function assignProject(project: ConnectedProjectRef): void {
-  if (!props.sessionId) return
+  if (!props.chatSid) return
 
   // 新开的会话在发第一条消息之前还没进 store，直接 setProject 会静默落空。
   // 用户点了「归入项目」就是明确表态，先把这条会话建出来再盖戳。
   // 标题用 useChatFlow 比对的同一个 key，免得首条消息的自动改名失效。
-  chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedChat'))
+  chatStore.ensureSession(props.chatSid, t('assistant.chatFlow.unnamedChat'))
 
-  chatStore.setProject(props.sessionId, {
+  chatStore.setProject(props.chatSid, {
     projectName: project.projectName,
     projectPath: project.projectPath,
     engineVersion: project.engineVersion
@@ -144,17 +144,17 @@ function assignProject(project: ConnectedProjectRef): void {
 }
 
 function clearProject(): void {
-  if (!props.sessionId) return
+  if (!props.chatSid) return
 
   // 和上面同理：会话还没建出来时，「移出项目」也得留下痕迹，
   // 否则待定归属还挂在路由上，首条消息一发又被盖回去。
-  chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedChat'))
-  chatStore.clearProject(props.sessionId)
+  chatStore.ensureSession(props.chatSid, t('assistant.chatFlow.unnamedChat'))
+  chatStore.clearProject(props.chatSid)
 }
 </script>
 
 <template>
-  <AppDropdown v-if="props.sessionId" :trigger="['click']" :placement="props.placement">
+  <AppDropdown v-if="props.chatSid" :trigger="['click']" :placement="props.placement">
     <AppTooltip placement="bottom" :title="tooltip">
       <span
         class="session-project-chip"

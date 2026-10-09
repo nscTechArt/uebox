@@ -105,7 +105,7 @@ const close = (): void => window.api.window.close()
     </header>
 
     <main class="chat-window__body">
-      <Welcome v-if="sid" :session-id="sid" />
+      <Welcome v-if="sid" :chat-sid="sid" />
     </main>
 
     <SensitiveActionConfirm />

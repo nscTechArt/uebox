@@ -20,7 +20,7 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 function createDeps(session: ChatSession | null): {
   store: Map<string, ChatSessionProject | null>
   deps: {
-    sessionId: string
+    chatSid: string
     getSession: () => ChatSession | null
     setProject: (id: string, value: ChatSessionProject | null) => void
     preferredProjectName?: string
@@ -30,7 +30,7 @@ function createDeps(session: ChatSession | null): {
   return {
     store,
     deps: {
-      sessionId: session?.id || 'sid-1',
+      chatSid: session?.id || 'sid-1',
       getSession: (): ChatSession | null => session,
       setProject: (id: string, value: ChatSessionProject | null): void => {
         store.set(id, value)
@@ -94,7 +94,7 @@ describe('sessionProjectBinding', () => {
     const { store, deps } = createDeps(createSession())
 
     expect(
-      stampSessionProject({ ...deps, sessionId: '', preferredProjectName: 'ArchViz' })
+      stampSessionProject({ ...deps, chatSid: '', preferredProjectName: 'ArchViz' })
     ).toBeNull()
     expect(store.size).toBe(0)
   })

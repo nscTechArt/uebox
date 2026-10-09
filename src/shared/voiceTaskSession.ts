@@ -22,24 +22,24 @@ export const VOICE_TASK_PREFIX = 'voice-tasks-'
  */
 export const WORKER_SEPARATOR = '::'
 
-export function voiceTaskSessionId(chatSid: string, workerKey: string): string {
+export function voiceTaskChatSid(chatSid: string, workerKey: string): string {
   return `${VOICE_TASK_PREFIX}${chatSid}${WORKER_SEPARATOR}${workerKey}`
 }
 
 /** 这条对话是某通电话的任务对话吗 */
-export function isVoiceTaskSessionId(sessionId: string): boolean {
-  return sessionId.startsWith(VOICE_TASK_PREFIX)
+export function isVoiceTaskChatSid(chatSid: string): boolean {
+  return chatSid.startsWith(VOICE_TASK_PREFIX)
 }
 
 /** 这条任务对话属于哪通电话。不是任务对话就返回空串 */
-export function voiceTaskOwnerSid(sessionId: string): string {
-  if (!isVoiceTaskSessionId(sessionId)) return ''
-  const rest = sessionId.slice(VOICE_TASK_PREFIX.length)
+export function voiceTaskOwnerSid(chatSid: string): string {
+  if (!isVoiceTaskChatSid(chatSid)) return ''
+  const rest = chatSid.slice(VOICE_TASK_PREFIX.length)
   const at = rest.lastIndexOf(WORKER_SEPARATOR)
   return at === -1 ? rest : rest.slice(0, at)
 }
 
-/** 这条对话是 `chatSid` 本身，或者是它那通电话派生出来的任务对话 */
-export function belongsToChat(sessionId: string, chatSid: string): boolean {
-  return Boolean(chatSid) && (sessionId === chatSid || voiceTaskOwnerSid(sessionId) === chatSid)
+/** 这条对话是 `ownerSid` 本身，或者是它那通电话派生出来的任务对话 */
+export function belongsToChat(sid: string, ownerSid: string): boolean {
+  return Boolean(ownerSid) && (sid === ownerSid || voiceTaskOwnerSid(sid) === ownerSid)
 }

@@ -66,4 +66,11 @@ describe('LibraryAIPanel 的嵌入契约', () => {
     // 也是通知点回来时认路的依据（notificationActivation）
     expect(source).toContain('library-chat-')
   })
+
+  it('嵌进来的助手按 chatSid 收对话 id', () => {
+    // prop 改名类型检查看不见（没开 strictTemplates），开标签断言兜住
+    const tag = source.match(/<AssistantWelcome\b[^>]*>/)?.[0] ?? ''
+    expect(tag).toContain(':chat-sid="chatSid"')
+    expect(tag).not.toContain(':session-id')
+  })
 })

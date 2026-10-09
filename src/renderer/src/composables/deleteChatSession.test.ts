@@ -36,7 +36,7 @@ function makeDeps(overrides: Partial<DeleteChatSessionDeps> = {}): {
   return {
     calls,
     deps: {
-      sessionId: 'chat-1',
+      chatSid: 'chat-1',
       agentSessionId: 'agent-1',
       deleteTranscript: calls.deleteTranscript,
       dropMessages: calls.dropMessages,
@@ -136,8 +136,8 @@ describe('deleteChatSession', () => {
     expect(result.closedTabs).toBe(1)
   })
 
-  it('空 sessionId 什么都不做', async () => {
-    const { deps, calls } = makeDeps({ sessionId: '' })
+  it('空 chatSid 什么都不做', async () => {
+    const { deps, calls } = makeDeps({ chatSid: '' })
 
     await deleteChatSession(deps)
 
@@ -167,8 +167,8 @@ describe('deleteChatSessions', () => {
       calls,
       deps: {
         targets: [
-          { sessionId: 'chat-1', agentSessionId: 'agent-1' },
-          { sessionId: 'chat-2', agentSessionId: 'agent-2' }
+          { chatSid: 'chat-1', agentSessionId: 'agent-1' },
+          { chatSid: 'chat-2', agentSessionId: 'agent-2' }
         ],
         deleteTranscript: calls.deleteTranscript,
         dropSessions: calls.dropSessions,
@@ -198,7 +198,7 @@ describe('deleteChatSessions', () => {
 
   it('内核记忆逐条删，没跑过 Agent 的会话不碰盘', async () => {
     const { deps, calls } = makeBatchDeps({
-      targets: [{ sessionId: 'chat-1', agentSessionId: 'agent-1' }, { sessionId: 'chat-2' }]
+      targets: [{ chatSid: 'chat-1', agentSessionId: 'agent-1' }, { chatSid: 'chat-2' }]
     })
 
     await deleteChatSessions(deps)
@@ -240,7 +240,7 @@ describe('deleteChatSessions', () => {
   })
 
   it('没有有效目标时什么都不做', async () => {
-    const { deps, calls } = makeBatchDeps({ targets: [{ sessionId: '' }] })
+    const { deps, calls } = makeBatchDeps({ targets: [{ chatSid: '' }] })
 
     const result = await deleteChatSessions(deps)
 

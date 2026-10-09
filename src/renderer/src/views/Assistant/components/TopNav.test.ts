@@ -9,8 +9,9 @@ const menuItem = {
   template: '<button class="menu-item" @click="$emit(\'click\')"><slot /></button>'
 }
 
-function mountTopNav(): ReturnType<typeof mount> {
+function mountTopNav(props: Record<string, unknown> = {}): ReturnType<typeof mount> {
   return mount(TopNav, {
+    props,
     global: {
       stubs: {
         SessionProjectChip: true,
@@ -42,5 +43,34 @@ describe('TopNav exports', () => {
     expect(sideQuestion).toBeDefined()
     await sideQuestion!.trigger('click')
     expect(wrapper.emitted('side-question')).toHaveLength(1)
+  })
+
+  it('把 chatSid 透传给 SessionProjectChip 和 EditorStatusMonitor', () => {
+    const chipStub = {
+      name: 'SessionProjectChip',
+      props: { chatSid: { type: String, default: '' } },
+      template: '<div />'
+    }
+    const monitorStub = {
+      name: 'EditorStatusMonitor',
+      props: { chatSid: { type: String, default: '' } },
+      template: '<div />'
+    }
+    const wrapper = mount(TopNav, {
+      props: { chatSid: 'chat-7' },
+      global: {
+        stubs: {
+          SessionProjectChip: chipStub,
+          EditorStatusMonitor: monitorStub,
+          AppDropdown: passthrough,
+          AppMenu: passthrough,
+          AppMenuItem: menuItem,
+          AppMenuDivider: true
+        }
+      }
+    })
+
+    expect(wrapper.findComponent(chipStub).props('chatSid')).toBe('chat-7')
+    expect(wrapper.findComponent(monitorStub).props('chatSid')).toBe('chat-7')
   })
 })

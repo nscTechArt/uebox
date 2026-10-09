@@ -1607,7 +1607,7 @@ function handleCanvasDrop(event: DragEvent): void {
 
       <!-- 右侧：AI 面板。里面嵌的就是主助手本身 -->
       <LibraryAIPanel
-        :session-id="`library-chat-blueprint-${bpId}`"
+        :chat-sid="`library-chat-blueprint-${bpId}`"
         :mode="aiPanelMode"
         :context="libraryChatContext"
         overlay-storage-prefix="blueprint-ai-panel"

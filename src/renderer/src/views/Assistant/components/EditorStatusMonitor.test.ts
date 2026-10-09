@@ -47,12 +47,12 @@ function okResult(overrides = {}): EditorHealthResult {
   return { status: 'ok', raw, report: evaluateEditorHealth(raw) }
 }
 
-async function mountMonitor(sessionId = 'sid'): Promise<ReturnType<typeof mount>> {
+async function mountMonitor(chatSid = 'sid'): Promise<ReturnType<typeof mount>> {
   const chat = useChatSessionsStore()
-  chat.ensureSession(sessionId, '二段跳')
-  chat.setProject(sessionId, { projectName: 'Bound' })
+  chat.ensureSession(chatSid, '二段跳')
+  chat.setProject(chatSid, { projectName: 'Bound' })
   const wrapper = mount(EditorStatusMonitor, {
-    props: { sessionId },
+    props: { chatSid },
     global: { stubs: { AppDropdown: dropdownStub, AppTooltip: tooltipStub } }
   })
   await flushPromises()

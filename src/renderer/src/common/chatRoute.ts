@@ -9,16 +9,16 @@ import type { RouteLocationRaw } from 'vue-router'
  * id」会撞成同一个 `''`，于是空 id 能匹配上任意一个标签页 —— 调用方以为自己
  * 拿到了那条会话的标签页，其实拿到的是列表里的第一个。
  */
-export function isSessionTab(path: string, sessionId: string): boolean {
-  if (!sessionId) return false
+export function isSessionTab(path: string, chatSid: string): boolean {
+  if (!chatSid) return false
   if (!path.startsWith('/dev-assistant')) return false
 
   const query = path.split('?')[1] || ''
-  return new URLSearchParams(query).get('sid') === sessionId
+  return new URLSearchParams(query).get('sid') === chatSid
 }
 
-/** 这个标签页开的是哪条会话；不是会话标签页（或者没带 sid）就是空串 */
-export function sessionIdOfTab(path: string): string {
+/** 这个标签页开的是哪条对话；不是对话标签页（或者没带 sid）就是空串 */
+export function chatSidOfTab(path: string): string {
   if (!path.startsWith('/dev-assistant')) return ''
   const query = path.split('?')[1] || ''
   return new URLSearchParams(query).get('sid')?.trim() || ''

@@ -21,7 +21,7 @@ vi.mock('@renderer/views/library-common/components/LibraryAIPanel.vue', () => ({
     name: 'LibraryAIPanelStub',
     props: {
       mode: { type: String, default: 'docked' },
-      sessionId: { type: String, default: '' },
+      chatSid: { type: String, default: '' },
       context: { type: Object, default: null }
     },
     emits: ['update:mode', 'restore', 'snapshot-selection'],
@@ -234,7 +234,7 @@ describe('MaterialEditor', () => {
     const aiPanel = wrapper.findComponent(LibraryAIPanel)
 
     // 上下文里带的是这个条目，而且会话 id 跟着条目走
-    expect(aiPanel.props('sessionId')).toBe('library-chat-material-material-master')
+    expect(aiPanel.props('chatSid')).toBe('library-chat-material-material-master')
     expect(aiPanel.props('context')).toMatchObject({
       library: 'material',
       entryId: 'material-master',

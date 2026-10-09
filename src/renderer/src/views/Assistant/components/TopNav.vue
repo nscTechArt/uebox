@@ -12,10 +12,10 @@
         用户以为绑了、模型那边毫无变化。
       -->
       <!-- 状态监控放在工程胶囊左边；欢迎页把胶囊挪走了，它照样留在顶栏 -->
-      <EditorStatusMonitor :session-id="sessionId" :pending-project-name="pendingProjectName" />
+      <EditorStatusMonitor :chat-sid="chatSid" :pending-project-name="pendingProjectName" />
       <SessionProjectChip
         v-if="!hideProjectChip"
-        :session-id="sessionId"
+        :chat-sid="chatSid"
         :pending-project-name="pendingProjectName"
       />
       <AppDropdown :trigger="['click']">
@@ -64,7 +64,7 @@ import EditorStatusMonitor from './EditorStatusMonitor.vue'
 defineProps<{
   notebookMode?: boolean
   /** 当前会话 ID，用于在右上角显示这条会话属于哪个 UE 工程 */
-  sessionId?: string
+  chatSid?: string
   /** 会话还没建出来时的待定工程归属（侧边栏在工程标题上点「+」新建的会话） */
   pendingProjectName?: string
   /** 欢迎页把工程胶囊挪到问候语下面，顶栏就不再重复放一个 */

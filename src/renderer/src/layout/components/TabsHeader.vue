@@ -22,7 +22,7 @@ import {
 import type { Component } from 'vue'
 import { computed, watch, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { generateChatSessionId, sessionIdOfTab } from '@renderer/common/chatRoute'
+import { generateChatSessionId, chatSidOfTab } from '@renderer/common/chatRoute'
 import { chatWindowAPI } from '@renderer/api/chatWindow'
 import { useTabsStore, DEFAULT_TAB_KEY } from '@renderer/store/modules/tabs'
 import { useI18n } from '@renderer/hooks/useI18n'
@@ -284,7 +284,7 @@ const handleDragEnd = (event: DragEvent): void => {
   resetDragState()
   if (!tabKey || droppedOnTab) return
   // 会话标签拖离标签栏松手：拎出来成独立窗口，像浏览器那样
-  if (sessionIdOfTab(tabKey) && isDraggedOffTabBar(event)) {
+  if (chatSidOfTab(tabKey) && isDraggedOffTabBar(event)) {
     void detachTab(tabKey, { screenX: event.screenX, screenY: event.screenY })
   }
 }
@@ -321,7 +321,7 @@ async function detachTab(
   tabKey: string,
   point?: { screenX: number; screenY: number }
 ): Promise<void> {
-  const sid = sessionIdOfTab(tabKey)
+  const sid = chatSidOfTab(tabKey)
   if (!sid) return
   try {
     if (!(await chatWindowAPI.open(sid, point))) return
@@ -429,7 +429,7 @@ const getContextMenuItems = (tabKey: string): MenuItem[] => {
 
   return [
     // 会话标签多一项：拖出去成独立窗口的另一个入口（不方便拖、或者不知道能拖的时候）
-    ...(sessionIdOfTab(tab.key)
+    ...(chatSidOfTab(tab.key)
       ? [
           {
             key: 'open-in-window',

@@ -17,6 +17,7 @@ vi.mock('./components/NoteSourcePanel.vue', () => ({
 vi.mock('@renderer/views/Assistant/Welcome.vue', () => ({
   default: defineComponent({
     name: 'AssistantWelcomeStub',
+    props: { chatSid: { type: String, default: '' } },
     template: '<div class="assistant-welcome-stub" />'
   })
 }))
@@ -137,5 +138,31 @@ describe('NotebookDetail', () => {
 
     // 只剩「AI 对话」与「设置」两个本地能力入口，分享那个不渲染
     expect(wrapper.findAll('.header-right .header-action-btn')).toHaveLength(2)
+  })
+
+  it('内嵌助手收到的对话 id 是 chatSid（prop 改名类型检查看不见，这里兜住）', async () => {
+    const router = createTestRouter()
+    await router.push('/notebooks/notebook-1')
+    await router.isReady()
+
+    // keep-alive 在 shallowMount 里是空桩，不渲默认槽；renderStubDefaultSlot 让它渲出来，
+    // 桩再把 prop 写进 DOM 属性断言（findComponent 穿不进 keep-alive）
+    const assistantWelcomeStub = defineComponent({
+      name: 'AssistantWelcomeStub',
+      props: { chatSid: { type: String, default: '' } },
+      template: '<div class="assistant-welcome-stub" :data-chat-sid="chatSid" />'
+    })
+    const wrapper = shallowMount(NotebookDetail, {
+      global: {
+        plugins: [pinia, router, i18n],
+        renderStubDefaultSlot: true,
+        stubs: { teleport: true, 'a-button': true, AssistantWelcome: assistantWelcomeStub }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.assistant-welcome-stub').attributes('data-chat-sid')).toBe(
+      'notebook-chat-notebook-1'
+    )
   })
 })
