@@ -516,7 +516,7 @@
       <PhCopy v-else-if="status === 'done'" class="tool" @click="emitCopy" />
       <PhArrowClockwise v-if="status === 'done'" class="tool" @click="emitRetry" />
       <AppTooltip v-if="status === 'done'" :title="t('assistant.branch.tooltip')">
-        <PhGitBranch class="tool" @click="emitFork" />
+        <PhGitBranch class="tool" @click="emitBranch" />
       </AppTooltip>
       <AppTooltip v-if="status === 'done'" :title="readAloud.label.value">
         <AppButton
@@ -918,7 +918,7 @@ const emit = defineEmits<{
   (e: 'stop', payload: { id: string }): void
   (e: 'suggest', payload: { id: string; text: string }): void
   (e: 'copy', payload: { id: string; content: string }): void
-  (e: 'fork', payload: { id: string }): void
+  (e: 'branch', payload: { id: string }): void
   (e: 'followups-ready', payload: { id: string }): void
   (e: 'resize'): void
   (e: 'open-location', folderKey: string, assetKey?: string): void
@@ -1250,11 +1250,11 @@ function emitCopy(): void {
 }
 
 /**
- * 触发会话分支事件。分的是整个会话（内核 transcript），不是这条消息，
- * payload 里的 id 只是将来做「从某一轮分叉」时留下的锚点。
+ * 触发分支事件。payload 里的 id 就是分支点：从这条回复分出一条新对话，
+ * 它之后的消息不带过去（截在哪见 `chatBranch.ts` 的 `resolveBranchPoint`）。
  */
-function emitFork(): void {
-  emit('fork', { id: props.id })
+function emitBranch(): void {
+  emit('branch', { id: props.id })
 }
 
 /**

@@ -28,8 +28,8 @@
               侧边问一句：把当前上下文复制给小窗口，在那边只读地问。
               **跑着的时候也能开** —— 那正是最想问「它现在在干嘛」的时刻
             -->
-            <AppMenuItem @click="emitSideChat">
-              {{ t('assistant.sideChat.open') }}
+            <AppMenuItem @click="emitSideQuestion">
+              {{ t('assistant.sideQuestion.open') }}
             </AppMenuItem>
             <AppMenuItem @click="emitClear"> {{ t('assistant.topNav.clearChat') }} </AppMenuItem>
             <AppMenuItem @click="emitExportImage">
@@ -72,7 +72,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'side-chat'): void
+  (e: 'side-question'): void
   (e: 'clear'): void
   (e: 'export-image'): void
   (e: 'export-json'): void
@@ -81,12 +81,9 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-/**
- * 处理右侧更多菜单点击事件。
- * 暂不实现具体功能，仅作为交互占位。
- */
-function emitSideChat(): void {
-  emit('side-chat')
+/** 更多菜单点了「侧边问一句」：只把事件发出去，复制上下文和开小窗由 Welcome 处理 */
+function emitSideQuestion(): void {
+  emit('side-question')
 }
 
 function emitClear(): void {

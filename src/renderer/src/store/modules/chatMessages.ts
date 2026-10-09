@@ -811,18 +811,18 @@ export const useChatMessagesStore = defineStore(
     }
 
     /**
-     * 把一个会话的消息复制到另一个会话（会话分支用）。
+     * 把一个对话的消息复制到另一个对话（分支用）。
      *
-     * `upToIndex` 是分叉点的下标，连它一起复制、后面的丢掉；不给就整份复制。
+     * `upToIndex` 是分支点的下标，连它一起复制、后面的丢掉；不给就整份复制。
      * 先按下标切再滤 typing，不能反过来 —— 下标是调用方在**没滤过**的这份
      * 列表上数出来的，先滤会让它错位。
      *
      * 深拷贝是必须的：两边之后各聊各的，共享引用会让分支里的编辑
-     * 写穿回源会话。JSON 往返而不是 structuredClone —— store 里的消息是
+     * 写穿回源对话。JSON 往返而不是 structuredClone —— store 里的消息是
      * Vue 响应式代理，structuredClone 直接 DataCloneError；而且这些数据
      * 本来就是 JSON 持久化的，往返一遍丢不了的才是真会丢的。
-     * typing 状态的丢弃 —— 分支建立时会话必然不在跑，
-     * 万一混进来一条，它在新会话里也永远不会有人收尾。
+     * typing 状态的丢弃 —— 分支建立时对话必然不在跑，
+     * 万一混进来一条，它在新对话里也永远不会有人收尾。
      */
     function copySessionMessages(
       fromSid: string,

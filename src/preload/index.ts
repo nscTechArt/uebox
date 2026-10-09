@@ -22,7 +22,7 @@ import {
 } from '../shared/trayActions'
 import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { AgentReviewTarget } from '../shared/agentReview'
-import type { SideChatContext } from '../shared/sideChat'
+import type { SideQuestionContext } from '../shared/sideQuestion'
 import type { ChatSyncPatch } from '../shared/chatWindowSync'
 import type { EditorSnapshot, MiniChatInitialMessage } from '../shared/editorSnapshot'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
@@ -264,7 +264,7 @@ const api = {
       ipcRenderer.send('mini-chat:session-saved', session),
     requestInitialMessage: () => ipcRenderer.send('mini-chat:request-initial-message'),
     /** 带着主对话的上下文打开侧边窗口（主窗口调） */
-    openWithContext: (context: SideChatContext) =>
+    openWithContext: (context: SideQuestionContext) =>
       ipcRenderer.send('mini-chat:open-with-context', context),
     /** 小窗口挂载完主动索取一次，免得投递早于挂载 */
     requestInitialContext: () => ipcRenderer.send('mini-chat:request-initial-context'),
@@ -281,8 +281,9 @@ const api = {
       ipcRenderer.on('mini-chat:initial-message', handler)
       return () => ipcRenderer.removeListener('mini-chat:initial-message', handler)
     },
-    onInitialContext: (callback: (context: SideChatContext) => void) => {
-      const handler = (_: Electron.IpcRendererEvent, context: SideChatContext) => callback(context)
+    onInitialContext: (callback: (context: SideQuestionContext) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, context: SideQuestionContext) =>
+        callback(context)
       ipcRenderer.on('mini-chat:initial-context', handler)
       return () => ipcRenderer.removeListener('mini-chat:initial-context', handler)
     },
@@ -1629,8 +1630,8 @@ const api = {
     reviewChanges: (args: { targets: AgentReviewTarget[] }) =>
       ipcRenderer.invoke('agent-v3:review-changes', args),
     /** 侧边问一句：把上下文复制一份给小窗口，主对话跑着也能分 */
-    forkForSideChat: (args: { sessionId: string }) =>
-      ipcRenderer.invoke('agent-v3:fork-for-side-chat', args),
+    forkForSideQuestion: (args: { sessionId: string }) =>
+      ipcRenderer.invoke('agent-v3:fork-for-side-question', args),
     /** 资产快照原型：只给真机验证脚本用，界面不要接 */
     snapshot: {
       capture: (args: {

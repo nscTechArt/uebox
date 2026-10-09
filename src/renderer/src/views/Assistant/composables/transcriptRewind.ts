@@ -16,7 +16,7 @@
  * 「这是第几个用户回合」，所以两边都按它切 —— 内核那半在
  * `main/agent-v3/core/transcriptStore.ts` 的 `sliceToUserTurns`。
  *
- * 同一套对齐也撑着会话分支（`sessionFork.ts`）：retry 每污染一次 transcript，
+ * 同一套对齐也撑着分支（`chatBranch.ts`）：retry 每污染一次 transcript，
  * 这个数就错一位，分支就会截错地方。
  */
 

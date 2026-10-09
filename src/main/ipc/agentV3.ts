@@ -3148,7 +3148,7 @@ export function registerAgentV3IPC(): void {
    * 复制出去之后两边再无关系。主对话继续跑它的，侧边那份是死的快照 ——
    * 用户在侧边聊什么都不会回流到主对话里。
    */
-  ipcMain.handle('agent-v3:fork-for-side-chat', async (_event, args: { sessionId: string }) => {
+  ipcMain.handle('agent-v3:fork-for-side-question', async (_event, args: { sessionId: string }) => {
     const { sessionId } = args
     const running = activeAgents.get(sessionId)
 

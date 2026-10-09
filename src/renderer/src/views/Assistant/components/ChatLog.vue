@@ -34,7 +34,7 @@
             @stop="handleStop"
             @suggest="handleSuggest"
             @copy="handleCopy"
-            @fork="handleFork"
+            @branch="handleBranch"
             @followups-ready="handleFollowupsReady"
             @open-location="handleOpenLocation"
             @resize="handleItemResize"
@@ -135,7 +135,7 @@ const emit = defineEmits<{
   (e: 'stop', payload: { id: string }): void
   (e: 'suggest', payload: { id: string; text: string }): void
   (e: 'copy', payload: { id: string; content: string }): void
-  (e: 'fork', payload: { id: string }): void
+  (e: 'branch', payload: { id: string }): void
   (e: 'followups-ready', payload: { id: string }): void
   (e: 'open-location', folderKey: string, assetKey?: string): void
   (e: 'content-resize'): void
@@ -242,10 +242,10 @@ function handleCopy(payload: { id: string; content: string }): void {
 }
 
 /**
- * 上抛会话分支事件。
+ * 上抛分支事件。
  */
-function handleFork(payload: { id: string }): void {
-  emit('fork', payload)
+function handleBranch(payload: { id: string }): void {
+  emit('branch', payload)
 }
 
 /**

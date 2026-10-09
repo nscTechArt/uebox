@@ -139,7 +139,7 @@ import type {
   MultimodalContentItem
 } from '@renderer/store/modules/chatMessages'
 import type { AgentProcessItem } from '@renderer/views/Assistant/components/AgentProcessLog.types'
-import type { SideChatContext } from '@core/shared/sideChat'
+import type { SideQuestionContext } from '@core/shared/sideQuestion'
 import type { EditorSnapshot, MiniChatInitialMessage } from '@core/shared/editorSnapshot'
 
 /**
@@ -559,7 +559,7 @@ async function handleInitialMessage(initialMsg: MiniChatInitialMessage): Promise
  * 锁成只读（`askModeRef`）：主对话可能正跑着，让第二个 agent 同时去改同一个
  * 工程等于两个人抢一支笔。这个窗口能看能查能解释，动不了工程。
  */
-function handleInitialContext(context: SideChatContext): void {
+function handleInitialContext(context: SideQuestionContext): void {
   if (!context?.agentSessionId) return
 
   console.log('[MiniChat] 收到侧边上下文:', context.agentSessionId, context.messageCount)
@@ -571,7 +571,7 @@ function handleInitialContext(context: SideChatContext): void {
 }
 
 /** 当前这条会话借来的上下文。没借就是 null，横幅不显示 */
-const sideContext = ref<SideChatContext | null>(null)
+const sideContext = ref<SideQuestionContext | null>(null)
 
 const sideContextLabel = computed(() => {
   const context = sideContext.value

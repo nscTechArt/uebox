@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
 
-import { openSideChat, type SideChatDeps } from './sideChat'
+import { openSideQuestion, type SideQuestionDeps } from './sideQuestion'
 
-function setupDeps(overrides: Partial<SideChatDeps> = {}): SideChatDeps {
+function setupDeps(overrides: Partial<SideQuestionDeps> = {}): SideQuestionDeps {
   return {
     chatStore: useChatSessionsStore(),
     fork: vi
@@ -21,7 +21,7 @@ function seedAgentChat(): void {
   chatStore.setAgentSessionId('chat-a', 'agent-a')
 }
 
-describe('openSideChat', () => {
+describe('openSideQuestion', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
@@ -31,7 +31,7 @@ describe('openSideChat', () => {
     seedAgentChat()
     const deps = setupDeps()
 
-    const outcome = await openSideChat('chat-a', deps)
+    const outcome = await openSideQuestion('chat-a', deps)
 
     expect(deps.fork).toHaveBeenCalledWith('agent-a')
     expect(outcome).toEqual({
@@ -46,12 +46,12 @@ describe('openSideChat', () => {
     expect(deps.open).toHaveBeenCalledWith(outcome.ok ? outcome.context : undefined)
   })
 
-  it('没有内核会话时不开窗口 —— 空窗口会让人以为它知道些什么', async () => {
+  it('没有内核 session 时不开窗口 —— 空窗口会让人以为它知道些什么', async () => {
     const chatStore = useChatSessionsStore()
     chatStore.createSession('chat-plain', '知识库聊天')
     const deps = setupDeps()
 
-    const outcome = await openSideChat('chat-plain', deps)
+    const outcome = await openSideQuestion('chat-plain', deps)
 
     expect(outcome).toEqual({ ok: false, reason: 'no-agent-session' })
     expect(deps.fork).not.toHaveBeenCalled()
@@ -62,7 +62,7 @@ describe('openSideChat', () => {
     seedAgentChat()
     const deps = setupDeps({ fork: vi.fn().mockResolvedValue({ success: false, reason: 'empty' }) })
 
-    expect(await openSideChat('chat-a', deps)).toEqual({ ok: false, reason: 'empty' })
+    expect(await openSideQuestion('chat-a', deps)).toEqual({ ok: false, reason: 'empty' })
     expect(deps.open).not.toHaveBeenCalled()
   })
 
@@ -70,7 +70,7 @@ describe('openSideChat', () => {
     seedAgentChat()
     const deps = setupDeps({ fork: vi.fn().mockRejectedValue(new Error('磁盘满了')) })
 
-    expect(await openSideChat('chat-a', deps)).toEqual({
+    expect(await openSideQuestion('chat-a', deps)).toEqual({
       ok: false,
       reason: 'error',
       error: '磁盘满了'
@@ -84,7 +84,7 @@ describe('openSideChat', () => {
       fork: vi.fn().mockResolvedValue({ success: true, sessionId: 'agent-side', messageCount: 3 })
     })
 
-    const outcome = await openSideChat('chat-a', deps)
+    const outcome = await openSideQuestion('chat-a', deps)
 
     expect(outcome.ok && outcome.context.live).toBe(false)
   })

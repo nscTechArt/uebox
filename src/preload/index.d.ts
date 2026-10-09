@@ -25,7 +25,7 @@ import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { EditorHealthResult } from '../shared/editorHealth'
 import type { ModelCheckup, TeamStateView } from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
-import type { SideChatContext } from '../shared/sideChat'
+import type { SideQuestionContext } from '../shared/sideQuestion'
 import type { ChatSyncPatch } from '../shared/chatWindowSync'
 import type {
   EditorSnapshot,
@@ -1444,11 +1444,11 @@ declare global {
       sessionSaved: (session: { id: string; title: string; messages?: unknown[] }) => void
       requestInitialMessage: () => void
       /** 带着主对话的上下文打开侧边窗口（主窗口调） */
-      openWithContext: (context: SideChatContext) => void
+      openWithContext: (context: SideQuestionContext) => void
       requestInitialContext: () => void
       /** 这些 on* 一律返回取消订阅的函数，组件卸载时调它 */
       onInitialMessage: (callback: (message: MiniChatInitialMessage) => void) => () => void
-      onInitialContext: (callback: (context: SideChatContext) => void) => () => void
+      onInitialContext: (callback: (context: SideQuestionContext) => void) => () => void
       onPinChanged: (callback: (pinned: boolean) => void) => () => void
       onResetSession: (callback: () => void) => () => void
     }
@@ -3484,7 +3484,7 @@ declare global {
        *
        * 和 `forkSession` 的区别是**跑着的时候也能分** —— 那正是这个功能的用处。
        */
-      forkForSideChat: (args: { sessionId: string }) => Promise<{
+      forkForSideQuestion: (args: { sessionId: string }) => Promise<{
         success: boolean
         sessionId?: string
         messageCount?: number

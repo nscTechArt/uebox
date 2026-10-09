@@ -82,7 +82,7 @@ describe('AIBubble 消息动作', () => {
     expect(read).toHaveBeenLastCalledWith('第二段正文。')
     wrapper.unmount()
   })
-  it('回复工具栏在复制、重试和分叉会话之后提供朗读', async () => {
+  it('回复工具栏在复制、重试和分支之后提供朗读', async () => {
     const wrapper = mountBubble('open-preview')
     const tools = wrapper.findAll('.tools .tool')
 
@@ -101,7 +101,7 @@ describe('AIBubble 消息动作', () => {
       id: 'msg-error',
       content: '错误: Connection error.'
     })
-    expect(wrapper.emitted('fork')?.[0]?.[0]).toEqual({ id: 'msg-error' })
+    expect(wrapper.emitted('branch')?.[0]?.[0]).toEqual({ id: 'msg-error' })
     expect(wrapper.emitted('edit')).toBeUndefined()
   })
 

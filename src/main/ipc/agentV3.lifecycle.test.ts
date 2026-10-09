@@ -218,7 +218,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
    * 「盘上落后于内存」（turn_end 才落盘），而那件事只影响还没说完的这一轮 ——
    * 跑着的时候读内存那份就绕开了，见 `liveForkSource`。
    */
-  describe('输出中的会话分支', () => {
+  describe('输出中的分支', () => {
     const turns = (count: number): AgentMessage[] =>
       Array.from({ length: count }, (_, i) => [
         { role: 'user', content: `问${i + 1}`, timestamp: 0 },

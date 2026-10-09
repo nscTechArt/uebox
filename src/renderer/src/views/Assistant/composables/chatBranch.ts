@@ -1,11 +1,11 @@
 /**
- * 会话分支：从**被点的那条回复**分叉出一条新会话，之后两边各聊各的。
+ * 分支：从**被点的那条回复**分出一条新对话，之后两边各聊各的。
  *
  * ## 为什么要分支
  *
  * 一段对话聊到第五轮，想退回第三轮换个方向试（「这个蓝图用接口做」vs
- * 「用组件做」），不做分支只能新建会话重讲一遍背景。分支复制到分叉点为止：
- * 新会话带着那之前的全部来龙去脉，之后的问答不跟过来，旧会话原地不动。
+ * 「用组件做」），不做分支只能新建对话重讲一遍背景。分支复制到分支点为止：
+ * 新对话带着那之前的全部来龙去脉，之后的问答不跟过来，旧对话原地不动。
  *
  * ## 两份历史要一起截、截在同一个位置
  *
@@ -15,12 +15,12 @@
  * 分支等于没分。反过来只截内核那份则是用户看得见、模型不认账。
  *
  * 两边的下标对不上（界面一轮一个气泡，内核一轮是 1 条 user 加 n 条
- * assistant/toolResult），所以对齐用的是**第几个用户回合**，见
+ * assistant/toolResult），所以对齐用的是**第几轮**，见
  * `main/agent-v3/core/transcriptStore.ts` 的 `sliceToUserTurns`。
  *
- * ## 会话跑着的时候
+ * ## 对话跑着的时候
  *
- * 从**更早的一轮**分支照常可用，源会话继续输出（内核那边读内存里那份历史，
+ * 从**更早的一轮**分支照常可用，源对话继续输出（内核那边读内存里那份历史，
  * 见 `ipc/agentV3.ts` 的 `liveForkSource`）—— 「聊到第六轮发现第三轮就走错了」
  * 正是分支最该用的时刻，让用户先等这轮完等于功能在这一刻是关的。
  * 只有整份复制（点最后一条）和切点落在这一轮里才回 `busy`：那时截出来的历史
@@ -30,7 +30,7 @@
 import type { useChatMessagesStore } from '@renderer/store/modules/chatMessages'
 import type { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
 
-/** 内核 transcript 分支的结果，与 `agentV3API.forkSession` 的返回一致 */
+/** 内核复制 session（fork）的结果，与 `agentV3API.forkSession` 的返回一致 */
 export interface ForkTranscriptResult {
   success: boolean
   sessionId?: string
@@ -39,7 +39,7 @@ export interface ForkTranscriptResult {
   error?: string
 }
 
-export type SessionForkOutcome =
+export type ChatBranchOutcome =
   | {
       ok: true
       chatSid: string
@@ -49,7 +49,7 @@ export type SessionForkOutcome =
     }
   | { ok: false; reason: 'no-agent-session' | 'busy' | 'missing' | 'error'; error?: string }
 
-export interface SessionForkDeps {
+export interface ChatBranchDeps {
   chatStore: ReturnType<typeof useChatSessionsStore>
   chatMsgStore: ReturnType<typeof useChatMessagesStore>
   /**
@@ -57,16 +57,16 @@ export interface SessionForkDeps {
    * `keepUserTurns` 不给表示整份复制。
    */
   forkTranscript: (agentSessionId: string, keepUserTurns?: number) => Promise<ForkTranscriptResult>
-  /** 新会话的 chatSid（crypto.randomUUID()） */
+  /** 新对话的 chatSid（crypto.randomUUID()） */
   newChatSid: () => string
-  /** 分支会话的标题 */
+  /** 分支出的对话的标题 */
   branchTitle: (sourceTitle: string) => string
   /** 分支建好后切换过去 */
   navigate: (chatSid: string) => void
 }
 
-/** 分叉点：界面消息切到哪一条，内核 transcript 留几个用户回合 */
-interface ForkPoint {
+/** 分支点：界面消息切到哪一条，内核 transcript 留几轮 */
+interface BranchPoint {
   upToIndex?: number
   keepUserTurns?: number
   /** 传了 messageId 但找不到那条消息 */
@@ -80,7 +80,10 @@ interface ForkPoint {
  * 分支这个动作本身没错，只是不知道该截在哪，全带过去总比什么都不给强。
  * 点的是最后一条时同样不截 —— 那时截和不截是同一个结果，少走一趟切片。
  */
-function resolveForkPoint(messages: { id: string; role: string }[], messageId?: string): ForkPoint {
+function resolveBranchPoint(
+  messages: { id: string; role: string }[],
+  messageId?: string
+): BranchPoint {
   if (!messageId) return {}
 
   const index = messages.findIndex((m) => m.id === messageId)
@@ -94,7 +97,7 @@ function resolveForkPoint(messages: { id: string; role: string }[], messageId?: 
 }
 
 /**
- * 把 `agentHistory` 截到第 `keepUserTurns` 个用户回合结束。
+ * 把 `agentHistory` 截到第 `keepUserTurns` 轮结束。
  *
  * 和内核那边的 `sliceToUserTurns` 同一个规则、不同的数据 —— 这份是渲染层
  * 自己留的对话镜像（只有 user/assistant 两种角色），没有工具消息要配对。
@@ -115,25 +118,25 @@ function sliceHistoryToUserTurns<T extends { role: string }>(
 /**
  * 从 `messageId` 这条回复创建分支。
  *
- * `messageId` 不传就是整份复制（老行为，给没有分叉点概念的调用方留的）。
+ * `messageId` 不传就是整份复制（老行为，给没有分支点概念的调用方留的）。
  *
- * 失败时**不碰会话列表**：内核分支成功之后才建界面会话，而界面这边的
+ * 失败时**不碰对话列表**：内核复制 session 成功之后才建界面对话，而界面这边的
  * 复制全在内存里，没有半途失败的可能。
  */
-export async function forkSession(
+export async function branchChat(
   chatSid: string,
-  deps: SessionForkDeps,
+  deps: ChatBranchDeps,
   messageId?: string
-): Promise<SessionForkOutcome> {
+): Promise<ChatBranchOutcome> {
   const source = deps.chatStore.sessionById(chatSid)
   const agentSessionId = source?.agentSessionId
-  // 普通（非 Agent）会话没有 transcript 可复制 —— 知识库聊天等 chat-only
+  // 普通（非 Agent）对话没有 transcript 可复制 —— 知识库对话等 chat-only
   // 界面走的正是这条路，它们天然分不出分支
   if (!source || !agentSessionId) {
     return { ok: false, reason: 'no-agent-session' }
   }
 
-  const { upToIndex, keepUserTurns, notFound } = resolveForkPoint(
+  const { upToIndex, keepUserTurns, notFound } = resolveBranchPoint(
     deps.chatMsgStore.getMessages(chatSid),
     messageId
   )
@@ -161,9 +164,9 @@ export async function forkSession(
   // 「在哪个工程里聊」「用哪种模式」不该重置
   deps.chatStore.setProject(newChatSid, source.project ?? null)
   deps.chatStore.setAgentMode(newChatSid, source.agentMode ?? true)
-  // 模型同理：分支接着源会话的活，主进程那边的执行记录也是整份抄过去的
+  // 模型同理：分支接着源对话的活，主进程那边的执行记录也是整份抄过去的
   if (source.model) deps.chatStore.setModel(newChatSid, source.model)
-  // 截过的分支上下文比源会话短，把源那个数字抄过来会虚高 —— 下一轮内核会报
+  // 截过的分支上下文比源对话短，把源那个数字抄过来会虚高 —— 下一轮内核会报
   // 真实用量盖掉它，但在那之前用户看到的是个假的百分比。不如先不显示。
   if (source.contextUsage && keepUserTurns === undefined) {
     deps.chatStore.setContextUsage(newChatSid, source.contextUsage)

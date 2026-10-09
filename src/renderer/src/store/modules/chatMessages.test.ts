@@ -206,8 +206,8 @@ describe('chatMessages 的实时过程快照', () => {
 })
 
 /**
- * 会话分支（forkSession）把界面消息整份复制到新会话。
- * 这里的边界：typing 不带走（分支建立时会话必然不在跑）、复制是深拷贝
+ * 分支（branchChat）把界面消息整份复制到新对话。
+ * 这里的边界：typing 不带走（分支建立时对话必然不在跑）、复制是深拷贝
  * （之后两边各改各的）、空源和同 sid 不产生怪结果。
  */
 describe('copySessionMessages', () => {
@@ -230,7 +230,7 @@ describe('copySessionMessages', () => {
     expect(store.getMessages('b').map((m) => m.content)).toEqual(['第一句', '回复', '追问'])
   })
 
-  it('深拷贝：改分支不写穿回源会话', () => {
+  it('深拷贝：改分支不写穿回源对话', () => {
     const store = useChatMessagesStore()
     store.pushUser('a', '原话')
     store.copySessionMessages('a', 'b')

@@ -2563,24 +2563,24 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     branch: {
       tooltip: 'Branch from here',
       titleSuffix: ' (branch)',
-      success: 'Branched from this reply — everything after it was left behind',
-      noAgentSession: 'Only Agent sessions can be branched',
+      success: "Branched into a new chat from this reply. Later messages weren't copied.",
       successWhole: "Branch created. That reply couldn't be found, so the whole chat came along.",
+      noAgentSession: "Branching isn't available for this kind of chat",
       busy: 'This turn has not settled yet — branch from an earlier message, or try again shortly',
-      missing: 'This session has no conversation history to copy yet',
-      failed: 'Failed to create the session branch'
+      missing: 'This chat has no history to copy yet',
+      failed: 'Failed to branch'
     },
     /**
-     * Side chat.
+     * Side question.
      *
      * The wording has to separate it from branching: a branch is for carrying on
-     * with the *work* in another direction and leaves a new session behind; a side
-     * chat is for understanding what is *going on* and leaves nothing behind.
+     * with the *work* in another direction and leaves a new chat behind; a side
+     * question is for understanding what is *going on* and leaves nothing behind.
      */
-    sideChat: {
+    sideQuestion: {
       open: 'Ask on the side (with context)',
-      noContext: 'This session has no context to hand over yet',
-      failed: 'Could not open the side chat'
+      noContext: 'This chat has no context to hand over yet',
+      failed: 'Could not open the side question'
     },
     search: {
       notImplemented: 'Web search function not implemented yet'
@@ -8140,7 +8140,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       live: 'Carrying {count} message(s) of context (snapshot — the main chat is still running)',
       snapshot: 'Carrying {count} message(s) of context',
       readOnly: 'Read-only',
-      empty: 'Ask away — it can see every step the main conversation took'
+      empty: 'Ask away — it can see every step the main chat took'
     },
     emptyState: {
       agent: 'Type a message to start a chat'

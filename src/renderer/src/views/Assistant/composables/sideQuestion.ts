@@ -1,4 +1,4 @@
-import type { SideChatContext } from '@core/shared/sideChat'
+import type { SideQuestionContext } from '@core/shared/sideQuestion'
 
 import type { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
 
@@ -20,8 +20,8 @@ import type { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
  * `resolveTools`），它能看能查能解释，但动不了工程。
  */
 
-/** `agentV3API.forkForSideChat` 的返回 */
-export interface SideChatForkResult {
+/** `agentV3API.forkForSideQuestion` 的返回 */
+export interface SideQuestionForkResult {
   success: boolean
   sessionId?: string
   messageCount?: number
@@ -30,29 +30,32 @@ export interface SideChatForkResult {
   error?: string
 }
 
-export type SideChatOutcome =
-  | { ok: true; context: SideChatContext }
+export type SideQuestionOutcome =
+  | { ok: true; context: SideQuestionContext }
   | { ok: false; reason: 'no-agent-session' | 'empty' | 'error'; error?: string }
 
-export interface SideChatDeps {
+export interface SideQuestionDeps {
   chatStore: ReturnType<typeof useChatSessionsStore>
   /** 复制内核 transcript，返回新的 agentSessionId */
-  fork: (agentSessionId: string) => Promise<SideChatForkResult>
+  fork: (agentSessionId: string) => Promise<SideQuestionForkResult>
   /** 把上下文交给小窗口并打开它 */
-  open: (context: SideChatContext) => void
+  open: (context: SideQuestionContext) => void
 }
 
-export async function openSideChat(chatSid: string, deps: SideChatDeps): Promise<SideChatOutcome> {
+export async function openSideQuestion(
+  chatSid: string,
+  deps: SideQuestionDeps
+): Promise<SideQuestionOutcome> {
   const source = deps.chatStore.sessionById(chatSid)
   const agentSessionId = source?.agentSessionId
 
-  // 没有内核会话就没有上下文可借。这时候开侧边窗口，模型手上和新开一个
+  // 没有内核 session 就没有上下文可借。这时候开侧边窗口，模型手上和新开一个
   // 对话没有区别 —— 不如直说，别让用户对着一个空窗口以为它知道些什么
   if (!source || !agentSessionId) {
     return { ok: false, reason: 'no-agent-session' }
   }
 
-  let forked: SideChatForkResult
+  let forked: SideQuestionForkResult
   try {
     forked = await deps.fork(agentSessionId)
   } catch (error) {
@@ -67,7 +70,7 @@ export async function openSideChat(chatSid: string, deps: SideChatDeps): Promise
     }
   }
 
-  const context: SideChatContext = {
+  const context: SideQuestionContext = {
     agentSessionId: forked.sessionId,
     messageCount: forked.messageCount ?? 0,
     sourceTitle: source.title,

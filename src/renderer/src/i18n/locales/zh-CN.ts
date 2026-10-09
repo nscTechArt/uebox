@@ -2498,12 +2498,12 @@ export default {
     branch: {
       tooltip: '从这条创建分支',
       titleSuffix: '（分支）',
-      success: '分支已创建，后续对话不会复制',
+      success: '已从这条回复分出一条新对话，之后的消息没有带过去',
       successWhole: '分支已创建。没找到你点的那条回复，整条对话都带过去了',
-      noAgentSession: '当前会话不是 Agent 会话，无法创建分支',
+      noAgentSession: '这类对话不支持分支',
       busy: '这一轮还没收尾，从更早的一条分支，或稍后再试',
       missing: '暂无可复制的对话历史',
-      failed: '创建会话分支失败'
+      failed: '分支失败'
     },
     /**
      * 侧边问一句。
@@ -2511,10 +2511,10 @@ export default {
      * 和「分支」的区别要在文案上说清楚：分支是换个方向接着**干活**，会留下一条
      * 新会话；侧边是弄明白**现在什么情况**，问完关掉，主对话一个字都不知道。
      */
-    sideChat: {
+    sideQuestion: {
       open: '侧边问一句（带上下文）',
       noContext: '暂无可带入的上下文',
-      failed: '打开侧边对话失败'
+      failed: '没能打开「侧边问一句」'
     },
     search: {
       notImplemented: '搜索网页功能暂未实现'

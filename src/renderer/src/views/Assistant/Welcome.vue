@@ -15,7 +15,7 @@
           :session-id="sid"
           :pending-project-name="pendingProjectName"
           :hide-project-chip="!conversationMode"
-          @side-chat="handleSideChat"
+          @side-question="handleSideQuestion"
           @clear="handleClearSession"
           @export-image="exportAsImage"
           @export-json="exportAsJSON"
@@ -131,7 +131,7 @@
           @stop="handleBubbleStop"
           @suggest="handleBubbleSuggest"
           @copy="handleBubbleCopy"
-          @fork="handleBubbleFork"
+          @branch="handleBubbleBranch"
           @followups-ready="handleFollowupsReady"
           @action="handleBubbleAction"
           @open-location="handleOpenLocation"
@@ -382,9 +382,9 @@ import type { AgentProcessItem } from './components/AgentProcessLog.types'
 import { useAgentStreamStore } from '../../store/modules/agentStream'
 import { useFollowUpQueueStore } from '../../store/modules/followUpQueue'
 import { agentV3API } from '@renderer/api/agentV3'
-import { forkSession } from './composables/sessionFork'
+import { branchChat } from './composables/chatBranch'
 import { countUserTurnsBefore, rewindTranscript } from './composables/transcriptRewind'
-import { openSideChat } from './composables/sideChat'
+import { openSideQuestion } from './composables/sideQuestion'
 import {
   buildReviewFixPrompt,
   buildSelfCheckPrompt,
@@ -2044,13 +2044,13 @@ async function handleUserConfirmEdit(payload: {
 }
 
 /**
- * 从这条回复分叉出一条新会话并切换过去。
+ * 从这条回复分出一条新对话并切换过去。
  *
  * 按钮（AIBubble 操作行里的分支图标）挂在哪条回复上，就分到哪条为止：
- * 它之后的问答不跟过去，内核 transcript 和界面消息一起截。原会话原地不动。
+ * 它之后的问答不跟过去，内核 transcript 和界面消息一起截。原对话原地不动。
  */
-async function handleBubbleFork(payload: { id: string }): Promise<void> {
-  const outcome = await forkSession(
+async function handleBubbleBranch(payload: { id: string }): Promise<void> {
+  const outcome = await branchChat(
     sid.value,
     {
       chatStore,
@@ -2088,32 +2088,32 @@ async function handleBubbleFork(payload: { id: string }): Promise<void> {
     message.warning(t('assistant.branch.missing'))
     return
   }
-  console.error('[会话分支] 创建失败:', outcome.error)
+  console.error('[分支] 创建失败:', outcome.error)
   message.error(t('assistant.branch.failed'))
 }
 
 /**
  * 侧边问一句：把当前上下文复制给小窗口，在那边只读地问。
  *
- * 和「分支」的区别：分支是想换个方向接着**干活**，会在侧边栏留下一条新会话；
+ * 和「分支」的区别：分支是想换个方向接着**干活**，会在侧边栏留下一条新对话；
  * 侧边是想弄明白**现在是什么情况**，问完关掉，什么都不留下。而且它跑着的时候
  * 也能开 —— 那正是最想问「它在干嘛」的时刻。
  */
-async function handleSideChat(): Promise<void> {
-  const outcome = await openSideChat(sid.value, {
+async function handleSideQuestion(): Promise<void> {
+  const outcome = await openSideQuestion(sid.value, {
     chatStore,
-    fork: (agentSessionId) => agentV3API.forkForSideChat(agentSessionId),
+    fork: (agentSessionId) => agentV3API.forkForSideQuestion(agentSessionId),
     open: (context) => window.api.miniChat.openWithContext(context)
   })
 
   if (outcome.ok) return
 
   if (outcome.reason === 'no-agent-session' || outcome.reason === 'empty') {
-    message.warning(t('assistant.sideChat.noContext'))
+    message.warning(t('assistant.sideQuestion.noContext'))
     return
   }
   console.error('[侧边问一句] 打开失败:', outcome.error)
-  message.error(t('assistant.sideChat.failed'))
+  message.error(t('assistant.sideQuestion.failed'))
 }
 
 /**

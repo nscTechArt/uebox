@@ -5,7 +5,7 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { logger } from './services'
 import { protectRendererWindow } from './security'
-import type { SideChatContext } from '../shared/sideChat'
+import type { SideQuestionContext } from '../shared/sideQuestion'
 import type { MiniChatInitialMessage } from '../shared/editorSnapshot'
 
 /** 固定窗口尺寸 */
@@ -159,12 +159,12 @@ class MiniChatWindowManager {
     })
 
     /**
-     * 主窗口把上下文交过来，开侧边对话。
+     * 主窗口把上下文交过来，开侧边问一句。
      *
-     * 上下文本体已经在主进程里复制好了（`agent-v3:fork-for-side-chat`），
+     * 上下文本体已经在主进程里复制好了（`agent-v3:fork-for-side-question`），
      * 这里只负责把「用哪一份」递给小窗口。
      */
-    ipcMain.on('mini-chat:open-with-context', (_event, context: SideChatContext) => {
+    ipcMain.on('mini-chat:open-with-context', (_event, context: SideQuestionContext) => {
       this.showWithContext(context)
     })
 
@@ -325,8 +325,8 @@ class MiniChatWindowManager {
      * 上下文那条路**一模一样**，所以也一起等它来取。
      *
      * 那条路看着像是安全的（「反正没有清空的副作用」），其实 `deliverContext()`
-     * 发完就把 `pendingContext` 置空了 —— 同样的 200 毫秒赌输一次，侧边对话就
-     * 开成了一个跟原会话失联的空窗口：它不知道自己是从哪条 agent 会话分出来的，
+     * 发完就把 `pendingContext` 置空了 —— 同样的 200 毫秒赌输一次，侧边问一句就
+     * 开成了一个跟主对话失联的空窗口：它不知道自己是从哪个内核 session 复制出来的，
      * 而且一样不报错。渲染层的 `requestInitialContext()` 和消息那条挨着发，
      * 接住它的是 `mini-chat:request-initial-context`。
      */
@@ -351,7 +351,7 @@ class MiniChatWindowManager {
    * 窗口已经开着时也照样递新的上下文 —— 用户在主对话里点第二次，
    * 要的是「拿现在这一刻的情况再问一次」，而不是复用十分钟前那份。
    */
-  showWithContext(context: SideChatContext): void {
+  showWithContext(context: SideQuestionContext): void {
     if (!context?.agentSessionId) return
 
     this.pendingContext = context
@@ -391,7 +391,7 @@ class MiniChatWindowManager {
       }, 150)
     }
     this.pendingMessage = null
-    // 窗口关了，借来的那份上下文也就作废 —— 下次打开是一次新的侧边对话
+    // 窗口关了，借来的那份上下文也就作废 —— 下次打开是一次新的侧边问一句
     this.pendingContext = null
   }
 
@@ -401,7 +401,7 @@ class MiniChatWindowManager {
   private rendererReady = false
 
   /** 待投递的侧边上下文。窗口还没加载完时先存着 */
-  private pendingContext: SideChatContext | null = null
+  private pendingContext: SideQuestionContext | null = null
 
   /**
    * 发送消息到 Mini Chat 窗口（已弃用，请使用 show(message)）

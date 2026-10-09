@@ -34,7 +34,13 @@ const BANNED_TERMS: BannedTerm[] = [
   { word: '聊天', suggestion: '对话' },
   { word: '回合', suggestion: '一轮' },
   { word: '一问一答', suggestion: '一轮' },
-  { word: 'exchange', suggestion: 'turn' }
+  { word: 'exchange', suggestion: 'turn' },
+  // 分支
+  { word: '会话分支', suggestion: '分支' },
+  { word: '对话分支', suggestion: '分支' },
+  // 侧边问一句
+  { word: '侧边对话', suggestion: '侧边问一句' },
+  { word: 'side chat', suggestion: 'side question' }
 ]
 
 /**

@@ -4,11 +4,11 @@
  * ## 为什么只传一个 sessionId
  *
  * 上下文本体是主进程里的一份 transcript，复制在主进程完成（见
- * `agent-v3:fork-for-side-chat`）。窗口之间只需要交换「用哪一份」这个标识 ——
+ * `agent-v3:fork-for-side-question`）。窗口之间只需要交换「用哪一份」这个标识 ——
  * 把几百条消息塞进 IPC 再在小窗口里反序列化一遍，除了慢没有任何好处。
  */
-export interface SideChatContext {
-  /** 复制出来的内核 sessionId。MiniChat 拿它当自己的 agent 会话 */
+export interface SideQuestionContext {
+  /** 复制出来的内核 sessionId。MiniChat 拿它当自己的内核 session */
   agentSessionId: string
   /** 带过来多少条消息。界面拿它说明「承接了多少上下文」 */
   messageCount: number

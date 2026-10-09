@@ -389,7 +389,7 @@ export const agentV3API = {
    * 返回的新 id 由调用方挂到新会话上 —— 内核按 sessionId 恢复历史，
    * 新会话下一轮自然带着分支点之前的上下文。
    *
-   * `keepUserTurns` 是分叉点：只复制前这么多个用户回合，后面的丢掉。
+   * `keepUserTurns` 是分支点：只复制前这么多个用户轮次，后面的丢掉。
    * 不给就整份复制（从最后一条回复分支时就是这样）。
    *
    * 会话跑着的时候也能从**更早的一轮**分支，源会话继续输出；整份复制和
@@ -434,7 +434,7 @@ export const agentV3API = {
    * 只肯从更早的一轮分（切点必须已经收尾），这边要的恰恰是此刻的现场 ——
    * 「它现在在干嘛」这个问题只在跑着的时候才有人问。
    */
-  forkForSideChat(sessionId: string): Promise<{
+  forkForSideQuestion(sessionId: string): Promise<{
     success: boolean
     sessionId?: string
     messageCount?: number
@@ -442,7 +442,7 @@ export const agentV3API = {
     reason?: 'empty' | 'error'
     error?: string
   }> {
-    return window.api.agentV3.forkForSideChat({ sessionId })
+    return window.api.agentV3.forkForSideQuestion({ sessionId })
   },
 
   /**
