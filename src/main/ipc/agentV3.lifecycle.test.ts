@@ -591,4 +591,55 @@ describe('Agent V3 真实 IPC 生命周期', () => {
     expect(mock.append).toHaveBeenCalledWith(messages, { strict: true })
     expect(mock.deleteCheckpoint).not.toHaveBeenCalled()
   })
+
+  /**
+   * `execute` 忙的时候回 `code: 'SESSION_BUSY'`，渲染层拿它换成本地化文案。
+   * `continue` 是同一种拒绝（会话被占），原来只回原文不带码，于是气泡里
+   * 直接摆出「session {uuid} 正在执行中」。两边必须同形。
+   */
+  it('续跑撞上还在跑的一轮：带 SESSION_BUSY 码，原文照旧留给日志', async () => {
+    const reached = deferred<void>()
+    agent.prompt.mockImplementationOnce(() => {
+      reached.resolve()
+      // 一轮永远不结束的输出
+      return new Promise(() => {})
+    })
+    void invoke('execute', { sessionId: 'busy-resume', prompt: 'work' })
+    await reached.promise
+
+    const result = await invoke('continue', { sessionId: 'busy-resume' })
+
+    expect(result).toMatchObject({ success: false, code: 'SESSION_BUSY' })
+    expect(String(result.error)).toContain('正在执行中')
+  })
+
+  /**
+   * steer 的第二道闸：进队之前要等附件落盘、媒体处理，这几秒里这一轮可能
+   * 刚好跑完。那时内核的插话队列已经没人读了 —— 原来照样回「成功」，
+   * 话就这么没了。拒出 NOT_RUNNING，调用方才说得出「这一轮刚好结束」。
+   */
+  it('等附件落盘期间这一轮结束：steer 按 NOT_RUNNING 拒', async () => {
+    let releasePrompt: () => void = () => {}
+    const reached = deferred<void>()
+    agent.prompt.mockImplementationOnce(() => {
+      reached.resolve()
+      return new Promise<void>((resolve) => {
+        releasePrompt = resolve
+      })
+    })
+    const executing = invoke('execute', { sessionId: 'steer-late', prompt: 'work' })
+    await reached.promise
+
+    // 附件落盘卡住：插话停在准备阶段，这一轮在它下面跑完
+    const saving = deferred<unknown[]>()
+    mock.attachments.mockReturnValueOnce(saving.promise)
+    const steering = invoke('steer', { sessionId: 'steer-late', message: '再加一句' })
+
+    releasePrompt()
+    // 等整个 handler 收完 —— finally 里才会从登记表摘掉这一轮
+    await executing
+    saving.resolve([])
+
+    expect(await steering).toMatchObject({ success: false, code: 'NOT_RUNNING' })
+  })
 })

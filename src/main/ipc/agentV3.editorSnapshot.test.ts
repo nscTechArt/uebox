@@ -338,9 +338,50 @@ describe('steer 的闸', () => {
     })
 
     expect(result.success).toBe(false)
+    expect(result.code).toBe('PROJECT_MISMATCH')
+    // 两个工程名按原值带出来，渲染层拼本地化文案用；error 原文留给日志和调试台
+    expect(result.errorParams).toEqual({ snapshotProject: 'GameA', runProject: 'GameB' })
     expect(String(result.error)).toContain('GameA')
     expect(agent.steer).not.toHaveBeenCalled()
     release()
+  })
+
+  /**
+   * 快照里工程名是空串（渲染层抓的时候工程没报名字）也要**原样**带出来 ——
+   * 「另一个工程」是界面的措辞，不是主进程往参数里塞的值。
+   */
+  it('工程名为空串也原样带出，不在主进程填措辞', async () => {
+    mock.interactiveProjects.mockReturnValue([PROJECT_B])
+    mock.currentProject.mockReturnValue(PROJECT_B)
+    const release = await startRun('run-mismatch-empty')
+    const snapshot = snapshotFromA()
+    snapshot.project.projectName = ''
+
+    const result = await invoke('steer', {
+      sessionId: 'run-mismatch-empty',
+      message: '这个也改了',
+      editorSnapshot: snapshot
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PROJECT_MISMATCH',
+      errorParams: { snapshotProject: '', runProject: 'GameB' }
+    })
+    release()
+  })
+
+  /**
+   * 压根没有在跑的一轮：第一道闸就拒出去。
+   *
+   * 不带 `code` 的时候渲染层只能把「没有正在执行的 session」塞进「插话失败」的
+   * 外框里 —— 但排队那条路会把话留着照常发出去，说「失败」是说反了。
+   */
+  it('没有在跑的一轮 → NOT_RUNNING', async () => {
+    const result = await invoke('steer', { sessionId: 'nothing-running', message: '插一句' })
+
+    expect(result).toMatchObject({ success: false, code: 'NOT_RUNNING' })
+    expect(String(result.error)).toBe('没有正在执行的 session')
   })
 
   it('不带快照时照旧注入原话', async () => {

@@ -1093,7 +1093,7 @@ ${params.text}
             }
           : {})
       })
-      .then((result: { success?: boolean; error?: string; code?: string } | undefined) => {
+      .then((result) => {
         // **失败是返回值，不是异常。**
         // 只挂 .catch 的话，主进程报 { success: false, error } 时这里
         // 一声不吭，用户看到的就是「点了没反应」。

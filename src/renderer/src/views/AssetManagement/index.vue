@@ -1039,6 +1039,8 @@ import {
   type ImportResultView
 } from './utils/importResultView'
 import { filterRetriableFailures, type ImportSkipEntry } from '@core/shared/assetImport'
+import { describeImportError } from './importErrorText'
+import type { ImportErrorDetails } from '@core/shared/importErrorKey'
 import {
   isHttpNetworkVault as isHttpNetworkVaultKind,
   resolveErrorText
@@ -2391,13 +2393,12 @@ const abandonImportSession = async (payload: ImportRecoveryPayload): Promise<boo
       success: boolean
       stagingCleared?: boolean
       locallyDismissed?: boolean
-      error?: string
-    }
+    } & ImportErrorDetails
 
     if (!result?.success) {
       message.error(
         t('assetManagement.import.abandonFailed', {
-          error: result?.error || t('assetManagement.import.unknownError')
+          error: describeImportError(result, t, t('assetManagement.import.unknownError'))
         }),
         8
       )
@@ -2409,7 +2410,7 @@ const abandonImportSession = async (payload: ImportRecoveryPayload): Promise<boo
     } else {
       message.warning(
         t('assetManagement.import.abandonStagingLeft', {
-          error: result.error || t('assetManagement.import.unknownError')
+          error: describeImportError(result, t, t('assetManagement.import.unknownError'))
         }),
         10
       )
@@ -2516,13 +2517,12 @@ const resumeImportByReportRef = async (ref: ImportRecoveryReportRef): Promise<vo
       uploadedFiles?: number
       uploadedThumbnails?: number
       committed?: boolean
-      error?: string
-    }
+    } & ImportErrorDetails
 
     if (!result?.success) {
-      const error = result?.error || t('assetManagement.import.unknownError')
+      const error = describeImportError(result, t, t('assetManagement.import.unknownError'))
       message.destroy(messageKey)
-      if (/未找到可续传|没有找到这份 JSON 对应/.test(error)) {
+      if (/未找到可续传|没有找到这份 JSON 对应/.test(result?.error ?? '')) {
         warningDialog({
           title: t('assetManagement.import.resumeNotFoundTitle'),
           content: t('assetManagement.import.resumeNotFoundContent', { error })
@@ -2725,13 +2725,12 @@ const handleFolderImportNeedsRecovery = (_event: unknown, payload: ImportRecover
         uploadedFiles?: number
         uploadedThumbnails?: number
         committed?: boolean
-        error?: string
-      }
+      } & ImportErrorDetails
       if (!result?.success) {
         const error =
           result?.status === 'expired'
             ? t('assetManagement.import.sessionExpired')
-            : result?.error || t('assetManagement.import.unknownError')
+            : describeImportError(result, t, t('assetManagement.import.unknownError'))
         message.error(t('assetManagement.import.continueFailed', { error }), 8)
         throw new Error(result?.error || 'resume import failed')
       }
@@ -2834,13 +2833,19 @@ const handleFolderImportError = (
     rootFolderPath?: string
     vaultId?: string
     targetFolderKey?: string
-  }
+  } & ImportErrorDetails
 ) => {
   if (suppressFolderImportErrorTasks.has(payload.taskId)) {
     console.warn('[DragImport] Folder import error captured for managed retry:', payload)
     return
   }
-  message.error(t('assetLib.import.failed', { message: payload.message }))
+  // 普通文件夹导入的 payload 没有 errorKey，describeImportError 原样走回 message
+  const errorText = describeImportError(
+    { error: payload.message, errorKey: payload.errorKey, errorParams: payload.errorParams },
+    t,
+    t('assetManagement.import.unknownError')
+  )
+  message.error(t('assetLib.import.failed', { message: errorText }))
   const view = buildImportResultView({
     ...payload,
     total: 0,
@@ -2850,7 +2855,7 @@ const handleFolderImportError = (
         stage: 'scan',
         fileName: payload.rootFolderPath || payload.taskId,
         path: payload.rootFolderPath || '',
-        error: payload.message,
+        error: errorText,
         retriable: Boolean(payload.rootFolderPath)
       }
     ]

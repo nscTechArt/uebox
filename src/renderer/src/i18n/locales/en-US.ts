@@ -2913,6 +2913,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       sessionBusy:
         'This chat still has a run in progress. Wait for it to finish, or just type what you want changed.',
       resume: 'Try again',
+      resumeProgress: 'Resuming from where it stopped…',
+      resumeFailed: "Couldn't resume: {reason}",
       autoResume:
         'Lost the connection to the model. Picking up again in {seconds}s (attempt {attempt}/{max}). Finished steps will not be redone.',
       modelRetry:
@@ -5844,6 +5846,15 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     steerAttachmentsOnly: 'Attached: {names}',
     steerImageCount: '{count} image(s)',
     steerFailed: 'Steering failed: {reason}',
+    steerTurnEndedRestored:
+      "This turn just finished, so the message wasn't added. It's back in the input box.",
+    steerTurnEndedQueued:
+      "This turn just finished, so the message wasn't added. It will be sent in queue order.",
+    steerProjectMismatchRestored:
+      'This message was sent from "{snapshotProject}", but the current turn is working in "{runProject}". It wasn\'t added and is back in the input box.',
+    steerProjectMismatchQueued:
+      'This message was sent from "{snapshotProject}", but the current turn is working in "{runProject}". It will run on "{snapshotProject}" after this turn finishes.',
+    steerOtherProject: 'another project',
     queueAction: 'Queue',
     queueCancel: 'Remove from queue',
     queueSteerNow: 'Send now',
@@ -7541,6 +7552,14 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       resumeFailed: 'Failed to resume import: {error}',
       resumeNotFoundTitle: 'Cannot resume import',
       resumeNotFoundContent: 'No resumable import found: {error}',
+      errors: {
+        reportMissingImportId: "This report has no server import ID, so it can't be resumed.",
+        notResumable:
+          'This import can no longer be resumed on the server (server status: {status}).',
+        cancelNotConfirmed:
+          'The server did not confirm cancelling this import (server status: {status}).',
+        serverImportFailed: 'This import failed on the server (server status: {status}).'
+      },
       selectErrorJson: 'Please select an import error report JSON file',
       singleErrorJson: 'Only one error report file can be selected at a time',
       selectResumeReportFailed: 'Failed to select the error report',

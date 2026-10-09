@@ -22,6 +22,7 @@ import {
   loadImportRecoveryContext,
   saveImportRecoveryContext
 } from './ImportRecoveryContextService'
+import type { ImportErrorDetails, ImportErrorKey } from '../../../shared/importErrorKey'
 import { checkV2ImportReadiness } from './importFeatureFlag'
 import { decideUploadRetry, getRetryAfterDelayMs } from './importUploadRetry'
 
@@ -51,7 +52,7 @@ export interface ResumeImportRequest {
   report?: ResumeImportReportContext
 }
 
-export interface ResumeImportResult {
+export interface ResumeImportResult extends ImportErrorDetails {
   success: boolean
   status: 'committed' | 'failed' | 'not_resumable' | 'not_found' | 'expired'
   uploadedFiles: number
@@ -61,7 +62,6 @@ export interface ResumeImportResult {
   sessionId?: string
   missingFiles?: number
   missingThumbnails?: number
-  error?: string
 }
 
 const RESUME_UPLOAD_CONCURRENCY =
@@ -134,10 +134,17 @@ function parseRemoteHttpNetworkPath(
 async function buildContextFromReport(
   report: ResumeImportReportContext,
   diagnosticId?: string
-): Promise<{ context?: ImportRecoveryContext; error?: string }> {
+): Promise<{
+  context?: ImportRecoveryContext
+  error?: string
+  errorKey?: ImportErrorKey
+}> {
   const sessionId = report.sessionId
   if (!sessionId) {
-    return { error: 'JSON 报告里缺少 sessionId，无法定位服务端导入会话' }
+    return {
+      error: 'JSON 报告里缺少 sessionId，找不到服务器上的这次导入',
+      errorKey: 'reportMissingImportId'
+    }
   }
 
   const reportFiles = (Array.isArray(report.files) ? report.files : []).filter(
@@ -537,7 +544,8 @@ export async function resumeImport(request: ResumeImportRequest): Promise<Resume
         committed: false,
         diagnosticId: request.diagnosticId,
         sessionId: request.report.sessionId,
-        error: restored.error || '无法从 JSON 报告重建续传上下文'
+        error: restored.error || '无法从 JSON 报告重建续传上下文',
+        errorKey: restored.errorKey
       }
     }
     context = restored.context
@@ -598,7 +606,7 @@ export async function resumeImport(request: ResumeImportRequest): Promise<Resume
     }
 
     if (!firstReconcile.canResume) {
-      const error = `该导入会话当前状态不支持续传: ${firstReconcile.sessionStatus}`
+      const error = `这次导入在服务器上的状态是 ${firstReconcile.sessionStatus}，不能继续`
       markContextStatus(context, 'failed', error, request.diagnosticId || null)
       return {
         success: false,
@@ -610,7 +618,9 @@ export async function resumeImport(request: ResumeImportRequest): Promise<Resume
         sessionId: context.sessionId,
         missingFiles: firstReconcile.missingFiles,
         missingThumbnails: firstReconcile.missingThumbnails,
-        error
+        error,
+        errorKey: 'notResumable',
+        errorParams: { status: firstReconcile.sessionStatus }
       }
     }
 
@@ -763,14 +773,13 @@ export interface AbandonImportRequest {
   report?: ResumeImportReportContext
 }
 
-export interface AbandonImportResult {
+export interface AbandonImportResult extends ImportErrorDetails {
   success: boolean
   sessionId?: string
   /** 服务端确认清掉暂存区了吗 —— 没确认就不许说清掉了 */
   stagingCleared: boolean
   /** 本地那条「未完成的导入」记录真的标掉了吗 —— 同理，没确认就不许说消掉了 */
   locallyDismissed: boolean
-  error?: string
 }
 
 /** 服务端认为「这个会话已经取消、暂存区归我清」的终态 */
@@ -807,7 +816,8 @@ export async function abandonImport(request: AbandonImportRequest): Promise<Aban
         stagingCleared: false,
         locallyDismissed: false,
         sessionId: request.report.sessionId,
-        error: restored.error || '无法从 JSON 报告重建导入上下文'
+        error: restored.error || '无法从 JSON 报告重建导入上下文',
+        errorKey: restored.errorKey
       }
     }
   }
@@ -823,6 +833,8 @@ export async function abandonImport(request: AbandonImportRequest): Promise<Aban
 
   let stagingCleared = false
   let error: string | undefined
+  let errorKey: ImportErrorKey | undefined
+  let errorParams: ImportErrorDetails['errorParams']
   try {
     const client = await createImportSessionClient(context)
     // 回读服务端给的状态再说话。POST 没抛不等于暂存区清了 —— 会话可能已经
@@ -831,7 +843,10 @@ export async function abandonImport(request: AbandonImportRequest): Promise<Aban
     if (session?.status === CANCELLED_SESSION_STATUS) {
       stagingCleared = true
     } else {
-      error = `服务端没有取消这次会话（当前状态：${session?.status || '未知'}）`
+      error = `服务器没有取消这次导入（当前状态：${session?.status || '未知'}）`
+      errorKey = 'cancelNotConfirmed'
+      // 进界面的状态只放服务器原话；没回状态时给中英文都看得懂的 unknown，不把「未知」塞进英文句子
+      errorParams = { status: session?.status || 'unknown' }
     }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err)
@@ -851,6 +866,8 @@ export async function abandonImport(request: AbandonImportRequest): Promise<Aban
     sessionId: context.sessionId,
     stagingCleared,
     locallyDismissed,
-    error
+    error,
+    errorKey,
+    errorParams
   }
 }

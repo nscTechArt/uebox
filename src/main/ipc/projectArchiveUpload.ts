@@ -187,7 +187,9 @@ ipcMain.handle(
           })
         )
         send('asset:folderImportError', {
-          message: result.error || result.errorCode || '整包上传失败'
+          message: result.error || result.errorCode || '整包上传失败',
+          errorKey: result.errorKey,
+          errorParams: result.errorParams
         })
         return { success: false, error: result.error || result.errorCode, data: result }
       }

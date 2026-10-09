@@ -2841,6 +2841,8 @@ export default {
       // 界面上「改方向」就是直接在输入框里继续打字
       sessionBusy: '这条对话还有一轮在跑。等它结束，或者直接在输入框里说下一步该怎么改。',
       resume: '继续尝试',
+      resumeProgress: '从断点继续执行…',
+      resumeFailed: '没能接着跑：{reason}',
       autoResume:
         '模型连接中断，{seconds} 秒后自动接着跑（第 {attempt}/{max} 次）。做完的步骤不会重做。',
       modelRetry:
@@ -5679,6 +5681,13 @@ export default {
     steerAttachmentsOnly: '补充附件：{names}',
     steerImageCount: '{count} 张图片',
     steerFailed: '插话失败：{reason}',
+    steerTurnEndedRestored: '这一轮刚好结束了，插话没送进去，内容已放回输入框',
+    steerTurnEndedQueued: '这一轮刚好结束了，插话没送进去，会按排队顺序发出',
+    steerProjectMismatchRestored:
+      '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮在「{runProject}」上，没有送进去，内容已放回输入框',
+    steerProjectMismatchQueued:
+      '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮在「{runProject}」上。这一轮结束后，它会按「{snapshotProject}」发出',
+    steerOtherProject: '另一个工程',
     queueAction: '排队',
     queueCancel: '取消这条',
     queueSteerNow: '立即发送',
@@ -7279,6 +7288,12 @@ export default {
       resumeFailed: '继续导入失败：{error}',
       resumeNotFoundTitle: '无法继续导入',
       resumeNotFoundContent: '未找到可以继续的导入：{error}',
+      errors: {
+        reportMissingImportId: '这份报告里没有服务器上这次导入的编号，没法继续',
+        notResumable: '这次导入在服务器上已经不能继续（服务器状态：{status}）',
+        cancelNotConfirmed: '服务器没有确认取消这次导入（服务器状态：{status}）',
+        serverImportFailed: '服务器上的这次导入失败了（服务器状态：{status}）'
+      },
       selectErrorJson: '请选择导入错误报告（JSON）',
       singleErrorJson: '一次只能选择一个错误报告',
       selectResumeReportFailed: '选择错误报告失败',

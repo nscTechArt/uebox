@@ -393,4 +393,60 @@ describe('uploadProjectArchive', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('tags the staged-poll fallback with serverImportFailed when the server gives no message', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'ual-proj-'))
+    try {
+      const zip = path.join(root, 'Demo.zip')
+      writeFileSync(zip, Buffer.alloc(2048, 1))
+      clientCalls.getSession.mockResolvedValue({
+        sessionId: 'sess-1',
+        status: 'failed',
+        stagedFileCount: 0
+      })
+
+      const result = await uploadProjectArchive({
+        serverUrl: 'http://127.0.0.1:19911',
+        vaultId: 'vault-1',
+        clientId: 'c',
+        sourcePath: zip
+      })
+
+      expect(result.status).toBe('failed')
+      expect(result.errorCode).toBe('SESSION_FAILED')
+      expect(result.errorKey).toBe('serverImportFailed')
+      expect(result.errorParams).toEqual({ status: 'failed' })
+      expect(result.error).toBe('服务器上的这次导入进入了 failed 状态')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('passes the server errorMessage through untouched and leaves errorKey unset', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'ual-proj-'))
+    try {
+      const zip = path.join(root, 'Demo.zip')
+      writeFileSync(zip, Buffer.alloc(2048, 1))
+      clientCalls.getSession.mockResolvedValue({
+        sessionId: 'sess-1',
+        status: 'failed',
+        stagedFileCount: 0,
+        errorMessage: 'manifest checksum mismatch'
+      })
+
+      const result = await uploadProjectArchive({
+        serverUrl: 'http://127.0.0.1:19911',
+        vaultId: 'vault-1',
+        clientId: 'c',
+        sourcePath: zip
+      })
+
+      expect(result.status).toBe('failed')
+      expect(result.error).toBe('manifest checksum mismatch')
+      expect(result.errorKey).toBeUndefined()
+      expect(result.errorParams).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

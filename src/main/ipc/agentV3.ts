@@ -88,6 +88,11 @@ import {
 import { openAssetInEditor } from '../agent-v3/core/openAsset'
 import { reviewChanges } from '../agent-v3/core/reviewChanges'
 import type { AgentReviewTarget } from '../../shared/agentReview'
+import type {
+  AgentStartRejectionCode,
+  SteerRejectionCode,
+  SteerRejectionErrorParams
+} from '../../shared/agentRunRejection'
 import {
   createUnrealAgent,
   runSubAgent,
@@ -1657,7 +1662,7 @@ export function registerAgentV3IPC(): void {
         return { success: false, error: 'sessionId 和 taskId 都要给' }
       }
       if (!(await loadExecutionOptions(sessionId))?.team) {
-        return { success: false, error: '这条会话不是团队模式' }
+        return { success: false, error: '这条 session 不是团队模式' }
       }
       const store = createTeamStore(teamDirsFor(sessionId))
       if (!(await store.board()).some((task) => task.id === taskId)) {
@@ -1690,7 +1695,7 @@ export function registerAgentV3IPC(): void {
         return { success: false, error: 'sessionId、name、providerId、modelId 都要给' }
       }
       if (!(await loadExecutionOptions(sessionId))?.team) {
-        return { success: false, error: '这条会话不是团队模式' }
+        return { success: false, error: '这条 session 不是团队模式' }
       }
       // 先过入职体检：不会调工具的模型换上去也干不了活，当场说清卡在哪比派活时才出错好
       const models = await loadTeamModels()
@@ -1876,8 +1881,8 @@ export function registerAgentV3IPC(): void {
        */
       return {
         success: false,
-        code: 'SESSION_BUSY',
-        error: `会话 ${args.sessionId} 正在执行中`
+        code: 'SESSION_BUSY' satisfies AgentStartRejectionCode,
+        error: `session ${args.sessionId} 正在执行中`
       }
     }
 
@@ -2385,7 +2390,13 @@ export function registerAgentV3IPC(): void {
    */
   ipcMain.handle('agent-v3:continue', async (event, args: AgentV3ContinueArgs) => {
     const run = reserveRun(args.sessionId, event.sender.id)
-    if (!run) return { success: false, error: `会话 ${args.sessionId} 正在执行中` }
+    if (!run) {
+      return {
+        success: false,
+        code: 'SESSION_BUSY' satisfies AgentStartRejectionCode,
+        error: `session ${args.sessionId} 正在执行中`
+      }
+    }
     if (args.approvalMode) approvalModeBySession.set(args.sessionId, args.approvalMode)
     if (args.mode) setReadOnly(args.sessionId, args.mode === 'ask')
     try {
@@ -3305,7 +3316,11 @@ export function registerAgentV3IPC(): void {
     ) => {
       const entry = activeAgents.get(args.sessionId)
       if (!entry?.agent || !acceptsSteer(entry)) {
-        return { success: false, error: '没有正在执行的会话' }
+        return {
+          success: false,
+          code: 'NOT_RUNNING' satisfies SteerRejectionCode,
+          error: '没有正在执行的 session'
+        }
       }
 
       /*
@@ -3320,10 +3335,16 @@ export function registerAgentV3IPC(): void {
       if (args.editorSnapshot && scope && !snapshotMatchesScope(args.editorSnapshot, scope)) {
         return {
           success: false,
+          code: 'PROJECT_MISMATCH' satisfies SteerRejectionCode,
           error:
             `这条插话是在「${args.editorSnapshot.project.projectName || '另一个工程'}」上抓的，` +
             `而正在跑的这一轮盯着「${scope.connectedProject?.projectName || '另一个工程'}」。` +
-            `先让它跑完，这条会按原来的工程发出去。`
+            `先让它跑完，这条会按原来的工程发出去。`,
+          errorParams: {
+            // 原值，可能为空串 —— 「另一个工程」的措辞是渲染层的事
+            snapshotProject: args.editorSnapshot.project.projectName,
+            runProject: scope.connectedProject?.projectName ?? ''
+          } satisfies SteerRejectionErrorParams
         }
       }
 
@@ -3365,7 +3386,11 @@ export function registerAgentV3IPC(): void {
         await previous
         // 上传要等一阵，这期间这一轮可能已经跑完了、或者正在收尾
         if (activeAgents.get(args.sessionId) !== entry || !acceptsSteer(entry)) {
-          return { success: false, error: '没有正在执行的会话' }
+          return {
+            success: false,
+            code: 'NOT_RUNNING' satisfies SteerRejectionCode,
+            error: '没有正在执行的 session'
+          }
         }
         /*
          * 图片关口的提示、音视频说明、文档正文都包进插话附件块：回执要按原话销号，

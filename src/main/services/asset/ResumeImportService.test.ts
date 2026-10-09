@@ -104,6 +104,8 @@ describe('abandonImport', () => {
 
     expect(result.stagingCleared).toBe(false)
     expect(result.error).toContain('committed')
+    expect(result.errorKey).toBe('cancelNotConfirmed')
+    expect(result.errorParams).toEqual({ status: 'committed' })
     // 本地提示还是要消掉 —— 用户已经说了不要这一单
     expect(result.locallyDismissed).toBe(true)
   })
@@ -194,5 +196,42 @@ describe('resumeImport', () => {
       'Session not found',
       null
     )
+  })
+
+  it('reports notResumable when the server session can no longer be resumed', async () => {
+    mocks.reconcileSession.mockResolvedValueOnce({
+      canResume: false,
+      sessionStatus: 'failed_recoverable',
+      expected: { files: 0, thumbnails: 0 },
+      staged: { files: 0, thumbnails: 0 },
+      missingFiles: 0,
+      missingThumbnails: 0
+    })
+
+    const result = await resumeImport({ taskId: 'task-a' })
+
+    expect(result).toMatchObject({
+      success: false,
+      status: 'not_resumable',
+      errorKey: 'notResumable',
+      errorParams: { status: 'failed_recoverable' }
+    })
+    expect(result.error).toContain('failed_recoverable')
+  })
+
+  it('reports reportMissingImportId when the JSON report has no sessionId and no local context', async () => {
+    mocks.loadImportRecoveryContext.mockResolvedValueOnce(null)
+
+    const result = await resumeImport({
+      diagnosticId: 'diag-a',
+      report: { taskId: 'task-b' }
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      status: 'not_found',
+      errorKey: 'reportMissingImportId'
+    })
+    expect(result.error).toContain('sessionId')
   })
 })

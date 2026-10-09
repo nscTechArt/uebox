@@ -1053,13 +1053,13 @@ async function handleSteerQueuedFollowUp(id: string): Promise<void> {
       // 纯附件的条目是「（附件）」，传进去 steerAgent 就补不上那句「补充附件：…」了
       const runningSessionId = chatStore.getAgentSessionId?.(chatSid) || undefined
       if (
-        !(await steerAgent(
-          queued.content,
-          queued.editorSnapshot,
-          queued.images,
+        !(await steerAgent(queued.content, {
+          editorSnapshot: queued.editorSnapshot,
+          images: queued.images,
           attachments,
-          runningSessionId
-        ))
+          targetSessionId: runningSessionId,
+          ifRejected: 'queued'
+        }))
       ) {
         return
       }
@@ -1850,14 +1850,14 @@ async function handleComposerSteer(payload: {
     sessionProject: chatStore.getProject?.(sid.value) ?? null,
     runningSessionId
   })
-  const steered = await steerAgent(
-    payload.text,
-    captured.ok ? captured.snapshot : null,
-    payload.images,
-    payload.attachments,
-    runningSessionId,
-    payload.restore
-  )
+  const steered = await steerAgent(payload.text, {
+    editorSnapshot: captured.ok ? captured.snapshot : null,
+    images: payload.images,
+    attachments: payload.attachments,
+    targetSessionId: runningSessionId,
+    ifRejected: 'restored',
+    restoreDraft: payload.restore
+  })
   // 没插进去：用户打的字和附件不能就这么没了（输入框为了不卡手，发出时先摘掉了）
   if (!steered) payload.restore?.()
 }

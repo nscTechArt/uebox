@@ -25,6 +25,11 @@ import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { EditorHealthResult } from '../shared/editorHealth'
 import type { ModelCheckup, TeamStateView } from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
+import type {
+  AgentStartRejectionCode,
+  SteerRejectionCode,
+  SteerRejectionErrorParams
+} from '../shared/agentRunRejection'
 import type { SideQuestionContext } from '../shared/sideQuestion'
 import type { ChatSyncPatch } from '../shared/chatWindowSync'
 import type {
@@ -3193,6 +3198,8 @@ declare global {
         sessionModel?: { providerId: string; modelId: string }
       }) => Promise<{
         success: boolean
+        /** 按码拒绝（如 SESSION_BUSY）时带，渲染层查文案用；error 原文始终保留给日志 */
+        code?: AgentStartRejectionCode
         error?: string
         modelId?: string
         providerId?: string
@@ -3211,7 +3218,13 @@ declare global {
         approvalMode?: AgentV3ApprovalMode
         /** 会话此刻绑的模型；用户报错后换了模型再续跑，得用新的 */
         sessionModel?: { providerId: string; modelId: string }
-      }) => Promise<{ success: boolean; error?: string; restoredMessages?: number }>
+      }) => Promise<{
+        success: boolean
+        /** 按码拒绝（如 SESSION_BUSY）时带，渲染层查文案用；error 原文始终保留给日志 */
+        code?: AgentStartRejectionCode
+        error?: string
+        restoredMessages?: number
+      }>
       /**
        * 用户在界面上改了这条会话归属哪个工程（顶栏胶囊、侧边栏「归入工程 / 移出项目」）。
        *
@@ -3249,7 +3262,15 @@ declare global {
         /** 已经解析好的文档 / 表格正文 */
         contextText?: string
         /** 撤回这一条要用的号。会话已经收尾、内核不收时没有它 */
-      }) => Promise<{ success: boolean; error?: string; steerId?: string }>
+      }) => Promise<{
+        success: boolean
+        /** 按码拒绝（NOT_RUNNING / PROJECT_MISMATCH）时带，渲染层查文案用 */
+        code?: SteerRejectionCode
+        error?: string
+        /** PROJECT_MISMATCH 时带：快照抓的工程 / 这一轮在跑的工程，原值，可能为空串 */
+        errorParams?: SteerRejectionErrorParams
+        steerId?: string
+      }>
       /**
        * 撤回一条还排着的插话。
        *

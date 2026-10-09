@@ -205,6 +205,26 @@ describe('asset:uploadProjectArchive', () => {
     expect(sent.some((e) => e.channel === 'asset:folderImportCompleted')).toBe(false)
   })
 
+  it('forwards errorKey and errorParams on the folderImportError payload', async () => {
+    state.uploadResult = {
+      status: 'failed',
+      error: '服务器上的这次导入进入了 failed 状态',
+      errorCode: 'SESSION_FAILED',
+      errorKey: 'serverImportFailed',
+      errorParams: { status: 'failed' }
+    }
+    const sent: SentEvent[] = []
+    const res = await invokeUpload(sent, 'D:/Projects/Demo', 'ALL', 'task-1')
+
+    expect(res.success).toBe(false)
+    const errorEvent = sent.find((e) => e.channel === 'asset:folderImportError')
+    expect(errorEvent?.payload).toMatchObject({
+      message: '服务器上的这次导入进入了 failed 状态',
+      errorKey: 'serverImportFailed',
+      errorParams: { status: 'failed' }
+    })
+  })
+
   it('omits mode on completion so the renderer does not stack a second success toast', async () => {
     const sent: SentEvent[] = []
     await invokeUpload(sent, 'D:/Projects/Demo', 'ALL', 'task-1')

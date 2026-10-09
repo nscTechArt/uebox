@@ -84,9 +84,10 @@ describe('提交那一刻抓取', () => {
     expect(handler).toContain('isGenerating.value')
     // 插话带的是**入队那一刻**的快照和图，不是现在的
     expect(handler).toContain('const queued = item.payload')
-    // 用户真打的字，不是队列标签上那行（纯附件的条目标签是「（附件）」）
+    // 用户真打的字，不是队列标签上那行（纯附件的条目标签是「（附件）」）。
+    // 'queued'：被拒时这条留在队列里，提示得照那个下文说，不能说成放回输入框
     expect(handler.replace(/\s+/g, ' ')).toContain(
-      'steerAgent( queued.content, queued.editorSnapshot, queued.images, attachments, runningSessionId )'
+      "steerAgent(queued.content, { editorSnapshot: queued.editorSnapshot, images: queued.images, attachments, targetSessionId: runningSessionId, ifRejected: 'queued' })"
     )
   })
 
@@ -107,7 +108,7 @@ describe('提交那一刻抓取', () => {
 
     expect(body.indexOf('const runningSessionId')).toBeLessThan(body.indexOf('await '))
     expect(body.replace(/\s+/g, ' ')).toContain(
-      'payload.attachments, runningSessionId, payload.restore )'
+      "attachments: payload.attachments, targetSessionId: runningSessionId, ifRejected: 'restored', restoreDraft: payload.restore }"
     )
     expect(body).toContain('if (!steered) payload.restore?.()')
   })

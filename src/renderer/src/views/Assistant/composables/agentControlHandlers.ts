@@ -1,4 +1,9 @@
 import { message } from '@renderer/utils/messageManager'
+import type {
+  AgentStartRejectionCode,
+  SteerRejectionCode,
+  SteerRejectionErrorParams
+} from '@core/shared/agentRunRejection'
 import { isCurrentRun, unregisterAgentHandler } from './agentEventDispatcher'
 import type { AgentModeHandlersDeps, ErrorEvent, StoppedEvent } from './agentHandlerShared'
 import {
@@ -51,7 +56,7 @@ export function isAgentNetworkError(data: { message: string; code?: string }): b
  */
 const STARTUP_ERROR_COPY: Record<string, string> = {
   SESSION_BUSY: 'assistant.agentMode.sessionBusy'
-}
+} satisfies Record<AgentStartRejectionCode, string>
 
 /**
  * 启动失败该跟用户说什么。
@@ -70,6 +75,52 @@ export function describeStartupError(
     if (copy !== key) return copy
   }
   return error?.message || fallback
+}
+
+/**
+ * 插话被主进程按 `code` 拒绝时的文案表。
+ *
+ * 同一句拒绝有两种结局，取决于调用方怎么处理这条话：
+ * `restored` = 输入框那条路，内容放回了输入框；
+ * `queued` = 排队转插话那条路，条目留在队列里，这一轮释放后照发。
+ * 一律说「失败」会把留在队列里那条说成丢了，所以两条路各配一句。
+ */
+const STEER_REJECTION_COPY: Record<string, { restored: string; queued: string }> = {
+  NOT_RUNNING: {
+    restored: 'assistantInputComposer.steerTurnEndedRestored',
+    queued: 'assistantInputComposer.steerTurnEndedQueued'
+  },
+  PROJECT_MISMATCH: {
+    restored: 'assistantInputComposer.steerProjectMismatchRestored',
+    queued: 'assistantInputComposer.steerProjectMismatchQueued'
+  }
+} satisfies Record<SteerRejectionCode, { restored: string; queued: string }>
+
+/**
+ * 插话被按码拒绝时该跟用户说什么。
+ *
+ * 认识的码返回查到的文案（`message.info`）；不认识（或文案没配上）返回
+ * `undefined`，调用方退回 `steerFailed` 外框。主进程给的工程名是原值、
+ * 可能为空串 —— 空的时代入「另一个工程」。`error` 原文不进界面，
+ * 照旧留给调试台和日志。
+ */
+export function describeSteerRejection(
+  result: {
+    code?: string
+    errorParams?: SteerRejectionErrorParams
+  } | null,
+  ifRejected: 'restored' | 'queued',
+  t: (key: string, params?: Record<string, unknown>) => string
+): string | undefined {
+  const copy = result?.code ? STEER_REJECTION_COPY[result.code] : undefined
+  if (!copy) return undefined
+  const otherProject = t('assistantInputComposer.steerOtherProject')
+  const key = copy[ifRejected]
+  const text = t(key, {
+    snapshotProject: result?.errorParams?.snapshotProject || otherProject,
+    runProject: result?.errorParams?.runProject || otherProject
+  })
+  return text !== key ? text : undefined
 }
 
 export function createAgentControlHandlers(deps: AgentModeHandlersDeps) {

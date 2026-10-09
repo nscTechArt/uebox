@@ -20,7 +20,7 @@ import {
 import { onAgentReattached } from './agentReattach'
 import { rememberSteerDraft } from './steerDrafts'
 import { isDuplicateNotify, NOTIFY_DEDUP_WINDOW_MS } from './notifyDedup'
-import { describeStartupError } from './agentControlHandlers'
+import { describeStartupError, describeSteerRejection } from './agentControlHandlers'
 import { createAgentModeHandlers } from './useAgentModeHandlers'
 import { useAgentStreamStore } from '@renderer/store/modules/agentStream'
 import { useNotebookStore } from '@renderer/store/modules/notebookStore'
@@ -104,6 +104,24 @@ type ExecuteAgentOptions = {
   sessionProject?: { projectName: string; projectPath?: string; engineVersion?: string } | null
   /** 这一轮带着的音视频路径。怎么让模型看由主进程决定，见主进程 `core/promptMedia.ts` */
   mediaFiles?: ChatMediaFile[]
+}
+
+type SteerAgentOptions = {
+  editorSnapshot?: EditorSnapshot | null
+  images?: readonly string[]
+  attachments?: SteerAttachments
+  /**
+   * 插进哪一轮。调用方在自己开始等（抓闪存、传附件）之前记下的 —— 等的这几秒里
+   * 用户切了对话，`currentSessionId` 就指向别人正在跑的那一轮了
+   */
+  targetSessionId?: string
+  /** 'restored'：放回输入框；'queued'：留在队列，等这一轮释放后照常发出 */
+  ifRejected?: 'restored' | 'queued'
+  /**
+   * 把这次摘走的字和附件放回输入框。插进去之后按号记下，用户撤回这条时调它 ——
+   * 撤回就是「我还要改」，东西得原样回到手上
+   */
+  restoreDraft?: () => void
 }
 
 export function useAgentMode(params: UseAgentModeParams) {
@@ -520,7 +538,7 @@ export function useAgentMode(params: UseAgentModeParams) {
     const typingId = pushAssistantTyping(Date.now())
     const resumeItem: AgentProcessItem = {
       type: 'notify-users',
-      data: { message: '从断点继续执行…', notifyType: 'progress' },
+      data: { message: t('assistant.agentMode.resumeProgress'), notifyType: 'progress' },
       timestamp: Date.now()
     }
     currentAgentProcess.value = [resumeItem]
@@ -540,9 +558,13 @@ export function useAgentMode(params: UseAgentModeParams) {
     // 起不来时要把刚摆好的这一摊收掉：留着的话气泡会永远转圈，
     // 而且下一次发消息会因为残留的处理器把事件派到这个已死的会话上
     const abandon = (reason: string): void => {
-      chatMsgStore.replaceTyping(chatSid, typingId, `续跑失败：${reason}`, true, {
-        outcome: 'error'
-      })
+      chatMsgStore.replaceTyping(
+        chatSid,
+        typingId,
+        t('assistant.agentMode.resumeFailed', { reason }),
+        true,
+        { outcome: 'error' }
+      )
       unregisterAgentHandler(agentSessionId, runId)
       agentStreamStore.cleanupStream(agentSessionId)
       // 没跑起来，主进程不会发 released —— 不摘的话这条对话永远显示「忙」
@@ -570,7 +592,11 @@ export function useAgentMode(params: UseAgentModeParams) {
       if (result?.success) return
 
       // 失败走的是返回值不是异常（同 execute）。不看它的话界面会一直转圈。
-      const reason = result?.error || t('assistant.agentMode.agentExecFailed')
+      const reason = describeStartupError(
+        { message: result?.error, code: result?.code },
+        t,
+        t('assistant.agentMode.agentExecFailed')
+      )
       abandon(reason)
       message.warning(reason)
     } catch (error) {
@@ -1014,22 +1040,15 @@ export function useAgentMode(params: UseAgentModeParams) {
    * `attachments` 是图片以外的附件（音视频路径、文档正文），和普通发送同一套处理，
    * 只是塞进正在跑的这一轮。
    */
-  async function steerAgent(
-    text: string,
-    editorSnapshot?: EditorSnapshot | null,
-    images?: readonly string[],
-    attachments?: SteerAttachments,
-    /**
-     * 插进哪一轮。调用方在自己开始等（抓闪存、传附件）之前记下的 —— 等的这几秒里
-     * 用户切了对话，`currentSessionId` 就指向别人正在跑的那一轮了
-     */
-    targetSessionId?: string,
-    /**
-     * 把这次摘走的字和附件放回输入框。插进去之后按号记下，用户撤回这条时调它 ——
-     * 撤回就是「我还要改」，东西得原样回到手上
-     */
-    restoreDraft?: () => void
-  ): Promise<boolean> {
+  async function steerAgent(text: string, options: SteerAgentOptions = {}): Promise<boolean> {
+    const {
+      editorSnapshot,
+      images,
+      attachments,
+      targetSessionId,
+      ifRejected = 'restored',
+      restoreDraft
+    } = options
     const sessionId = targetSessionId || currentSessionId.value
     // 这一轮属于哪条对话，也在等之前定下来：回执晚到时气泡得落回它自己的对话里
     const ownerChatSid = sessionId
@@ -1071,11 +1090,21 @@ export function useAgentMode(params: UseAgentModeParams) {
         ...(attachments?.contextText ? { contextText: attachments.contextText } : {})
       })
       if (!result?.success) {
-        message.warning(
-          t('assistantInputComposer.steerFailed', {
-            reason: result?.error || t('assistant.agentMode.agentExecFailed')
-          })
-        )
+        /*
+         * 这一轮已结束（NOT_RUNNING）、或快照和正在跑的工程对不上
+         * （PROJECT_MISMATCH）都不是「失败」：被拒的那条话按 `ifRejected`
+         * 各有下文，用 info 如实说。其余拒绝照旧走 steerFailed 外框。
+         */
+        const rejection = describeSteerRejection(result, ifRejected, t)
+        if (rejection) {
+          message.info(rejection)
+        } else {
+          message.warning(
+            t('assistantInputComposer.steerFailed', {
+              reason: result?.error || t('assistant.agentMode.agentExecFailed')
+            })
+          )
+        }
         return false
       }
       steerId = result.steerId

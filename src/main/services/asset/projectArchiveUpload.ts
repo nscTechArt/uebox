@@ -17,6 +17,7 @@ import { createReadStream, readdirSync, statSync, type Dirent } from 'fs'
 import path from 'path'
 import { createHash } from 'crypto'
 import { ImportSessionClient, type ImportSessionData } from '../../networkV2/ImportSessionClient'
+import type { ImportErrorDetails } from '../../../shared/importErrorKey'
 import { checkV2ImportReadiness } from './importFeatureFlag'
 import { decideUploadRetry, getRetryAfterDelayMs } from './importUploadRetry'
 import { createZipStoreStream, planZipStore, type ZipStoreSource } from './zipStoreStream'
@@ -85,7 +86,7 @@ export interface ProjectArchiveUploadParams {
   onBytes?: (sent: number, total: number) => void
 }
 
-export interface ProjectArchiveUploadResult {
+export interface ProjectArchiveUploadResult extends ImportErrorDetails {
   status: 'committed' | 'failed'
   sessionId?: string
   assetKey: string
@@ -103,7 +104,6 @@ export interface ProjectArchiveUploadResult {
   /** 按 archiveBytes / uploadMs 折算，MB/s（十进制兆） */
   mbPerSec: number
   uploadAttempts: number
-  error?: string
   errorCode?: string
 }
 
@@ -375,7 +375,11 @@ export async function uploadProjectArchive(
   const fail = (
     error: string,
     errorCode: string,
-    extra: { sessionId?: string; uploadMs?: number; uploadAttempts?: number } = {}
+    extra: {
+      sessionId?: string
+      uploadMs?: number
+      uploadAttempts?: number
+    } & Pick<ImportErrorDetails, 'errorKey' | 'errorParams'> = {}
   ): ProjectArchiveUploadResult => ({
     ...base,
     status: 'failed',
@@ -385,7 +389,9 @@ export async function uploadProjectArchive(
     mbPerSec: 0,
     uploadAttempts: extra.uploadAttempts ?? 0,
     error,
-    errorCode
+    errorCode,
+    errorKey: extra.errorKey,
+    errorParams: extra.errorParams
   })
 
   onStage?.('preflight', 0, 1)
@@ -518,10 +524,20 @@ export async function uploadProjectArchive(
     for (let attempt = 0; attempt < STAGED_WAIT_MAX_ATTEMPTS; attempt++) {
       latest = await client.getSession(sessionId)
       if (isImportSessionFailed(latest.status)) {
+        // 服务器给了 errorMessage / errorCode 就照旧透传原文；都没给才轮到这句兜底，
+        // errorKey 也只在这一路填 —— 透传的原文渲染层没法翻，编一个码反而说谎
+        const serverError = latest.errorMessage || latest.errorCode
         return fail(
-          latest.errorMessage || latest.errorCode || `服务端会话进入 ${latest.status} 状态`,
+          serverError || `服务器上的这次导入进入了 ${latest.status} 状态`,
           latest.errorCode || 'SESSION_FAILED',
-          { sessionId, uploadMs, uploadAttempts }
+          {
+            sessionId,
+            uploadMs,
+            uploadAttempts,
+            ...(serverError
+              ? {}
+              : { errorKey: 'serverImportFailed' as const, errorParams: { status: latest.status } })
+          }
         )
       }
       if (latest.stagedFileCount >= 1) break
