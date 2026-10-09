@@ -11,6 +11,7 @@
 
 import type { ChatMessageContent, MultimodalContentItem } from '../../../store/modules/chatMessages'
 import type { ChatSession, ChatSessionProject } from '../../../store/modules/chatSessions'
+import { isUntitledChatTitle } from '../../../utils/untitledChat'
 import { autoNameSession } from './sessionAutoTitle'
 import { stampSessionProject } from './sessionProjectBinding'
 
@@ -70,7 +71,7 @@ export function ensureSessionWithTitle(
   const { chatStore, tabsStore, route, unnamedTitle } = deps
   chatStore.ensureSession(sessionId, unnamedTitle)
   const session = chatStore.sessionById(sessionId)
-  if (session && session.title === unnamedTitle) {
+  if (session && isUntitledChatTitle(session.title, unnamedTitle)) {
     const autoTitle = messageText.replace(/\s+/g, ' ').slice(0, 20) || unnamedTitle
     chatStore.updateTitle(sessionId, autoTitle)
     const isAssistantRoute =

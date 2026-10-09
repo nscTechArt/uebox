@@ -65,6 +65,26 @@ describe('chat sessions pinning and project binding', () => {
     expect(store.getProject('old')?.projectPath).toBe('I:/SteamGame/steam-taikong-diablo')
   })
 
+  /*
+   * 默认标题换过几轮：小窗存进来的老对话标题还是「快速对话」。只比对新默认标题的话
+   * 它们会被当成已命名，再发一条消息也不会自动起名 —— 旧默认标题与当前默认标题
+   * 一视同仁（包括已经有消息的对话）是有意的行为变化，这里钉住它。
+   */
+  it('已存在的「快速对话」也算未命名，下一条消息照样给它起名', () => {
+    const store = useChatSessionsStore()
+    store.createSession('quick', '快速对话')
+    store.appendMessage('quick', '小窗里先前的对白')
+
+    ensureSessionWithTitle('quick', '这条新消息拿来给一条没起名的对话自动起名，后面截掉', {
+      chatStore: store,
+      tabsStore: { updateTabTitleByPath: vi.fn() },
+      route: { path: '/dev-assistant', fullPath: '/dev-assistant?sid=quick' },
+      unnamedTitle: '未命名对话'
+    })
+
+    expect(store.sessionById('quick')?.title).toBe('这条新消息拿来给一条没起名的对话自动起名')
+  })
+
   /**
    * 补路径这件事之所以不必在 `withSidebarProjectPath` 里防同名，是因为清单本身
    * 就没有同名。这条钉住那个前提 —— 哪天 `addManualProject` 不再去重，

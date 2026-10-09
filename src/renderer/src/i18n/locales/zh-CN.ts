@@ -2482,7 +2482,6 @@ export default {
       threeDGenEnabled: '3D生成模式已开启，支持上传5张以内的图片或输入描述后发送'
     },
     chat: {
-      unnamedSession: 'AI会话',
       messageNotFound: '消息不存在',
       onlyRetryAI: '只能重新生成AI回复',
       onlyEditUserMessage: '只能编辑用户消息',
@@ -2830,7 +2829,6 @@ export default {
       feedbackFailed: '已完成工具调用，但生成反馈失败。',
       generatingFeedback: '思考中..',
       noContent: '（AI 未返回文本内容）',
-      unnamedSession: 'AI会话',
       authFailed: '认证失败，请重新登录',
       agentError: 'Agent 错误',
       errorPrefix: '错误',
@@ -2938,7 +2936,7 @@ export default {
     },
     chatFlow: {
       readStreamFailed: '无法读取响应流',
-      unnamedSession: 'AI会话',
+      unnamedChat: '未命名对话',
       imageGenTitle: '🧩 图片生成',
       modelGenTitle: '✨ 模型生成',
       imageChatTitle: '图片对话',
@@ -7904,7 +7902,6 @@ export default {
       agent: '给 Agent 下达任务...'
     },
     imageCountPreview: '[{count}张图片]',
-    defaultSessionTitle: '快速对话',
     maxImagesWarning: '最多上传 {max} 张图片',
     imageSizeExceeded: '{name} 超过 20 MB',
     imageUploadFailed: '图片上传失败',

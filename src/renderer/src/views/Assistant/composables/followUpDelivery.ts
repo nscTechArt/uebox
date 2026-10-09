@@ -138,7 +138,7 @@ export function useFollowUpDelivery(): void {
       chatStore,
       tabsStore,
       route,
-      unnamedTitle: t('assistant.chatFlow.unnamedSession')
+      unnamedTitle: t('assistant.chatFlow.unnamedChat')
     })
     void appExecuteAgent(withSourceScope(content, sources), payload.excelContext, {
       chatSid,

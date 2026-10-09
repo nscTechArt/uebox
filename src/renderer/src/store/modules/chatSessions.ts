@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { chatHistoryStorage } from '../../utils/chatHistoryStorage'
+import { UNTITLED_CHAT_FALLBACK } from '../../utils/untitledChat'
 import { agentV3API } from '@renderer/api/agentV3'
 import { useChatSidebarStore } from './chatSidebarStore'
 import { applySessionPatch } from '../../utils/chatWindowSyncCore'
@@ -194,7 +195,7 @@ export const useChatSessionsStore = defineStore(
       }
 
       const now = Date.now()
-      const title = (initialTitle || 'AI会话').trim() || 'AI会话'
+      const title = (initialTitle || UNTITLED_CHAT_FALLBACK).trim() || UNTITLED_CHAT_FALLBACK
       const session: ChatSession = {
         id,
         title,

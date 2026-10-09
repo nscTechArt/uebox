@@ -122,7 +122,7 @@ export function useChatFlow(params: UseChatFlowParams) {
       chatStore,
       tabsStore,
       route,
-      unnamedTitle: t('assistant.chatFlow.unnamedSession')
+      unnamedTitle: t('assistant.chatFlow.unnamedChat')
     })
   }
 
@@ -167,7 +167,7 @@ export function useChatFlow(params: UseChatFlowParams) {
     if (text) return text
     if (isImageGenMode) return t('assistant.chatFlow.imageGenTitle')
     if (images.length > 0) return t('assistant.chatFlow.imageChatTitle')
-    return t('assistant.chatFlow.unnamedSession')
+    return t('assistant.chatFlow.unnamedChat')
   }
 
   async function respondWithImageGeneration(

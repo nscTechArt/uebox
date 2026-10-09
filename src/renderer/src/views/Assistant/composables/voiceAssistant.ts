@@ -1,5 +1,6 @@
 import { effectScope, watch, type EffectScope } from 'vue'
 import { message } from '@renderer/utils/messageManager'
+import { isUntitledChatTitle } from '@renderer/utils/untitledChat'
 import i18n from '@renderer/i18n'
 import { agentV3API } from '@renderer/api/agentV3'
 import { answerAgentQuestion, recordUserSteer } from './agentEventDispatcher'
@@ -255,10 +256,9 @@ function touchWorker(key: string): void {
 function voiceTaskTitle(workerKey: string): string {
   const chatTitle = useChatSessionsStore().sessionById(boundSid)?.title || ''
   const plain = t('assistantInputComposer.voice.taskSessionTitle')
-  const base =
-    !chatTitle || chatTitle === t('assistant.chatFlow.unnamedSession')
-      ? plain
-      : t('assistantInputComposer.voice.taskSessionTitleFor', { name: chatTitle })
+  const base = isUntitledChatTitle(chatTitle, t('assistant.chatFlow.unnamedChat'))
+    ? plain
+    : t('assistantInputComposer.voice.taskSessionTitleFor', { name: chatTitle })
   return `${base} · ${workerLabelOf(workerKey)}`
 }
 
@@ -285,7 +285,7 @@ export async function startVoiceIn(sid: string): Promise<void> {
   if (sid !== boundSid) workerOrder = []
   boundSid = sid
   // 和打字那条路用同一个占位标题，用户说第一句时照 `nameVoiceSession` 换掉
-  useChatSessionsStore().ensureSession(sid, t('assistant.chatFlow.unnamedSession'))
+  useChatSessionsStore().ensureSession(sid, t('assistant.chatFlow.unnamedChat'))
   await voice.start()
 }
 
@@ -324,7 +324,7 @@ let voiceAssistantMessageId = ''
 /**
  * 用户的第一句话顺手给这条对话起个名。
  *
- * 不起的话侧边栏上会排出一列一模一样的「AI会话」，用户分不出哪条是哪条 ——
+ * 不起的话侧边栏上会排出一列一模一样的「未命名对话」，用户分不出哪条是哪条 ——
  * 而「每次开口都是独立的一条」正是靠侧边栏认人的。判据和打字那条路
  * （`useChatFlow.ensureSessionWithTitle`）一样：**标题还是占位符才改**，
  * 所以绑到一条已经聊过的对话上时不会动人家的名字。标签页标题由页面上那条
@@ -332,8 +332,8 @@ let voiceAssistantMessageId = ''
  */
 function nameVoiceSession(text: string): void {
   const chatStore = useChatSessionsStore()
-  const placeholder = t('assistant.chatFlow.unnamedSession')
-  if (chatStore.sessionById(boundSid)?.title !== placeholder) return
+  const title = chatStore.sessionById(boundSid)?.title
+  if (!isUntitledChatTitle(title, t('assistant.chatFlow.unnamedChat'))) return
   chatStore.updateTitle(boundSid, text.replace(/\s+/g, ' ').slice(0, VOICE_TITLE_MAX_CHARS))
 }
 

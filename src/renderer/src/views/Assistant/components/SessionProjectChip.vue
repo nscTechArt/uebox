@@ -134,7 +134,7 @@ function assignProject(project: ConnectedProjectRef): void {
   // 新开的会话在发第一条消息之前还没进 store，直接 setProject 会静默落空。
   // 用户点了「归入项目」就是明确表态，先把这条会话建出来再盖戳。
   // 标题用 useChatFlow 比对的同一个 key，免得首条消息的自动改名失效。
-  chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedSession'))
+  chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedChat'))
 
   chatStore.setProject(props.sessionId, {
     projectName: project.projectName,
@@ -148,7 +148,7 @@ function clearProject(): void {
 
   // 和上面同理：会话还没建出来时，「移出项目」也得留下痕迹，
   // 否则待定归属还挂在路由上，首条消息一发又被盖回去。
-  chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedSession'))
+  chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedChat'))
   chatStore.clearProject(props.sessionId)
 }
 </script>

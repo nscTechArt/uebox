@@ -185,7 +185,7 @@ async function handleApplySnippet(): Promise<void> {
       chatStore: useChatSessionsStore(),
       tabsStore: useTabsStore(),
       route,
-      unnamedTitle: t('assistant.chatFlow.unnamedSession')
+      unnamedTitle: t('assistant.chatFlow.unnamedChat')
     })
     await appExecuteAgent(prompt, undefined, { chatSid })
   } catch (error) {

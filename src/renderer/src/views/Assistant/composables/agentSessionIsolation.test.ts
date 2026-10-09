@@ -53,7 +53,7 @@ function createAgentDeps() {
   const sessionA = 'session-a'
   const sessionB = 'session-b'
 
-  chatStore.createSession(chatA, 'assistant.agentMode.unnamedSession')
+  chatStore.createSession(chatA, 'assistant.chatFlow.unnamedChat')
   chatStore.createSession(chatB, 'Current Chat')
 
   const sid = ref(chatB)
@@ -246,6 +246,8 @@ describe('agent session isolation handlers', () => {
     ])
     expect(ctx.currentAgentController.value).not.toBeNull()
     expect(ctx.currentAgentProcess.value).toHaveLength(1)
+    // 后台对话确实走了自动起名，下一条「没改当前标签页」才有约束力
+    expect(ctx.chatStore.sessionById(ctx.chatA)?.title).toBe('Build me a frigate b')
     expect(ctx.tabsStore.updateTabTitleByPath).not.toHaveBeenCalled()
     expect(vi.mocked(unregisterAgentHandler)).toHaveBeenCalledWith(ctx.sessionA, undefined)
     expect(ctx.agentStreamStore.getChatSidByAgentSession(ctx.sessionA)).toBeUndefined()

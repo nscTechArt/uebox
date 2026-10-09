@@ -164,7 +164,7 @@ function handOffToAgent(context: HandOffContext): void {
       chatStore: useChatSessionsStore(),
       tabsStore: useTabsStore(),
       route: router.currentRoute.value,
-      unnamedTitle: t('assistant.chatFlow.unnamedSession')
+      unnamedTitle: t('assistant.chatFlow.unnamedChat')
     })
     void router.push({ path: '/dev-assistant', query: { sid: chatSid } })
     void appExecuteAgent(prompt, undefined, { chatSid })

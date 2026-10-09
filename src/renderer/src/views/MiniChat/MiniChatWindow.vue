@@ -299,7 +299,7 @@ function getSessionPreview(content: ChatMessageContent): string {
  * 初始化会话
  */
 function initSession(): void {
-  chatSessionStore.ensureSession(SESSION_ID.value, t('miniChatWindow.defaultSessionTitle'))
+  chatSessionStore.ensureSession(SESSION_ID.value, t('assistant.chatFlow.unnamedChat'))
   chatSessionStore.setAgentMode(SESSION_ID.value, true)
   chatSessionStore.setAgentHistory(SESSION_ID.value, [])
   chatSessionStore.setAgentCurrentText(SESSION_ID.value, '')
@@ -484,7 +484,7 @@ async function dispatchUserMessage(
   const submittedSessionId = SESSION_ID.value
 
   const preview = getSessionPreview(content)
-  chatSessionStore.ensureSession(submittedSessionId, t('miniChatWindow.defaultSessionTitle'))
+  chatSessionStore.ensureSession(submittedSessionId, t('assistant.chatFlow.unnamedChat'))
   if (preview) {
     chatSessionStore.appendMessage(submittedSessionId, preview)
   }
@@ -808,17 +808,14 @@ function handleResetSession(): void {
       const firstUserMsg = msgs.find((m) => m.role === 'user')
       const content = typeof firstUserMsg?.content === 'string' ? firstUserMsg.content : ''
       const title = content.slice(0, 20) + (content.length > 20 ? '...' : '')
-      chatSessionStore.updateTitle(
-        SESSION_ID.value,
-        title || t('miniChatWindow.defaultSessionTitle')
-      )
+      chatSessionStore.updateTitle(SESSION_ID.value, title || t('assistant.chatFlow.unnamedChat'))
       console.log('[MiniChat] 对话已保存到历史, 标题:', title)
 
       // 通知主窗口刷新会话列表
       console.log('[MiniChat] 发送 IPC 事件: mini-chat:session-saved')
       window.api.miniChat.sessionSaved({
         id: SESSION_ID.value,
-        title: title || t('miniChatWindow.defaultSessionTitle'),
+        title: title || t('assistant.chatFlow.unnamedChat'),
         // 主窗口靠这一份把消息同步进自己的 store（SideMenu 的 chat-sessions:refresh），
         // 少传的话侧边栏会多出一条点开是空的会话
         messages: JSON.parse(JSON.stringify(msgs))

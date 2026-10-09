@@ -319,7 +319,7 @@ function triggerInput(text: string): void {
   console.log('[Welcome] triggerInput called with:', text)
   if (!text) return
   // 确保会话存在，参考 handleBubbleSuggest 的逻辑
-  chatStore.ensureSession(sid.value || normalizeSid(''), t('assistant.chat.unnamedSession'))
+  chatStore.ensureSession(sid.value || normalizeSid(''), t('assistant.chatFlow.unnamedChat'))
   handleSend({ content: text, images: [] })
 }
 
@@ -908,7 +908,7 @@ const voiceStatusText = computed(() =>
 )
 const voiceBoundTitle = computed(() => {
   if (!voice.active.value && !voice.connecting.value) return ''
-  return chatStore.sessionById(voiceChatSid())?.title || t('assistant.chatFlow.unnamedSession')
+  return chatStore.sessionById(voiceChatSid())?.title || t('assistant.chatFlow.unnamedChat')
 })
 /** 球体此刻的用途：它在说话时点一下就是打断，不说话时提示去配个快捷键 */
 const voiceInterruptLabel = computed(() =>
@@ -1281,13 +1281,13 @@ onMounted(() => {
   if (isAssistantRoute) {
     tabsStore.updateTabTitleByPath(
       route.fullPath,
-      chatStore.sessionById(sid.value)?.title || t('assistant.chat.unnamedSession')
+      chatStore.sessionById(sid.value)?.title || t('assistant.chatFlow.unnamedChat')
     )
   }
   // 支持两种初始消息参数：q（原有）和 initialMessage（来自 Spotlight）
   const initial = String(route.query.q || route.query.initialMessage || '').trim()
   if (initial) {
-    chatStore.ensureSession(sid.value, t('assistant.chat.unnamedSession'))
+    chatStore.ensureSession(sid.value, t('assistant.chatFlow.unnamedChat'))
     chatStore.appendMessage(sid.value, initial)
     pushUser(initial) // 显示用户消息气泡
     executeAgent(initial)
@@ -1599,7 +1599,7 @@ function handleBindWiki(value: BoundNotebook): void {
     sid.value = targetSid
   }
 
-  chatStore.ensureSession(targetSid, t('assistant.chat.unnamedSession'))
+  chatStore.ensureSession(targetSid, t('assistant.chatFlow.unnamedChat'))
   chatStore.setBoundNotebook(targetSid, value)
   message.success(t('actionToast.notebook.bound', { title: value.title }))
 }
@@ -1780,7 +1780,7 @@ async function handleBubbleRetry(payload: { id: string; content: string }): Prom
 function handleBubbleSuggest(payload: { id: string; text: string }): void {
   const q = String(payload.text || '').trim()
   if (!q) return
-  chatStore.ensureSession(sid.value || normalizeSid(''), t('assistant.chat.unnamedSession'))
+  chatStore.ensureSession(sid.value || normalizeSid(''), t('assistant.chatFlow.unnamedChat'))
 
   // 重置用户滚动状态，确保后续生成内容能自动滚动到底部
   if (chatLogRef.value?.setUserScrolledAway) {

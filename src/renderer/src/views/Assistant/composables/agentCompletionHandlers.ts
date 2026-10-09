@@ -9,6 +9,7 @@ import type { AgentModeHandlersDeps, DoneEvent } from './agentHandlerShared'
 import { resolveAssistantMessage, resolveTargetChatSid } from './agentHandlerShared'
 import { collectGeneratedMediaFromAgentArtifacts } from './agentGeneratedMedia'
 import { autoNameSession } from './sessionAutoTitle'
+import { isUntitledChatTitle } from '../../../utils/untitledChat'
 import { retitleSession } from '../../../composables/sessionRetitle'
 import { shouldMarkTaskDone } from './sessionTaskDone'
 import { summarizeChanges } from './changeSummary'
@@ -489,18 +490,19 @@ export function createAgentCompletionHandlers(
     const retitleTabPath = route?.fullPath || ''
 
     const session = chatStore.sessionById(targetChatSid)
-    const defaultTitle = !session || session.title === t('assistant.agentMode.unnamedSession')
+    const defaultTitle =
+      !session || isUntitledChatTitle(session.title, t('assistant.chatFlow.unnamedChat'))
     if (defaultTitle && updatedHistory.length > 1) {
       const firstUserMsg = updatedHistory.find((item) => item.role === 'user')
       if (firstUserMsg) {
         const firstMessage = String(firstUserMsg.content || '')
         const autoTitle =
-          firstMessage.replace(/\s+/g, ' ').slice(0, 20) || t('assistant.agentMode.unnamedSession')
+          firstMessage.replace(/\s+/g, ' ').slice(0, 20) || t('assistant.chatFlow.unnamedChat')
         chatStore.updateTitle(targetChatSid, autoTitle)
         if (canRetitleTab) {
           tabsStore.updateTabTitleByPath(
             retitleTabPath,
-            chatStore.sessionById(targetChatSid)?.title || t('assistant.agentMode.unnamedSession')
+            chatStore.sessionById(targetChatSid)?.title || t('assistant.chatFlow.unnamedChat')
           )
         }
         // 走到这里说明这条会话没经过 `ensureSessionWithTitle`（从别处起的 Agent 跑）。

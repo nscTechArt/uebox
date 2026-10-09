@@ -2547,7 +2547,6 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         '3D generation mode enabled, supports uploading up to 5 images or entering description and send'
     },
     chat: {
-      unnamedSession: 'Unnamed Session',
       messageNotFound: 'Message not found',
       onlyRetryAI: 'Can only retry AI response',
       onlyEditUserMessage: 'Can only edit user message',
@@ -2900,7 +2899,6 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       feedbackFailed: 'Tool call completed, but failed to generate feedback.',
       generatingFeedback: 'Generating feedback...',
       noContent: '(AI returned no text content)',
-      unnamedSession: 'Unnamed Session',
       authFailed: 'Authentication failed, please login again',
       agentError: 'Agent Error',
       errorPrefix: 'Error',
@@ -3013,7 +3011,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     chatFlow: {
       readStreamFailed: 'Failed to read response stream',
-      unnamedSession: 'Unnamed Session',
+      unnamedChat: 'Untitled chat',
       imageGenTitle: '🧩 Image Gen',
       modelGenTitle: '✨ Model Gen',
       imageChatTitle: 'Image Chat',
@@ -8151,7 +8149,6 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       agent: 'Give the Agent a task...'
     },
     imageCountPreview: '[{count} image(s)]',
-    defaultSessionTitle: 'Quick chat',
     maxImagesWarning: 'You can upload up to {max} images',
     imageSizeExceeded: '{name} exceeds 20 MB',
     imageUploadFailed: 'Image upload failed',

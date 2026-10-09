@@ -26,7 +26,12 @@ const RETIRED_KEYS: string[] = [
   'assetLock.unknownSession',
   'assistant.sensitiveAction.allowForSession',
   'miniSensitiveConfirm.actions.allowSession',
-  'assistant.topNav.clearSession'
+  'assistant.topNav.clearSession',
+  // 未命名对话：四个旧 key 合并为 assistant.chatFlow.unnamedChat
+  'assistant.chat.unnamedSession',
+  'assistant.chatFlow.unnamedSession',
+  'assistant.agentMode.unnamedSession',
+  'miniChatWindow.defaultSessionTitle'
 ]
 
 describe('已退役的 i18n key', () => {
