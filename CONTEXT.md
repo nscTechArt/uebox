@@ -64,6 +64,43 @@ AI 使用用户配置的模型服务；网络资产库使用用户自己的服�
 对话入口，背后是 `src/main/agent-v3/`：**一个** Agent 直接拿到全部工具，自己决定调哪个。
 V2 那套「按问题类型路由到专家 Agent」已经废除，理由见 `agent-v3/core/createAgent.ts` 的注释。
 
+**对话 (Chat)**
+用户与 AI 之间的一条往来。AI 助手里的对话列在侧边栏；知识库、蓝图库、材质库的页面里各嵌着一条，不进侧边栏。
+背后是不是 Agent 驱动不构成区别。代码里叫 `ChatSession`。
+由 Agent 驱动的对话，在内核那一层对应一份 **session**，见该词条。
+别的概念的英文名不得含 "Chat"。
+_Avoid_：会话、聊天；Conversation、Session、Thread
+
+**消息 (Message)**
+对话里的一个气泡，用户发的或 AI 回的。
+
+**一轮 (Turn)**
+用户发出一条消息，加上 AI 为它做的全部回应（回复与工具调用）。
+_Avoid_：回合、一问一答；Exchange、Conversation turn
+
+**分支 (Branch)**
+一个动作：从一条对话的某条回复处复制出一条新对话，之后两边互不影响。分支出来的仍是一条普通对话，不是另一种东西。
+它靠内核复制一份 **session** 实现；内核把这个复制动作叫 fork，侧边问一句也用它。fork 只指内核那一步，不是分支的别名。
+_Avoid_：会话分支、对话分支；Session branch、Fork
+
+**侧边问一句 (Side question)**
+借一条对话的上下文，在小窗里只读地问一句；问完关掉，什么都不留下。它不是一条对话。
+被借上下文的那条对话，在这个场景里叫它的**主对话 (main chat)**。
+_Avoid_：侧边对话、侧边聊天；Side chat
+
+**语音通话 (Voice call)**
+用户与语音助手之间的一次实时语音交流，绑定在一条对话上；有开始、有挂断，通话结束后对话还在。
+_Avoid_：语音对话、语音会话；Voice conversation、Voice session
+
+**小窗 (Mini window)**
+AI 助手的浮动小窗口，不切回主窗口就能和 AI 对话；侧边问一句也在这里进行。代码里叫 MiniChat。
+_Avoid_：MiniChat、Mini Chat、迷你对话
+
+**session**
+内核那一层的单元：Agent 实际读写的那份历史，代码里 `agentSessionId`。不翻译，中文界面也写 "session"；
+只出现在面向开发者的界面（如调试台），面向用户的文案里不出现。
+_Avoid_：会话、内核记忆
+
 **UnrealAgentLink**
 装在用户 UE 项目里的插件，是虚幻盒子与引擎之间的通道。它连上之后，AI 才能"看见"当前关卡与选中资产，
 并反过来在引擎里执行操作。装在**项目**的 `Plugins/` 下而不是引擎目录 ——

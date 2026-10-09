@@ -31,7 +31,7 @@
             <AppMenuItem @click="emitSideChat">
               {{ t('assistant.sideChat.open') }}
             </AppMenuItem>
-            <AppMenuItem @click="emitClear"> {{ t('assistant.topNav.clearSession') }} </AppMenuItem>
+            <AppMenuItem @click="emitClear"> {{ t('assistant.topNav.clearChat') }} </AppMenuItem>
             <AppMenuItem @click="emitExportImage">
               {{ t('assistant.topNav.exportImage') }}
             </AppMenuItem>

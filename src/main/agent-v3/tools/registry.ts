@@ -656,7 +656,7 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'ue_fixup_redirectors',
     namespace: 'ue.content',
     risk: 'destructive',
-    // dry_run 按 safe 算（工具自己的 riskFor），预演上点的「本次会话都允许」放不过真正的那次
+    // dry_run 按 safe 算（工具自己的 riskFor），预演上点的「本对话内都允许」放不过真正的那次
     concurrency: 'sequential',
     make: () => ueEditor.createFixupRedirectorsTool()
   },
@@ -899,7 +899,7 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
   // 读跨库、写不跨库（见 adapted/asset/vaultScope.ts）。于是「东西在另一个库里，
   // 但改动只能在活跃库做」这一幕必然会撞上，出路只有换库 —— 而换库是用户的决定：
   // 应用整个界面会跟着换。所以定成 mutating 走审批门，用户可以放行一次，
-  // 也可以点「本会话都允许」让它以后自己切。
+  // 也可以点「本对话内都允许」让它以后自己切。
   {
     name: 'switch_vault',
     namespace: 'asset',

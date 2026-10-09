@@ -85,7 +85,7 @@ export interface ToolSpec<TIn extends z.ZodTypeAny, TDetails = unknown> {
   /**
    * 除完全访问权限外，每一次调用都必须由用户当场批准。
    *
-   * 「本次会话都允许」对它无效；`yolo` 档直接放行 —— 见 `core/approval.ts`。
+   * 「本对话内都允许」对它无效；`yolo` 档直接放行 —— 见 `core/approval.ts`。
    * 给的是那种**每次的参数都不一样、而参数本身就是风险**的工具：浏览器
    * 打开哪个网址、往输入框里发什么内容，批准一次不能代表批准下一次。
    */
@@ -176,7 +176,7 @@ export interface ToolMeta {
   requiresExplicitApproval?: boolean
   /**
    * 按这次的参数算实际风险。`risk` 是最坏情况；带 dry_run 这类只读开关的工具
-   * 用它把预演降成 safe —— 审批门按实际风险问，「本次会话都允许」也按实际风险记，
+   * 用它把预演降成 safe —— 审批门按实际风险问，「本对话内都允许」也按实际风险记，
    * 在预演上点的允许放不过真正的那次。
    */
   riskFor?: (args: unknown) => ToolRisk
@@ -187,7 +187,7 @@ const RISK_RANK: Record<ToolRisk, number> = { safe: 0, mutating: 1, destructive:
 /**
  * 这一次调用的实际风险：`riskFor` 只许往下降，不许往上抬。
  *
- * `risk` 是声明的最坏情况，「本次会话都允许」记在工具名上时覆盖的就是它；
+ * `risk` 是声明的最坏情况，「本对话内都允许」记在工具名上时覆盖的就是它；
  * `riskFor` 要是能抬到比它还高，那条记录就会放过一次没人批准过的更危险的调用。
  * 审批门、子任务写操作审计、目标复核都走这一个函数，免得各自对「这次算不算写」有不同答案。
  */

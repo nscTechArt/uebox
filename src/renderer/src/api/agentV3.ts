@@ -49,7 +49,7 @@ export type AgentV3Event =
       namespace: string
       risk: string
       args: unknown
-      /** false 时不给「本次会话都允许」——每次都要用户当场看参数再点头 */
+      /** false 时不给「本对话内都允许」——每次都要用户当场看参数再点头 */
       allowAlways?: boolean
     }
   /** agent 反问用户。界面在时间线上长一张选项卡片，答完经 replyQuestion 回传 */

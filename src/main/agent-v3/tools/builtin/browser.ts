@@ -37,7 +37,7 @@ import { BROWSER_TOOL_NAMES } from '../toolNames'
  *
  * `browser_interact` 保留 `mutating + requiresExplicitApproval`，因为它是
  * 真正**把数据发出去、在带登录态的页面上按按钮**的那一步：每次的参数都不一样，
- * 而参数本身就是风险，所以「本次会话都允许」对它无效；完全访问权限下直接放行
+ * 而参数本身就是风险，所以「本对话内都允许」对它无效；完全访问权限下直接放行
  * （见 `core/approval.ts`）。
  */
 

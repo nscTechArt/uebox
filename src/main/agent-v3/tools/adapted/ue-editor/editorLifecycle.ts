@@ -414,7 +414,7 @@ dirty_after 只数这条命令新弄脏、引擎又没存成的包，有才需�
     }),
 
     // 预演不改任何东西，按 safe 问；真正的那次照 destructive 问，而且预演上点的
-    // 「本次会话都允许」放不过来（审批门按实际风险分开记）
+    // 「本对话内都允许」放不过来（审批门按实际风险分开记）
     riskFor: (args) =>
       (args as { dry_run?: unknown } | null)?.dry_run === true ? 'safe' : 'destructive',
 

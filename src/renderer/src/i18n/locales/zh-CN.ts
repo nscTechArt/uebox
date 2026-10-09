@@ -26,7 +26,7 @@ export default {
     notebooks: '知识库',
     notebookDetail: '知识库详情',
     profile: '个人中心',
-    aiAssistant: 'AI会话',
+    aiAssistant: 'AI 助手',
     newChat: '新对话',
     tools: '工具',
     aiChat: 'AI 对话',
@@ -47,11 +47,11 @@ export default {
   chatSidebar: {
     pinned: '置顶',
     projects: '项目',
-    archive: '归档聊天',
+    archive: '归档对话',
     unarchive: '取消归档',
-    newChat: '新会话',
+    newChat: '新对话',
     projectSessionCount: '{count} 个对话',
-    newChatInProject: '在这个工程下新建会话',
+    newChatInProject: '在这个工程下新建对话',
     unassigned: '对话',
     unassignedHint: '没有关联 UE 工程的对话',
     connected: '已连接',
@@ -66,8 +66,8 @@ export default {
     renameProjectTitle: '重命名项目',
     openInExplorer: '在资源管理器中打开',
     openInExplorerFailed: '打开工程目录失败',
-    archiveProjectChats: '归档聊天',
-    archiveProjectTitle: '归档这个项目的聊天',
+    archiveProjectChats: '归档对话',
+    archiveProjectTitle: '归档这个项目的对话',
     archiveProjectContent:
       '把「{name}」下的 {count} 条对话都归档？归档后可以在「设置 → AI 助手 → 归档对话」里找回。',
     addProject: {
@@ -91,7 +91,7 @@ export default {
     organize: '整理侧边栏',
     groupByProject: '按 UE 工程',
     groupFlat: '在一个列表中',
-    sortBy: '会话排序方式',
+    sortBy: '对话排序方式',
     sortRecent: '最近更新',
     sortCreated: '创建时间',
     sortName: '名称',
@@ -99,10 +99,10 @@ export default {
     pin: '置顶',
     unpin: '取消置顶',
     rename: '重命名',
-    renameTitle: '重命名会话',
-    renamePlaceholder: '请输入新的会话名称',
+    renameTitle: '重命名对话',
+    renamePlaceholder: '请输入新的对话名称',
     smartName: '智能命名',
-    smartNameEmpty: '这条会话还没有对话内容，起不了名',
+    smartNameEmpty: '这条对话还没有消息，起不了名',
     smartNameFailed: '起名失败，自己写一个，或去检查轻量任务模型',
     /** 这条会话已经有一次起名在途（多半是「自动生成新标题」那一路）。等一下再点就有 */
     smartNameBusy: '正在起名，稍等一下再试',
@@ -112,16 +112,16 @@ export default {
     projectNamePlaceholder: '请输入 UE 工程名',
     delete: '删除',
     deleteTitle: '确认删除',
-    deleteContent: '确定要删除会话「{title}」吗？此操作不可撤销。',
+    deleteContent: '确定要删除对话「{title}」吗？此操作不可撤销。',
     deleteTranscriptFailed: '会话已移除，但内核记忆删除失败',
     cancel: '取消',
     // 多选批量栏：Ctrl/Cmd+点击逐个加，Shift+点击拉范围
     batch: {
       clearSelection: '取消选择',
       deleteTitle: '确认删除',
-      deleteContent: '确定要删除选中的 {count} 条会话吗？此操作不可撤销。'
+      deleteContent: '确定要删除选中的 {count} 条对话吗？此操作不可撤销。'
     },
-    initialFallback: '会'
+    initialFallback: '对'
   },
   // 归档对话：偏好设置 → AI 设置里的弹窗，侧边栏不再有「已归档」区
   archivedChats: {
@@ -138,9 +138,9 @@ export default {
     followUpUserPrompt:
       '基于上面的对话，站在用户当前的立场生成对assistant的{lang}追加和虚幻开发相关的提问建议或是对用户可能会回复的操作指令',
     sessionTitleSystemPrompt:
-      '你是会话标题生成器。根据用户发来的第一条消息，用{lang}起一个概括这段对话主题的标题，不超过15个字。只写主题本身，不要引号、不要句末标点、不要“关于”“如何”这类前缀，也不要复述整句话。仅输出JSON且必须符合schema，字段为title（字符串），不要输出其它内容或解释。',
+      '你是对话标题生成器。根据用户发来的第一条消息，用{lang}起一个概括这段对话主题的标题，不超过15个字。只写主题本身，不要引号、不要句末标点、不要“关于”“如何”这类前缀，也不要复述整句话。仅输出JSON且必须符合schema，字段为title（字符串），不要输出其它内容或解释。',
     sessionRenameSystemPrompt:
-      '你是会话标题生成器。下面是一段对话的梗概：用户按时间顺序提过的问题，和最后一条回答，有时还附上当前标题。用{lang}起一个概括整段对话主线的标题，不超过15个字。标题要覆盖这段对话一直在做的事，不要只写最后一个问题的细节；给了当前标题且它仍然贴切的话，原样返回它。只写主题本身，不要引号、不要句末标点、不要“关于”“如何”这类前缀，也不要复述原话。仅输出JSON且必须符合schema，字段为title（字符串），不要输出其它内容或解释。',
+      '你是对话标题生成器。下面是一段对话的梗概：用户按时间顺序提过的问题，和最后一条回答，有时还附上当前标题。用{lang}起一个概括整段对话主线的标题，不超过15个字。标题要覆盖这段对话一直在做的事，不要只写最后一个问题的细节；给了当前标题且它仍然贴切的话，原样返回它。只写主题本身，不要引号、不要句末标点、不要“关于”“如何”这类前缀，也不要复述原话。仅输出JSON且必须符合schema，字段为title（字符串），不要输出其它内容或解释。',
     speechBriefingConciseSystemPrompt:
       '你是语音播报编辑。把用户发来的这条 AI 回复改写成一段念给人听的口播稿，只保留结论：做了什么、结果如何、需要对方做什么。最多三句话，80 字以内。用回复原本的语言。不要代码、文件路径、网址、Markdown 符号、列表和标题；不要开场白，不要提“这条回复”，直接说正文。只输出口播稿本身，不要解释。',
     speechBriefingDetailedSystemPrompt:
@@ -153,7 +153,7 @@ export default {
     releaseAll: '全部解锁',
     conflict: '{path} 正被「{session}」修改，本次未改动',
     dismiss: '知道了',
-    unknownSession: '另一条会话',
+    unknownChat: '另一条对话',
     currentLevel: '当前关卡'
   },
   agentV3Debug: {
@@ -626,7 +626,7 @@ export default {
       // 行内只留「选之前要知道的」，长文收进 More（一个 ? 图标的 tooltip）
       moreLabel: '查看详细说明',
       chat: '对话',
-      chatDesc: '助手与各处聊天窗口的默认模型。',
+      chatDesc: '助手与各处对话窗口的默认模型。',
       chatMerged: 'Agent、视觉、轻量任务也用这个模型。',
       chatSplit: '分别设置',
       agent: 'Agent',
@@ -860,11 +860,11 @@ export default {
     copy: '复制',
     pin: '固定',
     unpin: '取消固定',
-    newChat: '和 AGENT 对话',
+    newChat: '新对话',
     openInNewWindow: '在新窗口打开'
   },
   chatWindow: {
-    windowTitle: 'AI 会话',
+    windowTitle: 'AI 对话',
     voiceTakenOver: '语音通话已转到另一个窗口。',
     minimize: '最小化',
     maximize: '最大化',
@@ -1647,7 +1647,7 @@ export default {
     language: '语言',
     // 托盘「退出」时还有会话操作没收摊。数的是会话操作，不是全部后台任务
     trayQuitTitle: '退出虚幻盒子？',
-    trayQuitContent: '有 {count} 项会话操作尚未完成，退出会中断它们。',
+    trayQuitContent: 'AI 还有 {count} 项操作在进行，退出会中断它们。',
     trayQuitOk: '仍然退出',
     // 同一个框，安装更新时换标题和按钮
     updateQuitTitle: '重启安装更新？',
@@ -2488,8 +2488,8 @@ export default {
       onlyEditUserMessage: '只能编辑用户消息',
       stopBeforeResendFailed: '上一轮仍在停止，请稍后重试',
       userMessageNotFound: '找不到对应的用户消息',
-      clearConfirmTitle: '确认清空会话',
-      clearConfirmContent: '该操作不可撤销,确定要清空当前会话的所有消息吗？',
+      clearConfirmTitle: '确认清空对话',
+      clearConfirmContent: '该操作不可撤销，确定要清空当前对话的所有消息吗？',
       newMessage: '有新消息',
       emptyMessage: '消息内容不能为空',
       editMessage: '编辑消息',
@@ -2634,7 +2634,7 @@ export default {
     },
     topNav: {
       agentMode: '智能对话',
-      clearSession: '清空会话',
+      clearChat: '清空对话',
       exportImage: '导出图片',
       exportImageEmpty: '暂无可导出内容',
       exportImagePreparing: '正在生成对话长图…',
@@ -2837,7 +2837,7 @@ export default {
       switchedToAgent: '已切换到 Agent',
       switchedToNormal: '已切换到 Chat',
       agentExecFailed: 'Agent 执行失败',
-      sessionModelUnavailable: '这个会话绑定的模型 {model} 已不可用，本轮改用默认模型',
+      sessionModelUnavailable: '这条对话绑定的模型 {model} 已不可用，本轮改用默认模型',
       // 同一条对话已经有一轮在跑。不提 sessionId，也不提底下那个 IPC 通道叫什么 ——
       // 界面上「改方向」就是直接在输入框里继续打字
       sessionBusy: '这条对话还有一轮在跑。等它结束，或者直接在输入框里说下一步该怎么改。',
@@ -2901,7 +2901,7 @@ export default {
       resize: '调整浏览器宽度',
       resizing: '松开鼠标以显示网页',
       closeFailed: '无法保存浏览器关闭状态，请稍后重试。',
-      restoreFailed: '无法恢复浏览器页面，请检查网络后重新进入会话。',
+      restoreFailed: '无法恢复浏览器页面，请检查网络后重新进入对话。',
       title: 'Agent 浏览器',
       hint: '页面加载中…'
     },
@@ -2910,7 +2910,7 @@ export default {
       actionType: '操作类型',
       confirm: '确认执行',
       reject: '拒绝',
-      allowForSession: '本次会话都允许',
+      allowForChat: '本对话内都允许',
       whatIsThis: '这是什么？',
       // 并行执行时可能同时有好几条在等，答完这条会接着弹下一条
       queued: '还有 {count} 条等确认',
@@ -3257,10 +3257,10 @@ export default {
       },
       metric: {
         uncached: 'Token',
-        turns: '对话轮次',
+        turns: '轮次',
         changes: '改动'
       },
-      totalTurns: '对话轮次',
+      totalTurns: '轮次',
       totalTurnsHint: '一次提问算一轮',
       toolCallsTotal: '工具调用',
       uncachedTotal: '不含缓存共计',
@@ -3295,7 +3295,7 @@ export default {
       changesTargets: '涉及资产',
       changesTargetsHint: '同一资产多次修改只计一次',
       changesPerTurn: '平均每轮',
-      changesPerTurnHint: '每轮对话完成的平均改动数',
+      changesPerTurnHint: '每轮完成的平均改动数',
       changesNote: '只统计成功修改；脚本改动计入操作数，但不计入涉及资产数。',
       changesFailedNote: '另有 {count} 次修改失败，详情见操作记录。',
       changesEmpty: '这段时间没有改动记录。',
@@ -3313,7 +3313,7 @@ export default {
       },
       projectsTitle: '按工程',
       colProject: '工程',
-      colTurns: '对话轮次',
+      colTurns: '轮次',
       colTokens: 'Token（不含缓存）',
       colChanges: '改动',
       noProject: '未关联工程',
@@ -3533,7 +3533,7 @@ export default {
       assistantTitle: '语音助手',
       generalTitle: '通用',
       autoPlay: '自动播放',
-      autoPlayDesc: 'AI 会话生成结束后，自动朗读回复。',
+      autoPlayDesc: 'AI 回复生成结束后，自动朗读。',
       briefingStyle: '播报风格',
       briefingConcise: '简洁',
       briefingDetailed: '详细',
@@ -5571,7 +5571,7 @@ export default {
     },
     wikiPopover: {
       title: '选择知识库',
-      hint: '输入 /wiki 过滤，点击绑定到当前会话',
+      hint: '输入 /wiki 过滤，点击绑定到当前对话',
       empty: '未找到匹配知识库',
       sourceCount: '{count} 个来源'
     },
@@ -5595,7 +5595,7 @@ export default {
       team: '团队模式 —— 一句话，自己组队做到可玩交付',
       teamArg: '<一句话>',
       image: '切到图片生成模式',
-      compact: '压缩这条会话的历史，腾出上下文',
+      compact: '压缩这条对话的历史，腾出上下文',
       goalArg: '<目标>',
       wikiArg: '[关键词]',
       wiki: '绑定知识库；输入 /wiki clear 解绑'
@@ -6716,7 +6716,7 @@ export default {
       operationFailed: '操作失败'
     }
   },
-  // 对一条本地/网络路径能做什么：聊天正文右键、以及「本轮改动」里的「打开 ▾」共用
+  // 对一条本地/网络路径能做什么：对话正文右键、以及「本轮改动」里的「打开 ▾」共用
   filePathMenu: {
     open: '打开',
     reveal: '资源管理器',
@@ -6816,7 +6816,7 @@ export default {
     },
     actions: {
       reject: '拒绝',
-      allowSession: '本次会话都允许',
+      allowForChat: '本对话内都允许',
       confirm: '确认执行'
     }
   },
@@ -7898,7 +7898,7 @@ export default {
       empty: '问点什么吧 —— 它看得见主对话做过的每一步'
     },
     emptyState: {
-      agent: '输入消息开始 Agent 对话'
+      agent: '输入消息开始对话'
     },
     placeholder: {
       agent: '给 Agent 下达任务...'

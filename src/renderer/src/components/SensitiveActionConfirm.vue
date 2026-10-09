@@ -56,11 +56,11 @@
           <AppButton
             v-if="pendingAction.allowAlways !== false"
             variant="default"
-            class="btn-allow-session"
-            @click="handleAllowForSession"
+            class="btn-allow-chat"
+            @click="handleAllowForChat"
           >
             <template #icon><PhShieldCheck /></template>
-            {{ t('assistant.sensitiveAction.allowForSession') }}
+            {{ t('assistant.sensitiveAction.allowForChat') }}
           </AppButton>
           <AppButton variant="primary" class="btn-confirm" @click="handleConfirm">
             <template #icon><PhCheck /></template>
@@ -156,8 +156,8 @@ function handleConfirm(): void {
   reply('approve')
 }
 
-/** 「本次会话都允许」。V3 的 'always' 语义就是「本会话内该工具不再询问」，正好对上 */
-function handleAllowForSession(): void {
+/** 「本对话内都允许」。V3 的 'always' 语义是「本 session 内该工具不再询问」，对用户就是这条对话 */
+function handleAllowForChat(): void {
   reply('always')
 }
 
@@ -476,7 +476,7 @@ Please explain what this operation means and does.`
   }
 }
 
-.btn-allow-session {
+.btn-allow-chat {
   background: var(--color-success-bg);
   border-color: var(--color-success-border);
   color: var(--color-success-text);

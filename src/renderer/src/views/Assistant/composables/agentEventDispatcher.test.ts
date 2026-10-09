@@ -995,7 +995,7 @@ describe('agentEventDispatcher', () => {
       expect(usePendingApprovalsStore().current).toBeNull()
     })
 
-    it('没有 allowAlways 字段时按「可以本次会话都允许」算', () => {
+    it('没有 allowAlways 字段时按「可以本对话内都允许」算', () => {
       bus.emit('agent-v3:approval-required', {
         sessionId: SID,
         toolCallId: 'call-1',

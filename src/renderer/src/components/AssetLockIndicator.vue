@@ -179,13 +179,13 @@ const shortPath = (path: string): string => path.split('/').pop() || path
  *
  * **先按 `agentSessionId` 查。** 锁主是内核那边的会话 id（`agent-v3:execute`
  * 收到的那个），跟界面这边的会话 `id` 不是一回事。原来直接拿它去 `sessionById`，
- * 于是**每一把锁都查不到**，全部显示成「另一条会话」—— 包括用户自己此刻正在
+ * 于是**每一把锁都查不到**，全部显示成「另一条对话」—— 包括用户自己此刻正在
  * 用的这条。再退回按界面 id 查一次，是因为小窗口那类入口两个 id 可能同源。
  */
 const sessionLabel = (owner: string): string => {
   const session =
     chatSessions.sessionByAgentSessionId(owner) || chatSessions.sessionById(owner) || null
-  return session?.title || t('assetLock.unknownSession')
+  return session?.title || t('assetLock.unknownChat')
 }
 </script>
 

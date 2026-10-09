@@ -17,7 +17,7 @@ export interface PendingApproval {
   namespace: string
   risk: string
   args: unknown
-  /** false 时界面不给「本次会话都允许」，见 `core/approval.ts` */
+  /** false 时界面不给「本对话内都允许」，见 `core/approval.ts` */
   allowAlways: boolean
 }
 

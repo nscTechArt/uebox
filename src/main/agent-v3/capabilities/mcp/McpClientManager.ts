@@ -12,7 +12,7 @@
  *   - MCP 的 `annotations.readOnlyHint` 是 **server 自报**的，攻击者随便填
  *
  * `destructive` 意味着即使在 auto-edit 模式下也要用户确认。用户信任某个 server 时，
- * 审批弹窗里点「本次会话始终允许」即可，成本只有一次。
+ * 审批弹窗里点「本对话内都允许」即可，成本只有一次。
  *
  * ## 隔离
  *

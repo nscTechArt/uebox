@@ -156,7 +156,7 @@ describe('explainVaultMiss：说准，但不越权', () => {
   it('说明切库要用户点头，被拒绝时得如实转达而不是绕路', async () => {
     const reason = await explainVaultMiss('当前保管库里没有这条记录', (db) => db === DB.v_default)
 
-    expect(reason).toContain('本会话都允许')
+    expect(reason).toContain('本对话内都允许')
     expect(reason).toContain('被拒绝')
   })
 

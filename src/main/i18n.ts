@@ -52,7 +52,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'tray.quit': '退出',
     // 数的是会话操作：AI 轮次和分叉 / 截断 / 压缩这类历史操作都算，
     // 但不是全部后台任务 —— 别让用户以为连导入也算
-    'tray.quitConfirm': '有 {count} 项会话操作尚未完成，退出会中断它们。',
+    'tray.quitConfirm': 'AI 还有 {count} 项操作在进行，退出会中断它们。',
     'tray.quitConfirmOk': '仍然退出',
     // 安装更新撞上会话操作没收摊：同一个框，按钮说清楚是重启装包
     'tray.updateConfirmOk': '仍然重启安装',
@@ -99,7 +99,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
   'en-US': {
     'tray.tooltip': 'Unreal Box',
     'tray.open': 'Open Unreal Box',
-    'tray.newChat': 'New AI Chat',
+    'tray.newChat': 'New chat',
     'tray.recentChats': 'Recent chats',
     'tray.untitledChat': 'Untitled chat',
     'tray.recentProjects': 'Recent projects',
@@ -107,7 +107,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'tray.launching': '{name} (starting)',
     'tray.quit': 'Quit',
     'tray.quitConfirm':
-      '{count} session operation(s) are still unfinished — quitting will interrupt them.',
+      'The AI still has {count} operation(s) in progress — quitting will interrupt them.',
     'tray.quitConfirmOk': 'Quit anyway',
     'tray.updateConfirmOk': 'Restart and install anyway',
     'tray.quitConfirmCancel': 'Cancel',

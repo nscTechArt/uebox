@@ -81,7 +81,7 @@ async function run(
 }
 
 describe('元数据', () => {
-  it('每一次渲染都要用户当场批准，「本次会话都允许」放不过', () => {
+  it('每一次渲染都要用户当场批准，「本对话内都允许」放不过', () => {
     expect(tool.unrealBox.requiresExplicitApproval).toBe(true)
     expect(tool.unrealBox.namespace).toBe('ue.sequencer')
   })

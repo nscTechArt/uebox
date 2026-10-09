@@ -20,9 +20,9 @@
         size="small"
         variant="primary"
         class="btn-allow"
-        @click="handleAllowForSession"
+        @click="handleAllowForChat"
       >
-        {{ $t('miniSensitiveConfirm.actions.allowSession') }}
+        {{ $t('miniSensitiveConfirm.actions.allowForChat') }}
       </AppButton>
       <AppButton size="small" variant="primary" class="btn-confirm" @click="handleConfirm">
         {{ $t('miniSensitiveConfirm.actions.confirm') }}
@@ -65,8 +65,8 @@ function handleConfirm(): void {
   reply('approve')
 }
 
-/** 「本次会话都允许」。V3 的 'always' 语义就是「本会话内该工具不再询问」，正好对上 */
-function handleAllowForSession(): void {
+/** 「本对话内都允许」。V3 的 'always' 语义是「本 session 内该工具不再询问」，对用户就是这条对话 */
+function handleAllowForChat(): void {
   reply('always')
 }
 

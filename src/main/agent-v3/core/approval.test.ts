@@ -102,7 +102,7 @@ describe('createApprovalGate', () => {
 
   /**
    * 带 dry_run 的破坏性工具：预演按 riskFor 降成 safe，不问；在预演上点的
-   * 「本次会话都允许」不能把真正的那次一起放行 —— 记住的授权按实际风险分开记。
+   * 「本对话内都允许」不能把真正的那次一起放行 —— 记住的授权按实际风险分开记。
    */
   it('riskFor 把 dry_run 降成 safe；预演上的始终允许放不过真正的那次', async () => {
     const dryRunTool = (): UnrealAgentTool<never> =>
@@ -129,7 +129,7 @@ describe('createApprovalGate', () => {
     expect(await run(callCtx('t', { dry_run: true }))).toBeUndefined()
     expect(request).toHaveBeenCalledTimes(0)
 
-    // 真正执行：问，用户点「始终允许」
+    // 真正执行：问，用户点「本对话内都允许」
     expect(await run(callCtx('t', {}))).toBeUndefined()
     expect(request).toHaveBeenCalledTimes(1)
     expect(remembered.has('t')).toBe(true)
@@ -138,7 +138,7 @@ describe('createApprovalGate', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
-  it('风险被 riskFor 降级的那次点「始终允许」，只记降级后的那一档', async () => {
+  it('风险被 riskFor 降级的那次点「本对话内都允许」，只记降级后的那一档', async () => {
     const remembered = new Set<string>()
     const request = vi.fn(async (): Promise<ApprovalVerdict> => 'always')
     const run = createApprovalGate({
@@ -157,7 +157,7 @@ describe('createApprovalGate', () => {
         }) as unknown as UnrealAgentTool<never>,
       request
     })
-    // mutating 在 ask 下要问；点了始终允许，记的是 t#mutating
+    // mutating 在 ask 下要问；点了「本对话内都允许」，记的是 t#mutating
     expect(await run(callCtx('t', { preview: true }))).toBeUndefined()
     expect(remembered.has('t#mutating')).toBe(true)
     expect(remembered.has('t')).toBe(false)
@@ -262,7 +262,7 @@ describe('createApprovalGate', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
-  // 按钮上写的是「本次会话都允许」。集合活在审批门里的话它只管到这一轮结束
+  // 按钮上写的是「本对话内都允许」。集合活在审批门里的话它只管到这一轮结束
   //（审批门随 agent 创建，而 agent 每条消息重建一次），下一句话又开始问
   it('「始终允许」记在宿主给的集合里，换一轮也还算数', async () => {
     const alwaysAllowed = new Set<string>()
@@ -357,7 +357,7 @@ describe('createApprovalGate', () => {
       expect(request).toHaveBeenCalledTimes(1)
     })
 
-    it('请求里带 allowAlways: false，界面据此不显示「本次会话都允许」', async () => {
+    it('请求里带 allowAlways: false，界面据此不显示「本对话内都允许」', async () => {
       const seen: ApprovalRequest[] = []
       const run = createApprovalGate({
         sessionId: 's',

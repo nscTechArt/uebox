@@ -27,7 +27,7 @@ export default {
     notebookDetail: 'Notebook Detail',
     profile: 'Profile',
     aiAssistant: 'AI Assistant',
-    newChat: 'New AI Chat',
+    newChat: 'New chat',
     tools: 'Tools',
     aiChat: 'AI Chat',
     requirements: 'Requirements',
@@ -135,11 +135,11 @@ export default {
     followUpSystemPrompt:
       "You are a senior Unreal Engine technical assistant. Output only JSON and must strictly follow the schema. The field is followUps (array), containing 2-3 follow-up questions for the assistant from the user's perspective, within 15 words each in {lang}. Each must be a complete sentence that can be asked directly. Do not output any other content or explanations.",
     followUpUserPrompt:
-      "Based on the conversation above, generate follow-up questions for the assistant from the user's perspective in {lang}.",
+      "Based on the chat above, generate follow-up questions for the assistant from the user's perspective in {lang}.",
     sessionTitleSystemPrompt:
-      'You are a chat title generator. From the user\'s first message, write a title in {lang} that captures what the conversation is about, at most 6 words. Write the topic only: no quotes, no trailing punctuation, no prefixes like "About" or "How to", and do not repeat the whole sentence. Output only JSON and must strictly follow the schema. The field is title (string). Do not output any other content or explanations.',
+      'You are a chat title generator. From the user\'s first message, write a title in {lang} that captures what the chat is about, at most 6 words. Write the topic only: no quotes, no trailing punctuation, no prefixes like "About" or "How to", and do not repeat the whole sentence. Output only JSON and must strictly follow the schema. The field is title (string). Do not output any other content or explanations.',
     sessionRenameSystemPrompt:
-      'You are a chat title generator. Below is an outline of a conversation: the user\'s questions in order and the latest answer, sometimes with the current title. Write a title in {lang} that captures the main thread of the whole conversation, at most 6 words. Cover what the conversation has been working on throughout, not just the details of the last question; if a current title is given and still fits, return it unchanged. Write the topic only: no quotes, no trailing punctuation, no prefixes like "About" or "How to", and do not repeat the wording. Output only JSON and must strictly follow the schema. The field is title (string). Do not output any other content or explanations.',
+      'You are a chat title generator. Below is an outline of a chat: the user\'s questions in order and the latest answer, sometimes with the current title. Write a title in {lang} that captures the main thread of the whole chat, at most 6 words. Cover what the chat has been working on throughout, not just the details of the last question; if a current title is given and still fits, return it unchanged. Write the topic only: no quotes, no trailing punctuation, no prefixes like "About" or "How to", and do not repeat the wording. Output only JSON and must strictly follow the schema. The field is title (string). Do not output any other content or explanations.',
     speechBriefingConciseSystemPrompt:
       'You are a voice narration editor. Rewrite the AI reply the user sends you as a short script to be read aloud, keeping only the conclusion: what was done, the outcome, and what the listener needs to do. At most three sentences and about 50 words. Use the same language as the reply. No code, file paths, URLs, Markdown symbols, lists or headings; no preamble and no references to "this reply", just the script itself. Output only the script, no explanation.',
     speechBriefingDetailedSystemPrompt:
@@ -152,7 +152,7 @@ export default {
     releaseAll: 'Release all',
     conflict: '{path} is being modified by "{session}"; nothing was changed',
     dismiss: 'Dismiss',
-    unknownSession: 'another session',
+    unknownChat: 'another chat',
     currentLevel: 'Current level'
   },
   agentV3Debug: {
@@ -229,7 +229,8 @@ export default {
       needsRestart: 'Configured · restart the editor',
       unsupported: 'Engine too old · needs 5.8+',
       ready: 'Enabled · running',
-      readyHint: 'The engine service is running; the box will connect on the next conversation.',
+      readyHint:
+        'The engine service is running; the box will connect automatically the next time you chat.',
       // The most common reason the button "disappears" — say it instead of showing nothing.
       noProject:
         'No Unreal Engine project is connected yet. Open a project from the home page and its status will show here.',
@@ -882,7 +883,7 @@ export default {
     copy: 'Duplicate',
     pin: 'Pin',
     unpin: 'Unpin',
-    newChat: 'New AI Chat',
+    newChat: 'New chat',
     openInNewWindow: 'Open in New Window'
   },
   chatWindow: {
@@ -1689,7 +1690,7 @@ export default {
     language: 'Language',
     trayQuitTitle: 'Quit Unreal Box?',
     trayQuitContent:
-      '{count} session operation(s) are still unfinished — quitting will interrupt them.',
+      'The AI still has {count} operation(s) in progress — quitting will interrupt them.',
     trayQuitOk: 'Quit anyway',
     updateQuitTitle: 'Restart to install the update?',
     updateQuitOk: 'Restart and install anyway'
@@ -2552,9 +2553,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       onlyEditUserMessage: 'Can only edit user message',
       stopBeforeResendFailed: 'The previous run has not stopped yet — try resending in a moment',
       userMessageNotFound: 'Cannot find corresponding user message',
-      clearConfirmTitle: 'Confirm Clear Session',
-      clearConfirmContent:
-        'This operation cannot be undone. Are you sure you want to clear all messages in the current session?',
+      clearConfirmTitle: 'Clear this chat?',
+      clearConfirmContent: 'This cannot be undone. Clear all messages in this chat?',
       newMessage: 'New Message',
       emptyMessage: 'Message content cannot be empty',
       editMessage: 'Edit Message',
@@ -2703,12 +2703,12 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     topNav: {
       agentMode: 'Agent Mode',
-      clearSession: 'Clear Session',
+      clearChat: 'Clear chat',
       exportImage: 'Export Image',
-      exportImageEmpty: 'This conversation has no content to export',
-      exportImagePreparing: 'Generating conversation image…',
-      exportImageSuccess: 'Conversation image exported',
-      exportImageFailed: 'Failed to export conversation image. Please try again.',
+      exportImageEmpty: 'This chat has no content to export',
+      exportImagePreparing: 'Exporting chat as image…',
+      exportImageSuccess: 'Chat image exported',
+      exportImageFailed: 'Failed to export chat image. Please try again.',
       exportJSON: 'Export JSON',
       exportMarkdown: 'Export Markdown'
     },
@@ -2912,7 +2912,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       // No session id, no IPC channel name: "change direction" is just typing
       // into the input box
       sessionBusy:
-        'This conversation still has a run in progress. Wait for it to finish, or just type what you want changed.',
+        'This chat still has a run in progress. Wait for it to finish, or just type what you want changed.',
       resume: 'Try again',
       autoResume:
         'Lost the connection to the model. Picking up again in {seconds}s (attempt {attempt}/{max}). Finished steps will not be redone.',
@@ -2977,7 +2977,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       resizing: 'Release to show the page',
       closeFailed: 'Could not save the closed browser state. Please try again.',
       restoreFailed:
-        'Could not restore the browser page. Check your connection and reopen the conversation.',
+        'Could not restore the browser page. Check your connection and reopen the chat.',
       title: 'Agent browser',
       hint: 'Loading the page…'
     },
@@ -2986,7 +2986,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       actionType: 'Operation Type',
       confirm: 'Confirm',
       reject: 'Reject',
-      allowForSession: 'Allow for Session',
+      allowForChat: 'Allow for this chat',
       whatIsThis: 'What is this?',
       queued: '{count} more waiting',
       // Named by risk. Everything non-browser used to collapse into "Other
@@ -3202,7 +3202,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       description: 'Work background and communication preferences.',
       // Standing instructions
       instructionsTitle: 'Instructions for the assistant',
-      instructionsDesc: 'Persistent preferences applied to all conversations.',
+      instructionsDesc: 'Persistent preferences applied to all chats.',
       instructionsPlaceholder:
         'For example:\nI am a level designer at a game studio, mostly open-world layout and optimisation.\nI do not write C++. I can read blueprints but do not assume fluency.\nLead with the conclusion; I will ask for the details when I want them.',
       openInstructionsFile: 'Open in the default text editor',
@@ -3366,10 +3366,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       },
       metric: {
         uncached: 'Tokens',
-        turns: 'Conversation turns',
+        turns: 'Turns',
         changes: 'Changes'
       },
-      totalTurns: 'Conversation turns',
+      totalTurns: 'Turns',
       totalTurnsHint: 'One question counts as one turn',
       toolCallsTotal: 'Tool calls',
       uncachedTotal: 'Excluding cache',
@@ -3405,7 +3405,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       changesTargets: 'Assets touched',
       changesTargetsHint: 'Each asset is counted once, even if changed multiple times',
       changesPerTurn: 'Per turn',
-      changesPerTurnHint: 'Average completed changes per conversation turn',
+      changesPerTurnHint: 'Average completed changes per turn',
       changesNote:
         'Counts successful changes only. Script changes count as operations, but not as affected assets.',
       changesFailedNote: 'Another {count} changes failed. See operation records for details.',
@@ -3424,7 +3424,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       },
       projectsTitle: 'By project',
       colProject: 'Project',
-      colTurns: 'Conversation turns',
+      colTurns: 'Turns',
       colTokens: 'Tokens (uncached)',
       colChanges: 'Changes',
       noProject: 'No project',
@@ -3524,7 +3524,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       assistantTitle: 'Voice assistant',
       generalTitle: 'General',
       autoPlay: 'Auto play',
-      autoPlayDesc: 'Read replies aloud automatically when generation finishes in AI chats.',
+      autoPlayDesc: 'Read replies aloud automatically when generation finishes.',
       briefingStyle: 'Narration style',
       briefingConcise: 'Brief',
       briefingDetailed: 'Detailed',
@@ -3632,7 +3632,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       removeAllTitle: 'Delete all {count} files under the prefix?',
       cleanTitle: 'Delete files uploaded more than {days} days ago?',
       removeHint:
-        'They are removed from the bucket and cannot be recovered. Conversations that referenced them will no longer show them to the model.',
+        'They are removed from the bucket and cannot be recovered. Chats that referenced them will no longer show them to the model.',
       removeOk: 'Delete',
       removed: 'Deleted {count} files',
       removedPartly: 'Deleted {removed}; {failed} could not be deleted',
@@ -4158,7 +4158,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     studio: {
       title: 'Studio',
       generating: 'Generating…',
-      noContent: 'Please add some sources or start a conversation first',
+      noContent: 'Please add some sources or start a chat first',
       noNotebookId: 'Notebook ID not set',
       providerOutOfCredit:
         'The model provider reported insufficient credit. Top up in that provider console, or pick a different model under Settings → Models.',
@@ -5744,7 +5744,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     wikiPopover: {
       title: 'Select knowledge base',
-      hint: 'Type /wiki to filter, click to bind to the current session',
+      hint: 'Type /wiki to filter, click to bind to the current chat',
       empty: 'No matching knowledge base found',
       sourceCount: '{count} sources'
     },
@@ -5768,7 +5768,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       team: 'Team mode — one line in, it builds a team and works to a playable delivery',
       teamArg: '<one line>',
       image: 'Switch to image generation',
-      compact: 'Compact this session history to free up context',
+      compact: "Compact this chat's history to free up context",
       goalArg: '<objective>',
       wikiArg: '[keyword]',
       wiki: 'Bind a notebook; type /wiki clear to unbind'
@@ -5832,8 +5832,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       'Auto-compacts when full. You can also compact now: earlier turns become a summary, recent ones stay intact.',
     compactDone: 'Compacted: {before} → {after}',
     compactReason: {
-      busy: 'This conversation is busy. Please try compacting again shortly',
-      cancelled: 'Compaction cancelled. Your conversation has been preserved',
+      busy: 'This chat is busy. Please try compacting again shortly',
+      cancelled: 'Compaction cancelled. Your chat has been preserved',
       empty: 'This chat is empty',
       'too-short': 'This chat is still short — no need to compact yet',
       'already-compact': 'Already compacted — nothing more to compress',
@@ -5874,9 +5874,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       noWikiBound: 'No knowledge base is currently bound',
       compacted: 'Compacted: {before} messages → {after}, about {saved} tokens saved',
       compactFailed: {
-        busy: 'This conversation is busy. Please try compacting again shortly',
-        cancelled: 'Compaction cancelled. Your conversation has been preserved',
-        empty: 'Nothing to compact yet in this session',
+        busy: 'This chat is busy. Please try compacting again shortly',
+        cancelled: 'Compaction cancelled. Your chat has been preserved',
+        empty: 'Nothing to compact yet in this chat',
         'already-compact': 'Already compacted; doing it again only re-summarises the summary',
         'too-short': 'History is still too short to save anything',
         'summary-failed': 'Could not build the summary; history is unchanged',
@@ -7008,7 +7008,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     actions: {
       reject: 'Reject',
-      allowSession: 'Allow for this session',
+      allowForChat: 'Allow for this chat',
       confirm: 'Confirm'
     }
   },
@@ -8145,7 +8145,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       empty: 'Ask away — it can see every step the main conversation took'
     },
     emptyState: {
-      agent: 'Type a message to start an Agent conversation'
+      agent: 'Type a message to start a chat'
     },
     placeholder: {
       agent: 'Give the Agent a task...'
