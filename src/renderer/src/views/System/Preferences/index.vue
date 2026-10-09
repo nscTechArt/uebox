@@ -119,7 +119,7 @@ const pageHeaders: Record<string, { titleKey: string; descKey?: string }> = {
     titleKey: 'profile.screenRecorder.title'
   },
   miniChat: {
-    titleKey: 'profile.miniChat.title'
+    titleKey: 'profile.miniWindow.title'
   },
   voice: {
     titleKey: 'profile.voice.title'

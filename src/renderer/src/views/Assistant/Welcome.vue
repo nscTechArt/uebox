@@ -34,7 +34,7 @@
             size="small"
             @click="router.push({ name: 'AssistantWelcome', query: { sid: voiceChatSid() } })"
           >
-            {{ t('assistantInputComposer.voice.boundConversation', { name: voiceBoundTitle }) }}
+            {{ t('assistantInputComposer.voice.boundCall', { name: voiceBoundTitle }) }}
           </AppButton>
           <AppButton
             variant="text"

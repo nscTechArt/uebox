@@ -23,7 +23,7 @@ it('does not offer the Mini Chat settings entry', () => {
     props: { activeKey: 'general' },
     global: { mocks: { $t: (key: string) => key } }
   })
-  expect(wrapper.text()).not.toContain('profile.menu.miniChat')
+  expect(wrapper.text()).not.toContain('profile.menu.miniWindow')
   expect(wrapper.text()).toContain('profile.menu.general')
   wrapper.unmount()
 })

@@ -28,20 +28,20 @@ const miniChatOpacityPercent = computed({
 <template>
   <div class="settings-content">
     <section class="settings-section">
-      <h4 class="section-title">{{ $t('profile.miniChat.title') }}</h4>
+      <h4 class="section-title">{{ $t('profile.miniWindow.title') }}</h4>
       <div class="settings-list">
         <div class="setting-item">
           <div class="setting-info">
-            <div class="setting-label">{{ $t('profile.miniChat.persist') }}</div>
-            <div class="setting-desc">{{ $t('profile.miniChat.persistDesc') }}</div>
+            <div class="setting-label">{{ $t('profile.miniWindow.persist') }}</div>
+            <div class="setting-desc">{{ $t('profile.miniWindow.persistDesc') }}</div>
           </div>
           <AppSwitch v-model:checked="miniChatPersistEnabled" />
         </div>
 
         <div class="setting-item vertical">
           <div class="setting-info">
-            <div class="setting-label">{{ $t('profile.miniChat.opacity') }}</div>
-            <div class="setting-desc">{{ $t('profile.miniChat.opacityDesc') }}</div>
+            <div class="setting-label">{{ $t('profile.miniWindow.opacity') }}</div>
+            <div class="setting-desc">{{ $t('profile.miniWindow.opacityDesc') }}</div>
           </div>
           <div class="slider-row">
             <a-slider

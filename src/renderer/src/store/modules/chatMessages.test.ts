@@ -4,6 +4,10 @@ import { createPinia, setActivePinia } from 'pinia'
 import { takeHydratedTypingMessages, useChatMessagesStore } from './chatMessages'
 import { chatHistoryStorage } from '../../utils/chatHistoryStorage'
 import { chatMessagesPersistencePlugin } from '../../utils/chatMessagesPersistence'
+import zhCN from '@renderer/i18n/locales/zh-CN'
+
+/** 收尾文案由调用方传入，测试里统一用语言包里的这一句 */
+const REPLY_INTERRUPTED = zhCN.assistant.chat.replyInterrupted
 
 /**
  * 会话删除后不该在存盘数据里留下任何按 sid 存的东西。
@@ -155,19 +159,19 @@ describe('chatMessages 的刷新残留处理', () => {
     const store = useChatMessagesStore()
     store.pushUser('a', '问题')
     const emptyId = store.pushAssistantTyping('a')
-    store.markTypingInterrupted('a', emptyId)
+    store.markTypingInterrupted('a', emptyId, REPLY_INTERRUPTED)
 
     store.pushUser('b', '问题')
     const partialId = store.pushAssistantTyping('b')
     store.replaceTyping('b', partialId, '已经写了一半', false)
-    store.markTypingInterrupted('b', partialId)
+    store.markTypingInterrupted('b', partialId, REPLY_INTERRUPTED)
 
     expect(store.getMessages('a').at(-1)).toMatchObject({
-      content: '会话已中断（页面刷新）',
+      content: REPLY_INTERRUPTED,
       status: 'done'
     })
     expect(store.getMessages('b').at(-1)).toMatchObject({
-      content: '已经写了一半\n\n*[会话已中断（页面刷新）]*',
+      content: `已经写了一半\n\n*[${REPLY_INTERRUPTED}]*`,
       status: 'done'
     })
   })
@@ -177,10 +181,10 @@ describe('chatMessages 的刷新残留处理', () => {
     store.pushUser('a', '问题')
     const typingId = store.pushAssistantTyping('a')
 
-    store.markTypingInterrupted('a', typingId)
-    store.markTypingInterrupted('a', typingId)
+    store.markTypingInterrupted('a', typingId, REPLY_INTERRUPTED)
+    store.markTypingInterrupted('a', typingId, REPLY_INTERRUPTED)
 
-    expect(store.getMessages('a').at(-1)!.content).toBe('会话已中断（页面刷新）')
+    expect(store.getMessages('a').at(-1)!.content).toBe(REPLY_INTERRUPTED)
   })
 })
 

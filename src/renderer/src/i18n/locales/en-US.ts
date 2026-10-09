@@ -112,7 +112,7 @@ export default {
     delete: 'Delete',
     deleteTitle: 'Delete chat',
     deleteContent: 'Delete "{title}"? This cannot be undone.',
-    deleteTranscriptFailed: 'Chat removed, but its agent memory could not be deleted',
+    deleteTranscriptFailed: 'Chat removed, but some of its history could not be cleaned up',
     cancel: 'Cancel',
     // Batch bar for multi-select: Ctrl/Cmd+click adds one by one, Shift+click picks a range
     batch: {
@@ -431,7 +431,7 @@ export default {
       supportsModel3d: '3D generation',
       supportsModel3dDesc: 'Generate 3D models from text or images',
       supportsRealtimeVoice: 'Realtime voice',
-      supportsRealtimeVoiceDesc: 'Supports real-time voice conversations',
+      supportsRealtimeVoiceDesc: 'Supports real-time voice calls',
       supportsReasoning: 'Reasoning',
       supportsReasoningDesc: 'Thinks before answering',
       ttsVoice: 'Reading voice',
@@ -439,7 +439,7 @@ export default {
         'Enter a voice ID supported by this model. Leave empty to use its default voice.',
       realtimeVoice: 'Voice',
       realtimeVoiceHint:
-        'Takes effect the next time you start a voice conversation. It will not switch an active call mid-session.',
+        'Takes effect the next time you start a voice call. A call already in progress keeps its current voice.',
       realtimeVoices: {
         zh_female_vv_jupiter_bigtts: 'VV · lively, expressive female voice',
         zh_female_xiaohe_jupiter_bigtts:
@@ -682,10 +682,10 @@ export default {
       ttsMore:
         'Add Doubao Text to speech, enter a Speech console API key, then select TTS 2.0 here. Change the voice in model settings.',
       ttsMissing: 'Read aloud unavailable',
-      realtimeDesc: 'Choose a real-time voice model for voice conversations.',
+      realtimeDesc: 'Choose a real-time voice model for voice calls.',
       realtimeMore:
         'Supports OpenAI gpt-realtime models and Doubao Seeduplex. Ordinary chat models do not apply.',
-      realtimeMissing: 'Voice conversation unavailable',
+      realtimeMissing: 'Voice call unavailable',
       stt: 'Speech to text',
       sttDesc:
         'Hold the voice hotkey, speak, and get text in the search box. Falls back to the realtime voice role when unset.',
@@ -1538,7 +1538,7 @@ export default {
       title: 'Sign in to {server} again'
     },
     view: {
-      signedOut: 'Your server library session has expired. Sign in again to continue.',
+      signedOut: "You've been signed out of the server library. Sign in again to continue.",
       offlineBanner:
         'Cannot reach the server. Showing pages you have already viewed; search and import are unavailable.',
       remove: 'Remove from list',
@@ -1616,7 +1616,7 @@ export default {
       'no-member-surface': 'This server has no account sign-in. Paste an identity token instead.',
       'missing-password': 'Enter the password.',
       'missing-token': 'Paste the identity token.',
-      'signed-out': 'Your session has expired. Sign in again.',
+      'signed-out': "You've been signed out. Sign in again.",
       unauthorized: 'The account, password or token is not right.',
       forbidden: 'You do not have permission.',
       'not-found': 'Not found, or you cannot see it.',
@@ -2554,6 +2554,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       userMessageNotFound: 'Cannot find corresponding user message',
       clearConfirmTitle: 'Clear this chat?',
       clearConfirmContent: 'This cannot be undone. Clear all messages in this chat?',
+      replyInterrupted: 'Reply interrupted',
       newMessage: 'New Message',
       emptyMessage: 'Message content cannot be empty',
       editMessage: 'Edit Message',
@@ -2943,7 +2944,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       serviceUnavailableDesc:
         'The AI service is currently experiencing issues and is being recovered. Please retry later. If the problem persists, please contact support.',
       // Token refresh related
-      tokenRefreshedRetry: 'Session restored, please retry your action',
+      tokenRefreshedRetry: "You're signed in again. Please try again.",
       // Network error related
       networkError: 'Network connection error',
       networkErrorTitle: 'Network Connection Failed',
@@ -3103,7 +3104,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     // Menu items
     menu: {
       screenRecorder: 'Recordings',
-      miniChat: 'MiniChat',
+      miniWindow: 'Mini window',
       voice: 'Voice',
       general: 'General',
       appearance: 'Appearance',
@@ -3157,7 +3158,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       archivedChats: 'Archived chats',
       archivedChatsDesc: 'View, restore, or delete archived chats.',
       autoRetitle: 'Auto-generate new titles',
-      autoRetitleDesc: 'Rename the chat after every reply, based on the whole conversation.',
+      autoRetitleDesc: 'Rename the chat after every reply, based on its full history.',
       persistentAutoResume: 'Auto-resume on failure',
       persistentAutoResumeDesc:
         'When your gateway is unstable, pick up from where it stopped every 60s. Gives up after 30 minutes of failures. Failed attempts are left out of the chat.',
@@ -3541,12 +3542,12 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       autoHangup: 'End unanswered calls automatically',
       autoHangupDesc: 'End idle calls after three unanswered prompts.'
     },
-    miniChat: {
-      title: 'MiniChat',
+    miniWindow: {
+      title: 'Mini window',
       // The small window's own title bar (meta.title in router/modules/index.ts)
       windowTitle: 'AI Assistant',
-      persist: 'Save MiniChat history',
-      persistDesc: 'Save to conversation history when the window closes.',
+      persist: 'Save chats from the mini window',
+      persistDesc: 'Saved to your chats when the mini window closes.',
       opacity: 'Window opacity',
       opacityDesc: 'Lower values increase transparency.'
     },
@@ -5705,16 +5706,16 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     pathOnlyAttachment:
       '### File: {name}\n\nLocal path: {path}\n\nThis format was not pre-parsed. Open it with a file-reading tool if you need its contents.',
     voice: {
-      start: 'Start voice session',
+      start: 'Start voice call',
       cancelConnection: 'Cancel connection',
       connectionTimeout: 'Voice connection timed out. Retry or check your realtime model settings.',
       mute: 'Mute microphone',
       unmute: 'Unmute microphone',
       muted: 'Microphone muted. Background tasks continue.',
       retry: 'Retry connection',
-      boundConversation: 'Voice conversation: {name}',
+      boundCall: 'Voice call: {name}',
       interruptByVoice: 'Speak or click to interrupt',
-      stop: 'End voice session (background tasks continue)',
+      stop: 'End voice call (background tasks continue)',
       status: {
         connecting: 'Connecting voice…',
         listening: 'Listening — speak naturally',
@@ -7522,7 +7523,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       abandon: 'Abandon this import',
       abandonConfirmTitle: 'Abandon this import?',
       abandonConfirmContent:
-        'The server cancels this session and deletes the staged files it holds. Nothing that was uploaded counts — you will have to import again. This cannot be undone.',
+        'The server cancels this import and deletes the staged files it holds. Nothing that was uploaded counts — you will have to import again. This cannot be undone.',
       abandonDone: 'Import abandoned; staged files on the server were cleaned up',
       abandonStagingLeft:
         'The local prompt is cleared, but the staged files on the server could not be removed and need deleting by hand: {error}',
@@ -7535,15 +7536,16 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       continueSummary: '{files} file(s) and {thumbnails} thumbnail(s) uploaded',
       continueSummaryDone: 'All content uploaded',
       continueFailed: 'Failed to resume import: {error}',
-      sessionExpired: 'Your session has expired; please sign in again',
+      sessionExpired:
+        'The server no longer has this import (it may have timed out and been cleaned up). Import it again.',
       resumeFailed: 'Failed to resume import: {error}',
       resumeNotFoundTitle: 'Cannot resume import',
-      resumeNotFoundContent: 'No resumable import session found: {error}',
+      resumeNotFoundContent: 'No resumable import found: {error}',
       selectErrorJson: 'Please select an import error report JSON file',
       singleErrorJson: 'Only one error report file can be selected at a time',
       selectResumeReportFailed: 'Failed to select the error report',
       stages: {
-        createSession: 'Creating import session',
+        createSession: 'Starting import',
         preflight: 'Pre-flight check',
         uploadMetadata: 'Uploading metadata',
         uploadFiles: 'Uploading files',
@@ -8131,7 +8133,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
   miniChatWindow: {
     sendButton: 'Send',
     /**
-     * Banner shown when this window carries the main conversation's context.
+     * Banner shown when this window carries the main chat's context.
      *
      * It has to say three things: how much was carried over, that it is a
      * snapshot, and that this window cannot change the project.

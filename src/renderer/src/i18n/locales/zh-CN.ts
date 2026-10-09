@@ -43,7 +43,7 @@ export default {
     done: '完成',
     dragHint: '勾选的工具常驻侧边栏，拖动可调整顺序'
   },
-  // 侧边栏「AI 对话」列表：按 UE 工程分组、置顶、纯会话
+  // 侧边栏「AI 对话」列表：按 UE 工程分组、置顶、纯对话
   chatSidebar: {
     pinned: '置顶',
     projects: '项目',
@@ -104,7 +104,7 @@ export default {
     smartName: '智能命名',
     smartNameEmpty: '这条对话还没有消息，起不了名',
     smartNameFailed: '起名失败，自己写一个，或去检查轻量任务模型',
-    /** 这条会话已经有一次起名在途（多半是「自动生成新标题」那一路）。等一下再点就有 */
+    /** 这条对话已经有一次起名在途（多半是「自动生成新标题」那一路）。等一下再点就有 */
     smartNameBusy: '正在起名，稍等一下再试',
     moveToProject: '归入工程',
     removeFromProject: '不在项目中工作',
@@ -113,7 +113,7 @@ export default {
     delete: '删除',
     deleteTitle: '确认删除',
     deleteContent: '确定要删除对话「{title}」吗？此操作不可撤销。',
-    deleteTranscriptFailed: '会话已移除，但内核记忆删除失败',
+    deleteTranscriptFailed: '对话已移除，但部分历史没能清理',
     cancel: '取消',
     // 多选批量栏：Ctrl/Cmd+点击逐个加，Shift+点击拉范围
     batch: {
@@ -159,7 +159,7 @@ export default {
   agentV3Debug: {
     title: 'Agent V3 调试台',
     description: '直接驱动 V3 内核：发指令、看事件流、试插话与审批。开发诊断用，不是正式对话界面。',
-    sessionId: '会话 ID',
+    sessionId: 'Session ID',
     mode: '模式',
     modeAgent: 'Agent（可执行操作）',
     modeAsk: 'Ask（只读）',
@@ -170,7 +170,7 @@ export default {
     usage: '上下文 {tokens} / {window} tokens（{percent}%）',
     approvalPrompt: '需要确认：{tool}（风险等级 {risk}）',
     approve: '允许',
-    approveAlways: '本次会话始终允许',
+    approveAlways: '本次 session 始终允许',
     reject: '拒绝',
     empty: '还没有事件。输入指令后点「发送」。',
     promptPlaceholder: '输入指令，Ctrl+Enter 发送',
@@ -179,7 +179,7 @@ export default {
     running: '执行中……',
     stop: '停止',
     resume: '断点续跑',
-    newSession: '新会话',
+    newSession: '新建 session',
     steer: '插话',
     smoke: '内核自检',
     log: {
@@ -434,13 +434,13 @@ export default {
       supportsModel3d: '3D 生成',
       supportsModel3dDesc: '生成 3D 模型（文字或图片输入）',
       supportsRealtimeVoice: '实时语音',
-      supportsRealtimeVoiceDesc: '支持实时语音对话',
+      supportsRealtimeVoiceDesc: '支持实时语音通话',
       supportsReasoning: '推理',
       supportsReasoningDesc: '会先思考再回答',
       ttsVoice: '朗读音色',
       ttsVoiceHint: '填写当前模型支持的音色 ID；留空使用该模型的默认音色。',
       realtimeVoice: '语音音色',
-      realtimeVoiceHint: '保存后，下次开始语音对话时生效；当前正在进行的通话不会中途换音色。',
+      realtimeVoiceHint: '保存后，下次开始语音通话时生效；当前正在进行的通话不会中途换音色。',
       realtimeVoices: {
         zh_female_vv_jupiter_bigtts: 'VV｜活泼灵动女声，分享感强',
         zh_female_xiaohe_jupiter_bigtts: '小何｜甜美活泼女声，带明显台湾口音',
@@ -663,9 +663,9 @@ export default {
       ttsMore:
         '添加豆包语音合成服务商，填写语音控制台的 API Key，然后在此选择 TTS 2.0。音色可在模型设置中修改。',
       ttsMissing: '回复朗读不可用',
-      realtimeDesc: '选择实时语音模型，用于语音对话。',
+      realtimeDesc: '选择实时语音模型，用于语音通话。',
       realtimeMore: '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex；普通对话模型不适用。',
-      realtimeMissing: '语音对话不可用',
+      realtimeMissing: '语音通话不可用',
       stt: '语音识别',
       sttDesc: '按下语音热键说话，转成文字填进搜索框。不配就用实时语音那一路。',
       sttMore:
@@ -717,7 +717,7 @@ export default {
         music: '音乐生成',
         tts: '语音合成',
         stt: '语音识别（听写）',
-        realtime: '实时语音（语音对话）',
+        realtime: '实时语音（语音通话）',
         video: '视频生成',
         model3d: '3D 生成',
         search: '网页检索',
@@ -1645,7 +1645,7 @@ export default {
     userInfo: '用户信息',
     settings: '设置',
     language: '语言',
-    // 托盘「退出」时还有会话操作没收摊。数的是会话操作，不是全部后台任务
+    // 托盘「退出」时还有 Agent session 的操作没收摊。数的是 session 操作，不是全部后台任务
     trayQuitTitle: '退出虚幻盒子？',
     trayQuitContent: 'AI 还有 {count} 项操作在进行，退出会中断它们。',
     trayQuitOk: '仍然退出',
@@ -2161,7 +2161,7 @@ export default {
       found: '发现 {count} 处问题',
       // 引擎没连时**必须**说出来：这时候「没问题」只代表命名没问题
       engineOffline: '引擎没连上，只做了命名检查',
-      // 引擎没连上、但知道这条会话是哪个工程时，问要不要替用户打开
+      // 引擎没连上、但知道这条对话是哪个工程时，问要不要替用户打开
       openProjectTitle: '工程没开',
       openProjectContent: '落盘、编译、断引用要在编辑器里查。打开「{name}」，连上后接着审查？',
       openProjectOk: '打开并审查',
@@ -2489,6 +2489,7 @@ export default {
       userMessageNotFound: '找不到对应的用户消息',
       clearConfirmTitle: '确认清空对话',
       clearConfirmContent: '该操作不可撤销，确定要清空当前对话的所有消息吗？',
+      replyInterrupted: '回复已中断',
       newMessage: '有新消息',
       emptyMessage: '消息内容不能为空',
       editMessage: '编辑消息',
@@ -2509,7 +2510,7 @@ export default {
      * 侧边问一句。
      *
      * 和「分支」的区别要在文案上说清楚：分支是换个方向接着**干活**，会留下一条
-     * 新会话；侧边是弄明白**现在什么情况**，问完关掉，主对话一个字都不知道。
+     * 新对话；侧边是弄明白**现在什么情况**，问完关掉，主对话一个字都不知道。
      */
     sideQuestion: {
       open: '侧边问一句（带上下文）',
@@ -2776,7 +2777,7 @@ export default {
         cpp_compile: '编译 C++',
         anim_preview: '预览动画'
       },
-      /** 主聊天页的步骤组：两段正文之间那一行摘要，和点开后的每一步 */
+      /** 主对话页的步骤组：两段正文之间那一行摘要，和点开后的每一步 */
       steps: {
         thinking: '思考过程',
         thinkingNow: '正在思考',
@@ -3004,7 +3005,7 @@ export default {
     // 菜单项
     menu: {
       screenRecorder: '录屏',
-      miniChat: 'MiniChat',
+      miniWindow: '小窗',
       voice: '语音',
       general: '常规',
       appearance: '外观',
@@ -3549,13 +3550,13 @@ export default {
       autoHangup: '无人回应时自动结束通话',
       autoHangupDesc: '空闲时连续三次无人回应则结束通话。'
     },
-    miniChat: {
-      title: 'MiniChat',
+    miniWindow: {
+      title: '小窗',
       // 小窗的**窗口标题**（`router/modules/index.ts` 的 meta.title）。
       // 那里原来直接写着 'AI 助手' 四个字 —— 而 `router/index.ts` 是拿它当
       // i18n key 去 t() 的，于是英文用户的小窗标题栏上是中文
       windowTitle: 'AI 助手',
-      persist: '保存 MiniChat 对话历史',
+      persist: '保存小窗里的对话',
       persistDesc: '关闭小窗后保存至对话历史。',
       opacity: '窗口透明度',
       opacityDesc: '数值越低，窗口越透明。'
@@ -5531,17 +5532,17 @@ export default {
     pathOnlyAttachment:
       '### 文件：{name}\n\n本地路径：{path}\n\n这个格式没有预先解析，需要内容就用读文件的工具自己打开。',
     voice: {
-      start: '开始语音对话',
+      start: '开始语音通话',
       cancelConnection: '取消连接',
       connectionTimeout: '语音连接超时，请重试或检查实时语音模型设置。',
       mute: '暂停收音',
       unmute: '恢复收音',
       muted: '已暂停收音，后台任务继续运行',
       retry: '重试连接',
-      boundConversation: '语音对话：{name}',
+      boundCall: '语音通话：{name}',
       interruptByVoice: '直接开口或点击即可打断',
       // 说清「一直听着」——用户得知道麦克风现在是开的
-      stop: '结束语音对话（后台任务继续运行）',
+      stop: '结束语音通话（后台任务继续运行）',
       status: {
         connecting: '正在连接语音…',
         listening: '正在听，请直接说话',
@@ -6234,7 +6235,7 @@ export default {
   },
   assistantTopNav: {
     noConnectedProjects: '当前没有已连接工程',
-    // 右上角的会话工程标签
+    // 右上角的对话工程标签
     sessionProject: {
       none: '未归属项目',
       pick: '归入项目'
@@ -7263,7 +7264,7 @@ export default {
       abandon: '放弃这次导入',
       abandonConfirmTitle: '放弃这次导入？',
       abandonConfirmContent:
-        '服务器会取消这次会话，并删掉它占用的暂存文件。已经传上去的内容都不算数，要重新导入一次。这一步不能撤销。',
+        '服务器会取消这次导入，并删掉它占用的暂存文件。已经传上去的内容都不算数，要重新导入一次。这一步不能撤销。',
       abandonDone: '已放弃这次导入，服务器上的暂存文件已清理',
       abandonStagingLeft: '本地提示已消除，但服务器上的暂存文件没能清掉，需要手动删除：{error}',
       abandonLocalRecordLeft: '本地的「未完成导入」记录没能标记掉，下次启动可能还会提示这一单',
@@ -7274,15 +7275,15 @@ export default {
       continueSummary: '已上传 {files} 个文件、{thumbnails} 张缩略图',
       continueSummaryDone: '全部内容已上传',
       continueFailed: '继续导入失败：{error}',
-      sessionExpired: '登录会话已过期，请重新登录后再试',
+      sessionExpired: '服务器上已经找不到这次导入了（可能超时被清理），需要重新导入',
       resumeFailed: '继续导入失败：{error}',
       resumeNotFoundTitle: '无法继续导入',
-      resumeNotFoundContent: '未找到可恢复的导入会话：{error}',
+      resumeNotFoundContent: '未找到可以继续的导入：{error}',
       selectErrorJson: '请选择导入错误报告（JSON）',
       singleErrorJson: '一次只能选择一个错误报告',
       selectResumeReportFailed: '选择错误报告失败',
       stages: {
-        createSession: '创建导入会话',
+        createSession: '开始导入',
         preflight: '预检查',
         uploadMetadata: '上传元数据',
         uploadFiles: '上传文件',

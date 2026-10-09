@@ -84,7 +84,7 @@ const menuGroups: MenuGroup[] = [
         ? [
             {
               key: 'miniChat',
-              labelKey: 'profile.menu.miniChat',
+              labelKey: 'profile.menu.miniWindow',
               icon: PhChatCircle
             }
           ]

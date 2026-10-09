@@ -32,6 +32,7 @@ import { useAgentStreamStore } from '@renderer/store/modules/agentStream'
 import { agentV3API } from '@renderer/api/agentV3'
 import { isTypingPlaceholder } from '@renderer/utils/typingPlaceholder'
 import { isChatWindow } from '@renderer/api/chatWindow'
+import i18n from '@renderer/i18n'
 
 /**
  * 接回来时从哪儿续写。
@@ -172,7 +173,12 @@ export async function initAgentReattach(): Promise<void> {
     pending,
     agentSessionIdOf: (chatSid) => chatStore.getAgentSessionId(chatSid),
     fetchRunning: async (sessionIds) => (await agentV3API.reattach(sessionIds)).sessionIds,
-    markInterrupted: (chatSid, messageId) => chatMsgStore.markTypingInterrupted(chatSid, messageId),
+    markInterrupted: (chatSid, messageId) =>
+      chatMsgStore.markTypingInterrupted(
+        chatSid,
+        messageId,
+        i18n.global.t('assistant.chat.replyInterrupted')
+      ),
     reattach: ({ chatSid, agentSessionId, messageId }) => {
       const message = chatMsgStore.getMessages(chatSid).find((item) => item.id === messageId)
       const written = resolveReattachSeed(message)

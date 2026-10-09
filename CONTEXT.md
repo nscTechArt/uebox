@@ -6,6 +6,7 @@
 分层地图在 [docs/contributing/vertical-slice.md](docs/contributing/vertical-slice.md)。
 
 用词跟这里不一致时，以这里为准；发现这里定义错了，改这里。
+新增或修改 _Avoid_ 时，同步考虑术语守卫（`src/renderer/src/i18n/terminologyGuard.test.ts`）的禁用词表，两处一起改。
 
 ---
 
@@ -81,15 +82,17 @@ _Avoid_：回合、一问一答；Exchange、Conversation turn
 **分支 (Branch)**
 一个动作：从一条对话的某条回复处复制出一条新对话，之后两边互不影响。分支出来的仍是一条普通对话，不是另一种东西。
 它靠内核复制一份 **session** 实现；内核把这个复制动作叫 fork，侧边问一句也用它。fork 只指内核那一步，不是分支的别名。
+代码里界面这一层叫 `chatBranch`，内核复制那一步仍叫 fork。
 _Avoid_：会话分支、对话分支；Session branch、Fork
 
 **侧边问一句 (Side question)**
 借一条对话的上下文，在小窗里只读地问一句；问完关掉，什么都不留下。它不是一条对话。
-被借上下文的那条对话，在这个场景里叫它的**主对话 (main chat)**。
+被借上下文的那条对话，在这个场景里叫它的**主对话 (main chat)**。代码里叫 `sideQuestion`。
 _Avoid_：侧边对话、侧边聊天；Side chat
 
 **语音通话 (Voice call)**
 用户与语音助手之间的一次实时语音交流，绑定在一条对话上；有开始、有挂断，通话结束后对话还在。
+代码里叫 `voiceAssistant`，通话绑定在哪条对话上记在 `voiceChatSid`。
 _Avoid_：语音对话、语音会话；Voice conversation、Voice session
 
 **小窗 (Mini window)**

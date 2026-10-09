@@ -6,12 +6,15 @@ import enUS from './locales/en-US'
 /**
  * 术语守卫。
  *
- * 三份文案来源 —— 渲染层两份语言包与主进程 `MAIN_STRINGS` 的中英两侧 ——
+ * 三份文案来源文件 —— 渲染层两份语言包与主进程 `MAIN_STRINGS` —— 的中英两侧：
  * 任何一个叶子字符串里出现禁用词，测试就红，并逐条告诉贡献者：哪份文案、
  * 哪个 key、命中了什么、该换成什么。零容忍，不设基线文件。
  *
  * 写这个测试的目的是让贡献者写新文案时不必先读完
  * `CONTEXT.md` 的词汇表 —— 词汇表仍然是对的来源，这里只拦写错的。
+ *
+ * 失败信息只给替换写法。确有改写不了的正当用法时，由提交者在 PR 里说明、
+ * 维护者决定是否破例 —— 白名单仍是调试台三个 key。
  */
 
 /** 一条禁用词：`word` 是要在文案里拦下的写法，`suggestion` 告诉贡献者该换成什么 */
@@ -27,7 +30,7 @@ interface BannedTerm {
  * （Game Thread、内核复制 session 的 fork），入表会把它们一并拦掉。
  *
  * 含汉字的词按子串匹配，有已知的跨词误报：「社会话题」含「会话」、「撤回合并」含「回合」。
- * 碰上时改写那句文案，不用白名单 —— 白名单只放调试台三个 key（08 填入）。
+ * 碰上时改写那句文案，不用白名单 —— 白名单只放调试台三个 key。
  */
 const BANNED_TERMS: BannedTerm[] = [
   // 对话主体
@@ -40,15 +43,42 @@ const BANNED_TERMS: BannedTerm[] = [
   { word: '对话分支', suggestion: '分支' },
   // 侧边问一句
   { word: '侧边对话', suggestion: '侧边问一句' },
-  { word: 'side chat', suggestion: 'side question' }
+  { word: 'side chat', suggestion: 'side question' },
+  // 语音通话
+  { word: '语音对话', suggestion: '语音通话' },
+  // 小窗
+  { word: 'MiniChat', suggestion: 'mini window' },
+  { word: 'Mini Chat', suggestion: 'mini window' },
+  { word: '迷你对话', suggestion: '小窗' },
+  // 不是对话的「会话」
+  { word: '内核记忆', suggestion: '只说用户能理解的后果' },
+  // 对话之外不再有「会话」，英文里指对话的一律 chat
+  { word: '会话', suggestion: '对话（调试台写 session）' },
+  {
+    word: 'session',
+    suggestion: '对话写 chat；登录写 sign-in / signed out；网络库导入写 import（调试台除外）'
+  },
+  {
+    word: 'sessions',
+    suggestion: '对话写 chat；登录写 sign-in / signed out；网络库导入写 import（调试台除外）'
+  },
+  { word: 'conversation', suggestion: 'chat' },
+  { word: 'conversations', suggestion: 'chat' }
 ]
 
 /**
  * 白名单：完整 key → 放行的禁用词条目。按 key 精确匹配，只放行该 key 下列出的条目；
  * 同一个 key 下出现别的禁用词照样命中。放行的词写禁用词表里已有的条目本身，
  * 按条目比较、不按命中原文 —— 放行 "session" 条目，"Session ID" 里的 "Session" 也放行。
+ *
+ * 只放调试台三个 key：它们说的就是内核那一层，按术语表写不翻译的 session。
+ * key 路径不含来源，所以两份语言包（以及将来的主进程同名 key）都适用。
  */
-const WHITELIST = new Map<string, string[]>()
+const WHITELIST = new Map<string, string[]>([
+  ['agentV3Debug.sessionId', ['session']],
+  ['agentV3Debug.approveAlways', ['session']],
+  ['agentV3Debug.newSession', ['session']]
+])
 
 /** 含汉字的禁用词按子串匹配，其余（拉丁字母的词）按单词边界、不区分大小写 */
 const CJK_CHAR = /[一-鿿]/
@@ -125,6 +155,15 @@ describe('术语守卫', () => {
       }
     }
     expect(failures).toEqual([])
+  })
+
+  it('session、sessions 的替换建议按意思列全：chat、sign-in、import', () => {
+    for (const word of ['session', 'sessions']) {
+      const suggestion = BANNED_TERMS.find((term) => term.word === word)?.suggestion ?? ''
+      for (const expected of ['chat', 'sign-in', 'import']) {
+        expect(suggestion).toContain(expected)
+      }
+    }
   })
 })
 

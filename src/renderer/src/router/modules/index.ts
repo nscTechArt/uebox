@@ -55,7 +55,7 @@ const miniChatRoute: RouteRecordRaw = {
      * 这里原来写着「AI 助手」四个字，于是 t() 查不到、原样返回，
      * 英文用户的小窗标题栏上是一句中文。
      */
-    title: 'profile.miniChat.windowTitle',
+    title: 'profile.miniWindow.windowTitle',
     standalone: true,
     isShowInTab: false
   }

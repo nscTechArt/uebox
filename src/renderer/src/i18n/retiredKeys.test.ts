@@ -33,7 +33,12 @@ const RETIRED_KEYS: string[] = [
   'assistant.agentMode.unnamedSession',
   'miniChatWindow.defaultSessionTitle',
   // 侧边问一句：命名空间 assistant.sideChat 改名为 assistant.sideQuestion
-  'assistant.sideChat'
+  'assistant.sideChat',
+  // 语音通话：通话绑定显示改名为 assistantInputComposer.voice.boundCall
+  'assistantInputComposer.voice.boundConversation',
+  // 小窗：菜单 key 与命名空间 profile.miniChat 改名为 profile.miniWindow
+  'profile.menu.miniChat',
+  'profile.miniChat'
 ]
 
 describe('已退役的 i18n key', () => {

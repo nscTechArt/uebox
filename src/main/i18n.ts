@@ -50,11 +50,11 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     // 点了到插件连上来之间的那几十秒：还点不得，但得告诉用户它没在装死
     'tray.launching': '{name}（启动中）',
     'tray.quit': '退出',
-    // 数的是会话操作：AI 轮次和分叉 / 截断 / 压缩这类历史操作都算，
+    // 数的是 Agent session 的操作：AI 轮次和分叉 / 截断 / 压缩这类历史操作都算，
     // 但不是全部后台任务 —— 别让用户以为连导入也算
     'tray.quitConfirm': 'AI 还有 {count} 项操作在进行，退出会中断它们。',
     'tray.quitConfirmOk': '仍然退出',
-    // 安装更新撞上会话操作没收摊：同一个框，按钮说清楚是重启装包
+    // 安装更新撞上 session 操作没收摊：同一个框，按钮说清楚是重启装包
     'tray.updateConfirmOk': '仍然重启安装',
     'tray.quitConfirmCancel': '取消',
     'tray.openFailedTitle': '打不开项目',

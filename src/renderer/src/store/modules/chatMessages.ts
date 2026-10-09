@@ -186,11 +186,15 @@ export function takeHydratedTypingMessages(): HydratedTypingMessage[] {
  *
  * 内容还是初始占位符就整条换掉（这轮一个字都没输出），已经有正文就在末尾
  * 补一行标记 —— 用户写了一半的那段回复不该因为一次刷新就没了。
+ * `label` 由调用方传入：store 不引 i18n，中断的原话各处可能不同。
  */
-export function interruptedTypingContent(content: ChatMessageContent): ChatMessageContent {
+export function interruptedTypingContent(
+  content: ChatMessageContent,
+  label: string
+): ChatMessageContent {
   if (typeof content !== 'string') return content
-  if (isTypingPlaceholder(content) || content.trim() === '') return '会话已中断（页面刷新）'
-  return `${content}\n\n*[会话已中断（页面刷新）]*`
+  if (isTypingPlaceholder(content) || content.trim() === '') return label
+  return `${content}\n\n*[${label}]*`
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -848,9 +852,9 @@ export const useChatMessagesStore = defineStore(
      *
      * 页面刷新后，问过主进程、确认这条会话**真的已经不在跑了**才调这里。
      * 已经收过尾（status 不是 typing）的不再动 —— 重连流程和事件流可能先后
-     * 都碰到同一条消息，重复贴一遍标记会变成「会话已中断」叠两行。
+     * 都碰到同一条消息，重复贴一遍收尾标记会在气泡里叠两行。
      */
-    function markTypingInterrupted(sid: string, messageId: string): void {
+    function markTypingInterrupted(sid: string, messageId: string, label: string): void {
       const arr = messagesBySid.value[String(sid || '').trim()]
       if (!Array.isArray(arr)) return
 
@@ -859,7 +863,7 @@ export const useChatMessagesStore = defineStore(
 
       arr[idx] = {
         ...arr[idx],
-        content: interruptedTypingContent(arr[idx].content),
+        content: interruptedTypingContent(arr[idx].content, label),
         status: 'done'
       }
     }

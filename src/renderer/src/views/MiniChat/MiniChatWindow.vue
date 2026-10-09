@@ -522,7 +522,7 @@ async function dispatchUserMessage(
    * 消息发出去没有任何地方显示，模型却在后台照着它动手。
    */
   if (SESSION_ID.value !== submittedSessionId) {
-    console.log('[MiniChat] 会话在发送途中被重置，丢弃这条消息')
+    console.log('[MiniChat] 对话在发送途中被重置，丢弃这条消息')
     return
   }
 
@@ -597,7 +597,7 @@ async function startNewSession(): Promise<void> {
   if (isGenerating.value) {
     await stopCurrentResponse()
   }
-  handleResetSession()
+  handleResetChat()
 }
 
 async function handleAssistantCopy(payload: { id: string; content: string }): Promise<void> {
@@ -769,8 +769,8 @@ function scrollToBottom(): void {
  * 处理会话重置（关闭窗口时）
  * 根据设置决定是否保存对话到主界面历史，然后清除本地消息并创建新会话
  */
-function handleResetSession(): void {
-  console.log('[MiniChat] 重置会话:', SESSION_ID.value)
+function handleResetChat(): void {
+  console.log('[MiniChat] 重置对话:', SESSION_ID.value)
 
   // 同上：会话都重置了，没人会再来点那个确认框
   pendingApprovals.rejectAll()
@@ -897,7 +897,7 @@ onMounted(() => {
     window.api.miniChat.onInitialMessage(handleInitialMessage),
     window.api.miniChat.onInitialContext(handleInitialContext),
     window.api.miniChat.onPinChanged(handlePinChanged),
-    window.api.miniChat.onResetSession(handleResetSession)
+    window.api.miniChat.onResetSession(handleResetChat)
   ]
 
   // 主动要一次（备用机制，防止投递早于挂载）
