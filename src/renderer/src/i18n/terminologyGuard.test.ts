@@ -13,8 +13,8 @@ import enUS from './locales/en-US'
  * 写这个测试的目的是让贡献者写新文案时不必先读完
  * `CONTEXT.md` 的词汇表 —— 词汇表仍然是对的来源，这里只拦写错的。
  *
- * 失败信息只给替换写法。确有改写不了的正当用法时，由提交者在 PR 里说明、
- * 维护者决定是否破例 —— 白名单仍是调试台三个 key。
+ * 失败信息只给替换写法。确有改写不了的正当用法时，加进白名单放行 ——
+ * 每条必须在条目旁写清理由，由评审把关。
  */
 
 /** 一条禁用词：`word` 是要在文案里拦下的写法，`suggestion` 告诉贡献者该换成什么 */
@@ -30,7 +30,8 @@ interface BannedTerm {
  * （Game Thread、内核复制 session 的 fork），入表会把它们一并拦掉。
  *
  * 含汉字的词按子串匹配，有已知的跨词误报：「社会话题」含「会话」、「撤回合并」含「回合」。
- * 碰上时改写那句文案，不用白名单 —— 白名单只放调试台三个 key。
+ * 碰上时优先改写那句文案；改写不掉的正当用法（引擎界面名、外部协议名）
+ * 加白名单，每条写清理由。
  */
 const BANNED_TERMS: BannedTerm[] = [
   // 对话主体
@@ -71,10 +72,12 @@ const BANNED_TERMS: BannedTerm[] = [
  * 同一个 key 下出现别的禁用词照样命中。放行的词写禁用词表里已有的条目本身，
  * 按条目比较、不按命中原文 —— 放行 "session" 条目，"Session ID" 里的 "Session" 也放行。
  *
- * 只放调试台三个 key：它们说的就是内核那一层，按术语表写不翻译的 session。
+ * 可以加条目：改写不掉的正当用法（引擎界面名、外部协议名）就加，每条把
+ * 理由写在条目旁的注释里 —— 没有理由的条目评审不放行。现有三条都是调试台。
  * key 路径不含来源，所以两份语言包（以及将来的主进程同名 key）都适用。
  */
 const WHITELIST = new Map<string, string[]>([
+  // 调试台说的是内核那一层，session 按术语表不翻译
   ['agentV3Debug.sessionId', ['session']],
   ['agentV3Debug.approveAlways', ['session']],
   ['agentV3Debug.newSession', ['session']]
@@ -147,6 +150,12 @@ const SOURCES: Array<{ label: string; pack: unknown }> = [
 ]
 
 describe('术语守卫', () => {
+  it('每个来源都扫到了文案，来源改名或变空时立刻发现', () => {
+    for (const { label, pack } of SOURCES) {
+      expect(collectLeaves(pack).length, label).toBeGreaterThan(0)
+    }
+  })
+
   it('三份文案来源零禁用词', () => {
     const failures: string[] = []
     for (const { label, pack } of SOURCES) {
