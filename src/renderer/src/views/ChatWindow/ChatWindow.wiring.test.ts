@@ -1,23 +1,68 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import ChatWindow from './ChatWindow.vue'
+import {
+  installObserverStubs,
+  installWindowApiStub
+} from '../../../../../tests/utils/componentMount'
 
 /**
  * ChatWindow → Welcome 的 prop 连线断言。
  *
- * `tsconfig.web.json` 没开 `strictTemplates`，prop 改名类型检查看不见 ——
- * 挂起 ChatWindow 又会把 agent 运行器那一整套拖进来，所以照
- * `Welcome.events.test.ts` 的路数读源码、断言开标签。
+ * `tsconfig.web.json` 没开 `strictTemplates`，prop 改名类型检查看不见 —— 所以
+ * 挂起来断言编译后的 props。Welcome 用桩替掉：它三千行、不在被测面上。
  */
-const source = readFileSync(
-  resolve(process.cwd(), 'src/renderer/src/views/ChatWindow/ChatWindow.vue'),
-  'utf8'
-)
+
+const routeQuery = vi.hoisted(() => ({ sid: 'chat-42' as string }))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({
+    query: routeQuery,
+    params: {},
+    path: '/',
+    fullPath: '/',
+    name: 'ChatWindow',
+    meta: {}
+  }),
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    currentRoute: { value: { path: '/', query: {} } }
+  })
+}))
+
+const stubs = {
+  Welcome: {
+    name: 'Welcome',
+    props: { chatSid: String, forceChatView: Boolean },
+    template: '<div />'
+  },
+  SensitiveActionConfirm: true
+}
+
+function mountChatWindow(): ReturnType<typeof mount> {
+  return mount(ChatWindow, { global: { stubs } })
+}
+
+beforeEach(() => {
+  installWindowApiStub()
+  installObserverStubs()
+  routeQuery.sid = 'chat-42'
+})
 
 describe('ChatWindow prop 连线', () => {
-  it('<Welcome> 的对话 id 走 :chat-sid', () => {
-    const tag = source.match(/<Welcome\b[^>]*>/)?.[0] ?? ''
-    expect(tag).toContain(':chat-sid="sid"')
-    expect(tag).not.toContain(':session-id')
+  it('路由上的 sid 以 chatSid 传给 <Welcome>', () => {
+    const welcome = mountChatWindow().findComponent({ name: 'Welcome' })
+    expect(welcome.exists()).toBe(true)
+    expect(welcome.props('chatSid')).toBe('chat-42')
+    // 旧名一个都不能回来：sessionId 是内核那一层，agentSessionId 上游已经摘掉
+    expect(welcome.vm.$attrs.sessionId).toBeUndefined()
+    expect(welcome.vm.$attrs.agentSessionId).toBeUndefined()
+  })
+
+  it('路由上没有 sid 时不渲染 <Welcome>', () => {
+    routeQuery.sid = ''
+    expect(mountChatWindow().findComponent({ name: 'Welcome' }).exists()).toBe(false)
   })
 })

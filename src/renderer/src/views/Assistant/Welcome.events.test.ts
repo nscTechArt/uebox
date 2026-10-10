@@ -1,41 +1,126 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import Welcome from './Welcome.vue'
+import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
+import {
+  installObserverStubs,
+  installWindowApiStub
+} from '../../../../../tests/utils/componentMount'
 
 /**
- * 事件连线测试的页面一段：Welcome.vue 近 3000 行，不挂载，照
- * `ChatLog.style.test.ts` 的方式读源码，断言子组件事件真的接到了处理函数。
- * `tsconfig.web.json` 没开 `strictTemplates`，监听一个子组件没声明的事件
- * 不报类型错误 —— 改漏一处只会表现为点按钮没反应，这里兜住。
+ * Welcome 的事件 / prop 连线断言：挂起来看编译后的监听器和 props，不再读源码。
+ *
+ * `tsconfig.web.json` 没开 `strictTemplates`，监听一个子组件没声明的事件、prop
+ * 改名漏一边，类型检查都看不见 —— 这里断言的是解析后的函数和值，脚本里把处理
+ * 函数改名、模板忘了跟着改，当场红。
  */
-const source = readFileSync(
-  resolve(process.cwd(), 'src/renderer/src/views/Assistant/Welcome.vue'),
-  'utf8'
-)
 
-function openTag(component: string): string {
-  return source.match(new RegExp(`<${component}\\b[^>]*>`))?.[0] ?? ''
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {}, params: {}, path: '/', fullPath: '/', name: undefined, meta: {} }),
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    currentRoute: { value: { path: '/', query: {} } }
+  })
+}))
+
+const stubs = {
+  // Welcome 的 watcher / onMounted 会调 chatLogRef 上的这四个方法，桩必须 expose，
+  // 缺一个挂在挂载期就抛「xxx is not a function」
+  ChatLog: {
+    name: 'ChatLog',
+    setup(_props: unknown, { expose }: { expose: (exposed: object) => void }) {
+      expose({
+        getScrollElement: () => null,
+        scrollToBottom: () => {},
+        stopAutoScroll: () => {},
+        isNearBottom: () => true
+      })
+      return () => null
+    }
+  },
+  TopNav: {
+    name: 'TopNav',
+    props: { chatSid: String },
+    template: '<div />'
+  },
+  SessionProjectChip: {
+    name: 'SessionProjectChip',
+    props: { chatSid: String },
+    template: '<div />'
+  },
+  AgentBrowserPane: {
+    name: 'AgentBrowserPane',
+    props: { sessionId: String },
+    template: '<div />'
+  },
+  BrandSphere: true,
+  VoiceOrb: true,
+  InputComposer: true,
+  SuggestionCards: true,
+  FileReviewPane: true,
+  TeamBoardPanel: true,
+  AppButton: true
 }
 
+function mountWelcome(props: { forceChatView?: boolean } = {}): ReturnType<typeof mount> {
+  return mount(Welcome, {
+    props: { chatSid: 'chat-1', ...props },
+    global: { stubs }
+  })
+}
+
+beforeEach(() => {
+  installWindowApiStub()
+  installObserverStubs()
+})
+
 describe('Welcome 事件连线', () => {
-  it('<ChatLog> 的 branch 接到 handleBubbleBranch', () => {
-    expect(openTag('ChatLog')).toContain('@branch="handleBubbleBranch"')
+  it('<ChatLog> 的 branch 接到处理函数', () => {
+    // ChatLog 只在对话态渲染
+    const chatLog = mountWelcome({ forceChatView: true }).findComponent({ name: 'ChatLog' })
+    expect(chatLog.exists()).toBe(true)
+    expect(typeof chatLog.vm.$attrs.onBranch).toBe('function')
   })
 
-  it('<TopNav> 的 side-question 接到 handleSideQuestion', () => {
-    expect(openTag('TopNav')).toContain('@side-question="handleSideQuestion"')
+  it('<TopNav> 的 side-question 接到处理函数', () => {
+    const topNav = mountWelcome().findComponent({ name: 'TopNav' })
+    expect(topNav.exists()).toBe(true)
+    expect(typeof topNav.vm.$attrs.onSideQuestion).toBe('function')
   })
 })
 
 describe('Welcome prop 连线', () => {
-  it('<TopNav> 与 <SessionProjectChip> 的对话 id 走 :chat-sid', () => {
-    for (const component of ['TopNav', 'SessionProjectChip']) {
-      expect(openTag(component)).toContain(':chat-sid="sid"')
-      expect(openTag(component)).not.toContain(':session-id')
-    }
+  it('<TopNav> 与 <SessionProjectChip> 的对话 id 走 chatSid', () => {
+    // SessionProjectChip 在 hero 区（v-if="!conversationMode"），这次不压 forceChatView
+    const wrapper = mountWelcome()
+    const topNav = wrapper.findComponent({ name: 'TopNav' })
+    const chip = wrapper.findComponent({ name: 'SessionProjectChip' })
+
+    expect(topNav.props('chatSid')).toBe('chat-1')
+    expect(chip.exists()).toBe(true)
+    expect(chip.props('chatSid')).toBe('chat-1')
+    expect(topNav.vm.$attrs.sessionId).toBeUndefined()
+    expect(chip.vm.$attrs.sessionId).toBeUndefined()
   })
 
-  it('<AgentBrowserPane> 的 :session-id 指内核 session，保持原名', () => {
-    expect(openTag('AgentBrowserPane')).toContain(':session-id=')
+  it('<AgentBrowserPane> 的 sessionId 指内核会话，保持原名', () => {
+    // AgentBrowserPane 只在有浏览器/审查上下文时渲染：browserSessionId 来自
+    // chatStore.getAgentSessionId(sid)，播种一条挂了内核会话的对话
+    const chatStore = useChatSessionsStore()
+    chatStore.sessions = [
+      {
+        id: 'chat-1',
+        title: '对话',
+        createdAt: 1,
+        updatedAt: 1,
+        agentSessionId: 'engine-9'
+      }
+    ]
+
+    const pane = mountWelcome().findComponent({ name: 'AgentBrowserPane' })
+    expect(pane.exists()).toBe(true)
+    expect(pane.props('sessionId')).toBe('engine-9')
   })
 })
