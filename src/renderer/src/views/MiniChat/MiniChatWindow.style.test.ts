@@ -47,8 +47,8 @@ describe('MiniChatWindow read aloud', () => {
  */
 describe('MiniChatWindow 侧边问一句关窗不留东西', () => {
   const body = source.slice(
-    source.indexOf('function handleResetSession'),
-    source.indexOf('watch(', source.indexOf('function handleResetSession'))
+    source.indexOf('function handleResetChat'),
+    source.indexOf('watch(', source.indexOf('function handleResetChat'))
   )
 
   it('借了上下文就跳过保存', () => {
