@@ -69,7 +69,7 @@ V2 那套「按问题类型路由到专家 Agent」已经废除，理由见 `age
 用户与 AI 之间的一条往来。AI 助手里的对话列在侧边栏；知识库、蓝图库、材质库的页面里各嵌着一条，不进侧边栏。
 背后是不是 Agent 驱动不构成区别。代码里叫 `ChatSession`，它的 id 叫 `chatSid`（局部简写 `sid`）。
 由 Agent 驱动的对话，在内核那一层对应一份 **session**，见该词条。
-别的概念的英文名不得含 "Chat"。
+别的概念面向用户的英文名不得含 "Chat"；代码标识符不受此限（如 MiniChat）。
 代码注释里单写的「会话」多半不指对话，按 **session** 词条里的读法理解。
 _Avoid_：会话、聊天；Conversation、Session、Thread
 
