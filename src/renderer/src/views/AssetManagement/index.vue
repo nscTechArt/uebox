@@ -2729,7 +2729,7 @@ const handleFolderImportNeedsRecovery = (_event: unknown, payload: ImportRecover
       if (!result?.success) {
         const error =
           result?.status === 'expired'
-            ? t('assetManagement.import.sessionExpired')
+            ? t('assetManagement.import.importGone')
             : describeImportError(result, t, t('assetManagement.import.unknownError'))
         message.error(t('assetManagement.import.continueFailed', { error }), 8)
         throw new Error(result?.error || 'resume import failed')

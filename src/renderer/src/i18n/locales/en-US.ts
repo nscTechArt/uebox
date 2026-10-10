@@ -2579,7 +2579,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
      * question is for understanding what is *going on* and leaves nothing behind.
      */
     sideQuestion: {
-      open: 'Ask on the side (with context)',
+      open: 'Ask a side question (with context)',
       noContext: 'This chat has no context to hand over yet',
       failed: 'Could not open the side question'
     },
@@ -2946,7 +2946,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       serviceUnavailableDesc:
         'The AI service is currently experiencing issues and is being recovered. Please retry later. If the problem persists, please contact support.',
       // Token refresh related
-      tokenRefreshedRetry: "You're signed in again. Please try again.",
+      tokenRefreshedRetry: 'Signed back in. Please retry.',
       // Network error related
       networkError: 'Network connection error',
       networkErrorTitle: 'Network Connection Failed',
@@ -7547,7 +7547,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       continueSummary: '{files} file(s) and {thumbnails} thumbnail(s) uploaded',
       continueSummaryDone: 'All content uploaded',
       continueFailed: 'Failed to resume import: {error}',
-      sessionExpired:
+      importGone:
         'The server no longer has this import (it may have timed out and been cleaned up). Import it again.',
       resumeFailed: 'Failed to resume import: {error}',
       resumeNotFoundTitle: 'Cannot resume import',

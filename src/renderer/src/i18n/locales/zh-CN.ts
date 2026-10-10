@@ -2911,7 +2911,7 @@ export default {
       actionType: '操作类型',
       confirm: '确认执行',
       reject: '拒绝',
-      allowForChat: '本对话内都允许',
+      allowForChat: '这条对话里都允许',
       whatIsThis: '这是什么？',
       // 并行执行时可能同时有好几条在等，答完这条会接着弹下一条
       queued: '还有 {count} 条等确认',
@@ -6824,7 +6824,7 @@ export default {
     },
     actions: {
       reject: '拒绝',
-      allowForChat: '本对话内都允许',
+      allowForChat: '这条对话里都允许',
       confirm: '确认执行'
     }
   },
@@ -7284,7 +7284,7 @@ export default {
       continueSummary: '已上传 {files} 个文件、{thumbnails} 张缩略图',
       continueSummaryDone: '全部内容已上传',
       continueFailed: '继续导入失败：{error}',
-      sessionExpired: '服务器上已经找不到这次导入了（可能超时被清理），需要重新导入',
+      importGone: '服务器上已经找不到这次导入了（可能超时被清理），需要重新导入',
       resumeFailed: '继续导入失败：{error}',
       resumeNotFoundTitle: '无法继续导入',
       resumeNotFoundContent: '未找到可以继续的导入：{error}',

@@ -15,7 +15,7 @@ description: Retargets body animation between skeletons, measures poses and prev
 
 首版在 UE 5.5 编译和验收。旧插件不认识 `anim.*` 时先更新插件；低于 5.5 返回不支持，不能反复调用。
 5.2–5.4 尚未被新工具替代的脚本接口保留在 [references/api.md](references/api.md)。
-测量口径、写姿势边界和对话教训见 [references/measurement.md](references/measurement.md)。
+测量口径、写姿势边界和实测教训见 [references/measurement.md](references/measurement.md)。
 
 ## 链映射与姿势判断
 

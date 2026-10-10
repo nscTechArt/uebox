@@ -38,7 +38,9 @@ const RETIRED_KEYS: string[] = [
   'assistantInputComposer.voice.boundConversation',
   // 小窗：菜单 key 与命名空间 profile.miniChat 改名为 profile.miniWindow
   'profile.menu.miniChat',
-  'profile.miniChat'
+  'profile.miniChat',
+  // 资产导入：语义从「会话过期」改成「服务器上没有这次导入」，key 跟着改
+  'assetManagement.import.sessionExpired'
 ]
 
 describe('已退役的 i18n key', () => {
