@@ -47,8 +47,6 @@ export interface ToolOutcome<TDetails = unknown> {
   isError?: boolean
   /** 提示 agent 本批工具跑完后停下 */
   terminate?: boolean
-  /** 完整工具定义在下一轮装载；支持的供应商由 pi 将它们锚定在本次结果处。 */
-  addedToolNames?: string[]
 }
 
 /** execute 拿到的运行时上下文 */
@@ -146,8 +144,7 @@ async function toAgentResult<TDetails>(
   return {
     content: await toContent(outcome),
     details: outcome.details as TDetails,
-    ...(outcome.terminate !== undefined ? { terminate: outcome.terminate } : {}),
-    ...(outcome.addedToolNames ? { addedToolNames: outcome.addedToolNames } : {})
+    ...(outcome.terminate !== undefined ? { terminate: outcome.terminate } : {})
   }
 }
 

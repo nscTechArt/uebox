@@ -25,9 +25,14 @@
  * 想要无人值守的用户可以自己切到全放行。
  */
 
-import { createEditTool, createWriteTool, createBashTool } from '@earendil-works/pi-agent-core'
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node'
 import { app } from 'electron'
+
+import {
+  createBashTool,
+  createEditTool,
+  createWriteTool,
+  NodeExecutionEnv
+} from '../../vendor/pi-harness'
 
 import type { UnrealAgentTool } from '../defineTool'
 import { assertInAccessScope } from './accessScope'
@@ -38,7 +43,7 @@ import { assertCommandAllowed, assertPathAllowed } from './pathBoundary'
 import { assertNotCopyingEngineTemplate, assertNotWritingUproject } from './projectCreationGuard'
 
 /**
- * 把 pi 的 harness 工具包成我们的工具。
+ * 把 pi 的 harness 工具（pi 1.0 删了，搬在 `vendor/pi-harness`）包成我们的工具。
  *
  * pi 的 `execute` 比我们的多收一个 context 参数，绑上 `{ env }` 即可；
  * 另外它没有 `unrealBox` 元数据，必须补 —— `resolveTools` 靠它过滤、

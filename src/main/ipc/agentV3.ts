@@ -206,10 +206,12 @@ import {
   loadTranscript,
   truncateTranscript
 } from '../agent-v3/core/transcriptStore'
+import { restoreTranscript, withoutSystemMessages } from '../agent-v3/core/systemMessages'
 import { notifyAgentRun } from '../agent-v3/host/runObserver'
 import { isVoiceTaskSession } from './realtimeVoice'
 import { serviceManager } from '../services'
-import { estimateContextTokens, type Agent, type AgentMessage } from '@earendil-works/pi-agent-core'
+import type { Agent, AgentMessage } from '@earendil-works/pi-agent-core'
+import { estimateContextTokens } from '../agent-v3/vendor/pi-harness'
 import {
   deleteUserSkills,
   discoverSkillsOnDisk,
@@ -421,7 +423,7 @@ function liveForkSource(sessionId: string, keepUserTurns?: number): AgentMessage
   const running = activeAgents.get(sessionId)
   if (running?.kind !== 'agent' || !running.agent) return undefined
 
-  const messages = [...running.agent.state.messages]
+  const messages = withoutSystemMessages(running.agent.state.messages)
   const userTurns = messages.filter((m) => (m as { role?: string }).role === 'user').length
   return userTurns > keepUserTurns ? messages : undefined
 }
@@ -2204,7 +2206,7 @@ export function registerAgentV3IPC(): void {
       // 也就是这条对话从此再也发不出消息 —— 见 `core/resume.ts`。
       const previous = repairPendingQuestions(loaded)
       if (previous.length > 0) {
-        agent.state.messages = previous
+        restoreTranscript(agent, previous)
         // 只标「盘上本来就有的」。补出来的那条不在文件里，
         // 留给第一次 append 写进去，否则它每次重启都要重新补一遍。
         store.markPersisted(loaded.length)
@@ -2616,7 +2618,7 @@ export function registerAgentV3IPC(): void {
       run.controller.signal.throwIfAborted()
       const store = new TranscriptStore(sessionId)
       run.store = store
-      agent.state.messages = plan.messages
+      restoreTranscript(agent, plan.messages)
       // 只标「盘上本来就有的」—— 补出来的提问结果还没落盘，得让下面那次 append 写进去
       store.markPersisted(loaded.length)
 
@@ -3165,7 +3167,7 @@ export function registerAgentV3IPC(): void {
 
     try {
       const source = running?.agent
-        ? [...running.agent.state.messages]
+        ? withoutSystemMessages(running.agent.state.messages)
         : await loadTranscript(sessionId)
       const messages = trimDanglingToolCalls(source)
 

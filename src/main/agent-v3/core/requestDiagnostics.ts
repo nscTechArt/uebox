@@ -32,7 +32,7 @@ import {
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessageEvent,
-  type Context,
+  type TranscriptContext,
   type Model
 } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
@@ -150,9 +150,9 @@ const CONTENT_EVENTS = new Set<AssistantMessageEvent['type']>([
 
 export function diagnosedStreamFn(inner: StreamFn, deps: DiagnosticsDeps): StreamFn {
   const now = deps.now ?? Date.now
-  const attempts = new WeakMap<Context, number>()
+  const attempts = new WeakMap<TranscriptContext, number>()
 
-  return async (model: Model<Api>, context: Context, options) => {
+  return async (model: Model<Api>, context: TranscriptContext, options) => {
     const attempt = (attempts.get(context) ?? 0) + 1
     attempts.set(context, attempt)
 

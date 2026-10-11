@@ -7,7 +7,7 @@
  * 在这个结构里不存在。
  */
 
-import { Agent, generateSummary, Result } from '@earendil-works/pi-agent-core'
+import { Agent } from '@earendil-works/pi-agent-core'
 import type { AgentLoopTurnUpdate, AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
 import type { Message } from '@earendil-works/pi-ai'
 import type { WebContents } from 'electron'
@@ -49,6 +49,8 @@ import { createApprovalGate, type ApprovalDeps, type ApprovalMode } from './appr
 import { VIEWPORT_CAPTURE_TOOLS } from './editorScreenshotScope'
 import { createLoopBreaker } from './loopBreaker'
 import { createAutoCompact, UNREAL_BOX_COMPACTION } from './compaction'
+import { generateSummary } from '../vendor/pi-harness'
+import { restoreTranscript, withoutSystemMessages, withSystemPrompt } from './systemMessages'
 import {
   hashMessages,
   loadCheckpoint,
@@ -725,7 +727,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
             UNREAL_BOX_COMPACTION.reserveTokens,
             signal
           )
-          return Result.isOk(result) ? result.value : ''
+          return result.ok ? result.value : ''
         },
         runSubAgent: async (input) => runSubAgent(ctx, input)
       }) as unknown as UnrealAgentTool<never>)
@@ -816,21 +818,11 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   // 存下来只会让会话目录里堆满再也不会被读到的文件。
   const checkpoint = ctx.isSubAgent ? undefined : await loadCheckpoint(ctx.sessionId)
   let contextEpoch = checkpoint?.contextEpoch ?? 0
-  let restoredSearch = false
 
   const agent = new Agent({
     streamFn: search
-      ? (model, context, options) => {
-          if (!restoredSearch) {
-            // 调用方在构造后才补 transcript；须在首个请求前恢复，而且用压缩前的完整历史。
-            search.restore(agent.state.messages)
-            restoredSearch = true
-          }
-          const currentTools = search.getTools()
-          // pi 的请求 context 和执行 context 共用此数组；替换内容才会让首轮执行同步拿到恢复的工具。
-          context.tools?.splice(0, context.tools.length, ...currentTools)
-          agent.state.tools = currentTools
-          return streamFn(model, context, {
+      ? (model, context, options) =>
+          streamFn(model, context, {
             ...options,
             sessionId: promptCacheKey(
               ctx.sessionId,
@@ -838,7 +830,6 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
               toolSearchPrefixKey(model, context)
             )
           })
-        }
       : streamFn,
     // **不是**业务 sessionId：这是供应商缓存亲和键，摘要检查点一换就该换，
     // 而业务 id 是会话身份、界面和锁都认它，不能动。见 `compactionCheckpoint.ts`。
@@ -928,7 +919,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
             return {
               context: {
                 ...turn.context,
-                systemPrompt: systemPromptFor(next),
+                // pi 1.0 的提示词是 transcript 开头那条 system 消息，换它就是换那一条
+                messages: withSystemPrompt(turn.context.messages, systemPromptFor(next)),
                 tools: (search
                   ? search.getTools()
                   : toolsFor(facts.ueConnected)) as unknown as AgentTool<never>[]
@@ -977,6 +969,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       markLegacyHealthResults(messages) as unknown as Message[]
   })
 
+  if (search) restoreSearchBeforeFirstRun(agent, search)
+
   attachTeamLive(ctx, agent)
 
   return {
@@ -988,6 +982,37 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     skills,
     toolSearchEnabled: ctx.toolSearchEnabled
   }
+}
+
+/**
+ * 第一次 `prompt` / `continue` 之前，按历史把工具搜索加载过的那批工具恢复出来。
+ *
+ * 只能挂在入口上：调用方在构造之后才用 `restoreTranscript` 把历史装进来，而 pi 1.0
+ * 在发请求**之前**就把 `state.tools` 和 transcript 声明的工具比一遍、差异写成
+ * system 消息。以前在 streamFn 里恢复来得及（工具跟着请求参数走），现在晚了 ——
+ * 这一轮第一个请求就少声明这批工具。用压缩前的完整历史恢复，所以读 `state.messages`。
+ */
+function restoreSearchBeforeFirstRun(
+  agent: Agent,
+  search: Pick<ReturnType<typeof createToolSearch>, 'restore' | 'getTools'>
+): void {
+  let restored = false
+  const restore = (): void => {
+    if (restored) return
+    restored = true
+    search.restore(agent.state.messages)
+    agent.state.tools = search.getTools() as unknown as AgentTool<never>[]
+  }
+  const prompt = agent.prompt.bind(agent)
+  const resume = agent.continue.bind(agent)
+  agent.prompt = ((...args: Parameters<typeof prompt>) => {
+    restore()
+    return prompt(...args)
+  }) as typeof agent.prompt
+  agent.continue = ((...args: Parameters<typeof resume>) => {
+    restore()
+    return resume(...args)
+  }) as typeof agent.continue
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1141,8 +1166,11 @@ export async function runSubAgent(
   input.signal?.throwIfAborted()
 
   if (input.seedMessages.length > 0) {
-    agent.state.messages = [...input.seedMessages]
+    restoreTranscript(agent, input.seedMessages)
   }
+  // 「这一路新产生的」从这里往后算。不能用 seedMessages.length：开头有子 agent
+  // 自己那条提示词，继承来的父历史里的 system 消息又被 restoreTranscript 丢了
+  const seededCount = agent.state.messages.length
 
   /**
    * 这一路调用过的**写工具**及次数。
@@ -1226,8 +1254,8 @@ export async function runSubAgent(
         input.signal?.throwIfAborted()
         if (agent.state.errorMessage) throw new Error(agent.state.errorMessage)
         return {
-          text: extractFinalText(agent.state.messages, input.seedMessages.length),
-          messageCount: agent.state.messages.length - input.seedMessages.length,
+          text: extractFinalText(agent.state.messages, seededCount),
+          messageCount: withoutSystemMessages(agent.state.messages.slice(seededCount)).length,
           writeToolCalls: ledger.counts(),
           writes: ledger.list(),
           readOnly: Boolean(input.readOnly)

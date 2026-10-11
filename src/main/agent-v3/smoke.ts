@@ -17,11 +17,13 @@
  * 的 CJS 降级用例）。工具侧的诊断放在 toolDiagnostics.ts，由 IPC 层合并。
  */
 
-import { Agent, estimateContextTokens } from '@earendil-works/pi-agent-core'
+import { Agent } from '@earendil-works/pi-agent-core'
 import type { AgentTool, AgentToolResult, StreamFn } from '@earendil-works/pi-agent-core'
 import { builtinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { TSchema } from 'typebox'
 import { z } from 'zod'
+
+import { estimateContextTokens } from './vendor/pi-harness'
 
 export interface AgentV3SmokeReport {
   ok: boolean

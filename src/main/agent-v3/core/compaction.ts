@@ -13,16 +13,22 @@
  * 真机上用户在做视频时插一句话，正好撞上，以为卡死了。
  */
 
+import type { AgentMessage } from '@earendil-works/pi-agent-core'
+import {
+  getCurrentSystemMessage,
+  type Message,
+  type Model,
+  type Models
+} from '@earendil-works/pi-ai'
+
 import {
   DEFAULT_COMPACTION_SETTINGS,
   estimateContextTokens,
   estimateTokens,
   generateSummary,
-  Result,
-  type AgentMessage,
   type CompactionSettings
-} from '@earendil-works/pi-agent-core'
-import type { Model, Models } from '@earendil-works/pi-ai'
+} from '../vendor/pi-harness'
+import { withoutSystemMessages } from './systemMessages'
 
 /**
  * 压缩设置。
@@ -198,9 +204,7 @@ export async function compactMessages(
     options.previousSummary
   )
 
-  // Result.isOk 而不是 getOrUndefined —— 后者的签名约束到 object，
-  // 而 generateSummary 返回的是 Result<string, _>。
-  if (!Result.isOk(result) || !result.value) return { ok: false, reason: 'summary-failed' }
+  if (!result.ok || !result.value) return { ok: false, reason: 'summary-failed' }
 
   return { ok: true, messages: [toSummaryMessage(result.value), ...tail], summary: result.value }
 }
@@ -246,7 +250,7 @@ export function estimateMessagesTokens(messages: AgentMessage[]): number {
  * 这几条消息里的图片，比 pi 的估价多出来的那部分。
  *
  * pi 把图片一律记 4800 字符（1200 token），不看这张图多大
- * （`harness/compaction/compaction.js` 的 `ESTIMATED_IMAGE_CHARS`）。真机上
+ * （`vendor/pi-harness/compaction.ts` 的 `ESTIMATED_IMAGE_CHARS`，从 pi 0.84.3 搬来）。真机上
  * 出过事故：两张原样发出去的截图把上下文顶到 123 万 token，而按 pi 的算法
  * 它们合计只有 2400 —— 压缩因此迟迟不触发。
  *
@@ -298,7 +302,28 @@ export function applyCheckpoint(
   return [toSummaryMessage(checkpoint.summary), ...messages.slice(checkpoint.cutIndex)]
 }
 
+/**
+ * 自动压缩，装在 pi 的 `transformContext` 上。
+ *
+ * pi 1.0 起 transcript 里会有 system 消息（开头那条提示词 + 这一轮里的工具增量，
+ * 见 `systemMessages.ts`）。压缩**只看对话本身**：先把 system 消息拿出来，切点、
+ * 检查点指纹、用量估算都和盘上那份（本来就不含 system 消息）对得上，行为和
+ * 0.84 时一样；真压了，再把它们合成一条放回最前面。不放回的话，压完第一次
+ * 模型就没有提示词也没有工具了 —— pi 把 system 消息当普通历史交给我们。
+ */
 export function createAutoCompact(deps: CompactionDeps) {
+  const compactConversation = createConversationCompact(deps)
+  return async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
+    const conversation = withoutSystemMessages(messages)
+    const projected = await compactConversation(conversation, signal)
+    // 没压（原样返回）就把原数组交回去，一条都不动
+    if (projected === conversation) return messages
+    const head = getCurrentSystemMessage(messages as Message[])
+    return head ? [head, ...projected] : projected
+  }
+}
+
+function createConversationCompact(deps: CompactionDeps) {
   /**
    * 当前生效的检查点。
    *

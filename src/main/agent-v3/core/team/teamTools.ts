@@ -40,6 +40,7 @@ import {
 } from './teamStore'
 import { sameTeamModel } from '../../../../shared/agentTeam'
 import { getTargetProjectPath } from '../projectTargetContext'
+import { withoutSystemMessages } from '../systemMessages'
 import { checkupPassed } from './modelCheckups'
 import {
   canChooseModels,
@@ -434,7 +435,8 @@ function createSendTool(
         } finally {
           deps.live?.setAssignment(member.name, null)
           // 被停下也要存：它已经干了一半的活，下次派活时得记得
-          if (latest) await deps.store.saveHistory(member.name, latest)
+          // 提示词和工具增量每轮现算，不进队员的记忆（见 systemMessages.ts）
+          if (latest) await deps.store.saveHistory(member.name, withoutSystemMessages(latest))
         }
       })
     busy.set(key, run)

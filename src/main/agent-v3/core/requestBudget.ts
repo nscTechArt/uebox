@@ -175,6 +175,12 @@ export function measureContextBytes(context: Context): number {
   if (context.tools) total += Buffer.byteLength(JSON.stringify(context.tools), 'utf8')
 
   for (const message of context.messages) {
+    // pi 1.0 把提示词和工具定义放进 system 消息；正文走下面的 content，工具定义在这里补上
+    if (message.role === 'system') {
+      for (const tools of [message.toolsAdded, message.toolsRemoved]) {
+        if (tools?.length) total += Buffer.byteLength(JSON.stringify(tools), 'utf8')
+      }
+    }
     const content = message.content
     if (typeof content === 'string') {
       total += Buffer.byteLength(content, 'utf8')

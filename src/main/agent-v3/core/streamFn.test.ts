@@ -1,5 +1,6 @@
 /** @vitest-environment node */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TranscriptContext } from '@earendil-works/pi-ai'
 
 /**
  * 输入框里那个「思考程度」最终只落到一个地方：streamFn 传给 pi 的
@@ -10,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const streamSimple = vi.fn()
 const getSupportedThinkingLevels = vi.fn()
 const PI_MODEL = { id: 'm1', provider: 'p', api: 'openai-codex-responses' }
+/** pi-ai 被下面整个 mock 掉了，拿不到 normalizeContext；空 transcript 直接按类型断言 */
+const EMPTY_CONTEXT = { messages: [] } as unknown as TranscriptContext
 
 vi.mock('@earendil-works/pi-ai', async () => {
   const actual =
@@ -68,7 +71,7 @@ async function optionsPassedToPi(
   thinkingLevel?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 ): Promise<Record<string, unknown>> {
   const runtime = await resolveAgentModel({ role: 'agent' }, thinkingLevel)
-  runtime.streamFn(PI_MODEL as never, { messages: [] }, undefined as never)
+  runtime.streamFn(PI_MODEL as never, EMPTY_CONTEXT, undefined as never)
   return streamSimple.mock.calls.at(-1)?.[2] as Record<string, unknown>
 }
 
@@ -136,7 +139,7 @@ describe('思考程度 → pi 的 reasoning', () => {
     const mimo = { ...PI_MODEL, baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' }
     const passed = async (level: 'auto' | 'off'): Promise<Record<string, unknown>> => {
       const runtime = await resolveAgentModel({ role: 'agent' }, level)
-      runtime.streamFn(mimo as never, { messages: [] }, undefined as never)
+      runtime.streamFn(mimo as never, EMPTY_CONTEXT, undefined as never)
       return streamSimple.mock.calls.at(-1)?.[2] as Record<string, unknown>
     }
 
@@ -148,7 +151,7 @@ describe('思考程度 → pi 的 reasoning', () => {
   it('保留 pi 自己传进来的 options', async () => {
     const runtime = await resolveAgentModel({ role: 'agent' }, 'high')
     const signal = new AbortController().signal
-    runtime.streamFn(PI_MODEL as never, { messages: [] }, { signal } as never)
+    runtime.streamFn(PI_MODEL as never, EMPTY_CONTEXT, { signal } as never)
 
     const options = streamSimple.mock.calls.at(-1)?.[2] as Record<string, unknown>
     expect(options.signal).toBe(signal)
@@ -231,7 +234,7 @@ describe('出口闸', () => {
     streamSimple.mockReturnValue({ notAStream: true })
 
     expect(() =>
-      runtime.streamFn(PI_MODEL as never, { messages: [] } as never, undefined as never)
+      runtime.streamFn(PI_MODEL as never, EMPTY_CONTEXT as never, undefined as never)
     ).not.toThrow()
   })
 })
@@ -406,7 +409,7 @@ describe('CodeBuddy 带图的请求被拒', () => {
     const runtime = await resolveAgentModel({ role: 'agent' })
     const noImage = await runtime.streamFn(
       CODEBUDDY as never,
-      { messages: [] } as never,
+      EMPTY_CONTEXT as never,
       undefined as never
     )
     await expect(noImage.result()).resolves.toMatchObject({ stopReason: 'error' })

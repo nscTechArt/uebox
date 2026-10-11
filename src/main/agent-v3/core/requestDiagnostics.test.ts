@@ -3,8 +3,8 @@ import {
   type Api,
   type AssistantMessage,
   type AssistantMessageEvent,
-  type Context,
-  type Model
+  type Model,
+  normalizeContext
 } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import { describe, expect, it } from 'vitest'
@@ -105,7 +105,7 @@ describe('diagnosedStreamFn', () => {
       now: () => clock.t
     })
 
-    const seen = await drain(await wrapped(model, { messages: [] } as Context, {}))
+    const seen = await drain(await wrapped(model, normalizeContext({ messages: [] }), {}))
     await Promise.resolve()
 
     expect(seen).toEqual(events)
@@ -154,7 +154,7 @@ describe('diagnosedStreamFn', () => {
       now: () => clock.t
     })
 
-    await drain(await wrapped(model, { messages: [] } as Context, {}))
+    await drain(await wrapped(model, normalizeContext({ messages: [] }), {}))
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(records[0]).toMatchObject({
@@ -181,11 +181,11 @@ describe('diagnosedStreamFn', () => {
       sink: (r) => records.push(r),
       now: () => clock.t
     })
-    const context = { messages: [] } as Context
+    const context = normalizeContext({ messages: [] })
 
     await drain(await wrapped(model, context, {}))
     await drain(await wrapped(model, context, {}))
-    await drain(await wrapped(model, { messages: [] } as Context, {}))
+    await drain(await wrapped(model, normalizeContext({ messages: [] }), {}))
     await Promise.resolve()
 
     expect(records.map((r) => r.attempt)).toEqual([1, 2, 1])
@@ -206,7 +206,7 @@ describe('diagnosedStreamFn', () => {
     const wrapped = diagnosedStreamFn(inner, { sink: () => {}, now: () => clock.t })
 
     await drain(
-      await wrapped(model, { messages: [] } as Context, {
+      await wrapped(model, normalizeContext({ messages: [] }), {
         onPayload: async () => ({ rewritten: true }),
         onResponse: () => {
           responded++
@@ -232,7 +232,9 @@ describe('diagnosedStreamFn', () => {
     ])
     const wrapped = diagnosedStreamFn(fn, { sink: (r) => records.push(r), now: () => clock.t })
 
-    await drain(await wrapped(model, { messages: [] } as Context, { signal: controller.signal }))
+    await drain(
+      await wrapped(model, normalizeContext({ messages: [] }), { signal: controller.signal })
+    )
     await Promise.resolve()
 
     expect(records[0]).toMatchObject({
@@ -268,7 +270,7 @@ describe('失败响应的头', () => {
       dumpRejected: (_r, payload) => dumped.push(payload)
     })
 
-    await drain(await wrapped(model, { messages: [] } as Context, { fetch: upstream }))
+    await drain(await wrapped(model, normalizeContext({ messages: [] }), { fetch: upstream }))
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     const { headers, body } = records[0].errorResponse!

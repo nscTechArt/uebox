@@ -34,11 +34,11 @@
 
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 
-import { createReadTool } from '@earendil-works/pi-agent-core'
-import type { AgentToolResult, ReadImageProcessor } from '@earendil-works/pi-agent-core'
-import { NodeExecutionEnv } from '@earendil-works/pi-agent-core/node'
+import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 import { app } from 'electron'
 import { z } from 'zod'
+
+import { createReadTool, NodeExecutionEnv, type ReadImageProcessor } from '../../vendor/pi-harness'
 
 import { compressForContext, describeResize } from '../contextImage'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
@@ -70,7 +70,7 @@ function getEnv(): NodeExecutionEnv {
  * ## 为什么必须有
  *
  * pi 的 read 工具**没挂这个钩子就把原始字节原样 base64 发出去**
- * （`harness/tools/read.js`：`{ type: 'image', data: encodeBase64(bytes) }`）。
+ * （`vendor/pi-harness/tools/read.ts`：`{ type: 'image', data: encodeBase64(bytes) }`）。
  * 真机上炸过一次：用户让 agent 看一张 2048×2048 的 UV 排布图（3.5MB PNG），
  * base64 撑到 4.7MB 塞进一个 JSON body，厂商网关（openresty）默认的请求体
  * 上限是 1MB，直接退回一页 413 的 HTML —— 界面上显示的是「Agent 执行失败」

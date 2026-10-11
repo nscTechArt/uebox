@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createModels } from '@earendil-works/pi-ai'
+import { createModels, getCurrentSystemPrompt, getCurrentTools } from '@earendil-works/pi-ai'
 import {
   fauxAssistantMessage,
   fauxProvider,
@@ -31,6 +31,7 @@ vi.mock('./compactionCheckpoint', async (importOriginal) => ({
 }))
 
 import { createUnrealAgent } from './createAgent'
+import { restoreTranscript } from './systemMessages'
 import { discoverSkills } from '../capabilities/skillsService/SkillsService'
 
 const faux = fauxProvider({ tokensPerSecond: 100000 })
@@ -39,7 +40,7 @@ models.setProvider(faux.provider)
 const write = vi.fn(async () => ({ text: 'written' }))
 const read = vi.fn(async () => ({ text: 'read' }))
 const base = { sessionId: 'beta-test', ueConnected: true, isSubAgent: true, skills: [] }
-const requests: Array<{ key?: string; tools: string[] }> = []
+const requests: Array<{ key?: string; system?: string; tools: string[] }> = []
 
 beforeEach(() => {
   settings.agentToolSearchEnabled = false
@@ -67,7 +68,8 @@ beforeEach(() => {
   const streamFn: StreamFn = (model, context, options) => {
     requests.push({
       key: options?.sessionId,
-      tools: (context.tools ?? []).map((tool) => tool.name)
+      system: getCurrentSystemPrompt(context.messages),
+      tools: getCurrentTools(context.messages).map((tool) => tool.name)
     })
     return models.streamSimple(model, context, options)
   }
@@ -111,7 +113,9 @@ describe('搜索模式真正进入 Agent 循环', () => {
       expect.objectContaining({
         role: 'toolResult',
         toolName: 'search_tools',
-        addedToolNames: ['read_state', 'write_state']
+        details: expect.objectContaining({
+          toolSearch: expect.objectContaining({ loadedToolNames: ['read_state', 'write_state'] })
+        })
       })
     )
     expect(requests).toHaveLength(3)
@@ -232,7 +236,7 @@ describe('搜索模式真正进入 Agent 循环', () => {
     ])
     await first.agent.prompt('read')
     const next = await createUnrealAgent({ ...base, toolSearchEnabled: true })
-    next.agent.state.messages = [...first.agent.state.messages]
+    restoreTranscript(next.agent, first.agent.state.messages)
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall('search_tools', { names: ['read_state'] }, { id: 's' })]),
       fauxAssistantMessage([fauxToolCall('read_state', {}, { id: 'new' })]),
@@ -242,6 +246,31 @@ describe('搜索模式真正进入 Agent 循环', () => {
     expect(read).toHaveBeenCalledTimes(2)
     const fullAgain = await createUnrealAgent({ ...base, toolSearchEnabled: false })
     expect(fullAgain.tools.map((t) => t.name)).toEqual(['read_state', 'write_state'])
+  })
+
+  it('恢复历史后第一个请求就带着加载过的工具和这一轮自己的提示词', async () => {
+    const first = await createUnrealAgent({ ...base, toolSearchEnabled: true })
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall('search_tools', { names: ['read_state'] }, { id: 's' })]),
+      fauxAssistantMessage('loaded')
+    ])
+    await first.agent.prompt('加载')
+    const next = await createUnrealAgent({ ...base, toolSearchEnabled: true })
+    // 宿主的做法：先建 agent，再把盘上的历史装进去（盘上没有 system 消息）
+    restoreTranscript(
+      next.agent,
+      first.agent.state.messages.filter((message) => message.role !== 'system')
+    )
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall('read_state', {}, { id: 'r' })]),
+      fauxAssistantMessage('done')
+    ])
+    requests.length = 0
+    await next.agent.prompt('直接读')
+    expect(read).toHaveBeenCalledOnce()
+    // pi 1.0 把提示词和工具都放在 transcript 里：直接赋值 state.messages 会把两者一起冲掉
+    expect(requests[0].tools).toContain('read_state')
+    expect(requests[0].system).toContain('<tool_search_beta>')
   })
 
   it('真实材质技能带组，下一响应直接执行；恢复聊天首轮就保留整组并重过只读权限', async () => {
@@ -281,7 +310,11 @@ describe('搜索模式真正进入 Agent 循环', () => {
       expect.objectContaining({
         role: 'toolResult',
         toolName: 'load_skill',
-        addedToolNames: ['material_create', 'material_get_graph']
+        details: expect.objectContaining({
+          toolSearch: expect.objectContaining({
+            loadedToolNames: ['material_create', 'material_get_graph']
+          })
+        })
       })
     )
     expect(
@@ -295,7 +328,7 @@ describe('搜索模式真正进入 Agent 循环', () => {
       toolSearchEnabled: true,
       readOnly: true
     })
-    next.agent.state.messages = [...first.agent.state.messages]
+    restoreTranscript(next.agent, first.agent.state.messages)
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall('material_get_graph', {}, { id: 'again' })]),
       fauxAssistantMessage('read again')
