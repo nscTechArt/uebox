@@ -47,6 +47,7 @@
 **怎么点**：Level Sequence 编辑器 → 扳手图标 `Actions` → `Advanced` →
 `Rebind Possessable References`（有的版本叫 `Fix Actor References`）。
 修不好就右键那条轨道 → `Assign Actor` → 选中场景里正确的 Actor。
+**要代劳**：`sequence_rebind` 把绑定改绑到点名的 Actor，相当于 `Assign Actor`。
 
 > **两类故障要分开说。** 资产引用（子序列、动画、材质）改名后可以靠
 > Redirector 修；**关卡里 Actor 的 possessable 绑定不走 Redirector**，

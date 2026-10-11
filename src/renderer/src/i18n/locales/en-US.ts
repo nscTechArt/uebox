@@ -2410,6 +2410,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
 
         ue_save: 'Save',
         ue_set_config: 'Change editor setting',
+        sequence_rebind: 'Change sequence binding',
         ue_collect_garbage: 'Free memory',
         ue_playtest: 'Play in editor',
         ue_restart_editor: 'Restart editor',

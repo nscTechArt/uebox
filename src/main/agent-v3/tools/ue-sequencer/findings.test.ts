@@ -39,7 +39,7 @@ describe('解释表', () => {
     // 用户和模型都不会自己想到「轨道在、但什么都不做」这一层
     const e = explain('broken_binding')
     expect(e.why).toContain('不报错')
-    expect(e.how).toContain('Rebind Possessable References')
+    expect(e.how).toContain('sequence_rebind')
   })
 
   it('「判不出来」要明说不代表坏了', () => {

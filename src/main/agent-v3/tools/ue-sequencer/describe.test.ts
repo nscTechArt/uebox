@@ -132,9 +132,9 @@ describe('出片体检', () => {
     expect(text).toContain('什么都不做')
   })
 
-  it('失效绑定要给出引擎自带的修复入口，而不是让用户自己找', async () => {
+  it('失效绑定要指向能修它的工具，而不是让用户自己找', async () => {
     const text = await run({ broken_bindings: ['Hero'] })
-    expect(text).toContain('Rebind Possessable References')
+    expect(text).toContain('sequence_rebind')
   })
 
   // 回归：用 bindings 点名时，broken 只覆盖被点到的那几个，

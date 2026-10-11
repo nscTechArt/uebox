@@ -214,8 +214,7 @@ function readinessLines(data: DescribeOutput, filtered: boolean): string[] {
     lines.push(
       `- ❌ ${broken.length} 个绑定已失效（${broken.slice(0, 5).join('、')}${broken.length > 5 ? ' 等' : ''}）。` +
         '失效的绑定不会报错，只是什么都不做 —— 对应的轨道等于没有效果。' +
-        '可以在 Level Sequence 编辑器里用 Actions → Advanced → Rebind Possessable References 修复；' +
-        '用户指明该绑到哪个 Actor 并同意后，也可以用 Python 代为重绑（见 ue-sequencer 技能）。'
+        '用 sequence_rebind 改绑到关卡里对应的 Actor；该绑哪个拿不准就先问用户。'
     )
   } else if (filtered) {
     // 用 bindings 点名时只查了那几个。说「没有失效的绑定」是假话 ——
