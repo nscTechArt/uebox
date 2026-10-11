@@ -5,19 +5,28 @@ Instructions for AI coding agents working in this repository.
 
 ---
 
+## 0. This fork — read first
+
+This section governs work **in this fork** and is not a contribution: keep it, and
+`docs/agents/`, out of upstream PRs by cutting PR branches from `upstream/main`, never local `main`.
+
+- **Verification is on-demand.** Write code, commit, hand off; commits land unverified. Run
+  `pnpm verify*` (any variant), `lint`, `typecheck` or the vitest suite only when the user asks
+  in the session or an invoked skill's instructions call for it. §3's rules apply whenever a
+  check does run.
+- **The single test file is still allowed** while implementing — a self-check, not the gate.
+- **Issues, specs and triage labels** → `docs/agents/issue-tracker.md` (local markdown under
+  `.scratch/<feature-slug>/`) and `docs/agents/triage-labels.md`. **Before exploring an area** →
+  `docs/agents/domain.md`.
+
 ## 1. What this project is
 
 **Unreal Box (虚幻盒子)** — an agent harness for Unreal Engine: a local runtime that lets an AI
 agent actually operate an Unreal project. Electron + Vue 3 + TypeScript.
 
-The agent is the product. The harness around it is model access, the Unreal tool set, the
-skills, and the constraints and verification that keep it in bounds; the engine connection
-itself runs through the bundled UnrealAgentLink plugin.
-
 The other modules — project library, asset library, blueprint and material libraries,
-notebooks and wikis — each have a full standalone UI, but structurally they exist to serve the
-agent: they register what it acts on, feed it material, and receive what it produces. Treat
-them that way when deciding where a feature belongs.
+notebooks and wikis — exist to serve the agent: they register what it acts on, feed it
+material, and receive what it produces. Decide where a feature belongs by that relation.
 
 This repository is the open-source desktop application. Local features work fully offline,
 without an account or region gate. Optional AI and network vault features use services
@@ -32,11 +41,12 @@ pnpm install
 pnpm dev          # start the app (Electron)
 ```
 
-Windows is the primary platform. pnpm 10.28.2, Node 24.21.0.
-The project pins Node in `.npmrc`; use `pnpm exec node` for direct Node commands so they use
-the project runtime even when the system Node differs.
+Windows is the primary platform. The project pins Node in `.npmrc`; use `pnpm exec node` for
+direct Node commands so they use the project runtime even when the system Node differs.
 
 ## 3. The gate — two tiers, and which one you owe
+
+> **In this fork, §0 suspends the run schedule below.**
 
 **While you work: run no gate.** Finish the feature first. At most run the one test file you are
 writing (`pnpm exec vitest run <file>`).
@@ -44,89 +54,41 @@ writing (`pnpm exec vitest run <file>`).
 **When the feature is done and you are about to commit:**
 
 ```bash
-pnpm verify:changed     # ~30s — only what you touched; once per commit, not per edit
+pnpm verify:changed     # only what you touched; once per commit, not per edit
 ```
 
 **Before the work is published** — you are about to `git push`, cut a release, or hand the whole
 batch over:
 
 ```bash
-pnpm verify             # ~3.5 min — the full gate
+pnpm verify             # the full gate
 ```
 
-**Do not run any gate after every small edit, and the full gate not even per commit.** Those 3.5 minutes are almost all fixed cost:
-the full lint ratchet is 49s, both typecheck projects 45s, and the whole test suite 126s — of which
-only 43s is actually executing tests (the rest is 386 test files each building an environment).
-Paying that per task is the biggest single waste of time in this repo. With several sessions
-working at once it is also actively misleading: the gate is repo-wide, so another session's
-half-written file turns **your** gate red (§5 rule 11).
+**Run each tier once, at its point — never per edit.** The full gate is almost all fixed cost,
+and it is repo-wide, so another session's half-written file turns **your** gate red (§5 rule 11).
 
-`verify:changed` is a snapshot, not a substitute — the full gate still has to pass before anything
-is published. Two things make deferring it safe:
+The steps are defined in one place, `scripts/verify.mjs` (CI runs `pnpm verify --ci` on PRs and
+pushes to `main`, but never the plugin/native checks, so green CI is not native acceptance);
+every failing step says what to fix. You can leave the app running meanwhile.
 
-- Every commit got its own 30-second check, so a red full gate points at _this_ batch, not at a
-  commit someone made three hours ago and can no longer reconstruct.
-- **CI is the backstop.** `.github/workflows/quality.yml` runs `pnpm verify --ci` on pull requests
-  and pushes to `main`. The shared gate adds audit, packaging and offline boot in CI, while
-  plugin package/native checks are explicitly NOT RUN. A green repository job is not
-  native acceptance. The gate is defined in exactly one place (`scripts/verify.mjs`), so local and
-  CI cannot drift. Forgetting to run it locally costs you a red run on GitHub, not a broken
-  release.
+`verify:changed` skips the full lint ratchet (`lint:changed` still covers new lines), typechecks
+only the side you changed, and runs only the related tests. Its comparison base is
+`$VERIFY_BASE` → `origin/main` → `main` → `HEAD`, so as an unpushed batch grows it widens to
+cover the whole batch. To check strictly the task in front of you, pin it:
+`VERIFY_BASE=HEAD pnpm verify:changed`.
 
-Every step tells you what to fix when it fails. You can leave the app running while it runs — the
-gate no longer touches the `better-sqlite3` native binding.
+Touched the main process, build config, or dependencies → add `--with-build` (packaging + offline
+boot locally).
 
-| Step | What it checks |
-|---|---|
-| `security:secrets` | No credentials committed |
-| `verify:official-endpoints` | Ratchet: the community core must not gain new official-server calls |
-| `lint` | Ratchet: full-repo ESLint, per-file counts must not exceed `scripts/lint.baseline.json` |
-| `lint:changed` | **Full ESLint rules on the lines you changed** — zero tolerance |
-| `docs:check` | Bilingual doc pairs were updated together |
-| `verify:skills` | `resources/skills/**` conforms to `resources/skills/SKILL_STANDARD.md` |
-| `verify:ue-file-reads` | Engine-authored files (`.uproject` / `.uplugin` / engine `ini`) are never read with a hard-coded encoding — see §5 |
-| `verify:plugin` | Local only — plugin packaged inputs changed ⇒ inspect the selected development package; CI lists it as NOT RUN |
-| `typecheck` | `tsconfig.node.json` (main) + `tsconfig.web.json` (renderer) + `tsconfig.cli.json` (`packages/cli`) |
-| `test:run` | Vitest, whole-repo unit tests (no count here — it changes daily and would just go stale) |
-| `audit:prod` | CI only — no high-severity vulnerabilities in production deps |
-| `build:unpack` | CI only — production build + packaging + packaged-dependency closure |
-| `verify:offline-boot` | CI only — boots the packaged app, walks every page, asserts zero official-server requests |
+`verify:plugin` inspects a plugin package only when the change touches packaged plugin inputs, and
+only the version selected by `VERIFY_PLUGIN_ENGINE`. **Selecting the target, or working without
+Unreal installed** → [the packaging guide](docs/contributing/packaging.md#the-everyday-gate).
+**Official installers, the update feed, releasing** →
+[the same guide](docs/contributing/packaging.md#official-installers).
 
-What the per-commit tier actually does: `verify:changed` skips the full lint ratchet (new code is
-still covered by `lint:changed`, zero tolerance), typechecks only the side you changed, and runs
-only the tests related to your diff. Everything else in the table above still runs — those steps
-are cheap.
-
-Its comparison base is `$VERIFY_BASE` → `origin/main` → `main` → `HEAD`. So as an unpushed batch
-grows, `verify:changed` slowly widens to cover the whole batch. To check strictly the task in
-front of you, pin it: `VERIFY_BASE=HEAD pnpm verify:changed`.
-
-Two other variants: `pnpm verify:fast` (the whole gate, but the test step skips the native-ABI
-preflight) and `pnpm verify --with-build` (adds packaging and the offline-boot gate locally — use
-it when you touched the main process, build config, or dependencies).
-
-Plugin package freshness comes in two tiers. Everyday `pnpm verify` / `verify:changed` /
-`verify:fast` run `verify:plugin`: it inspects a package only when the change touches packaged
-plugin inputs, and only the version selected by `VERIFY_PLUGIN_ENGINE`; `pnpm verify --ci` lists
-it as NOT RUN. How to select the target, and what to declare without Unreal installed, is in
-[the packaging guide](docs/contributing/packaging.md#the-everyday-gate). The strict tier is
-`plugin:check:all`, wired into the official installer scripts (`build:win` / `build:mac` /
-`build:linux`); it requires **every version, 5.0–5.8, to be fresh** — ship a release with one
-version behind and those users really do install a stale plugin. Rebuild the whole set with
-`node scripts/build-all-plugins.mjs`.
-
-Shipping an official installer is one command, `pnpm build:win`, with no channels (the old
-personal / enterprise split is gone, along with `build:win:personal`, `sync:update-feed`, and the
-channel marker file). There is exactly one update source: **public GitHub Releases**. Set
-`updateGithubRepo` in `package.json` to `owner/repo` and the build script injects the publish
-config and emits `latest.yml`; leave it empty and you get a package with no update source at all —
-it makes no update request on boot, which is also what anyone who clones and builds this repo
-gets. Update checks read `dist/`'s `.exe`, `.blockmap`, and `latest.yml` from that repository's
-Release. Runtime resolution lives in `src/main/services/updater/updateFeed.ts`.
-
-**Do not** make the gate green by skipping, deleting, or `.skip`-ing tests, by widening ESLint
-ignores, or by loosening the coverage threshold. If a gate is genuinely wrong, say so in the PR
-instead of routing around it.
+**When a gate is genuinely wrong, say so in the PR** and leave the check intact. Skipping,
+deleting or `.skip`-ing tests, widening ESLint ignores, or loosening the coverage threshold is
+routing around the gate, not fixing it.
 
 ## 4. Where code goes — the vertical slice
 
@@ -138,7 +100,7 @@ Using tags as the example:
 | 1 | Model | `src/main/sqliteDataBase/models/tag.ts` | Table DDL + SQL |
 | 2 | IPC handler | `src/main/sqliteDataBase/ipc/tag.ts` | `ipcMain.handle('db:tags:*')` |
 | 3 | Preload bridge | `src/preload/index.ts` | `contextBridge` → `window.api.database.tag.*` |
-| 4 | Preload types | `src/preload/index.d.ts` | **Must change together with #3** |
+| 4 | Preload types | `src/preload/index.d.ts` | Types for `window.api.*` |
 | 5 | Renderer API | `src/renderer/src/api/tag.ts` | `tagAPI.*`, unwraps via `unwrapResult()` |
 | 6 | Store | `src/renderer/src/store/modules/*` | Pinia, only if state is shared |
 | 7 | View | `src/renderer/src/views/**` | Vue components |
@@ -147,15 +109,14 @@ Full walkthrough with a real worked example: [docs/contributing/vertical-slice.m
 
 For project vocabulary, read [CONTEXT.md](CONTEXT.md).
 
-Other entry points: main-process IPC in `src/main/ipc/`, AI agents in `src/main/agent-v3/`
-(`agent-v2/` is gone; it only survives in historical docs), shared types in `src/shared/`.
+Other entry points: main-process IPC in `src/main/ipc/`, AI agents in `src/main/agent-v3/`.
 
 Four areas sit outside that slice. Each carries its own obligation, and a change there is not done
 until it is met:
 
 | Area | Path | Obligation |
 |---|---|---|
-| Agent tools | `src/main/agent-v3/tools/` | Define with `defineTool` / `defineUeTool` and register in `registry.ts`; mind the `appSettingsManager` trap in §7 |
+| Agent tools | `src/main/agent-v3/tools/` | Define with `defineTool` / `defineUeTool` and register in `registry.ts`; mind the `appSettingsManager` trap in §7; media inputs and write-tool receipts follow §5 rules 13–14 |
 | Runtime skills (loaded by the in-app agent and the CLI) | `resources/skills/**`, `packages/cli/skills/**` | Conform to `resources/skills/SKILL_STANDARD.md` — gate step `verify:skills` |
 | UE plugin | `plugin/UnrealAgentLink/` | Packaged inputs changed ⇒ rebuild the selected development zip and set `VERIFY_PLUGIN_ENGINE`, or gate step `verify:plugin` fails (§3) |
 | `uebox` CLI | `packages/cli/` | Typechecked by the gate via `tsconfig.cli.json`; `pnpm verify:cli-package` (build + package check) is not in the gate — run it before publishing the package |
@@ -184,11 +145,12 @@ until it is met:
    `src/renderer/src/api/updater.ts` is the worked example.
 6. **New behaviour needs a test.** Put it in `tests/` or beside the source as `*.test.ts` — both
    are picked up. See [docs/contributing/testing.md](docs/contributing/testing.md).
-7. **No new dependencies, network calls, or telemetry** unless the issue explicitly asks for it.
-   `pnpm audit:prod` runs in CI and a new package will be scrutinised.
-8. **Don't reformat files you didn't change.** A 900-line diff for a 10-line feature will not be merged.
+7. **No new dependencies** unless the issue explicitly asks for one; network calls and telemetry
+   follow §1.
+8. **Keep the diff to the lines your task changes.** Leave other files' formatting as it is; a
+   900-line diff for a 10-line feature will not be merged.
 9. **Read before you write.** Check `docs/` for an existing spec on the area you're touching
-   (`docs/资产库避坑指南.md`, `docs/ContextMenu组件使用规范.md`, `docs/router-meta.md`, …).
+   (`docs/ContextMenu组件使用规范.md`, `docs/router-meta.md`, …).
 10. **For anything the user authored, the file on disk is the single source of truth.** The database
    is an index you can delete and rebuild; localStorage only holds UI preferences and one-shot flags.
    That is what makes the community edition's "your data stays yours" promise real — it has to be
@@ -199,65 +161,36 @@ until it is met:
 11. **This repo is often edited by several agent sessions at once.** Three rules:
     - **Stage your own files by path.** `git add -A` / `git add .` / `git commit -a` sweep
       another session's uncommitted work into your commit — nothing is lost, but the history
-      is now wrong and the change is untraceable. These commands are in the `deny` list in
-      `.claude/settings.json`.
-    - **Run the full `pnpm verify` only when handing off, and only one session at a time.**
-      Use `pnpm verify:changed` at commit time, not while you work. The gate is repo-wide: a file another session
-      is halfway through will turn your gate red, and that is not yours to fix.
-      **Do not edit files outside your task just to make the gate green** — say in your handoff
-      whose work-in-progress is blocking it. That is more useful than finishing it for them.
+      is now wrong and the change is untraceable.
+    - **When another session's work-in-progress turns the gate red, name it in your handoff.**
+      Leave files outside your task untouched — reporting whose file blocks the gate is more
+      useful than finishing it for them. Only one session runs the full `pnpm verify` at a
+      time (schedule: §3).
     - **The four ratchet baselines are shared** (lint / colors / local-storage /
       official-endpoints under `scripts/`). They can only be updated one session at a time;
       concurrent updates always conflict. Before updating one, confirm you are the only
       session wrapping up.
 
-12. **Never read engine-authored files with a hard-coded encoding.** UE saves
-    `.uproject` / `.uplugin` through `SaveStringToFile` with AutoDetect: one non-ASCII
-    character anywhere in the file (a Chinese project name or description) and the whole
-    file is written as UTF-16LE. Reading it as `'utf-8'` yields mojibake and `JSON.parse`
-    throws `Unexpected token '�'` — which reaches the user as "the plugin will not
-    install, the AI cannot see the engine", wrapped in an error message they cannot read.
-    Always read through `src/main/utils/ueTextFile.ts` (`readUeTextFile` / `readUeJsonFile` /
-    `decodeUeText`); write back as UTF-8 without a BOM (with no BOM the engine decodes as
-    UTF-8, identically on 5.0-5.8). Gate: `scripts/check-ue-file-reads.mjs`.
+12. **Read engine-authored files (`.uproject` / `.uplugin` / engine `ini`) only through
+    `src/main/utils/ueTextFile.ts`** (`readUeTextFile` / `readUeJsonFile` / `decodeUeText`).
+    One non-ASCII character (a Chinese project name) makes UE write the whole file as
+    UTF-16LE, so a hard-coded `'utf-8'` read makes `JSON.parse` throw and the plugin install
+    fail with an unreadable error. Write back as UTF-8 without a BOM.
+    Gate: `scripts/check-ue-file-reads.mjs`.
 
-13. **Media going to a model tries object storage first, and falls back only when that
-    does not work.** Images, video, audio — anything a user hands to a model — is
-    uploaded to the user's own object storage (Settings → Object storage) and sent as a
-    link. Only when storage is not configured, the model cannot take a link for that
-    kind, or the upload fails does it fall back to the old path: base64 for images, a
-    local path plus the `analyze_video` tool for video and audio. Base64 is resent with
-    the whole transcript on every turn, runs into the request budget
-    (`requestBudget.ts` drops the largest first) and hits provider size caps; a link is a
-    few hundred bytes. Every step of the fallback must be silent to the turn: a failed
-    check or upload degrades that one file, never aborts the message.
-    The single place that decides is `src/main/agent-v3/core/promptMedia.ts`
-    (`preparePromptImages` / `preparePromptMedia`); references are rewritten into
-    `image_url` / `video_url` / `input_audio` at send time in `streamFn.ts`. A new media
-    type plugs into that file — do not add a second upload path.
-    Tool output (editor screenshots, contact sheets) is **not** covered: a tool loop
-    produces many of them, uploading each would slow every step, and editor pixels must
-    not reach third-party storage by default (see the header of `screenshot.ts`).
+13. **Media going to a model goes through `src/main/agent-v3/core/promptMedia.ts`:** an
+    object-storage link first; only when storage is unconfigured, the model cannot take a link
+    for that kind, or the upload fails, a per-file fallback (base64 for images, local path +
+    `analyze_video` for video/audio) that never aborts the turn. A new media type plugs into
+    that file. Tool output (editor screenshots) stays out of it.
 
 14. **A write tool's receipt reports the engine's state after the write, and a partial
-    failure never opens with success.** The model treats a receipt as fact: it stops at
-    "success" and assumes anything unmentioned does not exist. A receipt may be incomplete;
-    it may not be wrong. Two parts:
-    - **Read state back after the write.** Any field describing the result (value, type,
-      container, pins, links, instance-editable, compiled) is read from the engine after
-      every mutation — compile included — has finished. Never echo the request payload,
-      and never serialize a snapshot taken halfway through. Names and paths the caller
-      passed as lookup keys may be echoed. Counter-examples: `is_array` echoed from input
-      while `container` actually built an array; pins serialized before links were made;
-      `bCompiled = true` without checking the compile result. If a state cannot be read
-      back, say `needs_compile` / `unknown` — do not guess for the engine.
-    - **If anything failed, the first line does not say success.** On the C++ side, any
-      failure puts `failed_count` at the top level. On the TS side, the first line of the
-      text the model reads is "N succeeded / M failed", followed by each failure's reason
-      — never ✅ first with failures tucked into a later array. Total failure throws.
-    A new or changed write tool needs a test where the engine returns a value different
-    from the input, asserting the receipt follows the engine; batch tools add a
-    partial-failure test.
+    failure never opens with success.** The model treats a receipt as fact. Every result
+    field is read back from the engine after every mutation — compile included — has
+    finished; a state that cannot be read back says `needs_compile` / `unknown`. If anything
+    failed, the first line the model reads is "N succeeded / M failed" (C++: top-level
+    `failed_count`); total failure throws. A new or changed write tool needs a test where the
+    engine returns a value different from the input; batch tools add a partial-failure test.
 
 ## 6. Commits and PRs
 
@@ -267,24 +200,21 @@ until it is met:
 - Fill in `.github/PULL_REQUEST_TEMPLATE.md` honestly, including whether `pnpm verify` passed.
 - **Stop and ask the human before `git push` or opening a PR.** Committing locally is fine;
   publishing is the contributor's decision, not yours.
-- AI-assisted contributions are welcome and explicitly encouraged. Say so in the PR — it is not
-  held against you. What is reviewed is the diff and the gate, not who typed it.
+- Say in the PR that it is AI-assisted.
 
 ## 7. Traps
 
-- **`better-sqlite3` ABI — no longer a trap.** Node and Electron need different ABIs,
-  but both artifacts are now cached side by side: tests read the Node one through a vitest alias,
-  `node_modules` keeps the Electron one. **You can run the tests with the app open.**
-  If you ever see `NODE_MODULE_VERSION`, the cache is missing —
-  `node scripts/better-sqlite3-abi.mjs ensure node` fixes it without touching `node_modules`.
+- **`NODE_MODULE_VERSION` from `better-sqlite3`** means the cached Node-ABI build is missing:
+  `pnpm exec node scripts/better-sqlite3-abi.mjs ensure node` restores it without touching
+  `node_modules` (which keeps the Electron build, so tests run fine with the app open).
 - **`pnpm lint` is a ratchet, not a clean bill of health.** It lints the whole repo, but compares
-  against a recorded backlog (`scripts/lint.baseline.json`: 341 files, 2435 errors, 3440 warnings).
-  Existing violations are not your job to fix — they just must not grow.
+  against a recorded backlog (`scripts/lint.baseline.json`). Existing violations are not your job
+  to fix — they just must not grow.
 - **If the gate says the backlog shrank**, run `pnpm lint:baseline:update` and commit the updated
   baseline. The ratchet only turns one way: `--update` refuses any increase.
 - **`pnpm lint:changed` is what actually guards your code.** The ratchet still allows swapping 30
   existing problems for 30 different ones in the same file; the per-line gate does not.
-- **Coverage thresholds (80%) apply to `src/renderer/**` only\*\*; main and preload are excluded
+- **Coverage thresholds (80%) apply to `src/renderer/**` only.** Main and preload are excluded
   from coverage but still must have tests for logic you add.
 - **Never statically import `appSettingsManager` from an agent tool.** It starts with
   `import { logger } from './services'`, and that module drags in the WebSocket service and the
@@ -302,43 +232,6 @@ until it is met:
 
 ## 8. When you are stuck
 
-Do not guess and do not silently narrow the task. Report what you tried, what the gate said, and
-what you need decided. A half-finished PR with an honest description is more useful than a green
-one that skipped the hard part.
-
-## 9. Agent skills
-
-### Issue tracker
-
-Issues and specs live as local markdown files under `.scratch/<feature-slug>/`.
-See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five canonical triage roles use the default label strings (`needs-triage`,
-`needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`).
-See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: `CONTEXT.md` at the repo root, ADRs in `docs/adr/`.
-See `docs/agents/domain.md`.
-
-## 10. Local workflow — this fork only
-
-This section governs work **in this fork**. It suspends §3's local run schedule —
-every other §3 rule still applies whenever a check does run. Not a contribution:
-never include it in a PR to upstream.
-
-- **Verification is on-demand.** Write code, commit, hand off. Run `pnpm verify*`
-  (any variant), `lint`, `typecheck`, or the vitest suite only when the user asks
-  in the session or invokes a skill whose contract includes it (`/tdd`,
-  `/implement` driving it, `unreal-box-ship`, `unreal-box-verify`). Commits land
-  unverified — no automatic `verify:changed`.
-- **The single test file is still allowed.** While implementing, you may run the
-  one test file covering your change — §3's working-tier allowance. A self-check,
-  not the gate.
-- **Cut PR branches from `upstream/main`, not local `main`.** Local `main` carries
-  fork-only sections (this one, §9); branching from it leaks them into the PR diff.
-- **CI is the backstop.** Upstream runs `pnpm verify --ci` on every PR; skipping
-  locally moves first detection to that run.
+Keep the task at its full scope and stop to report: what you tried, what the gate said, and what
+you need decided. A half-finished PR with an honest description is more useful than a green one
+that skipped the hard part.
