@@ -2567,9 +2567,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     branch: {
       tooltip: 'Branch from here',
       titleSuffix: ' (branch)',
-      success: "Branched into a new chat from this reply. Later messages weren't copied.",
-      successWhole: "Branch created. That reply couldn't be found, so the whole chat came along.",
-      noAgentSession: "Branching isn't available for this kind of chat",
+      success: 'Created a new chat from this reply. Later messages were not copied.',
+      successWhole:
+        'Branch created. The selected reply could not be found, so the entire chat was copied.',
+      noAgentSession: 'Branching is not available for this type of chat',
       busy: 'This turn has not settled yet — branch from an earlier message, or try again shortly',
       missing: 'This chat has no history to copy yet',
       failed: 'Failed to branch'
@@ -8166,7 +8167,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       live: 'Carrying {count} message(s) of context (snapshot — the main chat is still running)',
       snapshot: 'Carrying {count} message(s) of context',
       readOnly: 'Read-only',
-      empty: 'Ask away — it can see every step the main chat took'
+      empty: 'Enter a question. The AI can see every step of the main chat'
     },
     emptyState: {
       agent: 'Type a message to start a chat'

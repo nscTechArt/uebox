@@ -51,7 +51,7 @@ export default {
     unarchive: '取消归档',
     newChat: '新对话',
     projectSessionCount: '{count} 个对话',
-    newChatInProject: '在这个工程下新建对话',
+    newChatInProject: '在此工程下新建对话',
     unassigned: '对话',
     unassignedHint: '没有关联 UE 工程的对话',
     connected: '已连接',
@@ -67,7 +67,7 @@ export default {
     openInExplorer: '在资源管理器中打开',
     openInExplorerFailed: '打开工程目录失败',
     archiveProjectChats: '归档对话',
-    archiveProjectTitle: '归档这个项目的对话',
+    archiveProjectTitle: '归档此项目的对话',
     archiveProjectContent:
       '归档「{name}」下的全部 {count} 条对话？归档后可在「设置 → AI 助手 → 归档对话」中找回。',
     addProject: {
@@ -102,10 +102,10 @@ export default {
     renameTitle: '重命名对话',
     renamePlaceholder: '请输入新的对话名称',
     smartName: '智能命名',
-    smartNameEmpty: '这条对话还没有消息，起不了名',
-    smartNameFailed: '起名失败，自己写一个，或去检查轻量任务模型',
+    smartNameEmpty: '当前对话暂无消息，无法命名',
+    smartNameFailed: '命名失败。请手动输入名称，或检查轻量任务模型配置',
     /** 这条对话已经有一次起名在途（多半是「自动生成新标题」那一路）。等一下再点就有 */
-    smartNameBusy: '正在起名，稍等一下再试',
+    smartNameBusy: '正在命名，请稍后重试',
     moveToProject: '归入工程',
     removeFromProject: '不在项目中工作',
     newProjectGroup: '新建工程分组…',
@@ -153,12 +153,13 @@ export default {
     releaseAll: '全部解锁',
     conflict: '{path} 正被「{session}」修改，本次未改动',
     dismiss: '知道了',
-    unknownChat: '另一条对话',
+    unknownChat: '其他对话',
     currentLevel: '当前关卡'
   },
   agentV3Debug: {
     title: 'Agent V3 调试台',
-    description: '直接驱动 V3 内核：发指令、看事件流、试插话与审批。开发诊断用，不是正式对话界面。',
+    description:
+      '直接驱动 V3 内核：发送指令、查看事件流、测试插话与审批。仅供开发诊断，非正式对话界面。',
     sessionId: 'Session ID',
     mode: '模式',
     modeAgent: 'Agent（可执行操作）',
@@ -628,7 +629,7 @@ export default {
       moreLabel: '查看详细说明',
       chat: '对话',
       chatDesc: '助手与各处对话窗口的默认模型。',
-      chatMerged: 'Agent、视觉、轻量任务也用这个模型。',
+      chatMerged: 'Agent、视觉、轻量任务同样使用此模型。',
       chatSplit: '分别设置',
       agent: 'Agent',
       agentDesc: '处理多步任务；未选择时使用对话模型。',
@@ -1647,7 +1648,7 @@ export default {
     language: '语言',
     // 托盘「退出」时还有 Agent session 的操作没收摊。数的是 session 操作，不是全部后台任务
     trayQuitTitle: '退出虚幻盒子？',
-    trayQuitContent: 'AI 还有 {count} 项操作在进行，退出会中断它们。',
+    trayQuitContent: 'AI 仍有 {count} 项操作正在进行，退出将中断这些操作。',
     trayQuitOk: '仍然退出',
     // 同一个框，安装更新时换标题和按钮
     updateQuitTitle: '重启安装更新？',
@@ -2161,10 +2162,11 @@ export default {
       clean: '已检查 {count} 个资产，未发现问题',
       found: '发现 {count} 处问题',
       // 引擎没连时**必须**说出来：这时候「没问题」只代表命名没问题
-      engineOffline: '引擎没连上，只做了命名检查',
+      engineOffline: '引擎未连接，仅完成命名检查',
       // 引擎没连上、但知道这条对话是哪个工程时，问要不要替用户打开
-      openProjectTitle: '工程没开',
-      openProjectContent: '落盘、编译、断引用要在编辑器里查。打开「{name}」，连上后接着审查？',
+      openProjectTitle: '工程未打开',
+      openProjectContent:
+        '保存状态、编译结果和断开的引用需在编辑器中检查。是否打开「{name}」，并在连接后继续审查？',
       openProjectOk: '打开并审查',
       openProjectCancel: '只查命名',
       openingProject: '正在打开「{name}」，连接后自动审查…',
@@ -2491,7 +2493,7 @@ export default {
       stopBeforeResendFailed: '上一轮仍在停止，请稍后重试',
       userMessageNotFound: '找不到对应的用户消息',
       clearConfirmTitle: '确认清空对话',
-      clearConfirmContent: '该操作不可撤销，确定要清空当前对话的所有消息吗？',
+      clearConfirmContent: '此操作不可撤销，确定要清空当前对话的所有消息吗？',
       replyInterrupted: '回复已中断',
       newMessage: '有新消息',
       emptyMessage: '消息内容不能为空',
@@ -2502,10 +2504,10 @@ export default {
     branch: {
       tooltip: '从这条创建分支',
       titleSuffix: '（分支）',
-      success: '已从这条回复分出一条新对话，之后的消息没有带过去',
-      successWhole: '分支已创建。没找到你点的那条回复，整条对话都带过去了',
-      noAgentSession: '这类对话不支持分支',
-      busy: '这一轮还没收尾，从更早的一条分支，或稍后再试',
+      success: '已从此回复创建新对话，后续消息未复制',
+      successWhole: '分支已创建。未找到所选回复，已复制完整对话',
+      noAgentSession: '此类对话不支持创建分支',
+      busy: '当前轮次尚未结束，请从更早的消息创建分支，或稍后重试',
       missing: '暂无可复制的对话历史',
       failed: '分支失败'
     },
@@ -2839,7 +2841,7 @@ export default {
       switchedToAgent: '已切换到 Agent',
       switchedToNormal: '已切换到 Chat',
       agentExecFailed: 'Agent 执行失败',
-      sessionModelUnavailable: '这条对话绑定的模型 {model} 已不可用，本轮改用默认模型',
+      sessionModelUnavailable: '此对话绑定的模型 {model} 已不可用，本轮改用默认模型',
       // 同一条对话已经有一轮在跑。不提 sessionId，也不提底下那个 IPC 通道叫什么 ——
       // 界面上「改方向」就是直接在输入框里继续打字
       sessionBusy: '此对话仍有一轮任务在运行。请等待其结束，或直接在输入框中输入调整指令。',
@@ -2914,7 +2916,7 @@ export default {
       actionType: '操作类型',
       confirm: '确认执行',
       reject: '拒绝',
-      allowForChat: '这条对话里都允许',
+      allowForChat: '本对话内均允许',
       whatIsThis: '这是什么？',
       // 并行执行时可能同时有好几条在等，答完这条会接着弹下一条
       queued: '还有 {count} 项待确认',
@@ -5548,7 +5550,7 @@ export default {
       muted: '已暂停收音，后台任务继续运行',
       retry: '重试连接',
       boundCall: '语音通话：{name}',
-      interruptByVoice: '直接开口或点击即可打断',
+      interruptByVoice: '直接说话或点击即可打断',
       // 说清「一直听着」——用户得知道麦克风现在是开的
       stop: '结束语音通话（后台任务继续运行）',
       status: {
@@ -5601,8 +5603,8 @@ export default {
       goal: '目标模式 —— 完成后自动复核，未达成则继续修改',
       team: '团队模式 —— 输入一句话需求，自动组队直至交付可玩版本',
       teamArg: '<一句话>',
-      image: '切到图片生成模式',
-      compact: '压缩这条对话的历史，腾出上下文',
+      image: '切换到图片生成模式',
+      compact: '压缩当前对话历史，释放上下文空间',
       goalArg: '<目标>',
       wikiArg: '[关键词]',
       wiki: '绑定知识库；输入 /wiki clear 解绑'
@@ -6831,7 +6833,7 @@ export default {
     },
     actions: {
       reject: '拒绝',
-      allowForChat: '这条对话里都允许',
+      allowForChat: '本对话内均允许',
       confirm: '确认执行'
     }
   },
@@ -7281,10 +7283,10 @@ export default {
       abandon: '放弃本次导入',
       abandonConfirmTitle: '放弃本次导入？',
       abandonConfirmContent:
-        '服务器会取消这次导入，并删掉它占用的暂存文件。已经传上去的内容都不算数，要重新导入一次。这一步不能撤销。',
-      abandonDone: '已放弃这次导入，服务器上的暂存文件已清理',
-      abandonStagingLeft: '本地提示已消除，但服务器上的暂存文件没能清掉，需要手动删除：{error}',
-      abandonLocalRecordLeft: '本地的「未完成导入」记录没能标记掉，下次启动可能还会提示这一单',
+        '服务器将取消本次导入，并删除其占用的暂存文件。已上传的内容将作废，需重新导入。此操作不可撤销。',
+      abandonDone: '已放弃本次导入，服务器上的暂存文件已清理',
+      abandonStagingLeft: '本地提示已清除，但服务器上的暂存文件清理失败，需手动删除：{error}',
+      abandonLocalRecordLeft: '本地「未完成导入」记录标记失败，下次启动时可能仍会提示此次导入',
       abandonFailed: '放弃导入失败：{error}',
       supportInfoSummary: '支持信息（点开查看）',
       checkingUnfinished: '正在检查未完成导入…',

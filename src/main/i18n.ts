@@ -52,7 +52,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'tray.quit': '退出',
     // 数的是 Agent session 的操作：AI 轮次和分叉 / 截断 / 压缩这类历史操作都算，
     // 但不是全部后台任务 —— 别让用户以为连导入也算
-    'tray.quitConfirm': 'AI 还有 {count} 项操作在进行，退出会中断它们。',
+    'tray.quitConfirm': 'AI 仍有 {count} 项操作正在进行，退出将中断这些操作。',
     'tray.quitConfirmOk': '仍然退出',
     // 安装更新撞上 session 操作没收摊：同一个框，按钮说清楚是重启装包
     'tray.updateConfirmOk': '仍然重启安装',
