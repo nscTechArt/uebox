@@ -2850,6 +2850,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         cpp_list_modules: 'List C++ modules',
         cpp_add_class: 'Add C++ class',
         cpp_compile: 'Compile C++',
+        cpp_full_rebuild: 'Full C++ rebuild',
         anim_preview: 'Preview animation'
       },
       /** Step groups in the main chat: the one-line summary between replies, and each step inside */

@@ -287,17 +287,11 @@ export function createShellTool(): UnrealAgentTool<never> {
       '依赖共享内容包的模板还会一打开就是丢失引用。这条是硬拦的。\n' +
       '【编译 UE 工程不用这个】改完 C++ 用 cpp_compile —— 它编进正在跑的编辑器，' +
       '**不需要用户关编辑器**，编不过还能给出带文件名和行号的报错。\n' +
-      '【真要用命令行编的时候】只有改了 .Build.cs 依赖、加了新模块、改了 .uproject 时才需要，' +
-      '那种改动必须完整重新链接。命令用 UnrealBuildTool（' +
+      '【要关编辑器完整重编也不用这个】用 cpp_full_rebuild：它替用户关编辑器（有未保存的会先拦下）、' +
+      '跑 UnrealBuildTool、再打开工程并重连。编辑器开着时自己跑 Build 脚本编不干净 —— ' +
       (process.platform === 'darwin'
-        ? '<Engine>/Build/BatchFiles/Mac/Build.sh'
-        : '<Engine>/Build/BatchFiles/Build.bat') +
-      '），' +
-      '不要直接调编译器。这时候要先请用户关掉编辑器 —— ' +
-      (process.platform === 'darwin'
-        ? '编辑器运行时的 Hot Reload 可能产出带后缀的动态库，不是干净重编。'
-        : 'Live Coding 开着时 UBT 会直接拒绝执行，关着时它会转而产出带后缀的热重载 DLL，' +
-          '两种都不是你要的干净重编。') +
+        ? '编辑器运行时的 Hot Reload 可能产出带后缀的动态库。'
+        : 'Live Coding 开着时 UBT 会直接拒绝，关着时它转而产出带后缀的热重载 DLL。') +
       '**不要自己去杀编辑器进程。**\n' +
       // 2026-09-26 真机反馈：`powershell -Command "… $_.IsReadOnly …"` 连试三次，$_ 每次都被
       // bash 先展开成 `/usr/bin/bash.`，报错也看不出是引号的锅

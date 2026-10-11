@@ -121,11 +121,12 @@ For Unreal C++ specifically:
 
 - Build with UnrealBuildTool, not by invoking the compiler directly.
 - **The editor holds the module DLLs open.** A rebuild will fail at the link step while it is
-  running. Tell the user the editor needs closing and let them close it — do not kill the process
-  yourself.
+  running. Don't hand-roll that from the shell: `cpp_compile` builds into the running editor, and
+  `cpp_full_rebuild` closes the editor (refusing if anything is unsaved), runs UnrealBuildTool for
+  the right engine and target, then reopens the project. Don't kill the editor process yourself.
 - Live Coding can be pinned to an MSVC toolset that is no longer installed, in which case hot
-  reload fails and a full rebuild with the editor closed is the only path. Read the error rather
-  than retrying the same build.
+  reload fails and `cpp_full_rebuild` is the only path. Read the error rather than retrying the
+  same build.
 
 ## `inspect_uasset_file` — read a .uasset without opening the engine
 

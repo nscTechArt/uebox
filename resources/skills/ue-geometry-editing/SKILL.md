@@ -28,7 +28,8 @@ output_data = {'geometry_scripting_available': hasattr(unreal, 'GeometryScript_M
 ```
 
 返回 `False` 就用 `ue_manage_plugin` 启用 `GeometryScripting`，
-然后**必须重启编辑器**才生效 —— 告诉用户去重启，别自己反复重试。
+然后**必须重启编辑器**才生效：先 `ue_save`，再调 `ue_restart_editor`（它会等编辑器回来并重连），
+别在没重启的情况下反复重试。
 
 ## 标准往返
 

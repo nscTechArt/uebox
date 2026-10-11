@@ -245,7 +245,7 @@ describe('ue_restart_editor', () => {
    * 报一个后续会连环失败的 true，比报失败坏得多：模型会照着那个 true 一路走下去，
    * 而每一步的失败信息指的都不是根因。
    */
-  it('socket 回来了但命令跑不通时，如实报「重启了、没连上」并让用户去界面重连', async () => {
+  it('socket 回来了但命令跑不通时，如实报「重启了、没连上」，让模型等而不是让用户去找连接按钮', async () => {
     routeCalls({ probeRejects: '客户端不存在或已断开: conn-2' })
     scriptConnectionCounts([1, 1, 0, 0, 1])
 
@@ -259,9 +259,10 @@ describe('ue_restart_editor', () => {
     expect(result.success).toBe(false)
     expect(result.restarted).toBe(true)
     expect(result.reconnected).toBe(false)
-    expect(result.needs_manual_reconnect).toBe(true)
+    expect(result.wait_for_reconnect).toBe(true)
     const message = String(result.error)
-    expect(message).toContain('重新连接项目')
+    expect(message).toContain('ue_session_health')
+    expect(message).not.toContain('请用户在盒子界面里重新连接')
     expect(message).toContain('不要重复重启')
     // 失败原因要带上，否则用户只能猜
     expect(message).toContain('客户端不存在或已断开')

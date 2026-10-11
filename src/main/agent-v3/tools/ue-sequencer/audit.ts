@@ -90,8 +90,8 @@ export function createSequenceAuditTool(): UnrealAgentTool<AuditOutput> {
 父层通过、某个 shot 里绑定断了是最典型的漏检。
 
 【本工具只诊断不渲染】
-渲染要花几小时机器时间和几十 GB 磁盘，编解码和采样直接挂在交付物上，
-这个决定和执行都由用户自己来。不要提议帮他渲。`,
+要渲染用 sequence_render。渲染要花几小时机器时间和几十 GB 磁盘，编解码和采样直接挂在交付物上，
+所以用户没要求出片时别主动开渲；用户要了就去渲（那个工具每次都会请用户当场确认参数）。`,
     input: InputSchema,
     execute: async (input) => {
       // 上限由 schema 的 .max() 把关，这里不再重复判 —— 重复的校验迟早会漂移

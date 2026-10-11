@@ -37,7 +37,8 @@ const TIMEOUT_MS = 20 * 60 * 1000
 
 const LIVE_CODING_NO_DIAGNOSTICS =
   '这次没找到 UnrealBuildTool 的编译日志，Live Coding 的报错只在它的控制台窗口里，我读不到。' +
-  '请让用户把 Live Coding 窗口里的 error 行贴过来；或者关掉 Live Coding 重启编辑器，走热重载那条路我能拿到完整诊断。'
+  '可以调 cpp_full_rebuild 关掉编辑器完整编一次 —— 那条路的编译输出我全都读得到，' +
+  '报错带文件名和行号；用户就在 Live Coding 窗口前的话，也可以请他把 error 行贴过来。'
 
 function summarize(response: CppCompileResponse): string {
   const lines: string[] = []
@@ -127,14 +128,14 @@ function summarize(response: CppCompileResponse): string {
       // Live Coding 只打补丁，链接期的东西它碰不到。这一格没有被实测推翻
       lines.push(
         'Live Coding 只打二进制补丁，补不上新的模块依赖 —— 它可能报成功，但新依赖没链进去。' +
-          '要改依赖，请让用户关掉 Live Coding 重启编辑器（那条路能处理），或者关掉编辑器完整重编。'
+          '新依赖相关的行为要是不对，调 cpp_full_rebuild（盒子关编辑器、完整编译、再打开）。'
       )
     } else {
       lines.push(
         '**给模块新增依赖这一类改动，热重载是能处理的**（2026-09-08 实测：加 Slate/SlateCore ' +
           '并调用新模块的 API，22 秒编过且生效，不用关编辑器）。所以不要因为这条提示就让用户关编辑器。',
-        '但「在 .uproject 里加新模块」「改目标设置」超出热重载的能力范围，那类改动才需要完整重编。' +
-          '拿不准就让用户验证一下新依赖那部分的行为，别只看「编译成功」。'
+        '但「在 .uproject 里加新模块」「改目标设置」超出热重载的能力范围，那类改动用 cpp_full_rebuild。' +
+          '拿不准就验证一下新依赖那部分的行为，别只看「编译成功」。'
       )
     }
   }
@@ -160,19 +161,14 @@ export function createCppCompileTool(): UnrealAgentTool<CppCompileResponse> {
     input: z.object({}),
     description:
       '编译当前虚幻工程的 C++ 改动，并热加载进正在运行的编辑器。**不需要用户关闭编辑器**。\n\n' +
-      '【这是编 UE 工程的默认路，别自己去 run_shell_command 调 Build.bat】' +
-      '那条路要先请用户关掉编辑器，而本工具不用，报错也带文件名和行号。' +
-      '只有一种情况轮得到它：本工具报了 needs_full_rebuild 且走的是 Live Coding —— ' +
-      '那是链接期的改动，补丁式热更补不上，必须请用户关掉编辑器完整重编一次，' +
-      '那时候才用 run_shell_command 走 Build.bat。\n\n' +
+      '【别 run_shell_command 调 Build.bat】编辑器补不上的改动（返回里会说）用 cpp_full_rebuild。\n\n' +
       '【什么时候用】改完 .cpp / .h 之后。改完不编，用户在编辑器里看到的还是旧代码。\n' +
       '【编译期间编辑器不会卡住】异步执行，可能要几十秒到几分钟。\n' +
       '【编不过时能拿到什么】看走的哪条路（用 cpp_probe 先看）：\n' +
       '- 热重载路：完整的编译器报错，带文件名和行号。\n' +
       '- Live Coding 路：通常也能拿到（从 UnrealBuildTool 的 Log.txt 读回）。' +
-      '偶尔读不到时工具会明说，那时候请用户贴 Live Coding 窗口里的报错，别瞎猜哪一行错了。\n' +
-      '【改了 .Build.cs 或 .uproject 之后不要指望它】那类改动要完整重新链接，' +
-      '得关掉编辑器在 IDE 里编一次。返回里的 needs_full_rebuild 会提醒你。',
+      '偶尔读不到时会明说，别猜行号。\n' +
+      '【改了 .Build.cs / .uproject】热重载路一般编得进来；Live Coding 路看返回的 needs_full_rebuild。',
     /*
      * 编译失败**不标 isError**。
      *

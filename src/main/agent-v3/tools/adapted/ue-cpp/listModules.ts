@@ -39,6 +39,8 @@ export interface CppListModulesResponse {
   modules?: CppModule[]
   count?: number
   has_code?: boolean
+  /** .uproject 的 Modules 段里声明了几个（新插件才有）。纯蓝图工程为 0 */
+  declared_module_count?: number
 }
 
 const InputSchema = z.object({
@@ -53,26 +55,28 @@ const InputSchema = z.object({
 })
 
 /**
- * `has_code` 和模块列表**会不一致**，而且判断顺序不能搞反。
+ * `has_code` 和模块列表**会不一致**，分清两种：
  *
- * 初版这里是先看 `has_code === false` 就直接回「纯蓝图工程，没有 C++ 模块」。
- * 真机读回时撞了（2026-09-03，宿主工程 ProbeHost）：`has_code=false`，
- * 但模块列表里实实在在有一个 `ProbeHost`。原因是两个数据源不同 ——
- * `ProjectHasCodeFiles()` 数磁盘上的源文件，`GetCurrentProjectModules()` 读
- * .uproject 的 Modules 段。工程拷贝时漏了 Source 目录就是这个样子。
+ *   - 纯蓝图工程：引擎的 `GetCurrentProjectModules()` 会塞一个以工程名命名的**占位模块**
+ *     （给新建类向导用，磁盘上并不存在）。2026-09-03 在 ProbeHost 上看到的
+ *     「has_code=false 却列出一个模块」就是它 —— 当时误判成了源码丢失，
+ *     结果每个纯蓝图工程都被说成坏工程（10-12 真机在 BPOnly52 上查实）。
+ *     新插件已经不列这个占位，并给出 `declared_module_count`（读 .uproject 本身）。
+ *   - .uproject 真的声明了模块、源码却不在：这才是坏掉的 C++ 工程。
  *
- * 那一版的输出会把一个**坏掉的 C++ 工程**说成纯蓝图工程，还顺手把已经拿到的
- * 模块列表丢掉。所以现在：**先看列表里有没有东西**，有就一定列出来。
+ * 老插件没有 `declared_module_count`，那时只能按「列表里有没有东西」判，保持原样。
  */
 function summarize(response: CppListModulesResponse): string {
-  const modules = response.modules ?? []
+  const declared = response.declared_module_count
+  // 新插件：.uproject 一个模块都没声明 = 纯蓝图，列表里那个是引擎的占位，不算数
+  const modules = response.has_code === false && declared === 0 ? [] : (response.modules ?? [])
 
   if (modules.length === 0) {
     if (response.has_code === false) {
       return (
         '这是纯蓝图工程，没有 C++ 模块。' +
-        '要加第一个 C++ 类，需要用户在编辑器里手动做一次 File > New C++ Class —— ' +
-        '这一步我做不了（引擎那条路在这种工程上会弹窗卡住编辑器）。'
+        '直接用 cpp_add_class 建第一个类（module 留空），它会和编辑器一样顺带建好以工程名命名的主模块；' +
+        '新模块正在跑的编辑器加载不了，填完实现后用 cpp_full_rebuild 编译并重开编辑器。'
       )
     }
     // has_code 为真却一个模块都没有，是个矛盾状态。如实说出来，

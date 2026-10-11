@@ -382,6 +382,8 @@ export function toolSearchGroup(tool: GroupedTool): string {
   if (tool.name === 'ue_autoplay') return 'ue.editor.autoplay'
   // 只在导入了带「资产指南」的资产、或编辑器弹「缺失项目设置」时才用；导入回执会点名让模型加载
   if (tool.name === 'ue_asset_guidelines') return 'ue.editor.guidelines'
+  // 要关编辑器的完整重编，一个会话用不上几次；add_class / compile 的回执和 C++ 技能会点名它
+  if (tool.name === 'cpp_full_rebuild') return 'ue.cpp.rebuild'
   if (tool.unrealBox.namespace === 'ue.content' && Object.hasOwn(UE_CONTENT_SUBGROUPS, tool.name))
     return UE_CONTENT_SUBGROUPS[tool.name]
   return tool.unrealBox.namespace

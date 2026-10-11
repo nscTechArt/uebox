@@ -28,8 +28,9 @@ export interface RvtDiagnosis {
 const KIND_NAME: Record<RvtKind, string> = { color: '颜色', height: '高度' }
 
 export const PROJECT_VT_OFF =
-  '项目没开虚拟纹理支持：项目设置 → 引擎 → 渲染 → Virtual Textures → 勾上 Enable virtual texture support，' +
-  '改完必须重启编辑器才生效。这是整个项目的设置，要不要改让用户决定'
+  '项目没开虚拟纹理支持（项目设置 → 引擎 → 渲染 → Enable virtual texture support）。' +
+  '这是整个项目的设置、改完要重启编辑器，先问用户；同意了就用 ue_set_config ' +
+  '（Engine / /Script/Engine.RendererSettings / r.VirtualTextures = True），存盘后 ue_restart_editor'
 
 function materialProblems(land: LandscapeInfo, kind: RvtKind): string[] {
   const output = land.rvt?.material_output

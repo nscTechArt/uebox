@@ -6,9 +6,8 @@
  *
  * 因为答案会改变**写代码之前**的决策，不只是编译时的分支：
  *
- *   - `has_code === false` → 纯蓝图工程，一行 C++ 都不该开始写；
- *     引擎的建类路在这种工程上会弹模态对话框，而命令跑在游戏线程上，
- *     弹出来就是编辑器和调用一起卡死。要先请用户手动加第一个类。
+ *   - `has_code === false` → 纯蓝图工程。第一个类由 cpp_add_class 建（顺带建主模块），
+ *     但新模块正在跑的编辑器加载不了，编译要走 cpp_full_rebuild 而不是 cpp_compile。
  *   - `compile_path === 'livecoding'` → 编得动。编不过时的报错从 UBT 的 Log.txt
  *     读回（编辑器日志里只有一句「失败了」），偶尔读不到时 cpp_compile 会明说。
  *
@@ -79,7 +78,8 @@ function summarize(response: CppProbeResponse): string {
   // 和 .uproject 声明了模块但源码目录不存在（工程坏了）。
   // 只按 has_code 一个位下结论，会把后者说成前者，然后把用户引向
   // 「手动加第一个类」——而他的问题是工程本身缺了 Source。
-  // 这是真机读回时撞出来的，详见 listModules.ts 里 summarize 的注释。
+  // declared_module_count 读的是 .uproject 本身（新插件）；老插件数的是引擎带占位的模块表，
+  // 纯蓝图工程上恒为 1，会误报成源码缺失 —— 详见 listModules.ts 里 summarize 的注释。
   if (response.has_code === false && (response.declared_module_count ?? 0) > 0) {
     lines.push(
       `⚠️ .uproject 声明了 ${response.declared_module_count} 个模块，但磁盘上找不到源码文件。` +
@@ -134,7 +134,7 @@ export function createCppProbeTool(): UnrealAgentTool<CppProbeResponse> {
       '【什么时候用】**写或改 UE C++ 代码之前先调一次**。它回答的是「能不能编、编不过时能不能拿到报错」，' +
       '这两件事会改变你要不要动手、以及要不要先请用户改设置。\n' +
       '【返回里最重要的两条】\n' +
-      '- has_code=false：纯蓝图工程，不要试图加 C++ 类，先请用户在编辑器里手动加一次（File > New C++ Class）。\n' +
+      '- has_code=false：纯蓝图工程，照样用 cpp_add_class 建第一个类。\n' +
       '- compile_path=livecoding：编得动，编不过时一般也能拿到文件名和行号（从编译日志读回），不用先请用户改设置。\n' +
       '【不会改变任何状态】它只读，不会启用 Live Coding，也不会触发编译。',
     toOutcome: (response) => ({ text: summarize(response), details: response })

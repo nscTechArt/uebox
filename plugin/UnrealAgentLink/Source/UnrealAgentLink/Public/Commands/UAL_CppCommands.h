@@ -43,10 +43,12 @@ public:
 	static void Handle_Compile(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 
 	/**
-	 * cpp.add_class —— 新建一个 C++ 类（引擎的 Add C++ Class 走的是同一个函数）。
+	 * cpp.add_class —— 新建一个 C++ 类，产出和编辑器「新建 C++ 类」逐字相同。
 	 *
-	 * 纯蓝图工程会**直接拒绝**：引擎那条路在工程原先没有代码时会弹模态对话框，
-	 * 而命令跑在游戏线程上，弹出来就是编辑器和这次调用一起卡死。
+	 * 不调 GameProjectUtils::AddCodeToProject（真实工程上不返回，见 .cpp 里那段），
+	 * 而是用同一份引擎模板、同一套占位符规则自己生成，**只写文件、不编译**，
+	 * 编译由调用方接着发 cpp.compile。纯蓝图工程会顺带建好工程主模块（同引擎），
+	 * 那种情况新模块要重启编辑器才加载得上。
 	 */
 	static void Handle_AddClass(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 };

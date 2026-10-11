@@ -340,7 +340,7 @@ Movie Render Queue 渲染不含末帧，AnimSequence 首尾都含。**不要自�
 【出片体检】
 返回里会指出「渲染出来会不会是黑画面」的三个主要根因：没有相机切轨、
 切轨没覆盖播放范围、绑定失效。这是社区里最高频的问题。
-本工具只诊断不渲染 —— 渲染由用户自己在编辑器里决定和执行。`,
+本工具只诊断不渲染 —— 用户要出片时用 sequence_render（每次渲染都要用户当场确认）。`,
     input: InputSchema,
     execute: async (input) => {
       if (input.detail === 'keys' && !input.bindings?.length) {

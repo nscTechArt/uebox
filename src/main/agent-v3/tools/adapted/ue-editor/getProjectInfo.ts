@@ -217,7 +217,8 @@ export function createGetProjectInfoTool() {
 - 盘点模块和插件（想连禁用的插件一起看，把 include_disabled_plugins 设为 true）
 - **动手写 UE C++ 之前先调一次**：拿 engineSourceDir 去 grep 引擎头文件核对 API 的
   真实签名（UE 的 API 在版本之间会变，不要凭记忆写）；拿 hasCode 判断这个工程
-  能不能加 C++ 类 —— 为 false 说明是纯蓝图工程，要先请用户在编辑器里手动加一次
+  是不是纯蓝图工程 —— 为 false 时照样用 cpp_add_class 建第一个类（会顺带建好主模块），
+  建完调 cpp_full_rebuild
 
 【注意】：若 defaultMap 为空，说明项目未在 Project Settings → Maps & Modes 中设置 Game Default Map。`,
 

@@ -2780,6 +2780,7 @@ export default {
         cpp_list_modules: '查看 C++ 模块',
         cpp_add_class: '新建 C++ 类',
         cpp_compile: '编译 C++',
+        cpp_full_rebuild: '完整重编 C++',
         anim_preview: '预览动画'
       },
       /** 主对话页的步骤组：两段正文之间那一行摘要，和点开后的每一步 */

@@ -25,12 +25,15 @@ const toolNamed = (name: string): ExecutableTool => {
 const textOf = (result: { content?: unknown[] }): string =>
   ((result.content?.[0] as { text?: string })?.text ?? '') as string
 
-it.each(['darwin', 'win32'] as const)('gives the %s build script in shell guidance', (platform) => {
+it.each(['darwin', 'win32'] as const)('points %s full rebuilds at cpp_full_rebuild', (platform) => {
   vi.stubGlobal('process', { ...process, platform })
   try {
     const description = createShellTool().description
-    expect(description).toContain(platform === 'darwin' ? 'Mac/Build.sh' : 'Build.bat')
+    // 完整重编走 cpp_full_rebuild，不再教模型自己拼 Build 脚本、让用户关编辑器
+    expect(description).toContain('cpp_full_rebuild')
+    expect(description).not.toContain('先请用户关掉编辑器')
     if (platform === 'darwin') expect(description).not.toContain('Live Coding 开着')
+    else expect(description).toContain('Live Coding 开着')
   } finally {
     vi.unstubAllGlobals()
   }
