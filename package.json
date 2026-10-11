@@ -139,7 +139,7 @@
     "morphdom": "^2.7.8",
     "multer": "^2.4.0",
     "photoswipe": "^5.4.4",
-    "pinia": "^3.0.3",
+    "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "pinyin-pro": "^3.29.4",
     "sharp": "^0.35.5",
