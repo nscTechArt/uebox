@@ -428,7 +428,6 @@ function liveForkSource(sessionId: string, keepUserTurns?: number): AgentMessage
   return userTurns > keepUserTurns ? messages : undefined
 }
 
-/** 按停止之后最多等它收尾多久，超时就如实说「没停干净」 */
 /** 目标模式里「用户最新一句」最多带多长：它每轮复核、续跑都要再发一遍 */
 const LATEST_REQUEST_MAX_CHARS = 2000
 
@@ -436,6 +435,7 @@ function tailOf(text: string, max: number): string {
   return text.length <= max ? text : `…${text.slice(text.length - max)}`
 }
 
+/** 按停止之后最多等它收尾多久，超时就如实说「没停干净」 */
 const STOP_DRAIN_TIMEOUT_MS = 15_000
 
 /**

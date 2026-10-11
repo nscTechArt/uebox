@@ -2501,7 +2501,6 @@ export default {
     },
     branch: {
       tooltip: '从这条创建分支',
-      successWhole: '分支已创建。未找到所选回复，已复制完整对话',
       titleSuffix: '（分支）',
       success: '已从这条回复分出一条新对话，之后的消息没有带过去',
       successWhole: '分支已创建。没找到你点的那条回复，整条对话都带过去了',

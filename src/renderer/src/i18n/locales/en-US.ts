@@ -2566,7 +2566,6 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     branch: {
       tooltip: 'Branch from here',
-      successWhole: "Branch created. That reply couldn't be found, so the whole chat came along.",
       titleSuffix: ' (branch)',
       success: "Branched into a new chat from this reply. Later messages weren't copied.",
       successWhole: "Branch created. That reply couldn't be found, so the whole chat came along.",

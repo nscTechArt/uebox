@@ -293,9 +293,7 @@ describe('失败响应的头', () => {
     await drain(
       await wrapped(
         { ...model, api: 'google-generative-ai' } as typeof model,
-        {
-          messages: []
-        } as Context
+        normalizeContext({ messages: [] })
       )
     )
     expect(seen).toBeUndefined()
