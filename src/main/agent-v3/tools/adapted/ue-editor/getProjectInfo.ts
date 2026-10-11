@@ -13,6 +13,7 @@ import UnrealPathManagerUtil from '../../../../utils/UnrealPathManager'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 // ============================================================================
 // Schema 定义
 // ============================================================================
@@ -135,21 +136,22 @@ export function describePluginState(response: {
   if (!response.pluginBuild) {
     out.pluginUpToDate = false
     out.pluginHint =
-      '工程里的 UnrealAgentLink 插件太旧，连构建指纹都不上报。让用户在盒子设置里更新插件后重启编辑器，' +
-      '否则新工具的行为都对不上。'
+      '工程里的 UnrealAgentLink 插件太旧，连构建指纹都不上报，新工具的行为都会对不上。' +
+      PLUGIN_UPDATE_HINT
   } else if (response.pluginBuild === 'unknown') {
     // 插件在没有 .ual-build 戳的时候发的是字面量 "unknown"（宿主工程里直接编的、
     // 或旧 zip 装的）。这是「不知道」，不是「旧」—— 按旧处理会让人把刚编的开发版覆盖掉
     out.pluginHint =
       '工程里的 UnrealAgentLink 插件没有构建指纹（本机直接编译的，或旧包装的），无法判断新旧。' +
-      '工具行为和描述对不上时再考虑更新，不要仅凭这一条让用户重装。'
+      '工具行为和描述对不上时再考虑更新，不要仅凭这一条就去重装插件。'
   } else if (bundled) {
     out.pluginUpToDate = response.pluginBuild === bundled
     if (!out.pluginUpToDate) {
       // 指纹是内容哈希，比不出先后：可能更旧，也可能是本机刚编的更新版本
       out.pluginHint =
         '工程里跑着的 UnrealAgentLink 插件和盒子自带的不是同一份构建，可能更旧，也可能是本机刚编的。' +
-        '碰到工具行为和描述对不上时先确认哪份更新，再决定是否让用户在盒子设置里更新插件并重启编辑器。'
+        '碰到工具行为和描述对不上时先确认哪份更新：盒子自带的那份更新，才用 project_update_plugin 换上它' +
+        '（本机刚编的会被覆盖，先问用户）。'
     }
   }
 
@@ -201,7 +203,7 @@ export function createGetProjectInfoTool() {
 - lumenGIEnabled: Lumen 全局光照是否启用
 - lumenReflectionsEnabled: Lumen 反射是否启用
 - pluginBuild: UnrealAgentLink 插件的构建指纹（改完插件代码验证时，先确认这个值是新的）
-- pluginUpToDate: 工程里的插件是不是盒子自带的那一份；false 时 pluginHint 里写了该让用户做什么
+- pluginUpToDate: 工程里的插件是不是盒子自带的那一份；false 时 pluginHint 里写了下一步怎么办
 - pythonAvailable: 这份引擎能不能跑 Python；false 就别用 ue_run_python_script，也别去启插件
 - engineDir / engineSourceDir: 引擎安装目录 / 引擎源码目录（绝对路径）
 - projectSourceDir: 工程 C++ 源码目录（绝对路径）

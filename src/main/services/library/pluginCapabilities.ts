@@ -119,7 +119,7 @@ export async function checkPluginCapability(
       supported: false,
       reason:
         `工程里的 UnrealAgentLink 插件版本太旧${pluginVersion ? `（${pluginVersion}）` : ''}，` +
-        `没有「${CAPABILITY_LABEL[capability]}」这道保护。请在设置里更新插件后再试。`,
+        `没有「${CAPABILITY_LABEL[capability]}」这道保护。用 project_update_plugin 更新插件后再试。`,
       pluginVersion,
       pluginBuild
     }
@@ -130,7 +130,7 @@ export async function checkPluginCapability(
       supported: false,
       reason:
         `工程里的 UnrealAgentLink 插件不支持「${CAPABILITY_LABEL[capability]}」` +
-        `${pluginVersion ? `（当前版本 ${pluginVersion}）` : ''}。请更新插件后再试。`,
+        `${pluginVersion ? `（当前版本 ${pluginVersion}）` : ''}。用 project_update_plugin 更新插件后再试。`,
       pluginVersion,
       pluginBuild
     }

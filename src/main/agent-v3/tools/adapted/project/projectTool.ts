@@ -679,7 +679,8 @@ async function openProject(projectKey: string): Promise<OpenProjectResult> {
   const pluginDetails = pluginFailure
     ? [
         `⚠️ UnrealAgentLink 插件没装上（${pluginFailure}）—— 这个工程连不上盒子，` +
-          'ue.* 那些工具都用不了。让用户在工程卡片右键里手动安装一次。'
+          'ue.* 那些工具都用不了。用 project_update_plugin 再装一次，它会说清装不上的具体原因；' +
+          '还是装不上就把原因如实告诉用户，不要让用户去手动安装。'
       ]
     : []
 
@@ -788,7 +789,8 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
   const pluginDetails = pluginFailure
     ? [
         `⚠️ UnrealAgentLink 插件没装上（${pluginFailure}）—— 这个工程连不上盒子，` +
-          'ue.* 那些工具都用不了。让用户在工程卡片右键里手动安装一次。'
+          'ue.* 那些工具都用不了。用 project_update_plugin 再装一次，它会说清装不上的具体原因；' +
+          '还是装不上就把原因如实告诉用户，不要让用户去手动安装。'
       ]
     : []
 

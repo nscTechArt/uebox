@@ -13,7 +13,7 @@ description: Retargets body animation between skeletons, measures poses and prev
 4. 批量传 `animations: [{ animation, output_path }]`，插件每次只导出一段，保存并回读骨架、关键帧和文件。
 5. 对本次产物调用 `anim_measure`，再用 `anim_preview` 看同一时刻，回复给一张图加本轮数字。
 
-首版在 UE 5.5 编译和验收。旧插件不认识 `anim.*` 时先更新插件；低于 5.5 返回不支持，不能反复调用。
+首版在 UE 5.5 编译和验收。旧插件不认识 `anim.*` 时先用 `project_update_plugin` 更新插件；低于 5.5 返回不支持，不能反复调用。
 5.2–5.4 尚未被新工具替代的脚本接口保留在 [references/api.md](references/api.md)。
 测量口径、写姿势边界和实测教训见 [references/measurement.md](references/measurement.md)。
 

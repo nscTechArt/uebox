@@ -15,8 +15,8 @@
  *
  * ## 四步，每一步都可能停下来，停下来就如实说停在哪
  *
- * 1. **关编辑器**：走插件的 `editor.quit`（编辑器自己的「文件 > 退出」那条路），
- *    有未保存的改动先拒绝、把清单交回来 —— 和 `ue_restart_editor` 同一道闸。
+ * 1. **关编辑器**：`closeEditorForProject`（和 `project_update_plugin` 共用）——
+ *    有未保存的改动先拒绝、把清单交回来，和 `ue_restart_editor` 同一道闸。
  *    插件没连上（编辑器卡死）时只有用户明确同意丢弃改动才结束进程。
  * 2. **编译**：引擎自带的 Build.bat / Build.sh，编 `<工程>Editor` 这个 Target。
  *    编不过就停在这里、编辑器**保持关着** —— 带着编不过的代码打开，引擎会弹
@@ -30,12 +30,7 @@ import { promises as fs } from 'fs'
 import { basename, dirname, join } from 'path'
 import { z } from 'zod'
 
-import { serviceManager } from '../../../../services'
-import { projectManager } from '../../../../services/project'
-import UnrealProcessDetector from '../../../../utils/UnrealProcessDetector'
-import { getTargetConnectionId, getTargetProjectPath } from '../../../core/projectTargetContext'
-import { projectPathKey } from '../../../core/projectPathKey'
-import { expectEditorClose } from '../../../core/team/editorWatch'
+import { getTargetProjectPath } from '../../../core/projectTargetContext'
 import { defineTool, type UnrealAgentTool } from '../../defineTool'
 import {
   engineRootFor,
@@ -45,11 +40,9 @@ import {
   quoteForCmd
 } from '../../builtin/projectPackage'
 import { awaitProjectLive } from '../project/awaitProjectLive'
-import { describeUnsavedRefusal } from '../unsavedRefusal'
+import { closeEditorForProject } from '../project/closeEditor'
 import { formatDiagnostic, parseDiagnostics } from './diagnostics'
 
-/** 编辑器收到关闭命令后最多等多久退出。大工程退出要存配置、停着色器编译 */
-const CLOSE_WAIT_MS = 3 * 60_000
 /** 一次完整编译的上限。冷编一个大工程能到半小时 */
 const BUILD_TIMEOUT_MS = 60 * 60_000
 /** 编辑器重新打开、插件连回来的上限（同团队快照回滚） */
@@ -141,39 +134,6 @@ async function readTargets(projectDir: string): Promise<Array<{ file: string; co
     })
   }
   return out
-}
-
-/** 这个工程此刻连着的那条连接（本轮目标优先） */
-function connectionFor(projectDir: string): string | undefined {
-  const wanted = projectPathKey(projectDir)
-  const current = getTargetConnectionId()
-  try {
-    if (
-      current &&
-      projectPathKey(projectManager.getProject(current)?.projectPath ?? '') === wanted
-    ) {
-      return current
-    }
-    return projectManager
-      .getInteractiveProjects()
-      .find((p) => projectPathKey(p.projectPath) === wanted)?.connectionId
-  } catch {
-    return undefined
-  }
-}
-
-async function waitUntilClosed(
-  uproject: string,
-  timeoutMs: number,
-  signal?: AbortSignal
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (signal?.aborted) return false
-    if (!(await UnrealProcessDetector.findRunningProjectByPath(uproject))) return true
-    await sleep(1000)
-  }
-  return false
 }
 
 async function runBuild(
@@ -318,44 +278,14 @@ export function createCppFullRebuildTool(): UnrealAgentTool<FullRebuildResult> {
         live: false,
         target
       }
-      const running = await UnrealProcessDetector.findRunningProjectByPath(uproject)
-      if (running) {
-        const connectionId = connectionFor(projectDir)
-        if (connectionId) {
-          ctx.report({ text: '关闭编辑器…' })
-          const response = await serviceManager.getWebSocketService().callRequest<{
-            ok?: boolean
-          }>('editor.quit', discard_unsaved ? { force: true } : {}, connectionId, 30_000)
-          const refusal = describeUnsavedRefusal(response, '关闭编辑器')
-          if (refusal) throw new Error(refusal)
-          if (!response?.ok) {
-            const message = (response as { error?: string } | undefined)?.error
-            throw new Error(
-              `编辑器没有接受关闭命令${message ? `：${message}` : ''}。` +
-                '插件可能是旧版本（没有 editor.quit）—— 用 ue_restart_editor 不行，那会原样重开；' +
-                '这种情况请用户保存并关掉编辑器，再调一次这个工具。'
-            )
-          }
-        } else if (discard_unsaved) {
-          // 插件不在（卡死、没装）就没有优雅退出这条路。用户同意丢改动才直接结束进程
-          ctx.report({ text: '编辑器没有响应，结束编辑器进程…' })
-          process.kill(running.pid)
-        } else {
-          throw new Error(
-            '编辑器开着，但插件没连上（可能卡住了），没法正常关闭它。' +
-              '可以问用户：是否同意丢掉编辑器里未保存的改动、直接结束编辑器进程？' +
-              '同意就带 discard_unsaved=true 再调；或者请用户自己保存并关掉编辑器后再调。'
-          )
-        }
-        expectEditorClose(projectDir, CLOSE_WAIT_MS + 60_000)
-        if (!(await waitUntilClosed(uproject, CLOSE_WAIT_MS, ctx.signal))) {
-          throw new Error(
-            `编辑器 ${Math.round(CLOSE_WAIT_MS / 60_000)} 分钟内没有关掉，没有编译。` +
-              '多半是弹了「要保存吗」之类的对话框在等用户点 —— 请用户看一眼编辑器窗口。'
-          )
-        }
-        result.closedEditor = true
-      }
+      result.closedEditor = await closeEditorForProject({
+        projectDir,
+        uproject,
+        discardUnsaved: discard_unsaved,
+        purpose: '编译',
+        report: (text) => ctx.report({ text }),
+        signal: ctx.signal
+      })
       ctx.signal?.throwIfAborted()
 
       // ── 2. 编译 ──

@@ -53,6 +53,7 @@ import { findEntryById, readSnippetPayload } from '../../../../services/library/
 import { checkPluginCapability } from '../../../../services/library/pluginCapabilities'
 import { containsAsset, toPackagePath } from '../../../../utils/uePackagePath'
 import { requireVaultRoot } from './vaultRoot'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 const ApplySchema = z.object({
   entry_id: z.string().describe('库条目 id，用 library_search 拿'),
@@ -262,7 +263,8 @@ export function createBlueprintLibraryApplyTool(): V2Tool {
               success: false,
               error:
                 '工程里的 UnrealAgentLink 插件太旧，还没有「放回片段」这条命令。' +
-                '请在设置里更新插件后再试。',
+                PLUGIN_UPDATE_HINT +
+                '更新完再试。',
               saved: false
             }
           }

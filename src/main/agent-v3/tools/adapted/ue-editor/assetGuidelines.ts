@@ -18,6 +18,7 @@ import { z } from 'zod'
 
 import { defineTool, type ToolOutcome } from '../../defineTool'
 import { callUe, callUeRaw } from '../../defineUeTool'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 // ────────────────────────────────────────────────────────────────────────────
 // 插件回包
@@ -302,8 +303,9 @@ function translateOldPlugin(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes('Unknown method')) {
     throw new Error(
-      '这个工程里装的虚幻盒子插件太旧，还不会检查「资产指南」。更新插件后重启编辑器再试；' +
-        '在那之前可以让用户在编辑器弹框里点「启用缺失」，效果相同。'
+      '这个工程里装的虚幻盒子插件太旧，还不会检查「资产指南」。' +
+        PLUGIN_UPDATE_HINT +
+        '更新完再试；也可以让用户在编辑器弹框里点「启用缺失」，效果相同。'
     )
   }
   throw error
