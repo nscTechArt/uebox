@@ -1,0 +1,403 @@
+src/shared\agentQuestion.ts|46|member/field/param|sessionId?: string
+src/shared\agentNotificationActivation.ts|51|member/field/param|sessionId: string
+src/renderer\src\i18n\locales\zh-CN.ts|161|member/field/param|sessionId: 'Session ID',
+src/renderer\src\i18n\locales\en-US.ts|161|member/field/param|sessionId: 'Session ID',
+src/renderer\src\composables\sessionRetitle.ts|120|member/field/param|sessionId: string,
+src/renderer\src\composables\deleteChatSession.test.ts|39|member/field/param|sessionId: 'chat-1',
+src/renderer\src\composables\deleteChatSession.test.ts|140|member/field/param|const { deps, calls } = makeDeps({ sessionId: '' })
+src/renderer\src\composables\deleteChatSession.test.ts|170|member/field/param|{ sessionId: 'chat-1', agentSessionId: 'agent-1' },
+src/renderer\src\composables\deleteChatSession.test.ts|171|member/field/param|{ sessionId: 'chat-2', agentSessionId: 'agent-2' }
+src/renderer\src\composables\deleteChatSession.test.ts|201|member/field/param|targets: [{ sessionId: 'chat-1', agentSessionId: 'agent-1' }, { sessionId: 'chat-2' }]
+src/renderer\src\composables\deleteChatSession.test.ts|201|member/field/param|targets: [{ sessionId: 'chat-1', agentSessionId: 'agent-1' }, { sessionId: 'chat-2' }]
+src/renderer\src\composables\deleteChatSession.test.ts|243|member/field/param|const { deps, calls } = makeBatchDeps({ targets: [{ sessionId: '' }] })
+src/renderer\src\composables\deleteChatSession.ts|37|member/field/param|sessionId: string
+src/renderer\src\composables\deleteChatSession.ts|41|member/field/param|dropMessages: (sessionId: string) => void
+src/renderer\src\composables\deleteChatSession.ts|42|member/field/param|removeSession: (sessionId: string) => void
+src/renderer\src\composables\deleteChatSession.ts|49|member/field/param|sessionId: string
+src/renderer\src\composables\deleteChatSession.ts|138|member/field/param|targets: [{ sessionId: deps.sessionId, agentSessionId: deps.agentSessionId }],
+src/renderer\src\layout\components\ChatSessionList.vue|76|member/field/param|(e: 'open', sessionId: string): void
+src/renderer\src\layout\components\ChatSessionList.vue|251|member/field/param|function isSessionRunning(sessionId: string): boolean {
+src/renderer\src\layout\components\ChatSessionList.vue|472|member/field/param|function handleSessionDragStart(sessionId: string, event: DragEvent): void {
+src/renderer\src\layout\components\ChatSessionList.vue|480|var-decl|const sessionId = draggingSessionId
+src/renderer\src\layout\components\ChatSessionList.vue|487|member/field/param|function openInNewWindow(sessionId: string): void {
+src/renderer\src\layout\components\ChatSessionList.vue|549|member/field/param|async function openSessionContextMenu(sessionId: string, event: MouseEvent): Promise<void> {
+src/renderer\src\layout\components\ChatSessionList.vue|557|member/field/param|function syncSessionContextMenuOpen(sessionId: string, open: boolean): void {
+src/renderer\src\layout\components\ChatSessionList.vue|666|member/field/param|sessionId: session.id,
+src/renderer\src\layout\components\ChatSessionList.vue|670|member/field/param|window.api.agentV3.deleteSession({ sessionId: agentSessionId }),
+src/renderer\src\layout\components\ChatSessionList.vue|731|var-decl|const sessionId = renamingId.value
+src/renderer\src\layout\components\ChatSessionList.vue|756|member/field/param|function assignProject(sessionId: string, project: ConnectedProjectRef): void {
+src/renderer\src\layout\components\ChatSessionList.vue|765|member/field/param|function clearProject(sessionId: string): void {
+src/renderer\src\layout\components\ChatSessionList.vue|778|var-decl|for (const sessionId of projectTargetIds.value) {
+src/shared\voiceTaskSession.ts|30|member/field/param|export function isVoiceTaskSessionId(sessionId: string): boolean {
+src/shared\voiceTaskSession.ts|35|member/field/param|export function voiceTaskOwnerSid(sessionId: string): string {
+src/shared\voiceTaskSession.ts|43|member/field/param|export function belongsToChat(sessionId: string, chatSid: string): boolean {
+src/renderer\src\layout\composables\notificationActivation.ts|69|shorthand/destr-field|function activate({ notificationKey, sessionId, toolCallId }: NotificationActivatePayload): void {
+src/shared\trayActions.ts|49|member/field/param|| { type: 'open-session'; sessionId: string }
+src/renderer\src\layout\composables\notificationActivation.test.ts|57|member/field/param|sessionId?: string
+src/renderer\src\layout\composables\notificationActivation.test.ts|62|member/field/param|let pendingPayload: { notificationKey: string; sessionId: string; toolCallId?: string } | null =
+src/renderer\src\layout\composables\notificationActivation.test.ts|131|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|142|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|149|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-unknown' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|160|member/field/param|sessionId: 'agent-session-7',
+src/renderer\src\layout\composables\notificationActivation.test.ts|171|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-nb' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|178|member/field/param|pendingPayload = { notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' }
+src/renderer\src\layout\composables\notificationActivation.test.ts|195|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|214|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|227|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|240|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|249|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-unknown' })
+src/renderer\src\layout\composables\notificationActivation.test.ts|261|member/field/param|fireActivate({ notificationKey: 'turn:agent-session-7', sessionId: 'agent-session-7' })
+src/renderer\src\layout\composables\trayBridge.test.ts|231|member/field/param|pendingAction = { type: 'open-session', sessionId: 'chat-7' }
+src/renderer\src\layout\composables\trayBridge.test.ts|247|member/field/param|pendingAction = { type: 'open-session', sessionId: 'chat-7' }
+src/renderer\src\layout\composables\trayBridge.test.ts|257|member/field/param|pendingAction = { type: 'open-session', sessionId: 'nope' }
+src/renderer\src\layout\composables\trayBridge.test.ts|377|member/field/param|pendingAction = { type: 'open-session', sessionId: 'chat-7' }
+src/renderer\src\layout\composables\trayBridge.test.ts|396|member/field/param|pendingAction = { type: 'open-session', sessionId: 'chat-7' }
+src/renderer\src\layout\composables\trayBridge.test.ts|415|member/field/param|pendingAction = { type: 'open-session', sessionId: 'chat-7' }
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.vue|100|member/field/param|sessionId: session.id,
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.vue|102|paren-arrow-param|deleteTranscript: (sessionId) => window.api.agentV3.deleteSession({ sessionId }),
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.vue|102|shorthand/destr-field|deleteTranscript: (sessionId) => window.api.agentV3.deleteSession({ sessionId }),
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.test.ts|128|member/field/param|expect(deleteSession).toHaveBeenCalledWith({ sessionId: 'agent-new' })
+src/renderer\src\common\chatRoute.ts|12|member/field/param|export function isSessionTab(path: string, sessionId: string): boolean {
+src/renderer\src\views\BlueprintLibrary\SnippetDetail.aiContext.test.ts|16|member/field/param|sessionId: { type: String, default: '' },
+src/renderer\src\components\SensitiveActionConfirm.test.ts|43|member/field/param|sessionId: 's1',
+src/renderer\src\components\ImportProgressWidget.vue|137|member/field/param|sessionId?: string
+src/renderer\src\components\useApprovalDisplay.test.ts|37|member/field/param|sessionId: 's1',
+src/renderer\src\views\BlueprintLibrary\BlueprintEditor.test.ts|63|member/field/param|sessionId: { type: String, default: '' },
+src/renderer\src\views\Assistant\Welcome.vue|484|member/field/param|sessionId: {
+src/renderer\src\views\Assistant\Welcome.vue|1858|member/field/param|data?: { sessionId?: string } & Partial<SelfCheckInput>
+src/renderer\src\views\Assistant\Welcome.vue|1875|var-decl|const sessionId = payload.data?.sessionId
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|25|var-decl|const sessionId = ref(`debug-${Date.now()}`)
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|113|member/field/param|sessionId: sessionId.value,
+src/renderer\src\api\ai.ts|282|member/field/param|sessionId?: string
+src/renderer\src\api\ai.ts|690|var-decl|const sessionId = `chat-text-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+src/renderer\src\api\ai.ts|729|multiline-field|sessionId,
+src/renderer\src\api\ai.ts|1006|var-decl|const sessionId = params.sessionId || ''
+src/renderer\src\api\ai.ts|1020|shorthand/destr-field|const result = await window.api.agentV3.stop({ sessionId })
+src/renderer\src\api\ai.ts|1034|multiline-field|sessionId,
+src/renderer\src\api\ai.executeAgent.test.ts|49|member/field/param|sessionId: 'session-a'
+src/renderer\src\api\ai.executeAgent.test.ts|78|member/field/param|expect.objectContaining({ sessionId: 'session-a', prompt: '造一艘船', mode: 'agent' })
+src/renderer\src\api\ai.executeAgent.test.ts|220|member/field/param|expect(agentV3.stop).toHaveBeenCalledWith({ sessionId: 'session-a' })
+src/renderer\src\api\ai.chatText.test.ts|11|member/field/param|type ChunkHandler = (payload: { sessionId: string; delta: string }) => void
+src/renderer\src\api\ai.chatText.test.ts|12|member/field/param|type DoneHandler = (payload: { sessionId: string; text: string; aborted: boolean }) => void
+src/renderer\src\api\ai.chatText.test.ts|13|member/field/param|type ErrorHandler = (payload: { sessionId: string; message: string }) => void
+src/renderer\src\api\ai.chatText.test.ts|34|var-decl|let sessionId = ''
+src/renderer\src\api\ai.chatText.test.ts|43|member/field/param|const chatStream = vi.fn(async (args: { sessionId: string }) => {
+src/renderer\src\api\ai.chatText.test.ts|72|shorthand/destr-field|emitChunk: (delta) => chunkHandlers.forEach((h) => h({ sessionId, delta })),
+src/renderer\src\api\ai.chatText.test.ts|74|shorthand/destr-field|doneHandlers.forEach((h) => h({ sessionId, text, aborted })),
+src/renderer\src\api\ai.chatText.test.ts|75|shorthand/destr-field|emitError: (message) => errorHandlers.forEach((h) => h({ sessionId, message })),
+src/renderer\src\api\editorSnapshotIpcPayload.test.ts|132|member/field/param|sessionId: 'agent-1',
+src/renderer\src\api\editorSnapshotIpcPayload.test.ts|151|member/field/param|await aiAPI.executeAgent({ sessionId: 'a', prompt: 'hi', editorSnapshot: null }, {})
+src/renderer\src\api\editorSnapshotIpcPayload.test.ts|155|member/field/param|await aiAPI.executeAgent({ sessionId: 'a', prompt: 'hi' }, {})
+src/renderer\src\api\agentV3.ts|86|member/field/param|sessionId?: string
+src/renderer\src\api\agentV3.ts|117|member/field/param|sessionId: string
+src/renderer\src\api\agentV3.ts|178|member/field/param|sessionId: string
+src/renderer\src\api\agentV3.ts|183|member/field/param|sessionId: args.sessionId,
+src/renderer\src\api\agentV3.ts|198|member/field/param|sessionModel(sessionId: string) {
+src/renderer\src\api\agentV3.ts|199|shorthand/destr-field|return window.api.agentV3.sessionModel({ sessionId })
+src/renderer\src\api\agentV3.ts|213|member/field/param|sessionId: string,
+src/renderer\src\api\agentV3.ts|219|multiline-field|sessionId,
+src/renderer\src\api\agentV3.ts|234|member/field/param|setApprovalMode(sessionId: string, approvalMode: AgentV3ApprovalMode, mode?: 'agent' | 'ask') {
+src/renderer\src\api\agentV3.ts|235|shorthand/destr-field|return window.api.agentV3.setApprovalMode({ sessionId, approvalMode, mode })
+src/renderer\src\api\agentV3.ts|238|member/field/param|steer(sessionId: string, message: string) {
+src/renderer\src\api\agentV3.ts|239|shorthand/destr-field|return window.api.agentV3.steer({ sessionId, message })
+src/renderer\src\api\agentV3.ts|249|member/field/param|cancelSteer(sessionId: string, steerId: string) {
+src/renderer\src\api\agentV3.ts|250|shorthand/destr-field|return window.api.agentV3.cancelSteer({ sessionId, steerId })
+src/renderer\src\api\agentV3.ts|253|member/field/param|stop(sessionId: string) {
+src/renderer\src\api\agentV3.ts|254|shorthand/destr-field|return window.api.agentV3.stop({ sessionId })
+src/renderer\src\api\agentV3.ts|268|member/field/param|compact(sessionId: string): Promise<AgentV3CompactResult> {
+src/renderer\src\api\agentV3.ts|269|shorthand/destr-field|return window.api.agentV3.compact({ sessionId }) as Promise<AgentV3CompactResult>
+src/renderer\src\api\agentV3.ts|378|member/field/param|loadSession(sessionId: string): Promise<{ messages: unknown[] }> {
+src/renderer\src\api\agentV3.ts|379|shorthand/destr-field|return window.api.agentV3.loadSession({ sessionId })
+src/renderer\src\api\agentV3.ts|382|member/field/param|deleteSession(sessionId: string) {
+src/renderer\src\api\agentV3.ts|383|shorthand/destr-field|return window.api.agentV3.deleteSession({ sessionId })
+src/renderer\src\api\agentV3.ts|399|member/field/param|sessionId: string,
+src/renderer\src\api\agentV3.ts|403|member/field/param|sessionId?: string
+src/renderer\src\api\agentV3.ts|408|shorthand/destr-field|return window.api.agentV3.forkSession({ sessionId, keepUserTurns })
+src/renderer\src\api\agentV3.ts|418|member/field/param|sessionId: string,
+src/renderer\src\api\agentV3.ts|427|shorthand/destr-field|return window.api.agentV3.truncateSession({ sessionId, keepUserTurns })
+src/renderer\src\api\agentV3.ts|437|member/field/param|forkForSideQuestion(sessionId: string): Promise<{
+src/renderer\src\api\agentV3.ts|439|member/field/param|sessionId?: string
+src/renderer\src\api\agentV3.ts|445|shorthand/destr-field|return window.api.agentV3.forkForSideQuestion({ sessionId })
+src/renderer\src\api\agentV3.ts|459|member/field/param|async goalState(sessionId: string): Promise<{ objective: string; settled: boolean } | null> {
+src/renderer\src\api\agentV3.ts|460|shorthand/destr-field|const result = await window.api.agentV3.goalState({ sessionId })
+src/renderer\src\api\agentV3.ts|465|member/field/param|goalEnd(sessionId: string): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {
+src/renderer\src\api\agentV3.ts|466|shorthand/destr-field|return window.api.agentV3.goalEnd({ sessionId })
+src/renderer\src\api\agentV3.ts|470|member/field/param|async teamState(sessionId: string): Promise<TeamStateView | null> {
+src/renderer\src\api\agentV3.ts|471|shorthand/destr-field|const result = await window.api.agentV3.teamState({ sessionId })
+src/renderer\src\api\agentV3.ts|481|member/field/param|teamTaskReopen(sessionId: string, taskId: string): Promise<{ success: boolean; error?: string }> {
+src/renderer\src\api\agentV3.ts|482|shorthand/destr-field|return window.api.agentV3.teamTaskReopen({ sessionId, taskId })
+src/renderer\src\api\agentV3.ts|485|member/field/param|teamEnd(sessionId: string): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {
+src/renderer\src\api\agentV3.ts|486|shorthand/destr-field|return window.api.agentV3.teamEnd({ sessionId })
+src/renderer\src\api\agentV3.ts|515|member/field/param|subscribe(sessionId: string, handler: (event: AgentV3Event) => void): () => void {
+src/renderer\src\api\agentBrowser.ts|17|member/field/param|async tab(sessionId: string, command: BrowserTabCommand): Promise<void> {
+src/renderer\src\api\agentBrowser.ts|20|member/field/param|async toolbar(sessionId: string, action: BrowserToolbarAction): Promise<void> {
+src/renderer\src\api\agentBrowser.ts|23|member/field/param|async openUrl(sessionId: string, address: string): Promise<{ url: string }> {
+src/renderer\src\api\agentBrowser.ts|26|member/field/param|async getState(sessionId: string, restore: boolean): Promise<AgentBrowserState> {
+src/renderer\src\store\modules\agentStream.ts|384|member/field/param|sessionId: agentSessionId,
+src/renderer\src\store\modules\agentStream.ts|459|member/field/param|data: { ...item, sessionId: agentSessionId },
+src/renderer\src\views\AssetManagement\index.vue|2128|member/field/param|sessionId?: string
+src/renderer\src\views\AssetManagement\index.vue|2169|member/field/param|sessionId: payload.sessionId || undefined,
+src/renderer\src\views\AssetManagement\index.vue|2198|member/field/param|sessionId?: string
+src/renderer\src\views\AssetManagement\index.vue|2266|member/field/param|sessionId?: string
+src/renderer\src\views\AssetManagement\index.vue|2284|member/field/param|sessionId: string
+src/renderer\src\views\AssetManagement\index.vue|2300|member/field/param|sessionId?: string
+src/renderer\src\views\AssetManagement\index.vue|2463|member/field/param|sessionId: getStringField(data.sessionId) || getStringField(firstIssue.sessionId),
+src/renderer\src\views\AssetManagement\index.vue|2584|var-decl|const sessionId = payload.sessionId || '-'
+src/renderer\src\views\AssetManagement\index.vue|2783|member/field/param|sessionId: latest.sessionId,
+src/renderer\src\store\modules\chatSessions.ts|477|member/field/param|.setSessionProject({ sessionId: agentSessionId, project: session.project })
+src/renderer\src\store\modules\chatSessions.ts|553|member/field/param|function setAgentSessionId(id: string, sessionId: string): void {
+src/renderer\src\store\modules\importTasks.ts|40|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|12|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|25|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|31|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|45|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|50|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|62|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|95|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|118|member/field/param|clearWikiRagState: (sessionId?: string) => void
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|119|member/field/param|getWikiRagCitations: (sessionId?: string) => NotebookRagCitation[]
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|141|member/field/param|sessionId?: string
+src/renderer\src\store\modules\chatSessions.test.ts|477|member/field/param|sessionId: 'kernel-a',
+src/renderer\src\store\modules\chatSessions.test.ts|483|member/field/param|sessionId: 'kernel-a',
+src/renderer\src\store\modules\chatSessions.test.ts|488|member/field/param|expect(pushed.calls.at(-1)).toMatchObject({ sessionId: 'kernel-a', project: null })
+src/renderer\src\store\modules\pendingApprovals.test.ts|16|member/field/param|sessionId: 'session-1',
+src/renderer\src\store\modules\chatMessages.test.ts|283|member/field/param|const resumeButton = [{ label: '继续尝试', action: 'agent-resume', data: { sessionId: 's1' } }]
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|62|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|92|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|101|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|107|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|111|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|115|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|194|member/field/param|function paintStreamingMessage(sessionId: string): void {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|229|member/field/param|function scheduleRepaint(sessionId: string): void {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|241|member/field/param|function cancelRepaint(sessionId: string): void {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|248|member/field/param|export function finalizeSessionCompletionForUI(sessionId: string): void {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|306|member/field/param|function handlerFor(sessionId?: string): RegisteredHandler | undefined {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|317|member/field/param|sessionId: string,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|329|multiline-field|sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|359|member/field/param|on('agent-v3:text', (data: { sessionId: string; text: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|367|member/field/param|on('agent-v3:thinking', (data: { sessionId: string; text: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|376|member/field/param|(data: { sessionId: string; toolCallId: string; toolName: string; args: unknown }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|383|member/field/param|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|401|member/field/param|(data: { sessionId: string; toolCallId?: string; toolName: string; partial: unknown }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|415|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|426|member/field/param|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|437|member/field/param|on('agent-v3:step', (data: { sessionId: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|441|member/field/param|handlerFor(data.sessionId)?.onStep?.({ sessionId: data.sessionId, step })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|448|member/field/param|on('agent-v3:user-message', (data: { sessionId: string; text: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|465|member/field/param|(data: { sessionId: string; toolCallId: string; questions: AgentQuestion[] }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|494|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|506|member/field/param|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|530|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|546|member/field/param|(data: { sessionId: string; tokens: number; contextWindow: number }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|564|member/field/param|on('agent-v3:turn-usage', (data: { sessionId: string } & AgentTurnUsage) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|578|member/field/param|on('agent-v3:compacting', (data: { sessionId: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|586|member/field/param|on('agent-v3:goal', (data: { sessionId: string; message: string; level: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|594|member/field/param|on('agent-v3:notice', (data: { sessionId: string; message: string; level: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|606|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|634|member/field/param|on('agent-v3:model-retry', (data: { sessionId: string; model: string; reason: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|647|member/field/param|on('agent-v3:done', (data: { sessionId: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|654|member/field/param|on('agent-v3:stopped', (data: { sessionId: string }) => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|663|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|694|member/field/param|sessionId: string,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|798|member/field/param|export function isCurrentRun(sessionId: string, runId?: number): boolean {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|803|member/field/param|export function unregisterAgentHandler(sessionId: string, runId?: number): void {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|825|member/field/param|export function hasActiveHandler(sessionId: string): boolean {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|830|var-decl|for (const [sessionId, handler] of handlers) {
+src/renderer\src\views\Assistant\AgentBrowserWindow.vue|23|var-decl|const sessionId = computed(() =>
+src/renderer\src\store\modules\pendingApprovals.ts|14|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|121|member/field/param|bus.emit('agent-v3:text', { sessionId: SID, text: '已创建材质' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|129|member/field/param|bus.emit('agent-v3:thinking', { sessionId: SID, text: '先看看图表' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|130|member/field/param|bus.emit('agent-v3:text', { sessionId: SID, text: '正文' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|152|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|169|member/field/param|bus.emit('agent-v3:thinking', { sessionId: SID, text: '先确认工程连上了没有' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|188|member/field/param|bus.emit('agent-v3:text', { sessionId: SID, text: `第 ${i} 段增量文本内容。` })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|203|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onStreamPaint })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|206|member/field/param|bus.emit('agent-v3:text', { sessionId: SID, text: `第 ${i} 段增量文本内容。` })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|221|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onStreamPaint })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|223|member/field/param|bus.emit('agent-v3:thinking', { sessionId: SID, text: '先分析问题。' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|227|member/field/param|bus.emit('agent-v3:thinking', { sessionId: SID, text: '再检查工程。' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|241|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onToolCall })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|244|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|251|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|268|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onToolResult })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|271|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|284|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|302|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onToolCall })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|305|member/field/param|sessionId: 'session-b',
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|317|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onToolCall })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|321|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|342|member/field/param|const firstRun = registerAgentHandler({ sessionId: SID, chatSid: CHAT })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|347|member/field/param|const secondRun = registerAgentHandler({ sessionId: SID, chatSid: CHAT, onToolCall })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|354|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|369|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|381|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onStep })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|383|member/field/param|bus.emit('agent-v3:step', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|384|member/field/param|bus.emit('agent-v3:step', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|392|member/field/param|expect(onStep).toHaveBeenLastCalledWith({ sessionId: SID, step: 2 })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|398|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onStep })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|399|member/field/param|bus.emit('agent-v3:step', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|402|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onStep })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|403|member/field/param|bus.emit('agent-v3:step', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|419|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onDone })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|421|member/field/param|bus.emit('agent-v3:text', { sessionId: SID, text: '做完了' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|422|member/field/param|bus.emit('agent-v3:done', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|434|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onStopped, onError })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|436|member/field/param|bus.emit('agent-v3:stopped', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|445|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onError })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|447|member/field/param|bus.emit('agent-v3:error', { sessionId: SID, message: '模型未配置' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|462|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onError })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|465|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|484|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onError })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|487|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|498|member/field/param|bus.emit('agent-v3:error', { sessionId: SID, message: 'x', statusCode: 402 })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|516|member/field/param|bus.emit('agent-v3:text', { sessionId: SID, text: '，刷新后接着说完' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|517|member/field/param|bus.emit('agent-v3:done', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|533|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|545|member/field/param|bus.emit('agent-v3:text', { sessionId: SID, text: reply })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|546|member/field/param|bus.emit('agent-v3:goal', { sessionId: SID, message: '正在复核', level: 'info' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|547|member/field/param|bus.emit('agent-v3:done', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|558|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|560|member/field/param|bus.emit('agent-v3:compacting', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|572|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers, onError })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|575|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|594|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|598|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|615|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|618|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|634|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|637|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|654|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|657|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|674|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|677|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|691|member/field/param|registerAgentHandler({ sessionId: SID, chatSid: CHAT, onNotifyUsers })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|693|member/field/param|bus.emit('agent-v3:tool-progress', { sessionId: SID, toolName: 'x', partial: {} })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|700|member/field/param|bus.emit('agent-v3:compacting', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|723|member/field/param|bus.emit('agent-v3:context-usage', { sessionId: SID, tokens: 12_000, contextWindow: 128_000 })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|740|member/field/param|bus.emit('agent-v3:context-usage', { sessionId: SID, tokens: 900, contextWindow: 8_000 })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|753|member/field/param|bus.emit('agent-v3:context-usage', { sessionId: SID, tokens: 900, contextWindow: 8_000 })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|760|member/field/param|sessionId: 'unknown-session',
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|784|member/field/param|): { sessionId: string } & AgentTurnUsage => ({
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|785|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|812|member/field/param|bus.emit('agent-v3:turn-usage', { ...usage(10, 10, 0), sessionId: 'unknown-session' })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|837|member/field/param|bus.emit('agent-v3:question-required', { sessionId: SID, toolCallId, questions: QUESTIONS })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|849|member/field/param|expect(questionItems()[0].data).toMatchObject({ toolCallId: 'q1', sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|909|member/field/param|sessionId: 'no-such-session',
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|922|member/field/param|bus.emit('agent-v3:question-required', { sessionId: SID, questions: QUESTIONS })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|943|member/field/param|bus.emit('agent-v3:done', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|955|member/field/param|bus.emit('agent-v3:done', { sessionId: SID })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|970|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|984|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|1000|member/field/param|sessionId: SID,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|1093|member/field/param|expect(bus.cancelSteer).toHaveBeenCalledWith({ sessionId: SID_S, steerId: 'steer-1' })
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|320|member/field/param|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|44|member/field/param|ensureSession: (sessionId: string, title: string) => void
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|45|member/field/param|sessionById: (sessionId: string) => ChatSession | null
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|46|member/field/param|updateTitle: (sessionId: string, title: string) => void
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|47|member/field/param|appendMessage: (sessionId: string, text: string) => void
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|48|member/field/param|setProject: (sessionId: string, project: ChatSessionProject | null) => void
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|67|member/field/param|sessionId: string,
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|100|multiline-field|sessionId,
+src/renderer\src\views\Assistant\composables\chatBranch.ts|36|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|213|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\chatBranch.test.ts|20|member/field/param|forkTranscript: vi.fn().mockResolvedValue({ success: true, sessionId: 'agent-branch' }),
+src/renderer\src\views\Assistant\components\AgentBrowserPane.test.ts|70|member/field/param|props: { sessionId: 'session-a', open: true, visible: true },
+src/renderer\src\views\Assistant\components\AIBubble.actions.test.ts|20|member/field/param|data: Record<string, unknown> = { sessionId: 'session-1' }
+src/renderer\src\views\Assistant\components\AIBubble.actions.test.ts|110|member/field/param|sessionId: 'session-1',
+src/renderer\src\views\Assistant\components\AIBubble.actions.test.ts|130|member/field/param|sessionId: 'session-1',
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts|63|var-decl|for (const [sessionId, mode] of Object.entries(next)) {
+src/renderer\src\views\Assistant\composables\agentTimeline.ts|55|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentTimeline.ts|152|member/field/param|sessionId?: unknown
+src/renderer\src\views\Assistant\composables\agentTimeline.ts|174|member/field/param|...(typeof data?.sessionId === 'string' ? { sessionId: data.sessionId } : {}),
+src/renderer\src\views\Assistant\composables\agentTimeline.test.ts|132|member/field/param|data: { text: '算了', applied: false, cancelled: true, steerId: 's-1', sessionId: 'a-1' },
+src/renderer\src\views\Assistant\composables\agentTimeline.test.ts|141|member/field/param|sessionId: 'a-1'
+src/renderer\src\views\Assistant\composables\agentTimeline.test.ts|401|member/field/param|sessionId: 's1',
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|60|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|111|member/field/param|function handleAgentText(_event: unknown, data: { delta: string; sessionId?: string }): void {
+src/renderer\src\views\Assistant\components\AskUserCard.test.ts|14|member/field/param|sessionId: 's1',
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|147|member/field/param|sessionId: ctx.sessionA,
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|180|member/field/param|handlers.handleAgentStopped(null, { sessionId: ctx.sessionA })
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|197|member/field/param|vi.mocked(unregisterAgentHandler).mockImplementation((sessionId: string) => {
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|227|member/field/param|const finalText = await handlers.handleAgentDone(null, { sessionId: ctx.sessionA })
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|259|member/field/param|vi.mocked(unregisterAgentHandler).mockImplementation((sessionId: string) => {
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|273|member/field/param|sessionId: ctx.sessionA,
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|285|member/field/param|vi.mocked(unregisterAgentHandler).mockImplementation((sessionId: string) => {
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|298|member/field/param|await handlers.handleAgentDone(null, { sessionId: ctx.sessionA })
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|319|member/field/param|vi.mocked(unregisterAgentHandler).mockImplementation((sessionId: string) => {
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|335|member/field/param|await handlers.handleAgentDone(null, { sessionId: ctx.sessionA, runId: 1 })
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|349|member/field/param|vi.mocked(unregisterAgentHandler).mockImplementation((sessionId: string) => {
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|373|member/field/param|sessionId: ctx.sessionA,
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|16|member/field/param|getTitle: (sessionId: string) => string | undefined
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|18|member/field/param|applyTitle: (sessionId: string, title: string) => void
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|28|member/field/param|sessionId: string,
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.test.ts|50|default-param|async function mountMonitor(sessionId = 'sid'): Promise<ReturnType<typeof mount>> {
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.test.ts|55|shorthand/destr-field|props: { sessionId },
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue|32|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue|36|member/field/param|{ sessionId: '', pendingProjectName: '' }
+src/renderer\src\views\Assistant\composables\followUpDelivery.test.ts|70|member/field/param|let fireReleased: (payload?: { sessionId?: string }) => void = () => {}
+src/renderer\src\views\Assistant\composables\followUpDelivery.test.ts|192|member/field/param|fireReleased({ sessionId: 'agent-session-1' })
+src/renderer\src\views\Assistant\composables\followUpDelivery.ts|160|member/field/param|const payload = args[0] as { sessionId?: string } | undefined
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts|160|member/field/param|sessionId: SESSION,
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts|176|member/field/param|sessionId: SESSION,
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts|190|member/field/param|sessionId: SESSION,
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts|206|member/field/param|sessionId: SESSION,
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts|11|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts|27|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\sessionProjectSync.ts|34|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.ts|4|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.ts|76|var-decl|const { sessionId, getSession, setProject } = deps
+src/renderer\src\views\Assistant\composables\sideQuestion.test.ts|12|member/field/param|.mockResolvedValue({ success: true, sessionId: 'agent-side', messageCount: 12, live: true }),
+src/renderer\src\views\Assistant\composables\sideQuestion.test.ts|84|member/field/param|fork: vi.fn().mockResolvedValue({ success: true, sessionId: 'agent-side', messageCount: 3 })
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts|42|member/field/param|sessionId: 'agent-1',
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts|58|member/field/param|applySessionProjectEvent({ sessionId: 'agent-1', project: null }, store)
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts|68|member/field/param|applySessionProjectEvent({ sessionId: 'agent-1', project: { projectName: '  ' } }, store)
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts|76|member/field/param|applySessionProjectEvent({ sessionId: 'agent-somewhere-else', project: null }, store)
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts|85|member/field/param|applySessionProjectEvent({ sessionId: '  ', project: null }, store)
+src/renderer\src\views\Assistant\composables\sideQuestion.ts|26|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.test.ts|23|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.test.ts|33|member/field/param|sessionId: session?.id || 'sid-1',
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.test.ts|97|member/field/param|stampSessionProject({ ...deps, sessionId: '', preferredProjectName: 'ArchViz' })
+src/renderer\src\views\Assistant\components\InputComposer.vue|1467|var-decl|const sessionId = chatSessionsStore.getAgentSessionId(chatSid)
+src/renderer\src\views\Assistant\components\InputComposer.vue|1475|shorthand/destr-field|const result = await window.api.agentV3.compact({ sessionId })
+src/renderer\src\views\MaterialLibrary\MaterialEditor.test.ts|24|member/field/param|sessionId: { type: String, default: '' },
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|147|member/field/param|sessionId: string,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|172|member/field/param|const getWikiRagCitations = (sessionId?: string): NotebookRagCitation[] => {
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|178|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|184|member/field/param|const clearWikiRagState = (sessionId?: string): void => {
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|397|var-decl|const sessionId = chatStore.getAgentSessionId(sid.value)
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|411|var-decl|const sessionId = chatStore.getAgentSessionId(sid.value)
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|442|member/field/param|sessionId: agentSessionId,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|466|member/field/param|handleAgentStopped(null, { sessionId: agentSessionId, runId })
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|475|member/field/param|sessionId: agentSessionId,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|550|member/field/param|sessionId: agentSessionId,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|845|member/field/param|sessionId: agentSessionId,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|970|member/field/param|const result = await window.api.agentV3.stop({ sessionId: elsewhereSessionId })
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|983|member/field/param|const result = await window.api.agentV3.stop({ sessionId: currentSessionId.value })
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|984|member/field/param|handleAgentStopped(null, { sessionId: currentSessionId.value })
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1027|var-decl|const sessionId = targetSessionId || currentSessionId.value
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1054|multiline-field|sessionId,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1260|member/field/param|.deleteSession({ sessionId: staleSessionId })
+src/renderer\src\views\library-common\components\LibraryAIPanel.vue|43|member/field/param|sessionId: string
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|46|var-decl|const sessionId = agentSessionId.value
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|61|member/field/param|const payload = args[0] as { sessionId?: string } | undefined
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|77|var-decl|const sessionId = agentSessionId.value
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|84|var-decl|const sessionId = agentSessionId.value
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|1146|member/field/param|sessionId: string,
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|1240|member/field/param|function resolveTarget(sessionId: string): VoiceSessionRef | undefined {
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|32|var-decl|const sessionId = agentSessionId.value
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|47|member/field/param|const payload = args[0] as { sessionId?: string } | undefined
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|61|var-decl|const sessionId = agentSessionId.value
+src/renderer\src\views\Assistant\composables\transcriptRewind.ts|56|member/field/param|truncate: (sessionId: string, keepUserTurns: number) => Promise<TruncateTranscriptResult>
+src/renderer\src\views\Assistant\composables\useSessionBrowser.ts|7|member/field/param|sessionId: Readonly<Ref<string>>,
+src/renderer\src\views\Assistant\composables\useSessionBrowser.ts|68|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\components\SessionProjectChip.test.ts|31|member/field/param|function mountChip(sessionId: string, pendingProjectName = ''): ReturnType<typeof mount> {
+src/renderer\src\views\Assistant\components\SessionProjectChip.test.ts|33|shorthand/destr-field|props: { sessionId, pendingProjectName },
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts|27|var-decl|const sessionId = ref(id)
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts|93|member/field/param|listener({ sessionId: 'a', ...opened })
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts|96|member/field/param|listener({ sessionId: 'b', ...opened })
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts|109|member/field/param|listener({ sessionId: 'a', open: false, mode: 'embedded' })
+src/renderer\src\views\Assistant\composables\useChatFlow.ts|120|member/field/param|function ensureSessionWithTitle(sessionId: string, messageText: string): void {
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|23|member/field/param|sessionId?: string
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|37|member/field/param|sessionId: '',
+src/renderer\src\views\Assistant\components\TopNav.vue|67|member/field/param|sessionId?: string

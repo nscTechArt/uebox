@@ -1,0 +1,409 @@
+src/shared\voiceTaskSession.ts:30:37:(sessionId:
+src/shared\voiceTaskSession.ts:35:34:(sessionId:
+src/shared\voiceTaskSession.ts:43:30:(sessionId:
+src/renderer\src\layout\composables\trayBridge.test.ts:231:44: sessionId:
+src/renderer\src\layout\composables\trayBridge.test.ts:247:44: sessionId:
+src/renderer\src\layout\composables\trayBridge.test.ts:257:44: sessionId:
+src/renderer\src\layout\composables\trayBridge.test.ts:377:44: sessionId:
+src/renderer\src\layout\composables\trayBridge.test.ts:396:44: sessionId:
+src/renderer\src\layout\composables\trayBridge.test.ts:415:44: sessionId:
+src/shared\trayActions.ts:49:28: sessionId:
+src/renderer\src\layout\composables\notificationActivation.ts:69:20:({ notificationKey, sessionId,
+src/renderer\src\layout\composables\notificationActivation.test.ts:57:2: sessionId?:
+src/renderer\src\layout\composables\notificationActivation.test.ts:62:47: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:131:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:142:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:149:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:160:6: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:171:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:178:64: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:195:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:214:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:227:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:240:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:249:60: sessionId:
+src/renderer\src\layout\composables\notificationActivation.test.ts:261:62: sessionId:
+src/renderer\src\composables\sessionRetitle.ts:120:2: sessionId:
+src/renderer\src\composables\deleteChatSession.ts:37:2: sessionId:
+src/renderer\src\composables\deleteChatSession.ts:41:17:(sessionId:
+src/renderer\src\composables\deleteChatSession.ts:42:62:(sessionId:
+src/renderer\src\composables\deleteChatSession.ts:49:2: sessionId:
+src/renderer\src\composables\deleteChatSession.ts:138:16: sessionId:
+src/renderer\src\composables\deleteChatSession.test.ts:39:6: sessionId:
+src/renderer\src\composables\deleteChatSession.test.ts:140:39: sessionId:
+src/renderer\src\composables\deleteChatSession.test.ts:170:12: sessionId:
+src/renderer\src\composables\deleteChatSession.test.ts:171:74: sessionId:
+src/renderer\src\composables\deleteChatSession.test.ts:201:18: sessionId:
+src/renderer\src\composables\deleteChatSession.test.ts:201:70: sessionId:
+src/renderer\src\composables\deleteChatSession.test.ts:243:56: sessionId:
+src/renderer\src\store\modules\pendingApprovals.ts:14:2: sessionId:
+src/renderer\src\store\modules\pendingApprovals.test.ts:16:4: sessionId:
+src/renderer\src\components\useApprovalDisplay.test.ts:37:4: sessionId:
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.vue:100:8: sessionId:
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.vue:102:27:(sessionId) =>
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.vue:102:74:({ sessionId }
+src/shared\agentQuestion.ts:46:2: sessionId?:
+src/shared\agentNotificationActivation.ts:51:2: sessionId:
+src/renderer\src\views\System\Preferences\panels\ArchivedChatsModal.test.ts:128:49: sessionId:
+src/renderer\src\api\editorSnapshotIpcPayload.test.ts:132:8: sessionId:
+src/renderer\src\api\editorSnapshotIpcPayload.test.ts:151:31: sessionId:
+src/renderer\src\api\editorSnapshotIpcPayload.test.ts:155:31: sessionId:
+src/renderer\src\api\ai.chatText.test.ts:11:32: sessionId:
+src/renderer\src\api\ai.chatText.test.ts:12:107: sessionId:
+src/renderer\src\api\ai.chatText.test.ts:13:200: sessionId:
+src/renderer\src\api\ai.chatText.test.ts:34:3:let sessionId
+src/renderer\src\api\ai.chatText.test.ts:43:42: sessionId:
+src/renderer\src\api\ai.chatText.test.ts:72:57:({ sessionId,
+src/renderer\src\api\ai.chatText.test.ts:74:36:({ sessionId,
+src/renderer\src\api\ai.chatText.test.ts:75:127:({ sessionId,
+src/renderer\src\store\modules\chatMessages.test.ts:283:81: sessionId:
+src/renderer\src\api\agentV3.ts:86:2: sessionId?:
+src/renderer\src\api\agentV3.ts:117:4: sessionId:
+src/renderer\src\api\agentV3.ts:178:4: sessionId:
+src/renderer\src\api\agentV3.ts:183:8: sessionId:
+src/renderer\src\api\agentV3.ts:198:15:(sessionId:
+src/renderer\src\api\agentV3.ts:199:79:({ sessionId }
+src/renderer\src\api\agentV3.ts:213:4: sessionId:
+src/renderer\src\api\agentV3.ts:218:39:({
+src/renderer\src\api\agentV3.ts:219:39:      sessionId,
+src/renderer\src\api\agentV3.ts:234:18:(sessionId:
+src/renderer\src\api\agentV3.ts:235:144:({ sessionId,
+src/renderer\src\api\agentV3.ts:238:8:(sessionId:
+src/renderer\src\api\agentV3.ts:239:82:({ sessionId,
+src/renderer\src\api\agentV3.ts:249:14:(sessionId:
+src/renderer\src\api\agentV3.ts:250:94:({ sessionId,
+src/renderer\src\api\agentV3.ts:253:7:(sessionId:
+src/renderer\src\api\agentV3.ts:254:63:({ sessionId }
+src/renderer\src\api\agentV3.ts:268:10:(sessionId:
+src/renderer\src\api\agentV3.ts:269:100:({ sessionId }
+src/renderer\src\api\agentV3.ts:378:14:(sessionId:
+src/renderer\src\api\agentV3.ts:379:111:({ sessionId }
+src/renderer\src\api\agentV3.ts:382:16:(sessionId:
+src/renderer\src\api\agentV3.ts:383:81:({ sessionId }
+src/renderer\src\api\agentV3.ts:399:4: sessionId:
+src/renderer\src\api\agentV3.ts:403:4: sessionId?:
+src/renderer\src\api\agentV3.ts:408:42:({ sessionId,
+src/renderer\src\api\agentV3.ts:418:4: sessionId:
+src/renderer\src\api\agentV3.ts:427:46:({ sessionId,
+src/renderer\src\api\agentV3.ts:437:22:(sessionId:
+src/renderer\src\api\agentV3.ts:439:4: sessionId?:
+src/renderer\src\api\agentV3.ts:445:50:({ sessionId }
+src/renderer\src\api\agentV3.ts:459:18:(sessionId:
+src/renderer\src\api\agentV3.ts:460:150:({ sessionId }
+src/renderer\src\api\agentV3.ts:465:10:(sessionId:
+src/renderer\src\api\agentV3.ts:466:138:({ sessionId }
+src/renderer\src\api\agentV3.ts:470:18:(sessionId:
+src/renderer\src\api\agentV3.ts:471:124:({ sessionId }
+src/renderer\src\api\agentV3.ts:481:17:(sessionId:
+src/renderer\src\api\agentV3.ts:482:146:({ sessionId,
+src/renderer\src\api\agentV3.ts:485:10:(sessionId:
+src/renderer\src\api\agentV3.ts:486:138:({ sessionId }
+src/renderer\src\api\agentV3.ts:515:12:(sessionId:
+src/renderer\src\api\agentBrowser.ts:17:12:(sessionId:
+src/renderer\src\api\agentBrowser.ts:20:16:(sessionId:
+src/renderer\src\api\agentBrowser.ts:23:16:(sessionId:
+src/renderer\src\api\agentBrowser.ts:26:17:(sessionId:
+src/renderer\src\api\ai.executeAgent.test.ts:49:2: sessionId:
+src/renderer\src\api\ai.executeAgent.test.ts:78:32: sessionId:
+src/renderer\src\api\ai.executeAgent.test.ts:220:48: sessionId:
+src/renderer\src\api\ai.ts:282:2: sessionId?:
+src/renderer\src\api\ai.ts:690:5:const sessionId
+src/renderer\src\api\ai.ts:728:52:({
+src/renderer\src\api\ai.ts:729:52:          sessionId,
+src/renderer\src\api\ai.ts:1006:5:const sessionId
+src/renderer\src\api\ai.ts:1020:55:({ sessionId }
+src/renderer\src\api\ai.ts:1033:15:({
+src/renderer\src\api\ai.ts:1034:15:        sessionId,
+src/renderer\src\components\SensitiveActionConfirm.test.ts:43:4: sessionId:
+src/renderer\src\store\modules\importTasks.ts:40:2: sessionId?:
+src/renderer\src\i18n\locales\en-US.ts:161:4: sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:76:14: sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:251:26:(sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:472:32:(sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:480:3:const sessionId
+src/renderer\src\layout\components\ChatSessionList.vue:487:25:(sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:549:38:(sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:557:36:(sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:666:10: sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:670:45: sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:731:3:const sessionId
+src/renderer\src\layout\components\ChatSessionList.vue:756:23:(sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:765:22:(sessionId:
+src/renderer\src\layout\components\ChatSessionList.vue:778:10:const sessionId
+src/renderer\src\components\ImportProgressWidget.vue:137:2: sessionId?:
+src/renderer\src\i18n\locales\zh-CN.ts:161:4: sessionId:
+src/renderer\src\store\modules\chatSessions.ts:477:29: sessionId:
+src/renderer\src\store\modules\chatSessions.ts:553:43: sessionId:
+src/renderer\src\store\modules\agentStream.ts:384:8: sessionId:
+src/renderer\src\store\modules\agentStream.ts:459:23: sessionId:
+src/renderer\src\views\BlueprintLibrary\SnippetDetail.aiContext.test.ts:16:6: sessionId:
+src/renderer\src\store\modules\chatSessions.test.ts:477:6: sessionId:
+src/renderer\src\store\modules\chatSessions.test.ts:483:6: sessionId:
+src/renderer\src\store\modules\chatSessions.test.ts:488:48: sessionId:
+src/renderer\src\common\chatRoute.ts:12:43: sessionId:
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue:25:1:const sessionId
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue:113:6: sessionId:
+src/renderer\src\views\BlueprintLibrary\BlueprintEditor.test.ts:63:6: sessionId:
+src/renderer\src\views\MaterialLibrary\MaterialEditor.test.ts:24:6: sessionId:
+src/renderer\src\views\Assistant\Welcome.vue:484:2: sessionId:
+src/renderer\src\views\Assistant\Welcome.vue:1858:11: sessionId?:
+src/renderer\src\views\Assistant\Welcome.vue:1875:3:const sessionId
+src/renderer\src\views\Assistant\components\TopNav.vue:67:2: sessionId?:
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue:23:2: sessionId?:
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue:37:2: sessionId:
+src/renderer\src\views\Assistant\components\SessionProjectChip.test.ts:31:19:(sessionId:
+src/renderer\src\views\Assistant\components\SessionProjectChip.test.ts:33:11: { sessionId,
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts:46:5:const sessionId
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts:61:33: sessionId?:
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts:77:5:const sessionId
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts:84:5:const sessionId
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts:32:5:const sessionId
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts:47:33: sessionId?:
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts:61:5:const sessionId
+src/renderer\src\views\Assistant\composables\useSessionBrowser.ts:7:2: sessionId:
+src/renderer\src\views\Assistant\composables\useSessionBrowser.ts:68:12: sessionId?:
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts:27:3:const sessionId
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts:93:15: sessionId:
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts:96:15: sessionId:
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts:109:15: sessionId:
+src/renderer\src\views\Assistant\components\AskUserCard.test.ts:14:4: sessionId:
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue:213:2: sessionId:
+src/renderer\src\views\library-common\components\LibraryAIPanel.vue:43:4: sessionId:
+src/renderer\src\views\Assistant\components\AgentBrowserPane.test.ts:70:13: sessionId:
+src/renderer\src\views\Assistant\AgentBrowserWindow.vue:23:1:const sessionId
+src/renderer\src\views\Assistant\components\AIBubble.actions.test.ts:20:36: sessionId:
+src/renderer\src\views\Assistant\components\AIBubble.actions.test.ts:110:6: sessionId:
+src/renderer\src\views\Assistant\components\AIBubble.actions.test.ts:130:8: sessionId:
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts:160:6: sessionId:
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts:176:6: sessionId:
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts:190:6: sessionId:
+src/renderer\src\views\Assistant\composables\creatorPlanChatError.test.ts:206:6: sessionId:
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:44:20:(sessionId:
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:45:80:(sessionId:
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:46:139:(sessionId:
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:47:201:(sessionId:
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:48:259:(sessionId:
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:67:2: sessionId:
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:99:22:({
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts:100:22:    sessionId,
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.test.ts:50:28:(sessionId = 
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.test.ts:55:11: { sessionId }
+src/renderer\src\views\Assistant\composables\chatBranch.ts:36:2: sessionId?:
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue:32:4: sessionId?:
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue:36:4: sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:147:6: sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:180:40: sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:197:58:(sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:227:61: sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:259:58:(sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:273:6: sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:285:58:(sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:298:43: sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:319:58:(sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:335:43: sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:349:58:(sessionId:
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts:373:6: sessionId:
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts:1146:4: sessionId:
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts:1240:25:(sessionId:
+src/renderer\src\views\Assistant\composables\chatBranch.test.ts:20:63: sessionId:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:12:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:25:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:31:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:45:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:50:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:62:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:95:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:118:22:(sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:119:74:(sessionId?:
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts:141:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:62:2: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:92:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:101:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:107:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:111:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:115:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:194:31:(sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:229:25:(sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:241:23:(sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:248:47:(sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:306:20:(sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:317:2: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:328:26:({
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:329:26:      sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:359:31: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:367:35: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:376:13: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:383:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:401:13: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:415:6: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:426:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:437:31: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:441:43: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:448:39: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:465:13: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:494:6: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:506:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:530:6: sessionId?:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:546:13: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:564:37: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:578:37: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:586:31: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:594:33: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:606:6: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:634:38: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:647:31: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:654:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:663:6: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:694:2: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:798:29:(sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:803:39:(sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:825:33:(sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts:830:8:const [sessionId
+src/renderer\src\views\Assistant\composables\agentTimeline.ts:55:2: sessionId?:
+src/renderer\src\views\Assistant\composables\agentTimeline.ts:152:12: sessionId?:
+src/renderer\src\views\Assistant\composables\agentTimeline.ts:174:52: sessionId:
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts:60:4: sessionId?:
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts:111:67: sessionId?:
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts:63:10:const [sessionId
+src/renderer\src\views\Assistant\components\InputComposer.vue:1467:3:const sessionId
+src/renderer\src\views\Assistant\components\InputComposer.vue:1475:52:({ sessionId }
+src/renderer\src\views\Assistant\composables\sideQuestion.test.ts:12:42: sessionId:
+src/renderer\src\views\Assistant\composables\sideQuestion.test.ts:84:55: sessionId:
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts:11:2: sessionId:
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts:27:2: sessionId:
+src/renderer\src\views\Assistant\composables\transcriptRewind.ts:56:13:(sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectSync.ts:34:2: sessionId:
+src/renderer\src\views\Assistant\composables\agentTimeline.test.ts:132:81: sessionId:
+src/renderer\src\views\Assistant\composables\agentTimeline.test.ts:141:6: sessionId:
+src/renderer\src\views\Assistant\composables\agentTimeline.test.ts:401:6: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts:42:8: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts:58:31: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts:68:31: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts:76:31: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts:85:31: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:121:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:129:38: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:130:115: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:152:10: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:169:40: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:188:38: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:203:31: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:206:38: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:221:31: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:223:40: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:227:40: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:241:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:244:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:251:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:268:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:271:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:284:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:302:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:305:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:317:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:321:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:342:46: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:347:47: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:354:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:369:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:381:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:383:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:384:86: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:392:48: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:398:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:399:104: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:402:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:403:104: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:419:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:421:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:422:105: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:434:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:436:37: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:445:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:447:35: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:462:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:465:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:484:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:487:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:498:35: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:516:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:517:120: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:533:10: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:545:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:546:99: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:547:191: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:558:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:560:40: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:572:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:575:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:594:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:598:10: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:615:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:618:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:634:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:637:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:654:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:657:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:674:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:677:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:691:29: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:693:43: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:700:40: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:723:43: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:740:43: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:753:43: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:760:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:784:9: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:785:58: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:812:61: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:837:47: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:849:72: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:909:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:922:49: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:943:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:955:34: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:970:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:984:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:1000:8: sessionId:
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts:1093:51: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.ts:4:2: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.ts:76:3:const { sessionId
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts:320:16: sessionId:
+src/renderer\src\views\Assistant\composables\sideQuestion.ts:26:2: sessionId?:
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.test.ts:23:4: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.test.ts:33:6: sessionId:
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.test.ts:97:37: sessionId:
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts:16:13:(sessionId:
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts:18:15:(sessionId:
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts:28:2: sessionId:
+src/renderer\src\views\Assistant\composables\followUpDelivery.ts:160:33: sessionId?:
+src/renderer\src\views\Assistant\composables\followUpDelivery.test.ts:70:31: sessionId?:
+src/renderer\src\views\Assistant\composables\followUpDelivery.test.ts:192:19: sessionId:
+src/renderer\src\views\Assistant\composables\useChatFlow.ts:120:34:(sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:147:4: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:172:31:(sessionId?:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:178:4: sessionId?:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:184:29:(sessionId?:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:397:5:const sessionId
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:411:7:const sessionId
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:442:6: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:466:35: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:475:10: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:550:8: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:845:10: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:970:57: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:983:53: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:984:123: sessionId:
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:1027:5:const sessionId
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:1053:52:({
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:1054:52:        sessionId,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts:1260:23: sessionId:
+src/renderer\src\views\AssetManagement\index.vue:2128:4: sessionId?:
+src/renderer\src\views\AssetManagement\index.vue:2169:4: sessionId:
+src/renderer\src\views\AssetManagement\index.vue:2198:4: sessionId?:
+src/renderer\src\views\AssetManagement\index.vue:2266:2: sessionId?:
+src/renderer\src\views\AssetManagement\index.vue:2284:2: sessionId:
+src/renderer\src\views\AssetManagement\index.vue:2300:2: sessionId?:
+src/renderer\src\views\AssetManagement\index.vue:2463:4: sessionId:
+src/renderer\src\views\AssetManagement\index.vue:2584:3:const sessionId
+src/renderer\src\views\AssetManagement\index.vue:2783:4: sessionId:

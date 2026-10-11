@@ -1,0 +1,112 @@
+diff --git a/src/renderer/src/views/Assistant/Welcome.vue b/src/renderer/src/views/Assistant/Welcome.vue
+index f471b5d..3989f94 100644
+--- a/src/renderer/src/views/Assistant/Welcome.vue
++++ b/src/renderer/src/views/Assistant/Welcome.vue
+@@ -1874,6 +1874,15 @@ async function handleBubbleAction(payload: {
+   if (payload.action !== AGENT_RESUME_ACTION) return
+   const sessionId = payload.data?.sessionId
+   if (!sessionId) return
++  /*
++   * 这条对话还在占着（在跑、或在别窗口跑、或后台还没说 released）：续跑一定会被
++   * 主进程以 SESSION_BUSY 顶回来。在摘按钮**之前**拦住 —— 先摘再拦的话按钮没了、
++   * 什么也没发生，这条报错的轮次就再也续不了了。
++   */
++  if (agentStreamStore.isBusy(sid.value)) {
++    message.info(t('assistant.agentMode.sessionBusy'))
++    return
++  }
+   // 只摘按钮，不删消息 —— 这条气泡装着报错那一轮的全部过程日志，
+   // 删了的话屏幕上会像是任务从头开始了
+   chatMsgStore.clearActionButtons(sid.value, payload.id)
+diff --git a/src/renderer/src/views/Assistant/composables/useAgentMode.resumeSteer.test.ts b/src/renderer/src/views/Assistant/composables/useAgentMode.resumeSteer.test.ts
+index 1f0256f..43cf29e 100644
+--- a/src/renderer/src/views/Assistant/composables/useAgentMode.resumeSteer.test.ts
++++ b/src/renderer/src/views/Assistant/composables/useAgentMode.resumeSteer.test.ts
+@@ -77,6 +77,35 @@ beforeEach(() => {
+ })
+ 
+ describe('resumeAgent 的忙闸', () => {
++  /**
++   * 「接着跑」按钮点下去时这条对话正占着 —— 主进程一定会拒。先拦在这一层，
++   * 不然气泡先摆出来、再被一句「会话 {id} 正在执行中」拍回去。
++   */
++  it('这一轮在别的窗口跑（busyElsewhere）：不发请求，也不摆气泡', async () => {
++    const { api, chatMsgStore, pushAssistantTyping } = mountAgentMode()
++    useAgentStreamStore().setBusyElsewhere(['chat-1'])
++
++    await api.resumeAgent('agent-old')
++
++    expect(agentV3.continue).not.toHaveBeenCalled()
++    expect(pushAssistantTyping).not.toHaveBeenCalled()
++    expect(chatMsgStore.replaceTyping).not.toHaveBeenCalled()
++  })
++
++  /**
++   * done 已收、released 未到的空档：流式标志是 false，光看 `isStreaming` 会放行 ——
++   * 这正是当初漏掉的那条缝。
++   */
++  it('done 收了 released 没到（awaitingRelease）：同样不发', async () => {
++    const { api } = mountAgentMode()
++    // 流式已停，但后台还没放 —— isStreaming false、isBusy true
++    useAgentStreamStore().markAwaitingRelease('chat-1', 'agent-running')
++
++    await api.resumeAgent('agent-old')
++
++    expect(agentV3.continue).not.toHaveBeenCalled()
++  })
++
+   it('拦不住、主进程回 SESSION_BUSY：气泡和 toast 都是本地化文案，不带会话号', async () => {
+     const { api, chatMsgStore } = mountAgentMode()
+     agentV3.continue.mockResolvedValue({
+@@ -208,6 +237,35 @@ describe('steerAgent 的被拒文案', () => {
+   })
+ })
+ 
++/**
++ * `handleBubbleAction` 在 Welcome.vue 的 SFC 里，挂不起来 —— 照
++ * `editorSnapshotWiring.test.ts` 的路子读源码盯形状。
++ */
++describe('Welcome 气泡上「接着跑」的忙闸', () => {
++  const welcome = readFileSync(
++    resolve(process.cwd(), 'src/renderer/src/views/Assistant/Welcome.vue'),
++    'utf8'
++  )
++  const handler = welcome.slice(
++    welcome.indexOf('async function handleBubbleAction'),
++    welcome.indexOf('function handleSelfCheck')
++  )
++
++  it('摘按钮之前先查 isBusy，忙就留下按钮、提示并返回', () => {
++    const busyAt = handler.indexOf('agentStreamStore.isBusy(sid.value)')
++    const clearAt = handler.indexOf('clearActionButtons')
++    const resumeAt = handler.indexOf('await resumeAgent')
++
++    expect(busyAt).toBeGreaterThan(-1)
++    // isBusy 在 clearActionButtons 之前：忙的时候按钮还在，用户之后还能再点
++    expect(busyAt).toBeLessThan(clearAt)
++    expect(clearAt).toBeLessThan(resumeAt)
++    expect(handler).toContain("message.info(t('assistant.agentMode.sessionBusy'))")
++    // 忙的那一档要提前返回，不能滑到 resumeAgent
++    expect(handler.slice(busyAt, clearAt)).toContain('return')
++  })
++})
++
+ describe('续跑文案不再有写死的中文', () => {
+   it('useAgentMode 里没有「从断点继续执行」「续跑失败」字面量', () => {
+     const source = readFileSync(
+diff --git a/src/renderer/src/views/Assistant/composables/useAgentMode.ts b/src/renderer/src/views/Assistant/composables/useAgentMode.ts
+index 4a9b999..21e1541 100644
+--- a/src/renderer/src/views/Assistant/composables/useAgentMode.ts
++++ b/src/renderer/src/views/Assistant/composables/useAgentMode.ts
+@@ -502,9 +502,9 @@ export function useAgentMode(params: UseAgentModeParams) {
+    */
+   async function resumeAgent(agentSessionId: string): Promise<void> {
+     const chatSid = sid.value
+-    // 正在跑就别再起一次 —— 主进程会以「会话正在执行中」拒掉，
++    // 正在跑、或主进程还没说 released 的都别再起一次 —— 主进程会以 SESSION_BUSY 拒掉，
+     // 而界面这边已经多了一个永远转下去的气泡
+-    if (!agentSessionId || agentStreamStore.isStreaming(chatSid)) return
++    if (!agentSessionId || agentStreamStore.isBusy(chatSid)) return
+ 
+     const typingId = pushAssistantTyping(Date.now())
+     const resumeItem: AgentProcessItem = {

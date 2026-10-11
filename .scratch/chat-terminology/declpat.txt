@@ -1,0 +1,1 @@
+(^|[^.\w$?])sessionId\??\s*:|\b(?:const|let|var)\s+(?:\{[^{}\n]*|\[[^\]\n]*)?sessionId\b|(^|[^$])\{\s*sessionId\s*[,}=]|(^|[^$])\{[^{}\n]*,\s*sessionId\s*[,}=]|(^|[^$])\{\s*\n\s*sessionId\s*[,}]|\bsessionId\s*=>|\(\s*sessionId\s*\)\s*=>|[(,{]\s*sessionId\s*=[^=>]

@@ -1,0 +1,397 @@
+src/shared\agentQuestion.ts|42|* 「提交」时手上必须有 sessionId 才能把答案送回去。存进条目里而不是靠组件
+src/shared\agentNotificationActivation.ts|45|* 不能拿 `sessionId` 代替：**一条会话可以同时挂着两条通知**（上一轮的
+src/renderer\src\i18n\terminologyGuard.test.ts|78|['agentV3Debug.sessionId', ['session']],
+src/renderer\src\i18n\terminologyGuard.test.ts|179|const DEBUG_SESSION_WHITELIST = new Map([['agentV3Debug.sessionId', ['session']]])
+src/renderer\src\i18n\terminologyGuard.test.ts|213|scan([{ path: 'agentV3Debug.sessionId', text: 'Session ID' }], TERMS, DEBUG_SESSION_WHITELIST)
+src/renderer\src\i18n\terminologyGuard.test.ts|219|scan([{ path: 'agentV3Debug.sessionId', text: '新会话' }], TERMS, DEBUG_SESSION_WHITELIST)
+src/renderer\src\i18n\terminologyGuard.test.ts|220|).toEqual(['agentV3Debug.sessionId：命中「会话」，建议改为「对话」'])
+src/renderer\src\i18n\locales\zh-CN.ts|2743|// 同一条对话已经有一轮在跑。不提 sessionId，也不提底下那个 IPC 通道叫什么 ——
+src/renderer\src\composables\sessionRetitle.ts|125|if (!sessionId) return 'empty'
+src/renderer\src\composables\sessionRetitle.ts|126|if (inFlight.has(sessionId)) return 'skipped'
+src/renderer\src\composables\sessionRetitle.ts|131|inFlight.add(sessionId)
+src/renderer\src\composables\sessionRetitle.ts|147|inFlight.delete(sessionId)
+src/renderer\src\composables\deleteChatSession.test.ts|139|it('空 sessionId 什么都不做', async () => {
+src/renderer\src\composables\deleteChatSession.ts|94|const targets = deps.targets.filter((target) => target.sessionId)
+src/renderer\src\composables\deleteChatSession.ts|114|const sessionIds = targets.map((target) => target.sessionId)
+src/renderer\src\composables\deleteChatSession.ts|138|targets: [{ sessionId: deps.sessionId, agentSessionId: deps.agentSessionId }],
+src/renderer\src\layout\components\ChatSessionList.vue|252|if (agentStreamStore.isStreaming(sessionId)) return true
+src/renderer\src\layout\components\ChatSessionList.vue|254|const messages = chatMsgStore.getMessages(sessionId)
+src/renderer\src\layout\components\ChatSessionList.vue|473|draggingSessionId = sessionId
+src/renderer\src\layout\components\ChatSessionList.vue|476|event.dataTransfer.setData(SESSION_DRAG_MIME, sessionId)
+src/renderer\src\layout\components\ChatSessionList.vue|483|if (!sessionId || !area || !isDraggedOutOf(area, event)) return
+src/renderer\src\layout\components\ChatSessionList.vue|484|void detachChatSession(router, sessionId, { screenX: event.screenX, screenY: event.screenY })
+src/renderer\src\layout\components\ChatSessionList.vue|488|void detachChatSession(router, sessionId)
+src/renderer\src\layout\components\ChatSessionList.vue|554|contextMenuSessionId.value = sessionId
+src/renderer\src\layout\components\ChatSessionList.vue|558|if (!open && contextMenuSessionId.value === sessionId) {
+src/renderer\src\layout\components\ChatSessionList.vue|732|if (!sessionId) return
+src/renderer\src\layout\components\ChatSessionList.vue|736|sessionId,
+src/renderer\src\layout\components\ChatSessionList.vue|737|chatMsgStore.getMessages(sessionId),
+src/renderer\src\layout\components\ChatSessionList.vue|738|(title) => chatStore.updateTitle(sessionId, title),
+src/renderer\src\layout\components\ChatSessionList.vue|739|() => chatStore.sessionById(sessionId)?.title
+src/renderer\src\layout\components\ChatSessionList.vue|758|chatStore.setProject(sessionId, {
+src/renderer\src\layout\components\ChatSessionList.vue|766|chatStore.clearProject(sessionId)
+src/renderer\src\layout\components\ChatSessionList.vue|779|assignProject(sessionId, { projectName: name })
+src/renderer\src\hooks\useAssetLocks.ts|9|* 那个订阅按 sessionId 过滤 —— 而锁冲突恰恰是**跨会话**的事：被挡住的是
+src/shared\voiceTaskSession.ts|31|return sessionId.startsWith(VOICE_TASK_PREFIX)
+src/shared\voiceTaskSession.ts|36|if (!isVoiceTaskSessionId(sessionId)) return ''
+src/shared\voiceTaskSession.ts|37|const rest = sessionId.slice(VOICE_TASK_PREFIX.length)
+src/shared\voiceTaskSession.ts|44|return Boolean(chatSid) && (sessionId === chatSid || voiceTaskOwnerSid(sessionId) === chatSid)
+src/shared\voiceTaskSession.ts|44|return Boolean(chatSid) && (sessionId === chatSid || voiceTaskOwnerSid(sessionId) === chatSid)
+src/renderer\src\layout\composables\notificationActivation.ts|70|const session = chatStore.sessionByAgentSessionId(sessionId)
+src/renderer\src\layout\composables\trayBridge.ts|96|if (!chatStore.sessionById(action.sessionId)) return
+src/renderer\src\layout\composables\trayBridge.ts|100|action.sessionId,
+src/shared\sideQuestion.ts|4|* ## 为什么只传一个 sessionId
+src/shared\sideQuestion.ts|11|/** 复制出来的内核 sessionId。MiniChat 拿它当自己的 agent session */
+src/shared\importErrorKey.ts|8|| 'reportMissingImportId' // 报告里没有 sessionId，定位不到服务器上的那次导入
+src/renderer\src\components\AssetLockIndicator.vue|72|* 锁主的 sessionId → 会话标题。
+src/renderer\src\common\chatRoute.ts|13|if (!sessionId) return false
+src/renderer\src\common\chatRoute.ts|17|return new URLSearchParams(query).get('sid') === sessionId
+src/renderer\src\views\BlueprintLibrary\SnippetDetail.aiContext.test.ts|93|expect(panel.props('sessionId')).toBe('library-chat-blueprint-entry-1')
+src/renderer\src\components\ImportProgressWidget.vue|74|<span v-if="task.sessionId" class="session-id" :title="task.sessionId">
+src/renderer\src\components\ImportProgressWidget.vue|74|<span v-if="task.sessionId" class="session-id" :title="task.sessionId">
+src/renderer\src\components\ImportProgressWidget.vue|75|{{ task.sessionId.substring(0, 8) }}
+src/renderer\src\components\ImportProgressWidget.vue|187|Boolean(targetLabel(task) || task.importMode || task.sessionId)
+src/renderer\src\views\BlueprintLibrary\BlueprintEditor.test.ts|68|<div class="bp-ai-chat-stub" :data-mode="mode" :data-session-id="sessionId">
+src/renderer\src\views\Assistant\Welcome.vue|532|if (props.sessionId) {
+src/renderer\src\views\Assistant\Welcome.vue|533|sid.value = props.sessionId
+src/renderer\src\views\Assistant\Welcome.vue|553|// Watch for sessionId prop changes (critical for keep-alive components)
+src/renderer\src\views\Assistant\Welcome.vue|555|() => props.sessionId,
+src/renderer\src\views\Assistant\Welcome.vue|558|console.log('[Welcome] sessionId prop changed:', newVal)
+src/renderer\src\views\Assistant\Welcome.vue|1233|// 优先使用 props.sessionId (如果存在)，否则从 URL query 读取
+src/renderer\src\views\Assistant\Welcome.vue|1234|sid.value = normalizeSid(props.sessionId || String(route.query.sid || ''))
+src/renderer\src\views\Assistant\Welcome.vue|1481|// 如果有 props.sessionId，则忽略 URL 的 sid 变化
+src/renderer\src\views\Assistant\Welcome.vue|1482|if (props.sessionId) return
+src/renderer\src\views\Assistant\Welcome.vue|1499|() => props.sessionId,
+src/renderer\src\views\Assistant\Welcome.vue|1544|* @param sessionId 会话ID
+src/renderer\src\views\Assistant\Welcome.vue|1875|const sessionId = payload.data?.sessionId
+src/renderer\src\views\Assistant\Welcome.vue|1876|if (!sessionId) return
+src/renderer\src\views\Assistant\Welcome.vue|1880|await resumeAgent(sessionId)
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|101|unsubscribe = agentV3API.subscribe(sessionId.value, handleEvent)
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|113|sessionId: sessionId.value,
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|141|const result = await agentV3API.steer(sessionId.value, steerMessage.value)
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|152|const result = await agentV3API.stop(sessionId.value)
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|160|const result = await agentV3API.continue(sessionId.value)
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|187|sessionId.value = `debug-${Date.now()}`
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|201|<span>{{ t('agentV3Debug.sessionId') }}</span>
+src/renderer\src\views\System\Preferences\panels\AgentV3Debug\AgentV3DebugPanel.vue|202|<input v-model="sessionId" type="text" :disabled="running" />
+src/renderer\src\api\ai.ts|557|* V3 自己按 sessionId 恢复 transcript，所以**不需要**把历史再传一遍 ——
+src/renderer\src\api\ai.ts|682|*   不再等结果，模型那边照跑照扣 token。流式有 sessionId，可以真的掐断。
+src/renderer\src\api\ai.ts|704|if (payload.sessionId !== sessionId) return
+src/renderer\src\api\ai.ts|704|if (payload.sessionId !== sessionId) return
+src/renderer\src\api\ai.ts|712|if (payload.sessionId !== sessionId) return
+src/renderer\src\api\ai.ts|712|if (payload.sessionId !== sessionId) return
+src/renderer\src\api\ai.ts|722|if (payload.sessionId !== sessionId) return
+src/renderer\src\api\ai.ts|722|if (payload.sessionId !== sessionId) return
+src/renderer\src\api\ai.ts|754|() => window.api.ai.abortStream(sessionId),
+src/renderer\src\api\ai.ts|987|* `agent-v3:*` 并按 sessionId 派发；这里只负责发起执行、返回停止控制器、
+src/renderer\src\api\ai.ts|1006|const sessionId = params.sessionId || ''
+src/renderer\src\api\ai.ts|1015|if (!sessionId) {
+src/renderer\src\api\ai.ts|1016|console.warn('[Agent] sessionId 不存在，无法停止')
+src/renderer\src\api\ai.ts|1094|// 那句（带 sessionId 的诊断原文）原样糊给用户
+src/renderer\src\api\ai.executeAgent.test.ts|256|* V3 自己按 sessionId 恢复 transcript，所以历史不用再传一遍。
+src/renderer\src\api\ai.chatText.test.ts|27|* sessionId 是 `chatText` 内部生成的，测试拿不到，所以这里从 `chatStream` 的
+src/renderer\src\api\ai.chatText.test.ts|28|* 入参里把它捞出来 —— 事件按 sessionId 过滤，发错 id 的事件会被忽略。
+src/renderer\src\api\ai.chatText.test.ts|44|// sessionId 必须在 await 之前抓住：调用方可能拿一个迟迟不落地的 invoke 进来
+src/renderer\src\api\ai.chatText.test.ts|45|sessionId = args.sessionId
+src/renderer\src\api\ai.chatText.test.ts|45|sessionId = args.sessionId
+src/renderer\src\api\agentV3.ts|175|* `project: null` = 移出项目。`sessionId` 是**内核**会话 id。
+src/renderer\src\api\agentV3.ts|183|sessionId: args.sessionId,
+src/renderer\src\api\agentV3.ts|232|* `sessionId` 是内核会话 id（`chatStore.getAgentSessionId`），不是聊天会话 id。
+src/renderer\src\api\agentV3.ts|387|* 会话分支：把内核 transcript 复制成一个新 sessionId。
+src/renderer\src\api\agentV3.ts|389|* 返回的新 id 由调用方挂到新会话上 —— 内核按 sessionId 恢复历史，
+src/renderer\src\api\agentV3.ts|512|* 按 sessionId 过滤：多窗口 / 多标签同时开着不同会话时，
+src/renderer\src\api\agentV3.ts|520|if (!payload || payload.sessionId !== sessionId) return
+src/renderer\src\api\agentV3.ts|520|if (!payload || payload.sessionId !== sessionId) return
+src/renderer\src\api\agentV3.ts|521|// sessionId 只用于路由，不进事件对象 —— 订阅方已经知道自己订的是哪个会话
+src/renderer\src\api\agentV3.ts|523|delete rest.sessionId
+src/renderer\src\api\agentBrowser.ts|18|unwrapResult(await window.api.agentBrowser.tab(sessionId, command))
+src/renderer\src\api\agentBrowser.ts|21|unwrapResult(await window.api.agentBrowser.toolbar(sessionId, action))
+src/renderer\src\api\agentBrowser.ts|24|return unwrapResult(await window.api.agentBrowser.openUrl(sessionId, address))
+src/renderer\src\api\agentBrowser.ts|28|await window.api.agentBrowser.getState(sessionId, restore)
+src/renderer\src\api\agentNotifications.ts|25|if (!payload?.sessionId) return
+src/renderer\src\api\agentNotifications.ts|40|return result?.sessionId ? result : null
+src/renderer\src\store\modules\agentStreamBusy.test.ts|86|'sessionId',
+src/renderer\src\store\modules\agentStream.ts|455|// 把 sessionId 一起存进条目：卡片渲染自消息里的 agentProcess，
+src/renderer\src\views\AssetManagement\index.vue|2169|sessionId: payload.sessionId || undefined,
+src/renderer\src\views\AssetManagement\index.vue|2211|const sessionTag = payload.sessionId ? ` [${payload.sessionId.substring(0, 8)}]` : ''
+src/renderer\src\views\AssetManagement\index.vue|2211|const sessionTag = payload.sessionId ? ` [${payload.sessionId.substring(0, 8)}]` : ''
+src/renderer\src\views\AssetManagement\index.vue|2463|sessionId: getStringField(data.sessionId) || getStringField(firstIssue.sessionId),
+src/renderer\src\views\AssetManagement\index.vue|2463|sessionId: getStringField(data.sessionId) || getStringField(firstIssue.sessionId),
+src/renderer\src\views\AssetManagement\index.vue|2469|return ref.taskId || ref.diagnosticId || ref.sessionId ? ref : null
+src/renderer\src\views\AssetManagement\index.vue|2503|const messageKey = `import-recovery-${ref.taskId || ref.diagnosticId || ref.sessionId || Date.now()}`
+src/renderer\src\views\AssetManagement\index.vue|2584|const sessionId = payload.sessionId || '-'
+src/renderer\src\views\AssetManagement\index.vue|2708|h('code', sessionId),
+src/renderer\src\views\AssetManagement\index.vue|2783|sessionId: latest.sessionId,
+src/renderer\src\store\modules\chatSessions.ts|555|if (!session || session.agentSessionId === sessionId) return
+src/renderer\src\store\modules\chatSessions.ts|557|session.agentSessionId = sessionId
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|143|return sessionId ? agentStreamStore.getChatSidByAgentSession(sessionId) : sid
+src/renderer\src\views\Assistant\composables\agentHandlerShared.ts|143|return sessionId ? agentStreamStore.getChatSidByAgentSession(sessionId) : sid
+src/renderer\src\views\Assistant\composables\agentGeneratedMedia.ts|17|* 完成事件只带一个 sessionId，那条路上 `toolResults` 恒为空。真正有值的是
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|4|* 应用启动时注册一次全局监听，按 sessionId 派发给注册的处理器。
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|120|* 注册的处理器：sessionId -> handler。
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|175|* 增量到达后重画气泡的节流器：sessionId -> 待触发的定时器。
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|195|const state = getStreamStore().getStreamByAgentSession(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|225|handlerFor(sessionId)?.onStreamPaint?.(state.chatSid)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|230|if (repaintTimers.has(sessionId)) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|233|sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|235|repaintTimers.delete(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|236|paintStreamingMessage(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|242|const timer = repaintTimers.get(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|245|repaintTimers.delete(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|250|cancelRepaint(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|253|store.flushBuffer(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|257|store.closePendingQuestions(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|258|const state = store.endStream(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|259|const chatSid = state?.chatSid || store.getChatSidByAgentSession(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|305|/** 取回处理器。所有 V3 事件都带 sessionId，拿不到就是这个会话没人管，直接丢弃 */
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|307|return sessionId ? handlers.get(sessionId) : undefined
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|307|return sessionId ? handlers.get(sessionId) : undefined
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|326|const handler = handlers.get(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|338|getStreamStore().addAgentProcess(sessionId, {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|360|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|361|getStreamStore().appendText(data.sessionId, data.text)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|362|scheduleRepaint(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|368|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|369|getStreamStore().appendThinking(data.sessionId, data.text)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|370|scheduleRepaint(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|377|const handler = handlerFor(data?.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|383|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|402|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|405|notify(data.sessionId, `${progressLabel(data.toolName)}：${text}`, 'progress', {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|422|const handler = handlerFor(data?.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|426|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|438|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|439|const step = (stepCounters.get(data.sessionId) ?? 0) + 1
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|440|stepCounters.set(data.sessionId, step)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|441|handlerFor(data.sessionId)?.onStep?.({ sessionId: data.sessionId, step })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|441|handlerFor(data.sessionId)?.onStep?.({ sessionId: data.sessionId, step })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|449|if (!data?.sessionId || !data.text) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|450|getStreamStore().markSteerApplied(data.sessionId, data.text)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|466|if (!data?.sessionId || !data.toolCallId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|468|const placed = getStreamStore().pushQuestion(data.sessionId, {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|481|paintStreamingMessage(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|504|if (isChatWindow() && !isOwnChatWindowSession(data.sessionId)) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|506|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|535|if (!data?.sessionId || !data.toolCallId || !data.action) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|536|getStreamStore().resolveQuestion(data.sessionId, data.toolCallId, data.action, data.answers)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|537|paintStreamingMessage(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|547|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|551|const chatSid = getStreamStore().getChatSidByAgentSession(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|565|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|566|getStreamStore().addTurnUsage(data.sessionId, {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|579|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|580|notify(data.sessionId, '对话变长了，正在压缩上下文…', 'info')
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|587|if (!data?.sessionId || !data.message) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|589|getStreamStore().flushBuffer(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|590|notify(data.sessionId, data.message, data.level || 'info')
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|595|if (!data?.sessionId || !data.message) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|596|notify(data.sessionId, data.message, data.level || 'info')
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|612|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|614|getStreamStore().flushBuffer(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|617|data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|635|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|637|data.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|648|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|649|finalizeSessionCompletionForUI(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|650|handlerFor(data.sessionId)?.onDone?.(data)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|655|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|656|finalizeSessionCompletionForUI(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|657|handlerFor(data.sessionId)?.onStopped?.()
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|670|if (!data?.sessionId) return
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|674|handlerFor(data.sessionId)?.onError?.(data.message || '未知错误', {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|700|getStreamStore().resolveQuestion(sessionId, toolCallId, action, answers)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|701|paintStreamingMessage(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|781|handler.sessionId,
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|787|handlers.set(handler.sessionId, { ...handler, runId })
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|788|stepCounters.set(handler.sessionId, 0)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|800|return handlers.get(sessionId)?.runId === runId
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|804|if (!isCurrentRun(sessionId, runId)) {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|805|console.log('[AgentEventDispatcher] 跳过过期收尾:', sessionId, 'run:', runId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|808|console.log('[AgentEventDispatcher] 注销处理器:', sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|809|handlers.delete(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|810|stepCounters.delete(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|812|cancelRepaint(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|813|getStreamStore().cleanupStream(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|826|return handlers.has(sessionId)
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.ts|832|return sessionId
+src/renderer\src\views\Assistant\AgentBrowserWindow.vue|3|:session-id="sessionId"
+src/renderer\src\views\Assistant\AgentBrowserWindow.vue|24|typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
+src/renderer\src\views\Assistant\AgentBrowserWindow.vue|24|typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
+src/renderer\src\views\Assistant\AgentBrowserWindow.vue|27|sessionId,
+src/renderer\src\views\Assistant\composables\agentCompletionHandlers.ts|189|const agentSessionId = data?.sessionId
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|137|it('没有 sessionId 的事件直接丢弃，不抛异常', () => {
+src/renderer\src\views\Assistant\composables\agentEventDispatcher.test.ts|845|it('提问进时间线，并带上回传要用的 sessionId', () => {
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|286|const targetChatSid = resolveTargetChatSid(agentStreamStore, sid.value, data.sessionId)
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|299|const trackedTypingId = data.sessionId
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|300|? agentStreamStore.getStreamByAgentSession(data.sessionId)?.currentTypingId
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|313|const resumable = !errorInfo.fatal && data.statusCode !== 401 && !!data.sessionId
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|320|sessionId: data.sessionId,
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|334|teardownRun(data.sessionId, data.runId, targetChatSid)
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|338|const targetChatSid = resolveTargetChatSid(agentStreamStore, sid.value, data?.sessionId)
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|343|const trackedTypingId = data?.sessionId
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|344|? agentStreamStore.getStreamByAgentSession(data.sessionId)?.currentTypingId
+src/renderer\src\views\Assistant\composables\agentControlHandlers.ts|364|teardownRun(data?.sessionId, data?.runId, targetChatSid)
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|72|chatStore.ensureSession(sessionId, unnamedTitle)
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|73|const session = chatStore.sessionById(sessionId)
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|76|chatStore.updateTitle(sessionId, autoTitle)
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|85|autoNameSession(sessionId, messageText, autoTitle, {
+src/renderer\src\views\Assistant\composables\chatSendPrimitives.ts|95|chatStore.appendMessage(sessionId, messageText)
+src/renderer\src\views\Assistant\composables\chatBranch.ts|12|* 内核有一份（`agent-v3-sessions/*.jsonl`，主进程按 sessionId 恢复），界面
+src/renderer\src\views\Assistant\composables\chatBranch.ts|143|if (!forked.success || !forked.sessionId) {
+src/renderer\src\views\Assistant\composables\chatBranch.ts|174|deps.chatStore.setAgentSessionId(newChatSid, forked.sessionId)
+src/renderer\src\views\Assistant\composables\chatBranch.ts|179|return { ok: true, chatSid: newChatSid, agentSessionId: forked.sessionId }
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|71|v-if="sessionId"
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|276|const result = await agentBrowserAPI.openUrl(props.sessionId, address)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|287|const shouldShow = computed(() => paneShown.value && !props.reviewActive && !!props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|303|if (value && props.sessionId) window.api.agentBrowser.setBounds(null, props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|303|if (value && props.sessionId) window.api.agentBrowser.setBounds(null, props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|348|if (!props.sessionId) return
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|354|window.api?.agentBrowser?.setBounds?.(null, props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|360|window.api?.agentBrowser?.setBounds?.(null, props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|371|props.sessionId
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|378|await agentBrowserAPI.tab(props.sessionId, command)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|391|await agentBrowserAPI.toolbar(props.sessionId, action)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|399|await window.api.agentBrowser.close(props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|408|if (!shouldShow.value && props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|409|window.api?.agentBrowser?.setBounds?.(null, props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|452|if (props.sessionId) window.api?.agentBrowser?.setBounds?.(null, props.sessionId)
+src/renderer\src\views\Assistant\components\AgentBrowserPane.vue|452|if (props.sessionId) window.api?.agentBrowser?.setBounds?.(null, props.sessionId)
+src/renderer\src\views\MiniChat\MiniChatWindow.vue|551|* 上下文本体是主进程里复制好的一份 transcript，这里只把新的内核 sessionId
+src/renderer\src\views\MiniChat\MiniChatWindow.vue|553|* `agent-v3:execute`，主进程按 sessionId 恢复历史（见 ipc/agentV3.ts），
+src/renderer\src\views\MiniChat\MiniChatWindow.vue|568|// sessionId 要先落进 store：下一句话发出去时 useAgentMode 拿的就是它
+src/renderer\src\views\MiniChat\MiniChatWindow.vue|832|// 横幅还挂着「承接了 42 条」，而新会话的内核 sessionId 已经换了 —— 那句话是假的
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts|10|* 主进程那张表也是按内核 sessionId 存的。这里盯住「每条内核会话此刻该是哪一档」
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts|36|/** 内核 sessionId → 此刻该用的审批档位。没起过内核会话的对话不在表里 */
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts|64|const previous = sent.get(sessionId)
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts|67|sent.set(sessionId, mode)
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts|71|.setApprovalMode(sessionId, mode.approvalMode, mode.mode)
+src/renderer\src\views\Assistant\composables\approvalModeSync.ts|73|sent.delete(sessionId)
+src/renderer\src\views\Assistant\composables\agentTimeline.ts|174|...(typeof data?.sessionId === 'string' ? { sessionId: data.sessionId } : {}),
+src/renderer\src\views\Assistant\composables\agentTimeline.ts|174|...(typeof data?.sessionId === 'string' ? { sessionId: data.sessionId } : {}),
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|63|sessionId || (targetChatSid === sid.value ? currentSessionId.value : undefined)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|112|if (data.sessionId && data.sessionId !== currentSessionId.value) {
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|112|if (data.sessionId && data.sessionId !== currentSessionId.value) {
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|120|const targetChatSid = resolveTargetChatSid(agentStreamStore, sid.value, data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|122|console.warn('[AgentMode] Missing chatSid for tool call', data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|126|if (data.sessionId) {
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|127|agentStreamStore.flushBuffer(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|141|data.sessionId
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|167|const targetChatSid = resolveTargetChatSid(agentStreamStore, sid.value, data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|169|console.warn('[AgentMode] Missing chatSid for tool result', data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|173|if (data.sessionId) {
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|174|agentStreamStore.flushBuffer(data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|190|data.sessionId
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|204|const targetChatSid = resolveTargetChatSid(agentStreamStore, sid.value, data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|206|console.warn('[AgentMode] Missing chatSid for notify event', data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|240|data.sessionId
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|279|const targetChatSid = resolveTargetChatSid(agentStreamStore, sid.value, data.sessionId)
+src/renderer\src\views\Assistant\composables\agentStreamHandlers.ts|281|console.warn('[AgentMode] Missing chatSid for step event', data.sessionId)
+src/renderer\src\views\Assistant\components\AIBubble.modelPreview.test.ts|10|* `toolResults`，而那是 V2 的形状 —— V3 的完成事件只带一个 sessionId，那条路上
+src/renderer\src\views\Assistant\components\AIBubble.vue|785|* sessionId 从条目里取，不从 props 传：这张卡片嵌在时间线的第三层，
+src/renderer\src\views\Assistant\components\AIBubble.vue|795|if (!question.sessionId) {
+src/renderer\src\views\Assistant\components\AIBubble.vue|796|console.warn('[AIBubble] 提问卡片没有 sessionId，无法回传答案:', question.toolCallId)
+src/renderer\src\views\Assistant\components\AIBubble.vue|799|answerAgentQuestion(question.sessionId, question.toolCallId, action, answers)
+src/renderer\src\views\Assistant\components\AIBubble.vue|814|!!block.sessionId
+src/renderer\src\views\Assistant\components\AIBubble.vue|832|if (!block.steerId || !block.sessionId) return
+src/renderer\src\views\Assistant\components\AIBubble.vue|833|if (await cancelUserSteer(block.sessionId, block.steerId)) return
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|198|ctx.agentStreamStore.cleanupStream(sessionId)
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|260|ctx.agentStreamStore.cleanupStream(sessionId)
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|286|ctx.agentStreamStore.cleanupStream(sessionId)
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|320|ctx.agentStreamStore.cleanupStream(sessionId)
+src/renderer\src\views\Assistant\composables\agentSessionIsolation.test.ts|350|ctx.agentStreamStore.cleanupStream(sessionId)
+src/renderer\src\views\Assistant\composables\agentReattach.ts|11|* 以及 sessionId ↔ 对话的对应关系。以前的做法是**猜**：恢复缓存时把所有残留的
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|37|if (!sessionId || !firstMessage.trim() || inFlight.has(sessionId)) return
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|37|if (!sessionId || !firstMessage.trim() || inFlight.has(sessionId)) return
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|39|inFlight.add(sessionId)
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|48|if (deps.getTitle(sessionId) !== placeholderTitle) return
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|49|deps.applyTitle(sessionId, title)
+src/renderer\src\views\Assistant\composables\sessionAutoTitle.ts|54|inFlight.delete(sessionId)
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.test.ts|52|chat.ensureSession(sessionId, '二段跳')
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.test.ts|53|chat.setProject(sessionId, { projectName: 'Bound' })
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue|45|const stored = props.sessionId ? chatStore.sessionById(props.sessionId)?.project : undefined
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue|45|const stored = props.sessionId ? chatStore.sessionById(props.sessionId)?.project : undefined
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue|149|if (!props.sessionId) return
+src/renderer\src\views\Assistant\components\EditorStatusMonitor.vue|151|props.sessionId,
+src/renderer\src\views\Assistant\composables\followUpDelivery.ts|155|* 不看它带的 sessionId：那是 agent 会话号，而队列按对话（chatSid）分桶，两者的
+src/renderer\src\views\Assistant\composables\followUpDelivery.ts|166|if (payload?.sessionId) streamStore.clearAwaitingRelease(payload.sessionId)
+src/renderer\src\views\Assistant\composables\followUpDelivery.ts|166|if (payload?.sessionId) streamStore.clearAwaitingRelease(payload.sessionId)
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts|13|if (!sessionId) return false
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts|20|return sid === sessionId
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts|29|if (!sessionId) return false
+src/renderer\src\views\Assistant\composables\sessionTaskDone.ts|30|return !isSessionOnScreen(routePath, routeSid, sessionId)
+src/renderer\src\views\MiniChat\components\MiniMessage.vue|207|if (!question.sessionId) return
+src/renderer\src\views\MiniChat\components\MiniMessage.vue|208|answerAgentQuestion(question.sessionId, question.toolCallId, action, answers)
+src/renderer\src\views\Assistant\composables\sessionProjectSync.ts|54|const agentSessionId = event?.sessionId?.trim()
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.ts|77|if (!sessionId) return null
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.ts|82|if (!shouldStampSessionProject(getSession(sessionId))) {
+src/renderer\src\views\Assistant\composables\sessionProjectBinding.ts|87|setProject(sessionId, stamped)
+src/renderer\src\views\Assistant\composables\sessionProjectSync.test.ts|82|it('没有 sessionId 的事件一律忽略，不去动任何一条会话', () => {
+src/renderer\src\views\Assistant\composables\sideQuestion.ts|65|if (!forked.success || !forked.sessionId) {
+src/renderer\src\views\Assistant\composables\sideQuestion.ts|74|agentSessionId: forked.sessionId,
+src/renderer\src\views\Assistant\components\InputComposer.vue|1468|if (!sessionId) {
+src/renderer\src\views\MaterialLibrary\MaterialEditor.test.ts|237|expect(aiPanel.props('sessionId')).toBe('library-chat-material-material-master')
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|152|if (!sessionId) return
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|156|[sessionId]: [...citations]
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|162|[sessionId]: { message: hitMessage, notifyType }
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|168|delete nextHitMessages[sessionId]
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|173|if (!sessionId) return []
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|174|return wikiRagCitationsBySession.value[sessionId] || []
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|180|if (!sessionId) return undefined
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|181|return wikiHitMessageBySession.value[sessionId]
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|185|if (!sessionId) return
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|188|delete nextCitations[sessionId]
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|192|delete nextHitMessages[sessionId]
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|400|if (sessionId) {
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|401|currentSessionId.value = sessionId
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|413|if (sessionId) {
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|414|currentSessionId.value = sessionId
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|659|* 原来这里每轮 `crypto.randomUUID()` 现开一个，而 V3 是按 sessionId 恢复
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|882|if (error?.sessionId === agentSessionId) {
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|888|// 用户读到的是带 sessionId 和 IPC 通道名的诊断原文
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1029|const ownerChatSid = sessionId
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1030|? agentStreamStore.getChatSidByAgentSession(sessionId) || sid.value
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1035|if (!sessionId || !trimmed) return false
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1097|agentStreamStore.flushBuffer(sessionId)
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1109|sessionId,
+src/renderer\src\views\Assistant\composables\useAgentMode.ts|1138|const chatSid = agentStreamStore.getChatSidByAgentSession(sessionId) || sid.value
+src/renderer\src\views\library-common\components\LibraryAIPanel.vue|443|不加 :key。`Welcome.vue` 自己 watch 了 sessionId（注释写着「keep-alive
+src/renderer\src\views\library-common\components\LibraryAIPanel.vue|449|:session-id="sessionId"
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|9|* - 换了会话（chatSid 变了，或者这条会话第一次拿到 agent sessionId）
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|48|if (!sessionId) {
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|53|const next = await agentV3API.teamState(sessionId)
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|62|if (payload?.sessionId && payload.sessionId === agentSessionId.value) void refresh()
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|62|if (payload?.sessionId && payload.sessionId === agentSessionId.value) void refresh()
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|78|if (!sessionId) return
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|79|const result = await agentV3API.teamTaskReopen(sessionId, taskId).catch(() => null)
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|85|if (!sessionId) return
+src/renderer\src\views\Assistant\composables\useTeamBoard.ts|86|const result = await agentV3API.teamEnd(sessionId).catch(() => null)
+src/renderer\src\views\Assistant\composables\turnAttachments.ts|14|* `executeAgent` 只把**最后一条**用户消息发给内核（历史由内核按 sessionId 自己恢复）。
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|226|* 挑一个「灶」来干这件活。不传 sessionId 的派发都落到它给的那条上。
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|1160|: sessionId
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|1161|? resolveTarget(sessionId)
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|1164|return `没有 id 是「${sessionId}」的对话。先用 ${LIST_SESSIONS} 看一眼，或者别填 session。`
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|1241|const lane = options.listWorkers?.().find((item) => item.agentSessionId === sessionId)
+src/renderer\src\views\Assistant\composables\useRealtimeVoice.ts|1243|return options.listSessions?.().find((item) => item.agentSessionId === sessionId)
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|34|if (!sessionId) {
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|39|const goal = await agentV3API.goalState(sessionId)
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|48|if (payload?.sessionId && payload.sessionId === agentSessionId.value) void refresh()
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|48|if (payload?.sessionId && payload.sessionId === agentSessionId.value) void refresh()
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|62|if (!sessionId) return
+src/renderer\src\views\Assistant\composables\useSessionGoal.ts|63|const result = await agentV3API.goalEnd(sessionId).catch(() => null)
+src/renderer\src\views\Assistant\composables\useSessionBrowser.ts|34|[sessionId, visible],
+src/renderer\src\views\Assistant\composables\useSessionBrowser.ts|75|if (!state || state.sessionId !== sessionId.value) return
+src/renderer\src\views\Assistant\composables\useSessionBrowser.ts|75|if (!state || state.sessionId !== sessionId.value) return
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts|34|browser = useSessionBrowser(sessionId, active, error)
+src/renderer\src\views\Assistant\composables\useSessionBrowser.test.ts|40|return { id: sessionId, active, error, browser }
+src/renderer\src\views\Assistant\composables\useChatFlow.ts|121|ensureSessionWithTitleShared(sessionId, messageText, {
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|78|props.sessionId ? chatStore.sessionById(props.sessionId)?.project : undefined
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|78|props.sessionId ? chatStore.sessionById(props.sessionId)?.project : undefined
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|130|if (!props.sessionId) return
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|135|chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedChat'))
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|137|chatStore.setProject(props.sessionId, {
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|145|if (!props.sessionId) return
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|149|chatStore.ensureSession(props.sessionId, t('assistant.chatFlow.unnamedChat'))
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|150|chatStore.clearProject(props.sessionId)
+src/renderer\src\views\Assistant\components\SessionProjectChip.vue|155|<AppDropdown v-if="props.sessionId" :trigger="['click']" :placement="props.placement">
+src/renderer\src\views\Assistant\components\TopNav.vue|15|<EditorStatusMonitor :session-id="sessionId" :pending-project-name="pendingProjectName" />
+src/renderer\src\views\Assistant\components\TopNav.vue|18|:session-id="sessionId"
