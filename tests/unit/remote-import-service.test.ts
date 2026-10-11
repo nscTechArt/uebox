@@ -53,20 +53,23 @@ vi.mock('../../src/main/network/PlatformAuthManager', () => ({
 
 vi.mock('../../src/main/networkV2/ImportSessionClient', () => ({
   DEFAULT_FILE_UPLOAD_TIMEOUT_MS: 300_000,
-  ImportSessionClient: vi.fn().mockImplementation(() => ({
-    getImportPreflight: mocks.mockGetImportPreflight,
-    createSession: mocks.mockCreateSession,
-    uploadManifest: mocks.mockUploadManifest,
-    uploadMetadataChunk: mocks.mockUploadMetadataChunk,
-    uploadFile: mocks.mockUploadFile,
-    uploadFileStream: mocks.mockUploadFileStream,
-    uploadThumbnailBundle: mocks.mockUploadThumbnailBundle,
-    uploadThumbnail: mocks.mockUploadThumbnail,
-    commitSession: mocks.mockCommitSession,
-    getSession: mocks.mockGetSession,
-    reconcileSession: mocks.mockReconcileSession,
-    cancelSession: mocks.mockCancelSession
-  }))
+  // vitest 4 起 new 一个 vi.fn() 会真的拿实现当构造函数调，箭头函数不行
+  ImportSessionClient: vi.fn(function () {
+    return {
+      getImportPreflight: mocks.mockGetImportPreflight,
+      createSession: mocks.mockCreateSession,
+      uploadManifest: mocks.mockUploadManifest,
+      uploadMetadataChunk: mocks.mockUploadMetadataChunk,
+      uploadFile: mocks.mockUploadFile,
+      uploadFileStream: mocks.mockUploadFileStream,
+      uploadThumbnailBundle: mocks.mockUploadThumbnailBundle,
+      uploadThumbnail: mocks.mockUploadThumbnail,
+      commitSession: mocks.mockCommitSession,
+      getSession: mocks.mockGetSession,
+      reconcileSession: mocks.mockReconcileSession,
+      cancelSession: mocks.mockCancelSession
+    }
+  })
 }))
 
 // ─── Mock VaultServiceManager ────────────────────────────────

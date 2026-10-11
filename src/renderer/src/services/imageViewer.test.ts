@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, type Mock } from 'vitest'
 
 import { handleVerticalImageViewerPageKey } from './imageViewer'
 
 function createNavigator(count = 3): {
   getNumItems: () => number
-  prev: ReturnType<typeof vi.fn>
-  next: ReturnType<typeof vi.fn>
+  prev: Mock<() => void>
+  next: Mock<() => void>
 } {
   return {
     getNumItems: () => count,

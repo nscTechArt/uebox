@@ -1,16 +1,14 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, type Mock } from 'vitest'
 
 import { applySessionProjectEvent } from './sessionProjectSync'
+
+type SessionStore = Parameters<typeof applySessionProjectEvent>[1]
 
 /** 内核 id → 界面 id 的那一步在 store 里，这里照着真实映射打一份桩 */
 function makeStore(
   agentSessionId = 'agent-1',
   id = 'chat-1'
-): {
-  sessionByAgentSessionId: ReturnType<typeof vi.fn>
-  setProject: ReturnType<typeof vi.fn>
-  clearProject: ReturnType<typeof vi.fn>
-} {
+): { [K in keyof SessionStore]: Mock<SessionStore[K]> } {
   return {
     sessionByAgentSessionId: vi.fn((wanted: string) => (wanted === agentSessionId ? { id } : null)),
     setProject: vi.fn(),

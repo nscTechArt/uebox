@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { createApp } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { takeHydratedTypingMessages, useChatMessagesStore } from '../store/modules/chatMessages'
@@ -10,15 +10,17 @@ import {
 } from './chatMessagesPersistence'
 
 function memoryStorage(initial?: string): ChatMessagesCheckpointStorage & {
-  setItem: ReturnType<typeof vi.fn>
-  flush: ReturnType<typeof vi.fn>
+  setItem: Mock<ChatMessagesCheckpointStorage['setItem']>
+  flush: Mock<ChatMessagesCheckpointStorage['flush']>
 } {
   const values = new Map<string, string>()
   if (initial) values.set(CHAT_MESSAGES_STORAGE_KEY, initial)
 
   return {
     getItem: (key) => values.get(key) ?? null,
-    setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value)
+    }),
     flush: vi.fn()
   }
 }

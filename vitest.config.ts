@@ -111,7 +111,8 @@ export default defineConfig({
      * 换掉一个随机变红的门禁，值。
      */
     pool: 'forks',
-    poolOptions: { forks: { maxForks: 4, minForks: 1 } },
+    // vitest 4 起 poolOptions 被移除：原来的 forks.maxForks 收成顶层 maxWorkers，minForks 没有了替代项
+    maxWorkers: 4,
 
     /**
      * `@electron-toolkit/utils` 必须走 Vite 的转换链，不能外部化。

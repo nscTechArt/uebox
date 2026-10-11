@@ -1,15 +1,9 @@
 /** @vitest-environment node */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, type Mock } from 'vitest'
 import { keepMainWindowInTray, showOrCreateMainWindow } from './mainWindowLifecycle'
 
-interface WindowMock {
-  focus: ReturnType<typeof vi.fn>
-  hide: ReturnType<typeof vi.fn>
-  isDestroyed: ReturnType<typeof vi.fn>
-  isMinimized: ReturnType<typeof vi.fn>
-  restore: ReturnType<typeof vi.fn>
-  show: ReturnType<typeof vi.fn>
-}
+type MainWindow = Parameters<typeof keepMainWindowInTray>[1]
+type WindowMock = { [K in keyof MainWindow]: Mock<MainWindow[K]> }
 
 function createWindowMock(
   overrides: { destroyed?: boolean; minimized?: boolean } = {}

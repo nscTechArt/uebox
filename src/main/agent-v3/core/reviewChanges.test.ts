@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, type Mock } from 'vitest'
 
 // 依赖是注入的，但静态 import 仍会把 editorPython → services → electron 整条拉进来
 vi.mock('./editorPython', () => ({ runEditorPython: vi.fn() }))
@@ -12,8 +12,12 @@ import {
   normalizeReviewTargets,
   parseEngineFindings,
   reviewChanges,
-  reviewNaming
+  reviewNaming,
+  type ReviewDeps
 } from './reviewChanges'
+
+type RunPython = NonNullable<ReviewDeps['runPython']>
+type CompileBlueprint = NonNullable<ReviewDeps['compileBlueprint']>
 
 describe('normalizeReviewTargets', () => {
   it('只留引擎内资产路径 —— Actor 名和本地文件在编辑器里查不了', () => {
@@ -175,8 +179,8 @@ describe('reviewChanges', () => {
 })
 
 describe('蓝图编译报错原文', () => {
-  const brokenBlueprint = (count = 1): ReturnType<typeof vi.fn> =>
-    vi.fn().mockResolvedValue({
+  const brokenBlueprint = (count = 1): Mock<RunPython> =>
+    vi.fn<RunPython>().mockResolvedValue({
       success: true,
       output: {
         findings: Array.from({ length: count }, (_, i) => ({
@@ -187,7 +191,7 @@ describe('蓝图编译报错原文', () => {
     })
 
   it('红灯的蓝图重编一次，把报错原文挂进 detail', async () => {
-    const compileBlueprint = vi.fn().mockResolvedValue({
+    const compileBlueprint = vi.fn<CompileBlueprint>().mockResolvedValue({
       ok: false,
       diagnostics: [
         { type: 'Warning', message: '变量没用上' },
@@ -213,7 +217,7 @@ describe('蓝图编译报错原文', () => {
   it('重编通过说明红灯过期了，这条撤掉 —— 不能再说它是坏的', async () => {
     const result = await reviewChanges([{ path: '/Game/A/BP_0', action: 'modified' }], {
       runPython: brokenBlueprint(),
-      compileBlueprint: vi.fn().mockResolvedValue({ ok: true, diagnostics: [] })
+      compileBlueprint: vi.fn<CompileBlueprint>().mockResolvedValue({ ok: true, diagnostics: [] })
     })
 
     expect(result.findings).toEqual([])
@@ -222,7 +226,7 @@ describe('蓝图编译报错原文', () => {
   it('取原文失败时保留原来那条，不让整次审查炸掉', async () => {
     const result = await reviewChanges([{ path: '/Game/A/BP_0', action: 'modified' }], {
       runPython: brokenBlueprint(),
-      compileBlueprint: vi.fn().mockRejectedValue(new Error('超时'))
+      compileBlueprint: vi.fn<CompileBlueprint>().mockRejectedValue(new Error('超时'))
     })
 
     expect(result.findings).toEqual([
@@ -231,7 +235,9 @@ describe('蓝图编译报错原文', () => {
   })
 
   it('最多重编三个 —— 编译跑在游戏线程上，多了会卡住编辑器', async () => {
-    const compileBlueprint = vi.fn().mockResolvedValue({ ok: false, diagnostics: [] })
+    const compileBlueprint = vi
+      .fn<CompileBlueprint>()
+      .mockResolvedValue({ ok: false, diagnostics: [] })
     const targets = Array.from({ length: 5 }, (_, i) => ({
       path: `/Game/A/BP_${i}`,
       action: 'modified' as const
@@ -244,7 +250,7 @@ describe('蓝图编译报错原文', () => {
   })
 
   it('好好的蓝图一个都不编', async () => {
-    const compileBlueprint = vi.fn()
+    const compileBlueprint = vi.fn<CompileBlueprint>()
     await reviewChanges([{ path: '/Game/A/BP_0', action: 'modified' }], {
       runPython: vi.fn().mockResolvedValue({ success: true, output: { findings: [] } }),
       compileBlueprint
