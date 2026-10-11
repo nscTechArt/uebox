@@ -49,7 +49,8 @@ const STATIC_MESSAGES: Readonly<
   role_not_in_plan:
     '当前 Box Plan 套餐不包含该角色。' +
     '请在「设置 → 模型」的套餐卡片中点击「管理订阅」更换套餐，或将该角色改绑到其他来源。',
-  unauthorized: 'Box Plan 授权已失效（Key 已被吊销或删除）。请在「设置 → 模型」的套餐卡片中重新连接。'
+  unauthorized:
+    'Box Plan 授权已失效（Key 已被吊销或删除）。请在「设置 → 模型」的套餐卡片中重新连接。'
 })
 
 const resetTime = (iso: string): string =>

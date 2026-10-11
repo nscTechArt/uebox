@@ -2641,7 +2641,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         byUser: 'set by you',
         followProducer: 'same as producer',
         chatModel: 'chat model',
-        unavailable: "{model} is currently unavailable; this teammate's tasks use the producer's model",
+        unavailable:
+          "{model} is currently unavailable; this teammate's tasks use the producer's model",
         change: "Click to change the model. Applies from this teammate's next task",
         changeFailed: "Couldn't change the model. Try again later",
         checking: 'Checking {model} for connectivity and tool calling…',
@@ -7818,7 +7819,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     retry: 'Retry import',
     retrySucceeded: 'All items imported',
     retrying: 'Retrying import...',
-    retryPartial: 'The .uasset files are complete; external files (FBX, textures, etc.) can be retried only while the project is open',
+    retryPartial:
+      'The .uasset files are complete; external files (FBX, textures, etc.) can be retried only while the project is open',
     retryStillFailing: 'Still incomplete; details updated',
     close: 'Close'
   },

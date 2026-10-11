@@ -257,14 +257,10 @@ describe('projectContentSoftPath', () => {
   })
 
   it('插件的 Content 不归它管，挂载点不是 /Game', () => {
-    expect(
-      projectContentSoftPath('D:/Proj/Plugins/Foo/Content/Meshes/SM_Rock.uasset')
-    ).toBe('')
+    expect(projectContentSoftPath('D:/Proj/Plugins/Foo/Content/Meshes/SM_Rock.uasset')).toBe('')
   })
 
   it('不在 Content 下的文件（资产库自己的存储）返回空串', () => {
-    expect(
-      projectContentSoftPath('I:/库/FPS/assetData/1789-abc/Game/Poly/SM_Box.uasset')
-    ).toBe('')
+    expect(projectContentSoftPath('I:/库/FPS/assetData/1789-abc/Game/Poly/SM_Box.uasset')).toBe('')
   })
 })

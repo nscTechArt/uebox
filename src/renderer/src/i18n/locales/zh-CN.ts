@@ -298,7 +298,8 @@ export default {
       title: '共享虚幻引擎能力',
       label: '开放给外部客户端',
       // 第一层只给一行；可写时在权限设置中显示完整风险说明。
-      shortNote: '向 Codex、Claude Code 开放虚幻盒子助手的全部工具。仅限本机连接，需令牌，默认可写。',
+      shortNote:
+        '向 Codex、Claude Code 开放虚幻盒子助手的全部工具。仅限本机连接，需令牌，默认可写。',
       securityNote:
         '外部客户端可使用与虚幻盒子助手相同的全部工具，包括读写本机文件和执行命令。虚幻盒子不弹出审批窗口，是否拦截由客户端自身的审批设置决定。令牌一旦泄露，持有者即可修改你的工程和本机文件。',
       // 服务停着的时候要用将来时。主开关明明是关的，却读到一句「会直接执行」，
@@ -1588,8 +1589,7 @@ export default {
       'bad-remote': 'Lore 地址格式不正确（应以 lores:// 开头）。',
       'port-blocked':
         '{target} 无响应，可能被防火墙拦截。请管理员在服务器上放行：TCP 8084（登录）、TCP 8083（资产目录）、TCP 和 UDP 8441（Lore 文件传输）。',
-      'port-closed':
-        '{target} 拒绝连接：服务器上该端口无服务运行（服务未启动，或端口号不正确）。',
+      'port-closed': '{target} 拒绝连接：服务器上该端口无服务运行（服务未启动，或端口号不正确）。',
       'host-not-found': '找不到主机 {target}：请检查地址拼写，或直接使用服务器 IP。',
       'host-unreachable':
         '无法访问 {target}：请检查本机与服务器是否位于同一网络（或 VPN 是否已连接）。',
@@ -2145,7 +2145,8 @@ export default {
       missing: '请先到设置 → 模型，配置并选择「语音合成」模型。',
       empty: '此回复没有可朗读的正文。',
       failed: '朗读失败，请检查语音合成配置或重试。',
-      briefingFallback: '播报稿压缩失败，已改为朗读原文。请在 设置 → 模型 中确认已绑定「轻量任务」模型。'
+      briefingFallback:
+        '播报稿压缩失败，已改为朗读原文。请在 设置 → 模型 中确认已绑定「轻量任务」模型。'
     },
     // 每轮回复下方的「本轮改动」清单
     /**
@@ -3122,7 +3123,8 @@ export default {
       toolSearchHint: '下次发送消息时生效，不影响正在运行的任务。',
       toolSearchSaveFailed: '工具搜索设置保存失败，已保留原有模式。',
       listTitle: '工具清单',
-      listNoteFull: '已开启 {on} / {total} 个，每次对话约增加 {tokens} token。已关闭的工具不提供给模型。',
+      listNoteFull:
+        '已开启 {on} / {total} 个，每次对话约增加 {tokens} token。已关闭的工具不提供给模型。',
       listNoteSearch: '常驻 {on} / {total} 个，每次对话约增加 {tokens} token；其余按需加载。',
       lockedHint: '不可撤销的工具无法关闭，此类工具由每一步的审批控制，而非本清单。',
       lockedToggleLabel: '{name}：不可撤销的工具不能关闭',
@@ -3158,7 +3160,8 @@ export default {
       title: '技能',
       // 自动沉淀
       learningTitle: '自动记录做法',
-      learningDesc: '将可复用的做法保存为技能，将遇到并已解决的问题记入经验库。文件写入仍受权限控制。',
+      learningDesc:
+        '将可复用的做法保存为技能，将遇到并已解决的问题记入经验库。文件写入仍受权限控制。',
       learningOff: '关闭',
       learningAsk: '先确认',
       learningAuto: '自动',
@@ -3440,7 +3443,8 @@ export default {
       listFailed: '读取列表失败',
       removeAllTitle: '清理前缀下的全部 {count} 个文件？',
       cleanTitle: '清理 {days} 天前上传的文件？',
-      removeHint: '将从存储桶中删除且无法恢复。引用这些文件的对话中，模型将无法再读取对应的音视频。',
+      removeHint:
+        '将从存储桶中删除且无法恢复。引用这些文件的对话中，模型将无法再读取对应的音视频。',
       removeOk: '删除',
       removed: '已删除 {count} 个文件',
       removedPartly: '已删除 {removed} 个，{failed} 个删除失败',
@@ -3543,8 +3547,7 @@ export default {
       briefingDetailed: '详细',
       briefingFull: '完整',
       briefingConciseHint: '由轻量模型压缩为三句以内：执行内容、结果、需要处理的事项。',
-      briefingDetailedHint:
-        '由轻量模型提炼要点：结论、关键步骤、待决定事项，省略代码和过程说明。',
+      briefingDetailedHint: '由轻量模型提炼要点：结论、关键步骤、待决定事项，省略代码和过程说明。',
       briefingFullHint: '朗读原文，不经模型压缩。',
       feedback: '助手反馈',
 
@@ -4112,7 +4115,8 @@ export default {
       saveAsSourceEmpty: '该产出暂无可保存的正文',
       briefFailedShort: '设计要点提炼失败',
       briefFailed: '提炼设计要点失败，请检查「轻量任务」模型配置后重试',
-      outputsSaveFailed: '产出保存到保管库失败，当前仅存于内存中，重启后将丢失。请检查保管库是否可写',
+      outputsSaveFailed:
+        '产出保存到保管库失败，当前仅存于内存中，重启后将丢失。请检查保管库是否可写',
       outputsInterruptedByVaultSwitch: '切换保管库已中断正在生成的产出，如有需要请重新生成',
       sourcesOverBudgetShort: '来源超出模型上下文',
       sourcesOverBudget:
@@ -5655,8 +5659,7 @@ export default {
       // 开启完全访问权限前的二次确认。参考 Codex 的做法：
       // 这一步不是走流程，是让用户真的看清自己在放开什么
       confirmTitle: '开启完全访问权限？',
-      confirmIntro:
-        '虚幻盒子将无需批准即可对工程和本机执行以下操作，包括但不限于：',
+      confirmIntro: '虚幻盒子将无需批准即可对工程和本机执行以下操作，包括但不限于：',
       confirmProject: '虚幻工程',
       confirmProjectDesc: '创建、修改、删除关卡中的 Actor、蓝图、材质与资产',
       confirmFile: '文件和资产库',
@@ -5710,7 +5713,8 @@ export default {
       parseFailed: '解析 {name} 失败',
       maxDocFiles: '最多上传 {max} 个文档',
       processFailed: '处理 {name} 失败',
-      videoFramesFallback: '未配置支持视频理解的模型，{name} 已改为抽帧后发送给模型（不含音频和帧间运动）',
+      videoFramesFallback:
+        '未配置支持视频理解的模型，{name} 已改为抽帧后发送给模型（不含音频和帧间运动）',
       videoNeedsLocalFile: '视频需从本地文件拖入或通过附件按钮选择，从网页直接拖入无法获取文件路径',
       mediaUploadFailed: '{name} 预上传至对象存储失败，发送时将重试：{error}',
       unsupportedFile: '无法获取以下文件的本地路径，请先保存到本地再拖入：{name}',
@@ -5910,7 +5914,8 @@ export default {
       extractHintAfter: '如压缩包内含 FBX 或贴图，需在 UE 中再次导入',
       copyDone: '压缩包已复制到 {dir}',
       unsupportedTitle: '虚幻盒子不支持解压此格式',
-      unsupportedContent: '虚幻盒子仅支持解压 ZIP。{format} 格式请先使用解压软件解压，再将文件夹导入资产库。',
+      unsupportedContent:
+        '虚幻盒子仅支持解压 ZIP。{format} 格式请先使用解压软件解压，再将文件夹导入资产库。',
       unsupportedOk: '知道了'
     },
     searchPlaceholder: '搜索名称或路径',
@@ -6978,7 +6983,8 @@ export default {
     nodeTypes: '使用的节点类型',
     source: '来自',
     openPortsTitle: '存在悬空端口',
-    openPortsHint: '这些引脚原本连接到选区外部，在片段中处于断开状态。应用到工程后，需在 UE 中手动连接。',
+    openPortsHint:
+      '这些引脚原本连接到选区外部，在片段中处于断开状态。应用到工程后，需在 UE 中手动连接。',
     noCanvasTitle: '为何不显示节点图',
     noCanvasHint:
       '片段保存的是 UE 导出文本，库中的渲染器可以读取，但该渲染器是编辑器，拖动节点即会修改内容，而片段无处保存这些修改，看似可编辑，修改实际会全部丢失。需先为其增加真正的只读模式才能接入。如需了解该片段的内容，可询问右侧助手，助手已获取该片段的全部内容。',
@@ -7341,7 +7347,8 @@ export default {
     resumeImportTip: '选择服务器导入报告，继续未完成的服务器上传',
     importFolder: '导入文件夹',
     importFile: '导入文件',
-    importProjectArchive: '工程整包上传（打包为一个 zip 上传到服务器，数千个文件的工程可在几分钟内完成）',
+    importProjectArchive:
+      '工程整包上传（打包为一个 zip 上传到服务器，数千个文件的工程可在几分钟内完成）',
     upgrade: {
       checking: '正在检查网络库升级条件…',
       checkingStatus: '检查中…',

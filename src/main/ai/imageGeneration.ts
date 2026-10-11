@@ -294,9 +294,7 @@ export class ImageTaskInterruptedError extends Error {
  */
 export class ImageTaskCancelledError extends Error {
   constructor(readonly taskId: string) {
-    super(
-      `已停止等待。厂商任务仍在运行，额度已扣除，可凭任务号 ${shortTaskId(taskId)} 取回结果。`
-    )
+    super(`已停止等待。厂商任务仍在运行，额度已扣除，可凭任务号 ${shortTaskId(taskId)} 取回结果。`)
     this.name = 'ImageTaskCancelledError'
   }
 }

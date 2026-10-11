@@ -291,9 +291,12 @@ describe('失败响应的头', () => {
     }
     const wrapped = diagnosedStreamFn(fn, { sink: () => undefined })
     await drain(
-      await wrapped({ ...model, api: 'google-generative-ai' } as typeof model, {
-        messages: []
-      } as Context)
+      await wrapped(
+        { ...model, api: 'google-generative-ai' } as typeof model,
+        {
+          messages: []
+        } as Context
+      )
     )
     expect(seen).toBeUndefined()
   })
