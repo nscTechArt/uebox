@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createApprovalGate,
   needsApproval,
+  type ApprovalDeps,
   type ApprovalRequest,
   type ApprovalVerdict
 } from './approval'
@@ -49,6 +50,159 @@ describe('needsApproval', () => {
   it.each(['safe', 'mutating', 'destructive'] as const)('完全访问放行逐次审批工具：%s', (risk) => {
     expect(needsApproval(risk, 'yolo', true)).toBe(false)
   })
+
+  // 「以后都允许」：任何档位都不再问，唯独逐次审批的工具照问
+  it.each([
+    ['mutating', 'ask', false, false],
+    ['destructive', 'ask', false, false],
+    ['destructive', 'auto-edit', false, false],
+    ['destructive', 'yolo', false, false],
+    ['mutating', 'ask', true, true],
+    ['destructive', 'auto-edit', true, true],
+    ['mutating', 'yolo', true, false]
+  ] as const)('持久允许：risk=%s mode=%s explicit=%s → %s', (risk, mode, explicit, expected) => {
+    expect(needsApproval(risk, mode, explicit, true)).toBe(expected)
+  })
+})
+
+describe('以后都允许（持久名单）', () => {
+  const list = (
+    initial: string[] = []
+  ): { names: Set<string>; has: (n: string) => boolean; add: (n: string) => void } => {
+    const names = new Set(initial)
+    return { names, has: (n) => names.has(n), add: (n) => void names.add(n) }
+  }
+
+  it('名单里的工具在任何档位都不问', async () => {
+    const request = vi.fn<ApprovalDeps['request']>(async () => 'approve')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      persistent: list(['t']),
+      lookup: () => tool('destructive'),
+      request
+    })
+    expect(await run(callCtx())).toBeUndefined()
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('点了「以后都允许」就记进名单，按工具名记', async () => {
+    const persistent = list()
+    const request = vi.fn<ApprovalDeps['request']>(async () => 'forever')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      persistent,
+      lookup: () => tool('mutating'),
+      request
+    })
+    expect(await run(callCtx())).toBeUndefined()
+    expect(request.mock.calls[0]![0]).toMatchObject({ allowAlways: true, allowForever: true })
+    expect([...persistent.names]).toEqual(['t'])
+    // 另开一个审批门（另一条对话）也不再问
+    const other = createApprovalGate({
+      sessionId: 's2',
+      mode: 'ask',
+      persistent,
+      lookup: () => tool('mutating'),
+      request
+    })
+    expect(await other(callCtx())).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('逐次审批的工具：名单不算数，也不给那个按钮', async () => {
+    const persistent = list(['t'])
+    const request = vi.fn<ApprovalDeps['request']>(async () => 'forever')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'auto-edit',
+      persistent,
+      lookup: () => tool('mutating', true),
+      request
+    })
+    expect(await run(callCtx())).toBeUndefined()
+    expect(await run(callCtx())).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls[0]![0]).toMatchObject({ allowAlways: false, allowForever: false })
+  })
+
+  it('只读对话里名单不算数', async () => {
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      isReadOnly: () => true,
+      persistent: list(['t']),
+      lookup: () => tool('mutating'),
+      request: async () => 'approve'
+    })
+    expect(await run(callCtx())).toMatchObject({ block: true })
+  })
+
+  it('参数降了级的那次不给「以后都允许」；收到 forever 也只记本对话、只记降级后的风险', async () => {
+    const persistent = list()
+    const remembered = new Set<string>()
+    const forceTool = {
+      name: 't',
+      unrealBox: {
+        namespace: 'ue.level',
+        risk: 'destructive',
+        riskFor: (args: unknown) =>
+          (args as { force?: unknown })?.force === true ? 'destructive' : 'mutating'
+      }
+    } as unknown as UnrealAgentTool<never>
+    const request = vi.fn<ApprovalDeps['request']>(async () => 'forever')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      persistent,
+      alwaysAllowed: remembered,
+      lookup: () => forceTool,
+      request
+    })
+    expect(await run(callCtx('t', {}))).toBeUndefined()
+    expect(request.mock.calls[0]![0]).toMatchObject({ allowForever: false })
+    expect(persistent.names.size).toBe(0)
+    expect([...remembered]).toEqual(['t#mutating'])
+    // 带 force 的那次照样问
+    await run(callCtx('t', { force: true }))
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
+  it('宿主没接名单：不给按钮', async () => {
+    const request = vi.fn<ApprovalDeps['request']>(async () => 'approve')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      lookup: () => tool('mutating'),
+      request
+    })
+    await run(callCtx())
+    expect(request.mock.calls[0]![0]).toMatchObject({ allowForever: false })
+  })
+
+  it('名单读坏了按不在名单里算，写坏了这一次照样放行', async () => {
+    const request = vi.fn<ApprovalDeps['request']>(async () => 'forever')
+    const run = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      persistent: {
+        has: () => {
+          throw new Error('设置坏了')
+        },
+        add: () => {
+          throw new Error('写不进去')
+        }
+      },
+      lookup: () => tool('mutating'),
+      request
+    })
+    expect(await run(callCtx())).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
+    // 写失败退成本对话内允许
+    expect(await run(callCtx())).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('createApprovalGate', () => {
@@ -89,7 +243,9 @@ describe('createApprovalGate', () => {
 
     expect(result?.block).toBe(true)
     // 关键：必须明确告诉模型别重试，否则它会原样再调一次
-    expect(result?.reason).toContain('不要重试')
+    expect(result?.reason).toContain('这一轮不要自行重试')
+    // 但不是永久禁令：用户之后亲口再要，模型可以重新调用（会再审批一次）
+    expect(result?.reason).toContain('用户之后明确再要求')
   })
 
   it('「始终允许」之后同名工具不再询问', async () => {

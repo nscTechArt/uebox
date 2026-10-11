@@ -25,6 +25,7 @@
 import { z } from 'zod'
 
 import type { V2Tool } from '../../adaptV2Tool'
+import type { ToolRisk } from '../../defineTool'
 
 import { createProjectTool } from './projectTool'
 
@@ -40,6 +41,30 @@ export const WRITE_ACTIONS = [
   'setup_level_sequence',
   'enable_plugins'
 ] as const
+
+/**
+ * 只往外加东西、不碰已有内容的写动作：新建工程、打开工程、导资产进工程 / 关卡、
+ * 建定序器（开在编辑器事务里）。这些按 mutating 走，默认的 auto-edit 不再每次问。
+ *
+ * 不在名单里的仍按声明的 destructive 问：`enable_plugins` 改用户的 .uproject，
+ * 开错了工程可能打不开；导入带 `overwrite: true` 会盖掉工程里已有的同名资产。
+ */
+const ADDITIVE_ACTIONS: ReadonlySet<string> = new Set([
+  'create_project',
+  'open_project',
+  'import_assets',
+  'import_assets_to_scene',
+  'setup_level_sequence'
+])
+
+/** `project_manage` 这一次调用的实际风险（审批门的 `riskFor`，只降不升） */
+export function projectManageRisk(args: unknown): ToolRisk {
+  const input = (args ?? {}) as { action?: unknown; overwrite?: unknown }
+  if (input.overwrite === true) return 'destructive'
+  return typeof input.action === 'string' && ADDITIVE_ACTIONS.has(input.action)
+    ? 'mutating'
+    : 'destructive'
+}
 
 type AnyTool = V2Tool & {
   description?: string

@@ -2856,6 +2856,8 @@ declare global {
         agentGoalMaxRounds: number
         /** 全量模式下关掉的工具名 */
         agentDisabledTools: string[]
+        /** 审批卡片上点过「以后都允许」的工具名 */
+        agentAlwaysAllowedTools: string[]
         /** 工具搜索模式下偏离内置常驻清单的那些 */
         agentResidentTools: Record<string, boolean>
         notifyTurnComplete: 'off' | 'unfocused' | 'always'
@@ -2865,6 +2867,10 @@ declare global {
         autoRecoverEditorCrash: boolean
         /** agent 搜素材时看不看别的保管库，默认关 */
         assetCrossVaultSearch: boolean
+        /** agent 改资产期间把锁住的文件设成只读，默认关 */
+        assetReadonlyLock: boolean
+        /** Agent 浏览器能否访问本机和局域网地址，默认关 */
+        agentBrowserAllowLocalNetwork: boolean
       }>
       /** 更新应用设置 */
       set: (settings: {
@@ -2877,6 +2883,7 @@ declare global {
         agentPersistentAutoResume?: boolean
         agentGoalMaxRounds?: number
         agentDisabledTools?: string[]
+        agentAlwaysAllowedTools?: string[]
         agentResidentTools?: Record<string, boolean>
         notifyTurnComplete?: 'off' | 'unfocused' | 'always'
         notifyApprovalRequired?: boolean
@@ -2884,6 +2891,8 @@ declare global {
         hideWindowOnProjectLaunch?: boolean
         autoRecoverEditorCrash?: boolean
         assetCrossVaultSearch?: boolean
+        assetReadonlyLock?: boolean
+        agentBrowserAllowLocalNetwork?: boolean
       }) => Promise<{ success: boolean }>
       /** 设置开机自启 */
       setAutoLaunch: (enabled: boolean) => Promise<{ success: boolean }>
@@ -3697,7 +3706,8 @@ declare global {
   type AgentV3SkillLearning = 'off' | 'ask' | 'auto'
 
   /** always = 批准且本对话内该工具不再询问（按内核 session 记：重启、清空对话、切到 Ask 模式后失效，分出的新对话也不继承） */
-  type AgentV3ApprovalVerdict = 'approve' | 'always' | 'reject'
+  /** forever = 批准且以后所有对话里该工具都不再询问（存进应用设置，在偏好设置里移除） */
+  type AgentV3ApprovalVerdict = 'approve' | 'always' | 'forever' | 'reject'
 
   /**
    * 用户对 agent 反问的处置。
@@ -3834,6 +3844,8 @@ declare global {
      * 渲染层就会在往返时把它当成不存在的东西丢掉。
      */
     readOnlyTools?: string[]
+    /** 用户信任这个 server：它的工具按 mutating 审批。见主进程 `capabilities/mcp/types.ts` */
+    trusted?: boolean
   }
 
   interface McpServerStatus {

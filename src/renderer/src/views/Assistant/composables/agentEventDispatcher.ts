@@ -501,6 +501,7 @@ export function initAgentEventDispatcher(): void {
       risk: string
       args: unknown
       allowAlways?: boolean
+      allowForever?: boolean
     }) => {
       if (!data?.toolCallId) return
       // 独立对话窗口只弹它自己那条对话的：别的对话的审批主窗口那边弹着
@@ -512,7 +513,9 @@ export function initAgentEventDispatcher(): void {
         namespace: data.namespace,
         risk: data.risk,
         args: data.args,
-        allowAlways: data.allowAlways !== false
+        allowAlways: data.allowAlways !== false,
+        // 和 allowAlways 相反，没给就不摆按钮：旧主进程不认 forever
+        allowForever: data.allowForever === true
       })
     }
   )

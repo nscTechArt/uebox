@@ -38,7 +38,10 @@ vi.mock('@renderer/api/agentV3', () => ({
 }))
 
 /** 队列里放一条待审批。组件只是它的视图，没有这一条就整个不渲染 */
-function enqueue(toolCallId: string): void {
+function enqueue(
+  toolCallId: string,
+  extra: { allowAlways?: boolean; allowForever?: boolean } = {}
+): void {
   usePendingApprovalsStore().enqueue({
     sessionId: 's1',
     toolCallId,
@@ -46,7 +49,8 @@ function enqueue(toolCallId: string): void {
     namespace: 'asset',
     risk: 'destructive',
     args: { path: '/Game/Foo' },
-    allowAlways: true
+    allowAlways: true,
+    ...extra
   })
 }
 
@@ -249,5 +253,40 @@ describe('SensitiveActionConfirm 的落点', () => {
     expect(cards).toHaveLength(1)
     expect(cards[0].isConnected).toBe(true)
     expect(cards[0].classList.contains('floating')).toBe(true)
+  })
+})
+
+/**
+ * 「以后都允许」：主进程说能给才给（逐次审批的工具、被参数降了级的那次都不给），
+ * 点了回传 forever。
+ */
+describe('SensitiveActionConfirm 的「以后都允许」', () => {
+  afterEach(() => {
+    usePendingApprovalsStore().settle('call-1')
+  })
+
+  it('主进程允许时显示，点了回传 forever', async () => {
+    const { agentV3API } = await import('@renderer/api/agentV3')
+    vi.mocked(agentV3API.replyApproval).mockClear()
+    enqueue('call-1', { allowForever: true })
+    const wrapper = mountConfirm()
+
+    await wrapper.find('.btn-allow-forever').trigger('click')
+
+    expect(agentV3API.replyApproval).toHaveBeenCalledWith('call-1', 'forever')
+  })
+
+  it('没给 allowForever 不显示', () => {
+    enqueue('call-1')
+    const wrapper = mountConfirm()
+    expect(wrapper.find('.btn-allow-forever').exists()).toBe(false)
+    expect(wrapper.find('.btn-allow-chat').exists()).toBe(true)
+  })
+
+  it('逐次审批的工具（allowAlways=false）两个都不显示，哪怕 allowForever 误给了 true', () => {
+    enqueue('call-1', { allowAlways: false, allowForever: true })
+    const wrapper = mountConfirm()
+    expect(wrapper.find('.btn-allow-forever').exists()).toBe(false)
+    expect(wrapper.find('.btn-allow-chat').exists()).toBe(false)
   })
 })

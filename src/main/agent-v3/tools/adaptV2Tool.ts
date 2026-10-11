@@ -118,6 +118,8 @@ export interface AdaptOptions {
   /** 覆盖 V2 的描述。留空则沿用 */
   description?: string
   concurrency?: 'sequential' | 'parallel'
+  /** 注册表那边按参数降风险（见 `ToolMeta.riskFor`）。给了就盖过 V2 工具自带的 */
+  riskFor?: (args: unknown) => ToolRisk
 }
 
 /**
@@ -283,6 +285,7 @@ export function adaptV2Tool(v2: V2Tool, options: AdaptOptions): UnrealAgentTool<
   }
 
   const schema = asZodSchema(v2.inputSchema, options.name)
+  const riskFor = options.riskFor ?? v2.riskFor
   const execute = v2.execute
 
   const tool = {
@@ -336,7 +339,7 @@ export function adaptV2Tool(v2: V2Tool, options: AdaptOptions): UnrealAgentTool<
     unrealBox: {
       namespace: options.namespace,
       risk: options.risk,
-      ...(v2.riskFor ? { riskFor: v2.riskFor } : {})
+      ...(riskFor ? { riskFor } : {})
     }
   }
 

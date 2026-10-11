@@ -62,6 +62,15 @@
             <template #icon><PhShieldCheck /></template>
             {{ t('assistant.sensitiveAction.allowForChat') }}
           </AppButton>
+          <AppButton
+            v-if="pendingAction.allowForever"
+            variant="default"
+            class="btn-allow-forever"
+            :title="t('assistant.sensitiveAction.allowForeverHint')"
+            @click="handleAllowForever"
+          >
+            {{ t('assistant.sensitiveAction.allowForever') }}
+          </AppButton>
           <AppButton variant="primary" class="btn-confirm" @click="handleConfirm">
             <template #icon><PhCheck /></template>
             {{ t('assistant.sensitiveAction.confirm') }}
@@ -159,6 +168,11 @@ function handleConfirm(): void {
 /** 「本对话内都允许」。V3 的 'always' 语义是「本 session 内该工具不再询问」，对用户就是这条对话 */
 function handleAllowForChat(): void {
   reply('always')
+}
+
+/** 「以后都允许」：存进应用设置，所有对话都不再问。在「偏好设置 → AI」里移除 */
+function handleAllowForever(): void {
+  reply('forever')
 }
 
 function handleReject(): void {

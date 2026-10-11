@@ -45,6 +45,7 @@ export function registerAppSettingsIPC(setAppIconTheme: SetAppIconTheme): void {
         agentPersistentAutoResume?: boolean
         agentGoalMaxRounds?: number
         agentDisabledTools?: string[]
+        agentAlwaysAllowedTools?: string[]
         agentResidentTools?: Record<string, boolean>
         notifyTurnComplete?: TurnCompleteNotification
         notifyApprovalRequired?: boolean
@@ -52,6 +53,8 @@ export function registerAppSettingsIPC(setAppIconTheme: SetAppIconTheme): void {
         hideWindowOnProjectLaunch?: boolean
         autoRecoverEditorCrash?: boolean
         assetCrossVaultSearch?: boolean
+        assetReadonlyLock?: boolean
+        agentBrowserAllowLocalNetwork?: boolean
       }
     ) => {
       if (typeof settings.autoLaunch === 'boolean') {
@@ -92,6 +95,9 @@ export function registerAppSettingsIPC(setAppIconTheme: SetAppIconTheme): void {
       if (Array.isArray(settings.agentDisabledTools)) {
         appSettingsManager.setAgentDisabledTools(settings.agentDisabledTools)
       }
+      if (Array.isArray(settings.agentAlwaysAllowedTools)) {
+        appSettingsManager.setAgentAlwaysAllowedTools(settings.agentAlwaysAllowedTools)
+      }
       if (
         settings.agentResidentTools &&
         typeof settings.agentResidentTools === 'object' &&
@@ -122,6 +128,12 @@ export function registerAppSettingsIPC(setAppIconTheme: SetAppIconTheme): void {
       }
       if (typeof settings.assetCrossVaultSearch === 'boolean') {
         appSettingsManager.setAssetCrossVaultSearch(settings.assetCrossVaultSearch)
+      }
+      if (typeof settings.assetReadonlyLock === 'boolean') {
+        appSettingsManager.setAssetReadonlyLock(settings.assetReadonlyLock)
+      }
+      if (typeof settings.agentBrowserAllowLocalNetwork === 'boolean') {
+        appSettingsManager.setAgentBrowserAllowLocalNetwork(settings.agentBrowserAllowLocalNetwork)
       }
       return { success: true }
     }

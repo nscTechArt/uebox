@@ -38,6 +38,7 @@ function request(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
     risk: 'destructive',
     args: { path: '/Game/Foo' },
     allowAlways: true,
+    allowForever: true,
     ...overrides
   }
 }

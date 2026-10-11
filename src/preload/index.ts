@@ -1565,7 +1565,7 @@ const api = {
     /** 回复工具审批弹窗 */
     replyApproval: (args: {
       toolCallId: string
-      verdict: 'approve' | 'always' | 'reject'
+      verdict: 'approve' | 'always' | 'forever' | 'reject'
     }): void => {
       ipcRenderer.send('agent-v3:approval-reply', args)
     },
@@ -3031,6 +3031,7 @@ const api = {
       agentPersistentAutoResume: boolean
       agentGoalMaxRounds: number
       agentDisabledTools: string[]
+      agentAlwaysAllowedTools: string[]
       agentResidentTools: Record<string, boolean>
       notifyTurnComplete: 'off' | 'unfocused' | 'always'
       notifyApprovalRequired: boolean
@@ -3039,6 +3040,8 @@ const api = {
       autoRecoverEditorCrash: boolean
       /** agent 搜素材时看不看别的保管库，默认关 */
       assetCrossVaultSearch: boolean
+      assetReadonlyLock: boolean
+      agentBrowserAllowLocalNetwork: boolean
     }> => ipcRenderer.invoke('app-settings:get'),
     /**
      * 更新应用设置
@@ -3053,6 +3056,7 @@ const api = {
       agentPersistentAutoResume?: boolean
       agentGoalMaxRounds?: number
       agentDisabledTools?: string[]
+      agentAlwaysAllowedTools?: string[]
       agentResidentTools?: Record<string, boolean>
       notifyTurnComplete?: 'off' | 'unfocused' | 'always'
       notifyApprovalRequired?: boolean
@@ -3060,6 +3064,8 @@ const api = {
       hideWindowOnProjectLaunch?: boolean
       autoRecoverEditorCrash?: boolean
       assetCrossVaultSearch?: boolean
+      assetReadonlyLock?: boolean
+      agentBrowserAllowLocalNetwork?: boolean
     }): Promise<{ success: boolean }> => ipcRenderer.invoke('app-settings:set', settings),
     /**
      * 设置开机自启

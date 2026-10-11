@@ -1,6 +1,6 @@
 ---
 name: ue-sequencer
-description: Author any camera move in a Level Sequence by writing keyframes the model computes itself — orbit, dolly, follow, figure-of-eight, handheld shake, crane — plus diagnose why a sequence renders black, read what is inside one, compare two sequences (what changed, whether a protected original was touched, whether a migrated character kept every animated state), and repair a missing Camera Cuts track. Use when the user says "绕着它转一圈"、"给我个运镜"、"镜头推近一点"、"甩起来那种"、"渲出来是黑的"、"按播放没反应"、"轨道变红了"、"绑定丢了"、"原版动没动"、"迁过去的齐不齐", asks what is inside a sequence, or asks whether a sequence is ready to render. Also read this skill's engine-disconnect rule whenever any Unreal tool reports no connected project. Also renders a sequence to image frames or MP4 through Movie Render Queue when the user asks for it ("出片"、"用 MRQ 渲"、"出 EXR"); every render needs the user's approval. Do not use for focal-length animation, retiming, or rebinding a possessable, none of which are implemented yet.
+description: Author any camera move in a Level Sequence by writing keyframes the model computes itself — orbit, dolly, follow, figure-of-eight, handheld shake, crane — plus diagnose why a sequence renders black, read what is inside one, compare two sequences (what changed, whether a protected original was touched, whether a migrated character kept every animated state), and repair a missing Camera Cuts track. Use when the user says "绕着它转一圈"、"给我个运镜"、"镜头推近一点"、"甩起来那种"、"渲出来是黑的"、"按播放没反应"、"轨道变红了"、"绑定丢了"、"原版动没动"、"迁过去的齐不齐", asks what is inside a sequence, or asks whether a sequence is ready to render. Also read this skill's engine-disconnect rule whenever any Unreal tool reports no connected project. Also renders a sequence to image frames or MP4 through Movie Render Queue when the user asks for it ("出片"、"用 MRQ 渲"、"出 EXR"); every render needs the user's approval. Do not use for focal-length animation or retiming (no tool yet); rebinding a possessable goes through Python with the user's consent.
 ---
 
 # Sequencer
@@ -121,7 +121,7 @@ Render (Local) 一样在编辑器里起 PIE 渲，渲完才返回，过程中推
 不想覆盖就把 `replace_existing_keys` 关掉。
 
 **改已有序列的时间**（重定时、批量改属性、变体批处理）还没有实现，
-possessable 的重新绑定也没有 —— 见「做不到的时候」。
+possessable 的重新绑定没有专门工具 —— 见「绑定断了」。
 
 ## 诊断路径
 
@@ -148,23 +148,30 @@ AnimSequence 首尾都含；播放头压在两段交界上显示的是**后一�
 `capabilities`。**看到能力受限就要如实告诉用户**，不能静默降级。
 版本差异表见 `references/engine-version-matrix.md`。
 
-## 绑定断了：这一步只能用户自己点
+## 绑定断了：先问清绑到哪个 Actor
 
 序列里的 possessable 指向一个已经不存在的对象时（相机被删了，或者关卡没保存
-就崩了），**重新绑定没有 Python 接口** —— 引擎侧的 `ReplacePossessable` 没导出。
+就崩了），没有专门的重绑工具：自动重绑有「该绑到哪一个」的歧义（同名 Actor
+有多个，或者压根不该绑同名的那个），猜错比不修更糟。
 `sequence_camera_cuts` 会把这种情况查出来并如实说明，不会假装修好。
 
-告诉用户这两步，按顺序：
+默认告诉用户这两步，按顺序：
 
 1. 打开序列 → 左上角扳手 → **Actions → Advanced → Rebind Possessable References**
 2. 没生效就右键那条轨道 → **Assign Actor** → 选关卡里那台相机
+
+用户要你代劳时，先让他指明绑到关卡里哪个 Actor，确认后用 `ue_run_python_script`：
+`unreal.LevelSequenceEditorBlueprintLibrary.open_level_sequence(seq)` 打开序列，
+再调 `unreal.get_editor_subsystem(unreal.LevelSequenceEditorSubsystem)` 的
+`replace_binding_with_actors([actor], binding)`（`fix_actor_references()` 对应菜单里那一项）。
+做完用 `sequence_audit` 回读，绑定解析到了才算修好。
 
 如果这条序列的相机动画本来就是 `sequence_camera_keys` 写的，**重新写一条通常比手修更快**
 —— 一次调用的事，而且它会先存关卡，不会再断一次。
 
 ## 做不到的时候
 
-还没有的：**变焦动画**（焦距关键帧）、**重定时**、批量改属性、变体批处理、
+还没有专门工具的：**变焦动画**（焦距关键帧）、**重定时**、批量改属性、变体批处理、
 可见性/材质等其它轨道、possessable 重新绑定。
 
 不要假装做了。**没做的事不许说成做了**，这一条没有例外。
@@ -200,7 +207,8 @@ AnimSequence 首尾都含；播放头压在两段交界上显示的是**后一�
 交付责任在人。用户没提出片就别主动渲；他要出片时才调 `sequence_render`，而且每一次
 都会弹审批卡让他当场点头。我们的价值首先是**让他按下渲染键之前就知道会不会白等**。
 
-其余红线（不许删、不许动手 K 的曲线、不许改命名、不许产生序列之外的副作用）
-见 `references/red-lines.md`。**动手之前先读它。**
+其余红线（不主动删、不动手 K 的曲线、不改命名、不产生序列之外的副作用）
+见 `references/red-lines.md`。**动手之前先读它。** 那些是默认做法：用户点名要做时，
+把具体后果说一遍，他点头就照做。
 
 该不该由这个 skill 接手，边界例见 `references/trigger-examples.md`。

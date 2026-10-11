@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
-import { checkNavigationUrl, checkResolvedAddresses, isPrivateAddress } from './urlPolicy'
+import {
+  checkNavigationUrl,
+  checkResolvedAddresses,
+  isPrivateAddress,
+  setLocalNetworkPolicy
+} from './urlPolicy'
 
 /**
  * 这是整套浏览器能力里唯一「判断错了就出事」的地方，所以按攻击面逐条测。
@@ -143,5 +148,66 @@ describe('checkResolvedAddresses', () => {
     // 没人会手输假 IP，放行它没有收益
     expect(checkNavigationUrl('http://198.18.0.184/').ok).toBe(false)
     expect(isPrivateAddress('fc00::a1b2')).toBe(true)
+  })
+})
+
+/**
+ * 「允许浏览器访问局域网」（设置 → AI，默认关）。开着时本机、局域网、`.local` 放行；
+ * 协议限制、网址里带密码、云主机元数据地址照旧拒绝。
+ */
+describe('允许访问局域网', () => {
+  afterEach(() => setLocalNetworkPolicy(undefined))
+
+  const LOCAL = [
+    'http://localhost:5173/',
+    'http://127.0.0.1:8080/index.html',
+    'http://192.168.1.20/',
+    'http://10.0.0.5:3000/',
+    'http://my-nas.local/',
+    'http://[::1]:8000/'
+  ]
+
+  it.each(LOCAL)('默认关：拒绝 %s，并告诉模型去哪里开', (url) => {
+    const result = checkNavigationUrl(url)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toContain('允许浏览器访问局域网')
+  })
+
+  it.each(LOCAL)('开着：放行 %s', (url) => {
+    expect(checkNavigationUrl(url, { allowLocalNetwork: true }).ok).toBe(true)
+  })
+
+  it('开关每次现读：注入的读法拨过去，下一次校验就生效', () => {
+    let allowed = false
+    setLocalNetworkPolicy(() => allowed)
+    expect(checkNavigationUrl('http://localhost:5173/').ok).toBe(false)
+    allowed = true
+    expect(checkNavigationUrl('http://localhost:5173/').ok).toBe(true)
+    // 调用方显式传的优先
+    expect(checkNavigationUrl('http://localhost:5173/', { allowLocalNetwork: false }).ok).toBe(
+      false
+    )
+  })
+
+  it('读开关抛异常时按关处理', () => {
+    setLocalNetworkPolicy(() => {
+      throw new Error('settings not ready')
+    })
+    expect(checkNavigationUrl('http://localhost/').ok).toBe(false)
+  })
+
+  it.each([
+    'file:///C:/Windows/win.ini',
+    'javascript:alert(1)',
+    'http://user:pass@localhost/',
+    'http://169.254.169.254/latest/meta-data/'
+  ])('开着也照旧拒绝：%s', (url) => {
+    expect(checkNavigationUrl(url, { allowLocalNetwork: true }).ok).toBe(false)
+  })
+
+  it('DNS 解析到局域网：开着放行，元数据地址照旧拒绝', () => {
+    expect(checkResolvedAddresses(['192.168.1.20'], { allowLocalNetwork: true })).toBeNull()
+    expect(checkResolvedAddresses(['192.168.1.20'])?.ok).toBe(false)
+    expect(checkResolvedAddresses(['169.254.169.254'], { allowLocalNetwork: true })?.ok).toBe(false)
   })
 })

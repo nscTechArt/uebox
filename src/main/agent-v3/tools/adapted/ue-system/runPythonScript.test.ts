@@ -92,15 +92,33 @@ describe('ue_run_python_script', () => {
 
   /**
    * unreal.Rotator 的位置参数顺序是 (roll, pitch, yaw)，按 (pitch, yaw, roll) 写会静默转错方向。
-   * 真机上 78 个部件因此全摆错 —— 这里必须在发给引擎之前拦下来，一个字都不能执行。
+   * 但照 UE 顺序写的位置参数是对的，所以不拦：照常执行，结果后面提醒回读、改成关键字。
    */
-  it('unreal.Rotator 用位置参数时拒绝执行，并告诉模型改成关键字', async () => {
-    const text = await errorTextOf({
+  it('unreal.Rotator 用位置参数时照常执行，结果后面提醒顺序和关键字写法', async () => {
+    mockRun.mockResolvedValue({ success: true, stdout: 'ok' })
+    const result = await adapted().execute('test', {
       script: 'a = unreal.Rotator(0.0, 90.0, 0.0)'
     })
-    expect(mockRun).not.toHaveBeenCalled()
+    expect(mockRun).toHaveBeenCalledTimes(1)
+    const text = JSON.stringify(result)
+    expect(text).toContain('ok')
     expect(text).toContain('(roll, pitch, yaw)')
     expect(text).toContain('unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0)')
+  })
+
+  it('执行失败时同样带上旋转提醒', async () => {
+    mockRun.mockResolvedValue({ success: false, error: 'NameError: a' })
+    const text = await errorTextOf({ script: 'a = unreal.Rotator(0.0, 90.0, 0.0)' })
+    expect(text).toContain('NameError')
+    expect(text).toContain('(roll, pitch, yaw)')
+  })
+
+  it('关键字写法不带旋转提醒', async () => {
+    mockRun.mockResolvedValue({ success: true, stdout: 'ok' })
+    const result = await adapted().execute('test', {
+      script: 'a = unreal.Rotator(roll=0, pitch=0, yaw=90)'
+    })
+    expect(JSON.stringify(result)).not.toContain('(roll, pitch, yaw)')
   })
 
   it('关键字写法照常执行', async () => {
@@ -187,9 +205,12 @@ describe('跑 skill 自带的脚本', () => {
   })
 
   it('skill 脚本同样过旋转检查', async () => {
-    expect(
-      await errorTextOf({ skill: 'doubao-motion-import', skill_script: 'scripts/bad_rotator.py' })
-    ).toContain('Rotator')
-    expect(mockRun).not.toHaveBeenCalled()
+    mockRun.mockResolvedValue({ success: true, stdout: 'ok' })
+    const result = await adapted().execute('test', {
+      skill: 'doubao-motion-import',
+      skill_script: 'scripts/bad_rotator.py'
+    })
+    expect(mockRun).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(result)).toContain('(roll, pitch, yaw)')
   })
 })

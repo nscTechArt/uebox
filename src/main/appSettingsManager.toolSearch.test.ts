@@ -108,3 +108,31 @@ describe('工具开关落盘', () => {
     expect(appSettingsManager.getSettings().agentDisabledTools).toEqual([])
   })
 })
+
+describe('资产只读锁与浏览器局域网访问', () => {
+  it('默认都关；拨开后落盘，重启读回', async () => {
+    const { appSettingsManager: first } = await import('./appSettingsManager')
+    expect(first.getAssetReadonlyLock()).toBe(false)
+    expect(first.getAgentBrowserAllowLocalNetwork()).toBe(false)
+
+    first.setAssetReadonlyLock(true)
+    first.setAgentBrowserAllowLocalNetwork(true)
+    expect(JSON.parse(disk.text)).toMatchObject({
+      assetReadonlyLock: true,
+      agentBrowserAllowLocalNetwork: true
+    })
+
+    vi.resetModules()
+    const { appSettingsManager: restarted } = await import('./appSettingsManager')
+    expect(restarted.getAssetReadonlyLock()).toBe(true)
+    expect(restarted.getAgentBrowserAllowLocalNetwork()).toBe(true)
+  })
+
+  // 一个改用户文件属性、一个放开内网访问：写坏的值不能被当成开
+  it('配置里写坏成非布尔值时按关处理', async () => {
+    disk.text = '{"assetReadonlyLock":"true","agentBrowserAllowLocalNetwork":1}'
+    const { appSettingsManager } = await import('./appSettingsManager')
+    expect(appSettingsManager.getAssetReadonlyLock()).toBe(false)
+    expect(appSettingsManager.getAgentBrowserAllowLocalNetwork()).toBe(false)
+  })
+})

@@ -61,6 +61,37 @@ export function setProjectRootResolver(resolver: ProjectRootResolver | undefined
 }
 
 /**
+ * 只读位这一层开没开（设置 → AI 助手里的「修改资产时设为只读」，默认关）。
+ *
+ * 关着时**一个新位都不翻**，用户在编辑器里的 Ctrl+S 照常可用；会话之间的内存锁
+ * （`assetLock.ts`）照常生效。清位、还原这几条路径不受开关影响 —— 它们只碰台账上
+ * 记着的文件，台账空的时候什么都不动；开关中途被关掉时，正是它们把已经翻上去的
+ * 位收回来。
+ *
+ * 每次现读（懒加载 `appSettingsManager`，理由同上面的 `defaultResolver`）。读不到
+ * 设置就当关 —— 拿不准时不去改用户文件的属性。
+ */
+export type ReadonlyLockEnabledResolver = () => Promise<boolean>
+
+const defaultEnabledResolver: ReadonlyLockEnabledResolver = async () => {
+  try {
+    const { appSettingsManager } = await import('../../appSettingsManager')
+    return appSettingsManager.getAssetReadonlyLock()
+  } catch {
+    return false
+  }
+}
+
+let readonlyLockEnabled: ReadonlyLockEnabledResolver = defaultEnabledResolver
+
+/** 测试用：换掉开关的读取方式 */
+export function setReadonlyLockEnabledResolver(
+  resolver: ReadonlyLockEnabledResolver | undefined
+): void {
+  readonlyLockEnabled = resolver ?? defaultEnabledResolver
+}
+
+/**
  * 哪些包此刻真的被只读位护着。界面文案能不能说「保存会被拦下」就看它。
  *
  * 键带 `connectionId` —— 和锁表同一套：盒子可以同时连多个工程，只按路径记的话
@@ -241,6 +272,8 @@ export async function enforceAfterWrite(locks: LockRecord[]): Promise<void> {
     try {
       const root = await resolveProjectRoot(connectionId)
       if (!root) continue
+      // 计数照常归零（上面），只是不翻位：开关随时可能被拨回来，计数得一直对得上
+      if (!(await readonlyLockEnabled())) continue
       remember(connectionId, await protectPackages(root, lastClose))
     } catch {
       /* 同上 */

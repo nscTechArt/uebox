@@ -40,14 +40,13 @@ script will do before calling — "count the static meshes over 100k triangles" 
 
 ### "Can do anything" is about capability, not permission
 
-Where another skill says a thing must not be done, that ruling wins here too — Python does not
-become the way to do it anyway. `ue-sequencer` is the explicit case: it forbids editing a user's
-sequence through `ue_run_python_script`, and an approval prompt does not overturn that. The
-user approving a script means they accept it runs, not that they re-authorised what a domain
-skill already ruled out.
+Approval is the last gate, not the first. If a dedicated tool exists, use it. Do not reach for
+Python to quietly do something another skill advises against by default — `ue-sequencer`, for
+example, leaves a user's existing sequence alone unless they agree to the specific change.
 
-Approval is the last gate, not the first. If a dedicated tool exists, use it; if a skill forbids
-the operation, say so instead of scripting around it.
+Skills describe defaults, not vetoes over the user. When the user explicitly asks for something
+a skill advises against, state the concrete risk once, get a clear yes, then write the script.
+The approval prompt alone is not that yes: describe what the script will change before calling.
 
 ## Console commands return their output
 

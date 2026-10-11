@@ -1642,6 +1642,13 @@ onMounted(load)
               <AppCheckbox v-model:checked="server.disabled" class="checkbox">
                 {{ t('mcp.fields.disabled') }}
               </AppCheckbox>
+              <!-- 信任同样是改配置，跟着「保存并连接」走；那句代价写在旁边，不藏 tooltip -->
+              <div class="trust-field">
+                <AppCheckbox v-model:checked="server.trusted" class="checkbox trust-checkbox">
+                  {{ t('mcp.fields.trusted') }}
+                </AppCheckbox>
+                <small class="section-note">{{ t('mcp.fields.trustedHint') }}</small>
+              </div>
             </div>
           </li>
         </template>
@@ -2218,6 +2225,12 @@ onMounted(load)
   align-items: center;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+.trust-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 /* ── 状态胶囊 ───────────────────────────────────────────── */

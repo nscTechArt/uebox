@@ -12,6 +12,8 @@ import type { SendShortcut } from '@renderer/views/Assistant/composables/sendSho
 import ArchivedChatsModal from './ArchivedChatsModal.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import AppSwitch from '@renderer/components/AppSwitch.vue'
+import { appSettingsAPI } from '@renderer/api/appSettings'
+import { resolveToolLabel } from '@renderer/views/Assistant/components/agentStepLabels'
 import {
   DEFAULT_GOAL_MAX_ROUNDS,
   GOAL_MAX_ROUNDS_MAX,
@@ -20,7 +22,7 @@ import {
 } from '@core/shared/goalRounds'
 
 const aiConfigStore = useAIConfigStore()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 // 归档对话（侧边栏不再显示已归档，这里是唯一入口）
 const showArchivedChats = ref(false)
@@ -135,6 +137,38 @@ const fileAccessScope = ref<AgentFileAccessScope>('full')
 const persistentAutoResume = ref(true)
 
 /**
+ * agent 改资产期间把锁住的文件设成只读。默认关 —— 开着时用户自己在编辑器里
+ * 也存不了那几个资产。判定在主进程的写工具收尾处，所以存在应用设置里。
+ */
+const assetReadonlyLock = ref(false)
+
+/**
+ * Agent 浏览器能不能打开本机和局域网地址。默认关（防网页借 agent 的手访问内网）。
+ * 每次打开网址时主进程现读。
+ */
+const browserAllowLocalNetwork = ref(false)
+
+/**
+ * 审批卡片上点过「以后都允许」的工具。空着就整行不显示 —— 没点过的人用不上它。
+ * 存在应用设置里，审批门每次调用现读，这里移除下一次调用就算数。
+ */
+const alwaysAllowedTools = ref<string[]>([])
+
+function alwaysAllowedLabel(toolName: string): string {
+  return resolveToolLabel(toolName, t, te)
+}
+
+async function removeAlwaysAllowed(toolName: string): Promise<void> {
+  const next = alwaysAllowedTools.value.filter((name) => name !== toolName)
+  try {
+    await appSettingsAPI.setAlwaysAllowedTools(next)
+    alwaysAllowedTools.value = next
+  } catch (error) {
+    console.error('移除始终允许的操作失败:', error)
+  }
+}
+
+/**
  * 目标模式最多几轮。同样存在应用设置里 —— 循环跑在主进程。
  *
  * 失焦 / 回车才存，不跟着 watch：敲「25」的中途会先经过「2」，
@@ -202,6 +236,10 @@ onMounted(async () => {
     fileAccessScope.value = settings.agentFileAccessScope === 'ue-only' ? 'ue-only' : 'full'
     persistentAutoResume.value = settings.agentPersistentAutoResume !== false
     goalMaxRounds.value = normalizeGoalMaxRounds(settings.agentGoalMaxRounds)
+    // 两个都只认 true，和主进程的兜底一致
+    assetReadonlyLock.value = settings.assetReadonlyLock === true
+    browserAllowLocalNetwork.value = settings.agentBrowserAllowLocalNetwork === true
+    alwaysAllowedTools.value = settings.agentAlwaysAllowedTools ?? []
   } catch (error) {
     console.error('读取应用设置失败:', error)
   } finally {
@@ -246,6 +284,26 @@ watch(persistentAutoResume, async (enabled) => {
     await window.api.appSettings.set({ agentPersistentAutoResume: enabled })
   } catch (error) {
     console.error('设置自动断点续传失败:', error)
+  }
+})
+
+/** 下一次写工具收尾时生效；关掉后已设的只读位在下一次写入或本轮结束时放开 */
+watch(assetReadonlyLock, async (enabled) => {
+  if (!appSettingsLoaded.value) return
+  try {
+    await window.api.appSettings.set({ assetReadonlyLock: enabled })
+  } catch (error) {
+    console.error('设置资产只读锁失败:', error)
+  }
+})
+
+/** 下一次打开网址就生效 */
+watch(browserAllowLocalNetwork, async (enabled) => {
+  if (!appSettingsLoaded.value) return
+  try {
+    await window.api.appSettings.set({ agentBrowserAllowLocalNetwork: enabled })
+  } catch (error) {
+    console.error('设置浏览器局域网访问失败:', error)
   }
 })
 
@@ -351,6 +409,17 @@ watch(persistentAutoResume, async (enabled) => {
         </div>
         <div class="setting-item">
           <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.ai.assetReadonlyLock') }}</div>
+            <div class="setting-desc">{{ $t('profile.ai.assetReadonlyLockDesc') }}</div>
+          </div>
+          <AppSwitch
+            v-model:checked="assetReadonlyLock"
+            :disabled="!appSettingsLoaded"
+            :aria-label="$t('profile.ai.assetReadonlyLock')"
+          />
+        </div>
+        <div class="setting-item">
+          <div class="setting-info">
             <div class="setting-label">{{ $t('profile.ai.persistentAutoResume') }}</div>
             <div class="setting-desc">{{ $t('profile.ai.persistentAutoResumeDesc') }}</div>
           </div>
@@ -407,6 +476,38 @@ watch(persistentAutoResume, async (enabled) => {
             <div class="setting-desc">{{ $t('profile.ai.editorScreenshotDesc') }}</div>
           </div>
           <AppSwitch v-model:checked="editorScreenshotEnabled" />
+        </div>
+        <div class="setting-item">
+          <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.ai.browserAllowLocalNetwork') }}</div>
+            <div class="setting-desc">{{ $t('profile.ai.browserAllowLocalNetworkDesc') }}</div>
+          </div>
+          <AppSwitch
+            v-model:checked="browserAllowLocalNetwork"
+            :disabled="!appSettingsLoaded"
+            :aria-label="$t('profile.ai.browserAllowLocalNetwork')"
+          />
+        </div>
+        <div v-if="alwaysAllowedTools.length > 0" class="setting-item always-allowed">
+          <div class="setting-info">
+            <div class="setting-label">{{ $t('profile.ai.alwaysAllowedTools') }}</div>
+            <div class="setting-desc">{{ $t('profile.ai.alwaysAllowedToolsDesc') }}</div>
+            <ul class="always-allowed-list">
+              <li v-for="name in alwaysAllowedTools" :key="name" class="always-allowed-item">
+                <span class="always-allowed-name">{{ alwaysAllowedLabel(name) }}</span>
+                <AppButton
+                  variant="text"
+                  size="small"
+                  :aria-label="
+                    $t('profile.ai.alwaysAllowedRemoveLabel', { name: alwaysAllowedLabel(name) })
+                  "
+                  @click="removeAlwaysAllowed(name)"
+                >
+                  {{ $t('profile.ai.alwaysAllowedRemove') }}
+                </AppButton>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </section>
@@ -469,6 +570,30 @@ watch(persistentAutoResume, async (enabled) => {
 .setting-desc {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.always-allowed-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.always-allowed-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-hover);
+}
+
+.always-allowed-name {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
 }
 
 .rounds-input {

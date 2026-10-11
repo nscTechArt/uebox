@@ -725,8 +725,11 @@ function createSnapshotTool(snapshots: TeamSnapshots): UnrealAgentTool<unknown> 
   return defineTool<typeof snapshotInput, unknown>({
     name: 'team_snapshot',
     namespace: 'core',
-    // 回滚会关掉编辑器、改写工程文件
+    // 回滚会关掉编辑器、改写工程文件，编辑器里没保存的改动会丢
     risk: 'destructive',
+    // list 只读；save 只多存一份。回滚虽然先存了当前状态，但未保存的改动救不回，仍要问
+    riskFor: ({ action }) =>
+      action === 'list' ? 'safe' : action === 'save' ? 'mutating' : 'destructive',
     concurrency: 'sequential',
     description:
       '工程快照。每个队员交回一件改了东西的活，盒子都会自动存一份（回话里有编号）。' +

@@ -58,7 +58,8 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     `- A shared workspace folder every teammate can read and write: ${input.workspaceDir}`,
     '- Teammates do not see this conversation. What they know is what you send them, what is in the workspace, and what is on the board.',
     '- The Unreal editor is one seat. Editor writes from different teammates queue automatically; anything off the editor — documents, code files, generated images and models, data tables — proceeds in parallel.',
-    "- Build in a new project you create. Never modify the user's existing projects.",
+    // 默认新建；但用户在目标里点名了一个已有工程，那就是要在它里面做，不能拒
+    "- Build in a new project you create, and leave the user's other projects alone. If the objective names an existing project to work in, confirm that with the user once, then build there.",
     EXPOSURE_NOTE,
     '- If the editor crashes, Unreal Box reopens the project on its own and tells you. Whatever was not saved is lost, so save as work lands.',
     '- Every time a teammate hands back work that changed something, Unreal Box snapshots the project. `team_snapshot` lists them and can roll the project back to one.',

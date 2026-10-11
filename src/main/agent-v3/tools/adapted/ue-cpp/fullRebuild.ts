@@ -233,8 +233,10 @@ export function createCppFullRebuildTool(): UnrealAgentTool<FullRebuildResult> {
   return defineTool<typeof InputSchema, FullRebuildResult>({
     name: 'cpp_full_rebuild',
     namespace: 'ue.cpp',
-    // 关掉用户的编辑器 —— 始终要用户点头
+    // 声明最坏情况：discard_unsaved 会丢掉未保存的改动
     risk: 'destructive',
+    // 不丢改动的那次（有未保存就拒绝并列清单）按 mutating 走：关了还会重开
+    riskFor: ({ discard_unsaved }) => (discard_unsaved === true ? 'destructive' : 'mutating'),
     concurrency: 'sequential',
     input: InputSchema,
     description:

@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { describePositionalRotatorRefusal, findPositionalRotatorCalls } from './pythonRotatorGuard'
+import { describePositionalRotatorWarning, findPositionalRotatorCalls } from './pythonRotatorGuard'
 
 describe('findPositionalRotatorCalls', () => {
   it('三个位置参数 —— 真机翻车的那一行', () => {
@@ -95,10 +95,10 @@ describe('findPositionalRotatorCalls', () => {
   })
 })
 
-describe('describePositionalRotatorRefusal', () => {
+describe('describePositionalRotatorWarning', () => {
   // 实参自己带着轴名的，按名字对 —— 按 (pitch, yaw, roll) 硬映射给的「照抄版」是转乱的
   it('实参带轴名时按名字给关键字写法', () => {
-    const text = describePositionalRotatorRefusal(
+    const text = describePositionalRotatorWarning(
       findPositionalRotatorCalls('r = unreal.Rotator(rot.roll, rot.pitch, rot.yaw + 90)')
     )
     expect(text).toContain('unreal.Rotator(roll=rot.roll, pitch=rot.pitch, yaw=rot.yaw + 90)')
@@ -106,17 +106,20 @@ describe('describePositionalRotatorRefusal', () => {
   })
 
   it('说清顺序、给出可照抄的关键字重写', () => {
-    const text = describePositionalRotatorRefusal(
+    const text = describePositionalRotatorWarning(
       findPositionalRotatorCalls('unreal.Rotator(0.0, yaw, 0.0)')
     )
     expect(text).toContain('(roll, pitch, yaw)')
     expect(text).toContain('第 1 行')
     expect(text).toContain('unreal.Rotator(roll=0.0, pitch=0.0, yaw=yaw)')
-    expect(text).toContain('没有执行')
+    // 是提醒不是拒绝：脚本已经跑了，要模型回读确认
+    expect(text).toContain('脚本已执行')
+    expect(text).toContain('回读')
+    expect(text).not.toContain('没有执行')
   })
 
   it('两个参数时不瞎猜映射，只给模板', () => {
-    const text = describePositionalRotatorRefusal(
+    const text = describePositionalRotatorWarning(
       findPositionalRotatorCalls('unreal.Rotator(0, 90)')
     )
     expect(text).toContain('unreal.Rotator(roll=…, pitch=…, yaw=…)')

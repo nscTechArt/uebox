@@ -52,10 +52,13 @@ export function normalizeServer(id: string, raw: unknown): McpServerConfig | nul
   const disabled = source.disabled === true
   const allowedTools = strArray(source.allowedTools)
   const readOnlyTools = strArray(source.readOnlyTools)
+  // 只认 true：信任是放宽审批的开关，手改坏的配置不能变成「信任」
+  const trusted = source.trusted === true
   const common = {
     ...(disabled ? { disabled } : {}),
     ...(allowedTools ? { allowedTools } : {}),
-    ...(readOnlyTools ? { readOnlyTools } : {})
+    ...(readOnlyTools ? { readOnlyTools } : {}),
+    ...(trusted ? { trusted } : {})
   }
 
   // 有 url 就是远程，即使没写 type —— Claude Desktop 的配置里 type 常常省略

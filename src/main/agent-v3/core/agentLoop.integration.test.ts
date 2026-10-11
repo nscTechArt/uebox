@@ -324,7 +324,7 @@ describe('审批门', () => {
   })
 
   // 这是审批门最关键的一条：拒绝必须真的拦住，而不是只在界面上显示一下
-  it('拒绝后工具不执行，且模型收到「不要重试」的指示', async () => {
+  it('拒绝后工具不执行，且模型收到「这一轮不要自行重试」的指示', async () => {
     const { agent, faux, asked } = setupWithApproval('reject')
     faux.setResponses([
       fauxAssistantMessage([fauxToolCall('danger_delete', {}, { id: 'c1' })]),
@@ -335,7 +335,7 @@ describe('审批门', () => {
 
     expect(asked).toEqual(['danger_delete'])
     expect(calls).toEqual([])
-    expect(JSON.stringify(agent.state.messages)).toContain('不要重试')
+    expect(JSON.stringify(agent.state.messages)).toContain('这一轮不要自行重试')
   })
 })
 

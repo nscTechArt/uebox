@@ -29,6 +29,7 @@ import {
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './teamPrompt'
 import { parseGoalCommand, parseVerdict } from '../goalLoop'
 import type { SubAgentResult } from '../../tools/builtin/task'
+import { effectiveRisk } from '../../tools/defineTool'
 
 /**
  * 工作室模式里盒子负责的那几件事：认命令、排钥匙、记账、派活、交付闸。
@@ -405,6 +406,20 @@ describe('团队工具', () => {
     expect(Object.keys(tools())).not.toContain('team_snapshot')
   })
 
+  it('快照按动作算风险：看和存不弹窗，回滚会丢未保存的改动仍要问', () => {
+    const snapshot = createTeamTools({
+      store,
+      objective: 'x',
+      namespaces: [],
+      runMember: async () => ok('done'),
+      runAcceptance: async () => 'VERDICT: PASS',
+      snapshots: { save: async () => null, list: async () => [], rollback: async () => '' }
+    }).find((tool) => tool.name === 'team_snapshot')!
+    expect(effectiveRisk(snapshot.unrealBox, { action: 'list' })).toBe('safe')
+    expect(effectiveRisk(snapshot.unrealBox, { action: 'save' })).toBe('mutating')
+    expect(effectiveRisk(snapshot.unrealBox, { action: 'rollback', id: 'a' })).toBe('destructive')
+  })
+
   it('任务板渲染：计数、负责人、证据', () => {
     const text = renderBoard([
       { id: 't1', title: '灰盒', status: 'done', owner: '地编', evidence: 'a.png', updatedAt: 0 },
@@ -557,6 +572,14 @@ describe('提示词只写环境，不写方法论', () => {
   it('不点名任何岗位', () => {
     const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
     expect(brief).not.toMatch(/art director|level designer|designer|programmer|美术|策划|程序/i)
+  })
+
+  /** 默认新建工程；但用户在目标里点名已有工程时，不能一口拒掉 */
+  it('默认新建工程，点名已有工程时确认后在里面做', () => {
+    const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
+    expect(brief).toMatch(/Build in a new project you create/)
+    expect(brief).toMatch(/names an existing project.*confirm.*build there/)
+    expect(brief).not.toMatch(/Never modify the user's existing projects/)
   })
 
   it('验收员拿到同一份交付标准，要一行结论', () => {

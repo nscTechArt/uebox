@@ -1609,7 +1609,9 @@ export async function enablePluginsForProject(
       success: false,
       error:
         `本机没有这些插件：${check.notInstalled.join('、')}。写进去会让工程打不开，所以一个都没写。` +
-        '去掉它们再调一次；本机没有的插件只能让用户自己装（导入结果里有 Fab 链接的就给他）。'
+        '去掉它们再调一次，或者先把插件装进工程的 Plugins 目录再调：免费、公开源码的插件，' +
+        '经用户同意可以用 run_shell_command 把源码 git clone 或拷进去（工程有 C++ 时随后 cpp_full_rebuild）；' +
+        'Fab / 商城上的和付费插件请用户自己装（导入结果里有 Fab 链接的就给他）。'
     }
   }
 

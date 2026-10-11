@@ -350,6 +350,9 @@ export default {
       command: 'Launch command',
       url: 'Server URL',
       disabled: 'Disabled',
+      trusted: 'Trust this server',
+      trustedHint:
+        'When on, its tools no longer ask for confirmation in "Approve for me" mode. "Ask for approval" mode still asks.',
       env: 'Environment',
       envPlaceholder: 'KEY=VALUE',
       envHint: 'Follow the service instructions: one KEY=VALUE per line, or paste JSON.'
@@ -2994,6 +2997,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       confirm: 'Confirm',
       reject: 'Reject',
       allowForChat: 'Allow for this chat',
+      allowForever: 'Always allow',
+      allowForeverHint:
+        'Stops asking for this operation in every chat. You can remove it in Settings → AI Assistant.',
       whatIsThis: 'What is this?',
       queued: '{count} more waiting',
       // Named by risk. Everything non-browser used to collapse into "Other
@@ -3170,6 +3176,17 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       persistentAutoResume: 'Auto-resume on failure',
       persistentAutoResumeDesc:
         'When your gateway is unstable, pick up from where it stopped every 60s. Gives up after 30 minutes of failures. Failed attempts are left out of the chat.',
+      assetReadonlyLock: 'Make assets read-only while editing',
+      assetReadonlyLockDesc:
+        'While the AI edits an asset, its .uasset file is set to read-only so a save in the editor cannot overwrite the changes. Those assets cannot be saved in the editor until the AI finishes.',
+      browserAllowLocalNetwork: 'Allow browser access to local network',
+      browserAllowLocalNetworkDesc:
+        'Lets the Agent browser open this computer and local network addresses (such as localhost or 192.168.x.x), for example a local dev server. Links on web pages can reach these addresses too.',
+      alwaysAllowedTools: 'Always allowed operations',
+      alwaysAllowedToolsDesc:
+        'These operations no longer ask for confirmation in any chat. Read-only chats are not affected.',
+      alwaysAllowedRemove: 'Remove',
+      alwaysAllowedRemoveLabel: 'Stop always allowing "{name}"',
       goalMaxRounds: 'Goal mode round limit',
       goalMaxRoundsDesc:
         'With /goal, a failed review sends the work back for another round. After this many rounds it stops and hands back to you. Each round adds a review that may compile Blueprints or run PIE. Applies from your next message. 1–50.',

@@ -33,10 +33,15 @@ import {
   listLocks,
   runWithLockOwner
 } from '../core/assetLock'
-import { resetEnforcementState, setProjectRootResolver } from '../core/assetLockEnforcement'
+import {
+  resetEnforcementState,
+  setProjectRootResolver,
+  setReadonlyLockEnabledResolver
+} from '../core/assetLockEnforcement'
 import { resetReadonlyGuardCaches } from '../core/assetReadonlyGuard'
 import { invalidateSettingsCache } from '../../ai/store'
 import { estimateTokens } from '../../../shared/tokenBudget'
+import { effectiveRisk } from './defineTool'
 
 beforeEach(() => resetToolCacheForTest())
 
@@ -161,15 +166,14 @@ describe('buildAllTools', () => {
     const byName = new Map(buildAllTools().map((t) => [t.name, t]))
     expect(byName.get('ue_destroy_actor')?.unrealBox.risk).toBe('destructive')
     expect(byName.get('ue_content_delete')?.unrealBox.risk).toBe('destructive')
-    // 素材库的删除是软删除（进回收站），仍然按 destructive 登记：
-    // auto-edit 档位下也要问，因为删错时用户得自己去回收站里认哪条是他的
-    expect(byName.get('delete_assets')?.unrealBox.risk).toBe('destructive')
+    // 素材库的删除是软删除（进回收站），restore_assets 原样捞得回来，按可撤销的改动登记
+    expect(byName.get('delete_assets')?.unrealBox.risk).toBe('mutating')
     // 删除有了，恢复就必须有 —— 否则 agent 删错了自己救不回来
     expect(byName.get('restore_assets')?.unrealBox.risk).toBe('mutating')
     expect(byName.get('move_assets')?.unrealBox.risk).toBe('mutating')
     // 删文件夹会连里面的资产一起带走，对应的撤销键是 restore_folders ——
     // 光有 restore_assets 捞不回目录结构
-    expect(byName.get('delete_folders')?.unrealBox.risk).toBe('destructive')
+    expect(byName.get('delete_folders')?.unrealBox.risk).toBe('mutating')
     expect(byName.get('restore_folders')?.unrealBox.risk).toBe('mutating')
     // 标签按风险拆成两个：改名/改色可逆，删除和合并没有回收站
     expect(byName.get('manage_tags')?.unrealBox.risk).toBe('mutating')
@@ -182,6 +186,63 @@ describe('buildAllTools', () => {
     expect(byName.get('blueprint_get_graph')?.unrealBox.risk).toBe('safe')
     expect(byName.get('blueprint_search_nodes')?.unrealBox.risk).toBe('safe')
     expect(byName.get('ue_content_search')?.unrealBox.risk).toBe('safe')
+  })
+
+  /**
+   * 开源版放宽审批：声明的仍是最坏情况，按参数降到 mutating 的那些，
+   * 默认的 auto-edit 下不再弹窗；真会丢东西的那种调用照旧 destructive。
+   */
+  describe('按参数降风险', () => {
+    const risk = (name: string, args: unknown): string => {
+      const tool = buildAllTools().find((t) => t.name === name)
+      expect(tool, name).toBeDefined()
+      return effectiveRisk(tool!.unrealBox, args)
+    }
+
+    it.each(['ue_open_level', 'ue_new_level', 'ue_restart_editor'])(
+      '%s 不带 force 时插件会拦未保存，按 mutating；带 force 才 destructive',
+      (name) => {
+        expect(risk(name, {})).toBe('mutating')
+        expect(risk(name, { force: false })).toBe('mutating')
+        expect(risk(name, { force: true })).toBe('destructive')
+      }
+    )
+
+    it('ue_new_level 给了 save_as 会盖掉同路径关卡，仍按 destructive', () => {
+      expect(risk('ue_new_level', { save_as: '/Game/Maps/New' })).toBe('destructive')
+    })
+
+    it('project_manage 只往外加的动作按 mutating，改 .uproject 和覆盖导入仍 destructive', () => {
+      for (const action of [
+        'create_project',
+        'open_project',
+        'import_assets',
+        'import_assets_to_scene',
+        'setup_level_sequence'
+      ]) {
+        expect(risk('project_manage', { action }), action).toBe('mutating')
+      }
+      expect(risk('project_manage', { action: 'enable_plugins' })).toBe('destructive')
+      expect(risk('project_manage', { action: 'import_assets', overwrite: true })).toBe(
+        'destructive'
+      )
+      expect(risk('project_manage', { action: 'nonsense' })).toBe('destructive')
+    })
+
+    it('blueprint_function_signature 只有加参数是 mutating，删参数、删函数撤不回', () => {
+      expect(risk('blueprint_function_signature', { action: 'add_param' })).toBe('mutating')
+      expect(risk('blueprint_function_signature', { action: 'remove_param' })).toBe('destructive')
+      expect(risk('blueprint_function_signature', { action: 'remove_function' })).toBe(
+        'destructive'
+      )
+    })
+
+    it('撤销和删节点开在插件事务里，ue_undo 撤得回来，声明为 mutating', () => {
+      const byName = new Map(buildAllTools().map((t) => [t.name, t]))
+      expect(byName.get('ue_undo')?.unrealBox.risk).toBe('mutating')
+      expect(byName.get('blueprint_delete_node')?.unrealBox.risk).toBe('mutating')
+      expect(byName.get('material_delete_node')?.unrealBox.risk).toBe('mutating')
+    })
   })
 
   it('改同一份图表的工具声明为串行', () => {
@@ -317,7 +378,7 @@ describe('buildAllTools', () => {
 
     expect(byName.has('blueprint_set_variable_meta')).toBe(true)
     expect(byName.has('blueprint_event_dispatcher')).toBe(true)
-    // 删变量不可逆，且会让引用它的节点变成孤儿 —— 必须过审批门
+    // 删变量不可逆（插件端没开事务），且会让引用它的节点变成孤儿 —— 必须过审批门
     expect(byName.get('blueprint_remove_variable')?.unrealBox.risk).toBe('destructive')
   })
 
@@ -586,6 +647,7 @@ describe('资产锁接线', () => {
     mkdirSync(path.dirname(file), { recursive: true })
     writeFileSync(file, 'bytes', 'utf8')
     setProjectRootResolver(async () => root)
+    setReadonlyLockEnabledResolver(async () => true)
 
     try {
       acquire(CONN, 'me', ['/Game/BP_Door'])
@@ -601,6 +663,7 @@ describe('资产锁接线', () => {
     } finally {
       chmodSync(file, 0o666)
       setProjectRootResolver(undefined)
+      setReadonlyLockEnabledResolver(undefined)
       resetEnforcementState()
       resetReadonlyGuardCaches()
       rmSync(root, { recursive: true, force: true })

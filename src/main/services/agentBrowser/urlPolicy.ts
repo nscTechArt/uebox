@@ -116,13 +116,62 @@ export function isPrivateAddress(hostname: string): boolean {
 }
 
 /**
+ * 「允许访问本机和局域网」这一档（设置 → AI，`agentBrowserAllowLocalNetwork`，默认关）。
+ *
+ * 默认关：浏览器打开的往往是不受信任的网页，页面里的链接、跳转、`window.open`
+ * 都会走到这里 —— 放开内网，页面就能借 agent 的手去访问路由器后台和本机服务。
+ * 用户在本机起了开发服务器、想让 agent 看一眼时再打开。
+ *
+ * 这个模块保持纯函数、不碰设置：开关的读法由宿主注入（`agentBrowser/index.ts`
+ * 在加载时注册），每次校验**现读**，用户拨完开关下一次导航就生效。调用方也可以
+ * 直接传 `allowLocalNetwork`，传了以传入的为准。
+ */
+export interface UrlPolicyOptions {
+  allowLocalNetwork?: boolean
+}
+
+let localNetworkProvider: () => boolean = () => false
+
+/** 注入「现在允不允许本机和局域网」的读法。传 undefined 恢复默认（不允许） */
+export function setLocalNetworkPolicy(provider: (() => boolean) | undefined): void {
+  localNetworkProvider = provider ?? (() => false)
+}
+
+function localNetworkAllowed(options?: UrlPolicyOptions): boolean {
+  if (options?.allowLocalNetwork !== undefined) return options.allowLocalNetwork
+  try {
+    return localNetworkProvider()
+  } catch {
+    // 读不到设置就按默认的关处理 —— 拿不准时不放开内网
+    return false
+  }
+}
+
+/**
+ * 放开局域网时仍然挡的：云主机的元数据地址（169.254/16，AWS / Azure / GCP 都在这一段；
+ * `metadata.google.internal` 这类域名解析出来也落在这里，由 DNS 预检挡）。
+ * 那不是用户的开发服务器，是 SSRF 最经典的目标，放开局域网的理由覆盖不到它。
+ */
+function isCloudMetadataAddress(hostname: string): boolean {
+  const octets = parseIPv4(hostname)
+  return octets !== null && octets[0] === 169 && octets[1] === 254
+}
+
+/** 按当前开关判断这个主机能不能去 */
+function isBlockedHost(hostname: string, options?: UrlPolicyOptions): boolean {
+  if (!isPrivateAddress(hostname)) return false
+  if (!localNetworkAllowed(options)) return true
+  return !hostname || isCloudMetadataAddress(hostname)
+}
+
+/**
  * 校验一个要导航过去的 URL。
  *
  * 注意 `new URL()` 已经按 WHATWG 规范把 `http://2130706433/`、
  * `http://0x7f.1/` 这类写法规范化成点分十进制，所以这里不需要自己解析
  * 十进制/十六进制 IP —— 但**必须**在规范化之后判断，不能先做字符串匹配。
  */
-export function checkNavigationUrl(raw: string): UrlCheckResult {
+export function checkNavigationUrl(raw: string, options?: UrlPolicyOptions): UrlCheckResult {
   let url: URL
   try {
     url = new URL(raw)
@@ -139,8 +188,14 @@ export function checkNavigationUrl(raw: string): UrlCheckResult {
     return { ok: false, reason: '网址里带用户名或密码，已拒绝' }
   }
 
-  if (isPrivateAddress(url.hostname)) {
-    return { ok: false, reason: `不允许访问本机或内网地址：${url.hostname}` }
+  if (isBlockedHost(url.hostname, options)) {
+    return {
+      ok: false,
+      reason: localNetworkAllowed(options)
+        ? `不允许访问云主机元数据地址：${url.hostname}`
+        : `不允许访问本机或内网地址：${url.hostname}。` +
+          '需要访问本机开发服务器时，请用户在「设置 → AI 助手 → 隐私」中开启「允许浏览器访问局域网」。'
+    }
   }
 
   return { ok: true, url }
@@ -179,9 +234,12 @@ function isFakeIpAddress(address: string): boolean {
  *
  * fake-ip 段先摘出去，理由见 `isFakeIpAddress`。
  */
-export function checkResolvedAddresses(addresses: readonly string[]): UrlCheckResult | null {
+export function checkResolvedAddresses(
+  addresses: readonly string[],
+  options?: UrlPolicyOptions
+): UrlCheckResult | null {
   const real = addresses.filter((address) => !isFakeIpAddress(address))
-  const bad = real.find((address) => isPrivateAddress(address))
+  const bad = real.find((address) => isBlockedHost(address, options))
   if (!bad) return null
 
   return {

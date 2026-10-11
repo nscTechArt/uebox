@@ -22,7 +22,7 @@
  * 现在不做的理由换成了：自动重绑有「该绑到哪一个」的歧义（同名 Actor 有多个、
  * 或者压根不该绑同名的那个），猜错比不修更糟。。
  *
- * 所以这里的选择仍然是**查出来并说清楚怎么点**，而不是假装修好：把切轨绑到一个
+ * 所以这里的选择仍然是**查出来并说清楚怎么修**，而不是假装修好：把切轨绑到一个
  * 解析不到对象的绑定上，渲出来照样是黑的，而用户会以为已经修好了。
  */
 
@@ -65,13 +65,18 @@ const InputSchema = z.object({
  * （工具集已从 Python 迁到插件 C++），所以「只能手点」这条**技术上已经不成立**。
  * 但自动重绑有歧义 —— 同名 Actor 有多个、或者根本不该绑到同名的那个 ——
  * 猜错了比不修更糟。做成工具要先设计消歧规则，
- * 的四档方案。在那之前这里仍然只给步骤，不代劳。
+ * 的四档方案。在那之前这个工具不自动重绑。
+ *
+ * 但「工具不自动做」不等于「只能用户手点」：引擎 5.0 起就有
+ * `LevelSequenceEditorSubsystem.replace_binding_with_actors`（BlueprintCallable，
+ * Python 够得着）。用户说清楚绑到哪个 Actor 时，歧义就没了，可以经他同意走 Python。
  */
 const REBIND_STEPS = [
   '这条绑定指向的对象在关卡里已经不存在了，补了切轨照样是黑的。先修绑定：',
   '  1. 打开这条序列，左上角扳手 → Actions → Advanced → Rebind Possessable References',
   '  2. 没生效的话，右键那条相机轨道 → Assign Actor → 选关卡里的那台相机',
-  '（自动重绑要先解决「绑到哪一个」的歧义，还没做，所以这一步暂时只能手点。）'
+  '（本工具不自动重绑，因为「绑到哪一个」有歧义。用户指明要绑的 Actor 并同意后，' +
+    '也可以用 ue_run_python_script 调 LevelSequenceEditorSubsystem.replace_binding_with_actors 代为重绑。）'
 ]
 
 interface CameraCutsOutput {

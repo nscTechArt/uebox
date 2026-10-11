@@ -12,6 +12,8 @@ import { EventEmitter } from 'events'
 import { join } from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { effectiveRisk } from '../../defineTool'
+
 const callRequest = vi.fn()
 const findRunningProjectByPath = vi.fn()
 const openPath = vi.fn()
@@ -178,6 +180,14 @@ describe('纯函数', () => {
 })
 
 describe('cpp_full_rebuild', () => {
+  it('不丢改动的那次按 mutating 走；discard_unsaved 才是 destructive', () => {
+    const meta = createCppFullRebuildTool().unrealBox
+    expect(meta.risk).toBe('destructive')
+    expect(effectiveRisk(meta, {})).toBe('mutating')
+    expect(effectiveRisk(meta, { discard_unsaved: false })).toBe('mutating')
+    expect(effectiveRisk(meta, { discard_unsaved: true })).toBe('destructive')
+  })
+
   it('有未保存的改动：拒绝并列清单，不编译', async () => {
     findRunningProjectByPath.mockResolvedValue({ pid: 99 })
     callRequest.mockResolvedValue({

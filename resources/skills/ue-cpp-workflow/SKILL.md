@@ -1,6 +1,6 @@
 ---
 name: ue-cpp-workflow
-description: Writes, adds and compiles C++ in an Unreal project, then hot-reloads it into the running editor. Use when the user asks for gameplay code, a new UCLASS/USTRUCT/UENUM, an Actor or Component or Subsystem class, a module dependency change, or says things like "写个 C++ 类"、"加个组件"、"这段代码编不过"、"帮我改下 Build.cs". Do not use for Blueprint graph editing, for material graphs, for Sequencer, or for modifying the engine's own source under Engine/Source.
+description: Writes, adds and compiles C++ in an Unreal project, then hot-reloads it into the running editor. Use when the user asks for gameplay code, a new UCLASS/USTRUCT/UENUM, an Actor or Component or Subsystem class, a module dependency change, or says things like "写个 C++ 类"、"加个组件"、"这段代码编不过"、"帮我改下 Build.cs". Also covers editing the engine's own source under Engine/Source when the user asks for it. Do not use for Blueprint graph editing, for material graphs, or for Sequencer.
 ---
 
 # UE C++ 工作流
@@ -107,11 +107,18 @@ cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑�
 
 ## Escalation
 
-工具做不到、需要用户本人处理的只有这些：
+需要用户点头才做的：
 
-- 编辑器卡死、插件连不上时关不掉它 —— `cpp_full_rebuild` 会说明；用户同意丢弃未保存改动才能强行结束进程
-- 开启 / 关闭 Live Coding（那是用户的编辑器偏好，不替他改）
-- 修改引擎自身源码、安装 Visual Studio / 编译工具链
+- 编辑器卡死、插件连不上时关不掉它 —— `cpp_full_rebuild` 会说明；用户同意丢弃未保存改动后，
+  用 `run_shell_command` 跑 `taskkill` 结束进程
+- 开启 / 关闭 Live Coding —— 那是用户的编辑器偏好，不主动改。他要改时用 `ue_set_config`
+  （`EditorPerProjectUserSettings`，`/Script/LiveCoding.LiveCodingSettings`，`bEnabled`），
+  然后 `ue_save` 再 `ue_restart_editor`
+- 修改引擎自身源码（`Engine/Source`）—— 只在用户要求时改。先说清两件事：安装版引擎
+  （Launcher / Fab 装的）改了源码也不会重新编译，只有源码版引擎才生效；源码版改完要整个
+  引擎重编，可能几十分钟到几小时。他确认后再动手，改之前列出要改的文件
+
+工具做不到、需要用户本人处理的：安装 Visual Studio / 编译工具链。
 
 别的（建类、编译、关编辑器完整重编、重启编辑器）都有工具，**不要交给用户**。
 用户明确授权你直接改文件时，照做就是 —— 这里没有「授权也解除不了」的限制。

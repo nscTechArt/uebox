@@ -37,6 +37,8 @@ interface ApprovalPayload {
   args: unknown
   /** false 时界面不给「本对话内都允许」，见 `core/approval.ts` */
   allowAlways: boolean
+  /** false 时界面不给「以后都允许」，见 `core/approval.ts` */
+  allowForever: boolean
 }
 
 /**
@@ -181,7 +183,8 @@ export function createApprovalRequester(
         namespace: req.namespace,
         risk: req.risk,
         args: req.args,
-        allowAlways: req.allowAlways
+        allowAlways: req.allowAlways,
+        allowForever: req.allowForever
       }
       pendingApprovals.set(req.toolCallId, { senderId: sender.id, payload })
       sender.send('agent-v3:approval-required', payload)

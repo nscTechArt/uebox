@@ -68,13 +68,13 @@ describe('整台电脑', () => {
 })
 
 describe('仅虚幻相关（默认档）', () => {
-  // 设置读不出来（配置损坏、旧版本没这个字段）时宁可窄不宜宽：
-  // 窄了用户当场看到一句写明原因的拒绝，宽了他什么都看不到
-  it('读设置抛错时按收窄档走', async () => {
+  // 设置读不出来时退回默认档 `full`，和「没选过」同一个兜底 —— 否则设置页显示
+  // 「整台电脑」，实际却按收窄档挡，界面和生效的对不上。凭据目录由 pathBoundary 另外挡
+  it('读设置抛错时按默认档（整台电脑）走', async () => {
     getAgentFileAccessScope.mockImplementation(() => {
       throw new Error('配置文件坏了')
     })
-    expect(await assertInAccessScope('D:/素材/wall.fbx')).toBeDefined()
+    expect(await assertInAccessScope('D:/素材/wall.fbx')).toBeUndefined()
   })
 
   it.each([

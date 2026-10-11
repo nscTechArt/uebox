@@ -34,7 +34,8 @@
  * 「模型自己算 24 个点」的一种用法，和别的运镜没有区别。不留兼容层。
  *
  * 未实现：变焦动画、重定时、批量换引用、变体批处理。见文档 §8 的顺序。
- * possessable 的重新绑定引擎没导出 Python 接口，只能让用户手点（见 cameraCuts.ts）。
+ * possessable 的重新绑定没有专门工具：默认给用户手点的步骤，用户指明目标并同意时
+ * 走 Python 的 `LevelSequenceEditorSubsystem.replace_binding_with_actors`（见 cameraCuts.ts）。
  *
  * ## 那次崩溃
  *

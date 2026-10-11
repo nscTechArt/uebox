@@ -105,6 +105,13 @@ interface AppSettings {
    */
   agentDisabledTools: string[]
   /**
+   * 审批卡片上点过「以后都允许」的工具名。默认空。
+   *
+   * 按工具名记，覆盖的是工具声明的风险；逐次审批的工具和只读对话不受它影响
+   * （判定在 `agent-v3/core/approval.ts`）。用户在「偏好设置 → AI」里能看到、能移除。
+   */
+  agentAlwaysAllowedTools: string[]
+  /**
    * 工具搜索模式下，偏离内置常驻清单的那些工具。`true` = 强行常驻，`false` = 改成搜索加载。
    *
    * 同样只存**差量**：内置常驻清单会随实验结论调整（见 `toolSearch.ts` 的
@@ -137,6 +144,22 @@ interface AppSettings {
    * 结果里混着一堆当下动不了的资产，比只看眼前这个库更让人迷糊。
    */
   assetCrossVaultSearch: boolean
+  /**
+   * agent 改资产期间，把它锁住的 `.uasset` 设成只读，挡住用户在编辑器里手动保存。
+   *
+   * 默认关：只读位挡的是**用户自己**的 Ctrl+S —— 用户在编辑器里存不了自己的
+   * 改动、弹一个「文件只读」，比偶尔两边写同一个资产更让人困惑。会话之间的
+   * 内存锁（`agent-v3/core/assetLock.ts`）不受这个开关影响。
+   */
+  assetReadonlyLock: boolean
+  /**
+   * Agent 浏览器能不能打开本机和局域网地址（localhost、192.168.x.x、*.local）。
+   *
+   * 默认关：浏览器打开的往往是不受信任的网页，网页里的链接和跳转能借 agent
+   * 的手去访问路由器后台、本机服务（SSRF）。用户在本机起了开发服务器、
+   * 想让 agent 看一眼时再打开。
+   */
+  agentBrowserAllowLocalNetwork: boolean
 }
 
 /**
@@ -162,6 +185,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   agentGoalMaxRounds: DEFAULT_GOAL_MAX_ROUNDS,
   // 默认全部打开。设置页里那一长串开关，起手状态就该等于「什么都没设置过」
   agentDisabledTools: [],
+  agentAlwaysAllowedTools: [],
   agentResidentTools: {},
   // 默认开着，但只在窗口不在前台时响。盒子干的是长活，用户派完就切回虚幻里
   // 接着做自己的事 —— 而审批**超时五分钟按拒绝算**，不提醒的话他回来只看到
@@ -174,7 +198,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   // 默认开着。崩溃报告窗口不点就一直挡着，agent 那一轮活也就停在那儿；
   // 重开之前会把未保存的自动存档备份好，不替用户决定恢复不恢复
   autoRecoverEditorCrash: true,
-  assetCrossVaultSearch: false
+  assetCrossVaultSearch: false,
+  assetReadonlyLock: false,
+  agentBrowserAllowLocalNetwork: false
 }
 
 /** 只保留字符串项；不是数组就当空名单 */
@@ -246,13 +272,17 @@ class AppSettingsManager {
           // 这两份名单只会让模型少拿到工具，读坏了宁可全给，不能让人对着一个
           // 空空如也的助手查半天
           agentDisabledTools: sanitizeToolNames(mergedSettings.agentDisabledTools),
+          agentAlwaysAllowedTools: sanitizeToolNames(mergedSettings.agentAlwaysAllowedTools),
           agentResidentTools: sanitizeResidentTools(mergedSettings.agentResidentTools),
           notifyTurnComplete: mergedSettings.notifyTurnComplete,
           notifyApprovalRequired: mergedSettings.notifyApprovalRequired,
           notifyQuestionRequired: mergedSettings.notifyQuestionRequired,
           hideWindowOnProjectLaunch: mergedSettings.hideWindowOnProjectLaunch,
           autoRecoverEditorCrash: mergedSettings.autoRecoverEditorCrash,
-          assetCrossVaultSearch: mergedSettings.assetCrossVaultSearch === true
+          assetCrossVaultSearch: mergedSettings.assetCrossVaultSearch === true,
+          // 这两个都是放宽或改动用户文件的开关，只有明确写着 true 才算开
+          assetReadonlyLock: mergedSettings.assetReadonlyLock === true,
+          agentBrowserAllowLocalNetwork: mergedSettings.agentBrowserAllowLocalNetwork === true
         }
       }
     } catch (error) {
@@ -297,6 +327,30 @@ class AppSettingsManager {
   }
 
   /** 同上：先落盘再更新内存 */
+  setAssetReadonlyLock(enabled: boolean): void {
+    const next = { ...this.settings, assetReadonlyLock: enabled }
+    writeFileSync(this.configPath, JSON.stringify(next, null, 2))
+    this.settings = next
+  }
+
+  /** 锁住的资产要不要设只读位。只认 true（见字段注释） */
+  getAssetReadonlyLock(): boolean {
+    return this.settings.assetReadonlyLock === true
+  }
+
+  /** 同上：先落盘再更新内存 */
+  setAgentBrowserAllowLocalNetwork(enabled: boolean): void {
+    const next = { ...this.settings, agentBrowserAllowLocalNetwork: enabled }
+    writeFileSync(this.configPath, JSON.stringify(next, null, 2))
+    this.settings = next
+  }
+
+  /** Agent 浏览器能不能访问本机和局域网地址。只认 true（见字段注释） */
+  getAgentBrowserAllowLocalNetwork(): boolean {
+    return this.settings.agentBrowserAllowLocalNetwork === true
+  }
+
+  /** 同上：先落盘再更新内存 */
   setAgentPersistentAutoResume(enabled: boolean): void {
     const next = { ...this.settings, agentPersistentAutoResume: enabled }
     writeFileSync(this.configPath, JSON.stringify(next, null, 2))
@@ -318,6 +372,27 @@ class AppSettingsManager {
     const next = { ...this.settings, agentDisabledTools: sanitizeToolNames(names) }
     writeFileSync(this.configPath, JSON.stringify(next, null, 2))
     this.settings = next
+  }
+
+  /** 「以后都允许」的名单整份替换（设置页移除一项时用）。先落盘再更新内存 */
+  setAgentAlwaysAllowedTools(names: string[]): void {
+    const next = {
+      ...this.settings,
+      agentAlwaysAllowedTools: [...new Set(sanitizeToolNames(names))]
+    }
+    writeFileSync(this.configPath, JSON.stringify(next, null, 2))
+    this.settings = next
+  }
+
+  /** 审批卡片上点了「以后都允许」。已在名单里就不重写文件 */
+  addAgentAlwaysAllowedTool(name: string): void {
+    const current = this.getAgentAlwaysAllowedTools()
+    if (current.includes(name)) return
+    this.setAgentAlwaysAllowedTools([...current, name])
+  }
+
+  getAgentAlwaysAllowedTools(): string[] {
+    return this.settings.agentAlwaysAllowedTools ?? []
   }
 
   /** 工具搜索模式下偏离内置常驻清单的那些 */

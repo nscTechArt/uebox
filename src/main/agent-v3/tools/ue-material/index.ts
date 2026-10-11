@@ -1257,8 +1257,8 @@ const deleteMaterialNode = defineUeTool({
   name: 'material_delete_node',
   namespace: NAMESPACE,
   method: 'material.delete_node',
-  // 删节点不可逆
-  risk: 'destructive',
+  // 插件端删节点开在事务里（进 agent 那条撤销栈），ue_undo 撤得回来
+  risk: 'mutating',
   concurrency: 'sequential',
   description: `从材质图表中删除一个节点。指向它的连线会一并断开。
 
@@ -1615,7 +1615,11 @@ material_get_graph）只认 UMaterial，传函数路径一律回 "Material not f
 FunctionOutput 也不在可建的节点类型里。所以别去试，会白跑好几轮还在用户工程里
 留下一个永远空着的函数资产。
 
-现在能走通的只有两条路：
+现在能走通的有三条路：
+- 经用户同意，用 ue_run_python_script 填：unreal.MaterialEditingLibrary 的
+  CreateMaterialExpressionInFunction 建节点（含 MaterialExpressionFunctionOutput /
+  FunctionInput）、ConnectMaterialExpressions 连线、最后 UpdateMaterialFunction
+  （Python 里是对应的 snake_case 名）。脚本自述不算数，写完要回读函数里的节点；
 - 让用户在材质编辑器里手工填这个函数（建好之后告诉他路径）；
 - 或者干脆别抽函数 —— 在每个材质里用 material_apply_graph 把那串节点搭出来。
 
@@ -1630,8 +1634,9 @@ function_path 填这里返回的路径。`,
     text:
       `已创建材质函数 ${r.function_name}（${r.function_path}），当前是空的。\n` +
       '⚠️ 这套工具**填不了它**：图表命令只认 UMaterial，拿这个路径去调 ' +
-      'material_apply_graph 会回 "Material not found"。要么请用户在材质编辑器里手工填，' +
-      '要么改用「在每个材质里直接搭那串节点」。\n' +
+      'material_apply_graph 会回 "Material not found"。可以经用户同意用 ue_run_python_script ' +
+      '调 unreal.MaterialEditingLibrary 的 CreateMaterialExpressionInFunction（Python 里是 snake_case）填，' +
+      '或请用户在材质编辑器里手工填，或改用「在每个材质里直接搭那串节点」。\n' +
       `填好之后在材质里引用：material_apply_graph 加一个节点 node_type="MaterialFunctionCall"，function_path="${r.function_path}"。`,
     details: r
   })

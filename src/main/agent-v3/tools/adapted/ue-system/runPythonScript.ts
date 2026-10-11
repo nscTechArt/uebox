@@ -10,7 +10,7 @@ import { z } from 'zod'
 
 import { runEditorPython } from '../../../core/editorPython'
 import { assertScriptAllowed } from '../../builtin/pathBoundary'
-import { describePositionalRotatorRefusal, findPositionalRotatorCalls } from './pythonRotatorGuard'
+import { describePositionalRotatorWarning, findPositionalRotatorCalls } from './pythonRotatorGuard'
 import { describeAutoAnsweredDialogs, describePythonErrorHints } from './pythonErrorHints'
 import { noteViewportMove, viewportCameraApiInScript } from '../ue-editor/viewportProvenance'
 import { discoverEnabledSkills } from '../../../capabilities/skills'
@@ -102,7 +102,7 @@ export function createRunPythonScriptTool(): V2Tool {
 【旋转一律写关键字】\`unreal.Rotator\` 的**位置参数顺序是 (roll, pitch, yaw)**，跟 JSON / 蓝图的
 (pitch, yaw, roll) 相反。\`unreal.Rotator(0, 90, 0)\` 得到的是 pitch=90 不是 yaw=90 —— 墙横着躺、
 镜头朝天，引擎不报任何错。所以写 \`unreal.Rotator(roll=0, pitch=0, yaw=90)\`；带位置参数的写法
-这个工具会直接拒绝执行。摆完东西用 ue_get_actor 回读，它会把旋转翻成「正面朝哪」的人话。
+照样执行，但回执会附一条顺序警告。摆完东西用 ue_get_actor 回读，它会把旋转翻成「正面朝哪」的人话。
 
 【注意】：脚本在编辑器主线程上同步执行，最多等待 5 分钟。超时或停止等待不代表 UE 已停止执行，先回读确认，不能直接重复修改。
 
@@ -152,11 +152,11 @@ export function createRunPythonScriptTool(): V2Tool {
       if (denied) return { success: false, error: denied }
 
       // unreal.Rotator(a, b, c) 的位置参数顺序是 (roll, pitch, yaw)，按直觉传会静默转错方向。
-      // 真机上 78 个部件因此全摆错。这里拦下来让模型改成关键字，比事后回读便宜得多。
+      // 真机上 78 个部件因此全摆错。不拦（照 UE 顺序写的也是位置参数），照常执行，
+      // 成功失败都在结果后面提醒回读确认、改成关键字（见 pythonRotatorGuard.ts）
       const rotatorHits = findPositionalRotatorCalls(script)
-      if (rotatorHits.length > 0) {
-        return { success: false, error: describePositionalRotatorRefusal(rotatorHits) }
-      }
+      const rotatorWarning =
+        rotatorHits.length > 0 ? `\n\n${describePositionalRotatorWarning(rotatorHits)}` : ''
 
       // 脚本要动关卡视口相机 —— 先记一笔，ue_screenshot 拍视口时会把它说出来。
       // 跑成没跑成都记：「跑成了但改坏了」正是要抓的情形
@@ -189,8 +189,9 @@ export function createRunPythonScriptTool(): V2Tool {
          */
         const hint = result.unconfirmed
           ? '\n不要再发命令试探 —— 主线程被占住时所有命令都会一起超时。' +
-            '先用 ue_session_health 看编辑器进程还在不在，真卡死了请用户重启编辑器，' +
-            '重启后先回读现场再继续。'
+            '先用 ue_session_health 看编辑器进程还在不在。真卡死了就告诉用户，' +
+            '问他是否同意结束编辑器进程（未保存的内容会丢）：同意就用 run_shell_command 跑 taskkill，' +
+            '再用 project_manage 重新打开工程；不同意就请他自己处理。重启后先回读现场再继续。'
           : ''
         // V3 的失败适配只保留 error/details；stdout 单独放顶层会被丢掉。
         return {
@@ -199,7 +200,8 @@ export function createRunPythonScriptTool(): V2Tool {
             (result.error ?? 'Python 执行失败') +
             describePythonErrorHints(`${result.error ?? ''}\n${result.stdout ?? ''}`, script) +
             describeAutoAnsweredDialogs(result.dialogs) +
-            hint,
+            hint +
+            rotatorWarning,
           details: { stdout: result.stdout }
         }
       }
@@ -212,6 +214,7 @@ export function createRunPythonScriptTool(): V2Tool {
         message +=
           ' (注意：脚本没有任何输出。用 print(...) 打印，或把结构化数据赋给 output_data 变量。)'
       }
+      message += rotatorWarning
 
       return {
         success: true,

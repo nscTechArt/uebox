@@ -129,7 +129,7 @@ function describePlugin(p: GuidelinePlugin): string {
     case 'missing':
       return `插件 ${name} 没开`
     case 'not_installed':
-      return `插件 ${name} 本机没装，只能用户自己装`
+      return `插件 ${name} 本机没装。Fab / 付费插件请用户自己装；免费开源的可经用户同意拷进工程 Plugins 目录`
     case 'pending_restart':
       return `插件 ${name} 已在工程里开启，重启编辑器后生效`
     default:
@@ -328,7 +328,13 @@ async function enablePlugin(
 ): Promise<PluginEnableResult> {
   const base = { name: p.name, friendly_name: p.friendly_name }
   if (p.status === 'not_installed') {
-    return { ...base, ok: false, error: '本机没装这个插件，只能用户自己装（Fab 或插件作者）' }
+    return {
+      ...base,
+      ok: false,
+      error:
+        '本机没装这个插件。Fab / 付费插件请用户自己装；免费开源的可经用户同意用 run_shell_command ' +
+        '拷进工程 Plugins 目录，再调一次'
+    }
   }
   try {
     const res = await callUeRaw<{

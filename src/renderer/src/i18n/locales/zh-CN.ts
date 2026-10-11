@@ -350,6 +350,8 @@ export default {
       command: '启动命令',
       url: '服务地址',
       disabled: '停用',
+      trusted: '信任此服务器',
+      trustedHint: '开启后，「帮我批准」模式下调用它的工具不再逐次确认；「请求批准」模式仍会确认。',
       env: '环境变量',
       // 示例写成通用形状。原来照抄 BLENDER_PATH，和上面 blender 那条真配置
       // 长得一样，新行看起来就像「已经复制了一份」
@@ -2918,6 +2920,8 @@ export default {
       confirm: '确认执行',
       reject: '拒绝',
       allowForChat: '本对话内均允许',
+      allowForever: '以后均允许',
+      allowForeverHint: '所有对话中不再询问此操作。可在「设置 → AI 助手」中移除。',
       whatIsThis: '这是什么？',
       // 并行执行时可能同时有好几条在等，答完这条会接着弹下一条
       queued: '还有 {count} 项待确认',
@@ -3068,6 +3072,16 @@ export default {
       persistentAutoResume: '自动断点续传',
       persistentAutoResumeDesc:
         '中转服务不稳定时，每 60 秒自动从断点继续，连续失败 30 分钟后停止。失败的重试不保留在对话中。',
+      assetReadonlyLock: '修改资产时设为只读',
+      assetReadonlyLockDesc:
+        'AI 修改资产期间，将对应的 .uasset 文件设为只读，防止编辑器中的保存覆盖其改动。开启后，这些资产在编辑器中暂时无法保存。',
+      browserAllowLocalNetwork: '允许浏览器访问局域网',
+      browserAllowLocalNetworkDesc:
+        '允许 Agent 浏览器打开本机与局域网地址（如 localhost、192.168.x.x），用于查看本地开发服务器。网页中的链接也将能访问这些地址。',
+      alwaysAllowedTools: '已设为始终允许的操作',
+      alwaysAllowedToolsDesc: '以下操作在所有对话中均不再请求确认。只读对话不受影响。',
+      alwaysAllowedRemove: '移除',
+      alwaysAllowedRemoveLabel: '移除「{name}」的始终允许',
       goalMaxRounds: '目标模式最大轮数',
       goalMaxRoundsDesc:
         '使用 /goal 时，复核未通过则继续修改，达到此轮数仍未完成则停止并交由用户处理。每轮额外进行一次复核，可能编译蓝图、运行 PIE。下一条消息起生效，范围 1–50。',

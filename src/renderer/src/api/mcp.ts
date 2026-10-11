@@ -45,6 +45,11 @@ export interface McpServerFormValue {
   /** http：远程地址 */
   url: string
   disabled: boolean
+  /**
+   * 信任这个 server：它的工具按可撤销的改动算，「帮我批准」档不再逐次确认。
+   * 见主进程 `capabilities/mcp/types.ts`。可选是为了老的表单值不用改
+   */
+  trusted?: boolean
   /** stdio：环境变量，每行一条 `KEY=VALUE`。解析规则见 `parseEnvText` */
   env: string
   /** 界面管不到、但要原样保住的部分。见 `PreservedServerFields` */
@@ -180,6 +185,8 @@ export function toFormValues(settings: McpSettings): McpServerFormValue[] {
     commandLine: config.command ? formatCommandLine(config.command, config.args) : '',
     url: config.url ?? '',
     disabled: config.disabled === true,
+    // 只有信任了才带这个键：老的表单值和往返比较都不用跟着改
+    ...(config.trusted === true ? { trusted: true } : {}),
     env: formatEnvText(config.env),
     preserved: {
       ...(config.cwd ? { cwd: config.cwd } : {}),
@@ -214,7 +221,8 @@ export function toSettings(values: McpServerFormValue[]): McpSettings {
         url: value.url.trim(),
         ...(preserved.headers ? { headers: preserved.headers } : {}),
         ...sharedPreserved(preserved),
-        ...(value.disabled ? { disabled: true } : {})
+        ...(value.disabled ? { disabled: true } : {}),
+        ...(value.trusted ? { trusted: true } : {})
       }
     } else {
       const { command, args } = parseCommandLine(value.commandLine)
@@ -227,7 +235,8 @@ export function toSettings(values: McpServerFormValue[]): McpSettings {
         ...(Object.keys(env).length ? { env } : {}),
         ...(preserved.cwd ? { cwd: preserved.cwd } : {}),
         ...sharedPreserved(preserved),
-        ...(value.disabled ? { disabled: true } : {})
+        ...(value.disabled ? { disabled: true } : {}),
+        ...(value.trusted ? { trusted: true } : {})
       }
     }
   }

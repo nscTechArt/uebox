@@ -123,7 +123,9 @@ For Unreal C++ specifically:
 - **The editor holds the module DLLs open.** A rebuild will fail at the link step while it is
   running. Don't hand-roll that from the shell: `cpp_compile` builds into the running editor, and
   `cpp_full_rebuild` closes the editor (refusing if anything is unsaved), runs UnrealBuildTool for
-  the right engine and target, then reopens the project. Don't kill the editor process yourself.
+  the right engine and target, then reopens the project. Prefer those (or `ue_restart_editor`) to
+  killing the editor. Only when it is frozen and the user agrees to lose unsaved work, end it with
+  `taskkill`.
 - Live Coding can be pinned to an MSVC toolset that is no longer installed, in which case hot
   reload fails and `cpp_full_rebuild` is the only path. Read the error rather than retrying the
   same build.
@@ -169,6 +171,8 @@ click, scripts and environment variables included. Point the user at that button
 
 ## What is deliberately missing
 
-There is no delete tool. Removing, renaming or moving the user's files is not something to do
-through a side channel — say what needs doing and let them do it, or work inside Unreal where the
-content tools handle it properly.
+There is no dedicated delete tool, and you never remove, rename or move the user's files on your
+own initiative. When the user explicitly asks for it, do it through `run_shell_command`, which asks
+for their approval. Name the exact paths first, and confirm anything that is not obviously theirs to
+lose (whole folders, files outside the folder they named). Inside an Unreal project's `Content`,
+use the content tools instead — moving `.uasset` files on disk breaks references.
