@@ -305,3 +305,40 @@ until it is met:
 Do not guess and do not silently narrow the task. Report what you tried, what the gate said, and
 what you need decided. A half-finished PR with an honest description is more useful than a green
 one that skipped the hard part.
+
+## 9. Agent skills
+
+### Issue tracker
+
+Issues and specs live as local markdown files under `.scratch/<feature-slug>/`.
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles use the default label strings (`needs-triage`,
+`needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`).
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at the repo root, ADRs in `docs/adr/`.
+See `docs/agents/domain.md`.
+
+## 10. Local workflow — this fork only
+
+This section governs work **in this fork**. It suspends §3's local run schedule —
+every other §3 rule still applies whenever a check does run. Not a contribution:
+never include it in a PR to upstream.
+
+- **Verification is on-demand.** Write code, commit, hand off. Run `pnpm verify*`
+  (any variant), `lint`, `typecheck`, or the vitest suite only when the user asks
+  in the session or invokes a skill whose contract includes it (`/tdd`,
+  `/implement` driving it, `unreal-box-ship`, `unreal-box-verify`). Commits land
+  unverified — no automatic `verify:changed`.
+- **The single test file is still allowed.** While implementing, you may run the
+  one test file covering your change — §3's working-tier allowance. A self-check,
+  not the gate.
+- **Cut PR branches from `upstream/main`, not local `main`.** Local `main` carries
+  fork-only sections (this one, §9); branching from it leaks them into the PR diff.
+- **CI is the backstop.** Upstream runs `pnpm verify --ci` on every PR; skipping
+  locally moves first detection to that run.

@@ -268,3 +268,38 @@ Release 上的 `.exe`、`.blockmap`、`latest.yml`。运行期解析见 `src/mai
 
 不要猜，也不要偷偷把任务缩小。把你试过什么、门禁报了什么、需要谁来拍板讲清楚。
 一个诚实说明「哪块没做完」的 PR，比一个绕过了难点的绿灯 PR 有用得多。
+
+## 9. Agent 技能
+
+### Issue tracker
+
+Issue 和 spec 以本地 markdown 文件的形式存放在 `.scratch/<feature-slug>/` 下。
+见 `docs/agents/issue-tracker.md`。
+
+### Triage 标签
+
+五个标准 triage 角色使用默认标签字符串（`needs-triage`、`needs-info`、
+`ready-for-agent`、`ready-for-human`、`wontfix`）。见 `docs/agents/triage-labels.md`。
+
+### 领域文档
+
+单上下文：仓库根目录一个 `CONTEXT.md`，ADR 放 `docs/adr/`。
+见 `docs/agents/domain.md`。
+
+## 10. 本地工作流 —— 仅本 fork
+
+本节只约束**本 fork** 中的工作方式，仅暂停第 3 节的本地执行时刻表 ——
+其余第 3 节规则在检查真跑起来时仍然全部生效。它不是贡献内容：不要把它
+带进提给上游的 PR。
+
+- **验证按需提供。** 写代码、提交、交接。仅当用户在本会话中明说，或调用的
+  技能本身包含验证（`/tdd`、`/implement` 驱动的 TDD、`unreal-box-ship`、
+  `unreal-box-verify`）时，才执行 `pnpm verify*`（任何变体）、`lint`、
+  `typecheck` 或 vitest 全量测试。提交不带验证 —— 没有自动的
+  `verify:changed`。
+- **单个测试文件仍允许。** 实现过程中可以跑覆盖本次改动的那一个测试
+  文件 —— 第 3 节工作期的既有上限。是自查，不是门禁。
+- **PR 分支从 `upstream/main` 切，不从本地 `main` 切。** 本地 `main`
+  带有 fork 专有章节（本节、第 9 节）；从它切分支会把它们带进 PR diff。
+- **CI 兜底。** 上游对每个 PR 跑 `pnpm verify --ci`；本地不跑只是把
+  第一次检测挪到那一趟。
