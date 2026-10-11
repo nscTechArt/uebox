@@ -563,7 +563,7 @@ describe('端口被占用', () => {
       const status = loser.getStatus()
       expect(status.startError).toContain(String(taken))
       expect(status.startError).toContain('虚幻盒子')
-      expect(status.startError).toMatch(/关掉|别的程序/)
+      expect(status.startError).toMatch(/关闭|其他程序/)
     } finally {
       await blocker.stopServer()
     }

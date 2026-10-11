@@ -336,7 +336,7 @@ export async function writeSkillDocument(
   if (declared !== name) {
     return {
       success: false,
-      error: `frontmatter 里写的是 name: ${declared}，和你正在编辑的「${name}」对不上。改名请另存一个新技能。`
+      error: `frontmatter 中的 name 为 ${declared}，与当前编辑的「${name}」不一致。如需改名，请另存为新技能。`
     }
   }
 

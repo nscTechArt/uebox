@@ -96,7 +96,7 @@ export function registerSpeechToTextIPC(): void {
       return {
         ok: false as const,
         reason: 'failed' as const,
-        error: '认不出这个语音识别服务商。目前支持豆包语音（openspeech）与阿里云百炼。'
+        error: '不支持该语音识别服务商。目前支持豆包语音（openspeech）与阿里云百炼。'
       }
     }
 

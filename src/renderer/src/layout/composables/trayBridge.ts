@@ -58,7 +58,7 @@ function confirmTrayQuit(count: number, reason?: 'update'): void {
     // 默认停在「取消」：误按回车不该把跑着的任务一起带走
     focusCancel: true,
     onOk: () =>
-      trayAPI.confirmQuit().catch((error) => {
+      trayAPI.confirmQuit(reason).catch((error) => {
         console.error('[TrayBridge] 通知主进程退出失败', error)
       }),
     afterClose: () => {

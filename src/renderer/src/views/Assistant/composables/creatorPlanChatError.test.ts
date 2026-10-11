@@ -80,7 +80,7 @@ describe('creatorPlanErrorInfo', () => {
       ])
     }
     expect(creatorPlanErrorInfo('unauthorized', t).actionButtons).toEqual([
-      { label: '去重新连接', action: CREATOR_PLAN_RECONNECT_ACTION }
+      { label: '重新连接', action: CREATOR_PLAN_RECONNECT_ACTION }
     ])
   })
 })
@@ -93,7 +93,7 @@ describe('每日上限 daily_limit_reached', () => {
     const sameLocalDay = new Date(now).toDateString() === reset.toDateString()
 
     const zh = creatorPlanErrorInfo('daily_limit_reached', translator(zhCN), now)
-    expect(zh.display).toContain('今天的额度用完了')
+    expect(zh.display).toContain('今日额度已用完')
     expect(zh.display).toContain(`${sameLocalDay ? '今天' : '明天'} ${clock} 恢复`)
     expect(zh.fatal).toBe(true)
     expect(dailyResetText(translator(enUS), now)).toBe(
@@ -103,7 +103,7 @@ describe('每日上限 daily_limit_reached', () => {
 
   it('朗读的 toast 用一句话版：标题：说明', () => {
     const text = creatorPlanErrorText('daily_limit_reached', translator(zhCN))
-    expect(text).toMatch(/^今天的额度用完了：.+ 恢复。/)
+    expect(text).toMatch(/^今日额度已用完：.+ 恢复。/)
   })
 })
 
@@ -164,7 +164,7 @@ describe('handleAgentError 遇到套餐错误', () => {
       planError: 'quota_exhausted'
     })
     const bubble = lastAssistant()
-    expect(String(bubble.content)).toContain('本月额度用完了')
+    expect(String(bubble.content)).toContain('本月额度已用完')
     expect(bubble.actionButtons).toEqual([
       { label: '管理订阅', action: CREATOR_PLAN_MANAGE_ACTION }
     ])
@@ -180,7 +180,7 @@ describe('handleAgentError 遇到套餐错误', () => {
     })
     expect(String(lastAssistant().content)).toContain('授权失效')
     expect(lastAssistant().actionButtons).toEqual([
-      { label: '去重新连接', action: CREATOR_PLAN_RECONNECT_ACTION }
+      { label: '重新连接', action: CREATOR_PLAN_RECONNECT_ACTION }
     ])
   })
 
@@ -193,7 +193,7 @@ describe('handleAgentError 遇到套餐错误', () => {
       code: 'daily_limit_reached',
       planError: 'daily_limit_reached'
     })
-    expect(String(lastAssistant().content)).toContain('今天的额度用完了')
+    expect(String(lastAssistant().content)).toContain('今日额度已用完')
     expect(String(lastAssistant().content)).toMatch(/\d{2}:\d{2} 恢复/)
     expect(lastAssistant().actionButtons).toEqual([
       { label: '管理订阅', action: CREATOR_PLAN_MANAGE_ACTION }

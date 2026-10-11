@@ -223,7 +223,7 @@ async function runProviders(query: string, limit: number): Promise<WebSearchResu
     if (!bound.apiKey) {
       return {
         success: false,
-        error: 'Box Plan 的 Key 取不出来了。到 设置 → 模型 的套餐卡片重新连接。'
+        error: '无法读取 Box Plan 的 Key。请在「设置 → 模型」的套餐卡片中重新连接。'
       }
     }
     try {

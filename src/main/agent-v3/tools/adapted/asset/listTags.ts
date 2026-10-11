@@ -72,7 +72,10 @@ export function createListTagsTool(): V2Tool {
       // 标签在公共库、关联在各保管库。只数活跃库的话，用户站在一个没打标签的库里
       // 会看到每个标签都是 0 —— 而 library_overview / search_assets 默认是全库算的，三边对不上
       const countByTagId = new Map<number, number>()
-      const { runs } = await runAcrossVaults(undefined, (db) => getAssetCountsByTag(db))
+      // 标签删除是全局的，计数必须跨库算，不受「跨库搜索」开关影响
+      const { runs } = await runAcrossVaults(undefined, (db) => getAssetCountsByTag(db), {
+        ignoreSetting: true
+      })
       for (const row of runs.flatMap((run) => run.value ?? [])) {
         countByTagId.set(row.tagId, (countByTagId.get(row.tagId) ?? 0) + row.count)
       }

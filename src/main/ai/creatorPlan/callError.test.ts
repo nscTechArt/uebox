@@ -32,7 +32,7 @@ describe('planCallError', () => {
     const error = planCallError(402, { error: { code: 'quota_exhausted' } })!
     expect(error).toBeInstanceOf(CreatorPlanCallError)
     expect(error.message).toContain('设置 → 模型')
-    expect(error.message).toContain('重试也一样失败')
+    expect(error.message).toContain('重试仍会失败')
     expect(error.status).toBe(402)
   })
 
@@ -62,8 +62,8 @@ describe('每日上限 429 daily_limit_reached', () => {
       headers({ 'X-Uebox-Daily-Reset': '2026-09-24T00:00:00Z' })
     )!
     expect(withHeader.detail.dailyResetAt).toBe('2026-09-24T00:00:00Z')
-    expect(withHeader.message).toMatch(/今天的额度用完了，.+ 恢复/)
-    expect(withHeader.message).toContain('重试也一样失败')
+    expect(withHeader.message).toMatch(/今日额度已用完，.+ 恢复/)
+    expect(withHeader.message).toContain('重试仍会失败')
     expect(withHeader.message).toContain('设置 → 模型')
 
     const without = planCallError(429, '{"error":{"code":"daily_limit_reached"}}')!
@@ -117,10 +117,10 @@ describe('402 quota_exhausted 带压低原因', () => {
 
     expect(
       planCallError(402, body, new Headers({ 'X-Uebox-Quota-Limited-By': 'plan_change' }))!.message
-    ).toContain('中途升档')
+    ).toContain('中途升级')
     // 原因代码不认识：照旧的文案
     const unknown = planCallError(402, body, new Headers({ 'X-Uebox-Quota-Limited-By': 'x' }))!
     expect(unknown.detail).toEqual({})
-    expect(unknown.message).toContain('升级，或等额度重置')
+    expect(unknown.message).toContain('升级，或等待额度重置')
   })
 })

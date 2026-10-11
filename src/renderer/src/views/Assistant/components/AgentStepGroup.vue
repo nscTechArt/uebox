@@ -207,9 +207,12 @@ function thinkingPreview(text: string): string {
   const line =
     text
       .split('\n')
-      .map((part) => part.replace(/^[#>*\-+\d.\s]+/, '').trim())
+      // 只去掉行首的 Markdown 记号（标题、引用、列表符、「1. 」这种编号），
+      // 「3D」「5.3」这类正文开头的数字要留着
+      .map((part) => part.replace(/^\s*(?:#+|>+|[*+-]|\d+[.)])\s+/, '').trim())
       .find(Boolean) ?? ''
-  return line.replace(/[*_`]/g, '').slice(0, 160)
+  // 只去掉成对的加粗 / 斜体 / 行内代码记号；资产名里的下划线（BP_Night_Car_5）不动
+  return line.replace(/(\*\*|__|\*|`)(.+?)\1/g, '$2').slice(0, 160)
 }
 
 // ── 计时 ──
@@ -271,7 +274,8 @@ const summaryText = computed(() => {
     if (rows.some((row) => row.kind === 'thinking')) {
       return t('assistant.agentProcess.steps.thinking')
     }
-    const note = rows.find((row) => row.kind === 'note')
+    // 只有说明的组用最后一条：目标复核先说「正在复核」，最后才说结论
+    const note = [...rows].reverse().find((row) => row.kind === 'note')
     return note?.kind === 'note' ? note.text : t('assistant.agentProcess.processFinished')
   }
 
@@ -313,6 +317,8 @@ const liveText = computed(() => {
   if (last?.kind === 'subtask' && last.lane.status === 'running') {
     return last.lane.title || t('assistant.agentProcess.steps.working')
   }
+  // 网关重发、断线续跑、编辑器崩溃重开这些说明，是用户此刻唯一能看到的解释
+  if (last?.kind === 'note') return last.text
   return t('assistant.agentProcess.steps.working')
 })
 </script>

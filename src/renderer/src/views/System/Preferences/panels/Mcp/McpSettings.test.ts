@@ -344,7 +344,7 @@ describe('渐进披露', () => {
    */
   it('手动配置一条都没有时给一句话，不是一片空白', async () => {
     const wrapper = await mountPanel()
-    expect(wrapper.find('.manual-foot .section-note').text()).toContain('还没有手动配置的服务')
+    expect(wrapper.find('.manual-foot .section-note').text()).toContain('暂无手动配置的服务')
   })
 })
 
@@ -1604,12 +1604,12 @@ describe('一键接入 Blender', () => {
   // 主进程才知道这次是装好了、缺前置、还是脚本自己挂了，渲染层照 state 猜会对不上
   it('失败时把主进程那句话原样显示出来', async () => {
     blenderStatus.mockResolvedValue(ready)
-    blenderSetup.mockResolvedValue({ success: false, message: '安装没跑完：网络连不上。' })
+    blenderSetup.mockResolvedValue({ success: false, message: '安装未完成：网络连不上。' })
     const wrapper = await mountPanel()
 
     await installButton(wrapper).trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('安装没跑完：网络连不上。')
+    expect(wrapper.text()).toContain('安装未完成：网络连不上。')
   })
 })

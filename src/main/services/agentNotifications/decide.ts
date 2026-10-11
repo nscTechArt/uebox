@@ -55,23 +55,23 @@ export function settledKey(signal: AgentRunSignal): string | null {
 const TEXT = {
   'zh-CN': {
     doneTitle: '任务完成',
-    doneBody: '这一轮跑完了',
+    doneBody: '本轮已完成',
     errorTitle: '任务失败',
-    approvalTitle: '需要你确认',
-    approvalBody: (tool: string) => `Agent 要执行「${tool}」，等你点头`,
-    approvalRiskyBody: (tool: string) => `Agent 要执行高风险操作「${tool}」，等你点头`,
-    questionTitle: 'Agent 在问你',
-    questionBody: '它卡在一个问题上，等你回答'
+    approvalTitle: '待确认',
+    approvalBody: (tool: string) => `Agent 请求执行「${tool}」，等待确认`,
+    approvalRiskyBody: (tool: string) => `Agent 请求执行高风险操作「${tool}」，等待确认`,
+    questionTitle: 'Agent 待回复',
+    questionBody: 'Agent 提出了一个问题，等待回答'
   },
   'en-US': {
     doneTitle: 'Task finished',
-    doneBody: 'This turn is done',
+    doneBody: 'This turn is complete',
     errorTitle: 'Task failed',
-    approvalTitle: 'Waiting for your approval',
-    approvalBody: (tool: string) => `The agent wants to run "${tool}"`,
-    approvalRiskyBody: (tool: string) => `The agent wants to run a high-risk step: "${tool}"`,
-    questionTitle: 'The agent has a question',
-    questionBody: "It's blocked on a question and waiting for you"
+    approvalTitle: 'Approval required',
+    approvalBody: (tool: string) => `The agent requests to run "${tool}"`,
+    approvalRiskyBody: (tool: string) => `The agent requests to run a high-risk step: "${tool}"`,
+    questionTitle: 'Reply required',
+    questionBody: 'The agent has asked a question and is waiting for a reply'
   }
 } as const
 

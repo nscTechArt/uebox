@@ -628,6 +628,13 @@ void FUAL_AssetGuidelineCommands::Handle_Apply(const TSharedPtr<FJsonObject>& Pa
 			{
 				Writes.Add({ State.Name, S, FString(), FString(), FString() });
 			}
+			else if (S.Status == TEXT("bad_file") && !SameMeaning(S.Live, S.Required))
+			{
+				// 说明指的不是工程 Config 下的 Default*.ini，改不了也不能当成已满足
+				Writes.Add({ State.Name, S, TEXT("failed"),
+					FString::Printf(TEXT("%s is not a project Config/Default*.ini - change [%s] %s by hand"),
+						*S.Filename, *S.Section, *S.Key), FString() });
+			}
 		}
 	}
 
@@ -648,21 +655,24 @@ void FUAL_AssetGuidelineCommands::Handle_Apply(const TSharedPtr<FJsonObject>& Pa
 		}
 	}
 
-	TSet<FString> Done;
-	for (FWrite& W : Writes)
+	// 同一个键第二次出现时照抄第一次写的结果（成败、磁盘读回值都跟它走）
+	TMap<FString, int32> Done;
+	for (int32 Index = 0; Index < Writes.Num(); ++Index)
 	{
+		FWrite& W = Writes[Index];
 		if (!W.Result.IsEmpty())
 		{
 			continue;
 		}
-		const FString Id = W.Setting.IniPath + TEXT("|") + W.Setting.Section + TEXT("|") + W.Setting.Key;
-		if (Done.Contains(Id.ToLower()))
+		const FString Id = (W.Setting.IniPath + TEXT("|") + W.Setting.Section + TEXT("|") + W.Setting.Key).ToLower();
+		if (const int32* First = Done.Find(Id))
 		{
-			W.Result = TEXT("written");
-			W.OnDisk = W.Setting.Required;
+			W.Result = Writes[*First].Result;
+			W.OnDisk = Writes[*First].OnDisk;
+			W.Error = Writes[*First].Error;
 			continue;
 		}
-		Done.Add(Id.ToLower());
+		Done.Add(Id, Index);
 
 		if (IFileManager::Get().FileExists(*W.Setting.IniPath) && IFileManager::Get().IsReadOnly(*W.Setting.IniPath))
 		{

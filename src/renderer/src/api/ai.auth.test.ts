@@ -70,9 +70,9 @@ describe('generateImage 在没有官方会话时的回落', () => {
   })
 
   it('本地模型没配好时把主进程给的说明透出来，而不是一句「生成失败」', async () => {
-    generateImage.mockResolvedValue({ success: false, error: '还没有配置「生图」模型。' })
+    generateImage.mockResolvedValue({ success: false, error: '尚未配置「生图」模型。' })
 
-    await expect(aiAPI.generateImage({ prompt: 'x' })).rejects.toThrow('还没有配置「生图」模型。')
+    await expect(aiAPI.generateImage({ prompt: 'x' })).rejects.toThrow('尚未配置「生图」模型。')
   })
 
   it('有官方会话但明确选择本地模型时仍按选择生成', async () => {

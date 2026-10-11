@@ -192,7 +192,7 @@ describe('提交', () => {
     stubFetch(() => json({ error: { code: 'quota_exhausted', message: 'x' } }, 402))
     await expect(
       tasks.submitPlanTask(video, { model: 'uebox-video', input: {} }, 'k', undefined, deps())
-    ).rejects.toThrow('额度用完了')
+    ).rejects.toThrow('额度已用完')
   })
 
   it('429 daily_limit_reached 不重发：说今天的额度用完、什么时候恢复；限流的 429 照常重发', async () => {
@@ -212,7 +212,7 @@ describe('提交', () => {
       planError: 'daily_limit_reached',
       detail: { dailyResetAt: '2026-09-24T00:00:00Z' }
     })
-    expect((error as Error).message).toMatch(/今天的额度用完了，.+ 恢复/)
+    expect((error as Error).message).toMatch(/今日额度已用完，.+ 恢复/)
 
     let attempt = 0
     const limited = stubFetch(() => {
@@ -264,7 +264,7 @@ describe('等待', () => {
     )
     await expect(
       tasks.waitPlanTask(video, 'video', tasks.parsePlanTask(taskObject('t', 'running'))!, deps())
-    ).rejects.toThrow(/超时了[\s\S]*额度已经退回/)
+    ).rejects.toThrow(/超时了[\s\S]*额度已退回/)
   })
 
   it('用户按停止：POST /tasks/{id}/cancel，服务端置 cancelled，额度退回', async () => {
@@ -288,9 +288,9 @@ describe('等待', () => {
 
   it('取消后 usage 没归零（3D、音乐提交之后、视频开始生成之后）：说清额度不退', async () => {
     for (const [kind, usage, reason] of [
-      ['model3d', { model3d_tasks: 1.5 }, '已提交的 3D 取消后不退额度'],
-      ['music', { music_tasks: 1 }, '已提交的音乐取消后不退额度'],
-      ['video', { video_seconds: 12.5 }, '只有还在排队时取消才退']
+      ['model3d', { model3d_tasks: 1.5 }, '3D 任务提交后取消不退还额度'],
+      ['music', { music_tasks: 1 }, '音乐任务提交后取消不退还额度'],
+      ['video', { video_seconds: 12.5 }, '仅在排队阶段取消可退还额度']
     ] as const) {
       const controller = new AbortController()
       stubFetch((call) =>
@@ -309,7 +309,7 @@ describe('等待', () => {
       expect(error.outcome).toBe('kept')
       expect(error.refunded).toBe(false)
       expect(error.settled).toBe(true)
-      expect(error.message).toContain('额度不退')
+      expect(error.message).toContain('额度不予退还')
       expect(error.message).toContain(reason)
     }
   })

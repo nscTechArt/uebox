@@ -352,7 +352,7 @@ export async function runBlenderSetup(
   if (platform !== 'win32' && platform !== 'darwin') {
     return {
       success: false,
-      message: '这个平台还没有 Blender 安装脚本，只有 Windows 和 macOS 有。',
+      message: '当前平台暂无 Blender 安装脚本，仅支持 Windows 和 macOS。',
       error: `unsupported platform: ${platform}`
     }
   }
@@ -367,14 +367,14 @@ export async function runBlenderSetup(
   if (!blenderPath) {
     return {
       success: false,
-      message: '没找到 Blender。请在上面选一个 blender 可执行文件再试。',
+      message: '未找到 Blender。请在上方选择 Blender 可执行文件后重试。',
       error: 'no blender executable'
     }
   }
   if (!existsSync(blenderPath)) {
     return {
       success: false,
-      message: `这个位置没有文件：${blenderPath}`,
+      message: `文件不存在：${blenderPath}`,
       error: `blender not found: ${blenderPath}`
     }
   }
@@ -393,14 +393,14 @@ export async function runBlenderSetup(
   )
   if (blocking.length > 0) {
     const missing = describeMissing(blocking)
-    return { success: false, message: `还差这些才能装：${missing}`, error: missing }
+    return { success: false, message: `缺少以下安装条件：${missing}`, error: missing }
   }
 
   const python = prerequisites.find((item) => item.id === 'python')?.path
   if (!python) {
     return {
       success: false,
-      message: '没找到 Python 3.11+，官方 server 装不了。',
+      message: '未找到 Python 3.11+，无法安装官方 server。',
       error: 'no python interpreter'
     }
   }
@@ -419,7 +419,7 @@ export async function runBlenderSetup(
     return {
       success: false,
       // 带上安装目录：脚本自己的那句报错只说「换一个目录」，不说是哪个
-      message: `安装没跑完：${reason}（安装目录：${installRoot}）`,
+      message: `安装未完成：${reason}（安装目录：${installRoot}）`,
       error: reason
     }
   }
@@ -431,14 +431,14 @@ export async function runBlenderSetup(
   } catch (error) {
     return {
       success: false,
-      message: '装完了，但读不到安装脚本写出来的配置，没能自动填进 MCP 设置。',
+      message: '安装已完成，但无法读取安装脚本生成的配置，未能自动写入 MCP 设置。',
       error: `${entryFile}: ${(error as Error).message}`
     }
   }
   if (!entry) {
     return {
       success: false,
-      message: '装完了，但安装脚本写出来的配置不完整，没能自动填进 MCP 设置。',
+      message: '安装已完成，但安装脚本生成的配置不完整，未能自动写入 MCP 设置。',
       error: `${entryFile} has no usable server entry`
     }
   }
@@ -489,9 +489,9 @@ export async function runBlenderSetup(
 function onlineAccessNote(installerOutput: string): string {
   if (!/BLMCP_ONLINE=False/i.test(installerOutput)) return ''
   return (
-    '（另外：Blender 的「允许在线访问」是关的。盒子拉起来的那个不受影响，' +
-    '但你自己双击打开的 Blender 不会开桥 —— 要么让盒子来开，' +
-    '要么在 Blender 的偏好设置 → 系统 → 网络里勾上这一项。）'
+    '（注意：Blender 的「允许在线访问」处于关闭状态。由虚幻盒子启动的 Blender 不受影响，' +
+    '但手动启动的 Blender 不会开启 MCP 桥。请通过虚幻盒子启动 Blender，' +
+    '或在 Blender 的偏好设置 → 系统 → 网络中勾选该选项。）'
   )
 }
 
@@ -541,9 +541,9 @@ async function clearPartialInstall(installRoot: string): Promise<string | undefi
   const unexpected = entries.filter((entry) => !INSTALL_ROOT_ENTRIES.has(entry))
   if (unexpected.length > 0) {
     return (
-      `${installRoot} 里有一份没装完的安装，而且夹着不认识的文件` +
-      `（${unexpected.slice(0, 3).join('、')}），盒子没有动它。` +
-      '请确认这个目录没有你要留的东西，删掉它再点一次。'
+      `${installRoot} 中存在未完成的安装，且包含无法识别的文件` +
+      `（${unexpected.slice(0, 3).join('、')}），虚幻盒子未做改动。` +
+      '请确认该目录中没有需要保留的文件，删除该目录后重试。'
     )
   }
 

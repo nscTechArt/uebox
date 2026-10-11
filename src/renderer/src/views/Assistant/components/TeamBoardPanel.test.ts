@@ -51,7 +51,7 @@ describe('TeamBoardPanel', () => {
     expect(routes[1]).not.toContain('producer')
     // 回执：读到了的显示已读，还在信箱里的照实说
     const receipts = wrapper.findAll('.mail-receipt').map((node) => node.text())
-    expect(receipts).toEqual(['已读', '在信箱里'])
+    expect(receipts).toEqual(['已读', '待送达'])
   })
 
   /** 2026-09-26：队员标了完成，证据里自己写着没做完；用户看到「完成」就信了 */
@@ -91,7 +91,7 @@ describe('TeamBoardPanel', () => {
     expect(fresh!.classes()).not.toContain('task--old')
     expect(old!.classes()).toContain('task--old')
     expect(old!.find('.task-when').text()).toContain('上一轮')
-    expect(old!.text()).toContain('卡住原因：等你定死亡规则')
+    expect(old!.text()).toContain('受阻原因：等你定死亡规则')
 
     await old!.find('.task-reopen').trigger('click')
     expect(wrapper.emitted('reopen')).toEqual([['t3']])
@@ -211,7 +211,7 @@ describe('TeamBoardPanel 队员的模型', () => {
     })
     await wrapper.find('.team-board-head').trigger('click')
     const chips = wrapper.findAll('.member-model')
-    expect(chips.map((c) => c.text())).toEqual(['跟制作人', '对话模型'])
+    expect(chips.map((c) => c.text())).toEqual(['跟随制作人', '对话模型'])
     expect(chips[0].classes()).not.toContain('unavailable')
     // 有了模型标签，原来那个「快档」就不再单独显示
     expect(wrapper.find('.member-flag').text()).not.toBe('快档')

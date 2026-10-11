@@ -362,13 +362,13 @@ describe('托盘桥', () => {
 
   it('open-failed：用应用内的错误框把原因弹出来', async () => {
     mountHost()
-    pendingAction = { type: 'open-failed', title: '打不开项目', body: 'Demo：NO_ASSOC' }
+    pendingAction = { type: 'open-failed', title: '无法打开项目', body: 'Demo：NO_ASSOC' }
     firePoke()
     await nextTick()
     await nextTick()
 
     expect(errorDialog).toHaveBeenCalledWith(
-      expect.objectContaining({ title: '打不开项目', content: 'Demo：NO_ASSOC' })
+      expect.objectContaining({ title: '无法打开项目', content: 'Demo：NO_ASSOC' })
     )
   })
 

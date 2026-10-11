@@ -871,13 +871,13 @@ export class WebSocketService implements IWebSocketService {
 export function describeListenError(error: NodeJS.ErrnoException, port: number): string {
   if (error.code === 'EADDRINUSE') {
     return (
-      `端口 ${port} 已被占用，虚幻引擎桥接服务没能启动。` +
-      '可能是已经开着一个虚幻盒子，或者别的程序占用了这个端口。' +
-      '关掉占用它的程序后重启盒子即可 —— 在此之前，连接引擎相关的功能都用不了。'
+      `端口 ${port} 已被占用，虚幻引擎桥接服务启动失败。` +
+      '可能已有虚幻盒子实例在运行，或该端口被其他程序占用。' +
+      '请关闭占用该端口的程序后重启虚幻盒子；在此之前，连接引擎相关的功能均不可用。'
     )
   }
   if (error.code === 'EACCES') {
-    return `没有权限监听端口 ${port}，虚幻引擎桥接服务没能启动。`
+    return `没有权限监听端口 ${port}，虚幻引擎桥接服务启动失败。`
   }
   return `虚幻引擎桥接服务启动失败：${error.message}`
 }

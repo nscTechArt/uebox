@@ -433,7 +433,11 @@ describe('resolveTools —— 动态工具过滤', () => {
             'ue_get_config',
             'cpp_probe',
             'search_notes',
-            'blueprint_describe'
+            'blueprint_describe',
+            // 交付验收的提示词点了这几个名字去核对交付目录（见 teamPrompt 的 buildAcceptancePrompt）
+            'find_local_files',
+            'list_local_dir',
+            'read_local_file'
           ])
         )
       })

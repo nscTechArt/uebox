@@ -38,6 +38,8 @@ import { logger } from './services'
 const DEFAULT_SIZE = { width: 560, height: 780 }
 const MIN_WIDTH = 420
 const MIN_HEIGHT = 520
+/** 藏起来的窗口跑完之后，留给它收尾、把补丁发完的时间 */
+const IDLE_HIDDEN_CLOSE_DELAY_MS = 3000
 
 interface SizeState {
   width: number
@@ -211,6 +213,13 @@ class ChatWindowManager {
       this.rehostBrowserOf(win)
     })
 
+    // 藏着等跑完的窗口被别处提上来（点系统通知、托盘）：用户又在用它了，不关了，网页也搬回来。
+    // 只有 open() 会清这两个标记的话，跑完时窗口会在用户手底下被关掉
+    win.on('show', () => {
+      if (!this.closingWhenIdle.delete(win)) return
+      if (this.leaving.delete(win)) this.rehostBrowserOf(win)
+    })
+
     win.on('closed', () => {
       if (resizeTimer) clearTimeout(resizeTimer)
       this.closingWhenIdle.delete(win)
@@ -256,8 +265,17 @@ class ChatWindowManager {
         continue
       }
       if (hasActiveRunsOwnedBy(win.webContents.id)) continue
-      this.closingWhenIdle.delete(win)
-      win.destroy()
+      /*
+       * 这里跑在 `activeAgents.release()` 里面，`agent-v3:released` 还没发、窗口也还没
+       * 处理完收尾（终稿、追问队列、自动起名）。当场 destroy 会把这些连同还没发出去的
+       * 同步补丁一起扔掉。留几秒再用 close() 关，beforeunload 会把补丁冲出去
+       */
+      setTimeout(() => {
+        if (win.isDestroyed() || !this.closingWhenIdle.has(win)) return
+        if (hasActiveRunsOwnedBy(win.webContents.id)) return
+        this.closingWhenIdle.delete(win)
+        win.close()
+      }, IDLE_HIDDEN_CLOSE_DELAY_MS)
     }
   }
 

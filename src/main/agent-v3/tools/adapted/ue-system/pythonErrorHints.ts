@@ -28,22 +28,44 @@ function hintFor(received: string, target: string, text: string): string | null 
 
 /**
  * 从 Python 报错文本里提取补充指引；认不出就返回空串。
- * 另外：create_asset 返回 None（撞了「覆写现有 Object」模态框）的 AttributeError 也在这里认。
+ * 另外：create_asset 返回 None（重名，引擎拒绝覆写）的 AttributeError 也在这里认。
+ *
+ * @param script 脚本原文。`<ua-script>` 的回溯不带源码行，报错里只有
+ *   `'NoneType' object has no attribute 'set_display_rate'`，看不到 create_asset ——
+ *   只看报错的话这条提示在真机上一次都没触发过（2026-10-11）
  */
-export function describePythonErrorHints(errorText: string | undefined): string {
+export function describePythonErrorHints(errorText: string | undefined, script?: string): string {
   if (!errorText) return ''
   const hints = new Set<string>()
   for (const m of errorText.matchAll(NATIVIZE)) {
     const hint = hintFor(m[1], m[2], errorText)
     if (hint) hints.add(hint)
   }
-  if (/'NoneType' object has no attribute/.test(errorText) && /create_asset/.test(errorText)) {
+  if (
+    /'NoneType' object has no attribute/.test(errorText) &&
+    /create_asset/.test(`${errorText}\n${script ?? ''}`)
+  ) {
     hints.add(
-      'create_asset 返回 None：重名时引擎会弹「覆写现有 Object」模态框挡住主线程，脚本里点不了。' +
-        '创建前先 unreal.EditorAssetLibrary.does_asset_exist(path)，已存在就换名，不要重试同名；' +
-        '若已弹框，请用户点「取消」，再用 ue_content_delete 清理残留'
+      'create_asset 返回 None：多半是同名资产已存在，引擎拒绝覆写（正被关卡或 Sequencer 引用时也删不掉）。' +
+        '创建前先 unreal.EditorAssetLibrary.does_asset_exist(path)，已存在就 load_asset 接着改，' +
+        '不要重试同名创建'
     )
   }
   if (hints.size === 0) return ''
   return '\n提示：\n- ' + [...hints].join('\n- ')
+}
+
+/**
+ * 脚本跑的时候引擎替它答掉的弹窗。
+ *
+ * 插件跑脚本时开着无人值守，框不再卡住编辑器，而是直接取默认答案 —— 覆写已有资产
+ * 答「否」。脚本拿到的只是一个 None，引擎问了什么、答了什么只有这几行说得清。
+ * 成功的脚本也要带上：脚本可能把 None 吞掉了照样跑完。
+ */
+export function describeAutoAnsweredDialogs(dialogs: string[] | undefined): string {
+  if (!dialogs || dialogs.length === 0) return ''
+  return (
+    '\n引擎弹出过以下对话框，已按默认答案自动关闭（对应操作多半没做成，先回读确认）：\n- ' +
+    dialogs.join('\n- ')
+  )
 }

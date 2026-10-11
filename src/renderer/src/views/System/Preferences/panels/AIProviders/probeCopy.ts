@@ -13,7 +13,7 @@
  *
  * ## 为什么有些分支要带原文
  *
- * 5xx 的服务端错误码、400 的拒绝理由、以及归不上类的，翻译过去仍然说不清 ——
+ * 5xx 的服务端错误码、400 / 403 的拒绝理由、以及归不上类的，翻译过去仍然说不清 ——
  * 那几句里真正有用的信息在厂商的原话里。把它截断附在后面，比替用户猜一个
  * 原因要诚实。
  */
@@ -21,7 +21,7 @@ import type { ProbeFailure } from '@core/shared/aiProvider'
 import i18n from '@renderer/i18n'
 
 /** 带原文的那几种：光有文案说不清，必须让用户看见厂商原话 */
-const WITH_RAW = new Set(['providerServerError', 'badRequest', 'listHttpError'])
+const WITH_RAW = new Set(['forbidden', 'providerServerError', 'badRequest', 'listHttpError'])
 
 export function describeProbeFailure(failure: ProbeFailure | string | null | undefined): string {
   const { t } = i18n.global

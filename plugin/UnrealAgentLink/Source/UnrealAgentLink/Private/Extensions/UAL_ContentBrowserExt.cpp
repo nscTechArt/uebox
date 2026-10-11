@@ -385,7 +385,7 @@ void FUAL_ContentBrowserExt::AddMenuEntry(FMenuBuilder& MenuBuilder, TArray<FStr
 	{
 		MenuBuilder.AddMenuEntry(
 			LocalizedText(TEXT("UALImportToAgent"), TEXT("导入到虚幻盒子资产库"), TEXT("Import into Unreal Box Asset Library")),
-			LocalizedText(TEXT("UALImportToAgentTooltip"), TEXT("将选中的文件夹及其内容导入到虚幻盒子中（虚幻盒子需要处于打开状态）"), TEXT("Import selected folders and contents into Unreal Box (Unreal Box must be running)")),
+			LocalizedText(TEXT("UALImportToAgentTooltip"), TEXT("将选中的文件夹及其内容导入虚幻盒子资产库（需先启动虚幻盒子）"), TEXT("Import the selected folders and their contents into the Unreal Box Asset Library (requires Unreal Box to be running)")),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Import"),
 			FUIAction(FExecuteAction::CreateLambda([this, SelectedPaths]()
 			{
@@ -402,7 +402,7 @@ void FUAL_ContentBrowserExt::AddAssetMenuEntry(FMenuBuilder& MenuBuilder, TArray
 	{
 		MenuBuilder.AddMenuEntry(
 			LocalizedText(TEXT("UALImportAssets"), TEXT("导入到虚幻盒子资产库"), TEXT("Import into Unreal Box Asset Library")),
-			LocalizedText(TEXT("UALImportAssetsTooltip"), TEXT("将选中的资产导入到虚幻盒子中（虚幻盒子需要处于打开状态）"), TEXT("Import selected assets into Unreal Box (Unreal Box must be running)")),
+			LocalizedText(TEXT("UALImportAssetsTooltip"), TEXT("将选中的资产导入虚幻盒子资产库（需先启动虚幻盒子）"), TEXT("Import the selected assets into the Unreal Box Asset Library (requires Unreal Box to be running)")),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Import"),
 			FUIAction(FExecuteAction::CreateLambda([this, SelectedAssets]()
 			{

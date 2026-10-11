@@ -379,7 +379,7 @@ void FUAL_ActorCommands::Handle_SpawnActor(const TSharedPtr<FJsonObject>& Payloa
 {
 #if WITH_EDITOR
 	// 创建撤销事务，使生成操作可通过 Ctrl+Z 撤销
-	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("生成Actor"), TEXT("Spawn Actor")));
+	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("生成 Actor"), TEXT("Spawn Actor")));
 #endif
 
 	const TArray<TSharedPtr<FJsonValue>>* Instances = nullptr;
@@ -542,7 +542,7 @@ void FUAL_ActorCommands::Handle_DestroyActor(const TSharedPtr<FJsonObject>& Payl
 {
 #if WITH_EDITOR
 	// 创建撤销事务，使删除操作可通过 Ctrl+Z 撤销
-	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("删除Actor"), TEXT("Delete Actor")));
+	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("删除 Actor"), TEXT("Delete Actor")));
 #endif
 
 	// 新版：targets 选择器
@@ -992,7 +992,7 @@ void FUAL_ActorCommands::Handle_SetProperty(const TSharedPtr<FJsonObject>& Paylo
 {
 #if WITH_EDITOR
 	// 创建撤销事务，使属性修改操作可通过 Ctrl+Z 撤销
-	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("修改Actor属性"), TEXT("Modify Actor Property")));
+	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("修改 Actor 属性"), TEXT("Modify Actor Property")));
 #endif
 
 	const TSharedPtr<FJsonObject>* TargetsObj = nullptr;
@@ -1579,7 +1579,7 @@ void FUAL_ActorCommands::Handle_SetTransformUnified(const TSharedPtr<FJsonObject
 	}
 
 #if WITH_EDITOR
-	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("批量修改Actor变换"), TEXT("Batch Modify Actor Transform")));
+	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("批量修改 Actor 变换"), TEXT("Batch Modify Actor Transform")));
 #endif
 
 	int32 AffectedCount = 0;

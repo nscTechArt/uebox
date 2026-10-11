@@ -36,6 +36,7 @@
 
 import { z } from 'zod'
 
+import { DELEGATED_ANSWER } from '../../../../shared/agentQuestion'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 import {
   hasPendingQuestion,
@@ -55,7 +56,13 @@ const askUserInput = z.object({
           .max(12)
           .describe('卡片上的短标签，不超过 12 个字符，如「用在哪」「做多深」'),
         question: z.string().describe('完整的问题。说清楚你为什么问不下去了'),
-        multiSelect: z.boolean().default(false).describe('选项之间不互斥、可以多选时为 true'),
+        multiSelect: z
+          .boolean()
+          .default(false)
+          .describe(
+            '选项之间不互斥、用户可能同时要好几个时为 true（如「要哪些功能」「覆盖哪些平台」）。' +
+              '只有「几选一」才用单选'
+          ),
         options: z
           .array(
             z.object({
@@ -106,10 +113,16 @@ export interface AskUserToolDeps {
  */
 export function formatAnswers(questions: AskUserQuestion[], answers: string[]): string {
   const lines = questions.map((q, i) => {
+    if (answers[i] === DELEGATED_ANSWER) return `- [${q.header}]（用户让你自己定这一问）`
     const answer = answers[i]?.trim()
     return answer ? `- [${q.header}] ${answer}` : `- [${q.header}]（用户跳过了这一问）`
   })
-  return ['用户的回答：', ...lines].join('\n')
+  const delegated = answers.some((a) => a === DELEGATED_ANSWER)
+  return [
+    '用户的回答：',
+    ...lines,
+    ...(delegated ? ['', '让你自己定的那几问，按你的判断选，并在最终回复里写明你的假设。'] : [])
+  ].join('\n')
 }
 
 const DECLINED =

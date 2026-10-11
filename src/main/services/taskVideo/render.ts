@@ -42,7 +42,7 @@ export async function videoPreflight(signal?: AbortSignal): Promise<string> {
   const ffmpeg = await findFFmpeg()
   if (!ffmpeg)
     throw new Error(
-      '制作视频需要 FFmpeg。请先安装完整版本并加入 PATH，或配置 UNREAL_BOX_FFMPEG_PATH 后重启盒子，然后继续；尚未生成收费素材。'
+      '制作视频需要 FFmpeg。请先安装完整版本并加入 PATH，或配置 UNREAL_BOX_FFMPEG_PATH 后重启虚幻盒子，然后继续；尚未生成收费素材。'
     )
   const filters = await runVideoProcess(ffmpeg, ['-hide_banner', '-filters'], process.cwd(), signal)
   const encoders = await runVideoProcess(

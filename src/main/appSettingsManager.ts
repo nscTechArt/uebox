@@ -229,12 +229,14 @@ class AppSettingsManager {
           ualinkOptOutProjects: mergedSettings.ualinkOptOutProjects,
           agentBrowserMode: mergedSettings.agentBrowserMode,
           agentFileAccessScope: mergedSettings.agentFileAccessScope,
-          // 没拨过的跟着新默认走（见 `agentToolSearchUserSet`）。全量模式下关过的工具
-          // 切过去之后不再被滤掉，但也不常驻 —— 模型主动搜到才会取回
+          // 没拨过的跟着新默认走（见 `agentToolSearchUserSet`）。例外：在全量模式下关过工具的
+          // 老用户留在全量模式 —— 搜索模式不认那份名单，切过去等于把他关掉的工具又放出来
           agentToolSearchEnabled:
             savedSettings.agentToolSearchUserSet === true
               ? savedSettings.agentToolSearchEnabled === true
-              : DEFAULT_SETTINGS.agentToolSearchEnabled,
+              : sanitizeToolNames(mergedSettings.agentDisabledTools).length > 0
+                ? savedSettings.agentToolSearchEnabled === true
+                : DEFAULT_SETTINGS.agentToolSearchEnabled,
           agentToolSearchUserSet: savedSettings.agentToolSearchUserSet === true,
           // 只有用户明确关掉才算关：旧配置里没有这个字段的，跟着默认走
           agentPersistentAutoResume: mergedSettings.agentPersistentAutoResume !== false,

@@ -27,6 +27,23 @@ function steer(value: string, timestamp = 1, applied = false): AgentProcessItem 
 }
 
 describe('splitAgentTimeline', () => {
+  it('工具跑着时插话：结果挪回调用那一组，不留一行一直转圈、也不多出一行没头的结果', () => {
+    const blocks = splitAgentTimeline([
+      {
+        type: 'tool-call',
+        data: { id: 'c1', function: { name: 'ue_build', arguments: '{}' } },
+        timestamp: 1
+      },
+      steer('顺便看看日志', 2),
+      { type: 'tool-result', data: { toolCallId: 'c1', result: 'ok' }, timestamp: 3 }
+    ])
+    expect(blocks.map((block) => block.kind)).toEqual(['process', 'steer'])
+    expect(blocks[0].kind === 'process' && blocks[0].items.map((item) => item.type)).toEqual([
+      'tool-call',
+      'tool-result'
+    ])
+  })
+
   /**
    * 这是整件事的重点：模型在两次工具调用之间说的话，必须留在它说话的位置。
    * 原来界面把所有正文拼成一根字符串挂在最底下，读的人对不上哪句话在说哪一步。

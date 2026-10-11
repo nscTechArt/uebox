@@ -43,6 +43,11 @@
 import { z } from 'zod'
 
 import { findFFmpeg } from '../../../services/ffmpegPath'
+import {
+  getTargetConnectionId,
+  getTargetProjectPath,
+  runWithTargetConnectionId
+} from '../../core/projectTargetContext'
 import { callUe, callUeRaw } from '../defineUeTool'
 import { defineTool, type ToolCallContext, type UnrealAgentTool } from '../defineTool'
 import { composeVideo, type ComposedVideo } from './composeVideo'
@@ -222,7 +227,13 @@ export function formatResult(j: RenderStartOutput, s: RenderStatusOutput): strin
   const lines: string[] = []
   const head = describeJob(j)
 
-  if (s.state === 'finished') {
+  if (s.state === 'finished' && (s.files_written ?? 0) === 0) {
+    // 一个文件都没写出来就不是「完成」：第一句就得说没成
+    lines.push(`渲染失败：${head}。引擎说渲完了，但输出目录里一个文件都没有。`)
+    lines.push(`输出目录：${s.output_dir}`)
+    if (s.error) lines.push(`引擎报过错：${s.error}`)
+    lines.push('先看输出日志里的 LogMovieRenderPipeline。')
+  } else if (s.state === 'finished') {
     const expected = j.frame_range[1] - j.frame_range[0]
     const written = s.files_written ?? 0
     lines.push(`渲染完成：${head}，用时 ${formatDuration(s.elapsed_seconds)}。`)
@@ -241,11 +252,6 @@ export function formatResult(j: RenderStartOutput, s: RenderStatusOutput): strin
     for (const f of s.sample_files ?? []) lines.push(`  ${f}`)
     // 渲完了但中途报过错（非致命）：照实转述，别让「完成」盖住它
     if (s.error) lines.push(`⚠️ 渲染过程中引擎报过错：${s.error}`)
-    if (written === 0) {
-      lines.push(
-        '⚠️ 引擎说渲完了，但输出目录里一个文件都没有。先看输出日志里的 LogMovieRenderPipeline。'
-      )
-    }
   } else if (s.state === 'canceled') {
     lines.push(`渲染已取消：${head}。`)
     lines.push(`取消前已经写出的文件在 ${s.output_dir}（${s.files_written ?? 0} 个）。`)
@@ -421,19 +427,45 @@ export function createSequenceRenderTool(): UnrealAgentTool<RenderDetails> {
       // 用户明确要 MRQ 自带的 MP4 编码器：原样交给插件（5.6 以下插件会报没有这个输出）
       if (input.format === 'mp4_mrq') params.format = 'mp4'
 
+      // 停止回调跑在停止按钮的执行流里，那边认不出目标编辑器；连着两个以上编辑器时
+      // 不带目标就发不出去，所以在这儿把这次渲染的目标记下来
+      const connectionId = getTargetConnectionId()
+      const projectPath = getTargetProjectPath()
+      const target = {
+        ...(connectionId ? { connectionId } : {}),
+        ...(projectPath ? { projectPath } : {})
+      }
+      const cancelJob = (jobId: string): void => {
+        void runWithTargetConnectionId(target, () =>
+          callUeRaw('sequence.render_cancel', { job_id: jobId }, { timeoutMs: 15_000 })
+        ).catch(() => undefined)
+      }
+
+      // 开始请求不挂停止信号：请求已经发出去了，编辑器照样会开渲；这边放手只会丢掉任务号，
+      // 留下一个没人管、后面每次都报「上一次还没结束」的渲染。停止发生在等回执的时候，
+      // 回执一到就取消
+      const started = callUe<RenderStartOutput>('sequence.render', params, { timeoutMs: 60_000 })
+      const cancelOnceStarted = (): void => {
+        void started
+          .then((value) => value?.job_id && cancelJob(value.job_id))
+          .catch(() => undefined)
+      }
+      ctx.signal?.addEventListener('abort', cancelOnceStarted, { once: true })
+
       let job: RenderStartOutput
       try {
-        job = await callUe<RenderStartOutput>('sequence.render', params, {
-          timeoutMs: 60_000,
-          ...(ctx.signal ? { signal: ctx.signal } : {})
-        })
+        job = await started
       } catch (error) {
         // 第一次用最常见的就是这一条。下一步写死在报错里，比指望模型翻回描述可靠
         if (error instanceof Error && error.message.includes('MovieRenderPipeline')) {
           throw new Error(`${error.message}\n${MRQ_DISABLED_HINT}`)
         }
         throw error
+      } finally {
+        ctx.signal?.removeEventListener('abort', cancelOnceStarted)
       }
+      // 等回执期间被停了：上面挂的监听已经在回执到手时发了取消
+      if (ctx.signal?.aborted) throw ctx.signal.reason ?? new Error('Operation aborted')
       if (!job?.job_id) {
         return { text: '失败：引擎没有返回渲染任务', isError: true }
       }
@@ -456,13 +488,7 @@ export function createSequenceRenderTool(): UnrealAgentTool<RenderDetails> {
 
       // 停止 = 取消。发出去就不管了：编辑器卡死时这条也会超时，那时 note 里的
       // 「已请求取消」就是全部真相
-      const onAbort = (): void => {
-        void callUeRaw(
-          'sequence.render_cancel',
-          { job_id: job.job_id },
-          { timeoutMs: 15_000 }
-        ).catch(() => undefined)
-      }
+      const onAbort = (): void => cancelJob(job.job_id)
       ctx.signal?.addEventListener('abort', onAbort, { once: true })
       ctx.setAbortNote?.(
         () =>
@@ -496,7 +522,11 @@ export function createSequenceRenderTool(): UnrealAgentTool<RenderDetails> {
         return {
           text,
           details: { start: job, status, ...(video ? { video } : {}) },
-          isError: status.state === 'failed'
+          // 没写出文件的「完成」、编辑器里已经没有这个任务（none）都按失败交出去
+          isError:
+            status.state === 'failed' ||
+            status.state === 'none' ||
+            (status.state === 'finished' && (status.files_written ?? 0) === 0)
         }
       } finally {
         ctx.signal?.removeEventListener('abort', onAbort)

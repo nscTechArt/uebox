@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { runEditorPython } from '../../../core/editorPython'
 import { assertScriptAllowed } from '../../builtin/pathBoundary'
 import { describePositionalRotatorRefusal, findPositionalRotatorCalls } from './pythonRotatorGuard'
-import { describePythonErrorHints } from './pythonErrorHints'
+import { describeAutoAnsweredDialogs, describePythonErrorHints } from './pythonErrorHints'
 import { noteViewportMove, viewportCameraApiInScript } from '../ue-editor/viewportProvenance'
 import { discoverEnabledSkills } from '../../../capabilities/skills'
 import { readSkillResource } from '../../../capabilities/skillsService/SkillsService'
@@ -197,13 +197,14 @@ export function createRunPythonScriptTool(): V2Tool {
           success: false,
           error:
             (result.error ?? 'Python 执行失败') +
-            describePythonErrorHints(`${result.error ?? ''}\n${result.stdout ?? ''}`) +
+            describePythonErrorHints(`${result.error ?? ''}\n${result.stdout ?? ''}`, script) +
+            describeAutoAnsweredDialogs(result.dialogs) +
             hint,
           details: { stdout: result.stdout }
         }
       }
 
-      let message = 'Python 脚本执行成功'
+      let message = 'Python 脚本执行成功' + describeAutoAnsweredDialogs(result.dialogs)
       if (result.stdout) {
         message += `\nstdout:\n${result.stdout}`
       } else if (!result.output) {

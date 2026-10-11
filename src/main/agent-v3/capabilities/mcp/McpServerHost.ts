@@ -774,10 +774,10 @@ function jsonRpcError(res: ServerResponse, status: number, code: number, message
 function describeListenError(error: Error, port: number): string {
   const code = (error as NodeJS.ErrnoException).code
   if (code === 'EADDRINUSE') {
-    return `端口 ${port} 已被占用（可能已经开了一个盒子，或别的程序在用）。换一个端口再试。`
+    return `端口 ${port} 已被占用（可能已有虚幻盒子实例在运行，或被其他程序占用）。请更换端口后重试。`
   }
   if (code === 'EACCES') {
-    return `没有权限使用端口 ${port}。换一个大于 1024 的端口。`
+    return `没有权限使用端口 ${port}，请更换为大于 1024 的端口。`
   }
   return error.message
 }

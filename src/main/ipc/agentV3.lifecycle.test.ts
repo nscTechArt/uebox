@@ -22,6 +22,12 @@ const mock = vi.hoisted(() => ({
   attachments: vi.fn()
 }))
 
+/** 审计员交回一份只有一条的复核清单 */
+function auditReply(status: 'PASS' | 'FAIL', finding: string): string {
+  const item = { id: 1, requirement: '验收', quote: '完成原目标', how: '看', status, finding }
+  return `<checklist>${JSON.stringify([item])}</checklist>`
+}
+
 vi.mock('electron', () => ({
   ipcMain: { handle: (name: string, handler: Handler) => mock.handlers.set(name, handler) },
   webContents: { getAllWebContents: () => [] }
@@ -178,7 +184,7 @@ beforeEach(() => {
   mock.compact.mockReset()
   mock.truncate.mockReset().mockResolvedValue({ ok: true, messageCount: 1, dropped: 1 })
   mock.fork.mockReset().mockResolvedValue({ ok: true, sessionId: 'branch', messageCount: 2 })
-  mock.audit.mockReset().mockResolvedValue({ text: 'VERDICT: PASS — checked' })
+  mock.audit.mockReset().mockResolvedValue({ text: auditReply('PASS', 'checked') })
   mock.deleteTranscript.mockReset().mockResolvedValue(undefined)
   mock.deleteBrowser.mockReset().mockResolvedValue(undefined)
   agent.state.messages = []
@@ -346,7 +352,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
   it('失败后继续仍装配目标复核，并保存恢复后的轮次', async () => {
     mock.loadOptions.mockResolvedValue({
       mode: 'agent',
-      goal: { objective: '完成目标', rounds: 3, lastFailReason: '', mutations: [], settled: false }
+      goal: { objective: '完成目标', rounds: 3, checklist: [], mutations: [], settled: false }
     })
     agent.continue.mockImplementationOnce(async () => {
       const event: AgentEvent = {
@@ -375,7 +381,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
       goal: {
         objective: '完成目标',
         rounds: 5,
-        lastFailReason: '旧',
+        checklist: [],
         mutations: ['x'],
         settled: true
       }
@@ -388,7 +394,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
           objective: '完成目标',
           latestRequest: '顺便把灯调亮',
           rounds: 0,
-          lastFailReason: '',
+          checklist: [],
           mutations: [],
           settled: false
         }
@@ -399,7 +405,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
   it('取消目标：删掉落盘的目标并通知界面；正在跑时不让取消', async () => {
     mock.loadOptions.mockResolvedValue({
       mode: 'agent',
-      goal: { objective: '完成目标', rounds: 1, lastFailReason: '', mutations: [], settled: false }
+      goal: { objective: '完成目标', rounds: 1, checklist: [], mutations: [], settled: false }
     })
     expect(await invoke('goal-end', { sessionId: 'goal-cancel' })).toEqual({ success: true })
     expect(mock.saveOptions).toHaveBeenCalledWith('goal-cancel', { mode: 'agent' })
@@ -421,7 +427,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
   it('只有复核中断时继续先复核，不重复请求 worker', async () => {
     mock.loadOptions.mockResolvedValue({
       mode: 'agent',
-      goal: { objective: '完成目标', rounds: 1, lastFailReason: '', mutations: [], settled: false }
+      goal: { objective: '完成目标', rounds: 1, checklist: [], mutations: [], settled: false }
     })
     mock.load.mockResolvedValue([
       ...messages,
@@ -444,7 +450,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
       goal: {
         objective: '完成原目标',
         rounds: 2,
-        lastFailReason: '',
+        checklist: [],
         mutations: [],
         settled: false
       }
@@ -453,7 +459,7 @@ describe('Agent V3 真实 IPC 生命周期', () => {
       ...messages,
       { role: 'assistant', content: '已完成', stopReason: 'stop' }
     ])
-    mock.audit.mockResolvedValue({ text: 'VERDICT: FAIL — 缺少验收' })
+    mock.audit.mockResolvedValue({ text: auditReply('FAIL', '缺少验收') })
     expect(
       await invoke('continue', { sessionId: 'goal-audit-retry', mode: 'agent' })
     ).toMatchObject({ success: true })
@@ -464,7 +470,10 @@ describe('Agent V3 真实 IPC 生命周期', () => {
     expect(mock.saveOptions).toHaveBeenLastCalledWith(
       'goal-audit-retry',
       expect.objectContaining({
-        goal: expect.objectContaining({ rounds: 3, lastFailReason: '缺少验收' })
+        goal: expect.objectContaining({
+          rounds: 3,
+          checklist: [expect.objectContaining({ id: 1, status: 'fail', finding: '缺少验收' })]
+        })
       })
     )
   })

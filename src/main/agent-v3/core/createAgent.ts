@@ -773,7 +773,12 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     : undefined
   const tools = search ? search.getTools() : toolsFor(ctx.ueConnected)
   const systemPromptFor = (context: SessionContext): string =>
-    buildSystemPrompt(context, skills, selection) + (search ? TOOL_SEARCH_RULES : '')
+    // 主模型看不了图、但截图会交给视觉模型看时，按「看得到」说（见 `toolImagesVisible`）
+    buildSystemPrompt(
+      context,
+      skills,
+      runtime.toolImagesVisible ? { ...selection, model: { input: ['text', 'image'] } } : selection
+    ) + (search ? TOOL_SEARCH_RULES : '')
 
   const byName = new Map(onlineTools.map((tool) => [tool.name, tool]))
   if (search) byName.set(search.tool.name, search.tool)

@@ -31,6 +31,16 @@ export interface AgentQuestion {
  */
 export type AgentQuestionAction = 'accept' | 'decline' | 'cancel'
 
+/**
+ * `answers` 里某一问的值等于它，表示用户对**这一问**点了「你自己定」。
+ *
+ * 「你自己定」是逐问的：一次问三问，前两问选好了、第三问拿不准，点它只该放手
+ * 第三问。原来它是整张卡片的 `decline`，前两问的选择会被一起丢掉。
+ * 用一个占位值而不是并行数组：答案要走 IPC、存进消息历史、再画回只读卡片，
+ * 多一个字段就要多改一路，漏一处就是「选了没生效」。全部几问都放手才发 `decline`。
+ */
+export const DELEGATED_ANSWER = '\u0000delegate'
+
 /** 时间线上那张卡片的完整状态 */
 export interface AgentQuestionItem {
   toolCallId: string

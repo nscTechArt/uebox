@@ -95,7 +95,7 @@ describe('导入预览：对象存储', () => {
     const { wrapper, apply } = await openPreview(previewWith(storage({ kind: 'none' }, true)))
     const text = wrapper.text()
     expect(text).toContain('对象存储')
-    expect(text).toContain('10 GB 空间 · 最后一次用到后留 30 天')
+    expect(text).toContain('10 GB 空间 · 最后使用后保留 30 天')
     expect(text).toContain('接管：未开启')
     await wrapper.find('.modal-ok').trigger('click')
     await flushPromises()

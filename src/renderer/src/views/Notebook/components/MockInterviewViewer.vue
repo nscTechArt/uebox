@@ -749,10 +749,10 @@ const scoreEmoji = computed(() => {
  * 情感化反馈 - 消息
  */
 const scoreMessage = computed(() => {
-  if (totalScore.value >= 90) return '虚幻大师！Epic 都要来挖你了'
-  if (totalScore.value >= 70) return '表现不错！继续保持'
-  if (totalScore.value >= 50) return '再接再厉，多刷文档哦'
-  return '别灰心，知识需要一点点积累'
+  if (totalScore.value >= 90) return '优秀：知识掌握扎实'
+  if (totalScore.value >= 70) return '良好：大部分知识点已掌握'
+  if (totalScore.value >= 50) return '及格：建议复习错题对应的文档'
+  return '未及格：建议系统复习相关知识点'
 })
 
 /**

@@ -429,6 +429,13 @@ function liveForkSource(sessionId: string, keepUserTurns?: number): AgentMessage
 }
 
 /** 按停止之后最多等它收尾多久，超时就如实说「没停干净」 */
+/** 目标模式里「用户最新一句」最多带多长：它每轮复核、续跑都要再发一遍 */
+const LATEST_REQUEST_MAX_CHARS = 2000
+
+function tailOf(text: string, max: number): string {
+  return text.length <= max ? text : `…${text.slice(text.length - max)}`
+}
+
 const STOP_DRAIN_TIMEOUT_MS = 15_000
 
 /**
@@ -469,15 +476,6 @@ function approvalModeFor(sessionId: string): ApprovalMode {
  */
 const sessionAlwaysAllowed = new Map<string, Set<string>>()
 
-function alwaysAllowedFor(sessionId: string): Set<string> {
-  const existing = sessionAlwaysAllowed.get(sessionId)
-  if (existing) return existing
-
-  const created = new Set<string>()
-  sessionAlwaysAllowed.set(sessionId, created)
-  return created
-}
-
 /**
  * 切到只读（Ask）时连同「本对话内都允许」的名单一起清掉。
  *
@@ -488,6 +486,15 @@ function alwaysAllowedFor(sessionId: string): Set<string> {
 function setReadOnly(sessionId: string, readOnly: boolean): void {
   readOnlyBySession.set(sessionId, readOnly)
   if (readOnly) sessionAlwaysAllowed.get(sessionId)?.clear()
+}
+
+function alwaysAllowedFor(sessionId: string): Set<string> {
+  const existing = sessionAlwaysAllowed.get(sessionId)
+  if (existing) return existing
+
+  const created = new Set<string>()
+  sessionAlwaysAllowed.set(sessionId, created)
+  return created
 }
 
 /**
@@ -519,7 +526,9 @@ function attachGoalLoop(
     emit('agent-v3:goal', { sessionId: ctx.sessionId, message, level })
   const precondition = checkGoalPreconditions({ mode: options.mode })
   if (!precondition.ok) {
-    report(precondition.reason!, 'warning')
+    // 只在这一轮刚定目标时提醒；沿用下来的目标（带 latestRequest）在只读轮里静默跳过，
+    // 不然切到只读问一句就句句报「目标不可能达成」
+    if (!goal.latestRequest) report(precondition.reason!, 'warning')
     return undefined
   }
   const loop = createGoalLoop({
@@ -766,12 +775,12 @@ function stopEditorWatch(sessionId: string): void {
 /** 给用户看的那一句（界面提示）。给制作人看的在 `buildCrashNotice` */
 function watchNotice(event: EditorWatchEvent): string {
   if (event.kind === 'crashed') {
-    return `编辑器崩溃了${event.reason ? `（${event.reason.slice(0, 120)}）` : ''}，正在自动重开工程…`
+    return `编辑器已崩溃${event.reason ? `（${event.reason.slice(0, 120)}）` : ''}，正在自动重新打开工程…`
   }
   if (event.kind === 'recovered') {
-    return `编辑器已经重开并连上（用时 ${Math.round(event.waitedMs / 1000)} 秒），已告诉制作人。`
+    return `编辑器已重新打开并连接（用时 ${Math.round(event.waitedMs / 1000)} 秒），已通知制作人。`
   }
-  return `编辑器没能自动恢复：${event.why}`
+  return `编辑器自动恢复失败：${event.why}`
 }
 
 /**
@@ -1667,14 +1676,19 @@ export function registerAgentV3IPC(): void {
         return { success: false, error: '这条 session 不是团队模式' }
       }
       const store = createTeamStore(teamDirsFor(sessionId))
-      if (!(await store.board()).some((task) => task.id === taskId)) {
+      const before = (await store.board()).find((task) => task.id === taskId)
+      if (!before) {
         return { success: false, error: `任务板上没有 ${taskId}` }
       }
       await store.patchBoard([{ id: taskId, status: 'todo', reopenedAt: Date.now() }])
-      // 打回是履历里分量最重的一条：记到干这件活的那个模型头上。记不上不影响重开本身
-      await recordReopen(store, taskId, createTrackRecord(trackRecordFile()).add).catch(
-        (error: unknown) => console.warn('[team] 打回没记进履历:', error)
-      )
+      // 打回是履历里分量最重的一条：记到干这件活的那个模型头上。记不上不影响重开本身。
+      // 只有交过货（done）的才算「被用户打回」：卡住（blocked）重开多半是环境问题，
+      // 而且活动记录分不清是哪件活，记下去只会冤枉上一件交货的模型
+      if (before.status === 'done') {
+        await recordReopen(store, taskId, createTrackRecord(trackRecordFile()).add).catch(
+          (error: unknown) => console.warn('[team] 打回没记进履历:', error)
+        )
+      }
       event.sender.send('agent-v3:team-board', { sessionId })
       return { success: true }
     }
@@ -2122,9 +2136,14 @@ export function registerAgentV3IPC(): void {
         ? {
             objective: goalSource,
             // 沿用老目标的这一轮，用户刚说的话要压过目标原文，见 `GoalLoopDeps.latestRequest`
-            ...(goalObjective ? {} : { latestRequest: promptText }),
+            // promptText 是渲染层拼好的整段（知识库命中、资产库 / 工程上下文、附件正文排在前面），
+            // 用户自己的话在最后。每一轮复核和续跑都要再带一遍，只留末尾一段
+            ...(goalObjective
+              ? {}
+              : { latestRequest: tailOf(promptText, LATEST_REQUEST_MAX_CHARS) }),
             rounds: 0,
-            lastFailReason: '',
+            // 用户说了新话，目标可能变了 —— 清单清空，下一轮复核按新话重拆
+            checklist: [],
             mutations: [],
             settled: false
           }
@@ -2836,7 +2855,7 @@ export function registerAgentV3IPC(): void {
         ref,
         args.pinned
       )
-      return found ? { success: true } : { success: false, error: '这条经验已经不在了' }
+      return found ? { success: true } : { success: false, error: '该经验不存在' }
     }
   )
 
@@ -2844,7 +2863,7 @@ export function registerAgentV3IPC(): void {
     const ref = parseExperienceRef(rawRef)
     if (!ref) return { success: false, error: '参数不对：需要经验的位置' }
     const found = await deleteExperience(experienceHome(), experienceProjects(), ref)
-    return found ? { success: true } : { success: false, error: '这条经验已经不在了' }
+    return found ? { success: true } : { success: false, error: '该经验不存在' }
   })
 
   ipcMain.handle('agent-v3:undo-last-curation', async () => {

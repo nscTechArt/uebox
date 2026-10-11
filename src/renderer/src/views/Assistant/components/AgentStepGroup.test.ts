@@ -159,7 +159,7 @@ describe('AgentStepGroup', () => {
     ])
 
     expect(wrapper.findAll('img')).toHaveLength(1)
-    expect(wrapper.findAll('.step-stat').map((node) => node.text())).toContain('看了 1 张图')
+    expect(wrapper.findAll('.step-stat').map((node) => node.text())).toContain('查看了 1 张图片')
 
     await wrapper.find('.step-summary').trigger('click')
     expect(wrapper.findAll('img')).toHaveLength(2)

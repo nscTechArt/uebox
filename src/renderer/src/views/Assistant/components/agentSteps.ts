@@ -220,7 +220,8 @@ function applyResult(row: ToolStepRow, item: AgentProcessItem): void {
   if (isDeliverableImageTool(row.toolName)) row.images = images
   else row.viewedImages = images
   row.viewedImages = [...row.viewedImages, ...findResultPeekImageUrls(result)]
-  row.videos = findResultVideoUrls(result)
+  // analyze_video 回带的是它看的那段视频（入参原样回来），不是产出
+  row.videos = row.toolName === 'analyze_video' ? [] : findResultVideoUrls(result)
   row.fileChange = readFileChange(structured?.fileChange)
   row.fileChangeUnavailable = !!structured?.fileChangeUnavailable
 }
@@ -361,13 +362,16 @@ export function buildStepGroup(parts: readonly StepPart[]): StepGroupView {
   const videos: string[] = []
 
   for (const row of rows) {
+    // 子任务失败也是这一组出的错：只数工具的话，整组都是子任务时摘要行看不出有失败
+    if (row.kind === 'subtask' && row.lane.status === 'failed') failedCount += 1
     if (row.kind !== 'tool') continue
     toolCount += 1
     if (row.status === 'failed') failedCount += 1
     viewedImageCount += row.viewedImages.length
     if (row.fileChange) changedFiles.add(row.fileChange.path)
-    deliverableImages.push(...row.images)
-    videos.push(...row.videos)
+    for (const image of row.images)
+      if (!deliverableImages.includes(image)) deliverableImages.push(image)
+    for (const video of row.videos) if (!videos.includes(video)) videos.push(video)
 
     const at = countIndex.get(row.toolName)
     if (at === undefined) {

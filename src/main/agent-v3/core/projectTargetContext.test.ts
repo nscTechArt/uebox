@@ -429,14 +429,16 @@ describe('retargetToProject —— 工具自己打开工程之后把这一轮切
     })
   })
 
-  it('原来绑着别的工程时，打开的那个连上就切过去', () => {
+  it('手里的目标还连着时，打开的那个连上了也不悄悄换（模型被告知的是「没切换」）', () => {
     projects.push({ connectionId: 'conn-a', projectPath: 'I:/Dev/A', isConnected: true })
     runWithTargetConnectionId({ connectionId: 'conn-a', projectPath: 'I:/Dev/A' }, () => {
       retargetToProject('I:/Dev/New')
-      // 还没连上：照旧发给 A
       expect(getTargetConnectionId()).toBe('conn-a')
 
       projects.push({ connectionId: 'conn-new', projectPath: 'I:/Dev/New', isConnected: true })
+      expect(getTargetConnectionId()).toBe('conn-a')
+      // 模型照提示再调一次 open_project 才切
+      expect(retargetToProject('I:/Dev/New')).toMatchObject({ ok: true, connectionId: 'conn-new' })
       expect(getTargetConnectionId()).toBe('conn-new')
     })
   })

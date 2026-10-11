@@ -368,7 +368,8 @@ export function createAgentCompletionHandlers(
       )
     ].join('\n\n')
 
-    if (mediaMarkdown) {
+    // 有过程记录时，生成的图和视频已经挂在生成它的那组步骤下面了，正文末尾再补一份就重复了
+    if (mediaMarkdown && !(finalAgentProcess && finalAgentProcess.length > 0)) {
       finalText = finalText.replace(/\{\s*"tool_code"\s*:\s*"[^"]*"\s*\}/g, '')
       finalText = finalText.replace(/\{\s*"tool_code"\s*:\s*`[^`]*`\s*\}/g, '')
       finalText = finalText.trim()

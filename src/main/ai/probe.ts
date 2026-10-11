@@ -88,7 +88,15 @@ export async function testProvider(
      * 这与文件顶部那条「向量化不能用对话 ping 测」是同一个教训，只是这一档
      * 连替代请求都没有，所以只能明说「测不了」。
      */
-    if (provider.kind === 'music' || provider.kind === 'model3d' || provider.kind === 'video') {
+    // 生图同理：正式调用打的是 /images/generations，对话 ping 测的是另一个端点。
+    // 中转站上只挂了生图渠道的模型（gemini-3.1-flash-image-preview 这类）对话那边
+    // 一律 404，被说成「模型不存在」；就算对话通了也证明不了生图能用
+    if (
+      provider.kind === 'image' ||
+      provider.kind === 'music' ||
+      provider.kind === 'model3d' ||
+      provider.kind === 'video'
+    ) {
       return { ok: true, skipped: 'generativeNoCheapCall' }
     }
 
@@ -170,7 +178,8 @@ export function describeProbeError(error: unknown): ProbeFailure {
 
   if (/timeout|aborted/i.test(raw)) return { code: 'timeout' }
   if (/\b401\b|unauthorized|invalid api key/i.test(raw)) return { code: 'unauthorized' }
-  if (/\b403\b|forbidden/i.test(raw)) return { code: 'forbidden' }
+  // 403 不一定是密钥没权限：中转站的客户端校验、地区限制也回 403，理由只在原话里
+  if (/\b403\b|forbidden/i.test(raw)) return { code: 'forbidden', raw: raw.slice(0, 300) }
 
   // 5xx 是**对方服务端**出错，不是配置问题。不说清楚的话用户会一直回来
   // 改 Base URL、换密钥、重新登录 —— 全都没用，因为问题根本不在这边。

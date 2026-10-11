@@ -18,6 +18,14 @@
  * seedMessages（fresh eyes）+ 一套只读查证工具（见 `AUDITOR_HARD_JUDGES`），只知道目标和 worker
  * 动过什么，不知道它是怎么想的。
  *
+ * ## 为什么清单跨轮留着，分数不留
+ *
+ * 原来每轮审计员自己临时决定查哪几项、只交一句总评：这轮挑插座、下轮挑瓷砖，
+ * worker 每轮追一个新毛病；卡死只能比两轮理由一字不差，换个说法就认不出来。
+ * 现在第一轮把目标拆成带编号的清单（考纲），之后每轮拿**同一份**清单逐条重查 ——
+ * 标准不再漂。上一轮哪条过了**不给**审计员看：给了它就会照抄，fresh eyes 就没了，
+ * 而且 worker 后来的改动可能把过了的弄坏。分数只留在循环里，用来按编号认卡死。
+ *
  * ## 为什么还要订 agent_end
  *
  * `turn_end` 那条判据挡不住 `terminate: true`（`askUser.ts` 在用户关掉提问卡片时
@@ -26,6 +34,7 @@
  */
 
 import type { AgentEvent } from '@earendil-works/pi-agent-core'
+import { z } from 'zod'
 
 import { DEFAULT_GOAL_MAX_ROUNDS } from '../../../shared/goalRounds'
 
@@ -69,7 +78,14 @@ export const AUDITOR_HARD_JUDGES: readonly string[] = [
  * - `core`：`task`、技能、工具搜索。审计员再派子任务出去，复核的成本就没了边。
  * - `host`：提问、语音汇报，都是冲着用户去的。子 agent 本来也拿不到。
  */
-const AUDITOR_EXCLUDED_NAMESPACES = new Set(['browser', 'web', 'mcp', 'core', 'host'])
+const AUDITOR_EXCLUDED_NAMESPACES = new Set(['browser', 'web', 'mcp', 'core', 'host', 'aigc'])
+
+/**
+ * 标着 safe 但要花钱或很重的：审计员每轮都跑、又不过审批，不能自己拿。
+ * `aigc` 整个命名空间也排掉（analyze_video 这类按次计费的看图看视频）。
+ * 真要用就由调用方在 `judges` 里点名
+ */
+const AUDITOR_EXCLUDED_TOOLS = new Set(['ue_insights_trace', 'ue_capture_perf_trace'])
 
 /** 审计员（以及工作室的验收员）拿不拿这个工具，`judges` 是额外点名的裁判 */
 export function isAuditorTool(
@@ -82,6 +98,7 @@ export function isAuditorTool(
   if (judges.includes(tool.name)) return true
   const { namespace, risk, requiresExplicitApproval } = tool.unrealBox
   if (AUDITOR_EXCLUDED_NAMESPACES.has(namespace) || namespace.startsWith('mcp.')) return false
+  if (AUDITOR_EXCLUDED_TOOLS.has(tool.name)) return false
   return risk === 'safe' && requiresExplicitApproval !== true
 }
 
@@ -109,8 +126,8 @@ export interface GoalPrecondition {
  *   照样烧满十轮。
  *
  * 一张静态的「什么活能验」清单注定跟不上工具的增长，而**审计员自己最清楚**
- * 它能不能验这一个具体目标。所以这条规则整个撤掉，改由审计员在裁决里说
- * `VERDICT: BLOCKED`（见 `buildAuditPrompt` / `parseVerdict`）。
+ * 它能不能验这一个具体目标。所以这条规则整个撤掉，改由审计员把验不了的那条判
+ * `BLOCKED`（见 `buildAuditPrompt` / `parseChecklist`）。
  * 代价是多花一轮问它一次，换来的是零误伤、且新领域自动覆盖。
  *
  * ## 只读那条为什么留着
@@ -127,8 +144,8 @@ export function checkGoalPreconditions(input: { mode?: 'agent' | 'ask' }): GoalP
     return {
       ok: false,
       reason:
-        '只读模式下改不了任何东西，目标不可能达成 —— 这一轮按普通对话跑，没有进复核循环。' +
-        '要用目标模式请先退出只读模式。'
+        '只读模式下无法修改任何内容，目标无法达成。本轮按普通对话执行，未进入复核循环。' +
+        '如需使用目标模式，请先退出只读模式。'
     }
   }
 
@@ -174,6 +191,29 @@ export interface GoalVerdict {
   reason: string
 }
 
+/**
+ * 复核清单的一条：考纲（要什么、出自目标哪句话、怎么查）加它的判分。
+ * 落盘也用这一份（`sessionExecutionOptions.ts`），别再抄一遍。
+ *
+ * 考纲第一轮由审计员拆出来，之后**原样**交给每一轮的审计员 —— 不许它改写，
+ * 不然标准又跟着每轮的审计员漂了。判分只存在循环里，不回给审计员。
+ */
+export const goalCheckSchema = z.object({
+  id: z.number().int().positive(),
+  requirement: z.string(),
+  /** 出自目标（或用户后来那句话）的原文。拿来防目标被越查越宽，也防被悄悄缩小 */
+  quote: z.string(),
+  /** 怎么查。写成能重复跑的检查，下一轮照着再跑一遍 */
+  how: z.string(),
+  status: z.enum(['pass', 'fail', 'blocked']),
+  finding: z.string(),
+  /** 连着几轮 FAIL。按编号认卡死，不比措辞 */
+  failStreak: z.number().int().min(0)
+})
+
+export type GoalCheck = z.infer<typeof goalCheckSchema>
+export type GoalCheckItem = Pick<GoalCheck, 'id' | 'requirement' | 'quote' | 'how'>
+
 export interface GoalAuditInput {
   objective: string
   /** worker 本轮的结束语 */
@@ -182,6 +222,8 @@ export interface GoalAuditInput {
   mutations: readonly string[]
   /** 定下目标之后用户又说的那句话，见 `GoalLoopDeps.latestRequest` */
   latestRequest?: string
+  /** 前几轮立下的清单。第一轮为空，由这一轮的审计员拆 */
+  checklist?: readonly GoalCheckItem[]
   signal?: AbortSignal
   onProgress?: (text: string) => void
 }
@@ -220,13 +262,15 @@ export interface GoalLoopDeps {
 
 export interface GoalLoopState {
   rounds: number
-  lastFailReason: string
+  /** 复核清单和最近一次判分。用户每说一句新话清空重拆，见 `agent-v3:execute` */
+  checklist: GoalCheck[]
   mutations: string[]
   settled: boolean
 }
 
 /**
- * 读审计员的裁决。
+ * 读审计员的一句话裁决。目标模式改成逐条清单了（`parseChecklist`），
+ * 这个留给工作室的验收员。
  *
  * 取**最后**一条匹配：审计员可能在正文里复述格式要求（「我要输出 VERDICT: PASS」），
  * 取第一条会读到那句预告而不是结论。
@@ -251,6 +295,130 @@ export function parseVerdict(text: string): GoalVerdict | null {
 }
 
 /**
+ * 审计员交回来的一条。比落盘那份宽：编号可以是字符串、状态大小写随意 ——
+ * 模型常这么写，为这个判读不出来太脆。要什么、怎么查不许空：第一轮拆出来的
+ * 就是以后每轮的标准，空的立进去等于没有标准。
+ */
+const checkReportSchema = goalCheckSchema.omit({ failStreak: true }).extend({
+  id: z.coerce.number().int().positive(),
+  requirement: z.string().trim().min(1),
+  quote: z.string().default(''),
+  how: z.string().trim().min(1),
+  status: z
+    .string()
+    .transform((value) => value.trim().toLowerCase())
+    .pipe(goalCheckSchema.shape.status),
+  finding: z.string().default('')
+})
+
+export type GoalCheckReport = z.infer<typeof checkReportSchema>
+
+/**
+ * 读审计员交回来的清单。
+ *
+ * 取**最后**一个 `<checklist>`，理由同 `parseVerdict`：正文里复述格式的那段不算。
+ * 从最后一个闭合标签往回找开标签，而不是从头懒匹配 —— 正文里提一句「我会给出
+ * <checklist>」，懒匹配会从那里一路吞到真正那份的结尾。
+ * 里面套了 ```json 围栏也认 —— 模型爱加，为这个判读不出来太脆。
+ * 有一条不合格式、或编号重了就整份作废：缺一条的清单当真用，会把漏查的那条当成
+ * 没这回事；同号两条一过一不过，留哪条都是替审计员拍板。
+ */
+export function parseChecklist(text: string): GoalCheckReport[] | null {
+  const lower = text.toLowerCase()
+  const end = lower.lastIndexOf('</checklist>')
+  const start = end < 0 ? -1 : lower.lastIndexOf('<checklist>', end)
+  if (start < 0) return null
+  const body = text.slice(start + '<checklist>'.length, end)
+
+  const json = body.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')
+  let raw: unknown
+  try {
+    raw = JSON.parse(json)
+  } catch {
+    return null
+  }
+  const parsed = z.array(checkReportSchema).min(1).safeParse(raw)
+  if (!parsed.success) return null
+  const ids = new Set(parsed.data.map((report) => report.id))
+  return ids.size === parsed.data.length ? parsed.data : null
+}
+
+/** 比两句考纲是不是同一句：提示词里转义过，审计员可能原样抄回转义后的 */
+function sameRequirement(a: string, b: string): boolean {
+  const normalize = (text: string): string =>
+    text
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ')
+      .trim()
+  return normalize(a) === normalize(b)
+}
+
+/**
+ * 把这一轮的判分并进清单。
+ *
+ * 已有的条目只取判分，考纲三项一律用存着的。编号对上了、要什么却不是同一句的，
+ * 不认作那一条 —— 审计员重新编了号，判分会落到别的需求头上；当新条目接在后面，
+ * 原来那条记成漏查。清单里有、这一轮没交回来的进 `missing`：没查不等于过了，
+ * 它的连败也断了 —— 中间那轮没人查过，再没过不算「连着」。
+ */
+export function mergeChecklist(
+  previous: readonly GoalCheck[],
+  reported: readonly GoalCheckReport[]
+): { checks: GoalCheck[]; current: GoalCheck[]; missing: GoalCheck[] } {
+  const byId = new Map<number, GoalCheckReport>()
+  const added: GoalCheckReport[] = []
+  const known = new Map(previous.map((item) => [item.id, item]))
+  for (const report of reported) {
+    const item = known.get(report.id)
+    if (item && !sameRequirement(item.requirement, report.requirement)) added.push(report)
+    else byId.set(report.id, report)
+  }
+
+  const judge = (item: GoalCheckItem, report: GoalCheckReport, streak: number): GoalCheck => ({
+    id: item.id,
+    requirement: item.requirement,
+    quote: item.quote,
+    how: item.how,
+    status: report.status,
+    finding: report.finding,
+    failStreak: report.status === 'fail' ? streak + 1 : 0
+  })
+
+  const checks: GoalCheck[] = []
+  const current: GoalCheck[] = []
+  const missing: GoalCheck[] = []
+  for (const item of previous) {
+    const report = byId.get(item.id)
+    byId.delete(item.id)
+    if (!report) {
+      missing.push(item)
+      checks.push({ ...item, failStreak: 0 })
+      continue
+    }
+    const check = judge(item, report, item.status === 'fail' ? item.failStreak : 0)
+    checks.push(check)
+    current.push(check)
+  }
+  // 新补的条目；撞了老编号的换一个空号
+  let nextId = Math.max(0, ...previous.map((item) => item.id), ...reported.map((r) => r.id))
+  for (const report of [...byId.values(), ...added.map((r) => ({ ...r, id: ++nextId }))]) {
+    const check = judge(report, report, 0)
+    checks.push(check)
+    current.push(check)
+  }
+  return { checks, current, missing }
+}
+
+/** `#3 门靠近会开：碰撞盒没接 overlap 事件` —— 时间线和续跑提示都用这个 */
+function describeCheck(check: GoalCheck): string {
+  return check.finding
+    ? `#${check.id} ${check.requirement}：${check.finding}`
+    : `#${check.id} ${check.requirement}`
+}
+
+/**
  * 目标原文进提示词前要转义。
  *
  * 目标是用户输入，审计提示词是我们拼的 —— 中间不能让一个 `</objective>` 把标签
@@ -271,9 +439,14 @@ export function escapeXml(input: string): string {
  *
  * 「按需求逐条找证据」和「绿勾要先确认覆盖了这条需求」照 Codex 的 completion audit
  * 写：编译过、跑不崩只证明没坏，证明不了做成了，最省事的过法是把出错的东西删掉。
+ *
+ * 清单那段（见文件头「为什么清单跨轮留着」）：第一轮让它拆，并写明这份清单会成为
+ * 以后每一轮的标准；之后只给考纲不给分数，要求每条重查、不许删改合并，
+ * 补条目必须引目标原文。
  */
 export function buildAuditPrompt(input: GoalAuditInput): string {
   const mutations = input.mutations.length > 0 ? input.mutations.join(', ') : '(none)'
+  const standing = input.checklist ?? []
 
   return [
     // 不提 Unreal —— 目标可能是素材库、笔记、本地文件。写死「the user's Unreal Engine
@@ -288,26 +461,48 @@ export function buildAuditPrompt(input: GoalAuditInput): string {
     `<worker_report>${escapeXml(input.closing)}</worker_report>`,
     `Change-making tools it called this round: ${mutations}`,
     '',
+    ...(standing.length === 0
+      ? [
+          'Break the objective into the concrete things it asks for, one checklist item each.',
+          'Quote the words of the objective (or of the later user message) each item comes from.',
+          'Do not add items for things it does not ask for, and do not leave out anything it does ask for.',
+          'This checklist becomes the fixed standard for every later audit of this goal, so write',
+          '`how` as a check someone else could repeat.'
+        ]
+      : [
+          'An earlier audit of this goal broke it into the checklist below. It is the fixed standard:',
+          `<standing_checklist>${escapeXml(JSON.stringify(standing))}</standing_checklist>`,
+          'Return every item with its id, and check every one of them again now. Earlier results are',
+          'not shown on purpose: changes made since then may have broken what used to pass.',
+          'Do not drop, merge or reword items. Add an item only if the objective asks for something',
+          'the list missed: give it the next free id and quote the words it comes from.'
+        ]),
+    '',
     'Verify against the current state of things, not against that report:',
-    '- Break the objective into the concrete things it asks for. For each one, find the evidence that would prove it and inspect it with your tools. Re-compile and re-run rather than trusting the report.',
+    '- For each item, find the evidence that would prove it and inspect it with your tools. Re-compile and re-run rather than trusting the report.',
     '- Treat the report as claims to check, not as a map of where to look: the parts nobody touched are where unfinished work hides.',
     '- Match the check to the claim. A narrow check does not prove a broad requirement.',
     '- A clean compile, a run with no errors or a passing check counts only once you have confirmed it covers the requirement. One that passes because something the objective needs was removed or switched off is a FAIL.',
     '- Intent, partial progress and "it should work" are not evidence. If the evidence for a requirement is weak or indirect, it is not met.',
     '- Do not narrow the objective to fit what was done.',
     '',
-    'End your reply with exactly one line, nothing after it — one of:',
-    'VERDICT: PASS — <what you verified, and how>',
-    'VERDICT: FAIL — <what is still missing, concrete enough to act on>',
-    'VERDICT: BLOCKED — <why no further work by that agent could let you verify this>',
+    'End your reply with the checklist as a JSON array in exactly this form, nothing after it:',
+    '<checklist>',
+    '[{"id": 1, "requirement": "...", "quote": "...", "how": "...", "status": "PASS", "finding": "..."}]',
+    '</checklist>',
+    '',
+    '`status` is one of:',
+    '- PASS — `finding` says what you verified, and how.',
+    '- FAIL — `finding` says what is still missing, concrete enough to act on.',
+    '- BLOCKED — `finding` says why no further work by that agent could let you verify this item.',
     '',
     'PASS and FAIL both mean you actually looked. Use FAIL when the work is incomplete or',
     'wrong: the agent can act on that and try again.',
     '',
-    'Use BLOCKED only when nothing you could do would settle the question — the editor is',
+    'Use BLOCKED only when nothing you could do would settle the item — the editor is',
     'not connected and the goal is about the project, you have no tool that can inspect the',
     'thing being asked about, or what was asked for is an answer rather than a change you',
-    'could go and look at. BLOCKED stops the loop and hands the goal back to the user, so do',
+    'could go and look at. A BLOCKED item hands the goal back to the user, so do',
     'not reach for it just because verifying would be tedious: if any tool you have could',
     'answer the question, use that tool instead.'
   ].join('\n')
@@ -375,13 +570,17 @@ export function createGoalLoop(
   let busy = false
   /** 已经有结论了（达成 / 停下来交人）。之后所有事件都不再处理 */
   let settled = deps.initialState?.settled ?? false
-  let lastFailReason = deps.initialState?.lastFailReason ?? ''
+  let checklist: GoalCheck[] = [...(deps.initialState?.checklist ?? [])]
   let mutations: string[] = [...(deps.initialState?.mutations ?? [])]
   let interrupted = false
 
   const save = (): Promise<void> =>
-    deps.onStateChange?.({ rounds, lastFailReason, mutations: [...mutations], settled }) ??
-    Promise.resolve()
+    deps.onStateChange?.({
+      rounds,
+      checklist: [...checklist],
+      mutations: [...mutations],
+      settled
+    }) ?? Promise.resolve()
 
   const settle = async (message: string, level: 'info' | 'warning' | 'success'): Promise<void> => {
     settled = true
@@ -416,7 +615,7 @@ export function createGoalLoop(
     // 兜 terminate 那条路（见文件头）。中止不算 —— 那是用户的意图达成
     if (event.type === 'agent_end') {
       if (signal?.aborted || interrupted) return
-      await settle('这一轮结束了，但没走到复核这一步 —— 目标有没有达成没确认上。', 'warning')
+      await settle('本轮已结束，但未进入复核，无法确认目标是否达成。', 'warning')
       return
     }
 
@@ -437,7 +636,7 @@ export function createGoalLoop(
     interrupted = false
 
     if (rounds >= maxRounds) {
-      await settle(`已经迭代 ${maxRounds} 轮还没达成，停下来交给你。`, 'warning')
+      await settle(`已迭代 ${maxRounds} 轮仍未达成目标，已停止自动迭代。`, 'warning')
       return
     }
 
@@ -454,6 +653,13 @@ export function createGoalLoop(
         closing: extractText(event.message),
         mutations: roundMutations,
         ...(deps.latestRequest ? { latestRequest: deps.latestRequest } : {}),
+        // 只给考纲不给分数，见文件头
+        checklist: checklist.map(({ id, requirement, quote, how }) => ({
+          id,
+          requirement,
+          quote,
+          how
+        })),
         ...(signal ? { signal } : {}),
         onProgress: (text) => deps.report(`复核：${text}`, 'info')
       })
@@ -461,45 +667,74 @@ export function createGoalLoop(
       // 审计员跑的时候用户按了停止：零副作用退出，目标不判死
       if (signal?.aborted) return
 
-      const verdict = parseVerdict(raw)
-      if (!verdict) {
+      const reported = parseChecklist(raw)
+      if (!reported) {
         // 当成 FAIL 会转成死循环（每轮都读不出裁决，每轮都续跑），所以停
-        await settle(`复核没有给出裁决，停下来交给你。它说：${summarize(raw)}`, 'warning')
+        await settle(`复核未给出裁决，已停止自动迭代。复核输出：${summarize(raw)}`, 'warning')
         return
       }
 
-      if (verdict.kind === 'pass') {
-        await settle(`复核通过：${verdict.reason || '目标已达成'}`, 'success')
+      const merged = mergeChecklist(checklist, reported)
+      checklist = merged.checks
+      const failed = merged.current.filter((check) => check.status === 'fail')
+      const blocked = merged.current.filter((check) => check.status === 'blocked')
+      const passed = merged.current.length - failed.length - blocked.length
+
+      if (failed.length === 0) {
+        // 漏查的那条可能正是没做完的那条，不能算过
+        if (merged.missing.length > 0) {
+          await settle(
+            `复核未检查 ${merged.missing.map((check) => `#${check.id}`).join('、')}，` +
+              `无法确认目标已达成，已停止自动迭代。`,
+            'warning'
+          )
+          return
+        }
+        // 「够不着」不是「没做完」—— 再催一百轮它也还是看不见。
+        // 这一态就是为了不让那种目标一路烧到轮数上限，见 `GoalVerdictKind`
+        if (blocked.length > 0) {
+          await settle(
+            `以下条目无法验收，已停止自动迭代：${blocked.map(describeCheck).join('；')}`,
+            'warning'
+          )
+          return
+        }
+        // 只报条数：逐条的凭据在落盘的清单里，全糊进时间线没人看得下去
+        await settle(`复核通过：${passed} 条均已检查`, 'success')
         return
       }
 
-      // 「够不着」不是「没做完」—— 再催一百轮它也还是看不见。
-      // 这一态就是为了不让那种目标一路烧到轮数上限，见 `GoalVerdictKind`
-      if (verdict.kind === 'blocked') {
+      deps.report(
+        `第 ${rounds} 轮复核未通过（${merged.current.length} 条中通过 ${passed} 条）：` +
+          failed.map(describeCheck).join('；'),
+        'info'
+      )
+
+      // 按编号认，不比措辞：同一条换个说法描述也还是同一堵墙
+      const stuck = failed.filter((check) => check.failStreak >= 2)
+      if (stuck.length > 0) {
         await settle(
-          `复核员没法验收这个目标，停下来交给你：${verdict.reason || '（没说原因）'}`,
+          `${stuck.map((check) => `#${check.id} ${check.requirement}`).join('、')} ` +
+            '连续两轮未通过，已停止自动迭代。',
           'warning'
         )
         return
       }
-
-      deps.report(`第 ${rounds} 轮复核未通过：${verdict.reason || '（没说原因）'}`, 'info')
-
-      if (verdict.reason && verdict.reason === lastFailReason) {
-        await settle('连着两轮卡在同一个问题上，停下来交给你 —— 再跑下去也是同一堵墙。', 'warning')
-        return
-      }
-      lastFailReason = verdict.reason
       mutations = []
       await save()
 
       if (rounds >= maxRounds) {
-        await settle(`已经迭代 ${maxRounds} 轮还没达成，停下来交给你。`, 'warning')
+        await settle(`已迭代 ${maxRounds} 轮仍未达成目标，已停止自动迭代。`, 'warning')
         return
       }
 
       deps.followUp(
-        buildContinuationPrompt(deps.objective, verdict.reason, rounds, deps.latestRequest)
+        buildContinuationPrompt(
+          deps.objective,
+          failed.map(describeCheck).join('\n'),
+          rounds,
+          deps.latestRequest
+        )
       )
     } catch (error) {
       interrupted = true

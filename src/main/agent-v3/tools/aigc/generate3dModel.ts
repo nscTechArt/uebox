@@ -114,8 +114,9 @@ const Generate3dModelInput = z.object({
     .length(3)
     .optional()
     .describe(
-      '限制成品最大尺寸 [宽, 高, 长]。**整批资产比例要一致时必填** —— ' +
-        '不给的话每个模型都是各自归一化的大小，导进引擎要一个个手调缩放。' +
+      '限制成品的长宽比 [宽, 高, 长]，三个 1–2048 的**整数**，是比例不是米' +
+        '（0.22×0.30×0.23 米写 [22, 30, 23]，真实大小导入后再缩放）。' +
+        '**整批资产比例要一致时必填** —— 不给的话每个模型都是各自归一化的大小，导进引擎要一个个手调缩放。' +
         '只有 Rodin 支持，其它家给了会明确报错'
     ),
   material: z
@@ -423,7 +424,7 @@ export function createGenerate3dModelTool(): UnrealAgentTool<Generated3dModelDet
 - \`quality\` **按用途选**：背景道具 low/extra-low，可交互道具 medium，主角/特写 high。
   一律选 high 的结果是几十万面的背景石头，进引擎必返工。
 - \`bounding_box\` **整批资产要比例一致时必填**。不给的话每个模型各自归一化，
-  导进去要一个个手调缩放。（只有 Rodin 支持）
+  导进去要一个个手调缩放。填 1–2048 的整数比例，不是米。（只有 Rodin 支持）
 
 【图生 3D 比文生 3D 稳得多】有参考图就给。本地截图可以直接给路径。
 
@@ -673,7 +674,7 @@ function describeModel3dFailure(error: unknown, modelLabel: string): string {
         '不要直接重试 —— 先把原因告诉用户，由他决定要不要再花一次钱。'
     )
   }
-  if (/没有指定 3D 接口形状|还没有配置/.test(raw)) {
+  if (/没有指定 3D 接口形状|还没有配置|尚未配置/.test(raw)) {
     parts.push(`当前用的是 ${modelLabel}。这是配置问题，重试没有意义。`)
   }
   return parts.join('\n')

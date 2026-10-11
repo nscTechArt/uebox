@@ -280,4 +280,21 @@ describe('失败响应的头', () => {
     // 400 不说是哪个参数：原样请求体留给事后逐段定位
     expect(dumped).toEqual([{ messages: ['原样'] }])
   })
+
+  it('Google 协议的模型不塞自己的 fetch：pi 的 Google 适配器见到自定义 fetch 直接抛错', async () => {
+    let seen: unknown = 'unset'
+    const fn: StreamFn = async (_m, _context, options) => {
+      seen = options?.fetch
+      const stream = createAssistantMessageEventStream()
+      stream.end()
+      return stream
+    }
+    const wrapped = diagnosedStreamFn(fn, { sink: () => undefined })
+    await drain(
+      await wrapped({ ...model, api: 'google-generative-ai' } as typeof model, {
+        messages: []
+      } as Context)
+    )
+    expect(seen).toBeUndefined()
+  })
 })

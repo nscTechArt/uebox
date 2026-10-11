@@ -247,6 +247,33 @@ describe('rodin 提交', () => {
       Model3dRequestError
     )
   })
+
+  /** Rodin 的 error 只是代码，哪个字段错了在 message 里。只留代码的话模型只看得到 Bad Request */
+  it('Rodin 的错误代码和说明一起带出来', async () => {
+    responders['POST /rodin'] = () =>
+      new Response(
+        JSON.stringify({ error: 'INVALID_REQUEST', message: 'bbox_condition must be integers' }),
+        { status: 400 }
+      )
+
+    await expect(submitModel3d(provider(), 'Gen-2', { prompt: '战斧' })).rejects.toThrow(
+      'HTTP 400（POST /rodin）：INVALID_REQUEST：bbox_condition must be integers'
+    )
+  })
+
+  /** 真机上填的是米制尺寸 [0.22, 0.30, 0.23]，厂商只回一个 400 */
+  it.each([[[0.22, 0.3, 0.23]], [[0, 30, 23]], [[22, 30, 4096]]])(
+    'Rodin 包围盒不是 1–2048 的整数时本地拦下：%j',
+    async (box) => {
+      await expect(
+        submitModel3d(provider(), 'Gen-2', {
+          prompt: '头部',
+          boundingBox: box as [number, number, number]
+        })
+      ).rejects.toThrow(/1–2048 的整数.*\[22, 30, 23\]/)
+      expect(sent).toHaveLength(0)
+    }
+  )
 })
 
 describe('两个任务号不能混用', () => {
@@ -909,7 +936,7 @@ describe('网络抖动不该让已付费的任务作废', () => {
     vi.useFakeTimers()
     const settled = expect(
       generateModel3d({ prompt: '战斧', signal: controller.signal })
-    ).rejects.toThrow(/已停止等待.*sub-key-for-status[\s\S]*还在跑/)
+    ).rejects.toThrow(/已停止等待.*sub-key-for-status[\s\S]*仍在运行/)
     await vi.advanceTimersByTimeAsync(20_000)
     await settled
   })

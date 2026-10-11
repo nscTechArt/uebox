@@ -21,14 +21,25 @@ describe('会话执行配置', () => {
     const goal = {
       objective: '完成用户目标',
       rounds: 4,
-      lastFailReason: '缺验证',
+      checklist: [
+        {
+          id: 1,
+          requirement: '有验证',
+          quote: '完成用户目标',
+          how: '编译',
+          status: 'fail' as const,
+          finding: '缺验证',
+          failStreak: 1
+        }
+      ],
       mutations: ['blueprint_compile'],
       settled: false
     }
     await saveExecutionOptions('goal', { mode: 'agent', goal })
     expect((await loadExecutionOptions('goal'))?.goal).toEqual(goal)
+    // 分支、侧边问一句复制配置时不带走目标：目标是原会话主线上的
     await copyExecutionOptions('goal', 'goal-copy')
-    expect((await loadExecutionOptions('goal-copy'))?.goal).toEqual(goal)
+    expect(await loadExecutionOptions('goal-copy')).toEqual({ mode: 'agent' })
   })
   it('重新读取后继续保留只读、知识库和思考/技能设置', async () => {
     const options = {

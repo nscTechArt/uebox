@@ -69,8 +69,14 @@ describe('describeProbeFailure', () => {
       code: 'providerServerError',
       raw: 'quota pool missing'
     })
-    expect(text).toContain('不是你的配置问题')
+    expect(text).toContain('通常与本地配置无关')
     expect(text).toContain('quota pool missing')
+  })
+
+  it('403 把厂商原话带上 —— 中转站的客户端校验也回 403，不全是密钥没权限', () => {
+    const text = describeProbeFailure({ code: 'forbidden', raw: '403 请使用标准 Codex 客户端请求' })
+    expect(text).toContain('403')
+    expect(text).toContain('请使用标准 Codex 客户端请求')
   })
 
   it('不带原文的码不拼后缀', () => {

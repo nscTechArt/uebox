@@ -53,7 +53,7 @@ describe('describeStartupError', () => {
     )
     // 查到的是真文案，不是 key
     expect(text).not.toBe('assistant.agentMode.sessionBusy')
-    expect(text).toContain('还有一轮在跑')
+    expect(text).toContain('仍有一轮任务在运行')
     expect(text).not.toContain('3f2a8c1e')
     expect(text).not.toContain('agent-v3')
   })

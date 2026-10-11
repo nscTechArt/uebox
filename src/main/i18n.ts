@@ -57,18 +57,18 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     // 安装更新撞上 session 操作没收摊：同一个框，按钮说清楚是重启装包
     'tray.updateConfirmOk': '仍然重启安装',
     'tray.quitConfirmCancel': '取消',
-    'tray.openFailedTitle': '打不开项目',
+    'tray.openFailedTitle': '无法打开项目',
     'tray.openFailedBody': '{name}：{error}',
-    'tray.openFailedMissing': '「{name}」的工程文件已经不在了',
-    'tray.alreadyRunningTitle': '项目已经开着了',
-    'tray.alreadyRunningBody': '「{name}」已经在虚幻编辑器里打开',
-    'tray.pluginFailedTitle': '项目已打开，但 AI 暂时连不上',
-    'tray.pluginFailedBody': 'UnrealAgentLink 没有装上，点这里查看原因',
+    'tray.openFailedMissing': '「{name}」的工程文件不存在',
+    'tray.alreadyRunningTitle': '项目已打开',
+    'tray.alreadyRunningBody': '「{name}」已在虚幻编辑器中打开',
+    'tray.pluginFailedTitle': '项目已打开，AI 连接失败',
+    'tray.pluginFailedBody': 'UnrealAgentLink 插件安装失败，点击查看原因',
 
     'startup.failedTitle': '虚幻盒子启动失败',
     // {reason} 是原始异常，{logDir} 是日志目录 —— 这两样是用户唯一能拿去求助的东西
     'startup.failedBody':
-      '启动时发生错误，应用无法继续运行。\n\n原因：{reason}\n\n日志在：{logDir}',
+      '启动时发生错误，应用无法继续运行。\n\n原因：{reason}\n\n日志目录：{logDir}',
 
     /*
      * 系统文件对话框的标题。
@@ -116,12 +116,12 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'tray.openFailedMissing': 'The project file for "{name}" no longer exists',
     'tray.alreadyRunningTitle': 'Project already open',
     'tray.alreadyRunningBody': '"{name}" is already open in Unreal Editor',
-    'tray.pluginFailedTitle': 'Project opened, but the AI cannot connect yet',
-    'tray.pluginFailedBody': 'UnrealAgentLink was not installed — click to see why',
+    'tray.pluginFailedTitle': 'Project opened, but the AI could not connect',
+    'tray.pluginFailedBody': 'UnrealAgentLink failed to install. Click to view details.',
 
     'startup.failedTitle': 'Unreal Box failed to start',
     'startup.failedBody':
-      'An error occurred during startup and the app cannot continue.\n\nReason: {reason}\n\nLogs are in: {logDir}',
+      'An error occurred during startup and the app cannot continue.\n\nReason: {reason}\n\nLog directory: {logDir}',
 
     'dialog.open': 'Choose files or folders',
     'dialog.save': 'Save file',

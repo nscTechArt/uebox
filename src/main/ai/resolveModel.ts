@@ -91,9 +91,9 @@ export function findBinding(
 /** 缺配时给用户的那句话。V3 的 streamFn 也用它，两条路径的说法必须一致 */
 export function describeMissingRole(role: ModelRole): string {
   if (role === 'vision') {
-    return '当前模型无法识图。请到 设置 → 模型 选择支持图片的对话或视觉模型。'
+    return '当前模型不支持识图。请在「设置 → 模型」中选择支持图片的对话或视觉模型。'
   }
-  return '还没有可用的 AI 模型。请到 设置 → 模型 添加服务商，并选择默认模型。'
+  return '尚无可用的 AI 模型。请在「设置 → 模型」中添加服务商并选择默认模型。'
 }
 
 /** 本地是否已经配得出模型。界面据此显示「AI 未配置」引导 */

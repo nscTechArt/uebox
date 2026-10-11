@@ -207,7 +207,10 @@ export function getTargetConnectionId(): string | undefined {
       delete store.pendingProjectPath
     }
   }
-  if (store?.pendingProjectPath) {
+  // 手里已经有一个还连着的目标时不悄悄换：open_project 回给模型的是「没切换」，
+  // 它会接着往原工程里写，等新工程连上再自动切过去就写错了工程。要切由模型再调一次 open_project
+  const currentAlive = Boolean(store?.connectionId && projectManager.getProject(store.connectionId))
+  if (store?.pendingProjectPath && !currentAlive) {
     const opened = findByProjectPath(store.pendingProjectPath)
     if (opened) {
       store.connectionId = opened

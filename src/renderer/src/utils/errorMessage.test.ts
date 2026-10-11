@@ -11,7 +11,7 @@ import { formatErrorMessage } from './errorMessage'
  * 毫无关系的东西。
  */
 const OUT_OF_CREDIT =
-  '当前模型服务商返回「余额不足」。请到该服务商的控制台充值，或在 设置 → 模型 换一个可用的模型。'
+  '当前模型服务商返回「余额不足」。请到该服务商的控制台充值，或在「设置 → 模型」中更换可用模型。'
 
 describe('formatErrorMessage', () => {
   it('把服务商的余额不足翻译成「去服务商那边充值」', () => {

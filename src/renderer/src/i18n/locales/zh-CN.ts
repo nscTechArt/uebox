@@ -55,29 +55,29 @@ export default {
     unassigned: '对话',
     unassignedHint: '没有关联 UE 工程的对话',
     connected: '已连接',
-    taskDone: '任务已完成，还没看',
+    taskDone: '任务已完成，未查看',
     running: '正在运行',
-    awaitingAnswer: '有问题等你回答',
+    awaitingAnswer: '有待回答的问题',
     noProjects: '暂无项目',
     removeProjectGroup: '移除项目',
     removeProjectTitle: '移除项目',
     removeProjectContent:
-      '把「{name}」从侧边栏移除？里面的 {count} 条对话不会删除，会回到「对话」区。',
+      '从侧边栏移除「{name}」？其中的 {count} 条对话不会被删除，将移至「对话」区。',
     renameProjectTitle: '重命名项目',
     openInExplorer: '在资源管理器中打开',
     openInExplorerFailed: '打开工程目录失败',
     archiveProjectChats: '归档对话',
     archiveProjectTitle: '归档这个项目的对话',
     archiveProjectContent:
-      '把「{name}」下的 {count} 条对话都归档？归档后可以在「设置 → AI 助手 → 归档对话」里找回。',
+      '归档「{name}」下的全部 {count} 条对话？归档后可在「设置 → AI 助手 → 归档对话」中找回。',
     addProject: {
       title: '添加项目',
       typeLabel: '项目类型',
       folder: '本地文件夹',
-      folderDesc: '从电脑上选一个 UE 工程目录',
+      folderDesc: '从本机选择 UE 工程目录',
       imported: '已导入的项目',
-      importedDesc: '从资产库已导入的工程里选',
-      importedEmpty: '还没有导入过项目',
+      importedDesc: '从资产库已导入的工程中选择',
+      importedEmpty: '暂无已导入的项目',
       searchPlaceholder: '搜索项目名称或路径',
       searchEmpty: '未找到匹配项目',
       pickFolderTitle: '选择 UE 工程目录',
@@ -126,9 +126,9 @@ export default {
   // 归档对话：偏好设置 → AI 设置里的弹窗，侧边栏不再有「已归档」区
   archivedChats: {
     title: '归档对话',
-    description: '归档的对话不显示在侧边栏，取消归档就回到列表。',
+    description: '已归档的对话不在侧边栏显示，取消归档后恢复到列表。',
     count: '{count} 条已归档',
-    empty: '还没有归档的对话',
+    empty: '暂无归档的对话',
     open: '打开',
     archivedAt: '归档于 {date}'
   },
@@ -164,7 +164,7 @@ export default {
     modeAgent: 'Agent（可执行操作）',
     modeAsk: 'Ask（只读）',
     approvalMode: '审批策略',
-    approvalAsk: '每个写操作都问',
+    approvalAsk: '每个写操作均需确认',
     approvalAutoEdit: '可撤销的自动放行',
     approvalYolo: '全部放行（危险）',
     usage: '上下文 {tokens} / {window} tokens（{percent}%）',
@@ -172,9 +172,9 @@ export default {
     approve: '允许',
     approveAlways: '本次 session 始终允许',
     reject: '拒绝',
-    empty: '还没有事件。输入指令后点「发送」。',
+    empty: '暂无事件。输入指令后点击「发送」。',
     promptPlaceholder: '输入指令，Ctrl+Enter 发送',
-    steerPlaceholder: '运行中插话改方向……',
+    steerPlaceholder: '运行中插话以调整方向……',
     send: '发送',
     running: '执行中……',
     stop: '停止',
@@ -200,14 +200,14 @@ export default {
       description: '连接第三方 MCP 服务，扩展助手能力；可粘贴 Claude Desktop 格式的配置。',
       // 页面 Header 用这句短的。面板里不再重复标题，长描述用不上了
       shortDescription: '给助手接入第三方能力，或把虚幻引擎开放给外部客户端。',
-      empty: '还没有配置任何 MCP 服务。',
+      empty: '尚未配置 MCP 服务。',
       configPath: '配置文件：{path}',
       // 上半页分两组：盒子自己装好的 vs 用户自己加的。原来这两类混在一起，
       // 一条盒子装的 blender 长得和手填的一模一样，用户分不清哪条是自己的责任
       builtinTitle: '内置',
       manualTitle: '手动配置',
       // 空组不能留一片空白 —— 那看起来像坏了，而不是「这里本来就没有」
-      manualEmpty: '还没有手动配置的服务。',
+      manualEmpty: '暂无手动配置的服务。',
       unsaved: '有未保存的修改',
       // 收起态那一行要显示名字，还没填标识时给个占位
       newServer: '新服务'
@@ -217,7 +217,7 @@ export default {
       // 折叠行的标题。整块卡片压成一行之后，标题要短到能和状态并排
       rowTitle: '虚幻引擎',
       // noProject 那句是给展开区读的，太长挂不到行右端
-      noProjectShort: '还没连接项目 · 先在首页打开一个',
+      noProjectShort: '未连接项目 · 请先在首页打开项目',
       checking: '检查中…',
       enable: '一键开启',
       start: '启动服务',
@@ -228,12 +228,12 @@ export default {
       unsupported: '引擎版本过低 · 需要 5.8+',
       ready: '已开启 · 运行中',
       // 只在「引擎那边好了、盒子还没接上」时出现，必须给下一步而不是干说一句已开启
-      readyHint: '引擎服务已在运行，盒子会在下次对话时自动接上。',
+      readyHint: '引擎服务已在运行，虚幻盒子将在下次对话时自动连接。',
       // 「按钮怎么不见了」最常见的原因，必须点破而不是留一片空白
       // 不在这里提 5.8：用户一个项目都没连时就读到版本门槛，用 5.5 的会直接
       // 认定「这功能跟我无关」而走开。版本不够有 unsupported 那条单独说
-      noProject: '还没有连接的虚幻引擎项目。先在首页打开一个项目，这里会显示它能不能用。',
-      failed: '检查失败：{error}。如果你刚更新过盒子，重启一次应用再看。',
+      noProject: '尚未连接虚幻引擎项目。请先在首页打开项目，此处将显示该项目是否可用。',
+      failed: '检查失败：{error}。如刚更新过虚幻盒子，请重启应用后重试。',
       hint: '会更新项目文件和编辑器偏好；可在虚幻引擎的 Edit > Plugins 中关闭。'
     },
     blenderSetup: {
@@ -241,13 +241,13 @@ export default {
       rowTitle: 'Blender',
       // 行右端的短状态。长句子挂不到一行上，留给摊开的里面
       checking: '检查中…',
-      unsupportedShort: '这个平台没有安装脚本',
+      unsupportedShort: '当前平台无安装脚本',
       missingPrereq: '缺少安装所需的组件',
       notConnected: '未接入',
       // 装好之后能改的只有这两样。标识、连接方式、启动命令都是盒子自己写的，
       // 给输入框只会让用户改坏一条本来好好的配置 —— 要动就去「高级」
       pathLabel: 'Blender 程序路径',
-      pathHint: '换了 Blender 的安装位置就改这里，盒子按这个路径把它拉起来。',
+      pathHint: 'Blender 安装位置变更后请修改此处，虚幻盒子将按此路径启动 Blender。',
       portLabel: '端口',
       reinstall: '重新安装',
       // 逃生口。做成链接不做成折叠区：这一页的层级已经够深了
@@ -260,24 +260,24 @@ export default {
       working: '安装中，需要几分钟…',
       loading: '正在检查 Blender 与安装所需的组件…',
       // 找不到 Blender 不是错误：便携版、网络盘上的本来就猜不到
-      noBlender: '没找到 Blender',
-      unsupported: '这个平台还没有安装脚本，只有 Windows 和 macOS 有。',
-      failed: '检查失败：{error}。如果你刚更新过盒子，重启一次应用再看。',
-      hint: '会安装官方 Blender Lab 服务和 Blender 插件，并自动填好 MCP 配置。需要联网。',
+      noBlender: '未找到 Blender',
+      unsupported: '当前平台暂无安装脚本，仅支持 Windows 和 macOS。',
+      failed: '检查失败：{error}。如刚更新过虚幻盒子，请重启应用后重试。',
+      hint: '将安装官方 Blender Lab 服务与 Blender 插件，并自动填写 MCP 配置。需要联网。',
       // 缺什么点名说，别合成一句「环境不满足」—— 那正是安装脚本原来的
       // 失败样子（一句 Command failed: git），用户看不出要去装什么
       prereq: {
         blender: {
-          missing: '没找到 Blender。请先安装 Blender 5.1 或更新版本（blender.org）。',
-          tooOld: '这台机器上是 {found}，官方插件需要 Blender 5.1 或更新版本。'
+          missing: '未找到 Blender。请先安装 Blender 5.1 或更高版本（blender.org）。',
+          tooOld: '本机版本为 {found}，官方插件需要 Blender 5.1 或更高版本。'
         },
         git: {
-          missing: '没找到 Git。安装官方服务要用它下载源码，请先安装（git-scm.com）。',
-          tooOld: '这台机器上是 {found}，请升级 Git（git-scm.com）。'
+          missing: '未找到 Git。安装官方服务需使用 Git 下载源码，请先安装（git-scm.com）。',
+          tooOld: '本机版本为 {found}，请升级 Git（git-scm.com）。'
         },
         python: {
-          missing: '没找到 Python。官方服务跑在 Python 上，需要 3.11 或更新版本（python.org）。',
-          tooOld: '这台机器上是 {found}，官方服务需要 Python 3.11 或更新版本（python.org）。'
+          missing: '未找到 Python。官方服务基于 Python 运行，需要 3.11 或更高版本（python.org）。',
+          tooOld: '本机版本为 {found}，官方服务需要 Python 3.11 或更高版本（python.org）。'
         }
       }
     },
@@ -285,7 +285,7 @@ export default {
       title: '虚幻引擎内置工具集',
       // 用户没做任何配置就多出一块东西，必须说清楚它从哪来
       description: '已自动接入所连接工程中虚幻引擎 5.8 的官方 MCP 工具。',
-      hint: '要更改连接，在下方添加相同标识的配置即可。',
+      hint: '如需更改连接，请在下方添加相同标识的配置。',
       readOnly: '自动发现',
       // 「3 个工具」看起来像没接全 —— 这是真实被问过的一句「怎么只有三个工具」
       connected: '已连接 · {count} 个入口',
@@ -298,17 +298,17 @@ export default {
       title: '共享虚幻引擎能力',
       label: '开放给外部客户端',
       // 第一层只给一行；可写时在权限设置中显示完整风险说明。
-      shortNote: '让 Codex、Claude Code 用上盒子助手的全部工具。仅本机可连，需令牌，默认可写。',
+      shortNote: '向 Codex、Claude Code 开放虚幻盒子助手的全部工具。仅限本机连接，需令牌，默认可写。',
       securityNote:
-        '外部客户端拿到的工具和盒子助手一样全，包括读写本机文件和执行命令。盒子不弹审批窗，拦不拦由客户端自己的审批设置决定。令牌一旦泄露，拿到的人就能改你的工程和电脑上的文件。',
+        '外部客户端可使用与虚幻盒子助手相同的全部工具，包括读写本机文件和执行命令。虚幻盒子不弹出审批窗口，是否拦截由客户端自身的审批设置决定。令牌一旦泄露，持有者即可修改你的工程和本机文件。',
       // 服务停着的时候要用将来时。主开关明明是关的，却读到一句「会直接执行」，
       // 三处状态互相打架，用户只会以为自己开着一个危险的东西
       securityNoteIdle:
-        '开启之后，外部客户端拿到的工具和盒子助手一样全，包括读写本机文件和执行命令。盒子不弹审批窗，拦不拦由客户端自己的审批设置决定。令牌一旦泄露，拿到的人就能改你的工程和电脑上的文件。',
+        '开启后，外部客户端将可使用与虚幻盒子助手相同的全部工具，包括读写本机文件和执行命令。虚幻盒子不弹出审批窗口，是否拦截由客户端自身的审批设置决定。令牌一旦泄露，持有者即可修改你的工程和本机文件。',
       includeMutating: '外部客户端的权限',
       // 当前档位要直接说出来，别让用户从开关的明暗去推
       scopeReadOnly: '当前只读。打开后允许外部客户端创建、修改和删除。',
-      scopeWritable: '当前可写：外部客户端能改动和删除你的资产、读写本机文件、执行命令。',
+      scopeWritable: '当前可写：外部客户端可修改和删除资产、读写本机文件、执行命令。',
       // 端口仍需停止服务才能修改，权限切换会自动重启。
       stopToChange: '服务运行中无法修改端口，请先关闭上面的开关。',
       port: '端口',
@@ -322,7 +322,7 @@ export default {
       // 完整那句仍在，挂 title 上，要对账的人够得着
       runningShort: '运行中 · 开放 {count} 个引擎工具',
       // 同一页三个「工具数」口径不同，不说清楚用户会拿它们互相对账
-      toolsNote: '这是盒子自己的引擎工具总数，和上方各个第三方服务的数量无关。',
+      toolsNote: '此为虚幻盒子自身的引擎工具总数，与上方各第三方服务的工具数量无关。',
       // 标题要点名说出里面有什么。风险可以折起来，但不能藏在一个叫「高级」的抽屉里
       advanced: '端口和权限',
       scopeTagReadOnly: '只读',
@@ -331,14 +331,14 @@ export default {
       copyConfig: '复制配置',
       copyToken: '只复制令牌',
       copied: '已复制',
-      tokenMasked: '出于安全考虑只显示头尾，完整令牌请点「复制令牌」',
+      tokenMasked: '出于安全考虑仅显示首尾字符，完整令牌请点击「复制令牌」',
       // 「重置」两个字单看不知道重置什么，而它旁边就是两个复制动作
       rotate: '重置令牌',
       rotateConfirm:
-        '重置后，所有已配置这个服务的外部客户端都会立刻连不上，需要重新粘贴配置。确定继续？',
+        '重置后，所有已配置此服务的外部客户端将立即断开连接，需重新粘贴配置。是否继续？',
       // 地址和令牌都在这段 JSON 里，说一句就不用再在别处各印一份
-      clientHint: '粘到外部客户端的 MCP 配置文件中。地址和令牌都在里面。',
-      autoStartHint: '状态会记住，下次启动盒子自动运行。'
+      clientHint: '粘贴到外部客户端的 MCP 配置文件中，其中已包含地址和令牌。',
+      autoStartHint: '此状态将被保存，下次启动虚幻盒子时自动运行。'
     },
     fields: {
       id: '标识',
@@ -368,7 +368,7 @@ export default {
       // 它还在，只能判断成「删除坏了」。现在删除会当场写 mcp.json，
       // 所以「立刻」和「不能撤销」都是真的了 —— 但要说出来它是立刻生效的，
       // 因为这一页其余的编辑都要等保存。
-      removeConfirm: '删除「{id}」的配置？会立刻从 mcp.json 里去掉，不用再点保存，也不能撤销。',
+      removeConfirm: '删除「{id}」的配置？将立即从 mcp.json 中移除，无需保存，且无法撤销。',
       reveal: '打开位置',
       copyPath: '复制',
       save: '保存并连接',
@@ -381,7 +381,7 @@ export default {
       idDuplicate: '标识重复',
       envInvalid: '环境变量格式不正确：{line}',
       // 出错那行可能已经滚出视野，灰掉的按钮必须说出自己为什么点不动
-      blocked: '有 {count} 条配置填写不完整，修好之后才能保存。',
+      blocked: '{count} 条配置填写不完整，修正后方可保存。',
       saveFailed: '保存失败'
     }
   },
@@ -397,7 +397,7 @@ export default {
     },
     list: {
       modelCount: '{count} 个模型',
-      empty: '还没有服务商',
+      empty: '暂无服务商',
       add: '+ 添加服务商',
       // 也搜模型名：想找 Kimi K3 的人未必记得它挂在「Kimi Code（会员）」下面
       searchPlaceholder: '搜索服务商或模型',
@@ -417,26 +417,26 @@ export default {
       section: '模型',
       untitled: '新模型',
       advanced: '高级设置',
-      advancedNote: '不填就沿用内置数据',
+      advancedNote: '留空则沿用内置数据',
       id: '模型 ID',
       displayName: '显示名',
       displayNamePlaceholder: '留空则显示模型 ID',
       capabilities: '能力',
       // 「视觉」与「生图」是相反的两件事，不写说明必然有人勾反
       supportsVision: '视觉',
-      supportsVisionDesc: '看得懂图（图片进、文字出）',
+      supportsVisionDesc: '理解图片（输入图片，输出文字）',
       supportsVideo: '视频',
-      supportsVideoDesc: '看得懂视频（视频进、文字出）',
+      supportsVideoDesc: '理解视频（输入视频，输出文字）',
       supportsTools: '工具',
-      supportsToolsDesc: 'Agent 能不能用它',
+      supportsToolsDesc: '可供 Agent 使用',
       supportsImageGeneration: '生图',
-      supportsImageGenerationDesc: '画得出图（文字进、图片出）',
+      supportsImageGenerationDesc: '生成图片（输入文字，输出图片）',
       supportsModel3d: '3D 生成',
       supportsModel3dDesc: '生成 3D 模型（文字或图片输入）',
       supportsRealtimeVoice: '实时语音',
       supportsRealtimeVoiceDesc: '支持实时语音通话',
       supportsReasoning: '推理',
-      supportsReasoningDesc: '会先思考再回答',
+      supportsReasoningDesc: '先推理再回答',
       ttsVoice: '朗读音色',
       ttsVoiceHint: '填写当前模型支持的音色 ID；留空使用该模型的默认音色。',
       realtimeVoice: '语音音色',
@@ -456,7 +456,7 @@ export default {
         absent: '不可用',
         custom: '自定义'
       },
-      ladderReset: '全部改回跟随内置',
+      ladderReset: '全部恢复为跟随内置',
       limits: '上下文与输出上限',
       contextWindow: '上下文窗口（Token）',
       maxOutputTokens: '单次输出上限（Token）',
@@ -517,7 +517,7 @@ export default {
       headerValue: '值',
       addHeader: '+ 添加请求头',
       // 那个 × 按钮只有一个符号，读屏软件念不出它是干什么的
-      removeHeader: '删掉这个请求头',
+      removeHeader: '删除此请求头',
       headersDesc: '仅在服务商要求时填写附加请求头。',
       models: '模型',
       import: '导入模型…',
@@ -555,7 +555,7 @@ export default {
       delete: '删除',
       // 删除按钮删的是右边正在看的那个东西，所以文案得写明是谁
       deleteProvider: '删除服务商',
-      deleteModel: '删除这个模型'
+      deleteModel: '删除此模型'
     },
     validation: {
       nameRequired: '请先填写服务商名称',
@@ -585,28 +585,28 @@ export default {
     probe: {
       timeout: '请求超时。请检查 API 地址是否可达，或是否需要代理。',
       unauthorized: 'API 密钥无效或已失效。',
-      forbidden: '密钥没有访问该模型的权限。',
-      providerServerError: '厂商服务端返回错误，通常不是你的配置问题，过一会儿再试。',
-      modelNotFound: '模型不存在。请确认模型 ID 是否正确，或用「导入模型」拉取可用列表。',
+      forbidden: '请求被拒绝（403）：密钥可能没有该模型的权限，也可能是服务商限制了访问方式。',
+      providerServerError: '服务商服务端返回错误，通常与本地配置无关，请稍后重试。',
+      modelNotFound: '模型不存在。请确认模型 ID 是否正确，或使用「导入模型」获取可用列表。',
       rateLimited: '触发限流或额度不足。',
       badRequest: '请求被拒绝（400），请检查模型 ID、API 地址和接口协议。',
-      unreachable: '连不上该地址。请检查 API 地址是否正确、本机服务是否已启动。',
-      unknown: '连接失败，但厂商没有给出原因。',
+      unreachable: '无法连接该地址。请检查 API 地址是否正确、本机服务是否已启动。',
+      unknown: '连接失败，服务商未返回原因。',
       listUnsupportedGenerative: '此服务商不支持获取模型列表，请按其文档填写模型 ID。',
       listUnsupportedProtocol: '该协议没有通用的模型列表接口，请手动填写模型 ID。',
       listUnsupportedCodex:
         'ChatGPT 订阅接口不提供模型列表。可用型号见内置清单，或按官方公告手动填写。',
-      listHttpError: '拉取模型列表失败。',
-      listEmpty: '厂商返回了空列表。',
+      listHttpError: '获取模型列表失败。',
+      listEmpty: '服务商返回的模型列表为空。',
       // 渲染层自己产生的：界面上压根没有草稿可测（正常操作路径走不到）
-      noDraft: '还没有可测的配置。',
+      noDraft: '暂无可测试的配置。',
       // 翻译过去仍然说不清的那几种，把厂商原话截一段附在后面
       rawSuffix: '原文：{raw}'
     },
     /** 跳过探测的理由。「跳过了」必须显示出来，否则用户会当成「测通了」 */
     probeSkip: {
       generativeNoCheapCall: '连接测试会产生生成费用，因此不提供；首次生成时会验证配置。',
-      noChatEndpoint: '这类服务没有可以单独发的测试请求，首次使用时会验证配置。'
+      noChatEndpoint: '此类服务不支持单独发送测试请求，首次使用时将验证配置。'
     },
     delete: {
       title: '删除 {name}？',
@@ -617,7 +617,7 @@ export default {
     deleteModel: {
       title: '删除模型 {name}？',
       // 说清楚「只是从清单里摘掉」，免得跟上面那个删 Provider 的搞混
-      content: '只把这个模型从该服务商的清单里移除，密钥和其余模型都不动。点「保存」后生效。'
+      content: '仅从该服务商的模型列表中移除此模型，密钥和其他模型不受影响。点击「保存」后生效。'
     },
     roles: {
       title: '默认模型',
@@ -645,7 +645,7 @@ export default {
       image: '生图',
       imageDesc: '用于生成图片；未配置时无法生图。',
       imageMore: '添加服务商时可选「图片生成」分类；这里只显示已启用生图能力的模型。',
-      imageMissing: 'AI 创作出不了图',
+      imageMissing: 'AI 创作无法生图',
       video: '视频生成',
       videoDesc: '根据文字或参考图生成视频；未配置时无法生成。',
       videoMore: '生成视频可能需要数分钟并产生费用，失败也可能扣费；请查看服务商的计费规则。',
@@ -667,9 +667,9 @@ export default {
       realtimeMore: '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex；普通对话模型不适用。',
       realtimeMissing: '语音通话不可用',
       stt: '语音识别',
-      sttDesc: '按下语音热键说话，转成文字填进搜索框。不配就用实时语音那一路。',
+      sttDesc: '按下语音热键说话，转写为文字填入搜索框。未配置时使用实时语音通道。',
       sttMore:
-        '内置豆包 STT 2.0 与阿里云 Qwen-Audio ASR，都是只转写不回答的纯识别接口。空着也能用听写 —— 会退回实时语音那一路，但那条只有 OpenAI gpt-realtime 关得掉自动应答，绑豆包实时语音时按热键会提示用不了。这一档按识别时长计费，比借对话模型转写便宜得多。',
+        '内置豆包 STT 2.0 与阿里云 Qwen-Audio ASR，均为仅转写、不作回答的纯识别接口。未配置时仍可听写，将回退到实时语音通道；但该通道仅 OpenAI gpt-realtime 可关闭自动应答，绑定豆包实时语音时按热键将提示不可用。此项按识别时长计费，费用远低于借用对话模型转写。',
       sttMissing: '语音识别不可用',
       model3dMissing: '3D 生成不可用',
       search: '网页检索',
@@ -677,9 +677,9 @@ export default {
       searchMore: '内置浏览器无需配置；也可使用 Jina 或自建 SearXNG，费用以所选服务为准。',
       searchMissing: '网页检索不可用',
       judge: '结构化判定',
-      judgeDesc: '可选。Agent 用它收紧自己的护栏；不配就保持现在的行为，什么都不会少。',
+      judgeDesc: '可选。用于收紧 Agent 的护栏；未配置时保持当前行为，功能不受影响。',
       judgeMore:
-        '和这一列里其他角色相反：空着不代表功能坏掉。每一处用到判定的地方都留着原来那条确定性规则，绑上只是把它换成带概率的判断。这类模型不生成文本，只回答是非 / 多选 / 评分，约 100ms，输入 $0.042/M、输出不计费，内置的是 TypeSafe Jev。它是云端服务，所以默认不启用。'
+        '与本列其他角色不同：留空不代表功能缺失。所有用到判定之处均保留原有的确定性规则，配置后仅将其替换为基于概率的判断。此类模型不生成文本，只回答是非 / 多选 / 评分，耗时约 100ms，输入 $0.042/M，输出不计费，内置模型为 TypeSafe Jev。因属云端服务，默认不启用。'
     },
     unsaved: {
       title: '有未保存的修改',
@@ -731,24 +731,24 @@ export default {
       noPresetModelsShort: '自填模型',
       // 只是标记，不禁用：配两个 OpenAI（官方 + 自建网关）是常见需求
       added: '已添加',
-      noMatch: '没有匹配的厂商'
+      noMatch: '未找到匹配的厂商'
     },
     device: {
-      title: '在浏览器里完成登录',
-      desc: '已为你打开浏览器。若页面要求输入验证码，请填下面这串（点击可复制）：',
+      title: '在浏览器中完成登录',
+      desc: '已打开浏览器。如页面要求输入验证码，请填写以下代码（点击可复制）：',
       uri: '验证地址：',
       waiting: '完成后本页会自动关闭，请稍候…'
     },
     creatorPlan: {
       title: 'Box Plan',
-      desc: '使用盒子提供的订阅服务轻松配置所有模型',
+      desc: '使用虚幻盒子订阅服务一键配置所有模型',
       connect: '连接',
       connecting: '等待浏览器确认…',
       cancel: '取消',
-      codeTitle: '在浏览器里确认连接',
-      codeDesc: '已打开浏览器。登录后核对下面这串码，点「允许」。',
+      codeTitle: '在浏览器中确认连接',
+      codeDesc: '已打开浏览器。登录后核对以下代码，然后点击「允许」。',
       codeCopy: '点击复制',
-      notOpened: '浏览器没打开？手动访问：',
+      notOpened: '浏览器未打开？请手动访问：',
       tier: '{tier} · {interval}',
       intervalMonth: '月付',
       intervalYear: '年付',
@@ -767,20 +767,20 @@ export default {
         today: '今天 {time}',
         tomorrow: '明天 {time}'
       },
-      pastDue: '续费扣款失败，本期只给 20% 的额度。更新付款方式后立即恢复。',
+      pastDue: '续费扣款失败，本期额度降为 20%。更新付款方式后立即恢复。',
       pastDueAction: '更新付款方式',
-      deprecated: '{role}在用的 {model} 要下线了。',
-      deprecatedUntil: '{role}在用的 {model} 将于 {date} 下线。',
-      deprecatedReplace: '点「重新导入」换成 {replacement}。',
-      deprecatedReindex: '换完要重建知识库索引。',
-      revokeFailed: '没能在服务端吊销这把 Key，可以去网页端手动吊销。',
-      revokeOpen: '去网页端吊销',
+      deprecated: '{role}正在使用的 {model} 即将下线。',
+      deprecatedUntil: '{role}正在使用的 {model} 将于 {date} 下线。',
+      deprecatedReplace: '点击「重新导入」替换为 {replacement}。',
+      deprecatedReindex: '替换后需重建知识库索引。',
+      revokeFailed: '服务端吊销此 Key 失败，可前往网页端手动吊销。',
+      revokeOpen: '前往网页端吊销',
       managedBadge: '由 Box Plan 管理',
       manage: '管理订阅',
       reimport: '重新导入',
       disconnect: '断开',
       disconnectConfirm:
-        '断开后，由套餐管理的角色恢复成导入前的设置。这把 Key 会在服务端吊销，本机也会删除。',
+        '断开后，由套餐管理的角色将恢复为导入前的设置，此 Key 将在服务端吊销并从本机删除。',
       pricing: {
         description: '按实际调用线路扣点，以下为当前价格范围。',
         input: '输入',
@@ -792,61 +792,61 @@ export default {
         accept: '接受价格并应用'
       },
       previewTitle: '选择交给套餐的角色',
-      previewDesc: '勾选的角色改用套餐模型。已手动配置的角色默认不勾。',
+      previewDesc: '勾选的角色将改用套餐模型。已手动配置的角色默认不勾选。',
       previewCurrent: '接管：{name}',
       previewUnset: '接管：未设置',
       previewManaged: '套餐管理中',
-      previewReindex: '换过去后知识库按新模型重建向量，期间只能按关键词搜',
+      previewReindex: '切换后知识库将按新模型重建向量，重建期间仅支持关键词搜索',
       apply: '应用',
       applied: '已应用',
       storage: {
         label: '对象存储',
-        spec: '{quota} 空间 · 最后一次用到后留 {days} 天',
+        spec: '{quota} 空间 · 最后使用后保留 {days} 天',
         off: '接管：未开启',
-        provider: 'Box Plan 提供，不用填密钥',
+        provider: '由 Box Plan 提供，无需填写密钥',
         usage: '已用 {used} / {quota}',
-        retention: '最后一次用到后留 {days} 天',
+        retention: '最后使用后保留 {days} 天',
         switchBack:
-          '想换回自己的桶：到「设置 → 模型」的套餐卡片点「重新导入」，取消勾选「对象存储」。'
+          '如需换回自有存储桶：在「设置 → 模型」的套餐卡片中点击「重新导入」，并取消勾选「对象存储」。'
       },
       errors: {
         cancelled: '已取消',
-        denied: '在浏览器里被拒绝了',
-        expired: '确认码过期了，请重新连接',
+        denied: '已在浏览器中拒绝',
+        expired: '确认码已过期，请重新连接',
         unauthorized: '授权已失效，请重新连接',
-        network: '连不上 Box Plan 服务',
-        networkDetail: '连不上 Box Plan 服务：{error}',
+        network: '无法连接 Box Plan 服务',
+        networkDetail: '无法连接 Box Plan 服务：{error}',
         bad_response: 'Box Plan 服务返回了无法识别的内容',
-        not_connected: '还没有连接',
+        not_connected: '尚未连接',
         encryption_unavailable: '无法安全保存 Key',
-        unknown: '出错了：{error}'
+        unknown: '发生错误：{error}'
       },
       chat: {
         subscription_inactive: {
-          title: 'Box Plan 没有生效的订阅',
-          desc: '订阅没开，或续费失败已过宽限期。处理好再发。'
+          title: 'Box Plan 无有效订阅',
+          desc: '未开通订阅，或续费失败且已过宽限期。请处理后再发送。'
         },
         quota_exhausted: {
-          title: '本月额度用完了',
-          desc: '升级套餐，或等额度重置。'
+          title: '本月额度已用完',
+          desc: '请升级套餐，或等待额度重置。'
         },
         daily_limit_reached: {
-          title: '今天的额度用完了',
-          desc: '{time} 恢复。单次规格超过每天的上限时，明天也一样，换小一点的规格。等不及可以升级套餐。'
+          title: '今日额度已用完',
+          desc: '{time} 恢复。若单次规格超过每日上限，次日仍会受限，请改用较小规格，或升级套餐。'
         },
         role_not_in_plan: {
-          title: '当前套餐不含这个角色',
-          desc: '升级套餐，或在「设置 → 模型」里给这个角色换个来源。'
+          title: '当前套餐不包含此角色',
+          desc: '请升级套餐，或在「设置 → 模型」中为此角色更换来源。'
         },
         unauthorized: {
           title: 'Box Plan 授权失效',
-          desc: 'Key 被吊销或删掉了。到「设置 → 模型」重新连接。'
+          desc: 'Key 已被吊销或删除。请在「设置 → 模型」中重新连接。'
         },
         manage: '管理订阅',
-        reconnect: '去重新连接'
+        reconnect: '重新连接'
       },
       realtime: {
-        idle_timeout: '一分钟没人说话，语音已挂断。要接着聊，再点一下。',
+        idle_timeout: '1 分钟内无语音输入，通话已挂断。如需继续，请再次点击。',
         session_timeout: '单次通话最长 30 分钟，已挂断。要接着聊，再点一下。'
       }
     },
@@ -1301,7 +1301,7 @@ export default {
         description: '请按照步骤获取授权码以完成账号绑定',
         appSetup: {
           title: '准备：配置百度开放平台应用',
-          desc: '社区版不内置官方应用凭据。请在百度网盘开放平台创建你自己的应用，把 AppKey 与 SecretKey 填在下方。凭据只保存在本机。',
+          desc: '社区版不内置官方应用凭据。请在百度网盘开放平台创建应用，并在下方填写 AppKey 与 SecretKey。凭据仅保存在本机。',
           consoleBtn: '前往百度开放平台创建应用',
           clientIdPlaceholder: '填入 AppKey (client_id)',
           clientSecretPlaceholder: '填入 SecretKey (client_secret)',
@@ -1357,8 +1357,8 @@ export default {
   ffmpeg: {
     requiredTitle: '此功能需要 FFmpeg',
     requiredDesc:
-      '录屏导出、音频提取与视频压缩依赖 FFmpeg，系统里暂时没有检测到。在终端执行下面这条命令即可安装：',
-    noRestartHint: '安装完成后无需重启应用，回来再点一次即可。视频缩略图不受影响。',
+      '录屏导出、音频提取与视频压缩依赖 FFmpeg，当前系统未检测到。在终端执行以下命令即可安装：',
+    noRestartHint: '安装完成后无需重启应用，重新点击即可。视频缩略图不受影响。',
     copyCommand: '复制命令',
     commandCopied: '命令已复制'
   },
@@ -1409,69 +1409,69 @@ export default {
       badge: '服务器',
       state: {
         online: '已连接',
-        offline: '连不上服务器',
+        offline: '无法连接服务器',
         signedOut: '需要重新登录',
         unknown: '未连接'
       },
       signIn: '重新登录',
       clearCache: '清空本机缓存',
-      cacheCleared: '已清空这个库在本机缓存的页',
+      cacheCleared: '已清空此库的本机页面缓存',
       remove: '从列表移除'
     },
     create: {
       title: '服务器资产库',
       desc: '连接团队的资产服务器，在线浏览，不在本机建库',
-      hint: '文件留在服务器上：浏览按页取，下载和导入经 Lore 进行。'
+      hint: '文件保留在服务器上：浏览时按页加载，下载和导入通过 Lore 进行。'
     },
     reasons: {
       structure: '服务器库的结构由服务端管理',
       favorite: '收藏只对本地库生效',
-      favoriteFilter: '服务器库的收藏记在本机，请在左侧「我的收藏」里看',
-      cloudDrives: '网盘是本地库的导入来源；服务器库请把文件拖进来导入',
-      tagInUse: '这个标签还挂在 {count} 个资产上，先在资产上去掉它',
+      favoriteFilter: '服务器库的收藏保存在本机，请在左侧「我的收藏」中查看',
+      cloudDrives: '网盘仅作为本地库的导入来源；服务器库请拖入文件导入',
+      tagInUse: '此标签仍关联 {count} 个资产，请先从资产上移除',
       tagFavorite: '服务器库的标签没有「常用」',
-      trash: '服务器库的回收站由服务端保留，暂不能在盒子里查看',
-      scan: '服务器库不需要扫描，变化会自动推过来',
-      folderSearch: '服务器还不支持按文件夹名搜索',
-      dependencyGraph: '服务器库的依赖图还没有接入，先看上面的依赖列表',
-      tagManagement: '服务器还没有标签注册表',
-      sortByType: '服务器还不支持按类型排序',
-      nativeDrag: '文件还在服务器上：先右键"导入到工程"',
+      trash: '服务器库的回收站由服务端保留，暂不支持在虚幻盒子中查看',
+      scan: '服务器库无需扫描，变更将自动同步',
+      folderSearch: '服务器暂不支持按文件夹名搜索',
+      dependencyGraph: '服务器库暂未接入依赖图，请查看上方的依赖列表',
+      tagManagement: '服务器暂无标签注册表',
+      sortByType: '服务器暂不支持按类型排序',
+      nativeDrag: '文件仍在服务器上：请先右键选择"导入到工程"',
       richNotes: '服务器库只支持一句话备注',
-      filterUnsupported: '服务器还不支持这个筛选',
-      annotations: '只有写权限的成员能改标签和备注',
+      filterUnsupported: '服务器暂不支持此筛选',
+      annotations: '仅有写权限的成员可修改标签和备注',
       lore: '导入和下载需要 Lore 地址和随包的 lore.exe',
-      offline: '连不上服务器',
+      offline: '无法连接服务器',
       folderAnnotations: '服务器库的文件夹没有标签和备注。'
     },
     unclaimed: {
-      notice: '有 {count} 条标签 / 备注的文件已不在库里（删除，或移动后没配上）',
+      notice: '{count} 条标签 / 备注对应的文件已不在库中（已删除，或移动后未能匹配）',
       show: '查看',
       hide: '收起',
       claimTo: '认领到 {name}',
-      noSuggestion: '没有相同内容的文件',
-      claimed: '已挪到 {name}',
-      claimFailed: '认领失败：可能没有这个仓库的写权限'
+      noSuggestion: '未找到内容相同的文件',
+      claimed: '已移至 {name}',
+      claimFailed: '认领失败：可能缺少该仓库的写权限'
     },
     filter: {
       allEngines: '全部引擎',
       enginesWithCount: '{count} 个引擎版本',
       anyTag: '不限标签',
-      noTags: '这里的资产还没有标签'
+      noTags: '当前资产暂无标签'
     },
     add: {
       title: '添加服务器资产库',
-      addressLead: '填服务器地址，或直接粘贴管理员发的邀请链接。',
+      addressLead: '填写服务器地址，或粘贴管理员提供的邀请链接。',
       address: '服务器地址或邀请链接',
       addressPlaceholder: 'https://assets.studio.lan:8084',
-      fingerprint: '部署 CA 指纹（SHA-256，邀请链接里有）',
-      fingerprintPlaceholder: '可留空：证书能被系统信任时不需要',
+      fingerprint: '部署 CA 指纹（SHA-256，包含在邀请链接中）',
+      fingerprintPlaceholder: '可留空：证书受系统信任时无需填写',
       caFile: '导入 CA 文件',
       caLoaded: '已载入 CA 文件',
-      trustHint: '指纹或 CA 文件由管理员提供，程序逐字比对，对不上就不连。',
+      trustHint: '指纹或 CA 文件由管理员提供，将逐字比对，不一致时拒绝连接。',
       next: '连接',
       back: '上一步',
-      trustPinned: '证书已按指纹核对，只对这台服务器信任该部署 CA。',
+      trustPinned: '证书已按指纹核对，仅对此服务器信任该部署 CA。',
       trustSystem: '证书由系统信任库验证通过。',
       trustLoopback: '本机地址，明文连接只允许在本机使用。',
       authMode: '登录方式',
@@ -1485,13 +1485,13 @@ export default {
       inviteCode: '邀请码',
       newPassword: '设置密码（至少 8 位）',
       token: '身份令牌',
-      tokenPlaceholder: '粘贴管理员或实验环境给的令牌',
-      tokenHint: '令牌加密保存在本机；过期后要重新粘贴。',
+      tokenPlaceholder: '粘贴管理员或实验环境提供的令牌',
+      tokenHint: '令牌加密保存在本机，过期后需重新粘贴。',
       loreRemote: 'Lore 地址（导入和下载用，可留空）',
       signIn: '登录',
       chooseLead: '以 {member} 的身份登录。选择要添加的库：',
       chooseLeadAnonymous: '已登录。选择要添加的库：',
-      noLibraries: '这个账号在该服务器上没有可见的库。',
+      noLibraries: '此账号在该服务器上没有可见的库。',
       libraryCounts: '{assets} 个资产 · {state}',
       addLibraries: '添加 {count} 个库'
     },
@@ -1499,34 +1499,34 @@ export default {
       title: '重新登录 {server}'
     },
     view: {
-      signedOut: '服务器库的登录已失效，重新登录后继续。',
-      offlineBanner: '连不上服务器，正在显示看过的页；搜索和导入暂不可用。',
+      signedOut: '服务器库登录已失效，请重新登录后继续。',
+      offlineBanner: '无法连接服务器，当前显示已浏览过的页面；搜索和导入暂不可用。',
       remove: '从列表移除',
       removeTitle: '从本机移除"{name}"？',
       removeContent: '只移除本机的连接和缓存，服务器上的库不受影响。'
     },
     detail: {
       addTagPlaceholder: '输入标签名，回车添加',
-      editFailed: '修改没有保存：{reason}'
+      editFailed: '修改未保存：{reason}'
     },
     download: {
       title: '导入 {count} 个资产到工程',
-      lead: '经 Lore 取文件，连同依赖复制到目标位置（Content/… 对应 /Game/…）。',
+      lead: '通过 Lore 获取文件，并连同依赖复制到目标位置（Content/… 对应 /Game/…）。',
       more: '还有 {count} 个',
-      target: '放到',
+      target: '目标位置',
       targets: {
         project: 'UE 工程',
         folder: '文件夹'
       },
       pickProject: '选择工程',
-      noProjects: '工程库里还没有工程。',
+      noProjects: '工程库中暂无工程。',
       pickFolder: '选择文件夹',
       noFolder: '未选择',
-      withDependencies: '连同依赖一起',
+      withDependencies: '包含依赖',
       closure: '连同依赖共 {count} 个资产，约 {size}。',
-      closureMissing: '另有 {count} 个依赖库里没有。',
-      closureIncomplete: '依赖层级很深，可能还有更远的没算进来。',
-      hint: '文件是复制进去的，在工程里改动不会影响服务器。',
+      closureMissing: '另有 {count} 个依赖不在库中。',
+      closureIncomplete: '依赖层级较深，可能有更深层的依赖未计入。',
+      hint: '文件以副本形式复制，在工程中修改不会影响服务器。',
       start: '开始'
     },
     import: {
@@ -1538,7 +1538,7 @@ export default {
       pickRepository: '选择仓库',
       message: '提交说明',
       messagePlaceholder: '可留空',
-      hint: '.uasset / .umap 旁边同名的 .uexp、.ubulk 会一起提交。推送完成后，服务端索引好就会出现在列表里。',
+      hint: '.uasset / .umap 旁的同名 .uexp、.ubulk 将一并提交。推送完成且服务端完成索引后，文件将显示在列表中。',
       start: '开始导入'
     },
     jobs: {
@@ -1551,52 +1551,52 @@ export default {
         staging: '暂存中',
         committing: '提交中',
         pushing: '推送中',
-        materialising: '取文件中',
+        materialising: '获取文件中',
         done: '完成',
         failed: '失败'
       },
       failedDetail: '失败：{reason}',
-      downloadDone: '已放进目标位置：{count} 个文件',
+      downloadDone: '已放置到目标位置：{count} 个文件',
       importDone: '已提交到服务器库：{count} 个文件'
     },
     errors: {
-      unknown: '操作没有完成。',
-      'invalid-address': '地址格式不对。',
-      'insecure-http': '明文 http 只允许连本机；其他机器请用 https。',
-      insecure: '这个地址不安全，已拒绝连接。',
-      unreachable: '连不上这个地址',
-      'untrusted-certificate': '证书不被信任。向管理员要邀请链接（带指纹）或 CA 文件。',
-      'fingerprint-mismatch': '证书指纹对不上，可能连到了别的服务器，已拒绝连接。',
-      'ca-file-not-ca': '这个文件不是 CA 证书。',
-      'ca-file-not-pem': '这个文件不是 PEM 格式的证书。',
-      'not-a-catalog': '这个地址不是虚幻盒子资产服务器。',
-      'no-member-surface': '这台服务器不支持账号登录，请粘贴身份令牌。',
+      unknown: '操作未完成。',
+      'invalid-address': '地址格式不正确。',
+      'insecure-http': '明文 http 仅允许连接本机，其他主机请使用 https。',
+      insecure: '该地址不安全，已拒绝连接。',
+      unreachable: '无法连接该地址',
+      'untrusted-certificate': '证书不受信任。请向管理员获取邀请链接（含指纹）或 CA 文件。',
+      'fingerprint-mismatch': '证书指纹不匹配，可能连接到了其他服务器，已拒绝连接。',
+      'ca-file-not-ca': '该文件不是 CA 证书。',
+      'ca-file-not-pem': '该文件不是 PEM 格式的证书。',
+      'not-a-catalog': '该地址不是虚幻盒子资产服务器。',
+      'no-member-surface': '该服务器不支持账号登录，请粘贴身份令牌。',
       'missing-password': '请填写密码。',
       'missing-token': '请粘贴身份令牌。',
       'signed-out': '登录已失效，请重新登录。',
-      unauthorized: '账号、密码或令牌不对。',
+      unauthorized: '账号、密码或令牌不正确。',
       forbidden: '没有权限。',
-      'not-found': '找不到，或你没有权限查看。',
-      'route-missing': '这台服务器还不支持这个功能。',
+      'not-found': '未找到，或无权查看。',
+      'route-missing': '该服务器暂不支持此功能。',
       network: '网络出错',
       timeout: '服务器没有及时响应。',
       tls: '安全连接失败',
       unavailable: '服务器暂时不可用。',
-      throttled: '尝试太频繁，请稍后再试。',
+      throttled: '尝试过于频繁，请稍后重试。',
       'lore-missing': 'lore.exe 不可用',
-      'no-lore-remote': '这台服务器没有配置 Lore 地址。',
-      'bad-remote': 'Lore 地址格式不对（应以 lores:// 开头）。',
+      'no-lore-remote': '该服务器未配置 Lore 地址。',
+      'bad-remote': 'Lore 地址格式不正确（应以 lores:// 开头）。',
       'port-blocked':
-        '{target} 没有回应，多半是防火墙挡住了。请管理员在服务器上放行：TCP 8084（登录）、TCP 8083（资产目录）、TCP 和 UDP 8441（Lore 传文件）。',
+        '{target} 无响应，可能被防火墙拦截。请管理员在服务器上放行：TCP 8084（登录）、TCP 8083（资产目录）、TCP 和 UDP 8441（Lore 文件传输）。',
       'port-closed':
-        '{target} 拒绝连接：服务器上这个端口没有服务在运行（服务没启动，或端口号不对）。',
-      'host-not-found': '找不到主机 {target}：检查地址拼写，或直接用服务器的 IP。',
+        '{target} 拒绝连接：服务器上该端口无服务运行（服务未启动，或端口号不正确）。',
+      'host-not-found': '找不到主机 {target}：请检查地址拼写，或直接使用服务器 IP。',
       'host-unreachable':
-        '到不了 {target}：检查这台电脑和服务器是否在同一网络（或 VPN 是否已连上）。',
+        '无法访问 {target}：请检查本机与服务器是否位于同一网络（或 VPN 是否已连接）。',
       'tls-handshake':
-        '{target} 在建立安全连接前就断开了：这个端口可能不是 HTTPS 服务，或者中间有防火墙 / 代理软件拦截（「全局代理」「TUN 模式」会接管局域网地址，请把服务器地址设为直连）。',
+        '{target} 在建立安全连接前断开：该端口可能不是 HTTPS 服务，或被防火墙 / 代理软件拦截（「全局代理」「TUN 模式」会接管局域网地址，请将服务器地址设为直连）。',
       'cert-name-mismatch':
-        '证书是这台服务器的，但上面没有你填的地址（{target}）。请改用证书上的名字连接，或请管理员把这个地址加进证书。'
+        '证书属于该服务器，但未包含所填地址（{target}）。请改用证书中的名称连接，或请管理员将此地址加入证书。'
     }
   },
   common: {
@@ -1662,10 +1662,10 @@ export default {
     downloadingHint: '正在下载 {version}',
     restartToUpdate: '重启更新',
     /** 启动/后台检查发现新版本时的一次性全局提示 */
-    foundToast: '发现新版本 {version}，点左下角即可下载',
+    foundToast: '发现新版本 {version}，点击左下角即可下载',
     downloadStarted: '开始下载新版本，可在左下角查看进度',
     installTitle: '安装更新',
-    installContent: '新版本 {version} 已下载完成，现在重启安装吗？',
+    installContent: '新版本 {version} 已下载完成，是否立即重启安装？',
     installNow: '立即重启',
     later: '稍后',
     /** quitAndInstall 失败不走 update-error 事件，只能在发起的地方报 */
@@ -1673,9 +1673,9 @@ export default {
     /** 渲染进程没拿到 updater 通道（preload 没装上、通道改名、独立窗口） */
     unavailable: '更新功能当前不可用，请重启应用后重试',
     /** 渲染层自己判出来的：主进程静默返回成功，一个事件都没推 */
-    downloadNotStarted: '下载没有开始：可能没有可用更新，或已有下载在进行',
+    downloadNotStarted: '下载未开始：可能没有可用更新，或已有下载正在进行',
     /** 没配更新源/已有检查在跑：问不出结果，但不能沉默 */
-    checkUnavailable: '这个版本没有配置更新源，无法检查更新'
+    checkUnavailable: '当前版本未配置更新源，无法检查更新'
   },
   page: {
     home: {
@@ -1703,14 +1703,14 @@ export default {
         remove: '移除引擎',
         // 首次启动时引擎区可能一个都没有 —— 原来这里什么都不显示，
         // 新用户看到的是一片空白，不知道盒子是没扫到还是坏了
-        emptyTitle: '没有找到已安装的虚幻引擎',
-        emptyDesc: '把引擎根目录拖到这里，或点上面的 + 手动添加。',
+        emptyTitle: '未找到已安装的虚幻引擎',
+        emptyDesc: '将引擎根目录拖到此处，或点击上方的 + 手动添加。',
         // 扫不动和真的没装是两回事，后者才是上面那句。
         // scanFailed 给主动点刷新的那一次弹提示；下面两句是列表空着时留在屏幕上的
         scanFailed: '扫描引擎失败，列表可能不全。',
-        staleList: '列表可能是旧的',
-        scanFailedTitle: '没能读到引擎列表',
-        scanFailedDesc: '这不代表你没装引擎 —— 这次没读出来。点右上角刷新再试一次。',
+        staleList: '列表可能已过期',
+        scanFailedTitle: '读取引擎列表失败',
+        scanFailedDesc: '这不表示未安装引擎，仅本次读取失败。请点击右上角刷新重试。',
         dropTitle: '释放以添加自定义引擎',
         dropDesc: '拖入引擎根目录（包含 Engine/Binaries/Win64/UnrealEditor.exe）',
         addSuccess: '已添加 {count} 个自定义引擎',
@@ -1739,14 +1739,14 @@ export default {
       // 项目区域
       project: {
         title: '我的项目',
-        subtitle: '管理和启动你的 Unreal 项目',
+        subtitle: '管理和启动 Unreal 项目',
         empty: '暂无项目',
         emptyDesc: '拖拽 .uproject 文件或项目目录到此处导入',
         // 搜不到 ≠ 一个都没导入：后者才该讲怎么导入
-        loadFailedTitle: '没能读到工程列表',
-        loadFailedDesc: '这不代表你没有工程 —— 这次没读出来。刷新页面再试一次。',
-        noSearchResults: '没有匹配「{keyword}」的工程',
-        noSearchResultsDesc: '清空上面的搜索框就能看到全部工程。',
+        loadFailedTitle: '读取工程列表失败',
+        loadFailedDesc: '这不表示没有工程，仅本次读取失败。请刷新页面重试。',
+        noSearchResults: '未找到匹配「{keyword}」的工程',
+        noSearchResultsDesc: '清空上方搜索框即可查看全部工程。',
         import: '导入项目',
         create: '创建项目',
         createFromTemplate: '用模板新建工程',
@@ -1775,8 +1775,8 @@ export default {
         engineFilter: '按引擎版本筛选',
         allEngineVersions: '全部版本',
         unknownEngineVersion: '版本未知',
-        noVersionResults: '没有「{version}」的工程',
-        noVersionResultsDesc: '换一个版本，或者选「全部版本」看看其他工程。',
+        noVersionResults: '暂无「{version}」的工程',
+        noVersionResultsDesc: '请选择其他版本，或选择「全部版本」查看所有工程。',
         opening: '正在打开项目...',
         unnamedCollection: '未命名分组',
         unnamedProject: '未命名项目',
@@ -1800,9 +1800,9 @@ export default {
           refresh: '刷新'
         },
         ualink: {
-          removeTitle: '从这个项目移除 UnrealAgentLink？',
+          removeTitle: '从此项目移除 UnrealAgentLink？',
           removeContent:
-            '将删除项目下的 Plugins/UnrealAgentLink 目录，并从 .uproject 中移除该插件。之后虚幻盒子不会再为这个项目自动安装它，需要时可以从右键菜单重新装回来。',
+            '将删除项目下的 Plugins/UnrealAgentLink 目录，并从 .uproject 中移除该插件。此后虚幻盒子不再为此项目自动安装该插件，如有需要可通过右键菜单重新安装。',
           removeSuccess: 'UnrealAgentLink 已移除，不会自动重装',
           removeFailed: '移除 UnrealAgentLink 失败',
           installing: '正在安装 UnrealAgentLink...',
@@ -1810,12 +1810,12 @@ export default {
           installFailed: 'UnrealAgentLink 安装失败'
         },
         pluginFailure: {
-          dialogTitle: '工程导入了，但 AI 连不上这个引擎',
-          title: '原因：{reason}。UnrealAgentLink 没装上，AI 就看不到引擎里的东西。',
-          askAi: '让 AI 看看',
+          dialogTitle: '工程已导入，但 AI 无法连接该引擎',
+          title: '原因：{reason}。UnrealAgentLink 未安装成功，AI 无法访问引擎内容。',
+          askAi: '交给 AI 排查',
           dismiss: '知道了',
-          pathUnknown: '（盒子这边没拿到工程文件路径）',
-          askAiFailed: '没能把这件事交给 AI：{reason}',
+          pathUnknown: '（虚幻盒子未获取到工程文件路径）',
+          askAiFailed: '无法提交给 AI：{reason}',
           /*
            * 交给 AI 的那条消息。
            *
@@ -1829,9 +1829,9 @@ export default {
 盒子报的原因：{reason}
 
 可以从这几处看起：这个 .uproject 能不能正常读出来、里面的 EngineAssociation 写的是哪个版本；工程目录下的 Plugins/UnrealAgentLink/ 在不在、里面有没有 UnrealAgentLink.uplugin；这台机器上装没装对应版本的引擎。查清楚之后用一句话告诉我是什么问题。`,
-          noEngineAssociation: '这个 .uproject 没写引擎版本',
-          filesMissing: '没有这个引擎版本的随包插件',
-          uprojectUnreadable: '这个 .uproject 读不出来，可能已经损坏'
+          noEngineAssociation: '该 .uproject 未指定引擎版本',
+          filesMissing: '缺少该引擎版本的随包插件',
+          uprojectUnreadable: '无法读取该 .uproject，文件可能已损坏'
         },
         /*
          * 拖拽 / 选目录导入的那一串提示。
@@ -1865,8 +1865,8 @@ export default {
            */
           summaryOk: '成功导入 {count} 个',
           summarySkipped: '{count} 个已存在',
-          alreadyInLibrary: '{count} 个工程已在库里',
-          existingJoinedCollection: '{count} 个工程已在库里，已放进「{name}」',
+          alreadyInLibrary: '{count} 个工程已在库中',
+          existingJoinedCollection: '{count} 个工程已在库中，已加入「{name}」',
           summaryFailed: '{count} 个失败',
           /** 各段之间的分隔符。中文用顿号，英文用逗号加空格 */
           summarySeparator: '，',
@@ -1882,14 +1882,14 @@ export default {
         // 所以按「N 个工程 + 第一条原因」汇总，具体哪几个在日志里
         pluginUpgradeFailure: {
           title:
-            '有 {count} 个工程的 UnrealAgentLink 没能更新（{project}：{reason}）。它们还在用旧版插件。'
+            '{count} 个工程的 UnrealAgentLink 更新失败（{project}：{reason}），这些工程仍在使用旧版插件。'
         },
         messages: {
           slnNotFound: '未找到 sln 文件',
           openFailed: '打开失败',
           openSlnError: '打开 C++ 工程异常',
           pathNotFound: '未找到项目路径',
-          openLocationError: '打开所在地异常',
+          openLocationError: '打开所在目录异常',
           pinSuccess: '已置顶',
           unpinSuccess: '已取消置顶',
           updatePinFailed: '更新置顶状态失败',
@@ -1899,9 +1899,9 @@ export default {
           removeFromCollectionSuccess: '已移出分组',
           removeFromCollectionFailed: '移出分组失败',
           uprojectNotFound: '未找到 .uproject 文件',
-          projectMissingTitle: '这个工程已经不在电脑上了',
+          projectMissingTitle: '找不到该工程',
           projectMissingContent:
-            '打不开是因为找不到工程文件：{path}\n它可能被删除或移到了别处。要把这条记录从列表里移除吗？',
+            '找不到工程文件，无法打开：{path}\n该文件可能已被删除或移动。是否从列表中移除此记录？',
           projectMissingRemove: '从列表移除',
           coverUpdated: '封面已更换，将不再自动更新',
           autoCoverRestored: '已恢复自动封面',
@@ -1927,14 +1927,14 @@ export default {
         collection: {
           renameFailed: '重命名分组失败',
           filterAll: '全部',
-          filterHint: '只看「{name}」里的工程',
+          filterHint: '仅显示「{name}」中的工程',
           filterUngrouped: '未分组',
-          filterUngroupedHint: '只看还没归进任何分组的工程',
-          emptyFilter: '这个分组里没有工程',
-          emptyFilterDesc: '把工程卡片拖到分组按钮上，就能加进来。',
+          filterUngroupedHint: '仅显示未归入任何分组的工程',
+          emptyFilter: '此分组中暂无工程',
+          emptyFilterDesc: '将工程卡片拖到分组按钮上即可加入。',
           dissolve: '解散分组',
           dissolveTitle: '解散分组「{name}」？',
-          dissolveContent: '分组会消失，里面的工程会回到「未分组」，一个都不会删。',
+          dissolveContent: '分组将被移除，其中的工程将移至「未分组」，不会删除任何工程。',
           dissolveSuccess: '分组已解散',
           dissolveFailed: '解散分组失败'
         },
@@ -2024,16 +2024,16 @@ export default {
           sortName: '按名称',
           sortSize: '按大小',
           sortAdded: '最近添加',
-          emptyNoMatch: '没有匹配的模板',
-          downloadHint: '下载到本地模板库之后就能建工程',
+          emptyNoMatch: '未找到匹配的模板',
+          downloadHint: '下载到本地模板库后即可创建工程',
           // 全新安装的第一屏
-          onboardTitle: '还没有模板',
+          onboardTitle: '暂无模板',
           onboardDesc:
-            '模板都在线上模板源里。虚幻盒子默认完全离线，不启用源就不会发出任何网络请求 —— 启用之后才会去获取模板列表。官方源有 GitHub 和国内镜像两份，一起启用，哪个通用哪个。',
-          onboardPickSource: '用别的源',
+            '模板均位于在线模板源中。虚幻盒子默认完全离线，未启用模板源时不会发出任何网络请求，启用后才会获取模板列表。官方源包含 GitHub 和国内镜像两个地址，将同时启用，自动使用可用的地址。',
+          onboardPickSource: '使用其他源',
           // 社区模板
-          communityOfflineDesc: '启用官方源可以看到更多模板。启用之前不会发出任何网络请求。',
-          communitySomeSourcesFailed: '有 {count} 个源没连上，模板列表来自其它源',
+          communityOfflineDesc: '启用官方源可查看更多模板。启用前不会发出任何网络请求。',
+          communitySomeSourcesFailed: '{count} 个源连接失败，模板列表来自其他源',
           communityEnableOfficial: '启用官方社区库',
           communityManageSources: '管理模板源',
           communityRefresh: '刷新',
@@ -2051,11 +2051,11 @@ export default {
           sourcesTitle: '模板源',
           sourcesBuiltin: '内置',
           sourcesRemove: '删除',
-          sourcesRemoveConfirm: '确定删除这个模板源？',
+          sourcesRemoveConfirm: '确定删除此模板源？',
           sourcesAddTitle: '添加模板源',
           sourcesNameLabel: '名称',
           sourcesUrlLabel: '清单地址',
-          sourcesNamePlaceholder: '给这个源起个名字',
+          sourcesNamePlaceholder: '输入模板源名称',
           sourcesUrlPlaceholder: 'https://example.com/manifest.json',
           sourcesAdd: '添加',
           sourcesAddSuccess: '模板源已添加',
@@ -2081,21 +2081,21 @@ export default {
         // 导入本机已有工程
         importProjectModal: {
           title: '导入已有工程',
-          subtitle: '从本地引擎最近打开过的工程里挑，选中即可收进工程库',
-          subtitleIntoCollection: '从本地引擎最近打开过的工程里挑，导入后放进「{name}」分组',
+          subtitle: '从本地引擎最近打开的工程中选择，选中即可加入工程库',
+          subtitleIntoCollection: '从本地引擎最近打开的工程中选择，导入后加入「{name}」分组',
           pickFile: '选择 .uproject 文件',
-          dropHint: '列表里没有？自己选文件，或把 .uproject 直接拖进工程库',
+          dropHint: '列表中没有？可手动选择文件，或将 .uproject 直接拖入工程库',
           searchPlaceholder: '搜索工程名称...',
           allVersions: '全部版本',
           importAll: '全部导入（{count}）',
           importingAll: '正在导入…',
           scanning: '正在扫描本地引擎工程...',
           empty: '未发现本地工程',
-          emptyDesc: '本地引擎里没有最近打开过的工程，先用 Epic Launcher 打开一次再回来',
+          emptyDesc: '本地引擎中没有最近打开的工程，请先通过 Epic Launcher 打开工程后重试',
           imported: '已导入',
           clickToImport: '点击导入',
-          clickToJoin: '点击放进「{name}」分组',
-          joinCollection: '放进分组',
+          clickToJoin: '点击加入「{name}」分组',
+          joinCollection: '加入分组',
           importSuccess: '工程「{name}」已导入',
           importFailed: '导入失败',
           importError: '导入工程失败',
@@ -2143,9 +2143,9 @@ export default {
       stop: '停止朗读',
       loading: '正在合成语音，点击取消',
       missing: '请先到设置 → 模型，配置并选择「语音合成」模型。',
-      empty: '这条回复没有可朗读的正文。',
+      empty: '此回复没有可朗读的正文。',
       failed: '朗读失败，请检查语音合成配置或重试。',
-      briefingFallback: '口播稿压缩失败，改念原文。请到设置 → 模型确认已绑定「轻量任务」模型。'
+      briefingFallback: '播报稿压缩失败，已改为朗读原文。请在 设置 → 模型 中确认已绑定「轻量任务」模型。'
     },
     // 每轮回复下方的「本轮改动」清单
     /**
@@ -2157,7 +2157,7 @@ export default {
     review: {
       run: '审查',
       running: '审查中…',
-      clean: '查了 {count} 个资产，没发现问题',
+      clean: '已检查 {count} 个资产，未发现问题',
       found: '发现 {count} 处问题',
       // 引擎没连时**必须**说出来：这时候「没问题」只代表命名没问题
       engineOffline: '引擎没连上，只做了命名检查',
@@ -2166,12 +2166,12 @@ export default {
       openProjectContent: '落盘、编译、断引用要在编辑器里查。打开「{name}」，连上后接着审查？',
       openProjectOk: '打开并审查',
       openProjectCancel: '只查命名',
-      openingProject: '正在打开「{name}」，连上后自动审查…',
-      openProjectFailed: '没能打开工程：{error}',
-      pluginNotInstalled: '工程打开了，但插件没装上，连不上引擎：{error}',
-      editorWaitTimeout: '编辑器迟迟没连上，等它打开后再点一次审查',
-      failed: '审查没跑成',
-      fix: '交给 AI 修',
+      openingProject: '正在打开「{name}」，连接后自动审查…',
+      openProjectFailed: '工程打开失败：{error}',
+      pluginNotInstalled: '工程已打开，但插件未安装，无法连接引擎：{error}',
+      editorWaitTimeout: '等待编辑器连接超时，请在编辑器打开后重新审查',
+      failed: '审查执行失败',
+      fix: '交给 AI 修复',
       // 编译报错带原文时用这一句；原文是引擎给的，可能好几行
       compileErrorDetail: '蓝图编译报错：\n{detail}',
       /** 「交给 AI 修」发出去的那句话。发给模型的，但走 i18n，理由同 selfCheck.prompt */
@@ -2182,15 +2182,15 @@ export default {
           '修不了的直说原因，不要绕过去。'
       },
       codes: {
-        missing: '说是做好了，但工程里找不到它',
-        'still-there': '说是删掉了，但它还在',
-        unsaved: '改动还在编辑器内存里，没保存到硬盘',
-        'compile-error': '蓝图编译报错，现在是坏的',
+        missing: '报告已创建，但工程中未找到',
+        'still-there': '报告已删除，但仍然存在',
+        unsaved: '修改仅存在于编辑器内存中，尚未保存到磁盘',
+        'compile-error': '蓝图编译出错，当前不可用',
         'compile-warning': '蓝图编译有警告',
         'broken-dependency': '引用了不存在的资产：{detail}',
-        'orphan-referencer': '删掉了，但还有资产在引用它：{detail}',
-        naming: '命名和 UE 惯例不一致，一般用 {detail} 开头',
-        'check-failed': '这一项没查成：{detail}'
+        'orphan-referencer': '已删除，但仍被其他资产引用：{detail}',
+        naming: '命名不符合 UE 惯例，通常以 {detail} 开头',
+        'check-failed': '该项检查失败：{detail}'
       }
     },
     /**
@@ -2202,7 +2202,7 @@ export default {
      */
     selfCheck: {
       /** 不是按钮 —— 审查一点就连着发出去了，这只是告诉用户回复在哪 */
-      sent: '已让它自证 ↓',
+      sent: '已请求 AI 自证 ↓',
       prompt: {
         intro: '（自证）刚才那一轮你做的改动，我用引擎查了一遍。',
         foundHeader: '机器查出 {count} 处问题：',
@@ -2287,16 +2287,16 @@ export default {
         // 蓝图
         blueprint_create: '新建蓝图',
         blueprint_apply_graph: '修改蓝图图表',
-        blueprint_add_component: '给蓝图加组件',
-        blueprint_set_property: '改蓝图属性',
+        blueprint_add_component: '添加蓝图组件',
+        blueprint_set_property: '修改蓝图属性',
         blueprint_create_function: '新建蓝图函数',
         blueprint_add_variable: '新建蓝图变量',
         blueprint_remove_variable: '删除蓝图变量',
-        blueprint_set_variable_meta: '改蓝图变量设置',
-        blueprint_function_signature: '改蓝图函数签名',
-        blueprint_set_parent_class: '改蓝图父类',
-        blueprint_event_dispatcher: '改蓝图事件分发器',
-        blueprint_component_event: '加蓝图组件事件',
+        blueprint_set_variable_meta: '修改蓝图变量设置',
+        blueprint_function_signature: '修改蓝图函数签名',
+        blueprint_set_parent_class: '修改蓝图父类',
+        blueprint_event_dispatcher: '修改蓝图事件分发器',
+        blueprint_component_event: '添加蓝图组件事件',
         blueprint_compile: '编译蓝图',
         blueprint_compile_all: '编译全部蓝图',
         blueprint_tidy_graph: '整理蓝图连线',
@@ -2305,29 +2305,29 @@ export default {
         material_create: '新建材质',
         material_create_instance: '新建材质实例',
         material_apply: '应用材质',
-        material_add_node: '给材质加节点',
+        material_add_node: '添加材质节点',
         material_delete_node: '删除材质节点',
         material_connect_pins: '连接材质引脚',
         material_disconnect_pins: '断开材质引脚',
-        material_delete_unused_nodes: '删除没用上的材质节点',
+        material_delete_unused_nodes: '删除未使用的材质节点',
         material_create_function: '新建材质函数',
-        material_parameter_collection: '改材质参数集',
-        material_set_node_value: '改材质节点取值',
-        material_set_param: '改材质参数',
-        material_set_property: '改材质属性',
+        material_parameter_collection: '修改材质参数集',
+        material_set_node_value: '修改材质节点值',
+        material_set_param: '修改材质参数',
+        material_set_property: '修改材质属性',
         material_compile: '编译材质',
         material_tidy_graph: '整理材质连线',
 
         // 资产
         ue_content_import: '导入资产',
         ue_content_move: '批量移动资产',
-        ue_content_naming_audit: '命名规范体检',
-        ue_content_dependencies: '查资产依赖',
-        ue_content_migrate: '迁移资产到别的工程',
-        ue_datatable_edit: '改数据表',
+        ue_content_naming_audit: '命名规范检查',
+        ue_content_dependencies: '查看资产依赖',
+        ue_content_migrate: '迁移资产到其他工程',
+        ue_datatable_edit: '修改数据表',
         ue_content_delete: '删除资产',
         ue_fixup_redirectors: '修复资产重定向',
-        annotate_asset: '给资产写标注',
+        annotate_asset: '添加资产标注',
         delete_assets: '删除素材库资产',
         restore_assets: '恢复素材库资产',
         move_assets: '移动素材库资产',
@@ -2339,12 +2339,12 @@ export default {
         ue_new_level: '新建关卡',
         ue_open_level: '打开关卡',
         ue_save_level: '保存关卡',
-        ue_set_level_streaming: '改子关卡加载方式',
+        ue_set_level_streaming: '修改子关卡加载方式',
         level_organize_actors: '整理关卡 Actor',
 
         // 编辑器
         ue_save: '保存',
-        ue_set_config: '改编辑器设置',
+        ue_set_config: '修改编辑器设置',
         ue_collect_garbage: '清理内存',
         ue_playtest: '运行试玩',
         ue_restart_editor: '重启编辑器',
@@ -2352,7 +2352,7 @@ export default {
         ue_undo: '撤销上一步',
 
         // 系统。这三个能干任何事，写死一个具体动作反而是撒谎
-        ue_run_python_script: '在编辑器里执行脚本',
+        ue_run_python_script: '在编辑器中执行脚本',
         ue_run_console_command: '执行控制台命令',
         // 启停方向在参数里，按方向取 ue_manage_plugin_enable / _disable；
         // 这条含糊的兜底只给查不到方向的历史旧消息
@@ -2363,8 +2363,8 @@ export default {
         // UMG
         widget_create: '新建控件蓝图',
         widget_add_child: '添加子控件',
-        widget_make_variable: '把控件变成变量',
-        widget_set_property: '改控件属性',
+        widget_make_variable: '将控件设为变量',
+        widget_set_property: '修改控件属性',
 
         // 本地文件与其他
         write_local_file: '写入文件',
@@ -2387,25 +2387,27 @@ export default {
       notApplied: '未发送',
       cancel: '撤回重新编辑',
       // 撤不掉是常态：话早就交给内核了，点下去那一刻它可能刚好被读走
-      cancelTooLate: '晚了一步，这条已经发给模型了'
+      cancelTooLate: '无法撤回，该消息已发送给模型'
     },
     // agent 反问用户的那张选项卡片
     askUser: {
-      title: '需要你定一下',
-      waiting: '等你回答',
-      other: '其他（自己填）',
-      otherPlaceholder: '写下你想要的做法…',
+      title: '请做出选择',
+      waiting: '等待回答',
+      other: '其他（自定义）',
+      otherPlaceholder: '输入期望的做法…',
       submit: '提交',
       next: '下一步',
       back: '上一步',
       step: '{current} / {total}',
-      decline: '你自己定',
-      declineHint: '不选，让 AI 按它认为最好的方案继续',
-      cancel: '关掉，先不答',
+      decline: '由 AI 决定',
+      declineHint: '此问题不作选择，由 AI 选择最合适的方案',
+      multi: '可多选',
+      cancel: '关闭，暂不回答',
       answered: '已回答',
-      declined: '你让 AI 自己定',
-      cancelled: '没有回答',
-      skippedOne: '这一问没选'
+      declined: '已交由 AI 决定',
+      cancelled: '未回答',
+      skippedOne: '此问题未选择',
+      delegatedOne: '由 AI 决定'
     },
     // 每轮回复下方的 token 用量
     tokenUsage: {
@@ -2418,7 +2420,7 @@ export default {
       cacheWrite: '缓存写入',
       total: '合计',
       cost: '费用',
-      hint: '这一轮实际发给模型 / 模型返回的 token，按厂商计费口径统计'
+      hint: '本轮实际发送给模型及模型返回的 token，按服务商计费口径统计'
     },
     welcome: {
       greetingPrompt: '{greeting}，有什么可以帮您？'
@@ -2428,12 +2430,12 @@ export default {
       blueprintDebug: {
         title: '知识问答',
         desc: '询问问题并获取实时答案',
-        prompt: ' 在虚幻引擎领域，最近有什么新鲜事'
+        prompt: '虚幻引擎领域最近有哪些新动态？'
       },
       materialRender: {
         title: '场景整理',
-        desc: '批量创建和整理场景中的 Actor ',
-        prompt: "在场景里中创建3个点光源并归类到 'Lighting/Indoor' 文件夹下。"
+        desc: '批量创建和整理场景中的 Actor',
+        prompt: "在场景中创建 3 个点光源并归类到 'Lighting/Indoor' 文件夹下。"
       },
       buildPackage: {
         title: '创建蓝图',
@@ -2453,16 +2455,16 @@ export default {
           prompt: '一片赛博朋克风格的未来城市街景，霓虹灯照耀，雨后潮湿的街道反射着五彩的灯光'
         },
         item3: {
-          title: '生成UI界面素材',
+          title: '生成 UI 界面素材',
           desc: '设计游戏界面相关的图标或背景',
-          prompt: '一套科幻风格的游戏UI图标，包含血条、能量槽、技能框，金属质感配合蓝色发光效果'
+          prompt: '一套科幻风格的游戏 UI 图标，包含血条、能量槽、技能框，金属质感配合蓝色发光效果'
         }
       },
       // 模型生成模式建议
       modelGen: {
         item1: {
           title: '生成游戏道具模型',
-          desc: '创建武器、装备等游戏道具3D模型',
+          desc: '创建武器、装备等游戏道具 3D 模型',
           prompt: '一把精致的中世纪长剑，剑身有符文雕刻，剑柄镶嵌宝石，金属材质反光'
         },
         item2: {
@@ -2479,11 +2481,11 @@ export default {
     },
     mode: {
       imageGenEnabled: '图片生成模式已开启，请输入图片描述后发送',
-      threeDGenEnabled: '3D生成模式已开启，支持上传5张以内的图片或输入描述后发送'
+      threeDGenEnabled: '3D 生成模式已开启，可上传最多 5 张图片或输入描述后发送'
     },
     chat: {
       messageNotFound: '消息不存在',
-      onlyRetryAI: '只能重新生成AI回复',
+      onlyRetryAI: '只能重新生成 AI 回复',
       onlyEditUserMessage: '只能编辑用户消息',
       stopBeforeResendFailed: '上一轮仍在停止，请稍后重试',
       userMessageNotFound: '找不到对应的用户消息',
@@ -2498,6 +2500,7 @@ export default {
     },
     branch: {
       tooltip: '从这条创建分支',
+      successWhole: '分支已创建。未找到所选回复，已复制完整对话',
       titleSuffix: '（分支）',
       success: '已从这条回复分出一条新对话，之后的消息没有带过去',
       successWhole: '分支已创建。没找到你点的那条回复，整条对话都带过去了',
@@ -2535,25 +2538,25 @@ export default {
     },
     teamBoard: {
       title: '团队',
-      summary: '{members} 人 · 任务 {done}/{total} 标了完成',
-      selfReportedHint: '队员自己标的，盒子没核实；以验收结论为准',
+      summary: '{members} 人 · 任务 {done}/{total} 已标记完成',
+      selfReportedHint: '由队员自行标记，虚幻盒子未核实；以验收结论为准',
       objective: '目标',
-      noMembers: '制作人还没招人',
-      noTasks: '任务板是空的',
+      noMembers: '制作人尚未添加队员',
+      noTasks: '任务板为空',
       evidence: '证据：',
       mail: '留言',
       note: '备注：',
-      blockedReason: '卡住原因：',
+      blockedReason: '受阻原因：',
       old: '上一轮',
-      oldHint: '这一轮开始后还没人更新过它，说法可能已经过期',
-      reopened: '你重开了',
+      oldHint: '本轮开始后尚未更新，内容可能已过期',
+      reopened: '已手动重开',
       reopen: '重开',
       reopenHint: '改回待办，制作人下一轮会重新评估这一项',
-      reopenFailed: '没能重开这一项，稍后再试',
+      reopenFailed: '重开失败，请稍后重试',
       end: '结束团队模式',
-      endHint: '之后回到普通对话，不再催着交付；任务板和队员都保留，下次 /team 接着用',
-      endWhileRunning: '正在跑，等这一轮结束再结束团队模式',
-      endFailed: '没能结束团队模式，稍后再试',
+      endHint: '结束后恢复普通对话，不再推进交付；任务板和队员保留，下次使用 /team 可继续',
+      endWhileRunning: '任务运行中，请在本轮结束后再结束团队模式',
+      endFailed: '结束团队模式失败，请稍后重试',
       verdictTitle: '第 {count} 次验收 · {when}',
       ago: {
         justNow: '刚刚',
@@ -2566,25 +2569,25 @@ export default {
       readOnly: '只读',
       model: {
         reason: '制作人选它的理由：{reason}',
-        byUser: '你定的',
-        followProducer: '跟制作人',
+        byUser: '手动指定',
+        followProducer: '跟随制作人',
         chatModel: '对话模型',
-        unavailable: '{model} 现在用不了，它的活先用制作人的模型',
-        change: '点击换模型，从它的下一件活开始用',
-        changeFailed: '没能换模型，稍后再试',
-        checking: '正在给 {model} 做入职体检：看它通不通、会不会调工具…',
-        checkupFailed: '{model} 入职体检没过，没有换：{reason}',
-        checkupNoTools: '让它调一个工具，两次都没调。这样的模型当不了队员'
+        unavailable: '{model} 当前不可用，该队员的任务暂用制作人的模型',
+        change: '点击更换模型，从该队员的下一项任务开始生效',
+        changeFailed: '更换模型失败，请稍后重试',
+        checking: '正在检测 {model} 的连通性和工具调用能力…',
+        checkupFailed: '{model} 检测未通过，未更换：{reason}',
+        checkupNoTools: '两次要求调用工具均未调用，该模型无法担任队员'
       },
       receipt: {
         read: '已读',
         delivered: '已送达',
-        queued: '在信箱里'
+        queued: '待送达'
       },
       verdict: {
         pass: '验收通过',
         fail: '验收未过',
-        blocked: '验收卡住',
+        blocked: '验收受阻',
         stale: '改动后未重验'
       },
       status: {
@@ -2592,7 +2595,7 @@ export default {
         doing: '进行中',
         done: '完成',
         selfReported: '自报完成',
-        blocked: '卡住'
+        blocked: '受阻'
       }
     },
     composer: {
@@ -2602,7 +2605,7 @@ export default {
       exitGoalMode: '退出目标模式',
       currentGoal: '目标',
       cancelGoal: '取消目标',
-      cancelGoalWhileRunning: '正在执行，先停下再取消目标',
+      cancelGoalWhileRunning: '正在执行，请先停止再取消目标',
       cancelGoalFailed: '取消目标失败',
       teamMode: '团队',
       exitTeamMode: '退出团队模式',
@@ -2617,12 +2620,12 @@ export default {
       meshTri: '三角面',
       polyCount: '面数质量',
       threeDModelGen: '模型生成',
-      dropFilesHere: '松手添加图片、文档或音视频',
-      placeholder3D: '请输入3D模型描述或上传5张以内的图片',
-      placeholderImage: '请输入图片描述或上传5张以内的图片',
+      dropFilesHere: '松开鼠标以添加图片、文档或音视频',
+      placeholder3D: '请输入 3D 模型描述或上传最多 5 张图片',
+      placeholderImage: '请输入图片描述或上传最多 5 张图片',
       placeholderAgent: '给 AI 发消息或发布指令...',
-      placeholderSteer: '正在执行中，可以随时发送新指令...',
-      placeholderImageChat: '与AI通过图片对话',
+      placeholderSteer: '正在执行，可随时发送新指令...',
+      placeholderImageChat: '通过图片与 AI 对话',
       placeholderDefault: '给 AI 发消息…',
       maxImagesWarning: '最多上传 5 张图片',
       notImageFile: '{name} 不是图片文件',
@@ -2686,7 +2689,7 @@ export default {
       resultImageAlt: '工具产出的截图',
       resultImageHint: '点击查看大图',
       /** agent 看过的图。默认收起，点开才加载 —— 一轮可能看十几张 */
-      peekImageShow: '查看它看的图（{count}）',
+      peekImageShow: '查看 AI 读取的图片（{count}）',
       peekImageHide: '收起图片',
       /** 子任务（task 工具）泳道。多路并行时各占一张卡 */
       subtask: {
@@ -2698,19 +2701,19 @@ export default {
         parallelRunning: '{count} 路子任务并行中',
         untitled: '未写任务描述',
         brief: '任务书',
-        noSteps: '还没开始动手'
+        noSteps: '尚未开始'
       },
       tools: {
         generate_image: '生成图片',
         search_assets: '搜索资产',
-        generate_3d_model: '生成3D模型',
+        generate_3d_model: '生成 3D 模型',
         generate_video: '生成视频',
         prepare_task_video: '整理视频素材',
         read_task_video_context: '读取任务过程',
         generate_task_music: '制作配乐',
         generate_speech: '合成语音',
         render_task_video: '制作任务视频',
-        analyze_video: '观看视频',
+        analyze_video: '分析视频',
         open_folder: '打开文件夹',
         aigc: 'AIGC 内容生成',
         asset_library_manager: '资产库管理',
@@ -2753,7 +2756,7 @@ export default {
         ue_datatable_describe: '查看数据表',
         ue_message_log: '查看消息日志',
         ue_get_crash_logs: '查看崩溃日志',
-        ue_editor_health: '编辑器体检',
+        ue_editor_health: '编辑器健康检查',
         ue_get_performance_stats: '读取性能数据',
         ue_list_unsaved: '查看未保存内容',
         ue_undo_history: '查看撤销历史',
@@ -2766,7 +2769,7 @@ export default {
         material_get_graph: '读取材质图表',
         material_graph_slice: '读取材质片段',
         material_search_nodes: '搜索材质节点',
-        material_get_referencers: '查材质引用',
+        material_get_referencers: '查看材质引用',
         mesh_describe: '查看网格',
         widget_get_hierarchy: '查看控件层级',
         widget_preview: '预览控件',
@@ -2785,9 +2788,9 @@ export default {
         separator: '、',
         more: '{text} 等 {count} 步',
         failed: '出错 {count} 次',
-        failedHint: '这一步失败了',
-        viewedImages: '看了 {count} 张图',
-        changedFiles: '改了 {count} 个文件',
+        failedHint: '此步骤失败',
+        viewedImages: '查看了 {count} 张图片',
+        changedFiles: '修改了 {count} 个文件',
         count: '共 {count} 项',
         seconds: '{s}s',
         minutes: '{m} 分 {s} 秒',
@@ -2817,8 +2820,8 @@ export default {
       evening: '晚上好'
     },
     agentMode: {
-      stoppedByUser: '已停止。你可以继续发送消息。',
-      noResult: '没有返回结果，请检测网络',
+      stoppedByUser: '已停止，可继续发送消息。',
+      noResult: '未返回结果，请检查网络',
       executedOperations: '执行了以下操作：\n\n',
       unknownTool: '未知工具',
       callTool: '调用工具',
@@ -2839,16 +2842,16 @@ export default {
       sessionModelUnavailable: '这条对话绑定的模型 {model} 已不可用，本轮改用默认模型',
       // 同一条对话已经有一轮在跑。不提 sessionId，也不提底下那个 IPC 通道叫什么 ——
       // 界面上「改方向」就是直接在输入框里继续打字
-      sessionBusy: '这条对话还有一轮在跑。等它结束，或者直接在输入框里说下一步该怎么改。',
+      sessionBusy: '此对话仍有一轮任务在运行。请等待其结束，或直接在输入框中输入调整指令。',
       resume: '继续尝试',
       resumeProgress: '从断点继续执行…',
       resumeFailed: '没能接着跑：{reason}',
       autoResume:
-        '模型连接中断，{seconds} 秒后自动接着跑（第 {attempt}/{max} 次）。做完的步骤不会重做。',
+        '模型连接中断，{seconds} 秒后自动继续（第 {attempt}/{max} 次）。已完成的步骤不会重复执行。',
       modelRetry:
-        '模型网关没回话（{model}：{reason}），已自动重发，还在等。一直这样可以停止后换个模型或渠道。',
+        '模型网关无响应（{model}：{reason}），已自动重发，正在等待。如持续出现，可停止后更换模型或渠道。',
       autoResumePersistent:
-        '模型请求失败，已开启自动断点续传：每 {seconds} 秒重试一次，最长 {minutes} 分钟。做完的步骤不会重做。',
+        '模型请求失败，已开启自动断点续传：每 {seconds} 秒重试一次，最长 {minutes} 分钟。已完成的步骤不会重复执行。',
       resumeReasonUnknown: '暂时无法确定具体原因，请检查模型连接后再试。',
       agentExecException: 'Agent 执行异常',
       generatedImageAlt: '生成的图片',
@@ -2858,14 +2861,14 @@ export default {
       providerOutOfCredit: '模型服务商返回「余额不足」',
       providerOutOfCreditTitle: '模型服务商余额不足',
       providerOutOfCreditDesc:
-        '你配置的模型服务商返回了余额不足。请到该服务商的控制台充值，或在 设置 → 模型 换一个可用的模型。',
-      providerAuthFailed: '模型服务商拒绝了这次请求',
+        '已配置的模型服务商返回余额不足。请前往该服务商控制台充值，或在 设置 → 模型 中更换可用模型。',
+      providerAuthFailed: '模型服务商拒绝了本次请求',
       providerAuthFailedTitle: 'API 密钥无效或已过期',
-      providerAuthFailedDesc: '请到 设置 → 模型 检查这个服务商的 API 密钥是否填错、是否已过期。',
+      providerAuthFailedDesc: '请在 设置 → 模型 中检查该服务商的 API 密钥是否有误或已过期。',
       // 速率限制相关
       rateLimitExceeded: '请求过于频繁，请稍后再试',
-      rateLimitTitle: '请求太频繁',
-      rateLimitDesc: '您的请求频率超出了限制，请稍等一会儿后再试。',
+      rateLimitTitle: '请求过于频繁',
+      rateLimitDesc: '请求频率超出限制，请稍后重试。',
       // 服务不可用相关
       serviceUnavailable: '服务暂时不可用，请稍后再试',
       serviceUnavailableTitle: '服务暂时不可用',
@@ -2897,8 +2900,8 @@ export default {
       address: '网址',
       addressPlaceholder: '输入网址',
       navigationFailed: '无法打开该网址，请检查地址或网络后重试。',
-      actionFailed: '操作没有成功，请稍后重试。',
-      busy: '助手正在用浏览器，等它这一步做完再试。',
+      actionFailed: '操作失败，请稍后重试。',
+      busy: '助手正在使用浏览器，请在当前步骤完成后重试。',
       resize: '调整浏览器宽度',
       resizing: '松开鼠标以显示网页',
       closeFailed: '无法保存浏览器关闭状态，请稍后重试。',
@@ -2914,7 +2917,7 @@ export default {
       allowForChat: '这条对话里都允许',
       whatIsThis: '这是什么？',
       // 并行执行时可能同时有好几条在等，答完这条会接着弹下一条
-      queued: '还有 {count} 条等确认',
+      queued: '还有 {count} 项待确认',
       // 按 risk 说话。原先非上网的一律归「其他操作」，那一行恒定不变、
       // 一个字的信息量都没有，而用户要判断的恰恰是「这一步有多危险」
       types: {
@@ -2929,8 +2932,8 @@ export default {
       // 上网这一类不写「写入操作」：打开网页什么都没写，
       // 要用户判断的是「去这个网址 / 往这个框里发这段话，行不行」
       browser: {
-        click: '即将点击网页上的「{label}」',
-        input: '即将向网页上的「{label}」填入下面的内容',
+        click: '即将点击网页中的「{label}」',
+        input: '即将向网页中的「{label}」填入以下内容',
         interactUnknown: '即将操作当前网页',
         generic: '即将执行网页操作：{tool}'
       },
@@ -2946,24 +2949,24 @@ export default {
       // 「还没配模型」那句不在这里：主进程的 describeMissingRole() 已经在说了，
       // 而且是同一条路上唯一真正到得了用户眼前的那句。在这儿再放一份等于两个
       // 事实来源，改一处漏一处。
-      aiResponseError: 'AI响应错误',
-      aiResponseErrorRetry: 'AI响应出错，请重试',
-      aiResponseErrorPrefix: 'AI响应出错: ',
-      noValidContent: 'AI未返回有效内容',
-      requestFailed: 'AI请求失败',
+      aiResponseError: 'AI 响应错误',
+      aiResponseErrorRetry: 'AI 响应出错，请重试',
+      aiResponseErrorPrefix: 'AI 响应出错：',
+      noValidContent: 'AI 未返回有效内容',
+      requestFailed: 'AI 请求失败',
       errorPrefix: '错误',
       generatingImage: '正在生成图片，请稍候...',
-      imageGenFailedNoUrl: '生成图片失败：未返回图片URL',
+      imageGenFailedNoUrl: '图片生成失败：未返回图片 URL',
       imageGenFailed: '图片生成失败',
       imageConvertFailed: '图片转换失败，请重试',
-      submitting3DTask: '正在提交3D生成任务...',
+      submitting3DTask: '正在提交 3D 生成任务...',
       submitTaskFailed: '提交任务失败',
-      noTaskId: '未获取到任务ID',
-      taskSubmitted: '3D任务已提交 (ID: {taskId})，正在生成中...',
-      gen3DFailed: '3D生成失败',
-      submittingImageTo3D: '正在提交图生3D任务...',
-      imageTo3DSubmitted: '图生3D任务已提交 (ID: {taskId})，正在生成...',
-      imageTo3DFailed: '图生3D失败',
+      noTaskId: '未获取到任务 ID',
+      taskSubmitted: '3D 任务已提交（ID：{taskId}），正在生成...',
+      gen3DFailed: '3D 生成失败',
+      submittingImageTo3D: '正在提交图生 3D 任务...',
+      imageTo3DSubmitted: '图生 3D 任务已提交（ID：{taskId}），正在生成...',
+      imageTo3DFailed: '图生 3D 失败',
       imagePlaceholder: '[图片]',
       imageAltDefault: '图片'
     },
@@ -2982,19 +2985,19 @@ export default {
       default: ['继续这个话题', '换一种角度解释', '给出一个示例']
     },
     threeDGeneration: {
-      success: '3D模型生成完成！',
-      failed: '3D模型生成失败: {error}',
-      timeout: '3D模型生成超时: {error}',
+      success: '3D 模型生成完成',
+      failed: '3D 模型生成失败：{error}',
+      timeout: '3D 模型生成超时：{error}',
       processingError: '处理生成结果时出错',
       vaultPathNotFound: '未找到当前保管库路径',
       successMessage:
-        '✅ 3D模型生成完成！\n\n📝 提示词: {optimizedPrompt}\n{originalPromptLine}🆔 任务ID: {taskId}\n\n📦 模型已自动导入到 **AIGC\\模型\\taskId** 文件夹中。',
+        '✅ 3D 模型生成完成\n\n📝 提示词: {optimizedPrompt}\n{originalPromptLine}🆔 任务ID: {taskId}\n\n📦 模型已自动导入到 **AIGC\\模型\\taskId** 文件夹中。',
       originalPromptLine: '📋 原始提示词: {originalPrompt}\n',
       viewButton: '📍 查看模型',
       failedMessage:
-        '❌ 3D模型生成失败\n\n📝 提示词: {optimizedPrompt}\n🆔 任务ID: {taskId}\n❌ 错误: {error}\n\n请稍后重试或检查任务状态。',
+        '❌ 3D 模型生成失败\n\n📝 提示词: {optimizedPrompt}\n🆔 任务ID: {taskId}\n❌ 错误: {error}\n\n请稍后重试或检查任务状态。',
       timeoutMessage:
-        '⏱️ 3D模型生成超时\n\n📝 提示词: {optimizedPrompt}\n🆔 任务ID: {taskId}\n⏱️ 状态: {error}\n\n模型可能仍在生成中，请稍后手动查询任务状态。'
+        '⏱️ 3D 模型生成超时\n\n📝 提示词: {optimizedPrompt}\n🆔 任务ID: {taskId}\n⏱️ 状态: {error}\n\n模型可能仍在生成中，请稍后手动查询任务状态。'
     },
     thinking: {
       processing: '思考中...',
@@ -3061,10 +3064,10 @@ export default {
       autoRetitleDesc: '每轮回复结束后，按整段对话重起标题。',
       persistentAutoResume: '自动断点续传',
       persistentAutoResumeDesc:
-        '中转不稳定时，每 60 秒自动从断点接着跑，连续失败 30 分钟才停。失败的那几次不留在对话里。',
-      goalMaxRounds: '目标模式最多几轮',
+        '中转服务不稳定时，每 60 秒自动从断点继续，连续失败 30 分钟后停止。失败的重试不保留在对话中。',
+      goalMaxRounds: '目标模式最大轮数',
       goalMaxRoundsDesc:
-        '用 /goal 时，复核没通过就接着改，到这个轮数还没达成就停下来交给你。每轮都会多一次复核，可能编译蓝图、跑 PIE。下一条消息生效，1–50。',
+        '使用 /goal 时，复核未通过则继续修改，达到此轮数仍未完成则停止并交由用户处理。每轮额外进行一次复核，可能编译蓝图、运行 PIE。下一条消息起生效，范围 1–50。',
       openArchivedChats: '打开归档对话',
       // 智能追加提问设置
       followUpSuggestions: '追问建议',
@@ -3111,17 +3114,17 @@ export default {
     // 技能：它会做哪些事，以及它自己学会的那些
     tools: {
       title: '工具',
-      description: '它手上有哪些工具，以及怎么递到模型面前。',
-      toolSearchTitle: '工具怎么送给模型',
+      description: '可用工具及其提供给模型的方式。',
+      toolSearchTitle: '工具提供方式',
       toolSearchBeta: '工具搜索（Beta）',
-      toolSearchOn: '用到才给：技能和搜索在需要时把工具取回来。',
-      toolSearchOff: '全都给：每次对话都带上全部工具。',
-      toolSearchHint: '下一次发送消息生效，正在跑的任务不变。',
-      toolSearchSaveFailed: '工具搜索设置保存失败，已保留原来的模式。',
+      toolSearchOn: '按需提供：由技能和搜索在需要时加载工具。',
+      toolSearchOff: '全部提供：每次对话均附带全部工具。',
+      toolSearchHint: '下次发送消息时生效，不影响正在运行的任务。',
+      toolSearchSaveFailed: '工具搜索设置保存失败，已保留原有模式。',
       listTitle: '工具清单',
-      listNoteFull: '已开启 {on} / {total} 个，每次对话大约多付 {tokens} token。关掉的不再给模型。',
-      listNoteSearch: '常驻 {on} / {total} 个，每次对话大约多付 {tokens} token；其余用到时再加载。',
-      lockedHint: '不可撤销的工具不能关闭 —— 拦它们的是每一步的审批，不是这份清单。',
+      listNoteFull: '已开启 {on} / {total} 个，每次对话约增加 {tokens} token。已关闭的工具不提供给模型。',
+      listNoteSearch: '常驻 {on} / {total} 个，每次对话约增加 {tokens} token；其余按需加载。',
+      lockedHint: '不可撤销的工具无法关闭，此类工具由每一步的审批控制，而非本清单。',
       lockedToggleLabel: '{name}：不可撤销的工具不能关闭',
       categoryToggleLabel: '{name}：已开启 {on} / {total}',
       toggleLabel: '开关 {name}',
@@ -3129,7 +3132,7 @@ export default {
       loading: '正在读取工具清单…',
       loadFailed: '工具清单读取失败，请重新打开设置页。',
       loadFailedDetail: '读取失败：{reason}',
-      saveFailed: '工具开关保存失败，已保留原来的设置。',
+      saveFailed: '工具开关保存失败，已保留原有设置。',
       empty: '没有可配置的工具。',
       noMatch: '没有匹配的工具。',
       risk: {
@@ -3147,25 +3150,25 @@ export default {
         cpp: 'C++ 与编译',
         system: '系统与诊断',
         aigc: 'AI 生成',
-        box: '盒子自己的工具',
+        box: '虚幻盒子内置工具',
         other: '其他'
       }
     },
     skills: {
       title: '技能',
       // 自动沉淀
-      learningTitle: '自动记住做法',
-      learningDesc: '把可复用的做法记成技能，把踩过的坑记进经验库。文件写入仍受权限控制。',
+      learningTitle: '自动记录做法',
+      learningDesc: '将可复用的做法保存为技能，将遇到并已解决的问题记入经验库。文件写入仍受权限控制。',
       learningOff: '关闭',
-      learningAsk: '先问我',
+      learningAsk: '先确认',
       learningAuto: '自动',
-      learningOffHint: '都不记。已有的经验保留，但不再出现。',
-      learningAskHint: '经验自动记、自动淘汰；技能保存前确认。',
-      learningAutoHint: '经验和技能都自动记，保存后通知。',
+      learningOffHint: '不记录。已有经验保留，但不再提示。',
+      learningAskHint: '经验自动记录与淘汰；技能保存前需确认。',
+      learningAutoHint: '经验和技能均自动记录，保存后通知。',
       // 清单
       listTitle: '技能列表',
       listNote: '查看、编辑或启用技能。启用状态下次任务生效。',
-      searchPlaceholder: '搜名字或说明',
+      searchPlaceholder: '搜索名称或说明',
       openFolder: '打开技能目录',
       loading: '正在读取…',
       // 读失败要说读失败。显示 0 会被当成「你没有」，而真相是这次没读着
@@ -3176,71 +3179,71 @@ export default {
         all: '全部',
         builtin: '内置',
         plugin: '插件',
-        user: '自己的'
+        user: '自定义'
       },
       source: {
         builtin: '内置',
         plugin: '插件',
-        user: '自己的'
+        user: '自定义'
       },
       // 开关
       offBadge: '已关闭',
-      learningOffBadge: '自动记住已关闭，技能未启用',
+      learningOffBadge: '自动记录已关闭，技能未启用',
       toggleLabel: '启用「{name}」',
       toggleFailed: '切换失败，请重试',
       // 详情弹窗
       detailLoading: '正在读取正文…',
-      detailMissing: '这个技能已经不在了，可能刚被别处删掉。',
+      detailMissing: '该技能已不存在，可能已在其他位置被删除。',
       ownNote: '保存后更新原文件。',
       overrideNote: '保存为自定义副本，应用更新不覆盖；删除副本恢复原版。',
       saved: '已保存',
       savedAsCopy: '已保存为自定义副本。',
       saveFailed: '保存失败：{reason}',
-      deleteTitle: '删掉「{name}」？',
-      deleteContent: '这个技能的整个目录都会删掉，没有回收站。',
+      deleteTitle: '删除「{name}」？',
+      deleteContent: '将删除该技能的整个目录，且不会移入回收站。',
       deletedGone: '「{name}」已删除',
-      deletedRestored: '你的那份已删除，「{name}」退回了原版'
+      deletedRestored: '自定义副本已删除，「{name}」已恢复为原版'
     },
     // 经验库：做事时踩过又绕过去的坑（见 ProfileExperience.vue）
     experience: {
       title: '经验库',
-      description: '做事时踩过又绕过去的坑。再遇到同样的报错会自动提醒，不管用的会自己淘汰。',
+      description: '执行任务时遇到并已解决的问题。再次出现相同报错时自动提示，无效的经验自动淘汰。',
       listTitle: '全部经验',
-      offNote: '「技能」页的自动记住已关闭：已有的经验保留，但不会再出现。',
+      offNote: '「技能」页的自动记录已关闭：已有经验保留，但不再提示。',
       undo: '撤销上次整理',
       undoTitle: '撤销上次整理？',
       undoContent:
-        '上次整理在 {at}，新加了 {added} 条、淘汰了 {retired} 条。撤销后回到那之前的样子。',
+        '上次整理于 {at}，新增 {added} 条、淘汰 {retired} 条。撤销后恢复到整理前的状态。',
       undone: '已撤销',
       undoFailed: '撤销失败：{reason}',
       filter: { all: '全部', global: '通用', project: '工程' },
       showRetired: '显示已淘汰',
       loadFailed: '读取失败：{reason}',
-      empty: '还没有经验。做事时踩过又绕过去的坑会出现在这里。',
-      emptyProject: '这个工程还没有经验。',
+      empty: '暂无经验。执行任务时遇到并已解决的问题将显示在此处。',
+      emptyProject: '此工程暂无经验。',
       layerGlobal: '通用',
       status: { trial: '试用中', proven: '已验证', retired: '已淘汰' },
       pinnedBadge: '固定',
-      effect: '照着做 {adopted} 次，成了 {ok} 次',
+      effect: '采用 {adopted} 次，成功 {ok} 次',
       detail: {
-        how: '怎么做',
-        when: '什么时候出现',
+        how: '做法',
+        when: '触发条件',
         whenValue: '报错里含「{pattern}」',
         scope: '适用范围',
         scopeGlobal: '所有工程',
-        scopeProject: '只在 {name}',
+        scopeProject: '仅限 {name}',
         engines: '引擎版本',
         enginesOk: 'UE {versions} 成立',
         enginesNo: 'UE {versions} 不适用',
         effect: '效果',
-        effectValue: '出现 {shown} 次，照着做 {adopted} 次，成了 {ok} 次',
-        lift: '不给时成功 {without}%，给了 {with}%',
-        liftUnknown: '对照样本还不够，暂时算不出提升',
+        effectValue: '提示 {shown} 次，采用 {adopted} 次，成功 {ok} 次',
+        lift: '未提示时成功率 {without}%，提示后 {with}%',
+        liftUnknown: '对照样本不足，暂无法计算提升',
         source: '来源',
         pin: '固定保留，不自动淘汰'
       },
-      deleteTitle: '删掉这条经验？',
-      deleteContent: '删掉后不再提醒。以后再踩到同样的坑，可能会重新学到。',
+      deleteTitle: '删除这条经验？',
+      deleteContent: '删除后不再提示。再次遇到相同问题时，可能重新学习。',
       deleted: '已删除',
       actionFailed: '操作失败：{reason}'
     },
@@ -3265,16 +3268,16 @@ export default {
       totalTurnsHint: '一次提问算一轮',
       toolCallsTotal: '工具调用',
       uncachedTotal: '不含缓存共计',
-      uncachedTotalHint: '真正按全价计费的那部分',
+      uncachedTotalHint: '按全价计费的部分',
       perTurn: '平均每轮',
       perTurnHint: '不含缓存命中的 Token',
       inputHint: '每次都按全价计费',
       outputHint: '含模型的思考过程',
       cacheReadHint: '单价通常低一个量级',
       cacheHitRate: '缓存命中率',
-      cacheHitRateHint: '命中的那部分不按全价算',
+      cacheHitRateHint: '命中部分不按全价计费',
       uncachedMetricNote:
-        '这里的 Token 不含缓存命中 —— 它单价低一个量级，混进来会让图只反映缓存读了多少。',
+        '此处 Token 不含缓存命中。缓存命中单价低一个量级，计入后图表将主要反映缓存读取量。',
       toolsPerTurn: '平均每轮 {count} 次',
       barTooltip:
         '{date}：{tokens} Token（另有 {cached} 缓存命中）· {turns} 轮 · 改动 {changes} 处',
@@ -3289,7 +3292,7 @@ export default {
       cacheRead: '缓存命中',
       cacheWrite: '写入缓存',
       breakdownNote:
-        '四项相加共 {total} Token。四项单价并不相同：缓存命中最便宜，写入缓存比新输入还贵一点，具体以服务商计费为准。',
+        '四项合计 {total} Token。各项单价不同：缓存命中最低，写入缓存略高于新输入，具体以服务商计费为准。',
       changesTitle: '完成的改动',
       changesApplied: '已完成操作',
       changesAppliedHint: '成功修改工程的操作数',
@@ -3299,17 +3302,17 @@ export default {
       changesPerTurnHint: '每轮完成的平均改动数',
       changesNote: '只统计成功修改；脚本改动计入操作数，但不计入涉及资产数。',
       changesFailedNote: '另有 {count} 次修改失败，详情见操作记录。',
-      changesEmpty: '这段时间没有改动记录。',
+      changesEmpty: '该时间段内无改动记录。',
       toolsTitle: '操作记录',
       colTool: '工具',
       colCalls: '调用',
       colFailed: '失败',
       colMedian: '中位耗时',
-      toolsNote: '耗时包含等待你确认的时间。',
+      toolsNote: '耗时包含等待确认的时间。',
       skillsTitle: '用过的技能',
       skillSource: {
         builtin: '内置',
-        user: '自己的',
+        user: '自定义',
         unknown: '来源不详'
       },
       projectsTitle: '按工程',
@@ -3318,7 +3321,7 @@ export default {
       colTokens: 'Token（不含缓存）',
       colChanges: '改动',
       noProject: '未关联工程',
-      empty: '这段时间里没有记录。'
+      empty: '该时间段内无记录。'
     },
     // 知识库设置
     notebook: {
@@ -3329,7 +3332,7 @@ export default {
       autoTrainDesc: '编辑笔记后自动更新索引，方便助手检索。',
       readImages: '读取网页里的图片',
       readImagesDesc: '识别网页图片中的文字并标注为「AI 识别」；可能产生模型费用，默认关闭。',
-      readImagesMax: '每篇最多读几张',
+      readImagesMax: '每篇最多识别图片数',
       readImagesMaxDesc: '每篇识别 {min}–{max} 张以内的图片；数量越多，模型费用可能越高。',
 
       dataManagement: '数据管理',
@@ -3347,9 +3350,9 @@ export default {
       showDependenciesDesc: '在资产列表中显示自动收集的依赖资产（关闭后只显示手动导入的资产）',
       archiveImportAsk: '压缩包导入前询问',
       archiveImportAskDesc:
-        '把压缩包导入 UE 工程时，先问一次是解压后导入还是原样复制（关闭后一律解压后导入）',
+        '将压缩包导入 UE 工程时，询问解压后导入还是原样复制（关闭后一律解压后导入）',
       crossVaultSearch: '跨库搜索',
-      crossVaultSearchDesc: 'AI 助手找素材时连其他保管库一起搜。关闭时只搜当前保管库。',
+      crossVaultSearchDesc: 'AI 助手查找素材时同时搜索其他保管库。关闭后仅搜索当前保管库。',
       defaultApps: '默认应用',
       selectApp: '选择应用程序',
       selectAppSuccess: '设置成功',
@@ -3372,11 +3375,11 @@ export default {
         title: '语义搜索',
         desc: '按语义匹配资产名称。',
         note: '使用「模型」中配置的嵌入模型建立索引，费用由服务商决定。',
-        unavailable: '语义搜索组件未能加载，暂时无法使用；关键词搜索不受影响。',
-        indexing: '正在建索引：{indexed} / {total}',
-        paused: '建索引中断了：{error}',
-        ready: '索引已建好，覆盖 {indexed} 个资产',
-        pending: '还有 {pending} 个资产没算完',
+        unavailable: '语义搜索组件加载失败，暂不可用；关键词搜索不受影响。',
+        indexing: '正在建立索引：{indexed} / {total}',
+        paused: '索引建立中断：{error}',
+        ready: '索引已建立，覆盖 {indexed} 个资产',
+        pending: '还有 {pending} 个资产未完成索引',
         resume: '继续',
         enableFailed: '开启失败：{error}',
         disableConfirm: '关闭会删除已有索引，重新开启需要重建。确定关闭？'
@@ -3390,12 +3393,12 @@ export default {
       title: '对象存储',
       enable: '启用对象存储',
       enableDesc:
-        '接入你自己的 S3 兼容存储桶。需要把文件放到云上的功能会用它，目前是对话里的图片和音视频，以及生视频用的本地参考视频',
+        '接入自有的 S3 兼容存储桶，供需要将文件上传到云端的功能使用，目前包括对话中的图片和音视频，以及视频生成所用的本地参考视频',
       connectedSummary: '{provider} · {bucket}（{region}）',
       edit: '修改',
       advanced: '高级设置',
       hideAdvanced: '收起高级设置',
-      privacyNote: '文件会离开本机，由用到它的服务凭链接读取',
+      privacyNote: '文件将上传至云端，由相关服务通过链接读取',
       connection: '连接',
       preset: '服务商',
       presets: {
@@ -3410,42 +3413,42 @@ export default {
       bucket: 'Bucket',
       endpoint: 'Endpoint',
       endpointHint:
-        '不带桶名。R2 要把地址里的账户 ID 换成你自己的。模型厂商得能从公网访问这个地址，本机或内网的 MinIO 不行。',
+        '不含桶名。使用 R2 时需将地址中的账户 ID 替换为自己的账户 ID。模型服务商须能从公网访问此地址，本机或内网的 MinIO 不适用。',
       accessKeyId: 'AccessKey ID',
       secret: 'AccessKey Secret',
       secretSaved: '已保存，留空不修改',
-      secretPlaceholder: '保存在本机安全存储里，不会回显',
+      secretPlaceholder: '保存于本机安全存储，不会回显',
       prefix: '路径前缀',
       publicBaseUrl: '公开访问域名（可选）',
       publicBaseUrlHint:
-        '不填也行：链接自带签名，私有桶也能被模型读到，7 天有效、到期自动换。填了公开域名则永不过期、对缓存最友好，但桶要允许公共读。',
+        '可不填：链接自带签名，私有桶也可被模型读取，有效期 7 天，到期自动更新。填写公开域名后链接永不过期，缓存效果最佳，但存储桶需允许公共读。',
       pathStyle: '路径式寻址',
-      pathStyleDesc: 'MinIO、R2 需要打开；阿里云、腾讯云、AWS 保持关闭',
+      pathStyleDesc: 'MinIO、R2 需开启；阿里云、腾讯云、AWS 保持关闭',
       test: '测试连接',
       save: '保存',
       saved: '已保存',
       saveFailed: '保存失败',
       loadFailed: '读取配置失败：{error}',
       autoClean: '自动清理（天）',
-      autoCleanDesc: '启动时删掉早于这么多天的文件，0 为不清理',
+      autoCleanDesc: '启动时删除早于指定天数的文件，0 表示不清理',
       cleanNow: '立即清理',
       objects: '已上传的文件',
       summary: '{count} 个 · {size}',
       refresh: '刷新',
       removeAll: '全部清理',
-      empty: '还没有上传过文件',
+      empty: '暂无已上传的文件',
       listFailed: '读取列表失败',
       removeAllTitle: '清理前缀下的全部 {count} 个文件？',
       cleanTitle: '清理 {days} 天前上传的文件？',
-      removeHint: '从桶里删掉，不能恢复。引用过它们的对话，模型之后就看不到这些音视频了。',
+      removeHint: '将从存储桶中删除且无法恢复。引用这些文件的对话中，模型将无法再读取对应的音视频。',
       removeOk: '删除',
       removed: '已删除 {count} 个文件',
-      removedPartly: '删除了 {removed} 个，{failed} 个没删掉',
+      removedPartly: '已删除 {removed} 个，{failed} 个删除失败',
       removeFailed: '删除失败'
     },
     cli: {
       title: '命令行',
-      description: '从终端调用虚幻引擎能力，给外部 Agent 和自动化脚本用',
+      description: '从终端调用虚幻引擎能力，供外部 Agent 和自动化脚本使用',
       intro: '终端操作引擎前请打开目标工程。帮助：uebox --help',
       loading: '正在检查…',
       unavailable: '未找到命令行程序，请重新安装应用。',
@@ -3483,13 +3486,13 @@ export default {
       bridgeOn: '正常',
       bridgeOff: '未运行',
       bridgeListening: '已在端口 {port} 上等待引擎接入。',
-      bridgeOffline: '桥接没有运行，虚幻引擎连不进来。',
+      bridgeOffline: '桥接未运行，虚幻引擎无法连接。',
       // 还没问到状态时用这两条 —— 没核实过就不许报「没运行」
       bridgeChecking: '读取中',
       bridgeUnknown: '正在读取桥接状态…',
       connectedProjects: '已连接的工程',
       connectedProjectsDesc:
-        '插件会自己连过来，断了每 5 秒重试一次 —— 这里不需要你点「连接」。工程开着却一直是 0，多半是那个工程还没装插件。',
+        '插件自动连接，断开后每 5 秒重试一次，无需手动连接。若工程已打开但数量始终为 0，通常是该工程未安装插件。',
       injectionBehavior: '安装方式',
       resources: '相关资源',
       autoEnableUnrealAgentLink: '自动安装连接插件',
@@ -3499,7 +3502,7 @@ export default {
       crashRecovery: '崩溃恢复',
       autoRecoverEditorCrash: '允许 Agent 重开崩溃的编辑器',
       autoRecoverEditorCrashDesc:
-        'Agent 操作时编辑器崩了，由它决定要不要重开：关掉崩溃报告窗口，备份未保存的自动存档，再打开工程。你自己操作时崩的不管。5 分钟内再崩一次就不再重开。',
+        'Agent 操作期间编辑器崩溃时，由 Agent 决定是否重开：关闭崩溃报告窗口，备份未保存的自动存档，然后重新打开工程。手动操作期间的崩溃不处理。5 分钟内再次崩溃则不再重开。',
       repairCleanup: '清理旧版插件',
       repairCleanupDesc: '清理引擎目录中的旧版连接插件；请先关闭虚幻编辑器。',
       repairCleanupAction: '清理旧版插件',
@@ -3539,10 +3542,10 @@ export default {
       briefingConcise: '简洁',
       briefingDetailed: '详细',
       briefingFull: '完整',
-      briefingConciseHint: '轻量模型压成三句话以内：做了什么、结果如何、要你做什么。',
+      briefingConciseHint: '由轻量模型压缩为三句以内：执行内容、结果、需要处理的事项。',
       briefingDetailedHint:
-        '轻量模型提炼要点：结论、关键步骤、需要你决定的事，去掉代码和过程解说。',
-      briefingFullHint: '原文照念，不经模型压缩。',
+        '由轻量模型提炼要点：结论、关键步骤、待决定事项，省略代码和过程说明。',
+      briefingFullHint: '朗读原文，不经模型压缩。',
       feedback: '助手反馈',
 
       feedbackConcise: '简洁',
@@ -3602,7 +3605,7 @@ export default {
       languageZhCN: '中文（简体）',
       languageEnUS: 'English',
       languageChangedZh: '语言已切换为中文，部分内容需要刷新页面后生效',
-      languageChangedEn: '语言已切换为English，部分内容需要刷新页面后生效',
+      languageChangedEn: '语言已切换为 English，部分内容需要刷新页面后生效',
       // 主题
       theme: '主题',
       themeSystem: '跟随系统',
@@ -3652,10 +3655,10 @@ export default {
       // 更新相关
       checking: '正在检查更新...',
       upToDate: '当前已是最新版本',
-      updateAvailable: '发现新版本 {version}，现在下载吗？',
+      updateAvailable: '发现新版本 {version}，是否立即下载？',
       downloadNow: '下载',
       later: '稍后',
-      downloading: '正在下载更新，完成后会提示你安装',
+      downloading: '正在下载更新，完成后将提示安装',
       updateError: '检查更新失败',
       downloadError: '下载更新失败',
       updateFeedNotReady: '暂时无法获取更新，请稍后重试。',
@@ -3674,10 +3677,10 @@ export default {
         global: '随时可用',
         local: '应用内使用'
       },
-      recording: '按下想用的组合键，Esc 取消',
+      recording: '请按下组合键，按 Esc 取消',
       change: '修改',
       needsModifier: '请至少搭配 Ctrl、Alt 或 Shift 中的一个键。',
-      updateFailed: '无法使用此快捷键，可能已被其他程序占用，请换一个。',
+      updateFailed: '无法使用此快捷键，可能已被其他程序占用，请更换。',
       resetDone: '快捷键已恢复默认',
       occupied: '已被其他程序占用',
       none: '无',
@@ -3792,9 +3795,9 @@ export default {
         startsWith: '开头是',
         endsWith: '结尾是',
         contains: '包含',
-        textPlaceholder: '要找的原文，如 _FINAL',
+        textPlaceholder: '要匹配的文本，如 _FINAL',
         replacement: '替换内容',
-        replacementPlaceholder: '换成什么（留空 = 删掉）',
+        replacementPlaceholder: '替换为（留空则删除）',
         enabled: '启用',
         ruleDescription: '描述'
       }
@@ -3811,7 +3814,7 @@ export default {
       clay: '白模',
       uv: 'UV',
       snapshot: '截图更新缩略图',
-      snapshotUnavailable: '这个模型不在资产库里，没有可更新的缩略图'
+      snapshotUnavailable: '该模型不在资产库中，无法更新缩略图'
     },
     modelInfo: {
       title: '模型详情',
@@ -3954,7 +3957,7 @@ export default {
       loading: '加载中...',
       searchWebLabel: '在网络中搜索新来源',
       searchRecallLabel: '测试知识库召回率',
-      searchPlaceholder: '搜索你想知道的内容..',
+      searchPlaceholder: '搜索内容...',
       recallPlaceholder: '输入内容测试召回...',
       researchPlaceholder: '输入想深度研究的问题...',
       recallModalTitle: '召回测试结果',
@@ -3982,32 +3985,32 @@ export default {
       renamePlaceholder: '请输入新名称',
       selectedSourceCount: '应用了 {count} 个来源',
       noSourceSelected: '请至少选择一个来源',
-      cleanFailed: '「{title}」没能清洗掉网页噪音，用的是抓回来的原文',
-      imagesRead: '已从 {count} 张图里读出文字（标注为「AI 识别」，原文未改动）',
-      cleanTooLong: '这个页面太长，当前「轻量任务」模型一次最多写 {limit} token，整篇清洗写不下',
+      cleanFailed: '「{title}」网页清洗失败，已使用抓取的原文',
+      imagesRead: '已从 {count} 张图片中识别文字（标注为「AI 识别」，原文未改动）',
+      cleanTooLong: '页面过长：当前「轻量任务」模型单次最多输出 {limit} token，无法完成整篇清洗',
       cleanEmpty: '模型没有返回内容',
-      cleanTruncated: '清洗结果只有 {after} 字（原文 {before} 字），像是写到一半停了，没有采用',
-      viewRaw: '看原文',
-      viewCleaned: '看清洗后',
-      rawHint: '这是抓回来的原文，AI 用的是清洗后的版本',
+      cleanTruncated: '清洗结果仅 {after} 字（原文 {before} 字），疑似输出中断，未采用',
+      viewRaw: '查看原文',
+      viewCleaned: '查看清洗结果',
+      rawHint: '此为抓取的原文，AI 使用清洗后的版本',
       // 上下文档位：这条来源送多少内容给 AI
       context: {
         full: '全文',
-        summary: '只给摘要',
+        summary: '仅摘要',
         excluded: '不进上下文',
-        badgeHint: '点击在「全文」和「只给摘要」之间切换',
+        badgeHint: '点击在「全文」和「仅摘要」之间切换',
         summarizing: '摘要生成中',
-        summaryUnavailable: '摘要没生成',
-        summaryFailed: '「{title}」的摘要没生成出来，这次按正文开头送',
+        summaryUnavailable: '摘要未生成',
+        summaryFailed: '「{title}」摘要生成失败，本次使用正文开头',
         bulkTitle: '批量设置上下文档位',
-        allFull: '全部给全文',
-        allSummary: '全部只给摘要',
+        allFull: '全部使用全文',
+        allSummary: '全部仅摘要',
         allExcluded: '全部不进上下文',
         budget: '本次送入 {used}字 / 上限 {max}字 · {count} 个来源',
         overBudget:
-          '超出上限，有 {count} 个来源这次送不进去：{titles}。把它们降到「只给摘要」或取消勾选。',
+          '超出上限，{count} 个来源本次无法送入：{titles}。请将其改为「仅摘要」或取消勾选。',
         summaryMissingHint:
-          '有 {count} 个来源的摘要还没生成，这次先送正文开头。点它的「摘要」标签可以现在生成。',
+          '{count} 个来源的摘要尚未生成，本次使用正文开头。点击来源的「摘要」标签可立即生成。',
         untitled: '未命名来源'
       }
     },
@@ -4016,9 +4019,9 @@ export default {
       title: '工作台',
       generating: '正在生成…',
       noContent: '请先添加一些来源或进行对话',
-      noNotebookId: '知识库ID未设置',
+      noNotebookId: '知识库 ID 未设置',
       providerOutOfCredit:
-        '模型服务商返回「余额不足」。请到该服务商的控制台充值，或在 设置 → 模型 换一个可用的模型。',
+        '模型服务商返回「余额不足」。请前往该服务商控制台充值，或在 设置 → 模型 中更换可用模型。',
       outputTypes: {
         video: '新视频概览',
         mindmap: '新思维导图',
@@ -4045,7 +4048,7 @@ export default {
         sortLabel: '排序',
         reset: '重置筛选',
         emptyTitle: '当前筛选下没有产出',
-        emptyDescription: '换个筛选条件试试。',
+        emptyDescription: '请调整筛选条件。',
         type: {
           all: '全部类型',
           video: '视频',
@@ -4076,13 +4079,13 @@ export default {
         }
       },
       success: {
-        mindmap: '思维导图生成完成！',
-        report: '报告生成完成！',
-        knowledgeGraph: '知识图谱生成完成！',
-        interview: '面试配置生成完成！',
-        infographic: '信息图生成完成！',
-        webpage: '网页生成完成！',
-        brainstorm: '头脑风暴生成完成！'
+        mindmap: '思维导图生成完成',
+        report: '报告生成完成',
+        knowledgeGraph: '知识图谱生成完成',
+        interview: '面试配置生成完成',
+        infographic: '信息图生成完成',
+        webpage: '网页生成完成',
+        brainstorm: '头脑风暴生成完成'
       },
       failed: {
         mindmap: '思维导图生成失败',
@@ -4093,11 +4096,11 @@ export default {
         webpage: '网页生成失败',
         brainstorm: '头脑风暴生成失败'
       },
-      researchComplete: '研究完成！笔记已添加到知识库',
+      researchComplete: '研究完成，笔记已添加到知识库',
       researchFailed: '深度研究失败',
       // 空状态
-      emptyTitle: '工作台 输出将保存在此处',
-      emptyDesc: '添加来源后，点击即可添加信息图、思维导图、测验等！',
+      emptyTitle: '工作台输出将保存在此处',
+      emptyDesc: '添加来源后，可生成信息图、思维导图、测验等。',
       // 菜单操作
       rename: '重命名',
       renameSuccess: '重命名成功',
@@ -4105,15 +4108,15 @@ export default {
       editConfig: '配置模型与 Prompt',
       editPrompt: '编辑提示词',
       saveAsSource: '存为来源',
-      saveAsSourceDone: '「{title}」已存进来源，之后 AI 就能检索到它了',
-      saveAsSourceEmpty: '这份产出还没有可存的正文',
-      briefFailedShort: '没能提炼出设计要点',
+      saveAsSourceDone: '「{title}」已存为来源，可供 AI 检索',
+      saveAsSourceEmpty: '该产出暂无可保存的正文',
+      briefFailedShort: '设计要点提炼失败',
       briefFailed: '提炼设计要点失败，请检查「轻量任务」模型配置后重试',
-      outputsSaveFailed: '产出没能存进保管库，现在只在内存里 —— 重启就会丢。请检查保管库是否可写',
-      outputsInterruptedByVaultSwitch: '切换保管库中断了正在生成的产出，需要的话请重新生成',
+      outputsSaveFailed: '产出保存到保管库失败，当前仅存于内存中，重启后将丢失。请检查保管库是否可写',
+      outputsInterruptedByVaultSwitch: '切换保管库已中断正在生成的产出，如有需要请重新生成',
       sourcesOverBudgetShort: '来源超出模型上下文',
       sourcesOverBudget:
-        '来源都超出了当前模型的上下文预算（{budget} 字），一条也送不进去。请换一个上下文窗口更大的模型，或把来源拆成几条再试',
+        '所有来源均超出当前模型的上下文预算（{budget} 字），无法送入。请更换上下文窗口更大的模型，或将来源拆分后重试',
       renameModalTitle: '重命名',
       renameModalPlaceholder: '请输入新标题',
       renameModalConfirm: '确认',
@@ -4145,8 +4148,8 @@ export default {
     // 添加来源弹窗
     addSource: {
       title: '添加来源',
-      description: '添加来源后，UnrealBox 能基于这些对您最重要的信息回答。',
-      examples: '（示例：UE学习笔记、项目文档、会议记录等）',
+      description: '添加来源后，虚幻盒子可基于这些信息回答问题。',
+      examples: '（示例：UE 学习笔记、项目文档、会议记录等）',
       /*
        * 从工程里抓东西进知识库这一路的提示和来源标题。
        *
@@ -4258,34 +4261,34 @@ export default {
     // 文字类产出的提示词编辑
     taskPrompt: {
       title: '{name} · 提示词',
-      subtitle: '这段话决定 AI 怎么读你的材料。改完对以后每次生成都生效。',
+      subtitle: '此提示词决定 AI 如何处理材料，修改后对之后的每次生成生效。',
       loading: '正在读取…',
       reset: '恢复默认',
       saved: '提示词已保存',
-      saveFailed: '提示词没保存上，请重试',
-      customized: '已改过出厂设置',
-      isDefault: '当前是出厂设置',
+      saveFailed: '提示词保存失败，请重试',
+      customized: '已自定义',
+      isDefault: '当前为默认设置',
       slots: {
         mindmap: '整理成思维导图',
         report: '写成总结报告',
         knowledgeGraph: '抽取实体与关系',
-        interview: '出面试题',
+        interview: '生成面试题',
         brainstorm: '发散想法',
-        webpageAnalyze: '第一步：把材料读成设计 Brief',
-        webpageHtml: '第二步：照 Brief 排出网页'
+        webpageAnalyze: '第一步：将材料整理为设计 Brief',
+        webpageHtml: '第二步：按 Brief 生成网页'
       }
     }
   },
   // 笔记编辑器
   noteEditor: {
-    saveFailedAlert: '这一段没能存进去。检查保管库还在不在、有没有被别的程序占用，然后重试。',
+    saveFailedAlert: '该段内容保存失败。请检查保管库是否存在、是否被其他程序占用，然后重试。',
     retrySave: '重试保存',
     emptyTitle: '没有打开任何笔记',
-    emptyDesc: '从资产库或知识库里打开一篇',
+    emptyDesc: '从资产库或知识库中打开笔记',
     video: {
-      unsupportedFormat: '这个格式（{ext}）播不了，请先转成 MP4 或 WebM',
-      saveFailed: '视频没能存进保管库',
-      playFailed: '这段视频播不出来，文件可能已被移走或删除'
+      unsupportedFormat: '不支持播放此格式（{ext}），请先转换为 MP4 或 WebM',
+      saveFailed: '视频保存到保管库失败',
+      playFailed: '视频无法播放，文件可能已被移动或删除'
     },
     newNote: '新笔记',
     placeholder: "输入 '/' 打开命令菜单...",
@@ -4365,8 +4368,8 @@ export default {
     interview: {
       hintTriggerButton: '💡 需要提示？',
       hintLabel: '💡 提示：',
-      hintFallback: '回顾一下相关知识点...',
-      correctFeedback: '✓ 回答正确！',
+      hintFallback: '请回顾相关知识点...',
+      correctFeedback: '✓ 回答正确',
       wrongFeedback: '✗ 回答错误',
       explanationLabel: '📖 解释：',
       explanationFallback: '暂无解释',
@@ -4376,7 +4379,7 @@ export default {
       followUpReferenceLabel: '📖 要点：',
       deepExplainButton: '深度解释',
       followUpAcceptButton: '🎤 接受追问',
-      answerPlaceholder: '请输入您的回答...',
+      answerPlaceholder: '请输入回答...',
       skipButton: '跳过',
       aiCommentLabel: '💬 AI 点评：',
       referenceAnswerLabel: '📖 参考答案：'
@@ -4392,10 +4395,10 @@ export default {
       backButton: '返回'
     },
     scoreMessage: {
-      master: '虚幻大师！Epic 都要来挖你了',
-      good: '表现不错！继续保持',
-      keepGoing: '再接再厉，多刷文档哦',
-      encourage: '别灰心，知识需要一点点积累'
+      master: '表现优异，已熟练掌握相关知识',
+      good: '表现良好，请继续保持',
+      keepGoing: '仍有提升空间，建议查阅相关文档',
+      encourage: '知识需要逐步积累，建议复习错题后再试'
     }
   },
   serverManagement: {
@@ -4425,8 +4428,8 @@ export default {
       loginButton: '登录节点',
       ownerKeyLabel: '节点 KEY',
       accountLabel: '账号',
-      ownerKeyPlaceholder: '所有者/恢复管理使用，不发给普通成员',
-      memberUsernamePlaceholder: '输入 server 成员账号',
+      ownerKeyPlaceholder: '供所有者登录或恢复管理使用，请勿提供给普通成员',
+      memberUsernamePlaceholder: '输入节点成员账号',
       passwordPlaceholder: '密码',
       loggedInAs: '已登录：{username} / {role}'
     },
@@ -4489,12 +4492,12 @@ export default {
   aigcImagePanel: {
     access: {
       noImageModel:
-        '还没有可用的生图模型。到 设置 → 模型，用「添加服务商」选择「图片生成」分组里的一家，填好 API 密钥，并确保模型已勾选「生图」能力。',
+        '暂无可用的生图模型。请在 设置 → 模型 中通过「添加服务商」选择「图片生成」分组下的服务商，填写 API 密钥，并确认模型已勾选「生图」能力。',
       checkTimeout: '生成前的检查超时，图片任务未能启动。'
     },
     gate: {
-      title: '还没有可用的生图模型',
-      action: '去配置模型'
+      title: '暂无可用的生图模型',
+      action: '配置模型'
     },
     model: {
       label: '模型',
@@ -4518,11 +4521,11 @@ export default {
       hint: '可选，上传后进入图生图模式',
       libraryButton: '参考库',
       libraryTitle: '参考库 · {folderName}',
-      libraryTip: '固定读取 AIGC 资产库里的“{folderName}”目录，当前还能添加 {slots} 张。',
+      libraryTip: '固定读取 AIGC 资产库里的“{folderName}”目录，当前还可添加 {slots} 张。',
       refresh: '刷新',
       noPreview: '无预览',
-      emptyTitle: '参考素材目录里还没有图片',
-      emptyDesc: '把图片放进 AIGC 资产库 / {folderName}，这里就能一键加入参考图。',
+      emptyTitle: '参考素材目录中暂无图片',
+      emptyDesc: '将图片放入 AIGC 资产库 / {folderName} 后，即可在此一键加入参考图。',
       openFolder: '打开参考素材库',
       vaultNotFound: '找不到 AIGC 资产库',
       openFolderFailed: '打开参考素材库失败',
@@ -4546,7 +4549,7 @@ export default {
       hintGpt: '支持常用尺寸与 Auto',
       hintDefault: '支持 1K / 2K / 4K',
       hints: {
-        k1: '更快出图快速查看效果',
+        k1: '出图更快，适合预览效果',
         k2: '画质与速度更平衡',
         k4: '高细节，适合最终成图',
         auto: '模型自动选择尺寸',
@@ -4690,7 +4693,7 @@ export default {
     cancel: '取消',
     importCount: '导入 {count} 个',
     manualSelect: '手动选择',
-    notFound: '没有找到旧版数据库',
+    notFound: '未找到旧版数据库',
     selectFile: '选择数据库文件',
     error: '{scope}失败：{reason}',
     scope: {
@@ -4700,10 +4703,10 @@ export default {
     },
     summary: {
       from: '来自 {folders} 个文件夹',
-      alreadyExists: '· {count} 个已在库中，会跳过'
+      alreadyExists: '· {count} 个已在库中，将跳过'
     },
     blocked: {
-      nothingSelected: '一个文件夹都没勾选。到「自定义」里选几个，或者点「全选」。'
+      nothingSelected: '未选择任何文件夹。请在「自定义」中选择文件夹，或点击「全选」。'
     },
     customize: {
       toggle: '自定义',
@@ -4716,19 +4719,19 @@ export default {
     done: {
       button: '完成',
       collections: '创建了 {count} 个集合',
-      skipped: '跳过 {count} 个已存在的'
+      skipped: '已跳过 {count} 个已存在项'
     }
   },
   blueprintMigration: {
     title: '从旧版导入蓝图',
     loading: '正在查找旧版蓝图…',
     summary: {
-      unit: '个蓝图可以导入'
+      unit: '个蓝图可导入'
     },
     blocked: {
-      allExist: '这 {count} 个蓝图都已经在库里了 —— 同一个旧库导过一次就不会重复导入。',
-      emptyFile: '这个文件里没有蓝图。',
-      otherKindOnly: '这个文件里的 {count} 个节点都不是蓝图（材质节点请到材质库导入）。'
+      allExist: '{count} 个蓝图均已在库中。同一旧库导入一次后不会重复导入。',
+      emptyFile: '该文件中没有蓝图。',
+      otherKindOnly: '该文件中的 {count} 个节点均不是蓝图（材质节点请在材质库中导入）。'
     },
     done: {
       imported: '已导入 {count} 个蓝图'
@@ -4738,12 +4741,12 @@ export default {
     title: '从旧版导入材质',
     loading: '正在查找旧版材质…',
     summary: {
-      unit: '个材质可以导入'
+      unit: '个材质可导入'
     },
     blocked: {
-      allExist: '这 {count} 个材质都已经在库里了 —— 同一个旧库导过一次就不会重复导入。',
-      emptyFile: '这个文件里没有材质。',
-      otherKindOnly: '这个文件里的 {count} 个节点都不是材质（蓝图节点请到蓝图库导入）。'
+      allExist: '{count} 个材质均已在库中。同一旧库导入一次后不会重复导入。',
+      emptyFile: '该文件中没有材质。',
+      otherKindOnly: '该文件中的 {count} 个节点均不是材质（蓝图节点请在蓝图库中导入）。'
     },
     done: {
       imported: '已导入 {count} 个材质'
@@ -4758,8 +4761,8 @@ export default {
   },
   libraryBrowser: {
     saveAlert: {
-      title: '有 {count} 项没能存进保管库',
-      desc: '你之后的编辑也存不上。常见原因是切换了保管库，或者包目录在资源管理器里被改名、移走了。',
+      title: '{count} 项保存到保管库失败',
+      desc: '后续编辑也将无法保存。常见原因：已切换保管库，或包目录在资源管理器中被重命名或移动。',
       retry: '重试保存'
     },
     allFolders: '全部',
@@ -4777,8 +4780,8 @@ export default {
     colInfo: '信息',
     colTags: '标签',
     loading: '加载中…',
-    emptyTitle: '这里可以放你复用的东西',
-    emptyHint: '新建一个，或者把文件拖进左边的文件夹',
+    emptyTitle: '用于存放可复用的资产',
+    emptyHint: '新建条目，或将文件拖入左侧文件夹',
     clearSearch: '清除搜索',
     folderSection: '文件夹',
     createFolder: '新建文件夹',
@@ -4786,12 +4789,12 @@ export default {
     facetShadingModel: '着色模型',
     newFolderName: '未命名文件夹',
     folderNameLabel: '文件夹名称',
-    folderNamePlaceholder: '给这个文件夹起个名字…',
+    folderNamePlaceholder: '输入文件夹名称…',
     folderNameConfirm: '保存',
     folderNameCancel: '取消',
     renameFolder: '重命名',
     deleteFolder: '删除文件夹',
-    deleteFolderConfirm: '删除「{name}」？里面的东西会回到「全部」，不会被删掉。',
+    deleteFolderConfirm: '删除「{name}」？其中的内容将移回「全部」，不会被删除。',
     selectedCount: '已选择 {count} 项',
     clearSelection: '取消选择',
     resizeSidebar: '拖动调整文件夹栏宽度'
@@ -4799,7 +4802,7 @@ export default {
   blueprintGallery: {
     header: {
       title: '蓝图库',
-      subtitle: '管理与复用你的蓝图节点'
+      subtitle: '管理与复用蓝图节点'
     },
     search: {
       placeholder: '搜索名称、类型、标签',
@@ -4881,8 +4884,8 @@ export default {
       confirm: '确认'
     },
     delete: {
-      title: '删除这个蓝图？',
-      content: '“{name}”会从蓝图库中移除。这个操作暂时不能撤销。',
+      title: '删除此蓝图？',
+      content: '“{name}”将从蓝图库中移除。此操作目前无法撤销。',
       okText: '删除',
       cancelText: '取消',
       successMessage: '已删除蓝图'
@@ -4894,7 +4897,7 @@ export default {
       readImageFailed: '读取图片失败',
       chooseFailed: '选择封面失败',
       openRecorderFailed: '打开录制器失败',
-      noRecordingAvailable: '还没有可用的录制视频',
+      noRecordingAvailable: '暂无可用的录制视频',
       exportFailed: '导出封面失败',
       resetSuccess: '已恢复默认封面',
       modalTitle: '录制封面',
@@ -4904,8 +4907,8 @@ export default {
       confirm: '确定'
     },
     empty: {
-      title: '蓝图库还是空的',
-      hint: '新建一个蓝图节点，或者从旧版导入你已有的蓝图。'
+      title: '蓝图库为空',
+      hint: '新建蓝图节点，或从旧版导入已有蓝图。'
     },
     stats: {
       functions: '{count} 函数',
@@ -5000,16 +5003,16 @@ export default {
       successMessage: '已清除 {count} 条失败记录'
     },
     emptyState: {
-      titleNoRecords: '还没有生成记录',
+      titleNoRecords: '暂无生成记录',
       titleNoMatch: '没有匹配的历史记录',
       titleNoActive: '当前没有进行中的任务',
-      titleNoCompleted: '还没有完成的作品',
+      titleNoCompleted: '暂无已完成的作品',
       titleNoFailed: '没有失败记录',
       titleNoRecordsToShow: '没有可显示的记录',
-      descNoRecords: '生成过的图片会按时间出现在这里，方便回看、下载和定位到资产库。',
-      descNoMatch: '试试换一个关键词，或者清空搜索后再看。',
-      descNoFailed: '这很好，说明这段时间生成过程很稳定。',
-      descDefault: '换个筛选条件试试。'
+      descNoRecords: '生成的图片将按时间显示在此处，可用于回看、下载及在资产库中定位。',
+      descNoMatch: '请尝试其他关键词，或清空搜索条件。',
+      descNoFailed: '当前没有生成失败的任务。',
+      descDefault: '请尝试其他筛选条件。'
     },
     header: {
       title: '生成历史',
@@ -5047,26 +5050,26 @@ export default {
     useAsReference: '用作参考图',
     copyImage: '复制图片',
     download: '下载图片',
-    useParams: '填回这套参数',
+    useParams: '回填参数',
     copyPrompt: '复制提示词',
     locate: '在资产库中定位',
     delete: '删除记录',
     more: '更多',
     deleteModal: {
-      title: '删除这条生成记录？',
-      content: '记录删除后无法恢复。已存进资产库的图片不受影响。',
+      title: '删除此生成记录？',
+      content: '记录删除后无法恢复。已保存至资产库的图片不受影响。',
       okText: '删除',
       cancelText: '取消'
     },
     messages: {
-      noImage: '这条记录还没有图片',
+      noImage: '此记录暂无图片',
       imageCopied: '图片已复制到剪贴板',
       copyImageFailed: '复制图片失败',
-      useAsReferenceFailed: '读取这张图失败，没能加成参考图',
+      useAsReferenceFailed: '读取图片失败，无法添加为参考图',
       promptCopied: '提示词已复制到剪贴板',
       copyPromptFailed: '复制提示词失败',
       filledForm: '已回填到左侧表单',
-      recordDeleted: '已删除这条记录',
+      recordDeleted: '记录已删除',
       downloadComplete: '下载完成',
       downloadFailed: '下载失败',
       imageFileFilterName: '图片文件',
@@ -5106,7 +5109,7 @@ export default {
     },
     noTags: '无标签',
     footer: {
-      hint: '选择鼠标左键，排除鼠标右键',
+      hint: '左键选择，右键排除',
       clear: '清空',
       confirm: '确定'
     },
@@ -5172,7 +5175,7 @@ export default {
     empty: {
       listEmpty: '没有找到匹配的材质',
       title: '未找到匹配材质资产',
-      hint: '你可以调整筛选条件，或者新建一个离线材质节点条目。'
+      hint: '可调整筛选条件，或新建离线材质节点条目。'
     },
     common: {
       close: '关闭',
@@ -5186,7 +5189,7 @@ export default {
       advancedToggle: '高级设置',
       typeLabel: '材质类型',
       descriptionLabel: '描述 (可选)',
-      descriptionPlaceholder: '记录这个材质节点的用途...',
+      descriptionPlaceholder: '记录此材质节点的用途...',
       noteLabel: '备注描述',
       defaultMaterialName: '新建材质节点'
     },
@@ -5277,7 +5280,7 @@ export default {
     title: '版本冲突',
     subtitle: '索引文件已被他人修改',
     info: {
-      localVersion: '您的版本',
+      localVersion: '本地版本',
       remoteVersion: '远程版本',
       modifiedBy: '修改者',
       modifiedAt: '修改时间'
@@ -5289,7 +5292,7 @@ export default {
       overwriteRemote: '覆盖远程版本',
       overwriteRemoteDesc: '使用本地版本覆盖服务器，其他人的修改将丢失'
     },
-    warningHint: '此操作将覆盖远程修改，请确认您了解风险',
+    warningHint: '此操作将覆盖远程修改，请确认已了解相关风险',
     cancel: '取消',
     confirmOverwrite: '确认覆盖',
     confirmSync: '确认同步'
@@ -5301,16 +5304,16 @@ export default {
   },
   networkVaultAccess: {
     title: '主机访问码',
-    hint: '把浏览码发给同事，他们在「资产服务器」里填上就能连接',
+    hint: '将浏览码发送给同事，在「资产服务器」中填写后即可连接',
     readCodeLabel: '浏览码（只读）',
     writeCodeLabel: '管理码（可写）',
     copy: '复制',
     copied: '已复制到剪贴板',
     rotate: '重新生成',
-    rotateConfirm: '重新生成后，所有用旧码连接的电脑都会掉线，需要重新填码。继续？',
-    rotated: '已重新生成，请把新码发给同事',
-    shareWriteLabel: '允许共享目录里的同事写入',
-    shareWriteHint: '勾选后，能访问这个共享文件夹的电脑会自动获得写权限，不用手动填码',
+    rotateConfirm: '重新生成后，所有使用旧码连接的电脑将断开连接，需重新填写访问码。是否继续？',
+    rotated: '已重新生成，请将新码发送给同事',
+    shareWriteLabel: '允许共享目录中的同事写入',
+    shareWriteHint: '勾选后，可访问此共享文件夹的电脑将自动获得写入权限，无需手动填写访问码',
     notServer: '当前保管库不是主机模式，没有配对码',
     authRequired: '需要资产库访问码，请向主机索取配对码后填写',
     authInvalid: '资产库访问码不正确，请向主机确认'
@@ -5318,7 +5321,7 @@ export default {
   createVaultModal: {
     header: {
       title: '新建资产库',
-      subtitle: '创建新的资源索引以开始管理您的文件'
+      subtitle: '创建新的资源索引以管理文件'
     },
     form: {
       nameLabel: '名称',
@@ -5381,7 +5384,7 @@ export default {
       selectVaultLabel: '选择资产库',
       createInRootTitle: '在此资产路径下新建资产库',
       createButtonShort: '新建',
-      emptyGroupHint: '该路径下还没有资产库，点击此处新建',
+      emptyGroupHint: '该路径下暂无资产库，点击此处新建',
       deleteVaultTitle: '从服务器删除此资产库',
       createOnServerButton: '在服务器上新建',
       createVaultLabel: '新建资产库',
@@ -5422,9 +5425,9 @@ export default {
     },
     confirm: {
       deleteWithApiKey:
-        '确定要从服务器上删除资产库「{name}」吗？\n\n⚠️ 已检测到 API 密钥，将同时删除物理文件！',
+        '确定要从服务器上删除资产库「{name}」吗？\n\n⚠️ 已检测到 API 密钥，将同时删除物理文件。',
       deleteWithoutApiKey:
-        '确定要从服务器上删除资产库「{name}」吗？\n\n注意：这只会注销服务器上的资产库记录，不会删除物理文件。'
+        '确定要从服务器上删除资产库「{name}」吗？\n\n注意：此操作仅注销服务器上的资产库记录，不会删除物理文件。'
     },
     toast: {
       nodeClaimed: '资产节点已认领',
@@ -5532,7 +5535,7 @@ export default {
   assistantInputComposer: {
     mediaUploading: '上传中 {percent}%',
     pathOnlyAttachment:
-      '### 文件：{name}\n\n本地路径：{path}\n\n这个格式没有预先解析，需要内容就用读文件的工具自己打开。',
+      '### 文件：{name}\n\n本地路径：{path}\n\n该格式未预先解析，如需读取内容，请使用读文件工具打开。',
     voice: {
       start: '开始语音通话',
       cancelConnection: '取消连接',
@@ -5547,16 +5550,16 @@ export default {
       stop: '结束语音通话（后台任务继续运行）',
       status: {
         connecting: '正在连接语音…',
-        listening: '正在听，请直接说话',
-        thinking: '正在理解您的问题…',
+        listening: '正在收音，请直接说话',
+        thinking: '正在理解问题…',
         executing: '正在通过 Agent 执行…',
         speaking: '正在回复…'
       },
       unsupportedAudio: '语音服务返回了错误的音频格式，已停止播放以避免爆音，请重试',
-      asrFailed: '刚才那句没听清，麻烦再说一遍',
+      asrFailed: '未能识别语音，请重新说一遍',
       // 它说话时麦克风是闭着的（外放会被自己的声音绕回去），所以打断只能手动
       interrupt: '点击打断说话（不会停止任务）',
-      interruptHint: '可以在 偏好设置 → 快捷键 里给「打断语音助手」配一个快捷键',
+      interruptHint: '可在 偏好设置 → 快捷键 中为「打断语音助手」配置快捷键',
       taskSessionTitle: '语音任务',
       taskSessionTitleFor: '语音任务 · {name}'
     },
@@ -5564,7 +5567,7 @@ export default {
       title: '选择来源',
       hint: '点击选择要引用的来源',
       empty: '暂无可用来源',
-      typeToSearch: '继续输入关键词，搜索你的笔记',
+      typeToSearch: '继续输入关键词以搜索笔记',
       noMatch: '没有匹配的来源或笔记',
       groupSources: '知识库来源',
       groupNotes: '笔记',
@@ -5592,8 +5595,8 @@ export default {
       }
     },
     slashCommands: {
-      goal: '目标模式 —— 做完自动复核，没达成就接着改',
-      team: '团队模式 —— 一句话，自己组队做到可玩交付',
+      goal: '目标模式 —— 完成后自动复核，未达成则继续修改',
+      team: '团队模式 —— 输入一句话需求，自动组队直至交付可玩版本',
       teamArg: '<一句话>',
       image: '切到图片生成模式',
       compact: '压缩这条对话的历史，腾出上下文',
@@ -5638,7 +5641,7 @@ export default {
       highDesc: '高强度推理',
       xhighDesc: '超高强度推理',
       maxDesc: '最高强度推理',
-      clamped: '{model} 没有 {chosen} 这一档，本次实际按 {actual} 执行'
+      clamped: '{model} 不支持 {chosen} 档位，本次按 {actual} 执行'
     },
     approval: {
       readOnlyLabel: '只读',
@@ -5648,19 +5651,19 @@ export default {
       autoEditLabel: '帮我批准',
       autoEditDesc: '仅对检测到的风险操作请求批准',
       yoloLabel: '完全访问权限',
-      yoloDesc: '可不受限制地修改你的工程、资产和本地文件',
+      yoloDesc: '可不受限制地修改工程、资产和本地文件',
       // 开启完全访问权限前的二次确认。参考 Codex 的做法：
       // 这一步不是走流程，是让用户真的看清自己在放开什么
-      confirmTitle: '要开启完全访问权限吗？',
+      confirmTitle: '开启完全访问权限？',
       confirmIntro:
-        '虚幻盒子将能够在未经许可的情况下，对你的工程和这台电脑执行以下操作。这包括但不限于：',
+        '虚幻盒子将无需批准即可对工程和本机执行以下操作，包括但不限于：',
       confirmProject: '虚幻工程',
       confirmProjectDesc: '创建、修改、删除关卡中的 Actor、蓝图、材质与资产',
       confirmFile: '文件和资产库',
       confirmFileDesc: '读取、写入、移动或删除资产库中的文件',
       confirmCommand: '引擎命令与脚本',
       confirmCommandDesc: '执行控制台命令、运行 Python 脚本、启用或停用插件',
-      confirmRisk: '这会带来资产被误删、工程被改坏的风险。你可以随时改回来。',
+      confirmRisk: '可能导致资产被误删或工程被损坏。此设置可随时改回。',
       confirmOk: '确认',
       confirmCancel: '取消'
     },
@@ -5668,12 +5671,12 @@ export default {
     contextTitle: '上下文窗口',
     compactDone: '已压缩：{before} → {after}',
     compactReason: {
-      busy: '正在处理这条对话，请稍后再压缩',
+      busy: '当前对话正在处理中，请稍后再压缩',
       cancelled: '已取消压缩，对话内容已保留',
-      empty: '这个对话还没有内容',
-      'too-short': '对话还很短，暂时不用压缩',
-      'already-compact': '已经压过了，没有更多可以压缩的内容',
-      'summary-failed': '压缩没成功，请稍后再试'
+      empty: '当前对话暂无内容',
+      'too-short': '对话内容较短，暂无需压缩',
+      'already-compact': '已压缩，没有更多可压缩的内容',
+      'summary-failed': '压缩失败，请稍后重试'
     },
     compactFailed: '压缩失败',
     compactNoSession: '暂无可压缩内容',
@@ -5689,7 +5692,7 @@ export default {
       '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮在「{runProject}」上。这一轮结束后，它会按「{snapshotProject}」发出',
     steerOtherProject: '另一个工程',
     queueAction: '排队',
-    queueCancel: '取消这条',
+    queueCancel: '取消此条',
     queueSteerNow: '立即发送',
     /** 只有图片、没打字时排队用的占位。标签上总得有一行字，否则是个空壳 */
     queueUntitled: '（附件）',
@@ -5707,20 +5710,20 @@ export default {
       parseFailed: '解析 {name} 失败',
       maxDocFiles: '最多上传 {max} 个文档',
       processFailed: '处理 {name} 失败',
-      videoFramesFallback: '没有配置能看视频的模型，{name} 改为抽帧给模型看（没有声音和帧间运动）',
-      videoNeedsLocalFile: '视频要从本地文件拖进来或用回形针选择，网页里直接拖过来拿不到文件路径',
-      mediaUploadFailed: '{name} 没能提前传到对象存储，发送时会再试一次：{error}',
-      unsupportedFile: '拿不到这些文件的本地路径，先存到本地再拖进来：{name}',
+      videoFramesFallback: '未配置支持视频理解的模型，{name} 已改为抽帧后发送给模型（不含音频和帧间运动）',
+      videoNeedsLocalFile: '视频需从本地文件拖入或通过附件按钮选择，从网页直接拖入无法获取文件路径',
+      mediaUploadFailed: '{name} 预上传至对象存储失败，发送时将重试：{error}',
+      unsupportedFile: '无法获取以下文件的本地路径，请先保存到本地再拖入：{name}',
       noWikiBound: '当前未绑定知识库',
       compacted: '已从 {before} 条压缩至 {after} 条，节省约 {saved} token',
       compactFailed: {
-        busy: '正在处理这条对话，请稍后再压缩',
+        busy: '当前对话正在处理中，请稍后再压缩',
         cancelled: '已取消压缩，对话内容已保留',
         empty: '暂无可压缩内容',
-        'already-compact': '压过一遍了，再压只会让摘要又被概括一层，没有收益',
-        'too-short': '历史还太短，压了省不下什么',
-        'summary-failed': '生成摘要失败，历史没有改动',
-        error: '压缩失败，历史没有改动'
+        'already-compact': '已压缩过，再次压缩只会对摘要重复概括，没有收益',
+        'too-short': '历史记录较短，压缩收益有限',
+        'summary-failed': '生成摘要失败，历史记录未更改',
+        error: '压缩失败，历史记录未更改'
       },
       imageTooLarge: '图片过大，请减少数量或尺寸'
     }
@@ -5824,90 +5827,90 @@ export default {
   // 拖拽导入的入口体检：压缩包里拖出来的东西不是磁盘上的文件
   dragImportGuard: {
     fromArchive:
-      '已忽略 {count} 个项目：压缩包里的文件不能直接拖进来，请先解压到硬盘上再拖解压后的文件夹',
+      '已忽略 {count} 个项目：压缩包内的文件无法直接拖入，请先解压到磁盘，再拖入解压后的文件夹',
     fromExtractorTemp:
-      '已忽略 {count} 个项目：这些是解压软件临时解出来的文件，导入后会随临时目录一起消失，请先正式解压'
+      '已忽略 {count} 个项目：这些是解压软件生成的临时文件，导入后会随临时目录一并清除，请先完整解压'
   },
   importToProjectModal: {
     engineFilter: 'UE 版本筛选',
     allEngineVersions: '全部 UE 版本',
     unknownEngineVersion: '版本未知',
 
-    targetNotConnected: '这个工程还没在 UE 里打开。这类文件要靠 UE 转换才能导进去。',
+    targetNotConnected: '该工程尚未在 UE 中打开。此类文件需经 UE 转换后才能导入。',
     // 模型、贴图这类文件要靠 UE 转换：选中的工程没开着时，按钮直接替用户打开再接着导
     notOpened: '未打开',
     openAndImport: '打开工程并导入',
-    waitingForEditorButton: '等 UE 启动…',
-    needsEditorNote: '{format} 要靠 UE 转换，会先在 UE 里打开这个工程',
-    waitingForEditor: '正在打开「{name}」，UE 启动好后自动开始导入。',
-    editorWaitTimeout: '等了很久 UE 还没连上盒子。确认工程已在 UE 里打开，再点一次。',
+    waitingForEditorButton: '等待 UE 启动…',
+    needsEditorNote: '{format} 需经 UE 转换，将先在 UE 中打开该工程',
+    waitingForEditor: '正在打开「{name}」，UE 启动完成后将自动开始导入。',
+    editorWaitTimeout: 'UE 长时间未连接到虚幻盒子。请确认工程已在 UE 中打开，然后重试。',
     alreadyRunningNotConnected:
-      '这个工程已经在 UE 里开着，但没连上盒子 —— 多半是 UnrealAgentLink 插件没启用。启用插件、重启编辑器后再点一次。',
-    openProjectFailed: '没能打开工程：{error}',
-    uprojectMissing: '找不到这个工程的 .uproject 文件，它可能被移动或删除了。',
-    pluginNotInstalled: 'UnrealAgentLink 插件没装上，这个工程连不上盒子：{error}',
+      '该工程已在 UE 中打开，但未连接到虚幻盒子，通常是因为 UnrealAgentLink 插件未启用。请启用插件并重启编辑器后重试。',
+    openProjectFailed: '打开工程失败：{error}',
+    uprojectMissing: '未找到该工程的 .uproject 文件，文件可能已被移动或删除。',
+    pluginNotInstalled: 'UnrealAgentLink 插件未安装，该工程无法连接到虚幻盒子：{error}',
     addProject: '添加工程',
     selected: '已选择',
     preparing: '准备中…',
-    loadingProjects: '读取工程…',
-    loadProjectsFailed: '工程列表没读出来',
+    loadingProjects: '正在读取工程…',
+    loadProjectsFailed: '读取工程列表失败',
     retry: '重试',
-    sourceItems: '导入 {count} 项，文件夹连里面的资产一起',
+    sourceItems: '导入 {count} 项（文件夹包含其中的资产）',
     sourceName: '导入：{name}',
     sourceFolder: '导入文件夹：{name}',
     sourceFolderWithCount: '导入文件夹：{name}（{count} 个资产）',
     targetProject: '导入到：{name}',
     startImport: '开始导入',
-    checkingVersion: '检查版本…',
-    versionConflicts: '{count} 项要求更高版本的引擎，开始导入时会问你怎么办',
-    versionPreflightDone: '没发现版本冲突',
-    versionPreflightOther: '外部文件、插件和压缩包能不能用，要看内容和目标引擎',
-    compatibilityCheckFailed: '版本没检查成',
-    compatibilityTitle: '有资产版本太高',
+    checkingVersion: '正在检查版本…',
+    versionConflicts: '{count} 项需要更高版本的引擎，开始导入时将提示选择处理方式',
+    versionPreflightDone: '未发现版本冲突',
+    versionPreflightOther: '外部文件、插件和压缩包是否可用，取决于其内容和目标引擎',
+    compatibilityCheckFailed: '版本检查失败',
+    compatibilityTitle: '部分资产版本过高',
     compatibilityDetails:
-      '{project} 是 UE {version}，这 {count} 项要更高版本：{assets}。仍然导入只是把文件原样拷过去，不做版本转换，UE 里多半打不开。',
+      '{project} 为 UE {version}，以下 {count} 项需要更高版本：{assets}。仍然导入仅会原样复制文件，不做版本转换，在 UE 中通常无法打开。',
     blockedAssetsOverflow: '{assets}，等 {rest} 项',
-    chooseCompatibleProject: '换个工程',
-    importCompatibleOnly: '只导其余的',
+    chooseCompatibleProject: '更换工程',
+    importCompatibleOnly: '仅导入其余项',
     forceImport: '仍然导入',
     forceImportAll: '仍然全部导入',
     missingPlugins: {
-      title: '还要开 {count} 个插件',
-      desc: '导进来的资产用到了这些引擎插件，{project} 还没开。不开的话蓝图编译会报「无效类型」「找不到函数」。',
-      restartHint: '会写进工程的 .uproject，重启虚幻编辑器后生效。',
-      enable: '开启插件',
-      later: '先不开',
-      done: '已开启 {count} 个插件，重启虚幻编辑器后生效',
-      failed: '没写进 .uproject：{error}',
+      title: '需启用 {count} 个插件',
+      desc: '导入的资产依赖以下引擎插件，{project} 尚未启用。未启用时，蓝图编译将报告「无效类型」「找不到函数」等错误。',
+      restartHint: '将写入工程的 .uproject，重启虚幻编辑器后生效。',
+      enable: '启用插件',
+      later: '暂不启用',
+      done: '已启用 {count} 个插件，重启虚幻编辑器后生效',
+      failed: '写入 .uproject 失败：{error}',
       editorFailed:
-        '开着的编辑器没接住 {plugins}，只写进了文件。先重启编辑器，再在里面改插件，不然会被冲掉',
-      unavailableTitle: '有 {count} 项本机没有',
-      unavailableDesc: '这些盒子没法替你开，相关蓝图在装好之前打不开：',
+        '已打开的编辑器未能应用 {plugins}，仅写入了文件。请先重启编辑器再修改插件设置，否则此更改将被覆盖',
+      unavailableTitle: '本机缺少 {count} 项',
+      unavailableDesc: '虚幻盒子无法自动启用以下项，安装前相关蓝图将无法打开：',
       fromProject: '来自「{project}」',
-      projectCode: '「{project}」自己的 C++ 代码',
-      projectCodeUnknown: '原工程自己的 C++ 代码',
-      onlyModuleName: '只知道模块名，可能是第三方插件或原工程的 C++',
+      projectCode: '「{project}」的工程 C++ 代码',
+      projectCodeUnknown: '原工程的 C++ 代码',
+      onlyModuleName: '仅知模块名，可能来自第三方插件或原工程的 C++ 代码',
       openFab: '在 Fab 上查看',
-      unavailableHint: '插件装好后重启编辑器；原工程的 C++ 要连源码一起拷过来编译。',
+      unavailableHint: '安装插件后重启编辑器；原工程的 C++ 代码需连同源码一并复制并编译。',
       gotIt: '知道了'
     },
 
     title: '导入到工程',
     archive: {
-      title: '这是一个压缩包',
-      question: '「{name}」怎么导入？',
-      extractOption: '解压后导入：内容解到工程的 Content 里，UE 里直接能看到',
-      copyOption: '原样复制：压缩包放进 Content/Imported，你自己解',
+      title: '检测到压缩包',
+      question: '选择「{name}」的导入方式',
+      extractOption: '解压后导入：内容解压至工程 Content 目录，可直接在 UE 中查看',
+      copyOption: '原样复制：将压缩包复制到 Content/Imported，需自行解压',
       extractAction: '解压后导入',
       copyAction: '原样复制',
-      dontAskAgain: '以后都这么处理',
+      dontAskAgain: '以后均按此方式处理',
       taskName: '压缩包导入：{name}',
-      pathNotFound: '找不到这个压缩包的文件路径',
+      pathNotFound: '未找到该压缩包的文件路径',
       extractDone: '已解压 {count} 个文件到 {dir}',
-      extractHintAfter: '包里是 FBX、贴图的话，还要在 UE 里再导一次',
+      extractHintAfter: '如压缩包内含 FBX 或贴图，需在 UE 中再次导入',
       copyDone: '压缩包已复制到 {dir}',
-      unsupportedTitle: '这个格式盒子解不了',
-      unsupportedContent: '盒子只能解 ZIP。{format} 请先用解压软件解开，再把文件夹导进资产库。',
+      unsupportedTitle: '虚幻盒子不支持解压此格式',
+      unsupportedContent: '虚幻盒子仅支持解压 ZIP。{format} 格式请先使用解压软件解压，再将文件夹导入资产库。',
       unsupportedOk: '知道了'
     },
     searchPlaceholder: '搜索名称或路径',
@@ -5920,8 +5923,8 @@ export default {
     unnamedProject: '未命名项目',
     connected: '已连接',
     emptyNoMatch: '没有匹配的工程',
-    emptyNoProjects: '还没有工程，点右上角「添加工程」',
-    emptyNoProjectsInGroup: '这个分组里还没有工程',
+    emptyNoProjects: '暂无工程，请点击右上角「添加工程」',
+    emptyNoProjectsInGroup: '该分组中暂无工程',
     cancel: '取消',
     confirm: '确认',
     importPathTooltip: '资产在工程中的导入路径，例如 Imported',
@@ -5933,22 +5936,22 @@ export default {
       audio: '音频',
       video: '视频'
     },
-    classifyConfirmTitle: '这批东西是：',
+    classifyConfirmTitle: '本次导入包含：',
     classifyUnrealCount: '虚幻资产 {count} 个',
     defaultFileTypesDesc: '未知类型',
     classifyExternalCount: '外部文件 {count} 个（{types}）',
-    importAllHint: '引擎没连上，外部文件会直接复制到 Content/Imported',
-    engineNotConnectedTitle: '引擎没连上，怎么导？',
-    importUnrealOnly: '只导虚幻资产',
-    importAllKeepNative: '全导，保留原格式',
-    chooseModeTitle: '外部文件怎么处理？',
+    importAllHint: '引擎未连接，外部文件将直接复制到 Content/Imported',
+    engineNotConnectedTitle: '引擎未连接，请选择导入方式',
+    importUnrealOnly: '仅导入虚幻资产',
+    importAllKeepNative: '全部导入，保留原格式',
+    chooseModeTitle: '外部文件处理方式',
     connectedUnrealCount: '虚幻资产 {count} 个',
     nativeMediaCount: '图片音视频 {count} 个',
     externalCountWithTypes: '待转换 {count} 个（{types}）',
-    convertToUEOption: '转成虚幻资产：导入到 /Game/Imported',
+    convertToUEOption: '转换为虚幻资产：导入到 /Game/Imported',
     keepNativeOption: '保留原格式：直接复制到 Content/Imported',
     chooseModeModalTitle: '选择导入方式',
-    convertToUE: '转成虚幻资产',
+    convertToUE: '转换为虚幻资产',
     keepNative: '保留原格式',
     normalizedImportOnlyUAsset: '规范化导入仅支持 .uasset / .umap 文件',
     normalizedImportTooltip: '将资产规范化导入到 {path}',
@@ -5958,7 +5961,7 @@ export default {
     importFailed: '导入失败',
     importingProgress: '正在导入 {processed}/{total}',
     copyingFiles: '{base} · 已写入 {files}/{totalFiles} 个文件（{bytes}/{totalBytes}）',
-    stageCancelling: '正在中止，等当前文件写完…',
+    stageCancelling: '正在中止，等待当前文件写入完成…',
     doneCancelled: '已中止：成功 {success}，已存在 {existing}',
     projectPathNotFound: '未找到工程路径',
     copyFailed: '复制失败：{name}',
@@ -5968,8 +5971,8 @@ export default {
     ueNotConnectedFile: 'UE 未连接，无法导入 {name}',
     doneSummary: '导入完成：成功 {success}，已存在 {existing}，失败 {error}',
     doneWithWarnings: '导入完成，{count} 条警告',
-    doneWithIssues: '导入完成，但有没解决的问题',
-    doneWithFailures: '导入完成，{count} 个资产没导全',
+    doneWithIssues: '导入完成，但存在未解决的问题',
+    doneWithFailures: '导入完成，{count} 个资产未完整导入',
     doneImported: '导入完成：已复制 {copied}/{total} 个文件，{existing} 个已存在',
     singleTaskName: '导入 {name}',
     importingExternal: '正在导入外部文件…',
@@ -5980,7 +5983,7 @@ export default {
     assetExists: '资产已存在于工程中',
     doneCopied: '已复制 {copied}/{total} 个文件',
     importException: '导入异常',
-    selectProjectFirst: '先选一个工程',
+    selectProjectFirst: '请先选择工程',
     noImportableAssets: '没有可导入的资产',
     needUEConnection: {
       title: '需要连接 UE',
@@ -6044,7 +6047,7 @@ export default {
       pleaseWait: '请稍候'
     },
     empty: {
-      text: '内容生成中 请稍后..'
+      text: '内容生成中，请稍候...'
     },
     preview: {
       title: '网页预览'
@@ -6103,14 +6106,14 @@ export default {
     }
   },
   bridgeBanner: {
-    title: '引擎桥接没能启动'
+    title: '引擎桥接启动失败'
   },
   modelViewer: {
     loading: '正在加载模型…',
-    loadFailed: '这个模型没能加载出来',
+    loadFailed: '模型加载失败',
     emptyState: {
-      title: '还没有模型',
-      hint: '把文件拖进来，或点右上角选择'
+      title: '暂无模型',
+      hint: '拖入文件，或点击右上角选择文件'
     }
   },
   baiduyunDetailsPanel: {
@@ -6186,7 +6189,7 @@ export default {
       brightness: '亮度',
       viewTitle: '视角',
       resetView: '回到默认视角',
-      flipUpAxis: '模型躺着？扶正它'
+      flipUpAxis: '修正模型朝向（切换向上轴）'
     },
     lightPresets: {
       studio: '影棚',
@@ -6256,11 +6259,11 @@ export default {
       attention: '需要注意',
       expect: '预期 {expect}',
       ask: '问 AI',
-      askPrompt: '状态监控里「{label}」是 {value}（预期 {expect}），帮我查查原因。',
+      askPrompt: '状态监控里「{label}」是 {value}（预期 {expect}），请排查原因。',
       refresh: '刷新',
       updatedAt: '更新于 {time}',
       loading: '正在读取…',
-      loadFailed: '没读到编辑器状况，稍后点刷新再试。',
+      loadFailed: '读取编辑器状态失败，请稍后点击刷新重试。',
       pluginOutdated: '工程里的 UnrealAgentLink 插件版本较旧，更新插件并重启编辑器后可用。',
       pending: '暂无数据',
       unsupported: '此版本不提供',
@@ -6339,12 +6342,12 @@ export default {
       usage: '按本库用量'
     },
     matchCount: '{matched} / {total}',
-    usageTitle: '本库有 {count} 个资产打了这个标签',
-    unusedTitle: '当前保管库里没有资产用这个标签（别的库可能还在用）',
+    usageTitle: '本库有 {count} 个资产使用此标签',
+    unusedTitle: '当前保管库中没有资产使用此标签（其他库可能仍在使用）',
     hint: {
-      drag: '拖到左边的标签组即可归类',
-      rename: '双击改名，右键可删除',
-      multiSelect: '按住 Shift 可连选一片'
+      drag: '拖到左侧标签组即可归类',
+      rename: '双击重命名，右键可删除',
+      multiSelect: '按住 Shift 可连续多选'
     },
     batch: {
       selected: '已选 {count} 个',
@@ -6354,7 +6357,7 @@ export default {
       delete: '删除',
       clear: '取消选择',
       deleteConfirmTitle: '删除 {count} 个标签？',
-      deleteConfirmContent: '这些标签会从所有资产上移除，该操作不可撤销。',
+      deleteConfirmContent: '这些标签将从所有资产上移除，此操作不可撤销。',
       deleted: '已删除 {count} 个标签',
       moved: '已移动 {count} 个标签',
       favorited: '已设为常用'
@@ -6367,7 +6370,7 @@ export default {
       ungrouped: '未分组',
       favorite: '常用',
       unused: '本库未使用',
-      unusedTip: '当前保管库里没有资产用到这些标签。标签是跨库共享的，别的库可能还在用。'
+      unusedTip: '当前保管库中没有资产使用这些标签。标签在各库间共享，其他库可能仍在使用。'
     },
     groupsTitle: '标签组',
     menu: {
@@ -6377,7 +6380,7 @@ export default {
     },
     empty: {
       title: '暂无标签组',
-      desc: '创建标签组来更好地管理您的标签',
+      desc: '创建标签组以分类管理标签',
       action: '创建标签组'
     }
   },
@@ -6407,7 +6410,7 @@ export default {
     contextMenu: {
       open: '打开材质'
     },
-    empty: '这个集合还是空的'
+    empty: '此集合为空'
   },
   notebookBrainstormViewer: {
     /*
@@ -6487,8 +6490,8 @@ export default {
   },
   systemNotFound: {
     title: '页面未找到',
-    descriptionLine1: '抱歉，您访问的页面不存在或已被移除。',
-    descriptionLine2: '请检查URL是否正确，或返回项目库继续浏览。',
+    descriptionLine1: '访问的页面不存在或已被移除。',
+    descriptionLine2: '请检查 URL 是否正确，或返回项目库继续浏览。',
     homeButton: '返回项目库',
     backButton: '返回上页'
   },
@@ -6520,13 +6523,13 @@ export default {
       okText: '删除',
       cancelText: '取消',
       content: '将删除 {filesCount} 个文件和 {foldersCount} 个文件夹',
-      recoverable: '会移到「最近删除」，之后可以恢复。',
+      recoverable: '将移至「最近删除」，之后可恢复。',
       dontAskAgain: '不再提示',
       network: {
-        title: '删除共享库里的内容？',
+        title: '删除共享库中的内容？',
         content:
-          '将删除 {filesCount} 个文件和 {foldersCount} 个文件夹，同时删掉共享盘上对应的目录。',
-        irreversible: '团队里所有人都会失去它们。共享库没有「最近删除」，删掉就找不回来了。'
+          '将删除 {filesCount} 个文件和 {foldersCount} 个文件夹，同时删除共享盘上对应的目录。',
+        irreversible: '团队所有成员都将失去这些内容。共享库没有「最近删除」，删除后无法恢复。'
       }
     },
     delete: {
@@ -6539,17 +6542,17 @@ export default {
       noWritePermission: '没有写入权限，无法删除',
       permanentDeleteFailed: '永久删除失败',
       networkDirFailed:
-        '共享盘上的目录没能删掉（{reason}），所以库里的记录也保留着。检查网络和权限后再试一次。',
+        '共享盘上的目录删除失败（{reason}），因此库中的记录已保留。请检查网络和权限后重试。',
       // 批量删除是并行发出去的，所以「失败」几乎总是部分失败。不说清已经删掉几个的话，
       // 用户看到的是文件夹一个没少、其中几个点进去是空的 —— 而那几个已经永久消失了
       networkDirPartial:
-        '有 {removed} 个目录已经从共享盘上删掉了，其余的没能删掉（{reason}）。这几个的记录还留在库里，检查网络和权限后再删一次就能对上。',
+        '已从共享盘删除 {removed} 个目录，其余目录删除失败（{reason}），其记录仍保留在库中。请检查网络和权限后重新删除，使库记录与共享盘保持一致。',
       permanentConfirm: {
         title: '永久删除 {count} 项？',
         content:
-          '这 {count} 项会从「最近删除」里彻底移除，保管库里的备份副本和缩略图也会一起删掉。',
-        foldersIncluded: '里面的文件夹连同它的子文件夹和资产一起清掉。',
-        irreversible: '删掉之后没有任何办法找回。',
+          '这 {count} 项将从「最近删除」中彻底移除，保管库中的备份副本和缩略图也将一并删除。',
+        foldersIncluded: '其中的文件夹及其子文件夹和资产将一并删除。',
+        irreversible: '删除后将无法以任何方式恢复。',
         okText: '永久删除'
       },
       permanentlyDeleted: '已永久删除 {count} 个文件',
@@ -6559,9 +6562,9 @@ export default {
     },
     restore: {
       done: '已恢复 {count} 项',
-      partial: '已恢复 {count}/{total} 项，其余没能恢复',
+      partial: '已恢复 {count}/{total} 项，其余项恢复失败',
       deletedTime: '删除时间：{time}',
-      openDeletedFolder: '这个文件夹还在「最近删除」里，先恢复它才能打开'
+      openDeletedFolder: '此文件夹位于「最近删除」中，恢复后才能打开'
     },
     favorite: {
       add: '收藏',
@@ -6636,7 +6639,7 @@ export default {
       importException: '导入项目资产时发生异常',
       noImportableAssets: '该项目没有可导入的资产',
       assetExists: '资产已存在于库中',
-      folderKeyNotFound: '找不到目标文件夹'
+      folderKeyNotFound: '未找到目标文件夹'
     },
     webdav: {
       downloadFailed: '下载失败',
@@ -6733,7 +6736,7 @@ export default {
   },
   markdownRendererLinkConfirm: {
     title: '安全提示',
-    confirmText: '您即将离开 Unreal Box，跳转至外部链接，请谨慎甄别网站真伪。',
+    confirmText: '即将离开虚幻盒子并跳转至外部链接，请注意甄别网站真伪。',
     cancelButton: '取消',
     continueButton: '继续访问'
   },
@@ -6765,7 +6768,7 @@ export default {
     title: '📝 Markdown 笔记',
     clearButton: '清空',
     saveButton: '保存',
-    editorPlaceholder: '开始编写你的 Markdown 笔记...'
+    editorPlaceholder: '开始编写 Markdown 笔记...'
   },
   materialEditor: {
     copiedLibraryPath: '已复制库路径',
@@ -6957,32 +6960,32 @@ export default {
     moreHidden: '还有 {count} 个资产未显示'
   },
   snippetCapture: {
-    title: '从引擎存一段进来',
+    title: '从引擎保存片段',
     prompt:
-      '我想把当前 UE 工程里的一段蓝图逻辑存进蓝图库。' +
-      '先用 blueprint_get_graph 读出我说的那张图，把节点列给我看，' +
-      '等我说清楚要存哪几个节点、叫什么名字，再用 blueprint_library_save 存。' +
-      '存不了的话把卡住的节点和原因列全，别只报一句失败。',
+      '将当前 UE 工程中的一段蓝图逻辑保存到蓝图库。' +
+      '先用 blueprint_get_graph 读取我指定的图表并列出节点，' +
+      '待我确认要保存的节点和名称后，再用 blueprint_library_save 保存。' +
+      '如无法保存，请完整列出受阻的节点及原因，不要只报告失败。',
     failed: '发起失败：{reason}'
   },
   snippetDetail: {
     back: '返回',
     formBadge: '片段',
-    applyToProject: '放进当前工程',
+    applyToProject: '应用到当前工程',
     nodes: '节点',
     connections: '连线',
     openPorts: '悬空端口',
-    nodeTypes: '用到的节点类型',
+    nodeTypes: '使用的节点类型',
     source: '来自',
-    openPortsTitle: '有悬空端口',
-    openPortsHint: '这些引脚原本连到选区外面，片段里是断的。放进工程之后需要你在 UE 里手动接上。',
-    noCanvasTitle: '这里为什么没有节点图',
+    openPortsTitle: '存在悬空端口',
+    openPortsHint: '这些引脚原本连接到选区外部，在片段中处于断开状态。应用到工程后，需在 UE 中手动连接。',
+    noCanvasTitle: '为何不显示节点图',
     noCanvasHint:
-      '片段存的就是 UE 导出文本，库里那个渲染器其实读得了 —— 但它是个编辑器，拖一下节点就会改内容，而片段没有地方存这些改动，看着能编、回头全没了。要先给它加一个真正的只读模式才能接上。现在想弄清这段是什么，问右边的助手，它手上有这段的全部内容。',
+      '片段保存的是 UE 导出文本，库中的渲染器可以读取，但该渲染器是编辑器，拖动节点即会修改内容，而片段无处保存这些修改，看似可编辑，修改实际会全部丢失。需先为其增加真正的只读模式才能接入。如需了解该片段的内容，可询问右侧助手，助手已获取该片段的全部内容。',
     applyPrompt:
-      '把蓝图库里的片段「{name}」（entry_id: {id}）放进当前工程。' +
-      '先用 library_search 确认这个条目，再问我要写进哪个蓝图的哪张空图，然后用 blueprint_library_apply 放进去。',
-    applyFailed: '放进工程失败：{reason}'
+      '将蓝图库中的片段「{name}」（entry_id: {id}）应用到当前工程。' +
+      '先用 library_search 确认该条目，再询问我要写入哪个蓝图的哪张空图，然后用 blueprint_library_apply 写入。',
+    applyFailed: '应用到工程失败：{reason}'
   },
   blueprintEditor: {
     topbar: {
@@ -7012,7 +7015,7 @@ export default {
     },
     deleteConfirm: {
       title: '删除{type}？',
-      content: '“{name}”会从当前蓝图中移除。这个操作暂时不能撤销。',
+      content: '“{name}”将从当前蓝图中移除。此操作目前无法撤销。',
       okText: '删除',
       cancelText: '取消'
     },
@@ -7020,11 +7023,11 @@ export default {
       dropForFunctionCall: '松开以创建函数调用节点',
       dropForSet: '松开以创建 Set 节点',
       dropForGet: '松开以创建 Get 节点',
-      functionCallSubtitle: '会按函数签名生成调用节点',
-      shiftForSetSubtitle: '按住 Shift 拖拽会放下 Set 节点',
+      functionCallSubtitle: '将按函数签名生成调用节点',
+      shiftForSetSubtitle: '按住 Shift 拖拽可放置 Set 节点',
       shiftToSetSubtitle: '按住 Shift 再松开可改为 Set 节点',
-      treeItemVariable: '拖到画布里创建节点，按住 Shift 可创建 Set 节点',
-      treeItemFunction: '拖到画布里创建函数调用节点'
+      treeItemVariable: '拖到画布中创建节点，按住 Shift 可创建 Set 节点',
+      treeItemFunction: '拖到画布中创建函数调用节点'
     },
     sidebar: {
       myBlueprint: '我的蓝图',
@@ -7050,8 +7053,8 @@ export default {
       listSeparator: '、'
     },
     canvasEmpty: {
-      title: '这个图表还没有节点',
-      desc: '从左侧拖入变量，或让 AI 帮你搭一段逻辑'
+      title: '此图表暂无节点',
+      desc: '从左侧拖入变量，或使用 AI 生成一段逻辑'
     },
     emptyState: {
       title: '选择一个图表、函数或宏开始编辑',
@@ -7100,7 +7103,7 @@ export default {
     }
   },
   spotlightWindow: {
-    inputPlaceholder: '输入问题,与 AI 对话...',
+    inputPlaceholder: '输入问题，与 AI 对话...',
     dragHandleTitle: '拖拽移动窗口',
     aiFallback: {
       title: '与 AI 对话: {query}',
@@ -7108,26 +7111,26 @@ export default {
     },
     dictation: {
       starting: '正在打开麦克风…',
-      listening: '正在听，说完自动提交',
+      listening: '正在收音，说完后自动提交',
       /** 按住说话松手之后：麦克风已关，最后一句还在识别 */
       finishing: '识别中…',
       /** 按住热键期间。和点一下那条区分开：这一路松手就发，不等 VAD */
       holding: '松开即发送',
-      unheard: '没听清，再说一遍',
+      unheard: '未能识别，请重新说一遍',
       /** 开不起来又没有更具体的话可说时的兜底（厂商迟迟不就绪、配置刚被改掉） */
-      unavailable: '这会儿用不了语音，直接打字吧',
+      unavailable: '语音暂不可用，请使用键盘输入',
       /** 助手页正在通话。麦克风只有一个，听写让路 */
-      busy: '语音助手正在通话，先打字吧',
+      busy: '语音助手正在通话中，请使用键盘输入',
       /**
        * 回落到实时语音那一路，而那家关不掉自动应答（豆包全双工）。
        *
        * 这一条以前和「正在通话」共用一句「这会儿用不了语音」—— 两种原因、
        * 两种处置，却给同一句话，用户既分不清也无从下手。现在直接说怎么修。
        */
-      vendorUnsupported: '当前语音模型只能对话；到 设置 → 模型 绑一个「语音识别」就能听写',
+      vendorUnsupported: '当前语音模型仅支持对话；在 设置 → 模型 中绑定「语音识别」模型后即可听写',
       micIconLabel: '语音输入中',
       /** 倒计时期间的提示。按 Esc 取消，改字也会把倒计时推迟 */
-      autoSubmit: '{seconds} 秒后发送，改一下可以延后'
+      autoSubmit: '{seconds} 秒后发送，编辑内容可延后'
     }
   },
   globalAudioPlayer: {
@@ -7138,7 +7141,7 @@ export default {
       off: '关闭循环'
     },
     errors: {
-      playFailed: '播放失败,请重试',
+      playFailed: '播放失败，请重试',
       loadFailed: '音频加载失败'
     }
   },
@@ -7270,8 +7273,8 @@ export default {
       copyDiagnosticId: '复制诊断 ID',
       openErrorReport: '打开错误报告',
       openReportFailed: '打开错误报告失败',
-      abandon: '放弃这次导入',
-      abandonConfirmTitle: '放弃这次导入？',
+      abandon: '放弃本次导入',
+      abandonConfirmTitle: '放弃本次导入？',
       abandonConfirmContent:
         '服务器会取消这次导入，并删掉它占用的暂存文件。已经传上去的内容都不算数，要重新导入一次。这一步不能撤销。',
       abandonDone: '已放弃这次导入，服务器上的暂存文件已清理',
@@ -7316,10 +7319,10 @@ export default {
         extractArchive: '解压'
       },
       selectProjectArchiveTitle: '选择要整包上传的工程目录',
-      selectPullDestTitle: '选择工程放到哪个目录',
+      selectPullDestTitle: '选择工程存放目录',
       projectArchivePulling: '正在取回整包',
-      projectArchivePulled: '{name} 已取回并解开到 {path}（{files} 个文件，下载 {rate} MB/s）',
-      projectArchiveDownloadedOnly: '{name} 已下载到 {path}，请用解压软件解开',
+      projectArchivePulled: '{name} 已取回并解压到 {path}（{files} 个文件，下载 {rate} MB/s）',
+      projectArchiveDownloadedOnly: '{name} 已下载到 {path}，请使用解压软件解压',
       projectArchiveQueued: '排队等待整包上传',
       projectArchiveDone: '{name} 整包上传完成：{files} 个文件，{size}，{rate} MB/s'
     },
@@ -7338,7 +7341,7 @@ export default {
     resumeImportTip: '选择服务器导入报告，继续未完成的服务器上传',
     importFolder: '导入文件夹',
     importFile: '导入文件',
-    importProjectArchive: '工程整包上传（打成一个 zip 传到服务器，几千个文件的工程几分钟传完）',
+    importProjectArchive: '工程整包上传（打包为一个 zip 上传到服务器，数千个文件的工程可在几分钟内完成）',
     upgrade: {
       checking: '正在检查网络库升级条件…',
       checkingStatus: '检查中…',
@@ -7380,7 +7383,7 @@ export default {
       renameFailed: '重命名文件夹失败',
       navigateFailed: '无法跳转到该文件夹',
       navigateFailedRetry: '文件夹跳转失败，请重试',
-      locateFailed: '找不到文件夹，请确认路径仍存在',
+      locateFailed: '未找到文件夹，请确认路径仍存在',
       targetNotFound: '未找到跳转目标文件夹',
       selectFirst: '请先选择一个文件夹'
     },
@@ -7405,12 +7408,12 @@ export default {
       clearNotSupported: '网络回收站暂不支持清空',
       clearTitle: '清空最近删除',
       clearContent:
-        '确定要永久清空「最近删除」里的全部内容吗？删掉的文件夹连同里面的资产、保管库里的备份副本和缩略图都会一起清掉，此操作不可撤销。',
+        '确定要永久清空「最近删除」中的全部内容吗？已删除的文件夹及其中的资产、保管库中的备份副本和缩略图将一并清除，此操作不可撤销。',
       okText: '清空',
       cancelText: '取消',
       cleared: '已清空最近删除',
       clearFailed: '清空失败',
-      foldersLoadFailed: '已删除的文件夹没能读出来，下面只列了资产'
+      foldersLoadFailed: '读取已删除的文件夹失败，下方仅列出资产'
     },
     delete: {
       assetSuccess: '资产已删除',
@@ -7533,48 +7536,48 @@ export default {
   importProgressWidget: {
     title: '后台导入任务 ({count})',
     inProgress: '进行中...',
-    titleFailed: '导入没导全 ({count})',
+    titleFailed: '导入不完整 ({count})',
     cancel: '中止导入',
-    dismiss: '知道了，收起',
+    dismiss: '收起',
     viewDetail: '查看详情',
     detecting: '检测中'
   },
   importResultModal: {
-    title: '导入到「{name}」没导全',
-    headlinePlanErrors: '{count} 个资产没能开始导入',
-    headlineOrphans: '{count} 个依赖文件没能写进工程',
-    headlineUnattributed: '{count} 个缺失依赖没能确定是谁在用',
-    noDetail: '这次没导全，但没有更多细节可看。',
+    title: '导入到「{name}」不完整',
+    headlinePlanErrors: '{count} 个资产未能开始导入',
+    headlineOrphans: '{count} 个依赖文件未能写入工程',
+    headlineUnattributed: '{count} 个缺失依赖无法确定引用方',
+    noDetail: '本次导入不完整，但没有更多详细信息。',
     separator: '，',
     listSeparator: '、',
-    sectionPlanErrors: '没能开始导入的资产',
-    headlineMissing: '缺 {count} 个依赖',
-    headlineFiles: '{count} 个文件没写进工程',
-    headlineUnconfirmed: '{count} 个资产没能确认是否导全',
+    sectionPlanErrors: '未能开始导入的资产',
+    headlineMissing: '缺失 {count} 个依赖',
+    headlineFiles: '{count} 个文件未写入工程',
+    headlineUnconfirmed: '{count} 个资产无法确认是否完整导入',
     headlineConflicts: '{count} 处目标路径冲突',
     sectionMissing: '缺失的依赖',
-    sectionFiles: '没能写进工程的文件',
-    sectionUnconfirmed: '没能确认是否导全',
+    sectionFiles: '未能写入工程的文件',
+    sectionUnconfirmed: '无法确认是否完整导入',
     sectionConflicts: '目标路径冲突',
-    unconfirmedNote: '这些资产的依赖太多，没能全部查完；这一批里又确实有问题，所以不敢当作没事。',
+    unconfirmedNote: '这些资产的依赖过多，未能全部检查；且本批次中确实存在问题，因此不能视为正常。',
     state: {
-      'not-in-vault': '保管库里没有',
-      'source-missing': '库里有记录，源文件丢了',
-      unresolved: '库里有、源文件也在，但没能定位到'
+      'not-in-vault': '保管库中不存在',
+      'source-missing': '库中有记录，但源文件缺失',
+      unresolved: '库中有记录且源文件存在，但无法定位'
     },
-    affected: '{count} 个资产用到它：{sample}',
-    affectedMore: '{count} 个资产用到它：{sample} 等 {more} 个',
-    conflictKept: '只保留了先到的那个，另一个来源：{rejected}',
-    findInVault: '在资产库里找它',
+    affected: '{count} 个资产引用了此项：{sample}',
+    affectedMore: '{count} 个资产引用了此项：{sample} 等 {more} 个',
+    conflictKept: '仅保留了先写入的一项，另一来源：{rejected}',
+    findInVault: '在资产库中查找',
     copyPath: '复制路径',
     copied: '已复制',
     copyFailed: '复制失败',
     andMore: '……另有 {count} 条，详见日志',
     retry: '重试导入',
-    retrySucceeded: '这次导全了',
+    retrySucceeded: '已全部导入',
     retrying: '正在重试导入…',
-    retryPartial: '.uasset 这部分导全了；外部文件（FBX/贴图等）要工程开着才能重试',
-    retryStillFailing: '还是没导全，详情已更新',
+    retryPartial: '.uasset 部分已全部导入；外部文件（FBX/贴图等）需在工程打开时才能重试',
+    retryStillFailing: '仍未全部导入，详情已更新',
     close: '关闭'
   },
   webdavHeader: {
@@ -7588,39 +7591,39 @@ export default {
     dockTooltip: '停靠',
     overlayTooltip: '悬浮',
     collapseTooltip: '折叠',
-    selectedNodes: '已选中 {count} 个节点，提问时会带上它们',
+    selectedNodes: '已选中 {count} 个节点，提问时将一并发送',
     suggestions: {
       blueprint: {
         explain: {
-          title: '讲讲这段逻辑',
-          desc: '它在干什么、按什么顺序跑',
-          prompt: '讲讲{subject}这段逻辑在干什么，按执行顺序说，标出关键节点。'
+          title: '解释逻辑',
+          desc: '功能与执行顺序',
+          prompt: '解释{subject}这段逻辑的功能，按执行顺序说明，并标出关键节点。'
         },
         review: {
-          title: '挑挑毛病',
-          desc: '每帧开销、空引用、可简化的地方',
-          prompt: '看一下{subject}有没有性能或健壮性问题：每帧开销、空引用、可以简化的地方。'
+          title: '问题检查',
+          desc: '每帧开销、空引用、可简化之处',
+          prompt: '检查{subject}是否存在性能或健壮性问题：每帧开销、空引用、可简化之处。'
         },
         apply: {
-          title: '放进当前工程',
-          desc: '写进一张空图，编译并保存',
-          prompt: '把{subject}放进我当前工程里。先告诉我要写进哪个蓝图的哪张图，确认后再动手。'
+          title: '应用到当前工程',
+          desc: '写入空图，编译并保存',
+          prompt: '将{subject}应用到当前工程。先说明要写入哪个蓝图的哪张图，经我确认后再执行。'
         }
       },
       material: {
         explain: {
-          title: '讲讲这个材质',
+          title: '解释材质',
           desc: '节点结构和数据流',
-          prompt: '讲讲{subject}的节点结构和数据流，指出关键节点和难维护的地方。'
+          prompt: '解释{subject}的节点结构和数据流，指出关键节点和难以维护之处。'
         },
         performance: {
-          title: '挑挑毛病',
+          title: '性能检查',
           desc: '采样数、指令数、混合模式',
           prompt:
-            '分析{subject}的性能风险：贴图采样、指令数、透明混合、函数调用，给可执行的优化建议。'
+            '分析{subject}的性能风险：贴图采样、指令数、透明混合、函数调用，并给出可执行的优化建议。'
         },
         dependencies: {
-          title: '查依赖',
+          title: '检查依赖',
           desc: '贴图、材质函数、参数集合',
           prompt: '检查{subject}的贴图、材质函数和参数集合依赖，找出缺失、重复或可疑的引用。'
         }
@@ -7648,7 +7651,7 @@ export default {
     promptBar: {
       expand: '展开',
       collapse: '收起',
-      reuse: '用这段再生成'
+      reuse: '使用此提示词重新生成'
     },
     generationFailed: '生成失败',
     errorPromptLabel: '提示词：{prompt}',
@@ -7800,7 +7803,7 @@ export default {
       dialogTitle: '选择「{name}」的新位置',
       dialogButtonLabel: '选择此位置',
       confirmTitle: '更改保存位置',
-      confirmContent: '将把「{name}」整个文件夹搬到新位置，迁移期间请勿操作资产。确定要继续吗？',
+      confirmContent: '将把「{name}」整个文件夹迁移到新位置，迁移期间请勿操作资产。确定要继续吗？',
       startMigration: '开始迁移',
       migrating: '正在迁移「{name}」…',
       migrated: '「{name}」已迁移到新位置',
@@ -7868,8 +7871,8 @@ export default {
     snapshotNodes: '{count} 个节点',
     snapshotActors: '{count} 个 Actor',
     snapshotAssets: '{count} 个资产',
-    snapshotEmpty: '当时没有选中任何东西',
-    snapshotTitle: '发送时（{time}）AI 看到的编辑器状态'
+    snapshotEmpty: '发送时未选中任何内容',
+    snapshotTitle: '发送时（{time}）AI 获取的编辑器状态'
   },
   blueprintLibraryRenderer: {
     loadingText: '加载蓝图渲染器…',
@@ -7906,10 +7909,10 @@ export default {
      * 用户会以为小窗口在实时跟着主对话，或者以为在这儿也能让它干活。
      */
     sideContext: {
-      live: '承接主对话的 {count} 条上下文（快照，主对话还在跑）',
+      live: '承接主对话的 {count} 条上下文（快照，主对话仍在运行）',
       snapshot: '承接主对话的 {count} 条上下文',
       readOnly: '只读',
-      empty: '问点什么吧 —— 它看得见主对话做过的每一步'
+      empty: '输入问题。AI 可获取主对话已执行的每一步'
     },
     emptyState: {
       agent: '输入消息开始对话'

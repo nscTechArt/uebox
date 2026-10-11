@@ -298,12 +298,12 @@ export const settleImportBatch = (input: SettlementInput): SettlementResult => {
 
   if (unattributedMissing > 0) {
     warnings.push(
-      `另有 ${unattributedMissing} 个依赖没找到，且没能确定是哪些资产在用它，相关资产在引擎里可能不完整`
+      `另有 ${unattributedMissing} 个依赖未找到，且无法确定引用它们的资产，相关资产在引擎中可能不完整`
     )
   }
 
   if (orphanFileFailures > 0) {
-    warnings.push(`另有 ${orphanFileFailures} 个依赖文件没能写入工程，相关资产在引擎里可能不完整`)
+    warnings.push(`另有 ${orphanFileFailures} 个依赖文件写入工程失败，相关资产在引擎中可能不完整`)
   }
 
   const conflictRows: ConflictRow[] = input.queueConflicts.map((conflict) => ({

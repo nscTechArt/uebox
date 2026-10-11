@@ -118,8 +118,8 @@ export const IMAGE_CONFIG_ERROR_MARKER = '设置 → 模型'
 export class ImageModelNotConfiguredError extends ModelNotConfiguredError {
   constructor() {
     super(
-      `还没有配置「生图」模型。请到 ${IMAGE_CONFIG_ERROR_MARKER} 添加一个 Provider，` +
-        '在它的模型清单里勾上「生图」，再把这个模型绑定给「生图」角色。',
+      `尚未配置「生图」模型。请在 ${IMAGE_CONFIG_ERROR_MARKER} 中添加 Provider，` +
+        '在其模型清单中勾选「生图」，并将该模型绑定到「生图」角色。',
       'image'
     )
     this.name = 'ImageModelNotConfiguredError'
@@ -129,8 +129,8 @@ export class ImageModelNotConfiguredError extends ModelNotConfiguredError {
 export class ImageModelUnavailableError extends Error {
   constructor() {
     super(
-      `这次信息图选择的生图模型已经不可用。请到 ${IMAGE_CONFIG_ERROR_MARKER} ` +
-        '检查服务商、密钥和模型的「生图」能力，再重新选择。'
+      `本次信息图所选的生图模型已不可用。请在 ${IMAGE_CONFIG_ERROR_MARKER} 中` +
+        '检查服务商、密钥和模型的「生图」能力，然后重新选择。'
     )
     this.name = 'ImageModelUnavailableError'
   }
@@ -259,8 +259,8 @@ export class ImageTaskTimeoutError extends Error {
     timeoutMs: number = TASK_TIMEOUT_MS
   ) {
     super(
-      `生图任务等了 ${Math.round(timeoutMs / 1000)} 秒还没画完，` +
-        `可以去厂商那边用任务号 ${shortTaskId(taskId)} 取回。`
+      `生图任务已等待 ${Math.round(timeoutMs / 1000)} 秒仍未完成，` +
+        `可在服务商处使用任务号 ${shortTaskId(taskId)} 取回结果。`
     )
     this.name = 'ImageTaskTimeoutError'
   }
@@ -295,8 +295,7 @@ export class ImageTaskInterruptedError extends Error {
 export class ImageTaskCancelledError extends Error {
   constructor(readonly taskId: string) {
     super(
-      `已停止等待，但厂商那边的任务还在跑、额度已经扣了 —— ` +
-        `想要结果可以用任务号 ${shortTaskId(taskId)} 去取回。`
+      `已停止等待。厂商任务仍在运行，额度已扣除，可凭任务号 ${shortTaskId(taskId)} 取回结果。`
     )
     this.name = 'ImageTaskCancelledError'
   }
@@ -939,8 +938,12 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
       }
 
       // steps 里是「说一句、出一张」的完整序列，output_image 只有最后一张。
-      // 先取 steps，两处都空才算一张都没回
+      // 先取 steps，两处都空才算一张都没回。
+      //
+      // `thought` 那一步跳过：模型思考时会先画至多两张草稿试构图（官方说不计费），
+      // 那不是成品。混进来就是「要 1 张回 2 张」，用户以为多扣了一张（2026-10-09 反馈）
       const fromSteps = (Array.isArray(interaction.steps) ? interaction.steps : [])
+        .filter((step) => (step as { type?: unknown })?.type !== 'thought')
         .flatMap((step) => {
           const content = (step as { content?: unknown })?.content
           return Array.isArray(content) ? content : []

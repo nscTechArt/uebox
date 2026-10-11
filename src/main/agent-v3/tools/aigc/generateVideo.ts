@@ -625,7 +625,7 @@ function describeVideoFailure(error: unknown, modelLabel: string): string {
         '不要直接重试 —— 先把原因告诉用户，由他决定要不要再花一次钱。'
     )
   }
-  if (/没有指定视频接口形状|还没有配置/.test(raw)) {
+  if (/没有指定视频接口形状|还没有配置|尚未配置/.test(raw)) {
     parts.push(`当前用的是 ${modelLabel}。这是配置问题，不是提示词问题，重试没有意义。`)
   }
   return parts.join('\n')

@@ -95,8 +95,8 @@ export const VIDEO_CONFIG_ERROR_MARKER = '设置 → 模型'
 export class VideoNotConfiguredError extends ModelNotConfiguredError {
   constructor() {
     super(
-      `还没有配置「视频生成」模型。请到 ${VIDEO_CONFIG_ERROR_MARKER} 添加一个用途为` +
-        '「视频生成」的 Provider，再把它的模型绑定给「视频生成」角色。',
+      `尚未配置「视频生成」模型。请在 ${VIDEO_CONFIG_ERROR_MARKER} 中添加用途为` +
+        '「视频生成」的 Provider，并将其模型绑定到「视频生成」角色。',
       'video'
     )
     this.name = 'VideoNotConfiguredError'
@@ -106,8 +106,8 @@ export class VideoNotConfiguredError extends ModelNotConfiguredError {
 export class VideoUnavailableError extends Error {
   constructor() {
     super(
-      `这次指定的视频模型已经不可用。请到 ${VIDEO_CONFIG_ERROR_MARKER} ` +
-        '检查 Provider、密钥和模型，再重新选择。'
+      `本次指定的视频模型已不可用。请在 ${VIDEO_CONFIG_ERROR_MARKER} 中` +
+        '检查 Provider、密钥和模型，然后重新选择。'
     )
     this.name = 'VideoUnavailableError'
   }
@@ -218,7 +218,7 @@ export class VideoCancelledError extends Error {
   constructor(readonly job: VideoJob) {
     super(
       `已停止等待（任务号 ${encodeVideoJob(job)}）。` +
-        '**厂商那边的任务还在跑，额度已经扣了** —— 想要结果的话用这个任务号取回。'
+        '厂商任务仍在运行，额度已扣除。可凭此任务号取回结果。'
     )
     this.name = 'VideoCancelledError'
   }

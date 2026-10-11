@@ -59,7 +59,7 @@ function normalizeBusinessErrorMessage(
     combined.includes('insufficient_quota') ||
     combined.includes('余额不足')
   ) {
-    return '当前模型服务商返回「余额不足」。请到该服务商的控制台充值，或在 设置 → 模型 换一个可用的模型。'
+    return '当前模型服务商返回「余额不足」。请到该服务商的控制台充值，或在「设置 → 模型」中更换可用模型。'
   }
 
   return undefined

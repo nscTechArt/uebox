@@ -82,7 +82,7 @@ async function openApiKeyUrl(): Promise<void> {
   // 返回值必须看：shell:* 失败时是 return {success:false}，不抛
   const res = await window.api.shell.openExternal(apiKeyUrl.value)
   if (!res?.success) {
-    message.error(`打不开这个网址：${apiKeyUrl.value}`, 8)
+    message.error(`无法打开网址：${apiKeyUrl.value}`, 8)
   }
 }
 

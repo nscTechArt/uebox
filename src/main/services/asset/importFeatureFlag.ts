@@ -170,7 +170,7 @@ export async function checkV2ImportReadiness(
         errorCode: errorCode || 'NAS_UPLOAD_PERMISSION_DENIED',
         userMessage: msg.includes('管理员 KEY')
           ? '当前资产库为只读模式，需要管理员 KEY 才能上传或覆盖'
-          : '资产服务器拒绝了这次上传，请检查这个库的访问码是不是只读的那一把'
+          : '资产服务器拒绝了本次上传，请检查该资产库的访问码是否为只读访问码'
       }
     }
 

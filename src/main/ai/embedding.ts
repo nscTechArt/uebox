@@ -31,11 +31,11 @@ const REQUEST_TIMEOUT_MS = 120_000
 export class EmbeddingNotConfiguredError extends ModelNotConfiguredError {
   constructor() {
     super(
-      '知识库检索需要一个「嵌入」模型。到 设置 → 模型，' +
-        '在「向量化」分组里挑一家（Jina、OpenAI、硅基流动、百炼、智谱、Voyage 都已内置），' +
-        '再把它的模型绑给「嵌入」角色。' +
-        '想完全本地免费就选「Ollama（本机向量化）」—— 先 `ollama pull bge-m3`，' +
-        '不需要任何密钥，也不产生费用。',
+      '知识库检索需要「嵌入」模型。请在「设置 → 模型」的' +
+        '「向量化」分组中选择一家服务商（已内置 Jina、OpenAI、硅基流动、百炼、智谱、Voyage），' +
+        '并将其模型绑定到「嵌入」角色。' +
+        '如需完全本地免费运行，可选择「Ollama（本机向量化）」：先执行 `ollama pull bge-m3`，' +
+        '无需密钥，也不产生费用。',
       'embedding'
     )
     this.name = 'EmbeddingNotConfiguredError'

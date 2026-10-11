@@ -273,7 +273,7 @@ const handleApplyUpdate = async () => {
     if (data.success && data.data) {
       if (data.data.updatedFiles > 0) {
         serverUpdateStatus.value = 'upToDate'
-        serverUpdateMessage.value = `更新成功！已更新 ${data.data.updatedFiles} 个文件，服务器将自动重启`
+        serverUpdateMessage.value = `更新成功，已更新 ${data.data.updatedFiles} 个文件，服务器将自动重启`
         message.success(t('profile.asset.updateRestarting'))
       } else {
         serverUpdateStatus.value = 'upToDate'

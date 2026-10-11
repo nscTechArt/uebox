@@ -1021,7 +1021,14 @@ void FUAL_WidgetCommands::Handle_Preview(const TSharedPtr<FJsonObject>& Payload,
 	int32 Height = 1080;
 	Payload->TryGetNumberField(TEXT("width"), Width);
 	Payload->TryGetNumberField(TEXT("height"), Height);
-	
+	// InitAutoFormat 里是 check(尺寸 > 0)：传 0 直接把编辑器带崩，负数会变成超大的无符号尺寸
+	if (Width <= 0 || Height <= 0 || Width > 8192 || Height > 8192)
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("width/height must be between 1 and 8192 (got %d x %d)"), Width, Height));
+		return;
+	}
+
 	FString Error;
 	UWidgetBlueprint* WidgetBP = LoadWidgetBlueprint(Path, Error);
 	if (!WidgetBP)

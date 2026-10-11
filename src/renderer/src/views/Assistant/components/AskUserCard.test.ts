@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
 import AskUserCard from './AskUserCard.vue'
-import type { AgentQuestionItem } from '@core/shared/agentQuestion'
+import { DELEGATED_ANSWER, type AgentQuestionItem } from '@core/shared/agentQuestion'
 import zhCN from '@renderer/i18n/locales/zh-CN'
 
 const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
@@ -142,19 +142,19 @@ describe('AskUserCard', () => {
 
   it('只读态下没选的那一问明说没选，不留空白', () => {
     const wrapper = render(item({ action: 'accept', answers: [''] }))
-    expect(wrapper.text()).toContain('这一问没选')
+    expect(wrapper.text()).toContain('此问题未选择')
   })
 
   /** 被取消的（超时 / 停止 / 关掉）也要留痕，且不能再点 */
   it('被取消的卡片显示「没有回答」且不可点', () => {
     const wrapper = render(item({ action: 'cancel' }))
 
-    expect(wrapper.text()).toContain('没有回答')
+    expect(wrapper.text()).toContain('未回答')
     expect(optionButtons(wrapper)).toHaveLength(0)
   })
 
   it('还没答时显示「等你回答」', () => {
-    expect(render(item()).text()).toContain('等你回答')
+    expect(render(item()).text()).toContain('等待回答')
   })
 })
 
@@ -315,13 +315,72 @@ describe('AskUserCard —— 多问分步', () => {
     expect(wrapper.find('button.primary').text()).toBe('提交')
   })
 
-  /** 「你自己定」在任何一步都能点 —— 用户随时可以放弃整轮提问 */
-  it('中途也能点「你自己定」', async () => {
+  /**
+   * 「你自己定」只放手当前这一问。真机上的 bug：前两问选好了，第三问点它，
+   * 整张卡片变成 decline，前两问的选择全丢了。
+   */
+  it('前面选好了，最后一问点「你自己定」只放手这一问', async () => {
     const wrapper = render(multi())
 
+    await optionButtons(wrapper)[0].trigger('click')
+    await optionButtons(wrapper)[1].trigger('click')
+    await wrapper.findAll('button.ghost')[0].trigger('click')
+
+    expect(wrapper.emitted('answer')?.[0]).toEqual([
+      'accept',
+      ['3D 探索/冒险', '完整小成品', DELEGATED_ANSWER]
+    ])
+  })
+
+  it('中间一问点「你自己定」翻到下一问，不提交', async () => {
+    const wrapper = render(multi())
+
+    await wrapper.findAll('button.ghost')[0].trigger('click')
+
+    expect(wrapper.text()).toContain('2 / 3')
+    expect(wrapper.emitted('answer')).toBeUndefined()
+  })
+
+  it('放手之后回去又选了，以选的为准', async () => {
+    const wrapper = render(multi())
+
+    await wrapper.findAll('button.ghost')[0].trigger('click')
+    await wrapper.findAll('button.ghost')[1].trigger('click') // 上一步
+    await optionButtons(wrapper)[1].trigger('click')
     await wrapper.find('button.primary').trigger('click')
+    await wrapper.find('button.primary').trigger('click')
+
+    expect(wrapper.emitted('answer')?.[0]).toEqual(['accept', ['动作/战斗', '', '']])
+  })
+
+  /** 每一问都放手才等于整张卡片「你自己定」 */
+  it('每一问都点了「你自己定」才发 decline', async () => {
+    const wrapper = render(multi())
+
+    await wrapper.findAll('button.ghost')[0].trigger('click')
+    await wrapper.findAll('button.ghost')[0].trigger('click')
     await wrapper.findAll('button.ghost')[0].trigger('click')
 
     expect(wrapper.emitted('answer')?.[0]).toEqual(['decline'])
+  })
+
+  it('只读态下放手的那一问写「让 AI 自己定」', () => {
+    const wrapper = render(
+      item({ ...multi(), action: 'accept', answers: ['动作/战斗', DELEGATED_ANSWER, ''] })
+    )
+
+    expect(wrapper.text()).toContain('由 AI 决定')
+    expect(wrapper.text()).toContain('此问题未选择')
+  })
+
+  /** 多选和单选长得一样，用户不会想到能勾好几个 */
+  it('多选题标出「可多选」，单选题不标', () => {
+    const question = multi()
+    question.questions[0].multiSelect = true
+    const wrapper = render(question)
+
+    expect(wrapper.text()).toContain('可多选')
+    expect(optionButtons(wrapper)[0].classes()).toContain('multi')
+    expect(render(multi()).text()).not.toContain('可多选')
   })
 })

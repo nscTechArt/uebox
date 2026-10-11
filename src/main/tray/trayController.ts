@@ -332,13 +332,17 @@ export function startTrayMenuController(tray: Tray, deps: TrayControllerDeps): v
    * 原生框这边也只留一个。
    *
    * 托盘以外的退出（安装更新、`app-quit`）经 `requestGuardedQuit` 也落到这里，
-   * 确认之后该怎么退由发起方给（`proceed`）。只记最近一次 —— 框开着时又来一条，
-   * 界面不叠框，确认的就是后来那条；两条反正都是退出
+   * 确认之后该怎么退由发起方给（`proceed`），按发起原因各记一份：框开着时又来一条，
+   * 界面不叠框，用户确认的是他看到的那个框 —— 界面回报框的原因，照那个原因的路退。
+   * 「装更新重启」和「直接退出」不是一回事，不能让后来那条把先弹的框的路换掉
    */
   let nativeQuitDialogOpen = false
-  let confirmedQuit: () => void = () => quit()
+  const confirmedQuit: Record<GuardedQuitReason, () => void> = {
+    quit: () => quit(),
+    update: () => quit()
+  }
   function askQuitConfirm(count: number, reason: GuardedQuitReason, proceed: () => void): void {
-    confirmedQuit = proceed
+    confirmedQuit[reason] = proceed
     const action: TrayAction =
       reason === 'update'
         ? { type: 'confirm-quit', count, reason }
@@ -481,8 +485,8 @@ export function startTrayMenuController(tray: Tray, deps: TrayControllerDeps): v
   ipcMain.handle(TRAY_TAKE_PENDING_CHANNEL, () => pendingSlot.take())
 
   // 界面的确认框里选了「仍然退出」：按发起方给的路退（托盘是 app.quit，更新是装包重启）
-  ipcMain.handle(TRAY_CONFIRM_QUIT_CHANNEL, () => {
-    if (!stopped) confirmedQuit()
+  ipcMain.handle(TRAY_CONFIRM_QUIT_CHANNEL, (_event, reason?: unknown) => {
+    if (!stopped) confirmedQuit[reason === 'update' ? 'update' : 'quit']()
     return { success: true }
   })
 }

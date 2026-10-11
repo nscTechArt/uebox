@@ -85,7 +85,7 @@ export async function listPlugins(): Promise<InstalledPlugin[]> {
     try {
       raw = JSON.parse(await fs.readFile(join(dir, 'plugin.json'), 'utf8'))
     } catch (error) {
-      plugins.push({ ...base, error: `读不出 plugin.json：${(error as Error).message}` })
+      plugins.push({ ...base, error: `无法读取 plugin.json：${(error as Error).message}` })
       continue
     }
 
@@ -220,7 +220,7 @@ export async function installFromDirectory(
   }
 
   const installed = (await listPlugins()).find((p) => p.manifest.id === id)
-  if (!installed) return { success: false, error: '安装后没能读回插件，请检查目录内容' }
+  if (!installed) return { success: false, error: '安装后无法读取插件，请检查目录内容' }
   return { success: true, plugin: installed }
 }
 

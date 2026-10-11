@@ -1,4 +1,5 @@
 import { resolveApiKey } from '../../ai/credentials'
+import { isOpenCodeEndpoint, openCodeHeaders } from '../../ai/opencode'
 import { readSettings } from '../../ai/store'
 import type { AiProviderSettings, ProviderConfig } from '../../ai/types'
 import type { ModelConfig, ModelRole } from '../../../shared/aiProvider'
@@ -190,6 +191,8 @@ async function analyzeOpenAICompatible(
     headers: {
       'Content-Type': 'application/json',
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      // OpenCode 不带会话头直接 400 MissingSessionID，Agent 那条路在 piModel / streamFn 里加
+      ...(isOpenCodeEndpoint(provider.baseUrl) ? openCodeHeaders() : {}),
       ...provider.headers
     },
     body: JSON.stringify(body),

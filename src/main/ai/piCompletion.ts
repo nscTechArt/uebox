@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import {
   contentText,
   createModels,
@@ -163,6 +164,10 @@ export async function complete(
     ...(request.tools ? { tools: request.tools } : {})
   }
   const options = {
+    // 每次单发也带一个会话 id，pi 会据此发 prompt_cache_key。有的 Codex 专线中转
+    // （packyapi）缺这一位就回 403「客户端异常」：对话里带着所以能用，测试连接
+    // 不带就测不过，被说成「密钥没权限」
+    sessionId: randomUUID(),
     ...(request.signal ? { signal: request.signal } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),

@@ -820,8 +820,8 @@ describe('trayController', () => {
       return tray.setContextMenu.mock.calls.at(-1)![0] as MenuItem[]
     }
 
-    function confirmFromUi(): unknown {
-      return s.ipcHandlers.get(TRAY_CONFIRM_QUIT_CHANNEL)!({}, undefined)
+    function confirmFromUi(reason?: 'update'): unknown {
+      return s.ipcHandlers.get(TRAY_CONFIRM_QUIT_CHANNEL)!({}, reason)
     }
 
     it('没有会话操作：直接退，不拉窗口也不问', async () => {
@@ -944,9 +944,22 @@ describe('trayController', () => {
 
         expect(proceed).not.toHaveBeenCalled()
         expect(takePending()).toEqual({ type: 'confirm-quit', count: 2, reason: 'update' })
-        confirmFromUi()
+        confirmFromUi('update')
         expect(proceed).toHaveBeenCalledTimes(1)
         expect(mocks.appQuit).not.toHaveBeenCalled()
+      })
+
+      it('更新框开着时又点托盘退出：确认更新框照样装包，不被后来的退出换成 app.quit', async () => {
+        mocks.countActiveOperations.mockReturnValue(1)
+        await darwinMenu()
+        const install = vi.fn()
+        requestGuardedQuit(install, 'update')
+        const plainQuit = vi.fn()
+        requestGuardedQuit(plainQuit)
+
+        confirmFromUi('update')
+        expect(install).toHaveBeenCalledTimes(1)
+        expect(plainQuit).not.toHaveBeenCalled()
       })
 
       it('app-quit 撞上会话操作：动作和托盘一模一样', async () => {

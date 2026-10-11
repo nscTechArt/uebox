@@ -67,6 +67,17 @@ describe('createPathLinkRule', () => {
     expect(pathsIn(createRenderer().render('C:\\a\\b and/or D:\\c'))).toEqual(['C:\\a\\b', 'D:\\c'])
   })
 
+  it('同一行里的几条路径各是各的，不连成一条', () => {
+    expect(pathsIn(createRenderer().render('Files: C:\\x\\a.png, C:\\x\\b.png'))).toEqual([
+      'C:\\x\\a.png',
+      'C:\\x\\b.png'
+    ])
+    expect(pathsIn(createRenderer().render('robocopy C:\\src D:\\dst /E'))).toEqual([
+      'C:\\src',
+      'D:\\dst'
+    ])
+  })
+
   it('认反引号里的 UNC 网络路径', () => {
     const html = createRenderer().render('放在 `\\\\nas\\share\\Content` 里')
     expect(pathsIn(html)).toEqual(['\\\\nas\\share\\Content'])

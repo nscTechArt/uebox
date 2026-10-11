@@ -16,6 +16,7 @@
 #include "Misc/Paths.h"
 #include "Misc/Timespan.h"
 #include "MovieScene.h"
+#include "Runtime/Launch/Resources/Version.h"
 #include "UObject/Package.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/StrongObjectPtr.h"
@@ -574,6 +575,20 @@ void FUAL_RenderCommands::OnExecutorFinished(bool bSuccess)
 	UALR::FRenderJob& Job = *UALR::GJob;
 	UALR::RefreshProgress(Job);
 	Job.EndSeconds = FPlatformTime::Seconds();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION <= 2
+	// 5.0–5.2 的 OnExecutorErroredImpl 出致命错时广播的是 Finished(bFatal=true)，
+	// 成功标志靠不住；这几个版本没有 MRQ 自带的视频输出，渲完至少每帧一个文件
+	if (bSuccess && !Job.bCancelRequested && Job.TotalFrames > 0
+		&& UALR::ListWrittenFiles(Job).Num() < Job.TotalFrames)
+	{
+		bSuccess = false;
+		if (Job.Error.IsEmpty())
+		{
+			Job.Error = FString::Printf(TEXT("MRQ 中途出错停下了：%d 帧只写出了 %d 个文件。看输出日志里的 LogMovieRenderPipeline"),
+				Job.TotalFrames, UALR::ListWrittenFiles(Job).Num());
+		}
+	}
+#endif
 	if (Job.bCancelRequested)
 	{
 		Job.State = UALR::ERenderState::Canceled;

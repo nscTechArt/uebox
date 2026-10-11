@@ -251,6 +251,14 @@ export async function generateTaskMusic(
       signal: combined,
       redirect: 'error'
     })
+    // 4xx（超时除外）是服务商明确拒收，没有建任务也不会收费：删掉回执，改好配置能直接重试。
+    // 不删的话没有会话的外部 MCP 调用按提示词记回执，同一句提示词永远被挡
+    if (response.status >= 400 && response.status < 500 && response.status !== 408) {
+      await fs.rm(receipt, { force: true }).catch(() => undefined)
+      throw new Error(
+        `音乐生成请求被拒绝：HTTP ${response.status}。服务商未受理本次请求，修正配置后可重试。`
+      )
+    }
     if (!response.ok)
       throw new Error(
         `音乐生成请求失败：HTTP ${response.status}。请求结果已记录，请检查服务商记录后再决定是否重新生成。`

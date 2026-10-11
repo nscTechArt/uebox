@@ -1754,6 +1754,27 @@ const MODEL_OVERRIDES = {
   }
 }
 
+/**
+ * 上游列着、厂商那边其实没有的模型。预置进去，用户一绑就是一句「模型不存在」。
+ *
+ * 刷完目录跑一遍 `pnpm check:catalog-models`，查出「不存在」的写到这里。
+ *
+ * 硅基流动（2026-10-09 拿真账号逐个发请求核对）：这几个回 20012 Model does not exist。
+ * 回 30004「私有模型」的不在这里 —— 那是账号权限，换个账号可能就能用。
+ * 社区真机：Agent 绑了 Kimi K3，盒子里一用就是 400
+ */
+const MODEL_REMOVALS = {
+  siliconflow: new Set([
+    'moonshotai/Kimi-K3',
+    'deepseek-ai/DeepSeek-V4-Pro-0813',
+    'deepseek-ai/DeepSeek-V4-Flash-Vision-Exp',
+    'Qwen/Qwen3.8-2.4T-A95B',
+    'tencent/Hy3'
+  ]),
+  // 小米（同日，`check-catalog-models.mjs`）：回 400 Unsupported model
+  xiaomi: new Set(['mimo-v2.5-pro-ultraspeed'])
+}
+
 /** Keep stable app provider IDs while reading metadata for the exact configured route. */
 export function sourceFor(item, upstream) {
   const source = upstream[item.sourceId || item.id] || MANUAL_ENTRIES[item.id]
@@ -1776,6 +1797,7 @@ export function pickModels(models, providerId, onlyProtocol) {
   // 按日期排序时会把真正能用的对话模型挤出预置清单。
   // 没有 modalities 字段的留着：判断不了，不该替上游做减法。
   const all = Object.values(models)
+    .filter((m) => !MODEL_REMOVALS[providerId]?.has(m.id))
     .map((m) => ({
       ...m,
       ...MODEL_OVERRIDES[providerId]?.[m.id]

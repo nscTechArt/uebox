@@ -189,7 +189,7 @@ void FUnrealAgentLinkModule::ShutdownModule()
 void FUnrealAgentLinkModule::PluginButtonClicked()
 {
 	const FString Status = FUAL_NetworkManager::Get().IsConnected() ? TEXT("已连接") : TEXT("未连接");
-	FText DialogText = FText::FromString(FString::Printf(TEXT("UnrealAgentLink 状态：%s"), *Status));
+	FText DialogText = FText::FromString(FString::Printf(TEXT("虚幻盒子连接状态：%s"), *Status));
 	FMessageDialog::Open(EAppMsgType::Ok, DialogText);
 }
 

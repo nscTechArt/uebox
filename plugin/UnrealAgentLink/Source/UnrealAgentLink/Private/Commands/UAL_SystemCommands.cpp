@@ -98,6 +98,52 @@ void FUAL_SystemCommands::RegisterCommands(TMap<FString, TFunction<void(const TS
 	});
 }
 
+namespace
+{
+	/**
+	 * 收「引擎替脚本答掉的弹窗」。
+	 *
+	 * 无人值守下 `FMessageDialog::Open` 不弹框，直接取默认答案，然后留一行
+	 * `Message dialog closed, result: No, title: ..., text: ...`（UE 5.4 MessageDialog.cpp）。
+	 * 不回给模型的话，它只看到 create_asset 返回 None，不知道引擎问过「要不要覆写」、答的是「否」。
+	 *
+	 * 不用 `FUAL_ScopedLogCapture`：那一行走的是 `GWarn->Logf`，类别取的是线程上
+	 * 当前的覆盖值，不固定 —— 只能按正文认。
+	 */
+	class FUAL_DialogLogCapture : public FOutputDevice
+	{
+	public:
+		FUAL_DialogLogCapture()
+		{
+			if (GLog)
+			{
+				GLog->AddOutputDevice(this);
+			}
+		}
+
+		virtual ~FUAL_DialogLogCapture() override
+		{
+			if (GLog)
+			{
+				GLog->RemoveOutputDevice(this);
+			}
+		}
+
+		using FOutputDevice::Serialize;
+
+		virtual void Serialize(const TCHAR* V, ELogVerbosity::Type, const FName&) override
+		{
+			static const TCHAR* Prefix = TEXT("Message dialog closed, ");
+			if (V && FCString::Strncmp(V, Prefix, FCString::Strlen(Prefix)) == 0 && Lines.Num() < 20)
+			{
+				Lines.Add(FString(V + FCString::Strlen(Prefix)));
+			}
+		}
+
+		TArray<FString> Lines;
+	};
+}
+
 // ========== 从 UAL_CommandHandler.cpp 迁移以下函数 ==========
 // 原始行号参考:
 //   Handle_RunPython:           1631-1653
@@ -134,8 +180,30 @@ void FUAL_SystemCommands::Handle_RunPython(const TSharedPtr<FJsonObject>& Payloa
 		PythonCommand.Command = Script;
 		PythonCommand.ExecutionMode = EPythonCommandExecutionMode::ExecuteFile;
 		PythonCommand.FileExecutionScope = EPythonFileExecutionScope::Public; // 共享环境，便于后续脚本访问变量
-		
-		bExecuted = PythonPlugin->ExecPythonCommandEx(PythonCommand);
+
+		// 无人值守：脚本里没人能点模态框，弹出来就把整个编辑器卡住。
+		// 真机（2026-10-11）：脚本对已存在的 SQ_Chase 再 create_asset，引擎先弹「覆写现有Object」，
+		// 用户点了是，强删又因为序列正被使用而弹「正在使用中」—— 两个框都挡着主线程，最后照样写不进去。
+		// 开着这个开关时框直接取默认答案（覆写 → 否），create_asset 安静地返回 None，
+		// 盒子那边按脚本里的 create_asset 补「先查重、已存在就 load_asset 接着改」的提示
+		TArray<FString> Dialogs;
+		{
+			TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
+			FUAL_DialogLogCapture DialogCapture;
+			bExecuted = PythonPlugin->ExecPythonCommandEx(PythonCommand);
+			Dialogs = MoveTemp(DialogCapture.Lines);
+		}
+
+		// 被自动答掉的弹窗原样回去：「覆写？→ 否」这种信息模型自己从返回值里推不出来
+		if (Dialogs.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> DialogArray;
+			for (const FString& Line : Dialogs)
+			{
+				DialogArray.Add(MakeShared<FJsonValueString>(Line));
+			}
+			Data->SetArrayField(TEXT("dialogs"), DialogArray);
+		}
 		
 		// 返回脚本结果（成功时为表达式结果，失败时为错误追踪）
 		if (!PythonCommand.CommandResult.IsEmpty())

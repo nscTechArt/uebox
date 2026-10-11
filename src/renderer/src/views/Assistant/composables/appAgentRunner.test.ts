@@ -34,7 +34,7 @@ describe('应用级 agent 运行器', () => {
     __setAppAgentRunnerForTest(null)
 
     await expect(appExecuteAgent('把灯调暗', undefined, { chatSid: 'c' })).rejects.toThrow(
-      '还没装上'
+      '尚未就绪'
     )
   })
 })

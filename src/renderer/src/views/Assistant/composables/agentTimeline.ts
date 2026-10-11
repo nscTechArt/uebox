@@ -100,12 +100,45 @@ export function hasTimelineThinking(items: AgentProcessItem[] | undefined): bool
 }
 
 /**
+ * 工具跑着时用户插了一句：插话落在调用和结果之间，切块会把两头分进两组 ——
+ * 前一组那一行一直「进行中」，后一组多出一行没头没尾的结果。
+ * 把这样的结果挪回插话前面，和它的调用待在一组。只认带调用 id 的。
+ */
+function reattachResultsAcrossSteers(items: AgentProcessItem[]): AgentProcessItem[] {
+  if (!items.some((item) => item.type === 'user-steer')) return items
+  const callId = (item: AgentProcessItem): string | undefined => {
+    const data = (item.data ?? {}) as { id?: unknown; toolCallId?: unknown }
+    const raw = item.type === 'tool-call' ? (data.id ?? data.toolCallId) : data.toolCallId
+    return typeof raw === 'string' && raw ? raw : undefined
+  }
+  const out = [...items]
+  for (let index = 0; index < out.length; index++) {
+    const item = out[index]
+    if (item.type !== 'tool-result') continue
+    const id = callId(item)
+    if (!id) continue
+    const callAt = out.findIndex(
+      (other, at) => at < index && other.type === 'tool-call' && callId(other) === id
+    )
+    if (callAt === -1) continue
+    const steerAt = out.findIndex(
+      (other, at) => at > callAt && at < index && other.type === 'user-steer'
+    )
+    if (steerAt === -1) continue
+    out.splice(index, 1)
+    out.splice(steerAt, 0, item)
+  }
+  return out
+}
+
+/**
  * 切块。
  *
  * key 里带块序号而不是随机数：流式过程中块只会**往后追加**，前面的 key 不变，
  * Vue 才不会每来一个增量就把已经画好的块整个重建（重建会丢掉折叠状态和滚动位置）。
  */
 export function splitAgentTimeline(items: AgentProcessItem[], thinking = ''): AgentTimelineBlock[] {
+  items = reattachResultsAcrossSteers(items)
   const blocks: AgentTimelineBlock[] = []
   let pendingText = ''
   let pendingTextAt = 0

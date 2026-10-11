@@ -45,7 +45,7 @@ async function openInstructionsFile(): Promise<void> {
   // 返回值必须看：shell:* 失败时是 return {success:false}，不抛
   const res = await window.api.invoke('shell:openPath', instructionsPath.value)
   if (!res?.success) {
-    message.error(`打不开这个文件：${instructionsPath.value}（${res?.error || ''}）`, 8)
+    message.error(`无法打开文件：${instructionsPath.value}（${res?.error || ''}）`, 8)
   }
 }
 

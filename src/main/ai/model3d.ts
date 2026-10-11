@@ -79,8 +79,8 @@ export const MODEL3D_CONFIG_ERROR_MARKER = '设置 → 模型'
 export class Model3dNotConfiguredError extends ModelNotConfiguredError {
   constructor() {
     super(
-      `还没有配置「3D 生成」模型。请到 ${MODEL3D_CONFIG_ERROR_MARKER} 添加一个 Provider，` +
-        '在它的模型清单里勾上「3D 生成」并选好接口形状，再把这个模型绑定给「3D 生成」角色。',
+      `尚未配置「3D 生成」模型。请在 ${MODEL3D_CONFIG_ERROR_MARKER} 中添加 Provider，` +
+        '在其模型清单中勾选「3D 生成」并选择接口形状，然后将该模型绑定到「3D 生成」角色。',
       'model3d'
     )
     this.name = 'Model3dNotConfiguredError'
@@ -90,8 +90,8 @@ export class Model3dNotConfiguredError extends ModelNotConfiguredError {
 export class Model3dUnavailableError extends Error {
   constructor() {
     super(
-      `这次指定的 3D 模型已经不可用。请到 ${MODEL3D_CONFIG_ERROR_MARKER} ` +
-        '检查 Provider、密钥和模型的「3D 生成」能力，再重新选择。'
+      `本次指定的 3D 模型已不可用。请在 ${MODEL3D_CONFIG_ERROR_MARKER} 中` +
+        '检查 Provider、密钥和模型的「3D 生成」能力，然后重新选择。'
     )
     this.name = 'Model3dUnavailableError'
   }
@@ -218,8 +218,7 @@ export class Model3dCancelledError extends Error {
   constructor(readonly job: Model3dJob) {
     super(
       `已停止等待（任务号 ${encodeModel3dJob(job)}）。` +
-        '**厂商那边的任务还在跑，额度已经扣了** —— 想要结果的话用这个任务号取回，' +
-        '不用重新生成。'
+        '厂商任务仍在运行，额度已扣除。可凭此任务号取回结果，无需重新生成。'
     )
     this.name = 'Model3dCancelledError'
   }
@@ -594,8 +593,23 @@ const ADAPTERS: Record<Exclude<Model3dApi, 'uebox-tasks'>, Model3dAdapter> = {
           'material',
           input.material === 'pbr' ? 'PBR' : input.material === 'shaded' ? 'Shaded' : 'All'
         )
-      // 三个整数的 JSON 数组，顺序是宽(X) / 高(Y) / 长(Z)
-      if (input.boundingBox) form.append('bbox_condition', JSON.stringify(input.boundingBox))
+      // 三个整数的 JSON 数组，顺序是宽(X) / 高(Y) / 长(Z)，每项 1–2048。
+      // 它是**比例**不是米：真机上有人填了 [0.22, 0.30, 0.23]（头部的米制尺寸），
+      // 厂商只回一个 400。本地先拦，免得白交一次收费请求
+      if (input.boundingBox) {
+        const bad = input.boundingBox.some(
+          (value) => !Number.isInteger(value) || value < 1 || value > 2048
+        )
+        if (bad) {
+          throw new Model3dParamUnsupportedError(
+            'rodin',
+            `包围盒 ${JSON.stringify(input.boundingBox)}`,
+            'bbox_condition 要三个 1–2048 的整数，表示宽/高/长的比例，不是米制尺寸。' +
+              '比如 0.22×0.30×0.23 米写成 [22, 30, 23]，真实大小导入后在 DCC 或引擎里缩放。'
+          )
+        }
+        form.append('bbox_condition', JSON.stringify(input.boundingBox))
+      }
       if (typeof input.seed === 'number') form.append('seed', String(input.seed))
       if (input.restPose) form.append('TAPose', 'true')
       return { path: '/rodin', body: form }
@@ -1297,9 +1311,13 @@ function describeError(body: string): string {
       message?: unknown
     }
     const error = payload.error
-    const message =
-      typeof error === 'string' ? error : (error?.message ?? payload.message ?? error?.code)
-    if (typeof message === 'string' && message.trim()) return message.trim()
+    const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
+    // Rodin 的形状是 `{ error: 'INVALID_REQUEST', message: '…' }`：error 只是个代码，
+    // 说清哪个字段错了的是 message。原来只取 error，模型拿到的就只剩「Bad Request」
+    const code = typeof error === 'string' ? text(error) : text(error?.code)
+    const message = (typeof error === 'string' ? '' : text(error?.message)) || text(payload.message)
+    if (code && message) return `${code}：${message}`
+    if (message || code) return message || code
   } catch {
     // 不是 JSON 也不是 HTML：空 body、纯文本错误都会走到这
   }

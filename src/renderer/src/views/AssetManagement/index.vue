@@ -2489,12 +2489,12 @@ const readImportRecoveryReportRef = async (
   try {
     report = JSON.parse(result.content)
   } catch {
-    throw new Error('这个文件不是有效的 JSON 报告')
+    throw new Error('该文件不是有效的 JSON 报告')
   }
 
   const ref = extractImportRecoveryReportRef(report)
   if (!ref) {
-    throw new Error('这个 JSON 里没有找到可用于续传的 taskId 或 diagnosticId')
+    throw new Error('该 JSON 中未找到可用于续传的 taskId 或 diagnosticId')
   }
   return ref
 }

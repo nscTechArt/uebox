@@ -297,7 +297,7 @@ describe('persistSessionProject', () => {
   it('不读盘，直接存调用方那一份 —— goal 的轮次不会被回滚', async () => {
     const live = {
       mode: 'agent',
-      goal: { objective: '做完', rounds: 3, lastFailReason: '', mutations: ['x'], settled: false }
+      goal: { objective: '做完', rounds: 3, checklist: [], mutations: ['x'], settled: false }
     } as SessionExecutionOptions
 
     await persistSessionProject('s1', { projectName: 'GameB', projectPath: 'D:/B' }, live)

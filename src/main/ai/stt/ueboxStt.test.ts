@@ -84,8 +84,8 @@ describe('协议形状', () => {
   })
 
   it('会话里的套餐错误说清下一步', () => {
-    expect(ueboxSttErrorMessage({ code: 'quota_exhausted' })).toContain('额度用完了')
-    expect(ueboxSttErrorMessage({ code: 'role_not_in_plan' })).toContain('套餐不含')
+    expect(ueboxSttErrorMessage({ code: 'quota_exhausted' })).toContain('额度已用完')
+    expect(ueboxSttErrorMessage({ code: 'role_not_in_plan' })).toContain('套餐不包含')
     expect(ueboxSttErrorMessage({ code: 'content_blocked', message: 'x' })).toBe(
       'content_blocked：x'
     )
@@ -160,7 +160,7 @@ describe('会话', () => {
     openUeboxSttSession({ apiKey: 'k', baseUrl: base, model: 'uebox-stt', onEvent })
     await closed
     expect(events[0]).toMatchObject({ type: 'error' })
-    expect((events[0] as { message: string }).message).toContain('额度用完了')
+    expect((events[0] as { message: string }).message).toContain('额度已用完')
   })
 
   it('握手 401：引导重新连接', async () => {

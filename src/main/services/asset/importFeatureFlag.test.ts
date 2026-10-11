@@ -92,7 +92,7 @@ describe('checkV2ImportReadiness', () => {
       supported: true,
       ready: false,
       errorCode: 'NAS_UPLOAD_PERMISSION_DENIED',
-      userMessage: '资产服务器拒绝了这次上传，请检查这个库的访问码是不是只读的那一把'
+      userMessage: '资产服务器拒绝了本次上传，请检查该资产库的访问码是否为只读访问码'
     })
   })
 
