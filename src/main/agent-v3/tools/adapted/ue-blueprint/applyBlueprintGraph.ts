@@ -250,7 +250,7 @@ const ApplyGraphSchema = z
       .string()
       .optional()
       .describe(
-        '图表名，默认 EventGraph。必须是已存在的图；新函数图先用 blueprint_create_function 建。' +
+        '图表名，默认 EventGraph。必须是已存在的图；新函数图先用 blueprint_create_function 建，新事件图先用 blueprint_create_event_graph 建。' +
           '子图写路径：AnimGraph/Locomotion（状态机）、AnimGraph/Locomotion/Idle（状态里）、' +
           'AnimGraph/Locomotion/Idle->Walk（转换条件）'
       ),
@@ -617,7 +617,8 @@ warnings 里 —— **读一下**，否则你以为写成了 A，图里其实是
 ## 图表必须已存在
 
 graph_name 默认 EventGraph。要写进新的函数图，先用
-blueprint_create_function 建出来。本工具不创建图表。
+blueprint_create_function 建出来；要一张新的事件图，先用 blueprint_create_event_graph。
+本工具不创建图表。
 
 ## 动画蓝图
 

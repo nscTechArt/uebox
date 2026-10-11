@@ -344,6 +344,13 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     make: () => ueBlueprint.createCreateBlueprintFunctionTool()
   },
   {
+    name: 'blueprint_create_event_graph',
+    namespace: 'ue.blueprint',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueBlueprint.createBlueprintCreateEventGraphTool()
+  },
+  {
     name: 'blueprint_add_variable',
     namespace: 'ue.blueprint',
     risk: 'mutating',

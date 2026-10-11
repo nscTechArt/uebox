@@ -273,6 +273,7 @@ describe('buildAllTools', () => {
       'blueprint_add_component',
       'blueprint_set_property',
       'blueprint_create_function',
+      'blueprint_create_event_graph',
       'blueprint_add_variable',
       'blueprint_set_variable_meta',
       'blueprint_remove_variable',

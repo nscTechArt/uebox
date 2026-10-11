@@ -42,7 +42,8 @@ export {
   createBlueprintEventDispatcherTool,
   createBlueprintComponentEventTool,
   createBlueprintFunctionSignatureTool,
-  createSetBlueprintParentClassTool
+  createSetBlueprintParentClassTool,
+  createBlueprintCreateEventGraphTool
 } from './blueprintMembers'
 
 /**

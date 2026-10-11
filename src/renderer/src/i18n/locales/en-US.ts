@@ -2358,6 +2358,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         blueprint_add_component: 'Add Blueprint component',
         blueprint_set_property: 'Change Blueprint property',
         blueprint_create_function: 'Create Blueprint function',
+        blueprint_create_event_graph: 'Create Blueprint event graph',
         blueprint_add_variable: 'Add Blueprint variable',
         blueprint_remove_variable: 'Remove Blueprint variable',
         blueprint_set_variable_meta: 'Change Blueprint variable settings',

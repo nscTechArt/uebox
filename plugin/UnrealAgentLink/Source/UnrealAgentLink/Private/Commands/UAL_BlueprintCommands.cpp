@@ -18,6 +18,7 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "AssetToolsModule.h"
+#include "FileHelpers.h"
 #include "Misc/PackageName.h"
 #include "UObject/SavePackage.h"
 #include "Engine/LevelScriptActor.h"
@@ -127,6 +128,11 @@ void FUAL_BlueprintCommands::RegisterCommands(TMap<FString, TFunction<void(const
 	CommandMap.Add(TEXT("blueprint.create_function"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 	{
 		Handle_CreateFunctionGraph(Payload, RequestId);
+	});
+
+	CommandMap.Add(TEXT("blueprint.create_event_graph"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		Handle_CreateEventGraph(Payload, RequestId);
 	});
 
 	CommandMap.Add(TEXT("blueprint.compile"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
@@ -6157,6 +6163,127 @@ void FUAL_BlueprintCommands::Handle_CreateFunctionGraph(const TSharedPtr<FJsonOb
 	Result->SetStringField(TEXT("graph_name"), FunctionName);
 	Result->SetStringField(TEXT("entry_node_id"), EntryNode ? UAL_GuidToString(EntryNode->NodeGuid) : TEXT(""));
 	Result->SetStringField(TEXT("result_node_id"), ResultNode ? UAL_GuidToString(ResultNode->NodeGuid) : TEXT(""));
+	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
+}
+
+/**
+ * 新建一页空的事件图 —— 编辑器「我的蓝图」面板里 Graphs 旁边那个「+」做的事。
+ *
+ * 以前没有这条命令，事件图只能让用户去 UE 里手点，而蓝图库的「放进空图」偏偏要一张
+ * 空事件图：用户点名让 Agent 放，Agent 只能回一句「请你先去建」。
+ *
+ * 建出来是空的（不带 BeginPlay 那几个灰色占位节点 —— 那是新建蓝图时才放的），
+ * 正好是 blueprint_library_apply 要的「空图」。
+ *
+ * 请求参数:
+ *   - blueprint_path: 蓝图路径（必填）
+ *   - graph_name: 新事件图的名字（必填）
+ *
+ * 响应:
+ *   - ok
+ *   - graph_name: 引擎里实际的图名（建完读回来的）
+ *   - event_graphs: 这个蓝图现在所有事件图的名字
+ *   - saved: 蓝图资产是否存盘成功
+ */
+void FUAL_BlueprintCommands::Handle_CreateEventGraph(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+{
+	FString BlueprintPath;
+	if (!Payload->TryGetStringField(TEXT("blueprint_path"), BlueprintPath) || BlueprintPath.IsEmpty())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing required field: blueprint_path"));
+		return;
+	}
+
+	FString GraphName;
+	if (!Payload->TryGetStringField(TEXT("graph_name"), GraphName) || GraphName.TrimStartAndEnd().IsEmpty())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing required field: graph_name"));
+		return;
+	}
+	GraphName.TrimStartAndEndInline();
+
+	UBlueprint* Blueprint = nullptr;
+	FString ResolvedPath;
+	if (!UAL_LoadBlueprintByPathOrName(BlueprintPath, Blueprint, ResolvedPath) || !Blueprint)
+	{
+		UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+		return;
+	}
+
+	// 函数库、宏库、接口没有事件图。不挡的话图建得出来，编译时才报，而且报的不是这个原因
+	if (!FBlueprintEditorUtils::DoesSupportEventGraphs(Blueprint))
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("Blueprint '%s' cannot have event graphs (function libraries, macro libraries and interfaces only hold functions). Use blueprint.create_function instead."),
+			*Blueprint->GetName()));
+		return;
+	}
+
+	// 名字校验走编辑器同一套：和函数图、变量、组件重名都不行
+	if (UAL_FindGraph(Blueprint, GraphName))
+	{
+		UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(TEXT("Graph already exists: %s"), *GraphName));
+		return;
+	}
+	{
+		FKismetNameValidator NameValidator(Blueprint);
+		const EValidatorResult NameResult = NameValidator.IsValid(FName(*GraphName), /*bOriginal=*/false);
+		if (NameResult != EValidatorResult::Ok)
+		{
+			UAL_CommandUtils::SendError(RequestId, NameResult == EValidatorResult::AlreadyInUse ? 409 : 400, FString::Printf(
+				TEXT("'%s' cannot be used as a graph name: %s"),
+				*GraphName,
+				*INameValidatorInterface::GetErrorString(GraphName, NameResult)));
+			return;
+		}
+	}
+
+	UEdGraph* NewGraph = nullptr;
+	{
+		FUAL_ScopedTransaction Transaction(NSLOCTEXT("UALBlueprint", "CreateEventGraph", "Create Event Graph"));
+		Blueprint->Modify();
+		NewGraph = FBlueprintEditorUtils::CreateNewGraph(
+			Blueprint,
+			FName(*GraphName),
+			UEdGraph::StaticClass(),
+			UEdGraphSchema_K2::StaticClass());
+		if (!NewGraph)
+		{
+			Transaction.Cancel();
+			UAL_CommandUtils::SendError(RequestId, 500, TEXT("Failed to create event graph"));
+			return;
+		}
+		FBlueprintEditorUtils::AddUbergraphPage(Blueprint, NewGraph);
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	// 回执从蓝图上读回来：确认它真的进了 UbergraphPages，名字以引擎为准
+	TArray<TSharedPtr<FJsonValue>> EventGraphNames;
+	bool bRegistered = false;
+	for (UEdGraph* Page : Blueprint->UbergraphPages)
+	{
+		if (!Page)
+		{
+			continue;
+		}
+		EventGraphNames.Add(MakeShared<FJsonValueString>(Page->GetName()));
+		bRegistered |= (Page == NewGraph);
+	}
+	if (!bRegistered)
+	{
+		UAL_CommandUtils::SendError(RequestId, 500, TEXT("Event graph was created but is not registered on the blueprint"));
+		return;
+	}
+
+	// 存盘：空图只改了内存，不存的话编辑器一关就没了 —— 2026-10-12 真机重启后这页确实丢了
+	const bool bSaved = UEditorLoadingAndSavingUtils::SavePackages({ Blueprint->GetOutermost() }, /*bOnlyDirty=*/false);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("ok"), true);
+	Result->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+	Result->SetStringField(TEXT("graph_name"), NewGraph->GetName());
+	Result->SetArrayField(TEXT("event_graphs"), EventGraphNames);
+	Result->SetBoolField(TEXT("saved"), bSaved);
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 }
 

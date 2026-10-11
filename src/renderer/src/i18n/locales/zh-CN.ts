@@ -2295,6 +2295,7 @@ export default {
         blueprint_add_component: '添加蓝图组件',
         blueprint_set_property: '修改蓝图属性',
         blueprint_create_function: '新建蓝图函数',
+        blueprint_create_event_graph: '新建蓝图事件图',
         blueprint_add_variable: '新建蓝图变量',
         blueprint_remove_variable: '删除蓝图变量',
         blueprint_set_variable_meta: '修改蓝图变量设置',

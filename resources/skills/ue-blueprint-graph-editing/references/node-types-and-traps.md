@@ -50,7 +50,8 @@ ends** is this trap, not a mistake of yours.
 
 `graph_name` defaults to `EventGraph`. Any other name must already exist; passing a new
 one returns `404 Graph not found`. Need a new function graph? `blueprint_create_function`
-first, then populate it.
+first, then populate it. Need another event graph page (events, Delay and Timeline only live
+in event graphs)? `blueprint_create_event_graph` first.
 
 ## Custom events carry their own parameters
 
