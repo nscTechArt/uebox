@@ -66,13 +66,13 @@ namespace
 		if (FUAL_AssetLockState::IsEnforced(PackageName))
 		{
 			return FText::FromString(LockText(
-				TEXT("虚幻盒子的 AI 正在修改这个资产，已锁定。\n你现在的改动保存会被拦下（文件已设为只读）—— 等 AI 做完会自动解锁，也可以到盒子里停掉这条会话。"),
-				TEXT("Unreal Box AI is editing this asset and has locked it.\nSaving your changes will be blocked (the file is read-only). It unlocks when the AI finishes, or stop the session in Unreal Box.")));
+				TEXT("此资产正由虚幻盒子 AI 编辑，已锁定。\n文件已设为只读，保存将失败。AI 任务结束后自动解锁，也可在虚幻盒子中停止对应会话。"),
+				TEXT("This asset is being edited by Unreal Box AI and is locked.\nThe file is read-only and saving will fail. It unlocks when the AI task ends, or stop the session in Unreal Box.")));
 		}
 
 		return FText::FromString(LockText(
-			TEXT("虚幻盒子的 AI 正在修改这个资产。\n你现在的改动和 AI 的会互相覆盖 —— 建议等它做完，或到盒子里停掉这条会话。"),
-			TEXT("Unreal Box AI is editing this asset.\nYour changes and the AI's will overwrite each other — wait for it to finish, or stop the session in Unreal Box.")));
+			TEXT("此资产正由虚幻盒子 AI 编辑。\n手动修改与 AI 修改将相互覆盖，建议待 AI 任务结束后再编辑，或在虚幻盒子中停止对应会话。"),
+			TEXT("This asset is being edited by Unreal Box AI.\nManual and AI changes will overwrite each other. Edit after the AI task ends, or stop the session in Unreal Box.")));
 	}
 
 	/**
@@ -122,8 +122,8 @@ namespace
 		const FString ShortName = FPackageName::GetShortName(PackageName);
 
 		FNotificationInfo Info(FText::FromString(LockText(
-			FString::Printf(TEXT("「%s」正被 AI 修改"), *ShortName),
-			FString::Printf(TEXT("\"%s\" is being edited by AI"), *ShortName))));
+			FString::Printf(TEXT("「%s」正由虚幻盒子 AI 编辑"), *ShortName),
+			FString::Printf(TEXT("\"%s\" is being edited by Unreal Box AI"), *ShortName))));
 		Info.SubText = FUAL_AssetLockState::DescribeLock(PackageName);
 		Info.Image = FCoreStyle::Get().GetBrush(TEXT("Icons.Lock"));
 		Info.ExpireDuration = 8.0f;
@@ -218,14 +218,14 @@ namespace
 
 		const FString Names = FString::Join(Blocked, TEXT("、"));
 		FNotificationInfo Info(FText::FromString(LockText(
-			FString::Printf(TEXT("有 %d 个资产没能存上"), Blocked.Num()),
-			FString::Printf(TEXT("%d asset(s) were not saved"), Blocked.Num()))));
+			FString::Printf(TEXT("%d 个资产保存失败"), Blocked.Num()),
+			FString::Printf(TEXT("Failed to save %d asset(s)"), Blocked.Num()))));
 		Info.SubText = FText::FromString(LockText(
 			FString::Printf(
-				TEXT("%s 正被虚幻盒子的 AI 修改并已锁定，这次保存跳过了它们。\n等 AI 做完会自动解锁，也可以到盒子里停掉那条会话。"),
+				TEXT("%s 已被虚幻盒子 AI 锁定，本次保存已跳过。\nAI 任务结束后自动解锁，也可在虚幻盒子中停止对应会话。"),
 				*Names),
 			FString::Printf(
-				TEXT("%s are locked while Unreal Box AI edits them, so this save skipped them.\nThey unlock when the AI finishes, or stop the session in Unreal Box."),
+				TEXT("%s locked by Unreal Box AI and skipped in this save.\nUnlocks when the AI task ends, or stop the session in Unreal Box."),
 				*Names)));
 		Info.Image = FCoreStyle::Get().GetBrush(TEXT("Icons.Lock"));
 		Info.ExpireDuration = 10.0f;
@@ -430,15 +430,15 @@ FText FUAL_AssetLockState::HintLine(FName PackageName)
 	if (IsEnforced(PackageName))
 	{
 		return FText::FromString(LockText(
-			TEXT("保存会被拦下 · 做完自动解锁，也可到盒子里停掉这条会话"),
-			TEXT("Saving is blocked · unlocks when it finishes, or stop the session in Unreal Box")));
+			TEXT("禁止保存 · AI 任务结束后自动解锁"),
+			TEXT("Saving disabled · unlocks when the AI task ends")));
 	}
 
 	// 只锁不拦时保存是**真存得进去**的，只是之后会被盖掉。说成存不进去就是假话，
 	// 而用户会照着这句假话放弃自己的改动（见 UAL_AssetLockState.h 的文案红线）
 	return FText::FromString(LockText(
-		TEXT("你的改动会和它互相覆盖 · 建议等它做完"),
-		TEXT("Your changes and its will overwrite each other · better to wait")));
+		TEXT("手动修改将与 AI 修改相互覆盖"),
+		TEXT("Manual and AI changes will overwrite each other")));
 }
 
 int32 FUAL_AssetLockState::Num()

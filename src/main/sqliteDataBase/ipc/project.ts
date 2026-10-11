@@ -343,8 +343,8 @@ export async function installUnrealAgentLinkPlugin(
         // 带上具体原因：它比「请确认这个引擎版本有对应的随包插件」准得多 ——
         // 目录被占、没权限、.uproject 没写引擎版本，处理方式完全不同
         error: outcome.pluginFailure
-          ? `插件文件没能装进项目：${outcome.pluginFailure}`
-          : '插件文件没能装进项目，请确认这个引擎版本有对应的随包插件'
+          ? `插件文件安装到项目失败：${outcome.pluginFailure}`
+          : '插件文件安装到项目失败，请确认该引擎版本有对应的随包插件'
       }
     }
     return { success: true }

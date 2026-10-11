@@ -155,18 +155,24 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
    */
   let ready = role === 'main'
 
-  function track(sid: string): SidState {
+  function track(sid: string, initialDirty: SidState['dirty'] = 'all'): SidState {
     let state = tracked.get(sid)
     if (!state) {
-      state = { known: emptyKnownState(), dirty: 'all', timer: null }
+      state = { known: emptyKnownState(), dirty: initialDirty, timer: null }
       tracked.set(sid, state)
     }
     return state
   }
 
-  /** 独立窗口管的对话：它开着的那条，加上那通电话派生的任务对话 */
+  /**
+   * 独立窗口里新建的对话（分支就是这么来的）。主窗口手里没有它，这边的就是唯一一份，
+   * 和自己开着的那条一样整份同步过去，不然存盘和主窗口都看不到它
+   */
+  const createdHere = new Set<string>()
+
+  /** 独立窗口管的对话：它开着的那条，加上那通电话派生的任务对话，以及在这里新建的 */
   function owns(sid: string): boolean {
-    return role === 'chat-window' && belongsToChat(sid, ownSid)
+    return role === 'chat-window' && (belongsToChat(sid, ownSid) || createdHere.has(sid))
   }
 
   /**
@@ -179,8 +185,14 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
   function syncable(sid: unknown): sid is string {
     if (typeof sid !== 'string' || !sid) return false
     if (tracked.has(sid)) return true
-    if (!owns(sid) && !(role === 'chat-window' && streamStore.getStream(sid))) return false
-    track(sid)
+    if (owns(sid)) {
+      track(sid)
+      return true
+    }
+    if (!(role === 'chat-window' && streamStore.getStream(sid))) return false
+    // 不归这个窗口的对话：它手里那份是开窗时从盘上读的旧样子，不能整份发过去当真相，
+    // 只发这一轮动到的那几条（见 flush 里对它的裁剪）
+    track(sid, new Set())
     return true
   }
 
@@ -218,6 +230,17 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
     const dirty = state.dirty
     state.dirty = new Set()
     const patch = buildPatch(sid, localState(sid), state.known, dirty, full)
+    if (patch && role === 'chat-window' && !owns(sid)) {
+      // 顺序、会话记录、草稿都以主窗口为准：带过去会把主窗口新加的消息和改动冲掉
+      delete patch.full
+      delete patch.order
+      delete patch.session
+      delete patch.permissionMode
+      delete patch.draft
+      delete patch.historySummary
+      delete patch.compressedUserCount
+      if (!patch.messages?.length) return
+    }
     if (patch) bridge.push(patch)
   }
 
@@ -267,14 +290,21 @@ export function createChatWindowSync(options: ChatWindowSyncOptions): { flushAll
 
   chatStore.$onAction(({ name, args, after }) => {
     if (applying || READ_ONLY_ACTIONS.test(name) || name === 'applySyncSession') return
+    if (role === 'chat-window' && name === 'createSession' && typeof args[0] === 'string') {
+      createdHere.add(args[0])
+    }
+    // 删的是哪几条只看参数本身。认不出时的「每条都比一遍」不能拿来判删除：
+    // 独立窗口里还没发过消息的新对话本来就没有会话记录，会被当成删掉的关掉
+    const removing =
+      name === 'removeSession' || name === 'removeSessions'
+        ? new Set(
+            (Array.isArray(args[0]) ? args[0] : [args[0]]).filter((id) => typeof id === 'string')
+          )
+        : null
     after(() => {
       for (const sid of sessionActionTargets(args)) {
         // 主窗口把开在独立窗口里的那条删了：告诉那边，它会关掉自己
-        if (
-          role === 'main' &&
-          (name === 'removeSession' || name === 'removeSessions') &&
-          !chatStore.sessionById(sid)
-        ) {
+        if (role === 'main' && removing?.has(sid) && !chatStore.sessionById(sid)) {
           bridge.push({ sid, deleted: true })
           untrack(sid)
           continue

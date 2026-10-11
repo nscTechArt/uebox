@@ -1133,7 +1133,7 @@ const navigationResult = computed<{
       if (result && result.action === 'navigate' && result.target) {
         console.log('[AIBubble] 从 toolResults 检测到导航结果:', result)
         return {
-          buttonText: result.buttonText || '🚀 带我过去',
+          buttonText: result.buttonText || '前往',
           description: result.description || '',
           target: result.target
         }
@@ -1160,7 +1160,7 @@ const navigationResult = computed<{
                   nestedResult
                 )
                 return {
-                  buttonText: nestedResult.buttonText || '🚀 带我过去',
+                  buttonText: nestedResult.buttonText || '前往',
                   description: nestedResult.description || '',
                   target: nestedResult.target
                 }
@@ -1173,7 +1173,7 @@ const navigationResult = computed<{
         if (result && result.action === 'navigate' && result.target) {
           console.log('[AIBubble] 从 agentProcess (直接工具) 检测到导航结果:', result)
           return {
-            buttonText: result.buttonText || '🚀 带我过去',
+            buttonText: result.buttonText || '前往',
             description: result.description || '',
             target: result.target
           }

@@ -48,12 +48,19 @@ export interface EditorPythonResult {
   unconfirmed?: boolean
   /** 调用方主动停的，不是引擎卡了 */
   aborted?: boolean
+  /**
+   * 脚本跑的时候引擎弹过、又按默认答案自动关掉的对话框，形如
+   * `result: No, title: ..., text: An object [SQ_Chase] ... already exists ...`。
+   * 插件跑脚本时开着无人值守，框不会挡住编辑器，但答案（多半是「否」）得让模型知道
+   */
+  dialogs?: string[]
 }
 
 interface RunPythonResponse {
   ok?: boolean
   result?: string
   logs?: { type?: string; message?: string }[]
+  dialogs?: string[]
   error?: string
 }
 
@@ -170,13 +177,16 @@ export async function runEditorPython(
   }
 
   const { output, stdout, error } = parsePythonLogs(response?.logs)
+  const dialogs =
+    Array.isArray(response?.dialogs) && response.dialogs.length > 0 ? response.dialogs : undefined
 
   if (response?.ok !== true) {
     return {
       success: false,
       // result 在失败时是 Python 异常栈，直接给出去 —— 模型要靠它改脚本
       error: response?.result || response?.error || `Python 执行失败：${description}`,
-      stdout
+      stdout,
+      dialogs
     }
   }
 
@@ -189,6 +199,6 @@ export async function runEditorPython(
    * 触发得到：脚本自己 `sys.exit()`、把编辑器搞崩、或者这份引擎的 Python
    * 日志捕获什么都没回（插件只在 LogOutput 非空时才发 logs，ok 却照发 true）。
    */
-  if (error) return { success: false, unconfirmed: true, error, stdout }
-  return { success: true, output, stdout }
+  if (error) return { success: false, unconfirmed: true, error, stdout, dialogs }
+  return { success: true, output, stdout, dialogs }
 }

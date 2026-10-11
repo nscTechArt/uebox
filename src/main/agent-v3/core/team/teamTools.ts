@@ -40,6 +40,7 @@ import {
 } from './teamStore'
 import { sameTeamModel } from '../../../../shared/agentTeam'
 import { getTargetProjectPath } from '../projectTargetContext'
+import { withoutSystemMessages } from '../systemMessages'
 import { checkupPassed } from './modelCheckups'
 import {
   canChooseModels,
@@ -434,7 +435,8 @@ function createSendTool(
         } finally {
           deps.live?.setAssignment(member.name, null)
           // 被停下也要存：它已经干了一半的活，下次派活时得记得
-          if (latest) await deps.store.saveHistory(member.name, latest)
+          // 提示词和工具增量每轮现算，不进队员的记忆（见 systemMessages.ts）
+          if (latest) await deps.store.saveHistory(member.name, withoutSystemMessages(latest))
         }
       })
     busy.set(key, run)
@@ -767,7 +769,10 @@ function createDeliverTool(deps: TeamToolDeps): UnrealAgentTool<GoalVerdict | nu
   const deliverInput = z.object({
     report: z.string().min(1).describe('交付说明：做了什么、玩法是什么、已知缺口'),
     how_to_play: z.string().min(1).describe('怎么玩：打开哪个关卡、操作键位、胜负条件'),
-    project_path: z.string().optional().describe('这次新建的工程目录'),
+    project_path: z
+      .string()
+      .optional()
+      .describe('这次新建的工程目录；交付的是模型、贴图这类文件而不是游戏时，给交付目录'),
     package_exe: z
       .string()
       .optional()

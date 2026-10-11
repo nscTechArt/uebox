@@ -33,10 +33,13 @@ vi.mock('./importFeatureFlag', () => ({
 
 vi.mock('../../networkV2/ImportSessionClient', () => ({
   DEFAULT_FILE_UPLOAD_TIMEOUT_MS: 30_000,
-  ImportSessionClient: vi.fn().mockImplementation(() => ({
-    reconcileSession: mocks.reconcileSession,
-    cancelSession: mocks.cancelSession
-  }))
+  // vitest 4 起 new 一个 vi.fn() 会真的拿实现当构造函数调，箭头函数不行
+  ImportSessionClient: vi.fn(function () {
+    return {
+      reconcileSession: mocks.reconcileSession,
+      cancelSession: mocks.cancelSession
+    }
+  })
 }))
 
 vi.mock('../../networkV2/VaultServiceManager', () => ({

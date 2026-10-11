@@ -24,6 +24,12 @@ describe('describeProbeError', () => {
     expect(describeProbeError(new Error(raw)).code).toBe(expected)
   })
 
+  it('403 带上原话：中转站的「客户端异常」也回 403，不能只说没权限', () => {
+    const failure = describeProbeError(new Error('403 我们检测到您的客户端存在异常'))
+    expect(failure.code).toBe('forbidden')
+    expect(failure.raw).toContain('客户端存在异常')
+  })
+
   /**
    * 5xx 必须明说是对方的问题。真实案例：Kimi 的 coding 端点对任何请求
    * （含 GET /models）都回 500，而界面只是把原文透出来，用户完全看不出
@@ -133,6 +139,24 @@ describe('testProvider 的探测方式', () => {
     expect(result.ok).toBe(true)
     // ok 但带 skipped：界面据此显示成提示而不是绿勾
     expect(result.skipped).toBe('generativeNoCheapCall')
+  })
+
+  // 中转站上的生图模型只挂在 /images/generations，对话 ping 打过去 404，
+  // 用户会被「模型不存在」指去反复改一个本来就对的模型名
+  it('生图用途不拿对话 ping 去测', async () => {
+    let called = false
+    globalThis.fetch = (async () => {
+      called = true
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}) }
+    }) as unknown as typeof fetch
+
+    const result = await testProvider(
+      providerWith([{ id: 'gemini-3.1-flash-image-preview' }], 'image'),
+      'gemini-3.1-flash-image-preview'
+    )
+
+    expect(called, '不该发出任何请求').toBe(false)
+    expect(result).toEqual({ ok: true, skipped: 'generativeNoCheapCall' })
   })
 
   // 实时语音、网页检索都没有 /chat/completions，对话 ping 的 404 会被说成「模型不存在」

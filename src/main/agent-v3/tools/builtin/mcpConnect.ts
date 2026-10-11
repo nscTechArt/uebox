@@ -66,6 +66,8 @@ export interface ConnectDetails {
   target?: string
   toolNames?: string[]
   attempts?: Attempt[]
+  /** 连上之后这批工具要在下一条消息里装回来，见 toolSearch.ts 的 restore */
+  toolSearch?: { loadedToolNames: string[] }
 }
 
 export async function runConnect(
@@ -163,14 +165,14 @@ export async function runConnect(
         id: request.id,
         connected: true,
         target: candidate.target,
-        toolNames: connected.toolNames
-      },
-      /*
-       * 登记成「这一步加载了这些工具」。工具检索开着时第三方 server 的组不常驻，
-       * 下一条消息重建目录时靠这份名单把它们装回来 —— 不然提示里说的「下一条就能直接调」
-       * 是假的，一调就是 Tool not found
-       */
-      addedToolNames: connected.toolNames
+        toolNames: connected.toolNames,
+        /*
+         * 登记成「这一步加载了这些工具」。工具检索开着时第三方 server 的组不常驻，
+         * 下一条消息重建目录时靠这份名单把它们装回来 —— 不然提示里说的「下一条就能直接调」
+         * 是假的，一调就是 Tool not found。格式和 search_tools 落盘的那份一样（见 toolSearch.ts 的 restore）
+         */
+        toolSearch: { loadedToolNames: connected.toolNames }
+      }
     }
   }
 

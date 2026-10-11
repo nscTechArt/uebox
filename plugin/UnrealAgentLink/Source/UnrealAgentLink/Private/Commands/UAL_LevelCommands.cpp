@@ -573,7 +573,7 @@ void FUAL_LevelCommands::Handle_OrganizeActors(const TSharedPtr<FJsonObject>& Pa
 		return;
 	}
 	// 创建撤销事务，使文件夹归类操作可通过 Ctrl+Z 撤销
-	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("组织Actor到文件夹"), TEXT("Organize Actors to Folder")));
+	FUAL_ScopedTransaction Transaction(UAL_CommandUtils::LText(TEXT("将 Actor 整理到文件夹"), TEXT("Organize Actors to Folder")));
 #endif
 
 	// 1) 解析参数

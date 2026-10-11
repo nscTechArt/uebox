@@ -1,5 +1,6 @@
 /** @vitest-environment node */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TranscriptContext } from '@earendil-works/pi-ai'
 
 /**
  * 输入框里那个「思考程度」最终只落到一个地方：streamFn 传给 pi 的
@@ -10,6 +11,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const streamSimple = vi.fn()
 const getSupportedThinkingLevels = vi.fn()
 const PI_MODEL = { id: 'm1', provider: 'p', api: 'openai-codex-responses' }
+/** pi-ai 被下面整个 mock 掉了，拿不到 normalizeContext；空 transcript 直接按类型断言 */
+const EMPTY_CONTEXT = { messages: [] } as unknown as TranscriptContext
+/** 按模型 id 换掉 getModel 的返回，没登记的一律是 PI_MODEL */
+const MODELS_BY_ID: Record<string, unknown> = {}
 
 vi.mock('@earendil-works/pi-ai', async () => {
   const actual =
@@ -18,7 +23,7 @@ vi.mock('@earendil-works/pi-ai', async () => {
     createAssistantMessageEventStream: actual.createAssistantMessageEventStream,
     createModels: () => ({
       setProvider: vi.fn(),
-      getModel: () => PI_MODEL,
+      getModel: (_provider: string, id: string) => MODELS_BY_ID[id] ?? PI_MODEL,
       streamSimple
     }),
     getSupportedThinkingLevels: (model: unknown) => getSupportedThinkingLevels(model)
@@ -37,9 +42,13 @@ vi.mock('../../ai/store', () => ({
   onSettingsChanged: () => () => {}
 }))
 
-const { resolveAgentModel, listThinkingLevels, invalidateProviderCache } = await import(
-  './streamFn'
-)
+const {
+  resolveAgentModel,
+  listThinkingLevels,
+  invalidateProviderCache,
+  resetImageRejectionsForTest,
+  withTopLevelErrorMessage
+} = await import('./streamFn')
 const {
   DEFAULT_REQUEST_MAX_BYTES,
   budgetFor,
@@ -68,7 +77,7 @@ async function optionsPassedToPi(
   thinkingLevel?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 ): Promise<Record<string, unknown>> {
   const runtime = await resolveAgentModel({ role: 'agent' }, thinkingLevel)
-  runtime.streamFn(PI_MODEL as never, { messages: [] }, undefined as never)
+  runtime.streamFn(PI_MODEL as never, EMPTY_CONTEXT, undefined as never)
   return streamSimple.mock.calls.at(-1)?.[2] as Record<string, unknown>
 }
 
@@ -78,6 +87,8 @@ beforeEach(() => {
   readSettings.mockReset().mockResolvedValue(SETTINGS)
   // 模型集合按「配置内容」缓存，测试之间要清掉才不会互相串
   invalidateProviderCache()
+  resetImageRejectionsForTest()
+  for (const id of Object.keys(MODELS_BY_ID)) delete MODELS_BY_ID[id]
 })
 
 /**
@@ -136,7 +147,7 @@ describe('思考程度 → pi 的 reasoning', () => {
     const mimo = { ...PI_MODEL, baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' }
     const passed = async (level: 'auto' | 'off'): Promise<Record<string, unknown>> => {
       const runtime = await resolveAgentModel({ role: 'agent' }, level)
-      runtime.streamFn(mimo as never, { messages: [] }, undefined as never)
+      runtime.streamFn(mimo as never, EMPTY_CONTEXT, undefined as never)
       return streamSimple.mock.calls.at(-1)?.[2] as Record<string, unknown>
     }
 
@@ -148,7 +159,7 @@ describe('思考程度 → pi 的 reasoning', () => {
   it('保留 pi 自己传进来的 options', async () => {
     const runtime = await resolveAgentModel({ role: 'agent' }, 'high')
     const signal = new AbortController().signal
-    runtime.streamFn(PI_MODEL as never, { messages: [] }, { signal } as never)
+    runtime.streamFn(PI_MODEL as never, EMPTY_CONTEXT, { signal } as never)
 
     const options = streamSimple.mock.calls.at(-1)?.[2] as Record<string, unknown>
     expect(options.signal).toBe(signal)
@@ -231,7 +242,7 @@ describe('出口闸', () => {
     streamSimple.mockReturnValue({ notAStream: true })
 
     expect(() =>
-      runtime.streamFn(PI_MODEL as never, { messages: [] } as never, undefined as never)
+      runtime.streamFn(PI_MODEL as never, EMPTY_CONTEXT as never, undefined as never)
     ).not.toThrow()
   })
 })
@@ -406,7 +417,7 @@ describe('CodeBuddy 带图的请求被拒', () => {
     const runtime = await resolveAgentModel({ role: 'agent' })
     const noImage = await runtime.streamFn(
       CODEBUDDY as never,
-      { messages: [] } as never,
+      EMPTY_CONTEXT as never,
       undefined as never
     )
     await expect(noImage.result()).resolves.toMatchObject({ stopReason: 'error' })
@@ -416,5 +427,200 @@ describe('CodeBuddy 带图的请求被拒', () => {
     await expect(other.result()).resolves.toMatchObject({ stopReason: 'error' })
 
     expect(streamSimple).toHaveBeenCalledTimes(2)
+  })
+})
+
+/**
+ * 收不了图的模型拿到了图（被勾了「视觉」、目录标错）：硅基流动回 400「not a VLM」。
+ * 图留在 transcript 里，不处理的话之后每一轮都原样重发、原样被拒，整条会话卡死。
+ */
+describe('别家带图的请求被拒', () => {
+  const VISION_CLAIMED = {
+    ...PI_MODEL,
+    api: 'openai-completions',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    input: ['text', 'image']
+  }
+  const withImage = {
+    messages: [
+      {
+        role: 'toolResult',
+        toolCallId: 't1',
+        toolName: 'mcp_blender_screenshot',
+        content: [{ type: 'image', data: 'AAAA', mimeType: 'image/jpeg' }],
+        isError: false,
+        timestamp: 0
+      }
+    ]
+  }
+  function streamEnding(event: Record<string, unknown>): unknown {
+    const stream = createAssistantMessageEventStream()
+    stream.push(event as never)
+    stream.end()
+    return stream
+  }
+  const notVlm = (): unknown =>
+    streamEnding({
+      type: 'error',
+      reason: 'error',
+      error: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: '400 The model is not a VLM (Vision Language Model).'
+      }
+    })
+  const ok = (): unknown =>
+    streamEnding({
+      type: 'done',
+      reason: 'stop',
+      message: { role: 'assistant', content: [], stopReason: 'stop' }
+    })
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('没有视觉模型：去掉图重发；过了就记下，之后带图直接按纯文本发', async () => {
+    streamSimple.mockReturnValueOnce(notVlm()).mockReturnValueOnce(ok())
+    const runtime = await resolveAgentModel({ role: 'agent' })
+
+    const first = await runtime.streamFn(
+      VISION_CLAIMED as never,
+      withImage as never,
+      undefined as never
+    )
+    await expect(first.result()).resolves.toMatchObject({ stopReason: 'stop' })
+    expect(streamSimple.mock.calls[1][0]).toMatchObject({ input: ['text'] })
+    await settle()
+
+    streamSimple.mockReturnValueOnce(ok())
+    const next = await runtime.streamFn(
+      VISION_CLAIMED as never,
+      withImage as never,
+      undefined as never
+    )
+    await expect(next.result()).resolves.toMatchObject({ stopReason: 'stop' })
+    expect(streamSimple).toHaveBeenCalledTimes(3)
+    expect(streamSimple.mock.calls[2][0]).toMatchObject({ input: ['text'] })
+  })
+
+  it('去掉图也没过：拒的不是图，不记账', async () => {
+    streamSimple.mockReturnValueOnce(notVlm()).mockReturnValueOnce(notVlm())
+    const runtime = await resolveAgentModel({ role: 'agent' })
+    const first = await runtime.streamFn(
+      VISION_CLAIMED as never,
+      withImage as never,
+      undefined as never
+    )
+    await expect(first.result()).resolves.toMatchObject({ stopReason: 'error' })
+    await settle()
+
+    streamSimple.mockReturnValueOnce(ok())
+    await runtime.streamFn(VISION_CLAIMED as never, withImage as never, undefined as never)
+    expect(streamSimple.mock.calls[2][0]).toMatchObject({ input: ['text', 'image'] })
+  })
+
+  it('配了视觉模型：被拒的这一轮交给它重发', async () => {
+    MODELS_BY_ID.v1 = {
+      id: 'v1',
+      provider: 'p',
+      api: 'openai-completions',
+      input: ['text', 'image']
+    }
+    readSettings.mockResolvedValue({
+      ...SETTINGS,
+      providers: [
+        { ...SETTINGS.providers[0], models: [{ id: 'm1' }, { id: 'v1', supportsVision: true }] }
+      ],
+      roles: { ...SETTINGS.roles, vision: { providerId: 'p', modelId: 'v1' } }
+    })
+    streamSimple.mockReturnValueOnce(notVlm()).mockReturnValueOnce(ok())
+    const runtime = await resolveAgentModel({ role: 'agent' })
+
+    const stream = await runtime.streamFn(
+      VISION_CLAIMED as never,
+      withImage as never,
+      undefined as never
+    )
+    await expect(stream.result()).resolves.toMatchObject({ stopReason: 'stop' })
+    expect(streamSimple.mock.calls[1][0]).toMatchObject({ id: 'v1', input: ['text', 'image'] })
+  })
+})
+
+/**
+ * 截图是跑到一半由工具回来的，进来时定的模型可能是纯文本的。
+ * 这一轮交给视觉模型看，下一轮（图已经答过）回到主模型。
+ */
+describe('这一轮带图、主模型看不了', () => {
+  const TEXT_ONLY = { ...PI_MODEL, input: ['text'] }
+  const VISION = { id: 'v1', provider: 'p', api: 'openai-completions', input: ['text', 'image'] }
+  const screenshot = {
+    role: 'toolResult',
+    toolCallId: 't1',
+    toolName: 'mcp_blender_screenshot',
+    content: [{ type: 'image', data: 'AAAA', mimeType: 'image/jpeg' }],
+    isError: false,
+    timestamp: 0
+  }
+  function withVision(visionConfig: Record<string, unknown> = { supportsVision: true }): void {
+    MODELS_BY_ID.m1 = TEXT_ONLY
+    MODELS_BY_ID.v1 = VISION
+    readSettings.mockResolvedValue({
+      ...SETTINGS,
+      providers: [
+        { ...SETTINGS.providers[0], models: [{ id: 'm1' }, { id: 'v1', ...visionConfig }] }
+      ],
+      roles: { ...SETTINGS.roles, vision: { providerId: 'p', modelId: 'v1' } }
+    })
+  }
+
+  it('交给视觉模型；图答过之后回到主模型', async () => {
+    withVision()
+    const runtime = await resolveAgentModel({ role: 'agent' })
+    expect(runtime.toolImagesVisible).toBe(true)
+
+    runtime.streamFn(TEXT_ONLY as never, { messages: [screenshot] } as never, undefined as never)
+    expect(streamSimple.mock.calls[0][0]).toMatchObject({ id: 'v1' })
+
+    const answered = { role: 'assistant', content: [{ type: 'text', text: '看到了' }] }
+    runtime.streamFn(
+      TEXT_ONLY as never,
+      { messages: [screenshot, answered] } as never,
+      undefined as never
+    )
+    expect(streamSimple.mock.calls[1][0]).toMatchObject({ id: 'm1' })
+  })
+
+  it('视觉模型调不了工具就不换，提示词照实说看不到', async () => {
+    withVision({ supportsVision: true, supportsTools: false })
+    const runtime = await resolveAgentModel({ role: 'agent' })
+    expect(runtime.toolImagesVisible).toBe(false)
+    runtime.streamFn(TEXT_ONLY as never, { messages: [screenshot] } as never, undefined as never)
+    expect(streamSimple.mock.calls[0][0]).toMatchObject({ id: 'm1' })
+  })
+})
+
+/** 硅基流动把原因放在响应体顶层，OpenAI SDK 只认 `error`，报错只剩「no body」 */
+describe('withTopLevelErrorMessage', () => {
+  const respond =
+    (body: string, status: number): typeof fetch =>
+    async () =>
+      new Response(body, { status, headers: { 'content-type': 'application/json' } })
+
+  it('顶层的 message 补进 error，状态码不变', async () => {
+    const fetchFn = withTopLevelErrorMessage(
+      respond(JSON.stringify({ code: 20041, message: 'not a VLM', data: null }), 400)
+    )
+    const response = await fetchFn('https://x/v1/chat/completions')
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: { message: 'not a VLM', code: 20041 } })
+  })
+
+  it('已经有 error、不是 JSON、成功的响应：原样放过', async () => {
+    const pass = async (body: string, status: number): Promise<string> =>
+      (await withTopLevelErrorMessage(respond(body, status))('u')).text()
+    const standard = JSON.stringify({ error: { message: 'bad' } })
+    expect(await pass(standard, 400)).toBe(standard)
+    expect(await pass('oops', 400)).toBe('oops')
+    const success = JSON.stringify({ message: 'hi' })
+    expect(await pass(success, 200)).toBe(success)
   })
 })

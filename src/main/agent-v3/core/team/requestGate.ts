@@ -37,7 +37,7 @@ import {
   type AssistantMessage,
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
-  type Context,
+  type TranscriptContext,
   type Model
 } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
@@ -345,7 +345,7 @@ export interface PacedStreamDeps {
 export function pacedStreamFn(inner: StreamFn, deps: PacedStreamDeps = {}): StreamFn {
   const pick = deps.limiterFor ?? limiterFor
 
-  return (model: Model<Api>, context: Context, options) => {
+  return (model: Model<Api>, context: TranscriptContext, options) => {
     const out = createAssistantMessageEventStream()
     const outer = options?.signal
     const limiter = pick(model)

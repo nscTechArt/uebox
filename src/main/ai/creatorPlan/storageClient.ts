@@ -151,7 +151,7 @@ function networkError(url: string, error: unknown): PlanStorageError {
   } catch {
     // 地址本身就不对，原样带上
   }
-  return new PlanStorageError('network', `连不上 Box Plan（${origin}，${reason}）`)
+  return new PlanStorageError('network', `无法连接 Box Plan（${origin}，${reason}）`)
 }
 
 async function call(
@@ -220,7 +220,7 @@ export async function requestUpload(
   const key = str(json?.key)
   const url = str(json?.url)
   if (!json || !key || !url) {
-    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的上传申请结果')
+    throw new PlanStorageError('bad_response', 'Box Plan 返回了无法识别的上传申请结果')
   }
   const expiresAt = str(json.expires_at)
   if (json.exists === true) return { exists: true, key, url, expiresAt }
@@ -258,7 +258,7 @@ export async function completeUpload(
   if (!res.ok) throw await failure(res)
   const object = toStoredObject((await res.json().catch(() => null)) as Record<string, unknown>)
   if (!object) {
-    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的确认结果')
+    throw new PlanStorageError('bad_response', 'Box Plan 返回了无法识别的确认结果')
   }
   return object
 }
@@ -288,7 +288,7 @@ export async function listObjectsPage(
   if (!res.ok) throw await failure(res)
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
   if (!json || !Array.isArray(json.data)) {
-    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的对象列表')
+    throw new PlanStorageError('bad_response', 'Box Plan 返回了无法识别的对象列表')
   }
   const data = json.data
     .map((item) => toStoredObject(item as Record<string, unknown>))
@@ -321,7 +321,7 @@ export async function getUsage(
   if (!res.ok) throw await failure(res)
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
   if (!json || typeof json.used_bytes !== 'number') {
-    throw new PlanStorageError('bad_response', 'Box Plan 回了无法识别的用量')
+    throw new PlanStorageError('bad_response', 'Box Plan 返回了无法识别的用量')
   }
   return {
     quotaBytes: Number(json.quota_bytes) || 0,

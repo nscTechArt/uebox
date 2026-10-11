@@ -5771,19 +5771,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         }
       },
       {
-        "id": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
-        "displayName": "DeepSeek V4 Flash Vision Exp",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 384000,
-        "cost": {
-          "input": 0.44,
-          "output": 1.32
-        }
-      },
-      {
         "id": "zai-org/GLM-5.3",
         "displayName": "GLM-5.3",
         "supportsVision": false,
@@ -5797,32 +5784,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         }
       },
       {
-        "id": "Qwen/Qwen3.8-2.4T-A95B",
-        "displayName": "Qwen3.8 2.4T A95B",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1049000,
-        "maxOutputTokens": 131000,
-        "cost": {
-          "input": 2,
-          "output": 6
-        }
-      },
-      {
-        "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
-        "displayName": "DeepSeek V4 Pro 0813",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1000000,
-        "maxOutputTokens": 384000,
-        "cost": {
-          "input": 1.32,
-          "output": 3.96
-        }
-      },
-      {
         "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
         "displayName": "DeepSeek V4 Flash 0731",
         "supportsVision": false,
@@ -5833,32 +5794,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "cost": {
           "input": 0.22,
           "output": 0.66
-        }
-      },
-      {
-        "id": "moonshotai/Kimi-K3",
-        "displayName": "Kimi K3",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1048576,
-        "maxOutputTokens": 262000,
-        "cost": {
-          "input": 2.7,
-          "output": 13.5
-        }
-      },
-      {
-        "id": "tencent/Hy3",
-        "displayName": "Hy3",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 262144,
-        "maxOutputTokens": 262144,
-        "cost": {
-          "input": 0.132,
-          "output": 0.528
         }
       },
       {
@@ -6346,19 +6281,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "cost": {
           "input": 4.35,
           "output": 8.7
-        }
-      },
-      {
-        "id": "mimo-v2.5-pro-ultraspeed",
-        "displayName": "MiMo-V2.5-Pro-UltraSpeed",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "contextWindow": 1048576,
-        "maxOutputTokens": 131072,
-        "cost": {
-          "input": 1.305,
-          "output": 2.61
         }
       },
       {

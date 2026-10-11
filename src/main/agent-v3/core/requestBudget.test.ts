@@ -78,6 +78,14 @@ describe('outbound assistant payloads', () => {
     } as Ctx
     expect(measureContextBytes(context)).toBeGreaterThanOrEqual(15000)
   })
+
+  it('pi 1.0 放在 system 消息里的工具定义也算进去', () => {
+    const tool = { name: 'big', description: 'x'.repeat(20000), parameters: {} }
+    const context = {
+      messages: [{ role: 'system', content: '提示词', toolsAdded: [tool], timestamp: 0 }]
+    } as unknown as Ctx
+    expect(measureContextBytes(context)).toBeGreaterThanOrEqual(20000)
+  })
 })
 
 describe('预算之内的请求原样透传', () => {

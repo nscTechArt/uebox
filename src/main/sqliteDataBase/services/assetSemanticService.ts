@@ -74,7 +74,7 @@ export async function enableAssetSemanticSearch(
   if (dimension <= 0) {
     return {
       ok: false,
-      error: '嵌入模型没有返回向量，检查一下「设置 → 模型」的配置。'
+      error: '嵌入模型未返回向量，请检查「设置 → 模型」中的配置。'
     }
   }
 

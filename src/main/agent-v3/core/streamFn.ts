@@ -1,4 +1,4 @@
-import type { StreamFn } from '@earendil-works/pi-agent-core'
+import type { AgentMessage, StreamFn } from '@earendil-works/pi-agent-core'
 import {
   createAssistantMessageEventStream,
   createModels,
@@ -28,6 +28,7 @@ import { classifyProviderError } from '../host/providerError'
 import { thinkingOffFields, toPiProvider } from './piModel'
 import { isTransientBadRequest } from './team/requestGate'
 import { labelToolResultImages } from './toolImageLabels'
+import { currentTurnHasImages } from './visionRouting'
 import {
   contextHasMediaRefs,
   isMediaFetchError,
@@ -222,16 +223,6 @@ function failedMessage(model: Model<Api>, errorMessage: string): AssistantMessag
   }
 }
 
-/**
- * 第一下就被拒、而且拒的原因换个请求能绕开时，换一条流重发一次，这一轮照样有回答
- * —— 见 AGENTS.md 第 5 节第 13 条「退的每一步都不许打断这一轮」。眼下两种：
- *
- * - 厂商说拉不下链接里的多媒体（对象存储在墙外、链接过期、格式它不认）：引用换成说明
- * - CodeBuddy 带图的请求回空 400：去掉图片（见 `contextHasImages` 那里）
- *
- * 只看第一个事件：pi 在 HTTP 失败时只推一个 `error`、不推 `start`，
- * 这时调用方还什么都没收到，换一条流接上不会留下半截内容。
- */
 /** 对话里有没有内嵌图片（工具截图、用户贴的图） */
 function contextHasImages(context: Context): boolean {
   return context.messages.some(
@@ -240,11 +231,96 @@ function contextHasImages(context: Context): boolean {
   )
 }
 
+/**
+ * 声明能看图、一带图就被拒的模型。这个进程里再带图就当它是纯文本模型：
+ * 截图交给视觉模型看，历史里的旧图换成占位文字。
+ *
+ * 真机（2026-10-09 硅基流动）：用户给 DeepSeek-V4-Pro 勾了「视觉」，Blender 截图一回来
+ * 就是 400「not a VLM」。图留在 transcript 里，之后每一轮、每次「继续尝试」都原样重发，
+ * 整条会话就此卡死。只记「去掉图之后真过了」的那种 —— 没过说明拒的不是图。
+ */
+const imageRejecting = new Set<string>()
+
+function modelKey(model: Model<Api>): string {
+  return `${model.provider}/${model.id}`
+}
+
+/** 模型声明收图。pi 的模型都带 `input`，没带的（手造的、测试桩）按不收算 */
+function acceptsImages(model: Model<Api>): boolean {
+  return model.input?.includes('image') ?? false
+}
+
+function seesImages(model: Model<Api>): boolean {
+  return acceptsImages(model) && !imageRejecting.has(modelKey(model))
+}
+
+/** 仅供测试 */
+export function resetImageRejectionsForTest(): void {
+  imageRejecting.clear()
+}
+
+/** 重发那一条真成功了，才把「这个模型收不了图」记下 */
+function learnImageRejection(retry: AssistantMessageEventStream, model: Model<Api>): void {
+  const result = (retry as { result?: () => Promise<unknown> })?.result
+  if (typeof result !== 'function') return
+  void Promise.resolve(result.call(retry))
+    .then((value) => value as { stopReason?: string })
+    .then((message) => {
+      if (message?.stopReason === 'error' || message?.stopReason === 'aborted') return
+      imageRejecting.add(modelKey(model))
+      console.warn(`[streamFn] ${modelKey(model)} 收不了图，这次运行里不再给它发图`)
+    })
+    .catch(() => {})
+}
+
+/**
+ * 有的厂商把错误原因放在响应体顶层（硅基流动：`{"code":20041,"message":"…not a VLM…"}`），
+ * OpenAI SDK 只认 `{"error":{…}}`，于是报错只剩一句 `400 status code (no body)`，
+ * 用户和我们都看不出是哪里被拒。失败响应体是这个形状时，补一层 `error` 让原因透出来。
+ * 成功的响应原样放过。
+ */
+export function withTopLevelErrorMessage(base: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    const response = await base(input, init)
+    if (response.ok) return response
+    const text = await response
+      .clone()
+      .text()
+      .catch(() => '')
+    let body: unknown
+    try {
+      body = JSON.parse(text)
+    } catch {
+      return response
+    }
+    if (!body || typeof body !== 'object' || 'error' in body) return response
+    const { message, code } = body as { message?: unknown; code?: unknown }
+    if (typeof message !== 'string' || !message) return response
+    const headers = new Headers(response.headers)
+    headers.delete('content-length')
+    headers.delete('content-encoding')
+    return new Response(
+      JSON.stringify({ ...body, error: { message, ...(code !== undefined ? { code } : {}) } }),
+      { status: response.status, statusText: response.statusText, headers }
+    )
+  }
+}
+
+/**
+ * 第一下就被拒、而且拒的原因换个请求能绕开时，换一条流重发一次，这一轮照样有回答
+ * —— 见 AGENTS.md 第 5 节第 13 条「退的每一步都不许打断这一轮」。眼下两种：
+ *
+ * - 厂商说拉不下链接里的多媒体（对象存储在墙外、链接过期、格式它不认）：引用换成说明
+ * - 带图的请求回 400：交给视觉模型，或者去掉图片（见 `contextHasImages` 那里）
+ *
+ * 只看第一个事件：pi 在 HTTP 失败时只推一个 `error`、不推 `start`，
+ * 这时调用方还什么都没收到，换一条流接上不会留下半截内容。
+ */
 function retryOnFirstError(
   first: AssistantMessageEventStream,
   model: Model<Api>,
   shouldRetry: (errorMessage: string) => boolean,
-  retry: () => AssistantMessageEventStream
+  retry: (errorMessage: string) => AssistantMessageEventStream
 ): AssistantMessageEventStream {
   const out = createAssistantMessageEventStream()
   const forward = async (iterator: AsyncIterator<AssistantMessageEvent>): Promise<void> => {
@@ -261,7 +337,7 @@ function retryOnFirstError(
       head.value.reason === 'error' &&
       shouldRetry(head.value.error.errorMessage ?? '')
     ) {
-      await forward(retry()[Symbol.asyncIterator]())
+      await forward(retry(head.value.error.errorMessage ?? '')[Symbol.asyncIterator]())
     } else {
       if (!head.done) out.push(head.value)
       await forward(iterator)
@@ -291,6 +367,11 @@ export interface AgentModelRuntime {
    * 主模型，压缩仍然可用，只是贵一点。
    */
   summaryModel: Model<string>
+  /**
+   * 工具回的截图有没有模型看得到：主模型自己能看，或者配了能接手的视觉模型。
+   * 系统提示词按它说「你看得到」还是「你看不到」
+   */
+  toolImagesVisible: boolean
 }
 
 /**
@@ -361,8 +442,173 @@ export async function resolveAgentModel(
   }
 
   const reasoning = toPiReasoning(thinkingLevel)
-  // 对话里的多媒体引用，这个模型能直接收哪几类链接，见 promptMedia.ts
-  const urlKinds = mediaUrlKinds(settings, selection.providerId, selection.modelId)
+
+  /** 这次请求实际发给谁。平时就是 selection；这一轮带图而它看不了，换成视觉模型 */
+  interface Target {
+    model: Model<Api>
+    providerId: string
+    modelId: string
+  }
+  const primary: Target = {
+    model: selection.model as Model<Api>,
+    providerId: selection.providerId,
+    modelId: selection.modelId
+  }
+
+  /**
+   * 这一轮的图交给谁看：主模型看不了时，按「视觉」角色的回落链找一个看得了、还能调工具的。
+   *
+   * 进来的时候模型已经定了（`hasImages` 只看用户贴的图），而截图是**跑到一半**
+   * 由工具回来的 —— 不在这里换，纯文本模型就只能拿着一句「(image omitted)」去
+   * 判断改得对不对。只换带图的这一轮（同 `visionRouting.ts` 的取舍），下一轮回到主模型。
+   * 视觉模型调不了工具的不换：这一轮它要接着干活，不是只描述一张图。
+   */
+  const visionStandIn = (exclude: Target): Target | undefined => {
+    for (const candidateRole of [
+      resolveRoleForRequest(settings, { ...request, hasImages: true }),
+      'vision' as const
+    ]) {
+      const candidate = selectModel(settings, models, candidateRole)
+      if (!candidate) continue
+      if (candidate.providerId === exclude.providerId && candidate.modelId === exclude.modelId) {
+        continue
+      }
+      const model = candidate.model as Model<Api>
+      if (!seesImages(model)) continue
+      const config = settings.providers
+        .find((provider) => provider.id === candidate.providerId)
+        ?.models.find((item) => item.id === candidate.modelId)
+      if (config?.supportsTools === false) continue
+      return { model, providerId: candidate.providerId, modelId: candidate.modelId }
+    }
+    return undefined
+  }
+
+  const send = (
+    target: Target,
+    context: Context,
+    options: Parameters<StreamFn>[2],
+    imageFallback: boolean
+  ): AssistantMessageEventStream => {
+    // 记下来收不了图的，按纯文本模型发：pi 会把图换成占位文字
+    const model: Model<Api> =
+      acceptsImages(target.model) && !seesImages(target.model)
+        ? { ...target.model, input: ['text'] }
+        : target.model
+    // 对话里的多媒体引用，这个模型能直接收哪几类链接，见 promptMedia.ts
+    const urlKinds = mediaUrlKinds(settings, target.providerId, target.modelId)
+    const projected = projectSafely(context, target.providerId)
+    if (projected.droppedImages > 0) {
+      console.warn(
+        `[streamFn] 本轮请求超出 ${target.providerId} 的预算，` +
+          `已丢掉 ${projected.droppedImages} 张图（最大的优先），换成占位文字`
+      )
+    }
+    // 发不出去的那几类先换成说明，剩下的（如果还有）在 onPayload 里换成链接
+    const replaced = replaceMediaRefs(
+      projected.context,
+      urlKinds,
+      unfetchableMediaKeys(target.providerId)
+    )
+    // 放在出口闸之后：被预算丢掉的图已换成文字，序号才和真正发出去的附图对得上
+    const labeled = labelToolResultImages(replaced.messages)
+    const outgoing = labeled === replaced.messages ? replaced : { ...replaced, messages: labeled }
+    const hasMedia = contextHasMediaRefs(outgoing)
+    const previousOnPayload = options?.onPayload
+    // 「不思考」在有几家端点上光传 off 不管用，要补自家字段（见 thinkingOffFields）
+    const offFields = thinkingLevel === 'off' ? thinkingOffFields(model.baseUrl) : undefined
+    // OpenCode 要一段对话一个稳定的会话 id；pi 给的缓存键正好是这个粒度，
+    // 压缩后换键时前缀缓存本来也失效了。凭据层那个随机 id 只给一次性请求兜底
+    const sessionHeaders =
+      options?.sessionId && isOpenCodeEndpoint(model.baseUrl)
+        ? { headers: { ...options.headers, ...openCodeHeaders(options.sessionId) } }
+        : {}
+    const baseOptions = {
+      ...options,
+      ...sessionHeaders,
+      // Google 两个适配器见到非全局 fetch 直接抛错（同 requestDiagnostics），只给 OpenAI 系
+      ...(String(model.api).startsWith('openai-')
+        ? {
+            fetch: withTopLevelErrorMessage(
+              options?.fetch ?? ((input, init) => globalThis.fetch(input, init))
+            )
+          }
+        : {}),
+      ...(reasoning ? { reasoning } : {}),
+      ...(offFields ? { samplingParams: { ...options?.samplingParams, ...offFields } } : {})
+    }
+    const firstTry = models.streamSimple(model, outgoing, {
+      ...baseOptions,
+      ...(hasMedia
+        ? {
+            onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
+              const upstream = await previousOnPayload?.(payload, payloadModel)
+              const current = upstream === undefined ? payload : upstream
+              const rewritten = await rewriteMediaInPayload(current, {
+                urlFor: mediaUrlFor,
+                isRemoved: isObjectRemoved
+              })
+              return rewritten === undefined ? upstream : rewritten
+            }
+          }
+        : {})
+    })
+    const stream = hasMedia
+      ? retryOnFirstError(firstTry, model, isMediaFetchError, () => {
+          const keys = mediaRefKeys(outgoing)
+          console.warn(
+            `[streamFn] ${target.providerId} 拉不下对话里的多媒体链接，换成说明重发：`,
+            keys
+          )
+          noteUnfetchableMedia(target.providerId, keys)
+          return models.streamSimple(
+            model,
+            replaceMediaRefs(outgoing, urlKinds, new Set(keys)),
+            baseOptions
+          )
+        })
+      : firstTry
+    // 带图的请求回 400，重发一次，这一轮照样有回答：
+    //
+    // - CodeBuddy 的 hy4：带图的请求过了约 14 万 token 就多半被拒（不带图 23 万也照收），
+    //   回的是空 400。2026-10-08 拿真机被拒的请求体逐项对照量出来的：同一请求去掉图片
+    //   5/5 能过，原样 5 次挂 4 次。它平时看得了图，所以只去掉图、不记账
+    // - 别家：多半是这个模型根本收不了图（被勾了「视觉」、目录标错）。有视觉模型就交给它，
+    //   没有就去掉图；重发真过了就记下来，这次运行里不再给它发图
+    const imagesGoOut = imageFallback && acceptsImages(model) && contextHasImages(outgoing)
+    const final = imagesGoOut
+      ? retryOnFirstError(
+          stream,
+          model,
+          (message) =>
+            isTransientBadRequest(model, message) ||
+            classifyProviderError(message).statusCode === 400,
+          (message) => {
+            if (isTransientBadRequest(model, message)) {
+              console.warn(
+                `[streamFn] ${target.providerId}/${model.id} 带图的请求被拒，去掉图片重发一次`
+              )
+              return models.streamSimple({ ...model, input: ['text'] }, outgoing, baseOptions)
+            }
+            const standIn = visionStandIn(target)
+            console.warn(
+              `[streamFn] ${target.providerId}/${model.id} 带图的请求被拒（${message.slice(0, 120)}），` +
+                (standIn ? `交给 ${standIn.providerId}/${standIn.modelId} 重发` : '去掉图片重发')
+            )
+            const retry = standIn
+              ? send(standIn, context, options, false)
+              : send({ ...target, model: { ...model, input: ['text'] } }, context, options, false)
+            learnImageRejection(retry, model)
+            return retry
+          }
+        )
+      : stream
+    // 没量出来（bytes < 0）就没有可学的数 —— 别拿一个假数去调这家的预算
+    if (projected.bytes >= 0) {
+      watchForOversized(stream, target.providerId, projected.bytes)
+    }
+    return final
+  }
 
   return {
     selection,
@@ -377,93 +623,21 @@ export async function resolveAgentModel(
     // 注意压缩用的摘要请求走的是 pi 的 `models.completeSimple`，不经过这里；
     // 那条路上 `serializeConversation` 会把图片全部丢成文本，所以不需要闸。
     streamFn: (model, context, options) => {
-      const projected = projectSafely(context, selection.providerId)
-      if (projected.droppedImages > 0) {
-        console.warn(
-          `[streamFn] 本轮请求超出 ${selection.providerId} 的预算，` +
-            `已丢掉 ${projected.droppedImages} 张图（最大的优先），换成占位文字`
-        )
-      }
-      // 发不出去的那几类先换成说明，剩下的（如果还有）在 onPayload 里换成链接
-      const replaced = replaceMediaRefs(
-        projected.context,
-        urlKinds,
-        unfetchableMediaKeys(selection.providerId)
-      )
-      // 放在出口闸之后：被预算丢掉的图已换成文字，序号才和真正发出去的附图对得上
-      const labeled = labelToolResultImages(replaced.messages)
-      const outgoing = labeled === replaced.messages ? replaced : { ...replaced, messages: labeled }
-      const hasMedia = contextHasMediaRefs(outgoing)
-      const previousOnPayload = options?.onPayload
-      // 「不思考」在有几家端点上光传 off 不管用，要补自家字段（见 thinkingOffFields）
-      const offFields = thinkingLevel === 'off' ? thinkingOffFields(model.baseUrl) : undefined
-      // OpenCode 要一段对话一个稳定的会话 id；pi 给的缓存键正好是这个粒度，
-      // 压缩后换键时前缀缓存本来也失效了。凭据层那个随机 id 只给一次性请求兜底
-      const sessionHeaders =
-        options?.sessionId && isOpenCodeEndpoint(model.baseUrl)
-          ? { headers: { ...options.headers, ...openCodeHeaders(options.sessionId) } }
-          : {}
-      const baseOptions = {
-        ...options,
-        ...sessionHeaders,
-        ...(reasoning ? { reasoning } : {}),
-        ...(offFields ? { samplingParams: { ...options?.samplingParams, ...offFields } } : {})
-      }
-      const firstTry = models.streamSimple(model, outgoing, {
-        ...baseOptions,
-        ...(hasMedia
-          ? {
-              onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
-                const upstream = await previousOnPayload?.(payload, payloadModel)
-                const current = upstream === undefined ? payload : upstream
-                const rewritten = await rewriteMediaInPayload(current, {
-                  urlFor: mediaUrlFor,
-                  isRemoved: isObjectRemoved
-                })
-                return rewritten === undefined ? upstream : rewritten
-              }
-            }
-          : {})
-      })
-      const stream = hasMedia
-        ? retryOnFirstError(firstTry, model, isMediaFetchError, () => {
-            const keys = mediaRefKeys(outgoing)
-            console.warn(
-              `[streamFn] ${selection.providerId} 拉不下对话里的多媒体链接，换成说明重发：`,
-              keys
-            )
-            noteUnfetchableMedia(selection.providerId, keys)
-            return models.streamSimple(
-              model,
-              replaceMediaRefs(outgoing, urlKinds, new Set(keys)),
-              baseOptions
-            )
-          })
-        : firstTry
-      // CodeBuddy 的 hy4：带图的请求过了约 14 万 token 就多半被拒（不带图 23 万也照收），
-      // 回的是空 400。2026-10-08 拿真机被拒的请求体逐项对照量出来的：同一请求去掉图片
-      // 5/5 能过，原样 5 次挂 4 次。去掉图片重发，模型这一轮看不到截图，但工具结果的
-      // 文字还在，好过整轮失败
-      const final = contextHasImages(outgoing)
-        ? retryOnFirstError(
-            stream,
-            model,
-            (message) => isTransientBadRequest(model, message),
-            () => {
-              console.warn(
-                `[streamFn] ${selection.providerId}/${model.id} 带图的请求被拒，去掉图片重发一次`
-              )
-              return models.streamSimple({ ...model, input: ['text'] }, outgoing, baseOptions)
-            }
+      const target: Target = { ...primary, model: model as Model<Api> }
+      if (!seesImages(target.model) && currentTurnHasImages(context.messages as AgentMessage[])) {
+        const standIn = visionStandIn(target)
+        if (standIn) {
+          console.warn(
+            `[streamFn] 这一轮带图，${target.providerId}/${target.modelId} 看不了，` +
+              `交给 ${standIn.providerId}/${standIn.modelId}`
           )
-        : stream
-      // 没量出来（bytes < 0）就没有可学的数 —— 别拿一个假数去调这家的预算
-      if (projected.bytes >= 0) {
-        watchForOversized(stream, selection.providerId, projected.bytes)
+          return send(standIn, context, options, true)
+        }
       }
-      return final
+      return send(target, context, options, true)
     },
     models,
-    summaryModel: selectModel(settings, models, 'summary')?.model ?? selection.model
+    summaryModel: selectModel(settings, models, 'summary')?.model ?? selection.model,
+    toolImagesVisible: seesImages(primary.model) || visionStandIn(primary) !== undefined
   }
 }

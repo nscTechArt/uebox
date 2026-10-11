@@ -580,7 +580,7 @@ export function initAgentEventDispatcher(): void {
   // 压缩要停几秒，不说一声用户会以为卡住了
   on('agent-v3:compacting', (data: { sessionId: string }) => {
     if (!data?.sessionId) return
-    notify(data.sessionId, '对话变长了，正在压缩上下文…', 'info')
+    notify(data.sessionId, '对话较长，正在压缩上下文…', 'info')
   })
 
   // ── /goal 目标模式：复核进度与裁决 ──────────────────────────────────

@@ -117,6 +117,8 @@ export function buildAcceptancePrompt(input: {
     '',
     'If there is a packaged build, also run `project_smoke_test` on it: a build that will not start is not delivered.',
     '',
+    'Not every delivery is a game. When what was promised is files on disk — models, textures, a .blend or .fbx, documents — and there is nothing to play, the game bar does not apply; judge the files against the objective instead. You have read-only local file tools for that: `find_local_files` / `list_local_dir` to see what is in the delivery folder, `read_local_file` to open text and images, `inspect_uasset_file` for Unreal assets. Confirm each promised file exists and opens, and compare it with any reference the objective names. A promised file that is not there is a FAIL, not a BLOCKED.',
+    '',
     'Judge the game in front of you, not the report:',
     '- Go through the bar line by line. For each line, find what would prove it and check that in the running game.',
     '- Run it. Compile, play it in the editor, try the loop from start to a win or a loss and back again. A clean compile is not a game that works.',

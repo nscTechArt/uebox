@@ -221,7 +221,7 @@ const probeVectorRoute = async (db: Database.Database): Promise<NotebookVectorRo
     const [probe] = await embedTexts(['probe'])
     const dimension = probe?.length ?? 0
     if (dimension <= 0) {
-      return { available: false, reason: '嵌入模型没有返回向量，检查一下服务商的配置' }
+      return { available: false, reason: '嵌入模型未返回向量，请检查服务商配置' }
     }
     reconcileEmbeddingIndex(dimension)
     return { available: true }

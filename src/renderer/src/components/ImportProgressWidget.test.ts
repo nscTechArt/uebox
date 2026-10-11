@@ -10,7 +10,7 @@ const translations: Record<string, string> = {
   'importProgressWidget.detecting': '检测中',
   'importProgressWidget.dismiss': '知道了，收起',
   'importProgressWidget.viewDetail': '查看详情',
-  'importProgressWidget.titleFailed': '导入没导全 ({count})'
+  'importProgressWidget.titleFailed': '导入不完整 ({count})'
 }
 
 const $t = (key: string, params?: Record<string, unknown>): string => {
@@ -167,7 +167,7 @@ describe('ImportProgressWidget', () => {
   it('全是失败任务时标题和图标都改口 —— 什么都没在跑就别转圈', () => {
     const failed = mountWidget([makeTask({ status: 'error' })])
     expect(failed.get('.loading-icon').classes()).not.toContain('spinning')
-    expect(failed.get('.title').text()).toBe('导入没导全 (1)')
+    expect(failed.get('.title').text()).toBe('导入不完整 (1)')
 
     // 只要还有一条在跑，就还是「进行中」的样子
     const mixed = mountWidget([makeTask({ id: 'a', status: 'error' }), makeTask({ id: 'b' })])

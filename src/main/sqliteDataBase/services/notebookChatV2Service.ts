@@ -419,7 +419,7 @@ const buildReadinessWarnings = (
     return [
       {
         code: 'no_indexed_sources',
-        message: '当前选中的知识库来源还没有建好索引，本轮将先按普通对话继续。',
+        message: '当前选中的知识库来源尚未建立索引，本轮将按普通对话继续。',
         severity: 'info'
       }
     ]

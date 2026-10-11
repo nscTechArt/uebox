@@ -27,6 +27,7 @@
 #include "GameFramework/PlayerController.h"
 // PIE 截图取玩家相机 FOV 用（PlayerController.h 里只有前向声明）
 #include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraComponent.h"
 #include "Engine/Engine.h"
 
 #include "Editor.h"
@@ -465,12 +466,21 @@ static void UAL_ResolveExposure(
 	const FVector& ViewLocation,
 	const FEditorViewportClient* SourceViewport,
 	bool bEditorWorldCapture,
+	const FPostProcessSettings* CameraPP,
 	FUALSceneCaptureSetup& OutSetup)
 {
 	if (bEditorWorldCapture && SourceViewport && SourceViewport->ExposureSettings.bFixed)
 	{
 		OutSetup.Exposure = TEXT("manual");
 		OutSetup.ExposureSource = TEXT("viewport");
+		return;
+	}
+
+	// 相机自己的后期叠在后期盒子上面，它说了算
+	if (CameraPP && CameraPP->bOverride_AutoExposureMethod)
+	{
+		OutSetup.Exposure = CameraPP->AutoExposureMethod == EAutoExposureMethod::AEM_Manual ? TEXT("manual") : TEXT("auto");
+		OutSetup.ExposureSource = TEXT("camera");
 		return;
 	}
 
@@ -575,6 +585,13 @@ static void UAL_MatchViewLighting(UWorld* World, const FVector& ViewLocation, FP
 #endif
 	}
 
+	// PP 里已经带着的（从驱动画面的相机抄来的）叠在最上面，和引擎的顺序一致
+	if (PP.bOverride_DynamicGlobalIlluminationMethod) { GI = PP.DynamicGlobalIlluminationMethod; }
+	if (PP.bOverride_ReflectionMethod) { Reflections = PP.ReflectionMethod; }
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+	if (PP.bOverride_LumenSurfaceCacheResolution) { SurfaceCacheResolution = PP.LumenSurfaceCacheResolution; }
+#endif
+
 	PP.bOverride_DynamicGlobalIlluminationMethod = true;
 	PP.DynamicGlobalIlluminationMethod = GI;
 	PP.bOverride_ReflectionMethod = true;
@@ -632,7 +649,7 @@ static bool UAL_SetupSceneCapture(
 	FVector ViewLocation(0.f, 0.f, 500.f);
 	FRotator ViewRotation(-30.f, 0.f, 0.f);
 	float ViewFOV = 90.f;
-	FEditorViewportClient* SourceViewport = nullptr;
+	FLevelEditorViewportClient* SourceViewport = nullptr;
 
 	if (GCurrentLevelEditingViewportClient && GCurrentLevelEditingViewportClient->IsPerspective())
 	{
@@ -672,6 +689,39 @@ static bool UAL_SetupSceneCapture(
 		ViewFOV = InViewFOV.GetValue();
 	}
 
+	// 驱动这个画面的相机。用户看到的不只是机位，还有这台相机的 FOV 和它自己的后期
+	// （白平衡、调色、曝光）—— 引擎把相机后期叠在后期盒子上面，SceneCapture 不会自己去拿。
+	//
+	// 编辑器里：视口锁在相机上（Sequencer 镜头切换、Pilot 了一台相机）时就是那台相机。
+	// 2026-10-09 夜景城市：视口锁在 CineCamera 上，截图却按视口的 90° 拍（构图更广）、
+	// 没带相机的冷色调色（整体偏暖），而 MRQ 走相机渲出来和视口一致。
+	// PIE 里：玩家相机管理器缓存的那一份视图，玩家相机组件上的后期在里面。
+	TOptional<FMinimalViewInfo> CameraView;
+	if (!InViewLocation.IsSet() && bEditorWorldCapture && SourceViewport)
+	{
+		if (UCameraComponent* Camera = SourceViewport->GetCameraComponentForView())
+		{
+			FMinimalViewInfo View;
+			Camera->GetCameraView(0.f, View);
+			ViewLocation = View.Location;
+			ViewRotation = View.Rotation;
+			ViewFOV = View.FOV;
+			CameraView = View;
+		}
+	}
+	else if (InViewLocation.IsSet())
+	{
+		APlayerController* PC = World->GetFirstPlayerController();
+		if (PC && PC->PlayerCameraManager)
+		{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+			CameraView = PC->PlayerCameraManager->GetCameraCacheView();
+#else
+			CameraView = PC->PlayerCameraManager->GetCameraCachePOV();
+#endif
+		}
+	}
+
 	const bool bFoundViewport = SourceViewport != nullptr;
 	if (!bFoundViewport)
 	{
@@ -682,7 +732,8 @@ static bool UAL_SetupSceneCapture(
 	// 调用方显式给了机位（PIE 玩家视角）时，找没找到视口都无关紧要。
 	OutSetup.CameraSource =
 		InViewLocation.IsSet() ? TEXT("player") : (bFoundViewport ? TEXT("viewport") : TEXT("fallback"));
-	UAL_ResolveExposure(World, ViewLocation, SourceViewport, bEditorWorldCapture, OutSetup);
+	UAL_ResolveExposure(World, ViewLocation, SourceViewport, bEditorWorldCapture,
+		CameraView.IsSet() ? &CameraView->PostProcessSettings : nullptr, OutSetup);
 
 	// RenderTarget：普通 RGBA8 + 显示伽马，读回来的字节就是视口屏幕上的那个值。
 	//
@@ -724,6 +775,11 @@ static bool UAL_SetupSceneCapture(
 	Capture->bCaptureEveryFrame = false;
 	Capture->bCaptureOnMovement = false;
 	Capture->bAlwaysPersistRenderingState = true;
+	if (CameraView.IsSet())
+	{
+		Capture->PostProcessSettings = CameraView->PostProcessSettings;
+		Capture->PostProcessBlendWeight = CameraView->PostProcessBlendWeight;
+	}
 	UAL_MatchViewLighting(World, ViewLocation, Capture->PostProcessSettings);
 
 	// 曝光要照抄视口的，否则画面明暗和用户看到的不是一回事。
@@ -3726,8 +3782,8 @@ namespace
 
 		const bool bChinese = FInternationalization::Get().GetCurrentCulture()->GetName().StartsWith(TEXT("zh"));
 		const FText Message = bChinese
-			? FText::FromString(TEXT("盒子正在试玩测试，请勿操作 · 按 Esc 中止"))
-			: FText::FromString(TEXT("UEBox is playtesting - please don't touch · Esc to abort"));
+			? FText::FromString(TEXT("虚幻盒子自动试玩测试中，请勿操作 · 按 Esc 中止"))
+			: FText::FromString(TEXT("Unreal Box automated playtest in progress. Do not interact · Press Esc to abort"));
 
 		static const FSlateColorBrush Background(FLinearColor(0.f, 0.f, 0.f, 0.6f));
 		FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 14);

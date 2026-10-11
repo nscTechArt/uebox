@@ -161,7 +161,7 @@ describe('parseJsonObject', () => {
   })
 
   it('实在解不出来时给一句能看懂的话', () => {
-    expect(() => parseJsonObject('我无法完成这个请求')).toThrow('不是合法 JSON')
+    expect(() => parseJsonObject('我无法完成这个请求')).toThrow('不是有效的 JSON')
   })
 })
 
@@ -193,7 +193,7 @@ describe('产出配方', () => {
     respondInOrder('{"title":"Lumen 入门"}', '我建议你自己写一个页面。')
 
     await expect(NOTEBOOK_TASK_RUNNERS.webpage(input(), context())).rejects.toThrow(
-      '没有返回可用的网页代码'
+      '未返回可用的网页代码'
     )
   })
 

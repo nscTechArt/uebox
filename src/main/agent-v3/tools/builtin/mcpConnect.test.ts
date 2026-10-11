@@ -127,7 +127,7 @@ describe('接一台 server', () => {
   // 工具检索开着时第三方组不常驻，下一条消息靠这份名单把它们装回来
   it('接上之后把新工具登记成「这一步加载的」', async () => {
     const outcome = await runConnect({ id: 'fs', url: '9876' }, deps())
-    expect(outcome.addedToolNames).toEqual(['mcp_x_echo'])
+    expect(outcome.details?.toolSearch?.loadedToolNames).toEqual(['mcp_x_echo'])
   })
 
   /** 握手那十几秒里用户按了停止：界面说停了，它就不能还连着、还写进配置 */

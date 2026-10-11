@@ -827,7 +827,7 @@ export async function abandonImport(request: AbandonImportRequest): Promise<Aban
       success: false,
       stagingCleared: false,
       locallyDismissed: false,
-      error: '未找到这次导入的本地恢复上下文'
+      error: '未找到本次导入的本地恢复上下文'
     }
   }
 

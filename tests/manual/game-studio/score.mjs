@@ -347,11 +347,13 @@ export function renderAutoSection(auto) {
     )
   }
   if (auto.goal) {
+    const failed = (auto.goal.checklist ?? [])
+      .filter((check) => check.status === 'fail')
+      .map((check) => `#${check.id} ${check.requirement}：${check.finding}`)
+      .join('；')
     lines.push(
       `- /goal：复核 ${auto.goal.rounds} 轮 · ${auto.goal.settled ? '已收尾' : '未收尾'}` +
-        (auto.goal.lastFailReason
-          ? ` · 最后一次打回：${auto.goal.lastFailReason.slice(0, 200)}`
-          : '')
+        (failed ? ` · 最后一次打回：${failed.slice(0, 200)}` : '')
     )
   }
   if (auto.project) lines.push(`- 工程：${auto.project.projectName} · ${auto.project.projectPath}`)

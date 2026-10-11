@@ -252,7 +252,12 @@ export function createGenerateImageTool(): UnrealAgentTool<GeneratedImageDetails
       const modelLabel = describeBoundModel(settings, chosen)
       const lines = [
         `用 ${modelLabel} 出了 ${generated.length} 张图` +
-          `${references.length > 0 ? `（参考图 ${references.length} 张）` : ''}。`
+          `${references.length > 0 ? `（参考图 ${references.length} 张）` : ''}。` +
+          // 张数对不上要明说：用户问「是不是多扣了」时，模型得知道这是厂商回的、不是它多调了一次。
+          // 按哪个数计费只有厂商账单说了算，这里不替它猜
+          (generated.length !== count
+            ? `要的是 ${count} 张，厂商这次回了 ${generated.length} 张；按几张计费以厂商账单为准。`
+            : '')
       ]
 
       if (paths.length > 0) {

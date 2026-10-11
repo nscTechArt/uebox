@@ -20,6 +20,9 @@ vi.mock('electron', () => ({
   }
 }))
 vi.mock('../agent-v3/tools/adapted/project/splitByRisk', () => ({ createProjectListTool: vi.fn() }))
+// 开会话时会在后台 import 整份工具注册表；不桩掉的话它在测试文件跑完后才失败并打日志，
+// vitest 4 起这条迟到的日志会被记成 EnvironmentTeardownError，整轮门禁变红
+vi.mock('../agent-v3/tools/registry', () => ({ listToolRisks: () => ({}) }))
 vi.mock('../ai/credentials', () => ({ resolveApiKey: async () => 'test-placeholder' }))
 vi.mock('../ai/store', () => ({ readSettings: mock.readSettings }))
 vi.mock('../agent-v3/core/focusContext', () => ({ getFocusContext: vi.fn() }))

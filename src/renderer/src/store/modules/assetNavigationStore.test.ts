@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   getTabStates,
@@ -16,8 +16,8 @@ function deferred(): { promise: Promise<boolean>; resolve: (value: boolean) => v
 function setup(): {
   store: ReturnType<typeof useAssetNavigationStore>
   ctx: {
-    navigateToFolderById: ReturnType<typeof vi.fn<HistoryNavigateContext['navigateToFolderById']>>
-    navigateRoot: ReturnType<typeof vi.fn>
+    navigateToFolderById: Mock<HistoryNavigateContext['navigateToFolderById']>
+    navigateRoot: Mock<HistoryNavigateContext['navigateRoot']>
   }
 } {
   const store = useAssetNavigationStore()
@@ -26,7 +26,7 @@ function setup(): {
   for (const key of ['A', 'B', 'C']) store.push(`/${key}`, key)
   const ctx = {
     navigateToFolderById: vi.fn<HistoryNavigateContext['navigateToFolderById']>(async () => true),
-    navigateRoot: vi.fn()
+    navigateRoot: vi.fn<HistoryNavigateContext['navigateRoot']>()
   }
   return { store, ctx }
 }
@@ -120,7 +120,7 @@ describe('asset navigation history', () => {
     const store = useAssetNavigationStore()
     const ctx = {
       navigateToFolderById: vi.fn<HistoryNavigateContext['navigateToFolderById']>(async () => true),
-      navigateRoot: vi.fn()
+      navigateRoot: vi.fn<HistoryNavigateContext['navigateRoot']>()
     }
     expect(await store.navigate('back', ctx)).toBeUndefined()
     store.push('/')

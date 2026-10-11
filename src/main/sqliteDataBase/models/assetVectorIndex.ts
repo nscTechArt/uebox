@@ -97,7 +97,7 @@ export function enableAssetVectorIndex(
   if (!ensureSqliteVecLoaded(db)) {
     return {
       ok: false,
-      error: 'sqlite-vec 扩展没能加载，这台机器上用不了语义搜索。关键词搜索不受影响。'
+      error: 'sqlite-vec 扩展加载失败，本机无法使用语义搜索。关键词搜索不受影响。'
     }
   }
 

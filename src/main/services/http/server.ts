@@ -1024,6 +1024,7 @@ export class HttpServer {
       const { TranscriptStore, loadTranscript } = await import(
         '../../agent-v3/core/transcriptStore'
       )
+      const { restoreTranscript } = await import('../../agent-v3/core/systemMessages')
       const { ensureConnected } = await import('../../agent-v3/capabilities/mcp')
       const { currentMainLanguage } = await import('../../i18n')
 
@@ -1266,7 +1267,7 @@ export class HttpServer {
       const store = new TranscriptStore(sessionId)
       const previous = await loadTranscript(sessionId)
       if (previous.length > 0) {
-        agent.state.messages = previous
+        restoreTranscript(agent, previous)
         store.markPersisted(previous.length)
       }
       agent.subscribe(async (event) => {

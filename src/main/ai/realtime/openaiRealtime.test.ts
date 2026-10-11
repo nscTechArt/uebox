@@ -477,7 +477,7 @@ describe('Box Plan', () => {
         type: 'error',
         error: { code: 'quota_exhausted', message: 'Monthly quota used up' }
       })
-    ).toEqual([{ type: 'error', message: expect.stringContaining('额度用完了') }])
+    ).toEqual([{ type: 'error', message: expect.stringContaining('额度已用完') }])
     expect(
       translate({ type: 'error', error: { code: 'subscription_inactive', message: 'x' } })
     ).toEqual([{ type: 'error', message: expect.stringContaining('管理订阅') }])
@@ -486,7 +486,7 @@ describe('Box Plan', () => {
   it('今天的额度用完（daily_limit_reached）：说几点恢复，不当普通报错', () => {
     expect(
       translate({ type: 'error', error: { code: 'daily_limit_reached', message: 'x' } })
-    ).toEqual([{ type: 'error', message: expect.stringMatching(/今天的额度用完了，.+ 恢复/) }])
+    ).toEqual([{ type: 'error', message: expect.stringMatching(/今日额度已用完，.+ 恢复/) }])
   })
 
   it('一分钟没人说话 / 满 30 分钟：按「断了、原因是这个」报，不当报错', () => {

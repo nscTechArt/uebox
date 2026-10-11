@@ -8,9 +8,12 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../networkV2/ImportSessionClient', () => ({
-  ImportSessionClient: vi.fn().mockImplementation(() => ({
-    getImportPreflight: mocks.getImportPreflight
-  }))
+  // vitest 4 起 new 一个 vi.fn() 会真的拿实现当构造函数调，箭头函数不行
+  ImportSessionClient: vi.fn(function () {
+    return {
+      getImportPreflight: mocks.getImportPreflight
+    }
+  })
 }))
 
 import { checkV2ImportReadiness, clearCapabilityCache } from './importFeatureFlag'
@@ -89,7 +92,7 @@ describe('checkV2ImportReadiness', () => {
       supported: true,
       ready: false,
       errorCode: 'NAS_UPLOAD_PERMISSION_DENIED',
-      userMessage: '资产服务器拒绝了这次上传，请检查这个库的访问码是不是只读的那一把'
+      userMessage: '资产服务器拒绝了本次上传，请检查该资产库的访问码是否为只读访问码'
     })
   })
 

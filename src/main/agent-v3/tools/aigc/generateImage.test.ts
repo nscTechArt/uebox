@@ -142,6 +142,19 @@ describe('出图', () => {
     expect(generateImages.mock.calls[0]![0]).toMatchObject({ count: 1 })
   })
 
+  it('厂商回的张数和要的不一样时明说，计费不替厂商猜', async () => {
+    generateImages.mockResolvedValue([...oneImage(), ...oneImage()])
+    const result = await tool.execute('c1', { prompt: '一个头部零件', count: 1 })
+
+    expect(textOf(result)).toContain('要的是 1 张，厂商这次回了 2 张')
+    expect(textOf(result)).toContain('以厂商账单为准')
+  })
+
+  it('张数对得上时不多那句话', async () => {
+    const result = await tool.execute('c1', { prompt: '一把椅子' })
+    expect(textOf(result)).not.toContain('厂商这次回了')
+  })
+
   it('没指定模型时不传绑定，也不在返回值里编一个模型名', async () => {
     const result = await tool.execute('c1', { prompt: '一把椅子' })
 

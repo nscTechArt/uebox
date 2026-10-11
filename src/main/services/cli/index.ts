@@ -64,8 +64,8 @@ export async function cliStatus(): Promise<CliStatus> {
       onPath: null,
       // 开发模式下最常见，说清楚免得以为是坏了
       reason: app.isPackaged
-        ? '这次安装里没有找到命令行程序，重新安装一次虚幻盒子即可。'
-        : '开发模式下没有命令行程序 —— 它只随安装包分发。'
+        ? '当前安装中未找到命令行程序，请重新安装虚幻盒子。'
+        : '开发模式下不提供命令行程序，命令行程序仅随安装包分发。'
     }
   }
 
@@ -87,7 +87,7 @@ export async function cliStatus(): Promise<CliStatus> {
       path,
       directory,
       onPath: null,
-      reason: `读不到当前的 PATH 设置：${(error as Error).message}`
+      reason: `无法读取当前的 PATH 设置：${(error as Error).message}`
     }
   }
 }
@@ -114,7 +114,7 @@ export async function addToUserPath(): Promise<CliPathChangeResult> {
     const current = await readUserPath()
     const { value, changed } = withDir(current, status.directory)
     if (!changed)
-      return { ok: true, status: { ...status, onPath: true }, message: '已经在 PATH 里了。' }
+      return { ok: true, status: { ...status, onPath: true }, message: '已在 PATH 中。' }
 
     await writeUserPath(value)
     logger.info('[CLI] 已把命令行目录加入用户 PATH')
@@ -140,7 +140,7 @@ export async function removeFromUserPath(): Promise<CliPathChangeResult> {
     const current = await readUserPath()
     const { value, changed } = withoutDir(current, status.directory)
     if (!changed)
-      return { ok: true, status: { ...status, onPath: false }, message: '本来就不在 PATH 里。' }
+      return { ok: true, status: { ...status, onPath: false }, message: '不在 PATH 中，无需移除。' }
 
     await writeUserPath(value)
     logger.info('[CLI] 已把命令行目录从用户 PATH 移除')

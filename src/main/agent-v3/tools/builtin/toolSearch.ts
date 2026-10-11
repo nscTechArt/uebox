@@ -680,7 +680,6 @@ export function createToolSearch(
       const outcome = load(selected, allowed)
       const nextOffset = offset + page < paged.groupCount ? offset + page : null
       return {
-        addedToolNames: outcome.addedToolNames,
         details: { toolSearch: outcome.details },
         text: JSON.stringify({
           loaded: outcome.loaded.map((entry) => ({
@@ -725,7 +724,6 @@ export function createToolSearch(
       )
       const outcome = load(selected, allowed)
       return {
-        addedToolNames: outcome.addedToolNames,
         details: outcome.details,
         text: JSON.stringify({
           toolGroups: outcome.details.loadedGroups,
@@ -742,7 +740,10 @@ export function createToolSearch(
       for (const message of messages) {
         if (message.role !== 'toolResult' || message.isError) continue
         const state = message.details as { toolSearch?: Partial<LoadDetails> } | undefined
-        const names = state?.toolSearch?.loadedToolNames ?? message.addedToolNames ?? []
+        // 0.84 时代的会话把名单记在消息自己的 `addedToolNames` 上（pi 1.0 删了这个字段），
+        // 盘上的老会话还是那样，照读
+        const legacy = (message as { addedToolNames?: unknown }).addedToolNames
+        const names = state?.toolSearch?.loadedToolNames ?? legacy ?? []
         if (!Array.isArray(names)) continue
         for (const name of names) {
           const entry = byName.get(name)

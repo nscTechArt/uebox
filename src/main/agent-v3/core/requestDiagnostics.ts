@@ -20,6 +20,8 @@
  * （响应头里的 request-id 一类、流里的 responseId）—— 拿去找厂商对账只需要它。
  *
  * **不记**密钥、请求头、请求体、对话内容。响应头只挑白名单里那几个标识。
+ * 唯一的例外是「400 什么都没说」的请求：请求体（去掉内联媒体）单独落到
+ * `rejected-requests`，只留最近几份，见 `dumpRejectedRequest`。
  *
  * ## 放在哪一层
  *
@@ -32,7 +34,7 @@ import {
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessageEvent,
-  type Context,
+  type TranscriptContext,
   type Model
 } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
@@ -150,9 +152,9 @@ const CONTENT_EVENTS = new Set<AssistantMessageEvent['type']>([
 
 export function diagnosedStreamFn(inner: StreamFn, deps: DiagnosticsDeps): StreamFn {
   const now = deps.now ?? Date.now
-  const attempts = new WeakMap<Context, number>()
+  const attempts = new WeakMap<TranscriptContext, number>()
 
-  return async (model: Model<Api>, context: Context, options) => {
+  return async (model: Model<Api>, context: TranscriptContext, options) => {
     const attempt = (attempts.get(context) ?? 0) + 1
     attempts.set(context, attempt)
 
@@ -188,7 +190,9 @@ export function diagnosedStreamFn(inner: StreamFn, deps: DiagnosticsDeps): Strea
       if (deps.describeRoute && model.baseUrl) {
         record.route = await deps.describeRoute(model.baseUrl).catch(() => undefined)
       }
-      if (record.statusCode === 400 && sentPayload !== undefined) {
+      // 只留「400 什么都没说」的那种：带了错误原文的 400（上下文超长、参数不对）看原文就够定位，
+      // 不该为它把整段对话落盘
+      if (record.statusCode === 400 && sentPayload !== undefined && !record.errorResponse?.body) {
         try {
           deps.dumpRejected?.(record, sentPayload)
         } catch {
@@ -227,7 +231,8 @@ export function diagnosedStreamFn(inner: StreamFn, deps: DiagnosticsDeps): Strea
     try {
       stream = await inner(model, context, {
         ...options,
-        fetch: observedFetch,
+        // Google 两个适配器见到非全局 fetch 直接抛错，那边只能不看失败响应体
+        ...(String(model.api).startsWith('google-') ? {} : { fetch: observedFetch }),
         onPayload: async (payload, payloadModel) => {
           const upstream = await previousOnPayload?.(payload, payloadModel)
           sentPayload = upstream === undefined ? payload : upstream
@@ -314,6 +319,10 @@ export function formatRequestRecord(record: RequestRecord): string {
 
 /** 被拒请求最多留几份：够对比，又不至于把一堆对话原文攒在盘上 */
 const REJECTED_KEEP = 5
+/** 一份最多多大：去掉内联媒体之后还这么大的，不值得落盘 */
+const REJECTED_MAX_CHARS = 2_000_000
+/** 多长的纯 base64 / data: 串算内联媒体 */
+const INLINE_MEDIA_MIN = 2_000
 
 /**
  * 把一次被上游拒掉（400）的请求体写进 `dir`，只留最近几份。
@@ -333,7 +342,17 @@ export async function dumpRejectedRequest(
     /[^\w.-]/g,
     '_'
   )
-  await writeFile(join(dir, name), JSON.stringify({ record, payload }, null, 1), 'utf8')
+  // 内联的图片 / 音视频（data: URL、长 base64）只留长度：定位靠结构，不靠像素，
+  // 留原样一份就是几 MB 的截图落盘
+  const text = JSON.stringify({ record, payload }, (_key, value: unknown) =>
+    typeof value === 'string' &&
+    value.length > INLINE_MEDIA_MIN &&
+    /^(data:|[A-Za-z0-9+/=]+$)/.test(value)
+      ? `[已省略 ${value.length} 字符的内联数据]`
+      : value
+  )
+  if (text.length > REJECTED_MAX_CHARS) return
+  await writeFile(join(dir, name), text, 'utf8')
   const files = (await readdir(dir)).filter((file) => file.endsWith('.json')).sort()
   for (const old of files.slice(0, Math.max(0, files.length - REJECTED_KEEP))) {
     await rm(join(dir, old), { force: true })

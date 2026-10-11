@@ -1065,11 +1065,11 @@ async function revealConfig(): Promise<void> {
     const res = await window.api.shell.showItemInFolder(configPath.value)
     if (!res?.success) {
       console.warn('[MCP] 打开配置文件位置失败:', res?.error)
-      message.error(`打不开配置文件所在位置：${configPath.value}`, 8)
+      message.error(`无法打开配置文件所在位置：${configPath.value}`, 8)
     }
   } catch (error) {
     console.warn('[MCP] 打开配置文件位置失败:', error)
-    message.error(`打不开配置文件所在位置：${configPath.value}`, 8)
+    message.error(`无法打开配置文件所在位置：${configPath.value}`, 8)
   }
 }
 

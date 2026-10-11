@@ -104,7 +104,7 @@ export function registerLibraryPackageIPC(): void {
     try {
       const result = await readPackage(root, String(dirPath || ''))
       if (!result) return fail('路径不在当前保管库里', null)
-      if ('reason' in result) return fail(`包读不了: ${result.reason}`, null)
+      if ('reason' in result) return fail(`无法读取包：${result.reason}`, null)
       return ok(toDto(result))
     } catch (error) {
       console.error('[LibraryPackageIpc] 读取失败', error)

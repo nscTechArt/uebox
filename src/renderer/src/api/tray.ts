@@ -46,7 +46,7 @@ export const trayAPI = {
   },
 
   /** 托盘「退出」的确认框里选了「仍然退出」，让主进程退出 */
-  confirmQuit(): Promise<{ success: boolean }> {
-    return window.api.tray.confirmQuit()
+  confirmQuit(reason?: 'update'): Promise<{ success: boolean }> {
+    return window.api.tray.confirmQuit(reason)
   }
 }

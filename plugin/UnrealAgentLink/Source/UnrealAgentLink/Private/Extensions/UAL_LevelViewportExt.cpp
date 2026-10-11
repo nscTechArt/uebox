@@ -274,7 +274,7 @@ void FUAL_LevelViewportExt::AddMenuEntry(FMenuBuilder& MenuBuilder, TArray<AActo
 	{
 		MenuBuilder.AddMenuEntry(
 			UALViewportUtils::LText(TEXT("UALImportActorAssets"), TEXT("导入到虚幻盒子资产库"), TEXT("Import into Unreal Box Asset Library")),
-			UALViewportUtils::LText(TEXT("UALImportActorAssetsTooltip"), TEXT("将选中Actor引用的资产导入到虚幻盒子中（虚幻盒子需要处于打开状态）"), TEXT("Import assets referenced by selected actors into Unreal Box (Unreal Box must be running)")),
+			UALViewportUtils::LText(TEXT("UALImportActorAssetsTooltip"), TEXT("将选中 Actor 引用的资产导入虚幻盒子资产库（需先启动虚幻盒子）"), TEXT("Import assets referenced by the selected actors into the Unreal Box Asset Library (requires Unreal Box to be running)")),
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Import"),
 			FUIAction(FExecuteAction::CreateLambda([this, SelectedActors]()
 			{

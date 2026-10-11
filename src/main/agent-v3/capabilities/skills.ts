@@ -336,7 +336,7 @@ export async function writeSkillDocument(
   if (declared !== name) {
     return {
       success: false,
-      error: `frontmatter 里写的是 name: ${declared}，和你正在编辑的「${name}」对不上。改名请另存一个新技能。`
+      error: `frontmatter 中的 name 为 ${declared}，与当前编辑的「${name}」不一致。如需改名，请另存为新技能。`
     }
   }
 
@@ -647,7 +647,6 @@ export function createSkillTools(
         // 正文里的工具名同样要重写 —— 否则模型会照着技能的指示
         // 去调 blueprint.add_node，而注册的是 blueprint_add_node
         text: content + nudge + (loaded?.text ? `\n\n${loaded.text}` : ''),
-        ...(loaded?.addedToolNames ? { addedToolNames: loaded.addedToolNames } : {}),
         details: {
           skillName: result.name,
           skillDirectory: result.skillDirectory,
@@ -680,7 +679,6 @@ export function createSkillTools(
       const loaded = loadTools?.(content)
       return {
         text: content + (loaded?.text ? `\n\n${loaded.text}` : ''),
-        ...(loaded?.addedToolNames ? { addedToolNames: loaded.addedToolNames } : {}),
         details: {
           skillDirectory: result.skillDirectory,
           relativePath: result.relativePath,

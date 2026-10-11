@@ -565,6 +565,15 @@ describe('提示词只写环境，不写方法论', () => {
     expect(prompt).toMatch(/VERDICT: PASS/)
   })
 
+  /** 2026-10-09：角色模型交付走了 team_deliver，验收员按游戏标准找不到东西可玩，报 BLOCKED 说读不了目录 */
+  it('交付的是文件而不是游戏时，验收员按文件核对，并知道手上有只读的本地文件工具', () => {
+    const prompt = buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })
+    expect(prompt).toMatch(/Not every delivery is a game/)
+    for (const name of ['find_local_files', 'list_local_dir', 'read_local_file']) {
+      expect(prompt).toContain(name)
+    }
+  })
+
   /** 2026-09-26：自动曝光下调灯，截图发白却归给「截图偏差」收工；验收员没看画面 */
   it('制作人和队员都知道先锁曝光；验收员要在游戏跑着时看画面', () => {
     const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })

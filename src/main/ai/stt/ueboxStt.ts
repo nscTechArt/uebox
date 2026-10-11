@@ -73,7 +73,7 @@ export function ueboxSttErrorMessage(error: ServerEvent['error']): string {
             : 0
   const plan = planStatus ? planCallError(planStatus, { error: { code } }) : null
   if (plan) return plan.message
-  if (code === 'idle_timeout') return '一分钟没收到声音，识别已结束。'
+  if (code === 'idle_timeout') return '1 分钟内未检测到语音，识别已结束。'
   return [code, error?.message].filter(Boolean).join('：') || '识别失败'
 }
 
@@ -140,8 +140,8 @@ export function openUeboxSttSession(config: SttSessionConfig): SttSessionHandle 
       plan
         ? plan.message
         : status === 429
-          ? '语音识别的并发或频率超限了，稍等几秒再试。'
-          : `语音识别连接被拒：HTTP ${status}`
+          ? '语音识别并发数或请求频率超出限制，请稍后重试。'
+          : `语音识别连接被拒绝：HTTP ${status}`
     )
   })
 

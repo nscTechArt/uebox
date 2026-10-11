@@ -66,6 +66,7 @@ import {
   rewriteCrossReferences
 } from './toolNames'
 import type { ToolRisk, UnrealAgentTool } from './defineTool'
+import { effectiveRisk } from './defineTool'
 import { materialTools } from './ue-material'
 import { meshTools } from './ue-mesh'
 import { landscapeTools } from './ue-landscape'
@@ -1459,6 +1460,10 @@ function withAssetLock(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
       // 没人释放，那才是真会卡死用户的东西
       const owner = getLockOwner()
       if (!owner) return inner(toolCallId, params, signal, onUpdate)
+      // 这一次调用只读（riskFor 降成 safe，比如只查不改）：不占锁、不翻只读位
+      if (effectiveRisk(tool.unrealBox, params) === 'safe') {
+        return inner(toolCallId, params, signal, onUpdate)
+      }
 
       /*
        * 工作室模式（`editorKeyActive()`）两处不一样，都是 2026-09-26 真机反馈逼出来的：

@@ -280,7 +280,7 @@ async function runPkceLogin(
       // state 对不上说明这次回调不是我们发起的那一次，按攻击处理
       if (returnedState && returnedState !== state) {
         res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        res.end(resultPage('授权校验失败', 'state 不匹配，这次授权已被丢弃。'))
+        res.end(resultPage('授权校验失败', 'state 不匹配，本次授权已作废。'))
         finish(new Error('state 校验失败，授权已丢弃'))
         return
       }

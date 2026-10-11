@@ -162,7 +162,7 @@ async function targetFor(config: ObjectStorageConfig, secretOverride?: string): 
     secretOverride?.trim() ||
     (await resolveApiKey({ kind: 'literal', id: SECRET_ID }).catch(() => ''))
   if (!secret) missing.push('AccessKey Secret')
-  if (missing.length > 0) throw new Error(`对象存储还没配完整：缺 ${missing.join('、')}`)
+  if (missing.length > 0) throw new Error(`对象存储配置不完整，缺少：${missing.join('、')}`)
   return {
     endpoint: config.endpoint,
     region: config.region,
@@ -547,8 +547,8 @@ export async function testObjectStorage(input: ObjectStorageSaveInput): Promise<
         return {
           ok: false,
           message: config.publicBaseUrl
-            ? `写入成功，但公开域名读不到（HTTP ${response.status}）：检查域名是否绑定到这个桶、桶是否允许公共读`
-            : `写入成功，但签名链接读不回来（HTTP ${response.status}）：检查 region 是否与桶所在地域一致`
+            ? `写入成功，但无法通过公开域名读取（HTTP ${response.status}）：请检查域名是否已绑定到该存储桶，以及存储桶是否允许公共读`
+            : `写入成功，但无法通过签名链接读取（HTTP ${response.status}）：请检查 region 是否与存储桶所在地域一致`
         }
       }
     } finally {
@@ -558,7 +558,7 @@ export async function testObjectStorage(input: ObjectStorageSaveInput): Promise<
       return {
         ok: false,
         message:
-          '本机读写都通过了，但这是本机或内网地址，模型厂商从公网访问不到，视频发过去它看不了'
+          '本机读写测试通过，但该地址为本机或内网地址，模型服务商无法从公网访问，因此无法读取上传的视频'
       }
     }
     return { ok: true, message: '连接正常：写入、链接读取、删除都通过了' }

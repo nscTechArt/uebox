@@ -88,14 +88,14 @@ export function useSpotlightAction() {
         console.error('[SpotlightAction] 打开项目失败:', projectPath, result?.error)
         message.error(
           result?.pathNotFound
-            ? `工程文件不在了：${projectPath}`
-            : `打不开工程：${projectPath}（${result?.error || ''}）`,
+            ? `工程文件不存在：${projectPath}`
+            : `无法打开工程：${projectPath}（${result?.error || ''}）`,
           8
         )
       }
     } catch (error) {
       console.error('[SpotlightAction] 打开项目失败:', error)
-      message.error(`打不开工程：${projectPath}`, 8)
+      message.error(`无法打开工程：${projectPath}`, 8)
     }
   }
 

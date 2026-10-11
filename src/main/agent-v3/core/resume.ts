@@ -200,7 +200,7 @@ export function planResume(previous: AgentMessage[]): ResumePlan {
 
   if (messages.length === 0) {
     // 整个 transcript 只有失败标记：第一轮就没调通，没有"断点"可言
-    return { ok: false, reason: '这个对话还没有成功跑过一轮，请重新发送消息' }
+    return { ok: false, reason: '该对话尚未成功执行过任何一轮，请重新发送消息' }
   }
 
   // 摘完之后最后一条仍是 assistant，说明那是一条**正常收尾**的回复 ——

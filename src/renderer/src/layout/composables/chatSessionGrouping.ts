@@ -402,6 +402,9 @@ export function collectKnownProjects(
   for (const project of connectedProjects) {
     const name = project.projectName?.trim()
     if (!name) continue
+    // 先来的赢：调用方把连着的排在手动加的前面。后来的盖掉前面的话，菜单上标着
+    // 「已连接」的那一项其实指向另一份没连着的同名工程
+    if (byKey.has(projectGroupKey(name))) continue
     byKey.set(projectGroupKey(name), {
       projectName: name,
       projectPath: project.projectPath,

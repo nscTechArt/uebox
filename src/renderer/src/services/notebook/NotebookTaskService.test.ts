@@ -145,7 +145,7 @@ describe('NotebookTaskService', () => {
 
     await expect(
       new NotebookTaskService().executeTask('knowledgeGraph', SOURCES, [], {})
-    ).rejects.toThrow('不是合法 JSON')
+    ).rejects.toThrow('不是有效的 JSON')
   })
 
   it('一条来源和一条消息都没有时不发请求', async () => {

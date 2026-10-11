@@ -70,7 +70,7 @@ export async function resolveSttBinding(): Promise<SttBinding | null> {
 
   const provider = settings.providers.find((item) => item.id === binding.providerId)
   if (!provider) {
-    throw new Error('语音识别服务商已被删除。请到 设置 → 模型 重新选择默认模型。')
+    throw new Error('语音识别服务商已被删除。请在「设置 → 模型」中重新选择默认模型。')
   }
   return {
     apiKey: await resolveApiKey(provider.apiKey),
@@ -176,7 +176,7 @@ const PROBE_ACK_GRACE_MS = 1_500
 export async function probeStt(provider: ProviderConfig, modelId: string): Promise<void> {
   const plan = isPlanProvider(provider.id)
   if (!hasSttAdapter(provider.baseUrl, plan)) {
-    throw new Error('认不出这个语音识别服务商。目前支持豆包语音（openspeech）与阿里云百炼。')
+    throw new Error('不支持该语音识别服务商。目前支持豆包语音（openspeech）与阿里云百炼。')
   }
   const apiKey = await resolveApiKey(provider.apiKey)
   await new Promise<void>((resolve, reject) => {

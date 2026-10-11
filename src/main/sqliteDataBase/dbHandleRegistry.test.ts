@@ -5,11 +5,11 @@
  * 原来每次都 `new Database(...)`，而 AssetServer 只是把 map 里的旧条目覆盖掉、
  * 从不 close —— 每切一次库就为每个后台网络库泄漏一个句柄。
  */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, type Mock } from 'vitest'
 
 import { DbHandleRegistry } from './dbHandleRegistry'
 
-const fakeHandle = (): { close: ReturnType<typeof vi.fn> } => ({ close: vi.fn() })
+const fakeHandle = (): { close: Mock<() => void> } => ({ close: vi.fn() })
 
 describe('DbHandleRegistry', () => {
   it('同一个库反复 acquire 只开一次连接', () => {

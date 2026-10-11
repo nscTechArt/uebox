@@ -258,7 +258,7 @@ describe('settleImportBatch：三条归因路径', () => {
 
     expect(result.report.unattributedMissing).toBe(1)
     expect(isCleanImportReport(result.report)).toBe(false)
-    expect(result.warnings.join(' | ')).toContain('没能确定是哪些资产在用它')
+    expect(result.warnings.join(' | ')).toContain('无法确定引用它们的资产')
   })
 
   it('只有目标冲突时也不算干净 —— 那是「报了成功、字节却是别人的」', () => {
@@ -309,7 +309,7 @@ describe('settleImportBatch：三条归因路径', () => {
 
     expect(result.failed).toBe(0)
     expect(result.report.orphanFileFailures).toBe(1)
-    expect(result.warnings.join(' | ')).toContain('另有 1 个依赖文件没能写入工程')
+    expect(result.warnings.join(' | ')).toContain('另有 1 个依赖文件写入工程失败')
   })
 
   it('目标冲突原样带出来，先到的留下、后到的报出来', () => {

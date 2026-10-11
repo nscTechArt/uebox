@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import { estimateContextTokens, type AgentMessage } from '@earendil-works/pi-agent-core'
+import type { AgentMessage } from '@earendil-works/pi-agent-core'
 
 // vi.mock 会被提升到文件顶部，工厂里不能引用普通的顶层变量。
 // vi.hoisted 让这个 mock 函数跟着一起提升。
 const { generateSummary } = vi.hoisted(() => ({ generateSummary: vi.fn() }))
-vi.mock('@earendil-works/pi-agent-core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@earendil-works/pi-agent-core')>()
+vi.mock('../vendor/pi-harness', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../vendor/pi-harness')>()
   return { ...actual, generateSummary }
 })
+
+import { estimateContextTokens } from '../vendor/pi-harness'
 
 import {
   compactionThreshold,
@@ -142,6 +144,43 @@ describe('createAutoCompact', () => {
     expect(result.length).toBeLessThan(messages.length)
     expect(generateSummary).toHaveBeenCalled()
     expect(String((result[0] as { content: string }).content)).toContain('此前做了 A 和 B')
+  })
+
+  it('压完提示词和工具还在最前面，不被当成历史摘掉（pi 1.0 把它们放在 transcript 里）', async () => {
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '此前做了 A 和 B' })
+    const compact = createAutoCompact(deps(8_000))
+    const tool = { name: 'read_state', description: '读', parameters: { type: 'object' } }
+    const later = { name: 'write_state', description: '写', parameters: { type: 'object' } }
+    const history = longHistory()
+    const messages = [
+      { role: 'system', content: '你是虚幻盒子', toolsAdded: [tool], timestamp: 0 },
+      ...history.slice(0, 2),
+      // 这一轮中途加载的工具：落在会被摘要的那段里
+      { role: 'system', content: '', toolsAdded: [later], timestamp: 1 },
+      ...history.slice(2)
+    ] as unknown as AgentMessage[]
+
+    const result = await compact(messages)
+
+    expect(result[0]).toMatchObject({
+      role: 'system',
+      content: '你是虚幻盒子',
+      toolsAdded: [tool, later]
+    })
+    expect(result.filter((message) => message.role === 'system')).toHaveLength(1)
+    expect(String((result[1] as { content: string }).content)).toContain('此前做了 A 和 B')
+    // 摘要模型只看对话本身
+    const summarized = generateSummary.mock.calls[0][0] as AgentMessage[]
+    expect(summarized.some((message) => message.role === 'system')).toBe(false)
+  })
+
+  it('没压时带 system 消息的原数组原样交回', async () => {
+    const compact = createAutoCompact(deps(200_000))
+    const messages = [
+      { role: 'system', content: '你是虚幻盒子', timestamp: 0 },
+      msg('user', '你好')
+    ] as unknown as AgentMessage[]
+    expect(await compact(messages)).toBe(messages)
   })
 
   it('摘要失败时返回原始消息，不让循环崩掉', async () => {

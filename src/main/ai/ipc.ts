@@ -240,7 +240,7 @@ export function registerAiProviderIPC(): void {
       if (lost.length > 0) {
         return {
           ok: false,
-          error: `没存上（${lost.join('、')}）：选的来源或模型已经不在了，重新打开设置页再选一次。`
+          error: `保存失败（${lost.join('、')}）：所选来源或模型已不存在，请重新打开设置页并重新选择。`
         }
       }
       return { ok: true, data: await toView(saved) }

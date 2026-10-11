@@ -63,7 +63,7 @@ export async function searchViaSearxng(
 ): Promise<SearxngSearchResult> {
   const trimmedBase = baseUrl.trim().replace(/\/+$/, '')
   if (!trimmedBase) {
-    return { success: false, error: 'SearXNG 地址是空的，到 设置 → 模型 里把实例地址填上。' }
+    return { success: false, error: 'SearXNG 地址为空，请在「设置 → 模型」中填写实例地址。' }
   }
 
   const controller = new AbortController()
@@ -109,7 +109,7 @@ export async function searchViaSearxng(
       success: false,
       error: aborted
         ? `SearXNG 超时（${SEARCH_TIMEOUT_MS / 1000} 秒）。`
-        : `连不上 SearXNG：${error instanceof Error ? error.message : String(error)}`
+        : `无法连接 SearXNG：${error instanceof Error ? error.message : String(error)}`
     }
   } finally {
     clearTimeout(timer)

@@ -56,7 +56,7 @@ export class FavoriteService {
       if (isAssetFavorited(db, assetKey, mergedOptions.userId, mergedOptions.vaultId, itemType)) {
         const typeLabel = itemType === 'folder' ? '文件夹' : '资产'
         logger.warn(`${typeLabel} ${assetKey} 已经在收藏中`)
-        throw new Error(`${typeLabel}已经在收藏中`)
+        throw new Error(`${typeLabel}已在收藏中`)
       }
 
       const favoriteId = addAssetFavorite(db, {

@@ -81,7 +81,7 @@ export function createTeamSnapshots(): TeamSnapshots {
   }
   const currentProject = (): string => {
     const dir = getTargetProjectPath()
-    if (!dir) throw new Error('这一轮还没有连着的工程，没有东西可以快照')
+    if (!dir) throw new Error('本轮未连接工程，无法创建快照')
     return dir
   }
 
@@ -141,8 +141,12 @@ export function createTeamSnapshots(): TeamSnapshots {
 
       return [
         `已退回快照 ${id}。`,
-        before ? `回滚前的状态存成了快照 ${before.id}，想反悔就退回它。` : '回滚前没有未存的改动。',
-        live.live ? '编辑器已重新打开并连上。' : '文件已经退回，但编辑器还没连上，等它起来再继续。'
+        before
+          ? `回滚前的状态已保存为快照 ${before.id}，可通过该快照撤销本次回滚。`
+          : '回滚前没有未保存的改动。',
+        live.live
+          ? '编辑器已重新打开并连接。'
+          : '文件已回退，但编辑器尚未连接，请等待编辑器启动后继续。'
       ].join('\n')
     }
   }

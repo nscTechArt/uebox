@@ -194,8 +194,7 @@ describe('load_skill', () => {
   it('正文和附带资源都在旧工具名重写后触发加载，并保留完整正文及加载记录', async () => {
     const loadTools = vi.fn((content: string) => ({
       text: `整组已加载：${content.length}`,
-      addedToolNames: ['blueprint_get_graph'],
-      details: { loadedGroups: ['ue.blueprint'] }
+      details: { loadedToolNames: ['blueprint_get_graph'], loadedGroups: ['ue.blueprint'] }
     }))
     const wired = createSkillTools(skills, 'off', loadTools)
     for (const [name, args] of [
@@ -206,8 +205,10 @@ describe('load_skill', () => {
       ]
     ] as const) {
       const result = await wired.find((tool) => tool.name === name)!.execute('load', args)
-      expect(result.addedToolNames).toEqual(['blueprint_get_graph'])
-      expect(result.details).toMatchObject({ toolSearch: { loadedGroups: ['ue.blueprint'] } })
+      // 加载记录跟着 details 落盘，下一条消息靠它把工具装回来（toolSearch.ts 的 restore）
+      expect(result.details).toMatchObject({
+        toolSearch: { loadedToolNames: ['blueprint_get_graph'], loadedGroups: ['ue.blueprint'] }
+      })
       expect(JSON.stringify(result.content)).toContain('拿')
     }
     expect(loadTools).toHaveBeenCalledTimes(2)

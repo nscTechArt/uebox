@@ -365,7 +365,7 @@ describe('装到一半留下的目录', () => {
     const fake = fakeInstaller(() => writeEntryFile(installRoot, exe))
     const result = await runBlenderSetup({ blenderPath: exe }, windows, fake)
 
-    if (result.message.includes('还差这些')) return // 缺 git/Python，到不了这一步
+    if (result.message.includes('缺少以下安装条件')) return // 缺 git/Python，到不了这一步
     expect(fake.calls).toBe(1)
   })
 
@@ -378,7 +378,7 @@ describe('装到一半留下的目录', () => {
     const fake = fakeInstaller()
     const result = await runBlenderSetup({ blenderPath: exe }, windows, fake)
 
-    if (result.message.includes('还差这些')) return
+    if (result.message.includes('缺少以下安装条件')) return
     expect(result.success).toBe(false)
     expect(result.message).toContain(installRoot)
     expect(result.message).toContain('我的论文.docx')

@@ -87,7 +87,7 @@ describe('resumeAgent 的忙闸', () => {
 
     await api.resumeAgent('agent-secret-id')
 
-    const sessionBusy = '这条对话还有一轮在跑'
+    const sessionBusy = '此对话仍有一轮任务在运行'
     const bubbleCall = chatMsgStore.replaceTyping.mock.calls.at(-1)
     expect(String(bubbleCall?.[2])).toContain(sessionBusy)
     expect(String(bubbleCall?.[2])).not.toContain('agent-secret-id')

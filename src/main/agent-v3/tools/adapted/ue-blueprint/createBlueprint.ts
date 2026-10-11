@@ -101,9 +101,17 @@ interface ExistingBlueprintInfo {
   name?: string
   path?: string
   parent_class?: string
+  anim_blueprint?: { target_skeleton?: string }
 }
 
 /** 父类名比较时去掉路径、包名和 A/U 前缀：/Script/Engine.Actor、AActor、Actor 是同一个 */
+/** 骨架比较只看资产名：路径、`.Name` 后缀、Skeleton 前缀写法不同都算同一个 */
+function sameAsset(a: string, b: string): boolean {
+  const name = (value: string): string =>
+    (value.split(/[./]/).pop() ?? value).replace(/^Skeleton'|'$/g, '').toLowerCase()
+  return name(a) === name(b)
+}
+
 function normalizeClassName(name: string): string {
   const last = name.split(/[./]/).pop() ?? name
   return last.replace(/_C$/, '').toLowerCase()
@@ -275,6 +283,13 @@ export function createBlueprintTool() {
           const existingParent = verified ? existing?.parent_class : undefined
           const parentMismatch =
             existingParent && input.parent_class && !sameClass(existingParent, input.parent_class)
+          // 动画蓝图还要对骨架：同名的那个绑的是别的骨架，往下写的动画全对不上
+          const existingSkeleton = verified ? existing?.anim_blueprint?.target_skeleton : undefined
+          const skeletonMismatch =
+            !parentMismatch &&
+            existingSkeleton !== undefined &&
+            input.skeleton !== undefined &&
+            !sameAsset(existingSkeleton, input.skeleton)
 
           const where = existingPath ? `（路径: ${existingPath}）` : ''
           const message = !verified
@@ -283,7 +298,10 @@ export function createBlueprintTool() {
             : parentMismatch
               ? `⚠️ 蓝图 "${input.name}" 已存在${where}，没有新建，而且它的父类是 ${existingParent}，` +
                 `不是你要的 ${input.parent_class}。要 ${input.parent_class} 的话换个名字重建。`
-              : `蓝图 "${input.name}" 已存在${where}，父类 ${existingParent}，没有新建，已复用现有资产。`
+              : skeletonMismatch
+                ? `⚠️ 动画蓝图 "${input.name}" 已存在${where}，没有新建，而且它绑的骨架是 ${existingSkeleton}，` +
+                  `不是你要的 ${input.skeleton}。要那副骨架的话换个名字重建。`
+                : `蓝图 "${input.name}" 已存在${where}，父类 ${existingParent}，没有新建，已复用现有资产。`
 
           return {
             message,
@@ -301,6 +319,7 @@ export function createBlueprintTool() {
             path: existingPath,
             verified,
             ...(existingParent ? { parent_class: existingParent } : {}),
+            ...(existingSkeleton ? { target_skeleton: existingSkeleton } : {}),
             suggestion:
               '不要再次调用 blueprint.create；请改为调用 blueprint.add_component / blueprint.set_property / blueprint.compile。'
           }

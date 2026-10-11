@@ -76,8 +76,8 @@ export function useRunFold(options: RunFoldOptions): {
     return {
       hiddenCount: finalText,
       label: label || t('assistant.agentProcess.processFinished'),
-      images: groups.flatMap((group) => group.deliverableImages),
-      videos: groups.flatMap((group) => group.videos)
+      images: [...new Set(groups.flatMap((group) => group.deliverableImages))],
+      videos: [...new Set(groups.flatMap((group) => group.videos))]
     }
   })
 

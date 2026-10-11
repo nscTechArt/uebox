@@ -260,7 +260,7 @@ async function runStep(ctx: TaskRunContext, step: ChatStep): Promise<string> {
 
   ctx.report(step.to)
   const trimmed = text.trim()
-  if (!trimmed) throw new Error('模型没有返回内容')
+  if (!trimmed) throw new Error('模型未返回内容')
   return trimmed
 }
 
@@ -287,7 +287,7 @@ export function parseJsonObject<T>(text: string): T {
         /* 落到下面统一报错 */
       }
     }
-    throw new Error('模型返回的不是合法 JSON，请换一个更强的模型再试')
+    throw new Error('模型返回的内容不是有效的 JSON，请更换模型后重试')
   }
 }
 
@@ -435,7 +435,7 @@ export const NOTEBOOK_TASK_RUNNERS: {
     })
 
     const htmlContent = extractHtml(html)
-    if (!htmlContent.includes('<html')) throw new Error('模型没有返回可用的网页代码')
+    if (!htmlContent.includes('<html')) throw new Error('模型未返回可用的网页代码')
 
     // Brief 里的 title 就是这个页面的标题，解析失败也不该让整次生成白跑
     let title = notebookTitle(input)

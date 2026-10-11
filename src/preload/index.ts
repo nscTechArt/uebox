@@ -3009,7 +3009,8 @@ const api = {
     /** 取走主进程存着的那条托盘动作（取走即清）—— 唯一的送达路径 */
     takePending: (): Promise<TrayAction | null> => ipcRenderer.invoke(TRAY_TAKE_PENDING_CHANNEL),
     /** 用户在退出确认框里选了「仍然退出」 */
-    confirmQuit: (): Promise<{ success: boolean }> => ipcRenderer.invoke(TRAY_CONFIRM_QUIT_CHANNEL)
+    confirmQuit: (reason?: 'update'): Promise<{ success: boolean }> =>
+      ipcRenderer.invoke(TRAY_CONFIRM_QUIT_CHANNEL, reason)
   },
 
   /**

@@ -591,7 +591,8 @@ export default {
       timeout:
         'Request timed out. Check that the Base URL is reachable, or whether a proxy is needed.',
       unauthorized: 'The API key is invalid or has expired.',
-      forbidden: 'This key does not have access to that model.',
+      forbidden:
+        'Request rejected (403). The key may lack access to this model, or the provider may restrict how it is accessed.',
       providerServerError:
         "The provider's server returned an error. This is usually not your configuration — try again in a little while.",
       modelNotFound:
@@ -2262,7 +2263,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
      */
     selfCheck: {
       /** Not a button — the review fires this off; this just says where the answer is */
-      sent: 'Asked it to prove it ↓',
+      sent: 'Self-check requested ↓',
       prompt: {
         intro: '(Self-check) I ran the engine over the changes you just made.',
         foundHeader: 'The machine found {count} issue(s):',
@@ -2446,11 +2447,11 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       notApplied: 'Not sent',
       cancel: 'Take back to edit',
       // Failing to cancel is normal: the kernel may have just picked it up
-      cancelTooLate: 'Too late — this one already went to the model'
+      cancelTooLate: 'Cannot withdraw: this message has already been sent to the model'
     },
     // The option card the agent shows when it needs a decision from you
     askUser: {
-      title: 'Needs your call',
+      title: 'Make a choice',
       waiting: 'Waiting for you',
       other: 'Other (write your own)',
       otherPlaceholder: 'Describe what you want instead…',
@@ -2458,13 +2459,15 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       next: 'Next',
       back: 'Back',
       step: '{current} / {total}',
-      decline: 'You decide',
-      declineHint: 'Skip choosing — let the AI go with what it thinks is best',
+      decline: 'Let AI decide',
+      declineHint: 'Skip this question and let the AI choose the most suitable option',
+      multi: 'Pick any',
       cancel: 'Dismiss for now',
       answered: 'Answered',
-      declined: 'You let the AI decide',
+      declined: 'Left to the AI',
       cancelled: 'No answer',
-      skippedOne: 'Not answered'
+      skippedOne: 'Not answered',
+      delegatedOne: 'Left to the AI'
     },
     // Token usage under each reply
     tokenUsage: {
@@ -2564,9 +2567,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     branch: {
       tooltip: 'Branch from here',
       titleSuffix: ' (branch)',
-      success: "Branched into a new chat from this reply. Later messages weren't copied.",
-      successWhole: "Branch created. That reply couldn't be found, so the whole chat came along.",
-      noAgentSession: "Branching isn't available for this kind of chat",
+      success: 'Created a new chat from this reply. Later messages were not copied.',
+      successWhole:
+        'Branch created. The selected reply could not be found, so the entire chat was copied.',
+      noAgentSession: 'Branching is not available for this type of chat',
       busy: 'This turn has not settled yet — branch from an earlier message, or try again shortly',
       missing: 'This chat has no history to copy yet',
       failed: 'Failed to branch'
@@ -2605,7 +2609,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       selfReportedHint:
         'Marked by the teammate, not checked by Unreal Box — the acceptance verdict is what counts',
       objective: 'Goal',
-      noMembers: 'The producer has not hired anyone yet',
+      noMembers: 'The producer has not added any teammates yet',
       noTasks: 'The task board is empty',
       evidence: 'Evidence: ',
       mail: 'Notes',
@@ -2637,13 +2641,14 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         byUser: 'set by you',
         followProducer: 'same as producer',
         chatModel: 'chat model',
-        unavailable: "{model} isn't available right now; its work uses the producer's model",
-        change: 'Click to change the model. It applies from its next task',
+        unavailable:
+          "{model} is currently unavailable; this teammate's tasks use the producer's model",
+        change: "Click to change the model. Applies from this teammate's next task",
         changeFailed: "Couldn't change the model. Try again later",
-        checking: 'Checking {model}: is it reachable, and can it call tools…',
+        checking: 'Checking {model} for connectivity and tool calling…',
         checkupFailed: "{model} didn't pass the check, so the model wasn't changed: {reason}",
         checkupNoTools:
-          "Asked twice to call a tool, it didn't. A model like that can't work as a teammate"
+          'The model did not call a tool after two requests and cannot be used as a teammate'
       },
       receipt: {
         read: 'read',
@@ -2756,7 +2761,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       resultImageAlt: 'Screenshot produced by the tool',
       resultImageHint: 'Click to view full size',
       /** Images the agent looked at. Collapsed by default — a turn can read a dozen */
-      peekImageShow: 'Show what it looked at ({count})',
+      peekImageShow: 'Show images viewed by the AI ({count})',
       peekImageHide: 'Hide images',
       /** Subtask (`task` tool) lanes. Parallel runs get one card each */
       subtask: {
@@ -2780,7 +2785,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         generate_task_music: 'Creating background music',
         generate_speech: 'Synthesizing speech',
         render_task_video: 'Producing task video',
-        analyze_video: 'Watching video',
+        analyze_video: 'Analyzing video',
         open_folder: 'Open Folder',
         aigc: 'AIGC Content Generation',
         asset_library_manager: 'Asset Library Manager',
@@ -3688,7 +3693,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       bridgeUnknown: 'Reading bridge status…',
       connectedProjects: 'Connected projects',
       connectedProjectsDesc:
-        'The plugin connects on its own and retries every 5 seconds — there is nothing here for you to click. If a project is open and this stays at 0, that project most likely has no plugin installed.',
+        'The plugin connects automatically and retries every 5 seconds after a disconnect; no manual connection is needed. If a project is open but this stays at 0, the plugin is most likely not installed in that project.',
       injectionBehavior: 'Installation',
       resources: 'Resources',
       autoEnableUnrealAgentLink: 'Automatically install the connection plugin',
@@ -4544,10 +4549,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       backButton: 'Back'
     },
     scoreMessage: {
-      master: 'Unreal master! Epic will come recruiting',
-      good: 'Nice work! Keep it up',
-      keepGoing: 'Keep going, review the docs more',
-      encourage: "Don't worry, knowledge builds up bit by bit"
+      master: 'Excellent. You have a strong command of this topic',
+      good: 'Good result. Keep it up',
+      keepGoing: 'Room for improvement. Reviewing the docs is recommended',
+      encourage: 'Knowledge builds over time. Review your mistakes and try again'
     }
   },
   serverManagement: {
@@ -5727,7 +5732,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       },
       unsupportedAudio:
         'The voice service returned an invalid audio format. Playback was stopped to prevent loud noise; please try again.',
-      asrFailed: "Didn't catch that — could you say it again?",
+      asrFailed: 'Speech not recognized. Please say it again',
       interrupt: 'Click to interrupt speech (tasks continue)',
       interruptHint: 'Assign a shortcut under Preferences → Shortcuts → Interrupt voice assistant',
       taskSessionTitle: 'Voice tasks',
@@ -5765,8 +5770,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       }
     },
     slashCommands: {
-      goal: 'Goal mode — audits its own work and keeps going until it passes',
-      team: 'Team mode — one line in, it builds a team and works to a playable delivery',
+      goal: 'Goal mode — reviews the result automatically and continues until the goal is met',
+      team: 'Team mode — from a one-line request, assembles a team and works through to a playable build',
       teamArg: '<one line>',
       image: 'Switch to image generation',
       compact: "Compact this chat's history to free up context",
@@ -6058,7 +6063,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         'The open editor did not apply {plugins}; only the file was updated. Restart the editor before changing plugins there, or the change will be overwritten.',
       unavailableTitle: '{count} items are not on this machine',
       unavailableDesc:
-        'The box cannot enable these for you. Related Blueprints will not open until they are installed:',
+        'Unreal Box cannot enable these automatically. Related Blueprints will not open until they are installed:',
       fromProject: 'from "{project}"',
       projectCode: 'C++ code from "{project}"',
       projectCodeUnknown: 'C++ code from the original project',
@@ -7247,7 +7252,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       'These pins were connected to nodes outside the selection, so they are left dangling. You will need to wire them up in Unreal after adding the snippet.',
     noCanvasTitle: 'Why there is no node graph here',
     noCanvasHint:
-      'Snippets store Unreal clipboard text, which the library’s node renderer can actually read — but that renderer is an editor: drag a node and the content changes, and a snippet has nowhere to save those edits, so it would look editable and then lose your work. It needs a real read-only mode first. To understand what this snippet does, ask the assistant on the right — it has the whole thing.',
+      'Snippets store Unreal clipboard text, which the library’s node renderer can actually read — but that renderer is an editor: drag a node and the content changes, and a snippet has nowhere to save those edits, so it would look editable and then lose your work. It needs a real read-only mode first. To understand what this snippet does, ask the assistant on the right, which has the full snippet content.',
     applyPrompt:
       'Add the blueprint library snippet “{name}” (entry_id: {id}) to the current project. ' +
       'Confirm the entry with library_search first, ask me which blueprint and which empty graph to write into, then use blueprint_library_apply.',
@@ -7377,16 +7382,16 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     dictation: {
       starting: 'Opening the microphone…',
-      listening: 'Listening — sends itself when you stop',
+      listening: 'Listening. Sends automatically when you stop speaking',
       finishing: 'Transcribing…',
       holding: 'Release to send',
-      unheard: "Didn't catch that, say it again",
-      unavailable: 'Voice is unavailable right now, just type',
-      busy: 'The voice assistant is on a call — type for now',
+      unheard: 'Speech not recognized. Please try again',
+      unavailable: 'Voice input is unavailable. Use the keyboard instead',
+      busy: 'The voice assistant is in a call. Use the keyboard instead',
       vendorUnsupported:
         'This voice model can only converse. Bind a Speech to text model in Settings → Models to dictate.',
       micIconLabel: 'Voice input active',
-      autoSubmit: 'Sending in {seconds}s — edit to hold it'
+      autoSubmit: 'Sending in {seconds}s. Edit the text to delay'
     }
   },
   globalAudioPlayer: {
@@ -7812,9 +7817,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     copyFailed: 'Copy failed',
     andMore: '...and {count} more, see the log',
     retry: 'Retry import',
-    retrySucceeded: 'Everything imported this time',
+    retrySucceeded: 'All items imported',
     retrying: 'Retrying import...',
-    retryPartial: 'The .uasset half is complete; external files need the project open to retry',
+    retryPartial:
+      'The .uasset files are complete; external files (FBX, textures, etc.) can be retried only while the project is open',
     retryStillFailing: 'Still incomplete; details updated',
     close: 'Close'
   },
@@ -7844,7 +7850,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
             'Review {subject} for performance and robustness issues: per-frame cost, null references, anything that can be simplified.'
         },
         apply: {
-          title: 'Put it in my project',
+          title: 'Apply to current project',
           desc: 'Write into an empty graph, compile and save',
           prompt:
             'Put {subject} into my current project. Tell me which blueprint and which graph first, then do it once I confirm.'
@@ -8161,7 +8167,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       live: 'Carrying {count} message(s) of context (snapshot — the main chat is still running)',
       snapshot: 'Carrying {count} message(s) of context',
       readOnly: 'Read-only',
-      empty: 'Ask away — it can see every step the main chat took'
+      empty: 'Enter a question. The AI can see every step of the main chat'
     },
     emptyState: {
       agent: 'Type a message to start a chat'

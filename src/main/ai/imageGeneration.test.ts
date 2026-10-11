@@ -757,6 +757,35 @@ describe('各家的官方适配器', () => {
     ])
   })
 
+  /** 思考时画的草稿不是成品：要 1 张就该回 1 张 */
+  it('gemini-images：thought 步里的草稿图不算出图', async () => {
+    useModel('gemini-images', 'gemini-3.1-flash-image')
+    stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            interaction: {
+              steps: [
+                {
+                  type: 'thought',
+                  content: [{ type: 'image', data: 'DRAFT', mime_type: 'image/png' }]
+                },
+                {
+                  type: 'model_output',
+                  content: [{ type: 'image', data: 'FINAL', mime_type: 'image/png' }]
+                }
+              ],
+              output_image: { data: 'FINAL', mime_type: 'image/png' }
+            }
+          }),
+          { headers: { 'content-type': 'application/json' } }
+        )
+    )
+    expect(await generateImages({ prompt: 'x' })).toEqual([
+      { base64: 'FINAL', mediaType: 'image/png' }
+    ])
+  })
+
   /**
    * 聚合平台上 `google/gemini-3.1-flash-image` 这种名字很常见，
    * 但它们转发的是 OpenAI 形状。按名字猜会把这批用户打死在 401 + 404 上。

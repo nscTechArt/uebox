@@ -65,7 +65,7 @@ describe('Beta 工具搜索', () => {
     )
     expect(controller.getTools().find((t) => t.name === material.name)).toBe(material)
     const result = await controller.tool.execute('exact', { names: [material.name] })
-    expect(result.addedToolNames).toEqual([])
+    expect(JSON.parse((result.content[0] as { text: string }).text).addedToolNames).toEqual([])
     expect((await search(controller, { query: 'open_project', limit: 1 })).loaded?.[0].name).toBe(
       'open_project'
     )
@@ -154,10 +154,10 @@ describe('Beta 工具搜索', () => {
     const first = controller.loadFromSkill(
       '先用 `material_read`；unknown_tool 和 material_read_fake 不是可用工具。'
     )
-    expect(first.addedToolNames).toEqual(['material_read', 'material_write'])
+    expect(JSON.parse(first.text!).addedToolNames).toEqual(['material_read', 'material_write'])
     const materialTools = controller.getTools()
     expect(materialTools.slice(0, initial.length)).toEqual(initial)
-    expect(controller.loadFromSkill('material_write').addedToolNames).toEqual([])
+    expect(JSON.parse(controller.loadFromSkill('material_write').text!).addedToolNames).toEqual([])
     controller.loadFromSkill('blueprint_read')
     expect(controller.getTools().slice(0, materialTools.length)).toEqual(materialTools)
     expect(controller.getTools().at(-1)).toBe(catalog[0])

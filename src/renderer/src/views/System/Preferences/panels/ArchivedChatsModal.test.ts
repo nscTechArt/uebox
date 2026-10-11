@@ -137,6 +137,6 @@ describe('ArchivedChatsModal', () => {
     const wrapper = await mountModal()
 
     expect(wrapper.findAll('.archived-item')).toHaveLength(0)
-    expect(wrapper.text()).toContain('还没有归档的对话')
+    expect(wrapper.text()).toContain('暂无归档的对话')
   })
 })

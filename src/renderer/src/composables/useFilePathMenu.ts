@@ -81,7 +81,7 @@ function reportOpenFailure(result: ShellOpenResult | undefined, target: string):
   if (!failure) return
   console.warn('[useFilePathMenu] 打开失败:', target, failure.error)
   message[failure.level](
-    failure.pathNotFound ? `这个路径不存在：${target}` : `打不开：${target}（${failure.error}）`,
+    failure.pathNotFound ? `路径不存在：${target}` : `无法打开：${target}（${failure.error}）`,
     8
   )
 }

@@ -62,16 +62,18 @@ const UnrealProcessDetector = {
           }))
         )
       }
-      // 使用 PowerShell 获取 UnrealEditor.exe 进程及其命令行参数
+      // 使用 PowerShell 获取 UnrealEditor.exe（UE5）/ UE4Editor.exe（UE4）进程及其命令行参数
       // 使用 Base64 编码命令以避免引号转义问题
-      const psCommand = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;Get-CimInstance Win32_Process -Filter "Name='UnrealEditor.exe'"|Select-Object ProcessId,Name,CommandLine|ConvertTo-Json -Compress`
+      const psCommand = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;Get-CimInstance Win32_Process -Filter "Name='UnrealEditor.exe' OR Name='UE4Editor.exe'"|Select-Object ProcessId,Name,CommandLine|ConvertTo-Json -Compress`
       const encodedCommand = Buffer.from(psCommand, 'utf16le').toString('base64')
 
       const { stdout } = await execAsync(
         `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`,
         {
           encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+          // WMI 坏了会一直挂着：托盘「打开工程」在等它，挂住就一直显示「启动中」
+          timeout: 15_000
         }
       )
 

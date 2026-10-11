@@ -203,7 +203,8 @@ describe('真实工具库检索回归', () => {
     const members = catalog.filter((tool) => toolSearchGroup(tool) === group)
     expect(members.length).toBeGreaterThan(1)
     expect(search.getTools()).toEqual(expect.arrayContaining(members))
-    expect(result.addedToolNames).toEqual(
+    const details = result.details as { toolSearch?: { loadedToolNames?: string[] } }
+    expect(details.toolSearch?.loadedToolNames).toEqual(
       expect.arrayContaining(
         members
           .filter((tool) => !(RESIDENT_TOOL_NAMES as readonly string[]).includes(tool.name))

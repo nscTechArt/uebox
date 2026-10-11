@@ -79,7 +79,7 @@ export async function captureVideoFirstFrame(
 
     video.onloadedmetadata = () => {
       if (!Number.isFinite(video.duration) || video.duration <= 0) {
-        fail(new Error(`读不到视频时长: ${videoPath}`))
+        fail(new Error(`无法读取视频时长: ${videoPath}`))
         return
       }
       // 取中间帧：开头常常是黑场或台标

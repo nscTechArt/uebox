@@ -65,7 +65,7 @@ describe('resumeAgent 的忙闸', () => {
 
     expect(agentV3.continue).not.toHaveBeenCalled()
     expect(stream.isBusy('chat-1')).toBe(true)
-    expect(messageCalls.info).toHaveBeenCalledWith(expect.stringContaining('还有一轮在跑'))
+    expect(messageCalls.info).toHaveBeenCalledWith(expect.stringContaining('仍有一轮任务在运行'))
   })
 
   it('空出来了照常续跑', async () => {

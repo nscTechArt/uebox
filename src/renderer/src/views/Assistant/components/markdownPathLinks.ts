@@ -40,6 +40,10 @@ function extendAcrossSpaces(source: string, start: number, path: string): string
   for (;;) {
     const word = NEXT_WORD.exec(source.slice(start + extended.length))?.[1]
     if (!word || !word.includes(separator)) return extended
+    // 下一个词自己就是一条路径（`a.png, D:\b.png`、`robocopy C:\src D:\dst`）：那是另一条，不接
+    if (/^(?:[A-Za-z]:[\\/]|\\\\)/.test(word)) return extended
+    // 前一段以逗号、分号收尾：是在列举，不是路径里的空格
+    if (/[,;]$/.test(extended)) return extended
     extended += ` ${word}`
   }
 }

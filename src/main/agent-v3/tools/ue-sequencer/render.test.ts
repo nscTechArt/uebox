@@ -226,6 +226,11 @@ describe('停止 = 取消', () => {
 })
 
 describe('formatResult', () => {
+  it('说渲完了却一个文件都没写出来：第一句就说失败', () => {
+    const text = formatResult(JOB, status({ state: 'finished', files_written: 0 }))
+    expect(text.split('\n')[0]).toMatch(/^渲染失败/)
+  })
+
   it('取消时说已写出的文件在哪，不说失败', () => {
     const text = formatResult(JOB, status({ state: 'canceled', files_written: 12 }))
     expect(text).toContain('已取消')

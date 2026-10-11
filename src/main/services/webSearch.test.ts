@@ -542,7 +542,7 @@ describe('Box Plan 检索', () => {
     )
     const result = await searchWeb('虚幻引擎')
     expect(result.success).toBe(false)
-    expect(result.error).toContain('额度用完了')
+    expect(result.error).toContain('额度已用完')
     expect(browserSearch).not.toHaveBeenCalled()
   })
 })

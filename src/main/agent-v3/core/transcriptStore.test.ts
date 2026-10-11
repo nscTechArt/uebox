@@ -180,6 +180,24 @@ describe('TranscriptStore', () => {
     expect(readFileSync(join(DIR, 's1.jsonl'), 'utf8').split('旧对话').length - 1).toBe(1)
   })
 
+  it('提示词和工具增量（system 消息）不落盘，恢复后计数照样对得上', async () => {
+    const head = { role: 'system', content: '这一轮的提示词', timestamp: 0 } as AgentMessage
+    const first = new TranscriptStore('s1')
+    await first.append([head, msg('user', '旧对话'), msg('assistant', '旧回复')])
+    expect(readFileSync(join(DIR, 's1.jsonl'), 'utf8')).not.toContain('这一轮的提示词')
+
+    // 重启：盘上两条，agent 里开头又是一条新提示词，中途还插了一条工具增量
+    const restored = await loadTranscript('s1')
+    expect(restored).toHaveLength(2)
+    const second = new TranscriptStore('s1')
+    second.markPersisted(restored.length)
+    const delta = { role: 'system', content: '', timestamp: 2 } as AgentMessage
+    await second.append([head, ...restored, delta, msg('user', '新消息')])
+
+    const loaded = await loadTranscript('s1')
+    expect(loaded.map((message) => message.role)).toEqual(['user', 'assistant', 'user'])
+  })
+
   it('并发 append 不会写出交错的半行 JSON', async () => {
     const store = new TranscriptStore('s1')
     const batches = Array.from({ length: 10 }, (_, i) =>

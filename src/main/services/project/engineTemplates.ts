@@ -640,7 +640,7 @@ export async function instantiateEngineTemplate(options: {
       sharedPacks.push(copied)
     } else {
       warnings.push(
-        `共享内容包 "${pack.mountName}" 在引擎里没找到，模板里引用它的资产会显示为丢失引用。`
+        `引擎中未找到共享内容包 "${pack.mountName}"，模板中引用它的资产将显示为丢失引用。`
       )
     }
   }

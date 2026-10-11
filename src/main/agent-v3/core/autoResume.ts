@@ -42,6 +42,7 @@
 import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core'
 
 import { planResume, type ResumePlan } from './resume'
+import { restoreTranscript, withoutSystemMessages } from './systemMessages'
 
 /** 第 n 次自动续跑前等多久。数组长度就是次数上限 */
 export const AUTO_RESUME_DELAYS_MS: readonly number[] = [10_000, 30_000]
@@ -226,7 +227,8 @@ export function createAutoResume(deps: AutoResumeDeps): AutoResume {
       await first()
       while (pending !== undefined) {
         const reason = pending
-        const plan = planResume(agent.state.messages)
+        // 开头那条提示词不算历史：只剩它时等于没跑过，续跑后由 restoreTranscript 放回去
+        const plan = planResume(withoutSystemMessages(agent.state.messages))
         if (!plan.ok) {
           pending = undefined
           const release = held
@@ -248,7 +250,7 @@ export function createAutoResume(deps: AutoResumeDeps): AutoResume {
         pending = undefined
         held = []
         await hooks.onResume(plan)
-        agent.state.messages = plan.messages
+        restoreTranscript(agent, plan.messages)
         await hooks.resume()
       }
     }

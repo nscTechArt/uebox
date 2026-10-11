@@ -132,7 +132,7 @@ export async function setupProject(connectionId: string): Promise<EpicSetupApply
       wroteAutoStart: false,
       running: false,
       error: '项目已断开连接',
-      message: '项目已断开连接，请重新在盒子里打开它。'
+      message: '项目已断开连接，请在虚幻盒子中重新打开该项目。'
     }
   }
 
@@ -169,13 +169,13 @@ export async function setupProject(connectionId: string): Promise<EpicSetupApply
 }
 
 function buildMessage(result: EpicSetupResult, running: boolean): string {
-  if (running) return '已开启，虚幻引擎的工具集现在可以用了。'
+  if (running) return '已开启，虚幻引擎工具集现已可用。'
   if (result.needsRestart) {
     const what =
       result.addedPlugins.length > 0 ? `已启用 ${result.addedPlugins.join('、')}` : '已配置'
     return `${what}。请重启虚幻引擎编辑器，重启后服务会自动运行。`
   }
-  return '已配置，但服务没能自动启动。请重启虚幻引擎编辑器再试。'
+  return '已配置，但服务未能自动启动。请重启虚幻引擎编辑器后重试。'
 }
 
 /**

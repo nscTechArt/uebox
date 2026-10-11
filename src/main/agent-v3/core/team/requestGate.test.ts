@@ -5,7 +5,8 @@ import {
   type AssistantMessage,
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
-  type Model
+  type Model,
+  normalizeContext
 } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import { describe, expect, it } from 'vitest'
@@ -184,14 +185,20 @@ describe('调度包装', () => {
     const plans = [[overloaded], ok]
     const retries: number[] = []
     const paced = wrap(() => scripted(plans.shift()!), retries)
-    expect(await collect(await paced(model, { messages: [] }))).toEqual(['start', 'done'])
+    expect(await collect(await paced(model, normalizeContext({ messages: [] })))).toEqual([
+      'start',
+      'done'
+    ])
     expect(retries).toEqual([1])
   })
 
   it('一直没有首包：到点放弃、重发', async () => {
     const plans: Array<Array<AssistantMessageEvent | 'hang'>> = [['hang'], ok]
     const paced = wrap(() => scripted(plans.shift()!))
-    expect(await collect(await paced(model, { messages: [] }))).toEqual(['start', 'done'])
+    expect(await collect(await paced(model, normalizeContext({ messages: [] })))).toEqual([
+      'start',
+      'done'
+    ])
   })
 
   it('已经推过内容再断流：不重发（会重复开头），报一次失败', async () => {
@@ -200,7 +207,7 @@ describe('调度包装', () => {
       calls++
       return scripted([{ type: 'start', partial: message() }, 'hang'])
     })
-    const types = await collect(await paced(model, { messages: [] }))
+    const types = await collect(await paced(model, normalizeContext({ messages: [] })))
     expect(calls).toBe(1)
     expect(types[0]).toBe('start')
     expect(types[1]).toMatch(/^error:.*没收完/)
@@ -218,13 +225,15 @@ describe('调度包装', () => {
         }
       ])
     })
-    expect(await collect(await paced(model, { messages: [] }))).toEqual(['error:401 Unauthorized'])
+    expect(await collect(await paced(model, normalizeContext({ messages: [] })))).toEqual([
+      'error:401 Unauthorized'
+    ])
     expect(calls).toBe(1)
   })
 
   it('重发次数用完：报一句说得清原因的失败', async () => {
     const paced = wrap(() => scripted([overloaded]))
-    const types = await collect(await paced(model, { messages: [] }))
+    const types = await collect(await paced(model, normalizeContext({ messages: [] })))
     expect(types).toHaveLength(1)
     expect(types[0]).toMatch(/连续 5 次扛不住.*429/)
   })
@@ -241,13 +250,16 @@ describe('调度包装', () => {
       const plans = [[bodyless], ok]
       const retries: number[] = []
       const paced = wrap(() => scripted(plans.shift()!), retries)
-      expect(await collect(await paced(codebuddy, { messages: [] }))).toEqual(['start', 'done'])
+      expect(await collect(await paced(codebuddy, normalizeContext({ messages: [] })))).toEqual([
+        'start',
+        'done'
+      ])
       expect(retries).toEqual([1])
     })
 
     it('一直 400：报原文，不说「扛不住」（免得持续续跑当成中转不稳接着转）', async () => {
       const paced = wrap(() => scripted([bodyless]))
-      expect(await collect(await paced(codebuddy, { messages: [] }))).toEqual([
+      expect(await collect(await paced(codebuddy, normalizeContext({ messages: [] })))).toEqual([
         'error:400 status code (no body)'
       ])
     })
@@ -258,7 +270,7 @@ describe('调度包装', () => {
         calls++
         return scripted([bodyless])
       })
-      await collect(await paced(model, { messages: [] }))
+      await collect(await paced(model, normalizeContext({ messages: [] })))
       expect(calls).toBe(1)
 
       const withBody: AssistantMessageEvent = {
@@ -271,7 +283,7 @@ describe('调度包装', () => {
         calls++
         return scripted([withBody])
       })
-      await collect(await paced2(codebuddy, { messages: [] }))
+      await collect(await paced2(codebuddy, normalizeContext({ messages: [] })))
       expect(calls).toBe(1)
     })
   })
@@ -284,7 +296,9 @@ describe('调度包装', () => {
       controller.abort()
       return scripted([overloaded])
     })
-    const types = await collect(await paced(model, { messages: [] }, { signal: controller.signal }))
+    const types = await collect(
+      await paced(model, normalizeContext({ messages: [] }), { signal: controller.signal })
+    )
     expect(calls).toBe(1)
     expect(types).toHaveLength(1)
     expect(types[0]).toMatch(/^error:/)
@@ -304,7 +318,9 @@ describe('调度包装', () => {
         }) as unknown as AssistantMessageEventStream
     )
     const events: AssistantMessageEvent[] = []
-    for await (const event of await paced(model, { messages: [] }, { signal: controller.signal })) {
+    for await (const event of await paced(model, normalizeContext({ messages: [] }), {
+      signal: controller.signal
+    })) {
       events.push(event)
     }
     expect(events).toHaveLength(1)

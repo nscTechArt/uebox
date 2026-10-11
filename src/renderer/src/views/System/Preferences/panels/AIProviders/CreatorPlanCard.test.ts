@@ -99,7 +99,7 @@ describe('CreatorPlanCard', () => {
     stubApi()
     const wrapper = mount(CreatorPlanCard, { global: { stubs } })
     await flushPromises()
-    expect(wrapper.text()).toContain('使用盒子提供的订阅服务轻松配置所有模型')
+    expect(wrapper.text()).toContain('使用虚幻盒子订阅服务一键配置所有模型')
     expect(wrapper.text()).toContain('连接')
     expect(wrapper.text()).not.toContain('断开')
   })
@@ -189,7 +189,7 @@ describe('CreatorPlanCard', () => {
     await flushPromises()
     const alert = wrapper.find('.plan-alert')
     expect(alert.exists()).toBe(true)
-    expect(alert.text()).toContain('本期只给 20% 的额度')
+    expect(alert.text()).toContain('本期额度降为 20%')
     await alert.find('button').trigger('click')
     expect(openExternal).toHaveBeenCalledWith('https://plan.example/account/billing')
   })
@@ -263,7 +263,7 @@ describe('CreatorPlanCard', () => {
     await flushPromises()
     const items = wrapper.findAll('.plan-deprecations li').map((li) => li.text())
     expect(items).toHaveLength(2)
-    expect(items[0]).toContain('uebox-agent 要下线了')
+    expect(items[0]).toContain('uebox-agent 即将下线')
     expect(items[0]).toContain('uebox-agent-2')
     expect(items[0]).not.toContain('重建')
     expect(items[1]).toContain('重建知识库索引')
@@ -295,10 +295,10 @@ describe('CreatorPlanCard', () => {
       ok: true,
       data: { revoked: false, keysUrl: 'https://plan.example/account/keys' }
     })
-    expect(wrapper.text()).toContain('没能在服务端吊销这把 Key')
+    expect(wrapper.text()).toContain('服务端吊销此 Key 失败')
     await wrapper
       .findAll('button')
-      .find((b) => b.text() === '去网页端吊销')!
+      .find((b) => b.text() === '前往网页端吊销')!
       .trigger('click')
     expect(openExternal).toHaveBeenCalledWith('https://plan.example/account/keys')
     expect(wrapper.emitted('changed')).toHaveLength(1)
@@ -309,7 +309,7 @@ describe('CreatorPlanCard', () => {
       ok: true,
       data: { revoked: true, keysUrl: 'https://plan.example/account/keys' }
     })
-    expect(wrapper.text()).not.toContain('没能在服务端吊销')
+    expect(wrapper.text()).not.toContain('服务端吊销此 Key 失败')
     expect(wrapper.text()).toContain('连接')
   })
 })
@@ -339,7 +339,7 @@ describe('CreatorPlanCard 非对话角色', () => {
       .trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('嵌入')
-    expect(wrapper.text()).toContain('知识库按新模型重建向量')
+    expect(wrapper.text()).toContain('知识库将按新模型重建向量')
   })
 
   it('没勾上就不提示', async () => {
@@ -351,7 +351,7 @@ describe('CreatorPlanCard 非对话角色', () => {
       .find((b) => b.text() === '连接')!
       .trigger('click')
     await flushPromises()
-    expect(wrapper.text()).not.toContain('知识库按新模型重建向量')
+    expect(wrapper.text()).not.toContain('知识库将按新模型重建向量')
   })
 })
 

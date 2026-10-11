@@ -598,6 +598,15 @@ namespace
 		{
 			return Value->AsString();
 		}
+		// 整数引脚不认 "1.0"：整数值按整数写
+		if (Value.IsValid() && Value->Type == EJson::Number)
+		{
+			const double Number = Value->AsNumber();
+			if (FMath::IsFinite(Number) && Number == FMath::RoundToDouble(Number) && FMath::Abs(Number) < 9.0e15)
+			{
+				return FString::Printf(TEXT("%lld"), static_cast<int64>(Number));
+			}
+		}
 		return UAL_CommandUtils::JsonValueToImportText(Value);
 	}
 
@@ -757,6 +766,40 @@ namespace
 					}
 					return SetPinValue(Pin, Value, OutError);
 				}
+				// 结构体引脚：先按属性写（能只改一个分量），再把整个字段的值抄到引脚上 ——
+				// 编译时没连线的引脚字面值会盖掉属性，只写属性等于没写
+				if (bOnNodeStruct && Pin->Direction == EGPD_Input && !Pin->bHidden && Pin->LinkedTo.Num() == 0
+					&& Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
+				{
+					const FProperty* Field = NodeProp->Struct->FindPropertyByName(FName(*Resolved));
+					if (Field)
+					{
+						if (!bNodeIsNew)
+						{
+							TWeakObjectPtr<UEdGraphNode> WeakNode = Anim;
+							const FString OldValue = Pin->DefaultValue;
+							Log.AddUndo([WeakNode, PinName, OldValue]()
+							{
+								UEdGraphNode* Restored = WeakNode.Get();
+								if (UEdGraphPin* RestoredPin = Restored ? FindPinIgnoreCase(Restored, PinName) : nullptr)
+								{
+									RestoredPin->DefaultValue = OldValue;
+								}
+							});
+						}
+						if (!UALPropertyPath::SetByPath(Anim, NodeProp->GetName() + TEXT(".") + Resolved + Rest, Value, OutError))
+						{
+							return false;
+						}
+						const uint8* StructMemory = NodeProp->ContainerPtrToValuePtr<uint8>(Anim);
+						FString PinText;
+						if (FBlueprintEditorUtils::PropertyValueToString_Direct(Field, Field->ContainerPtrToValuePtr<uint8>(StructMemory), PinText))
+						{
+							Pin->GetSchema()->TrySetDefaultValue(*Pin, PinText);
+						}
+						return true;
+					}
+				}
 			}
 
 			if (bOnNodeStruct)
@@ -791,13 +834,18 @@ namespace
 			{
 				Log.Backup(Node, Prop->GetFName());
 			}
+			const FString Before = ExportTextCompat(Prop, Prop->ContainerPtrToValuePtr<void>(Node));
 			if (!UALPropertyPath::SetByPath(Node, Resolved + Rest, Value, OutError))
 			{
 				return false;
 			}
-			// 转换的 LogicType 改成 Custom 时，自定义混合图是在这个回调里建出来的
-			FPropertyChangedEvent Changed(Prop);
-			Node->PostEditChangeProperty(Changed);
+			// 转换的 LogicType 改成 Custom 时，自定义混合图是在这个回调里建出来的。
+			// 值没变就别回调：已是 Custom 的转换再收一次回调，引擎会把现有的自定义混合图删掉
+			if (ExportTextCompat(Prop, Prop->ContainerPtrToValuePtr<void>(Node)) != Before)
+			{
+				FPropertyChangedEvent Changed(Prop);
+				Node->PostEditChangeProperty(Changed);
+			}
 			return true;
 		}
 
@@ -1390,7 +1438,11 @@ bool TryCreateNode(
 	Graph->AddNode(Node, /*bFromUI=*/false, /*bSelectNewNode=*/false);
 	Node->CreateNewGuid();
 	Node->PostPlacedNewNode();
-	Node->AllocateDefaultPins();
+	// 按位置混合这类节点在 PostPlacedNewNode 里已经重建过引脚，再建一遍会多出一整套（同引擎的 FGraphNodeCreator）
+	if (Node->Pins.Num() == 0)
+	{
+		Node->AllocateDefaultPins();
+	}
 	Node->NodePosX = PosX;
 	Node->NodePosY = PosY;
 	OutNode = Node;
@@ -2328,6 +2380,12 @@ void HandleApplyStateMachine(UBlueprint* Blueprint, UEdGraph* Graph, const FStri
 			Keep.Add(Pair.Value);
 		}
 		Keep.Append(UsedTransitions);
+		// 连线里按名字 / GUID 点到的已有状态也算「提到了」：删了它，刚连上的转换也跟着没了
+		for (const auto& Conn : Pending)
+		{
+			if (Conn.From) Keep.Add(Conn.From);
+			if (Conn.To) Keep.Add(Conn.To);
+		}
 		for (UEdGraphNode* Node : PreExisting)
 		{
 			if (Node && Node->IsA<UAnimStateTransitionNode>() && !Keep.Contains(Node) && Graph->Nodes.Contains(Node))

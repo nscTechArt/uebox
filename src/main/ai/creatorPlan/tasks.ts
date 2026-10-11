@@ -149,8 +149,8 @@ export class PlanTaskFailedError extends Error {
     label: string
   ) {
     super(
-      `没生成出来（${label}）：${task.error?.message || task.error?.code || '服务端没有给出原因'}。` +
-        '这次占用的额度已经退回。'
+      `生成失败（${label}）：${task.error?.message || task.error?.code || '服务端未提供原因'}。` +
+        '本次占用的额度已退回。'
     )
     this.name = 'PlanTaskFailedError'
   }
@@ -171,21 +171,21 @@ export function cancelOutcomeOf(task: PlanTask | null): PlanTaskCancelOutcome {
 
 /** 为什么不退：视频是「已经开始生成」，3D、音乐是「提交了就不退」 */
 const KEPT_REASON: Readonly<Record<PlanTaskKind, string>> = {
-  video: '视频已经开始生成，只有还在排队时取消才退',
-  model3d: '已提交的 3D 取消后不退额度，上游会跑完并照常计费',
-  music: '已提交的音乐取消后不退额度，上游会跑完并照常计费'
+  video: '视频已开始生成，仅在排队阶段取消可退还额度',
+  model3d: '3D 任务提交后取消不退还额度，上游将继续生成并正常计费',
+  music: '音乐任务提交后取消不退还额度，上游将继续生成并正常计费'
 }
 
 const CANCEL_MESSAGES: Readonly<
   Record<PlanTaskCancelOutcome, (label: string, kind?: PlanTaskKind) => string>
 > = {
-  refunded: (label) => `已取消（${label}），占用的额度已经退回。`,
+  refunded: (label) => `已取消（${label}），占用的额度已退回。`,
   kept: (label, kind) =>
-    `已取消（${label}），这次的额度不退（${kind ? KEPT_REASON[kind] : '任务已经开始生成'}）。` +
-    '结果不再交付。',
+    `已取消（${label}），本次额度不予退还（${kind ? KEPT_REASON[kind] : '任务已开始生成'}）。` +
+    '结果将不再交付。',
   unconfirmed: (label) =>
-    `已停止等待（${label}），但取消请求没送到服务端，任务可能还在跑 —— ` +
-    `想要结果用这个任务号取回，不要重新提交。`
+    `已停止等待（${label}），但取消请求未送达服务端，任务可能仍在运行。` +
+    `如需结果，请使用该任务号取回，不要重新提交。`
 }
 
 /** 用户按了停止（或任务在别处被取消了） */
@@ -233,7 +233,7 @@ export class PlanTaskTimeoutError extends Error {
     readonly taskId: string,
     label: string
   ) {
-    super(`等了很久还没结束（${label}）。稍后用这个任务号接着取，不要重新提交。`)
+    super(`等待超时，任务仍未完成（${label}）。请稍后使用该任务号取回结果，不要重新提交。`)
     this.name = 'PlanTaskTimeoutError'
   }
 }
@@ -693,8 +693,8 @@ export class PlanTaskLeftError extends Error {
     label: string
   ) {
     super(
-      `已停止等待（${label}）。同样的请求别处还在等，任务没有取消、照常在跑；` +
-        '要结果的话稍后用这个任务号接着取，不要重新提交。'
+      `已停止等待（${label}）。同一请求仍在其他位置等待，任务未取消，仍在正常运行；` +
+        '如需结果，请稍后使用该任务号取回，不要重新提交。'
     )
     this.name = 'PlanTaskLeftError'
   }

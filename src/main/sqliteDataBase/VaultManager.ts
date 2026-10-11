@@ -820,6 +820,10 @@ export class VaultManager {
     // 移动过程中任何一个服务端请求打进来都会抛错。
     const isCurrent = this.currentVaultInfo?.id === vaultId
     if (isCurrent) {
+      // 有导入在跑时，搬完之后的重新连接会被拒（见 switchToVault），库就一直断着。
+      // 在关连接之前先问一句，不行就别动
+      beginImportVaultSwitch()
+      finishImportVaultSwitch()
       await this.stopV2NetworkService(vaultId)
       if (this.currentVaultDb) {
         try {
@@ -859,9 +863,14 @@ export class VaultManager {
       throw new Error(`数据库更新失败: ${error instanceof Error ? error.message : String(error)}`)
     }
 
-    // 如果是活跃的，重新连接
+    // 如果是活跃的，重新连接。连不上要说出来，不能报「已迁移」却留着一个断开的库
     if (isCurrent) {
-      await this.switchToVault(vaultId)
+      const reconnected = await this.switchToVault(vaultId)
+      if (!reconnected.success) {
+        throw new Error(
+          `保管库已移动到 ${newVaultPath}，但重新连接失败：${reconnected.error ?? '未知原因'}。请重新切换到这个保管库`
+        )
+      }
     }
 
     console.log(`[VaultManager] 保管库已移动: ${vaultInfo.name} -> ${newVaultPath}`)

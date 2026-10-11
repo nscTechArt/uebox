@@ -141,7 +141,7 @@ describe('嵌入（03-embeddings）', () => {
       (e: unknown) => e
     )
     expect(error).toBeInstanceOf(CreatorPlanCallError)
-    expect((error as Error).message).toContain('额度用完了')
+    expect((error as Error).message).toContain('额度已用完')
     expect((error as Error).message).toContain('设置 → 模型')
 
     const other = { ...provider, id: 'jina' }
@@ -238,7 +238,7 @@ describe('判定（09-judge）', () => {
     stubFetch(() => planError(403, 'role_not_in_plan'))
     await expect(
       requestJudgement(provider, 'uebox-judge', 'x', { q: { type: 'noul', instructions: 'y' } })
-    ).rejects.toThrow('套餐不含这个角色')
+    ).rejects.toThrow('套餐不包含该角色')
   })
 })
 
@@ -328,7 +328,7 @@ describe('生图（04-images）', () => {
         })
     )
     await expect(generateImages({ prompt: 'x' })).rejects.toThrow(
-      /今天的额度用完了，.+ 恢复[\s\S]*设置 → 模型/
+      /今日额度已用完，.+ 恢复[\s\S]*设置 → 模型/
     )
     expect(calls).toHaveLength(1)
   })

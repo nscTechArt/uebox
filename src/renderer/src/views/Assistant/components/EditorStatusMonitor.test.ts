@@ -105,7 +105,7 @@ describe('EditorStatusMonitor', () => {
     await wrapper.find('.bad-item .ask-btn').trigger('click')
 
     expect(useChatSessionsStore().getDraft('sid')).toBe(
-      '状态监控里「本地缓存命中」是 62.0%（预期 > 85.0%），帮我查查原因。'
+      '状态监控里「本地缓存命中」是 62.0%（预期 > 85.0%），请排查原因。'
     )
   })
 

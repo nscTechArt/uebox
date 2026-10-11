@@ -95,7 +95,7 @@ describe('LibraryMigrationWizard', () => {
 
     expect(wrapper.find('.btn-confirm').text()).toBe('导入 3 个')
     expect(wrapper.find('.modal-title').text()).toBe('从旧版导入蓝图')
-    expect(wrapper.find('.summary-unit').text()).toBe('个蓝图可以导入')
+    expect(wrapper.find('.summary-unit').text()).toBe('个蓝图可导入')
   })
 
   it('勾掉文件夹后数字与按钮跟着变', async () => {
@@ -135,7 +135,7 @@ describe('LibraryMigrationWizard', () => {
     const wrapper = await mountWizard()
 
     expect(wrapper.find('.summary-count').text()).toBe('0')
-    expect(wrapper.find('.summary-sub').text()).toContain('都已经在库里了')
+    expect(wrapper.find('.summary-sub').text()).toContain('均已在库中')
     expect((wrapper.find('.btn-confirm').element as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -143,14 +143,14 @@ describe('LibraryMigrationWizard', () => {
     preview.mockResolvedValue({ entries: [], folders: [], totalSkipped: 0 })
     const wrapper = await mountWizard()
 
-    expect(wrapper.find('.summary-sub').text()).toBe('这个文件里没有蓝图。')
+    expect(wrapper.find('.summary-sub').text()).toBe('该文件中没有蓝图。')
   })
 
   it('文件里全是另一类节点：说清楚该去哪个库导', async () => {
     preview.mockResolvedValue({ entries: [], folders: [], totalSkipped: 12 })
     const wrapper = await mountWizard()
 
-    expect(wrapper.find('.summary-sub').text()).toContain('12 个节点都不是蓝图')
+    expect(wrapper.find('.summary-sub').text()).toContain('12 个节点均不是蓝图')
     expect(wrapper.find('.summary-sub').text()).toContain('材质库')
   })
 
@@ -165,7 +165,7 @@ describe('LibraryMigrationWizard', () => {
     await wrapper.find('.btn-toggle-all').trigger('click')
 
     expect(wrapper.find('.summary-count').text()).toBe('0')
-    expect(wrapper.find('.summary-sub').text()).toContain('一个文件夹都没勾选')
+    expect(wrapper.find('.summary-sub').text()).toContain('未选择任何文件夹')
   })
 
   it('部分已存在时在副标题里说一句', async () => {
@@ -176,7 +176,7 @@ describe('LibraryMigrationWizard', () => {
     const wrapper = await mountWizard()
 
     expect(wrapper.find('.summary-count').text()).toBe('2')
-    expect(wrapper.find('.summary-sub').text()).toContain('1 个已在库中，会跳过')
+    expect(wrapper.find('.summary-sub').text()).toContain('1 个已在库中，将跳过')
   })
 
   // ===== 结果与失败 =====

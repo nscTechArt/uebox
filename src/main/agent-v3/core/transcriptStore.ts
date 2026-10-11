@@ -28,6 +28,7 @@ import { app } from 'electron'
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { trimDanglingToolCalls } from './resume'
 import { writeSessionFile } from './atomicSessionFile'
+import { withoutSystemMessages } from './systemMessages'
 
 const DIR = 'agent-v3-sessions'
 const VERSION = 1
@@ -154,7 +155,10 @@ export class TranscriptStore {
    * 传整个数组而不是单条：pi 的 `Agent` 不保证每条消息都有对应事件
    * （压缩会整体替换 messages），按「差量」处理才不会漏。
    */
-  append(messages: AgentMessage[], options: { strict?: boolean } = {}): Promise<void> {
+  append(all: AgentMessage[], options: { strict?: boolean } = {}): Promise<void> {
+    // 系统提示词和工具增量每轮现算，不落盘（见 systemMessages.ts）。
+    // 计数也按过滤后的算，`markPersisted(盘上条数)` 才对得上。
+    const messages = withoutSystemMessages(all)
     const write = this.queue.then(async () => {
       if (this.discarded) return
       try {
@@ -184,7 +188,8 @@ export class TranscriptStore {
     return write
   }
 
-  private async rewrite(messages: AgentMessage[]): Promise<void> {
+  private async rewrite(all: AgentMessage[]): Promise<void> {
+    const messages = withoutSystemMessages(all)
     const path = filePathFor(this.sessionId)
     const header: Header = (await readHeader(path)) ?? {
       kind: 'header',

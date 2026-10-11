@@ -86,7 +86,7 @@ export function useAppAgentRunner(): void {
  */
 export const appExecuteAgent: ExecuteAgent = (message, excelContext, options) => {
   if (!runner) {
-    return Promise.reject(new Error('agent 运行器还没装上（常驻布局尚未挂载）'))
+    return Promise.reject(new Error('Agent 运行器尚未就绪（常驻布局尚未挂载）'))
   }
   return runner(message, excelContext, options)
 }

@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createModels } from '@earendil-works/pi-ai'
+import { createModels, getCurrentSystemPrompt, getCurrentTools } from '@earendil-works/pi-ai'
 import {
   fauxAssistantMessage,
   fauxProvider,
@@ -104,8 +104,8 @@ beforeEach(() => {
   ])
   const streamFn: StreamFn = (model, context, options) => {
     requests.push({
-      system: context.systemPrompt ?? '',
-      tools: (context.tools ?? []).map((tool) => tool.name)
+      system: getCurrentSystemPrompt(context.messages),
+      tools: getCurrentTools(context.messages).map((tool) => tool.name)
     })
     return models.streamSimple(model, context, options)
   }
