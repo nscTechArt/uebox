@@ -648,6 +648,17 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     concurrency: 'sequential',
     make: () => ueInput.createInjectInputTool()
   },
+  /**
+   * 加按键映射：写 IMC / InputAction 资产，或旧输入系统的 DefaultInput.ini。
+   * sequential —— 两次并发写同一个 IMC，后存的那次会把前一次的映射盖掉。
+   */
+  {
+    name: 'ue_input_add_mapping',
+    namespace: 'ue.input',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueInput.createInputAddMappingTool()
+  },
   {
     name: 'ue_playtest',
     namespace: 'ue.editor',

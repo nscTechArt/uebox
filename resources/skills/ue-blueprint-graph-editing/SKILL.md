@@ -91,6 +91,7 @@ look like. Route on what the user actually said:
 | "这个 BP 应该继承 Character" | `blueprint_set_parent_class` — compiles and returns the breakage |
 | 联机同步一个变量 | `replication` on `blueprint_set_variable_meta` |
 | "战斗逻辑单独放一页"、需要一张空事件图 | `blueprint_create_event_graph` — events only live in event graphs |
+| "按 E 交互"、"空格跳" but the key is not bound yet | `ue_input_add_mapping` — bind the key first, then write the input event node |
 
 The first three change the shape of your graph, so settle them first. Full usage,
 including how to wire a bound event's returned `node_id` straight into

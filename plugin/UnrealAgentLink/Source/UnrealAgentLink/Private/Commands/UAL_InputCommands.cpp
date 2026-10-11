@@ -2,9 +2,13 @@
 
 #include "UAL_CommandUtils.h"
 #include "UAL_ReflectCall.h"
+#include "UAL_ScopedTransaction.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Editor.h"
+#include "FileHelpers.h"
+#include "Misc/PackageName.h"
+#include "UObject/Package.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/InputSettings.h"
@@ -439,6 +443,40 @@ namespace
 	// ------------------------------------------------------------------
 
 	/**
+	 * IMC 里那张按键映射表在哪。
+	 *
+	 * ⚠️ 5.7 起表挪进了 `DefaultKeyMappings.Mappings`（结构体里），顶层的 `Mappings`
+	 * 还在但被标了弃用，**PostLoad 时内容被搬走、留下空数组**。只认顶层名字的话，
+	 * 5.7/5.8 上读出来每个 IMC 都是空的，写进去的映射加载时也不认 —— 编得过、
+	 * 跑得动、答案是错的。所以先找新位置，找不到再回落到老名字（5.0–5.6）。
+	 *
+	 * @param OutContainer 数组属性所在的容器（IMC 本身，或它里面那个结构体）
+	 */
+	FArrayProperty* FindContextMappingsArray(UObject* Context, void*& OutContainer)
+	{
+		OutContainer = nullptr;
+		if (!Context)
+		{
+			return nullptr;
+		}
+		if (const FStructProperty* DataProp =
+				FindFProperty<FStructProperty>(Context->GetClass(), TEXT("DefaultKeyMappings")))
+		{
+			if (FArrayProperty* Inner = FindFProperty<FArrayProperty>(DataProp->Struct, TEXT("Mappings")))
+			{
+				OutContainer = DataProp->ContainerPtrToValuePtr<void>(Context);
+				return Inner;
+			}
+		}
+		if (FArrayProperty* Legacy = FindFProperty<FArrayProperty>(Context->GetClass(), TEXT("Mappings")))
+		{
+			OutContainer = Context;
+			return Legacy;
+		}
+		return nullptr;
+	}
+
+	/**
 	 * 从资产里读 IMC。
 	 *
 	 * **这跟运行时不是一回事**：资产里定义了不代表游戏里那一刻挂着。
@@ -483,8 +521,8 @@ namespace
 			ContextJson->SetStringField(TEXT("name"), Context->GetName());
 			OutContexts.Add(MakeShared<FJsonValueObject>(ContextJson));
 
-			FArrayProperty* MappingsProp =
-				FindFProperty<FArrayProperty>(Context->GetClass(), TEXT("Mappings"));
+			void* MappingsContainer = nullptr;
+			FArrayProperty* MappingsProp = FindContextMappingsArray(Context, MappingsContainer);
 			if (!MappingsProp)
 			{
 				continue;
@@ -498,7 +536,7 @@ namespace
 				FindFProperty<FObjectPropertyBase>(ElemProp->Struct, TEXT("Action"));
 			const FStructProperty* KeyProp = FindFProperty<FStructProperty>(ElemProp->Struct, TEXT("Key"));
 
-			FScriptArrayHelper Helper(MappingsProp, MappingsProp->ContainerPtrToValuePtr<void>(Context));
+			FScriptArrayHelper Helper(MappingsProp, MappingsProp->ContainerPtrToValuePtr<void>(MappingsContainer));
 			for (int32 Index = 0; Index < Helper.Num(); ++Index)
 			{
 				const uint8* Elem = Helper.GetRawPtr(Index);
@@ -585,6 +623,11 @@ void FUAL_InputCommands::RegisterCommands(TMap<FString, FHandlerFunc>& CommandMa
 	CommandMap.Add(TEXT("input.inject_key"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 	{
 		Handle_InjectKey(Payload, RequestId);
+	});
+
+	CommandMap.Add(TEXT("input.add_mapping"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		Handle_AddMapping(Payload, RequestId);
 	});
 }
 
@@ -1226,4 +1269,477 @@ void FUAL_InputCommands::Handle_InjectKey(const TSharedPtr<FJsonObject>& Payload
 			UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 			return false;
 		}), 0.0f);
+}
+
+// ============================================================================
+// input.add_mapping —— 往工程里加一条按键映射
+// ============================================================================
+
+namespace
+{
+	/** `/Game/Input/IA_Jump` → `/Game/Input/IA_Jump.IA_Jump`；已经带对象名的原样返回 */
+	FString ToObjectPath(const FString& Path)
+	{
+		if (Path.Contains(TEXT(".")))
+		{
+			return Path;
+		}
+		return Path + TEXT(".") + FPackageName::GetShortName(Path);
+	}
+
+	/** Enhanced Input 的值类型名 → 枚举值。认不出返回 false */
+	bool ParseValueType(const FString& Name, uint8& Out)
+	{
+		static const TCHAR* Names[] = { TEXT("Boolean"), TEXT("Axis1D"), TEXT("Axis2D"), TEXT("Axis3D") };
+		for (uint8 Index = 0; Index < UE_ARRAY_COUNT(Names); ++Index)
+		{
+			if (Name.Equals(Names[Index], ESearchCase::IgnoreCase))
+			{
+				Out = Index;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool WriteValueType(UObject* Action, uint8 Type)
+	{
+		FProperty* Prop = Action ? FindFProperty<FProperty>(Action->GetClass(), TEXT("ValueType")) : nullptr;
+		if (const FByteProperty* AsByte = CastField<FByteProperty>(Prop))
+		{
+			AsByte->SetPropertyValue_InContainer(Action, Type);
+			return true;
+		}
+		if (const FEnumProperty* AsEnum = CastField<FEnumProperty>(Prop))
+		{
+			void* Addr = AsEnum->ContainerPtrToValuePtr<void>(Action);
+			AsEnum->GetUnderlyingProperty()->SetIntPropertyValue(Addr, static_cast<int64>(Type));
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * 触发器 / 修饰器名 → 类。
+	 *
+	 * 认三种写法：短名（`Negate`）、带前缀的类名（`InputModifierNegate`）、
+	 * 完整路径（`/Script/MyGame.MyModifier`，工程自定义的）。认不出时把能用的列出来。
+	 */
+	UClass* ResolveBehaviourClass(const FString& Name, UClass* Base, const TCHAR* Prefix, FString& OutError)
+	{
+		UClass* Found = nullptr;
+		if (Name.StartsWith(TEXT("/")))
+		{
+			Found = UALReflect::FindScriptClass(*Name);
+		}
+		else
+		{
+			const FString Short = Name.StartsWith(Prefix) ? Name : FString(Prefix) + Name;
+			Found = UALReflect::FindScriptClass(*(FString(TEXT("/Script/EnhancedInput.")) + Short));
+		}
+		if (Found && Base && Found->IsChildOf(Base) && !Found->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated))
+		{
+			return Found;
+		}
+
+		TArray<UClass*> Derived;
+		UALReflect::FindDerivedClasses(Base, Derived);
+		TArray<FString> Names;
+		for (UClass* Cls : Derived)
+		{
+			FString Short = Cls->GetName();
+			Short.RemoveFromStart(Prefix);
+			Names.Add(Short);
+		}
+		Names.Sort();
+		OutError = FString::Printf(TEXT("认不出「%s」。可用的有：%s"), *Name, *FString::Join(Names, TEXT(", ")));
+		return nullptr;
+	}
+
+	/** 往映射元素里的 Triggers / Modifiers 数组追加一个实例化子对象 */
+	bool AppendInstanced(void* MappingElem, const UStruct* MappingType, const TCHAR* ArrayName, UObject* Outer, UClass* Cls)
+	{
+		FArrayProperty* ArrayProp = FindFProperty<FArrayProperty>(MappingType, ArrayName);
+		const FObjectPropertyBase* ElemProp = ArrayProp ? CastField<FObjectPropertyBase>(ArrayProp->Inner) : nullptr;
+		if (!ElemProp)
+		{
+			return false;
+		}
+		FScriptArrayHelper Helper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(MappingElem));
+		const int32 Index = Helper.AddValue();
+		ElemProp->SetObjectPropertyValue(Helper.GetRawPtr(Index), NewObject<UObject>(Outer, Cls, NAME_None, RF_Transactional));
+		return true;
+	}
+
+	/** 工程里所有 IMC 的路径（给「找不到」时列候选用，最多 20 个） */
+	TArray<TSharedPtr<FJsonValue>> ListContextPaths(UClass* ContextClass)
+	{
+		TArray<TSharedPtr<FJsonValue>> Out;
+		const FAssetRegistryModule& Registry =
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		TArray<FAssetData> Assets;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+		Registry.Get().GetAssetsByClass(ContextClass->GetClassPathName(), Assets);
+#else
+		Registry.Get().GetAssetsByClass(ContextClass->GetFName(), Assets);
+#endif
+		for (const FAssetData& Asset : Assets)
+		{
+			if (Out.Num() >= 20)
+			{
+				break;
+			}
+			Out.Add(MakeShared<FJsonValueString>(Asset.PackageName.ToString()));
+		}
+		return Out;
+	}
+
+	/** 旧输入系统：加一条 Action 或 Axis Mapping，写回 DefaultInput.ini */
+	void AddLegacyMapping(const TSharedPtr<FJsonObject>& Payload, const FKey& Key, const FString& RequestId)
+	{
+		FString Name;
+		if (!Payload->TryGetStringField(TEXT("name"), Name) || Name.TrimStartAndEnd().IsEmpty())
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, TEXT("旧输入系统要给 name（Action 或 Axis 的名字）"));
+			return;
+		}
+		Name.TrimStartAndEndInline();
+		double Scale = 0.0;
+		const bool bAxis = Payload->TryGetNumberField(TEXT("axis_scale"), Scale);
+
+		UInputSettings* Settings = GetMutableDefault<UInputSettings>();
+		if (!Settings)
+		{
+			UAL_CommandUtils::SendError(RequestId, 500, TEXT("拿不到 InputSettings"));
+			return;
+		}
+
+		const FName MappingName(*Name);
+		bool bAlready = false;
+		if (bAxis)
+		{
+			for (const FInputAxisKeyMapping& Existing : Settings->GetAxisMappings())
+			{
+				bAlready |= (Existing.AxisName == MappingName && Existing.Key == Key);
+			}
+			if (!bAlready)
+			{
+				Settings->AddAxisMapping(FInputAxisKeyMapping(MappingName, Key, static_cast<float>(Scale)), true);
+			}
+		}
+		else
+		{
+			for (const FInputActionKeyMapping& Existing : Settings->GetActionMappings())
+			{
+				bAlready |= (Existing.ActionName == MappingName && Existing.Key == Key);
+			}
+			if (!bAlready)
+			{
+				Settings->AddActionMapping(FInputActionKeyMapping(MappingName, Key), true);
+			}
+		}
+
+		bool bConfigSaved = true;
+		if (!bAlready)
+		{
+			Settings->SaveKeyMappings();
+			// SaveKeyMappings 只写本机的 Saved/Config；要跟着工程走得写回 Config/DefaultInput.ini
+			bConfigSaved = Settings->TryUpdateDefaultConfigFile();
+		}
+
+		// 回执从设置里读回来：这个名字下现在绑了哪些键
+		TArray<TSharedPtr<FJsonValue>> Keys;
+		if (bAxis)
+		{
+			for (const FInputAxisKeyMapping& Mapping : Settings->GetAxisMappings())
+			{
+				if (Mapping.AxisName == MappingName)
+				{
+					TSharedPtr<FJsonObject> KeyJson = MakeShared<FJsonObject>();
+					KeyJson->SetStringField(TEXT("key"), Mapping.Key.ToString());
+					KeyJson->SetNumberField(TEXT("scale"), Mapping.Scale);
+					Keys.Add(MakeShared<FJsonValueObject>(KeyJson));
+				}
+			}
+		}
+		else
+		{
+			for (const FInputActionKeyMapping& Mapping : Settings->GetActionMappings())
+			{
+				if (Mapping.ActionName == MappingName)
+				{
+					Keys.Add(MakeShared<FJsonValueString>(Mapping.Key.ToString()));
+				}
+			}
+		}
+
+		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetBoolField(TEXT("ok"), true);
+		Result->SetStringField(TEXT("system"), TEXT("legacy"));
+		Result->SetStringField(TEXT("kind"), bAxis ? TEXT("axis") : TEXT("action"));
+		Result->SetStringField(TEXT("name"), Name);
+		Result->SetStringField(TEXT("key"), Key.ToString());
+		Result->SetBoolField(TEXT("already_mapped"), bAlready);
+		if (!bAlready)
+		{
+			Result->SetBoolField(TEXT("config_saved"), bConfigSaved);
+		}
+		Result->SetArrayField(TEXT("keys"), Keys);
+		UAL_CommandUtils::SendResponse(RequestId, 200, Result);
+	}
+}
+
+void FUAL_InputCommands::Handle_AddMapping(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+{
+	if (!Payload.IsValid())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing payload"));
+		return;
+	}
+
+	FString KeyName;
+	if (!Payload->TryGetStringField(TEXT("key"), KeyName) || KeyName.TrimStartAndEnd().IsEmpty())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing field: key"));
+		return;
+	}
+	const FKey Key(FName(*KeyName.TrimStartAndEnd()));
+	if (!Key.IsValid())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("「%s」不是引擎认识的键名。用引擎的键名，如 SpaceBar、W、LeftMouseButton、")
+			TEXT("Gamepad_FaceButton_Bottom、Gamepad_Left2D。"),
+			*KeyName));
+		return;
+	}
+
+	FString System;
+	Payload->TryGetStringField(TEXT("system"), System);
+	if (System.Equals(TEXT("legacy"), ESearchCase::IgnoreCase))
+	{
+		AddLegacyMapping(Payload, Key, RequestId);
+		return;
+	}
+
+	UClass* ContextClass = UALReflect::FindScriptClass(TEXT("/Script/EnhancedInput.InputMappingContext"));
+	UClass* ActionClass = UALReflect::FindScriptClass(TEXT("/Script/EnhancedInput.InputAction"));
+	if (!ContextClass || !ActionClass)
+	{
+		UAL_CommandUtils::SendError(RequestId, 400,
+			TEXT("这个工程没启用 Enhanced Input 插件，走的是旧输入系统。改用 system=\"legacy\"，")
+			TEXT("给 name（Action/Axis 名）和 key，轴映射再给 axis_scale。"));
+		return;
+	}
+
+	// ══ 先探，不动手 ══════════════════════════════════════════════════════
+
+	FString ContextPath, ActionPath;
+	if (!Payload->TryGetStringField(TEXT("context_path"), ContextPath) || ContextPath.IsEmpty() ||
+		!Payload->TryGetStringField(TEXT("action_path"), ActionPath) || ActionPath.IsEmpty())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing field: context_path / action_path"));
+		return;
+	}
+
+	UObject* Context = StaticLoadObject(ContextClass, nullptr, *ToObjectPath(ContextPath), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!Context)
+	{
+		TSharedPtr<FJsonObject> Details = MakeShared<FJsonObject>();
+		Details->SetArrayField(TEXT("contexts"), ListContextPaths(ContextClass));
+		UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(
+			TEXT("找不到输入映射上下文（IMC）：%s。工程里已有的列在 details.contexts。"), *ContextPath), Details);
+		return;
+	}
+
+	void* MappingsContainer = nullptr;
+	FArrayProperty* MappingsProp = FindContextMappingsArray(Context, MappingsContainer);
+	const FStructProperty* ElemProp = MappingsProp ? CastField<FStructProperty>(MappingsProp->Inner) : nullptr;
+	const FObjectPropertyBase* ElemActionProp =
+		ElemProp ? FindFProperty<FObjectPropertyBase>(ElemProp->Struct, TEXT("Action")) : nullptr;
+	const FStructProperty* ElemKeyProp = ElemProp ? FindFProperty<FStructProperty>(ElemProp->Struct, TEXT("Key")) : nullptr;
+	if (!ElemActionProp || !ElemKeyProp)
+	{
+		UAL_CommandUtils::SendError(RequestId, 500, TEXT("这个引擎版本的 IMC 结构认不出（找不到映射表），什么都没有改动。"));
+		return;
+	}
+
+	// 值类型：新建动作时用；已有动作给了又对不上就拒绝（往 Boolean 动作上绑 2D 摇杆不报错，只是没用）
+	FString WantedTypeName;
+	uint8 WantedType = 0;
+	const bool bHasValueType = Payload->TryGetStringField(TEXT("value_type"), WantedTypeName) && !WantedTypeName.IsEmpty();
+	if (bHasValueType && !ParseValueType(WantedTypeName, WantedType))
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("value_type「%s」认不出，只能是 Boolean / Axis1D / Axis2D / Axis3D"), *WantedTypeName));
+		return;
+	}
+
+	UObject* Action = StaticLoadObject(ActionClass, nullptr, *ToObjectPath(ActionPath), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	const bool bCreateAction = (Action == nullptr);
+	if (!bCreateAction && bHasValueType)
+	{
+		uint8 Existing = 0xFF;
+		if (ReadValueType(Action, Existing) && Existing != WantedType)
+		{
+			UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(
+				TEXT("%s 已存在，值类型是 %s，不是 %s。要么去掉 value_type 沿用它，要么换一个新的动作路径。什么都没有改动。"),
+				*Action->GetPathName(), ValueTypeName(Existing), *WantedTypeName));
+			return;
+		}
+	}
+	FString ActionPackagePath = ActionPath;
+	if (bCreateAction)
+	{
+		int32 Dot = INDEX_NONE;
+		if (ActionPackagePath.FindChar(TCHAR('.'), Dot))
+		{
+			ActionPackagePath.LeftInline(Dot);
+		}
+		FText Reason;
+		if (!FPackageName::IsValidLongPackageName(ActionPackagePath, /*bIncludeReadOnlyRoots=*/false, &Reason))
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+				TEXT("action_path「%s」没有这个资产，也不是能新建的位置：%s"), *ActionPath, *Reason.ToString()));
+			return;
+		}
+		if (StaticLoadObject(UObject::StaticClass(), nullptr, *ToObjectPath(ActionPackagePath), nullptr, LOAD_NoWarn | LOAD_Quiet))
+		{
+			UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(
+				TEXT("%s 已经有一个资产，但不是 InputAction。换一个路径。什么都没有改动。"), *ActionPackagePath));
+			return;
+		}
+	}
+
+	// 触发器 / 修饰器先全部解析，认不出一个就整条不动
+	TArray<UClass*> TriggerClasses, ModifierClasses;
+	{
+		UClass* TriggerBase = UALReflect::FindScriptClass(TEXT("/Script/EnhancedInput.InputTrigger"));
+		UClass* ModifierBase = UALReflect::FindScriptClass(TEXT("/Script/EnhancedInput.InputModifier"));
+		const TArray<TSharedPtr<FJsonValue>>* Names = nullptr;
+		FString ResolveError;
+		if (Payload->TryGetArrayField(TEXT("triggers"), Names) && Names)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Names)
+			{
+				UClass* Cls = ResolveBehaviourClass(Value->AsString(), TriggerBase, TEXT("InputTrigger"), ResolveError);
+				if (!Cls)
+				{
+					UAL_CommandUtils::SendError(RequestId, 400, TEXT("triggers：") + ResolveError);
+					return;
+				}
+				TriggerClasses.Add(Cls);
+			}
+		}
+		Names = nullptr;
+		if (Payload->TryGetArrayField(TEXT("modifiers"), Names) && Names)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Names)
+			{
+				UClass* Cls = ResolveBehaviourClass(Value->AsString(), ModifierBase, TEXT("InputModifier"), ResolveError);
+				if (!Cls)
+				{
+					UAL_CommandUtils::SendError(RequestId, 400, TEXT("modifiers：") + ResolveError);
+					return;
+				}
+				ModifierClasses.Add(Cls);
+			}
+		}
+	}
+
+	// 同一个动作同一个键已经有了就不重复加 —— 重复的映射会让一次按键触发两次
+	bool bAlready = false;
+	if (!bCreateAction)
+	{
+		FScriptArrayHelper Existing(MappingsProp, MappingsProp->ContainerPtrToValuePtr<void>(MappingsContainer));
+		for (int32 Index = 0; Index < Existing.Num(); ++Index)
+		{
+			const uint8* Elem = Existing.GetRawPtr(Index);
+			bAlready |= ElemActionProp->GetObjectPropertyValue_InContainer(Elem) == Action &&
+						*ElemKeyProp->ContainerPtrToValuePtr<FKey>(Elem) == Key;
+		}
+	}
+
+	// ══ 动手 ══════════════════════════════════════════════════════════════
+
+	TArray<UPackage*> ToSave;
+	if (!bAlready)
+	{
+		FUAL_ScopedTransaction Transaction(NSLOCTEXT("UALInput", "AddMapping", "Add Input Mapping"));
+
+		if (bCreateAction)
+		{
+			UPackage* Package = CreatePackage(*ActionPackagePath);
+			Action = Package
+				? NewObject<UObject>(Package, ActionClass, FName(*FPackageName::GetShortName(ActionPackagePath)),
+					RF_Public | RF_Standalone | RF_Transactional)
+				: nullptr;
+			if (!Action)
+			{
+				Transaction.Cancel();
+				UAL_CommandUtils::SendError(RequestId, 500, FString::Printf(TEXT("建不出输入动作：%s"), *ActionPackagePath));
+				return;
+			}
+			WriteValueType(Action, bHasValueType ? WantedType : 0);
+			FAssetRegistryModule::AssetCreated(Action);
+			Action->MarkPackageDirty();
+			ToSave.Add(Package);
+		}
+
+		Context->Modify();
+		FScriptArrayHelper Helper(MappingsProp, MappingsProp->ContainerPtrToValuePtr<void>(MappingsContainer));
+		const int32 NewIndex = Helper.AddValue();
+		uint8* Elem = Helper.GetRawPtr(NewIndex);
+		ElemActionProp->SetObjectPropertyValue_InContainer(Elem, Action);
+		*ElemKeyProp->ContainerPtrToValuePtr<FKey>(Elem) = Key;
+		for (UClass* Cls : TriggerClasses)
+		{
+			AppendInstanced(Elem, ElemProp->Struct, TEXT("Triggers"), Context, Cls);
+		}
+		for (UClass* Cls : ModifierClasses)
+		{
+			AppendInstanced(Elem, ElemProp->Struct, TEXT("Modifiers"), Context, Cls);
+		}
+		Context->PostEditChange();
+		Context->MarkPackageDirty();
+		ToSave.Add(Context->GetOutermost());
+	}
+
+	bool bSaved = true;
+	if (ToSave.Num() > 0)
+	{
+		bSaved = UEditorLoadingAndSavingUtils::SavePackages(ToSave, /*bOnlyDirty=*/false);
+	}
+
+	// 回执从 IMC 里读回来：这个动作现在绑着哪些键（含各自的触发器/修饰器）
+	TArray<TSharedPtr<FJsonValue>> Keys;
+	{
+		FScriptArrayHelper Helper(MappingsProp, MappingsProp->ContainerPtrToValuePtr<void>(MappingsContainer));
+		for (int32 Index = 0; Index < Helper.Num(); ++Index)
+		{
+			const uint8* Elem = Helper.GetRawPtr(Index);
+			if (ElemActionProp->GetObjectPropertyValue_InContainer(Elem) == Action)
+			{
+				Keys.Add(MakeShared<FJsonValueObject>(
+					KeyMappingToJson(*ElemKeyProp->ContainerPtrToValuePtr<FKey>(Elem), Elem, ElemProp->Struct)));
+			}
+		}
+	}
+	uint8 ActualType = 0xFF;
+	ReadValueType(Action, ActualType);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("ok"), true);
+	Result->SetStringField(TEXT("system"), TEXT("enhanced"));
+	Result->SetStringField(TEXT("context_path"), Context->GetPathName());
+	Result->SetStringField(TEXT("action_path"), Action->GetPathName());
+	Result->SetStringField(TEXT("value_type"), ValueTypeName(ActualType));
+	Result->SetStringField(TEXT("key"), Key.ToString());
+	Result->SetBoolField(TEXT("action_created"), bCreateAction);
+	Result->SetBoolField(TEXT("already_mapped"), bAlready);
+	if (ToSave.Num() > 0)
+	{
+		Result->SetBoolField(TEXT("saved"), bSaved);
+	}
+	Result->SetArrayField(TEXT("keys"), Keys);
+	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 }

@@ -2410,6 +2410,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
 
         ue_save: 'Save',
         ue_set_config: 'Change editor setting',
+        ue_input_add_mapping: 'Add input mapping',
         sequence_rebind: 'Change sequence binding',
         ue_collect_garbage: 'Free memory',
         ue_playtest: 'Play in editor',
@@ -2839,6 +2840,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         ue_undo_history: 'Undo history',
         ue_inject_input: 'Simulate input',
         ue_input_map: 'Read input mappings',
+        ue_input_add_mapping: 'Add input mapping',
         blueprint_describe: 'Inspect blueprint',
         blueprint_get_graph: 'Read blueprint graph',
         blueprint_search_nodes: 'Search blueprint nodes',

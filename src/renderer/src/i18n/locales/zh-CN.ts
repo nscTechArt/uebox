@@ -2351,6 +2351,7 @@ export default {
         // 编辑器
         ue_save: '保存',
         ue_set_config: '修改编辑器设置',
+        ue_input_add_mapping: '添加输入映射',
         sequence_rebind: '修改序列绑定',
         ue_collect_garbage: '清理内存',
         ue_playtest: '运行试玩',
@@ -2768,6 +2769,7 @@ export default {
         ue_undo_history: '查看撤销历史',
         ue_inject_input: '模拟输入',
         ue_input_map: '查看输入映射',
+        ue_input_add_mapping: '添加输入映射',
         blueprint_describe: '查看蓝图',
         blueprint_get_graph: '读取蓝图图表',
         blueprint_search_nodes: '搜索蓝图节点',
