@@ -155,62 +155,6 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         },
         "contextWindow": 272000,
         "maxOutputTokens": 128000
-      },
-      {
-        "id": "gpt-5.5",
-        "displayName": "GPT-5.5",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "thinkingLevelMap": {
-          "minimal": null,
-          "xhigh": "xhigh",
-          "max": null
-        },
-        "contextWindow": 272000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "gpt-5.4-mini",
-        "displayName": "GPT-5.4 mini",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "thinkingLevelMap": {
-          "minimal": null,
-          "xhigh": "xhigh",
-          "max": null
-        },
-        "contextWindow": 272000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "gpt-5.4",
-        "displayName": "GPT-5.4",
-        "supportsVision": true,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "thinkingLevelMap": {
-          "minimal": null,
-          "xhigh": "xhigh",
-          "max": null
-        },
-        "contextWindow": 272000,
-        "maxOutputTokens": 128000
-      },
-      {
-        "id": "gpt-5.3-codex-spark",
-        "displayName": "GPT-5.3 Codex Spark",
-        "supportsVision": false,
-        "supportsTools": true,
-        "supportsReasoning": true,
-        "thinkingLevelMap": {
-          "minimal": null,
-          "xhigh": "xhigh",
-          "max": null
-        },
-        "contextWindow": 128000,
-        "maxOutputTokens": 128000
       }
     ]
   },
