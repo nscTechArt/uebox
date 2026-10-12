@@ -23,7 +23,7 @@ import type {
 } from '../shared/assetDependency'
 import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { EditorHealthResult } from '../shared/editorHealth'
-import type { ModelCheckup, TeamStateView } from '../shared/agentTeam'
+import type { ModelCheckup, ModelDossier, TeamStateView } from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
 import type {
   AgentStartRejectionCode,
@@ -3358,6 +3358,13 @@ declare global {
       teamEnd: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; error?: string; errorKey?: 'running' }>
+      /** 设置「团队」页：检测过或干过活的模型，各自的体检结论和履历汇总 */
+      teamModels: () => Promise<{ success: boolean; models: ModelDossier[] }>
+      /** 设置「团队」页的「重新检测」：不管上次结论新不新都测一次 */
+      teamModelCheckup: (args: {
+        providerId: string
+        modelId: string
+      }) => Promise<{ success: boolean; error?: string; checkup?: ModelCheckup }>
       /** 改某条对话的审批档位（`sessionId` 传它当前的内核 session id）。运行中也立刻生效，下一个工具调用就按新档位走 */
       setApprovalMode: (args: {
         sessionId: string

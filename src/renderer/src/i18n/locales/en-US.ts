@@ -3130,6 +3130,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       ai: 'AI Assistant',
       personalization: 'Personalization',
       models: 'Models',
+      team: 'Team',
       mcp: 'MCP',
       skills: 'Skills',
       experience: 'Lessons learned',
@@ -3148,6 +3149,44 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     // AI Settings
     models: {
       title: 'Models'
+    },
+    team: {
+      title: 'Team',
+      description: 'Check results and task history of each model in team mode',
+      empty: 'After you use /team, check results and task history for each model appear here.',
+      note: 'Only models that were checked or took on tasks are listed. Reopened means a task you reopened on the task board.',
+      col: {
+        model: 'Model',
+        checkup: 'Check',
+        tasks: 'Tasks',
+        reopened: 'Reopened',
+        unfinished: 'Unfinished',
+        lastUsed: 'Last used',
+        role: 'Role',
+        avgTime: 'Avg. time'
+      },
+      passed: 'Passed',
+      failed: 'Failed',
+      notChecked: 'Not checked',
+      notCheckedHint: 'Not checked yet',
+      removed: 'Removed',
+      removedHint:
+        'This model was removed from model settings. Its history is kept, and it no longer joins teams.',
+      reachOk: 'Reachable',
+      reachFail: 'Unreachable: {reason}',
+      toolsOk: 'Tool calls OK',
+      toolsFail: 'Tool calls failed: no tool was called after two requests',
+      visionOk: 'Vision OK',
+      visionFail: 'Vision failed',
+      checkedAt: 'checked {when}',
+      recheck: 'Check again',
+      checking: 'Checking…',
+      recheckFailed: 'Check failed. Try again later.',
+      uncategorized: 'Uncategorized',
+      noTasks: 'No tasks yet',
+      underMinute: 'Under 1 min',
+      minutes: '{n} min',
+      hours: '{n} h'
     },
     ai: {
       title: 'AI Assistant',

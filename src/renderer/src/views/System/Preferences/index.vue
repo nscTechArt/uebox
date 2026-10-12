@@ -17,6 +17,7 @@ import ProfileSkills from './panels/ProfileSkills.vue'
 import ProfileExperience from './panels/ProfileExperience.vue'
 import ProfileTools from './panels/ProfileTools.vue'
 import ProfileUsage from './panels/Usage/ProfileUsage.vue'
+import ProfileTeam from './panels/ProfileTeam.vue'
 import AIProviderSettings from './panels/AIProviders/AIProviderSettings.vue'
 import AgentV3DebugPanel from './panels/AgentV3Debug/AgentV3DebugPanel.vue'
 import McpSettings from './panels/Mcp/McpSettings.vue'
@@ -79,6 +80,10 @@ const pageHeaders: Record<string, { titleKey: string; descKey?: string }> = {
   },
   models: {
     titleKey: 'profile.models.title'
+  },
+  team: {
+    titleKey: 'profile.team.title',
+    descKey: 'profile.team.description'
   },
   // 面板里已经有「对外暴露虚幻引擎能力」这个小标题，页面 Header 用
   // client 的标题会在同一屏出现两次一模一样的文字（上一版就是这样）。
@@ -233,6 +238,9 @@ function handleMenuChange(key: string): void {
 
             <!-- 模型：服务商与默认模型，内容多，单独一页 -->
             <AIProviderSettings v-else-if="activeKey === 'models'" />
+
+            <!-- 团队：各模型在团队模式里的检测结论和履历，和制作人招人时看的是同一份账 -->
+            <ProfileTeam v-else-if="activeKey === 'team'" />
             <McpSettings v-else-if="activeKey === 'mcp'" />
             <ProfileCli v-else-if="activeKey === 'cli'" />
             <AgentV3DebugPanel v-else-if="activeKey === 'agentV3Debug'" />

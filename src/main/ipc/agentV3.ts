@@ -125,6 +125,7 @@ import { createTeamLive } from '../agent-v3/core/team/teamLive'
 import { formatMail } from '../agent-v3/core/team/teamTools'
 import { assignMemberModel, loadTeamModels, recordReopen } from '../agent-v3/core/team/teamModels'
 import { createTrackRecord } from '../agent-v3/core/team/trackRecord'
+import { loadModelDossiers, recheckModel } from '../agent-v3/core/team/modelDossier'
 import { teamModelCandidates, type TeamStateView } from '../../shared/agentTeam'
 import { readSettings as readAiSettings } from '../ai/store'
 import { DEFAULT_GOAL_MAX_ROUNDS, normalizeGoalMaxRounds } from '../../shared/goalRounds'
@@ -1725,6 +1726,22 @@ export function registerAgentV3IPC(): void {
       if (!result.success) return result
       event.sender.send('agent-v3:team-board', { sessionId })
       return { success: true }
+    }
+  )
+
+  /** 设置「团队」页：每个模型的体检结论和履历汇总（`modelDossier.ts`） */
+  ipcMain.handle('agent-v3:team-models', async () => ({
+    success: true,
+    models: await loadModelDossiers()
+  }))
+
+  /** 设置「团队」页的「重新检测」 */
+  ipcMain.handle(
+    'agent-v3:team-model-checkup',
+    async (_event, args: { providerId?: string; modelId?: string }) => {
+      const { providerId, modelId } = args ?? {}
+      if (!providerId || !modelId) return { success: false, error: 'providerId、modelId 都要给' }
+      return recheckModel({ providerId, modelId })
     }
   )
 

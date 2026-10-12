@@ -95,6 +95,35 @@ export interface TrackRecordEntry {
   ms?: number
 }
 
+export interface ModelDossierTally {
+  tasks: number
+  /** 被用户在任务板上重开的 */
+  reopened: number
+  unfinished: number
+}
+
+/** 档案里按岗位分开的一行。`roleType` 没标的归一类，界面上写「未分类」 */
+export interface ModelDossierRole extends ModelDossierTally {
+  roleType?: string
+  /** 交回来的活平均干了多久。没有带耗时的记录时没有 */
+  avgMs?: number
+}
+
+/**
+ * 设置「团队」页上一个模型的档案：入职体检结论加履历汇总。
+ * 和给制作人看的简历是同一份账，只汇总事实，不打分。
+ */
+export interface ModelDossier extends TeamModel, ModelDossierTally {
+  name: string
+  providerName?: string
+  /** 来源或模型已不在模型设置里：记录保留，不再参与组队 */
+  removed: boolean
+  checkup?: ModelCheckup
+  lastUsedAt?: number
+  /** 按任务数从多到少 */
+  roles: ModelDossierRole[]
+}
+
 /** 给人看的模型名：名单里有就用展示名，没有（来源删了）就用模型 id。制作人的回话和任务板共用 */
 export function teamModelLabel(
   candidates: readonly TeamModelCandidate[],

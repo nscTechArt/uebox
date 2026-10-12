@@ -3029,6 +3029,7 @@ export default {
       ai: 'AI 助手',
       personalization: '个性化',
       models: '模型',
+      team: '团队',
       mcp: 'MCP',
       skills: '技能',
       experience: '经验库',
@@ -3047,6 +3048,43 @@ export default {
     // AI 设置
     models: {
       title: '模型'
+    },
+    team: {
+      title: '团队',
+      description: '团队模式中各模型的检测结论与任务记录',
+      empty: '使用 /team 后，各模型的检测结论与任务记录将显示在此处。',
+      note: '仅列出检测过或参与过任务的模型。打回指用户在任务板上重开的任务。',
+      col: {
+        model: '模型',
+        checkup: '检测',
+        tasks: '任务',
+        reopened: '打回',
+        unfinished: '未完成',
+        lastUsed: '最近使用',
+        role: '岗位',
+        avgTime: '平均耗时'
+      },
+      passed: '通过',
+      failed: '未通过',
+      notChecked: '未检测',
+      notCheckedHint: '尚未检测',
+      removed: '已移除',
+      removedHint: '该模型已从模型设置中移除，记录保留，不再参与组队。',
+      reachOk: '连通正常',
+      reachFail: '连通失败：{reason}',
+      toolsOk: '工具调用正常',
+      toolsFail: '工具调用失败：两次要求调用工具均未调用',
+      visionOk: '识图正常',
+      visionFail: '识图失败',
+      checkedAt: '{when}检测',
+      recheck: '重新检测',
+      checking: '检测中…',
+      recheckFailed: '检测失败，请稍后重试',
+      uncategorized: '未分类',
+      noTasks: '尚无任务记录',
+      underMinute: '不到 1 分钟',
+      minutes: '{n} 分钟',
+      hours: '{n} 小时'
     },
     ai: {
       title: 'AI 助手',

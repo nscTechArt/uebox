@@ -30,11 +30,15 @@ export interface ModelCheckupTarget {
   baseUrl: string
   /** 真去测一次 */
   run: () => Promise<ModelCheckup>
+  /** 不管结论新不新都重测：用户在设置「团队」页点了「重新检测」 */
+  force?: boolean
 }
 
 export interface ModelCheckups {
   /** 已知的结论（不管新旧），给制作人看的简历用。没测过给 undefined */
   known: (model: TeamModel) => ModelCheckup | undefined
+  /** 测过的全部结论（不管新旧），设置「团队」页列档案用 */
+  all: () => (TeamModel & ModelCheckup)[]
   /** 要用它了：有新鲜结论就用，没有就测一次 */
   ensure: (target: ModelCheckupTarget) => Promise<ModelCheckup>
 }
@@ -72,9 +76,10 @@ export async function loadModelCheckups(
 
   return {
     known: (model) => find(model),
-    ensure: ({ model, baseUrl, run }) => {
+    all: () => list,
+    ensure: ({ model, baseUrl, run, force }) => {
       const stored = find(model)
-      if (stored && fresh(stored, baseUrl)) return Promise.resolve(stored)
+      if (!force && stored && fresh(stored, baseUrl)) return Promise.resolve(stored)
       // 同一个模型同时被要两次（并行招人）只测一次
       const key = JSON.stringify([model.providerId, model.modelId])
       const pending = inflight.get(key)
