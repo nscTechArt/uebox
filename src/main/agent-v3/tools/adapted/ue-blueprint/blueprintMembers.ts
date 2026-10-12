@@ -672,9 +672,7 @@ export function createSetBlueprintParentClassTool() {
 
 const CreateEventGraphSchema = z.object({
   blueprint_path: z.string().describe('蓝图路径，如 /Game/Blueprints/BP_Hero'),
-  graph_name: z
-    .string()
-    .describe('新事件图的名字，如 Combat。不能和已有的图、函数、变量、组件重名')
+  graph_name: z.string().describe('新事件图的名字，如 Combat。不能和已有的图、函数、变量、组件重名')
 })
 
 interface CreateEventGraphResponse {

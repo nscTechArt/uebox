@@ -71,8 +71,7 @@ export function createEditorHealthTool(): V2Tool {
       if (result.status === 'plugin_outdated') {
         return {
           success: false,
-          error:
-            '当前工程里的 UnrealAgentLink 插件版本太旧，还没有状态监控。' + PLUGIN_UPDATE_HINT
+          error: '当前工程里的 UnrealAgentLink 插件版本太旧，还没有状态监控。' + PLUGIN_UPDATE_HINT
         }
       }
       if (result.status === 'error') return { success: false, error: result.error }
