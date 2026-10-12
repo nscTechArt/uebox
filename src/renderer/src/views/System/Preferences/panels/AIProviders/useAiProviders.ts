@@ -135,6 +135,33 @@ export function draftFromCatalog(entry: CatalogEntry): ProviderDraft {
   }
 }
 
+/**
+ * 目录里有、这条已保存的 provider 却没有的预置模型。
+ *
+ * 模型清单是添加 provider 那一刻从目录复制的，之后升级带来的新型号（比如
+ * GPT-6.1 Sol）不会自己进去。这里只算差集，加不加由用户在树上点 ——
+ * 不自动补，免得用户删掉的预置型号在下次启动时又冒出来。
+ *
+ * 按 id 认目录条目；`openai-2` 这种第二份按 Base URL 认，换了网关的就不算。
+ */
+export function missingCatalogModels(
+  draft: Pick<ProviderDraft, 'id' | 'kind' | 'baseUrl' | 'models'>,
+  catalog: readonly CatalogEntry[]
+): ModelConfig[] {
+  const trimSlash = (url: string): string => url.trim().replace(/\/+$/, '')
+  const entry =
+    catalog.find((item) => item.id === draft.id) ??
+    catalog.find(
+      (item) =>
+        item.kind === draft.kind &&
+        !!item.baseUrl &&
+        trimSlash(item.baseUrl) === trimSlash(draft.baseUrl)
+    )
+  if (!entry) return []
+  const present = new Set(draft.models.map((model) => model.id.trim()))
+  return entry.models.filter((model) => !present.has(model.id)).map((model) => ({ ...model }))
+}
+
 /** 把已保存的 provider 还原成可编辑草稿 */
 export function draftFromProvider(provider: ProviderView): ProviderDraft {
   return {

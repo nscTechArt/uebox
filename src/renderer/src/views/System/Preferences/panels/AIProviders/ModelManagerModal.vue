@@ -20,7 +20,7 @@ import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import { PROVIDER_KINDS, type ProviderKind, type ProviderView } from '@core/shared/aiProvider'
 import { isPlanProvider } from '@core/shared/creatorPlan'
-import type { AiProvidersState } from './useAiProviders'
+import { missingCatalogModels, type AiProvidersState } from './useAiProviders'
 import ProviderFields from './ProviderFields.vue'
 import ModelFields from './ModelFields.vue'
 import { Z_CONFIRM, Z_MANAGER } from './modalLayers'
@@ -31,7 +31,8 @@ const props = defineProps<{ open: boolean; state: AiProvidersState }>()
 const emit = defineEmits<{ 'update:open': [value: boolean]; addProvider: [] }>()
 
 const { t } = useI18n()
-const { draft, providers, isNew, isDirty, saving, testing, selectedId, configPath } = props.state
+const { draft, providers, isNew, isDirty, saving, testing, selectedId, configPath, catalog } =
+  props.state
 
 /**
  * 右侧显示谁。
@@ -191,6 +192,27 @@ function removeModel(index: number): void {
   // 删掉的正是当前选中的（或它前面的），焦点得跟着挪，否则右边显示的是别人
   if (focus.value === index) focus.value = 'provider'
   else if (typeof focus.value === 'number' && focus.value > index) focus.value -= 1
+}
+
+/** 目录里新出、这条 provider 还没有的预置模型。新建中的草稿本来就是从目录复制的，不算 */
+const catalogAdditions = computed(() =>
+  draft.value && !isNew.value ? missingCatalogModels(draft.value, catalog.value) : []
+)
+
+const catalogAdditionsLabel = computed(() => {
+  const [first] = catalogAdditions.value
+  if (!first) return ''
+  const name = first.displayName || first.id
+  return catalogAdditions.value.length === 1
+    ? t('aiProvider.field.addCatalogModel', { name })
+    : t('aiProvider.field.addCatalogModels', { name, count: catalogAdditions.value.length })
+})
+
+/** 加进草稿，跟手动添加一样要点保存才落盘 */
+function addCatalogModels(): void {
+  if (!draft.value || catalogAdditions.value.length === 0) return
+  draft.value.models = [...catalogAdditions.value, ...draft.value.models]
+  focus.value = 0
 }
 
 /** 树上模型那一行的名字。新加的还没填 id，给个占位，否则是一行空白 */
@@ -424,6 +446,15 @@ function addProvider(): void {
                   </button>
                   <button type="button" class="tree-model tree-add" @click="addModel">
                     {{ $t('aiProvider.field.addModel') }}
+                  </button>
+                  <button
+                    v-if="catalogAdditions.length > 0"
+                    type="button"
+                    class="tree-model tree-add"
+                    :title="catalogAdditions.map(modelLabel).join(', ')"
+                    @click="addCatalogModels"
+                  >
+                    {{ catalogAdditionsLabel }}
                   </button>
                 </template>
               </template>

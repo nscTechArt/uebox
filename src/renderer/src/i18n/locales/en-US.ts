@@ -532,7 +532,10 @@ export default {
       models: 'Models',
       import: 'Import models…',
       importing: 'Importing…',
-      addModel: '+ Add Model'
+      addModel: '+ Add Model',
+      // Preset models in the catalog that this saved provider does not have yet
+      addCatalogModel: '+ Add new model {name}',
+      addCatalogModels: '+ Add {count} new models, incl. {name}'
     },
     apiKey: {
       placeholder: 'Enter a key, environment variable, or !command',

@@ -1258,6 +1258,9 @@ const MANUAL_ENTRIES = {
     // 模型**，所以最后那个参数一律为 true —— 少了它输入框里的「思考程度」
     // 对 ChatGPT 订阅完全不起作用。
     models: {
+      'gpt-6.1-sol': model('gpt-6.1-sol', 'GPT-6.1 Sol', true, true, CODEX_LIMIT, true, {
+        release_date: '2026-09-29'
+      }),
       'gpt-6-astra': model('gpt-6-astra', 'GPT-6 Astra', true, true, CODEX_LIMIT, true, {
         release_date: '2026-09-04'
       }),
@@ -1645,6 +1648,8 @@ const THINKING_OVERRIDES = {
     // https://developers.openai.com/api/docs/models/gpt-6-sol / gpt-6-luna (2026-09-23)
     'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    // https://developers.openai.com/api/docs/models/gpt-6.1-sol (2026-10-12)
+    'gpt-6.1-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6': {
       thinking: {
         minimal: null,
@@ -1666,6 +1671,7 @@ const THINKING_OVERRIDES = {
    * 「还没查」在这张表里长得不一样。
    */
   chatgpt: {
+    'gpt-6.1-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-astra': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },

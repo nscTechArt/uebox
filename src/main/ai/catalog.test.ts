@@ -196,10 +196,10 @@ describe('内置 Provider 目录', () => {
     expect(subscription).toMatchObject({ contextWindow: 272_000, maxOutputTokens: 128_000 })
   })
 
-  it('GPT-6 Sol / Luna 在 API 与订阅两边都列出最高两档', () => {
+  it('GPT-6.1 Sol / 6 Sol / 6 Luna 在 API 与订阅两边都列出最高两档', () => {
     for (const providerId of ['openai', 'chatgpt']) {
       const models = CATALOG.find((entry) => entry.id === providerId)!.models
-      for (const id of ['gpt-6-sol', 'gpt-6-luna']) {
+      for (const id of ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
         expect(models.find((m) => m.id === id)?.thinkingLevelMap, `${providerId}/${id}`).toEqual({
           minimal: null,
           xhigh: 'xhigh',

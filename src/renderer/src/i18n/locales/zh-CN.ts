@@ -526,7 +526,10 @@ export default {
       models: '模型',
       import: '导入模型…',
       importing: '导入中…',
-      addModel: '+ 添加模型'
+      addModel: '+ 添加模型',
+      // 目录里新出、这条服务商还没有的预置模型
+      addCatalogModel: '+ 添加新模型 {name}',
+      addCatalogModels: '+ 添加新模型 {name} 等 {count} 个'
     },
     apiKey: {
       placeholder: '填写密钥、环境变量名或 !命令',
