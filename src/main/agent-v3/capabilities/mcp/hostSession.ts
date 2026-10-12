@@ -109,6 +109,9 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
 
   const ctx: SessionContext = {
     sessionId: request.sessionId,
+    // 子任务（task）照盒子助手用 agent 那一档。不写的话按默认角色落到对话模型上 ——
+    // 真机上外部派的子任务一直跑在对话模型上，那家额度用完就整路 429
+    modelRequest: { role: 'agent', agentType: 'agent-v3' },
     // 工具一律按「引擎连着」装：外部调用每次都可以点名工程，连没连上要到调用时才知道
     ueConnected: true,
     shellAvailable,
