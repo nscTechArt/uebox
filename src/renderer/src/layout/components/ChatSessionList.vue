@@ -250,14 +250,10 @@ const connectedNames = computed<Set<string>>(
  * 这条对话此刻是不是在跑。
  *
  * 两种模式各有各的信号：Agent 模式看流式 store，普通 Chat 模式看最后一条
- * 是不是还在打字。只看最后一条，避免为了一个小圆点去遍历整段历史。
+ * 是不是还在打字 —— 没打开过的对话查索引，不为一个小圆点把整段历史读进来。
  */
 function isSessionRunning(chatSid: string): boolean {
-  if (agentStreamStore.isStreaming(chatSid)) return true
-
-  const messages = chatMsgStore.getMessages(chatSid)
-  const last = messages[messages.length - 1]
-  return last?.role === 'assistant' && last?.status === 'typing'
+  return agentStreamStore.isStreaming(chatSid) || chatMsgStore.isLastReplyTyping(chatSid)
 }
 
 function activityOf(session: ChatSession): ReturnType<typeof sessionActivityState> {

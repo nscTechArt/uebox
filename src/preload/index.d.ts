@@ -2810,8 +2810,15 @@ declare global {
      * AI 对话历史落盘 API（原来存 localStorage，配额只有几 MB）
      */
     chatHistory: {
-      read: () => Promise<{ 'chat-messages'?: string; 'chat-sessions'?: string }>
+      read: () => Promise<{ 'chat-sessions'?: string; 'follow-up-queue'?: string }>
       write: (key: string, value: string) => Promise<void>
+      sessionsIndex: () => Promise<Record<string, { typing?: string[] }>>
+      importLegacySessions: (json: string) => Promise<Record<string, { typing?: string[] }>>
+      readSessionSync: (sid: string) => string | null
+      readSessions: (sids: string[]) => Promise<Record<string, string>>
+      writeSessions: (
+        writes: Array<{ sid: string; json: string | null; typing?: string[] }>
+      ) => Promise<void>
     }
     /**
      * 个性化 API：用户写给 agent 的那段常驻说明。技能的列与删在 `agentV3` 下。

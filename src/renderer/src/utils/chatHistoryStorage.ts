@@ -6,18 +6,20 @@
  * （`main/ipc/chatHistory.ts`），这边只负责搬字符串。
  *
  * pinia 的 storage 接口是**同步**的，磁盘读是异步的，所以分两步：
- * 启动时 `preload()` 把两份 JSON 一次性读进内存，之后 `getItem` 走内存，
+ * 启动时 `preload()` 把对话列表和排队消息读进内存，之后 `getItem` 走内存，
  * `setItem` 改内存 + 节流往磁盘刷。
  *
- * 注意：Storage 接到的已经是序列化后的字符串，这一层只能合并磁盘 IPC，不能
- * 节流 JSON.stringify。高频的 chat-messages 由 `chatMessagesPersistence.ts`
- * 在序列化之前做检查点合并；chat-sessions 等低频数据继续走这里的写盘节流。
+ * 对话正文不走这里：一个对话一个文件，用到才读（`chatMessagesPersistence.ts`）。
+ * 这里只在启动时取回那份很小的索引，顺带把 localStorage 时代的老正文交给主进程拆分。
  */
 
 import { isChatWindow } from '@renderer/api/chatWindow'
 
 /** 走这套存储的 key。跟主进程的白名单一一对应。 */
-const CHAT_KEYS = ['chat-messages', 'chat-sessions', 'follow-up-queue'] as const
+const CHAT_KEYS = ['chat-sessions', 'follow-up-queue'] as const
+
+/** localStorage 时代的对话正文 key。只为迁移读一次 */
+const LEGACY_MESSAGES_KEY = 'chat-messages'
 
 export class ChatHistoryStorage implements Storage {
   /** 磁盘内容的内存镜像；getItem 只读它 */
@@ -45,6 +47,13 @@ export class ChatHistoryStorage implements Storage {
    * 各发一次。主窗口排的归主窗口发，独立窗口只管它自己这次打开之后排的。
    */
   private skipFollowUpQueue = false
+
+  /** 盘上有哪些对话、哪些还有没收尾的回复。正文用到才读 */
+  sessionIndex: Record<string, { typing?: string[] }> = {}
+
+  get isReadOnly(): boolean {
+    return this.readOnly
+  }
 
   constructor(private readonly throttleMs = 2000) {}
 
@@ -116,6 +125,8 @@ export class ChatHistoryStorage implements Storage {
       }
     }
 
+    await this.loadSessionIndex()
+
     if (toMigrate.length === 0 || this.readOnly) return
 
     // 先确认落盘，再删旧 key。顺序反过来就是一次性丢光全部历史。
@@ -127,6 +138,22 @@ export class ChatHistoryStorage implements Storage {
       console.log(`[ChatHistory] 已把 ${toMigrate.join('、')} 从 localStorage 迁到磁盘`)
     } catch (error) {
       console.error('[ChatHistory] 迁移写盘失败，旧数据留在 localStorage，下次启动再试:', error)
+    }
+  }
+
+  private async loadSessionIndex(): Promise<void> {
+    const api = window.api?.chatHistory
+    if (!api?.sessionsIndex) return
+    try {
+      this.sessionIndex = await api.sessionsIndex()
+      const legacy = localStorage.getItem(LEGACY_MESSAGES_KEY)
+      if (legacy === null || this.readOnly) return
+      // 盘上已经有的对话以盘上为准，主进程只补盘上没有的
+      this.sessionIndex = await api.importLegacySessions(legacy)
+      localStorage.removeItem(LEGACY_MESSAGES_KEY)
+      console.log('[ChatHistory] 已把 localStorage 里的对话正文迁到磁盘')
+    } catch (error) {
+      console.error('[ChatHistory] 读取对话索引失败，本次历史对话打不开:', error)
     }
   }
 
@@ -150,8 +177,6 @@ export class ChatHistoryStorage implements Storage {
 
     for (const key of keys) {
       const value = this.cache.get(key) ?? ''
-      // ponytail: 每次都写整份 JSON。一万条消息约 20MB，stringify 会有 ~150ms 卡顿
-      // （这也是换盘之前的行为）。真有人到这个量级，再按对话拆成一个对话一个文件。
       void window.api?.chatHistory?.write(key, value)?.catch((error: unknown) => {
         console.error(`[ChatHistory] 写入 ${key} 失败（${value.length} 字符）:`, error)
       })
@@ -159,5 +184,5 @@ export class ChatHistoryStorage implements Storage {
   }
 }
 
-/** 全局单例：chat-messages 和 chat-sessions 共用一份 */
+/** 全局单例：chat-sessions、follow-up-queue 共用一份，对话正文的索引也挂在这里 */
 export const chatHistoryStorage = new ChatHistoryStorage(2000)

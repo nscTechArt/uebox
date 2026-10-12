@@ -3,7 +3,7 @@ import { createApp, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { takeHydratedTypingMessages, useChatMessagesStore } from './chatMessages'
 import { chatHistoryStorage } from '../../utils/chatHistoryStorage'
-import { chatMessagesPersistencePlugin } from '../../utils/chatMessagesPersistence'
+import { createChatMessagesPersistencePlugin } from '../../utils/chatMessagesPersistence'
 import zhCN from '@renderer/i18n/locales/zh-CN'
 
 /** 收尾文案由调用方传入，测试里统一用语言包里的这一句 */
@@ -128,23 +128,28 @@ describe('chatMessages 的刷新残留处理', () => {
   })
 
   it('恢复缓存时把 typing 消息登记下来，而不是直接标成已中断', () => {
-    chatHistoryStorage.setItem(
-      'chat-messages',
-      JSON.stringify({
-        messagesBySid: {
-          a: [
-            { id: 'm1', role: 'user', content: '帮我改一下材质' },
-            { id: 'm2', role: 'assistant', content: '正在思考...', status: 'typing' }
-          ]
-        },
-        historySummaryBySid: {},
-        compressedUserCountBySid: {}
-      })
-    )
+    const file = JSON.stringify({
+      sid: 'a',
+      messages: [
+        { id: 'm1', role: 'user', content: '帮我改一下材质' },
+        { id: 'm2', role: 'assistant', content: '正在思考...', status: 'typing' }
+      ]
+    })
 
     // Pinia 插件要挂在一个真的 app 上才会运行。
     const pinia = createPinia()
-    pinia.use(chatMessagesPersistencePlugin)
+    pinia.use(
+      createChatMessagesPersistencePlugin({
+        backend: {
+          source: () => ({
+            typing: new Map([['a', ['m2']]]),
+            read: () => file
+          }),
+          write: () => {},
+          readOnly: () => false
+        }
+      })
+    )
     createApp({}).use(pinia)
     setActivePinia(pinia)
 

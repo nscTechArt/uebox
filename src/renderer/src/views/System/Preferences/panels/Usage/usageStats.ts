@@ -401,6 +401,45 @@ export interface BuildUsageReportOptions {
 }
 
 /**
+ * 统计只用得到这些字段。对话正文是用到才读的，算全部历史时要把每个对话都从盘上
+ * 读一遍 —— 读完先削成这样，免得面板开着时把上百 MB 正文压在内存里。
+ */
+export function slimForUsage(messages: unknown): ChatMessage[] {
+  if (!Array.isArray(messages)) return []
+  const out: ChatMessage[] = []
+  for (const message of messages as ChatMessage[]) {
+    if (message?.role !== 'assistant') continue
+    out.push({
+      id: message.id,
+      role: 'assistant',
+      content: '',
+      status: message.status,
+      startTime: message.startTime,
+      responseMetadata: message.responseMetadata,
+      agentProcess: (message.agentProcess ?? []).flatMap((item): AgentProcessItem[] => {
+        if (item?.type === 'tool-call') {
+          return [
+            { type: item.type, timestamp: item.timestamp, data: { name: readToolName(item) } }
+          ]
+        }
+        if (item?.type === 'tool-result') {
+          const data = item.data as { toolName?: unknown; isError?: unknown } | undefined
+          return [
+            {
+              type: item.type,
+              timestamp: item.timestamp,
+              data: { toolName: data?.toolName, isError: data?.isError }
+            }
+          ]
+        }
+        return []
+      })
+    })
+  }
+  return out
+}
+
+/**
  * 算一份报告。
  *
  * 只看助手消息：用户那条既没有用量也没有工具调用。没有 `startTime` 的消息

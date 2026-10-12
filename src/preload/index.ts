@@ -2974,10 +2974,23 @@ const api = {
    * 只搬运整份 JSON 字符串，不理解内容；见 renderer/utils/chatHistoryStorage.ts。
    */
   chatHistory: {
-    read: (): Promise<{ 'chat-messages'?: string; 'chat-sessions'?: string }> =>
+    read: (): Promise<{ 'chat-sessions'?: string; 'follow-up-queue'?: string }> =>
       ipcRenderer.invoke('chat-history:read'),
     write: (key: string, value: string): Promise<void> =>
-      ipcRenderer.invoke('chat-history:write', key, value)
+      ipcRenderer.invoke('chat-history:write', key, value),
+    /** 对话正文一个对话一个文件；见 main/ipc/chatSessionFiles.ts */
+    sessionsIndex: (): Promise<Record<string, { typing?: string[] }>> =>
+      ipcRenderer.invoke('chat-history:sessions-index'),
+    importLegacySessions: (json: string): Promise<Record<string, { typing?: string[] }>> =>
+      ipcRenderer.invoke('chat-history:sessions-import-legacy', json),
+    /** 同步读：store 接口是同步的，第一次碰到某个对话时才读它 */
+    readSessionSync: (sid: string): string | null =>
+      ipcRenderer.sendSync('chat-history:session-read-sync', sid),
+    readSessions: (sids: string[]): Promise<Record<string, string>> =>
+      ipcRenderer.invoke('chat-history:sessions-read', sids),
+    writeSessions: (
+      writes: Array<{ sid: string; json: string | null; typing?: string[] }>
+    ): Promise<void> => ipcRenderer.invoke('chat-history:sessions-write', writes)
   },
 
   /**
