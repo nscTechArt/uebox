@@ -1094,14 +1094,15 @@ export async function runSubAgent(
     ledger?: WriteLedger
     /**
      * 工作室里的一个队员（见 `core/team/`）。带了它，子 agent 的系统提示词换成队员的
-     * 人设，手上多一个任务板工具。模型见 `memberPin`。
+     * 人设，手上多一个任务板工具。模型见 `model`。
      */
     member?: TeamMember
     /**
-     * 钉给这个队员的模型（`team/teamModels.ts` 的 `routeMember` 定的）。
-     * 不给就是老规矩：老 `fast` 档走用户绑的对话模型，其余跟着制作人
+     * 钉给这个子 agent 的模型。队员的由 `team/teamModels.ts` 的 `routeMember` 定；
+     * 外部 MCP 调用方点名的由 `task` 的 `model` 参数给（`TaskToolDeps.models`）。
+     * 不给就是老规矩：老 `fast` 档走用户绑的对话模型，其余跟着父 agent
      */
-    memberPin?: TeamModel
+    model?: TeamModel
     /** 跑完（含被停下）时交回它的全部消息。队员靠它记住干过的活 */
     keepMessages?: (messages: AgentMessage[]) => void
   }
@@ -1130,11 +1131,11 @@ export async function runSubAgent(
     modelRequest: {
       ...parent.modelRequest,
       hasImages: currentTurnHasImages(input.seedMessages),
-      // 队员钉了模型就用它（带图时仍按能力位换视觉模型，同主对话）。
+      // 钉了模型（队员的、MCP 调用方点名的）就用它（带图时仍按能力位换视觉模型，同主对话）。
       // 老名册的 `fast` 档走用户绑的对话模型；没绑会按角色回落链退回 agent 模型。
       // 会话钉住的是 agent 那一档，不能带过来 —— 带着的话钉子会顶掉 chat 的绑定
-      ...(input.memberPin
-        ? { pin: input.memberPin }
+      ...(input.model
+        ? { pin: input.model }
         : input.member?.tier === 'fast' && !input.member.model
           ? { role: 'chat' as const, pin: undefined }
           : {})
@@ -1400,7 +1401,7 @@ function teamToolsFor(
           return await runSubAgent(ctx, {
             prompt: message,
             member,
-            ...(pin ? { memberPin: pin } : {}),
+            ...(pin ? { model: pin } : {}),
             seedMessages: history,
             ledger,
             onProgress,

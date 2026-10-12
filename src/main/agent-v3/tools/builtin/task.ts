@@ -17,6 +17,7 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { z } from 'zod'
 
+import type { TeamModel } from '../../../../shared/agentTeam'
 import {
   formatInterruptedWrites,
   summarizeDoneWrites,
@@ -142,6 +143,8 @@ export interface TaskToolDeps {
     onProgress?: (text: string) => void
     /** 写操作台账，被停下时由 task 自己读出来交给父 agent */
     ledger?: WriteLedger
+    /** 调用方点名的模型（见 `models`）。不给就用默认的 */
+    model?: TeamModel
   }) => Promise<SubAgentResult>
 
   /** 取当前父 agent 的 transcript。延迟到调用时取，拿到的才是最新的 */
@@ -149,6 +152,20 @@ export interface TaskToolDeps {
 
   /** 生成父上下文的摘要，供 contextMode: 'summary' 使用 */
   summarize?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<string>
+
+  /**
+   * 给了才有 `model` 参数，让调用方点名子任务用哪个模型。
+   *
+   * 只有外部 MCP 会话给（`hostSession.ts`）：调用方自己的模型不在盒子里，子任务
+   * 原本只能用盒子的默认模型。盒子助手的 task 不给 —— 它在常驻工具组里，参数说明
+   * 多一份模型名单就超预算；盒子里要分模型干活走工作室的队员。
+   */
+  models?: {
+    /** 写进 `model` 参数说明的名单，一行一个，行首是 id */
+    catalog: string
+    /** 按 id 找模型。找不到、此刻用不了就抛，消息写给调用方看 */
+    resolve: (key: string) => Promise<TeamModel>
+  }
 }
 
 const taskInput = z.object({
@@ -187,8 +204,22 @@ const taskInput = z.object({
     )
 })
 
+/** 带 `model` 参数的那份（见 `TaskToolDeps.models`）。类型按它写，没给名单时运行期用 `taskInput` */
+type TaskInputWithModel = ReturnType<typeof taskInput.extend<{ model: z.ZodOptional<z.ZodString> }>>
+
+function withModelInput(catalog: string): TaskInputWithModel {
+  return taskInput.extend({
+    model: z
+      .string()
+      .optional()
+      .describe(
+        '子任务用哪个模型，填下面名单里行首的 id。省略则用盒子设置里的默认模型。\n' + catalog
+      )
+  })
+}
+
 export function createTaskTool(deps: TaskToolDeps): UnrealAgentTool<SubAgentResult> {
-  return defineTool<typeof taskInput, SubAgentResult>({
+  return defineTool<typeof taskInput | TaskInputWithModel, SubAgentResult>({
     name: 'task',
     namespace: 'core',
     // 子 agent 自己会受审批门约束，起一个子 agent 本身不改任何东西
@@ -213,8 +244,12 @@ export function createTaskTool(deps: TaskToolDeps): UnrealAgentTool<SubAgentResu
 
 子 agent 默认继承当前对话的完整上下文，**你不需要把背景重复写进 prompt**。
 它返回的是最终结论，中间过程不会进入当前对话；结论末尾会附一行它实际做过的写操作。`,
-    input: taskInput,
-    execute: async ({ prompt, namespaces, context_mode, read_only }, ctx) => {
+    input: deps.models ? withModelInput(deps.models.catalog) : taskInput,
+    execute: async (args, ctx) => {
+      const { prompt, namespaces, context_mode, read_only } = args
+      // 先认模型再干活：点错了名当场报回去，不要跑了半天才发现用的不是它
+      const model = 'model' in args ? args.model : undefined
+      const pinned = model && deps.models ? await deps.models.resolve(model) : undefined
       // 摘掉还没有结果的工具调用 —— 其中就有「派出这一路」的这次调用本身，
       // 留着它子 agent 第一眼看到的就是一条凭空的失败（见 stripPendingToolCalls）
       const parentMessages = stripPendingToolCalls(deps.getParentMessages())
@@ -249,6 +284,7 @@ export function createTaskTool(deps: TaskToolDeps): UnrealAgentTool<SubAgentResu
         ledger,
         ...(namespaces ? { namespaces } : {}),
         ...(read_only ? { readOnly: true } : {}),
+        ...(pinned ? { model: pinned } : {}),
         seedMessages,
         ...(ctx.signal ? { signal: ctx.signal } : {}),
         // 子 agent 的进度实时冒泡到界面，用户能看到它在干什么
