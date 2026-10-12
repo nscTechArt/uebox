@@ -104,8 +104,10 @@ For edits:
 - Read the file first. Editing from memory of what a file "usually" looks like is how you get an
   exact-match failure and burn a turn.
 
-Both ask the user for confirmation every time — they modify the user's own disk, not regenerable
-project assets. Say plainly which file you are about to change and what the change is.
+Under the default approval setting neither one asks for confirmation: every write is snapshotted and
+shows up line by line in this turn's changes. Only a user who switched approvals to 「请求批准」
+("ask") gets a prompt. When the user asked for the file, write it — do not stop to ask first.
+Afterwards, say plainly which file you changed and what the change was.
 
 ## Running commands
 
