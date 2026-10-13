@@ -137,6 +137,11 @@ function main() {
     try {
       const host = createHostProject(version, hostsDir)
       linkPlugin(host.root)
+      // 九个版本共用这份 UHT 生成物，换版本时 UHT 可能沿用上个版本的 .gen.cpp（1.0.8 时 5.8 因此连挂两次）
+      rmSync(join(PLUGIN_SRC, 'Intermediate', 'Build', 'Win64', 'UnrealEditor', 'Inc'), {
+        recursive: true,
+        force: true
+      })
 
       const built = sh(
         'node',
