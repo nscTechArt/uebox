@@ -42,6 +42,7 @@ import {
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
+import { graphNameMissHint, isGraphNotFound, lookupMissedGraphName } from './getBlueprintGraph'
 
 /**
  * 节点类型。
@@ -311,6 +312,8 @@ interface ApplyGraphResponse {
     graph?: string
   }>
   errors?: string[]
+  /** 整条命令没进门时插件只回这一句（见 describeFailure） */
+  error?: string
   message?: string
   /** 状态机那一页才有 */
   graph_kind?: string
@@ -437,7 +440,9 @@ function describeWildcardRetry(errors: string[]): string {
 }
 
 function describeFailure(response: ApplyGraphResponse): string {
-  const errors = response.errors ?? []
+  // 整条命令没进门的（图找不到、蓝图找不到）插件只回一句 error，没有 errors 数组。
+  // 不接住它，模型拿到的是一句光秃秃的「写入失败。」，只能瞎猜是哪里不认
+  const errors = response.errors?.length ? response.errors : response.error ? [response.error] : []
   const head =
     response.rolled_back === true
       ? '整批已回滚，蓝图没有任何改动。修正后重新提交完整的 nodes + connections（不要只补失败的那几个）。'
@@ -638,23 +643,37 @@ AnimGraph、状态机、状态内部、转换条件都用这个工具写，graph
           }
         }
 
-        const laidOut = await withLayout(input)
+        const send = async (request: ApplyGraphInput): Promise<ApplyGraphResponse | null> => {
+          const laidOut = await withLayout(request)
 
-        const params: Record<string, unknown> = {
-          blueprint_path: laidOut.blueprint_path,
-          nodes: laidOut.nodes,
-          connections: laidOut.connections ?? []
+          const params: Record<string, unknown> = {
+            blueprint_path: laidOut.blueprint_path,
+            nodes: laidOut.nodes,
+            connections: laidOut.connections ?? []
+          }
+          if (laidOut.graph_name) params.graph_name = laidOut.graph_name
+          if (laidOut.clear_existing !== undefined) params.clear_existing = laidOut.clear_existing
+          if (laidOut.compile !== undefined) params.compile = laidOut.compile
+
+          return wsService.callRequest<ApplyGraphResponse>(
+            'blueprint.create_graph',
+            params,
+            getTargetConnectionId(),
+            60000
+          )
         }
-        if (laidOut.graph_name) params.graph_name = laidOut.graph_name
-        if (laidOut.clear_existing !== undefined) params.clear_existing = laidOut.clear_existing
-        if (laidOut.compile !== undefined) params.compile = laidOut.compile
 
-        const response = await wsService.callRequest<ApplyGraphResponse>(
-          'blueprint.create_graph',
-          params,
-          getTargetConnectionId(),
-          60000
-        )
+        let response = await send(input)
+
+        // 图找不到时插件一个节点都没动。只写了状态 / 状态机名字的，换成完整路径整批重发
+        let missHint = ''
+        if (response && !response.ok && input.graph_name && isGraphNotFound(response)) {
+          const miss = await lookupMissedGraphName(input.blueprint_path, input.graph_name)
+          if (miss?.kind === 'resolved') {
+            response = await send({ ...input, graph_name: miss.path })
+          }
+          missHint = graphNameMissHint(input.graph_name, miss)
+        }
 
         if (!response) {
           return { success: false, error: '插件没有响应（blueprint.create_graph）' }
@@ -663,7 +682,7 @@ AnimGraph、状态机、状态内部、转换条件都用这个工具写，graph
         if (!response.ok) {
           return {
             success: false,
-            error: describeFailure(response),
+            error: describeFailure(response) + (missHint ? `\n\n${missHint}` : ''),
             rolled_back: response.rolled_back === true,
             errors: response.errors
           }

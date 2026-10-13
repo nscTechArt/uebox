@@ -11,8 +11,15 @@ import { defineV2Tool } from '../../adaptV2Tool'
 import { z } from 'zod'
 import { serviceManager } from '../../../../services'
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
-import { extractBlueprintGraphRefs, pickPreferredGraphName } from './graphDiscovery'
+import {
+  describeGraphNameMiss,
+  explainGraphNameMiss,
+  extractBlueprintGraphRefs,
+  pickPreferredGraphName,
+  type GraphNameMiss
+} from './graphDiscovery'
 import { resolveBlueprintPathInput } from './resolveBlueprintPath'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 const GetBlueprintGraphSchema = z.object({
   blueprint_path: z
@@ -280,6 +287,39 @@ export function stateMachineConnections(
   return connections
 }
 
+/** 插件报的是「图找不到」，而不是蓝图找不到或别的错 */
+export function isGraphNotFound(response: unknown): boolean {
+  const error = (response as { error?: unknown } | null)?.error
+  return typeof error === 'string' && /^Graph not found/i.test(error)
+}
+
+/**
+ * 图名没找到时问一次图列表，查清是写了短名、有歧义、插件太旧，还是真没有。
+ * 列表也拿不到就返回 null，调用方照用插件的原报错。
+ */
+export async function lookupMissedGraphName(
+  blueprintPath: string,
+  graphName: string
+): Promise<GraphNameMiss | null> {
+  try {
+    const listed = await serviceManager
+      .getWebSocketService()
+      .callRequest<
+        Record<string, unknown>
+      >('blueprint.list_graphs', { blueprint_path: blueprintPath }, getTargetConnectionId(), 20000)
+    if (!listed?.ok) return null
+    return explainGraphNameMiss(graphName, extractBlueprintGraphRefs(listed))
+  } catch {
+    return null
+  }
+}
+
+/** 换不成完整路径时接在原报错后面的那句 */
+export function graphNameMissHint(graphName: string, miss: GraphNameMiss | null): string {
+  if (!miss || miss.kind === 'resolved') return ''
+  return describeGraphNameMiss(graphName, miss, PLUGIN_UPDATE_HINT)
+}
+
 export const __testing = {
   stateMachineConnections,
   describePin,
@@ -445,10 +485,38 @@ rule_graph }), the same shape blueprint_apply_graph takes there.`,
           }
         }
 
+        // 点名的图找不到：多半是只写了状态 / 状态机的名字，查清楚后换成完整路径再读一次
+        let missHint = ''
+        if (!response && explicitGraphName && isGraphNotFound(lastFailure.raw)) {
+          const miss = await lookupMissedGraphName(blueprintPath, explicitGraphName)
+          if (miss?.kind === 'resolved') {
+            triedGraphNames.push(miss.path)
+            const retried = await wsService.callRequest<GetBlueprintGraphResponse>(
+              'blueprint.get_graph',
+              { blueprint_path: blueprintPath, graph_name: miss.path },
+              getTargetConnectionId(),
+              30000
+            )
+            if (retried?.ok) {
+              response = retried
+            } else {
+              lastFailure = {
+                error: String(
+                  (retried as Record<string, unknown> | null)?.error ?? 'No response or ok=false'
+                ),
+                raw: retried
+              }
+            }
+          }
+          missHint = graphNameMissHint(explicitGraphName, miss)
+        }
+
         if (!response) {
           return {
             success: false,
-            error: `Failed to get Blueprint graph: ${lastFailure.error || 'No response or ok=false'}`,
+            error:
+              `Failed to get Blueprint graph: ${lastFailure.error || 'No response or ok=false'}` +
+              (missHint ? `\n${missHint}` : ''),
             code: lastFailure.code,
             details: lastFailure.details,
             raw: lastFailure.raw,

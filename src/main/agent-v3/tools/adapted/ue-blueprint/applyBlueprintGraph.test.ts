@@ -650,4 +650,54 @@ describe('动画蓝图', () => {
       'AnimGraph/Locomotion/Idle->Walk'
     )
   })
+
+  /**
+   * 真机上模型往 `待机` 里写动画节点，插件只认完整路径回了一句 Graph not found ——
+   * 而这里原来只读 errors 数组，模型拿到的是光秃秃的「写入失败。」，以为插件不认动画节点。
+   */
+  it('只写了状态名 → 换成完整路径整批重发', async () => {
+    callRequest.mockImplementation(async (command: string, params: { graph_name?: string }) => {
+      if (command === 'blueprint.list_graphs') {
+        return {
+          ok: true,
+          graphs: [
+            { name: 'AnimGraph', type: 'anim_graph' },
+            { name: 'AnimGraph/MR22基础动作/待机', type: 'state' }
+          ]
+        }
+      }
+      if (params.graph_name !== 'AnimGraph/MR22基础动作/待机') {
+        return { ok: false, error: `Graph not found: ${params.graph_name}`, code: 404 }
+      }
+      return command === 'blueprint.get_graph'
+        ? { ok: true, nodes: [] }
+        : { ...okResponse, graph_name: 'AnimGraph/MR22基础动作/待机' }
+    })
+
+    const result = await run({
+      blueprint_path: '/Game/ABP_Hero',
+      graph_name: '待机',
+      nodes: [{ id: 'p', class: 'SequencePlayer', member_name: 'Idle' }],
+      connections: []
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.graph_name).toBe('AnimGraph/MR22基础动作/待机')
+    const writes = callRequest.mock.calls.filter(
+      ([command]) => command === 'blueprint.create_graph'
+    )
+    expect(writes.map(([, params]) => (params as { graph_name: string }).graph_name)).toEqual([
+      '待机',
+      'AnimGraph/MR22基础动作/待机'
+    ])
+  })
+
+  it('插件只回一句 error（没有 errors 数组）时，原话要带给模型', async () => {
+    mockApply({ ok: false, error: 'Blueprint not found: /Game/ABP_Nope', code: 404 })
+
+    const result = await run({ ...MINIMAL, blueprint_path: '/Game/ABP_Nope' })
+
+    expect(result.success).toBe(false)
+    expect(String(result.error)).toContain('Blueprint not found: /Game/ABP_Nope')
+  })
 })
