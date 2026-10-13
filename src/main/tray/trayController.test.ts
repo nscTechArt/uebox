@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => {
     interactiveProjects: [] as Array<{ projectPath: string }>,
     /** 系统进程里正开着的 .uproject（没装插件、盒子认不出来的那种） */
     runningProcessPaths: [] as string[],
+    /** 进程探测整个抛错（PowerShell/WMI 不可用之类） */
+    processQueryFails: false,
     openFile: (async () => ({ success: true })) as (
       path: string
     ) => Promise<{ success: boolean; error?: string; pluginFailure?: string }>,
@@ -157,8 +159,10 @@ vi.mock('../services', () => ({
 
 vi.mock('../utils/UnrealProcessDetector', () => ({
   default: {
-    findRunningProjectByPath: async (path: string) =>
-      mocks.state.runningProcessPaths.includes(path) ? { projectPath: path } : null
+    findRunningProjectByPath: async (path: string) => {
+      if (mocks.state.processQueryFails) throw new Error('cim query blew up')
+      return mocks.state.runningProcessPaths.includes(path) ? { projectPath: path } : null
+    }
   }
 }))
 
@@ -301,6 +305,7 @@ describe('trayController', () => {
     s.fileExists = true
     s.interactiveProjects = []
     s.runningProcessPaths = []
+    s.processQueryFails = false
     s.openFile = async () => ({ success: true })
     s.listRecent = async () => []
     s.findRecord = () => undefined
@@ -569,6 +574,15 @@ describe('trayController', () => {
   })
 
   describe('win32 右键现建', () => {
+    /** 右键弹菜单 → 点工程项 → 等打开链路落定（标记进入「等连接」段） */
+    async function launchFromMenu(tray: { popUpContextMenu: Mock }): Promise<void> {
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      const menu = tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]
+      projectItem(menu, 'A')!.click!()
+      await flush()
+    }
+
     it('会话 / 语言 / 工程变化都不排定时器；右键时才现建，拿到的是新名单', async () => {
       setPlatform('win32')
       seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
@@ -650,6 +664,107 @@ describe('trayController', () => {
       expect(mocks.listRecentCalls).toHaveBeenCalledTimes(1)
       expect(tray.popUpContextMenu).toHaveBeenCalledTimes(3)
       expect(tray.setContextMenu).not.toHaveBeenCalled()
+    })
+
+    it('连上又关闭、中间没人右键：标记在连上那一刻就摘了，关闭后不再标「启动中」', async () => {
+      setPlatform('win32')
+      seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
+
+      const tray = newTray()
+      startTrayMenuController(tray as never, hostDeps)
+      await launchFromMenu(tray)
+
+      // 引擎连上 → 又断开（工程被关）。中间一次右键都没有 —— 点了启动就去
+      // 编辑器里干活的正常路径；标记只能在 onProjectsChanged 里摘掉
+      s.interactiveProjects = [{ projectPath: 'D:/A' }]
+      s.projectListeners.forEach((cb) => cb())
+      s.interactiveProjects = []
+      s.projectListeners.forEach((cb) => cb())
+      await flush()
+
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      const closed = tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]
+      const item = projectItem(closed, 'A')!
+      expect(item.label).toBe('A')
+      expect(item.enabled).not.toBe(false)
+    })
+
+    it('插件一直没连上就被关掉：过了宽限右键现查进程表，引擎不在就摘标记', async () => {
+      setPlatform('win32')
+      seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
+
+      const tray = newTray()
+      startTrayMenuController(tray as never, hostDeps)
+      await launchFromMenu(tray)
+
+      // 引擎没连上、进程也已经没了 —— 过了进程对账宽限再右键
+      await vi.advanceTimersByTimeAsync(40_000)
+
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      const closed = tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]
+      const item = projectItem(closed, 'A')!
+      expect(item.label).toBe('A')
+      expect(item.enabled).not.toBe(false)
+    })
+
+    it('宽限内右键不对进程表：刚点出去的启动照样灰着', async () => {
+      setPlatform('win32')
+      seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
+
+      const tray = newTray()
+      startTrayMenuController(tray as never, hostDeps)
+      await launchFromMenu(tray)
+
+      // 宽限内就算进程表暂时查不到（引擎刚拉起、WMI 还没收录），也得继续拦
+      await vi.advanceTimersByTimeAsync(5_000)
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      const during = tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]
+      const item = projectItem(during, 'A')!
+      expect(item.enabled).toBe(false)
+      expect(item.label).toContain('tray.launching')
+    })
+
+    it('进程还活着只是没连上：过了宽限照样标「启动中」', async () => {
+      setPlatform('win32')
+      seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
+
+      const tray = newTray()
+      startTrayMenuController(tray as never, hostDeps)
+      await launchFromMenu(tray)
+
+      // 引擎起来了（进程在）、插件慢还没握手 —— 这不是残留，不许摘
+      s.runningProcessPaths = ['D:/A/A.uproject']
+      await vi.advanceTimersByTimeAsync(40_000)
+
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      const alive = tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]
+      const item = projectItem(alive, 'A')!
+      expect(item.enabled).toBe(false)
+      expect(item.label).toContain('tray.launching')
+    })
+
+    it('进程表整个查挂了：标记留着 —— 查不出来不等于不在跑', async () => {
+      setPlatform('win32')
+      seedProjects(['D:/A'], { 'D:/A': '2025-01-01T00:00:00' })
+
+      const tray = newTray()
+      startTrayMenuController(tray as never, hostDeps)
+      await launchFromMenu(tray)
+
+      // 过了宽限、探测整个抛错：查不出来不等于不在跑，标记留给 TTL
+      s.processQueryFails = true
+      await vi.advanceTimersByTimeAsync(40_000)
+
+      s.trayHandlers.get('right-click')!()
+      await flush()
+      const during = tray.popUpContextMenu.mock.calls.at(-1)![0] as MenuItem[]
+      const item = projectItem(during, 'A')!
+      expect(item.enabled).toBe(false)
+      expect(item.label).toContain('tray.launching')
     })
 
     it('连点两下右键：只弹后一次建好的菜单', async () => {

@@ -53,7 +53,7 @@ import { getPublicDatabase } from '../sqliteDataBase'
 import { getProjectByPath } from '../sqliteDataBase/models/project'
 import UnrealProcessDetector from '../utils/UnrealProcessDetector'
 
-import { createLaunchTracker, withProjectState } from './launchTracker'
+import { applyProjectState, createLaunchTracker } from './launchTracker'
 import { trayOpenOutcome } from './openOutcome'
 import { createTrayProjectOpener } from './openTrayProject'
 import { createPendingSlot } from './pendingSlot'
@@ -106,6 +106,15 @@ function projectQueryDeps(): RunningProjectsDeps {
 const REBUILD_DEBOUNCE_MS = 200
 
 /**
+ * 「等连接」标记多久没兑现，建菜单时才去对一次进程表。
+ *
+ * `openPath` 落定到 `UnrealEditor.exe` 出现在进程表里有一小段空窗 ——
+ * 宽限设短了会把刚点出去的启动误摘（摘了就能再点出第二份编辑器）；
+ * 设长了只是把对账点往后推，代价是多标一会儿「启动中」，两头不对称。
+ */
+const LAUNCH_PROCESS_GRACE_MS = 30_000
+
+/**
  * 退出确认先交给界面弹应用内的确认框；过了这么久还没被取走（窗口在重建、
  * 渲染进程卡死），退回系统原生框 —— Windows 上托盘「退出」几乎是唯一的退出入口，
  * 不能因为界面没响应就退不掉
@@ -123,8 +132,8 @@ export function startTrayMenuController(tray: Tray, deps: TrayControllerDeps): v
   /*
    * 点了「最近项目」到插件连上来之间的过渡期。引擎起来要几十秒，这期间
    * `projectManager` 还报不出 running —— 不记一笔的话菜单那条还是活的，
-   * 双击就是第二个编辑器进程。「等连接」的计时标记由 `withProjectState`
-   * 在看到 running 时摘掉，或由 TTL 兜底。
+   * 双击就是第二个编辑器进程。「等连接」的计时标记在连上那一刻由
+   * `onProjectsChanged` 摘掉；一直没连上的，靠建菜单时的进程对账或 TTL 兜底。
    */
   const launchTracker = createLaunchTracker()
 
@@ -296,14 +305,7 @@ export function startTrayMenuController(tray: Tray, deps: TrayControllerDeps): v
     // 菜单是弹出时刻的快照：挂着期间工程可能被别处拉起来，
     // 点下去现查一遍 running。查不出来按没跑放行 —— 真开不成，
     // 后面还有打开失败的通知兜着
-    isRunning: (projectKey) => {
-      try {
-        return runningProjectKeys(projectQueryDeps()).has(projectKey)
-      } catch (error) {
-        logger.warn('[托盘] 复查运行状态失败:', error)
-        return false
-      }
-    },
+    isRunning: (projectKey) => currentRunningKeys().has(projectKey),
     // 「运行中」只认连上盒子的工程：没装插件的那份编辑器盒子看不见，
     // 不查进程的话「启动中」一过期再点就是第二个编辑器。只在点下去时查 —— 枚举进程不便宜
     openFile: async (path) => {
@@ -411,22 +413,63 @@ export function startTrayMenuController(tray: Tray, deps: TrayControllerDeps): v
     quit: () => guardQuit(quit, 'quit')
   }
 
-  const buildMenu = async (): Promise<Menu> =>
-    Menu.buildFromTemplate(
+  /*
+   * 「等连接」标记对账：标记还在、人没连上、进程表里也没有它 —— 引擎已经死了，
+   * 「启动中」是残留。
+   *
+   * 只在建菜单时、且只对过了宽限的标记查进程 —— 枚举进程不便宜，这是为
+   * 「工程关了菜单还标着启动中」付出的代价换来的少数场合。进行中的打开
+   * （waitingSince 查不出时刻）不碰：装插件之类的 await 还没落定，
+   * 进程确实还不该在。
+   */
+  async function reconcileDeadLaunches(
+    candidates: TrayProjectCandidate[],
+    running: Set<string>
+  ): Promise<void> {
+    for (const candidate of candidates) {
+      const since = launchTracker.waitingSince(candidate.projectKey)
+      if (
+        since === undefined ||
+        running.has(candidate.projectKey) ||
+        Date.now() - since <= LAUNCH_PROCESS_GRACE_MS
+      ) {
+        continue
+      }
+      /*
+       * 查不出来 ≠ 不在跑：探测抛错按「还在」处理，标记留给 TTL（和
+       * openFile/isRunning 的放行约定相反方向，这里保的是标记本身）。
+       * 摘错标记不等于直接开出第二份编辑器 —— 再点时 openFile 还会查一次
+       * 进程，要那次也查不出来才真开出第二份。残留盲区：getRunningProjects
+       * 内部把枚举失败也吞成空数组，这层分不出「枚举失败」和「真没枚举到」
+       * —— 所有调用方共享这个约定，对账只能保证抛出来的不算死。
+       */
+      const alive = await UnrealProcessDetector.findRunningProjectByPath(
+        candidate.originPath
+      ).catch((error) => {
+        logger.warn('[托盘] 进程对账查询失败，标记保留:', error)
+        return undefined
+      })
+      if (alive === undefined) continue
+      if (alive === null) launchTracker.drop(candidate.projectKey)
+    }
+  }
+
+  const buildMenu = async (): Promise<Menu> => {
+    const candidates = await loadRecentCandidates()
+    // 「运行中 / 启动中」不是名单的属性，是建菜单那一刻叠上去的瞬时状态
+    const running = currentRunningKeys()
+    await reconcileDeadLaunches(candidates, running)
+    return Menu.buildFromTemplate(
       buildTrayMenuTemplate(
         {
           recentSessions,
-          // 「运行中 / 启动中」不是名单的属性，是建菜单那一刻叠上去的瞬时状态
-          recentProjects: withProjectState(
-            await loadRecentCandidates(),
-            currentRunningKeys(),
-            launchTracker
-          )
+          recentProjects: applyProjectState(candidates, running, launchTracker)
         },
         handlers,
         mt
       )
     )
+  }
 
   const onTrayRightClick = (): void => {
     if (stopped) return
@@ -459,6 +502,13 @@ export function startTrayMenuController(tray: Tray, deps: TrayControllerDeps): v
   })
   const unsubscribeProjectsChanged = projectManager.onProjectsChanged(() => {
     recentCandidatesCache.invalidate()
+    /*
+     * 连上这一刻就摘掉「等连接」标记，不能等下一次建菜单 —— win32 只在右键时
+     * 才建菜单，「连上 → 关掉、中间没人右键」走完，标记会留到 TTL，
+     * 一个已经关掉的工程被标成「启动中」。这里查库摊的是每次连接变化一次，
+     * 不是每次右键。
+     */
+    for (const key of currentRunningKeys()) launchTracker.clearIfRunning(key)
     scheduleRebuild()
   })
 

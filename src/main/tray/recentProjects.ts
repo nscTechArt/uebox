@@ -22,7 +22,7 @@
  *
  * `getTrayRecentCandidates` 只算「名单里该有谁」（读 ini、查库、确认文件还在）：
  * 这一整段全是 IO，但变化极慢，调用方拿十秒 TTL 缓存包着。
- * `withProjectState` 把「谁在跑 / 谁在启动」叠上去 —— 那是一瞬的事，每次建菜单都现算，
+ * `applyProjectState` 把「谁在跑 / 谁在启动」叠上去 —— 那是一瞬的事，每次建菜单都现算，
  * 不经过缓存。混在一起的话，要么 running 跟着名单旧十秒，要么 IO 跟着
  * running 每趟重跑 —— 两头都不该。
  */
@@ -91,7 +91,7 @@ export function runningProjectKeys(deps: RunningProjectsDeps): Set<string> {
 
 /**
  * 「名单里该有谁」：不含 running/launching —— 那层是点开菜单那一刻的瞬时状态，
- * 由 `withProjectState` 在缓存之外现叠上去。
+ * 由 `applyProjectState` 在缓存之外现叠上去。
  */
 export async function getTrayRecentCandidates(
   deps: TrayRecentCandidatesDeps
@@ -119,7 +119,7 @@ export async function getTrayRecentCandidates(
     }
 
     // 「运行中 / 启动中」不归这里管：那是瞬时状态，
-    // 由 withProjectState 在缓存之外每次建菜单现叠
+    // 由 applyProjectState 在缓存之外每次建菜单现叠
     picked.set(record.projectKey, {
       projectKey: record.projectKey,
       name: record.projectName || entry.projectName,
