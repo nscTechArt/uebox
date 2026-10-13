@@ -2614,6 +2614,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     teamBoard: {
       title: 'Team',
+      tab: 'Team tasks',
+      openTab: 'View team tasks in the side panel',
+      closeTab: 'Close team tasks',
       summary: '{members} members · {done}/{total} tasks marked done',
       selfReportedHint:
         'Marked by the teammate, not checked by Unreal Box — the acceptance verdict is what counts',
@@ -2622,6 +2625,52 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       noTasks: 'The task board is empty',
       evidence: 'Evidence: ',
       mail: 'Notes',
+      members: 'Members',
+      clearFilter: 'Show all members',
+      readOnlyHint: 'Read-only: inspects the project without changing it',
+      assignment: 'Assignment',
+      steps: 'Recent steps',
+      stepTimes: '{n} times',
+      noSteps: 'No activity yet',
+      doneFold: '{n} completed',
+      updatedAgo: 'Updated {ago}',
+      doneAgo: 'Done {ago}',
+      unread: 'Not read yet',
+      openReader: 'Open in reading view',
+      backToBoard: 'Back',
+      prevMail: 'Previous',
+      nextMail: 'Next',
+      sections: '{n} sections',
+      mailRole: {
+        delivery: 'Delivery',
+        stopped: 'Stopped',
+        instruction: 'Instruction',
+        reply: 'Reply',
+        question: 'Question',
+        note: 'Note'
+      },
+      kindVerb: {
+        read: 'Inspecting project',
+        write: 'Editing project',
+        run: 'Running',
+        look: 'Viewing',
+        play: 'Playtesting',
+        talk: 'Messaging teammates'
+      },
+      statusLine: {
+        stopped: 'Stopped: {reason}',
+        blocked: 'Blocked: {reason}',
+        waiting: 'Waiting for a reply',
+        tool: '{verb}',
+        toolAt: '{verb} · {target}',
+        thinking: 'Thinking',
+        received: 'Task received, not started',
+        delivered: 'Delivered "{title}"',
+        idle: 'Idle'
+      },
+      tasks: 'Tasks',
+      less: 'Show less',
+      extra: { writes: 'Writes', snapshot: 'Snapshot' },
       note: 'Note: ',
       blockedReason: 'Blocked on: ',
       old: 'Earlier',
@@ -2658,6 +2707,34 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         checkupFailed: "{model} didn't pass the check, so the model wasn't changed: {reason}",
         checkupNoTools:
           'The model did not call a tool after two requests and cannot be used as a teammate'
+      },
+      office: {
+        aria: 'Team office: {summary}',
+        only: 'Only {name}',
+        noTasksFor: 'No tasks assigned to {name}',
+        styleHint: 'Switch art style',
+        style: { v1: 'Minimal', v2: 'Pixel' },
+        status: {
+          think: 'Thinking',
+          wait: 'Waiting for a reply',
+          out: 'Stopped: {reason}',
+          board: 'Planning',
+          awaiting: 'Waiting for {name} to deliver'
+        },
+        idle: {
+          idle: 'Idle',
+          coffee: 'Idle · making coffee',
+          water: 'Idle · getting water',
+          plant: 'Idle · watering the plant',
+          window: 'Idle · looking outside',
+          sofa: 'Idle · reading on the sofa',
+          desk: 'Idle · standing by at the desk',
+          stretch: 'Idle · stretching',
+          board: 'Idle · reading the board',
+          pace: 'Idle · pacing',
+          chat: 'Idle · chatting with {name}',
+          peek: 'Checking on {name}'
+        }
       },
       receipt: {
         read: 'read',
@@ -2785,6 +2862,16 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         noSteps: 'Not started yet'
       },
       tools: {
+        team_board: 'Update task board',
+        team_status: 'Check team status',
+        team_send: 'Assign task',
+        team_message: 'Send message',
+        team_deliver: 'Submit delivery',
+        team_hire: 'Add teammate',
+        team_snapshot: 'Save project snapshot',
+        ue_list: 'List items',
+        ue_project_asset_ranking: 'Rank assets by size',
+        ue_find_heavy_assets: 'Find heavy assets',
         generate_image: 'Generate Image',
         search_assets: 'Search Assets',
         generate_3d_model: 'Generate 3D Model',

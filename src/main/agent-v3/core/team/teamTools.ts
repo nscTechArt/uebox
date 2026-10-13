@@ -427,7 +427,11 @@ function createSendTool(
             ...(route.pin ? { pin: route.pin } : {}),
             ...(ctx.signal ? { signal: ctx.signal } : {}),
             // 界面给这类进度统一加「团队：」前缀，这里只标是哪个队员
-            onProgress: (text) => ctx.report({ text: `${member.name} · ${text}` }),
+            // 后台派的活这次调用早就结束了，report 推不出去；动态另走一条推送
+            onProgress: (text) => {
+              ctx.report({ text: `${member.name} · ${text}` })
+              deps.live?.note(member.name, text)
+            },
             keepMessages: (messages) => {
               latest = messages
             }

@@ -113,6 +113,9 @@ const GENERIC_EVENT_CHANNELS = new Set([
   // 工作室模式的名册、任务板、留言变了。只带 sessionId，面板自己去重读 ——
   // 任务板在两轮之间也要活着，所以不挂在按运行订阅的那套事件上
   'agent-v3:team-board',
+  // 队员干活时的一条动态（调了什么工具、说了什么）。后台派的活进度推不到
+  // 已经结束的那次工具调用上，单独走这条
+  'agent-v3:team-activity',
   // 两条内核 session 抢同一个资产。必须让用户看见 —— 他可能开着两个窗口，
   // 以为两边在干不同的活
   'agent-v3:lock-conflict',

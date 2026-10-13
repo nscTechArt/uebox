@@ -14,112 +14,189 @@ const team: TeamStateView = {
     { name: '试玩', persona: '找 bug', tier: 'fast', readOnly: true, hiredAt: 2 }
   ],
   board: [
-    { id: 't1', title: '灰盒关卡', status: 'done', owner: '地编', evidence: 'a.png', updatedAt: 1 },
+    {
+      id: 't1',
+      title: '灰盒关卡',
+      status: 'done',
+      owner: '玩法主程',
+      evidence: 'a.png',
+      updatedAt: 1
+    },
     { id: 't2', title: '波次系统', status: 'doing', owner: '玩法主程', updatedAt: 2 },
-    { id: 't3', title: '存档', status: 'blocked', updatedAt: 3 }
+    { id: 't3', title: '存档', status: 'blocked', note: '等你定死亡规则', updatedAt: 3 }
   ],
   mail: [
-    { id: 'm1', from: '试玩', to: 'producer', text: '第三波卡死', at: 1 },
-    { id: 'm2', from: '试玩', to: '玩法主程', text: '塔没伤害', at: 2, deliveredAt: 3, readAt: 4 }
+    {
+      id: 'm1',
+      from: '试玩',
+      to: 'producer',
+      at: 1,
+      text: '【交活】试玩（mimo） 回话：\n任务已完成，报告全文如下。\n\n---\n# 试玩报告\n- 第三波卡死，塔没有伤害\n\n【快照】已存 42'
+    },
+    { id: 'm2', from: 'producer', to: '试玩', text: '去试玩第三波。别的先不管。', at: 2 }
   ]
 }
 
-describe('TeamBoardPanel', () => {
-  it('收起时一行说清：几个人、几件完成、验收结论', () => {
+/** 名册、留言、阅读视图都用到 Markdown 渲染器；测试里换成一个只吐原文的小壳 */
+const stubs = {
+  MarkdownRenderer: { props: ['content'], template: '<div class="md-stub">{{ content }}</div>' },
+  TeamOffice: { template: '<div class="office-stub" />' }
+}
+
+function docked(props: Record<string, unknown> = {}): VueWrapper {
+  return mount(TeamBoardPanel, {
+    props: { team, docked: true, ...props },
+    global: { stubs },
+    attachTo: document.body
+  })
+}
+
+describe('TeamBoardPanel 摘要行', () => {
+  it('输入框上方只有一行：几个人、几件完成、验收结论；点它要求在右侧面板打开', async () => {
     const wrapper = mount(TeamBoardPanel, { props: { team } })
     const head = wrapper.find('.team-board-head')
-    expect(head.attributes('aria-expanded')).toBe('false')
     expect(head.text()).toContain('2')
     expect(head.text()).toContain('1/3')
     expect(wrapper.find('.team-board-body').exists()).toBe(false)
+    await head.trigger('click')
+    expect(wrapper.emitted('open')).toHaveLength(1)
   })
 
-  it('展开后：进行中和卡住的排前面，完成的带证据；留言新的在上，制作人显示成中文', async () => {
-    const wrapper = mount(TeamBoardPanel, { props: { team } })
-    await wrapper.find('.team-board-head').trigger('click')
-
-    const titles = wrapper.findAll('.task-title').map((node) => node.text())
-    expect(titles).toEqual(['波次系统', '存档', '灰盒关卡'])
-    expect(wrapper.find('.task-detail').text()).toContain('a.png')
-
-    const members = wrapper.findAll('.members li')
-    expect(members).toHaveLength(2)
-    expect(members[1].attributes('title')).toBe('找 bug')
-
-    const routes = wrapper.findAll('.mail-route').map((node) => node.text())
-    expect(routes[0]).toBe('试玩 → 玩法主程')
-    expect(routes[1]).not.toContain('producer')
-    // 回执：读到了的显示已读，还在信箱里的照实说
-    const receipts = wrapper.findAll('.mail-receipt').map((node) => node.text())
-    expect(receipts).toEqual(['已读', '待送达'])
+  it('右侧面板里：打开时重读一次模型名单；正在跑的时候不能结束团队模式', async () => {
+    const wrapper = docked()
+    expect(wrapper.emitted('open-models')).toHaveLength(1)
+    await wrapper.find('.team-board-end').trigger('click')
+    expect(wrapper.emitted('end')).toHaveLength(1)
+    const running = docked({ running: true })
+    expect(running.find('.team-board-end').attributes('disabled')).toBeDefined()
   })
 
-  /** 2026-09-26：队员标了完成，证据里自己写着没做完；用户看到「完成」就信了 */
-  it('验收通过之前，队员标的完成叫「自报完成」；通过之后才叫完成', async () => {
-    const before = mount(TeamBoardPanel, { props: { team } })
-    await before.find('.team-board-head').trigger('click')
-    const doneTag = (w: typeof before): string =>
-      w
-        .findAll('.task')
-        .find((node) => node.text().includes('灰盒关卡'))!
-        .find('.task-line')
-        .text()
-    expect(doneTag(before)).toContain('自报完成')
-
-    const after = mount(TeamBoardPanel, { props: { team: { ...team, verdict: 'pass' } } })
-    await after.find('.team-board-head').trigger('click')
-    expect(doneTag(after)).not.toContain('自报')
-    expect(doneTag(after)).toContain('完成')
-  })
-
-  /** 2026-09-30 真机：第一轮标的「卡住」一直挂着，用户分不清是现在卡着还是早就过去了 */
-  it('这一轮开始后没人动过的「进行中 / 卡住」灰掉标「上一轮」；卡住的显示原因、能重开', async () => {
-    const wrapper = mount(TeamBoardPanel, {
-      props: {
-        team: {
-          ...team,
-          roundStartedAt: 10,
-          board: [
-            { id: 't2', title: '波次系统', status: 'doing', updatedAt: 20 },
-            { id: 't3', title: '存档', status: 'blocked', note: '等你定死亡规则', updatedAt: 3 }
-          ]
-        }
-      }
-    })
-    await wrapper.find('.team-board-head').trigger('click')
-    const [fresh, old] = wrapper.findAll('.task')
-    expect(fresh!.classes()).not.toContain('task--old')
-    expect(old!.classes()).toContain('task--old')
-    expect(old!.find('.task-when').text()).toContain('上一轮')
-    expect(old!.text()).toContain('受阻原因：等你定死亡规则')
-
-    await old!.find('.task-reopen').trigger('click')
-    expect(wrapper.emitted('reopen')).toEqual([['t3']])
-    expect(fresh!.find('.task-reopen').exists()).toBe(false)
-  })
-
-  it('验收之后又改过工程：不再挂红牌，改成「改动后未重验」；完成也回到「自报完成」', async () => {
-    const wrapper = mount(TeamBoardPanel, {
-      props: { team: { ...team, verdict: 'pass', verdictStale: true } }
-    })
+  it('验收之后又改过工程：不再挂红牌，改成「改动后未重验」', () => {
+    const wrapper = docked({ team: { ...team, verdict: 'pass', verdictStale: true } })
     expect(wrapper.find('.team-board-head').text()).toContain('改动后未重验')
-    await wrapper.find('.team-board-head').trigger('click')
-    expect(wrapper.text()).toContain('自报完成')
-  })
-
-  it('结束团队模式：正在跑的时候按钮不可点', async () => {
-    const idle = mount(TeamBoardPanel, { props: { team } })
-    await idle.find('.team-board-head').trigger('click')
-    await idle.find('.team-board-foot button').trigger('click')
-    expect(idle.emitted('end')).toHaveLength(1)
-
-    const running = mount(TeamBoardPanel, { props: { team, running: true } })
-    await running.find('.team-board-head').trigger('click')
-    expect(running.find('.team-board-foot button').attributes('disabled')).toBeDefined()
   })
 })
 
-describe('TeamBoardPanel 队员的模型', () => {
+describe('成员', () => {
+  it('一人一行说此刻在干嘛：在跑的翻成人话、路径变短，交过活的说交了什么', () => {
+    const wrapper = docked({
+      team: {
+        ...team,
+        live: {
+          running: ['玩法主程'],
+          waiting: [],
+          awaited: [],
+          assignments: [{ member: '玩法主程', text: '写波次', since: 5 }],
+          recent: []
+        }
+      },
+      activity: [
+        { member: '玩法主程', text: '调用 read_local_file D:/Proj/Source/Game/Wave.cpp', at: 6 }
+      ]
+    })
+    const rows = wrapper.findAll('.member-main')
+    expect(rows).toHaveLength(2)
+    const busy = rows.find((row) => row.text().includes('玩法主程'))!
+    expect(busy.find('.member-status').text()).toContain('Source/Game/Wave.cpp')
+    expect(busy.find('.member-status').text()).not.toContain('read_local_file')
+    const tester = rows.find((row) => row.text().includes('试玩'))!
+    expect(tester.find('.member-status').text()).toContain('已交付「试玩报告」')
+    expect(tester.find('.member-lock').exists()).toBe(true)
+  })
+
+  it('点一行：选中他，展开最近几步；任务和留言只看他；再点或点标签上的 × 取消', async () => {
+    const wrapper = docked({
+      activity: [{ member: '玩法主程', text: '调用 blueprint_compile BP_Wave', at: 6 }]
+    })
+    const row = wrapper.findAll('.member-main').find((r) => r.text().includes('玩法主程'))!
+    await row.trigger('click')
+    expect(wrapper.find('.member-detail').exists()).toBe(true)
+    expect(wrapper.find('.step-action').text()).toContain('BP_Wave')
+    expect(wrapper.find('.filter-chip').text()).toContain('玩法主程')
+    // 存档没有负责人，选了玩法主程就看不到它
+    expect(wrapper.text()).not.toContain('存档')
+    // 留言里没有玩法主程的往来
+    expect(wrapper.findAll('.mail')).toHaveLength(0)
+    await row.trigger('click')
+    expect(wrapper.find('.member-detail').exists()).toBe(false)
+  })
+})
+
+describe('任务', () => {
+  it('受阻的排最前、带红标签和原因、能重开；完成的折起来', async () => {
+    const wrapper = docked()
+    const titles = wrapper.findAll('.tasks .task-title').map((node) => node.text())
+    expect(titles).toEqual(['存档', '波次系统'])
+    const blocked = wrapper.findAll('.task')[0]!
+    expect(blocked.text()).toContain('受阻')
+    expect(blocked.find('.task-note').text()).toContain('等你定死亡规则')
+    await blocked.find('.task-reopen').trigger('click')
+    expect(wrapper.emitted('reopen')).toEqual([['t3']])
+
+    const fold = wrapper.find('.done-fold')
+    expect(fold.text()).toContain('已完成 1 项')
+    await fold.trigger('click')
+    expect(wrapper.text()).toContain('灰盒关卡')
+  })
+
+  it('验收通过之前叫「自报完成」；点开才看证据', async () => {
+    const wrapper = docked()
+    await wrapper.find('.done-fold').trigger('click')
+    const done = wrapper.findAll('.task').find((task) => task.text().includes('灰盒关卡'))!
+    expect(done.find('.task-icon').attributes('aria-label')).toBe('自报完成')
+    expect(done.find('.task-evidence').exists()).toBe(false)
+    await done.find('.task-line').trigger('click')
+    expect(done.find('.task-evidence').text()).toContain('a.png')
+
+    const passed = docked({ team: { ...team, verdict: 'pass' } })
+    await passed.find('.done-fold').trigger('click')
+    const accepted = passed.findAll('.task').find((task) => task.text().includes('灰盒关卡'))!
+    expect(accepted.find('.task-icon').attributes('aria-label')).toBe('完成')
+  })
+
+  it('这一轮开始后没人动过的「进行中 / 受阻」退到背景，标「上一轮」', () => {
+    const wrapper = docked({ team: { ...team, roundStartedAt: 10 } })
+    const old = wrapper.findAll('.task').find((task) => task.text().includes('存档'))!
+    expect(old.classes()).toContain('is-old')
+    expect(old.find('.task-when').text()).toContain('上一轮')
+  })
+})
+
+describe('留言', () => {
+  it('交付：标签 + 报告标题 + 一句摘要，客套话和分隔线去掉；指令只露第一句', () => {
+    const wrapper = docked()
+    const [instruction, delivery] = wrapper.findAll('.mail')
+    expect(delivery!.find('.mail-head').text()).toContain('交付')
+    expect(delivery!.find('.mail-title').text()).toBe('试玩报告')
+    expect(delivery!.find('.mail-summary').text()).toBe('第三波卡死，塔没有伤害')
+    expect(delivery!.text()).not.toContain('报告全文如下')
+    expect(instruction!.find('.mail-head').text()).toContain('指令')
+    expect(instruction!.find('.mail-summary').text()).toBe('去试玩第三波。')
+    // 制作人发出去还没被读到：一个小圆点
+    expect(instruction!.find('.unread-dot').exists()).toBe(true)
+  })
+
+  it('点开：Markdown 全文和附注；很长的报告能开阅读视图，返回后回到原位', async () => {
+    const long =
+      '# 很长的报告\n' + Array.from({ length: 4 }, (_, i) => `## 第 ${i} 节\n内容`).join('\n')
+    const wrapper = docked({
+      team: {
+        ...team,
+        mail: [
+          { id: 'm9', from: '试玩', to: 'producer', at: 1, text: `【交活】试玩 回话：\n${long}` }
+        ]
+      }
+    })
+    await wrapper.find('.mail-preview').trigger('click')
+    expect(wrapper.find('.md-stub').text()).toContain('第 3 节')
+    await wrapper.find('.mail-action.is-primary').trigger('click')
+    expect(wrapper.find('.reader').exists()).toBe(true)
+    await wrapper.find('.reader-back').trigger('click')
+    expect(wrapper.find('.reader').exists()).toBe(false)
+  })
+})
+
+describe('队员的模型（选中那一行后出现）', () => {
   const choice = (
     providerId: string,
     modelId: string,
@@ -161,64 +238,42 @@ describe('TeamBoardPanel 队员的模型', () => {
     ]
   }
 
-  async function open(props: Record<string, unknown>): Promise<VueWrapper> {
-    const wrapper = mount(TeamBoardPanel, { props: { team: withModels, ...props } })
-    await wrapper.find('.team-board-head').trigger('click')
+  async function open(name: string, props: Record<string, unknown>): Promise<VueWrapper> {
+    const wrapper = docked({ team: withModels, ...props })
+    await wrapper
+      .findAll('.member-main')
+      .find((row) => row.text().includes(name))!
+      .trigger('click')
     return wrapper
   }
 
   it('只有一个模型可选时不显示模型', async () => {
-    const wrapper = await open({ modelChoices: choices.slice(0, 1), modelsLoaded: true })
+    const wrapper = await open('搭建', { modelChoices: choices.slice(0, 1), modelsLoaded: true })
     expect(wrapper.find('.member-model').exists()).toBe(false)
   })
 
-  it('多个模型：显示名字和制作人的理由；名单里没有的标成用不了', async () => {
-    const wrapper = await open({ modelChoices: choices, modelsLoaded: true })
-    const chips = wrapper.findAll('.member-model')
-    expect(chips.map((c) => c.text())).toEqual(['DeepSeek V4', 'gpt-6'])
-    expect(chips[0].attributes('title')).toContain('活多量大')
-    expect(chips[0].classes()).not.toContain('unavailable')
-    expect(chips[1].classes()).toContain('unavailable')
-    expect(chips[1].attributes('title')).toContain('gpt-6')
-  })
-
-  it('模型设置还没读到时，不说用不了', async () => {
-    const wrapper = await open({ modelChoices: choices, modelsLoaded: false })
-    expect(wrapper.findAll('.member-model.unavailable')).toHaveLength(0)
+  it('多个模型：显示名字和制作人的理由；名单里没有的标成用不了；没读到设置时不说', async () => {
+    const first = await open('搭建', { modelChoices: choices, modelsLoaded: true })
+    const chip = first.find('.member-model')
+    expect(chip.text()).toBe('DeepSeek V4')
+    expect(chip.attributes('title')).toContain('活多量大')
+    const second = await open('审核', { modelChoices: choices, modelsLoaded: true })
+    expect(second.find('.member-model').classes()).toContain('unavailable')
+    const unknown = await open('审核', { modelChoices: choices, modelsLoaded: false })
+    expect(unknown.find('.member-model').classes()).not.toContain('unavailable')
   })
 
   it('从菜单里换模型：报给外面；选回原来的不报', async () => {
-    const wrapper = await open({ modelChoices: choices, modelsLoaded: true })
-    // 展开面板时重读一次名单，打开菜单时再读一次
-    expect(wrapper.emitted('open-models')).toHaveLength(1)
-    await wrapper.findAll('.member-model')[0].trigger('click')
-    expect(wrapper.emitted('open-models')).toHaveLength(2)
+    const wrapper = await open('搭建', { modelChoices: choices, modelsLoaded: true })
+    await wrapper.find('.member-model').trigger('click')
     const items = wrapper.findAllComponents({ name: 'AppMenuItem' })
     expect(items.map((item) => item.text())).toEqual(['Claude Opus', 'DeepSeek V4'])
-    await items[1].trigger('click')
+    await items[1]!.trigger('click')
     expect(wrapper.emitted('set-model')).toBeUndefined()
-    // 点一项菜单就关了，再打开一次
-    await wrapper.findAll('.member-model')[0].trigger('click')
-    await wrapper.findAllComponents({ name: 'AppMenuItem' })[0].trigger('click')
+    await wrapper.find('.member-model').trigger('click')
+    await wrapper.findAllComponents({ name: 'AppMenuItem' })[0]!.trigger('click')
     expect(wrapper.emitted('set-model')).toEqual([
       ['搭建', { providerId: 'anthropic', modelId: 'opus' }]
-    ])
-  })
-
-  it('老名册里没钉模型的队员也能换：照实显示它跟着谁，选一个就钉上', async () => {
-    const wrapper = mount(TeamBoardPanel, {
-      props: { team, modelChoices: choices, modelsLoaded: true }
-    })
-    await wrapper.find('.team-board-head').trigger('click')
-    const chips = wrapper.findAll('.member-model')
-    expect(chips.map((c) => c.text())).toEqual(['跟随制作人', '对话模型'])
-    expect(chips[0].classes()).not.toContain('unavailable')
-    // 有了模型标签，原来那个「快档」就不再单独显示
-    expect(wrapper.find('.member-flag').text()).not.toBe('快档')
-    await chips[1].trigger('click')
-    await wrapper.findAllComponents({ name: 'AppMenuItem' })[1].trigger('click')
-    expect(wrapper.emitted('set-model')).toEqual([
-      ['试玩', { providerId: 'deepseek', modelId: 'v4' }]
     ])
   })
 })

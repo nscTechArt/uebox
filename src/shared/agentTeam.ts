@@ -238,4 +238,34 @@ export interface TeamStateView {
   board: BoardTask[]
   /** 最近的留言，旧的在前 */
   mail: TeamMail[]
+  /** 此刻谁在跑、谁在等。只有这条对话这次运行里跑过团队才有（内存里的事，不落盘） */
+  live?: TeamLiveView
+}
+
+/**
+ * 团队此刻的动静，给任务板上的办公室看。名字一律是小写（同 `teamLive` 的键），
+ * 和名册比对时把名册的名字也转小写；制作人是 `PRODUCER`。
+ */
+export interface TeamLiveView {
+  /** 正在跑的（制作人也算） */
+  running: string[]
+  /** 发了话、正在等对方回的 */
+  waiting: string[]
+  /** 制作人正卡在「等这个队员交活」上 */
+  awaited: string[]
+  /** 手上的活：派活那段话的第一行 */
+  assignments: { member: string; text: string; since: number }[]
+  /** 每人最近几条动态（调了什么工具、说了什么），旧的在前 */
+  recent: TeamActivity[]
+}
+
+/**
+ * 队员的一条动态。后台派出去的活，进度推不到那次已经结束的工具调用上，
+ * 只能走这条单独的推送（`agent-v3:team-activity`）
+ */
+export interface TeamActivity {
+  member: string
+  /** `调用 <工具> <目标>`，或者它说的一段话 */
+  text: string
+  at: number
 }

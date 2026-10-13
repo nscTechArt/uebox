@@ -121,7 +121,7 @@ import {
 import { parseTeamCommand } from '../agent-v3/core/team/teamCommand'
 import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
 import { createTeamStore, PRODUCER } from '../agent-v3/core/team/teamStore'
-import { createTeamLive } from '../agent-v3/core/team/teamLive'
+import { createTeamLive, type TeamLive } from '../agent-v3/core/team/teamLive'
 import { formatMail } from '../agent-v3/core/team/teamTools'
 import { assignMemberModel, loadTeamModels, recordReopen } from '../agent-v3/core/team/teamModels'
 import { createTrackRecord } from '../agent-v3/core/team/trackRecord'
@@ -586,10 +586,25 @@ async function prepareTeam(
   const store = createTeamStore(teamDirsFor(ctx.sessionId), Date.now, changed)
   await store.ensure()
   ctx.pacedRequests = true
+  // 谁开始跑、谁在等也告诉界面（任务板上的办公室）。派活时几个人同时开工，合并成一次
+  let liveTimer: ReturnType<typeof setTimeout> | null = null
+  const live = createTeamLive(
+    store,
+    () => {
+      if (liveTimer) return
+      liveTimer = setTimeout(() => {
+        liveTimer = null
+        changed()
+      }, TEAM_LIVE_COALESCE_MS)
+    },
+    // 队员的动态当场推，不让界面为一行字重读整份任务板
+    (activity) => emit('agent-v3:team-activity', { sessionId: ctx.sessionId, ...activity })
+  )
+  liveTeams.set(ctx.sessionId, live)
   ctx.team = {
     objective: team.objective,
     store,
-    live: createTeamLive(store),
+    live,
     snapshots: createTeamSnapshots(),
     onVerdict: async (verdict) => {
       options.team = applyVerdict(options.team ?? team, verdict)
@@ -601,6 +616,15 @@ async function prepareTeam(
 
 /** 面板上最多显示多少条留言。它是近况，不是档案 —— 全量在 `<会话>.team/mail.json` */
 const TEAM_PANEL_MAIL = 30
+
+/** 动静通知合并的窗口。人眼看不出这一点延迟，几个人同时开工只重读一次 */
+const TEAM_LIVE_COALESCE_MS = 120
+
+/**
+ * 每条工作室对话最近一次运行的 `TeamLive`。面板读「谁在跑」要它，而它只挂在这一轮的
+ * ctx 上。下一轮 `prepareTeam` 换成新的；结束团队模式时删掉
+ */
+const liveTeams = new Map<string, TeamLive>()
 
 /** 任务板面板要的一整份。不是工作室的会话返回 null */
 async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
@@ -622,7 +646,8 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
     ...(team.roundStartedAt !== undefined ? { roundStartedAt: team.roundStartedAt } : {}),
     members,
     board,
-    mail: mail.slice(-TEAM_PANEL_MAIL)
+    mail: mail.slice(-TEAM_PANEL_MAIL),
+    ...(liveTeams.has(sessionId) ? { live: liveTeams.get(sessionId)!.view() } : {})
   }
 }
 
@@ -1759,6 +1784,7 @@ export function registerAgentV3IPC(): void {
     const options = await loadExecutionOptions(sessionId)
     if (!options?.team) return { success: true }
     delete options.team
+    liveTeams.delete(sessionId)
     await saveExecutionOptions(sessionId, options)
     event.sender.send('agent-v3:team-board', { sessionId })
     return { success: true }

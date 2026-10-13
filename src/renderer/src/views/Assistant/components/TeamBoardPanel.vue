@@ -2,12 +2,26 @@
   <!--
     工作室模式（/team）的任务板：名册、任务、留言、验收结论。
 
-    挂在输入框正上方、默认收起成一行：跑起来之后用户最常问的是「做到哪了」，
-    一行摘要（几个人、几件完成、验收过没过）就答了；要细看再展开。
-    不另开页面 —— 它是这条对话的一部分（见 docs/AI游戏工作室设计-2026-09-25.md 第 3 节）。
+    两处出现：输入框正上方只有一行摘要 —— 跑起来之后用户最常问的是「做到哪了」，
+    几个人、几件完成、验收过没过就答了；点它在右侧面板打开「团队任务」页签（docked），
+    整块高度给办公室、成员、任务和留言。不另开页面 —— 它是这条对话的一部分
+    （见 docs/AI游戏工作室设计-2026-09-25.md 第 3 节）。
+
+    面板从上到下回答：做完了吗（页头）→ 谁在干嘛、谁卡住了（成员）→ 还剩什么（任务）
+    → 交回了什么（留言）。机器写的细节（工具名、路径、模型、回执、报告全文）都在悬停或点开之后。
   -->
-  <section class="team-board" :aria-label="t('assistant.teamBoard.title')">
-    <button type="button" class="team-board-head" :aria-expanded="expanded" @click="toggle">
+  <section
+    class="team-board"
+    :class="{ 'is-docked': docked }"
+    :aria-label="t('assistant.teamBoard.title')"
+  >
+    <component
+      :is="docked ? 'div' : 'button'"
+      :type="docked ? undefined : 'button'"
+      class="team-board-head"
+      :title="docked ? undefined : t('assistant.teamBoard.openTab')"
+      @click="docked || emit('open')"
+    >
       <PhUsersThree class="head-icon" />
       <span class="head-title">{{ t('assistant.teamBoard.title') }}</span>
       <span class="head-meta">
@@ -22,161 +36,118 @@
       <AppTag v-if="team.verdict" :tone="verdictTone" :title="verdictTitle">
         {{ verdictLabel }}
       </AppTag>
-      <PhCaretDown class="caret" :class="{ open: expanded }" />
-    </button>
+      <PhCaretRight v-if="!docked" class="caret" />
+      <AppButton
+        v-else
+        class="team-board-end"
+        size="small"
+        variant="text"
+        :disabled="running"
+        :title="
+          running ? t('assistant.teamBoard.endWhileRunning') : t('assistant.teamBoard.endHint')
+        "
+        @click="emit('end')"
+      >
+        {{ t('assistant.teamBoard.end') }}
+      </AppButton>
+    </component>
 
-    <div v-if="expanded" class="team-board-body">
-      <p class="objective">
-        <span class="label">{{ t('assistant.teamBoard.objective') }}</span>
-        {{ team.objective }}
-      </p>
+    <div v-if="docked" class="team-board-stage">
+      <div ref="bodyRef" class="team-board-body" :inert="readerIndex !== null || undefined">
+        <TeamOffice
+          :team="team"
+          :running="running"
+          :session-id="sessionId"
+          :activity="activity ?? []"
+          :model-choices="modelChoices"
+          :selected="selected"
+          :highlight="hovered"
+          @select="select"
+        />
 
-      <ul v-if="team.members.length" class="members">
-        <li v-for="member in team.members" :key="member.name" :title="member.persona">
-          <span class="member-name">{{ member.name }}</span>
-          <!-- 它用的模型。只有一个模型可选时不显示：没得换，显示了也是噪音 -->
-          <AppDropdown
-            v-if="showModels"
-            :trigger="['click']"
-            @update:open="(open: boolean) => open && emit('open-models')"
-          >
-            <button
-              type="button"
-              class="member-model"
-              :class="{ unavailable: isUnavailable(member) }"
-              :title="modelTitle(member)"
+        <section class="block">
+          <h4 class="block-label">{{ t('assistant.teamBoard.objective') }}</h4>
+          <p class="objective" :title="team.objective">{{ team.objective }}</p>
+        </section>
+
+        <section class="block">
+          <h4 class="block-title">
+            {{ t('assistant.teamBoard.members') }}
+            <span class="block-count">{{ team.members.length }}</span>
+            <AppTag
+              v-if="selectedName"
+              class="filter-chip"
+              tone="info"
+              removable
+              :remove-label="t('assistant.teamBoard.clearFilter')"
+              @remove="select(null)"
             >
-              <PhWarning v-if="isUnavailable(member)" class="member-model-icon" />
-              {{ memberModelLabel(member) }}
-              <PhCaretDown class="member-model-icon" />
-            </button>
-            <template #overlay>
-              <AppMenu :selected-keys="member.model ? [modelKey(member.model)] : []">
-                <AppMenuItemGroup
-                  v-for="group in modelGroups"
-                  :key="group.providerName"
-                  :title="group.providerName"
-                >
-                  <AppMenuItem
-                    v-for="choice in group.choices"
-                    :key="choice.key"
-                    :item-key="choice.key"
-                    @click="pickModel(member, choice)"
-                  >
-                    {{ choice.name }}
-                  </AppMenuItem>
-                </AppMenuItemGroup>
-              </AppMenu>
-            </template>
-          </AppDropdown>
-          <span v-if="!showModels && member.tier === 'fast' && !member.model" class="member-flag">
-            {{ t('assistant.teamBoard.fast') }}
-          </span>
-          <span v-if="member.readOnly" class="member-flag">
-            {{ t('assistant.teamBoard.readOnly') }}
-          </span>
-        </li>
-      </ul>
-      <p v-else class="empty">{{ t('assistant.teamBoard.noMembers') }}</p>
-
-      <ul v-if="sortedTasks.length" class="tasks">
-        <li
-          v-for="task in sortedTasks"
-          :key="task.id"
-          class="task"
-          :class="{ 'task--old': isOld(task) }"
-        >
-          <div class="task-line">
-            <AppTag :tone="STATUS_TONE[task.status]" :title="statusHint(task.status)">
-              {{ statusLabel(task.status) }}
+              {{ t('assistant.teamBoard.office.only', { name: selectedName }) }}
             </AppTag>
-            <span class="task-title">{{ task.title }}</span>
-            <span v-if="task.owner" class="task-owner">@{{ task.owner }}</span>
-            <span
-              class="task-when"
-              :title="isOld(task) ? t('assistant.teamBoard.oldHint') : undefined"
-            >
-              <template v-if="task.reopenedAt">{{ t('assistant.teamBoard.reopened') }} · </template>
-              <template v-else-if="isOld(task)">{{ t('assistant.teamBoard.old') }} · </template>
-              {{ ago(task.reopenedAt ?? task.updatedAt) }}
-            </span>
-            <AppButton
-              v-if="task.status === 'blocked'"
-              class="task-reopen"
-              size="small"
-              variant="text"
-              :title="t('assistant.teamBoard.reopenHint')"
-              @click="emit('reopen', task.id)"
-            >
-              {{ t('assistant.teamBoard.reopen') }}
-            </AppButton>
-          </div>
-          <p v-if="task.note" class="task-detail">
-            {{
-              task.status === 'blocked'
-                ? t('assistant.teamBoard.blockedReason')
-                : t('assistant.teamBoard.note')
-            }}{{ task.note }}
-          </p>
-          <p v-if="task.evidence" class="task-detail">
-            {{ t('assistant.teamBoard.evidence') }}{{ task.evidence }}
-          </p>
-        </li>
-      </ul>
-      <p v-else class="empty">{{ t('assistant.teamBoard.noTasks') }}</p>
+          </h4>
+          <TeamRoster
+            :team="team"
+            :activity="activity ?? []"
+            :selected="selected"
+            :model-choices="modelChoices"
+            :models-loaded="modelsLoaded"
+            @select="select"
+            @hover="hovered = $event"
+            @open-models="emit('open-models')"
+            @set-model="(name, model) => emit('set-model', name, model)"
+          />
+        </section>
 
-      <div v-if="recentMail.length" class="mail">
-        <h4>{{ t('assistant.teamBoard.mail') }}</h4>
-        <ul>
-          <li v-for="mail in recentMail" :key="mail.id">
-            <span class="mail-route">{{ who(mail.from) }} → {{ who(mail.to) }}</span>
-            <span class="mail-text">{{ mail.text }}</span>
-            <span class="mail-receipt">{{ receipt(mail) }}</span>
-          </li>
-        </ul>
+        <section class="block">
+          <h4 class="block-title">
+            {{ t('assistant.teamBoard.tasks') }}
+            <span class="block-count">{{ doneCount }}/{{ team.board.length }}</span>
+          </h4>
+          <TeamTaskList :team="team" :selected="selected" @reopen="emit('reopen', $event)" />
+        </section>
+
+        <section v-if="mails.length" class="block">
+          <h4 class="block-title">
+            {{ t('assistant.teamBoard.mail') }}
+            <span class="block-count">{{ mails.length }}</span>
+          </h4>
+          <TeamMailList :team="team" :items="mails" @read="openReader" />
+        </section>
       </div>
 
-      <div class="team-board-foot">
-        <AppButton
-          size="small"
-          variant="text"
-          :disabled="running"
-          :title="
-            running ? t('assistant.teamBoard.endWhileRunning') : t('assistant.teamBoard.endHint')
-          "
-          @click="emit('end')"
-        >
-          {{ t('assistant.teamBoard.end') }}
-        </AppButton>
-      </div>
+      <TeamMailReader
+        v-if="readerIndex !== null && mails[readerIndex]"
+        :team="team"
+        :items="mails"
+        :index="readerIndex"
+        @go="readerIndex = $event"
+        @close="closeReader"
+      />
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PhCaretDown, PhUsersThree, PhWarning } from '@phosphor-icons/vue'
+import { PhCaretRight, PhUsersThree } from '@phosphor-icons/vue'
 
 import AppButton from '@renderer/components/AppButton.vue'
-import AppDropdown from '@renderer/components/AppDropdown.vue'
-import AppMenu from '@renderer/components/AppMenu.vue'
-import AppMenuItem from '@renderer/components/AppMenuItem.vue'
-import AppMenuItemGroup from '@renderer/components/AppMenuItemGroup.vue'
 import AppTag from '@renderer/components/AppTag.vue'
-import {
-  PRODUCER,
-  sameTeamModel,
-  teamModelLabel,
-  type BoardTask,
-  type TaskStatus,
-  type TeamMail,
-  type TeamMember,
-  type TeamModel,
-  type TeamModelCandidate,
-  type TeamStateView,
-  type TeamVerdict
+import type {
+  TeamActivity,
+  TeamModel,
+  TeamModelCandidate,
+  TeamStateView,
+  TeamVerdict
 } from '@core/shared/agentTeam'
+import TeamMailList from './TeamMailList.vue'
+import TeamMailReader from './TeamMailReader.vue'
+import TeamOffice from './teamOffice/TeamOffice.vue'
+import TeamRoster from './TeamRoster.vue'
+import TeamTaskList from './TeamTaskList.vue'
+import { useTeamLabels } from './teamBoardLabels'
+import { mailItems } from './teamMail'
 
 const props = defineProps<{
   team: TeamStateView
@@ -186,35 +157,34 @@ const props = defineProps<{
   modelChoices?: TeamModelCandidate[]
   /** 模型设置读到过没有。没读到时不能说某个模型「用不了」 */
   modelsLoaded?: boolean
+  /** 在右侧面板里整块显示；不带时只有输入框上方那一行摘要 */
+  docked?: boolean
+  /** 内核 session：办公室按它认制作人的实时进度 */
+  sessionId?: string
+  /** 队员最近的动态，旧的在前 */
+  activity?: TeamActivity[]
 }>()
 const emit = defineEmits<{
+  /** 用户点了摘要行：在右侧面板打开「团队任务」 */
+  open: []
   /** 用户把一项卡住的改回待办 */
   reopen: [taskId: string]
   /** 用户结束团队模式 */
   end: []
-  /** 用户展开了面板或打开了换模型菜单：重读一次模型设置 */
+  /** 用户打开了团队任务或换模型菜单：重读一次模型设置 */
   'open-models': []
   /** 用户给队员换了模型 */
   'set-model': [name: string, model: TeamModel]
 }>()
 const { t } = useI18n()
+const { ago } = useTeamLabels()
 
-const expanded = ref(false)
-
-/** 展开时顺手重读模型名单：用户可能刚在设置页增删过来源，模型名和「用不了」要跟上 */
-function toggle(): void {
-  expanded.value = !expanded.value
-  if (expanded.value) emit('open-models')
-}
+/** 打开时顺手重读模型名单：用户可能刚在设置页增删过来源，模型名和「用不了」要跟上 */
+onMounted(() => {
+  if (props.docked) emit('open-models')
+})
 
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
-
-const STATUS_TONE: Record<TaskStatus, Tone> = {
-  doing: 'info',
-  blocked: 'danger',
-  todo: 'neutral',
-  done: 'success'
-}
 
 const VERDICT_TONE: Record<TeamVerdict, Tone> = {
   pass: 'success',
@@ -222,28 +192,54 @@ const VERDICT_TONE: Record<TeamVerdict, Tone> = {
   blocked: 'danger'
 }
 
-/** 正在干的和卡住的排前面 —— 用户展开来看，多半是想知道现在在忙什么、哪里堵了 */
-const STATUS_ORDER: Record<TaskStatus, number> = { doing: 0, blocked: 1, todo: 2, done: 3 }
-
-/** 展开后最多显示几条留言。全量在主进程的账本里 */
-const MAIL_SHOWN = 8
-
 const doneCount = computed(() => props.team.board.filter((task) => task.status === 'done').length)
 
-const sortedTasks = computed(() =>
-  [...props.team.board].sort(
-    (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.updatedAt - a.updatedAt
-  )
+// ── 只看某个队员（在办公室里点人，或点名册里的那一行） ───────────────────
+
+const memberId = (name: string): string => name.trim().toLowerCase()
+const selected = ref<string | null>(null)
+/** 鼠标停在名册哪一行：办公室里把那个人标出来 */
+const hovered = ref<string | null>(null)
+function select(id: string | null): void {
+  selected.value = id
+}
+const selectedName = computed(
+  () => props.team.members.find((m) => memberId(m.name) === selected.value)?.name ?? null
 )
+// 名册里没这个人了（结束重开、换了一批人），筛选跟着撤掉
+watch(selectedName, (name) => {
+  if (!name) selected.value = null
+})
 
-const recentMail = computed(() => props.team.mail.slice(-MAIL_SHOWN).reverse())
+// ── 留言和阅读视图 ──────────────────────────────────────────────────────
 
-/**
- * 「完成」是队员自己标的，盒子不核实。2026-09-26 真机：美术队员标了完成，
- * 证据里自己写着材质没建，用户看到「完成」却对着一块纯色蓝板。
- * 所以验收通过之前一律叫「自报完成」，真正的完成以验收结论为准。
- */
-const accepted = computed(() => props.team.verdict === 'pass' && !props.team.verdictStale)
+const mails = computed(() => mailItems(props.team, selected.value))
+
+const bodyRef = ref<HTMLElement | null>(null)
+const readerIndex = ref<number | null>(null)
+let readerReturn: { scroll: number; mailId: string } | null = null
+
+function openReader(mailId: string): void {
+  const index = mails.value.findIndex((item) => item.mail.id === mailId)
+  if (index < 0) return
+  readerReturn = { scroll: bodyRef.value?.scrollTop ?? 0, mailId }
+  readerIndex.value = index
+}
+
+/** 回到原来读到的地方，焦点回到打开它的那张卡上 */
+async function closeReader(): Promise<void> {
+  readerIndex.value = null
+  await nextTick()
+  const back = readerReturn
+  readerReturn = null
+  if (!back || !bodyRef.value) return
+  bodyRef.value.scrollTop = back.scroll
+  bodyRef.value
+    .querySelector<HTMLElement>(`[data-mail-id="${CSS.escape(back.mailId)}"] button`)
+    ?.focus()
+}
+
+// ── 验收 ────────────────────────────────────────────────────────────────
 
 /**
  * 验收之后工程又改过：那次结论只说明当时的游戏。红牌「未过」一直挂着，
@@ -265,120 +261,6 @@ const verdictTitle = computed(() =>
         when: ago(props.team.verdictAt)
       })
 )
-
-/**
- * 「进行中 / 卡住」是对「现在」的断言。这一轮开始之后没人再碰过的，
- * 是上一轮留下的说法，灰掉 —— 2026-09-30 真机：第一轮标的 5 个「卡住」，
- * 之后几轮一直挂着，用户分不清是现在卡着还是早就过去了。
- */
-function isOld(task: BoardTask): boolean {
-  const since = props.team.roundStartedAt
-  return (
-    since !== undefined &&
-    task.reopenedAt === undefined &&
-    (task.status === 'doing' || task.status === 'blocked') &&
-    task.updatedAt < since
-  )
-}
-
-function ago(at: number): string {
-  const minutes = Math.round((Date.now() - at) / 60_000)
-  if (minutes < 1) return t('assistant.teamBoard.ago.justNow')
-  if (minutes < 60) return t('assistant.teamBoard.ago.minutes', { n: minutes })
-  const hours = Math.round(minutes / 60)
-  if (hours < 48) return t('assistant.teamBoard.ago.hours', { n: hours })
-  return t('assistant.teamBoard.ago.days', { n: Math.round(hours / 24) })
-}
-
-function statusLabel(status: TaskStatus): string {
-  if (status === 'done' && !accepted.value) return t('assistant.teamBoard.status.selfReported')
-  return t(`assistant.teamBoard.status.${status}`)
-}
-
-function statusHint(status: TaskStatus): string | undefined {
-  return status === 'done' && !accepted.value
-    ? t('assistant.teamBoard.selfReportedHint')
-    : undefined
-}
-
-function who(name: string): string {
-  return name === PRODUCER ? t('assistant.teamBoard.producer') : name
-}
-
-// ── 队员的模型 ──────────────────────────────────────────────────────────
-
-const choices = computed(() => props.modelChoices ?? [])
-
-/** 只有一个模型可选时不显示：没得换（同招人工具不让制作人挑） */
-const showModels = computed(() => choices.value.length > 1)
-
-/** 菜单按来源分组，顺序同设置页 */
-const modelGroups = computed(() => {
-  const groups: { providerName: string; choices: TeamModelCandidate[] }[] = []
-  for (const choice of choices.value) {
-    const last = groups[groups.length - 1]
-    if (last?.providerName === choice.providerName) last.choices.push(choice)
-    else groups.push({ providerName: choice.providerName, choices: [choice] })
-  }
-  return groups
-})
-
-function findChoice(model: TeamModel): TeamModelCandidate | undefined {
-  return choices.value.find((choice) => sameTeamModel(choice, model))
-}
-
-function modelKey(model: TeamModel): string {
-  return findChoice(model)?.key ?? `${model.providerId}/${model.modelId}`
-}
-
-function modelName(model: TeamModel): string {
-  return teamModelLabel(choices.value, model)
-}
-
-/**
- * 面板上显示的模型名。老名册里没钉模型的队员照旧按档位走（主进程 `routeMember`），
- * 这里照实说它跟着谁；用户点开选一个，就钉上了
- */
-function memberModelLabel(member: TeamMember): string {
-  if (member.model) return modelName(member.model)
-  return member.tier === 'fast'
-    ? t('assistant.teamBoard.model.chatModel')
-    : t('assistant.teamBoard.model.followProducer')
-}
-
-/** 名单里已经没有它了：派活时这件会改用制作人的模型（主进程 `routeMember`） */
-function isUnavailable(member: TeamMember): boolean {
-  return !!props.modelsLoaded && !!member.model && !findChoice(member.model)
-}
-
-/** 悬停说明：用不了的说用不了；否则说是谁定的、为什么，再说怎么换 */
-function modelTitle(member: TeamMember): string {
-  if (!member.model) return t('assistant.teamBoard.model.change')
-  if (isUnavailable(member)) {
-    return t('assistant.teamBoard.model.unavailable', { model: modelName(member.model) })
-  }
-  const lines = [
-    member.modelBy === 'user'
-      ? t('assistant.teamBoard.model.byUser')
-      : member.modelReason
-        ? t('assistant.teamBoard.model.reason', { reason: member.modelReason })
-        : '',
-    t('assistant.teamBoard.model.change')
-  ]
-  return lines.filter(Boolean).join('\n')
-}
-
-function pickModel(member: TeamMember, choice: TeamModelCandidate): void {
-  if (member.model && sameTeamModel(member.model, choice)) return
-  emit('set-model', member.name, { providerId: choice.providerId, modelId: choice.modelId })
-}
-
-/** 回执：读到了、塞进去了还没读、还在信箱里 */
-function receipt(mail: TeamMail): string {
-  if (mail.readAt) return t('assistant.teamBoard.receipt.read')
-  if (mail.deliveredAt) return t('assistant.teamBoard.receipt.delivered')
-  return t('assistant.teamBoard.receipt.queued')
-}
 </script>
 
 <style scoped lang="less">
@@ -388,6 +270,15 @@ function receipt(mail: TeamMail): string {
   border-radius: var(--radius-md);
   background: var(--color-bg-surface);
   overflow: hidden;
+}
+
+.team-board.is-docked {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
 }
 
 .team-board-head {
@@ -413,6 +304,17 @@ function receipt(mail: TeamMail): string {
     outline: 2px solid var(--color-border-focus);
     outline-offset: -2px;
   }
+
+  .is-docked > & {
+    flex-shrink: 0;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--color-border-subtle);
+    cursor: default;
+
+    &:hover {
+      background: transparent;
+    }
+  }
 }
 
 .head-icon {
@@ -422,7 +324,7 @@ function receipt(mail: TeamMail): string {
 
 .head-title {
   color: var(--color-text-primary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .head-meta {
@@ -434,206 +336,79 @@ function receipt(mail: TeamMail): string {
   text-overflow: ellipsis;
 }
 
-.caret {
+.caret,
+.team-board-end {
   flex-shrink: 0;
   color: var(--color-text-muted);
-  transition: transform 160ms ease;
+}
 
-  &.open {
-    transform: rotate(180deg);
-  }
+/* 阅读视图盖在这一层上面 */
+.team-board-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 .team-board-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  max-height: 280px;
-  padding: 0 var(--space-3) var(--space-3);
+  gap: var(--space-6);
+  height: 100%;
+  padding: var(--space-4);
   overflow-y: auto;
   font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
 }
 
-.objective {
-  margin: 0;
-  color: var(--color-text-primary);
-
-  .label {
-    margin-right: var(--space-1);
-    color: var(--color-text-muted);
-  }
-}
-
-.members {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-
-  li {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: 2px var(--space-2);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-full);
-    background: var(--color-bg-sunken);
-    color: var(--color-text-primary);
-  }
-}
-
-.member-flag {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-}
-
-.member-model {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-family: inherit;
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-
-  &:hover {
-    color: var(--color-text-primary);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--color-border-focus);
-    outline-offset: 1px;
-    border-radius: var(--radius-sm);
-  }
-
-  &.unavailable {
-    color: var(--color-warning-text);
-  }
-}
-
-.member-model-icon {
-  flex-shrink: 0;
-}
-
-.tasks {
+.block {
   display: flex;
   flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: var(--space-2);
 }
 
-.task {
-  padding: var(--space-1) 0;
-  border-top: 1px solid var(--color-separator);
-
-  &:first-child {
-    border-top: none;
-  }
-}
-
-.task-line {
+.block-title,
+.block-label {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-width: 0;
+  min-height: 22px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
 }
 
-.task-title {
-  flex: 1;
-  min-width: 0;
+.block-label {
+  min-height: 0;
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-normal);
+}
+
+.block-count {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-numeric);
+  font-weight: var(--font-weight-normal);
+}
+
+.filter-chip {
+  margin-left: auto;
+  letter-spacing: normal;
+}
+
+/* 目标：一行，悬停看全文 */
+.objective {
+  margin: -2px 0 0;
   color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.task-owner,
-.task-when,
-.task-detail {
-  color: var(--color-text-muted);
-}
-
-.task-when {
-  flex-shrink: 0;
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-}
-
-.task-reopen {
-  flex-shrink: 0;
-}
-
-/* 上一轮留下的说法：退到背景里，但还读得清 */
-.task--old {
-  .task-title {
-    color: var(--color-text-muted);
-  }
-
-  :deep(.app-tag) {
-    opacity: 0.6;
-  }
-}
-
-.team-board-foot {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.task-detail {
-  margin: 2px 0 0;
-  overflow-wrap: anywhere;
-}
-
-.mail {
-  h4 {
-    margin: 0 0 var(--space-1);
-    color: var(--color-text-secondary);
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-  }
-
-  ul {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-}
-
-.mail-route {
-  margin-right: var(--space-2);
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.mail-text {
-  color: var(--color-text-primary);
-  overflow-wrap: anywhere;
-}
-
-.mail-receipt {
-  margin-left: var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-}
-
-.empty {
-  margin: 0;
-  color: var(--color-text-muted);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .team-board-head,
-  .caret {
+  .team-board-head {
     transition: none;
   }
 }
