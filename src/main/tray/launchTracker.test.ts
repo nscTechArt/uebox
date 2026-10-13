@@ -1,7 +1,7 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest'
 
-import { createLaunchTracker, LAUNCH_TTL_MS, withProjectState } from './launchTracker'
+import { applyProjectState, createLaunchTracker, LAUNCH_TTL_MS } from './launchTracker'
 import type { TrayProjectCandidate } from './recentProjects'
 
 /**
@@ -10,7 +10,7 @@ import type { TrayProjectCandidate } from './recentProjects'
  * - complete(true) 才开始算「等引擎连上」的 TTL；complete(false) 直接摘掉
  * - clearIfRunning 只摘「等连接」的计时标记 —— 进行中的打开被 running 撞上
  *   也不放行，不然 connect-then-disconnect 之间就能点开第二份
- * - withProjectState：running 优先于 launching，连上了顺手摘计时标记
+ * - applyProjectState：running 优先于 launching，连上了顺手摘计时标记
  */
 
 function candidate(partial: Partial<TrayProjectCandidate> = {}): TrayProjectCandidate {
@@ -90,6 +90,37 @@ describe('启动中跟踪', () => {
     expect(tracker.isLaunching('k')).toBe(true)
   })
 
+  it('waitingSince：等连接的标记给出立起时刻；进行中的、没标过的、刚过期的给 undefined', () => {
+    let now = 1_000
+    const tracker = createLaunchTracker({ now: () => now })
+
+    tracker.begin('pending')
+    expect(tracker.waitingSince('pending')).toBeUndefined()
+    expect(tracker.waitingSince('never-marked')).toBeUndefined()
+
+    tracker.complete('waiting', true)
+    expect(tracker.waitingSince('waiting')).toBe(1_000)
+
+    now += LAUNCH_TTL_MS + 1
+    expect(tracker.waitingSince('waiting')).toBeUndefined()
+    expect(tracker.isLaunching('waiting')).toBe(false)
+  })
+
+  it('drop 直接摘掉标记：进行中的和等连接的都摘', () => {
+    const tracker = createLaunchTracker()
+    tracker.begin('pending')
+    tracker.begin('waiting')
+    tracker.complete('waiting', true)
+
+    tracker.drop('pending')
+    tracker.drop('waiting')
+    expect(tracker.isLaunching('pending')).toBe(false)
+    expect(tracker.isLaunching('waiting')).toBe(false)
+
+    tracker.drop('never-marked')
+    expect(tracker.isLaunching('never-marked')).toBe(false)
+  })
+
   describe('nextExpiryDelay', () => {
     it('没有任何标记时返回 null', () => {
       expect(createLaunchTracker().nextExpiryDelay()).toBeNull()
@@ -138,12 +169,12 @@ describe('启动中跟踪', () => {
     })
   })
 
-  describe('withProjectState', () => {
+  describe('applyProjectState', () => {
     it('标过的非运行工程标启动中，没标过的原样', () => {
       const tracker = createLaunchTracker()
       tracker.begin('key-1')
 
-      const [a, b] = withProjectState(
+      const [a, b] = applyProjectState(
         [candidate({ projectKey: 'key-1' }), candidate({ projectKey: 'key-2' })],
         new Set(),
         tracker
@@ -158,7 +189,7 @@ describe('启动中跟踪', () => {
       tracker.begin('key-1')
       tracker.complete('key-1', true)
 
-      const [a] = withProjectState(
+      const [a] = applyProjectState(
         [candidate({ projectKey: 'key-1' })],
         new Set(['key-1']),
         tracker
@@ -174,14 +205,14 @@ describe('启动中跟踪', () => {
       const tracker = createLaunchTracker()
       tracker.begin('key-1')
 
-      const [during] = withProjectState(
+      const [during] = applyProjectState(
         [candidate({ projectKey: 'key-1' })],
         new Set(['key-1']),
         tracker
       )
       expect(during.running).toBe(true)
 
-      const [after] = withProjectState([candidate({ projectKey: 'key-1' })], new Set(), tracker)
+      const [after] = applyProjectState([candidate({ projectKey: 'key-1' })], new Set(), tracker)
       expect(after.running).toBe(false)
       expect(after.launching).toBe(true)
     })
@@ -191,7 +222,7 @@ describe('启动中跟踪', () => {
       tracker.begin('key-1')
       const input = candidate({ projectKey: 'key-1' })
 
-      const [projected] = withProjectState([input], new Set(), tracker)
+      const [projected] = applyProjectState([input], new Set(), tracker)
       projected.name = '改过的'
       expect(projected.name).toBe('改过的')
       expect(input).toEqual({
