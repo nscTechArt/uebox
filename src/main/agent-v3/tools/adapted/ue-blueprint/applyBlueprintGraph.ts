@@ -83,6 +83,7 @@ const NodeDefinitionSchema = z.object({
         'Event 用 ReceiveBeginPlay / ReceiveTick；EnhancedInputAction 写 Input Action 资产名或路径（IA_Jump）；' +
         'VariableGet 写变量名、组件名（如 Light）或父类变量名；' +
         '别的蓝图上的变量写 蓝图名.变量名（如 WBP_HUD.Health），节点多一根 self 输入接那个对象；' +
+        '引擎类的属性同理（Character.CharacterMovement —— 它是属性不是函数，别写成 Function）；' +
         'Timeline 写 Timeline 自己的名字；控制节点可省略。' +
         '动画节点：SequencePlayer 等写动画资产，StateMachine / State 写它的名字，' +
         'SaveCachedPose / UseCachedPose 写缓存名'
@@ -199,7 +200,13 @@ const NodeDefinitionSchema = z.object({
     .boolean()
     .optional()
     .describe('CustomEvent 专用：可靠 RPC，只在 replication 非 None 时有效'),
-  target_class: z.string().optional().describe('Cast / SpawnActor 的目标类'),
+  target_class: z
+    .string()
+    .optional()
+    .describe(
+      'Cast / SpawnActor 的目标类，蓝图写名字即可（BP_Player）。' +
+        'Cast 的输出引脚连线时写 As —— 真名随编辑器语言变（As玩家控制器、AsBP Player），不用猜'
+    ),
   struct_type: z.string().optional().describe('MakeStruct / BreakStruct 的结构体'),
   raw_class: z
     .string()
@@ -271,6 +278,7 @@ const ApplyGraphSchema = z
   })
 
 type ApplyGraphInput = z.infer<typeof ApplyGraphSchema>
+type NodeDefinition = ApplyGraphInput['nodes'][number]
 
 interface ApplyGraphResponse {
   ok: boolean
@@ -360,6 +368,21 @@ async function existingContentBottom(
   } catch {
     return undefined
   }
+}
+
+/**
+ * 填了 raw_class 又把 class 写成 Function 时，按 raw_class 建。
+ *
+ * 插件先认具名类型，class=Function 一命中就去要 member_name，raw_class 被晾在一边，
+ * 回一句「Function not found:（空）」—— 真机上模型拿它点名 AnimGraphNode_SequencePlayer，
+ * 被这句话带去查函数名（2026-10-13 反馈）。只写 raw_class 的意思是明确的，
+ * class=Function 又没给 member_name，不可能是想建函数调用。
+ */
+function preferRawClass(node: NodeDefinition): NodeDefinition {
+  // 插件比类型名前会去掉下划线（Call_Function 也算），这里同一套规矩
+  const isBareFunction =
+    /^(call)?function$/i.test(node.class.replace(/_/g, '')) && !node.member_name
+  return node.raw_class && isBareFunction ? { ...node, class: node.raw_class } : node
 }
 
 /** 新一批和已有内容之间留的空档，够看出是两段逻辑 */
@@ -507,7 +530,7 @@ Private 的读不到；控件要在 UMG 里勾「是变量」才读得到，而�
 资产（IA_Jump，或完整路径 /Game/Input/IA_Jump）。不要用 Event 去建它，也不要
 raw_class 点名 K2Node_EnhancedInputAction —— 那样建出来的节点没绑资产。
 出口引脚：Triggered / Started / Ongoing / Canceled / Completed，值在 ActionValue。
-资产名用 ue_input_map 查。
+资产名用 ue_input_map 查；动作资产还没有，用 ue_input_add_mapping 连同按键一起建，别走 Python。
 
 ## Timeline
 
@@ -648,7 +671,7 @@ AnimGraph、状态机、状态内部、转换条件都用这个工具写，graph
 
           const params: Record<string, unknown> = {
             blueprint_path: laidOut.blueprint_path,
-            nodes: laidOut.nodes,
+            nodes: laidOut.nodes.map(preferRawClass),
             connections: laidOut.connections ?? []
           }
           if (laidOut.graph_name) params.graph_name = laidOut.graph_name

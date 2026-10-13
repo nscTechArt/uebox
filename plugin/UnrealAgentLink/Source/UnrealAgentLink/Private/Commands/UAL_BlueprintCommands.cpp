@@ -607,7 +607,54 @@ static UEdGraphPin* UAL_FindPinByName(UEdGraphNode* Node, const FString& PinName
 			return Pin;
 		}
 	}
-	return nullptr;
+
+	/**
+	 * Cast 的输出引脚名是 "As" + 目标类的**显示名**，而显示名跟着编辑器语言走：
+	 * 同一个 Cast To PlayerController，英文编辑器里叫 `AsPlayer Controller`，
+	 * 中文编辑器里叫 `As玩家控制器`；蓝图类则是 `AsBP Player`（中间有空格）。
+	 * 这些名字只有建出来回读一次才知道，而写图是全有或全无 —— 真机上为它整图重发了
+	 * 3~4 次（2026-10-13 反馈）。所以给与语言无关的写法：As / Result / Output，
+	 * 或 As + 目标类的类名（AsPlayerController、AsBP_Player），都认成那根转换结果引脚。
+	 */
+	if (UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))
+	{
+		// 「As<类名>」只认点到的正是这个 Cast 的目标类，写成别的类说明连错了节点，照常报找不到
+		const FString Squashed = PinName.Replace(TEXT(" "), TEXT("")).Replace(TEXT("_"), TEXT(""));
+		bool bNamesTarget = false;
+		if (Squashed.StartsWith(TEXT("As"), ESearchCase::IgnoreCase) && CastNode->TargetType)
+		{
+			FString Target = CastNode->TargetType->GetName();
+			Target.RemoveFromEnd(TEXT("_C"));
+			bNamesTarget = Squashed.Mid(2).Equals(Target.Replace(TEXT("_"), TEXT("")), ESearchCase::IgnoreCase);
+		}
+		if (bNamesTarget
+			|| PinName.Equals(TEXT("As"), ESearchCase::IgnoreCase)
+			|| PinName.Equals(TEXT("Result"), ESearchCase::IgnoreCase)
+			|| PinName.Equals(TEXT("Output"), ESearchCase::IgnoreCase))
+		{
+			if (UEdGraphPin* ResultPin = CastNode->GetCastResultPin())
+			{
+				return ResultPin;
+			}
+		}
+	}
+
+	// 空格、下划线写法不同（`AsBP_Player` / `AsBPPlayer`）也认，但只认唯一命中的那根
+	auto Squash = [](const FString& S)
+	{
+		return S.Replace(TEXT(" "), TEXT("")).Replace(TEXT("_"), TEXT(""));
+	};
+	const FString Wanted = Squash(PinName);
+	UEdGraphPin* Loose = nullptr;
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (Pin && Squash(Pin->PinName.ToString()).Equals(Wanted, ESearchCase::IgnoreCase))
+		{
+			if (Loose) return nullptr;
+			Loose = Pin;
+		}
+	}
+	return Loose;
 }
 
 static TArray<TSharedPtr<FJsonValue>> UAL_BuildPinsJson(UEdGraphNode* Node)
@@ -2372,6 +2419,93 @@ static void UAL_KeepCloseSuggestions(const FString& Wanted, TArray<FString>& InO
 }
 
 /**
+ * 写了「类名.函数名」、类找到了而函数没有时，说清楚是哪一种。
+ *
+ * 以前这里的「did you mean」候选取自蓝图自己的函数库，跟点名的那个类毫无关系：
+ * 真机上 `Character.GetCharacterMovement` 回的是 `GetCharacterAsNumber, GetMaxElement`
+ * （2026-10-13 反馈）。而它其实是 ACharacter 上的**属性**（C++ 里的 inline getter，
+ * 不是 UFUNCTION），蓝图里要用 VariableGet 去读 —— 这件事报错里一个字都没提。
+ *
+ * 按顺序认三种：
+ *   1. 是这个类上的属性（写 `GetXxx` 而属性叫 `Xxx` 也算）→ 指向 VariableGet；
+ *   2. 函数声明在它的子类上（`Actor.GetMovementComponent` 其实在 Pawn 上）→ 报真正的类；
+ *   3. 都不是 → 候选只从这个类自己的函数里挑。
+ */
+static FString UAL_ExplainMissingClassMember(UClass* TargetClass, const FString& ClassPart, const FString& FuncPart)
+{
+	FString Out = FString::Printf(TEXT("Function not found: %s.%s"), *ClassPart, *FuncPart);
+
+	FProperty* Property = TargetClass->FindPropertyByName(FName(*FuncPart));
+	if (!Property && FuncPart.StartsWith(TEXT("Get")) && FuncPart.Len() > 3)
+	{
+		Property = TargetClass->FindPropertyByName(FName(*FuncPart.Mid(3)));
+	}
+	if (Property && CastField<FMulticastDelegateProperty>(Property))
+	{
+		return Out + FString::Printf(
+			TEXT(" - %s is an event dispatcher on %s, not a function: use CallDispatcher / BindEvent with member_name \"%s.%s\""),
+			*Property->GetName(), *ClassPart, *ClassPart, *Property->GetName());
+	}
+	const bool bReachable = Property && Property->HasAnyPropertyFlags(CPF_BlueprintVisible)
+		&& !Property->HasMetaData(FBlueprintMetadata::MD_Private)
+		&& !Property->HasMetaData(FBlueprintMetadata::MD_Protected);
+	if (bReachable)
+	{
+		return Out + FString::Printf(
+			TEXT(" - %s is a property on %s, not a function. Read it with {\"class\":\"VariableGet\",\"member_name\":\"%s.%s\"} ")
+			TEXT("and wire the %s reference into its self (Target) pin"),
+			*Property->GetName(), *ClassPart, *ClassPart, *Property->GetName(), *ClassPart);
+	}
+
+	TArray<FString> DeclaredOn;
+	for (TObjectIterator<UClass> It; It; ++It)
+	{
+		UClass* Cls = *It;
+		if (Cls == TargetClass || !Cls->IsChildOf(TargetClass) || !Cls->IsNative()
+			|| Cls->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists))
+		{
+			continue;
+		}
+		UFunction* Func = UAL_FindFunctionByAnyName(Cls, FuncPart);
+		if (!Func || !Func->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure))
+		{
+			continue;
+		}
+		if (UClass* Owner = Func->GetOwnerClass())
+		{
+			DeclaredOn.AddUnique(Owner->GetName());
+		}
+		if (DeclaredOn.Num() >= 3) break;
+	}
+	if (DeclaredOn.Num() > 0)
+	{
+		return Out + FString::Printf(
+			TEXT(" - it is declared on %s (a subclass of %s): write %s.%s, and Cast to that class first if your reference is typed as %s"),
+			*FString::Join(DeclaredOn, TEXT(" / ")), *ClassPart, *DeclaredOn[0], *FuncPart, *ClassPart);
+	}
+
+	TArray<FString> Candidates;
+	for (TFieldIterator<UFunction> It(TargetClass, EFieldIteratorFlags::IncludeSuper); It; ++It)
+	{
+		if (It->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure))
+		{
+			Candidates.AddUnique(UAL_BlueprintFunctionName(*It));
+		}
+	}
+	TArray<FString> Suggestions;
+	UAL_CommandUtils::SuggestProperties(FuncPart, Candidates, Suggestions, 5);
+	UAL_KeepCloseSuggestions(FuncPart, Suggestions);
+	if (Suggestions.Num() > 0)
+	{
+		return Out + FString::Printf(TEXT(" (did you mean: %s.%s?)"),
+			*ClassPart, *FString::Join(Suggestions, *FString::Printf(TEXT(", %s."), *ClassPart)));
+	}
+	return Out + FString::Printf(
+		TEXT(" (%s has no blueprint-callable function or property by that name - use blueprint.search_nodes to look up the exact member_name)"),
+		*ClassPart);
+}
+
+/**
  * 找蓝图事件。
  *
  * 事件的 C++ 名和图上显示的名字差得比普通函数还远：
@@ -3372,6 +3506,13 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			});
 		}
 
+		// 类点名了、类也找到了，只是函数没有：候选和指路都得围着那个类说
+		if (!TargetFunc && TargetClass && !ClassPart.IsEmpty() && !FuncPart.Contains(TEXT(" ")))
+		{
+			OutError = UAL_ExplainMissingClassMember(TargetClass, ClassPart, FuncPart);
+			return nullptr;
+		}
+
 		if (!TargetFunc || !TargetClass)
 		{
 			// 近似匹配写进错误信息本身 —— 调用方拿到的是「你要的没有，这几个像」，
@@ -3794,11 +3935,11 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			OutError = TEXT("Missing field: target_class for Cast node");
 			return nullptr;
 		}
-		FString ClassError;
-		UClass* TargetClass = UAL_CommandUtils::ResolveClassFromIdentifier(Spec.TargetClass, UObject::StaticClass(), ClassError);
+		// 和跨蓝图读变量同一套解析：认 BP_Player 这种蓝图短名，不用调用方拼
+		// /Game/.../BP_Player.BP_Player_C（真机上 target_class=BP_Player 被回了 Class not found）
+		UClass* TargetClass = UAL_ResolveVariableOwnerClass(Blueprint, Spec.TargetClass, OutError);
 		if (!TargetClass)
 		{
-			OutError = ClassError;
 			return nullptr;
 		}
 		FGraphNodeCreator<UK2Node_DynamicCast> NodeCreator(*Graph);
@@ -3814,6 +3955,16 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 	// ===== SpawnActor =====
 	if (T == TEXT("spawnactor") || T == TEXT("spawnactorfromclass"))
 	{
+		// 和 Cast 同一套解析（认蓝图短名）。解析不了就报错，不建一个没设类的节点还回成功
+		UClass* SpawnClass = nullptr;
+		if (!Spec.TargetClass.IsEmpty())
+		{
+			SpawnClass = UAL_ResolveVariableOwnerClass(Blueprint, Spec.TargetClass, OutError);
+			if (!SpawnClass)
+			{
+				return nullptr;
+			}
+		}
 		FGraphNodeCreator<UK2Node_SpawnActorFromClass> NodeCreator(*Graph);
 		UK2Node_SpawnActorFromClass* SpawnNode = NodeCreator.CreateNode();
 		SpawnNode->NodePosX = PosX;
@@ -3851,16 +4002,12 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 		NodeCreator.Finalize();
 
 		// Class 可以留空由引脚传入，所以给了才设
-		if (!Spec.TargetClass.IsEmpty())
+		if (SpawnClass)
 		{
-			FString ClassError;
-			if (UClass* TargetClass = UAL_CommandUtils::ResolveClassFromIdentifier(Spec.TargetClass, UObject::StaticClass(), ClassError))
+			if (UEdGraphPin* ClassPin = SpawnNode->GetClassPin())
 			{
-				if (UEdGraphPin* ClassPin = SpawnNode->GetClassPin())
-				{
-					ClassPin->DefaultObject = TargetClass;
-					SpawnNode->ReconstructNode();
-				}
+				ClassPin->DefaultObject = SpawnClass;
+				SpawnNode->ReconstructNode();
 			}
 		}
 		return SpawnNode;
@@ -5884,16 +6031,44 @@ void FUAL_BlueprintCommands::Handle_GetBlueprintGraph(const TSharedPtr<FJsonObje
 		return;
 	}
 
-	TArray<TSharedPtr<FJsonValue>> Nodes;
+	/**
+	 * 分页：offset / limit 按节点数切，不给 limit 就整张回（老行为）。
+	 *
+	 * 大图整张回会超过盒子收包的 512KB 上限，在传输层就被拒 —— 真机上一张 UI 背包的
+	 * EventGraph 回了 707KB，agent 整个任务都没读到它（2026-10-13 反馈）。
+	 * 节点里的 linked_to 照常指向页外节点的 GUID，分几页读完再拼得回整张图。
+	 */
+	int32 Offset = 0;
+	int32 Limit = 0;
+	Payload->TryGetNumberField(TEXT("offset"), Offset);
+	Payload->TryGetNumberField(TEXT("limit"), Limit);
+	Offset = FMath::Max(0, Offset);
+
+	TArray<UEdGraphNode*> AllNodes;
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
-		if (!Node)
+		if (Node)
 		{
-			continue;
+			AllNodes.Add(Node);
 		}
-		if (TSharedPtr<FJsonObject> NodeObj = UAL_BuildNodeJson(Node))
+	}
+	const int32 End = Limit > 0 ? (int32)FMath::Min<int64>(AllNodes.Num(), (int64)Offset + Limit) : AllNodes.Num();
+
+	TArray<TSharedPtr<FJsonValue>> Nodes;
+	for (int32 i = Offset; i < End; ++i)
+	{
+		if (TSharedPtr<FJsonObject> NodeObj = UAL_BuildNodeJson(AllNodes[i]))
 		{
 			Nodes.Add(MakeShared<FJsonValueObject>(NodeObj));
+		}
+	}
+	if (Limit > 0)
+	{
+		Result->SetNumberField(TEXT("total_node_count"), AllNodes.Num());
+		Result->SetNumberField(TEXT("offset"), Offset);
+		if (End < AllNodes.Num())
+		{
+			Result->SetNumberField(TEXT("next_offset"), End);
 		}
 	}
 

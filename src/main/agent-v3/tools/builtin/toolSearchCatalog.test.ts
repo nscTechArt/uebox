@@ -344,7 +344,9 @@ describe('真实工具库检索回归', () => {
     ['compile blueprint', 'blueprint_compile'],
     ['蓝图添加变量', 'blueprint_add_variable'],
     ['按文件名查找 fbx', 'find_local_files'],
-    ['网页搜索', 'web_search']
+    ['网页搜索', 'web_search'],
+    // 真机上模型没搜、直接写了 Python（2026-10-13 反馈）；钉住这条搜得到
+    ['新建增强输入动作', 'ue_input_add_mapping']
   ])('%s 应能加载 %s', async (query, expected) => {
     expect(
       catalog.some((tool) => tool.name === expected),

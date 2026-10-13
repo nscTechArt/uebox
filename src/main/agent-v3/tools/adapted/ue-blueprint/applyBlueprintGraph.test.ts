@@ -701,3 +701,54 @@ describe('动画蓝图', () => {
     expect(String(result.error)).toContain('Blueprint not found: /Game/ABP_Nope')
   })
 })
+
+/**
+ * 真机上模型写 { class: "Function", raw_class: "AnimGraphNode_SequencePlayer" }，
+ * 插件按 Function 去要 member_name，回「Function not found:（空）」，把它带去查函数名。
+ */
+describe('raw_class 与 class=Function 同时出现', () => {
+  it('Function 没给 member_name → 按 raw_class 建', async () => {
+    mockApply(okResponse)
+
+    await run({
+      blueprint_path: '/Game/ABP_Hero',
+      graph_name: 'AnimGraph',
+      nodes: [{ id: 'p', class: 'Function', raw_class: 'AnimGraphNode_SequencePlayer' }],
+      connections: []
+    })
+
+    expect(writeParams().nodes[0]).toMatchObject({ class: 'AnimGraphNode_SequencePlayer' })
+  })
+
+  it('Call_Function 这种带下划线的写法也认', async () => {
+    mockApply(okResponse)
+
+    await run({
+      blueprint_path: '/Game/ABP_Hero',
+      graph_name: 'AnimGraph',
+      nodes: [{ id: 'p', class: 'Call_Function', raw_class: 'AnimGraphNode_SequencePlayer' }],
+      connections: []
+    })
+
+    expect(writeParams().nodes[0]).toMatchObject({ class: 'AnimGraphNode_SequencePlayer' })
+  })
+
+  it('Function 给了 member_name → 照旧是函数调用，不动它', async () => {
+    mockApply(okResponse)
+
+    await run({
+      ...MINIMAL,
+      nodes: [
+        {
+          id: 'print',
+          class: 'Function',
+          member_name: 'KismetSystemLibrary.PrintString',
+          raw_class: 'K2Node_CallFunction'
+        }
+      ],
+      connections: []
+    })
+
+    expect(writeParams().nodes[0]).toMatchObject({ class: 'Function' })
+  })
+})

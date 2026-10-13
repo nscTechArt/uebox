@@ -87,7 +87,8 @@ is_pure=true 的是纯函数（没有执行引脚，不用接 then/execute）。
 搜出 0 条时**别退而求其次**用 KismetSystemLibrary.SetXxxPropertyByName 那类
 反射写字段的节点 —— 它们只改字段不通知 Slate，值变了屏幕不重画。
 member_name 直接写「类名.函数名」（去掉 U 前缀）填进 blueprint_apply_graph，
-那条路按类名解析，认识引擎里任何一个类。
+那条路按类名解析，认识引擎里任何一个类。这里只搜函数：像 Character.CharacterMovement
+这种在 C++ 里有 getter、蓝图里却是**属性**的，用 VariableGet 写「类名.属性名」去读。
 
 动画蓝图（带 blueprint_path）还会搜动画节点，回在 anim_nodes 里：write_as 填进
 apply_graph 的 class，settings 列的是能写进节点 settings 的字段。
