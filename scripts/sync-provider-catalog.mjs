@@ -1278,7 +1278,7 @@ const MANUAL_ENTRIES = {
       }),
       'gpt-5.6-luna': model('gpt-5.6-luna', 'GPT-5.6 Luna', true, true, CODEX_LIMIT, true, {
         release_date: '2026-07-09'
-      }),
+      })
       // 下线的不留：GPT-5.4 / 5.4 mini（08-31）、5.3 Codex Spark（09-14）、
       // GPT-5.5（10-14）。https://learn.chatgpt.com/docs/models (2026-10-12)
     }

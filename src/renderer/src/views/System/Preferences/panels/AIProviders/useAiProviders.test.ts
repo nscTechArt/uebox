@@ -149,9 +149,9 @@ describe('missingCatalogModels', () => {
       models: []
     }
     expect(missingCatalogModels(second, [openai])).toHaveLength(2)
-    expect(missingCatalogModels({ ...second, baseUrl: 'https://gw.example.com/v1' }, [openai])).toEqual(
-      []
-    )
+    expect(
+      missingCatalogModels({ ...second, baseUrl: 'https://gw.example.com/v1' }, [openai])
+    ).toEqual([])
   })
 })
 
