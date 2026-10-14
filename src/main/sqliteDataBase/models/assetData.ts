@@ -185,8 +185,21 @@ export const initAssetDataModel = (db: Database.Database): void => {
 
   // 添加索引以提高查询性能
   const createIndexSQL = `
-    CREATE INDEX IF NOT EXISTS idx_assetData_isDelete ON ${TABLE_NAME}(isDelete);
+    -- 不要在 isDelete 上建单列索引（老库里有的这里删掉）。只有 0/1 两个值、绝大多数是 0，
+    -- 它对「没删的」毫无筛选力，可没有统计信息或统计不准时规划器偏偏会挑它：先把全表按它
+    -- 取一遍再临时排序，52 万行的库上一页从 0.1 ms 变成好几秒。这个坑以前踩过好几回，
+    -- 每次都在单条查询上用 INDEXED BY 绕开，见 remoteImportPath.ts、searchAssetDataByExactName。
+    -- 回收站要的是「删掉的那一小撮」，用部分索引：isDelete = 0 的查询根本用不上它。
+    DROP INDEX IF EXISTS idx_assetData_isDelete;
+    CREATE INDEX IF NOT EXISTS idx_assetData_deleted ON ${TABLE_NAME}(deletedAt) WHERE isDelete = 1;
     CREATE INDEX IF NOT EXISTS idx_assetData_fileExtension ON ${TABLE_NAME}(fileExtension);
+    -- 按扩展名筛选是 fileExtension IN (..) OR ext IN (..)：OR 的两边都得有索引，
+    -- SQLite 才会分别走索引再取并集；少一边整条退化成全表扫（52 万行点「音频」卡死）
+    CREATE INDEX IF NOT EXISTS idx_assetData_ext ON ${TABLE_NAME}(ext);
+    -- 默认排序「按修改时间倒序」= ORDER BY updated_at DESC, assetName。没有这个索引时，
+    -- 每翻一页都要把命中的行全部临时排一遍（52 万行约 4 秒）；有了它沿索引倒着取一页即可
+    CREATE INDEX IF NOT EXISTS idx_assetData_updated_at_name
+      ON ${TABLE_NAME}(updated_at, assetName COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_assetData_assetType ON ${TABLE_NAME}(assetType);
     CREATE INDEX IF NOT EXISTS idx_assetData_processorType ON ${TABLE_NAME}(processorType);
     CREATE INDEX IF NOT EXISTS idx_assetData_filePath ON ${TABLE_NAME}(filePath);

@@ -320,18 +320,40 @@ describe('按名称排序', () => {
       db.exec('ANALYZE')
     })
 
-    /** 拦下主查询那一句，换成 EXPLAIN QUERY PLAN，拿到的「资产」就是计划行 */
+    /**
+     * 拦下取这一页的那句查询，用同样的参数跑一遍 EXPLAIN QUERY PLAN。
+     *
+     * 分页查询先只排 id（`SELECT ad.id AS id ...`），再按 id 取整行；要看的是前一句。
+     * 不分页的调用一步查完，那句带 tagIdList 而不是 `WHERE ad.id IN`。
+     */
     function planOf(criteria: Parameters<typeof searchAssetsByCriteria>[1]): string {
       const realPrepare = db.prepare.bind(db)
-      const spy = vi
-        .spyOn(db, 'prepare')
-        .mockImplementation(((sql: string) =>
-          realPrepare(
-            sql.includes('tagIdList') ? `EXPLAIN QUERY PLAN ${sql}` : sql
-          )) as typeof db.prepare)
+      let plan = ''
+      const spy = vi.spyOn(db, 'prepare').mockImplementation(((sql: string) => {
+        const stmt = realPrepare(sql)
+        const isPageQuery =
+          sql.includes('SELECT ad.id AS id') ||
+          (sql.includes('tagIdList') && !sql.includes('WHERE ad.id IN'))
+        if (!isPageQuery || plan) return stmt
+        const explain = realPrepare(`EXPLAIN QUERY PLAN ${sql}`)
+        return new Proxy(stmt, {
+          get(target, key) {
+            if (key === 'all') {
+              return (...args: unknown[]) => {
+                plan = (explain.all(...args) as { detail: string }[])
+                  .map((r) => r.detail)
+                  .join(' | ')
+                return target.all(...args)
+              }
+            }
+            const value = Reflect.get(target, key)
+            return typeof value === 'function' ? value.bind(target) : value
+          }
+        })
+      }) as typeof db.prepare)
       try {
-        const rows = searchAssetsByCriteria(db, criteria) as unknown as { detail: string }[]
-        return rows.map((r) => r.detail).join(' | ')
+        searchAssetsByCriteria(db, criteria)
+        return plan
       } finally {
         spy.mockRestore()
       }
@@ -357,6 +379,46 @@ describe('按名称排序', () => {
         expect(plan).toContain('idx_assetData_folderKey_isDelete_assetName (folderKey=?')
       }
     )
+
+    /**
+     * 52 万行的库上点「音频」卡死：fileExtension IN (..) OR ext IN (..) 的 ext 那一边
+     * 没有索引，整个 OR 退化成全表扫；按名字排时规划器还会沿名称索引把整张表走一遍
+     * 去凑 50 个音频。两边都有索引之后应该各自按索引取行再取并集。
+     */
+    it.each(['assetName', 'modifiedTime'] as const)(
+      '按扩展名筛选（按 %s 排）走扩展名索引，不扫全表',
+      (sortBy) => {
+        db.prepare(`UPDATE assetData SET fileExtension = 'uasset', ext = 'uasset'`).run()
+        db.prepare(
+          `UPDATE assetData SET fileExtension = 'wav', ext = NULL WHERE assetKey IN ('p1', 'p2', 'p3')`
+        ).run()
+        db.exec('ANALYZE')
+        const plan = planOf({ fileExtensions: ['wav', 'mp3'], sortBy, limit: 50 })
+        expect(plan).toContain('idx_assetData_fileExtension')
+        expect(plan).toContain('idx_assetData_ext')
+        expect(plan).not.toMatch(/SCAN ad\b(?! USING INDEX idx_assetData_(fileExtension|ext))/)
+        expect(plan).not.toMatch(/USING INDEX idx_assetData_assetName/)
+      }
+    )
+  })
+})
+
+describe('分页先排 id 再取整行', () => {
+  it('取回来的整行保持排序、带着标签', () => {
+    for (let i = 0; i < 30; i++) insertAsset(`k${i}`, `Name${String(i).padStart(2, '0')}`, 'ALL')
+    db.prepare(`INSERT INTO asset_tags (assetKey, tagId) VALUES ('k27', 5), ('k27', 9)`).run()
+
+    const page = searchAssetsByCriteria(db, {
+      sortBy: 'assetName',
+      sortOrder: 'desc',
+      limit: 5,
+      offset: 2
+    })
+    expect(page.map((row) => row.assetKey)).toEqual(['k27', 'k26', 'k25', 'k24', 'k23'])
+    const tagged = page[0] as unknown as { tagIdList: string; imports?: unknown }
+    expect(tagged.tagIdList.split(',').sort()).toEqual(['5', '9'])
+    // 整行：ad.* 的列都在
+    expect(page[0]).toHaveProperty('folderKey', 'ALL')
   })
 })
 

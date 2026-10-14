@@ -52,13 +52,14 @@ type SyncClientRuntimeConfig = SyncClientConfig &
 export interface SyncClientEvents {
   /** 连接状态变化 */
   status: (status: 'connected' | 'disconnected' | 'syncing' | 'error') => void
-  /** 收到实时变更 */
+  /** 收到实时变更（一批变更合成一条时 op = 'batch'，count = 条数） */
   change: (entry: {
     seq: number
     op: string
     tableName: string
     recordKey: string
     payload: string | null
+    count?: number
   }) => void
   /** 同步进度 */
   'sync-progress': (stats: { phase: string; current: number; total: number }) => void
@@ -140,6 +141,47 @@ const ASSET_SYNC_COLUMNS = [
 
 /** 被 stop() 换掉之后主动放弃全量同步用的哨兵 —— 不是故障 */
 const SYNC_ABORTED_BY_STOP = 'SYNC_ABORTED_BY_STOP'
+
+// ─────────────────────── 全量对账的分页参数 ───────────────────────
+
+/** 一页的行数。服务端上限 5000；2000 行一页的写入事务在 50 ms 量级，两页之间界面照常响应 */
+const RECONCILE_PAGE_SIZE = 2000
+const RECONCILE_PAGE_TIMEOUT_MS = 120_000
+/** 断点超过这么久就不续了，见 canResumeReconcile */
+const RECONCILE_RESUME_MAX_AGE_MS = 24 * 60 * 60 * 1000
+/** 差集回收 / 清理「见过的集合」每块处理的行数 */
+const RECONCILE_SWEEP_CHUNK = 10_000
+/** 一次同步写入最多占主线程多久，写满就提交、让出事件循环（见 writeAssetPage） */
+const WRITE_SLICE_BUDGET_MS = 40
+/** 缺行修复一次最多按 key 单取这么多行；更多的交给定期校验 */
+const REPAIR_MAX_ROWS = 200
+/** 实时变更攒批：凑够这么多条或等这么久就写一次 */
+const WS_CHANGE_BATCH_MAX = 200
+const WS_CHANGE_BATCH_DELAY_MS = 30
+/** 增量变更分片写入的片大小（见 applyChangesInSlices） */
+const CHANGE_SLICE_SIZE = 200
+
+interface ReconcileCheckpoint {
+  scope: string
+  serverUrl: string
+  snapshotSeq: number
+  /** folders → assets → sweep → done */
+  phase: 'folders' | 'assets' | 'sweep' | 'done'
+  assetCursor: number
+  assetMaxRowid: number
+  assetTotal: number
+  fetched: number
+  /** 服务端给了、本地存不下而跳过的行数（校验时要扣掉，否则永远对不上） */
+  skippedAssets: number
+  skippedFolders: number
+  startedAt: number
+  updatedAt: number
+}
+
+/** 让出事件循环：把排队的 IPC、界面事件、WebSocket 消息先处理掉再继续 */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
 
 const FOLDER_SYNC_COLUMNS = [
   'folderKey',
@@ -238,6 +280,12 @@ export class SyncClient extends EventEmitter {
   private _authFailed = false
   private _isStopped = false
   private pullChangesPromise: Promise<void> | null = null
+  private reconcilePromise: Promise<void> | null = null
+  /** 实时变更攒批，见 flushWsChanges */
+  private wsChangeBuffer: ChangeLogEntry[] = []
+  private wsFlushTimer: ReturnType<typeof setTimeout> | null = null
+  /** 上一轮对账跳过的行数（服务端有、本地存不下），校验时扣掉 */
+  private lastReconcileSkips = { assets: 0, folders: 0 }
 
   // 预编译 SQL
   private stmtDeleteAsset!: Database.Statement
@@ -278,6 +326,7 @@ export class SyncClient extends EventEmitter {
       ...config
     }
     this.initSyncStateTable()
+    this.initReconcileTables()
     this.initOutboxTable()
     this.resolveSyncColumns()
     this.prepareStatements()
@@ -562,6 +611,45 @@ export class SyncClient extends EventEmitter {
   }
 
   /**
+   * 全量对账的断点和「这一轮见过哪些行」。
+   *
+   * 以前对账是「先把服务端几十万行全拉进内存，最后一个事务写进去」：内存跟着库的
+   * 大小涨（52 万行就是几个 GB，主进程直接爆掉），而且进度只在最后一刻落盘 ——
+   * 崩在 70% 等于白下，重启从 0 开始，再崩在 70%。
+   *
+   * 现在每一页拉下来就写进去，同时在这两张表里记下「拉到哪了」「见过谁」。
+   * 断网、崩溃、被换掉之后从断点接着拉；最后用「见过的集合」做差集软删。
+   */
+  private initReconcileTables(): void {
+    this.localDb.exec(`
+      CREATE TABLE IF NOT EXISTS sync_reconcile (
+        scope            TEXT PRIMARY KEY,
+        server_url       TEXT    NOT NULL,
+        snapshot_seq     INTEGER NOT NULL DEFAULT 0,
+        phase            TEXT    NOT NULL,
+        asset_cursor     INTEGER NOT NULL DEFAULT 0,
+        asset_max_rowid  INTEGER NOT NULL DEFAULT 0,
+        asset_total      INTEGER NOT NULL DEFAULT 0,
+        fetched          INTEGER NOT NULL DEFAULT 0,
+        skipped_assets   INTEGER NOT NULL DEFAULT 0,
+        skipped_folders  INTEGER NOT NULL DEFAULT 0,
+        started_at       INTEGER NOT NULL,
+        updated_at       INTEGER NOT NULL
+      );
+      -- run_id = 这一轮对账的 started_at。换客户端时旧实例可能还在清理它那一轮的记录，
+      -- 按轮次隔开，两轮的「见过」互不干扰（否则新一轮会把刚记下的被旧实例删掉，
+      -- 差集时当成「服务端没有」软删掉）
+      CREATE TABLE IF NOT EXISTS sync_reconcile_seen (
+        scope       TEXT    NOT NULL,
+        run_id      INTEGER NOT NULL,
+        table_name  TEXT    NOT NULL,
+        record_key  TEXT    NOT NULL,
+        PRIMARY KEY (scope, run_id, table_name, record_key)
+      ) WITHOUT ROWID;
+    `)
+  }
+
+  /**
    * 待推送队列。
    *
    * 建在 SQLite 里而不是 JSON 文件：进程崩溃 / 多写并发下 JSON 文件不安全，
@@ -652,6 +740,14 @@ export class SyncClient extends EventEmitter {
       | { last_seq: number }
       | undefined
     this.lastSeq = row?.last_seq || 0
+
+    const checkpoint = this.loadReconcileCheckpoint()
+    if (checkpoint?.phase === 'done') {
+      this.lastReconcileSkips = {
+        assets: checkpoint.skippedAssets,
+        folders: checkpoint.skippedFolders
+      }
+    }
   }
 
   /** 写入指定 seq 到 sync_state 表（用于事务内部，此时 this.lastSeq 尚未更新） */
@@ -703,7 +799,12 @@ export class SyncClient extends EventEmitter {
       }, 60_000)
     } catch (err) {
       if (this._isStopped) return // 被 stop() 后不再触发重连
-      this.emit('error', err instanceof Error ? err : new Error(String(err)))
+      const error = err instanceof Error ? err : new Error(String(err))
+      console.warn('[SyncClient] 启动同步失败，稍后重试:', error.message)
+      // EventEmitter 的 'error' 没人监听时会**原地抛出**。这里以前无条件 emit，
+      // 而全仓没有一处监听它 —— 于是下面两行永远走不到：一次超时之后这个客户端
+      // 不重连、不报状态，就这么死着，直到用户重启软件（重启又从头全量下载）。
+      if (this.listenerCount('error') > 0) this.emit('error', error)
       this.emit('status', 'error')
       this.scheduleReconnect()
     }
@@ -732,6 +833,12 @@ export class SyncClient extends EventEmitter {
       clearTimeout(this.repairTimer)
       this.repairTimer = null
     }
+    if (this.wsFlushTimer) {
+      clearTimeout(this.wsFlushTimer)
+      this.wsFlushTimer = null
+    }
+    // 没写进去的实时变更直接丢掉：lastSeq 没前进，下次连上从同一个 seq 补拉
+    this.wsChangeBuffer = []
     this.reconnectAttempt = 0
     this._isConnected = false
     this.emit('status', 'disconnected')
@@ -766,6 +873,7 @@ export class SyncClient extends EventEmitter {
     if (this.lastSeq === 0) {
       console.log('[SyncClient] 首次同步 (lastSeq=0)，执行全量同步')
       await this.reconcileSync()
+      await this.catchUpAfterReconcile()
       return
     }
 
@@ -774,220 +882,444 @@ export class SyncClient extends EventEmitter {
     )
 
     if (resp.fullSyncRequired) {
-      console.log('[SyncClient] 需要全量同步 (change_log 已过期)')
+      // 旧服务端上**每一次批量导入**都会走到这里（ImportSessionService 设
+      // fullSyncRequiredSeq，导入的行不进 change_log）：别人导一次，所有人的客户端
+      // 都要把整个库重新过一遍。这是协议的缺陷，客户端改不了它，只能让这一遍足够轻 ——
+      // 分页落盘、没变的行不写、不卡界面，见 reconcileSync。
+      console.log('[SyncClient] 需要全量同步 (change_log 已过期或服务端有批量导入)')
       await this.reconcileSync()
+      await this.catchUpAfterReconcile()
       return
     }
 
     if (resp.changes.length > 0) {
       try {
-        this.applyChanges(resp.changes)
+        await this.applyChangesInSlices(resp.changes)
       } catch (err) {
+        if (err instanceof Error && err.message === SYNC_ABORTED_BY_STOP) throw err
         console.warn('[SyncClient] 增量同步应用失败，回退到全量同步:', err)
         await this.reconcileSync()
+        await this.catchUpAfterReconcile()
         return
       }
       console.log(
         `[SyncClient] 增量同步：应用了 ${resp.changes.length} 条变更 (seq: ${this.lastSeq})`
       )
       this.emit('incremental-sync-done', { applied: resp.changes.length })
+      this.scheduleMissingRowRepair()
     }
   }
 
   /**
-   * 全量同步 — 原子化实现
+   * 对账写下的是 snapshotSeq 那一刻的服务端；拉取那几分钟里服务端又变了的，
+   * 从 snapshotSeq 起补一次增量。以前不补，要等下一次断线重连、或者心跳发现
+   * 落后一百条以上才会补。
    *
-   * 1. 先从服务端拉取全部数据到内存（folders + assets）
-   *    如果任何 HTTP 请求失败，异常直接向上抛，本地 DB 不会被触碰。
-   * 2. 所有数据拉取成功后，在一个同步事务内执行：清空旧表 → 插入 ALL → 插入 folders(depth升序) → 插入 assets → 更新 lastSeq
-   *    如果事务内任何一步失败，SQLite 自动回滚，旧缓存保持不变。
+   * 这里**只补增量，不再连环对账**：拉取期间又有人批量导入的话，服务端会再要一次
+   * 全量 —— 那就交给心跳 / 重连按正常节奏去触发。在这里接着套一轮，导入频繁的库
+   * 会永远停在「正在同步」里。
    */
-  /**
-   * 全量对账同步 —— **非破坏性**。
-   *
-   * 与旧的 fullSync 的根本区别：不再 `DELETE FROM assetData / assetFolder` 再
-   * 灌回。旧实现会把「只存在于本地、还没推上去」的记录连根拔掉，而由于推送
-   * 失败是静默的，用户以为保存成功了，下一次 checksum 抖动就永久丢数据。
-   *
-   * 新流程：
-   *   0. 先把待推送队列刷出去 —— 本地独有数据尽量先变成服务端数据
-   *   1. 拉取服务端快照到内存（HTTP 失败直接上抛，本地库不被触碰）
-   *   2. 一个事务里：upsert 快照每一行（局部安全）→ 差集回收 → 写 sync_state
-   *
-   * 差集回收只做**软删除**，永不物理删除：
-   *   - 服务端快照只返回 isDelete=0 的行，物理删本地行会顺手清空本地回收站；
-   *   - 服务端 purge 掉的行在本地留个软删幽灵，远好过误删活数据。
-   * 且跳过「保护集」：outbox 里还有未推送变更的记录、快照拍摄之后才写入的记录，
-   * 以及它们的祖先链。
-   *
-   * 重命名（fullSync → reconcileSync）是刻意的：语义从「删光重灌」变成「对账」，
-   * 留着旧名字会误导下一个读代码的人。
-   */
-  private async reconcileSync(): Promise<void> {
-    this.emit('sync-progress', { phase: '正在下载数据...', current: 0, total: 0 })
+  private async catchUpAfterReconcile(): Promise<void> {
+    if (this._isStopped) return
+    try {
+      const resp = await this.httpGet<SyncResponse>(
+        `/api/vaults/${this.config.vaultId}/sync?since=${this.lastSeq}`
+      )
+      if (resp.fullSyncRequired || resp.changes.length === 0) return
+      await this.applyChangesInSlices(resp.changes)
+      this.emit('incremental-sync-done', { applied: resp.changes.length })
+      this.scheduleMissingRowRepair()
+    } catch (err) {
+      // 补不上不要紧：下一次心跳 / 重连会从同一个 seq 再补
+      console.warn('[SyncClient] 对账后补增量失败:', err instanceof Error ? err.message : err)
+    }
+  }
 
-    // ── Phase 0: 先把本地欠账推上去 ──
+  /**
+   * 全量对账 —— 同一时刻只跑一轮。
+   *
+   * 三条路会触发它：拉取、缺行修复、校验不一致。以前它们互不知道对方，两轮可以
+   * 同时在跑，各自拉一遍几十万行。现在后来的直接等前面那一轮。
+   */
+  private reconcileSync(): Promise<void> {
+    if (!this.reconcilePromise) {
+      this.reconcilePromise = this.runReconcile().finally(() => {
+        this.reconcilePromise = null
+      })
+    }
+    return this.reconcilePromise
+  }
+
+  /**
+   * 全量对账 —— **非破坏性、分页落盘、可断点续传**。
+   *
+   * 历史：
+   *   - 最早是 `DELETE FROM` 两张表再灌回，会把本地还没推上去的记录连根拔掉；
+   *     后来改成 upsert + 差集软删（reconcile），永不物理删除。
+   *   - 但那一版仍是「先把服务端所有行拉进内存，最后一个事务写完」。52 万行的库
+   *     就是几个 GB 的 JS 对象压在主进程里，加上一个跑好几分钟的同步事务 ——
+   *     五十多万资产的库上表现为进度停在 70% 不动，然后软件崩掉；重启从 0 开始，再崩一次。
+   *
+   * 现在：
+   *   1. 文件夹（几千个）照旧一次拉完、一个事务写入（要按深度排序，保证父先于子）。
+   *   2. 资产一页一页来：每页一个短事务，upsert 这一页 + 记下「见过这些 key」+ 更新断点，
+   *      然后把事件循环让出去 —— 界面、IPC 在两页之间照常响应。内存里永远只有一页。
+   *   3. 全部拉完，按「见过的集合」分块做差集软删。
+   *   4. 任何一步中断（断网、崩溃、被 stop 换掉），下次从断点继续，不从 0 开始。
+   *
+   * 保护规则不变：outbox 里还有未推送变更的行、对账开始后本地写过的行，不被服务端
+   * 覆盖也不被软删；文件夹额外保护受保护资产所在的祖先链。
+   *
+   * 服务端给的行如果本地存不下（缺名字 / 缺文件夹 / 父文件夹不在了），**跳过并计数**，
+   * 不再让一行坏数据回滚整轮、也不再拿它触发下一轮对账 —— 以前这两条加起来就是
+   * 「永远在全量同步」。跳过的数目记在断点表里，校验时扣掉，免得每小时又对一次账。
+   */
+  private async runReconcile(): Promise<void> {
+    const scope = this.getSyncStateKey()
+    const abortIfStopped = (): void => {
+      // 被 stop() 换掉之后就别再拉了：startClientDirect 换客户端时只会 stop() 旧的，
+      // 不加这一道，旧链路会继续在后台下载。断点已经落盘，新客户端会接着拉。
+      if (this._isStopped) throw new Error(SYNC_ABORTED_BY_STOP)
+    }
+
+    this.emit('sync-progress', { phase: '正在准备同步...', current: 0, total: 0 })
+
+    // ── 0. 先把本地欠账推上去 —— 本地独有数据尽量先变成服务端数据 ──
     await this.flushOutbox().catch((err) => {
       console.warn('[SyncClient] 对账前刷新待推送队列失败:', err)
       return undefined
     })
-    const snapshotTakenAt = Date.now()
+    abortIfStopped()
 
-    const PAGE_SIZE = 2000
-
-    /**
-     * 被 stop() 换掉之后就别再拉了。
-     *
-     * `startClientDirect` 每次都会先 `existingClient.stop()` 再建新的，但 stop() 只关了
-     * WebSocket 和几个定时器，**动不了正在跑的全量拉取**。于是切一次库就多一条还在
-     * 下载的旧链路：用户看到两条「正在下载资产 (216000/219489)」「(218000/219489)」
-     * 并排转圈，两份二十多万行的数据同时压在内存里，机器越跑越慢。
-     *
-     * 这里每翻一页看一眼，被停掉就把这一轮整个放弃 —— 半截数据绝不能往库里写。
-     */
-    const abortIfStopped = (): void => {
-      if (this._isStopped) {
-        throw new Error(SYNC_ABORTED_BY_STOP)
+    let checkpoint = this.loadReconcileCheckpoint()
+    if (checkpoint && this.canResumeReconcile(checkpoint)) {
+      console.log(
+        `[SyncClient] 接着上次中断的对账继续: 阶段=${checkpoint.phase}, ` +
+          `已拉 ${checkpoint.fetched}/${checkpoint.assetTotal} 个资产`
+      )
+    } else {
+      await this.clearReconcileSeen(scope, null)
+      const now = Date.now()
+      checkpoint = {
+        scope,
+        serverUrl: this.config.serverUrl,
+        snapshotSeq: 0,
+        phase: 'folders',
+        assetCursor: 0,
+        assetMaxRowid: 0,
+        assetTotal: 0,
+        fetched: 0,
+        skippedAssets: 0,
+        skippedFolders: 0,
+        startedAt: now,
+        updatedAt: now
       }
+      this.saveReconcileCheckpoint(checkpoint)
     }
+    const startedAt = checkpoint.startedAt
 
-    // ── Phase 1: 拉取所有数据到内存（不触碰本地 DB）──
-    const allFolderRows: Record<string, unknown>[] = []
-    let snapshotSeq = 0
-    let snapshotMaxRowid = 0
-    {
+    // ── 1. 文件夹：数量小，一次拉完，按深度一个事务写入 ──
+    if (checkpoint.phase === 'folders') {
+      const folderRows: Record<string, unknown>[] = []
       let cursor = 0
       let total = 0
+      let maxRowid = 0
+      let snapshotSeq = 0
       let hasMore = true
       while (hasMore) {
         const params = new URLSearchParams({
           type: 'folders',
           cursor: String(cursor),
-          limit: String(PAGE_SIZE)
+          limit: String(RECONCILE_PAGE_SIZE)
         })
         if (cursor > 0) {
           params.set('snapshotSeq', String(snapshotSeq))
-          params.set('maxRowid', String(snapshotMaxRowid))
+          params.set('maxRowid', String(maxRowid))
         }
         abortIfStopped()
         const page = await this.httpGet<FullDataPageResponse>(
           `/api/vaults/${this.config.vaultId}/full-data?${params.toString()}`,
-          120_000
+          RECONCILE_PAGE_TIMEOUT_MS
         )
         abortIfStopped()
         if (cursor === 0) {
           total = page.total
-          snapshotMaxRowid = page.snapshotMaxRowid
+          maxRowid = page.snapshotMaxRowid
           snapshotSeq = page.snapshotSeq
-          console.log(`[SyncClient] 全量拉取 folders: total=${total}, snapshotSeq=${snapshotSeq}`)
+          console.log(`[SyncClient] 对账 folders: total=${total}, snapshotSeq=${snapshotSeq}`)
         }
-        allFolderRows.push(...page.rows)
+        folderRows.push(...page.rows)
         this.emit('sync-progress', {
-          phase: `正在下载文件夹 (${allFolderRows.length}/${total})`,
-          current: allFolderRows.length,
-          total
+          phase: `正在同步文件夹 (${folderRows.length}/${total})`,
+          current: folderRows.length,
+          total: Math.max(total, folderRows.length)
         })
         cursor = page.cursor
         hasMore = page.hasMore
       }
+
+      folderRows.sort((a, b) => ((a.depth as number) || 0) - ((b.depth as number) || 0))
+      checkpoint = this.writeFolderSnapshot(folderRows, {
+        ...checkpoint,
+        snapshotSeq,
+        phase: 'assets',
+        assetCursor: 0,
+        assetMaxRowid: 0,
+        assetTotal: 0,
+        fetched: 0,
+        skippedAssets: 0
+      })
+      await yieldToEventLoop()
     }
 
-    const allAssetRows: Record<string, unknown>[] = []
-    {
-      let cursor = 0
-      let total = 0
-      let assetMaxRowid = 0
+    // ── 2. 资产：一页一个短事务，断点随页落盘 ──
+    if (checkpoint.phase === 'assets') {
       let hasMore = true
       while (hasMore) {
+        const cursor = checkpoint.assetCursor
         const params = new URLSearchParams({
           type: 'assets',
           cursor: String(cursor),
-          limit: String(PAGE_SIZE)
+          limit: String(RECONCILE_PAGE_SIZE),
+          // 首页只传 snapshotSeq，maxRowid 由服务端按 assetData 表算；后续页两个都传回去
+          snapshotSeq: String(checkpoint.snapshotSeq)
         })
-        if (cursor === 0) {
-          // 首页：只传 snapshotSeq 让服务端复用同一时间点，maxRowid 由服务端按 assetData 表计算
-          params.set('snapshotSeq', String(snapshotSeq))
-        } else {
-          // 后续页：传回服务端上一页返回的 assetData 表 maxRowid
-          params.set('snapshotSeq', String(snapshotSeq))
-          params.set('maxRowid', String(assetMaxRowid))
-        }
+        if (cursor > 0) params.set('maxRowid', String(checkpoint.assetMaxRowid))
+
         abortIfStopped()
         const page = await this.httpGet<FullDataPageResponse>(
           `/api/vaults/${this.config.vaultId}/full-data?${params.toString()}`,
-          120_000
+          RECONCILE_PAGE_TIMEOUT_MS
         )
         abortIfStopped()
+
+        const assetMaxRowid = cursor === 0 ? page.snapshotMaxRowid : checkpoint.assetMaxRowid
         if (cursor === 0) {
-          total = page.total
-          assetMaxRowid = page.snapshotMaxRowid // 服务端按 assetData 表计算的 maxRowid
           console.log(
-            `[SyncClient] 全量拉取 assets: total=${total} (snapshotSeq=${snapshotSeq}, maxRowid=${assetMaxRowid})`
+            `[SyncClient] 对账 assets: total=${page.total} ` +
+              `(snapshotSeq=${checkpoint.snapshotSeq}, maxRowid=${assetMaxRowid})`
           )
         }
-        allAssetRows.push(...page.rows)
-        this.emit('sync-progress', {
-          phase: `正在下载资产 (${allAssetRows.length}/${total})`,
-          current: allFolderRows.length + allAssetRows.length,
-          total: allFolderRows.length + total
-        })
-        cursor = page.cursor
         hasMore = page.hasMore
+        checkpoint = await this.writeAssetPage(
+          page.rows,
+          {
+            ...checkpoint,
+            phase: hasMore ? 'assets' : 'sweep',
+            assetCursor: page.cursor,
+            assetMaxRowid,
+            assetTotal: page.total || checkpoint.assetTotal,
+            fetched: checkpoint.fetched + page.rows.length
+          },
+          abortIfStopped
+        )
+        this.emit('sync-progress', {
+          phase: `正在同步资产 (${checkpoint.fetched}/${checkpoint.assetTotal})`,
+          current: checkpoint.fetched,
+          total: Math.max(checkpoint.assetTotal, checkpoint.fetched)
+        })
+        // 两页之间把事件循环让出去：界面点击、IPC、WebSocket 心跳都在这里得到处理
+        await yieldToEventLoop()
       }
     }
 
-    // 按 depth 升序排列 folders，保证父先于子插入
-    allFolderRows.sort((a, b) => ((a.depth as number) || 0) - ((b.depth as number) || 0))
-
-    console.log(
-      `[SyncClient] 数据拉取完成，开始原子写入: ${allFolderRows.length} 文件夹, ${allAssetRows.length} 资产`
-    )
-
-    /**
-     * 下载完了要**改口**，别让进度停在 99% 装死。
-     *
-     * 下面这一整段（算保护集 + 一个事务里写二十多万行）一条进度都不发。二十多万行
-     * 的库跑下来是好几分钟，而界面上最后一条消息还是「正在下载资产 (218000/219489)
-     * 99%」—— 用户看到的就是卡住了，只能去杀进程，而杀在事务中间等于白下一遍。
-     *
-     * 这里换成一条没有百分比的「正在写入」：写入阶段拿不到细粒度进度（都在一个
-     * 事务里），但至少要让人知道它换阶段了、还活着、别去动它。
-     */
-    this.emit('sync-progress', {
-      phase: `正在写入本地库 (${allAssetRows.length} 个资产，请不要关闭)`,
-      current: 0,
-      total: 0
-    })
-
-    const serverAssetKeys = new Set(
-      allAssetRows.map((row) => String(row.assetKey ?? '')).filter(Boolean)
-    )
-    const serverFolderKeys = new Set(
-      allFolderRows.map((row) => String(row.folderKey ?? '')).filter(Boolean)
-    )
-    // 两个集合、两种用途，别混：
-    //  · 窄集 = 这一行自己有未推送的改动（或快照拍完之后才写过）→ **不许被服务端快照覆盖**
-    //  · 宽集 = 窄集 ∪ 受保护资产所在文件夹 ∪ 祖先链 → **不许被差集软删**
-    // 宽集不能拿来挡覆盖：某个子孙有未推送改动，不该让同事对这个父文件夹的改名下不来。
-    const protectedAssetKeys = this.buildProtectedKeys('assetData', snapshotTakenAt)
-    const locallyChangedFolderKeys = this.buildProtectedKeys('assetFolder', snapshotTakenAt)
+    // ── 3. 差集软删：服务端这一轮没给的活行 → 软删除（受保护的跳过）──
+    if (checkpoint.phase !== 'sweep') {
+      throw new Error(`[SyncClient] 对账断点处于未知阶段: ${checkpoint.phase}`)
+    }
+    const protectedAssetKeys = this.buildProtectedKeys('assetData', startedAt)
+    const locallyChangedFolderKeys = this.buildProtectedKeys('assetFolder', startedAt)
     const protectedFolderKeys = this.buildProtectedFolderKeys(
       locallyChangedFolderKeys,
       protectedAssetKeys
     )
+    const seenAssets = this.countReconcileSeen(scope, startedAt, 'assetData')
+    const seenFolders = this.countReconcileSeen(scope, startedAt, 'assetFolder')
+    if (checkpoint.fetched - checkpoint.skippedAssets > 0 && seenAssets === 0) {
+      // 「见过的集合」丢了还照着它做差集，等于把整个库软删掉。宁可从头再来一轮
+      this.deleteReconcileCheckpoint(scope)
+      throw new Error('[SyncClient] 对账记录不完整，放弃本轮差集回收，下次从头对账')
+    }
 
-    let softDeletedAssets = 0
-    let softDeletedFolders = 0
-    let keptLocalRows = 0
+    const softDeletedAssets = await this.sweepUnseenAssets(
+      scope,
+      startedAt,
+      protectedAssetKeys,
+      abortIfStopped
+    )
+    abortIfStopped()
+    const softDeletedFolders = this.sweepUnseenFolders(scope, startedAt, protectedFolderKeys)
 
-    // ── Phase 2: 原子事务写入（失败则回滚，旧数据不受影响）──
-    const tx = this.localDb.transaction(() => {
-      // ⚠️ 这里以前是 `DELETE FROM assetData` + `DELETE FROM assetFolder`。
-      // 那两句会把「只存在于本地、还没推上去」的记录连根拔掉 —— 配上静默的
-      // 推送失败，就是「界面说保存成功，过一会儿数据自己消失」。
-      // 现在改成 upsert + 差集软删，永不物理删除。
+    const snapshotSeq = checkpoint.snapshotSeq
+    const finished = { ...checkpoint, phase: 'done' as const, updatedAt: Date.now() }
+    this.localDb.transaction(() => {
+      this.saveSyncStateWithSeq(snapshotSeq)
+      this.saveReconcileCheckpoint(finished)
+    })()
+    // 事务提交之后才动内存里的 lastSeq —— 提交失败时内存状态保持原样
+    this.lastSeq = snapshotSeq
+    this.lastReconcileSkips = {
+      assets: finished.skippedAssets,
+      folders: finished.skippedFolders
+    }
 
-      // 插入 ALL 根文件夹
+    await this.clearReconcileSeen(scope, startedAt)
+    await this.refreshPlannerStats()
+
+    console.log(
+      `[SyncClient] 对账同步完成: ${seenAssets} 资产, ${seenFolders} 文件夹 ` +
+        `(软删 ${softDeletedAssets} 资产 / ${softDeletedFolders} 文件夹，` +
+        `服务端行本地存不下而跳过 ${finished.skippedAssets} 资产 / ${finished.skippedFolders} 文件夹，` +
+        `保护 ${protectedAssetKeys.size} 资产 / ${protectedFolderKeys.size} 文件夹，snapshotSeq=${this.lastSeq})`
+    )
+    this.emit('full-sync-done', { assets: seenAssets, folders: seenFolders })
+  }
+
+  // ───────────────────── 对账：断点与分页写入 ─────────────────────
+
+  private loadReconcileCheckpoint(): ReconcileCheckpoint | null {
+    const row = this.localDb
+      .prepare(`SELECT * FROM sync_reconcile WHERE scope = ?`)
+      .get(this.getSyncStateKey()) as Record<string, unknown> | undefined
+    if (!row) return null
+    return {
+      scope: String(row.scope),
+      serverUrl: String(row.server_url),
+      snapshotSeq: Number(row.snapshot_seq) || 0,
+      phase: String(row.phase) as ReconcileCheckpoint['phase'],
+      assetCursor: Number(row.asset_cursor) || 0,
+      assetMaxRowid: Number(row.asset_max_rowid) || 0,
+      assetTotal: Number(row.asset_total) || 0,
+      fetched: Number(row.fetched) || 0,
+      skippedAssets: Number(row.skipped_assets) || 0,
+      skippedFolders: Number(row.skipped_folders) || 0,
+      startedAt: Number(row.started_at) || 0,
+      updatedAt: Number(row.updated_at) || 0
+    }
+  }
+
+  /**
+   * 断点能不能接着用。
+   *
+   * 换了服务器地址的不接（同一个 vaultId 搬了家，rowid 对不上）；太久的不接 ——
+   * 续传完成后会从 snapshotSeq 补增量，服务端的 change_log 撑不了那么久的话
+   * 只会再要一次全量，不如现在就从头来。
+   */
+  private canResumeReconcile(checkpoint: ReconcileCheckpoint): boolean {
+    if (checkpoint.phase === 'done') return false
+    if (checkpoint.serverUrl !== this.config.serverUrl) return false
+    return Date.now() - checkpoint.updatedAt < RECONCILE_RESUME_MAX_AGE_MS
+  }
+
+  private saveReconcileCheckpoint(checkpoint: ReconcileCheckpoint): void {
+    this.prepareCached(
+      `INSERT INTO sync_reconcile (
+         scope, server_url, snapshot_seq, phase, asset_cursor, asset_max_rowid, asset_total,
+         fetched, skipped_assets, skipped_folders, started_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope) DO UPDATE SET
+         server_url = excluded.server_url, snapshot_seq = excluded.snapshot_seq,
+         phase = excluded.phase, asset_cursor = excluded.asset_cursor,
+         asset_max_rowid = excluded.asset_max_rowid, asset_total = excluded.asset_total,
+         fetched = excluded.fetched, skipped_assets = excluded.skipped_assets,
+         skipped_folders = excluded.skipped_folders, started_at = excluded.started_at,
+         updated_at = excluded.updated_at`
+    ).run(
+      checkpoint.scope,
+      checkpoint.serverUrl,
+      checkpoint.snapshotSeq,
+      checkpoint.phase,
+      checkpoint.assetCursor,
+      checkpoint.assetMaxRowid,
+      checkpoint.assetTotal,
+      checkpoint.fetched,
+      checkpoint.skippedAssets,
+      checkpoint.skippedFolders,
+      checkpoint.startedAt,
+      Date.now()
+    )
+  }
+
+  private deleteReconcileCheckpoint(scope: string): void {
+    this.localDb.prepare(`DELETE FROM sync_reconcile WHERE scope = ?`).run(scope)
+  }
+
+  private markReconcileSeen(
+    scope: string,
+    runId: number,
+    tableName: TrackedTable,
+    recordKey: string
+  ): void {
+    this.prepareCached(
+      `INSERT OR IGNORE INTO sync_reconcile_seen (scope, run_id, table_name, record_key)
+       VALUES (?, ?, ?, ?)`
+    ).run(scope, runId, tableName, recordKey)
+  }
+
+  private countReconcileSeen(scope: string, runId: number, tableName: TrackedTable): number {
+    return (
+      this.prepareCached(
+        `SELECT COUNT(*) AS c FROM sync_reconcile_seen
+         WHERE scope = ? AND run_id = ? AND table_name = ?`
+      ).get(scope, runId, tableName) as { c: number }
+    ).c
+  }
+
+  /**
+   * 分块删「见过的集合」：几十万行一句 DELETE 也要卡主进程一两秒。
+   * runId = null 删这个库所有轮次的残留（开新一轮之前）；给了就只删那一轮。
+   * 被 stop() 之后不再继续 —— 剩下的留给下一轮开头清。
+   */
+  private async clearReconcileSeen(scope: string, runId: number | null): Promise<void> {
+    const deleteChunk = this.prepareCached(
+      `DELETE FROM sync_reconcile_seen
+       WHERE scope = ? AND (run_id, table_name, record_key) IN (
+         SELECT run_id, table_name, record_key FROM sync_reconcile_seen
+         WHERE scope = ? AND (? IS NULL OR run_id = ?) LIMIT ?
+       )`
+    )
+    for (;;) {
+      const { changes } = deleteChunk.run(scope, scope, runId, runId, RECONCILE_SWEEP_CHUNK)
+      if (changes < RECONCILE_SWEEP_CHUNK || this._isStopped) return
+      await yieldToEventLoop()
+    }
+  }
+
+  /**
+   * 服务端快照里的一行写进本地，返回「本地现在有没有这一行」。
+   *
+   * 存不下的（缺必填列、父文件夹不在、其他约束冲突）**只跳过这一行**：以前一行
+   * 外键失败就回滚整个对账事务，下次再全量、再回滚，永远同步不完。
+   * 约束冲突时本地若已有旧版本，那一行仍算「在」—— 校验计数靠这个返回值对齐。
+   */
+  private upsertSnapshotRow(
+    tableName: 'assetData' | 'assetFolder',
+    row: Record<string, unknown>
+  ): boolean {
+    try {
+      return this.applyRowUpsert(tableName, row, { bufferMissing: false }) !== 'missing'
+    } catch (err) {
+      const code = (err as { code?: unknown })?.code
+      if (typeof code !== 'string' || !code.startsWith('SQLITE_CONSTRAINT')) throw err
+      const keyColumn = TABLE_SPEC[tableName].keyColumn
+      return Boolean(
+        this.prepareCached(`SELECT 1 AS hit FROM ${tableName} WHERE ${keyColumn} = ?`).get(
+          row[keyColumn]
+        )
+      )
+    }
+  }
+
+  private writeFolderSnapshot(
+    rows: Record<string, unknown>[],
+    next: ReconcileCheckpoint
+  ): ReconcileCheckpoint {
+    const scope = next.scope
+    const locallyChanged = this.buildProtectedKeys('assetFolder', next.startedAt)
+    let skipped = 0
+    const skippedSample: string[] = []
+
+    const result = this.localDb.transaction(() => {
       this.localDb
         .prepare(
           `INSERT OR IGNORE INTO assetFolder (folderKey, type, folderName, fullPath, pathArray, depth, isDelete)
@@ -995,79 +1327,233 @@ export class SyncClient extends EventEmitter {
         )
         .run()
 
-      // 插入 folders（已按 depth 排序，FK 始终满足）
-      for (const row of allFolderRows) {
-        const folderKey = String(row.folderKey ?? '')
-        // 本地这行还有没推上去的改动 —— 服务端快照是它改之前的样子，
-        // 盖下去等于把用户刚做的编辑静默回滚，把他刚删的东西复活。
-        // 等这条改动推成功、离开队列之后，下一轮对账自然就一致了。
-        if (folderKey && locallyChangedFolderKeys.has(folderKey)) {
-          keptLocalRows += 1
+      for (const row of rows) {
+        const folderKey = typeof row.folderKey === 'string' ? row.folderKey : ''
+        if (!folderKey) {
+          skipped += 1
           continue
         }
-        this.applyRowUpsert('assetFolder', row)
-      }
-
-      // 插入 assets
-      for (const row of allAssetRows) {
-        const assetKey = String(row.assetKey ?? '')
-        if (assetKey && protectedAssetKeys.has(assetKey)) {
-          keptLocalRows += 1
-          continue
+        this.markReconcileSeen(scope, next.startedAt, 'assetFolder', folderKey)
+        // 本地这行还有没推上去的改动 —— 服务端快照是它改之前的样子，盖下去等于
+        // 把用户刚做的编辑静默回滚。等改动推成功、离开队列，下一轮自然一致
+        if (locallyChanged.has(folderKey)) continue
+        if (!this.upsertSnapshotRow('assetFolder', row)) {
+          skipped += 1
+          if (skippedSample.length < 5) skippedSample.push(folderKey)
         }
-        this.applyRowUpsert('assetData', row)
       }
 
-      // ── 差集回收：服务端快照里没有的活行 → 软删除（受保护的跳过）──
-      const localAssets = this.localDb
-        .prepare(`SELECT assetKey FROM assetData WHERE isDelete = 0`)
-        .all() as { assetKey: string }[]
-      for (const { assetKey } of localAssets) {
-        if (serverAssetKeys.has(assetKey) || protectedAssetKeys.has(assetKey)) continue
-        this.stmtDeleteAsset.run(assetKey)
-        softDeletedAssets += 1
-      }
+      const saved = { ...next, skippedFolders: skipped }
+      this.saveReconcileCheckpoint(saved)
+      return saved
+    })()
 
-      // 文件夹从深到浅，避免中间态出现「父没了子还在」
-      const localFolders = this.localDb
-        .prepare(
-          `SELECT folderKey FROM assetFolder
-           WHERE isDelete = 0 AND folderKey <> 'ALL' ORDER BY depth DESC`
-        )
-        .all() as { folderKey: string }[]
-      for (const { folderKey } of localFolders) {
-        if (serverFolderKeys.has(folderKey) || protectedFolderKeys.has(folderKey)) continue
-        this.stmtDeleteFolder.run(folderKey)
-        softDeletedFolders += 1
-      }
+    if (skipped > 0) {
+      console.warn(
+        `[SyncClient] 服务端有 ${skipped} 个文件夹本地存不下（缺字段或父文件夹不在），已跳过。例: ${skippedSample.join(', ')}`
+      )
+    }
+    return result
+  }
 
-      // saveSyncState 写入 sync_state 表（属于事务内的 DB 操作）
-      this.saveSyncStateWithSeq(snapshotSeq)
+  /**
+   * 一页写进本地 —— **按时间切片**，每片最多占主线程 WRITE_SLICE_BUDGET_MS。
+   *
+   * 一页 2000 行在空库里很快，可库一大（几十万行、十几个索引）每插一行要零点几到一毫秒：
+   * 实测 54 万行的库上一页一个事务要 1.4 秒，最长 7.7 秒，界面跟着卡。行数和机器快慢
+   * 都不可控，能控的只有「一口气占多久」：写满预算就提交、让出事件循环，再接着写。
+   *
+   * 断点只在整页写完的最后一片里前进。中途断掉的话这一页会整页重拉重写 ——
+   * upsert 是幂等的（没变的行不写），「见过」是 INSERT OR IGNORE，重做一遍没有副作用。
+   */
+  private async writeAssetPage(
+    rows: Record<string, unknown>[],
+    next: ReconcileCheckpoint,
+    abortIfStopped: () => void
+  ): Promise<ReconcileCheckpoint> {
+    const scope = next.scope
+    // 每页重新取一次：几分钟的拉取过程中用户可能又改了东西
+    const outboxKeys = this.getPendingRecordKeys('assetData')
+    let skipped = 0
+    const skippedSample: string[] = []
+    let index = 0
+    let saved: ReconcileCheckpoint | null = null
+
+    const writeSlice = this.localDb.transaction(() => {
+      const deadline = performance.now() + WRITE_SLICE_BUDGET_MS
+      while (index < rows.length) {
+        const row = rows[index]
+        index += 1
+        const assetKey = typeof row.assetKey === 'string' ? row.assetKey : ''
+        if (!assetKey) {
+          skipped += 1
+        } else {
+          this.markReconcileSeen(scope, next.startedAt, 'assetData', assetKey)
+          const isProtected =
+            outboxKeys.has(assetKey) ||
+            this.wroteLocallySince('assetData', assetKey, next.startedAt)
+          if (!isProtected && !this.upsertSnapshotRow('assetData', row)) {
+            skipped += 1
+            if (skippedSample.length < 5) skippedSample.push(assetKey)
+          }
+        }
+        if (performance.now() >= deadline) break
+      }
+      if (index >= rows.length) {
+        saved = { ...next, skippedAssets: next.skippedAssets + skipped }
+        this.saveReconcileCheckpoint(saved)
+      }
     })
-    tx()
 
-    // ✅ tx() 成功返回后才更新内存中的 lastSeq
-    // 如果 tx() 抛出异常，下面这行不会执行，内存状态不受影响
-    this.lastSeq = snapshotSeq
-    this.scheduleMissingRowRepair()
-
-    // 整库刚被重写过，统计信息要跟着刷新，否则规划器还按旧分布挑索引。
-    // 52 万行约 5 秒，相对于前面几分钟的全量写入可以接受；失败不影响同步结果。
-    try {
-      const analyzeStart = Date.now()
-      this.localDb.exec('ANALYZE')
-      console.log(`[SyncClient] 对账后 ANALYZE 完成，耗时 ${Date.now() - analyzeStart} ms`)
-    } catch (err) {
-      console.warn('[SyncClient] 对账后 ANALYZE 失败（不影响数据）:', err)
+    for (;;) {
+      writeSlice()
+      if (saved) break
+      await yieldToEventLoop()
+      abortIfStopped()
     }
 
-    console.log(
-      `[SyncClient] 对账同步完成: ${allAssetRows.length} 资产, ${allFolderRows.length} 文件夹 ` +
-        `(软删 ${softDeletedAssets} 资产 / ${softDeletedFolders} 文件夹，` +
-        `保留本地未推送 ${keptLocalRows} 行，` +
-        `保护 ${protectedAssetKeys.size} 资产 / ${protectedFolderKeys.size} 文件夹，snapshotSeq=${this.lastSeq})`
+    if (skipped > 0) {
+      console.warn(
+        `[SyncClient] 本页有 ${skipped} 个资产本地存不下（缺名字/缺文件夹，或所在文件夹不在），已跳过。例: ${skippedSample.join(', ')}`
+      )
+    }
+    return saved as unknown as ReconcileCheckpoint
+  }
+
+  private wroteLocallySince(tableName: TrackedTable, recordKey: string, since: number): boolean {
+    const ts = this.recentWrites.get(`${tableName}:${recordKey}`)
+    return ts !== undefined && ts >= since
+  }
+
+  /**
+   * 本地有、服务端这一轮没给的活资产 → 软删。按 rowid 分块，块与块之间让出事件循环。
+   */
+  private async sweepUnseenAssets(
+    scope: string,
+    runId: number,
+    protectedAssetKeys: ReadonlySet<string>,
+    abortIfStopped: () => void
+  ): Promise<number> {
+    const maxRowid =
+      (this.localDb.prepare(`SELECT MAX(rowid) AS m FROM assetData`).get() as { m: number | null })
+        .m ?? 0
+    const unseenInRange = this.prepareCached(
+      `SELECT ad.assetKey AS assetKey FROM assetData ad
+       WHERE ad.rowid > ? AND ad.rowid <= ? AND ad.isDelete = 0
+         AND NOT EXISTS (
+           SELECT 1 FROM sync_reconcile_seen s
+           WHERE s.scope = ? AND s.run_id = ? AND s.table_name = 'assetData'
+             AND s.record_key = ad.assetKey
+         )`
     )
-    this.emit('full-sync-done', { assets: allAssetRows.length, folders: allFolderRows.length })
+    let softDeleted = 0
+    for (let lower = 0; lower < maxRowid; lower += RECONCILE_SWEEP_CHUNK) {
+      // 被换掉的实例不许再删任何东西：新实例会从 sweep 阶段重做一遍
+      abortIfStopped()
+      const upper = lower + RECONCILE_SWEEP_CHUNK
+      const candidates = unseenInRange.all(lower, upper, scope, runId) as { assetKey: string }[]
+      if (candidates.length > 0) {
+        this.localDb.transaction(() => {
+          for (const { assetKey } of candidates) {
+            if (protectedAssetKeys.has(assetKey)) continue
+            this.stmtDeleteAsset.run(assetKey)
+            softDeleted += 1
+          }
+        })()
+      }
+      this.emit('sync-progress', {
+        phase: '正在核对本地资产',
+        current: Math.min(upper, maxRowid),
+        total: maxRowid
+      })
+      await yieldToEventLoop()
+    }
+    return softDeleted
+  }
+
+  /** 文件夹只有几千个，一个事务做完；从深到浅，避免中间态出现「父没了子还在」 */
+  private sweepUnseenFolders(
+    scope: string,
+    runId: number,
+    protectedFolderKeys: ReadonlySet<string>
+  ): number {
+    let softDeleted = 0
+    this.localDb.transaction(() => {
+      const unseen = this.localDb
+        .prepare(
+          `SELECT af.folderKey AS folderKey FROM assetFolder af
+           WHERE af.isDelete = 0 AND af.folderKey <> 'ALL'
+             AND NOT EXISTS (
+               SELECT 1 FROM sync_reconcile_seen s
+               WHERE s.scope = ? AND s.run_id = ? AND s.table_name = 'assetFolder'
+                 AND s.record_key = af.folderKey
+             )
+           ORDER BY af.depth DESC`
+        )
+        .all(scope, runId) as { folderKey: string }[]
+      for (const { folderKey } of unseen) {
+        if (protectedFolderKeys.has(folderKey)) continue
+        this.stmtDeleteFolder.run(folderKey)
+        softDeleted += 1
+      }
+    })()
+    return softDeleted
+  }
+
+  /**
+   * 库的规模变了一个量级才重新 ANALYZE。
+   *
+   * 以前每轮对账都跑一次完整 ANALYZE：52 万行约 5 秒，期间主进程不响应 —— 而旧服务端上
+   * 每次有人批量导入都会触发一轮对账。行数没怎么变的话统计信息不会过时，没必要重算。
+   * 统计表里第一列就是当时的行数，拿它和现在比：差两倍以上（首次同步从空库灌满就是这种）
+   * 才重算。
+   *
+   * 别用 analysis_limit 采样来提速：低基数列（isDelete、扩展名）会被估成很有筛选力，
+   * 规划器挑错索引，查询慢几百倍。见 VaultManager.initializeVaultDatabase 的说明。
+   *
+   * 要重算时**一个索引一个索引地算**，中间让出事件循环：整库一句 ANALYZE 在 54 万行上
+   * 实测 5.4 秒不响应；拆开以后单个索引几百毫秒。
+   */
+  private async refreshPlannerStats(): Promise<void> {
+    try {
+      const actual = this.countLocalActive('assetData')
+      let analyzedRows = 0
+      try {
+        // 每个索引一行，第一个数是统计时这个索引的行数。取最大的那个：部分索引
+        // （回收站那个只收 isDelete = 1 的行）记的是它自己的行数，拿它当全表行数
+        // 会以为库是空的，每轮都重算
+        const rows = this.localDb
+          .prepare(`SELECT stat FROM sqlite_stat1 WHERE tbl = 'assetData'`)
+          .all() as { stat?: string }[]
+        for (const row of rows) {
+          analyzedRows = Math.max(analyzedRows, Number(String(row.stat ?? '').split(' ')[0]) || 0)
+        }
+      } catch {
+        // 还没有 sqlite_stat1 —— 当作从没统计过
+      }
+      const ratio = (Math.max(actual, 1) + 1) / (Math.max(analyzedRows, 1) + 1)
+      if (analyzedRows > 0 && ratio < 2 && ratio > 0.5) return
+
+      const started = Date.now()
+      const targets = (
+        this.localDb
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'index' AND tbl_name IN ('assetData', 'assetFolder') AND sql IS NOT NULL`
+          )
+          .all() as { name: string }[]
+      ).map((row) => row.name)
+      for (const name of targets) {
+        if (this._isStopped) return
+        this.localDb.exec(`ANALYZE "${name.replace(/"/g, '""')}"`)
+        await yieldToEventLoop()
+      }
+      console.log(
+        `[SyncClient] 资产数从 ${analyzedRows} 变为 ${actual}，重新统计，耗时 ${Date.now() - started} ms`
+      )
+    } catch (err) {
+      console.warn('[SyncClient] 对账后刷新统计信息失败（不影响数据）:', err)
+    }
   }
 
   /** 待推送 + 快照拍摄后新写入的 recordKey，对账时一律不动 */
@@ -1117,13 +1603,15 @@ export class SyncClient extends EventEmitter {
   }
 
   /**
-   * 局部更新命中了本地没有的行 —— 不能凭局部 payload 造行，改为退回一次对账把
-   * 整行取回来。
+   * 局部更新命中了本地没有的行 —— 不能凭局部 payload 造行，按 key 把整行单取回来。
    *
-   * 为什么不做「按 key 取单行」的精细路径：修复之后服务端一律广播整行，
-   * 局部 payload 基本只会来自尚未升级的旧服务端，触发频率很低；而对账现在
-   * 已经是无损的（只 upsert + 软删，且保护本地独有数据），退回它不再危险。
-   * 用一条便宜的路径换掉一个额外的网络接口，是划算的。
+   * 这里以前是「退回一次全量对账」，理由是局部 payload 只来自没升级的旧服务端、
+   * 很少见。但还有不少库跑在旧服务端上：每来一条局部更新就是一次几十万行的全量；
+   * 更糟的是对账自己也往缺行缓冲里塞「服务端那行本身就缺字段」的行，对账一完
+   * 3 秒后又一轮对账 —— 永远停不下来。
+   *
+   * 现在：资产按 key 单取（旧服务端有 GET /assets/:key），一次最多 REPAIR_MAX_ROWS 行；
+   * 取回来仍然不完整的就放弃，不升级成全量。文件夹没有单取接口，留给定期校验。
    */
   private scheduleMissingRowRepair(): void {
     if (this.missingRowBuffer.length === 0) return
@@ -1147,8 +1635,41 @@ export class SyncClient extends EventEmitter {
   ): Promise<void> {
     if (this._isStopped || batch.length === 0) return
 
-    console.warn(`[SyncClient] ${batch.length} 条局部更新命中了本地不存在的行，退回对账同步补齐`)
-    await this.reconcileSync()
+    const assetKeys = batch
+      .filter((item) => item.tableName === 'assetData')
+      .map((item) => item.recordKey)
+    const folderCount = batch.length - assetKeys.length
+    if (folderCount > 0) {
+      console.warn(
+        `[SyncClient] ${folderCount} 个文件夹的局部更新命中了本地不存在的行，等定期校验补齐`
+      )
+    }
+    if (assetKeys.length > REPAIR_MAX_ROWS) {
+      console.warn(
+        `[SyncClient] ${assetKeys.length} 个资产缺行，本轮只补前 ${REPAIR_MAX_ROWS} 个，其余等定期校验`
+      )
+    }
+
+    let repaired = 0
+    for (const assetKey of assetKeys.slice(0, REPAIR_MAX_ROWS)) {
+      if (this._isStopped) return
+      try {
+        const row = await this.httpGet<Record<string, unknown>>(
+          `/api/vaults/${this.config.vaultId}/assets/${encodeURIComponent(assetKey)}`
+        )
+        if (row && this.upsertSnapshotRow('assetData', { ...row, assetKey })) repaired += 1
+      } catch (err) {
+        // 404 = 服务端也没有了；其他错误下一次校验再说。都不升级成全量
+        console.warn(
+          `[SyncClient] 单取资产 ${assetKey} 失败:`,
+          err instanceof Error ? err.message : err
+        )
+      }
+    }
+    if (repaired > 0) {
+      console.log(`[SyncClient] 缺行修复：补回 ${repaired} 个资产`)
+      this.emit('incremental-sync-done', { applied: repaired })
+    }
   }
 
   /**
@@ -1158,25 +1679,18 @@ export class SyncClient extends EventEmitter {
    * FK 失败的行延迟到第二轮重试。
    * 如果任何 change 最终无法应用，整个事务回滚并向上抛异常。
    * lastSeq 仅在全部成功时才更新。
+   *
+   * advanceSeqTo = null：分片写入的中间片，写完不推进 lastSeq（见 applyChangesInSlices）。
    */
-  private applyChanges(changes: ChangeLogEntry[]): void {
-    // 排序: folder upserts (shallow first) → asset upserts → asset deletes → folder deletes (deep first)
-    const sorted = [...changes].sort((a, b) => {
-      const order = (c: ChangeLogEntry) => {
-        if (c.tableName === 'assetFolder') return c.op === 'delete' ? 30 : 0
-        if (c.tableName === 'assetData') return c.op === 'delete' ? 20 : 10
-        return 40
-      }
-      const diff = order(a) - order(b)
-      if (diff !== 0) return diff
-      if (a.tableName === 'assetFolder' && b.tableName === 'assetFolder') {
-        const dA = this.parseDepth(a)
-        const dB = this.parseDepth(b)
-        if (a.op === 'delete') return dB - dA
-        return dA - dB
-      }
-      return a.seq - b.seq
-    })
+  private applyChanges(
+    changes: ChangeLogEntry[],
+    options: { presorted?: boolean; advanceSeqTo?: number | null } = {}
+  ): void {
+    const sorted = options.presorted ? changes : this.sortChanges(changes)
+    const advance = options.advanceSeqTo !== null
+    const targetSeq =
+      options.advanceSeqTo ??
+      changes.reduce((max, change) => Math.max(max, change.seq), this.lastSeq)
 
     const tx = this.localDb.transaction(() => {
       const deferred: ChangeLogEntry[] = []
@@ -1202,20 +1716,57 @@ export class SyncClient extends EventEmitter {
       }
 
       // 全部成功才写 sync_state 表
-      let maxSeq = this.lastSeq
-      for (const change of changes) {
-        maxSeq = Math.max(maxSeq, change.seq)
-      }
-      this.saveSyncStateWithSeq(maxSeq)
+      if (advance) this.saveSyncStateWithSeq(targetSeq)
     })
     tx()
 
     // ✅ tx() 成功返回后才更新内存中的 lastSeq
-    let maxSeq = this.lastSeq
-    for (const change of changes) {
-      maxSeq = Math.max(maxSeq, change.seq)
+    if (advance) this.lastSeq = Math.max(this.lastSeq, targetSeq)
+  }
+
+  /**
+   * 一大批增量分片写：服务端一次最多给 5000 条，几十万行的库上一个事务写完要好几秒。
+   * 按排好的顺序切成小片，片与片之间让出事件循环；lastSeq 只在最后一片写完时推进 ——
+   * 中途失败或被停掉，下次从原来的 seq 重拉，已经写进去的那几片重放一遍是幂等的。
+   */
+  private async applyChangesInSlices(changes: ChangeLogEntry[]): Promise<void> {
+    if (changes.length <= CHANGE_SLICE_SIZE) {
+      this.applyChanges(changes)
+      return
     }
-    this.lastSeq = maxSeq
+    const sorted = this.sortChanges(changes)
+    const finalSeq = changes.reduce((max, change) => Math.max(max, change.seq), this.lastSeq)
+    for (let start = 0; start < sorted.length; start += CHANGE_SLICE_SIZE) {
+      const isLast = start + CHANGE_SLICE_SIZE >= sorted.length
+      this.applyChanges(sorted.slice(start, start + CHANGE_SLICE_SIZE), {
+        presorted: true,
+        advanceSeqTo: isLast ? finalSeq : null
+      })
+      if (!isLast) {
+        await yieldToEventLoop()
+        if (this._isStopped) throw new Error(SYNC_ABORTED_BY_STOP)
+      }
+    }
+  }
+
+  /** 排序: folder upserts (shallow first) → asset upserts → asset deletes → folder deletes (deep first) */
+  private sortChanges(changes: ChangeLogEntry[]): ChangeLogEntry[] {
+    return [...changes].sort((a, b) => {
+      const order = (c: ChangeLogEntry): number => {
+        if (c.tableName === 'assetFolder') return c.op === 'delete' ? 30 : 0
+        if (c.tableName === 'assetData') return c.op === 'delete' ? 20 : 10
+        return 40
+      }
+      const diff = order(a) - order(b)
+      if (diff !== 0) return diff
+      if (a.tableName === 'assetFolder' && b.tableName === 'assetFolder') {
+        const dA = this.parseDepth(a)
+        const dB = this.parseDepth(b)
+        if (a.op === 'delete') return dB - dA
+        return dA - dB
+      }
+      return a.seq - b.seq
+    })
   }
 
   private applySingleChange(change: ChangeLogEntry): void {
@@ -1306,8 +1857,9 @@ export class SyncClient extends EventEmitter {
    */
   private applyRowUpsert(
     tableName: 'assetData' | 'assetFolder',
-    row: Record<string, unknown>
-  ): 'updated' | 'inserted' | 'missing' {
+    row: Record<string, unknown>,
+    options: { bufferMissing?: boolean } = {}
+  ): 'updated' | 'unchanged' | 'inserted' | 'missing' {
     const spec = TABLE_SPEC[tableName]
     const allowed = tableName === 'assetData' ? this.assetColumns : this.folderColumns
     const protectedCols = PROTECTED_SYNC_COLUMNS[tableName]
@@ -1330,27 +1882,36 @@ export class SyncClient extends EventEmitter {
     for (const col of columns) params[col] = normalizeBindValue(row[col])
 
     if (columns.length > 0) {
+      /**
+       * 值没变的行**不写**。
+       *
+       * 以前每次 UPDATE 都会落盘：对账一轮就是把几十万行整行重写一遍、十几个索引全部
+       * 重排，而 assetData 上挂着 AFTER UPDATE 触发器 —— 每一行都被标成「搜索索引要重建」
+       * （向量索引开着的话还要重新算向量）。重建完之前关键词搜索退回 LIKE 全表扫，
+       * updated_at 也被刷成「同步的那一刻」，按修改时间排序整个乱掉。
+       *
+       * `IS NOT` 而不是 `<>`：两边有 NULL 时 `<>` 得 NULL，会把「NULL → 有值」当成没变。
+       */
       const setClause = columns.map((col) => `${col} = @${col}`).join(', ')
+      const changedClause = columns.map((col) => `${col} IS NOT @${col}`).join(' OR ')
       const result = this.prepareCached(
         `UPDATE ${tableName} SET ${setClause}, updated_at = datetime('now','localtime')
-         WHERE ${keyColumn} = @${keyColumn}`
+         WHERE ${keyColumn} = @${keyColumn} AND (${changedClause})`
       ).run(params)
-      // SQLite 的 UPDATE changes 统计 WHERE 命中的行数，命中即 >0，
-      // 所以 changes === 0 严格等价于「本地没有这行」
       if (result.changes > 0) return 'updated'
-    } else {
-      const hit = this.prepareCached(
-        `SELECT 1 AS hit FROM ${tableName} WHERE ${keyColumn} = ?`
-      ).get(recordKey)
-      if (hit) return 'updated'
     }
+    // 没写成：要么本地没有这行，要么值全都一样
+    const hit = this.prepareCached(`SELECT 1 AS hit FROM ${tableName} WHERE ${keyColumn} = ?`).get(
+      recordKey
+    )
+    if (hit) return 'unchanged'
 
     const complete = spec.requiredColumns.every((col) => {
       const value = row[col]
       return value !== undefined && value !== null && value !== ''
     })
     if (!complete) {
-      this.missingRowBuffer.push({ tableName, recordKey })
+      if (options.bufferMissing !== false) this.missingRowBuffer.push({ tableName, recordKey })
       return 'missing'
     }
 
@@ -1479,11 +2040,61 @@ export class SyncClient extends EventEmitter {
     }, 30_000)
   }
 
+  /**
+   * 把攒下的实时变更一次性写进本地，再往界面发**一条**汇总通知。
+   *
+   * 服务端是一行一条推过来的，批量操作（删一个大文件夹、扫描入库）就是几万条连发。
+   * 以前每条一个事务 + 一次落盘 + 一条带整行 payload 的 IPC：十万条就是十万次提交，
+   * 主进程被占满几十分钟，界面那边再被十万条消息淹掉。现在攒一小批（最多
+   * WS_CHANGE_BATCH_MAX 条或 WS_CHANGE_BATCH_DELAY_MS）一个事务写完。
+   */
+  private flushWsChanges(): void {
+    if (this.wsFlushTimer) {
+      clearTimeout(this.wsFlushTimer)
+      this.wsFlushTimer = null
+    }
+    const batch = this.wsChangeBuffer.splice(0)
+    if (batch.length === 0 || this._isStopped) return
+
+    try {
+      this.applyChanges(batch)
+      this.scheduleMissingRowRepair()
+    } catch (err) {
+      console.warn('[SyncClient] WS 变更应用失败，补拉增量同步:', err)
+      this.pullChanges().catch((pullErr) => {
+        console.warn('[SyncClient] 补拉同步失败:', (pullErr as Error).message)
+      })
+    }
+
+    // 界面只关心「哪张表动了」：文件夹动了要刷目录树，其余只刷列表。
+    // 单条时照旧带上这一条的详情
+    const last = batch[batch.length - 1]
+    const touchedFolders = batch.some((entry) => entry.tableName === 'assetFolder')
+    this.emit(
+      'change',
+      batch.length === 1
+        ? {
+            seq: last.seq,
+            op: last.op,
+            tableName: last.tableName,
+            recordKey: last.recordKey,
+            payload: last.payload
+          }
+        : {
+            seq: Math.max(...batch.map((entry) => entry.seq)),
+            op: 'batch',
+            tableName: touchedFolders ? 'assetFolder' : 'assetData',
+            recordKey: '',
+            payload: null,
+            count: batch.length
+          }
+    )
+  }
+
   private handleWsMessage(msg: WsServerMessage): void {
     switch (msg.type) {
       case 'change': {
-        // 实时应用单条变更
-        const entry: ChangeLogEntry = {
+        this.wsChangeBuffer.push({
           seq: msg.seq,
           op: msg.op,
           tableName: msg.tableName,
@@ -1491,22 +2102,12 @@ export class SyncClient extends EventEmitter {
           payload: msg.payload,
           clientId: msg.clientId,
           createdAt: Date.now()
-        }
-        try {
-          this.applyChanges([entry])
-        } catch (err) {
-          console.warn('[SyncClient] WS 变更应用失败，补拉增量同步:', err)
-          this.pullChanges().catch((pullErr) => {
-            console.warn('[SyncClient] 补拉同步失败:', (pullErr as Error).message)
-          })
-        }
-        this.emit('change', {
-          seq: msg.seq,
-          op: msg.op,
-          tableName: msg.tableName,
-          recordKey: msg.recordKey,
-          payload: msg.payload
         })
+        if (this.wsChangeBuffer.length >= WS_CHANGE_BATCH_MAX) {
+          this.flushWsChanges()
+        } else if (!this.wsFlushTimer) {
+          this.wsFlushTimer = setTimeout(() => this.flushWsChanges(), WS_CHANGE_BATCH_DELAY_MS)
+        }
         break
       }
       case 'pong': {
@@ -1575,8 +2176,12 @@ export class SyncClient extends EventEmitter {
     const localOnlyAssets = this.getPendingRecordKeys('assetData', 'insert').size
     const localOnlyFolders = this.getPendingRecordKeys('assetFolder', 'insert').size
 
-    const localAssetCount = this.countLocalActive('assetData') - localOnlyAssets
-    const localFolderCount = this.countLocalActive('assetFolder') - localOnlyFolders
+    // 上一轮对账里服务端给了、本地存不下的行（缺字段、父文件夹不在）要加回去：
+    // 不加的话计数永远差这几行，每两次校验就升级成一次全量对账 —— 每小时一次
+    const localAssetCount =
+      this.countLocalActive('assetData') - localOnlyAssets + this.lastReconcileSkips.assets
+    const localFolderCount =
+      this.countLocalActive('assetFolder') - localOnlyFolders + this.lastReconcileSkips.folders
 
     const countsMatch =
       localAssetCount === serverChecksum.assetCount &&

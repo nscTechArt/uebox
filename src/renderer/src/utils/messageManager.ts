@@ -51,6 +51,13 @@ class MessageManager {
    * @param duration 持续时间（秒）
    */
   private show(type: MessageType, content: string | MessageConfig, duration?: number): void {
+    // 带 key 的是「同一条消息的新状态」（加载中 → 完成、进度 30% → 31%），
+    // 身份由 key 决定，不归下面按内容去重管
+    if (typeof content === 'object' && content.key) {
+      this.showKeyed(type, content, duration ?? 3)
+      return
+    }
+
     // 解析参数
     let messageContent: string
     let messageDuration: number
@@ -176,9 +183,8 @@ class MessageManager {
    * @param duration 持续时间（秒），0 表示不自动关闭
    */
   loading(content: string | MessageConfig, duration?: number): () => void {
-    // 如果传入的是配置对象且包含 key，直接使用原生 API
     if (typeof content === 'object' && content.key) {
-      return antdMessage.loading(content.content, content.duration ?? duration ?? 0)
+      return this.showKeyed('loading', content, duration ?? 0)
     }
 
     // 否则使用自定义去重逻辑
@@ -187,6 +193,27 @@ class MessageManager {
       typeof content === 'string' ? (duration ?? 0) : (content.duration ?? duration ?? 0)
 
     return antdMessage.loading(messageContent, messageDuration)
+  }
+
+  /**
+   * 带 key 的消息：key 必须原样交给 antd，它才会**原地更新**同一条，而不是再弹一条。
+   *
+   * 这里以前只转了内容和时长，key 被扔掉了。于是所有「先 loading 再用同一个 key 改成
+   * success / 刷新进度」的地方都在不停新开消息：网络库同步每 2000 行弹一条
+   * 「正在下载资产 (N/M)」，duration 0 永不消失，maxCount 3 只是让它看起来像
+   * 「三条进度卡住不动」；按 key 销毁也销毁不到，因为 antd 那边根本没有这个 key。
+   */
+  private showKeyed(
+    type: MessageType | 'loading',
+    config: MessageConfig,
+    fallbackDuration: number
+  ): () => void {
+    return antdMessage[type]({
+      content: config.content,
+      key: config.key,
+      duration: config.duration ?? fallbackDuration,
+      onClose: config.onClose
+    })
   }
 
   /**

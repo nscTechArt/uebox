@@ -431,11 +431,15 @@ function setupSingleInstanceLock(): boolean {
 }
 
 // ==================== V8 堆内存配置 ====================
-// 🛡️ 解决资产导入时的 OOM (Out of Memory) 崩溃问题
-// 注意：app.commandLine.appendSwitch('js-flags', ...) 对主进程取决于 Electron 版本
-// 必须分开设置每个 flag（多个 flag 写在同一字符串中可能不会被正确解析）
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192')
-app.commandLine.appendSwitch('js-flags', '--expose-gc')
+// 这一段**管不到主进程自己**：主进程的 V8 在这行代码执行之前就已经初始化好了，
+// js-flags 只对之后启动的渲染进程生效。所以别指望靠调大堆来扛「把整个库读进内存」，
+// 主进程里的大数据量操作必须分页 / 流式（见 SyncClient.reconcileSync）。
+// 开发时 package.json 的 dev 脚本用 NODE_OPTIONS 给了 16 GB 堆，正式包没有 ——
+// 在 dev 里跑得动的全量操作，到用户机器上可能直接 OOM。
+//
+// 两个 flag 必须写在**同一个**开关里：同名开关追加两次，后一次会覆盖前一次，
+// 以前分两行写，--max-old-space-size 实际上从来没生效过。
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192 --expose-gc')
 // 同时设置 NODE_OPTIONS 环境变量作为后备（影响子进程和某些 Electron 版本的主进程）
 if (!process.env.NODE_OPTIONS?.includes('max-old-space-size')) {
   process.env.NODE_OPTIONS =

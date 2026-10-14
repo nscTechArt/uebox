@@ -14,6 +14,8 @@ import { authStatusOf } from '../networkV2/SyncClient'
 import { initAssetSearchIndexModel } from './models/assetSearchIndex'
 import { initAssetNoteModel } from './models/assetNote'
 import { ensureSqliteVecLoaded } from './sqliteVec'
+import { releaseAssetQueryConnections, shutdownAssetQueryWorker } from './services/assetQueryRunner'
+import { VAULT_DB_MMAP_SIZE } from './vaultConnectionPragmas'
 
 /**
  * 保管库信息接口
@@ -825,6 +827,8 @@ export class VaultManager {
       beginImportVaultSwitch()
       finishImportVaultSwitch()
       await this.stopV2NetworkService(vaultId)
+      // 查询 worker 手上也开着这个库文件，不放手的话 Windows 上移动会失败
+      await releaseAssetQueryConnections()
       if (this.currentVaultDb) {
         try {
           this.currentVaultDb.close()
@@ -904,7 +908,8 @@ export class VaultManager {
         await this.stopV2NetworkService(this.currentVaultInfo.id)
       }
 
-      // 关闭当前保管库数据库连接
+      // 关闭当前保管库数据库连接（查询 worker 那条只读连接一起放掉）
+      await releaseAssetQueryConnections()
       if (this.currentVaultDb) {
         try {
           this.currentVaultDb.close()
@@ -1502,7 +1507,7 @@ export class VaultManager {
    * 等于全表扫）。远端导入卡死那次就是这么来的（见 remoteImportPath.ts）。
    *
    * 只在没有 stat1 时跑：52 万行的库约 5 秒，一次性；有了之后由 SyncClient
-   * 在全量对账后刷新。
+   * 在全量对账后按需刷新。
    */
   private ensureQueryPlannerStats(vaultDb: Database.Database): void {
     try {
@@ -1532,6 +1537,30 @@ export class VaultManager {
    * 初始化保管库数据库
    */
   private initializeVaultDatabase(vaultDb: Database.Database): void {
+    // synchronous = NORMAL：WAL 下的推荐档位（连接级设置，每个连接都要设）。默认的 FULL
+    // 让**每次提交**都等一次落盘，网络库的实时变更、对账分页这类大量小事务因此慢一个
+    // 数量级。NORMAL 下断电最多丢最后几个事务，库不会损坏。
+    //
+    // 别设 analysis_limit 来给 ANALYZE 提速：采样统计会把 isDelete、扩展名这类低基数列
+    // 估成「很有筛选力」（实测 isDelete 从「每个值 2 万行」估成 1001 行），规划器据此
+    // 挑错索引，一页查询从 0.1 ms 变成 90 ms，库越大越慢。
+    //
+    // temp_store = MEMORY：assetData 上挂着搜索索引的触发器，带触发器的写语句每一条都要开
+    // 一个「语句日志」，默认写在**磁盘临时文件**里 —— 插一行就建一次临时文件。实测一页
+    // 2000 行从 626 ms 降到 124 ms；大结果集排序的临时 B 树也不再落盘。
+    //
+    // mmap_size：读页走内存映射，不再一页一次 ReadFile。Windows 上每次 ReadFile 都要过
+    // 一遍文件系统过滤驱动（杀毒软件），54 万行的库全表读一遍几乎全是系统调用时间：
+    // 实测保管库目录下 7~9 倍，临时目录下 37 倍。保管库都在本机 userData 下，不存在
+    // 网络盘上做内存映射的风险。写入照旧走 WAL。
+    try {
+      vaultDb.pragma('synchronous = NORMAL')
+      vaultDb.pragma('temp_store = MEMORY')
+      vaultDb.pragma(`mmap_size = ${VAULT_DB_MMAP_SIZE}`)
+    } catch (e) {
+      console.warn('[VaultManager] 设置连接参数失败:', e)
+    }
+
     // 创建保管库元数据表
     const createVaultMetadataTable = `
       CREATE TABLE IF NOT EXISTS vault_metadata (
@@ -1664,6 +1693,10 @@ export class VaultManager {
       'CREATE INDEX IF NOT EXISTS idx_assetData_className ON assetData(className)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_classNameCn ON assetData(classNameCn)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_fileExtension ON assetData(fileExtension)',
+      // 扩展名筛选的 OR 两边都要有索引，理由见 models/assetData.ts 同名索引
+      'CREATE INDEX IF NOT EXISTS idx_assetData_ext ON assetData(ext)',
+      // 默认排序「按修改时间倒序」沿索引取页，理由见 models/assetData.ts 同名索引
+      'CREATE INDEX IF NOT EXISTS idx_assetData_updated_at_name ON assetData(updated_at, assetName COLLATE NOCASE)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_processorType ON assetData(processorType)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_assetClass ON assetData(assetClass)',
       'CREATE INDEX IF NOT EXISTS idx_assetData_filePath ON assetData(filePath)',
@@ -1679,7 +1712,9 @@ export class VaultManager {
       'CREATE INDEX IF NOT EXISTS idx_assetData_customPoster_present ON assetData(customPoster) WHERE customPoster IS NOT NULL',
       // 筛选下拉的类型聚合只读索引不回表
       'CREATE INDEX IF NOT EXISTS idx_assetData_types_cover ON assetData(classNameCn, isDelete, fileExtension, ext, className)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_isDelete ON assetData(isDelete)',
+      // isDelete 单列索引是规划器的陷阱，删掉；回收站走部分索引。理由见 models/assetData.ts
+      'DROP INDEX IF EXISTS idx_assetData_isDelete',
+      'CREATE INDEX IF NOT EXISTS idx_assetData_deleted ON assetData(deletedAt) WHERE isDelete = 1',
       // 🚀 性能优化：添加 assetName 索引（常用于排序和搜索）
       'CREATE INDEX IF NOT EXISTS idx_assetData_assetName ON assetData(assetName COLLATE NOCASE)',
       'CREATE INDEX IF NOT EXISTS idx_asset_favorites_assetKey ON asset_favorites(assetKey)',
@@ -2028,6 +2063,7 @@ export class VaultManager {
         console.warn('[VaultManager] V2 网络服务关闭失败:', e)
       })
 
+    void shutdownAssetQueryWorker()
     if (this.currentVaultDb) {
       this.currentVaultDb.close()
       this.currentVaultDb = null

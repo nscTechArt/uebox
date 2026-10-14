@@ -5625,6 +5625,7 @@ const handleNetworkVaultAssetsSynced = async (): Promise<void> => {
 }
 
 let assetChangedTimer: ReturnType<typeof setTimeout> | null = null
+let assetChangedTouchedFolders = false
 const handleAssetChanged = (
   _event: any,
   payload: { source?: string; vaultId?: string; op?: string; tableName?: string }
@@ -5635,11 +5636,16 @@ const handleAssetChanged = (
   // 仅处理当前 vault 的变更
   if (payload.vaultId && currentVault.value?.id && payload.vaultId !== currentVault.value.id) return
 
-  // 防抖 500ms：批量变更时合并为一次刷新
+  // 防抖 500ms：批量变更时合并为一次刷新。
+  // 「有没有文件夹变更」要跨这 500ms 累计 —— 只看最后一条的话，先来文件夹后来资产，
+  // 目录树就漏刷了
+  if (payload.tableName === 'assetFolder') assetChangedTouchedFolders = true
   if (assetChangedTimer) clearTimeout(assetChangedTimer)
   assetChangedTimer = setTimeout(async () => {
+    const touchedFolders = assetChangedTouchedFolders
+    assetChangedTouchedFolders = false
     console.log('[AssetManagement] 收到实时变更推送，刷新 UI:', payload.tableName, payload.op)
-    if (payload.tableName === 'assetFolder') {
+    if (touchedFolders) {
       // 文件夹变更：刷新树
       await refreshFolderTreePreservingExpansion()
     }
