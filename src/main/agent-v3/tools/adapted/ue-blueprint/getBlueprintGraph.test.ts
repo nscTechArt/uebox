@@ -197,6 +197,70 @@ describe('大图分页', () => {
     expect(String(result.error)).toContain('project_update_plugin')
   })
 
+  it('接着读的那页太大 → 退到小页，不直接报错', async () => {
+    callRequest.mockImplementation(async (_command: string, params: { limit?: number }) => {
+      if (!params.limit || params.limit > 40) throw tooLarge
+      return page(25, params.limit, 400)
+    })
+
+    const result = await run({
+      blueprint_path: '/Game/UI_Bag',
+      graph_name: 'EventGraph',
+      offset: 25
+    })
+
+    expect(result.node_count).toBe(25)
+    expect(String(result.page_note)).toContain('offset=50, limit=25')
+  })
+
+  it('状态机那一页带了分页参数 → 不误报插件太旧', async () => {
+    callRequest.mockResolvedValue({ ...stateGraph, graph_kind: 'state_machine', nodes: [] })
+
+    const result = await run({
+      blueprint_path: '/Game/ABP_Hero',
+      graph_name: 'AnimGraph/SM',
+      limit: 50
+    })
+
+    expect(result).not.toHaveProperty('page_note')
+  })
+
+  it('offset 越界 → 说清楚越界了，不报成空图的最后一页', async () => {
+    callRequest.mockResolvedValue({ ...page(0, 0, 8), offset: 500 })
+
+    const result = await run({
+      blueprint_path: '/Game/UI_Bag',
+      graph_name: 'EventGraph',
+      offset: 500
+    })
+
+    expect(String(result.page_note)).toContain('past the end')
+  })
+
+  it('空图分页读 → 说是空图，不报越界', async () => {
+    callRequest.mockResolvedValue(page(0, 0, 0))
+
+    const result = await run({
+      blueprint_path: '/Game/UI_Bag',
+      graph_name: 'EventGraph',
+      limit: 50
+    })
+
+    expect(String(result.page_note)).toContain('empty')
+  })
+
+  it('点名分页但旧插件回整张、小页也超限 → 给更新插件的下一步', async () => {
+    callRequest.mockRejectedValue(tooLarge)
+
+    const result = await run({
+      blueprint_path: '/Game/UI_Bag',
+      graph_name: 'EventGraph',
+      limit: 100
+    })
+
+    expect(String(result.error)).toContain('project_update_plugin')
+  })
+
   it('小图照旧整张读，不带分页字段', async () => {
     callRequest.mockResolvedValue({
       ...page(0, 3, 3),

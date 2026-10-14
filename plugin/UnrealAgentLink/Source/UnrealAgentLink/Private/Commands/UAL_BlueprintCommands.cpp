@@ -2450,7 +2450,7 @@ static void UAL_KeepCloseSuggestions(const FString& Wanted, TArray<FString>& InO
  *   2. 函数声明在它的子类上（`Actor.GetMovementComponent` 其实在 Pawn 上）→ 报真正的类；
  *   3. 都不是 → 候选只从这个类自己的函数里挑。
  */
-static FString UAL_ExplainMissingClassMember(UClass* TargetClass, const FString& ClassPart, const FString& FuncPart)
+static FString UAL_ExplainMissingClassMember(UBlueprint* Blueprint, UClass* TargetClass, const FString& ClassPart, const FString& FuncPart)
 {
 	FString Out = FString::Printf(TEXT("Function not found: %s.%s"), *ClassPart, *FuncPart);
 
@@ -2461,14 +2461,46 @@ static FString UAL_ExplainMissingClassMember(UClass* TargetClass, const FString&
 	}
 	if (Property && CastField<FMulticastDelegateProperty>(Property))
 	{
+		// 只列真能用的那种：引擎里不少分发器只能绑、不能广播（Actor.OnDestroyed）
+		TArray<FString> Kinds;
+		if (Property->HasAnyPropertyFlags(CPF_BlueprintCallable)) Kinds.Add(TEXT("CallDispatcher"));
+		if (Property->HasAnyPropertyFlags(CPF_BlueprintAssignable)) Kinds.Add(TEXT("BindEvent"));
+		if (Kinds.Num() == 0)
+		{
+			return Out + FString::Printf(
+				TEXT(" - %s is an event dispatcher on %s that blueprints can neither broadcast nor bind"),
+				*Property->GetName(), *ClassPart);
+		}
 		return Out + FString::Printf(
-			TEXT(" - %s is an event dispatcher on %s, not a function: use CallDispatcher / BindEvent with member_name \"%s.%s\""),
-			*Property->GetName(), *ClassPart, *ClassPart, *Property->GetName());
+			TEXT(" - %s is an event dispatcher on %s, not a function: use %s with member_name \"%s.%s\""),
+			*Property->GetName(), *ClassPart, *FString::Join(Kinds, TEXT(" / ")), *ClassPart, *Property->GetName());
 	}
-	const bool bReachable = Property && Property->HasAnyPropertyFlags(CPF_BlueprintVisible)
-		&& !Property->HasMetaData(FBlueprintMetadata::MD_Private)
-		&& !Property->HasMetaData(FBlueprintMetadata::MD_Protected);
-	if (bReachable)
+	// 和 VariableGet 那边 bIsSelf 同一套判法：点名的是自己或父类时走 self 那条路，
+	// 不需要 Target；Private 只有声明它的蓝图自己能碰，Protected 子类也能碰
+	UClass* SelfClass = Blueprint
+		? (Blueprint->GeneratedClass ? Blueprint->GeneratedClass.Get() : Blueprint->SkeletonGeneratedClass.Get())
+		: nullptr;
+	const bool bIsSelf = SelfClass && SelfClass->IsChildOf(TargetClass);
+	const bool bOwnVariable = Property && Blueprint
+		&& UBlueprint::GetBlueprintFromClass(Property->GetOwnerClass()) == Blueprint;
+	const bool bVisible = Property && Property->HasAnyPropertyFlags(CPF_BlueprintVisible);
+	const bool bPrivate = Property && Property->HasMetaData(FBlueprintMetadata::MD_Private) && !bOwnVariable;
+	const bool bProtected = Property && Property->HasMetaData(FBlueprintMetadata::MD_Protected);
+	if (Property && (!bVisible || bPrivate || (bProtected && !bIsSelf)))
+	{
+		return Out + FString::Printf(
+			TEXT(" - %s exists on %s as a property, but this blueprint cannot read it (%s)"),
+			*Property->GetName(), *ClassPart,
+			!bVisible ? TEXT("not exposed to blueprints") : bPrivate ? TEXT("Private") : TEXT("Protected, and this blueprint does not derive from it"));
+	}
+	if (Property && bIsSelf)
+	{
+		return Out + FString::Printf(
+			TEXT(" - %s is a property on this blueprint (inherited from %s), not a function. ")
+			TEXT("Read it with {\"class\":\"VariableGet\",\"member_name\":\"%s\"} - no Target pin needed"),
+			*Property->GetName(), *ClassPart, *Property->GetName());
+	}
+	if (Property)
 	{
 		return Out + FString::Printf(
 			TEXT(" - %s is a property on %s, not a function. Read it with {\"class\":\"VariableGet\",\"member_name\":\"%s.%s\"} ")
@@ -3528,7 +3560,7 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 		// 类点名了、类也找到了，只是函数没有：候选和指路都得围着那个类说
 		if (!TargetFunc && TargetClass && !ClassPart.IsEmpty() && !FuncPart.Contains(TEXT(" ")))
 		{
-			OutError = UAL_ExplainMissingClassMember(TargetClass, ClassPart, FuncPart);
+			OutError = UAL_ExplainMissingClassMember(Blueprint, TargetClass, ClassPart, FuncPart);
 			return nullptr;
 		}
 
@@ -3981,6 +4013,13 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			SpawnClass = UAL_ResolveVariableOwnerClass(Blueprint, Spec.TargetClass, OutError);
 			if (!SpawnClass)
 			{
+				return nullptr;
+			}
+			if (!SpawnClass->IsChildOf(AActor::StaticClass()))
+			{
+				OutError = FString::Printf(
+					TEXT("SpawnActor target_class %s is not an Actor class - widgets use CreateWidget, components use AddComponent"),
+					*SpawnClass->GetName());
 				return nullptr;
 			}
 		}
