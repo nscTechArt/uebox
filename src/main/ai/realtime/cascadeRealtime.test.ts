@@ -159,6 +159,11 @@ const quietPackets = (ms: number): string[] =>
 
 const types = (events: VoiceSessionEvent[]): string[] => events.map((event) => event.type)
 
+/** 用户真开口：先有够响的声音到麦克风，识别结果随后才到 */
+function speakUp(h: { session: ReturnType<typeof openCascadeSession> }): void {
+  for (const packet of [...quietPackets(300), ...loudPackets(200)]) h.session.appendAudio(packet)
+}
+
 describe('切句与清洗', () => {
   it('到句号、问号、换行就切；英文句点后面要跟空白才算', () => {
     expect(sentenceBreak('好的。接着')).toBe(3)
@@ -275,6 +280,7 @@ describe('插话', () => {
     h.stt.onEvent({ type: 'user-text', text: '看看灯光', final: true })
     await vi.waitFor(() => expect(h.spoken).toEqual(['我先看一下灯光。']))
 
+    speakUp(h)
     h.stt.onEvent({ type: 'user-text', text: '不对，改成蓝色', final: true })
     // 没配判定模型：按老规矩当真
     await vi.waitFor(() => expect(types(h.events)).toContain('interrupted'))
@@ -372,6 +378,7 @@ describe('插话', () => {
     const h = harness([{ text: ['我先看一下。', '还有'], hold }, { text: ['好，改蓝色。'] }], judge)
     h.stt.onEvent({ type: 'user-text', text: '看看', final: true })
     await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+    speakUp(h)
     h.stt.onEvent({ type: 'user-text', text: '改成蓝色', final: true })
     await vi.waitFor(() => expect(types(h.events)).toContain('interrupted'))
     expect(h.signals[0].aborted).toBe(true)
@@ -389,6 +396,26 @@ describe('插话', () => {
     expect(judge).toHaveBeenCalledWith(expect.objectContaining({ busy: false }))
     expect(h.requests).toHaveLength(0)
     expect(types(h.events)).not.toContain('user-text')
+  })
+
+  /**
+   * 喇叭里自己的「虚幻工程」被收回来认成「来工程。」，判定模型看它像个回答放行了，
+   * 它就自顾自重跑了一遍（真机 2026-10-14）。它出声时认出的话，没先触发停播的就是回声
+   */
+  it('它出声时认出一句、却没听见有人开口：当回声丢掉，连判定都不问', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const judge = vi.fn(async () => ({ addressed: 0.85, interrupt: 0.82 }))
+    const h = harness([{ text: ['七十四个虚幻工程。', '要我再跑一遍吗？'], hold }], judge)
+    h.stt.onEvent({ type: 'user-text', text: '什么事', final: true })
+    await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+    judge.mockClear()
+    h.stt.onEvent({ type: 'user-text', text: '来工程。', final: true })
+    await settle()
+    expect(judge).not.toHaveBeenCalled()
+    expect(h.signals[0].aborted).toBe(false)
+    expect(types(h.events)).not.toContain('interrupted')
+    release()
   })
 
   it('判定模型判不了（没配、超时）：照老规矩当真', async () => {
@@ -431,6 +458,7 @@ describe('播报', () => {
     expect(h.events).toContainEqual({ type: 'announced', text: '灯光那边做完了。' })
     expect(h.spoken).toEqual(['灯光那边做完了。'])
 
+    speakUp(h)
     h.stt.onEvent({ type: 'user-text', text: '好', final: true })
     await vi.waitFor(() => expect(h.requests).toHaveLength(1))
     expect(h.requests[0].slice(-3)).toMatchObject([

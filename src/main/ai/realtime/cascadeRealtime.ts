@@ -109,6 +109,11 @@ const HOLD_MAX_MS = 15_000
  * - **它在说话时打断它**是丢掉它说了一半的话，过半就打断 —— 那是用户在要东西。
  */
 const ADDRESSED_FLOOR = 0.2
+
+/**
+ * 喇叭停了之后多久之内，识别出来的话还可能是它自己的回声（房间混响、播放缓冲）
+ */
+const ECHO_TAIL_MS = 800
 const INTERRUPT_AT = 0.5
 
 /** 识别那一路连着断开多少次就不再重连了。正常是几十分钟断一次（厂商的单次时长上限） */
@@ -404,6 +409,17 @@ export function openCascadeSession(
    */
   async function consider(text: string, asrTags?: string[]): Promise<void> {
     if (closed) return
+    /*
+     * **回声先拦，不交给判定模型。** 它出声的时候，用户真开口会先被本机响度检测听见、
+     * 触发停播（门槛跟着「回声抑制」档位，`BARGE_IN_FLOOR_DB`）。识别那一路的门槛低，
+     * 喇叭里自己的声音收回来也认得出字 —— 「虚幻工程」被认成「来工程。」，判定模型
+     * 看它像个回答，0.85 放行了（真机 2026-10-14）。所以：喇叭在响（或刚停）时认出的话，
+     * 之前没触发过停播的，就是不够响、不像有人凑着麦克风在说，按回声丢掉。
+     */
+    if (!hold && Date.now() < playbackUntil + ECHO_TAIL_MS) {
+      console.log(`[拼装通话] 当作回声：「${text}」`)
+      return
+    }
     const busy = speaking() || hold !== null
     const verdict = deps.judgeUtterance
       ? await deps.judgeUtterance({ text, assistantSaying, busy, asrTags })
