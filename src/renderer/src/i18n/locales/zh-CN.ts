@@ -680,7 +680,7 @@ export default {
       stt: '语音识别',
       sttDesc: '按下语音热键说话，转写为文字填入搜索框。未配置时使用实时语音通道。',
       sttMore:
-        '内置豆包 STT 2.0 与阿里云 Qwen-Audio ASR，均为仅转写、不作回答的纯识别接口。未配置时仍可听写，将回退到实时语音通道；但该通道仅 OpenAI gpt-realtime 可关闭自动应答，绑定豆包实时语音时按热键将提示不可用。此项按识别时长计费，费用远低于借用对话模型转写。',
+        '内置豆包 STT 2.0、阿里云 Qwen-Audio ASR 与硅基流动 SenseVoice，均为仅转写、不作回答的纯识别接口；也可接入本机运行的 SenseVoice、Whisper 等 OpenAI 兼容转写服务。未配置时仍可听写，将回退到实时语音通道；但该通道仅 OpenAI gpt-realtime 可关闭自动应答，绑定豆包实时语音时按热键将提示不可用。云端识别按时长计费，费用远低于借用对话模型转写；本机识别不产生费用。',
       sttMissing: '语音识别不可用',
       model3dMissing: '3D 生成不可用',
       search: '网页检索',

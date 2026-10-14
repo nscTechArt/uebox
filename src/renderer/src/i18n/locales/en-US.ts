@@ -701,7 +701,7 @@ export default {
       sttDesc:
         'Hold the voice hotkey, speak, and get text in the search box. Falls back to the realtime voice role when unset.',
       sttMore:
-        'Doubao STT 2.0 and Alibaba Qwen-Audio ASR are built in — transcription-only endpoints that never talk back. Dictation still works when this is empty: it falls back to the realtime voice role, but only OpenAI gpt-realtime can turn off the automatic reply there, so a Doubao realtime binding reports that voice is unavailable. This role bills by audio duration, far cheaper than transcribing through a chat model.',
+        'Doubao STT 2.0, Alibaba Qwen-Audio ASR and SiliconFlow SenseVoice are built in — transcription-only endpoints that never talk back. A local SenseVoice or Whisper server that speaks the OpenAI transcription API works too. Dictation still works when this is empty: it falls back to the realtime voice role, but only OpenAI gpt-realtime can turn off the automatic reply there, so a Doubao realtime binding reports that voice is unavailable. Cloud recognition bills by audio duration, far cheaper than transcribing through a chat model; local recognition is free.',
       sttMissing: 'Speech to text unavailable',
       model3dMissing: '3D generation unavailable',
       search: 'Web search',

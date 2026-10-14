@@ -4,6 +4,7 @@ import type { ProviderConfig } from '../types'
 import { openDoubaoSttSession } from './doubaoStt'
 import { openQwenAudioSttSession } from './qwenAudioStt'
 import { openUeboxSttSession } from './ueboxStt'
+import { openTranscriptionSttSession, probeTranscription } from './transcriptionStt'
 import { isPlanProvider } from '../../../shared/creatorPlan'
 import {
   STT_INPUT_SAMPLE_RATE,
@@ -17,10 +18,11 @@ export { STT_INPUT_SAMPLE_RATE, STT_PACKET_MS } from './types'
 export type { SttEvent, SttSessionHandle } from './types'
 
 /**
- * 流式语音识别的统一入口。
+ * 语音识别的统一入口。
  *
- * 两家适配器（豆包 sauc、阿里百炼 ASR）各自处理自己的协议，这里只做三件事：
- * **认出连哪一家**、**攒包**、**把凭据取出来**。
+ * 三个适配器各自处理自己的协议：豆包 sauc、阿里百炼 ASR（这两家是流式的），
+ * 以及 OpenAI 兼容的整段转写（本机 SenseVoice / Whisper、硅基流动等，见
+ * `transcriptionStt.ts`）。这里只做三件事：**认出连哪一家**、**攒包**、**把凭据取出来**。
  *
  * ## 为什么按 Base URL 认，不看别的
  *
@@ -57,6 +59,32 @@ function isDashScopeUrl(baseUrl: string): boolean {
 }
 
 /**
+ * 其余 http(s) 地址一律按 OpenAI 兼容的整段转写处理。
+ *
+ * 这是兜底而不是猜：本机服务的地址是 `127.0.0.1:端口`，域名里没有任何厂商的事实
+ * 可认，而这一类服务几乎全都实现了 `/v1/audio/transcriptions`。真不是的话，
+ * 「测试连接」会把 404 原样报出来，并告诉用户地址该填到哪一层。
+ */
+function isTranscriptionUrl(baseUrl: string): boolean {
+  return /^https?:\/\//i.test(baseUrl.trim())
+}
+
+type SttAdapter = 'plan' | 'doubao' | 'qwen' | 'transcription'
+
+/** 这个地址走哪个适配器。开会话、测试连接、开会话前的预检都按它，不各判一遍 */
+function sttAdapterOf(baseUrl: string, plan: boolean): SttAdapter | null {
+  if (plan) return 'plan'
+  if (isDoubaoSpeechUrl(baseUrl)) return 'doubao'
+  if (isDashScopeUrl(baseUrl)) return 'qwen'
+  if (isTranscriptionUrl(baseUrl)) return 'transcription'
+  return null
+}
+
+/** 地址一个适配器都对不上时给用户的话。IPC 那头开会话前也用它 */
+export const UNSUPPORTED_STT_MESSAGE =
+  '无法识别这个语音识别地址。支持豆包语音、阿里云百炼，以及 http(s) 开头的 OpenAI 兼容转写地址（例如 http://127.0.0.1:8000/v1）。'
+
+/**
  * 取「语音识别」角色绑的那个 Provider 与模型。
  *
  * **没绑不是错误。** 调用方（听写）拿不到它时会回落到实时语音那一路，
@@ -83,15 +111,16 @@ export async function resolveSttBinding(): Promise<SttBinding | null> {
 
 /** 这个地址有没有对应的适配器。绑了一家我们不认识的厂商时用它提前说清楚 */
 export function hasSttAdapter(baseUrl: string, plan = false): boolean {
-  return plan || isDoubaoSpeechUrl(baseUrl) || isDashScopeUrl(baseUrl)
+  return sttAdapterOf(baseUrl, plan) !== null
 }
 
 /**
  * 开一路识别会话，并在上行方向攒包。
  *
- * 攒包放在这里而不是各家适配器里：两家要的包长一样（100~200ms），而采集那头
+ * 攒包放在这里而不是各家适配器里：流式那两家要的包长一样（100~200ms），而采集那头
  * 给的是 20 毫秒一包 —— 这是**采集侧的事实**，不是厂商差异。写两遍的后果是
- * 改了一处忘了另一处，而症状（识别变慢）不会指向这里。
+ * 改了一处忘了另一处，而症状（识别变慢）不会指向这里。整段转写那一路自己再切帧，
+ * 攒不攒对它没有影响。
  */
 export function openSttSession(
   binding: SttBinding,
@@ -104,11 +133,15 @@ export function openSttSession(
     ...(binding.headers ? { headers: binding.headers } : {}),
     onEvent
   }
-  const session = binding.plan
-    ? openUeboxSttSession(config)
-    : isDoubaoSpeechUrl(binding.baseUrl)
-      ? openDoubaoSttSession(config)
-      : openQwenAudioSttSession(config)
+  const adapter = sttAdapterOf(binding.baseUrl, binding.plan === true)
+  const session =
+    adapter === 'plan'
+      ? openUeboxSttSession(config)
+      : adapter === 'doubao'
+        ? openDoubaoSttSession(config)
+        : adapter === 'qwen'
+          ? openQwenAudioSttSession(config)
+          : openTranscriptionSttSession(config)
 
   let buffered: Buffer[] = []
   let bufferedBytes = 0
@@ -170,15 +203,23 @@ const PROBE_ACK_GRACE_MS = 1_500
  * 「测试连接」。
  *
  * 开一条真会话、等厂商说就绪、然后收掉 —— 不送一个字节的音频。
- * 两家都是**先握手再计费**，所以这一次探测的成本是零，而它验的恰恰是
+ * 流式那两家都是**先握手再计费**，所以这一次探测的成本是零，而它验的恰恰是
  * 最容易配错的那两样：密钥对不对、资源 ID / 模型名认不认。
+ *
+ * 整段转写那一类没有握手，开会话必然「就绪」，只能真送一段静音去问（见 `probeTranscription`）。
  */
 export async function probeStt(provider: ProviderConfig, modelId: string): Promise<void> {
   const plan = isPlanProvider(provider.id)
-  if (!hasSttAdapter(provider.baseUrl, plan)) {
-    throw new Error('不支持该语音识别服务商。目前支持豆包语音（openspeech）与阿里云百炼。')
-  }
+  const adapter = sttAdapterOf(provider.baseUrl, plan)
+  if (!adapter) throw new Error(UNSUPPORTED_STT_MESSAGE)
   const apiKey = await resolveApiKey(provider.apiKey)
+  if (adapter === 'transcription') {
+    await probeTranscription(
+      { apiKey, baseUrl: provider.baseUrl, model: modelId, headers: provider.headers },
+      AbortSignal.timeout(PROBE_TIMEOUT_MS)
+    )
+    return
+  }
   await new Promise<void>((resolve, reject) => {
     let settled = false
     let session: SttSessionHandle | null = null

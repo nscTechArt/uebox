@@ -1,6 +1,7 @@
 import { ipcMain, type WebContents } from 'electron'
 import {
   STT_INPUT_SAMPLE_RATE,
+  UNSUPPORTED_STT_MESSAGE,
   hasSttAdapter,
   openSttSession,
   resolveSttBinding,
@@ -96,7 +97,7 @@ export function registerSpeechToTextIPC(): void {
       return {
         ok: false as const,
         reason: 'failed' as const,
-        error: '不支持该语音识别服务商。目前支持豆包语音（openspeech）与阿里云百炼。'
+        error: UNSUPPORTED_STT_MESSAGE
       }
     }
 
