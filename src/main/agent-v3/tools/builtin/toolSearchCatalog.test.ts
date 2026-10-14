@@ -349,7 +349,9 @@ describe('真实工具库检索回归', () => {
     ['新建增强输入动作', 'ue_input_add_mapping'],
     ['灯光阴影普查', 'ue_light_census'],
     // 以前技能让模型写 Python 的 set_convex_decomposition_collisions；现在要搜得到工具
-    ['凸包分解生成碰撞', 'mesh_optimize']
+    ['凸包分解生成碰撞', 'mesh_optimize'],
+    // 改 C++ 成员前查波及面；以前技能说「没工具，全量编译看谁报错」
+    ['哪些蓝图用到了这个函数', 'blueprint_find_usages']
   ])('%s 应能加载 %s', async (query, expected) => {
     expect(
       catalog.some((tool) => tool.name === expected),
@@ -406,6 +408,35 @@ describe('真实工具库检索回归', () => {
         search.getTools().map((tool) => tool.name),
         `${name} 加载后应带上 mesh_optimize`
       ).toContain('mesh_optimize')
+    }
+  })
+
+  /*
+   * blueprint_find_usages 属 ue.blueprint 命名空间，但单成按需子组：search_tools 按「谁在用」
+   * 命中时可以只加载它，不必连带二十多个写图工具（蓝图组是最大的一组）。
+   * 不进常驻（常驻预算已满），由 C++ 工作流和蓝图编辑两个技能点名带上；
+   * 搜得到它由上面 it.each 的「哪些蓝图用到了这个函数」那条钉住。
+   */
+  it('blueprint_find_usages 自成按需子组，由 C++ 和蓝图编辑技能带上', async () => {
+    const usages = catalog.find((tool) => tool.name === 'blueprint_find_usages')!
+    expect(usages).toBeDefined()
+    expect(usages.unrealBox.namespace).toBe('ue.blueprint')
+    expect(usages.unrealBox.risk).toBe('safe')
+    expect(toolSearchGroup(usages)).toBe('ue.blueprint.usages')
+    expect(RESIDENT_TOOL_GROUPS.has('ue.blueprint.usages')).toBe(false)
+    expect(residentNames().has('blueprint_find_usages')).toBe(false)
+    expect(groupDomainTerms('ue.blueprint.usages')).toContain('哪些蓝图')
+
+    for (const name of ['ue-cpp-workflow', 'ue-blueprint-graph-editing']) {
+      const search = createToolSearch(catalog, () => catalog)
+      const loader = createSkillTools(skills, 'off', search.loadFromSkill).find(
+        (tool) => tool.name === 'load_skill'
+      )!
+      await loader.execute('skill', { name })
+      const loaded = search.getTools().map((tool) => tool.name)
+      expect(loaded, `${name} 加载后应带上 blueprint_find_usages`).toContain(
+        'blueprint_find_usages'
+      )
     }
   })
 

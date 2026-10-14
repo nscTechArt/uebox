@@ -252,6 +252,17 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     make: () => ueBlueprint.createSearchBlueprintNodesTool()
   },
   /**
+   * 全项目搜「哪些蓝图用了这个名字」（引擎的 Find in Blueprints，不加载蓝图）。
+   * 只读；index_unindexed 只是请编辑器弹它自己的「Index All」确认框，加不加载由用户在框里定。
+   * 分组见 toolSearch.ts：自成按需子组 ue.blueprint.usages，由 C++ 和蓝图编辑两个技能点名
+   */
+  {
+    name: 'blueprint_find_usages',
+    namespace: 'ue.blueprint',
+    risk: 'safe',
+    make: () => ueBlueprint.createFindBlueprintUsagesTool()
+  },
+  /**
    * 蓝图的写工具**一律 sequential**。
    *
    * 同一条消息里的多个工具调用默认并发跑（`defineTool` 的

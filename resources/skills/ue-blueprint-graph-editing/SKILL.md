@@ -107,6 +107,12 @@ reparenting all break whatever uses this Blueprint — and `blueprint_compile` /
 ue_content_dependencies { path: "/Game/BP_Door", direction: "referencers", recursive: false }
 ```
 
+That list is per asset. To see which of them actually use the variable, function or event
+you are about to change — and to find callers of a C++ member, which is not an asset at all —
+search every graph by name with `blueprint_find_usages { query: "OpenDoor" }` (the editor's
+Find in Blueprints; nothing gets loaded). It matches names, so check each hit's `context`.
+If it says the result may be incomplete, the unindexed Blueprints were not searched: say so.
+
 Tell the user the list before changing anything. Afterwards compile every Blueprint on it
 (`blueprint_compile` each — `blueprint_compile_all` defaults to `scope: "touched"`, which is
 only what you edited). A level on the list holds placed instances or level-blueprint logic

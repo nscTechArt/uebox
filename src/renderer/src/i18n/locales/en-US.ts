@@ -2937,6 +2937,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         blueprint_describe: 'Inspect blueprint',
         blueprint_get_graph: 'Read blueprint graph',
         blueprint_search_nodes: 'Search blueprint nodes',
+        blueprint_find_usages: 'Find in all Blueprints',
         material_describe: 'Inspect material',
         material_get_graph: 'Read material graph',
         material_graph_slice: 'Read material slice',

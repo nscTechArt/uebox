@@ -191,6 +191,8 @@ export function isDefaultResidentTool(tool: GroupedTool): boolean {
  */
 const DOMAIN_TERMS: Record<string, string> = {
   'ue.blueprint': '蓝图 逻辑 节点 变量 事件 函数 blueprint graph node logic event function',
+  'ue.blueprint.usages':
+    '谁在用 哪些蓝图 用到 调用了 引用 波及 改名 删除 全局搜索 在所有蓝图中查找 uproperty ufunction find in blueprints usages callers references rename',
   'ue.material': '材质 材质实例 表面 颜色 贴图 纹理 material shader color surface texture',
   'ue.actor': '物体 场景 对象 位置 旋转 缩放 移动 灯光 actor transform spawn light',
   'ue.content': '内容浏览器 工程资产 内容 资产 content asset',
@@ -401,6 +403,9 @@ export function toolSearchGroup(tool: GroupedTool): string {
   // 生成 LOD / 碰撞是写操作、说明又长；ue.mesh 整组常驻而常驻预算已满，单拆按需加载。
   // 几何编辑和导入整理两个技能会点名它
   if (tool.name === 'mesh_optimize') return 'ue.mesh.optimize'
+  // 「哪些蓝图用了这个名字」：改 UFUNCTION / UPROPERTY 前查波及面。单拆按需子组，按「谁在用」
+  // 搜到时不必连带二十多个写图工具；C++ 和蓝图编辑两个技能点名它
+  if (tool.name === 'blueprint_find_usages') return 'ue.blueprint.usages'
   if (tool.unrealBox.namespace === 'ue.content' && Object.hasOwn(UE_CONTENT_SUBGROUPS, tool.name))
     return UE_CONTENT_SUBGROUPS[tool.name]
   return tool.unrealBox.namespace

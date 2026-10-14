@@ -2866,6 +2866,7 @@ export default {
         blueprint_describe: '查看蓝图',
         blueprint_get_graph: '读取蓝图图表',
         blueprint_search_nodes: '搜索蓝图节点',
+        blueprint_find_usages: '在所有蓝图中查找',
         material_describe: '查看材质',
         material_get_graph: '读取材质图表',
         material_graph_slice: '读取材质片段',

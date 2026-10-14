@@ -46,7 +46,10 @@ cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑�
 只编你改的那个文件，查不出别处被你改坏了。动 `UFUNCTION` / `UPROPERTY` / 类名之前：
 
 - C++ 调用方：`grep_local_files` 在工程 `Source/` 下搜这个名字。
-- 蓝图调用方：没有工具能列出哪些蓝图用了某个 C++ 成员。改完、完整重编之后跑
+- 蓝图调用方：`blueprint_find_usages { query: "成员名" }`，就是编辑器的「在所有蓝图中查找」，
+  不加载蓝图。动手前把命中的蓝图列给用户。它按名字匹配：同名的别的成员也会命中，看 `context` 甄别；
+  回包说「结果可能不全」时，没索引的那些蓝图没被搜到，照实告诉用户。
+- 查过也要编：改完、完整重编之后，对命中的蓝图逐个 `blueprint_compile`；结果不全时改跑
   `blueprint_compile_all`（`scope: "all"`，大工程用 `path` 收窄），编不过的就是被你改坏的。
 - 改名而资产里存着它的值（关卡里的实例、蓝图子类、数据资产）：同时在 `Config/DefaultEngine.ini`
   的 `[CoreRedirects]` 里加一条，否则存过的值和蓝图节点会断。例：
