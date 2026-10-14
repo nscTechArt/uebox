@@ -5,7 +5,7 @@
  * 那份里没有的工具，按动作大类说一个笼统的（「查看工程内容」），不把 snake_case 端给用户。
  */
 
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { PRODUCER } from '@core/shared/agentTeam'
@@ -37,6 +37,8 @@ function useNow(): void {
 }
 
 export interface TeamLabels {
+  /** 每 30 秒走一下的「现在」。时间轴、「刚交回」这类要跟着时间变的用它 */
+  now: Ref<number>
   ago: (at: number) => string
   /** 悬停看的精确时刻 */
   exact: (at: number) => string
@@ -92,5 +94,5 @@ export function useTeamLabels(): TeamLabels {
     }
   }
 
-  return { ago, exact, who, toolVerb, statusText }
+  return { now, ago, exact, who, toolVerb, statusText }
 }

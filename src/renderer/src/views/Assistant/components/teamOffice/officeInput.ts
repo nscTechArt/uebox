@@ -13,6 +13,7 @@ import type { TaskStatus, TeamActivity, TeamStateView } from '@core/shared/agent
 
 import { parseTeamMail } from '../teamBoardText'
 import { toolKind } from './officeActivity'
+import { modelLook } from './modelLook'
 import { CREW_COUNT } from './officePalette'
 import { PRODUCER_ID, type MemberInput, type Mode } from './officeSim'
 
@@ -73,6 +74,7 @@ export function officeMembers(
       name: member.name,
       style: hairStyle(member.name),
       crew: index % CREW_COUNT,
+      look: modelLook(member.model),
       mode: memberMode(team, member.name, tools)
     }))
 }

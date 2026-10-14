@@ -1,14 +1,15 @@
 <template>
   <!--
-    工作室模式（/team）的任务板：名册、任务、留言、验收结论。
+    工作室模式（/team）的任务板：办公室，加上下面这块「谁在干、交回了什么」。
 
     两处出现：输入框正上方只有一行摘要 —— 跑起来之后用户最常问的是「做到哪了」，
-    几个人、几件完成、验收过没过就答了；点它在右侧面板打开「团队任务」页签（docked），
-    整块高度给办公室、成员、任务和留言。不另开页面 —— 它是这条对话的一部分
+    几个人、到了哪一步、交回几份就答了；点它在右侧面板打开「团队任务」页签（docked），
+    整块高度给办公室和任务板。不另开页面 —— 它是这条对话的一部分
     （见 docs/AI游戏工作室设计-2026-09-25.md 第 3 节）。
 
-    面板从上到下回答：做完了吗（页头）→ 谁在干嘛、谁卡住了（成员）→ 还剩什么（任务）
-    → 交回了什么（留言）。机器写的细节（工具名、路径、模型、回执、报告全文）都在悬停或点开之后。
+    办公室有两种画风，下面跟着走：像素画风是「委托板」（TeamQuestBoard），
+    简约画风是一人一条泳道（TeamLaneBoard）。两者读同一份模型（teamBoardModel.ts），
+    设计见 docs/团队任务板可读性-2026-10-14.md。
   -->
   <section
     class="team-board"
@@ -24,17 +25,9 @@
     >
       <PhUsersThree class="head-icon" />
       <span class="head-title">{{ t('assistant.teamBoard.title') }}</span>
-      <span class="head-meta">
-        {{
-          t('assistant.teamBoard.summary', {
-            members: team.members.length,
-            done: doneCount,
-            total: team.board.length
-          })
-        }}
-      </span>
-      <AppTag v-if="team.verdict" :tone="verdictTone" :title="verdictTitle">
-        {{ verdictLabel }}
+      <span class="head-meta">{{ summary }}</span>
+      <AppTag v-if="!docked && verdictTag" :tone="verdictTag.tone" :title="verdictTag.title">
+        {{ verdictTag.label }}
       </AppTag>
       <PhCaretRight v-if="!docked" class="caret" />
       <AppButton
@@ -52,8 +45,13 @@
       </AppButton>
     </component>
 
-    <div v-if="docked" class="team-board-stage">
-      <div ref="bodyRef" class="team-board-body" :inert="readerIndex !== null || undefined">
+    <div
+      v-if="docked"
+      class="team-board-body"
+      :class="`is-${style}`"
+      :style="style === 'v2' ? QUEST_VARS : undefined"
+    >
+      <div class="office-wrap">
         <TeamOffice
           :team="team"
           :running="running"
@@ -64,71 +62,27 @@
           :highlight="hovered"
           @select="select"
         />
-
-        <section class="block">
-          <h4 class="block-label">{{ t('assistant.teamBoard.objective') }}</h4>
-          <p class="objective" :title="team.objective">{{ team.objective }}</p>
-        </section>
-
-        <section class="block">
-          <h4 class="block-title">
-            {{ t('assistant.teamBoard.members') }}
-            <span class="block-count">{{ team.members.length }}</span>
-            <AppTag
-              v-if="selectedName"
-              class="filter-chip"
-              tone="info"
-              removable
-              :remove-label="t('assistant.teamBoard.clearFilter')"
-              @remove="select(null)"
-            >
-              {{ t('assistant.teamBoard.office.only', { name: selectedName }) }}
-            </AppTag>
-          </h4>
-          <TeamRoster
-            :team="team"
-            :activity="activity ?? []"
-            :selected="selected"
-            :model-choices="modelChoices"
-            :models-loaded="modelsLoaded"
-            @select="select"
-            @hover="hovered = $event"
-            @open-models="emit('open-models')"
-            @set-model="(name, model) => emit('set-model', name, model)"
-          />
-        </section>
-
-        <section class="block">
-          <h4 class="block-title">
-            {{ t('assistant.teamBoard.tasks') }}
-            <span class="block-count">{{ doneCount }}/{{ team.board.length }}</span>
-          </h4>
-          <TeamTaskList :team="team" :selected="selected" @reopen="emit('reopen', $event)" />
-        </section>
-
-        <section v-if="mails.length" class="block">
-          <h4 class="block-title">
-            {{ t('assistant.teamBoard.mail') }}
-            <span class="block-count">{{ mails.length }}</span>
-          </h4>
-          <TeamMailList :team="team" :items="mails" @read="openReader" />
-        </section>
       </div>
-
-      <TeamMailReader
-        v-if="readerIndex !== null && mails[readerIndex]"
+      <component
+        :is="style === 'v2' ? TeamQuestBoard : TeamLaneBoard"
         :team="team"
-        :items="mails"
-        :index="readerIndex"
-        @go="readerIndex = $event"
-        @close="closeReader"
+        :model="model"
+        :activity="activity ?? []"
+        :selected="selected"
+        :model-choices="modelChoices"
+        :models-loaded="modelsLoaded"
+        @select="select"
+        @hover="hovered = $event"
+        @reopen="emit('reopen', $event)"
+        @open-models="emit('open-models')"
+        @set-model="(name: string, m: TeamModel) => emit('set-model', name, m)"
       />
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PhCaretRight, PhUsersThree } from '@phosphor-icons/vue'
 
@@ -141,13 +95,13 @@ import type {
   TeamStateView,
   TeamVerdict
 } from '@core/shared/agentTeam'
-import TeamMailList from './TeamMailList.vue'
-import TeamMailReader from './TeamMailReader.vue'
+import TeamLaneBoard from './teamLanes/TeamLaneBoard.vue'
 import TeamOffice from './teamOffice/TeamOffice.vue'
-import TeamRoster from './TeamRoster.vue'
-import TeamTaskList from './TeamTaskList.vue'
+import { officeStyle } from './teamOffice/officeStyle'
+import TeamQuestBoard from './teamQuest/TeamQuestBoard.vue'
+import { QUEST_VARS } from './teamQuest/questPalette'
 import { useTeamLabels } from './teamBoardLabels'
-import { mailItems } from './teamMail'
+import { buildBoardModel } from './teamBoardModel'
 
 const props = defineProps<{
   team: TeamStateView
@@ -177,89 +131,86 @@ const emit = defineEmits<{
   'set-model': [name: string, model: TeamModel]
 }>()
 const { t } = useI18n()
-const { ago } = useTeamLabels()
+const { ago, now } = useTeamLabels()
+const style = officeStyle
 
 /** 打开时顺手重读模型名单：用户可能刚在设置页增删过来源，模型名和「用不了」要跟上 */
 onMounted(() => {
   if (props.docked) emit('open-models')
 })
 
-type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
+const model = computed(() =>
+  buildBoardModel(props.team, props.activity ?? [], { running: !!props.running, now: now.value })
+)
 
+// ── 摘要行 ──────────────────────────────────────────────────────────────
+
+const phaseLabel = computed(() => {
+  const m = model.value
+  if (m.phase !== 'alert') return t(`assistant.teamBoard.ui.phase.${m.phase}`)
+  return m.stopped
+    ? t('assistant.teamBoard.ui.alertStopped', { n: m.stopped })
+    : t('assistant.teamBoard.ui.alertBlocked', { n: m.blocked })
+})
+
+const summary = computed(() => {
+  const m = model.value
+  const parts = [
+    t('assistant.teamBoard.ui.people', { n: props.team.members.length }),
+    phaseLabel.value
+  ]
+  if (m.round.length) {
+    parts.push(
+      t('assistant.teamBoard.ui.roundCount', {
+        done: m.round.filter((j) => j.state === 'done').length,
+        total: m.round.length
+      })
+    )
+  }
+  return parts.join(' · ')
+})
+
+type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
 const VERDICT_TONE: Record<TeamVerdict, Tone> = {
   pass: 'success',
   fail: 'warning',
   blocked: 'danger'
 }
 
-const doneCount = computed(() => props.team.board.filter((task) => task.status === 'done').length)
+/**
+ * 摘要行上的验收标签：只挂这一轮、没人在跑时的结论（见 buildBoardModel）。
+ * 验收之后工程又改过：那次结论只说明当时的游戏，换成中性的「改动后未重验」（2026-09-30 真机）
+ */
+const verdictTag = computed(() => {
+  const v = model.value.verdict
+  if (!v) return null
+  return {
+    label: v.stale
+      ? t('assistant.teamBoard.verdict.stale')
+      : t(`assistant.teamBoard.verdict.${v.kind}`),
+    tone: v.stale ? ('neutral' as Tone) : VERDICT_TONE[v.kind],
+    title:
+      v.at !== undefined
+        ? t('assistant.teamBoard.verdictTitle', { count: v.count, when: ago(v.at) })
+        : undefined
+  }
+})
 
-// ── 只看某个队员（在办公室里点人，或点名册里的那一行） ───────────────────
+// ── 只看某个队员（在办公室里点人，或点下面的卡片 / 泳道） ───────────────
 
 const memberId = (name: string): string => name.trim().toLowerCase()
 const selected = ref<string | null>(null)
-/** 鼠标停在名册哪一行：办公室里把那个人标出来 */
+/** 鼠标停在哪个人身上：办公室里把那个人标出来 */
 const hovered = ref<string | null>(null)
 function select(id: string | null): void {
   selected.value = id
 }
-const selectedName = computed(
-  () => props.team.members.find((m) => memberId(m.name) === selected.value)?.name ?? null
-)
-// 名册里没这个人了（结束重开、换了一批人），筛选跟着撤掉
-watch(selectedName, (name) => {
-  if (!name) selected.value = null
-})
-
-// ── 留言和阅读视图 ──────────────────────────────────────────────────────
-
-const mails = computed(() => mailItems(props.team, selected.value))
-
-const bodyRef = ref<HTMLElement | null>(null)
-const readerIndex = ref<number | null>(null)
-let readerReturn: { scroll: number; mailId: string } | null = null
-
-function openReader(mailId: string): void {
-  const index = mails.value.findIndex((item) => item.mail.id === mailId)
-  if (index < 0) return
-  readerReturn = { scroll: bodyRef.value?.scrollTop ?? 0, mailId }
-  readerIndex.value = index
-}
-
-/** 回到原来读到的地方，焦点回到打开它的那张卡上 */
-async function closeReader(): Promise<void> {
-  readerIndex.value = null
-  await nextTick()
-  const back = readerReturn
-  readerReturn = null
-  if (!back || !bodyRef.value) return
-  bodyRef.value.scrollTop = back.scroll
-  bodyRef.value
-    .querySelector<HTMLElement>(`[data-mail-id="${CSS.escape(back.mailId)}"] button`)
-    ?.focus()
-}
-
-// ── 验收 ────────────────────────────────────────────────────────────────
-
-/**
- * 验收之后工程又改过：那次结论只说明当时的游戏。红牌「未过」一直挂着，
- * 用户会以为现在还是那样（2026-09-30 真机），所以换成中性的「改动后未重验」。
- */
-const verdictLabel = computed(() =>
-  props.team.verdictStale
-    ? t('assistant.teamBoard.verdict.stale')
-    : t(`assistant.teamBoard.verdict.${props.team.verdict}`)
-)
-const verdictTone = computed<Tone>(() =>
-  props.team.verdictStale || !props.team.verdict ? 'neutral' : VERDICT_TONE[props.team.verdict]
-)
-const verdictTitle = computed(() =>
-  props.team.verdictAt === undefined
-    ? undefined
-    : t('assistant.teamBoard.verdictTitle', {
-        count: props.team.deliveries,
-        when: ago(props.team.verdictAt)
-      })
+// 名册里没这个人了（结束重开、换了一批人），选中跟着撤掉
+watch(
+  () => props.team.members.map((m) => memberId(m.name)),
+  (ids) => {
+    if (selected.value && !ids.includes(selected.value)) selected.value = null
+  }
 )
 </script>
 
@@ -342,69 +293,38 @@ const verdictTitle = computed(() =>
   color: var(--color-text-muted);
 }
 
-/* 阅读视图盖在这一层上面 */
-.team-board-stage {
-  position: relative;
+.team-board-body {
   flex: 1;
   min-height: 0;
-}
-
-.team-board-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  height: 100%;
-  padding: var(--space-4);
   overflow-y: auto;
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-normal);
+
+  /* 像素画风下，办公室下面接一整块深木色的委托板，滚到底也是它 */
+  &.is-v2 {
+    background: var(--q-bg);
+  }
 }
 
-.block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
+.office-wrap {
+  padding: var(--space-4) var(--space-4) 0;
 
-.block-title,
-.block-label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 22px;
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.04em;
-}
+  /* 像素画风：办公室装进一个缺角的木框，和下面委托板的框是一套 */
+  .is-v2 > & {
+    padding: 19px 19px 0;
 
-.block-label {
-  min-height: 0;
-  color: var(--color-text-muted);
-  font-weight: var(--font-weight-normal);
-}
+    :deep(.team-office),
+    :deep(.office-canvas) {
+      border-radius: 0;
+    }
 
-.block-count {
-  color: var(--color-text-muted);
-  font-family: var(--font-family-numeric);
-  font-weight: var(--font-weight-normal);
-}
-
-.filter-chip {
-  margin-left: auto;
-  letter-spacing: normal;
-}
-
-/* 目标：一行，悬停看全文 */
-.objective {
-  margin: -2px 0 0;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-medium);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+    :deep(.team-office) {
+      background: var(--q-ink);
+      box-shadow:
+        0 -3px 0 0 var(--q-banner-edge),
+        0 3px 0 0 var(--q-banner-edge),
+        -3px 0 0 0 var(--q-banner-edge),
+        3px 0 0 0 var(--q-banner-edge);
+    }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

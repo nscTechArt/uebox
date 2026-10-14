@@ -1,43 +1,77 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 
 import TeamBoardPanel from './TeamBoardPanel.vue'
+import { setOfficeStyle } from './teamOffice/officeStyle'
 import type { TeamModelCandidate, TeamStateView } from '@core/shared/agentTeam'
 
+const now = Date.now()
+const min = (n: number): number => now - n * 60_000
+
 const team: TeamStateView = {
-  objective: '做一个塔防游戏',
-  verdict: 'fail',
+  objective: '统计一下当前项目的信息',
+  verdict: 'pass',
+  verdictAt: min(90),
   verdictStale: false,
   deliveries: 1,
+  roundStartedAt: min(60),
   members: [
-    { name: '玩法主程', persona: '写塔和波次', tier: 'strong', readOnly: false, hiredAt: 1 },
-    { name: '试玩', persona: '找 bug', tier: 'fast', readOnly: true, hiredAt: 2 }
+    { name: '资产统计员', persona: '统计资产', tier: 'strong', readOnly: true, hiredAt: 1 },
+    { name: '配置统计员', persona: '统计配置', tier: 'strong', readOnly: true, hiredAt: 2 }
   ],
   board: [
+    { id: 't1', title: '统计配置', owner: '配置统计员', status: 'done', updatedAt: min(30) },
     {
-      id: 't1',
-      title: '灰盒关卡',
-      status: 'done',
-      owner: '玩法主程',
-      evidence: 'a.png',
-      updatedAt: 1
-    },
-    { id: 't2', title: '波次系统', status: 'doing', owner: '玩法主程', updatedAt: 2 },
-    { id: 't3', title: '存档', status: 'blocked', note: '等你定死亡规则', updatedAt: 3 }
+      id: 't2',
+      title: '核对重定向器',
+      owner: '资产统计员',
+      status: 'blocked',
+      note: '等你确认删不删',
+      updatedAt: min(5)
+    }
   ],
   mail: [
+    { id: 'm1', from: '配置统计员', to: '资产统计员', text: '你好，我是配置统计员。', at: min(20) },
     {
-      id: 'm1',
-      from: '试玩',
-      to: 'producer',
-      at: 1,
-      text: '【交活】试玩（mimo） 回话：\n任务已完成，报告全文如下。\n\n---\n# 试玩报告\n- 第三波卡死，塔没有伤害\n\n【快照】已存 42'
+      id: 'm2',
+      from: 'producer',
+      to: '资产统计员',
+      text: '提醒：编辑器崩溃过一次，已重启。',
+      at: min(3),
+      readAt: min(2)
     },
-    { id: 'm2', from: 'producer', to: '试玩', text: '去试玩第三波。别的先不管。', at: 2 }
-  ]
+    {
+      id: 'm3',
+      from: 'producer',
+      to: '配置统计员',
+      text: '提醒：编辑器崩溃过一次，已重启。',
+      at: min(3)
+    }
+  ],
+  jobs: [
+    {
+      id: 'j1',
+      member: '配置统计员',
+      brief: '统计引擎配置和插件',
+      startedAt: min(50),
+      endedAt: min(30),
+      outcome: 'done',
+      report:
+        '任务已完成，报告全文如下。\n\n# 配置统计报告\n\n- 引擎 5.7\n- 插件 23 个\n\n## 模块\n\n- NeonHarbor'
+    },
+    { id: 'j2', member: '资产统计员', brief: '统计全部资产', startedAt: min(10) }
+  ],
+  events: [{ kind: 'crashed', at: min(4), detail: 'Assertion failed' }],
+  live: {
+    running: ['producer', '资产统计员'],
+    waiting: [],
+    awaited: [],
+    assignments: [{ member: '资产统计员', text: '统计全部资产', since: min(10) }],
+    recent: []
+  }
 }
 
-/** 名册、留言、阅读视图都用到 Markdown 渲染器；测试里换成一个只吐原文的小壳 */
+/** 正文渲染器、办公室换成小壳：这里只测任务板 */
 const stubs = {
   MarkdownRenderer: { props: ['content'], template: '<div class="md-stub">{{ content }}</div>' },
   TeamOffice: { template: '<div class="office-stub" />' }
@@ -51,15 +85,45 @@ function docked(props: Record<string, unknown> = {}): VueWrapper {
   })
 }
 
+const labelOf = (wrapper: VueWrapper, selector: string): string[] =>
+  wrapper.findAll(`${selector} [aria-label]`).map((el) => el.attributes('aria-label')!)
+
+afterEach(() => setOfficeStyle('v2'))
+
 describe('TeamBoardPanel 摘要行', () => {
-  it('输入框上方只有一行：几个人、几件完成、验收结论；点它要求在右侧面板打开', async () => {
-    const wrapper = mount(TeamBoardPanel, { props: { team } })
+  it('输入框上方一行：几个人、到哪一步、交回几份；点它要求在右侧面板打开', async () => {
+    const wrapper = mount(TeamBoardPanel, { props: { team, running: true } })
     const head = wrapper.find('.team-board-head')
-    expect(head.text()).toContain('2')
-    expect(head.text()).toContain('1/3')
+    expect(head.text()).toContain('2 人')
+    expect(head.text()).toContain('1 项受阻')
+    expect(head.text()).toContain('交回 1/2')
     expect(wrapper.find('.team-board-body').exists()).toBe(false)
     await head.trigger('click')
     expect(wrapper.emitted('open')).toHaveLength(1)
+  })
+
+  it('验收标签只挂这一轮、没人在跑时的结论；改过工程就是「改动后未重验」', () => {
+    // 上一轮的验收：不挂
+    expect(
+      mount(TeamBoardPanel, { props: { team } }).find('.team-board-head').text()
+    ).not.toContain('验收通过')
+    const thisRound = { ...team, verdictAt: min(1), live: undefined, jobs: team.jobs!.slice(0, 1) }
+    expect(
+      mount(TeamBoardPanel, { props: { team: thisRound } })
+        .find('.team-board-head')
+        .text()
+    ).toContain('验收通过')
+    // 有人在跑：不挂
+    expect(
+      mount(TeamBoardPanel, { props: { team: thisRound, running: true } })
+        .find('.team-board-head')
+        .text()
+    ).not.toContain('验收通过')
+    expect(
+      mount(TeamBoardPanel, { props: { team: { ...thisRound, verdictStale: true } } })
+        .find('.team-board-head')
+        .text()
+    ).toContain('改动后未重验')
   })
 
   it('右侧面板里：打开时重读一次模型名单；正在跑的时候不能结束团队模式', async () => {
@@ -70,133 +134,113 @@ describe('TeamBoardPanel 摘要行', () => {
     const running = docked({ running: true })
     expect(running.find('.team-board-end').attributes('disabled')).toBeDefined()
   })
+})
 
-  it('验收之后又改过工程：不再挂红牌，改成「改动后未重验」', () => {
-    const wrapper = docked({ team: { ...team, verdict: 'pass', verdictStale: true } })
-    expect(wrapper.find('.team-board-head').text()).toContain('改动后未重验')
+describe('像素画风：委托板', () => {
+  it('委托条说现在：有受阻项就说受阻；进度格一件活一格', () => {
+    const wrapper = docked({ running: true })
+    expect(labelOf(wrapper, '.q-banner')).toContain('1 项受阻')
+    expect(wrapper.findAll('.pip').map((pip) => pip.classes())).toEqual([
+      ['pip', 'is-done'],
+      ['pip', 'is-writing']
+    ])
+    // 上一轮的验收不盖章
+    expect(wrapper.find('.stamp').exists()).toBe(false)
+  })
+
+  it('角色卡：气泡说此刻在干嘛；交过活的说交了什么、右上角记几份', () => {
+    const wrapper = docked({ running: true })
+    const cards = wrapper.findAll('.crew-card')
+    expect(cards).toHaveLength(2)
+    // 资产统计员名下有受阻项：要人看一眼
+    expect(cards[0]!.classes()).toContain('is-alert')
+    expect(cards[0]!.find('.bubble').text()).toContain('等你确认删不删')
+    expect(cards[1]!.find('.bubble').text()).toContain('已交付「配置统计报告」')
+    expect(cards[1]!.find('.card-loot').attributes('title')).toBe('本轮交回 1 份')
+  })
+
+  it('点角色卡：详情插在这一行下面——手上的活、往来（群发的合成一条）、名下受阻的能重开', async () => {
+    const wrapper = docked({ running: true })
+    await wrapper.findAll('.crew-card')[0]!.trigger('click')
+    const detail = wrapper.find('.crew-detail')
+    expect(detail.exists()).toBe(true)
+    expect(detail.find('.detail-job').text()).toBe('统计全部资产')
+    const thread = detail.findAll('.thread-item').map((item) => item.text())
+    expect(thread.some((line) => line.includes('制作人 → 资产统计员、配置统计员'))).toBe(true)
+    expect(thread.some((line) => line.includes('Assertion failed'))).toBe(true)
+    await detail.find('.mini-task .q-btn').trigger('click')
+    expect(wrapper.emitted('reopen')).toEqual([['t2']])
+    await wrapper.findAll('.crew-card')[0]!.trigger('click')
+    expect(wrapper.find('.crew-detail').exists()).toBe(false)
+  })
+
+  it('成果架：交回的是卷轴，在写的、停下的是空格；点卷轴就地展开，标题不重复、可看全文', async () => {
+    const wrapper = docked({ running: true })
+    const slots = wrapper.findAll('.slot')
+    expect(slots[0]!.text()).toContain('配置统计报告')
+    expect(slots[1]!.classes()).toContain('is-writing')
+    await slots[0]!.trigger('click')
+    const scroll = wrapper.find('.scroll-open')
+    expect(scroll.find('.parch-title').text()).toBe('配置统计报告')
+    const body = scroll.find('.md-stub').text()
+    expect(body.startsWith('- 引擎 5.7')).toBe(true)
+    expect(scroll.find('.parch-body').classes()).toContain('is-clamped')
+    await scroll.findAll('.q-link')[0]!.trigger('click')
+    expect(wrapper.find('.parch-body').classes()).not.toContain('is-clamped')
+    await wrapper.findAll('.scroll-open .q-link')[1]!.trigger('click')
+    expect(wrapper.find('.scroll-open').exists()).toBe(false)
+  })
+
+  it('任务板、日志默认收着：日志只露最新一条；交付那条点了展开那份卷轴', async () => {
+    const wrapper = docked({ running: true })
+    const [board, log] = wrapper.findAll('.q-fold-box')
+    expect(board!.find('.board-list').exists()).toBe(false)
+    expect(board!.text()).toContain('1 项受阻')
+    expect(log!.findAll('.log-item')).toHaveLength(1)
+    await log!.find('.fold-head').trigger('click')
+    const items = wrapper.findAll('.log-item')
+    expect(items.length).toBeGreaterThan(3)
+    const delivered = items.find((item) => item.classes().includes('is-delivered'))!
+    await delivered.find('button').trigger('click')
+    expect(wrapper.find('.scroll-open .parch-title').text()).toBe('配置统计报告')
+  })
+
+  it('还没招人、还没派活：说清楚在等什么', () => {
+    const empty = { ...team, members: [], jobs: [], board: [], mail: [], events: [] }
+    const wrapper = docked({ team: empty, running: true })
+    expect(wrapper.text()).toContain('制作人还没有招人')
+    expect(wrapper.text()).toContain('制作人正在安排活')
   })
 })
 
-describe('成员', () => {
-  it('一人一行说此刻在干嘛：在跑的翻成人话、路径变短，交过活的说交了什么', () => {
-    const wrapper = docked({
-      team: {
-        ...team,
-        live: {
-          running: ['玩法主程'],
-          waiting: [],
-          awaited: [],
-          assignments: [{ member: '玩法主程', text: '写波次', since: 5 }],
-          recent: []
-        }
-      },
-      activity: [
-        { member: '玩法主程', text: '调用 read_local_file D:/Proj/Source/Game/Wave.cpp', at: 6 }
-      ]
-    })
-    const rows = wrapper.findAll('.member-main')
-    expect(rows).toHaveLength(2)
-    const busy = rows.find((row) => row.text().includes('玩法主程'))!
-    expect(busy.find('.member-status').text()).toContain('Source/Game/Wave.cpp')
-    expect(busy.find('.member-status').text()).not.toContain('read_local_file')
-    const tester = rows.find((row) => row.text().includes('试玩'))!
-    expect(tester.find('.member-status').text()).toContain('已交付「试玩报告」')
-    expect(tester.find('.member-lock').exists()).toBe(true)
+describe('简约画风：泳道', () => {
+  it('一人一条：此刻在干嘛、时间轴上一件活一段；点一条就地展开交回的成果', async () => {
+    setOfficeStyle('v1')
+    const wrapper = docked({ running: true })
+    expect(wrapper.find('.quest').exists()).toBe(false)
+    const lanes = wrapper.findAll('.lane')
+    expect(lanes).toHaveLength(2)
+    expect(lanes[1]!.findAll('.track-mark')).toHaveLength(1)
+    expect(lanes[0]!.findAll('.track-bar.is-writing')).toHaveLength(1)
+    expect(wrapper.findAll('.track-crash').length).toBeGreaterThan(0)
+
+    await lanes[1]!.find('.lane-row').trigger('click')
+    const body = wrapper.find('.lane-body')
+    expect(body.find('.report-title').text()).toBe('配置统计报告')
+    expect(body.find('.md-stub').exists()).toBe(false)
+    await body.find('.report-head').trigger('click')
+    expect(wrapper.find('.lane-body .md-stub').text().startsWith('- 引擎 5.7')).toBe(true)
   })
 
-  it('点一行：选中他，展开最近几步；任务和留言只看他；再点或点标签上的 × 取消', async () => {
-    const wrapper = docked({
-      activity: [{ member: '玩法主程', text: '调用 blueprint_compile BP_Wave', at: 6 }]
-    })
-    const row = wrapper.findAll('.member-main').find((r) => r.text().includes('玩法主程'))!
-    await row.trigger('click')
-    expect(wrapper.find('.member-detail').exists()).toBe(true)
-    expect(wrapper.find('.step-action').text()).toContain('BP_Wave')
-    expect(wrapper.find('.filter-chip').text()).toContain('玩法主程')
-    // 存档没有负责人，选了玩法主程就看不到它
-    expect(wrapper.text()).not.toContain('存档')
-    // 留言里没有玩法主程的往来
-    expect(wrapper.findAll('.mail')).toHaveLength(0)
-    await row.trigger('click')
-    expect(wrapper.find('.member-detail').exists()).toBe(false)
+  it('点时间轴上的菱形：展开这个人和那份成果', async () => {
+    setOfficeStyle('v1')
+    const wrapper = docked({ running: true })
+    await wrapper.find('.track-mark').trigger('click')
+    expect(wrapper.find('.lane.is-open .md-stub').exists()).toBe(true)
   })
 })
 
-describe('任务', () => {
-  it('受阻的排最前、带红标签和原因、能重开；完成的折起来', async () => {
-    const wrapper = docked()
-    const titles = wrapper.findAll('.tasks .task-title').map((node) => node.text())
-    expect(titles).toEqual(['存档', '波次系统'])
-    const blocked = wrapper.findAll('.task')[0]!
-    expect(blocked.text()).toContain('受阻')
-    expect(blocked.find('.task-note').text()).toContain('等你定死亡规则')
-    await blocked.find('.task-reopen').trigger('click')
-    expect(wrapper.emitted('reopen')).toEqual([['t3']])
-
-    const fold = wrapper.find('.done-fold')
-    expect(fold.text()).toContain('已完成 1 项')
-    await fold.trigger('click')
-    expect(wrapper.text()).toContain('灰盒关卡')
-  })
-
-  it('验收通过之前叫「自报完成」；点开才看证据', async () => {
-    const wrapper = docked()
-    await wrapper.find('.done-fold').trigger('click')
-    const done = wrapper.findAll('.task').find((task) => task.text().includes('灰盒关卡'))!
-    expect(done.find('.task-icon').attributes('aria-label')).toBe('自报完成')
-    expect(done.find('.task-evidence').exists()).toBe(false)
-    await done.find('.task-line').trigger('click')
-    expect(done.find('.task-evidence').text()).toContain('a.png')
-
-    const passed = docked({ team: { ...team, verdict: 'pass' } })
-    await passed.find('.done-fold').trigger('click')
-    const accepted = passed.findAll('.task').find((task) => task.text().includes('灰盒关卡'))!
-    expect(accepted.find('.task-icon').attributes('aria-label')).toBe('完成')
-  })
-
-  it('这一轮开始后没人动过的「进行中 / 受阻」退到背景，标「上一轮」', () => {
-    const wrapper = docked({ team: { ...team, roundStartedAt: 10 } })
-    const old = wrapper.findAll('.task').find((task) => task.text().includes('存档'))!
-    expect(old.classes()).toContain('is-old')
-    expect(old.find('.task-when').text()).toContain('上一轮')
-  })
-})
-
-describe('留言', () => {
-  it('交付：标签 + 报告标题 + 一句摘要，客套话和分隔线去掉；指令只露第一句', () => {
-    const wrapper = docked()
-    const [instruction, delivery] = wrapper.findAll('.mail')
-    expect(delivery!.find('.mail-head').text()).toContain('交付')
-    expect(delivery!.find('.mail-title').text()).toBe('试玩报告')
-    expect(delivery!.find('.mail-summary').text()).toBe('第三波卡死，塔没有伤害')
-    expect(delivery!.text()).not.toContain('报告全文如下')
-    expect(instruction!.find('.mail-head').text()).toContain('指令')
-    expect(instruction!.find('.mail-summary').text()).toBe('去试玩第三波。')
-    // 制作人发出去还没被读到：一个小圆点
-    expect(instruction!.find('.unread-dot').exists()).toBe(true)
-  })
-
-  it('点开：Markdown 全文和附注；很长的报告能开阅读视图，返回后回到原位', async () => {
-    const long =
-      '# 很长的报告\n' + Array.from({ length: 4 }, (_, i) => `## 第 ${i} 节\n内容`).join('\n')
-    const wrapper = docked({
-      team: {
-        ...team,
-        mail: [
-          { id: 'm9', from: '试玩', to: 'producer', at: 1, text: `【交活】试玩 回话：\n${long}` }
-        ]
-      }
-    })
-    await wrapper.find('.mail-preview').trigger('click')
-    expect(wrapper.find('.md-stub').text()).toContain('第 3 节')
-    await wrapper.find('.mail-action.is-primary').trigger('click')
-    expect(wrapper.find('.reader').exists()).toBe(true)
-    await wrapper.find('.reader-back').trigger('click')
-    expect(wrapper.find('.reader').exists()).toBe(false)
-  })
-})
-
-describe('队员的模型（选中那一行后出现）', () => {
+describe('队员的模型（打开角色详情后出现）', () => {
   const choice = (
     providerId: string,
     modelId: string,
@@ -241,8 +285,8 @@ describe('队员的模型（选中那一行后出现）', () => {
   async function open(name: string, props: Record<string, unknown>): Promise<VueWrapper> {
     const wrapper = docked({ team: withModels, ...props })
     await wrapper
-      .findAll('.member-main')
-      .find((row) => row.text().includes(name))!
+      .findAll('.crew-card')
+      .find((card) => card.text().includes(name))!
       .trigger('click')
     return wrapper
   }

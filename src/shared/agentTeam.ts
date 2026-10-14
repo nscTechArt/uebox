@@ -217,6 +217,38 @@ export interface TeamMail {
   readAt?: number
 }
 
+/**
+ * 一件派出去的活：从开工到交回（或停下）。盒子自己记的账，不靠制作人写任务板 ——
+ * 「谁交回了什么」在界面上就是这本账（见 docs/团队任务板可读性-2026-10-14.md）。
+ *
+ * 两种派活（等它干完、派到后台）都记；排队等前一件的，轮到它开工才算开始。
+ */
+export interface TeamJob {
+  id: string
+  member: string
+  /** 派活那段话的第一行（截短）。交回的报告没有标题时拿它当名字 */
+  brief: string
+  startedAt: number
+  /** 没有 = 还在干（或者上次运行被打断，见 `outcome`） */
+  endedAt?: number
+  outcome?: 'done' | 'stopped'
+  /** 交回的结论原文（不含盒子附的写操作记账、快照） */
+  report?: string
+  /** 停下的原因 */
+  reason?: string
+}
+
+/**
+ * 团队这一局里发生的、不属于任何一个人的事。现在只有编辑器的崩溃和恢复：
+ * 它影响所有正在干活的人，界面上画成一条贯穿所有人的线，而不是几条一样的留言
+ */
+export interface TeamEvent {
+  kind: 'crashed' | 'recovered' | 'recoverFailed'
+  at: number
+  /** 崩溃的报错摘要、恢复失败的原因。给人看的，可能没有 */
+  detail?: string
+}
+
 export type TeamVerdict = 'pass' | 'fail' | 'blocked'
 
 /** 界面上任务板面板要的一整份 */
@@ -238,6 +270,10 @@ export interface TeamStateView {
   board: BoardTask[]
   /** 最近的留言，旧的在前 */
   mail: TeamMail[]
+  /** 最近派出去的活，旧的在前。老数据没有 */
+  jobs?: TeamJob[]
+  /** 最近的团队事件（编辑器崩溃、恢复），旧的在前。老数据没有 */
+  events?: TeamEvent[]
   /** 此刻谁在跑、谁在等。只有这条对话这次运行里跑过团队才有（内存里的事，不落盘） */
   live?: TeamLiveView
 }

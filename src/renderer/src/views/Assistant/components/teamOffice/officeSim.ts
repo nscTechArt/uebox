@@ -15,6 +15,7 @@
  */
 
 import type { ToolKind } from './officeActivity'
+import type { ModelLook } from './modelLook'
 
 export type Mode =
   | { kind: 'work'; tool: ToolKind | 'think' }
@@ -64,6 +65,8 @@ export interface Actor {
   style: number
   /** 衬衫颜色序号，制作人是 -1（用强调色） */
   crew: number
+  /** 认得出是哪家模型：发色、配件照那家画，发型不再按 style 挑 */
+  look?: ModelLook
   mode: Mode
   x: number
   vx: number
@@ -333,6 +336,7 @@ export interface MemberInput {
   name: string
   style: number
   crew: number
+  look?: ModelLook
   mode: Mode
 }
 
@@ -415,12 +419,14 @@ export class OfficeSim {
         existing.name = member.name
         existing.style = member.style
         existing.crew = member.crew
+        existing.look = member.look
         this.setMode(existing, member.mode)
         continue
       }
       changed = true
       const actor = this.spawn(member.id, member.name, member.style, member.crew, false)
       actor.mode = member.mode
+      actor.look = member.look
       if (!options.fresh && !this.reduced) {
         // 新招来的：从门口走进来，挥挥手
         actor.x = -this.profile.spriteW - 2

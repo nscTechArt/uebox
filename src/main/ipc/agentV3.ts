@@ -604,6 +604,8 @@ async function prepareTeam(
   const changed = (): void => emit('agent-v3:team-board', { sessionId: ctx.sessionId })
   const store = createTeamStore(teamDirsFor(ctx.sessionId), Date.now, changed)
   await store.ensure()
+  // 上次运行没交回的活（盒子关了、崩了）不会再交回来了；不收掉，界面上会一直挂着「正在写」
+  await store.closeOpenJobs('上次运行中断，这件活没有交回').catch(() => undefined)
   ctx.pacedRequests = true
   // 谁开始跑、谁在等也告诉界面（任务板上的办公室）。派活时几个人同时开工，合并成一次
   let liveTimer: ReturnType<typeof setTimeout> | null = null
@@ -635,6 +637,9 @@ async function prepareTeam(
 
 /** 面板上最多显示多少条留言。它是近况，不是档案 —— 全量在 `<会话>.team/mail.json` */
 const TEAM_PANEL_MAIL = 30
+/** 面板上最多显示多少件活、多少条团队事件。同上，是近况 */
+const TEAM_PANEL_JOBS = 60
+const TEAM_PANEL_EVENTS = 20
 
 /** 动静通知合并的窗口。人眼看不出这一点延迟，几个人同时开工只重读一次 */
 const TEAM_LIVE_COALESCE_MS = 120
@@ -650,11 +655,13 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
   const team = (await loadExecutionOptions(sessionId))?.team
   if (!team) return null
   const store = createTeamStore(teamDirsFor(sessionId))
-  const [members, board, mail, activity] = await Promise.all([
+  const [members, board, mail, activity, jobs, events] = await Promise.all([
     store.roster(),
     store.board(),
     store.mail(),
-    store.activity(TEAM_ACTIVITY_LOOKBACK)
+    store.activity(TEAM_ACTIVITY_LOOKBACK),
+    store.jobs(TEAM_PANEL_JOBS),
+    store.events(TEAM_PANEL_EVENTS)
   ])
   return {
     objective: team.objective,
@@ -666,6 +673,8 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
     members,
     board,
     mail: mail.slice(-TEAM_PANEL_MAIL),
+    jobs,
+    events,
     ...(liveTeams.has(sessionId) ? { live: liveTeams.get(sessionId)!.view() } : {})
   }
 }
@@ -846,6 +855,16 @@ function attachEditorWatch(
   }
   const stop = startTeamEditorWatch(isOurs, {
     onEvent: (event) => {
+      // 记进团队的账：任务板上画成一条贯穿所有人的线（落盘失败不影响看护）
+      void ctx.team?.store
+        .recordEvent(
+          event.kind === 'crashed'
+            ? { kind: 'crashed', ...(event.reason ? { detail: event.reason.slice(0, 200) } : {}) }
+            : event.kind === 'recovered'
+              ? { kind: 'recovered' }
+              : { kind: 'recoverFailed', detail: event.why.slice(0, 200) }
+        )
+        .catch(() => undefined)
       emit('agent-v3:notice', {
         sessionId: ctx.sessionId,
         message: watchNotice(event),

@@ -12,8 +12,10 @@
 
 import type { TaskStatus } from '@core/shared/agentTeam'
 
+import type { ModelLook } from '../modelLook'
 import type { Actor, BubbleIcon, DeskSlot, OfficeSim, Particle, Pose } from '../officeSim'
 import { C, FONT, HAIRS, PRODUCER_SHIRT, SHIRTS } from './artV2'
+import { girl, LOOKS } from './looksV2'
 import type { SpriteSet } from './spritesV2'
 
 type Ctx = CanvasRenderingContext2D
@@ -854,7 +856,7 @@ function blueprintPoster(ctx: Ctx, x: number): void {
 
 // ── 人 ───────────────────────────────────────────────────────────────────
 
-interface Body {
+export interface Body {
   top: number
   P: (lx: number, ly: number, w: number, h: number, color: string) => void
   shirt: [string, string, string]
@@ -890,14 +892,17 @@ function bodyOf(ctx: Ctx, sim: OfficeSim, actor: Actor): Body {
     rect(ctx, color, px, top + ly, w, h)
   }
   const darkSkin = (actor.style + Math.max(0, actor.crew)) % 3 === 2
+  const look = actor.look ? LOOKS[actor.look] : undefined
   return {
     top,
     P,
-    shirt: shirtOf(actor),
-    skin: darkSkin ? C.skinB : C.skinA,
-    skinShade: darkSkin ? C.skinBShade : C.skinAShade,
-    skinLine: darkSkin ? C.skinBLine : C.skinALine,
-    hair: HAIRS[[0, 2, 1, 3, 4, 0, 1, 2][actor.style % 8]! % HAIRS.length]!,
+    shirt: look?.sleeve ?? shirtOf(actor),
+    skin: look ? C.skinA : darkSkin ? C.skinB : C.skinA,
+    skinShade: look ? C.skinAShade : darkSkin ? C.skinBShade : C.skinAShade,
+    skinLine: look ? C.skinALine : darkSkin ? C.skinBLine : C.skinALine,
+    hair: look
+      ? [look.hair[0], look.hair[1]]
+      : HAIRS[[0, 2, 1, 3, 4, 0, 1, 2][actor.style % 8]! % HAIRS.length]!,
     lean: actor.pose === 'lean' ? -1 : actor.pose === 'look' || actor.pose === 'sleep' ? 1 : 0,
     nod: actor.pose === 'sleep' ? 4 : 0
   }
@@ -910,6 +915,19 @@ function person(ctx: Ctx, sim: OfficeSim, actor: Actor, light: Light): void {
   const [shirtHi, shirtMid, shirtLo] = b.shirt
   // 影子：脚下一块椭圆
   if (!actor.seated) glaze(ctx, C.shadow, 0.3, Math.round(actor.x) + 2, f, 9, 2)
+  if (actor.look) {
+    // 认得出模型的队员：照那家的看板娘画，一整套另画（见 looksV2）
+    const asleep = actor.pose === 'sleep'
+    girl(actor.look, b, {
+      seated: actor.seated,
+      walk: actor.pose === 'walk' ? Math.floor(actor.stride) % 4 : -1,
+      closed: asleep || sim.blinking(actor),
+      talking: actor.pose === 'chat' && Math.floor(sim.time * 6) % 2 === 0,
+      dx: b.lean + (asleep ? 2 : 0),
+      dy: b.nod
+    })
+    return
+  }
 
   if (actor.seated) {
     // 坐着：大腿横着、小腿垂下
@@ -1445,4 +1463,49 @@ export class OfficeCat {
       rect(ctx, C.rose, bx + 3, by + 4, 3, 1)
     }
   }
+}
+
+// ── 名片上的小人 ─────────────────────────────────────────────────────────
+
+/** 名片小人的画布：左边留 2 格给马尾，头顶留 6 格给丸子头和举起的手 */
+export const PORTRAIT_W = W + 4
+export const PORTRAIT_H = STAND_H + 7
+
+/**
+ * 任务板角色卡上的小人：和办公室里是同一个人（同发型、同肤色、同衬衫），
+ * 用同一套画法画在一块小画布上。没有工位和场景，只要人。
+ *
+ * @param time 秒。拿来眨眼、敲键盘那几下的节奏；传同一个值画出来就是同一帧
+ */
+export function drawPortraitV2(
+  ctx: Ctx,
+  who: { crew: number; style: number; producer?: boolean; look?: ModelLook; seated?: boolean },
+  pose: Pose,
+  time: number
+): void {
+  const actor = {
+    id: '',
+    name: '',
+    producer: !!who.producer,
+    style: who.style,
+    crew: who.crew,
+    look: who.look,
+    x: 2,
+    facing: 1,
+    pose,
+    seated: !!who.seated,
+    hop: 0,
+    stride: 0,
+    blinkAt: 0
+  } as unknown as Actor
+  // 站着的人头顶在 floorY - 25：落在第 6 行，脚底贴着画布底（下面留 1 行给影子）
+  const blink = (time + who.style * 0.7) % 3.6 < 0.14
+  const sim = {
+    layout: { floorY: PORTRAIT_H - 2 },
+    time,
+    blinking: () => blink
+  } as unknown as OfficeSim
+  ctx.clearRect(0, 0, PORTRAIT_W, PORTRAIT_H)
+  person(ctx, sim, actor, { hour: 12, night: false, dusk: false })
+  arms(ctx, sim, actor)
 }
