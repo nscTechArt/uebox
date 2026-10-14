@@ -46,6 +46,9 @@ public:
 	// blueprint.create_function - 创建蓝图函数图表（可选定义输入输出参数）
 	static void Handle_CreateFunctionGraph(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 
+	// blueprint.create_event_graph - 新建一页空的事件图（编辑器里「+ 图表」那一步）
+	static void Handle_CreateEventGraph(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
 	// blueprint.compile - 编译蓝图并可选保存
 	static void Handle_CompileBlueprint(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 

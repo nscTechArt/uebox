@@ -25,12 +25,15 @@ const toolNamed = (name: string): ExecutableTool => {
 const textOf = (result: { content?: unknown[] }): string =>
   ((result.content?.[0] as { text?: string })?.text ?? '') as string
 
-it.each(['darwin', 'win32'] as const)('gives the %s build script in shell guidance', (platform) => {
+it.each(['darwin', 'win32'] as const)('points %s full rebuilds at cpp_full_rebuild', (platform) => {
   vi.stubGlobal('process', { ...process, platform })
   try {
     const description = createShellTool().description
-    expect(description).toContain(platform === 'darwin' ? 'Mac/Build.sh' : 'Build.bat')
+    // 完整重编走 cpp_full_rebuild，不再教模型自己拼 Build 脚本、让用户关编辑器
+    expect(description).toContain('cpp_full_rebuild')
+    expect(description).not.toContain('先请用户关掉编辑器')
     if (platform === 'darwin') expect(description).not.toContain('Live Coding 开着')
+    else expect(description).toContain('Live Coding 开着')
   } finally {
     vi.unstubAllGlobals()
   }
@@ -75,19 +78,53 @@ describe('写文件工具的敏感位置边界', () => {
     expect(result.isError).toBe(true)
     expect(textOf(result)).toMatch(/不允许访问/)
   })
+  // 盒子自己的配置能读不能写：写进去等于 agent 绕过设置页给自己换权限
+  it.each(['write_local_file', 'edit_local_file'])('%s 不给改盒子自己的配置', async (name) => {
+    const result = await toolNamed(name).execute('call-1', {
+      path: 'C:/Users/me/AppData/Roaming/unreal-box/app-settings.json',
+      content: '{}',
+      edits: [{ oldText: 'a', newText: 'b' }]
+    })
+
+    expect(result.isError).toBe(true)
+    expect(textOf(result)).toMatch(/设置页/)
+  })
 })
 
 describe('三个工具的风险等级', () => {
   /**
-   * 它们动的是**用户自己的硬盘**，不是虚幻工程里可以重新生成的资产。
-   * 标成 mutating 的话，默认的 auto-edit 模式会静默放行 —— 静默改用户源码
-   * 这件事不做。这条断言是防止以后有人为了少弹几次窗把它降级。
+   * 写 / 改文件有改前改后快照，按 mutating 走（auto-edit 下放行）；
+   * 命令没有快照兜得住，始终要问。这条断言防止以后有人为了少弹几次窗把命令降级。
    */
-  it.each(['write_local_file', 'edit_local_file', 'run_shell_command'])(
-    '%s 始终需要审批',
-    (name) => {
-      const tool = toolNamed(name) as unknown as { unrealBox: { risk: string } }
-      expect(tool.unrealBox.risk).toBe('destructive')
+  it.each([
+    ['write_local_file', 'mutating'],
+    ['edit_local_file', 'mutating'],
+    ['run_shell_command', 'destructive']
+  ])('%s 的风险等级是 %s', (name, risk) => {
+    const tool = toolNamed(name) as unknown as { unrealBox: { risk: string } }
+    expect(tool.unrealBox.risk).toBe(risk)
+  })
+})
+
+describe('建工程提醒不拦路', () => {
+  // 写在临时目录里：放行就是真写，正是要断言的那件事
+  it('write_local_file 写 .uproject 照常写入，结果后面带上 create_project 提醒', async () => {
+    const { mkdtempSync, readFileSync, rmSync } = await import('fs')
+    const { join } = await import('path')
+    const dir = mkdtempSync(join(tmpdir(), 'ual-uproject-'))
+    try {
+      const file = join(dir, 'MyGame.uproject')
+      const result = await toolNamed('write_local_file').execute('call-1', {
+        path: file,
+        content: '{"FileVersion": 3}'
+      })
+
+      expect(result.isError).toBeFalsy()
+      expect(readFileSync(file, 'utf8')).toBe('{"FileVersion": 3}')
+      const texts = (result.content as Array<{ text?: string }>).map((c) => c.text ?? '')
+      expect(texts.at(-1)).toContain('create_project')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
-  )
+  })
 })

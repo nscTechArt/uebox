@@ -12,6 +12,7 @@
  * 会原样退回扁平渲染 —— 显示得不如现在好，但不会错。
  */
 
+import { SUBTASK_TOOL_NAMES } from '@core/shared/agentProgress'
 import type { AgentProcessItem } from './AgentProcessLog.types'
 import {
   getToolArgs,
@@ -19,12 +20,6 @@ import {
   normalizeToolName,
   parseStructuredValue
 } from './agentToolCallData'
-
-/**
- * 起子 agent 的工具。`task` 是普通子任务；`team_send` 是工作室模式里派给队员的活，
- * `team_deliver` 是独立验收员在玩 —— 三者都是「另一个 agent 在底下干活」，泳道一样画。
- */
-const SUBTASK_TOOL_NAMES = new Set(['task', 'team_send', 'team_deliver'])
 
 /**
  * 进度行在扁平时间线上带着说话人前缀（`子任务：调用 xxx`）——

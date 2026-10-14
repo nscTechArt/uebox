@@ -1,8 +1,8 @@
 import type { PiniaPluginContext, StoreGeneric } from 'pinia'
+import type { ChatSessionSource } from '../store/modules/chatMessages'
 import { chatHistoryStorage } from './chatHistoryStorage'
 
 export const CHAT_MESSAGES_STORE_ID = 'chat-messages'
-export const CHAT_MESSAGES_STORAGE_KEY = 'chat-messages'
 export const CHAT_MESSAGES_CHECKPOINT_MS = 2000
 
 export interface ChatMessagesPersistedState {
@@ -11,26 +11,34 @@ export interface ChatMessagesPersistedState {
   compressedUserCountBySid: Record<string, number>
 }
 
-interface ChatMessagesPersistenceStore extends StoreGeneric {
-  exportChatMessagesPersistence: () => ChatMessagesPersistedState
-  hydrateChatMessagesPersistence: (snapshot: unknown) => void
+export interface ChatSessionWrite {
+  sid: string
+  /** null = 这个对话删掉了 */
+  json: string | null
+  typing?: string[]
 }
 
-export interface ChatMessagesCheckpointStorage {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-  flush(): void
+/** 对话正文的盘。默认接主进程（`main/ipc/chatSessionFiles.ts`），测试里换成内存 */
+export interface ChatSessionsBackend {
+  source(): ChatSessionSource
+  write(writes: ChatSessionWrite[]): void
+  /** 独立窗口、MiniChat 不写盘，改动交给主窗口存 */
+  readOnly(): boolean
+}
+
+interface ChatMessagesPersistenceStore extends StoreGeneric {
+  attachSessionSource: (source: ChatSessionSource) => void
+  exportSession: (sid: string) => { json: string; typing: string[] } | null | undefined
+  loadedSessionIds: () => string[]
 }
 
 interface ChatMessagesPersistenceOptions {
-  storage?: ChatMessagesCheckpointStorage
+  backend?: ChatSessionsBackend
   checkpointMs?: number
-  serialize?: (snapshot: ChatMessagesPersistedState) => string
-  deserialize?: (value: string) => unknown
 }
 
+// `ensureContainer` 不在里面：它只建一个空容器，真有内容时后面的动作会记上
 const MUTATING_ACTIONS = new Set([
-  'ensureContainer',
   'pushUser',
   'insertUserBefore',
   'pushAssistantTyping',
@@ -56,27 +64,57 @@ const MUTATING_ACTIONS = new Set([
   'applySyncMessages'
 ])
 
+/** 这次改动碰了哪几个对话。约定是第一个参数；两个例外单列 */
+function touchedSids(name: string, args: unknown[]): string[] {
+  const raw =
+    name === 'dropSessions'
+      ? Array.isArray(args[0])
+        ? args[0]
+        : []
+      : name === 'copySessionMessages'
+        ? [args[1]]
+        : [args[0]]
+  return raw.map((sid) => String(sid || '').trim()).filter(Boolean)
+}
+
+export const defaultChatSessionsBackend: ChatSessionsBackend = {
+  source: () => {
+    const index = chatHistoryStorage.sessionIndex
+    return {
+      typing: new Map(
+        Object.entries(index)
+          .filter(([, entry]) => entry.typing?.length)
+          .map(([sid, entry]) => [sid, entry.typing!])
+      ),
+      read: (sid) => window.api?.chatHistory?.readSessionSync?.(sid) ?? null
+    }
+  },
+  write: (writes) => {
+    void window.api?.chatHistory?.writeSessions?.(writes)?.catch((error: unknown) => {
+      console.error(`[ChatMessagesPersistence] 写入 ${writes.length} 个对话失败:`, error)
+    })
+  },
+  readOnly: () => chatHistoryStorage.isReadOnly
+}
+
 /**
  * 对话消息专用的持久化插件。
  *
- * `pinia-plugin-persistedstate` 会在每次深层 mutation 后先序列化整棵 Store，之后才
- * 调 storage.setItem。把节流写在 Storage 里只能合并磁盘 IPC，拦不住最贵的
- * JSON.stringify。这里改成监听 Store action，只记一个 dirty 标记；等检查点到了
- * 才从 Store 取最新快照并序列化一次。
+ * 一个对话一个文件，**只写改过的那几个**：监听 Store action，记下碰过哪些对话，
+ * 检查点到了逐个序列化。原来是每次把全部对话拼成一份整体重写，历史到了
+ * 一百多 MB 时每 2 秒卡一下，最后还撑爆了 IPC。
  */
 export function createChatMessagesPersistencePlugin(
   options: ChatMessagesPersistenceOptions = {}
 ): (context: PiniaPluginContext) => void {
-  const storage = options.storage ?? chatHistoryStorage
+  const backend = options.backend ?? defaultChatSessionsBackend
   const checkpointMs = options.checkpointMs ?? CHAT_MESSAGES_CHECKPOINT_MS
-  const serialize = options.serialize ?? JSON.stringify
-  const deserialize = options.deserialize ?? JSON.parse
 
   return ({ store }: PiniaPluginContext): void => {
     if (store.$id !== CHAT_MESSAGES_STORE_ID) return
 
     const chatStore = store as ChatMessagesPersistenceStore
-    let dirty = false
+    const dirty = new Set<string>()
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const clearCheckpointTimer = (): void => {
@@ -85,24 +123,31 @@ export function createChatMessagesPersistencePlugin(
       timer = null
     }
 
-    const persistNow = (force = false): void => {
+    const persistNow = (all = false): void => {
       clearCheckpointTimer()
-      if (!dirty && !force) return
+      const sids = all ? new Set([...dirty, ...chatStore.loadedSessionIds()]) : new Set(dirty)
+      dirty.clear()
+      if (sids.size === 0 || backend.readOnly()) return
 
-      try {
-        const value = serialize(chatStore.exportChatMessagesPersistence())
-        storage.setItem(CHAT_MESSAGES_STORAGE_KEY, value)
-        // 序列化已经在检查点层完成，立即交给主进程落盘，避免再叠一层 2 秒延迟。
-        storage.flush()
-        dirty = false
-      } catch (error) {
-        // 保留 dirty；下一次 mutation 会重新安排检查点，临时失败不会让后续历史停更。
-        console.error('[ChatMessagesPersistence] 保存聊天历史失败:', error)
+      const writes: ChatSessionWrite[] = []
+      for (const sid of sids) {
+        try {
+          const exported = chatStore.exportSession(sid)
+          // 盘上那份读不出来：不拿内存里这份去盖它
+          if (exported === undefined) continue
+          writes.push(
+            exported ? { sid, json: exported.json, typing: exported.typing } : { sid, json: null }
+          )
+        } catch (error) {
+          // 留着 dirty，下一次改动会重新安排检查点，临时失败不会让后续历史停更
+          dirty.add(sid)
+          console.error(`[ChatMessagesPersistence] 序列化对话 ${sid} 失败:`, error)
+        }
       }
+      if (writes.length > 0) backend.write(writes)
     }
 
     const scheduleCheckpoint = (): void => {
-      dirty = true
       if (timer) return
       timer = setTimeout(() => {
         timer = null
@@ -110,39 +155,21 @@ export function createChatMessagesPersistencePlugin(
       }, checkpointMs)
     }
 
-    const hydrate = (): void => {
-      const raw = storage.getItem(CHAT_MESSAGES_STORAGE_KEY)
-      if (!raw) return
-
-      try {
-        chatStore.hydrateChatMessagesPersistence(deserialize(raw))
-      } catch (error) {
-        console.error('[ChatMessagesPersistence] 读取聊天历史失败，本次使用空历史:', error)
-      }
-    }
-
     Object.defineProperty(chatStore, '$persist', {
       configurable: true,
-      value: () => {
-        dirty = true
-        persistNow()
-      }
-    })
-    Object.defineProperty(chatStore, '$hydrate', {
-      configurable: true,
-      value: hydrate
+      value: () => persistNow(true)
     })
 
-    hydrate()
+    chatStore.attachSessionSource(backend.source())
 
     const unsubscribeActions = chatStore.$onAction(({ name, args, after }) => {
       if (!MUTATING_ACTIONS.has(name)) return
 
       after(() => {
+        for (const sid of touchedSids(name, args)) dirty.add(sid)
         // 完成态是用户真正需要保住的终稿，不等下一次恢复检查点。
         const isFinalReplace = name === 'replaceTyping' && args[3] === true
         if (isFinalReplace) {
-          dirty = true
           persistNow()
           return
         }

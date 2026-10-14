@@ -1,6 +1,6 @@
 ---
 name: ue-cpp-workflow
-description: Writes, adds and compiles C++ in an Unreal project, then hot-reloads it into the running editor. Use when the user asks for gameplay code, a new UCLASS/USTRUCT/UENUM, an Actor or Component or Subsystem class, a module dependency change, or says things like "写个 C++ 类"、"加个组件"、"这段代码编不过"、"帮我改下 Build.cs". Do not use for Blueprint graph editing, for material graphs, for Sequencer, or for modifying the engine's own source under Engine/Source.
+description: Writes, adds and compiles C++ in an Unreal project, then hot-reloads it into the running editor. Use when the user asks for gameplay code, a new UCLASS/USTRUCT/UENUM, an Actor or Component or Subsystem class, a module dependency change, or says things like "写个 C++ 类"、"加个组件"、"这段代码编不过"、"帮我改下 Build.cs". Also covers editing the engine's own source under Engine/Source when the user asks for it. Do not use for Blueprint graph editing, for material graphs, or for Sequencer.
 ---
 
 # UE C++ 工作流
@@ -8,63 +8,65 @@ description: Writes, adds and compiles C++ in an Unreal project, then hot-reload
 ## Quick Start
 
 **动手写任何 C++ 之前，先 `cpp_probe`。** 它回答两个会改变做法的问题：
-这个工程能不能加 C++、编不过时能不能拿到报错。
+这个工程走哪条编译路、编不过时能不能拿到报错。
 
 ```
 cpp_probe                    → 能怎么编、引擎源码在哪
 cpp_list_modules             → 这个类该写进哪个模块
+cpp_add_class                → 新建类（和编辑器「新建 C++ 类」逐字相同，只写文件不编译）
 （写代码：read_local_file / edit_local_file）
-cpp_compile                  → 编进正在跑的编辑器，不需要用户关编辑器
+cpp_compile                  → 编进正在跑的编辑器，不需要关编辑器
+cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑器、完整编译、再打开并重连
 ```
+
+整条链上**没有一步需要用户动手**。关编辑器这种事由 `cpp_full_rebuild` 做，用户只在审批框里点一次同意。
 
 ## Workflow
 
 ### 改一个已有的类
 
 `read_local_file` 看清楚 → `edit_local_file` 改 → `cpp_compile`。
-编不过就读诊断、改、再编。这条路不需要用户做任何事。
+编不过就读诊断、改、再编。
 
-### 新建一个类 —— 现在做不了，交给用户
+### 新建一个类
 
-**没有建类工具。** 用户要一个新的 C++ 类时，请他在编辑器里手动建一次：
+`cpp_add_class`（名字不带前缀，父类如 `Actor` / `ActorComponent` / `Interface`）
+→ `read_local_file` 看生成的两个文件 → 填实现 → `cpp_compile`。
 
-> 菜单 **工具 > 新建 C++ 类**，选好父类和模块，点创建。
+- 它用的是引擎自己的类模板，`.generated.h`、`<MODULE>_API` 宏、老式 PCH、父类模块依赖都和编辑器建的一样。
+  所以**不要自己 `write_local_file` 拼 `.h`/`.cpp` 来建类**，也**不要让用户去菜单里点** ——
+  两样都比这个工具差。
+- 报「已经存在」：多半是上一轮建过还没编进来。读那个文件接着改，别换名字重建。
+- 一次要建好几个类：逐个调，全部建完、实现填完再 `cpp_compile` 一次。
 
-建完告诉我文件在哪，**后面改实现和编译我全都能接**。
+### 纯蓝图工程的第一个类
 
-原因（2026-09-08 真机实测）：引擎的建类 API 里有一步会把引擎和所有插件的源码
-全扫一遍，同步跑在游戏线程上，在真实工程上不返回 —— 编辑器停在
-「正在添加代码到项目…… 14%」，10 分钟也等不到结果。所以这个工具已经摘掉了。
+`cpp_probe` 回 `has_code: false` 且没有声明模块时，照样调 `cpp_add_class`（`module` 留空）。
+它会和编辑器一样先建好以工程名命名的主模块（`.Build.cs`、两个 `.Target.cs`、模块文件）。
+**新模块正在跑的编辑器加载不了**，所以填完实现后调 `cpp_full_rebuild`，不是 `cpp_compile`。
 
-**也不要用 `write_local_file` 自己造 `.h`/`.cpp` 来顶替。** 建类要处理类名校验、
-`.generated.h`、模块 API 宏、`.uproject` 依赖登记，自己写会漏，产出和用户在
-编辑器里建的不一样，而且很容易编不过。
+工程名不是合法的 C++ 标识符（中文、带横杠、数字开头）时工具会拒绝 —— 引擎在这里也会失败，
+如实告诉用户需要先给工程改个英文名。
 
-### 改模块依赖
+### 改模块依赖（.Build.cs / .uproject）
 
-`edit_local_file` 改 `.Build.cs` → **这类改动热重载和 Live Coding 都补不上**，
-需要关掉编辑器完整重新链接。`cpp_compile` 的返回里 `needs_full_rebuild` 为真就是这个意思。
-把命令递给用户，不要自己去杀编辑器进程：
-
-```
-<Engine>/Build/BatchFiles/Build.bat <项目名>Editor Win64 Development -Project="<uproject 绝对路径>"
-```
+`edit_local_file` 改 → `cpp_compile`。热重载路一般编得进来（实测给模块加 Slate 依赖、
+调用新模块 API 都生效）。返回里 `needs_full_rebuild` 为真**且走的是 Live Coding** 时，
+补丁式热更链不进新依赖，调 `cpp_full_rebuild`。
 
 ## Constraints
 
-**1. 纯蓝图工程加不了 C++。** `cpp_probe` 回 `has_code: false` 且没有声明模块时，
-停下来告诉用户：第一个 C++ 类要他在编辑器里手动加一次（菜单 工具 > 新建 C++ 类）。
-这一步工具做不了 —— 引擎那条路在这种工程上会弹模态对话框，把编辑器卡死。
+**1. `cpp_full_rebuild` 会关掉用户的编辑器。** 只在 `cpp_compile` 做不到时用（上面三种情况，
+加上 `cpp_compile` 报「没有可热重载的 UObject」）。有未保存的改动它会拒绝并列出清单：先 `ue_save`
+再调；清单里有存不了的，问用户能不能丢，同意了才带 `discard_unsaved`。
+编不过时编辑器保持关着，按报错改完直接再调一次。
 
 `has_code: false` **但**列得出模块，是另一回事：那是个源码缺失的 C++ 工程
 （`.uproject` 声明了模块但 `Source/` 不在），加新类解决不了，让用户检查工程完整性。
 
-**2. Live Coding 路编不过时拿不到报错。** `cpp_probe` 回 `compile_path: livecoding` 时，
-编译失败只会告诉你「失败了」，没有文件名和行号 —— 那些只显示在 Live Coding 控制台窗口里，
-不写任何日志文件（实测确认过）。这时候：
-
-- **不要猜是哪一行错**，更不要编造一个行号去改；
-- 建议用户在编辑器设置里关掉 Live Coding 后重启，那条路（热重载）能给出完整诊断。
+**2. Live Coding 路的报错从 UBT 日志读回。** 编辑器日志里只有一句「失败了」，`cpp_compile`
+会去读 UnrealBuildTool 的 `Log.txt` 拿文件名和行号。偶尔读不到时它会明说 ——
+**不要猜是哪一行错**，用 `cpp_full_rebuild` 完整编一次就能拿到全部报错。
 
 **3. 不要凭记忆写 UE API。** UE 的 API 在 5.0–5.8 之间会变（函数改名、参数增减、
 导出宏变化）。拿不准某个函数的签名，就用 `cpp_probe` 给的 `engine_source_dir` 去
@@ -98,14 +100,25 @@ cpp_compile                  → 编进正在跑的编辑器，不需要用户�
 |---|---|
 | `cpp_compile` 回 `NoChanges` | 确认文件真的保存了，且改的是这个工程正在用的那份源码 |
 | `cpp_compile` 回 `Timeout` | 说「不知道成没成」，请用户看一眼编辑器，**不要报成功** |
+| `cpp_compile` 回 `NotStarted` | 前提条件没满足（见返回的原因），改代码解决不了；没有可热重载的 UObject 就 `cpp_full_rebuild` |
 | 诊断里没有文件名行号 | 走的是 Live Coding 路，见 Constraints 2，不要猜 |
-| 编译反复失败且原因不明 | 建议关编辑器在 IDE 里完整编一次，那里的报错最全 |
+| 编译反复失败且原因不明 | `cpp_full_rebuild` 完整编一次，那条路的报错最全 |
+| Live Coding 处于「关了没关干净」 | `cpp_compile` 会拒绝并说明；先 `ue_save` 再 `ue_restart_editor` |
 
 ## Escalation
 
-这几件事工具做不到，必须交回给用户，不要试图绕过：
+需要用户点头才做的：
 
-- 关闭编辑器（`cpp_compile` 不需要，但完整重编需要）
-- **新建任何 C++ 类**（不只是第一个）—— 请用户走编辑器菜单 工具 > 新建 C++ 类
-- 关闭 / 开启 Live Coding（那是用户的编辑器设置，工具不主动改）
-- 修改引擎自身源码、打包、安装 Visual Studio
+- 编辑器卡死、插件连不上时关不掉它 —— `cpp_full_rebuild` 会说明；用户同意丢弃未保存改动后，
+  用 `run_shell_command` 跑 `taskkill` 结束进程
+- 开启 / 关闭 Live Coding —— 那是用户的编辑器偏好，不主动改。他要改时用 `ue_set_config`
+  （`EditorPerProjectUserSettings`，`/Script/LiveCoding.LiveCodingSettings`，`bEnabled`），
+  然后 `ue_save` 再 `ue_restart_editor`
+- 修改引擎自身源码（`Engine/Source`）—— 只在用户要求时改。先说清两件事：安装版引擎
+  （Launcher / Fab 装的）改了源码也不会重新编译，只有源码版引擎才生效；源码版改完要整个
+  引擎重编，可能几十分钟到几小时。他确认后再动手，改之前列出要改的文件
+
+工具做不到、需要用户本人处理的：安装 Visual Studio / 编译工具链。
+
+别的（建类、编译、关编辑器完整重编、重启编辑器）都有工具，**不要交给用户**。
+用户明确授权你直接改文件时，照做就是 —— 这里没有「授权也解除不了」的限制。

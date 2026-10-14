@@ -158,7 +158,8 @@ describe('resolveTools —— 动态工具过滤', () => {
       resolveTools({ sessionId: 's', ueConnected: true }).map((t) => [t.name, t])
     )
 
-    expect(byName.get('material_delete_node')?.unrealBox.risk).toBe('destructive')
+    // 删材质节点开在插件事务里，ue_undo 撤得回来，按可撤销的改动算
+    expect(byName.get('material_delete_node')?.unrealBox.risk).toBe('mutating')
     expect(byName.get('ue_destroy_actor')?.unrealBox.risk).toBe('destructive')
   })
 
@@ -582,6 +583,24 @@ describe('buildSystemPrompt', () => {
    * 做包含判断，会把能力清单里的一次提及误当成连接引导。
    */
   const environmentOf = (prompt: string): string => prompt.slice(prompt.indexOf('<environment>'))
+
+  /**
+   * 技能里的「不要做 X」是默认做法，不是替用户做的否决。以前模型读到就拒，
+   * 用户明说「我知道风险，做吧」也照样拒。这里守住三处放宽，以及没放宽的那几条。
+   */
+  it('用户明确要求时可以越过技能的默认做法；切到已装引擎不算假升级；下载不再一律交给用户', () => {
+    const prompt = buildSystemPrompt(base)
+    expect(prompt).toContain(
+      'Skills and tool descriptions describe defaults, not vetoes over the user'
+    )
+    expect(prompt).toContain('Switching the project to an engine that is already installed is real')
+    // 假装升级到没装的引擎仍然不行
+    expect(prompt).toContain(
+      'never rewrite `.uproject`, `Target.cs` or `Build.cs` to claim a state'
+    )
+    expect(prompt).toContain('a login, a payment, a captcha or an upload, hand it to the user')
+    expect(prompt).not.toMatch(/an upload or a download/)
+  })
 
   /**
    * 子 agent 手里没有 `task`（`resolveAgentTools` 摘掉了），提示词却照样把它
@@ -1451,16 +1470,16 @@ describe('shell 工具的条件注册', () => {
   })
 
   /**
-   * 这三个动的是**用户自己的硬盘**，不是虚幻工程里能重新生成的资产。
-   * 默认模式是 auto-edit，那个模式下 mutating 会静默放行 ——
-   * 静默改用户源码这件事不能有。
+   * 写 / 改文件有改前改后快照，改动看得到，按 mutating 走；
+   * 跑命令没有快照兜得住，每次都问。
    */
-  it('写 / 改 / 跑命令都必须每次都问', () => {
+  it('写 / 改文件是 mutating，跑命令每次都问', () => {
     const tools = resolveTools({ sessionId: 's', ueConnected: true, shellAvailable: true })
-    for (const name of ['write_local_file', 'edit_local_file', 'run_shell_command']) {
-      const tool = tools.find((t) => t.name === name)
-      expect(tool?.unrealBox.risk, name).toBe('destructive')
-    }
+    const riskOf = (name: string): string | undefined =>
+      tools.find((t) => t.name === name)?.unrealBox.risk
+    expect(riskOf('write_local_file')).toBe('mutating')
+    expect(riskOf('edit_local_file')).toBe('mutating')
+    expect(riskOf('run_shell_command')).toBe('destructive')
   })
 
   // Ask 模式是「只看不动」，写盘和跑命令一个都不能留

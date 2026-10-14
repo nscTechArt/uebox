@@ -4,6 +4,7 @@ import { readWebPageLocally } from '../../../services/webReader'
 import { MAX_SEARCH_RESULTS, searchWeb } from '../../../services/webSearch'
 import { checkNavigationUrl } from '../../../services/agentBrowser/urlPolicy'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
+import { browserLocalNetworkAllowed } from './localNetworkSetting'
 
 /**
  * 无头检索：查资料、读文章。
@@ -177,7 +178,9 @@ function createReadTool(): UnrealAgentTool<never> {
     execute: async (args) => {
       // 和浏览器共用同一套地址判据：本机、内网、危险协议一律不读。
       // 少了这一层，这个工具就是一个现成的内网探测器
-      const checked = checkNavigationUrl(args.url)
+      const checked = checkNavigationUrl(args.url, {
+        allowLocalNetwork: await browserLocalNetworkAllowed()
+      })
       if (!checked.ok) throw new Error(`[NAVIGATION_BLOCKED] ${checked.reason}`)
 
       const page = await readPage(checked.url.toString())

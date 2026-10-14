@@ -11,8 +11,15 @@ import { defineV2Tool } from '../../adaptV2Tool'
 import { z } from 'zod'
 import { serviceManager } from '../../../../services'
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
-import { extractBlueprintGraphRefs, pickPreferredGraphName } from './graphDiscovery'
+import {
+  describeGraphNameMiss,
+  explainGraphNameMiss,
+  extractBlueprintGraphRefs,
+  pickPreferredGraphName,
+  type GraphNameMiss
+} from './graphDiscovery'
 import { resolveBlueprintPathInput } from './resolveBlueprintPath'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 const GetBlueprintGraphSchema = z.object({
   blueprint_path: z
@@ -27,6 +34,23 @@ const GetBlueprintGraphSchema = z.object({
       'Optional graph name. Defaults to EventGraph or the best available graph. ' +
         'Graphs inside other graphs are addressed by path: "AnimGraph/Locomotion" (a state machine), ' +
         '"AnimGraph/Locomotion/Idle" (inside a state), "AnimGraph/Locomotion/Idle->Walk" (a transition rule).'
+    ),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      'Paging: index of the first node to return. Pass the next_offset of the previous page.'
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      'Paging: nodes per page. Omit to read the whole graph; a graph too large to send in one ' +
+        'response is paged automatically and the result says how to continue.'
     )
 })
 
@@ -125,7 +149,105 @@ export interface GetBlueprintGraphResponse {
   entry_state?: string
   links?: Array<Record<string, unknown>>
   connections?: Array<Record<string, unknown>>
+  /** 分页读时才有；旧插件不认 offset / limit，整张回 */
+  total_node_count?: number
+  offset?: number
+  next_offset?: number
   [key: string]: unknown
+}
+
+/**
+ * 整张图超过收包上限时，第一页先给这么多节点；还超就退到小页再试一次。
+ * 只试两次：旧插件不认 limit，每试一次编辑器都要把整张大图再序列化、再发一遍
+ */
+const AUTO_PAGE_NODES = 150
+const FALLBACK_PAGE_NODES = 25
+
+function isResponseTooLarge(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'E_MESSAGE_TOO_LARGE'
+}
+
+/**
+ * 读一页图。没点名 limit 就先整张读，整张超过收包上限（512KB）再自动改成分页。
+ *
+ * 以前大图只回一句「响应过大」，而这个工具没有任何分页参数 —— 真机上一张 UI 背包的
+ * EventGraph 707KB，agent 整个任务都没读到它，也不知道自己少读了东西（2026-10-13 反馈）。
+ */
+async function fetchGraphPage(
+  blueprintPath: string,
+  graphName: string,
+  page: { offset?: number; limit?: number }
+): Promise<{ response: GetBlueprintGraphResponse | null; autoPaged: boolean }> {
+  const wsService = serviceManager.getWebSocketService()
+  const call = (limit?: number): Promise<GetBlueprintGraphResponse | null> =>
+    wsService.callRequest<GetBlueprintGraphResponse>(
+      'blueprint.get_graph',
+      {
+        blueprint_path: blueprintPath,
+        graph_name: graphName,
+        ...(limit ? { offset: page.offset ?? 0, limit } : {})
+      },
+      getTargetConnectionId(),
+      30000
+    )
+
+  const explicitLimit = page.limit ?? (page.offset ? AUTO_PAGE_NODES : undefined)
+  if (explicitLimit) return { response: await call(explicitLimit), autoPaged: false }
+
+  try {
+    return { response: await call(), autoPaged: false }
+  } catch (error) {
+    if (!isResponseTooLarge(error)) throw error
+  }
+  for (const limit of [AUTO_PAGE_NODES, FALLBACK_PAGE_NODES]) {
+    try {
+      return { response: await call(limit), autoPaged: true }
+    } catch (error) {
+      if (!isResponseTooLarge(error)) throw error
+    }
+  }
+  throw new Error(
+    `Graph ${graphName} is too large to send even ${FALLBACK_PAGE_NODES} nodes at a time. ` +
+      'The UnrealAgentLink plugin in this project probably predates graph paging. ' +
+      PLUGIN_UPDATE_HINT
+  )
+}
+
+/** 分页读到的那一页，告诉模型这是第几到第几个、怎么接着读 */
+export function describeGraphPage(
+  response: GetBlueprintGraphResponse,
+  autoPaged: boolean,
+  pagingRequested: boolean
+): Record<string, unknown> {
+  if (response.total_node_count === undefined) {
+    // 旧插件不认 offset / limit，回的是整张图；不说的话模型会拿 offset 再读一遍同样的东西
+    if (!pagingRequested) return {}
+    return {
+      page_note:
+        'The plugin ignored offset/limit (it predates graph paging), so this is the whole graph — ' +
+        'do not request further pages. ' +
+        PLUGIN_UPDATE_HINT
+    }
+  }
+  const first = response.offset ?? 0
+  const last = first + (response.nodes?.length ?? 0)
+  const more = response.next_offset !== undefined
+  const head = autoPaged
+    ? `This graph is too large to read in one response, so it was paged automatically: `
+    : ''
+  const note =
+    head +
+    `nodes ${first}–${last - 1} of ${response.total_node_count}. ` +
+    (more
+      ? `Call again with offset=${response.next_offset} for the next page. `
+      : 'This is the last page. ') +
+    'linked_to / connections may point at node_ids on other pages.'
+  return {
+    total_node_count: response.total_node_count,
+    offset: first,
+    ...(more ? { next_offset: response.next_offset } : {}),
+    page_note: note
+  }
 }
 
 /**
@@ -280,6 +402,39 @@ export function stateMachineConnections(
   return connections
 }
 
+/** 插件报的是「图找不到」，而不是蓝图找不到或别的错 */
+export function isGraphNotFound(response: unknown): boolean {
+  const error = (response as { error?: unknown } | null)?.error
+  return typeof error === 'string' && /^Graph not found/i.test(error)
+}
+
+/**
+ * 图名没找到时问一次图列表，查清是写了短名、有歧义、插件太旧，还是真没有。
+ * 列表也拿不到就返回 null，调用方照用插件的原报错。
+ */
+export async function lookupMissedGraphName(
+  blueprintPath: string,
+  graphName: string
+): Promise<GraphNameMiss | null> {
+  try {
+    const listed = await serviceManager
+      .getWebSocketService()
+      .callRequest<
+        Record<string, unknown>
+      >('blueprint.list_graphs', { blueprint_path: blueprintPath }, getTargetConnectionId(), 20000)
+    if (!listed?.ok) return null
+    return explainGraphNameMiss(graphName, extractBlueprintGraphRefs(listed))
+  } catch {
+    return null
+  }
+}
+
+/** 换不成完整路径时接在原报错后面的那句 */
+export function graphNameMissHint(graphName: string, miss: GraphNameMiss | null): string {
+  if (!miss || miss.kind === 'resolved') return ''
+  return describeGraphNameMiss(graphName, miss, PLUGIN_UPDATE_HINT)
+}
+
 export const __testing = {
   stateMachineConnections,
   describePin,
@@ -417,14 +572,15 @@ rule_graph }), the same shape blueprint_apply_graph takes there.`,
         let response: GetBlueprintGraphResponse | null = null
         let lastFailure: { error?: string; code?: number; details?: unknown; raw?: unknown } = {}
 
+        let autoPaged = false
+        const page = { offset: input.offset, limit: input.limit }
+        const pagingRequested = input.offset !== undefined || input.limit !== undefined
+
         for (const graphName of candidateGraphNames) {
           triedGraphNames.push(graphName)
-          const graphResponse = await wsService.callRequest<GetBlueprintGraphResponse>(
-            'blueprint.get_graph',
-            { blueprint_path: blueprintPath, graph_name: graphName },
-            getTargetConnectionId(),
-            30000
-          )
+          const fetched = await fetchGraphPage(blueprintPath, graphName, page)
+          const graphResponse = fetched.response
+          autoPaged = fetched.autoPaged
           if (graphResponse?.ok) {
             response = graphResponse
             break
@@ -445,10 +601,35 @@ rule_graph }), the same shape blueprint_apply_graph takes there.`,
           }
         }
 
+        // 点名的图找不到：多半是只写了状态 / 状态机的名字，查清楚后换成完整路径再读一次
+        let missHint = ''
+        if (!response && explicitGraphName && isGraphNotFound(lastFailure.raw)) {
+          const miss = await lookupMissedGraphName(blueprintPath, explicitGraphName)
+          if (miss?.kind === 'resolved') {
+            triedGraphNames.push(miss.path)
+            const fetched = await fetchGraphPage(blueprintPath, miss.path, page)
+            const retried = fetched.response
+            autoPaged = fetched.autoPaged
+            if (retried?.ok) {
+              response = retried
+            } else {
+              lastFailure = {
+                error: String(
+                  (retried as Record<string, unknown> | null)?.error ?? 'No response or ok=false'
+                ),
+                raw: retried
+              }
+            }
+          }
+          missHint = graphNameMissHint(explicitGraphName, miss)
+        }
+
         if (!response) {
           return {
             success: false,
-            error: `Failed to get Blueprint graph: ${lastFailure.error || 'No response or ok=false'}`,
+            error:
+              `Failed to get Blueprint graph: ${lastFailure.error || 'No response or ok=false'}` +
+              (missHint ? `\n${missHint}` : ''),
             code: lastFailure.code,
             details: lastFailure.details,
             raw: lastFailure.raw,
@@ -466,6 +647,7 @@ rule_graph }), the same shape blueprint_apply_graph takes there.`,
             graph_name: response.graph_name,
             graph_kind: response.graph_kind,
             node_count: response.nodes?.length ?? 0,
+            ...describeGraphPage(response, autoPaged, pagingRequested),
             nodes: graphNodes,
             connection_count: connections.length,
             connections,
@@ -535,6 +717,7 @@ rule_graph }), the same shape blueprint_apply_graph takes there.`,
           graph_name: response.graph_name,
           ...(response.graph_kind ? { graph_kind: response.graph_kind } : {}),
           node_count: response.nodes?.length ?? 0,
+          ...describeGraphPage(response, autoPaged, pagingRequested),
           nodes: graphNodes,
           connection_count: graphConnections.length,
           connections: graphConnections,

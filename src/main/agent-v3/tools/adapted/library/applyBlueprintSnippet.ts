@@ -53,6 +53,7 @@ import { findEntryById, readSnippetPayload } from '../../../../services/library/
 import { checkPluginCapability } from '../../../../services/library/pluginCapabilities'
 import { containsAsset, toPackagePath } from '../../../../utils/uePackagePath'
 import { requireVaultRoot } from './vaultRoot'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 const ApplySchema = z.object({
   entry_id: z.string().describe('库条目 id，用 library_search 拿'),
@@ -159,7 +160,7 @@ export function createBlueprintLibraryApplyTool(): V2Tool {
 【先决条件】
 - 目标图**必须已经存在，而且是空的**。这条命令不会建图。
   要新建函数图用 blueprint_create_function（**别给它声明参数和返回值**，
-  声明了就不算空图了）；事件图只能用户自己在 UE 里建。
+  声明了就不算空图了）；事件图用 blueprint_create_event_graph。
   新建蓝图自带的那几个灰色占位事件节点不算「不空」。
 - 工程里的 UnrealAgentLink 插件必须够新。太旧会在写入前被拒绝并提示更新。
 
@@ -262,7 +263,8 @@ export function createBlueprintLibraryApplyTool(): V2Tool {
               success: false,
               error:
                 '工程里的 UnrealAgentLink 插件太旧，还没有「放回片段」这条命令。' +
-                '请在设置里更新插件后再试。',
+                PLUGIN_UPDATE_HINT +
+                '更新完再试。',
               saved: false
             }
           }

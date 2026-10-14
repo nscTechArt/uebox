@@ -10,6 +10,7 @@ import {
 } from '@core/shared/agentUsage'
 import type { AgentQuestionAction, AgentQuestionItem } from '@core/shared/agentQuestion'
 import { snapshotAgentProcess } from '@renderer/utils/agentProcessSnapshot'
+import { findReplaceableProgress } from '@core/shared/agentProgress'
 
 /**
  * Agent 流式状态接口
@@ -337,13 +338,15 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
   }
 
   /**
-   * 添加 Agent 处理过程项
+   * 添加 Agent 处理过程项。工具的流式进度只留最新一份（见 `shared/agentProgress.ts`）
    */
   function addAgentProcess(agentSessionId: string, item: AgentProcessItem): void {
     const state = getStreamByAgentSession(agentSessionId)
     if (!state) return
 
-    state.agentProcess.push(item)
+    const at = findReplaceableProgress(state.agentProcess, item)
+    if (at >= 0) state.agentProcess[at] = item
+    else state.agentProcess.push(item)
   }
 
   /**

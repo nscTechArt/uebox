@@ -312,6 +312,12 @@ void FUAL_EditorCommands::RegisterCommands(TMap<FString, TFunction<void(const TS
 		Handle_RestartEditor(Payload, RequestId);
 	});
 
+	// editor.quit - 关闭编辑器（盒子完整重编前用，响应先发后关）
+	CommandMap.Add(TEXT("editor.quit"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		Handle_QuitEditor(Payload, RequestId);
+	});
+
 	// pie.run - 跑一次试玩，回一份「发生了什么」
 	CommandMap.Add(TEXT("pie.run"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 	{
@@ -3378,6 +3384,58 @@ void FUAL_EditorCommands::Handle_RestartEditor(const TSharedPtr<FJsonObject>& Pa
 			// 比不重启更糟（同 SaveLevelAs 那个坑）。
 			FUnrealEdMisc::Get().RestartEditor(/*bWarn=*/false);
 			return false; // 只跑一次
+		}),
+		0.0f);
+}
+
+// ============================================================================
+// editor.quit —— 关闭编辑器
+// ============================================================================
+
+void FUAL_EditorCommands::Handle_QuitEditor(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+{
+	bool bForce = false;
+	Payload->TryGetBoolField(TEXT("force"), bForce);
+
+	// 和 editor.restart 同一道闸、同一个判据（UAL_SavablePackage.h）：有没存的就拒，清单交回去
+	if (!bForce)
+	{
+		const FUAL_DestructiveOpDirty Dirty = UAL_DirtyPackagesForDestructiveOp();
+		if (Dirty.Num() > 0)
+		{
+			UAL_CommandUtils::SendError(
+				RequestId,
+				409,
+				FString::Printf(
+					TEXT("Refusing to close the editor: %d package(s) have unsaved changes that would be lost."),
+					Dirty.Num()),
+				UAL_UnsavedRefusalDetails(Dirty));
+			return;
+		}
+	}
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("ok"), true);
+	Result->SetBoolField(TEXT("closing"), true);
+	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
+
+	/*
+	 * 走编辑器自己的「文件 > 退出」那条路（CLOSE_SLATE_MAINFRAME → IMainFrameModule::RequestCloseEditor），
+	 * 不用 FPlatformMisc::RequestExit：前者会存布局和配置、在保存 / GC / 慢任务进行中时自动顺延到
+	 * 下一帧，后者直接拆引擎。走 DeferredCommands 而不是直接调 IMainFrameModule，是为了不给
+	 * 插件新增 MainFrame 模块依赖 —— 这条命令从 5.0 到 5.8 都在 EditorServer.cpp 里。
+	 *
+	 * 上面的脏检查之外万一还有要存的（判据排除掉的包），引擎会弹「要保存吗」—— 那是用户的数据，
+	 * 让他自己点。盒子那边等进程退出有超时，没关掉会如实说。
+	 */
+	FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([](float /*DeltaTime*/) -> bool
+		{
+			if (GEngine)
+			{
+				GEngine->DeferredCommands.AddUnique(TEXT("CLOSE_SLATE_MAINFRAME"));
+			}
+			return false;
 		}),
 		0.0f);
 }

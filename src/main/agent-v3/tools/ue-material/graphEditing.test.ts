@@ -357,6 +357,8 @@ describe('material_create_function / material_get_referencers', () => {
     expect(text).toContain('填不了')
     expect(text).toContain('材质编辑器')
     expect(text).toContain('MaterialFunctionCall')
+    // 「这套工具填不了」不等于只能用户手填：引擎的 Python 接口能往函数里建节点
+    expect(text).toContain('CreateMaterialExpressionInFunction')
   })
 
   it('没人引用时明确说「删掉不会影响别的东西」', async () => {

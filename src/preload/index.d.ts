@@ -23,7 +23,7 @@ import type {
 } from '../shared/assetDependency'
 import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { EditorHealthResult } from '../shared/editorHealth'
-import type { ModelCheckup, TeamStateView } from '../shared/agentTeam'
+import type { ModelCheckup, ModelDossier, TeamStateView } from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
 import type {
   AgentStartRejectionCode,
@@ -2810,8 +2810,15 @@ declare global {
      * AI 对话历史落盘 API（原来存 localStorage，配额只有几 MB）
      */
     chatHistory: {
-      read: () => Promise<{ 'chat-messages'?: string; 'chat-sessions'?: string }>
+      read: () => Promise<{ 'chat-sessions'?: string; 'follow-up-queue'?: string }>
       write: (key: string, value: string) => Promise<void>
+      sessionsIndex: () => Promise<Record<string, { typing?: string[] }>>
+      importLegacySessions: (json: string) => Promise<Record<string, { typing?: string[] }>>
+      readSessionSync: (sid: string) => string | null
+      readSessions: (sids: string[]) => Promise<Record<string, string>>
+      writeSessions: (
+        writes: Array<{ sid: string; json: string | null; typing?: string[] }>
+      ) => Promise<void>
     }
     /**
      * 个性化 API：用户写给 agent 的那段常驻说明。技能的列与删在 `agentV3` 下。
@@ -2856,6 +2863,8 @@ declare global {
         agentGoalMaxRounds: number
         /** 全量模式下关掉的工具名 */
         agentDisabledTools: string[]
+        /** 审批卡片上点过「以后都允许」的工具名 */
+        agentAlwaysAllowedTools: string[]
         /** 工具搜索模式下偏离内置常驻清单的那些 */
         agentResidentTools: Record<string, boolean>
         notifyTurnComplete: 'off' | 'unfocused' | 'always'
@@ -2865,6 +2874,10 @@ declare global {
         autoRecoverEditorCrash: boolean
         /** agent 搜素材时看不看别的保管库，默认关 */
         assetCrossVaultSearch: boolean
+        /** agent 改资产期间把锁住的文件设成只读，默认关 */
+        assetReadonlyLock: boolean
+        /** Agent 浏览器能否访问本机和局域网地址，默认关 */
+        agentBrowserAllowLocalNetwork: boolean
       }>
       /** 更新应用设置 */
       set: (settings: {
@@ -2877,6 +2890,7 @@ declare global {
         agentPersistentAutoResume?: boolean
         agentGoalMaxRounds?: number
         agentDisabledTools?: string[]
+        agentAlwaysAllowedTools?: string[]
         agentResidentTools?: Record<string, boolean>
         notifyTurnComplete?: 'off' | 'unfocused' | 'always'
         notifyApprovalRequired?: boolean
@@ -2884,6 +2898,8 @@ declare global {
         hideWindowOnProjectLaunch?: boolean
         autoRecoverEditorCrash?: boolean
         assetCrossVaultSearch?: boolean
+        assetReadonlyLock?: boolean
+        agentBrowserAllowLocalNetwork?: boolean
       }) => Promise<{ success: boolean }>
       /** 设置开机自启 */
       setAutoLaunch: (enabled: boolean) => Promise<{ success: boolean }>
@@ -3342,6 +3358,13 @@ declare global {
       teamEnd: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; error?: string; errorKey?: 'running' }>
+      /** 设置「团队」页：检测过或干过活的模型，各自的体检结论和履历汇总 */
+      teamModels: () => Promise<{ success: boolean; models: ModelDossier[] }>
+      /** 设置「团队」页的「重新检测」：不管上次结论新不新都测一次 */
+      teamModelCheckup: (args: {
+        providerId: string
+        modelId: string
+      }) => Promise<{ success: boolean; error?: string; checkup?: ModelCheckup }>
       /** 改某条对话的审批档位（`sessionId` 传它当前的内核 session id）。运行中也立刻生效，下一个工具调用就按新档位走 */
       setApprovalMode: (args: {
         sessionId: string
@@ -3697,7 +3720,8 @@ declare global {
   type AgentV3SkillLearning = 'off' | 'ask' | 'auto'
 
   /** always = 批准且本对话内该工具不再询问（按内核 session 记：重启、清空对话、切到 Ask 模式后失效，分出的新对话也不继承） */
-  type AgentV3ApprovalVerdict = 'approve' | 'always' | 'reject'
+  /** forever = 批准且以后所有对话里该工具都不再询问（存进应用设置，在偏好设置里移除） */
+  type AgentV3ApprovalVerdict = 'approve' | 'always' | 'forever' | 'reject'
 
   /**
    * 用户对 agent 反问的处置。
@@ -3834,6 +3858,8 @@ declare global {
      * 渲染层就会在往返时把它当成不存在的东西丢掉。
      */
     readOnlyTools?: string[]
+    /** 用户信任这个 server：它的工具按 mutating 审批。见主进程 `capabilities/mcp/types.ts` */
+    trusted?: boolean
   }
 
   interface McpServerStatus {

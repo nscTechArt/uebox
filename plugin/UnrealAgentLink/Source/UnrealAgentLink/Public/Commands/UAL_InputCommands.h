@@ -22,6 +22,7 @@
  *
  * 支持的命令：
  * - input.map: 列出当前生效（或工程里定义）的输入映射
+ * - input.add_mapping: 往工程里加一条按键映射（Enhanced Input 的 IMC，或旧输入系统的 DefaultInput.ini）
  */
 class FUAL_InputCommands
 {
@@ -51,4 +52,13 @@ public:
 	 * （2026-09-03 实测：菜单打开时这条路归零，而 L1 照常生效）。
 	 */
 	static void Handle_InjectKey(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/**
+	 * input.add_mapping —— 往工程里加一条按键映射。
+	 *
+	 * Enhanced Input：往点名的 IMC 里加「动作 + 键」，动作资产不存在就按 value_type 新建，
+	 * 可带触发器/修饰器；同一动作同一键已有时不重复加。旧输入系统（system=legacy）：
+	 * 加 Action / Axis Mapping 并写回 DefaultInput.ini。回执都是写完从引擎读回来的。
+	 */
+	static void Handle_AddMapping(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 };

@@ -1,7 +1,7 @@
 /** @vitest-environment node */
 import { describe, expect, it, vi } from 'vitest'
 
-import { createLaunchTracker, withProjectState } from './launchTracker'
+import { applyProjectState, createLaunchTracker } from './launchTracker'
 import {
   getTrayRecentCandidates,
   runningProjectKeys,
@@ -18,7 +18,7 @@ import {
  * - 同一工程按 projectKey 去重，留最近打开的那条
  * - 按 lastOpenTime 倒序，封顶 3 条
  * - 引擎正连着的标 running（插件报的路径可能是目录，也可能是 .uproject）——
- *   这层由 `withProjectState` 叠，不进候选名单
+ *   这层由 `applyProjectState` 叠，不进候选名单
  */
 
 function deps(
@@ -158,7 +158,7 @@ describe('托盘最近项目', () => {
     })
 
     const tracker = createLaunchTracker()
-    const [item] = withProjectState(
+    const [item] = applyProjectState(
       await getTrayRecentCandidates(d),
       runningProjectKeys(d),
       tracker
@@ -174,7 +174,7 @@ describe('托盘最近项目', () => {
     })
 
     const tracker = createLaunchTracker()
-    const [item] = withProjectState(
+    const [item] = applyProjectState(
       await getTrayRecentCandidates(d),
       runningProjectKeys(d),
       tracker
@@ -193,7 +193,7 @@ describe('托盘最近项目', () => {
     })
 
     const tracker = createLaunchTracker()
-    const [item] = withProjectState(
+    const [item] = applyProjectState(
       await getTrayRecentCandidates(d),
       runningProjectKeys(d),
       tracker

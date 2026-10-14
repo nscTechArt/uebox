@@ -116,6 +116,12 @@ public:
 	static void Handle_RestartEditor(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 
 	/**
+	 * editor.quit —— 关闭编辑器（不重开）。给盒子的 cpp_full_rebuild 用：
+	 * 关掉 → 盒子跑 UBT 完整编译 → 盒子再把工程打开。脏包检查和 editor.restart 同一套。
+	 */
+	static void Handle_QuitEditor(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/**
 	 * pie.run —— 跑一次 PIE 试玩，回一份报告。
 	 *
 	 * ## 为什么是「一次调用一份报告」而不是 start/stop 两个命令

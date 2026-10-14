@@ -136,6 +136,28 @@ export async function routeMember(
   return { ...(models?.producer ? { used: models.producer } : {}), fellBack: false }
 }
 
+/**
+ * 按名单里的 id 认出模型。外部 MCP 调用方给 `task` 点名用（`hostSession.ts`）。
+ *
+ * 和队员不同，点了名就照办或者报错，不悄悄换成别的：调用方是冲着这个模型来的，
+ * 换了它也不知道，拿回来的结论就不是它要比的那个。
+ */
+export async function pickModel(models: TeamModels, key: string): Promise<TeamModel> {
+  const picked = models.candidates.find((c) => c.key === key.trim())
+  if (!picked) {
+    throw new Error(
+      `没有「${key}」这个模型。可选：${models.candidates.map((c) => c.key).join('、')}`
+    )
+  }
+  const model: TeamModel = { providerId: picked.providerId, modelId: picked.modelId }
+  if (!(await models.isAvailable(model))) {
+    throw new Error(
+      `${picked.name} 现在用不了（来源删了或模型下架了）。换一个，或省略 model 用默认模型`
+    )
+  }
+  return model
+}
+
 interface CatalogLookup {
   baseUrl: string
   models: readonly { id: string; cost?: { input: number; output: number } }[]

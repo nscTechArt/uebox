@@ -146,6 +146,21 @@ describe('createTrayProjectOpener', () => {
     expect(onStateChanged).toHaveBeenCalledTimes(2)
   })
 
+  it('落定那一刻它已经连上了：不挂「等连接」标记，挂了没人摘', async () => {
+    const pending = deferred<OpenUprojectResult>()
+    const openFile = vi.fn(() => pending.promise)
+    // 点下去时还没连上；打开链路落定前引擎已经连上了
+    const isRunning = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
+    const { deps: d, tracker } = deps({ openFile, isRunning })
+
+    const first = createTrayProjectOpener(d)(project)
+    pending.resolve({ success: true })
+    await first
+
+    expect(tracker.isLaunching('k-a')).toBe(false)
+    expect(tracker.waitingSince('k-a')).toBeUndefined()
+  })
+
   it('编辑器本来就开着：不挂「启动中」，下次还能点', async () => {
     const { deps: d, tracker, openFile, report } = deps()
     openFile.mockResolvedValue({ success: true, alreadyRunning: true })

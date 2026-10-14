@@ -104,4 +104,13 @@ public:
 	 * 。
 	 */
 	static void Handle_CameraCuts(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/**
+	 * sequence.rebind —— 把一条 possessable 绑定改指向关卡里的另一个 Actor
+	 * （编辑器里「Assign Actor」那一步）。
+	 *
+	 * 歧义不猜：绑定名重了、Actor 重了都回候选让调用方点名；
+	 * 类型对不上、Actor 已被另一条绑定占着都先拒绝。GUID 保持不变。
+	 */
+	static void Handle_Rebind(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 };

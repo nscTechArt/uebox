@@ -43,7 +43,7 @@ Missing any one gives no error — just black patches or no blending.
 
 | # | What | Who fixes it |
 |---|---|---|
-| 1 | Project setting: Enable virtual texture support | **The user.** Needs an editor restart and affects the whole project. Explain; do not change it silently |
+| 1 | Project setting: Enable virtual texture support | Affects the whole project and needs an editor restart, so ask first. Once the user agrees: `ue_set_config` (Engine, `/Script/Engine.RendererSettings`, `r.VirtualTextures=True`), save, then `ue_restart_editor` |
 | 2 | An RVT asset of the right type | `landscape_setup_rvt` |
 | 3 | The landscape and every streaming proxy draw into it | `landscape_setup_rvt` |
 | 4 | An RVT volume covering the whole landscape (height RVT: full height too) | `landscape_setup_rvt` |

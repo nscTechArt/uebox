@@ -1,0 +1,102 @@
+/**
+ * @vitest-environment node
+ *
+ * 外部会话里的 `task` 用哪个模型。
+ *
+ * 真机上查出来的：外部会话没写 `modelRequest`，按默认角色落到了对话模型上，
+ * 和盒子助手用的 agent 那一档不是同一个 —— 那家额度一用完，外部派的子任务整路 429。
+ */
+
+import { describe, expect, it, vi } from 'vitest'
+
+import { teamModelCandidates } from '../../../../shared/agentTeam'
+import { electronMock, servicesMock, targetContextMock } from '../../testSupport/toolMocks'
+
+vi.mock('electron', () => electronMock())
+vi.mock('../../../services', () => servicesMock())
+vi.mock('../../core/projectTargetContext', async (importOriginal) =>
+  targetContextMock(importOriginal)
+)
+vi.mock('../../../appSettingsManager', () => ({
+  appSettingsManager: { getSettings: () => ({ agentDisabledTools: [] }) }
+}))
+vi.mock('../../../services/project/projectManager', () => ({
+  projectManager: { getInteractiveProjects: () => [] }
+}))
+vi.mock('../../tools/builtin/localShell', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  isShellAvailable: async () => true
+}))
+vi.mock('./index', () => ({
+  ensureConnected: async () => ({ getTools: () => [], getStatuses: () => [] })
+}))
+
+const runSubAgent = vi.hoisted(() => vi.fn(async () => ({ text: '完成', messageCount: 2 })))
+vi.mock('../../core/createAgent', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  runSubAgent
+}))
+
+const providers = vi.hoisted(() => ({
+  list: [] as Parameters<typeof teamModelCandidates>[0]
+}))
+vi.mock('../../core/team/teamModels', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  loadTeamModels: async () => ({
+    candidates: teamModelCandidates(providers.list),
+    isAvailable: async () => true
+  })
+}))
+
+import { setupMcpSession } from './hostSession'
+
+const chat = (id: string, models: string[]): Parameters<typeof teamModelCandidates>[0][number] => ({
+  id,
+  kind: 'chat',
+  models: models.map((m) => ({ id: m }))
+})
+
+async function taskTool(): Promise<{
+  parameters: unknown
+  execute: (id: string, params: unknown) => Promise<unknown>
+}> {
+  const { tools } = await setupMcpSession({ sessionId: 'mcp-test' } as never)
+  const tool = tools.find((t) => t.name === 'task')
+  if (!tool) throw new Error('task 没有装上')
+  return tool as never
+}
+
+describe('外部会话的 task 用哪个模型', () => {
+  it('不点名：子任务照盒子助手用 agent 那一档，不落到对话模型上', async () => {
+    providers.list = [chat('a', ['m1']), chat('b', ['m2'])]
+    runSubAgent.mockClear()
+
+    await (await taskTool()).execute('c1', { prompt: 'x', context_mode: 'fresh' })
+
+    const [parent, input] = runSubAgent.mock.calls[0] as unknown as [
+      { modelRequest?: { role?: string } },
+      { model?: unknown }
+    ]
+    expect(parent.modelRequest?.role).toBe('agent')
+    expect(input.model).toBeUndefined()
+  })
+
+  it('点名：按名单里的 id 钉到那个模型', async () => {
+    providers.list = [chat('a', ['m1']), chat('b', ['m2'])]
+    runSubAgent.mockClear()
+
+    const tool = await taskTool()
+    expect(JSON.stringify(tool.parameters)).toContain('b/m2')
+    await tool.execute('c1', { prompt: 'x', context_mode: 'fresh', model: 'b/m2' })
+
+    const [, input] = runSubAgent.mock.calls[0] as unknown as [unknown, { model?: unknown }]
+    expect(input.model).toEqual({ providerId: 'b', modelId: 'm2' })
+  })
+
+  it('只配了一个模型：没得挑，不出 model 参数', async () => {
+    providers.list = [chat('a', ['m1'])]
+
+    const { parameters } = await taskTool()
+    expect(Object.keys((parameters as { properties: object }).properties)).not.toContain('model')
+  })
+})

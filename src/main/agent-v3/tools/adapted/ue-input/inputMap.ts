@@ -38,9 +38,9 @@ const InputMapSchema = z.object({
 
 export function createInputMapTool(): V2Tool {
   return defineV2Tool({
-    description: `查这个游戏现在能按什么键、有哪些输入动作。
+    description: `查这个游戏现在能按什么键、有哪些输入动作（只读，加键用 ue_input_add_mapping）。
 
-**要模拟玩家操作之前，先调它。** 不调就去按键，等于闭着眼睛敲键盘。
+**要模拟玩家操作之前，先调它。**
 
 ## 最要紧的一个字段：source
 

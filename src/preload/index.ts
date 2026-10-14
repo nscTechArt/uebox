@@ -1549,6 +1549,10 @@ const api = {
       modelId: string
     }) => ipcRenderer.invoke('agent-v3:team-member-model', args),
     teamEnd: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-end', args),
+    /** 设置「团队」页：模型档案、重新检测 */
+    teamModels: () => ipcRenderer.invoke('agent-v3:team-models'),
+    teamModelCheckup: (args: { providerId: string; modelId: string }) =>
+      ipcRenderer.invoke('agent-v3:team-model-checkup', args),
     /**
      * 全部强制解锁 —— 逃生口。
      *
@@ -1565,7 +1569,7 @@ const api = {
     /** 回复工具审批弹窗 */
     replyApproval: (args: {
       toolCallId: string
-      verdict: 'approve' | 'always' | 'reject'
+      verdict: 'approve' | 'always' | 'forever' | 'reject'
     }): void => {
       ipcRenderer.send('agent-v3:approval-reply', args)
     },
@@ -2974,10 +2978,23 @@ const api = {
    * 只搬运整份 JSON 字符串，不理解内容；见 renderer/utils/chatHistoryStorage.ts。
    */
   chatHistory: {
-    read: (): Promise<{ 'chat-messages'?: string; 'chat-sessions'?: string }> =>
+    read: (): Promise<{ 'chat-sessions'?: string; 'follow-up-queue'?: string }> =>
       ipcRenderer.invoke('chat-history:read'),
     write: (key: string, value: string): Promise<void> =>
-      ipcRenderer.invoke('chat-history:write', key, value)
+      ipcRenderer.invoke('chat-history:write', key, value),
+    /** 对话正文一个对话一个文件；见 main/ipc/chatSessionFiles.ts */
+    sessionsIndex: (): Promise<Record<string, { typing?: string[] }>> =>
+      ipcRenderer.invoke('chat-history:sessions-index'),
+    importLegacySessions: (json: string): Promise<Record<string, { typing?: string[] }>> =>
+      ipcRenderer.invoke('chat-history:sessions-import-legacy', json),
+    /** 同步读：store 接口是同步的，第一次碰到某个对话时才读它 */
+    readSessionSync: (sid: string): string | null =>
+      ipcRenderer.sendSync('chat-history:session-read-sync', sid),
+    readSessions: (sids: string[]): Promise<Record<string, string>> =>
+      ipcRenderer.invoke('chat-history:sessions-read', sids),
+    writeSessions: (
+      writes: Array<{ sid: string; json: string | null; typing?: string[] }>
+    ): Promise<void> => ipcRenderer.invoke('chat-history:sessions-write', writes)
   },
 
   /**
@@ -3031,6 +3048,7 @@ const api = {
       agentPersistentAutoResume: boolean
       agentGoalMaxRounds: number
       agentDisabledTools: string[]
+      agentAlwaysAllowedTools: string[]
       agentResidentTools: Record<string, boolean>
       notifyTurnComplete: 'off' | 'unfocused' | 'always'
       notifyApprovalRequired: boolean
@@ -3039,6 +3057,8 @@ const api = {
       autoRecoverEditorCrash: boolean
       /** agent 搜素材时看不看别的保管库，默认关 */
       assetCrossVaultSearch: boolean
+      assetReadonlyLock: boolean
+      agentBrowserAllowLocalNetwork: boolean
     }> => ipcRenderer.invoke('app-settings:get'),
     /**
      * 更新应用设置
@@ -3053,6 +3073,7 @@ const api = {
       agentPersistentAutoResume?: boolean
       agentGoalMaxRounds?: number
       agentDisabledTools?: string[]
+      agentAlwaysAllowedTools?: string[]
       agentResidentTools?: Record<string, boolean>
       notifyTurnComplete?: 'off' | 'unfocused' | 'always'
       notifyApprovalRequired?: boolean
@@ -3060,6 +3081,8 @@ const api = {
       hideWindowOnProjectLaunch?: boolean
       autoRecoverEditorCrash?: boolean
       assetCrossVaultSearch?: boolean
+      assetReadonlyLock?: boolean
+      agentBrowserAllowLocalNetwork?: boolean
     }): Promise<{ success: boolean }> => ipcRenderer.invoke('app-settings:set', settings),
     /**
      * 设置开机自启

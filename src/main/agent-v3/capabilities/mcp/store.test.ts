@@ -62,6 +62,12 @@ describe('normalizeServer', () => {
     expect(out).toMatchObject({ disabled: true, allowedTools: ['t1', 't2'] })
   })
 
+  it('trusted 只认 true，其余（字符串、缺省）都按不信任', () => {
+    expect(normalizeServer('x', { command: 'a', trusted: true })).toMatchObject({ trusted: true })
+    expect(normalizeServer('x', { command: 'a', trusted: 'true' })).not.toHaveProperty('trusted')
+    expect(normalizeServer('x', { command: 'a' })).not.toHaveProperty('trusted')
+  })
+
   it('忽略类型不对的字段而不是整条丢掉', () => {
     // 用户手改配置写错类型很常见，不该因此读不出整份配置
     const out = normalizeServer('x', { command: 'a', args: 'not-an-array', env: 42 })

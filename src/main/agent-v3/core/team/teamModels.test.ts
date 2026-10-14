@@ -26,6 +26,7 @@ import {
   assignMemberModel,
   describeCandidates,
   loadTeamModels,
+  pickModel,
   recordReopen,
   routeMember,
   type TeamModels
@@ -106,6 +107,24 @@ describe('队员能用的模型', () => {
     await expect(routeMember(models, { ...base, tier: 'fast' })).resolves.toEqual({
       fellBack: false
     })
+  })
+})
+
+describe('外部调用方点名模型', () => {
+  const models: TeamModels = {
+    candidates: teamModelCandidates(PROVIDERS),
+    isAvailable: async (m) => m.providerId !== 'deepseek'
+  }
+
+  it('按名单里的 id 认出模型', async () => {
+    await expect(pickModel(models, ' openai/gpt-6 ')).resolves.toEqual(GPT)
+  })
+
+  it('点错名、点的用不了都报错，不悄悄换成别的', async () => {
+    await expect(pickModel(models, 'gpt-6')).rejects.toThrow(
+      '可选：anthropic/claude-opus-5-5、deepseek/deepseek-chat、openai/gpt-6'
+    )
+    await expect(pickModel(models, 'deepseek/deepseek-chat')).rejects.toThrow('现在用不了')
   })
 })
 

@@ -1006,6 +1006,23 @@ describe('agentEventDispatcher', () => {
       })
 
       expect(usePendingApprovalsStore().current?.allowAlways).toBe(true)
+      // 「以后都允许」反过来：没给就不摆（旧主进程不认 forever）
+      expect(usePendingApprovalsStore().current?.allowForever).toBe(false)
+    })
+
+    it('allowForever 原样带进队列', () => {
+      bus.emit('agent-v3:approval-required', {
+        sessionId: SID,
+        toolCallId: 'call-1',
+        toolName: 'write_file',
+        namespace: 'fs',
+        risk: 'mutating',
+        args: {},
+        allowAlways: true,
+        allowForever: true
+      })
+
+      expect(usePendingApprovalsStore().current?.allowForever).toBe(true)
     })
   })
 })

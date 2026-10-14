@@ -104,8 +104,10 @@ For edits:
 - Read the file first. Editing from memory of what a file "usually" looks like is how you get an
   exact-match failure and burn a turn.
 
-Both ask the user for confirmation every time — they modify the user's own disk, not regenerable
-project assets. Say plainly which file you are about to change and what the change is.
+Under the default approval setting neither one asks for confirmation: every write is snapshotted and
+shows up line by line in this turn's changes. Only a user who switched approvals to 「请求批准」
+("ask") gets a prompt. When the user asked for the file, write it — do not stop to ask first.
+Afterwards, say plainly which file you changed and what the change was.
 
 ## Running commands
 
@@ -121,11 +123,14 @@ For Unreal C++ specifically:
 
 - Build with UnrealBuildTool, not by invoking the compiler directly.
 - **The editor holds the module DLLs open.** A rebuild will fail at the link step while it is
-  running. Tell the user the editor needs closing and let them close it — do not kill the process
-  yourself.
+  running. Don't hand-roll that from the shell: `cpp_compile` builds into the running editor, and
+  `cpp_full_rebuild` closes the editor (refusing if anything is unsaved), runs UnrealBuildTool for
+  the right engine and target, then reopens the project. Prefer those (or `ue_restart_editor`) to
+  killing the editor. Only when it is frozen and the user agrees to lose unsaved work, end it with
+  `taskkill`.
 - Live Coding can be pinned to an MSVC toolset that is no longer installed, in which case hot
-  reload fails and a full rebuild with the editor closed is the only path. Read the error rather
-  than retrying the same build.
+  reload fails and `cpp_full_rebuild` is the only path. Read the error rather than retrying the
+  same build.
 
 ## `inspect_uasset_file` — read a .uasset without opening the engine
 
@@ -168,6 +173,8 @@ click, scripts and environment variables included. Point the user at that button
 
 ## What is deliberately missing
 
-There is no delete tool. Removing, renaming or moving the user's files is not something to do
-through a side channel — say what needs doing and let them do it, or work inside Unreal where the
-content tools handle it properly.
+There is no dedicated delete tool, and you never remove, rename or move the user's files on your
+own initiative. When the user explicitly asks for it, do it through `run_shell_command`, which asks
+for their approval. Name the exact paths first, and confirm anything that is not obviously theirs to
+lose (whole folders, files outside the folder they named). Inside an Unreal project's `Content`,
+use the content tools instead — moving `.uasset` files on disk breaks references.

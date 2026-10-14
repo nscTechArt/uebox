@@ -56,12 +56,17 @@ dares change it.
 { "function_name": "MF_Wetness", "destination_path": "/Game/Materials" }
 ```
 
-The function is created **empty, and these tools cannot fill it.** Every graph command
-loads a `UMaterial`; handed a function path they answer `Material not found`, and
-`FunctionOutput` is not among the node types that can be created. Do not try — it costs
-several round trips and leaves a permanently empty asset in the project. Either ask the
-user to author the function in the material editor, or skip the abstraction and build the
-same nodes inside each material.
+The function is created **empty, and the material graph tools cannot fill it.** Every graph
+command loads a `UMaterial`; handed a function path they answer `Material not found`, and
+`FunctionOutput` is not among the node types that can be created. Do not retry them on a
+function.
+
+When the user wants the function, fill it with `ue_run_python_script` through
+`unreal.MaterialEditingLibrary`: `create_material_expression_in_function` for each node
+(including `MaterialExpressionFunctionInput` / `MaterialExpressionFunctionOutput`),
+`connect_material_expressions` for the wires, then `update_material_function`. The script's
+own printout is not proof — read the function's expressions back before reporting it done.
+If the user would rather not have a function, build the same nodes inside each material.
 
 A function that is already filled in works normally. Call it from a material:
 

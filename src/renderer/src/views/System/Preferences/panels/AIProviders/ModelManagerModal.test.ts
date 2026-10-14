@@ -70,6 +70,7 @@ function makeState(
     testing: ref(false),
     selectedId: ref('p1'),
     configPath: computed(() => '/tmp/models.json'),
+    catalog: ref([]),
     selectProvider: vi.fn(),
     cancelEdit: vi.fn(),
     save: vi.fn(),
@@ -153,6 +154,33 @@ describe('ModelManagerModal 的树', () => {
 
     expect(state.draft.value!.models).toHaveLength(2)
     expect(wrapper.find('.model-pane').text()).toBe('1')
+  })
+
+  it('目录里新出的预置模型给一行，点了加进草稿、聚焦到第一个', async () => {
+    const state = makeState([{ id: 'old' }], {
+      catalog: ref([
+        {
+          id: 'p1',
+          displayName: 'P1',
+          group: 'cloud',
+          kind: 'chat',
+          protocol: 'openai-completions',
+          baseUrl: 'https://a/v1',
+          requiresApiKey: true,
+          hasLogo: false,
+          models: [{ id: 'new', displayName: 'New' }, { id: 'old' }]
+        }
+      ])
+    })
+    const wrapper = mountManager(state)
+
+    const rows = wrapper.findAll('.tree-add')
+    expect(rows).toHaveLength(2)
+    await rows[1].trigger('click')
+
+    expect(state.draft.value!.models.map((m) => m.id)).toEqual(['new', 'old'])
+    expect(wrapper.find('.model-pane').text()).toBe('0')
+    expect(wrapper.findAll('.tree-add')).toHaveLength(1)
   })
 
   /** 树上没填 id 的新模型不能是一行空白，否则根本点不着 */

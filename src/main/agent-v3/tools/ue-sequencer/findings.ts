@@ -95,7 +95,7 @@ const EXPLANATIONS: Record<string, Explanation> = {
   broken_binding: {
     what: '绑定已失效，找不到对应的 Actor',
     why: 'Possessable 绑定存的是路径引用。改名、移到别的子关卡、删了重放、关卡另存为新名字，绑定就断 —— 而且不报错，播放器照跑，那条轨道只是什么都不做',
-    how: 'Level Sequence 编辑器 → 扳手图标 Actions → Advanced → Rebind Possessable References。修不好就右键那条轨道 → Assign Actor 选中正确的 Actor'
+    how: '用 sequence_rebind 把这条绑定改绑到关卡里正确的 Actor（该绑哪个拿不准就先问用户）。手动修：Level Sequence 编辑器 → 右键那条轨道 → Assign Actor'
   },
   unresolved_binding: {
     what: '这次判不出绑定是否有效',

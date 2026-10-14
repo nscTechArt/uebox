@@ -390,7 +390,14 @@ export class McpClientManager {
     this.tools.set(
       id,
       usable.map((tool) =>
-        this.toAgentTool(id, client, tool, readOnly?.has(tool.name) === true, ensureBridge)
+        this.toAgentTool(
+          id,
+          client,
+          tool,
+          readOnly?.has(tool.name) === true,
+          ensureBridge,
+          config.trusted === true
+        )
       )
     )
 
@@ -413,7 +420,9 @@ export class McpClientManager {
     /** 由配置里的 `readOnlyTools` 点名降级。见 types.ts 的说明 */
     isReadOnly = false,
     /** 本机 Blender 专用：桥断了先把它拉起来再重试一次。见 blenderBridge.ts */
-    ensureBridge?: BridgeRecovery
+    ensureBridge?: BridgeRecovery,
+    /** 用户在设置里信任了这个 server（配置的 `trusted`）。见 types.ts */
+    trusted = false
   ): UnrealAgentTool<unknown> {
     const namespace = namespaceFor(serverId)
 
@@ -447,9 +456,12 @@ export class McpClientManager {
             ensureBridge
           )
         ),
-      // 第三方来源默认按最危险处理（见文件头）。唯一的例外是配置里点名的
-      // 纯发现类工具 —— 那是为了不让审批门被无意义的确认框点烦，见 types.ts
-      unrealBox: { namespace, risk: isReadOnly ? 'safe' : 'destructive' }
+      // 第三方来源默认按最危险处理（见文件头）。例外两个：配置里点名的纯发现类
+      // 工具降成 safe；用户信任了的 server 降成 mutating（「请求批准」档照样问）。见 types.ts
+      unrealBox: {
+        namespace,
+        risk: isReadOnly ? 'safe' : trusted ? 'mutating' : 'destructive'
+      }
     } as unknown as UnrealAgentTool<unknown>
   }
 

@@ -30,6 +30,7 @@ import { z } from 'zod'
 
 import { callUe } from '../defineUeTool'
 import { defineTool } from '../defineTool'
+import { PLUGIN_UPDATE_HINT } from '../adapted/project/pluginUpdateHint'
 
 const NAMESPACE = 'ue.material'
 
@@ -168,7 +169,7 @@ Substrate 节点（UE 5.4+）的 node_type 都以 Substrate 开头，搜 "Substr
           '这个工程里装的 UnrealAgentLink 插件太旧，还没有 material.search_nodes 这条命令。',
           '这一次先这么绕：引脚名改从现有材质里读 —— 对一张已经有这类节点的材质调 material_get_graph，inputs/outputs 里就是真实引脚名。',
           '几个常用的（UE 5.x 通用）：TextureSample 的 UV 输入叫 Coordinates（不是 UVs），Lerp 是 A / B / Alpha，Sine 是 Input，Multiply、Add 是 A / B。',
-          '想用上这个工具，让用户在盒子里重新安装一次插件（设置 → UE 插件）。'
+          '想用上这个工具：' + PLUGIN_UPDATE_HINT
         ].join('\n'),
         details: {} as SearchNodesResponse
       }

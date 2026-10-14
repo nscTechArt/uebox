@@ -97,14 +97,38 @@ describe('cpp_list_modules', () => {
 
   /**
    * 两种「没有模块」要给出不同的下一步，不能都回一句「共 0 个模块」：
-   * 纯蓝图工程是**正常状态**，下一步是请用户手动加第一个类；
+   * 纯蓝图工程是**正常状态**，下一步是 cpp_add_class 建第一个类（不是让用户去点菜单）；
    * 有代码却列不出模块是**异常状态**，下一步是让用户确认工程能不能编。
    */
-  it('纯蓝图工程说清楚要用户手动加第一个类', async () => {
+  it('纯蓝图工程指向 cpp_add_class + cpp_full_rebuild，不让用户手动建', async () => {
     const text = await run({ has_code: false, modules: [] })
 
     expect(text).toContain('纯蓝图工程')
-    expect(text).toContain('New C++ Class')
+    expect(text).toContain('cpp_add_class')
+    expect(text).toContain('cpp_full_rebuild')
+    expect(text).not.toContain('New C++ Class')
+  })
+
+  /** 引擎在纯蓝图工程上塞的占位模块不能让它被说成「源码缺失」（10-12 真机，BPOnly52） */
+  it('纯蓝图工程上引擎的占位模块不算数：按 declared_module_count 判', async () => {
+    const text = await run({
+      has_code: false,
+      declared_module_count: 0,
+      modules: [{ name: 'BPOnly52', type: 'Runtime', origin: 'project', source_path: 'X' }]
+    })
+
+    expect(text).toContain('纯蓝图工程')
+    expect(text).not.toContain('源码缺失')
+  })
+
+  it('.uproject 真声明了模块、源码不在：才说源码缺失', async () => {
+    const text = await run({
+      has_code: false,
+      declared_module_count: 1,
+      modules: [{ name: 'MyGame', type: 'Runtime', origin: 'project', source_path: 'X' }]
+    })
+
+    expect(text).toContain('源码缺失')
   })
 
   it('有代码却一个模块都没有，要说这不正常', async () => {

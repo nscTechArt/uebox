@@ -1258,6 +1258,9 @@ const MANUAL_ENTRIES = {
     // 模型**，所以最后那个参数一律为 true —— 少了它输入框里的「思考程度」
     // 对 ChatGPT 订阅完全不起作用。
     models: {
+      'gpt-6.1-sol': model('gpt-6.1-sol', 'GPT-6.1 Sol', true, true, CODEX_LIMIT, true, {
+        release_date: '2026-09-29'
+      }),
       'gpt-6-astra': model('gpt-6-astra', 'GPT-6 Astra', true, true, CODEX_LIMIT, true, {
         release_date: '2026-09-04'
       }),
@@ -1275,25 +1278,9 @@ const MANUAL_ENTRIES = {
       }),
       'gpt-5.6-luna': model('gpt-5.6-luna', 'GPT-5.6 Luna', true, true, CODEX_LIMIT, true, {
         release_date: '2026-07-09'
-      }),
-      'gpt-5.5': model('gpt-5.5', 'GPT-5.5', true, true, CODEX_LIMIT, true, {
-        release_date: '2026-04-23'
-      }),
-      'gpt-5.4': model('gpt-5.4', 'GPT-5.4', true, true, CODEX_LIMIT, true, {
-        release_date: '2026-03-05'
-      }),
-      'gpt-5.4-mini': model('gpt-5.4-mini', 'GPT-5.4 mini', true, true, CODEX_LIMIT, true, {
-        release_date: '2026-03-17'
-      }),
-      'gpt-5.3-codex-spark': model(
-        'gpt-5.3-codex-spark',
-        'GPT-5.3 Codex Spark',
-        false,
-        true,
-        { context: 128_000, output: 128_000 },
-        true,
-        { release_date: '2026-02-12' }
-      )
+      })
+      // 下线的不留：GPT-5.4 / 5.4 mini（08-31）、5.3 Codex Spark（09-14）、
+      // GPT-5.5（10-14）。https://learn.chatgpt.com/docs/models (2026-10-12)
     }
   },
   /**
@@ -1645,6 +1632,8 @@ const THINKING_OVERRIDES = {
     // https://developers.openai.com/api/docs/models/gpt-6-sol / gpt-6-luna (2026-09-23)
     'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    // https://developers.openai.com/api/docs/models/gpt-6.1-sol (2026-10-12)
+    'gpt-6.1-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6': {
       thinking: {
         minimal: null,
@@ -1661,21 +1650,17 @@ const THINKING_OVERRIDES = {
    * ChatGPT 订阅（Codex 那条 responses 路）。型号与 OpenAI 直连同源，
    * 但 provider id 对不上 pi 的 `openai-codex`，整家拿不到阶梯。
    *
-   * `max` 只有 5.6 那一代有；5.5 / 5.4 / codex-spark 到 xhigh 为止 ——
-   * 显式写 `null` 而不是省略，是为了让「这一档查过了、确实没有」和
-   * 「还没查」在这张表里长得不一样。
+   * 6.x 与 5.6 都有 `max`、都没有 `minimal`。显式写 `null` 而不是省略，
+   * 是为了让「这一档查过了、确实没有」和「还没查」在这张表里长得不一样。
    */
   chatgpt: {
+    'gpt-6.1-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-astra': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6-terra': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
-    'gpt-5.6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
-    'gpt-5.5': { thinking: { minimal: null, xhigh: 'xhigh', max: null } },
-    'gpt-5.4': { thinking: { minimal: null, xhigh: 'xhigh', max: null } },
-    'gpt-5.4-mini': { thinking: { minimal: null, xhigh: 'xhigh', max: null } },
-    'gpt-5.3-codex-spark': { thinking: { minimal: null, xhigh: 'xhigh', max: null } }
+    'gpt-5.6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } }
   },
 
   /*

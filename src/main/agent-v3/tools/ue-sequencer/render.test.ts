@@ -81,9 +81,11 @@ async function run(
 }
 
 describe('元数据', () => {
-  it('每一次渲染都要用户当场批准，「本对话内都允许」放不过', () => {
-    expect(tool.unrealBox.requiresExplicitApproval).toBe(true)
+  it('渲染只写新文件，按可撤销的改动走；描述里管住不主动开渲', () => {
+    expect(tool.unrealBox.risk).toBe('mutating')
+    expect(tool.unrealBox.requiresExplicitApproval).toBeUndefined()
     expect(tool.unrealBox.namespace).toBe('ue.sequencer')
+    expect(tool.description).toContain('用户没要就不要主动开渲')
   })
 
   it('描述里写清这是引擎渲染、调之前先体检', () => {

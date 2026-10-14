@@ -1,7 +1,13 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest'
 
-import { createLoopBreaker, MAX_IDENTICAL_FAILURES, type LoopBreaker } from './loopBreaker'
+import {
+  createLoopBreaker,
+  MAX_IDENTICAL_FAILURES,
+  MAX_VOLATILE_FAILURES,
+  VOLATILE_TOOLS,
+  type LoopBreaker
+} from './loopBreaker'
 
 const before = (
   b: ReturnType<typeof createLoopBreaker>,
@@ -119,5 +125,88 @@ describe('createLoopBreaker', () => {
     // 设成 1 会在「第一次失败」后就拦，模型连一次重试都做不了；
     // 瞬时故障（锁竞争、引擎重连）会被误判成撞墙。
     expect(MAX_IDENTICAL_FAILURES).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('createLoopBreaker —— 世界变了就清账', () => {
+  const metas: Record<string, { unrealBox: { namespace: string; risk: 'safe' | 'mutating' } }> = {
+    cpp_compile: { unrealBox: { namespace: 'cpp', risk: 'mutating' } },
+    edit_local_file: { unrealBox: { namespace: 'local', risk: 'mutating' } },
+    read_local_file: { unrealBox: { namespace: 'local', risk: 'safe' } },
+    get_note: { unrealBox: { namespace: 'note', risk: 'safe' } }
+  }
+  const make = (limit?: number): LoopBreaker =>
+    createLoopBreaker(limit, {
+      lookup: (name) => metas[name] as never
+    })
+
+  // 改代码 → 编译 → 再改 → 再编译：编译参数一字不差，但源文件不同了
+  it('编译失败、改文件成功、再失败、再改成功之后，编译仍被放行', () => {
+    const b = make(1)
+    const compile = { module: 'Game' }
+
+    fail(b, 'cpp_compile', compile)
+    after(b, 'edit_local_file', { path: 'a.cpp', v: 1 }, false)
+    expect(before(b, 'cpp_compile', compile)).toBeUndefined()
+
+    fail(b, 'cpp_compile', compile)
+    after(b, 'edit_local_file', { path: 'a.cpp', v: 2 }, false)
+    expect(before(b, 'cpp_compile', compile)).toBeUndefined()
+  })
+
+  it('成功的改动清掉所有工具的失败计数', () => {
+    const b = make()
+    fail(b, 'get_note', { id: 1 }, MAX_IDENTICAL_FAILURES)
+    expect(before(b, 'get_note', { id: 1 })?.block).toBe(true)
+
+    after(b, 'edit_local_file', { path: 'x' }, false)
+    expect(before(b, 'get_note', { id: 1 })).toBeUndefined()
+  })
+
+  // 只读调用不改变下一次调用的结果，不能用来洗掉熔断
+  it('只读调用成功不清别的工具的计数', () => {
+    const b = make()
+    fail(b, 'get_note', { id: 1 }, MAX_IDENTICAL_FAILURES)
+    after(b, 'read_local_file', { path: 'x' }, false)
+    expect(before(b, 'get_note', { id: 1 })?.block).toBe(true)
+  })
+
+  it('查不到元数据的工具成功不清别人的计数', () => {
+    const b = make()
+    fail(b, 'get_note', { id: 1 }, MAX_IDENTICAL_FAILURES)
+    after(b, 'mystery_tool', {}, false)
+    expect(before(b, 'get_note', { id: 1 })?.block).toBe(true)
+  })
+
+  it('改动失败不清账', () => {
+    const b = make()
+    fail(b, 'get_note', { id: 1 }, MAX_IDENTICAL_FAILURES)
+    after(b, 'edit_local_file', { path: 'x' }, true)
+    expect(before(b, 'get_note', { id: 1 })?.block).toBe(true)
+  })
+
+  it('不传 lookup 时从钩子上下文的 tools 里查元数据', () => {
+    const b = createLoopBreaker()
+    fail(b, 'get_note', { id: 1 }, MAX_IDENTICAL_FAILURES)
+    b.after({
+      toolCall: { name: 'edit_local_file' },
+      args: {},
+      isError: false,
+      context: { tools: [{ name: 'edit_local_file', ...metas.edit_local_file }] }
+    } as unknown as Parameters<typeof b.after>[0])
+    expect(before(b, 'get_note', { id: 1 })).toBeUndefined()
+  })
+
+  // 编译、试玩、截图的结果随工程状态变；什么都没变就连发仍然是撞墙，只是阈值更宽
+  it('结果随状态变化的工具用更宽的阈值，但不是无限', () => {
+    const b = make()
+    const args = { module: 'Game' }
+    fail(b, 'cpp_compile', args, MAX_IDENTICAL_FAILURES)
+    expect(before(b, 'cpp_compile', args)).toBeUndefined()
+
+    fail(b, 'cpp_compile', args, MAX_VOLATILE_FAILURES - MAX_IDENTICAL_FAILURES)
+    expect(before(b, 'cpp_compile', args)?.block).toBe(true)
+    expect(VOLATILE_TOOLS.has('ue_playtest')).toBe(true)
+    expect(VOLATILE_TOOLS.has('run_shell_command')).toBe(true)
   })
 })

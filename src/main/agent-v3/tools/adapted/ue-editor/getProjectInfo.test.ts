@@ -148,12 +148,13 @@ describe('ue_get_project_info 的插件新旧与 Python 可用性', () => {
     expect(String(result.message)).not.toContain('更新插件')
   })
 
-  it('指纹对不上：明说插件旧了，让用户去设置里更新', async () => {
+  it('指纹对不上：明说插件可能旧了，指向 project_update_plugin，不把步骤甩给用户', async () => {
     const result = await run({ pluginBuild: 'stale-fp' })
 
     expect(result.pluginUpToDate).toBe(false)
-    expect(String(result.pluginHint)).toContain('更新插件')
-    expect(String(result.message)).toContain('更新插件')
+    expect(String(result.pluginHint)).toContain('project_update_plugin')
+    expect(String(result.message)).toContain('project_update_plugin')
+    expect(String(result.pluginHint)).not.toContain('让用户在盒子设置里')
   })
 
   it('连指纹都不报的老插件也算旧', async () => {

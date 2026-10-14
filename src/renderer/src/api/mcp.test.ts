@@ -162,6 +162,33 @@ describe('toSettings / toFormValues', () => {
     expect(toFormValues(settings)).toEqual(values)
   })
 
+  it('信任此服务器：只有勾上才写进盘，往返一致', () => {
+    const values = [
+      {
+        id: 'fs',
+        savedId: 'fs',
+        transport: 'stdio' as const,
+        commandLine: 'npx srv',
+        url: '',
+        disabled: false,
+        trusted: true,
+        env: '',
+        preserved: {}
+      }
+    ]
+    const settings = toSettings(values)
+    expect(settings.mcpServers.fs).toEqual({
+      type: 'stdio',
+      command: 'npx',
+      args: ['srv'],
+      trusted: true
+    })
+    expect(toFormValues(settings)).toEqual(values)
+    expect(toSettings([{ ...values[0]!, trusted: false }]).mcpServers.fs).not.toHaveProperty(
+      'trusted'
+    )
+  })
+
   /**
    * 这一条是本次事故的回归测试。
    *

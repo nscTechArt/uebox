@@ -26,6 +26,7 @@
  *   - `sequence_diff`         —— 两条序列逐绑定对比：受保护资产改没改、风格迁移覆盖全没全
  *   - `sequence_camera_keys`  —— 写相机关键帧，任意运镜都走这里
  *   - `sequence_camera_cuts`  —— 给已有序列补相机切轨
+ *   - `sequence_rebind`       —— 断了的 possessable 绑定改指向点名的 Actor，歧义一律拒绝
  *   - `sequence_render`       —— 用 MRQ 渲成序列帧或视频，每次都要用户当场批准
  *
  * `sequence_orbit` 已删除（2026-08-30）。它的参数是「转几圈、俯角多少、半径倍数」，
@@ -34,7 +35,6 @@
  * 「模型自己算 24 个点」的一种用法，和别的运镜没有区别。不留兼容层。
  *
  * 未实现：变焦动画、重定时、批量换引用、变体批处理。见文档 §8 的顺序。
- * possessable 的重新绑定引擎没导出 Python 接口，只能让用户手点（见 cameraCuts.ts）。
  *
  * ## 那次崩溃
  *
@@ -55,6 +55,7 @@ import { createSequenceCameraCutsTool } from './cameraCuts'
 import { createSequenceCameraKeysTool } from './cameraKeys'
 import { createSequenceDescribeTool } from './describe'
 import { createSequenceDiffTool } from './diff'
+import { createSequenceRebindTool } from './rebind'
 import { createSequenceRenderTool } from './render'
 import type { UnrealAgentTool } from '../defineTool'
 
@@ -66,6 +67,7 @@ export function sequencerTools(): UnrealAgentTool<never>[] {
     createSequenceDiffTool(),
     createSequenceCameraKeysTool(),
     createSequenceCameraCutsTool(),
+    createSequenceRebindTool(),
     createSequenceRenderTool()
   ] as unknown as UnrealAgentTool<never>[]
 }
@@ -75,5 +77,6 @@ export { createSequenceCameraCutsTool } from './cameraCuts'
 export { createSequenceCameraKeysTool } from './cameraKeys'
 export { createSequenceDescribeTool } from './describe'
 export { createSequenceDiffTool } from './diff'
+export { createSequenceRebindTool } from './rebind'
 export { createSequenceRenderTool } from './render'
 export * from './findings'

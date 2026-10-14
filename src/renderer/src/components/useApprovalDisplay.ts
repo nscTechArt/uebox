@@ -55,6 +55,8 @@ export interface DisplayApproval {
    * 主进程那边也拦着（见 `core/approval.ts`），界面只负责别把按钮摆出来。
    */
   allowAlways: boolean
+  /** 能不能「以后都允许」。条件比 allowAlways 严，见 `core/approval.ts` */
+  allowForever: boolean
 }
 
 export interface ApprovalDisplay {
@@ -152,7 +154,8 @@ export function useApprovalDisplay(): ApprovalDisplay {
       // 参数原样显示，绝不脱敏：用户批准的是「把这段文字发给这个网站」，
       // 看不到文字就是在盲批（见设计文档 §5.3）
       details: (request.args as Record<string, unknown>) ?? undefined,
-      allowAlways: request.allowAlways
+      allowAlways: request.allowAlways,
+      allowForever: request.allowAlways && request.allowForever === true
     }
   })
 

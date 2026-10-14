@@ -183,6 +183,44 @@ describe('task 子 agent 工具', () => {
     expect(runSubAgent.mock.calls[1][0].readOnly).toBeUndefined()
   })
 
+  it('没给模型名单就没有 model 参数 —— 盒子助手的常驻说明不变', () => {
+    const { tool } = makeTool()
+
+    const { properties } = tool.parameters as { properties: Record<string, unknown> }
+    expect(Object.keys(properties)).not.toContain('model')
+  })
+
+  it('给了名单：说明里列出候选，点名的模型一路传到 runSubAgent', async () => {
+    const GPT = { providerId: 'openai', modelId: 'gpt-6' }
+    const resolve = vi.fn(async () => GPT)
+    const { runSubAgent, tool } = makeTool({
+      models: { catalog: '- openai/gpt-6：GPT-6（OpenAI）', resolve }
+    })
+
+    expect(JSON.stringify(tool.parameters)).toContain('openai/gpt-6')
+
+    await tool.execute('c1', { prompt: '评审', model: 'openai/gpt-6' })
+    expect(resolve).toHaveBeenCalledWith('openai/gpt-6')
+    expect(runSubAgent.mock.calls[0][0].model).toEqual(GPT)
+
+    await tool.execute('c2', { prompt: '评审' })
+    expect(runSubAgent.mock.calls[1][0].model).toBeUndefined()
+  })
+
+  it('点的模型认不出来就报错，不派子任务', async () => {
+    const { runSubAgent, tool } = makeTool({
+      models: {
+        catalog: '',
+        resolve: async () => {
+          throw new Error('没有「gpt」这个模型')
+        }
+      }
+    })
+
+    await expect(tool.execute('c1', { prompt: 'x', model: 'gpt' })).rejects.toThrow('没有「gpt」')
+    expect(runSubAgent).not.toHaveBeenCalled()
+  })
+
   it('标为 safe 且可并发 —— 支持多个子 agent 同时跑不同视角', () => {
     const { tool } = makeTool()
 

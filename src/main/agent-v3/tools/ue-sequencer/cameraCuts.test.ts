@@ -44,8 +44,9 @@ describe('元数据', () => {
     expect(tool.unrealBox.namespace).toBe('ue.sequencer')
   })
 
-  it('描述里说清它不做重新绑定，也说清为什么', () => {
-    expect(tool.description).toContain('不做 possessable 的重新绑定')
+  it('描述里说清它不重绑，并指向 sequence_rebind', () => {
+    expect(tool.description).toContain('不重绑 possessable')
+    expect(tool.description).toContain('sequence_rebind')
     expect(tool.description).toContain('不会假装修好')
   })
 })
@@ -108,13 +109,14 @@ describe('返回给用户的话', () => {
    * 最重要的一条。绑定是坏的时候补完切轨渲出来照样是黑的 ——
    * 只说「已补上」会让用户以为修好了，比不修更糟。
    */
-  it('绑定已失效时，必须跟上手动重绑的步骤', async () => {
+  it('绑定已失效时，必须跟上重绑的下一步', async () => {
     mockUe.mockResolvedValueOnce({ ...OK, binding_broken: true })
     const text = textOf(await call())
 
     expect(text).toContain('照样是黑的')
-    expect(text).toContain('Rebind Possessable References')
-    expect(text).toContain('Assign Actor')
+    expect(text).toContain('sequence_rebind')
+    // 不知道该绑哪台，不能让模型随手挑
+    expect(text).toContain('先问用户')
   })
 
   it('提醒模型自查', async () => {

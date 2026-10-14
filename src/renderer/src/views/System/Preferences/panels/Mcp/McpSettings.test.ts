@@ -918,6 +918,29 @@ describe('按行保存', () => {
     expect(args.renamedFrom).toBe('dcc-bridge')
   })
 
+  // 信任是对这一个 server 的放宽：勾上要能存下去，而且只写进这一条
+  it('勾上「信任此服务器」：长出保存按钮，存下去的配置带 trusted', async () => {
+    withTwo()
+    const wrapper = await mountPanel()
+    await wrapper
+      .findAll('.category.manual')[1]
+      .find('.category.manual .category-open')
+      .trigger('click')
+    await flushPromises()
+    await wrapper
+      .findAll('.category.manual')[1]
+      .find('.trust-checkbox [role="checkbox"]')
+      .trigger('click')
+    await flushPromises()
+
+    await wrapper.find('button.save-row').trigger('click')
+    await flushPromises()
+
+    const [args] = saveServerIpc.mock.calls[0]
+    expect(args.id).toBe('filesystem')
+    expect(args.config.trusted).toBe(true)
+  })
+
   it('存失败时把主进程给的原因显示出来', async () => {
     withTwo()
     saveServerIpc.mockResolvedValue({ success: false, error: 'EPERM: mcp.json 被占用' })

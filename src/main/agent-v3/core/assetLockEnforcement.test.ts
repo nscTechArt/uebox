@@ -23,6 +23,7 @@ import {
   setEnforcementChangeListener,
   setLockRepublishTrigger,
   setProjectRootResolver,
+  setReadonlyLockEnabledResolver,
   suspendForWrite
 } from './assetLockEnforcement'
 import { countProtected, resetReadonlyGuardCaches } from './assetReadonlyGuard'
@@ -49,6 +50,8 @@ function lock(packagePath: string, connectionId: string | undefined): LockRecord
 beforeEach(() => {
   root = mkdtempSync(path.join(os.tmpdir(), 'ual-enforce-'))
   setProjectRootResolver(async () => root)
+  // 这一层默认关（设置 → AI）。下面的用例测的是开着时的行为，关着的单独一组
+  setReadonlyLockEnabledResolver(async () => true)
   setEnforcementChangeListener(undefined)
   setLockRepublishTrigger(undefined)
   resetEnforcementState()
@@ -60,6 +63,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   setProjectRootResolver(undefined)
+  setReadonlyLockEnabledResolver(undefined)
   setEnforcementChangeListener(undefined)
   setLockRepublishTrigger(undefined)
   // 留下的只读文件会让 Windows 上的 rm 失败
@@ -351,5 +355,42 @@ describe('删资产之前撤掉自己的只读保护', () => {
 
     setProjectRootResolver(async () => undefined)
     await expect(releaseProtectionBeforeDelete('conn-a', ['/Game/A'])).resolves.toBeUndefined()
+  })
+})
+
+describe('只读位开关关着（默认）', () => {
+  it('写完不翻位，用户在编辑器里照常能存；计数照样配平', async () => {
+    setReadonlyLockEnabledResolver(async () => false)
+    const file = makeAsset('Maps/M_Off')
+    const held = [lock('/Game/Maps/M_Off', 'c1')]
+
+    await suspendForWrite(held)
+    await enforceAfterWrite(held)
+
+    expect(isWritable(file)).toBe(true)
+    expect(listEnforced(held)).toEqual([])
+    expect(await countProtected(root)).toBe(0)
+
+    // 拨回开着之后下一次写完立刻生效 —— 关着那段时间计数没有漏减
+    setReadonlyLockEnabledResolver(async () => true)
+    await suspendForWrite(held)
+    await enforceAfterWrite(held)
+    expect(isWritable(file)).toBe(false)
+  })
+
+  it('中途关掉：已经翻上去的位在下一次清位时放开，之后不再翻回来', async () => {
+    const file = makeAsset('Maps/M_Mid')
+    const held = [lock('/Game/Maps/M_Mid', 'c1')]
+    await suspendForWrite(held)
+    await enforceAfterWrite(held)
+    expect(isWritable(file)).toBe(false)
+
+    setReadonlyLockEnabledResolver(async () => false)
+    await suspendForWrite(held)
+    await enforceAfterWrite(held)
+    expect(isWritable(file)).toBe(true)
+
+    await releaseEnforcement(held)
+    expect(await countProtected(root)).toBe(0)
   })
 })

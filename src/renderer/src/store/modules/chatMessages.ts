@@ -176,6 +176,21 @@ export interface HydratedTypingMessage {
  */
 const hydratedTypingMessages: HydratedTypingMessage[] = []
 
+/** 一个对话在盘上的样子（`chat-history/sessions/<sid>.json`） */
+export interface PersistedChatSession {
+  sid: string
+  messages: unknown[]
+  historySummary?: string
+  compressedUserCount?: number
+}
+
+/** 盘上的对话怎么读。由持久化插件接上（见 `utils/chatMessagesPersistence.ts`） */
+export interface ChatSessionSource {
+  /** sid → 还挂在 typing 上的消息 id */
+  typing: ReadonlyMap<string, readonly string[]>
+  read: (sid: string) => string | null
+}
+
 /** 取走并清空待裁决清单 —— 只该由重连流程调用一次 */
 export function takeHydratedTypingMessages(): HydratedTypingMessage[] {
   return hydratedTypingMessages.splice(0, hydratedTypingMessages.length)
@@ -238,12 +253,122 @@ export const useChatMessagesStore = defineStore(
     const compressedUserCountBySid = ref<Record<string, number>>({})
 
     /**
+     * 对话正文是**用到才读**的：一个对话一个文件（`main/ipc/chatSessionFiles.ts`），
+     * 第一次碰到某个对话时同步读进来。store 的接口全是同步的，调用方不用管
+     * 这件事 —— 每个按 sid 取数据的地方都先过 `keyOf`。
+     *
+     * 读过的（含读了发现盘上没有的）记在这里，不再读第二遍：之后内存那份是准的。
+     */
+    const loadedSids = new Set<string>()
+    let sessionSource: ChatSessionSource | null = null
+
+    function keyOf(sid: unknown): string {
+      const k = String(sid || '').trim()
+      if (k && !loadedSids.has(k)) loadSession(k)
+      return k
+    }
+
+    /**
+     * 盘上有、但读不出来的对话（文件损坏、IPC 出错）。界面上按空对话显示，
+     * 但**不写回**：写回就是拿一份空的或只有新消息的盖掉那份还可能救回来的文件。
+     */
+    const unreadableSids = new Set<string>()
+
+    function loadSession(k: string): void {
+      loadedSids.add(k)
+      if (!sessionSource) return
+      try {
+        // 不看索引里有没有：索引可能没跟上，盘上有的对话绝不能当成空的
+        const raw = sessionSource.read(k)
+        if (raw) applySession(k, JSON.parse(raw) as PersistedChatSession)
+      } catch (error) {
+        unreadableSids.add(k)
+        console.error(`[chatMessages] 对话 ${k} 的历史读不出来，本次不保存它:`, error)
+      }
+    }
+
+    function applySession(k: string, data: PersistedChatSession): void {
+      if (!Array.isArray(data?.messages)) throw new Error('文件里没有消息列表')
+      // 追加提问请求活在渲染层，重开后无法恢复，不能留一个永远转圈的按钮
+      messagesBySid.value[k] = (data.messages as ChatMessage[]).map((msg) =>
+        msg?.suggestionsLoading ? { ...msg, suggestionsLoading: false } : msg
+      )
+      if (typeof data.historySummary === 'string')
+        historySummaryBySid.value[k] = data.historySummary
+      if (
+        typeof data.compressedUserCount === 'number' &&
+        Number.isFinite(data.compressedUserCount)
+      ) {
+        compressedUserCountBySid.value[k] = data.compressedUserCount
+      }
+    }
+
+    /**
+     * 接上盘上的对话：记下有哪些对话，并把还挂在 typing 上的回复交给重连流程。
+     * 索引里就有 typing 清单，不必为此把每个对话都读一遍。
+     */
+    function attachSessionSource(source: ChatSessionSource): void {
+      sessionSource = source
+      hydratedTypingMessages.splice(0, hydratedTypingMessages.length)
+      for (const [sid, messageIds] of source.typing) {
+        for (const messageId of messageIds) hydratedTypingMessages.push({ sid, messageId })
+      }
+      if (hydratedTypingMessages.length > 0) {
+        console.log(
+          `[chatMessages] ${hydratedTypingMessages.length} 条回复还挂在 typing 上，等重连流程裁决`
+        )
+      }
+    }
+
+    /**
+     * 一个对话落盘用的那份。对话已经没了（删掉或从没有过）返回 null；
+     * 盘上那份读不出来时返回 undefined —— 这种不能写，见 `unreadableSids`
+     */
+    function exportSession(sid: string): { json: string; typing: string[] } | null | undefined {
+      const k = String(sid || '').trim()
+      if (unreadableSids.has(k)) return undefined
+      const messages = toRaw(messagesBySid.value[k])
+      const historySummary = historySummaryBySid.value[k]
+      const compressedUserCount = compressedUserCountBySid.value[k]
+      if (!messages && historySummary === undefined) return null
+      const session: PersistedChatSession = { sid: k, messages: messages ?? [] }
+      if (historySummary !== undefined) session.historySummary = historySummary
+      if (compressedUserCount !== undefined) session.compressedUserCount = compressedUserCount
+      return {
+        json: JSON.stringify(session),
+        typing: (messages ?? [])
+          .filter((m) => m.role === 'assistant' && m.status === 'typing')
+          .map((m) => m.id)
+      }
+    }
+
+    /**
+     * 最后一条是不是还在打字的助手回复。
+     *
+     * 侧栏每个对话都要问一遍（画「在跑」那个小圆点），为它把对话读进来不值得：
+     * 没读过的直接查索引里的 typing 清单。
+     */
+    function isLastReplyTyping(sid: string): boolean {
+      const k = String(sid || '').trim()
+      if (!k) return false
+      // 先读一下响应式的这一格：之后对话被读进来时，侧栏能跟着重算
+      const last = messagesBySid.value[k]?.at(-1)
+      if (!loadedSids.has(k)) return (sessionSource?.typing.get(k)?.length ?? 0) > 0
+      return last?.role === 'assistant' && last?.status === 'typing'
+    }
+
+    /** 已经读进内存的对话。整份落盘（`$persist`）时用 */
+    function loadedSessionIds(): string[] {
+      return [...loadedSids]
+    }
+
+    /**
      * 获取指定对话的消息列表
      * @param sid 对话ID
      * @returns 消息数组（若不存在返回空数组）
      */
     function getMessages(sid: string): ChatMessage[] {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return []
       return messagesBySid.value[k] || []
     }
@@ -253,7 +378,7 @@ export const useChatMessagesStore = defineStore(
      * @param sid 对话ID
      */
     function ensureContainer(sid: string): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return
       if (!messagesBySid.value[k]) {
         messagesBySid.value[k] = []
@@ -533,14 +658,14 @@ export const useChatMessagesStore = defineStore(
      * @param sid 对话ID
      */
     function clearSessionMessages(sid: string): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return
       messagesBySid.value[k] = []
     }
 
     /** 用一份独立快照替换某个对话的消息（MiniChat → 主窗口同步）。 */
     function replaceSessionMessages(sid: string, messages: ChatMessage[]): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k || !Array.isArray(messages)) return
       messagesBySid.value[k] = JSON.parse(JSON.stringify(messages)) as ChatMessage[]
     }
@@ -570,6 +695,9 @@ export const useChatMessagesStore = defineStore(
       for (const sid of sids) {
         const k = String(sid || '').trim()
         if (!k) continue
+        // 记成「读过」：落盘删除之前再碰到它，不能从盘上把删掉的对话读回来
+        loadedSids.add(k)
+        unreadableSids.delete(k)
         delete messagesBySid.value[k]
         delete stoppedBySid.value[k]
         delete historySummaryBySid.value[k]
@@ -663,7 +791,7 @@ export const useChatMessagesStore = defineStore(
      * @param fromIndex 起始索引（包含该索引）
      */
     function deleteMessagesFromIndex(sid: string, fromIndex: number): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return
       const arr = messagesBySid.value[k]
       if (!arr || fromIndex < 0 || fromIndex >= arr.length) return
@@ -684,7 +812,7 @@ export const useChatMessagesStore = defineStore(
      * 模型上下文在主进程的内核 session 里，续跑照旧接着断点走）。
      */
     function clearActionButtons(sid: string, messageId: string): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       const id = String(messageId || '').trim()
       if (!k || !id) return
       const msg = messagesBySid.value[k]?.find((message) => message.id === id)
@@ -704,7 +832,7 @@ export const useChatMessagesStore = defineStore(
       messageId: string,
       newContent: ChatMessageContent
     ): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return
       const arr = messagesBySid.value[k]
       if (!arr) return
@@ -728,7 +856,7 @@ export const useChatMessagesStore = defineStore(
       >,
       protectedId?: string | null
     ): Set<string> {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return new Set()
       let skipped = new Set<string>()
       if (patch.full || patch.order || patch.messages?.length) {
@@ -757,7 +885,7 @@ export const useChatMessagesStore = defineStore(
      * @returns 已压缩的user消息数，如果不存在则返回0
      */
     function getCompressedUserCount(sid: string): number {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return 0
       return compressedUserCountBySid.value[k] || 0
     }
@@ -768,7 +896,7 @@ export const useChatMessagesStore = defineStore(
      * @param count 已压缩的user消息数
      */
     function setCompressedUserCount(sid: string, count: number): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return
       compressedUserCountBySid.value[k] = count
     }
@@ -779,7 +907,7 @@ export const useChatMessagesStore = defineStore(
      * @returns 历史摘要文本，如果不存在则返回null
      */
     function getHistorySummary(sid: string): string | null {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return null
       return historySummaryBySid.value[k] || null
     }
@@ -790,7 +918,7 @@ export const useChatMessagesStore = defineStore(
      * @param summary 摘要文本
      */
     function setHistorySummary(sid: string, summary: string): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return
       historySummaryBySid.value[k] = summary
     }
@@ -800,16 +928,7 @@ export const useChatMessagesStore = defineStore(
      * @param sid 对话ID
      */
     function clearHistorySummary(sid: string): void {
-      const k = String(sid || '').trim()
-      if (!k) return
-      delete historySummaryBySid.value[k]
-    }
-
-    /**
-     * 清空历史摘要（已废弃，保留兼容）
-     */
-    function clearHistorySummary_deprecated(sid: string): void {
-      const k = String(sid || '').trim()
+      const k = keyOf(sid)
       if (!k) return
       delete historySummaryBySid.value[k]
     }
@@ -833,8 +952,8 @@ export const useChatMessagesStore = defineStore(
       toSid: number | string,
       upToIndex?: number
     ): void {
-      const from = String(fromSid || '').trim()
-      const to = String(toSid || '').trim()
+      const from = keyOf(fromSid)
+      const to = keyOf(toSid)
       if (!from || !to || from === to) return
 
       const source = messagesBySid.value[from]
@@ -855,7 +974,7 @@ export const useChatMessagesStore = defineStore(
      * 都碰到同一条消息，重复贴一遍收尾标记会在气泡里叠两行。
      */
     function markTypingInterrupted(sid: string, messageId: string, label: string): void {
-      const arr = messagesBySid.value[String(sid || '').trim()]
+      const arr = messagesBySid.value[keyOf(sid)]
       if (!Array.isArray(arr)) return
 
       const idx = arr.findIndex((m) => m.id === messageId)
@@ -888,6 +1007,7 @@ export const useChatMessagesStore = defineStore(
       messagesBySid.value = restoreMessages(persisted.messagesBySid)
       historySummaryBySid.value = restoreStringRecord(persisted.historySummaryBySid)
       compressedUserCountBySid.value = restoreNumberRecord(persisted.compressedUserCountBySid)
+      for (const sid in messagesBySid.value) loadedSids.add(sid)
       // 停止标记只属于当前渲染进程，不跨启动恢复。
       stoppedBySid.value = {}
       hydratedTypingMessages.splice(0, hydratedTypingMessages.length)
@@ -947,7 +1067,11 @@ export const useChatMessagesStore = defineStore(
       markTypingInterrupted,
       applySyncMessages,
       exportChatMessagesPersistence,
-      hydrateChatMessagesPersistence
+      hydrateChatMessagesPersistence,
+      attachSessionSource,
+      exportSession,
+      loadedSessionIds,
+      isLastReplyTyping
     }
   },
   {}

@@ -350,6 +350,9 @@ export default {
       command: 'Launch command',
       url: 'Server URL',
       disabled: 'Disabled',
+      trusted: 'Trust this server',
+      trustedHint:
+        'When on, its tools no longer ask for confirmation in "Approve for me" mode. "Ask for approval" mode still asks.',
       env: 'Environment',
       envPlaceholder: 'KEY=VALUE',
       envHint: 'Follow the service instructions: one KEY=VALUE per line, or paste JSON.'
@@ -529,7 +532,10 @@ export default {
       models: 'Models',
       import: 'Import models…',
       importing: 'Importing…',
-      addModel: '+ Add Model'
+      addModel: '+ Add Model',
+      // Preset models in the catalog that this saved provider does not have yet
+      addCatalogModel: '+ Add new model {name}',
+      addCatalogModels: '+ Add {count} new models, incl. {name}'
     },
     apiKey: {
       placeholder: 'Enter a key, environment variable, or !command',
@@ -2355,6 +2361,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         blueprint_add_component: 'Add Blueprint component',
         blueprint_set_property: 'Change Blueprint property',
         blueprint_create_function: 'Create Blueprint function',
+        blueprint_create_event_graph: 'Create Blueprint event graph',
         blueprint_add_variable: 'Add Blueprint variable',
         blueprint_remove_variable: 'Remove Blueprint variable',
         blueprint_set_variable_meta: 'Change Blueprint variable settings',
@@ -2406,6 +2413,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
 
         ue_save: 'Save',
         ue_set_config: 'Change editor setting',
+        ue_input_add_mapping: 'Add input mapping',
+        sequence_rebind: 'Change sequence binding',
         ue_collect_garbage: 'Free memory',
         ue_playtest: 'Play in editor',
         ue_restart_editor: 'Restart editor',
@@ -2834,6 +2843,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         ue_undo_history: 'Undo history',
         ue_inject_input: 'Simulate input',
         ue_input_map: 'Read input mappings',
+        ue_input_add_mapping: 'Add input mapping',
         blueprint_describe: 'Inspect blueprint',
         blueprint_get_graph: 'Read blueprint graph',
         blueprint_search_nodes: 'Search blueprint nodes',
@@ -2850,6 +2860,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         cpp_list_modules: 'List C++ modules',
         cpp_add_class: 'Add C++ class',
         cpp_compile: 'Compile C++',
+        cpp_full_rebuild: 'Full C++ rebuild',
         anim_preview: 'Preview animation'
       },
       /** Step groups in the main chat: the one-line summary between replies, and each step inside */
@@ -2993,6 +3004,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       confirm: 'Confirm',
       reject: 'Reject',
       allowForChat: 'Allow for this chat',
+      allowForever: 'Always allow',
+      allowForeverHint:
+        'Stops asking for this operation in every chat. You can remove it in Settings → AI Assistant.',
       whatIsThis: 'What is this?',
       queued: '{count} more waiting',
       // Named by risk. Everything non-browser used to collapse into "Other
@@ -3119,6 +3133,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       ai: 'AI Assistant',
       personalization: 'Personalization',
       models: 'Models',
+      team: 'Team',
       mcp: 'MCP',
       skills: 'Skills',
       experience: 'Lessons learned',
@@ -3137,6 +3152,44 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     // AI Settings
     models: {
       title: 'Models'
+    },
+    team: {
+      title: 'Team',
+      description: 'Check results and task history of each model in team mode',
+      empty: 'After you use /team, check results and task history for each model appear here.',
+      note: 'Only models that were checked or took on tasks are listed. Reopened means a task you reopened on the task board.',
+      col: {
+        model: 'Model',
+        checkup: 'Check',
+        tasks: 'Tasks',
+        reopened: 'Reopened',
+        unfinished: 'Unfinished',
+        lastUsed: 'Last used',
+        role: 'Role',
+        avgTime: 'Avg. time'
+      },
+      passed: 'Passed',
+      failed: 'Failed',
+      notChecked: 'Not checked',
+      notCheckedHint: 'Not checked yet',
+      removed: 'Removed',
+      removedHint:
+        'This model was removed from model settings. Its history is kept, and it no longer joins teams.',
+      reachOk: 'Reachable',
+      reachFail: 'Unreachable: {reason}',
+      toolsOk: 'Tool calls OK',
+      toolsFail: 'Tool calls failed: no tool was called after two requests',
+      visionOk: 'Vision OK',
+      visionFail: 'Vision failed',
+      checkedAt: 'checked {when}',
+      recheck: 'Check again',
+      checking: 'Checking…',
+      recheckFailed: 'Check failed. Try again later.',
+      uncategorized: 'Uncategorized',
+      noTasks: 'No tasks yet',
+      underMinute: 'Under 1 min',
+      minutes: '{n} min',
+      hours: '{n} h'
     },
     ai: {
       title: 'AI Assistant',
@@ -3169,6 +3222,17 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       persistentAutoResume: 'Auto-resume on failure',
       persistentAutoResumeDesc:
         'When your gateway is unstable, pick up from where it stopped every 60s. Gives up after 30 minutes of failures. Failed attempts are left out of the chat.',
+      assetReadonlyLock: 'Make assets read-only while editing',
+      assetReadonlyLockDesc:
+        'While the AI edits an asset, its .uasset file is set to read-only so a save in the editor cannot overwrite the changes. Those assets cannot be saved in the editor until the AI finishes.',
+      browserAllowLocalNetwork: 'Allow browser access to local network',
+      browserAllowLocalNetworkDesc:
+        'Lets the Agent browser open this computer and local network addresses (such as localhost or 192.168.x.x), for example a local dev server. Links on web pages can reach these addresses too.',
+      alwaysAllowedTools: 'Always allowed operations',
+      alwaysAllowedToolsDesc:
+        'These operations no longer ask for confirmation in any chat. Read-only chats are not affected.',
+      alwaysAllowedRemove: 'Remove',
+      alwaysAllowedRemoveLabel: 'Stop always allowing "{name}"',
       goalMaxRounds: 'Goal mode round limit',
       goalMaxRoundsDesc:
         'With /goal, a failed review sends the work back for another round. After this many rounds it stops and hands back to you. Each round adds a review that may compile Blueprints or run PIE. Applies from your next message. 1–50.',

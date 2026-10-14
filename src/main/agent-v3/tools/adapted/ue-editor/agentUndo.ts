@@ -95,7 +95,7 @@ ue_undo 也撤不掉 —— 那是刻意的。
 也能认出「哪几步不是我做的」。
 step 越大越新，撤销从最大的那个往回走。
 
-**objects 是空的**说明那一步动的都是临时对象，或者插件是旧版本 —— 后者请提醒用户更新插件。`,
+**objects 是空的**说明那一步动的都是临时对象，或者插件是旧版本 —— 后者用 project_update_plugin 更新插件。`,
 
     inputSchema: z.object({
       limit: z

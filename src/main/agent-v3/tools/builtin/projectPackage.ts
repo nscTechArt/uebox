@@ -129,14 +129,14 @@ export function fatalLines(log: string): string[] {
 
 // ── 引擎与工程 ──────────────────────────────────────────────────────────
 
-async function findUproject(projectDir: string): Promise<string> {
+export async function findUproject(projectDir: string): Promise<string> {
   const name = (await fs.readdir(projectDir)).find((entry) => entry.endsWith('.uproject'))
   if (!name) throw new Error(`${projectDir} 里没有 .uproject`)
   return join(projectDir, name)
 }
 
 /** 这个工程用哪个引擎：自编译引擎按 GUID 查注册表，安装版按版本号对 */
-async function engineRootFor(uproject: string): Promise<string> {
+export async function engineRootFor(uproject: string): Promise<string> {
   // 引擎存 .uproject 时遇到中文工程名、中文描述会整份存成 UTF-16LE，按 utf-8 读就是乱码
   const association = String(
     (await readUeJsonFile<{ EngineAssociation?: unknown }>(uproject)).EngineAssociation ?? ''
@@ -176,7 +176,7 @@ function runUatPath(engineRoot: string): string {
  * （找 dotnet、检查环境），这点空档足够；之后派生的子进程都继承这个优先级。
  * 降不下来不影响打包本身，只是会和用户抢 CPU。
  */
-function lowerPriority(child: ChildProcess): void {
+export function lowerPriority(child: ChildProcess): void {
   if (!child.pid) return
   try {
     setPriority(child.pid, constants.priority.PRIORITY_BELOW_NORMAL)
@@ -186,7 +186,7 @@ function lowerPriority(child: ChildProcess): void {
 }
 
 /** 停止时连子孙一起杀：UAT 派生的编译、烘焙进程不跟着死的话会自己再跑半小时 */
-function killTree(child: ChildProcess): void {
+export function killTree(child: ChildProcess): void {
   if (!child.pid || child.exitCode !== null) return
   if (process.platform === 'win32') {
     spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).on(

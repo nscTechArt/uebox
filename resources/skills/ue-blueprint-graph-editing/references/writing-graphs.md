@@ -151,6 +151,7 @@ Fix the named node and re-send the complete graph. Do not re-send unchanged inpu
 
 Warnings alone are fine — the Blueprint compiles and saves. Relay the warning to the
 user rather than trying to "fix" something that is not an error. `InputAction` nodes
-warn when the action is not in the project's input settings; either ask the user to add
-the mapping, or drive the logic from an event that needs no configuration
-(`ReceiveBeginPlay`, an overlap event) and say why you switched.
+warn when the action is not in the project's input settings: add the mapping with
+`ue_input_add_mapping` (`system: "legacy"`, `name` = the node's action name) instead of
+handing it to the user. For Enhanced Input use an `EnhancedInputAction` node and add the
+key to the project's IMC with the same tool.

@@ -27,6 +27,7 @@ import { aigcTools } from './aigc'
 import { taskVideoTools } from './builtin/taskVideo'
 import { engineTools } from './builtin/engines'
 import { projectPackageTools } from './builtin/projectPackage'
+import { createProjectUpdatePluginTool } from './adapted/project/updatePlugin'
 import { createWebTools } from './builtin/web'
 import { createLocalFileTools } from './builtin/localFiles'
 import { createInspectUassetTool } from './builtin/inspectUasset'
@@ -34,7 +35,11 @@ import { createLocalSearchTools } from './builtin/localSearch'
 import { createAddNotebookSourceTool } from './builtin/addNotebookSource'
 import { createSearchNotebookSourcesTool, type NotebookScope } from './builtin/notebookSources'
 import { createBoxTools } from './builtin/box'
-import { createProjectListTool, createProjectWriteTool } from './adapted/project/splitByRisk'
+import {
+  createProjectListTool,
+  createProjectWriteTool,
+  projectManageRisk
+} from './adapted/project/splitByRisk'
 import { createOrganizeProjectsTool } from './adapted/project/organizeProjects'
 import { createLocalWriteTools, createShellTool } from './builtin/localShell'
 import { mcpTools } from './builtin/mcpConnect'
@@ -118,7 +123,13 @@ interface Registration {
    */
   needsSender?: boolean
   concurrency?: 'sequential' | 'parallel'
+  /** 按这次的参数降风险（见 `ToolMeta.riskFor`）。工具自己带了的话这里优先 */
+  riskFor?: (args: unknown) => ToolRisk
 }
+
+/** 带着 `force: true`（丢弃未保存的改动）才算 destructive；不带时插件有未保存就拒绝 */
+const destructiveOnlyWithForce = (args: unknown): ToolRisk =>
+  (args as { force?: unknown } | null)?.force === true ? 'destructive' : 'mutating'
 
 /**
  * 写完一个 SKILL.md 就地体检，报告贴在写入工具的返回值里。
@@ -285,9 +296,10 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
    * 它们不和 apply_graph 争「怎么写一片逻辑」，所以不构成当初要避免的选择负担。
    */
   {
+    // 插件端删节点开在事务里（进 agent 那条撤销栈），ue_undo 撤得回来
     name: 'blueprint_delete_node',
     namespace: 'ue.blueprint',
-    risk: 'destructive',
+    risk: 'mutating',
     concurrency: 'sequential',
     make: () => ueBlueprint.createDeleteBlueprintNodeTool()
   },
@@ -332,6 +344,13 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     make: () => ueBlueprint.createCreateBlueprintFunctionTool()
   },
   {
+    name: 'blueprint_create_event_graph',
+    namespace: 'ue.blueprint',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueBlueprint.createBlueprintCreateEventGraphTool()
+  },
+  {
     name: 'blueprint_add_variable',
     namespace: 'ue.blueprint',
     risk: 'mutating',
@@ -348,7 +367,7 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     make: () => ueBlueprint.createSetBlueprintVariableMetaTool()
   },
   {
-    // 删变量不可逆，且会让引用它的节点变成孤儿
+    // 删变量不可逆（插件端没开事务，ue_undo 撤不回），且会让引用它的节点变成孤儿
     name: 'blueprint_remove_variable',
     namespace: 'ue.blueprint',
     risk: 'destructive',
@@ -376,6 +395,9 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'blueprint_function_signature',
     namespace: 'ue.blueprint',
     risk: 'destructive',
+    // 加参数只往上加；删参数、删函数没有事务撤不回，仍按 destructive 问
+    riskFor: (args) =>
+      (args as { action?: unknown } | null)?.action === 'add_param' ? 'mutating' : 'destructive',
     concurrency: 'sequential',
     make: () => ueBlueprint.createBlueprintFunctionSignatureTool()
   },
@@ -561,15 +583,14 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
    * 插件端给 agent 单开了一条撤销栈（换掉 `GEditor->Trans`），所以这里的
    * 「全撤」是「把 AI 干的全撤了」，撤不到用户手动做的任何操作。
    *
-   * 标 destructive 而不是 mutating：虽然有 redo 可以走回来，但它会一次性
-   * 丢掉用户可能已经认可的一整轮产出。这种事不该在 auto-edit 模式下不问就做。
+   * 标 mutating：只撤 agent 自己的事务，撤错了有 redo 走回来，本身就是可撤销的改动。
    *
    * sequential：并发撤销同一条栈会互相打架。
    */
   {
     name: 'ue_undo',
     namespace: 'ue.editor',
-    risk: 'destructive',
+    risk: 'mutating',
     concurrency: 'sequential',
     make: () => ueEditor.createUndoTool()
   },
@@ -592,7 +613,8 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
    * 重启会丢掉全部未保存改动；清理重定向器会删资产并重写一批引用者。
    * 两个都不可撤销，auto-edit 模式下也要先问一句。
    *
-   * 插件端对重启还有一道脏检查（有未保存就回 409），这里的风险等级是第二道。
+   * 插件端对重启还有一道脏检查（有未保存就回 409），所以重启只在带 force 时
+   * 按 destructive 问；不带 force 时丢不了东西，按 mutating 走。
    */
   /**
    * 试玩：把游戏跑起来看它到底能不能跑。
@@ -626,6 +648,17 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     concurrency: 'sequential',
     make: () => ueInput.createInjectInputTool()
   },
+  /**
+   * 加按键映射：写 IMC / InputAction 资产，或旧输入系统的 DefaultInput.ini。
+   * sequential —— 两次并发写同一个 IMC，后存的那次会把前一次的映射盖掉。
+   */
+  {
+    name: 'ue_input_add_mapping',
+    namespace: 'ue.input',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueInput.createInputAddMappingTool()
+  },
   {
     name: 'ue_playtest',
     namespace: 'ue.editor',
@@ -650,6 +683,8 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'ue_restart_editor',
     namespace: 'ue.editor',
     risk: 'destructive',
+    // 不带 force 时有未保存插件就拒绝，丢不了东西
+    riskFor: destructiveOnlyWithForce,
     concurrency: 'sequential',
     make: () => ueEditor.createRestartEditorTool()
   },
@@ -689,16 +724,17 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     make: () => ueLevel.createSaveLevelTool()
   },
   /**
-   * 打开 / 新建关卡标 destructive。
+   * 打开 / 新建关卡声明 destructive（最坏情况），实际按参数算。
    *
-   * 它们会丢弃全部未保存的改动，且**无法撤销** —— 这是整套工具里少数几个
-   * 能让用户直接损失工作的操作。插件端在有脏改动时默认拒绝并回 409，
-   * 这里的风险等级保证 auto-edit 模式下也会先问一句。
+   * 带 force 时它们会丢弃全部未保存的改动，且**无法撤销**。不带 force 时插件端
+   * 在有脏改动时拒绝并回 409，丢不了东西 —— 所以只有 force 那次按 destructive 问。
    */
   {
     name: 'ue_open_level',
     namespace: 'ue.level',
     risk: 'destructive',
+    // 不带 force 时有未保存插件就拒绝（409），丢不了东西
+    riskFor: destructiveOnlyWithForce,
     concurrency: 'sequential',
     make: () => ueLevel.createOpenLevelTool()
   },
@@ -706,6 +742,11 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'ue_new_level',
     namespace: 'ue.level',
     risk: 'destructive',
+    // 同上；但 save_as 会直接盖掉同路径的已有关卡（插件不查），给了就仍按 destructive 问
+    riskFor: (args) =>
+      (args as { save_as?: unknown } | null)?.save_as
+        ? 'destructive'
+        : destructiveOnlyWithForce(args),
     concurrency: 'sequential',
     make: () => ueLevel.createNewLevelTool()
   },
@@ -1010,13 +1051,12 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     risk: 'destructive',
     make: () => assetTools.createDeleteTagsTool()
   },
-  // 软删除（进回收站、能恢复、不动磁盘文件），但仍然登记成 destructive：
-  // auto-edit 档位下也要问一次。删错的代价不是「改回来」而是用户得自己去
-  // 回收站里认哪条是他的 —— 而 assetKey 认错人的时候，名字看起来是一样的。
+  // 软删除（进回收站、能恢复、不动磁盘文件），restore_assets 就能原样捞回来，
+  // 是可撤销的改动，登记成 mutating。
   {
     name: 'delete_assets',
     namespace: 'asset',
-    risk: 'destructive',
+    risk: 'mutating',
     make: () => assetTools.createDeleteAssetsTool()
   },
   // 恢复和删除必须同时存在。只给删不给恢复，等于让用户在没有撤销键的编辑器里
@@ -1045,11 +1085,11 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     risk: 'mutating',
     make: () => assetTools.createRenameFolderTool()
   },
-  // 删文件夹连里面的资产一起软删 —— 影响面比删单个资产大，永远要问
+  // 删文件夹连里面的资产一起软删，restore_folders 连目录树一起恢复 —— 同样可撤销
   {
     name: 'delete_folders',
     namespace: 'asset',
-    risk: 'destructive',
+    risk: 'mutating',
     make: () => assetTools.createDeleteFoldersTool()
   },
   // delete_folders 的撤销键。删文件夹连里面的资产一起带走，而 restore_assets
@@ -1081,6 +1121,8 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'project_manage',
     namespace: 'project',
     risk: 'destructive',
+    // 只往外加东西的动作按 mutating 走，见 `splitByRisk.ts` 的 projectManageRisk
+    riskFor: projectManageRisk,
     /*
      * 串行，因为 `open_project` 会**改掉这一轮的目标工程**
      * （见 `adapted/project/awaitProjectLive.ts`）。
@@ -1183,6 +1225,9 @@ export function listToolRisks(): Record<string, ToolRisk> {
   for (const tool of projectPackageTools()) {
     table[tool.name] = tool.unrealBox.risk
   }
+  // 装 / 更新插件会关掉再重开编辑器，同样不在 REGISTRATIONS 里
+  const updatePlugin = createProjectUpdatePluginTool()
+  table[updatePlugin.name] = updatePlugin.unrealBox.risk
 
   for (const tool of aigcTools()) {
     table[tool.name] = tool.unrealBox.risk
@@ -1312,6 +1357,7 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
       name: reg.name,
       namespace: reg.namespace,
       risk: reg.risk,
+      ...(reg.riskFor ? { riskFor: reg.riskFor } : {}),
       description: rewriteCrossReferences(v2.description ?? reg.name),
       ...(reg.concurrency ? { concurrency: reg.concurrency } : {})
     })
@@ -1349,6 +1395,8 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
     ...engineTools,
     // 打包成可执行文件、拿打包版冒烟。不依赖编辑器，所以不在 ue.* 下（断开引擎时也能用）
     ...projectPackageTools(),
+    // 装 / 更新工程里的插件。插件太旧或没装上时引擎正连不上，所以同样不在 ue.* 下
+    createProjectUpdatePluginTool() as unknown as UnrealAgentTool<never>,
     // 会话体检。命名空间在 `ue.system` 下，但它**不依赖引擎连接** ——
     // 进程检测在盒子这一侧做，所以它同时进了 `createAgent.ts` 的
     // `OFFLINE_UE_TOOLS` 豁免名单：连不上的时候正是最需要它的时候。

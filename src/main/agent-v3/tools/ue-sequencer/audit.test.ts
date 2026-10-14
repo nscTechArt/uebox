@@ -42,9 +42,11 @@ describe('sequence_audit 的元数据', () => {
     expect(tool.name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/)
   })
 
-  it('描述里划清不渲染的边界，并且明说别提议帮用户渲', () => {
+  it('描述里划清不渲染的边界：不主动开渲，用户要了就交给 sequence_render', () => {
     expect(tool.description).toContain('只诊断不渲染')
-    expect(tool.description).toContain('不要提议帮他渲')
+    expect(tool.description).toContain('别主动开渲')
+    // 用户要出片时不能再回一句「这得你自己来」—— 渲染工具早就有了
+    expect(tool.description).toContain('sequence_render')
   })
 
   it('描述里点明它回答的是「按下渲染键会不会白等」', () => {

@@ -36,30 +36,46 @@ describe('ChatHistoryStorage', () => {
   })
 
   it('磁盘上有数据时直接用，不碰 localStorage', async () => {
-    stubDisk({ 'chat-messages': '{"disk":1}' })
-    localStorage.setItem('chat-messages', '{"legacy":1}')
+    stubDisk({ 'chat-sessions': '{"disk":1}' })
+    localStorage.setItem('chat-sessions', '{"legacy":1}')
 
     const storage = new ChatHistoryStorage(2000)
     await storage.preload()
 
-    expect(storage.getItem('chat-messages')).toBe('{"disk":1}')
+    expect(storage.getItem('chat-sessions')).toBe('{"disk":1}')
     // 磁盘是权威，旧 key 不该被当种子，也不该被顺手删掉
-    expect(localStorage.getItem('chat-messages')).toBe('{"legacy":1}')
+    expect(localStorage.getItem('chat-sessions')).toBe('{"legacy":1}')
   })
 
   it('磁盘为空时把 localStorage 的旧历史迁过去，落盘成功后才删旧 key', async () => {
     const { disk } = stubDisk()
-    localStorage.setItem('chat-messages', '{"legacy":1}')
-    localStorage.setItem('chat-sessions', '[]')
+    localStorage.setItem('chat-sessions', '{"legacy":1}')
+    localStorage.setItem('follow-up-queue', '[]')
 
     const storage = new ChatHistoryStorage(2000)
     await storage.preload()
 
-    expect(disk['chat-messages']).toBe('{"legacy":1}')
-    expect(disk['chat-sessions']).toBe('[]')
-    expect(localStorage.getItem('chat-messages')).toBeNull()
+    expect(disk['chat-sessions']).toBe('{"legacy":1}')
+    expect(disk['follow-up-queue']).toBe('[]')
     expect(localStorage.getItem('chat-sessions')).toBeNull()
-    expect(storage.getItem('chat-messages')).toBe('{"legacy":1}')
+    expect(localStorage.getItem('follow-up-queue')).toBeNull()
+    expect(storage.getItem('chat-sessions')).toBe('{"legacy":1}')
+  })
+
+  it('取回对话索引；localStorage 里的老正文交给主进程拆分，成功后才删', async () => {
+    stubDisk()
+    const api = (window as unknown as { api: { chatHistory: Record<string, unknown> } }).api
+    api.chatHistory.sessionsIndex = vi.fn(async () => ({ a: {} }))
+    const importLegacySessions = vi.fn(async () => ({ a: {}, b: { typing: ['t'] } }))
+    api.chatHistory.importLegacySessions = importLegacySessions
+    localStorage.setItem('chat-messages', '{"messagesBySid":{}}')
+
+    const storage = new ChatHistoryStorage(2000)
+    await storage.preload()
+
+    expect(importLegacySessions).toHaveBeenCalledWith('{"messagesBySid":{}}')
+    expect(storage.sessionIndex).toEqual({ a: {}, b: { typing: ['t'] } })
+    expect(localStorage.getItem('chat-messages')).toBeNull()
   })
 
   it('迁移写盘失败时旧数据必须留在 localStorage', async () => {
@@ -68,12 +84,12 @@ describe('ChatHistoryStorage', () => {
       vi.fn(async () => {
         throw new Error('磁盘满了')
       })
-    localStorage.setItem('chat-messages', '{"legacy":1}')
+    localStorage.setItem('chat-sessions', '{"legacy":1}')
 
     const storage = new ChatHistoryStorage(2000)
     await storage.preload()
 
-    expect(localStorage.getItem('chat-messages')).toBe('{"legacy":1}')
+    expect(localStorage.getItem('chat-sessions')).toBe('{"legacy":1}')
   })
 
   it('setItem 节流合并，2 秒内只写一次盘', async () => {
@@ -81,16 +97,16 @@ describe('ChatHistoryStorage', () => {
     const storage = new ChatHistoryStorage(2000)
     await storage.preload()
 
-    storage.setItem('chat-messages', 'a')
-    storage.setItem('chat-messages', 'b')
-    storage.setItem('chat-messages', 'c')
+    storage.setItem('chat-sessions', 'a')
+    storage.setItem('chat-sessions', 'b')
+    storage.setItem('chat-sessions', 'c')
     expect(write).not.toHaveBeenCalled()
     // 还没落盘也要读得到最新值，否则 pinia 下一次 hydrate 会读到旧内容
-    expect(storage.getItem('chat-messages')).toBe('c')
+    expect(storage.getItem('chat-sessions')).toBe('c')
 
     vi.advanceTimersByTime(2000)
     expect(write).toHaveBeenCalledTimes(1)
-    expect(write).toHaveBeenCalledWith('chat-messages', 'c')
+    expect(write).toHaveBeenCalledWith('chat-sessions', 'c')
   })
 
   it('写盘失败不影响后续写入', async () => {
@@ -101,41 +117,41 @@ describe('ChatHistoryStorage', () => {
     const storage = new ChatHistoryStorage(2000)
     await storage.preload()
 
-    storage.setItem('chat-messages', 'a')
+    storage.setItem('chat-sessions', 'a')
     storage.flush()
-    storage.setItem('chat-messages', 'b')
+    storage.setItem('chat-sessions', 'b')
     storage.flush()
 
     expect(write).toHaveBeenCalledTimes(2)
-    expect(write).toHaveBeenLastCalledWith('chat-messages', 'b')
+    expect(write).toHaveBeenLastCalledWith('chat-sessions', 'b')
   })
 
   it('MiniChat 窗口只读：改内存但不写盘，免得覆盖主窗口', async () => {
     setHash('#/mini-chat')
-    const { write } = stubDisk({ 'chat-messages': '{"disk":1}' })
+    const { write } = stubDisk({ 'chat-sessions': '{"disk":1}' })
 
     const storage = new ChatHistoryStorage(2000)
     await storage.preload()
-    storage.setItem('chat-messages', '{"mini":1}')
+    storage.setItem('chat-sessions', '{"mini":1}')
     storage.flush()
 
     expect(write).not.toHaveBeenCalled()
-    expect(storage.getItem('chat-messages')).toBe('{"mini":1}')
+    expect(storage.getItem('chat-sessions')).toBe('{"mini":1}')
   })
 
   it('独立聊天窗口只读，而且不接盘上排着的跟进消息（主窗口会发，两边都发就重了）', async () => {
     setHash('#/chat-window?sid=s1')
     const { write } = stubDisk({
-      'chat-messages': '{"disk":1}',
+      'chat-sessions': '{"disk":1}',
       'follow-up-queue': '{"queues":{"s1":[1]}}'
     })
 
     const storage = new ChatHistoryStorage(2000)
     await storage.preload()
-    expect(storage.getItem('chat-messages')).toBe('{"disk":1}')
+    expect(storage.getItem('chat-sessions')).toBe('{"disk":1}')
     expect(storage.getItem('follow-up-queue')).toBeNull()
 
-    storage.setItem('chat-messages', '{"window":1}')
+    storage.setItem('chat-sessions', '{"window":1}')
     storage.flush()
     expect(write).not.toHaveBeenCalled()
   })
@@ -153,6 +169,6 @@ describe('ChatHistoryStorage', () => {
 
     const storage = new ChatHistoryStorage(2000)
     await expect(storage.preload()).resolves.toBeUndefined()
-    expect(storage.getItem('chat-messages')).toBeNull()
+    expect(storage.getItem('chat-sessions')).toBeNull()
   })
 })

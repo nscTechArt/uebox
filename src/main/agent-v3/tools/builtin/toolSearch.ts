@@ -212,6 +212,7 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.mesh': '网格 几何 模型 mesh geometry model',
   'ue.cpp': '代码 编译 类 模块 c++ compile code module',
   'ue.input': '输入 按键 操作 映射 input action key mapping',
+  'ue.input.edit': '加按键 绑定 键位 新建输入动作 改映射 add bind key mapping input action imc',
   box: '盒子 对话记录 会话 状态 导入 卡住 续传 技能 开关 备份 box session status import skill backup',
   asset: '盒子素材库 保管库 标签 文件夹 asset library vault tag folder',
   library: '蓝图库 材质库 片段 收藏 snippet library',
@@ -382,6 +383,10 @@ export function toolSearchGroup(tool: GroupedTool): string {
   if (tool.name === 'ue_autoplay') return 'ue.editor.autoplay'
   // 只在导入了带「资产指南」的资产、或编辑器弹「缺失项目设置」时才用；导入回执会点名让模型加载
   if (tool.name === 'ue_asset_guidelines') return 'ue.editor.guidelines'
+  // 要关编辑器的完整重编，一个会话用不上几次；add_class / compile 的回执和 C++ 技能会点名它
+  if (tool.name === 'cpp_full_rebuild') return 'ue.cpp.rebuild'
+  // 加按键映射是改工程的低频动作，说明又长；不跟 ue.input 整组常驻，ue_input_map 的说明会点名它
+  if (tool.name === 'ue_input_add_mapping') return 'ue.input.edit'
   if (tool.unrealBox.namespace === 'ue.content' && Object.hasOwn(UE_CONTENT_SUBGROUPS, tool.name))
     return UE_CONTENT_SUBGROUPS[tool.name]
   return tool.unrealBox.namespace

@@ -62,7 +62,12 @@ export function createTrayProjectOpener(
     // openFile 落定才翻页：成功转入「等引擎连上」的计时（TTL 从这里才开始算），
     // 失败摘掉标记 —— 不然这条要灰到永远
     // 编辑器本来就开着：不挂「启动中」，下次点照样能问
-    deps.tracker.complete(project.projectKey, result.success && !result.alreadyRunning)
+    // 落定这一刻它已经连上了（重连中的引擎比打开链路先跑完）：也不用挂「等连接」——
+    // 连上的瞬间没人摘它，它就会躺到 TTL，工程关了还标「启动中」
+    deps.tracker.complete(
+      project.projectKey,
+      result.success && !result.alreadyRunning && !deps.isRunning(project.projectKey)
+    )
     deps.onStateChanged()
 
     deps.report(result, project)

@@ -41,6 +41,9 @@ vi.mock('../../../services/webReader', () => ({
   readWebPageLocally: (...args: unknown[]) => read(...args)
 }))
 
+// 局域网开关默认关。替掉真实读法：那条路会懒加载 appSettingsManager
+vi.mock('./localNetworkSetting', () => ({ browserLocalNetworkAllowed: async () => false }))
+
 const { createAddNotebookSourceTool } = await import('./addNotebookSource')
 
 const sent: Array<{ channel: string; payload: unknown }> = []

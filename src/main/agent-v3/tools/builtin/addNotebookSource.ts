@@ -10,6 +10,7 @@ import {
 import { indexNotebookRag } from '../../../sqliteDataBase/services/notebookRagService'
 import { readWebPageLocally } from '../../../services/webReader'
 import { checkNavigationUrl } from '../../../services/agentBrowser/urlPolicy'
+import { browserLocalNetworkAllowed } from './localNetworkSetting'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 import type { NotebookScope } from './notebookSources'
 
@@ -133,7 +134,9 @@ ${whereTo}
       if (args.url) {
         // 和 web_read 共用同一套地址判据：本机、内网、危险协议一律不碰。
         // 少了这一层，这个工具就是一个能把内网页面存进知识库的探测器
-        const checked = checkNavigationUrl(args.url)
+        const checked = checkNavigationUrl(args.url, {
+          allowLocalNetwork: await browserLocalNetworkAllowed()
+        })
         if (!checked.ok) throw new Error(`[NAVIGATION_BLOCKED] ${checked.reason}`)
 
         const page = await readWebPageLocally(checked.url.toString())

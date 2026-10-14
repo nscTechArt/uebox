@@ -36,6 +36,15 @@ export const appSettingsAPI = {
     const result = await window.api.appSettings.set({ agentResidentTools: overrides })
     unwrapResult({ ...result, data: undefined })
   },
+  /** 审批卡片上点过「以后都允许」的工具名 */
+  async getAlwaysAllowedTools(): Promise<string[]> {
+    return (await window.api.appSettings.get()).agentAlwaysAllowedTools ?? []
+  },
+  /** 整份替换。设置页移除一项时用 */
+  async setAlwaysAllowedTools(names: string[]): Promise<void> {
+    const result = await window.api.appSettings.set({ agentAlwaysAllowedTools: names })
+    unwrapResult({ ...result, data: undefined })
+  },
   async setThemeIcon(theme: AppIconTheme): Promise<boolean> {
     const result = await window.api.appSettings.setThemeIcon(theme)
     return unwrapResult(result, '切换任务栏图标失败')

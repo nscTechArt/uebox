@@ -17,6 +17,8 @@ export type ApprovalVerdict =
   | 'approve'
   /** 批准，并且这条内核 session 里该工具不再询问 */
   | 'always'
+  /** 批准，并且以后所有对话里该工具都不再询问（存进应用设置，见 `ApprovalDeps.persistent`） */
+  | 'forever'
   | 'reject'
 
 export type ApprovalMode =
@@ -41,6 +43,25 @@ export interface ApprovalRequest {
    * 参数都不一样，而参数本身就是风险，批准一次不能代表批准下一次。
    */
   allowAlways: boolean
+  /**
+   * 界面上要不要给「以后都允许」。
+   *
+   * 比 `allowAlways` 多两个条件：宿主接了持久名单；这次调用的实际风险就是工具声明的
+   * 风险。名单按工具名记、覆盖的是声明的最坏情况 —— 在一次被参数降了级的调用上
+   * （不带 force 的打开关卡）点「以后都允许」，不能顺带放过以后带 force 的那次。
+   */
+  allowForever: boolean
+}
+
+/**
+ * 跨对话的「以后都允许」名单（存在应用设置里，用户在偏好设置里能看到、能移除）。
+ *
+ * 由宿主注入而不是在这里 import 设置管理器：那个模块会把 services 一路拉进来，
+ * 工具注册表和测试都不该背这条依赖（见 AGENTS.md「已知陷阱」）。
+ */
+export interface PersistentAllowList {
+  has: (toolName: string) => boolean
+  add: (toolName: string) => void
 }
 
 export interface ApprovalDeps {
@@ -63,6 +84,12 @@ export interface ApprovalDeps {
    * 「本对话内都允许」，实际只管到这一轮结束。
    */
   alwaysAllowed?: Set<string>
+  /**
+   * 「以后都允许」的持久名单。每次调用现读，用户在设置里移除立刻算数。
+   *
+   * 不覆盖两种情况：逐次审批的工具（`requiresExplicitApproval`）、只读对话。
+   */
+  persistent?: PersistentAllowList
   /** 按 name 查工具元数据。注册表提供 */
   lookup: (toolName: string) => UnrealAgentTool<never> | undefined
   /** 向用户发起审批。实现在 host 层（IPC 往返） */
@@ -73,12 +100,15 @@ export interface ApprovalDeps {
 export function needsApproval(
   risk: ToolRisk,
   mode: ApprovalMode,
-  requiresExplicitApproval = false
+  requiresExplicitApproval = false,
+  persistentlyAllowed = false
 ): boolean {
   // 用户明确选择完全访问后，浏览器交互也无需逐次审批。
   if (mode === 'yolo') return false
-  // 其他档位仍逐次确认，不能用「本对话内都允许」代替。
+  // 其他档位仍逐次确认，不能用「本对话内都允许」或「以后都允许」代替。
   if (requiresExplicitApproval) return true
+  // 用户点过「以后都允许」的工具，任何档位都不再问
+  if (persistentlyAllowed) return false
   // 只读操作永远不问
   if (risk === 'safe') return false
   // 不可逆操作在 auto-edit 下仍然要问 —— 这正是 auto-edit 与 yolo 的区别
@@ -98,6 +128,13 @@ export function createApprovalGate(deps: ApprovalDeps) {
   const alwaysAllowed = deps.alwaysAllowed ?? new Set<string>()
   const currentMode = (): ApprovalMode =>
     typeof deps.mode === 'function' ? deps.mode() : deps.mode
+  const persistentHas = (toolName: string): boolean => {
+    try {
+      return deps.persistent?.has(toolName) === true
+    } catch {
+      return false
+    }
+  }
 
   return async (
     ctx: BeforeToolCallContext,
@@ -128,7 +165,11 @@ export function createApprovalGate(deps: ApprovalDeps) {
 
       // 查不到元数据的工具（例如以后接进来的 MCP 工具还没登记）按最危险处理。
       // 第三方来源的工具不可信，宁可多问一次。
-      if (!needsApproval(risk, currentMode(), explicit)) return undefined
+      // 持久名单读坏了（设置文件出错）按没在名单里算：多问一次，不能因此放行
+      if (!needsApproval(risk, currentMode(), explicit, !explicit && persistentHas(toolName))) {
+        return undefined
+      }
+      const allowForever = !explicit && risk === declaredRisk && deps.persistent !== undefined
 
       const verdict = await deps.request(
         {
@@ -138,7 +179,8 @@ export function createApprovalGate(deps: ApprovalDeps) {
           namespace: tool?.unrealBox.namespace ?? 'unknown',
           risk,
           args: ctx.args,
-          allowAlways: !explicit
+          allowAlways: !explicit,
+          allowForever
         },
         signal
       )
@@ -148,7 +190,17 @@ export function createApprovalGate(deps: ApprovalDeps) {
       if (blockedAfterApproval) return blockedAfterApproval
       if (signal?.aborted) return { block: true, reason: 'Tool execution was cancelled.' }
 
-      if (verdict === 'always') {
+      if (verdict === 'forever' && allowForever) {
+        try {
+          deps.persistent?.add(toolName)
+        } catch {
+          // 没存进设置（写盘失败）：这一次用户已经批了，退成本对话内允许
+          alwaysAllowed.add(allowKey)
+        }
+        return undefined
+      }
+      // 不给「以后都允许」的那次收到了 forever（旧界面、语音）：退成本对话内允许
+      if (verdict === 'always' || verdict === 'forever') {
         // 逐次审批的工具即使收到 always 也只按这一次批准处理 ——
         // 界面已经隐藏了那个按钮，但主进程不能依赖界面来守这条规则
         if (!explicit) alwaysAllowed.add(allowKey)
@@ -160,9 +212,11 @@ export function createApprovalGate(deps: ApprovalDeps) {
         block: true,
         // 这段文字会作为 tool result 交给模型，所以要写成「对模型的指示」
         // 而不是「对用户的提示」—— 否则模型会原样重试。
+        // 「这一轮」三个字不能省：写成永久禁令，用户之后亲口再要，模型也不敢调了。
         reason:
-          `用户拒绝执行 ${toolName}。不要重试这个操作。` +
-          '请询问用户希望怎么做，或者换一种不需要该操作的方案。'
+          `用户拒绝执行 ${toolName}。这一轮不要自行重试这个操作。` +
+          '请询问用户希望怎么做，或者换一种不需要该操作的方案。' +
+          '如果用户之后明确再要求做这件事，可以重新调用，届时会再次请他批准。'
       }
     } catch {
       return { block: true, reason: 'Approval unavailable; tool execution was blocked.' }

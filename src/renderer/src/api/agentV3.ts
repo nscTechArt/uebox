@@ -7,7 +7,7 @@
 
 import type { AgentTurnUsage } from '@core/shared/agentUsage'
 import type { AgentReviewResult, AgentReviewTarget } from '@core/shared/agentReview'
-import type { ModelCheckup, TeamStateView } from '@core/shared/agentTeam'
+import type { ModelCheckup, ModelDossier, TeamStateView } from '@core/shared/agentTeam'
 import type { AgentQuestion, AgentQuestionAction } from '@core/shared/agentQuestion'
 import type { EditorSnapshotCaptureResult } from '@core/shared/editorSnapshot'
 import { unwrapResult } from '@renderer/common/utils'
@@ -493,6 +493,20 @@ export const agentV3API = {
 
   teamEnd(sessionId: string): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {
     return window.api.agentV3.teamEnd({ sessionId })
+  },
+
+  /** 设置「团队」页的模型档案 */
+  async teamModels(): Promise<ModelDossier[]> {
+    const result = await window.api.agentV3.teamModels()
+    return result?.models ?? []
+  },
+
+  /** 「重新检测」。不走 `unwrapResult()`：结论要显示在那一行上，不抛到全局 */
+  teamModelCheckup(model: {
+    providerId: string
+    modelId: string
+  }): Promise<{ success: boolean; error?: string; checkup?: ModelCheckup }> {
+    return window.api.agentV3.teamModelCheckup(model)
   },
 
   invalidateProviders() {

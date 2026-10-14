@@ -12,17 +12,13 @@
  *
  * 两种情况用户都被迫回 Sequencer 手点。这个工具就是那两步手工操作。
  *
- * ## 它不做重新绑定
+ * ## 它不顺手重绑
  *
  * possessable 指向一个不存在的对象时（相机被删了、或所在关卡没保存就崩了），
- * 正确做法是 Sequencer 的 **Actions → Advanced → Rebind Possessable References**。
+ * 补切轨修不好黑屏。重绑交给 `sequence_rebind` —— 它要调用方点名绑到哪个 Actor，
+ * 这里只知道绑定断了，不知道该绑谁，猜错比不修更糟。
  *
- * 原先不做的理由是「引擎没导出 Python 接口」。**那条理由已经过期** ——
- * 工具集迁到插件 C++ 之后，`UMovieScene::ReplacePossessable` 是够得着的。
- * 现在不做的理由换成了：自动重绑有「该绑到哪一个」的歧义（同名 Actor 有多个、
- * 或者压根不该绑同名的那个），猜错比不修更糟。。
- *
- * 所以这里的选择仍然是**查出来并说清楚怎么点**，而不是假装修好：把切轨绑到一个
+ * 所以这里**查出来并指向 sequence_rebind**，而不是假装修好：把切轨绑到一个
  * 解析不到对象的绑定上，渲出来照样是黑的，而用户会以为已经修好了。
  */
 
@@ -59,19 +55,15 @@ const InputSchema = z.object({
 })
 
 /**
- * 绑定断了时给用户的手动修复步骤。
+ * 绑定断了时的下一步。
  *
- * 引擎侧的 `UMovieScene::ReplacePossessable` 现在在 C++ 里够得着了
- * （工具集已从 Python 迁到插件 C++），所以「只能手点」这条**技术上已经不成立**。
- * 但自动重绑有歧义 —— 同名 Actor 有多个、或者根本不该绑到同名的那个 ——
- * 猜错了比不修更糟。做成工具要先设计消歧规则，
- * 的四档方案。在那之前这里仍然只给步骤，不代劳。
+ * 重绑有工具（sequence_rebind），但这里不知道该绑哪台相机 —— 关卡里可能有好几台，
+ * 也可能那台已经删了要新放。所以只指路：绑哪台由模型看关卡，拿不准就问用户。
  */
 const REBIND_STEPS = [
   '这条绑定指向的对象在关卡里已经不存在了，补了切轨照样是黑的。先修绑定：',
-  '  1. 打开这条序列，左上角扳手 → Actions → Advanced → Rebind Possessable References',
-  '  2. 没生效的话，右键那条相机轨道 → Assign Actor → 选关卡里的那台相机',
-  '（自动重绑要先解决「绑到哪一个」的歧义，还没做，所以这一步暂时只能手点。）'
+  '  用 sequence_rebind 把它改绑到关卡里那台相机（binding 填这条绑定名，actor 填相机在大纲里的标签）。',
+  '  该绑哪台不确定就先问用户 —— 绑错了不报错，只是拍到别的东西。'
 ]
 
 interface CameraCutsOutput {
@@ -117,8 +109,8 @@ export function createSequenceCameraCutsTool(): UnrealAgentTool<CameraCutsOutput
 确认要删就带 \`rebuild: true\`，删了几个会在返回里报出来。删除撤不回来，先问用户。
 
 【它不做什么】
-不做 possessable 的重新绑定 —— 自动重绑有「该绑到哪一个」的歧义，还没做。
-绑定已经指向不存在的对象时，它会**查出来并告诉你怎么手点**，不会假装修好。`,
+不重绑 possessable —— 它不知道该绑哪台相机。绑定已经指向不存在的对象时，
+它会**查出来并让你接着用 sequence_rebind 点名修**，不会假装修好。`,
     input: InputSchema,
     execute: async (input) => {
       const d = await callUe<CameraCutsOutput>(

@@ -30,6 +30,7 @@ import { runAutoplay, type AutoplayOptions, type AutoplayResult } from './runner
 import { summarizeAutoplay } from './summary'
 import { createFileTrace } from './trace'
 import type { PieRunReport } from './types'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 const Vec3Schema = z.object({ x: z.number(), y: z.number(), z: z.number() })
 
@@ -231,7 +232,9 @@ export function createAutoplayTool(): ReturnType<typeof defineV2Tool> {
           success: false,
           error:
             '引擎里装的 UnrealAgentLink 插件版本太旧，没有试玩机器人要用的命令（pie.observe）。' +
-            `更新插件并重启编辑器后再试。这次已经起的试玩会在 ${duration} 秒内自己结束。`
+            `这次已经起的试玩会在 ${duration} 秒内自己结束，之后` +
+            PLUGIN_UPDATE_HINT +
+            '更新完再试。'
         }
       }
       if (ready !== 'ready') {

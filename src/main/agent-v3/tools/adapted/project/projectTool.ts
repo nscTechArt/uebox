@@ -679,7 +679,8 @@ async function openProject(projectKey: string): Promise<OpenProjectResult> {
   const pluginDetails = pluginFailure
     ? [
         `⚠️ UnrealAgentLink 插件没装上（${pluginFailure}）—— 这个工程连不上盒子，` +
-          'ue.* 那些工具都用不了。让用户在工程卡片右键里手动安装一次。'
+          'ue.* 那些工具都用不了。用 project_update_plugin 再装一次，它会说清装不上的具体原因；' +
+          '还是装不上就把原因如实告诉用户，不要让用户去手动安装。'
       ]
     : []
 
@@ -788,7 +789,8 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
   const pluginDetails = pluginFailure
     ? [
         `⚠️ UnrealAgentLink 插件没装上（${pluginFailure}）—— 这个工程连不上盒子，` +
-          'ue.* 那些工具都用不了。让用户在工程卡片右键里手动安装一次。'
+          'ue.* 那些工具都用不了。用 project_update_plugin 再装一次，它会说清装不上的具体原因；' +
+          '还是装不上就把原因如实告诉用户，不要让用户去手动安装。'
       ]
     : []
 
@@ -1607,7 +1609,9 @@ export async function enablePluginsForProject(
       success: false,
       error:
         `本机没有这些插件：${check.notInstalled.join('、')}。写进去会让工程打不开，所以一个都没写。` +
-        '去掉它们再调一次；本机没有的插件只能让用户自己装（导入结果里有 Fab 链接的就给他）。'
+        '去掉它们再调一次，或者先把插件装进工程的 Plugins 目录再调：免费、公开源码的插件，' +
+        '经用户同意可以用 run_shell_command 把源码 git clone 或拷进去（工程有 C++ 时随后 cpp_full_rebuild）；' +
+        'Fab / 商城上的和付费插件请用户自己装（导入结果里有 Fab 链接的就给他）。'
     }
   }
 

@@ -7,6 +7,7 @@ import type {
 } from '@core/shared/aiProvider'
 import {
   draftFromCatalog,
+  missingCatalogModels,
   draftFromProvider,
   filterModelOptionsForRole,
   modelOptionLabel,
@@ -109,6 +110,48 @@ describe('draftFromCatalog', () => {
     }
 
     expect(draftFromCatalog(entry).apiKeyInput).toBe('OPENAI_API_KEY')
+  })
+})
+
+describe('missingCatalogModels', () => {
+  const openai: CatalogEntry = {
+    id: 'openai',
+    displayName: 'OpenAI',
+    group: 'cloud',
+    kind: 'chat',
+    protocol: 'openai-responses',
+    baseUrl: 'https://api.openai.com/v1',
+    requiresApiKey: true,
+    hasLogo: true,
+    models: [
+      { id: 'gpt-6.1-sol', displayName: 'GPT-6.1 Sol', thinkingLevelMap: { minimal: null } },
+      { id: 'gpt-6-sol', displayName: 'GPT-6 Sol' }
+    ]
+  }
+
+  it('老服务商只列出目录里新出的型号，能力位一并带上', () => {
+    const saved = {
+      id: 'openai',
+      kind: 'chat' as const,
+      baseUrl: 'https://api.openai.com/v1',
+      models: [{ id: 'gpt-6-sol' }]
+    }
+    expect(missingCatalogModels(saved, [openai])).toEqual([
+      { id: 'gpt-6.1-sol', displayName: 'GPT-6.1 Sol', thinkingLevelMap: { minimal: null } }
+    ])
+  })
+
+  it('第二份同厂商按 Base URL 认，换了网关的不算', () => {
+    const second = {
+      id: 'openai-2',
+      kind: 'chat' as const,
+      baseUrl: 'https://api.openai.com/v1/',
+      models: []
+    }
+    expect(missingCatalogModels(second, [openai])).toHaveLength(2)
+    expect(
+      missingCatalogModels({ ...second, baseUrl: 'https://gw.example.com/v1' }, [openai])
+    ).toEqual([])
   })
 })
 

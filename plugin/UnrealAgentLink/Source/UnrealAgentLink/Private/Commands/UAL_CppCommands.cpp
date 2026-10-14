@@ -2,15 +2,28 @@
 #include "UAL_CommandUtils.h"
 
 #include "Containers/Ticker.h"
-#include "AddToProjectConfig.h"
+#include "ClassTemplateEditorSubsystem.h"
+#include "Components/SceneComponent.h"
+#include "Editor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "GameProjectUtils.h"
+#include "GeneralProjectSettings.h"
 #include "HAL/FileManager.h"
+#include "Interfaces/IProjectManager.h"
+#include "ISourceControlModule.h"
+#include "ISourceControlProvider.h"
+#include "Misc/App.h"
 #include "Misc/CompilationResult.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/FileHelper.h"
 #include "Misc/HotReloadInterface.h"
 #include "Misc/Paths.h"
 #include "ModuleDescriptor.h"
 #include "Modules/ModuleManager.h"
+#include "ProjectDescriptor.h"
+#include "SourceControlOperations.h"
+#include "UObject/Interface.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -51,84 +64,624 @@ void FUAL_CppCommands::RegisterCommands(TMap<FString, FHandlerFunc>& CommandMap)
 }
 
 // ──────────────────────────── cpp.add_class ────────────────────────────
+//
+// ## 为什么不再调 GameProjectUtils::AddCodeToProject
+//
+// 它在真实工程上**不返回**（2026-09-08 真机验收案例 5，三轮都卡在「正在添加代码到项目…… 14%」）。
+// 卡点定位到 AddCodeToProject → FSourceCodeNavigation::AddSourceFiles → GetSourceFileDatabase()：
+// 同步把引擎 + 工程 + 所有插件的源码扫一遍，装了多个引擎的机器上不收敛，扫完什么也不做
+// （VS 那个 AddSourceFiles 在 5.5 里是 #if 0）。除此之外它还会：
+//   - 起 FScopedSlowTask::MakeDialog() 进度框；
+//   - 没走通 AddSourceFiles 时同步跑一遍 GenerateProjectFiles（UBT，几十秒）；
+//   - 热重载路上 WaitForCompletion 同步等编译；
+//   - 纯蓝图工程 + Live Coding 时弹模态框。
+// 每一样都把游戏线程（也就是我们的命令）钉住。
+//
+// ## 所以这里自己走一遍它的「生成」那一半，「编译」交给 cpp.compile
+//
+// 生成那一半照抄 GameProjectUtils::AddCodeToProject_Internal / GenerateClassHeaderFile /
+// GenerateClassCPPFile（5.0–5.8 逐版本对过，只有 5.3 起「按父类链找类模板」这一处不同，
+// 下面按版本分开）：同一份 Engine/Content/Editor/Templates 模板、同一套占位符、
+// 同样的 API 宏规则、同样的 .uproject AdditionalDependencies 登记。
+// **产出和用户在编辑器里点「新建 C++ 类」得到的逐字相同** —— 这是这条路成立的前提，
+// 「AI 建的类」和「引擎建的类」长得不一样本身就是 bug 的来源。
+//
+// 抄而不调，是因为那几个生成函数和 FNewClassInfo 的成员函数都**不导出**
+// （GenerateClassHeaderFile 等在 private 段；FNewClassInfo 没有 API 宏，5.8 起
+// GameProjectUtils 也改成逐函数 UE_API），链接不到。
+//
+// 跳过的三步和理由：
+//   - AddSourceFiles / GenerateProjectFiles：只是让 IDE 的解决方案里看得见新文件，
+//     编译不依赖它们（UBT 自己扫目录）。回执里如实说「IDE 里要刷新一下才看得见」。
+//   - 编译：调用方接着调 cpp.compile（异步，不卡编辑器，编不过有行号）。
+//     一般会先把实现填完再编，比引擎「建完立刻空编一次」少编一轮。
+
+/**
+ * .uproject 的 Modules 段里声明了几个模块。
+ *
+ * **不能用 GameProjectUtils::GetCurrentProjectModules().Num()。** 那个函数在工程没有代码时
+ * 会塞一个以工程名命名的**占位模块**（「这样新建类向导才有东西可选，建类时再真的建出来」，
+ * GameProjectUtils.cpp 的 GetCurrentProjectModules），所以纯蓝图工程上它恒为 1；
+ * 反过来，声明了模块但找不到 .Build.cs 的那些它又直接跳过。两头都不准。
+ *
+ * 2026-10-12 真机实测：纯蓝图工程 BPOnly52 上它返回 1，cpp.probe 因此把每一个纯蓝图工程
+ * 都报成了「源码缺失的 C++ 工程」。09-03 在 ProbeHost 上看到的「has_code=false 但列出一个模块」
+ * 也是这个占位，不是源码丢了。
+ */
+static int32 DeclaredProjectModuleCount()
+{
+	const FProjectDescriptor* Project = IProjectManager::Get().GetCurrentProject();
+	return Project ? Project->Modules.Num() : 0;
+}
+
+namespace UALAddClass
+{
+
+enum class EKind : uint8
+{
+	UObject,     // 继承某个 UClass
+	Interface,   // UINTERFACE（U + I 一对）
+	SlateWidget, // SCompoundWidget 派生
+	EmptyCpp     // 不继承 UObject 的普通类
+};
+
+struct FClassSpec
+{
+	EKind Kind = EKind::EmptyCpp;
+	const UClass* BaseClass = nullptr;
+
+	// 下面这些对应 FNewClassInfo 的同名成员（GameProjectUtils.cpp 里的实现，原样翻过来）
+
+	FString PrefixCPP() const
+	{
+		switch (Kind)
+		{
+		case EKind::UObject:     return BaseClass ? BaseClass->GetPrefixCPP() : TEXT("U");
+		case EKind::EmptyCpp:    return TEXT("F");
+		case EKind::SlateWidget: return TEXT("S");
+		case EKind::Interface:   return TEXT("U");
+		}
+		return FString();
+	}
+
+	FString BaseNameCPP() const
+	{
+		switch (Kind)
+		{
+		case EKind::UObject:     return BaseClass ? BaseClass->GetName() : FString();
+		case EKind::EmptyCpp:    return FString();
+		case EKind::SlateWidget: return TEXT("CompoundWidget");
+		case EKind::Interface:   return TEXT("Interface");
+		}
+		return FString();
+	}
+
+	bool IncludePath(FString& Out) const
+	{
+		if (Kind == EKind::UObject && BaseClass && BaseClass->HasMetaData(TEXT("IncludePath")))
+		{
+			Out = BaseClass->GetMetaData(TEXT("IncludePath"));
+			return true;
+		}
+		if (Kind == EKind::SlateWidget)
+		{
+			Out = TEXT("Widgets/SCompoundWidget.h");
+			return true;
+		}
+		return false;
+	}
+
+	FString HeaderFilename(const FString& ClassName) const
+	{
+		return (Kind == EKind::SlateWidget ? TEXT("S") : TEXT("")) + ClassName + TEXT(".h");
+	}
+
+	FString SourceFilename(const FString& ClassName) const
+	{
+		return (Kind == EKind::SlateWidget ? TEXT("S") : TEXT("")) + ClassName + TEXT(".cpp");
+	}
+
+	/** 引擎内置模板的文件名。插件注册的类模板（UClassTemplate）优先，见 FindRegisteredTemplate */
+	FString TemplateFilename(bool bHeader) const
+	{
+		const TCHAR* Ext = bHeader ? TEXT(".h.template") : TEXT(".cpp.template");
+		switch (Kind)
+		{
+		case EKind::UObject:
+			if (BaseClass == UActorComponent::StaticClass() || BaseClass == USceneComponent::StaticClass())
+			{
+				return FString(TEXT("ActorComponentClass")) + Ext;
+			}
+			if (BaseClass == AActor::StaticClass())     return FString(TEXT("ActorClass")) + Ext;
+			if (BaseClass == APawn::StaticClass())      return FString(TEXT("PawnClass")) + Ext;
+			if (BaseClass == ACharacter::StaticClass()) return FString(TEXT("CharacterClass")) + Ext;
+			return FString(TEXT("UObjectClass")) + Ext;
+		case EKind::EmptyCpp:    return FString(TEXT("EmptyClass")) + Ext;
+		case EKind::SlateWidget: return FString(TEXT("SlateWidget")) + Ext;
+		case EKind::Interface:   return FString(TEXT("InterfaceClass")) + Ext;
+		}
+		return FString();
+	}
+
+	/** GameProjectUtils::GetRequiredAdditionalDependencies */
+	TArray<FString> RequiredDependencies() const
+	{
+		TArray<FString> Out;
+		if (Kind == EKind::SlateWidget)
+		{
+			Out.Add(TEXT("Slate"));
+			Out.Add(TEXT("SlateCore"));
+		}
+		else if (Kind == EKind::UObject && BaseClass)
+		{
+			const FString Package = BaseClass->GetOutermost()->GetName();
+			if (Package.StartsWith(TEXT("/Script/")))
+			{
+				Out.Add(Package.Mid(8));
+			}
+		}
+		return Out;
+	}
+};
+
+/** 插件（或引擎）给某个父类注册的类模板。5.3 起沿父类链往上找，5.0–5.2 只认父类本身 —— 和引擎一致 */
+const UClassTemplate* FindRegisteredTemplate(const FClassSpec& Spec)
+{
+	if (!GEditor || !Spec.BaseClass) return nullptr;
+	const UClassTemplateEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UClassTemplateEditorSubsystem>();
+	if (!Subsystem) return nullptr;
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+	return Subsystem->FindClassTemplate(Spec.BaseClass);
+#else
+	for (const UClass* Class = Spec.BaseClass; Class; Class = Class->GetSuperClass())
+	{
+		if (const UClassTemplate* Template = Subsystem->FindClassTemplate(Class))
+		{
+			return Template;
+		}
+	}
+	return nullptr;
+#endif
+}
+
+bool ReadTemplate(const FClassSpec& Spec, bool bHeader, FString& Out, FText& OutFailReason)
+{
+	if (const UClassTemplate* Registered = FindRegisteredTemplate(Spec))
+	{
+		return bHeader ? Registered->ReadHeader(Out, OutFailReason) : Registered->ReadSource(Out, OutFailReason);
+	}
+	return GameProjectUtils::ReadTemplateFile(Spec.TemplateFilename(bHeader), Out, OutFailReason);
+}
+
+/** GameProjectUtils::MakeCopyrightLine（private） */
+FString MakeCopyrightLine()
+{
+	const FString& Notice = GetDefault<UGeneralProjectSettings>()->CopyrightNotice;
+	return Notice.IsEmpty() ? FString() : FString(TEXT("// ")) + Notice;
+}
+
+/** GameProjectUtils::ReplaceWildcard（private）：先连着前导 Tab / 结尾换行一起换，换不到再只换占位符本身 */
+FString ReplaceWildcard(const FString& Input, const FString& From, const FString& To, bool bLeadingTab, bool bTrailingNewLine)
+{
+	FString Result = Input;
+	FString WildCard = bLeadingTab ? TEXT("\t") : TEXT("");
+	WildCard.Append(From);
+	if (bTrailingNewLine)
+	{
+		WildCard.Append(LINE_TERMINATOR);
+	}
+	if (Result.ReplaceInline(*WildCard, *To, ESearchCase::CaseSensitive) == 0)
+	{
+		Result = Result.Replace(*From, *To, ESearchCase::CaseSensitive);
+	}
+	return Result;
+}
+
+/** GameProjectUtils::GetIncludePathForFile（private） */
+FString IncludePathForFile(const FString& FullFilePath, const FString& ModuleRootPath)
+{
+	const FString HeaderPath = FPaths::ChangeExtension(FullFilePath, TEXT("h"));
+	const FString PublicDir = ModuleRootPath / TEXT("Public") / TEXT("");
+	if (HeaderPath.StartsWith(PublicDir))
+	{
+		return HeaderPath.RightChop(PublicDir.Len());
+	}
+	const FString PrivateDir = ModuleRootPath / TEXT("Private") / TEXT("");
+	if (HeaderPath.StartsWith(PrivateDir))
+	{
+		return HeaderPath.RightChop(PrivateDir.Len());
+	}
+	return HeaderPath.RightChop(ModuleRootPath.Len());
+}
+
+/** GameProjectUtils.cpp 里文件内 static 的 TryParseIncludeDirective */
+bool TryParseIncludeDirective(const FString& Text, int32 Pos, int32 EndPos, FString& OutIncludePath)
+{
+	while (Pos < EndPos && FChar::IsWhitespace(Text[Pos])) Pos++;
+	if (Pos == EndPos || Text[Pos++] != TEXT('#')) return false;
+	while (Pos < EndPos && FChar::IsWhitespace(Text[Pos])) Pos++;
+	for (const TCHAR* Include = TEXT("include"); *Include; ++Include)
+	{
+		if (Pos == EndPos || Text[Pos] != *Include) return false;
+		Pos++;
+	}
+	while (Pos < EndPos && FChar::IsWhitespace(Text[Pos])) Pos++;
+	if (Pos == EndPos || Text[Pos++] != TEXT('"')) return false;
+	const int32 Start = Pos;
+	while (Pos < EndPos && Text[Pos] != TEXT('"')) Pos++;
+	OutIncludePath = Text.Mid(Start, Pos - Start);
+	return true;
+}
+
+/** 同上，IsUsingOldStylePch：模块里每个 .cpp 第一行 include 都是同一个文件，就是老式 PCH */
+bool IsUsingOldStylePch(const FString& BaseDir)
+{
+	TArray<FString> Files;
+	IFileManager::Get().FindFilesRecursive(Files, *BaseDir, TEXT("*.cpp"), true, false, false);
+
+	TArray<FString> FirstIncluded;
+	for (int32 Idx = 0; Idx < Files.Num() && Idx < 16; Idx++)
+	{
+		FString Text;
+		FFileHelper::LoadFileToString(Text, *Files[Idx]);
+		int32 LinePos = 0;
+		while (LinePos < Text.Len())
+		{
+			int32 LineEnd = LinePos;
+			while (LineEnd < Text.Len() && Text[LineEnd] != TEXT('\n')) LineEnd++;
+			FString IncludePath;
+			if (TryParseIncludeDirective(Text, LinePos, LineEnd, IncludePath))
+			{
+				FirstIncluded.AddUnique(FPaths::GetCleanFilename(IncludePath));
+				break;
+			}
+			LinePos = LineEnd + 1;
+		}
+	}
+	return FirstIncluded.Num() == 1 && Files.Num() > 1;
+}
+
+/** 去掉占位符 %CURSORFOCUSLOCATION%（引擎拿它定位 IDE 光标，HarvestCursorSyncLocation 里删掉） */
+void StripCursorMarker(FString& Text)
+{
+	Text.ReplaceInline(TEXT("%CURSORFOCUSLOCATION%"), TEXT(""), ESearchCase::CaseSensitive);
+}
+
+/** GenerateClassHeaderFile 的生成部分（不落盘） */
+bool RenderHeader(const FString& HeaderFile, const FString& ClassName, const FClassSpec& Spec,
+	const FModuleContextInfo& Module, FString& Out, FText& OutFailReason)
+{
+	FString Template;
+	if (!ReadTemplate(Spec, true, Template, OutFailReason)) return false;
+
+	const FString Prefix = Spec.PrefixCPP();
+
+	FString BaseInclude;
+	FString BaseIncludePath;
+	if (Spec.IncludePath(BaseIncludePath))
+	{
+		BaseInclude = FString::Printf(TEXT("#include \"%s\""), *BaseIncludePath);
+	}
+
+	// 类不在 Private 下就带模块导出宏，别的模块才链得到它
+	FString ApiMacro;
+	GameProjectUtils::EClassLocation Location = GameProjectUtils::EClassLocation::UserDefined;
+	if (GameProjectUtils::GetClassLocation(HeaderFile, Module, Location) && Location != GameProjectUtils::EClassLocation::Private)
+	{
+		ApiMacro = Module.ModuleName.ToUpper() + TEXT("_API ");
+	}
+
+	TArray<FString> Specifiers;
+	if (Spec.Kind == EKind::Interface)
+	{
+		Specifiers.Add(TEXT("MinimalAPI"));
+	}
+
+	Out = Template.Replace(TEXT("%COPYRIGHT_LINE%"), *MakeCopyrightLine(), ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%UNPREFIXED_CLASS_NAME%"), *ClassName, ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%CLASS_MODULE_API_MACRO%"), *ApiMacro, ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%UCLASS_SPECIFIER_LIST%"), *GameProjectUtils::MakeCommaDelimitedList(Specifiers, false), ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%PREFIXED_CLASS_NAME%"), *(Prefix + ClassName), ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%PREFIXED_BASE_CLASS_NAME%"), *(Prefix + Spec.BaseNameCPP()), ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%MODULE_NAME%"), *Module.ModuleName, ESearchCase::CaseSensitive);
+	Out = ReplaceWildcard(Out, TEXT("%EVENTUAL_CONSTRUCTOR_DECLARATION%"), TEXT(""), true, true);
+	Out = ReplaceWildcard(Out, TEXT("%CLASS_PROPERTIES%"), TEXT(""), true, true);
+	Out = ReplaceWildcard(Out, TEXT("%CLASS_FUNCTION_DECLARATIONS%"), TEXT(""), true, true);
+	if (BaseInclude.IsEmpty())
+	{
+		Out = Out.Replace(TEXT("%BASE_CLASS_INCLUDE_DIRECTIVE%") LINE_TERMINATOR, TEXT(""), ESearchCase::CaseSensitive);
+	}
+	Out = Out.Replace(TEXT("%BASE_CLASS_INCLUDE_DIRECTIVE%"), *BaseInclude, ESearchCase::CaseSensitive);
+	StripCursorMarker(Out);
+	return true;
+}
+
+/** GenerateClassCPPFile 的生成部分（不落盘） */
+bool RenderSource(const FString& CppFile, const FString& ClassName, const FClassSpec& Spec,
+	const FModuleContextInfo& Module, FString& Out, FText& OutFailReason)
+{
+	FString Template;
+	if (!ReadTemplate(Spec, false, Template, OutFailReason)) return false;
+
+	GameProjectUtils::EClassLocation Location = GameProjectUtils::EClassLocation::UserDefined;
+	if (!GameProjectUtils::GetClassLocation(CppFile, Module, Location, &OutFailReason)) return false;
+
+	FString PchInclude;
+	if (IsUsingOldStylePch(Module.ModuleSourcePath))
+	{
+		const FString ModuleInclude = GameProjectUtils::DetermineModuleIncludePath(Module, CppFile);
+		if (!ModuleInclude.IsEmpty())
+		{
+			PchInclude = FString::Printf(TEXT("#include \"%s\""), *ModuleInclude);
+		}
+	}
+
+	const FString Prefixed = Spec.PrefixCPP() + ClassName;
+	Out = Template.Replace(TEXT("%COPYRIGHT_LINE%"), *MakeCopyrightLine(), ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%UNPREFIXED_CLASS_NAME%"), *ClassName, ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%PREFIXED_CLASS_NAME%"), *Prefixed, ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%MODULE_NAME%"), *Module.ModuleName, ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%PCH_INCLUDE_DIRECTIVE%"), *PchInclude, ESearchCase::CaseSensitive);
+
+	// 本类头文件的 include：先删掉老模板里不带子目录的写法，再换成带子目录的
+	const FString RelativeHeader = IncludePathForFile(CppFile, Module.ModuleSourcePath);
+	Out = Out.Replace(*FString::Printf(TEXT("#include \"%s\""), *FPaths::GetCleanFilename(RelativeHeader)), TEXT(""), ESearchCase::CaseSensitive);
+	Out = Out.Replace(TEXT("%MY_HEADER_INCLUDE_DIRECTIVE%"), *FString::Printf(TEXT("#include \"%s\""), *RelativeHeader), ESearchCase::CaseSensitive);
+
+	Out = ReplaceWildcard(Out, TEXT("%ADDITIONAL_INCLUDE_DIRECTIVES%"), TEXT(""), false, true);
+	Out = ReplaceWildcard(Out, TEXT("%EVENTUAL_CONSTRUCTOR_DEFINITION%"), TEXT(""), false, true);
+	Out = ReplaceWildcard(Out, TEXT("%ADDITIONAL_MEMBER_DEFINITIONS%"), TEXT(""), false, true);
+	StripCursorMarker(Out);
+	return true;
+}
+
+/**
+ * 把父类所在模块登记进 .uproject 的 AdditionalDependencies（UBT 会把它当成私有依赖）。
+ *
+ * 和引擎有一处**有意的**不同：模块的 .Build.cs 里已经写了这个模块名，就不登记。
+ * 引擎是无条件补（所以老工程的 .uproject 里常见 "AdditionalDependencies": ["Engine"]）。
+ * 补了也无害，但改了 .uproject 会让 cpp.compile 报 needs_full_rebuild（它比的是配置和产物
+ * 的时间戳）—— 建一个 Actor 就提示要完整重编，是一条假警报，模型会照着去关编辑器。
+ *
+ * 返回实际新登记的模块。.uproject 写不进去（只读、被源码管理锁着）时 OutFailReason 非空。
+ */
+TArray<FString> RegisterDependencies(const FModuleContextInfo& Module, TArray<FString> Required, FText& OutFailReason)
+{
+	TArray<FString> Added;
+	Required.Remove(Module.ModuleName);
+	if (Required.Num() == 0) return Added;
+
+	FString BuildCs;
+	FFileHelper::LoadFileToString(BuildCs, *(Module.ModuleSourcePath / Module.ModuleName + TEXT(".Build.cs")));
+	Required.RemoveAll([&BuildCs](const FString& Dep)
+	{
+		return BuildCs.Contains(TEXT("\"") + Dep + TEXT("\""));
+	});
+	if (Required.Num() == 0) return Added;
+
+	const FString ProjectFile = FPaths::GetProjectFilePath();
+	FProjectDescriptor Descriptor;
+	if (!Descriptor.Load(ProjectFile, OutFailReason)) return Added;
+
+	for (FModuleDescriptor& Desc : Descriptor.Modules)
+	{
+		if (Desc.Name != FName(*Module.ModuleName)) continue;
+		for (const FString& Dep : Required)
+		{
+			if (!Desc.AdditionalDependencies.Contains(Dep))
+			{
+				Desc.AdditionalDependencies.Add(Dep);
+				Added.Add(Dep);
+			}
+		}
+	}
+	// 插件模块不在 .uproject 里，引擎那条路也是什么都不做
+	if (Added.Num() == 0) return Added;
+
+	GameProjectUtils::TryMakeProjectFileWriteable(ProjectFile);
+	if (!Descriptor.Save(ProjectFile, OutFailReason))
+	{
+		Added.Reset();
+		return Added;
+	}
+	IProjectManager::Get().LoadProjectFile(ProjectFile);
+	GameProjectUtils::ResetCurrentProjectModulesCache();
+	return Added;
+}
+
+/** 新文件登记进源码管理。异步：Perforce 慢的时候别把编辑器钉住 */
+bool MarkForAdd(const TArray<FString>& Files)
+{
+	ISourceControlModule& Scc = ISourceControlModule::Get();
+	if (!Scc.IsEnabled() || !Scc.GetProvider().IsAvailable()) return false;
+
+	TArray<FString> Absolute;
+	for (const FString& File : Files)
+	{
+		Absolute.Add(IFileManager::Get().ConvertToAbsolutePathForExternalAppForRead(*File));
+	}
+	Scc.GetProvider().Execute(ISourceControlOperation::Create<FMarkForAdd>(), Absolute, EConcurrency::Asynchronous);
+	return true;
+}
+
+/** 名字是不是合法的 C++ 标识符（工程名要当模块名用时检查） */
+bool IsCppIdentifier(const FString& Name)
+{
+	if (Name.IsEmpty() || FChar::IsDigit(Name[0])) return false;
+	for (const TCHAR C : Name)
+	{
+		if (!(FChar::IsAlnum(C) && C < 128) && C != TEXT('_')) return false;
+	}
+	return true;
+}
+
+/** 某个模块里已经有这个头文件的话，返回它的路径（给「已存在」的报错指路） */
+FString FindExistingHeader(const FModuleContextInfo& Module, const FString& HeaderName)
+{
+	TArray<FString> Found;
+	IFileManager::Get().FindFilesRecursive(Found, *Module.ModuleSourcePath, *HeaderName, true, false, false);
+	return Found.Num() > 0 ? FPaths::ConvertRelativePathToFull(Found[0]) : FString();
+}
+
+} // namespace UALAddClass
 
 void FUAL_CppCommands::Handle_AddClass(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 {
-	/*
-	 * 纯蓝图工程一律拒。
-	 *
-	 * 引擎的 AddCodeToProject 在 bProjectHadCodeFiles == false 且 Live Coding
-	 * 启用时会 FMessageDialog::Open（GameProjectUtils.cpp:4116），那是个模态框，
-	 * 会把游戏线程停在那儿等人点确定 —— 我们的命令也跑在游戏线程上，
-	 * 于是编辑器和这次调用一起卡死，直到用户手动点掉。
-	 *
-	 * 引擎在 Live Coding 关着时不弹窗，所以这条一刀切**比引擎保守**。
-	 * 那是有意的：区分两种情况等于把「会不会卡死编辑器」押在一次探测上，
-	 * 而这个场景（工程从零加第一个 C++ 类）一辈子只发生一次，
-	 * 用户手动做一次的成本远低于我们探测错一次。
-	 */
-	if (!GameProjectUtils::ProjectHasCodeFiles())
-	{
-		UAL_CommandUtils::SendError(RequestId, 400,
-			TEXT("这是纯蓝图工程，还没有任何 C++ 代码。第一个 C++ 类需要用户在编辑器里手动加一次")
-			TEXT("（菜单 工具 > 新建 C++ 类 / Tools > New C++ Class），之后我就能接手了。"));
-		return;
-	}
+	using namespace UALAddClass;
 
-	FString ClassName;
-	if (!Payload->TryGetStringField(TEXT("name"), ClassName) || ClassName.IsEmpty())
+	FString RawName;
+	if (!Payload->TryGetStringField(TEXT("name"), RawName) || RawName.TrimStartAndEnd().IsEmpty())
 	{
 		UAL_CommandUtils::SendError(RequestId, 400, TEXT("缺少字段: name"));
 		return;
 	}
+	RawName.TrimStartAndEndInline();
 
 	FString ParentClass, ModuleName, Location;
 	Payload->TryGetStringField(TEXT("parent_class"), ParentClass);
 	Payload->TryGetStringField(TEXT("module"), ModuleName);
 	Payload->TryGetStringField(TEXT("location"), Location);
+	ParentClass.TrimStartAndEndInline();
+
+	// ── 父类 → 类别 ──
+	FClassSpec Spec;
+	{
+		const FString P = ParentClass;
+		if (P.IsEmpty() || P.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+		{
+			Spec.Kind = EKind::EmptyCpp;
+		}
+		else if (P.Equals(TEXT("Interface"), ESearchCase::IgnoreCase) || P.Equals(TEXT("UInterface"), ESearchCase::IgnoreCase)
+			|| P.Equals(TEXT("UnrealInterface"), ESearchCase::IgnoreCase))
+		{
+			// 选 UInterface 当父类时，引擎走的是专门的「虚幻接口」模板（U/I 一对），不是 UObject 模板
+			Spec.Kind = EKind::Interface;
+		}
+		else if (P.Equals(TEXT("SlateWidget"), ESearchCase::IgnoreCase) || P.Equals(TEXT("SCompoundWidget"), ESearchCase::IgnoreCase)
+			|| P.Equals(TEXT("CompoundWidget"), ESearchCase::IgnoreCase))
+		{
+			Spec.Kind = EKind::SlateWidget;
+		}
+		else
+		{
+			FString ResolveError;
+			UClass* Base = UAL_CommandUtils::ResolveClassFromIdentifier(P, nullptr, ResolveError);
+			if (!Base)
+			{
+				UAL_CommandUtils::SendError(RequestId, 400,
+					FString::Printf(TEXT("找不到父类 %s：%s"), *P, *ResolveError));
+				return;
+			}
+			if (Base == UInterface::StaticClass())
+			{
+				Spec.Kind = EKind::Interface;
+			}
+			else
+			{
+				Spec.Kind = EKind::UObject;
+				Spec.BaseClass = Base;
+			}
+		}
+	}
+
+	// 名字带了前缀（ASurvivorDirector / UHealthComponent / IDamageable）就剥掉 —— 引擎按父类
+	// 加前缀，不剥会建出 AASurvivorDirector。
+	//
+	// 只在「前缀和父类对得上 + 后面是一个大写字母再跟小写字母」时剥：AIDirector、UIManager
+	// 这种名字本身就以缩写开头（AI、UI），剥了会变成 IDirector / IManager，换掉的是用户要的名字。
+	// 宁可偶尔多一层前缀（回执里看得见最终类名），也不悄悄改名。
+	FString ClassName = RawName;
+	{
+		const bool bInterfaceI = Spec.Kind == EKind::Interface && ClassName.StartsWith(TEXT("I"), ESearchCase::CaseSensitive);
+		const FString Strip = bInterfaceI ? FString(TEXT("I")) : Spec.PrefixCPP();
+		const int32 N = Strip.Len();
+		if (N > 0 && ClassName.Len() > N + 1
+			&& ClassName.StartsWith(Strip, ESearchCase::CaseSensitive)
+			&& FChar::IsUpper(ClassName[N]) && FChar::IsLower(ClassName[N + 1]))
+		{
+			ClassName.RightChopInline(N);
+		}
+	}
+
+	// ── 纯蓝图工程：先补上工程的主模块（引擎在同一情况下做的事，GenerateBasicSourceCode） ──
+	const bool bHadCode = GameProjectUtils::ProjectHasCodeFiles();
+	bool bCreatedPrimaryModule = false;
+	TArray<FString> CreatedFiles;
+
+	if (!bHadCode)
+	{
+		if (DeclaredProjectModuleCount() > 0)
+		{
+			// .uproject 声明了模块但 Source/ 不在：工程是坏的，补一个模块盖不住
+			UAL_CommandUtils::SendError(RequestId, 409,
+				TEXT(".uproject 声明了 C++ 模块，但磁盘上找不到源码（Source 目录不存在或是空的）。")
+				TEXT("这是源码缺失的 C++ 工程，不是纯蓝图工程 —— 在这上面建类会和缺掉的那份源码冲突。")
+				TEXT("请让用户确认工程拷贝时有没有漏掉 Source 目录。"));
+			return;
+		}
+		const FString ProjectName = FApp::GetProjectName();
+		if (!IsCppIdentifier(ProjectName))
+		{
+			UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(
+				TEXT("工程名 %s 不能当 C++ 模块名用（只能是英文字母、数字、下划线，且不以数字开头）。")
+				TEXT("第一个 C++ 类会以工程名建主模块，引擎在这里也会失败。需要先给工程改一个英文名。"), *ProjectName));
+			return;
+		}
+		if (!ModuleName.IsEmpty() && !ModuleName.Equals(ProjectName, ESearchCase::IgnoreCase))
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+				TEXT("这是纯蓝图工程，第一个类只能放进以工程名命名的主模块 %s（引擎的规矩）。module 留空即可。"), *ProjectName));
+			return;
+		}
+
+		// 和引擎一样：先清掉 Intermediate/Source，蓝图工程带着自定义构建设置转 C++ 时不清会出错
+		IFileManager::Get().DeleteDirectory(*(FPaths::ProjectIntermediateDir() / TEXT("Source")), false, true);
+
+		FText Reason;
+		if (!GameProjectUtils::GenerateBasicSourceCode(CreatedFiles, Reason))
+		{
+			GameProjectUtils::DeleteCreatedFiles(FPaths::GameSourceDir().LeftChop(1), CreatedFiles);
+			UAL_CommandUtils::SendError(RequestId, 500,
+				FString::Printf(TEXT("给工程生成主模块失败：%s"), *Reason.ToString()));
+			return;
+		}
+		bCreatedPrimaryModule = true;
+		GameProjectUtils::ResetCurrentProjectModulesCache();
+	}
 
 	// ── 选模块 ──
 	//
-	// **注意这里取的是副本，不是引用。别改回去。**
-	//
-	// GetCurrentProjectModules() 返回的是 IProjectManager 内部那个数组的引用
-	// （GameProjectUtils.cpp:2562 直接返回 GetCurrentProjectModuleContextInfos()）。
-	// 而 AddCodeToProject 在生成文件之前会调 UpdateProject() 改写 .uproject
-	// （给新类的父类补依赖模块，GameProjectUtils.cpp:4053）—— 那一步会把模块表
-	// 清掉重建，**我们手上指向数组元素的指针当场悬空**。
-	//
-	// 之后引擎拿这个已经悬空的 ModuleInfo 去做路径校验和格式化错误消息，
-	// 于是 2026-09-08 真机验收案例 5 看到的现象是：FailedToAddCode ＋
-	// 一串每次都不一样的乱码理由（`“頀笠੏` / `“⿎ண` / `“怒偗ਛ`），
-	// 一个文件都没建出来。那串乱码的第一个字符恒定是 `“`，正是
-	// SourcePathInvalidForModule 这条消息的开头，只是两个参数都读到了野内存。
-	//
-	// 受控实验（2026-09-08，独立的空工程 _ual-test/AddClassProbe55）：
-	// 别的都不动，只把传给 AddCodeToProject 的模块信息从引用换成副本，
-	// 结果就从 FailedToAddCode 变成 Succeeded，两个文件正常生成。
-	//
-	// 这是**用后即释**，所以它有时会「碰巧成功」—— 别拿一次成功当它没问题。
-	const TArray<FModuleContextInfo> Modules = GameProjectUtils::GetCurrentProjectModules();
+	// **取副本，不取引用。** GetCurrentProjectModules() 返回 IProjectManager 内部数组的引用，
+	// 下面 RegisterDependencies 会 LoadProjectFile 把它清掉重建 —— 拿着元素指针就悬空了
+	// （2026-09-08 案例 5 的乱码 fail_reason 就是这么来的）。插件模块也收进来：引擎的
+	// 新建类对话框允许选插件模块。
+	TArray<FModuleContextInfo> Modules = GameProjectUtils::GetCurrentProjectModules();
+	Modules.Append(GameProjectUtils::GetCurrentProjectPluginModules());
+	// 我们自己（UnrealAgentLink 装在工程的 Plugins/ 下，所以也在插件模块里）不能当落点：
+	// 盒子每次更新插件都会整个替换这个目录，写进去的类下次就没了
+	Modules.RemoveAll([](const FModuleContextInfo& M)
+	{
+		return M.ModuleName == TEXT("UnrealAgentLink");
+	});
 	if (Modules.Num() == 0)
 	{
 		UAL_CommandUtils::SendError(RequestId, 500,
 			TEXT("工程报告有 C++ 代码，但一个模块都列不出来。请让用户确认工程能否正常编译。"));
 		return;
 	}
-	const FModuleContextInfo* Module = nullptr;
-	if (ModuleName.IsEmpty())
-	{
-		// 不给就用第一个 —— 那是工程的主游戏模块
-		Module = &Modules[0];
-	}
-	else
-	{
-		Module = Modules.FindByPredicate([&ModuleName](const FModuleContextInfo& M)
+	const FModuleContextInfo* FoundModule = ModuleName.IsEmpty()
+		? &Modules[0] // 第一个是工程的主游戏模块
+		: Modules.FindByPredicate([&ModuleName](const FModuleContextInfo& M)
 		{
 			return M.ModuleName.Equals(ModuleName, ESearchCase::IgnoreCase);
 		});
+	if (!FoundModule && ModuleName.Equals(TEXT("UnrealAgentLink"), ESearchCase::IgnoreCase))
+	{
+		UAL_CommandUtils::SendError(RequestId, 400,
+			TEXT("UnrealAgentLink 是虚幻盒子自己的插件，每次更新都会整个替换，类不能建在这里。module 留空用工程主模块。"));
+		return;
 	}
-	if (!Module)
+	if (!FoundModule)
 	{
 		FString Available;
 		for (const FModuleContextInfo& M : Modules)
@@ -139,89 +692,134 @@ void FUAL_CppCommands::Handle_AddClass(const TSharedPtr<FJsonObject>& Payload, c
 			FString::Printf(TEXT("找不到模块 %s。这个工程有：%s"), *ModuleName, *Available));
 		return;
 	}
+	const FModuleContextInfo Module = *FoundModule;
 
-	/*
-	 * DisallowedHeaderNames 传空集。
-	 *
-	 * 引擎的对话框会把模块里已有的头文件名塞进来，用于提前发现重名。我们不扫 ——
-	 * 重名时 AddCodeToProject 自己会因为文件已存在而失败，只是报错措辞差一点。
-	 * ponytail: 为了一句更漂亮的错误去扫一遍源码目录不划算，真嫌错误看不懂再补。
-	 */
-	const TSet<FString> DisallowedHeaderNames;
-
+	// ── 校验：名字、父类、落点、文件 ──
 	FText FailReason;
-	if (!GameProjectUtils::IsValidClassNameForCreation(ClassName, *Module, DisallowedHeaderNames, FailReason))
+	if (!GameProjectUtils::IsValidClassNameForCreation(ClassName, Module, TSet<FString>(), FailReason))
 	{
-		UAL_CommandUtils::SendError(RequestId, 400,
-			FString::Printf(TEXT("类名 %s 不合法：%s"), *ClassName, *FailReason.ToString()));
+		// 最常见的原因是「已经有了」—— 多半是上一轮建过、还没编进来。指给它看文件在哪，
+		// 别让模型换个名字再建一个
+		const FString Existing = FindExistingHeader(Module, Spec.HeaderFilename(ClassName));
+		UAL_CommandUtils::SendError(RequestId, Existing.IsEmpty() ? 400 : 409, Existing.IsEmpty()
+			? FString::Printf(TEXT("类名 %s 不能用：%s"), *ClassName, *FailReason.ToString())
+			: FString::Printf(TEXT("类 %s 已经存在：%s。不要换个名字重建 —— 直接读这个文件接着改，改完调 cpp_compile。"),
+				*ClassName, *Existing));
+		return;
+	}
+	if (Spec.Kind == EKind::UObject && !GameProjectUtils::IsValidBaseClassForCreation(Spec.BaseClass, Module))
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("%s 不能作为父类：模块 %s 够不着它（它所在的模块没有导出这个类），或者它被标记为不可继承。"),
+			*Spec.BaseClass->GetName(), *Module.ModuleName));
 		return;
 	}
 
-	// ── 父类 ──
-	FNewClassInfo ClassInfo(FNewClassInfo::EClassType::EmptyCpp);
-	if (!ParentClass.IsEmpty())
-	{
-		FString ResolveError;
-		// 复用已有的解析器：它认路径形式、认不带 U/A 前缀的名字，
-		// 而且 5.3 前后的 FindObject/FindFirstObject 差异也在里面处理过了
-		UClass* Base = UAL_CommandUtils::ResolveClassFromIdentifier(ParentClass, nullptr, ResolveError);
-		if (!Base)
-		{
-			UAL_CommandUtils::SendError(RequestId, 400,
-				FString::Printf(TEXT("找不到父类 %s：%s"), *ParentClass, *ResolveError));
-			return;
-		}
-		if (!GameProjectUtils::IsValidBaseClassForCreation(Base, *Module))
-		{
-			UAL_CommandUtils::SendError(RequestId, 400,
-				FString::Printf(TEXT("%s 不能作为父类（模块 %s 够不着它，或者它被标记为不可继承）。"),
-					*Base->GetName(), *Module->ModuleName));
-			return;
-		}
-		ClassInfo = FNewClassInfo(Base);
-	}
-
-	// ── 落点 ──
-	//
-	// 默认放模块根目录 —— 那是引擎的 Add C++ Class 对游戏模块的默认行为。
-	// 显式要 public/private 才进子目录（插件模块和要被别的模块 include 的类需要）
-	FString NewClassPath = Module->ModuleSourcePath;
+	// 默认放模块根目录（引擎新建类对话框的初始路径就是这里）；public/private 进对应子目录，
+	// CalculateSourcePaths 会把 .h 和 .cpp 分到 Public/Private 两边
+	FString ClassPath = Module.ModuleSourcePath;
 	if (Location.Equals(TEXT("public"), ESearchCase::IgnoreCase))
 	{
-		NewClassPath = Module->ModuleSourcePath / TEXT("Public");
+		ClassPath = Module.ModuleSourcePath / TEXT("Public");
 	}
 	else if (Location.Equals(TEXT("private"), ESearchCase::IgnoreCase))
 	{
-		NewClassPath = Module->ModuleSourcePath / TEXT("Private");
+		ClassPath = Module.ModuleSourcePath / TEXT("Private");
 	}
-
-	FString HeaderPath, CppPath;
-	GameProjectUtils::EReloadStatus ReloadStatus = GameProjectUtils::EReloadStatus::NotReloaded;
-	const GameProjectUtils::EAddCodeToProjectResult Result = GameProjectUtils::AddCodeToProject(
-		ClassName, NewClassPath, *Module, ClassInfo, DisallowedHeaderNames,
-		HeaderPath, CppPath, FailReason, ReloadStatus);
-
-	const TCHAR* ResultName = TEXT("Unknown");
-	switch (Result)
+	FString HeaderDir, SourceDir;
+	if (!GameProjectUtils::CalculateSourcePaths(ClassPath, Module, HeaderDir, SourceDir, &FailReason))
 	{
-	case GameProjectUtils::EAddCodeToProjectResult::Succeeded:       ResultName = TEXT("Succeeded"); break;
-	case GameProjectUtils::EAddCodeToProjectResult::InvalidInput:    ResultName = TEXT("InvalidInput"); break;
-	case GameProjectUtils::EAddCodeToProjectResult::FailedToAddCode: ResultName = TEXT("FailedToAddCode"); break;
-	case GameProjectUtils::EAddCodeToProjectResult::FailedToHotReload: ResultName = TEXT("FailedToHotReload"); break;
+		UAL_CommandUtils::SendError(RequestId, 400,
+			FString::Printf(TEXT("落点不合法：%s"), *FailReason.ToString()));
+		return;
+	}
+	const FString HeaderFile = FPaths::ConvertRelativePathToFull(HeaderDir / Spec.HeaderFilename(ClassName));
+	const FString SourceFile = FPaths::ConvertRelativePathToFull(SourceDir / Spec.SourceFilename(ClassName));
+	for (const FString& File : { HeaderFile, SourceFile })
+	{
+		if (IFileManager::Get().FileExists(*File))
+		{
+			UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(
+				TEXT("%s 已经存在，没有覆盖。如果它就是要建的类，直接读它接着改。"), *File));
+			return;
+		}
 	}
 
-	// 和 cpp.compile 同一条教训：非 200 会被盒子标成 ok:false，
-	// 整个载荷被 callUe 吞掉，只剩一句「未提供失败原因」。
-	// 建类跑完了就是 RPC 成功，成没成写在 result 里
-	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
-	Data->SetStringField(TEXT("result"), ResultName);
-	Data->SetStringField(TEXT("module"), Module->ModuleName);
-	Data->SetStringField(TEXT("header_path"), HeaderPath);
-	Data->SetStringField(TEXT("cpp_path"), CppPath);
-	Data->SetBoolField(TEXT("reloaded"), ReloadStatus == GameProjectUtils::EReloadStatus::Reloaded);
-	Data->SetStringField(TEXT("fail_reason"), FailReason.ToString());
+	// ── 先在内存里把两份文件都生成好，再落盘：模板读不到时一个文件都不留 ──
+	FString HeaderText, SourceText;
+	if (!RenderHeader(HeaderFile, ClassName, Spec, Module, HeaderText, FailReason)
+		|| !RenderSource(SourceFile, ClassName, Spec, Module, SourceText, FailReason))
+	{
+		UAL_CommandUtils::SendError(RequestId, 500,
+			FString::Printf(TEXT("读引擎的类模板失败：%s"), *FailReason.ToString()));
+		return;
+	}
+	if (!GameProjectUtils::WriteOutputFile(HeaderFile, HeaderText, FailReason))
+	{
+		UAL_CommandUtils::SendError(RequestId, 500,
+			FString::Printf(TEXT("写 %s 失败：%s"), *HeaderFile, *FailReason.ToString()));
+		return;
+	}
+	if (!GameProjectUtils::WriteOutputFile(SourceFile, SourceText, FailReason))
+	{
+		IFileManager::Get().Delete(*HeaderFile);
+		UAL_CommandUtils::SendError(RequestId, 500,
+			FString::Printf(TEXT("写 %s 失败：%s（已删掉刚写的头文件）"), *SourceFile, *FailReason.ToString()));
+		return;
+	}
+	CreatedFiles.Add(HeaderFile);
+	CreatedFiles.Add(SourceFile);
 
-	UE_LOG(LogUALCpp, Log, TEXT("cpp.add_class %s -> %s"), *ClassName, ResultName);
+	// ── 依赖登记、源码管理。都不影响「类建出来了」，失败只记警告 ──
+	TArray<TSharedPtr<FJsonValue>> Warnings;
+	FText DepFail;
+	const TArray<FString> DepsAdded = RegisterDependencies(Module, Spec.RequiredDependencies(), DepFail);
+	if (!DepFail.IsEmpty())
+	{
+		Warnings.Add(MakeShared<FJsonValueString>(FString::Printf(
+			TEXT("父类所在模块没能登记进 .uproject（%s）。编译时如果报找不到父类的符号（LNK2019），")
+			TEXT("在模块的 .Build.cs 里把它加进 PrivateDependencyModuleNames。"), *DepFail.ToString())));
+	}
+	const bool bMarkedForAdd = MarkForAdd(CreatedFiles);
+
+	// 状态字段一律从磁盘读回，不回显入参（AGENTS.md §5 第 14 条）
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("result"), TEXT("Succeeded"));
+	Data->SetStringField(TEXT("class_name"), Spec.PrefixCPP() + ClassName);
+	if (Spec.Kind == EKind::Interface)
+	{
+		Data->SetStringField(TEXT("interface_name"), TEXT("I") + ClassName);
+	}
+	if (ClassName != RawName)
+	{
+		Data->SetStringField(TEXT("requested_name"), RawName);
+	}
+	Data->SetStringField(TEXT("module"), Module.ModuleName);
+	Data->SetStringField(TEXT("header_path"), HeaderFile);
+	Data->SetStringField(TEXT("cpp_path"), SourceFile);
+	Data->SetBoolField(TEXT("header_exists"), IFileManager::Get().FileExists(*HeaderFile));
+	Data->SetBoolField(TEXT("cpp_exists"), IFileManager::Get().FileExists(*SourceFile));
+
+	TArray<TSharedPtr<FJsonValue>> Created;
+	for (const FString& File : CreatedFiles)
+	{
+		Created.Add(MakeShared<FJsonValueString>(FPaths::ConvertRelativePathToFull(File)));
+	}
+	Data->SetArrayField(TEXT("created_files"), Created);
+
+	TArray<TSharedPtr<FJsonValue>> Deps;
+	for (const FString& Dep : DepsAdded)
+	{
+		Deps.Add(MakeShared<FJsonValueString>(Dep));
+	}
+	Data->SetArrayField(TEXT("dependencies_added"), Deps);
+	Data->SetBoolField(TEXT("created_primary_module"), bCreatedPrimaryModule);
+	Data->SetBoolField(TEXT("marked_for_add"), bMarkedForAdd);
+	Data->SetBoolField(TEXT("reloaded"), false);
+	Data->SetArrayField(TEXT("warnings"), Warnings);
+
+	UE_LOG(LogUALCpp, Log, TEXT("cpp.add_class %s -> %s / %s (primary_module=%d)"),
+		*ClassName, *HeaderFile, *SourceFile, bCreatedPrimaryModule ? 1 : 0);
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
 
@@ -316,7 +914,8 @@ FString LiveCodingHalfDisabledHint()
 		TEXT("但它的会话还在这个进程里跑着（引擎自己在日志里说的：Console will be hidden ")
 		TEXT("but remain running in the background. Restart to disable completely）。")
 		TEXT("**这个状态下走热重载会把编辑器卡死**（实测：20 分钟不动一帧，只能强制关闭）。")
-		TEXT("请让用户重启编辑器 —— 重启之后热重载就正常了，而且编不过时能拿到完整的文件名和行号。");
+		TEXT("解法是重启编辑器：先保存，然后调 ue_restart_editor（盒子会等它回来并自动重连），")
+		TEXT("重启之后热重载就正常了，编不过时也能拿到完整的文件名和行号。");
 }
 
 /** 热重载编不动时给用户的那句话。两处要用（探测和编译），所以抽出来 */
@@ -324,9 +923,9 @@ FString NoReloadablePackagesHint()
 {
 	return TEXT("这个工程当前加载的游戏模块里，没有任何一个声明过 UObject 类")
 		TEXT("（UCLASS / USTRUCT / UENUM）。引擎的热重载是按 UObject 包来重新绑定的，")
-		TEXT("模块里没有 UObject 就没有可绑定的包，引擎会直接拒绝，一行都不会编。")
-		TEXT("解法：在这个模块里至少放一个 UCLASS（比如一个继承 AActor 的类），")
-		TEXT("或者关掉编辑器用 IDE / 命令行完整编一次。");
+		TEXT("模块里没有 UObject 就没有可绑定的包，引擎会直接拒绝，一行都不会编 ——")
+		TEXT("哪怕你刚往模块里加了 UCLASS，没编进来之前它也不算。")
+		TEXT("解法：调 cpp_full_rebuild（盒子替用户关编辑器、完整编译、再打开，有未保存的改动会先拦下来）。");
 }
 
 /**
@@ -807,8 +1406,13 @@ void FUAL_CppCommands::Handle_ListModules(const TSharedPtr<FJsonObject>& Payload
 		Payload->TryGetBoolField(TEXT("include_plugins"), bIncludePlugins);
 	}
 
+	// 纯蓝图工程上引擎会塞一个占位模块（见 DeclaredProjectModuleCount），它在磁盘上并不存在，
+	// 列出来会让调用方以为工程有 C++ 模块
 	TArray<TSharedPtr<FJsonValue>> Modules;
-	AppendModules(Modules, GameProjectUtils::GetCurrentProjectModules(), TEXT("project"));
+	if (GameProjectUtils::ProjectHasCodeFiles() || DeclaredProjectModuleCount() > 0)
+	{
+		AppendModules(Modules, GameProjectUtils::GetCurrentProjectModules(), TEXT("project"));
+	}
 	if (bIncludePlugins)
 	{
 		AppendModules(Modules, GameProjectUtils::GetCurrentProjectPluginModules(), TEXT("plugin"));
@@ -818,6 +1422,7 @@ void FUAL_CppCommands::Handle_ListModules(const TSharedPtr<FJsonObject>& Payload
 	Data->SetArrayField(TEXT("modules"), Modules);
 	Data->SetNumberField(TEXT("count"), Modules.Num());
 	Data->SetBoolField(TEXT("has_code"), GameProjectUtils::ProjectHasCodeFiles());
+	Data->SetNumberField(TEXT("declared_module_count"), DeclaredProjectModuleCount());
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }
@@ -830,20 +1435,12 @@ void FUAL_CppCommands::Handle_Probe(const TSharedPtr<FJsonObject>& Payload, cons
 	Data->SetBoolField(TEXT("has_code"), bHasCode);
 
 	/*
-	 * 声明了几个模块。**这个数和 has_code 会不一致，而且不一致是有意义的。**
-	 *
-	 * 真机上撞到过（2026-09-03，一个叫 ProbeHost 的宿主工程）：
-	 *   has_code = false，但 GetCurrentProjectModules() 返回了一个模块。
-	 *
-	 * 两者的数据源不同 —— ProjectHasCodeFiles() 数的是**磁盘上的源文件**，
-	 * GetCurrentProjectModules() 读的是 **.uproject 里的 Modules 段**。
-	 * 所以「.uproject 声明了 MyGame 模块，但 Source/ 目录根本不存在」是个
-	 * 能稳定出现的状态：模板生成到一半、源码被删过、或者工程是从别处拷来的。
-	 *
-	 * 只报 has_code 的话，这种工程会被说成「纯蓝图工程」——那是错的，
-	 * 而且会把用户引向「手动加第一个 C++ 类」，可他的问题是工程本身坏了。
+	 * .uproject 声明了几个模块。**这个数和 has_code 不一致时是有意义的**：
+	 * ProjectHasCodeFiles() 数的是磁盘上的源文件，这里读的是 .uproject 的 Modules 段，
+	 * 「声明了模块但 Source/ 不在」是源码丢了的 C++ 工程（拷贝漏了、被删过），不是纯蓝图工程。
+	 * 判据为什么不能用 GetCurrentProjectModules()，见 DeclaredProjectModuleCount。
 	 */
-	const int32 DeclaredModuleCount = GameProjectUtils::GetCurrentProjectModules().Num();
+	const int32 DeclaredModuleCount = DeclaredProjectModuleCount();
 	Data->SetNumberField(TEXT("declared_module_count"), DeclaredModuleCount);
 	Data->SetStringField(TEXT("engine_dir"), FPaths::ConvertRelativePathToFull(FPaths::EngineDir()));
 	Data->SetStringField(TEXT("engine_source_dir"), FPaths::ConvertRelativePathToFull(FPaths::EngineSourceDir()));
@@ -951,7 +1548,7 @@ void FUAL_CppCommands::Handle_Probe(const TSharedPtr<FJsonObject>& Payload, cons
 	 * 把「为什么是这条路」也说出来。
 	 *
 	 * 只回一个枚举的话，模型遇到 none 只能猜；而这三种 none 的处置完全不同：
-	 * 纯蓝图工程要请用户手动加第一个类，没有热重载模块是环境问题，
+	 * 纯蓝图工程直接建第一个类（cpp_add_class 会补主模块），没有热重载模块是环境问题，
 	 * 两条路都不可用则要报告而不是重试。
 	 */
 	FString Why;
@@ -967,7 +1564,9 @@ void FUAL_CppCommands::Handle_Probe(const TSharedPtr<FJsonObject>& Payload, cons
 	}
 	else if (!bHasCode)
 	{
-		Why = TEXT("这是纯蓝图工程（没有 C++ 源码，.uproject 里也没有声明模块）。要加第一个 C++ 类，需要用户在编辑器里手动做一次 File > New C++ Class。");
+		Why = TEXT("这是纯蓝图工程（没有 C++ 源码，.uproject 里也没有声明模块）。")
+			TEXT("直接调 cpp_add_class 建第一个类，它会和编辑器一样顺带建好工程的主模块；")
+			TEXT("新模块编辑器当场加载不了，建完填好实现后调 cpp_full_rebuild 编译并重开编辑器。");
 	}
 	else if (bLcEnabledForSession)
 	{

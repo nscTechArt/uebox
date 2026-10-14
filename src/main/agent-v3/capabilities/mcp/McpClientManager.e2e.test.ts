@@ -229,6 +229,24 @@ describe('readOnlyTools 点名降级', () => {
     )
     await wrong.disconnectAll()
   }, 30_000)
+
+  it('用户信任了这个 server：其余工具降成 mutating，点名的仍是 safe', async () => {
+    const trusted = new McpClientManager()
+    await trusted.connectAll({
+      echo: {
+        type: 'stdio',
+        command: process.execPath,
+        args: [SERVER],
+        readOnlyTools: ['echo.text'],
+        trusted: true
+      }
+    })
+
+    const byName = new Map(trusted.getTools().map((t) => [t.name, t]))
+    expect(byName.get('mcp_echo_echo_text')?.unrealBox.risk).toBe('safe')
+    expect(byName.get('mcp_echo_always_fails')?.unrealBox.risk).toBe('mutating')
+    await trusted.disconnectAll()
+  }, 30_000)
 })
 
 /**

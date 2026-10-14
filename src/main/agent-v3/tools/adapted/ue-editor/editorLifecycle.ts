@@ -265,11 +265,13 @@ export function createRestartEditorTool() {
             restarted: true,
             reconnected: false,
             timed_out: true,
-            needs_manual_reconnect: true,
+            // 插件断线后自己每 5 秒重连，等就是了 —— 字段名别再暗示「要人去手动连」
+            wait_for_reconnect: true,
             error:
               `编辑器已经重启，但盒子还没重新连上它 —— 现在发任何引擎命令都会失败。\n` +
               (check.lastError ? `最后一次试探的失败原因：${check.lastError}\n` : '') +
-              `请用户在盒子界面里重新连接项目；重连之后就能继续了。\n` +
+              `用 ue_session_health 带 wait_seconds 再等一会儿 —— 插件断线后每 5 秒自己重连，` +
+              `界面上没有「连接」按钮，不要让用户去找。\n` +
               `**不要重复重启** —— 编辑器本身是好的，问题在连接上。`
           }
         }

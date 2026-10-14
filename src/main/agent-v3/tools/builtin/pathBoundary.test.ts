@@ -23,8 +23,11 @@ describe('敏感位置拦截（按路径）', () => {
 
   // 斜杠方向和大小写都不该成为绕过手段
   it('正斜杠、反斜杠、大小写都认', () => {
-    expect(isDenied('C:\\Users\\Me\\AppData\\Roaming\\Unreal-Box\\x')).toBe(true)
-    expect(isDenied('c:/users/me/appdata/roaming/unreal-box/x')).toBe(true)
+    expect(isDenied('C:\\Users\\Me\\AppData\\Roaming\\Unreal-Box\\AI-Provider-Secrets.bin')).toBe(
+      true
+    )
+    expect(isDenied('c:/users/me/appdata/roaming/unreal-box/ai-provider-secrets.bin')).toBe(true)
+    expect(isDenied('C:\\USERS\\ME\\.SSH\\ID_RSA')).toBe(true)
   })
 
   it.each([
@@ -60,67 +63,95 @@ describe('敏感位置拦截（按路径）', () => {
 })
 
 /**
- * userData 整个是拒绝的，`skills/` 是两个口子之一 —— 用户自己的 skill 就存在那儿
- * （`capabilities/skills.ts` 的搜索路径第一位）。不开这个口子，
- * `ue-skill-creator` 写不进去，还会照着「换一个目录」的提示把 skill
- * 写到一个永远不会被加载的地方。
+ * userData 只挡里面的凭据，不再整个挡。agent 要能读自己的日志、MCP 配置、对话记录 ——
+ * 排查「刚才那一步为什么失败」时最该看的就是这些。
  */
-describe('userData 里的 skills 例外', () => {
+describe('userData：只挡凭据', () => {
   it.each([
-    'C:/Users/me/AppData/Roaming/unreal-box/skills',
+    'C:/Users/me/AppData/Roaming/unreal-box/logs/main.log',
+    'C:/Users/me/AppData/Roaming/unreal-box/mcp.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/agent-v3-sessions/s.jsonl',
+    'C:/Users/me/AppData/Roaming/unreal-box/chat-history/chat-messages.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/app-settings.json',
     'C:/Users/me/AppData/Roaming/unreal-box/skills/my-skill/SKILL.md',
     'C:\\Users\\me\\AppData\\Roaming\\unreal-box\\skills\\my-skill\\references\\wiring.md',
-    '/Users/me/Library/Application Support/unreal-box/skills/my-skill/SKILL.md',
+    'C:/Users/me/AppData/Roaming/unreal-box/team/abc/立项书.md',
+    '/Users/me/Library/Application Support/unreal-box/logs/main.log',
     '/home/me/.config/unreal-box/skills/my-skill/scripts/check.py'
-  ])('放行 %s', (p) => expect(isDenied(p)).toBe(false))
-
-  /**
-   * 例外是按子串匹配的，而 `…/skills/../ai-provider-secrets.bin` 这个**字符串**
-   * 含有 `/unreal-box/skills/`。不先把 `..` 折叠掉，这个口子会亲手把密钥放出去。
-   */
-  it.each([
-    'C:/Users/me/AppData/Roaming/unreal-box/skills/../ai-provider-secrets.bin',
-    'C:\\Users\\me\\AppData\\Roaming\\unreal-box\\skills\\..\\chat-history\\db.sqlite',
-    'C:/Users/me/AppData/Roaming/unreal-box/skills/x/../../agent-v3-sessions/s.jsonl'
-  ])('`..` 跳出 skills 之后照样挡住：%s', (p) => expect(isDenied(p)).toBe(true))
+  ])('读：放行 %s', (p) => expect(isDenied(p)).toBe(false))
 
   it.each([
     'C:/Users/me/AppData/Roaming/unreal-box/ai-provider-secrets.bin',
-    'C:/Users/me/AppData/Roaming/unreal-box/app-settings.json',
-    // 前缀撞上不算 —— 例外认的是 `skills/` 这一整段
-    'C:/Users/me/AppData/Roaming/unreal-box/skills-backup/secrets.txt'
-  ])('userData 里的其余位置一律照旧挡住：%s', (p) => expect(isDenied(p)).toBe(true))
+    'C:/Users/me/AppData/Roaming/unreal-box/catalog-library-secrets.bin',
+    'C:/Users/me/AppData/Roaming/unreal-box/network-credentials/nas.enc',
+    'C:/Users/me/AppData/Roaming/unreal-box/mcp-server.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/Cookies',
+    'C:/Users/me/AppData/Roaming/unreal-box/Network/Cookies',
+    'C:/Users/me/AppData/Roaming/unreal-box/Local Storage/leveldb/000003.log',
+    'C:/Users/me/AppData/Roaming/unreal-box/Partitions/agent-browser/Cookies',
+    '/Users/me/Library/Application Support/unreal-box/ai-provider-secrets.bin',
+    '/home/me/.config/unreal-box/network-credentials/x.enc'
+  ])('读写都挡：%s', (p) => {
+    expect(isDenied(p)).toBe(true)
+    expect(isDenied(p, 'write')).toBe(true)
+  })
 
   /**
-   * `team/` 是工作室模式的共享工作区（见 `core/team/teamStore.ts`）。
-   * 盒子自己的团队账（名册、任务板、队员对话）在 `agent-v3-sessions/<会话>.team/`，照旧挡着。
+   * 规则按 userData 根之后的完整一段认，而 `…/skills/../ai-provider-secrets.bin` 这个
+   * **字符串**里密钥文件并不紧跟在根后面。不先把 `..` 折叠掉就漏了。
    */
   it.each([
-    'C:/Users/me/AppData/Roaming/unreal-box/team/abc/立项书.md',
-    '/Users/me/Library/Application Support/unreal-box/team/abc/art/ref.png'
-  ])('放行团队工作区：%s', (p) => expect(isDenied(p)).toBe(false))
+    'C:/Users/me/AppData/Roaming/unreal-box/skills/../ai-provider-secrets.bin',
+    'C:\\Users\\me\\AppData\\Roaming\\unreal-box\\team\\x\\..\\..\\mcp-server.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/skills/x/../../database/app-data.db'
+  ])('`..` 跳回去照样挡住：%s', (p) => expect(isDenied(p)).toBe(true))
+
+  // 按完整一段认：名字前缀撞上的不算
+  it.each([
+    'C:/Users/me/AppData/Roaming/unreal-box/networks-notes.md',
+    'C:/Users/me/AppData/Roaming/unreal-box/database-export/a.csv',
+    'C:/Users/me/AppData/Roaming/unreal-box/skills/network/SKILL.md'
+  ])('前缀相近的放行：%s', (p) => expect(isDenied(p)).toBe(false))
+
+  /**
+   * 能读不能写：写进去等于 agent 绕过设置页给自己换权限，或者埋一条下次启动时
+   * 在审批门之外执行的命令。
+   */
+  it.each([
+    'C:/Users/me/AppData/Roaming/unreal-box/app-settings.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/models.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/mcp.json',
+    'C:/Users/me/AppData/Roaming/unreal-box/plugins/x/plugin.json'
+  ])('盒子自己的配置能读不能写：%s', (p) => {
+    expect(assertPathAllowed(p)).toBeUndefined()
+    expect(assertPathAllowed(p, 'write')).toMatch(/设置页/)
+  })
 
   it.each([
-    'C:/Users/me/AppData/Roaming/unreal-box/agent-v3-sessions/abc.team/roster.json',
-    'C:/Users/me/AppData/Roaming/unreal-box/team/../ai-provider-secrets.bin',
-    'C:/Users/me/AppData/Roaming/unreal-box/teams/x.txt'
-  ])('团队工作区以外照旧挡住：%s', (p) => expect(isDenied(p)).toBe(true))
+    'C:/Users/me/AppData/Roaming/unreal-box/skills/my-skill/SKILL.md',
+    'C:/Users/me/AppData/Roaming/unreal-box/team/abc/GDD.md',
+    'C:/Users/me/AppData/Roaming/unreal-box/logs/note.txt'
+  ])('其余位置可写：%s', (p) => expect(isDenied(p, 'write')).toBe(false))
 
-  // 例外只解除 userData 那三条，不解除别的 —— 否则在 skills 下摆一个
-  // `.ssh` 目录就能把整份清单绕过去
-  it('例外不为别的规则开门', () => {
-    expect(isDenied('C:/Users/me/AppData/Roaming/unreal-box/skills/x/.ssh/id_rsa')).toBe(true)
-  })
-
-  // 命令和 Python 那两条路没有例外：写 skill 用 write_local_file 就够了
-  it('命令和脚本里提到 skills 目录仍然拒绝', () => {
+  it('命令和脚本可以读日志、skills、MCP 配置', () => {
     expect(
       assertCommandAllowed('cat ~/AppData/Roaming/unreal-box/skills/my-skill/SKILL.md')
-    ).toBeDefined()
+    ).toBeUndefined()
     expect(
-      assertScriptAllowed("open('C:/Users/me/AppData/Roaming/unreal-box/skills/x/SKILL.md')")
-    ).toBeDefined()
+      assertCommandAllowed('tail -n 200 ~/AppData/Roaming/unreal-box/logs/main.log')
+    ).toBeUndefined()
+    expect(
+      assertScriptAllowed("open('C:/Users/me/AppData/Roaming/unreal-box/mcp.json').read()")
+    ).toBeUndefined()
   })
+
+  it.each([
+    'cat ~/AppData/Roaming/unreal-box/ai-provider-secrets.bin',
+    'cat "C:/Users/me/AppData/Roaming/unreal-box/mcp-server.json"',
+    'ls ~/AppData/Roaming/unreal-box/network-credentials',
+    'cp ~/AppData/Roaming/unreal-box/Local\\ Storage/leveldb/x /tmp',
+    'cat ~/AppData/Roaming/unreal-box/logs/../ai-provider-secrets.bin'
+  ])('命令里的凭据照样挡：%s', (c) => expect(assertCommandAllowed(c)).toBeDefined())
 })
 
 /**
@@ -140,15 +171,18 @@ describe('userData 里的保管库例外', () => {
   ])('放行 %s', (p) => expect(isDenied(p)).toBe(false))
 
   /**
-   * 开的是 `vaults/`，不是 `database/` 整层 —— 公共库和备份还在禁区里。
-   * 前缀撞上也不算：例外认的是 `database/vaults/` 这一整段。
+   * 开的是 `vaults/`，不是 `database/` 整层 —— 公共库（存着资产库访问码，可能是明文；
+   * 写坏了整个应用起不来）和备份读写都挡。前缀撞上也不算：例外认的是 `database/vaults/` 这一整段。
    */
   it.each([
     'C:/Users/me/AppData/Roaming/unreal-box/database/app-data.db',
     'C:/Users/me/AppData/Roaming/unreal-box/database/backups/app-data.2026.db',
     'C:/Users/me/AppData/Roaming/unreal-box/database/vaults-old/secrets.txt',
     'C:/Users/me/AppData/Roaming/unreal-box/network-credentials/keys.json'
-  ])('database 下的其余位置照旧挡住：%s', (p) => expect(isDenied(p)).toBe(true))
+  ])('database 下的其余位置照旧挡住：%s', (p) => {
+    expect(isDenied(p)).toBe(true)
+    expect(isDenied(p, 'write')).toBe(true)
+  })
 
   // 和 skills 一样：例外按子串匹配，`..` 不折叠的话这个口子会亲手把密钥放出去
   it.each([
@@ -156,10 +190,14 @@ describe('userData 里的保管库例外', () => {
     'C:\\Users\\me\\AppData\\Roaming\\unreal-box\\database\\vaults\\x\\..\\..\\app-data.db'
   ])('`..` 跳出保管库之后照样挡住：%s', (p) => expect(isDenied(p)).toBe(true))
 
-  it('例外不为别的规则开门', () => {
-    expect(isDenied('C:/Users/me/AppData/Roaming/unreal-box/database/vaults/v1/.ssh/id_rsa')).toBe(
-      true
-    )
+  // 主目录下的凭据只认主目录：素材库里一个叫 `.ssh` 的文件夹不是用户的私钥；
+  // 但从素材库 `..` 跳回主目录的照样挡
+  it('例外不为别的规则开门：跳回主目录的凭据照样挡', () => {
+    expect(
+      isDenied(
+        'C:/Users/me/AppData/Roaming/unreal-box/database/vaults/v1/../../../../../../.ssh/id_rsa'
+      )
+    ).toBe(true)
   })
 
   it('命令和脚本允许处理保管库素材', () => {
@@ -201,9 +239,8 @@ describe('userData 里的保管库例外', () => {
 
   it.each([
     'cat ~/AppData/Roaming/unreal-box/team/../ai-provider-secrets.bin',
-    'cat ~/AppData/Roaming/unreal-box/teams/x.txt',
-    'cat ~/AppData/Roaming/unreal-box/agent-v3-sessions/abc.team/roster.json'
-  ])('团队工作区以外照旧挡住：%s', (source) => {
+    'cat ~/AppData/Roaming/unreal-box/database/app-data.db'
+  ])('从团队工作区跳出去碰凭据照旧挡住：%s', (source) => {
     expect(assertCommandAllowed(source)).toBeDefined()
   })
 
@@ -211,7 +248,7 @@ describe('userData 里的保管库例外', () => {
     'cat ~/AppData/Roaming/unreal-box/ai-provider-secrets.bin',
     'cat ~/AppData/Roaming/unreal-box/database/app-data.db',
     'cat ~/.ssh/id_rsa',
-    'cat ~/AppData/Roaming/unreal-box/database/vaults/v1/.aws/credentials',
+    'cat ~/.aws/credentials',
     'cat ~/AppData/Roaming/unreal-box/database/vaults-old/a.png',
     'cat ~/AppData/Roaming/unreal-box/database/vaults中文/a.png',
     'cat ~/AppData/Roaming/unreal-box/database/vaults.old/a.png',
@@ -328,13 +365,9 @@ describe('已知的边界（故意不挡）', () => {
     expect(assertCommandAllowed('S=ssh; cat ~/.$S/id_rsa')).toBeUndefined()
   })
 
-  /**
-   * 反过来的代价：宁可误挡。命令里**提到**敏感位置就够了，
-   * 哪怕只是写在提交信息里。这个方向的错是可以接受的 ——
-   * 误挡一次模型换条路走，漏放一次是用户的私钥进了上下文。
-   */
-  it('宁可误挡 —— 只是提到也会被拦', () => {
-    expect(assertCommandAllowed('git commit -m "fix .netrc parsing"')).toBeDefined()
+  // 引号里的相对写法不挡 —— 那正是提交信息的样子，挡它误伤的比防住的多
+  it('先 cd 到主目录、再用引号包起来的相对路径挡不住', () => {
+    expect(assertCommandAllowed('cd ~ && cat ".ssh/id_rsa"')).toBeUndefined()
   })
 
   // 但别误挡得太离谱：只是前缀撞上不算（`.awesome` 不含 `.aws`）
@@ -350,5 +383,62 @@ describe('命令归一化', () => {
 
   it('路径里不可能出现的字符一律变成分隔符', () => {
     expect(normalizeCommand('a|b;c(d)')).toBe('a/b/c/d/')
+  })
+})
+
+/**
+ * 主目录下的凭据只在主目录下才算。原先按子串匹配，工程自己的 `.npmrc`、
+ * 提交信息里提到 `.netrc` 都被当成凭据拒掉。
+ */
+describe('主目录凭据只认主目录', () => {
+  it.each([
+    'D:/Projects/MyTool/.npmrc',
+    'C:/Users/me/Projects/web/.npmrc',
+    '/home/me/repo/deploy/.kube/values.yaml',
+    'D:/MyGame/.docker/config.json'
+  ])('工程里的同名文件放行：%s', (p) => expect(isDenied(p)).toBe(false))
+
+  it.each([
+    'C:/Users/me/.npmrc',
+    'C:/Users/me/.kube/config',
+    '/Users/me/.netrc',
+    '/root/.ssh/authorized_keys',
+    '~/.ssh/id_rsa',
+    '$HOME/.aws/credentials',
+    '%USERPROFILE%\\.ssh\\id_rsa',
+    // 本地文件工具的工作目录就是主目录，相对路径落在主目录下
+    '.ssh/id_rsa',
+    '.netrc'
+  ])('主目录下的凭据挡住：%s', (p) => expect(isDenied(p)).toBe(true))
+
+  it('本机实际的主目录也认', async () => {
+    const { homedir } = await import('os')
+    expect(isDenied(`${homedir()}/.ssh/id_rsa`)).toBe(true)
+  })
+
+  it.each([
+    'git commit -m "fix .netrc parsing"',
+    "git commit -m 'handle .npmrc in workspaces'",
+    'cat D:/Projects/MyTool/.npmrc',
+    'cd D:/Projects/MyTool && cat .npmrc',
+    'cd /d D:\\Projects\\MyTool && type .npmrc',
+    'kubectl apply -f deploy/.kube/values.yaml',
+    'npm config get registry --userconfig ./project/.npmrc'
+  ])('命令里的误伤放行：%s', (c) => expect(assertCommandAllowed(c)).toBeUndefined())
+
+  it.each([
+    'cat ~/.netrc',
+    'cat $HOME/.npmrc',
+    'type %USERPROFILE%\\.npmrc',
+    'type C:\\Users\\me\\.aws\\credentials',
+    'cat /c/Users/me/.kube/config',
+    'cat .netrc',
+    'cd ~ && cat .npmrc',
+    'cd ~/ ; cat ./.ssh/id_rsa'
+  ])('命令里主目录下的凭据照样挡：%s', (c) => expect(assertCommandAllowed(c)).toBeDefined())
+
+  it('脚本里主目录下的凭据照样挡，工程里的同名文件放行', () => {
+    expect(assertScriptAllowed("open(os.path.expanduser('~/.npmrc')).read()")).toBeDefined()
+    expect(assertScriptAllowed("open('D:/MyGame/Tools/.npmrc').read()")).toBeUndefined()
   })
 })

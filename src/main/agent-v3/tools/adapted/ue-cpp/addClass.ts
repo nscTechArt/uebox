@@ -1,17 +1,22 @@
 /**
  * `cpp_add_class` —— 新建一个 C++ 类。
  *
- * ## 为什么必须走引擎的 AddCodeToProject，不能自己写文件
+ * ## 产出和编辑器「新建 C++ 类」逐字相同，但不走它那条路
  *
- * 那一个函数里做完了：类名合法性校验、按父类挑模板、写 .h/.cpp、必要时补 Build.cs、
- * 源码管理 mark-for-add、以及触发一次编译。自己拼模板会漏掉后三项，
- * 而且产出和用户在编辑器里点「新建 C++ 类」得到的东西不一样 ——
- * 「AI 建的类」和「引擎建的类」长得不同，这本身就是 bug 的来源。
+ * 引擎那条路（`GameProjectUtils::AddCodeToProject`）在真实工程上不返回：里面有一步
+ * 同步扫全部源码给 IDE 用，编辑器停在「正在添加代码到项目…… 14%」。插件现在照抄它的
+ * 「生成」那一半 —— 同一份引擎类模板、同一套占位符、同样的 API 宏和 .uproject 依赖登记 ——
+ * 只写文件，**不编译**。细节在插件 `UAL_CppCommands.cpp` 的 cpp.add_class 那段。
  *
- * ## 纯蓝图工程会被拒
+ * 所以这个工具的回执要把下一步讲死：填实现 → `cpp_compile`。纯蓝图工程的第一个类会顺带
+ * 建出工程主模块，那个模块编辑器当场加载不了，下一步是 `cpp_full_rebuild`。
  *
- * 引擎那条路在工程原先没有 C++ 时会弹模态对话框，而命令跑在游戏线程上，
- * 弹出来就是编辑器和调用一起卡死。插件侧硬拦（比引擎保守，理由写在那边）。
+ * ## 为什么不让模型直接写 .h/.cpp 顶替
+ *
+ * 模型凭记忆写的类和引擎模板差在细节上：`.generated.h` 的位置、`<MODULE>_API` 宏
+ * 该不该带（Private 下的不带）、老式 PCH 工程要不要先 include 模块头、父类所在模块
+ * 要不要登记依赖。每一处差了都是一次编译失败，而且是模型最难读懂的那种 UHT 报错。
+ * 有了这个工具，「自己写文件建类」就没有理由存在了 —— 不是禁止，是没必要。
  */
 
 import { z } from 'zod'
@@ -20,76 +25,108 @@ import { defineUeTool } from '../../defineUeTool'
 import type { UnrealAgentTool } from '../../defineTool'
 
 export interface CppAddClassResponse {
-  result?: 'Succeeded' | 'InvalidInput' | 'FailedToAddCode' | 'FailedToHotReload' | 'Unknown'
+  result?: 'Succeeded'
+  /** 带前缀的最终类名，如 ASurvivorDirector */
+  class_name?: string
+  /** 接口类才有：实现方要继承的那个 I 类 */
+  interface_name?: string
+  /** 调用方给的名字带了前缀、被剥掉时才有，原样带回 */
+  requested_name?: string
   module?: string
   header_path?: string
   cpp_path?: string
-  /** 引擎有没有顺手把新类编进来了。为 false 说明还要自己调一次 cpp_compile */
+  /** 插件写完后从磁盘读回的 —— 不是回显 */
+  header_exists?: boolean
+  cpp_exists?: boolean
+  created_files?: string[]
+  /** 新登记进 .uproject AdditionalDependencies 的模块 */
+  dependencies_added?: string[]
+  /** 纯蓝图工程的第一个类：顺带建了工程主模块（Build.cs / Target.cs / 模块 .h/.cpp） */
+  created_primary_module?: boolean
+  marked_for_add?: boolean
+  /** 新插件恒为 false：建类不再顺带编译 */
   reloaded?: boolean
-  fail_reason?: string
+  warnings?: string[]
 }
 
 const InputSchema = z.object({
-  name: z
-    .string()
-    .describe('新类的名字，**不要带 U/A/F 前缀**（引擎会按父类自动加）。例如 TurretActor'),
+  name: z.string().min(1).describe('类名，不带 U/A/F 前缀，如 SurvivorDirector'),
   parent_class: z
     .string()
     .optional()
     .describe(
-      '父类，如 Actor / ActorComponent / UserWidget / SceneComponent，' +
-        '带不带 U/A 前缀都认，也可以给完整路径。' +
-        '**留空表示建一个不继承 UObject 的普通 C++ 类**（纯工具类才这么用）'
+      '父类如 Actor / ActorComponent / UserWidget；Interface = 接口；SlateWidget；留空 = 普通类'
     ),
-  module: z
-    .string()
-    .optional()
-    .describe('放进哪个模块。留空用工程的主模块。不确定有哪些模块先调 cpp_list_modules'),
+  module: z.string().optional().describe('留空 = 工程主模块'),
   location: z
     .enum(['default', 'public', 'private'])
     .optional()
     .default('default')
-    .describe(
-      '放在模块的哪一层。default = 模块根目录（引擎对游戏模块的默认行为，绝大多数情况用这个）；' +
-        'public = 要被别的模块 include 的类；private = 只在本模块内用'
-    )
+    .describe('public = 要被别的模块 include')
 })
 
-/**
- * 引擎的 FailedToHotReload 是「代码加成功了，只是没能热加载」—— 部分完成，不是没建成。
- * 抛成错误会让模型以为什么都没发生，转头再建一次，撞「文件已存在」或建出第二个类
- */
-function nothingCreated(response: CppAddClassResponse): boolean {
-  return response.result !== 'Succeeded' && response.result !== 'FailedToHotReload'
-}
-
 function summarize(response: CppAddClassResponse): string {
-  if (response.result !== 'Succeeded') {
-    return [
-      response.result === 'FailedToHotReload'
-        ? '⚠️ 部分完成：类文件已写出，但没能编进编辑器（FailedToHotReload）'
-        : `✗ 建类失败（${response.result ?? '未知原因'}）`,
-      response.fail_reason || '引擎没有给出原因。',
-      response.result === 'FailedToHotReload'
-        ? '注意：**文件可能已经写出去了**，只是没能编进来。先去看一眼那两个文件在不在，别重复创建。'
-        : ''
-    ]
-      .filter(Boolean)
-      .join('\n')
+  const className = response.class_name ?? '新类'
+  const lines: string[] = []
+
+  // 状态以插件从磁盘读回的为准；读回说文件不在，就不能开口说建好了
+  const missing = [
+    response.header_exists === false ? response.header_path : undefined,
+    response.cpp_exists === false ? response.cpp_path : undefined
+  ].filter(Boolean)
+  if (missing.length > 0) {
+    lines.push(
+      `⚠️ 插件报告写完了，但读回时找不到：${missing.join('、')}。先去看一眼，别直接往下写。`
+    )
+  } else {
+    lines.push(`✓ 已在模块 ${response.module} 里创建 ${className}：`)
+  }
+  lines.push(`  ${response.header_path}`, `  ${response.cpp_path}`)
+
+  if (response.interface_name) {
+    lines.push(
+      `这是虚幻接口：要实现它的类继承 ${response.interface_name}，接口函数声明在 ${response.interface_name} 里。`
+    )
+  }
+  if (response.requested_name) {
+    lines.push(
+      `（传入的 ${response.requested_name} 已经带了前缀，没有再加一层，类名就是 ${className}）`
+    )
   }
 
-  const lines = [
-    `✓ 已在模块 ${response.module} 里创建：`,
-    `  ${response.header_path}`,
-    `  ${response.cpp_path}`
-  ]
+  if (response.created_primary_module) {
+    const extra = (response.created_files ?? []).filter(
+      (f) => f !== response.header_path && f !== response.cpp_path
+    )
+    lines.push(
+      '',
+      '这是工程的第一个 C++ 类，已经和编辑器一样顺带建好了工程主模块：',
+      ...extra.map((f) => `  ${f}`),
+      '**新模块正在跑的编辑器加载不了**，cpp_compile 编不进来。' +
+        '下一步：先 read_local_file 看生成的文件、把实现填完，再调 cpp_full_rebuild ——' +
+        '它会替用户关掉编辑器、完整编译、再打开工程并重连。'
+    )
+  } else {
+    lines.push(
+      '',
+      '**还没有编译。** 下一步：read_local_file 看一眼生成的文件，把实现填完，然后调 cpp_compile。' +
+        '编进来之前，编辑器里（蓝图父类列表、内容浏览器）还看不到这个类。'
+    )
+  }
 
+  if (response.dependencies_added?.length) {
+    lines.push(
+      `已把 ${response.dependencies_added.join('、')} 登记进 .uproject 的模块依赖（父类在这些模块里）。`
+    )
+  }
+  for (const warning of response.warnings ?? []) {
+    lines.push(`⚠️ ${warning}`)
+  }
+  // 跳过了引擎给 IDE 刷新工程文件那一步（就是它会卡死）。只影响用户在 VS 里看不看得见新文件
   lines.push(
-    response.reloaded
-      ? '引擎已经顺手编译并加载了它，现在就能用。'
-      : '**还没有编译。** 填完实现之后调 cpp_compile。'
+    '（Visual Studio / Rider 的解决方案里暂时看不到新文件，不影响编译；用户要在 IDE 里打开时，' +
+      '在编辑器里点 工具 > 刷新 Visual Studio 项目 即可。用户没问就不用提。）'
   )
-  lines.push('接下来先 read_local_file 看一眼引擎生成了什么，再往里加实现。')
 
   return lines.join('\n')
 }
@@ -99,30 +136,16 @@ export function createCppAddClassTool(): UnrealAgentTool<CppAddClassResponse> {
     name: 'cpp_add_class',
     namespace: 'ue.cpp',
     method: 'cpp.add_class',
-    // 往用户的源码树里写文件，而且可能顺带触发一次编译
-    risk: 'destructive',
+    // 只新建文件、从不覆盖（重名直接拒绝），偶尔往 .uproject 补一条依赖。不编译
+    risk: 'mutating',
     concurrency: 'sequential',
-    // 引擎在 Live Coding 开着时会顺手编一次，那一下可能要几分钟
-    timeoutMs: 10 * 60 * 1000,
+    timeoutMs: 60_000,
     input: InputSchema,
     description:
-      '在虚幻工程里新建一个 C++ 类（和编辑器里「工具 > 新建 C++ 类」是同一套逻辑）。\n\n' +
-      '【什么时候用】要加一个新的 Actor、Component、Subsystem、UObject 之类的时候。\n' +
-      '【不要自己写文件来建类】引擎这条路会同时处理类名校验、模板、Build.cs、' +
-      '源码管理登记和编译 —— 自己写会漏掉这些，产出也和引擎建的不一样。\n' +
-      '【纯蓝图工程会被拒】那种工程加第一个 C++ 类必须用户手动做一次，我做不了。\n' +
-      '【建完还要做什么】返回里会说有没有顺手编译。没编就填完实现后调 cpp_compile。',
-    /*
-     * 没建成就标 isError。正文第一个字已经是 ✗，但不标的话宿主和熔断器都当它成功了：
-     * 模型拿着同一组参数反复重建，一次都不会被拦。和 cpp_compile 不同，这里的入参
-     * 就是类名，重试同一组参数本来就该被拦 —— 没有「改完代码再调同一个调用」的正常路径。
-     * ToolFailure 的消息就是这段正文，引擎给的原因不会丢。
-     * FailedToHotReload 不算：文件已经写出去了，见 nothingCreated。
-     */
-    toOutcome: (response) => ({
-      text: summarize(response),
-      details: response,
-      ...(nothingCreated(response) ? { isError: true } : {})
-    })
+      '新建 C++ 类，和编辑器「新建 C++ 类」同一套引擎模板，纯蓝图工程也能用。' +
+      '**建类就用它，别让用户去编辑器里点，也别 write_local_file 自己拼。**只写文件不编译，下一步见回执。',
+    // 失败（类名不合法、重名、父类不可继承、模板读不到）插件走 4xx/5xx 带原话，
+    // callUe 直接抛 —— 同一组参数重试会被熔断器拦下，这正是想要的
+    toOutcome: (response) => ({ text: summarize(response), details: response })
   })
 }

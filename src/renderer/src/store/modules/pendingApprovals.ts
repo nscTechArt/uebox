@@ -19,6 +19,8 @@ export interface PendingApproval {
   args: unknown
   /** false 时界面不给「本对话内都允许」，见 `core/approval.ts` */
   allowAlways: boolean
+  /** true 时界面给「以后都允许」，见 `core/approval.ts`。没给按 false */
+  allowForever?: boolean
 }
 
 /**

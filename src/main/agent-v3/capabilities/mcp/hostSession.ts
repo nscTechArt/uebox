@@ -18,7 +18,8 @@
  *     照常注册。真正拦不拦由客户端按工具注解决定（见 `McpServerHost`）。
  *   - **`ask_user` 走 MCP elicitation**，客户端声明支持才给。
  *   - **`task` 没有父对话可继承**：外部客户端的对话不在盒子里，子任务只拿到 prompt。
- *     它用的是盒子里配置的模型。
+ *     默认用盒子里配置的模型；配了不止一个时多一个 `model` 参数，调用方可以点名
+ *     （名单和工作室招人那份是同一份）。
  *   - **没有 `set_session_project` / `voice_report`**：前者改的是盒子侧边栏里
  *     某条对话的归属，外部会话没有那条对话；后者要有人在听语音。
  *   - **工具搜索不折叠**：MCP 的工具清单一次给全，等同盒子的全量模式。
@@ -39,6 +40,12 @@ import {
   type SessionContext
 } from '../../core/createAgent'
 import { EDITOR_SCREENSHOT_DEFAULT } from '../../core/editorScreenshotScope'
+import {
+  canChooseModels,
+  describeCandidates,
+  loadTeamModels,
+  pickModel
+} from '../../core/team/teamModels'
 import { isShellAvailable } from '../../tools/builtin/localShell'
 import { createTaskTool } from '../../tools/builtin/task'
 import type { UnrealAgentTool } from '../../tools/defineTool'
@@ -90,10 +97,11 @@ function connectedProject(): SessionContext['project'] {
  */
 export async function setupMcpSession(request: McpSessionRequest): Promise<McpSessionSetup> {
   const settings = appSettingsManager.getSettings()
-  const [shellAvailable, userInstructions, mcp] = await Promise.all([
+  const [shellAvailable, userInstructions, mcp, models] = await Promise.all([
     isShellAvailable(),
     readUserInstructions(),
-    ensureConnected()
+    ensureConnected(),
+    loadTeamModels()
   ])
   const skillLearning = 'ask'
   const skills = applySkillLearningMode(await discoverEnabledSkills(), skillLearning)
@@ -101,6 +109,9 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
 
   const ctx: SessionContext = {
     sessionId: request.sessionId,
+    // 子任务（task）照盒子助手用 agent 那一档。不写的话按默认角色落到对话模型上 ——
+    // 真机上外部派的子任务一直跑在对话模型上，那家额度用完就整路 429
+    modelRequest: { role: 'agent', agentType: 'agent-v3' },
     // 工具一律按「引擎连着」装：外部调用每次都可以点名工程，连没连上要到调用时才知道
     ueConnected: true,
     shellAvailable,
@@ -125,7 +136,15 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
   const taskTool = createTaskTool({
     // 外部客户端的对话不在盒子里，没有可继承的上下文
     getParentMessages: () => [],
-    runSubAgent: async (input) => runSubAgent(ctx, input)
+    runSubAgent: async (input) => runSubAgent(ctx, input),
+    ...(canChooseModels(models)
+      ? {
+          models: {
+            catalog: describeCandidates(models),
+            resolve: (key: string) => pickModel(models, key)
+          }
+        }
+      : {})
   }) as unknown as UnrealAgentTool<never>
 
   const tools = resolveAgentTools(ctx, skills, taskTool)

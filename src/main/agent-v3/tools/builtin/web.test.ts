@@ -20,6 +20,12 @@ vi.mock('../../../services/webReader', () => ({
   readWebPageLocally: (...args: unknown[]) => read(...args)
 }))
 
+// 「允许浏览器访问局域网」开关。替掉真实读法：那条路会懒加载 appSettingsManager
+const localNetwork = vi.hoisted(() => ({ allowed: false }))
+vi.mock('./localNetworkSetting', () => ({
+  browserLocalNetworkAllowed: async () => localNetwork.allowed
+}))
+
 const { createWebTools } = await import('./web')
 
 function toolNamed(name: string): ReturnType<typeof createWebTools>[number] {
@@ -34,6 +40,7 @@ function run(name: string, args: unknown): Promise<unknown> {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localNetwork.allowed = false
   search.mockResolvedValue({
     success: true,
     provider: 'jina',
@@ -181,6 +188,23 @@ describe('web_read', () => {
   ])('拒绝本机、内网和危险协议：%s', async (url) => {
     await expect(run('web_read', { url })).rejects.toThrow('NAVIGATION_BLOCKED')
     expect(read).not.toHaveBeenCalled()
+  })
+
+  // 用户在设置里开了「允许浏览器访问局域网」：本机开发服务器能读，元数据地址照旧不行
+  it('开关打开后放行本机和局域网，云元数据地址照旧拒绝', async () => {
+    localNetwork.allowed = true
+    read.mockResolvedValue({
+      success: true,
+      title: 'Dev',
+      url: 'http://localhost:5173/',
+      content: '本地页面'
+    })
+
+    await expect(run('web_read', { url: 'http://localhost:5173/' })).resolves.toBeDefined()
+    expect(read).toHaveBeenCalledTimes(1)
+    await expect(
+      run('web_read', { url: 'http://169.254.169.254/latest/meta-data/' })
+    ).rejects.toThrow('NAVIGATION_BLOCKED')
   })
 
   it('正文超长时截断，并说明还有多少', async () => {

@@ -183,10 +183,12 @@ function currentScope(): AgentFileAccessScope {
   try {
     return appSettingsManager.getAgentFileAccessScope()
   } catch {
-    // 设置整个读不出来（不是「没选过」，是抛异常）时仍然按收窄的那一档走。
-    // 这是兜底不是默认：窄了用户当场看到一句写明原因的拒绝，自己就能放开；
-    // 宽了他什么都看不到。默认档是 `full`，由 appSettingsManager 决定
-    return 'ue-only'
+    // 设置整个读不出来（抛异常）时退回默认档 `full`，和「没选过」「值不认识」同一个兜底
+    // （见 appSettingsManager.getAgentFileAccessScope）。原先这里退到 `ue-only`：
+    // 用户从没收窄过，却因为一次读设置失败被挡在自己的素材目录外面，而他在设置页里
+    // 看到的明明是「整台电脑」—— 界面和实际生效的对不上，比宽一点更糟。
+    // 凭据目录不靠这一层，`pathBoundary` 在任何一档下都挡着。
+    return 'full'
   }
 }
 

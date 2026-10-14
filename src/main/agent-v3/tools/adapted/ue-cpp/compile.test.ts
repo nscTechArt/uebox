@@ -146,7 +146,8 @@ describe('cpp_compile', () => {
     })
 
     expect(text).toContain('读不到')
-    expect(text).toContain('关掉 Live Coding')
+    // 出路是盒子自己能做的完整重编，不是让用户去改编辑器设置
+    expect(text).toContain('cpp_full_rebuild')
     // 没有任何编造出来的文件位置
     expect(text).not.toMatch(/\.cpp:\d+/)
   })

@@ -350,6 +350,8 @@ export default {
       command: '启动命令',
       url: '服务地址',
       disabled: '停用',
+      trusted: '信任此服务器',
+      trustedHint: '开启后，「帮我批准」模式下调用它的工具不再逐次确认；「请求批准」模式仍会确认。',
       env: '环境变量',
       // 示例写成通用形状。原来照抄 BLENDER_PATH，和上面 blender 那条真配置
       // 长得一样，新行看起来就像「已经复制了一份」
@@ -524,7 +526,10 @@ export default {
       models: '模型',
       import: '导入模型…',
       importing: '导入中…',
-      addModel: '+ 添加模型'
+      addModel: '+ 添加模型',
+      // 目录里新出、这条服务商还没有的预置模型
+      addCatalogModel: '+ 添加新模型 {name}',
+      addCatalogModels: '+ 添加新模型 {name} 等 {count} 个'
     },
     apiKey: {
       placeholder: '填写密钥、环境变量名或 !命令',
@@ -2293,6 +2298,7 @@ export default {
         blueprint_add_component: '添加蓝图组件',
         blueprint_set_property: '修改蓝图属性',
         blueprint_create_function: '新建蓝图函数',
+        blueprint_create_event_graph: '新建蓝图事件图',
         blueprint_add_variable: '新建蓝图变量',
         blueprint_remove_variable: '删除蓝图变量',
         blueprint_set_variable_meta: '修改蓝图变量设置',
@@ -2348,6 +2354,8 @@ export default {
         // 编辑器
         ue_save: '保存',
         ue_set_config: '修改编辑器设置',
+        ue_input_add_mapping: '添加输入映射',
+        sequence_rebind: '修改序列绑定',
         ue_collect_garbage: '清理内存',
         ue_playtest: '运行试玩',
         ue_restart_editor: '重启编辑器',
@@ -2764,6 +2772,7 @@ export default {
         ue_undo_history: '查看撤销历史',
         ue_inject_input: '模拟输入',
         ue_input_map: '查看输入映射',
+        ue_input_add_mapping: '添加输入映射',
         blueprint_describe: '查看蓝图',
         blueprint_get_graph: '读取蓝图图表',
         blueprint_search_nodes: '搜索蓝图节点',
@@ -2780,6 +2789,7 @@ export default {
         cpp_list_modules: '查看 C++ 模块',
         cpp_add_class: '新建 C++ 类',
         cpp_compile: '编译 C++',
+        cpp_full_rebuild: '完整重编 C++',
         anim_preview: '预览动画'
       },
       /** 主对话页的步骤组：两段正文之间那一行摘要，和点开后的每一步 */
@@ -2917,6 +2927,8 @@ export default {
       confirm: '确认执行',
       reject: '拒绝',
       allowForChat: '本对话内均允许',
+      allowForever: '以后均允许',
+      allowForeverHint: '所有对话中不再询问此操作。可在「设置 → AI 助手」中移除。',
       whatIsThis: '这是什么？',
       // 并行执行时可能同时有好几条在等，答完这条会接着弹下一条
       queued: '还有 {count} 项待确认',
@@ -3020,6 +3032,7 @@ export default {
       ai: 'AI 助手',
       personalization: '个性化',
       models: '模型',
+      team: '团队',
       mcp: 'MCP',
       skills: '技能',
       experience: '经验库',
@@ -3038,6 +3051,43 @@ export default {
     // AI 设置
     models: {
       title: '模型'
+    },
+    team: {
+      title: '团队',
+      description: '团队模式中各模型的检测结论与任务记录',
+      empty: '使用 /team 后，各模型的检测结论与任务记录将显示在此处。',
+      note: '仅列出检测过或参与过任务的模型。打回指用户在任务板上重开的任务。',
+      col: {
+        model: '模型',
+        checkup: '检测',
+        tasks: '任务',
+        reopened: '打回',
+        unfinished: '未完成',
+        lastUsed: '最近使用',
+        role: '岗位',
+        avgTime: '平均耗时'
+      },
+      passed: '通过',
+      failed: '未通过',
+      notChecked: '未检测',
+      notCheckedHint: '尚未检测',
+      removed: '已移除',
+      removedHint: '该模型已从模型设置中移除，记录保留，不再参与组队。',
+      reachOk: '连通正常',
+      reachFail: '连通失败：{reason}',
+      toolsOk: '工具调用正常',
+      toolsFail: '工具调用失败：两次要求调用工具均未调用',
+      visionOk: '识图正常',
+      visionFail: '识图失败',
+      checkedAt: '{when}检测',
+      recheck: '重新检测',
+      checking: '检测中…',
+      recheckFailed: '检测失败，请稍后重试',
+      uncategorized: '未分类',
+      noTasks: '尚无任务记录',
+      underMinute: '不到 1 分钟',
+      minutes: '{n} 分钟',
+      hours: '{n} 小时'
     },
     ai: {
       title: 'AI 助手',
@@ -3067,6 +3117,16 @@ export default {
       persistentAutoResume: '自动断点续传',
       persistentAutoResumeDesc:
         '中转服务不稳定时，每 60 秒自动从断点继续，连续失败 30 分钟后停止。失败的重试不保留在对话中。',
+      assetReadonlyLock: '修改资产时设为只读',
+      assetReadonlyLockDesc:
+        'AI 修改资产期间，将对应的 .uasset 文件设为只读，防止编辑器中的保存覆盖其改动。开启后，这些资产在编辑器中暂时无法保存。',
+      browserAllowLocalNetwork: '允许浏览器访问局域网',
+      browserAllowLocalNetworkDesc:
+        '允许 Agent 浏览器打开本机与局域网地址（如 localhost、192.168.x.x），用于查看本地开发服务器。网页中的链接也将能访问这些地址。',
+      alwaysAllowedTools: '已设为始终允许的操作',
+      alwaysAllowedToolsDesc: '以下操作在所有对话中均不再请求确认。只读对话不受影响。',
+      alwaysAllowedRemove: '移除',
+      alwaysAllowedRemoveLabel: '移除「{name}」的始终允许',
       goalMaxRounds: '目标模式最大轮数',
       goalMaxRoundsDesc:
         '使用 /goal 时，复核未通过则继续修改，达到此轮数仍未完成则停止并交由用户处理。每轮额外进行一次复核，可能编译蓝图、运行 PIE。下一条消息起生效，范围 1–50。',

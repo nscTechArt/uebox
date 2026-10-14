@@ -509,7 +509,7 @@ function describeCapturedWindow(
     // 老插件不认 window：点了名却没回选窗信息，说明拍的是默认那扇，不能装作点名生效了
     return requestedWindow
       ? `⚠️ 当前插件版本不支持 window 参数，「${requestedWindow}」被忽略了，拍的是插件默认选的窗口，` +
-          `不一定是它。请用户更新 UnrealAgentLink 插件。\n`
+          `不一定是它。要点名拍窗口，先用 project_update_plugin 更新插件。\n`
       : ''
   }
   const title = response.window_title ? `「${response.window_title}」` : '（标题未知）'

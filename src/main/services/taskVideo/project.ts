@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { assertPathAllowed } from '../../agent-v3/tools/builtin/pathBoundary'
 import { retryMediaFile } from './files'
+import { fileNameFor } from '../../ipc/chatSessionFiles'
 
 export interface VideoContextEntry {
   index: number
@@ -83,10 +84,25 @@ export async function loadConversationVideoMessages(
           '当前 Agent 尚未对应到唯一的已保存对话记录，将使用可用的 Agent 记录；早期内容可能仅剩摘要。'
       }
     }
+    const chatId = matches[0].id
+    // 一个对话一个文件（见 ipc/chatSessionFiles.ts）；还没迁移的老数据在单文件里
+    try {
+      const own = JSON.parse(
+        await fs.readFile(
+          path.join(userData, 'chat-history', 'sessions', fileNameFor(chatId)),
+          'utf8'
+        )
+      ) as { messages?: unknown }
+      return {
+        messages: conversationMessages({ messagesBySid: { [chatId]: own.messages } }, chatId)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
     const saved = JSON.parse(
       await fs.readFile(path.join(userData, 'chat-history', 'chat-messages.json'), 'utf8')
     )
-    return { messages: conversationMessages(saved, matches[0].id) }
+    return { messages: conversationMessages(saved, chatId) }
   } catch (error) {
     return {
       messages: [],

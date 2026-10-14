@@ -26,6 +26,7 @@ import {
   PhRobot,
   PhSquaresFour,
   PhToolbox,
+  PhUsersThree,
   PhVideoCamera
 } from '@phosphor-icons/vue'
 
@@ -103,6 +104,12 @@ const menuGroups: MenuGroup[] = [
         key: 'models',
         labelKey: 'profile.menu.models',
         icon: PhPlugs
+      },
+      {
+        key: 'team',
+        labelKey: 'profile.menu.team',
+        // 团队模式里各模型的档案，紧挨着配模型的那一页
+        icon: PhUsersThree
       },
       {
         key: 'skills',

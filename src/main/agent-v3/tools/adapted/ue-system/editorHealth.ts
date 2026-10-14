@@ -9,6 +9,7 @@ import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
 import { fetchEditorHealth } from '../../../../services/editorHealth'
 import type { EditorHealthItem, EditorHealthItemId } from '../../../../../shared/editorHealth'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 export const EDITOR_HEALTH_TOOL_NAME = 'ue_editor_health'
 
@@ -70,8 +71,7 @@ export function createEditorHealthTool(): V2Tool {
       if (result.status === 'plugin_outdated') {
         return {
           success: false,
-          error:
-            '当前工程里的 UnrealAgentLink 插件版本太旧，还没有状态监控。请用户在盒子里更新插件后重启编辑器。'
+          error: '当前工程里的 UnrealAgentLink 插件版本太旧，还没有状态监控。' + PLUGIN_UPDATE_HINT
         }
       }
       if (result.status === 'error') return { success: false, error: result.error }

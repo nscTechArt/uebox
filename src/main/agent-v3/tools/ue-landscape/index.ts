@@ -382,7 +382,7 @@ const landscapeSetupRvt = defineUeTool<typeof SetupRvtSchema, LandscapeSetupRvtR
 （已有指向这张 RVT 的体积就复用，只重算边界）。能 Ctrl+Z 撤销。
 
 RVT 要五件事同时成立才有效果，**少一件引擎不报错，只是黑一块**。这个工具做其中三件，另外两件只检查不改：
-- 项目设置里的虚拟纹理开关：改了要重启编辑器、影响整个项目，由用户决定
+- 项目设置里的虚拟纹理开关：影响整个项目、改了要重启编辑器，问过用户再用 ue_set_config + ue_restart_editor
 - 地形材质里的 Runtime Virtual Texture Output 节点：用材质工具去加
 回执末尾会列出还没对上的项。`,
   input: SetupRvtSchema,

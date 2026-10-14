@@ -84,6 +84,9 @@ describe('project_manage 的 enable_plugins', () => {
     })
     expect(result.success).toBe(false)
     expect(String(result.error)).toContain('KawaiiPhysics')
+    // 免费开源插件不是只能用户自己装：经同意可以装进工程 Plugins 目录再调；Fab / 付费的才交给用户
+    expect(String(result.error)).toContain('Plugins 目录')
+    expect(String(result.error)).toContain('Fab')
     expect(await pluginsOnDisk()).toEqual([{ Name: 'UnrealAgentLink', Enabled: true }])
   })
 

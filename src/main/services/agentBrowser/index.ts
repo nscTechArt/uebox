@@ -28,8 +28,12 @@ import {
   type PageAgentResult,
   type PageScanResult
 } from './pageScan'
-import { checkNavigationUrl, checkResolvedAddresses } from './urlPolicy'
+import { checkNavigationUrl, checkResolvedAddresses, setLocalNetworkPolicy } from './urlPolicy'
 import { loadBrowserGroup, saveBrowserGroup, saveBrowserUrl } from './sessionState'
+
+// 地址校验每次现读「允许浏览器访问局域网」（设置 → AI）。注册在这里而不是 urlPolicy
+// 里：那个模块保持纯函数、不碰设置，才能把每个分支单测到
+setLocalNetworkPolicy(() => appSettingsManager.getAgentBrowserAllowLocalNetwork())
 
 /**
  * Agent 浏览器。

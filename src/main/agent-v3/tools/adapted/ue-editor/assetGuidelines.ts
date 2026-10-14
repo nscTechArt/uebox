@@ -18,6 +18,7 @@ import { z } from 'zod'
 
 import { defineTool, type ToolOutcome } from '../../defineTool'
 import { callUe, callUeRaw } from '../../defineUeTool'
+import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
 
 // ────────────────────────────────────────────────────────────────────────────
 // 插件回包
@@ -128,7 +129,7 @@ function describePlugin(p: GuidelinePlugin): string {
     case 'missing':
       return `插件 ${name} 没开`
     case 'not_installed':
-      return `插件 ${name} 本机没装，只能用户自己装`
+      return `插件 ${name} 本机没装。Fab / 付费插件请用户自己装；免费开源的可经用户同意拷进工程 Plugins 目录`
     case 'pending_restart':
       return `插件 ${name} 已在工程里开启，重启编辑器后生效`
     default:
@@ -302,8 +303,9 @@ function translateOldPlugin(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes('Unknown method')) {
     throw new Error(
-      '这个工程里装的虚幻盒子插件太旧，还不会检查「资产指南」。更新插件后重启编辑器再试；' +
-        '在那之前可以让用户在编辑器弹框里点「启用缺失」，效果相同。'
+      '这个工程里装的虚幻盒子插件太旧，还不会检查「资产指南」。' +
+        PLUGIN_UPDATE_HINT +
+        '更新完再试；也可以让用户在编辑器弹框里点「启用缺失」，效果相同。'
     )
   }
   throw error
@@ -326,7 +328,13 @@ async function enablePlugin(
 ): Promise<PluginEnableResult> {
   const base = { name: p.name, friendly_name: p.friendly_name }
   if (p.status === 'not_installed') {
-    return { ...base, ok: false, error: '本机没装这个插件，只能用户自己装（Fab 或插件作者）' }
+    return {
+      ...base,
+      ok: false,
+      error:
+        '本机没装这个插件。Fab / 付费插件请用户自己装；免费开源的可经用户同意用 run_shell_command ' +
+        '拷进工程 Plugins 目录，再调一次'
+    }
   }
   try {
     const res = await callUeRaw<{

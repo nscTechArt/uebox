@@ -388,14 +388,13 @@ export function createSequenceRenderTool(): UnrealAgentTool<RenderDetails> {
   return defineTool<typeof InputSchema, RenderDetails>({
     name: 'sequence_render',
     namespace: NAMESPACE,
+    // 只写新的输出文件，不动工程内容；占机器时间这件事靠描述里「用户要了才渲」管
     risk: 'mutating',
-    // 每次渲染都要用户当场点头：参数每次不同，而参数本身就是代价（几小时、几十 GB）
-    requiresExplicitApproval: true,
     concurrency: 'sequential',
     description: `用 Movie Render Queue（MRQ）把一条 Level Sequence 渲成文件：序列帧（PNG / JPG / EXR / BMP），或者先出 PNG 再用 FFmpeg 合成 MP4。这是**引擎真实渲染**，不是 AI 生图。
 
 【什么时候用】
-用户说「出片」「渲染序列」「用 MRQ 渲」「出序列帧」「出 EXR 给合成」「渲个视频」。
+用户说「出片」「渲染序列」「用 MRQ 渲」「出序列帧」「出 EXR 给合成」「渲个视频」。用户没要就不要主动开渲。
 
 【调之前】
 1. 先跑 \`sequence_audit\`，FAIL 就先修 —— 黑屏、缺相机切轨的序列渲出来也是废片

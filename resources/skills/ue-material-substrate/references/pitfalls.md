@@ -54,7 +54,8 @@ Error text as the engine prints it (`%s` = a node or asset name).
   extra closure.
 - **Glints show "(Disabled)" on the pin.** `r.Substrate.Glints` is off (the default from
   5.7, turned on by the Windows platform config). It is a project setting and needs a
-  shader recompile, so leave it to the user.
+  shader recompile, so ask first. If the user agrees, set it with `ue_set_config` (Engine,
+  `/Script/Engine.RendererSettings`, `r.Substrate.Glints=1`) and restart the editor with `ue_restart_editor`.
 - **A UI or post-process material renders as a lit surface.** A Slab is at the root. Use
   `SubstrateUI` / `SubstratePostProcess`.
 - **Edits to BaseColor etc. do nothing.** Look at `material_get_graph`: wires marked as not

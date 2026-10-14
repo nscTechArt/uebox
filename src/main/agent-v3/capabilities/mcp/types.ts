@@ -47,6 +47,13 @@ export type McpServerConfig = (StdioServerConfig | HttpServerConfig) & {
    * `describe_toolset` 降级，真正干活的 `call_tool` 不降。
    */
   readOnlyTools?: string[]
+  /**
+   * 用户信任这个 server：它的工具（`readOnlyTools` 之外的）按 `mutating` 算，不是 `destructive`。
+   *
+   * 默认 false。打开后默认的「帮我批准」档不再逐次弹窗，「请求批准」档照样问。
+   * 这是用户在设置里对**这一个** server 明确做的选择，不看 server 自报的任何提示。
+   */
+  trusted?: boolean
 }
 
 /** `mcp.json` 的完整结构 */
@@ -91,6 +98,7 @@ export function isHttpConfig(config: McpServerConfig): config is HttpServerConfi
   disabled?: boolean
   allowedTools?: string[]
   readOnlyTools?: string[]
+  trusted?: boolean
 } {
   return (config as HttpServerConfig).type === 'http'
 }
