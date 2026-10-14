@@ -80,3 +80,78 @@ export interface MeshDescribeResponse {
   }
   morph_targets?: string[]
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// mesh.optimize
+// ────────────────────────────────────────────────────────────────────────────
+
+/** 一级 LOD 的事实：面数读的是重建后的渲染数据，来源和减面比例读 SourceModel */
+export interface MeshOptimizeLod {
+  index: number
+  triangles?: number
+  screen_size?: number
+  source?: 'imported' | 'generated'
+  /** 仅生成的级：保留 LOD0 面数的百分比（引擎里存的值，不是请求） */
+  reduction_percent?: number
+}
+
+/** 简单碰撞按类型的个数。complexity 为 complex_as_simple 时简单碰撞不参与查询 */
+export interface MeshCollisionFacts {
+  box?: number
+  sphere?: number
+  capsule?: number
+  convex?: number
+  total?: number
+  complexity?: string
+}
+
+export interface MeshOptimizeLodsResult {
+  ok: boolean
+  /** 拒绝或失败的原因（导入的 LOD、级数不对……） */
+  reason?: string
+  requested_count?: number
+  before?: MeshOptimizeLod[]
+  after?: MeshOptimizeLod[]
+  /** 自动屏占比开没开；关着时新级取上一级的一半 */
+  auto_screen_size?: boolean
+  /** keep_imported 时原样保留的级数（含 LOD0） */
+  kept_imported?: number
+  /** replace_imported 时被换掉的导入级下标（换之前读的）。不可逆，回执必须点名 */
+  replaced_imported?: number[]
+  /** 网格开着 Nanite：这些 LOD 只在不走 Nanite 的路径上用 */
+  nanite?: boolean
+}
+
+export type MeshCollisionType = 'box' | 'sphere' | 'capsule' | 'convex'
+
+export interface MeshOptimizeCollisionResult {
+  ok: boolean
+  reason?: string
+  type?: MeshCollisionType
+  /** 生成前删掉了原有的简单碰撞 */
+  replaced?: boolean
+  before?: MeshCollisionFacts
+  after?: MeshCollisionFacts
+}
+
+/**
+ * `mesh.optimize` 的响应。与 `UAL_MeshCommands.cpp` 的 `Handle_Optimize` 一一对应。
+ * 两项各自成败；`failed_count` 在顶层，全部失败时插件回 `ok:false` + `error`。
+ */
+export interface MeshOptimizeResponse {
+  ok?: boolean
+  path?: string
+  name?: string
+  nanite?: boolean
+  succeeded_count?: number
+  failed_count?: number
+  /** 网格有没有被动过（拒绝的项不算） */
+  changed?: boolean
+  saved?: boolean
+  save_error?: string
+  dirty?: boolean
+  reopened_editor?: boolean
+  lods?: MeshOptimizeLodsResult
+  collision?: MeshOptimizeCollisionResult
+  error?: string
+}

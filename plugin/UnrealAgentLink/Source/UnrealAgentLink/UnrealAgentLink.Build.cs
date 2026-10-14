@@ -144,7 +144,13 @@ public class UnrealAgentLink : ModuleRules
 				// 状态监控的本地缓存命中率（UAL_EditorHealth）：GatherDerivedDataCacheSummaryStats。
 				// 引擎内建模块（Engine/Source/Developer/DerivedDataCache），5.0–5.8 都在，
 				// 不是插件；那个函数 5.3 才有，5.0–5.2 在 .cpp 里按版本编掉
-				"DerivedDataCache"
+				"DerivedDataCache",
+
+				// 网格优化（UAL_MeshCommands 的 mesh.optimize）：UStaticMeshEditorSubsystem 的
+				// 加简单碰撞 / 删碰撞 / 凸包分解。引擎本体编辑器模块（Engine/Source/Editor/
+				// StaticMeshEditor），5.0–5.8 都在、不是插件；用到的三个函数签名九版逐个 grep 过一致。
+				// 头文件里带进来的 EditorSubsystem / StaticMeshDescription 由 UnrealEd 公开依赖传递
+				"StaticMeshEditor"
 
 				// GameplayTags / GameplayTagsEditor 两个依赖**故意不加**。
 				//

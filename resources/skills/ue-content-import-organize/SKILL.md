@@ -68,7 +68,7 @@ errors) before calling an import clean; if the reply has no such field (older pl
 | Real-world size | `bounds.size` (cm) | a chair 0.9 cm or 9000 cm tall | re-import with `scale` |
 | Up axis | which `bounds` axis is longest | a door lying flat (Z smallest) | fix in the DCC, re-export |
 | Pivot | origin line (centred / on base / at corner) | floor prop pivoting from its middle | DCC (`blender-ue-pipeline`) — do not compensate on every actor |
-| Collision | ⚠️ no collision / primitive count | player walks through it | generate collision (`ue-geometry-editing`) |
+| Collision | ⚠️ no collision / primitive count | player walks through it | `mesh_optimize` `collision` (box for crates, convex for concave shapes) |
 | Lightmap UV | ⚠️ invalid lightmap index | dark blotches after a lighting build | only matters with baked lighting; Lumen-only projects can skip |
 | Nanite / LODs | `nanite`, per-LOD source and triangles | dense non-Nanite mesh with one LOD | see below |
 | Materials | every slot has a material | Legacy Phong parent, empty slots | see _Third-party packs_ |
@@ -77,7 +77,8 @@ errors) before calling an import clean; if the reply has no such field (older pl
 lighting-build warnings, not here. Nanite: opaque, dense static meshes on a desktop/console
 project should have it on (`ue_content_set_properties`, `"NaniteSettings.bEnabled": true`) —
 then judge cost by Nanite, not by the raw triangle count. Translucent
-materials and mobile targets keep classic LODs; add auto LODs before anyone decimates LOD0.
+materials and mobile targets keep classic LODs; add auto LODs (`mesh_optimize` `lods`) before anyone
+decimates LOD0.
 Skeletal meshes: confirm `skeleton` is the one the user's animations use and that a physics
 asset exists.
 

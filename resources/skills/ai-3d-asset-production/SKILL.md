@@ -38,7 +38,8 @@ AI 这一环确实做不到时才补位 —— 不是反过来。
 | 四视图 / 转身图 | `generate_image` + `reference_images` + 明确保留项 | 图生 3D 的原生输入形态，逐张核对一致性 |
 | 颜色贴图、法线参考、材质纹理 | `generate_image` | 贴图本来就是二维问题 |
 | 底模、blockout | `generate_3d_model` | 比脚本堆基本体强一个量级 |
-| 减面、补洞、焊点、布尔、UV 投影、生成碰撞 | `ue_run_python_script` 走 Geometry Script | 不出引擎，链路最短 |
+| 减面、补洞、焊点、布尔、UV 投影 | `ue_run_python_script` 走 Geometry Script | 不出引擎，链路最短 |
+| 自动 LOD、生成碰撞（盒 / 凸包分解） | `mesh_optimize` | 引擎网格编辑器同一套实现，回执带前后读回值 |
 | 改造型、改拓扑、加结构细节、雕刻 | Blender | 引擎里没有对应能力 |
 | 从零做**简单**模型（箱体、管件、旋转体、规则构件） | Blender | 参数化几步就到位，比生成更可控 |
 | 从零手搓**复杂有机**造型 | 默认不做 | 见下面「已知会失败的做法」 |
@@ -77,7 +78,7 @@ AI 这一环确实做不到时才补位 —— 不是反过来。
      才需要有效的光照贴图 UV；只用 Lumen 的项目不查这条。
    - **Nanite**：不透明、面数偏高的静态道具，项目开着 Nanite 就开上（`ue_content_set_properties`，
      `{"NaniteSettings.bEnabled": true}`，回执带读回值），这时面数预算不再是开销的尺子；
-     半透明材质或移动端项目不开，超预算先考虑自动 LOD，再考虑减面（`ue-geometry-editing`）。
+     半透明材质或移动端项目不开，超预算先考虑自动 LOD（`mesh_optimize`），再考虑减面（`ue-geometry-editing`）。
 
 ## Constraints
 

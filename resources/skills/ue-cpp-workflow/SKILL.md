@@ -37,7 +37,8 @@ cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑�
 | 构造函数里改默认值 | `cpp_full_rebuild` |
 
 后两类热补丁靠不住：可能报成功但旧的类布局、旧默认值还在，也可能过一会儿崩。
-返回里的 `needs_full_rebuild` 只看 `.Build.cs` / `.uproject`，**不看头文件**，这一步得你自己判断。
+返回里的 `needs_full_rebuild` 只看 `.Build.cs` / `.uproject`。头文件另有 `reflected_headers_changed`：
+上次编译后改过的反射头文件清单。它只说改了哪些文件，改的是不是上表那几类，要你对照自己的改动判断。
 用户不想关编辑器时可以先 `cpp_compile`，但编过之后必须在 PIE 里确认，不对就 `cpp_full_rebuild`。
 
 ### 改签名、改名、删成员之前：先查谁在用

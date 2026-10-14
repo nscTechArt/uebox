@@ -347,7 +347,9 @@ describe('真实工具库检索回归', () => {
     ['网页搜索', 'web_search'],
     // 真机上模型没搜、直接写了 Python（2026-10-13 反馈）；钉住这条搜得到
     ['新建增强输入动作', 'ue_input_add_mapping'],
-    ['灯光阴影普查', 'ue_light_census']
+    ['灯光阴影普查', 'ue_light_census'],
+    // 以前技能让模型写 Python 的 set_convex_decomposition_collisions；现在要搜得到工具
+    ['凸包分解生成碰撞', 'mesh_optimize']
   ])('%s 应能加载 %s', async (query, expected) => {
     expect(
       catalog.some((tool) => tool.name === expected),
@@ -376,6 +378,35 @@ describe('真实工具库检索回归', () => {
     )!
     await loader.execute('skill', { name: 'ue-project-audit' })
     expect(search.getTools().map((tool) => tool.name)).toContain('ue_light_census')
+  })
+
+  /*
+   * mesh_optimize 和 mesh_describe 同属 ue.mesh 命名空间，但 ue.mesh 是整组常驻的，
+   * 常驻预算（上面那条 30,000）已经满了 —— 跟着整组走就会把那条线顶破。
+   * 所以它单成按需子组，由几何编辑技能（和导入整理技能）点名带上。
+   */
+  it('mesh_optimize 自成按需子组，由几何编辑技能带上', async () => {
+    const optimize = catalog.find((tool) => tool.name === 'mesh_optimize')!
+    expect(optimize).toBeDefined()
+    expect(optimize.unrealBox.namespace).toBe('ue.mesh')
+    expect(toolSearchGroup(optimize)).toBe('ue.mesh.optimize')
+    expect(RESIDENT_TOOL_GROUPS.has('ue.mesh.optimize')).toBe(false)
+    expect(residentNames().has('mesh_optimize')).toBe(false)
+    // mesh_describe 仍然整组常驻，没被一起拆走
+    expect(residentNames().has('mesh_describe')).toBe(true)
+    expect(groupDomainTerms('ue.mesh.optimize')).toContain('凸包')
+
+    for (const name of ['ue-geometry-editing', 'ue-content-import-organize']) {
+      const search = createToolSearch(catalog, () => catalog)
+      const loader = createSkillTools(skills, 'off', search.loadFromSkill).find(
+        (tool) => tool.name === 'load_skill'
+      )!
+      await loader.execute('skill', { name })
+      expect(
+        search.getTools().map((tool) => tool.name),
+        `${name} 加载后应带上 mesh_optimize`
+      ).toContain('mesh_optimize')
+    }
   })
 
   it('泛称本地文件搜索时至少提供文件名查找或文件内容搜索', async () => {

@@ -30,6 +30,11 @@ export interface CppCompileResponse {
   /** Live Coding 失败时插件读回来的 UBT Log.txt（只取这次编译开始之后写的） */
   build_log?: string
   build_log_path?: string
+  /**
+   * 比上次编译产物新、带反射标记的头文件（相对 Source/，最多 20 个）。开编之前算的。
+   * 只是事实：插件判断不了 Live Coding 这次补没补全，那取决于改了什么、引擎版本和设置
+   */
+  reflected_headers_changed?: string[]
 }
 
 /** 冷编译能到几分钟，默认的 30 秒必然超时。插件端自己 15 分钟兜底，这里留点余量 */
@@ -136,6 +141,18 @@ function summarize(response: CppCompileResponse): string {
           '并调用新模块的 API，22 秒编过且生效，不用关编辑器）。所以不要因为这条提示就让用户关编辑器。',
         '但「在 .uproject 里加新模块」「改目标设置」超出热重载的能力范围，那类改动用 cpp_full_rebuild。' +
           '拿不准就验证一下新依赖那部分的行为，别只看「编译成功」。'
+      )
+    }
+  }
+
+  const headers = response.reflected_headers_changed ?? []
+  if (headers.length > 0 && response.result !== 'NotStarted') {
+    lines.push('', `上次编译之后改过的反射头文件（带 GENERATED_BODY）：${headers.join('、')}。`)
+    if (response.path === 'livecoding') {
+      // 只给条件，不下结论：改的是函数体以外的东西才需要完整重编，这一点只有模型知道
+      lines.push(
+        '如果改的是 UPROPERTY / UFUNCTION 的增删、成员布局、父类或构造函数默认值，Live Coding ' +
+          '补不全，编译成功也不代表生效：调 cpp_full_rebuild。只改了注释或内联函数体就不用。'
       )
     }
   }

@@ -6,7 +6,8 @@ description: Edits mesh geometry itself inside Unreal using Geometry Script - bo
 # Geometry editing (Geometry Script)
 
 改几何本身通过 `ue_run_python_script` 调 Geometry Script。只改网格的设置（开关 Nanite、
-碰撞复杂度、LOD 组）用 `ue_content_set_properties`，不写 Python。
+碰撞复杂度、LOD 组）用 `ue_content_set_properties`；自动生成 LOD、生成简单碰撞
+（盒 / 球 / 胶囊 / 凸包分解）用 `mesh_optimize`。这两类都不写 Python。
 
 ## Quick start
 
@@ -40,12 +41,13 @@ output_data = {'geometry_scripting_available': hasattr(unreal, 'GeometryScript_M
 2. **开 Nanite**：静态网格、材质不透明时首选。几何一点不改，随时能关。
    半透明材质不走 Nanite；遮罩和 WPO 材质 5.0 不支持（5.1 起支持，但更贵）；
    目标平台不支持 Nanite（如移动端）时走第 3 步。
-3. **自动生成 LOD**：LOD0 原样保留，远处换低模。已有导入的 LOD 时这一步会把它们换掉，先问用户。
+3. **自动生成 LOD**：LOD0 原样保留，远处换低模。已有导入的 LOD 时 `mesh_optimize` 会拒绝，
+   先问用户：同意保留就传 `keep_imported: true` 只在后面追加；要换掉它们见下面「布尔之后」第 3 步。
 4. 只有用户明确要 LOD0 本身变少（导出给别的软件、移动端最高档、做碰撞代理），
    才在副本上减面，走下面的标准往返。
 
 第 2 步用 `ue_content_set_properties`，`{"NaniteSettings.bEnabled": true}`，回执带读回值；
-第 3 步的写法见 [references/api.md](references/api.md)「Nanite 与自动 LOD」。
+第 3 步用 `mesh_optimize`，`{"lods": {"count": 4}}`（默认逐级减半），回执给每级前后面数。
 它们改的是原资产本身，摆了它的每个关卡都跟着变：先用 `ue_content_dependencies`
 （`direction: "referencers"`）看有多少地方在用，告诉用户。
 做完用 `mesh_describe` 回读开关和每级面数，再 `ue_screenshot` 看近景有没有破形。
@@ -141,11 +143,14 @@ output_data = {'before': before, 'after': after, 'readback': readback,
 引擎自动生成的 LOD 会按新 LOD0 重建，导入的不会。布尔、平面切割之后，在副本上：
 
 1. `mesh_describe` 看碰撞图元和每级 LOD 的来源。
-2. 删掉旧的简单碰撞，按新几何重做（凸包分解，写法见 [references/api.md](references/api.md)
-   「布尔之后：碰撞与 LOD」）。凸包仍把洞封住时，用 `ue_content_set_properties` 把
-   `BodySetup.CollisionTraceFlag` 设成 `CTF_UseComplexAsSimple`（网格编辑器里的
-   「Use Complex Collision As Simple」）。
-3. 有导入的 LOD 就重新自动生成。
+2. 按新几何重做碰撞：`mesh_optimize`，`{"collision": {"type": "convex", "hull_count": 8}}`，
+   默认先删掉旧的简单碰撞。凸包仍把洞封住就加大 `hull_count`；还不行时用
+   `ue_content_set_properties` 把 `BodySetup.CollisionTraceFlag` 设成 `CTF_UseComplexAsSimple`
+   （网格编辑器里的「Use Complex Collision As Simple」）。
+3. 生成的 LOD 会按新 LOD0 自己重建；导入的 LOD 还是旧几何（走远一点洞就消失）。
+   告诉用户这几级要换掉、换掉就回不来，**用户明确同意之后**才用 `mesh_optimize`
+   `{"lods": {"count": 4, "replace_imported": true}}`，从 LOD1 起全部重建；
+   回执会点名换掉了哪几级。用户没表态就停在这里问，不替他决定。
 4. 回读确认，然后验证门洞真的能过：PIE 里让角色走过去（`ue_autoplay` 的 goal 模式把
    `reach_location` 设在洞的另一侧；它是实验性的，走不到先怀疑地形），或请用户走一趟。
    模型自己确认不了就照实说。
@@ -170,7 +175,7 @@ output_data = {'before': before, 'after': after, 'readback': readback,
 | 修退化面 | `GeometryScript_MeshRepair.repair_mesh_degenerate_geometry` |
 | 重算法线 | `GeometryScript_Normals.recompute_normals` |
 | 自动展 UV | `GeometryScript_UVs.auto_generate_x_atlas_mesh_uvs` |
-| 生成碰撞 | `GeometryScript_Collision.set_static_mesh_collision_from_mesh` |
+| 按自定义形状生成碰撞（盒 / 球 / 胶囊 / 凸包分解用 `mesh_optimize`） | `GeometryScript_Collision.set_static_mesh_collision_from_mesh` |
 | 读统计 | `GeometryScript_MeshQueries.get_mesh_info_string` / `get_is_closed_mesh` |
 | 存成新资产 | `GeometryScript_NewAssetUtils.create_new_static_mesh_asset_from_mesh` |
 

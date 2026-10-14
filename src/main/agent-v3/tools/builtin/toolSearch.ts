@@ -214,6 +214,8 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.sequencer': '过场 镜头 摄像机 时间轴 序列 sequencer camera cinematic timeline',
   'ue.pcg': '程序化 散布 植被 pcg procedural scatter foliage',
   'ue.mesh': '网格 几何 模型 mesh geometry model',
+  'ue.mesh.optimize':
+    '生成 自动 lod 减面 远处低模 碰撞 简单碰撞 凸包 凸包分解 盒体 胶囊 穿模 lod collision convex hull decomposition box capsule',
   'ue.cpp': '代码 编译 类 模块 c++ compile code module',
   'ue.input': '输入 按键 操作 映射 input action key mapping',
   'ue.input.edit': '加按键 绑定 键位 新建输入动作 改映射 add bind key mapping input action imc',
@@ -396,6 +398,9 @@ export function toolSearchGroup(tool: GroupedTool): string {
   if (tool.name === 'ue_input_add_mapping') return 'ue.input.edit'
   // 灯光普查只在排查渲染线程 / GPU 瓶颈时用；不跟 ue.level 整组走，项目体检技能会点名它
   if (tool.name === 'ue_light_census') return 'ue.level.lights'
+  // 生成 LOD / 碰撞是写操作、说明又长；ue.mesh 整组常驻而常驻预算已满，单拆按需加载。
+  // 几何编辑和导入整理两个技能会点名它
+  if (tool.name === 'mesh_optimize') return 'ue.mesh.optimize'
   if (tool.unrealBox.namespace === 'ue.content' && Object.hasOwn(UE_CONTENT_SUBGROUPS, tool.name))
     return UE_CONTENT_SUBGROUPS[tool.name]
   return tool.unrealBox.namespace

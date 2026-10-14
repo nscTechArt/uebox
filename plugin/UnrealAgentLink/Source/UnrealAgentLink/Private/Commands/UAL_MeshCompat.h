@@ -71,4 +71,28 @@ namespace UALMeshCompat
 		return Mesh->NaniteSettings.bEnabled != 0;
 #endif
 	}
+
+	/**
+	 * 「自动计算 LOD 屏占比」开没开（网格编辑器里的 Auto Compute LOD Distances）。
+	 *
+	 * 实测（grep 各版本 `Engine/Classes/Engine/StaticMesh.h`）：
+	 *   - `UStaticMesh::bAutoComputeLODScreenSize`     5.0–5.8 都是公开成员，
+	 *                                                  5.7 起标了 `UE_DEPRECATED`（将转私有）
+	 *   - `UStaticMesh::GetAutoComputeLODScreenSize()` 5.7 / 5.8 确认存在且 public
+	 *
+	 * 5.7+ 走访问器，之前直读成员 —— 那几个版本上它没被弃用。
+	 */
+	inline bool GetAutoComputeLODScreenSize(const UStaticMesh* Mesh)
+	{
+		if (!Mesh)
+		{
+			return false;
+		}
+
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+		return Mesh->GetAutoComputeLODScreenSize();
+#else
+		return Mesh->bAutoComputeLODScreenSize != 0;
+#endif
+	}
 }

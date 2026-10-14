@@ -1134,6 +1134,53 @@ bool BuildConfigNewerThanBinaries()
 	return NewestConfig > NewestBinary;
 }
 
+/**
+ * 比工程 Binaries 里最新的 .dll 还新、而且带反射标记（GENERATED_BODY 一类）的头文件。
+ *
+ * 只报事实，不下「必须完整重编」的结论：Live Coding 能不能补上反射改动，
+ * 随引擎版本和「Enable Reinstancing」设置变，判断永远对不了。但改没改头文件是能查准的 ——
+ * 改的要是 UPROPERTY / UFUNCTION 增删、成员布局、父类，模型拿着这份清单去对
+ * 技能里的分类表，比让它凭记忆猜「我刚才改没改过头文件」靠谱。
+ *
+ * 算在开编之前：编完产物就比头文件新了，那时再算什么都查不到。
+ */
+TArray<TSharedPtr<FJsonValue>> ReflectedHeadersNewerThanBinaries()
+{
+	TArray<TSharedPtr<FJsonValue>> Out;
+	IFileManager& FM = IFileManager::Get();
+
+	TArray<FString> Binaries;
+	FM.FindFilesRecursive(Binaries, *(FPaths::ProjectDir() / TEXT("Binaries")), TEXT("*.dll"), true, false);
+	FDateTime NewestBinary = FDateTime::MinValue();
+	for (const FString& File : Binaries)
+	{
+		const FDateTime Stamp = FM.GetTimeStamp(*File);
+		if (Stamp > NewestBinary) NewestBinary = Stamp;
+	}
+	if (NewestBinary == FDateTime::MinValue()) return Out;
+
+	TArray<FString> Headers;
+	FM.FindFilesRecursive(Headers, *FPaths::GameSourceDir(), TEXT("*.h"), true, false);
+	const FString SourceRoot = FPaths::ConvertRelativePathToFull(FPaths::GameSourceDir());
+	constexpr int32 MaxListed = 20;
+	for (const FString& Header : Headers)
+	{
+		if (FM.GetTimeStamp(*Header) <= NewestBinary) continue;
+		FString Text;
+		if (!FFileHelper::LoadFileToString(Text, *Header)) continue;
+		if (!Text.Contains(TEXT("GENERATED_BODY")) && !Text.Contains(TEXT("GENERATED_UCLASS_BODY"))
+			&& !Text.Contains(TEXT("GENERATED_USTRUCT_BODY")) && !Text.Contains(TEXT("GENERATED_UINTERFACE_BODY")))
+		{
+			continue;
+		}
+		FString Relative = FPaths::ConvertRelativePathToFull(Header);
+		FPaths::MakePathRelativeTo(Relative, *SourceRoot);
+		Out.Add(MakeShared<FJsonValueString>(Relative));
+		if (Out.Num() >= MaxListed) break;
+	}
+	return Out;
+}
+
 } // namespace
 
 void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
@@ -1178,11 +1225,12 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 	GJob->StartedAtUtc = FDateTime::UtcNow();
 
 	const bool bNeedsFullRebuild = BuildConfigNewerThanBinaries();
+	const TArray<TSharedPtr<FJsonValue>> ReflectedHeaders = ReflectedHeadersNewerThanBinaries();
 
 	// 超时兜底。轮询和委托都可能永远不到达（编辑器崩了、Live Coding 控制台被杀），
 	// 那时候必须说「不知道成没成」而不是让调用方挂到自己超时
 	GJob->Ticker = FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateLambda([bNeedsFullRebuild](float) -> bool
+		FTickerDelegate::CreateLambda([bNeedsFullRebuild, ReflectedHeaders](float) -> bool
 		{
 			if (!GJob) return false;
 
@@ -1260,6 +1308,7 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 			Data->SetStringField(TEXT("result"), Result);
 			Data->SetStringField(TEXT("output"), Output);
 			Data->SetBoolField(TEXT("needs_full_rebuild"), bNeedsFullRebuild);
+			Data->SetArrayField(TEXT("reflected_headers_changed"), ReflectedHeaders);
 
 			// 编不过（或没确认上）时把 UBT 日志带回去，解析在 TS 侧做，和热重载那条路一样
 			if (GJob->Path == TEXT("livecoding") && (Result == TEXT("Failure") || Result == TEXT("Unknown")))
@@ -1296,6 +1345,7 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 				TEXT("Live Coding 没能启动这次编译，一行都没编。多半是它的控制台进程起不来")
 				TEXT("（引擎设置里的 Live Coding 控制台路径不对，或者进程被杀了）。"));
 			Data->SetBoolField(TEXT("needs_full_rebuild"), bNeedsFullRebuild);
+			Data->SetArrayField(TEXT("reflected_headers_changed"), ReflectedHeaders);
 			RespondAndClear(Data);
 		}
 #endif
@@ -1309,7 +1359,7 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 	// 编辑器会整个转圈。异步这条路的完成事件还顺带把 UBT 的完整输出带回来。
 	IHotReloadInterface& Hr = FModuleManager::LoadModuleChecked<IHotReloadInterface>(TEXT("HotReload"));
 	GJob->CompilerFinished = Hr.OnModuleCompilerFinished().AddLambda(
-		[bNeedsFullRebuild](const FString& FinalOutput, ECompilationResult::Type CompileResult, bool)
+		[bNeedsFullRebuild, ReflectedHeaders](const FString& FinalOutput, ECompilationResult::Type CompileResult, bool)
 		{
 			if (!GJob || GJob->Path != TEXT("hotreload")) return;
 
@@ -1326,6 +1376,7 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 			Data->SetStringField(TEXT("output"), FinalOutput);
 			Data->SetNumberField(TEXT("compilation_result"), static_cast<int32>(CompileResult));
 			Data->SetBoolField(TEXT("needs_full_rebuild"), bNeedsFullRebuild);
+			Data->SetArrayField(TEXT("reflected_headers_changed"), ReflectedHeaders);
 			RespondAndClear(Data);
 		});
 
@@ -1369,6 +1420,7 @@ void FUAL_CppCommands::Handle_Compile(const TSharedPtr<FJsonObject>& Payload, co
 	Data->SetStringField(TEXT("reason"), Reason);
 	Data->SetNumberField(TEXT("compilation_result"), static_cast<int32>(Kick));
 	Data->SetBoolField(TEXT("needs_full_rebuild"), bNeedsFullRebuild);
+	Data->SetArrayField(TEXT("reflected_headers_changed"), ReflectedHeaders);
 	RespondAndClear(Data);
 }
 

@@ -48,6 +48,46 @@ beforeEach(() => {
 })
 
 describe('cpp_compile', () => {
+  /**
+   * Live Coding 补不全反射布局的改动，可编译照样报成功。插件判断不了这次改的是什么，
+   * 只报「哪些反射头文件改过」这个事实；条件交给模型对照自己的改动去判
+   */
+  it('Live Coding 路上列出改过的反射头文件，并给出要完整重编的条件', async () => {
+    const { text } = await run({
+      result: 'Success',
+      path: 'livecoding',
+      reflected_headers_changed: ['MyGame/Public/MyActor.h']
+    })
+
+    expect(text.startsWith('✓')).toBe(true)
+    expect(text).toContain('MyGame/Public/MyActor.h')
+    expect(text).toContain('cpp_full_rebuild')
+  })
+
+  it('热重载路只列事实，不提 Live Coding 的条件', async () => {
+    const { text } = await run({
+      result: 'Success',
+      path: 'hotreload',
+      reflected_headers_changed: ['MyGame/Public/MyActor.h']
+    })
+
+    expect(text).toContain('MyGame/Public/MyActor.h')
+    expect(text).not.toContain('Live Coding 补不全')
+  })
+
+  it('没改反射头文件、或编译没发起时一句不多说', async () => {
+    expect((await run({ result: 'Success', path: 'livecoding' })).text).not.toContain('反射头文件')
+    expect(
+      (
+        await run({
+          result: 'NotStarted',
+          path: 'livecoding',
+          reflected_headers_changed: ['MyGame/Public/MyActor.h']
+        })
+      ).text
+    ).not.toContain('反射头文件')
+  })
+
   it('同名函数编译冲突提示检查 Unity 合并顺序', async () => {
     const result = await run({
       result: 'Failed',
