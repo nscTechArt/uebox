@@ -28,7 +28,7 @@ watch(language, async (newLocale) => {
   )
 })
 
-const autoLaunch = ref(true)
+const autoLaunch = ref(false)
 /**
  * 通知三项。真相源在主进程（`appSettingsManager`）——判定发生在那边的
  * `services/agentNotifications`，渲染层这份只是给控件做双向绑定用的镜像。
