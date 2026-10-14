@@ -25,6 +25,7 @@ vi.mock('../../../core/projectTargetContext', () => ({ getTargetConnectionId: ()
 
 import { addChildTool } from './addChild'
 import { createWidgetTool } from './createWidget'
+import { makeVariableTool } from './makeVariable'
 import { setPropertyTool } from './setProperty'
 
 type Result = Record<string, unknown>
@@ -227,5 +228,94 @@ describe('widget_set_property', () => {
     })
 
     expect(r.message).toBe('Visibility 现在是 Collapsed')
+  })
+})
+
+describe('widget_make_variable', () => {
+  const run = runner(makeVariableTool())
+
+  it('改名后报引擎读回来的名字和改过来的图表引用数', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      widget_name: 'HPBar',
+      old_name: 'ProgressBar_0',
+      renamed: true,
+      is_variable: true,
+      graph_references_found: 3,
+      graph_references_renamed: 3,
+      graph_references_updated: true
+    })
+
+    const r = await run({
+      path: '/Game/UI/WBP_HUD',
+      widget_name: 'ProgressBar_0',
+      variable_name: 'HP Bar'
+    })
+
+    expect(Object.keys(r)[0]).toBe('message')
+    expect(firstLine(r)).toMatch(/^控件 "ProgressBar_0" 已改名为 "HPBar"/)
+    expect(String(r.message)).toContain('请求的是 "HP Bar"')
+    expect(String(r.message)).toContain('3 处引用')
+    expect(r.widget_name).toBe('HPBar')
+    expect(r.graph_references_updated).toBe(true)
+  })
+
+  it('有引用没跟着改时第一句就说部分完成，并列出是哪几个节点', async () => {
+    callRequest.mockResolvedValue({
+      failed_count: 1,
+      ok: true,
+      widget_name: 'HPBar',
+      old_name: 'ProgressBar_0',
+      renamed: true,
+      is_variable: true,
+      graph_references_found: 2,
+      graph_references_renamed: 1,
+      graph_references_updated: false,
+      stale_graph_references: ['EventGraph: Get ProgressBar_0']
+    })
+
+    const r = await run({
+      path: '/Game/UI/WBP_HUD',
+      widget_name: 'ProgressBar_0',
+      variable_name: 'HPBar'
+    })
+
+    expect(firstLine(r)).toMatch(/^⚠️ 部分完成/)
+    expect(firstLine(r)).toContain('1 处引用没跟着改')
+    expect(String(r.message)).toContain('- EventGraph: Get ProgressBar_0')
+    expect(r.graph_references_updated).toBe(false)
+    expect(r.stale_graph_references).toEqual(['EventGraph: Get ProgressBar_0'])
+  })
+
+  it('旧版插件只改对象名，不能当成引用也改好了', async () => {
+    callRequest.mockResolvedValue({ ok: true, widget_name: 'HPBar', is_variable: true })
+
+    const r = await run({
+      path: '/Game/UI/WBP_HUD',
+      widget_name: 'ProgressBar_0',
+      variable_name: 'HPBar'
+    })
+
+    expect(firstLine(r)).toMatch(/^⚠️/)
+    expect(String(r.message)).toContain('不改图表引用')
+    expect(r).not.toHaveProperty('graph_references_updated')
+  })
+
+  it('不改名时只说设成了变量', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      widget_name: 'Txt_Score',
+      old_name: 'Txt_Score',
+      renamed: false,
+      is_variable: true,
+      graph_references_found: 0,
+      graph_references_renamed: 0,
+      graph_references_updated: true
+    })
+
+    const r = await run({ path: '/Game/UI/WBP_HUD', widget_name: 'Txt_Score' })
+
+    expect(r.message).toBe('控件 "Txt_Score" 已设为蓝图变量')
+    expect(r.is_variable).toBe(true)
   })
 })

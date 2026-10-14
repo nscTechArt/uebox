@@ -144,7 +144,10 @@ A control is only reachable from the Widget Blueprint's graph if it is a variabl
 `widget_make_variable` does that; `widget_get_hierarchy` reports `is_variable` so you can check.
 
 Any control the game needs to update at runtime — a health bar's `Percent`, a score `TextBlock` —
-must be exposed. Values set with `widget_set_property` are just the design-time defaults;
+must be exposed. `variable_name` renames the control the way the editor does: nodes that get/set it
+and events bound to it follow the new name. A name already taken is refused — pick another. If the
+receipt says `graph_references_updated: false`, the nodes it lists still use the old name; fix those.
+Values set with `widget_set_property` are just the design-time defaults;
 they are what the user sees in the editor, not what the game will show.
 
 ## Reading the structure back
