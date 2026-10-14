@@ -757,6 +757,42 @@ describe('各家的官方适配器', () => {
     ])
   })
 
+  /**
+   * 官方 REST 回的就是 Interaction 本身，不包 `{ interaction }`，也没有 output_image
+   * （照 https://ai.google.dev/api/interactions-api 的示例）。图可能给 data，也可能给 uri
+   */
+  it('gemini-images：官方 REST 形状——顶层就是 Interaction，uri 也认', async () => {
+    useModel('gemini-images', 'gemini-3.1-flash-image')
+    const official = (image: Record<string, unknown>) => (): Response =>
+      new Response(
+        JSON.stringify({
+          object: 'interaction',
+          status: 'completed',
+          steps: [
+            {
+              type: 'model_output',
+              content: [{ type: 'image', mime_type: 'image/png', ...image }]
+            }
+          ]
+        }),
+        { headers: { 'content-type': 'application/json' } }
+      )
+
+    stubFetch(official({ data: 'QUJD' }))
+    expect(await generateImages({ prompt: 'x' })).toEqual([
+      { base64: 'QUJD', mediaType: 'image/png' }
+    ])
+
+    const respond = official({ uri: 'https://files.example/a.png' })
+    stubFetch((url) =>
+      url === 'https://files.example/a.png' ? new Response(Buffer.from('ABC')) : respond()
+    )
+    expect(await generateImages({ prompt: 'x' })).toEqual([
+      { base64: 'QUJD', mediaType: 'image/png' }
+    ])
+    expect(sent.map((request) => request.url)).toContain('https://files.example/a.png')
+  })
+
   /** 思考时画的草稿不是成品：要 1 张就该回 1 张 */
   it('gemini-images：thought 步里的草稿图不算出图', async () => {
     useModel('gemini-images', 'gemini-3.1-flash-image')
