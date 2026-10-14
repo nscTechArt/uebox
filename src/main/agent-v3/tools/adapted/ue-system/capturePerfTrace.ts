@@ -21,6 +21,7 @@ import { resolveEngineOutputPath } from './engineOutputPath'
 import { foregroundUnrealEditorWindow } from './foregroundEditorWindow'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
 import { assertFreshFile } from '../../assertFreshFile'
+import { listModified } from './consoleSettingLedger'
 
 const CapturePerfTraceSchema = z.object({
   duration_seconds: z
@@ -34,7 +35,14 @@ const CapturePerfTraceSchema = z.object({
     .boolean()
     .optional()
     .default(false)
-    .describe('是否同时记录 GPU 各 pass 耗时（有额外开销，默认关）。开了之后不会自动关回去')
+    .describe('是否同时记录 GPU 各 pass 耗时（有额外开销，默认关）。开了之后不会自动关回去'),
+  warmup_seconds: z
+    .number()
+    .optional()
+    .default(0)
+    .describe(
+      '开始记录前先等几秒，0–60，默认 0。用户刚进 PIE 时传 15–20，跳过流送和着色器编译那一段'
+    )
 })
 
 interface ColumnStats {
@@ -86,18 +94,26 @@ GameThreadTime / RenderThreadTime / GPUTime，回：
 - duration_seconds: 采样时长，默认 10，最长 120。数字越大越能捕捉到偶发尖峰，
   但用户也要等这么久
 - gpu_stats: 要不要顺便记 GPU 各 pass 耗时（有额外开销，默认不开）
+- warmup_seconds: 先等几秒再开始记，默认 0。刚进 PIE 时着色器还在编译、关卡还在流送，
+  那几秒的数字会难看得离谱，拿它当基线后面全错。等待时间不算进 duration_seconds
 
 【读结果时注意】
 - 和 ue_get_performance_stats 同一条纪律：\`idle_sample: true\` 说明采样期间编辑器
   视口根本没在渲染（后台/失焦降帧），这组数字不能用来下性能结论——让用户把编辑器
   置前、进 PIE，再采一次
 - 数据采自编辑器，不等于打包后的运行表现
+- \`modified_settings\` 出现时，说明有经 ue_run_console_command 改过、还没改回去的
+  cvar / ShowFlag，这组数字是在那些设置下测的——比较两次采样前先确认两边设置一致
 - \`csv_path\` 是完整原始数据，想用 Session Frontend 深挖可以直接打开这个文件`,
 
     inputSchema: CapturePerfTraceSchema,
 
-    execute: async ({ duration_seconds, gpu_stats }) => {
-      console.log('[CapturePerfTraceTool] 收到请求:', { duration_seconds, gpu_stats })
+    execute: async ({ duration_seconds, gpu_stats, warmup_seconds }) => {
+      console.log('[CapturePerfTraceTool] 收到请求:', {
+        duration_seconds,
+        gpu_stats,
+        warmup_seconds
+      })
 
       try {
         const wsService = serviceManager.getWebSocketService()
@@ -111,15 +127,22 @@ GameThreadTime / RenderThreadTime / GPUTime，回：
         // 采样前先尝试把编辑器窗口拉到前台，见文件头说明
         await foregroundUnrealEditorWindow('[CapturePerfTraceTool]')
 
+        // 预热在盒子这边等，不用插件配合：旧插件照样能用，也不用为一个参数发插件新版
+        const warmupMs = Math.min(Math.max(warmup_seconds ?? 0, 0), 60) * 1000
+        if (warmupMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, warmupMs))
+        }
+
         // 超时给采样时长留足余量：插件端还有一段结束宽限期，
         // 网络往返和引擎那边的调度也需要时间
         const timeoutMs = duration_seconds * 1000 + 60000
 
         const since = Date.now()
+        const connectionId = getTargetConnectionId()
         const response = await wsService.callRequest<CapturePerfTraceResponse>(
           'system.capture_perf_trace',
           { duration_seconds, gpu_stats },
-          getTargetConnectionId(),
+          connectionId,
           timeoutMs
         )
 
@@ -185,6 +208,14 @@ GameThreadTime / RenderThreadTime / GPUTime，回：
           message += '\n注：数据采自编辑器，不等于打包后的运行表现。'
         }
 
+        const modified = listModified(connectionId)
+        if (modified.length > 0) {
+          message +=
+            `\n这次是在 ${modified.length} 项被改过的设置下测的：` +
+            modified.map((m) => `${m.name}（原值 ${m.original}）`).join('，') +
+            '。和别的采样比较前先确认两边设置一致；排查结束调 ue_run_console_command 的 restore_all 改回去。'
+        }
+
         return {
           success: true,
           // 回落回去的那一份：相对路径给出去，用户和模型都打不开
@@ -199,6 +230,8 @@ GameThreadTime / RenderThreadTime / GPUTime，回：
           worst_frame: response.worst_frame,
           bottleneck: response.bottleneck,
           idle_sample: response.idle_sample,
+          ...(warmupMs > 0 ? { warmup_seconds: warmupMs / 1000 } : {}),
+          ...(modified.length > 0 ? { modified_settings: modified } : {}),
           message
         }
       } catch (error) {

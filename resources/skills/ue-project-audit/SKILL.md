@@ -89,7 +89,12 @@ mapped onto exactly which of our tools plays which role (and honest about the on
 reading the on-screen `stat gpu`/`stat game` overlay — that this toolset genuinely cannot do).
 
 Read it before telling a user "this is GPU-bound" or "this is a CPU problem" — that sentence
-should come with *why*, not just a verdict field echoed back.
+should come with *why*, not just a verdict field echoed back. Two parts of it are easy to skip
+and expensive to skip: §2 (a single capture is not a baseline — warm-up, noise, alternating
+runs; pass `warmup_seconds` right after entering PIE) and §6 (on a render-thread or GPU
+bottleneck, switch whole categories off with `ShowFlag.X 0` before touching any asset). Show
+flags and console variables survive across PIE sessions: finish every diagnosis with
+`ue_run_console_command({ restore_all: true })`, which puts back every value the tool changed.
 
 A structural diagnosis ("SM_Grass2 is 53% of the level's triangles and has Nanite off") is still
 an inference, not proof. When the user pushes back with "what's the *real* cause" or asks you to
@@ -192,7 +197,7 @@ Say this plainly rather than approximating it:
 - **Draw calls, shader complexity, overdraw** — the optimization viewmodes and `stat gpu` /
   `stat scenerendering` render to the viewport as a Slate overlay, and the agent cannot read it.
   `ue_screenshot` does not help here: its default path renders the scene directly (SceneCapture),
-  which never includes that overlay. See `references/performance-diagnosis.md` §8 for what to use
+  which never includes that overlay. See `references/performance-diagnosis.md` §10 for what to use
   instead (Insights timer ranking, or asset-structure clues) when the user needs this.
 - **Memory and asset-loading data from Insights** — `ue_insights_trace` (`analyze`) exports timer
   statistics per thread and nothing else. The engine has no command-line export for Memory

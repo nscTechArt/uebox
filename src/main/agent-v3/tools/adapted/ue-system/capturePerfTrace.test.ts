@@ -40,6 +40,7 @@ vi.mock('./foregroundEditorWindow', () => ({ foregroundUnrealEditorWindow }))
 
 import { createCapturePerfTraceTool } from './capturePerfTrace'
 import { assertFreshFile } from '../../assertFreshFile'
+import { recordChange, resetLedgersForTest } from './consoleSettingLedger'
 
 vi.mock('../../assertFreshFile', () => ({ assertFreshFile: vi.fn(async () => undefined) }))
 
@@ -166,5 +167,45 @@ describe('ue_capture_perf_trace', () => {
     await run({})
 
     expect(foregroundUnrealEditorWindow).not.toHaveBeenCalled()
+  })
+
+  it('warmup_seconds：等够了才发采样请求，等待不占采样的超时预算', async () => {
+    vi.useFakeTimers()
+    try {
+      callRequest.mockClear()
+      callRequest.mockResolvedValueOnce({ ok: true, stats: {}, frame_count: 1 })
+
+      const pending = run({ duration_seconds: 10, warmup_seconds: 15 })
+      await vi.advanceTimersByTimeAsync(14_000)
+      expect(callRequest).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1_000)
+      const r = await pending
+
+      expect(callRequest).toHaveBeenCalledTimes(1)
+      expect(r.warmup_seconds).toBe(15)
+      expect(callRequest.mock.calls[0]![1]).toEqual({ duration_seconds: 10, gpu_stats: undefined })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('有没改回去的设置时，结果里点名，提醒比较前确认两边设置一致', async () => {
+    resetLedgersForTest()
+    recordChange('conn-1', 'ShowFlag.DynamicShadows', '2', '0')
+    callRequest.mockResolvedValueOnce({ ok: true, stats: {}, frame_count: 1 })
+
+    const r = await run({ duration_seconds: 10 })
+
+    expect(r.modified_settings).toEqual([{ name: 'ShowFlag.DynamicShadows', original: '2' }])
+    expect(String(r.message)).toContain('ShowFlag.DynamicShadows（原值 2）')
+    expect(String(r.message)).toContain('restore_all')
+    resetLedgersForTest()
+  })
+
+  it('没有改过的设置时不出现 modified_settings', async () => {
+    resetLedgersForTest()
+    callRequest.mockResolvedValueOnce({ ok: true, stats: {}, frame_count: 1 })
+    const r = await run({ duration_seconds: 10 })
+    expect(r.modified_settings).toBeUndefined()
   })
 })
