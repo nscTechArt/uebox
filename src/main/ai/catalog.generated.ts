@@ -6330,5 +6330,28 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         }
       }
     ]
+  },
+  {
+    "id": "zcode",
+    "displayName": "ZCode Coding Plan",
+    "group": "subscription",
+    "kind": "chat",
+    "protocol": "anthropic-messages",
+    "baseUrl": "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
+    "apiKeyUrl": "https://zcode.z.ai",
+    "requiresApiKey": true,
+    "hasLogo": false,
+    "supportsOAuth": true,
+    "models": [
+      {
+        "id": "GLM-5.2",
+        "displayName": "GLM-5.2",
+        "supportsVision": false,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072
+      }
+    ]
   }
 ] as CatalogEntry[])

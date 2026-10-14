@@ -330,6 +330,14 @@ export const CURATED = [
     displayName: 'CodeBuddy / WorkBuddy',
     supportsOAuth: true
   },
+  {
+    id: 'zcode',
+    group: 'subscription',
+    baseUrl: 'https://zcode.z.ai/api/v1/zcode-plan/anthropic',
+    protocol: 'anthropic-messages',
+    displayName: 'ZCode Coding Plan',
+    supportsOAuth: true
+  },
 
   // ── 图片生成 ──
   //
@@ -837,6 +845,25 @@ const model3d = (id, name, api) => ({
  *    份额不小，先手写几个主力模型；等 models.dev 收录了就把这里删掉。
  */
 const MANUAL_ENTRIES = {
+  // Subscription model ID is case-sensitive (maskeb34/zcode, routes/gateway.py).
+  // Limits verified against zcode.z.ai/api/v1/client/configs on 2026-10-13.
+  // Other account models can be added manually.
+  zcode: {
+    name: 'ZCode Coding Plan',
+    env: [],
+    doc: 'https://zcode.z.ai',
+    models: {
+      'GLM-5.2': model(
+        'GLM-5.2',
+        'GLM-5.2',
+        false,
+        true,
+        { context: 1_048_576, output: 131_072 },
+        true,
+        { release_date: '2026-06-13' }
+      )
+    }
+  },
   /**
    * CodeBuddy 会员。models.dev 没有这一家，而且它**没有** `/models` 接口，
    * 「导入模型」用不了 —— 清单不能留空（理由同下面 chatgpt 那条）。

@@ -3,12 +3,117 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('../../ai/credentials', () => ({
   resolveRequestAuth: vi.fn(async () => ({ apiKey: 'sk-test-key' }))
 }))
+vi.mock('../../ai/store', () => ({
+  readSettings: vi.fn(async () => ({ version: 3, providers: [], roles: {} }))
+}))
+vi.mock('../../ai/zcodeCaptcha', () => ({
+  getZCodeVerification: vi.fn(async () => undefined),
+  invalidateZCodeVerification: vi.fn()
+}))
 
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import { getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import { toPiModel, toPiProvider } from './piModel'
 import { PROVIDER_CATALOG } from '../../ai/catalog'
 import type { ProviderConfig } from '../../ai/types'
+import { ZCODE_BASE_URL } from '../../ai/zcode'
+
+describe('ZCode provider integration', () => {
+  it.each(['stream', 'streamSimple'] as const)(
+    'adapts %s and decodes streamed tool calls',
+    async (method) => {
+      const { resolveRequestAuth } = await import('../../ai/credentials')
+      const token = `header.${Buffer.from('{}').toString('base64url')}.signature`
+      vi.mocked(resolveRequestAuth).mockResolvedValueOnce({ apiKey: token })
+      const models = createModels()
+      models.setProvider(
+        toPiProvider({
+          id: 'zcode',
+          displayName: 'ZCode',
+          kind: 'chat',
+          protocol: 'anthropic-messages',
+          baseUrl: ZCODE_BASE_URL,
+          apiKey: { kind: 'oauth', id: 'zcode-key', provider: 'zcode' },
+          models: [{ id: 'GLM-5.2', supportsTools: true, supportsReasoning: false }]
+        })
+      )
+      const events = [
+        {
+          type: 'message_start',
+          message: {
+            id: 'msg1',
+            type: 'message',
+            role: 'assistant',
+            model: 'GLM-5.2',
+            content: [],
+            usage: { input_tokens: 4, output_tokens: 0 }
+          }
+        },
+        {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'call1', name: 'ping', input: {} }
+        },
+        {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: '{"value":1}' }
+        },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } },
+        { type: 'message_stop' }
+      ]
+      const capture = vi
+        .fn<typeof fetch>()
+        .mockImplementation(
+          async () =>
+            new Response(
+              events
+                .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+                .join(''),
+              { headers: { 'Content-Type': 'text/event-stream' } }
+            )
+        )
+      const stream = models[method](
+        models.getModel('zcode', 'GLM-5.2')!,
+        {
+          messages: [{ role: 'user', content: 'Call ping', timestamp: 0 }]
+        },
+        { fetch: capture }
+      )
+      const result = await stream.result()
+      expect(result.stopReason).toBe('toolUse')
+      expect(result.content).toContainEqual(
+        expect.objectContaining({ type: 'toolCall', name: 'ping', arguments: { value: 1 } })
+      )
+      const [url, init] = capture.mock.calls[0]
+      expect(String(url)).toContain(`${ZCODE_BASE_URL}/v1/messages`)
+      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${token}`)
+      expect(new Headers(init?.headers).has('x-api-key')).toBe(false)
+    }
+  )
+
+  it('does not resolve a ZCode login token for an edited external endpoint', async () => {
+    const { resolveRequestAuth } = await import('../../ai/credentials')
+    const before = vi.mocked(resolveRequestAuth).mock.calls.length
+    const provider = toPiProvider({
+      id: 'zcode',
+      displayName: 'ZCode',
+      kind: 'chat',
+      protocol: 'anthropic-messages',
+      baseUrl: 'https://example.test',
+      apiKey: { kind: 'oauth', id: 'zcode-key', provider: 'zcode' },
+      models: []
+    })
+    await expect(
+      provider.auth.apiKey!.resolve({
+        ctx: { env: async () => undefined, fileExists: async () => false },
+        signal: new AbortController().signal
+      })
+    ).rejects.toThrow('subscription endpoint')
+    expect(vi.mocked(resolveRequestAuth).mock.calls.length).toBe(before)
+  })
+})
 
 const openaiProvider: ProviderConfig = {
   id: 'openai',
@@ -470,6 +575,38 @@ describe('toPiProvider', () => {
     })
 
     expect(result?.auth.apiKey).toBe('not-required')
+  })
+
+  it('取不到密钥、且服务商已从设置里删掉时，照实说是被删了', async () => {
+    const { resolveRequestAuth } = await import('../../ai/credentials')
+    const { readSettings } = await import('../../ai/store')
+    vi.mocked(resolveRequestAuth).mockRejectedValueOnce(new Error('密钥不存在'))
+    vi.mocked(readSettings).mockResolvedValueOnce({ version: 3, providers: [], roles: {} })
+
+    const resolving = toPiProvider(openaiProvider).auth.apiKey!.resolve({
+      ctx: { env: async () => undefined, fileExists: async () => false },
+      signal: new AbortController().signal
+    })
+
+    await expect(resolving).rejects.toThrow(`「${openaiProvider.displayName}」已从模型设置中删除`)
+  })
+
+  it('服务商还在时，密钥库的原始报错原样抛出', async () => {
+    const { resolveRequestAuth } = await import('../../ai/credentials')
+    const { readSettings } = await import('../../ai/store')
+    vi.mocked(resolveRequestAuth).mockRejectedValueOnce(new Error('密钥不存在'))
+    vi.mocked(readSettings).mockResolvedValueOnce({
+      version: 3,
+      providers: [openaiProvider],
+      roles: {}
+    })
+
+    const resolving = toPiProvider(openaiProvider).auth.apiKey!.resolve({
+      ctx: { env: async () => undefined, fileExists: async () => false },
+      signal: new AbortController().signal
+    })
+
+    await expect(resolving).rejects.toThrow('密钥不存在')
   })
 
   it('密钥来源描述不含密钥本身', async () => {

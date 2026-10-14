@@ -286,6 +286,15 @@ describe('设备码流程（Kimi）', () => {
 })
 
 describe('令牌续期', () => {
+  it('ZCode 无已知续期协议，明确要求重新登录且不发送刷新请求', async () => {
+    const fetchImpl = vi.fn()
+    globalThis.fetch = fetchImpl
+    expect(yieldsPermanentKey('zcode')).toBe(false)
+    await expect(
+      refreshOAuthTokens('zcode', { accessToken: 'expired', expiresAt: 1 })
+    ).rejects.toThrow('Sign in to ZCode again')
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
   it('过期判定留了提前量', () => {
     expect(isExpired({ accessToken: 'a' })).toBe(false)
     expect(isExpired({ accessToken: 'a', expiresAt: Date.now() + 3600_000 })).toBe(false)

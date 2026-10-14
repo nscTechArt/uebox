@@ -2227,6 +2227,8 @@ const api = {
     saveProvider: (draft: unknown) => ipcRenderer.invoke('ai-provider:save-provider', draft),
     deleteProvider: (providerId: string) =>
       ipcRenderer.invoke('ai-provider:delete-provider', providerId),
+    /** 正在跑的对话里有几个用着这个服务商。删之前问 */
+    usage: (providerId: string) => ipcRenderer.invoke('ai-provider:usage', providerId),
     setRoles: (patch: unknown) => ipcRenderer.invoke('ai-provider:set-roles', patch),
     /** 连通性测试。用草稿而不是已存配置，让用户存盘前就能验 */
     test: (draft: unknown, modelId: string) =>

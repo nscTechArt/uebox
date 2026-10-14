@@ -544,6 +544,9 @@ export default {
       oauthLogin: 'Sign in with {name}',
       oauthRelogin: 'Sign in again',
       oauthLinked: 'Signed in with {name}. Tokens refresh automatically',
+      zcodeLinked: 'Signed in with {name}. Sign in again when the token expires',
+      zcodeHint:
+        'Authorize your account in ZCode and activate Coding Plan before signing in with Z.ai, or enter a subscription JWT. This connection only uses the ZCode subscription and never falls back to API balance. If verification is required, complete it in ZCode and retry.',
       oauthKeyFetched: 'Key fetched from {name} and filled in above — click Save to apply',
       getKey: 'Get an API key ↗',
       oauthOpening: 'Browser opened — complete the authorization there',
@@ -632,6 +635,7 @@ export default {
       title: 'Delete {name}?',
       content:
         'Deletes this provider’s configuration and key, and clears default models that use it.',
+      inUse: '{count} running chat(s) use this provider. They will fail on their next model call.',
       ok: 'Delete',
       cancel: 'Cancel'
     },

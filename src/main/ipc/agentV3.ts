@@ -128,6 +128,7 @@ import { createTrackRecord } from '../agent-v3/core/team/trackRecord'
 import { loadModelDossiers, recheckModel } from '../agent-v3/core/team/modelDossier'
 import { teamModelCandidates, type TeamStateView } from '../../shared/agentTeam'
 import { readSettings as readAiSettings } from '../ai/store'
+import { setProviderUsageProbe } from '../ai/providerUsage'
 import { DEFAULT_GOAL_MAX_ROUNDS, normalizeGoalMaxRounds } from '../../shared/goalRounds'
 import { buildCrashNotice, type EditorWatchEvent } from '../agent-v3/core/team/editorWatch'
 import { startTeamEditorWatch } from './teamEditorWatch'
@@ -382,6 +383,24 @@ export function onActiveRunsChanged(listener: () => void): () => void {
  */
 export function countActiveSessionOperations(): number {
   return activeAgents.entries().length
+}
+
+/**
+ * 正在跑的对话里有几个用着这个服务商：制作人自己的模型，或团队名册里钉了它的队员。
+ * 设置页删服务商前问这个（见 `ai/providerUsage.ts`）
+ */
+async function countRunsUsingProvider(providerId: string): Promise<number> {
+  let count = 0
+  for (const [sessionId, entry] of activeAgents.entries()) {
+    if (entry.kind !== 'agent') continue
+    if (entry.selection?.providerId === providerId) {
+      count++
+      continue
+    }
+    const roster = await createTeamStore(teamDirsFor(sessionId)).roster()
+    if (roster.some((member) => member.model?.providerId === providerId)) count++
+  }
+  return count
 }
 
 /** 在任何异步准备之前占位，停止和重入检查从这一刻起生效。 */
@@ -1576,6 +1595,8 @@ async function withHostSettings(status: McpServerHostStatus): Promise<
 }
 
 export function registerAgentV3IPC(): void {
+  setProviderUsageProbe(countRunsUsingProvider)
+
   /**
    * 两条对话抢同一个资产时，用户必须看得见。
    *

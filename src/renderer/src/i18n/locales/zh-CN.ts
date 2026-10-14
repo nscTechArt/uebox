@@ -538,6 +538,9 @@ export default {
       oauthLogin: '用 {name} 账号登录',
       oauthRelogin: '重新登录',
       oauthLinked: '已用 {name} 账号登录，令牌过期会自动续期',
+      zcodeLinked: '已用 {name} 账号登录，令牌失效后请重新登录',
+      zcodeHint:
+        '请先在 ZCode 授权并开通 Coding Plan，再通过 Z.ai 账号登录；也可填写订阅 JWT。此入口只使用 ZCode 订阅，不回退到普通 API 余额。平台要求重新验证时，请在 ZCode 完成验证后重试。',
       oauthKeyFetched: '已从 {name} 取回密钥并填入上方，点「保存」后生效',
       getKey: '去获取 API 密钥 ↗',
       oauthOpening: '浏览器已打开，请完成授权',
@@ -618,6 +621,7 @@ export default {
     delete: {
       title: '删除 {name}？',
       content: '将删除服务商配置和密钥，同时清空使用它的默认模型。',
+      inUse: '有 {count} 个正在运行的对话使用此服务商，删除后它们下一次调用模型时将出错。',
       ok: '删除',
       cancel: '取消'
     },

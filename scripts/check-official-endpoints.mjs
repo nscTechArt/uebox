@@ -163,6 +163,10 @@ const NOT_OFFICIAL_CALLS = {
   'src/main/services/dashscope/ossUpload.ts':
     '用户自己的 API Key 直接请求 dashscope.aliyuncs.com 的临时上传凭证',
   'src/main/ai/oauth.ts': '厂商自己的 OAuth 端点（OpenRouter / ChatGPT / Kimi）',
+  'src/main/ai/zcode.ts':
+    '用户主动连接的 ZCode 订阅：向 zcode.z.ai 登录和发送 Anthropic 消息，使用用户自己的 JWT',
+  'src/main/ai/zcodeCaptcha.ts':
+    '仅在 ZCode 模型调用时读取 zcode.z.ai 的验证配置，必要时在隔离浏览器运行阿里云验证 SDK',
   'src/main/ipc/assistant.ts': 'Epic Games 社区的 Assistant API（dev.epicgames.com）',
   'src/main/ai/realtime/doubaoRealtime.ts':
     '豆包全双工语音的 WebSocket 端点，由用户配置 Provider 并用自己的 API Key 直连',
