@@ -12,7 +12,9 @@ import { findFFmpeg } from '../../../services/ffmpegPath'
 import { callUe, callUeRaw } from '../defineUeTool'
 import { composeVideo } from './composeVideo'
 import {
+  checkConsoleVariables,
   createSequenceRenderTool,
+  CVARS_IGNORED,
   formatProgress,
   formatResult,
   type RenderStartOutput,
@@ -118,6 +120,81 @@ describe('发给引擎的载荷', () => {
       { job_id: 'job-1' },
       { timeoutMs: 15_000 }
     ])
+  })
+})
+
+describe('控制台变量', () => {
+  const CVARS = { 'r.Streaming.FullyLoadUsedTextures': 1, 'r.ForceLOD': 0 }
+
+  it('原样发给引擎', async () => {
+    mockUe
+      .mockResolvedValueOnce({ ...JOB, console_variables: CVARS })
+      .mockResolvedValueOnce(status({ state: 'finished', files_written: 120 }))
+    await run({ console_variables: CVARS })
+    expect(mockUe.mock.calls[0]![1]).toMatchObject({ console_variables: CVARS })
+  })
+
+  it('名字为空或带空白在本地就挡下，不发给引擎', async () => {
+    for (const bad of [{ '': 1 }, { 'r.ForceLOD 0': 1 }, { 'r.ForceLOD\n': 0 }]) {
+      await expect(
+        tool.execute('c1', { sequence_path: '/Game/Cine/SQ_Intro', console_variables: bad })
+      ).rejects.toThrow()
+    }
+    expect(mockUe).not.toHaveBeenCalled()
+  })
+
+  it('值不是数字在本地就挡下', async () => {
+    await expect(
+      tool.execute('c1', {
+        sequence_path: '/Game/Cine/SQ_Intro',
+        console_variables: { 'r.ForceLOD': '0' }
+      })
+    ).rejects.toThrow()
+    expect(mockUe).not.toHaveBeenCalled()
+  })
+
+  it('回执写引擎回报的那些，float 误差收掉', async () => {
+    mockUe
+      .mockResolvedValueOnce({
+        ...JOB,
+        console_variables: { 'r.ForceLOD': 0, 'r.ScreenPercentage': 0.10000000149011612 }
+      })
+      .mockResolvedValueOnce(status({ state: 'finished', files_written: 120 }))
+    const text = textOf(
+      await run({ console_variables: { 'r.ForceLOD': 0, 'r.ScreenPercentage': 0.1 } })
+    )
+    expect(text).toContain('控制台变量 r.ForceLOD=0、r.ScreenPercentage=0.1')
+    expect(text).not.toContain('0.1000000')
+  })
+
+  it('没要控制台变量时回执不提', () => {
+    const text = formatResult(JOB, status({ state: 'finished', files_written: 120 }))
+    expect(text).not.toContain('控制台变量')
+  })
+
+  it('引擎一个都没回报也没说为什么（旧版插件）：照实说没生效', async () => {
+    mockUe
+      .mockResolvedValueOnce(JOB)
+      .mockResolvedValueOnce(status({ state: 'finished', files_written: 120 }))
+    const text = textOf(await run({ console_variables: CVARS }))
+    expect(text).toContain(CVARS_IGNORED)
+  })
+
+  it('引擎已在 warnings 里说了查不到哪个变量，就不再补一句', () => {
+    const job = checkConsoleVariables(
+      { 'r.NoSuchThing': 1 },
+      {
+        ...JOB,
+        warnings: ['引擎里没有控制台变量 r.NoSuchThing（拼错了，或者它所在的插件没开），没有加']
+      }
+    )
+    expect(job.warnings).toHaveLength(1)
+    expect(job.warnings).not.toContain(CVARS_IGNORED)
+  })
+
+  it('部分生效时以引擎回报为准，不补「没生效」', () => {
+    const job = checkConsoleVariables(CVARS, { ...JOB, console_variables: { 'r.ForceLOD': 0 } })
+    expect(job.warnings).toBeUndefined()
   })
 })
 

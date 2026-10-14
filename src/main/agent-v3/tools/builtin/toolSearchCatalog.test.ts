@@ -346,7 +346,8 @@ describe('真实工具库检索回归', () => {
     ['按文件名查找 fbx', 'find_local_files'],
     ['网页搜索', 'web_search'],
     // 真机上模型没搜、直接写了 Python（2026-10-13 反馈）；钉住这条搜得到
-    ['新建增强输入动作', 'ue_input_add_mapping']
+    ['新建增强输入动作', 'ue_input_add_mapping'],
+    ['灯光阴影普查', 'ue_light_census']
   ])('%s 应能加载 %s', async (query, expected) => {
     expect(
       catalog.some((tool) => tool.name === expected),
@@ -355,6 +356,26 @@ describe('真实工具库检索回归', () => {
     const search = createToolSearch(catalog, () => catalog)
     const result = await search.tool.execute('probe', { query })
     expect(loadedNames(result)).toContain(expected)
+  })
+
+  /*
+   * 灯光普查是按需子组：不常驻、不跟 ue.level 整组走（那组有开关卡、存关卡这些写操作），
+   * 而项目体检技能一加载就把它带上 —— 渲染线程 / GPU 瓶颈的排查正是从那里进来的
+   */
+  it('ue_light_census 自成按需子组，由项目体检技能带上', async () => {
+    const census = catalog.find((tool) => tool.name === 'ue_light_census')!
+    expect(census).toBeDefined()
+    expect(toolSearchGroup(census)).toBe('ue.level.lights')
+    expect(RESIDENT_TOOL_GROUPS.has('ue.level.lights')).toBe(false)
+    expect(residentNames().has('ue_light_census')).toBe(false)
+    expect(groupDomainTerms('ue.level.lights')).toContain('灯光')
+
+    const search = createToolSearch(catalog, () => catalog)
+    const loader = createSkillTools(skills, 'off', search.loadFromSkill).find(
+      (tool) => tool.name === 'load_skill'
+    )!
+    await loader.execute('skill', { name: 'ue-project-audit' })
+    expect(search.getTools().map((tool) => tool.name)).toContain('ue_light_census')
   })
 
   it('泛称本地文件搜索时至少提供文件名查找或文件内容搜索', async () => {

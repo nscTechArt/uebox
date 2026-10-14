@@ -25,6 +25,9 @@
 #include "HAL/PlatformMemory.h"
 #include "UObject/GarbageCollection.h"
 #include "PlayInEditorDataTypes.h"
+// pie.run 的联网模式 / 人数：拿一份设置副本塞进 FRequestPlaySessionParams。
+// UnrealEd 模块下（Classes/Settings），5.0–5.8 路径一致，不新增模块依赖
+#include "Settings/LevelEditorPlaySettings.h"
 #include "GameFramework/PlayerController.h"
 // PIE 截图取玩家相机 FOV 用（PlayerController.h 里只有前向声明）
 #include "Camera/PlayerCameraManager.h"
@@ -349,6 +352,12 @@ void FUAL_EditorCommands::RegisterCommands(TMap<FString, TFunction<void(const TS
  *
  * 定义放在这里而不是 pie.run 那一段：截图也要用它 —— PIE 一开，
  * 用户看的就是游戏世界，截编辑器世界等于答非所问。
+ *
+ * 多人 PIE 时有好几个 PIE 世界，**优先挑有游戏窗口的那个**：Play As Client
+ * 会在进程内另起一个独立服务器，它排在第一个、没有窗口也没有本地玩家 ——
+ * 拿它截图就只能回落到编辑器相机，拍到的是一个谁也没在看的画面。
+ * 有窗口的第一个就是用户眼前那位玩家（Listen Server 下是主机，Client 下是 Client 1）。
+ * 单人 PIE 只有一个世界，挑出来的和以前一样。
  */
 static UWorld* UAL_GetPlayWorld()
 {
@@ -356,14 +365,23 @@ static UWorld* UAL_GetPlayWorld()
 	{
 		return nullptr;
 	}
+	UWorld* FirstPieWorld = nullptr;
 	for (const FWorldContext& Context : GEngine->GetWorldContexts())
 	{
 		if (Context.WorldType == EWorldType::PIE && Context.World())
 		{
-			return Context.World();
+			if (Context.GameViewport)
+			{
+				return Context.World();
+			}
+			if (!FirstPieWorld)
+			{
+				FirstPieWorld = Context.World();
+			}
 		}
 	}
-	return nullptr;
+	// Simulate 等没有游戏窗口的情况照旧回第一个
+	return FirstPieWorld;
 }
 
 /**
@@ -3674,6 +3692,20 @@ namespace
 		bool bPrevUseFixedFrameRate = false;
 		float PrevFixedFrameRate = 30.0f;
 
+		/**
+		 * 联网模式和玩家数，就是编辑器 Play 下拉里的 Net Mode / Number of Players。
+		 *
+		 * 单进程单人 PIE 验不了复制和 RPC：没有客户端，「服务器上改了、客户端没收到」
+		 * 这件事根本不会发生。行家的验法是 Listen Server / Client 开两个人，
+		 * 看 PrintString 前面引擎自己加的「Server:」「Client 1:」。
+		 *
+		 * 用户的编辑器偏好**一个字都不改**：设置是复制一份塞进这次请求的，
+		 * 见 Handle_RunPlaytest 里 EditorPlaySettings 那一段。
+		 */
+		FString NetMode = TEXT("standalone");
+		int32 NumPlayers = 1;
+		bool IsMultiplayer() const { return NumPlayers > 1 || NetMode != TEXT("standalone"); }
+
 		int32 ActorsAtStart = 0;
 		FString ScreenshotPath;
 		FString ScreenshotError;
@@ -3767,6 +3799,8 @@ namespace
 			bFixedStepApplied = false;
 			bPrevUseFixedFrameRate = false;
 			PrevFixedFrameRate = 30.0f;
+			NetMode = TEXT("standalone");
+			NumPlayers = 1;
 			ActorsAtStart = 0;
 			ScreenshotPath.Empty();
 			ScreenshotError.Empty();
@@ -3795,6 +3829,34 @@ namespace
 			++Count;
 		}
 		return Count;
+	}
+
+	/**
+	 * 数 Actor 用哪个世界。
+	 *
+	 * 多人时数**服务器**那个：客户端世界在 PostPIEStarted 那一刻还没连上，
+	 * 之后复制过来的 Actor 会全算成「运行中新增」—— 一个什么都没生成的游戏
+	 * 也会报出几十个新增 Actor。服务器世界才是权威的那份。
+	 * 单人时就是唯一那个 PIE 世界，和以前一样。
+	 */
+	UWorld* UAL_GetPieCountWorld()
+	{
+		if (GPieSession.IsMultiplayer() && GEngine)
+		{
+			for (const FWorldContext& Context : GEngine->GetWorldContexts())
+			{
+				UWorld* World = Context.World();
+				if (Context.WorldType == EWorldType::PIE && World)
+				{
+					const ENetMode Mode = World->GetNetMode();
+					if (Mode == NM_ListenServer || Mode == NM_DedicatedServer)
+					{
+						return World;
+					}
+				}
+			}
+		}
+		return UAL_GetPlayWorld();
 	}
 
 	/**
@@ -4010,6 +4072,13 @@ namespace
 		{
 			// 回报实际用的步长：不说的话调用方不知道这次的「帧」有多长
 			Result->SetNumberField(TEXT("fixed_fps"), GPieSession.FixedFps);
+		}
+		if (GPieSession.IsMultiplayer())
+		{
+			// 回报实际跑的联网配置：Actor 数、截图、events 各取的是哪个实例，
+			// 盒子那侧要照着这两个字段把话说清楚
+			Result->SetStringField(TEXT("net_mode"), GPieSession.NetMode);
+			Result->SetNumberField(TEXT("num_players"), GPieSession.NumPlayers);
 		}
 
 		if (GPieSession.Capture)
@@ -4269,6 +4338,70 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		}
 	}
 
+	/**
+	 * 联网模式和玩家数，见 FUAL_PieSession::NetMode。
+	 *
+	 * 不传就是 standalone 单人，**不跟用户编辑器里的 Play 设置走**：报告里的
+	 * Actor 数、截图、events 落在哪个实例，都取决于这次到底跑的是几个人。
+	 * 继承偏好的话，用户哪天在编辑器里切成两人 Listen Server，调用方拿到的
+	 * 就是一份它以为是单人的多人报告。
+	 *
+	 * 给了 num_players>1 却没给 net_mode，按 listen_server：要多个人多半就是要验联网，
+	 * 而 standalone 多开的几份互不相连，PrintString 也不带前缀，分不出谁是谁。
+	 */
+	FString NetMode;
+	const bool bHasNetMode = Payload->TryGetStringField(TEXT("net_mode"), NetMode) && !NetMode.IsEmpty();
+	NetMode = NetMode.ToLower();
+	int32 NumPlayers = 1;
+	Payload->TryGetNumberField(TEXT("num_players"), NumPlayers);
+	NumPlayers = FMath::Clamp(NumPlayers, 1, 4);
+	if (!bHasNetMode)
+	{
+		NetMode = NumPlayers > 1 ? TEXT("listen_server") : TEXT("standalone");
+	}
+
+	EPlayNetMode PlayNetMode = EPlayNetMode::PIE_Standalone;
+	if (NetMode == TEXT("listen_server"))
+	{
+		PlayNetMode = EPlayNetMode::PIE_ListenServer;
+	}
+	else if (NetMode == TEXT("client"))
+	{
+		PlayNetMode = EPlayNetMode::PIE_Client;
+	}
+	else if (NetMode != TEXT("standalone"))
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 400,
+			FString::Printf(TEXT("Unknown net_mode \"%s\". Use standalone, listen_server or client."), *NetMode));
+		return;
+	}
+
+	// 显式要了 standalone 多人：那几份游戏互不相连，验不了联网，
+	// PrintString 也不带实例前缀，报告里分不出哪行是谁打的 —— 当场说清楚，别跑出一份没法读的报告
+	if (PlayNetMode == EPlayNetMode::PIE_Standalone && NumPlayers > 1)
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 400,
+			TEXT("net_mode=standalone with num_players>1 starts unconnected copies whose PrintStrings carry no instance prefix. Use listen_server or client to test networking."));
+		return;
+	}
+
+	/**
+	 * 多人必须在**同一进程**里跑：日志捕获只挂在这个编辑器进程上，另起的进程
+	 * 打的 PrintString 和报错一条都收不到，报告会是一份「客户端什么都没发生」的假象。
+	 * bAllowMultiplePIEWorlds 关着时引擎会强行改成多进程（PlayLevel.cpp 里
+	 * StartPlayInEditorSession 那一段，5.0–5.8 都在），所以这里先拒绝。
+	 */
+	const bool bWantsMultiplayer = NumPlayers > 1 || PlayNetMode != EPlayNetMode::PIE_Standalone;
+	if (bWantsMultiplayer && !GEditor->bAllowMultiplePIEWorlds)
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 409,
+			TEXT("This editor has bAllowMultiplePIEWorlds disabled, so multiplayer PIE would launch separate processes whose logs pie.run cannot capture."));
+		return;
+	}
+
 	GPieSession.Reset();
 	GPieSession.bActive = true;
 	GPieSession.RequestId = RequestId;
@@ -4278,6 +4411,8 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 	GPieSession.Commands = MoveTemp(Commands);
 	GPieSession.Frames = MoveTemp(Frames);
 	GPieSession.FrameMode = FrameMode;
+	GPieSession.NetMode = NetMode;
+	GPieSession.NumPlayers = NumPlayers;
 	// 带上毫秒。文件名本身只精确到秒，同一秒里抓的几帧会互相覆盖 ——
 	// 覆盖之后一切照常成功，只是拼出来九格一模一样
 	GPieSession.FrameStamp = FDateTime::Now().ToString(TEXT("%H%M%S%s"));
@@ -4313,7 +4448,7 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		{
 			GPieSession.Capture->SetPlayStartedAt(GPieSession.PlayStartedAt);
 		}
-		GPieSession.ActorsAtStart = UAL_CountActors(UAL_GetPlayWorld());
+		GPieSession.ActorsAtStart = UAL_CountActors(UAL_GetPieCountWorld());
 		UAL_ShowPieBanner();
 	});
 
@@ -4339,6 +4474,36 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 	FRequestPlaySessionParams Params;
 	Params.WorldType = EPlaySessionWorldType::PlayInEditor;
 	Params.SessionDestination = EPlaySessionDestinationType::InProcess;
+
+	/**
+	 * 联网模式和人数改在**一份副本**上，不碰用户的 Editor Preferences。
+	 *
+	 * 为什么不是「改 CDO、跑完再改回去」：改回去那一步要等 EndPlayMap 跑完，
+	 * 中间编辑器崩了、用户手动停了、我们这边哪条退出路径漏了，用户的
+	 * Net Mode 就悄悄变成了 Listen Server 两人，而且会被 SaveConfig 落盘。
+	 * FRequestPlaySessionParams::EditorPlaySettings 本来就是给这个用的：
+	 * 「nullptr 用 CDO，否则用给的这份」，RequestPlaySession 当场再复制一份
+	 * 自己持有（PlayLevel.cpp，5.0–5.8 一致），我们这份用完交给 GC。
+	 *
+	 * 除了下面四项，窗口大小、声音、鼠标控制这些都照用户自己的设置走。
+	 * 已知的副作用：EndPlayMap 会把这次 PIE 窗口的位置记回 CDO 并 SaveConfig
+	 * （MultipleInstancePositions 等）—— 这是引擎每次 PIE 结束都做的事，
+	 * 用户自己点 Play 也一样，不是这里改的设置。
+	 */
+	ULevelEditorPlaySettings* PlaySettings =
+		DuplicateObject<ULevelEditorPlaySettings>(GetDefault<ULevelEditorPlaySettings>(), GetTransientPackage());
+	if (PlaySettings)
+	{
+		PlaySettings->SetPlayNetMode(PlayNetMode);
+		PlaySettings->SetPlayNumberOfClients(NumPlayers);
+		// 多个实例必须在本进程里，理由见上面 bAllowMultiplePIEWorlds 那段
+		PlaySettings->SetRunUnderOneProcess(true);
+		// 用户若勾了「Standalone 也起一个独立服务器」，单人试玩会凭空多一个看不见的服务器世界；
+		// Client 模式不受影响 —— 那种模式引擎无论如何都会起服务器
+		PlaySettings->bLaunchSeparateServer = false;
+		Params.EditorPlaySettings = PlaySettings;
+	}
+
 	GEditor->RequestPlaySession(Params);
 	// RequestPlaySession 只是排队，真正启动在下一帧。这里踢一下让它尽快开始。
 	GEditor->StartQueuedPlaySessionRequest();
@@ -4437,7 +4602,7 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 			// 截图和数 Actor 都必须赶在 RequestEndPlayMap **之前** ——
 			// PIE 世界一销毁这两样就都没了
 			UWorld* PlayWorld = UAL_GetPlayWorld();
-			const int32 ActorsAtEnd = UAL_CountActors(PlayWorld);
+			const int32 ActorsAtEnd = UAL_CountActors(UAL_GetPieCountWorld());
 
 			// 关卡组成同理，也只有这一刻取得到
 			if (PlayWorld)

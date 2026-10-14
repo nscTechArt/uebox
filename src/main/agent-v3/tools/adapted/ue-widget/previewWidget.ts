@@ -42,6 +42,11 @@ interface PreviewResponse {
   path: string
   width: number
   height: number
+  /**
+   * 按项目 DPI 曲线算出的缩放（游戏里同分辨率下 UMG 的缩放）。
+   * 旧插件不回这个字段，按 1 倍画，此时不提 DPI。
+   */
+  dpi_scale?: number
   /** 插件写的失败原因，由 WebSocket 那层从 code>=400 的响应补上。不透传等于把诊断扔了 */
   error?: string
 }
@@ -53,7 +58,7 @@ export function previewWidgetTool() {
 
 【功能说明】：
 - 编译 Widget Blueprint 确保最新
-- 使用 FWidgetRenderer 渲染到 RenderTarget
+- 使用 FWidgetRenderer 渲染到 RenderTarget，按项目 DPI 缩放规则缩放（同游戏里该分辨率的效果）
 - 保存截图到项目 Saved/Screenshots/UAL 目录
 
 【适用场景】：
@@ -94,14 +99,23 @@ export function previewWidgetTool() {
         // 「检查 Widget 布局效果」这个声称的用途根本无从实现。
         const images = await readPreviewImage(response.path)
 
+        // 游戏里 UMG 按项目 DPI 曲线缩放，1280x720 下 1080p 布局会整体缩到 2/3。
+        // 把实际缩放写进文案，模型才知道图里的字为什么变小，不会去「修」字号。
+        const dpiScale = typeof response.dpi_scale === 'number' ? response.dpi_scale : undefined
+        const dpiNote =
+          dpiScale === undefined
+            ? ''
+            : `，DPI 缩放 ${Number(dpiScale.toFixed(3))}，同游戏里该分辨率的效果`
+
         return {
           ok: true,
           screenshot_path: response.path,
           width: response.width,
           height: response.height,
+          ...(dpiScale === undefined ? {} : { dpi_scale: dpiScale }),
           images,
           message: images.length
-            ? `Widget 预览已渲染（${response.width}x${response.height}），图见附件。`
+            ? `Widget 预览已渲染（${response.width}x${response.height}${dpiNote}），图见附件。`
             : `Widget 预览已保存到 ${response.path}，但读取图片失败，只能自行打开查看。`
         }
       } catch (error) {

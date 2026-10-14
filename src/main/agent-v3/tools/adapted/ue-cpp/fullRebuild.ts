@@ -22,6 +22,13 @@
  *    编不过就停在这里、编辑器**保持关着** —— 带着编不过的代码打开，引擎会弹
  *    「模块缺失，要重编吗」，用户点了也一样编不过。诊断带文件名和行号回来，改完再调一次。
  * 3. **重开工程**，4. **等插件连回来并切过去**：和 `open_project` 同一套（`awaitProjectLive`）。
+ *
+ * ## 另一种用法：只编游戏 Target，验证打包时能不能编过
+ *
+ * 编辑器 Target 带着 `WITH_EDITOR`，Runtime 模块里漏包 `#if WITH_EDITOR` 的编辑器代码、
+ * 或者 include 了编辑器模块，开发时全绿，要到用户打包那天才红。专家改完 Runtime 模块
+ * 会单独编一次 Game Target（Development）。它的产物和编辑器的 DLL 不在一处，
+ * 所以**不用关编辑器**；只编工程自己的模块，几分钟就够，不必完整打包烘焙。
  */
 
 import { spawn } from 'child_process'
@@ -78,6 +85,18 @@ export function pickEditorTarget(
     editors.find((name) => name.toLowerCase() === `${projectName}Editor`.toLowerCase()) ??
     editors[0]
   )
+}
+
+/** 工程的游戏 Target 名：认 `TargetType.Game`，有多个时优先和工程同名的。没有返回 null */
+export function pickGameTarget(
+  projectName: string,
+  targets: Array<{ file: string; content: string }>
+): string | null {
+  const games = targets
+    .filter((t) => /TargetType\s*\.\s*Game\b/.test(t.content))
+    .map((t) => basename(t.file).replace(/\.Target\.cs$/i, ''))
+  if (games.length === 0) return null
+  return games.find((name) => name.toLowerCase() === projectName.toLowerCase()) ?? games[0]
 }
 
 export function buildScript(engineRoot: string, platform = process.platform): string {
@@ -217,6 +236,13 @@ const InputSchema = z.object({
     .describe(
       '编译失败时也把编辑器打开（默认不开：带着编不过的代码打开，引擎只会再弹一次「要重编吗」）。' +
         '决定放弃修复、要把编辑器还给用户时才设 true'
+    ),
+  game_target_only: z
+    .boolean()
+    .optional()
+    .describe(
+      '只编独立游戏的 Target（Development），**不关编辑器、不重开**。用来验证打包时能不能编过：' +
+        '改过 Runtime 模块、动过 include 或 WITH_EDITOR 相关代码，交付前编一次。几分钟，不烘焙'
     )
 })
 
@@ -236,7 +262,8 @@ export function createCppFullRebuildTool(): UnrealAgentTool<FullRebuildResult> {
     // 声明最坏情况：discard_unsaved 会丢掉未保存的改动
     risk: 'destructive',
     // 不丢改动的那次（有未保存就拒绝并列清单）按 mutating 走：关了还会重开
-    riskFor: ({ discard_unsaved }) => (discard_unsaved === true ? 'destructive' : 'mutating'),
+    riskFor: ({ discard_unsaved, game_target_only }) =>
+      discard_unsaved === true && game_target_only !== true ? 'destructive' : 'mutating',
     concurrency: 'sequential',
     input: InputSchema,
     description:
@@ -249,12 +276,64 @@ export function createCppFullRebuildTool(): UnrealAgentTool<FullRebuildResult> {
       '普通的改 .cpp/.h 用 cpp_compile，别用这个 —— 它要关编辑器，慢得多。\n' +
       '【先存盘】编辑器里有未保存的改动会被拒绝并列出清单，先 ue_save 再调。\n' +
       '【编不过时编辑器保持关着】返回带文件名行号的报错，改完直接再调一次（会跳过关编辑器那步）。\n' +
-      '【返回 live=true 就是已经连回来了】可以直接接着发引擎命令。',
-    execute: async ({ project_path, discard_unsaved, reopen_on_failure }, ctx) => {
+      '【返回 live=true 就是已经连回来了】可以直接接着发引擎命令。\n' +
+      '【game_target_only=true】只编游戏 Target 验证打包能否编过，不关编辑器（见参数说明）。',
+    execute: async (
+      { project_path, discard_unsaved, reopen_on_failure, game_target_only },
+      ctx
+    ) => {
       const projectDir = project_path ?? getTargetProjectPath()
       if (!projectDir) throw new Error('不知道编哪个工程：这一轮没有连着的工程，请给 project_path')
       const uproject = await findUproject(projectDir)
       const projectName = basename(uproject, '.uproject')
+
+      if (game_target_only) {
+        const gameTarget = pickGameTarget(projectName, await readTargets(projectDir))
+        if (!gameTarget) {
+          throw new Error(
+            `${projectName} 的 Source/ 下没有游戏 Target（TargetType.Game 的 *.Target.cs），` +
+              '没法单独验证打包编译。纯蓝图工程不需要这一步'
+          )
+        }
+        const gameScript = buildScript(await engineRootFor(uproject))
+        await fs.access(gameScript).catch(() => {
+          throw new Error(`引擎里没有编译脚本 ${gameScript}，这份引擎装得不完整`)
+        })
+        const gameArgs = buildArgs(gameTarget, uproject)
+        if (process.platform === 'win32') [gameScript, ...gameArgs].forEach(quoteForCmd)
+
+        ctx.report({ text: `编译游戏 Target ${gameTarget}（不关编辑器）…` })
+        const build = await runBuild(gameScript, gameArgs, ctx.signal, (line) => {
+          if (/^\[\d+\/\d+\]/.test(line)) ctx.report({ text: `编译：${line.slice(0, 120)}` })
+        })
+        ctx.signal?.throwIfAborted()
+        const described = describeBuild(build)
+        const lines = [described.text]
+        if (described.ok) {
+          lines.push('游戏 Target 编过了：Runtime 模块没有混进只在编辑器里才有的代码。')
+        } else if (TRANSIENT_LOCK.test(build.output)) {
+          lines.push(
+            '编译被另一个 UnrealBuildTool 或 Live Coding 占着，不是代码问题。' +
+              '等编辑器里的编译结束再调一次。'
+          )
+        } else {
+          lines.push(
+            '编辑器里编得过、这里编不过，通常是 Runtime 模块用了编辑器专用的代码：' +
+              '包进 #if WITH_EDITOR，或者把它挪到 Editor 模块。编辑器没动过，还开着。'
+          )
+        }
+        return {
+          text: lines.join('\n'),
+          details: {
+            closedEditor: false,
+            built: described.ok,
+            reopened: false,
+            live: false,
+            target: gameTarget,
+            minutes: build.minutes
+          }
+        }
+      }
 
       const target = pickEditorTarget(projectName, await readTargets(projectDir))
       if (!target) {

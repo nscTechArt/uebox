@@ -13,6 +13,7 @@
  *   - `ue_content_move`          批量移动 / 改名 / 整目录搬迁（取代原单资产版本）
  *   - `ue_content_dependencies`  依赖 / 被引用闭包、断链、无引用资产（只读）
  *   - `ue_content_migrate`       连同依赖闭包拷到另一个工程
+ *   - `ue_content_set_properties` 改资产自身的设置（Nanite、碰撞复杂度、贴图压缩…），写完读回
  *
  * 安全网：
  *
@@ -32,6 +33,7 @@ import { migrateTool } from './migrate'
 import { namingAuditTool } from './namingAudit'
 import { projectPathRefsTool } from './projectPathRefs'
 import { rollbackTool } from './rollback'
+import { setPropertiesTool } from './setProperties'
 import type { UnrealAgentTool } from '../defineTool'
 
 export function contentOrganizeTools(): UnrealAgentTool<never>[] {
@@ -42,6 +44,7 @@ export function contentOrganizeTools(): UnrealAgentTool<never>[] {
     dependenciesTool,
     migrateTool,
     projectPathRefsTool,
-    rollbackTool
+    rollbackTool,
+    setPropertiesTool
   ] as unknown as UnrealAgentTool<never>[]
 }

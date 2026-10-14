@@ -90,6 +90,9 @@
 #include "MaterialGraph/MaterialGraph.h"
 #include "MaterialShared.h"
 #include "ShaderCompiler.h"
+// material.compile 回执里的成本统计 —— 材质编辑器 Stats 面板用的同一个入口，见 Handle_CompileMaterial
+#include "MaterialEditingLibrary.h"
+#include "RHI.h"
 
 /*
  * Substrate 从 5.4 起才有（5.3 叫 Strata，实验性，类名和引脚都不一样，不接）。
@@ -4523,6 +4526,77 @@ void FUAL_MaterialCommands::Handle_CompileMaterial(
 	Data->SetArrayField(TEXT("errors"), ErrorsJson);
 	Data->SetArrayField(TEXT("warnings"), WarningsJson);
 	Data->SetArrayField(TEXT("error_nodes"), ErrorNodesJson);
+
+	/*
+	 * 7. 成本统计 —— 材质编辑器底部 Stats 面板里的那几行数。
+	 *
+	 * 「编得过」只说明能用，不说明用得起：一个材质可以每像素几百条指令、
+	 * 采样器用到 15/16 还照样编译通过。行家看材质先看这几个数。
+	 *
+	 * 不自己数节点估算，直接调 UMaterialEditingLibrary::GetStatistics ——
+	 * 5.0–5.8 签名和 FMaterialStatistics 字段完全一致，内部走的就是 Stats 面板那套
+	 * FMaterialStatsUtils。有编译错误时着色器图没建成，引擎给的是 0 / -1，
+	 * 那组数字没有意义，干脆不给。
+	 */
+	if (!bHasErrors)
+	{
+		const FMaterialStatistics Stats = UMaterialEditingLibrary::GetStatistics(MaterialInterface);
+		TSharedPtr<FJsonObject> StatsObj = MakeShared<FJsonObject>();
+
+		// 指令数 ≤0 时编辑器面板显示的是 "n/a"（引擎原话：离线着色器编译器不可用或出错）。
+		// 给 null 而不是 0，免得被读成「零成本」
+		auto SetInstructionCount = [&StatsObj](const TCHAR* Key, int32 Count)
+		{
+			if (Count > 0)
+			{
+				StatsObj->SetNumberField(Key, Count);
+			}
+			else
+			{
+				StatsObj->SetField(Key, MakeShared<FJsonValueNull>());
+			}
+		};
+		SetInstructionCount(TEXT("pixel_shader_instructions"), Stats.NumPixelShaderInstructions);
+		SetInstructionCount(TEXT("vertex_shader_instructions"), Stats.NumVertexShaderInstructions);
+
+		// 采样器数是编出来的各个着色器里占用槽位最多的那个（引擎从编译产物里读，不是数节点）——
+		// Sampler Source 设成 Shared:Wrap/Clamp 的贴图共用槽位，所以它可以比贴图数少。
+		// 上限取引擎自己的 GetExpectedFeatureLevelMaxTextureSamplers —— 编辑器 Stats 面板
+		// 「Texture samplers: N/16」的分母就是它，各版本都是 16
+		StatsObj->SetNumberField(TEXT("samplers"), FMath::Max(Stats.NumSamplers, 0));
+		StatsObj->SetNumberField(TEXT("samplers_max"),
+			(int32)GetExpectedFeatureLevelMaxTextureSamplers(GMaxRHIFeatureLevel));
+		StatsObj->SetNumberField(TEXT("texture_samples_pixel"), Stats.NumPixelTextureSamples);
+		StatsObj->SetNumberField(TEXT("texture_samples_vertex"), Stats.NumVertexTextureSamples);
+		StatsObj->SetNumberField(TEXT("virtual_texture_samples"), Stats.NumVirtualTextureSamples);
+		StatsObj->SetNumberField(TEXT("uv_scalars"), Stats.NumUVScalars);
+		StatsObj->SetNumberField(TEXT("interpolator_scalars"), Stats.NumInterpolatorScalars);
+
+		// 静态开关：每个开关会让着色器按「开/关」各编一份（实例里实际用到的组合才编）。
+		// 只报引擎列出来的参数名，组合数由调用方按 2^N 理解上限，这里不替它估
+		TArray<FMaterialParameterInfo> SwitchInfos;
+		TArray<FGuid> SwitchIds;
+		MaterialInterface->GetAllStaticSwitchParameterInfo(SwitchInfos, SwitchIds);
+		TArray<TSharedPtr<FJsonValue>> SwitchNames;
+		for (const FMaterialParameterInfo& Info : SwitchInfos)
+		{
+			SwitchNames.Add(MakeShared<FJsonValueString>(Info.Name.ToString()));
+		}
+		StatsObj->SetArrayField(TEXT("static_switches"), SwitchNames);
+
+		// 静态通道遮罩参数同样按取值分排列，一起报
+		TArray<FMaterialParameterInfo> MaskInfos;
+		TArray<FGuid> MaskIds;
+		MaterialInterface->GetAllStaticComponentMaskParameterInfo(MaskInfos, MaskIds);
+		TArray<TSharedPtr<FJsonValue>> MaskNames;
+		for (const FMaterialParameterInfo& Info : MaskInfos)
+		{
+			MaskNames.Add(MakeShared<FJsonValueString>(Info.Name.ToString()));
+		}
+		StatsObj->SetArrayField(TEXT("static_component_masks"), MaskNames);
+
+		Data->SetObjectField(TEXT("stats"), StatsObj);
+	}
 
 	if (bHasErrors)
 	{

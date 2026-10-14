@@ -58,6 +58,9 @@
 #include "K2Node_ExecutionSequence.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_SpawnActorFromClass.h"
+// CreateWidget 节点的基类；UK2Node_CreateWidget 本身的头在 UMGEditor/Private，5.0–5.8 都拿不到，走反射
+#include "K2Node_ConstructObjectFromClass.h"
+#include "Blueprint/UserWidget.h"
 #include "K2Node_MakeArray.h"
 #include "K2Node_MakeStruct.h"
 #include "K2Node_BreakStruct.h"
@@ -1119,6 +1122,22 @@ static void UAL_AnnotateNodeForRewrite(UEdGraphNode* Node, const TSharedPtr<FJso
 			if (const UObject* Action = UALReflect::GetObjectProp(Node, TEXT("InputAction")))
 			{
 				NodeObj->SetStringField(TEXT("member_name"), Action->GetPathName());
+			}
+			return;
+		}
+	}
+	// CreateWidget：节点类的头在 UMGEditor/Private，同样走反射认
+	if (UClass* CreateWidgetNodeClass = UALReflect::FindScriptClass(TEXT("/Script/UMGEditor.K2Node_CreateWidget")))
+	{
+		if (Node->IsA(CreateWidgetNodeClass))
+		{
+			NodeObj->SetStringField(TEXT("write_as"), TEXT("CreateWidget"));
+			if (const UK2Node_ConstructObjectFromClass* ConstructNode = Cast<UK2Node_ConstructObjectFromClass>(Node))
+			{
+				if (const UClass* WidgetClass = ConstructNode->GetClassToSpawn())
+				{
+					NodeObj->SetStringField(TEXT("target_class"), WidgetClass->GetPathName());
+				}
 			}
 			return;
 		}
@@ -4013,6 +4032,92 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 		return SpawnNode;
 	}
 
+	// ===== CreateWidget =====
+	/**
+	 * 「Create Widget」节点（UK2Node_CreateWidget）。和 SpawnActor 同是
+	 * UK2Node_ConstructObjectFromClass 的子类：Class 引脚设好后要 ReconstructNode，
+	 * 返回值引脚才会从 UserWidget 变成具体的 WBP_xxx_C —— 不重建的话，后面要接
+	 * WBP 自己的函数 / 变量时类型对不上，连线被拒。
+	 *
+	 * 节点类的头文件在 UMGEditor/Private（5.0–5.8 都是），include 不到，
+	 * 所以按 /Script/UMGEditor.K2Node_CreateWidget 反射找类，再当基类用；
+	 * 要用的 GetClassPin 在基类上，BlueprintGraph 导出的。UMGEditor 本来就在
+	 * Build.cs 的依赖里，模块一定已加载。
+	 *
+	 * 构造照上面 CallFunction 那段 5.0–5.2 分支：NewObject + AddNode，再按
+	 * FGraphNodeCreator::Finalize 的顺序收尾 —— 5.0 的 UEdGraph::CreateNode 是
+	 * protected，能指定子类的 FGraphNodeCreator::CreateNode 重载 5.3 才有。
+	 * 引脚先分配再 PostPlacedNewNode，理由同 SpawnActor（CreateWidget 自己没覆写
+	 * PostPlacedNewNode，基类那份不碰必有引脚，先分配只是不留同一个坑）。
+	 *
+	 * 加到屏幕不用另起类型：{"class":"Function","member_name":"UserWidget.AddToViewport"}，
+	 * Target 接这个节点的返回值 —— 普通 CallFunction 那条路就能建。
+	 */
+	// K2Node_CreateWidget 也认：get_graph 回的 class 原样抄回来时，照样能带上 target_class
+	if (T == TEXT("createwidget") || T == TEXT("k2nodecreatewidget"))
+	{
+		// Class 可以留空由引脚传入；给了就必须是能实例化的控件类，不建一个错类的节点还回成功
+		UClass* WidgetClass = nullptr;
+		if (!Spec.TargetClass.IsEmpty())
+		{
+			WidgetClass = UAL_ResolveVariableOwnerClass(Blueprint, Spec.TargetClass, OutError);
+			if (!WidgetClass)
+			{
+				return nullptr;
+			}
+			if (!WidgetClass->IsChildOf(UUserWidget::StaticClass()))
+			{
+				OutError = FString::Printf(
+					TEXT("CreateWidget target_class %s is not a Widget Blueprint - actors use SpawnActor"),
+					*WidgetClass->GetName());
+				return nullptr;
+			}
+			// UserWidget 本身是抽象类，编译时才报「不能创建抽象类」，离写错的地方太远
+			if (WidgetClass->HasAnyClassFlags(CLASS_Abstract))
+			{
+				OutError = FString::Printf(
+					TEXT("CreateWidget target_class %s is abstract - pass a Widget Blueprint, e.g. WBP_HUD"),
+					*WidgetClass->GetName());
+				return nullptr;
+			}
+		}
+
+		UClass* NodeClass = UALReflect::FindScriptClass(TEXT("/Script/UMGEditor.K2Node_CreateWidget"));
+		if (!NodeClass || !NodeClass->IsChildOf(UK2Node_ConstructObjectFromClass::StaticClass()))
+		{
+			OutError = TEXT("K2Node_CreateWidget is not available - the UMGEditor module is not loaded");
+			return nullptr;
+		}
+
+		UK2Node_ConstructObjectFromClass* WidgetNode =
+			NewObject<UK2Node_ConstructObjectFromClass>(Graph, NodeClass, NAME_None, RF_Transactional);
+		if (!WidgetNode)
+		{
+			OutError = TEXT("failed to create the CreateWidget node");
+			return nullptr;
+		}
+		if (Graph->HasAnyFlags(RF_Transient))
+		{
+			WidgetNode->SetFlags(RF_Transient);
+		}
+		Graph->AddNode(WidgetNode, /*bUserAction=*/false, /*bSelectNewNode=*/true);
+		WidgetNode->NodePosX = PosX;
+		WidgetNode->NodePosY = PosY;
+		WidgetNode->CreateNewGuid();
+		WidgetNode->AllocateDefaultPins();
+		WidgetNode->PostPlacedNewNode();
+
+		if (WidgetClass)
+		{
+			if (UEdGraphPin* ClassPin = WidgetNode->GetClassPin())
+			{
+				ClassPin->DefaultObject = WidgetClass;
+				WidgetNode->ReconstructNode();
+			}
+		}
+		return WidgetNode;
+	}
+
 	// ===== 标准宏（ForLoop / WhileLoop / Gate / DoOnce / DoN / FlipFlop / IsValid / ForEach…）=====
 	{
 		// 类型名 → StandardMacros 里的图名。宏名本身可以直接当类型用
@@ -4528,7 +4633,7 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 	}
 
 	OutError = FString::Printf(
-		TEXT("Unsupported node type: %s. Named types: Event, Function, VariableGet, VariableSet, InputAction, EnhancedInputAction, Branch, Sequence, Cast, SpawnActor, CustomEvent, Select, MakeArray, MakeStruct, BreakStruct, Self, Timeline, CallDispatcher, BindEvent, UnbindEvent, UnbindAllEvents, CreateEvent, ForLoop, WhileLoop, Gate, DoOnce, DoN, FlipFlop, IsValid, ForEachLoop, ForEachLoopWithBreak, ReverseForEachLoop, Macro. Or pass raw_class=\"K2Node_<Something>\".%s"),
+		TEXT("Unsupported node type: %s. Named types: Event, Function, VariableGet, VariableSet, InputAction, EnhancedInputAction, Branch, Sequence, Cast, SpawnActor, CreateWidget, CustomEvent, Select, MakeArray, MakeStruct, BreakStruct, Self, Timeline, CallDispatcher, BindEvent, UnbindEvent, UnbindAllEvents, CreateEvent, ForLoop, WhileLoop, Gate, DoOnce, DoN, FlipFlop, IsValid, ForEachLoop, ForEachLoopWithBreak, ReverseForEachLoop, Macro. Or pass raw_class=\"K2Node_<Something>\".%s"),
 		*Spec.Type, *UALAnimGraph::DescribeNodeTypesForError(Graph));
 	return nullptr;
 }

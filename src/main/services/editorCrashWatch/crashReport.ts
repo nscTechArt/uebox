@@ -29,9 +29,6 @@ export interface CrashSummary {
   time: number
 }
 
-/** 编辑器还活着、或者是被人结束的那几类报告 */
-const NON_FATAL_TYPES = new Set(['ensure', 'stall', 'abnormalshutdown'])
-
 const CALL_STACK_LINES = 8
 const ERROR_MESSAGE_MAX = 600
 
@@ -52,6 +49,31 @@ function tag(xml: string, name: string): string {
   return match ? decodeXml(match[1]).trim() : ''
 }
 
+/**
+ * 这份报告是哪一类。只有 `fatal` 是编辑器真的崩了；其余三类同一个目录里也有，
+ * 但编辑器还活着（ensure、卡顿）或者是被人结束的（abnormal_shutdown）。
+ */
+export type CrashKind = 'fatal' | 'ensure' | 'stall' | 'abnormal_shutdown'
+
+export function crashKind(xml: string): CrashKind {
+  if (tag(xml, 'IsEnsure').toLowerCase() === 'true') return 'ensure'
+  switch (tag(xml, 'CrashType').toLowerCase()) {
+    case 'ensure':
+      return 'ensure'
+    case 'stall':
+      return 'stall'
+    case 'abnormalshutdown':
+      return 'abnormal_shutdown'
+    default:
+      return 'fatal'
+  }
+}
+
+/** 取 CrashContext 里的一个字段（已还原 XML 实体、去掉首尾空白），没有就是空串 */
+export function crashContextField(xml: string, name: string): string {
+  return tag(xml, name)
+}
+
 /** 解析一份 CrashContext。是 ensure / 卡顿，或者 `GameName` 对不上，返回 null */
 export function parseCrashContext(
   xml: string,
@@ -61,8 +83,7 @@ export function parseCrashContext(
     return null
   }
   const crashType = tag(xml, 'CrashType')
-  if (tag(xml, 'IsEnsure').toLowerCase() === 'true') return null
-  if (NON_FATAL_TYPES.has(crashType.toLowerCase())) return null
+  if (crashKind(xml) !== 'fatal') return null
 
   const errorMessage = tag(xml, 'ErrorMessage')
   return {

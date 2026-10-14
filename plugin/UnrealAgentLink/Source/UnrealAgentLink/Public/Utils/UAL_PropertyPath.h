@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonValue.h"
 
+class FProperty;
+
 /**
  * 按**路径**读写属性，穿透嵌套结构体、数组和 Instanced 子对象。
  *
@@ -69,6 +71,37 @@ namespace UALPropertyPath
 
 	/** 同 GetByPath，起点是一块结构体内存 */
 	TSharedPtr<FJsonValue> GetInStruct(const UStruct* RootStruct, const void* RootData, const FString& Path, FString& OutError);
+
+	/** 路径上的一段，见 ResolvePath */
+	struct FResolvedStep
+	{
+		/** 这一段对应的属性。带下标的段（`A[2]`）给的是数组属性本身，不是 Inner */
+		FProperty* Property = nullptr;
+		/** 这一段的内存归哪个对象：根对象，或者路径穿过的子对象（如 StaticMesh 的 BodySetup） */
+		UObject* Owner = nullptr;
+		/** 这一段是对象引用、路径还要往里走时，走进去的那个对象；否则为空 */
+		UObject* Descended = nullptr;
+	};
+
+	enum class EResolveFailure : uint8
+	{
+		None,
+		/** 路径写法不对，或数组下标越界（ResolvePath 不扩容） */
+		InvalidPath,
+		/** 某一段的字段不存在 */
+		NotFound,
+		/** 某一段走不进去：空的子对象，或标量没有子字段 */
+		NotTraversable
+	};
+
+	/**
+	 * **只解析不写**：沿路径找出每一段的属性和它所在的对象。
+	 *
+	 * 给「改之前先看清楚要改什么」的调用方用：判断每一段在细节面板里能不能编辑、
+	 * 有没有穿到别的资产上去，以及拼 PreEditChange / PostEditChange 要的属性链。
+	 * 和 SetByPath 的区别：数组下标越界时报错，不扩容。
+	 */
+	bool ResolvePath(UObject* Root, const FString& Path, TArray<FResolvedStep>& OutSteps, EResolveFailure& OutFailure, FString& OutError);
 
 	/**
 	 * 列出某个容器下所有可写字段的名字，用来拼「你是不是想写 XXX」。

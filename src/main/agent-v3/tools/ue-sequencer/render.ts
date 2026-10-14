@@ -74,6 +74,9 @@ export const MRQ_DISABLED_HINT =
 export const RENDER_FORMATS = ['png', 'jpg', 'exr', 'bmp', 'mp4', 'mp4_mrq'] as const
 export const RENDER_QUALITIES = ['draft', 'standard', 'high', 'ultra'] as const
 
+/** 控制台变量名：非空、不带任何空白。与插件 Handle_Render 的校验一致 */
+const CVAR_NAME = /^\S+$/
+
 const InputSchema = z.object({
   sequence_path: z.string().trim().min(1).describe('要渲的序列，如 /Game/Cinematics/SQ_Intro'),
   map_path: z
@@ -94,7 +97,7 @@ const InputSchema = z.object({
     .enum(RENDER_QUALITIES)
     .optional()
     .describe(
-      '画质档，不填是 standard。draft：不加采样，最快，用来看镜头对不对；standard：每帧 4 次时间采样；' +
+      '画质档，不填是 standard。draft：不加采样、预热很少，最快，用来看镜头对不对；standard：每帧 4 次时间采样；' +
         'high：2×8；ultra：4×16，最慢。档位越高，同一帧渲得越久'
     ),
   renderer: z
@@ -134,7 +137,18 @@ const InputSchema = z.object({
     .trim()
     .min(1)
     .optional()
-    .describe('输出目录的绝对路径。不填就是 工程/Saved/MovieRenders/序列名/时间戳')
+    .describe('输出目录的绝对路径。不填就是 工程/Saved/MovieRenders/序列名/时间戳'),
+  // 只挡写不进去的名字（空、带空白 —— MRQ 按名字查变量，查不到就静默跳过），不设白名单
+  console_variables: z
+    .record(z.string(), z.number())
+    .refine((m) => Object.keys(m).every((k) => CVAR_NAME.test(k)), {
+      message: '控制台变量名不能为空、不能带空格或换行；名字和值分开写，如 {"r.ForceLOD": 0}'
+    })
+    .optional()
+    .describe(
+      '渲染期间临时设的控制台变量 {名字: 数值}，渲完 MRQ 自动恢复，叠在预设之上。' +
+        '首帧贴图糊、切镜 LOD 跳一下：{"r.Streaming.FullyLoadUsedTextures": 1, "r.ForceLOD": 0}。只收数值'
+    )
 })
 
 type RenderInput = z.infer<typeof InputSchema>
@@ -151,9 +165,36 @@ export interface RenderStartOutput {
   quality: string
   /** 实际要渲的范围，闭开区间，显示帧号 */
   frame_range: [number, number]
+  /** 真写进 MRQ 配置的控制台变量（值是引擎存的 float）。没有写进去的在 warnings 里 */
+  console_variables?: Record<string, number>
   /** 用了用户的预设时才有 */
   preset_path?: string
   warnings?: string[]
+}
+
+/** 旧版插件不认 console_variables，会静默忽略；这时得照实说没生效 */
+export const CVARS_IGNORED =
+  '编辑器里的插件没有回报 console_variables —— 多半是插件版本旧、不认这个参数，这些控制台变量没有生效'
+
+/**
+ * 要了控制台变量、引擎却一个都没回报也没给理由时，补一条警告。
+ * 插件对查不到的变量会写进 warnings，那种情况不重复说
+ */
+export function checkConsoleVariables(
+  requested: Record<string, number> | undefined,
+  job: RenderStartOutput
+): RenderStartOutput {
+  const names = Object.keys(requested ?? {})
+  if (names.length === 0 || job.console_variables) return job
+  if ((job.warnings ?? []).some((w) => names.some((n) => w.includes(n)))) return job
+  return { ...job, warnings: [...(job.warnings ?? []), CVARS_IGNORED] }
+}
+
+/** 引擎回的是 float：0.1 会变成 0.10000000149011612，给人看时收一下 */
+function formatCVars(cvars: Record<string, number>): string {
+  return Object.entries(cvars)
+    .map(([k, v]) => `${k}=${Number(v.toPrecision(6))}`)
+    .join('、')
 }
 
 export type RenderState = 'rendering' | 'finished' | 'failed' | 'canceled' | 'none'
@@ -216,9 +257,13 @@ function describeJob(j: RenderStartOutput): string {
   const settings = j.preset_path
     ? `预设 ${j.preset_path}`
     : `${j.renderer === 'path_tracer' ? '路径追踪' : 'Lumen'}，${j.quality} 档`
+  const cvars =
+    j.console_variables && Object.keys(j.console_variables).length > 0
+      ? `，控制台变量 ${formatCVars(j.console_variables)}`
+      : ''
   return (
     `${j.sequence_path}（关卡 ${j.map_path}）→ ${j.format.toUpperCase()} ${w}×${h}，` +
-    `${settings}，帧 [${j.frame_range[0]}, ${j.frame_range[1]})`
+    `${settings}，帧 [${j.frame_range[0]}, ${j.frame_range[1]})${cvars}`
   )
 }
 
@@ -468,6 +513,7 @@ export function createSequenceRenderTool(): UnrealAgentTool<RenderDetails> {
       if (!job?.job_id) {
         return { text: '失败：引擎没有返回渲染任务', isError: true }
       }
+      job = checkConsoleVariables(input.console_variables, job)
 
       ctx.report({
         text: `已开始渲染：${describeJob(job)}`,

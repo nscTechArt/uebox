@@ -134,6 +134,46 @@ describe('整图写入', () => {
   })
 
   /**
+   * 以前 SpawnActor 拿到控件类会回「widgets use CreateWidget」，而 CreateWidget
+   * 这个具名类型并不存在 —— 模型照着改还是被拒。插件补上之后，app 侧要做的是：
+   * 描述里列出它、target_class 原样发下去（插件靠它设 Class 引脚、重建返回值类型）。
+   * 加到屏幕走普通 Function：UserWidget.AddToViewport。
+   */
+  it('CreateWidget 的 target_class 原样透传，AddToViewport 走普通 Function', async () => {
+    mockApply({ ...okResponse, created_count: 2 })
+
+    await run({
+      blueprint_path: '/Game/BP_PlayerController',
+      nodes: [
+        { id: 'w', class: 'CreateWidget', target_class: 'WBP_HUD' },
+        { id: 'add', class: 'Function', member_name: 'UserWidget.AddToViewport' }
+      ],
+      connections: [
+        { from: 'w.then', to: 'add.execute' },
+        { from: 'w.ReturnValue', to: 'add.self' }
+      ]
+    })
+
+    const sent = writeParams().nodes as unknown as Array<Record<string, unknown>>
+    expect(sent[0]).toMatchObject({ class: 'CreateWidget', target_class: 'WBP_HUD' })
+    expect(sent[1]).toMatchObject({ class: 'Function', member_name: 'UserWidget.AddToViewport' })
+  })
+
+  it('描述里列出 CreateWidget，并指明怎么加到屏幕', () => {
+    type Described = { description?: string }
+    const schema = (
+      createApplyBlueprintGraphTool() as unknown as {
+        inputSchema: { shape: { nodes: { element: { shape: Record<string, Described> } } } }
+      }
+    ).inputSchema
+    const nodeShape = schema.shape.nodes.element.shape
+
+    expect(nodeShape.class.description).toContain('CreateWidget')
+    expect(nodeShape.target_class.description).toContain('CreateWidget')
+    expect(nodeShape.target_class.description).toContain('UserWidget.AddToViewport')
+  })
+
+  /**
    * 关键帧的 interp / 切线和 length_mode 走的是 `params` 那条老路：schema 里
    * 少一个字段，zod 解析时就把它整个剥掉，请求发到插件时已经没有了，
    * 插件那头连「收到过一个不认识的字段」都不知道。所以断言盯的是

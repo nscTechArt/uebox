@@ -80,7 +80,13 @@ const DestroyActorParamsSchema = z
     targets: z.unknown().optional(),
     name: z.string().optional().describe('兼容字段：单个名称'),
     path: z.string().optional().describe('兼容字段：单个路径'),
-    batch: BatchInputSchema.describe('兼容 destroy_batch: {name|path} 列表；可为数组或 JSON 字符串')
+    batch: BatchInputSchema.describe(
+      '兼容 destroy_batch: {name|path} 列表；可为数组或 JSON 字符串'
+    ),
+    force: z
+      .boolean()
+      .optional()
+      .describe('被关卡蓝图或其它 Actor 引用也照删（引用会变 None）。只在用户确认后用')
   })
   .refine(
     (data) =>
@@ -94,6 +100,8 @@ const DestroyActorParamsSchema = z
 export type DestroyActorParams = z.infer<typeof DestroyActorParamsSchema>
 
 export interface DestroyActorPayload {
+  /** 有引用也删。不传 = 插件把被引用的那几个按住不删，列在 blocked 里 */
+  force?: boolean
   targets: {
     selection?: boolean
     names?: string[]
@@ -106,6 +114,27 @@ export interface DestroyActorPayload {
   }
 }
 
+/** 插件回的一条引用方：关卡蓝图（带节点标题）或另一个 Actor 的某个属性 */
+interface ActorReferencer {
+  /** level_blueprint | actor */
+  kind?: string
+  referencer?: string
+  referencer_path?: string
+  /** kind=actor：引用方身上的属性路径，如 TriggerComp.TargetDoor */
+  property?: string
+  /** kind=level_blueprint：引用它的节点（最多点名 5 个） */
+  nodes?: string
+  node_count?: number
+}
+
+interface ReferencedActorEntry {
+  name?: string
+  path?: string
+  class?: string
+  referencers?: ActorReferencer[]
+  referencer_count?: number
+}
+
 interface DestroyActorResponse extends WorldScopedResponse, UnmatchedTargetsResponse {
   ok?: boolean
   success?: boolean
@@ -113,10 +142,53 @@ interface DestroyActorResponse extends WorldScopedResponse, UnmatchedTargetsResp
   error?: string
   count?: number
   target_count?: number
-  deleted_actors?: Array<{ name?: string; path?: string; class?: string } | string>
+  /** force 删掉的条目会带 referencers：这些引用此刻已经变成 None */
+  deleted_actors?: Array<ReferencedActorEntry | string>
   /** 找到了但引擎没删掉的（新插件才有）。老插件只能从 count < target_count 看出来 */
   failed_count?: number
   failed?: Array<{ name?: string; path?: string; class?: string; reason?: string }>
+  /** 还被引用、没加 force，所以没删的（新插件才有）。它们原样留在关卡里 */
+  blocked_count?: number
+  blocked?: ReferencedActorEntry[]
+  /** false = 这次没查引用（PIE 世界里删的是副本） */
+  references_checked?: boolean
+}
+
+/** 一条引用方写成人话：「关卡蓝图（2 个节点：EventGraph: Door_1）」「Trigger_1 的 TargetDoor」 */
+function describeReferencer(ref: ActorReferencer): string {
+  if (ref.kind === 'level_blueprint') {
+    const count = ref.node_count ? `${ref.node_count} 个节点` : '节点'
+    return `关卡蓝图（${count}${ref.nodes ? `：${ref.nodes}` : ''}）`
+  }
+  const who = ref.referencer || ref.referencer_path || '某个 Actor'
+  return ref.property ? `${who} 的 ${ref.property}` : who
+}
+
+/** 列几个 Actor 的引用方。超出插件上限（每个 20 条）的只说还有几条 */
+function describeReferencedActors(entries: readonly ReferencedActorEntry[]): string {
+  return entries
+    .map((e) => {
+      const refs = e.referencers ?? []
+      const rest = Math.max((e.referencer_count ?? refs.length) - refs.length, 0)
+      const list = refs.map(describeReferencer).join('、') || '（插件没列出引用方）'
+      return `- ${e.name || e.path || '(未命名)'}：${list}${rest > 0 ? ` 等，还有 ${rest} 处` : ''}`
+    })
+    .join('\n')
+}
+
+/**
+ * 被拦下没删的那段话。用户在大纲里手动删时编辑器会弹框问「它被关卡蓝图引用了，确定？」，
+ * 我们这条路不能弹框，所以插件按住不删，这里把同样的问题交给模型去问用户。
+ * 不能写成「换个办法删」：绕开的结果就是门和触发器的连线无声断掉。
+ */
+function describeBlocked(blocked: readonly ReferencedActorEntry[]): string {
+  if (blocked.length === 0) return ''
+  return (
+    `因为还被引用，以下 ${blocked.length} 个 Actor 没删（原样留在关卡里）：\n` +
+    describeReferencedActors(blocked) +
+    '\n下一步：先把这些引用告诉用户。用户确认仍要删，再带 force: true 重调，这些引用会变成 None；' +
+    '否则先改掉引用方（关卡蓝图节点 / 属性）再删。'
+  )
 }
 
 /**
@@ -227,6 +299,7 @@ export function normalizeDestroyTargets(input: DestroyActorParams): DestroyActor
   if (names.size > 0) payload.targets.names = Array.from(names)
   if (paths.size > 0) payload.targets.paths = Array.from(paths)
   if (filter) payload.targets.filter = filter
+  if (input.force === true) payload.force = true
 
   return payload
 }
@@ -309,12 +382,25 @@ selection: true 表示删掉用户此刻在视口/大纲里选中的那些 —�
           item: f.name || f.path || '(未命名)',
           reason: f.reason
         }))
+        const blocked = response?.blocked ?? []
+        const blockedCount = Math.max(response?.blocked_count ?? 0, blocked.length)
+        // 被拦下的也在 target_count - count 这个差值里，不能再算一遍成「失败」
         const failedCount = Math.max(
           response?.failed_count ?? failures.length,
-          targetCount !== undefined ? targetCount - count : 0,
+          targetCount !== undefined ? targetCount - count - blockedCount : 0,
           0
         )
         const unmatched = unmatchedTargetFields(response).unmatched_count ?? 0
+        const blockedText = describeBlocked(blocked)
+        // force 删掉的：引用此刻已经变成 None，要点名让模型告诉用户去哪儿补
+        const broken = (deletedActors ?? []).filter(
+          (a): a is ReferencedActorEntry =>
+            typeof a === 'object' && a !== null && (a.referencers?.length ?? 0) > 0
+        )
+        const brokenText =
+          broken.length > 0
+            ? `以下引用已随删除变成 None，需要用户去补：\n${describeReferencedActors(broken)}`
+            : ''
 
         // 回了 count 就按 count 说话：「ok 但删了 0 个」是失败。
         // 没回 count 的极老插件只能信它的 ok
@@ -326,23 +412,32 @@ selection: true 表示删掉用户此刻在视口/大纲里选中的那些 —�
             // 点名删 7 个只删掉 6 个时，第 7 个的名字必须出现在这句话里。
             // 删除不可逆：静默少删一个，用户是照着「删完了」往下干的
             describeUnmatchedTargets(response) +
-            describeWorld(response)
+            describeWorld(response) +
+            (brokenText ? `\n${brokenText}` : '')
           // 老插件只给了差值没给名单时，也得有一条说明，不能只剩一个数字
           const listed =
             failures.length === 0 && failedCount > 0
               ? [{ item: `${failedCount} 个 Actor`, reason: '引擎没删掉，插件没说是哪几个' }]
               : failures
+          const headed = withPartialHeadline(
+            body,
+            // 被引用按住的算「跳过」：没尝试删，原样还在
+            {
+              succeeded: count,
+              failed: failedCount,
+              skipped: unmatched + blockedCount,
+              unit: '个 Actor'
+            },
+            listed
+          )
           return {
             // 有没删掉的就先说部分完成，不能先说「成功删除 6 / 7」（AGENTS.md §5 第 14 条）
-            message: withPartialHeadline(
-              body,
-              { succeeded: count, failed: failedCount, skipped: unmatched, unit: '个 Actor' },
-              listed
-            ),
+            message: blockedText ? `${headed}\n${blockedText}` : headed,
             success: true,
             count,
             target_count: targetCount,
             ...(failedCount > 0 ? { failed_count: failedCount, failed: response?.failed } : {}),
+            ...(blockedCount > 0 ? { blocked_count: blockedCount, blocked } : {}),
             deleted_actors: deletedActors,
             warning:
               criticalDeleted.length > 0
@@ -350,7 +445,10 @@ selection: true 表示删掉用户此刻在视口/大纲里选中的那些 —�
                 : undefined,
             ...unmatchedTargetFields(response),
             ...worldFields(response),
-            _aiInstruction: 'Actor 删除完成。如果所有任务已完成，请调用 done 工具汇报结果。'
+            _aiInstruction:
+              blockedCount > 0
+                ? '有 Actor 因为还被引用没删，先按 message 里的清单问用户，别直接加 force。'
+                : 'Actor 删除完成。如果所有任务已完成，请调用 done 工具汇报结果。'
           }
         }
 
@@ -363,8 +461,13 @@ selection: true 表示删掉用户此刻在视口/大纲里选中的那些 —�
           success: false,
           deleted_actors: deletedActors,
           error:
-            (response?.error || response?.message || '删除 Actor 失败，未收到成功确认') +
-            (failureList ? `\n${failureList}` : ''),
+            // 全被引用按住时，插件那句英文只是概要；给模型的是逐个列出的引用方和下一步
+            blockedText && failures.length === 0
+              ? blockedText
+              : (response?.error || response?.message || '删除 Actor 失败，未收到成功确认') +
+                (failureList ? `\n${failureList}` : '') +
+                (blockedText ? `\n${blockedText}` : ''),
+          ...(blockedCount > 0 ? { blocked_count: blockedCount, blocked } : {}),
           code,
           details,
           raw: response

@@ -53,6 +53,7 @@
 #include "RenderingThread.h"
 #include "UObject/Package.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/UserInterfaceSettings.h"
 #include "IImageWrapperModule.h"
 #include "IImageWrapper.h"
 #include "Misc/FileHelper.h"
@@ -1078,11 +1079,16 @@ void FUAL_WidgetCommands::Handle_Preview(const TSharedPtr<FJsonObject>& Payload,
 	RenderTarget->InitAutoFormat(Width, Height);
 	RenderTarget->UpdateResourceImmediate();
 
+	// 游戏里 UMG 会按项目「用户界面」设置的 DPI 曲线缩放（默认按短边），1920x1080 的布局放到 1280x720
+	// 会整体缩小。按 1 倍画出来的预览和实际游戏对不上，所以这里用同一条曲线算出缩放再画。
+	// 带 Scale 的 DrawWidget 在 5.0~5.8 都是：根几何逻辑尺寸 = 像素尺寸 / Scale，再按 Scale 放大到像素。
+	const float DPIScale = GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(Width, Height));
+
 	// 使用 FWidgetRenderer 渲染到 RenderTarget；渲染器和 Slate 控件限定在块内，画完即释放
 	{
 		FWidgetRenderer WidgetRenderer(true);
 		TSharedRef<SWidget> SlateWidget = TempWidget->TakeWidget();
-		WidgetRenderer.DrawWidget(RenderTarget, SlateWidget, FVector2D(Width, Height), 0.0f);
+		WidgetRenderer.DrawWidget(RenderTarget, SlateWidget, DPIScale, FVector2D(Width, Height), 0.0f);
 		FlushRenderingCommands();
 	}
 
@@ -1128,8 +1134,9 @@ void FUAL_WidgetCommands::Handle_Preview(const TSharedPtr<FJsonObject>& Payload,
 	Result->SetStringField(TEXT("path"), OutputPath);
 	Result->SetNumberField(TEXT("width"), Width);
 	Result->SetNumberField(TEXT("height"), Height);
+	Result->SetNumberField(TEXT("dpi_scale"), DPIScale);
 	
-	UE_LOG(LogUALWidget, Log, TEXT("widget.preview: path=%s, output=%s"), *Path, *OutputPath);
+	UE_LOG(LogUALWidget, Log, TEXT("widget.preview: path=%s, output=%s, dpi_scale=%.3f"), *Path, *OutputPath, DPIScale);
 	
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 #else

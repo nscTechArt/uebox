@@ -91,6 +91,9 @@ interface PlaytestResponse {
   /** 按时间抓的帧。没抓成的那些也在里面，带 error；capture_ms 是这一帧卡了游戏多久 */
   frames?: Array<{ at: number; path?: string; error?: string; capture_ms?: number }>
   frame_mode?: 'scene' | 'window' | string
+  /** 只在多人（非 standalone 或人数 > 1）时回 */
+  net_mode?: 'listen_server' | 'client' | string
+  num_players?: number
 }
 
 const PlaytestSchema = z.object({
@@ -110,25 +113,18 @@ const PlaytestSchema = z.object({
    * 足以让人照着它下一个关于「运行效果」的结论。这正是 2026-09-17
    * 用户反馈的那件事：拿一张图就下定论。
    */
-  frames: z
-    .number()
-    .int()
-    .min(0)
-    .max(36)
-    .optional()
-    .describe(
-      '抓几帧拼成时间轴拼图，默认 0（只有收尾那一张）。' +
-        '移动、掉落、生成、变黑这些事单帧里看不出来。' +
-        '**每 9 帧一张图**，格子大小恒定：9=一张，18=两张，27=三张。' +
-        '每多一张就多一份图片预算，跑得久要看全程才往上加。时间在整段里均分，首尾各一帧。' +
-        '抓一帧会让游戏卡约 0.1 秒（实测），帧数×0.1 秒超过时长两成就别信这次的流畅度'
-    ),
+  frames: z.number().int().min(0).max(36).optional().describe(
+    // 「单帧看不出动没动」「每 9 帧一张图、别拉满」工具说明里已经各说了一遍，
+    // 「抓帧卡游戏」由 summarize 按实测 capture_ms 当场点名 —— 这里不再重复，
+    // 省下的字节让给 net_mode / num_players（常驻组，改动要字节中性）
+    '抓几帧拼成时间轴拼图，默认 0（只有收尾那一张）。时间在整段里均分，首尾各一帧'
+  ),
   frame_times: z
     .array(z.number())
     .optional()
     .describe(
-      '可选，每帧抓在开跑后第几秒，给了就不再均分。用来把帧钉在事件前后：' +
-        '第 2 秒发了 ce OpenDoor 就传 [1.9, 2.1, 2.5, 3.5]。超过时长的夹到结尾'
+      '每帧抓在开跑后第几秒，给了就不再均分。用来把帧钉在事件前后：' +
+        '第 2 秒发了 ce OpenDoor 就传 [1.9, 2.1, 2.5, 3.5]'
     ),
   frame_mode: z
     .enum(['scene', 'window'])
@@ -142,6 +138,29 @@ const PlaytestSchema = z.object({
     .boolean()
     .optional()
     .describe('一出现运行时错误就提前停，默认 false。想快速定位崩溃点时用'),
+  /**
+   * 编辑器 Play 下拉里的 Net Mode / Number of Players。
+   *
+   * 单进程单人 PIE 验不了复制和 RPC —— 没有客户端，「服务器改了、客户端没收到」
+   * 根本不会发生。行家的验法是开两个人，看 PrintString 前面引擎自己加的
+   * 「Server:」「Client 1:」。怎么读这些前缀放在返回的 summary 里说
+   * （`describeNetSession`），不进常驻的参数说明。
+   *
+   * 插件那边改的是一份设置副本，用户的 Editor Preferences 不动。
+   */
+  net_mode: z
+    .enum(['standalone', 'listen_server', 'client'])
+    .optional()
+    .describe(
+      '默认 standalone。验复制/RPC 用 listen_server（1 号玩家兼服务器）或 client（独立服务器）'
+    ),
+  num_players: z
+    .number()
+    .int()
+    .min(1)
+    .max(4)
+    .optional()
+    .describe('1-4，默认 1；大于 1 且没给 net_mode 时按 listen_server'),
   events: z
     .array(
       z.object({
@@ -305,6 +324,69 @@ function summarize(response: PlaytestResponse): string {
   }
 
   return parts.join('；')
+}
+
+/** 引擎 PrintString 自己加的实例前缀（KismetSystemLibrary.cpp）。开了 bLogPrintStringSource 时前面还有一段「[对象名] 」 */
+const INSTANCE_PREFIX = /^(?:\[[^\]]*\] )?(Server|Client \d+): /
+
+/**
+ * 多人试玩怎么读。
+ *
+ * 前缀是引擎加的、插件原样转过来，模型照理能自己数 —— 但它不一定逐条看数组，
+ * 而多人验证的结论恰恰就在「哪一侧打了、哪一侧没打」里。所以按来源数好写进 summary。
+ *
+ * 另外三件事不说就会被读错：
+ * - errors / warnings 不带实例标记（引擎的报错不加前缀），分不出是哪一侧报的；
+ * - Actor 增减数的是服务器世界，不是玩家眼前那个；
+ * - 截图、采样帧、events 都落在第一个有窗口的实例上，不是每个人各一份。
+ *
+ * 单人（插件不回 net_mode）时一个字都不加。
+ */
+function describeNetSession(response: PlaytestResponse): string {
+  if (!response.net_mode) return ''
+
+  const counts = new Map<string, number>()
+  let unprefixed = 0
+  for (const line of response.print_strings) {
+    const source = INSTANCE_PREFIX.exec(line)?.[1]
+    if (source) counts.set(source, (counts.get(source) ?? 0) + 1)
+    else unprefixed++
+  }
+
+  const isListen = response.net_mode === 'listen_server'
+  const host = isListen ? '1 号玩家兼服务器' : '独立服务器'
+  const lines: string[] = [
+    `这次是 ${response.net_mode} ${response.num_players ?? '?'} 人（${host}）。` +
+      'print_strings 每行前面的「Server:」「Client N:」是引擎加的，标出这行在哪一侧执行' +
+      (isListen ? '；listen_server 下 1 号玩家的打印也记作 Server' : '') +
+      '。'
+  ]
+
+  if (response.print_strings.length > 0) {
+    const bySource = Array.from(counts.entries())
+      .sort(([a], [b]) => (a === 'Server' ? -1 : b === 'Server' ? 1 : a.localeCompare(b)))
+      .map(([source, count]) => `${source} ${count} 条`)
+    if (unprefixed > 0) bySource.push(`无前缀 ${unprefixed} 条`)
+    lines.push(`PrintString 按来源：${bySource.join('、')}。`)
+
+    // listen_server 一个人时根本没有客户端，这句就成了误报
+    const hasClients = !isListen || (response.num_players ?? 1) > 1
+    const clientLines = Array.from(counts.keys()).filter((source) => source.startsWith('Client'))
+    if (hasClients && counts.has('Server') && clientLines.length === 0) {
+      lines.push(
+        '**客户端一侧一条 PrintString 都没有** —— 要验的逻辑如果该在客户端跑' +
+          '（OnRep、Client RPC、复制过来的事件），说明它没跑到客户端。'
+      )
+    }
+  }
+
+  lines.push(
+    'errors / warnings 不带实例标记，分不出是哪一侧报的。' +
+      'Actor 增减数的是服务器世界，起点在客户端连上之前，所以客户端的控制器、角色等也算在新增里，' +
+      '什么都不生成的游戏也会报几个；截图、采样帧和 events 都落在第一个有窗口的实例上' +
+      `（${isListen ? '1 号玩家' : 'Client 1'}），不是每个玩家各一份。`
+  )
+  return lines.join('\n')
 }
 
 /**
@@ -483,6 +565,11 @@ Play，或者你之前在 Python 里调过 editor_play_simulate() 没停。停�
         if (captureScreenshot !== undefined) params.screenshot = captureScreenshot
         if (input.stop_on_error !== undefined) params.stop_on_error = input.stop_on_error
         if (input.events?.length) params.events = input.events
+        if (input.net_mode) params.net_mode = input.net_mode
+        if (input.num_players !== undefined) params.num_players = input.num_players
+        const wantsMultiplayer =
+          (input.net_mode !== undefined && input.net_mode !== 'standalone') ||
+          (input.num_players ?? 1) > 1
 
         // 多帧采样也是编辑器截图，同一个开关管着。关着时一帧都不发出去 ——
         // 少了这一句，一个明确关掉的隐私开关会被「换个参数」绕过去
@@ -610,6 +697,9 @@ Play，或者你之前在 Python 里调过 editor_play_simulate() 没停。停�
           ...(response.frames?.length
             ? { frames: response.frames, frame_mode: response.frame_mode ?? 'scene' }
             : {}),
+          ...(response.net_mode
+            ? { net_mode: response.net_mode, num_players: response.num_players }
+            : {}),
           // 界面按这个字段铺图。拼图排前面、收尾那张排后面，和模型看到的顺序一致 ——
           // 两边看的不是同一批画面时，用户没法复核模型说的话
           ...(sheetPaths.length > 0
@@ -624,8 +714,16 @@ Play，或者你之前在 Python 里调过 editor_play_simulate() 没停。停�
             : {}),
           // 没出图必须说清楚是**用户关的**，不是试玩失败。不说的话模型只会看见
           // 一份没有图的报告，然后再调一次 ue_screenshot 去补 —— 那次同样会被挡
+          // 要了多人、插件却没回 net_mode：旧版插件不认这两个参数，照单人跑了。
+          // 不说的话模型会把一份单人报告当成「客户端那边什么都没发生」来读
           summary:
             summarize(response) +
+            (response.net_mode
+              ? `\n${describeNetSession(response)}`
+              : wantsMultiplayer
+                ? '\n⚠️ 这次实际按单人跑的：插件版本太旧，不认 net_mode / num_players。' +
+                  '报告里没有客户端，验不了复制和 RPC，更新插件后再跑。'
+                : '') +
             sheetNote +
             (screenshotBlocked ? `\n${EDITOR_SCREENSHOT_SKIPPED_NOTE}` : '')
         }

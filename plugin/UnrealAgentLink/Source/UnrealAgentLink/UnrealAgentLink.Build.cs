@@ -180,7 +180,11 @@ public class UnrealAgentLink : ModuleRules
 		// Note: Target.Version 仅在 UE 5.1+ 可用，使用 ReadOnlyBuildVersion 兼容 5.0
 		#if UE_5_1_OR_LATER
 		{
-			// 示例：可在此添加 5.1+ 特有模块
+			// content.import 的 import_messages 订阅 UInterchangeManager::OnBatchImportComplete、
+			// 读 UInterchangeResult。5.1 起两个都是引擎本体模块（Engine/Source/Runtime/Interchange/
+			// Core、Engine），AssetTools 自己就依赖它们，不引入对插件 DLL 的硬导入；
+			// 5.0 的 Interchange 还在 Plugins/Experimental 里，所以只在 5.1+ 加
+			PrivateDependencyModuleNames.AddRange(new string[] { "InterchangeCore", "InterchangeEngine" });
 		}
 		#endif
 	}

@@ -37,7 +37,24 @@ enum class EUAL_PBRTextureType : uint8
 	Opacity,         // 透明度
 	Specular,        // 高光
 	Subsurface,      // 次表面散射
+	// 打包遮罩：一张图三个通道各放一种数据。通道顺序就写在命名缩写里，
+	// 只认缩写能唯一说明顺序的那几种
+	PackedORM,       // R=AO G=Roughness B=Metallic（命名 ORM / ARM）
+	PackedRMA,       // R=Roughness G=Metallic B=AO（命名 RMA）
+	PackedMRA,       // R=Metallic G=Roughness B=AO（命名 MRA）
+	PackedMask,      // 命名只写了 Mask，通道顺序没有约定
 	Unknown          // 未知类型
+};
+
+/**
+ * 一张贴图在自动建材质时被怎么处理了 —— 回给调用方，别让它对着 MI 猜。
+ */
+struct FUAL_PBRTextureReport
+{
+	UTexture2D* Texture = nullptr;
+	EUAL_PBRTextureType Type = EUAL_PBRTextureType::Unknown;
+	FString MaterialParameter;        // 接进了 MI 的哪个参数；空 = 没接
+	bool bFlippedGreenByNaming = false; // 这次按命名里的 OpenGL 标记翻了绿通道
 };
 
 /**
@@ -115,7 +132,23 @@ public:
 		const FString& MaterialName,
 		const FString& DestinationPath,
 		const FUAL_TextureGroup& TextureGroup,
-		const FUAL_PBRMaterialOptions& Options);
+		const FUAL_PBRMaterialOptions& Options,
+		TArray<FUAL_PBRTextureReport>* OutTextureReports = nullptr);
+
+	/** 类型的英文短名，给 JSON 回执用（albedo / packed_orm …） */
+	static const TCHAR* GetTextureTypeName(EUAL_PBRTextureType Type);
+
+	/**
+	 * 打包遮罩的通道含义。通道顺序没有约定的（PackedMask）和非打包类型返回 false。
+	 */
+	static bool GetPackedChannels(EUAL_PBRTextureType Type,
+		const TCHAR*& OutR, const TCHAR*& OutG, const TCHAR*& OutB);
+
+	/**
+	 * 名字里有没有明确的 OpenGL 法线标记（独立的 gl / opengl 词）。
+	 * 同时看资产名和导入源文件名 —— 导入时改过名的话，标记只剩在源文件名里。
+	 */
+	static bool HasOpenGLNormalMarker(const UTexture2D* Texture);
 	
 	/**
 	 * 为静态网格体应用材质
@@ -164,7 +197,8 @@ public:
 		const TArray<UStaticMesh*>& ImportedMeshes,
 		const FString& DestinationPath,
 		const FUAL_PBRMaterialOptions& Options,
-		TArray<UMaterialInstanceConstant*>& OutCreatedMaterials);
+		TArray<UMaterialInstanceConstant*>& OutCreatedMaterials,
+		TArray<FUAL_PBRTextureReport>* OutTextureReports = nullptr);
 
 private:
 	/**

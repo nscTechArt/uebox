@@ -290,6 +290,120 @@ describe('事件注入', () => {
   })
 })
 
+/**
+ * 单进程单人 PIE 验不了复制和 RPC。多人时结论就在「哪一侧打了、哪一侧没打」里，
+ * 前缀是引擎加的，但模型不一定逐条看数组 —— 所以按来源数好写进 summary。
+ */
+describe('多人试玩', () => {
+  const LISTEN_RUN = {
+    ...CLEAN_RUN,
+    net_mode: 'listen_server',
+    num_players: 2,
+    print_strings: ['Server: door opened', 'Client 1: door opened', 'Server: score 1']
+  }
+
+  it('net_mode / num_players 原样发给插件', async () => {
+    callRequest.mockResolvedValue(LISTEN_RUN)
+
+    await run({ net_mode: 'client', num_players: 3 })
+
+    const params = callRequest.mock.calls[0][1] as Record<string, unknown>
+    expect(params.net_mode).toBe('client')
+    expect(params.num_players).toBe(3)
+  })
+
+  it('没给时不往插件塞这两个字段 —— 由插件按单人跑', async () => {
+    callRequest.mockResolvedValue(CLEAN_RUN)
+
+    await run({})
+
+    expect(callRequest.mock.calls[0][1]).not.toHaveProperty('net_mode')
+    expect(callRequest.mock.calls[0][1]).not.toHaveProperty('num_players')
+  })
+
+  it('前缀原样保留，并按来源数好写进结论', async () => {
+    callRequest.mockResolvedValue(LISTEN_RUN)
+
+    const result = await run({ net_mode: 'listen_server', num_players: 2 })
+
+    // 前缀不能被剥掉，否则分不出哪行是谁打的
+    expect(result.print_strings).toEqual(LISTEN_RUN.print_strings)
+    expect(result.net_mode).toBe('listen_server')
+    expect(result.num_players).toBe(2)
+    const summary = String(result.summary)
+    expect(summary).toContain('listen_server 2 人')
+    expect(summary).toContain('Server 2 条')
+    expect(summary).toContain('Client 1 1 条')
+    expect(summary).not.toContain('客户端一侧一条 PrintString 都没有')
+  })
+
+  it('开了 bLogPrintStringSource 时前面多一段 [对象名] 也认得出来源', async () => {
+    callRequest.mockResolvedValue({
+      ...LISTEN_RUN,
+      print_strings: ['[BP_Door_C_0] Server: open', '[BP_Door_C_0] Client 1: open']
+    })
+
+    const summary = String((await run({ num_players: 2 })).summary)
+
+    expect(summary).toContain('Server 1 条')
+    expect(summary).toContain('Client 1 1 条')
+    expect(summary).not.toContain('无前缀')
+  })
+
+  it('只有服务器在打印时点出客户端一侧没跑到', async () => {
+    callRequest.mockResolvedValue({
+      ...LISTEN_RUN,
+      net_mode: 'client',
+      print_strings: ['Server: replicated value set']
+    })
+
+    const summary = String((await run({ net_mode: 'client', num_players: 1 })).summary)
+
+    expect(summary).toContain('客户端一侧一条 PrintString 都没有')
+    // client 模式下画面和 events 落在 Client 1，不是服务器
+    expect(summary).toContain('Client 1')
+  })
+
+  it('listen_server 一个人时没有客户端，不报「客户端没跑到」', async () => {
+    callRequest.mockResolvedValue({
+      ...LISTEN_RUN,
+      num_players: 1,
+      print_strings: ['Server: hello']
+    })
+
+    const summary = String((await run({ net_mode: 'listen_server' })).summary)
+
+    expect(summary).not.toContain('客户端一侧一条 PrintString 都没有')
+  })
+
+  it('说清报错不带实例标记、Actor 数取的是服务器世界', async () => {
+    callRequest.mockResolvedValue(LISTEN_RUN)
+
+    const summary = String((await run({ num_players: 2 })).summary)
+
+    expect(summary).toContain('errors / warnings 不带实例标记')
+    expect(summary).toContain('Actor 增减数的是服务器世界')
+  })
+
+  it('要了多人而旧插件没回 net_mode 时说清这次其实是单人', async () => {
+    callRequest.mockResolvedValue(CLEAN_RUN)
+
+    const summary = String((await run({ net_mode: 'listen_server', num_players: 2 })).summary)
+
+    expect(summary).toContain('实际按单人跑的')
+  })
+
+  it('单人时一个字都不加', async () => {
+    callRequest.mockResolvedValue(CLEAN_RUN)
+
+    const result = await run({})
+
+    expect(result).not.toHaveProperty('net_mode')
+    expect(String(result.summary)).not.toContain('Server')
+    expect(String(result.summary)).not.toContain('实例标记')
+  })
+})
+
 describe('拒绝与异常', () => {
   it('编辑器已在 Play 模式时把插件的拒绝带上来', async () => {
     callRequest.mockResolvedValue({

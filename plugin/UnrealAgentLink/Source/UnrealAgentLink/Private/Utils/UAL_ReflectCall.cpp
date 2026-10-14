@@ -394,6 +394,20 @@ namespace UALReflect
 		return *this;
 	}
 
+	FCall& FCall::Str(const TCHAR* ParamName, const FString& Value)
+	{
+		// 缓冲里的 FString 构造时已 InitializeValue 过，这里是赋值不是拷进生内存
+		if (FStrProperty* Prop = CastField<FStrProperty>(FindParam(ParamName)))
+		{
+			Prop->SetPropertyValue(Prop->ContainerPtrToValuePtr<void>(Buffer.GetData()), Value);
+		}
+		else if (Function)
+		{
+			UE_LOG(LogUALReflect, Warning, TEXT("%s: no string param '%s'"), *Function->GetName(), ParamName);
+		}
+		return *this;
+	}
+
 	FCall& FCall::Num(const TCHAR* ParamName, double Value)
 	{
 		FProperty* Param = FindParam(ParamName);

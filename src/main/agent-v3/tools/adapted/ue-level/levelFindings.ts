@@ -51,6 +51,12 @@ export type LevelFindingSeverity =
   | 'breaks_gameplay'
   /** 每帧都在付的开销 */
   | 'costs_frame_time'
+  /**
+   * 占的是显存和流送带宽，不是帧时间。大贴图开了流送时，平时只驻留用得到的那几级 mip，
+   * 卡不卡要看流送池够不够，和「这一帧画了多少东西」是两回事。分开报，
+   * 免得模型拿它去解释帧率问题。
+   */
+  | 'costs_memory'
   /** 只是信息，不一定要改 */
   | 'info'
 
@@ -124,20 +130,28 @@ export function classifyAsset(
     s.instance_count > 1
   ) {
     const percent = Math.round(triangleShare * 100)
-    findings.push({
-      code: 'dominates_level_triangles',
-      severity: 'costs_frame_time',
-      evidence:
-        `摆了 ${s.instance_count} 份，占本次统计总面数的 ${percent}%` +
-        (typeof s.triangles === 'number' ? `（单份 ${s.triangles} 面）` : '')
-    })
+    const base =
+      `摆了 ${s.instance_count} 份，占本次统计总面数的 ${percent}%` +
+      (typeof s.triangles === 'number' ? `（单份 ${s.triangles} 面）` : '')
+    // Nanite 按屏幕像素挑簇来画，原始面数和帧开销基本脱钩：占比再高也只是个信息。
+    // 它真正的开销在材质（遮罩、半透明、WPO 会让它退出快速路径）和 overdraw，
+    // 这些数据这里没有，只能把方向说清，不能替它下「拖帧」的结论。
+    findings.push(
+      s.nanite === true
+        ? {
+            code: 'dominates_level_triangles',
+            severity: 'info',
+            evidence: `${base}；已开 Nanite，面数不代表帧开销，要查就看它的材质有没有遮罩、半透明或 WPO`
+          }
+        : { code: 'dominates_level_triangles', severity: 'costs_frame_time', evidence: base }
+    )
   }
 
   if (typeof s.max_texture_pixels === 'number' && s.max_texture_pixels >= LARGE_TEXTURE_PIXELS) {
     findings.push({
       code: 'large_texture',
-      severity: 'costs_frame_time',
-      evidence: `用到了超大贴图，最大一张长边 ${s.max_texture_edge ?? '?'}`
+      severity: 'costs_memory',
+      evidence: `用到了超大贴图，最大一张长边 ${s.max_texture_edge ?? '?'}（占显存和流送，不是帧时间）`
     })
   }
 
@@ -155,6 +169,7 @@ export function summarize(all: LevelFinding[]): Record<LevelFindingSeverity, num
   const counts: Record<LevelFindingSeverity, number> = {
     breaks_gameplay: 0,
     costs_frame_time: 0,
+    costs_memory: 0,
     info: 0
   }
   for (const f of all) counts[f.severity]++

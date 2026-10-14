@@ -140,6 +140,73 @@ describe('material_compile 的错误节点', () => {
 })
 
 /**
+ * 「编得过」不等于「用得起」。行家看材质先看 Stats 面板那几行：
+ * 指令数、采样器占用（上限 16）、静态开关。插件把引擎的 FMaterialStatistics
+ * 原样传上来，这里测的是数字确实摆进了摘要、没被改写或吞掉。
+ */
+describe('material_compile 的成本统计', () => {
+  it('编译通过时把指令数、采样器、静态开关照抄出来', async () => {
+    const text = await compile({
+      material_name: 'M_Rock',
+      compiled: true,
+      errors: [],
+      stats: {
+        pixel_shader_instructions: 187,
+        vertex_shader_instructions: 92,
+        samplers: 7,
+        samplers_max: 16,
+        texture_samples_pixel: 6,
+        texture_samples_vertex: 0,
+        virtual_texture_samples: 0,
+        uv_scalars: 2,
+        interpolator_scalars: 0,
+        static_switches: ['UseDetail', 'UseWetness'],
+        static_component_masks: []
+      }
+    })
+
+    expect(text).toContain('像素着色器 187 条')
+    expect(text).toContain('顶点着色器 92 条')
+    expect(text).toContain('采样器：7 / 16')
+    expect(text).toContain('像素 6，顶点 0')
+    expect(text).toContain('静态开关 2 个：UseDetail、UseWetness')
+    expect(text).toContain('最多 4 种')
+    expect(text).not.toContain('n/a')
+  })
+
+  /**
+   * 引擎量不出指令数时给的是 0，编辑器面板显示 n/a；插件改成 null。
+   * 摘要里绝不能写成「0 条」—— 那会被读成零成本。
+   */
+  it('指令数缺失时写 n/a 并说明原因，不写 0', async () => {
+    const text = await compile({
+      material_name: 'M_Rock',
+      compiled: true,
+      errors: [],
+      stats: {
+        pixel_shader_instructions: null,
+        vertex_shader_instructions: null,
+        samplers: 3,
+        samplers_max: 16,
+        static_switches: []
+      }
+    })
+
+    expect(text).toContain('像素着色器 n/a')
+    expect(text).not.toContain('0 条')
+    expect(text).toContain('不代表零成本')
+    expect(text).toContain('静态开关：无')
+  })
+
+  /** 插件端没更新时没有 stats 字段，摘要保持老样子 */
+  it('没有 stats 字段时不出现成本段', async () => {
+    const text = await compile({ material_name: 'M_Old', compiled: true, errors: [] })
+    expect(text).toContain('✅ M_Old 编译通过')
+    expect(text).not.toContain('成本')
+  })
+})
+
+/**
  * 删节点顺带断线，这件事必须说出来。
  *
  * 真机回归测里踩到的：删掉一个接在 Metallic 上的节点，引擎侧没断线，

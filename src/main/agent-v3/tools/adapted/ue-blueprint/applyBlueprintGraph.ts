@@ -65,7 +65,7 @@ const NodeDefinitionSchema = z.object({
     .string()
     .describe(
       '节点类型。常用：Event、EnhancedInputAction、Function、VariableGet、VariableSet、Branch、Sequence、' +
-        'Cast、SpawnActor、CustomEvent、Select、MakeArray、MakeStruct、BreakStruct、Self、Timeline、' +
+        'Cast、SpawnActor、CreateWidget、CustomEvent、Select、MakeArray、MakeStruct、BreakStruct、Self、Timeline、' +
         'CallDispatcher、BindEvent、UnbindEvent、UnbindAllEvents、CreateEvent、' +
         'ForLoop、WhileLoop、DoOnce、Gate、FlipFlop、IsValid、ForEachLoop。' +
         '动画图里还有 OutputPose、SequencePlayer、BlendSpacePlayer、StateMachine 等动画节点；' +
@@ -204,7 +204,8 @@ const NodeDefinitionSchema = z.object({
     .string()
     .optional()
     .describe(
-      'Cast / SpawnActor 的目标类，蓝图写名字即可（BP_Player）。' +
+      'Cast / SpawnActor / CreateWidget 的目标类，蓝图写名字即可（BP_Player、WBP_HUD）。' +
+        'CreateWidget 建出的控件加到屏幕：Function 写 UserWidget.AddToViewport，Target 接它的返回值。' +
         'Cast 的输出引脚连线时写 As —— 真名随编辑器语言变（As玩家控制器、AsBP Player），不用猜'
     ),
   struct_type: z.string().optional().describe('MakeStruct / BreakStruct 的结构体'),

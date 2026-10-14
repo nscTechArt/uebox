@@ -23,7 +23,14 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/LightComponent.h"
+#include "Components/LocalLightComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Materials/MaterialInterface.h"
+// 5.0–5.4 在 Classes/Materials/，5.5 起在 Public/Materials/；两处都在 Engine 的包含路径上
+#include "Materials/MaterialRelevance.h"
+#include "ShaderCompiler.h"
+#include "UObject/EnumProperty.h"
 // GPixelFormats：5.0 在 RHI.h 里，5.5 起搬到了 Core 的 PixelFormat.h。
 // RHI.h 两边都能拿到（新版本会把 PixelFormat.h 带进来）。
 #include "RHI.h"
@@ -84,6 +91,12 @@ void FUAL_LevelCommands::RegisterCommands(TMap<FString, TFunction<void(const TSh
 	CommandMap.Add(TEXT("level.set_streaming"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 	{
 		Handle_SetLevelStreaming(Payload, RequestId);
+	});
+
+	// level.light_census - 灯光普查：每盏灯的设置，以及投影局部光半径里压着什么
+	CommandMap.Add(TEXT("level.light_census"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		Handle_LightCensus(Payload, RequestId);
 	});
 }
 
@@ -1715,6 +1728,649 @@ void FUAL_LevelCommands::Handle_SetLevelStreaming(const TSharedPtr<FJsonObject>&
 		ChangedJson.Add(MakeShared<FJsonValueString>(Field));
 	}
 	Data->SetArrayField(TEXT("changed"), ChangedJson);
+
+	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
+}
+
+// ============================================================================
+// level.light_census —— 灯光普查
+// ============================================================================
+//
+// ## 为什么要有
+//
+// 渲染线程 / GPU 瓶颈的「为什么」常常落在灯上，而此前的命令只数网格：
+// `level.query_assets` 把灯光放进 not_ranked_by_class，只报一个个数。
+// 性能排查讲清原因靠的是一张普查表 —— 点光源的阴影要画立方体的六个面；
+// 灯的半径里只要有可移动物体、或用了 World Position Offset 的材质，
+// 那盏灯的阴影缓存就留不住，要反复重画。所以对每盏投影局部光要数清：
+// 半径里有多少投影物体、几个可移动、几个带 WPO、几个是 Nanite、
+// 实例化组件（植被）里有多少实例落在半径内。
+//
+// ## 只报引擎数据，不判「灯太多」
+//
+// 多少盏灯、多少物体算多，取决于平台和画面目标。这里不给门槛（同 query_assets
+// 的 min_triangles 不给默认值），只回数，结论由调用方结合实测去下。
+//
+// ## 几处口径（返回和工具说明里都要讲清）
+//
+// - 「投影物体」= 已进渲染场景（SceneProxy 非空）且 CastShadow、bCastDynamicShadow
+//   都开着的图元组件。没进场景的（隐藏又不投隐藏阴影、空网格）画不进阴影图。
+// - 半径判定用包围球：物体包围球与灯的衰减半径球相交就算在半径里。
+//   聚光灯也按整球算，不按锥体裁 —— 是上界。
+// - WPO 读的是材质**编译后**的着色器图（UMaterialInterface::GetRelevance 的
+//   bUsesWorldPositionOffset；5.0–5.8 逐版本看过源码，都取自 GameThreadShaderMap）。
+//   着色器还没编出来时引擎自己也答 false，所以编译队列不空时把队列长度一并报出，
+//   这时 WPO 数只能当下限。
+// - 实例化组件（ISM / HISM）逐实例判距离，整条命令有总预算；超预算后把整个组件
+//   的实例数计入并标成上界，不悄悄少算。
+// - 只数当前已加载的 Actor：World Partition 下没加载的格子不在内。
+
+namespace
+{
+	/** 默认 / 最多返回几盏灯的明细。总数统计不受它影响 */
+	constexpr int32 UAL_CensusDefaultListed = 50;
+	constexpr int32 UAL_CensusMaxListed = 500;
+	/** 做半径普查的局部灯上限。普查是「灯数 × 图元数」次球相交，灯多了线性变慢 */
+	constexpr int32 UAL_CensusMaxRadiusLights = 200;
+	/** 收集的投影图元上限 */
+	constexpr int32 UAL_CensusMaxPrimitives = 200000;
+	/** 整条命令逐实例判距离的总次数上限 —— 大片植被一个组件就有几十万株 */
+	constexpr int64 UAL_CensusMaxInstanceChecks = 2000000;
+	/** 每盏灯列出半径里最多的几个网格 */
+	constexpr int32 UAL_CensusTopMeshes = 5;
+
+	/** 一个投影图元。只在本次命令里用，游戏线程上一口气跑完，不会被 GC */
+	struct FUAL_CensusPrimitive
+	{
+		const UPrimitiveComponent* Component = nullptr;
+		/** 静态网格组件才有 */
+		const UStaticMesh* Mesh = nullptr;
+		/** ISM / HISM 才有 */
+		const UInstancedStaticMeshComponent* Instanced = nullptr;
+		FVector Origin = FVector::ZeroVector;
+		double Radius = 0.0;
+		EComponentMobility::Type Mobility = EComponentMobility::Static;
+		bool bNanite = false;
+		/** 组件上关了 bEvaluateWorldPositionOffset（5.1+ 才有这个开关的渲染含义） */
+		bool bWpoEvaluationOff = false;
+		/** 用到了才算（要遍历材质）：-1 = 还没算 */
+		int8 Wpo = -1;
+	};
+
+	/** 半径里按网格（非静态网格按组件类）汇总的一行 */
+	struct FUAL_CensusMeshTally
+	{
+		FString Name;
+		bool bStaticMesh = false;
+		bool bNanite = false;
+		int32 Primitives = 0;
+		int64 Instances = 0;
+		int32 Movable = 0;
+		int32 Wpo = 0;
+	};
+
+	struct FUAL_LightCensusResult
+	{
+		int32 Primitives = 0;
+		int32 Movable = 0;
+		int32 Stationary = 0;
+		int32 Static = 0;
+		int32 Wpo = 0;
+		int32 WpoEvaluationOff = 0;
+		int32 Nanite = 0;
+		int32 NonNanite = 0;
+		int32 Other = 0;
+		int32 InstancedComponents = 0;
+		int64 Instances = 0;
+		bool bInstancesUpperBound = false;
+		TMap<FString, FUAL_CensusMeshTally> ByMesh;
+	};
+
+	const TCHAR* UAL_MobilityName(EComponentMobility::Type Mobility)
+	{
+		switch (Mobility)
+		{
+		case EComponentMobility::Movable: return TEXT("movable");
+		case EComponentMobility::Stationary: return TEXT("stationary");
+		default: return TEXT("static");
+		}
+	}
+
+	bool UAL_SpheresTouch(const FVector& A, double RadiusA, const FVector& B, double RadiusB)
+	{
+		const double Reach = RadiusA + RadiusB;
+		return FVector::DistSquared(A, B) <= Reach * Reach;
+	}
+
+	ERHIFeatureLevel::Type UAL_WorldFeatureLevel(const UWorld* World)
+	{
+		// UWorld::FeatureLevel 5.3 起标了废弃，换成访问器；5.0–5.2 没有访问器
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3)
+		return World->GetFeatureLevel();
+#else
+		return World->FeatureLevel;
+#endif
+	}
+
+	bool UAL_MaterialUsesWpo(const UMaterialInterface* Material, ERHIFeatureLevel::Type FeatureLevel)
+	{
+		// 5.7 起按特性等级取的重载标了废弃，换成按着色器平台取；两边读的是同一份编译结果
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+		return Material->GetRelevance(GetFeatureLevelShaderPlatform(FeatureLevel)).bUsesWorldPositionOffset != 0;
+#else
+		return Material->GetRelevance(FeatureLevel).bUsesWorldPositionOffset != 0;
+#endif
+	}
+
+	/** 图元的任一材质带 WPO。按材质缓存：一片植被几千个组件共用同一个材质 */
+	bool UAL_PrimitiveUsesWpo(FUAL_CensusPrimitive& Prim, ERHIFeatureLevel::Type FeatureLevel,
+		TMap<const UMaterialInterface*, bool>& Cache)
+	{
+		if (Prim.Wpo < 0)
+		{
+			bool bAny = false;
+			TArray<UMaterialInterface*> Materials;
+			Prim.Component->GetUsedMaterials(Materials);
+			for (const UMaterialInterface* Material : Materials)
+			{
+				if (!Material)
+				{
+					continue;
+				}
+				const bool* Known = Cache.Find(Material);
+				const bool bUses = Known ? *Known : Cache.Add(Material, UAL_MaterialUsesWpo(Material, FeatureLevel));
+				if (bUses)
+				{
+					bAny = true;
+					break;
+				}
+			}
+			Prim.Wpo = bAny ? 1 : 0;
+		}
+		return Prim.Wpo == 1;
+	}
+
+	/**
+	 * 强度单位（Candelas / Lumens / Unitless…）。按反射读枚举名：
+	 * 各版本 ELightUnits 的成员不一样，自己维护对照表只会越来越旧。
+	 */
+	FString UAL_LightIntensityUnits(const ULocalLightComponent* Light)
+	{
+		const FEnumProperty* Prop = FindFProperty<FEnumProperty>(ULocalLightComponent::StaticClass(), TEXT("IntensityUnits"));
+		const UEnum* Enum = Prop ? Prop->GetEnum() : nullptr;
+		const FNumericProperty* Underlying = Prop ? Prop->GetUnderlyingProperty() : nullptr;
+		if (!Enum || !Underlying)
+		{
+			return FString();
+		}
+		return Enum->GetNameStringByValue(Underlying->GetSignedIntPropertyValue(Prop->ContainerPtrToValuePtr<void>(Light)));
+	}
+
+	/**
+	 * 一盏局部光的半径普查。
+	 *
+	 * InstanceBudget 是整条命令共享的逐实例判定预算：花完以后实例化组件按整组件计入，
+	 * 并把这盏灯标成上界 —— 少算比多算更糟，用户会以为那片草不在灯下。
+	 */
+	FUAL_LightCensusResult UAL_CensusLight(const FVector& LightPos, double LightRadius, TArray<FUAL_CensusPrimitive>& Primitives,
+		ERHIFeatureLevel::Type FeatureLevel, TMap<const UMaterialInterface*, bool>& WpoCache, int64& InstanceBudget)
+	{
+		FUAL_LightCensusResult Result;
+		for (FUAL_CensusPrimitive& Prim : Primitives)
+		{
+			if (!UAL_SpheresTouch(LightPos, LightRadius, Prim.Origin, Prim.Radius))
+			{
+				continue;
+			}
+
+			int64 InstancesIn = 0;
+			if (Prim.Instanced)
+			{
+				const int32 Count = Prim.Instanced->GetInstanceCount();
+				if (Count <= 0)
+				{
+					continue;
+				}
+				if (InstanceBudget >= Count)
+				{
+					InstanceBudget -= Count;
+					FVector MeshOrigin = FVector::ZeroVector;
+					double MeshRadius = 0.0;
+					if (Prim.Mesh)
+					{
+						const FBoxSphereBounds MeshBounds = Prim.Mesh->GetBounds();
+						MeshOrigin = MeshBounds.Origin;
+						MeshRadius = MeshBounds.SphereRadius;
+					}
+					FTransform InstanceTransform;
+					for (int32 Index = 0; Index < Count; ++Index)
+					{
+						if (!Prim.Instanced->GetInstanceTransform(Index, InstanceTransform, /*bWorldSpace=*/true))
+						{
+							continue;
+						}
+						if (UAL_SpheresTouch(LightPos, LightRadius, InstanceTransform.TransformPosition(MeshOrigin),
+							MeshRadius * InstanceTransform.GetMaximumAxisScale()))
+						{
+							++InstancesIn;
+						}
+					}
+					// 组件包围球擦到了半径，但没有一个实例真的在里面
+					if (InstancesIn == 0)
+					{
+						continue;
+					}
+				}
+				else
+				{
+					InstancesIn = Count;
+					Result.bInstancesUpperBound = true;
+				}
+				Result.InstancedComponents++;
+				Result.Instances += InstancesIn;
+			}
+
+			Result.Primitives++;
+			switch (Prim.Mobility)
+			{
+			case EComponentMobility::Movable: Result.Movable++; break;
+			case EComponentMobility::Stationary: Result.Stationary++; break;
+			default: Result.Static++; break;
+			}
+
+			const bool bWpo = UAL_PrimitiveUsesWpo(Prim, FeatureLevel, WpoCache);
+			if (bWpo)
+			{
+				Result.Wpo++;
+				if (Prim.bWpoEvaluationOff)
+				{
+					Result.WpoEvaluationOff++;
+				}
+			}
+
+			if (Prim.Mesh)
+			{
+				if (Prim.bNanite) { Result.Nanite++; }
+				else { Result.NonNanite++; }
+			}
+			else
+			{
+				Result.Other++;
+			}
+
+			const FString Key = Prim.Mesh ? Prim.Mesh->GetPathName() : Prim.Component->GetClass()->GetName();
+			FUAL_CensusMeshTally& Tally = Result.ByMesh.FindOrAdd(Key);
+			if (Tally.Name.IsEmpty())
+			{
+				Tally.Name = Key;
+				Tally.bStaticMesh = Prim.Mesh != nullptr;
+				Tally.bNanite = Prim.bNanite;
+			}
+			Tally.Primitives++;
+			Tally.Instances += Prim.Instanced ? InstancesIn : 1;
+			if (Prim.Mobility == EComponentMobility::Movable)
+			{
+				Tally.Movable++;
+			}
+			if (bWpo)
+			{
+				Tally.Wpo++;
+			}
+		}
+		return Result;
+	}
+
+	TSharedPtr<FJsonObject> UAL_CensusToJson(const FUAL_LightCensusResult& Result)
+	{
+		TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+		Json->SetNumberField(TEXT("primitives"), Result.Primitives);
+		Json->SetNumberField(TEXT("movable"), Result.Movable);
+		Json->SetNumberField(TEXT("stationary"), Result.Stationary);
+		Json->SetNumberField(TEXT("static"), Result.Static);
+		Json->SetNumberField(TEXT("wpo"), Result.Wpo);
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+		// 5.0 的 bEvaluateWorldPositionOffset 归在 RayTracing 分类下，只管光追，不报
+		Json->SetNumberField(TEXT("wpo_evaluation_off"), Result.WpoEvaluationOff);
+#endif
+		Json->SetNumberField(TEXT("nanite"), Result.Nanite);
+		Json->SetNumberField(TEXT("non_nanite"), Result.NonNanite);
+		Json->SetNumberField(TEXT("other"), Result.Other);
+		Json->SetNumberField(TEXT("instanced_components"), Result.InstancedComponents);
+		Json->SetNumberField(TEXT("instances"), static_cast<double>(Result.Instances));
+		if (Result.bInstancesUpperBound)
+		{
+			Json->SetBoolField(TEXT("instances_upper_bound"), true);
+		}
+
+		TArray<FUAL_CensusMeshTally> Tallies;
+		Result.ByMesh.GenerateValueArray(Tallies);
+		Tallies.Sort([](const FUAL_CensusMeshTally& A, const FUAL_CensusMeshTally& B)
+		{
+			return A.Instances != B.Instances ? A.Instances > B.Instances : A.Primitives > B.Primitives;
+		});
+		TArray<TSharedPtr<FJsonValue>> Top;
+		for (int32 Index = 0; Index < Tallies.Num() && Index < UAL_CensusTopMeshes; ++Index)
+		{
+			const FUAL_CensusMeshTally& Tally = Tallies[Index];
+			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+			Row->SetStringField(Tally.bStaticMesh ? TEXT("mesh") : TEXT("component_class"), Tally.Name);
+			Row->SetNumberField(TEXT("primitives"), Tally.Primitives);
+			Row->SetNumberField(TEXT("instances"), static_cast<double>(Tally.Instances));
+			Row->SetNumberField(TEXT("movable"), Tally.Movable);
+			Row->SetNumberField(TEXT("wpo"), Tally.Wpo);
+			if (Tally.bStaticMesh)
+			{
+				Row->SetBoolField(TEXT("nanite"), Tally.bNanite);
+			}
+			Top.Add(MakeShared<FJsonValueObject>(Row));
+		}
+		Json->SetArrayField(TEXT("top_meshes"), Top);
+		if (Tallies.Num() > UAL_CensusTopMeshes)
+		{
+			Json->SetNumberField(TEXT("distinct_meshes"), Tallies.Num());
+		}
+		return Json;
+	}
+}
+
+void FUAL_LevelCommands::Handle_LightCensus(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+{
+	const double StartSeconds = FPlatformTime::Seconds();
+
+	FString WorldMode = TEXT("auto");
+	FString LabelContains;
+	int32 Limit = UAL_CensusDefaultListed;
+	if (Payload.IsValid())
+	{
+		Payload->TryGetStringField(TEXT("world"), WorldMode);
+		Payload->TryGetStringField(TEXT("label_contains"), LabelContains);
+		Payload->TryGetNumberField(TEXT("limit"), Limit);
+	}
+	Limit = FMath::Clamp(Limit > 0 ? Limit : UAL_CensusDefaultListed, 1, UAL_CensusMaxListed);
+
+	// 默认读「当下该看的世界」（PIE 在跑就是游戏世界）；要看关卡里原本的摆放就传 editor
+	const bool bEditorRequested = WorldMode.Equals(TEXT("editor"), ESearchCase::IgnoreCase);
+	UWorld* World = bEditorRequested ? UAL_CommandUtils::GetTargetWorld() : UAL_CommandUtils::GetLiveWorld();
+	if (!World)
+	{
+		UAL_CommandUtils::SendError(RequestId, 500, TEXT("No world available"));
+		return;
+	}
+	const ERHIFeatureLevel::Type FeatureLevel = UAL_WorldFeatureLevel(World);
+
+	// 1) 一次走完所有 Actor：收灯光组件和投影图元
+	TArray<ULightComponentBase*> Lights;
+	TArray<FUAL_CensusPrimitive> Primitives;
+	int32 ShadowPrimitivesSeen = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (!Actor)
+		{
+			continue;
+		}
+
+		TArray<ULightComponentBase*> ActorLights;
+		Actor->GetComponents<ULightComponentBase>(ActorLights);
+		for (ULightComponentBase* Light : ActorLights)
+		{
+			if (!Light || !Light->IsRegistered())
+			{
+				continue;
+			}
+			if (!LabelContains.IsEmpty()
+				&& !UAL_CommandUtils::GetActorFriendlyName(Actor).Contains(LabelContains, ESearchCase::IgnoreCase)
+				&& !Light->GetName().Contains(LabelContains, ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+			Lights.Add(Light);
+		}
+
+		TArray<UPrimitiveComponent*> ActorPrimitives;
+		Actor->GetComponents<UPrimitiveComponent>(ActorPrimitives);
+		for (UPrimitiveComponent* Prim : ActorPrimitives)
+		{
+			if (!Prim || !Prim->IsRegistered() || !Prim->SceneProxy || !Prim->CastShadow || !Prim->bCastDynamicShadow)
+			{
+				continue;
+			}
+			++ShadowPrimitivesSeen;
+			if (Primitives.Num() >= UAL_CensusMaxPrimitives)
+			{
+				continue;
+			}
+			FUAL_CensusPrimitive& Record = Primitives.AddDefaulted_GetRef();
+			Record.Component = Prim;
+			Record.Origin = Prim->Bounds.Origin;
+			Record.Radius = Prim->Bounds.SphereRadius;
+			Record.Mobility = Prim->Mobility;
+			if (const UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(Prim))
+			{
+				Record.Mesh = MeshComponent->GetStaticMesh();
+				Record.bNanite = UALCompat::IsNaniteEnabled(Record.Mesh);
+				Record.Instanced = Cast<UInstancedStaticMeshComponent>(Prim);
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+				Record.bWpoEvaluationOff = !MeshComponent->bEvaluateWorldPositionOffset;
+#endif
+			}
+		}
+	}
+
+	// 2) 逐灯：设置照抄，投影局部光再做半径普查
+	struct FLightRow
+	{
+		TSharedPtr<FJsonObject> Json;
+		/** 排序用：半径里的投影物体数；没做普查的是 -1，排在后面 */
+		int32 CensusPrimitives = -1;
+	};
+	TArray<FLightRow> Rows;
+	TMap<FString, int32> ByType;
+	TMap<FString, int32> ByMobility;
+	int32 InScene = 0;
+	int32 ShadowCasting = 0;
+	int32 ShadowCastingLocal = 0;
+	int32 ShadowCastingLocalNoMaxDraw = 0;
+	int32 CensusDone = 0;
+	int32 CensusSkipped = 0;
+	int64 InstanceBudget = UAL_CensusMaxInstanceChecks;
+	bool bInstanceBudgetHit = false;
+	TMap<const UMaterialInterface*, bool> WpoCache;
+
+	for (ULightComponentBase* LightBase : Lights)
+	{
+		const ULightComponent* Light = Cast<ULightComponent>(LightBase);
+		const ULocalLightComponent* Local = Cast<ULocalLightComponent>(LightBase);
+
+		FString Type = TEXT("other");
+		if (Cast<USkyLightComponent>(LightBase))
+		{
+			Type = TEXT("sky");
+		}
+		else if (Light)
+		{
+			switch (Light->GetLightType())
+			{
+			case LightType_Directional: Type = TEXT("directional"); break;
+			case LightType_Point: Type = TEXT("point"); break;
+			case LightType_Spot: Type = TEXT("spot"); break;
+			case LightType_Rect: Type = TEXT("rect"); break;
+			default: break;
+			}
+		}
+
+		const EComponentMobility::Type Mobility = LightBase->Mobility;
+		// ULightComponent 用引擎自己的「已加进场景且可见」标志（CreateRenderState 里按
+		// bAffectsWorld / 可见性 / 强度 > 0 定）；天光没有这个标志，按 bAffectsWorld + 可见性
+		const bool bInScene = Light
+			? Light->bAddedToSceneVisible != 0
+			: (LightBase->bAffectsWorld && LightBase->IsVisible());
+		const bool bCastShadows = LightBase->CastShadows != 0;
+		const bool bCastDynamicShadows = LightBase->CastDynamicShadows != 0;
+
+		ByType.FindOrAdd(Type)++;
+		ByMobility.FindOrAdd(UAL_MobilityName(Mobility))++;
+		if (bInScene) { InScene++; }
+		if (bCastShadows) { ShadowCasting++; }
+
+		AActor* Owner = LightBase->GetOwner();
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("label"), Owner ? UAL_CommandUtils::GetActorFriendlyName(Owner) : LightBase->GetName());
+		Entry->SetStringField(TEXT("component"), LightBase->GetName());
+		Entry->SetStringField(TEXT("type"), Type);
+		if (Type == TEXT("other"))
+		{
+			Entry->SetStringField(TEXT("class"), LightBase->GetClass()->GetName());
+		}
+		Entry->SetStringField(TEXT("mobility"), UAL_MobilityName(Mobility));
+		Entry->SetBoolField(TEXT("in_scene"), bInScene);
+		Entry->SetBoolField(TEXT("cast_shadows"), bCastShadows);
+		Entry->SetBoolField(TEXT("cast_dynamic_shadows"), bCastDynamicShadows);
+		Entry->SetNumberField(TEXT("intensity"), LightBase->Intensity);
+
+		if (Light)
+		{
+			// 0 = 不按距离裁，任何距离都画
+			Entry->SetNumberField(TEXT("max_draw_distance"), Light->MaxDrawDistance);
+			Entry->SetBoolField(TEXT("max_draw_distance_set"), Light->MaxDrawDistance > 0.f);
+		}
+
+		FLightRow Row;
+		if (Local)
+		{
+			const FString Units = UAL_LightIntensityUnits(Local);
+			if (!Units.IsEmpty())
+			{
+				Entry->SetStringField(TEXT("intensity_units"), Units);
+			}
+			Entry->SetNumberField(TEXT("attenuation_radius"), Local->AttenuationRadius);
+			const FVector Location = Local->GetComponentLocation();
+			TArray<TSharedPtr<FJsonValue>> LocationJson;
+			LocationJson.Add(MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Location.X)));
+			LocationJson.Add(MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Location.Y)));
+			LocationJson.Add(MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Location.Z)));
+			Entry->SetArrayField(TEXT("location"), LocationJson);
+
+			if (bCastShadows && bCastDynamicShadows)
+			{
+				ShadowCastingLocal++;
+				if (Local->MaxDrawDistance <= 0.f)
+				{
+					ShadowCastingLocalNoMaxDraw++;
+				}
+				if (!bInScene)
+				{
+					// 没进场景的灯不画阴影，普查它只会多出一行误导人的数
+					Entry->SetStringField(TEXT("census_skipped"), TEXT("not_in_scene"));
+				}
+				else if (CensusDone >= UAL_CensusMaxRadiusLights)
+				{
+					CensusSkipped++;
+					Entry->SetStringField(TEXT("census_skipped"), TEXT("limit"));
+				}
+				else
+				{
+					CensusDone++;
+					const FUAL_LightCensusResult Census = UAL_CensusLight(Location, Local->AttenuationRadius, Primitives,
+						FeatureLevel, WpoCache, InstanceBudget);
+					bInstanceBudgetHit = bInstanceBudgetHit || Census.bInstancesUpperBound;
+					Entry->SetObjectField(TEXT("census"), UAL_CensusToJson(Census));
+					Row.CensusPrimitives = Census.Primitives;
+				}
+			}
+		}
+
+		Row.Json = Entry;
+		Rows.Add(MoveTemp(Row));
+	}
+
+	// 半径里压着最多投影物体的灯排前面；其余保持原顺序
+	Rows.StableSort([](const FLightRow& A, const FLightRow& B) { return A.CensusPrimitives > B.CensusPrimitives; });
+
+	TArray<TSharedPtr<FJsonValue>> LightsJson;
+	for (int32 Index = 0; Index < Rows.Num() && Index < Limit; ++Index)
+	{
+		LightsJson.Add(MakeShared<FJsonValueObject>(Rows[Index].Json));
+	}
+
+	TSharedPtr<FJsonObject> Totals = MakeShared<FJsonObject>();
+	Totals->SetNumberField(TEXT("lights"), Lights.Num());
+	Totals->SetNumberField(TEXT("in_scene"), InScene);
+	Totals->SetNumberField(TEXT("shadow_casting"), ShadowCasting);
+	Totals->SetNumberField(TEXT("shadow_casting_local"), ShadowCastingLocal);
+	Totals->SetNumberField(TEXT("shadow_casting_local_without_max_draw_distance"), ShadowCastingLocalNoMaxDraw);
+	Totals->SetNumberField(TEXT("radius_census_done"), CensusDone);
+	Totals->SetNumberField(TEXT("shadow_casting_primitives"), ShadowPrimitivesSeen);
+	TSharedPtr<FJsonObject> ByTypeJson = MakeShared<FJsonObject>();
+	for (const TPair<FString, int32>& Pair : ByType) { ByTypeJson->SetNumberField(Pair.Key, Pair.Value); }
+	Totals->SetObjectField(TEXT("by_type"), ByTypeJson);
+	TSharedPtr<FJsonObject> ByMobilityJson = MakeShared<FJsonObject>();
+	for (const TPair<FString, int32>& Pair : ByMobility) { ByMobilityJson->SetNumberField(Pair.Key, Pair.Value); }
+	Totals->SetObjectField(TEXT("by_mobility"), ByMobilityJson);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("ok"), true);
+
+	// 读的是哪个世界必须写明：PIE 一开一关，同一张图的普查会给出两份不同的数
+	Data->SetStringField(TEXT("world"), UAL_CommandUtils::WorldKindName(World));
+	if (World->WorldType == EWorldType::PIE)
+	{
+		Data->SetStringField(TEXT("world_note"), UAL_CommandUtils::LStr(
+			TEXT("读的是正在运行的游戏世界：含运行时生成的 Actor。关卡里原本的摆放用 world=editor 读。"),
+			TEXT("This reads the running PIE world, including runtime-spawned actors. Pass world=editor for the level as placed.")));
+		const int32 PlayWorlds = UAL_CommandUtils::GetPlayWorldCount();
+		if (PlayWorlds > 1)
+		{
+			Data->SetNumberField(TEXT("play_world_count"), PlayWorlds);
+		}
+	}
+	else if (UAL_CommandUtils::IsPlayInProgress())
+	{
+		Data->SetStringField(TEXT("world_note"), UAL_CommandUtils::LStr(
+			TEXT("游戏正在运行，这次按要求读的是编辑器世界（关卡里的摆放），不含运行时生成的 Actor。"),
+			TEXT("Play is running; as requested this reads the editor world (the level as placed), without runtime-spawned actors.")));
+	}
+	if (!LabelContains.IsEmpty())
+	{
+		Data->SetStringField(TEXT("label_contains"), LabelContains);
+	}
+
+	Data->SetObjectField(TEXT("totals"), Totals);
+	Data->SetArrayField(TEXT("lights"), LightsJson);
+
+	// 截断一律明说，调用方据此把总数标成下限 / 上界
+	if (Rows.Num() > Limit)
+	{
+		Data->SetBoolField(TEXT("lights_truncated"), true);
+	}
+	if (CensusSkipped > 0)
+	{
+		Data->SetNumberField(TEXT("radius_census_skipped"), CensusSkipped);
+	}
+	if (ShadowPrimitivesSeen > Primitives.Num())
+	{
+		Data->SetBoolField(TEXT("primitives_truncated"), true);
+		Data->SetNumberField(TEXT("primitives_examined"), Primitives.Num());
+	}
+	if (bInstanceBudgetHit)
+	{
+		Data->SetBoolField(TEXT("instance_budget_exhausted"), true);
+	}
+
+	// WPO 读自编译好的着色器图；编译队列不空时引擎对没编完的材质答 false，数只能当下限
+	const int32 ShadersCompiling = GShaderCompilingManager ? GShaderCompilingManager->GetNumRemainingJobs() : 0;
+	if (ShadersCompiling > 0)
+	{
+		Data->SetNumberField(TEXT("shaders_compiling"), ShadersCompiling);
+	}
+
+	TSharedPtr<FJsonObject> Limits = MakeShared<FJsonObject>();
+	Limits->SetNumberField(TEXT("listed"), Limit);
+	Limits->SetNumberField(TEXT("radius_census_lights"), UAL_CensusMaxRadiusLights);
+	Limits->SetNumberField(TEXT("primitives"), UAL_CensusMaxPrimitives);
+	Limits->SetNumberField(TEXT("instance_checks"), static_cast<double>(UAL_CensusMaxInstanceChecks));
+	Data->SetObjectField(TEXT("limits"), Limits);
+	Data->SetNumberField(TEXT("elapsed_ms"), FMath::RoundToDouble((FPlatformTime::Seconds() - StartSeconds) * 1000.0));
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }

@@ -606,6 +606,107 @@ namespace UALPropertyPath
 		return UAL_CommandUtils::PropertyToJsonValueCompat(Prop, ValueAddr);
 	}
 
+	bool ResolvePath(UObject* Root, const FString& Path, TArray<FResolvedStep>& OutSteps, EResolveFailure& OutFailure, FString& OutError)
+	{
+		OutSteps.Reset();
+		OutFailure = EResolveFailure::None;
+		if (!Root)
+		{
+			OutFailure = EResolveFailure::InvalidPath;
+			OutError = TEXT("root object is null");
+			return false;
+		}
+
+		TArray<FSegment> Segments;
+		if (!ParsePath(Path, Segments, OutError))
+		{
+			OutFailure = EResolveFailure::InvalidPath;
+			return false;
+		}
+
+		const UStruct* Struct = Root->GetClass();
+		void* Container = Root;
+		UObject* Owner = Root;
+
+		for (int32 Index = 0; Index < Segments.Num(); ++Index)
+		{
+			const FSegment& Segment = Segments[Index];
+			const bool bLast = Index == Segments.Num() - 1;
+
+			FProperty* Prop = FindField(Struct, Segment.Name);
+			if (!Prop)
+			{
+				OutFailure = EResolveFailure::NotFound;
+				OutError = UnknownFieldError(Segment.Name, Struct);
+				return false;
+			}
+
+			FResolvedStep Step;
+			Step.Property = Prop;
+			Step.Owner = Owner;
+
+			FProperty* ValueProp = Prop;
+			void* ValueAddr = Prop->ContainerPtrToValuePtr<void>(Container);
+
+			if (Segment.Index != INDEX_NONE)
+			{
+				FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop);
+				if (!ArrayProp)
+				{
+					OutFailure = EResolveFailure::InvalidPath;
+					OutError = FString::Printf(TEXT("'%s' is not an array, cannot index it"), *Segment.Name);
+					return false;
+				}
+				FScriptArrayHelper Helper(ArrayProp, ValueAddr);
+				if (Segment.Index >= Helper.Num())
+				{
+					OutFailure = EResolveFailure::InvalidPath;
+					OutError = FString::Printf(TEXT("'%s' has %d entries, index %d is out of range"),
+						*Segment.Name, Helper.Num(), Segment.Index);
+					return false;
+				}
+				ValueProp = ArrayProp->Inner;
+				ValueAddr = Helper.GetRawPtr(Segment.Index);
+			}
+
+			if (!bLast)
+			{
+				if (FStructProperty* StructProp = CastField<FStructProperty>(ValueProp))
+				{
+					Struct = StructProp->Struct;
+					Container = ValueAddr;
+				}
+				else if (FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(ValueProp))
+				{
+					UObject* Inner = ObjProp->GetObjectPropertyValue(ValueAddr);
+					if (!Inner)
+					{
+						OutFailure = EResolveFailure::NotTraversable;
+						OutError = FString::Printf(TEXT("'%s' is null, cannot descend into it"), *Segment.Name);
+						return false;
+					}
+					Step.Descended = Inner;
+					Struct = Inner->GetClass();
+					Container = Inner;
+					Owner = Inner;
+				}
+				else
+				{
+					OutFailure = EResolveFailure::NotTraversable;
+					OutError = FString::Printf(
+						TEXT("'%s' is a %s, which has no sub-fields to descend into"),
+						*Segment.Name, *ValueProp->GetCPPType());
+					return false;
+				}
+			}
+
+			OutSteps.Add(Step);
+		}
+
+		OutError.Reset();
+		return true;
+	}
+
 	namespace
 	{
 		/** FlattenProperties 的递归主体。Container 是 Struct 在内存里的那份数据 */

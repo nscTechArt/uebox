@@ -355,3 +355,212 @@ describe('部分失败与落盘', () => {
     expect(String(r.message)).not.toContain('部分完成')
   })
 })
+
+/**
+ * 自动建材质时贴图被怎么处理了，要摆到 message 里。
+ *
+ * 打包遮罩（ORM/ARM/RMA/MRA）插件会认出来、关 sRGB、改 Masks 压缩，但**不接**进
+ * 自动生成的材质实例 —— 母材质没有打包遮罩输入。不写出来的话模型会以为粗糙度和
+ * 金属度已经接好了，然后对着一个灰蒙蒙的材质去调参数。
+ */
+describe('贴图处理结果 texture_setup', () => {
+  const okWith = (texture_setup: unknown[]): Record<string, unknown> => ({
+    ok: true,
+    imported_count: texture_setup.length + 1,
+    requested_count: texture_setup.length,
+    imported: [],
+    texture_setup
+  })
+
+  it('打包遮罩：写出通道含义，并说清没接进材质实例', async () => {
+    callRequest.mockResolvedValue(
+      okWith([
+        {
+          name: 'T_Rock_ORM',
+          type: 'packed_orm',
+          srgb: false,
+          compression: 'TC_Masks',
+          channels: { r: 'ao', g: 'roughness', b: 'metallic' }
+        }
+      ])
+    )
+
+    const r = await run(withDefaults({ files: ['C:/a/T_Rock_ORM.png'] }))
+    const message = String(r.message)
+
+    expect(message).toContain('T_Rock_ORM')
+    expect(message).toContain('R=ao G=roughness B=metallic')
+    expect(message).toContain('sRGB 关')
+    expect(message).toContain('TC_Masks')
+    expect(message).toContain('没接进自动生成的材质实例')
+    expect(r.texture_setup).toHaveLength(1)
+  })
+
+  it('只写 Mask 的不编通道顺序', async () => {
+    callRequest.mockResolvedValue(
+      okWith([{ name: 'T_Leaf_Mask', type: 'packed_mask', srgb: false, compression: 'TC_Masks' }])
+    )
+
+    const message = String((await run(withDefaults({ files: ['C:/a/T_Leaf_Mask.png'] }))).message)
+
+    expect(message).toContain('没写通道顺序')
+    expect(message).not.toContain('R=')
+  })
+
+  it('按名字翻了绿通道的法线要说出来，接上的参数也写明', async () => {
+    callRequest.mockResolvedValue(
+      okWith([
+        {
+          name: 'T_Rock_Normal_GL',
+          type: 'normal',
+          srgb: false,
+          compression: 'TC_Normalmap',
+          flip_green_channel: true,
+          flip_reason: 'name contains an OpenGL marker (gl / opengl)',
+          material_parameter: 'Normal'
+        }
+      ])
+    )
+
+    const message = String(
+      (await run(withDefaults({ files: ['C:/a/T_Rock_Normal_GL.png'] }))).message
+    )
+
+    expect(message).toContain('已翻转绿通道')
+    expect(message).toContain('接到材质参数 Normal')
+  })
+
+  it('旧插件没有 texture_setup 时不多出这一段', async () => {
+    const r = await run(withDefaults({ files: ['C:/a/wood.png'] }))
+
+    expect('texture_setup' in r).toBe(false)
+    expect(String(r.message)).not.toContain('贴图处理')
+  })
+})
+
+/**
+ * 导入器自己说的 Warning / Error。
+ *
+ * 资产建出来了不等于导入干净：平滑组缺失、切线重算、没有光照贴图 UV、骨架对不上，
+ * 引擎都只在 Message Log 里留一句。插件把它们收进 import_messages，工具要把条数和
+ * 前几条摆进正文 —— 只看 message 的模型才不会报一个「干净导入」。
+ */
+describe('导入器消息 import_messages', () => {
+  const fbxWarnings = [
+    {
+      severity: 'error',
+      category: 'Interchange',
+      text: "[C:/a/hero.fbx : 'SK_Hero', SkeletalMesh] Bone 'spine_03' is missing from the skeleton"
+    },
+    {
+      severity: 'warning',
+      category: 'FBXImport',
+      text: 'No smoothing group information was found in this FBX scene.'
+    },
+    { severity: 'warning', category: 'LogStaticMesh', text: 'Lightmap UV channel is missing' }
+  ]
+
+  it('有消息时，正文写出条数、错误/警告各几条，并逐条带上类别', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      imported_count: 1,
+      requested_count: 1,
+      imported: [{ name: 'SK_Hero', path: '/Game/SK_Hero.SK_Hero', class: 'SkeletalMesh' }],
+      import_messages: fbxWarnings
+    })
+
+    const r = await run(withDefaults({ files: ['C:/a/hero.fbx'] }))
+    const message = String(r.message)
+
+    expect(r.success).toBe(true)
+    expect(message).toContain('导入器报了 3 条消息（1 个错误、2 个警告）')
+    expect(message).toContain('import_messages')
+    expect(message).toContain('[错误] Interchange:')
+    expect(message).toContain('[警告] FBXImport: No smoothing group information')
+    expect(r.import_messages).toEqual(fbxWarnings)
+    expect('import_messages_truncated' in r).toBe(false)
+  })
+
+  it('正文只列前几条，其余和被插件截掉的数目都说清，原始列表完整留在字段里', async () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({
+      severity: 'warning',
+      category: 'LogFbx',
+      text: `warning #${i}`
+    }))
+    callRequest.mockResolvedValue({
+      ok: true,
+      imported_count: 1,
+      requested_count: 1,
+      imported: [],
+      import_messages: many,
+      import_messages_truncated: 12
+    })
+
+    const r = await run(withDefaults({ files: ['C:/a/hero.fbx'] }))
+    const message = String(r.message)
+
+    expect(message).toContain('导入器报了 20 条消息')
+    expect(message).toContain('另有 12 条超出上限没列出')
+    expect(message).toContain('warning #4')
+    expect(message).not.toContain('warning #5')
+    expect(message).toContain('其余 3 条见 import_messages')
+    expect(r.import_messages).toHaveLength(8)
+    expect(r.import_messages_truncated).toBe(12)
+  })
+
+  it('不带类别的行不写空的类别前缀；超长的一条在正文里截断', async () => {
+    const long = 'x'.repeat(500)
+    callRequest.mockResolvedValue({
+      ok: true,
+      imported_count: 1,
+      requested_count: 1,
+      imported: [],
+      import_messages: [{ severity: 'warning', category: '', text: long }]
+    })
+
+    const message = String((await run(withDefaults({ files: ['C:/a/wood.png'] }))).message)
+
+    expect(message).toContain('  [警告] xxx')
+    expect(message).not.toContain('[警告] :')
+    expect(message).not.toContain(long)
+  })
+
+  it('一个都没导成时，导入器的原话也进 error', async () => {
+    callRequest.mockResolvedValue({
+      ok: false,
+      error: 'C:/a/anim.fbx: the engine imported nothing from this FBX',
+      imported_count: 0,
+      succeeded_count: 0,
+      requested_count: 1,
+      imported: [],
+      failed_count: 1,
+      failed: [{ file: 'C:/a/anim.fbx', reason: 'the engine imported nothing from this FBX' }],
+      import_messages: [
+        { severity: 'error', category: 'FBXImport', text: 'Could not find skeleton for animation' }
+      ]
+    })
+
+    const r = await run(withDefaults({ files: ['C:/a/anim.fbx'] }))
+
+    expect(r.success).toBe(false)
+    expect(String(r.error)).toContain('[错误] FBXImport: Could not find skeleton for animation')
+  })
+
+  it('空数组（这次干净）和旧插件（没有字段）都不多出这一段', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      imported_count: 1,
+      requested_count: 1,
+      imported: [],
+      import_messages: []
+    })
+    const clean = await run(withDefaults({ files: ['C:/a/wood.png'] }))
+    expect('import_messages' in clean).toBe(false)
+    expect(String(clean.message)).not.toContain('导入器报了')
+
+    callRequest.mockResolvedValue({ ok: true, imported_count: 1, requested_count: 1, imported: [] })
+    const old = await run(withDefaults({ files: ['C:/a/wood.png'] }))
+    expect('import_messages' in old).toBe(false)
+    expect(String(old.message)).not.toContain('导入器报了')
+  })
+})

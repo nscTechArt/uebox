@@ -9,6 +9,7 @@
 #include "UAL_ContentBrowserCommands.h"
 #include "UAL_ContentOrganizeCommands.h"
 #include "UAL_ContentSafetyCommands.h"
+#include "UAL_AssetPropertyCommands.h"
 #include "UAL_DataTableCommands.h"
 #include "UAL_CppCommands.h"
 #include "UAL_MaterialCommands.h"
@@ -156,6 +157,8 @@ void FUAL_CommandHandler::RegisterCommands()
 	FUAL_ContentBrowserCommands::RegisterCommands(CommandMap);
 	FUAL_ContentOrganizeCommands::RegisterCommands(CommandMap);
 	FUAL_ContentSafetyCommands::RegisterCommands(CommandMap);
+	// content.set_asset_properties —— 细节面板里那些资产设置（Nanite、碰撞复杂度、贴图压缩…），按路径写、读回
+	FUAL_AssetPropertyCommands::RegisterCommands(CommandMap);
 	FUAL_DataTableCommands::RegisterCommands(CommandMap);
 	FUAL_CppCommands::RegisterCommands(CommandMap);
 	FUAL_MaterialCommands::RegisterCommands(CommandMap);
