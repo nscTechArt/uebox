@@ -34,8 +34,13 @@ import type { ModelRequest, ModelRole, ProviderConfig } from './types'
  * `agent-v3` 的事，那边直接用 pi 的 Agent，不经过这里。
  */
 
-/** pi 的模型 + 它所属的 Models 实例。两者要一起用，分开拿没有意义 */
-function resolveModel(
+/**
+ * pi 的模型 + 它所属的 Models 实例。两者要一起用，分开拿没有意义。
+ *
+ * 导出给拼装通话（`realtime/cascadeDeps.ts`）：那边要带工具的流，这个模块按边界不做，
+ * 但「按 Provider 造一个 pi 模型」这一步两边必须是同一份，免得厂商怪癖修两遍。
+ */
+export function resolveModel(
   provider: ProviderConfig,
   modelId: string
 ): {

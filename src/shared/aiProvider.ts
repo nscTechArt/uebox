@@ -708,6 +708,47 @@ export function findVisionCapableRole(source: RoleBindingSource): ModelRole | nu
 }
 
 /**
+ * 拼装通话的「脑子」从这几个角色里取，按顺序第一个绑了的。
+ *
+ * 和主进程的 `ROLE_FALLBACK.summary` 是同一串（那边有测试盯着两份对不对得上）：
+ * 语音前台要快，先用「轻量任务」，没配才用主力对话模型。
+ */
+export const VOICE_PIPELINE_BRAIN_ROLES: readonly ModelRole[] = Object.freeze([
+  'summary',
+  'chat',
+  'agent'
+])
+
+/**
+ * 没绑「实时语音」时，能不能拼一通电话出来：语音识别当耳朵、对话模型当脑子、
+ * 语音合成当嘴。回缺的那几个角色（`chat` 代表对话模型那一组），配齐了回空数组。
+ *
+ * 主进程开通话、设置页决定「语音通话不可用」那一行要不要显示，用的是同一份判断 ——
+ * 理由同 `findVisionCapableRole`：界面说能通、实际打不通（或者反过来）都很糟。
+ *
+ * `sttUsable` 给主进程用：识别那一路认不认得这个地址只有主进程知道。界面上不传，
+ * 按认得算 —— 认不得的那种地址（陌生的 ws://）极少，开通话时会把原因说清楚。
+ */
+export function missingForVoicePipeline(
+  source: {
+    roles: RoleBindings
+    providers: readonly { id: string; kind: ProviderKind; baseUrl: string }[]
+  },
+  sttUsable: (provider: { id: string; baseUrl: string }) => boolean = () => true
+): ModelRole[] {
+  const bound = (
+    role: ModelRole
+  ): { id: string; kind: ProviderKind; baseUrl: string } | undefined =>
+    source.providers.find((item) => item.id === source.roles[role]?.providerId)
+  const missing: ModelRole[] = []
+  const stt = bound('stt')
+  if (!stt || stt.kind !== 'stt' || !sttUsable(stt)) missing.push('stt')
+  if (bound('tts')?.kind !== 'tts') missing.push('tts')
+  if (!VOICE_PIPELINE_BRAIN_ROLES.some((role) => source.roles[role])) missing.push('chat')
+  return missing
+}
+
+/**
  * Agent 此刻的默认模型。没单独绑 Agent 时内核沿用 chat 角色，这里给出同一个结果。
  *
  * 只留 providerId / modelId：`source: 'plan'` 是全局绑定的归属标记，

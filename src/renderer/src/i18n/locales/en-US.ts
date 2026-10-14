@@ -695,8 +695,10 @@ export default {
       ttsMissing: 'Read aloud unavailable',
       realtimeDesc: 'Choose a real-time voice model for voice calls.',
       realtimeMore:
-        'Supports OpenAI gpt-realtime models and Doubao Seeduplex. Ordinary chat models do not apply.',
+        'Supports OpenAI gpt-realtime models and Doubao Seeduplex; ordinary chat models cannot be bound here. When unset and speech-to-text plus text-to-speech are configured, calls are answered by the chat model with slightly more delay.',
       realtimeMissing: 'Voice call unavailable',
+      realtimeViaPipeline:
+        'Unset: calls are answered by the chat model through speech-to-text and text-to-speech, with slightly more delay.',
       stt: 'Speech to text',
       sttDesc:
         'Hold the voice hotkey, speak, and get text in the search box. Falls back to the realtime voice role when unset.',

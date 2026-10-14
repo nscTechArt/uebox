@@ -675,8 +675,10 @@ export default {
         '添加豆包语音合成服务商，填写语音控制台的 API Key，然后在此选择 TTS 2.0。音色可在模型设置中修改。',
       ttsMissing: '回复朗读不可用',
       realtimeDesc: '选择实时语音模型，用于语音通话。',
-      realtimeMore: '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex；普通对话模型不适用。',
+      realtimeMore:
+        '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex，普通对话模型不能绑在此处。未设置时，若已配置语音识别与语音合成，通话改由对话模型应答，响应稍慢。',
       realtimeMissing: '语音通话不可用',
+      realtimeViaPipeline: '未设置时，通话由对话模型应答（经语音识别与语音合成），响应稍慢。',
       stt: '语音识别',
       sttDesc: '按下语音热键说话，转写为文字填入搜索框。未配置时使用实时语音通道。',
       sttMore:

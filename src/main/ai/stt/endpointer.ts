@@ -66,6 +66,13 @@ const MIN_VOICED_MS = 160
 export interface EndpointerOptions {
   /** PCM16 单声道的采样率 */
   sampleRate: number
+  /**
+   * 低于这个响度一律不算说话，默认 `SPEECH_FLOOR_DB`。
+   *
+   * 拼装通话拿它判「用户插话」：外放时喇叭的回声残留会被收回来，门槛得跟着
+   * 回声档位抬高，不然它自己的声音就把自己打断了。
+   */
+  speechFloorDb?: number
 }
 
 export interface Endpointer {
@@ -106,6 +113,7 @@ export function createEndpointer(options: EndpointerOptions): Endpointer {
   const tailFrames = frames(TAIL_MS)
   const maxSegmentFrames = frames(MAX_SEGMENT_MS)
   const minVoicedFrames = frames(MIN_VOICED_MS)
+  const speechFloorDb = options.speechFloorDb ?? SPEECH_FLOOR_DB
 
   /** 上一次没凑满一帧的零头 */
   let remainder = Buffer.alloc(0)
@@ -146,7 +154,7 @@ export function createEndpointer(options: EndpointerOptions): Endpointer {
     levels.push(level)
     if (levels.length > floorWindow) levels.shift()
     const floor = Math.min(...levels)
-    const voiced = level >= Math.max(floor + SPEECH_MARGIN_DB, SPEECH_FLOOR_DB)
+    const voiced = level >= Math.max(floor + SPEECH_MARGIN_DB, speechFloorDb)
 
     if (!speaking) {
       recentVoiced.push(voiced)
