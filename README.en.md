@@ -36,13 +36,27 @@
 
 A desktop app. You bring a model provider; it connects to your running Unreal Editor
 through the UnrealAgentLink plugin and does the work with a hundred-plus engine tools
-and 25 built-in skills. Routine operations just run; risky ones pause for your approval.
+and 27 built-in skills. Routine operations just run; risky ones pause for your approval,
+and anything you've approved can be set to "always allow".
 "Done" isn't its call to make — after it edits, it goes back into the engine to check,
 and then has to account for itself.
 
-Beyond levels, Blueprints, materials, assets and C++, it also handles animation
-retargeting, UMG, Sequencer shots, PIE runtime checks, geometry editing and project
-audits. → [Full capabilities and limits](https://uebox.ai/guide/capabilities)
+Beyond levels, Blueprints, materials, assets and C++, it also handles Animation
+Blueprints and retargeting, Substrate materials, Data Tables, UMG, Sequencer shots and
+Movie Render Queue renders, automated PIE playtests, geometry editing and project audits.
+→ [Full capabilities and limits](https://uebox.ai/guide/capabilities)
+
+Hand it work at the size it comes in:
+
+- **Just say it**: one sentence, one job, and it stops when done.
+- **`/goal`**: hand it a goal. An auditor breaks the request into a checklist and looks for
+  evidence item by item; if it isn't met, the agent keeps going. → [Goal mode](https://uebox.ai/guide/agent-loop#目标模式)
+- **`/team`**: hand it a complex task. It assembles a team — each member can run on a
+  different model — and they split the work until there's a playable build. The
+  "Team tasks" side tab shows who's doing what and what's left.
+
+It also keeps experience: pitfalls it hit in your project come back attached to the next
+matching error, and after a session they're distilled into reusable entries.
 
 The agent is the product. The project library, asset library, Blueprint and material
 libraries, and notebooks each have a full standalone UI and can be used on their own,
@@ -86,14 +100,18 @@ Stuck? → [First run](https://uebox.ai/guide/first-run) · [Connect Unreal](htt
 
 One task, four frames:
 
-|                                                                                                                               |                                                                                                                                                   |
-| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Tool call](website/public/shots/ai-tool-call.png)<br>**Engine tool call** — name, arguments and return value, all laid open | ![Changes](website/public/shots/engine-changes.png)<br>**This round's changes** — what it touched in the engine                                   |
+|                                                                                                                                       |                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ![Tool call](website/public/shots/ai-tool-call.png)<br>**Engine tool call** — name, arguments and return value, all laid open         | ![Changes](website/public/shots/engine-changes.png)<br>**This round's changes** — what it touched in the engine                                   |
 | ![Review](website/public/shots/engine-review.png)<br>**Review** — the verdict after the agent re-read the engine with read-only tools | ![Self-check](website/public/shots/engine-selfcheck.png)<br>**Account for it** — answering each finding: what it missed, what it added on its own |
 
 **Already using Codex, Claude Code or Cursor?** Switch on the MCP server and plug UE Box in as a tool
 provider — your client gains a hundred-plus Unreal tools at once. Local connections only, token required, writable by default.
 → [MCP](https://uebox.ai/guide/mcp)
+
+**Scripts or CI?** Use the `uebox` CLI: `tools call` runs a single tool, `ask` hands a whole
+sentence to the box's own agent. No setup, read-only by default, `--allow-write` to change
+anything. → [CLI](https://uebox.ai/guide/cli)
 
 It ships with these too, each usable on its own:
 
@@ -119,11 +137,11 @@ It ships with these too, each usable on its own:
 
 ## Platform support
 
-|         | Installer         | Engine discovery                      | Prebuilt UnrealAgentLink plugin            |
-| ------- | ----------------- | ------------------------------------- | ------------------------------------------ |
-| Windows | ✅                | ✅                                    | ✅                                         |
-| macOS   | Build from source | ✅ common directories + manual adding | Build and release validation not finished  |
-| Linux   | Build from source | Not supported yet                     | —                                          |
+|         | Installer         | Engine discovery                      | Prebuilt UnrealAgentLink plugin           |
+| ------- | ----------------- | ------------------------------------- | ----------------------------------------- |
+| Windows | ✅                | ✅                                    | ✅                                        |
+| macOS   | Build from source | ✅ common directories + manual adding | Build and release validation not finished |
+| Linux   | Build from source | Not supported yet                     | —                                         |
 
 <!-- TODO: fill in the Linux "prebuilt plugin" cell with the real status -->
 
@@ -142,7 +160,7 @@ The stance of this project: **experiment freely while developing, concede
 nothing at the acceptance gate.**
 
 The repo ships a spec for AI agents to read ([AGENTS.md](AGENTS.md)) and a
-one-command acceptance gate (`pnpm verify`). You just tell your AI coding assistant
+acceptance gate (`pnpm verify`). You just tell your AI coding assistant
 what you want:
 
 > Add a feature to UE Box: asset library tags should support custom colors.
@@ -166,16 +184,24 @@ pnpm install
 pnpm dev
 ```
 
-After changing code:
+The gate has two tiers. Don't run it while you work; at commit time run the fast tier,
+which checks only what you changed (about 30 seconds):
+
+```bash
+pnpm verify:changed
+```
+
+Before anything goes out (push, PR), run the full one:
 
 ```bash
 pnpm verify
 ```
 
-One command runs every CI gate (secret scan → official-endpoint ratchet → lint
+The full tier runs every CI gate (secret scan → official-endpoint ratchet → lint
 → changed-line lint → typecheck → unit tests). On failure it tells you exactly
 what to fix and which command to run. **You can leave the app running while it
-runs** — the gate does not touch the native module.
+runs** — the gate does not touch the native module. Why two tiers:
+[AGENTS.md §3](AGENTS.md#3-the-gate--two-tiers-and-which-one-you-owe).
 
 To produce an installer, cut a release, or get unstuck from the `better-sqlite3`
 ABI, see [Packaging, releasing and the native module](docs/contributing/packaging.md).
@@ -184,14 +210,14 @@ ABI, see [Packaging, releasing and the native module](docs/contributing/packagin
 
 ## Documentation
 
-| I am…                              | Start here                                                                                                                                         |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A user who wants to get going      | [Manual](https://uebox.ai/guide/) · [First run](https://uebox.ai/guide/first-run) · [Connect Unreal](https://uebox.ai/guide/plugin) (Chinese)      |
-| A user who wants a feature         | [Add a feature with AI](docs/contributing/vibe-coding.md) · [Request one](../../issues/new?template=feature_request.yml)                           |
-| A developer                        | [Contributing](CONTRIBUTING.md) · [Vertical slice](docs/contributing/vertical-slice.md) · [Testing guide](docs/contributing/testing.md)            |
-| A release manager                  | [Packaging and releasing](docs/contributing/packaging.md)                                                                                          |
-| An AI agent                        | [AGENTS.md](AGENTS.md)                                                                                                                             |
-| A designer                         | [UI design standards](docs/UI-Design-Standards.md)                                                                                                 |
+| I am…                         | Start here                                                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| A user who wants to get going | [Manual](https://uebox.ai/guide/) · [First run](https://uebox.ai/guide/first-run) · [Connect Unreal](https://uebox.ai/guide/plugin) (Chinese) |
+| A user who wants a feature    | [Add a feature with AI](docs/contributing/vibe-coding.md) · [Request one](../../issues/new?template=feature_request.yml)                      |
+| A developer                   | [Contributing](CONTRIBUTING.md) · [Vertical slice](docs/contributing/vertical-slice.md) · [Testing guide](docs/contributing/testing.md)       |
+| A release manager             | [Packaging and releasing](docs/contributing/packaging.md)                                                                                     |
+| An AI agent                   | [AGENTS.md](AGENTS.md)                                                                                                                        |
+| A designer                    | [UI design standards](docs/UI-Design-Standards.md)                                                                                            |
 
 More topics live in [`docs/`](docs/).
 
