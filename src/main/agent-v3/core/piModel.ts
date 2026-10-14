@@ -284,6 +284,13 @@ const THINKING_OFF_FIELDS: readonly { match: RegExp; body: Record<string, unknow
     // 小米 MiMo（按量 api. 与 Token Plan token-plan-cn. 两个入口）。v2.5 / v2.6 默认开思考
     match: /\.xiaomimimo\.com/i,
     body: { thinking: { type: 'disabled' } }
+  },
+  {
+    // 火山方舟。带「深度思考」标签的豆包 Seed 默认就想；Chat API 关思考是 thinking.type=disabled
+    // （官方「深度思考」文档）。不发 auto：Seed 2.1 直接 400 Unsupported thinking type。
+    // 不带这个标签的模型本来就不想，文档说直接调用即可
+    match: /ark\.[a-z-]+\.volces\.com/i,
+    body: { thinking: { type: 'disabled' } }
   }
 ]
 

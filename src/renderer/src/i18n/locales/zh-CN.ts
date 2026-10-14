@@ -672,7 +672,7 @@ export default {
       musicMissing: '不自动生成配乐',
       ttsDesc: '朗读 AI 回复，使用 AI 合成声音。',
       ttsMore:
-        '添加豆包语音合成服务商，填写语音控制台的 API Key，然后在此选择 TTS 2.0。音色可在模型设置中修改。',
+        '内置豆包 TTS 2.0 与阿里云 Qwen-Audio；也可接入本机运行的 Kokoro、CosyVoice 等 OpenAI 兼容合成服务（添加服务商 → 本机语音合成）。音色可在模型设置中修改。',
       ttsMissing: '回复朗读不可用',
       realtimeDesc: '选择实时语音模型，用于语音通话。',
       realtimeMore:

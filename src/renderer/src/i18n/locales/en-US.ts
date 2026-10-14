@@ -691,7 +691,7 @@ export default {
       musicMissing: 'Automatic music unavailable',
       ttsDesc: 'Read AI replies aloud with an AI-generated voice.',
       ttsMore:
-        'Add Doubao Text to speech, enter a Speech console API key, then select TTS 2.0 here. Change the voice in model settings.',
+        'Doubao TTS 2.0 and Alibaba Qwen-Audio are built in. A local Kokoro or CosyVoice server that speaks the OpenAI speech API works too — add the local text-to-speech entry under Add provider → Voice. Change the voice in model settings.',
       ttsMissing: 'Read aloud unavailable',
       realtimeDesc: 'Choose a real-time voice model for voice calls.',
       realtimeMore:

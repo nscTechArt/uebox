@@ -611,6 +611,15 @@ export const CURATED = [
   // 这一组只转写、不回话。与上面那两家是**同一个控制台、同一把密钥**，
   // 单独列条目是因为地址不同（一个 Provider = 一个地址 + 一套凭据 + 一种用途）。
   {
+    id: 'local-tts',
+    group: 'tts',
+    // Kokoro-FastAPI 的默认地址。CosyVoice、GPT-SoVITS 的 OpenAI 兼容封装、LocalAI
+    // 改成它们自己的 /v1 —— 走的都是 /audio/speech（ai/speechOpenAi.ts）
+    baseUrl: 'http://127.0.0.1:8880/v1',
+    displayName: '本机语音合成',
+    requiresApiKey: false
+  },
+  {
     id: 'doubao-stt',
     group: 'stt',
     baseUrl: 'https://openspeech.bytedance.com/api/v3/sauc/bigmodel',
@@ -1227,6 +1236,15 @@ const MANUAL_ENTRIES = {
         name: 'Qwen-Audio 3.0 ASR Flash Streaming'
       },
       'fun-asr-realtime': { id: 'fun-asr-realtime', name: 'Fun-ASR Realtime' }
+    }
+  },
+  'local-tts': {
+    name: '本机语音合成',
+    env: [],
+    doc: 'https://github.com/remsky/Kokoro-FastAPI',
+    models: {
+      // Kokoro 的中文女声。别的服务换成它自己的模型名和音色
+      kokoro: { id: 'kokoro', name: 'Kokoro', ttsVoice: 'zf_xiaobei' }
     }
   },
   'siliconflow-stt': {
@@ -1985,7 +2003,8 @@ const NO_LOGO = new Set([
   'sunoapi-music',
   'builtin-browser',
   'searxng',
-  'local-stt'
+  'local-stt',
+  'local-tts'
 ])
 
 async function downloadLogo(id, aliasOf) {

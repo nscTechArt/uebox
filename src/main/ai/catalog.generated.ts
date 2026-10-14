@@ -6388,5 +6388,23 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "displayName": "SenseVoice Small"
       }
     ]
+  },
+  {
+    "id": "local-tts",
+    "displayName": "本机语音合成",
+    "group": "tts",
+    "kind": "tts",
+    "protocol": "openai-completions",
+    "baseUrl": "http://127.0.0.1:8880/v1",
+    "apiKeyUrl": "https://github.com/remsky/Kokoro-FastAPI",
+    "requiresApiKey": false,
+    "hasLogo": false,
+    "models": [
+      {
+        "id": "kokoro",
+        "displayName": "Kokoro",
+        "ttsVoice": "zf_xiaobei"
+      }
+    ]
   }
 ] as CatalogEntry[])

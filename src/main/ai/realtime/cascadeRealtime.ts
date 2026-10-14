@@ -409,11 +409,29 @@ export function openCascadeSession(
       trimHistory()
 
       const mouth = createMouth(signal)
+      const askedAt = Date.now()
       const stream = deps.reply({ system, messages: history, tools, signal })
       let text = ''
       const calls: ToolCall[] = []
+      /*
+       * 慢在哪儿得看得见。一句话从识别完到开口，模型首字常常占大头 —— 而那多半是
+       * 它在先想（关不掉思考的模型、或者厂商默认开着思考）。日志里记一行，
+       * 用户嫌慢时一眼看出是该换个快模型，还是该去关思考。
+       */
+      let firstTokenMs: number | null = null
+      let thinkingChars = 0
       for await (const event of stream) {
         if (signal.aborted) break
+        if (event.type === 'thinking_delta') thinkingChars += event.delta.length
+        if (
+          firstTokenMs === null &&
+          (event.type === 'text_delta' || event.type === 'toolcall_end')
+        ) {
+          firstTokenMs = Date.now() - askedAt
+          console.log(
+            `[拼装通话] 模型首字 ${firstTokenMs}ms${thinkingChars ? `，此前思考 ${thinkingChars} 字` : ''}`
+          )
+        }
         if (event.type === 'text_delta') {
           text += event.delta
           emit({ type: 'assistant-text', text: event.delta })

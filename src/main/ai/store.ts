@@ -138,7 +138,8 @@ function normalizeModel(
   raw: unknown,
   providerId: string,
   kind: ProviderKind,
-  legacy: boolean
+  legacy: boolean,
+  baseUrl = ''
 ): ModelConfig | null {
   if (!raw || typeof raw !== 'object') return null
   const source = raw as Record<string, unknown>
@@ -169,7 +170,7 @@ function normalizeModel(
     adaptiveThinking: source.adaptiveThinking === true ? true : undefined,
     contextWindow: positiveInt(source.contextWindow),
     maxOutputTokens: positiveInt(source.maxOutputTokens),
-    ttsVoice: kind === 'tts' ? str(source.ttsVoice) || defaultSpeechVoice(id) : undefined,
+    ttsVoice: kind === 'tts' ? str(source.ttsVoice) || defaultSpeechVoice(id, baseUrl) : undefined,
     ttsMaxInputChars: kind === 'tts' ? positiveInt(source.ttsMaxInputChars) : undefined,
     realtimeVoice:
       kind === 'realtime'
@@ -392,7 +393,7 @@ function normalizeProvider(raw: unknown, legacy: boolean): ProviderConfig | null
   const providerKind = declared ?? inferKind(source, baseUrl, rawModels)
 
   const models = rawModels
-    .map((model) => normalizeModel(model, id, providerKind, legacy))
+    .map((model) => normalizeModel(model, id, providerKind, legacy, baseUrl))
     .filter((item): item is ModelConfig => item !== null)
 
   return {
