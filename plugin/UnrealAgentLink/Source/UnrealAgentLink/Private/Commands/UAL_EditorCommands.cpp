@@ -44,6 +44,8 @@
 #include "Widgets/SWindow.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/SLeafWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Brushes/SlateColorBrush.h"
 #include "Styling/CoreStyle.h"
@@ -3940,7 +3942,68 @@ namespace
 	}
 
 	/**
-	 * 游戏视口顶上挂一条「盒子正在试玩，请勿操作」。
+	 * 视口四周往里渗的一圈呼吸光，告诉用户「这块画面正被接管」。
+	 * 四条边各画一道由边向内淡出的渐变，透明度按正弦慢慢起伏。
+	 */
+	class SUAL_PieEdgeGlow : public SLeafWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SUAL_PieEdgeGlow) {}
+			SLATE_ARGUMENT(FLinearColor, Color)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			Color = InArgs._Color;
+			// 游戏视口不一定每帧重画这层，挂个常驻计时器让它跟着动
+			RegisterActiveTimer(0.f, FWidgetActiveTimerDelegate::CreateLambda(
+				[](double, float) { return EActiveTimerReturnType::Continue; }));
+		}
+
+		virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D::ZeroVector; }
+
+		virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+		{
+			const FVector2D Size = AllottedGeometry.GetLocalSize();
+			const float Thickness = FMath::Min(48.f, FMath::Min(Size.X, Size.Y) * 0.06f);
+			if (Thickness <= 0.f)
+			{
+				return LayerId;
+			}
+
+			// 2.4 秒一个来回，最暗时也留一点，免得像在闪
+			const double Time = FSlateApplication::Get().GetCurrentTime();
+			const float Breath = 0.5f + 0.5f * FMath::Sin(Time * 6.283185307179586 / 2.4); // 2π；UE_TWO_PI 5.0 没有，PI 5.8 没有
+			FLinearColor Edge = Color;
+			Edge.A = FMath::Lerp(0.12f, 0.4f, Breath);
+			FLinearColor Clear = Color;
+			Clear.A = 0.f;
+
+			// Orient_Vertical 的渐变沿 X 走，Orient_Horizontal 沿 Y 走
+			auto Draw = [&](const FVector2D& Pos, const FVector2D& BoxSize, EOrientation Orient, bool bFadeTowardEnd)
+			{
+				TArray<FSlateGradientStop> Stops;
+				Stops.Add(FSlateGradientStop(FVector2D::ZeroVector, bFadeTowardEnd ? Edge : Clear));
+				Stops.Add(FSlateGradientStop(BoxSize, bFadeTowardEnd ? Clear : Edge));
+				FSlateDrawElement::MakeGradient(
+					OutDrawElements, LayerId,
+					AllottedGeometry.ToPaintGeometry(BoxSize, FSlateLayoutTransform(Pos)),
+					MoveTemp(Stops), Orient, ESlateDrawEffect::None);
+			};
+			Draw(FVector2D(0.f, 0.f), FVector2D(Thickness, Size.Y), Orient_Vertical, true);
+			Draw(FVector2D(Size.X - Thickness, 0.f), FVector2D(Thickness, Size.Y), Orient_Vertical, false);
+			Draw(FVector2D(0.f, 0.f), FVector2D(Size.X, Thickness), Orient_Horizontal, true);
+			Draw(FVector2D(0.f, Size.Y - Thickness), FVector2D(Size.X, Thickness), Orient_Horizontal, false);
+			return LayerId;
+		}
+
+	private:
+		FLinearColor Color;
+	};
+
+	/**
+	 * 游戏视口顶上挂一条「盒子正在试玩，请勿操作」，四周一圈呼吸光。
 	 *
 	 * 试玩机器人一跑就是几十秒，用户看见游戏窗口自己在动，顺手一碰鼠标键盘，
 	 * 机器人的判断就脏了。
@@ -3964,18 +4027,26 @@ namespace
 
 		const bool bChinese = FInternationalization::Get().GetCurrentCulture()->GetName().StartsWith(TEXT("zh"));
 		const FText Message = bChinese
-			? FText::FromString(TEXT("虚幻盒子自动试玩测试中，请勿操作 · 按 Esc 中止"))
-			: FText::FromString(TEXT("Unreal Box automated playtest in progress. Do not interact · Press Esc to abort"));
+			? FText::FromString(TEXT("虚幻盒子测试中，请勿操作并保持前台运行 · 按 Esc 中止"))
+			: FText::FromString(TEXT("Unreal Box test in progress. Do not interact and keep this window in front · Press Esc to abort"));
 
 		static const FSlateColorBrush Background(FLinearColor(0.f, 0.f, 0.f, 0.6f));
 		FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 14);
 
+		const FLinearColor Amber(1.f, 0.78f, 0.25f);
+
 		TSharedRef<SWidget> Banner =
-			SNew(SBox)
+			SNew(SOverlay)
+			.Visibility(EVisibility::HitTestInvisible)
+			+ SOverlay::Slot()
+			[
+				SNew(SUAL_PieEdgeGlow)
+				.Color(Amber)
+			]
+			+ SOverlay::Slot()
 			.HAlign(HAlign_Center)
 			.VAlign(VAlign_Top)
 			.Padding(FMargin(0.f, 16.f, 0.f, 0.f))
-			.Visibility(EVisibility::HitTestInvisible)
 			[
 				SNew(SBorder)
 				.BorderImage(&Background)
@@ -3984,7 +4055,7 @@ namespace
 					SNew(STextBlock)
 					.Text(Message)
 					.Font(Font)
-					.ColorAndOpacity(FLinearColor(1.f, 0.78f, 0.25f))
+					.ColorAndOpacity(Amber)
 				]
 			];
 
