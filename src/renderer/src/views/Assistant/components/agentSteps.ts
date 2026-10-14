@@ -104,8 +104,9 @@ export interface StepGroupView {
  *
  * `done` 是内核收尾的信号，`ask_user` 自己就是时间线上的一张卡片 ——
  * 再各占一行就是同一件事说两遍。失败的 `done` 例外，见 `buildStepGroup`。
+ * `update_plan` / `wrap_up` 同理：清单和收尾提问各有自己的位置（`agentTurnReport.ts`）。
  */
-const HIDDEN_TOOLS = new Set(['done', 'ask_user'])
+const HIDDEN_TOOLS = new Set(['done', 'ask_user', 'update_plan', 'wrap_up'])
 
 const ERROR_MAX_LENGTH = 80
 const ARGS_MAX_LENGTH = 4000

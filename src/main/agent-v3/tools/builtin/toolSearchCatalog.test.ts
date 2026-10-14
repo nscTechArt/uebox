@@ -82,6 +82,8 @@ describe('真实工具库检索回归', () => {
       'ask_user',
       'voice_report',
       'set_session_project',
+      'update_plan',
+      'wrap_up',
       'search_tools'
     ]
     const resident = search.getTools()
@@ -246,7 +248,9 @@ describe('真实工具库检索回归', () => {
           ...BROWSER_TOOL_NAMES,
           'ask_user',
           'voice_report',
-          'set_session_project'
+          'set_session_project',
+          'update_plan',
+          'wrap_up'
         ])
           expect(names).not.toContain(name)
       if ('toolNames' in overrides) expect(names).toEqual(['search_tools', 'web_read'])
@@ -297,7 +301,13 @@ describe('真实工具库检索回归', () => {
     )
     const groupBytes = byGroup.reduce((sum, tool) => sum + toolDefinitionBytes(tool), 0)
     expect(groupBytes).toBeLessThan(30_000)
-    expect(coreBytes - groupBytes).toBeLessThan(80_000)
+    /*
+     * 2026-10-15：80,000 → 82,000。只为 `update_plan` / `wrap_up` 这两个宿主工具
+     * （任务清单、收尾提问，见 `turnReport.ts`），实测合计 1,399 字节，加上之前
+     * 已有的 79,652 落在 81,051。描述已经压成英文、参数不带 describe。
+     * 这不是给别的工具留的余量 —— 下一个想往点名常驻里加东西的，先在这条线里腾地方。
+     */
+    expect(coreBytes - groupBytes).toBeLessThan(82_000)
     if (process.env.TOOL_SEARCH_MEASURE !== '1') return
     const [cl100k, o200k] = await Promise.all([
       import('gpt-tokenizer/encoding/cl100k_base'),
