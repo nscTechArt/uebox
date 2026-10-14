@@ -2,21 +2,20 @@
 
 English: [definition-of-done.md](definition-of-done.md)
 
-**开发阶段随便试，验收阶段一寸不让。** 这份清单是「做完了」的定义，
-PR 模板与它逐条对应。AI Agent 在说「完成」之前必须自己走一遍。
+这份清单定义什么算「做完了」，PR 模板与它逐条对应。AI Agent 说「完成」之前要自己逐条核对。
 
 ---
 
 ## A. 门禁
 
-这份清单是**发布**那一档的检查点，不是每个任务都要走的。提交时只欠
-`pnpm verify:changed`（约 30 秒），干活中间什么都不欠；完整门禁整批只跑一次，在发出去之前。见
-[AGENTS.md](../../AGENTS.md) 第 3 节。
+这份清单对应**发布**那一档，不是每个任务都要走一遍。干活过程中不跑门禁；每次提交跑
+`pnpm verify:changed`（约 30 秒）；整批发出去之前跑一次完整的 `pnpm verify`（约 3.5 分钟）。
+见 [AGENTS.md](../../AGENTS.md) 第 3 节。
 
 - [ ] 这批里每次提交时都过了 `pnpm verify:changed`
 - [ ] `pnpm verify` 全绿，最后一行是 `✅ 门禁全绿，可以提交了。`
-- [ ] 没有用 `.skip` / 删测试 / 注释断言 / 改覆盖率阈值 / 扩大 ESLint ignore /
-      在新文件加 `/* eslint-disable */` 的方式过关
+- [ ] 没有靠 `.skip`、删测试、注释断言、改覆盖率阈值、扩大 ESLint ignore、
+      在新文件加 `/* eslint-disable */` 过关
 - [ ] 改了主进程、构建配置或依赖的话，额外跑过 `pnpm verify --with-build`
 
 ## B. 功能本身
@@ -47,6 +46,7 @@ PR 模板与它逐条对应。AI Agent 在说「完成」之前必须自己走�
 ## E. 文案与国际化
 
 - [ ] 新增的用户可见文案在 `zh-CN.ts` 和 `en-US.ts` 里都加了
+- [ ] 用词符合 [CONTEXT.md](../../CONTEXT.md)，`terminologyGuard.test.ts` 通过
 - [ ] 如果属于登录 / 订阅 / 付款 / 授权这类必经路径，key 加进了
       `src/renderer/src/i18n/criticalPathCoverage.test.ts` 的 `CRITICAL_KEYS`
 - [ ] 新代码没有在 `.vue` 模板里写死中文
@@ -71,7 +71,7 @@ PR 模板与它逐条对应。AI Agent 在说「完成」之前必须自己走�
 
 ## 没做完怎么办
 
-不要为了凑齐这份清单而假装做完了。
+不要为了凑齐清单而假装做完。
 
 在 PR 描述里开一节 `## 未完成 / 需要帮助`，写清楚：
 
@@ -79,4 +79,4 @@ PR 模板与它逐条对应。AI Agent 在说「完成」之前必须自己走�
 - 你试过什么；
 - 卡在哪（贴报错原文）。
 
-**这样的 PR 我们会接着帮你做完。** 一个绕过了难点的绿灯 PR，只会把问题推给下一个人。
+这样的 PR 维护者会接着帮你做完。绕过难点的绿灯 PR 会把问题留给下一个人。

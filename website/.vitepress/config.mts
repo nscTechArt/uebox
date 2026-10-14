@@ -129,7 +129,7 @@ export default defineConfig({
           text: 'AI Agent',
           items: [
             { text: '配置模型', link: '/guide/ai-setup' },
-            { text: 'AI 会话', link: '/guide/assistant' },
+            { text: 'AI 对话', link: '/guide/assistant' },
             // 「它会干什么」「它怎么干」「怎么管住它」是三个问题，分三页。
             // 合成一页的话，想找“能不能帮我摆场景”的人得先翻过三屏权限说明
             { text: '助手能做什么', link: '/guide/capabilities' },
@@ -156,7 +156,7 @@ export default defineConfig({
             { text: '检索与整理', link: '/guide/asset-organize' },
             { text: '导入到 UE 工程', link: '/guide/asset-to-project' },
             { text: '团队协作', link: '/guide/asset-team' },
-            { text: '资产节点管理', link: '/guide/asset-server' },
+            { text: '服务器资产库', link: '/guide/asset-server' },
             { text: '百度网盘与 WebDAV', link: '/guide/cloud-drive' }
           ]
         },

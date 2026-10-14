@@ -2,9 +2,9 @@
 
 English: [packaging.md](packaging.md)
 
-日常开发不需要这一篇 —— `pnpm install`、`pnpm dev`、`pnpm verify` 就够了，见
-[README](../../README.md)。要出安装包、要发版、或者被 `better-sqlite3` 的
-ABI 卡住时再读这里。
+日常开发用不到这一篇：`pnpm install`、`pnpm dev`、`pnpm verify:changed`（提交时）和
+`pnpm verify`（发出去之前）就够了，见 [README](../../README.md)。出安装包、发版、或被
+`better-sqlite3` 的 ABI 卡住时再读这里。
 
 ---
 

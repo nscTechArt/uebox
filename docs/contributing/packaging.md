@@ -2,10 +2,9 @@
 
 中文：[packaging.zh-CN.md](packaging.zh-CN.md)
 
-You don't need this page for day-to-day work — `pnpm install`, `pnpm dev` and
-`pnpm verify` are enough, see the [README](../../README.en.md). Read this when you
-need to produce an installer, cut a release, or get stuck on the `better-sqlite3`
-ABI.
+Day-to-day work does not need this page: `pnpm install`, `pnpm dev`, `pnpm verify:changed` (on
+commit) and `pnpm verify` (before publishing) are enough, see the [README](../../README.en.md).
+Read this to produce an installer, cut a release, or get unstuck from the `better-sqlite3` ABI.
 
 ---
 

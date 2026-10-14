@@ -5,10 +5,7 @@
 <h1 align="center">UE Box</h1>
 
 <p align="center">
-  <b>The open-source AI agent that works directly in the Unreal Editor</b><br>
-  Give it a goal and it finishes the job inside the project you already have open —
-  place Actors, edit Blueprints, wire materials, compile C++.<br>
-  Every step can be approved. Every change can be verified.
+  <b>Open-source AI agent that operates the Unreal Editor directly</b>
 </p>
 
 <p align="center">
@@ -32,203 +29,76 @@
 
 ---
 
-## What it is
+## Features
 
-A desktop app. You bring a model provider; it connects to your running Unreal Editor
-through the UnrealAgentLink plugin and does the work with a hundred-plus engine tools
-and 27 built-in skills. Routine operations just run; risky ones pause for your approval,
-and anything you've approved can be set to "always allow".
-"Done" isn't its call to make — after it edits, it goes back into the engine to check,
-and then has to account for itself.
+- **100+ engine tools**: levels, Blueprints (incl. Animation Blueprints), materials (incl. Substrate), C++, assets, Data Tables, UMG, Sequencer, geometry, landscape, PCG
+- **Compile and run checks**: fixes Blueprint / C++ compile errors; runs PIE and collects logs and screenshots; playtest bot drives input (experimental)
+- **Verifiable changes**: every tool call visible; each round lists what was created / modified / deleted; one-click re-read of the engine to compare
+- **Goal mode** `/goal`: checks the request item by item, keeps fixing until it passes
+- **Team mode** `/team`: splits work across team members, each on its own model
+- **27 built-in skills** + per-project error experience
+- **80+ model providers**: Claude, GPT, DeepSeek, Ollama, LM Studio and more; ChatGPT Plus / Kimi membership sign-in
+- **Approvals**: risky operations need confirmation; "always allow" per action
+- **MCP / CLI**: for Codex, Claude Code, Cursor and scripts
+- **Asset management**: projects, assets, Blueprint and material libraries, 3D viewer, notebooks — usable without the engine
 
-Beyond levels, Blueprints, materials, assets and C++, it also handles Animation
-Blueprints and retargeting, Substrate materials, Data Tables, UMG, Sequencer shots and
-Movie Render Queue renders, automated PIE playtests, geometry editing and project audits.
-→ [Full capabilities and limits](https://uebox.ai/guide/capabilities)
+Full capabilities and limits: [Capabilities](https://uebox.ai/guide/capabilities) (Chinese)
 
-Hand it work at the size it comes in:
+|                                                                   |                                                                 |
+| ----------------------------------------------------------------- | --------------------------------------------------------------- |
+| ![Tool call](website/public/shots/ai-tool-call.png)<br>Tool calls | ![Changes](website/public/shots/engine-changes.png)<br>Changes  |
+| ![Review](website/public/shots/engine-review.png)<br>Review       | ![Projects](website/public/shots/home-projects.png)<br>Projects |
 
-- **Just say it**: one sentence, one job, and it stops when done.
-- **`/goal`**: hand it a goal. An auditor breaks the request into a checklist and looks for
-  evidence item by item; if it isn't met, the agent keeps going. → [Goal mode](https://uebox.ai/guide/agent-loop#目标模式)
-- **`/team`**: hand it a complex task. It assembles a team — each member can run on a
-  different model — and they split the work until there's a playable build. The
-  "Team tasks" side tab shows who's doing what and what's left.
+## Quick start
 
-It also keeps experience: pitfalls it hit in your project come back attached to the next
-matching error, and after a session they're distilled into reusable entries.
+1. Download and install from [Releases](https://github.com/ueboxai/uebox/releases) (Windows)
+2. **Settings → Models → Add Provider**, enter an API key; set it under **Default models → Chat** (the model must support tool calling)
+3. **Projects → Import Project**, pick a `.uproject`, click **Open Project** (installs the UnrealAgentLink plugin and connects)
+4. **Sidebar → AI Chat**, ask "How many lights are in this level?" to check the connection
 
-The agent is the product. The project library, asset library, Blueprint and material
-libraries, and notebooks each have a full standalone UI and can be used on their own,
-but structurally they serve the agent: they register what it acts on, feed it material,
-and receive what it produces.
+Docs (Chinese): [First run](https://uebox.ai/guide/first-run) · [Model setup](https://uebox.ai/guide/ai-setup) · [Connect Unreal](https://uebox.ai/guide/plugin) · [Troubleshooting](https://uebox.ai/guide/troubleshooting)
 
-<!-- TODO: "community core" has to be explained, or readers will wonder what is being held back.
-     A. Another edition / separately provided components exist (e.g. the asset server, a hosted gateway)
-        → add one sentence after the line below: what is in this repo and what is not.
-     B. This is the only edition → drop the words "community core" and keep the rest of the sentence.
-     Use the same sentence in the manual's Team page ("where does the server come from"). -->
+## External agents
 
-This repository is the **community core**: no account, no dependency on our servers,
-and you can build all of it yourself.
+| Method | Use                                            | Default   | Docs                              |
+| ------ | ---------------------------------------------- | --------- | --------------------------------- |
+| MCP    | Codex / Claude Code / Cursor call engine tools | Writable  | [MCP](https://uebox.ai/guide/mcp) |
+| CLI    | Scripts, CI: `uebox tools call` / `uebox ask`  | Read-only | [CLI](packages/cli/README.md)     |
 
----
+Local connections only, token required.
 
-## Up and running in three minutes
+## Privacy
 
-1. **Install** (Windows): [GitHub Releases](https://github.com/ueboxai/uebox/releases) · [website](https://uebox.ai/en).
-   Every local feature works the moment it opens.
-2. **Set up a model**: go to **Preferences → AI → Model Sources**, add your own provider,
-   then bind a model to the _Chat_ role — _Chat_ alone is enough, the other roles fall back to it.
-   Local inference (Ollama, LM Studio, llama.cpp) and self-hosted gateways (LiteLLM, One API)
-   are in the provider catalog too. The model must support tool calling, or it cannot operate the engine.
-   The key field also accepts an environment variable name or a command such as `!op read …`.
-3. **Import your project**: **Projects → import your `.uproject`**. The connection plugin is installed
-   into `<project>/Plugins/UnrealAgentLink/` automatically (you can turn this off or right-click to remove it —
-   [exactly what it touches](https://uebox.ai/guide/plugin#它怎么装上的)).
-4. **Say the first thing**: click **Open project**; once the editor is up the plugin connects by itself.
-   Open **AI session** and try "How many lights are in this level?" — read-only, just to confirm the link is live.
+- No account, no servers of ours; keys encrypted locally, requests go straight to your provider
+- By default only checks for updates; self-built packages without an update feed send nothing ([updateFeed.ts](src/main/services/updater/updateFeed.ts))
+- With a local model, AI requests stay on your machine
 
-Stuck? → [First run](https://uebox.ai/guide/first-run) · [Connect Unreal](https://uebox.ai/guide/plugin)
+## Platforms
 
-<!-- TODO: check the UI labels above against the English build: "Preferences → AI → Model Sources", "Projects", "Open project", "AI session".
-     The Chinese manual gives the model path as 设置 → 模型 → 添加服务商 / 默认模型 → 对话; one of the two is stale. -->
+|         | Installer         | Engine discovery         | Prebuilt plugin    |
+| ------- | ----------------- | ------------------------ | ------------------ |
+| Windows | ✅                | ✅                       | ✅                 |
+| macOS   | Build from source | ✅ common paths + manual | Validation pending |
+| Linux   | Build from source | Not supported yet        | —                  |
 
----
+UE 5.0–5.8. Windows is the primary platform. Plugin source: [`plugin/UnrealAgentLink`](plugin/UnrealAgentLink) ([MIT](plugin/UnrealAgentLink/LICENSE)).
 
-## See it work
-
-One task, four frames:
-
-|                                                                                                                                       |                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ![Tool call](website/public/shots/ai-tool-call.png)<br>**Engine tool call** — name, arguments and return value, all laid open         | ![Changes](website/public/shots/engine-changes.png)<br>**This round's changes** — what it touched in the engine                                   |
-| ![Review](website/public/shots/engine-review.png)<br>**Review** — the verdict after the agent re-read the engine with read-only tools | ![Self-check](website/public/shots/engine-selfcheck.png)<br>**Account for it** — answering each finding: what it missed, what it added on its own |
-
-**Already using Codex, Claude Code or Cursor?** Switch on the MCP server and plug UE Box in as a tool
-provider — your client gains a hundred-plus Unreal tools at once. Local connections only, token required, writable by default.
-→ [MCP](https://uebox.ai/guide/mcp)
-
-**Scripts or CI?** Use the `uebox` CLI: `tools call` runs a single tool, `ask` hands a whole
-sentence to the box's own agent. No setup, read-only by default, `--allow-write` to change
-anything. → [CLI](https://uebox.ai/guide/cli)
-
-It ships with these too, each usable on its own:
-
-|                                                                                              |                                                                             |
-| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| ![Projects](website/public/shots/home-projects.png)<br>Project library: engines and projects | ![Assets](website/public/shots/asset-library.png)<br>Asset library          |
-| ![Blueprints](website/public/shots/blueprint-library.png)<br>Blueprint library               | ![Materials](website/public/shots/material-library.png)<br>Material library |
-| ![3D viewer](website/public/shots/model-viewer-wireframe.png)<br>3D viewer                   | ![Notebooks](website/public/shots/notebooks.png)<br>Notes and notebooks     |
-
----
-
-## Network and data
-
-- No account. Keys are encrypted on your machine, and requests go straight to the provider
-  you configured — never through a server of ours.
-- By default the only network activity is an update check, which checks and never downloads.
-  A build you package yourself with no update feed configured makes no network request at all
-  (see [updateFeed.ts](src/main/services/updater/updateFeed.ts)).
-- AI, web search, image generation and cloud drives connect only when you use them.
-  With a local model, AI stays on your machine too.
-
----
-
-## Platform support
-
-|         | Installer         | Engine discovery                      | Prebuilt UnrealAgentLink plugin           |
-| ------- | ----------------- | ------------------------------------- | ----------------------------------------- |
-| Windows | ✅                | ✅                                    | ✅                                        |
-| macOS   | Build from source | ✅ common directories + manual adding | Build and release validation not finished |
-| Linux   | Build from source | Not supported yet                     | —                                         |
-
-<!-- TODO: fill in the Linux "prebuilt plugin" cell with the real status -->
-
-**Windows is the primary platform** and where features are verified. macOS discovers engines in
-common shared installation directories, lets you register engine folders or editor `.app` bundles
-by hand, and detects running UE4 / UE5 editors and their project paths.
-
-The UnrealAgentLink plugin source lives in [`plugin/UnrealAgentLink`](plugin/UnrealAgentLink)
-under its own [MIT license](plugin/UnrealAgentLink/LICENSE).
-
----
-
-## Add features with AI (no coding required)
-
-The stance of this project: **experiment freely while developing, concede
-nothing at the acceptance gate.**
-
-The repo ships a spec for AI agents to read ([AGENTS.md](AGENTS.md)) and a
-acceptance gate (`pnpm verify`). You just tell your AI coding assistant
-what you want:
-
-> Add a feature to UE Box: asset library tags should support custom colors.
-> Read AGENTS.md at the repo root first and follow it, add tests when you're
-> done, then run `pnpm verify` until everything is green. Don't push — wait for
-> my confirmation.
-
-It reads the architecture, writes the code and runs the tests itself.
-→ **[Three-step guide](docs/contributing/vibe-coding.md)**
-
-With Codex, just open and trust this repository: the root `AGENTS.md`, the
-`.codex/` sandbox config and the `.agents/skills/` workflows apply
-automatically. See [`.codex/README.md`](.codex/README.md).
-
----
-
-## Run from source
+## Development
 
 ```bash
 pnpm install
 pnpm dev
+pnpm verify:changed   # before commit, checks only your changes (~30 s)
+pnpm verify           # before push / PR, full gate
 ```
 
-The gate has two tiers. Don't run it while you work; at commit time run the fast tier,
-which checks only what you changed (about 30 seconds):
-
-```bash
-pnpm verify:changed
-```
-
-Before anything goes out (push, PR), run the full one:
-
-```bash
-pnpm verify
-```
-
-The full tier runs every CI gate (secret scan → official-endpoint ratchet → lint
-→ changed-line lint → typecheck → unit tests). On failure it tells you exactly
-what to fix and which command to run. **You can leave the app running while it
-runs** — the gate does not touch the native module. Why two tiers:
-[AGENTS.md §3](AGENTS.md#3-the-gate--two-tiers-and-which-one-you-owe).
-
-To produce an installer, cut a release, or get unstuck from the `better-sqlite3`
-ABI, see [Packaging, releasing and the native module](docs/contributing/packaging.md).
-
----
-
-## Documentation
-
-| I am…                         | Start here                                                                                                                                    |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| A user who wants to get going | [Manual](https://uebox.ai/guide/) · [First run](https://uebox.ai/guide/first-run) · [Connect Unreal](https://uebox.ai/guide/plugin) (Chinese) |
-| A user who wants a feature    | [Add a feature with AI](docs/contributing/vibe-coding.md) · [Request one](../../issues/new?template=feature_request.yml)                      |
-| A developer                   | [Contributing](CONTRIBUTING.md) · [Vertical slice](docs/contributing/vertical-slice.md) · [Testing guide](docs/contributing/testing.md)       |
-| A release manager             | [Packaging and releasing](docs/contributing/packaging.md)                                                                                     |
-| An AI agent                   | [AGENTS.md](AGENTS.md)                                                                                                                        |
-| A designer                    | [UI design standards](docs/UI-Design-Standards.md)                                                                                            |
-
-More topics live in [`docs/`](docs/).
-
-Changelog: [CHANGELOG.md](CHANGELOG.md) ·
-Security policy: [SECURITY.md](SECURITY.md) ·
-Third-party components: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
-
----
+- Developing with an AI coding assistant: read [AGENTS.md](AGENTS.md) first; guide: [Add a feature with AI](docs/contributing/vibe-coding.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · [Vertical slice](docs/contributing/vertical-slice.md) · [Testing](docs/contributing/testing.md)
+- Packaging and releases: [packaging.md](docs/contributing/packaging.md)
+- More: [`docs/`](docs/) · [UI design standards](docs/UI-Design-Standards.md) · [CHANGELOG](CHANGELOG.md) · [SECURITY](SECURITY.md) · [Third-party notices](THIRD-PARTY-NOTICES.md)
 
 ## License
 
-App: [Apache License 2.0](LICENSE) · UnrealAgentLink plugin: [MIT](plugin/UnrealAgentLink/LICENSE)
+App [Apache-2.0](LICENSE) · Plugin [MIT](plugin/UnrealAgentLink/LICENSE)
 
 Unreal Engine is a trademark of Epic Games, Inc. This project is not affiliated with Epic Games.

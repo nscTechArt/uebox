@@ -5,9 +5,7 @@
 <h1 align="center">虚幻盒子 · UE Box</h1>
 
 <p align="center">
-  <b>直接操作虚幻编辑器的开源 AI Agent</b><br>
-  给一个目标，它在你正在跑的工程里把活干完 —— 放 Actor、改蓝图、连材质、编译 C++。<br>
-  每一步可审批，每处改动可核对。
+  <b>直接操作虚幻编辑器的开源 AI Agent</b>
 </p>
 
 <p align="center">
@@ -31,175 +29,76 @@
 
 ---
 
-## 它是什么
+## 功能
 
-一个桌面应用。你配一家模型服务商，它通过 UnrealAgentLink 插件连上正在运行的虚幻编辑器，
-用一百多个引擎工具和 27 个内置技能替你干活。常规操作直接执行，风险操作停下来等你确认，
-确认过的可以设成「以后均允许」。它说做完了不算数 —— 改完回引擎核实一遍，再让它自己举证。
+- **100+ 引擎工具**：关卡、蓝图（含动画蓝图）、材质（含 Substrate）、C++、资产、数据表、UMG、Sequencer、几何体、地形、PCG
+- **编译与运行验证**：蓝图 / C++ 编译报错自动修；PIE 运行取日志和截图；试玩机器人自动按键测试（实验性）
+- **改动可核对**：工具调用全程可见；每轮列出新建 / 修改 / 删除；一键回引擎重读比对
+- **目标模式** `/goal`：按需求清单逐条验收，未通过继续改
+- **团队模式** `/team`：多个队员分工，每人可用不同模型
+- **27 个内置技能** + 按工程积累的报错经验
+- **80+ 模型服务商**：Claude、GPT、DeepSeek、Ollama、LM Studio 等；支持 ChatGPT Plus / Kimi 会员登录
+- **审批**：风险操作需确认，可设「以后均允许」
+- **MCP / CLI**：给 Codex、Claude Code、Cursor 和脚本用
+- **素材管理**：项目库、资产库、蓝图库、材质库、3D 查看器、知识库，不连引擎也能用
 
-关卡、蓝图、材质、资产、C++ 之外，还有动画蓝图与重定向、Substrate 材质、数据表、UMG、
-Sequencer 镜头与 Movie Render Queue 出片、PIE 自动试玩、几何体编辑和工程体检。
-→ [完整能力与边界](https://uebox.ai/guide/capabilities)
+完整能力与限制：[能力与边界](https://uebox.ai/guide/capabilities)
 
-活的大小不同，交法也不同：
+|                                                                |                                                                  |
+| -------------------------------------------------------------- | ---------------------------------------------------------------- |
+| ![工具调用](website/public/shots/ai-tool-call.png)<br>工具调用 | ![本轮改动](website/public/shots/engine-changes.png)<br>本轮改动 |
+| ![审查](website/public/shots/engine-review.png)<br>审查        | ![项目库](website/public/shots/home-projects.png)<br>项目库      |
 
-- **直接说**：一句话一件事，做完停下。
-- **`/goal`**：交一个目标。审计员把要求拆成清单逐条找证据，没达成就接着改。→ [目标模式](https://uebox.ai/guide/agent-loop#目标模式)
-- **`/team`**：交一个复杂任务。它自动组队，每个队员可以用不同的模型，分头干到交付可玩版本；
-  侧栏「团队任务」里能看到谁在干什么、还剩什么。
+## 快速开始
 
-它还会记经验：在你工程里踩过的坑，下次报错时自动带上，会话结束后整理成可复用的条目。
+1. 从 [Releases](https://github.com/ueboxai/uebox/releases) 下载安装（Windows）
+2. **设置 → 模型 → 添加服务商**，填 API 密钥；**默认模型 → 对话** 选它（模型需支持工具调用）
+3. **项目库 → 导入项目**，选 `.uproject`，点 **打开项目**（自动安装 UnrealAgentLink 插件并连接）
+4. **侧边栏 → AI 对话**，输入「这个关卡里有多少个光源？」验证连接
 
-产品的主体是这个 Agent。项目库、资产库、蓝图库与材质库、笔记与知识库各自有完整的独立界面，
-也可以单独使用，但在产品结构中它们服务于 Agent：登记它的作用目标、给它供料、接住它的产出。
+文档：[第一次打开](https://uebox.ai/guide/first-run) · [配置模型](https://uebox.ai/guide/ai-setup) · [连接虚幻引擎](https://uebox.ai/guide/plugin) · [常见问题](https://uebox.ai/guide/troubleshooting)
 
-<!-- TODO: “社区核心版”必须解释，否则读者会猜“好东西是不是藏起来了”。
-     A. 有其他版本 / 单独提供的组件（例如资产服务器）→ 在下面这句后面补一句：哪些在这里，哪些不在。
-     B. 目前只有这一版 → 删掉“社区核心版”五个字，只留后半句。
-     手册《团队协作》里“服务端从哪来”用同一句话。 -->
+## 接入外部 Agent
 
-本仓库是**社区核心版**：不需要账号，不依赖官方服务器，可以完全自行构建。
+| 方式 | 用途                                       | 默认 | 文档                                 |
+| ---- | ------------------------------------------ | ---- | ------------------------------------ |
+| MCP  | Codex / Claude Code / Cursor 调引擎工具    | 可写 | [MCP](https://uebox.ai/guide/mcp)    |
+| CLI  | 脚本、CI：`uebox tools call` / `uebox ask` | 只读 | [命令行](https://uebox.ai/guide/cli) |
 
----
+仅本机可连，需令牌。
 
-## 三分钟跑起来
+## 隐私
 
-1. **下载安装**（Windows）：[GitHub Releases](https://github.com/ueboxai/uebox/releases) · [官网](https://uebox.ai)。
-   装完打开，全部本地功能已经可用。
-2. **配模型**：**设置 → 模型 → 添加服务商**，填你自己的 API Key；再到 **默认模型**，把「对话」指向它。
-   本机推理（Ollama、LM Studio、llama.cpp）和自建网关（LiteLLM、One API）也在服务商清单里 ——
-   模型必须支持工具调用，否则操作不了引擎。
-3. **导入工程**：**项目库 → 导入 `.uproject`**，连接插件会自动装进
-   `<工程>/Plugins/UnrealAgentLink/`（可关闭、可右键移除，[它具体动了什么](https://uebox.ai/guide/plugin#它怎么装上的)）。
-4. **说第一句话**：点「打开项目」，编辑器起来后插件会自己连上。到 **侧边栏 → AI 会话**，
-   试试「这个关卡里有多少个光源？」—— 纯只读，用来确认真的连上了。
+- 无账号，无官方服务器；密钥加密存本机，请求直连你配的服务商
+- 默认只检查更新；未配置更新源的自行构建不发任何请求（[updateFeed.ts](src/main/services/updater/updateFeed.ts)）
+- 用本机模型时 AI 请求不出本机
 
-卡住了看这里 → [第一次打开](https://uebox.ai/guide/first-run) · [连接虚幻引擎](https://uebox.ai/guide/plugin)
+## 平台
 
----
+|         | 安装包   | 引擎发现           | 预编译插件 |
+| ------- | -------- | ------------------ | ---------- |
+| Windows | ✅       | ✅                 | ✅         |
+| macOS   | 源码构建 | ✅ 常见目录 + 手动 | 未完成验收 |
+| Linux   | 源码构建 | 未适配             | —          |
 
-## 看它干活
+UE 5.0–5.8。Windows 为主力平台。插件源码：[`plugin/UnrealAgentLink`](plugin/UnrealAgentLink)（[MIT](plugin/UnrealAgentLink/LICENSE)）。
 
-这是一轮任务的四个画面：
-
-|                                                                                                           |                                                                                                                              |
-| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| ![工具调用](website/public/shots/ai-tool-call.png)<br>**调引擎工具** —— 工具名、参数、返回值都摊开        | ![本轮改动](website/public/shots/engine-changes.png)<br>**本轮改动** —— 这一轮在引擎里动了什么                               |
-| ![审查改动](website/public/shots/engine-review.png)<br>**审查改动** —— Agent 用只读工具回引擎核实后的结论 | ![让它自证](website/public/shots/engine-selfcheck.png)<br>**让它自证** —— 逐条回应查出的问题，说清哪里没做到、哪里是自己加的 |
-
-**已经在用 Codex / Claude Code / Cursor？** 打开 MCP 开关，把虚幻盒子当工具服务接上去，
-它立刻多出一百多个 UE 工具。仅本机可连，需令牌，默认可写。→ [MCP](https://uebox.ai/guide/mcp)
-
-**写脚本、跑 CI？** 用命令行 `uebox`：`tools call` 调单个工具，`ask` 把一句话整个交给盒子的 Agent。
-零配置，默认只读，加 `--allow-write` 才改东西。→ [命令行](https://uebox.ai/guide/cli)
-
-它还带着这些（都能单独用）：
-
-|                                                                                 |                                                                |
-| ------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| ![项目库](website/public/shots/home-projects.png)<br>项目库：引擎版本与我的项目 | ![资产库](website/public/shots/asset-library.png)<br>资产库    |
-| ![蓝图库](website/public/shots/blueprint-library.png)<br>蓝图库                 | ![材质库](website/public/shots/material-library.png)<br>材质库 |
-| ![3D 查看器](website/public/shots/model-viewer-wireframe.png)<br>3D 查看器      | ![知识库](website/public/shots/notebooks.png)<br>笔记与知识库  |
-
----
-
-## 网络与数据
-
-- 不用账号。密钥加密存在本机，请求直达你配的服务商，不经过我们的服务器。
-- 默认只检查更新，只查不下载；自己打包且没填更新源的构建，一次网络请求都不发
-  （见 [updateFeed.ts](src/main/services/updater/updateFeed.ts)）。
-- AI、联网检索、生图、网盘，用到才连；跑本机模型，AI 也不出机器。
-
----
-
-## 平台支持
-
-|         | 安装包   | 引擎发现               | 预编译 UnrealAgentLink 插件 |
-| ------- | -------- | ---------------------- | --------------------------- |
-| Windows | ✅       | ✅                     | ✅                          |
-| macOS   | 源码构建 | ✅ 常见目录 + 手动添加 | 构建与发布验收未完成        |
-| Linux   | 源码构建 | 尚未适配               | —                           |
-
-<!-- TODO: Linux 的“预编译插件”一格按实际状态填 -->
-
-**Windows 是主力平台**，功能都在这上面验证。macOS 可扫描常见共享安装目录中的引擎，
-也可手动添加引擎目录或编辑器 `.app`，并能检测运行中的 UE4 / UE5 编辑器及其工程路径。
-
-UnrealAgentLink 插件源码位于 [`plugin/UnrealAgentLink`](plugin/UnrealAgentLink)，
-使用独立的 [MIT 许可证](plugin/UnrealAgentLink/LICENSE)。
-
----
-
-## 用 AI 给它加功能（不会写代码也行）
-
-这个项目的立场是：**开发阶段随便试，验收阶段一寸不让。**
-
-仓库里放好了给 AI 读的规范（[AGENTS.md](AGENTS.md)）和验收门禁（`pnpm verify`）。
-你只需要对你的 AI 编码助手说清楚想要什么：
-
-> 我要给虚幻盒子加一个功能：资产库的标签可以自定义颜色。
-> 先读仓库根目录的 AGENTS.md 按规范做，实现完补上测试，
-> 最后跑 `pnpm verify` 修到全绿，先别 push，等我确认。
-
-它会自己读架构、自己改代码、自己跑测试。→ **[三步上手指南](docs/contributing/vibe-coding.zh-CN.md)**
-
-使用 Codex 时，直接用它打开并信任本仓库即可：根目录 `AGENTS.md`、`.codex/` 安全配置和
-`.agents/skills/` 项目工作流会自动生效。详细说明见 [`.codex/README.md`](.codex/README.md)。
-
----
-
-## 从源码跑
+## 开发
 
 ```bash
 pnpm install
 pnpm dev
+pnpm verify:changed   # 提交前，只查改动（约 30 秒）
+pnpm verify           # push / PR 前，完整门禁
 ```
 
-门禁分两档。干活过程中不用跑，提交时跑快的那档，只查你改的东西（约 30 秒）：
-
-```bash
-pnpm verify:changed
-```
-
-要发出去（push、开 PR）之前跑一次完整的：
-
-```bash
-pnpm verify
-```
-
-完整档跑完 CI 的全部门禁（密钥扫描 → lint → 改动行 lint → 类型检查 → 单元测试），
-失败时会直接告诉你该改什么、敲什么命令。**开着应用也能跑** —— 门禁不碰原生模块。
-为什么分两档见 [AGENTS.md 第 3 节](AGENTS.zh-CN.md#3-门禁分两档你欠哪一档)。
-
-要出安装包、发版，或者被 `better-sqlite3` 的 ABI 卡住，见
-[打包、发布与原生模块](docs/contributing/packaging.zh-CN.md)。
-
----
-
-## 文档
-
-| 我是…              | 从这里开始                                                                                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 用户，想用起来     | [使用手册](https://uebox.ai/guide/) · [第一次打开](https://uebox.ai/guide/first-run) · [连接虚幻引擎](https://uebox.ai/guide/plugin) |
-| 用户，想要某个功能 | [用 AI 加功能](docs/contributing/vibe-coding.zh-CN.md) · [提需求](../../issues/new?template=feature_request.yml)                     |
-| 开发者             | [参与共创](CONTRIBUTING.zh-CN.md) · [垂直切片](docs/contributing/vertical-slice.md) · [测试指南](docs/contributing/testing.md)       |
-| 发版的人           | [打包、发布与原生模块](docs/contributing/packaging.zh-CN.md)                                                                         |
-| AI Agent           | [AGENTS.md](AGENTS.md)                                                                                                               |
-| 设计               | [UI 设计标准](docs/UI-Design-Standards.md)                                                                                           |
-
-更多专题文档在 [`docs/`](docs/)。
-
-更新日志：[CHANGELOG.md](CHANGELOG.md) ·
-安全策略：[SECURITY.md](SECURITY.md) ·
-第三方组件声明：[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
-
-English: [README.en.md](README.en.md) · [CONTRIBUTING.md](CONTRIBUTING.md) ·
-[AGENTS.md](AGENTS.md) · [Add a feature with AI](docs/contributing/vibe-coding.md)
-
----
+- 用 AI 编码助手开发：先读 [AGENTS.md](AGENTS.md)，指南见 [用 AI 加功能](docs/contributing/vibe-coding.zh-CN.md)
+- 贡献：[CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) · [垂直切片](docs/contributing/vertical-slice.md) · [测试](docs/contributing/testing.md)
+- 打包与发版：[packaging.zh-CN.md](docs/contributing/packaging.zh-CN.md)
+- 其他文档：[`docs/`](docs/) · [UI 设计标准](docs/UI-Design-Standards.md) · [CHANGELOG](CHANGELOG.md) · [SECURITY](SECURITY.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
 ## 许可
 
-应用：[Apache License 2.0](LICENSE) · 插件 UnrealAgentLink：[MIT](plugin/UnrealAgentLink/LICENSE)
+应用 [Apache-2.0](LICENSE) · 插件 [MIT](plugin/UnrealAgentLink/LICENSE)
 
 Unreal Engine 是 Epic Games, Inc. 的商标，本项目与 Epic Games 无隶属关系。
