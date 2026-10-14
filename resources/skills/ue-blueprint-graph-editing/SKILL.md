@@ -97,6 +97,37 @@ The first three change the shape of your graph, so settle them first. Full usage
 including how to wire a bound event's returned `node_id` straight into
 `blueprint_apply_graph`, is in **`references/members-and-events.md`**.
 
+## Changing what others already use
+
+Renaming or retyping a variable, changing a function's parameters, removing a member and
+reparenting all break whatever uses this Blueprint — and `blueprint_compile` /
+`blueprint_set_parent_class` only compile this one. List who is affected first:
+
+```
+ue_content_dependencies { path: "/Game/BP_Door", direction: "referencers", recursive: false }
+```
+
+Tell the user the list before changing anything. Afterwards compile every Blueprint on it
+(`blueprint_compile` each — `blueprint_compile_all` defaults to `scope: "touched"`, which is
+only what you edited). A level on the list holds placed instances or level-blueprint logic
+that no compile checks; the PIE run below is what covers it.
+
+## Done means it ran
+
+A clean compile proves the graph is well-formed, not that it does anything. Check the
+behaviour the user asked for in PIE:
+
+| the logic is triggered by | check with |
+|---|---|
+| BeginPlay, Tick, timers, physics, things that move on their own | `ue_playtest` |
+| a key press, the player walking somewhere, a menu click | `ue_autoplay` with a `goal` (experimental — say so), or ask the user to press Play |
+| server and clients | `ue_playtest` with `net_mode: "listen_server"`, `num_players: 2` — `references/members-and-events.md`, "Testing networked logic" |
+
+Put a `PrintString` at the end of the new logic in the same write. Its line in
+`print_strings` is the evidence; zero errors and no such line means the logic never ran.
+Take the print nodes out afterwards. If nothing prints, do not rewrite the graph yet —
+"Compiled, but nothing happens" in `references/writing-graphs.md` finds the broken hop first.
+
 ## When something goes wrong
 
 - a call failed, came back with `warnings`, or reported compile errors →

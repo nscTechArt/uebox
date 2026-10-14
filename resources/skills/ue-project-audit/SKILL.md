@@ -114,11 +114,31 @@ subject are unreadable a week later.
 
 **2. Whole project by size.** `ue_project_asset_ranking` with no arguments (defaults to `/Game`,
 sorted by disk size). Read `by_class` first — "textures are 68% of the project" decides where to
-look before any individual asset does. Then the top rows.
+look before any individual asset does. Then the top rows. Disk size answers "what fills the
+repository", not the other two questions users actually ask:
+
+- **"包体为什么这么大"** — an asset nothing references is usually not cooked at all (maps and
+  the project's always-cook directories aside). Run
+  `ue_content_dependencies` with `path: "/Game"`, `direction: "unreferenced"` first and set those aside (say
+  that assets loaded by path from code or config do not show up as referenced).
+- **"内存 / 显存吃紧"** — rank with `sort_by: "TextureMemory"`, not disk size. The fix to
+  recommend is the texture's `MaxTextureSize` or its texture group (LOD group): the source
+  stays intact and it can be undone. Not re-importing at a lower resolution. Once the user
+  agrees, it is one `ue_content_set_properties` call per texture (`{"MaxTextureSize": 2048}` or
+  `{"LODGroup": "TEXTUREGROUP_World"}`), not a Python script.
 
 **3. The open level by cost.** `ue_find_heavy_assets` sorted by `TotalTriangles`. Read
 `finding_counts` and lead with `breaks_gameplay`: a user chasing frame rate still wants to know
 their floor has no collision. Then `costs_frame_time`.
+
+Triangles only measure meshes **without Nanite**. Nanite draws by screen pixels, so a Nanite
+mesh's raw triangle count says nearly nothing about its frame cost — its cost is in its
+material (masked, WPO, translucency pushing it off the fast path) and in overdraw. The
+triangle ranking already leaves them out: `assets` holds only non-Nanite meshes, and the
+highest Nanite ones come back separately in `nanite_assets` (`ranking_note` says so). For the
+top `assets` rows, `mesh_describe` shows whether LODs exist and step down, and how many material
+sections each copy draws (copies × sections is what the CPU submits). For `nanite_assets`, point
+at their materials (`material_describe` reports blend mode), never at their triangle count.
 
 **4. Then go deeper on what step 2 or 3 turned up**, one thread at a time:
 
@@ -128,6 +148,9 @@ their floor has no collision. Then `costs_frame_time`.
 - user says it stutters, asks for a stress test, or asks *why* it's slow → `ue_capture_perf_trace`
   over a real stretch of time, then follow `references/performance-diagnosis.md` to narrow the
   verdict down to a cause instead of stopping at "GPU-bound"
+- verdict is render thread or GPU → `ue_light_census` for the lights: per shadow-casting point /
+  spot / rect light, how many movable, WPO and Nanite shadow casters sit in its radius, and
+  whether it has a max draw distance. Engine facts only — the count is a lead, not proof
 
 ## Constraints
 

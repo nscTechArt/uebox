@@ -25,8 +25,32 @@ cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑�
 
 ### 改一个已有的类
 
-`read_local_file` 看清楚 → `edit_local_file` 改 → `cpp_compile`。
+`read_local_file` 看清楚 → `edit_local_file` 改 → 编译 → 按下面「编过之后」验证。
 编不过就读诊断、改、再编。
+
+先看改的是哪一类，它决定用哪个编译工具：
+
+| 改动 | 用 |
+|---|---|
+| `.cpp` 里的函数体（构造函数除外）、头文件里不带反射的内联代码 | `cpp_compile` |
+| 已有类的结构：增删改 `UPROPERTY` / `UFUNCTION`、`USTRUCT` 字段、`UENUM` 项，加减成员变量或虚函数，换父类 | `cpp_full_rebuild` |
+| 构造函数里改默认值 | `cpp_full_rebuild` |
+
+后两类热补丁靠不住：可能报成功但旧的类布局、旧默认值还在，也可能过一会儿崩。
+返回里的 `needs_full_rebuild` 只看 `.Build.cs` / `.uproject`，**不看头文件**，这一步得你自己判断。
+用户不想关编辑器时可以先 `cpp_compile`，但编过之后必须在 PIE 里确认，不对就 `cpp_full_rebuild`。
+
+### 改签名、改名、删成员之前：先查谁在用
+
+只编你改的那个文件，查不出别处被你改坏了。动 `UFUNCTION` / `UPROPERTY` / 类名之前：
+
+- C++ 调用方：`grep_local_files` 在工程 `Source/` 下搜这个名字。
+- 蓝图调用方：没有工具能列出哪些蓝图用了某个 C++ 成员。改完、完整重编之后跑
+  `blueprint_compile_all`（`scope: "all"`，大工程用 `path` 收窄），编不过的就是被你改坏的。
+- 改名而资产里存着它的值（关卡里的实例、蓝图子类、数据资产）：同时在 `Config/DefaultEngine.ini`
+  的 `[CoreRedirects]` 里加一条，否则存过的值和蓝图节点会断。例：
+  `+PropertyRedirects=(OldName="/Script/MyGame.MyActor.Health",NewName="/Script/MyGame.MyActor.HP")`。
+  重定向在编辑器启动时读，正好跟 `cpp_full_rebuild` 一起生效。
 
 ### 新建一个类
 
@@ -54,9 +78,25 @@ cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑�
 调用新模块 API 都生效）。返回里 `needs_full_rebuild` 为真**且走的是 Live Coding** 时，
 补丁式热更链不进新依赖，调 `cpp_full_rebuild`。
 
+### 编过之后：在 PIE 里看行为
+
+编过只说明语法和链接没问题。改的是行为，就用 `ue_playtest` 跑一次，看行为变没变：
+
+- **埋打点**：在改动经过的路径上加 `UE_LOG(LogTemp, Warning, TEXT("..."))`，一次埋几处。
+  `ue_playtest` 只收 PrintString、Warning 和 Error，`Log` / `Display` 级的收不到；
+  非要看那些，跑完用 `grep_local_files` 搜 `Saved/Logs/<工程名>.log`。验证完把打点删掉。
+- **改构造函数默认值**：已放置的实例、蓝图子类里在细节面板改过这个值的，保留各自的值，
+  不跟着构造函数变。要看的是那个具体实例（`ue_inspect_components` / `ue_get_actor`），不是源码。
+- **修 bug**：改之前先用同样的步骤复现一次（看到那条报错或错的打点），改完用同样的步骤再跑，
+  那条报错不再出现才算修好。复现不了就如实说「改了，但没验证到」。
+- 要多步操作才触发的用 `ue_playtest` 的 `events` 或 `ue_autoplay`；联机、特定硬件这类工具测不了的，
+  告诉用户测什么、怎么测，不要报完成。
+
+打点出现、报错消失、读回的值对，这些你来确认；手感和数值合不合适由用户判断。
+
 ## Constraints
 
-**1. `cpp_full_rebuild` 会关掉用户的编辑器。** 只在 `cpp_compile` 做不到时用（上面三种情况，
+**1. `cpp_full_rebuild` 会关掉用户的编辑器。** 只在 `cpp_compile` 做不到时用（上面列的几种情况，
 加上 `cpp_compile` 报「没有可热重载的 UObject」）。有未保存的改动它会拒绝并列出清单：先 `ue_save`
 再调；清单里有存不了的，问用户能不能丢，同意了才带 `discard_unsaved`。
 编不过时编辑器保持关着，按报错改完直接再调一次。
@@ -82,6 +122,13 @@ cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑�
 
 这是最典型的「开发时全绿、打包时全红」。选模块时先看类型。
 
+`cpp_compile` 和默认的 `cpp_full_rebuild` 只编编辑器目标，这类错它们查不出来。先自查（便宜）：
+Runtime 模块的 `.Build.cs` 里有编辑器模块的，要包在 `if (Target.bBuildEditor)` 里；
+代码里用到编辑器 API 的地方要包在 `#if WITH_EDITOR` 里。要实证就调
+`cpp_full_rebuild({ game_target_only: true })`：只编游戏目标，不关编辑器、不烘焙，几分钟。
+改过 Runtime 模块的 include 或编辑器相关代码，交付前跑一次。要验证打出来的包能不能跑，
+才用 `project_package` + `project_smoke_test`（几十分钟、整机满载，跑之前告诉用户）。
+
 **5. UHT 的反射规则**（编译期报错，措辞对不熟 UE 的人很难懂）：
 
 | 现象 | 原因 |
@@ -90,11 +137,21 @@ cpp_full_rebuild             → 编辑器补不上的改动：盒子关编辑�
 | `Missing '*' in Emitting class` | `UPROPERTY` 指向 UObject 派生类时必须用指针 |
 | `Type 'TArray<FMyStruct>' is not supported by blueprint` | 元素类型没标 `BlueprintType` |
 | `Superclass ... of class ... not found` | 父类头文件没 include，或者父类模块不在依赖里 |
-| 改了 `UPROPERTY` 之后热重载崩溃 | 改反射结构不适合热补丁，关编辑器完整重编 |
+| 改了 `UPROPERTY` 之后热重载崩溃 | 改反射结构本该一开始就走 `cpp_full_rebuild`，见「改一个已有的类」 |
 
 `.generated.h` 必须是头文件里**最后一个** include。
 
 ## Failure Handling
+
+**编不过时只修第一条错误，再编。** 后面的常是它连带出来的：少一个 include 能刷出几十条。
+报错条数不是进度，修完第一条后一下少了一大半很正常。
+
+链接错误（编译过了、链接时失败）：
+
+| 现象 | 常见原因 |
+|---|---|
+| `LNK2019` / `LNK2001` 无法解析的外部符号 | ① 符号所在模块没加进 `.Build.cs` 依赖；② 符号在别的模块里但没导出（没有 `XXX_API`，或类是 `MinimalAPI` 只导出了一部分），引擎里没导出的换一个导出的 API；③ 声明了没实现，或实现的签名和声明对不上 |
+| `LNK2005` 符号已定义 | 非 `inline` 的函数定义写在头文件里，被多个 `.cpp` 包含 |
 
 | 情况 | 怎么办 |
 |---|---|

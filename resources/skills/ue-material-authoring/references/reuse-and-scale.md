@@ -2,17 +2,28 @@
 
 Read this when the ask is bigger than one material:
 
-- **"全场景下雨"、"按队伍改配色"、"全体受击闪白"** → parameter collection
+- **"全场景下雨"、"昼夜切换时整体变暗"** → parameter collection
+- **"受击闪白"、"选中的单位发光"、"按队伍改配色"** → per object, not a collection — see below
 - **同一串节点要用在好几个材质里** → material function
 - **要改或要删一个被别处引用的资产** → check the referencers first
+
+## Contents
+
+- One switch driving the whole level — parameter collections
+- One object, while the game runs — dynamic instances and custom primitive data
+- Reusing a group of nodes — material functions
+- Before you change or delete anything — check who uses it
 
 ---
 
 ## One switch driving the whole level — parameter collections
 
-When the ask is "make it rain across the level", "tint everything by team colour", or
-"flash all characters white on hit", the answer is a **Material Parameter Collection**, not
-a pass over every material instance.
+When the ask is "make it rain across the level" or "darken everything at night", the answer
+is a **Material Parameter Collection**, not a pass over every material instance.
+
+A collection is **global**: every material that reads `Wetness` reads the same one value.
+Put a hit flash in it and every character flashes when one is hit. Use it only when the
+whole level really should change together.
 
 `material_parameter_collection` creates and edits the collection:
 
@@ -35,14 +46,33 @@ created but greyed out, and the material only fails at compile time with "Missin
 Collection". The tool reports `collection_applied: false` when that happens; do not wire a
 node up after seeing that.
 
-Two reasons not to reach for per-instance parameters instead:
-
-- it does not scale past a handful of materials, and
-- instance parameters are edit-time only, so nothing can change them while the game runs.
-
 Scalars and vectors are capped at **16 each** by the engine. Past that the extra parameters
 are rejected and named in `rejected` — they are not silently dropped, but they are also not
 there, so check the message rather than assuming the write landed.
+
+## One object, while the game runs — dynamic instances and custom primitive data
+
+Per-object values change at runtime all the time; they just do not go through these tools.
+`material_set_param` edits a **MaterialInstanceConstant asset** — every actor using that
+asset shares the value, and it is set in the editor. Runtime, per-object changes are made by
+the game:
+
+- **Default — Dynamic Material Instance.** The material needs a `ScalarParameter` /
+  `VectorParameter` (say `HitFlash`, wired into an emissive term). In Blueprint, *Create
+  Dynamic Material Instance* on the hit actor's mesh component, then *Set Scalar Parameter
+  Value* `HitFlash` on that instance. Only that actor changes.
+- **Hundreds of actors sharing one material — Custom Primitive Data.** Give the parameter
+  node `properties: { "bUseCustomPrimitiveData": true, "PrimitiveDataIndex": 0 }` in
+  `material_apply_graph`; at runtime the component calls *Set Custom Primitive Data Float*
+  (index 0). No per-object material is created, so the actors can still be drawn together,
+  which hundreds of separate dynamic instances cannot. (It is per component: the instances
+  inside one Instanced Static Mesh component all share it.)
+
+Team colours that never change during play are simpler still: one instance asset per team
+(`material_create_instance`), assigned per actor.
+
+The Blueprint half belongs to skill `ue-blueprint-graph-editing`. Verify it in PIE — hit one
+enemy and check that only that one flashes — not by reading the graph.
 
 ## Reusing a group of nodes — material functions
 

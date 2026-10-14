@@ -11,7 +11,7 @@
   A3 切轨之间有空隙 / A4 绑定失效
 - B. `describe` 查不到、必须逐条问用户的 —— B1 视口没锁到 Camera Cuts / B2 没打关键帧 /
   B3 子关卡加载方式不对 / B4 曝光没锁、Lumen 没收敛 / B5 景深糊成一片 / B6 PIE 里不播 /
-  B7 每个 cut 首帧是脏的 / B8 spawnable 与 possessable 混用
+  B7 每个 cut 首帧是脏的 / B8 spawnable 与 possessable 混用 / B9 贴图糊、LOD 跳变
 - 排查顺序（照这个问，不要跳）
 
 ---
@@ -121,6 +121,16 @@ TSR、Lumen、粒子在第一帧不会收敛。
 **⚠️ 警告必须说给用户听**：`Convert to Spawnable` 会**复制并删除关卡里的原 Actor** ——
 名字看着像格式转换，实际是对关卡的破坏性改动，而且会影响同时在这个关卡里工作的其他人。
 
+### B9. 开头或切镜后贴图糊、模型 LOD 跳一下
+
+**现象**：首帧或切点后几帧贴图是糊的，过几帧才变清楚；不开 Nanite 的模型在切镜时换了一档精度。
+**为什么**：贴图流送按相机位置逐步加载高精度 mip，切镜等于相机瞬移，要几帧才追上；
+不开 Nanite 的网格按屏幕占比切 LOD，换了分辨率或机位就换档。只加预热帧治不全。
+**要代劳**：`sequence_render` 带 `console_variables: { "r.Streaming.FullyLoadUsedTextures": 1, "r.ForceLOD": 0 }`。
+回执里列出的才是真写进去的；引擎查不到的变量会出现在 warnings 里。值只能是数字。
+Game Overrides（Texture Streaming 选 Fully Load、勾 Use LOD Zero）工具加不了，要的话请用户在
+MRQ 窗口里加好、存成预设，传给 `preset_path`；用预设时画质档和渲染器参数随之失效，以预设为准。
+
 ---
 
 ## 排查顺序（照这个问，不要跳）
@@ -130,5 +140,5 @@ TSR、Lumen、粒子在第一帧不会收敛。
 3. 编辑器里播有没有画面？没有 → B1、B2
 4. 编辑器里正常、只有渲染黑 → B3、B4
 5. 只有 PIE 里不播 → B6
-6. 只有切镜瞬间不对 → A3、B7、B8
-7. 不黑但糊 → B5
+6. 只有切镜瞬间不对 → A3、B7、B8、B9
+7. 不黑但糊 → 整段糊看 B5；开头几帧糊、后面变清楚看 B9

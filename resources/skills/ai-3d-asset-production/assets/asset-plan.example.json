@@ -11,6 +11,12 @@
   "unknowns": ["Rear of the body is not visible in the single reference."],
   "intended_use": "background prop",
   "max_triangles": 20000,
+  "unreal": {
+    "size_cm": { "x": 40, "y": 35, "z": 55 },
+    "pivot": "base",
+    "nanite": true,
+    "baked_lighting": false
+  },
   "route": {
     "views": "generate_image, front first then left/rear/right anchored on it",
     "base_mesh": "generate_3d_model, quality medium, material pbr",

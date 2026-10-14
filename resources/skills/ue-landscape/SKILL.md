@@ -50,7 +50,12 @@ Missing any one gives no error — just black patches or no blending.
 | 5 | The landscape material has a Runtime Virtual Texture Output node, with BaseColor (colour) or WorldHeight (height) connected | Material tools — load `ue-material-authoring` |
 
 `landscape_setup_rvt` does 2–4 and checks 1 and 5. A receipt that says the setup was written
-but items are still unmet means **RVT does not work yet**. Do not report it as done.
+but items are still unmet means **RVT does not work yet**. Do not report it as done. All five
+met is still a check of the wiring, not the picture: `ue_screenshot` where meshes meet the
+ground and near the landscape edge before saying the blend works.
+
+Item 5 edits the landscape material, which is often shared by several landscapes and levels.
+`material_get_referencers` on it first, and tell the user what else changes.
 
 For "RVT 是黑的" / "融合没效果": call `landscape_list` first. It names the unmet item.
 Item 5 check searches the material graph and material functions but not Material Layers;

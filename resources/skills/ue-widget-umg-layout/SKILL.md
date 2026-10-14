@@ -45,7 +45,32 @@ Call it after any layout change and actually read the picture: overlapping contr
 running off the edge, a bar that is the wrong colour — none of that shows up in
 `widget_get_hierarchy`, which will happily report a perfectly sensible tree for a broken layout.
 
-Then tell the user what you saw, not just that the call succeeded.
+Then tell the user what you saw, not just that the call succeeded. Whether it *looks good* is
+the user's call; overlap, clipping and overflow are yours to catch.
+
+It renders in designer mode: PreConstruct runs, Construct and the event graph do not. Anything
+the game fills in at runtime shows as its design-time default.
+
+Preview with the longest content the game will really put there, not the placeholder: set the
+longest text (`"Score: 1,250,000"`, the longest translation, a 16-character player name) with
+`widget_set_property`, preview, then set the default back. `"Score: 0"` fits anything.
+
+### Other screen sizes: vary the aspect ratio, not just the resolution
+
+`widget_preview` applies the project's DPI curve for the size you ask for, the same as the game,
+and reports the `dpi_scale` it used. By default UMG scales by the screen's short side, so 720p,
+1080p and 4K at 16:9 lay out almost identically — previewing all three proves little. What
+really changes the layout is the aspect ratio, so hold the height and vary the width:
+
+| aspect | `width` × `height` |
+|---|---|
+| 16:9 | 1920 × 1080 |
+| 21:9 | 2520 × 1080 |
+| 16:10 | 1728 × 1080 |
+| 4:3 | 1440 × 1080 |
+
+If the result has no `dpi_scale`, the plugin is older and drew at scale 1: then only the
+1080-high rows above match the game.
 
 ## Layout: set it on add, fix it with `widget_set_slot`
 
@@ -73,10 +98,10 @@ h_align / v_align: Fill | Left/Top | Center | Right/Bottom
 `position` and `size` use different key names. Getting it wrong is a clear validation error, not
 a silent failure, so fix and retry — but write it correctly the first time.
 
-Anchors decide what the control does when the screen resizes. A HUD element pinned to a corner
-wants that corner's anchor (`TopLeft` for a health bar, `BottomCenter` for a hotbar); a
+Anchors decide what the control does when the screen changes shape. A HUD element pinned to a
+corner wants that corner's anchor (`TopLeft` for a health bar, `BottomCenter` for a hotbar); a
 background wants `Stretch`. Choosing `TopLeft` for everything gives a layout that breaks on any
-other resolution — ask the user about target resolution if it matters to them.
+other aspect ratio — check it with the width table under "Preview returns the actual image".
 
 ## Properties you can set
 
@@ -116,6 +141,43 @@ The variable reads back correctly while the user stares at the old number.
 
 Not finding a function in the search does not mean it does not exist. Write the class name
 yourself.
+
+## Getting it on screen in the game
+
+A Widget Blueprint shows nothing until something creates it and adds it to the viewport. Write
+that into the player's Blueprint (the player Character or PlayerController), on BeginPlay:
+
+```json
+{
+  "blueprint_path": "/Game/Blueprints/BP_PlayerCharacter",
+  "nodes": [
+    { "id": "begin", "class": "Event", "member_name": "ReceiveBeginPlay" },
+    { "id": "pc", "class": "Function", "member_name": "GameplayStatics.GetPlayerController",
+      "pin_defaults": { "PlayerIndex": "0" } },
+    { "id": "make", "class": "CreateWidget", "target_class": "WBP_HUD" },
+    { "id": "show", "class": "Function", "member_name": "UserWidget.AddToViewport" }
+  ],
+  "connections": [
+    { "from": "begin.then", "to": "make.execute" },
+    { "from": "pc.ReturnValue", "to": "make.OwningPlayer" },
+    { "from": "make.then", "to": "show.execute" },
+    { "from": "make.ReturnValue", "to": "show.self" }
+  ]
+}
+```
+
+- `target_class` sets the widget class and gives the return pin that exact type, so later nodes
+  can call the widget's own functions. It must be a Widget Blueprint; actors use `SpawnActor`.
+- `AddToViewport` needs the `UserWidget.` prefix; without it the lookup only searches the
+  Blueprint's own class.
+- After `blueprint_compile`, run `ue_playtest` and look at the screenshot: the widget should be
+  on screen. Compiling only proves the graph is valid.
+- Keep the return value in a variable if anything later updates or closes it
+  (`Widget.RemoveFromParent`).
+- A menu also needs input routed to it: `WidgetBlueprintLibrary.SetInputMode_UIOnlyEx` (or
+  `SetInputMode_GameAndUIEx`) with the player controller, plus `VariableSet`
+  `PlayerController.bShowMouseCursor` = true. Closing it reverses both
+  (`SetInputMode_GameOnly`). Without this the menu draws but the game keeps the mouse.
 
 ## Checking it actually shows on screen
 

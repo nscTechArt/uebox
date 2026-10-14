@@ -12,9 +12,15 @@ State the observable result this workflow delivers.
 ## Workflow
 
 1. Read the authoritative source of truth.
-2. Choose the narrowest valid path from the real inputs.
-3. Perform only the actions required by the request.
-4. Verify the resulting behavior or artifact.
+2. Choose the narrowest valid path from the real inputs. When several approaches work, try the
+   cheap, reversible one first (read-only query → runtime toggle → setting or instance → a
+   destructive step on a copy → the original).
+3. Before deleting, renaming or changing a signature, find what references it.
+4. Perform only the actions required by the request.
+5. Verify in the state where the result actually takes effect (re-run PIE, read the asset back,
+   open the rendered frame), not by the tool's success message. Name what only the user can
+   verify (feel, multiplayer) and ask them to.
+6. State which number the conclusion rests on and what it really measures.
 
 ## Coverage
 

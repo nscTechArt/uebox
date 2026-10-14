@@ -5,7 +5,8 @@ description: Edits mesh geometry itself inside Unreal using Geometry Script - bo
 
 # Geometry editing (Geometry Script)
 
-一切通过 `ue_run_python_script` 调 Geometry Script。没有专用工具，也不需要。
+改几何本身通过 `ue_run_python_script` 调 Geometry Script。只改网格的设置（开关 Nanite、
+碰撞复杂度、LOD 组）用 `ue_content_set_properties`，不写 Python。
 
 ## Quick start
 
@@ -30,6 +31,25 @@ output_data = {'geometry_scripting_available': hasattr(unreal, 'GeometryScript_M
 返回 `False` 就用 `ue_manage_plugin` 启用 `GeometryScripting`，
 然后**必须重启编辑器**才生效：先 `ue_save`，再调 `ue_restart_editor`（它会等编辑器回来并重连），
 别在没重启的情况下反复重试。
+
+## 「面数太高」先别动 LOD0
+
+用户说「面数太高帮我减一下」，要的通常是「别那么卡」，不是「把模型改坏一点」。按从轻到重走：
+
+1. `mesh_describe`：Nanite 开没开、有几级 LOD、每级是导入的还是引擎生成的。
+2. **开 Nanite**：静态网格、材质不透明时首选。几何一点不改，随时能关。
+   半透明材质不走 Nanite；遮罩和 WPO 材质 5.0 不支持（5.1 起支持，但更贵）；
+   目标平台不支持 Nanite（如移动端）时走第 3 步。
+3. **自动生成 LOD**：LOD0 原样保留，远处换低模。已有导入的 LOD 时这一步会把它们换掉，先问用户。
+4. 只有用户明确要 LOD0 本身变少（导出给别的软件、移动端最高档、做碰撞代理），
+   才在副本上减面，走下面的标准往返。
+
+第 2 步用 `ue_content_set_properties`，`{"NaniteSettings.bEnabled": true}`，回执带读回值；
+第 3 步的写法见 [references/api.md](references/api.md)「Nanite 与自动 LOD」。
+它们改的是原资产本身，摆了它的每个关卡都跟着变：先用 `ue_content_dependencies`
+（`direction: "referencers"`）看有多少地方在用，告诉用户。
+做完用 `mesh_describe` 回读开关和每级面数，再 `ue_screenshot` 看近景有没有破形。
+开了 Nanite 之后别再拿原始面数说它「太重」：Nanite 的开销看材质（遮罩、WPO）和重叠，不看面数。
 
 ## 标准往返
 
@@ -116,6 +136,20 @@ output_data = {'before': before, 'after': after, 'readback': readback,
                'save_required': True}
 ```
 
+**副本沿用原件的碰撞和导入的 LOD。** 上面只改了 LOD0 的几何：原件的简单碰撞（常见是一个
+包住整面墙的盒子）原样留着，门洞走不过去；导入的 LOD1+ 还是没洞的旧几何，走远一点洞就消失。
+引擎自动生成的 LOD 会按新 LOD0 重建，导入的不会。布尔、平面切割之后，在副本上：
+
+1. `mesh_describe` 看碰撞图元和每级 LOD 的来源。
+2. 删掉旧的简单碰撞，按新几何重做（凸包分解，写法见 [references/api.md](references/api.md)
+   「布尔之后：碰撞与 LOD」）。凸包仍把洞封住时，用 `ue_content_set_properties` 把
+   `BodySetup.CollisionTraceFlag` 设成 `CTF_UseComplexAsSimple`（网格编辑器里的
+   「Use Complex Collision As Simple」）。
+3. 有导入的 LOD 就重新自动生成。
+4. 回读确认，然后验证门洞真的能过：PIE 里让角色走过去（`ue_autoplay` 的 goal 模式把
+   `reach_location` 设在洞的另一侧；它是实验性的，走不到先怀疑地形），或请用户走一趟。
+   模型自己确认不了就照实说。
+
 写回只改内存里的资产，**最后必须 `ue_save`**。
 `ue_save` 的成功是保存回执；随后在同一编辑器里 `load_asset` 或 `mesh_describe`
 通常仍读内存缓存，不能称为「从磁盘重新读取」。需要持久化验收时，另启编辑器进程后回读。
@@ -127,7 +161,7 @@ output_data = {'before': before, 'after': after, 'readback': readback,
 | 合并 / 挖洞 / 求交 | `GeometryScript_MeshBooleans.apply_mesh_boolean` (UNION / SUBTRACT / INTERSECTION) |
 | 平面切开 | `GeometryScript_MeshBooleans.apply_mesh_plane_cut` |
 | 镜像 | `GeometryScript_MeshBooleans.apply_mesh_mirror` |
-| 减面到指定面数 | `GeometryScript_MeshSimplification.apply_simplify_to_triangle_count` |
+| 减面到指定面数（先看「面数太高」一节） | `GeometryScript_MeshSimplification.apply_simplify_to_triangle_count` |
 | 减面到误差容限 | `GeometryScript_MeshSimplification.apply_simplify_to_tolerance` |
 | 均匀重网格 | `GeometryScript_Remeshing.apply_uniform_remesh` |
 | 体素封边 / 加壳 | `GeometryScript_MeshVoxelProcessing.apply_mesh_solidify` / `apply_mesh_morphology` |

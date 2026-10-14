@@ -217,6 +217,23 @@ One operation applies to every actor the selector matched, which is what makes "
 lights by 50" a single call. It also means a sloppy selector changes more than intended —
 run `ue_get_actor` with the same selector first and tell the user the count before mutating.
 
+## Anything game logic moves must be Movable
+
+A door, a lift, a pickup that bobs: if logic moves it at runtime, its root component must be
+`Movable`. A `Static` one simply does not move — nothing fails, and the only trace is a
+"has to be 'Movable'" warning in the **PIE** Message Log. Preset meshes (`cube`, `sphere`, …)
+spawn as `StaticMeshActor`, which starts `Static`.
+
+- placed actor: `ue_set_property` with `properties: { "Mobility": "Movable" }`
+- Blueprint actor: `blueprint_set_property` with `component_name` set to the component that
+  moves — fixes every instance that has not overridden it
+- read it back: `ue_inspect_components` with `properties: ["Mobility"]`
+- after the playtest that should move it: `ue_message_log { action: "get", category: "PIE" }`
+  has no Movable warning
+
+Change only what moves. Baked lighting applies to `Static` only; flipping a whole level to
+`Movable` "to be safe" throws that away.
+
 ## Rotation: do not compute pitch signs in your head
 
 UE rotation is `{ pitch, yaw, roll }` in degrees. Local **+X is the "front"**; lights,
@@ -293,5 +310,18 @@ component transforms at runtime, so you would be flying blind — use the actor 
 selector as `ue_get_actor`, so one call deletes everything the selector matched. Name what will be deleted, by label and count, before calling — "delete 3 actors:
 UACube, UASphere, UALight" is reviewable; "delete matching actors" is not.
 
+**Referenced actors are held back.** Before deleting, the tool checks the Level Blueprint and
+every other actor's properties (the switch that opens this door, the camera that follows it).
+Referenced targets are not deleted: they come back under "skipped" with who points at them, and
+unreferenced targets in the same call are deleted as usual. Tell the user what would break; only
+after they agree, call again with `force: true` — the receipt then names the references that are
+now None.
+
+Not checked: Level Sequence bindings (`sequence_describe` lists them — look before deleting
+something a sequence animates) and references from assets outside the level. In PIE nothing is
+checked (`references_checked: false`).
+
 After deleting, confirm with `ue_get_actor` on the same selector — an empty result is now a
-normal success, so it is a clean way to prove the scene is in the state you claimed.
+normal success, so it is a clean way to prove the scene is in the state you claimed. If anything
+might have referenced it, run `ue_playtest`: an "Accessed None" in `errors` names the Blueprint
+that lost its target.

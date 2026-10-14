@@ -50,6 +50,14 @@ reroutes, and lists the nodes where it stopped so you can continue from there.
 any experiment you run, so every theory tested before that point is untestable.
 Full order of operations: **`references/diagnosing.md`**.
 
+**Compiling is not the finish line.** After `material_apply`, `ue_screenshot` the object
+and look at it; zero errors with the wrong picture is still unfinished. A value that changes
+during play (a flash, a fade) is checked in PIE, not on the graph.
+
+**Before changing a master that already exists, `material_get_referencers`.** Every instance
+under it and every level using it changes too; say how many in the report. To try something
+risky, `material_duplicate` first and work on the copy.
+
 **Nothing here writes to disk.** Call `ue_save` when the material is done.
 
 **Substrate (UE 5.4+).** A project having Substrate switched on is not a reason to build
@@ -88,7 +96,7 @@ Also: a `TextureSample` node takes `texture_path` directly. One call, not add-th
 | 改混合模式 / 着色模型、上到场景物体 | same file |
 | "接错线了"、"图里一堆没用的节点" | **`references/graph-editing.md`** |
 | "这个材质显示不对"、"草是紫的"、编译不过 | **`references/diagnosing.md`** |
-| "全场景下雨"、"按队伍改配色"、"这串节点想复用"、"这个材质被谁用了" | **`references/reuse-and-scale.md`** |
+| "全场景下雨"、"受击闪白"、"按队伍改配色"、"这串节点想复用"、"这个材质被谁用了" | **`references/reuse-and-scale.md`** — a parameter collection is global, so per-object effects are not one |
 
 The one to get right up front: **variants are instances, not copies.** Three master
 materials means three compiled shaders. One master with `ScalarParameter` /
@@ -101,8 +109,13 @@ so the copy has its own graph to edit — which is exactly what an instance cann
 Reach for it for "改一版但原来那份留着", never for "同一种材质来五个颜色". Name clashes get a
 suffix, so trust `new_path` in the reply rather than the name you asked for.
 
-## Three failures that look like success
+## Failures that look like success
 
+- **A packed mask texture left on sRGB.** ORM / ARM / roughness / metallic / AO maps hold
+  data, not colour. With sRGB on, everything compiles and the values come out darker than
+  stored, so the surface usually reads too glossy. `ue_content_describe` on the texture reports `srgb`; the fix is
+  `ue_content_set_properties` with `{"SRGB": false, "CompressionSettings": "TC_Masks"}`, and
+  the materials that sample it need follow-up — see `references/diagnosing.md`.
 - **Translucency is two steps.** Setting `blend_mode: "Translucent"` without wiring
   `Opacity` leaves it fully opaque and nothing reports an error.
 - **A `MaterialFunctionCall` without `function_path`, or a `CollectionParameter` without
@@ -114,3 +127,20 @@ suffix, so trust `new_path` in the reply rather than the name you asked for.
 - **`material_get_referencers` only sees saved packages.** "Nothing references this" is
   not a safe basis for deleting anything while unsaved packages exist. The response says
   so; save first rather than talking past it.
+
+## Cost — read the compile's `stats`
+
+A clean `material_compile` also reports the material editor's Stats numbers: pixel and vertex
+shader instructions, samplers against the platform maximum, texture samples, and the static
+switch parameters. When the user asks whether a material is heavy, or a change added a chain of
+nodes, compare these before and after the change; do not judge against a number you made up.
+
+They count for the editor's own shader platform, not mobile or console. An instruction count
+shown as n/a means the engine did not report it, not that it is free. A compile with errors has
+no stats. An older plugin returns none at all — then read them through `ue_run_python_script`
+with `unreal.MaterialEditingLibrary.get_statistics(material)` (it blocks until shaders finish).
+
+Past the sampler maximum the material stops compiling (set texture nodes' `SamplerSource` to
+`SSM_Wrap_WorldGroupSettings` through `properties`). Each static switch listed can double the
+shader permutations: every distinct combination of switch values across instances is one more
+shader to compile and ship — check how many instances override a switch before adding another.

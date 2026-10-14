@@ -5,6 +5,16 @@
 其他版本使用前通过 `help(...)` 核对，不能把 5.5 的所有字段当成九版通用。
 示例省略可选的 `debug=None`，所有类名前加 `unreal.`。
 
+## 目录
+
+- 读写资产
+- 减法布尔
+- 减面
+- 均匀重网格
+- 查询与判断
+- Nanite 与自动 LOD（不改 LOD0）
+- 布尔之后：碰撞与 LOD
+
 ## 读写资产
 
 ```python
@@ -93,3 +103,43 @@ surface_area, volume = GeometryScript_MeshQueries.get_mesh_volume_area(mesh)
 体积返回顺序是 **面积、体积**。`closed` 只检查拓扑边界，不证明没有自交或法线正确。
 不要把三角形数变化当作所有操作的成功条件。
 把核对结果赋给 `output_data`，它会送回 Agent；失败时抛出明确异常并保留诊断输出。
+
+## Nanite 与自动 LOD（不改 LOD0）
+
+开关 Nanite 是网格的一个设置，不写 Python：`ue_content_set_properties`，
+`{"NaniteSettings.bEnabled": true}`，关掉就恢复。LOD 组、碰撞复杂度
+（`BodySetup.CollisionTraceFlag`）同理。
+
+自动 LOD 不是一个属性，走 `StaticMeshEditorSubsystem`，不用开插件。本节和下一节按 5.0–5.8
+的引擎头文件核对过函数和字段，没在实机 Python 里跑过，第一次用先 `help(...)` 核对。
+
+```python
+sub = unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem)
+mesh = unreal.load_asset('/Game/Meshes/SM_Rock')
+
+# 自动 LOD：LOD0 保留，LOD1+ 按比例生成
+opts = unreal.StaticMeshReductionOptions()
+opts.auto_compute_lod_screen_size = True
+opts.reduction_settings = [
+    unreal.StaticMeshReductionSettings(percent_triangles=1.0, screen_size=1.0),
+    unreal.StaticMeshReductionSettings(percent_triangles=0.5, screen_size=0.5),
+    unreal.StaticMeshReductionSettings(percent_triangles=0.25, screen_size=0.25)]
+lod_count = sub.set_lods(mesh, opts)   # 负数表示失败，原因在日志里
+```
+
+`set_lods` 先把网格截到只剩 LOD0，再加生成的 LOD——**原有的导入 LOD 会被丢掉**。
+`mesh_describe` 显示有导入 LOD 时先问用户。会触发网格重建，大网格要等一会儿。
+
+## 布尔之后：碰撞与 LOD
+
+对**副本**操作。旧的简单碰撞删掉再按新几何做凸包分解，导入的 LOD 换成生成的：
+
+```python
+sub = unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem)
+copy = unreal.load_asset('/Game/Meshes/SM_Wall_Holed')
+sub.remove_collisions(copy)
+ok = sub.set_convex_decomposition_collisions(copy, 8, 16, 100000)  # 凸包数、每个凸包顶点上限、精度
+```
+
+凸包数太少时洞会被一个凸包盖住，适当加大再试。LOD 用上一节的 `set_lods`。
+做完 `mesh_describe` 回读碰撞图元数和每级 LOD 来源；能不能走过去要在 PIE 里验证。

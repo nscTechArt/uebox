@@ -35,6 +35,9 @@ Omit pin names by default. Supply one when the failure message lists candidates.
 | Sample points on a surface | `PCGSurfaceSamplerSettings`    |
 | Deterministic point grid   | `PCGCreatePointsGridSettings`  |
 | Spawn static meshes        | `PCGStaticMeshSpawnerSettings` |
+| Density from slope         | `PCGNormalToDensitySettings`   |
+| Drop points by density     | `PCGDensityFilterSettings`     |
+| Remove overlapping points  | `PCGSelfPruningSettings`       |
 
 `pcg_list_node_types` lists what this project actually has; the set varies by engine
 version and enabled plugins. Narrow with `search: "Sampler"`. Short names resolve —
@@ -83,12 +86,45 @@ edges: [
 A mixed forest is the same graph with one `MeshEntries[n]` pair per species; `Weight` sets
 relative frequency.
 
+Forest that avoids steep slopes, keeps trees apart and stops drawing at 200 m:
+
+```
+nodes: [
+  { id: "land",    type: "PCGGetLandscapeSettings",    x: 0,    y: 0 },
+  { id: "sampler", type: "PCGSurfaceSamplerSettings",  x: 300,  y: 0,
+    properties: { "PointsPerSquaredMeter": 0.01,
+                  "PointExtents": { "X": 300, "Y": 300, "Z": 100 } } },
+  { id: "slope",   type: "PCGNormalToDensitySettings", x: 600,  y: 0 },
+  { id: "flat",    type: "PCGDensityFilterSettings",   x: 900,  y: 0,
+    properties: { "LowerBound": 0.87, "UpperBound": 1.0 } },
+  { id: "prune",   type: "PCGSelfPruningSettings",     x: 1200, y: 0 },
+  { id: "spawner", type: "PCGStaticMeshSpawnerSettings", x: 1500, y: 0,
+    properties: {
+      "MeshSelectorParameters.MeshEntries[0].Descriptor.StaticMesh": "/Game/Trees/SM_Oak",
+      "MeshSelectorParameters.MeshEntries[0].Weight": 1,
+      "MeshSelectorParameters.MeshEntries[0].Descriptor.InstanceEndCullDistance": 20000
+    } }
+],
+edges: [
+  { from: "land",    to: "sampler", to_pin: "Surface" },
+  { from: "sampler", to: "slope" },
+  { from: "slope",   to: "flat" },
+  { from: "flat",    to: "prune" },
+  { from: "prune",   to: "spawner" },
+  { from: "spawner", to: "Output" }
+]
+```
+
+`LowerBound` is the cosine of the steepest slope kept (0.87 ≈ 30°, 0.71 ≈ 45°).
+
 ## Property paths
 
 ```
 PointsPerSquaredMeter                                          top-level scalar
 MeshSelectorParameters.MeshEntries[0].Descriptor.StaticMesh    first mesh
 MeshSelectorParameters.MeshEntries[0].Weight                   its weight
+MeshSelectorParameters.MeshEntries[0].Descriptor.InstanceEndCullDistance   cull, cm
+Seed                                                           on any random node
 ```
 
 Indices beyond the current length grow the array. Asset paths may omit the object suffix.

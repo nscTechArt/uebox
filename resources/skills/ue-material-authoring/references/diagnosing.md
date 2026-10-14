@@ -3,6 +3,12 @@
 For an existing material that compiles into the wrong picture, or does not compile at all.
 The order matters more than any individual step.
 
+## Contents
+
+1. Compile first · 2. The compile names the node · 3. Pin types · 4. Graphs that only look
+disconnected · 5. One wire at a time · 6. The picture, and sRGB on data textures ·
+7. Who else uses the master · 8. Undo · 9. Not through Python · Known gaps
+
 ## 1. Compile first. Do not start by reading the graph
 
 `material_compile` separates the two cases in one call:
@@ -64,6 +70,18 @@ wrong, or the object is no longer rendering at all, say so — "compiles clean, 
 is still not green" is a useful report; "fixed" is not.
 
 State plainly which part is verified and which part is still a theory.
+
+**Wiring right, surface wrong — check the textures before the graph.** A packed data map
+(ORM / ARM, roughness, metallic, AO) imported with sRGB on is the classic case: it compiles,
+and roughness and metallic come out darker than the file says, so the surface reads too
+glossy. `ue_content_describe` on each texture the material samples reports `srgb` and
+`compression`. Colour maps (base colour, emissive) should be `srgb: true`; data maps should
+be `false`, compression `TC_Masks`. To fix, `ue_content_set_properties` on the texture with
+`{"SRGB": false, "CompressionSettings": "TC_Masks"}`; its receipt reads both back.
+That makes every material sampling it fail with "Sampler type is …, should be …" until the
+`TextureSample` node's `SamplerType` property is set to match (`SAMPLERTYPE_Masks`, via
+`material_set_node_value` `properties`). So run `material_get_referencers` on the texture
+first and fix and recompile every material it lists, not only the one in front of you.
 
 ## 7. Before touching a master material, check who else uses it
 

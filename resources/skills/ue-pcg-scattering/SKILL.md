@@ -69,6 +69,50 @@ undeclared nodes; check `graph_nodes_after` in the reply for leftovers.
 
 Pin tables, node type names and copyable graphs: **`references/wiring.md`**.
 
+## Size it before filling the world
+
+Instances ≈ `PointsPerSquaredMeter` × area in m², before filters. 0.01 over 2 km × 2 km is
+40,000 trees; grass at 1 per m² over 1 km² is a million. Tell the user the estimate before a
+large run, and go in this order:
+
+1. **Trial on a small volume.** `pcg_spawn_volume` with `size` around 5000 × 5000 cm over
+   typical terrain, `pcg_execute`, read `instance_count` and `elapsed_seconds`. Scale both
+   by the area ratio — that is the full-size forecast.
+2. **Cull distance on every spawner entry**, in cm. Props drawn to the horizon are the
+   usual cost: `"MeshSelectorParameters.MeshEntries[0].Descriptor.InstanceEndCullDistance": 20000`.
+   Repeat per entry; pick the distance by mesh size (grass far shorter than trees).
+3. **Then full size.** Remove the trial volume (`ue_destroy_actor`) and place the real one.
+   Whole-world coverage is a partitioned component — see World Partition below.
+
+## Distribution that looks natural
+
+A grid of evenly spaced, identical-looking trees on cliffs is the default output. Three
+fixes, all nodes between the sampler and the spawner (graph in `references/wiring.md`):
+
+- **Slope.** `PCGNormalToDensitySettings` sets each point's density to the cosine of its
+  slope; `PCGDensityFilterSettings` with `LowerBound` 0.87 then keeps slopes under about
+  30°, 0.71 under about 45°.
+- **Spacing.** `PCGSelfPruningSettings` removes points whose bounds overlap. The bounds come
+  from the sampler's `PointExtents` (half-size, cm), so set X/Y to the mesh's footprint —
+  around 300 for a tree crown — or the spacing it enforces has nothing to do with the mesh. Pruning lowers the count;
+  the trial run shows by how much.
+- **Seed.** Every random node has a `Seed`; same seed, same layout on every run. For "换一种
+  分布" change the seed, not the density. Two samplers with identical settings produce the
+  same points, so trees and rocks land on top of each other — give them different seeds.
+
+## Check it in the level, not in the count
+
+`instance_count > 0` proves something spawned, not that it looks right. `ue_screenshot`
+from about eye height and look for floating or buried meshes, bare patches and visible
+grid rows. For "is it slow now", compare `ue_get_performance_stats` before and after
+generating — an editor snapshot, so say so.
+
+**What a change reaches.** One graph can sit on several volumes: `pcg_scene_report` lists
+which volumes in this level use it, and `ue_content_dependencies` (`direction:
+"referencers"`) finds other levels. Editing the graph changes what every one of them
+generates; say so first.
+`pcg_execute` also wipes that volume's previous output before regenerating.
+
 ## "I want to tune these values in the details panel"
 
 That is the graph's **user parameters**, and `pcg_graph_parameters` is the whole
