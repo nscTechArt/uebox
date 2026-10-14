@@ -6,7 +6,6 @@ import { registerBaiduyunIPC } from './baiduyun'
 import { registerWebdavIPC } from './webdav'
 import { registerShellIPC } from './shell'
 import { registerPathIPC } from './path'
-import { registerAssistantIPC } from './assistant'
 import { registerUnrealPathIPC } from './unrealPath'
 import { registerUnrealProcessIPC } from './unrealProcess'
 import { registerAgentV3IPC } from './agentV3'
@@ -75,8 +74,6 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 注册路径相关IPC
   registerPathIPC()
-  // 注册虚幻AI助手相关IPC
-  registerAssistantIPC()
   // 注册 Unreal 引擎相关IPC
   registerUnrealPathIPC()
   // 注册 Unreal 引擎进程检测相关IPC

@@ -1181,37 +1181,6 @@ const api = {
       return () => ipcRenderer.removeListener('baiduyun:folder-download-progress', handler)
     }
   },
-  assistant: {
-    // 发送问题
-    ask: (args: { content: string; conversationId?: string | null }) =>
-      ipcRenderer.invoke('assistant:ask', args),
-    // 订阅片段事件
-    onChunk: (listener: (chunk: string) => void) => {
-      const handler = (_: Electron.IpcRendererEvent, payload: any) =>
-        listener(String(payload || ''))
-      ipcRenderer.on('assistant:chunk', handler)
-      return () => ipcRenderer.removeListener('assistant:chunk', handler)
-    },
-    // 订阅完成事件
-    onDone: (listener: () => void) => {
-      const handler = (_: Electron.IpcRendererEvent) => listener()
-      ipcRenderer.on('assistant:done', handler)
-      return () => ipcRenderer.removeListener('assistant:done', handler)
-    },
-    // 订阅错误事件
-    onError: (listener: (err: { message?: string; status?: number }) => void) => {
-      const handler = (_: Electron.IpcRendererEvent, payload: any) => listener(payload)
-      ipcRenderer.on('assistant:error', handler)
-      return () => ipcRenderer.removeListener('assistant:error', handler)
-    },
-    // 订阅对话 ID 事件
-    onConversation: (listener: (id: string) => void) => {
-      const handler = (_: Electron.IpcRendererEvent, payload: any) =>
-        listener(String(payload || ''))
-      ipcRenderer.on('assistant:conversation', handler)
-      return () => ipcRenderer.removeListener('assistant:conversation', handler)
-    }
-  },
   unrealPath: {
     // 扫描 Unreal 引擎
     scanEngines: () => ipcRenderer.invoke('unreal:engines:scan'),
