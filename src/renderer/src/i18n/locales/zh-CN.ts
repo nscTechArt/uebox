@@ -7566,7 +7566,14 @@ export default {
       done: '同步完成',
       failed: '同步失败',
       doneContent: '全量同步完成：{assets} 个资产、{folders} 个文件夹',
-      failedContent: '网络库同步失败，请重试'
+      failedContent: '网络库同步失败，请重试',
+      // 同步进度（主进程只发阶段代号，文案在这里）
+      phase: {
+        preparing: '正在准备同步',
+        folders: '正在同步文件夹（{current}/{total}）',
+        assets: '正在同步资产（{current}/{total}）',
+        sweep: '正在核对本地资产'
+      }
     },
     scan: {
       done: '扫描完成'

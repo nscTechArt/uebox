@@ -14,8 +14,15 @@ import { authStatusOf } from '../networkV2/SyncClient'
 import { initAssetSearchIndexModel } from './models/assetSearchIndex'
 import { initAssetNoteModel } from './models/assetNote'
 import { ensureSqliteVecLoaded } from './sqliteVec'
-import { releaseAssetQueryConnections, shutdownAssetQueryWorker } from './services/assetQueryRunner'
-import { VAULT_DB_MMAP_SIZE } from './vaultConnectionPragmas'
+import {
+  releaseAssetQueryConnections,
+  shutdownAssetQueryWorker,
+  startWalCheckpointing,
+  stopWalCheckpointing
+} from './services/assetQueryRunner'
+import { applyVaultConnectionPragmas, isPathInside } from './vaultConnectionPragmas'
+import { applyVaultSchema } from './vaultSchema'
+import { refreshPlannerStatsIfStale } from './plannerStats'
 
 /**
  * 保管库信息接口
@@ -827,8 +834,9 @@ export class VaultManager {
       beginImportVaultSwitch()
       finishImportVaultSwitch()
       await this.stopV2NetworkService(vaultId)
-      // 查询 worker 手上也开着这个库文件，不放手的话 Windows 上移动会失败
-      await releaseAssetQueryConnections()
+      // 查询 worker 手上也开着这个库文件，不放手的话 Windows 上移动会失败；
+      // 放手之后旧连接上再来的查询一律拒绝，免得 worker 把老库文件又打开
+      await releaseAssetQueryConnections(this.currentVaultDb)
       if (this.currentVaultDb) {
         try {
           this.currentVaultDb.close()
@@ -908,8 +916,8 @@ export class VaultManager {
         await this.stopV2NetworkService(this.currentVaultInfo.id)
       }
 
-      // 关闭当前保管库数据库连接（查询 worker 那条只读连接一起放掉）
-      await releaseAssetQueryConnections()
+      // 关闭当前保管库数据库连接（查询 worker 那条只读连接、检查点连接一起放掉）
+      await releaseAssetQueryConnections(this.currentVaultDb)
       if (this.currentVaultDb) {
         try {
           this.currentVaultDb.close()
@@ -939,6 +947,8 @@ export class VaultManager {
 
       // 确保保管库数据库表结构完整
       this.initializeVaultDatabase(this.currentVaultDb)
+      // WAL 检查点交给查询 worker：几十万行的库上每次提交顺带的检查点要几百毫秒，别在主线程上做
+      startWalCheckpointing(this.currentVaultDb)
 
       // 后台把全文索引补齐。切库之后欠的账是这个库自己的，所以每次切都要推一把。
       // 分片进行，期间搜索照常可用（退回 LIKE）。
@@ -1500,302 +1510,17 @@ export class VaultManager {
   }
 
   /**
-   * 没有统计信息（sqlite_stat1）的库补一次 ANALYZE。
-   *
-   * 整个项目以前从来不跑 ANALYZE。没有统计信息时规划器对每个索引一视同仁，
-   * 「索引列 + isDelete」这类查询会选中 idx_assetData_isDelete（只有 0/1 两个值，
-   * 等于全表扫）。远端导入卡死那次就是这么来的（见 remoteImportPath.ts）。
-   *
-   * 只在没有 stat1 时跑：52 万行的库约 5 秒，一次性；有了之后由 SyncClient
-   * 在全量对账后按需刷新。
-   */
-  private ensureQueryPlannerStats(vaultDb: Database.Database): void {
-    try {
-      // 判据要盯着 assetData 自己，不能是「sqlite_stat1 这张表在不在」，也不能是
-      // 「随便哪张表有统计行」。建库时这里也会跑一次，而那时 assetData 还是空的：
-      // initializeVaultDatabase 要到后面才插入 'ALL' 根目录，于是早期某次 open 会写出
-      // 一行只属于 assetFolder 的统计。按「有没有任意行」判断的话，从那以后
-      // assetData 永远轮不到 ANALYZE —— 等它长到 52 万行，规划器仍然没有它的统计信息，
-      // 照样退回 idx_assetData_isDelete 全表扫，这个方法要修的问题原样复现
-      // （本地建的库没有 SyncClient 全量对账那条兜底路径）。
-      const hasTable = vaultDb
-        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'`)
-        .get()
-      const hasStats = hasTable
-        ? vaultDb.prepare(`SELECT 1 FROM sqlite_stat1 WHERE tbl = 'assetData' LIMIT 1`).get()
-        : undefined
-      if (hasStats) return
-      const started = Date.now()
-      vaultDb.exec('ANALYZE')
-      console.log(`[VaultManager] ANALYZE 完成，耗时 ${Date.now() - started} ms`)
-    } catch (err) {
-      console.warn('[VaultManager] ANALYZE 失败（不影响使用）:', err)
-    }
-  }
-
-  /**
-   * 初始化保管库数据库
+   * 初始化保管库数据库：连接参数 → 表结构（建表 → 补列 → 索引，见 vaultSchema.ts）→
+   * 附属表（详细说明、向量、全文索引）。统计信息在后台按需刷新，不挡打开。
    */
   private initializeVaultDatabase(vaultDb: Database.Database): void {
-    // synchronous = NORMAL：WAL 下的推荐档位（连接级设置，每个连接都要设）。默认的 FULL
-    // 让**每次提交**都等一次落盘，网络库的实时变更、对账分页这类大量小事务因此慢一个
-    // 数量级。NORMAL 下断电最多丢最后几个事务，库不会损坏。
-    //
-    // 别设 analysis_limit 来给 ANALYZE 提速：采样统计会把 isDelete、扩展名这类低基数列
-    // 估成「很有筛选力」（实测 isDelete 从「每个值 2 万行」估成 1001 行），规划器据此
-    // 挑错索引，一页查询从 0.1 ms 变成 90 ms，库越大越慢。
-    //
-    // temp_store = MEMORY：assetData 上挂着搜索索引的触发器，带触发器的写语句每一条都要开
-    // 一个「语句日志」，默认写在**磁盘临时文件**里 —— 插一行就建一次临时文件。实测一页
-    // 2000 行从 626 ms 降到 124 ms；大结果集排序的临时 B 树也不再落盘。
-    //
-    // mmap_size：读页走内存映射，不再一页一次 ReadFile。Windows 上每次 ReadFile 都要过
-    // 一遍文件系统过滤驱动（杀毒软件），54 万行的库全表读一遍几乎全是系统调用时间：
-    // 实测保管库目录下 7~9 倍，临时目录下 37 倍。保管库都在本机 userData 下，不存在
-    // 网络盘上做内存映射的风险。写入照旧走 WAL。
-    try {
-      vaultDb.pragma('synchronous = NORMAL')
-      vaultDb.pragma('temp_store = MEMORY')
-      vaultDb.pragma(`mmap_size = ${VAULT_DB_MMAP_SIZE}`)
-    } catch (e) {
-      console.warn('[VaultManager] 设置连接参数失败:', e)
-    }
+    // 内存映射只给本机 userData 下的库（保管库可以建在自选目录、U 盘、网络盘上），
+    // 理由见 vaultConnectionPragmas.ts
+    applyVaultConnectionPragmas(vaultDb, {
+      mmap: isPathInside(vaultDb.name, this.vaultsRootPath)
+    })
 
-    // 创建保管库元数据表
-    const createVaultMetadataTable = `
-      CREATE TABLE IF NOT EXISTS vault_metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT,
-        type TEXT DEFAULT 'string',
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-      )
-    `
-
-    // 创建资产文件夹表
-    const createAssetFolderTable = `
-      CREATE TABLE IF NOT EXISTS assetFolder (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        folderKey TEXT NOT NULL UNIQUE,
-        fatherKey TEXT,
-        img TEXT,
-        type TEXT NOT NULL,
-        folderName TEXT NOT NULL,
-        fullPath TEXT,
-        pathArray TEXT,
-        depth INTEGER DEFAULT 0,
-        ancestorKeys TEXT,
-        isDelete INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        FOREIGN KEY (fatherKey) REFERENCES assetFolder(folderKey) ON DELETE CASCADE
-      )
-    `
-
-    // 创建资产数据表
-    const createAssetDataTable = `
-      CREATE TABLE IF NOT EXISTS assetData (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        assetKey TEXT NOT NULL UNIQUE,
-        folderKey TEXT NOT NULL,
-        assetName TEXT NOT NULL,
-        filePath TEXT,
-        fileSize INTEGER,
-        fileExtension TEXT,
-        modifiedTime TEXT,
-        processorType TEXT,
-        assetType TEXT,
-        engineVersion TEXT,
-        isDelete INTEGER NOT NULL DEFAULT 0,
-        isDependency INTEGER NOT NULL DEFAULT 0,
-        classKey TEXT,
-        name TEXT,
-        originPath TEXT,
-        ext TEXT,
-        folderName TEXT,
-        softPath TEXT,
-        assetClass TEXT,
-        className TEXT,
-        classNameCn TEXT,
-        classColor TEXT,
-        imports TEXT,
-        imgLocalPath TEXT,
-        customPoster TEXT,
-        baiduyunPath TEXT,
-        webdavPath TEXT,
-        size INTEGER,
-        assetConfig TEXT,
-        assetConfigPath TEXT,
-        fileMd5 TEXT,
-        pluginInfo TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        FOREIGN KEY (folderKey) REFERENCES assetFolder(folderKey) ON DELETE CASCADE
-      )
-    `
-
-    // 创建资产收藏表
-    const createAssetFavoriteTable = `
-      CREATE TABLE IF NOT EXISTS asset_favorites (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        assetKey TEXT NOT NULL,
-        itemType TEXT DEFAULT 'asset',
-        userId INTEGER,
-        vaultId TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        UNIQUE(assetKey, itemType, userId, vaultId)
-      )
-    `
-
-    // 创建资产-标签关联表
-    const createAssetTagTable = `
-      CREATE TABLE IF NOT EXISTS asset_tags (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        assetKey TEXT NOT NULL,
-        tagId INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        UNIQUE(assetKey, tagId)
-      )
-    `
-
-    // 创建文件夹-标签关联表
-    const createFolderTagTable = `
-      CREATE TABLE IF NOT EXISTS folder_tags (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        folderKey TEXT NOT NULL,
-        tagId INTEGER NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-        UNIQUE(folderKey, tagId)
-      )
-    `
-
-    // 执行表创建
-    vaultDb.exec(createVaultMetadataTable)
-    vaultDb.exec(createAssetFolderTable)
-    vaultDb.exec(createAssetDataTable)
-    vaultDb.exec(createAssetFavoriteTable)
-    vaultDb.exec(createAssetTagTable)
-    vaultDb.exec(createFolderTagTable)
-
-    // 创建索引
-    const indexes = [
-      'CREATE INDEX IF NOT EXISTS idx_assetFolder_fatherKey ON assetFolder(fatherKey)',
-      'CREATE INDEX IF NOT EXISTS idx_assetFolder_depth ON assetFolder(depth)',
-      'CREATE INDEX IF NOT EXISTS idx_assetFolder_fullPath ON assetFolder(fullPath)',
-      'CREATE INDEX IF NOT EXISTS idx_assetFolder_isDelete ON assetFolder(isDelete)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_folderKey ON assetData(folderKey)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_folderKey_isDelete_assetName ON assetData(folderKey, isDelete, assetName COLLATE NOCASE)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_softPath ON assetData(softPath)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_assetType ON assetData(assetType)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_className ON assetData(className)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_classNameCn ON assetData(classNameCn)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_fileExtension ON assetData(fileExtension)',
-      // 扩展名筛选的 OR 两边都要有索引，理由见 models/assetData.ts 同名索引
-      'CREATE INDEX IF NOT EXISTS idx_assetData_ext ON assetData(ext)',
-      // 默认排序「按修改时间倒序」沿索引取页，理由见 models/assetData.ts 同名索引
-      'CREATE INDEX IF NOT EXISTS idx_assetData_updated_at_name ON assetData(updated_at, assetName COLLATE NOCASE)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_processorType ON assetData(processorType)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_assetClass ON assetData(assetClass)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_filePath ON assetData(filePath)',
-      // 远端导入按路径查重（remoteImportPath.ts）：filePath / originPath 各配一个
-      // 带 isDelete 的复合索引。老库在这里打开时顺手补上，见 initializeVaultDatabase 的调用点。
-      'CREATE INDEX IF NOT EXISTS idx_assetData_filePath_isDelete ON assetData(filePath, isDelete)',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_originPath_isDelete ON assetData(originPath, isDelete)',
-      // 缩略图占用判断 / 媒体读取权限按文件名等值查；部分索引，`= ?` 蕴含 IS NOT NULL。
-      // 谓词到 IS NOT NULL 为止，别加 `AND col != ''`：部分索引可用的前提是查询条件蕴含
-      // 谓词的每一个 AND 分支，而 `col = ?` 蕴含不了 `col != ''`（? 在 prepare 时未知），
-      // 加上去计划直接从索引 seek 退化成 SCAN。理由详见 models/assetData.ts 同一段注释。
-      'CREATE INDEX IF NOT EXISTS idx_assetData_imgLocalPath_present ON assetData(imgLocalPath) WHERE imgLocalPath IS NOT NULL',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_customPoster_present ON assetData(customPoster) WHERE customPoster IS NOT NULL',
-      // 筛选下拉的类型聚合只读索引不回表
-      'CREATE INDEX IF NOT EXISTS idx_assetData_types_cover ON assetData(classNameCn, isDelete, fileExtension, ext, className)',
-      // isDelete 单列索引是规划器的陷阱，删掉；回收站走部分索引。理由见 models/assetData.ts
-      'DROP INDEX IF EXISTS idx_assetData_isDelete',
-      'CREATE INDEX IF NOT EXISTS idx_assetData_deleted ON assetData(deletedAt) WHERE isDelete = 1',
-      // 🚀 性能优化：添加 assetName 索引（常用于排序和搜索）
-      'CREATE INDEX IF NOT EXISTS idx_assetData_assetName ON assetData(assetName COLLATE NOCASE)',
-      'CREATE INDEX IF NOT EXISTS idx_asset_favorites_assetKey ON asset_favorites(assetKey)',
-      'CREATE INDEX IF NOT EXISTS idx_asset_favorites_itemType ON asset_favorites(itemType)',
-      'CREATE INDEX IF NOT EXISTS idx_asset_favorites_userId ON asset_favorites(userId)',
-      'CREATE INDEX IF NOT EXISTS idx_asset_favorites_vaultId ON asset_favorites(vaultId)',
-      'CREATE INDEX IF NOT EXISTS idx_asset_tags_assetKey ON asset_tags(assetKey)',
-      'CREATE INDEX IF NOT EXISTS idx_asset_tags_tagId ON asset_tags(tagId)',
-      'CREATE INDEX IF NOT EXISTS idx_folder_tags_folderKey ON folder_tags(folderKey)',
-      'CREATE INDEX IF NOT EXISTS idx_folder_tags_tagId ON folder_tags(tagId)'
-    ]
-
-    indexes.forEach((sql) => vaultDb.exec(sql))
-    this.ensureQueryPlannerStats(vaultDb)
-
-    // 迁移：为 assetData 表添加缺失的新列
-    const assetDataMigrations = [
-      { name: 'note', type: 'TEXT' },
-      // 关联的详细说明（保管库的 assetNote 表）
-      { name: 'noteId', type: 'INTEGER' },
-      { name: 'isDependency', type: 'INTEGER DEFAULT 0' },
-      { name: 'fileMd5', type: 'TEXT' },
-      { name: 'pluginInfo', type: 'TEXT' },
-      { name: 'tags', type: 'TEXT' },
-      { name: 'color', type: 'TEXT' },
-      // 进回收站的时刻。**必须在这儿** —— models/assetData.ts 里那份同名清单
-      // 是那个没人调用的 initVaultModels 的，加在那边等于没加，见下面的说明。
-      { name: 'deletedAt', type: 'TEXT' }
-    ]
-
-    // 迁移：为 assetFolder 表添加缺失的新列
-    const assetFolderMigrations = [
-      { name: 'color', type: 'TEXT' },
-      // 文件夹也能写备注和详细说明
-      { name: 'note', type: 'TEXT' },
-      { name: 'noteId', type: 'INTEGER' },
-      /**
-       * 进回收站的时刻。
-       *
-       * 少了这一列，整个网络库会**全部离线**：SyncClient 的 prepareStatements()
-       * 无条件 prepare 了一句带 `deletedAt` 的 UPDATE，better-sqlite3 在 prepare
-       * 当场就编译，抛 `no such column: deletedAt`；这一抛正好落在
-       * startV2NetworkService 的 try 里，于是每个网络库都变成
-       * 「资产服务器连接失败：no such column: deletedAt」。
-       *
-       * 加列的人把它写进了 models/assetFolder.ts 的清单 —— 那份清单挂在
-       * initVaultModels 上，而那个函数从来没人调用（vaultSchema.test.ts 开头
-       * 就是在讲这件事）。老保管库的表早就建好了，CREATE TABLE IF NOT EXISTS
-       * 对它们不生效，只有这儿的 ALTER 补得上。
-       */
-      { name: 'deletedAt', type: 'TEXT' }
-    ]
-
-    /**
-     * 给一张已存在的表补列。
-     *
-     * 上面那段建表 SQL 用的是 `CREATE TABLE IF NOT EXISTS` —— 老保管库的表早就
-     * 建好了，改建表语句对它们一点作用都没有，只有走 ALTER 这条路才补得上。
-     */
-    const migrateColumns = (table: string, migrations: { name: string; type: string }[]): void => {
-      try {
-        type ColumnInfo = { name: string }
-        const columns = vaultDb.prepare(`PRAGMA table_info(${table})`).all() as ColumnInfo[]
-        const existingColumns = new Set(columns.map((col) => col.name))
-
-        for (const col of migrations) {
-          if (existingColumns.has(col.name)) continue
-          try {
-            vaultDb.exec(`ALTER TABLE ${table} ADD COLUMN ${col.name} ${col.type}`)
-            console.log(`[VaultManager] 迁移: 添加列 ${col.name} 到 ${table}`)
-          } catch (e) {
-            console.warn(`[VaultManager] 添加列 ${col.name} 失败:`, e)
-          }
-        }
-      } catch (e) {
-        console.warn(`[VaultManager] ${table} 列迁移检查失败:`, e)
-      }
-    }
-
-    migrateColumns('assetData', assetDataMigrations)
-    migrateColumns('assetFolder', assetFolderMigrations)
+    applyVaultSchema(vaultDb)
 
     // 资产/文件夹的详细说明。跟着保管库走，所以建在这儿而不是公共库
     try {
@@ -1803,14 +1528,6 @@ export class VaultManager {
     } catch (e) {
       console.warn('[VaultManager] assetNote 表初始化失败:', e)
     }
-
-    // 创建默认的ALL文件夹
-    const createAllFolderStmt = vaultDb.prepare(`
-      INSERT OR IGNORE INTO assetFolder (folderKey, fatherKey, type, folderName, fullPath, pathArray, depth, ancestorKeys)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-
-    createAllFolderStmt.run('ALL', null, 'system', 'ALL', '/ALL', '["ALL"]', 0, '["ALL"]')
 
     // sqlite-vec 是**按连接**加载的，公共库加载过不代表保管库也加载了 ——
     // 语义搜索的向量表建在保管库里，这里不加载的话它一辈子都是「不可用」。
@@ -1824,6 +1541,13 @@ export class VaultManager {
     } catch (e) {
       console.warn('[VaultManager] 全文检索索引初始化失败，搜索将退回 LIKE:', e)
     }
+
+    // 统计信息：没有或者过时（行数差两倍以上）就在后台一个索引一个索引地重算。
+    // 以前在这里同步跑整库 ANALYZE，52 万行的库打开时卡 5 秒；之后库再怎么长也不再算
+    setImmediate(() => {
+      if (!vaultDb.open) return
+      void refreshPlannerStatsIfStale(vaultDb)
+    })
   }
 
   /**
@@ -2480,6 +2204,7 @@ export class VaultManager {
           }
           // 确保表结构完整
           this.initializeVaultDatabase(opened)
+          startWalCheckpointing(opened)
           return opened
         })
 
@@ -2505,7 +2230,10 @@ export class VaultManager {
     } else if (role === 'client') {
       vsm.stopClient(vaultId)
     }
-    // 服务停了，为它开的后台连接也该还回去
+    // 服务停了，为它开的后台连接也该还回去。先让 worker 关掉它那条检查点连接 ——
+    // 不关的话库文件还被攥着，紧接着的删库 / 移库在 Windows 上会 EBUSY
+    const backgroundDb = this.backgroundVaultDbs.get(vaultId)
+    if (backgroundDb) await stopWalCheckpointing(backgroundDb)
     this.backgroundVaultDbs.release(vaultId)
   }
 

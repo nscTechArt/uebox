@@ -130,15 +130,11 @@ export interface AssetQueryParts {
   /** 这次走了召回索引（全文 / 语义），`recall.score` 可用于按相关度排序 */
   usedRecall: boolean
   /**
-   * 这次按「某文件夹及其子文件夹」圈了范围（JOIN assetFolder 或递归 CTE）。
-   * 排序那边要据此决定能不能让规划器沿排序列的索引走，见 searchAssetsByCriteria。
+   * 条件里有「规划器估不出命中多少行、又可能只命中几行」的：文件夹子树、关键词、收藏、
+   * 标签、大小、日期、引擎版本、类型（LIKE）、召回。排序那边据此决定能不能让规划器
+   * 沿排序列的索引走，见 searchAssetsByCriteria。
    */
-  folderSubtree: boolean
-  /**
-   * 这次按扩展名筛了。扩展名有索引，命中的行通常只占全库一小部分 ——
-   * 排序那边据此不让规划器沿排序列的索引「边走边筛」，见 searchAssetsByCriteria。
-   */
-  extensionFilter: boolean
+  narrowUnindexed: boolean
 }
 
 export function buildAssetQueryParts(
@@ -162,6 +158,9 @@ export function buildAssetQueryParts(
   const withParams: (string | number | null)[] = []
   const joinParams: (string | number | null)[] = []
   const whereParams: (string | number | null)[] = []
+
+  // 见 AssetQueryParts.narrowUnindexed；下面每加一个这类条件就置上
+  let narrowUnindexed = false
 
   // 默认仅返回未被软删除的资产；回收站视图反过来，只要删掉的那些
   whereClauses.push(criteria.deletedOnly ? 'ad.isDelete = 1' : 'ad.isDelete = 0')
@@ -219,6 +218,7 @@ export function buildAssetQueryParts(
         `)
         // 精确匹配当前文件夹 + 前缀匹配所有子文件夹
         joinParams.push(folderCheck.fullPath, `${escapedPath}/%`)
+        narrowUnindexed = true
         console.log('[资产搜索] 使用 fullPath 前缀匹配:', folderCheck.fullPath)
       } else {
         // 回退方案：fullPath 为空时使用 CTE 递归（兼容旧数据）
@@ -234,6 +234,7 @@ export function buildAssetQueryParts(
         `)
         joins.push('JOIN folder_tree ft ON ad.folderKey = ft.folderKey')
         withParams.push(criteria.folderKey)
+        narrowUnindexed = true
       }
     } else {
       whereClauses.push('ad.folderKey = ?')
@@ -255,6 +256,8 @@ export function buildAssetQueryParts(
     )`
     whereClauses.push(criteria.favoriteStatus === 'favorite' ? favExists : `NOT ${favExists}`)
     whereParams.push(userId, userId, vaultId, vaultId)
+    // 「未收藏」几乎是全库，沿排序索引走很快就凑满一页
+    if (criteria.favoriteStatus === 'favorite') narrowUnindexed = true
   }
 
   // ── 关键词：有全文索引走 FTS5，没有才退回 LIKE ─────────────────────────
@@ -267,6 +270,7 @@ export function buildAssetQueryParts(
   const usedRecall = ftsMatch.length > 0 || semanticIds.length > 0
 
   if (usedRecall) {
+    narrowUnindexed = true
     /**
      * 两路召回用 RRF（Reciprocal Rank Fusion）合并：**只看名次，不看分数**。
      *
@@ -383,6 +387,7 @@ export function buildAssetQueryParts(
       }
 
       whereClauses.push(`(${keywordConditions.join(' OR ')})`)
+      narrowUnindexed = true
 
       // 为每个关键词添加 5 个参数（对应 5 个字段：assetName, classNameCn, assetType, folderName, softPath）
       keywords.forEach((k) => {
@@ -401,6 +406,7 @@ export function buildAssetQueryParts(
   const excludeTagIds = (criteria.tagFilter?.excludeTagIds || []).filter((n) => Number.isFinite(n))
   const matchMode = criteria.tagFilter?.matchMode || 'any'
   if (includeTagIds.length) {
+    narrowUnindexed = true
     const placeholders = includeTagIds.map(() => '?').join(',')
     if (matchMode === 'all') {
       whereClauses.push(`ad.assetKey IN (
@@ -465,8 +471,10 @@ export function buildAssetQueryParts(
     return `(ad.fileExtension IN (${placeholders}) OR ad.ext IN (${placeholders}))`
   }
 
+  // 类型条件是一串 LIKE，用不上类型索引，规划器同样估不出
   if (criteria.assetTypes && criteria.assetTypes.length) {
     whereClauses.push(buildTypeCondition(criteria.assetTypes))
+    narrowUnindexed = true
   }
 
   // 别名展开出来的「扩展名 or 类型」：任意一半命中即可
@@ -477,6 +485,7 @@ export function buildAssetQueryParts(
     if (exts.length) parts.push(buildExtensionCondition(exts))
     if (types.length) parts.push(buildTypeCondition(types))
     if (parts.length) whereClauses.push(`(${parts.join(' OR ')})`)
+    if (types.length) narrowUnindexed = true
   }
 
   if (criteria.classNameCnFilters && criteria.classNameCnFilters.length) {
@@ -494,10 +503,12 @@ export function buildAssetQueryParts(
   if (typeof minSize === 'number') {
     whereClauses.push('(ad.size >= ? OR ad.fileSize >= ?)')
     whereParams.push(minSize, minSize)
+    narrowUnindexed = true
   }
   if (typeof maxSize === 'number') {
     whereClauses.push('(ad.size <= ? OR ad.fileSize <= ?)')
     whereParams.push(maxSize, maxSize)
+    narrowUnindexed = true
   }
 
   if (criteria.engineVersions && criteria.engineVersions.length) {
@@ -533,6 +544,7 @@ export function buildAssetQueryParts(
 
     if (versionConditions.length > 0) {
       whereClauses.push(`(${versionConditions.join(' OR ')})`)
+      narrowUnindexed = true
     }
   }
 
@@ -547,6 +559,7 @@ export function buildAssetQueryParts(
       END
     ) BETWEEN ? AND ?`)
     whereParams.push(start, end)
+    narrowUnindexed = true
   }
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : ''
@@ -560,12 +573,7 @@ export function buildAssetQueryParts(
     whereSql,
     params: [...withParams, ...joinParams, ...whereParams],
     usedRecall,
-    folderSubtree: Boolean(
-      criteria.folderKey && criteria.folderKey !== 'ALL' && criteria.includeSubfolders
-    ),
-    extensionFilter: Boolean(
-      criteria.fileExtensions?.length || criteria.formatMatch?.extensions?.length
-    )
+    narrowUnindexed
   }
 }
 
@@ -600,7 +608,7 @@ export function searchAssetsByCriteria(
   criteria: AssetSearchCriteria,
   env: AssetQueryEnv = {}
 ): AssetData[] {
-  const { withClause, joinSql, whereSql, params, usedRecall, folderSubtree, extensionFilter } =
+  const { withClause, joinSql, whereSql, params, usedRecall, narrowUnindexed } =
     buildAssetQueryParts(db, criteria, env)
 
   const sortBy = criteria.sortBy || (usedRecall ? 'relevance' : 'assetName')
@@ -638,20 +646,21 @@ export function searchAssetsByCriteria(
    *   都是 NOCASE 建的。二进制序对不上它们，52 万行的库每一页都是全表读出来再临时排序
    *   （实测 1.3–2.2 s）；对上了，不带筛选的一页是沿索引取前 N 条，零点几毫秒。
    *
-   * 但沿排序列的索引走，等于「按顺序把整张表过一遍，边走边筛」。规划器估不出
-   * 「某文件夹及其子文件夹」有多少行（JOIN 条件是 fullPath 前缀 LIKE），会照样选它 ——
-   * 一个只有几十个资产的文件夹，要把 52 万条索引走完才凑得出一页：从 0.6 ms 变成 3 s。
-   * 界面上只要开了任何筛选或搜索就是这条路。按类型排（idx_assetData_assetType）
-   * 原来就有同样的问题，实测 2.4 s。
+   * 但沿排序列的索引走，等于「按顺序把整张表过一遍，边走边筛」。条件宽（不筛选、只看主资产、
+   * 关键词几乎都中）时这正是最快的：走几十条就凑满一页，54 万行的库上 0 ms。条件窄时就是
+   * 最慢的：一个只有几十个资产的文件夹、30 个收藏、一个没人用的大小区间，要把 54 万条索引
+   * 连同逐行回表走完才凑得出一页 —— 比整表读一遍再排还慢 2~3 倍（实测文件夹 0.6 ms → 3 s）。
+   * 规划器分不出这两种：这些条件（narrowUnindexed）它估不出命中多少行，一律按「宽」处理。
    *
-   * 所以圈了子树时给排序列套一个一元 `+`：值和排序规则不变，只是它不再对得上任何索引，
-   * 规划器只能先按文件夹取行再排。大文件夹因此也不走名称索引了（20 万行子树约 85 ms），
-   * 比原来的二进制序（160 ms）仍然快。
+   * 所以有这类条件时给排序列套一个一元 `+`：值和排序规则不变，只是它不再对得上任何索引，
+   * 规划器只能先按条件取行再排 —— 最坏也就是整表读一遍（54 万行约 0.1~0.3 s，在查询 worker
+   * 里）。没有这类条件时让规划器沿索引走。
    *
-   * 按扩展名筛（「音频」「贴图」）同理：音频在 52 万行里可能只有几百个，沿名称索引
-   * 边走边筛要把整张表走完才凑出一页。扩展名两列都有索引，让规划器先按扩展名取行再排。
+   * 按扩展名、中文类名筛**不算**：这两样有索引，有统计信息时（编译带 STAT4）规划器自己估得出
+   * 「按扩展名取行再排」还是「沿排序索引走」哪个快；算进来反而把「UE 资产」这种几乎覆盖
+   * 全库的宽筛选也逼成整表读一遍再排序，一页从 0.1 ms 变成上百毫秒。
    */
-  const noIndex = folderSubtree || extensionFilter ? '+' : ''
+  const noIndex = narrowUnindexed ? '+' : ''
   const sortCol = allowedCols.has(sortBy) ? sortBy : 'assetName'
   /**
    * 「按时间 / 按大小」和浏览那条路（getAssetDataByFolderKey）取同一个值、同一个次序键。
@@ -764,10 +773,11 @@ export function searchAssetsByCriteria(
 
   let rows: AssetData[]
   if (pagedById) {
-    const ids = (db.prepare(sql).all(...params) as { id: number }[]).map((row) => row.id)
-    if (ids.length === 0) {
-      rows = []
-    } else {
+    // 两步放在同一个读事务里：查询在 worker 的连接上跑，主进程同时在写；两步之间要是有行
+    // 被删掉或换了 id，这一页就会少几行，界面以为到底了就不再往下翻
+    rows = db.transaction((): AssetData[] => {
+      const ids = (db.prepare(sql).all(...params) as { id: number }[]).map((row) => row.id)
+      if (ids.length === 0) return []
       const fetched = db
         .prepare(
           `SELECT ad.*, ${tagIdListColumn}
@@ -776,8 +786,8 @@ export function searchAssetsByCriteria(
         )
         .all(...ids) as AssetData[]
       const byId = new Map(fetched.map((row) => [(row as { id: number }).id, row]))
-      rows = ids.map((id) => byId.get(id)).filter((row): row is AssetData => row !== undefined)
-    }
+      return ids.map((id) => byId.get(id)).filter((row): row is AssetData => row !== undefined)
+    })()
   } else {
     rows = db.prepare(sql).all(...params) as AssetData[]
   }

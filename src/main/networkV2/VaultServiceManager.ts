@@ -18,6 +18,7 @@ import type { VaultDiscovery, ServerConfig } from './SyncProtocol'
 import { PROTOCOL_VERSION, VAULT_DISCOVERY_FILE } from './SyncProtocol'
 import type { VaultAccessKeys } from './ServerAuth'
 import { rememberVaultAccessKey } from './vaultAccessKeys'
+import { waitForWalCheckpoint } from '../sqliteDataBase/services/assetQueryRunner'
 
 /** 启动 Server 时要用的访问码，以及是否把写码也分发到共享目录 */
 export interface VaultServerAccess {
@@ -174,7 +175,9 @@ export class VaultServiceManager {
       vaultId: discovery.vaultId,
       clientId,
       hostname,
-      apiKey: accessKey
+      apiKey: accessKey,
+      // 大批量写入隔一会儿等 worker 把 WAL 追平，见 SyncClient.pauseBetweenWrites
+      waitForWalCheckpoint: () => waitForWalCheckpoint(localDb)
     }
 
     // 让主进程里所有绕过 SyncClient 的直连调用点（缩略图、导入下载、
@@ -267,7 +270,9 @@ export class VaultServiceManager {
       vaultId: remoteVaultId,
       clientId,
       hostname: hostnameStr,
-      apiKey: options?.apiKey
+      apiKey: options?.apiKey,
+      // 大批量写入隔一会儿等 worker 把 WAL 追平，见 SyncClient.pauseBetweenWrites
+      waitForWalCheckpoint: () => waitForWalCheckpoint(localDb)
     }
 
     // 使用本地 vaultId 作为 key，保持与 UI currentVault.id 一致

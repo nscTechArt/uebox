@@ -2,56 +2,100 @@
  * 保管库 schema 的守卫。
  *
  * 起因：`models/index.ts` 里有个 `initVaultModels`，看起来就是保管库的建表入口，
- * 实际上**从来没人调用** —— 真正的建表和列迁移全在
- * `VaultManager.initializeVaultDatabase()` 里内联写着。给保管库加了新表和新列、
- * 改进那个假入口、然后在运行时撞上「no such table: assetNote」。
+ * 实际上**从来没人调用**。给保管库加了新表和新列、改进那个假入口、然后在运行时撞上
+ * 「no such table: assetNote」。之后又有过两份建表清单各自漂移：新加的部分索引引用
+ * deletedAt，在一份里没问题，在 VaultManager 那份里排在补列之前 —— 新建保管库当场报
+ * `no such column: deletedAt`，首次安装连系统库都建不出来，而门禁全绿（以前这里只 grep 源码）。
  *
- * 这道检查读的是 VaultManager 的源码，确认新表/新列确实写在**那一处**。
- * 它挡不住所有写错，但能挡住「改了不生效的那个地方」这一类。
+ * 所以现在：建表 → 补列 → 索引只在 vaultSchema.ts 一处，VaultManager 调它；
+ * 这里**真的拿库跑一遍**：空库、没有 deletedAt 的老库都要建得起来。
  *
  * 运行方式: npx vitest run src/main/sqliteDataBase/vaultSchema.test.ts
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'fs'
+
+// 取消 tests/setup.ts 里对 better-sqlite3 的全局 mock —— 这里要真的执行 SQL
+vi.unmock('better-sqlite3')
+
+import Database from 'better-sqlite3'
+import { applyVaultSchema, VAULT_TABLE_DDL } from './vaultSchema'
+import { initAssetDataModel } from './models/assetData'
 
 const source = readFileSync('src/main/sqliteDataBase/VaultManager.ts', 'utf8')
 
-describe('保管库 schema 写在真正会执行的那一处', () => {
-  it('assetNote 表由 VaultManager 建，不是挂在没人调的 initVaultModels 上', () => {
+const columnsOf = (db: Database.Database, table: string): string[] =>
+  (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((r) => r.name)
+
+const indexesOf = (db: Database.Database): string[] =>
+  (
+    db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'assetData'`)
+      .all() as { name: string }[]
+  ).map((r) => r.name)
+
+/**
+ * 老保管库：表是早年那份 CREATE TABLE 建的，后加的列（deletedAt、note、noteId、tags、color）
+ * 一个都没有，还挂着老的 isDelete 单列索引。
+ */
+function createOldVaultDb(): Database.Database {
+  const db = new Database(':memory:')
+  for (const sql of VAULT_TABLE_DDL) db.exec(sql)
+  db.exec(`
+    CREATE INDEX idx_assetData_isDelete ON assetData(isDelete);
+    INSERT INTO assetFolder (folderKey, type, folderName) VALUES ('f1', 'folder', 'f1');
+    INSERT INTO assetData (assetKey, folderKey, assetName) VALUES ('a1', 'f1', 'a1');
+  `)
+  expect(columnsOf(db, 'assetData')).not.toContain('deletedAt')
+  return db
+}
+
+describe('保管库 schema：真的建一遍', () => {
+  it('空库：建表、补列、索引一次过，有 ALL 根目录', () => {
+    const db = new Database(':memory:')
+    expect(() => applyVaultSchema(db)).not.toThrow()
+    expect(columnsOf(db, 'assetData')).toEqual(
+      expect.arrayContaining(['deletedAt', 'note', 'noteId', 'tags', 'color', 'fileMd5'])
+    )
+    expect(columnsOf(db, 'assetFolder')).toEqual(
+      expect.arrayContaining(['deletedAt', 'note', 'noteId', 'color'])
+    )
+    expect(indexesOf(db)).toEqual(
+      expect.arrayContaining(['idx_assetData_deleted', 'idx_assetData_ext'])
+    )
+    expect(
+      db.prepare(`SELECT folderKey FROM assetFolder WHERE folderKey = 'ALL'`).get()
+    ).toBeTruthy()
+  })
+
+  it('没有 deletedAt 的老库：先补列再建索引，老数据还在，isDelete 单列索引被删掉', () => {
+    const db = createOldVaultDb()
+    expect(() => applyVaultSchema(db)).not.toThrow()
+    expect(columnsOf(db, 'assetData')).toContain('deletedAt')
+    expect(columnsOf(db, 'assetFolder')).toContain('deletedAt')
+    expect(indexesOf(db)).toContain('idx_assetData_deleted')
+    expect(indexesOf(db)).not.toContain('idx_assetData_isDelete')
+    expect(db.prepare(`SELECT assetKey FROM assetData`).all()).toEqual([{ assetKey: 'a1' }])
+  })
+
+  it('跑两遍不出错（每次打开保管库都会跑）', () => {
+    const db = new Database(':memory:')
+    applyVaultSchema(db)
+    expect(() => applyVaultSchema(db)).not.toThrow()
+  })
+
+  it('initAssetDataModel 和 VaultManager 用同一份 assetData 索引清单', () => {
+    const viaSchema = new Database(':memory:')
+    applyVaultSchema(viaSchema)
+    const viaModel = new Database(':memory:')
+    viaModel.exec(`CREATE TABLE assetFolder (folderKey TEXT PRIMARY KEY)`)
+    initAssetDataModel(viaModel)
+    expect(indexesOf(viaModel).sort()).toEqual(indexesOf(viaSchema).sort())
+  })
+
+  it('VaultManager 真的走 applyVaultSchema，assetNote 也由它建', () => {
+    expect(source).toContain('applyVaultSchema(vaultDb)')
     expect(source).toContain('initAssetNoteModel(vaultDb)')
-  })
-
-  it('assetData 的 noteId 列在迁移清单里', () => {
-    // 老保管库的表早就建好了，CREATE TABLE IF NOT EXISTS 对它们不生效，
-    // 只有走 ALTER 这条路才补得上
-    expect(source).toMatch(/assetDataMigrations[\s\S]*?name: 'noteId'/)
-  })
-
-  it('assetFolder 也有自己的迁移清单，note 和 noteId 都在里面', () => {
-    // 以前根本没有 assetFolder 的迁移清单 —— 文件夹备注是这次才加的功能，
-    // 光改建表 SQL 对已有保管库一点用都没有
-    expect(source).toMatch(/assetFolderMigrations[\s\S]*?name: 'note'/)
-    expect(source).toMatch(/assetFolderMigrations[\s\S]*?name: 'noteId'/)
-  })
-
-  /**
-   * 这条是拿线上事故换来的。
-   *
-   * `deletedAt` 当初只加进了 models/assetData.ts 和 models/assetFolder.ts 的清单 ——
-   * 那两份挂在没人调用的 initVaultModels 上，等于没加。而 SyncClient 的
-   * prepareStatements() 无条件 prepare 了一句带 `deletedAt` 的 UPDATE，
-   * better-sqlite3 在 prepare 当场编译就抛 `no such column: deletedAt`，
-   * 正好落在 startV2NetworkService 的 try 里 —— 用户升级之后**所有网络库全部离线**，
-   * 报「资产服务器连接失败：no such column: deletedAt」。
-   */
-  it('deletedAt 两张表都在迁移清单里 —— 少了会让所有网络库离线', () => {
-    expect(source).toMatch(/assetDataMigrations[\s\S]*?name: 'deletedAt'/)
-    expect(source).toMatch(/assetFolderMigrations[\s\S]*?name: 'deletedAt'/)
-  })
-
-  it('两张表的迁移都真的被执行了', () => {
-    expect(source).toContain("migrateColumns('assetData', assetDataMigrations)")
-    expect(source).toContain("migrateColumns('assetFolder', assetFolderMigrations)")
   })
 })
 

@@ -7833,7 +7833,14 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       done: 'Sync complete',
       failed: 'Sync failed',
       doneContent: 'Full sync finished: {assets} asset(s), {folders} folder(s)',
-      failedContent: 'Network vault sync failed. Try again later.'
+      failedContent: 'Network vault sync failed. Try again later.',
+      // Sync progress (the main process only sends the phase code)
+      phase: {
+        preparing: 'Preparing to sync',
+        folders: 'Syncing folders ({current}/{total})',
+        assets: 'Syncing assets ({current}/{total})',
+        sweep: 'Checking local assets'
+      }
     },
     scan: {
       done: 'Scan complete'

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initAssetDataModel } from '../sqliteDataBase/models/assetData'
 import { initAssetFolderModel } from '../sqliteDataBase/models/assetFolder'
 import { SyncClient } from './SyncClient'
+import { AdaptiveSliceSizer } from './adaptiveSlice'
 
 type Row = Record<string, unknown>
 
@@ -321,7 +322,7 @@ describe('没变的行不写', () => {
 })
 
 describe('实时变更攒批', () => {
-  it('连发的变更一个事务写完，界面只收到一条汇总通知', async () => {
+  it('连发的变更攒成几批写，界面只收到一条汇总通知', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     try {
       const changes: Array<{ op: string; tableName: string; count?: number }> = []
@@ -363,9 +364,10 @@ describe('实时变更攒批', () => {
       }
       expect(applySpy).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(100)
-
-      expect(applySpy).toHaveBeenCalledTimes(1)
-      expect(activeKeys()).toHaveLength(50)
+      // 一批太大时按实测耗时分几片写（见 adaptiveSlice），但远少于一条一个事务
+      await vi.waitFor(() => expect(activeKeys()).toHaveLength(50))
+      expect(applySpy.mock.calls.length).toBeGreaterThan(0)
+      expect(applySpy.mock.calls.length).toBeLessThan(10)
       // 文件夹也在这一批里 → 汇总通知要让界面刷目录树
       expect(changes).toEqual([
         expect.objectContaining({ op: 'batch', tableName: 'assetFolder', count: 51 })
@@ -432,5 +434,362 @@ describe('启动失败', () => {
     await expect(client.start()).resolves.toBeUndefined()
     expect(statuses).toContain('error')
     expect(scheduleReconnect).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * 对账要跑好几分钟，这期间本地和服务端都还在变。下面这些是代码审查里逐条复现过的
+ * 「期间发生了什么」：每一条在修之前都会让服务端还活着的行在本地被软删、或者变更被跳过。
+ */
+describe('对账进行中，本地和服务端还在变', () => {
+  const hookAssetPage = (server: FakeServer, page: number, during: () => void): void => {
+    const original = server.httpGet.getMockImplementation()!
+    let seen = 0
+    server.httpGet.mockImplementation(async (path: string) => {
+      if (path.includes('type=assets')) {
+        seen += 1
+        if (seen === page) during()
+      }
+      return original(path)
+    })
+  }
+
+  it('期间本地新建的、实时推来恢复的、实时改过的行：不被差集软删，也不被快照旧值盖回去', async () => {
+    // x 本地有、服务端快照里没有（拍快照时已删），期间被同事恢复
+    db.prepare(
+      `INSERT INTO assetData (assetKey, folderKey, assetName, isDelete) VALUES ('x', 'ALL', 'x', 0)`
+    ).run()
+    const assets = Array.from({ length: 9 }, (_, i) => asset(`a${i}`, { note: 'old' }))
+    const server = fakeServer({ folders: [], assets })
+    install(server)
+    hookAssetPage(server, 2, () => {
+      // 用户在拉取途中新建了一个资产（推送成功后才会 markLocalWrite —— 这里不标）
+      db.prepare(
+        `INSERT INTO assetData (assetKey, folderKey, assetName, isDelete) VALUES ('mine', 'ALL', 'mine', 0)`
+      ).run()
+      // 实时推来：x 被恢复、a7（还没拉到那一页）被改了备注
+      ;(client as unknown as { applyChanges: (c: unknown[], o?: unknown) => void }).applyChanges(
+        [
+          {
+            seq: 50,
+            op: 'update',
+            tableName: 'assetData',
+            recordKey: 'x',
+            payload: JSON.stringify({ isDelete: 0 }),
+            clientId: 'other',
+            createdAt: 0
+          },
+          {
+            // 服务端广播的是整行
+            seq: 51,
+            op: 'update',
+            tableName: 'assetData',
+            recordKey: 'a7',
+            payload: JSON.stringify({
+              assetKey: 'a7',
+              folderKey: 'ALL',
+              assetName: 'a7',
+              note: 'new'
+            }),
+            clientId: 'other',
+            createdAt: 0
+          },
+          {
+            // 局部 payload、本地又还没有这行：写不进去，也不许挡住它所在的快照页
+            seq: 52,
+            op: 'update',
+            tableName: 'assetData',
+            recordKey: 'a8',
+            payload: JSON.stringify({ note: 'partial' }),
+            clientId: 'other',
+            createdAt: 0
+          }
+        ],
+        { advanceSeqTo: null }
+      )
+    })
+
+    await reconcile()
+
+    expect(activeKeys()).toEqual(expect.arrayContaining(['mine', 'x', 'a8']))
+    const a7 = db.prepare(`SELECT note FROM assetData WHERE assetKey = 'a7'`).get() as {
+      note: string
+    }
+    // a7 那一页晚到，带着旧备注 —— 它已经被更新的变更碰过，不许盖回去
+    expect(a7.note).toBe('new')
+  })
+
+  it('断点之后本地已经吃进了更新的变更：不续老断点，从头来', async () => {
+    const assets = Array.from({ length: 9 }, (_, i) => asset(`a${i}`))
+    const server = fakeServer({ folders: [], assets })
+    install(server)
+    server.failCall(3)
+    await expect(reconcile()).rejects.toThrow()
+
+    // 之后增量把 lastSeq 推过了老快照（42）
+    ;(client as unknown as { lastSeq: number }).lastSeq = 100
+    const fresh = fakeServer({ folders: [], assets })
+    install(fresh)
+    await reconcile()
+    // 从头来：重新拉文件夹、资产从 cursor=0 开始
+    expect(fresh.requests.some((p) => p.includes('type=folders'))).toBe(true)
+    expect(fresh.assetPageRequests()[0]).toContain('cursor=0')
+  })
+
+  it('每一轮对账结尾都补一次增量 —— 校验触发的也一样', async () => {
+    const server = fakeServer({ folders: [], assets: [asset('a0')] })
+    install(server)
+    const original = server.httpGet.getMockImplementation()!
+    server.httpGet.mockImplementation(async (path: string) => {
+      if (path.endsWith('/checksum')) return { assetCount: 99, folderCount: 99, latestSeq: 42 }
+      return original(path)
+    })
+    ;(client as unknown as { lastSeq: number }).lastSeq = 42
+    ;(client as unknown as { checksumMismatchStreak: number }).checksumMismatchStreak = 1
+    await (client as unknown as { verifyChecksum: () => Promise<void> }).verifyChecksum()
+
+    const lastFullDataIndex = Math.max(
+      ...server.requests.map((p, i) => (p.includes('full-data') ? i : -1))
+    )
+    const syncAfter = server.requests.findIndex(
+      (p, i) => i > lastFullDataIndex && p.includes('/sync?since=42')
+    )
+    expect(lastFullDataIndex).toBeGreaterThan(0)
+    expect(syncAfter).toBeGreaterThan(lastFullDataIndex)
+  })
+})
+
+describe('实时变更和拉取的先后', () => {
+  const ws = (seq: number, op: string, recordKey: string, payload: Row | null): unknown => ({
+    type: 'change',
+    seq,
+    op,
+    tableName: 'assetData',
+    recordKey,
+    payload: payload ? JSON.stringify(payload) : null,
+    clientId: 'other'
+  })
+  const handle = (msg: unknown): void =>
+    (client as unknown as { handleWsMessage: (m: unknown) => void }).handleWsMessage(msg)
+  const flush = (): void => (client as unknown as { flushWsChanges: () => void }).flushWsChanges()
+  const noChangesServer = (): void => {
+    ;(client as unknown as { httpGet: unknown }).httpGet = vi
+      .fn()
+      .mockResolvedValue({ changes: [], latestSeq: 500, fullSyncRequired: false })
+  }
+
+  it('一批里先删后恢复：结果是恢复（合成之后再排序，不被拆开重排）', () => {
+    db.prepare(
+      `INSERT INTO assetData (assetKey, folderKey, assetName, isDelete) VALUES ('a1', 'ALL', 'a1', 0)`
+    ).run()
+    noChangesServer()
+    ;(client as unknown as { lastSeq: number }).lastSeq = 10
+    handle(ws(11, 'delete', 'a1', null))
+    handle(ws(12, 'update', 'a1', { isDelete: 0 }))
+    flush()
+    expect(activeKeys()).toContain('a1')
+  })
+
+  it('已经被拉取写过的实时变更不再重放', () => {
+    db.prepare(
+      `INSERT INTO assetData (assetKey, folderKey, assetName, note, isDelete) VALUES ('a1', 'ALL', 'a1', 'pulled', 0)`
+    ).run()
+    noChangesServer()
+    ;(client as unknown as { lastSeq: number }).lastSeq = 20
+    handle(ws(15, 'update', 'a1', { note: 'stale' }))
+    flush()
+    const row = db.prepare(`SELECT note FROM assetData WHERE assetKey = 'a1'`).get() as {
+      note: string
+    }
+    expect(row.note).toBe('pulled')
+  })
+
+  it('大批增量分片写入期间，实时变更先攒着：不夹在片与片之间，也不把 lastSeq 推到前面去', async () => {
+    const changes = Array.from({ length: 450 }, (_, i) => ({
+      seq: 11 + i,
+      op: 'insert',
+      tableName: 'assetData',
+      recordKey: `c${i}`,
+      payload: JSON.stringify({
+        assetKey: `c${i}`,
+        folderKey: 'ALL',
+        assetName: `c${i}`,
+        note: 'old',
+        isDelete: 0
+      }),
+      clientId: 'other',
+      createdAt: 0
+    }))
+    noChangesServer()
+    ;(client as unknown as { lastSeq: number }).lastSeq = 10
+    const slicing = (
+      client as unknown as { applyChangesInSlices: (c: unknown[]) => Promise<void> }
+    ).applyChangesInSlices(changes)
+    // 第一片已经写了，正在让出事件循环：这时来一条更新的实时变更
+    handle(ws(500, 'update', 'c300', { note: 'new' }))
+    flush()
+    const persisted = (): number =>
+      (
+        db.prepare(`SELECT last_seq FROM sync_state WHERE vault_id = 'v1'`).get() as
+          | { last_seq: number }
+          | undefined
+      )?.last_seq ?? 0
+    expect(persisted()).toBe(0)
+
+    await slicing
+    expect(persisted()).toBe(460)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    const row = db.prepare(`SELECT note FROM assetData WHERE assetKey = 'c300'`).get() as {
+      note: string
+    }
+    // 实时变更在整批写完之后才落，所以留下的是它（新的），不是 seq 300 那条旧的
+    expect(row.note).toBe('new')
+  })
+})
+
+describe('别的生命周期', () => {
+  it('启动失败、靠重连恢复的客户端也有定时校验', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval'] })
+    try {
+      ;(client as unknown as { flushOutbox: unknown }).flushOutbox = vi
+        .fn()
+        .mockResolvedValue({ flushed: 0, failed: 0 })
+      const pull = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('HTTP timeout'))
+        .mockResolvedValue(undefined)
+      ;(client as unknown as { pullChanges: unknown }).pullChanges = pull
+      ;(client as unknown as { connectWs: unknown }).connectWs = vi.fn()
+
+      await client.start()
+      expect((client as unknown as { checksumTimer: unknown }).checksumTimer).toBeNull()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(pull).toHaveBeenCalledTimes(2)
+      expect((client as unknown as { checksumTimer: unknown }).checksumTimer).not.toBeNull()
+      expect((client as unknown as { outboxTimer: unknown }).outboxTimer).not.toBeNull()
+    } finally {
+      client.stop()
+      vi.useRealTimers()
+    }
+  })
+
+  it('中途加入同一轮拉取的调用方也拿不到中止哨兵', async () => {
+    ;(client as unknown as { doPullChanges: unknown }).doPullChanges = vi
+      .fn()
+      .mockRejectedValue(new Error('SYNC_ABORTED_BY_STOP'))
+    const first = client.pullChanges()
+    const second = client.pullChanges()
+    await expect(first).resolves.toBeUndefined()
+    await expect(second).resolves.toBeUndefined()
+  })
+
+  it('本地缺的文件夹按需补：拉一遍文件夹列表，只补缺的那几个，不升级成全量', async () => {
+    const server = fakeServer({
+      folders: [
+        { folderKey: 'ALL', type: 'system', folderName: 'ALL', depth: 0 },
+        { folderKey: 'f9', fatherKey: 'ALL', type: 'folder', folderName: 'f9', depth: 1 }
+      ],
+      assets: []
+    })
+    install(server)
+    await (
+      client as unknown as { repairMissingRows: (b: unknown[]) => Promise<void> }
+    ).repairMissingRows([{ tableName: 'assetFolder', recordKey: 'f9' }])
+    expect(
+      db.prepare(`SELECT folderKey FROM assetFolder WHERE folderKey = 'f9'`).get()
+    ).toBeTruthy()
+    expect(server.assetPageRequests()).toHaveLength(0)
+  })
+})
+
+describe('写得多就停下来等 WAL 追平', () => {
+  const config = { serverUrl: 'http://127.0.0.1:1', vaultId: 'v1', clientId: 'c1', hostname: 'h1' }
+  const useClient = (waitForWalCheckpoint: () => Promise<void>): void => {
+    client.stop()
+    client = new SyncClient(db, { ...config, waitForWalCheckpoint })
+  }
+  const insertChange = (seq: number, key: string): Record<string, unknown> => ({
+    seq,
+    op: 'insert',
+    tableName: 'assetData',
+    recordKey: key,
+    payload: JSON.stringify({ assetKey: key, folderKey: 'ALL', assetName: key, isDelete: 0 }),
+    clientId: 'other',
+    createdAt: 0
+  })
+
+  it('大批增量分片写：累计写满一段就等一次，等的时候不写', async () => {
+    const writtenWhileWaiting: number[] = []
+    const wait = vi.fn(async () => {
+      const before = activeKeys().length
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      writtenWhileWaiting.push(activeKeys().length - before)
+    })
+    useClient(wait)
+    // 每量一次时间都过去 50 ms：每片「写 + 提交」都算 50 ms
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => (now += 50))
+    try {
+      await (
+        client as unknown as { applyChangesInSlices: (c: unknown[]) => Promise<void> }
+      ).applyChangesInSlices(Array.from({ length: 450 }, (_, i) => insertChange(1000 + i, `c${i}`)))
+    } finally {
+      clock.mockRestore()
+    }
+    expect(activeKeys()).toHaveLength(450)
+    expect(wait.mock.calls.length).toBeGreaterThan(1)
+    expect(writtenWhileWaiting.every((n) => n === 0)).toBe(true)
+  })
+
+  it('实时变更连着来：累计写满一段也等一次，攒着的变更等完再写', async () => {
+    let release!: () => void
+    const wait = vi.fn(() => new Promise<void>((resolve) => (release = resolve)))
+    useClient(wait)
+    ;(client as unknown as { httpGet: unknown }).httpGet = vi
+      .fn()
+      .mockResolvedValue({ changes: [], latestSeq: 11, fullSyncRequired: false })
+    ;(client as unknown as { lastSeq: number }).lastSeq = 10
+    ;(client as unknown as { writeMsSinceWalSync: number }).writeMsSinceWalSync = 1_000
+    ;(client as unknown as { handleWsMessage: (m: unknown) => void }).handleWsMessage({
+      type: 'change',
+      ...insertChange(11, 'w1')
+    })
+    ;(client as unknown as { flushWsChanges: () => void }).flushWsChanges()
+    expect(wait).toHaveBeenCalledTimes(1)
+    expect(activeKeys()).not.toContain('w1')
+
+    release()
+    await vi.waitFor(() => expect(activeKeys()).toContain('w1'))
+  })
+
+  it('差集分片软删之间被实时变更碰过的行不删', async () => {
+    // 本地 30 行服务端快照里都没有 → 都是差集候选；每片固定 10 行
+    const insert = db.prepare(
+      `INSERT INTO assetData (assetKey, folderKey, assetName, isDelete) VALUES (?, 'ALL', ?, 0)`
+    )
+    for (let i = 0; i < 30; i++) insert.run(`z${String(i).padStart(2, '0')}`, `z${i}`)
+    install(fakeServer({ folders: [], assets: [asset('keep')] }))
+    const c = client as unknown as {
+      sliceSizer: AdaptiveSliceSizer
+      pauseBetweenWrites: () => Promise<void>
+      markSeenForActiveRun: (tableName: string, recordKey: string) => void
+    }
+    c.sliceSizer = new AdaptiveSliceSizer(40, 10, 10, 10)
+    const original = c.pauseBetweenWrites.bind(client)
+    let touched = false
+    c.pauseBetweenWrites = async () => {
+      const z00 = db.prepare(`SELECT isDelete FROM assetData WHERE assetKey = 'z00'`).get() as {
+        isDelete: number
+      }
+      if (!touched && z00.isDelete === 1) {
+        // 第一片已经删了：这时同事把 z29 改了一下，实时推过来写进本地
+        touched = true
+        c.markSeenForActiveRun('assetData', 'z29')
+      }
+      return original()
+    }
+    await reconcile()
+    expect(touched).toBe(true)
+    expect(activeKeys()).toEqual(['keep', 'z29'])
   })
 })

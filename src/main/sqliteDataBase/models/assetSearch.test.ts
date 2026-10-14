@@ -381,6 +381,36 @@ describe('按名称排序', () => {
     )
 
     /**
+     * 默认视图就是「全部资产按修改时间倒序」：沿时间索引取前一页，而不是每一页都把全表读出来
+     * 再排（54 万行冷缓存 2 秒以上）。
+     */
+    it.each([
+      ['不筛选', {}],
+      ['只看主资产', { showDependencies: false }]
+    ] as const)('%s按修改时间倒序：沿时间索引取前一页', (_label, extra) => {
+      const plan = planOf({ sortBy: 'modifiedTime', sortOrder: 'desc', limit: 50, ...extra })
+      expect(plan).toContain('idx_assetData_updated_at_name')
+      expect(plan).not.toContain('USE TEMP B-TREE FOR ORDER BY')
+    })
+
+    /**
+     * 反过来，规划器估不出命中多少行的窄条件（大小、关键词、收藏、日期……）沿排序索引走，
+     * 是把整张索引连同逐行回表走完才凑得出一页 —— 比整表读一遍再排还慢 2~3 倍。
+     */
+    it.each([
+      ['大小', { sizeRange: { min: 1 } }],
+      ['关键词', { keyword: 'N1' }],
+      ['收藏', { favoriteStatus: 'favorite' as const }],
+      ['日期', { dateRange: { start: '2000-01-01', end: '2000-01-02' } }],
+      ['类型', { assetTypes: ['T1'] }]
+    ])('按%s筛时不沿时间 / 名称索引走', (_label, extra) => {
+      for (const sortBy of ['modifiedTime', 'assetName'] as const) {
+        const plan = planOf({ sortBy, sortOrder: 'desc', limit: 50, ...extra })
+        expect(plan).not.toMatch(/idx_assetData_(updated_at_name|assetName)\b/)
+      }
+    })
+
+    /**
      * 52 万行的库上点「音频」卡死：fileExtension IN (..) OR ext IN (..) 的 ext 那一边
      * 没有索引，整个 OR 退化成全表扫；按名字排时规划器还会沿名称索引把整张表走一遍
      * 去凑 50 个音频。两边都有索引之后应该各自按索引取行再取并集。

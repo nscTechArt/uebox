@@ -18,12 +18,14 @@
  */
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { setPriority, constants as osConstants, homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
 import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
+import { Worker } from 'node:worker_threads'
 
 const require = createRequire(import.meta.url)
 const SCRIPT = fileURLToPath(import.meta.url)
@@ -229,7 +231,9 @@ async function buildSourceDb(): Promise<void> {
           )
         )
         asset.run({
-          assetKey: `asset_${i.toString(36)}_${Math.floor(rand() * 1e9).toString(36)}`,
+          // 真实库里的 key 是随机的（uuid / 时间戳+随机串），插入落在索引的各处；
+          // 按序号递增的 key 会让插入总是追加在末尾，测出来偏乐观
+          assetKey: randomUUID(),
           // 3 行缺名字、2 行父文件夹不存在：旧实现会因此无限对账 / 整轮回滚
           folderKey:
             i === 7 || i === 70_007 ? `missing_folder_${i}` : `f${100 + (i % (FOLDERS - 100))}`,
@@ -276,44 +280,125 @@ interface Measured {
 }
 
 /**
- * 机器忙的时候（压测进程又是最低优先级）墙钟时间会被别的进程拉长，不可信。
- * 所以每一步同步写入都单独记 CPU 时间 —— 它近似「空闲机器上这一步会把界面卡多久」。
+ * 和应用里一样：WAL 检查点由另一个线程做（应用里是资产查询 worker，见 assetQueryRunner）——
+ * 每秒一次 PASSIVE，SyncClient 每写几百毫秒还会叫它当场追平一次（waitForWalCheckpoint）；
+ * 主连接的自动检查点调大到只当兜底。不这样测，每次提交顺带的检查点（几十万行的库上几百毫秒
+ * 到一秒多）会算进主线程卡顿，测出来的就不是应用的真实行为。
  */
-const writeSteps: Array<{ name: string; cpuMs: number }> = []
-
-function instrumentWrites(proto: Record<string, unknown>): void {
-  for (const name of [
-    'writeAssetPage',
-    'writeFolderSnapshot',
-    'sweepUnseenFolders',
-    'applyChanges'
-  ]) {
-    const original = proto[name]
-    if (typeof original !== 'function') continue
-    proto[name] = function (this: unknown, ...args: unknown[]) {
-      const cpu = process.cpuUsage()
-      try {
-        return (original as (...a: unknown[]) => unknown).apply(this, args)
-      } finally {
-        const used = process.cpuUsage(cpu)
-        writeSteps.push({ name, cpuMs: (used.user + used.system) / 1000 })
-      }
+function startCheckpointer(dbPath: string): {
+  worker: Worker
+  waitForWalCheckpoint: () => Promise<void>
+} {
+  const worker = new Worker(
+    `
+    const { workerData, parentPort } = require('node:worker_threads')
+    const Database = require(workerData.bs)
+    const db = new Database(workerData.path, { nativeBinding: workerData.nb })
+    db.pragma('busy_timeout = 0')
+    const checkpoint = () => { try { db.pragma('wal_checkpoint(PASSIVE)') } catch {} }
+    setInterval(checkpoint, 1000)
+    parentPort.on('message', (id) => { checkpoint(); parentPort.postMessage(id) })
+  `,
+    {
+      eval: true,
+      workerData: { path: dbPath, nb: NATIVE_BINDING, bs: require.resolve('better-sqlite3') }
     }
+  )
+  worker.unref()
+  let nextId = 0
+  const pending = new Map<number, () => void>()
+  worker.on('message', (id: number) => {
+    pending.get(id)?.()
+    pending.delete(id)
+  })
+  const waitForWalCheckpoint = (): Promise<void> =>
+    new Promise((resolve) => {
+      const id = ++nextId
+      pending.set(id, resolve)
+      worker.postMessage(id)
+    })
+  return { worker, waitForWalCheckpoint }
+}
+
+/** 测量期间顺带盯着的 WAL 文件（报峰值大小）：WAL 一直追不平时它会长到几个 GB */
+let watchedWalPath: string | null = null
+
+/**
+ * 主线程上单次超过 SLOW_CALL_MS 的 SQL 语句 / 事务 / exec，按耗时记下来。
+ * 「最长一次卡顿」偏高时靠它看是谁 —— 机器忙的时候手工挨条计时不可信。
+ * 只记本进程（客户端）；服务端在子进程里。
+ */
+const SLOW_CALL_MS = 100
+let slowCalls: { ms: number; cpuMs: number; what: string }[] = []
+
+/** 本线程（主线程）用掉的 CPU 毫秒数：机器忙时墙钟会把「CPU 被别人抢走」也算成卡顿，它不会 */
+function threadCpuMs(): number {
+  const { user, system } = process.threadCpuUsage()
+  return (user + system) / 1000
+}
+
+function callerOf(stack: string | undefined): string {
+  const frames = (stack ?? '').split('\n').slice(1)
+  const frame = frames.find((line) => /src[\\/]/.test(line) && !/better-sqlite3/.test(line))
+  return (frame ?? frames[1] ?? '')
+    .trim()
+    .replace(/^at /, '')
+    .replace(/\(.*[\\/](src[\\/].*)\)/, '($1)')
+}
+
+/** 跑一次 call，超过 SLOW_CALL_MS 就连同 what() 记进 slowCalls */
+function timed<T>(call: () => T, what: () => string): T {
+  const started = performance.now()
+  const cpuStarted = threadCpuMs()
+  try {
+    return call()
+  } finally {
+    const ms = performance.now() - started
+    if (ms >= SLOW_CALL_MS) slowCalls.push({ ms, cpuMs: threadCpuMs() - cpuStarted, what: what() })
   }
 }
 
-function reportWriteSteps(): void {
-  const byName = new Map<string, number[]>()
-  for (const step of writeSteps)
-    byName.set(step.name, [...(byName.get(step.name) ?? []), step.cpuMs])
-  for (const [name, values] of byName) {
-    const max = Math.max(...values)
-    const avg = values.reduce((a, b) => a + b, 0) / values.length
-    console.log(
-      `  ${name}: ${values.length} 次，单次 CPU 平均 ${avg.toFixed(0)} ms / 最大 ${max.toFixed(0)} ms`
+const oneLine = (sql: unknown, max: number): string =>
+  String(sql).replace(/\s+/g, ' ').trim().slice(0, max)
+
+function traceSlowSqlCalls(): void {
+  type Method = (...args: unknown[]) => unknown
+  const probe = new BetterSqlite3(':memory:', { nativeBinding: NATIVE_BINDING })
+  const stmtProto = Object.getPrototypeOf(probe.prepare('SELECT 1')) as Record<string, Method>
+  probe.close()
+  for (const method of ['run', 'get', 'all']) {
+    const original = stmtProto[method]
+    stmtProto[method] = function (this: { source: string }, ...args: unknown[]): unknown {
+      return timed(
+        () => original.apply(this, args),
+        () => oneLine(this.source, 100)
+      )
+    }
+  }
+  const dbProto = BetterSqlite3.prototype as unknown as Record<string, Method>
+  const originalExec = dbProto.exec
+  dbProto.exec = function (this: unknown, ...args: unknown[]): unknown {
+    return timed(
+      () => originalExec.apply(this, args),
+      () => `exec ${oneLine(args[0], 80)}`
     )
   }
-  writeSteps.length = 0
+  const originalTransaction = dbProto.transaction
+  dbProto.transaction = function (this: unknown, fn: unknown): unknown {
+    const tx = originalTransaction.call(this, fn) as Method & Record<string, unknown>
+    const wrapped = function (this: unknown, ...args: unknown[]): unknown {
+      return timed(
+        () => tx.apply(this, args),
+        () => `事务 ← ${callerOf(new Error().stack)}`
+      )
+    }
+    return Object.assign(wrapped, {
+      default: tx.default,
+      deferred: tx.deferred,
+      immediate: tx.immediate,
+      exclusive: tx.exclusive
+    })
+  }
 }
 
 async function measure(label: string, run: () => Promise<void>): Promise<Measured> {
@@ -322,11 +407,16 @@ async function measure(label: string, run: () => Promise<void>): Promise<Measure
   histogram.enable()
   let peakHeap = 0
   let peakRss = 0
+  let peakWal = 0
   const sampler = setInterval(() => {
     const m = process.memoryUsage()
     peakHeap = Math.max(peakHeap, m.heapUsed)
     peakRss = Math.max(peakRss, m.rss)
+    if (watchedWalPath && existsSync(watchedWalPath)) {
+      peakWal = Math.max(peakWal, statSync(watchedWalPath).size)
+    }
   }, 100)
+  slowCalls = []
   const started = performance.now()
   const cpuStarted = process.cpuUsage()
   let failure: unknown = null
@@ -350,9 +440,12 @@ async function measure(label: string, run: () => Promise<void>): Promise<Measure
   console.log(
     `\n[${label}] 墙钟 ${result.seconds.toFixed(1)} s / CPU ${result.cpuSeconds.toFixed(1)} s | ` +
       `峰值堆 ${result.peakHeapMB.toFixed(0)} MB | 峰值 RSS ${result.peakRssMB.toFixed(0)} MB | ` +
-      `事件循环最长延迟(墙钟) ${result.maxBlockMs.toFixed(0)} ms`
+      `主线程最长一次卡顿 ${result.maxBlockMs.toFixed(0)} ms` +
+      (peakWal > 0 ? ` | WAL 峰值 ${(peakWal / 2 ** 20).toFixed(0)} MB` : '')
   )
-  reportWriteSteps()
+  const slowest = [...slowCalls].sort((a, b) => b.ms - a.ms).slice(0, 5)
+  for (const call of slowest)
+    console.log(`    慢调用 ${call.ms.toFixed(0).padStart(5)} ms  ${call.what}`)
   if (failure) throw failure
   return result
 }
@@ -361,26 +454,15 @@ async function freshClientDb(path: string): Promise<DB> {
   rmSync(path, { force: true })
   rmSync(`${path}-wal`, { force: true })
   rmSync(`${path}-shm`, { force: true })
-  const { initAssetFolderModel } = await import('../../src/main/sqliteDataBase/models/assetFolder')
-  const { initAssetDataModel } = await import('../../src/main/sqliteDataBase/models/assetData')
-  const { initAssetTagModel } = await import('../../src/main/sqliteDataBase/models/assetTag')
-  const { initAssetFavoriteModel } = await import(
-    '../../src/main/sqliteDataBase/models/assetFavorite'
-  )
+  // 和应用打开保管库时同一套表结构（VaultManager → applyVaultSchema），外加全文索引的触发器
+  const { applyVaultSchema } = await import('../../src/main/sqliteDataBase/vaultSchema')
   const { initAssetSearchIndexModel } = await import(
     '../../src/main/sqliteDataBase/models/assetSearchIndex'
   )
   const db = openDb(path)
   db.pragma('foreign_keys = ON')
-  initAssetFolderModel(db as never)
-  initAssetDataModel(db as never)
-  initAssetTagModel(db as never)
-  initAssetFavoriteModel(db as never)
+  applyVaultSchema(db as never)
   initAssetSearchIndexModel(db as never)
-  db.prepare(
-    `INSERT INTO assetFolder (folderKey, fatherKey, type, folderName, fullPath, pathArray, depth, ancestorKeys, isDelete)
-     VALUES ('ALL', NULL, 'folder', 'ALL', '/', '[]', 0, '[]', 0)`
-  ).run()
   return db
 }
 
@@ -392,12 +474,17 @@ type ClientCtor = new (
   on(event: string, listener: (...args: never[]) => void): unknown
 }
 
-function newClient(Ctor: ClientCtor, db: DB): InstanceType<ClientCtor> {
+function newClient(
+  Ctor: ClientCtor,
+  db: DB,
+  waitForWalCheckpoint?: () => Promise<void>
+): InstanceType<ClientCtor> {
   return new Ctor(db as never, {
     serverUrl: `http://127.0.0.1:${PORT}`,
     vaultId: VAULT_ID,
     clientId: 'bench',
-    hostname: 'bench'
+    hostname: 'bench',
+    waitForWalCheckpoint
   })
 }
 
@@ -407,11 +494,18 @@ const reconcileOf = (client: unknown): Promise<void> =>
 const count = (db: DB, sql: string): number => (db.prepare(sql).get() as { c: number }).c
 
 async function benchCurrent(): Promise<void> {
+  traceSlowSqlCalls()
   const { SyncClient } = await import('../../src/main/networkV2/SyncClient')
-  instrumentWrites(SyncClient.prototype as unknown as Record<string, unknown>)
   const Ctor = SyncClient as unknown as ClientCtor
   const clientPath = join(WORK_DIR, 'client-current.db')
   const db = await freshClientDb(clientPath)
+  const { WATCHED_WAL_AUTOCHECKPOINT } = await import(
+    '../../src/main/sqliteDataBase/vaultConnectionPragmas'
+  )
+  db.pragma(`wal_autocheckpoint = ${WATCHED_WAL_AUTOCHECKPOINT}`)
+  const checkpointer = startCheckpointer(clientPath)
+  const wait = checkpointer.waitForWalCheckpoint
+  watchedWalPath = `${clientPath}-wal`
 
   let lastPhase = ''
   const progress = (stats: { phase: string }): void => {
@@ -420,7 +514,7 @@ async function benchCurrent(): Promise<void> {
   }
 
   // 1. 首次全量
-  let client = newClient(Ctor, db)
+  let client = newClient(Ctor, db, wait)
   client.on('sync-progress', progress as never)
   await measure('新实现 · 首次全量对账', () => reconcileOf(client))
   console.log(
@@ -445,7 +539,7 @@ async function benchCurrent(): Promise<void> {
   db.exec(`DELETE FROM sync_reconcile`)
   db.exec(`DELETE FROM sync_reconcile_seen`)
   client.stop()
-  client = newClient(Ctor, db)
+  client = newClient(Ctor, db, wait)
   let stopAt = 0
   client.on('sync-progress', ((stats: { current: number; total: number; phase: string }) => {
     if (
@@ -464,7 +558,7 @@ async function benchCurrent(): Promise<void> {
     fetched: number
   }
   console.log(`\n[续传] 在 ${stopAt} 行处停掉，断点: ${JSON.stringify(checkpoint)}`)
-  client = newClient(Ctor, db)
+  client = newClient(Ctor, db, wait)
   const requested: string[] = []
   const realGet = (
     client as unknown as { httpGet: (p: string, t?: number) => Promise<unknown> }
@@ -478,7 +572,9 @@ async function benchCurrent(): Promise<void> {
   console.log(`  续传后第一页请求: ${firstAssetPage.replace(/.*full-data\?/, '')}`)
   client.stop()
 
+  watchedWalPath = null
   await benchQueries(db)
+  await checkpointer.worker.terminate()
   db.close()
 }
 
@@ -563,6 +659,7 @@ async function benchLegacy(): Promise<void> {
     rmSync(legacyFile, { force: true })
   }
   const db = await freshClientDb(join(WORK_DIR, 'client-legacy.db'))
+  watchedWalPath = join(WORK_DIR, 'client-legacy.db-wal')
   const client = newClient(SyncClient as unknown as ClientCtor, db)
   ;(client as unknown as { flushOutbox: unknown }).flushOutbox = async () => ({
     flushed: 0,

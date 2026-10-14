@@ -52,9 +52,15 @@ async function invokeSearch<T>(channel: string, payload: unknown): Promise<T[]> 
   const response = (await window.electron.ipcRenderer.invoke(channel, payload)) as {
     success?: boolean
     error?: string
+    /** 查询被取消（被同一列表的新查询顶掉、保管库正在切换），不是失败 */
+    cancelled?: boolean
     data?: T[]
   }
-  if (!response || !response.success) throw new Error(response?.error || 'Unknown error')
+  if (!response || !response.success) {
+    throw Object.assign(new Error(response?.error || 'Unknown error'), {
+      cancelled: response?.cancelled === true
+    })
+  }
   return response.data || []
 }
 
