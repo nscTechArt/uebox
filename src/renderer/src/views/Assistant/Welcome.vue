@@ -1835,7 +1835,23 @@ function handleBubbleStop(): void {
 /**
  * 从输入区停止生成（找到正在生成的消息并停止）。
  */
+/**
+ * 输入框的停止键。
+ *
+ * 语音通话时它回话的那段字幕也是「正在输入」，停止键就跟着亮了 —— 可它原来只会停
+ * Agent，没有 Agent 在跑就什么都不做，用户点了没反应（真机 2026-10-14）。
+ * 所以：这条对话有 Agent 在跑就停 Agent；没有、而通话正绑在这条对话上，就是叫它别说了，
+ * 和点球体一样。
+ */
 function handleComposerStop(): void {
+  if (
+    !agentStreamStore.isStreaming(sid.value) &&
+    voice.active.value &&
+    sid.value === voiceChatSid()
+  ) {
+    voice.interrupt()
+    return
+  }
   stopAgentAndDropQueue()
 }
 

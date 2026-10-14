@@ -88,6 +88,8 @@ function harness(
   stt: { onEvent: (event: SttEvent) => void; audio: string[]; opened: number; close: () => void }
   session: ReturnType<typeof openCascadeSession>
   systems: string[]
+  spokenImpl: CascadeDeps['speak']
+  setSpeak: (impl: CascadeDeps['speak']) => void
 } {
   const events: VoiceSessionEvent[] = []
   const requests: Message[][] = []
@@ -100,6 +102,7 @@ function harness(
     opened: 0,
     close: vi.fn()
   }
+  let speakOverride: CascadeDeps['speak'] | null = null
   const deps: CascadeDeps = {
     openStt: (onEvent) => {
       stt.onEvent = onEvent
@@ -113,7 +116,8 @@ function harness(
       signals.push(signal)
       return scripted(scripts.shift() ?? { text: ['（没有脚本）'] }, signal)
     },
-    speak: async (text, _signal, onAudio) => {
+    speak: async (text, signal, onAudio) => {
+      if (speakOverride) return speakOverride(text, signal, onAudio)
       spoken.push(text)
       // 100 毫秒的静音当作合成出来的音频
       onAudio({
@@ -133,7 +137,19 @@ function harness(
     },
     deps
   )
-  return { events, requests, signals, spoken, stt, session, systems }
+  return {
+    events,
+    requests,
+    signals,
+    spoken,
+    stt,
+    session,
+    systems,
+    spokenImpl: deps.speak,
+    setSpeak: (impl) => {
+      speakOverride = impl
+    }
+  }
 }
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
@@ -479,6 +495,48 @@ describe('播报', () => {
     expect(h.spoken).toEqual(['我在看。'])
     release()
     await vi.waitFor(() => expect(h.spoken).toEqual(['我在看。', '看完了。', '另一件做完了。']))
+  })
+})
+
+describe('合成失败', () => {
+  /** 云端合成偶尔断一下（真机：Qwen-Audio TTS_CONNECTION_FAILED），不该为此挂断整通电话 */
+  it('偶尔断一次：重试，念出来了就当没事', async () => {
+    const h = harness([{ text: ['好的。'] }])
+    let calls = 0
+    h.setSpeak(async (_text, _signal, onAudio) => {
+      calls += 1
+      if (calls === 1) throw new Error('TTS_CONNECTION_FAILED')
+      onAudio({
+        base64: Buffer.alloc(480).toString('base64'),
+        format: 'pcm_s16le',
+        sampleRate: 24000
+      })
+    })
+    h.stt.onEvent({ type: 'user-text', text: '你好', final: true })
+    await vi.waitFor(() => expect(types(h.events)).toContain('turn-done'))
+    expect(calls).toBe(2)
+    expect(types(h.events)).not.toContain('error')
+  })
+
+  it('一句重试也念不出：这句跳过、字幕照样有，通话不断', async () => {
+    const h = harness([{ text: ['好的。'] }])
+    h.setSpeak(async () => {
+      throw new Error('TTS_CONNECTION_FAILED')
+    })
+    h.stt.onEvent({ type: 'user-text', text: '你好', final: true })
+    await vi.waitFor(() => expect(types(h.events)).toContain('turn-done'))
+    expect(types(h.events)).toContain('assistant-text')
+    expect(types(h.events)).not.toContain('error')
+  })
+
+  it('连着几句都念不出来：是配置坏了，说清楚再挂', async () => {
+    const h = harness([{ text: ['一。', '二。', '三。'] }])
+    h.setSpeak(async () => {
+      throw new Error('TTS_HTTP_401')
+    })
+    h.stt.onEvent({ type: 'user-text', text: '你好', final: true })
+    await vi.waitFor(() => expect(types(h.events)).toContain('closed'))
+    expect(h.events).toContainEqual({ type: 'error', message: 'TTS_HTTP_401' })
   })
 })
 

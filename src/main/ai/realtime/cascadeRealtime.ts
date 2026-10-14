@@ -116,6 +116,15 @@ const ADDRESSED_FLOOR = 0.2
 const ECHO_TAIL_MS = 800
 const INTERRUPT_AT = 0.5
 
+/**
+ * 合成连着失败几句才算真坏了、挂断。
+ *
+ * 云端合成偶尔断一下连接（真机 2026-10-14：Qwen-Audio 一次 TTS_CONNECTION_FAILED），
+ * 为此挂断整通电话太重了 —— 先重试一次，还不行就这一句不念（字幕照样在），
+ * 连着几句都念不出来才是配置坏了，那时说清楚再挂。
+ */
+const MAX_SPEAK_FAILURES = 3
+
 /** 识别那一路连着断开多少次就不再重连了。正常是几十分钟断一次（厂商的单次时长上限） */
 const MAX_STT_RECONNECTS = 3
 
@@ -276,6 +285,8 @@ export function openCascadeSession(
   let resultsArrived: (() => void) | null = null
   /** 估计的喇叭停下的时刻。最后一包合成出来不等于念完了，渲染层还排着好几秒 */
   let playbackUntil = 0
+  /** 合成连着失败了几句，见 MAX_SPEAK_FAILURES */
+  let speakFailures = 0
   /** 它这会儿（或刚才）在说的话。给判定模型认回声、认附和 */
   let assistantSaying = ''
   /**
@@ -473,14 +484,28 @@ export function openCascadeSession(
       if (!/[\p{L}\p{N}]/u.test(text)) return
       queue = queue.then(async () => {
         if (signal.aborted) return
-        try {
-          await deps.speak(text, signal, (chunk) => {
+        let produced = false
+        const onAudio = (chunk: SpeechAudio): void => {
+          if (signal.aborted) return
+          produced = true
+          emit({ type: 'audio', base64: chunk.base64 })
+          playbackUntil = Math.max(Date.now(), playbackUntil) + audioMs(chunk)
+        }
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await deps.speak(text, signal, onAudio)
+            speakFailures = 0
+            return
+          } catch (error) {
             if (signal.aborted) return
-            emit({ type: 'audio', base64: chunk.base64 })
-            playbackUntil = Math.max(Date.now(), playbackUntil) + audioMs(chunk)
-          })
-        } catch (error) {
-          if (!signal.aborted) failure ??= error
+            // 念了一半断的不重试，重念会把前半句再说一遍
+            if (attempt === 1 || produced) {
+              speakFailures += 1
+              console.warn(`[拼装通话] 这一句没念出来（第 ${speakFailures} 次）：`, error)
+              if (speakFailures >= MAX_SPEAK_FAILURES) failure ??= error
+              return
+            }
+          }
         }
       })
     }
