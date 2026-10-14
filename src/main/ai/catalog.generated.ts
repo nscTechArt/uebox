@@ -6378,7 +6378,7 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "group": "stt",
     "kind": "stt",
     "protocol": "openai-completions",
-    "baseUrl": "http://127.0.0.1:50000/api/v1/asr",
+    "baseUrl": "http://127.0.0.1:7860",
     "apiKeyUrl": "https://github.com/FunAudioLLM/SenseVoice",
     "requiresApiKey": false,
     "hasLogo": false,

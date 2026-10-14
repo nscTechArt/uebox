@@ -2,8 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   openTranscriptionSttSession,
+  parseGradioEvents,
   parseTranscription,
   pcmToWav,
+  planGradioCall,
   probeTranscription,
   resolveTranscriptionTarget,
   stripSenseVoiceTags,
@@ -315,5 +317,146 @@ describe('会话', () => {
     await tick()
     expect(signal?.aborted).toBe(true)
     expect(events).toEqual([{ type: 'ready' }, { type: 'closed' }])
+  })
+})
+
+/** 本机 SenseVoice 一键包的接口清单（照真机 /gradio_api/info 摘的） */
+const GRADIO_INFO = {
+  named_endpoints: {
+    '/load_example': {
+      parameters: [{ component: 'Dataset', parameter_has_default: false }],
+      returns: [{ component: 'Audio' }, { component: 'Dropdown' }]
+    },
+    '/transcribe': {
+      parameters: [
+        { component: 'Audio', parameter_has_default: false },
+        { component: 'Dropdown', parameter_has_default: true, parameter_default: 'auto' },
+        { component: 'Checkbox', parameter_has_default: true, parameter_default: true }
+      ],
+      returns: [{ component: 'Textbox' }, { component: 'Textbox' }, { component: 'Textbox' }]
+    }
+  }
+}
+
+describe('Gradio 网页界面', () => {
+  it('浏览器里打开的裸地址、/gradio_api、完整的 call 地址都认成 Gradio', () => {
+    expect(resolveTranscriptionTarget('http://127.0.0.1:7860/')).toEqual({
+      url: 'http://127.0.0.1:7860',
+      api: 'gradio'
+    })
+    expect(resolveTranscriptionTarget('http://127.0.0.1:7860/gradio_api')).toEqual({
+      url: 'http://127.0.0.1:7860',
+      api: 'gradio'
+    })
+    expect(resolveTranscriptionTarget('http://127.0.0.1:7860/gradio_api/call/transcribe')).toEqual({
+      url: 'http://127.0.0.1:7860',
+      api: 'gradio',
+      endpoint: 'transcribe'
+    })
+  })
+
+  it('照接口清单填参数：音频放进音频那一格，其余用界面的默认值，结果取第一个文本框', () => {
+    expect(planGradioCall(GRADIO_INFO)).toEqual({
+      endpoint: 'transcribe',
+      audioIndex: 0,
+      defaults: [null, 'auto', true],
+      outputIndex: 0
+    })
+  })
+
+  it('官方 webui 的接口名是 model_inference、只有两个参数，也对得上', () => {
+    const plan = planGradioCall({
+      named_endpoints: {
+        '/model_inference': {
+          parameters: [
+            { component: 'Audio', parameter_has_default: false },
+            { component: 'Dropdown', parameter_has_default: true, parameter_default: 'auto' }
+          ],
+          returns: [{ component: 'Textbox' }]
+        }
+      }
+    })
+    expect(plan).toMatchObject({ endpoint: 'model_inference', defaults: [null, 'auto'] })
+  })
+
+  it('不是 Gradio、或者没有带音频的接口：明说', () => {
+    expect(() => planGradioCall({ detail: 'Not Found' })).toThrow(/不是 Gradio/)
+    expect(() => planGradioCall(GRADIO_INFO, 'nope')).toThrow(/没有 nope/)
+    expect(() =>
+      planGradioCall({ named_endpoints: { '/chat': { parameters: [{ component: 'Textbox' }] } } })
+    ).toThrow(/没有带音频输入/)
+  })
+
+  it('事件流：取 complete 那一条；error 带上原话，null 不念', () => {
+    expect(parseGradioEvents('event: complete\ndata: ["你好。", "状态"]\n\n')).toEqual([
+      '你好。',
+      '状态'
+    ])
+    expect(() => parseGradioEvents('event: error\ndata: null\n\n')).toThrow(/^Gradio 接口报错$/)
+    expect(() => parseGradioEvents('event: error\ndata: "显存不足"\n\n')).toThrow(/显存不足/)
+    expect(() => parseGradioEvents('')).toThrow(/没有返回结果/)
+  })
+
+  it('一次识别：读清单 → 传文件 → 发起 → 取结果；清单读一次就记住', async () => {
+    const base = 'http://127.0.0.1:7861'
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/gradio_api/info')) return reply(GRADIO_INFO)
+      if (url.endsWith('/gradio_api/upload')) return reply(['I:\\cache\\speech.wav'])
+      if (url.endsWith('/gradio_api/call/transcribe')) return reply({ event_id: 'e1' })
+      if (url.endsWith('/gradio_api/call/transcribe/e1')) {
+        return reply(
+          'event: complete\ndata: ["打开角色蓝图。😊", "音频 2.3 秒", "<|zh|>打开角色蓝图。"]\n\n'
+        )
+      }
+      return reply('', 404)
+    })
+    const config = { apiKey: '', baseUrl: base, model: 'm' }
+    const signal = new AbortController().signal
+    await expect(transcribePcm(config, silence(100), RATE, signal)).resolves.toBe('打开角色蓝图。')
+
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/call/transcribe'))!
+    expect(JSON.parse(String(call[1]?.body))).toEqual({
+      data: [
+        {
+          path: 'I:\\cache\\speech.wav',
+          orig_name: 'speech.wav',
+          meta: { _type: 'gradio.FileData' }
+        },
+        'auto',
+        true
+      ]
+    })
+    const upload = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/upload'))!
+    expect((upload[1]?.body as FormData).get('files')).toBeInstanceOf(Blob)
+
+    await transcribePcm(config, silence(100), RATE, signal)
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/info'))).toHaveLength(1)
+  })
+
+  it('清单没读到（服务刚开）：不记住失败，下一句再读', async () => {
+    const base = 'http://127.0.0.1:7862'
+    fetchMock.mockResolvedValueOnce(reply('', 502))
+    const config = { apiKey: '', baseUrl: base, model: 'm' }
+    await expect(
+      transcribePcm(config, silence(100), RATE, new AbortController().signal)
+    ).rejects.toThrow(/HTTP 502/)
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/info')) return reply(GRADIO_INFO)
+      if (url.endsWith('/upload')) return reply(['p'])
+      if (url.endsWith('/call/transcribe')) return reply({ event_id: 'e2' })
+      return reply('event: complete\ndata: ["好"]\n\n')
+    })
+    await expect(
+      transcribePcm(config, silence(100), RATE, new AbortController().signal)
+    ).resolves.toBe('好')
+  })
+})
+
+describe('SenseVoice 的表情', () => {
+  it('官方后处理换成的情绪、事件表情去掉，正文留下', () => {
+    expect(stripSenseVoiceTags('🎼好的，保存关卡。😊')).toBe('好的，保存关卡。')
+    expect(stripSenseVoiceTags('❓')).toBe('')
   })
 })

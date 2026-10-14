@@ -12,8 +12,9 @@ import {
  *
  * 本机跑的 SenseVoice / Whisper（Xinference、FunASR、speaches、LocalAI …）、
  * 硅基流动、OpenAI 自己，用的都是 OpenAI 的 `/v1/audio/transcriptions` 这一个形状；
- * SenseVoice 仓库自带的 `api.py` 是另一个（`/api/v1/asr`）。两个形状只差表单字段名
- * 和回包结构，按地址认，不另设下拉框 —— 理由同 `stt/index.ts` 文件头。
+ * SenseVoice 仓库自带的 `api.py` 是另一个（`/api/v1/asr`）；一键包、整合包多半只开了
+ * Gradio 网页界面，那是第三个（先传文件、再发起、再取结果，见 `transcribeGradio`）。
+ * 按地址认，不另设下拉框 —— 理由同 `stt/index.ts` 文件头。
  *
  * ## 和豆包、百炼那两家的区别
  *
@@ -31,11 +32,14 @@ const REQUEST_TIMEOUT_MS = 30_000
 /** 「测试连接」送多长的静音。OpenAI 那家短于 0.1 秒直接拒，留足余量 */
 const PROBE_AUDIO_MS = 500
 
-export type TranscriptionApi = 'openai' | 'sensevoice'
+export type TranscriptionApi = 'openai' | 'sensevoice' | 'gradio'
 
 export interface TranscriptionTarget {
+  /** OpenAI / SenseVoice：要打的那个接口。Gradio：网页界面的根地址（`/gradio_api` 之前那段） */
   url: string
   api: TranscriptionApi
+  /** Gradio 的接口名（`/gradio_api/call/<它>`）。地址里没写就从界面的接口清单里找带音频输入的那个 */
+  endpoint?: string
 }
 
 /**
@@ -43,9 +47,18 @@ export interface TranscriptionTarget {
  *
  * 用户填的多半是 Base URL（`http://127.0.0.1:8000/v1`），和对话那边一个习惯，
  * 这里替他补上 `/audio/transcriptions`；直接贴了完整接口地址的也认。
+ *
+ * **只有主机和端口、没有路径的**按 Gradio 网页界面算：那是用户在浏览器里打开的地址，
+ * 也是他唯一知道的地址。OpenAI 兼容的服务几乎都挂在 `/v1` 下面，裸地址本来就打不通。
  */
 export function resolveTranscriptionTarget(baseUrl: string): TranscriptionTarget {
   const url = baseUrl.trim().replace(/\/+$/, '')
+  const gradio = url.search(/\/gradio_api(\/|$)/i)
+  if (gradio >= 0) {
+    const endpoint = /\/gradio_api\/call\/([^/?#]+)/i.exec(url)?.[1]
+    return { url: url.slice(0, gradio), api: 'gradio', ...(endpoint ? { endpoint } : {}) }
+  }
+  if (/^https?:\/\/[^/]+$/i.test(url)) return { url, api: 'gradio' }
   if (/\/api\/v1\/asr$/i.test(url)) return { url, api: 'sensevoice' }
   if (/\/audio\/transcriptions$/i.test(url)) return { url, api: 'openai' }
   return { url: `${url}/audio/transcriptions`, api: 'openai' }
@@ -71,18 +84,28 @@ export function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
 }
 
 /**
+ * SenseVoice 自己的后处理（`rich_transcription_postprocess`）把情绪、声音事件标签
+ * 换成的那几个表情（funasr `postprocess_utils.py` 的 emo_dict / event_dict / emoji_dict）。官方网页界面回的就是这种文字：「好的。😊」「🎼音乐」。
+ * 只认这一张表里的，用户真念出来的字一个不动。
+ */
+const SENSEVOICE_EVENT_EMOJI = /[😊😔😡😰🤢😮🎼👏😀😭🤧😷❓]/gu
+
+/**
  * 去掉 SenseVoice 的标签。
  *
  * 它的原始输出长这样：`<|zh|><|NEUTRAL|><|Speech|><|withitn|>你好。` ——
  * 语种、情绪、事件、是否规整，四个标签打在最前面。有的封装会去掉，有的原样透传，
- * 不去的话用户的搜索框里就是这一串。
+ * 有的换成了表情（见 `SENSEVOICE_EVENT_EMOJI`）。不去的话用户的搜索框里就是这一串。
  */
 export function stripSenseVoiceTags(text: string): string {
-  return text.replace(/<\|[^|]*\|>/g, '').trim()
+  return text.replace(/<\|[^|]*\|>/g, '').replace(SENSEVOICE_EVENT_EMOJI, '').trim()
 }
 
 /** 回包里拿出那句话。形状不对就抛 —— 200 回一个网页（地址填到了服务的首页）也是 200 */
-export function parseTranscription(api: TranscriptionApi, body: unknown): string {
+export function parseTranscription(
+  api: Exclude<TranscriptionApi, 'gradio'>,
+  body: unknown
+): string {
   if (api === 'sensevoice') {
     const result = (body as { result?: unknown } | null)?.result
     if (!Array.isArray(result)) throw new Error('识别服务的回包里没有 result，地址可能填错了')
@@ -126,7 +149,10 @@ function describeHttpFailure(status: number, detail: string): string {
   const suffix = detail ? `：${detail}` : ''
   if (status === 401 || status === 403) return `语音识别服务拒绝了密钥（HTTP ${status}）${suffix}`
   if (status === 404) {
-    return `找不到识别接口（HTTP 404）。OpenAI 兼容服务的地址一般填到 /v1 为止；SenseVoice 自带的服务填到 /api/v1/asr`
+    return (
+      '找不到识别接口（HTTP 404）。OpenAI 兼容服务的地址一般填到 /v1 为止；' +
+      'SenseVoice 自带的 api.py 填到 /api/v1/asr；Gradio 网页界面直接填浏览器里打开的那个地址'
+    )
   }
   return `语音识别请求失败（HTTP ${status}）${suffix}`
 }
@@ -149,6 +175,48 @@ export interface TranscriptionConfig {
   headers?: Record<string, string>
 }
 
+/**
+ * 发一次请求，回原文。超时、网络错误、HTTP 失败都在这里翻成人话。
+ *
+ * 三种接口共用：Gradio 那一种一次识别要打三个请求，每一个都可能失败在同样几处。
+ */
+async function send(
+  config: TranscriptionConfig,
+  url: string,
+  init: { method: 'GET' | 'POST'; body?: FormData; json?: unknown },
+  signal: AbortSignal
+): Promise<string> {
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: init.method,
+      headers: {
+        ...config.headers,
+        ...(init.json !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        // 本机服务多半不要密钥。空着就不带，带一个空的 Bearer 有的服务会当成填错了
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
+      },
+      body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+    })
+  } catch (error) {
+    // 我们自己撤的（会话关了）原样抛，调用方认得出；超时和网络错误翻成人话
+    if (signal.aborted && (signal.reason as Error | undefined)?.name !== 'TimeoutError') throw error
+    throw new Error(describeNetworkFailure(error, url))
+  }
+  const raw = await response.text()
+  if (!response.ok) throw new Error(describeHttpFailure(response.status, vendorDetail(raw)))
+  return raw
+}
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    throw new Error('识别服务回的不是 JSON，地址可能填错了')
+  }
+}
+
 /** 识别一段 PCM16 单声道，回识别出的文字（没听出东西是空串） */
 export async function transcribePcm(
   config: TranscriptionConfig,
@@ -157,9 +225,11 @@ export async function transcribePcm(
   signal: AbortSignal
 ): Promise<string> {
   const target = resolveTranscriptionTarget(config.baseUrl)
-  const form = new FormData()
   // 拷进一块独立的 ArrayBuffer：Buffer 可能是共享池里的一截，Blob 的类型不收
   const audio = new Blob([new Uint8Array(pcmToWav(pcm, sampleRate))], { type: 'audio/wav' })
+  if (target.api === 'gradio') return transcribeGradio(config, target, audio, signal)
+
+  const form = new FormData()
   if (target.api === 'sensevoice') {
     form.append('files', audio, 'speech.wav')
     form.append('lang', 'auto')
@@ -170,34 +240,153 @@ export async function transcribePcm(
     form.append('model', config.model)
     form.append('response_format', 'json')
   }
+  const raw = await send(config, target.url, { method: 'POST', body: form }, signal)
+  return parseTranscription(target.api, parseJson(raw))
+}
 
-  let response: Response
-  try {
-    response = await fetch(target.url, {
-      method: 'POST',
-      headers: {
-        ...config.headers,
-        // 本机服务多半不要密钥。空着就不带，带一个空的 Bearer 有的服务会当成填错了
-        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
-      },
-      body: form,
-      signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
-    })
-  } catch (error) {
-    // 我们自己撤的（会话关了）原样抛，调用方认得出；超时和网络错误翻成人话
-    if (signal.aborted && (signal.reason as Error | undefined)?.name !== 'TimeoutError') throw error
-    throw new Error(describeNetworkFailure(error, target.url))
-  }
+// ── Gradio 网页界面 ──
 
-  const raw = await response.text()
-  if (!response.ok) throw new Error(describeHttpFailure(response.status, vendorDetail(raw)))
-  let body: unknown
-  try {
-    body = JSON.parse(raw)
-  } catch {
-    throw new Error('识别服务回的不是 JSON，地址可能填错了')
+interface GradioParameter {
+  component?: string
+  parameter_has_default?: boolean
+  parameter_default?: unknown
+}
+
+interface GradioEndpoint {
+  parameters?: GradioParameter[]
+  returns?: { component?: string }[]
+}
+
+/** 怎么调这个界面：哪个接口、音频放第几个、其余参数填什么、结果取第几个 */
+export interface GradioPlan {
+  endpoint: string
+  audioIndex: number
+  defaults: unknown[]
+  outputIndex: number
+}
+
+/**
+ * 从界面自己的接口清单（`/gradio_api/info`）里读出怎么调它。
+ *
+ * **不写死参数**：一键包、官方 webui、各人自己改的界面，参数个数和顺序各不相同 ——
+ * 有的是「音频、语言」，有的是「音频、语言、数字规整」。清单里写着每个参数是什么控件、
+ * 默认值是多少，照着填就对得上：音频放进音频控件那一格，其余一律用界面自己的默认值，
+ * 结果取第一个文本框（「识别结果」那一栏，后面常跟着「处理状态」「原始输出」）。
+ */
+export function planGradioCall(info: unknown, wanted?: string): GradioPlan {
+  const endpoints = (info as { named_endpoints?: Record<string, GradioEndpoint> } | null)
+    ?.named_endpoints
+  if (!endpoints) throw new Error('这个地址不是 Gradio 界面（读不到接口清单），请检查地址')
+  const hasAudio = (item: GradioEndpoint): boolean =>
+    (item.parameters ?? []).some((param) => param.component === 'Audio')
+  const name = wanted
+    ? `/${wanted}`
+    : Object.keys(endpoints).find((key) => hasAudio(endpoints[key]))
+  const endpoint = name ? endpoints[name] : undefined
+  if (!name || !endpoint) {
+    throw new Error(
+      wanted
+        ? `Gradio 界面上没有 ${wanted} 这个接口`
+        : 'Gradio 界面上没有带音频输入的接口，它可能不是语音识别服务'
+    )
   }
-  return parseTranscription(target.api, body)
+  const parameters = endpoint.parameters ?? []
+  const audioIndex = parameters.findIndex((param) => param.component === 'Audio')
+  if (audioIndex < 0) throw new Error(`Gradio 接口 ${name.slice(1)} 没有音频输入`)
+  const outputIndex = Math.max(
+    0,
+    (endpoint.returns ?? []).findIndex((item) => item.component === 'Textbox')
+  )
+  return {
+    endpoint: name.slice(1),
+    audioIndex,
+    defaults: parameters.map((param) =>
+      param.parameter_has_default ? param.parameter_default : null
+    ),
+    outputIndex
+  }
+}
+
+/** 读 `/call/<接口>/<事件>` 回的那段事件流，拿出 complete 那一条的数据 */
+export function parseGradioEvents(raw: string): unknown[] {
+  let event = ''
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.startsWith('event:')) event = line.slice(6).trim()
+    if (!line.startsWith('data:')) continue
+    const data = line.slice(5).trim()
+    if (event === 'complete') {
+      const parsed = JSON.parse(data) as unknown
+      if (Array.isArray(parsed)) return parsed
+    }
+    if (event === 'error') {
+      // Gradio 出错时 data 常常就是一个 null，原话里没有可说的
+      throw new Error(`Gradio 接口报错${data && data !== 'null' ? `：${data.slice(0, 200)}` : ''}`)
+    }
+  }
+  throw new Error('Gradio 接口没有返回结果')
+}
+
+/**
+ * 接口清单按地址缓存。每说一句都去读一遍，是每句话多一个来回；
+ * 读失败的不缓存，服务重开之后下一句就能读到。
+ */
+const gradioPlans = new Map<string, Promise<GradioPlan>>()
+
+function gradioPlan(
+  config: TranscriptionConfig,
+  target: TranscriptionTarget,
+  signal: AbortSignal
+): Promise<GradioPlan> {
+  const key = `${target.url}#${target.endpoint ?? ''}`
+  let plan = gradioPlans.get(key)
+  if (!plan) {
+    plan = send(config, `${target.url}/gradio_api/info`, { method: 'GET' }, signal).then((raw) =>
+      planGradioCall(parseJson(raw), target.endpoint)
+    )
+    gradioPlans.set(key, plan)
+    plan.catch(() => gradioPlans.delete(key))
+  }
+  return plan
+}
+
+/**
+ * Gradio 网页界面：先传文件、再发起、再取结果，三个请求。
+ *
+ * 本机来回一共两三百毫秒（实测 SenseVoice + RTX 3060，2.3 秒的话 250ms），
+ * 不值得为它让用户再开一个服务、多占一份显存。
+ */
+async function transcribeGradio(
+  config: TranscriptionConfig,
+  target: TranscriptionTarget,
+  audio: Blob,
+  signal: AbortSignal
+): Promise<string> {
+  const plan = await gradioPlan(config, target, signal)
+  const api = `${target.url}/gradio_api`
+
+  const form = new FormData()
+  form.append('files', audio, 'speech.wav')
+  const uploaded = parseJson(
+    await send(config, `${api}/upload`, { method: 'POST', body: form }, signal)
+  )
+  const path = Array.isArray(uploaded) ? uploaded[0] : undefined
+  if (typeof path !== 'string') throw new Error('Gradio 界面没有收下音频文件')
+
+  const data = [...plan.defaults]
+  data[plan.audioIndex] = { path, orig_name: 'speech.wav', meta: { _type: 'gradio.FileData' } }
+  const started = parseJson(
+    await send(config, `${api}/call/${plan.endpoint}`, { method: 'POST', json: { data } }, signal)
+  ) as { event_id?: unknown } | null
+  if (typeof started?.event_id !== 'string') throw new Error('Gradio 界面没有接下这次识别')
+
+  const raw = await send(
+    config,
+    `${api}/call/${plan.endpoint}/${started.event_id}`,
+    { method: 'GET' },
+    signal
+  )
+  const output = parseGradioEvents(raw)[plan.outputIndex]
+  return typeof output === 'string' ? stripSenseVoiceTags(output) : ''
 }
 
 /**

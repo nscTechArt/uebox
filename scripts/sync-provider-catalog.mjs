@@ -642,9 +642,10 @@ export const CURATED = [
   {
     id: 'local-stt',
     group: 'stt',
-    // SenseVoice 仓库自带 api.py 的默认地址。Xinference、FunASR、speaches 这些
-    // OpenAI 兼容的服务改成它们自己的 /v1 —— 适配器按地址认是哪一种
-    baseUrl: 'http://127.0.0.1:50000/api/v1/asr',
+    // Gradio 网页界面的默认地址：SenseVoice 官方 webui.py、各种一键包都是它，
+    // 也是用户在浏览器里打开的那个。api.py 填 :50000/api/v1/asr，Xinference、FunASR、
+    // speaches 这些 OpenAI 兼容的服务填它们自己的 /v1 —— 适配器按地址认是哪一种
+    baseUrl: 'http://127.0.0.1:7860',
     // 卡片放不下更长的名字；SenseVoice、Whisper 这些词靠模型名搜得到
     displayName: '本机语音识别',
     requiresApiKey: false
