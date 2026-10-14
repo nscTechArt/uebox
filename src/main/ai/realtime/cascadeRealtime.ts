@@ -35,11 +35,25 @@ import type {
  * | | 实时语音那两家 | 拼装 |
  * |---|---|---|
  * | 判停 | 服务端 VAD | 识别那一路（流式厂商自己判，整段转写由 `endpointer` 判） |
- * | 插话 | 服务端听见就停 | 本地 `endpointer` 听见开口就掐掉这一轮 |
+ * | 插话 | 服务端听见就停 | 听见声音先停播，识别出来、判过是在对它说话才掐（见下） |
  * | 回答 | 模型直接出声 | 对话模型出字 → 逐句合成 |
  * | 播报 | 模型转述 | 原话逐字念（和 Box Plan 那条线同一个做法） |
  *
  * 代价是慢：一句话要等识别、模型首字、合成首包三段，比端到端的模型多一两秒。
+ *
+ * ## 插话：先停播，再判，最后才掐
+ *
+ * 听见声音就掐掉这一轮的话，一声咳嗽、敲一下键盘、喇叭的回声被认成「Yeah.」，
+ * 都会把等了十几秒的回答作废，用户只好再问一遍（真机 2026-10-14）。现在分三步：
+ *
+ * 1. **听见声音先停播**（`output-hold`），什么都不扔。
+ * 2. **识别模型说那不是人声的，当没发生**：SenseVoice 对杂音会打 `nospeech` 标签、
+ *    或者只回一个标点（`readTranscript`）。那一段不上屏，喇叭接着放（`output-release`）。
+ * 3. **识别出了字的，交给判定模型看一眼**（`judgeUtterance`，约 100ms）：是在对它说话、
+ *    要它停下吗？只是附和（「嗯」「对」）、杂音认出来的零碎字、喇叭回声，都接着说。
+ *    判定模型没配或判不了，照老规矩当真 —— 宁可多停一次，不吞用户的话。
+ *
+ * 判什么、阈值多少都不在这里猜：是不是人声由识别模型说了算，是不是在说话由判定模型说了算。
  *
  * ## 依赖从外面给
  *
@@ -77,6 +91,26 @@ const BARGE_IN_FLOOR_DB: Record<RealtimeEchoGuard, number> = {
   strong: -38
 }
 
+/**
+ * 停播之后，用户停下来多久还没等到识别结果，就当刚才那是杂音、接着放。
+ *
+ * 识别那一路认定不是人声的时候**什么都不回**，只能靠等。本机识别两三百毫秒出结果，
+ * 云端整段转写一秒上下；两秒等得住，又不至于让人觉得它卡住了。
+ */
+const HOLD_RESULT_GRACE_MS = 2_000
+
+/** 停播最多停多久。一直有声音（旁边在放音乐）也不能让它永远不说 */
+const HOLD_MAX_MS = 15_000
+
+/**
+ * 判定模型的阈值。`judge.isYes` 的约定是阈值跟着后果走，这里两条后果不对称：
+ *
+ * - **当成杂音丢掉**是吞了用户的话，只在很有把握时做（说话的概率低于 0.2）；
+ * - **它在说话时打断它**是丢掉它说了一半的话，过半就打断 —— 那是用户在要东西。
+ */
+const ADDRESSED_FLOOR = 0.2
+const INTERRUPT_AT = 0.5
+
 /** 识别那一路连着断开多少次就不再重连了。正常是几十分钟断一次（厂商的单次时长上限） */
 const MAX_STT_RECONNECTS = 3
 
@@ -110,6 +144,31 @@ export interface CascadeDeps {
   }) => ReplyStream
   /** 合成一句话，边合成边吐 PCM */
   speak: (text: string, signal: AbortSignal, onAudio: (chunk: SpeechAudio) => void) => Promise<void>
+  /**
+   * 判一句话该不该当真（可选，见文件头「插话」）。回 null 表示判不了 —— 没配判定模型、
+   * 超时、出错 —— 调用方按老规矩当真。
+   */
+  judgeUtterance?: (input: UtteranceContext) => Promise<UtteranceVerdict | null>
+}
+
+/** 判一句话要用到的上下文 */
+export interface UtteranceContext {
+  /** 识别出来的那句话 */
+  text: string
+  /** 它这会儿（或刚才）在说的话，判回声、判附和都靠它 */
+  assistantSaying: string
+  /** 它正在想或正在说。这时候才要问「是不是要打断它」 */
+  busy: boolean
+  /** 识别模型打的标签（SenseVoice 的语种、情绪、事件），有就给 */
+  asrTags?: string[]
+}
+
+/** 两个概率，0 到 1 */
+export interface UtteranceVerdict {
+  /** 这句是用户在对它说话（提问、下指令、回答、确认、叫停） */
+  addressed: number
+  /** 它忙着时：用户是要它停下、改说别的。不忙时不问，没有这一项 */
+  interrupt?: number
 }
 
 /**
@@ -212,6 +271,19 @@ export function openCascadeSession(
   let resultsArrived: (() => void) | null = null
   /** 估计的喇叭停下的时刻。最后一包合成出来不等于念完了，渲染层还排着好几秒 */
   let playbackUntil = 0
+  /** 它这会儿（或刚才）在说的话。给判定模型认回声、认附和 */
+  let assistantSaying = ''
+  /**
+   * 听见声音、先停了播，正等识别结果（见文件头「插话」）。
+   *
+   * `grace`：用户已经停下了，再等这么久还没结果就接着放。`limit`：停播的上限。
+   */
+  let hold: {
+    grace: ReturnType<typeof setTimeout> | null
+    limit: ReturnType<typeof setTimeout>
+  } | null = null
+  /** 一句一句排着判，判定快慢不一也不会把两句的先后弄反 */
+  let judging: Promise<void> = Promise.resolve()
 
   const endpointer = createEndpointer({
     sampleRate: STT_INPUT_SAMPLE_RATE,
@@ -244,16 +316,23 @@ export function openCascadeSession(
             emit({ type: 'ready' })
           }
           break
-        case 'user-text':
-          emit(event)
-          if (event.final && event.text.trim()) {
-            // 出得了整句，说明这一路是好的。重连计数只防「一开就断」那种来回
-            sttReconnects = 0
-            respond(event.text.trim())
+        case 'user-text': {
+          // 中间态照常上字幕；整句要先判过才算数，判过之前不上屏
+          if (!event.final) {
+            emit(event)
+            break
           }
+          const text = event.text.trim()
+          if (!text) break
+          // 出得了整句，说明这一路是好的。重连计数只防「一开就断」那种来回
+          sttReconnects = 0
+          judging = judging.then(() => consider(text, event.asrTags))
           break
+        }
         case 'asr-failed':
-          emit(event)
+          // 停着播等结果时没听清：多半是杂音，接着放，不说「没听清」
+          if (hold) releaseOutput()
+          else emit(event)
           break
         case 'error':
           fail(event.message)
@@ -279,13 +358,67 @@ export function openCascadeSession(
     return live.size > 0 || Date.now() < playbackUntil
   }
 
+  function clearHold(): boolean {
+    if (!hold) return false
+    if (hold.grace) clearTimeout(hold.grace)
+    clearTimeout(hold.limit)
+    hold = null
+    return true
+  }
+
+  /** 听见声音：先停播，什么都不扔 */
+  function holdOutput(): void {
+    if (hold) {
+      // 又开口了：「停下来多久没结果」重新算
+      if (hold.grace) clearTimeout(hold.grace)
+      hold.grace = null
+      return
+    }
+    hold = { grace: null, limit: setTimeout(releaseOutput, HOLD_MAX_MS) }
+    emit({ type: 'output-hold' })
+  }
+
+  /** 刚才那不算插话：接着放 */
+  function releaseOutput(): void {
+    if (clearHold()) emit({ type: 'output-release' })
+  }
+
   /** 掐掉手上的事。`notify` 为真时告诉渲染层把喇叭里排着的也掐掉 */
   function interrupt(notify: boolean): void {
+    const held = clearHold()
     const wasSpeaking = speaking()
     for (const controller of live) controller.abort()
     live.clear()
     playbackUntil = 0
+    // `interrupted` 会让渲染层掐掉排着的音频、并把停着的播放恢复；
+    // 没在说话但停着播（喇叭刚好放完）的，单独放开，不然后面的回答出不了声
     if (notify && wasSpeaking) emit({ type: 'interrupted' })
+    else if (held) emit({ type: 'output-release' })
+  }
+
+  /**
+   * 一句整话识别出来了：当真，还是当没听见（见文件头「插话」）。
+   *
+   * 不忙时也问一句「是不是在对它说话」：它说完了、喇叭的尾音被收回来认成「Yeah.」，
+   * 不拦的话它会一本正经地问「你说的 Yeah 是什么意思」。
+   */
+  async function consider(text: string, asrTags?: string[]): Promise<void> {
+    if (closed) return
+    const busy = speaking() || hold !== null
+    const verdict = deps.judgeUtterance
+      ? await deps.judgeUtterance({ text, assistantSaying, busy, asrTags })
+      : null
+    if (closed) return
+    const ignore =
+      verdict !== null &&
+      (verdict.addressed < ADDRESSED_FLOOR ||
+        (busy && verdict.interrupt !== undefined && verdict.interrupt < INTERRUPT_AT))
+    if (ignore) {
+      console.log(`[拼装通话] 当作没听见：「${text}」`)
+      releaseOutput()
+      return
+    }
+    respond(text, true)
   }
 
   /** 排一件事进队。掐掉的那件照样轮到它，由它自己决定被掐之前要记下什么 */
@@ -410,6 +543,7 @@ export function openCascadeSession(
 
       const mouth = createMouth(signal)
       const askedAt = Date.now()
+      assistantSaying = ''
       const stream = deps.reply({ system, messages: history, tools, signal })
       let text = ''
       const calls: ToolCall[] = []
@@ -434,6 +568,7 @@ export function openCascadeSession(
         }
         if (event.type === 'text_delta') {
           text += event.delta
+          assistantSaying = text
           emit({ type: 'assistant-text', text: event.delta })
           mouth.push(event.delta)
         } else if (event.type === 'toolcall_end') {
@@ -459,8 +594,13 @@ export function openCascadeSession(
             stopReason: calls.length ? 'toolUse' : 'stop'
           } as AssistantMessage)
         }
-        // 不是我们掐的（厂商自己断了）：场子得让出来，不然界面一直停在「在想」
-        if (!signal.aborted) emit({ type: 'turn-done' })
+        /*
+         * 这一轮哪怕被掐了也要报一句「说完了」—— 和 OpenAI 取消一轮之后照样发
+         * `response.done` 一个约定。渲染层靠它落定说了一半的字幕；不报的话那个
+         * 「正在输入」的气泡一直挂着，输入框以为还在执行，停止按钮怎么点都没反应
+         * （真机 2026-10-14）。什么都没说出口的，没有气泡要落定，不报。
+         */
+        if (text.trim() || calls.length || !signal.aborted) emit({ type: 'turn-done' })
         return
       }
       if (message.stopReason === 'error') {
@@ -486,8 +626,10 @@ export function openCascadeSession(
    * 作废的那一轮回的已经不是他要的了 —— 他补了半句、改了主意，或者打断了它。
    * 他的话先记进上下文再问模型；被掐的那一轮先把自己收拾完（见 `schedule`）。
    */
-  function respond(text: string): void {
+  function respond(text: string, spoken: boolean): void {
     interrupt(true)
+    // 先 `interrupted` 再上屏这句：反过来的话渲染层会把这句之后的新回答当被打断的残片丢掉
+    if (spoken) emit({ type: 'user-text', text, final: true })
     schedule(async (signal) => {
       // 被掐的那一轮可能还有工具结果没收：结果得紧跟在调用后面，排在这句话前头
       await settleToolResults()
@@ -512,6 +654,7 @@ export function openCascadeSession(
       history.push(userMessage(notice.context))
       if (signal.aborted) return
       history.push(spokenMessage(notice.speech))
+      assistantSaying = notice.speech
       emit({ type: 'announced', text: notice.speech })
       const mouth = createMouth(signal)
       mouth.push(notice.speech)
@@ -524,6 +667,7 @@ export function openCascadeSession(
     if (closed) return
     // 先置位再发 `closed`：上层收到它会回头再关一次，那一次得直接返回
     closed = true
+    clearHold()
     interrupt(false)
     resultsArrived?.()
     const ear = stt
@@ -540,13 +684,19 @@ export function openCascadeSession(
       stt?.appendAudio(base64)
       const wasTalking = endpointer.speaking
       endpointer.push(Buffer.from(base64, 'base64'))
-      if (!wasTalking && endpointer.speaking) interrupt(true)
-      // 他停下了：渲染层据此不再把新到的音频当被打断那一轮的残片丢掉
-      if (wasTalking && !endpointer.speaking) emit({ type: 'user-speech-done' })
+      // 它在说、或者在想的时候有人出声：先停播，等识别结果再定（不再一听见就掐）
+      if (!wasTalking && endpointer.speaking && (speaking() || hold)) holdOutput()
+      if (wasTalking && !endpointer.speaking) {
+        // 他停下了：渲染层据此不再把新到的音频当被打断那一轮的残片丢掉
+        emit({ type: 'user-speech-done' })
+        // 停下来这么久还没识别结果，就是识别那一路认定不是人声，接着放
+        if (hold && !hold.grace) hold.grace = setTimeout(releaseOutput, HOLD_RESULT_GRACE_MS)
+      }
     },
     sendText(text) {
       if (closed || !text.trim()) return
-      respond(text.trim())
+      // 打字发来的那句渲染层自己上过屏了
+      respond(text.trim(), false)
     },
     announce(notice) {
       if (closed) return

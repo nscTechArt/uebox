@@ -708,16 +708,12 @@ export function findVisionCapableRole(source: RoleBindingSource): ModelRole | nu
 }
 
 /**
- * 拼装通话的「脑子」从这几个角色里取，按顺序第一个绑了的。
+ * 拼装通话的「脑子」：对话没单独选过模型时，从这几个角色里取第一个绑了的。
  *
- * 和主进程的 `ROLE_FALLBACK.summary` 是同一串（那边有测试盯着两份对不对得上）：
- * 语音前台要快，先用「轻量任务」，没配才用主力对话模型。
+ * 和主进程的 `ROLE_FALLBACK.agent` 是同一串（那边有测试盯着两份对不对得上）——
+ * 也就是输入框里显示的那个默认模型。对话自己选过模型就用它，见 `cascadeDeps.resolveBrain`。
  */
-export const VOICE_PIPELINE_BRAIN_ROLES: readonly ModelRole[] = Object.freeze([
-  'summary',
-  'chat',
-  'agent'
-])
+export const VOICE_PIPELINE_BRAIN_ROLES: readonly ModelRole[] = Object.freeze(['agent', 'chat'])
 
 /**
  * 没绑「实时语音」时，能不能拼一通电话出来：语音识别当耳朵、对话模型当脑子、

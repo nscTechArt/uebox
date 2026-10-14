@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 // 这三样一 import 就拖进 electron；这里只测「配齐没有」的判断
 vi.mock('../piCompletion', () => ({ resolveBinding: vi.fn(), resolveModel: vi.fn() }))
 vi.mock('../speech', () => ({ synthesizeSpeech: vi.fn() }))
+vi.mock('../judge', () => ({ judge: vi.fn() }))
+vi.mock('../store', () => ({ readSettings: vi.fn() }))
 vi.mock('../../agent-v3/core/piModel', () => ({ thinkingOffFields: vi.fn() }))
 vi.mock('../stt', () => ({
   hasSttAdapter: (baseUrl: string) => /^https?:\/\//.test(baseUrl),
@@ -38,7 +40,7 @@ describe('missingForCascade', () => {
     ).toEqual([])
   })
 
-  it('轻量任务没配：落到对话模型，一样算齐', () => {
+  it('只配了 Agent 没配对话：一样算齐', () => {
     expect(
       missingForCascade(
         settings({
@@ -80,6 +82,6 @@ describe('missingForCascade', () => {
 
   /** 设置页和主进程各拿一份「脑子从哪几个角色取」，对不上的话界面会说能通、实际打不通 */
   it('脑子的候选角色和主进程的回落链一致', () => {
-    expect([...VOICE_PIPELINE_BRAIN_ROLES]).toEqual([...ROLE_FALLBACK.summary])
+    expect([...VOICE_PIPELINE_BRAIN_ROLES]).toEqual([...ROLE_FALLBACK.agent])
   })
 })

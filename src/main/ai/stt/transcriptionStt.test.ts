@@ -6,6 +6,7 @@ import {
   parseTranscription,
   pcmToWav,
   planGradioCall,
+  readTranscript,
   probeTranscription,
   resolveTranscriptionTarget,
   stripSenseVoiceTags,
@@ -96,7 +97,11 @@ describe('回包', () => {
   })
 
   it('OpenAI 形状取 text，透传了标签的也去掉', () => {
-    expect(parseTranscription('openai', { text: '<|zh|>你好' })).toBe('你好')
+    expect(parseTranscription('openai', { text: '<|zh|>你好' })).toEqual({
+      text: '你好',
+      tags: ['zh'],
+      speech: true
+    })
   })
 
   it('SenseVoice 自带服务取 raw_text（text 被它换成了表情符号）', () => {
@@ -104,9 +109,9 @@ describe('回包', () => {
       parseTranscription('sensevoice', {
         result: [{ raw_text: '<|zh|><|HAPPY|><|Speech|><|withitn|>好的。', text: '好的。😊' }]
       })
-    ).toBe('好的。')
+    ).toMatchObject({ text: '好的。', tags: ['zh', 'HAPPY', 'Speech', 'withitn'] })
     // 没听出东西时它回空数组
-    expect(parseTranscription('sensevoice', { result: [] })).toBe('')
+    expect(parseTranscription('sensevoice', { result: [] })).toMatchObject({ text: '' })
   })
 
   it('形状不对就抛，不把网页当成识别结果', () => {
@@ -120,8 +125,8 @@ describe('transcribePcm', () => {
 
   it('OpenAI 形状：file + model，带密钥', async () => {
     fetchMock.mockResolvedValue(reply({ text: '你好' }))
-    const text = await transcribePcm(config, silence(100), RATE, new AbortController().signal)
-    expect(text).toBe('你好')
+    const result = await transcribePcm(config, silence(100), RATE, new AbortController().signal)
+    expect(result.text).toBe('你好')
 
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('http://127.0.0.1:8000/v1/audio/transcriptions')
@@ -146,7 +151,7 @@ describe('transcribePcm', () => {
       RATE,
       new AbortController().signal
     )
-    expect(text).toBe('好')
+    expect(text.text).toBe('好')
     const form = fetchMock.mock.calls[0][1]?.body as FormData
     expect(form.get('files')).toBeInstanceOf(Blob)
     expect(form.get('lang')).toBe('auto')
@@ -413,7 +418,12 @@ describe('Gradio 网页界面', () => {
     })
     const config = { apiKey: '', baseUrl: base, model: 'm' }
     const signal = new AbortController().signal
-    await expect(transcribePcm(config, silence(100), RATE, signal)).resolves.toBe('打开角色蓝图。')
+    // 识别结果那一栏是干净文字，标签从「原始输出」那一栏读
+    await expect(transcribePcm(config, silence(100), RATE, signal)).resolves.toEqual({
+      text: '打开角色蓝图。',
+      tags: ['zh'],
+      speech: true
+    })
 
     const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/call/transcribe'))!
     expect(JSON.parse(String(call[1]?.body))).toEqual({
@@ -450,7 +460,7 @@ describe('Gradio 网页界面', () => {
     })
     await expect(
       transcribePcm(config, silence(100), RATE, new AbortController().signal)
-    ).resolves.toBe('好')
+    ).resolves.toMatchObject({ text: '好' })
   })
 })
 
@@ -458,5 +468,47 @@ describe('SenseVoice 的表情', () => {
   it('官方后处理换成的情绪、事件表情去掉，正文留下', () => {
     expect(stripSenseVoiceTags('🎼好的，保存关卡。😊')).toBe('好的，保存关卡。')
     expect(stripSenseVoiceTags('❓')).toBe('')
+  })
+})
+
+/**
+ * 是不是人声由识别模型说了算：SenseVoice 对杂音会打 nospeech、或者只回一个标点。
+ * 这种当没发生 —— 拼装通话里不上屏、不打断；听写里也不该说「没听清」。
+ */
+describe('识别模型说不是人声的', () => {
+  it('nospeech 标签、只剩标点的，都不算人声', () => {
+    expect(readTranscript('<|nospeech|><|EMO_UNKNOWN|><|Event_UNK|><|woitn|>')).toEqual({
+      text: '',
+      tags: ['nospeech', 'EMO_UNKNOWN', 'Event_UNK', 'woitn'],
+      speech: false
+    })
+    expect(readTranscript('<|en|><|NEUTRAL|><|Speech|><|woitn|>.')).toMatchObject({
+      text: '',
+      speech: false
+    })
+    expect(readTranscript('❓')).toMatchObject({ speech: false })
+  })
+
+  it('会话里：不是人声的一段不上屏、也不报没听清；是人声的带上标签', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply({ text: '<|en|><|NEUTRAL|><|Speech|><|woitn|>.' }))
+      .mockResolvedValueOnce(reply({ text: '<|zh|><|NEUTRAL|><|Speech|><|withitn|>保存关卡。' }))
+    const events: SttEvent[] = []
+    const session = openTranscriptionSttSession({
+      apiKey: '',
+      baseUrl: 'http://127.0.0.1:8000/v1',
+      model: 'm',
+      onEvent: (event) => events.push(event)
+    })
+    await tick()
+    send(session, Buffer.concat([sentence(), silence(1_000), sentence(), silence(1_000)]))
+    await vi.waitFor(() => expect(events.filter((e) => e.type === 'user-text')).toHaveLength(1))
+    expect(events).not.toContainEqual({ type: 'asr-failed' })
+    expect(events).toContainEqual({
+      type: 'user-text',
+      text: '保存关卡。',
+      final: true,
+      asrTags: ['zh', 'NEUTRAL', 'Speech', 'withitn']
+    })
   })
 })

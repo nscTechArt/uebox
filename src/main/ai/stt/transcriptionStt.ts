@@ -98,25 +98,52 @@ const SENSEVOICE_EVENT_EMOJI = /[😊😔😡😰🤢😮🎼👏😀😭🤧�
  * 有的换成了表情（见 `SENSEVOICE_EVENT_EMOJI`）。不去的话用户的搜索框里就是这一串。
  */
 export function stripSenseVoiceTags(text: string): string {
-  return text.replace(/<\|[^|]*\|>/g, '').replace(SENSEVOICE_EVENT_EMOJI, '').trim()
+  return text
+    .replace(/<\|[^|]*\|>/g, '')
+    .replace(SENSEVOICE_EVENT_EMOJI, '')
+    .trim()
+}
+
+/** 识别回来的一段 */
+export interface Transcript {
+  /** 去掉标签和表情之后的那句话。不是人声时为空 */
+  text: string
+  /** SenseVoice 打的标签（语种、情绪、事件，如 `zh`、`NEUTRAL`、`Cough`），没有就是空数组 */
+  tags: string[]
+  /**
+   * 识别模型自己说这段是不是人声。
+   *
+   * **判断交给模型，不由我们猜**：SenseVoice 对没人说话的一段会打 `nospeech` 标签；
+   * 去完标签和表情一个字都不剩（只剩「.」「。」）的，也是它在说「这里没有话」。
+   * 杂音、咳嗽、喇叭的回声被它认成这样的，拼装通话就当没发生 —— 不上屏、不打断。
+   */
+  speech: boolean
+}
+
+/** 从带标签的原文里读出那句话。`tagSource` 给了就从它读标签（Gradio 界面把原始输出放在另一栏） */
+export function readTranscript(raw: string, tagSource: string = raw): Transcript {
+  const tags = [...tagSource.matchAll(/<\|([^|]*)\|>/g)].map((match) => match[1])
+  const text = stripSenseVoiceTags(raw)
+  const speech = !tags.includes('nospeech') && /[\p{L}\p{N}]/u.test(text)
+  return { text: speech ? text : '', tags, speech }
 }
 
 /** 回包里拿出那句话。形状不对就抛 —— 200 回一个网页（地址填到了服务的首页）也是 200 */
 export function parseTranscription(
   api: Exclude<TranscriptionApi, 'gradio'>,
   body: unknown
-): string {
+): Transcript {
   if (api === 'sensevoice') {
     const result = (body as { result?: unknown } | null)?.result
     if (!Array.isArray(result)) throw new Error('识别服务的回包里没有 result，地址可能填错了')
     const first = (result[0] ?? {}) as { raw_text?: unknown; text?: unknown }
     // raw_text 只带标签；text 被它自己的后处理换成了表情符号，拿 raw_text 自己去标签
     const text = typeof first.raw_text === 'string' ? first.raw_text : first.text
-    return typeof text === 'string' ? stripSenseVoiceTags(text) : ''
+    return readTranscript(typeof text === 'string' ? text : '')
   }
   const text = (body as { text?: unknown } | null)?.text
   if (typeof text !== 'string') throw new Error('识别服务的回包里没有 text，地址可能填错了')
-  return stripSenseVoiceTags(text)
+  return readTranscript(text)
 }
 
 /** 厂商回的错误原文。OpenAI 是 error.message，FastAPI 一系是 detail，其余的给原文开头 */
@@ -217,13 +244,13 @@ function parseJson(raw: string): unknown {
   }
 }
 
-/** 识别一段 PCM16 单声道，回识别出的文字（没听出东西是空串） */
+/** 识别一段 PCM16 单声道 */
 export async function transcribePcm(
   config: TranscriptionConfig,
   pcm: Buffer,
   sampleRate: number,
   signal: AbortSignal
-): Promise<string> {
+): Promise<Transcript> {
   const target = resolveTranscriptionTarget(config.baseUrl)
   // 拷进一块独立的 ArrayBuffer：Buffer 可能是共享池里的一截，Blob 的类型不收
   const audio = new Blob([new Uint8Array(pcmToWav(pcm, sampleRate))], { type: 'audio/wav' })
@@ -360,7 +387,7 @@ async function transcribeGradio(
   target: TranscriptionTarget,
   audio: Blob,
   signal: AbortSignal
-): Promise<string> {
+): Promise<Transcript> {
   const plan = await gradioPlan(config, target, signal)
   const api = `${target.url}/gradio_api`
 
@@ -385,8 +412,13 @@ async function transcribeGradio(
     { method: 'GET' },
     signal
   )
-  const output = parseGradioEvents(raw)[plan.outputIndex]
-  return typeof output === 'string' ? stripSenseVoiceTags(output) : ''
+  const outputs = parseGradioEvents(raw)
+  const output = outputs[plan.outputIndex]
+  // 识别结果那一栏是去过标签的干净文字；标签在「原始输出」那一栏，哪栏带标签就从哪栏读
+  const tagged = outputs.find(
+    (item): item is string => typeof item === 'string' && /<\|[^|]*\|>/.test(item)
+  )
+  return readTranscript(typeof output === 'string' ? output : '', tagged)
 }
 
 /**
@@ -452,9 +484,24 @@ export function openTranscriptionSttSession(config: SttSessionConfig): SttSessio
     queue = queue.then(async () => {
       try {
         if (closed) return
-        const text = await transcribePcm(config, sentence, STT_INPUT_SAMPLE_RATE, controller.signal)
-        // 断句判出来有人说话，识别却一个字没有：多半是没说清，让界面说一声
-        emit(text ? { type: 'user-text', text, final: true } : { type: 'asr-failed' })
+        const result = await transcribePcm(
+          config,
+          sentence,
+          STT_INPUT_SAMPLE_RATE,
+          controller.signal
+        )
+        if (result.text) {
+          emit({
+            type: 'user-text',
+            text: result.text,
+            final: true,
+            ...(result.tags.length ? { asrTags: result.tags } : {})
+          })
+        } else if (!result.tags.length) {
+          // 断句判出来有人说话，识别却一个字没有、也没说那不是人声：多半是没说清，让界面说一声
+          emit({ type: 'asr-failed' })
+        }
+        // 识别模型自己说这段不是人声（打了 nospeech、或者只回了个标点）：当没发生，不上屏
       } catch (error) {
         if (!closed) fail(error instanceof Error ? error.message : String(error))
       } finally {

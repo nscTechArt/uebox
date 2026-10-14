@@ -30,6 +30,7 @@ import {
 import { OPENAI_AUDIO, openOpenAiRealtimeSession } from '../ai/realtime/openaiRealtime'
 import { CASCADE_AUDIO, openCascadeSession, type CascadeDeps } from '../ai/realtime/cascadeRealtime'
 import { createCascadeDeps, missingForCascade } from '../ai/realtime/cascadeDeps'
+import type { ModelBinding } from '../ai/types'
 import { normalizeRealtimeEchoGuard, type RealtimeEchoGuard } from '../../shared/realtimeEchoGuard'
 import type {
   AudioSpec,
@@ -480,7 +481,7 @@ function yieldSessionTo(senderId: number): void {
  * 普通对话模型也能通话，只是慢一点。**绑了实时语音就一定用它** —— 用户专门配的
  * 端到端模型比拼装的快，不该被另外三样顶替。
  */
-async function resolveRealtimeBinding(): Promise<{
+async function resolveRealtimeBinding(brain?: ModelBinding): Promise<{
   apiKey: string
   baseUrl: string
   model: string
@@ -494,7 +495,7 @@ async function resolveRealtimeBinding(): Promise<{
   const binding = settings.roles.realtime
   if (!binding) {
     if (missingForCascade(settings).length === 0) {
-      return { apiKey: '', baseUrl: '', model: '', cascade: await createCascadeDeps() }
+      return { apiKey: '', baseUrl: '', model: '', cascade: await createCascadeDeps(brain) }
     }
     throw new Error(
       '还没有配置「实时语音」模型。请到 设置 → 模型 → 默认模型，' +
@@ -663,6 +664,8 @@ export function registerRealtimeVoiceIPC(): void {
         voice?: string
         history?: RealtimeConversationMessage[]
         echoGuard?: RealtimeEchoGuard
+        /** 这条对话输入框里选的模型。只有拼装通话用它当脑子（见 `cascadeDeps.resolveBrain`） */
+        brain?: { providerId?: unknown; modelId?: unknown }
       }
     ) => {
       yieldSessionTo(event.sender.id)
@@ -671,7 +674,12 @@ export function registerRealtimeVoiceIPC(): void {
       let generation = connectionGeneration
       startingSender = event.sender.id
       try {
-        const binding = await resolveRealtimeBinding().finally(() => {
+        // 跨 IPC 的值过一遍：两个都是字符串才算数，不然按没给处理（用默认模型）
+        const brain =
+          typeof args?.brain?.providerId === 'string' && typeof args.brain.modelId === 'string'
+            ? { providerId: args.brain.providerId, modelId: args.brain.modelId }
+            : undefined
+        const binding = await resolveRealtimeBinding(brain).finally(() => {
           if (startingSender === event.sender.id) startingSender = null
         })
         if (generation !== connectionGeneration) return { ok: false, error: '语音连接已取消。' }
