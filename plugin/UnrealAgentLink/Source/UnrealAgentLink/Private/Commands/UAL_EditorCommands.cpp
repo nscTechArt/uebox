@@ -21,6 +21,7 @@
 // PIE 采样帧量抓帧耗时用（每条退出路径都要记，包括失败那条）。
 // Core 模块下，5.0–5.8 九版路径一致，不新增模块依赖
 #include "Misc/ScopeExit.h"
+#include "Misc/ScopeLock.h"
 #include "HAL/PlatformMemory.h"
 #include "UObject/GarbageCollection.h"
 #include "PlayInEditorDataTypes.h"
@@ -3487,9 +3488,15 @@ namespace
 	class FUAL_PieLogCapture : public FOutputDevice
 	{
 	public:
-		TArray<FString> PrintStrings;
-		TArray<FString> Errors;
-		TArray<FString> Warnings;
+		/**
+		 * 5.1 起日志在专门的分发线程上送到这里，而 ticker、收尾、`pie.observe`
+		 * 都在游戏线程上读 —— 所有数据都只在 Mutex 里碰。
+		 *
+		 * 自己加了锁，所以声明「哪个线程都能用」。但**不**声明可多线程同时进
+		 * （CanBeUsedOnMultipleThreads）：那样引擎会在打日志的线程上直接调过来，
+		 * 不同线程的日志进时间线的先后就乱了。
+		 */
+		virtual bool CanBeUsedOnAnyThread() const override { return true; }
 
 		virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
 		{
@@ -3509,6 +3516,7 @@ namespace
 
 			if (Category == BlueprintUserMessages)
 			{
+				FScopeLock Lock(&Mutex);
 				Push(PrintStrings, Line);
 				PushTimeline(TEXT("print"), Line);
 				return;
@@ -3517,18 +3525,73 @@ namespace
 			if (Verbosity == ELogVerbosity::Error || Verbosity == ELogVerbosity::Fatal)
 			{
 				const FString Tagged = FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line);
+				FScopeLock Lock(&Mutex);
 				Push(Errors, Tagged);
 				PushTimeline(TEXT("error"), Tagged);
 			}
 			else if (Verbosity == ELogVerbosity::Warning)
 			{
 				const FString Tagged = FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line);
+				FScopeLock Lock(&Mutex);
 				Push(Warnings, Tagged);
 				PushTimeline(TEXT("warning"), Tagged);
 			}
 		}
 
-		bool HasErrors() const { return Errors.Num() > 0; }
+		bool HasErrors() const
+		{
+			FScopeLock Lock(&Mutex);
+			return Errors.Num() > 0;
+		}
+
+		void SetPlayStartedAt(double Seconds)
+		{
+			FScopeLock Lock(&Mutex);
+			PlayStartedAt = Seconds;
+		}
+
+		/** 三个桶各拷一份出来，拼响应时不用一直攥着锁 */
+		void CopyBuckets(TArray<FString>& OutPrintStrings, TArray<FString>& OutErrors, TArray<FString>& OutWarnings) const
+		{
+			FScopeLock Lock(&Mutex);
+			OutPrintStrings = PrintStrings;
+			OutErrors = Errors;
+			OutWarnings = Warnings;
+		}
+
+		/** 从游标 SinceSeq 起最多读 MaxLines 条，语义见 ReadPieSessionLogs */
+		void ReadTimeline(int32 SinceSeq, int32 MaxLines, TArray<FUAL_EditorCommands::FPieLogLine>& OutLines, int32& OutNextSeq, bool& bOutDropped) const
+		{
+			FScopeLock Lock(&Mutex);
+			OutNextSeq = NextSeq;
+			if (Timeline.Num() > 0 && Timeline[0].Seq > SinceSeq)
+			{
+				bOutDropped = true;
+			}
+
+			for (const FUAL_EditorCommands::FPieLogLine& Entry : Timeline)
+			{
+				if (Entry.Seq < SinceSeq)
+				{
+					continue;
+				}
+				if (OutLines.Num() >= MaxLines)
+				{
+					// 一次读不完就把游标停在没读的那条上，而不是跳过去 —— 跳过的那一截
+					// 下次谁都读不到了，而调用方以为自己看全了
+					OutNextSeq = Entry.Seq;
+					break;
+				}
+				OutLines.Add(Entry);
+			}
+		}
+
+	private:
+		mutable FCriticalSection Mutex;
+
+		TArray<FString> PrintStrings;
+		TArray<FString> Errors;
+		TArray<FString> Warnings;
 
 		/**
 		 * 按时间顺序的全部日志，给 `pie.observe` 按游标增量读。
@@ -3545,7 +3608,6 @@ namespace
 		/** PIE 真正起来的那一刻；之前的日志 At 记 0 */
 		double PlayStartedAt = 0.0;
 
-	private:
 		static constexpr int32 TimelineCap = 2000;
 
 		void PushTimeline(const TCHAR* Kind, const FString& Text)
@@ -3952,11 +4014,21 @@ namespace
 
 		if (GPieSession.Capture)
 		{
-			Result->SetArrayField(TEXT("print_strings"), UAL_ToJsonStrings(GPieSession.Capture->PrintStrings));
-			Result->SetArrayField(TEXT("errors"), UAL_ToJsonStrings(GPieSession.Capture->Errors));
-			Result->SetArrayField(TEXT("warnings"), UAL_ToJsonStrings(GPieSession.Capture->Warnings));
-			Result->SetNumberField(TEXT("error_count"), GPieSession.Capture->Errors.Num());
-			Result->SetNumberField(TEXT("warning_count"), GPieSession.Capture->Warnings.Num());
+			// 5.1 起日志排队到分发线程再送过来。还在队里的正好是收尾前最后那几行
+			// （往往就是让它停下来的那条错误），先等它们送到再取
+			if (GLog)
+			{
+				GLog->FlushThreadedLogs();
+			}
+			TArray<FString> PrintStrings;
+			TArray<FString> Errors;
+			TArray<FString> Warnings;
+			GPieSession.Capture->CopyBuckets(PrintStrings, Errors, Warnings);
+			Result->SetArrayField(TEXT("print_strings"), UAL_ToJsonStrings(PrintStrings));
+			Result->SetArrayField(TEXT("errors"), UAL_ToJsonStrings(Errors));
+			Result->SetArrayField(TEXT("warnings"), UAL_ToJsonStrings(Warnings));
+			Result->SetNumberField(TEXT("error_count"), Errors.Num());
+			Result->SetNumberField(TEXT("warning_count"), Warnings.Num());
 		}
 
 		if (ActorsAtEnd.IsSet())
@@ -4239,7 +4311,7 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		GPieSession.PlayStartedAt = FPlatformTime::Seconds();
 		if (GPieSession.Capture)
 		{
-			GPieSession.Capture->PlayStartedAt = GPieSession.PlayStartedAt;
+			GPieSession.Capture->SetPlayStartedAt(GPieSession.PlayStartedAt);
 		}
 		GPieSession.ActorsAtStart = UAL_CountActors(UAL_GetPlayWorld());
 		UAL_ShowPieBanner();
@@ -4441,28 +4513,7 @@ bool FUAL_EditorCommands::ReadPieSessionLogs(int32 SinceSeq, int32 MaxLines, TAr
 		return false;
 	}
 
-	const TArray<FPieLogLine>& Timeline = GPieSession.Capture->Timeline;
-	OutNextSeq = GPieSession.Capture->NextSeq;
-	if (Timeline.Num() > 0 && Timeline[0].Seq > SinceSeq)
-	{
-		bOutDropped = true;
-	}
-
-	for (const FPieLogLine& Line : Timeline)
-	{
-		if (Line.Seq < SinceSeq)
-		{
-			continue;
-		}
-		if (OutLines.Num() >= MaxLines)
-		{
-			// 一次读不完就把游标停在没读的那条上，而不是跳过去 —— 跳过的那一截
-			// 下次谁都读不到了，而调用方以为自己看全了
-			OutNextSeq = Line.Seq;
-			break;
-		}
-		OutLines.Add(Line);
-	}
+	GPieSession.Capture->ReadTimeline(SinceSeq, MaxLines, OutLines, OutNextSeq, bOutDropped);
 	return true;
 }
 
