@@ -24,13 +24,12 @@
       @dblclick="resetWidth"
     />
     <div class="pane-tabs" role="tablist" :aria-label="t('assistant.browserPane.tabs')">
-      <div v-if="reviewOpen" class="pane-tab">
+      <div v-if="reviewOpen" class="pane-tab" :class="{ 'is-selected': reviewActive }">
         <AppButton
           variant="text"
           size="small"
           role="tab"
           :aria-selected="!!reviewActive"
-          :class="{ 'is-selected': reviewActive }"
           @click="emit('selectReview')"
         >
           {{ t('assistant.fileDiff.review') }}
@@ -43,14 +42,36 @@
           ><template #icon><PhX /></template
         ></AppButton>
       </div>
-      <div v-for="tab in group?.tabs ?? []" :key="tab.id" class="pane-tab">
+      <div v-if="teamOpen" class="pane-tab" :class="{ 'is-selected': teamActive }">
         <AppButton
           variant="text"
           size="small"
           role="tab"
-          :aria-selected="!reviewActive && tab.id === group?.activeTabId"
+          :aria-selected="!!teamActive"
+          @click="emit('selectTeam')"
+        >
+          {{ t('assistant.teamBoard.tab') }}
+        </AppButton>
+        <AppButton
+          variant="text"
+          size="small"
+          :aria-label="t('assistant.teamBoard.closeTab')"
+          @click="emit('closeTeam')"
+          ><template #icon><PhX /></template
+        ></AppButton>
+      </div>
+      <div
+        v-for="tab in group?.tabs ?? []"
+        :key="tab.id"
+        class="pane-tab"
+        :class="{ 'is-selected': !panelActive && tab.id === group?.activeTabId }"
+      >
+        <AppButton
+          variant="text"
+          size="small"
+          role="tab"
+          :aria-selected="!panelActive && tab.id === group?.activeTabId"
           :title="tab.url"
-          :class="{ 'is-selected': !reviewActive && tab.id === group?.activeTabId }"
           @click="runTab({ action: 'select', tabId: tab.id })"
         >
           {{
@@ -78,7 +99,7 @@
         <template #icon><PhPlus /></template>
       </AppButton>
     </div>
-    <header v-show="!reviewActive" class="pane-header">
+    <header v-show="!panelActive" class="pane-header">
       <div class="pane-title" :title="t('assistant.browserPane.title')">
         <PhGlobe />
       </div>
@@ -155,13 +176,16 @@
       内容之上 —— 我们只负责把这块的位置量出来报过去（见 measure）。所以
       这里既不能放内容，也不能给它加圆角裁剪：视图不会跟着裁。
     -->
-    <div v-show="!reviewActive" ref="surfaceRef" class="pane-surface">
+    <div v-show="!panelActive" ref="surfaceRef" class="pane-surface">
       <span class="pane-hint">{{
         t(dragging ? 'assistant.browserPane.resizing' : 'assistant.browserPane.hint')
       }}</span>
     </div>
     <div v-if="reviewActive" class="pane-review">
       <div class="pane-review-content"><slot name="review" /></div>
+    </div>
+    <div v-else-if="teamActive" class="pane-review">
+      <div class="pane-review-content"><slot name="team" /></div>
     </div>
   </aside>
 </template>
@@ -207,6 +231,9 @@ import { useBrowserPaneResize } from '../composables/useBrowserPaneResize'
 const props = defineProps<{
   reviewOpen?: boolean
   reviewActive?: boolean
+  /** 工作室对话的「团队任务」页签。和审查一样是渲染层内容，选中时网页让位 */
+  teamOpen?: boolean
+  teamActive?: boolean
   group?: BrowserGroupState
   standalone?: boolean
   navigation?: BrowserNavigationState
@@ -217,7 +244,13 @@ const props = defineProps<{
   /** 助手页面此刻可见吗。切到别的路由要收起来 */
   visible: boolean
 }>()
-const emit = defineEmits<{ selectReview: []; closeReview: []; selectBrowser: [] }>()
+const emit = defineEmits<{
+  selectReview: []
+  closeReview: []
+  selectTeam: []
+  closeTeam: []
+  selectBrowser: []
+}>()
 
 const { t } = useI18n()
 const surfaceRef = ref<HTMLElement | null>(null)
@@ -284,7 +317,9 @@ async function submitAddress(event: KeyboardEvent): Promise<void> {
 }
 
 const paneShown = computed(() => props.open && props.visible)
-const shouldShow = computed(() => paneShown.value && !props.reviewActive && !!props.sessionId)
+/** 选中的是渲染层自己画的页签（审查 / 团队任务），网页那层要收起来 */
+const panelActive = computed(() => !!props.reviewActive || !!props.teamActive)
+const shouldShow = computed(() => paneShown.value && !panelActive.value && !!props.sessionId)
 const {
   width: paneWidth,
   minWidth,
@@ -409,7 +444,7 @@ async function handleClose(): Promise<void> {
 }
 
 watch(
-  () => [props.open, props.visible, props.reviewActive],
+  () => [props.open, props.visible, panelActive.value],
   () => {
     if (!shouldShow.value && props.sessionId)
       window.api?.agentBrowser?.setBounds?.(null, props.sessionId)
@@ -487,6 +522,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   align-items: center;
   max-width: 40%;
+  border-radius: var(--radius-md);
 }
 .pane-tab [role='tab'] {
   overflow: hidden;
@@ -494,8 +530,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   min-width: 0;
 }
-.pane-tab .is-selected {
+/* 选中底色铺满整个页签（标题 + ×），别只铺在标题按钮上 */
+.pane-tab.is-selected {
   background: var(--color-bg-selected);
+}
+.pane-tab.is-selected [role='tab'] {
   color: var(--color-text-primary);
 }
 

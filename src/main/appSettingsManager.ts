@@ -166,7 +166,9 @@ interface AppSettings {
  * 默认设置值
  */
 const DEFAULT_SETTINGS: AppSettings = {
-  autoLaunch: true,
+  // 默认关：不问一声就登记开机启动、静默进托盘，用户嫌打扰，安全软件也按可疑处理。
+  // 盒子是从项目里开虚幻时才用得上，想常驻的人去设置页打开
+  autoLaunch: false,
   enableFollowUpSuggestions: false,
   language: 'zh-CN',
   autoEnableUnrealAgentLink: true,
@@ -445,12 +447,19 @@ class AppSettingsManager {
     return this.applyAutoLaunchSetting(enabled, true)
   }
 
+  /**
+   * 启动时对一次开机自启：系统里的状态就是真相，只把它读回设置文件，**不往回写**。
+   *
+   * 以前每次启动都重写一遍：Windows 上这一写会顺手删掉任务管理器 / 360 记的
+   * 「已禁用」（StartupApproved），用户关一次、下次开机又回来 —— 关不掉，
+   * 而「自己把被禁的启动项改回来」正是安全软件按病毒处理的那种行为。
+   */
   ensureAutoLaunchSetting(): boolean {
-    if (!this.settings.autoLaunch) {
-      return true
+    const actual = this.getAutoLaunchStatus()
+    if (actual !== this.settings.autoLaunch) {
+      this.saveSettings({ autoLaunch: actual })
     }
-
-    return this.applyAutoLaunchSetting(true, false)
+    return true
   }
 
   /**
@@ -459,8 +468,13 @@ class AppSettingsManager {
    */
   getAutoLaunchStatus(): boolean {
     try {
-      const loginItemSettings = app.getLoginItemSettings()
-      return loginItemSettings.openAtLogin
+      if (process.platform === 'win32') {
+        // 登记时带了 --hidden，查的时候不带，openAtLogin 永远是 false（设置页一直显示「关」）。
+        // executableWillLaunchAtLogin 不比参数，并且认任务管理器 / 360 里的「已禁用」
+        return app.getLoginItemSettings({ path: process.execPath, args: [START_HIDDEN_ARG] })
+          .executableWillLaunchAtLogin
+      }
+      return app.getLoginItemSettings().openAtLogin
     } catch (error) {
       logger.error('获取开机自启状态失败:', error)
       return this.settings.autoLaunch

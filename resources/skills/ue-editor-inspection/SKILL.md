@@ -307,3 +307,14 @@ empty string; confirm with `ue_get_project_info` or a console command.
 `ue_set_config` writes project-wide settings and takes values as strings (`"True"`, `"1"`). Most
 renderer settings need an editor restart to take effect — tell the user, and prefer proposing the
 change over making it unasked.
+
+It writes the project's `Config/Default*.ini` (`EditorPerProjectUserSettings` excepted), so the
+change reaches every level, every teammate who syncs the project, and the packaged game. Before
+writing:
+
+- **Try it live first** when the key is a cvar (`r.*` and the like): set it with
+  `ue_run_console_command`, look, and put it back — nothing touches disk. Cvars that only apply at
+  startup cannot be tried this way.
+- **Read the current value** with `ue_get_config`, so you can say what it was and put it back.
+- **Afterwards**, `applied_live: false` in the reply means the running editor still uses the old
+  value; check the effect after the user restarts, not before.

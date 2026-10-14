@@ -14,14 +14,18 @@
  * ## 已注册
  *
  *   - `mesh_describe` —— 一次读完一个网格的全部信息，并给出判断
+ *   - `mesh_optimize` —— 静态网格生成 LOD / 简单碰撞（见 `optimize.ts`）。
+ *     它不跟本组常驻：`ue.mesh` 是整组常驻的，常驻预算已满，所以在 `toolSearch.ts`
+ *     里单拆成按需子组 `ue.mesh.optimize`，由几何编辑和导入整理两个技能点名带上
  *
  * 未实现（见文档 §7 的顺序）：`mesh_audit`（批量体检，走 AssetRegistry 标签不加载资产）、
- * `mesh_optimize`（生成 LOD/碰撞）、`mesh_sockets`。
+ * `mesh_sockets`。
  */
 
 import { z } from 'zod'
 
 import { defineUeTool } from '../defineUeTool'
+import { optimizeMesh } from './optimize'
 import { summarizeMesh } from './summarize'
 import type { MeshDescribeResponse } from './types'
 import type { UnrealAgentTool } from '../defineTool'
@@ -62,5 +66,5 @@ const describeMesh = defineUeTool<z.ZodTypeAny, MeshDescribeResponse>({
 
 export function meshTools(): UnrealAgentTool<never>[] {
   // 工具带自己的 details 类型，注册表要的是统一的 never —— 与 ue-material / ue-sequencer 同一处理
-  return [describeMesh] as unknown as UnrealAgentTool<never>[]
+  return [describeMesh, optimizeMesh] as unknown as UnrealAgentTool<never>[]
 }

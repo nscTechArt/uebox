@@ -10,6 +10,18 @@
 #include "Engine/EngineTypes.h"
 #include "CollisionQueryParams.h"
 
+#if WITH_EDITOR
+// 删除前查引用（关卡蓝图 + 其它 Actor 的对象属性），见 UAL_DeleteReferences
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Engine/LevelScriptBlueprint.h"
+#include "Engine/LevelScriptActor.h"
+#include "Engine/LODActor.h"
+#include "Editor/GroupActor.h"
+#include "Components/ChildActorComponent.h"
+#include "EdGraph/EdGraph.h"
+#include "K2Node.h"
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogUALActor, Log, All);
 
 namespace UAL_SnapToFloor
@@ -495,6 +507,301 @@ void FUAL_ActorCommands::Handle_SpawnActor(const TSharedPtr<FJsonObject>& Payloa
 	}
 }
 
+#if WITH_EDITOR
+namespace UAL_DeleteReferences
+{
+	/**
+	 * 删 Actor 之前查「谁还指着它」。
+	 *
+	 * ## 为什么要查
+	 *
+	 * 用户在大纲里手动删时，编辑器（UUnrealEdEngine::DeleteActors，EditorActor.cpp）会先查
+	 * 关卡蓝图和其它 Actor 有没有引用它，有就弹框确认。我们直接调 EditorDestroyActor，
+	 * 这一步被跳过了：关卡蓝图里的节点变 None、门和触发器的连线无声断掉，而删除回执
+	 * 和回读都说「成功」。这里把编辑器那一步补回来，只是不弹框，改成把引用方列给调用方。
+	 *
+	 * ## 为什么 Actor 之间的引用自己扫属性，而不用 FBlueprintEditorUtils::GetActorReferenceMap
+	 *
+	 * 那个函数只回「谁引用了谁」，说不出是哪个属性；而且它走 FReferenceFinder 序列化，
+	 * 看不到软引用（编辑器另走 AssetTools 的 FindSoftReferencesToObjects 补，那要扫所有已加载包）。
+	 * 这里用 TPropertyValueIterator 扫一遍对象属性（硬 / 弱 / 懒 / 软都是 FObjectPropertyBase），
+	 * 能把「Trigger_1 的 TargetDoor」这种路径直接回给模型，好让它跟用户说清楚。
+	 *
+	 * ## 开销
+	 *
+	 * 一批删除只扫一遍世界：每个 Actor 和它的组件各过一次属性迭代，命中查一次 TSet。
+	 * 只有命中目标时才去拼属性路径。
+	 */
+	struct FReferencer
+	{
+		/** level_blueprint | actor */
+		FString Kind;
+		/** 引用方显示名；关卡蓝图写 "Level Blueprint" */
+		FString Label;
+		/** 引用方 Actor 路径；关卡蓝图写关卡蓝图资产路径 */
+		FString Path;
+		/** 属性路径（actor）或节点标题（level_blueprint） */
+		FString Detail;
+		/** 关卡蓝图里引用它的节点个数 */
+		int32 NodeCount = 0;
+		/** 引用方 Actor；关卡蓝图为 nullptr。判断「引用方是不是也在这批里被删掉」用 */
+		AActor* ReferencerActor = nullptr;
+	};
+
+	/** 每个被引用的 Actor 最多列多少条引用方。一个被几百个东西指着的 Actor，全列会把回执撑爆 */
+	static constexpr int32 MaxReferencersPerTarget = 20;
+	/** 关卡蓝图里最多点名几个节点 */
+	static constexpr int32 MaxNodesListed = 5;
+
+	/** 编辑器手动删时也不算的引用方类型：关卡脚本 Actor 走关卡蓝图那条查；组和 HLOD 不影响玩法，编辑器会自己清 */
+	static bool IsIgnoredReferencerClass(const AActor* Actor)
+	{
+		return Actor->IsA(ALevelScriptActor::StaticClass())
+			|| Actor->IsA(AGroupActor::StaticClass())
+			|| Actor->IsA(ALODActor::StaticClass());
+	}
+
+	static void AddReferencer(TMap<AActor*, TArray<FReferencer>>& Out, AActor* Target, FReferencer&& Ref)
+	{
+		TArray<FReferencer>& List = Out.FindOrAdd(Target);
+		for (const FReferencer& Existing : List)
+		{
+			if (Existing.ReferencerActor == Ref.ReferencerActor && Existing.Detail == Ref.Detail)
+			{
+				return;
+			}
+		}
+		List.Add(MoveTemp(Ref));
+	}
+
+	/**
+	 * 扫一个对象（Actor 本体或它的组件）的所有对象属性，命中目标就记一条。
+	 * Prefix 是组件名，属性路径写成「组件名.属性名」，Actor 本体的属性不带前缀。
+	 */
+	static void ScanObject(UObject* Object, AActor* OwnerActor, const FString& Prefix,
+		const TSet<AActor*>& Targets, const AActor* ChildActorParent,
+		TMap<AActor*, TArray<FReferencer>>& Out)
+	{
+		for (TPropertyValueIterator<FObjectPropertyBase> It(Object->GetClass(), Object); It; ++It)
+		{
+			const FObjectPropertyBase* Prop = It.Key();
+			AActor* Target = Cast<AActor>(Prop->GetObjectPropertyValue(It.Value()));
+			// 指着自己的不算；子 Actor（ChildActorComponent 生成的）回指父级也不算，它会跟着父级一起删
+			if (!Target || Target == OwnerActor || Target == ChildActorParent || !Targets.Contains(Target))
+			{
+				continue;
+			}
+
+			// 命中了才拼路径。链上任何一层是 Transient 就不算：不存盘的引用，删了也不会断在关卡里
+			// （AActor::AttachmentReplication 就是这种，挂在目标下面的子物体不该被当成引用方）
+			TArray<const FProperty*> Chain;
+			It.GetPropertyChain(Chain);
+			bool bTransient = false;
+			FString PropPath = Prefix;
+			FString LastName;
+			for (int32 Index = Chain.Num() - 1; Index >= 0; --Index)
+			{
+				const FProperty* Link = Chain[Index];
+				if (!Link)
+				{
+					continue;
+				}
+				if (Link->HasAnyPropertyFlags(CPF_Transient))
+				{
+					bTransient = true;
+					break;
+				}
+				// 数组 / 集合的 Inner 和外层同名，不重复写成 Targets.Targets
+				const FString Name = Link->GetAuthoredName();
+				if (Name == LastName)
+				{
+					continue;
+				}
+				LastName = Name;
+				PropPath += PropPath.IsEmpty() ? Name : (TEXT(".") + Name);
+			}
+			if (bTransient)
+			{
+				continue;
+			}
+
+			FReferencer Ref;
+			Ref.Kind = TEXT("actor");
+			Ref.Label = UAL_CommandUtils::GetActorFriendlyName(OwnerActor);
+			Ref.Path = OwnerActor->GetPathName();
+			Ref.Detail = PropPath;
+			Ref.ReferencerActor = OwnerActor;
+			AddReferencer(Out, Target, MoveTemp(Ref));
+		}
+	}
+
+	/** 一遍扫完世界里所有 Actor（含组件），收集它们对 Targets 的引用 */
+	static void CollectActorReferencers(UWorld* World, const TSet<AActor*>& Targets,
+		TMap<AActor*, TArray<FReferencer>>& Out)
+	{
+		TArray<UActorComponent*> Components;
+		for (FActorIterator It(World); It; ++It)
+		{
+			AActor* Referencer = *It;
+			// Transient 的 Actor 不存盘，它手里的引用断了也不会留在关卡里
+			if (!IsValid(Referencer) || Referencer->HasAnyFlags(RF_Transient) || IsIgnoredReferencerClass(Referencer))
+			{
+				continue;
+			}
+
+			UChildActorComponent* ParentComponent = Referencer->GetParentComponent();
+			const AActor* ChildActorParent = ParentComponent ? ParentComponent->GetOwner() : nullptr;
+
+			ScanObject(Referencer, Referencer, FString(), Targets, ChildActorParent, Out);
+
+			Components.Reset();
+			Referencer->GetComponents(Components);
+			for (UActorComponent* Component : Components)
+			{
+				if (IsValid(Component) && !Component->HasAnyFlags(RF_Transient))
+				{
+					ScanObject(Component, Referencer, Component->GetName(), Targets, ChildActorParent, Out);
+				}
+			}
+		}
+	}
+
+	/** 关卡蓝图里有没有节点引用它 —— 和编辑器手动删时调的是同一个函数 */
+	static void CollectLevelScriptReferencers(AActor* Target, TMap<AActor*, TArray<FReferencer>>& Out)
+	{
+		ULevel* Level = Target->GetLevel();
+		// bDontCreate = true：没有关卡蓝图就别为了查引用凭空建一个出来
+		ULevelScriptBlueprint* LevelScript = Level ? Level->GetLevelScriptBlueprint(/*bDontCreate=*/true) : nullptr;
+		if (!LevelScript)
+		{
+			return;
+		}
+
+		TArray<UK2Node*> Nodes;
+		if (!FBlueprintEditorUtils::FindReferencesToActorFromLevelScript(LevelScript, Target, Nodes))
+		{
+			return;
+		}
+
+		TArray<FString> NodeTitles;
+		for (UK2Node* Node : Nodes)
+		{
+			if (!Node || NodeTitles.Num() >= MaxNodesListed)
+			{
+				continue;
+			}
+			const UEdGraph* Graph = Node->GetGraph();
+			const FString Title = Node->GetNodeTitle(ENodeTitleType::ListView).ToString();
+			NodeTitles.Add(Graph ? FString::Printf(TEXT("%s: %s"), *Graph->GetName(), *Title) : Title);
+		}
+
+		FReferencer Ref;
+		Ref.Kind = TEXT("level_blueprint");
+		Ref.Label = TEXT("Level Blueprint");
+		Ref.Path = LevelScript->GetPathName();
+		Ref.Detail = FString::Join(NodeTitles, TEXT("; "));
+		Ref.NodeCount = Nodes.Num();
+		Out.FindOrAdd(Target).Add(MoveTemp(Ref));
+	}
+
+	static TSharedPtr<FJsonObject> ReferencerToJson(const FReferencer& Ref)
+	{
+		TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+		Obj->SetStringField(TEXT("kind"), Ref.Kind);
+		Obj->SetStringField(TEXT("referencer"), Ref.Label);
+		Obj->SetStringField(TEXT("referencer_path"), Ref.Path);
+		if (Ref.Kind == TEXT("level_blueprint"))
+		{
+			Obj->SetNumberField(TEXT("node_count"), Ref.NodeCount);
+			Obj->SetStringField(TEXT("nodes"), Ref.Detail);
+		}
+		else
+		{
+			Obj->SetStringField(TEXT("property"), Ref.Detail);
+		}
+		return Obj;
+	}
+
+	/** 把一个目标的引用方写成 JSON 数组，超出上限的只记个数 */
+	static void WriteReferencers(const TSharedPtr<FJsonObject>& Into, const TArray<FReferencer>& Refs)
+	{
+		TArray<TSharedPtr<FJsonValue>> Arr;
+		for (int32 Index = 0; Index < Refs.Num() && Index < MaxReferencersPerTarget; ++Index)
+		{
+			Arr.Add(MakeShared<FJsonValueObject>(ReferencerToJson(Refs[Index])));
+		}
+		Into->SetArrayField(TEXT("referencers"), Arr);
+		Into->SetNumberField(TEXT("referencer_count"), Refs.Num());
+	}
+
+	/**
+	 * 算出这批里哪些目标因为还被引用而不能删，并返回每个目标「删了会断掉的」引用方。
+	 *
+	 * 引用方自己也在这批里、而且也会被删掉的，不算 —— A 和 B 互相指着、一起删，
+	 * 关卡里不会留下断掉的引用。但如果 A 因为被关卡蓝图引用而被拦下，那 B 被 A 指着，
+	 * B 也得拦下，否则 A 留在关卡里手里攥着一个 None。所以反复收敛到不再变化为止。
+	 */
+	static void Resolve(UWorld* World, const TSet<AActor*>& Targets,
+		TSet<AActor*>& OutBlocked, TMap<AActor*, TArray<FReferencer>>& OutLiveReferencers)
+	{
+		TMap<AActor*, TArray<FReferencer>> All;
+		CollectActorReferencers(World, Targets, All);
+		for (AActor* Target : Targets)
+		{
+			if (Target)
+			{
+				CollectLevelScriptReferencers(Target, All);
+			}
+		}
+
+		// 引用方是否会留在关卡里：关卡蓝图一定留；Actor 引用方要么不在这批里，要么在这批里但被拦下了
+		auto Survives = [&Targets, &OutBlocked](const FReferencer& Ref)
+		{
+			return !Ref.ReferencerActor || !Targets.Contains(Ref.ReferencerActor) || OutBlocked.Contains(Ref.ReferencerActor);
+		};
+
+		// 每轮至少多拦一个才会继续，最多 Targets.Num() 轮
+		bool bChanged = true;
+		while (bChanged)
+		{
+			bChanged = false;
+			for (const TPair<AActor*, TArray<FReferencer>>& Pair : All)
+			{
+				if (OutBlocked.Contains(Pair.Key))
+				{
+					continue;
+				}
+				for (const FReferencer& Ref : Pair.Value)
+				{
+					if (Survives(Ref))
+					{
+						OutBlocked.Add(Pair.Key);
+						bChanged = true;
+						break;
+					}
+				}
+			}
+		}
+
+		for (const TPair<AActor*, TArray<FReferencer>>& Pair : All)
+		{
+			TArray<FReferencer> Live;
+			for (const FReferencer& Ref : Pair.Value)
+			{
+				if (Survives(Ref))
+				{
+					Live.Add(Ref);
+				}
+			}
+			if (Live.Num() > 0)
+			{
+				OutLiveReferencers.Add(Pair.Key, MoveTemp(Live));
+			}
+		}
+	}
+}
+#endif
+
 bool FUAL_ActorCommands::DestroySingleActor(const FString& Name, const FString& Path)
 {
 	if (Name.IsEmpty() && Path.IsEmpty())
@@ -565,9 +872,26 @@ void FUAL_ActorCommands::Handle_DestroyActor(const TSharedPtr<FJsonObject>& Payl
 			return;
 		}
 
+		// force = true：明知有引用也删（用户已经确认过）。默认 false —— 有引用就先不删，把引用方列回去
+		bool bForce = false;
+		Payload->TryGetBoolField(TEXT("force"), bForce);
+
+		// 关卡蓝图 / 其它 Actor 对这批目标的引用。PIE 世界里删的是副本，停止 PIE 就回来了，不查
+		bool bReferencesChecked = false;
+#if WITH_EDITOR
+		TSet<AActor*> BlockedSet;
+		TMap<AActor*, TArray<UAL_DeleteReferences::FReferencer>> LiveReferencers;
+		if (!World->IsGameWorld())
+		{
+			UAL_DeleteReferences::Resolve(World, TargetSet, BlockedSet, LiveReferencers);
+			bReferencesChecked = true;
+		}
+#endif
+
 		int32 SuccessCount = 0;
 		TArray<TSharedPtr<FJsonValue>> Deleted;
 		TArray<TSharedPtr<FJsonValue>> Failed;
+		TArray<TSharedPtr<FJsonValue>> Blocked;
 		for (AActor* Actor : TargetSet)
 		{
 			if (!Actor)
@@ -577,6 +901,28 @@ void FUAL_ActorCommands::Handle_DestroyActor(const TSharedPtr<FJsonObject>& Payl
 			const FString FriendlyName = UAL_CommandUtils::GetActorFriendlyName(Actor);
 			const FString ActorPath = Actor->GetPathName();
 			const FString ActorClass = Actor->GetClass() ? Actor->GetClass()->GetName() : FString();
+
+#if WITH_EDITOR
+			// 删了会断掉的引用方（引用方自己也在这批里一起删的不算）。被拦下的一定有，见 Resolve
+			const TArray<UAL_DeleteReferences::FReferencer>* Refs = LiveReferencers.Find(Actor);
+			if (!bForce && BlockedSet.Contains(Actor))
+			{
+				// 还被引用着：不删，原样留在关卡里，把谁在引用它回给调用方去问用户
+				TSharedPtr<FJsonObject> Block = MakeShared<FJsonObject>();
+				Block->SetStringField(TEXT("name"), FriendlyName);
+				Block->SetStringField(TEXT("path"), ActorPath);
+				if (!ActorClass.IsEmpty())
+				{
+					Block->SetStringField(TEXT("class"), ActorClass);
+				}
+				if (Refs)
+				{
+					UAL_DeleteReferences::WriteReferencers(Block, *Refs);
+				}
+				Blocked.Add(MakeShared<FJsonValueObject>(Block));
+				continue;
+			}
+#endif
 
 			bool bDestroyed = false;
 #if WITH_EDITOR
@@ -595,6 +941,13 @@ void FUAL_ActorCommands::Handle_DestroyActor(const TSharedPtr<FJsonObject>& Payl
 				{
 					Obj->SetStringField(TEXT("class"), ActorClass);
 				}
+#if WITH_EDITOR
+				// force 删掉的：这些引用此刻已经变成 None 了，回执要点名，让模型告诉用户去哪儿补
+				if (Refs)
+				{
+					UAL_DeleteReferences::WriteReferencers(Obj, *Refs);
+				}
+#endif
 				Deleted.Add(MakeShared<FJsonValueObject>(Obj));
 			}
 			else
@@ -626,17 +979,37 @@ void FUAL_ActorCommands::Handle_DestroyActor(const TSharedPtr<FJsonObject>& Payl
 		// 点名删 7 个只找到 6 个时，第 7 个的名字必须出现在响应里。
 		// 这条链路是不可逆的：静默少删一个，调用方会告诉用户「删完了」
 		UAL_CommandUtils::AddUnmatchedTargets(Data, Unmatched);
+		// 因为还被引用而没删的。老盒子不认这个字段，但 count < target_count 照样会让它说「部分完成」
+		Data->SetNumberField(TEXT("blocked_count"), Blocked.Num());
+		if (Blocked.Num() > 0)
+		{
+			Data->SetArrayField(TEXT("blocked"), Blocked);
+		}
+		// false = 这次没查引用（PIE 世界）。和「查了、没人引用」要分得开
+		Data->SetBoolField(TEXT("references_checked"), bReferencesChecked);
 
 		// 找到了但一个都没删掉是「失败」，不是「没找到」—— 404 在调用方那里会被读成
 		// 合法的空结果（见 TS 侧 EngineNotFoundError）
 		int32 Code = 200;
 		if (SuccessCount == 0)
 		{
-			Code = Failed.Num() > 0 ? 500 : 404;
 			if (Failed.Num() > 0)
 			{
+				Code = 500;
 				Data->SetStringField(TEXT("error"), FString::Printf(
 					TEXT("None of the %d matched actors could be destroyed"), Failed.Num()));
+			}
+			else if (Blocked.Num() > 0)
+			{
+				// 409：东西都在、引擎也能删，是我们按住没删 —— 等用户点头后带 force 重来
+				Code = 409;
+				Data->SetStringField(TEXT("error"), FString::Printf(
+					TEXT("None of the %d matched actors were destroyed: each is still referenced (see blocked). Pass force=true to delete anyway; those references will become None"),
+					Blocked.Num()));
+			}
+			else
+			{
+				Code = 404;
 			}
 		}
 		UAL_CommandUtils::SendResponse(RequestId, Code, Data);

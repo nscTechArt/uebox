@@ -53,6 +53,7 @@
 #include "RenderingThread.h"
 #include "UObject/Package.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/UserInterfaceSettings.h"
 #include "IImageWrapperModule.h"
 #include "IImageWrapper.h"
 #include "Misc/FileHelper.h"
@@ -65,6 +66,16 @@
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "FileHelpers.h"
+// widget.make_variable 改名要连带图表引用一起改
+#include "Kismet2/Kismet2NameValidators.h"
+#include "K2Node_Variable.h"
+#include "K2Node_ComponentBoundEvent.h"
+#include "Animation/WidgetAnimation.h"
+#include "Blueprint/WidgetNavigation.h"
+#include "MovieScene.h"
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+#include "WidgetBlueprintOperationUtils.h"
+#endif
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogUALWidget, Log, All);
@@ -1068,11 +1079,16 @@ void FUAL_WidgetCommands::Handle_Preview(const TSharedPtr<FJsonObject>& Payload,
 	RenderTarget->InitAutoFormat(Width, Height);
 	RenderTarget->UpdateResourceImmediate();
 
+	// 游戏里 UMG 会按项目「用户界面」设置的 DPI 曲线缩放（默认按短边），1920x1080 的布局放到 1280x720
+	// 会整体缩小。按 1 倍画出来的预览和实际游戏对不上，所以这里用同一条曲线算出缩放再画。
+	// 带 Scale 的 DrawWidget 在 5.0~5.8 都是：根几何逻辑尺寸 = 像素尺寸 / Scale，再按 Scale 放大到像素。
+	const float DPIScale = GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(Width, Height));
+
 	// 使用 FWidgetRenderer 渲染到 RenderTarget；渲染器和 Slate 控件限定在块内，画完即释放
 	{
 		FWidgetRenderer WidgetRenderer(true);
 		TSharedRef<SWidget> SlateWidget = TempWidget->TakeWidget();
-		WidgetRenderer.DrawWidget(RenderTarget, SlateWidget, FVector2D(Width, Height), 0.0f);
+		WidgetRenderer.DrawWidget(RenderTarget, SlateWidget, DPIScale, FVector2D(Width, Height), 0.0f);
 		FlushRenderingCommands();
 	}
 
@@ -1118,8 +1134,9 @@ void FUAL_WidgetCommands::Handle_Preview(const TSharedPtr<FJsonObject>& Payload,
 	Result->SetStringField(TEXT("path"), OutputPath);
 	Result->SetNumberField(TEXT("width"), Width);
 	Result->SetNumberField(TEXT("height"), Height);
+	Result->SetNumberField(TEXT("dpi_scale"), DPIScale);
 	
-	UE_LOG(LogUALWidget, Log, TEXT("widget.preview: path=%s, output=%s"), *Path, *OutputPath);
+	UE_LOG(LogUALWidget, Log, TEXT("widget.preview: path=%s, output=%s, dpi_scale=%.3f"), *Path, *OutputPath, DPIScale);
 	
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 #else
@@ -1130,6 +1147,104 @@ void FUAL_WidgetCommands::Handle_Preview(const TSharedPtr<FJsonObject>& Payload,
 // ============================================================================
 // Phase 5: 事件绑定
 // ============================================================================
+
+#if WITH_EDITOR
+/** 这个节点是不是在用本蓝图上叫 Name 的控件变量：变量读写节点，或绑在控件上的事件（OnClicked 之类） */
+static bool UAL_NodeRefsWidgetVariable(const UEdGraphNode* Node, const UWidgetBlueprint* WidgetBP, const FName Name)
+{
+	if (const UK2Node_ComponentBoundEvent* BoundEvent = Cast<UK2Node_ComponentBoundEvent>(Node))
+	{
+		return BoundEvent->ComponentPropertyName == Name;
+	}
+	const UK2Node_Variable* VarNode = Cast<UK2Node_Variable>(Node);
+	if (!VarNode || VarNode->GetVarName() != Name || VarNode->VariableReference.IsLocalScope())
+	{
+		return false;
+	}
+	UClass* SelfClass = WidgetBP->GeneratedClass;
+	UClass* Owner = VarNode->VariableReference.GetMemberParentClass(SelfClass);
+	return Owner && ((SelfClass && Owner->IsChildOf(SelfClass))
+		|| (WidgetBP->SkeletonGeneratedClass && Owner->IsChildOf(WidgetBP->SkeletonGeneratedClass)));
+}
+
+/**
+ * 编辑器改控件名那一套，不依赖打开的蓝图编辑器。
+ * 5.8 起引擎有公开的 FWidgetBlueprintOperationUtils::RenameWidget，直接用；更早的版本里
+ * 对应的 FWidgetBlueprintEditorUtils::RenameWidget 在 Private 头里，还要传一个打开着的
+ * 编辑器，只能照 5.0 引擎那份实现抄关键步骤：改对象名、改图表里的变量/事件引用、
+ * 属性绑定、动画绑定、导航绑定、子蓝图撞名检查，最后标记结构变更让骨架类重编。
+ * 名字已经由调用方验过（不撞控件树、不撞蓝图成员）。
+ */
+static bool UAL_RenameWidgetLikeEditor(UWidgetBlueprint* WidgetBP, UWidget* Widget, const FName NewName)
+{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
+	return FWidgetBlueprintOperationUtils::RenameWidget(WidgetBP, Widget, NewName.ToString());
+#else
+	const FName OldName = Widget->GetFName();
+	const FString OldNameStr = OldName.ToString();
+	const FString NewNameStr = NewName.ToString();
+
+	WidgetBP->Modify();
+	Widget->Modify();
+	Widget->SetDisplayLabel(NewNameStr);
+	if (!Widget->Rename(*NewNameStr))
+	{
+		return false;
+	}
+
+	FBlueprintEditorUtils::ReplaceVariableReferences(WidgetBP, OldName, NewName);
+
+	for (FDelegateEditorBinding& Binding : WidgetBP->Bindings)
+	{
+		if (Binding.ObjectName == OldNameStr)
+		{
+			Binding.ObjectName = NewNameStr;
+		}
+	}
+
+	for (UWidgetAnimation* WidgetAnimation : WidgetBP->Animations)
+	{
+		if (!WidgetAnimation)
+		{
+			continue;
+		}
+		for (FWidgetAnimationBinding& AnimBinding : WidgetAnimation->AnimationBindings)
+		{
+			if (AnimBinding.WidgetName != OldName)
+			{
+				continue;
+			}
+			AnimBinding.WidgetName = NewName;
+			if (WidgetAnimation->MovieScene)
+			{
+				WidgetAnimation->MovieScene->Modify();
+				if (AnimBinding.SlotWidgetName == NAME_None)
+				{
+					if (FMovieScenePossessable* Possessable = WidgetAnimation->MovieScene->FindPossessable(AnimBinding.AnimationGuid))
+					{
+						Possessable->SetName(NewNameStr);
+					}
+				}
+			}
+		}
+	}
+
+	WidgetBP->WidgetTree->ForEachWidget([OldName, NewName](UWidget* Each)
+	{
+		if (Each && Each->Navigation)
+		{
+			Each->Navigation->SetFlags(RF_Transactional);
+			Each->Navigation->Modify();
+			Each->Navigation->TryToRenameBinding(OldName, NewName);
+		}
+	});
+
+	FBlueprintEditorUtils::ValidateBlueprintChildVariables(WidgetBP, NewName);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+	return true;
+#endif
+}
+#endif
 
 void FUAL_WidgetCommands::Handle_MakeVariable(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
 {
@@ -1170,27 +1285,140 @@ void FUAL_WidgetCommands::Handle_MakeVariable(const TSharedPtr<FJsonObject>& Pay
 		return;
 	}
 	
-	const FUAL_ScopedTransaction Transaction(NSLOCTEXT("UAL", "MakeVariable", "Agent Make Variable"));
-	WidgetBP->Modify();
-	
-	// 设置控件为变量
-	Widget->bIsVariable = true;
-	
-	// 重命名控件（变量名）- 使用安全重命名防止重名崩溃
+	// 改名前先把名字验完：和编辑器的改名框一样，撞了就拒绝，不偷偷加后缀——
+	// 调用方接下来要按自己给的名字去连图表，换个名字等于让它连错
+	const FName OldName = Widget->GetFName();
+	FName NewName = OldName;
 	if (VariableName != WidgetName)
 	{
-		FName SafeName = GenerateUniqueWidgetName(WidgetBP->WidgetTree, VariableName);
-		Widget->Rename(*SafeName.ToString());
+		const FString Slug = SlugStringForValidName(VariableName);
+		if (Slug.IsEmpty())
+		{
+			UAL_CommandUtils::SendError(RequestId, 400,
+				FString::Printf(TEXT("variable_name '%s' has no characters usable in a variable name"), *VariableName));
+			return;
+		}
+		NewName = FName(*Slug);
 	}
-	
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
-	
+	const bool bWantsRename = NewName != OldName;
+	if (bWantsRename)
+	{
+		const UWidget* Holder = WidgetBP->WidgetTree->FindWidget(NewName);
+		if ((Holder && Holder != Widget) || StaticFindObject(nullptr, Widget->GetOuter(), *NewName.ToString()))
+		{
+			UAL_CommandUtils::SendError(RequestId, 409, Holder
+				? FString::Printf(TEXT("Name '%s' is already used by widget %s (%s); pick another variable_name"),
+					*NewName.ToString(), *Holder->GetName(), *Holder->GetClass()->GetName())
+				: FString::Printf(TEXT("Name '%s' is already used by another object in this Widget Blueprint; pick another variable_name"),
+					*NewName.ToString()));
+			return;
+		}
+
+		// 父类里同名的 BindWidget 属性是给这个控件留的位子，可以占
+		bool bBindWidgetSlot = false;
+		if (WidgetBP->ParentClass)
+		{
+			const FObjectPropertyBase* Existing = CastField<FObjectPropertyBase>(WidgetBP->ParentClass->FindPropertyByName(NewName));
+			bBindWidgetSlot = Existing && (Existing->HasMetaData(TEXT("BindWidget")) || Existing->HasMetaData(TEXT("BindWidgetOptional")))
+				&& Widget->IsA(Existing->PropertyClass);
+		}
+		FKismetNameValidator Validator(WidgetBP, OldName);
+		const EValidatorResult Validity = Validator.IsValid(NewName);
+		if (Validity != EValidatorResult::Ok && !bBindWidgetSlot)
+		{
+			UAL_CommandUtils::SendError(RequestId, 409,
+				FString::Printf(TEXT("Cannot rename widget %s to '%s': %s"), *OldName.ToString(), *NewName.ToString(),
+					*INameValidatorInterface::GetErrorString(NewName.ToString(), Validity)));
+			return;
+		}
+	}
+
+	const FUAL_ScopedTransaction Transaction(NSLOCTEXT("UAL", "MakeVariable", "Agent Make Variable"));
+	WidgetBP->Modify();
+	Widget->Modify();
+
+	// 设置控件为变量
+	Widget->bIsVariable = true;
+
+	// 改名前记下图表里哪些节点在用旧名，改完逐个读回去看是不是跟着变了
+	TArray<TWeakObjectPtr<UEdGraphNode>> ReferencingNodes;
+	if (bWantsRename)
+	{
+		TArray<UEdGraph*> Graphs;
+		WidgetBP->GetAllGraphs(Graphs);
+		for (const UEdGraph* Graph : Graphs)
+		{
+			if (!Graph)
+			{
+				continue;
+			}
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (Node && UAL_NodeRefsWidgetVariable(Node, WidgetBP, OldName))
+				{
+					ReferencingNodes.Add(Node);
+				}
+			}
+		}
+	}
+
+	const bool bRenamed = bWantsRename && UAL_RenameWidgetLikeEditor(WidgetBP, Widget, NewName);
+	if (bWantsRename && !bRenamed)
+	{
+		UAL_CommandUtils::SendError(RequestId, 500,
+			FString::Printf(TEXT("Engine refused to rename widget %s to '%s'"), *OldName.ToString(), *NewName.ToString()));
+		return;
+	}
+	if (!bRenamed)
+	{
+		// 改名那条路自己会标记结构变更；没改名时由这里让骨架类长出这个变量
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+	}
+
+	int32 UpdatedRefs = 0;
+	TArray<TSharedPtr<FJsonValue>> StaleRefs;
+	for (const TWeakObjectPtr<UEdGraphNode>& Weak : ReferencingNodes)
+	{
+		const UEdGraphNode* Node = Weak.Get();
+		if (!Node)
+		{
+			continue; // 节点在重建里被换掉了，下面 found/updated 对不上就会显出来
+		}
+		if (UAL_NodeRefsWidgetVariable(Node, WidgetBP, Widget->GetFName()))
+		{
+			++UpdatedRefs;
+		}
+		else
+		{
+			const UEdGraph* Graph = Node->GetGraph();
+			StaleRefs.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%s: %s"),
+				Graph ? *Graph->GetName() : TEXT("?"), *Node->GetNodeTitle(ENodeTitleType::ListView).ToString())));
+		}
+	}
+	const int32 FoundRefs = ReferencingNodes.Num();
+	const int32 NotUpdated = FoundRefs - UpdatedRefs;
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	if (NotUpdated > 0)
+	{
+		Result->SetNumberField(TEXT("failed_count"), NotUpdated);
+	}
 	Result->SetBoolField(TEXT("ok"), true);
 	Result->SetStringField(TEXT("widget_name"), Widget->GetName());
+	Result->SetStringField(TEXT("old_name"), OldName.ToString());
+	Result->SetBoolField(TEXT("renamed"), Widget->GetFName() != OldName);
 	Result->SetBoolField(TEXT("is_variable"), Widget->bIsVariable);
-	
-	UE_LOG(LogUALWidget, Log, TEXT("widget.make_variable: widget=%s"), *Widget->GetName());
+	// 图表里用旧名的节点（变量读写、绑定事件）是不是都跟着改了；没改名时没有可改的
+	Result->SetNumberField(TEXT("graph_references_found"), FoundRefs);
+	Result->SetNumberField(TEXT("graph_references_renamed"), UpdatedRefs);
+	Result->SetBoolField(TEXT("graph_references_updated"), NotUpdated == 0);
+	if (StaleRefs.Num() > 0)
+	{
+		Result->SetArrayField(TEXT("stale_graph_references"), StaleRefs);
+	}
+
+	UE_LOG(LogUALWidget, Log, TEXT("widget.make_variable: widget=%s old=%s refs=%d/%d"),
+		*Widget->GetName(), *OldName.ToString(), UpdatedRefs, FoundRefs);
 	
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
 #else
@@ -2140,38 +2368,4 @@ FVector2D FUAL_WidgetCommands::ParseVector2D(const TSharedPtr<FJsonObject>& Obj)
 	}
 	
 	return FVector2D(X, Y);
-}
-
-// ============================================================================
-// 辅助函数: 唯一名称生成（防止重名崩溃）
-// ============================================================================
-
-FName FUAL_WidgetCommands::GenerateUniqueWidgetName(UWidgetTree* WidgetTree, const FString& DesiredName)
-{
-	if (!WidgetTree || DesiredName.IsEmpty())
-	{
-		return NAME_None;
-	}
-	
-	// 先检查期望名称是否可用
-	if (!WidgetTree->FindWidget(FName(*DesiredName)))
-	{
-		return FName(*DesiredName);
-	}
-	
-	// 名称已存在，追加后缀递增
-	UE_LOG(LogUALWidget, Warning, TEXT("Widget name '%s' already exists, generating unique name"), *DesiredName);
-	
-	for (int32 i = 1; i < 1000; i++)
-	{
-		FString Candidate = FString::Printf(TEXT("%s_%d"), *DesiredName, i);
-		if (!WidgetTree->FindWidget(FName(*Candidate)))
-		{
-			UE_LOG(LogUALWidget, Log, TEXT("Using unique name: %s"), *Candidate);
-			return FName(*Candidate);
-		}
-	}
-	
-	// 极端情况 fallback：使用 MakeUniqueObjectName
-	return MakeUniqueObjectName(WidgetTree, UWidget::StaticClass(), FName(*DesiredName));
 }

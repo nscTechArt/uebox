@@ -217,7 +217,14 @@ async function copyUserCode(): Promise<void> {
     -->
     <div v-if="savedOAuth && oauthEntry" class="linked">
       <span class="linked-check">✓</span>
-      <span>{{ $t('aiProvider.apiKey.oauthLinked', { name: oauthEntry.displayName }) }}</span>
+      <span>{{
+        $t(
+          oauthEntry.id === 'zcode'
+            ? 'aiProvider.apiKey.zcodeLinked'
+            : 'aiProvider.apiKey.oauthLinked',
+          { name: oauthEntry.displayName }
+        )
+      }}</span>
     </div>
     <div v-else-if="keyJustFetched && oauthEntry" class="linked pending">
       <span class="linked-check">✓</span>
@@ -225,6 +232,7 @@ async function copyUserCode(): Promise<void> {
     </div>
 
     <p class="hint">{{ $t('aiProvider.apiKey.hint') }}</p>
+    <p v-if="oauthEntry?.id === 'zcode'" class="hint">{{ $t('aiProvider.apiKey.zcodeHint') }}</p>
 
     <!-- 设备码流程：把码显示出来，浏览器已自动打开，输不进去时可手输 -->
     <AppModal

@@ -142,7 +142,9 @@ public:
 	 * @param Payload 请求参数:
 	 *   - path: Widget Blueprint 路径（必填）
 	 *   - widget_name: 控件名称（必填）
-	 *   - variable_name: 变量名称（可选，默认使用控件名）
+	 *   - variable_name: 变量名称（可选，默认使用控件名）。给了就按编辑器改名的路子改：
+	 *     图表里的变量读写、绑定事件、属性/动画/导航绑定跟着改名；名字被占用直接拒绝，
+	 *     回执里 graph_references_updated 说明引用是否都改过来了
 	 * @param RequestId 请求 ID
 	 */
 	static void Handle_MakeVariable(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
@@ -209,10 +211,4 @@ private:
 	 * 解析 Vector2D 从 JSON 对象
 	 */
 	static FVector2D ParseVector2D(const TSharedPtr<FJsonObject>& Obj);
-	
-	/**
-	 * 在 WidgetTree 中生成唯一名称（防止重名崩溃）
-	 * 如果 DesiredName 已存在，自动追加 _1, _2, ... 后缀
-	 */
-	static FName GenerateUniqueWidgetName(class UWidgetTree* WidgetTree, const FString& DesiredName);
 };

@@ -113,6 +113,9 @@ const GENERIC_EVENT_CHANNELS = new Set([
   // 工作室模式的名册、任务板、留言变了。只带 sessionId，面板自己去重读 ——
   // 任务板在两轮之间也要活着，所以不挂在按运行订阅的那套事件上
   'agent-v3:team-board',
+  // 队员干活时的一条动态（调了什么工具、说了什么）。后台派的活进度推不到
+  // 已经结束的那次工具调用上，单独走这条
+  'agent-v3:team-activity',
   // 两条内核 session 抢同一个资产。必须让用户看见 —— 他可能开着两个窗口，
   // 以为两边在干不同的活
   'agent-v3:lock-conflict',
@@ -2224,6 +2227,8 @@ const api = {
     saveProvider: (draft: unknown) => ipcRenderer.invoke('ai-provider:save-provider', draft),
     deleteProvider: (providerId: string) =>
       ipcRenderer.invoke('ai-provider:delete-provider', providerId),
+    /** 正在跑的对话里有几个用着这个服务商。删之前问 */
+    usage: (providerId: string) => ipcRenderer.invoke('ai-provider:usage', providerId),
     setRoles: (patch: unknown) => ipcRenderer.invoke('ai-provider:set-roles', patch),
     /** 连通性测试。用草稿而不是已存配置，让用户存盘前就能验 */
     test: (draft: unknown, modelId: string) =>

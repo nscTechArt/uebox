@@ -53,7 +53,14 @@
             </div>
           </div>
           <!-- 文本区域 -->
-          <div v-if="textContent" class="text-content">{{ textContent }}</div>
+          <div v-if="textContent" class="message-text">
+            <span v-if="commandMode" class="command-mode">
+              <PhTarget v-if="commandMode.name === 'goal'" aria-hidden="true" />
+              <PhUsersThree v-else aria-hidden="true" />
+              {{ t(`assistant.composer.${commandMode.name}Mode`) }}
+            </span>
+            <div class="text-content">{{ commandMode?.text ?? textContent }}</div>
+          </div>
         </div>
         <!-- 工具栏 -->
         <div class="tools">
@@ -78,7 +85,8 @@ import type {
 import { useI18n } from 'vue-i18n'
 import { openImageViewer } from '@renderer/services/imageViewer'
 import AttachmentCard from './AttachmentCard.vue'
-import { PhCheck, PhCopy, PhPencilSimple } from '@phosphor-icons/vue'
+import { PhCheck, PhCopy, PhPencilSimple, PhTarget, PhUsersThree } from '@phosphor-icons/vue'
+import { parseGoalCommandDraft, parseTeamCommandDraft } from './slashCommands'
 
 const { t } = useI18n()
 
@@ -130,6 +138,15 @@ const textContent = computed(() => {
     )
     .map((item) => item.text)
     .join('\n')
+})
+
+// 和输入框使用相同的模式标签；原文仍用于复制、编辑和持久化。
+const commandMode = computed(() => {
+  const goal = parseGoalCommandDraft(textContent.value)
+  if (goal?.trim()) return { name: 'goal', text: goal }
+  const team = parseTeamCommandDraft(textContent.value)
+  if (team?.trim()) return { name: 'team', text: team }
+  return null
 })
 
 /**
@@ -337,7 +354,28 @@ function handleKeydown(e: KeyboardEvent): void {
   border-radius: 8px;
 }
 
+.message-text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.command-mode {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-bg);
+  color: var(--color-accent-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .text-content {
+  min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text !important;

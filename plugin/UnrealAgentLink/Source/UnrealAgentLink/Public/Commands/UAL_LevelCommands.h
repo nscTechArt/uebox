@@ -87,6 +87,18 @@ public:
 	static void Handle_SetLevelStreaming(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 
 	/**
+	 * level.light_census —— 灯光普查（只读）。
+	 *
+	 * 每盏灯：类型、移动性、投不投影、强度 / 衰减半径、最大绘制距离；
+	 * 每盏投影局部光：半径里压着多少投影物体，其中可移动的、带 WPO 材质的、
+	 * Nanite 的各几个，实例化组件里有多少实例落在半径内。
+	 *
+	 * 请求: { "world": "auto" | "editor", "limit": 50, "label_contains": "Lamp" }
+	 * 响应: { ok, world, totals{...}, lights[], ...截断标记 }
+	 */
+	static void Handle_LightCensus(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/**
 	 * 一个世界的关卡组成，`level.list` 的响应体本身。
 	 *
 	 * 公开出来是给 `pie.run` 用的：试玩报告里要能回答「编辑器里有、游戏里没有

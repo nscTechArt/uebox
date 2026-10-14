@@ -19,6 +19,7 @@
  * 只在一次运行（进程）里有效：谁在跑、谁在等，都是内存里的事；留言本身照旧落盘。
  */
 
+import type { TeamActivity, TeamLiveView } from '../../../../shared/agentTeam'
 import { PRODUCER, type TeamMail, type TeamStore } from './teamStore'
 
 export interface LiveHandle {
@@ -83,9 +84,31 @@ export interface TeamLive {
   pendingJobs(): Array<{ member: string; startedAt: number }>
   /** 等下一件后台活结束。到点没结束给 false */
   nextSettle(timeoutMs: number, signal?: AbortSignal): Promise<boolean>
+  /** 此刻谁在跑、谁在等、谁手上有活。给界面上的办公室看 */
+  view(): TeamLiveView
+  /** 队员干活时的一条进度（调工具、说话）。记下最近几条，并当场推给界面 */
+  note(member: string, text: string): void
 }
 
-export function createTeamLive(store: TeamStore): TeamLive {
+/** 每人留几条动态 */
+const RECENT_PER_MEMBER = 8
+/** 一条动态最长多少字（它说的话可能是一大段） */
+const ACTIVITY_SHOWN = 600
+
+/** 界面上只露派活那段话的第一行，再长就截掉 */
+const ASSIGNMENT_SHOWN = 160
+
+/**
+ * @param onChange 谁开始跑 / 收工、开始等 / 等到了、接活 / 交活时调用，界面据此重读。
+ *   只是通知，不带内容；调用方自己合并密集的几次
+ */
+export function createTeamLive(
+  store: TeamStore,
+  onChange?: () => void,
+  onActivity?: (activity: TeamActivity) => void
+): TeamLive {
+  const changed = (): void => onChange?.()
+  const recent = new Map<string, TeamActivity[]>()
   const running = new Map<string, { handle: LiveHandle; pending: Set<string> }>()
   const waiting = new Map<string, { mailId: string; wake: (result: WaitResult) => void }>()
   const readers = new Map<string, Array<() => void>>()
@@ -139,9 +162,11 @@ export function createTeamLive(store: TeamStore): TeamLive {
       const k = key(name)
       const entry = { handle, pending: new Set<string>() }
       running.set(k, entry)
+      changed()
       return async () => {
         if (running.get(k) !== entry) return
         running.delete(k)
+        changed()
         // 插进去了但没来得及读：退回信箱，下次接活再交
         if (entry.pending.size) await store.requeue([...entry.pending]).catch(() => undefined)
       }
@@ -156,6 +181,7 @@ export function createTeamLive(store: TeamStore): TeamLive {
       const waiter = waiting.get(k)
       if (waiter) {
         waiting.delete(k)
+        changed()
         void markRead([mail.id])
         waiter.wake(
           mail.replyTo === waiter.mailId
@@ -202,6 +228,7 @@ export function createTeamLive(store: TeamStore): TeamLive {
     awaiting(member) {
       const k = key(member)
       awaited.set(k, (awaited.get(k) ?? 0) + 1)
+      changed()
       let done = false
       return () => {
         if (done) return
@@ -209,6 +236,7 @@ export function createTeamLive(store: TeamStore): TeamLive {
         const left = (awaited.get(k) ?? 1) - 1
         if (left > 0) awaited.set(k, left)
         else awaited.delete(k)
+        changed()
       }
     },
 
@@ -217,6 +245,7 @@ export function createTeamLive(store: TeamStore): TeamLive {
     setAssignment(member, text) {
       if (text === null) current.delete(key(member))
       else current.set(key(member), { member, text, since: Date.now() })
+      changed()
     },
 
     assignments: () => [...current.values()].map((a) => ({ ...a })),
@@ -251,6 +280,29 @@ export function createTeamLive(store: TeamStore): TeamLive {
             false
           ),
 
+    view: () => ({
+      running: [...running.keys()],
+      waiting: [...waiting.keys()],
+      awaited: [...awaited.keys()],
+      assignments: [...current.values()].map(({ member, text, since }) => ({
+        member,
+        text: (text.split('\n').find((line) => line.trim()) ?? '')
+          .trim()
+          .slice(0, ASSIGNMENT_SHOWN),
+        since
+      })),
+      recent: [...recent.values()].flat().sort((a, b) => a.at - b.at)
+    }),
+
+    note(member, text) {
+      const line = text.trim().slice(0, ACTIVITY_SHOWN)
+      if (!line) return
+      const activity = { member, text: line, at: Date.now() }
+      const k = key(member)
+      recent.set(k, [...(recent.get(k) ?? []), activity].slice(-RECENT_PER_MEMBER))
+      onActivity?.(activity)
+    },
+
     waitReply: (waiterName, mailId, timeoutMs, signal) =>
       timed<WaitResult>(
         timeoutMs,
@@ -259,8 +311,10 @@ export function createTeamLive(store: TeamStore): TeamLive {
           const k = key(waiterName)
           const entry = { mailId, wake: resolve }
           waiting.set(k, entry)
+          changed()
           return () => {
             if (waiting.get(k) === entry) waiting.delete(k)
+            changed()
           }
         },
         { kind: 'timeout' }

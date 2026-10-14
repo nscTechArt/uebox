@@ -144,7 +144,13 @@ public class UnrealAgentLink : ModuleRules
 				// 状态监控的本地缓存命中率（UAL_EditorHealth）：GatherDerivedDataCacheSummaryStats。
 				// 引擎内建模块（Engine/Source/Developer/DerivedDataCache），5.0–5.8 都在，
 				// 不是插件；那个函数 5.3 才有，5.0–5.2 在 .cpp 里按版本编掉
-				"DerivedDataCache"
+				"DerivedDataCache",
+
+				// 网格优化（UAL_MeshCommands 的 mesh.optimize）：UStaticMeshEditorSubsystem 的
+				// 加简单碰撞 / 删碰撞 / 凸包分解。引擎本体编辑器模块（Engine/Source/Editor/
+				// StaticMeshEditor），5.0–5.8 都在、不是插件；用到的三个函数签名九版逐个 grep 过一致。
+				// 头文件里带进来的 EditorSubsystem / StaticMeshDescription 由 UnrealEd 公开依赖传递
+				"StaticMeshEditor"
 
 				// GameplayTags / GameplayTagsEditor 两个依赖**故意不加**。
 				//
@@ -180,7 +186,11 @@ public class UnrealAgentLink : ModuleRules
 		// Note: Target.Version 仅在 UE 5.1+ 可用，使用 ReadOnlyBuildVersion 兼容 5.0
 		#if UE_5_1_OR_LATER
 		{
-			// 示例：可在此添加 5.1+ 特有模块
+			// content.import 的 import_messages 订阅 UInterchangeManager::OnBatchImportComplete、
+			// 读 UInterchangeResult。5.1 起两个都是引擎本体模块（Engine/Source/Runtime/Interchange/
+			// Core、Engine），AssetTools 自己就依赖它们，不引入对插件 DLL 的硬导入；
+			// 5.0 的 Interchange 还在 Plugins/Experimental 里，所以只在 5.1+ 加
+			PrivateDependencyModuleNames.AddRange(new string[] { "InterchangeCore", "InterchangeEngine" });
 		}
 		#endif
 	}

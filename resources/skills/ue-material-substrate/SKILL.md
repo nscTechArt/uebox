@@ -29,6 +29,11 @@ counting.
 5. read the compile result in its reply, then ue_save
 ```
 
+A clean compile is not the result: `ue_screenshot` the object under the level's lighting
+and compare it with what the user asked for (glass from the side, coats at a grazing angle).
+Changing a material that already exists? `material_get_referencers` first; every instance
+and level using it changes too, and `material_duplicate` gives a copy to experiment on.
+
 Minimal graph (a blue dielectric):
 
 ```
@@ -142,8 +147,9 @@ lighting pass per pixel. For game assets keep one closure: set
 `bUseParameterBlending: true` on Horizontal / Vertical / Add operators. The look becomes a
 blend of parameters instead of two layers of light, and it usually holds up. Keep true
 multi-layer results for hero assets and film. Anisotropy, glints, specular profiles,
-Fuzz, SSS diffusion and F90 each push the Slab into a more expensive class. Details and
-the out-of-budget behavior: **`references/pitfalls.md`**.
+Fuzz, SSS diffusion and F90 each push the Slab into a more expensive class. Count closures
+and these features to judge cost; a shader instruction count does not show the extra
+lighting work. Details and the out-of-budget behavior: **`references/pitfalls.md`**.
 
 ## Failure handling
 

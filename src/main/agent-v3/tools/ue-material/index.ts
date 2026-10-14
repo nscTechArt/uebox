@@ -1163,6 +1163,7 @@ const compileMaterial = defineUeTool({
     errors?: string[]
     warnings?: string[]
     error_nodes?: { node_id?: string; class?: string; error?: string; note?: string }[]
+    stats?: MaterialCompileStats
   }) => {
     const errors = r.errors ?? []
     const warnings = r.warnings ?? []
@@ -1200,9 +1201,89 @@ const compileMaterial = defineUeTool({
       lines.push(`⚠️ ${warnings.length} 个警告：`, ...warnings.map((w) => `  ${w}`))
     }
 
+    if (r.stats) {
+      lines.push(...formatCompileStats(r.stats))
+    }
+
     return { text: lines.join('\n'), details: r }
   }
 })
+
+/** 插件 material.compile 回执里的 `stats`，字段一一对应引擎的 FMaterialStatistics */
+export interface MaterialCompileStats {
+  /** null = 引擎没拿到（编辑器 Stats 面板此时显示 n/a） */
+  pixel_shader_instructions?: number | null
+  vertex_shader_instructions?: number | null
+  samplers?: number
+  samplers_max?: number
+  texture_samples_pixel?: number
+  texture_samples_vertex?: number
+  virtual_texture_samples?: number
+  uv_scalars?: number
+  interpolator_scalars?: number
+  static_switches?: string[]
+  static_component_masks?: string[]
+}
+
+/**
+ * 编译通过后把成本摆出来 —— 就是材质编辑器底部 Stats 面板那几行。
+ *
+ * 只照抄引擎给的数，不在这里加「多少条算贵」的判断：贵不贵取决于这个材质
+ * 铺多大面积、跑在什么平台，那是看数的人的事。唯一写出来的上限是采样器，
+ * 因为分母也是引擎给的（samplers_max），超了引擎自己会报编译错误。
+ */
+export function formatCompileStats(stats: MaterialCompileStats): string[] {
+  const instr = (n: number | null | undefined): string =>
+    typeof n === 'number' && n > 0 ? `${n} 条` : 'n/a'
+  const lines = ['成本（与材质编辑器 Stats 面板同源）：']
+
+  const ps = stats.pixel_shader_instructions
+  const vs = stats.vertex_shader_instructions
+  lines.push(`  指令数：像素着色器 ${instr(ps)}，顶点着色器 ${instr(vs)}`)
+  if (!(typeof ps === 'number' && ps > 0) || !(typeof vs === 'number' && vs > 0)) {
+    // 引擎原话：离线着色器编译器不可用或出错 —— 不是零成本，是没量出来
+    lines.push('    （n/a = 引擎没量出指令数：离线着色器编译器不可用或出错，不代表零成本）')
+  }
+
+  if (typeof stats.samplers === 'number') {
+    lines.push(
+      `  采样器：${stats.samplers}` +
+        (typeof stats.samplers_max === 'number' ? ` / ${stats.samplers_max}` : '') +
+        '（Sampler Source 为 Shared:Wrap/Clamp 的贴图共用槽位）'
+    )
+  }
+  if (
+    typeof stats.texture_samples_pixel === 'number' ||
+    typeof stats.texture_samples_vertex === 'number'
+  ) {
+    lines.push(
+      `  贴图采样（引擎估算）：像素 ${stats.texture_samples_pixel ?? 0}，顶点 ${stats.texture_samples_vertex ?? 0}` +
+        (stats.virtual_texture_samples ? `，虚拟贴图 ${stats.virtual_texture_samples}` : '')
+    )
+  }
+  if (typeof stats.uv_scalars === 'number' || typeof stats.interpolator_scalars === 'number') {
+    lines.push(
+      `  插值器标量：UV ${stats.uv_scalars ?? 0}，自定义 ${stats.interpolator_scalars ?? 0}`
+    )
+  }
+
+  const switches = stats.static_switches ?? []
+  if (switches.length) {
+    // 2^N 是排列数的上限：实例里实际用到的开关组合才会各编一份着色器
+    lines.push(
+      `  静态开关 ${switches.length} 个：${switches.join('、')}` +
+        `（每种开关组合各编一份着色器，最多 ${2 ** switches.length} 种，实例里实际用到几种就编几种）`
+    )
+  } else if (stats.static_switches) {
+    lines.push('  静态开关：无')
+  }
+  const masks = stats.static_component_masks ?? []
+  if (masks.length) {
+    lines.push(`  静态通道遮罩参数 ${masks.length} 个：${masks.join('、')}（同样按取值分排列）`)
+  }
+
+  return lines
+}
 
 const setMaterialNodeValue = defineUeTool({
   name: 'material_set_node_value',

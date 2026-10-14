@@ -310,6 +310,144 @@ describe('ue_destroy_actor 部分失败', () => {
   })
 })
 
+/*
+ * 删前查引用。用户手动删时编辑器会问「它被关卡蓝图 / 别的 Actor 引用了，确定？」，
+ * 插件这条路以前跳过了这一步，门和触发器的连线无声断掉、回执照样说成功。
+ * 现在插件按住被引用的不删，列在 blocked 里；带 force 才照删。
+ */
+describe('ue_destroy_actor 被引用的 Actor', () => {
+  const doorBlocked = {
+    name: 'Door_1',
+    path: '/Game/L.L:PersistentLevel.Door_1',
+    class: 'BP_Door_C',
+    referencer_count: 2,
+    referencers: [
+      {
+        kind: 'level_blueprint',
+        referencer: 'Level Blueprint',
+        referencer_path: '/Game/L.L:PersistentLevel.L',
+        node_count: 2,
+        nodes: 'EventGraph: Door_1'
+      },
+      {
+        kind: 'actor',
+        referencer: 'Trigger_1',
+        referencer_path: '/Game/L.L:PersistentLevel.Trigger_1',
+        property: 'TargetDoor'
+      }
+    ]
+  }
+
+  it('默认不带 force：payload 里没有 force 字段', async () => {
+    callRequest.mockResolvedValue({ count: 1, target_count: 1, deleted_actors: [] })
+
+    await run(createDestroyActorTool(), { targets: { names: ['Crate'] } })
+
+    const payload = callRequest.mock.calls[0][1] as Record<string, unknown>
+    expect(payload.force).toBeUndefined()
+  })
+
+  it('force: true 原样透传给插件', async () => {
+    callRequest.mockResolvedValue({ count: 1, target_count: 1, deleted_actors: [] })
+
+    await run(createDestroyActorTool(), { targets: { names: ['Door_1'] }, force: true })
+
+    const payload = callRequest.mock.calls[0][1] as Record<string, unknown>
+    expect(payload.force).toBe(true)
+  })
+
+  it('删 2 个、1 个被引用按住：第一句说部分完成，并逐条列出引用方和下一步', async () => {
+    callRequest.mockResolvedValue({
+      count: 1,
+      target_count: 2,
+      failed_count: 0,
+      blocked_count: 1,
+      blocked: [doorBlocked],
+      references_checked: true,
+      deleted_actors: [{ name: 'Crate', path: '/Game/L.L:PersistentLevel.Crate' }]
+    })
+
+    const result = await run(createDestroyActorTool(), {
+      targets: { names: ['Crate', 'Door_1'] }
+    })
+
+    expect(result.success).toBe(true)
+    // 被按住的算跳过，不能再从 target_count - count 里算成一个「失败」
+    expect(firstLine(result)).toBe(
+      '⚠️ 部分完成：1 个 Actor 成功 / 0 个 Actor 失败 / 1 个 Actor 跳过。'
+    )
+    const message = String(result.message)
+    expect(message).toContain('Door_1')
+    expect(message).toContain('关卡蓝图（2 个节点：EventGraph: Door_1）')
+    expect(message).toContain('Trigger_1 的 TargetDoor')
+    expect(message).toContain('force: true')
+    expect(result.blocked_count).toBe(1)
+    expect(result.failed_count).toBeUndefined()
+  })
+
+  it('全部被引用按住（409）：工具失败，错误里是引用清单而不是插件那句英文概要', async () => {
+    callRequest.mockResolvedValue({
+      count: 0,
+      target_count: 1,
+      failed_count: 0,
+      blocked_count: 1,
+      blocked: [doorBlocked],
+      deleted_actors: [],
+      ok: false,
+      success: false,
+      code: 409,
+      error: 'None of the 1 matched actors were destroyed: each is still referenced (see blocked).'
+    })
+
+    const result = await run(createDestroyActorTool(), { targets: { names: ['Door_1'] } })
+
+    expect(result.success).toBe(false)
+    const error = String(result.error)
+    expect(error.split('\n')[0]).toContain('没删')
+    expect(error).not.toMatch(/^已删除/)
+    expect(error).toContain('关卡蓝图')
+    expect(error).toContain('Trigger_1 的 TargetDoor')
+    expect(error).toContain('force: true')
+    expect(result.blocked_count).toBe(1)
+  })
+
+  it('force 删掉被引用的：回执点名哪些引用已经变成 None', async () => {
+    callRequest.mockResolvedValue({
+      count: 1,
+      target_count: 1,
+      failed_count: 0,
+      blocked_count: 0,
+      deleted_actors: [doorBlocked]
+    })
+
+    const result = await run(createDestroyActorTool(), {
+      targets: { names: ['Door_1'] },
+      force: true
+    })
+
+    expect(result.success).toBe(true)
+    const message = String(result.message)
+    expect(message.split('\n')[0]).toBe('已删除 1 个 Actor')
+    expect(message).toContain('变成 None')
+    expect(message).toContain('Trigger_1 的 TargetDoor')
+  })
+
+  it('引用方超出插件列出的上限：说还有几处', async () => {
+    callRequest.mockResolvedValue({
+      count: 0,
+      target_count: 1,
+      blocked_count: 1,
+      blocked: [{ ...doorBlocked, referencer_count: 25 }],
+      deleted_actors: [],
+      ok: false
+    })
+
+    const result = await run(createDestroyActorTool(), { targets: { names: ['Door_1'] } })
+
+    expect(String(result.error)).toContain('还有 23 处')
+  })
+})
+
 describe('ue_set_transform 回读', () => {
   it('报的是引擎回读值，不是入参', async () => {
     // 请求 z=500，引擎因为挂在父级下只落到了 480

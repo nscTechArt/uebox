@@ -218,17 +218,11 @@
             <PhX :size="12" />
           </button>
         </div>
-        <!-- 工作室模式（/team）的任务板。只有工作室对话才有，默认收成一行 -->
+        <!-- 工作室模式（/team）的任务板摘要。只有工作室对话才有，点开在右侧面板看全部 -->
         <TeamBoardPanel
           v-if="teamBoard.team.value"
           :team="teamBoard.team.value"
-          :running="isGenerating"
-          :model-choices="teamBoard.modelChoices.value"
-          :models-loaded="teamBoard.modelsLoaded.value"
-          @reopen="teamBoard.reopen"
-          @end="teamBoard.end"
-          @open-models="teamBoard.loadModels"
-          @set-model="teamBoard.setMemberModel"
+          @open="teamTab.show"
         />
         <InputComposer
           :is-generating="isGenerating"
@@ -261,25 +255,47 @@
     </div>
 
     <AgentBrowserPane
-      v-if="browserSessionId || fileReview"
+      v-if="browserSessionId || fileReview || teamTab.open.value"
       :key="`${sid}:${browserSessionId}`"
       :session-id="browserSessionId || ''"
-      :open="browserPaneOpen || !!fileReview"
+      :open="browserPaneOpen || !!fileReview || teamTab.open.value"
       :review-open="!!fileReview"
-      :review-active="!!fileReview && (fileReview.active || !browserPaneOpen)"
+      :review-active="
+        !!fileReview && !teamTab.active.value && (fileReview.active || !browserPaneOpen)
+      "
+      :team-open="teamTab.open.value"
+      :team-active="teamTab.active.value"
       :url="browserUrl"
       :navigation="browserNavigation"
       :group="browserGroup"
       :visible="paneActive"
-      @select-review="selectFileReview"
+      @select-review="selectReviewTab"
       @close-review="closeFileReview"
-      @select-browser="selectBrowserTab"
+      @select-team="teamTab.show"
+      @close-team="teamTab.close"
+      @select-browser="selectBrowserPage"
     >
       <template #review>
         <FileReviewPane
           v-if="fileReview"
           :changes="fileReview.changes"
           :selected-path="fileReview.selectedPath"
+        />
+      </template>
+      <template #team>
+        <TeamBoardPanel
+          v-if="teamBoard.team.value"
+          docked
+          :team="teamBoard.team.value"
+          :session-id="browserSessionId || ''"
+          :activity="teamBoard.activity.value"
+          :running="isGenerating"
+          :model-choices="teamBoard.modelChoices.value"
+          :models-loaded="teamBoard.modelsLoaded.value"
+          @reopen="teamBoard.reopen"
+          @end="teamBoard.end"
+          @open-models="teamBoard.loadModels"
+          @set-model="teamBoard.setMemberModel"
         />
       </template>
     </AgentBrowserPane>
@@ -344,6 +360,7 @@ import { useSessionBrowser } from './composables/useSessionBrowser'
 import { useChatSessionsStore, type BoundNotebook } from '../../store/modules/chatSessions'
 import TeamBoardPanel from './components/TeamBoardPanel.vue'
 import { useTeamBoard } from './composables/useTeamBoard'
+import { useTeamTab } from './composables/useTeamTab'
 import { useSessionGoal } from './composables/useSessionGoal'
 import { useTabsStore } from '../../store/modules/tabs'
 import {
@@ -2640,6 +2657,23 @@ const {
 } = useSessionBrowser(browserSessionId, paneActive, () => {
   message.error(t('assistant.browserPane.restoreFailed'))
 })
+/** 右侧面板的「团队任务」页签。点输入框上方的团队摘要打开 */
+const teamTab = useTeamTab(
+  sid,
+  computed(() => !!teamBoard.team.value),
+  fileReview,
+  browserPaneOpen
+)
+
+function selectReviewTab(): void {
+  teamTab.blur()
+  selectFileReview()
+}
+
+function selectBrowserPage(): void {
+  teamTab.blur()
+  selectBrowserTab()
+}
 </script>
 
 <style scoped lang="less">

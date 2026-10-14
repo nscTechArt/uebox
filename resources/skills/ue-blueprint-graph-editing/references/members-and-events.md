@@ -23,6 +23,7 @@ Read this when the task involves any of:
 - Reparenting
 - Networked variables
 - Networked events (RPCs)
+- Testing networked logic
 
 ---
 
@@ -152,7 +153,9 @@ adds and removes them, and deletes the function outright:
 result node.
 
 Changing a signature leaves **existing call sites wired to the old pins** — compile after,
-and re-wire what broke. Same for `remove_function`: its call sites become orphans.
+and re-wire what broke. Same for `remove_function`: its call sites become orphans. Call
+sites in *other* Blueprints count too; `SKILL.md` "Changing what others already use" lists
+them.
 
 ## Reparenting
 
@@ -163,6 +166,8 @@ copying the graphs across, which is its own source of mistakes.
 It **compiles automatically afterwards and returns the errors**, because reparenting usually
 breaks nodes that referenced members of the old parent. Treat `compile_errors > 0` as a
 failed operation even though the call succeeded: read `messages` and fix before continuing.
+That compile covers this Blueprint only — child Blueprints and callers need their own
+(`SKILL.md`, "Changing what others already use").
 
 ## Networked variables
 
@@ -196,3 +201,21 @@ PlayerController, or something they own. Put the request there, not on a level a
 `blueprint_get_graph` returns `replication` / `reliable` on replicated events. To change an
 existing event, delete the node and recreate it with the new `replication`, wiring back to
 its neighbours by `node_id`.
+
+## Testing networked logic
+
+A single-player playtest never exercises replication, RPCs or ownership, so a clean
+default `ue_playtest` says nothing about multiplayer. Run it networked:
+`ue_playtest({ net_mode: "listen_server", num_players: 2, ... })`. Every PrintString line then
+carries the instance that ran it — `Server:` or `Client 1:` — and the summary counts lines per
+instance.
+
+Put PrintStrings where they prove the path: after the replicated change, inside the OnRep
+function, inside the RPC. Done means the expected prefix shows up — `Client 1: OnRep_Health 80`
+after the server changed Health; `Server: Server_RequestFire` after the client fired. Lines
+only from `Server:` mean the client side never ran. `errors` are not tagged by instance, and
+`events` / screenshots go to the first window.
+
+Input-driven paths (the client pressing Fire) still need a real player: if `events` cannot
+trigger it, hand the user the same check — Play dropdown → Multiplayer Options, Net Mode = Play
+As Listen Server, Number of Players = 2 — and tell them which prefixed line to look for.

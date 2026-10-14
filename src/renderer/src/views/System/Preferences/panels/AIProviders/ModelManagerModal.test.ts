@@ -380,6 +380,8 @@ describe('ModelManagerModal 的删除按钮', () => {
   })
 
   it('选中 Provider 时，删除按钮才删整条 Provider', async () => {
+    // 删之前先问主进程有几个对话在用它（确认框里要说），这里没有对话在用
+    vi.stubGlobal('api', { aiProvider: { usage: vi.fn().mockResolvedValue(0) } })
     const state = makeState([{ id: 'a' }], {
       remove: vi.fn().mockResolvedValue({ ok: true })
     })
@@ -387,9 +389,11 @@ describe('ModelManagerModal 的删除按钮', () => {
     const confirm = captureConfirm()
 
     await wrapper.find('.detail-actions .app-button--danger').trigger('click')
+    await flushPromises()
     await confirm.ok()
 
     expect(state.remove).toHaveBeenCalledWith('p1')
+    vi.unstubAllGlobals()
   })
 
   /** 文案得写明删的是谁，否则两个确认框长得一样，用户凭位置猜 */

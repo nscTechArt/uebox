@@ -8,6 +8,7 @@ vi.mock('../defineUeTool', () => ({
 import { callUe } from '../defineUeTool'
 import { inspectTools } from './index'
 import { formatInspectOutcome, type InspectOutput } from './inspectComponents'
+import { formatLightCensus, type LightCensusOutput } from './lightCensus'
 import { sliceGraph, type GraphData } from './materialGraphSlice'
 
 const mockUe = vi.mocked(callUe)
@@ -23,7 +24,8 @@ describe('细粒度只读工具', () => {
   it('都是只读工具', () => {
     expect(inspectTools().map((t) => [t.name, t.unrealBox.risk])).toEqual([
       ['ue_inspect_components', 'safe'],
-      ['material_graph_slice', 'safe']
+      ['material_graph_slice', 'safe'],
+      ['ue_light_census', 'safe']
     ])
   })
 })
@@ -183,5 +185,158 @@ describe('material_graph_slice', () => {
     await expect(
       tool('material_graph_slice').execute('t', { path: '/Game/M_Big' })
     ).rejects.toThrow()
+  })
+})
+
+describe('ue_light_census', () => {
+  const lamp: LightCensusOutput['lights'][number] = {
+    label: 'ParkLampLight_01',
+    component: 'LightComponent0',
+    type: 'point',
+    mobility: 'movable',
+    in_scene: true,
+    cast_shadows: true,
+    cast_dynamic_shadows: true,
+    intensity: 5000,
+    intensity_units: 'Candelas',
+    attenuation_radius: 1500,
+    max_draw_distance: 0,
+    max_draw_distance_set: false,
+    location: [100, 200, 300],
+    census: {
+      primitives: 42,
+      movable: 3,
+      stationary: 0,
+      static: 39,
+      wpo: 12,
+      wpo_evaluation_off: 2,
+      nanite: 30,
+      non_nanite: 10,
+      other: 2,
+      instanced_components: 4,
+      instances: 2300,
+      top_meshes: [
+        {
+          mesh: '/Game/Foliage/SM_Grass.SM_Grass',
+          primitives: 2,
+          instances: 2000,
+          movable: 0,
+          wpo: 2,
+          nanite: false
+        }
+      ]
+    }
+  }
+  const base: LightCensusOutput = {
+    world: 'editor',
+    totals: {
+      lights: 3,
+      in_scene: 3,
+      shadow_casting: 2,
+      shadow_casting_local: 1,
+      shadow_casting_local_without_max_draw_distance: 1,
+      radius_census_done: 1,
+      shadow_casting_primitives: 900,
+      by_type: { point: 1, directional: 1, sky: 1 },
+      by_mobility: { movable: 2, stationary: 1 }
+    },
+    lights: [
+      lamp,
+      {
+        label: 'Sun',
+        component: 'LightComponent0',
+        type: 'directional',
+        mobility: 'stationary',
+        in_scene: true,
+        cast_shadows: true,
+        cast_dynamic_shadows: true,
+        intensity: 10,
+        max_draw_distance: 0,
+        max_draw_distance_set: false
+      }
+    ]
+  }
+
+  // 「为什么卡」要落到每盏灯的半径里压着什么：可移动、WPO、Nanite、实例数都要看得见
+  it('逐灯报设置和半径里的投影物体', () => {
+    const out = formatLightCensus(base)
+    expect(out).toContain('读的是编辑器世界')
+    expect(out).toContain('共 3 盏灯')
+    expect(out).toContain('点光源')
+    expect(out).toContain('强度 5000 Candelas')
+    expect(out).toContain('最大绘制距离未设')
+    expect(out).toContain('半径内投影物体 42：可移动 3')
+    expect(out).toContain('带 WPO 12（其中 2 个组件关了 Evaluate World Position Offset）')
+    expect(out).toContain('Nanite 30 / 非 Nanite 10')
+    expect(out).toContain('半径内 2,300 个实例')
+    expect(out).toContain('/Game/Foliage/SM_Grass.SM_Grass（2,000 实例，非 Nanite，WPO 2）')
+    expect(out).toContain('平行光的阴影不受半径约束')
+  })
+
+  // 只报事实：没有门槛，就不该出现「太多」「过多」这类判断
+  it('不替用户判「灯太多」', () => {
+    expect(formatLightCensus(base)).not.toMatch(/太多|过多|超标/)
+  })
+
+  it('说清读的是哪个世界：PIE 时带上插件的说明和实例数', () => {
+    const out = formatLightCensus({
+      ...base,
+      world: 'pie',
+      world_note: '含运行时生成的 Actor。',
+      play_world_count: 2
+    })
+    expect(out).toContain('正在运行的游戏世界（PIE）')
+    expect(out).toContain('含运行时生成的 Actor')
+    expect(out).toContain('2 个游戏实例')
+  })
+
+  // 截断和着色器还在编译都会让数偏小 / 偏大，必须说出来，不能当成完整的数转述
+  it('截断、预算用完、着色器在编译、聚光灯按整球都写明', () => {
+    const out = formatLightCensus({
+      ...base,
+      lights: [{ ...lamp, type: 'spot', census: { ...lamp.census!, instances_upper_bound: true } }],
+      lights_truncated: true,
+      radius_census_skipped: 7,
+      primitives_truncated: true,
+      primitives_examined: 200000,
+      instance_budget_exhausted: true,
+      shaders_compiling: 120,
+      limits: { radius_census_lights: 200 }
+    })
+    expect(out).toContain('只列了 1 盏明细')
+    expect(out).toContain('还有 7 盏投影局部光没做半径普查（单次上限 200 盏）')
+    expect(out).toContain('只拿前 200,000 个做半径判定')
+    expect(out).toContain('是上界')
+    expect(out).toContain('还有 120 个着色器在编译')
+    expect(out).toContain('WPO 数现在是下限')
+    expect(out).toContain('聚光灯按整个衰减半径球算')
+  })
+
+  it('没有灯时直说', () => {
+    const out = formatLightCensus({
+      ...base,
+      totals: { ...base.totals, lights: 0, by_type: {}, by_mobility: {} },
+      lights: []
+    })
+    expect(out).toContain('没有找到灯光组件')
+  })
+
+  it('参数原样传给 level.light_census，默认读当下的世界', async () => {
+    mockUe.mockResolvedValueOnce(base)
+    const result = await tool('ue_light_census').execute('t', { label_contains: 'Lamp' })
+    expect(mockUe).toHaveBeenCalledWith(
+      'level.light_census',
+      { world: 'auto', limit: 30, label_contains: 'Lamp' },
+      expect.anything()
+    )
+    expect(text(result)).toContain('ParkLampLight_01')
+  })
+
+  // 老插件回 404「Unknown method」，原文对谁都没意义 —— 翻成「插件太旧」并指向更新
+  it('老插件没有这条命令时指向更新插件', async () => {
+    mockUe.mockRejectedValueOnce(
+      new Error('level.light_census 失败：Unknown method: level.light_census')
+    )
+    await expect(tool('ue_light_census').execute('t', {})).rejects.toThrow('project_update_plugin')
   })
 })

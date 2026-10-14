@@ -60,6 +60,7 @@ const NOT_TOOL_NAMES: Record<string, string> = {
     'ue_get_performance_stats 的渲染线程耗时字段；render_task_video 新增 render 前缀后会被扫描到',
   blueprint_path: 'ue_get_actor / blueprint_search_nodes 返回的字段',
   blueprint_name: 'blueprint_add_component 的参数',
+  restore_all: 'ue_run_console_command 的参数：把本工具改过的设置一键还原',
   material_slots: 'ue_content_describe 的 details 字段',
   library_sample: 'search_assets 零命中回退时返回的字段',
   cpp_name: 'blueprint_search_nodes 返回的字段（C++ 里的函数名）',

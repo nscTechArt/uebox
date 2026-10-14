@@ -49,6 +49,8 @@ namespace UALRenderImpl
 	const TCHAR* SUBSYSTEM_CLASS = TEXT("/Script/MovieRenderPipelineEditor.MoviePipelineQueueSubsystem");
 	const TCHAR* DEFERRED_PASS_CLASS = TEXT("/Script/MovieRenderPipelineRenderPasses.MoviePipelineDeferredPassBase");
 	const TCHAR* PATH_TRACER_PASS_CLASS = TEXT("/Script/MovieRenderPipelineRenderPasses.MoviePipelineDeferredPass_PathTracer");
+	/** 5.0–5.8 都在 MovieRenderPipelineSettings 模块（Runtime / Default 加载），类名没改过 */
+	const TCHAR* CONSOLE_VAR_SETTING_CLASS = TEXT("/Script/MovieRenderPipelineSettings.MoviePipelineConsoleVariableSetting");
 
 	/** 5.2 起叫 PrimaryConfig；5.0/5.1 叫 MasterConfig（5.2–5.4 的旧名只剩 C++ typedef，没有 UClass） */
 	UClass* FindPrimaryConfigClass()
@@ -101,7 +103,15 @@ namespace UALRenderImpl
 			if (Quality == TEXT("ultra"))    { Out = { 1024, 1, false, 64, 0 }; return true; }
 			return false;
 		}
-		if (Quality == TEXT("draft"))    { Out = { 1, 1, false, 0, 0 };    return true; }
+		// draft 原来一帧不预热，可 ue-sequencer 技能让用户拿 draft 看预览 —— 首帧曝光、Lumen、TSR 没收敛、
+		// 粒子没起、贴图糊，用户会误判场景。给 8 + 8：
+		//   - 只给引擎预热（EngineWarmUp、不交 GPU）没用：曝光、Lumen、TSR 历史、GPU 粒子、贴图流送的视角
+		//     都得真渲出来才往前走，所以下面 bRenderWarmUpFrames 跟着 RenderWarmUp > 0 打开
+		//   - 8 帧引擎预热每帧交一次 GPU（1 个采样，世界时间往前走 ⅓ 秒左右），最后一帧再原地渲 8 个采样
+		//     攒 TSR / Lumen 历史；曝光在切镜那帧直接取目标值（ForceTarget），有了收敛的光照就对了
+		//   - 代价：每个镜头多渲 16 个采样，约等于多渲 16 帧 draft，不写盘；standard 是 32 + 32 且每帧 4 个时间采样
+		// 寿命长的粒子、要起很久的特效 8 帧不够，那种还是用 standard 看
+		if (Quality == TEXT("draft"))    { Out = { 1, 1, false, 8, 8 };    return true; }
 		if (Quality == TEXT("standard")) { Out = { 1, 4, false, 32, 32 };  return true; }
 		if (Quality == TEXT("high"))     { Out = { 2, 8, true, 32, 32 };   return true; }
 		if (Quality == TEXT("ultra"))    { Out = { 4, 16, true, 64, 64 };  return true; }
@@ -261,6 +271,44 @@ namespace UALRenderImpl
 		UALReflect::FCall Call(Config, TEXT("RemoveSetting"));
 		Call.Obj(TEXT("InSetting"), Setting);
 		Call.Invoke();
+	}
+
+	/**
+	 * 往 MRQ 的控制台变量设置里写一条。值只能是数 —— 两代存法都是 float，字符串型变量设不了。
+	 *
+	 * 两代存法（九个版本的头逐个看过）：
+	 *   - 5.0 / 5.1：公开 UPROPERTY `TMap<FString, float> ConsoleVariables`，类上一个 UFUNCTION 都没有，只能直接写表
+	 *   - 5.2 起：改存私有的 `TArray<FMoviePipelineConsoleVariableEntry> CVars`；旧表在 5.2–5.4 还留着但已弃用，
+	 *     写进去要等 PIE 里迁移才生效（头文件原话），所以有 `AddOrUpdateConsoleVariable` 就走它。
+	 *     预设里同名条目可能是关着的，AddOrUpdate 只改值不动开关，再补一次 `UpdateConsoleVariableEnableState`
+	 * 渲完 MRQ 自己把这些变量恢复成渲前的值，我们不用管还原。
+	 */
+	bool AddConsoleVariable(UObject* Setting, const FString& Name, float Value)
+	{
+		if (Setting->FindFunction(TEXT("AddOrUpdateConsoleVariable")))
+		{
+			UALReflect::FCall Call(Setting, TEXT("AddOrUpdateConsoleVariable"));
+			Call.Str(TEXT("Name"), Name).Num(TEXT("Value"), Value);
+			if (!Call.Invoke() || !Call.OutBool(TEXT("ReturnValue")))
+			{
+				UE_LOG(LogUALRender, Warning, TEXT("AddOrUpdateConsoleVariable(%s) failed: %s"), *Name, *Call.GetError());
+				return false;
+			}
+			UALReflect::FCall Enable(Setting, TEXT("UpdateConsoleVariableEnableState"));
+			Enable.Str(TEXT("Name"), Name).Bool(TEXT("bIsEnabled"), true);
+			Enable.Invoke();
+			return true;
+		}
+		// 键值类型逐个认过再按 TMap 用：类型对不上就不写，免得按错的布局写内存
+		FMapProperty* MapProp = FindFProperty<FMapProperty>(Setting->GetClass(), TEXT("ConsoleVariables"));
+		if (!MapProp || !CastField<FStrProperty>(MapProp->GetKeyProperty()) || !CastField<FFloatProperty>(MapProp->GetValueProperty()))
+		{
+			UE_LOG(LogUALRender, Warning, TEXT("%s has neither AddOrUpdateConsoleVariable nor TMap<FString,float> ConsoleVariables"),
+				*Setting->GetClass()->GetName());
+			return false;
+		}
+		MapProp->ContainerPtrToValuePtr<TMap<FString, float>>(Setting)->Add(Name, Value);
+		return true;
 	}
 
 	// ========================================================================
@@ -802,6 +850,50 @@ void FUAL_RenderCommands::Handle_Render(const TSharedPtr<FJsonObject>& Payload, 
 		}
 	}
 
+	// ---- 控制台变量（可选）：只挡写不进去的名字，不设白名单 —— 给什么变量是用户 / 模型的判断 ----
+	TArray<TPair<FString, float>> ConsoleVariables;
+	UClass* ConsoleVarClass = nullptr;
+	if (Payload->HasField(TEXT("console_variables")))
+	{
+		const TSharedPtr<FJsonObject>* CVarObj = nullptr;
+		if (!Payload->TryGetObjectField(TEXT("console_variables"), CVarObj) || !CVarObj || !CVarObj->IsValid())
+		{
+			UAL_CommandUtils::SendError(RequestId, 400, TEXT("console_variables 要是 {变量名: 数值} 的对象"));
+			return;
+		}
+		// 键用 auto + UAL_JsonKey：5.8 的 FJsonObject 键是 UE::FSharedString，不是 FString
+		for (const auto& Pair : (*CVarObj)->Values)
+		{
+			const FString Name = UAL_JsonKey(Pair.Key);
+			// 带空白的名字（如把「r.ForceLOD 0」整条当名字）MRQ 查不到变量，会静默跳过
+			const bool bBadName = Name.IsEmpty()
+				|| Name.Contains(TEXT(" ")) || Name.Contains(TEXT("\t"))
+				|| Name.Contains(TEXT("\n")) || Name.Contains(TEXT("\r"));
+			if (bBadName)
+			{
+				UAL_CommandUtils::SendError(RequestId, 400,
+					FString::Printf(TEXT("控制台变量名不能为空、不能带空格或换行：「%s」。名字和值分开写，如 {\"r.ForceLOD\": 0}"), *Name));
+				return;
+			}
+			if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Number)
+			{
+				UAL_CommandUtils::SendError(RequestId, 400,
+					FString::Printf(TEXT("控制台变量 %s 的值要是数字（MRQ 只收数值）"), *Name));
+				return;
+			}
+			ConsoleVariables.Emplace(Name, static_cast<float>(Pair.Value->AsNumber()));
+		}
+		if (ConsoleVariables.Num() > 0)
+		{
+			ConsoleVarClass = UALReflect::FindScriptClass(UALR::CONSOLE_VAR_SETTING_CLASS);
+			if (!ConsoleVarClass)
+			{
+				UAL_CommandUtils::SendError(RequestId, 412, TEXT("MRQ 的控制台变量设置没有加载（MovieRenderPipelineSettings），加不了 console_variables"));
+				return;
+			}
+		}
+	}
+
 	// ---- 帧范围 ----
 	int32 PlayStart = 0, PlayEnd = 0;
 	UALR::PlaybackInDisplayFrames(Sequence->GetMovieScene(), PlayStart, PlayEnd);
@@ -949,6 +1041,45 @@ void FUAL_RenderCommands::Handle_Render(const TSharedPtr<FJsonObject>& Payload, 
 		UALReflect::SetIntProp(Output, TEXT("CustomEndFrame"), FrameEnd);
 	}
 
+	// ---- 控制台变量：叠在预设之上，同名的以这里为准 ----
+	TArray<TPair<FString, float>> AppliedConsoleVariables;
+	if (ConsoleVarClass)
+	{
+		// 编辑器里查不到的变量 MRQ 渲的时候也查不到（它只记一条 Warning 就跳过），不写进去，回包里说清楚
+		TArray<TPair<FString, float>> Known;
+		for (const TPair<FString, float>& CVar : ConsoleVariables)
+		{
+			if (IConsoleManager::Get().FindConsoleVariable(*CVar.Key))
+			{
+				Known.Add(CVar);
+			}
+			else
+			{
+				Warnings.Add(FString::Printf(TEXT("引擎里没有控制台变量 %s（拼错了，或者它所在的插件没开），没有加"), *CVar.Key));
+			}
+		}
+		if (Known.Num() > 0)
+		{
+			UObject* CVarSetting = UALR::FindOrAddSetting(Config, ConsoleVarClass);
+			if (!CVarSetting)
+			{
+				UAL_CommandUtils::SendError(RequestId, 500, TEXT("加不上控制台变量设置"));
+				return;
+			}
+			for (const TPair<FString, float>& CVar : Known)
+			{
+				if (UALR::AddConsoleVariable(CVarSetting, CVar.Key, CVar.Value))
+				{
+					AppliedConsoleVariables.Add(CVar);
+				}
+				else
+				{
+					Warnings.Add(FString::Printf(TEXT("控制台变量 %s 没写进 MRQ 配置（看输出日志里的 LogUALRender）"), *CVar.Key));
+				}
+			}
+		}
+	}
+
 	// ---- 执行器 ----
 	UObject* Executor = NewObject<UObject>(GetTransientPackage(), ExecutorClass, NAME_None, RF_Transient);
 	UUAL_RenderListener* Listener = NewObject<UUAL_RenderListener>(GetTransientPackage(), NAME_None, RF_Transient);
@@ -1037,6 +1168,16 @@ void FUAL_RenderCommands::Handle_Render(const TSharedPtr<FJsonObject>& Payload, 
 	Data->SetStringField(TEXT("quality"), Preset ? TEXT("preset") : *Quality);
 	TArray<TSharedPtr<FJsonValue>> Range = { MakeShared<FJsonValueNumber>(RangeStart), MakeShared<FJsonValueNumber>(RangeEnd) };
 	Data->SetArrayField(TEXT("frame_range"), Range);
+	if (AppliedConsoleVariables.Num() > 0)
+	{
+		// 只回真写进配置的那些；没写进去的已在 warnings 里
+		TSharedPtr<FJsonObject> CVarJson = MakeShared<FJsonObject>();
+		for (const TPair<FString, float>& CVar : AppliedConsoleVariables)
+		{
+			CVarJson->SetNumberField(CVar.Key, CVar.Value);
+		}
+		Data->SetObjectField(TEXT("console_variables"), CVarJson);
+	}
 	if (Preset)
 	{
 		Data->SetStringField(TEXT("preset_path"), Preset->GetPathName());

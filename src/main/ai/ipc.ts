@@ -15,6 +15,7 @@ import {
 } from './credentials'
 import { OAuthCancelledError, runOAuthLogin, yieldsPermanentKey } from './oauth'
 import { listRemoteModels, testProvider } from './probe'
+import { countRunsUsingProvider } from './providerUsage'
 import { invalidateSettingsCache, readSettings, settingsPath, updateSettings } from './store'
 import { isLocalModelConfigured } from './resolveModel'
 import type { AiProviderSettings, ProviderConfig } from './types'
@@ -207,6 +208,11 @@ export function registerAiProviderIPC(): void {
       return fail(error)
     }
   })
+
+  /** 删之前问：有几个正在跑的对话用着它。确认框据此提醒「它们会在下一次调模型时出错」 */
+  ipcMain.handle('ai-provider:usage', (_event, providerId: string) =>
+    countRunsUsingProvider(String(providerId ?? ''))
+  )
 
   ipcMain.handle('ai-provider:delete-provider', async (_event, providerId: string) => {
     if (isPlanProvider(String(providerId ?? ''))) return PLAN_READ_ONLY

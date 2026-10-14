@@ -209,6 +209,47 @@ describe('团队的账', () => {
   })
 })
 
+describe('活的账和团队事件', () => {
+  let dir: string
+  let store: TeamStore
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'team-jobs-'))
+    store = createTeamStore({ stateDir: join(dir, 'state'), workspaceDir: join(dir, 'ws') })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('交回、停下只收一次尾；上次运行没交回的，下次开跑时一律收成停下', async () => {
+    const a = await store.startJob('甲', '统计资产')
+    const b = await store.startJob('乙', '统计配置')
+    await store.finishJob(a.id, { outcome: 'done', report: '报告' })
+    // 已经收过尾的不再改
+    await store.finishJob(a.id, { outcome: 'stopped', reason: '晚到的错误' })
+    await store.closeOpenJobs('上次运行中断')
+    const jobs = await store.jobs()
+    expect(jobs.map((j) => [j.id, j.outcome, j.report ?? j.reason])).toEqual([
+      [a.id, 'done', '报告'],
+      [b.id, 'stopped', '上次运行中断']
+    ])
+  })
+
+  it('派活那段话取第一行当名字，太长截短；编号截掉旧账之后也不撞', async () => {
+    const long = await store.startJob('甲', `${'很'.repeat(100)}\n第二行`)
+    expect(long.brief).toHaveLength(80)
+    expect(long.brief.endsWith('…')).toBe(true)
+    const next = await store.startJob('甲', 'x')
+    expect(next.id).toBe('j2')
+  })
+
+  it('团队事件按时间记，只留最近的', async () => {
+    await store.recordEvent({ kind: 'crashed', detail: 'Assertion failed' })
+    await store.recordEvent({ kind: 'recovered' })
+    const events = await store.events()
+    expect(events.map((e) => e.kind)).toEqual(['crashed', 'recovered'])
+    expect(events[0]!.detail).toBe('Assertion failed')
+  })
+})
+
 describe('团队工具', () => {
   let dir: string
   let store: TeamStore
@@ -418,6 +459,31 @@ describe('团队工具', () => {
     expect(effectiveRisk(snapshot.unrealBox, { action: 'list' })).toBe('safe')
     expect(effectiveRisk(snapshot.unrealBox, { action: 'save' })).toBe('mutating')
     expect(effectiveRisk(snapshot.unrealBox, { action: 'rollback', id: 'a' })).toBe('destructive')
+  })
+
+  it('活的账：等它干完的派活也记；交回记原话（不带记账附注），停下记原因', async () => {
+    let fail = false
+    const t = tools({
+      runMember: async () => {
+        if (fail) throw new Error('编辑器连接断开')
+        return { text: '# 资产统计\n- 21,384 个', messageCount: 1, writeToolCalls: { x: 1 } }
+      }
+    })
+    await t.team_hire!({ name: '统计', role: 'a', read_only: true })
+    await t.team_send!({ to: '统计', message: '\n统计全部资产\n只读' })
+    fail = true
+    await expect(t.team_send!({ to: '统计', message: '再查一遍' })).rejects.toThrow()
+    const jobs = await store.jobs()
+    expect(jobs).toHaveLength(2)
+    expect(jobs[0]).toMatchObject({
+      id: 'j1',
+      member: '统计',
+      brief: '统计全部资产',
+      outcome: 'done',
+      report: '# 资产统计\n- 21,384 个'
+    })
+    expect(jobs[1]).toMatchObject({ id: 'j2', outcome: 'stopped', reason: '编辑器连接断开' })
+    expect(jobs[1]!.endedAt).toBeGreaterThanOrEqual(jobs[1]!.startedAt)
   })
 
   it('任务板渲染：计数、负责人、证据', () => {

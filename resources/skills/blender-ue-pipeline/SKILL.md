@@ -136,6 +136,19 @@ result = bridge['open_exchange'](exchange_directory)
    Existing level instances of **that return asset** must keep their transforms and references.
    Reopening UE and re-reading proves persistence; same-session `load_asset` alone does not.
 
+## Verification, cost order, blast radius, metrics
+
+- **Verify where it runs.** The return readback and clay captures prove geometry; persistence needs
+  a UE reopen (step 9). Whether changed collision still lets a player through a door is a PIE
+  question the tools cannot answer — ask the user to walk it and say it is unverified until then.
+- **Cheapest edit first.** Simple fixes (decimate, fill holes, collision, UV projection) stay in UE
+  with `ue-geometry-editing`; Blender is for reshaping. Within Blender, fix the earliest wrong stage.
+- **Blast radius.** The original is never written. Later returns update the mapped copy in place,
+  so every level and asset already using it changes too: before such a return, run
+  `ue_content_dependencies` with `direction: "referencers"` on the copy and tell the user what moves.
+- **Right metric.** The 1 mm bounds check is a transport guard, not a quality score. For a
+  Nanite mesh, triangle count is not the runtime cost; report it, do not optimise to it.
+
 ## Failure handling
 
 - Changed source/target fingerprints, wrong project, malformed manifest, material mismatches,

@@ -346,7 +346,12 @@ describe('真实工具库检索回归', () => {
     ['按文件名查找 fbx', 'find_local_files'],
     ['网页搜索', 'web_search'],
     // 真机上模型没搜、直接写了 Python（2026-10-13 反馈）；钉住这条搜得到
-    ['新建增强输入动作', 'ue_input_add_mapping']
+    ['新建增强输入动作', 'ue_input_add_mapping'],
+    ['灯光阴影普查', 'ue_light_census'],
+    // 以前技能让模型写 Python 的 set_convex_decomposition_collisions；现在要搜得到工具
+    ['凸包分解生成碰撞', 'mesh_optimize'],
+    // 改 C++ 成员前查波及面；以前技能说「没工具，全量编译看谁报错」
+    ['哪些蓝图用到了这个函数', 'blueprint_find_usages']
   ])('%s 应能加载 %s', async (query, expected) => {
     expect(
       catalog.some((tool) => tool.name === expected),
@@ -355,6 +360,84 @@ describe('真实工具库检索回归', () => {
     const search = createToolSearch(catalog, () => catalog)
     const result = await search.tool.execute('probe', { query })
     expect(loadedNames(result)).toContain(expected)
+  })
+
+  /*
+   * 灯光普查是按需子组：不常驻、不跟 ue.level 整组走（那组有开关卡、存关卡这些写操作），
+   * 而项目体检技能一加载就把它带上 —— 渲染线程 / GPU 瓶颈的排查正是从那里进来的
+   */
+  it('ue_light_census 自成按需子组，由项目体检技能带上', async () => {
+    const census = catalog.find((tool) => tool.name === 'ue_light_census')!
+    expect(census).toBeDefined()
+    expect(toolSearchGroup(census)).toBe('ue.level.lights')
+    expect(RESIDENT_TOOL_GROUPS.has('ue.level.lights')).toBe(false)
+    expect(residentNames().has('ue_light_census')).toBe(false)
+    expect(groupDomainTerms('ue.level.lights')).toContain('灯光')
+
+    const search = createToolSearch(catalog, () => catalog)
+    const loader = createSkillTools(skills, 'off', search.loadFromSkill).find(
+      (tool) => tool.name === 'load_skill'
+    )!
+    await loader.execute('skill', { name: 'ue-project-audit' })
+    expect(search.getTools().map((tool) => tool.name)).toContain('ue_light_census')
+  })
+
+  /*
+   * mesh_optimize 和 mesh_describe 同属 ue.mesh 命名空间，但 ue.mesh 是整组常驻的，
+   * 常驻预算（上面那条 30,000）已经满了 —— 跟着整组走就会把那条线顶破。
+   * 所以它单成按需子组，由几何编辑技能（和导入整理技能）点名带上。
+   */
+  it('mesh_optimize 自成按需子组，由几何编辑技能带上', async () => {
+    const optimize = catalog.find((tool) => tool.name === 'mesh_optimize')!
+    expect(optimize).toBeDefined()
+    expect(optimize.unrealBox.namespace).toBe('ue.mesh')
+    expect(toolSearchGroup(optimize)).toBe('ue.mesh.optimize')
+    expect(RESIDENT_TOOL_GROUPS.has('ue.mesh.optimize')).toBe(false)
+    expect(residentNames().has('mesh_optimize')).toBe(false)
+    // mesh_describe 仍然整组常驻，没被一起拆走
+    expect(residentNames().has('mesh_describe')).toBe(true)
+    expect(groupDomainTerms('ue.mesh.optimize')).toContain('凸包')
+
+    for (const name of ['ue-geometry-editing', 'ue-content-import-organize']) {
+      const search = createToolSearch(catalog, () => catalog)
+      const loader = createSkillTools(skills, 'off', search.loadFromSkill).find(
+        (tool) => tool.name === 'load_skill'
+      )!
+      await loader.execute('skill', { name })
+      expect(
+        search.getTools().map((tool) => tool.name),
+        `${name} 加载后应带上 mesh_optimize`
+      ).toContain('mesh_optimize')
+    }
+  })
+
+  /*
+   * blueprint_find_usages 属 ue.blueprint 命名空间，但单成按需子组：search_tools 按「谁在用」
+   * 命中时可以只加载它，不必连带二十多个写图工具（蓝图组是最大的一组）。
+   * 不进常驻（常驻预算已满），由 C++ 工作流和蓝图编辑两个技能点名带上；
+   * 搜得到它由上面 it.each 的「哪些蓝图用到了这个函数」那条钉住。
+   */
+  it('blueprint_find_usages 自成按需子组，由 C++ 和蓝图编辑技能带上', async () => {
+    const usages = catalog.find((tool) => tool.name === 'blueprint_find_usages')!
+    expect(usages).toBeDefined()
+    expect(usages.unrealBox.namespace).toBe('ue.blueprint')
+    expect(usages.unrealBox.risk).toBe('safe')
+    expect(toolSearchGroup(usages)).toBe('ue.blueprint.usages')
+    expect(RESIDENT_TOOL_GROUPS.has('ue.blueprint.usages')).toBe(false)
+    expect(residentNames().has('blueprint_find_usages')).toBe(false)
+    expect(groupDomainTerms('ue.blueprint.usages')).toContain('哪些蓝图')
+
+    for (const name of ['ue-cpp-workflow', 'ue-blueprint-graph-editing']) {
+      const search = createToolSearch(catalog, () => catalog)
+      const loader = createSkillTools(skills, 'off', search.loadFromSkill).find(
+        (tool) => tool.name === 'load_skill'
+      )!
+      await loader.execute('skill', { name })
+      const loaded = search.getTools().map((tool) => tool.name)
+      expect(loaded, `${name} 加载后应带上 blueprint_find_usages`).toContain(
+        'blueprint_find_usages'
+      )
+    }
   })
 
   it('泛称本地文件搜索时至少提供文件名查找或文件内容搜索', async () => {

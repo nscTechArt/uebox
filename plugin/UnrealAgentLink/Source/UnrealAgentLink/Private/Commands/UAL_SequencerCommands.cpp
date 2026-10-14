@@ -598,6 +598,150 @@ namespace
 		return Json;
 	}
 
+	/**
+	 * 切轨段的一个边界换成显示帧号。
+	 *
+	 * 用 RoundToFrame 而不是 TickToDisplay 的 FloorToFrame：MRQ 给输出文件编号
+	 * （`{frame_number}` = `SourceFrameNumber`）就是 tick 换到显示帧率后 RoundToFrame，
+	 * 见 MovieRenderPipelineCore/Private/MoviePipelineTiming.cpp 的
+	 * `CalculateFrameNumbersForOutputState`（5.0 与 5.8 同）。边界正好落在整帧上时
+	 * 两种取整一样；30000/1001 这类每帧 tick 不是整数的帧率才会差，这里跟 MRQ 走。
+	 *
+	 * @param bOutOnFrame 边界离这个整帧不到 1 tick（tick 是存储的最小刻度）。
+	 *                    false = 切点落在两帧之间，交界那一帧渲哪台相机要看采样时刻
+	 */
+	int32 CutBoundaryToDisplay(const UMovieScene* MovieScene, const FFrameNumber& Tick, bool& bOutOnFrame)
+	{
+		const FFrameRate TickRes = MovieScene->GetTickResolution();
+		const FFrameRate DisplayRate = MovieScene->GetDisplayRate();
+		const FFrameNumber Frame = FFrameRate::TransformTime(FFrameTime(Tick), TickRes, DisplayRate).RoundToFrame();
+		const FFrameTime Back = FFrameRate::TransformTime(FFrameTime(Frame), DisplayRate, TickRes);
+		bOutOnFrame = FMath::Abs(Back.AsDecimal() - static_cast<double>(Tick.Value)) < 1.0;
+		return Frame.Value;
+	}
+
+	/**
+	 * 切轨上的每一段：从第几帧到第几帧、用哪台相机。按起始帧排序。
+	 *
+	 * 渲完看帧要看「每个切点的第一帧」，没有这张表模型只能猜，或者去写 Python。
+	 *
+	 * - 帧号是**显示帧**，和 Sequencer 时间轴上看到的、MRQ 默认文件名
+	 *   `{sequence_name}.{frame_number}` 里的帧号是同一套（绝对帧号，不从 0 起）。
+	 * - `end_frame` 不含，和 describe 里所有范围一样是 `[start, end)`。
+	 * - 一头无界写 null，不编一个数。
+	 * - 相机绑定在子序列 / 父序列里（相对绑定的 sequence ID 不是本序列），
+	 *   本序列查不到名字：camera 写 null 并标 `camera_in_other_sequence`，不猜。
+	 *
+	 * API：`UMovieSceneCameraCutSection::GetCameraBindingID()`、
+	 * `FMovieSceneObjectBindingID::GetGuid()` / `GetRelativeSequenceID()`、
+	 * `UMovieSceneSection::IsActive()` 在 5.0–5.8 签名一致（逐版本头文件核过），不需要 #if。
+	 */
+	TArray<TSharedPtr<FJsonValue>> MakeCameraCutListJson(UMovieScene* MovieScene, int32 MaxCuts, bool& bOutTruncated)
+	{
+		TArray<TSharedPtr<FJsonValue>> Out;
+		UMovieSceneTrack* CutTrack = MovieScene ? MovieScene->GetCameraCutTrack() : nullptr;
+		if (!CutTrack)
+		{
+			return Out;
+		}
+
+		TArray<const UMovieSceneSection*> Sections;
+		for (const UMovieSceneSection* Section : CutTrack->GetAllSections())
+		{
+			if (Section)
+			{
+				Sections.Add(Section);
+			}
+		}
+		// GetAllSections 不保证按时间排。无界的起点排最前
+		Sections.StableSort([](const UMovieSceneSection& A, const UMovieSceneSection& B)
+		{
+			const TRangeBound<FFrameNumber> LA = A.GetRange().GetLowerBound();
+			const TRangeBound<FFrameNumber> LB = B.GetRange().GetLowerBound();
+			if (!LA.IsClosed() || !LB.IsClosed())
+			{
+				return !LA.IsClosed() && LB.IsClosed();
+			}
+			return LA.GetValue() < LB.GetValue();
+		});
+
+		for (const UMovieSceneSection* Section : Sections)
+		{
+			if (Out.Num() >= MaxCuts)
+			{
+				bOutTruncated = true;
+				break;
+			}
+
+			TSharedPtr<FJsonObject> Cut = MakeShared<FJsonObject>();
+			const TRange<FFrameNumber> Range = Section->GetRange();
+			bool bOnFrame = true;
+
+			if (Range.GetLowerBound().IsClosed())
+			{
+				bool bStartOnFrame = true;
+				Cut->SetNumberField(TEXT("start_frame"), CutBoundaryToDisplay(MovieScene, Range.GetLowerBoundValue(), bStartOnFrame));
+				bOnFrame &= bStartOnFrame;
+			}
+			else
+			{
+				Cut->SetField(TEXT("start_frame"), MakeShared<FJsonValueNull>());
+			}
+			if (Range.GetUpperBound().IsClosed())
+			{
+				bool bEndOnFrame = true;
+				Cut->SetNumberField(TEXT("end_frame"), CutBoundaryToDisplay(MovieScene, Range.GetUpperBoundValue(), bEndOnFrame));
+				bOnFrame &= bEndOnFrame;
+			}
+			else
+			{
+				Cut->SetField(TEXT("end_frame"), MakeShared<FJsonValueNull>());
+			}
+			if (!bOnFrame)
+			{
+				Cut->SetBoolField(TEXT("off_frame_boundary"), true);
+			}
+
+			FString CameraName;
+			FString BindingId;
+			bool bOtherSequence = false;
+			if (const UMovieSceneCameraCutSection* CutSection = Cast<const UMovieSceneCameraCutSection>(Section))
+			{
+				const FMovieSceneObjectBindingID& Id = CutSection->GetCameraBindingID();
+				if (Id.IsValid())
+				{
+					BindingId = Id.GetGuid().ToString();
+					if (Id.GetRelativeSequenceID() != MovieSceneSequenceID::Root)
+					{
+						bOtherSequence = true;
+					}
+					else
+					{
+						EUALBindingKind Kind = EUALBindingKind::Unknown;
+						CameraName = ResolveBindingName(MovieScene, Id.GetGuid(), Kind);
+					}
+				}
+			}
+
+			if (CameraName.IsEmpty()) { Cut->SetField(TEXT("camera"), MakeShared<FJsonValueNull>()); }
+			else                      { Cut->SetStringField(TEXT("camera"), CameraName); }
+			if (BindingId.IsEmpty())  { Cut->SetField(TEXT("camera_binding_id"), MakeShared<FJsonValueNull>()); }
+			else                      { Cut->SetStringField(TEXT("camera_binding_id"), BindingId); }
+			if (bOtherSequence)
+			{
+				Cut->SetBoolField(TEXT("camera_in_other_sequence"), true);
+			}
+			// 被禁用的段不参与求值，渲出来不会切到它
+			if (!Section->IsActive())
+			{
+				Cut->SetBoolField(TEXT("active"), false);
+			}
+
+			Out.Add(MakeShared<FJsonValueObject>(Cut));
+		}
+		return Out;
+	}
+
 	// ========================================================================
 	// 能力回报
 	// ========================================================================
@@ -860,7 +1004,18 @@ void FUAL_SequencerCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payl
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetObjectField(TEXT("sequence"), SequenceJson);
 	Data->SetArrayField(TEXT("bindings"), BindingArray);
-	Data->SetObjectField(TEXT("camera_cuts"), MakeCameraCutsJson(InspectCameraCuts(MovieScene, PlaybackStart, PlaybackEnd)));
+	{
+		TSharedPtr<FJsonObject> CutsJson = MakeCameraCutsJson(InspectCameraCuts(MovieScene, PlaybackStart, PlaybackEnd));
+		// 每一段的起止帧和相机。一段几十字节，切点再多也撑不爆上下文；
+		// 上限只防坏资产，超了单独置 cuts_truncated，不混进绑定的 truncated
+		bool bCutsTruncated = false;
+		CutsJson->SetArrayField(TEXT("cuts"), MakeCameraCutListJson(MovieScene, 500, bCutsTruncated));
+		if (bCutsTruncated)
+		{
+			CutsJson->SetBoolField(TEXT("cuts_truncated"), true);
+		}
+		Data->SetObjectField(TEXT("camera_cuts"), CutsJson);
+	}
 	Data->SetArrayField(TEXT("broken_bindings"), BrokenArray);
 	Data->SetArrayField(TEXT("unresolved_bindings"), UnresolvedArray);
 	Data->SetObjectField(TEXT("capabilities"), MakeCapabilitiesJson(bBindingResolutionWorks));

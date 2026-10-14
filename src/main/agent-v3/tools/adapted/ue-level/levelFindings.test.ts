@@ -37,6 +37,12 @@ describe('分类只用引擎算好的量、调用方给的门槛，和数据内�
     expect(classifyAsset({ max_texture_pixels: 2048 * 2048 }, undefined)).toHaveLength(0)
   })
 
+  it('大贴图算显存开销，不算帧时间', () => {
+    expect(classifyAsset({ max_texture_pixels: 8192 * 8192 }, undefined)[0]!.severity).toBe(
+      'costs_memory'
+    )
+  })
+
   /**
    * 按单边判会把 4096×1 的分隔条报成「超大贴图」——
    * 它实际只有几 KB，而用户会去改它。
@@ -64,6 +70,34 @@ describe('占比结论：不需要外部阈值就能判轻重', () => {
     expect(f!.code).toBe('dominates_level_triangles')
     expect(f!.evidence).toContain('500 份')
     expect(f!.evidence).toContain('63%')
+  })
+
+  /**
+   * Nanite 网格的帧开销和原始面数基本脱钩。按面数把它点成「拖帧」，
+   * 报告头一句就会叫用户去优化一个其实不贵的网格。
+   */
+  it('开了 Nanite 的照样点名占比，但只是信息，不算帧开销', () => {
+    const [f] = classifyAsset(
+      { triangles: 4000, total_triangles: 2_000_000, instance_count: 500, nanite: true },
+      undefined,
+      undefined,
+      0.63
+    )
+
+    expect(f!.code).toBe('dominates_level_triangles')
+    expect(f!.severity).toBe('info')
+    expect(f!.evidence).toContain('Nanite')
+  })
+
+  it('没开 Nanite 的才算帧开销', () => {
+    const [f] = classifyAsset(
+      { triangles: 4000, instance_count: 500, nanite: false },
+      undefined,
+      undefined,
+      0.63
+    )
+
+    expect(f!.severity).toBe('costs_frame_time')
   })
 
   it('只摆了一份的不报 —— 那说明关卡小，不说明这个资产有问题', () => {
@@ -129,12 +163,18 @@ describe('汇总', () => {
 
     expect(summarize(findings)).toEqual({
       breaks_gameplay: 1,
-      costs_frame_time: 1,
+      costs_frame_time: 0,
+      costs_memory: 1,
       info: 1
     })
   })
 
-  it('一条结论都没有时三档都是 0，不是缺字段', () => {
-    expect(summarize([])).toEqual({ breaks_gameplay: 0, costs_frame_time: 0, info: 0 })
+  it('一条结论都没有时各档都是 0，不是缺字段', () => {
+    expect(summarize([])).toEqual({
+      breaks_gameplay: 0,
+      costs_frame_time: 0,
+      costs_memory: 0,
+      info: 0
+    })
   })
 })

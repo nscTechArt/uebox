@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { CatalogEntry } from '../../shared/aiProvider'
 import { GENERATED_CATALOG as CATALOG } from './catalog.generated'
 import { CODEBUDDY_BASE_URL } from './codebuddy'
+import { ZCODE_BASE_URL } from './zcode'
 
 /**
  * 目录是 `scripts/sync-provider-catalog.mjs` 从 models.dev 生成的快照，
@@ -12,6 +13,19 @@ import { CODEBUDDY_BASE_URL } from './codebuddy'
  * 下拉框里选到一个 2024 年的模型才发现。
  */
 describe('内置 Provider 目录', () => {
+  it('ZCode 是独立订阅入口，使用账号登录和 Anthropic 套餐端点', () => {
+    const zcode = CATALOG.find((entry) => entry.id === 'zcode')!
+    expect(zcode).toMatchObject({
+      group: 'subscription',
+      kind: 'chat',
+      supportsOAuth: true,
+      requiresApiKey: true,
+      protocol: 'anthropic-messages',
+      baseUrl: ZCODE_BASE_URL
+    })
+    expect(zcode.models.map((model) => model.id)).toContain('GLM-5.2')
+    expect(zcode.models.every((model) => model.supportsTools)).toBe(true)
+  })
   it('阿里语音合成目录区分接口并预置匹配音色', () => {
     const audio = CATALOG.find((entry) => entry.id === 'alibaba-tts')!
     expect(CATALOG.find((entry) => entry.id === 'alibaba-qwen3-tts')).toBeUndefined()

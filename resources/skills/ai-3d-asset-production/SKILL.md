@@ -38,7 +38,8 @@ AI 这一环确实做不到时才补位 —— 不是反过来。
 | 四视图 / 转身图 | `generate_image` + `reference_images` + 明确保留项 | 图生 3D 的原生输入形态，逐张核对一致性 |
 | 颜色贴图、法线参考、材质纹理 | `generate_image` | 贴图本来就是二维问题 |
 | 底模、blockout | `generate_3d_model` | 比脚本堆基本体强一个量级 |
-| 减面、补洞、焊点、布尔、UV 投影、生成碰撞 | `ue_run_python_script` 走 Geometry Script | 不出引擎，链路最短 |
+| 减面、补洞、焊点、布尔、UV 投影 | `ue_run_python_script` 走 Geometry Script | 不出引擎，链路最短 |
+| 自动 LOD、生成碰撞（盒 / 凸包分解） | `mesh_optimize` | 引擎网格编辑器同一套实现，回执带前后读回值 |
 | 改造型、改拓扑、加结构细节、雕刻 | Blender | 引擎里没有对应能力 |
 | 从零做**简单**模型（箱体、管件、旋转体、规则构件） | Blender | 参数化几步就到位，比生成更可控 |
 | 从零手搓**复杂有机**造型 | 默认不做 | 见下面「已知会失败的做法」 |
@@ -50,6 +51,7 @@ AI 这一环确实做不到时才补位 —— 不是反过来。
 
 1. **读参考图，写 `asset-plan.json`。** 分开记录三件事：看得见的观察、用户明确的要求、
    推断出来的隐藏结构。标清哪些特征是 critical。参考图存进工作目录并记下路径。
+   进引擎要满足的真实尺寸、轴心、Nanite、是否烘焙光照写进 `unreal` 一栏，拿不准就问用户。
 2. **补齐视图。** 只有一张参考图时，先用 `generate_image` 补出四视图再去生成。
    一致性怎么保证见 [references/four-view-consistency.md](references/four-view-consistency.md)。
    出图时就按输入图标准写提示词（纯色背景、均匀光、无阴影、物体完整入画）——
@@ -64,8 +66,19 @@ AI 这一环确实做不到时才补位 —— 不是反过来。
    不许说「挺接近的」。** 底模阶段只验形和比例，不验拓扑和细节 —— 那是后面的事。
 5. **决定优化走哪条。** 按路由表分流。进 Blender 就切到 `blender-ue-pipeline` skill，
    它带着自己的质量契约和回传校验，不要在这里另起一套。
-6. **进引擎、验收第二次。** `ue_content_import` 之后用 `mesh_describe` 读回面数、
-   材质槽、包围盒、碰撞，和计划里的预算对一遍。
+6. **进引擎、验收第二次。** `ue_content_import` 之后照 `ue-content-import-organize` 的导入验收清单
+   用 `mesh_describe` 读回，再对着计划的 `unreal` 一栏逐条过。生成件最常错的是这几处，只对面数不算验收：
+   - **真实尺寸**：生成器出的多是归一化大小，`bounding_box` 只管比例（Tripo 开了 `auto_size` 是米制）。
+     拿 `bounds.size` 和 `size_cm` 算出倍数，带 `scale` 重新导入一次缩对，别让用户逐个 Actor 去缩。
+   - **轴心**：原点不一定在底面（看 `mesh_describe` 的原点那一行）。落地道具要贴底面，不对就用
+     Geometry Script 把网格整体平移后写回（`ue-geometry-editing`），不在每个 Actor 上补偏移。
+   - **基础色里烘死的光影**：`shaded` 一定是烘的，`pbr` 也可能把投影、高光、AO 画进基础色 ——
+     换个方向打光它们不动。这件机器判不准，请用户切 Unlit 视图看一眼；烘了就回第 2 步换均匀光的输入图重生成。
+   - **UV**：生成器的 UV 是自动展开的碎块，贴图能用，手绘修改难。计划写了 `baked_lighting: true`
+     才需要有效的光照贴图 UV；只用 Lumen 的项目不查这条。
+   - **Nanite**：不透明、面数偏高的静态道具，项目开着 Nanite 就开上（`ue_content_set_properties`，
+     `{"NaniteSettings.bEnabled": true}`，回执带读回值），这时面数预算不再是开销的尺子；
+     半透明材质或移动端项目不开，超预算先考虑自动 LOD（`mesh_optimize`），再考虑减面（`ue-geometry-editing`）。
 
 ## Constraints
 
@@ -103,6 +116,9 @@ AI 这一环确实做不到时才补位 —— 不是反过来。
   修最早出问题的那一段。
 - **厂商任务超时不等于失败。** 状态未知时先查任务，不要盲目重交 —— 重交是再付一次全款。
 - **工具报了 success 不等于事情成了。** 回读校验过才算。读不回来就说「没确认上」。
+- **先便宜后贵。** 一个生成任务验过再批量；`quality` 按用途选；能在引擎里用 Geometry Script
+  修的不进 Blender。这条流程只新建资产，不动工程里已有的东西，没有波及面要查；
+  要替换关卡里已摆好的旧资产时，先 `ue_content_dependencies` 查谁在引用它。
 
 ## Escalation
 

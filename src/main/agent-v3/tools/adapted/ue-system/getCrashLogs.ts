@@ -7,7 +7,7 @@ import { serviceManager } from '../../../../services'
 import { projectManager } from '../../../../services/project'
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
-import { decodeXml as decodeXML } from '../../../../services/editorCrashWatch/crashReport'
+import { readCrashFolder } from './crashFolder'
 // Schema
 const GetCrashLogsParamsSchema = z.object({
   projectPath: z
@@ -25,6 +25,22 @@ interface CrashReport {
   callStack: string
   logSnippet: string
   source: 'CrashContext' | 'LogFile' | 'PluginRPC'
+  /** 以下只有 CrashContext 来源才有，见 crashFolder.ts */
+  folder?: string
+  crash_type?: string
+  /** 调用栈一共几帧、几帧没解析出函数名 */
+  frames?: { total: number; unresolved: number }
+  /** 日志尾巴来自哪个文件 */
+  log_file?: string
+  note?: string
+}
+
+/** 同一个目录里那些不算崩溃的报告：只报种类和时间，不占崩溃名额 */
+interface NonFatalReport {
+  timestamp: string
+  kind: 'ensure' | 'stall' | 'abnormal_shutdown'
+  error: string
+  folder: string
 }
 
 /**
@@ -150,9 +166,11 @@ export function createGetCrashLogsTool(): V2Tool {
 
 【功能】：
 1. 优先尝试通过插件连接获取实时崩溃/报错信息（如果编辑器还活着）。
-2. 读取 Saved/Crashes 目录下的最新崩溃报告（XML）。
-3. 读取 Saved/Logs 目录下的最新日志文件。
-4. 自动截断过长的日志堆栈，防止 Token 溢出。
+2. 读取 Saved/Crashes 目录下的最新崩溃报告：错误、调用栈、引擎报的崩溃类型（crash_type），
+   以及崩溃目录里那份当次日志的最后几十行（原因常在崩溃前，不在调用栈里）。
+3. ensure、卡顿、被结束的进程单列在 non_fatal，编辑器当时没崩，不要当崩溃汇报。
+4. frames.unresolved 等于 frames.total 时说明缺调试符号，别凭模块名猜原因。
+5. 没有崩溃报告时才附 Saved/Logs 里最新日志的尾巴，仅供参考。
 
 【使用场景】：
 - 当用户询问“为什么项目崩了”、“查看崩溃日志”时使用
@@ -162,6 +180,7 @@ export function createGetCrashLogsTool(): V2Tool {
 
     execute: async ({ projectPath, maxLogs = 1 }) => {
       const reports: CrashReport[] = []
+      const nonFatal: NonFatalReport[] = []
 
       try {
         // 尝试从多种来源解析项目路径
@@ -245,6 +264,9 @@ export function createGetCrashLogsTool(): V2Tool {
         const logsDir = path.join(resolvedPath, 'Saved', 'Logs')
 
         // 2a. 检查 Crashes 目录
+        //
+        // 按时间从新到旧读，ensure 和卡顿另外记，不占 maxLogs 的名额 ——
+        // 不然最近一次真崩溃会被后来的几条 ensure 挤出去。
         if (fs.existsSync(crashesDir)) {
           const crashFolders = fs
             .readdirSync(crashesDir)
@@ -252,40 +274,49 @@ export function createGetCrashLogsTool(): V2Tool {
             .filter((fullPath) => fs.statSync(fullPath).isDirectory())
             .map((fullPath) => ({ path: fullPath, mtime: fs.statSync(fullPath).mtime }))
             .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-            .slice(0, maxLogs)
 
           for (const crashFolder of crashFolders) {
-            const xmlPath = path.join(crashFolder.path, 'CrashContext.runtime-xml')
-
-            if (fs.existsSync(xmlPath)) {
-              try {
-                const xmlContent = fs.readFileSync(xmlPath, 'utf-8')
-                // 简单正则提取
-                const errorMatch = xmlContent.match(/<ErrorMessage>(.*?)<\/ErrorMessage>/s)
-                const stackMatch = xmlContent.match(/<CallStack>(.*?)<\/CallStack>/s)
-
-                reports.push({
-                  timestamp: crashFolder.mtime.toISOString(),
-                  error: truncate(
-                    errorMatch ? decodeXML(errorMatch[1]) : '未找到错误信息',
-                    MAX_ERROR_LEN
-                  ),
-                  callStack: truncate(
-                    stackMatch ? decodeXML(stackMatch[1]) : '未找到调用堆栈',
-                    MAX_STACK_LEN
-                  ),
-                  logSnippet: '详情请查看完整日志文件',
-                  source: 'CrashContext'
-                })
-              } catch (e) {
-                console.warn(`Error parsing crash log at ${xmlPath}:`, e)
+            if (reports.length >= maxLogs) break
+            try {
+              const facts = readCrashFolder(crashFolder.path)
+              if (!facts) continue
+              if (facts.kind !== 'fatal') {
+                if (nonFatal.length < maxLogs) {
+                  nonFatal.push({
+                    timestamp: crashFolder.mtime.toISOString(),
+                    kind: facts.kind,
+                    error: truncate(facts.error, 300),
+                    folder: crashFolder.path
+                  })
+                }
+                continue
               }
+              reports.push({
+                timestamp: crashFolder.mtime.toISOString(),
+                error: truncate(facts.error || '未找到错误信息', MAX_ERROR_LEN),
+                callStack: truncate(facts.callStack || '未找到调用堆栈', MAX_STACK_LEN),
+                logSnippet: facts.logTail
+                  ? truncate(facts.logTail, MAX_LOG_SNIPPET_LEN)
+                  : '崩溃目录里没有日志副本',
+                source: 'CrashContext',
+                folder: crashFolder.path,
+                crash_type: facts.crashType || undefined,
+                frames: facts.frames,
+                log_file: facts.logFile,
+                note: facts.note
+              })
+            } catch (e) {
+              console.warn(`Error parsing crash folder at ${crashFolder.path}:`, e)
             }
           }
         }
 
+        // 已经拿到崩溃目录里的日志副本时，不再附当前运行日志：
+        // 编辑器重启过的话，那份是新会话的，和这次崩溃无关，只会把模型带偏。
+        const haveCrashLog = reports.some((r) => r.source === 'CrashContext' && r.log_file)
+
         // 2b. 检查 Logs 目录 (读取最新的日志)
-        if (fs.existsSync(logsDir)) {
+        if (!haveCrashLog && fs.existsSync(logsDir)) {
           const logFiles = fs
             .readdirSync(logsDir)
             .filter((name) => name.endsWith('.log'))
@@ -328,6 +359,7 @@ export function createGetCrashLogsTool(): V2Tool {
           return {
             success: true,
             message: '在 Saved/Crashes 和 Saved/Logs 中未发现明显的崩溃记录',
+            ...(nonFatal.length > 0 ? { non_fatal: nonFatal } : {}),
             projectPath: resolvedPath
           }
         }
@@ -346,6 +378,8 @@ export function createGetCrashLogsTool(): V2Tool {
           success: true,
           reports,
           crash_report_count: realCrashes.length,
+          // ensure / 卡顿 / 被人结束：编辑器当时没崩，单列出来，别当崩溃汇报
+          ...(nonFatal.length > 0 ? { non_fatal: nonFatal } : {}),
           projectPath: resolvedPath,
           message: onlyLogTail
             ? '没有找到任何崩溃报告（Saved/Crashes 为空）。下面附的是当前运行日志的最后几十行，' +

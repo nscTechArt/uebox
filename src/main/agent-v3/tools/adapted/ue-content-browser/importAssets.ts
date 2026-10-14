@@ -145,6 +145,110 @@ interface FailedFile {
   reason?: string
 }
 
+/**
+ * 自动建 PBR 材质时，每张贴图被认成什么、设置改成了什么。
+ * srgb / compression / flip_green_channel 是插件处理完之后从贴图上回读的值。
+ */
+export interface TextureSetupItem {
+  name: string
+  path?: string
+  /** albedo / normal / roughness / … / packed_orm / packed_rma / packed_mra / packed_mask */
+  type: string
+  srgb?: boolean
+  compression?: string
+  /** 只有法线有 */
+  flip_green_channel?: boolean
+  /** 这次是因为名字里的 OpenGL 标记才翻的 */
+  flip_reason?: string
+  /** 打包遮罩的通道含义；packed_mask 没有（名字里没写顺序） */
+  channels?: { r: string; g: string; b: string }
+  /** 接进了自动生成的 MI 的哪个参数；没有 = 没接 */
+  material_parameter?: string
+}
+
+/**
+ * 贴图处理结果的摘要行。
+ *
+ * 打包遮罩是重点：插件认出来了、改成了线性数据，但**没接进**自动生成的材质实例
+ * （母材质没有打包遮罩输入），不说的话模型会以为粗糙度/金属度已经接好了。
+ */
+export function describeTextureSetup(items: TextureSetupItem[]): string[] {
+  if (items.length === 0) return []
+  const lines: string[] = ['贴图处理：']
+  for (const item of items) {
+    const settings = [
+      item.srgb === undefined ? '' : item.srgb ? 'sRGB 开' : 'sRGB 关',
+      item.compression ?? ''
+    ]
+      .filter(Boolean)
+      .join('，')
+    const wired = item.material_parameter
+      ? `接到材质参数 ${item.material_parameter}`
+      : '没接进自动生成的材质实例'
+    let line = `  ${item.name}：${item.type}（${settings}），${wired}`
+    if (item.channels) {
+      line += `；通道 R=${item.channels.r} G=${item.channels.g} B=${item.channels.b}，要用就在材质里按通道拆开接`
+    } else if (item.type === 'packed_mask') {
+      line += '；名字里没写通道顺序，接之前先问用户或看贴图'
+    }
+    if (item.flip_green_channel && item.flip_reason) {
+      line += `；已翻转绿通道（${item.flip_reason}）`
+    }
+    lines.push(line)
+  }
+  return lines
+}
+
+/**
+ * 导入器在这次导入里说的一句 Warning / Error，插件从 GLog 和 Interchange 结果容器里收来。
+ * category 是引擎的日志类别原样（LogFbx、FBXImport、Interchange、LogStaticMesh…），
+ * 不带类别的行是空串。
+ */
+export interface ImportMessage {
+  severity: 'warning' | 'error'
+  category: string
+  text: string
+}
+
+/** 正文里最多列几条，其余留在 import_messages 字段里 */
+const IMPORT_MESSAGES_IN_TEXT = 5
+/** 单条太长（FBX 的消息常带整串骨骼名）就截断，全文在字段里 */
+const IMPORT_MESSAGE_MAX_CHARS = 240
+
+/**
+ * 导入器消息的摘要行：条数 + 前几条。
+ *
+ * 导入「成功」和导入「干净」是两回事：平滑组缺失、切线重算、没有光照贴图 UV、
+ * 网格尺寸离谱、骨架对不上，资产照样建出来，只在编辑器的 Message Log 里留一句。
+ * 不摆进正文的话，模型会照着 imported_count 报一个干净的导入。
+ */
+export function describeImportMessages(messages: ImportMessage[], truncated = 0): string[] {
+  const total = messages.length + truncated
+  if (total === 0) return []
+  const errors = messages.filter((m) => m.severity === 'error').length
+  const warnings = messages.length - errors
+  const parts = [
+    errors ? `${errors} 个错误` : '',
+    warnings ? `${warnings} 个警告` : '',
+    truncated ? `另有 ${truncated} 条超出上限没列出` : ''
+  ].filter(Boolean)
+  const lines: string[] = [
+    `⚠️ 导入器报了 ${total} 条消息（${parts.join('、')}），说导入干净之前先看完 import_messages：`
+  ]
+  for (const message of messages.slice(0, IMPORT_MESSAGES_IN_TEXT)) {
+    const text =
+      message.text.length > IMPORT_MESSAGE_MAX_CHARS
+        ? `${message.text.slice(0, IMPORT_MESSAGE_MAX_CHARS)}…`
+        : message.text
+    const where = message.category ? `${message.category}: ` : ''
+    lines.push(`  [${message.severity === 'error' ? '错误' : '警告'}] ${where}${text}`)
+  }
+  if (messages.length > IMPORT_MESSAGES_IN_TEXT) {
+    lines.push(`  …其余 ${messages.length - IMPORT_MESSAGES_IN_TEXT} 条见 import_messages`)
+  }
+  return lines
+}
+
 /** 导入资产响应数据 (UE 插件返回) */
 interface ImportAssetsResponse {
   ok: boolean
@@ -169,6 +273,12 @@ interface ImportAssetsResponse {
   reused?: ReusedItem[]
   reused_count?: number
   reuse_warning?: string
+  /** 自动建材质时每张贴图的处理结果。旧插件没有 */
+  texture_setup?: TextureSetupItem[]
+  /** 导入器说的 Warning / Error，去重后最多 50 条、错误在前。旧插件没有；只有视频的批次也没有 */
+  import_messages?: ImportMessage[]
+  /** 超出上限没列出的条数，有才出现 */
+  import_messages_truncated?: number
 }
 
 // ============================================================================
@@ -237,7 +347,12 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
 - save_warning: 有资产没写进磁盘，关掉编辑器就没了 —— 出现了就告诉用户去手动保存
 - isolated / isolate_note: 哪些文件被放进了子文件夹，以及实际落点
 - reused / reused_count / reuse_warning: 哪些资产是复用的旧的，不是这次新建的
-- rename_failed: asset_names 里没改成的那些（只在有的时候出现）`,
+- rename_failed: asset_names 里没改成的那些（只在有的时候出现）
+- import_messages: 导入器这次报的 Warning/Error（{ severity, category, text }，错误在前、最多 50 条，
+  import_messages_truncated 是没列出的条数）。平滑组、切线/法线重算、缺 UV/光照贴图 UV、
+  材质槽、尺寸、骨架不匹配都在这里 —— 有内容就不是「干净导入」，照实告诉用户
+- texture_setup: 自动建材质时每张贴图被认成什么（ORM/ARM/RMA/MRA/Mask 打包遮罩、bump 当高度图）、
+  sRGB/压缩改成了什么、接没接进材质实例；名字带 gl/opengl 的法线会翻绿通道`,
 
     inputSchema: ImportAssetsSchema,
 
@@ -358,6 +473,13 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
           if (response.reuse_warning) {
             notes.push(`⚠️ ${response.reuse_warning}`)
           }
+          notes.push(
+            ...describeImportMessages(
+              response.import_messages ?? [],
+              response.import_messages_truncated ?? 0
+            )
+          )
+          notes.push(...describeTextureSetup(response.texture_setup ?? []))
 
           // 要的名字到底改上没有，回读一次再说。
           //
@@ -399,6 +521,15 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
                   reuse_warning: response.reuse_warning
                 }
               : {}),
+            ...(response.texture_setup?.length ? { texture_setup: response.texture_setup } : {}),
+            ...(response.import_messages?.length
+              ? {
+                  import_messages: response.import_messages,
+                  ...(response.import_messages_truncated
+                    ? { import_messages_truncated: response.import_messages_truncated }
+                    : {})
+                }
+              : {}),
             message: withPartialHeadline(
               notes.join('\n'),
               { succeeded: outcome.succeeded, failed: outcome.failed, unit: '个文件' },
@@ -415,9 +546,16 @@ FBX/GLB 里内嵌的贴图常叫 Color / Normal / Roughness / Metallic，AI 生�
         const details = (response as any)?.details
         // 一个都没导成：每个文件的原因都带上，别只剩插件挑的第一条
         const reasons = describeFailures(outcome.failures)
+        // 导入器自己的原话往往才是根因（缺骨架、格式不认、几何体为空），一起带上
+        const importerSaid = describeImportMessages(
+          response?.import_messages ?? [],
+          response?.import_messages_truncated ?? 0
+        ).join('\n')
         return {
           success: false,
-          error: `导入资产失败：${msg}${reasons ? `\n${reasons}` : ''}`,
+          error:
+            `导入资产失败：${msg}${reasons ? `\n${reasons}` : ''}` +
+            (importerSaid ? `\n${importerSaid}` : ''),
           code,
           details,
           raw: response

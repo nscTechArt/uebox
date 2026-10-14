@@ -28,6 +28,8 @@ export { createSearchBlueprintNodesTool } from './searchBlueprintNodes'
 export { createApplyBlueprintGraphTool } from './applyBlueprintGraph'
 export { createCompileAllBlueprintsTool } from './compileAllBlueprints'
 export { createTidyBlueprintGraphTool } from './tidyBlueprintGraph'
+// 全项目「哪些蓝图用了这个名字」（引擎的 Find in Blueprints）。按需子组 ue.blueprint.usages
+export { createFindBlueprintUsagesTool } from './findBlueprintUsages'
 
 /**
  * ## 成员的「调」与「删」

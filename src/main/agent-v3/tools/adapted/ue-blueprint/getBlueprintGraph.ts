@@ -192,7 +192,22 @@ async function fetchGraphPage(
     )
 
   const explicitLimit = page.limit ?? (page.offset ? AUTO_PAGE_NODES : undefined)
-  if (explicitLimit) return { response: await call(explicitLimit), autoPaged: false }
+  if (explicitLimit) {
+    try {
+      return { response: await call(explicitLimit), autoPaged: false }
+    } catch (error) {
+      // 接着读的那页也可能太大（上一页就是退到小页才读出来的）
+      if (!isResponseTooLarge(error)) throw error
+    }
+    if (explicitLimit > FALLBACK_PAGE_NODES) {
+      try {
+        return { response: await call(FALLBACK_PAGE_NODES), autoPaged: true }
+      } catch (error) {
+        if (!isResponseTooLarge(error)) throw error
+      }
+    }
+    throw tooLargeEvenPaged(graphName)
+  }
 
   try {
     return { response: await call(), autoPaged: false }
@@ -206,7 +221,11 @@ async function fetchGraphPage(
       if (!isResponseTooLarge(error)) throw error
     }
   }
-  throw new Error(
+  throw tooLargeEvenPaged(graphName)
+}
+
+function tooLargeEvenPaged(graphName: string): Error {
+  return new Error(
     `Graph ${graphName} is too large to send even ${FALLBACK_PAGE_NODES} nodes at a time. ` +
       'The UnrealAgentLink plugin in this project probably predates graph paging. ' +
       PLUGIN_UPDATE_HINT
@@ -220,8 +239,9 @@ export function describeGraphPage(
   pagingRequested: boolean
 ): Record<string, unknown> {
   if (response.total_node_count === undefined) {
-    // 旧插件不认 offset / limit，回的是整张图；不说的话模型会拿 offset 再读一遍同样的东西
-    if (!pagingRequested) return {}
+    // 旧插件不认 offset / limit，回的是整张图；不说的话模型会拿 offset 再读一遍同样的东西。
+    // 状态机那一页插件本来就不分页，不算
+    if (!pagingRequested || response.graph_kind === 'state_machine') return {}
     return {
       page_note:
         'The plugin ignored offset/limit (it predates graph paging), so this is the whole graph — ' +
@@ -230,7 +250,18 @@ export function describeGraphPage(
     }
   }
   const first = response.offset ?? 0
-  const last = first + (response.nodes?.length ?? 0)
+  const count = response.nodes?.length ?? 0
+  if (response.total_node_count === 0) {
+    return { total_node_count: 0, offset: first, page_note: 'This graph is empty (0 nodes).' }
+  }
+  if (count === 0 && first >= response.total_node_count) {
+    return {
+      total_node_count: response.total_node_count,
+      offset: first,
+      page_note: `offset ${first} is past the end: this graph has ${response.total_node_count} nodes. Start again from offset=0.`
+    }
+  }
+  const last = first + count
   const more = response.next_offset !== undefined
   const head = autoPaged
     ? `This graph is too large to read in one response, so it was paged automatically: `
@@ -239,7 +270,7 @@ export function describeGraphPage(
     head +
     `nodes ${first}–${last - 1} of ${response.total_node_count}. ` +
     (more
-      ? `Call again with offset=${response.next_offset} for the next page. `
+      ? `Call again with offset=${response.next_offset}, limit=${count} for the next page. `
       : 'This is the last page. ') +
     'linked_to / connections may point at node_ids on other pages.'
   return {

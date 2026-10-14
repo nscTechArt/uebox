@@ -10,7 +10,8 @@ description: Retargets body animation between skeletons, measures poses and prev
 1. `anim_measure(path, describe=true)` 查动画帧率、帧数、骨轨道。
 2. 已有调好的 IK Retargeter 就把路径传给 `anim_retarget.retargeter`；不要重新建 Rig 或自动对齐它。
 3. 没有配置时，由 `anim_retarget` 自动建源/目标 Rig、严格同名映射和姿势对齐。
-4. 批量传 `animations: [{ animation, output_path }]`，插件每次只导出一段，保存并回读骨架、关键帧和文件。
+4. 先导一段 idle 验静态姿势、一段 walk/run 验运动（见下面两节），都过了再批量传
+   `animations: [{ animation, output_path }]`；插件每次只导出一段，保存并回读骨架、关键帧和文件。
 5. 对本次产物调用 `anim_measure`，再用 `anim_preview` 看同一时刻，回复给一张图加本轮数字。
 
 首版在 UE 5.5 编译和验收。旧插件不认识 `anim.*` 时先用 `project_update_plugin` 更新插件；低于 5.5 返回不支持，不能反复调用。
@@ -43,12 +44,35 @@ description: Retargets body animation between skeletons, measures poses and prev
 2. `anim_preview` 看导出的那段 0 秒那一帧，front 和 side 各一张；
 3. `anim_measure` 用 `angle_bones` 量上臂对脊柱的夹角（四个骨名：脊柱起止、上臂起止），
    源动画和导出动画各量一次，把差值和预览图一起报给用户；对齐没有固定的度数门槛，
-   同一动作两边差得越小越好，差多少能接受由用户看图定。`bones` 能回骨骼世界坐标序列。
+   同一动作两边差得越小越好，差多少能接受由用户看图定。`bones` 回逐帧骨骼坐标（组件空间，不是世界空间）。
 
 不要用 `ue_screenshot` 拍重定向编辑器的预览窗来判断 —— 那张图是编辑器界面的一块像素，
 手臂「下来没下来」一眼看不准，2026-09-22 就有两次把 T-pose 读成已对齐、错报给用户。
 也不要为了读骨骼数值起 PIE：`ue_playtest` 回的是 PrintString 和画面，不回骨骼变换；
 在 Python 里 `editor_play_simulate()` 之后 `sleep` 只是把游戏线程挡住，世界永远是 None。
+
+## 运动中验：滑步、陷地、步幅
+
+静态姿势对了，只证明重定向姿势对；脚滑不滑、陷不陷地、步子大小对不对，要播一段运动才看得出。
+从同一批里挑一段 walk 或 run，源和产物同帧各量一次：
+
+```
+anim_measure(path, bones: ["pelvis", "foot_l", "foot_r", "ball_l", "ball_r"])
+```
+
+先看回执的 `root_displacement_range_cm`：水平方向有位移 = 测量里根在走；接近 0 = 原地
+（原地动画，或 `root_motion_enabled: true` 时引擎取姿势把根锁回了原位）。两种情况尺子不同：
+
+- **陷地 / 浮空**：比着地时脚掌的最低 Z。基准用目标骨架自带的动画（角色包大多带 idle）里的同一根骨；
+  没有自带动画就看 `anim_preview` 的 side 图，回复里说清地面基准是目测的。
+- **滑步（根在走）**：脚掌 Z 贴近最低值的帧算着地帧，着地脚应基本不动。源本身也可能有一点滑，
+  **产物比源多出来的水平位移才是重定向引入的**。
+- **步幅（两种都量）**：产物与源之比应接近腿长比（两边 idle 首帧 pelvis 的 Z 之比）。根在走时比根的
+  水平位移；原地时着地脚会匀速后移（跑步机效果，不是滑步），比这个后移速度。
+
+换算步骤和比不上时先查哪里，见 [references/measurement.md](references/measurement.md)。
+原地测量看不到根运动本身的位移；游戏里移动速度和步幅配不配，还取决于角色移动组件的速度。
+这两件工具量不到，请用户进 PIE 走一段看脚，不要替他说「不滑了」。
 
 ## 自动对齐与手工偏移
 
@@ -59,6 +83,9 @@ description: Retargets body animation between skeletons, measures poses and prev
 - `set_rotation_offset_for_retarget_pose_bone` 写的是局部空间的后乘增量，回读的四元数看不出方向，
   空间与合成顺序见 [references/api.md](references/api.md)。手工推偏移前先用 `anim_measure`
   量出目标和源的实际夹角，再决定要不要碰它。
+- **改现有的 retargeter 或 IK Rig 之前**，先 `ue_content_dependencies(direction: "referencers")`
+  查谁在用：一副 IK Rig 常被几个 retargeter 共用，改它的链会连带别的重定向一起变；
+  用户自己的配置要改，先说改哪几处、他点头再动。改完把同一段重导到新路径，和改前的产物同帧对比数字。
 - 5.6 起链设置和根设置在 op 栈上，控制器方法名先 `dir()` 再调，不要猜；
   op 栈 API 与常见 `AttributeError` 对照表见 [references/api.md](references/api.md)。
 

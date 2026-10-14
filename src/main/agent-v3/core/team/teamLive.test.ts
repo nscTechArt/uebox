@@ -165,3 +165,55 @@ describe('标记', () => {
     expect(mailIdsIn(rendered)).toEqual(['m7'])
   })
 })
+
+describe('给界面的动静', () => {
+  it('谁在跑、谁在等、谁手上有活都看得到；每次变化都通知一声', async () => {
+    let changes = 0
+    const watched = createTeamLive(store, () => changes++)
+    const detach = watched.attach('程序', { steer: () => undefined })
+    watched.setAssignment('程序', '\n做波次系统\n第二行细节')
+    const done = watched.awaiting('程序')
+    const controller = new AbortController()
+    const waiting = watched.waitReply('美术', 'm1', 60_000, controller.signal)
+
+    expect(watched.view()).toEqual({
+      running: ['程序'],
+      waiting: ['美术'],
+      awaited: ['程序'],
+      assignments: [{ member: '程序', text: '做波次系统', since: expect.any(Number) }],
+      recent: []
+    })
+    expect(changes).toBe(4)
+
+    controller.abort()
+    await expect(waiting).rejects.toThrow()
+    done()
+    watched.setAssignment('程序', null)
+    await detach()
+    expect(watched.view()).toEqual({
+      running: [],
+      waiting: [],
+      awaited: [],
+      assignments: [],
+      recent: []
+    })
+    expect(changes).toBe(8)
+  })
+})
+
+describe('队员的动态', () => {
+  it('当场推给界面，每人只留最近几条；空行不记', () => {
+    const pushed: string[] = []
+    const watched = createTeamLive(store, undefined, (a) => pushed.push(`${a.member}:${a.text}`))
+    watched.note('程序', '调用 ue_save /Game/A')
+    watched.note('程序', '   ')
+    for (let i = 0; i < 10; i++) watched.note('美术', `第 ${i} 步`)
+    expect(pushed[0]).toBe('程序:调用 ue_save /Game/A')
+    expect(pushed).toHaveLength(11)
+    const recent = watched.view().recent
+    expect(recent.filter((a) => a.member === '美术').map((a) => a.text)).toEqual(
+      Array.from({ length: 8 }, (_, i) => `第 ${i + 2} 步`)
+    )
+    expect(recent.filter((a) => a.member === '程序')).toHaveLength(1)
+  })
+})

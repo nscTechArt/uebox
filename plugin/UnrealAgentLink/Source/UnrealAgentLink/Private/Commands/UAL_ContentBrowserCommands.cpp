@@ -45,6 +45,13 @@
 #include "FileMediaSource.h"
 #include "Misc/FileHelper.h"
 #include "Misc/App.h" // UAL: 包含 GIsRunningUnattendedScript 用于无人值守模式删除
+#include "Misc/ScopeLock.h"
+// content.import 的 import_messages：Interchange 结果容器（5.0 里 Interchange 还是实验插件，不链）
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+#include "InterchangeManager.h"
+#include "InterchangeResult.h"
+#include "InterchangeResultsContainer.h"
+#endif
 
 // 使用独立的 Log Category 名称，避免与 UAL_ContentBrowserExt 冲突
 // 放在这里以便静态函数可以使用
@@ -610,6 +617,226 @@ void FUAL_ContentBrowserCommands::Handle_SearchAssets(
 
 
 /**
+ * content.import 回执里的 import_messages：导入器这次说了哪些 Warning / Error。
+ *
+ * 以前回执只有「导成了几个」，于是模型报「干净导入」，而编辑器的 Message Log 里
+ * 躺着平滑组缺失、切线重算、没有 UV / 光照贴图 UV、网格太小、骨架对不上……
+ * 这些行内行一眼就看的东西。两条来源：
+ *
+ * 1. **GLog**（FUAL_ScopedLogCapture，5.0–5.8）。按类别收，不按关键词猜：
+ *    - `FBXImport`：旧 FBX 管线的消息不走 UE_LOG。FFbxImporter::AddTokenizedErrorMessage
+ *      先攒进 FFbxLogger，每个文件导完 FFbxLogger 析构时 `AddMessages` 进名为
+ *      "FBXImport" 的 Message Log，默认 bMirrorToOutputLog=true，于是以**这个名字**为
+ *      类别镜像进 GLog（FbxSkeletalMeshImport.cpp 的 ~FFbxLogger，MessageLogListingModel.cpp
+ *      的 AddMessageInternal，5.0/5.4/5.8 核对过）。没有 Logger 时退回 `LogFbx` Warning。
+ *      注意那个 Message Log 每个文件导入前都被 ClearMessages —— 只读它的话一批里
+ *      只剩最后一个文件，镜像进 GLog 的才是全的。
+ *    - `Interchange`：5.3–5.6 InterchangeEditor 的 LogErrors 把结果加进 "Interchange"
+ *      Message Log 时同样镜像（5.7 起改成不镜像、由 LogInterchangeEngine 直接打）。
+ *      编辑器带 -unattended 时它整个不跑 —— 所以还有第 2 条。
+ *    - 其余是导入 / 建网格 / 改名路上各模块自己的类别；`None` 是工厂里
+ *      `Warn->Logf(ELogVerbosity::Error, ...)` 那种不带类别的行（OutputDevice.cpp
+ *      的 LogfImpl 传 NAME_None）。
+ * 2. **Interchange 结果容器**（5.1+）。AssetTools 每个任务导完都广播
+ *    `UInterchangeManager::OnBatchImportComplete`，带着这次的 UInterchangeResultsContainer
+ *    （AssetTools.cpp 的 AppendAndBroadcastImportResultIfNeeded，5.1–5.8 都有）。
+ *    5.3–5.6 引擎自己**不**把结果打进 GLog（ReleaseAsyncHelper 里
+ *    `bLogWarningsAndErrors = false`），这是那几版唯一可靠的来源。
+ *    同一条结果在 GLog 里可能还有一份（5.1/5.2 是 ToJson，5.3–5.6 是 GetText 的镜像，
+ *    5.7+ 是 GetMessageLogText），按这几种原文去重，留结构化的那份。
+ *
+ * 5.0 的 Interchange 还是实验插件，链不了，只有第 1 条（5.0 也没有任何格式默认走它）。
+ */
+namespace UALImportMessages
+{
+	/** 回执里最多给几条。截掉的数目照实报 */
+	static constexpr int32 MaxMessages = 50;
+
+	struct FMessage
+	{
+		bool bError = false;
+		FString Category;
+		FString Text;
+	};
+
+	/** 导入期间要收的 GLog 类别。名字逐个在引擎源码里找到过定义（或镜像来源），不存在的名字不会误收 */
+	static TUniquePtr<FUAL_ScopedLogCapture> MakeLogCapture()
+	{
+		return MakeUnique<FUAL_ScopedLogCapture>(std::initializer_list<const TCHAR*>{
+			// 旧 FBX 管线（UnrealEd/Private/Fbx）
+			TEXT("FBXImport"), TEXT("LogFbx"), TEXT("LogFbxMaterialImport"),
+			TEXT("LogSkeletalMeshImport"), TEXT("LogStaticMeshImportUtils"),
+			// Interchange（Runtime/Interchange + Plugins/Interchange）
+			TEXT("Interchange"), TEXT("LogInterchangeEngine"), TEXT("LogInterchangeImport"),
+			TEXT("LogInterchangeCore"), TEXT("LogInterchangePipeline"), TEXT("LogInterchangeFbxParser"),
+			// 5.0–5.2 旧 glTF 导入插件（Plugins/Editor/GLTFImporter）
+			TEXT("LogGLTF"),
+			// 建网格：缩放补偿后的 Build()、导入时的网格构建
+			TEXT("LogStaticMesh"), TEXT("LogSkeletalMesh"), TEXT("LogMeshUtilities"),
+			TEXT("LogStaticMeshBuilder"), TEXT("LogSkeletalMeshBuilder"), TEXT("LogMeshBuilderModule"),
+			// 工厂 / AssetTools（改名失败的原因也在 LogAssetTools）
+			TEXT("LogAssetTools"), TEXT("LogEditorFactories"), TEXT("LogFactory"), TEXT("LogTexture"),
+			// 不带类别的 Warn->Logf
+			TEXT("None"),
+			// 导入器撞上引擎断言（ensure）时记在这里，比如 OBJ 缺 UV 索引。
+			// 导入还会「成功」，但结果多半不对 —— 这是引擎自己报的，要让模型看见
+			TEXT("LogOutputDevice")
+		}, ELogVerbosity::Warning);
+	}
+
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+	/**
+	 * 作用域内订阅 OnBatchImportComplete，把非 Success 的结果抄成文本。
+	 *
+	 * 回调可能不在游戏线程（5.1–5.7 的同步导入是 ImportAssetAsync + WaitUntilDone，
+	 * SetDone 在完成任务里调），所以拷文本、不留 UObject 指针，并且加锁。
+	 */
+	class FInterchangeResultCapture
+	{
+	public:
+		FInterchangeResultCapture()
+		{
+			Handle = UInterchangeManager::GetInterchangeManager().OnBatchImportComplete.AddRaw(
+				this, &FInterchangeResultCapture::OnBatchImportComplete);
+		}
+
+		~FInterchangeResultCapture()
+		{
+			UInterchangeManager::GetInterchangeManager().OnBatchImportComplete.Remove(Handle);
+		}
+
+		FInterchangeResultCapture(const FInterchangeResultCapture&) = delete;
+		FInterchangeResultCapture& operator=(const FInterchangeResultCapture&) = delete;
+
+		void Collect(TArray<FMessage>& OutMessages, TSet<FString>& OutGLogEchoes) const
+		{
+			FScopeLock Lock(&Mutex);
+			OutMessages.Append(Messages);
+			OutGLogEchoes.Append(Echoes);
+		}
+
+	private:
+		void OnBatchImportComplete(TStrongObjectPtr<UInterchangeResultsContainer> Container)
+		{
+			if (!Container.IsValid())
+			{
+				return;
+			}
+			for (UInterchangeResult* Result : Container->GetResults())
+			{
+				if (!Result || Result->GetResultType() == EInterchangeResultType::Success)
+				{
+					continue;
+				}
+				const FString PlainText = Result->GetText().ToString();
+				FMessage Message;
+				Message.bError = Result->GetResultType() == EInterchangeResultType::Error;
+				Message.Category = TEXT("Interchange");
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4)
+				// 「[源文件 : '资产名', 类型] 正文」—— 一批好几个文件时得知道是哪个
+				Message.Text = Result->GetMessageLogText().ToString();
+#else
+				Message.Text = Result->SourceAssetName.IsEmpty()
+					? PlainText
+					: FString::Printf(TEXT("[%s] %s"), *FPaths::GetCleanFilename(Result->SourceAssetName), *PlainText);
+#endif
+				const FString Json = Result->ToJson();
+
+				FScopeLock Lock(&Mutex);
+				Echoes.Add(PlainText);
+				Echoes.Add(Message.Text);
+				Echoes.Add(Json);
+				Messages.Add(MoveTemp(Message));
+			}
+		}
+
+		FDelegateHandle Handle;
+		mutable FCriticalSection Mutex;
+		TArray<FMessage> Messages;
+		/** 同一条结果在 GLog 里可能长成的样子，用来去掉重复 */
+		TSet<FString> Echoes;
+	};
+#endif
+
+	/**
+	 * 合并、去重、截断，写进回执。错误排在警告前面（各自保持先后），截断时先丢警告。
+	 * 去重只看「级别 + 正文」：同一句话从 LogFbx 和 FBXImport 各来一次算一条。
+	 */
+	static void WriteToResponse(
+		const TSharedPtr<FJsonObject>& Response,
+		const TArray<FUAL_ScopedLogCapture::FEntry>& LogEntries,
+		int32 LogDropped,
+		const TArray<FMessage>& StructuredMessages,
+		const TSet<FString>& GLogEchoes)
+	{
+		TArray<FMessage> Unique;
+		TSet<FString> Seen;
+		auto AddUnique = [&Unique, &Seen](FMessage&& Message)
+		{
+			Message.Text.TrimStartAndEndInline();
+			if (Message.Text.IsEmpty())
+			{
+				return;
+			}
+			const FString Key = (Message.bError ? TEXT("E|") : TEXT("W|")) + Message.Text;
+			if (Seen.Contains(Key))
+			{
+				return;
+			}
+			Seen.Add(Key);
+			Unique.Add(MoveTemp(Message));
+		};
+
+		for (const FMessage& Message : StructuredMessages)
+		{
+			AddUnique(FMessage(Message));
+		}
+		for (const FUAL_ScopedLogCapture::FEntry& Entry : LogEntries)
+		{
+			if (GLogEchoes.Contains(Entry.Text) || GLogEchoes.Contains(Entry.Text.TrimStartAndEnd()))
+			{
+				continue;
+			}
+			FMessage Message;
+			Message.bError = Entry.Verbosity == ELogVerbosity::Error || Entry.Verbosity == ELogVerbosity::Fatal;
+			// 类别原样给；不带类别的行给空串，别让人以为有个叫 None 的模块
+			Message.Category = Entry.Category.IsNone() ? FString() : Entry.Category.ToString();
+			Message.Text = Entry.Text;
+			AddUnique(MoveTemp(Message));
+		}
+
+		TArray<TSharedPtr<FJsonValue>> Out;
+		int32 Kept = 0;
+		for (int32 Pass = 0; Pass < 2; ++Pass)
+		{
+			const bool bWantError = Pass == 0;
+			for (const FMessage& Message : Unique)
+			{
+				if (Message.bError != bWantError || Kept >= MaxMessages)
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+				Item->SetStringField(TEXT("severity"), Message.bError ? TEXT("error") : TEXT("warning"));
+				Item->SetStringField(TEXT("category"), Message.Category);
+				Item->SetStringField(TEXT("text"), Message.Text);
+				Out.Add(MakeShared<FJsonValueObject>(Item));
+				++Kept;
+			}
+		}
+
+		// 空数组也给：调用方据此分得清「这次没有」和「旧插件根本不报」
+		Response->SetArrayField(TEXT("import_messages"), Out);
+		const int32 Truncated = (Unique.Num() - Kept) + LogDropped;
+		if (Truncated > 0)
+		{
+			Response->SetNumberField(TEXT("import_messages_truncated"), Truncated);
+		}
+	}
+}
+
+
+/**
  * content.import - 导入外部文件
  * 将磁盘上的文件导入到 UE 项目中
  * 使用 UAssetImportTask 实现无弹窗自动化导入（类似 Quixel Bridge）
@@ -981,6 +1208,19 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 		return;
 	}
 	// === 第四阶段：执行标准导入任务 ===
+	// 导入器自己说的 Warning / Error（见 UALImportMessages）。范围盖住导入、缩放补偿的
+	// Build() 和改名，到收完结果为止；后面自动建材质、落盘那些不算「导入器说的」
+	TUniquePtr<FUAL_ScopedLogCapture> ImportLogCapture;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+	TUniquePtr<UALImportMessages::FInterchangeResultCapture> InterchangeCapture;
+#endif
+	if (ImportTasks.Num() > 0)
+	{
+		ImportLogCapture = UALImportMessages::MakeLogCapture();
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+		InterchangeCapture = MakeUnique<UALImportMessages::FInterchangeResultCapture>();
+#endif
+	}
 	if (ImportTasks.Num() > 0)
 	{
 		// 获取 AssetTools
@@ -1181,13 +1421,35 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 			else
 			{
 				// 引擎一个资产都没产出：格式没有对应的导入器，或导入器自己报错了（原因在 Output Log）
-				AddFailedFile(Task->Filename, TEXT("the engine imported nothing from this file (no importer for this format, or the importer failed - see Output Log)"));
+				AddFailedFile(Task->Filename, TEXT("the engine imported nothing from this file (no importer for this format, or the importer failed - the importer's own messages are in import_messages)"));
 			}
 		}
 	}
 	
+	// 导入器的话收到这里为止：先冲掉日志线程里排队的行再取，然后马上摘掉两个监听
+	TArray<FUAL_ScopedLogCapture::FEntry> ImportLogEntries;
+	int32 ImportLogDropped = 0;
+	TArray<UALImportMessages::FMessage> InterchangeMessages;
+	TSet<FString> InterchangeEchoes;
+	const bool bHasImportMessages = ImportLogCapture.IsValid();
+	if (ImportLogCapture.IsValid())
+	{
+		ImportLogEntries = ImportLogCapture->GetEntries();
+		ImportLogDropped = ImportLogCapture->Dropped();
+		ImportLogCapture.Reset();
+	}
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+	if (InterchangeCapture.IsValid())
+	{
+		InterchangeCapture->Collect(InterchangeMessages, InterchangeEchoes);
+		InterchangeCapture.Reset();
+	}
+#endif
+
 	// 🚀 自动生成PBR材质（如果导入了纹理）
 	TArray<UMaterialInstanceConstant*> CreatedMaterials;
+	// 每张贴图被认成什么、设置改成了什么、接没接进 MI —— 回执里的 texture_setup
+	TArray<FUAL_PBRTextureReport> TextureReports;
 	// 自动生成的附带资产单独数，不算进「输入文件成功了几个」
 	int32 AutoGeneratedCount = 0;
 	if (ImportedTextures.Num() > 0)
@@ -1208,7 +1470,8 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 			ImportedMeshes,
 			DestinationPath,
 			PBROptions,
-			CreatedMaterials);
+			CreatedMaterials,
+			&TextureReports);
 		
 		if (MaterialCount > 0)
 		{
@@ -1355,6 +1618,62 @@ void FUAL_ContentBrowserCommands::Handle_ImportAssets(
 		Response->SetStringField(TEXT("save_warning"),
 			FString::Printf(TEXT("%d 个资产已导入但未能写入磁盘，关闭编辑器后会丢失，请在编辑器里手动保存。"),
 				ImportUnsavedCount));
+	}
+	// 导入器自己说的 Warning / Error。只有视频的批次不走引擎导入器，不给这个字段
+	if (bHasImportMessages)
+	{
+		UALImportMessages::WriteToResponse(Response, ImportLogEntries, ImportLogDropped, InterchangeMessages, InterchangeEchoes);
+	}
+
+	/*
+	 * 自动建材质时每张贴图的处理结果。
+	 *
+	 * 以前这些只进日志：打包遮罩被当成什么、sRGB 关没关、法线翻没翻绿通道，
+	 * 调用方一概看不见，只能对着 MI 的效果猜。srgb / compression / flip_green_channel
+	 * 是处理完之后从贴图上回读的值，不是我们打算设的值。
+	 */
+	if (TextureReports.Num() > 0)
+	{
+		const UEnum* CompressionEnum = StaticEnum<TextureCompressionSettings>();
+		TArray<TSharedPtr<FJsonValue>> TextureSetupJson;
+		for (const FUAL_PBRTextureReport& Report : TextureReports)
+		{
+			if (!Report.Texture) continue;
+			TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+			Item->SetStringField(TEXT("name"), Report.Texture->GetName());
+			Item->SetStringField(TEXT("path"), Report.Texture->GetPathName());
+			Item->SetStringField(TEXT("type"), FUAL_PBRMaterialHelper::GetTextureTypeName(Report.Type));
+			Item->SetBoolField(TEXT("srgb"), Report.Texture->SRGB);
+			Item->SetStringField(TEXT("compression"), CompressionEnum
+				? CompressionEnum->GetNameStringByValue(Report.Texture->CompressionSettings)
+				: FString(TEXT("Unknown")));
+			if (Report.Type == EUAL_PBRTextureType::Normal)
+			{
+				Item->SetBoolField(TEXT("flip_green_channel"), Report.Texture->bFlipGreenChannel);
+				if (Report.bFlippedGreenByNaming)
+				{
+					Item->SetStringField(TEXT("flip_reason"),
+						TEXT("name contains an OpenGL marker (gl / opengl)"));
+				}
+			}
+			const TCHAR* ChannelR = nullptr;
+			const TCHAR* ChannelG = nullptr;
+			const TCHAR* ChannelB = nullptr;
+			if (FUAL_PBRMaterialHelper::GetPackedChannels(Report.Type, ChannelR, ChannelG, ChannelB))
+			{
+				TSharedPtr<FJsonObject> Channels = MakeShared<FJsonObject>();
+				Channels->SetStringField(TEXT("r"), ChannelR);
+				Channels->SetStringField(TEXT("g"), ChannelG);
+				Channels->SetStringField(TEXT("b"), ChannelB);
+				Item->SetObjectField(TEXT("channels"), Channels);
+			}
+			if (!Report.MaterialParameter.IsEmpty())
+			{
+				Item->SetStringField(TEXT("material_parameter"), Report.MaterialParameter);
+			}
+			TextureSetupJson.Add(MakeShared<FJsonValueObject>(Item));
+		}
+		Response->SetArrayField(TEXT("texture_setup"), TextureSetupJson);
 	}
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Response);

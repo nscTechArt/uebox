@@ -2,21 +2,28 @@
 
 #include "UAL_CommandUtils.h"
 #include "UAL_MeshCompat.h"
+#include "UAL_ScopedTransaction.h"
 
 #include "Animation/MorphTarget.h"
 #include "Animation/Skeleton.h"
+#include "Editor.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/SkeletalMeshSocket.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Engine/StaticMeshSourceData.h"
+#include "FileHelpers.h"
 #include "Materials/MaterialInterface.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "ReferenceSkeleton.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
+#include "StaticMeshCompiler.h"
+#include "StaticMeshEditorSubsystem.h"
 #include "StaticMeshResources.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUALMesh, Log, All);
@@ -409,6 +416,10 @@ void FUAL_MeshCommands::RegisterCommands(TMap<FString, TFunction<void(const TSha
 	{
 		Handle_Describe(Payload, RequestId);
 	});
+	CommandMap.Add(TEXT("mesh.optimize"), [](const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+	{
+		Handle_Optimize(Payload, RequestId);
+	});
 }
 
 // ======================================================================
@@ -453,6 +464,660 @@ void FUAL_MeshCommands::Handle_Describe(const TSharedPtr<FJsonObject>& Payload, 
 				*Path, *Asset->GetClass()->GetName()));
 		return;
 	}
+
+	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
+}
+
+// ======================================================================
+// mesh.optimize
+// ======================================================================
+
+// 具名而不是匿名：插件走 unity 构建，几个 .cpp 拼成一个编译单元，
+// 匿名命名空间里的 MarkFailed 之类会和别的文件撞名
+namespace UALMeshOptimize
+{
+	/**
+	 * 凸包分解的参数范围和默认值，照抄静态网格编辑器「Collision → Auto Convex Collision」
+	 * 面板（`StaticMeshEditorTools.cpp` 顶部那几个常量，5.0 与 5.8 一致）。
+	 * 用户在编辑器里点出来的结果和我们生成的应该是同一个东西。
+	 */
+	constexpr int32 MinHullCount = 1;
+	constexpr int32 MaxHullCount = 64;
+	constexpr int32 DefaultHullCount = 4;
+	constexpr int32 MinVertsPerHull = 6;
+	constexpr int32 MaxVertsPerHull = 32;
+	constexpr int32 DefaultVertsPerHull = 16;
+	constexpr int32 MinHullPrecision = 10000;
+	constexpr int32 MaxHullPrecision = 1000000;
+	constexpr int32 DefaultHullPrecision = 100000;
+
+	/** 这一级 LOD 有没有自己的源几何 —— 有就是导入的（美术的活），没有就是引擎按比例生成的 */
+	bool IsImportedLod(UStaticMesh* Mesh, int32 Index)
+	{
+		return Index < Mesh->GetNumSourceModels() && !Mesh->GetSourceModel(Index).IsRawMeshEmpty();
+	}
+
+	/** LOD1 起最后一个导入的 LOD 下标；没有就是 0 */
+	int32 LastImportedLod(UStaticMesh* Mesh)
+	{
+		int32 Last = 0;
+		for (int32 Index = 1; Index < Mesh->GetNumSourceModels(); ++Index)
+		{
+			if (IsImportedLod(Mesh, Index))
+			{
+				Last = Index;
+			}
+		}
+		return Last;
+	}
+
+	/** 每级 LOD 的事实：面数读渲染数据（构建完的真东西），来源和减面比例读 SourceModel */
+	TArray<TSharedPtr<FJsonValue>> ReadLodFacts(UStaticMesh* Mesh)
+	{
+		TArray<TSharedPtr<FJsonValue>> Lods;
+		const FStaticMeshRenderData* RenderData = Mesh->GetRenderData();
+		const int32 NumLODs = Mesh->GetNumLODs();
+		for (int32 Index = 0; Index < NumLODs; ++Index)
+		{
+			TSharedPtr<FJsonObject> Lod = MakeShared<FJsonObject>();
+			Lod->SetNumberField(TEXT("index"), Index);
+			Lod->SetNumberField(TEXT("triangles"), Mesh->GetNumTriangles(Index));
+			if (RenderData && RenderData->LODResources.IsValidIndex(Index))
+			{
+				Lod->SetNumberField(TEXT("screen_size"), RenderData->ScreenSize[Index].Default);
+			}
+			if (Index < Mesh->GetNumSourceModels())
+			{
+				const bool bImported = IsImportedLod(Mesh, Index);
+				Lod->SetStringField(TEXT("source"), bImported ? TEXT("imported") : TEXT("generated"));
+				if (!bImported)
+				{
+					Lod->SetNumberField(TEXT("reduction_percent"),
+						Mesh->GetSourceModel(Index).ReductionSettings.PercentTriangles * 100.0);
+				}
+			}
+			Lods.Add(MakeShared<FJsonValueObject>(Lod));
+		}
+		return Lods;
+	}
+
+	/** 简单碰撞按类型数一遍。复杂度一起给：complex_as_simple 时简单碰撞根本不参与查询 */
+	TSharedPtr<FJsonObject> ReadCollisionFacts(UStaticMesh* Mesh)
+	{
+		TSharedPtr<FJsonObject> Facts = MakeShared<FJsonObject>();
+		const UBodySetup* Body = Mesh->GetBodySetup();
+		Facts->SetNumberField(TEXT("box"), Body ? Body->AggGeom.BoxElems.Num() : 0);
+		Facts->SetNumberField(TEXT("sphere"), Body ? Body->AggGeom.SphereElems.Num() : 0);
+		Facts->SetNumberField(TEXT("capsule"), Body ? Body->AggGeom.SphylElems.Num() : 0);
+		Facts->SetNumberField(TEXT("convex"), Body ? Body->AggGeom.ConvexElems.Num() : 0);
+		Facts->SetNumberField(TEXT("total"), Body ? Body->AggGeom.GetElementCount() : 0);
+		Facts->SetStringField(TEXT("complexity"),
+			Body ? CollisionComplexityToString(Body->CollisionTraceFlag) : TEXT("unknown"));
+		return Facts;
+	}
+
+	/** 某一类简单碰撞的个数；Type 为空时给总数 */
+	int32 CollisionCount(UStaticMesh* Mesh, const FString& Type)
+	{
+		const UBodySetup* Body = Mesh->GetBodySetup();
+		if (!Body)
+		{
+			return 0;
+		}
+		if (Type == TEXT("box")) return Body->AggGeom.BoxElems.Num();
+		if (Type == TEXT("sphere")) return Body->AggGeom.SphereElems.Num();
+		if (Type == TEXT("capsule")) return Body->AggGeom.SphylElems.Num();
+		if (Type == TEXT("convex")) return Body->AggGeom.ConvexElems.Num();
+		return Body->AggGeom.GetElementCount();
+	}
+
+	void FinishMeshCompilation(UStaticMesh* Mesh)
+	{
+		// 对没在编译的网格是空操作；签名 5.0–5.8 一致（5.8 多一个带默认值的 Options 参数）
+		FStaticMeshCompilingManager::Get().FinishCompilation({ Mesh });
+	}
+
+	void MarkFailed(const TSharedPtr<FJsonObject>& Result, const FString& Reason)
+	{
+		Result->SetBoolField(TEXT("ok"), false);
+		Result->SetStringField(TEXT("reason"), Reason);
+	}
+
+	/** 解析出来的请求。参数本身有错就在动手前整条拒掉（400），不进「部分成功」 */
+	struct FLodRequest
+	{
+		int32 Count = 0;
+		/** 下标 k 对应 LOD k+1，单位是「占 LOD0 面数的百分比」 */
+		TArray<float> Percent;
+		bool bKeepImported = false;
+		/** 用生成的 LOD 换掉导入的（LOD1 起全部重建）。只在用户明确同意时传，和 bKeepImported 互斥 */
+		bool bReplaceImported = false;
+	};
+
+	struct FCollisionRequest
+	{
+		FString Type;
+		int32 HullCount = DefaultHullCount;
+		int32 MaxHullVerts = DefaultVertsPerHull;
+		int32 HullPrecision = DefaultHullPrecision;
+		bool bReplace = true;
+	};
+
+	bool ReadIntInRange(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Field, int32 Min, int32 Max, int32& InOut, FString& OutError)
+	{
+		double Value = 0.0;
+		if (!Obj->TryGetNumberField(Field, Value))
+		{
+			return true;	// 没给就用默认值
+		}
+		if (Value != FMath::FloorToDouble(Value) || Value < Min || Value > Max)
+		{
+			OutError = FString::Printf(TEXT("%s must be an integer in [%d, %d], got %g"), Field, Min, Max, Value);
+			return false;
+		}
+		InOut = static_cast<int32>(Value);
+		return true;
+	}
+
+	bool ParseLodRequest(const TSharedPtr<FJsonObject>& Obj, FLodRequest& Out, FString& OutError)
+	{
+		double CountValue = 0.0;
+		if (!Obj->TryGetNumberField(TEXT("count"), CountValue))
+		{
+			OutError = TEXT("lods.count is required: total number of LODs including LOD0 (2-8)");
+			return false;
+		}
+		if (CountValue != FMath::FloorToDouble(CountValue) || CountValue < 2 || CountValue > MAX_STATIC_MESH_LODS)
+		{
+			OutError = FString::Printf(TEXT("lods.count must be an integer in [2, %d], got %g"), MAX_STATIC_MESH_LODS, CountValue);
+			return false;
+		}
+		Out.Count = static_cast<int32>(CountValue);
+
+		const TArray<TSharedPtr<FJsonValue>>* Reduction = nullptr;
+		if (Obj->TryGetArrayField(TEXT("reduction"), Reduction) && Reduction)
+		{
+			if (Reduction->Num() != Out.Count - 1)
+			{
+				OutError = FString::Printf(TEXT("lods.reduction needs exactly count-1 = %d entries (LOD1..LOD%d), got %d"),
+					Out.Count - 1, Out.Count - 1, Reduction->Num());
+				return false;
+			}
+			for (const TSharedPtr<FJsonValue>& Entry : *Reduction)
+			{
+				double Percent = 0.0;
+				if (!Entry.IsValid() || !Entry->TryGetNumber(Percent) || Percent <= 0.0 || Percent > 100.0)
+				{
+					OutError = TEXT("lods.reduction entries are percent of LOD0 triangles, each in (0, 100]");
+					return false;
+				}
+				Out.Percent.Add(static_cast<float>(Percent));
+			}
+		}
+		else
+		{
+			// 默认逐级减半：LOD1 50%、LOD2 25%、LOD3 12.5%……
+			// 这就是引擎自带 LOD 组的做法（BaseEngine.ini [StaticMeshLODSettings] 的
+			// LODPercentTriangles=50，StaticMesh.cpp 里按级连乘），不是我们另编的一套。
+			for (int32 Index = 1; Index < Out.Count; ++Index)
+			{
+				Out.Percent.Add(100.0f * FMath::Pow(0.5f, static_cast<float>(Index)));
+			}
+		}
+
+		Obj->TryGetBoolField(TEXT("keep_imported"), Out.bKeepImported);
+		Obj->TryGetBoolField(TEXT("replace_imported"), Out.bReplaceImported);
+		if (Out.bKeepImported && Out.bReplaceImported)
+		{
+			OutError = TEXT("lods.keep_imported and lods.replace_imported are mutually exclusive: keep the imported LODs, or replace them - not both");
+			return false;
+		}
+		return true;
+	}
+
+	bool ParseCollisionRequest(const TSharedPtr<FJsonObject>& Obj, FCollisionRequest& Out, FString& OutError)
+	{
+		if (!Obj->TryGetStringField(TEXT("type"), Out.Type))
+		{
+			OutError = TEXT("collision.type is required: box | sphere | capsule | convex");
+			return false;
+		}
+		Out.Type = Out.Type.ToLower();
+		if (Out.Type != TEXT("box") && Out.Type != TEXT("sphere") && Out.Type != TEXT("capsule") && Out.Type != TEXT("convex"))
+		{
+			OutError = FString::Printf(TEXT("collision.type must be box | sphere | capsule | convex, got \"%s\""), *Out.Type);
+			return false;
+		}
+		if (!ReadIntInRange(Obj, TEXT("hull_count"), MinHullCount, MaxHullCount, Out.HullCount, OutError)
+			|| !ReadIntInRange(Obj, TEXT("max_hull_verts"), MinVertsPerHull, MaxVertsPerHull, Out.MaxHullVerts, OutError)
+			|| !ReadIntInRange(Obj, TEXT("hull_precision"), MinHullPrecision, MaxHullPrecision, Out.HullPrecision, OutError))
+		{
+			OutError = TEXT("collision.") + OutError;
+			return false;
+		}
+		Obj->TryGetBoolField(TEXT("replace"), Out.bReplace);
+		return true;
+	}
+}
+
+/**
+ * 两件互相独立的事，各自成败：生成 LOD、生成简单碰撞。
+ *
+ * ## 红线（设计文档 §5.3）
+ *
+ * 1. **导入的 LOD 是美术的活**。LOD1 起有任何一级带源几何，keep_imported / replace_imported
+ *    都没给，这一项直接拒绝并把哪几级是导入的说出来 —— 覆盖掉引擎生成不回来。
+ *    replace_imported 是用户明确同意之后的出口（典型是布尔挖洞后导入的 LOD 还是旧几何），
+ *    回执里 `replaced_imported` 点名换掉了哪几级。两个开关互斥，都给就 400。
+ * 2. 回执里的 before / after 都是**从引擎读回来的**：面数读构建完的渲染数据，
+ *    碰撞按 AggGeom 逐类数，不念请求（AGENTS.md §5 第 14 条）。
+ * 3. 默认存盘。
+ *
+ * ## 顺序
+ *
+ * LOD 先、碰撞后。两个都会 PostEditChange 触发重建；凸包分解读的是 LOD0 渲染数据，
+ * 所以中间等一次编译结束。全部做完、编译全部结束之后才读 after。
+ */
+void FUAL_MeshCommands::Handle_Optimize(const TSharedPtr<FJsonObject>& Payload, const FString RequestId)
+{
+	using namespace UALMeshOptimize;
+
+	FString Path;
+	if (!Payload->TryGetStringField(TEXT("path"), Path) || Path.IsEmpty())
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Missing required field: path"));
+		return;
+	}
+	Path = UAL_CommandUtils::NormalizeAssetPath(Path);
+
+	TSharedPtr<FJsonObject> LodsObj;
+	TSharedPtr<FJsonObject> CollisionObj;
+	const bool bWantLods = UAL_CommandUtils::TryGetObjectFieldFlexible(Payload, TEXT("lods"), LodsObj) && LodsObj.IsValid();
+	const bool bWantCollision = UAL_CommandUtils::TryGetObjectFieldFlexible(Payload, TEXT("collision"), CollisionObj) && CollisionObj.IsValid();
+	if (!bWantLods && !bWantCollision)
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, TEXT("Nothing to do: give lods and/or collision"));
+		return;
+	}
+
+	FLodRequest LodReq;
+	FCollisionRequest CollisionReq;
+	FString ParseError;
+	if ((bWantLods && !ParseLodRequest(LodsObj, LodReq, ParseError))
+		|| (bWantCollision && !ParseCollisionRequest(CollisionObj, CollisionReq, ParseError)))
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, ParseError);
+		return;
+	}
+
+	bool bSave = true;
+	Payload->TryGetBoolField(TEXT("save"), bSave);
+
+	// 编辑器子系统在 PIE 期间一律拒绝（EditorScriptingHelpers::CheckIfInEditorAndPIE），
+	// 与其让它返回一个看不出原因的失败，不如在门口说清楚
+	if (UAL_CommandUtils::RefuseDuringPlay(RequestId, TEXT("生成网格 LOD / 碰撞"), TEXT("generating mesh LODs / collision")))
+	{
+		return;
+	}
+
+	UObject* Asset = LoadObject<UObject>(nullptr, *Path);
+	if (!Asset)
+	{
+		UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(TEXT("Mesh asset not found: %s"), *Path));
+		return;
+	}
+	UStaticMesh* Mesh = Cast<UStaticMesh>(Asset);
+	if (!Mesh)
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("mesh.optimize only works on static meshes: %s is %s"), *Path, *Asset->GetClass()->GetName()));
+		return;
+	}
+	if (Mesh->GetNumSourceModels() == 0)
+	{
+		UAL_CommandUtils::SendError(RequestId, 400, FString::Printf(
+			TEXT("%s has no source geometry (cooked or broken asset); LODs and collision cannot be generated from it"), *Path));
+		return;
+	}
+
+	// 刚导入、刚改过的网格可能还在后台编译，before 要读构建完的
+	FinishMeshCompilation(Mesh);
+
+	const bool bNanite = UALMeshCompat::IsNaniteEnabled(Mesh);
+
+	/**
+	 * 网格编辑器开着就先关、做完再开 —— 引擎自己的 SetLods / AddSimpleCollisions 改之前
+	 * 都这么做，注释写的是「防止崩溃」（编辑器里的 LOD 面板和预览组件攥着旧渲染数据）。
+	 * 只在真要写之前关一次；子系统函数里那次关闭到时候找不到编辑器，是空操作。
+	 */
+	UAssetEditorSubsystem* AssetEditors = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+	bool bEditorClosed = false;
+	auto CloseMeshEditorOnce = [&]()
+	{
+		if (!bEditorClosed && AssetEditors && AssetEditors->FindEditorForAsset(Mesh, /*bFocusIfOpen=*/false))
+		{
+			AssetEditors->CloseAllEditorsForAsset(Mesh);
+			bEditorClosed = true;
+		}
+	};
+
+	TSharedPtr<FJsonObject> LodResult;
+	TSharedPtr<FJsonObject> CollisionResult;
+	bool bLodAttempted = false;
+	int32 KeepCount = 1;
+	bool bCollisionAttempted = false;
+	int32 CollisionTypeBefore = 0;
+	bool bChanged = false;
+
+	{
+		FUAL_ScopedTransaction Transaction(NSLOCTEXT("UALMesh", "OptimizeMesh", "Optimize Static Mesh"));
+
+		// ---------------- LOD ----------------
+		if (bWantLods)
+		{
+			LodResult = MakeShared<FJsonObject>();
+			LodResult->SetBoolField(TEXT("ok"), true);
+			LodResult->SetNumberField(TEXT("requested_count"), LodReq.Count);
+			LodResult->SetArrayField(TEXT("before"), ReadLodFacts(Mesh));
+
+			const int32 LastImported = LastImportedLod(Mesh);
+			// LOD1 起哪几级是导入的 —— 拒绝时要点名，replace_imported 时回执要点名
+			TArray<FString> Imported;
+			TArray<TSharedPtr<FJsonValue>> ImportedIndices;
+			for (int32 Index = 1; Index <= LastImported; ++Index)
+			{
+				if (IsImportedLod(Mesh, Index))
+				{
+					Imported.Add(FString::Printf(TEXT("LOD%d"), Index));
+					ImportedIndices.Add(MakeShared<FJsonValueNumber>(Index));
+				}
+			}
+			if (LastImported > 0 && !LodReq.bKeepImported && !LodReq.bReplaceImported)
+			{
+				const bool bPlural = Imported.Num() > 1;
+				MarkFailed(LodResult, FString::Printf(
+					TEXT("refused: %s %s imported (artist-made, has its own source geometry). Generating LODs would delete %s and the engine cannot recreate %s. Ask the user first: to keep %s and only generate LODs after %s pass keep_imported=true; only if the user explicitly agrees to throw %s away (e.g. stale geometry after a boolean cut) pass replace_imported=true."),
+					*FString::Join(Imported, TEXT(", ")), bPlural ? TEXT("are") : TEXT("is"),
+					bPlural ? TEXT("them") : TEXT("it"), bPlural ? TEXT("them") : TEXT("it"),
+					bPlural ? TEXT("them") : TEXT("it"), bPlural ? TEXT("them") : TEXT("it"), bPlural ? TEXT("them") : TEXT("it")));
+			}
+			else
+			{
+				KeepCount = LodReq.bKeepImported ? LastImported + 1 : 1;
+				if (LodReq.Count <= KeepCount)
+				{
+					MarkFailed(LodResult, FString::Printf(
+						TEXT("refused: LOD0..LOD%d are kept as imported, so count=%d leaves nothing to generate; count must be greater than %d"),
+						KeepCount - 1, LodReq.Count, KeepCount));
+				}
+				else
+				{
+					CloseMeshEditorOnce();
+					Mesh->Modify();
+
+					// 自动屏占比开着就交给引擎算；关着（美术手调过）就不去动这个开关，
+					// 新生成的每级取上一级的一半，保证逐级递减
+					const bool bAutoScreenSize = UALMeshCompat::GetAutoComputeLODScreenSize(Mesh);
+
+					// 和 SetLodsWithNotification 同一条路：截到要保留的级数，再逐级 AddSourceModel、
+					// 抄上一级的构建/减面设置、改减面比例，最后 PostEditChange 触发重建
+					Mesh->SetNumSourceModels(KeepCount);
+					for (int32 Index = KeepCount; Index < LodReq.Count; ++Index)
+					{
+						Mesh->AddSourceModel();
+						const FStaticMeshSourceModel& Prev = Mesh->GetSourceModel(Index - 1);
+						FStaticMeshSourceModel& Src = Mesh->GetSourceModel(Index);
+						Src.BuildSettings = Prev.BuildSettings;
+						Src.ReductionSettings = Prev.ReductionSettings;
+						// 百分比一律相对 LOD0、按面数停 —— 和 SetLods / LOD 组的语义一致
+						Src.ReductionSettings.BaseLODModel = 0;
+						Src.ReductionSettings.TerminationCriterion = EStaticMeshReductionTerimationCriterion::Triangles;
+						Src.ReductionSettings.PercentTriangles = LodReq.Percent[Index - 1] / 100.0f;
+						if (!bAutoScreenSize)
+						{
+							Src.ScreenSize.Default = Prev.ScreenSize.Default * 0.5f;
+						}
+					}
+
+					Mesh->PostEditChange();
+					FinishMeshCompilation(Mesh);
+
+					bLodAttempted = true;
+					bChanged = true;
+					LodResult->SetBoolField(TEXT("auto_screen_size"), bAutoScreenSize);
+					if (KeepCount > 1)
+					{
+						// 原样保留的级数（含 LOD0）。reduction 里对应这几级的条目被跳过了
+						LodResult->SetNumberField(TEXT("kept_imported"), KeepCount);
+					}
+					if (LodReq.bReplaceImported && ImportedIndices.Num() > 0)
+					{
+						// 被换掉的导入级（换之前读的下标）。这是不可逆的那一步，回执必须点名
+						LodResult->SetArrayField(TEXT("replaced_imported"), ImportedIndices);
+					}
+				}
+			}
+		}
+
+		// ---------------- 碰撞 ----------------
+		if (bWantCollision)
+		{
+			CollisionResult = MakeShared<FJsonObject>();
+			CollisionResult->SetBoolField(TEXT("ok"), true);
+			CollisionResult->SetStringField(TEXT("type"), CollisionReq.Type);
+			CollisionResult->SetObjectField(TEXT("before"), ReadCollisionFacts(Mesh));
+
+			const int32 TotalBefore = CollisionCount(Mesh, FString());
+			CollisionTypeBefore = CollisionCount(Mesh, CollisionReq.Type);
+			UStaticMeshEditorSubsystem* MeshEditing = GEditor ? GEditor->GetEditorSubsystem<UStaticMeshEditorSubsystem>() : nullptr;
+
+			if (!MeshEditing)
+			{
+				MarkFailed(CollisionResult, TEXT("StaticMeshEditorSubsystem is not available in this editor"));
+			}
+			else if (CollisionReq.Type == TEXT("convex"))
+			{
+				if (!CollisionReq.bReplace && TotalBefore > 0)
+				{
+					// 引擎的凸包分解开头就 RemoveSimpleCollision，追加不了
+					MarkFailed(CollisionResult, FString::Printf(
+						TEXT("refused: convex decomposition always replaces all existing simple collision (%d shapes here) - that is how the engine does it. Pass replace=true to accept that."),
+						TotalBefore));
+				}
+				else if (!Mesh->IsMeshDescriptionValid(0))
+				{
+					MarkFailed(CollisionResult, TEXT("LOD0 has no source geometry to decompose"));
+				}
+				else
+				{
+					CloseMeshEditorOnce();
+					Mesh->Modify();
+					if (UBodySetup* Body = Mesh->GetBodySetup())
+					{
+						Body->Modify();
+					}
+					// 网格编辑器「Auto Convex Collision」面板背后的同一个分解（DecomposeMeshToHulls）
+					const bool bOk = MeshEditing->SetConvexDecompositionCollisionsWithNotification(
+						Mesh, CollisionReq.HullCount, CollisionReq.MaxHullVerts, CollisionReq.HullPrecision, /*bApplyChanges=*/true);
+					FinishMeshCompilation(Mesh);
+					bCollisionAttempted = true;
+					bChanged = true;
+					// 凸包分解把所有类型都清了，「之前有几个凸包」不再是比较基准
+					CollisionTypeBefore = 0;
+					CollisionResult->SetBoolField(TEXT("replaced"), TotalBefore > 0);
+					if (!bOk)
+					{
+						MarkFailed(CollisionResult, TEXT("the engine's convex decomposition reported failure (see Output Log, LogStaticMeshEditorSubsystem)"));
+					}
+				}
+			}
+			else
+			{
+				const EScriptCollisionShapeType Shape =
+					CollisionReq.Type == TEXT("box") ? EScriptCollisionShapeType::Box
+					: CollisionReq.Type == TEXT("sphere") ? EScriptCollisionShapeType::Sphere
+					: EScriptCollisionShapeType::Capsule;
+
+				CloseMeshEditorOnce();
+				Mesh->Modify();
+				if (UBodySetup* Body = Mesh->GetBodySetup())
+				{
+					Body->Modify();
+				}
+
+				const bool bRemove = CollisionReq.bReplace && TotalBefore > 0;
+				if (bRemove)
+				{
+					// bApplyChanges=false：Modify 上面已经做过，重建留给下面那一次，免得构建两遍
+					MeshEditing->RemoveCollisionsWithNotification(Mesh, /*bApplyChanges=*/false);
+					CollisionTypeBefore = 0;
+				}
+
+				// 和网格编辑器 Collision 菜单里「Add Box/Sphere/Capsule Simplified Collision」同一个生成函数
+				const int32 PrimIndex = MeshEditing->AddSimpleCollisionsWithNotification(Mesh, Shape, /*bApplyChanges=*/true);
+				if (PrimIndex == INDEX_NONE)
+				{
+					// 子系统的早退路径（PIE 检查之类）不 PostEditChange，而上面可能已经删过旧碰撞 ——
+					// 补一次重建（正常失败路径上它已经建过一次，多建一次无害），after 里如实读出现状
+					Mesh->PostEditChange();
+					MarkFailed(CollisionResult, FString::Printf(
+						TEXT("the engine could not fit a %s to this mesh (empty or degenerate geometry)"), *CollisionReq.Type));
+				}
+				FinishMeshCompilation(Mesh);
+				bCollisionAttempted = true;
+				bChanged = true;
+				CollisionResult->SetBoolField(TEXT("replaced"), bRemove);
+			}
+		}
+
+		// 一项都没动：别在撤销栈上留一个空步骤
+		if (!bChanged)
+		{
+			Transaction.Cancel();
+		}
+	}
+
+	// ---------------- 全部做完、编译全部结束之后再读 after ----------------
+	FinishMeshCompilation(Mesh);
+
+	int32 Succeeded = 0;
+	int32 Failed = 0;
+	TArray<FString> FailureLines;
+
+	if (LodResult.IsValid())
+	{
+		LodResult->SetArrayField(TEXT("after"), ReadLodFacts(Mesh));
+		if (bLodAttempted && LodResult->GetBoolField(TEXT("ok")))
+		{
+			// 读回校验：级数对得上、要生成的那几级确实是生成的
+			const int32 Built = Mesh->GetNumLODs();
+			bool bGeneratedOk = Built == LodReq.Count;
+			for (int32 Index = KeepCount; bGeneratedOk && Index < LodReq.Count; ++Index)
+			{
+				bGeneratedOk = !IsImportedLod(Mesh, Index);
+			}
+			if (!bGeneratedOk)
+			{
+				MarkFailed(LodResult, FString::Printf(
+					TEXT("asked for %d LODs but the engine built %d (see Output Log for mesh build / reduction errors)"),
+					LodReq.Count, Built));
+			}
+		}
+		if (bNanite)
+		{
+			// TS 侧据此写说明：开着 Nanite 时这些 LOD 只在不走 Nanite 的路径上用
+			LodResult->SetBoolField(TEXT("nanite"), true);
+		}
+		if (LodResult->GetBoolField(TEXT("ok")))
+		{
+			++Succeeded;
+		}
+		else
+		{
+			++Failed;
+			FailureLines.Add(TEXT("lods: ") + LodResult->GetStringField(TEXT("reason")));
+		}
+	}
+
+	if (CollisionResult.IsValid())
+	{
+		CollisionResult->SetObjectField(TEXT("after"), ReadCollisionFacts(Mesh));
+		if (bCollisionAttempted && CollisionResult->GetBoolField(TEXT("ok")))
+		{
+			// 读回校验：这一类形状确实多出来了。子系统说成功但读不到，就不报成功
+			const int32 TypeAfter = CollisionCount(Mesh, CollisionReq.Type);
+			if (TypeAfter <= CollisionTypeBefore)
+			{
+				MarkFailed(CollisionResult, FString::Printf(
+					TEXT("the engine reported success but read-back finds %d %s shapes (expected more than %d)"),
+					TypeAfter, *CollisionReq.Type, CollisionTypeBefore));
+			}
+		}
+		if (CollisionResult->GetBoolField(TEXT("ok")))
+		{
+			++Succeeded;
+		}
+		else
+		{
+			++Failed;
+			FailureLines.Add(TEXT("collision: ") + CollisionResult->GetStringField(TEXT("reason")));
+		}
+	}
+
+	// ---------------- 落盘 ----------------
+	UPackage* Package = Mesh->GetOutermost();
+	bool bSaved = false;
+	FString SaveError;
+	if (bChanged && bSave)
+	{
+		if (UEditorLoadingAndSavingUtils::SavePackages({ Package }, /*bOnlyDirty=*/false) && !Package->IsDirty())
+		{
+			bSaved = true;
+		}
+		else
+		{
+			SaveError = TEXT("save failed (file read-only, not checked out, or locked by another program); changes are in memory, save later with ue_save");
+		}
+	}
+
+	if (bEditorClosed && AssetEditors)
+	{
+		AssetEditors->OpenEditorForAsset(Mesh);
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("ok"), Succeeded > 0);
+	Data->SetStringField(TEXT("path"), Mesh->GetPathName());
+	Data->SetStringField(TEXT("name"), Mesh->GetName());
+	Data->SetBoolField(TEXT("nanite"), bNanite);
+	Data->SetNumberField(TEXT("succeeded_count"), Succeeded);
+	Data->SetNumberField(TEXT("failed_count"), Failed);
+	Data->SetBoolField(TEXT("changed"), bChanged);
+	Data->SetBoolField(TEXT("saved"), bSaved);
+	if (!SaveError.IsEmpty())
+	{
+		Data->SetStringField(TEXT("save_error"), SaveError);
+	}
+	Data->SetBoolField(TEXT("dirty"), Package->IsDirty());
+	Data->SetBoolField(TEXT("reopened_editor"), bEditorClosed);
+	if (LodResult.IsValid())
+	{
+		Data->SetObjectField(TEXT("lods"), LodResult);
+	}
+	if (CollisionResult.IsValid())
+	{
+		Data->SetObjectField(TEXT("collision"), CollisionResult);
+	}
+	if (Succeeded == 0)
+	{
+		Data->SetStringField(TEXT("error"), FString::Printf(TEXT("nothing on %s was optimized%s: %s"),
+			*Mesh->GetPathName(),
+			bChanged ? TEXT(" (but the mesh WAS modified - check lods/collision.after)") : TEXT(""),
+			*FString::Join(FailureLines, TEXT("; "))));
+	}
+
+	UE_LOG(LogUALMesh, Log, TEXT("mesh.optimize %s: %d ok, %d failed, changed=%d, saved=%d"),
+		*Mesh->GetPathName(), Succeeded, Failed, bChanged ? 1 : 0, bSaved ? 1 : 0);
 
 	UAL_CommandUtils::SendResponse(RequestId, 200, Data);
 }

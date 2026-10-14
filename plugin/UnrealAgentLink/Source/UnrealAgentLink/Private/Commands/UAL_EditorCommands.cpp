@@ -21,9 +21,13 @@
 // PIE 采样帧量抓帧耗时用（每条退出路径都要记，包括失败那条）。
 // Core 模块下，5.0–5.8 九版路径一致，不新增模块依赖
 #include "Misc/ScopeExit.h"
+#include "Misc/ScopeLock.h"
 #include "HAL/PlatformMemory.h"
 #include "UObject/GarbageCollection.h"
 #include "PlayInEditorDataTypes.h"
+// pie.run 的联网模式 / 人数：拿一份设置副本塞进 FRequestPlaySessionParams。
+// UnrealEd 模块下（Classes/Settings），5.0–5.8 路径一致，不新增模块依赖
+#include "Settings/LevelEditorPlaySettings.h"
 #include "GameFramework/PlayerController.h"
 // PIE 截图取玩家相机 FOV 用（PlayerController.h 里只有前向声明）
 #include "Camera/PlayerCameraManager.h"
@@ -40,6 +44,8 @@
 #include "Widgets/SWindow.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/SLeafWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Brushes/SlateColorBrush.h"
 #include "Styling/CoreStyle.h"
@@ -348,6 +354,12 @@ void FUAL_EditorCommands::RegisterCommands(TMap<FString, TFunction<void(const TS
  *
  * 定义放在这里而不是 pie.run 那一段：截图也要用它 —— PIE 一开，
  * 用户看的就是游戏世界，截编辑器世界等于答非所问。
+ *
+ * 多人 PIE 时有好几个 PIE 世界，**优先挑有游戏窗口的那个**：Play As Client
+ * 会在进程内另起一个独立服务器，它排在第一个、没有窗口也没有本地玩家 ——
+ * 拿它截图就只能回落到编辑器相机，拍到的是一个谁也没在看的画面。
+ * 有窗口的第一个就是用户眼前那位玩家（Listen Server 下是主机，Client 下是 Client 1）。
+ * 单人 PIE 只有一个世界，挑出来的和以前一样。
  */
 static UWorld* UAL_GetPlayWorld()
 {
@@ -355,14 +367,23 @@ static UWorld* UAL_GetPlayWorld()
 	{
 		return nullptr;
 	}
+	UWorld* FirstPieWorld = nullptr;
 	for (const FWorldContext& Context : GEngine->GetWorldContexts())
 	{
 		if (Context.WorldType == EWorldType::PIE && Context.World())
 		{
-			return Context.World();
+			if (Context.GameViewport)
+			{
+				return Context.World();
+			}
+			if (!FirstPieWorld)
+			{
+				FirstPieWorld = Context.World();
+			}
 		}
 	}
-	return nullptr;
+	// Simulate 等没有游戏窗口的情况照旧回第一个
+	return FirstPieWorld;
 }
 
 /**
@@ -3487,9 +3508,15 @@ namespace
 	class FUAL_PieLogCapture : public FOutputDevice
 	{
 	public:
-		TArray<FString> PrintStrings;
-		TArray<FString> Errors;
-		TArray<FString> Warnings;
+		/**
+		 * 5.1 起日志在专门的分发线程上送到这里，而 ticker、收尾、`pie.observe`
+		 * 都在游戏线程上读 —— 所有数据都只在 Mutex 里碰。
+		 *
+		 * 自己加了锁，所以声明「哪个线程都能用」。但**不**声明可多线程同时进
+		 * （CanBeUsedOnMultipleThreads）：那样引擎会在打日志的线程上直接调过来，
+		 * 不同线程的日志进时间线的先后就乱了。
+		 */
+		virtual bool CanBeUsedOnAnyThread() const override { return true; }
 
 		virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
 		{
@@ -3509,6 +3536,7 @@ namespace
 
 			if (Category == BlueprintUserMessages)
 			{
+				FScopeLock Lock(&Mutex);
 				Push(PrintStrings, Line);
 				PushTimeline(TEXT("print"), Line);
 				return;
@@ -3517,18 +3545,73 @@ namespace
 			if (Verbosity == ELogVerbosity::Error || Verbosity == ELogVerbosity::Fatal)
 			{
 				const FString Tagged = FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line);
+				FScopeLock Lock(&Mutex);
 				Push(Errors, Tagged);
 				PushTimeline(TEXT("error"), Tagged);
 			}
 			else if (Verbosity == ELogVerbosity::Warning)
 			{
 				const FString Tagged = FString::Printf(TEXT("[%s] %s"), *Category.ToString(), *Line);
+				FScopeLock Lock(&Mutex);
 				Push(Warnings, Tagged);
 				PushTimeline(TEXT("warning"), Tagged);
 			}
 		}
 
-		bool HasErrors() const { return Errors.Num() > 0; }
+		bool HasErrors() const
+		{
+			FScopeLock Lock(&Mutex);
+			return Errors.Num() > 0;
+		}
+
+		void SetPlayStartedAt(double Seconds)
+		{
+			FScopeLock Lock(&Mutex);
+			PlayStartedAt = Seconds;
+		}
+
+		/** 三个桶各拷一份出来，拼响应时不用一直攥着锁 */
+		void CopyBuckets(TArray<FString>& OutPrintStrings, TArray<FString>& OutErrors, TArray<FString>& OutWarnings) const
+		{
+			FScopeLock Lock(&Mutex);
+			OutPrintStrings = PrintStrings;
+			OutErrors = Errors;
+			OutWarnings = Warnings;
+		}
+
+		/** 从游标 SinceSeq 起最多读 MaxLines 条，语义见 ReadPieSessionLogs */
+		void ReadTimeline(int32 SinceSeq, int32 MaxLines, TArray<FUAL_EditorCommands::FPieLogLine>& OutLines, int32& OutNextSeq, bool& bOutDropped) const
+		{
+			FScopeLock Lock(&Mutex);
+			OutNextSeq = NextSeq;
+			if (Timeline.Num() > 0 && Timeline[0].Seq > SinceSeq)
+			{
+				bOutDropped = true;
+			}
+
+			for (const FUAL_EditorCommands::FPieLogLine& Entry : Timeline)
+			{
+				if (Entry.Seq < SinceSeq)
+				{
+					continue;
+				}
+				if (OutLines.Num() >= MaxLines)
+				{
+					// 一次读不完就把游标停在没读的那条上，而不是跳过去 —— 跳过的那一截
+					// 下次谁都读不到了，而调用方以为自己看全了
+					OutNextSeq = Entry.Seq;
+					break;
+				}
+				OutLines.Add(Entry);
+			}
+		}
+
+	private:
+		mutable FCriticalSection Mutex;
+
+		TArray<FString> PrintStrings;
+		TArray<FString> Errors;
+		TArray<FString> Warnings;
 
 		/**
 		 * 按时间顺序的全部日志，给 `pie.observe` 按游标增量读。
@@ -3545,7 +3628,6 @@ namespace
 		/** PIE 真正起来的那一刻；之前的日志 At 记 0 */
 		double PlayStartedAt = 0.0;
 
-	private:
 		static constexpr int32 TimelineCap = 2000;
 
 		void PushTimeline(const TCHAR* Kind, const FString& Text)
@@ -3611,6 +3693,20 @@ namespace
 		bool bFixedStepApplied = false;
 		bool bPrevUseFixedFrameRate = false;
 		float PrevFixedFrameRate = 30.0f;
+
+		/**
+		 * 联网模式和玩家数，就是编辑器 Play 下拉里的 Net Mode / Number of Players。
+		 *
+		 * 单进程单人 PIE 验不了复制和 RPC：没有客户端，「服务器上改了、客户端没收到」
+		 * 这件事根本不会发生。行家的验法是 Listen Server / Client 开两个人，
+		 * 看 PrintString 前面引擎自己加的「Server:」「Client 1:」。
+		 *
+		 * 用户的编辑器偏好**一个字都不改**：设置是复制一份塞进这次请求的，
+		 * 见 Handle_RunPlaytest 里 EditorPlaySettings 那一段。
+		 */
+		FString NetMode = TEXT("standalone");
+		int32 NumPlayers = 1;
+		bool IsMultiplayer() const { return NumPlayers > 1 || NetMode != TEXT("standalone"); }
 
 		int32 ActorsAtStart = 0;
 		FString ScreenshotPath;
@@ -3705,6 +3801,8 @@ namespace
 			bFixedStepApplied = false;
 			bPrevUseFixedFrameRate = false;
 			PrevFixedFrameRate = 30.0f;
+			NetMode = TEXT("standalone");
+			NumPlayers = 1;
 			ActorsAtStart = 0;
 			ScreenshotPath.Empty();
 			ScreenshotError.Empty();
@@ -3733,6 +3831,34 @@ namespace
 			++Count;
 		}
 		return Count;
+	}
+
+	/**
+	 * 数 Actor 用哪个世界。
+	 *
+	 * 多人时数**服务器**那个：客户端世界在 PostPIEStarted 那一刻还没连上，
+	 * 之后复制过来的 Actor 会全算成「运行中新增」—— 一个什么都没生成的游戏
+	 * 也会报出几十个新增 Actor。服务器世界才是权威的那份。
+	 * 单人时就是唯一那个 PIE 世界，和以前一样。
+	 */
+	UWorld* UAL_GetPieCountWorld()
+	{
+		if (GPieSession.IsMultiplayer() && GEngine)
+		{
+			for (const FWorldContext& Context : GEngine->GetWorldContexts())
+			{
+				UWorld* World = Context.World();
+				if (Context.WorldType == EWorldType::PIE && World)
+				{
+					const ENetMode Mode = World->GetNetMode();
+					if (Mode == NM_ListenServer || Mode == NM_DedicatedServer)
+					{
+						return World;
+					}
+				}
+			}
+		}
+		return UAL_GetPlayWorld();
 	}
 
 	/**
@@ -3816,7 +3942,68 @@ namespace
 	}
 
 	/**
-	 * 游戏视口顶上挂一条「盒子正在试玩，请勿操作」。
+	 * 视口四周往里渗的一圈呼吸光，告诉用户「这块画面正被接管」。
+	 * 四条边各画一道由边向内淡出的渐变，透明度按正弦慢慢起伏。
+	 */
+	class SUAL_PieEdgeGlow : public SLeafWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SUAL_PieEdgeGlow) {}
+			SLATE_ARGUMENT(FLinearColor, Color)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			Color = InArgs._Color;
+			// 游戏视口不一定每帧重画这层，挂个常驻计时器让它跟着动
+			RegisterActiveTimer(0.f, FWidgetActiveTimerDelegate::CreateLambda(
+				[](double, float) { return EActiveTimerReturnType::Continue; }));
+		}
+
+		virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D::ZeroVector; }
+
+		virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+		{
+			const FVector2D Size = AllottedGeometry.GetLocalSize();
+			const float Thickness = FMath::Min(48.f, FMath::Min(Size.X, Size.Y) * 0.06f);
+			if (Thickness <= 0.f)
+			{
+				return LayerId;
+			}
+
+			// 2.4 秒一个来回，最暗时也留一点，免得像在闪
+			const double Time = FSlateApplication::Get().GetCurrentTime();
+			const float Breath = 0.5f + 0.5f * FMath::Sin(Time * 6.283185307179586 / 2.4); // 2π；UE_TWO_PI 5.0 没有，PI 5.8 没有
+			FLinearColor Edge = Color;
+			Edge.A = FMath::Lerp(0.12f, 0.4f, Breath);
+			FLinearColor Clear = Color;
+			Clear.A = 0.f;
+
+			// Orient_Vertical 的渐变沿 X 走，Orient_Horizontal 沿 Y 走
+			auto Draw = [&](const FVector2D& Pos, const FVector2D& BoxSize, EOrientation Orient, bool bFadeTowardEnd)
+			{
+				TArray<FSlateGradientStop> Stops;
+				Stops.Add(FSlateGradientStop(FVector2D::ZeroVector, bFadeTowardEnd ? Edge : Clear));
+				Stops.Add(FSlateGradientStop(BoxSize, bFadeTowardEnd ? Clear : Edge));
+				FSlateDrawElement::MakeGradient(
+					OutDrawElements, LayerId,
+					AllottedGeometry.ToPaintGeometry(BoxSize, FSlateLayoutTransform(Pos)),
+					MoveTemp(Stops), Orient, ESlateDrawEffect::None);
+			};
+			Draw(FVector2D(0.f, 0.f), FVector2D(Thickness, Size.Y), Orient_Vertical, true);
+			Draw(FVector2D(Size.X - Thickness, 0.f), FVector2D(Thickness, Size.Y), Orient_Vertical, false);
+			Draw(FVector2D(0.f, 0.f), FVector2D(Size.X, Thickness), Orient_Horizontal, true);
+			Draw(FVector2D(0.f, Size.Y - Thickness), FVector2D(Size.X, Thickness), Orient_Horizontal, false);
+			return LayerId;
+		}
+
+	private:
+		FLinearColor Color;
+	};
+
+	/**
+	 * 游戏视口顶上挂一条「盒子正在试玩，请勿操作」，四周一圈呼吸光。
 	 *
 	 * 试玩机器人一跑就是几十秒，用户看见游戏窗口自己在动，顺手一碰鼠标键盘，
 	 * 机器人的判断就脏了。
@@ -3840,18 +4027,26 @@ namespace
 
 		const bool bChinese = FInternationalization::Get().GetCurrentCulture()->GetName().StartsWith(TEXT("zh"));
 		const FText Message = bChinese
-			? FText::FromString(TEXT("虚幻盒子自动试玩测试中，请勿操作 · 按 Esc 中止"))
-			: FText::FromString(TEXT("Unreal Box automated playtest in progress. Do not interact · Press Esc to abort"));
+			? FText::FromString(TEXT("虚幻盒子测试中，请勿操作并保持前台运行 · 按 Esc 中止"))
+			: FText::FromString(TEXT("Unreal Box test in progress. Do not interact and keep this window in front · Press Esc to abort"));
 
 		static const FSlateColorBrush Background(FLinearColor(0.f, 0.f, 0.f, 0.6f));
 		FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 14);
 
+		const FLinearColor Amber(1.f, 0.78f, 0.25f);
+
 		TSharedRef<SWidget> Banner =
-			SNew(SBox)
+			SNew(SOverlay)
+			.Visibility(EVisibility::HitTestInvisible)
+			+ SOverlay::Slot()
+			[
+				SNew(SUAL_PieEdgeGlow)
+				.Color(Amber)
+			]
+			+ SOverlay::Slot()
 			.HAlign(HAlign_Center)
 			.VAlign(VAlign_Top)
 			.Padding(FMargin(0.f, 16.f, 0.f, 0.f))
-			.Visibility(EVisibility::HitTestInvisible)
 			[
 				SNew(SBorder)
 				.BorderImage(&Background)
@@ -3860,7 +4055,7 @@ namespace
 					SNew(STextBlock)
 					.Text(Message)
 					.Font(Font)
-					.ColorAndOpacity(FLinearColor(1.f, 0.78f, 0.25f))
+					.ColorAndOpacity(Amber)
 				]
 			];
 
@@ -3949,14 +4144,31 @@ namespace
 			// 回报实际用的步长：不说的话调用方不知道这次的「帧」有多长
 			Result->SetNumberField(TEXT("fixed_fps"), GPieSession.FixedFps);
 		}
+		if (GPieSession.IsMultiplayer())
+		{
+			// 回报实际跑的联网配置：Actor 数、截图、events 各取的是哪个实例，
+			// 盒子那侧要照着这两个字段把话说清楚
+			Result->SetStringField(TEXT("net_mode"), GPieSession.NetMode);
+			Result->SetNumberField(TEXT("num_players"), GPieSession.NumPlayers);
+		}
 
 		if (GPieSession.Capture)
 		{
-			Result->SetArrayField(TEXT("print_strings"), UAL_ToJsonStrings(GPieSession.Capture->PrintStrings));
-			Result->SetArrayField(TEXT("errors"), UAL_ToJsonStrings(GPieSession.Capture->Errors));
-			Result->SetArrayField(TEXT("warnings"), UAL_ToJsonStrings(GPieSession.Capture->Warnings));
-			Result->SetNumberField(TEXT("error_count"), GPieSession.Capture->Errors.Num());
-			Result->SetNumberField(TEXT("warning_count"), GPieSession.Capture->Warnings.Num());
+			// 5.1 起日志排队到分发线程再送过来。还在队里的正好是收尾前最后那几行
+			// （往往就是让它停下来的那条错误），先等它们送到再取
+			if (GLog)
+			{
+				GLog->FlushThreadedLogs();
+			}
+			TArray<FString> PrintStrings;
+			TArray<FString> Errors;
+			TArray<FString> Warnings;
+			GPieSession.Capture->CopyBuckets(PrintStrings, Errors, Warnings);
+			Result->SetArrayField(TEXT("print_strings"), UAL_ToJsonStrings(PrintStrings));
+			Result->SetArrayField(TEXT("errors"), UAL_ToJsonStrings(Errors));
+			Result->SetArrayField(TEXT("warnings"), UAL_ToJsonStrings(Warnings));
+			Result->SetNumberField(TEXT("error_count"), Errors.Num());
+			Result->SetNumberField(TEXT("warning_count"), Warnings.Num());
 		}
 
 		if (ActorsAtEnd.IsSet())
@@ -4197,6 +4409,70 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		}
 	}
 
+	/**
+	 * 联网模式和玩家数，见 FUAL_PieSession::NetMode。
+	 *
+	 * 不传就是 standalone 单人，**不跟用户编辑器里的 Play 设置走**：报告里的
+	 * Actor 数、截图、events 落在哪个实例，都取决于这次到底跑的是几个人。
+	 * 继承偏好的话，用户哪天在编辑器里切成两人 Listen Server，调用方拿到的
+	 * 就是一份它以为是单人的多人报告。
+	 *
+	 * 给了 num_players>1 却没给 net_mode，按 listen_server：要多个人多半就是要验联网，
+	 * 而 standalone 多开的几份互不相连，PrintString 也不带前缀，分不出谁是谁。
+	 */
+	FString NetMode;
+	const bool bHasNetMode = Payload->TryGetStringField(TEXT("net_mode"), NetMode) && !NetMode.IsEmpty();
+	NetMode = NetMode.ToLower();
+	int32 NumPlayers = 1;
+	Payload->TryGetNumberField(TEXT("num_players"), NumPlayers);
+	NumPlayers = FMath::Clamp(NumPlayers, 1, 4);
+	if (!bHasNetMode)
+	{
+		NetMode = NumPlayers > 1 ? TEXT("listen_server") : TEXT("standalone");
+	}
+
+	EPlayNetMode PlayNetMode = EPlayNetMode::PIE_Standalone;
+	if (NetMode == TEXT("listen_server"))
+	{
+		PlayNetMode = EPlayNetMode::PIE_ListenServer;
+	}
+	else if (NetMode == TEXT("client"))
+	{
+		PlayNetMode = EPlayNetMode::PIE_Client;
+	}
+	else if (NetMode != TEXT("standalone"))
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 400,
+			FString::Printf(TEXT("Unknown net_mode \"%s\". Use standalone, listen_server or client."), *NetMode));
+		return;
+	}
+
+	// 显式要了 standalone 多人：那几份游戏互不相连，验不了联网，
+	// PrintString 也不带实例前缀，报告里分不出哪行是谁打的 —— 当场说清楚，别跑出一份没法读的报告
+	if (PlayNetMode == EPlayNetMode::PIE_Standalone && NumPlayers > 1)
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 400,
+			TEXT("net_mode=standalone with num_players>1 starts unconnected copies whose PrintStrings carry no instance prefix. Use listen_server or client to test networking."));
+		return;
+	}
+
+	/**
+	 * 多人必须在**同一进程**里跑：日志捕获只挂在这个编辑器进程上，另起的进程
+	 * 打的 PrintString 和报错一条都收不到，报告会是一份「客户端什么都没发生」的假象。
+	 * bAllowMultiplePIEWorlds 关着时引擎会强行改成多进程（PlayLevel.cpp 里
+	 * StartPlayInEditorSession 那一段，5.0–5.8 都在），所以这里先拒绝。
+	 */
+	const bool bWantsMultiplayer = NumPlayers > 1 || PlayNetMode != EPlayNetMode::PIE_Standalone;
+	if (bWantsMultiplayer && !GEditor->bAllowMultiplePIEWorlds)
+	{
+		UAL_CommandUtils::SendError(
+			RequestId, 409,
+			TEXT("This editor has bAllowMultiplePIEWorlds disabled, so multiplayer PIE would launch separate processes whose logs pie.run cannot capture."));
+		return;
+	}
+
 	GPieSession.Reset();
 	GPieSession.bActive = true;
 	GPieSession.RequestId = RequestId;
@@ -4206,6 +4482,8 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 	GPieSession.Commands = MoveTemp(Commands);
 	GPieSession.Frames = MoveTemp(Frames);
 	GPieSession.FrameMode = FrameMode;
+	GPieSession.NetMode = NetMode;
+	GPieSession.NumPlayers = NumPlayers;
 	// 带上毫秒。文件名本身只精确到秒，同一秒里抓的几帧会互相覆盖 ——
 	// 覆盖之后一切照常成功，只是拼出来九格一模一样
 	GPieSession.FrameStamp = FDateTime::Now().ToString(TEXT("%H%M%S%s"));
@@ -4239,9 +4517,9 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		GPieSession.PlayStartedAt = FPlatformTime::Seconds();
 		if (GPieSession.Capture)
 		{
-			GPieSession.Capture->PlayStartedAt = GPieSession.PlayStartedAt;
+			GPieSession.Capture->SetPlayStartedAt(GPieSession.PlayStartedAt);
 		}
-		GPieSession.ActorsAtStart = UAL_CountActors(UAL_GetPlayWorld());
+		GPieSession.ActorsAtStart = UAL_CountActors(UAL_GetPieCountWorld());
 		UAL_ShowPieBanner();
 	});
 
@@ -4267,6 +4545,36 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 	FRequestPlaySessionParams Params;
 	Params.WorldType = EPlaySessionWorldType::PlayInEditor;
 	Params.SessionDestination = EPlaySessionDestinationType::InProcess;
+
+	/**
+	 * 联网模式和人数改在**一份副本**上，不碰用户的 Editor Preferences。
+	 *
+	 * 为什么不是「改 CDO、跑完再改回去」：改回去那一步要等 EndPlayMap 跑完，
+	 * 中间编辑器崩了、用户手动停了、我们这边哪条退出路径漏了，用户的
+	 * Net Mode 就悄悄变成了 Listen Server 两人，而且会被 SaveConfig 落盘。
+	 * FRequestPlaySessionParams::EditorPlaySettings 本来就是给这个用的：
+	 * 「nullptr 用 CDO，否则用给的这份」，RequestPlaySession 当场再复制一份
+	 * 自己持有（PlayLevel.cpp，5.0–5.8 一致），我们这份用完交给 GC。
+	 *
+	 * 除了下面四项，窗口大小、声音、鼠标控制这些都照用户自己的设置走。
+	 * 已知的副作用：EndPlayMap 会把这次 PIE 窗口的位置记回 CDO 并 SaveConfig
+	 * （MultipleInstancePositions 等）—— 这是引擎每次 PIE 结束都做的事，
+	 * 用户自己点 Play 也一样，不是这里改的设置。
+	 */
+	ULevelEditorPlaySettings* PlaySettings =
+		DuplicateObject<ULevelEditorPlaySettings>(GetDefault<ULevelEditorPlaySettings>(), GetTransientPackage());
+	if (PlaySettings)
+	{
+		PlaySettings->SetPlayNetMode(PlayNetMode);
+		PlaySettings->SetPlayNumberOfClients(NumPlayers);
+		// 多个实例必须在本进程里，理由见上面 bAllowMultiplePIEWorlds 那段
+		PlaySettings->SetRunUnderOneProcess(true);
+		// 用户若勾了「Standalone 也起一个独立服务器」，单人试玩会凭空多一个看不见的服务器世界；
+		// Client 模式不受影响 —— 那种模式引擎无论如何都会起服务器
+		PlaySettings->bLaunchSeparateServer = false;
+		Params.EditorPlaySettings = PlaySettings;
+	}
+
 	GEditor->RequestPlaySession(Params);
 	// RequestPlaySession 只是排队，真正启动在下一帧。这里踢一下让它尽快开始。
 	GEditor->StartQueuedPlaySessionRequest();
@@ -4365,7 +4673,7 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 			// 截图和数 Actor 都必须赶在 RequestEndPlayMap **之前** ——
 			// PIE 世界一销毁这两样就都没了
 			UWorld* PlayWorld = UAL_GetPlayWorld();
-			const int32 ActorsAtEnd = UAL_CountActors(PlayWorld);
+			const int32 ActorsAtEnd = UAL_CountActors(UAL_GetPieCountWorld());
 
 			// 关卡组成同理，也只有这一刻取得到
 			if (PlayWorld)
@@ -4441,28 +4749,7 @@ bool FUAL_EditorCommands::ReadPieSessionLogs(int32 SinceSeq, int32 MaxLines, TAr
 		return false;
 	}
 
-	const TArray<FPieLogLine>& Timeline = GPieSession.Capture->Timeline;
-	OutNextSeq = GPieSession.Capture->NextSeq;
-	if (Timeline.Num() > 0 && Timeline[0].Seq > SinceSeq)
-	{
-		bOutDropped = true;
-	}
-
-	for (const FPieLogLine& Line : Timeline)
-	{
-		if (Line.Seq < SinceSeq)
-		{
-			continue;
-		}
-		if (OutLines.Num() >= MaxLines)
-		{
-			// 一次读不完就把游标停在没读的那条上，而不是跳过去 —— 跳过的那一截
-			// 下次谁都读不到了，而调用方以为自己看全了
-			OutNextSeq = Line.Seq;
-			break;
-		}
-		OutLines.Add(Line);
-	}
+	GPieSession.Capture->ReadTimeline(SinceSeq, MaxLines, OutLines, OutNextSeq, bOutDropped);
 	return true;
 }
 

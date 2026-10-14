@@ -251,10 +251,30 @@ void FUAL_SystemCommands::Handle_ExecConsole(const TSharedPtr<FJsonObject>& Payl
 	// 现在是多少，回一个 "OK"；`stat` 系列、`obj list`、各种 cvar 查询同理。
 	// 调用方能执行命令却永远看不到结果，"跑个命令看看" 这件事办不成。
 	FStringOutputDevice CommandOutput;
+	// PIE 在跑时打到游戏世界。
+	//
+	// 原来写死编辑器世界：全局的控制台变量（r.*、ShowFlag.*）不受影响，
+	// 可 dumpticks、对象查询这类依赖世界的命令，查的是编辑器那份关卡，
+	// 不是用户此刻在玩的那一局 —— PIE 开始时关卡被复制了一份，两边的 Actor 不是同一批。
+	// 回执里的 world 字段说清这次打到了哪边。
+	bool bPieWorld = false;
 	if (GEngine)
 	{
 #if WITH_EDITOR
-		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		UWorld* World = nullptr;
+		for (const FWorldContext& Context : GEngine->GetWorldContexts())
+		{
+			if (Context.WorldType == EWorldType::PIE && Context.World())
+			{
+				World = Context.World();
+				bPieWorld = true;
+				break;
+			}
+		}
+		if (!World)
+		{
+			World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		}
 #else
 		UWorld* World = GWorld;
 #endif
@@ -263,6 +283,7 @@ void FUAL_SystemCommands::Handle_ExecConsole(const TSharedPtr<FJsonObject>& Payl
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("result"), bResult ? TEXT("OK") : TEXT("Failed"));
+	Data->SetStringField(TEXT("world"), bPieWorld ? TEXT("pie") : TEXT("editor"));
 
 	FString Output = CommandOutput;
 	Output.TrimStartAndEndInline();
@@ -282,7 +303,7 @@ void FUAL_SystemCommands::Handle_ExecConsole(const TSharedPtr<FJsonObject>& Payl
 		// 说清楚是「这条命令本来就不打印东西」，而不是「输出丢了」——
 		// 像 `stat unit` 是切换屏幕叠加显示的，本来就没有文字返回。
 		Data->SetStringField(TEXT("output_note"),
-			TEXT("该命令没有产生文字输出（切换类命令如 stat unit 属于正常情况；部分命令只写引擎日志，可用 messagelog 查看）。"));
+			TEXT("该命令没有产生文字输出（切换类命令如 stat unit 属于正常情况；部分命令如 dumpticks 只写输出日志，去 Saved/Logs/<工程名>.log 里找，Message Log 窗口里没有）。"));
 	}
 
 	// 失败要说为什么。

@@ -14,7 +14,7 @@ import { PhCaretRight } from '@phosphor-icons/vue'
  * 两个详情面板各自成组件（ProviderFields / ModelFields），
  * 免得又长回一个什么都干的大组件。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, h, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
@@ -292,11 +292,20 @@ function deleteFocusedModel(index: number): void {
   })
 }
 
-/** 删掉整条 Provider：配置、已存的密钥、指向它的角色绑定一起没 */
-function deleteProvider(providerId: string): void {
+/**
+ * 删掉整条 Provider：配置、已存的密钥、指向它的角色绑定一起没。
+ *
+ * 正在跑的对话开跑时就定了模型，删掉之后它下一次调模型才报错 —— 确认框里先说清楚
+ */
+async function deleteProvider(providerId: string): Promise<void> {
+  const inUse = await window.api.aiProvider.usage(providerId).catch(() => 0)
+  const content = t('aiProvider.delete.content')
   confirmDialog({
     title: t('aiProvider.delete.title', { name: draft.value?.displayName || providerId }),
-    content: t('aiProvider.delete.content'),
+    content:
+      inUse > 0
+        ? () => h('div', [h('p', content), h('p', t('aiProvider.delete.inUse', { count: inUse }))])
+        : content,
     okText: t('aiProvider.delete.ok'),
     danger: true,
     cancelText: t('aiProvider.delete.cancel'),
@@ -314,7 +323,7 @@ function handleDelete(): void {
     deleteFocusedModel(focusedIndex.value)
     return
   }
-  if (selectedId.value) deleteProvider(selectedId.value)
+  if (selectedId.value) void deleteProvider(selectedId.value)
 }
 
 async function handleImport(): Promise<void> {

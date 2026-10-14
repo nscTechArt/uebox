@@ -69,7 +69,8 @@ import {
   buildScript,
   createCppFullRebuildTool,
   describeBuild,
-  pickEditorTarget
+  pickEditorTarget,
+  pickGameTarget
 } from './fullRebuild'
 
 type Executable = {
@@ -272,5 +273,70 @@ describe('cpp_full_rebuild', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(2)
     expect(text.startsWith('✓')).toBe(true)
+  })
+
+  /**
+   * 编辑器 Target 带着 WITH_EDITOR，Runtime 模块里漏包的编辑器代码开发时全绿，
+   * 打包那天才红。这条路只编游戏 Target，编辑器碰都不碰。
+   */
+  describe('game_target_only：只编游戏 Target', () => {
+    it('不关编辑器、不重开，编的是游戏 Target', async () => {
+      spawnMock.mockImplementation(() => fakeChild('Result: Succeeded\n', 0))
+
+      const tool = createCppFullRebuildTool() as unknown as Executable
+      const r = await tool.execute('c1', { game_target_only: true })
+      const text = (r.content ?? []).map((c) => c.text ?? '').join('\n')
+
+      expect(text.startsWith('✓ 编译成功')).toBe(true)
+      expect(callRequest).not.toHaveBeenCalled()
+      expect(findRunningProjectByPath).not.toHaveBeenCalled()
+      expect(openPath).not.toHaveBeenCalled()
+      expect(JSON.stringify(spawnMock.mock.calls[0])).toContain('MyGame Win64 Development')
+      expect(r.details).toMatchObject({ closedEditor: false, built: true, target: 'MyGame' })
+    })
+
+    it('编不过：点出 WITH_EDITOR 这条常见原因，编辑器还开着', async () => {
+      spawnMock.mockImplementation(() =>
+        fakeChild(
+          'H:\\Dev\\MyGame\\Source\\MyGame\\A.cpp(3): error C1083: Cannot open include file\n',
+          6
+        )
+      )
+
+      const text = await run({ game_target_only: true })
+
+      expect(text.startsWith('✗')).toBe(true)
+      expect(text).toContain('A.cpp')
+      expect(text).toContain('WITH_EDITOR')
+      expect(openPath).not.toHaveBeenCalled()
+    })
+
+    it('丢改动的开关在这条路上不生效，所以不算 destructive', () => {
+      const meta = createCppFullRebuildTool().unrealBox
+      expect(effectiveRisk(meta, { game_target_only: true, discard_unsaved: true })).toBe(
+        'mutating'
+      )
+    })
+
+    it('没有游戏 Target：说清楚，不编', async () => {
+      readdir.mockResolvedValue(['MyGameEditor.Target.cs'])
+      readFile.mockResolvedValue(EDITOR_TARGET)
+
+      await expect(run({ game_target_only: true })).rejects.toThrow(/没有游戏 Target/)
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+
+    it('按 TargetType.Game 认，多个时优先和工程同名的', () => {
+      expect(
+        pickGameTarget('MyGame', [
+          { file: 'Server.Target.cs', content: 'TargetType.Server' },
+          { file: 'Demo.Target.cs', content: 'TargetType.Game' },
+          { file: 'MyGame.Target.cs', content: 'Type = TargetType . Game ;' }
+        ])
+      ).toBe('MyGame')
+      expect(
+        pickGameTarget('MyGame', [{ file: 'X.Target.cs', content: 'TargetType.Editor' }])
+      ).toBeNull()
+    })
   })
 })

@@ -65,6 +65,23 @@ const InputSchema = z.object({
 
 type Input = z.infer<typeof InputSchema>
 
+/** 相机切轨的一段。字段名与 `UAL_SequencerCommands.cpp` 的 `MakeCameraCutListJson` 逐字对应 */
+interface CameraCut {
+  /** 这段的第一帧（显示帧）。null = 起点无界 */
+  start_frame: number | null
+  /** 这段之后的第一帧，**不含**。null = 终点无界 */
+  end_frame: number | null
+  /** 相机绑定在序列里的名字。查不到时 null */
+  camera: string | null
+  camera_binding_id: string | null
+  /** 切点落在两帧之间：交界那一帧渲哪台相机取决于采样时刻 */
+  off_frame_boundary?: boolean
+  /** 相机绑定在子序列或父序列里，本序列查不到它的名字 */
+  camera_in_other_sequence?: boolean
+  /** false = 这段被禁用了，不参与求值 */
+  active?: boolean
+}
+
 /**
  * 引擎侧回传的形状。
  *
@@ -119,6 +136,16 @@ interface DescribeOutput {
     gaps?: Array<[number, number]>
     /** 段与段的重叠。重叠区间渲哪台相机是不确定的 */
     overlaps?: Array<[number, number]>
+    /**
+     * 切轨上的每一段，按起始帧排序。老插件不回传这个字段。
+     *
+     * 帧号是显示帧，`end_frame` 不含；和 MRQ 默认文件名 `{sequence_name}.{frame_number}`
+     * 里的帧号同一套（绝对帧号，播放范围从 1001 起文件就从 .1001 起）。
+     * 一头无界时那一头是 null。
+     */
+    cuts?: CameraCut[]
+    /** 段数超过引擎侧上限，cuts 只列了前面一部分 */
+    cuts_truncated?: boolean
   }
   broken_bindings: string[]
   /**
@@ -238,6 +265,40 @@ function readinessLines(data: DescribeOutput, filtered: boolean): string[] {
 }
 
 /**
+ * 切点表：每一段从第几帧到第几帧、用哪台相机。
+ *
+ * 渲完要看「每个切点的第一帧」—— 那就是每行的 start。没有这张表，
+ * 模型只能猜切点，或者去写 Python 读段。
+ */
+function cutLines(cuts: DescribeOutput['camera_cuts']): string[] {
+  const list = cuts.cuts
+  if (!list || list.length === 0) return []
+
+  const lines = [
+    '',
+    '相机切点（显示帧，[start, end) 不含 end；帧号就是 MRQ 默认文件名「序列名.帧号」里的帧号，不从 0 起。' +
+      '用了改过文件名格式、帧号偏移或输出帧率的渲染预设时对不上）：'
+  ]
+  for (const c of list) {
+    const camera =
+      c.camera ??
+      (c.camera_in_other_sequence
+        ? '（相机绑定在子/父序列里，名字这里查不到）'
+        : '（查不到相机绑定）')
+    const notes: string[] = []
+    if (c.active === false) notes.push('已禁用，不参与渲染')
+    if (c.off_frame_boundary) notes.push('切点落在两帧之间，交界那一帧可能是任一台相机')
+    lines.push(
+      `- [${c.start_frame ?? '−∞'}, ${c.end_frame ?? '+∞'}) ${camera}${notes.length > 0 ? `（${notes.join('；')}）` : ''}`
+    )
+  }
+  if (cuts.cuts_truncated) {
+    lines.push(`- ⚠️ 切轨段太多，只列了前 ${list.length} 段。`)
+  }
+  return lines
+}
+
+/**
  * 版本能力说明。
  *
  * 跨 5.0–5.8 时，同一条命令在不同版本上能做的事不一样。**静默降级是不行的**：
@@ -268,6 +329,7 @@ function formatOutcome(data: DescribeOutput, detail: Input['detail'], filtered: 
     '',
     '出片体检：',
     ...readinessLines(data, filtered),
+    ...cutLines(data.camera_cuts),
     ...capabilityLines(data),
     ''
   ]
@@ -340,6 +402,7 @@ Movie Render Queue 渲染不含末帧，AnimSequence 首尾都含。**不要自�
 【出片体检】
 返回里会指出「渲染出来会不会是黑画面」的三个主要根因：没有相机切轨、
 切轨没覆盖播放范围、绑定失效。这是社区里最高频的问题。
+还会逐段列出相机切点（起止帧、用哪台相机），渲完按它找每个切点的第一帧。
 本工具只诊断不渲染 —— 用户要出片时用 sequence_render（每次渲染都要用户当场确认）。`,
     input: InputSchema,
     execute: async (input) => {

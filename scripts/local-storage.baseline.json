@@ -195,6 +195,10 @@
     "category": "ui",
     "why": "打开着的标签页，属于会话状态，丢了重开即可。"
   },
+  "team-office-style": {
+    "category": "ui",
+    "why": "团队任务里像素办公室的画风（豪华像素 / 简约墨线）。"
+  },
   "unreal-agent:import-path": {
     "category": "ui",
     "why": "上次导入到项目的路径，是输入框记忆。"

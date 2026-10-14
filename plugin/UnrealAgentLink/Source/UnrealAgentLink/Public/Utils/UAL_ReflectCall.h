@@ -112,6 +112,8 @@ namespace UALReflect
 		FCall& Cls(const TCHAR* ParamName, UClass* Value);
 		FCall& Name(const TCHAR* ParamName, FName Value);
 		FCall& Bool(const TCHAR* ParamName, bool Value);
+		/** FString 形参（按值或 const&），如 MRQ 控制台变量设置的 `AddOrUpdateConsoleVariable(Name, Value)` */
+		FCall& Str(const TCHAR* ParamName, const FString& Value);
 
 		/**
 		 * 数值形参。**float 和 double 都要认。**

@@ -5,6 +5,16 @@
 其他版本使用前通过 `help(...)` 核对，不能把 5.5 的所有字段当成九版通用。
 示例省略可选的 `debug=None`，所有类名前加 `unreal.`。
 
+## 目录
+
+- 读写资产
+- 减法布尔
+- 减面
+- 均匀重网格
+- 查询与判断
+- Nanite 与自动 LOD（不改 LOD0）
+- 布尔之后：碰撞与 LOD
+
 ## 读写资产
 
 ```python
@@ -93,3 +103,41 @@ surface_area, volume = GeometryScript_MeshQueries.get_mesh_volume_area(mesh)
 体积返回顺序是 **面积、体积**。`closed` 只检查拓扑边界，不证明没有自交或法线正确。
 不要把三角形数变化当作所有操作的成功条件。
 把核对结果赋给 `output_data`，它会送回 Agent；失败时抛出明确异常并保留诊断输出。
+
+## Nanite 与自动 LOD（不改 LOD0）
+
+开关 Nanite 是网格的一个设置，不写 Python：`ue_content_set_properties`，
+`{"NaniteSettings.bEnabled": true}`，关掉就恢复。LOD 组、碰撞复杂度
+（`BodySetup.CollisionTraceFlag`）同理。
+
+自动 LOD 也不写 Python，用 `mesh_optimize`：
+
+```json
+{"path": "/Game/Meshes/SM_Rock", "lods": {"count": 4}}
+{"path": "/Game/Meshes/SM_Rock", "lods": {"count": 3, "reduction": [40, 15]}}
+```
+
+`reduction` 是 LOD1 起每级保留 LOD0 面数的百分比，省略时逐级减半。
+网格有导入的 LOD 时这一项被拒绝；用户同意保留就加 `"keep_imported": true`，
+只在导入的级后面追加。回执给每级前后面数和来源；生成的级面数没降会单独标 ⚠️。
+
+## 布尔之后：碰撞与 LOD
+
+对**副本**操作。碰撞按新几何做凸包分解（默认先删旧的简单碰撞）：
+
+```json
+{"path": "/Game/Meshes/SM_Wall_Holed", "collision": {"type": "convex", "hull_count": 8}}
+```
+
+凸包数太少时洞会被一个凸包盖住，适当加大再试（1–64，顶点上限 `max_hull_verts` 6–32）。
+
+**导入的 LOD 换成生成的**：布尔之后导入的 LOD1+ 还是没洞的旧几何。只有用户明确同意
+（换掉就回不来，撤销除外）才加 `replace_imported`，从 LOD1 起全部重建：
+
+```json
+{"path": "/Game/Meshes/SM_Wall_Holed", "lods": {"count": 4, "replace_imported": true}}
+```
+
+回执里会点名换掉了哪几级导入 LOD。`replace_imported` 和 `keep_imported` 互斥，同时给会被拒绝。
+
+做完 `mesh_describe` 回读碰撞图元数和每级 LOD 来源；能不能走过去要在 PIE 里验证。

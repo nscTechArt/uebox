@@ -3,14 +3,16 @@ import type { AddressInfo } from 'net'
 import { createHash, randomBytes } from 'crypto'
 import { shell } from 'electron'
 import { refreshCodeBuddyTokens, runCodeBuddyLogin } from './codebuddy'
+import { runZCodeLogin } from './zcode'
 
 /**
  * Provider 的账号登录。
  *
- * 支持三种授权方式，取决于各家提供哪一种：
+ * 授权方式取决于各家提供哪一种：
  * - `pkce`：授权码 + PKCE，浏览器回调到本机（OpenRouter、ChatGPT）
  * - `device`：设备码，用户在浏览器里输一串码（Kimi）
  * - `codebuddy`：腾讯自家的 state 轮询登录，细节在 codebuddy.ts
+ * - `zcode`：ZCode 自家的 CLI 授权轮询，订阅令牌失效后需重新登录
  *
  * 换回来的东西也分两类，直接决定了怎么存：
  * - OpenRouter 给的是**永久 API Key**，当成普通密钥加密存起来就行
@@ -89,7 +91,15 @@ interface CodeBuddyProviderSpec {
   grant: 'codebuddy'
 }
 
-export type OAuthProviderSpec = PkceProviderSpec | DeviceProviderSpec | CodeBuddyProviderSpec
+interface ZCodeProviderSpec {
+  grant: 'zcode'
+}
+
+export type OAuthProviderSpec =
+  | PkceProviderSpec
+  | DeviceProviderSpec
+  | CodeBuddyProviderSpec
+  | ZCodeProviderSpec
 
 export const OAUTH_PROVIDERS: Readonly<Record<string, OAuthProviderSpec>> = Object.freeze({
   openrouter: {
@@ -126,7 +136,8 @@ export const OAUTH_PROVIDERS: Readonly<Record<string, OAuthProviderSpec>> = Obje
     // @moonshot-ai/kimi-code-oauth（MIT）里的公开常量
     clientId: '17e5f671-d194-4dfb-9706-5516cb48c098'
   },
-  codebuddy: { grant: 'codebuddy' }
+  codebuddy: { grant: 'codebuddy' },
+  zcode: { grant: 'zcode' }
 })
 
 export function getOAuthSpec(providerId: string): OAuthProviderSpec | undefined {
@@ -196,6 +207,7 @@ export async function refreshOAuthTokens(
 ): Promise<OAuthTokens> {
   const spec = OAUTH_PROVIDERS[providerId]
   if (!spec) throw new Error(`${providerId} 不支持账号登录`)
+  if (spec.grant === 'zcode') throw new Error('ZCode token expired. Sign in to ZCode again.')
   if (!tokens.refreshToken) throw new Error('没有 refresh_token，需要重新登录')
   if (spec.grant === 'codebuddy') return refreshCodeBuddyTokens(tokens)
 
@@ -479,6 +491,9 @@ export async function runOAuthLogin(
   if (!spec) throw new Error(`${providerId} 不支持 OAuth 登录`)
 
   try {
+    if (spec.grant === 'zcode') {
+      return await runZCodeLogin({ openUrl: (url) => shell.openExternal(url), signal })
+    }
     if (spec.grant === 'codebuddy') {
       return await runCodeBuddyLogin({ openUrl: (url) => shell.openExternal(url), signal })
     }

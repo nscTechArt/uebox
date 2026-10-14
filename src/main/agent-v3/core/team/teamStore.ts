@@ -25,13 +25,24 @@ import {
   type BoardTask,
   type MemberTier,
   type TaskStatus,
+  type TeamEvent,
+  type TeamJob,
   type TeamMail,
   type TeamMember,
   type TeamModel
 } from '../../../../shared/agentTeam'
 
 export { PRODUCER, TASK_STATUSES }
-export type { BoardTask, MemberTier, TaskStatus, TeamMail, TeamMember, TeamModel }
+export type {
+  BoardTask,
+  MemberTier,
+  TaskStatus,
+  TeamEvent,
+  TeamJob,
+  TeamMail,
+  TeamMember,
+  TeamModel
+}
 
 export type BoardPatch = Partial<Omit<BoardTask, 'updatedAt'>> & { id: string }
 
@@ -94,7 +105,28 @@ export interface TeamStore {
   /** 记一笔「谁交了一件活、实际改了什么」。`team_status` 的「最近改动」读它 */
   recordActivity(entry: Omit<TeamActivity, 'at'>): Promise<void>
   activity(limit?: number): Promise<TeamActivity[]>
+  /** 一件活开工了：记下来，返回它（交回、停下时按 id 收尾） */
+  startJob(member: string, brief: string): Promise<TeamJob>
+  /** 一件活交回来了或停下了 */
+  finishJob(
+    id: string,
+    end: { outcome: 'done'; report: string } | { outcome: 'stopped'; reason: string }
+  ): Promise<void>
+  /**
+   * 还挂着「在干」的活一律收成停下。新一次运行开始时调：上次运行被打断（盒子关了、崩了）的活
+   * 不会再交回来，不收掉的话界面上会永远显示「正在写」
+   */
+  closeOpenJobs(reason: string): Promise<void>
+  jobs(limit?: number): Promise<TeamJob[]>
+  recordEvent(event: Omit<TeamEvent, 'at'>): Promise<void>
+  events(limit?: number): Promise<TeamEvent[]>
 }
+
+/** 活的账、事件的账各留多少条：它们是近况，不是档案 */
+const JOBS_KEPT = 200
+const EVENTS_KEPT = 100
+/** 派活那段话截多长当名字 */
+const BRIEF_MAX = 80
 
 /** 一件交回来的活实际改了什么（按写操作台账记，不是队员自己说的） */
 export interface TeamActivity {
@@ -126,6 +158,8 @@ export function createTeamStore(
   const boardFile = join(dirs.stateDir, 'board.json')
   const mailFile = join(dirs.stateDir, 'mail.json')
   const activityFile = join(dirs.stateDir, 'activity.json')
+  const jobsFile = join(dirs.stateDir, 'jobs.json')
+  const eventsFile = join(dirs.stateDir, 'events.json')
   const historyFile = (name: string): string =>
     join(dirs.stateDir, 'members', `${memberFileBase(name)}.json`)
 
@@ -252,6 +286,64 @@ export function createTeamStore(
         // 只留最近这些：它是「最近改动」，不是审计日志
         await writeJson(activityFile, list.slice(-200))
       }),
-    activity: async (limit = 20) => (await readJson<TeamActivity[]>(activityFile, [])).slice(-limit)
+    activity: async (limit = 20) =>
+      (await readJson<TeamActivity[]>(activityFile, [])).slice(-limit),
+    startJob: (member, brief) =>
+      serial(async () => {
+        await fs.mkdir(dirs.stateDir, { recursive: true })
+        const list = await readJson<TeamJob[]>(jobsFile, [])
+        const line =
+          brief
+            .split(/\r?\n/)
+            .find((l) => l.trim())
+            ?.trim() ?? ''
+        // id 不用下标：旧的会被截掉，下标会撞
+        const last = Number(list.at(-1)?.id.slice(1)) || 0
+        const job: TeamJob = {
+          id: `j${last + 1}`,
+          member,
+          brief: line.length > BRIEF_MAX ? `${line.slice(0, BRIEF_MAX - 1)}…` : line,
+          startedAt: now()
+        }
+        list.push(job)
+        await writeJson(jobsFile, list.slice(-JOBS_KEPT))
+        return job
+      }).then(changed),
+    finishJob: (id, end) =>
+      serial(async () => {
+        const list = await readJson<TeamJob[]>(jobsFile, [])
+        const job = list.find((j) => j.id === id)
+        if (!job || job.endedAt !== undefined) return
+        job.endedAt = now()
+        job.outcome = end.outcome
+        if (end.outcome === 'done') job.report = end.report
+        else job.reason = end.reason
+        await writeJson(jobsFile, list)
+      }).then(changed),
+    closeOpenJobs: (reason) =>
+      serial(async () => {
+        const list = await readJson<TeamJob[]>(jobsFile, [])
+        const open = list.filter((j) => j.endedAt === undefined)
+        if (open.length === 0) return false
+        const at = now()
+        for (const job of open) {
+          job.endedAt = at
+          job.outcome = 'stopped'
+          job.reason = reason
+        }
+        await writeJson(jobsFile, list)
+        return true
+      }).then((closed) => {
+        if (closed) onChange?.()
+      }),
+    jobs: async (limit = 60) => (await readJson<TeamJob[]>(jobsFile, [])).slice(-limit),
+    recordEvent: (event) =>
+      serial(async () => {
+        await fs.mkdir(dirs.stateDir, { recursive: true })
+        const list = await readJson<TeamEvent[]>(eventsFile, [])
+        list.push({ ...event, at: now() })
+        await writeJson(eventsFile, list.slice(-EVENTS_KEPT))
+      }).then(changed),
+    events: async (limit = 20) => (await readJson<TeamEvent[]>(eventsFile, [])).slice(-limit)
   }
 }

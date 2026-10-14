@@ -389,6 +389,8 @@ function createSendTool(
     let current = member
     let route: MemberRoute = { fellBack: false }
     let startedAt = Date.now()
+    /** 活的账（`store.startJob`）：界面上「谁交回了什么」就是它。记不上不影响干活 */
+    let jobId: string | undefined
     // 记一笔履历：哪个模型、干哪类活、交没交回来。说不准是哪个模型（老 fast 档）就不记
     const remember = (outcome: 'done' | 'unfinished'): void => {
       if (!route.used || !deps.models?.record) return
@@ -409,6 +411,7 @@ function createSendTool(
         current = (await deps.store.findMember(member.name)) ?? member
         route = await routeMember(deps.models, current)
         startedAt = Date.now()
+        jobId = (await deps.store.startJob(member.name, message).catch(() => undefined))?.id
         const ledger = new WriteLedger()
         ctx.setAbortNote?.(() => formatInterruptedWrites(ledger.list(), member.readOnly))
         // 上次被停在半截工具调用上的话，那条调用没有结果 —— 摘掉，不然它一睁眼
@@ -427,7 +430,11 @@ function createSendTool(
             ...(route.pin ? { pin: route.pin } : {}),
             ...(ctx.signal ? { signal: ctx.signal } : {}),
             // 界面给这类进度统一加「团队：」前缀，这里只标是哪个队员
-            onProgress: (text) => ctx.report({ text: `${member.name} · ${text}` }),
+            // 后台派的活这次调用早就结束了，report 推不出去；动态另走一条推送
+            onProgress: (text) => {
+              ctx.report({ text: `${member.name} · ${text}` })
+              deps.live?.note(member.name, text)
+            },
             keepMessages: (messages) => {
               latest = messages
             }
@@ -446,9 +453,18 @@ function createSendTool(
         result = await run
       } catch (error) {
         remember('unfinished')
+        if (jobId) {
+          const reason = error instanceof Error ? error.message : String(error)
+          await deps.store.finishJob(jobId, { outcome: 'stopped', reason }).catch(() => undefined)
+        }
         throw error
       }
       remember('done')
+      if (jobId) {
+        await deps.store
+          .finishJob(jobId, { outcome: 'done', report: result.text })
+          .catch(() => undefined)
+      }
       // 按台账记下它实际改了什么 —— `team_status` 的「最近改动」读它，不靠队员自己说
       await deps.store
         .recordActivity({

@@ -2,7 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Dom/JsonValue.h"
+#include "HAL/CriticalSection.h"
 #include "Logging/LogVerbosity.h"
+#include "Misc/ScopeLock.h"
 #include "Misc/OutputDevice.h"
 #include "Misc/OutputDeviceRedirector.h"
 
@@ -23,9 +25,15 @@
  *
  * ## 线程
  *
- * 默认 `CanBeUsedOnAnyThread()` 为 false，所以 GLog 只在游戏线程上把行交给我们；
- * 别的线程打的行先被缓冲，析构前 `FlushThreadedLogs()` 一次把它们收进来。
- * 因此不需要锁。
+ * `CanBeUsedOnMultipleThreads()` 保持默认 false，我们是「缓冲型」设备，GLog 只在它的
+ * **主日志线程**上把行交给我们。5.0 那就是游戏线程；5.1 起编辑器启动时
+ * `TryStartDedicatedPrimaryThread()` 起了一条专门的日志线程（LaunchEngineLoop.cpp），
+ * 主日志线程换成了它 —— 游戏线程自己打的行也是先排队、再由那条线程交给我们。
+ * 所以：
+ * - 写（Serialize，日志线程）和读（下面的取值函数，游戏线程）会并发，加锁；
+ * - 读之前必须先 `FlushThreadedLogs()`，否则刚打的行还在队列里没到我们手上。
+ *   取值函数自己先冲一次再拷贝，调用方不用记。冲的时候不能拿着我们的锁 ——
+ *   游戏线程在等日志线程把队列清空，日志线程正要进 Serialize 拿这把锁。
  *
  * ## 上限
  *
@@ -83,39 +91,82 @@ public:
 			return;
 		}
 
+		FScopeLock Lock(&Mutex);
 		++TotalSeen;
 		if (Lines.Num() >= MaxLines)
 		{
 			return;
 		}
 		Lines.Add(FString::Printf(TEXT("[%s] %s: %s"), *Category.ToString(), ToString(Level), V));
+		Entries.Add(FEntry{ Level, Category, FString(V) });
 		if (Level == ELogVerbosity::Error || Level == ELogVerbosity::Fatal)
 		{
 			RawErrors.Add(FString(V));
 		}
 	}
 
+	/** 一行的原始三件套：级别（已掩掉标志位）、类别（原样）、正文（没有前缀） */
+	struct FEntry
+	{
+		ELogVerbosity::Type Verbosity;
+		FName Category;
+		FString Text;
+	};
+
+	/** 把别的线程 / 日志线程队列里还没交过来的行收进来。别拿着 Mutex 调（见类注释「线程」） */
+	void FlushPending() const
+	{
+		if (GLog)
+		{
+			GLog->FlushThreadedLogs();
+		}
+	}
+
 	/** 已格式化的行：`[Category] Verbosity: text` */
-	const TArray<FString>& GetLines() const { return Lines; }
+	TArray<FString> GetLines() const
+	{
+		FlushPending();
+		FScopeLock Lock(&Mutex);
+		return Lines;
+	}
+
+	/** 按到达顺序的原始条目，给要自己分级 / 分类别的调用方 */
+	TArray<FEntry> GetEntries() const
+	{
+		FlushPending();
+		FScopeLock Lock(&Mutex);
+		return Entries;
+	}
 
 	/** 超出上限被丢掉的行数 */
-	int32 Dropped() const { return FMath::Max(0, TotalSeen - Lines.Num()); }
+	int32 Dropped() const
+	{
+		FScopeLock Lock(&Mutex);
+		return FMath::Max(0, TotalSeen - Lines.Num());
+	}
 
 	/** Error / Fatal 行的**原文**（没有类别前缀），给按格式拆解用 */
-	TArray<FString> ErrorsOnly() const { return RawErrors; }
+	TArray<FString> ErrorsOnly() const
+	{
+		FlushPending();
+		FScopeLock Lock(&Mutex);
+		return RawErrors;
+	}
 
 	/** 直接放进响应的 `engine_log` 数组；丢了行就在末尾补一条说明 */
 	TArray<TSharedPtr<FJsonValue>> ToJson() const
 	{
+		const TArray<FString> Snapshot = GetLines();
+		const int32 DroppedCount = Dropped();
 		TArray<TSharedPtr<FJsonValue>> Out;
-		Out.Reserve(Lines.Num() + 1);
-		for (const FString& Line : Lines)
+		Out.Reserve(Snapshot.Num() + 1);
+		for (const FString& Line : Snapshot)
 		{
 			Out.Add(MakeShared<FJsonValueString>(Line));
 		}
-		if (Dropped() > 0)
+		if (DroppedCount > 0)
 		{
-			Out.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("... %d more line(s) not captured (cap %d)"), Dropped(), MaxLines)));
+			Out.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("... %d more line(s) not captured (cap %d)"), DroppedCount, MaxLines)));
 		}
 		return Out;
 	}
@@ -123,7 +174,9 @@ public:
 private:
 	TSet<FName> Categories;
 	ELogVerbosity::Type MinVerbosity;
+	mutable FCriticalSection Mutex;
 	TArray<FString> Lines;
+	TArray<FEntry> Entries;
 	TArray<FString> RawErrors;
 	int32 TotalSeen = 0;
 };

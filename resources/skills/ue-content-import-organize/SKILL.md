@@ -29,10 +29,12 @@ Always compare `imported_count` against `requested_count` and tell the user what
 appeared. They will otherwise find material instances in their project that they never asked
 for and have no idea where they came from.
 
-Naming matters at import time: a file named `*_normal.png` is detected as a normal map and
-imported with `TC_Normalmap` / BC5 / sRGB off. Passing badly named files through gives wrong
-compression settings that are tedious to fix afterwards — say so before importing rather than
-after.
+Naming matters at import time: the texture type is guessed **from the filename alone**. A file
+named `*_normal.png` becomes a normal map (`TC_Normalmap` / BC5 / sRGB off); a name it cannot
+classify keeps whatever the engine chose — usually sRGB on. The receipt's `texture_setup` lists,
+per texture, the type it was read as and the `srgb` / `compression` it ended up with. Say so
+before importing badly named files, and check that list afterwards — see _After importing:
+acceptance checks_.
 
 Check `saved_count` too. It should equal the number of assets imported; a `save_warning` means
 some assets exist only in the current editor session and will be lost when the user closes UE.
@@ -51,6 +53,73 @@ convention; they may be looking for the file under its original name.
 already converts metres to centimetres for glTF, and FBX carries its own units). When a model
 lands a hundred times too small or too large, re-import it with `scale` set — do not tell the
 user to go fix Build Scale in the editor themselves.
+
+## After importing: acceptance checks
+
+`imported_count` proves the files went in, not that they are usable. Before reporting success,
+read back what the engine actually made. Read `import_messages` (the importer's own warnings and
+errors) before calling an import clean; if the reply has no such field (older plugin), check
+`ue_message_log` (`action: "list"`, then the import-related category) when anything looks off.
+
+**Meshes — one `mesh_describe` per mesh**, then compare against what the asset is:
+
+| Check | Read | Wrong looks like | Fix |
+|---|---|---|---|
+| Real-world size | `bounds.size` (cm) | a chair 0.9 cm or 9000 cm tall | re-import with `scale` |
+| Up axis | which `bounds` axis is longest | a door lying flat (Z smallest) | fix in the DCC, re-export |
+| Pivot | origin line (centred / on base / at corner) | floor prop pivoting from its middle | DCC (`blender-ue-pipeline`) — do not compensate on every actor |
+| Collision | ⚠️ no collision / primitive count | player walks through it | `mesh_optimize` `collision` (box for crates, convex for concave shapes) |
+| Lightmap UV | ⚠️ invalid lightmap index | dark blotches after a lighting build | only matters with baked lighting; Lumen-only projects can skip |
+| Nanite / LODs | `nanite`, per-LOD source and triangles | dense non-Nanite mesh with one LOD | see below |
+| Materials | every slot has a material | Legacy Phong parent, empty slots | see _Third-party packs_ |
+
+`index_valid` only says the lightmap channel exists; overlapping lightmap UVs show up as
+lighting-build warnings, not here. Nanite: opaque, dense static meshes on a desktop/console
+project should have it on (`ue_content_set_properties`, `"NaniteSettings.bEnabled": true`) —
+then judge cost by Nanite, not by the raw triangle count. Translucent
+materials and mobile targets keep classic LODs; add auto LODs (`mesh_optimize` `lods`) before anyone
+decimates LOD0.
+Skeletal meshes: confirm `skeleton` is the one the user's animations use and that a physics
+asset exists.
+
+**Textures — `ue_content_describe` per texture**, compare `srgb` and `compression`:
+
+| Texture | `srgb` | `compression` |
+|---|---|---|
+| Base colour, emissive | true | `TC_Default` |
+| Normal | false | `TC_Normalmap` |
+| Single-channel roughness / metallic / AO / height | false | `TC_Masks` (HDR sources keep `TC_HDR*`) |
+| Packed ORM / ARM / RMA / MRA / mask | false | `TC_Masks` |
+
+`texture_setup` already shows these per texture; `ue_content_describe` is for textures imported
+earlier or by hand. What the filename guess handles, and where it stops:
+
+- **Packed masks** are recognised only when the type word ends the name (`T_Rock_ORM`, not
+  `T_Arm_BaseColor`). The receipt gives `channels` for ORM/ARM (R = AO, G = roughness, B =
+  metallic), RMA and MRA; plain `_Mask` has no known order — ask. Packed masks are **not wired**
+  into the auto-generated instance (its master has no per-channel inputs); wiring one is a
+  material job.
+- **`bump`** is read as height, not as a normal map.
+- **Green flip** happens only when the name says `gl` / `opengl` as a word (`flip_reason` says
+  which). OpenGL normal maps without that marker (Blender, many free or AI sources) are not
+  flipped and render with bumps pushed in: ask where the maps came from, or have the user look at
+  a lit surface, before flipping by hand.
+
+Fix anything else with `ue_content_set_properties`; its receipt reads every value back
+(flip included), and it saves by default:
+
+```json
+{ "asset_path": "/Game/Imported/rock/T_Rock_ORM",
+  "properties": { "SRGB": false, "CompressionSettings": "TC_Masks" } }
+```
+
+An OpenGL normal map instead: `{ "bFlipGreenChannel": true }`.
+
+Then check the material: `material_describe` the auto-generated instance; each `texture_setup`
+entry names the material parameter its texture went into. A texture that landed in the wrong parameter
+(an older plugin put `bump` images in Normal) goes back to a flat normal with
+`material_set_param` and `/Engine/EngineMaterials/DefaultNormal` (it cannot clear a texture
+parameter).
 
 ## Same-named textures inside meshes silently overwrite each other
 

@@ -101,8 +101,16 @@ Render (Local) 一样在编辑器里起 PIE 渲，渲完才返回，过程中推
 
 1. **先 `sequence_audit`，FAIL 先修。** 黑屏的序列渲三小时还是黑的
 2. **参数跟用户对一遍**：格式、画质档、分辨率。拿不准就问，不要渲两遍去试
-3. **长序列先 `draft` 档或用 `frame_start` / `frame_end` 渲一小段**，让用户看过再渲全片
+3. **长序列先 `draft` 档或用 `frame_start` / `frame_end` 渲一小段**，让用户看过再渲全片。
+   `draft` 只有几帧预热，首帧和切点帧可能还没收敛（曝光、TSR、Lumen）——
+   要判断首帧干不干净，用正式档渲包住切点的一小段
 4. 渲完把输出目录告诉用户；回执里文件数和帧数对不上要原样转述
+5. **交出去之前自己先看帧**：首帧，加上每个切点的第一帧。回执的 `sample_files` 只列前几个文件，
+   其余用 `list_local_dir` 列输出目录按帧号找，`read_local_file` 打开就能看。
+   查机器能判的：黑帧、相机不对、糊成一片、切点闪错画面 —— 对照 `references/black-screen-causes.md`；
+   好不好看由用户定。EXR 和 `mp4_mrq` 你打不开，就说没看、请用户看。
+   切点帧号看 `sequence_describe` 的相机切点表：每段的 start 就是那个切点的第一帧，
+   和默认文件名「序列名.帧号」里的帧号一致（不从 0 起）；预设改过文件名格式或帧号偏移时对不上，就问用户
 
 用户按停止 = 取消渲染，已写出的帧留在输出目录。项目没开 Movie Render Queue 插件时它会
 报出来，用 `project_manage` 的 `enable_plugins` 开 `MovieRenderPipeline`，开完要重启编辑器。

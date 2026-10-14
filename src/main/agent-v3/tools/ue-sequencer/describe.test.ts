@@ -224,6 +224,112 @@ describe('出片体检', () => {
   })
 })
 
+/**
+ * 切点表。渲完要看每个切点的第一帧，原来工具不回切点帧号，
+ * skill 只能让模型去写 Python 读 Camera Cuts 段。
+ */
+describe('相机切点表', () => {
+  const run = async (cameraCuts: Record<string, unknown>): Promise<string> => {
+    mockUe.mockResolvedValueOnce(ok({ camera_cuts: cameraCuts }))
+    const result = await tool.execute('c1', { sequence_path: '/Game/x.x', detail: 'outline' })
+    return result.content.map((c) => ('text' in c ? c.text : '')).join('')
+  }
+  const base = { exists: true, section_count: 2, covers_playback: true }
+
+  it('逐段列出起止帧和相机，按闭开区间写', async () => {
+    const text = await run({
+      ...base,
+      cuts: [
+        { start_frame: 0, end_frame: 120, camera: 'Cam_Wide', camera_binding_id: 'g1' },
+        { start_frame: 120, end_frame: 300, camera: 'Cam_Close', camera_binding_id: 'g2' }
+      ]
+    })
+    expect(text).toContain('[0, 120) Cam_Wide')
+    expect(text).toContain('[120, 300) Cam_Close')
+    expect(text).toContain('不含 end')
+  })
+
+  it('说清帧号和输出文件名的对应：绝对帧号，不从 0 起', async () => {
+    const text = await run({
+      ...base,
+      cuts: [{ start_frame: 1001, end_frame: 1100, camera: 'Cam', camera_binding_id: 'g1' }]
+    })
+    expect(text).toContain('[1001, 1100)')
+    expect(text).toContain('序列名.帧号')
+    expect(text).toContain('不从 0 起')
+  })
+
+  it('无界的一头印成 ∞，不编一个数', async () => {
+    const text = await run({
+      ...base,
+      cuts: [{ start_frame: null, end_frame: null, camera: 'Cam', camera_binding_id: 'g1' }]
+    })
+    expect(text).toContain('[−∞, +∞) Cam')
+    expect(text).not.toContain('null')
+  })
+
+  it('查不到相机名时如实说，不印 null', async () => {
+    const text = await run({
+      ...base,
+      cuts: [
+        { start_frame: 0, end_frame: 50, camera: null, camera_binding_id: null },
+        {
+          start_frame: 50,
+          end_frame: 100,
+          camera: null,
+          camera_binding_id: 'g9',
+          camera_in_other_sequence: true
+        }
+      ]
+    })
+    expect(text).toContain('[0, 50) （查不到相机绑定）')
+    expect(text).toContain('子/父序列')
+    expect(text).not.toContain('null')
+  })
+
+  it('禁用的段和落在两帧之间的切点要标出来', async () => {
+    const text = await run({
+      ...base,
+      cuts: [
+        { start_frame: 0, end_frame: 60, camera: 'A', camera_binding_id: 'g1', active: false },
+        {
+          start_frame: 60,
+          end_frame: 90,
+          camera: 'B',
+          camera_binding_id: 'g2',
+          off_frame_boundary: true
+        }
+      ]
+    })
+    expect(text).toContain('已禁用')
+    expect(text).toContain('两帧之间')
+  })
+
+  it('段数被截断时要说', async () => {
+    const text = await run({
+      ...base,
+      cuts: [{ start_frame: 0, end_frame: 10, camera: 'A', camera_binding_id: 'g1' }],
+      cuts_truncated: true
+    })
+    expect(text).toContain('只列了前 1 段')
+  })
+
+  it('老插件不回 cuts 时不印切点表，也不报错', async () => {
+    const text = await run(base)
+    expect(text).not.toContain('相机切点')
+    expect(text).not.toContain('undefined')
+  })
+
+  it('结构化的 cuts 原样进 details', async () => {
+    const cuts = [{ start_frame: 0, end_frame: 10, camera: 'A', camera_binding_id: 'g1' }]
+    mockUe.mockResolvedValueOnce(ok({ camera_cuts: { ...base, cuts } }))
+    const result = await tool.execute('c1', { sequence_path: '/Game/x.x', detail: 'outline' })
+    expect((result.details as { camera_cuts?: { cuts?: unknown } })?.camera_cuts?.cuts).toEqual(
+      cuts
+    )
+  })
+})
+
 describe('跨版本能力如实上报', () => {
   const run = async (over: Record<string, unknown>): Promise<string> => {
     mockUe.mockResolvedValueOnce(ok(over))

@@ -121,13 +121,14 @@ import {
 import { parseTeamCommand } from '../agent-v3/core/team/teamCommand'
 import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
 import { createTeamStore, PRODUCER } from '../agent-v3/core/team/teamStore'
-import { createTeamLive } from '../agent-v3/core/team/teamLive'
+import { createTeamLive, type TeamLive } from '../agent-v3/core/team/teamLive'
 import { formatMail } from '../agent-v3/core/team/teamTools'
 import { assignMemberModel, loadTeamModels, recordReopen } from '../agent-v3/core/team/teamModels'
 import { createTrackRecord } from '../agent-v3/core/team/trackRecord'
 import { loadModelDossiers, recheckModel } from '../agent-v3/core/team/modelDossier'
 import { teamModelCandidates, type TeamStateView } from '../../shared/agentTeam'
 import { readSettings as readAiSettings } from '../ai/store'
+import { setProviderUsageProbe } from '../ai/providerUsage'
 import { DEFAULT_GOAL_MAX_ROUNDS, normalizeGoalMaxRounds } from '../../shared/goalRounds'
 import { buildCrashNotice, type EditorWatchEvent } from '../agent-v3/core/team/editorWatch'
 import { startTeamEditorWatch } from './teamEditorWatch'
@@ -384,6 +385,24 @@ export function countActiveSessionOperations(): number {
   return activeAgents.entries().length
 }
 
+/**
+ * 正在跑的对话里有几个用着这个服务商：制作人自己的模型，或团队名册里钉了它的队员。
+ * 设置页删服务商前问这个（见 `ai/providerUsage.ts`）
+ */
+async function countRunsUsingProvider(providerId: string): Promise<number> {
+  let count = 0
+  for (const [sessionId, entry] of activeAgents.entries()) {
+    if (entry.kind !== 'agent') continue
+    if (entry.selection?.providerId === providerId) {
+      count++
+      continue
+    }
+    const roster = await createTeamStore(teamDirsFor(sessionId)).roster()
+    if (roster.some((member) => member.model?.providerId === providerId)) count++
+  }
+  return count
+}
+
 /** 在任何异步准备之前占位，停止和重入检查从这一刻起生效。 */
 function reserveRun(
   sessionId: string,
@@ -585,11 +604,28 @@ async function prepareTeam(
   const changed = (): void => emit('agent-v3:team-board', { sessionId: ctx.sessionId })
   const store = createTeamStore(teamDirsFor(ctx.sessionId), Date.now, changed)
   await store.ensure()
+  // 上次运行没交回的活（盒子关了、崩了）不会再交回来了；不收掉，界面上会一直挂着「正在写」
+  await store.closeOpenJobs('上次运行中断，这件活没有交回').catch(() => undefined)
   ctx.pacedRequests = true
+  // 谁开始跑、谁在等也告诉界面（任务板上的办公室）。派活时几个人同时开工，合并成一次
+  let liveTimer: ReturnType<typeof setTimeout> | null = null
+  const live = createTeamLive(
+    store,
+    () => {
+      if (liveTimer) return
+      liveTimer = setTimeout(() => {
+        liveTimer = null
+        changed()
+      }, TEAM_LIVE_COALESCE_MS)
+    },
+    // 队员的动态当场推，不让界面为一行字重读整份任务板
+    (activity) => emit('agent-v3:team-activity', { sessionId: ctx.sessionId, ...activity })
+  )
+  liveTeams.set(ctx.sessionId, live)
   ctx.team = {
     objective: team.objective,
     store,
-    live: createTeamLive(store),
+    live,
     snapshots: createTeamSnapshots(),
     onVerdict: async (verdict) => {
       options.team = applyVerdict(options.team ?? team, verdict)
@@ -601,17 +637,31 @@ async function prepareTeam(
 
 /** 面板上最多显示多少条留言。它是近况，不是档案 —— 全量在 `<会话>.team/mail.json` */
 const TEAM_PANEL_MAIL = 30
+/** 面板上最多显示多少件活、多少条团队事件。同上，是近况 */
+const TEAM_PANEL_JOBS = 60
+const TEAM_PANEL_EVENTS = 20
+
+/** 动静通知合并的窗口。人眼看不出这一点延迟，几个人同时开工只重读一次 */
+const TEAM_LIVE_COALESCE_MS = 120
+
+/**
+ * 每条工作室对话最近一次运行的 `TeamLive`。面板读「谁在跑」要它，而它只挂在这一轮的
+ * ctx 上。下一轮 `prepareTeam` 换成新的；结束团队模式时删掉
+ */
+const liveTeams = new Map<string, TeamLive>()
 
 /** 任务板面板要的一整份。不是工作室的会话返回 null */
 async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
   const team = (await loadExecutionOptions(sessionId))?.team
   if (!team) return null
   const store = createTeamStore(teamDirsFor(sessionId))
-  const [members, board, mail, activity] = await Promise.all([
+  const [members, board, mail, activity, jobs, events] = await Promise.all([
     store.roster(),
     store.board(),
     store.mail(),
-    store.activity(TEAM_ACTIVITY_LOOKBACK)
+    store.activity(TEAM_ACTIVITY_LOOKBACK),
+    store.jobs(TEAM_PANEL_JOBS),
+    store.events(TEAM_PANEL_EVENTS)
   ])
   return {
     objective: team.objective,
@@ -622,7 +672,10 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
     ...(team.roundStartedAt !== undefined ? { roundStartedAt: team.roundStartedAt } : {}),
     members,
     board,
-    mail: mail.slice(-TEAM_PANEL_MAIL)
+    mail: mail.slice(-TEAM_PANEL_MAIL),
+    jobs,
+    events,
+    ...(liveTeams.has(sessionId) ? { live: liveTeams.get(sessionId)!.view() } : {})
   }
 }
 
@@ -802,6 +855,16 @@ function attachEditorWatch(
   }
   const stop = startTeamEditorWatch(isOurs, {
     onEvent: (event) => {
+      // 记进团队的账：任务板上画成一条贯穿所有人的线（落盘失败不影响看护）
+      void ctx.team?.store
+        .recordEvent(
+          event.kind === 'crashed'
+            ? { kind: 'crashed', ...(event.reason ? { detail: event.reason.slice(0, 200) } : {}) }
+            : event.kind === 'recovered'
+              ? { kind: 'recovered' }
+              : { kind: 'recoverFailed', detail: event.why.slice(0, 200) }
+        )
+        .catch(() => undefined)
       emit('agent-v3:notice', {
         sessionId: ctx.sessionId,
         message: watchNotice(event),
@@ -1551,6 +1614,8 @@ async function withHostSettings(status: McpServerHostStatus): Promise<
 }
 
 export function registerAgentV3IPC(): void {
+  setProviderUsageProbe(countRunsUsingProvider)
+
   /**
    * 两条对话抢同一个资产时，用户必须看得见。
    *
@@ -1759,6 +1824,7 @@ export function registerAgentV3IPC(): void {
     const options = await loadExecutionOptions(sessionId)
     if (!options?.team) return { success: true }
     delete options.team
+    liveTeams.delete(sessionId)
     await saveExecutionOptions(sessionId, options)
     event.sender.send('agent-v3:team-board', { sessionId })
     return { success: true }

@@ -102,6 +102,13 @@ If the render lost the blockout's layout, the reference did not carry: check tha
 `reference_images` really got the capture path, and that the capture actually shows the
 subject.
 
+Camera, layout and object count against the capture are yours to check; whether the picture is
+good is the user's call — do not grade it for them.
+
+Nothing in the project changes along this loop: `ue_focus_viewport` moves the user's editor
+camera (say so — it takes their view), and assets appear only if you import an image. There is no
+blast radius to check beyond that.
+
 ## Several angles
 
 Repeat frame → capture → generate per requested angle, preserving the same material, lighting

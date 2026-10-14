@@ -13,6 +13,8 @@
  * ## 已实现
  *
  *   - `mesh.describe` —— 一次读完一个网格资产的全部信息
+ *   - `mesh.optimize` —— 静态网格：生成 LOD、生成简单碰撞（盒/球/胶囊/凸包分解），
+ *                       前后都从引擎读回事实
  *
  * ## 为什么只有一个命令，而 Epic 有 38 个
  *
@@ -21,7 +23,7 @@
  * 我们把读取合成一个 `mesh.describe`，一次答完。
  *
  * 后续（见设计文档 §7）：`mesh.audit`（批量体检，走 AssetRegistry 标签，
- * 不加载资产）、`mesh.optimize`、`mesh.sockets`。
+ * 不加载资产）、`mesh.sockets`。
  *
  * ## 版本兼容策略
  *
@@ -29,9 +31,18 @@
  * 且都带 `UE_DEPRECATED(4.27, "…use GetXxx()…")` 标记 —— 说明这套 Get/Set
  * 访问器 4.27 就已存在，覆盖我们支持的 5.0–5.8 全区间。
  *
- * 需要编辑器子系统的写操作（生成 LOD、生成碰撞）不在这个文件里。那些 API
- * 在 5.6 之前不存在，届时走 `UAL_ReflectCall`（反射，不产生链接期依赖），
- * 不要往 Build.cs 里加 `StaticMeshEditor` —— 那会让插件在老引擎上整个加载不起来。
+ * `mesh.optimize` 的碰撞部分走 `UStaticMeshEditorSubsystem`（StaticMeshEditor 模块）。
+ * 这里原先写着「那些 API 5.6 之前不存在，别往 Build.cs 加 StaticMeshEditor」——
+ * 逐版本 grep 过，**那条结论是错的**：`Engine/Source/Editor/StaticMeshEditor/Public/
+ * StaticMeshEditorSubsystem.h` 在 5.0–5.8 九个版本里都在，用到的
+ * `AddSimpleCollisionsWithNotification` / `RemoveCollisionsWithNotification` /
+ * `SetConvexDecompositionCollisionsWithNotification` 签名九版一字不差（5.0–5.6 导出宏挂在类上，
+ * 5.7 起挂在每个函数上，调用方不受影响）。它是引擎本体的编辑器模块，不是插件，
+ * 加依赖不会引入对插件 DLL 的硬导入。
+ *
+ * LOD 部分不走子系统的 `SetLodsWithNotification`：它先 `SetNumSourceModels(1)`，
+ * 导入的 LOD 一律丢掉，做不了 keep_imported。直接改 SourceModel 的 ReductionSettings
+ * 再 PostEditChange —— 和 SetLods 内部是同一条构建路。
  */
 class FUAL_MeshCommands
 {
@@ -41,4 +52,7 @@ public:
 
 	/** mesh.describe —— 读取一个静态/骨骼网格资产的完整信息 */
 	static void Handle_Describe(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/** mesh.optimize —— 静态网格生成 LOD / 简单碰撞，回执给前后读回的事实 */
+	static void Handle_Optimize(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 };
