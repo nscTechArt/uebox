@@ -1,727 +1,752 @@
 <template>
-  <div
-    class="input-composer"
-    :class="{ 'drag-over': isDragging }"
-    @dragover.prevent="handleDragOver"
-    @dragleave.prevent="handleDragLeave"
-    @drop.prevent="handleDrop"
-  >
+  <div class="input-composer-shell">
     <!--
-      排着队等下一轮的跟进消息。
-      放在最上面：它是「已经交出去、但还没发生」的东西，和下面那些「还在手上、
-      跟着这次发送一起走」的附件不是一类，混在一排里用户分不清哪条已经算数了。
+      排着队等下一轮的跟进消息，贴在输入框顶边，像别在本子上的便签。
+      放在输入框**外面**：它是「已经交出去、但还没发生」的东西，和框里那些
+      「还在手上、跟着这次发送一起走」的字和附件不是一类，塞在框里用户分不清
+      哪条已经算数了。
+      多条时只露队头（下一条就发它），其余收成「还有 N 条」，免得把输入框顶得老高。
     -->
-    <div v-if="queuedFollowUps.length > 0" class="queued-followup-row">
-      <div v-for="item in queuedFollowUps" :key="item.id" class="source-pill queued-pill">
-        <div class="pill-icon">
-          <PhListPlus />
-        </div>
-        <span class="pill-title" :title="item.text">{{ item.text }}</span>
-        <button
-          class="pill-remove"
-          :aria-label="t('assistantInputComposer.queueCancel')"
-          @click.stop="handleCancelQueued(item.id)"
-        >
-          <PhX />
-        </button>
+    <div v-if="queuedFollowUps.length > 0" class="queued-tray">
+      <div v-for="item in visibleQueued" :key="item.id" class="queued-item">
+        <span class="queued-label">
+          <PhClock />
+          {{ t('assistantInputComposer.queueLabel') }}
+        </span>
+        <span class="queued-text" :title="item.text">{{ item.text }}</span>
         <!--
           排上之后随时能改主意：用户看着 agent 正往错的方向跑，这会儿
-          「等你跑完」正是他不想要的。没有这条出路的话他只能取消掉标签、
-          再把同一句话重打一遍。
-          放在整行最右边：正文才是这一条的主体，按钮挤在文字旁边会把正文压成几个字。
+          「等你跑完」正是他不想要的。
           带不走的附件（Excel、PDF、@ 来源）那条不给这个按钮，点下去东西会静悄悄
           少一半。图能带走，只贴了图的那条照给。
         -->
-        <button
-          v-if="item.canSteer"
-          class="pill-action"
-          :aria-label="t('assistantInputComposer.queueSteerNow')"
-          @click.stop="handleSteerQueued(item.id)"
-        >
-          <PhChatCircle />
-          <span>{{ t('assistantInputComposer.queueSteerNow') }}</span>
+        <button v-if="item.canSteer" class="queued-steer" @click.stop="handleSteerQueued(item.id)">
+          {{ t('assistantInputComposer.queueSteerNow') }}
         </button>
+        <!-- 改：退回输入框重新编辑。只有纯文字的那条给 —— 附件放不回去，退回去等于丢了 -->
+        <AppTooltip v-if="item.canEdit" :title="t('assistantInputComposer.queueEdit')">
+          <button
+            class="queued-icon-btn"
+            :aria-label="t('assistantInputComposer.queueEdit')"
+            @click.stop="handleEditQueued(item.id, item.text)"
+          >
+            <PhPencilSimple />
+          </button>
+        </AppTooltip>
+        <AppTooltip :title="t('assistantInputComposer.queueCancel')">
+          <button
+            class="queued-icon-btn"
+            :aria-label="t('assistantInputComposer.queueCancel')"
+            @click.stop="handleCancelQueued(item.id)"
+          >
+            <PhX />
+          </button>
+        </AppTooltip>
       </div>
+      <button
+        v-if="queuedFollowUps.length > 1"
+        class="queued-more"
+        @click.stop="queuedExpanded = !queuedExpanded"
+      >
+        {{
+          queuedExpanded
+            ? t('assistantInputComposer.queueCollapse')
+            : t('assistantInputComposer.queueMore', { count: queuedFollowUps.length - 1 })
+        }}
+      </button>
     </div>
 
-    <!-- 图片预览区域 -->
-    <div v-if="pendingImages.length > 0" class="image-preview-row">
-      <div v-for="(img, index) in pendingImages" :key="index" class="image-preview-item">
-        <img :src="img.preview" alt="preview" class="preview-img" @click="openImagePreview(img)" />
-        <div v-if="img.uploading" class="upload-overlay">
-          <PhCircleNotch class="icon-spin" />
-        </div>
-        <PhXCircle weight="fill" class="remove-btn" @click="removeImage(index)" />
-      </div>
-    </div>
-
-    <!-- 附件预览：Excel、文档、音视频，和发出去后气泡上的是同一张卡片 -->
     <div
-      v-if="pendingExcelFiles.length > 0 || pendingDocFiles.length > 0"
-      class="attachment-preview-row"
+      class="input-composer"
+      :class="{ 'drag-over': isDragging }"
+      @dragover.prevent="handleDragOver"
+      @dragleave.prevent="handleDragLeave"
+      @drop.prevent="handleDrop"
     >
-      <AttachmentCard
-        v-for="(excel, index) in pendingExcelFiles"
-        :key="`excel-${index}`"
-        :file-name="excel.fileName"
-        kind="excel"
-        :row-count="excel.rowCount"
-        :busy="excel.parsing"
-        :error="excel.error"
-        removable
-        @remove="removeExcelFile(index)"
-      />
-      <AttachmentCard
-        v-for="(doc, index) in pendingDocFiles"
-        :key="`doc-${index}`"
-        :file-name="doc.fileName"
-        :kind="docKind(doc)"
-        :busy="doc.parsing || doc.uploading"
-        :note="doc.statusNote"
-        :error="doc.error"
-        removable
-        @remove="removeDocFile(index)"
-      />
-    </div>
-
-    <!-- 知识库 @ 提及：已选来源标签（多选） -->
-    <div v-if="mentionedSources.length > 0" class="mentioned-source-row">
-      <div v-for="source in mentionedSources" :key="source.id" class="source-pill">
-        <div class="pill-icon">
-          <component :is="getSourceIcon(source.type)" />
+      <!-- 图片预览区域 -->
+      <div v-if="pendingImages.length > 0" class="image-preview-row">
+        <div v-for="(img, index) in pendingImages" :key="index" class="image-preview-item">
+          <img
+            :src="img.preview"
+            alt="preview"
+            class="preview-img"
+            @click="openImagePreview(img)"
+          />
+          <div v-if="img.uploading" class="upload-overlay">
+            <PhCircleNotch class="icon-spin" />
+          </div>
+          <PhXCircle weight="fill" class="remove-btn" @click="removeImage(index)" />
         </div>
-        <span class="pill-title">{{ source.title }}</span>
-        <button class="pill-remove" @click.stop="handleRemoveMention(source.id)">
-          <PhX />
-        </button>
       </div>
-    </div>
 
-    <div v-if="props.boundNotebook && !notebookMode" class="bound-wiki-row">
-      <div class="source-pill wiki-pill">
-        <div class="pill-icon">
-          <PhFileText />
-        </div>
-        <span class="pill-title">Wiki: {{ props.boundNotebook.title }}</span>
-        <button class="pill-remove" @click.stop="handleClearBoundWiki">
-          <PhX />
-        </button>
+      <!-- 附件预览：Excel、文档、音视频，和发出去后气泡上的是同一张卡片 -->
+      <div
+        v-if="pendingExcelFiles.length > 0 || pendingDocFiles.length > 0"
+        class="attachment-preview-row"
+      >
+        <AttachmentCard
+          v-for="(excel, index) in pendingExcelFiles"
+          :key="`excel-${index}`"
+          :file-name="excel.fileName"
+          kind="excel"
+          :row-count="excel.rowCount"
+          :busy="excel.parsing"
+          :error="excel.error"
+          removable
+          @remove="removeExcelFile(index)"
+        />
+        <AttachmentCard
+          v-for="(doc, index) in pendingDocFiles"
+          :key="`doc-${index}`"
+          :file-name="doc.fileName"
+          :kind="docKind(doc)"
+          :busy="doc.parsing || doc.uploading"
+          :note="doc.statusNote"
+          :error="doc.error"
+          removable
+          @remove="removeDocFile(index)"
+        />
       </div>
-    </div>
 
-    <!-- 知识库 @ 提及：来源选择弹出层 -->
-    <Transition name="popover-fade">
-      <div v-if="showMentionPopover" class="source-mention-popover">
-        <div class="popover-header">
-          <span class="header-title">{{ t('assistantInputComposer.mentionPopover.title') }}</span>
-          <span class="header-hint">{{ t('assistantInputComposer.mentionPopover.hint') }}</span>
+      <!-- 知识库 @ 提及：已选来源标签（多选） -->
+      <div v-if="mentionedSources.length > 0" class="mentioned-source-row">
+        <div v-for="source in mentionedSources" :key="source.id" class="source-pill">
+          <div class="pill-icon">
+            <component :is="getSourceIcon(source.type)" />
+          </div>
+          <span class="pill-title">{{ source.title }}</span>
+          <button class="pill-remove" @click.stop="handleRemoveMention(source.id)">
+            <PhX />
+          </button>
         </div>
-        <!-- 什么都没打、也没有知识库来源可推荐：告诉用户该干什么，
+      </div>
+
+      <div v-if="props.boundNotebook && !notebookMode" class="bound-wiki-row">
+        <div class="source-pill wiki-pill">
+          <div class="pill-icon">
+            <PhFileText />
+          </div>
+          <span class="pill-title">Wiki: {{ props.boundNotebook.title }}</span>
+          <button class="pill-remove" @click.stop="handleClearBoundWiki">
+            <PhX />
+          </button>
+        </div>
+      </div>
+
+      <!-- 知识库 @ 提及：来源选择弹出层 -->
+      <Transition name="popover-fade">
+        <div v-if="showMentionPopover" class="source-mention-popover">
+          <div class="popover-header">
+            <span class="header-title">{{ t('assistantInputComposer.mentionPopover.title') }}</span>
+            <span class="header-hint">{{ t('assistantInputComposer.mentionPopover.hint') }}</span>
+          </div>
+          <!-- 什么都没打、也没有知识库来源可推荐：告诉用户该干什么，
              而不是甩一句「暂无来源」让他以为功能坏了 -->
-        <div v-if="!hasMentionCandidates && !searchingNotes" class="empty-state">
-          <span>
-            {{
-              mentionQuery
-                ? t('assistantInputComposer.mentionPopover.noMatch')
-                : t('assistantInputComposer.mentionPopover.typeToSearch')
-            }}
-          </span>
-        </div>
-        <div v-else class="source-list">
-          <!-- 知识库来源：只有知识库的对话栏会有，按下 @ 就列出来 -->
-          <template v-if="availableNotebookSources.length > 0">
-            <div class="source-group-label">
-              {{ t('assistantInputComposer.mentionPopover.groupSources') }}
-            </div>
-            <div
-              v-for="source in availableNotebookSources"
-              :key="source.id"
-              class="source-item"
-              :class="{ selected: isSourceSelected(source.id) }"
-              @click="handleSourceSelect(source)"
-            >
-              <div class="source-icon">
-                <component :is="getSourceIcon(source.type)" />
+          <div v-if="!hasMentionCandidates && !searchingNotes" class="empty-state">
+            <span>
+              {{
+                mentionQuery
+                  ? t('assistantInputComposer.mentionPopover.noMatch')
+                  : t('assistantInputComposer.mentionPopover.typeToSearch')
+              }}
+            </span>
+          </div>
+          <div v-else class="source-list">
+            <!-- 知识库来源：只有知识库的对话栏会有，按下 @ 就列出来 -->
+            <template v-if="availableNotebookSources.length > 0">
+              <div class="source-group-label">
+                {{ t('assistantInputComposer.mentionPopover.groupSources') }}
               </div>
-              <div class="source-info">
-                <div class="source-title">{{ source.title }}</div>
-                <div class="source-type">{{ getSourceTypeLabel(source.type) }}</div>
+              <div
+                v-for="source in availableNotebookSources"
+                :key="source.id"
+                class="source-item"
+                :class="{ selected: isSourceSelected(source.id) }"
+                @click="handleSourceSelect(source)"
+              >
+                <div class="source-icon">
+                  <component :is="getSourceIcon(source.type)" />
+                </div>
+                <div class="source-info">
+                  <div class="source-title">{{ source.title }}</div>
+                  <div class="source-type">{{ getSourceTypeLabel(source.type) }}</div>
+                </div>
+                <div v-if="isSourceSelected(source.id)" class="check-mark">✓</div>
               </div>
-              <div v-if="isSourceSelected(source.id)" class="check-mark">✓</div>
-            </div>
-          </template>
+            </template>
 
-          <!-- 笔记：打了关键词才搜得出来 -->
-          <template v-if="searchingNotes || noteMatches.length > 0">
-            <div class="source-group-label">
-              {{ t('assistantInputComposer.mentionPopover.groupNotes') }}
-              <PhCircleNotch v-if="searchingNotes" class="icon-spin" />
-            </div>
+            <!-- 笔记：打了关键词才搜得出来 -->
+            <template v-if="searchingNotes || noteMatches.length > 0">
+              <div class="source-group-label">
+                {{ t('assistantInputComposer.mentionPopover.groupNotes') }}
+                <PhCircleNotch v-if="searchingNotes" class="icon-spin" />
+              </div>
+              <div
+                v-for="note in noteMatches"
+                :key="note.id"
+                class="source-item"
+                :class="{ selected: isSourceSelected(note.id) }"
+                @click="handleSourceSelect(note)"
+              >
+                <div class="source-icon">
+                  <PhNotePencil />
+                </div>
+                <div class="source-info">
+                  <div class="source-title">{{ note.title }}</div>
+                  <div class="source-type">
+                    {{ t('assistantInputComposer.mentionPopover.noteLabel') }}
+                  </div>
+                </div>
+                <div v-if="isSourceSelected(note.id)" class="check-mark">✓</div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </Transition>
+
+      <Transition name="popover-fade">
+        <div v-if="showWikiPopover" class="source-mention-popover wiki-popover">
+          <div class="popover-header">
+            <span class="header-title">{{ t('assistantInputComposer.wikiPopover.title') }}</span>
+            <span class="header-hint">{{ t('assistantInputComposer.wikiPopover.hint') }}</span>
+          </div>
+          <div v-if="loadingWikiOptions" class="empty-state">
+            <PhCircleNotch class="icon-spin" />
+          </div>
+          <div v-else-if="filteredWikiOptions.length === 0" class="empty-state">
+            <span>{{ t('assistantInputComposer.wikiPopover.empty') }}</span>
+          </div>
+          <div v-else class="source-list">
             <div
-              v-for="note in noteMatches"
-              :key="note.id"
+              v-for="wiki in filteredWikiOptions"
+              :key="wiki.notebookId"
               class="source-item"
-              :class="{ selected: isSourceSelected(note.id) }"
-              @click="handleSourceSelect(note)"
+              :class="{ selected: props.boundNotebook?.notebookId === wiki.notebookId }"
+              @click="handleSelectWiki(wiki)"
             >
               <div class="source-icon">
-                <PhNotePencil />
+                <PhFileText />
               </div>
               <div class="source-info">
-                <div class="source-title">{{ note.title }}</div>
+                <div class="source-title">{{ wiki.title }}</div>
                 <div class="source-type">
-                  {{ t('assistantInputComposer.mentionPopover.noteLabel') }}
+                  {{
+                    t('assistantInputComposer.wikiPopover.sourceCount', {
+                      count: wiki.sourceCount || 0
+                    })
+                  }}
                 </div>
               </div>
-              <div v-if="isSourceSelected(note.id)" class="check-mark">✓</div>
-            </div>
-          </template>
-        </div>
-      </div>
-    </Transition>
-
-    <Transition name="popover-fade">
-      <div v-if="showWikiPopover" class="source-mention-popover wiki-popover">
-        <div class="popover-header">
-          <span class="header-title">{{ t('assistantInputComposer.wikiPopover.title') }}</span>
-          <span class="header-hint">{{ t('assistantInputComposer.wikiPopover.hint') }}</span>
-        </div>
-        <div v-if="loadingWikiOptions" class="empty-state">
-          <PhCircleNotch class="icon-spin" />
-        </div>
-        <div v-else-if="filteredWikiOptions.length === 0" class="empty-state">
-          <span>{{ t('assistantInputComposer.wikiPopover.empty') }}</span>
-        </div>
-        <div v-else class="source-list">
-          <div
-            v-for="wiki in filteredWikiOptions"
-            :key="wiki.notebookId"
-            class="source-item"
-            :class="{ selected: props.boundNotebook?.notebookId === wiki.notebookId }"
-            @click="handleSelectWiki(wiki)"
-          >
-            <div class="source-icon">
-              <PhFileText />
-            </div>
-            <div class="source-info">
-              <div class="source-title">{{ wiki.title }}</div>
-              <div class="source-type">
-                {{
-                  t('assistantInputComposer.wikiPopover.sourceCount', {
-                    count: wiki.sourceCount || 0
-                  })
-                }}
+              <div v-if="props.boundNotebook?.notebookId === wiki.notebookId" class="check-mark">
+                <PhCheck />
               </div>
-            </div>
-            <div v-if="props.boundNotebook?.notebookId === wiki.notebookId" class="check-mark">
-              <PhCheck />
             </div>
           </div>
         </div>
-      </div>
-    </Transition>
+      </Transition>
 
-    <Transition name="popover-fade">
-      <SkillCommandMenu
-        v-if="showSkillMenu && skillQuery !== null"
-        ref="skillCommandMenuRef"
-        :skills="installedSkills"
-        :query="skillQuery"
-        :loading="loadingSkills"
-        :error="skillLoadError"
-        @select="handleSelectSkill"
-        @select-command="handleSelectCommand"
-        @retry="loadSkills"
-        @close="closeSkillMenu"
-      />
-    </Transition>
+      <Transition name="popover-fade">
+        <SkillCommandMenu
+          v-if="showSkillMenu && skillQuery !== null"
+          ref="skillCommandMenuRef"
+          :skills="installedSkills"
+          :query="skillQuery"
+          :loading="loadingSkills"
+          :error="skillLoadError"
+          @select="handleSelectSkill"
+          @select-command="handleSelectCommand"
+          @retry="loadSkills"
+          @close="closeSkillMenu"
+        />
+      </Transition>
 
-    <div class="placeholder-row">
-      <button
-        v-if="isImageGenerationMode"
-        type="button"
-        class="tool-indicator image-mode"
-        :title="t('assistant.composer.exitImageGen')"
-        aria-pressed="true"
-        @click="emit('cancel-image-generation')"
-      >
-        <PhImage /> {{ t('assistant.composer.imageGen') }}
-      </button>
-      <button
-        v-if="isGoalMode"
-        type="button"
-        class="tool-indicator goal-mode"
-        :title="t('assistant.composer.exitGoalMode')"
-        aria-pressed="true"
-        @click="cancelGoalMode"
-      >
-        <PhTarget /> {{ t('assistant.composer.goalMode') }}
-      </button>
-      <button
-        v-if="isTeamMode"
-        type="button"
-        class="tool-indicator goal-mode"
-        :title="t('assistant.composer.exitTeamMode')"
-        aria-pressed="true"
-        @click="cancelTeamMode"
-      >
-        <PhUsersThree /> {{ t('assistant.composer.teamMode') }}
-      </button>
-      <a-textarea
-        ref="textareaRef"
-        v-model:value="composerContent"
-        :placeholder="
-          mentionedSources.length > 0
-            ? t('assistantInputComposer.placeholderMentioned', { count: mentionedSources.length })
-            : placeholderText
-        "
-        :bordered="false"
-        :auto-size="{ minRows: 1, maxRows: 10 }"
-        aria-autocomplete="list"
-        aria-controls="assistant-skill-command-menu"
-        :aria-expanded="showSkillMenu"
-        spellcheck="false"
-        @keydown="handleKeydown"
-        @paste="handlePaste"
-        @click="handleTextareaClick"
-        @contextmenu.prevent="handleContextMenu"
-      />
-    </div>
-
-    <div class="tools-row">
-      <div class="left-tools">
-        <!-- 知识库 @ 按钮（仅在知识库模式下显示） -->
-        <AppTooltip
-          v-if="notebookMode"
-          :title="
-            availableNotebookSources.length === 0
-              ? t('assistantInputComposer.mentionPopover.empty')
-              : t('assistantInputComposer.atMentionTooltip')
-          "
+      <div class="placeholder-row">
+        <button
+          v-if="isImageGenerationMode"
+          type="button"
+          class="tool-indicator image-mode"
+          :title="t('assistant.composer.exitImageGen')"
+          aria-pressed="true"
+          @click="emit('cancel-image-generation')"
         >
-          <AppButton
-            class="at-btn"
-            :class="{
-              disabled: availableNotebookSources.length === 0,
-              active: mentionedSources.length > 0
-            }"
-            shape="circle"
-            size="small"
-            :disabled="availableNotebookSources.length === 0"
-            @click="handleAtClick"
+          <PhImage /> {{ t('assistant.composer.imageGen') }}
+        </button>
+        <button
+          v-if="isGoalMode"
+          type="button"
+          class="tool-indicator goal-mode"
+          :title="t('assistant.composer.exitGoalMode')"
+          aria-pressed="true"
+          @click="cancelGoalMode"
+        >
+          <PhTarget /> {{ t('assistant.composer.goalMode') }}
+        </button>
+        <button
+          v-if="isTeamMode"
+          type="button"
+          class="tool-indicator goal-mode"
+          :title="t('assistant.composer.exitTeamMode')"
+          aria-pressed="true"
+          @click="cancelTeamMode"
+        >
+          <PhUsersThree /> {{ t('assistant.composer.teamMode') }}
+        </button>
+        <a-textarea
+          ref="textareaRef"
+          v-model:value="composerContent"
+          :placeholder="
+            mentionedSources.length > 0
+              ? t('assistantInputComposer.placeholderMentioned', { count: mentionedSources.length })
+              : placeholderText
+          "
+          :bordered="false"
+          :auto-size="{ minRows: 1, maxRows: 10 }"
+          aria-autocomplete="list"
+          aria-controls="assistant-skill-command-menu"
+          :aria-expanded="showSkillMenu"
+          spellcheck="false"
+          @keydown="handleKeydown"
+          @paste="handlePaste"
+          @click="handleTextareaClick"
+          @contextmenu.prevent="handleContextMenu"
+        />
+      </div>
+
+      <div class="tools-row">
+        <div class="left-tools">
+          <!-- 知识库 @ 按钮（仅在知识库模式下显示） -->
+          <AppTooltip
+            v-if="notebookMode"
+            :title="
+              availableNotebookSources.length === 0
+                ? t('assistantInputComposer.mentionPopover.empty')
+                : t('assistantInputComposer.atMentionTooltip')
+            "
           >
-            <span class="at-symbol">@</span>
-          </AppButton>
-        </AppTooltip>
-        <PhPaperclip class="tool" @click="triggerFileInput" />
-        <input ref="fileInputRef" type="file" multiple hidden @change="handleFileSelect" />
-        <!--
+            <AppButton
+              class="at-btn"
+              :class="{
+                disabled: availableNotebookSources.length === 0,
+                active: mentionedSources.length > 0
+              }"
+              shape="circle"
+              size="small"
+              :disabled="availableNotebookSources.length === 0"
+              @click="handleAtClick"
+            >
+              <span class="at-symbol">@</span>
+            </AppButton>
+          </AppTooltip>
+          <PhPaperclip class="tool" @click="triggerFileInput" />
+          <input ref="fileInputRef" type="file" multiple hidden @change="handleFileSelect" />
+          <!--
           审批策略。这是现在唯一的「让它别乱动」开关 —— 老的 Chat 模式已经删了，
           要纯对话就把审批档位调严，写操作到不了工程上。
         -->
-        <div
-          v-click-outside="closeApprovalDropdown"
-          class="mode-selector approval-selector"
-          :class="{ 'is-yolo': permissionMode === 'yolo' }"
-          @keydown.esc.stop.prevent="dismissModeDropdown($event, closeApprovalDropdown)"
-        >
-          <!--
+          <div
+            v-click-outside="closeApprovalDropdown"
+            class="mode-selector approval-selector"
+            :class="{ 'is-yolo': permissionMode === 'yolo' }"
+            @keydown.esc.stop.prevent="dismissModeDropdown($event, closeApprovalDropdown)"
+          >
+            <!--
             触发器上**不要挂 tooltip**：下拉面板是往上弹的，tooltip 正好压在它
             上面，把选项的点击整个吃掉（真机验证时就是卡在这里）。
             而且每一档在面板里本来就有一行说明，再加一层浮层是重复。
           -->
-          <AppButton
-            variant="text"
-            size="small"
-            class="mode-trigger"
-            :aria-expanded="showApprovalDropdown"
-            :aria-label="currentApprovalConfig.label"
-            :title="currentApprovalConfig.label"
-            @click="toggleApprovalDropdown"
-          >
-            <component :is="currentApprovalConfig.icon" class="approval-trigger-icon" />
-            <span class="mode-trigger-label">{{ currentApprovalConfig.label }}</span>
-            <PhCaretDown class="mode-trigger-arrow" :class="{ open: showApprovalDropdown }" />
-            <span class="mode-trigger-glow" />
-          </AppButton>
-          <Transition name="mode-dropdown">
-            <div v-if="showApprovalDropdown" class="mode-dropdown approval-dropdown">
-              <button
-                v-for="opt in approvalOptions"
-                :key="opt.value"
-                type="button"
-                class="mode-option"
-                :class="{ active: permissionMode === opt.value }"
-                :aria-pressed="permissionMode === opt.value"
-                @click="selectApproval(opt.value, $event)"
-              >
-                <div
-                  class="mode-option-icon-wrap"
+            <AppButton
+              variant="text"
+              size="small"
+              class="mode-trigger"
+              :aria-expanded="showApprovalDropdown"
+              :aria-label="currentApprovalConfig.label"
+              :title="currentApprovalConfig.label"
+              @click="toggleApprovalDropdown"
+            >
+              <component :is="currentApprovalConfig.icon" class="approval-trigger-icon" />
+              <span class="mode-trigger-label">{{ currentApprovalConfig.label }}</span>
+              <PhCaretDown class="mode-trigger-arrow" :class="{ open: showApprovalDropdown }" />
+              <span class="mode-trigger-glow" />
+            </AppButton>
+            <Transition name="mode-dropdown">
+              <div v-if="showApprovalDropdown" class="mode-dropdown approval-dropdown">
+                <button
+                  v-for="opt in approvalOptions"
+                  :key="opt.value"
+                  type="button"
+                  class="mode-option"
                   :class="{ active: permissionMode === opt.value }"
+                  :aria-pressed="permissionMode === opt.value"
+                  @click="selectApproval(opt.value, $event)"
                 >
-                  <component :is="opt.icon" />
-                </div>
-                <div class="mode-option-text">
-                  <span class="mode-option-name">{{ opt.label }}</span>
-                  <span class="mode-option-desc">{{ opt.desc }}</span>
-                </div>
-                <div v-if="permissionMode === opt.value" class="mode-option-check">
-                  <PhCheck />
-                </div>
-              </button>
-            </div>
-          </Transition>
-        </div>
+                  <div
+                    class="mode-option-icon-wrap"
+                    :class="{ active: permissionMode === opt.value }"
+                  >
+                    <component :is="opt.icon" />
+                  </div>
+                  <div class="mode-option-text">
+                    <span class="mode-option-name">{{ opt.label }}</span>
+                    <span class="mode-option-desc">{{ opt.desc }}</span>
+                  </div>
+                  <div v-if="permissionMode === opt.value" class="mode-option-check">
+                    <PhCheck />
+                  </div>
+                </button>
+              </div>
+            </Transition>
+          </div>
 
-        <!--
+          <!--
           思考程度。Chat 与 Agent 两种模式都走同一个内核，所以不像审批策略那样
           限定在 Agent —— 两边都用得上。
         -->
-        <div
-          v-click-outside="closeThinkingDropdown"
-          class="mode-selector thinking-selector"
-          @keydown.esc.stop.prevent="dismissModeDropdown($event, closeThinkingDropdown)"
-        >
-          <AppButton
-            variant="text"
-            size="small"
-            class="mode-trigger"
-            :aria-expanded="showThinkingDropdown"
-            :aria-label="thinkingTriggerTitle"
-            :title="thinkingTriggerTitle"
-            @click="toggleThinkingDropdown"
+          <div
+            v-click-outside="closeThinkingDropdown"
+            class="mode-selector thinking-selector"
+            @keydown.esc.stop.prevent="dismissModeDropdown($event, closeThinkingDropdown)"
           >
-            <PhLightbulb class="thinking-trigger-icon" />
-            <span class="mode-trigger-label">{{ currentThinkingLabel }}</span>
-            <PhCaretDown class="mode-trigger-arrow" :class="{ open: showThinkingDropdown }" />
-            <span class="mode-trigger-glow" />
-          </AppButton>
-          <Transition name="mode-dropdown">
-            <div v-if="showThinkingDropdown" class="mode-dropdown thinking-dropdown">
-              <button
-                v-for="opt in thinkingOptions"
-                :key="opt.value"
-                type="button"
-                class="mode-option"
-                :class="{ active: thinkingLevel === opt.value }"
-                :aria-pressed="thinkingLevel === opt.value"
-                @click="selectThinkingLevel(opt.value, $event)"
-              >
-                <span class="thinking-level-name">
-                  {{ opt.label }}
-                  <!-- 厂商给这一档起了别名时，把档位原名跟在后面 —— 用户在
+            <AppButton
+              variant="text"
+              size="small"
+              class="mode-trigger"
+              :aria-expanded="showThinkingDropdown"
+              :aria-label="thinkingTriggerTitle"
+              :title="thinkingTriggerTitle"
+              @click="toggleThinkingDropdown"
+            >
+              <PhLightbulb class="thinking-trigger-icon" />
+              <span class="mode-trigger-label">{{ currentThinkingLabel }}</span>
+              <PhCaretDown class="mode-trigger-arrow" :class="{ open: showThinkingDropdown }" />
+              <span class="mode-trigger-glow" />
+            </AppButton>
+            <Transition name="mode-dropdown">
+              <div v-if="showThinkingDropdown" class="mode-dropdown thinking-dropdown">
+                <button
+                  v-for="opt in thinkingOptions"
+                  :key="opt.value"
+                  type="button"
+                  class="mode-option"
+                  :class="{ active: thinkingLevel === opt.value }"
+                  :aria-pressed="thinkingLevel === opt.value"
+                  @click="selectThinkingLevel(opt.value, $event)"
+                >
+                  <span class="thinking-level-name">
+                    {{ opt.label }}
+                    <!-- 厂商给这一档起了别名时，把档位原名跟在后面 —— 用户在
                        官方文档或别的客户端里看到的是原名 -->
-                  <span v-if="opt.original" class="thinking-alias">({{ opt.original }})</span>
-                </span>
-                <span class="mode-option-desc">{{ opt.desc }}</span>
-                <div v-if="thinkingLevel === opt.value" class="mode-option-check">
-                  <PhCheck />
-                </div>
-              </button>
-              <!--
+                    <span v-if="opt.original" class="thinking-alias">({{ opt.original }})</span>
+                  </span>
+                  <span class="mode-option-desc">{{ opt.desc }}</span>
+                  <div v-if="thinkingLevel === opt.value" class="mode-option-check">
+                    <PhCheck />
+                  </div>
+                </button>
+                <!--
                 选的档位当前模型没有时，内核会夹到最近的一档。不说出来的话
                 这一行一个勾都没有，用户不知道自己这次到底跑在哪一档。
               -->
-              <div v-if="thinkingClamped" class="mode-dropdown-note">
-                {{
-                  t('assistantInputComposer.thinking.clamped', {
-                    chosen: thinkingLevel,
-                    actual: effectiveThinkingLevel,
-                    model: thinkingSupport?.modelId ?? ''
-                  })
-                }}
+                <div v-if="thinkingClamped" class="mode-dropdown-note">
+                  {{
+                    t('assistantInputComposer.thinking.clamped', {
+                      chosen: thinkingLevel,
+                      actual: effectiveThinkingLevel,
+                      model: thinkingSupport?.modelId ?? ''
+                    })
+                  }}
+                </div>
               </div>
-            </div>
-          </Transition>
+            </Transition>
+          </div>
         </div>
-      </div>
 
-      <!-- 保持 grid 布局的占位元素 -->
-      <div class="chips-placeholder"></div>
+        <!-- 保持 grid 布局的占位元素 -->
+        <div class="chips-placeholder"></div>
 
-      <div class="right-tools">
-        <!-- Agent 模型快捷切换：放在发送区左侧，切换后下一轮立即使用新绑定。 -->
-        <div
-          v-if="!isImageGenerationMode"
-          ref="agentModelSelectorEl"
-          v-click-outside="closeAgentModelDropdown"
-          class="agent-model-selector"
-        >
-          <AppButton
-            variant="text"
-            size="small"
-            class="mode-trigger agent-model-trigger"
-            :disabled="modelSwitchDisabled"
-            :loading="agentModelSaving"
-            :aria-label="agentModelTriggerTitle"
-            :title="agentModelTriggerTitle"
-            aria-haspopup="menu"
-            :aria-expanded="showAgentModelDropdown"
-            @click="toggleAgentModelDropdown"
+        <div class="right-tools">
+          <!-- Agent 模型快捷切换：放在发送区左侧，切换后下一轮立即使用新绑定。 -->
+          <div
+            v-if="!isImageGenerationMode"
+            ref="agentModelSelectorEl"
+            v-click-outside="closeAgentModelDropdown"
+            class="agent-model-selector"
           >
-            <template #icon><PhCpu class="agent-model-trigger-icon" /></template>
-            <span class="mode-trigger-label agent-model-trigger-label">
-              {{ currentAgentModelLabel }}
-            </span>
-            <PhCaretDown
-              class="mode-trigger-arrow agent-model-trigger-caret"
-              :class="{ open: showAgentModelDropdown }"
-            />
-            <span class="mode-trigger-glow" />
-          </AppButton>
-          <Transition name="mode-dropdown">
-            <div
-              v-if="showAgentModelDropdown"
-              class="mode-dropdown agent-model-dropdown"
-              :style="{ maxBlockSize: agentModelDropdownMaxHeight }"
-              role="menu"
+            <AppButton
+              variant="text"
+              size="small"
+              class="mode-trigger agent-model-trigger"
+              :disabled="modelSwitchDisabled"
+              :loading="agentModelSaving"
+              :aria-label="agentModelTriggerTitle"
+              :title="agentModelTriggerTitle"
+              aria-haspopup="menu"
+              :aria-expanded="showAgentModelDropdown"
+              @click="toggleAgentModelDropdown"
             >
+              <template #icon><PhCpu class="agent-model-trigger-icon" /></template>
+              <span class="mode-trigger-label agent-model-trigger-label">
+                {{ currentAgentModelLabel }}
+              </span>
+              <PhCaretDown
+                class="mode-trigger-arrow agent-model-trigger-caret"
+                :class="{ open: showAgentModelDropdown }"
+              />
+              <span class="mode-trigger-glow" />
+            </AppButton>
+            <Transition name="mode-dropdown">
               <div
-                v-if="agentModelLoading && !agentModelSettings"
-                class="mode-dropdown-note agent-model-status"
-                role="status"
+                v-if="showAgentModelDropdown"
+                class="mode-dropdown agent-model-dropdown"
+                :style="{ maxBlockSize: agentModelDropdownMaxHeight }"
+                role="menu"
               >
-                <PhCircleNotch class="icon-spin" />
-                {{ t('assistantInputComposer.model.loading') }}
-              </div>
-              <button
-                v-else-if="agentModelLoadError && !agentModelSettings"
-                type="button"
-                class="mode-option agent-model-retry"
-                @click="loadAgentModels"
-              >
-                {{ t('assistantInputComposer.model.loadFailed') }}
-              </button>
-              <template v-else-if="agentModelCatalog?.groups.length === 0">
-                <div class="mode-dropdown-note agent-model-status" role="status">
-                  {{ t('assistantInputComposer.model.empty') }}
+                <div
+                  v-if="agentModelLoading && !agentModelSettings"
+                  class="mode-dropdown-note agent-model-status"
+                  role="status"
+                >
+                  <PhCircleNotch class="icon-spin" />
+                  {{ t('assistantInputComposer.model.loading') }}
                 </div>
                 <button
+                  v-else-if="agentModelLoadError && !agentModelSettings"
                   type="button"
-                  class="mode-option agent-model-settings"
-                  role="menuitem"
-                  @click="openModelSettings"
+                  class="mode-option agent-model-retry"
+                  @click="loadAgentModels"
                 >
-                  {{ t('assistantInputComposer.model.configure') }}
+                  {{ t('assistantInputComposer.model.loadFailed') }}
                 </button>
-              </template>
-              <template v-else>
-                <div
-                  v-for="group in agentModelCatalog?.groups ?? []"
-                  :key="group.providerId"
-                  class="agent-model-group"
-                  role="group"
-                >
-                  <div class="agent-model-group-title">{{ group.providerName }}</div>
+                <template v-else-if="agentModelCatalog?.groups.length === 0">
+                  <div class="mode-dropdown-note agent-model-status" role="status">
+                    {{ t('assistantInputComposer.model.empty') }}
+                  </div>
                   <button
-                    v-for="option in group.options"
-                    :key="option.key"
                     type="button"
-                    class="mode-option agent-model-option"
-                    :class="{ active: option.key === selectedAgentModelKey }"
-                    role="menuitemradio"
-                    :aria-checked="option.key === selectedAgentModelKey"
-                    @click="selectAgentModel(option)"
+                    class="mode-option agent-model-settings"
+                    role="menuitem"
+                    @click="openModelSettings"
                   >
-                    <span class="agent-model-option-name">{{ option.modelName }}</span>
-                    <span
-                      v-if="option.modelName !== option.modelId"
-                      class="mode-option-desc agent-model-option-id"
-                    >
-                      {{ option.modelId }}
-                    </span>
-                    <span v-if="option.key === selectedAgentModelKey" class="mode-option-check">
-                      <PhCheck />
-                    </span>
+                    {{ t('assistantInputComposer.model.configure') }}
                   </button>
-                </div>
-              </template>
-            </div>
-          </Transition>
-        </div>
-        <AppTooltip v-if="byokConfigured" placement="top">
-          <template #title>
-            <span>{{ t('assistantInputComposer.byokEnabled') }}</span>
-          </template>
-          <span class="byok-indicator" :aria-label="t('assistantInputComposer.byokEnabled')">
-            <PhSliders />
-          </span>
-        </AppTooltip>
-        <!--
+                </template>
+                <template v-else>
+                  <div
+                    v-for="group in agentModelCatalog?.groups ?? []"
+                    :key="group.providerId"
+                    class="agent-model-group"
+                    role="group"
+                  >
+                    <div class="agent-model-group-title">{{ group.providerName }}</div>
+                    <button
+                      v-for="option in group.options"
+                      :key="option.key"
+                      type="button"
+                      class="mode-option agent-model-option"
+                      :class="{ active: option.key === selectedAgentModelKey }"
+                      role="menuitemradio"
+                      :aria-checked="option.key === selectedAgentModelKey"
+                      @click="selectAgentModel(option)"
+                    >
+                      <span class="agent-model-option-name">{{ option.modelName }}</span>
+                      <span
+                        v-if="option.modelName !== option.modelId"
+                        class="mode-option-desc agent-model-option-id"
+                      >
+                        {{ option.modelId }}
+                      </span>
+                      <span v-if="option.key === selectedAgentModelKey" class="mode-option-check">
+                        <PhCheck />
+                      </span>
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </Transition>
+          </div>
+          <AppTooltip v-if="byokConfigured" placement="top">
+            <template #title>
+              <span>{{ t('assistantInputComposer.byokEnabled') }}</span>
+            </template>
+            <span class="byok-indicator" :aria-label="t('assistantInputComposer.byokEnabled')">
+              <PhSliders />
+            </span>
+          </AppTooltip>
+          <!--
           上下文用量。外面只有一个圆环，不带文字 —— 输入框那一排已经够挤了。
           悬停看详情，**点一下直接压缩**（不用再点第二个按钮）。
         -->
-        <AppTooltip
-          v-if="contextUsage"
-          placement="top"
-          overlay-class-name="context-usage-tip"
-          :mouse-enter-delay="0.15"
-        >
-          <template #title>
-            <div class="context-tip">
-              <div class="context-tip-head">
-                <span>{{ t('assistantInputComposer.contextTitle') }}</span>
-                <span class="context-tip-value">
-                  {{ formatTokens(contextUsage.tokens) }} /
-                  {{ formatTokens(contextUsage.contextWindow) }}（{{ contextUsageLabel }}）
-                </span>
-              </div>
-              <div class="context-tip-track">
-                <div
-                  class="context-tip-fill"
-                  :class="{ high: contextUsagePercent >= 80 }"
-                  :style="{ width: `${Math.max(contextUsagePercent, 1.5)}%` }"
-                />
-              </div>
-            </div>
-          </template>
-          <button
-            type="button"
-            class="context-ring"
-            :class="{ high: contextUsagePercent >= 80, busy: compacting }"
-            :disabled="compacting || props.isGenerating"
-            :aria-label="contextUsageText"
-            @click="handleCompact"
+          <AppTooltip
+            v-if="contextUsage"
+            placement="top"
+            overlay-class-name="context-usage-tip"
+            :mouse-enter-delay="0.15"
           >
-            <svg viewBox="0 0 20 20" width="18" height="18">
-              <circle class="context-ring-track" cx="10" cy="10" r="8" />
-              <!--
+            <template #title>
+              <div class="context-tip">
+                <div class="context-tip-head">
+                  <span>{{ t('assistantInputComposer.contextTitle') }}</span>
+                  <span class="context-tip-value">
+                    {{ formatTokens(contextUsage.tokens) }} /
+                    {{ formatTokens(contextUsage.contextWindow) }}（{{ contextUsageLabel }}）
+                  </span>
+                </div>
+                <div class="context-tip-track">
+                  <div
+                    class="context-tip-fill"
+                    :class="{ high: contextUsagePercent >= 80 }"
+                    :style="{ width: `${Math.max(contextUsagePercent, 1.5)}%` }"
+                  />
+                </div>
+              </div>
+            </template>
+            <button
+              type="button"
+              class="context-ring"
+              :class="{ high: contextUsagePercent >= 80, busy: compacting }"
+              :disabled="compacting || props.isGenerating"
+              :aria-label="contextUsageText"
+              @click="handleCompact"
+            >
+              <svg viewBox="0 0 20 20" width="18" height="18">
+                <circle class="context-ring-track" cx="10" cy="10" r="8" />
+                <!--
                 从 12 点开始顺时针：默认起点在 3 点，转 -90° 才符合"进度条"的直觉。
                 dasharray 用整圈周长，dashoffset 按百分比留白。
               -->
-              <circle
-                class="context-ring-fill"
-                cx="10"
-                cy="10"
-                r="8"
-                :stroke-dasharray="RING_CIRCUMFERENCE"
-                :stroke-dashoffset="ringOffset"
-                transform="rotate(-90 10 10)"
-              />
-            </svg>
-          </button>
-        </AppTooltip>
-        <!--
+                <circle
+                  class="context-ring-fill"
+                  cx="10"
+                  cy="10"
+                  r="8"
+                  :stroke-dasharray="RING_CIRCUMFERENCE"
+                  :stroke-dashoffset="ringOffset"
+                  transform="rotate(-90 10 10)"
+                />
+              </svg>
+            </button>
+          </AppTooltip>
+          <!--
           实时语音。点开就一直听着，说完模型直接答；要动 UE 时它会把指令
           交给现有的 Agent 链路跑（确认框、撤销栈都还在）。
         -->
-        <AppTooltip
-          v-if="!props.isGenerating || voiceVisible"
-          placement="top"
-          :title="
-            props.voice.connecting.value
-              ? t('assistantInputComposer.voice.cancelConnection')
-              : props.voice.active.value
-                ? t('assistantInputComposer.voice.stop')
-                : t('assistantInputComposer.voice.start')
-          "
-        >
-          <!--
+          <AppTooltip
+            v-if="!props.isGenerating || voiceVisible"
+            placement="top"
+            :title="
+              props.voice.connecting.value
+                ? t('assistantInputComposer.voice.cancelConnection')
+                : props.voice.active.value
+                  ? t('assistantInputComposer.voice.stop')
+                  : t('assistantInputComposer.voice.start')
+            "
+          >
+            <!--
             圆环画在按钮外面，不画在按钮里 —— 通话阶段（连接 / 在听 / 在想 /
             在调工具 / 在说）由它一个人交代，按钮只管颜色和按下去的手感。
             连接中不再换成 spinner 图标：麦克风图标一直在，外面的环负责表示在忙。
           -->
-          <span class="voice-slot">
-            <VoiceRing :phase="props.voice.phase.value" :level="props.voice.outputLevel.value" />
-            <AppButton
-              shape="circle"
-              class="voice-btn"
-              :class="{ live: props.voice.active.value }"
-              :aria-label="
-                props.voice.connecting.value
-                  ? t('assistantInputComposer.voice.cancelConnection')
-                  : props.voice.active.value
-                    ? t('assistantInputComposer.voice.stop')
-                    : t('assistantInputComposer.voice.start')
-              "
-              :aria-pressed="props.voice.active.value"
-              @click="toggleVoice"
-            >
-              <template #icon>
-                <PhMicrophone />
-              </template>
-            </AppButton>
-          </span>
-        </AppTooltip>
-        <!--
+            <span class="voice-slot">
+              <VoiceRing :phase="props.voice.phase.value" :level="props.voice.outputLevel.value" />
+              <AppButton
+                shape="circle"
+                class="voice-btn"
+                :class="{ live: props.voice.active.value }"
+                :aria-label="
+                  props.voice.connecting.value
+                    ? t('assistantInputComposer.voice.cancelConnection')
+                    : props.voice.active.value
+                      ? t('assistantInputComposer.voice.stop')
+                      : t('assistantInputComposer.voice.start')
+                "
+                :aria-pressed="props.voice.active.value"
+                @click="toggleVoice"
+              >
+                <template #icon>
+                  <PhMicrophone />
+                </template>
+              </AppButton>
+            </span>
+          </AppTooltip>
+          <!--
           停止任务和挂断通话分别保留入口：挂断后后台任务仍会继续。
 
           跑着的时候输入框一有东西，这颗就从「停止」换回「发送」：人刚打完一句话，
           手边这颗最该是发出去，不是把正在跑的那一轮掐了。清空输入框才退回红色停止。
         -->
-        <AppButton
-          v-if="props.isGenerating && !canSendFollowUp"
-          variant="primary"
-          shape="circle"
-          class="stop-btn"
-          :aria-label="t('assistantInputComposer.stopTask')"
-          danger
-          @click="handleStop"
-        >
-          <template #icon>
-            <PhStop />
-          </template>
-        </AppButton>
-        <AppButton
-          v-else
-          variant="primary"
-          shape="circle"
-          class="send-btn"
-          :aria-label="canSendFollowUp ? followUpActionLabel : t('common.send')"
-          :disabled="isSendDisabled"
-          :loading="isUploading"
-          @click="handlePrimaryAction"
-        >
-          <template #icon>
-            <PhArrowUp v-if="!isUploading" />
-          </template>
-        </AppButton>
+          <AppButton
+            v-if="props.isGenerating && !canSendFollowUp"
+            variant="primary"
+            shape="circle"
+            class="stop-btn"
+            :aria-label="t('assistantInputComposer.stopTask')"
+            danger
+            @click="handleStop"
+          >
+            <template #icon>
+              <PhStop />
+            </template>
+          </AppButton>
+          <AppButton
+            v-else
+            variant="primary"
+            shape="circle"
+            class="send-btn"
+            :aria-label="canSendFollowUp ? followUpActionLabel : t('common.send')"
+            :disabled="isSendDisabled"
+            :loading="isUploading"
+            @click="handlePrimaryAction"
+          >
+            <template #icon>
+              <PhArrowUp v-if="!isUploading" />
+            </template>
+          </AppButton>
+        </div>
       </div>
-    </div>
 
-    <!-- 开启完全访问权限前的二次确认 -->
-    <AppModal
-      v-model:open="showFullAccessConfirm"
-      hide-footer
-      :width="480"
-      centered
-      class="full-access-modal"
-    >
-      <div class="full-access">
-        <h3 class="full-access-title">
-          <PhWarning />
-          {{ t('assistantInputComposer.approval.confirmTitle') }}
-        </h3>
-        <p class="full-access-intro">{{ t('assistantInputComposer.approval.confirmIntro') }}</p>
+      <!-- 开启完全访问权限前的二次确认 -->
+      <AppModal
+        v-model:open="showFullAccessConfirm"
+        hide-footer
+        :width="480"
+        centered
+        class="full-access-modal"
+      >
+        <div class="full-access">
+          <h3 class="full-access-title">
+            <PhWarning />
+            {{ t('assistantInputComposer.approval.confirmTitle') }}
+          </h3>
+          <p class="full-access-intro">{{ t('assistantInputComposer.approval.confirmIntro') }}</p>
 
-        <div class="full-access-list">
-          <div v-for="scope in fullAccessScopes" :key="scope.title" class="full-access-item">
-            <component :is="scope.icon" class="full-access-icon" />
-            <div class="full-access-text">
-              <span class="full-access-item-title">{{ scope.title }}</span>
-              <span class="full-access-item-desc">{{ scope.desc }}</span>
+          <div class="full-access-list">
+            <div v-for="scope in fullAccessScopes" :key="scope.title" class="full-access-item">
+              <component :is="scope.icon" class="full-access-icon" />
+              <div class="full-access-text">
+                <span class="full-access-item-title">{{ scope.title }}</span>
+                <span class="full-access-item-desc">{{ scope.desc }}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <p class="full-access-risk">{{ t('assistantInputComposer.approval.confirmRisk') }}</p>
+          <p class="full-access-risk">{{ t('assistantInputComposer.approval.confirmRisk') }}</p>
 
-        <div class="full-access-actions">
-          <AppButton @click="showFullAccessConfirm = false">
-            {{ t('assistantInputComposer.approval.confirmCancel') }}
-          </AppButton>
-          <AppButton danger @click="confirmFullAccess">
-            <PhWarning />
-            {{ t('assistantInputComposer.approval.confirmOk') }}
-          </AppButton>
+          <div class="full-access-actions">
+            <AppButton @click="showFullAccessConfirm = false">
+              {{ t('assistantInputComposer.approval.confirmCancel') }}
+            </AppButton>
+            <AppButton danger @click="confirmFullAccess">
+              <PhWarning />
+              {{ t('assistantInputComposer.approval.confirmOk') }}
+            </AppButton>
+          </div>
         </div>
+      </AppModal>
+
+      <!-- 拖拽提示遮罩 -->
+      <div v-if="isDragging" class="drag-overlay">
+        <PhImage class="drag-icon" />
+        <span>{{ t('assistant.composer.dropFilesHere') }}</span>
       </div>
-    </AppModal>
-
-    <!-- 拖拽提示遮罩 -->
-    <div v-if="isDragging" class="drag-overlay">
-      <PhImage class="drag-icon" />
-      <span>{{ t('assistant.composer.dropFilesHere') }}</span>
     </div>
   </div>
 </template>
@@ -759,8 +784,8 @@ import {
   PhArrowUp,
   PhCaretDown,
   PhChartBar,
-  PhChatCircle,
   PhCheck,
+  PhClock,
   PhCircleNotch,
   PhCpu,
   PhEye,
@@ -771,11 +796,9 @@ import {
   PhLightbulb,
   PhLightning,
   PhLink,
-  // 「加到列表末尾」——排队按钮要表达的正是这个动作，不是「等一会儿」（沙漏）
-  // 也不是「回退」（逆时针钟）
-  PhListPlus,
   PhMicrophone,
   PhNotePencil,
+  PhPencilSimple,
   PhPaperclip,
   PhSealCheck,
   PhSliders,
@@ -950,8 +973,10 @@ const props = defineProps<{
   queuedFollowUps?: ReadonlyArray<{
     id: string
     text: string
-    /** 能不能「立即插话」。带着插话通道送不走的附件（Excel、PDF、@ 来源）就不能 */
+    /** 能不能「现在插话」。带着插话通道送不走的附件（Excel、PDF、@ 来源）就不能 */
     canSteer: boolean
+    /** 能不能退回输入框改。只有纯文字的能 —— 附件放不回输入框，退回去等于丢了 */
+    canEdit: boolean
   }>
 }>()
 
@@ -2044,6 +2069,10 @@ const placeholderText = computed(() => {
   // 生成中且能插话时换提示语：不换的话输入框看起来只是"还不能发"，
   // 用户不会想到这时候打的字会被送进正在跑的那一轮
   if (props.isGenerating && isAgentMode.value) {
+    // 已经排着一条、又是排队档：再发的也是排在后面，照实说
+    if (queuedFollowUps.value.length > 0 && followUpBehavior.value === 'queue') {
+      return t('assistantInputComposer.placeholderQueued')
+    }
     return t('assistant.composer.placeholderSteer')
   }
   if (isImageGenerationMode.value) {
@@ -2924,8 +2953,35 @@ function handleSteerQueued(id: string): void {
   emit('steer-queued', id)
 }
 
+/**
+ * 排着的这条退回输入框重新改：字放回去（接在用户正在打的字前面），队里那条摘掉。
+ * 只给纯文字的那条，所以标签上的正文就是原话，不用回页面要 payload。
+ */
+function handleEditQueued(id: string, text: string): void {
+  const current = content.value.trim()
+  content.value = current
+    ? `${text}
+
+${content.value}`
+    : text
+  emit('cancel-queued', id)
+  focus()
+}
+
 /** 排着的消息。父组件没传就是空 —— 模板里不用到处判空 */
 const queuedFollowUps = computed(() => props.queuedFollowUps ?? [])
+
+/** 多条时默认只露队头（下一条就发它），其余收起来 */
+const queuedExpanded = ref(false)
+const visibleQueued = computed(() =>
+  queuedExpanded.value ? queuedFollowUps.value : queuedFollowUps.value.slice(0, 1)
+)
+watch(
+  () => queuedFollowUps.value.length,
+  (n) => {
+    if (n <= 1) queuedExpanded.value = false
+  }
+)
 
 /**
  * 键盘处理
@@ -4101,41 +4157,102 @@ onMounted(() => {
 }
 
 /*
- * 一条排队消息占一整行，不跟别的标签挤在一排。
- * 它是用户自己刚打的一句话 —— 缩成「总结下…」等于没显示，他分不清排着的
- * 是哪一条，也就没法判断要不要撤回。
+ * 排队条：贴在输入框顶边，比输入框两边各缩进一点，底边不画 —— 看起来像
+ * 从输入框背后探出来的一张便签，而不是框里又套了个框。
  */
-.queued-followup-row {
+.queued-tray {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--color-border-subtle);
+  margin: 0 16px;
+  padding: 4px 6px 4px 12px;
+  border-radius: 12px 12px 0 0;
+  background: var(--color-bg-surface);
+  box-shadow: inset 0 0 0 1px var(--shadow-highlight);
+}
+
+.queued-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+/* 「本轮结束后发」：说清这条是什么状态，替掉原来那个看不懂的列表图标 */
+.queued-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* 正文吃掉整行剩下的宽度，按钮被推到最右边 */
+.queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /*
- * 「立即发送」。用强调色，因为它是这一行里唯一会**当场改变 agent 行为**的按钮 ——
- * 旁边的 ✕ 只是撤回一条还没发生的事。
+ * 「现在插话」。用强调色描边，因为它是这一行里唯一会**当场改变 agent 行为**的
+ * 按钮 —— 旁边的改和删只是动一条还没发生的事。
  */
-.pill-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
-  border: none;
-  border-radius: 10px;
+.queued-steer {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--color-accent-border);
+  border-radius: 6px;
   background: transparent;
   color: var(--color-accent-text);
   font-size: 12px;
   line-height: 1.5;
   white-space: nowrap;
   cursor: pointer;
-  flex-shrink: 0;
   transition: background 0.15s ease;
 
   &:hover {
     background: var(--color-accent-bg);
+  }
+}
+
+.queued-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: var(--color-bg-surface-hover);
+    color: var(--color-text-primary);
+  }
+}
+
+.queued-more {
+  align-self: flex-start;
+  padding: 2px 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--color-text-secondary);
   }
 }
 
@@ -4178,38 +4295,6 @@ onMounted(() => {
       background: var(--color-accent-bg);
       color: var(--color-text-primary);
     }
-  }
-}
-
-/*
- * 排队的消息用中性底色，不用强调色。
- * 强调色在这个输入框里已经被 @提及 和绑定的知识库占着了，那两样是「这次发送
- * 带上的东西」；排着的消息是「还没发生的下一次」，视觉上要退后一层。
- *
- * 必须排在 `.source-pill` 后面：它是那条规则的变体，两边选择器权重一样，
- * 谁在后面谁说了算。写在前面的话下面这个 `max-width: none` 会被基类的 200px
- * 顶掉，正文照旧被压成「记得打…」。
- */
-.queued-pill {
-  background: var(--color-bg-surface);
-  /* 撑满整行 —— 覆盖 .source-pill 给「@提及」用的 200px */
-  max-width: none;
-
-  &:hover {
-    background: var(--color-bg-surface-hover);
-  }
-
-  /* 正文吃掉整行剩下的宽度，两颗按钮被推到最右边 */
-  .pill-title {
-    flex: 1;
-    min-width: 0;
-    max-width: none;
-  }
-
-  .pill-title,
-  .pill-icon,
-  .pill-remove {
-    color: var(--color-text-secondary);
   }
 }
 

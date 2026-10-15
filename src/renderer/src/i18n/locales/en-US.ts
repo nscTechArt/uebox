@@ -6073,7 +6073,12 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     steerOtherProject: 'another project',
     queueAction: 'Queue',
     queueCancel: 'Remove from queue',
-    queueSteerNow: 'Send now',
+    queueSteerNow: 'Steer now',
+    queueLabel: 'Sends after this turn',
+    queueEdit: 'Take back to edit',
+    queueMore: '{count} more',
+    queueCollapse: 'Collapse',
+    placeholderQueued: 'Anything you send now queues up too',
     /** Placeholder when the queued message is attachments only — the chip still needs a label */
     queueUntitled: '(attachments)',
     sourceType: {

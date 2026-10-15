@@ -5904,7 +5904,12 @@ export default {
     steerOtherProject: '另一个工程',
     queueAction: '排队',
     queueCancel: '取消此条',
-    queueSteerNow: '立即发送',
+    queueSteerNow: '现在插话',
+    queueLabel: '本轮结束后发',
+    queueEdit: '撤回重新编辑',
+    queueMore: '还有 {count} 条',
+    queueCollapse: '收起',
+    placeholderQueued: '再发一条也会排在后面',
     /** 只有图片、没打字时排队用的占位。标签上总得有一行字，否则是个空壳 */
     queueUntitled: '（附件）',
     sourceType: {
