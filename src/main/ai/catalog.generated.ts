@@ -65,6 +65,7 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsTools": true,
         "supportsReasoning": true,
         "thinkingLevelMap": {
+          "off": null,
           "minimal": null,
           "xhigh": "xhigh",
           "max": "max"
@@ -2668,6 +2669,7 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsTools": true,
         "supportsReasoning": true,
         "thinkingLevelMap": {
+          "off": null,
           "minimal": null,
           "xhigh": "xhigh",
           "max": "max"

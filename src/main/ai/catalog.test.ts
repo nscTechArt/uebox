@@ -214,7 +214,8 @@ describe('内置 Provider 目录', () => {
     for (const providerId of ['openai', 'chatgpt']) {
       const models = CATALOG.find((entry) => entry.id === providerId)!.models
       for (const id of ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
-        expect(models.find((m) => m.id === id)?.thinkingLevelMap, `${providerId}/${id}`).toEqual({
+        // 6.1 Sol 另有 off: null，见下面「最高思考档位」那组
+        expect(models.find((m) => m.id === id)?.thinkingLevelMap, `${providerId}/${id}`).toMatchObject({
           minimal: null,
           xhigh: 'xhigh',
           max: 'max'
@@ -611,6 +612,13 @@ describe('最高思考档位（xhigh / max）', () => {
       xhigh: 'xhigh',
       max: 'max'
     })
+  })
+
+  /** 不写 off: null，pi 没给档位时就发 effort: "none"，6.1 Sol 整轮 400 */
+  it('OpenAI：6.1 Sol 没有 none', () => {
+    for (const provider of ['openai', 'chatgpt']) {
+      expect(modelIn(provider, 'gpt-6.1-sol')?.thinkingLevelMap?.off, provider).toBeNull()
+    }
   })
 
   /** 订阅那边下线的型号留在清单里，用户选了就是一次看不懂的报错 */
