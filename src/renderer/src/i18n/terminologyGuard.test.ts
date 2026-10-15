@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MAIN_STRINGS } from '@core/main/i18n'
-import {
-  BANNED_TERMS,
-  scan,
-  type BannedTerm,
-  type Leaf
-} from '@core/shared/terminologyGuard'
+import { BANNED_TERMS, scan, type BannedTerm, type Leaf } from '@core/shared/terminologyGuard'
 import zhCN from './locales/zh-CN'
 import enUS from './locales/en-US'
 
