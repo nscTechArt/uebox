@@ -80,7 +80,20 @@ export function promptCacheKey(
   contextEpoch: number,
   toolPrefix?: string
 ): string {
-  return `agent-v3:${PROMPT_PROTOCOL_VERSION}:${sessionId}:e${contextEpoch}${toolPrefix ? `:t${toolPrefix}` : ''}`
+  const tool = toolPrefix ? `:t${headerSafe(toolPrefix)}` : ''
+  return `agent-v3:${PROMPT_PROTOCOL_VERSION}:${headerSafe(sessionId)}:e${contextEpoch}${tool}`
+}
+
+/**
+ * 缓存键会进请求头：Codex 那条路把它原样放进 `session-id` / `x-client-request-id`，
+ * 请求头只收 Latin-1。队员的 sessionId 带着名字（`<会话>:mate-审核`），原样放进去
+ * fetch 当场抛「Cannot convert argument to a ByteString」，请求根本发不出去。
+ *
+ * 只有含非 ASCII 的才换成指纹：纯 ASCII 的键一个字都不变，已有的缓存不受影响。
+ */
+function headerSafe(part: string): string {
+  if (/^[ -~]*$/.test(part)) return part
+  return `h${createHash('sha256').update(part).digest('hex').slice(0, 24)}`
 }
 
 /**
