@@ -25,13 +25,9 @@
  * 用，只是 AI 那部分要补一下。
  */
 import i18n from '@renderer/i18n'
-import router from '@renderer/router'
-import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
-import { useTabsStore } from '@renderer/store/modules/tabs'
 import { confirmDialog } from '@renderer/utils/dialog'
 import { message } from '@renderer/utils/messageManager'
-import { appExecuteAgent } from '@renderer/views/Assistant/composables/appAgentRunner'
-import { ensureSessionWithTitle } from '@renderer/views/Assistant/composables/chatSendPrimitives'
+import { startAgentChat } from '@renderer/views/Assistant/composables/handOffToAgent'
 
 /** 主进程给的原因码里，有专门文案的那几种 */
 const KNOWN_REASONS: Record<string, string> = {
@@ -158,16 +154,8 @@ function handOffToAgent(context: HandOffContext): void {
     reason: context.reason
   })
 
-  const chatSid = `plugin-failure-${Date.now()}`
   try {
-    ensureSessionWithTitle(chatSid, prompt, {
-      chatStore: useChatSessionsStore(),
-      tabsStore: useTabsStore(),
-      route: router.currentRoute.value,
-      unnamedTitle: t('assistant.chatFlow.unnamedChat')
-    })
-    void router.push({ path: '/dev-assistant', query: { sid: chatSid } })
-    void appExecuteAgent(prompt, undefined, { chatSid })
+    startAgentChat(prompt, 'plugin-failure')
   } catch (error) {
     message.error(
       t('page.home.project.pluginFailure.askAiFailed', {

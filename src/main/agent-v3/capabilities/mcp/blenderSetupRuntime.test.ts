@@ -9,7 +9,14 @@ vi.mock('electron', () => ({
   app: { getPath: (): string => root, isPackaged: false, getAppPath: (): string => root }
 }))
 
-import { inspectBlenderSetup, runBlenderSetup } from './blenderSetupRuntime'
+// 刷 PATH 要起 PowerShell 改本进程环境变量，测试里不真刷
+vi.mock('../../../services/systemPath', () => ({ refreshProcessPath: vi.fn(async () => {}) }))
+
+import {
+  inspectBlenderSetup,
+  installBlenderPrerequisites,
+  runBlenderSetup
+} from './blenderSetupRuntime'
 import { mcpSettingsPath, writeMcpSettings } from './store'
 import { blenderInstallRoot } from './blenderSetup'
 
@@ -383,5 +390,45 @@ describe('装到一半留下的目录', () => {
     expect(result.message).toContain(installRoot)
     expect(result.message).toContain('我的论文.docx')
     expect(fake.calls).toBe(0)
+  })
+})
+
+describe('用 winget 装缺的 Git / Python', () => {
+  it('不是 Windows 就不装', async () => {
+    const runWinget = vi.fn()
+    const result = await installBlenderPrerequisites(['git'], linux, { runWinget })
+    expect(result.success).toBe(false)
+    expect(runWinget).not.toHaveBeenCalled()
+  })
+
+  // 后一个多半以同样的原因失败（没网、没 winget），连报两遍只是噪音
+  it('第一个失败就停，winget 的原话交给调用方', async () => {
+    const runWinget = vi.fn(async () => ({
+      ok: false,
+      message: '安装 Git 未完成（winget 退出码 0x8A150014）。',
+      detail: 'winget install Git.Git exited with 0x8A150014'
+    }))
+    const result = await installBlenderPrerequisites(['git', 'python'], windows, { runWinget })
+    expect(runWinget).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      success: false,
+      message: '安装 Git 未完成（winget 退出码 0x8A150014）。',
+      error: 'winget install Git.Git exited with 0x8A150014'
+    })
+  })
+
+  /**
+   * winget 说装好了，不等于盒子找得到。这时候安静地刷新出同一句「未找到」，
+   * 用户只会觉得按钮坏了 —— 要说实话，并把线索交出去。
+   */
+  it('装完仍探不到时报失败，而不是假装成功', async () => {
+    const runWinget = vi.fn(async () => ({ ok: true }))
+    const result = await installBlenderPrerequisites(['git', 'python'], windows, { runWinget })
+    expect(runWinget).toHaveBeenCalledTimes(2)
+    // 这台机器上有没有 git / Python 不确定：有就成功，没有就必须说出缺哪个
+    if (!result.success) {
+      expect(result.message).toContain('仍未检测到')
+      expect(result.error).toContain('still missing')
+    }
   })
 })

@@ -276,10 +276,17 @@ export function isShellAvailable(): Promise<boolean> {
   return shellProbe
 }
 
-/** 仅供测试重置探测缓存 */
-export function __resetShellProbe(): void {
+/**
+ * 忘掉上一次的探测结果，下次重新探。
+ *
+ * 盒子替用户装好 Git 之后调：不然那台机器上 shell 工具要等重启盒子才出现。
+ */
+export function forgetShellProbe(): void {
   shellProbe = undefined
 }
+
+/** 仅供测试重置探测缓存 */
+export const __resetShellProbe = forgetShellProbe
 
 /**
  * 跑 shell 命令。

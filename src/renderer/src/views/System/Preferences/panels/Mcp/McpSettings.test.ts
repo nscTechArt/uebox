@@ -26,6 +26,12 @@ const epicStatus = vi.fn()
 const reconnect = vi.fn()
 const blenderStatus = vi.fn()
 const blenderSetup = vi.fn()
+const blenderInstallPrereqs = vi.fn()
+const startAgentChat = vi.fn()
+
+vi.mock('@renderer/views/Assistant/composables/handOffToAgent', () => ({
+  startAgentChat: (...args: unknown[]) => startAgentChat(...args)
+}))
 const showOpenDialog = vi.fn()
 const removeServerIpc = vi.fn()
 const saveServerIpc = vi.fn()
@@ -137,6 +143,7 @@ beforeEach(() => {
         epicSetup: vi.fn(),
         blenderStatus,
         blenderSetup,
+        blenderInstallPrereqs,
         removeServer: removeServerIpc,
         saveServer: saveServerIpc
       },
@@ -1459,13 +1466,69 @@ describe('一键接入 Blender', () => {
 
   // 缺什么要逐条点名。合成一句「环境不满足」正是安装脚本原来的失败样子
   // （一句 Command failed: git），用户看不出要去装什么
-  it('缺前置时按钮点不了，并逐条说明缺哪个', async () => {
+  it('缺前置时逐条说明缺哪个', async () => {
     const wrapper = await mountPanel()
     const block = wrapper.find('.builtin.blender .category-body')
 
-    expect(installButton(wrapper).attributes('disabled')).toBeDefined()
     expect(block.text()).toContain('Git')
     expect(block.text()).toContain('Python')
+  })
+
+  /**
+   * 缺 Git / Python 时主按钮换成「安装 Git 和 Python」。给一个点不了的「一键接入」
+   * 加一句「请先去 git-scm.com 下载」，等于把运维活甩给用户。
+   */
+  it('Windows 上缺 Git / Python 时，主按钮直接替用户装', async () => {
+    blenderInstallPrereqs.mockResolvedValue({ success: true, message: '' })
+    const wrapper = await mountPanel()
+
+    expect(installButton(wrapper).text()).toBe('安装 Git 和 Python')
+    expect(installButton(wrapper).attributes('disabled')).toBeUndefined()
+    // 管理员确认框只有用户能点，点之前就要说
+    expect(wrapper.find('.builtin.blender .category-body').text()).toContain('管理员权限')
+
+    await installButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(blenderInstallPrereqs).toHaveBeenCalledWith({ ids: ['git', 'python'] })
+    // 装完重新探一次，让界面跟着翻到下一步
+    expect(blenderStatus).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.builtin.blender .category-body').text()).toContain('Git 和 Python 已安装')
+  })
+
+  it('macOS 上没有 winget，不给安装按钮', async () => {
+    window.api = { ...window.api, platform: 'darwin' } as typeof window.api
+    const wrapper = await mountPanel()
+
+    expect(installButton(wrapper).text()).toBe('一键接入')
+    expect(installButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
+  // 没失败过时「交给 AI 排查」只是噪音；失败了才出现，并把 winget 原话带过去
+  it('自动安装失败后才出现「交给 AI 排查」，原话交给 AI', async () => {
+    blenderInstallPrereqs.mockResolvedValue({
+      success: false,
+      message: '安装 Git 未完成（winget 退出码 0x8A150014）。',
+      error: 'winget install Git.Git exited with 0x8A150014'
+    })
+    const wrapper = await mountPanel()
+    const askAi = (): ReturnType<Wrapper['find']> | undefined =>
+      wrapper
+        .findAll('.builtin.blender .category-body button')
+        .find((b) => b.text() === '交给 AI 排查')
+
+    expect(askAi()).toBeUndefined()
+
+    await installButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.builtin.blender .category-body').text()).toContain('0x8A150014')
+    await askAi()!.trigger('click')
+
+    const [prompt, prefix] = startAgentChat.mock.calls[0]
+    expect(prefix).toBe('blender-prereqs')
+    expect(prompt).toContain('Git 和 Python')
+    expect(prompt).toContain('winget install Git.Git exited with 0x8A150014')
   })
 
   /**

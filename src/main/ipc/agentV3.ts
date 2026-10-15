@@ -3746,11 +3746,16 @@ export function registerAgentV3IPC(): void {
   // ── 一键接入官方 Blender Lab MCP ──────────────────────────────────────
   // 手工流程有四道关（装 git/Python、跑安装脚本、手填命令行、手填三行环境
   // 变量），走完的用户几乎没有。后三道盒子代劳，见 blenderSetup.ts
+  //
+  // 探之前先从注册表刷新 PATH：用户照着提示装好 Git / Python 回来，
+  // 不用重启盒子就能被认出来（见 services/systemPath.ts）
   ipcMain.handle('agent-v3:mcp:blender-status', async () => {
     try {
       const { inspectBlenderSetup } = await import(
         '../agent-v3/capabilities/mcp/blenderSetupRuntime'
       )
+      const { refreshProcessPath } = await import('../services/systemPath')
+      await refreshProcessPath()
       return { success: true, status: await inspectBlenderSetup() }
     } catch (error) {
       return { success: false, error: (error as Error).message }
@@ -3762,6 +3767,8 @@ export function registerAgentV3IPC(): void {
     async (_event, args: { blenderPath?: string } = {}) => {
       try {
         const { runBlenderSetup } = await import('../agent-v3/capabilities/mcp/blenderSetupRuntime')
+        const { refreshProcessPath } = await import('../services/systemPath')
+        await refreshProcessPath()
         const result = await runBlenderSetup(args)
         // 装完立刻重连，用户在设置页当场看到「已连接」和工具数，
         // 而不是被告知「去点一下重新连接」
@@ -3773,6 +3780,33 @@ export function registerAgentV3IPC(): void {
           message: '安装过程本身出错了。',
           error: (error as Error).message,
           statuses: currentStatuses()
+        }
+      }
+    }
+  )
+
+  // 缺 Git / Python 时用 winget 替用户装。失败的原话交还界面，由用户决定要不要交给 AI
+  ipcMain.handle(
+    'agent-v3:mcp:blender-install-prereqs',
+    async (_event, args: { ids?: Array<'git' | 'python'> } = {}) => {
+      try {
+        const { installBlenderPrerequisites } = await import(
+          '../agent-v3/capabilities/mcp/blenderSetupRuntime'
+        )
+        const ids = (args.ids ?? []).filter((id) => id === 'git' || id === 'python')
+        const result = await installBlenderPrerequisites(ids)
+        // 装 Git 就带来了 bash。成没成都重探一次：Python 失败时 Git 可能已经装上，
+        // 不重探的话 Agent 的 shell 工具要等重启盒子才出现
+        if (ids.includes('git')) {
+          const { forgetShellProbe } = await import('../agent-v3/tools/builtin/localShell')
+          forgetShellProbe()
+        }
+        return result
+      } catch (error) {
+        return {
+          success: false,
+          message: '安装过程本身出错了。',
+          error: (error as Error).message
         }
       }
     }

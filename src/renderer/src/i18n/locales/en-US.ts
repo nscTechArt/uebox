@@ -265,6 +265,19 @@ export default {
       unsupported: 'No installer for this platform yet — Windows and macOS only.',
       failed: 'Check failed: {error}. If you just updated the app, restart it and try again.',
       hint: 'Installs the official Blender Lab server and Blender add-on, then fills in the MCP config. Needs network access.',
+      installPrereqs: 'Install {names}',
+      installingPrereqs: 'Installing {names}. This takes a few minutes…',
+      nameJoiner: ' and ',
+      prereqsUacHint: 'Windows will ask for administrator permission while installing Git. Click "Yes" in the prompt.',
+      prereqsInstalled: '{names} installed.',
+      askAi: 'Ask AI to troubleshoot',
+      askAiFailed: 'Could not hand off to AI: {reason}',
+      aiPrompt: `Help me install {names} on this Windows PC so I can connect Blender. Unreal Box tried to install it automatically with winget and failed. Raw output:
+
+{detail}
+
+Requirements: after installing Git, git must run from the command line; Python must be 3.11 or newer and runnable as py or python.
+First work out why the install failed from the output above. If you can run commands, install it and verify; if you can't, walk me through installing it by hand. Finally, remind me to reopen Settings → MCP so the Blender row re-checks.`,
       // Name what is missing. "Environment not satisfied" is exactly the failure the
       // install script already had (one line of Command failed: git).
       prereq: {

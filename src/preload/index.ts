@@ -1666,7 +1666,10 @@ const api = {
       blenderStatus: () => ipcRenderer.invoke('agent-v3:mcp:blender-status'),
       /** 一键装官方 Blender Lab MCP 并写进配置 */
       blenderSetup: (args: { blenderPath?: string } = {}) =>
-        ipcRenderer.invoke('agent-v3:mcp:blender-setup', args)
+        ipcRenderer.invoke('agent-v3:mcp:blender-setup', args),
+      /** 用 winget 装 Blender 接入缺的 Git / Python */
+      blenderInstallPrereqs: (args: { ids: Array<'git' | 'python'> }) =>
+        ipcRenderer.invoke('agent-v3:mcp:blender-install-prereqs', args)
     },
     /** 把虚幻引擎能力对外暴露成 MCP server */
     mcpServer: {

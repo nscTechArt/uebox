@@ -39,6 +39,8 @@ import {
   type BlenderSetupStatus,
   type Version
 } from './blenderSetup'
+import { refreshProcessPath } from '../../../services/systemPath'
+import { runWinget, type InstallablePrerequisite, type WingetOutcome } from './blenderPrereqInstall'
 import { readMcpSettings, upsertMcpServer } from './store'
 
 const execFileAsync = promisify(execFile)
@@ -201,8 +203,35 @@ async function checkGit(): Promise<BlenderPrerequisite> {
  * 单独一支」—— 于是一台装着好好的 Python 3.13 的机器被判「没找到 Python」，
  * 而 Python 这一项又没有「选择…」那样的手动出路，等于永久锁死。
  */
-function pythonCandidates(platform: NodeJS.Platform): string[] {
-  return platform === 'win32' ? ['py', 'python', 'python3'] : ['python3', 'python']
+async function pythonCandidates(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): Promise<string[]> {
+  if (platform !== 'win32') return ['python3', 'python']
+  return ['py', 'python', 'python3', ...(await windowsUserPythons(env))]
+}
+
+/**
+ * python.org 按用户安装的标准位置：`%LOCALAPPDATA%\Programs\Python\Python3XX\`。
+ *
+ * 安装器默认不加 PATH，启动器 `py` 也可以被取消勾选 —— 那样装好的 Python
+ * 在 PATH 上一个入口都没有。一键安装那条路会显式打开 PATH，这里是兜底：
+ * 用户自己装、没勾选项的，也能被认出来。
+ */
+async function windowsUserPythons(env: NodeJS.ProcessEnv): Promise<string[]> {
+  const local = env.LOCALAPPDATA?.trim()
+  if (!local) return []
+  const root = join(local, 'Programs', 'Python')
+  let entries: string[]
+  try {
+    entries = await fs.readdir(root)
+  } catch {
+    return []
+  }
+  return entries
+    .filter((entry) => /^Python3\d+$/i.test(entry))
+    .map((entry) => join(root, entry, 'python.exe'))
+    .filter((exe) => existsSync(exe))
 }
 
 /**
@@ -237,10 +266,13 @@ async function resolveInterpreterPath(exe: string): Promise<string | undefined> 
  * 问不出绝对路径就当没找到 —— 把一个名字递给安装脚本只会换来一句
  * 用户读不懂的 PowerShell 报错，不如在这儿就说「没找到」。
  */
-async function checkPython(platform: NodeJS.Platform): Promise<BlenderPrerequisite> {
+async function checkPython(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): Promise<BlenderPrerequisite> {
   const found = await checkVersioned(
     'python',
-    pythonCandidates(platform),
+    await pythonCandidates(platform, env),
     ['--version'],
     'Python',
     MIN_PYTHON_VERSION
@@ -275,7 +307,7 @@ export async function checkPrerequisites(
   return Promise.all([
     checkVersioned('blender', candidates, ['--version'], 'Blender', MIN_BLENDER_VERSION),
     checkGit(),
-    checkPython(platform)
+    checkPython(platform, env)
   ])
 }
 
@@ -318,6 +350,61 @@ export async function inspectBlenderSetup(
     ...(blender?.path ? { blenderPath: blender.path } : {}),
     installRoot
   }
+}
+
+export interface PrerequisiteInstallResult {
+  success: boolean
+  /** 给界面直接显示的一句话 */
+  message: string
+  /** 失败时原样交给 AI 的东西（winget 退出码和原话），不概括 */
+  error?: string
+}
+
+/**
+ * 用 winget 装缺的 Git / Python，装完刷新 PATH 再探一次。
+ *
+ * 一个一个装，第一个失败就停 —— 后面那个多半会以同样的原因失败
+ * （没网、没 winget），连报两遍只是噪音。
+ *
+ * **装完要再探一次，不能拿 winget 的退出码当结论。** winget 说成功，
+ * 盒子仍然可能找不到它（PATH 没加上、装进了别的位置）。那时候界面要
+ * 说实话并给「交给 AI 排查」，而不是安静地刷新出同一句「未找到」。
+ */
+export async function installBlenderPrerequisites(
+  ids: InstallablePrerequisite[],
+  environment: BlenderSetupEnvironment = currentEnvironment(),
+  deps: { runWinget?: (id: InstallablePrerequisite) => Promise<WingetOutcome> } = {}
+): Promise<PrerequisiteInstallResult> {
+  if (environment.platform !== 'win32') {
+    return {
+      success: false,
+      message: '自动安装仅支持 Windows。',
+      error: `unsupported platform: ${environment.platform}`
+    }
+  }
+  const install = deps.runWinget ?? runWinget
+
+  for (const id of ids) {
+    const outcome = await install(id)
+    if (!outcome.ok) {
+      return { success: false, message: outcome.message ?? '', error: outcome.detail }
+    }
+  }
+
+  await refreshProcessPath()
+
+  const still = (await checkPrerequisites(environment)).filter(
+    (item) => !item.ok && (ids as string[]).includes(item.id)
+  )
+  if (still.length > 0) {
+    const missing = describeMissing(still)
+    return {
+      success: false,
+      message: `安装程序已运行完毕，但虚幻盒子仍未检测到：${missing}。`,
+      error: `winget reported success but still missing: ${still.map((item) => item.id).join(', ')}; PATH=${process.env.PATH ?? ''}`
+    }
+  }
+  return { success: true, message: '' }
 }
 
 export interface BlenderSetupResult {

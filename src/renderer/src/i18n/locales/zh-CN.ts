@@ -265,6 +265,26 @@ export default {
       unsupported: '当前平台暂无安装脚本，仅支持 Windows 和 macOS。',
       failed: '检查失败：{error}。如刚更新过虚幻盒子，请重启应用后重试。',
       hint: '将安装官方 Blender Lab 服务与 Blender 插件，并自动填写 MCP 配置。需要联网。',
+      // 缺 Git / Python 时主按钮换成这个，用 winget 装（仅 Windows）
+      installPrereqs: '安装 {names}',
+      installingPrereqs: '正在安装 {names}，需要几分钟…',
+      nameJoiner: ' 和 ',
+      prereqsUacHint: '安装 Git 时 Windows 会请求管理员权限，请在弹出的窗口中点击「是」。',
+      prereqsInstalled: '{names} 已安装。',
+      // 自动安装失败之后才出现
+      askAi: '交给 AI 排查',
+      askAiFailed: '无法提交给 AI：{reason}',
+      /*
+       * 交给 AI 的那条消息。winget 的原话不翻译，原样给。
+       * 缺 Git 的机器上 AI 没有 shell 工具，所以要说清楚：跑不了命令就教用户手动装，
+       * 不然模型会回一句「我没有这个能力」就停了。
+       */
+      aiPrompt: `帮我在这台 Windows 电脑上装好 {names}，用于接入 Blender。虚幻盒子用 winget 自动安装失败了，原始输出如下：
+
+{detail}
+
+要求：Git 装好后命令行里能直接运行 git；Python 需要 3.11 或更高版本，命令行里能运行 py 或 python。
+请先根据上面的输出判断失败原因。如果你能运行命令，就直接装好并验证；如果不能，就一步步告诉我怎么手动装。最后提醒我重新打开「设置 → MCP」，Blender 一栏会重新检测。`,
       // 缺什么点名说，别合成一句「环境不满足」—— 那正是安装脚本原来的
       // 失败样子（一句 Command failed: git），用户看不出要去装什么
       prereq: {

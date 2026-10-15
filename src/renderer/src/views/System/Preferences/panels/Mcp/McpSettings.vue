@@ -55,6 +55,7 @@ import {
   type EpicSetupProjectStatus,
   type McpServerFormValue
 } from '@renderer/api/mcp'
+import { startAgentChat } from '@renderer/views/Assistant/composables/handOffToAgent'
 import AppSwitch from '@renderer/components/AppSwitch.vue'
 
 const { t } = useI18n()
@@ -538,6 +539,76 @@ const canInstallBlender = computed(
     blenderTarget.value !== '' &&
     blenderBlockers.value.length === 0
 )
+
+/**
+ * 缺的 Git / Python 盒子能用 winget 替用户装（只在 Windows 上）。
+ *
+ * 有这几条时，行右端的主按钮从「一键接入」换成「安装 Git 和 Python」——
+ * 这一刻用户唯一该做的事就是这个，给一个点不了的「一键接入」加一句
+ * 「请先去 git-scm.com 下载」等于把运维活甩给他。
+ * Blender 本身不在这里装：版本、装哪个盘都是用户的选择，有「选择…」那条路。
+ */
+const prereqsToInstall = computed<Array<'git' | 'python'>>(() =>
+  window.api.platform === 'win32'
+    ? blenderBlockers.value
+        .map((item) => item.id)
+        .filter((id): id is 'git' | 'python' => id === 'git' || id === 'python')
+    : []
+)
+
+const prereqNames = computed(() =>
+  prereqsToInstall.value
+    .map((id) => (id === 'git' ? 'Git' : 'Python'))
+    .join(t('mcp.blenderSetup.nameJoiner'))
+)
+
+/** 正在装 Git / Python（不是装 Blender 服务）。按钮文案要分开说 */
+const prereqBusy = ref(false)
+
+/**
+ * winget 装失败时的原话。有它才出现「交给 AI 排查」——
+ * 没失败过的时候那个按钮只是噪音。
+ */
+const prereqFailure = ref<{ names: string; detail: string } | undefined>()
+
+async function installPrereqs(): Promise<void> {
+  if (blenderBusy.value || prereqsToInstall.value.length === 0) return
+  const names = prereqNames.value
+  blenderBusy.value = true
+  prereqBusy.value = true
+  blenderMessage.value = ''
+  prereqFailure.value = undefined
+  try {
+    const result = await mcpClientAPI.blenderInstallPrereqs([...prereqsToInstall.value])
+    if (result.success) {
+      blenderMessage.value = t('mcp.blenderSetup.prereqsInstalled', { names })
+    } else {
+      blenderMessage.value = result.message || result.error || ''
+      prereqFailure.value = { names, detail: result.error || result.message }
+    }
+    await refreshBlender()
+  } catch (error) {
+    blenderMessage.value = (error as Error).message
+    prereqFailure.value = { names, detail: (error as Error).message }
+  } finally {
+    prereqBusy.value = false
+    blenderBusy.value = false
+  }
+}
+
+/** 自动安装失败了，把 winget 的原话交给 AI */
+function askAiAboutPrereqs(): void {
+  const failure = prereqFailure.value
+  if (!failure) return
+  try {
+    startAgentChat(
+      t('mcp.blenderSetup.aiPrompt', { names: failure.names, detail: failure.detail }),
+      'blender-prereqs'
+    )
+  } catch (error) {
+    message.error(t('mcp.blenderSetup.askAiFailed', { reason: (error as Error).message }))
+  }
+}
 
 /** 让用户自己指一个 blender 可执行文件 */
 async function chooseBlender(): Promise<void> {
@@ -1304,7 +1375,21 @@ onMounted(load)
             所以缺哪个前置、要用哪个 Blender，点之前都看得见。
           -->
             <AppButton
-              v-if="blenderActionable && blender?.state !== 'unsupported'"
+              v-if="blenderActionable && prereqsToInstall.length > 0"
+              class="row-action"
+              variant="primary"
+              size="medium"
+              :disabled="blenderBusy"
+              @click="installPrereqs"
+            >
+              {{
+                prereqBusy
+                  ? t('mcp.blenderSetup.installingPrereqs', { names: prereqNames })
+                  : t('mcp.blenderSetup.installPrereqs', { names: prereqNames })
+              }}
+            </AppButton>
+            <AppButton
+              v-else-if="blenderActionable && blender?.state !== 'unsupported'"
               class="row-action"
               variant="primary"
               size="medium"
@@ -1362,8 +1447,21 @@ onMounted(load)
               <p v-for="item in blenderBlockers" :key="item.id" class="section-note">
                 {{ prerequisiteLabel(item) }}
               </p>
+              <!-- 管理员确认框只有用户能点，点之前就要说，不然弹出来像是出了什么事 -->
+              <p v-if="prereqsToInstall.includes('git')" class="section-note">
+                {{ t('mcp.blenderSetup.prereqsUacHint') }}
+              </p>
 
-              <p v-if="blenderMessage" class="section-note">{{ blenderMessage }}</p>
+              <p v-if="blenderMessage" class="section-note">
+                {{ blenderMessage }}
+                <button
+                  v-if="prereqFailure && !blenderBusy"
+                  class="link"
+                  @click="askAiAboutPrereqs"
+                >
+                  {{ t('mcp.blenderSetup.askAi') }}
+                </button>
+              </p>
               <p v-else-if="canInstallBlender" class="section-note">
                 {{ t('mcp.blenderSetup.hint') }}
               </p>

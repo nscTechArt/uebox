@@ -3652,6 +3652,13 @@ declare global {
           blenderPath?: string
           statuses?: McpServerStatus[]
         }>
+        /** 用 winget 装 Blender 接入缺的 Git / Python。装完主进程会刷新 PATH 再探一次 */
+        blenderInstallPrereqs: (args: { ids: Array<'git' | 'python'> }) => Promise<{
+          success: boolean
+          message: string
+          /** winget 的退出码和原话，「交给 AI 排查」时原样带上 */
+          error?: string
+        }>
       }
       /** 把虚幻引擎能力对外暴露成 MCP server */
       mcpServer: {
