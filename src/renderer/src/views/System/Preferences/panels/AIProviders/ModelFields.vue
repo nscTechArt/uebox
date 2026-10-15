@@ -126,7 +126,7 @@ const showAdvanced = ref(false)
         v-model="model.ttsVoice"
         class="field-input"
         type="text"
-        :placeholder="defaultSpeechVoice(model.id)"
+        :placeholder="defaultSpeechVoice(model.id, props.state.draft.value?.baseUrl || '')"
       />
       <span class="hint">{{ $t('aiProvider.model.ttsVoiceHint') }}</span>
     </label>

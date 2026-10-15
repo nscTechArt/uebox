@@ -21,7 +21,13 @@ export type SttEvent =
    * 识别结果。`final` 为假时是中间态 —— 同一句话会被反复改写，
    * 界面可以先显示，但不能拿它去做「说完了」的判断。
    */
-  | { type: 'user-text'; text: string; final: boolean }
+  | {
+      type: 'user-text'
+      text: string
+      final: boolean
+      /** 识别模型打的标签（SenseVoice 的语种、情绪、事件）。拼装通话拿去帮判定器分辨杂音 */
+      asrTags?: string[]
+    }
   /**
    * 这一段没听清。
    *

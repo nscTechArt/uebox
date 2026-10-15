@@ -1,7 +1,31 @@
 export const DEFAULT_TTS_VOICE = 'zh_female_vv_uranus_bigtts'
-export function defaultSpeechVoice(modelId: string): string {
+/**
+ * 这个模型走不走 OpenAI 兼容的 `/audio/speech`（本机 Kokoro、CosyVoice 封装、OpenAI 自己）。
+ *
+ * 豆包（seed-tts-*、openspeech 地址）、百炼（qwen-audio-*、dashscope 地址）、
+ * Box Plan（uebox-*）之外的 http(s) 地址都是。发请求选路和「没填音色给哪个默认值」
+ * 用的是同一份判断，免得一边按 OpenAI 发、一边塞了个豆包的音色进去。
+ */
+export function isOpenAiCompatibleSpeech(modelId: string, baseUrl: string): boolean {
+  return (
+    !modelId.startsWith('qwen-audio-3.0-tts-') &&
+    !modelId.startsWith('seed-tts-') &&
+    !modelId.startsWith('uebox-') &&
+    !/openspeech\.bytedance\.com|dashscope/i.test(baseUrl) &&
+    /^https?:\/\//i.test(baseUrl.trim())
+  )
+}
+
+/**
+ * 模型没填音色时用哪个。
+ *
+ * OpenAI 兼容的服务给 OpenAI 的标准名 `alloy` —— 把豆包的音色 ID 发给本机的 Kokoro，
+ * 只会换回一句「没有这个音色」。不知道地址时（老调用点）按豆包算，和以前一样。
+ */
+export function defaultSpeechVoice(modelId: string, baseUrl = ''): string {
   if (modelId.startsWith('qwen-audio-3.0-tts-plus')) return 'longanlingxin'
   if (modelId.startsWith('qwen-audio-3.0-tts-flash')) return 'longanfengyue'
+  if (isOpenAiCompatibleSpeech(modelId, baseUrl)) return 'alloy'
   return DEFAULT_TTS_VOICE
 }
 export const MAX_SPEECH_CHARS = 600

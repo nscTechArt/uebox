@@ -1,6 +1,6 @@
 # 用 AI 加功能
 
-仓库中放了面向 AI 的规范（`AGENTS.md`）和一条命令的验收门禁（`pnpm verify`）。AI 编码助手可以读取规范、修改代码、运行测试。
+仓库中有面向 AI 的规范（`AGENTS.md`）和两档验收门禁（`pnpm verify:changed`、`pnpm verify`）。AI 编码助手读取规范、修改代码、运行测试。
 
 ## 准备
 
@@ -47,3 +47,5 @@ pnpm dev
 - English: [`docs/contributing/vibe-coding.md`](https://github.com/ueboxai/uebox/blob/main/docs/contributing/vibe-coding.md)
 
 只想提需求：[开一个 Issue](https://github.com/ueboxai/uebox/issues/new)。
+
+AI 助手干活时不要每改一点就跑门禁：功能做完跑 `pnpm verify:changed`，整批发出去之前跑 `pnpm verify`，`git push` 和开 PR 之前先问你。

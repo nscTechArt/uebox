@@ -69,6 +69,7 @@ import {
 import { runEditorPython } from '../../../core/editorPython'
 import { isSameProjectPath } from '../../../core/projectPathKey'
 import { awaitProjectLive, DEFAULT_WAIT_MS, MAX_WAIT_MS } from './awaitProjectLive'
+import { applyVaultConnectionPragmas } from '../../../../sqliteDataBase/vaultConnectionPragmas'
 
 /**
  * 按文件夹导入时，一次最多导多少个。
@@ -2057,6 +2058,7 @@ async function importAssetsToProject(
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- 懒加载：静态 import 会在模块加载期就拉起原生模块
   const Database = require('better-sqlite3')
   const db = new Database(vaultDbPath)
+  applyVaultConnectionPragmas(db)
   const contentBase = getProjectContentBase(projectRecord)
   const details: string[] = []
   const importedAssets: ImportedAssetSummary[] = []

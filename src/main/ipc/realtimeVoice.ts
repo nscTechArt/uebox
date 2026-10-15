@@ -28,6 +28,9 @@ import {
   summarizeProjects
 } from '../ai/realtime/frontDesk'
 import { OPENAI_AUDIO, openOpenAiRealtimeSession } from '../ai/realtime/openaiRealtime'
+import { CASCADE_AUDIO, openCascadeSession, type CascadeDeps } from '../ai/realtime/cascadeRealtime'
+import { createCascadeDeps, missingForCascade } from '../ai/realtime/cascadeDeps'
+import type { ModelBinding } from '../ai/types'
 import { normalizeRealtimeEchoGuard, type RealtimeEchoGuard } from '../../shared/realtimeEchoGuard'
 import type {
   AudioSpec,
@@ -473,21 +476,31 @@ function yieldSessionTo(senderId: number): void {
  *
  * 现在跟其余角色一样，由用户在 设置 → 模型 → 默认模型 里显式指定；
  * **连哪一家由 Base URL 认**，不看协议下拉 —— 这两家都不是 OpenAI 兼容那套。
+ *
+ * 没绑、但「语音识别」「语音合成」和对话模型都配齐了，就走拼装通话（`cascade`）：
+ * 普通对话模型也能通话，只是慢一点。**绑了实时语音就一定用它** —— 用户专门配的
+ * 端到端模型比拼装的快，不该被另外三样顶替。
  */
-async function resolveRealtimeBinding(): Promise<{
+async function resolveRealtimeBinding(brain?: ModelBinding): Promise<{
   apiKey: string
   baseUrl: string
   model: string
   voice?: string
   /** Box Plan 的来源：地址不是豆包的，自然走 OpenAI 那支适配器（协议 07 是它的子集） */
   plan?: boolean
+  /** 拼装通话的三样依赖。有它就不看上面的地址和密钥 */
+  cascade?: CascadeDeps
 }> {
   const settings = await readSettings()
   const binding = settings.roles.realtime
   if (!binding) {
+    if (missingForCascade(settings).length === 0) {
+      return { apiKey: '', baseUrl: '', model: '', cascade: await createCascadeDeps(brain) }
+    }
     throw new Error(
       '还没有配置「实时语音」模型。请到 设置 → 模型 → 默认模型，' +
-        '把「实时语音」绑给一个实时模型（OpenAI 的 gpt-realtime，或豆包实时语音）。'
+        '把「实时语音」绑给一个实时模型（OpenAI 的 gpt-realtime，或豆包实时语音）；' +
+        '或者配好「语音识别」和「语音合成」，通话改由对话模型应答。'
     )
   }
 
@@ -516,15 +529,26 @@ async function resolveRealtimeBinding(): Promise<{
  * `openSession` 的采样率也从这里取，两处不可能对不上 —— 各写一份的话，
  * 改了一处忘了另一处的后果是首字那一小段变调，而且不报错。
  */
-export function realtimeAudioSpec(baseUrl: string): AudioSpec {
-  return isDoubaoRealtimeUrl(baseUrl) ? DOUBAO_AUDIO : OPENAI_AUDIO
+export function realtimeAudioSpec(binding: { baseUrl: string; cascade?: unknown }): AudioSpec {
+  if (binding.cascade) return CASCADE_AUDIO
+  return isDoubaoRealtimeUrl(binding.baseUrl) ? DOUBAO_AUDIO : OPENAI_AUDIO
 }
 
 /** 按 Base URL 认出连哪一家，顺带把该家的采样率交出去 */
 function openSession(
-  binding: { apiKey: string; baseUrl: string; model: string; plan?: boolean },
+  binding: {
+    apiKey: string
+    baseUrl: string
+    model: string
+    plan?: boolean
+    cascade?: CascadeDeps
+  },
   config: Omit<Parameters<typeof openOpenAiRealtimeSession>[0], 'apiKey' | 'baseUrl' | 'model'>
 ): { handle: VoiceSessionHandle; audio: AudioSpec } {
+  if (binding.cascade) {
+    return { handle: openCascadeSession(config, binding.cascade), audio: CASCADE_AUDIO }
+  }
+
   const common = {
     apiKey: binding.apiKey,
     baseUrl: binding.baseUrl,
@@ -532,7 +556,7 @@ function openSession(
     ...config
   }
 
-  const audio = realtimeAudioSpec(binding.baseUrl)
+  const audio = realtimeAudioSpec(binding)
 
   if (isDoubaoRealtimeUrl(binding.baseUrl)) {
     return { handle: openDoubaoRealtimeSession(common), audio }
@@ -619,7 +643,7 @@ export function registerRealtimeVoiceIPC(): void {
   ipcMain.handle('realtime-voice:audio-spec', async () => {
     try {
       const binding = await resolveRealtimeBinding()
-      return { ok: true as const, ...realtimeAudioSpec(binding.baseUrl) }
+      return { ok: true as const, ...realtimeAudioSpec(binding) }
     } catch {
       return { ok: false as const }
     }
@@ -640,6 +664,8 @@ export function registerRealtimeVoiceIPC(): void {
         voice?: string
         history?: RealtimeConversationMessage[]
         echoGuard?: RealtimeEchoGuard
+        /** 这条对话输入框里选的模型。只有拼装通话用它当脑子（见 `cascadeDeps.resolveBrain`） */
+        brain?: { providerId?: unknown; modelId?: unknown }
       }
     ) => {
       yieldSessionTo(event.sender.id)
@@ -648,7 +674,12 @@ export function registerRealtimeVoiceIPC(): void {
       let generation = connectionGeneration
       startingSender = event.sender.id
       try {
-        const binding = await resolveRealtimeBinding().finally(() => {
+        // 跨 IPC 的值过一遍：两个都是字符串才算数，不然按没给处理（用默认模型）
+        const brain =
+          typeof args?.brain?.providerId === 'string' && typeof args.brain.modelId === 'string'
+            ? { providerId: args.brain.providerId, modelId: args.brain.modelId }
+            : undefined
+        const binding = await resolveRealtimeBinding(brain).finally(() => {
           if (startingSender === event.sender.id) startingSender = null
         })
         if (generation !== connectionGeneration) return { ok: false, error: '语音连接已取消。' }
@@ -783,6 +814,14 @@ export function registerRealtimeVoiceIPC(): void {
      * 被模型抢答，所以宁可退回打字，也不在这里悄悄降级成一路会说话的会话。
      */
     if (isDoubaoRealtimeUrl(binding.baseUrl)) {
+      return { ok: false as const, reason: 'vendor-unsupported' as const }
+    }
+    /*
+     * 拼装通话不接听写：它的耳朵就是「语音识别」角色，而绑了那个角色的听写
+     * 根本不会走到这里（`useVoiceDictation` 先走识别那一路）。走到了说明识别那一路
+     * 开不起来，借拼装的耳朵也一样开不起来。
+     */
+    if (binding.cascade) {
       return { ok: false as const, reason: 'vendor-unsupported' as const }
     }
 

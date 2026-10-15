@@ -169,6 +169,16 @@ describe('一问一答', () => {
     expect(lastCall?.options).not.toHaveProperty('samplingParams')
   })
 
+  /** 火山方舟的豆包 Seed 同样默认就想；拼装通话、口播稿压缩都靠它不想 */
+  it('reasoning=off 时给火山方舟补 thinking.type=disabled', async () => {
+    const ark = { ...settings.providers[0], baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' }
+    await complete(ark, 'doubao-seed-2-1-lite-260915', {
+      messages: [userMessage('x')],
+      reasoning: 'off'
+    })
+    expect(lastCall?.options).toMatchObject({ samplingParams: { thinking: { type: 'disabled' } } })
+  })
+
   it('取消信号与温度透到 pi', async () => {
     const controller = new AbortController()
     await completeText(settings.providers[0], 'qwen-max', {

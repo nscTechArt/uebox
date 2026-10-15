@@ -2,12 +2,12 @@
 
 中文版：[vibe-coding.zh-CN.md](vibe-coding.zh-CN.md)
 
-**You don't need to know how to code.** You need a computer, an AI coding assistant, and one
+You don't need to know how to code. You need a computer, an AI coding assistant, and one
 sentence describing what you want.
 
-This repository ships the spec your AI reads (`AGENTS.md`) and a one-command acceptance gate
-(`pnpm verify`). Your AI reads the spec, writes the code, and runs the tests itself. Your job is
-to **describe what you want** and **check the result**.
+The repository ships the spec your AI reads (`AGENTS.md`) and acceptance gates (`pnpm verify:changed`
+and `pnpm verify`). Your AI reads the spec, writes the code, and runs the tests. You describe what
+you want and check the result.
 
 ---
 
@@ -15,8 +15,8 @@ to **describe what you want** and **check the result**.
 
 ### 1. Install the tools
 
-- [Node.js 22](https://nodejs.org/)
-- pnpm: after installing Node, run `npm i -g pnpm`
+- [Node.js 24.21.0](https://nodejs.org/)
+- pnpm 10.28.2: after installing Node, run `npm i -g pnpm@10.28.2`
 - An AI coding assistant — for example [Claude Code](https://claude.com/claude-code),
   [Codex](https://developers.openai.com/codex/), Cursor, or GitHub Copilot
 - [Git](https://git-scm.com/)
@@ -33,7 +33,7 @@ Just say this to your AI assistant — it will run the commands for you:
 > Clone https://github.com/<repo> locally, `cd` into it, run `pnpm install`, then run `pnpm dev`
 > and tell me whether the app starts.
 
-The first `pnpm install` takes a while (native modules get compiled). Go make a coffee.
+The first `pnpm install` takes several minutes because native modules get compiled.
 
 ### 3. Confirm it runs
 
@@ -43,7 +43,7 @@ If the Unreal Box window opens, your environment is ready.
 
 ## The request template
 
-**Don't describe *how*. Describe *what you want*.** Finding the implementation path is the AI's job.
+Describe what you want, not how to build it. The AI finds the implementation path.
 
 Copy this and replace the bracketed parts:
 
@@ -87,15 +87,15 @@ Please:
    wait for my confirmation.
 ```
 
-(This example is real: the database column already exists, the UI just never exposed it. A
-competent AI should discover that by reading the code and tell you "no database change needed".
-Full walkthrough: [vertical-slice.md](vertical-slice.md), written in Chinese with an English summary.)
+(In this example the database column already exists and the UI has no entry for it, so the AI
+should read the code first and report "no database change needed". Walkthrough:
+[vertical-slice.md](vertical-slice.md), written in Chinese with an English summary.)
 
 ---
 
 ## Reviewing: three things to check
 
-When the AI says "done", don't take its word for it. Check three things.
+When the AI says "done", check three things.
 
 ### 1. Is `pnpm verify` actually green?
 
@@ -117,8 +117,8 @@ test for now" — **that is not done**. Reply:
 pnpm dev
 ```
 
-Click through it yourself. **A green gate is not the same as a good feature** — the gate proves
-the code doesn't break, not that the experience is right.
+Click through it yourself. A green gate shows the code does not break; it does not show the
+feature behaves correctly.
 
 ### 3. Did it change only what it needed to?
 
@@ -131,17 +131,17 @@ Tell it to revert the unrelated changes.
 
 ## When the AI gets stuck
 
-| It says | You reply |
-|---|---|
+| It says                                       | You reply                                                                                                                           |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | "Tests won't run / NODE_MODULE_VERSION error" | "Run `node scripts/better-sqlite3-abi.mjs ensure node` once — it fills the missing Node-ABI cache without touching the running app" |
-| "Lint reports tons of pre-existing errors" | "`pnpm lint:changed` only reports lines you touched. Those are yours — fix them" |
-| "I'm not sure which layer this belongs in" | "Read `docs/contributing/vertical-slice.md` and locate it on the seven-layer map" |
-| "This needs a database schema change" | "Confirm that's really true first. See section 3 of `vertical-slice.md` — adding a column requires an idempotent migration" |
-| "typecheck says the property doesn't exist" | "Did you change `src/preload/index.ts` without updating `index.d.ts`? They must change together" |
-| It loops without fixing it | "Stop. Send me what you tried and the exact error text — we'll open an issue" |
+| "Lint reports tons of pre-existing errors"    | "`pnpm lint:changed` only reports lines you touched. Those are yours — fix them"                                                    |
+| "I'm not sure which layer this belongs in"    | "Read `docs/contributing/vertical-slice.md` and locate it on the seven-layer map"                                                   |
+| "This needs a database schema change"         | "Confirm that's really true first. See section 3 of `vertical-slice.md` — adding a column requires an idempotent migration"         |
+| "typecheck says the property doesn't exist"   | "Did you change `src/preload/index.ts` without updating `index.d.ts`? They must change together"                                    |
+| It loops without fixing it                    | "Stop. Send me what you tried and the exact error text — we'll open an issue"                                                       |
 
-**Getting stuck is fine.** Opening an issue with a concrete error is far more useful than forcing
-out an implementation that runs but isn't right.
+If you are stuck, open an issue with the exact error text. That helps more than an implementation
+that runs but is wrong.
 
 ---
 
@@ -153,17 +153,10 @@ out an implementation that runs but isn't right.
 3. Open a PR and fill in the template honestly, including whether `pnpm verify` passed and whether
    AI assisted.
 
-**Ticking "AI assisted" costs you nothing.** This project explicitly welcomes vibe coding. What
-gets reviewed is the diff and the gate, not who typed it.
+Ticking "AI assisted" does not count against you. Review looks at the diff and the gate, not at who
+typed it.
+
+If part of the work is unfinished, say so in the PR under `## Unfinished / need help`.
+Maintainers will help finish it.
 
 Full checklist: [definition-of-done.md](definition-of-done.md)
-
----
-
-## The mindset
-
-- **Experiment freely while building.** You don't have to prove an idea first — writing it and
-  running it is the fastest way to find out.
-- **Give no ground at review.** Green gate, working feature, clean diff. All three.
-- **If you didn't finish, say so.** A PR that honestly flags "this part isn't done" is one we'll
-  help you finish.

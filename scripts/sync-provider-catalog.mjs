@@ -74,6 +74,7 @@ const LOGO_ALIAS = {
   'alibaba-tts': 'alibaba',
   'doubao-stt': 'bytedance',
   'alibaba-asr': 'alibaba',
+  'siliconflow-stt': 'siliconflow',
   'doubao-realtime': 'bytedance'
 
   // 3D 那三家（hyper3d / tripo / meshy）在 models.dev 里没有条目，也没有可借用的
@@ -195,6 +196,7 @@ const KEY_PAGE = {
   'alibaba-tts': 'https://bailian.console.aliyun.com/?apiKey=1',
   'doubao-stt': 'https://console.volcengine.com/speech/new/setting/apikeys',
   'alibaba-asr': 'https://bailian.console.aliyun.com/?apiKey=1',
+  'siliconflow-stt': 'https://cloud.siliconflow.cn/account/ak',
   'doubao-realtime': 'https://console.volcengine.com/speech/app',
 
   // ── 3D 生成 ──
@@ -609,6 +611,15 @@ export const CURATED = [
   // 这一组只转写、不回话。与上面那两家是**同一个控制台、同一把密钥**，
   // 单独列条目是因为地址不同（一个 Provider = 一个地址 + 一套凭据 + 一种用途）。
   {
+    id: 'local-tts',
+    group: 'tts',
+    // Kokoro-FastAPI 的默认地址。CosyVoice、GPT-SoVITS 的 OpenAI 兼容封装、LocalAI
+    // 改成它们自己的 /v1 —— 走的都是 /audio/speech（ai/speechOpenAi.ts）
+    baseUrl: 'http://127.0.0.1:8880/v1',
+    displayName: '本机语音合成',
+    requiresApiKey: false
+  },
+  {
     id: 'doubao-stt',
     group: 'stt',
     baseUrl: 'https://openspeech.bytedance.com/api/v3/sauc/bigmodel',
@@ -619,6 +630,25 @@ export const CURATED = [
     group: 'stt',
     baseUrl: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference',
     displayName: '阿里云 Qwen-Audio 语音识别'
+  },
+  // 下面两条走 OpenAI 兼容的整段转写（ai/stt/transcriptionStt.ts）：
+  // 不是流式的，断句在我们这边做
+  {
+    id: 'siliconflow-stt',
+    group: 'stt',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    displayName: '硅基流动 SenseVoice'
+  },
+  {
+    id: 'local-stt',
+    group: 'stt',
+    // Gradio 网页界面的默认地址：SenseVoice 官方 webui.py、各种一键包都是它，
+    // 也是用户在浏览器里打开的那个。api.py 填 :50000/api/v1/asr，Xinference、FunASR、
+    // speaches 这些 OpenAI 兼容的服务填它们自己的 /v1 —— 适配器按地址认是哪一种
+    baseUrl: 'http://127.0.0.1:7860',
+    // 卡片放不下更长的名字；SenseVoice、Whisper 这些词靠模型名搜得到
+    displayName: '本机语音识别',
+    requiresApiKey: false
   },
   {
     id: 'doubao-realtime',
@@ -1207,6 +1237,35 @@ const MANUAL_ENTRIES = {
         name: 'Qwen-Audio 3.0 ASR Flash Streaming'
       },
       'fun-asr-realtime': { id: 'fun-asr-realtime', name: 'Fun-ASR Realtime' }
+    }
+  },
+  'local-tts': {
+    name: '本机语音合成',
+    env: [],
+    doc: 'https://github.com/remsky/Kokoro-FastAPI',
+    models: {
+      // Kokoro 的中文女声。别的服务换成它自己的模型名和音色
+      kokoro: { id: 'kokoro', name: 'Kokoro', ttsVoice: 'zf_xiaobei' }
+    }
+  },
+  'siliconflow-stt': {
+    name: '硅基流动 SenseVoice',
+    env: ['SILICONFLOW_API_KEY'],
+    doc: 'https://docs.siliconflow.cn/cn/api-reference/audio/create-audio-transcriptions',
+    models: {
+      'FunAudioLLM/SenseVoiceSmall': {
+        id: 'FunAudioLLM/SenseVoiceSmall',
+        name: 'SenseVoice Small'
+      }
+    }
+  },
+  'local-stt': {
+    name: '本机语音识别',
+    env: [],
+    doc: 'https://github.com/FunAudioLLM/SenseVoice',
+    models: {
+      // SenseVoice 自带的服务不看这一栏；OpenAI 兼容的服务按它找模型（Xinference 里就叫这个名字）
+      SenseVoiceSmall: { id: 'SenseVoiceSmall', name: 'SenseVoice Small' }
     }
   },
   'doubao-realtime': {
@@ -1944,7 +2003,9 @@ const NO_LOGO = new Set([
   'mureka-music',
   'sunoapi-music',
   'builtin-browser',
-  'searxng'
+  'searxng',
+  'local-stt',
+  'local-tts'
 ])
 
 async function downloadLogo(id, aliasOf) {

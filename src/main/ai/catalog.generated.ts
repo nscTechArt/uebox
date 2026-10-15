@@ -6353,5 +6353,58 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "maxOutputTokens": 131072
       }
     ]
+  },
+  {
+    "id": "siliconflow-stt",
+    "displayName": "硅基流动 SenseVoice",
+    "group": "stt",
+    "kind": "stt",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.siliconflow.cn/v1",
+    "apiKeyUrl": "https://cloud.siliconflow.cn/account/ak",
+    "requiresApiKey": true,
+    "defaultEnvVar": "SILICONFLOW_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "FunAudioLLM/SenseVoiceSmall",
+        "displayName": "SenseVoice Small"
+      }
+    ]
+  },
+  {
+    "id": "local-stt",
+    "displayName": "本机语音识别",
+    "group": "stt",
+    "kind": "stt",
+    "protocol": "openai-completions",
+    "baseUrl": "http://127.0.0.1:7860",
+    "apiKeyUrl": "https://github.com/FunAudioLLM/SenseVoice",
+    "requiresApiKey": false,
+    "hasLogo": false,
+    "models": [
+      {
+        "id": "SenseVoiceSmall",
+        "displayName": "SenseVoice Small"
+      }
+    ]
+  },
+  {
+    "id": "local-tts",
+    "displayName": "本机语音合成",
+    "group": "tts",
+    "kind": "tts",
+    "protocol": "openai-completions",
+    "baseUrl": "http://127.0.0.1:8880/v1",
+    "apiKeyUrl": "https://github.com/remsky/Kokoro-FastAPI",
+    "requiresApiKey": false,
+    "hasLogo": false,
+    "models": [
+      {
+        "id": "kokoro",
+        "displayName": "Kokoro",
+        "ttsVoice": "zf_xiaobei"
+      }
+    ]
   }
 ] as CatalogEntry[])

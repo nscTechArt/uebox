@@ -47,6 +47,7 @@ import { findIdenticalLocalAssets } from '../../sqliteDataBase/ipc/assetData/imp
 import { deriveFallbackSoftPath, deriveSoftPathFromDiskPath } from './backupSoftPath'
 import { defaultAnalyzer } from '../project/packageImports'
 import { readPackageScriptModules, type SourcePluginLookup } from '../project/requiredPlugins'
+import { applyVaultConnectionPragmas } from '../../sqliteDataBase/vaultConnectionPragmas'
 
 /**
  * 生成安全的 assetKey，防止文件名过长导致 Windows MAX_PATH 错误
@@ -368,10 +369,9 @@ export class AssetImportService {
       const Database = require('better-sqlite3')
       const db = new Database(vaultDbPath)
       importDb = db
-      try {
-        db.pragma('journal_mode = WAL')
-        db.pragma('busy_timeout = 5000')
-      } catch {}
+      // 和主连接同一套参数：导入是逐行插入，assetData 上挂着触发器，temp_store 不设的话
+      // 每插一行都要建一次临时文件（见 vaultConnectionPragmas.ts）
+      applyVaultConnectionPragmas(db)
 
       // 确保数据库表结构是最新的（包含所有新增字段）
       initAssetDataModel(db)

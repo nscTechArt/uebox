@@ -95,12 +95,12 @@ export const initPublicModels = (db: Database.Database): void => {
 /*
  * 这里没有对应的 initVaultModels。
  *
- * 曾经有一个，但从来没人调用 —— 保管库的建表和列迁移全在
- * `VaultManager.initializeVaultDatabase()` 里，那份 SQL 是内联写的。
+ * 曾经有一个，但从来没人调用 —— 保管库的建表和列迁移由
+ * `VaultManager.initializeVaultDatabase()` 调 `vaultSchema.ts` 的 applyVaultSchema 完成。
  * 留着一个长得像入口、实际不执行的函数，只会让下一个加字段的人把改动加进去，
  * 然后对着「no such table / no such column」查半天。这是真事，不是假想。
  *
- * 要给保管库加表或加列，改 VaultManager 那一处。
+ * 要给保管库加表、加列、加索引，改 vaultSchema.ts 那一处。
  */
 
 /**

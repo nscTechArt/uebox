@@ -1702,17 +1702,14 @@ async function downloadWebdavFileToVault(
         } catch (error) {
           console.warn('写入资产索引失败（可稍后手动导入）:', error)
           message.success({
-            content: t('assetTree.messages.downloadedRefreshManually'),
-            key: 'webdav-download'
+            content: t('assetTree.messages.downloadedRefreshManually')
           })
         }
         // 索引写入完成后立即移除占位符
         emit('download-task-complete', downloadId)
       } else {
         message.error({
-          content:
-            result.error || t('assetTree.messages.downloadFailed', { name: safeDisplayPath }),
-          key: 'webdav-download'
+          content: result.error || t('assetTree.messages.downloadFailed', { name: safeDisplayPath })
         })
         emit('download-task-update', downloadId, {
           stageText: t('assetTree.stages.downloadFailed')
@@ -1727,7 +1724,7 @@ async function downloadWebdavFileToVault(
         error instanceof Error
           ? error.message
           : t('assetTree.messages.downloadFailed', { name: safeDisplayPath })
-      message.error({ content: msg, key: 'webdav-download' })
+      message.error({ content: msg })
       emit('download-task-update', downloadId, { stageText: t('assetTree.stages.downloadError') })
       setTimeout(() => {
         emit('download-task-complete', downloadId)

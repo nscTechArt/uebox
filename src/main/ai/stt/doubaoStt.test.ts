@@ -1,6 +1,30 @@
 import { gzipSync } from 'node:zlib'
-import { describe, expect, it } from 'vitest'
-import { decodeDoubaoSttFrame, describeError, resolveDoubaoSttUrl } from './doubaoStt'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  decodeDoubaoSttFrame,
+  describeError,
+  openDoubaoSttSession,
+  resolveDoubaoSttUrl
+} from './doubaoStt'
+
+const sockets = vi.hoisted(() => [] as import('node:events').EventEmitter[])
+
+// 只用来驱动连接出错那一条；其余用例测的是纯函数，碰不到它
+vi.mock('ws', async () => {
+  const { EventEmitter } = await import('node:events')
+  class FakeSocket extends EventEmitter {
+    static OPEN = 1
+    readyState = 0
+    send = vi.fn()
+    close = vi.fn()
+    terminate = vi.fn()
+    constructor() {
+      super()
+      sockets.push(this)
+    }
+  }
+  return { default: FakeSocket }
+})
 
 /**
  * 这一组守的全是**错了也不报错**的东西。
@@ -142,5 +166,29 @@ describe('错误码翻译', () => {
   it('把码一起交出去', () => {
     expect(describeError(45000001, {})).toContain('45000001')
     expect(describeError(undefined, 'boom')).toContain('boom')
+  })
+})
+
+/**
+ * 出错时错误要先交出去，再关。
+ *
+ * 以前是先置「已关闭」再发错误，而发事件的闸门见到「已关闭」就只放 `closed` ——
+ * 厂商的原话（密钥不对、资源没开通）被自己挡掉，用户和「测试连接」只看得到
+ * 一句「服务端断开了连接」。
+ */
+describe('连接出错', () => {
+  it('先报错误原话，再报关闭', () => {
+    const events: unknown[] = []
+    openDoubaoSttSession({
+      apiKey: 'k',
+      baseUrl: 'https://openspeech.bytedance.com',
+      model: 'volc.x',
+      onEvent: (event) => events.push(event)
+    })
+    sockets[0].emit('error', new Error('Unexpected server response: 401'))
+    expect(events).toEqual([
+      { type: 'error', message: 'Unexpected server response: 401' },
+      { type: 'closed' }
+    ])
   })
 })

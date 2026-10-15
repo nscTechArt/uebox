@@ -77,6 +77,7 @@ import {
   saveImportRecoveryContext
 } from '../../services/asset/ImportRecoveryContextService'
 import { getAssetNameFromFileName, stripPathLeafExtension } from '../../utils/assetName'
+import { applyVaultConnectionPragmas } from '../vaultConnectionPragmas'
 
 const importRuntime = createAssetImportRuntimeState()
 registerAssetImportConfigIPC(importRuntime)
@@ -323,10 +324,8 @@ export const registerAssetDataIPC = (): void => {
         const Database = require('better-sqlite3')
         const db = new Database(vaultDbPath)
         importDb = db
-        try {
-          db.pragma('journal_mode = WAL')
-          db.pragma('busy_timeout = 5000')
-        } catch {}
+        // 和主连接同一套参数，理由见 vaultConnectionPragmas.ts（导入逐行插入，最吃这一项）
+        applyVaultConnectionPragmas(db)
         if (
           targetFolderKey &&
           targetFolderKey !== 'ALL' &&

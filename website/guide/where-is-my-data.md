@@ -4,7 +4,7 @@
 
 ## 应用数据目录
 
-设置、对话记录、技能、日志都在系统的应用数据目录下，文件夹名是 `unreal-box`：
+设置、对话记录、技能、经验、日志都在系统的应用数据目录下，文件夹名是 `unreal-box`：
 
 | 系统    | 路径                                        |
 | ------- | ------------------------------------------- |
@@ -14,32 +14,35 @@
 
 主要内容：
 
-| 文件 / 目录                             | 是什么                              |
-| --------------------------------------- | ----------------------------------- |
-| `app-settings.json`                     | 应用设置                            |
-| `models.json`                           | AI 服务商与模型配置（**不含密钥**） |
-| `ai-provider-secrets.bin`               | 加密后的密钥                        |
-| `object-storage.json`                   | 对象存储的连接配置（**不含密钥**）  |
-| `object-storage-index.json`             | 传到对象存储的文件登记              |
-| `instructions.md`                       | 给助手的常驻说明                    |
-| `skills/`                               | 技能目录                            |
-| `disabled-skills.json`                  | 关掉了哪些技能                      |
-| `plugins/`、`disabled-plugins.json`     | 插件                                |
-| `mcp.json`                              | 接入的第三方 MCP 服务               |
-| `mcp-server.json`                       | 对外开放的 MCP 服务配置             |
-| `agent-v3-sessions/`                    | 会话内核的记录                      |
-| `chat-history/`                         | 对话历史                            |
-| `organize-ledger/`                      | 内容整理的操作台账（撤销用）        |
-| `template-sources.json`                 | 模板源                              |
-| `templates/`                            | 本地模板库                          |
-| `list-thumbnails/`                      | 缩略图缓存                          |
-| `logs/`                                 | 日志。报问题时附上它                |
-| `diagnostics/`、`diagnostics/recovery/` | 诊断与恢复数据                      |
-| `window-state.json`                     | 窗口位置与大小                      |
-| `spotlight-position.json`               | 快捷提问窗口的位置                  |
+| 文件 / 目录                             | 是什么                                                 |
+| --------------------------------------- | ------------------------------------------------------ |
+| `app-settings.json`                     | 应用设置                                               |
+| `models.json`                           | AI 服务商与模型配置（**不含密钥**）                    |
+| `ai-provider-secrets.bin`               | 加密后的密钥                                           |
+| `object-storage.json`                   | 对象存储的连接配置（**不含密钥**）                     |
+| `object-storage-index.json`             | 传到对象存储的文件登记                                 |
+| `instructions.md`                       | 给助手的常驻说明                                       |
+| `skills/`                               | 技能目录                                               |
+| `disabled-skills.json`                  | 关掉了哪些技能                                         |
+| `plugins/`、`disabled-plugins.json`     | 插件                                                   |
+| `mcp.json`                              | 接入的第三方 MCP 服务                                  |
+| `mcp-server.json`                       | 对外开放的 MCP 服务配置                                |
+| `agent-v3-sessions/`                    | Agent 的执行记录，每条对话一份                         |
+| `chat-history/`                         | 对话历史：`sessions/` 下一条对话一个文件，外加一份索引 |
+| `experience/`                           | 经验库的通用层（所有工程共用）                         |
+| `team/`、`team-models/`                 | 团队模式：每次任务的工作区；各模型的入职检测结果和履历 |
+| `organize-ledger/`                      | 内容整理的操作台账（撤销用）                           |
+| `template-sources.json`                 | 模板源                                                 |
+| `templates/`                            | 本地模板库                                             |
+| `list-thumbnails/`                      | 缩略图缓存                                             |
+| `logs/`                                 | 日志。报问题时附上它                                   |
+| `diagnostics/`、`diagnostics/recovery/` | 诊断与恢复数据                                         |
+| `window-state.json`                     | 窗口位置与大小                                         |
+| `chat-window-state.json`                | 独立对话窗口的位置与大小                               |
+| `spotlight-position.json`               | 快捷提问窗口的位置                                     |
 
 ::: tip 界面上有直达按钮
-技能目录、MCP 配置文件、AI 服务商配置、命令行程序位置，各自的设置页里都有「在文件夹中显示」或「打开位置」。不用自己照着路径翻。
+技能目录、MCP 配置文件、AI 服务商配置、命令行程序位置，各自的设置页里都有「在文件夹中显示」或「打开位置」，不用自己照着路径找。
 :::
 
 ## API 密钥
@@ -75,9 +78,15 @@
 
 ## 工程和引擎
 
-应用**不修改**工程文件。项目库的「导入」只登记路径，「移除」只从列表中删除记录。
+项目库的「导入」只登记路径，「移除」只从列表中删除记录。盒子自身写入工程目录的内容如下：
 
-唯一的例外是**插件**：会写入 `<工程>/Plugins/UnrealAgentLink/` 并在 `.uproject` 里启用它。这个行为可以在 设置 → 插件 关掉，也可以按工程移除。
+| 位置                        | 内容                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `Plugins/UnrealAgentLink/`  | 连接插件；在 `.uproject` 里启用它；往 `.gitignore`、`.p4ignore` 各加一行。可在 设置 → 插件 关掉自动安装，也可以按工程移除 |
+| `.uebox/experience/`        | 在这个工程里踩过又解决的问题（经验库的工程层）                                                                            |
+| `Saved/UEBoxCrashRecovery/` | 编辑器崩溃重开前备份的自动存档                                                                                            |
+
+Agent 按你的要求改关卡、蓝图、材质等内容，属于你让它做的编辑，不在此列；它们的权限见[工具、技能与权限](/guide/tools-and-skills)。
 
 引擎目录应用只读不写。早期版本会往引擎目录装插件，残留可以用 设置 → 插件 →「清理旧版插件」清掉。
 
@@ -101,6 +110,10 @@
 2. **各保管库的目录**（建库时指定的位置）
 
 装好应用把这两部分放回原位就能接着用。
+
+### 迁移保管库的保存位置
+
+不换机器、只想把保管库挪到别的磁盘时，不用手动复制：资产库页面左上角库名的列表里，右键那个保管库 →「更改保存位置」，选新位置后确认。盒子会把整个保管库文件夹迁过去，迁移期间不要操作资产。网络协作库不适用。
 
 ::: warning 加密密钥可能不跨机器
 `ai-provider-secrets.bin` 用的是系统凭据存储，换一台机器不一定解得开。新机器上重新填一次密钥即可，其他数据不受影响。

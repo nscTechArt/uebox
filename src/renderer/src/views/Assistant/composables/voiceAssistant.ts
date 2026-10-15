@@ -588,6 +588,8 @@ function createVoiceAssistant(): RealtimeVoiceState {
       return t('assistantInputComposer.voice.asrFailed')
     },
     getHistory: voiceHistory,
+    // 输入框上显示的那个模型：这条对话单独选过就是它，没选过主进程用默认的（同输入框）
+    getBrain: () => (boundSid ? useChatSessionsStore().getModel(boundSid) : undefined),
     prepareInstruction: (instruction) => withVoiceDispatchContext(instruction, recentVoiceTurns()),
     onUserText: recordVoiceUserText,
     onAssistantText: updateVoiceAssistantText,

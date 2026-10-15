@@ -488,3 +488,73 @@ describe('套餐的对话四个角色合成一行', () => {
     expect(values[MODEL_ROLES.indexOf('vision')]).toBe('creator-plan::uebox-chat')
   })
 })
+
+/**
+ * 实时语音没绑时，「语音通话不可用」不一定是真的：识别、合成、对话模型配齐了，
+ * 通话改由对话模型应答。这时候还挂着那条警告就是在撒谎，用户会跑去配一个他不需要的实时模型。
+ */
+describe('实时语音没绑时的那一行', () => {
+  const voiceProviders: SettingsView['providers'] = [
+    ...loadedSettings.providers,
+    {
+      id: 'local-stt',
+      displayName: '本机语音识别',
+      kind: 'stt',
+      protocol: 'openai-completions',
+      baseUrl: 'http://127.0.0.1:50000/api/v1/asr',
+      models: [{ id: 'SenseVoiceSmall' }],
+      apiKey: { kind: 'none' }
+    },
+    {
+      id: 'doubao-tts',
+      displayName: '豆包语音合成',
+      kind: 'tts',
+      protocol: 'openai-completions',
+      baseUrl: 'https://openspeech.bytedance.com',
+      models: [{ id: 'seed-tts-2.0' }],
+      apiKey: { kind: 'none' }
+    }
+  ]
+
+  function realtimeRow(wrapper: VueWrapper): string {
+    const rows = wrapper.findAll('.setting-item')
+    return rows.find((row) => row.text().includes('实时语音'))?.text() ?? ''
+  }
+
+  it('识别、合成都配了：不报不可用，说明会由对话模型应答', async () => {
+    stubAiProviderApi({
+      getSettings: vi.fn(async () => ({
+        ...loadedSettings,
+        providers: voiceProviders,
+        roles: {
+          ...loadedSettings.roles,
+          stt: { providerId: 'local-stt', modelId: 'SenseVoiceSmall' },
+          tts: { providerId: 'doubao-tts', modelId: 'seed-tts-2.0' }
+        }
+      }))
+    })
+    const wrapper = mountSettings()
+    await flushPromises()
+    const row = realtimeRow(wrapper)
+    expect(row).not.toContain('语音通话不可用')
+    expect(row).toContain('通话由对话模型应答')
+  })
+
+  it('缺了语音合成：照旧报不可用', async () => {
+    stubAiProviderApi({
+      getSettings: vi.fn(async () => ({
+        ...loadedSettings,
+        providers: voiceProviders,
+        roles: {
+          ...loadedSettings.roles,
+          stt: { providerId: 'local-stt', modelId: 'SenseVoiceSmall' }
+        }
+      }))
+    })
+    const wrapper = mountSettings()
+    await flushPromises()
+    const row = realtimeRow(wrapper)
+    expect(row).toContain('语音通话不可用')
+    expect(row).not.toContain('通话由对话模型应答')
+  })
+})

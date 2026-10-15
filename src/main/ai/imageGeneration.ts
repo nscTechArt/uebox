@@ -877,8 +877,9 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
    * 2. **没有 prompt 字段**：提示词和参考图同在一个 `input` 数组里，各是一项。
    *    参考图要裸 base64，data URI 前缀和 http 直链都不收 —— 直链得自己先取回来
    * 3. 尺寸不是 `宽x高`，是 `image_size` 档位 + `aspect_ratio`，两者都只认固定值
-   * 4. 响应里没有 `data[]`：单图在 `interaction.output_image`，模型先说话再出图时
-   *    在 `interaction.steps[].content[]`
+   * 4. 响应里没有 `data[]`：官方 REST 直接回 Interaction 本身（顶层 `object: "interaction"`），
+   *    图在 `steps[].content[]`，每项给 `data` 或 `uri`。有的网关外面再包一层
+   *    `{ interaction }`、另给 `output_image`（SDK 的便利字段，REST 文档里没有），两种都认
    *
    * 不走 Google 那层 OpenAI 兼容地址（`/v1beta/openai/images/generations`）的原因：
    * 官方明说它只认 prompt / model / n / size / response_format，**参考图没有位置放**，
@@ -923,16 +924,18 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
       }
     },
     images(payload) {
-      const interaction = (payload as { interaction?: Record<string, unknown> })?.interaction
-      if (!interaction) return []
+      // 官方 REST 不包这一层（https://ai.google.dev/api/interactions-api），有的网关包
+      const interaction =
+        (payload as { interaction?: Record<string, unknown> } | null)?.interaction ??
+        (payload as Record<string, unknown> | null)
+      if (!interaction || typeof interaction !== 'object') return []
 
       const pick = (item: unknown): RawImage | null => {
-        const part = item as { data?: unknown; mime_type?: unknown } | null
-        if (typeof part?.data !== 'string' || !part.data) return null
-        return {
-          base64: part.data,
-          mediaType: typeof part.mime_type === 'string' ? part.mime_type : undefined
-        }
+        const part = item as { data?: unknown; uri?: unknown; mime_type?: unknown } | null
+        const mediaType = typeof part?.mime_type === 'string' ? part.mime_type : undefined
+        if (typeof part?.data === 'string' && part.data) return { base64: part.data, mediaType }
+        if (typeof part?.uri === 'string' && part.uri) return { url: part.uri, mediaType }
+        return null
       }
 
       // steps 里是「说一句、出一张」的完整序列，output_image 只有最后一张。
