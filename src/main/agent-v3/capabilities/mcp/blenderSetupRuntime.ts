@@ -17,7 +17,7 @@
  */
 
 import { execFile } from 'child_process'
-import { existsSync, promises as fs } from 'fs'
+import { existsSync, promises as fs, readFileSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
 import { app } from 'electron'
@@ -40,7 +40,11 @@ import {
   type Version
 } from './blenderSetup'
 import { refreshProcessPath } from '../../../services/systemPath'
-import { runWinget, type InstallablePrerequisite, type WingetOutcome } from './blenderPrereqInstall'
+import {
+  installPrerequisite,
+  type InstallablePrerequisite,
+  type WingetOutcome
+} from './blenderPrereqInstall'
 import { readMcpSettings, upsertMcpServer } from './store'
 
 const execFileAsync = promisify(execFile)
@@ -61,12 +65,35 @@ const INSTALL_TIMEOUT_MS = 15 * 60_000
 /** 安装脚本的输出。pip 的进度条能刷出很长一串 */
 const INSTALL_MAX_BUFFER = 16 * 1024 * 1024
 
+/** 随包资源的根。打包后是 `resources/`，开发时是仓库里的 `resources/` */
+function resourcesRoot(): string {
+  return app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources')
+}
+
 /** 技能里那两个安装脚本所在的目录。随包资源，不是用户目录 */
 function setupScriptDir(): string {
-  const root = app.isPackaged
-    ? join(process.resourcesPath, 'skills')
-    : join(app.getAppPath(), 'resources', 'skills')
-  return join(root, 'blender-ue-pipeline', 'scripts')
+  return join(resourcesRoot(), 'skills', 'blender-ue-pipeline', 'scripts')
+}
+
+/**
+ * 随包的官方源码 zip（锁定 commit，见 `scripts/fetch-blender-mcp.mjs`）。没有就返回 undefined。
+ *
+ * 有它，用户机器就不需要 Git，也不用连 projects.blender.org —— 国内直连时
+ * Git 安装包走 GitHub，握手失败、几百 KB/s 是常态，而拉的永远是同一个 commit。
+ * 没有它（开发时没跑过 `--ensure`）就退回安装脚本里原来的 git fetch。
+ */
+function bundledSourceArchive(): string | undefined {
+  const dir = join(resourcesRoot(), 'blender-mcp')
+  try {
+    const manifest = JSON.parse(readFileSync(join(dir, 'blender-mcp-source.json'), 'utf8')) as {
+      file?: unknown
+    }
+    if (typeof manifest.file !== 'string') return undefined
+    const archive = join(dir, manifest.file)
+    return existsSync(archive) ? archive : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -288,14 +315,23 @@ export interface BlenderSetupEnvironment {
   platform: NodeJS.Platform
   env: NodeJS.ProcessEnv
   home: string
+  /** 随包的官方源码 zip。有它就不需要 Git */
+  sourceArchive?: string
 }
 
 function currentEnvironment(): BlenderSetupEnvironment {
-  return { platform: process.platform, env: process.env, home: app.getPath('home') }
+  return {
+    platform: process.platform,
+    env: process.env,
+    home: app.getPath('home'),
+    sourceArchive: bundledSourceArchive()
+  }
 }
 
 /**
- * 探这台机器上的三项前置。要起三个子进程问版本，别在一次交互里调两遍。
+ * 探这台机器上的前置。要起几个子进程问版本，别在一次交互里调两遍。
+ *
+ * 随包带了源码就不探 Git：用不上的东西不该出现在「缺少」的清单里。
  */
 export async function checkPrerequisites(
   environment: BlenderSetupEnvironment
@@ -306,7 +342,7 @@ export async function checkPrerequisites(
 
   return Promise.all([
     checkVersioned('blender', candidates, ['--version'], 'Blender', MIN_BLENDER_VERSION),
-    checkGit(),
+    ...(environment.sourceArchive ? [] : [checkGit()]),
     checkPython(platform, env)
   ])
 }
@@ -361,7 +397,7 @@ export interface PrerequisiteInstallResult {
 }
 
 /**
- * 用 winget 装缺的 Git / Python，装完刷新 PATH 再探一次。
+ * 装缺的 Git / Python（Python 先走国内镜像，见 blenderPrereqInstall.ts），装完刷新 PATH 再探一次。
  *
  * 一个一个装，第一个失败就停 —— 后面那个多半会以同样的原因失败
  * （没网、没 winget），连报两遍只是噪音。
@@ -373,7 +409,7 @@ export interface PrerequisiteInstallResult {
 export async function installBlenderPrerequisites(
   ids: InstallablePrerequisite[],
   environment: BlenderSetupEnvironment = currentEnvironment(),
-  deps: { runWinget?: (id: InstallablePrerequisite) => Promise<WingetOutcome> } = {}
+  deps: { install?: (id: InstallablePrerequisite) => Promise<WingetOutcome> } = {}
 ): Promise<PrerequisiteInstallResult> {
   if (environment.platform !== 'win32') {
     return {
@@ -382,7 +418,7 @@ export async function installBlenderPrerequisites(
       error: `unsupported platform: ${environment.platform}`
     }
   }
-  const install = deps.runWinget ?? runWinget
+  const install = deps.install ?? installPrerequisite
 
   for (const id of ids) {
     const outcome = await install(id)
@@ -500,7 +536,13 @@ export async function runBlenderSetup(
 
   let installerOutput = ''
   try {
-    installerOutput = await install(platform, setupScriptDir(), blenderPath, python)
+    installerOutput = await install(
+      platform,
+      setupScriptDir(),
+      blenderPath,
+      python,
+      environment.sourceArchive
+    )
   } catch (error) {
     const reason = installerMessage(error)
     return {
@@ -649,7 +691,8 @@ export interface BlenderSetupDeps {
     platform: NodeJS.Platform,
     scriptDir: string,
     blenderPath: string,
-    python: string
+    python: string,
+    sourceArchive?: string
   ) => Promise<string>
 }
 
@@ -658,12 +701,18 @@ async function runInstaller(
   platform: NodeJS.Platform,
   scriptDir: string,
   blenderPath: string,
-  python: string
+  python: string,
+  sourceArchive?: string
 ): Promise<string> {
   if (platform === 'darwin') {
     const { stdout } = await execFileAsync(
       python,
-      [join(scriptDir, 'setup_mcp.py'), '--blender-path', blenderPath],
+      [
+        join(scriptDir, 'setup_mcp.py'),
+        '--blender-path',
+        blenderPath,
+        ...(sourceArchive ? ['--source-archive', sourceArchive] : [])
+      ],
       { timeout: INSTALL_TIMEOUT_MS, maxBuffer: INSTALL_MAX_BUFFER }
     )
     return stdout
@@ -682,7 +731,8 @@ async function runInstaller(
       '-BlenderPath',
       blenderPath,
       '-PythonPath',
-      python
+      python,
+      ...(sourceArchive ? ['-SourceArchive', sourceArchive] : [])
     ],
     { timeout: INSTALL_TIMEOUT_MS, maxBuffer: INSTALL_MAX_BUFFER, windowsHide: true }
   )

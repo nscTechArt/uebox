@@ -14,15 +14,18 @@
 
 ## The one-click path
 
-Box installs this itself: **Preferences → MCP → Connect Blender**. It checks Blender, Git and
-Python first and names whichever is missing, runs the same setup script this document describes,
+Box installs this itself: **Preferences → MCP → Connect Blender**. It checks Blender and Python
+first and names whichever is missing, runs the same setup script this document describes with the
+pinned official source that ships inside Box (so no Git and no access to `projects.blender.org`),
 then writes the server entry into Box's MCP settings and reconnects. Nothing below has to be done
 by hand when that button succeeds, and pressing it again repairs an install whose add-on step
 failed. Tell the user to press it rather than walking them through the manual steps; the rest of
 this document is the manual fallback and the explanation of what the button did.
 
-Box does not install Git or Python — those are the user's machine and the user's choice. The
-button names the missing one and where to get it.
+On Windows, a missing Python turns that button into **Install Python**: Box downloads the official
+python.org installer from a mirror in mainland China, checks its SHA-256, installs it for the
+current user, and falls back to winget. pip falls back to the Tsinghua and Aliyun PyPI mirrors when
+PyPI fails. Box does not install Blender — the version and location are the user's choice.
 
 ## Platform support
 
@@ -32,9 +35,10 @@ bridge query, and UE exchange on the actual target machine are still required fo
 
 ### macOS prerequisites and setup
 
-Use an installed Python 3.11+ interpreter and Git. Run as the normal user, without `sudo`.
-The installer fetches the same pinned official revision as Windows and installs its Python
-dependencies; run it only for the requested integration setup, with network access available.
+Use an installed Python 3.11+ interpreter. Run as the normal user, without `sudo`.
+The installer uses the same pinned official revision as Windows — from the zip Box ships when
+given `--source-archive`, otherwise fetched with Git — and installs its Python dependencies; run it
+only for the requested integration setup, with network access available.
 
 ```sh
 python3 /absolute/path/to/scripts/setup_mcp.py --blender-path '/Applications/Blender.app'
@@ -54,9 +58,9 @@ Restart an already open Blender so it loads the add-on, then verify the bridge a
   execution policy on Windows client blocks a plain `.\setup_mcp.ps1`.
 - If the skill files arrived inside a downloaded archive they carry the Internet zone mark and are
   blocked even under RemoteSigned. Clear it with `Unblock-File`.
-- `git` and a Python 3.11+ interpreter must be on PATH; the script reports a bare
-  `Command failed: git` when they are not. The install also fetches a pinned revision from
-  `projects.blender.org`, so it needs network access to that host.
+- Pass `-SourceArchive` with the zip Box ships in `resources\blender-mcp` and no Git is needed.
+  Without it the script fetches the pinned revision from `projects.blender.org` with `git`, which
+  must then be on PATH (a missing one shows up as a bare `Command failed: git`).
 - **Do not run it elevated.** The virtual environment and the Blender add-on install into the
   invoking user's profile; run it as Administrator and Box, running as the normal user, will not
   find either of them.

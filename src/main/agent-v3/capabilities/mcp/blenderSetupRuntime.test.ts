@@ -173,6 +173,12 @@ describe('检查现状', () => {
     }
   })
 
+  // 随包带了官方源码就用不上 Git，它不该出现在「缺少」的清单里
+  it('随包带了源码时不探 Git', async () => {
+    const status = await inspectBlenderSetup({ ...windows, sourceArchive: join(root, 'src.zip') })
+    expect(status.prerequisites.map((item) => item.id)).toEqual(['blender', 'python'])
+  })
+
   it('安装目录跟着传进来的环境走', async () => {
     const status = await inspectBlenderSetup(windows)
     expect(status.installRoot.startsWith(root)).toBe(true)
@@ -396,7 +402,7 @@ describe('装到一半留下的目录', () => {
 describe('用 winget 装缺的 Git / Python', () => {
   it('不是 Windows 就不装', async () => {
     const runWinget = vi.fn()
-    const result = await installBlenderPrerequisites(['git'], linux, { runWinget })
+    const result = await installBlenderPrerequisites(['git'], linux, { install: runWinget })
     expect(result.success).toBe(false)
     expect(runWinget).not.toHaveBeenCalled()
   })
@@ -408,7 +414,7 @@ describe('用 winget 装缺的 Git / Python', () => {
       message: '安装 Git 未完成（winget 退出码 0x8A150014）。',
       detail: 'winget install Git.Git exited with 0x8A150014'
     }))
-    const result = await installBlenderPrerequisites(['git', 'python'], windows, { runWinget })
+    const result = await installBlenderPrerequisites(['git', 'python'], windows, { install: runWinget })
     expect(runWinget).toHaveBeenCalledTimes(1)
     expect(result).toMatchObject({
       success: false,
@@ -423,7 +429,7 @@ describe('用 winget 装缺的 Git / Python', () => {
    */
   it('装完仍探不到时报失败，而不是假装成功', async () => {
     const runWinget = vi.fn(async () => ({ ok: true }))
-    const result = await installBlenderPrerequisites(['git', 'python'], windows, { runWinget })
+    const result = await installBlenderPrerequisites(['git', 'python'], windows, { install: runWinget })
     expect(runWinget).toHaveBeenCalledTimes(2)
     // 这台机器上有没有 git / Python 不确定：有就成功，没有就必须说出缺哪个
     if (!result.success) {

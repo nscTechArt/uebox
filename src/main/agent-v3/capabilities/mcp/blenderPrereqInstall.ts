@@ -1,5 +1,5 @@
 /**
- * 用 winget 替用户装 Blender 接入缺的 Git / Python。
+ * 替用户装 Blender 接入缺的 Python（以及没有随包源码时的 Git）。
  *
  * ## 为什么盒子自己装，而不是交给 AI
  *
@@ -12,13 +12,27 @@
  *
  * - Git：`Git.Git`，官方安装器默认把 `git` 放进 PATH。装进 Program Files，
  *   会弹一次管理员确认 —— 那个框只能用户自己点，界面上要先说。
+ *   随包带了官方源码时用不上 Git（见 `scripts/fetch-blender-mcp.mjs`），这条只剩开发环境会走。
  * - Python：钉 3.12。官方服务要 3.11+，3.13 上个别依赖还没有现成的 wheel。
- *   python.org 安装器默认**不**加 PATH，所以用 `--override` 显式打开；
+ *   python.org 安装器默认**不**加 PATH，所以显式打开；
  *   就算没加上，`blenderSetupRuntime` 也会去用户目录下的标准位置找。
+ *
+ * ## Python 先走国内镜像
+ *
+ * winget 不能给单个包换下载源，Python 安装包从 python.org 下。国内直连实测还行，
+ * 但网络差的机器上就是整次失败。所以先从 npmmirror 下**同一个**官方安装包，
+ * 按锁定的 SHA-256 逐字节核对（和 python.org 上的那份一致，签名是 Python Software
+ * Foundation），对不上就扔掉；镜像不通或核对失败再退回 winget。
+ * 按用户安装、不装全用户的启动器，所以不弹管理员确认。
  */
 
 import { execFile } from 'child_process'
+import { createHash } from 'crypto'
+import { promises as fs } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { promisify } from 'util'
+import { net } from 'electron'
 
 const execFileAsync = promisify(execFile)
 
@@ -36,9 +50,38 @@ export const WINGET_PACKAGES: Record<InstallablePrerequisite, WingetPackage> = {
   python: {
     id: 'Python.Python.3.12',
     name: 'Python 3.12',
-    override: '/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1'
+    override: '/quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 InstallLauncherAllUsers=0'
   }
 }
+
+/** python.org 安装器的静默参数：按用户装、加 PATH、带 `py` 启动器，都不需要管理员 */
+export const PYTHON_INSTALLER_ARGS = [
+  '/quiet',
+  'InstallAllUsers=0',
+  'PrependPath=1',
+  'Include_launcher=1',
+  'InstallLauncherAllUsers=0'
+]
+
+const PYTHON_VERSION = '3.12.10'
+
+/**
+ * 镜像上的官方安装包。SHA-256 是从 python.org 和 npmmirror 各下一份比对过的。
+ * 升版本时两边都要重新下来核对，不能只抄镜像的。
+ */
+export const PYTHON_MIRROR_INSTALLERS: Partial<Record<string, { url: string; sha256: string }>> = {
+  x64: {
+    url: `https://registry.npmmirror.com/-/binary/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-amd64.exe`,
+    sha256: '67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb'
+  },
+  arm64: {
+    url: `https://registry.npmmirror.com/-/binary/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-arm64.exe`,
+    sha256: '377ac8fd478987940088e879441e702a71b53164d2a1e6f1d51ff77a7e470258'
+  }
+}
+
+/** 下载 + 安装的上限。27MB 的安装包，慢网也够了 */
+const MIRROR_TIMEOUT_MS = 10 * 60_000
 
 /** 一个包的上限。Git 安装包 60MB 上下，慢网要好几分钟 */
 const WINGET_TIMEOUT_MS = 10 * 60_000
@@ -126,6 +169,82 @@ export function describeWingetFailure(pkg: WingetPackage, error: unknown): Winge
     message: `安装 ${pkg.name} 未完成（winget 退出码 ${hex}）。`,
     detail: `winget install ${pkg.id} exited with ${hex}\n${tail}`.trim()
   }
+}
+
+export interface MirrorDeps {
+  /** 下载一个 URL 的全部字节。默认走 Electron 的 net（认系统代理） */
+  download?: (url: string, signal: AbortSignal) => Promise<Buffer>
+  /** 运行安装器 */
+  run?: (exe: string, args: string[]) => Promise<void>
+  arch?: string
+}
+
+async function netDownload(url: string, signal: AbortSignal): Promise<Buffer> {
+  const response = await net.fetch(url, { signal })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return Buffer.from(await response.arrayBuffer())
+}
+
+async function runInstallerExe(exe: string, args: string[]): Promise<void> {
+  await execFileAsync(exe, args, { timeout: MIRROR_TIMEOUT_MS, windowsHide: true })
+}
+
+/**
+ * 从国内镜像下 Python 官方安装包、核对、静默安装。
+ *
+ * 失败不抛：返回原因，调用方据此退回 winget，并把这段原因一起交给 AI。
+ */
+export async function installPythonFromMirror(deps: MirrorDeps = {}): Promise<WingetOutcome> {
+  const pin = PYTHON_MIRROR_INSTALLERS[deps.arch ?? process.arch]
+  if (!pin) return { ok: false, detail: `no mirror installer for ${deps.arch ?? process.arch}` }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), MIRROR_TIMEOUT_MS)
+  const dir = await fs.mkdtemp(join(tmpdir(), 'uebox-python-'))
+  try {
+    let bytes: Buffer
+    try {
+      bytes = await (deps.download ?? netDownload)(pin.url, controller.signal)
+    } catch (error) {
+      return { ok: false, detail: `mirror download failed: ${(error as Error).message}` }
+    }
+    const actual = createHash('sha256').update(bytes).digest('hex')
+    if (actual !== pin.sha256) {
+      return { ok: false, detail: `mirror installer SHA-256 ${actual}, expected ${pin.sha256}` }
+    }
+
+    const exe = join(dir, pin.url.split('/').pop() ?? 'python-installer.exe')
+    await fs.writeFile(exe, bytes)
+    try {
+      await (deps.run ?? runInstallerExe)(exe, PYTHON_INSTALLER_ARGS)
+    } catch (error) {
+      const code = (error as { code?: unknown }).code
+      return { ok: false, detail: `python installer exited with ${String(code ?? (error as Error).message)}` }
+    }
+    return { ok: true }
+  } finally {
+    clearTimeout(timer)
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
+}
+
+/**
+ * 装一项前置。Python 先镜像、再 winget；Git 只有 winget。
+ *
+ * 两条都失败时，两段原因都留着 —— 交给 AI 时它要知道镜像那条也试过了。
+ */
+export async function installPrerequisite(
+  prerequisite: InstallablePrerequisite,
+  deps: { mirror?: () => Promise<WingetOutcome>; winget?: typeof runWinget } = {}
+): Promise<WingetOutcome> {
+  const winget = deps.winget ?? runWinget
+  if (prerequisite !== 'python') return winget(prerequisite)
+
+  const mirror = await (deps.mirror ?? installPythonFromMirror)()
+  if (mirror.ok) return mirror
+  const fallback = await winget('python')
+  if (fallback.ok) return fallback
+  return { ...fallback, detail: `${mirror.detail ?? ''}\n${fallback.detail ?? ''}`.trim() }
 }
 
 /** 跑一个包的 winget 安装。抽成可替换的一项，测试才不会真去装软件 */

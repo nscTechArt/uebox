@@ -3,7 +3,9 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
+import zipfile
 
 FILE = Path(__file__).resolve().parents[1] / 'resources/skills/blender-ue-pipeline/scripts/setup_mcp.py'
 spec = importlib.util.spec_from_file_location('setup_mcp', FILE)
@@ -81,6 +83,42 @@ class MacSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not enabled'):
             setup.install(self.exe, self.install, self.run_command)
         self.assertFalse((self.install / 'mcp-entry.json').exists())
+
+    def make_archive(self, comment):
+        archive = self.root / 'source.zip'
+        with zipfile.ZipFile(archive, 'w') as bundle:
+            bundle.writestr('mcp/pyproject.toml', '')
+            bundle.writestr('addon/blender_mcp_addon/__init__.py', '')
+            bundle.comment = comment.encode('ascii')
+        return archive
+
+    # Box ships the pinned source, so a machine without Git can install
+    def test_shipped_archive_needs_no_git(self):
+        archive = self.make_archive(setup.REVISION)
+        setup.install(self.exe, self.install, self.run_command, source_archive=archive)
+        self.assertTrue((self.install / 'source' / 'mcp' / 'pyproject.toml').is_file())
+        self.assertFalse(any(call[0] == 'git' for call in self.calls))
+        # rerun repairs the add-on; an unpacked source has no .git to ask
+        self.calls.clear()
+        setup.install(self.exe, self.install, self.run_command, source_archive=archive)
+        self.assertFalse(any(call[0] == 'git' or 'pip' in call for call in self.calls))
+
+    def test_archive_of_another_revision_is_refused(self):
+        archive = self.make_archive('0' * 40)
+        with self.assertRaisesRegex(ValueError, 'pinned upstream revision'):
+            setup.install(self.exe, self.install, self.run_command, source_archive=archive)
+        self.assertFalse((self.install / 'installed-revision.txt').exists())
+
+    # From mainland China PyPI often stalls; the mirror is only tried after it fails
+    def test_pip_falls_back_to_mirror(self):
+        def flaky(*args):
+            if 'pip' in args and '--index-url' not in args:
+                raise subprocess.CalledProcessError(1, args)
+            return self.run_command(*args)
+        setup.install(self.exe, self.install, flaky)
+        pip_calls = [call for call in self.calls if 'pip' in call]
+        self.assertEqual(len(pip_calls), 1)
+        self.assertIn('https://pypi.tuna.tsinghua.edu.cn/simple', pip_calls[0])
 
     def test_old_version_and_nonexecutable_rejected_before_install(self):
         with self.assertRaisesRegex(ValueError, '5.1'):

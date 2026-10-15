@@ -68,6 +68,20 @@ commit `3c8f346435aab021dd5da3a048ada7c8fb647385`），安装后位于 `resource
 [`licenses/Lore-MIT.txt`](licenses/Lore-MIT.txt)（Copyright (c) 2026 Epic Games, Inc.）。
 本体的 Apache-2.0 不替代它。
 
+## Blender Lab MCP — GPL-3.0-or-later / CC-BY-SA-4.0
+
+「一键接入 Blender」用的官方 MCP 服务与 Blender 插件来自 Blender Foundation 的
+[Blender Lab MCP](https://projects.blender.org/lab/blender_mcp)。随包提供未修改的完整源码
+（commit `4309a39646e644261624bfcd2bca669b343b7621`），安装后位于
+`resources/blender-mcp/blender-mcp-4309a396.zip`，用户点击安装时解压到本机并在独立的 Python
+环境中运行，与虚幻盒子本体以进程间通信交互，不与本体链接。
+代码以 GPL-3.0-or-later 授权（Copyright Blender Authors），完整许可证见
+[`licenses/GPL-3.0.txt`](licenses/GPL-3.0.txt)；其中的 Blender 手册摘录以 CC-BY-SA-4.0 授权，
+署名 Blender Documentation Team，说明见 zip 内 `mcp/blmcp/data/manual/copyright.rst`。
+zip 本身即对应源码；来源与版本记录在
+[`resources/blender-mcp/blender-mcp-source.json`](resources/blender-mcp/blender-mcp-source.json)，
+由 `scripts/fetch-blender-mcp.mjs` 取得并按 commit 核对。本体的 Apache-2.0 不替代它。
+
 ## 其他双许可组件
 
 | 组件 | 上游许可选项 | 本项目采用 |

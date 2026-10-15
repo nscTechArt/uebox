@@ -272,7 +272,7 @@ export default {
       prereqsInstalled: '{names} installed.',
       askAi: 'Ask AI to troubleshoot',
       askAiFailed: 'Could not hand off to AI: {reason}',
-      aiPrompt: `Help me install {names} on this Windows PC so I can connect Blender. Unreal Box tried to install it automatically with winget and failed. Raw output:
+      aiPrompt: `Help me install {names} on this Windows PC so I can connect Blender. Unreal Box tried to install it automatically (Python from a mirror in China, then winget) and failed. Raw output:
 
 {detail}
 

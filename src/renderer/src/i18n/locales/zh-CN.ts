@@ -279,7 +279,7 @@ export default {
        * 缺 Git 的机器上 AI 没有 shell 工具，所以要说清楚：跑不了命令就教用户手动装，
        * 不然模型会回一句「我没有这个能力」就停了。
        */
-      aiPrompt: `帮我在这台 Windows 电脑上装好 {names}，用于接入 Blender。虚幻盒子用 winget 自动安装失败了，原始输出如下：
+      aiPrompt: `帮我在这台 Windows 电脑上装好 {names}，用于接入 Blender。虚幻盒子自动安装失败了（Python 先试过国内镜像，再试过 winget），原始输出如下：
 
 {detail}
 
