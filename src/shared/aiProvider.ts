@@ -648,11 +648,12 @@ export function applyRolePatch(roles: RoleBindings, patch: RoleBindingsPatch): R
  */
 export function unsavedRoles(saved: RoleBindings, patch: RoleBindingsPatch): ModelRole[] {
   return (Object.entries(patch) as [ModelRole, ModelBinding | null][])
-    .filter(
-      ([role, binding]) =>
-        binding &&
-        (saved[role]?.providerId !== binding.providerId || saved[role]?.modelId !== binding.modelId)
-    )
+    .filter(([role, binding]) => {
+      if (!binding) return false
+      // 「Agent」已并进「对话」那一格（主进程 `ai/store.ts` 的 mergeMainModel），写进去的在 chat 上
+      const stored = role === 'agent' ? (saved.agent ?? saved.chat) : saved[role]
+      return stored?.providerId !== binding.providerId || stored?.modelId !== binding.modelId
+    })
     .map(([role]) => role)
 }
 

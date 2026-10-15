@@ -636,19 +636,19 @@ export default {
       unset: '未设置',
       // 行内只留「选之前要知道的」，长文收进 More（一个 ? 图标的 tooltip）
       moreLabel: '查看详细说明',
-      chat: '对话',
-      chatDesc: '助手与各处对话窗口的默认模型。',
-      chatMerged: 'Agent、视觉、轻量任务同样使用此模型。',
+      chat: '主模型',
+      chatDesc: '对话与 Agent 共用，输入框里切换的就是它；其他用途未单独设置时也用它。',
+      chatMerged: '视觉、轻量任务同样使用此模型。',
       chatSplit: '分别设置',
       agent: 'Agent',
       agentDesc: '处理多步任务；未选择时使用对话模型。',
       vision: '视觉',
       // 这几条渲染成纯文本，不要写 Markdown 强调符，会原样显示出来
-      visionDesc: '对话或 Agent 模型无法识图时，使用此模型。',
+      visionDesc: '主模型无法识图时，使用此模型。',
       visionMore: '主模型支持识图时无需配置；否则请选择视觉模型，两者都不支持时无法发送图片。',
       visionMissing: '图片请求会报错',
       summary: '轻量任务',
-      summaryDesc: '用于总结、起标题、判断意图等；未选择时使用对话或 Agent 模型。',
+      summaryDesc: '用于总结、起标题、判断意图等；未选择时使用主模型。',
       embedding: '嵌入',
       embeddingDesc: '为知识库内容建立索引，供助手检索。',
       embeddingMore: '更换模型会自动重建索引；使用 Ollama 本地模型可避免云端费用。',
@@ -676,9 +676,9 @@ export default {
       ttsMissing: '回复朗读不可用',
       realtimeDesc: '选择实时语音模型，用于语音通话。',
       realtimeMore:
-        '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex，普通对话模型不能绑在此处。未设置时，若已配置语音识别与语音合成，通话改由对话模型应答，响应稍慢。',
+        '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex，普通对话模型不能绑在此处。未设置时，若已配置语音识别与语音合成，通话改由主模型应答，响应稍慢。',
       realtimeMissing: '语音通话不可用',
-      realtimeViaPipeline: '未设置时，通话由对话模型应答（经语音识别与语音合成），响应稍慢。',
+      realtimeViaPipeline: '未设置时，通话由主模型应答（经语音识别与语音合成），响应稍慢。',
       stt: '语音识别',
       sttDesc: '按下语音热键说话，转写为文字填入搜索框。未配置时使用实时语音通道。',
       sttMore:
@@ -2426,7 +2426,9 @@ export default {
       declined: '已交由 AI 决定',
       cancelled: '未回答',
       skippedOne: '此问题未选择',
-      delegatedOne: '由 AI 决定'
+      delegatedOne: '由 AI 决定',
+      autoCountdown: '全部权限模式下，{time} 后按推荐项继续',
+      autoAnswered: '已按推荐项继续'
     },
     // 每轮回复下方的 token 用量
     tokenUsage: {

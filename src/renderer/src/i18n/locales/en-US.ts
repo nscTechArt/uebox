@@ -649,20 +649,20 @@ export default {
       desc: 'Assign models by purpose.',
       unset: 'Not set',
       moreLabel: 'Show details',
-      chat: 'Chat',
-      chatDesc: 'Default model for the assistant and every chat window.',
-      chatMerged: 'Agent, Vision and Quick tasks use this model too.',
+      chat: 'Main model',
+      chatDesc: 'Shared by chat and Agent; the composer switches this one. Also used wherever no other model is set.',
+      chatMerged: 'Vision and Quick tasks use this model too.',
       chatSplit: 'Set separately',
       agent: 'Agent',
       agentDesc: 'For multi-step tasks. Uses the Chat model if unconfigured.',
       vision: 'Vision',
-      visionDesc: 'Used when the Chat or Agent model cannot understand images.',
+      visionDesc: 'Used when the main model cannot understand images.',
       visionMore:
         'No setup is needed if the primary model supports images. Otherwise choose a vision model; images cannot be sent if neither supports them.',
       visionMissing: 'Image requests will fail',
       summary: 'Quick tasks',
       summaryDesc:
-        'For summaries, titles, and intent classification. Uses the Chat or Agent model if unconfigured.',
+        'For summaries, titles, and intent classification. Uses the main model if unconfigured.',
       embedding: 'Embedding',
       embeddingDesc: 'Index knowledge base content for the assistant to search.',
       embeddingMore:
@@ -2484,7 +2484,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       declined: 'Left to the AI',
       cancelled: 'No answer',
       skippedOne: 'Not answered',
-      delegatedOne: 'Left to the AI'
+      delegatedOne: 'Left to the AI',
+      autoCountdown: 'Full access: continuing with the recommended option in {time}',
+      autoAnswered: 'Continued with the recommended option'
     },
     // Token usage under each reply
     tokenUsage: {

@@ -14,7 +14,7 @@
  *   - 提问是**求助**，问的是「你到底想要什么」，**没有默认答案**。超时按什么处理都是
  *     替不在场的人做主：按取消是替他决定「这事不做了」，按「你自己定」更糟。
  *
- * 所以提问**没有超时**，见下。
+ * 所以提问**没有超时**，见下。唯一的例外是用户选了「全部权限」，见「全部权限档的倒计时」。
  *
  * ## 为什么提问不设超时
  *
@@ -28,6 +28,14 @@
  *   1. 用户回答（accept / decline / 主动关掉卡片按 cancel）；
  *   2. 用户按停止 / 删掉对话 → `signal` abort；
  *   3. 拥有这张卡片的窗口被销毁 → 见 `onSenderGone`。
+ *
+ * ## 全部权限档的倒计时
+
+ *
+ * 用户选「全部权限」时说的就是「我不盯着，你自己拿主意」—— 审批在这一档已经不弹了，
+ * 提问却照样把整轮挂住等人，两条规矩互相打架。所以这一档下请求方会带上
+ * `autoAnswerAfterMs`：到点没人答，就按每一问的推荐项（第一个选项）作答，
+ * 回给模型时注明是自动选的。卡片上画倒计时，人在场时照样能抢先改选。
  *
  * ## 为什么是三态而不是两态
  *
@@ -44,10 +52,11 @@
 
 import { ipcMain, type WebContents } from 'electron'
 
-import type {
-  AgentQuestion,
-  AgentQuestionAction,
-  AgentQuestionOption
+import {
+  recommendedAnswers,
+  type AgentQuestion,
+  type AgentQuestionAction,
+  type AgentQuestionOption
 } from '../../../shared/agentQuestion'
 
 import { notifyAgentRun } from './runObserver'
@@ -66,12 +75,16 @@ export interface QuestionPayload {
   sessionId: string
   toolCallId: string
   questions: AskUserQuestion[]
+  /** 到点自动按推荐项作答的时刻（epoch 毫秒），只在全部权限档下有 */
+  autoAnswerAt?: number
 }
 
 export interface QuestionRequest {
   sessionId: string
   toolCallId: string
   questions: AskUserQuestion[]
+  /** 多久没人答就按推荐项作答。不给 = 一直等（默认），见文件头 */
+  autoAnswerAfterMs?: number
 }
 
 export interface QuestionOutcome {
@@ -84,6 +97,8 @@ export interface QuestionOutcome {
    * 答了两问。下标对齐不会有这个问题。
    */
   answers?: string[]
+  /** 倒计时到点自动选的推荐项，不是用户点的 */
+  auto?: boolean
 }
 
 interface ReplyPayload {
@@ -144,9 +159,11 @@ export function createQuestionRequester(
       }
 
       let settled = false
+      let autoTimer: ReturnType<typeof setTimeout> | undefined
       const finish = (outcome: QuestionOutcome): void => {
         if (settled) return
         settled = true
+        if (autoTimer) clearTimeout(autoTimer)
         ipcMain.removeListener(REPLY_CHANNEL, handler)
         signal?.removeEventListener('abort', onAbort)
         sender.off('destroyed', onSenderGone)
@@ -172,6 +189,11 @@ export function createQuestionRequester(
             ? { answers: payload.answers.map((a) => (typeof a === 'string' ? a : '')) }
             : {})
         }
+        settleWith(outcome)
+      }
+
+      /** 收掉这一问，并告诉发起窗口它已经答过了（谁答的、在哪个窗口答的都一样） */
+      const settleWith = (outcome: QuestionOutcome): void => {
         finish(outcome)
         /*
          * 告诉发起窗口：这张卡片答过了。
@@ -213,10 +235,26 @@ export function createQuestionRequester(
       signal?.addEventListener('abort', onAbort, { once: true })
       sender.once('destroyed', onSenderGone)
 
+      const autoAfter = req.autoAnswerAfterMs
+      const autoAnswerAt =
+        typeof autoAfter === 'number' && autoAfter > 0 ? Date.now() + autoAfter : undefined
+      if (autoAnswerAt !== undefined) {
+        autoTimer = setTimeout(
+          () =>
+            settleWith({
+              action: 'accept',
+              answers: recommendedAnswers(req.questions),
+              auto: true
+            }),
+          autoAfter
+        )
+      }
+
       const payload: QuestionPayload = {
         sessionId: req.sessionId,
         toolCallId: req.toolCallId,
-        questions: req.questions
+        questions: req.questions,
+        ...(autoAnswerAt !== undefined ? { autoAnswerAt } : {})
       }
       pendingQuestions.set(req.toolCallId, { senderId: sender.id, payload })
       sender.send('agent-v3:question-required', payload)
