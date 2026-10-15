@@ -27,6 +27,37 @@ describe('models.json 解析', () => {
     expect(settings.providers[0].models.map((model) => model.ttsVoice)).toEqual([voice, 'my-voice'])
     expect(normalizeSettings(settings).providers[0].baseUrl).toBe('wss://speech.example/inference')
   })
+  /**
+   * 「对话」与「Agent」合成一个主模型，存在 chat 那一格。输入框写的是 Agent 那格，
+   * 两格都有值时听它的 —— 那是用户最近亲手选的；不合的话后台活会一直用另一个模型
+   */
+  it('Agent 绑定并进主模型（chat）；两格都有时听 Agent 的', () => {
+    const provider = {
+      id: 'p',
+      kind: 'chat',
+      protocol: 'openai-completions',
+      baseUrl: 'https://api.example/v1',
+      models: [{ id: 'claude' }, { id: 'sol' }]
+    }
+    const both = normalizeSettings({
+      version: 3,
+      providers: [provider],
+      roles: {
+        chat: { providerId: 'p', modelId: 'claude' },
+        agent: { providerId: 'p', modelId: 'sol' }
+      }
+    })
+    expect(both.roles.chat).toEqual({ providerId: 'p', modelId: 'sol' })
+    expect(both.roles.agent).toBeUndefined()
+
+    const chatOnly = normalizeSettings({
+      version: 3,
+      providers: [provider],
+      roles: { chat: { providerId: 'p', modelId: 'claude' } }
+    })
+    expect(chatOnly.roles.chat).toEqual({ providerId: 'p', modelId: 'claude' })
+  })
+
   it('保存独立语音合成绑定与音色，往返不丢失', () => {
     const settings = normalizeSettings({
       version: 3,

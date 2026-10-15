@@ -97,11 +97,23 @@ const STEER_REJECTION_COPY: Record<string, { restored: string; queued: string }>
 } satisfies Record<SteerRejectionCode, { restored: string; queued: string }>
 
 /**
+ * PROJECT_MISMATCH 且 `runProject` 为空串 = 这一轮压根没连着工程
+ * （归属的工程没开，或纯对话开跑时什么都没连）—— 作用域里没有
+ * `connectedProject` 时主进程带回空串。这不是「在另一个工程上」，
+ * 换用不带工程名的一句。
+ */
+const STEER_NO_PROJECT_COPY = {
+  restored: 'assistantInputComposer.steerNoProjectRestored',
+  queued: 'assistantInputComposer.steerNoProjectQueued'
+} satisfies Record<'restored' | 'queued', string>
+
+/**
  * 插话被按码拒绝时该跟用户说什么。
  *
  * 认识的码返回查到的文案（`message.info`）；不认识（或文案没配上）返回
  * `undefined`，调用方退回 `steerFailed` 外框。主进程给的工程名是原值、
- * 可能为空串 —— 空的时代入「另一个工程」。`error` 原文不进界面，
+ * 可能为空串 —— 插话抓的那头空了代入「另一个工程」；正在跑的这头空了
+ * 说明这一轮没连着工程，走 `STEER_NO_PROJECT_COPY`。`error` 原文不进界面，
  * 照旧留给调试台和日志。
  */
 export function describeSteerRejection(
@@ -115,10 +127,14 @@ export function describeSteerRejection(
   const copy = result?.code ? STEER_REJECTION_COPY[result.code] : undefined
   if (!copy) return undefined
   const otherProject = t('assistantInputComposer.steerOtherProject')
-  const key = copy[ifRejected]
+  const runProject = result?.errorParams?.runProject
+  const key =
+    result?.code === 'PROJECT_MISMATCH' && !runProject
+      ? STEER_NO_PROJECT_COPY[ifRejected]
+      : copy[ifRejected]
   const text = t(key, {
     snapshotProject: result?.errorParams?.snapshotProject || otherProject,
-    runProject: result?.errorParams?.runProject || otherProject
+    runProject: runProject || otherProject
   })
   return text !== key ? text : undefined
 }

@@ -109,11 +109,14 @@ describe('resumeAgent 的忙闸', () => {
 })
 
 describe('steerAgent 的被拒文案', () => {
-  it('这一轮已结束 + 放回输入框（默认）：info，说内容放回去了', async () => {
+  it('这一轮已结束 + 放回输入框：info，说内容放回去了', async () => {
     const { api } = mountAgentMode()
     agentV3.steer.mockResolvedValue({ success: false, code: 'NOT_RUNNING' })
 
-    const sent = await api.steerAgent('加一句', { targetSessionId: 'agent-1' })
+    const sent = await api.steerAgent('加一句', {
+      targetSessionId: 'agent-1',
+      ifRejected: 'restored'
+    })
 
     expect(sent).toBe(false)
     expect(messageCalls.info).toHaveBeenCalledWith(expect.stringContaining('放回输入框'))
@@ -143,7 +146,10 @@ describe('steerAgent 的被拒文案', () => {
       errorParams: { snapshotProject: 'GameA', runProject: 'GameB' }
     })
 
-    const sent = await api.steerAgent('加一句', { targetSessionId: 'agent-1' })
+    const sent = await api.steerAgent('加一句', {
+      targetSessionId: 'agent-1',
+      ifRejected: 'restored'
+    })
 
     expect(sent).toBe(false)
     const text = String(messageCalls.info.mock.calls.at(-1)?.[0])
@@ -177,10 +183,10 @@ describe('steerAgent 的被拒文案', () => {
     agentV3.steer.mockResolvedValue({
       success: false,
       code: 'PROJECT_MISMATCH',
-      errorParams: { snapshotProject: '', runProject: '' }
+      errorParams: { snapshotProject: '', runProject: 'GameB' }
     })
 
-    await api.steerAgent('加一句', { targetSessionId: 'agent-1' })
+    await api.steerAgent('加一句', { targetSessionId: 'agent-1', ifRejected: 'restored' })
 
     const text = String(messageCalls.info.mock.calls.at(-1)?.[0])
     expect(text).toContain('另一个工程')
@@ -191,7 +197,10 @@ describe('steerAgent 的被拒文案', () => {
     const { api } = mountAgentMode()
     agentV3.steer.mockResolvedValue({ success: false, error: '内核拒了' })
 
-    const sent = await api.steerAgent('加一句', { targetSessionId: 'agent-1' })
+    const sent = await api.steerAgent('加一句', {
+      targetSessionId: 'agent-1',
+      ifRejected: 'restored'
+    })
 
     expect(sent).toBe(false)
     expect(messageCalls.warning).toHaveBeenCalledWith(expect.stringContaining('插话失败'))

@@ -19,6 +19,7 @@ import { join } from 'path'
 import { observeAgentRuns } from '../host/runObserver'
 import { curateSession, type CurateResult } from './curator'
 import { createEditorProbe, type EditorProbe } from './probe'
+import { ExperienceStore } from './store'
 import {
   markCurated,
   pruneTrails,
@@ -27,6 +28,7 @@ import {
   type TrailCall,
   type TrailHeader
 } from './trail'
+import { repairLayer } from './upkeep'
 
 /** 会话结束后等多久再整理。用户常常紧接着再发一句，那一轮结束再说 */
 export const CURATE_DELAY_MS = 60_000
@@ -80,7 +82,11 @@ export function startExperienceCurator(deps: CuratorSchedulerDeps = {}): () => v
   const complete = deps.complete ?? defaultComplete
   const probe = deps.probe ?? createEditorProbe()
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
-  let chain: Promise<unknown> = Promise.resolve()
+  // 通用层的旧账启动时就修（见 upkeep.ts）：不等哪次会话结束，设置页一打开就是修好的样子。
+  // 各工程那一层在整理员给它干活时修
+  let chain: Promise<unknown> = repairLayer(new ExperienceStore(home)).catch((error) =>
+    console.warn('[Experience] 修旧账失败，已忽略:', error)
+  )
 
   const curate = async (sessionId: string): Promise<void> => {
     const trail = await readTrail(trailDir, sessionId)

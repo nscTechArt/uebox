@@ -58,4 +58,19 @@ export interface AgentQuestionItem {
   action?: AgentQuestionAction
   /** 与 `questions` 同序，空串表示这一问没选 */
   answers?: string[]
+  /**
+   * 到这个时刻（epoch 毫秒）还没人答，就按推荐项继续。只有「全部权限」档下才有，
+   * 卡片据此画倒计时。没有这一项就是一直等，见 `questionChannel.ts`
+   */
+  autoAnswerAt?: number
+  /** 这次的回答是倒计时到点自动选的推荐项，不是用户点的 */
+  auto?: boolean
+}
+
+/**
+ * 倒计时到点时每一问选哪个：模型按约定把推荐项放在第一个（`ask_user` 的 schema 说明）。
+ * 主进程自动作答、界面预告「将选择 X」都用它，两边说的必须是同一个选项
+ */
+export function recommendedAnswers(questions: readonly AgentQuestion[]): string[] {
+  return questions.map((q) => q.options[0]?.label ?? '')
 }

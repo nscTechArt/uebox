@@ -14,7 +14,7 @@ import { findAvoided, formatPrecheck } from './precheck'
 import { buildProbeScript, probeTarget, readProbeVerdict, type ProbeVerdict } from './probe'
 import { matchEntries, type LayeredEntry } from './recall'
 import { createExperienceRuntime } from './runtime'
-import { consoleSymbol, pythonSymbol } from './specificity'
+import { consoleSymbol, errorProblem, isApiFact, pythonSymbol } from './specificity'
 import { ExperienceStore, experienceDir } from './store'
 import type { TrailCall, TrailHeader } from './trail'
 
@@ -49,6 +49,18 @@ describe('API 钥匙', () => {
     ).toBe('material.used_with_landscape')
     expect(pythonSymbol(py('TypeError: must be real number, not NoneType'))).toBeUndefined()
     expect(consoleSymbol('  r.ScreenPercentage 50')).toBe('r.screenpercentage')
+  })
+
+  it('在 None 上取属性是脚本没判空，不学', () => {
+    const none = py("AttributeError: 'NoneType' object has no attribute 'get_editor_property'")
+    expect(errorProblem('ue_run_python_script', none)).toBe('script-bug')
+    expect(errorProblem('ue_run_python_script', HIDDEN)).toBeUndefined()
+  })
+
+  it('只有 Python 经验带 API 钥匙的才是 API 事实', () => {
+    expect(isApiFact({ tool: 'ue_run_python_script', symbol: 'character.is_hidden' })).toBe(true)
+    expect(isApiFact({ tool: 'ue_run_python_script' })).toBe(false)
+    expect(isApiFact({ tool: 'ue_run_console_command', symbol: 'r.x' })).toBe(false)
   })
 
   it('召回：说的不是同一个 API，片段再像也不出场', () => {
@@ -158,17 +170,48 @@ describe('执行前提醒', () => {
     expect((await global.readTool(proven.tool))[0].status).toBe('proven')
   })
 
-  it('原样再发就放行；真跑成了说明拦错了，降回试用、不再拦', async () => {
+  it('原样再发就放行；真跑成了说明拦错了：API 事实不降级，只是不再拦', async () => {
     const rt = runtime()
     const bad = { tool: proven.tool, args: { script: 'b.is_hidden' } }
     expect(await rt.before(bad)).toBeDefined()
     expect(await rt.before(bad)).toBeUndefined()
     await rt.after({ ...bad, isError: false, text: 'ok' })
     await rt.flush()
-    expect((await global.readTool(proven.tool))[0].status).toBe('trial')
+    const [saved] = await global.readTool(proven.tool)
+    expect(saved.status).toBe('proven')
+    expect(saved.avoid).toBeUndefined()
     expect(
       await runtime().before({ tool: proven.tool, args: { script: 'c.is_hidden' } })
     ).toBeUndefined()
+  })
+
+  it('API 事实不进对照组：抽到对照也照样出场，再报一次就转正', async () => {
+    await global.updateTool(proven.tool, (list) => list.map((e) => ({ ...e, status: 'trial' })))
+    const rt = createExperienceRuntime({
+      project: new ExperienceStore(join(root, 'project')),
+      global,
+      projectKey: 'p',
+      engine: '5.5',
+      agentId: 's',
+      isLearnableTool: () => true,
+      random: () => 0.01
+    })
+    const note = await rt.after({
+      tool: proven.tool,
+      args: { script: 'a.is_hidden' },
+      isError: true,
+      text: `ue_run_python_script 失败：Traceback (most recent call last): File "<ua-script>", line 5, in <module> AttributeError: 'Character' object has no attribute 'is_hidden'`
+    })
+    expect(note).toContain('改用 is_hidden_ed()')
+    await rt.after({
+      tool: proven.tool,
+      args: { script: 'a.is_hidden_ed()' },
+      isError: false,
+      text: 'ok'
+    })
+    await rt.flush()
+    expect((await global.readTool(proven.tool))[0].status).toBe('proven')
+    expect(await global.statsFor(proven.id)).toMatchObject({ shown: 1, holdout: 0 })
   })
 
   it('普通工具不做执行前提醒', async () => {
@@ -394,7 +437,12 @@ describe('到引擎里验真', () => {
       member: 'is_hidden',
       prefer: 'is_hidden_ed'
     })
-    expect((await curateWith('confirmed')).written[0].source).toContain('checked in editor')
-    expect((await curateWith('unknown')).written[0].source).not.toContain('checked in editor')
+    const confirmed = (await curateWith('confirmed')).written[0]
+    expect(confirmed.source).toContain('checked in editor')
+    // 引擎答过真假的 API 事实，进门就是已验证
+    expect(confirmed.status).toBe('proven')
+    const unknown = (await curateWith('unknown')).written[0]
+    expect(unknown.source).not.toContain('checked in editor')
+    expect(unknown.status).toBe('trial')
   })
 })

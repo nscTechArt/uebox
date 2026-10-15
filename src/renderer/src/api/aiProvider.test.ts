@@ -31,7 +31,7 @@ describe('aiProviderAPI', () => {
     await expect(aiProviderAPI.getSettings()).resolves.toBe(value)
   })
 
-  it('切换 Agent 只发 agent 这一个（主进程在最新配置上合并，别的角色不动），发的是普通对象', async () => {
+  it('切换模型只发主模型这一格（主进程在最新配置上合并，别的角色不动），发的是普通对象', async () => {
     const roles: RoleBindings = {
       chat: { providerId: 'p', modelId: 'chat' },
       vision: { providerId: 'p', modelId: 'vision' }
@@ -47,11 +47,13 @@ describe('aiProviderAPI', () => {
     })
 
     const payload = setRoles.mock.calls[0][0] as RoleBindings
+    // 「Agent」已并进主模型（chat 那一格）：输入框切的就是它
     expect(structuredClone(payload)).toEqual({
-      agent: { providerId: 'p2', modelId: 'agent::pro' }
+      chat: { providerId: 'p2', modelId: 'agent::pro' }
     })
-    expect(roles.agent).toBeUndefined()
-    expect(result.roles.agent).toEqual({ providerId: 'p2', modelId: 'agent::pro' })
+    expect(roles.chat).toEqual({ providerId: 'p', modelId: 'chat' })
+    expect(result.roles.chat).toEqual({ providerId: 'p2', modelId: 'agent::pro' })
+    expect(result.roles.vision).toEqual({ providerId: 'p', modelId: 'vision' })
   })
 
   it('主进程拒绝保存时把真实原因交给界面', async () => {

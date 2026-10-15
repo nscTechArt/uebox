@@ -58,7 +58,9 @@ import {
   extractPackagePaths,
   getLockOwner,
   locksOwnedBy,
-  sameTeam
+  releasePaths,
+  sameTeam,
+  teamRootOf
 } from '../core/assetLock'
 import { enforceAfterWrite, suspendForWrite } from '../core/assetLockEnforcement'
 import { effectiveConnectionId } from '../core/projectTargetContext'
@@ -1565,8 +1567,24 @@ function withAssetLock(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
       //
       // 走**软锁**：只挡另一条 AI 会话、只出提示，不翻只读位。用户在主视口里
       // 干活是常态，把关卡的手动保存也拦下来，代价和收益完全不成比例。
-      if (LEVEL_SCOPED_NAMESPACES.has(tool.unrealBox.namespace)) {
+      const levelScoped = LEVEL_SCOPED_NAMESPACES.has(tool.unrealBox.namespace)
+      if (levelScoped) {
         await lock([CURRENT_LEVEL_LOCK], true)
+      }
+
+      // 工作室模式的制作人：它那一轮就是整局，锁跟着一轮走的话，它碰过的资产和「当前关卡」
+      // 到交付前队友都改不了（撞上去等 90 秒再失败）。制作人的锁只占这一次调用；
+      // 队员照旧占到这件活交回（`releaseAll` 在派活的 finally 里）。团队里全是软锁，
+      // 不翻只读位，所以这里不用管下面那一开一合
+      if (team && teamRootOf(owner) === owner) {
+        try {
+          return await inner(toolCallId, params, signal, onUpdate)
+        } finally {
+          releasePaths(effectiveConnectionId(), owner, [
+            ...paths,
+            ...(levelScoped ? [CURRENT_LEVEL_LOCK] : [])
+          ])
+        }
       }
 
       // 开合的范围是**这条会话手上的全部锁**，不是这次调用参数里那几个 ——

@@ -465,12 +465,18 @@ export function initAgentEventDispatcher(): void {
   // 它会一直等下去，而用户根本看不到有卡片在等他。
   on(
     'agent-v3:question-required',
-    (data: { sessionId: string; toolCallId: string; questions: AgentQuestion[] }) => {
+    (data: {
+      sessionId: string
+      toolCallId: string
+      questions: AgentQuestion[]
+      autoAnswerAt?: number
+    }) => {
       if (!data?.sessionId || !data.toolCallId) return
 
       const placed = getStreamStore().pushQuestion(data.sessionId, {
         toolCallId: data.toolCallId,
-        questions: Array.isArray(data.questions) ? data.questions : []
+        questions: Array.isArray(data.questions) ? data.questions : [],
+        ...(typeof data.autoAnswerAt === 'number' ? { autoAnswerAt: data.autoAnswerAt } : {})
       })
 
       if (!placed) {
@@ -537,9 +543,16 @@ export function initAgentEventDispatcher(): void {
       toolCallId?: string
       action?: AgentQuestionAction
       answers?: string[]
+      auto?: boolean
     }) => {
       if (!data?.sessionId || !data.toolCallId || !data.action) return
-      getStreamStore().resolveQuestion(data.sessionId, data.toolCallId, data.action, data.answers)
+      getStreamStore().resolveQuestion(
+        data.sessionId,
+        data.toolCallId,
+        data.action,
+        data.answers,
+        data.auto === true
+      )
       paintStreamingMessage(data.sessionId)
     }
   )

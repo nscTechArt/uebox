@@ -186,6 +186,46 @@ describe('createQuestionRequester', () => {
    * 卡片可能是在另一个窗口里答的（独立聊天窗口显示着主窗口跑的这一轮）。
    * 发起窗口的「已答」记在它自己的流式状态里，不告诉它的话卡片一直写着「等你回答」。
    */
+  /**
+   * 「全部权限」档：用户说了不用问他，到点就按推荐项（每问第一个选项）继续，
+   * 并告诉卡片这是自动选的。倒计时之前人回来了，照样以他的选择为准。
+   */
+  it('带了 autoAnswerAfterMs：到点按推荐项作答，标明是自动的', async () => {
+    const sender = fakeSender(1)
+    const pending = createQuestionRequester(sender as never)(
+      request({ autoAnswerAfterMs: 3 * 60_000 })
+    )
+
+    expect(sender.send).toHaveBeenCalledWith(
+      'agent-v3:question-required',
+      expect.objectContaining({ autoAnswerAt: expect.any(Number) })
+    )
+
+    vi.advanceTimersByTime(3 * 60_000)
+    await expect(pending).resolves.toEqual({
+      action: 'accept',
+      answers: ['补适配层（推荐）'],
+      auto: true
+    })
+    expect(sender.send).toHaveBeenLastCalledWith(
+      'agent-v3:question-settled',
+      expect.objectContaining({ toolCallId: 'call-1', auto: true })
+    )
+    expect(hasPendingQuestion('session-1')).toBe(false)
+  })
+
+  it('倒计时内人答了，以人的选择为准，计时器不再作答', async () => {
+    const sender = fakeSender(1)
+    const pending = createQuestionRequester(sender as never)(
+      request({ autoAnswerAfterMs: 3 * 60_000 })
+    )
+
+    reply('call-1', 'accept', ['顺带改音频概览'])
+    vi.advanceTimersByTime(3 * 60_000)
+
+    await expect(pending).resolves.toEqual({ action: 'accept', answers: ['顺带改音频概览'] })
+  })
+
   it('答完之后告诉发起窗口这张卡片怎么答的', async () => {
     const sender = fakeSender(1)
     const pending = createQuestionRequester(sender as never)(request())

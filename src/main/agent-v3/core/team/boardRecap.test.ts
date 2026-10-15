@@ -7,6 +7,7 @@ import {
   carryOverTasks,
   changedSince,
   formatBoardCarryOver,
+  reopenedJobTask,
   verdictIsStale
 } from './boardRecap'
 
@@ -76,5 +77,41 @@ describe('改没改过工程', () => {
     expect(verdictIsStale(undefined, 100, activity)).toBe(false)
     expect(verdictIsStale(60, undefined, activity)).toBe(false)
     expect(verdictIsStale(40, undefined, activity)).toBe(true)
+  })
+})
+
+/**
+ * 成果架上「重开」一件停下的活：不另起通知，变成任务板上一项「用户重开」的待办，
+ * 下一轮开局制作人在旧账里就能看到
+ */
+describe('停下的活交回制作人', () => {
+  const job = {
+    id: 'j7',
+    member: '审核',
+    brief: '同步现状',
+    startedAt: 1,
+    endedAt: 2,
+    outcome: 'stopped' as const,
+    reason: 'API key\n  auth failed'
+  }
+
+  it('变成一项挂着用户重开的待办，派给原来那个人，原因写进备注', () => {
+    expect(reopenedJobTask(job, 5 * HOUR)).toEqual({
+      id: 'redo-j7',
+      title: '同步现状',
+      owner: '审核',
+      status: 'todo',
+      note: 'stopped before finishing: API key auth failed',
+      reopenedAt: 5 * HOUR
+    })
+  })
+
+  it('下一轮开局的旧账里有它', () => {
+    const patch = reopenedJobTask(job, 5 * HOUR)
+    const board = [task({ ...patch, title: patch.title!, updatedAt: 5 * HOUR })]
+    expect(carryOverTasks(board, 6 * HOUR).map((t) => t.id)).toEqual(['redo-j7'])
+    expect(formatBoardCarryOver(carryOverTasks(board, 6 * HOUR), 6 * HOUR)).toContain(
+      'reopened by the user'
+    )
   })
 })

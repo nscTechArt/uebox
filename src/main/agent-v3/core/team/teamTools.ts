@@ -722,7 +722,13 @@ async function autoSnapshot(
 ): Promise<string> {
   if (!deps.snapshots || Object.keys(result.writeToolCalls ?? {}).length === 0) return ''
   try {
-    const snapshot = await deps.snapshots.save(snapshotMessage(who, what))
+    // 标签说「它干了什么」：交回报告的第一句比派活原文贴切 —— 派活常以工程路径这类背景开头，
+    // 一串快照全叫「地编：工程：I:\…」就分不出来了
+    const did = result.text
+      .trim()
+      .split(/(?<=[。！？!?])|\n/)
+      .find((s) => s.trim())
+    const snapshot = await deps.snapshots.save(snapshotMessage(who, did || what))
     return snapshot ? `【快照】已存 ${snapshot.id}（${snapshot.message}）` : ''
   } catch (error) {
     return `【快照】这次没存上：${error instanceof Error ? error.message : String(error)}`

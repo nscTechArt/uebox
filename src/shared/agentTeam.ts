@@ -236,6 +236,11 @@ export interface TeamJob {
   report?: string
   /** 停下的原因 */
   reason?: string
+  /**
+   * 用户在成果架上把这件停下的活「重开」了的时刻：任务板上加了一项交回制作人，
+   * 这件就不再算「停着没人管」
+   */
+  reopenedAt?: number
 }
 
 /**

@@ -20,7 +20,7 @@ const miniChatOpacityPercent = computed({
     const normalized = Math.min(100, Math.max(40, value))
     const opacity = normalized / 100
     aiConfigStore.setMiniChatOpacity(opacity)
-    window.electron?.ipcRenderer.send('mini-chat:set-opacity', opacity)
+    window.api.miniChat.setOpacity(opacity)
   }
 })
 </script>

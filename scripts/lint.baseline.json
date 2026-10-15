@@ -19,10 +19,6 @@
     "errors": 2,
     "warnings": 0
   },
-  "src/main/ipc/assistant.ts": {
-    "errors": 1,
-    "warnings": 0
-  },
   "src/main/ipc/baiduyun.ts": {
     "errors": 4,
     "warnings": 0
@@ -72,11 +68,11 @@
     "warnings": 0
   },
   "src/main/networkV2/SyncClient.ts": {
-    "errors": 6,
+    "errors": 5,
     "warnings": 0
   },
   "src/main/services/asset/AssetImportService.ts": {
-    "errors": 18,
+    "errors": 17,
     "warnings": 0
   },
   "src/main/services/asset/importFeatureFlag.test.ts": {
@@ -176,7 +172,7 @@
     "warnings": 0
   },
   "src/main/sqliteDataBase/ipc/assetData.ts": {
-    "errors": 44,
+    "errors": 43,
     "warnings": 0
   },
   "src/main/sqliteDataBase/ipc/assetData/crud.ts": {

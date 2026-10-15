@@ -1,20 +1,45 @@
 /**
  * 一条新经验能不能进门、进门时挤掉谁。整理员写新经验、以及工程经验升为通用时共用。
+ *
+ * ## 为什么不按工具限条数
+ *
+ * 早先每个工具最多 5 条，理由是防稀释：召回时几条互相挤占。可稀释是召回那一侧的事，
+ * 召回早已按工具名、报错片段、API 钥匙三把钥匙精确对上，一次最多带 3 条
+ * （`recall.ts`）—— 存得多不会让一次报错带上不相干的。按工具限条数防不了稀释，
+ * 只会把不相干的知识挤在同一排座位上：`ue_run_python_script` 下所有 API 的坑抢 5 个位置，
+ * 实际效果是「只留最近 5 条」，引擎核实过的事实被一条新来的挤掉（2026-10-15 用户发现）。
+ *
+ * 现在只按层限总量，防的是文件无限长；做法经验和 API 事实分开算（见 `isApiFact`）。
  */
 
-import type { ExperienceEntry } from './experienceFile'
+import type { ExperienceEntry, RetireReason } from './experienceFile'
 import { emptyStats, evictionScore, type EntryStats } from './lifecycle'
-import { patternProblem } from './specificity'
+import { isApiFact, patternProblem } from './specificity'
 
-/** 每个工具最多几条在用的。多了召回时互相挤占，研究里叫稀释 */
-export const MAX_ACTIVE_PER_TOOL = 5
-/** 每一层（一个工程、或通用层）最多几条在用的 */
+/** 每一层（一个工程、或通用层）最多几条在用的做法经验 */
 export const MAX_ACTIVE_PER_LAYER: Record<'project' | 'global', number> = {
   project: 60,
   global: 150
 }
+/**
+ * 每一层最多几条在用的 API 事实。事实只在说的是同一个 API 时才出场，
+ * 多存不会稀释召回；这个数只为文件不至于无限长
+ */
+export const MAX_FACTS_PER_LAYER: Record<'project' | 'global', number> = {
+  project: 1000,
+  global: 1000
+}
 /** 每个文件留几条已退休的，给用户看「它曾经这么以为过」 */
 export const MAX_RETIRED_PER_TOOL = 10
+
+/** 这一层里，和 `entry` 同一类（事实 / 做法）的在用条目最多几条 */
+export function layerCapacity(layer: 'project' | 'global', entry: ExperienceEntry): number {
+  return isApiFact(entry) ? MAX_FACTS_PER_LAYER[layer] : MAX_ACTIVE_PER_LAYER[layer]
+}
+
+export function retireAs(entry: ExperienceEntry, reason: RetireReason): ExperienceEntry {
+  return { ...entry, status: 'retired', retiredBecause: reason }
+}
 
 /**
  * 这个报错是不是已经有在用的经验对得上。
@@ -58,19 +83,25 @@ export function weakest(
 }
 
 /**
- * 把新经验放进一个工具的条目里：满了挤掉最该走的；
- * 最该走的是钉住的（全满且全钉住）就不放，回 undefined。
+ * 把新经验放进一个工具的条目里。回 undefined 表示不放。
+ *
+ * 不在这里限条数（见文件头），只做一件事：API 事实同一个 API 只留一条。
+ * 已有的那条转正了或被钉住，说明它站得住，新来的不放；还在试用，就换成新的 ——
+ * 新的那条是这次刚从引擎结果里学到的。
  */
 export function admit(
   entries: ExperienceEntry[],
-  incoming: ExperienceEntry,
-  ledger: Record<string, EntryStats>
+  incoming: ExperienceEntry
 ): ExperienceEntry[] | undefined {
   let next = [...entries]
-  if (entries.filter((e) => e.status !== 'retired').length >= MAX_ACTIVE_PER_TOOL) {
-    const victim = weakest(entries, ledger)
-    if (!victim || victim.pinned) return undefined
-    next = next.map((e) => (e.id === victim.id ? { ...e, status: 'retired' as const } : e))
+  if (isApiFact(incoming)) {
+    const same = entries.find(
+      (e) => e.status !== 'retired' && isApiFact(e) && e.symbol === incoming.symbol
+    )
+    if (same) {
+      if (same.pinned || same.status === 'proven') return undefined
+      next = next.map((e) => (e.id === same.id ? retireAs(e, 'replaced') : e))
+    }
   }
   next.push(incoming)
   const retired = next.filter((e) => e.status === 'retired')

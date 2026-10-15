@@ -69,6 +69,35 @@ describe('buildBoardModel：这一轮到哪了', () => {
     expect(build(redone)).toMatchObject({ phase: 'done', stopped: 0 })
   })
 
+  /**
+   * 停下的活不上成果架，折成一行。只留还没人管的：同一个人之后又接了活
+   * （制作人已经接手），或用户点过重开（已经交回制作人），都只留在日志里
+   */
+  it('停着没人管的才进 stops；被接手、被重开的不算', () => {
+    const m = build(
+      team({
+        jobs: [
+          job({ id: 'j1', member: 'A', endedAt: min(9), outcome: 'stopped', reason: '断开' }),
+          job({ id: 'j2', member: 'A', startedAt: min(8), endedAt: min(7), outcome: 'stopped' }),
+          job({ id: 'j3', member: 'B', endedAt: min(6), outcome: 'stopped', reopenedAt: min(1) }),
+          job({ id: 'j4', member: 'B', startedAt: min(5), endedAt: min(4), outcome: 'stopped' })
+        ]
+      })
+    )
+    expect(m.stops.map((j) => j.id)).toEqual(['j4', 'j2'])
+    expect(m.stopped).toBe(2)
+
+    const allReopened = build(
+      team({
+        jobs: [
+          job({ id: 'j1', member: 'A', endedAt: min(5), outcome: 'stopped', reopenedAt: min(1) })
+        ]
+      })
+    )
+    expect(allReopened).toMatchObject({ stopped: 0, stops: [] })
+    expect(allReopened.phase).not.toBe('alert')
+  })
+
   it('账上还挂着在写、可这次运行里没人在跑：上次被打断了，算没交回', () => {
     const orphan = team({ jobs: [job({ id: 'j1', member: 'A' })] })
     expect(build(orphan).round[0]!.state).toBe('lost')

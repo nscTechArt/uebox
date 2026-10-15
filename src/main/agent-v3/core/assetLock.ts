@@ -369,6 +369,33 @@ export function releaseAll(owner: string): number {
   return released.length
 }
 
+/**
+ * 放掉某个主人手上的几把锁（不是全部）。
+ *
+ * 给工作室模式的制作人用：它那一轮就是整局，锁跟着一轮走的话，它碰过的资产（包括
+ * 「当前关卡」那把）到交付之前队友一个都改不了 —— 队员撞上去等 90 秒再失败。
+ * GDBox 那边 2026-10-15 真机撞到过（程序等制作人占着的场景文件等了 14 分钟）。
+ */
+export function releasePaths(
+  connectionId: string | undefined,
+  owner: string,
+  paths: string[]
+): number {
+  const root = rootSessionId(owner)
+  const released: LockRecord[] = []
+  for (const raw of paths) {
+    const path = raw === CURRENT_LEVEL_LOCK ? raw : toPackagePath(raw)
+    const key = keyOf(connectionId, path)
+    const record = locks.get(key)
+    if (record && record.owner === root && locks.delete(key)) released.push(record)
+  }
+  if (released.length > 0) {
+    notifyChanged()
+    notifyReleased(released)
+  }
+  return released.length
+}
+
 /** 当前所有锁，给界面上那个「AI 锁定了 N 个资产」用 */
 export function listLocks(): LockRecord[] {
   return [...locks.values()]

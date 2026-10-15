@@ -130,7 +130,7 @@ export function createCppProbeTool(): UnrealAgentTool<CppProbeResponse> {
     risk: 'safe',
     input: z.object({}),
     description:
-      '探测当前虚幻工程的 C++ 编译能力：有没有 C++ 源码、这个编辑器会话该走哪条编译路、引擎和工程源码在哪。\n\n' +
+      '探测当前虚幻工程的 C++ 编译能力：有没有 C++ 源码、这个编辑器进程该走哪条编译路、引擎和工程源码在哪。\n\n' +
       '【什么时候用】**写或改 UE C++ 代码之前先调一次**。它回答的是「能不能编、编不过时能不能拿到报错」，' +
       '这两件事会改变你要不要动手、以及要不要先请用户改设置。\n' +
       '【返回里最重要的两条】\n' +

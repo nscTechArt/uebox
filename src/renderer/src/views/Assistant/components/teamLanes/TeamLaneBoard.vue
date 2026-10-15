@@ -160,6 +160,15 @@
                     reason: job.reason ?? ''
                   })
                 }}
+                <button
+                  v-if="job.state === 'stopped'"
+                  type="button"
+                  class="stopped-reopen"
+                  :title="t('assistant.teamBoard.reopenJobHint')"
+                  @click="emit('reopen-job', job.id)"
+                >
+                  {{ t('assistant.teamBoard.reopen') }}
+                </button>
               </p>
             </div>
 
@@ -332,6 +341,7 @@ const emit = defineEmits<{
   select: [id: string | null]
   hover: [id: string | null]
   reopen: [taskId: string]
+  'reopen-job': [jobId: string]
   'open-models': []
   'set-model': [name: string, model: TeamModel]
 }>()
@@ -439,8 +449,9 @@ function barTitle(job: JobView): string {
 // ── 展开 ────────────────────────────────────────────────────────────────
 
 const reportsOf = (c: CrewView): JobView[] => c.jobs.filter((j) => j.state === 'done' && j.current)
+/** 停着没人管的那件（之后又接了活、或已经重开的不算，见 `pendingStops`） */
 const stoppedOf = (c: CrewView): JobView[] =>
-  c.jobs.filter((j) => j.current && (j.state === 'stopped' || j.state === 'lost')).slice(0, 1)
+  props.model.stops.filter((j) => j.memberId === c.id).slice(0, 1)
 const stepsOf = (c: CrewView): StepGroup[] => recentSteps(props.activity, c.name, 6)
 const threadOf = (c: CrewView): LogEntry[] =>
   c.thread.filter((e) => e.kind === 'mail' || e.kind === 'crashed')
@@ -962,6 +973,20 @@ function entryText(entry: LogEntry): string {
 .stopped-line {
   margin: 0;
   color: var(--color-danger-text);
+}
+
+.stopped-reopen {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent-text);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .steps {

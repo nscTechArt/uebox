@@ -793,3 +793,64 @@ describe('写得多就停下来等 WAL 追平', () => {
     expect(activeKeys()).toEqual(['keep', 'z29'])
   })
 })
+
+/**
+ * 服务端的文件扫描、批量导入直接写库，不进 change_log。整个库都是这么来的话，
+ * change_log 是空的，快照点就是 0，对完一轮 lastSeq 还是 0 —— 以前被当成「从没同步过」，
+ * 每次启动、每次重连都把整个库重新过一遍。
+ */
+describe('服务端变更日志一直是空的', () => {
+  const emptyLogServer = (assets: Row[]): FakeServer => {
+    const server = fakeServer({ folders: [], assets })
+    const original = server.httpGet.getMockImplementation()!
+    server.httpGet.mockImplementation(async (path: string) => {
+      server.requests.push(path)
+      if (path.includes('/sync')) return { changes: [], latestSeq: 0, fullSyncRequired: false }
+      if (path.includes('/checksum')) {
+        const folders = db
+          .prepare(`SELECT COUNT(*) AS c FROM assetFolder WHERE isDelete = 0`)
+          .get() as { c: number }
+        return { assetCount: assets.length, folderCount: folders.c, latestSeq: 0 }
+      }
+      server.requests.pop() // 交给原实现记
+      const page = (await original(path)) as Record<string, unknown>
+      return { ...page, snapshotSeq: 0 }
+    })
+    return server
+  }
+
+  it('对完一轮之后再拉：条数对得上就只走增量，不再全量', async () => {
+    const server = emptyLogServer([asset('a1'), asset('a2')])
+    install(server)
+    await client.pullChanges()
+    expect(activeKeys()).toEqual(['a1', 'a2'])
+    const pagesAfterFirst = server.assetPageRequests().length
+
+    await client.pullChanges()
+    expect(server.assetPageRequests()).toHaveLength(pagesAfterFirst)
+    expect(server.requests.some((p) => p.includes('/checksum'))).toBe(true)
+  })
+
+  it('条数对不上（服务端扫描 / 批量导入进来的）才全量', async () => {
+    const assets = [asset('a1')]
+    const server = emptyLogServer(assets)
+    install(server)
+    await client.pullChanges()
+    expect(activeKeys()).toEqual(['a1'])
+
+    assets.push(asset('a2'))
+    await client.pullChanges()
+    expect(activeKeys()).toEqual(['a1', 'a2'])
+  })
+
+  it('没对完过（中途断了）的照旧接着全量', async () => {
+    const server = emptyLogServer(Array.from({ length: 7 }, (_, i) => asset(`a${i}`)))
+    install(server)
+    server.failCall(4)
+    await client.pullChanges().catch(() => undefined)
+    expect(activeKeys().length).toBeLessThan(7)
+
+    await client.pullChanges()
+    expect(activeKeys()).toHaveLength(7)
+  })
+})

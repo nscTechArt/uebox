@@ -172,4 +172,30 @@ describe('promptCacheKey', () => {
   it('不同会话的键不同', () => {
     expect(promptCacheKey('s1', 0)).not.toBe(promptCacheKey('s2', 0))
   })
+
+  /**
+   * Codex 把缓存键原样放进 `session-id` 请求头，请求头只收 Latin-1。
+   * 队员 sessionId 带中文名时 fetch 当场抛 ByteString 错，队员直接停工
+   */
+  describe('进请求头也不炸', () => {
+    const mate = '0f8c2a4e-1b7d-4c39-9e51-6a2d8f3b7c10:mate-审核'
+
+    it('带中文名的队员键能放进请求头', () => {
+      const key = promptCacheKey(mate, 2, '工具组')
+      expect(key).toMatch(/^[\x20-\x7e]+$/)
+      expect(() => new Headers().set('session-id', key)).not.toThrow()
+    })
+
+    it('换成指纹后仍然稳定、分得开', () => {
+      expect(promptCacheKey(mate, 0)).toBe(promptCacheKey(mate, 0))
+      expect(promptCacheKey(mate, 0)).not.toBe(promptCacheKey(`${mate.slice(0, -2)}美术`, 0))
+      expect(promptCacheKey(mate, 0)).not.toBe(promptCacheKey(mate, 1))
+    })
+
+    it('纯 ASCII 的键一个字都不变，已有缓存不受影响', () => {
+      expect(promptCacheKey('s1:mate-art', 1, 'material')).toBe(
+        `agent-v3:${PROMPT_PROTOCOL_VERSION}:s1:mate-art:e1:tmaterial`
+      )
+    })
+  })
 })

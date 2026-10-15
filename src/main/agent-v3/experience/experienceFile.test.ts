@@ -46,4 +46,15 @@ describe('experienceFile', () => {
     const broken = '\n## 坏掉的一条\n<!-- id: e-bad -->\n- advice: 没有 key 也没有 status\n'
     expect(parseExperienceFile(good + broken).map((e) => e.id)).toEqual([entry.id])
   })
+
+  it('退休原因来回不丢；不认识的原因、没退休的条目上的原因都不认', () => {
+    const retired: ExperienceEntry = { ...entry, status: 'retired', retiredBecause: 'capacity' }
+    expect(parseExperienceFile(serializeExperienceFile('t', [retired]))).toEqual([retired])
+    const text = serializeExperienceFile('t', [retired])
+    expect(
+      parseExperienceFile(text.replace('capacity', 'whatever'))[0].retiredBecause
+    ).toBeUndefined()
+    const active = text.replace('- status: retired', '- status: trial')
+    expect(parseExperienceFile(active)[0].retiredBecause).toBeUndefined()
+  })
 })

@@ -13,29 +13,30 @@ const source = readFileSync(
  * 缩成「记得打…」等于没显示 —— 用户分不清排着的是哪一条，也就没法判断
  * 要不要撤回。
  */
-describe('InputComposer 排队标签', () => {
-  /*
-   * `.queued-pill` 是 `.source-pill` 的变体，两边权重一样，谁在后面谁说了算。
-   * 写反过一次：`max-width: none` 被基类的 200px 顶掉，正文被压回几个字，
-   * 而样式本身看起来完全正确 —— 这种回归只有顺序检查能逮住。
-   */
-  it('样式排在 .source-pill 后面，才盖得住那条 200px', () => {
-    expect(source.indexOf('\n.queued-pill {')).toBeGreaterThan(source.indexOf('\n.source-pill {'))
+describe('InputComposer 排队条', () => {
+  // 它是「已经交出去、还没发生」的东西，不能和框里还在手上的字挤在一个框里
+  it('排队条在输入框外面，贴在它上方', () => {
+    const tray = source.indexOf('class="queued-tray"')
+    const composer = source.indexOf('class="input-composer"')
+    expect(tray).toBeGreaterThan(-1)
+    expect(tray).toBeLessThan(composer)
   })
 
-  it('整行铺开，正文吃掉剩下的宽度', () => {
-    expect(source).toContain('flex-direction: column')
-    expect(source).toMatch(/\.queued-pill \{[\s\S]*?max-width: none;/)
+  it('正文吃掉剩下的宽度，不被压成几个字', () => {
+    expect(source).toMatch(/\.queued-text \{[\s\S]*?flex: 1;/)
   })
 
-  // 按钮挤在文字旁边会把正文压没，所以它在整行最右端
-  it('「立即发送」排在删除按钮之后', () => {
-    expect(source.indexOf('class="pill-action"')).toBeGreaterThan(
-      source.indexOf('class="pill-remove"')
-    )
+  // 关闭类按钮按习惯在最右端；夹在中间容易点错
+  it('按钮顺序：现在插话、撤回重新编辑、删除', () => {
+    const steer = source.indexOf('class="queued-steer"')
+    const edit = source.indexOf('handleEditQueued(item.id')
+    const remove = source.indexOf('handleCancelQueued(item.id)')
+    expect(steer).toBeGreaterThan(-1)
+    expect(edit).toBeGreaterThan(steer)
+    expect(remove).toBeGreaterThan(edit)
   })
 
-  it('不再显示「这一轮跑完就发」那句提示', () => {
+  it('不再显示「这一轮跑完就发」那句单独的提示行', () => {
     expect(source).not.toContain('queueHint')
     expect(source).not.toContain('queued-hint')
   })

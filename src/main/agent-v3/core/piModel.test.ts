@@ -308,6 +308,41 @@ describe('toPiModel', () => {
 
       expect(toPiModel(custom, custom.models[0]).thinkingLevelMap).toEqual(mine)
     })
+
+    /**
+     * responses 那两条路上，没给档位 pi 就发 `effort: "none"`，除非写明 `off: null`。
+     * 哪本目录都没收录的型号认不认 none 没人知道，猜错就是整个模型用不了（GPT-6.1 Sol 那次）
+     */
+    it.each(['openai-responses', 'openai-codex-responses'] as const)(
+      '%s 上目录外的推理模型不发 none',
+      (protocol) => {
+        const gateway: ProviderConfig = {
+          ...provider,
+          id: 'my-gateway',
+          protocol,
+          models: [{ id: 'gpt-next-unlisted', supportsReasoning: true }]
+        }
+
+        expect(toPiModel(gateway, gateway.models[0]).thinkingLevelMap).toEqual({ off: null })
+      }
+    )
+
+    it('目录外的不推理模型、别的协议照旧不带阶梯', () => {
+      const plain: ProviderConfig = {
+        ...provider,
+        id: 'my-gateway',
+        protocol: 'openai-responses',
+        models: [{ id: 'gpt-next-unlisted', supportsReasoning: false }]
+      }
+      const completions: ProviderConfig = {
+        ...plain,
+        protocol: 'openai-completions',
+        models: [{ id: 'gpt-next-unlisted', supportsReasoning: true }]
+      }
+
+      expect(toPiModel(plain, plain.models[0]).thinkingLevelMap).toBeUndefined()
+      expect(toPiModel(completions, completions.models[0]).thinkingLevelMap).toBeUndefined()
+    })
   })
 
   /**

@@ -233,6 +233,19 @@ describe('活的账和团队事件', () => {
     ])
   })
 
+  it('只有停下的活能重开，重开记下时刻', async () => {
+    const a = await store.startJob('甲', '统计资产')
+    const b = await store.startJob('乙', '统计配置')
+    await store.finishJob(a.id, { outcome: 'stopped', reason: '密钥失效' })
+    await store.finishJob(b.id, { outcome: 'done', report: '报告' })
+
+    expect(await store.reopenJob(b.id)).toBeUndefined()
+    expect(await store.reopenJob('j99')).toBeUndefined()
+    const reopened = await store.reopenJob(a.id)
+    expect(reopened).toMatchObject({ id: a.id, reason: '密钥失效' })
+    expect((await store.jobs()).find((j) => j.id === a.id)?.reopenedAt).toBeTypeOf('number')
+  })
+
   it('派活那段话取第一行当名字，太长截短；编号截掉旧账之后也不撞', async () => {
     const long = await store.startJob('甲', `${'很'.repeat(100)}\n第二行`)
     expect(long.brief).toHaveLength(80)
@@ -420,15 +433,20 @@ describe('团队工具', () => {
     let writes: Record<string, number> = { ue_spawn_actor: 2 }
     const t = tools({
       snapshots,
-      runMember: async () => ({ text: '好了', messageCount: 1, writeToolCalls: writes })
+      runMember: async () => ({
+        text: '灰盒搭好了，三个房间。证据见截图',
+        messageCount: 1,
+        writeToolCalls: writes
+      })
     })
     await t.team_hire!({ name: '地编', role: 'a' })
     await expect(t.team_send!({ to: '地编', message: '搭灰盒\n细节' })).resolves.toContain(
-      '【快照】已存 s1（地编：搭灰盒）'
+      '【快照】已存 s1（地编：灰盒搭好了，三个房间。）'
     )
     writes = {}
     await t.team_send!({ to: '地编', message: '看看有没有问题' })
-    expect(saved).toEqual(['地编：搭灰盒'])
+    // 标签用交回报告的第一句（它干了什么），不是派活原文
+    expect(saved).toEqual(['地编：灰盒搭好了，三个房间。'])
     expect(Object.keys(t)).toContain('team_snapshot')
   })
 

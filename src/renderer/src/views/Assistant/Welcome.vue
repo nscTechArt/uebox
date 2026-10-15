@@ -294,6 +294,7 @@
           :model-choices="teamBoard.modelChoices.value"
           :models-loaded="teamBoard.modelsLoaded.value"
           @reopen="teamBoard.reopen"
+          @reopen-job="teamBoard.reopenJob"
           @end="teamBoard.end"
           @open-models="teamBoard.loadModels"
           @set-model="teamBoard.setMemberModel"
@@ -1017,9 +1018,29 @@ const queuedFollowUps = computed(() =>
   listFollowUps(followUpQueues.value, sid.value).map((item) => ({
     id: item.id,
     text: item.text,
-    canSteer: isSteerable(item.payload)
+    canSteer: isSteerable(item.payload),
+    canEdit: isTextOnly(item.payload)
   }))
 )
+
+/**
+ * 排着的这条只有字、没带任何附件 —— 只有这种能退回输入框改。
+ * 附件在排队那一刻已经处理成 payload 里的成品，放不回输入框的附件栏，
+ * 退回去等于静悄悄丢掉。
+ */
+function isTextOnly(payload: ComposerSendPayload): boolean {
+  return (
+    payload.content.trim().length > 0 &&
+    (payload.images?.length || 0) === 0 &&
+    (payload.imageFiles?.length || 0) === 0 &&
+    !payload.excelContext &&
+    (payload.excelFiles?.length || 0) === 0 &&
+    (payload.docFiles?.length || 0) === 0 &&
+    (payload.mediaFiles?.length || 0) === 0 &&
+    (payload.forcedSources?.length || 0) === 0 &&
+    (payload.inlineDocuments?.length || 0) === 0
+  )
+}
 
 function handleCancelQueuedFollowUp(id: string): void {
   followUpQueues.value = removeFollowUp(followUpQueues.value, sid.value, id)

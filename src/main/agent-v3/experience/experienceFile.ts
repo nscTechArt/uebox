@@ -39,6 +39,36 @@
 export type ExperienceStatus = 'trial' | 'proven' | 'retired'
 
 /**
+ * 为什么退休。界面要说得出「是被挤掉的，还是证据说它不对」—— 两者对用户的意思完全不同。
+ *
+ * - capacity：这一层满了，它是最该走的那条
+ * - replaced：同一个 API 来了一条新的
+ * - failed：照着做了还是同一个错
+ * - ignored：一直摆在眼前没人照做
+ * - no-lift：样本够了，出场不比不出场好
+ * - refuted：引擎里一查，它说不存在的东西其实存在
+ * - script-bug：后来认定这类报错是脚本自己的 bug，不是引擎的规矩
+ */
+export type RetireReason =
+  | 'capacity'
+  | 'replaced'
+  | 'failed'
+  | 'ignored'
+  | 'no-lift'
+  | 'refuted'
+  | 'script-bug'
+
+const RETIRE_REASONS: ReadonlySet<string> = new Set<RetireReason>([
+  'capacity',
+  'replaced',
+  'failed',
+  'ignored',
+  'no-lift',
+  'refuted',
+  'script-bug'
+])
+
+/**
  * 「采纳」的判据：经验出场后，下一步做了它说的事。
  *
  * 必须是结构化的 —— 「模型有没有照着做」让模型自己判断，又回到了靠猜。
@@ -63,6 +93,8 @@ export interface ExperienceEntry {
   /** 验真的日期与引擎版本 */
   verified?: { date: string; engine?: string }
   status: ExperienceStatus
+  /** 退休的才有。这个字段出现之前退休的旧经验没有 */
+  retiredBecause?: RetireReason
   /** 用户钉住的不会被淘汰 */
   pinned?: boolean
   /** 通用层：在哪些引擎版本（major.minor）上被照着做并且成功过 */
@@ -155,6 +187,11 @@ export function parseExperienceFile(text: string): ExperienceEntry[] {
     const notFor = parseList(fields['not-for'])
     const symbol = fields.symbol?.trim()
     const avoid = fields.avoid?.trim()
+    const because = fields['retired-because']?.trim()
+    const retiredBecause =
+      status === 'retired' && because && RETIRE_REASONS.has(because)
+        ? (because as RetireReason)
+        : undefined
     entries.push({
       id,
       title,
@@ -165,6 +202,7 @@ export function parseExperienceFile(text: string): ExperienceEntry[] {
       source: fields.source ?? '',
       ...(verified ? { verified } : {}),
       status,
+      ...(retiredBecause ? { retiredBecause } : {}),
       ...(fields.pinned === 'yes' ? { pinned: true } : {}),
       ...(engines ? { engines } : {}),
       ...(notFor ? { notFor } : {}),
@@ -206,6 +244,9 @@ export function serializeExperienceFile(tool: string, entries: ExperienceEntry[]
           ]
         : []),
       `- status: ${entry.status}`,
+      ...(entry.status === 'retired' && entry.retiredBecause
+        ? [`- retired-because: ${entry.retiredBecause}`]
+        : []),
       ...(entry.pinned ? ['- pinned: yes'] : []),
       ...(entry.engines?.length ? [`- engines: ${entry.engines.join(', ')}`] : []),
       ...(entry.notFor?.length ? [`- not-for: ${entry.notFor.join(', ')}`] : []),

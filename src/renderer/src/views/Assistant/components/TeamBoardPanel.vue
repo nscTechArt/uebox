@@ -74,6 +74,7 @@
         @select="select"
         @hover="hovered = $event"
         @reopen="emit('reopen', $event)"
+        @reopen-job="emit('reopen-job', $event)"
         @open-models="emit('open-models')"
         @set-model="(name: string, m: TeamModel) => emit('set-model', name, m)"
       />
@@ -123,6 +124,8 @@ const emit = defineEmits<{
   open: []
   /** 用户把一项卡住的改回待办 */
   reopen: [taskId: string]
+  /** 用户把一件停下的活交回制作人 */
+  'reopen-job': [jobId: string]
   /** 用户结束团队模式 */
   end: []
   /** 用户打开了团队任务或换模型菜单：重读一次模型设置 */
