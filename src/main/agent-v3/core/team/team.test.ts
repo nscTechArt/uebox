@@ -433,15 +433,20 @@ describe('团队工具', () => {
     let writes: Record<string, number> = { ue_spawn_actor: 2 }
     const t = tools({
       snapshots,
-      runMember: async () => ({ text: '好了', messageCount: 1, writeToolCalls: writes })
+      runMember: async () => ({
+        text: '灰盒搭好了，三个房间。证据见截图',
+        messageCount: 1,
+        writeToolCalls: writes
+      })
     })
     await t.team_hire!({ name: '地编', role: 'a' })
     await expect(t.team_send!({ to: '地编', message: '搭灰盒\n细节' })).resolves.toContain(
-      '【快照】已存 s1（地编：搭灰盒）'
+      '【快照】已存 s1（地编：灰盒搭好了，三个房间。）'
     )
     writes = {}
     await t.team_send!({ to: '地编', message: '看看有没有问题' })
-    expect(saved).toEqual(['地编：搭灰盒'])
+    // 标签用交回报告的第一句（它干了什么），不是派活原文
+    expect(saved).toEqual(['地编：灰盒搭好了，三个房间。'])
     expect(Object.keys(t)).toContain('team_snapshot')
   })
 
