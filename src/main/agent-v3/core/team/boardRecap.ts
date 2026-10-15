@@ -18,8 +18,8 @@
  * 全是纯函数，宿主（`ipc/agentV3.ts`）负责读盘和落盘。
  */
 
-import type { BoardTask } from '../../../../shared/agentTeam'
-import type { TeamActivity } from './teamStore'
+import type { BoardTask, TeamJob } from '../../../../shared/agentTeam'
+import type { BoardPatch, TeamActivity } from './teamStore'
 
 /** 「进行中」「卡住」是对「现在」的断言，隔了一轮没人碰就可能过期了 */
 const LIVE_STATUSES = new Set(['doing', 'blocked'])
@@ -34,6 +34,27 @@ export function carryOverTasks(board: BoardTask[], roundStartedAt: number): Boar
       task.reopenedAt !== undefined ||
       (LIVE_STATUSES.has(task.status) && task.updatedAt < roundStartedAt)
   )
+}
+
+/**
+ * 用户在成果架上「重开」一件停下的活：任务板上加一项待办，挂着「用户重开」。
+ *
+ * 不另起一条通知制作人的路 —— 用户重开的任务本来就会出现在下一轮开局的旧账里
+ * （`carryOverTasks`），制作人改它一次标记就清掉。活本身不能原地续上：
+ * 那个队员当时的上下文已经没了，派不派、派给谁由制作人定。
+ *
+ * id 跟着活走，同一件重开两次只是刷新时刻，不会在板上堆两项。
+ */
+export function reopenedJobTask(job: TeamJob, at: number): BoardPatch {
+  const reason = job.reason?.replace(/\s+/g, ' ').trim()
+  return {
+    id: `redo-${job.id}`,
+    title: job.brief || job.id,
+    owner: job.member,
+    status: 'todo',
+    note: reason ? `stopped before finishing: ${reason}` : 'stopped before finishing',
+    reopenedAt: at
+  }
 }
 
 function ago(ms: number): string {

@@ -482,6 +482,10 @@ export const agentV3API = {
     return window.api.agentV3.teamTaskReopen({ sessionId, taskId })
   },
 
+  teamJobReopen(sessionId: string, jobId: string): Promise<{ success: boolean; error?: string }> {
+    return window.api.agentV3.teamJobReopen({ sessionId, jobId })
+  },
+
   /** 任务板上给队员换模型。同上，不走 `unwrapResult()`：失败在面板上就地说 */
   teamMemberModel(
     sessionId: string,

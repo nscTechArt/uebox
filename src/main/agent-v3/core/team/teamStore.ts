@@ -117,6 +117,8 @@ export interface TeamStore {
    * 不会再交回来，不收掉的话界面上会永远显示「正在写」
    */
   closeOpenJobs(reason: string): Promise<void>
+  /** 用户把一件停下的活交回制作人：记下时刻，返回这件活（没有这件、或它不是停下的，回 undefined） */
+  reopenJob(id: string): Promise<TeamJob | undefined>
   jobs(limit?: number): Promise<TeamJob[]>
   recordEvent(event: Omit<TeamEvent, 'at'>): Promise<void>
   events(limit?: number): Promise<TeamEvent[]>
@@ -335,6 +337,18 @@ export function createTeamStore(
         return true
       }).then((closed) => {
         if (closed) onChange?.()
+      }),
+    reopenJob: (id) =>
+      serial(async () => {
+        const list = await readJson<TeamJob[]>(jobsFile, [])
+        const job = list.find((j) => j.id === id)
+        if (!job || job.outcome !== 'stopped') return undefined
+        job.reopenedAt = now()
+        await writeJson(jobsFile, list)
+        return job
+      }).then((job) => {
+        if (job) onChange?.()
+        return job
       }),
     jobs: async (limit = 60) => (await readJson<TeamJob[]>(jobsFile, [])).slice(-limit),
     recordEvent: (event) =>

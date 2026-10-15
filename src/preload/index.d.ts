@@ -3351,6 +3351,11 @@ declare global {
         sessionId: string
         taskId: string
       }) => Promise<{ success: boolean; error?: string }>
+      /** 把一件停下的活交回制作人：任务板上加一项「用户重开」的待办 */
+      teamJobReopen: (args: {
+        sessionId: string
+        jobId: string
+      }) => Promise<{ success: boolean; error?: string }>
       /** 给一个队员换模型，记成用户定的。先过入职体检，没过带回 checkup。正在跑也行：它下一件活开始用 */
       teamMemberModel: (args: {
         sessionId: string

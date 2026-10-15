@@ -2652,6 +2652,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         stopped: 'Stopped',
         lost: 'Not delivered',
         stoppedJob: '"{title}" stopped: {reason}',
+        stopsLine: '{n} stopped · {who}',
+        stopsLineReason: '{n} stopped · {who} · Reason: {reason}',
+        stopReason: 'Why it stopped: {reason}',
+        stopSteps: 'Last steps before stopping',
         deliveredCount: '{n} delivered this round',
         deliveredBy: '{name} · delivered {ago}',
         earlier: 'Earlier deliverables ({n})',
@@ -2726,6 +2730,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       reopened: 'Reopened by you',
       reopen: 'Reopen',
       reopenHint: 'Move it back to To do; the producer will reassess it next round',
+      reopenJobHint: 'Hand it back to the producer; it decides next round whether to reassign it',
       reopenFailed: 'Could not reopen this task. Try again in a moment',
       end: 'End team mode',
       endHint:

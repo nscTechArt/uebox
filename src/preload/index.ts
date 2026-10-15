@@ -1545,6 +1545,8 @@ const api = {
     teamState: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-state', args),
     teamTaskReopen: (args: { sessionId: string; taskId: string }) =>
       ipcRenderer.invoke('agent-v3:team-task-reopen', args),
+    teamJobReopen: (args: { sessionId: string; jobId: string }) =>
+      ipcRenderer.invoke('agent-v3:team-job-reopen', args),
     teamMemberModel: (args: {
       sessionId: string
       name: string

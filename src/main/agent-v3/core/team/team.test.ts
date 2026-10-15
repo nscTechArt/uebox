@@ -233,6 +233,19 @@ describe('活的账和团队事件', () => {
     ])
   })
 
+  it('只有停下的活能重开，重开记下时刻', async () => {
+    const a = await store.startJob('甲', '统计资产')
+    const b = await store.startJob('乙', '统计配置')
+    await store.finishJob(a.id, { outcome: 'stopped', reason: '密钥失效' })
+    await store.finishJob(b.id, { outcome: 'done', report: '报告' })
+
+    expect(await store.reopenJob(b.id)).toBeUndefined()
+    expect(await store.reopenJob('j99')).toBeUndefined()
+    const reopened = await store.reopenJob(a.id)
+    expect(reopened).toMatchObject({ id: a.id, reason: '密钥失效' })
+    expect((await store.jobs()).find((j) => j.id === a.id)?.reopenedAt).toBeTypeOf('number')
+  })
+
   it('派活那段话取第一行当名字，太长截短；编号截掉旧账之后也不撞', async () => {
     const long = await store.startJob('甲', `${'很'.repeat(100)}\n第二行`)
     expect(long.brief).toHaveLength(80)

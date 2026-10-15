@@ -356,6 +356,65 @@
       }}
     </button>
 
+    <!-- 停下的活：不占成果架的格子，折成一行；点开看原因、停前在做什么，能交回制作人 -->
+    <section v-if="model.stops.length" class="q-fold-box q-frame is-stops">
+      <button
+        type="button"
+        class="fold-head"
+        :aria-expanded="stopsOpen"
+        @click="stopsOpen = !stopsOpen"
+      >
+        <PixelSprite :art="TORN" :scale="2" />
+        <span class="stops-line" :title="stopsLine">{{ stopsLine }}</span>
+        <span class="fold-toggle">{{
+          stopsOpen ? t('assistant.teamBoard.ui.less') : t('assistant.teamBoard.ui.logAll')
+        }}</span>
+      </button>
+      <ul v-if="stopsOpen" class="log-list">
+        <li v-for="job in model.stops" :key="job.id" class="stop-item">
+          <div class="stop-top">
+            <span class="card-swatch" :style="{ background: memberColor(job.member) }" />
+            <span class="slot-who">{{ job.member }}</span>
+            <span class="stop-when" :title="exact(job.endedAt ?? job.startedAt)">{{
+              ago(job.endedAt ?? job.startedAt)
+            }}</span>
+            <button
+              v-if="job.state === 'stopped'"
+              type="button"
+              class="q-link"
+              :title="t('assistant.teamBoard.reopenJobHint')"
+              @click="emit('reopen-job', job.id)"
+            >
+              {{ t('assistant.teamBoard.reopen') }}
+            </button>
+          </div>
+          <p class="stop-brief">{{ job.brief || job.title }}</p>
+          <p v-if="job.reason" class="stop-reason">
+            {{ t('assistant.teamBoard.ui.stopReason', { reason: job.reason }) }}
+          </p>
+          <template v-if="stopSteps(job).length">
+            <h5 class="detail-label">{{ t('assistant.teamBoard.ui.stopSteps') }}</h5>
+            <ol class="steps">
+              <li v-for="(step, index) in stopSteps(job)" :key="index" class="step">
+                <span class="step-when">{{ step.showTime ? ago(step.at) : '' }}</span>
+                <span
+                  v-if="step.tool"
+                  class="step-text"
+                  :title="[step.tool, ...step.targets].join('\n')"
+                >
+                  {{ toolVerb(step.tool) }}
+                  <template v-if="step.targets.length">
+                    · {{ shortTarget(step.targets.at(-1)!) }}
+                  </template>
+                </span>
+                <span v-else class="step-text is-speech" :title="step.text">{{ step.text }}</span>
+              </li>
+            </ol>
+          </template>
+        </li>
+      </ul>
+    </section>
+
     <!-- 任务板 -->
     <section v-if="team.board.length" class="q-fold-box q-frame">
       <button
@@ -501,6 +560,7 @@ const emit = defineEmits<{
   select: [id: string | null]
   hover: [id: string | null]
   reopen: [taskId: string]
+  'reopen-job': [jobId: string]
   'open-models': []
   'set-model': [name: string, model: TeamModel]
 }>()
@@ -635,16 +695,16 @@ const threadShown = computed(() => {
 // ── 成果 ────────────────────────────────────────────────────────────────
 
 /**
- * 成果架：这一轮的活。交回的新的在前，然后是停下的、在写的。
+ * 成果架：这一轮的活。交回的新的在前，然后是在写的。
+ * 停下的不上架 —— 它没交回任何东西，折在架子下面那一行里（`model.stops`）。
  * 这一轮还没派活时，拿之前交回的摆上去 —— 刚打开面板不该是一个空架子
  */
 const shelfBase = computed(() => {
   const round = props.model.round
   if (!round.length) return props.model.earlier.slice(0, 6)
   const done = round.filter((j) => j.state === 'done').reverse()
-  const bad = round.filter((j) => j.state === 'stopped' || j.state === 'lost').reverse()
   const writing = round.filter((j) => j.state === 'writing')
-  return [...done, ...bad, ...writing]
+  return [...done, ...writing]
 })
 const earlierToFold = computed(() =>
   props.model.round.length ? props.model.earlier : props.model.earlier.slice(6)
@@ -674,6 +734,28 @@ const shelfRow = useRowInsert(
   () => shelf.value.length,
   () => shelf.value.findIndex((j) => j.id === openJobId.value)
 )
+
+// ── 停下的活 ──────────────────────────────────────────────────────────────
+
+const stopsOpen = ref(false)
+
+/** 折起来那一行：几件、谁的；原因全一样（多半是同一个环境问题）就直接写出来 */
+const stopsLine = computed(() => {
+  const stops = props.model.stops
+  const names = [...new Set(stops.map((j) => j.member))].join('、')
+  const reasons = new Set(stops.map((j) => j.reason ?? ''))
+  const [reason] = reasons
+  return reasons.size === 1 && reason
+    ? t('assistant.teamBoard.ui.stopsLineReason', { n: stops.length, who: names, reason })
+    : t('assistant.teamBoard.ui.stopsLine', { n: stops.length, who: names })
+})
+
+/** 这件活从开工到停下之间，这个人最后几步。动态只存在这次打开盒子之后，早的就没有 */
+function stopSteps(job: JobView): ReturnType<typeof recentSteps> {
+  const end = job.endedAt ?? Number.POSITIVE_INFINITY
+  const during = props.activity.filter((line) => line.at >= job.startedAt && line.at <= end)
+  return recentSteps(during, job.member, 4)
+}
 
 const shelfHas = (jobId: string): boolean =>
   props.model.round.some((j) => j.id === jobId) || props.model.earlier.some((j) => j.id === jobId)
@@ -1814,6 +1896,56 @@ button.q-frame {
   margin-left: auto;
   color: var(--q-muted);
   font-size: 12px;
+}
+
+/* 停下的活：紧贴成果架的一行，不像任务板、日志那样隔开一大段 */
+.q-fold-box.is-stops {
+  margin-top: 12px;
+}
+
+.stops-line {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--q-red);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stop-item {
+  padding: 8px 0;
+  border-top: 2px dotted var(--q-rule);
+  font-size: 12px;
+
+  &:first-child {
+    border-top: none;
+  }
+}
+
+.stop-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .q-link {
+    margin-left: auto;
+  }
+}
+
+.stop-when {
+  color: var(--q-dim);
+}
+
+.stop-brief {
+  margin: 4px 0 0;
+  color: var(--q-paper);
+  word-break: break-word;
+}
+
+.stop-reason {
+  margin: 4px 0 0;
+  color: var(--q-red);
+  word-break: break-word;
 }
 
 .board-list,

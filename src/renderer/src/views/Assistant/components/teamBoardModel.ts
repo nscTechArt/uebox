@@ -52,6 +52,8 @@ export interface JobView {
   /** 报告有几节 */
   sections: number
   reason?: string
+  /** 停下之后用户点过「重开」，已经交回制作人 */
+  reopened: boolean
   /** 属于这一轮（最近一条真人消息之后还在干或干完的） */
   current: boolean
 }
@@ -91,6 +93,7 @@ function jobView(job: TeamJob, live: boolean, roundStart: number): JobView {
     body: report ? withoutTitle(report.body, report.title) : '',
     sections: report?.sections ?? 0,
     ...(job.reason ? { reason: job.reason } : {}),
+    reopened: job.reopenedAt !== undefined,
     current: (job.endedAt ?? Number.POSITIVE_INFINITY) >= roundStart
   }
 }
@@ -120,6 +123,7 @@ function legacyJobs(team: TeamStateView, roundStart: number): JobView[] {
       body: report?.body ?? '',
       sections: report?.sections ?? 0,
       ...(view.kind === 'stopped' ? { reason: view.body } : {}),
+      reopened: false,
       current: mail.at >= roundStart
     })
   }
@@ -274,8 +278,13 @@ export interface BoardModel {
   phase: BoardPhase
   /** 此刻在干活的队员数 */
   working: number
-  /** 停下的活（每人只看最近一件） */
+  /** 停着没人管的活有几件（就是 `stops` 的长度） */
   stopped: number
+  /**
+   * 这一轮停下、还没人管的活，新的在前。「没人管」= 用户没重开、同一个人之后也没再接活 ——
+   * 之后又派了一件的，说明制作人已经接手了，这件只留在日志里
+   */
+  stops: JobView[]
   /** 任务板上这一轮的受阻项 */
   blocked: number
   /** 只在没人在跑、且是这一轮的验收时给 */
@@ -382,11 +391,8 @@ export function buildBoardModel(
   const round = jobs.filter((job) => job.current)
   const earlier = jobs.filter((job) => !job.current && job.state === 'done').reverse()
 
-  // 每人只看最近一件：停下之后又派了一件并交回来的，就不算还停着
-  const stopped = crew.filter((c) => {
-    const latest = c.jobs.find((job) => job.current)
-    return latest?.state === 'stopped' || latest?.state === 'lost'
-  }).length
+  const stops = pendingStops(jobs)
+  const stopped = stops.length
   const blocked = team.board.filter(
     (task) => task.status === 'blocked' && (task.reopenedAt ?? task.updatedAt) >= roundStart
   ).length
@@ -414,5 +420,18 @@ export function buildBoardModel(
         }
       : null
 
-  return { phase, working, stopped, blocked, verdict, round, earlier, crew, log, events }
+  return { phase, working, stopped, stops, blocked, verdict, round, earlier, crew, log, events }
+}
+
+/** 这一轮停下、没重开、同一个人之后也没再接活的。`jobs` 旧的在前，返回新的在前 */
+export function pendingStops(jobs: readonly JobView[]): JobView[] {
+  return jobs
+    .filter(
+      (job, index) =>
+        job.current &&
+        (job.state === 'stopped' || job.state === 'lost') &&
+        !job.reopened &&
+        !jobs.slice(index + 1).some((later) => later.memberId === job.memberId)
+    )
+    .reverse()
 }
