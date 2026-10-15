@@ -445,10 +445,14 @@
             >
               {{ entryText(entry) }}
             </button>
-            <template v-else>
-              <span v-if="entry.kind === 'mail'" class="log-who">{{ entryWho(entry) }}</span>
-              <span class="log-text">{{ entryText(entry) }}</span>
+            <!-- 队员之间的信是模型写的，满是 Markdown；系统事件是我们拼的一句话，照原样 -->
+            <template v-else-if="entry.kind === 'mail'">
+              <span class="log-who is-block">{{ entryWho(entry) }}</span>
+              <div class="log-md">
+                <MarkdownRenderer :content="entry.text" />
+              </div>
             </template>
+            <span v-else class="log-text">{{ entryText(entry) }}</span>
           </span>
         </li>
       </ul>
@@ -1905,6 +1909,61 @@ button.q-frame {
 .log-who {
   margin-right: 8px;
   color: var(--q-muted);
+
+  &.is-block {
+    display: block;
+    margin: 0 0 2px;
+  }
+}
+
+.log-md {
+  /* 深木底上的浅色字：正文渲染器读的主题色就地换成委托板的那几个 */
+  --color-text-primary: var(--q-paper);
+  --color-text-secondary: var(--q-muted);
+  --color-text-muted: var(--q-dim);
+  --color-border: var(--q-rule);
+  --color-border-subtle: var(--q-rule);
+  --color-border-strong: var(--q-edge-hi);
+  --color-accent-text: var(--q-gold);
+  --color-accent-border: var(--q-edge-hi);
+  --color-accent-bg: var(--q-panel-hi);
+  --color-bg-sunken: var(--q-ink-soft);
+  --color-bg-surface: var(--q-panel);
+  --color-bg-surface-hover: var(--q-panel-hi);
+
+  word-break: break-word;
+
+  :deep(.markdown-body) {
+    font-size: 12px;
+    color: var(--q-paper);
+  }
+
+  :deep(h1),
+  :deep(h2),
+  :deep(h3),
+  :deep(h4) {
+    margin: 8px 0 4px;
+    padding: 0;
+    border: none;
+    color: var(--q-gold);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  :deep(p),
+  :deep(ul),
+  :deep(ol) {
+    margin-bottom: 4px;
+  }
+
+  :deep(.markdown-body > *:last-child) {
+    margin-bottom: 0;
+  }
+
+  :deep(code) {
+    background: var(--q-ink-soft);
+    color: var(--q-gold);
+  }
 }
 
 .log-text {
