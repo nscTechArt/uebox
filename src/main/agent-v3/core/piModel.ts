@@ -120,11 +120,35 @@ function thinkingLevelMapFor(
   const known =
     (catalogModel(provider, model)?.thinkingLevelMap as ThinkingLevelMap | undefined) ??
     builtinModel(provider, model)?.thinkingLevelMap
-  if (!own) return known
+  if (!own) return known ?? unknownModelLevelMap(provider, model)
   // 用户那份没提 `off` 就跟随目录：Opus 5.5 的 `off: null`（关不掉思考）是模型的事实，
   // 以前存盘时会被滤掉 —— 丢了它，「自动」档就会发 thinking: disabled，整轮 400
   if (!('off' in own) && known && 'off' in known) return { off: known.off, ...own }
   return own
+}
+
+/** 不给档位时 pi 会替我们发 `reasoning.effort: "none"` 的那两条路 */
+const EFFORT_NONE_BY_DEFAULT: ReadonlySet<ProviderProtocol> = new Set([
+  'openai-responses',
+  'openai-codex-responses'
+])
+
+/**
+ * 哪本目录都没收录的推理模型：responses 那两条路上标成「`off` 这一档不存在」。
+ *
+ * pi 在没给档位（输入框的「自动」、入职体检这类单轮调用）时会发 `effort: "none"`，
+ * 除非表里写明 `off: null`。认不认 `none` 是逐个型号的事 —— GPT-6.1 Sol 就不认，
+ * 整轮 400。不知道的型号宁可什么都不发、按它自己的默认来，代价只是「关思考」那一档
+ * 对它不起作用；猜错的代价却是这个模型完全用不了。
+ */
+function unknownModelLevelMap(
+  provider: ProviderConfig,
+  model: ModelConfig
+): ThinkingLevelMap | undefined {
+  if (!EFFORT_NONE_BY_DEFAULT.has(provider.protocol) || !reasoningFor(provider, model)) {
+    return undefined
+  }
+  return { off: null }
 }
 
 /**

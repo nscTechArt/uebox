@@ -32,7 +32,7 @@ import { randomBytes } from 'crypto'
 import { basename } from 'path'
 
 import type { SkillLearningMode } from '../capabilities/skills'
-import { admit, covered, MAX_ACTIVE_PER_LAYER, patternCovered, weakest } from './admission'
+import { admit, covered, layerCapacity, patternCovered, retireAs, weakest } from './admission'
 import { engineMinor, type ExperienceEntry } from './experienceFile'
 import type { ExperienceLayer, LayeredEntry } from './recall'
 import { avoidPattern } from './precheck'
@@ -40,12 +40,14 @@ import { probeTarget, type EditorProbe, type ProbeVerdict } from './probe'
 import {
   attributeMember,
   errorProblem,
+  isApiFact,
   patternProblem,
   STRICT_TOOLS,
   symbolOf
 } from './specificity'
 import { ExperienceStore, experienceDir } from './store'
 import type { TrailCall, TrailHeader } from './trail'
+import { recheckFacts, repairLayer } from './upkeep'
 
 /** 成功要在失败后几步之内出现，才算「后来这样过的」 */
 export const PAIR_WINDOW = 6
@@ -429,25 +431,28 @@ export interface CurateResult {
   written: LayeredEntry[]
 }
 
-/** 往一层里写一条：整层满了先挤掉最该走的，已有对得上的就不写 */
+/**
+ * 往一层里写一条：这一类（事实 / 做法）在这层满了，先挤掉同一类里最该走的；
+ * 已有对得上的就不写
+ */
 async function writeInto(
   store: ExperienceStore,
   layer: ExperienceLayer,
   entry: ExperienceEntry
 ): Promise<boolean> {
-  const ledger = await store.readLedger()
   const all = await store.readAll()
-  if (all.filter((e) => e.status !== 'retired').length >= MAX_ACTIVE_PER_LAYER[layer]) {
-    const victim = weakest(all, ledger)
+  const sameKind = all.filter((e) => e.status !== 'retired' && isApiFact(e) === isApiFact(entry))
+  if (sameKind.length >= layerCapacity(layer, entry)) {
+    const victim = weakest(sameKind, await store.readLedger())
     if (!victim || victim.pinned) return false
     await store.updateTool(victim.tool, (list) =>
-      list.map((e) => (e.id === victim.id ? { ...e, status: 'retired' as const } : e))
+      list.map((e) => (e.id === victim.id ? retireAs(e, 'capacity') : e))
     )
   }
   let added = false
   await store.updateTool(entry.tool, (list) => {
     if (patternCovered(list, entry.tool, entry.errorPattern)) return undefined
-    const next = admit(list, entry, ledger)
+    const next = admit(list, entry)
     if (next) added = true
     return next
   })
@@ -463,6 +468,16 @@ export async function curateSession(deps: CurateDeps): Promise<CurateResult> {
 
   const project = new ExperienceStore(dir)
   const global = deps.globalDir ? new ExperienceStore(deps.globalDir) : undefined
+  const engine = engineMinor(deps.header.engineVersion)
+
+  // 先做维护（见 upkeep.ts）：修旧账不花钱；复查要编辑器开着，没开就是空跑
+  const layers = [
+    { store: project, layer: 'project' as const },
+    ...(global ? [{ store: global, layer: 'global' as const }] : [])
+  ]
+  for (const { store } of layers) await repairLayer(store)
+  if (deps.probe) await recheckFacts(layers, deps.probe, deps.header.projectRoot, engine)
+
   const existing = [...(await project.readAll()), ...(global ? await global.readAll() : [])]
   const candidates = findLessonCandidates(deps.calls, existing)
   if (candidates.length === 0) return nothing
@@ -472,7 +487,6 @@ export async function curateSession(deps: CurateDeps): Promise<CurateResult> {
 
   const now = deps.now ?? new Date()
   const today = now.toISOString().slice(0, 10)
-  const engine = engineMinor(deps.header.engineVersion)
   const projectName = projectNameOf(deps.header.projectRoot)
 
   const accepted: LayeredEntry[] = []
@@ -512,7 +526,8 @@ export async function curateSession(deps: CurateDeps): Promise<CurateResult> {
         date: today,
         ...(deps.header.engineVersion ? { engine: deps.header.engineVersion } : {})
       },
-      status: 'trial',
+      // API 事实在编辑器里核实过就是已验证：真假引擎已经答过了，不用再攒采纳次数
+      status: verdict === 'confirmed' && isApiFact(candidate) ? 'proven' : 'trial',
       // 通用经验记「在哪些版本上成立」；学到它的这个版本就是第一个
       ...(layer === 'global' && engine ? { engines: [engine] } : {}),
       ...(candidate.symbol ? { symbol: candidate.symbol } : {}),
@@ -531,7 +546,7 @@ export async function curateSession(deps: CurateDeps): Promise<CurateResult> {
     // 界面就会给出一次「撤销」，点了会把这之后运行时记下的转正和计数一起退回去
     const list = await store.readTool(entry.tool)
     if (patternCovered(list, entry.tool, entry.errorPattern)) continue
-    if (!admit(list, entry, await store.readLedger())) continue
+    if (!admit(list, entry)) continue
     if (!snapshotted.has(layer)) {
       await store.snapshot(now)
       snapshotted.add(layer)

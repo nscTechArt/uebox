@@ -115,8 +115,11 @@ type SteerAgentOptions = {
    * 用户切了对话，`currentSessionId` 就指向别人正在跑的那一轮了
    */
   targetSessionId?: string
-  /** 'restored'：放回输入框；'queued'：留在队列，等这一轮释放后照常发出 */
-  ifRejected?: 'restored' | 'queued'
+  /**
+   * 'restored'：放回输入框；'queued'：留在队列，等这一轮释放后照常发出。
+   * 故意不给默认值：被拒提示按它选话术，默认成哪个，都可能和调用方实际的处理对不上
+   */
+  ifRejected: 'restored' | 'queued'
   /**
    * 把这次摘走的字和附件放回输入框。插进去之后按号记下，用户撤回这条时调它 ——
    * 撤回就是「我还要改」，东西得原样回到手上
@@ -1040,15 +1043,9 @@ export function useAgentMode(params: UseAgentModeParams) {
    * `attachments` 是图片以外的附件（音视频路径、文档正文），和普通发送同一套处理，
    * 只是塞进正在跑的这一轮。
    */
-  async function steerAgent(text: string, options: SteerAgentOptions = {}): Promise<boolean> {
-    const {
-      editorSnapshot,
-      images,
-      attachments,
-      targetSessionId,
-      ifRejected = 'restored',
-      restoreDraft
-    } = options
+  async function steerAgent(text: string, options: SteerAgentOptions): Promise<boolean> {
+    const { editorSnapshot, images, attachments, targetSessionId, ifRejected, restoreDraft } =
+      options
     const sessionId = targetSessionId || currentSessionId.value
     // 这一轮属于哪条对话，也在等之前定下来：回执晚到时气泡得落回它自己的对话里
     const ownerChatSid = sessionId

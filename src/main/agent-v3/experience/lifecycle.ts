@@ -15,10 +15,18 @@
  * 照着做了却还是同一个错 —— 这是经验错了的直接证据，当场降级，不等攒够样本。
  * 很久没出场不算失效，只在容量满时被挤掉（见 `curator.ts`）。
  *
+ * ## API 事实另算
+ *
+ * 上面这些是给做法经验的。API 事实（见 `specificity.ts` 的 `isApiFact`）说的是
+ * 「这个成员不存在」，同一个错又报了一次，正是又证明了一次 —— 所以它一出场就转正，
+ * 不因为照做了又错、被忽略、提升不够而退休。它只在引擎里查到那个成员其实存在时退休
+ * （`curator.ts` 的复查）。
+ *
  * 阈值是初值，要拿评测数据校准（设计稿第 9 节）。
  */
 
-import type { ExperienceEntry, ExperienceStatus } from './experienceFile'
+import type { ExperienceEntry, ExperienceStatus, RetireReason } from './experienceFile'
+import { isApiFact } from './specificity'
 
 export interface EntryStats {
   /** 出场次数，以及出场后同一工具随后成功的次数 */
@@ -83,16 +91,34 @@ function canPromote(stats: EntryStats): boolean {
   return measured > 0
 }
 
+export interface OutcomeResult {
+  stats: EntryStats
+  status: ExperienceStatus
+  /** 这一次刚退休时才有 */
+  retiredBecause?: RetireReason
+}
+
 export function applyOutcome(
-  entry: Pick<ExperienceEntry, 'status' | 'pinned'>,
+  entry: Pick<ExperienceEntry, 'status' | 'pinned'> &
+    Partial<Pick<ExperienceEntry, 'tool' | 'symbol'>>,
   before: EntryStats,
   outcome: Outcome,
   now: string = new Date().toISOString()
-): { stats: EntryStats; status: ExperienceStatus } {
+): OutcomeResult {
   const stats = { ...before }
   let status = entry.status
-  const retire = (): void => {
-    if (!entry.pinned) status = 'retired'
+  let retiredBecause: RetireReason | undefined
+  const retire = (reason: RetireReason): void => {
+    if (entry.pinned) return
+    status = 'retired'
+    retiredBecause = reason
+  }
+
+  if (entry.tool && isApiFact({ tool: entry.tool, symbol: entry.symbol })) {
+    return {
+      stats: countFact(stats, outcome, now),
+      status: status === 'retired' ? status : 'proven'
+    }
   }
 
   if (outcome.arm === 'holdout') {
@@ -111,31 +137,63 @@ export function applyOutcome(
         stats.adoptedFail += 1
         // 照着做了还是同一个错：经验错了的直接证据，当场降级
         if (status === 'proven') status = 'trial'
-        else if (stats.adoptedFail >= TRIAL_ADOPTED_FAIL_LIMIT) retire()
+        else if (stats.adoptedFail >= TRIAL_ADOPTED_FAIL_LIMIT) retire('failed')
       }
     } else {
       stats.ignoredStreak += 1
       // 一直摆在眼前却没人照做：要么写得不好，要么不对路。留着只占位置
-      if (stats.ignoredStreak >= IGNORED_STREAK_LIMIT) retire()
+      if (stats.ignoredStreak >= IGNORED_STREAK_LIMIT) retire('ignored')
     }
   }
 
-  if (status === 'retired') return { stats, status }
+  if (status === 'retired') return { stats, status, ...(retiredBecause ? { retiredBecause } : {}) }
 
   const measured = lift(stats)
   const enoughSamples = stats.shown + stats.holdout >= RETIRE_MIN_SAMPLES
   // 样本够了、有对照，而出场并不比不出场好：它没用
   if (measured !== undefined && measured <= 0 && enoughSamples && !entry.pinned) {
-    return { stats, status: 'retired' }
+    return { stats, status: 'retired', retiredBecause: 'no-lift' }
   }
 
   if (status === 'trial' && canPromote(stats)) status = 'proven'
   return { stats, status }
 }
 
-/** 容量满时谁先走：钉住的不走；试用先于转正；同档里提升（或采纳成功数）低的先走 */
+/** API 事实只记数，给界面看「提示过几次、照做了几次」；去留不看这些 */
+function countFact(stats: EntryStats, outcome: Outcome, now: string): EntryStats {
+  if (outcome.arm === 'holdout') {
+    stats.holdout += 1
+    if (outcome.ok) stats.holdoutOk += 1
+    return stats
+  }
+  stats.shown += 1
+  stats.lastShownAt = now
+  if (outcome.ok) stats.shownOk += 1
+  if (outcome.adopted) {
+    stats.adopted += 1
+    stats.ignoredStreak = 0
+    if (outcome.ok === true) stats.adoptedOk += 1
+    if (outcome.ok === false) stats.adoptedFail += 1
+  } else {
+    stats.ignoredStreak += 1
+  }
+  return stats
+}
+
+/** 出场、对照都还没有过：没有任何证据说它好或不好 */
+function untested(stats: EntryStats): boolean {
+  return stats.shown === 0 && stats.holdout === 0
+}
+
+/**
+ * 容量满时谁先走：钉住的不走；试用先于转正；同档里提升（或采纳成功数）低的先走。
+ *
+ * 还没出过场的试用排在「出过场却一次没成」的后面：没出场是因为那个错还没再犯，
+ * 不是它没用。早先它们是 0 分、排最前，结果新来一条就挤掉最老的那条，等于只留最近几条
+ */
 export function evictionScore(entry: ExperienceEntry, stats: EntryStats): number {
   if (entry.pinned) return Number.POSITIVE_INFINITY
   const base = entry.status === 'proven' ? 1000 : 0
+  if (entry.status !== 'proven' && untested(stats)) return base + 0.5
   return base + (lift(stats) ?? 0) * 100 + stats.adoptedOk
 }

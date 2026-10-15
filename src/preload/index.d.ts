@@ -1191,17 +1191,6 @@ declare global {
       filename: string
     ) => Promise<{ success: boolean; data?: string; error?: string }>
   }
-  interface AssistantAPI {
-    ask: (args: {
-      content: string
-      conversationId?: string | null
-    }) => Promise<{ success: boolean }>
-    onChunk: (listener: (chunk: string) => void) => () => void
-    onDone: (listener: () => void) => () => void
-    onError: (listener: (err: { message?: string; status?: number }) => void) => () => void
-    onConversation: (listener: (id: string) => void) => () => void
-  }
-
   // Unreal 引擎与插件 API
   interface UnrealEngineInfo {
     name: string
@@ -1674,7 +1663,6 @@ declare global {
         error?: string
       }>
     }
-    assistant: AssistantAPI
     unrealPath: UnrealPathAPI
     unrealProcess: UnrealProcessAPI
     /**
@@ -3351,6 +3339,11 @@ declare global {
         sessionId: string
         taskId: string
       }) => Promise<{ success: boolean; error?: string }>
+      /** 把一件停下的活交回制作人：任务板上加一项「用户重开」的待办 */
+      teamJobReopen: (args: {
+        sessionId: string
+        jobId: string
+      }) => Promise<{ success: boolean; error?: string }>
       /** 给一个队员换模型，记成用户定的。先过入职体检，没过带回 checkup。正在跑也行：它下一件活开始用 */
       teamMemberModel: (args: {
         sessionId: string
@@ -3771,6 +3764,15 @@ declare global {
     source: string
     verified?: { date: string; engine?: string }
     status: 'trial' | 'proven' | 'retired'
+    /** 退休的才有；这个字段出现之前退休的旧经验没有 */
+    retiredBecause?:
+      | 'capacity'
+      | 'replaced'
+      | 'failed'
+      | 'ignored'
+      | 'no-lift'
+      | 'refuted'
+      | 'script-bug'
     pinned?: boolean
     engines?: string[]
     notFor?: string[]

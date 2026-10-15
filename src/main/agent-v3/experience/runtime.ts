@@ -14,7 +14,7 @@
  */
 
 import { errorFingerprint, isEnvironmentalError, normalizeError } from './errorSignature'
-import type { ExpectedAction, ExperienceEntry } from './experienceFile'
+import type { ExpectedAction, ExperienceEntry, RetireReason } from './experienceFile'
 import { applyOutcome, emptyStats, type Outcome } from './lifecycle'
 import { codeDigest, codeOf, findAvoided, formatPrecheck } from './precheck'
 import { recordProvenInProject } from './promotion'
@@ -25,7 +25,7 @@ import {
   type ExperienceLayer,
   type LayeredEntry
 } from './recall'
-import { STRICT_TOOLS, symbolOf } from './specificity'
+import { isApiFact, STRICT_TOOLS, symbolOf } from './specificity'
 import type { ExperienceStore } from './store'
 import { CODE_LIMIT, digestArgs, type TrailWriter } from './trail'
 
@@ -181,6 +181,7 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
 
         // 读和改放在同一次排队的更新里：同一条经验的两次结论同时落地时，分开读写会丢掉一次
         let status = current.status
+        let retiredBecause: RetireReason | undefined
         await store.updateLedger((all) => {
           const result = applyOutcome(
             current,
@@ -189,9 +190,10 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
             now()
           )
           status = result.status
+          retiredBecause = result.retiredBecause
           return { ...all, [item.entry.id]: result.stats }
         })
-        next = { ...next, status }
+        next = { ...next, status, ...(retiredBecause ? { retiredBecause } : {}) }
 
         if (JSON.stringify(next) !== JSON.stringify(current)) {
           await store.updateTool(item.tool, (entries) =>
@@ -276,7 +278,9 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
         )
         for (const entry of matches) {
           if (alreadyWatching.has(entry.id)) continue
+          // API 事实不留对照组：真假引擎答得出，藏起来只会让模型多绕几步
           const arm: Outcome['arm'] =
+            !isApiFact(entry) &&
             random() < HOLDOUT_RATE[entry.status === 'proven' ? 'proven' : 'trial']
               ? 'holdout'
               : 'shown'
@@ -318,16 +322,28 @@ export function createExperienceRuntime(deps: ExperienceRuntimeDeps): Experience
     }
   }
 
-  /** 已验证的降回试用（执行前提醒拦错了） */
+  /**
+   * 执行前提醒拦错了。
+   *
+   * 做法经验降回试用。API 事实不降级：它说的那个类确实没有这个成员（引擎答过），
+   * 错的是 `avoid` —— 它只认成员名，换个类就可能是对的写法。去掉 `avoid`，不再拦；
+   * 报错后照样出场
+   */
   const demote = (entry: LayeredEntry): void => {
     const store = storeOf(entry.layer)
     if (!store) return
     track(
-      store.updateTool(entry.tool, (entries) =>
-        entries.some((e) => e.id === entry.id && e.status === 'proven')
-          ? entries.map((e) => (e.id === entry.id ? { ...e, status: 'trial' as const } : e))
-          : undefined
-      )
+      store.updateTool(entry.tool, (entries) => {
+        const target = entries.find((e) => e.id === entry.id && e.status === 'proven')
+        if (!target) return undefined
+        return entries.map((e) => {
+          if (e.id !== entry.id) return e
+          if (!isApiFact(e)) return { ...e, status: 'trial' as const }
+          const next = { ...e }
+          delete next.avoid
+          return next
+        })
+      })
     )
   }
 

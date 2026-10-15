@@ -136,6 +136,22 @@ describe('经验分组', () => {
     })
   })
 
+  it('已淘汰的详情说明淘汰原因；在用的不出现这一行', async () => {
+    listExperiences.mockResolvedValue({
+      entries: [ENTRIES[0], { ...ENTRIES[1], retiredBecause: 'capacity' }]
+    })
+    const wrapper = mountSection()
+    await flushPromises()
+    await wrapper.find('.entity-open').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).not.toContain('profile.experience.detail.retiredBecause')
+
+    await wrapper.find('.retired-toggle [role="checkbox"]').trigger('click')
+    await wrapper.findAll('.entity-open')[1].trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('profile.experience.retireReason.capacity')
+  })
+
   it('有可撤销的整理才给按钮，确认后才撤销', async () => {
     const plain = mountSection()
     await flushPromises()

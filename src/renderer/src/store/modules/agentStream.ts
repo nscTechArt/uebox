@@ -479,14 +479,20 @@ export const useAgentStreamStore = defineStore('agentStream', () => {
     agentSessionId: string,
     toolCallId: string,
     action: AgentQuestionAction,
-    answers?: string[]
+    answers?: string[],
+    auto = false
   ): void {
     const state = getStreamByAgentSession(agentSessionId)
     if (!state) return
 
     for (const entry of state.agentProcess) {
       if (entry.type !== 'question' || entry.data?.toolCallId !== toolCallId) continue
-      entry.data = { ...entry.data, action, ...(answers ? { answers } : {}) }
+      entry.data = {
+        ...entry.data,
+        action,
+        ...(answers ? { answers } : {}),
+        ...(auto ? { auto: true } : {})
+      }
       return
     }
   }

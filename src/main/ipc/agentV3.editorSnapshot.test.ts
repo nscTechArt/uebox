@@ -372,6 +372,30 @@ describe('steer 的闸', () => {
   })
 
   /**
+   * 这一轮没连着工程时 `runProject` 回空串 —— 渲染层靠它换「未连接工程」那句
+   * （`describeSteerRejection`），改成回别的值，界面会把「没连工程」说成「在另一个工程上」。
+   */
+  it('这一轮没连着工程：runProject 回空串', async () => {
+    mock.interactiveProjects.mockReturnValue([])
+    mock.currentProject.mockReturnValue(undefined)
+    const release = await startRun('run-no-project')
+
+    const result = await invoke('steer', {
+      sessionId: 'run-no-project',
+      message: '这个也改了',
+      editorSnapshot: snapshotFromA()
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PROJECT_MISMATCH',
+      errorParams: { snapshotProject: 'GameA', runProject: '' }
+    })
+    expect(agent.steer).not.toHaveBeenCalled()
+    release()
+  })
+
+  /**
    * 压根没有在跑的一轮：第一道闸就拒出去。
    *
    * 不带 `code` 的时候渲染层只能把「没有正在执行的 session」塞进「插话失败」的

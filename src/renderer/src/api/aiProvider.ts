@@ -25,8 +25,9 @@ export const aiProviderAPI = {
     binding: ModelBinding,
     defaultError = '切换 Agent 模型失败'
   ): Promise<SettingsView> {
+    // 写主模型那一格。「Agent」已并进「对话」，见主进程 `ai/store.ts` 的 mergeMainModel
     const result = await window.api.aiProvider.setRoles({
-      agent: { providerId: binding.providerId, modelId: binding.modelId }
+      chat: { providerId: binding.providerId, modelId: binding.modelId }
     })
     const view = unwrapAiProviderResult(result, defaultError)
     // 换了模型，按角色缓存的窗口/输出上限立刻作废，别让预算继续按上一个模型算

@@ -40,6 +40,8 @@ export interface UseTeamBoard {
   refresh: () => Promise<void>
   /** 卡住的一项改回待办，下一轮制作人会看到 */
   reopen: (taskId: string) => Promise<void>
+  /** 把一件停下的活交回制作人（任务板上加一项「用户重开」的待办） */
+  reopenJob: (jobId: string) => Promise<void>
   /** 结束团队模式。任务板和队员留在盘上，下次 /team 接得上 */
   end: () => Promise<void>
   /** 队员能换成哪些模型。和制作人招人时的候选是同一份名单 */
@@ -125,6 +127,12 @@ export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
     const result = await agentV3API.teamTaskReopen(sessionId, taskId).catch(() => null)
     if (!result?.success) message.error(t('assistant.teamBoard.reopenFailed'))
   }
+  const reopenJob = async (jobId: string): Promise<void> => {
+    const sessionId = agentSessionId.value
+    if (!sessionId) return
+    const result = await agentV3API.teamJobReopen(sessionId, jobId).catch(() => null)
+    if (!result?.success) message.error(t('assistant.teamBoard.reopenFailed'))
+  }
 
   const end = async (): Promise<void> => {
     const sessionId = agentSessionId.value
@@ -182,6 +190,7 @@ export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
     active,
     refresh,
     reopen,
+    reopenJob,
     end,
     modelChoices,
     modelsLoaded: computed(() => modelSettings.value !== null),

@@ -16,7 +16,9 @@ import {
  * 写死的话，每加一个角色（image、tts、asr、model3d 都加过）这两条断言就红一次，
  * 而它们要守的其实是「骨架占位与真下拉一一对应」，与到底有几个角色无关。
  */
-const ROLE_COUNT = MODEL_ROLES.length
+// 「Agent」并进了主模型（chat 那一行），设置页不再单列
+const SHOWN_ROLES = MODEL_ROLES.filter((role) => role !== 'agent')
+const ROLE_COUNT = SHOWN_ROLES.length
 
 /**
  * 这一页以前的毛病是**抢答**：settings 还在 IPC 路上，computed 全部落到空档
@@ -276,7 +278,7 @@ describe('AIProviderSettings 的首屏加载', () => {
     const wrapper = mountSettings()
     await flushPromises()
 
-    const realtimeIndex = MODEL_ROLES.indexOf('realtime')
+    const realtimeIndex = SHOWN_ROLES.indexOf('realtime')
     const realtimeSelect = wrapper.findAll('.role-select')[realtimeIndex]
     const options = realtimeSelect.findAll('.model-option')
 
@@ -448,15 +450,15 @@ describe('套餐的对话四个角色合成一行', () => {
     return { wrapper: mountSettings(), saved }
   }
 
-  it('只显示「对话」一行，其余三行收起；点「分别设置」展开', async () => {
+  it('只显示「主模型」一行，其余两行收起；点「分别设置」展开', async () => {
     const { wrapper } = mountMerged()
     await flushPromises()
-    expect(wrapper.findAll('.role-select')).toHaveLength(ROLE_COUNT - 3)
+    expect(wrapper.findAll('.role-select')).toHaveLength(ROLE_COUNT - 2)
     await wrapper.find('.role-split').trigger('click')
     expect(wrapper.findAll('.role-select')).toHaveLength(ROLE_COUNT)
   })
 
-  it('合成时改「对话」：四个角色一起改', async () => {
+  it('合成时改「主模型」：三个角色一起改', async () => {
     const { wrapper, saved } = mountMerged()
     await flushPromises()
     const chatSelect = wrapper.findComponent('.role-select') as VueWrapper
@@ -464,12 +466,12 @@ describe('套餐的对话四个角色合成一行', () => {
     await flushPromises()
     expect(saved).toHaveLength(1)
     const last = saved.at(-1) as SettingsView['roles']
-    for (const role of ['chat', 'agent', 'vision', 'summary'] as const) {
+    for (const role of ['chat', 'vision', 'summary'] as const) {
       expect(last[role]).toEqual({ providerId: 'deepseek', modelId: 'v4-flash' })
     }
   })
 
-  it('合成时改成看不懂图的模型：视觉留在原来的模型上，其余三个一起改', async () => {
+  it('合成时改成看不懂图的模型：视觉留在原来的模型上，其余两个一起改', async () => {
     const { wrapper, saved } = mountMerged()
     await flushPromises()
     const chatSelect = wrapper.findComponent('.role-select') as VueWrapper
@@ -477,7 +479,7 @@ describe('套餐的对话四个角色合成一行', () => {
     await flushPromises()
     expect(saved).toHaveLength(1)
     const last = saved[0] as SettingsView['roles']
-    for (const role of ['chat', 'agent', 'summary'] as const) {
+    for (const role of ['chat', 'summary'] as const) {
       expect(last[role]).toEqual({ providerId: 'text-only', modelId: 'plain' })
     }
     // 只发改了的角色：视觉不在里面，主进程那边保持原来的 Box-Chat
@@ -485,7 +487,7 @@ describe('套餐的对话四个角色合成一行', () => {
     // 存完之后四个不再一样：展开成四行，视觉那一行还是 Box-Chat
     const values = wrapper.findAll('.role-select').map((node) => node.attributes('data-value'))
     expect(values).toHaveLength(ROLE_COUNT)
-    expect(values[MODEL_ROLES.indexOf('vision')]).toBe('creator-plan::uebox-chat')
+    expect(values[SHOWN_ROLES.indexOf('vision')]).toBe('creator-plan::uebox-chat')
   })
 })
 
@@ -537,7 +539,7 @@ describe('实时语音没绑时的那一行', () => {
     await flushPromises()
     const row = realtimeRow(wrapper)
     expect(row).not.toContain('语音通话不可用')
-    expect(row).toContain('通话由对话模型应答')
+    expect(row).toContain('通话由主模型应答')
   })
 
   it('缺了语音合成：照旧报不可用', async () => {
@@ -555,6 +557,6 @@ describe('实时语音没绑时的那一行', () => {
     await flushPromises()
     const row = realtimeRow(wrapper)
     expect(row).toContain('语音通话不可用')
-    expect(row).not.toContain('通话由对话模型应答')
+    expect(row).not.toContain('通话由主模型应答')
   })
 })

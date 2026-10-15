@@ -636,19 +636,19 @@ export default {
       unset: '未设置',
       // 行内只留「选之前要知道的」，长文收进 More（一个 ? 图标的 tooltip）
       moreLabel: '查看详细说明',
-      chat: '对话',
-      chatDesc: '助手与各处对话窗口的默认模型。',
-      chatMerged: 'Agent、视觉、轻量任务同样使用此模型。',
+      chat: '主模型',
+      chatDesc: '对话与 Agent 共用，输入框里切换的就是它；其他用途未单独设置时也用它。',
+      chatMerged: '视觉、轻量任务同样使用此模型。',
       chatSplit: '分别设置',
       agent: 'Agent',
       agentDesc: '处理多步任务；未选择时使用对话模型。',
       vision: '视觉',
       // 这几条渲染成纯文本，不要写 Markdown 强调符，会原样显示出来
-      visionDesc: '对话或 Agent 模型无法识图时，使用此模型。',
+      visionDesc: '主模型无法识图时，使用此模型。',
       visionMore: '主模型支持识图时无需配置；否则请选择视觉模型，两者都不支持时无法发送图片。',
       visionMissing: '图片请求会报错',
       summary: '轻量任务',
-      summaryDesc: '用于总结、起标题、判断意图等；未选择时使用对话或 Agent 模型。',
+      summaryDesc: '用于总结、起标题、判断意图等；未选择时使用主模型。',
       embedding: '嵌入',
       embeddingDesc: '为知识库内容建立索引，供助手检索。',
       embeddingMore: '更换模型会自动重建索引；使用 Ollama 本地模型可避免云端费用。',
@@ -676,9 +676,9 @@ export default {
       ttsMissing: '回复朗读不可用',
       realtimeDesc: '选择实时语音模型，用于语音通话。',
       realtimeMore:
-        '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex，普通对话模型不能绑在此处。未设置时，若已配置语音识别与语音合成，通话改由对话模型应答，响应稍慢。',
+        '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex，普通对话模型不能绑在此处。未设置时，若已配置语音识别与语音合成，通话改由主模型应答，响应稍慢。',
       realtimeMissing: '语音通话不可用',
-      realtimeViaPipeline: '未设置时，通话由对话模型应答（经语音识别与语音合成），响应稍慢。',
+      realtimeViaPipeline: '未设置时，通话由主模型应答（经语音识别与语音合成），响应稍慢。',
       stt: '语音识别',
       sttDesc: '按下语音热键说话，转写为文字填入搜索框。未配置时使用实时语音通道。',
       sttMore:
@@ -2426,7 +2426,9 @@ export default {
       declined: '已交由 AI 决定',
       cancelled: '未回答',
       skippedOne: '此问题未选择',
-      delegatedOne: '由 AI 决定'
+      delegatedOne: '由 AI 决定',
+      autoCountdown: '全部权限模式下，{time} 后按推荐项继续',
+      autoAnswered: '已按推荐项继续'
     },
     // 每轮回复下方的 token 用量
     tokenUsage: {
@@ -2584,6 +2586,10 @@ export default {
         stopped: '停下了',
         lost: '没有交回',
         stoppedJob: '「{title}」停下了：{reason}',
+        stopsLine: '{n} 件停下了 · {who}',
+        stopsLineReason: '{n} 件停下了 · {who} · 原因：{reason}',
+        stopReason: '停下的原因：{reason}',
+        stopSteps: '停下前在做',
         deliveredCount: '本轮交回 {n} 份',
         deliveredBy: '{name} · {ago}交回',
         earlier: '更早的成果 {n} 份',
@@ -2657,6 +2663,7 @@ export default {
       reopened: '已手动重开',
       reopen: '重开',
       reopenHint: '改回待办，制作人下一轮会重新评估这一项',
+      reopenJobHint: '交回制作人，下一轮由它决定要不要重派',
       reopenFailed: '重开失败，请稍后重试',
       end: '结束团队模式',
       endHint: '结束后恢复普通对话，不再推进交付；任务板和队员保留，下次使用 /team 可继续',
@@ -3433,8 +3440,18 @@ export default {
         effectValue: '提示 {shown} 次，采用 {adopted} 次，成功 {ok} 次',
         lift: '未提示时成功率 {without}%，提示后 {with}%',
         liftUnknown: '对照样本不足，暂无法计算提升',
+        retiredBecause: '淘汰原因',
         source: '来源',
         pin: '固定保留，不自动淘汰'
+      },
+      retireReason: {
+        capacity: '经验数量达到上限，按效果排序被移出',
+        replaced: '同一 API 已有更新的经验',
+        failed: '按此做法执行后仍报相同错误',
+        ignored: '连续多次提示均未被采用',
+        'no-lift': '对照结果显示提示后成功率未提高',
+        refuted: '编辑器核实该成员实际存在',
+        'script-bug': '属于脚本自身的错误，不是引擎规则'
       },
       deleteTitle: '删除这条经验？',
       deleteContent: '删除后不再提示。再次遇到相同问题时，可能重新学习。',
@@ -5884,10 +5901,19 @@ export default {
       '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮在「{runProject}」上，没有送进去，内容已放回输入框',
     steerProjectMismatchQueued:
       '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮在「{runProject}」上。这一轮结束后，它会按「{snapshotProject}」发出',
+    steerNoProjectRestored:
+      '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮未连接工程，没有送进去，内容已放回输入框',
+    steerNoProjectQueued:
+      '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮未连接工程。这一轮结束后，它会按「{snapshotProject}」发出',
     steerOtherProject: '另一个工程',
     queueAction: '排队',
     queueCancel: '取消此条',
-    queueSteerNow: '立即发送',
+    queueSteerNow: '现在插话',
+    queueLabel: '本轮结束后发',
+    queueEdit: '撤回重新编辑',
+    queueMore: '还有 {count} 条',
+    queueCollapse: '收起',
+    placeholderQueued: '再发一条也会排在后面',
     /** 只有图片、没打字时排队用的占位。标签上总得有一行字，否则是个空壳 */
     queueUntitled: '（附件）',
     sourceType: {

@@ -649,20 +649,21 @@ export default {
       desc: 'Assign models by purpose.',
       unset: 'Not set',
       moreLabel: 'Show details',
-      chat: 'Chat',
-      chatDesc: 'Default model for the assistant and every chat window.',
-      chatMerged: 'Agent, Vision and Quick tasks use this model too.',
+      chat: 'Main model',
+      chatDesc:
+        'Shared by chat and Agent; the composer switches this one. Also used wherever no other model is set.',
+      chatMerged: 'Vision and Quick tasks use this model too.',
       chatSplit: 'Set separately',
       agent: 'Agent',
       agentDesc: 'For multi-step tasks. Uses the Chat model if unconfigured.',
       vision: 'Vision',
-      visionDesc: 'Used when the Chat or Agent model cannot understand images.',
+      visionDesc: 'Used when the main model cannot understand images.',
       visionMore:
         'No setup is needed if the primary model supports images. Otherwise choose a vision model; images cannot be sent if neither supports them.',
       visionMissing: 'Image requests will fail',
       summary: 'Quick tasks',
       summaryDesc:
-        'For summaries, titles, and intent classification. Uses the Chat or Agent model if unconfigured.',
+        'For summaries, titles, and intent classification. Uses the main model if unconfigured.',
       embedding: 'Embedding',
       embeddingDesc: 'Index knowledge base content for the assistant to search.',
       embeddingMore:
@@ -2484,7 +2485,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       declined: 'Left to the AI',
       cancelled: 'No answer',
       skippedOne: 'Not answered',
-      delegatedOne: 'Left to the AI'
+      delegatedOne: 'Left to the AI',
+      autoCountdown: 'Full access: continuing with the recommended option in {time}',
+      autoAnswered: 'Continued with the recommended option'
     },
     // Token usage under each reply
     tokenUsage: {
@@ -2650,6 +2653,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         stopped: 'Stopped',
         lost: 'Not delivered',
         stoppedJob: '"{title}" stopped: {reason}',
+        stopsLine: '{n} stopped · {who}',
+        stopsLineReason: '{n} stopped · {who} · Reason: {reason}',
+        stopReason: 'Why it stopped: {reason}',
+        stopSteps: 'Last steps before stopping',
         deliveredCount: '{n} delivered this round',
         deliveredBy: '{name} · delivered {ago}',
         earlier: 'Earlier deliverables ({n})',
@@ -2724,6 +2731,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       reopened: 'Reopened by you',
       reopen: 'Reopen',
       reopenHint: 'Move it back to To do; the producer will reassess it next round',
+      reopenJobHint: 'Hand it back to the producer; it decides next round whether to reassign it',
       reopenFailed: 'Could not reopen this task. Try again in a moment',
       end: 'End team mode',
       endHint:
@@ -3543,8 +3551,18 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         effectValue: 'Shown {shown}x, followed {adopted}x, worked {ok}x',
         lift: 'Success {without}% without it, {with}% with it',
         liftUnknown: 'Not enough comparison data yet',
+        retiredBecause: 'Retired because',
         source: 'Source',
         pin: 'Keep pinned, never auto-retire'
+      },
+      retireReason: {
+        capacity: 'The limit was reached and this one ranked lowest',
+        replaced: 'Superseded by a newer entry for the same API',
+        failed: 'The same error came back after following it',
+        ignored: 'Shown several times in a row without being followed',
+        'no-lift': 'Comparison showed no gain in success rate',
+        refuted: 'The editor shows the member does exist',
+        'script-bug': 'A bug in the script itself, not an engine rule'
       },
       deleteTitle: 'Delete this experience?',
       deleteContent:
@@ -6053,10 +6071,19 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       'This message was sent from "{snapshotProject}", but the current turn is working in "{runProject}". It wasn\'t added and is back in the input box.',
     steerProjectMismatchQueued:
       'This message was sent from "{snapshotProject}", but the current turn is working in "{runProject}". It will run on "{snapshotProject}" after this turn finishes.',
+    steerNoProjectRestored:
+      'This message was sent from "{snapshotProject}", but the current turn isn\'t connected to a project. It wasn\'t added and is back in the input box.',
+    steerNoProjectQueued:
+      'This message was sent from "{snapshotProject}", but the current turn isn\'t connected to a project. It will run on "{snapshotProject}" after this turn finishes.',
     steerOtherProject: 'another project',
     queueAction: 'Queue',
     queueCancel: 'Remove from queue',
-    queueSteerNow: 'Send now',
+    queueSteerNow: 'Steer now',
+    queueLabel: 'Sends after this turn',
+    queueEdit: 'Take back to edit',
+    queueMore: '{count} more',
+    queueCollapse: 'Collapse',
+    placeholderQueued: 'Anything you send now queues up too',
     /** Placeholder when the queued message is attachments only — the chip still needs a label */
     queueUntitled: '(attachments)',
     sourceType: {

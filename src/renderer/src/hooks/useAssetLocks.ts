@@ -80,12 +80,13 @@ export function useAssetLocks(): UseAssetLocks {
     void refresh()
   }
 
-  window.api.on('agent-v3:lock-conflict', onConflict)
+  // off() 要的是 on() 返回的那一层包装，传 onConflict 摘不掉
+  const conflictHandle = window.api.on('agent-v3:lock-conflict', onConflict)
   const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
   void refresh()
 
   onUnmounted(() => {
-    window.api.off('agent-v3:lock-conflict', onConflict)
+    window.api.off('agent-v3:lock-conflict', conflictHandle)
     window.clearInterval(timer)
   })
 

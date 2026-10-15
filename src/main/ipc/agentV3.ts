@@ -148,6 +148,7 @@ import {
   carryOverTasks,
   changedSince,
   formatBoardCarryOver,
+  reopenedJobTask,
   verdictIsStale
 } from '../agent-v3/core/team/boardRecap'
 import {
@@ -1755,6 +1756,34 @@ export function registerAgentV3IPC(): void {
           (error: unknown) => console.warn('[team] 打回没记进履历:', error)
         )
       }
+      event.sender.send('agent-v3:team-board', { sessionId })
+      return { success: true }
+    }
+  )
+
+  /**
+   * 用户在成果架上「重开」一件停下的活：任务板上加一项挂着「用户重开」的待办，
+   * 下一轮开局制作人在旧账里看到它，派不派、派给谁它定（见 `reopenedJobTask`）。
+   *
+   * 和上面的任务重开一样，这一轮正跑着也允许：改的只是两本账。
+   */
+  ipcMain.handle(
+    'agent-v3:team-job-reopen',
+    async (event, args: { sessionId?: string; jobId?: string }) => {
+      const sessionId = args?.sessionId
+      const jobId = args?.jobId
+      if (typeof sessionId !== 'string' || !sessionId || typeof jobId !== 'string' || !jobId) {
+        return { success: false, error: 'sessionId 和 jobId 都要给' }
+      }
+      if (!(await loadExecutionOptions(sessionId))?.team) {
+        return { success: false, error: '这条 session 不是团队模式' }
+      }
+      const store = createTeamStore(teamDirsFor(sessionId))
+      const job = await store.reopenJob(jobId)
+      if (!job) {
+        return { success: false, error: `${jobId} 不是一件停下的活` }
+      }
+      await store.patchBoard([reopenedJobTask(job, job.reopenedAt ?? Date.now())])
       event.sender.send('agent-v3:team-board', { sessionId })
       return { success: true }
     }

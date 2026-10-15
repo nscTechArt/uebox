@@ -1719,7 +1719,9 @@ const THINKING_OVERRIDES = {
     'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     // https://developers.openai.com/api/docs/models/gpt-6.1-sol (2026-10-12)
-    'gpt-6.1-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    // 没有 `none`：pi 不给档位时默认发 effort: "none"，400「Supported values are: 'low',
+    // 'medium', 'high', 'xhigh', and 'max'」（2026-10-15 团队换模型体检撞上）
+    'gpt-6.1-sol': { thinking: { off: null, minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-5.6': {
       thinking: {
         minimal: null,
@@ -1740,7 +1742,8 @@ const THINKING_OVERRIDES = {
    * 是为了让「这一档查过了、确实没有」和「还没查」在这张表里长得不一样。
    */
   chatgpt: {
-    'gpt-6.1-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
+    // 同 openai 那条：6.1 Sol 没有 `none`
+    'gpt-6.1-sol': { thinking: { off: null, minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-astra': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-sol': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },
     'gpt-6-luna': { thinking: { minimal: null, xhigh: 'xhigh', max: 'max' } },

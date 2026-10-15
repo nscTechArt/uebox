@@ -15,6 +15,7 @@ export type SteerRejectionCode = 'NOT_RUNNING' | 'PROJECT_MISMATCH'
 /**
  * `agent-v3:steer` 按码被拒时随码带回的参数（目前只有 PROJECT_MISMATCH 用）。
  * 工程名是原值、可能为空串 —— 「另一个工程」的措辞归渲染层。
+ * `runProject` 空串 = 这一轮没连着工程，渲染层据此换「未连接工程」那句。
  */
 export interface SteerRejectionErrorParams {
   snapshotProject: string

@@ -75,6 +75,10 @@
         </button>
       </div>
       <div class="ask-user-hint">{{ t('assistant.askUser.declineHint') }}</div>
+      <!-- 全部权限档：到点按推荐项继续。倒计时写在脸上，人在场时知道还有多久可以改 -->
+      <div v-if="countdown" class="ask-user-hint ask-user-countdown">
+        {{ t('assistant.askUser.autoCountdown', { time: countdown }) }}
+      </div>
     </template>
 
     <template v-else>
@@ -115,7 +119,7 @@
  * 底下就是输入框，绑全局数字键会让用户没法打字 —— 而运行途中插话是这个
  * 应用里第一等重要的交互。只保留「其他」输入框里按回车走下一步。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { DELEGATED_ANSWER, type AgentQuestionItem } from '@core/shared/agentQuestion'
@@ -237,9 +241,37 @@ function delegateCurrent(): void {
   advance()
 }
 
+/** 倒计时用的「现在」。只在有倒计时的待答卡片上走表，答完就停 */
+const now = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | undefined
+
+watch(
+  () => (pending.value ? props.question.autoAnswerAt : undefined),
+  (deadline) => {
+    if (ticker) clearInterval(ticker)
+    ticker = undefined
+    if (!deadline) return
+    now.value = Date.now()
+    ticker = setInterval(() => (now.value = Date.now()), 1000)
+  },
+  { immediate: true }
+)
+onBeforeUnmount(() => {
+  if (ticker) clearInterval(ticker)
+})
+
+/** 剩余时间，m:ss。到点后主进程会作答并收掉卡片，这里停在 0:00 等那一下 */
+const countdown = computed(() => {
+  const deadline = props.question.autoAnswerAt
+  if (!pending.value || !deadline) return ''
+  const left = Math.max(0, Math.ceil((deadline - now.value) / 1000))
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+})
+
 const stateLabel = computed(() => {
   const action = props.question.action
   if (!action) return t('assistant.askUser.waiting')
+  if (props.question.auto) return t('assistant.askUser.autoAnswered')
   if (action === 'decline') return t('assistant.askUser.declined')
   if (action === 'cancel') return t('assistant.askUser.cancelled')
   return t('assistant.askUser.answered')
@@ -461,6 +493,11 @@ function answerLabel(qi: number): string {
   text-align: right;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+.ask-user-countdown {
+  color: var(--color-accent-text);
+  font-variant-numeric: tabular-nums;
 }
 
 .ask-user-answered {

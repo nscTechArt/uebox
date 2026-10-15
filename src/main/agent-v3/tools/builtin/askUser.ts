@@ -26,6 +26,9 @@
  * 只代表他还没回来。卡片就一直挂在时间线上，这次运行悬停在这儿 —— 不烧 token，
  * 也不会有谁替他把这个选择做了。要收场只能由人来：回答它，或者按停止。
  *
+ * 例外是「全部权限」档：用户已经说了「不用问我」，到点就按推荐项继续
+ * （`autoAnswerAfterMs`，见 `questionChannel.ts` 文件头）。
+ *
  * ## 子 agent 拿不到这个工具
  *
  * 在 `resolveTools` 里就被 `isSubAgent` 挡掉了。子 agent 跑在用户看不见的后台，
@@ -46,6 +49,9 @@ import {
 
 /** 一次运行最多问几轮。超了直接报错，让模型自己拿主意 */
 export const MAX_ASKS_PER_RUN = 3
+
+/** 「全部权限」档下，一问挂多久没人答就按推荐项继续。够人回头看一眼，又不至于把整轮晾太久 */
+export const UNATTENDED_ANSWER_MS = 3 * 60_000
 
 const askUserInput = z.object({
   questions: z
@@ -100,9 +106,19 @@ export interface AskUserToolDeps {
   sessionId: string
   /** 向用户发起提问，由 `host/questionChannel.ts` 构造 */
   request: (
-    req: { sessionId: string; toolCallId: string; questions: AskUserQuestion[] },
+    req: {
+      sessionId: string
+      toolCallId: string
+      questions: AskUserQuestion[]
+      autoAnswerAfterMs?: number
+    },
     signal?: AbortSignal
   ) => Promise<QuestionOutcome>
+  /**
+   * 这一问多久没人答就按推荐项继续。**每次提问现读**：用户可能跑到一半才把
+   * 权限档调成「全部权限」。返回 undefined = 一直等
+   */
+  autoAnswerAfterMs?: () => number | undefined
 }
 
 /**
@@ -124,6 +140,10 @@ export function formatAnswers(questions: AskUserQuestion[], answers: string[]): 
     ...(delegated ? ['', '让你自己定的那几问，按你的判断选，并在最终回复里写明你的假设。'] : [])
   ].join('\n')
 }
+
+const AUTO_ANSWERED =
+  '\n\n用户开着「全部权限」且没有在限定时间内回答，以上是按你标的推荐项自动选的。' +
+  '照此继续，并在最终回复里说明这几项是自动按推荐选的。'
 
 const DECLINED =
   '用户不想选，让你自己判断。按你认为最好的方案继续，' +
@@ -169,16 +189,20 @@ export function createAskUserTool(deps: AskUserToolDeps): UnrealAgentTool<Questi
 
       asked += 1
       const questions = args.questions as AskUserQuestion[]
+      const autoAnswerAfterMs = deps.autoAnswerAfterMs?.()
       const outcome = await deps.request(
-        { sessionId: deps.sessionId, toolCallId: ctx.toolCallId, questions },
+        {
+          sessionId: deps.sessionId,
+          toolCallId: ctx.toolCallId,
+          questions,
+          ...(autoAnswerAfterMs ? { autoAnswerAfterMs } : {})
+        },
         ctx.signal
       )
 
       if (outcome.action === 'accept') {
-        return {
-          text: formatAnswers(questions, outcome.answers ?? []),
-          details: outcome
-        }
+        const text = formatAnswers(questions, outcome.answers ?? [])
+        return { text: outcome.auto ? text + AUTO_ANSWERED : text, details: outcome }
       }
 
       if (outcome.action === 'decline') {

@@ -482,6 +482,10 @@ export const agentV3API = {
     return window.api.agentV3.teamTaskReopen({ sessionId, taskId })
   },
 
+  teamJobReopen(sessionId: string, jobId: string): Promise<{ success: boolean; error?: string }> {
+    return window.api.agentV3.teamJobReopen({ sessionId, jobId })
+  },
+
   /** 任务板上给队员换模型。同上，不走 `unwrapResult()`：失败在面板上就地说 */
   teamMemberModel(
     sessionId: string,
@@ -546,8 +550,10 @@ export const agentV3API = {
         delete rest.sessionId
         handler({ type, ...rest } as AgentV3Event)
       }
-      window.api.on(`agent-v3:${type}`, listener)
-      return () => window.api.off(`agent-v3:${type}`, listener)
+      // preload 的 on() 包了一层再挂上去，返回的是那一层；off() 要的是它，不是 listener ——
+      // 传 listener 的话一个都摘不掉，同一条 session 再订一次就会收到两份事件
+      const handle = window.api.on(`agent-v3:${type}`, listener)
+      return () => window.api.off(`agent-v3:${type}`, handle)
     })
 
     return () => disposers.forEach((dispose) => dispose())

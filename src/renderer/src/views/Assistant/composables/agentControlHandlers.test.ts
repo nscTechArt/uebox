@@ -115,6 +115,8 @@ describe('describeSteerRejection', () => {
       'assistantInputComposer.steerTurnEndedQueued',
       'assistantInputComposer.steerProjectMismatchRestored',
       'assistantInputComposer.steerProjectMismatchQueued',
+      'assistantInputComposer.steerNoProjectRestored',
+      'assistantInputComposer.steerNoProjectQueued',
       'assistantInputComposer.steerOtherProject'
     ]
     for (const key of keys) {
@@ -159,17 +161,42 @@ describe('describeSteerRejection', () => {
     expect(queued).not.toContain('放回输入框')
   })
 
-  it('工程名是空串时代入「另一个工程」，不把空引号丢给用户', () => {
+  it('插话抓的工程名是空串时代入「另一个工程」，不把空引号丢给用户', () => {
     const text = describeSteerRejection(
       {
         code: 'PROJECT_MISMATCH',
-        errorParams: { snapshotProject: '', runProject: '' }
+        errorParams: { snapshotProject: '', runProject: 'GameB' }
       },
       'restored',
       t
     )
     expect(text).toContain('另一个工程')
+    expect(text).toContain('GameB')
     expect(text).not.toContain('「」')
+  })
+
+  /*
+   * runProject 空串 = 这一轮没连着工程（归属的工程没开，或纯对话开跑时
+   * 什么都没连），不是「在另一个工程上」—— 主进程按原值回空串，
+   * 措辞归渲染层。
+   */
+  it('这一轮没连着工程时说「未连接工程」，不是「另一个工程」', () => {
+    const result = {
+      code: 'PROJECT_MISMATCH',
+      errorParams: { snapshotProject: 'GameA', runProject: '' }
+    }
+
+    const restored = describeSteerRejection(result, 'restored', t)
+    expect(restored).toContain('GameA')
+    expect(restored).toContain('未连接工程')
+    expect(restored).toContain('放回输入框')
+    expect(restored).not.toContain('另一个工程')
+
+    const queued = describeSteerRejection(result, 'queued', t)
+    expect(queued).toContain('GameA')
+    expect(queued).toContain('未连接工程')
+    expect(queued).not.toContain('放回输入框')
+    expect(queued).not.toContain('另一个工程')
   })
 
   it('不认识的码、没文案时都返回 undefined —— 调用方退回 steerFailed', () => {

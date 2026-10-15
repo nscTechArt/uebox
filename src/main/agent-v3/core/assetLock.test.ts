@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  CURRENT_LEVEL_LOCK,
   acquire,
   describeConflicts,
   extractPackagePaths,
@@ -8,6 +9,7 @@ import {
   getLockOwner,
   listLocks,
   releaseAll,
+  releasePaths,
   rootSessionId,
   runWithLockOwner,
   setLockConflictNotifier
@@ -258,5 +260,20 @@ describe('工作室模式的锁', () => {
     expect(notify).not.toHaveBeenCalled()
     acquire(CONN, 's2', ['/Game/A'])
     expect(notify).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('releasePaths', () => {
+  it('只放点名的那几把，别人的、没点名的都不动；关卡哨兵也认', () => {
+    acquire(CONN, 's1', ['/Game/A', '/Game/B', CURRENT_LEVEL_LOCK], { soft: true })
+    acquire(CONN, 's2', ['/Game/C'])
+    expect(releasePaths(CONN, 's1', ['/Game/A.A_C', CURRENT_LEVEL_LOCK, '/Game/C'])).toBe(2)
+    expect(
+      listLocks()
+        .map((l) => l.path)
+        .sort()
+    ).toEqual(['/Game/B', '/Game/C'])
+    // 放掉之后队友能拿到
+    expect(acquire(CONN, 's1:mate-地编', [CURRENT_LEVEL_LOCK], { soft: true }).ok).toBe(true)
   })
 })

@@ -588,7 +588,7 @@ describe('source 字段落盘', () => {
       providers: [mine],
       roles: {
         chat: { providerId: 'my-gateway', modelId: 'gpt-x', source: 'plan' },
-        agent: { providerId: 'my-gateway', modelId: 'gpt-x', source: 'whatever' }
+        summary: { providerId: 'my-gateway', modelId: 'gpt-x', source: 'whatever' }
       }
     })
     expect(settings.roles.chat).toEqual({
@@ -596,7 +596,7 @@ describe('source 字段落盘', () => {
       modelId: 'gpt-x',
       source: 'plan'
     })
-    expect(settings.roles.agent).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
+    expect(settings.roles.summary).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
   })
 })
 
