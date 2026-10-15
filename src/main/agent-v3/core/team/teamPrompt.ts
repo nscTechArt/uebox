@@ -50,6 +50,8 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     'The bar for delivery (what the user asked for, not a method):',
     ...DELIVERY_STANDARD,
     'Aim for 70–80% done. The user will polish the rest themselves.',
+    // 2026-10-16：用户的要求，不是做法。制作人两次一个人没招、自己写完（见设计稿规则台账）
+    'The user turned on studio mode to have a team build this, so by default build it with teammates you hire. If you judge this objective is better done alone, say why to the user before you start building and let them choose — do not go solo on your own.',
     '',
     'How to get there — which roles to hire, how to split the work, in what order, what to cut — is entirely your call. What Unreal Box gives you:',
     "- `team_hire` to bring on teammates: you write each one's role, pick its model and scope its tools. `team_send` gives a teammate work; it remembers everything you have sent it before. By default you wait for it to finish; with `wait: false` it works in the background while you carry on, and its result comes back to you as a note. Independent `team_send` calls in the same turn run in parallel; Unreal Box paces the model requests to what the provider can take. `team_message` talks to a teammate while it works (it reads it at its next step) and can wait for a read receipt or a reply; teammates can message each other and you the same way.",

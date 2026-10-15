@@ -658,6 +658,13 @@ describe('提示词只写环境，不写方法论', () => {
     expect(brief).not.toMatch(/art director|level designer|designer|programmer|美术|策划|程序/i)
   })
 
+  /** 2026-10-16：制作人一个人没招、自己把游戏写完。默认组队，想单干先问用户 */
+  it('默认组队，单干要先问用户', () => {
+    const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
+    expect(brief).toMatch(/by default build it with teammates you hire/)
+    expect(brief).toMatch(/better done alone.*let them choose/)
+  })
+
   /** 默认新建工程；但用户在目标里点名已有工程时，不能一口拒掉 */
   it('默认新建工程，点名已有工程时确认后在里面做', () => {
     const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
