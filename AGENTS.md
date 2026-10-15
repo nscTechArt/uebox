@@ -111,6 +111,11 @@ For project vocabulary, read [CONTEXT.md](CONTEXT.md).
 
 Other entry points: main-process IPC in `src/main/ipc/`, AI agents in `src/main/agent-v3/`.
 
+Module map: [docs/module-map.md](docs/module-map.md) — which main-process module owns a
+behavior and the interfaces between modules. Consult it before placing new main-process
+code; update it in the same change that moves a responsibility, interface, state
+ownership, or dependency between modules.
+
 Four areas sit outside that slice. Each carries its own obligation, and a change there is not done
 until it is met:
 
