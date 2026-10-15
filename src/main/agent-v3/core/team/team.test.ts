@@ -14,6 +14,7 @@ import {
   createMessageTool,
   createTeamTools,
   formatMail,
+  producerTools,
   renderBoard,
   type TeamToolDeps
 } from './teamTools'
@@ -29,7 +30,7 @@ import {
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './teamPrompt'
 import { parseGoalCommand, parseVerdict } from '../goalLoop'
 import type { SubAgentResult } from '../../tools/builtin/task'
-import { effectiveRisk } from '../../tools/defineTool'
+import { effectiveRisk, type UnrealAgentTool } from '../../tools/defineTool'
 
 /**
  * 工作室模式里盒子负责的那几件事：认命令、排钥匙、记账、派活、交付闸。
@@ -658,11 +659,31 @@ describe('提示词只写环境，不写方法论', () => {
     expect(brief).not.toMatch(/art director|level designer|designer|programmer|美术|策划|程序/i)
   })
 
-  /** 2026-10-16：制作人一个人没招、自己把游戏写完。默认组队，想单干先问用户 */
-  it('默认组队，单干要先问用户', () => {
+  /** 2026-10-16：制作人一个人没招、自己把游戏写完。写工具收走，活只能派出去 */
+  it('制作人只留只读工具和建工程、绑工程', () => {
+    const tool = (
+      name: string,
+      risk: 'safe' | 'mutating' | 'destructive'
+    ): UnrealAgentTool<never> =>
+      ({ name, unrealBox: { risk } }) as unknown as UnrealAgentTool<never>
+    const kept = producerTools([
+      tool('read_local_file', 'safe'),
+      tool('ue_screenshot', 'safe'),
+      tool('write_local_file', 'mutating'),
+      tool('ue_run_python_script', 'destructive'),
+      tool('task', 'safe'),
+      tool('project_manage', 'destructive'),
+      tool('set_session_project', 'mutating')
+    ]).map((t) => t.name)
+    expect(kept).toEqual([
+      'read_local_file',
+      'ue_screenshot',
+      'project_manage',
+      'set_session_project'
+    ])
     const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
-    expect(brief).toMatch(/by default build it with teammates you hire/)
-    expect(brief).toMatch(/better done alone.*let them choose/)
+    expect(brief).toMatch(/You coordinate; teammates build/)
+    expect(brief).not.toMatch(/better done alone/)
   })
 
   /** 默认新建工程；但用户在目标里点名已有工程时，不能一口拒掉 */

@@ -91,7 +91,12 @@ import { loadTeamModels, type TeamModels } from './team/teamModels'
 import type { TeamSnapshots } from './team/snapshots'
 import type { TeamLive } from './team/teamLive'
 import { PRODUCER } from './team/teamStore'
-import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
+import {
+  createBoardTool,
+  createMessageTool,
+  createTeamTools,
+  producerTools
+} from './team/teamTools'
 import { createStatusTool } from './team/teamStatus'
 import { pacedStreamFn, stallGuardStreamFn, type PacedStreamDeps } from './team/requestGate'
 import { diagnosedStreamFn, dumpRejectedRequest, formatRequestRecord } from './requestDiagnostics'
@@ -762,7 +767,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
    * 就只看命名空间和名字，先滤后滤结果一样。
    */
 
-  const onlineTools = resolveAgentTools(
+  const resolvedTools = resolveAgentTools(
     { ...ctx, ueConnected: true },
     skills,
     taskTool,
@@ -778,7 +783,12 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
           ctx.modelRequest?.pin ?? { providerId: selection.providerId, modelId: selection.modelId }
         )
       : undefined
-  onlineTools.push(...teamToolsFor(ctx, onlineTools, teamModels))
+  const teamTools = teamToolsFor(ctx, resolvedTools, teamModels)
+  // 制作人只协调不动手：写工具全部收走，活只能派给队员（见 `producerTools`）
+  const onlineTools = [
+    ...(ctx.team && !ctx.isSubAgent ? producerTools(resolvedTools) : resolvedTools),
+    ...teamTools
+  ]
   const offlineTools = onlineTools.filter(
     (tool) => !tool.unrealBox.namespace.startsWith('ue.') || OFFLINE_UE_TOOLS.has(tool.name)
   )
