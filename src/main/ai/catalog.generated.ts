@@ -1830,6 +1830,24 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     ]
   },
   {
+    "id": "elevenlabs-sfx",
+    "displayName": "ElevenLabs 音效",
+    "group": "sfx",
+    "kind": "sfx",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.elevenlabs.io/v1",
+    "apiKeyUrl": "https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert",
+    "requiresApiKey": true,
+    "defaultEnvVar": "ELEVENLABS_API_KEY",
+    "hasLogo": false,
+    "models": [
+      {
+        "id": "eleven_text_to_sound_v2",
+        "displayName": "Eleven Sound Effects v2"
+      }
+    ]
+  },
+  {
     "id": "sunoapi-music",
     "displayName": "SUNO (SunoAPI.org)",
     "group": "music",

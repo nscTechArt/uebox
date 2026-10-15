@@ -581,6 +581,12 @@ export const CURATED = [
     displayName: 'ElevenLabs Music'
   },
   {
+    id: 'elevenlabs-sfx',
+    group: 'sfx',
+    baseUrl: 'https://api.elevenlabs.io/v1',
+    displayName: 'ElevenLabs 音效'
+  },
+  {
     id: 'sunoapi-music',
     group: 'music',
     baseUrl: 'https://api.sunoapi.org/api/v1',
@@ -1156,6 +1162,14 @@ const MANUAL_ENTRIES = {
     doc: 'https://elevenlabs.io/docs/api-reference/music/compose',
     models: { music_v2: { id: 'music_v2', name: 'Eleven Music v2' } }
   },
+  'elevenlabs-sfx': {
+    name: 'ElevenLabs 音效',
+    env: ['ELEVENLABS_API_KEY'],
+    doc: 'https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert',
+    models: {
+      eleven_text_to_sound_v2: { id: 'eleven_text_to_sound_v2', name: 'Eleven Sound Effects v2' }
+    }
+  },
   'mureka-music': {
     name: 'Mureka',
     env: ['MUREKA_API_KEY'],
@@ -1538,6 +1552,7 @@ const GROUP_KIND = {
   tts: 'tts',
   stt: 'stt',
   music: 'music',
+  sfx: 'sfx',
   search: 'search',
   judge: 'judge'
 }
@@ -2059,7 +2074,7 @@ async function main() {
 
     const protocol = item.protocol || NPM_TO_PROTOCOL[source.npm] || 'openai-completions'
     const models =
-      item.group === 'tts' || item.group === 'music'
+      item.group === 'tts' || item.group === 'music' || item.group === 'sfx'
         ? Object.values(source.models).map((model) => ({
             id: model.id,
             displayName: model.name,

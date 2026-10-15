@@ -175,6 +175,7 @@ defineEmits<{ import: [] }>()
         draft.kind !== 'tts' &&
         draft.kind !== 'stt' &&
         draft.kind !== 'music' &&
+        draft.kind !== 'sfx' &&
         draft.kind !== 'judge' &&
         draft.kind !== 'realtime' &&
         draft.kind !== 'search'

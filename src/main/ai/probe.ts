@@ -94,6 +94,7 @@ export async function testProvider(
     if (
       provider.kind === 'image' ||
       provider.kind === 'music' ||
+      provider.kind === 'sfx' ||
       provider.kind === 'model3d' ||
       provider.kind === 'video'
     ) {
@@ -221,6 +222,7 @@ export async function listRemoteModels(
   // 获取模型列表，请按其文档填写模型 ID」。名字里的 Generative 是历史，不是行为。
   if (
     provider.kind === 'music' ||
+    provider.kind === 'sfx' ||
     provider.kind === 'model3d' ||
     provider.kind === 'video' ||
     provider.kind === 'tts' ||

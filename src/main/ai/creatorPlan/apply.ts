@@ -74,6 +74,8 @@ export const PLAN_PROVIDER_IDS: Readonly<Record<ProviderKind, string>> = Object.
   tts: `${PLAN_PROVIDER_ID}-tts`,
   stt: `${PLAN_PROVIDER_ID}-stt`,
   music: `${PLAN_PROVIDER_ID}-music`,
+  // 网关目前没有音效接口，清单里也不会有这个角色；占个 id 只为让表完整
+  sfx: `${PLAN_PROVIDER_ID}-sfx`,
   search: `${PLAN_PROVIDER_ID}-search`,
   judge: `${PLAN_PROVIDER_ID}-judge`
 })
@@ -162,6 +164,7 @@ const MODEL_OF_KIND: Readonly<
   video: () => ({}),
   model3d: () => ({}),
   music: () => ({}),
+  sfx: () => ({}),
   realtime: (spec: PlanRoleSpec) => {
     const voice = Array.isArray(spec.voices) ? str(spec.voices[0]) : undefined
     return voice ? { realtimeVoice: voice } : {}

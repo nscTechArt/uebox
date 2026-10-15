@@ -1,5 +1,5 @@
 /**
- * AIGC 工具集：生图、视频生成与分析、3D 生成均使用用户配置的模型服务。
+ * AIGC 工具集：生图、视频生成与分析、3D 生成、音效均使用用户配置的模型服务。
  */
 
 import type { UnrealAgentTool } from '../defineTool'
@@ -8,6 +8,7 @@ import { createGenerateVideoTool } from './generateVideo'
 import { createAnalyzeVideoTool } from './analyzeVideo'
 import { createGenerate3dModelTool } from './generate3dModel'
 import { createRig3dModelTool } from './rig3dModel'
+import { createGenerateSoundEffectTool } from './generateSoundEffect'
 
 export function aigcTools(): UnrealAgentTool<never>[] {
   return [
@@ -17,7 +18,8 @@ export function aigcTools(): UnrealAgentTool<never>[] {
     createAnalyzeVideoTool(),
     createGenerate3dModelTool(),
     // 生成出来的是静态网格；Tripo 生成的可以接着绑骨
-    createRig3dModelTool()
+    createRig3dModelTool(),
+    createGenerateSoundEffectTool()
   ] as unknown as UnrealAgentTool<never>[]
 }
 
@@ -31,3 +33,5 @@ export { createGenerate3dModelTool } from './generate3dModel'
 export type { Generated3dModelDetails } from './generate3dModel'
 export { createRig3dModelTool } from './rig3dModel'
 export type { Rigged3dModelDetails } from './rig3dModel'
+export { createGenerateSoundEffectTool } from './generateSoundEffect'
+export type { GeneratedSoundEffectDetails } from './generateSoundEffect'

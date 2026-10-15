@@ -510,6 +510,7 @@ export default {
         video: '视频生成',
         model3d: '3D 生成',
         music: '音乐生成',
+        sfx: '音效生成',
         tts: '语音合成',
         stt: '语音识别',
         realtime: '实时语音',
@@ -690,6 +691,10 @@ export default {
       musicDesc: '为视频生成背景音乐；未配置时可无配乐成片。',
       musicMore: '使用所选服务商生成纯音乐。生成可能收费，商用权限以服务商套餐为准。',
       musicMissing: '不自动生成配乐',
+      sfx: '音效生成',
+      sfxDesc: '为游戏生成脚步、点击、爆炸等音效；未配置时用本机 FFmpeg 合成。',
+      sfxMore:
+        '选择 ElevenLabs 时按描述生成写实音效，可能收费；未配置时 Agent 用本机 FFmpeg 合成合成器类音效，需先安装 FFmpeg。两种方式都输出可直接导入 UE 的 WAV。',
       ttsDesc: '朗读 AI 回复，使用 AI 合成声音。',
       ttsMore:
         '内置豆包 TTS 2.0 与阿里云 Qwen-Audio；也可接入本机运行的 Kokoro、CosyVoice 等 OpenAI 兼容合成服务（添加服务商 → 本机语音合成）。音色可在模型设置中修改。',
@@ -731,7 +736,7 @@ export default {
         chat: '对话',
         visual: '生图与视频',
         voice: '语音',
-        creative: '音乐与 3D',
+        creative: '音频与 3D',
         retrieval: '检索与工具'
       },
       access: {
@@ -748,6 +753,7 @@ export default {
         image: '图片生成',
         embedding: '嵌入（知识库检索）',
         music: '音乐生成',
+        sfx: '音效生成',
         tts: '语音合成',
         stt: '语音识别（听写）',
         realtime: '实时语音（语音通话）',
@@ -2881,6 +2887,7 @@ export default {
         prepare_task_video: '整理视频素材',
         read_task_video_context: '读取任务过程',
         generate_task_music: '制作配乐',
+        generate_sound_effect: '生成音效',
         generate_speech: '合成语音',
         render_task_video: '制作任务视频',
         analyze_video: '分析视频',

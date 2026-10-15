@@ -303,6 +303,11 @@ export type ProviderKind =
   | 'stt'
   | 'music'
   /**
+   * 音效。和音乐分开：接口不同（同步回音频字节，没有任务），而且没绑也能用 ——
+   * 那时 Agent 用本机 FFmpeg 合成，见 sound-effects 技能。
+   */
+  | 'sfx'
+  /**
    * 网页检索。
    *
    * 这一档里的「模型」不是模型 —— 是**去哪儿搜**（Jina 的搜索接口、
@@ -349,6 +354,7 @@ export const PROVIDER_KINDS: readonly ProviderKind[] = Object.freeze([
   'tts',
   'stt',
   'music',
+  'sfx',
   'search',
   'judge'
 ])
@@ -535,6 +541,8 @@ export type ModelRole =
    */
   | 'stt'
   | 'music'
+  /** 音效。不绑不是不能用：Agent 改用本机 FFmpeg 合成 */
+  | 'sfx'
   /** 网页检索走哪条路。不绑就用内置的真浏览器 —— 社区版零配置就靠这条 */
   | 'search'
   /**
@@ -560,6 +568,7 @@ export const MODEL_ROLES: readonly ModelRole[] = Object.freeze([
   'tts',
   'stt',
   'music',
+  'sfx',
   'search',
   'judge'
 ])
@@ -584,6 +593,7 @@ export const ROLE_KIND: Readonly<Record<ModelRole, ProviderKind>> = Object.freez
   tts: 'tts',
   stt: 'stt',
   music: 'music',
+  sfx: 'sfx',
   search: 'search',
   judge: 'judge'
 })

@@ -505,6 +505,7 @@ First work out why the install failed from the output above. If you can run comm
         video: 'Video generation',
         model3d: '3D generation',
         music: 'Music generation',
+        sfx: 'Sound effects',
         tts: 'Text to speech',
         stt: 'Speech to text',
         realtime: 'Realtime voice',
@@ -703,6 +704,11 @@ First work out why the install failed from the output above. If you can run comm
       musicMore:
         'Generates instrumental music with the selected provider. Charges and commercial rights depend on your plan.',
       musicMissing: 'Automatic music unavailable',
+      sfx: 'Sound effects',
+      sfxDesc:
+        'Generate footsteps, clicks, explosions and other game sounds. Uses local FFmpeg synthesis when unset.',
+      sfxMore:
+        'With ElevenLabs, realistic sounds are generated from a description and may be charged. When unset, the agent synthesizes synth-style sounds with local FFmpeg, which must be installed first. Both output WAV files ready to import into UE.',
       ttsDesc: 'Read AI replies aloud with an AI-generated voice.',
       ttsMore:
         'Doubao TTS 2.0 and Alibaba Qwen-Audio are built in. A local Kokoro or CosyVoice server that speaks the OpenAI speech API works too — add the local text-to-speech entry under Add provider → Voice. Change the voice in model settings.',
@@ -747,7 +753,7 @@ First work out why the install failed from the output above. If you can run comm
         chat: 'Chat',
         visual: 'Image & Video',
         voice: 'Voice',
-        creative: 'Music & 3D',
+        creative: 'Audio & 3D',
         retrieval: 'Search & Tools'
       },
       access: {
@@ -764,6 +770,7 @@ First work out why the install failed from the output above. If you can run comm
         image: 'Image Generation',
         embedding: 'Embedding (knowledge search)',
         music: 'Music generation',
+        sfx: 'Sound effects',
         tts: 'Text to speech',
         stt: 'Speech to text (dictation)',
         realtime: 'Realtime voice',
@@ -2946,6 +2953,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         prepare_task_video: 'Preparing video materials',
         read_task_video_context: 'Reading task history',
         generate_task_music: 'Creating background music',
+        generate_sound_effect: 'Generating sound effects',
         generate_speech: 'Synthesizing speech',
         render_task_video: 'Producing task video',
         analyze_video: 'Analyzing video',
