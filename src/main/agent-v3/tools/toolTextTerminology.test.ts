@@ -119,7 +119,6 @@ function explicitlyListedTools(): UnrealAgentTool<never>[] {
     }),
     // 队员侧的三个工具：与制作人那份同名、调用参数不同（队员名、不带 live）。
     // 目前说明与参数无关、去重后只剩一份；将来说明随参数变了，两份都会收
-
     createBoardTool(store),
     createMessageTool(store, '队员甲'),
     createStatusTool({ store, sessionId: 's' })
