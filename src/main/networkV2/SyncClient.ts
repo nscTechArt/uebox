@@ -939,11 +939,14 @@ export class SyncClient extends EventEmitter {
   }
 
   private async doPullChanges(): Promise<void> {
-    // 首次同步 (lastSeq=0) 时，直接走全量同步
-    // 全量同步从 assetData/assetFolder 表直接读取，不依赖 change_log
-    // 这解决了 change_log 为空（如文件扫描直接写入 SQLite）的情况
-    if (this.lastSeq === 0) {
-      console.log('[SyncClient] 首次同步 (lastSeq=0)，执行全量同步')
+    // 从没对完过一轮就全量。全量从 assetData/assetFolder 表直接读，不依赖 change_log
+    // （服务端的文件扫描、批量导入直接写库，不进 change_log）。
+    //
+    // 判据是「对完过没有」，不是 lastSeq === 0：服务端 change_log 为空时快照点就是 0，
+    // 对完一轮 lastSeq 还是 0。以前按 lastSeq 判，这种库每次启动、每次重连都把整个库
+    // 重新过一遍 —— 几十万行的库就是每次开软件都「正在同步资产」好几分钟。
+    if (this.lastSeq === 0 && !this.hasFinishedReconcile()) {
+      console.log('[SyncClient] 首次同步，执行全量同步')
       await this.reconcileSync()
       return
     }
@@ -977,6 +980,32 @@ export class SyncClient extends EventEmitter {
       this.emit('incremental-sync-done', { applied: resp.changes.length })
       this.scheduleMissingRowRepair()
     }
+
+    if (this.lastSeq === 0 && resp.latestSeq === 0) await this.reconcileIfCountsDiffer()
+  }
+
+  /** 这个库（同一台服务器）有没有完整对完过一轮 */
+  private hasFinishedReconcile(): boolean {
+    const checkpoint = this.loadReconcileCheckpoint()
+    return checkpoint?.phase === 'done' && checkpoint.serverUrl === this.config.serverUrl
+  }
+
+  /**
+   * 服务端 change_log 一直是空的库：扫描、批量导入进来的行既不会出现在增量里，也不会让
+   * 服务端要求全量（它对 since=0 从不要求）。拿条数和服务端核对一次，对不上才全量 ——
+   * 和定期校验同一个算法，只是不等它半小时后连错两次。
+   */
+  private async reconcileIfCountsDiffer(): Promise<void> {
+    const server = await this.httpGet<ChecksumResponse>(
+      `/api/vaults/${this.config.vaultId}/checksum`
+    )
+    const local = this.localCountsForChecksum()
+    if (local.assets === server.assetCount && local.folders === server.folderCount) return
+    console.log(
+      `[SyncClient] 服务端没有变更日志，条数对不上（本地 ${local.assets}/${local.folders}，` +
+        `服务端 ${server.assetCount}/${server.folderCount}），执行全量同步`
+    )
+    await this.reconcileSync()
   }
 
   /**
@@ -2599,22 +2628,7 @@ export class SyncClient extends EventEmitter {
 
     await this.flushOutbox().catch(() => undefined)
 
-    // 只扣 insert：pending 的 update 对应的行服务端本来就有，不该扣
-    const localOnlyAssets = this.getPendingRecordKeys('assetData', 'insert').size
-    const localOnlyFolders = this.getPendingRecordKeys('assetFolder', 'insert').size
-
-    // 上一轮对账里服务端给了、本地存不下的行（缺字段、父文件夹不在）要加回去：
-    // 不加的话计数永远差这几行，每两次校验就升级成一次全量对账 —— 每小时一次
-    const localAssetCount =
-      this.countLocalActive('assetData') -
-      localOnlyAssets +
-      this.lastReconcileSkips.assets +
-      this.incrementalSkips.assets
-    const localFolderCount =
-      this.countLocalActive('assetFolder') -
-      localOnlyFolders +
-      this.lastReconcileSkips.folders +
-      this.incrementalSkips.folders
+    const { assets: localAssetCount, folders: localFolderCount } = this.localCountsForChecksum()
 
     const countsMatch =
       localAssetCount === serverChecksum.assetCount &&
@@ -2640,6 +2654,27 @@ export class SyncClient extends EventEmitter {
 
     this.checksumMismatchStreak = 0
     await this.reconcileSync()
+  }
+
+  /** 和服务端 /checksum 比的本地条数 */
+  private localCountsForChecksum(): { assets: number; folders: number } {
+    // 只扣 insert：pending 的 update 对应的行服务端本来就有，不该扣
+    const localOnlyAssets = this.getPendingRecordKeys('assetData', 'insert').size
+    const localOnlyFolders = this.getPendingRecordKeys('assetFolder', 'insert').size
+    // 上一轮对账里服务端给了、本地存不下的行（缺字段、父文件夹不在）要加回去：
+    // 不加的话计数永远差这几行，每两次校验就升级成一次全量对账 —— 每小时一次
+    return {
+      assets:
+        this.countLocalActive('assetData') -
+        localOnlyAssets +
+        this.lastReconcileSkips.assets +
+        this.incrementalSkips.assets,
+      folders:
+        this.countLocalActive('assetFolder') -
+        localOnlyFolders +
+        this.lastReconcileSkips.folders +
+        this.incrementalSkips.folders
+    }
   }
 
   private countLocalActive(tableName: 'assetData' | 'assetFolder'): number {
