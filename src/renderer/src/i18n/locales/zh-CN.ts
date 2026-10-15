@@ -762,6 +762,8 @@ export default {
       codeDesc: '已打开浏览器。登录后核对以下代码，然后点击「允许」。',
       codeCopy: '点击复制',
       notOpened: '浏览器未打开？请手动访问：',
+      openLink: '在浏览器中打开',
+      copyLink: '复制链接',
       tier: '{tier} · {interval}',
       intervalMonth: '月付',
       intervalYear: '年付',

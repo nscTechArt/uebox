@@ -783,6 +783,8 @@ export default {
       codeDesc: 'Your browser is open. Sign in, check that this code matches, then click Approve.',
       codeCopy: 'Click to copy',
       notOpened: "Browser didn't open? Visit:",
+      openLink: 'Open in browser',
+      copyLink: 'Copy link',
       tier: '{tier} · {interval}',
       intervalMonth: 'Monthly',
       intervalYear: 'Yearly',
