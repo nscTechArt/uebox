@@ -287,10 +287,11 @@ export type ProviderKind =
   | 'realtime'
   | 'tts'
   /**
-   * 流式语音识别。**只出文字，一个音都不出。**
+   * 语音识别。**只出文字，一个音都不出。**
    *
-   * 它和 `realtime` 的区别不是「实时不实时」—— 两档都是常驻 WebSocket、都是
-   * 边说边出字。区别是**会不会回话**：`realtime` 那一档的端点判停之后要生成
+   * 它和 `realtime` 的区别不是「实时不实时」—— 豆包、百炼的识别和 `realtime` 一样
+   * 是常驻 WebSocket、边说边出字（另有一类整段转写，见 `ai/stt/transcriptionStt.ts`）。
+   * 区别是**会不会回话**：`realtime` 那一档的端点判停之后要生成
    * 回答（豆包全双工的上行事件表里根本没有关掉它的开关），而听写要的只有
    * 转写结果，模型一张嘴就全是多余的。
    *
@@ -704,6 +705,43 @@ export function findVisionCapableRole(source: RoleBindingSource): ModelRole | nu
     if (role === 'vision' || bindingSeesImages(source, binding)) return role
   }
   return null
+}
+
+/**
+ * 拼装通话的「脑子」：对话没单独选过模型时，从这几个角色里取第一个绑了的。
+ *
+ * 和主进程的 `ROLE_FALLBACK.agent` 是同一串（那边有测试盯着两份对不对得上）——
+ * 也就是输入框里显示的那个默认模型。对话自己选过模型就用它，见 `cascadeDeps.resolveBrain`。
+ */
+export const VOICE_PIPELINE_BRAIN_ROLES: readonly ModelRole[] = Object.freeze(['agent', 'chat'])
+
+/**
+ * 没绑「实时语音」时，能不能拼一通电话出来：语音识别当耳朵、对话模型当脑子、
+ * 语音合成当嘴。回缺的那几个角色（`chat` 代表对话模型那一组），配齐了回空数组。
+ *
+ * 主进程开通话、设置页决定「语音通话不可用」那一行要不要显示，用的是同一份判断 ——
+ * 理由同 `findVisionCapableRole`：界面说能通、实际打不通（或者反过来）都很糟。
+ *
+ * `sttUsable` 给主进程用：识别那一路认不认得这个地址只有主进程知道。界面上不传，
+ * 按认得算 —— 认不得的那种地址（陌生的 ws://）极少，开通话时会把原因说清楚。
+ */
+export function missingForVoicePipeline(
+  source: {
+    roles: RoleBindings
+    providers: readonly { id: string; kind: ProviderKind; baseUrl: string }[]
+  },
+  sttUsable: (provider: { id: string; baseUrl: string }) => boolean = () => true
+): ModelRole[] {
+  const bound = (
+    role: ModelRole
+  ): { id: string; kind: ProviderKind; baseUrl: string } | undefined =>
+    source.providers.find((item) => item.id === source.roles[role]?.providerId)
+  const missing: ModelRole[] = []
+  const stt = bound('stt')
+  if (!stt || stt.kind !== 'stt' || !sttUsable(stt)) missing.push('stt')
+  if (bound('tts')?.kind !== 'tts') missing.push('tts')
+  if (!VOICE_PIPELINE_BRAIN_ROLES.some((role) => source.roles[role])) missing.push('chat')
+  return missing
 }
 
 /**

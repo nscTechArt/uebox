@@ -8,25 +8,25 @@
 ## 界面上只有两种模板
 
 **社区的**和**我自己的**。没有「预设模板」这一类 —— 界面按「来源 / 用途 / 引擎版本」
-三个维度筛，来源就这两个值。以前那个按来源分标签页的设计（预设 / 我的 / 社区 / EPIC /
-导入项目）已经拆掉了：标签页是抽屉，模板一多，找东西就得挨个抽屉翻。
+三个维度筛，来源就这两个值。原来按来源分的标签页（预设 / 我的 / 社区 / EPIC /
+导入项目）已经删除，模板多了要逐个标签页翻找。
 
-「导入已有工程」也从这个弹窗搬走了 —— 它是「打开我电脑上已有的工程」，
-跟「用模板造一个新工程」是两件事，入口在首页工程列表旁边（`ImportProjectModal.vue`）。
+「导入已有工程」也从这个弹窗搬走了。它打开的是本机已有的工程，和用模板新建工程是两件事，
+入口在首页工程列表旁边（`ImportProjectModal.vue`）。
 
 ---
 
 ## 为什么是「源」而不是「服务器」
 
-这个仓库是社区核心版，[AGENTS.md](../AGENTS.md) 第 5 条硬规则写着：**不许给社区版代码路径加
-远程调用、遥测或账号要求**。社区模板天然要联网，两者的调和办法是把它做成**模板源**：
+这个仓库是开源版，[AGENTS.md](../AGENTS.md) 第 1 节规定本地功能不加遥测、远程请求和账号要求，
+`verify:official-endpoints` 门禁拦新增的官方服务端调用。社区模板需要联网，所以做成**模板源**：
 
 - 核心不认识任何官方服务端，只认识一个**清单地址**；
 - 内置源存在，但**默认 enabled = false** —— 用户不点「启用」，应用一个请求都不会发；
 - 上传、点赞、审核这些需要账号的能力不在核心里。
 
-改这块代码时请守住第二条：不要给内置源写死 `enabled: true`，也不要在启动流程里自动抓清单。
-「装好之后完全离线」是这个版本对用户的承诺，不是一句宣传语。
+改这块代码时守住第二条：不要给内置源写死 `enabled: true`，也不要在启动流程里自动抓清单。
+装好之后不联网是对用户的承诺，`verify:offline-boot` 在打包产物上检查它。
 
 ---
 
@@ -36,10 +36,9 @@
 `electron-builder.yml` 里对应的 extraResources 条目也一并去掉。本地模板只有一个位置：
 `userData/templates`，里面要么是用户自己打包的，要么是从源下载来的。
 
-直接后果：**全新安装、一个源都没启用时，模板列表是空的。** 这不是 bug，是这个选择的代价。
-界面上因此有一整屏引导（`onboardTitle` / `onboardDesc` 那几条文案）：说清楚模板在线上、
-默认不联网、点一下启用官方源。不要为了让首屏有东西就把内置源改成默认启用 ——
-那等于用离线承诺换一个首屏。
+所以全新安装、一个源都没启用时，模板列表是空的，这是预期行为。
+界面上有一屏引导（`onboardTitle` / `onboardDesc` 那几条文案），说明模板在线上、默认不联网、
+点一下启用官方源。不要为了让首屏有内容把内置源改成默认启用，那会破坏离线承诺。
 
 ---
 
@@ -48,10 +47,10 @@
 `raw.githubusercontent.com` 在国内经常连不上。只内置一个源，等于让一部分用户点了「启用」
 之后只看到一条获取失败。所以内置源有两条，**装的是同一份内容**：
 
-| id | 托管 |
-|---|---|
-| `official` | `raw.githubusercontent.com/ueboxai/community-templates` |
-| `mirror-cn` | `gitee.com/ueboxai/community-templates` |
+| id          | 托管                                                    |
+| ----------- | ------------------------------------------------------- |
+| `official`  | `raw.githubusercontent.com/ueboxai/community-templates` |
+| `mirror-cn` | `gitee.com/ueboxai/community-templates`                 |
 
 界面上的「启用官方社区库」按钮**一次把两个都打开**，哪个通就用哪个 —— 自带容灾。
 两个都通也不会重复显示：清单条目按 **sha256 跨源去重**（见 `templateRows.ts`），
@@ -97,16 +96,16 @@
 }
 ```
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
-| `id` | 是 | 源内唯一。重复的只认第一条 |
-| `name` | 是 | 界面上显示的名字 |
-| `packageUrl` | 是 | 可以是相对于清单的相对路径 |
-| `sha256` | 是 | 64 位小写十六进制。**缺失或不合法的条目会被整条丢弃** |
-| `size` | 否 | 字节数，用于下载前提示和进度条 |
-| `category` | 否 | `game` / `render` / `film` / `architecture` / `automotive` / `other`，不认识的归到 `other` |
-| `engineVersion` | 否 | 默认 `5.3` |
-| `description` `version` `author` `license` `previewUrl` `homepage` | 否 | 展示用 |
+| 字段                                                               | 必填 | 说明                                                                                       |
+| ------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------ |
+| `id`                                                               | 是   | 源内唯一。重复的只认第一条                                                                 |
+| `name`                                                             | 是   | 界面上显示的名字                                                                           |
+| `packageUrl`                                                       | 是   | 可以是相对于清单的相对路径                                                                 |
+| `sha256`                                                           | 是   | 64 位小写十六进制。**缺失或不合法的条目会被整条丢弃**                                      |
+| `size`                                                             | 否   | 字节数，用于下载前提示和进度条                                                             |
+| `category`                                                         | 否   | `game` / `render` / `film` / `architecture` / `automotive` / `other`，不认识的归到 `other` |
+| `engineVersion`                                                    | 否   | 默认 `5.3`                                                                                 |
+| `description` `version` `author` `license` `previewUrl` `homepage` | 否   | 展示用                                                                                     |
 
 ### 模板包
 
@@ -119,11 +118,11 @@
 node scripts/pack-project-template.mjs <工程目录> <输出 zip 路径>
 ```
 
-它比手工压缩多做四件事，每一件都踩过：
+它比手工压缩多做四件事：
 
 1. **条目名写成 UTF-8。** Windows 自带的压缩走本地代码页（GBK）且不设 UTF-8 标志位，
    中文路径到别人机器上就是乱码。
-2. **剔掉 `Content/Developers/**`。** 这是 UE 给每个开发者建的私人目录，名字就是本机
+2. **剔掉 `Content/Developers/**`。\*\* 这是 UE 给每个开发者建的私人目录，名字就是本机
    用户名 —— 打包者的真名会跟着模板分发出去。
 3. **排掉 `Binaries` / `Intermediate` / `Saved` / `.git`** 等产物目录。
 4. **输出可复现。** 固定条目时间戳并按路径排序，同样的输入永远得到同样的字节，
@@ -160,15 +159,15 @@ node scripts/pack-project-template.mjs <工程目录> <输出 zip 路径>
 
 ## 相关文件
 
-| 文件 | 职责 |
-|---|---|
-| `src/shared/projectTemplate.ts` | 共享类型 |
-| `src/main/services/project/templateSource.ts` | 源配置读写（`userData/template-sources.json`） |
-| `src/main/services/project/templateManifest.ts` | 清单解析与校验 |
-| `src/main/services/project/templateDownload.ts` | 抓清单、下包、sha256 校验、取消 |
-| `src/main/services/project/safeExtract.ts` | Zip Slip 防护 |
-| `src/main/ipc/projectTemplate.ts` | IPC 入口 |
-| `src/renderer/src/api/projectTemplate.ts` | 渲染层 API |
-| `src/renderer/.../templateRows.ts` | 本地模板 + 各源清单合成一份列表（含跨源去重） |
-| `src/renderer/.../CreateProjectFromTemplateModal.vue` | 新建工程（搜索 + 筛选 + 列表） |
-| `src/renderer/.../ImportProjectModal.vue` | 导入本机已有工程（跟模板无关） |
+| 文件                                                  | 职责                                           |
+| ----------------------------------------------------- | ---------------------------------------------- |
+| `src/shared/projectTemplate.ts`                       | 共享类型                                       |
+| `src/main/services/project/templateSource.ts`         | 源配置读写（`userData/template-sources.json`） |
+| `src/main/services/project/templateManifest.ts`       | 清单解析与校验                                 |
+| `src/main/services/project/templateDownload.ts`       | 抓清单、下包、sha256 校验、取消                |
+| `src/main/services/project/safeExtract.ts`            | Zip Slip 防护                                  |
+| `src/main/ipc/projectTemplate.ts`                     | IPC 入口                                       |
+| `src/renderer/src/api/projectTemplate.ts`             | 渲染层 API                                     |
+| `src/renderer/.../templateRows.ts`                    | 本地模板 + 各源清单合成一份列表（含跨源去重）  |
+| `src/renderer/.../CreateProjectFromTemplateModal.vue` | 新建工程（搜索 + 筛选 + 列表）                 |
+| `src/renderer/.../ImportProjectModal.vue`             | 导入本机已有工程（跟模板无关）                 |

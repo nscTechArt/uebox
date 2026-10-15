@@ -9,7 +9,9 @@ const mock = vi.hoisted(() => ({
     onEvent: RealtimeSessionConfig['onEvent']
     handle: { close: ReturnType<typeof vi.fn>; announce: ReturnType<typeof vi.fn> }
   }>,
-  readSettings: vi.fn()
+  readSettings: vi.fn(),
+  cascadeMissing: vi.fn((): string[] => ['语音识别', '语音合成']),
+  cascadeOpened: [] as Array<{ instructions: string }>
 }))
 vi.mock('electron', () => ({
   ipcMain: {
@@ -36,6 +38,17 @@ vi.mock('../ai/realtime/doubaoRealtime', () => ({
   DOUBAO_AUDIO: { inputSampleRate: 16000, outputSampleRate: 24000 },
   isDoubaoRealtimeUrl: () => false,
   openDoubaoRealtimeSession: vi.fn()
+}))
+vi.mock('../ai/realtime/cascadeDeps', () => ({
+  missingForCascade: mock.cascadeMissing,
+  createCascadeDeps: async () => ({})
+}))
+vi.mock('../ai/realtime/cascadeRealtime', () => ({
+  CASCADE_AUDIO: { inputSampleRate: 16000, outputSampleRate: 24000 },
+  openCascadeSession: (config: RealtimeSessionConfig) => {
+    mock.cascadeOpened.push({ instructions: config.instructions })
+    return { close: vi.fn(), announce: vi.fn(), appendAudio: vi.fn() }
+  }
 }))
 vi.mock('../ai/realtime/openaiRealtime', () => ({
   OPENAI_AUDIO: { inputSampleRate: 24000, outputSampleRate: 24000 },
@@ -366,5 +379,65 @@ describe('语音 IPC 生命周期', () => {
     await expect(dictation).resolves.toMatchObject({ ok: false, reason: 'busy' })
     expect(mock.connections).toHaveLength(1)
     expect(mock.connections[0].handle.close).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 没绑实时语音，但识别、合成、对话模型都配齐了：通话改走拼装的那一路。
+ * 绑了实时语音就一定用它 —— 端到端的比拼装的快，不该被另外三样顶替。
+ */
+describe('没绑实时语音时的拼装通话', () => {
+  const withoutRealtime = {
+    roles: {},
+    providers: [{ id: 'test', baseUrl: 'https://test.invalid/v1', apiKey: '', models: [] }]
+  }
+
+  beforeEach(() => {
+    vi.resetModules()
+    mock.handlers.clear()
+    mock.connections.length = 0
+    mock.cascadeOpened.length = 0
+    mock.readSettings.mockReset().mockResolvedValue(withoutRealtime)
+    mock.cascadeMissing.mockReset()
+  })
+
+  async function invoker(): Promise<(name: string, args?: unknown) => unknown> {
+    const { registerRealtimeVoiceIPC } = await import('./realtimeVoice')
+    registerRealtimeVoiceIPC()
+    const sender = { id: 1, isDestroyed: () => false, send: vi.fn() }
+    return (name, args) => mock.handlers.get(`realtime-voice:${name}`)!({ sender }, args)
+  }
+
+  it('三样配齐：开拼装会话，进 16k 出 24k', async () => {
+    mock.cascadeMissing.mockReturnValue([])
+    const invoke = await invoker()
+    await expect(invoke('audio-spec')).resolves.toEqual({
+      ok: true,
+      inputSampleRate: 16000,
+      outputSampleRate: 24000
+    })
+    await expect(invoke('start')).resolves.toMatchObject({ ok: true, inputSampleRate: 16000 })
+    expect(mock.cascadeOpened).toHaveLength(1)
+    expect(mock.connections).toHaveLength(0)
+    await invoke('stop')
+  })
+
+  it('缺了哪样：照旧报没配实时语音，并说出另一条路', async () => {
+    mock.cascadeMissing.mockReturnValue(['语音合成'])
+    const invoke = await invoker()
+    const result = (await invoke('start')) as { ok: boolean; error?: string }
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('「语音识别」和「语音合成」')
+    expect(mock.cascadeOpened).toHaveLength(0)
+  })
+
+  it('绑了实时语音：用它，不看另外三样', async () => {
+    mock.readSettings.mockResolvedValue(settings)
+    mock.cascadeMissing.mockReturnValue([])
+    const invoke = await invoker()
+    await invoke('start')
+    expect(mock.connections).toHaveLength(1)
+    expect(mock.cascadeOpened).toHaveLength(0)
+    await invoke('stop')
   })
 })

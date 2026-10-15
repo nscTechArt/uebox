@@ -672,15 +672,17 @@ export default {
       musicMissing: '不自动生成配乐',
       ttsDesc: '朗读 AI 回复，使用 AI 合成声音。',
       ttsMore:
-        '添加豆包语音合成服务商，填写语音控制台的 API Key，然后在此选择 TTS 2.0。音色可在模型设置中修改。',
+        '内置豆包 TTS 2.0 与阿里云 Qwen-Audio；也可接入本机运行的 Kokoro、CosyVoice 等 OpenAI 兼容合成服务（添加服务商 → 本机语音合成）。音色可在模型设置中修改。',
       ttsMissing: '回复朗读不可用',
       realtimeDesc: '选择实时语音模型，用于语音通话。',
-      realtimeMore: '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex；普通对话模型不适用。',
+      realtimeMore:
+        '支持 OpenAI gpt-realtime 系列和豆包 Seeduplex，普通对话模型不能绑在此处。未设置时，若已配置语音识别与语音合成，通话改由对话模型应答，响应稍慢。',
       realtimeMissing: '语音通话不可用',
+      realtimeViaPipeline: '未设置时，通话由对话模型应答（经语音识别与语音合成），响应稍慢。',
       stt: '语音识别',
       sttDesc: '按下语音热键说话，转写为文字填入搜索框。未配置时使用实时语音通道。',
       sttMore:
-        '内置豆包 STT 2.0 与阿里云 Qwen-Audio ASR，均为仅转写、不作回答的纯识别接口。未配置时仍可听写，将回退到实时语音通道；但该通道仅 OpenAI gpt-realtime 可关闭自动应答，绑定豆包实时语音时按热键将提示不可用。此项按识别时长计费，费用远低于借用对话模型转写。',
+        '内置豆包 STT 2.0、阿里云 Qwen-Audio ASR 与硅基流动 SenseVoice，均为仅转写、不作回答的纯识别接口；也可接入本机运行的 SenseVoice、Whisper 等 OpenAI 兼容转写服务。未配置时仍可听写，将回退到实时语音通道；但该通道仅 OpenAI gpt-realtime 可关闭自动应答，绑定豆包实时语音时按热键将提示不可用。云端识别按时长计费，费用远低于借用对话模型转写；本机识别不产生费用。',
       sttMissing: '语音识别不可用',
       model3dMissing: '3D 生成不可用',
       search: '网页检索',
@@ -7564,7 +7566,14 @@ export default {
       done: '同步完成',
       failed: '同步失败',
       doneContent: '全量同步完成：{assets} 个资产、{folders} 个文件夹',
-      failedContent: '网络库同步失败，请重试'
+      failedContent: '网络库同步失败，请重试',
+      // 同步进度（主进程只发阶段代号，文案在这里）
+      phase: {
+        preparing: '正在准备同步',
+        folders: '正在同步文件夹（{current}/{total}）',
+        assets: '正在同步资产（{current}/{total}）',
+        sweep: '正在核对本地资产'
+      }
     },
     scan: {
       done: '扫描完成'

@@ -2507,6 +2507,8 @@ const api = {
       voice?: string
       history?: Array<{ role: 'user' | 'assistant'; text: string }>
       echoGuard?: RealtimeEchoGuard
+      /** 这条对话输入框里选的模型。拼装通话（没绑实时语音时）拿它接电话 */
+      brain?: { providerId: string; modelId: string }
     }) => ipcRenderer.invoke('realtime-voice:start', args),
     /**
      * 只转写、不回答的听写会话（全局热键 → Spotlight）。

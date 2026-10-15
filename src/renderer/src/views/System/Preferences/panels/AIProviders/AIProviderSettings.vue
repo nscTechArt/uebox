@@ -26,6 +26,7 @@ import {
   BUILTIN_BROWSER_PROVIDER_ID,
   bindingSeesImages,
   findVisionCapableRole,
+  missingForVoicePipeline,
   MODEL_ROLES,
   type CatalogEntry,
   type ModelRole
@@ -332,6 +333,17 @@ function roleValue(role: ModelRole): string | null {
 }
 
 /**
+ * 实时语音没绑，但识别、合成、对话模型都配齐了 —— 通话照样打得通，改由对话模型应答。
+ *
+ * 判断和主进程开通话时是同一份（`missingForVoicePipeline`），界面不会说能通而实际打不通。
+ */
+const voiceViaPipeline = computed(
+  () =>
+    roleValue('realtime') === null &&
+    missingForVoicePipeline({ roles: roles.value, providers: providers.value }).length === 0
+)
+
+/**
  * 「没配就真的用不了」的提示，只对不回落的角色、且确实没配时显示。
  *
  * 视觉这一档要多问一句：**主模型自己看得懂图的话，「视觉」空着完全没事** ——
@@ -340,6 +352,8 @@ function roleValue(role: ModelRole): string | null {
  */
 function showMissing(role: ModelRole): boolean {
   if (roleValue(role) !== null) return false
+  // 实时语音没绑也打得了电话：识别、合成、对话模型配齐了，就由对话模型应答
+  if (role === 'realtime' && voiceViaPipeline.value) return false
   if (role === 'vision') {
     return findVisionCapableRole({ roles: roles.value, providers: providers.value }) === null
   }
@@ -492,6 +506,9 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
               </span>
             </div>
             <div class="setting-desc">{{ $t(`aiProvider.roles.${role}Desc`) }}</div>
+            <div v-if="role === 'realtime' && voiceViaPipeline" class="setting-desc">
+              {{ $t('aiProvider.roles.realtimeViaPipeline') }}
+            </div>
             <div v-if="role === 'chat' && collapseChatRoles" class="setting-desc">
               {{ $t('aiProvider.roles.chatMerged') }}
               <button type="button" class="role-split" @click="splitChatRoles = true">

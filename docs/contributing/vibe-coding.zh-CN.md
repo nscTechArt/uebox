@@ -2,10 +2,10 @@
 
 English: [vibe-coding.md](vibe-coding.md)
 
-**你不需要会写代码。** 你需要的是：一台电脑、一个 AI 编码助手、以及一句话说清楚你想要什么。
+你不需要会写代码。你需要一台电脑、一个 AI 编码助手，以及一句话说清楚你想要什么。
 
-这个仓库里放好了给 AI 看的规范（`AGENTS.md`）和一条命令的验收门禁（`pnpm verify`）。
-你的 AI 会自己读规范、自己改代码、自己跑测试。你负责的是**说清楚要什么**和**验收结果**。
+仓库里有给 AI 读的规范（`AGENTS.md`）和验收门禁（`pnpm verify:changed`、`pnpm verify`）。
+AI 读规范、改代码、跑测试。你负责说清楚要什么，并验收结果。
 
 ---
 
@@ -13,8 +13,8 @@ English: [vibe-coding.md](vibe-coding.md)
 
 ### 1. 装工具
 
-- [Node.js 22](https://nodejs.org/)
-- pnpm：装好 Node 后在终端执行 `npm i -g pnpm`
+- [Node.js 24.21.0](https://nodejs.org/)
+- pnpm 10.28.2：装好 Node 后在终端执行 `npm i -g pnpm@10.28.2`
 - 一个 AI 编码助手，例如 [Claude Code](https://claude.com/claude-code)、
   [Codex](https://developers.openai.com/codex/)、Cursor、GitHub Copilot 等
 - Git（[下载](https://git-scm.com/)）
@@ -29,7 +29,7 @@ English: [vibe-coding.md](vibe-coding.md)
 
 > 把 https://github.com/<仓库地址> clone 到本地，进目录跑 `pnpm install`，然后跑 `pnpm dev` 看看能不能启动。
 
-第一次 `pnpm install` 会比较久（有原生模块要编译），泡杯茶。
+第一次 `pnpm install` 要编译原生模块，需要几分钟。
 
 ### 3. 确认能跑起来
 
@@ -39,7 +39,7 @@ English: [vibe-coding.md](vibe-coding.md)
 
 ## 提需求的模板
 
-**别写「怎么实现」，写「你想要什么」。** 实现路径交给 AI 去查。
+写你想要什么，不写怎么实现。实现路径由 AI 去查。
 
 复制下面这段，把方括号里的内容换掉：
 
@@ -77,15 +77,14 @@ English: [vibe-coding.md](vibe-coding.md)
 5. 全绿之后给我一个符合规范的提交信息，但先别 push，等我确认。
 ```
 
-（这个例子是真的：数据库里其实已经有颜色字段了，只是界面上没给入口。
-一个称职的 AI 读完代码应该能自己发现这一点，并告诉你「不用改数据库」。
+（这个例子里数据库已经有颜色字段，界面没有入口，所以 AI 应当先读代码，再告诉你「不用改数据库」。
 完整走查见 [垂直切片](vertical-slice.md)。）
 
 ---
 
 ## 验收：你要盯的三件事
 
-AI 说「做完了」的时候，别急着信。看三件事：
+AI 说「做完了」时，检查三件事：
 
 ### 1. `pnpm verify` 是不是真的全绿
 
@@ -106,7 +105,7 @@ AI 说「做完了」的时候，别急着信。看三件事：
 pnpm dev
 ```
 
-自己点一遍。**AI 跑绿了门禁不等于功能好用**，门禁测的是代码没崩，不是体验对不对。
+自己点一遍。门禁只能证明代码没崩，不能证明功能行为正确。
 
 ### 3. 改动是不是"只改了该改的"
 
@@ -121,34 +120,27 @@ pnpm dev
 
 ## AI 卡住了怎么办
 
-| 它说 | 你回 |
-|---|---|
+| 它说                                        | 你回                                                                                                            |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | 「测试跑不起来 / NODE_MODULE_VERSION 报错」 | 「跑一次 `node scripts/better-sqlite3-abi.mjs ensure node`，它会补上缺失的 Node 版 ABI 缓存，不影响开着的应用」 |
-| 「lint 报了一堆错，都是历史遗留问题」 | 「`pnpm lint:changed` 只报你改动的行。报出来的都是你写的，去修」 |
-| 「我不确定这个功能应该放在哪一层」 | 「读 `docs/contributing/vertical-slice.md`，按那七层地图定位」 |
-| 「这个改动需要改数据库结构」 | 「先确认真的需要。看 `vertical-slice.md` 第三节，加列必须写幂等迁移」 |
-| 「typecheck 说找不到属性」 | 「你是不是改了 `src/preload/index.ts` 没同步 `index.d.ts`？两个必须一起改」 |
-| 转了几圈都修不好 | 「停下来，把你试过什么、报错原文是什么发给我，我们去仓库开个 Issue 问」 |
+| 「lint 报了一堆错，都是历史遗留问题」       | 「`pnpm lint:changed` 只报你改动的行。报出来的都是你写的，去修」                                                |
+| 「我不确定这个功能应该放在哪一层」          | 「读 `docs/contributing/vertical-slice.md`，按那七层地图定位」                                                  |
+| 「这个改动需要改数据库结构」                | 「先确认真的需要。看 `vertical-slice.md` 第三节，加列必须写幂等迁移」                                           |
+| 「typecheck 说找不到属性」                  | 「你是不是改了 `src/preload/index.ts` 没同步 `index.d.ts`？两个必须一起改」                                     |
+| 转了几圈都修不好                            | 「停下来，把你试过什么、报错原文是什么发给我，我们去仓库开个 Issue 问」                                         |
 
-**卡住不丢人。** 带着具体报错去开 Issue，比硬憋出一个能跑但不对的实现有用得多。
+卡住时带着报错原文开 Issue，比硬做出一个能跑但不对的实现有用。
 
 ---
 
 ## 把成果提交上来
 
 1. 让 AI 建分支、写提交信息（Conventional Commits + 中文，比如 `feat: 支持自定义标签颜色`）；
-2. **push 之前它会停下来问你** —— 这是规范要求的，确认后再让它继续；
+2. push 之前它会停下来问你（规范要求），确认后再让它继续；
 3. 开 PR，按模板如实填写，包括「`pnpm verify` 是否全绿」和「是否 AI 辅助完成」。
 
-**勾上"AI 辅助"不会减分。** 这个项目明确欢迎 vibe coding。
-review 看的是 diff 和门禁，不是谁敲的键盘。
+勾上「AI 辅助」不会减分。review 看 diff 和门禁，不看谁敲的键盘。
+
+有没做完的部分，在 PR 里用 `## 未完成 / 需要帮助` 一节写明，维护者会接着帮你做完。
 
 完整验收清单：[definition-of-done.zh-CN.md](definition-of-done.zh-CN.md)
-
----
-
-## 心态
-
-- **开发阶段随便试。** 想法不用先证明是对的，写出来跑一下最快。
-- **验收阶段一寸不让。** 门禁全绿、功能可用、改动干净，三条缺一不可。
-- **做不完就说做不完。** 一个诚实标注「这部分没搞定」的 PR，我们会接着帮你做完。

@@ -78,6 +78,8 @@ const CORE_NAMES = new Set<string>([
   'ask_user',
   'voice_report',
   'set_session_project',
+  'update_plan',
+  'wrap_up',
   ...BROWSER_TOOL_NAMES
 ])
 

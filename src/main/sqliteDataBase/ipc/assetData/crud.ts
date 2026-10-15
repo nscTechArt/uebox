@@ -35,6 +35,9 @@ import {
   retainSharedThumbnails
 } from '../../services/vaultThumbnailRefs'
 
+/** 清空回收站时每条 DELETE 处理的行数（见 db:assetData:clearDeleted） */
+const CLEAR_DELETED_CHUNK = 2000
+
 /**
  * ── 物理清理的两道占用闸 ─────────────────────────────────────────────
  *
@@ -540,20 +543,26 @@ export function registerAssetDataCrudIPC(): void {
           excludeAssetKeys: rows.map((row) => row.assetKey)
         })
 
-        innerDb
-          .prepare(
-            `DELETE FROM asset_tags WHERE assetKey IN (SELECT assetKey FROM assetData WHERE isDelete = 1)`
-          )
-          .run()
-        innerDb
-          .prepare(
-            `DELETE FROM asset_favorites WHERE assetKey IN (SELECT assetKey FROM assetData WHERE isDelete = 1)`
-          )
-          .run()
-        const result = innerDb.prepare(`DELETE FROM assetData WHERE isDelete = 1`).run()
+        // 按块删，不一条语句删完：保管库连接设了 temp_store = MEMORY（见 vaultConnectionPragmas），
+        // 一条语句改动的每一页的原样都留在内存里的语句日志中。回收站几十万行时一条
+        // DELETE 就是几百 MB 的主进程内存尖峰；按块删，每条语句只留它那一块
+        const keys = rows.map((row) => row.assetKey)
+        for (let start = 0; start < keys.length; start += CLEAR_DELETED_CHUNK) {
+          const chunk = keys.slice(start, start + CLEAR_DELETED_CHUNK)
+          const placeholders = chunk.map(() => '?').join(',')
+          innerDb
+            .prepare(`DELETE FROM asset_tags WHERE assetKey IN (${placeholders})`)
+            .run(...chunk)
+          innerDb
+            .prepare(`DELETE FROM asset_favorites WHERE assetKey IN (${placeholders})`)
+            .run(...chunk)
+          innerDb
+            .prepare(`DELETE FROM assetData WHERE isDelete = 1 AND assetKey IN (${placeholders})`)
+            .run(...chunk)
+        }
 
         return {
-          success: result.changes >= 0,
+          success: true,
           files: rows.map<VaultFileRef>((row) =>
             retainSharedThumbnails(
               {

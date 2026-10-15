@@ -6,6 +6,7 @@
   <div class="assistant-shell">
     <div
       class="assistant-welcome"
+      :class="{ 'is-conversation': conversationMode }"
       :style="{ '--composer-height': composerHeightVar }"
       @mousemove="handleSphereMouseMove"
     >
@@ -1835,7 +1836,23 @@ function handleBubbleStop(): void {
 /**
  * 从输入区停止生成（找到正在生成的消息并停止）。
  */
+/**
+ * 输入框的停止键。
+ *
+ * 语音通话时它回话的那段字幕也是「正在输入」，停止键就跟着亮了 —— 可它原来只会停
+ * Agent，没有 Agent 在跑就什么都不做，用户点了没反应（真机 2026-10-14）。
+ * 所以：这条对话有 Agent 在跑就停 Agent；没有、而通话正绑在这条对话上，就是叫它别说了，
+ * 和点球体一样。
+ */
 function handleComposerStop(): void {
+  if (
+    !agentStreamStore.isStreaming(sid.value) &&
+    voice.active.value &&
+    sid.value === voiceChatSid()
+  ) {
+    voice.interrupt()
+    return
+  }
   stopAgentAndDropQueue()
 }
 
@@ -2735,7 +2752,8 @@ function selectBrowserPage(): void {
   display: flex;
   align-items: stretch;
   width: 100%;
-  min-height: calc(100vh - 64px);
+  /* 跟着内容区走，别按窗口高度估：估少了底下会空一截。内容多了由 .assistant-welcome 自己滚 */
+  height: 100%;
 }
 
 .assistant-shell > .assistant-welcome {
@@ -2745,14 +2763,13 @@ function selectBrowserPage(): void {
 
 .assistant-welcome {
   position: relative;
-  min-height: calc(100vh - 64px);
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   color: var(--color-text-primary);
   background: transparent;
   justify-content: center;
-  --sticky-header-height: 56px;
   /* --composer-height 由模板绑定输入框的实测高度，测量前用 130/210px 兜底 */
   overflow-y: overlay; /* 防止滚动条出现导致的布局抖动 */
 }
@@ -2813,9 +2830,15 @@ function selectBrowserPage(): void {
   animation: fadeIn 0.5s ease-out 0.1s backwards;
 }
 
+.assistant-welcome.is-conversation {
+  height: 100%;
+  justify-content: flex-end;
+}
+
 .chat-composer-sticky {
-  position: sticky;
-  bottom: 24px;
+  position: relative;
+  z-index: 1;
+  margin-bottom: 14px;
   padding: 0 12px;
 }
 
@@ -2871,18 +2894,20 @@ function selectBrowserPage(): void {
   animation: fadeInUp 0.5s ease-out 0.2s backwards;
 }
 
+/*
+ * 消息区铺满整页，顶栏和输入框浮在它上面，滚动条才能从上到下贯通。
+ * 被盖住的两头由 ChatLog 按下面两个变量留白，最后一条消息仍停在输入框上方。
+ */
 .chat-log-area {
-  width: 100%;
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 60px;
-  /* 输入框被撑得极高时（图片 + 满行文本 + 小窗口）也留一段消息区，别算成负数 */
-  max-height: max(180px, calc(100vh - var(--sticky-header-height) - var(--composer-height) - 38px));
+  --chat-log-top-gap: 70px;
+  --chat-log-bottom-gap: calc(var(--composer-height) + 14px);
   overflow: hidden; /* 改为hidden，让RecycleScroller自己处理滚动 */
   overscroll-behavior: contain;
-  position: relative; /* 为绝对定位的子元素提供定位上下文 */
 }
 
 .context-chips-section {
@@ -2893,7 +2918,7 @@ function selectBrowserPage(): void {
 
 .new-msg-toast {
   position: absolute;
-  bottom: 19px;
+  bottom: calc(var(--chat-log-bottom-gap) + 19px);
   align-self: center;
 }
 

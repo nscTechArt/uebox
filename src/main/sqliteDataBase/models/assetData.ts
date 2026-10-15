@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { ASSET_DATA_INDEX_DDL } from '../vaultSchema'
 
 // 资产数据模型接口 - 简化版本
 export interface AssetData {
@@ -183,45 +184,8 @@ export const initAssetDataModel = (db: Database.Database): void => {
     }
   }
 
-  // 添加索引以提高查询性能
-  const createIndexSQL = `
-    CREATE INDEX IF NOT EXISTS idx_assetData_isDelete ON ${TABLE_NAME}(isDelete);
-    CREATE INDEX IF NOT EXISTS idx_assetData_fileExtension ON ${TABLE_NAME}(fileExtension);
-    CREATE INDEX IF NOT EXISTS idx_assetData_assetType ON ${TABLE_NAME}(assetType);
-    CREATE INDEX IF NOT EXISTS idx_assetData_processorType ON ${TABLE_NAME}(processorType);
-    CREATE INDEX IF NOT EXISTS idx_assetData_filePath ON ${TABLE_NAME}(filePath);
-    CREATE INDEX IF NOT EXISTS idx_assetData_softPath ON ${TABLE_NAME}(softPath);
-    CREATE INDEX IF NOT EXISTS idx_assetData_assetClass ON ${TABLE_NAME}(assetClass);
-    CREATE INDEX IF NOT EXISTS idx_assetData_className ON ${TABLE_NAME}(className);
-    CREATE INDEX IF NOT EXISTS idx_assetData_fileMd5 ON ${TABLE_NAME}(fileMd5);
-    -- 远端导入按路径查重（remoteImportPath.ts）用的复合索引。单列 filePath 索引
-    -- 不够：那条查询同时按 originPath 查，缺一侧索引整条就退化成全表扫。
-    CREATE INDEX IF NOT EXISTS idx_assetData_filePath_isDelete ON ${TABLE_NAME}(filePath, isDelete);
-    CREATE INDEX IF NOT EXISTS idx_assetData_originPath_isDelete ON ${TABLE_NAME}(originPath, isDelete);
-    -- 名称等值 / 排序（Spotlight、工程导入按名找依赖）
-    CREATE INDEX IF NOT EXISTS idx_assetData_assetName ON ${TABLE_NAME}(assetName COLLATE NOCASE);
-    -- 缩略图占用判断（vaultThumbnailRefs）与媒体读取权限（thumbnails.ts）按文件名等值查。
-    -- 部分索引：绝大多数行这两列为空，全列索引白占空间；等值条件蕴含 IS NOT NULL，规划器能用。
-    --
-    -- 谓词只能写到 IS NOT NULL 为止，别加 "AND col != 空串"。本仓库的「空」确实既有
-    -- NULL 又有空串（写入方多数写空串），加上去看着更贴合实际，但 SQLite 判定部分索引
-    -- 可用，要求查询条件蕴含谓词的**每一个** AND 分支："col = ?" 能蕴含 IS NOT NULL，
-    -- 却蕴含不了 "col != 空串"（? 的值在 prepare 时未知）。实测加了之后计划从
-    -- "SEARCH ... USING INDEX (imgLocalPath=?)" 退化成 "SCAN assetData"，强行 INDEXED BY
-    -- 直接报 no query solution —— 想省空间反而把索引整个废掉。真要瘦身得在写入侧把
-    -- 空串归一成 NULL，不是在这里加条件。
-    CREATE INDEX IF NOT EXISTS idx_assetData_imgLocalPath_present
-      ON ${TABLE_NAME}(imgLocalPath) WHERE imgLocalPath IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_assetData_customPoster_present
-      ON ${TABLE_NAME}(customPoster) WHERE customPoster IS NOT NULL;
-    -- 筛选下拉的类型聚合（getDistinctAssetTypes）只读索引不回表：52 万行从 7.9 s 降到 0.3 s
-    CREATE INDEX IF NOT EXISTS idx_assetData_types_cover
-      ON ${TABLE_NAME}(classNameCn, isDelete, fileExtension, ext, className);
-    CREATE INDEX IF NOT EXISTS idx_assetData_folderKey_isDelete_assetName
-      ON ${TABLE_NAME}(folderKey, isDelete, assetName COLLATE NOCASE);
-  `
-
-  db.exec(createIndexSQL)
+  // 索引清单只有一份，和 VaultManager 共用（见 vaultSchema.ts）：两边各写一份时早就对不上了
+  for (const sql of ASSET_DATA_INDEX_DDL) db.exec(sql)
   console.log(`资产数据表 ${TABLE_NAME} 初始化完成`)
 }
 
@@ -499,6 +463,7 @@ export const findAssetDataByExactName = (
   // 两条分支都得把索引钉死。库里没有统计信息时规划器会挑 idx_assetData_isDelete ——
   // 一个只有 0/1 两个值的索引，52 万行上等于全表扫，正是 a1ef7de 要消灭的那个形状。
   // 实测（4 行的内存库、未 ANALYZE）不钉就会选它。
+  // （那个索引后来整个删了，见 vaultSchema.ts；钉索引照样留着，防别的低基数索引。）
   try {
     return exactNameStatement(db, EXACT_NAME_INDEX_HINT).all(params) as AssetData[]
   } catch (err) {

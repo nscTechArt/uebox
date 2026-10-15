@@ -61,6 +61,12 @@ export type VoiceEvent =
   | { type: 'user-speech-done' }
   | { type: 'turn-done' }
   /**
+   * 拼装通话：有人出声，先停播、别扔；`output-release` 接着放，`interrupted` 才真掐。
+   * 见主进程 `cascadeRealtime.ts` 文件头「插话」
+   */
+  | { type: 'output-hold' }
+  | { type: 'output-release' }
+  /**
    * 主进程让这边**自己念**这段话（见 `speakLocally`）。豆包等不到自己的音频时的退路；
    * `engine: 'tts'` 是 Box Plan 的播报，用语音合成角色念（见 `speakWithTts`）
    */
@@ -283,6 +289,11 @@ export interface RealtimeVoiceOptions {
   onApprove?: (toolCallId: string, verdict: 'approve' | 'always' | 'reject') => void
   /** 开语音时把普通对话的最近历史交给实时模型。 */
   getHistory?: () => RealtimeVoiceHistoryMessage[]
+  /**
+   * 这条对话输入框里选的模型。没绑实时语音、走拼装通话时由它接电话 ——
+   * 输入框上写着哪个，听到的就是哪个。没单独选过回 undefined，主进程用默认的
+   */
+  getBrain?: () => { providerId: string; modelId: string } | undefined
   /** 同步拍下登记时的原话，排队执行和重连不得重新取当前对白。 */
   prepareInstruction?: (instruction: string) => string
   /** 最终用户文本（语音识别或键盘输入）进入普通消息列表。 */
@@ -616,6 +627,11 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
    * 之前 `start()` 过的那几段照样会响。
    */
   let scheduled: AudioBufferSourceNode[] = []
+  /**
+   * 主进程让先停播（`output-hold`）。停着的时候新到的分片照样往后排，但**不许自己把
+   * 播放时钟拨回来** —— `play()` 平时每来一包都会 resume 一次，不拦的话停播只停得住几十毫秒
+   */
+  let outputHeld = false
   /**
    * 量**喇叭此刻真正在响**的那个节点。所有播放都串过它再进 destination。
    *
@@ -1081,7 +1097,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
       void stop()
       return
     }
-    if (playContext.state === 'suspended') void playContext.resume()
+    if (playContext.state === 'suspended' && !outputHeld) void playContext.resume()
     const samples = decodePcm16Le(base64)
 
     const buffer = playContext.createBuffer(1, samples.length, sampleRate)
@@ -1486,6 +1502,9 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
         play(event.base64)
         break
       case 'interrupted': {
+        // 停着播等判定的那一路真掐了：时钟先拨回来，不然后面的新回答一个音都放不出来
+        outputHeld = false
+        void playContext?.resume()
         /*
          * **这是服务端自己发现的打断**（豆包是 `transcription.started`，OpenAI 是
          * `speech_started`）—— 也就是说，用户那句话它已经收到、并且开始转写了。
@@ -1579,6 +1598,18 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
         if (eventGeneration === generation) await forwardPendingAnswer()
         // 告别是这一轮说的。喇叭里还排着东西就等 `play` 的 onended 再挂
         if (eventGeneration === generation) hangUpIfFarewellSpoken()
+        break
+      /*
+       * 停的是整个播放时钟：排着的分片原地不动，接着放时从停下的那个字往后念。
+       * 球体和字幕不动 —— 还不知道是不是插话，别让界面先跳一下
+       */
+      case 'output-hold':
+        outputHeld = true
+        void playContext?.suspend()
+        break
+      case 'output-release':
+        outputHeld = false
+        void playContext?.resume()
         break
       case 'speak':
         if (event.engine === 'tts') void speakWithTts(event.text)
@@ -1794,9 +1825,12 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
       }
       if (generation !== currentGeneration) return
 
+      const brain = options.getBrain?.()
       const session = await window.api.realtimeVoice.start({
         history: options.getHistory?.() || [],
-        echoGuard: options.echoGuard?.()
+        echoGuard: options.echoGuard?.(),
+        // 只带两个字符串过 IPC：store 里那份是响应式对象，结构化克隆不收
+        ...(brain ? { brain: { providerId: brain.providerId, modelId: brain.modelId } } : {})
       })
       if (generation !== currentGeneration) return
       if (!session.ok) {
@@ -1897,6 +1931,7 @@ export function useRealtimeVoice(options: RealtimeVoiceOptions): RealtimeVoiceSt
   async function stop(): Promise<void> {
     const committed = commitAssistantTurn()
     generation += 1
+    outputHeld = false
     if (connectionTimer) clearTimeout(connectionTimer)
     connectionTimer = null
     awaitingAnswer = null

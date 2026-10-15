@@ -475,9 +475,10 @@ defineExpose({
   display: flex;
   flex-direction: column;
   // 底部留白（在翻转后变成顶部留白，即视觉上的列表底部）
-  padding-top: 36px;
+  // 外层让输入框、顶栏盖在列表上时，用两个变量把被盖住的高度让出来
+  padding-top: calc(36px + var(--chat-log-bottom-gap, 0px));
   // 顶部留白（在翻转后变成底部留白，即视觉上的列表顶部）
-  padding-bottom: 20px;
+  padding-bottom: calc(20px + var(--chat-log-top-gap, 0px));
   // 内容不满一屏时向翻转空间的末端（视觉上的顶部）对齐，
   // 避免短对话悬在窗口底部、上方留一大块空白；
   // 内容撑满后 min-height 不再生效，贴底滚动行为与原先完全一致

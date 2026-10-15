@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { promises as fs } from 'fs'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { applyVaultConnectionPragmas } from '../sqliteDataBase/vaultConnectionPragmas'
 import { createAssetFolder, getAssetFolderByKey } from '../sqliteDataBase/models/assetFolder'
 import {
   SYSTEM_VAULT_KEYS,
@@ -59,8 +60,7 @@ export function openAIGCVaultDatabase(): {
   }
 
   const db = new Database(dbPath)
-  db.pragma('journal_mode = WAL')
-  db.pragma('busy_timeout = 5000')
+  applyVaultConnectionPragmas(db)
 
   return {
     db,

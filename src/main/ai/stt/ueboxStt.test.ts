@@ -92,8 +92,9 @@ describe('协议形状', () => {
   })
 
   it('套餐来源按来源 id 认，不看域名', () => {
-    expect(hasSttAdapter('https://plan.example/v1')).toBe(false)
-    expect(hasSttAdapter('https://plan.example/v1', true)).toBe(true)
+    // 用 wss 地址：http(s) 的陌生地址本来就会落到 OpenAI 兼容转写那一路，测不出「不看域名」
+    expect(hasSttAdapter('wss://plan.example/v1')).toBe(false)
+    expect(hasSttAdapter('wss://plan.example/v1', true)).toBe(true)
   })
 })
 

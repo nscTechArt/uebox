@@ -22,16 +22,19 @@ interface MessageRecord {
   content: string
   type: MessageType
   count: number
-  messageKey: string // Ant Design message 实例的 key
   destroyFn: (() => void) | null
+  expireTimer: ReturnType<typeof setTimeout> | null
 }
+
+/** 同时最多显示几条**不带 key** 的消息；再多就把最早的那条收掉 */
+const MAX_VISIBLE_UNKEYED = 3
 
 /**
  * 消息管理器类
  * 用于管理全局消息通知，实现相同内容的消息去重和计数
  */
 class MessageManager {
-  // 存储当前显示的消息记录
+  /** 当前显示着的不带 key 的消息，按出现先后排（Map 保持插入顺序） */
   private messageMap: Map<string, MessageRecord> = new Map()
 
   /**
@@ -51,6 +54,13 @@ class MessageManager {
    * @param duration 持续时间（秒）
    */
   private show(type: MessageType, content: string | MessageConfig, duration?: number): void {
+    // 带 key 的是「同一条消息的新状态」（加载中 → 完成、进度 30% → 31%），
+    // 身份由 key 决定，不归下面按内容去重管
+    if (typeof content === 'object' && content.key) {
+      this.showKeyed(type, content, duration ?? 3)
+      return
+    }
+
     // 解析参数
     let messageContent: string
     let messageDuration: number
@@ -67,57 +77,67 @@ class MessageManager {
 
     const key = this.generateKey(messageContent, type)
     const existingRecord = this.messageMap.get(key)
+    let record: MessageRecord
 
     if (existingRecord) {
-      // 消息已存在，增加计数
+      // 消息已存在，增加计数、换成带计数的新消息，挪到队尾（算「最新」）
       existingRecord.count++
-
-      // 更新显示内容，添加计数器
-      const displayContent = `${messageContent} (${existingRecord.count})`
-
-      // 销毁旧消息
-      if (existingRecord.destroyFn) {
-        existingRecord.destroyFn()
-      }
-
-      // 显示新消息
-      const destroyFn = antdMessage[type](displayContent, messageDuration)
-      existingRecord.destroyFn = destroyFn
-
-      // 重置过期定时器
-      this.resetExpireTimer(key, messageDuration, onClose)
+      existingRecord.destroyFn?.()
+      existingRecord.destroyFn = antdMessage[type](
+        `${messageContent} (${existingRecord.count})`,
+        messageDuration
+      )
+      this.messageMap.delete(key)
+      record = existingRecord
     } else {
-      // 新消息，直接显示
-      const destroyFn = antdMessage[type](messageContent, messageDuration)
-
-      // 记录消息
-      const record: MessageRecord = {
+      record = {
         content: messageContent,
         type,
         count: 1,
-        messageKey: key,
-        destroyFn
+        destroyFn: antdMessage[type](messageContent, messageDuration),
+        expireTimer: null
       }
+    }
+    this.messageMap.set(key, record)
+    this.resetExpireTimer(key, record, messageDuration, onClose)
+    this.trimVisible()
+  }
 
-      this.messageMap.set(key, record)
-
-      // 设置过期定时器
-      this.resetExpireTimer(key, messageDuration, onClose)
+  /**
+   * 同屏条数的上限自己管，不交给 antd 的 maxCount。
+   *
+   * antd 4.2.6 的 maxCount 满了之后，新消息会**借用最早那条的 key**，用户给的 key 存到
+   * 另一个字段里；而之后按 key 更新时只认前者 —— 于是屏幕上已经有三条消息的时候，
+   * 带 key 的进度消息每更新一次就多出一条，「三条进度卡住不动」原样复现。
+   * 这里只给不带 key 的消息设上限；带 key 的消息本来就是一条原地更新，不会堆。
+   */
+  private trimVisible(): void {
+    while (this.messageMap.size > MAX_VISIBLE_UNKEYED) {
+      const [oldestKey, oldest] = this.messageMap.entries().next().value as [string, MessageRecord]
+      this.messageMap.delete(oldestKey)
+      if (oldest.expireTimer) clearTimeout(oldest.expireTimer)
+      oldest.destroyFn?.()
     }
   }
 
   /**
-   * 重置消息过期定时器
-   * @param key 消息唯一标识
-   * @param duration 持续时间（秒）
-   * @param onClose 关闭回调
+   * 重置消息过期定时器（同一条消息重复出现时，旧的定时器要清掉，否则它会提前把记录删掉）
    */
-  private resetExpireTimer(key: string, duration: number, onClose?: () => void): void {
-    setTimeout(() => {
-      this.messageMap.delete(key)
-      if (onClose) {
-        onClose()
-      }
+  private resetExpireTimer(
+    key: string,
+    record: MessageRecord,
+    duration: number,
+    onClose?: () => void
+  ): void {
+    if (record.expireTimer) clearTimeout(record.expireTimer)
+    // duration 0 = 不自动关闭，记录留着，等被顶掉或 destroy
+    if (duration <= 0) {
+      record.expireTimer = null
+      return
+    }
+    record.expireTimer = setTimeout(() => {
+      if (this.messageMap.get(key) === record) this.messageMap.delete(key)
+      onClose?.()
     }, duration * 1000)
   }
 
@@ -162,9 +182,8 @@ class MessageManager {
    */
   destroyAll(): void {
     this.messageMap.forEach((record) => {
-      if (record.destroyFn) {
-        record.destroyFn()
-      }
+      if (record.expireTimer) clearTimeout(record.expireTimer)
+      record.destroyFn?.()
     })
     this.messageMap.clear()
     antdMessage.destroy()
@@ -176,9 +195,8 @@ class MessageManager {
    * @param duration 持续时间（秒），0 表示不自动关闭
    */
   loading(content: string | MessageConfig, duration?: number): () => void {
-    // 如果传入的是配置对象且包含 key，直接使用原生 API
     if (typeof content === 'object' && content.key) {
-      return antdMessage.loading(content.content, content.duration ?? duration ?? 0)
+      return this.showKeyed('loading', content, duration ?? 0)
     }
 
     // 否则使用自定义去重逻辑
@@ -187,6 +205,28 @@ class MessageManager {
       typeof content === 'string' ? (duration ?? 0) : (content.duration ?? duration ?? 0)
 
     return antdMessage.loading(messageContent, messageDuration)
+  }
+
+  /**
+   * 带 key 的消息：key 必须原样交给 antd，它才会**原地更新**同一条，而不是再弹一条。
+   *
+   * 这里以前只转了内容和时长，key 被扔掉了。于是所有「先 loading 再用同一个 key 改成
+   * success / 刷新进度」的地方都在不停新开消息：网络库同步每 2000 行弹一条
+   * 「正在下载资产 (N/M)」，duration 0 永不消失；按 key 销毁也销毁不到，因为 antd 那边
+   * 根本没有这个 key。同屏上限见 trimVisible。
+   */
+  private showKeyed(
+    type: MessageType | 'loading',
+    config: MessageConfig,
+    fallbackDuration: number
+  ): () => void {
+    return antdMessage[type]({
+      // 空字符串过不了 antd 的「这是配置对象」判断，整个对象会被当成内容渲染出来，key 也丢了
+      content: config.content || ' ',
+      key: config.key,
+      duration: config.duration ?? fallbackDuration,
+      onClose: config.onClose
+    })
   }
 
   /**
@@ -207,9 +247,9 @@ class MessageManager {
 // 导出单例
 export const message = new MessageManager()
 
-// 配置全局消息位置，默认 top 为 24px，往下偏移 30px
+// 配置全局消息位置，默认 top 为 24px，往下偏移 30px。
+// 不设 maxCount：同屏上限由 MessageManager.trimVisible 自己管，理由见那里
 antdMessage.config({
   top: '54px',
-  duration: 3,
-  maxCount: 3
+  duration: 3
 })

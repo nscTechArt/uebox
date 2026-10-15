@@ -266,8 +266,10 @@ export function openDoubaoSttSession(config: SttSessionConfig): SttSessionHandle
 
   const fail = (message: string): void => {
     if (closed) return
-    closed = true
+    // 先发错误再置 closed —— 反过来的话 emit 的闸门会把这条错误自己挡掉，
+    // 用户（和「测试连接」）只看得到一句「服务端断开了连接」，厂商的原话丢了
     emit({ type: 'error', message })
+    closed = true
     finish()
   }
 

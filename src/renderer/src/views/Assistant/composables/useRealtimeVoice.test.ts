@@ -275,6 +275,8 @@ describe('measurePcmLevel', () => {
 let playedChunkCount = 0
 /** 排进播放队列的那些节点。用例调它们的 `onended` 模拟喇叭播完 */
 let playedSources: Array<{ onended: (() => void) | null }> = []
+/** 播放时钟被停、被拨回来的记录（`output-hold` / `output-release`） */
+let clockCalls: string[] = []
 
 /** 本机语音合成念过的那些。`onend` 由测试自己触发，模拟念完 */
 let localUtterances: Array<{ text: string; onend: (() => void) | null }> = []
@@ -288,6 +290,7 @@ let micPort: { onmessage: ((event: { data: ArrayBuffer }) => void) | null } | nu
 function stubAudioDevices(): void {
   playedChunkCount = 0
   playedSources = []
+  clockCalls = []
   localUtterances = []
   speakerFrame = new Float32Array(1024)
   micPort = null
@@ -331,6 +334,14 @@ function stubAudioDevices(): void {
     }))
     createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }))
     close = vi.fn().mockResolvedValue(undefined)
+    suspend = vi.fn(async () => {
+      this.state = 'suspended'
+      clockCalls.push('suspend')
+    })
+    resume = vi.fn(async () => {
+      this.state = 'running'
+      clockCalls.push('resume')
+    })
   }
 
   vi.stubGlobal('AudioContext', FakeAudioContext)
@@ -697,6 +708,34 @@ describe('useRealtimeVoice', () => {
       await harness.emit({ type: 'interrupted' })
 
       expect(harness.voice.speaking.value).toBe(false)
+    })
+
+    /**
+     * 拼装通话：有人出声先停播、别扔，判完再定（主进程 cascadeRealtime 文件头「插话」）。
+     * 停着的时候新到的分片照样排着，但**不许自己把时钟拨回来** —— `play()` 平时每来一包
+     * 都会 resume 一次，不拦的话停播只停得住几十毫秒
+     */
+    it('先停播：后到的分片照样排着、不会自己恢复；判完接着放', async () => {
+      const harness = await connect()
+      await harness.emit({ type: 'audio', base64: SILENT_PCM })
+      await harness.emit({ type: 'output-hold' })
+      await harness.emit({ type: 'audio', base64: SILENT_PCM })
+      expect(harness.playedChunks()).toBe(2)
+      expect(clockCalls).toEqual(['suspend'])
+
+      await harness.emit({ type: 'output-release' })
+      expect(clockCalls).toEqual(['suspend', 'resume'])
+    })
+
+    it('停着播时真打断了：掐掉排着的，并把时钟拨回来，新回答才放得出来', async () => {
+      const harness = await connect()
+      await harness.emit({ type: 'audio', base64: SILENT_PCM })
+      await harness.emit({ type: 'output-hold' })
+      await harness.emit({ type: 'interrupted' })
+      expect(clockCalls).toEqual(['suspend', 'resume'])
+      await harness.emit({ type: 'user-text', text: '改成蓝色', final: true })
+      await harness.emit({ type: 'audio', base64: SILENT_PCM })
+      expect(harness.playedChunks()).toBe(2)
     })
 
     it('打断之后到的残片要丢掉，用户说完了才恢复', async () => {

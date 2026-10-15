@@ -691,17 +691,19 @@ export default {
       musicMissing: 'Automatic music unavailable',
       ttsDesc: 'Read AI replies aloud with an AI-generated voice.',
       ttsMore:
-        'Add Doubao Text to speech, enter a Speech console API key, then select TTS 2.0 here. Change the voice in model settings.',
+        'Doubao TTS 2.0 and Alibaba Qwen-Audio are built in. A local Kokoro or CosyVoice server that speaks the OpenAI speech API works too — add the local text-to-speech entry under Add provider → Voice. Change the voice in model settings.',
       ttsMissing: 'Read aloud unavailable',
       realtimeDesc: 'Choose a real-time voice model for voice calls.',
       realtimeMore:
-        'Supports OpenAI gpt-realtime models and Doubao Seeduplex. Ordinary chat models do not apply.',
+        'Supports OpenAI gpt-realtime models and Doubao Seeduplex; ordinary chat models cannot be bound here. When unset and speech-to-text plus text-to-speech are configured, calls are answered by the chat model with slightly more delay.',
       realtimeMissing: 'Voice call unavailable',
+      realtimeViaPipeline:
+        'Unset: calls are answered by the chat model through speech-to-text and text-to-speech, with slightly more delay.',
       stt: 'Speech to text',
       sttDesc:
         'Hold the voice hotkey, speak, and get text in the search box. Falls back to the realtime voice role when unset.',
       sttMore:
-        'Doubao STT 2.0 and Alibaba Qwen-Audio ASR are built in — transcription-only endpoints that never talk back. Dictation still works when this is empty: it falls back to the realtime voice role, but only OpenAI gpt-realtime can turn off the automatic reply there, so a Doubao realtime binding reports that voice is unavailable. This role bills by audio duration, far cheaper than transcribing through a chat model.',
+        'Doubao STT 2.0, Alibaba Qwen-Audio ASR and SiliconFlow SenseVoice are built in — transcription-only endpoints that never talk back. A local SenseVoice or Whisper server that speaks the OpenAI transcription API works too. Dictation still works when this is empty: it falls back to the realtime voice role, but only OpenAI gpt-realtime can turn off the automatic reply there, so a Doubao realtime binding reports that voice is unavailable. Cloud recognition bills by audio duration, far cheaper than transcribing through a chat model; local recognition is free.',
       sttMissing: 'Speech to text unavailable',
       model3dMissing: '3D generation unavailable',
       search: 'Web search',
@@ -7831,7 +7833,14 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       done: 'Sync complete',
       failed: 'Sync failed',
       doneContent: 'Full sync finished: {assets} asset(s), {folders} folder(s)',
-      failedContent: 'Network vault sync failed. Try again later.'
+      failedContent: 'Network vault sync failed. Try again later.',
+      // Sync progress (the main process only sends the phase code)
+      phase: {
+        preparing: 'Preparing to sync',
+        folders: 'Syncing folders ({current}/{total})',
+        assets: 'Syncing assets ({current}/{total})',
+        sweep: 'Checking local assets'
+      }
     },
     scan: {
       done: 'Scan complete'

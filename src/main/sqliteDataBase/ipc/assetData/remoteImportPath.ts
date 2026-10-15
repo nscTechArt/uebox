@@ -79,6 +79,9 @@ export function findActiveRemoteAssetByPath(
   // 镜像库上实测每次 4 秒多，一次几千个文件的导入就是「写入本地数据库」卡在 21% 几小时。
   // 即便补了复合索引，已经打开的连接也未必换计划。
   //
+  // （idx_assetData_isDelete 后来整个删了，见 vaultSchema.ts；这里的写法照样留着，
+  // 统计不准时别的低基数索引一样会被选中。）
+  //
   // 拆成两条单列等值查询再 UNION ALL，每条各自只能走 (filePath, isDelete) /
   // (originPath, isDelete) 复合索引，不给规划器选错的机会。和服务端 aa166cf 的修法一致。
   const stmt = db.prepare(ACTIVE_REMOTE_ASSET_BY_PATH_SQL)

@@ -129,7 +129,12 @@ describe('SyncClient.applyChanges', () => {
     expect(syncState.lastSeq).toBe(3)
   })
 
-  it('rolls back the whole batch when foreign keys still cannot be resolved', () => {
+  /**
+   * 以前这里整批回滚、上抛，调用方退回一次全量对账 —— 服务端只要有一个「文件夹已经不在了」
+   * 的资产，有人碰它一下，所有客户端就各自重下一遍全库。现在只跳过这一条，同批的照常写入，
+   * 跳过的行和它的父文件夹登记去补（不再是整库重下）。
+   */
+  it('skips only the change whose parent folder is missing, and queues it for repair', () => {
     const db = createTestDb()
     const client = createClient(db)
 
@@ -169,7 +174,7 @@ describe('SyncClient.applyChanges', () => {
           createdAt: Date.now()
         }
       ])
-    ).toThrow()
+    ).not.toThrow()
 
     const folder = db
       .prepare(`SELECT folderKey FROM assetFolder WHERE folderKey = 'folder_parent'`)
@@ -179,9 +184,21 @@ describe('SyncClient.applyChanges', () => {
       .prepare(`SELECT last_seq AS lastSeq FROM sync_state WHERE vault_id = 'test-vault'`)
       .get() as { lastSeq: number } | undefined
 
-    expect(folder).toBeUndefined()
+    expect(folder).toBeDefined()
     expect(asset).toBeUndefined()
-    expect(syncState?.lastSeq ?? 0).toBe(0)
+    expect(syncState?.lastSeq).toBe(2)
+    const internals = client as unknown as {
+      missingRowBuffer: unknown[]
+      incrementalSkips: { assets: number }
+    }
+    expect(internals.missingRowBuffer).toEqual(
+      expect.arrayContaining([
+        { tableName: 'assetFolder', recordKey: 'missing_folder' },
+        { tableName: 'assetData', recordKey: 'asset_orphan' }
+      ])
+    )
+    // 服务端有、本地存不下 —— 校验计数要把它算回去，否则每两次校验就升级成全量
+    expect(internals.incrementalSkips.assets).toBe(1)
   })
 })
 

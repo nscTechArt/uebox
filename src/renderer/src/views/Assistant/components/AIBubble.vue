@@ -123,6 +123,11 @@
         :streaming="status === 'typing'"
         @resize="emit('resize')"
       />
+      <!--
+        任务清单。跑着的时候挂在最底下跟着进度走；跑完全勾上了就不再占地方
+        （上面那行「用时 · 步数」已经交代了），还有没做完的才留着 —— 那正是用户该知道的。
+      -->
+      <PlanChecklist v-if="showPlan" :items="planItems" :live="status === 'typing'" />
       <!-- 归不到时间线上任何一段的产出（V2 老消息的 toolResults）只能挂在最后 -->
       <GeneratedArtifacts
         :music="unplacedArtifacts.music"
@@ -557,6 +562,25 @@
         <span class="loading-dot"></span>
         <span class="loading-dot"></span>
       </div>
+      <!--
+        Agent 自己用 wrap_up 交代了「接下来要你定的事」：那一问放上面，按钮换成它给的。
+        猜的那次建议调用这时不会发（`agentCompletionHandlers.ts`），两套按钮不会同时出现。
+      -->
+      <template v-else-if="wrapUp">
+        <div class="wrap-up-ask">{{ wrapUp.ask }}</div>
+        <AppButton
+          v-for="(action, index) in wrapUp.actions"
+          :key="`${index}:${action.label}`"
+          size="small"
+          shape="round"
+          class="chip"
+          :class="{ 'is-primary': index === 0 }"
+          @click="emitSuggest(wrapUpActionMessage(action))"
+        >
+          <span>{{ action.label }}</span>
+          <PhCaretRight />
+        </AppButton>
+      </template>
       <!-- 建议列表 -->
       <template v-else>
         <AppButton
@@ -604,6 +628,8 @@ import GeneratedArtifacts from './GeneratedArtifacts.vue'
 import AssetList from './AssetList.vue'
 import MessageSources from './MessageSources.vue'
 import NavigationButton from './NavigationButton.vue'
+import PlanChecklist from './PlanChecklist.vue'
+import { readLatestPlan, readWrapUp, wrapUpActionMessage } from '../composables/agentTurnReport'
 import type { ResponseMetadata } from '@renderer/store/modules/chatMessages'
 import {
   PhArrowClockwise,
@@ -1201,13 +1227,24 @@ const suggestions = computed<string[]>(() => {
   return props.externalSuggestions || []
 })
 const showFollowUps = computed<boolean>(() => !!props.showFollowUps)
+const planItems = computed(() => readLatestPlan(props.agentProcess))
+const showPlan = computed(
+  () =>
+    planItems.value.length > 0 &&
+    (props.status === 'typing' || planItems.value.some((item) => item.status !== 'completed'))
+)
+const wrapUp = computed(() => readWrapUp(props.agentProcess))
 const toolsMode = computed<'hover' | 'always'>(() => props.toolsMode || 'always')
 
 /**
  * 当跟进建议准备好并显示时，通知上层进行滚动处理。
  */
 function notifyFollowupsReady(): void {
-  if (props.status === 'done' && showFollowUps.value && suggestions.value.length) {
+  if (
+    props.status === 'done' &&
+    showFollowUps.value &&
+    (suggestions.value.length || wrapUp.value)
+  ) {
     emit('followups-ready', { id: props.id })
   }
 }
@@ -1217,7 +1254,7 @@ onMounted(async () => {
   notifyFollowupsReady()
 })
 
-watch([() => props.status, showFollowUps, () => suggestions.value.length], () => {
+watch([() => props.status, showFollowUps, () => suggestions.value.length, wrapUp], () => {
   notifyFollowupsReady()
 })
 
@@ -2212,6 +2249,23 @@ function toggleChanges(): void {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+
+.wrap-up-ask {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* wrap_up 的第一个按钮是 agent 推荐的那个，压一档实色，和其余的分开 */
+.chip.is-primary {
+  background: var(--color-text-primary) !important;
+  color: var(--color-bg-page);
+
+  &:hover {
+    background: var(--color-text-primary) !important;
+    opacity: 0.9;
+  }
 }
 
 .chip {

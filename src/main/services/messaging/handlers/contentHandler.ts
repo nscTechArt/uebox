@@ -15,6 +15,7 @@ import { createAssetFolder, getAssetFolderByKey } from '../../../sqliteDataBase/
 import { AssetImportService } from '../../asset/AssetImportService'
 import { projectManager } from '../../project'
 import { buildSourcePluginLookup, type SourcePluginLookup } from '../../project/requiredPlugins'
+import { applyVaultConnectionPragmas } from '../../../sqliteDataBase/vaultConnectionPragmas'
 
 /** ALL 文件夹常量 */
 const ALL_FOLDER = 'ALL'
@@ -242,6 +243,7 @@ export class ContentHandler {
 
       const vaultDbPath = path.join(vaultInfo.path, 'vault-data.db')
       const db = new Database(vaultDbPath)
+      applyVaultConnectionPragmas(db)
 
       // 辅助函数：安全创建文件夹
       const safeCreateFolder = (folderData: any) => {

@@ -172,6 +172,8 @@ const NOT_OFFICIAL_CALLS = {
     '豆包全双工语音的 WebSocket 端点，由用户配置 Provider 并用自己的 API Key 直连',
   'src/main/ai/stt/doubaoStt.ts':
     '豆包流式语音识别（sauc）的 WebSocket 端点，同上：用户自己配 Provider、自己的 API Key 直连',
+  'src/main/ai/stt/transcriptionStt.ts':
+    'SenseVoice 自带服务的 /api/v1/asr 路径：用户本机或自建的识别服务，地址由用户在 Provider 里填',
   'src/main/ai/model3d.ts':
     '3D 生成厂商（Tripo / Meshy / Hyper3D Rodin），全部打 provider.baseUrl —— ' +
     '地址由用户在模型配置里填、用自己的 API Key 直连。' +

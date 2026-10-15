@@ -2,21 +2,21 @@
 
 中文版：[definition-of-done.zh-CN.md](definition-of-done.zh-CN.md)
 
-**Experiment freely while building; give no ground at review.** This is what "done" means. The PR
-template maps to it line by line. An AI agent must walk this list before claiming completion.
+This list defines what "done" means. The PR template maps to it line by line. An AI agent walks
+this list before claiming completion.
 
 ---
 
 ## A. Gates
 
-This list is the **publish** checkpoint, not the per-task one. Committing only owes
-`pnpm verify:changed` (~30s), and nothing is owed while you work; the full gate is owed once, before the batch goes out. See
-[AGENTS.md](../../AGENTS.md) §3.
+This list matches the **publish** tier, not every task. Do not run gates while working; run
+`pnpm verify:changed` (about 30 s) on each commit; run the full `pnpm verify` (about 3.5 min) once
+before the batch goes out. See [AGENTS.md](../../AGENTS.md) §3.
 
 - [ ] Each commit in this batch passed `pnpm verify:changed` when it was made
 - [ ] `pnpm verify` is fully green; the last line reads `✅ 门禁全绿，可以提交了。`
-- [ ] No `.skip`, no deleted tests, no commented-out assertions, no lowered coverage thresholds,
-      no widened ESLint ignores, no `/* eslint-disable */` at the top of a new file
+- [ ] Nothing passed by `.skip`, deleted tests, commented-out assertions, lowered coverage
+      thresholds, widened ESLint ignores, or `/* eslint-disable */` at the top of a new file
 - [ ] If the main process, build config, or dependencies changed: `pnpm verify --with-build` also ran
 
 ## B. The feature itself
@@ -48,6 +48,7 @@ This list is the **publish** checkpoint, not the per-task one. Committing only o
 ## E. Copy and i18n
 
 - [ ] New user-visible strings were added to **both** `zh-CN.ts` and `en-US.ts`
+- [ ] Wording follows [CONTEXT.md](../../CONTEXT.md) and `terminologyGuard.test.ts` passes
 - [ ] If the copy is on a login / subscription / payment / authorization path, the key was added to
       `CRITICAL_KEYS` in `src/renderer/src/i18n/criticalPathCoverage.test.ts`
 - [ ] No hard-coded Chinese in new `.vue` templates
@@ -72,7 +73,7 @@ This list is the **publish** checkpoint, not the per-task one. Committing only o
 
 ## If you didn't finish
 
-Don't fake completion to satisfy this list.
+Do not fake completion to satisfy this list.
 
 Add a `## Unfinished / need help` section to the PR description and state:
 
@@ -80,5 +81,5 @@ Add a `## Unfinished / need help` section to the PR description and state:
 - what you tried;
 - where you got stuck (paste the exact error).
 
-**We will help you finish that PR.** A green PR that routed around the hard part just hands the
-problem to the next person.
+Maintainers will help finish that PR. A green PR that routed around the hard part leaves the
+problem for the next person.

@@ -3596,10 +3596,19 @@ const buildListCriteria = (options: {
 }
 
 /** 跑一次统一查询，并把行转成文件列表认识的形状 */
+/**
+ * 查询被取消（同一列表的新查询把它顶掉了，或者保管库正在切换）—— 不是失败，别弹「搜索失败」。
+ * 主进程那边按 queryGroup 作废排着还没开始的旧查询，见 services/assetQueryRunner。
+ */
+const isCancelledQuery = (error: unknown): boolean =>
+  Boolean((error as { cancelled?: boolean } | null)?.cancelled)
+
 const searchAssetsWithCriteria = async (criteria: ListCriteria): Promise<SearchedAssetRow[]> => {
-  const rows = (await getActiveLibrarySource().search.assets(
-    criteria as never
-  )) as unknown as SearchedAssetRow[]
+  const rows = (await getActiveLibrarySource().search.assets({
+    ...criteria,
+    // 搜索、收藏、回收站三个视图是同一个列表：新查询来了，排着的旧查询作废
+    queryGroup: 'asset-list'
+  } as never)) as unknown as SearchedAssetRow[]
   return rows.map((asset) => ({
     ...asset,
     id: asset.assetKey,
@@ -3742,11 +3751,12 @@ const performSearchWithPagination = async (isLoadMore = false): Promise<void> =>
   } catch (error) {
     console.error('搜索请求失败:', error)
     if (isStaleListRequest(requestToken)) return
-    message.error(t('assetManagement.search.failed'))
+    const cancelled = isCancelledQuery(error)
+    if (!cancelled) message.error(t('assetManagement.search.failed'))
     if (isLoadMore) {
       // 页码不回滚的话，下次「加载更多」会直接跳过一页 —— 中间那 50 条永远看不到
       searchPagination.current = Math.max(1, searchPagination.current - 1)
-    } else {
+    } else if (!cancelled) {
       currentFiles.value = []
     }
   } finally {
@@ -5180,7 +5190,7 @@ const handleFavoritesShortcut = async () => {
     updateFileList(allFavorites)
   } catch (error) {
     console.error('处理收藏快捷方式失败:', error)
-    if (!isStaleListRequest(requestToken)) {
+    if (!isStaleListRequest(requestToken) && !isCancelledQuery(error)) {
       currentFiles.value = []
       resetPagination()
     }
@@ -5347,7 +5357,7 @@ const handleDeletedShortcut = async (isLoadMore = false) => {
     }
   } catch (error) {
     console.error('处理最近删除快捷方式失败:', error)
-    if (isStaleListRequest(requestToken)) return
+    if (isStaleListRequest(requestToken) || isCancelledQuery(error)) return
     message.error(t('assetManagement.load.recentDeletedFailed'))
     if (!isLoadMore) {
       currentFiles.value = []
@@ -5408,6 +5418,7 @@ const handleClearDeleted = async () => {
 
 // 导入树状态管理器
 import { saveTreeState, restoreTreeState } from './utils/tabStateManager'
+import { createAssetChangeDebouncer } from './utils/assetChangeDebouncer'
 import { log } from 'console'
 
 // 获取路由实例（已在文件开头声明）
@@ -5624,7 +5635,16 @@ const handleNetworkVaultAssetsSynced = async (): Promise<void> => {
   await loadCurrentFolderAssets()
 }
 
-let assetChangedTimer: ReturnType<typeof setTimeout> | null = null
+// 防抖 500ms：批量变更时合并为一次刷新；文件夹变更跨窗口累计，见 assetChangeDebouncer
+const assetChangeDebouncer = createAssetChangeDebouncer(async ({ touchedFolders }) => {
+  console.log('[AssetManagement] 收到实时变更推送，刷新 UI，含文件夹变更:', touchedFolders)
+  if (touchedFolders) {
+    // 文件夹变更：刷新树
+    await refreshFolderTreePreservingExpansion()
+  }
+  // 所有变更都刷新当前文件列表
+  await loadCurrentFolderAssets()
+})
 const handleAssetChanged = (
   _event: any,
   payload: { source?: string; vaultId?: string; op?: string; tableName?: string }
@@ -5635,17 +5655,7 @@ const handleAssetChanged = (
   // 仅处理当前 vault 的变更
   if (payload.vaultId && currentVault.value?.id && payload.vaultId !== currentVault.value.id) return
 
-  // 防抖 500ms：批量变更时合并为一次刷新
-  if (assetChangedTimer) clearTimeout(assetChangedTimer)
-  assetChangedTimer = setTimeout(async () => {
-    console.log('[AssetManagement] 收到实时变更推送，刷新 UI:', payload.tableName, payload.op)
-    if (payload.tableName === 'assetFolder') {
-      // 文件夹变更：刷新树
-      await refreshFolderTreePreservingExpansion()
-    }
-    // 所有变更都刷新当前文件列表
-    await loadCurrentFolderAssets()
-  }, 500)
+  assetChangeDebouncer.push(payload.tableName)
 }
 
 const handleTriggerNetworkVaultPullSync = async (): Promise<void> => {
@@ -5729,6 +5739,8 @@ onMounted(async () => {
   networkSyncProgressHandler = window.api.on('networkVaultV2:syncProgress', ((payload: {
     vaultId: string
     phase: string
+    /** 阶段代号，按它取双语文案；没有（老版本主进程）就退回 phase 原文 */
+    phaseKey?: string
     current: number
     total: number
   }) => {
@@ -5736,8 +5748,14 @@ onMounted(async () => {
       return
     if (currentVault.value?.id && payload.total > 0) {
       const percent = Math.round((payload.current / payload.total) * 100)
+      const phaseText = payload.phaseKey
+        ? t(`assetManagement.sync.phase.${payload.phaseKey}`, {
+            current: payload.current,
+            total: payload.total
+          })
+        : payload.phase
       message.loading({
-        content: `${payload.phase}  ${percent}%`,
+        content: `${phaseText}  ${percent}%`,
         key: getNetworkSyncMessageKey(payload.vaultId),
         duration: percent >= 100 ? 1.5 : 0
       })
@@ -5937,10 +5955,7 @@ onUnmounted(() => {
   window.removeEventListener('trigger-network-sync', handleTriggerNetworkSync)
   window.removeEventListener('navigate-to-all-folder', handleNavigateToAllFolder)
   removeIpcListener('asset:changed', handleAssetChanged)
-  if (assetChangedTimer) {
-    clearTimeout(assetChangedTimer)
-    assetChangedTimer = null
-  }
+  assetChangeDebouncer.cancel()
 
   // 清理拖拽监听器
   if (isResizing.value) {

@@ -6460,20 +6460,18 @@ async function handleWebdavDrop(event: DragEvent): Promise<void> {
       } catch (error) {
         console.warn('写入资产索引失败（可稍后手动导入）:', error)
         message.success({
-          content: t('assetFileList.webdav.downloadedRefreshManually'),
-          key: 'webdav-download'
+          content: t('assetFileList.webdav.downloadedRefreshManually')
         })
       }
     } else {
       message.error({
-        content: result.error || t('assetFileList.webdav.downloadFailed'),
-        key: 'webdav-download'
+        content: result.error || t('assetFileList.webdav.downloadFailed')
       })
     }
   } catch (error) {
     console.error('[AssetFileList] WebDav文件拖放处理失败:', error)
     const msg = error instanceof Error ? error.message : t('assetFileList.webdav.downloadFailed')
-    message.error({ content: msg, key: 'webdav-download' })
+    message.error({ content: msg })
   }
 }
 

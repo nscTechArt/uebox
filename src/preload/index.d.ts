@@ -2356,6 +2356,8 @@ declare global {
         voice?: string
         history?: Array<{ role: 'user' | 'assistant'; text: string }>
         echoGuard?: RealtimeEchoGuard
+        /** 这条对话输入框里选的模型。拼装通话（没绑实时语音时）拿它接电话 */
+        brain?: { providerId: string; modelId: string }
       }) => Promise<
         | { ok: true; inputSampleRate: number; outputSampleRate: number; connectionId: number }
         | { ok: false; error: string }

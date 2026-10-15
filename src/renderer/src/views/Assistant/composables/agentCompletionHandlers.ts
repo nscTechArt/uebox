@@ -1,4 +1,5 @@
 import { aiAPI } from '../../../api/ai'
+import { readWrapUp } from './agentTurnReport'
 import { isCurrentRun, unregisterAgentHandler } from './agentEventDispatcher'
 import type {
   ChatMessage,
@@ -445,7 +446,14 @@ export function createAgentCompletionHandlers(
       break
     }
 
-    if (userContent && displayText && aiConfigStore.followUpSuggestionsEnabled) {
+    // agent 自己用 wrap_up 给了下一步的问题和按钮，就不再另外猜一排 ——
+    // 两套按钮挤在一条回复下面，用户分不清该点哪套
+    if (
+      userContent &&
+      displayText &&
+      aiConfigStore.followUpSuggestionsEnabled &&
+      !readWrapUp(finalAgentProcess)
+    ) {
       ;(async () => {
         try {
           chatMsgStore.setSuggestionsLoading(targetChatSid, lastAssistant.id, true)

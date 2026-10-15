@@ -3,9 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const doubao = vi.hoisted(() => vi.fn())
 const qwen = vi.hoisted(() => vi.fn())
+const transcription = vi.hoisted(() => vi.fn())
+const probeTranscription = vi.hoisted(() => vi.fn())
 
 vi.mock('./doubaoStt', () => ({ openDoubaoSttSession: doubao }))
 vi.mock('./qwenAudioStt', () => ({ openQwenAudioSttSession: qwen }))
+vi.mock('./transcriptionStt', () => ({
+  openTranscriptionSttSession: transcription,
+  probeTranscription
+}))
 vi.mock('../credentials', () => ({ resolveApiKey: async () => 'key' }))
 vi.mock('../store', () => ({ readSettings: async () => ({ providers: [], roles: {} }) }))
 
@@ -25,21 +31,36 @@ function stubSession(): { sent: string[]; close: ReturnType<typeof vi.fn> } {
   const handle = { appendAudio: (base64: string) => sent.push(base64), close }
   doubao.mockReturnValue(handle)
   qwen.mockReturnValue(handle)
+  transcription.mockReturnValue(handle)
   return { sent, close }
 }
 
 beforeEach(() => {
   doubao.mockReset()
   qwen.mockReset()
+  transcription.mockReset()
+  probeTranscription.mockReset()
 })
 
 describe('选路', () => {
-  it('按域名认厂商，认不出的明说', () => {
+  it('按域名认厂商，其余 http(s) 走 OpenAI 兼容转写，认不出的明说', () => {
     expect(hasSttAdapter('https://openspeech.bytedance.com/api/v3/sauc/bigmodel')).toBe(true)
     expect(hasSttAdapter('wss://dashscope.aliyuncs.com/api-ws/v1/inference')).toBe(true)
     // 业务空间专属域名：厂商正在推的迁移方向，漏了它用户迁移完就用不了了
     expect(hasSttAdapter('wss://ws-1.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference')).toBe(true)
-    expect(hasSttAdapter('https://api.openai.com/v1')).toBe(false)
+    expect(hasSttAdapter('https://api.openai.com/v1')).toBe(true)
+    expect(hasSttAdapter('http://127.0.0.1:50000/api/v1/asr')).toBe(true)
+    // 陌生的 WebSocket 地址：没有哪个适配器说得通，别硬塞给转写那一路
+    expect(hasSttAdapter('wss://example.com/asr')).toBe(false)
+    expect(hasSttAdapter('')).toBe(false)
+  })
+
+  it('本机服务和其余 http(s) 地址走整段转写', () => {
+    stubSession()
+    openSttSession({ apiKey: '', baseUrl: 'http://127.0.0.1:8000/v1', model: 'm' }, () => {})
+    expect(transcription).toHaveBeenCalledTimes(1)
+    expect(doubao).not.toHaveBeenCalled()
+    expect(qwen).not.toHaveBeenCalled()
   })
 
   it('豆包地址走豆包适配器，百炼地址走百炼适配器', () => {
@@ -163,5 +184,32 @@ describe('probeStt', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('probeStt：整段转写', () => {
+  /** 这一类没有握手，开会话必然「就绪」—— 照流式那套探，配错了也亮绿灯 */
+  it('不开会话等就绪，真送一段音频去问', async () => {
+    const { probeStt } = await import('./index')
+    probeTranscription.mockRejectedValue(new Error('找不到识别接口（HTTP 404）'))
+    await expect(
+      probeStt(
+        {
+          id: 'local-stt',
+          displayName: '本机语音识别',
+          kind: 'stt',
+          protocol: 'openai-completions',
+          baseUrl: 'http://127.0.0.1:8000',
+          apiKey: { kind: 'none' },
+          models: []
+        } as never,
+        'SenseVoiceSmall'
+      )
+    ).rejects.toThrow('HTTP 404')
+    expect(transcription).not.toHaveBeenCalled()
+    expect(probeTranscription).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: 'http://127.0.0.1:8000', model: 'SenseVoiceSmall' }),
+      expect.any(AbortSignal)
+    )
   })
 })

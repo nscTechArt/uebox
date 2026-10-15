@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { defaultSpeechVoice, MAX_SPEECH_CHARS, type SpeechAudio } from '../../shared/speech'
+import {
+  defaultSpeechVoice,
+  isOpenAiCompatibleSpeech,
+  MAX_SPEECH_CHARS,
+  type SpeechAudio
+} from '../../shared/speech'
 import { requestQwenAudioSpeech } from './speechQwenAudio'
+import { requestOpenAiSpeech } from './speechOpenAi'
 import { isPlanProvider } from '../../shared/creatorPlan'
 import { requestPlanSpeech } from './creatorPlan/speech'
 import { resolveApiKey } from './credentials'
@@ -25,12 +31,23 @@ export async function requestSpeech(
   if (!text.trim() || Array.from(text).length > limit) {
     throw new Error('TTS_INVALID_TEXT')
   }
+  /*
+   * 豆包、百炼两家按模型名认；其余 http(s) 地址按 OpenAI 兼容的 /audio/speech 走
+   * （本机 Kokoro、CosyVoice 封装、OpenAI 自己）。豆包、百炼的地址配了个认不得的
+   * 模型名时照旧报不支持 —— 拿 OpenAI 的形状去打它们只会换来一句看不懂的 400。
+   */
+  const openAiCompatible = !plan && isOpenAiCompatibleSpeech(modelId, provider.baseUrl)
   const key = await resolveApiKey(provider.apiKey)
-  if (!key) throw new Error('TTS_NOT_CONFIGURED')
+  // 本机服务不要密钥；另外几家没密钥就是没配好
+  if (!key && !openAiCompatible) throw new Error('TTS_NOT_CONFIGURED')
   signal.throwIfAborted()
   const voice =
-    provider.models.find((model) => model.id === modelId)?.ttsVoice || defaultSpeechVoice(modelId)
+    provider.models.find((model) => model.id === modelId)?.ttsVoice ||
+    defaultSpeechVoice(modelId, provider.baseUrl)
   if (plan) return requestPlanSpeech(provider, modelId, voice, text, key, signal, onAudio)
+  if (openAiCompatible) {
+    return requestOpenAiSpeech(provider, modelId, voice, text, key, signal, onAudio)
+  }
   if (modelId.startsWith('qwen-audio-3.0-tts-')) {
     return requestQwenAudioSpeech(provider, modelId, voice, text, key, signal, onAudio)
   }

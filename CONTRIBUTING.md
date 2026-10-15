@@ -2,71 +2,80 @@
 
 中文版：[CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)
 
-This project's stance is simple:
-
-> **Experiment freely while building; give no ground at review.**
-
-We **explicitly welcome vibe coding** — turning an idea into code with an AI assistant. Not
-knowing how to code is not a barrier. Not running the tests is. This repository ships the spec
-your AI reads and a one-command acceptance gate. The rest is just describing what you want.
+Vibe coding (building with an AI assistant) is welcome. Not knowing how to code is not a barrier;
+not running the tests is. The repository ships the spec your AI reads ([AGENTS.md](AGENTS.md)) and
+an acceptance gate (`pnpm verify`). You only need to say what you want.
 
 ---
 
 ## Pick your path
 
-### 🙋 I'm a user and I just want a feature
+### I'm a user and I want a feature
 
 Two options:
 
 - **Do it yourself** (fastest): follow
-  [Add a feature with AI](docs/contributing/vibe-coding.md) — three setup steps, then hand the
-  request template to your AI assistant.
+  [Add a feature with AI](docs/contributing/vibe-coding.md) to set up, then give the request
+  template to your AI assistant.
 - **File a request**: open a
-  [Feature request](../../issues/new?template=feature_request.yml). Describe _what you want_, not
-  _how to build it_.
+  [Feature request](../../issues/new?template=feature_request.yml). Say what you want and where
+  you would use it. You do not need to say how to build it.
 
-By the way: a well-written issue is excellent AI input. Once it's filed, you can paste the whole
-issue into your AI assistant and have it build the thing.
+You can paste a finished issue into your AI assistant and have it build the feature.
 
-### 👩‍💻 I write code
+### I write code
 
-1. Read [AGENTS.md](AGENTS.md) — architecture layers, hard rules, gates;
-2. Read [the vertical slice guide](docs/contributing/vertical-slice.md) — where code goes;
+1. Read [AGENTS.md](AGENTS.md): architecture layers, hard rules, gates;
+2. Read [the vertical slice guide](docs/contributing/vertical-slice.md): which layer the code goes in;
 3. Write the code and the tests;
-4. Get `pnpm verify` fully green;
+4. Run `pnpm verify:changed` on each commit and `pnpm verify` once before the PR, fully green;
 5. Self-check against the [Definition of Done](docs/contributing/definition-of-done.md);
 6. Open a PR.
 
-### 🤖 I'm an AI agent
+### I'm an AI agent
 
-Read [AGENTS.md](AGENTS.md). That is your single source of truth. Stop and ask a human before
-`git push` or opening a PR.
+Read [AGENTS.md](AGENTS.md) (Chinese version: [AGENTS.zh-CN.md](AGENTS.zh-CN.md)). It is the single
+source of truth. Ask a human before `git push` or opening a PR.
 
 ---
 
 ## Quick start
+
+Requires Node.js 24.21.0 and pnpm 10.28.2.
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-After changing code:
+### The gate has two tiers
 
-```bash
-pnpm verify
-```
+| When                                 | Command               | Time          | Scope                                 |
+| ------------------------------------ | --------------------- | ------------- | ------------------------------------- |
+| While working                        | none                  | -             | At most the test file you are editing |
+| Feature done, on each commit         | `pnpm verify:changed` | about 30 s    | Only what you changed                 |
+| Before the batch goes out (push, PR) | `pnpm verify`         | about 3.5 min | The full set CI runs, whole repo      |
 
-That one command runs every gate CI runs, and tells you exactly what to fix when something fails.
-It also restores the `better-sqlite3` Electron ABI on the way out, so you can go straight back to
-`pnpm dev`.
+Run one test file: `pnpm exec vitest run <file>`.
 
-Unrelated UI/docs work needs no plugin ZIP or Unreal installation. If you change packaged plugin
-inputs, the gate needs a target version (or `none` without Unreal) — see
-[the packaging guide](docs/contributing/packaging.md#the-everyday-gate).
+`verify:changed` does not replace `pnpm verify`. You do not need to close the app to run either.
+What each step checks is listed in the
+[architecture and gate page](website/develop/architecture.md).
 
-To produce an installer, cut a release, or get unstuck from the native module ABI, see
+If you change packaged plugin inputs (files under `plugin/UnrealAgentLink/` that ship in the
+distribution), the gate needs a target engine version, or `none` when Unreal is not installed. See
+[the packaging guide](docs/contributing/packaging.md#the-everyday-gate). UI and docs changes need
+no plugin ZIP and no Unreal installation.
+
+To produce an installer, cut a release, or get unstuck from the `better-sqlite3` ABI, see
 [Packaging, releasing and the native module](docs/contributing/packaging.md).
+
+### UI strings and terminology
+
+- Add every user-visible string to both `zh-CN.ts` and `en-US.ts`.
+- [CONTEXT.md](CONTEXT.md) defines the terms. `src/renderer/src/i18n/terminologyGuard.test.ts`
+  scans both language packs and the main-process strings. It fails on banned words (for example
+  「会话」, 「聊天」, 「回合」) and prints the replacement.
 
 ### Recommended editor setup
 
@@ -77,23 +86,17 @@ To produce an installer, cut a release, or get unstuck from the native module AB
 
 ---
 
-## What we review — and what we don't
-
-**We do review:**
+## What review looks at
 
 - Whether `pnpm verify` is genuinely green
-- Whether the feature actually works (not just whether tests pass)
+- Whether the feature actually works, not only whether tests pass
 - Whether the diff touches only what it needed to
 - Whether new code has tests
 - Whether user-visible strings exist in both `zh-CN` and `en-US`
 
-**We don't review:**
-
-- Whether you're a "real programmer"
-- Whether an AI wrote the code (welcome — tick the box in the PR template, it costs you nothing)
-- Which AI assistant you used
-- Whether your first implementation is the most elegant one (if it passes the gate and works,
-  we'll refine it together)
+Review does not look at: whether you are a professional programmer; whether an AI wrote the code
+(tick the box in the PR template, it costs nothing); which AI assistant you used; whether the first
+version is elegant (if it passes the gate and works, it gets refined in review).
 
 ---
 
@@ -126,8 +129,8 @@ Open a [Bug report](../../issues/new?template=bug_report.yml) with:
 
 ## Security issues
 
-**Do not** report security vulnerabilities in a public issue. Use GitHub's private
-[Security Advisory](../../security/advisories/new) flow instead.
+Do not report vulnerabilities in a public issue. Email the maintainers as described in
+[SECURITY.md](SECURITY.md).
 
 ---
 

@@ -23,13 +23,16 @@ pnpm dev
 
 ## 验收
 
-```bash
-pnpm verify
-```
+门禁分两档，干活过程中不跑：
 
-跑的是 CI 跑的那一整套门禁——不止 lint 和测试，还包括密钥扫描、技能规范、引擎文件编码检查等，完整步骤见下面的[架构与验收门禁](/develop/architecture#门禁两档)。失败时会给出具体该改什么、敲什么命令。门禁不涉及原生模块，应用开着也能跑。
+| 时机                 | 命令                  | 耗时        | 范围         |
+| -------------------- | --------------------- | ----------- | ------------ |
+| 功能做完、每次提交时 | `pnpm verify:changed` | 约 30 秒    | 只查改动部分 |
+| 整批发出去之前       | `pnpm verify`         | 约 3.5 分钟 | 全仓完整门禁 |
 
-开发过程中用 `pnpm verify:changed`，约 30 秒，只检查改动部分。
+完整门禁包括密钥扫描、lint、类型检查、单测、技能规范（`verify:skills`）、引擎文件编码检查等，步骤见[架构与验收门禁](/develop/architecture#门禁两档)。失败时会给出该改什么、该敲什么命令。门禁不碰原生模块，应用开着也能跑。
+
+调单个测试文件：`pnpm exec vitest run <文件>`。
 
 ## 索引
 
@@ -38,8 +41,11 @@ pnpm verify
 | **规范**（架构分层、硬规则、门禁、提交约定） | [`AGENTS.md`](https://github.com/ueboxai/uebox/blob/main/AGENTS.md) / [`AGENTS.zh-CN.md`](https://github.com/ueboxai/uebox/blob/main/AGENTS.zh-CN.md)，唯一真相源 |
 | 用 AI 加功能                                 | [用 AI 加功能](/develop/with-ai)                                                                                                                                  |
 | 代码分层                                     | [架构与验收门禁](/develop/architecture)                                                                                                                           |
-| 贡献流程                                     | 仓库的 `CONTRIBUTING.md`                                                                                                                                          |
-| 术语定义                                     | 仓库的 `CONTEXT.md`                                                                                                                                               |
+| 贡献流程                                     | 仓库的 `CONTRIBUTING.md` / `CONTRIBUTING.zh-CN.md`                                                                                                                |
+| 测试、打包与发版                             | 仓库的 `docs/contributing/`（`testing.md`、`packaging.md`、`definition-of-done.md`）                                                                              |
+| 术语定义                                     | 仓库的 `CONTEXT.md`，界面文案由 `terminologyGuard.test.ts` 检查                                                                                                   |
+| 命令行 `uebox`                               | 仓库的 `packages/cli/README.md`，用法见[命令行](/guide/cli)                                                                                                       |
+| 安全策略                                     | 仓库的 `SECURITY.md`                                                                                                                                              |
 | UI 设计规范                                  | 仓库的 `docs/UI-Design-Standards.md`、`docs/ui-components.md`                                                                                                     |
 | 各能力的设计稿                               | 仓库的 `docs/` 目录                                                                                                                                               |
 

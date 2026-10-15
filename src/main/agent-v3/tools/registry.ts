@@ -70,6 +70,7 @@ import {
   SET_SESSION_PROJECT_TOOL_NAME,
   rewriteCrossReferences
 } from './toolNames'
+import { UPDATE_PLAN_TOOL_NAME, WRAP_UP_TOOL_NAME } from '../../../shared/agentTurnReport'
 import type { ToolRisk, UnrealAgentTool } from './defineTool'
 import { effectiveRisk } from './defineTool'
 import { materialTools } from './ue-material'
@@ -173,6 +174,9 @@ export function allToolNames(): Set<string> {
   // 名字不在这儿的话，第一个把这套流程写进 SKILL.md 的人会被体检告知
   // 「引用了不存在的工具」，然后把唯一正确的那句删掉
   names.add(SET_SESSION_PROJECT_TOOL_NAME)
+  // 任务清单、收尾提问同理
+  names.add(UPDATE_PLAN_TOOL_NAME)
+  names.add(WRAP_UP_TOOL_NAME)
   return names
 }
 
