@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { MAIN_STRINGS } from '@core/main/i18n'
+import {
+  BANNED_TERMS,
+  scan,
+  type BannedTerm,
+  type Leaf
+} from '@core/shared/terminologyGuard'
 import zhCN from './locales/zh-CN'
 import enUS from './locales/en-US'
 
@@ -17,56 +23,6 @@ import enUS from './locales/en-US'
  * 每条必须在条目旁写清理由，由评审把关。
  */
 
-/** 一条禁用词：`word` 是要在文案里拦下的写法，`suggestion` 告诉贡献者该换成什么 */
-interface BannedTerm {
-  word: string
-  suggestion: string
-}
-
-/**
- * 禁用词表。来源：`CONTEXT.md` 的 _Avoid_，是有意挑选的子集；改这张表时同步 `CONTEXT.md`。
- *
- * Thread、Fork 不入表，只靠词汇表约束 —— UE 与内核语境里有正常用法
- * （Game Thread、内核复制 session 的 fork），入表会把它们一并拦掉。
- *
- * 含汉字的词按子串匹配，有已知的跨词误报：「社会话题」含「会话」、「撤回合并」含「回合」。
- * 碰上时优先改写那句文案；改写不掉的正当用法（引擎界面名、外部协议名）
- * 加白名单，每条写清理由。
- */
-const BANNED_TERMS: BannedTerm[] = [
-  // 对话主体
-  { word: '聊天', suggestion: '对话' },
-  { word: '回合', suggestion: '一轮' },
-  { word: '一问一答', suggestion: '一轮' },
-  { word: 'exchange', suggestion: 'turn' },
-  // 分支
-  { word: '会话分支', suggestion: '分支' },
-  { word: '对话分支', suggestion: '分支' },
-  // 侧边问一句
-  { word: '侧边对话', suggestion: '侧边问一句' },
-  { word: 'side chat', suggestion: 'side question' },
-  // 语音通话
-  { word: '语音对话', suggestion: '语音通话' },
-  // 小窗
-  { word: 'MiniChat', suggestion: 'mini window' },
-  { word: 'Mini Chat', suggestion: 'mini window' },
-  { word: '迷你对话', suggestion: '小窗' },
-  // 不是对话的「会话」
-  { word: '内核记忆', suggestion: '只说用户能理解的后果' },
-  // 对话之外不再有「会话」，英文里指对话的一律 chat
-  { word: '会话', suggestion: '对话（调试台写 session）' },
-  {
-    word: 'session',
-    suggestion: '对话写 chat；登录写 sign-in / signed out；网络库导入写 import（调试台除外）'
-  },
-  {
-    word: 'sessions',
-    suggestion: '对话写 chat；登录写 sign-in / signed out；网络库导入写 import（调试台除外）'
-  },
-  { word: 'conversation', suggestion: 'chat' },
-  { word: 'conversations', suggestion: 'chat' }
-]
-
 /**
  * 白名单：完整 key → 放行的禁用词条目。按 key 精确匹配，只放行该 key 下列出的条目；
  * 同一个 key 下出现别的禁用词照样命中。放行的词写禁用词表里已有的条目本身，
@@ -82,18 +38,6 @@ const WHITELIST = new Map<string, string[]>([
   ['agentV3Debug.approveAlways', ['session']],
   ['agentV3Debug.newSession', ['session']]
 ])
-
-/** 含汉字的禁用词按子串匹配，其余（拉丁字母的词）按单词边界、不区分大小写 */
-const CJK_CHAR = /[一-鿿]/
-
-/** 插值占位符是运行时才填的值，不算文案 —— 先剥掉再匹配（`{session}` 不算命中 session） */
-const INTERPOLATION = /\{\w+\}/g
-
-/** 一片叶子字符串：`path` 是文案里的完整 key（数组元素带下标），`text` 是文案本身 */
-interface Leaf {
-  path: string
-  text: string
-}
 
 /**
  * 收集全部叶子字符串。数组元素也是叶子，路径带下标（如 `assistant.contextChips.default[0]`）——
@@ -111,35 +55,6 @@ function collectLeaves(value: unknown, prefix = '', out: Leaf[] = []): Leaf[] {
     }
   }
   return out
-}
-
-function escapeRegExp(word: string): string {
-  return word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/** 返回在这段文案里命中的禁用词条目。匹配方式按禁用词本身的写法决定，对所有来源一视同仁 */
-function matchTerms(text: string, terms: BannedTerm[]): BannedTerm[] {
-  const plain = text.replace(INTERPOLATION, '')
-  return terms.filter((term) => {
-    if (CJK_CHAR.test(term.word)) return plain.includes(term.word)
-    return new RegExp(`\\b${escapeRegExp(term.word)}\\b`, 'i').test(plain)
-  })
-}
-
-/**
- * 扫一批叶子，返回逐条失败信息（key 路径、命中词、替换建议；来源由调用方拼在前面）。
- * 白名单按完整 key 放行指定条目，放行之外照样报。
- */
-function scan(leaves: Leaf[], terms: BannedTerm[], whitelist: Map<string, string[]>): string[] {
-  const failures: string[] = []
-  for (const leaf of leaves) {
-    const allowed = whitelist.get(leaf.path) ?? []
-    for (const term of matchTerms(leaf.text, terms)) {
-      if (allowed.includes(term.word)) continue
-      failures.push(`${leaf.path}：命中「${term.word}」，建议改为「${term.suggestion}」`)
-    }
-  }
-  return failures
 }
 
 const SOURCES: Array<{ label: string; pack: unknown }> = [

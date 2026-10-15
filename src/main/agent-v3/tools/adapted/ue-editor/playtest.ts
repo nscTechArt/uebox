@@ -534,7 +534,7 @@ cvar 也都能发。
 
 保存是另一回事——干完活记得 ue_save，那是为了别丢，不是为了让试玩看见。
 
-编辑器已经在 Play / Simulate 模式时会被拒绝 —— 这个工具不接管别人的会话。多半是用户自己按了
+编辑器已经在 Play / Simulate 模式时会被拒绝 —— 这个工具不接管别人开的试玩。多半是用户自己按了
 Play，或者你之前在 Python 里调过 editor_play_simulate() 没停。停法见拒绝信息。`,
 
     inputSchema: PlaytestSchema,
