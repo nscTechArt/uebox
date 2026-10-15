@@ -345,6 +345,11 @@ onMounted(refresh)
           </div>
         </dd>
 
+        <template v-if="detail.status === 'retired' && detail.retiredBecause">
+          <dt>{{ $t('profile.experience.detail.retiredBecause') }}</dt>
+          <dd>{{ $t(`profile.experience.retireReason.${detail.retiredBecause}`) }}</dd>
+        </template>
+
         <template v-if="detail.source">
           <dt>{{ $t('profile.experience.detail.source') }}</dt>
           <dd>{{ detail.source }}</dd>

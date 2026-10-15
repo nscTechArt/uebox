@@ -3435,8 +3435,18 @@ export default {
         effectValue: '提示 {shown} 次，采用 {adopted} 次，成功 {ok} 次',
         lift: '未提示时成功率 {without}%，提示后 {with}%',
         liftUnknown: '对照样本不足，暂无法计算提升',
+        retiredBecause: '淘汰原因',
         source: '来源',
         pin: '固定保留，不自动淘汰'
+      },
+      retireReason: {
+        capacity: '经验数量达到上限，按效果排序被移出',
+        replaced: '同一 API 已有更新的经验',
+        failed: '按此做法执行后仍报相同错误',
+        ignored: '连续多次提示均未被采用',
+        'no-lift': '对照结果显示提示后成功率未提高',
+        refuted: '编辑器核实该成员实际存在',
+        'script-bug': '属于脚本自身的错误，不是引擎规则'
       },
       deleteTitle: '删除这条经验？',
       deleteContent: '删除后不再提示。再次遇到相同问题时，可能重新学习。',

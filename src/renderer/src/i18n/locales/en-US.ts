@@ -3545,8 +3545,18 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         effectValue: 'Shown {shown}x, followed {adopted}x, worked {ok}x',
         lift: 'Success {without}% without it, {with}% with it',
         liftUnknown: 'Not enough comparison data yet',
+        retiredBecause: 'Retired because',
         source: 'Source',
         pin: 'Keep pinned, never auto-retire'
+      },
+      retireReason: {
+        capacity: 'The limit was reached and this one ranked lowest',
+        replaced: 'Superseded by a newer entry for the same API',
+        failed: 'The same error came back after following it',
+        ignored: 'Shown several times in a row without being followed',
+        'no-lift': 'Comparison showed no gain in success rate',
+        refuted: 'The editor shows the member does exist',
+        'script-bug': 'A bug in the script itself, not an engine rule'
       },
       deleteTitle: 'Delete this experience?',
       deleteContent:

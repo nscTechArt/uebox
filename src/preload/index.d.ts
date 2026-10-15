@@ -3771,6 +3771,15 @@ declare global {
     source: string
     verified?: { date: string; engine?: string }
     status: 'trial' | 'proven' | 'retired'
+    /** 退休的才有；这个字段出现之前退休的旧经验没有 */
+    retiredBecause?:
+      | 'capacity'
+      | 'replaced'
+      | 'failed'
+      | 'ignored'
+      | 'no-lift'
+      | 'refuted'
+      | 'script-bug'
     pinned?: boolean
     engines?: string[]
     notFor?: string[]

@@ -15,8 +15,8 @@
  * 区分全压在片段上。所以对它们：
  *
  * - 只学 Python 异常（`XxxError: ...`）。「执行未确认」「没连上」这类不是知识。
- * - 不学脚本自己的 bug：NameError（变量名打错）、SyntaxError 等。那是这一次现写的
- *   代码写错了，不是引擎的规矩，下次写的是另一段代码。
+ * - 不学脚本自己的 bug：NameError（变量名打错）、SyntaxError、在 None 上取属性等。
+ *   那是这一次现写的代码写错了，不是引擎的规矩，下次写的是另一段代码。
  * - 片段必须带一个引号里的名字（类名、属性名、函数名、参数名），知识就在那个名字上。
  * - 片段要覆盖异常信息的大半（≥ 50%）。召回时拿**新报错**再算一次：
  *   新报错里只有一小部分和片段重合，说明是另一件事。
@@ -37,6 +37,18 @@ const PYTHON_TOOLS: ReadonlySet<string> = new Set(['ue_run_python_script'])
 /** 脚本自己写错了，不是引擎的规矩 */
 const SCRIPT_BUG =
   /^(nameerror|syntaxerror|indentationerror|taberror|unboundlocalerror|assertionerror|zerodivisionerror|keyboardinterrupt|recursionerror)$/
+
+/**
+ * 在 None 上取属性：前面的查找没找到东西、脚本没判空。说的是这一段脚本的逻辑，
+ * 不是哪个类缺了什么 —— `'nonetype' object has no attribute 'get_editor_property'`
+ * 换成任何属性名都一样
+ */
+const NONE_ATTRIBUTE = /'nonetype' object has no attribute /
+
+/** 报错或片段说的是「在 None 上取属性」。片段不一定是整行异常，所以单独给一个判据 */
+export function isNoneAttribute(text: string): boolean {
+  return NONE_ATTRIBUTE.test(text.toLowerCase())
+}
 
 /** 片段最短多长。6 太短：`failed` 就满足了 */
 export const MIN_PATTERN_LENGTH = 12
@@ -106,7 +118,27 @@ export function errorProblem(tool: string, normalizedError: string): PatternProb
   const ex = exceptionLine(normalizedError)
   if (PYTHON_TOOLS.has(tool) && !ex) return 'no-exception'
   if (ex && SCRIPT_BUG.test(ex.type)) return 'script-bug'
+  if (ex && PYTHON_TOOLS.has(tool) && NONE_ATTRIBUTE.test(ex.message)) return 'script-bug'
   return undefined
+}
+
+/**
+ * API 事实：Python 经验里抽得出「类.成员」或「函数(参数)」钥匙的那些。
+ *
+ * 它和别的经验不是一种东西。「材质参数名要先查真实名字」是做法，灵不灵说不准，
+ * 要试用、要对照组、按效果去留；「5.7 里 LevelEditorSubsystem 没有
+ * set_level_viewport_camera_info」是事实，问一下引擎就知道真假，在这个版本里一直成立，
+ * 而且 Python API 有上万个成员，事实的条数本来就没有上限。所以它们：
+ *
+ * - 不按条数和做法经验抢位置，同一个 API 只留一条（`admission.ts`）；
+ * - 引擎核实过、或同一个错又报了一次，就算已验证，可以在执行前拦（`lifecycle.ts`）；
+ * - 不留对照组 —— 核实过的事实藏起来，只会让模型多绕几步，测不出什么（`runtime.ts`）；
+ * - 只有引擎说「它其实存在」才退休。照着做了又报同一个错，恰好再证明了一次那个成员不存在
+ *
+ * 控制台命令的钥匙是命令名，同一个命令下可以有好几件不同的事，不算。
+ */
+export function isApiFact(entry: { tool: string; symbol?: string }): boolean {
+  return PYTHON_TOOLS.has(entry.tool) && !!entry.symbol
 }
 
 /**

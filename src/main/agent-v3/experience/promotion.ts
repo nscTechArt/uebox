@@ -70,14 +70,16 @@ export async function recordProvenInProject(
     expect: entry.expect,
     source: `proven in ${record.projects.length} projects`,
     status: 'proven',
-    ...(record.engines.length ? { engines: record.engines } : {})
+    ...(record.engines.length ? { engines: record.engines } : {}),
+    // 上帝工具的两把钥匙要跟着走：丢了 symbol，召回就不再核对是不是同一个 API
+    ...(entry.symbol ? { symbol: entry.symbol } : {}),
+    ...(entry.avoid ? { avoid: entry.avoid } : {})
   }
 
   let added = false
-  const ledger = await global.readLedger()
   await global.updateTool(entry.tool, (list) => {
     if (patternCovered(list, entry.tool, entry.errorPattern)) return undefined
-    const next = admit(list, promoted, ledger)
+    const next = admit(list, promoted)
     if (next) added = true
     return next
   })
