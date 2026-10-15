@@ -203,7 +203,12 @@ describe('执行前提醒', () => {
       text: `ue_run_python_script 失败：Traceback (most recent call last): File "<ua-script>", line 5, in <module> AttributeError: 'Character' object has no attribute 'is_hidden'`
     })
     expect(note).toContain('改用 is_hidden_ed()')
-    await rt.after({ tool: proven.tool, args: { script: 'a.is_hidden_ed()' }, isError: false, text: 'ok' })
+    await rt.after({
+      tool: proven.tool,
+      args: { script: 'a.is_hidden_ed()' },
+      isError: false,
+      text: 'ok'
+    })
     await rt.flush()
     expect((await global.readTool(proven.tool))[0].status).toBe('proven')
     expect(await global.statsFor(proven.id)).toMatchObject({ shown: 1, holdout: 0 })

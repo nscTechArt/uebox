@@ -99,7 +99,8 @@ export interface OutcomeResult {
 }
 
 export function applyOutcome(
-  entry: Pick<ExperienceEntry, 'status' | 'pinned'> & Partial<Pick<ExperienceEntry, 'tool' | 'symbol'>>,
+  entry: Pick<ExperienceEntry, 'status' | 'pinned'> &
+    Partial<Pick<ExperienceEntry, 'tool' | 'symbol'>>,
   before: EntryStats,
   outcome: Outcome,
   now: string = new Date().toISOString()
@@ -114,7 +115,10 @@ export function applyOutcome(
   }
 
   if (entry.tool && isApiFact({ tool: entry.tool, symbol: entry.symbol })) {
-    return { stats: countFact(stats, outcome, now), status: status === 'retired' ? status : 'proven' }
+    return {
+      stats: countFact(stats, outcome, now),
+      status: status === 'retired' ? status : 'proven'
+    }
   }
 
   if (outcome.arm === 'holdout') {

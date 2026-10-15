@@ -128,7 +128,10 @@ describe('进门', () => {
     const retired = Array.from({ length: MAX_RETIRED_PER_TOOL }, (_, i) =>
       fact(`r${i}`, { status: 'retired' as const })
     )
-    const next = admit([...retired, fact('old')], fact('n', { symbol: 'leveleditorsubsystem.old' }))!
+    const next = admit(
+      [...retired, fact('old')],
+      fact('n', { symbol: 'leveleditorsubsystem.old' })
+    )!
     expect(next.filter((e) => e.status === 'retired')).toHaveLength(MAX_RETIRED_PER_TOOL)
     expect(next.some((e) => e.id === 'r0')).toBe(false)
   })

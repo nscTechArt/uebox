@@ -376,7 +376,11 @@ export function releaseAll(owner: string): number {
  * 「当前关卡」那把）到交付之前队友一个都改不了 —— 队员撞上去等 90 秒再失败。
  * GDBox 那边 2026-10-15 真机撞到过（程序等制作人占着的场景文件等了 14 分钟）。
  */
-export function releasePaths(connectionId: string | undefined, owner: string, paths: string[]): number {
+export function releasePaths(
+  connectionId: string | undefined,
+  owner: string,
+  paths: string[]
+): number {
   const root = rootSessionId(owner)
   const released: LockRecord[] = []
   for (const raw of paths) {

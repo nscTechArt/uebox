@@ -51,7 +51,9 @@ describe('experienceFile', () => {
     const retired: ExperienceEntry = { ...entry, status: 'retired', retiredBecause: 'capacity' }
     expect(parseExperienceFile(serializeExperienceFile('t', [retired]))).toEqual([retired])
     const text = serializeExperienceFile('t', [retired])
-    expect(parseExperienceFile(text.replace('capacity', 'whatever'))[0].retiredBecause).toBeUndefined()
+    expect(
+      parseExperienceFile(text.replace('capacity', 'whatever'))[0].retiredBecause
+    ).toBeUndefined()
     const active = text.replace('- status: retired', '- status: trial')
     expect(parseExperienceFile(active)[0].retiredBecause).toBeUndefined()
   })

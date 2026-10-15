@@ -650,7 +650,8 @@ export default {
       unset: 'Not set',
       moreLabel: 'Show details',
       chat: 'Main model',
-      chatDesc: 'Shared by chat and Agent; the composer switches this one. Also used wherever no other model is set.',
+      chatDesc:
+        'Shared by chat and Agent; the composer switches this one. Also used wherever no other model is set.',
       chatMerged: 'Vision and Quick tasks use this model too.',
       chatSplit: 'Set separately',
       agent: 'Agent',
