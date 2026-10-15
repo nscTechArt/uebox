@@ -215,7 +215,10 @@ describe('内置 Provider 目录', () => {
       const models = CATALOG.find((entry) => entry.id === providerId)!.models
       for (const id of ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
         // 6.1 Sol 另有 off: null，见下面「最高思考档位」那组
-        expect(models.find((m) => m.id === id)?.thinkingLevelMap, `${providerId}/${id}`).toMatchObject({
+        expect(
+          models.find((m) => m.id === id)?.thinkingLevelMap,
+          `${providerId}/${id}`
+        ).toMatchObject({
           minimal: null,
           xhigh: 'xhigh',
           max: 'max'
