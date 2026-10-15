@@ -295,6 +295,8 @@ export interface AgentExecuteParams {
    * 只对推理模型有效（模型上要标了「推理」），普通模型会被内核夹成不思考。
    */
   thinkingLevel?: AgentV3ThinkingLevel
+  /** 「快速」：Codex 订阅走 priority 档，别的模型忽略 */
+  fastMode?: boolean
   /**
    * 技能沉淀档位。不给等同 `ask` —— 想沉淀时先问用户。
    *
@@ -1045,6 +1047,7 @@ ${params.text}
         mode: params.askMode ? 'ask' : 'agent',
         approvalMode: resolveApprovalMode(params),
         thinkingLevel: params.thinkingLevel ?? 'auto',
+        fastMode: params.fastMode ?? false,
         skillLearning: params.skillLearning ?? 'ask',
         /*
          * 隐私档：允不允许 agent 拍编辑器画面。

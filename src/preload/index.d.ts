@@ -3178,6 +3178,8 @@ declare global {
         approvalMode?: AgentV3ApprovalMode
         /** 思考程度。不传等于 auto（不指定，随模型默认） */
         thinkingLevel?: AgentV3ThinkingLevel
+        /** 「快速」：Codex 订阅走 priority 档，别的模型忽略 */
+        fastMode?: boolean
         /** 技能沉淀档位。不传等于 ask（想沉淀时先问用户） */
         skillLearning?: AgentV3SkillLearning
         /**
@@ -3448,6 +3450,8 @@ declare global {
         levels: AgentV3ThinkingLevel[]
         levelMap: Record<string, string | null>
         modelId: string
+        /** 这个模型能不能开「快速」（目前只有 ChatGPT 订阅） */
+        fastMode: boolean
       } | null>
       /** 这条对话绑定的模型（执行记录里那份）。没绑过为 null */
       sessionModel: (args: {

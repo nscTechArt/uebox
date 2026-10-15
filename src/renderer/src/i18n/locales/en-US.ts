@@ -6038,7 +6038,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       highDesc: 'High reasoning',
       xhighDesc: 'Extra high reasoning',
       maxDesc: 'Maximum reasoning',
-      clamped: '{model} has no {chosen} level — this run uses {actual} instead'
+      clamped: '{model} has no {chosen} level — this run uses {actual} instead',
+      fast: 'Fast',
+      fastDesc: 'Faster responses, uses about 2× quota'
     },
     approval: {
       readOnlyLabel: 'Read only',

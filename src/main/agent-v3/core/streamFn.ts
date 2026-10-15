@@ -81,6 +81,16 @@ function toPiReasoning(choice: ThinkingLevelChoice | undefined): ThinkingLevel |
   return choice as ThinkingLevel
 }
 
+/**
+ * 模型菜单里的「快速」开关：请求里带 `service_tier: "priority"`，Codex CLI 的快速模式就是这个。
+ *
+ * 只有 ChatGPT 订阅（Codex 后端）给这个开关：额度按倍数扣（pi 记的是 2 倍，gpt-5.5 是 2.5 倍），
+ * 别家端点不认这个字段，开了也没用。pi 的 `streamSimple` 不转 `serviceTier`，所以在 onPayload 里补。
+ */
+export function supportsFastMode(model: { api: string }): boolean {
+  return model.api === 'openai-codex-responses'
+}
+
 export interface PiModelSelection {
   model: Model<string>
   providerId: string
@@ -399,6 +409,8 @@ export interface ThinkingLevelOptions {
   levelMap: Record<string, string | null>
   /** 这次的档位清单是按哪个模型问出来的，界面上要说清楚 */
   modelId: string
+  /** 这个模型能不能开「快速」，见 `supportsFastMode` */
+  fastMode: boolean
 }
 
 /**
@@ -423,7 +435,8 @@ export async function listThinkingLevels(
   return {
     levels: getSupportedThinkingLevels(selection.model),
     levelMap: (selection.model.thinkingLevelMap ?? {}) as Record<string, string | null>,
-    modelId: selection.modelId
+    modelId: selection.modelId,
+    fastMode: supportsFastMode(selection.model)
   }
 }
 
@@ -436,7 +449,8 @@ function withPin(stored: AiProviderSettings, request: ModelRequest): AiProviderS
 
 export async function resolveAgentModel(
   request: ModelRequest = {},
-  thinkingLevel?: ThinkingLevelChoice
+  thinkingLevel?: ThinkingLevelChoice,
+  fastMode = false
 ): Promise<AgentModelRuntime> {
   const settings = withPin(await readSettings(), request)
   const models = getModels(settings)
@@ -520,7 +534,14 @@ export async function resolveAgentModel(
     const labeled = labelToolResultImages(replaced.messages)
     const outgoing = labeled === replaced.messages ? replaced : { ...replaced, messages: labeled }
     const hasMedia = contextHasMediaRefs(outgoing)
-    const previousOnPayload = options?.onPayload
+    const priority = fastMode && supportsFastMode(model)
+    const previousOnPayload = priority
+      ? async (payload: unknown, payloadModel: Model<Api>) => {
+          const upstream = await options?.onPayload?.(payload, payloadModel)
+          const current = (upstream === undefined ? payload : upstream) as object
+          return { ...current, service_tier: 'priority' }
+        }
+      : options?.onPayload
     // 「不思考」在有几家端点上光传 off 不管用，要补自家字段（见 thinkingOffFields）
     const offFields = thinkingLevel === 'off' ? thinkingOffFields(model.baseUrl) : undefined
     // OpenCode 要一段对话一个稳定的会话 id；pi 给的缓存键正好是这个粒度，
@@ -541,7 +562,8 @@ export async function resolveAgentModel(
           }
         : {}),
       ...(reasoning ? { reasoning } : {}),
-      ...(offFields ? { samplingParams: { ...options?.samplingParams, ...offFields } } : {})
+      ...(offFields ? { samplingParams: { ...options?.samplingParams, ...offFields } } : {}),
+      ...(priority ? { onPayload: previousOnPayload } : {})
     }
     const firstTry = models.streamSimple(model, outgoing, {
       ...baseOptions,

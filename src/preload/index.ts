@@ -1424,6 +1424,8 @@ const api = {
       approvalMode?: 'ask' | 'auto-edit' | 'yolo'
       /** 思考程度。auto=不指定，随模型自己的默认；其余档位由模型自己声明 */
       thinkingLevel?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+      /** 「快速」：Codex 订阅走 priority 档，别的模型忽略 */
+      fastMode?: boolean
       /** 技能沉淀档位。不传等于 ask（想沉淀时先问用户） */
       skillLearning?: 'off' | 'ask' | 'auto'
       /**

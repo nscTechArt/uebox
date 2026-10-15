@@ -5879,7 +5879,9 @@ export default {
       highDesc: '高强度推理',
       xhighDesc: '超高强度推理',
       maxDesc: '最高强度推理',
-      clamped: '{model} 不支持 {chosen} 档位，本次按 {actual} 执行'
+      clamped: '{model} 不支持 {chosen} 档位，本次按 {actual} 执行',
+      fast: '快速',
+      fastDesc: '响应更快，额度消耗约 2 倍'
     },
     approval: {
       readOnlyLabel: '只读',

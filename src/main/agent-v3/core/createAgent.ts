@@ -231,6 +231,8 @@ export interface SessionContext {
   alwaysAllowed?: Set<string>
   /** 思考程度。省略等同 auto —— 不指定，随模型自己的默认 */
   thinkingLevel?: ThinkingLevelChoice
+  /** 模型菜单里的「快速」（Codex 订阅的 priority 档），见 `supportsFastMode` */
+  fastMode?: boolean
   modelRequest?: ModelRequest
   /** 向用户发起审批。省略则等同 yolo（无人值守场景，如定时任务） */
   requestApproval?: ApprovalDeps['request']
@@ -692,7 +694,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     ctx.auditorJudges
   )
     ctx.toolSearchEnabled = false
-  const runtime = await resolveAgentModel(ctx.modelRequest, ctx.thinkingLevel)
+  const runtime = await resolveAgentModel(ctx.modelRequest, ctx.thinkingLevel, ctx.fastMode)
   const { selection, models, summaryModel } = runtime
   // 工作室模式：模型请求按网关的实际反应自适应排队、卡死重发（见 `core/team/requestGate.ts`）。
   // 子 agent 经 `...parent` 继承这个开关，队员、验收员、`task` 子任务共用同一个名额池。
