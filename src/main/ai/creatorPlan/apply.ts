@@ -15,6 +15,8 @@
 import {
   MODEL_ROLES,
   ROLE_KIND,
+  modelAllowsRole,
+  modelLabelWithBadge,
   type ModelBinding,
   type ModelConfig,
   type ModelRole,
@@ -109,12 +111,6 @@ export function planRoleSpecs(
   return out
 }
 
-/** 清单里的显示名；`beta: true` 的角色（目前是音乐）在名字后标「Beta」 */
-function displayNameOf(spec: PlanRoleSpec): string {
-  const name = spec.display_name ?? spec.model
-  return spec.beta === true ? `${name} (Beta)` : name
-}
-
 function chatModel(spec: CreatorPlanChatSpec): ModelConfig {
   const efforts = new Set(spec.reasoning_efforts ?? [])
   return {
@@ -192,14 +188,107 @@ const PLAN_PROVIDER_EXTRA: Partial<Record<ProviderKind, Partial<ProviderConfig>>
   music: { musicApi: 'uebox-tasks' }
 }
 
+/**
+ * 一个角色的规格 → `ModelConfig`。旧服务端（清单没有 `models`）走的就是这一条：
+ * 名字用 `display_name`，`beta: true`（目前是音乐）标「Beta」。
+ *
+ * `models` 管的那四位（badge / description / allowedRoles / freeOnFailure）没有也写成 undefined：
+ * 清单刷新逐键比对，服务端撤掉了哪一位，这边才跟着撤。
+ */
 function toModelConfig(role: ModelRole, spec: PlanRoleSpec): ModelConfig {
   const kind = ROLE_KIND[role]
-  if (kind === 'chat') return chatModel(spec as unknown as CreatorPlanChatSpec)
+  const model: ModelConfig =
+    kind === 'chat'
+      ? chatModel(spec as unknown as CreatorPlanChatSpec)
+      : {
+          id: spec.model,
+          displayName: spec.display_name ?? spec.model,
+          ...MODEL_OF_KIND[kind](spec)
+        }
   return {
-    id: spec.model,
-    displayName: displayNameOf(spec),
-    ...MODEL_OF_KIND[kind](spec)
+    ...model,
+    badge: spec.beta === true ? 'Beta' : undefined,
+    description: undefined,
+    allowedRoles: undefined,
+    freeOnFailure: undefined
   }
+}
+
+/** 清单 `models` 的一项，认过的（协议 01-plan，2026-10-15） */
+export interface PlanModelEntry {
+  /** 主角色（`roles[0]`）：其余字段是它的规格，按它转成模型配置 */
+  primary: ModelRole
+  /** 整项原样：主角色的规格，外加 display_name / badge / description / free_on_failure */
+  spec: PlanRoleSpec
+  /** 能绑的角色，按 MODEL_ROLES 排（和落盘归一化一致，刷新时不会因为顺序白写盘） */
+  roles: ModelRole[]
+}
+
+/**
+ * 清单里的 `models`。旧服务端没有这个字段时回 null，调用方照旧按 `roles` 生成。
+ *
+ * 认不出的项跳过：主角色这个客户端不认识（服务端以后加的新角色）、规格形状不对。
+ * 能绑的角色只留和主角色同一类的：来源一类一个，跨类的绑上去也调不通。
+ */
+export function planModelEntries(manifest: CreatorPlanManifest): PlanModelEntry[] | null {
+  if (!Array.isArray(manifest.models)) return null
+  return manifest.models.flatMap((raw): PlanModelEntry[] => {
+    const listed: unknown[] = Array.isArray((raw as { roles?: unknown } | null)?.roles)
+      ? (raw as { roles: unknown[] }).roles
+      : []
+    const primary = MODEL_ROLES.find((role) => role === listed[0])
+    if (!primary || !isRoleSpec(primary, raw)) return []
+    const kind = ROLE_KIND[primary]
+    const roles = MODEL_ROLES.filter((role) => ROLE_KIND[role] === kind && listed.includes(role))
+    return [{ primary, spec: raw, roles }]
+  })
+}
+
+/** `models` 的一项 → `ModelConfig`：规格按主角色转，名字、标签、说明、能绑的角色原样用服务端的 */
+function entryModel(entry: PlanModelEntry): ModelConfig {
+  const { spec } = entry
+  return {
+    ...toModelConfig(entry.primary, spec),
+    displayName: str(spec.display_name) ?? spec.model,
+    badge: str(spec.badge),
+    description: str(spec.description),
+    allowedRoles: entry.roles,
+    freeOnFailure: spec.free_on_failure === true ? true : undefined
+  }
+}
+
+/**
+ * 清单 → 各类套餐来源该有的模型。
+ *
+ * 有 `models` 就按它（服务端定有哪些、叫什么、标什么），客户端不写死任何模型。
+ * 各角色的默认模型按协议都在 `models` 里；万一漏了、或者旧服务端根本没有 `models`，按 `roles` 补上。
+ */
+function planModelConfigs(
+  manifest: CreatorPlanManifest
+): Map<ProviderKind, Map<string, ModelConfig>> {
+  const byKind = new Map<ProviderKind, Map<string, ModelConfig>>()
+  const add = (kind: ProviderKind, model: ModelConfig): void => {
+    const models = byKind.get(kind) ?? new Map<string, ModelConfig>()
+    if (!models.has(model.id)) models.set(model.id, model)
+    byKind.set(kind, models)
+  }
+  for (const entry of planModelEntries(manifest) ?? []) {
+    add(ROLE_KIND[entry.primary], entryModel(entry))
+  }
+  for (const [role, spec] of Object.entries(planRoleSpecs(manifest)) as [
+    ModelRole,
+    PlanRoleSpec
+  ][]) {
+    add(ROLE_KIND[role], toModelConfig(role, spec))
+  }
+  return byKind
+}
+
+/** 同上，按模型 id 摊平 */
+function planModelsById(manifest: CreatorPlanManifest): Map<string, ModelConfig> {
+  return new Map(
+    [...planModelConfigs(manifest).values()].flatMap((models) => [...models.entries()])
+  )
 }
 
 /** 这个角色的套餐来源 id */
@@ -207,18 +296,9 @@ export function planProviderIdOf(role: ModelRole): string {
   return PLAN_PROVIDER_IDS[ROLE_KIND[role]]
 }
 
-/** 清单 → 套餐的来源。一类一个，没有模型的类不生成 */
+/** 清单 → 套餐的来源。一类一个，没有模型的类不生成；`models` 里的可选模型一并列上 */
 export function planProviders(manifest: CreatorPlanManifest, apiKey: ApiKeyRef): ProviderConfig[] {
-  const byKind = new Map<ProviderKind, Map<string, ModelConfig>>()
-  for (const [role, spec] of Object.entries(planRoleSpecs(manifest)) as [
-    ModelRole,
-    PlanRoleSpec
-  ][]) {
-    const kind = ROLE_KIND[role]
-    const models = byKind.get(kind) ?? new Map<string, ModelConfig>()
-    if (!models.has(spec.model)) models.set(spec.model, toModelConfig(role, spec))
-    byKind.set(kind, models)
-  }
+  const byKind = planModelConfigs(manifest)
   const pricing: Record<string, { version: string }> = parsePlanPricing(manifest.route_pricing)
   const video = parseVideoPricing(manifest.video_pricing)
   if (video) pricing['uebox-video'] = video
@@ -332,9 +412,11 @@ export function planRoleChanges(
   manifest: CreatorPlanManifest
 ): CreatorPlanRoleChange[] {
   const specs = planRoleSpecs(manifest)
+  const models = planModelsById(manifest)
   return SUPPORTED_ROLES.flatMap((role) => {
     const spec = specs[role]
     if (!spec) return []
+    const model = models.get(spec.model)
     const binding = settings.roles[role]
     const provider = binding && settings.providers.find((p) => p.id === binding.providerId)
     const managed = binding?.source === 'plan'
@@ -342,7 +424,7 @@ export function planRoleChanges(
       {
         role,
         model: spec.model,
-        modelDisplayName: displayNameOf(spec),
+        modelDisplayName: modelLabelWithBadge(model?.displayName ?? spec.model, model?.badge),
         current:
           binding && provider
             ? {
@@ -390,7 +472,91 @@ export function applyPlan(
       else delete roles[role]
     }
   }
-  return { ...settings, providers, roles }
+  // 没勾、用户手动绑着套餐可选模型的角色：新清单里不给了就退回默认，不留一个调不通的绑定
+  const kept = planModelEntries(manifest)
+    ? fallBackUnoffered(roles, planModelConfigs(manifest), specs)
+    : roles
+  return { ...settings, providers, roles: kept }
+}
+
+/**
+ * 绑在套餐来源上、清单里已经不给（或不再允许绑这个角色）的模型：那个角色退回套餐的默认模型。
+ *
+ * 例：用户手动选了可选模型 Box-Chat Beta，后来它下线了、或者换到了不含它的档位。
+ * 只在这种时候换，别的情况一律不替用户换模型。嵌入不退（换模型要重建知识库，走 deprecation 提示）；
+ * 清单里这个角色没有默认模型的不动（那是套餐不再给这个角色，见 releaseDroppedRoles）。
+ * 没变化时原样返回同一个对象。
+ */
+function fallBackUnoffered(
+  roles: RoleBindings,
+  configs: Map<ProviderKind, Map<string, ModelConfig>>,
+  specs: Partial<Record<ModelRole, PlanRoleSpec>>
+): RoleBindings {
+  let next = roles
+  for (const role of MODEL_ROLES) {
+    const binding = roles[role]
+    const spec = specs[role]
+    if (!binding || !spec || role === 'embedding' || !isPlanBinding(binding)) continue
+    const model = configs.get(ROLE_KIND[role])?.get(binding.modelId)
+    if (model && modelAllowsRole(model, role)) continue
+    if (next === roles) next = { ...roles }
+    next[role] = { providerId: planProviderIdOf(role), modelId: spec.model, source: 'plan' }
+  }
+  return next
+}
+
+/**
+ * 清单刷新时，套餐来源的模型列表跟清单 `models` 对齐：服务端新加的模型（比如可选的经济线）
+ * 不用重新导入就出现在选择列表里，下线的从列表里拿掉；绑着下线模型的角色先退回默认（fallBackUnoffered）。
+ *
+ * 只动已经导入了的那几类来源：哪一类交给套餐是用户在导入预览里定的。
+ * 只在清单有 `models`、订阅生效时做：旧服务端没有这个字段（照旧不增不删，见 refreshPlanModels），
+ * 订阅失效时清单什么都不给，那不是「下线了」。退不回去、还有角色绑着的（嵌入）留着，不断开那个角色。
+ * 没变化时原样返回同一个对象。
+ */
+export function syncPlanModels(
+  settings: AiProviderSettings,
+  manifest: CreatorPlanManifest
+): AiProviderSettings {
+  if (!planModelEntries(manifest) || !isLivePlan(manifest)) return settings
+  const configs = planModelConfigs(manifest)
+  const roles = fallBackUnoffered(settings.roles, configs, planRoleSpecs(manifest))
+  const bound = new Set(
+    Object.values(roles).map((binding) => binding && `${binding.providerId}\n${binding.modelId}`)
+  )
+  let changed = roles !== settings.roles
+  const providers = settings.providers.map((provider) => {
+    const offered = isPlanProvider(provider.id) ? configs.get(provider.kind) : undefined
+    if (!offered) return provider
+    const current = new Map(provider.models.map((model) => [model.id, model]))
+    const models = [
+      ...[...offered.values()].map((model) => current.get(model.id) ?? model),
+      ...provider.models.filter(
+        (model) => !offered.has(model.id) && bound.has(`${provider.id}\n${model.id}`)
+      )
+    ]
+    const same =
+      models.length === provider.models.length &&
+      models.every((model, index) => model === provider.models[index])
+    if (same) return provider
+    changed = true
+    return { ...provider, models }
+  })
+  return changed ? { ...settings, providers, roles } : settings
+}
+
+/**
+ * 这个套餐模型是不是「失败不扣费」的（清单 `models[].free_on_failure`）。
+ * 对话那一路据此在 `upstream_unavailable` 时自动重试一次，再失败提示换回默认模型
+ */
+export function isFreeOnFailureModel(
+  settings: Pick<AiProviderSettings, 'providers'>,
+  providerId: string,
+  modelId: string
+): boolean {
+  if (!isPlanProvider(providerId)) return false
+  const provider = settings.providers.find((item) => item.id === providerId)
+  return provider?.models.find((model) => model.id === modelId)?.freeOnFailure === true
 }
 
 /**
@@ -512,19 +678,15 @@ export function releaseDroppedRoles(
  *
  * 只改已有的模型，不增不删：增删角色是用户在「重新导入」里做的决定；
  * 订阅失效时清单的 roles 全是 null，这里要是跟着删，来源一没，连接也就没了。
- * 唯一的口子是订阅生效、套餐明确不再给某个角色，见 releaseDroppedRoles。
+ * 口子有两个，都只在订阅生效时开：套餐明确不再给某个角色（releaseDroppedRoles），
+ * 清单 `models` 增删了模型（syncPlanModels）。
  * 没变化时原样返回同一个对象，调用方据此跳过写盘。
  */
 export function refreshPlanModels(
   settings: AiProviderSettings,
   manifest: CreatorPlanManifest
 ): AiProviderSettings {
-  const bySpec = new Map(
-    (Object.entries(planRoleSpecs(manifest)) as [ModelRole, PlanRoleSpec][]).map(([role, spec]) => [
-      spec.model,
-      toModelConfig(role, spec)
-    ])
-  )
+  const bySpec = planModelsById(manifest)
   let changed = false
   const providers = settings.providers.map((provider) => {
     if (!isPlanProvider(provider.id)) return provider
@@ -574,7 +736,7 @@ export function migrateRetiredModels(
     const hit = deprecations.find((d) => d.model === binding.modelId)
     if (!hit || hit.replaced_by !== spec.model) continue
     roles[role] = { ...binding, modelId: spec.model }
-    added.set(spec.model, toModelConfig(role, spec))
+    added.set(spec.model, planModelsById(manifest).get(spec.model) ?? toModelConfig(role, spec))
   }
   if (added.size === 0) return settings
 

@@ -288,6 +288,51 @@ describe('调度包装', () => {
     })
   })
 
+  describe('失败不扣费的套餐模型线路全挂（503 upstream_unavailable）', () => {
+    const busy: AssistantMessageEvent = {
+      type: 'error',
+      reason: 'error',
+      error: message({
+        stopReason: 'error',
+        errorMessage: '503 {"error":{"code":"upstream_unavailable","message":"线路暂时不可用"}}'
+      })
+    }
+    const wrapFree = (inner: StreamFn, free: boolean): StreamFn => {
+      const limiter = new AdaptiveLimiter(fast)
+      return pacedStreamFn(inner, { limiterFor: () => limiter, freeOnFailure: () => free })
+    }
+
+    it('只重发一次，再失败把原文交出去（不包成「扛不住」）', async () => {
+      let calls = 0
+      const paced = wrapFree(() => {
+        calls++
+        return scripted([busy])
+      }, true)
+      const types = await collect(await paced(model, normalizeContext({ messages: [] })))
+      expect(calls).toBe(2)
+      expect(types).toEqual([`error:${busy.type === 'error' ? busy.error.errorMessage : ''}`])
+    })
+
+    it('重发那一次成了：调用方只看到成功', async () => {
+      const plans = [[busy], ok]
+      const paced = wrapFree(() => scripted(plans.shift()!), true)
+      expect(await collect(await paced(model, normalizeContext({ messages: [] })))).toEqual([
+        'start',
+        'done'
+      ])
+    })
+
+    it('别的模型的 503 照旧按过载重发到头', async () => {
+      let calls = 0
+      const paced = wrapFree(() => {
+        calls++
+        return scripted([busy])
+      }, false)
+      await collect(await paced(model, normalizeContext({ messages: [] })))
+      expect(calls).toBe(fast.maxRetries + 1)
+    })
+  })
+
   it('用户停下：不重发', async () => {
     const controller = new AbortController()
     let calls = 0

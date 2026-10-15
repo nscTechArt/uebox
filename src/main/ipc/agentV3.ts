@@ -2317,7 +2317,7 @@ export function registerAgentV3IPC(): void {
       emit('agent-v3:goal-state', { sessionId })
       await prepareTeam(ctx, options, emit)
       run.controller.signal.throwIfAborted()
-      const { agent, selection, tools, allTools } = await createUnrealAgent(ctx)
+      const { agent, selection, tools, allTools, runtime } = await createUnrealAgent(ctx)
       run.agent = agent
       run.selection = selection
       run.controller.signal.throwIfAborted()
@@ -2350,13 +2350,15 @@ export function registerAgentV3IPC(): void {
       // 插话回执顺手给影子队列销号：读进上下文的那条就撤不回来了
       const bridge = createEventBridge(sender, sessionId, {
         onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
-        riskOf: callRiskOf(allTools)
+        riskOf: callRiskOf(allTools),
+        freeOnFailure: runtime.freeOnFailure
       })
       // 连接中途被掐断时自动「继续尝试」，见 `core/autoResume.ts`。
       // 失败事件经它转交事件桥：决定续跑的那次，界面不会先看到一张失败卡片
       const autoResume = createAutoResume({
         signal: run.controller.signal,
-        persistent: await persistentAutoResumeEnabled()
+        persistent: await persistentAutoResumeEnabled(),
+        freeOnFailure: runtime.freeOnFailure
       })
       ctx.autoResumeAttempt = () => autoResume.attempts
       ctx.onModelRetry = (info) => notifyModelRetry(sender, sessionId, info, autoResume.attempts)
@@ -2743,7 +2745,7 @@ export function registerAgentV3IPC(): void {
       run.controller.signal.throwIfAborted()
       // 续跑照样是工作室：团队、任务板、队员的记忆都在盘上，接着用
       await prepareTeam(ctx, options, emit)
-      const { agent, selection, allTools } = await createUnrealAgent(ctx)
+      const { agent, selection, allTools, runtime } = await createUnrealAgent(ctx)
       run.agent = agent
       run.selection = selection
       run.controller.signal.throwIfAborted()
@@ -2766,12 +2768,14 @@ export function registerAgentV3IPC(): void {
       // 插话回执顺手给影子队列销号：读进上下文的那条就撤不回来了
       const bridge = createEventBridge(sender, sessionId, {
         onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
-        riskOf: callRiskOf(allTools)
+        riskOf: callRiskOf(allTools),
+        freeOnFailure: runtime.freeOnFailure
       })
       // 同 execute：手动「继续尝试」这一轮里再断，同样自动接着跑
       const autoResume = createAutoResume({
         signal: run.controller.signal,
-        persistent: await persistentAutoResumeEnabled()
+        persistent: await persistentAutoResumeEnabled(),
+        freeOnFailure: runtime.freeOnFailure
       })
       ctx.autoResumeAttempt = () => autoResume.attempts
       ctx.onModelRetry = (info) => notifyModelRetry(sender, sessionId, info, autoResume.attempts)

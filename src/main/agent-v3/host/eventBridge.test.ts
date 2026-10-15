@@ -201,6 +201,36 @@ describe('projectEvent', () => {
     )
   })
 
+  // 失败不扣费的模型（Box-Chat Beta）线路全挂：提示稍后重试或换回默认模型；默认模型的 503 走通用文案
+  it('失败不扣费的套餐模型回 503 upstream_unavailable：planError 为 line_busy', () => {
+    const state = {
+      ...createProjectionState(),
+      freeOnFailure: (m: { provider: string; id: string }) => m.id === 'uebox-chat-beta'
+    }
+    const failure = (provider: string, model: string): AgentV3Event['payload'] =>
+      projectEvent(
+        {
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            provider,
+            model,
+            errorMessage: '503 {"error":{"code":"upstream_unavailable","message":"x"}}'
+          }
+        } as unknown as AgentEvent,
+        SID,
+        state
+      )[0]!.payload
+
+    expect(failure('creator-plan', 'uebox-chat-beta')).toMatchObject({
+      statusCode: 503,
+      planError: 'line_busy'
+    })
+    expect(failure('creator-plan', 'uebox-chat')).not.toHaveProperty('planError')
+  })
+
   it('报错但没给原因时也要发事件，附带兜底文案', () => {
     const events = project({
       type: 'message_end',

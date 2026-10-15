@@ -877,6 +877,10 @@ export default {
           title: 'Box Plan 授权失效',
           desc: 'Key 已被吊销或删除。请在「设置 → 模型」中重新连接。'
         },
+        line_busy: {
+          title: '线路繁忙',
+          desc: '已自动重试一次，本次失败不扣 Credits。请稍后重试，或换回默认模型。'
+        },
         manage: '管理订阅',
         reconnect: '重新连接'
       },

@@ -2,6 +2,7 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import {
   BUILTIN_BROWSER_PROVIDER_ID,
   ROLE_KIND,
+  modelAllowsRole,
   type CatalogEntry,
   type ModelConfig,
   type ModelRole,
@@ -46,8 +47,10 @@ export interface ModelOption {
   label: string
   /** 它所属 Provider 的用途。角色候选按这一位过滤 */
   kind: ProviderKind
-  /** 视觉是**唯一**还留在模型上的角色判据：同一个对话 Provider 下有的模型看得懂图，有的不行 */
+  /** 视觉是**唯一**还留在模型上的能力判据：同一个对话 Provider 下有的模型看得懂图，有的不行 */
   supportsVision: boolean
+  /** 模型只开放给这几个角色（套餐的可选模型，服务端定）。不写 = 不限 */
+  allowedRoles?: ModelRole[]
 }
 
 /**
@@ -64,7 +67,10 @@ export function filterModelOptionsForRole<T extends ModelOption>(
 ): T[] {
   // 用途对不上的一律不列。这一条替掉了以前那一排 supportsXxx 判断 ——
   // 「哪个模型能干这件事」现在由 Provider 的用途回答，不再逐个模型猜
-  const usable = options.filter((option) => option.kind === ROLE_KIND[role])
+  // 服务端说了只能接哪几个角色的（套餐可选模型），别的角色不列
+  const usable = options.filter(
+    (option) => option.kind === ROLE_KIND[role] && modelAllowsRole(option, role)
+  )
   // 视觉是唯一的例外：同一个对话 Provider 下，能力仍然逐模型不同
   if (role === 'vision') return usable.filter((option) => option.supportsVision)
   return usable

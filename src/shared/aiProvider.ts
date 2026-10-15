@@ -477,6 +477,35 @@ export interface ModelConfig {
    * 渲染层按它切段，主进程按它拦。放在模型上而不是另查清单缓存，是因为渲染层只读得到这份配置。
    */
   ttsMaxInputChars?: number
+  /**
+   * 名字旁的小标签（如「Beta」）。目前只有 Box Plan 写它：清单 `models[].badge` 原样搬过来，
+   * 界面原样显示，客户端不认识也不翻译 —— 标什么由服务端定。
+   */
+  badge?: string
+  /** 一句话说明，界面放在悬停提示里。来源同 `badge` */
+  description?: string
+  /**
+   * 这个模型只能绑到这几个角色。不写 = 不限（按来源用途过滤，见 `ROLE_KIND`）。
+   *
+   * 目前只有 Box Plan 写它（清单 `models[].roles`）：同一个对话来源下，可选的经济线
+   * 可能只开放给部分角色，绑到别的角色网关会拒。
+   */
+  allowedRoles?: ModelRole[]
+  /** 上游出错、流中断不扣费（清单 `models[].free_on_failure`）。主进程据此失败后自动重试一次 */
+  freeOnFailure?: boolean
+}
+
+/** 这个模型能不能绑到这个角色。没写 `allowedRoles` 的不限 */
+export function modelAllowsRole(
+  model: Pick<ModelConfig, 'allowedRoles'> | undefined,
+  role: ModelRole
+): boolean {
+  return !model?.allowedRoles || model.allowedRoles.includes(role)
+}
+
+/** 带标签的显示名：「Box-Music (Beta)」。界面上放不下小标签的地方（下拉框选中值、提示）用它 */
+export function modelLabelWithBadge(name: string, badge: string | undefined): string {
+  return badge ? `${name} (${badge})` : name
 }
 
 /**
@@ -643,6 +672,21 @@ export function applyRolePatch(roles: RoleBindings, patch: RoleBindingsPatch): R
 }
 
 /**
+ * 补丁里哪些角色绑到了不许绑的模型（模型写了 `allowedRoles` 而不含这个角色，见 `modelAllowsRole`）。
+ * 界面上的下拉本来就不列它们，走到这里的是过期的界面或手改的请求
+ */
+export function disallowedRoles(source: RoleBindingSource, patch: RoleBindingsPatch): ModelRole[] {
+  return (Object.entries(patch) as [ModelRole, ModelBinding | null][])
+    .filter(([role, binding]) => {
+      if (!binding) return false
+      const provider = source.providers.find((item) => item.id === binding.providerId)
+      const model = provider?.models.find((item) => item.id === binding.modelId)
+      return !modelAllowsRole(model, role)
+    })
+    .map(([role]) => role)
+}
+
+/**
  * 补丁里要设上的角色，落盘之后哪些没留住（指向的来源或模型已经不在了，被归一化丢掉）。
  * 不报出来的话渲染层当成存上了，下拉框照样显示选中的，重开设置页才发现没了
  */
@@ -764,13 +808,18 @@ export function defaultAgentBinding(roles: RoleBindings): ModelBinding | null {
  */
 export function isAgentBindingAvailable(
   source: {
-    providers: readonly { id: string; kind: ProviderKind; models: readonly { id: string }[] }[]
+    providers: readonly {
+      id: string
+      kind: ProviderKind
+      models: readonly Pick<ModelConfig, 'id' | 'allowedRoles'>[]
+    }[]
   },
   binding: ModelBinding
 ): boolean {
   const provider = source.providers.find((item) => item.id === binding.providerId)
   if (!provider || provider.kind !== ROLE_KIND.agent) return false
-  return provider.models.some((model) => model.id === binding.modelId)
+  const model = provider.models.find((item) => item.id === binding.modelId)
+  return !!model && modelAllowsRole(model, 'agent')
 }
 
 /** 发给渲染层的 provider 形态：不含任何密钥内容 */

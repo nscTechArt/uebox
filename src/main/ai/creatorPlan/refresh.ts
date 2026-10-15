@@ -3,7 +3,8 @@
  *
  * 带上次的 ETag 发 If-None-Match，没变服务端回 304，用缓存的那份；变了就把新清单缓存下来。
  * 不管 200 还是 304，都拿这份清单和配置对一遍账：更新套餐来源里各模型的能力
- * （`refreshPlanModels`），停用的对话模型换成接替者（`migrateRetiredModels`），把套餐不再给的
+ * （`refreshPlanModels`），停用的对话模型换成接替者（`migrateRetiredModels`），模型列表跟清单
+ * `models` 对齐（`syncPlanModels`：新加的可选模型出现、下线的拿掉），把套餐不再给的
  * 角色还给用户（`releaseDroppedRoles`：还原成导入前的绑定），不再带的存储也还原
  * （`releaseDroppedStorage`）。配置已经一致时一次盘都不写。
  * 401 记成「授权失效」，卡片据此让用户重新连接。
@@ -19,7 +20,8 @@ import {
   isPlanProvider,
   migrateRetiredModels,
   refreshPlanModels,
-  releaseDroppedRoles
+  releaseDroppedRoles,
+  syncPlanModels
 } from './apply'
 import { CreatorPlanError, fetchManifestIfChanged } from './client'
 import { readPlanState, updatePlanState } from './planState'
@@ -87,7 +89,7 @@ export async function refreshPlan(fetchImpl: typeof fetch = fetch): Promise<Refr
       const cached = manifest
       await updateSettings((settings) =>
         releaseDroppedRoles(
-          migrateRetiredModels(refreshPlanModels(settings, cached), cached),
+          syncPlanModels(migrateRetiredModels(refreshPlanModels(settings, cached), cached), cached),
           cached,
           originals
         )

@@ -41,6 +41,8 @@
 
 import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core'
 
+import { isPlanUpstreamUnavailable } from '../../../shared/creatorPlan'
+import { classifyProviderError } from '../host/providerError'
 import { planResume, type ResumePlan } from './resume'
 import { restoreTranscript, withoutSystemMessages } from './systemMessages'
 
@@ -160,6 +162,23 @@ export interface AutoResumeDeps {
   delay?: (ms: number, signal: AbortSignal) => Promise<void>
   /** 持续模式，见文件头。开着时 `delaysMs` 不用 */
   persistent?: boolean
+  /**
+   * 「失败不扣费」的套餐模型（见 `AgentModelRuntime.freeOnFailure`）。它的 `upstream_unavailable`
+   * 卡死重发那层已经重试过一次（requestGate.ts），这里不再接：协议要的是重试一次就告诉用户，
+   * 让用户决定等一会儿还是换回默认模型，而不是持续模式里再转半小时
+   */
+  freeOnFailure?: (model: { provider: string; id: string }) => boolean
+}
+
+/** 失败不扣费的模型线路全挂了：已经重试过，交给用户 */
+function isSettledLineBusy(
+  deps: AutoResumeDeps,
+  message: { provider?: string; model?: string; errorMessage?: string }
+): boolean {
+  if (!message.provider || !message.model) return false
+  if (!deps.freeOnFailure?.({ provider: message.provider, id: message.model })) return false
+  const { statusCode, code } = classifyProviderError(message.errorMessage ?? '')
+  return isPlanUpstreamUnavailable(statusCode, code)
 }
 
 /**
@@ -193,7 +212,13 @@ export function createAutoResume(deps: AutoResumeDeps): AutoResume {
 
   const decide = (event: AgentEvent): boolean => {
     if (event.type !== 'message_end') return false
-    const message = event.message as { role?: string; stopReason?: string; errorMessage?: string }
+    const message = event.message as {
+      role?: string
+      stopReason?: string
+      errorMessage?: string
+      provider?: string
+      model?: string
+    }
     if (message.role !== 'assistant') return false
     if (message.stopReason !== 'error') {
       // 持续模式数的是「连续」失败：回成一次话就清零，长任务里零星断几次不会攒到上限
@@ -201,7 +226,10 @@ export function createAutoResume(deps: AutoResumeDeps): AutoResume {
       return false
     }
     pending =
-      used < delays.length && !deps.signal.aborted && retryable(message.errorMessage)
+      used < delays.length &&
+      !deps.signal.aborted &&
+      retryable(message.errorMessage) &&
+      !isSettledLineBusy(deps, message)
         ? (message.errorMessage ?? '')
         : undefined
     return pending !== undefined

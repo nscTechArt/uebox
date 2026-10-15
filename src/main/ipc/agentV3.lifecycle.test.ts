@@ -155,7 +155,14 @@ const created = {
   // 改动台账按**全量**工具名判「这一步算不算改了东西」，所以 createUnrealAgent
   // 现在同时给这一份；替身漏掉它，`/goal` 那几条会话装配当场炸
   allTools: [],
-  selection: { providerId: 'faux', modelId: 'test', role: 'agent', model: { contextWindow: 10000 } }
+  selection: {
+    providerId: 'faux',
+    modelId: 'test',
+    role: 'agent',
+    model: { contextWindow: 10000 }
+  },
+  // 自动续跑和报错提示按它认「失败不扣费」的套餐模型
+  runtime: { freeOnFailure: () => false }
 }
 
 function invoke(channel: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {

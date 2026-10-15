@@ -28,6 +28,7 @@ import {
   findVisionCapableRole,
   missingForVoicePipeline,
   MODEL_ROLES,
+  modelLabelWithBadge,
   type CatalogEntry,
   type ModelRole
 } from '@core/shared/aiProvider'
@@ -232,6 +233,9 @@ function keyStatus(provider: (typeof providers.value)[number]): {
 // ==================== 角色绑定 ====================
 interface RoleModelOption extends ModelOption {
   modelName: string
+  /** 名字旁的小标签、悬停说明：套餐清单给的，原样显示 */
+  badge?: string
+  description?: string
 }
 
 interface RoleModelGroup {
@@ -260,10 +264,13 @@ const modelGroups = computed<RoleModelGroup[]>(() =>
       const modelName = model.displayName || model.id
       return {
         value: `${provider.id}::${model.id}`,
-        label: modelOptionLabel(provider.displayName, modelName),
+        label: modelOptionLabel(provider.displayName, modelLabelWithBadge(modelName, model.badge)),
         modelName,
+        badge: model.badge,
+        description: model.description,
         kind: provider.kind,
-        supportsVision: model.supportsVision === true
+        supportsVision: model.supportsVision === true,
+        allowedRoles: model.allowedRoles
       }
     })
   }))
@@ -561,13 +568,16 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
                 :label="option.label"
                 :aria-label="option.label"
               >
-                <span
-                  class="model-option-name"
-                  :title="option.label"
-                  @mouseenter="scrollOptionTextToEnd"
-                  @mouseleave="resetOptionText"
-                >
-                  {{ option.modelName }}
+                <span class="model-option-row">
+                  <span
+                    class="model-option-name"
+                    :title="option.description || option.label"
+                    @mouseenter="scrollOptionTextToEnd"
+                    @mouseleave="resetOptionText"
+                  >
+                    {{ option.modelName }}
+                  </span>
+                  <span v-if="option.badge" class="model-option-badge">{{ option.badge }}</span>
                 </span>
               </a-select-option>
             </a-select-opt-group>
@@ -681,6 +691,26 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
 .model-option-name {
   display: block;
   min-width: 0;
+}
+
+.model-option-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 套餐清单给的标签（如「Beta」），样式同侧栏的 beta-tag */
+.model-option-badge {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {

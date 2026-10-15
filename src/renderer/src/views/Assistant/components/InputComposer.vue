@@ -545,9 +545,13 @@
                       :class="{ active: option.key === selectedAgentModelKey }"
                       role="menuitemradio"
                       :aria-checked="option.key === selectedAgentModelKey"
+                      :title="option.description"
                       @click="selectAgentModel(option)"
                     >
                       <span class="agent-model-option-name">{{ option.modelName }}</span>
+                      <span v-if="option.badge" class="agent-model-option-badge">
+                        {{ option.badge }}
+                      </span>
                       <span
                         v-if="option.modelName !== option.modelId"
                         class="mode-option-desc agent-model-option-id"
@@ -3857,6 +3861,26 @@ onMounted(() => {
   white-space: nowrap;
   font-size: var(--font-size-sm);
   font-weight: 500;
+}
+
+/* 有标签时标签紧跟名字，空白让给标签后面 */
+.agent-model-option-name:has(+ .agent-model-option-badge) {
+  flex: 0 1 auto;
+}
+
+/* 套餐清单给的标签（如「Beta」），样式同侧栏的 beta-tag */
+.agent-model-option-badge {
+  flex: none;
+  margin-right: auto;
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
 }
 
 .agent-model-option-id {

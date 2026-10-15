@@ -526,6 +526,18 @@ describe('filterModelOptionsForRole', () => {
     expect(filterModelOptionsForRole([opaque], 'embedding')).toEqual([opaque])
     expect(filterModelOptionsForRole([opaque], 'chat')).toEqual([])
   })
+
+  // 套餐的可选模型由服务端说能接哪几个角色（清单 models[].roles），别的角色不列
+  it('模型写了能接的角色：只出现在那几个角色的下拉里', () => {
+    const beta = option('creator-plan::uebox-chat-beta', 'chat', {
+      supportsVision: true,
+      allowedRoles: ['chat', 'agent']
+    })
+    expect(filterModelOptionsForRole([beta], 'chat')).toEqual([beta])
+    expect(filterModelOptionsForRole([beta], 'agent')).toEqual([beta])
+    expect(filterModelOptionsForRole([beta], 'summary')).toEqual([])
+    expect(filterModelOptionsForRole([beta], 'vision')).toEqual([])
+  })
 })
 
 /**

@@ -15,6 +15,7 @@ import {
 } from '@earendil-works/pi-ai'
 
 import { isOpenCodeEndpoint, openCodeHeaders } from '../../ai/opencode'
+import { isFreeOnFailureModel } from '../../ai/creatorPlan/apply'
 import { readSettings } from '../../ai/store'
 import {
   ModelNotConfiguredError,
@@ -372,6 +373,11 @@ export interface AgentModelRuntime {
    * 系统提示词按它说「你看得到」还是「你看不到」
    */
   toolImagesVisible: boolean
+  /**
+   * 这个模型是不是「失败不扣费」的套餐模型（清单 `models[].free_on_failure`）。
+   * 卡死重发、自动续跑、报错提示据此对它的 `upstream_unavailable` 只重试一次（见 requestGate.ts）
+   */
+  freeOnFailure: (model: { provider: string; id: string }) => boolean
 }
 
 /**
@@ -638,6 +644,7 @@ export async function resolveAgentModel(
     },
     models,
     summaryModel: selectModel(settings, models, 'summary')?.model ?? selection.model,
-    toolImagesVisible: seesImages(primary.model) || visionStandIn(primary) !== undefined
+    toolImagesVisible: seesImages(primary.model) || visionStandIn(primary) !== undefined,
+    freeOnFailure: (model) => isFreeOnFailureModel(settings, model.provider, model.id)
   }
 }

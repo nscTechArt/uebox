@@ -200,7 +200,8 @@ beforeEach(() => {
       modelId: 'test',
       role: 'agent',
       model: { contextWindow: 1000 }
-    }
+    },
+    runtime: { freeOnFailure: () => false }
   })
   mock.load.mockResolvedValue(messages)
   mock.append.mockResolvedValue(undefined)
