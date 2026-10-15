@@ -64,8 +64,26 @@ function limitsFor(
   }
 }
 
+/**
+ * 查目录时依次试哪几个 provider id。
+ *
+ * 先试自己的 id；走 Anthropic 协议的再试一次 `anthropic`。中转网关、加第二个
+ * Claude 渠道时自动起的 `anthropic-4` 这类 id 两本目录都查不到，而 Claude 的
+ * 思考方式是型号的事，跟从哪条渠道发出去无关 —— 查不到时 Sonnet 5.5 就退回
+ * 老式思考预算，对面整轮 400「requires adaptive thinking」（2026-10-15）。
+ */
+function catalogIdsFor(provider: ProviderConfig): string[] {
+  return provider.protocol === 'anthropic-messages' && provider.id !== 'anthropic'
+    ? [provider.id, 'anthropic']
+    : [provider.id]
+}
+
 function catalogModel(provider: ProviderConfig, model: ModelConfig): ModelConfig | undefined {
-  return findCatalogEntry(provider.id)?.models.find((item) => item.id === model.id)
+  for (const id of catalogIdsFor(provider)) {
+    const hit = findCatalogEntry(id)?.models.find((item) => item.id === model.id)
+    if (hit) return hit
+  }
+  return undefined
 }
 
 /**
@@ -80,7 +98,8 @@ function catalogModel(provider: ProviderConfig, model: ModelConfig): ModelConfig
  * 列出模型根本没有的 minimal / medium，又漏掉它真有的 max。
  *
  * 按 (provider id, model id) 对齐 —— 我们的目录 id 与 pi 的同源，能对上。
- * 用户自建的网关对不上，那就没有这张表，回落到缺省行为。
+ * 用户自建的网关对不上，那就没有这张表，回落到缺省行为（Anthropic 协议例外，
+ * 见 `catalogIdsFor`）。
  */
 function builtinModel(provider: ProviderConfig, model: ModelConfig): Model<Api> | undefined {
   // getBuiltinModel 的入参是字面量联合类型，动态查得放宽；查不到会回 undefined
@@ -88,7 +107,11 @@ function builtinModel(provider: ProviderConfig, model: ModelConfig): Model<Api> 
     providerId: string,
     modelId: string
   ) => Model<Api> | undefined
-  return lookup(provider.id, model.id)
+  for (const id of catalogIdsFor(provider)) {
+    const hit = lookup(id, model.id)
+    if (hit) return hit
+  }
+  return undefined
 }
 
 /**

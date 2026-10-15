@@ -1764,7 +1764,12 @@ const THINKING_OVERRIDES = {
     // Opus 5.5 的思考关不掉：发 `thinking: disabled` 在任何档位都是 400，
     // 所以 `off` 写成不存在（pi 给 Fable 5 也是这么标的）。
     // https://platform.claude.com/docs/en/build-with-claude/effort (2026-09-23)
-    'claude-opus-5-5': { adaptive: true, thinking: { off: null, xhigh: 'xhigh', max: 'max' } }
+    'claude-opus-5-5': { adaptive: true, thinking: { off: null, xhigh: 'xhigh', max: 'max' } },
+    // Sonnet 5.5 只认自适应思考：老式预算 400「requires adaptive thinking or
+    // thinking.type=between_tools」；`disabled` 也不收（关思考要发 between_tools，
+    // pi 没有这一档），所以 `off` 同样写成不存在。
+    // https://platform.claude.com/docs/en/build-with-claude/effort (2026-10-15)
+    'claude-sonnet-5-5': { adaptive: true, thinking: { off: null, xhigh: 'xhigh', max: 'max' } }
   },
 
   // 2026-09-16: https://api-docs.deepseek.com/guides/thinking_mode/

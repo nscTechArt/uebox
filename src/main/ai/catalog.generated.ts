@@ -2880,6 +2880,12 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "supportsVision": true,
         "supportsTools": true,
         "supportsReasoning": true,
+        "thinkingLevelMap": {
+          "off": null,
+          "xhigh": "xhigh",
+          "max": "max"
+        },
+        "adaptiveThinking": true,
         "contextWindow": 1000000,
         "maxOutputTokens": 128000,
         "cost": {
