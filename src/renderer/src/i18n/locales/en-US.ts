@@ -6071,6 +6071,10 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       'This message was sent from "{snapshotProject}", but the current turn is working in "{runProject}". It wasn\'t added and is back in the input box.',
     steerProjectMismatchQueued:
       'This message was sent from "{snapshotProject}", but the current turn is working in "{runProject}". It will run on "{snapshotProject}" after this turn finishes.',
+    steerNoProjectRestored:
+      'This message was sent from "{snapshotProject}", but the current turn isn\'t connected to a project. It wasn\'t added and is back in the input box.',
+    steerNoProjectQueued:
+      'This message was sent from "{snapshotProject}", but the current turn isn\'t connected to a project. It will run on "{snapshotProject}" after this turn finishes.',
     steerOtherProject: 'another project',
     queueAction: 'Queue',
     queueCancel: 'Remove from queue',

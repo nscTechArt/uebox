@@ -5901,6 +5901,10 @@ export default {
       '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮在「{runProject}」上，没有送进去，内容已放回输入框',
     steerProjectMismatchQueued:
       '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮在「{runProject}」上。这一轮结束后，它会按「{snapshotProject}」发出',
+    steerNoProjectRestored:
+      '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮未连接工程，没有送进去，内容已放回输入框',
+    steerNoProjectQueued:
+      '这条插话是在「{snapshotProject}」下发的，正在进行的这一轮未连接工程。这一轮结束后，它会按「{snapshotProject}」发出',
     steerOtherProject: '另一个工程',
     queueAction: '排队',
     queueCancel: '取消此条',
