@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { findFFmpeg } from '../ffmpegPath'
+import { chromiumContactSheets } from './chromiumFrames'
 
 /** 一张联系表放几格。4×6 = 24 格，1080p 竖屏缩到 192 宽仍能看清构图 */
 const SHEET_COLUMNS = 4
@@ -55,6 +56,8 @@ export interface VideoFramesResult {
   fps?: number
   /** 视频时长（秒）。探不出来时缺省 */
   durationSec?: number
+  /** 每格左下角标了时间（Chromium 那条会标，FFmpeg 那条不标） */
+  labeled?: boolean
   error?: string
 }
 
@@ -201,16 +204,44 @@ export async function cleanupContactSheets(sheetPaths: string[]): Promise<void> 
  * 必须和联系表一起发 —— 模型拿到一张网格图，如果不知道这是「一段视频按
  * 时间顺序抽的帧」，很可能当成一堆无关截图去解读。
  */
-export function describeContactSheets(result: VideoFramesResult, fileName: string): string {
+export function describeContactSheets(
+  result: VideoFramesResult,
+  fileName: string,
+  /** 为什么没让视频模型看。默认是没配 */
+  reason = '没有配置能看视频的模型'
+): string {
   const interval = result.fps ? (1 / result.fps).toFixed(1) : '约 1'
   const duration = result.durationSec ? `${result.durationSec.toFixed(1)} 秒` : '未知时长'
   return [
-    `【视频 ${fileName}】没有配置能看视频的模型，改为抽帧给你看。`,
+    `【视频 ${fileName}】${reason}，改为抽帧给你看。`,
     `时长 ${duration}，按每 ${interval} 秒一帧抽出，拼成 ${result.sheetPaths?.length ?? 0} 张联系表，`,
-    `每张按**从左到右、从上到下**的顺序排列时间。`,
+    `每张按**从左到右、从上到下**的顺序排列时间${result.labeled ? '，每格左下角标着它在片中的时间' : ''}。`,
     '',
     '注意这不是在看视频：**没有声音，也看不到帧与帧之间的运动**。',
     '快速剪辑、镜头运动、转场细节都可能丢在两帧之间。',
     '涉及节奏、音效、运镜的判断请说明这是基于静帧的推测，不要当成看过原片。'
   ].join('\n')
+}
+
+/**
+ * 抽帧的总入口：先用盒子自带的 Chromium，解不开的格式再交给用户装的 FFmpeg。
+ *
+ * 两条都不通时只给一句用户能照做的话 —— 转成 MP4 或配视频模型，
+ * 不叫用户去装命令行工具，也不叫用户自己截图。
+ */
+export async function extractVideoFrames(filePath: string): Promise<VideoFramesResult> {
+  const viaChromium = await chromiumContactSheets(filePath)
+  if (viaChromium.success) return viaChromium
+  if (!(await findFFmpeg())) {
+    return {
+      success: false,
+      error:
+        `盒子解不开这个视频（${viaChromium.error}）。` +
+        '转成 MP4（H.264）再发，或到 设置 → 模型 给一个模型勾上「视频」。'
+    }
+  }
+  const viaFFmpeg = await extractVideoContactSheets(filePath)
+  return viaFFmpeg.success
+    ? viaFFmpeg
+    : { success: false, error: `抽帧失败：${viaChromium.error}；${viaFFmpeg.error}` }
 }

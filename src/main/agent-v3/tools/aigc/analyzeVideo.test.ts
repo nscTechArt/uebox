@@ -1,4 +1,8 @@
 /** @vitest-environment node */
+import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -10,6 +14,21 @@ const analyzeVideoSource = vi.fn()
 
 vi.mock('../../../services/videoAnalysis/videoSourceAnalysis', () => ({
   analyzeVideoSource: (...args: unknown[]) => analyzeVideoSource(...args)
+}))
+
+const cleanupContactSheets = vi.fn()
+vi.mock('../../../services/videoAnalysis/videoFrameFallback', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  cleanupContactSheets: (...args: unknown[]) => cleanupContactSheets(...args)
+}))
+
+vi.mock('../../../services/videoAnalysis/videoFileAnalysis', () => ({
+  NO_VIDEO_MODEL_HINT: 'no-video-model-hint'
+}))
+
+vi.mock('../contextImage', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  compressForContext: async () => ({ data: 'c2hlZXQ=', mimeType: 'image/jpeg' })
 }))
 
 import { createAnalyzeVideoTool } from './analyzeVideo'
@@ -88,4 +107,71 @@ it('接受 B 站链接并传给公共入口', async () => {
       prompt: '总结'
     })
   )
+})
+
+/**
+ * 真机反馈：视频模型没看成，agent 自己去 shell 抽帧落进 WSL，最后请用户补截图。
+ * 这一组守的是：看不成时工具自己交回关键帧，并如实说明这是静帧。
+ */
+describe('视频模型看不成时改看关键帧', () => {
+  const withSheet = async (fn: (sheet: string) => Promise<void>): Promise<void> => {
+    const dir = await fs.mkdtemp(path.join(tmpdir(), 'uebox-sheet-test-'))
+    const sheet = path.join(dir, 'sheet_1.jpg')
+    await fs.writeFile(sheet, 'jpg')
+    try {
+      await fn(sheet)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('要求抽帧兜底', async () => {
+    await run({ video_path: 'C:/a.mp4' })
+    expect(analyzeVideoSource.mock.calls[0][0]).toMatchObject({ framesFallback: true })
+  })
+
+  it('联系表作为图片交回去，说清没看成的原因和静帧的局限，读完就删', async () => {
+    await withSheet(async (sheet) => {
+      analyzeVideoSource.mockResolvedValue({
+        success: true,
+        model: 'x:y',
+        error: 'HTTP 400: video_url not supported',
+        frames: {
+          success: true,
+          sheetPaths: [sheet],
+          frameCount: 20,
+          fps: 2,
+          durationSec: 10,
+          labeled: true
+        }
+      })
+
+      const result = (await run({ video_path: 'C:/雨天参考.mp4' })) as {
+        content: { type: string }[]
+      }
+
+      expect(result.content.filter((part) => part.type === 'image')).toHaveLength(1)
+      const text = textOf(result)
+      expect(text).toContain('雨天参考.mp4')
+      expect(text).toContain('video_url not supported')
+      expect(text).toContain('没有声音')
+      expect(text).toContain('左下角标着')
+      expect(detailsOf(result).frames).toBe(true)
+      expect(cleanupContactSheets).toHaveBeenCalledWith([sheet])
+    })
+  })
+
+  it('没配视频模型时也看关键帧，并提示去哪配能连声音一起看', async () => {
+    await withSheet(async (sheet) => {
+      analyzeVideoSource.mockResolvedValue({
+        success: true,
+        error: 'no-video-model-hint',
+        frames: { success: true, sheetPaths: [sheet], frameCount: 20, fps: 2 }
+      })
+
+      const text = textOf(await run({ video_path: 'C:/a.mp4' }))
+      expect(text).toContain('没有配置能看视频的模型')
+      expect(text).toContain('设置 → 模型')
+    })
+  })
 })

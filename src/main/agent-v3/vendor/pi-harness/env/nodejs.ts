@@ -186,14 +186,27 @@ async function runCommand(
   })
 }
 
+/**
+ * PATH 上的 bash。Windows 上跳过 `System32\bash.exe`：那是 WSL 入口，命令跑进 Linux，
+ * 看不到 Windows 上装的工具，报错还是 UTF-16 乱码 —— 真机上 agent 想抽视频帧就是落进它失败的。
+ * 只有 WSL 时宁可没有 shell：shell 工具不注册，agent 用不依赖 shell 的工具干活。
+ * 用户显式配置的 shellPath 不受这条限制。
+ */
 async function findBashOnPath(): Promise<string | null> {
   const result =
     process.platform === 'win32'
       ? await runCommand('where', ['bash.exe'], 5000)
       : await runCommand('which', ['bash'], 5000)
   if (result.status !== 0 || !result.stdout) return null
-  const firstMatch = result.stdout.trim().split(/\r?\n/)[0]
-  return firstMatch && (await pathExists(firstMatch)) ? firstMatch : null
+  const matches = result.stdout
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !(process.platform === 'win32' && isLegacyWslBashPath(line)))
+  for (const match of matches) {
+    if (await pathExists(match)) return match
+  }
+  return null
 }
 
 interface ShellConfig {

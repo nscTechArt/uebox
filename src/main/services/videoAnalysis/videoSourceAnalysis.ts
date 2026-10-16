@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 
 import { analyzeLocalAudioFile } from './audioFileAnalysis'
 import { analyzeLocalVideoFile, type VideoFileAnalysisResult } from './videoFileAnalysis'
+import { extractVideoFrames, type VideoFramesResult } from './videoFrameFallback'
 import {
   BILIBILI_PLAYBACK_HEADERS,
   isValidBilibiliUrl,
@@ -54,12 +55,53 @@ async function downloadToTempFile(
   }
 }
 
+export interface VideoSourceAnalysisResult extends VideoFileAnalysisResult {
+  /**
+   * 视频模型没看成、改抽了帧。只在调用方要了 `framesFallback` 时出现，
+   * 这时 `success` 为 true、`error` 是视频模型没看成的原因。联系表由调用方读完删掉
+   */
+  frames?: VideoFramesResult
+}
+
+/**
+ * 让视频模型看一个本地视频文件；`framesFallback` 时看不成就抽帧。
+ *
+ * 抽帧必须在这里做而不是交给调用方：远端视频下到的是临时文件，返回之前就删了。
+ */
+async function analyzeVideoFile(
+  filePath: string,
+  args: { prompt?: string; onProgress?: (note: string) => void; framesFallback?: boolean }
+): Promise<VideoSourceAnalysisResult> {
+  const analyzed = await analyzeLocalVideoFile({
+    filePath,
+    prompt: args.prompt,
+    onProgress: args.onProgress
+  })
+  if (analyzed.success || !args.framesFallback) return analyzed
+  // 文件本身不在，抽帧也是白抽，原样报「找不到」
+  if (!(await fs.stat(filePath).catch(() => null))) return analyzed
+
+  args.onProgress?.('视频模型没看成，改看关键帧…')
+  const frames = await extractVideoFrames(filePath)
+  if (!frames.success) {
+    return { ...analyzed, error: [analyzed.error, frames.error].filter(Boolean).join('\n') }
+  }
+  return {
+    success: true,
+    ...(analyzed.model ? { model: analyzed.model } : {}),
+    error: analyzed.error,
+    frames
+  }
+}
+
 /** 本地文件、视频直链与平台页面共用的分析入口。 */
 export async function analyzeVideoSource(args: {
   source: string
   prompt?: string
   onProgress?: (note: string) => void
-}): Promise<VideoFileAnalysisResult> {
+  /** 视频模型没配或没看成时，改用抽帧联系表交回去。音频不适用 */
+  framesFallback?: boolean
+}): Promise<VideoSourceAnalysisResult> {
   const source = args.source.trim()
   if (!/^https?:\/\//i.test(source)) {
     // 音频走同一批模型，只是请求分片不同。放在这里分派，调用方不必先判类型
@@ -70,11 +112,7 @@ export async function analyzeVideoSource(args: {
         onProgress: args.onProgress
       })
     }
-    return analyzeLocalVideoFile({
-      filePath: source,
-      prompt: args.prompt,
-      onProgress: args.onProgress
-    })
+    return analyzeVideoFile(source, args)
   }
 
   try {
@@ -105,11 +143,7 @@ export async function analyzeVideoSource(args: {
     args.onProgress?.('正在下载视频…')
     const file = await downloadToTempFile(downloadUrl, headers, extension)
     try {
-      return await analyzeLocalVideoFile({
-        filePath: file,
-        prompt: args.prompt,
-        onProgress: args.onProgress
-      })
+      return await analyzeVideoFile(file, args)
     } finally {
       await fs.rm(file, { force: true }).catch(() => {})
     }

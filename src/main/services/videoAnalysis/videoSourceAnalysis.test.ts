@@ -1,12 +1,15 @@
 /** @vitest-environment node */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 
-const mocks = vi.hoisted(() => ({ local: vi.fn() }))
+const mocks = vi.hoisted(() => ({ local: vi.fn(), frames: vi.fn() }))
 vi.mock('./videoFileAnalysis', () => ({
   analyzeLocalVideoFile: mocks.local,
   NO_VIDEO_MODEL_HINT: '没有视频模型'
 }))
+vi.mock('./videoFrameFallback', () => ({ extractVideoFrames: mocks.frames }))
 import { analyzeVideoSource } from './videoSourceAnalysis'
 
 /** 远端分支会把响应体写进临时文件，用一段可读的假字节就够。 */
@@ -93,4 +96,59 @@ it('下载失败时给出明确错误，不留临时文件', async () => {
     error: expect.stringContaining('403')
   })
   expect(mocks.local).not.toHaveBeenCalled()
+})
+
+/** 建一个真实存在的临时视频文件，跑完删掉 */
+async function withVideo(name: string, fn: (file: string) => Promise<void>): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(tmpdir(), 'uebox-src-test-'))
+  const file = path.join(dir, name)
+  await fs.writeFile(file, 'x')
+  try {
+    await fn(file)
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+}
+
+/**
+ * 真机反馈：视频模型没看成，agent 只能自己去 shell 抽帧，落进 WSL 失败，最后请用户截图。
+ * 要了 framesFallback 就由这里抽帧交回去，用户不用做任何事。
+ */
+it('视频模型没看成时改抽帧，并带上没看成的原因', async () => {
+  await withVideo('rain.mp4', async (file) => {
+    mocks.local.mockResolvedValue({ success: false, model: 'x:y', error: 'HTTP 400: bad video' })
+    mocks.frames.mockResolvedValue({ success: true, sheetPaths: ['/tmp/s1.jpg'], frameCount: 20 })
+    expect(await analyzeVideoSource({ source: file, framesFallback: true })).toMatchObject({
+      success: true,
+      error: 'HTTP 400: bad video',
+      frames: { sheetPaths: ['/tmp/s1.jpg'] }
+    })
+    expect(mocks.frames).toHaveBeenCalledWith(file)
+  })
+})
+
+it('没要抽帧的调用方照旧拿到失败', async () => {
+  mocks.local.mockResolvedValue({ success: false, error: 'no model' })
+  expect(await analyzeVideoSource({ source: 'C:/video.mp4' })).toMatchObject({ success: false })
+  expect(mocks.frames).not.toHaveBeenCalled()
+})
+
+it('文件本身不在就不抽帧，原样报找不到', async () => {
+  mocks.local.mockResolvedValue({ success: false, error: 'not found: C:/nope.mp4' })
+  expect(await analyzeVideoSource({ source: 'C:/nope.mp4', framesFallback: true })).toMatchObject({
+    success: false,
+    error: 'not found: C:/nope.mp4'
+  })
+  expect(mocks.frames).not.toHaveBeenCalled()
+})
+
+it('抽帧也失败时两边的原因都说出来', async () => {
+  await withVideo('a.avi', async (file) => {
+    mocks.local.mockResolvedValue({ success: false, error: 'no model' })
+    mocks.frames.mockResolvedValue({ success: false, error: 'cannot decode' })
+    const result = await analyzeVideoSource({ source: file, framesFallback: true })
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('no model')
+    expect(result.error).toContain('cannot decode')
+  })
 })

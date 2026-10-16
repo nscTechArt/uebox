@@ -21,7 +21,7 @@ vi.mock('./videoAnalysis/audioFileAnalysis', () => ({
   analyzeLocalAudioFile: (...args: unknown[]) => analyzeLocalAudioFile(...args)
 }))
 vi.mock('./videoAnalysis/videoFrameFallback', () => ({
-  extractVideoContactSheets: (...args: unknown[]) => extractVideoContactSheets(...args),
+  extractVideoFrames: (...args: unknown[]) => extractVideoContactSheets(...args),
   cleanupContactSheets: vi.fn(),
   describeContactSheets: () => '【视频 clip.mp4】没有配置能看视频的模型，改为抽帧给你看。'
 }))

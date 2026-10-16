@@ -13,14 +13,30 @@
  * ## 边界
  *
  * 只有**用户显式勾了「视频」能力的模型**才做得了这件事，而且要那家的协议是
- * OpenAI Chat Completions 兼容或 Google Generative AI。没配就如实说去哪配，
- * 不去猜、不拿一个不支持的模型硬发。
+ * OpenAI Chat Completions 兼容或 Google Generative AI。不拿一个不支持的模型硬发。
+ *
+ * ## 看不成时改看关键帧
+ *
+ * 没配视频模型、或者它这次没看成（厂商拒收、超时……），用户要的仍然是「AI 看一眼」。
+ * 真机上这时 agent 只能自己去 shell 里找 ffmpeg，落进 WSL 失败，最后请用户「补几张截图」——
+ * 把盒子该干的活推回给了用户。所以这里直接抽帧拼联系表交回去（盒子自带 Chromium 解码，
+ * 不依赖用户装什么），并写明这是静帧：没有声音、看不到帧间运动。
  */
 
 import { z } from 'zod'
 
-import { defineTool, type UnrealAgentTool } from '../defineTool'
+import path from 'node:path'
+import { promises as fs } from 'node:fs'
+
+import { defineTool, type ToolOutcome, type UnrealAgentTool } from '../defineTool'
+import { CONTACT_SHEET_MAX_WIDTH, compressForContext } from '../contextImage'
+import { NO_VIDEO_MODEL_HINT } from '../../../services/videoAnalysis/videoFileAnalysis'
 import { analyzeVideoSource } from '../../../services/videoAnalysis/videoSourceAnalysis'
+import {
+  cleanupContactSheets,
+  describeContactSheets,
+  type VideoFramesResult
+} from '../../../services/videoAnalysis/videoFrameFallback'
 
 const AnalyzeVideoInput = z.object({
   video_path: z
@@ -46,6 +62,8 @@ export interface AnalyzedVideoDetails extends Record<string, unknown> {
   model?: string
   /** 视频太大压过一遍再发的。画质与原片不同，要说 */
   compressed?: boolean
+  /** 视频模型没看成，看的是抽帧联系表 */
+  frames?: boolean
 }
 
 export function createAnalyzeVideoTool(): UnrealAgentTool<AnalyzedVideoDetails> {
@@ -66,9 +84,11 @@ export function createAnalyzeVideoTool(): UnrealAgentTool<AnalyzedVideoDetails> 
 - 用户说「这段不太对」而你不知道他指什么时，先看一眼再问
 
 【它不是你自己在看】：发给的是用户在 设置 → 模型 里**勾了「视频」能力**的那个模型，
-回来的是那个模型写的一段描述。所以：
-- 没配这样的模型时会明确报错，告诉用户去哪勾。**这时不要假装看过**
-- 描述可能有出入。涉及「好不好看」这类主观判断，仍然以用户的判断为准
+回来的是那个模型写的一段描述。描述可能有出入，「好不好看」仍以用户的判断为准。
+
+【看不成时自动改看关键帧】：没配视频模型、或它这次没看成，会直接把视频抽成带时间标记的
+联系表图片交给你 —— 不用再自己找 ffmpeg 抽帧，也**不要请用户截图**。
+静帧没有声音、看不到帧间运动，涉及节奏、音效、运镜的判断要说明是凭静帧推测的。
 
 【要花钱、也要时间】：一整段视频发过去按 token 计费，长片子要等一会儿。
 同一段视频看一次就够了，别为了确认再看一遍 —— 有新问题就在 \`question\` 里一次问清。`,
@@ -79,12 +99,14 @@ export function createAnalyzeVideoTool(): UnrealAgentTool<AnalyzedVideoDetails> 
       const analyzed = await analyzeVideoSource({
         source: args.video_path,
         ...(args.question ? { prompt: args.question } : {}),
-        onProgress: (note) => ctx.report({ text: note })
+        onProgress: (note) => ctx.report({ text: note }),
+        framesFallback: true
       })
 
       if (!analyzed.success) {
         return { isError: true, text: analyzed.error || '视频分析失败' }
       }
+      if (analyzed.frames) return framesOutcome(args.video_path, analyzed.frames, analyzed.error)
 
       const lines: string[] = []
       if (analyzed.compressed) {
@@ -106,4 +128,49 @@ export function createAnalyzeVideoTool(): UnrealAgentTool<AnalyzedVideoDetails> 
       }
     }
   })
+}
+
+/** 视频模型没看成的原因，压成一句话放进联系表说明的开头 */
+function modelMissReason(error?: string): string {
+  const first = (error ?? '').split('\n')[0].trim()
+  if (!first) return '视频模型这次没看成'
+  return first === NO_VIDEO_MODEL_HINT
+    ? '没有配置能看视频的模型'
+    : `视频模型这次没看成（${first.slice(0, 160)}）`
+}
+
+/** 联系表读进上下文，读完就删 */
+async function framesOutcome(
+  videoPath: string,
+  frames: VideoFramesResult,
+  modelError?: string
+): Promise<ToolOutcome<AnalyzedVideoDetails>> {
+  const sheetPaths = frames.sheetPaths ?? []
+  try {
+    const images: { data: string; mimeType: string }[] = []
+    for (const sheet of sheetPaths) {
+      const compressed = await compressForContext(await fs.readFile(sheet), {
+        maxWidth: CONTACT_SHEET_MAX_WIDTH
+      })
+      if (compressed) images.push({ data: compressed.data, mimeType: compressed.mimeType })
+    }
+    const lines = [
+      describeContactSheets(frames, path.basename(videoPath), modelMissReason(modelError))
+    ]
+    if (images.length < sheetPaths.length) {
+      lines.push(`（${sheetPaths.length - images.length} 张联系表没能压进上下文，你看到的不全。）`)
+    }
+    if (modelError === NO_VIDEO_MODEL_HINT) {
+      lines.push(
+        '想连声音和动作一起看，可以告诉用户：到 设置 → 模型 给一个支持视频的模型勾上「视频」。'
+      )
+    }
+    return {
+      text: lines.join('\n'),
+      images,
+      details: { success: true, video_path: videoPath, frames: true }
+    }
+  } finally {
+    await cleanupContactSheets(sheetPaths)
+  }
 }
