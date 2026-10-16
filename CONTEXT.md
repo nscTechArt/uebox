@@ -6,7 +6,7 @@
 分层地图在 [docs/contributing/vertical-slice.md](docs/contributing/vertical-slice.md)。
 
 用词跟这里不一致时，以这里为准；发现这里定义错了，改这里。
-新增或修改 _Avoid_ 时，同步考虑术语守卫（`src/renderer/src/i18n/terminologyGuard.test.ts`）的禁用词表，两处一起改。
+新增或修改 _Avoid_ 时，同步考虑术语守卫的禁用词表（`src/shared/terminologyGuard.ts`，界面文案守卫与工具说明守卫共用），两处一起改。
 
 ---
 
