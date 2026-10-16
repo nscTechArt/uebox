@@ -285,6 +285,8 @@ export interface PieRunReport {
   warning_count?: number
   screenshot_path?: string
   screenshot_error?: string
+  frames?: Array<{ at: number; path?: string; error?: string; capture_ms?: number }>
+  frame_mode?: string
   levels?: { editor_only_levels?: string[] }
 }
 
