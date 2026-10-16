@@ -37,9 +37,16 @@ describe('Python 走国内镜像', () => {
     pin.sha256 = sha256(bytes)
     try {
       const run = vi.fn(async () => {})
-      const outcome = await installPythonFromMirror({ arch: 'x64', download: async () => bytes, run })
+      const outcome = await installPythonFromMirror({
+        arch: 'x64',
+        download: async () => bytes,
+        run
+      })
       expect(outcome.ok).toBe(true)
-      expect(run).toHaveBeenCalledWith(expect.stringMatching(/python-.*-amd64\.exe$/), PYTHON_INSTALLER_ARGS)
+      expect(run).toHaveBeenCalledWith(
+        expect.stringMatching(/python-.*-amd64\.exe$/),
+        PYTHON_INSTALLER_ARGS
+      )
       expect(PYTHON_INSTALLER_ARGS).toContain('InstallAllUsers=0')
       expect(PYTHON_INSTALLER_ARGS).toContain('InstallLauncherAllUsers=0')
     } finally {
@@ -60,7 +67,11 @@ describe('Python 走国内镜像', () => {
 
 describe('installPrerequisite', () => {
   it('Python 镜像失败才退回 winget，两段原因都留给 AI', async () => {
-    const winget = vi.fn(async () => ({ ok: false, message: 'winget 失败', detail: 'winget detail' }))
+    const winget = vi.fn(async () => ({
+      ok: false,
+      message: 'winget 失败',
+      detail: 'winget detail'
+    }))
     const outcome = await installPrerequisite('python', {
       mirror: async () => ({ ok: false, detail: 'mirror detail' }),
       winget

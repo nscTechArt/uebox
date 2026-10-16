@@ -219,7 +219,10 @@ export async function installPythonFromMirror(deps: MirrorDeps = {}): Promise<Wi
       await (deps.run ?? runInstallerExe)(exe, PYTHON_INSTALLER_ARGS)
     } catch (error) {
       const code = (error as { code?: unknown }).code
-      return { ok: false, detail: `python installer exited with ${String(code ?? (error as Error).message)}` }
+      return {
+        ok: false,
+        detail: `python installer exited with ${String(code ?? (error as Error).message)}`
+      }
     }
     return { ok: true }
   } finally {

@@ -76,7 +76,8 @@ function download() {
     git(work, 'remote', 'add', 'origin', manifest.origin)
     git(work, 'fetch', '--quiet', '--depth', '1', 'origin', manifest.revision)
     const head = git(work, 'rev-parse', 'FETCH_HEAD')
-    if (head !== manifest.revision) throw new Error(`上游给的是 ${head}，清单要求 ${manifest.revision}`)
+    if (head !== manifest.revision)
+      throw new Error(`上游给的是 ${head}，清单要求 ${manifest.revision}`)
     mkdirSync(dir, { recursive: true })
     git(work, 'archive', '--format=zip', '-o', target, manifest.revision)
   } finally {

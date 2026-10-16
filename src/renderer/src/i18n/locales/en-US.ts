@@ -268,7 +268,8 @@ export default {
       installPrereqs: 'Install {names}',
       installingPrereqs: 'Installing {names}. This takes a few minutes…',
       nameJoiner: ' and ',
-      prereqsUacHint: 'Windows will ask for administrator permission while installing Git. Click "Yes" in the prompt.',
+      prereqsUacHint:
+        'Windows will ask for administrator permission while installing Git. Click "Yes" in the prompt.',
       prereqsInstalled: '{names} installed.',
       askAi: 'Ask AI to troubleshoot',
       askAiFailed: 'Could not hand off to AI: {reason}',

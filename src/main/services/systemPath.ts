@@ -61,10 +61,14 @@ export async function refreshProcessPath(): Promise<void> {
 
   let stdout: string
   try {
-    ;({ stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-      timeout: TIMEOUT_MS,
-      windowsHide: true
-    }))
+    ;({ stdout } = await run(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        timeout: TIMEOUT_MS,
+        windowsHide: true
+      }
+    ))
   } catch (error) {
     console.warn('[systemPath] 读取注册表 PATH 失败，保持原样:', error)
     return

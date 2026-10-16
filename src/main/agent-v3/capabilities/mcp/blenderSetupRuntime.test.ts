@@ -414,7 +414,9 @@ describe('用 winget 装缺的 Git / Python', () => {
       message: '安装 Git 未完成（winget 退出码 0x8A150014）。',
       detail: 'winget install Git.Git exited with 0x8A150014'
     }))
-    const result = await installBlenderPrerequisites(['git', 'python'], windows, { install: runWinget })
+    const result = await installBlenderPrerequisites(['git', 'python'], windows, {
+      install: runWinget
+    })
     expect(runWinget).toHaveBeenCalledTimes(1)
     expect(result).toMatchObject({
       success: false,
@@ -429,7 +431,9 @@ describe('用 winget 装缺的 Git / Python', () => {
    */
   it('装完仍探不到时报失败，而不是假装成功', async () => {
     const runWinget = vi.fn(async () => ({ ok: true }))
-    const result = await installBlenderPrerequisites(['git', 'python'], windows, { install: runWinget })
+    const result = await installBlenderPrerequisites(['git', 'python'], windows, {
+      install: runWinget
+    })
     expect(runWinget).toHaveBeenCalledTimes(2)
     // 这台机器上有没有 git / Python 不确定：有就成功，没有就必须说出缺哪个
     if (!result.success) {
