@@ -1020,10 +1020,10 @@ export type ProbeErrorCode =
   | 'modelNotFound'
   | 'rateLimited'
   | 'badRequest'
-  /** chat/completions 不收「工具 + 思考」（OpenAI 新型号如此），要换 Responses 或关思考 */
-  | 'toolsWithReasoningUnsupported'
-  /** Responses 接口收到了 chat 那一套的 `reasoning_effort`：协议选错，或网关改写了请求 */
-  | 'reasoningParamMoved'
+  /** 当前协议下被拒，换成 `suggestedProtocol` 就通了（换着发试出来的，不是读报错猜的） */
+  | 'protocolMismatch'
+  /** 带工具就被拒、不带就通：这个模型或网关不接受工具调用，当不了智能体 */
+  | 'toolsRejected'
   | 'unreachable'
   /** 没归上类。原文照带，猜错了反而掩盖真实原因 */
   | 'unknown'
@@ -1056,7 +1056,15 @@ export interface ProbeFailure {
    * 5xx 的服务端错误码、400 / 403 的拒绝理由、以及没归上类的。
    */
   raw?: string
+  /** `protocolMismatch` 时：换成哪个协议试通了 */
+  suggestedProtocol?: ProviderProtocol
 }
+
+/**
+ * 通了，但有一项用不了。界面显示成提示而不是绿勾。
+ * - `thinkingRejected`：带思考档位被拒、不带就通 ——「自动」能用，开思考会 400
+ */
+export type ProbeCaveat = 'thinkingRejected'
 
 export type ListModelsResult =
   | { ok: true; models: ModelConfig[] }
@@ -1070,7 +1078,7 @@ export type ListModelsResult =
  * 验过了，而实际上第一次真生成才知道对不对。
  */
 export type TestProviderResult =
-  | { ok: true; skipped?: ProbeSkipCode }
+  | { ok: true; skipped?: ProbeSkipCode; caveat?: ProbeCaveat }
   | { ok: false; error: ProbeFailure }
 
 /** Music providers have distinct request and task formats. */

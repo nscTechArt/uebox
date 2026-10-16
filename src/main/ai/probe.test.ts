@@ -70,31 +70,6 @@ describe('describeProbeError', () => {
     })
   })
 
-  /*
-   * 思考参数被拒的两种 400 各有明确改法，不能落进笼统的 badRequest。
-   * 两句都是用户现场截图里的原话（gpt-6.1-sol 经中转）。
-   */
-  describe('思考参数被拒', () => {
-    it('chat/completions 不收「工具 + reasoning_effort」→ 指向换 Responses 或关思考', () => {
-      const failure = describeProbeError(
-        new Error(
-          `400 {"message":"Function tools with reasoning_effort are not supported for gpt-6.1-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.","type":"invalid_request_error","param":"reasoning_effort"}`
-        )
-      )
-      expect(failure.code).toBe('toolsWithReasoningUnsupported')
-      expect(failure.raw).toContain('gpt-6.1-sol')
-    })
-
-    it('Responses 收到 reasoning_effort → 协议选错或网关改写', () => {
-      const failure = describeProbeError(
-        new Error(
-          `400 {"message":"Unsupported parameter: 'reasoning_effort'. In the Responses API, this parameter has moved to 'reasoning.effort'. Try again with the new parameter.","type":"invalid_request_error","code":"unsupported_parameter"}`
-        )
-      )
-      expect(failure.code).toBe('reasoningParamMoved')
-    })
-  })
-
   // 认不出来的原样透出，猜错方向比不猜更糟
   it('认不出的错误原样透出', () => {
     const failure = describeProbeError(new Error('某种没见过的错误'))

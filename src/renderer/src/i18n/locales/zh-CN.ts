@@ -597,6 +597,8 @@ export default {
       saved: '已保存',
       saveFailed: '保存失败',
       testOk: '连接成功（{model}）',
+      testOkThinkingRejected:
+        '连接成功（{model}），但开启思考后请求被拒绝。使用该模型时，思考档位请保持「自动」或设为「关」。',
       imported: '已导入，新增 {count} 个模型',
       importFailed: '导入失败',
       oauthOk: '授权成功，请保存设置',
@@ -621,10 +623,8 @@ export default {
       modelNotFound: '模型不存在。请确认模型 ID 是否正确，或使用「导入模型」获取可用列表。',
       rateLimited: '触发限流或额度不足。',
       badRequest: '请求被拒绝（400），请检查模型 ID、API 地址和接口协议。',
-      toolsWithReasoningUnsupported:
-        '该模型在 openai-completions 协议下不能同时使用工具和思考。请将接口协议改为 openai-responses；服务商不支持时，将思考档位设为「关」。',
-      reasoningParamMoved:
-        '服务端为 Responses 接口，但收到了 Chat Completions 格式的思考参数。当前协议为 openai-completions 时，请改为 openai-responses；已是 openai-responses 时，说明中间的网关改写了请求，需让其原样转发。',
+      protocolMismatch: '当前接口协议下请求被拒绝，改为 {protocol} 后测试通过。请修改接口协议。',
+      toolsRejected: '该模型不接受工具调用，无法在对话中操作编辑器。',
       unreachable: '无法连接该地址。请检查 API 地址是否正确、本机服务是否已启动。',
       unknown: '连接失败，服务商未返回原因。',
       listUnsupportedGenerative: '此服务商不支持获取模型列表，请按其文档填写模型 ID。',

@@ -594,6 +594,8 @@ First work out why the install failed from the output above. If you can run comm
       saved: 'Saved',
       saveFailed: 'Save failed',
       testOk: 'Connected ({model})',
+      testOkThinkingRejected:
+        'Connected ({model}), but requests with thinking enabled are rejected. Keep the thinking level on Auto or Off for this model.',
       imported: 'Imported, {count} models added',
       importFailed: 'Import failed',
       oauthOk: 'Authorized. The key is filled in — press Save to apply.',
@@ -623,10 +625,9 @@ First work out why the install failed from the output above. If you can run comm
         'No such model. Check the model ID, or use "Import models" to pull the available list.',
       rateLimited: 'Rate limited, or out of quota.',
       badRequest: 'Request rejected (400). Check the model ID, API URL, and protocol.',
-      toolsWithReasoningUnsupported:
-        'This model cannot use tools and thinking together over openai-completions. Switch the protocol to openai-responses, or set the thinking level to Off if the provider does not support it.',
-      reasoningParamMoved:
-        'The server is a Responses endpoint but received a Chat Completions thinking parameter. If the protocol is openai-completions, switch to openai-responses; if it already is, a gateway in between is rewriting the request and must pass it through unchanged.',
+      protocolMismatch:
+        'Rejected under the current protocol, but the test passes with {protocol}. Change the protocol.',
+      toolsRejected: 'This model does not accept tool calls, so it cannot operate the editor in chat.',
       unreachable:
         'Cannot reach that address. Check the Base URL, and whether the local service is running.',
       unknown: 'The connection failed, but the provider gave no reason.',

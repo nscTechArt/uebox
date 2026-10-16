@@ -7,7 +7,7 @@ import {
   type ModelConfig,
   type ModelRole,
   type ProbeFailure,
-  type ProbeSkipCode,
+  type TestProviderResult,
   type ProviderDraft,
   type ProviderKind,
   type ProviderView,
@@ -256,7 +256,7 @@ export interface AiProvidersState {
    * `error` 是**码**不是文案：主进程只判是哪一种，措辞在 `probeCopy.ts` 查语言包 ——
    * 原来这里是一整句中文，英文用户点「测试连接」读不懂自己配错在哪。
    */
-  test: (modelId: string) => Promise<{ ok: boolean; error?: ProbeFailure; skipped?: ProbeSkipCode }>
+  test: (modelId: string) => Promise<TestProviderResult>
   importModels: () => Promise<{ ok: boolean; count?: number; error?: ProbeFailure }>
   oauthLogin: (
     oauthProvider: string
@@ -451,14 +451,16 @@ export function useAiProviders(): AiProvidersState {
 
   async function test(
     modelId: string
-  ): Promise<{ ok: boolean; error?: ProbeFailure; skipped?: ProbeSkipCode }> {
+  ): Promise<TestProviderResult> {
     const payload = normalizedDraft()
     if (!payload) return { ok: false, error: { code: 'noDraft' } }
     testing.value = true
     try {
       const result = await window.api.aiProvider.test(payload, modelId)
-      // skipped 要原样带到界面：把「没测」显示成「测过了」比不测更糟
-      return result.ok ? { ok: true, skipped: result.skipped } : { ok: false, error: result.error }
+      // skipped、caveat 要原样带到界面：把「没测」「有一项用不了」显示成绿勾比不测更糟
+      return result.ok
+        ? { ok: true, skipped: result.skipped, caveat: result.caveat }
+        : { ok: false, error: result.error }
     } finally {
       testing.value = false
     }

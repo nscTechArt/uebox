@@ -354,7 +354,13 @@ async function handleTest(): Promise<void> {
     ? { type: 'error', text: describeProbeFailure(result.error) }
     : result.skipped
       ? { type: 'warning', text: t(`aiProvider.probeSkip.${result.skipped}`) }
-      : { type: 'success', text: t('aiProvider.messages.testOk', { model: modelId }) }
+      : // 通了但开思考会被拒：不给绿勾，否则用户开了思考才撞上 400
+        result.caveat === 'thinkingRejected'
+        ? {
+            type: 'warning',
+            text: t('aiProvider.messages.testOkThinkingRejected', { model: modelId })
+          }
+        : { type: 'success', text: t('aiProvider.messages.testOk', { model: modelId }) }
 }
 
 function close(): void {

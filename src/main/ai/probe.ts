@@ -4,8 +4,10 @@ import type { TSchema } from 'typebox'
 import type { ModelCheckup } from '../../shared/agentTeam'
 import {
   looksLikeEmbeddingModelId,
+  type ProbeCaveat,
   type ProbeFailure,
-  type ProbeSkipCode
+  type ProbeSkipCode,
+  type ProviderProtocol
 } from '../../shared/aiProvider'
 import { CODEBUDDY_ORIGIN } from './codebuddy'
 import { resolveApiKey } from './credentials'
@@ -50,6 +52,8 @@ export interface ProbeResult {
    * 界面要把这一位显示出来，否则用户会把「跳过了」当成「测通了」。
    */
   skipped?: ProbeSkipCode
+  /** 通了，但有一项用不了。见 ProbeCaveat */
+  caveat?: ProbeCaveat
 }
 
 /**
@@ -154,26 +158,95 @@ export async function testProvider(
       return { ok: true }
     }
 
-    /*
-     * 探测走的必须是**正式调用同一条路**（pi），否则测得过的配置未必用得了：
-     * 上一版这里是另一套 HTTP 实现，ChatGPT 订阅在那边一调就 400。
-     *
-     * 请求的**形状**也得和对话里一样：带工具，会思考的模型带上思考档位。只发一句光秃秃
-     * 的 ping 时，测试连接显示「连接成功」，一开工就 400 —— 真实案例：中转上的
-     * gpt-6.1-sol 配成 openai-completions，chat/completions 不收「工具 + reasoning_effort」，
-     * 而这两样对话里每一轮都带。工具只放着不执行，模型调不调都算通。
-     */
-    const { model: piModel } = resolveModel(provider, modelId)
-    await complete(provider, modelId, {
-      messages: [userMessage('ping')],
-      ...(model?.supportsTools !== false ? { tools: [CHECKUP_TOOL] } : {}),
-      ...(piModel.reasoning ? { reasoning: 'low' as const } : {}),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+    return await probeChat(provider, modelId, {
+      tools: model?.supportsTools !== false,
+      thinking: resolveModel(provider, modelId).model.reasoning
     })
-    return { ok: true }
   } catch (error) {
     return { ok: false, error: describeProbeError(error) }
   }
+}
+
+/** 对话探测这一次带哪几样。和对话里每一轮带的一致 */
+interface ChatShape {
+  tools: boolean
+  thinking: boolean
+}
+
+/** 按这个形状发一句 ping。工具只放着不执行，模型调不调都算通 */
+async function pingChat(
+  provider: ProviderConfig,
+  modelId: string,
+  shape: ChatShape
+): Promise<void> {
+  await complete(provider, modelId, {
+    messages: [userMessage('ping')],
+    ...(shape.tools ? { tools: [CHECKUP_TOOL] } : {}),
+    ...(shape.thinking ? { reasoning: 'low' as const } : {}),
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+  })
+}
+
+async function passes(
+  provider: ProviderConfig,
+  modelId: string,
+  shape: ChatShape
+): Promise<boolean> {
+  return pingChat(provider, modelId, shape).then(
+    () => true,
+    () => false
+  )
+}
+
+/** 能互换着试的两种协议：同一个 /v1 底下常常两个端点都在，用户只是选错了 */
+const SWAPPABLE_PROTOCOL: Partial<Record<ProviderProtocol, ProviderProtocol>> = {
+  'openai-completions': 'openai-responses',
+  'openai-responses': 'openai-completions'
+}
+
+/**
+ * 对话模型的探测。
+ *
+ * 走的必须是**正式调用同一条路**（pi），否则测得过的配置未必用得了：
+ * 上一版这里是另一套 HTTP 实现，ChatGPT 订阅在那边一调就 400。
+ *
+ * 请求的**形状**也得和对话里一样：带工具，会思考的模型带上思考档位。只发一句光秃秃
+ * 的 ping 时，测试连接显示「连接成功」，一开工就 400 —— 真实案例：中转上的
+ * gpt-6.1-sol 配成 openai-completions，chat/completions 不收「工具 + 思考」。
+ *
+ * 被拒（400）时**换着发几次看哪种能通**，而不是读报错原文猜原因：各家措辞不一样，
+ * 背一家的台词换一家就失灵。试法与厂商无关，顺序按「对用户最省事的改法」排：
+ * 1. 换协议、形状不变 —— 通了就让用户改协议，什么能力都不丢
+ * 2. 去掉思考 —— 通了算「能用」，只是开思考会被拒
+ * 3. 去掉工具 —— 通了说明它接不了工具，当不了智能体
+ * 都不通就原样报第一次的错。只有失败时才多发这几次，成功的路径还是一个请求。
+ */
+async function probeChat(
+  provider: ProviderConfig,
+  modelId: string,
+  shape: ChatShape
+): Promise<ProbeResult> {
+  let failure: ProbeFailure
+  try {
+    await pingChat(provider, modelId, shape)
+    return { ok: true }
+  } catch (error) {
+    failure = describeProbeError(error)
+  }
+  // 只有「请求本身被拒」才值得换着试。密钥错、超时、限流换什么都一样，多发只是白等
+  if (failure.code !== 'badRequest') return { ok: false, error: failure }
+
+  const swapped = SWAPPABLE_PROTOCOL[provider.protocol]
+  if (swapped && (await passes({ ...provider, protocol: swapped }, modelId, shape))) {
+    return { ok: false, error: { code: 'protocolMismatch', suggestedProtocol: swapped } }
+  }
+  if (shape.thinking && (await passes(provider, modelId, { ...shape, thinking: false }))) {
+    return { ok: true, caveat: 'thinkingRejected' }
+  }
+  if (shape.tools && (await passes(provider, modelId, { tools: false, thinking: false }))) {
+    return { ok: false, error: { code: 'toolsRejected', raw: failure.raw } }
+  }
+  return { ok: false, error: failure }
 }
 
 /**
@@ -199,19 +272,6 @@ export function describeProbeError(error: unknown): ProbeFailure {
   // 按关键词先命中限流分支，就会把一次服务端故障说成「你额度不够」。
   if (/\b5\d\d\b|server_error|internal server error|server had an error/i.test(raw))
     return { code: 'providerServerError', raw: raw.slice(0, 160) }
-
-  /*
-   * 思考参数被拒的两种 400，各自有明确的改法，不能混进下面笼统的 badRequest。
-   * 两句都是 OpenAI 的原话（中转原样透出），排在 400 前面是因为它们本身就带着 400。
-   * - chat/completions 不收「工具 + reasoning_effort」：要么换 Responses，要么关思考
-   * - Responses 收到了 chat 那一套的 `reasoning_effort`：协议选错了，或者中间的网关改写了请求
-   */
-  if (/reasoning_effort/i.test(raw) && /function tools|tools with/i.test(raw)) {
-    return { code: 'toolsWithReasoningUnsupported', raw: raw.slice(0, 300) }
-  }
-  if (/reasoning_effort/i.test(raw) && /reasoning\.effort|moved/i.test(raw)) {
-    return { code: 'reasoningParamMoved', raw: raw.slice(0, 300) }
-  }
 
   if (/\b404\b|model.*not found|no such model/i.test(raw)) return { code: 'modelNotFound' }
   if (/\b429\b|rate limit|quota/i.test(raw)) return { code: 'rateLimited' }

@@ -25,6 +25,8 @@ const ALL_CODES = [
   'modelNotFound',
   'rateLimited',
   'badRequest',
+  'protocolMismatch',
+  'toolsRejected',
   'unreachable',
   'unknown',
   'listUnsupportedGenerative',
@@ -126,4 +128,12 @@ describe('describeProbeFailure', () => {
     expect(describeProbeFailure(null)).toBeTypeOf('string')
     expect(describeProbeFailure(undefined)).toBeTypeOf('string')
   })
+})
+
+// 换着试出来的协议要写进那句话里：只说「协议不对」用户还得自己猜该换成哪个
+it('protocolMismatch 说出试通的那个协议', () => {
+  i18n.global.locale.value = 'zh-CN'
+  expect(
+    describeProbeFailure({ code: 'protocolMismatch', suggestedProtocol: 'openai-responses' })
+  ).toContain('openai-responses')
 })
