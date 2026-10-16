@@ -11,11 +11,19 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
 import { parseTeamCommand } from './teamCommand'
 import { editorKeyActive, runWithEditorKey, withEditorKey } from './editorKey'
-import { createTeamStore, memberFileBase, PRODUCER, type TeamStore } from './teamStore'
 import {
+  createTeamStore,
+  MEMORY_KEPT_NOTE,
+  memberFileBase,
+  PRODUCER,
+  type TeamStore
+} from './teamStore'
+import {
+  createMemorySaver,
   createMessageTool,
   createTeamTools,
   formatMail,
+  MEMORY_SAVE_INTERVAL_MS,
   producerTools,
   renderBoard,
   type TeamToolDeps
@@ -238,6 +246,29 @@ describe('活的账和团队事件', () => {
     ])
   })
 
+  it('上次运行没交回的活：开工后队员记忆落过盘的，原因里说它记得干到哪了', async () => {
+    const message = [{ role: 'user', content: 'hi', timestamp: 1 }] as AgentMessage[]
+    let clock = Date.now() - 60_000
+    store = createTeamStore(
+      { stateDir: join(dir, 'state'), workspaceDir: join(dir, 'ws') },
+      () => clock
+    )
+    const saved = await store.startJob('甲', '搭关卡')
+    await store.saveHistory('甲', message)
+    // 乙的记忆是上一件活留下的，这件开工后一轮都没说完
+    await store.saveHistory('乙', message)
+    clock = Date.now() + 60_000
+    const before = await store.startJob('乙', '做材质')
+    const none = await store.startJob('丙', '写脚本')
+    await store.closeOpenJobs('上次运行中断')
+    const reasons = Object.fromEntries((await store.jobs()).map((j) => [j.id, j.reason]))
+    expect(reasons).toEqual({
+      [saved.id]: `上次运行中断；${MEMORY_KEPT_NOTE}`,
+      [before.id]: '上次运行中断',
+      [none.id]: '上次运行中断'
+    })
+  })
+
   it('只有停下的活能重开，重开记下时刻', async () => {
     const a = await store.startJob('甲', '统计资产')
     const b = await store.startJob('乙', '统计配置')
@@ -403,6 +434,46 @@ describe('团队工具', () => {
     await expect(t.team_send!({ to: '程序', message: '第二件' })).rejects.toThrow('stopped')
     expect(seen[1]).toHaveLength(1)
     expect(await store.history('程序')).toHaveLength(2)
+    // 停下的活：制作人看得到它记得干到哪了
+    expect((await store.jobs()).at(-1)?.reason).toBe(`stopped；${MEMORY_KEPT_NOTE}`)
+  })
+
+  it('干活途中每说完一轮就存盘：活还没交回，记忆里已经有了', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      let midway!: () => void
+      const reachedMidway = new Promise<void>((resolve) => (midway = resolve))
+      const t = tools({
+        runMember: async ({ history, keepMessages, message }) => {
+          // 和 runSubAgent 一样交活的数组：之后还会往里推
+          const live = [...history, { role: 'user', content: message, timestamp: 0 }]
+          keepMessages(live as AgentMessage[])
+          live.push({ role: 'user', content: '第一轮的工具结果', timestamp: 1 })
+          keepMessages(live as AgentMessage[])
+          midway()
+          await gate
+          live.push({ role: 'user', content: '最后一轮', timestamp: 2 })
+          keepMessages(live as AgentMessage[])
+          return ok('好了')
+        }
+      })
+      await t.team_hire!({ name: '程序', role: '写玩法' })
+      const sending = t.team_send!({ to: '程序', message: '长活' })
+      await reachedMidway
+      // 两轮合并成一次写，间隔没到不写
+      await vi.advanceTimersByTimeAsync(MEMORY_SAVE_INTERVAL_MS - 1)
+      expect(await store.history('程序')).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      await vi.waitFor(async () => expect(await store.history('程序')).toHaveLength(2))
+
+      release()
+      await expect(sending).resolves.toMatch(/好了/)
+      expect(await store.history('程序')).toHaveLength(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('同一个队员的两件活排队，不同队员并行', async () => {
@@ -936,5 +1007,84 @@ describe('提示词只写环境，不写方法论', () => {
     const prompt = buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })
     expect(prompt).toMatch(/screenshots while the game is running/)
     expect(prompt).toMatch(/Basic art is part of the bar/)
+  })
+})
+
+describe('队员记忆按轮存盘', () => {
+  const msg = (content: string): AgentMessage =>
+    ({ role: 'user', content, timestamp: 0 }) as AgentMessage
+
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('间隔内交来的几份合并成一次写，写的是最新那份；system 消息不进记忆', async () => {
+    const saves: string[][] = []
+    const memory = createMemorySaver(async (messages) => {
+      saves.push(messages.map((m) => String((m as { content: unknown }).content)))
+    }, 1000)
+    const live = [{ role: 'system', content: 'prompt' } as unknown as AgentMessage, msg('a')]
+    memory.keep(live)
+    live.push(msg('b'))
+    memory.keep(live)
+    // 交的是活的数组：交完之后再推进去的不算这一份
+    live.push(msg('c'))
+    await vi.advanceTimersByTimeAsync(999)
+    expect(saves).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(saves).toEqual([['a', 'b']])
+    // 没有新交来的就不再写
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(saves).toHaveLength(1)
+  })
+
+  it('最终版排在最后：在途的旧快照写得再慢也盖不掉它，待写的那次取消', async () => {
+    let disk: string[] = []
+    const calls: string[][] = []
+    let finishSlow!: () => void
+    const memory = createMemorySaver(async (messages) => {
+      const snapshot = messages.map((m) => String((m as { content: unknown }).content))
+      calls.push(snapshot)
+      // 第一次写卡在半路
+      if (calls.length === 1) await new Promise<void>((resolve) => (finishSlow = resolve))
+      disk = snapshot
+    }, 1000)
+    memory.keep([msg('a')])
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(calls).toHaveLength(1)
+    // 这一份等着下一次定时写，但活先结束了
+    memory.keep([msg('a'), msg('b')])
+    memory.keep([msg('a'), msg('b'), msg('c')])
+    const flushed = memory.flush()
+    finishSlow()
+    await flushed
+    expect(disk).toEqual(['a', 'b', 'c'])
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(calls).toEqual([['a'], ['a', 'b', 'c']])
+    expect(memory.kept).toBe(true)
+  })
+
+  it('中途写失败不挡后面；最终版写失败报给调用方', async () => {
+    let fail = true
+    const saved: number[] = []
+    const memory = createMemorySaver(async (messages) => {
+      if (fail) throw new Error('disk full')
+      saved.push(messages.length)
+    }, 1000)
+    memory.keep([msg('a')])
+    await vi.advanceTimersByTimeAsync(1000)
+    fail = false
+    memory.keep([msg('a'), msg('b')])
+    await expect(memory.flush()).resolves.toBeUndefined()
+    expect(saved).toEqual([2])
+    fail = true
+    await expect(memory.flush()).rejects.toThrow('disk full')
+  })
+
+  it('一份都没交过：什么都不写', async () => {
+    const save = vi.fn(async () => undefined)
+    const memory = createMemorySaver(save, 1000)
+    await memory.flush()
+    expect(save).not.toHaveBeenCalled()
+    expect(memory.kept).toBe(false)
   })
 })

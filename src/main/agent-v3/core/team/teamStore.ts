@@ -122,7 +122,9 @@ export interface TeamStore {
   ): Promise<void>
   /**
    * 还挂着「在干」的活一律收成停下。新一次运行开始时调：上次运行被打断（盒子关了、崩了）的活
-   * 不会再交回来，不收掉的话界面上会永远显示「正在写」
+   * 不会再交回来，不收掉的话界面上会永远显示「正在写」。
+   *
+   * 这件活开工后队员的记忆存过盘的，原因后面带上 `MEMORY_KEPT_NOTE`
    */
   closeOpenJobs(reason: string): Promise<void>
   /** 用户把一件停下的活交回制作人：记下时刻，返回这件活（没有这件、或它不是停下的，回 undefined） */
@@ -143,6 +145,12 @@ const JOBS_KEPT = 200
 const EVENTS_KEPT = 100
 /** 派活那段话截多长当名字 */
 const BRIEF_MAX = 80
+
+/**
+ * 停下的活，队员记忆里存着干到哪了（队员每说完一轮存一次，见 `createMemorySaver`）：
+ * 跟在停下的原因后面。制作人看到它，重派时可以让队员接着上次的往下干，而不是从头来
+ */
+export const MEMORY_KEPT_NOTE = '它的记忆里存着这件活干到哪了，再派给它可以接着上次的往下干'
 
 /** 一件交回来的活实际改了什么（按写操作台账记，不是队员自己说的） */
 export interface TeamActivity {
@@ -206,6 +214,14 @@ export function createTeamStore(
 
   const sameName = (a: string, b: string): boolean =>
     a.trim().toLowerCase() === b.trim().toLowerCase()
+  /** 这个队员的记忆在这个时刻之后落过盘。同一个人的活排着队，开工后写的只会是这一件的 */
+  const memorySavedSince = async (name: string, since: number): Promise<boolean> => {
+    try {
+      return (await fs.stat(historyFile(name))).mtimeMs >= since
+    } catch {
+      return false
+    }
+  }
 
   const readUsage = (): Promise<TeamUsageLedger> =>
     readJson<TeamUsageLedger>(usageFile, { total: { ...EMPTY_TEAM_USAGE }, byWho: {} })
@@ -363,7 +379,9 @@ export function createTeamStore(
         for (const job of open) {
           job.endedAt = at
           job.outcome = 'stopped'
-          job.reason = reason
+          job.reason = (await memorySavedSince(job.member, job.startedAt))
+            ? `${reason}；${MEMORY_KEPT_NOTE}`
+            : reason
         }
         await writeJson(jobsFile, list)
         return true

@@ -1166,7 +1166,13 @@ export async function runSubAgent(
      * 不给就是老规矩：老 `fast` 档走用户绑的对话模型，其余跟着父 agent
      */
     model?: TeamModel
-    /** 跑完（含被停下）时交回它的全部消息。队员靠它记住干过的活 */
+    /**
+     * 交回它的全部消息。队员靠它记住干过的活。
+     *
+     * 每说完一轮（`turn_end`，这一轮的工具结果都已在里面）交一次，跑完（含被停下）再交一次，
+     * 最后那次是最终版。按轮交是为了盒子崩了、进程被杀时 finally 不跑也丢不了已经干过的部分。
+     * 交的是活的数组，要留就自己拷一份；回调同步跑在事件循环里，别在里面做重活
+     */
     keepMessages?: (messages: AgentMessage[]) => void
     /**
      * 跑完（含被停下、出错）时交回这一路新花掉的 token。工作室记团队的账用它。
@@ -1295,6 +1301,10 @@ export async function runSubAgent(
       if (message.role === 'assistant') spent = addTeamUsage(spent, teamUsageOf(message.usage))
       const narration = readNarration(event.message)
       if (narration) input.onProgress?.(narration)
+      return
+    }
+    if (event.type === 'turn_end') {
+      input.keepMessages?.(agent.state.messages)
       return
     }
     if (event.type !== 'tool_execution_end') return

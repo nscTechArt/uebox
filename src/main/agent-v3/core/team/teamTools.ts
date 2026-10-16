@@ -31,6 +31,7 @@ import { createStatusTool } from './teamStatus'
 import { snapshotMessage, type TeamSnapshots } from './snapshots'
 import type { TeamLive } from './teamLive'
 import {
+  MEMORY_KEPT_NOTE,
   PRODUCER,
   TASK_STATUSES,
   type BoardTask,
@@ -71,7 +72,10 @@ export interface RunMemberInput {
   signal?: AbortSignal
   onProgress: (text: string) => void
   ledger: WriteLedger
-  /** 跑完（含被停下）时交回它的全部消息，下次派活时接着用 */
+  /**
+   * 交回它的全部消息，下次派活时接着用。每说完一轮交一次，跑完（含被停下）再交一次最终版
+   * （见 `runSubAgent` 的同名参数）
+   */
   keepMessages: (messages: AgentMessage[]) => void
   /** 钉给它的模型。不给 = 老规矩（制作人的模型，或老 `fast` 档的对话模型），见 `routeMember` */
   pin?: TeamModel
@@ -355,6 +359,63 @@ export function formatMail(title: string, mails: TeamMail[]): string {
   return [title, ...mails.map((m) => `- ${who(m.from)}：${m.text}`)].join('\n')
 }
 
+/**
+ * 干活途中按轮存盘，从第一次交来的那一轮起最多隔这么久落一次。
+ *
+ * 只是合并写盘：一件活里工具一轮接一轮，记忆是整份 JSON，每轮都整份重写太浪费；
+ * 隔一会儿只写最新那份。崩了最多丢这一小段，和模型怎么干活无关
+ */
+export const MEMORY_SAVE_INTERVAL_MS = 2_000
+
+/**
+ * 一件活的记忆存盘：`keep` 记下最新一份、合并着落盘，`flush` 取消待写的、把最终版写上去。
+ *
+ * 所有写都排在同一条链上，先交的先写 —— `flush` 那次排在最后，在途的旧快照盖不掉它。
+ * 提示词和工具增量每轮现算，不进队员的记忆（见 systemMessages.ts）
+ */
+export function createMemorySaver(
+  save: (messages: AgentMessage[]) => Promise<void>,
+  intervalMs = MEMORY_SAVE_INTERVAL_MS
+): {
+  keep: (messages: AgentMessage[]) => void
+  flush: () => Promise<void>
+  /** 交过至少一份（落没落盘另说） */
+  readonly kept: boolean
+} {
+  let latest: AgentMessage[] | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let chain: Promise<void> = Promise.resolve()
+  const write = (): void => {
+    const snapshot = latest
+    if (!snapshot) return
+    // 中途那几次写失败不要紧，下一次写的是更全的一份
+    chain = chain.then(() => save(snapshot)).catch(() => undefined)
+  }
+  return {
+    keep(messages) {
+      // 交来的是活的数组，下一轮还会往里推 —— 拷一份
+      latest = withoutSystemMessages(messages).slice()
+      timer ??= setTimeout(() => {
+        timer = undefined
+        write()
+      }, intervalMs)
+    },
+    async flush() {
+      if (timer) clearTimeout(timer)
+      timer = undefined
+      const snapshot = latest
+      if (!snapshot) return chain
+      // 最终版写失败要让调用方知道，和改之前一样
+      const final = chain.then(() => save(snapshot))
+      chain = final.catch(() => undefined)
+      return final
+    },
+    get kept() {
+      return latest !== undefined
+    }
+  }
+}
+
 function createSendTool(
   deps: TeamToolDeps
 ): UnrealAgentTool<SubAgentResult | { dispatched: string }> {
@@ -428,6 +489,9 @@ function createSendTool(
           : Promise.resolve()
       ).catch(() => undefined)
     }
+
+    // 被停下也要存：它已经干了一半的活，下次派活时得记得
+    const memory = createMemorySaver((messages) => deps.store.saveHistory(member.name, messages))
     const previous = busy.get(key) ?? Promise.resolve()
     const run = previous
       .catch(() => undefined)
@@ -443,7 +507,6 @@ function createSendTool(
         const history = stripPendingToolCalls(await deps.store.history(member.name))
         // 它不在的时候队友给它的留言，这次接活时一起交给它
         const inbox = formatMail('【队友给你的留言】', await deps.store.takeInbox(member.name))
-        let latest: AgentMessage[] | undefined
         deps.live?.setAssignment(member.name, message)
         try {
           return await deps.runMember({
@@ -460,15 +523,11 @@ function createSendTool(
               ctx.report({ text: `${member.name} · ${text}` })
               deps.live?.note(member.name, text)
             },
-            keepMessages: (messages) => {
-              latest = messages
-            }
+            keepMessages: memory.keep
           })
         } finally {
           deps.live?.setAssignment(member.name, null)
-          // 被停下也要存：它已经干了一半的活，下次派活时得记得
-          // 提示词和工具增量每轮现算，不进队员的记忆（见 systemMessages.ts）
-          if (latest) await deps.store.saveHistory(member.name, withoutSystemMessages(latest))
+          await memory.flush()
         }
       })
     busy.set(key, run)
@@ -478,7 +537,9 @@ function createSendTool(
         result = await run
       } catch (error) {
         remember('unfinished')
-        const reason = error instanceof Error ? error.message : String(error)
+        const why = error instanceof Error ? error.message : String(error)
+        // 制作人决定重派时要知道：它记得干到哪了，可以让它接着上次的往下干
+        const reason = memory.kept ? `${why}；${MEMORY_KEPT_NOTE}` : why
         // 停下的活也记已经花掉的：钱是真花了
         await settleJob({ outcome: 'stopped', reason })
         throw error
