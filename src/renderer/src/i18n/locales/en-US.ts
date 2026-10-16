@@ -627,7 +627,8 @@ First work out why the install failed from the output above. If you can run comm
       badRequest: 'Request rejected (400). Check the model ID, API URL, and protocol.',
       protocolMismatch:
         'Rejected under the current protocol, but the test passes with {protocol}. Change the protocol.',
-      toolsRejected: 'This model does not accept tool calls, so it cannot operate the editor in chat.',
+      toolsRejected:
+        'This model does not accept tool calls, so it cannot operate the editor in chat.',
       unreachable:
         'Cannot reach that address. Check the Base URL, and whether the local service is running.',
       unknown: 'The connection failed, but the provider gave no reason.',

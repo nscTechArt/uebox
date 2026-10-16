@@ -21,15 +21,17 @@ vi.mock('./piCompletion', () => ({
   userMessage: (text: string) => ({ role: 'user', content: text, timestamp: 0 }),
   completeText: vi.fn(),
   resolveModel: () => ({ model: { reasoning: true } }),
-  complete: vi.fn(async (provider: ProviderConfig, _modelId: string, request: CompletionRequest) => {
-    calls.push({
-      protocol: provider.protocol,
-      tools: Boolean(request.tools),
-      thinking: Boolean(request.reasoning)
-    })
-    if (!accepts(provider.protocol, request)) throw new Error('400 Bad Request')
-    return { content: [], stopReason: 'stop' }
-  })
+  complete: vi.fn(
+    async (provider: ProviderConfig, _modelId: string, request: CompletionRequest) => {
+      calls.push({
+        protocol: provider.protocol,
+        tools: Boolean(request.tools),
+        thinking: Boolean(request.reasoning)
+      })
+      if (!accepts(provider.protocol, request)) throw new Error('400 Bad Request')
+      return { content: [], stopReason: 'stop' }
+    }
+  )
 }))
 
 const { testProvider } = await import('./probe')

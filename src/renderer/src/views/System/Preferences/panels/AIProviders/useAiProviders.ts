@@ -449,9 +449,7 @@ export function useAiProviders(): AiProvidersState {
     return { ok: true }
   }
 
-  async function test(
-    modelId: string
-  ): Promise<TestProviderResult> {
+  async function test(modelId: string): Promise<TestProviderResult> {
     const payload = normalizedDraft()
     if (!payload) return { ok: false, error: { code: 'noDraft' } }
     testing.value = true
