@@ -9,6 +9,10 @@
  *   noul   「这句话成立吗」        → 0~1 的概率
  *   choice 「选哪个」（≤255 项）   → 选中项 + 每项概率 + confidence
  *   score  「哪一档」（2~10 档）   → 档位 + 分布 + confidence
+ *   box    「目标在哪里」（1.14） → 单个归一化边界框 + confidence
+ *
+ * 图片通过 options.assets 显式传入，引用可放在 state / instructions / criteria。
+ * 图片、Box、longContext 是实验能力，仅按次启用；不会自动收集或上传截图。
  *
  * 一次调用约 100ms，输入 $0.042/M token，输出不计费，而且**同一份 state 下
  * 多问几个问题几乎不加钱**（并行评估，只有问题本身的 token）。这两条合起来
@@ -81,13 +85,16 @@ const DEFAULT_TIMEOUT_MS = 4_000
  * 超限**在本地就回落**，不发出去换一个 400：那次往返既花时间又没有信息。
  */
 const MAX_PAYLOAD_CHARS = 48_000
+// 长上下文仍用保守字符预算；真正的 token 限制由服务端执行（262k）。
+const MAX_LONG_CONTEXT_CHARS = 262_000
+const MAX_REQUEST_BYTES = 32 * 1024 * 1024
 
 /** 是非题。返回「是」的概率 */
 export interface NoulQuestion {
   type: 'noul'
   instructions: string | Record<string, unknown> | unknown[]
   /** 可选：说清「是」和「否」分别指什么。边界case写在这里比写进 instructions 准 */
-  criteria?: { true?: string; false?: string }
+  criteria?: { true?: JudgeState; false?: JudgeState }
 }
 
 /** 多选题。最多 255 个选项 */
@@ -95,17 +102,23 @@ export interface ChoiceQuestion {
   type: 'choice'
   instructions: string | Record<string, unknown> | unknown[]
   /** 选项 → 该选项的说明。不需要额外说明时给 null */
-  criteria: Record<string, string | null>
+  criteria: Record<string, JudgeState | null>
 }
 
 /** 评分题。criteria 是**有序**的档位描述，2~10 档 */
 export interface ScoreQuestion {
   type: 'score'
   instructions: string | Record<string, unknown> | unknown[]
-  criteria: string[]
+  criteria: JudgeState[]
 }
 
-export type JudgeQuestion = NoulQuestion | ChoiceQuestion | ScoreQuestion
+/** 实验能力：每题只找一个目标。目标不存在仍会返回框，必须另问 Noul 确认存在。 */
+export interface BoxQuestion {
+  type: 'box'
+  instructions: JudgeState
+}
+
+export type JudgeQuestion = NoulQuestion | ChoiceQuestion | ScoreQuestion | BoxQuestion
 
 export interface NoulAnswer {
   type: 'noul'
@@ -140,7 +153,14 @@ export interface ScoreAnswer {
   confidence: number
 }
 
-export type JudgeAnswer = NoulAnswer | ChoiceAnswer | ScoreAnswer
+export interface BoxAnswer {
+  type: 'box'
+  /** 相对原图宽高的 0~1 坐标，从左上角起算 */
+  box: { top: number; bottom: number; left: number; right: number }
+  confidence: number
+}
+
+export type JudgeAnswer = NoulAnswer | ChoiceAnswer | ScoreAnswer | BoxAnswer
 
 /** 问题 id → 答案。id 是调用方自己取的，原样回来 */
 export type JudgeAnswers = Record<string, JudgeAnswer>
@@ -158,6 +178,21 @@ export interface JudgeResult {
 
 /** state 可以是字符串，也可以是结构化数据 —— 后者更好，字段名本身就是线索 */
 export type JudgeState = string | Record<string, unknown> | unknown[]
+
+/** TypeSafe 不接受图片 URL；复用已有图片的 base64，不另走对象存储上传。 */
+export interface JudgeImageAsset {
+  type: 'image'
+  format: 'png' | 'jpg' | 'jpeg'
+  /** 原始 base64，不含 data: 前缀。PNG/JPEG，每边 280~1568px，单图 ≤16MiB。 */
+  data_base64: string
+}
+
+export interface JudgeRequestOptions {
+  /** key 是图片引用：用 UUID 避免误替换普通文本；每张图必须被引用。 */
+  assets?: Record<string, JudgeImageAsset>
+  /** 显式启用实验长上下文；默认保持热路径的小请求预算。 */
+  longContext?: boolean
+}
 
 interface SystemOneResponse {
   model?: string
@@ -299,9 +334,10 @@ export function payloadSize(state: JudgeState, questions: Record<string, JudgeQu
 /** 超出厂商上限的请求不发。导出仅为可测 */
 export function payloadTooLarge(
   state: JudgeState,
-  questions: Record<string, JudgeQuestion>
+  questions: Record<string, JudgeQuestion>,
+  longContext = false
 ): boolean {
-  return payloadSize(state, questions) > MAX_PAYLOAD_CHARS
+  return payloadSize(state, questions) > (longContext ? MAX_LONG_CONTEXT_CHARS : MAX_PAYLOAD_CHARS)
 }
 
 /**
@@ -320,8 +356,45 @@ export async function requestJudgement(
   state: JudgeState,
   questions: Record<string, JudgeQuestion>,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: JudgeRequestOptions = {}
 ): Promise<JudgeResult> {
+  const plan = isPlanProvider(provider.id)
+  const hasImages = Object.keys(options.assets ?? {}).length > 0
+  const hasBox = Object.values(questions).some((question) => question.type === 'box')
+  if (plan && (hasImages || hasBox || options.longContext)) {
+    throw new Error('当前套餐判定接口不支持图片、Box 或实验长上下文，请使用 TypeSafe 来源')
+  }
+  if (hasBox && !hasImages) throw new Error('Box 判定需要提供图片 assets')
+  if (hasBox && /^jev-1\.13(?:\.|$)/.test(modelId)) {
+    throw new Error('Box 判定需要 Jev 1.14 或更新版本')
+  }
+  if (payloadTooLarge(state, questions, options.longContext)) {
+    throw new Error('判定请求体过大，请筛掉与判据无关的字段，或显式启用 longContext')
+  }
+  for (const asset of Object.values(options.assets ?? {})) {
+    if (
+      asset.type !== 'image' ||
+      !['png', 'jpg', 'jpeg'].includes(asset.format) ||
+      !asset.data_base64 ||
+      asset.data_base64.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(asset.data_base64)
+    ) {
+      throw new Error('判定图片需要 PNG/JPEG 的原始 base64（不含 data: 前缀）')
+    }
+    if (Buffer.byteLength(asset.data_base64, 'base64') > 16 * 1024 * 1024) {
+      throw new Error('判定图片超过单图 16MiB 上限')
+    }
+  }
+  // 套餐协议的 state 只收文本。图片不计入字符预算，单独按实际 JSON 字节卡请求体。
+  const requestBody = JSON.stringify(
+    plan
+      ? { model: modelId, state: asText(state), questions: toPlanQuestions(questions) }
+      : { model: modelId, state, questions, ...(hasImages ? { assets: options.assets } : {}) }
+  )
+  if (Buffer.byteLength(requestBody, 'utf8') > MAX_REQUEST_BYTES) {
+    throw new Error('判定请求体超过 32MiB 上限，请减少图片或压缩图片尺寸')
+  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   /*
@@ -339,20 +412,17 @@ export async function requestJudgement(
   try {
     const apiKey = await resolveApiKey(provider.apiKey)
 
-    const plan = isPlanProvider(provider.id)
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+    })
+    for (const [name, value] of Object.entries(provider.headers ?? {})) headers.set(name, value)
+    if (hasImages) headers.set('TypeSafe-Danger-Zone-Images', 'true')
+    if (options.longContext) headers.set('TypeSafe-Danger-Zone-Long-Context', 'true')
     const response = await fetch(judgeUrl(provider), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-        ...(provider.headers ?? {})
-      },
-      // 套餐协议的 state 只收纯文本（≤ 48000 字符），结构化的序列化成 JSON 文本发
-      body: JSON.stringify(
-        plan
-          ? { model: modelId, state: asText(state), questions: toPlanQuestions(questions) }
-          : { model: modelId, state, questions }
-      ),
+      headers,
+      body: requestBody,
       signal: controller.signal
     })
 
@@ -401,7 +471,7 @@ export async function judgeAvailable(): Promise<boolean> {
   return (await resolveJudgeBinding()) !== null
 }
 
-export interface JudgeOptions {
+export interface JudgeOptions extends JudgeRequestOptions {
   timeoutMs?: number
   signal?: AbortSignal
   /** 失败时的去向。默认 console.warn（主进程里进 electron-log），调用方可以换成自己的 logger */
@@ -434,23 +504,14 @@ export async function judge(
     const binding = await resolveJudgeBinding()
     if (!binding) return null
 
-    if (payloadTooLarge(state, questions)) {
-      onError(
-        new Error(
-          `判定请求体过大（${payloadSize(state, questions)} 字符，上限 ${MAX_PAYLOAD_CHARS}），` +
-            '先在代码里筛掉与判据无关的字段'
-        )
-      )
-      return null
-    }
-
     return await requestJudgement(
       binding.provider,
       binding.modelId,
       state,
       questions,
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      options.signal
+      options.signal,
+      options
     )
   } catch (error) {
     onError(error)
@@ -503,4 +564,34 @@ export function confidentScore(
   if (answer?.type !== 'score') return null
   if (answer.confidence < minConfidence) return null
   return answer.level ?? Math.round(answer.score)
+}
+
+/** Box 永远返回框；只有存在性和置信度都过线、坐标有效时才允许调用方使用。 */
+export function confidentBox(
+  answer: JudgeAnswer | undefined,
+  minConfidence: number,
+  presence: JudgeAnswer | undefined,
+  minPresence: number
+): BoxAnswer['box'] | null {
+  if (
+    answer?.type !== 'box' ||
+    !isYes(presence, minPresence) ||
+    !Number.isFinite(answer.confidence) ||
+    answer.confidence < minConfidence ||
+    answer.confidence > 1 ||
+    !answer.box
+  ) {
+    return null
+  }
+  const { top, bottom, left, right } = answer.box
+  if (
+    ![top, bottom, left, right].every(
+      (value) => Number.isFinite(value) && value >= 0 && value <= 1
+    ) ||
+    top >= bottom ||
+    left >= right
+  ) {
+    return null
+  }
+  return { top, bottom, left, right }
 }

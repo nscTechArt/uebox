@@ -1508,6 +1508,14 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "displayName": "Jev（最新）"
       },
       {
+        "id": "jev-preview",
+        "displayName": "Jev Preview"
+      },
+      {
+        "id": "jev-1.14.0",
+        "displayName": "Jev 1.14.0"
+      },
+      {
         "id": "jev-1.13.0",
         "displayName": "Jev 1.13（锁定版本）"
       }

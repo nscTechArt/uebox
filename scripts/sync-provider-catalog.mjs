@@ -1529,6 +1529,9 @@ const MANUAL_ENTRIES = {
       // 别名，跟着厂商滚动。默认给这个 —— 判定的问题是我们写死在代码里的，
       // 版本锁死收益不大，而新版本修的正是 jaggedness 上那些已知短板。
       'jev-latest': { id: 'jev-latest', name: 'Jev（最新）' },
+      // 2026-10-14 发布：https://typesafe.ai/blog/jev-1-14
+      'jev-preview': { id: 'jev-preview', name: 'Jev Preview' },
+      'jev-1.14.0': { id: 'jev-1.14.0', name: 'Jev 1.14.0' },
       // 要可复现的判定时绑这个：同一份 state 同一组问题，换了版本答案会变
       'jev-1.13.0': { id: 'jev-1.13.0', name: 'Jev 1.13（锁定版本）' }
     }
