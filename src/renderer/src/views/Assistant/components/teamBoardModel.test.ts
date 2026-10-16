@@ -112,6 +112,26 @@ describe('buildBoardModel：这一轮到哪了', () => {
     expect(build(fresh, true).verdict).toBeNull()
   })
 
+  it('每次验收各占往来里一条；老数据没有验收事件时拿最近那次补一条', () => {
+    const verdicts = (t: TeamStateView): string[] =>
+      build(t)
+        .log.filter((e) => e.kind === 'verdict')
+        .map((e) => e.verdict ?? '')
+    const history = team({
+      verdict: 'pass',
+      verdictAt: min(1),
+      deliveries: 3,
+      events: [
+        { kind: 'verdict', verdict: 'fail', at: min(20) },
+        { kind: 'crashed', at: min(15) },
+        { kind: 'verdict', verdict: 'fail', at: min(10) },
+        { kind: 'verdict', verdict: 'pass', at: min(1) }
+      ]
+    })
+    expect(verdicts(history)).toEqual(['pass', 'fail', 'fail'])
+    expect(verdicts(team({ verdict: 'fail', verdictAt: min(1), deliveries: 1 }))).toEqual(['fail'])
+  })
+
   it('这一轮之前交回的放进「更早」；这一轮的按开工先后', () => {
     const t = team({
       jobs: [

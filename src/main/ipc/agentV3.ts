@@ -119,7 +119,7 @@ import {
   createGoalLoop,
   parseGoalCommand
 } from '../agent-v3/core/goalLoop'
-import { parseTeamCommand } from '../agent-v3/core/team/teamCommand'
+import { activeLoop, parseTeamCommand } from '../agent-v3/core/team/teamCommand'
 import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
 import { createTeamStore, PRODUCER } from '../agent-v3/core/team/teamStore'
 import { createTeamLive, type TeamLive } from '../agent-v3/core/team/teamLive'
@@ -646,6 +646,10 @@ async function prepareTeam(
     onVerdict: async (verdict) => {
       options.team = applyVerdict(options.team ?? team, verdict)
       await saveExecutionOptions(ctx.sessionId, options)
+      // 执行记录只留最近一次；每次的结论进团队事件，往来记录里一条一条看得到（落盘失败不影响交付闸）
+      await store
+        .recordEvent({ kind: 'verdict', verdict: options.team.verdict ?? 'fail' })
+        .catch(() => undefined)
       changed()
     }
   }
@@ -2286,8 +2290,15 @@ export function registerAgentV3IPC(): void {
        * 目标也是**跨轮**的：`/goal` 定下之后一直挂在这条会话上，直到用户在输入框上方
        * 那一行点掉（`agent-v3:goal-end`）。用户再说一句就是新的一轮，复核重新武装 ——
        * 上一轮「停下来交给你」也好、复核通过也好，用户开口了就该按目标再验一遍。
+       *
+       * 两套只挂一套（`activeLoop`）：新敲的命令替掉旧的。
        */
-      const goalSource = goalObjective ?? previousOptions?.goal?.objective
+      const loop = activeLoop(
+        goalObjective ? 'goal' : teamObjective ? 'team' : null,
+        previousOptions
+      )
+      const goalSource =
+        loop === 'goal' ? (goalObjective ?? previousOptions?.goal?.objective) : undefined
       const goal = goalSource
         ? {
             objective: goalSource,
@@ -2304,11 +2315,14 @@ export function registerAgentV3IPC(): void {
             settled: false
           }
         : undefined
-      const team = teamObjective
-        ? startTeamRound(newTeamState(teamObjective))
-        : previousOptions?.team
-          ? startTeamRound(previousOptions.team)
-          : undefined
+      const team =
+        loop !== 'team'
+          ? undefined
+          : teamObjective
+            ? startTeamRound(newTeamState(teamObjective))
+            : previousOptions?.team
+              ? startTeamRound(previousOptions.team)
+              : undefined
 
       /*
        * 落盘的是**归属表**里那份，不是文件里那份。
@@ -2360,6 +2374,22 @@ export function registerAgentV3IPC(): void {
       if (team) emit('agent-v3:team-board', { sessionId })
       // 输入框上方那行「当前目标」：新对话第一轮时渲染层还查不到，落盘后推一下
       emit('agent-v3:goal-state', { sessionId })
+      // 被新命令替掉的那一套：面板跟着收起，说一声为什么不见了。任务板、队员留在盘上，同 `agent-v3:team-end`
+      if (previousOptions?.team && !team) {
+        liveTeams.delete(sessionId)
+        emit('agent-v3:team-board', { sessionId })
+        emit('agent-v3:notice', {
+          sessionId,
+          message: '已结束团队模式，这一轮按目标执行。',
+          level: 'info'
+        })
+      } else if (previousOptions?.goal && !goal) {
+        emit('agent-v3:notice', {
+          sessionId,
+          message: '已结束当前目标，这一轮按团队模式执行。',
+          level: 'info'
+        })
+      }
       await prepareTeam(ctx, options, emit)
       run.controller.signal.throwIfAborted()
       const { agent, selection, tools, allTools, runtime } = await createUnrealAgent(ctx)

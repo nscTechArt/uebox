@@ -15,3 +15,21 @@ export function parseTeamCommand(prompt: string): string | null {
   // 在这里报错的话，用户得到的是一句系统错误，而不是一次对话
   return objective || null
 }
+
+/**
+ * 这一轮挂哪一套：`/goal` 的复核还是工作室的交付闸。
+ *
+ * 两套都跨轮沿用，又各有一道收尾闸 —— 叠在一起的话收尾时两道都往回推，
+ * 复核员和验收员各跑一遍，谁也没设计过这种组合。所以只留一套：
+ * 新敲的命令替掉旧的；都没敲就沿用上一轮。老执行记录里两套都在的，留工作室
+ * （团队、任务板都在盘上，丢掉代价更大）。
+ */
+export function activeLoop(
+  typed: 'goal' | 'team' | null,
+  previous: { goal?: unknown; team?: unknown } | undefined
+): 'goal' | 'team' | null {
+  if (typed) return typed
+  if (previous?.team) return 'team'
+  if (previous?.goal) return 'goal'
+  return null
+}

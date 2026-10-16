@@ -9,7 +9,7 @@ import { z } from 'zod'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
-import { parseTeamCommand } from './teamCommand'
+import { activeLoop, parseTeamCommand } from './teamCommand'
 import { editorKeyActive, runWithEditorKey, withEditorKey } from './editorKey'
 import {
   createTeamStore,
@@ -64,6 +64,18 @@ describe('/team 命令', () => {
   it('和 /goal 互不认领', () => {
     expect(parseGoalCommand('/team 做一个塔防游戏')).toBeNull()
     expect(parseTeamCommand('/goal 做一个塔防游戏')).toBeNull()
+  })
+
+  it('目标和团队只挂一套：新敲的命令替掉旧的，没敲就沿用', () => {
+    const goal = { objective: '门' }
+    const team = newTeamState('塔防')
+    expect(activeLoop('team', { goal })).toBe('team')
+    expect(activeLoop('goal', { team })).toBe('goal')
+    expect(activeLoop(null, { goal })).toBe('goal')
+    expect(activeLoop(null, { team })).toBe('team')
+    expect(activeLoop(null, undefined)).toBeNull()
+    // 老执行记录里两套都在：留团队
+    expect(activeLoop(null, { goal, team })).toBe('team')
   })
 })
 

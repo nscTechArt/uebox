@@ -299,10 +299,13 @@ export function addTeamUsage(a: TeamUsage, b: TeamUsage): TeamUsage {
  * 它影响所有正在干活的人，界面上画成一条贯穿所有人的线，而不是几条一样的留言
  */
 export interface TeamEvent {
-  kind: 'crashed' | 'recovered' | 'recoverFailed'
+  /** `verdict` = 跑过一次验收。执行记录里只留最近一次结论，每次的结论记在这里 */
+  kind: 'crashed' | 'recovered' | 'recoverFailed' | 'verdict'
   at: number
   /** 崩溃的报错摘要、恢复失败的原因。给人看的，可能没有 */
   detail?: string
+  /** 只有 `verdict` 有。读不出结论记 fail，同交付闸 */
+  verdict?: TeamVerdict
 }
 
 export type TeamVerdict = 'pass' | 'fail' | 'blocked'

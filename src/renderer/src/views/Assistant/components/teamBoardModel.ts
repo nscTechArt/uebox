@@ -196,7 +196,8 @@ function eventEntry(event: TeamEvent, index: number): LogEntry {
     at: event.at,
     kind: event.kind,
     to: [],
-    text: event.detail ?? ''
+    text: event.detail ?? '',
+    ...(event.verdict ? { verdict: event.verdict } : {})
   }
 }
 
@@ -330,8 +331,9 @@ export function buildBoardModel(
       jobId: job.id
     }))
   const eventEntries = events.map(eventEntry)
+  // 每次验收都记成了事件；老数据没有，只能拿执行记录里最近那一次补一条
   const verdictEntry: LogEntry[] =
-    team.verdict && team.verdictAt !== undefined
+    team.verdict && team.verdictAt !== undefined && !events.some((e) => e.kind === 'verdict')
       ? [
           {
             key: `verdict:${team.verdictAt}`,
