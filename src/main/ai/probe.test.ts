@@ -70,6 +70,31 @@ describe('describeProbeError', () => {
     })
   })
 
+  /*
+   * 思考参数被拒的两种 400 各有明确改法，不能落进笼统的 badRequest。
+   * 两句都是用户现场截图里的原话（gpt-6.1-sol 经中转）。
+   */
+  describe('思考参数被拒', () => {
+    it('chat/completions 不收「工具 + reasoning_effort」→ 指向换 Responses 或关思考', () => {
+      const failure = describeProbeError(
+        new Error(
+          `400 {"message":"Function tools with reasoning_effort are not supported for gpt-6.1-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.","type":"invalid_request_error","param":"reasoning_effort"}`
+        )
+      )
+      expect(failure.code).toBe('toolsWithReasoningUnsupported')
+      expect(failure.raw).toContain('gpt-6.1-sol')
+    })
+
+    it('Responses 收到 reasoning_effort → 协议选错或网关改写', () => {
+      const failure = describeProbeError(
+        new Error(
+          `400 {"message":"Unsupported parameter: 'reasoning_effort'. In the Responses API, this parameter has moved to 'reasoning.effort'. Try again with the new parameter.","type":"invalid_request_error","code":"unsupported_parameter"}`
+        )
+      )
+      expect(failure.code).toBe('reasoningParamMoved')
+    })
+  })
+
   // 认不出来的原样透出，猜错方向比不猜更糟
   it('认不出的错误原样透出', () => {
     const failure = describeProbeError(new Error('某种没见过的错误'))
@@ -217,6 +242,56 @@ describe('testProvider 的探测方式', () => {
     await testProvider(providerWith([{ id: 'glm-4-plus' }], 'chat'), 'glm-4-plus')
 
     expect(urls[0]).toContain('/chat/completions')
+  })
+
+  /*
+   * 对话探测要和对话里同一种形状：带工具，会思考的模型带思考档位。只发光秃秃的 ping 时，
+   * 「工具 + reasoning_effort」被拒的配置照样显示「连接成功」，一开工就 400。
+   */
+  describe('对话探测的请求形状', () => {
+    function captureChatBody(bodies: Record<string, unknown>[]): void {
+      globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')))
+        return new Response(
+          JSON.stringify({
+            id: 'x',
+            object: 'chat.completion',
+            created: 0,
+            model: 'm',
+            choices: [
+              { index: 0, message: { role: 'assistant', content: 'pong' }, finish_reason: 'stop' }
+            ]
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }) as unknown as typeof fetch
+    }
+
+    it('会思考、能调工具的模型：请求里带工具和思考档位', async () => {
+      const bodies: Record<string, unknown>[] = []
+      captureChatBody(bodies)
+
+      await testProvider(
+        providerWith([{ id: 'thinker', supportsTools: true, supportsReasoning: true }], 'chat'),
+        'thinker'
+      )
+
+      expect(bodies[0]?.tools).toBeDefined()
+      expect(bodies[0]?.reasoning_effort).toBeDefined()
+    })
+
+    it('不会思考、标明不能调工具的模型：两样都不带，免得误报', async () => {
+      const bodies: Record<string, unknown>[] = []
+      captureChatBody(bodies)
+
+      await testProvider(
+        providerWith([{ id: 'plain', supportsTools: false, supportsReasoning: false }], 'chat'),
+        'plain'
+      )
+
+      expect(bodies[0]?.tools).toBeUndefined()
+      expect(bodies[0]?.reasoning_effort).toBeUndefined()
+    })
   })
 
   it('向量化探测的失败走同一套错误翻译', async () => {

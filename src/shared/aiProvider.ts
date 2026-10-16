@@ -1020,6 +1020,10 @@ export type ProbeErrorCode =
   | 'modelNotFound'
   | 'rateLimited'
   | 'badRequest'
+  /** chat/completions 不收「工具 + 思考」（OpenAI 新型号如此），要换 Responses 或关思考 */
+  | 'toolsWithReasoningUnsupported'
+  /** Responses 接口收到了 chat 那一套的 `reasoning_effort`：协议选错，或网关改写了请求 */
+  | 'reasoningParamMoved'
   | 'unreachable'
   /** 没归上类。原文照带，猜错了反而掩盖真实原因 */
   | 'unknown'

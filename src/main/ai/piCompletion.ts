@@ -102,10 +102,11 @@ export interface CompletionRequest {
   /** 原样并进请求体的额外字段（如 response_format）。只有 OpenAI 兼容那几家会读 */
   samplingParams?: Record<string, unknown>
   /**
-   * 请模型别思考。关不掉的模型（有些推理模型只有档位没有开关）pi 会夹到它支持的
-   * 最低一档（`clampThinkingLevel`），不报错。不给就按模型自己的默认。
+   * 思考档位。`off` 是请模型别思考：关不掉的模型（有些推理模型只有档位没有开关）pi 会
+   * 夹到它支持的最低一档（`clampThinkingLevel`），不报错。不给就按模型自己的默认。
+   * 给具体档位的只有「测试连接」：它要发出和对话里同一种形状的请求，见 probe.ts
    */
-  reasoning?: 'off'
+  reasoning?: 'off' | ThinkingLevel
 }
 
 /** 一条纯文本的用户消息。单轮调用点占多数，省得每处都拼一遍 */
@@ -179,6 +180,7 @@ export async function complete(
     ...(request.samplingParams ? { samplingParams: request.samplingParams } : {})
   }
   // 思考档位只有 simple 那条路认。`off` 不在 pi 的类型里但运行时认，理由见 streamFn 的 toPiReasoning。
+  // 下面那个 as 只为 `off`；具体档位本来就是 ThinkingLevel
   // 有几家光靠 `off` 关不掉，得在请求体里补自家字段（见 piModel 的 thinkingOffFields）
   const offFields = request.reasoning === 'off' ? thinkingOffFields(provider.baseUrl) : undefined
   const message = request.reasoning

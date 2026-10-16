@@ -13,7 +13,7 @@ import { requestEmbeddings } from './embedding'
 import { requestJudgement } from './judge'
 import { requestSpeech } from './speech'
 import { probeStt } from './stt'
-import { complete, completeText, userMessage } from './piCompletion'
+import { complete, completeText, resolveModel, userMessage } from './piCompletion'
 import type { ModelConfig, ProviderConfig } from './types'
 
 /**
@@ -154,10 +154,20 @@ export async function testProvider(
       return { ok: true }
     }
 
-    // 探测走的必须是**正式调用同一条路**（pi），否则测得过的配置未必用得了：
-    // 上一版这里是另一套 HTTP 实现，ChatGPT 订阅在那边一调就 400
-    await completeText(provider, modelId, {
+    /*
+     * 探测走的必须是**正式调用同一条路**（pi），否则测得过的配置未必用得了：
+     * 上一版这里是另一套 HTTP 实现，ChatGPT 订阅在那边一调就 400。
+     *
+     * 请求的**形状**也得和对话里一样：带工具，会思考的模型带上思考档位。只发一句光秃秃
+     * 的 ping 时，测试连接显示「连接成功」，一开工就 400 —— 真实案例：中转上的
+     * gpt-6.1-sol 配成 openai-completions，chat/completions 不收「工具 + reasoning_effort」，
+     * 而这两样对话里每一轮都带。工具只放着不执行，模型调不调都算通。
+     */
+    const { model: piModel } = resolveModel(provider, modelId)
+    await complete(provider, modelId, {
       messages: [userMessage('ping')],
+      ...(model?.supportsTools !== false ? { tools: [CHECKUP_TOOL] } : {}),
+      ...(piModel.reasoning ? { reasoning: 'low' as const } : {}),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
     })
     return { ok: true }
@@ -189,6 +199,19 @@ export function describeProbeError(error: unknown): ProbeFailure {
   // 按关键词先命中限流分支，就会把一次服务端故障说成「你额度不够」。
   if (/\b5\d\d\b|server_error|internal server error|server had an error/i.test(raw))
     return { code: 'providerServerError', raw: raw.slice(0, 160) }
+
+  /*
+   * 思考参数被拒的两种 400，各自有明确的改法，不能混进下面笼统的 badRequest。
+   * 两句都是 OpenAI 的原话（中转原样透出），排在 400 前面是因为它们本身就带着 400。
+   * - chat/completions 不收「工具 + reasoning_effort」：要么换 Responses，要么关思考
+   * - Responses 收到了 chat 那一套的 `reasoning_effort`：协议选错了，或者中间的网关改写了请求
+   */
+  if (/reasoning_effort/i.test(raw) && /function tools|tools with/i.test(raw)) {
+    return { code: 'toolsWithReasoningUnsupported', raw: raw.slice(0, 300) }
+  }
+  if (/reasoning_effort/i.test(raw) && /reasoning\.effort|moved/i.test(raw)) {
+    return { code: 'reasoningParamMoved', raw: raw.slice(0, 300) }
+  }
 
   if (/\b404\b|model.*not found|no such model/i.test(raw)) return { code: 'modelNotFound' }
   if (/\b429\b|rate limit|quota/i.test(raw)) return { code: 'rateLimited' }

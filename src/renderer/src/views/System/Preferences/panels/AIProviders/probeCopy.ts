@@ -21,7 +21,14 @@ import type { ProbeFailure } from '@core/shared/aiProvider'
 import i18n from '@renderer/i18n'
 
 /** 带原文的那几种：光有文案说不清，必须让用户看见厂商原话 */
-const WITH_RAW = new Set(['forbidden', 'providerServerError', 'badRequest', 'listHttpError'])
+const WITH_RAW = new Set([
+  'forbidden',
+  'providerServerError',
+  'badRequest',
+  'toolsWithReasoningUnsupported',
+  'reasoningParamMoved',
+  'listHttpError'
+])
 
 export function describeProbeFailure(failure: ProbeFailure | string | null | undefined): string {
   const { t } = i18n.global
