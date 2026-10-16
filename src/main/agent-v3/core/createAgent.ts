@@ -1469,27 +1469,38 @@ function teamToolsFor(
   })
 }
 
-/** 取子 agent 最后一条 assistant 消息的文本作为返回值 */
+/**
+ * 子 agent 的结论：**最后一条** assistant 消息的文本。
+ *
+ * 只认最后一条，不往前找。最后一条被截断（`length`：输出额度全花在思考上、一个字没写）
+ * 或者没有文字时，往前找到的只会是半路的自言自语（「让我读一下契约」），
+ * 拿它当结论交回去，界面上就成了一份「成果」，制作人也以为这件活干完了。
+ * 这种情况算没交回：抛出去，派活方按「停下了」记账、能重开。
+ */
 function extractFinalText(messages: AgentMessage[], seedCount: number): string {
-  for (let i = messages.length - 1; i >= seedCount; i--) {
-    const message = messages[i] as { role?: string; content?: unknown }
-    if (message.role !== 'assistant') continue
-
-    const content = message.content
-    if (typeof content === 'string') return content
-    if (!Array.isArray(content)) continue
-
-    const text = content
-      .filter((block): block is { type: 'text'; text: string } => {
-        const b = block as { type?: string; text?: unknown }
-        return b.type === 'text' && typeof b.text === 'string'
-      })
-      .map((block) => block.text)
-      .join('')
-
-    if (text) return text
+  const last = messages
+    .slice(seedCount)
+    .findLast((m) => (m as { role?: string }).role === 'assistant') as
+    | { content?: unknown; stopReason?: string }
+    | undefined
+  if (last?.stopReason === 'length') {
+    throw new Error('回复超出模型的输出上限被截断，没有交回结论')
   }
-  return '(子 agent 没有产出文本结论)'
+  const content = last?.content
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((block): block is { type: 'text'; text: string } => {
+              const b = block as { type?: string; text?: unknown }
+              return b.type === 'text' && typeof b.text === 'string'
+            })
+            .map((block) => block.text)
+            .join('')
+        : ''
+  if (!text.trim()) throw new Error('最后一条回复没有文字，没有交回结论')
+  return text
 }
 
 /**

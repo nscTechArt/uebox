@@ -248,10 +248,9 @@
           class="slot q-frame"
           :class="{
             'is-open': openJobId === job.id,
-            'is-fresh': isFresh(job),
-            'is-mine': isMine(job)
+            'is-fresh': isFresh(job)
           }"
-          :style="{ order: i * 2, '--mine': memberColor(job.member) }"
+          :style="{ order: i * 2 }"
           :data-row-item="i"
           :aria-expanded="openJobId === job.id"
           @click="toggleScroll(job.id)"
@@ -357,7 +356,7 @@
     </button>
 
     <!-- 停下的活：不占成果架的格子，折成一行；点开看原因、停前在做什么，能交回制作人 -->
-    <section v-if="model.stops.length" class="q-fold-box q-frame is-stops">
+    <section v-if="stops.length" class="q-fold-box q-frame is-stops">
       <button
         type="button"
         class="fold-head"
@@ -371,7 +370,7 @@
         }}</span>
       </button>
       <ul v-if="stopsOpen" class="log-list">
-        <li v-for="job in model.stops" :key="job.id" class="stop-item">
+        <li v-for="job in stops" :key="job.id" class="stop-item">
           <div class="stop-top">
             <span class="card-swatch" :style="{ background: memberColor(job.member) }" />
             <span class="slot-who">{{ job.member }}</span>
@@ -700,14 +699,24 @@ const threadShown = computed(() => {
  * 这一轮还没派活时，拿之前交回的摆上去 —— 刚打开面板不该是一个空架子
  */
 const shelfBase = computed(() => {
-  const round = props.model.round
-  if (!round.length) return props.model.earlier.slice(0, 6)
-  const done = round.filter((j) => j.state === 'done').reverse()
-  const writing = round.filter((j) => j.state === 'writing')
-  return [...done, ...writing]
+  const { round, earlier } = props.model
+  const current = round.length
+    ? [
+        ...round.filter((j) => j.state === 'done').reverse(),
+        ...round.filter((j) => j.state === 'writing')
+      ]
+    : earlier.slice(0, 6)
+  if (!props.selected) return current
+  // 点了某个人：架子上只摆他的，之前几轮的也一起摆出来，不再折
+  const all = round.length ? [...current, ...earlier] : earlier
+  return all.filter((j) => j.memberId === props.selected)
 })
 const earlierToFold = computed(() =>
-  props.model.round.length ? props.model.earlier : props.model.earlier.slice(6)
+  props.selected
+    ? []
+    : props.model.round.length
+      ? props.model.earlier
+      : props.model.earlier.slice(6)
 )
 const earlierOpen = ref(false)
 const shelf = computed(() =>
@@ -717,7 +726,6 @@ const shelfDone = computed(() => shelf.value.filter((j) => j.state === 'done').l
 
 const isFresh = (job: JobView): boolean =>
   job.state === 'done' && job.current && Date.now() - (job.endedAt ?? 0) < FRESH_MS
-const isMine = (job: JobView): boolean => !!props.selected && job.memberId === props.selected
 
 const openJobId = ref<string | null>(null)
 const fullText = ref(false)
@@ -738,16 +746,22 @@ const shelfRow = useRowInsert(
 // ── 停下的活 ──────────────────────────────────────────────────────────────
 
 const stopsOpen = ref(false)
+/** 停下的活跟成果架一样，点了某个人就只看他的 */
+const stops = computed(() =>
+  props.selected
+    ? props.model.stops.filter((j) => j.memberId === props.selected)
+    : props.model.stops
+)
 
 /** 折起来那一行：几件、谁的；原因全一样（多半是同一个环境问题）就直接写出来 */
 const stopsLine = computed(() => {
-  const stops = props.model.stops
-  const names = [...new Set(stops.map((j) => j.member))].join('、')
-  const reasons = new Set(stops.map((j) => j.reason ?? ''))
+  const list = stops.value
+  const names = [...new Set(list.map((j) => j.member))].join('、')
+  const reasons = new Set(list.map((j) => j.reason ?? ''))
   const [reason] = reasons
   return reasons.size === 1 && reason
-    ? t('assistant.teamBoard.ui.stopsLineReason', { n: stops.length, who: names, reason })
-    : t('assistant.teamBoard.ui.stopsLine', { n: stops.length, who: names })
+    ? t('assistant.teamBoard.ui.stopsLineReason', { n: list.length, who: names, reason })
+    : t('assistant.teamBoard.ui.stopsLine', { n: list.length, who: names })
 })
 
 /** 这件活从开工到停下之间，这个人最后几步。动态只存在这次打开盒子之后，早的就没有 */
@@ -760,7 +774,11 @@ function stopSteps(job: JobView): ReturnType<typeof recentSteps> {
 const shelfHas = (jobId: string): boolean =>
   props.model.round.some((j) => j.id === jobId) || props.model.earlier.some((j) => j.id === jobId)
 function openFromLog(jobId: string): void {
-  if (!shelf.value.some((j) => j.id === jobId)) earlierOpen.value = true
+  if (!shelf.value.some((j) => j.id === jobId)) {
+    // 架子正按某个人筛着、这件不是他的：先撤掉筛选，不然点了日志架上什么也没开
+    if (props.selected) emit('select', null)
+    earlierOpen.value = true
+  }
   openJobId.value = jobId
   fullText.value = false
 }
@@ -1525,10 +1543,6 @@ button.q-frame {
   &.is-open {
     --f: var(--q-brass);
     background: var(--q-panel-hi);
-  }
-
-  &.is-mine:not(.is-open) {
-    --f: var(--mine);
   }
 
   &.is-fresh {
