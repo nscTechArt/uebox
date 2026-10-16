@@ -673,13 +673,14 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
   const team = (await loadExecutionOptions(sessionId))?.team
   if (!team) return null
   const store = createTeamStore(teamDirsFor(sessionId))
-  const [members, board, mail, activity, jobs, events] = await Promise.all([
+  const [members, board, mail, activity, jobs, events, usage] = await Promise.all([
     store.roster(),
     store.board(),
     store.mail(),
     store.activity(TEAM_ACTIVITY_LOOKBACK),
     store.jobs(TEAM_PANEL_JOBS),
-    store.events(TEAM_PANEL_EVENTS)
+    store.events(TEAM_PANEL_EVENTS),
+    store.usage()
   ])
   return {
     objective: team.objective,
@@ -693,6 +694,7 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
     mail: mail.slice(-TEAM_PANEL_MAIL),
     jobs,
     events,
+    ...(usage.total.total > 0 || usage.total.cost > 0 ? { usage } : {}),
     ...(liveTeams.has(sessionId) ? { live: liveTeams.get(sessionId)!.view() } : {})
   }
 }

@@ -93,6 +93,12 @@ import type { TeamSnapshots } from './team/snapshots'
 import type { TeamLive } from './team/teamLive'
 import { PRODUCER } from './team/teamStore'
 import {
+  EMPTY_TEAM_USAGE,
+  addTeamUsage,
+  teamUsageOf,
+  type TeamUsage
+} from '../../../shared/agentTeam'
+import {
   createBoardTool,
   createMessageTool,
   createTeamTools,
@@ -1044,6 +1050,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   if (search) restoreSearchBeforeFirstRun(agent, search)
 
   attachTeamLive(ctx, agent)
+  attachProducerUsage(ctx, agent)
 
   return {
     agent,
@@ -1161,6 +1168,11 @@ export async function runSubAgent(
     model?: TeamModel
     /** 跑完（含被停下）时交回它的全部消息。队员靠它记住干过的活 */
     keepMessages?: (messages: AgentMessage[]) => void
+    /**
+     * 跑完（含被停下、出错）时交回这一路新花掉的 token。工作室记团队的账用它。
+     * 和 `onUsage`（上下文用了多少）不是一回事：那个照旧不往上冒
+     */
+    keepUsage?: (usage: TeamUsage) => void
   }
 ): Promise<SubAgentResult> {
   input.signal?.throwIfAborted()
@@ -1259,6 +1271,8 @@ export async function runSubAgent(
    * 纪律：不认识的一律从严。
    */
   const ledger = input.ledger ?? new WriteLedger()
+  // 按每条回复的结束事件累计，不按最后的消息列表数：中途压缩过的话列表已经换了一份
+  let spent: TeamUsage = EMPTY_TEAM_USAGE
   // 按这次的参数算（dry_run 预演不算写）
   const metaByName = new Map(allTools.map((tool) => [tool.name, tool.unrealBox]))
 
@@ -1277,6 +1291,8 @@ export async function runSubAgent(
     // 子 agent 两步之间说的话（「先看车辆结构」）也冒泡上去：只有工具名的话，
     // 用户看得到它在调什么，看不出它为什么调、打算干嘛
     if (event.type === 'message_end') {
+      const message = event.message as { role?: string; usage?: Parameters<typeof teamUsageOf>[0] }
+      if (message.role === 'assistant') spent = addTeamUsage(spent, teamUsageOf(message.usage))
       const narration = readNarration(event.message)
       if (narration) input.onProgress?.(narration)
       return
@@ -1338,6 +1354,7 @@ export async function runSubAgent(
   } finally {
     input.signal?.removeEventListener('abort', onAbort)
     input.keepMessages?.(agent.state.messages)
+    input.keepUsage?.(spent)
   }
 }
 
@@ -1361,6 +1378,21 @@ const ACCEPTANCE_JUDGES = [
  *
  * 验收员、`task` 子任务不登记：它们不收留言。
  */
+/**
+ * 制作人自己花的 token 记进团队的总账。队员、验收员的由 `runSubAgent` 的 `keepUsage`
+ * 交给团队工具去记（见 `teamTools.ts`），这里只管制作人：每条回复结束记一笔。
+ */
+function attachProducerUsage(ctx: SessionContext, agent: Agent): void {
+  const store = ctx.isSubAgent ? undefined : ctx.team?.store
+  if (!store) return
+  agent.subscribe((event) => {
+    if (event.type !== 'message_end') return
+    const message = event.message as { role?: string; usage?: Parameters<typeof teamUsageOf>[0] }
+    if (message.role !== 'assistant') return
+    void store.addUsage(PRODUCER, teamUsageOf(message.usage)).catch(() => undefined)
+  })
+}
+
 function attachTeamLive(ctx: SessionContext, agent: Agent): void {
   const live = ctx.teamMember?.live ?? (ctx.isSubAgent ? undefined : ctx.team?.live)
   const name = ctx.teamMember?.name ?? (ctx.isSubAgent ? undefined : PRODUCER)
@@ -1447,6 +1479,7 @@ function teamToolsFor(
       onProgress,
       ledger,
       keepMessages,
+      keepUsage,
       pin
     }) => {
       // 队员用自己的锁主：两个队员改同一个资产会被挡下，而不是像 `task` 那样
@@ -1462,6 +1495,7 @@ function teamToolsFor(
             ledger,
             onProgress,
             keepMessages,
+            ...(keepUsage ? { keepUsage } : {}),
             ...(member.namespaces ? { namespaces: member.namespaces } : {}),
             ...(member.readOnly ? { readOnly: true } : {}),
             ...(signal ? { signal } : {})
@@ -1471,7 +1505,15 @@ function teamToolsFor(
         }
       })
     },
-    runAcceptance: async ({ report, howToPlay, projectPath, packageExe, signal, onProgress }) => {
+    runAcceptance: async ({
+      report,
+      howToPlay,
+      projectPath,
+      packageExe,
+      signal,
+      onProgress,
+      keepUsage
+    }) => {
       // 验收员什么都不带：不看制作过程，只看交付说明和游戏本身。
       // 不给审批通道，理由同 `/goal` 的审计员：它的授权边界就是 `isAuditorTool`
       const result = await runSubAgent(ctx, {
@@ -1486,6 +1528,7 @@ function teamToolsFor(
         withoutApproval: true,
         seedMessages: [],
         onProgress,
+        keepUsage,
         ...(signal ? { signal } : {})
       })
       return result.text

@@ -12,6 +12,7 @@ import {
   type ProbeFailure,
   type ProviderKind
 } from './aiProvider'
+import { mergeTurnUsage, toTurnUsage, type AgentTurnUsage, type PiUsageLike } from './agentUsage'
 
 /**
  * 老名册的模型档位。`strong` 跟着制作人，`fast` 走用户绑的对话模型。
@@ -247,6 +248,50 @@ export interface TeamJob {
    * 这件就不再算「停着没人管」
    */
   reopenedAt?: number
+  /** 这件活花掉的 token（交回、停下都记）。老数据、一个请求都没发出去的没有 */
+  usage?: TeamUsage
+}
+
+/** 验收员在用量账上的名字。和 `PRODUCER` 一样不许队员用 */
+export const ACCEPTOR = 'acceptor'
+
+/**
+ * 一个人（或整个团队）花掉的 token。口径同回复下面的「本轮消耗」（`AgentTurnUsage`），
+ * 多记一项 `unpriced`：第三方网关、套餐常常没有价目表，那部分算出来的金额是 0。
+ * 只有 token 数是可靠的；金额只含有价目的部分，界面据此说明。
+ */
+export interface TeamUsage extends AgentTurnUsage {
+  /** 其中没有价目的 token */
+  unpriced: number
+}
+
+/**
+ * 团队的用量总账。单独一份，不靠逐件活加：活的账只留最近 200 件，会被截掉。
+ * 键是队员名；制作人是 `PRODUCER`，验收员是 `ACCEPTOR`。
+ */
+export interface TeamUsageLedger {
+  total: TeamUsage
+  byWho: Record<string, TeamUsage>
+}
+
+export const EMPTY_TEAM_USAGE: TeamUsage = Object.freeze({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  total: 0,
+  cost: 0,
+  unpriced: 0
+})
+
+/** 一次模型请求报的用量 → 团队账的一笔。没给价（cost 为 0）的整笔算进 `unpriced` */
+export function teamUsageOf(usage: PiUsageLike | undefined | null): TeamUsage {
+  const turn = toTurnUsage(usage)
+  return { ...turn, unpriced: turn.cost > 0 ? 0 : turn.total }
+}
+
+export function addTeamUsage(a: TeamUsage, b: TeamUsage): TeamUsage {
+  return { ...mergeTurnUsage(a, b), unpriced: (a.unpriced ?? 0) + (b.unpriced ?? 0) }
 }
 
 /**
@@ -285,6 +330,8 @@ export interface TeamStateView {
   jobs?: TeamJob[]
   /** 最近的团队事件（编辑器崩溃、恢复），旧的在前。老数据没有 */
   events?: TeamEvent[]
+  /** 团队花掉的 token 总账（制作人、队员、验收员）。老数据没有 */
+  usage?: TeamUsageLedger
   /** 此刻谁在跑、谁在等。只有这条对话这次运行里跑过团队才有（内存里的事，不落盘） */
   live?: TeamLiveView
   /**

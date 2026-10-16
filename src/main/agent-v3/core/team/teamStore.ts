@@ -20,8 +20,10 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 
 import {
+  EMPTY_TEAM_USAGE,
   PRODUCER,
   TASK_STATUSES,
+  addTeamUsage,
   type BoardTask,
   type MemberTier,
   type TaskStatus,
@@ -29,7 +31,9 @@ import {
   type TeamJob,
   type TeamMail,
   type TeamMember,
-  type TeamModel
+  type TeamModel,
+  type TeamUsage,
+  type TeamUsageLedger
 } from '../../../../shared/agentTeam'
 
 export { PRODUCER, TASK_STATUSES }
@@ -41,7 +45,9 @@ export type {
   TeamJob,
   TeamMail,
   TeamMember,
-  TeamModel
+  TeamModel,
+  TeamUsage,
+  TeamUsageLedger
 }
 
 export type BoardPatch = Partial<Omit<BoardTask, 'updatedAt'>> & { id: string }
@@ -107,10 +113,12 @@ export interface TeamStore {
   activity(limit?: number): Promise<TeamActivity[]>
   /** 一件活开工了：记下来，返回它（交回、停下时按 id 收尾） */
   startJob(member: string, brief: string): Promise<TeamJob>
-  /** 一件活交回来了或停下了 */
+  /** 一件活交回来了或停下了。带了用量就记在这件活上，同时记进总账 */
   finishJob(
     id: string,
-    end: { outcome: 'done'; report: string } | { outcome: 'stopped'; reason: string }
+    end: ({ outcome: 'done'; report: string } | { outcome: 'stopped'; reason: string }) & {
+      usage?: TeamUsage
+    }
   ): Promise<void>
   /**
    * 还挂着「在干」的活一律收成停下。新一次运行开始时调：上次运行被打断（盒子关了、崩了）的活
@@ -120,6 +128,12 @@ export interface TeamStore {
   /** 用户把一件停下的活交回制作人：记下时刻，返回这件活（没有这件、或它不是停下的，回 undefined） */
   reopenJob(id: string): Promise<TeamJob | undefined>
   jobs(limit?: number): Promise<TeamJob[]>
+  /**
+   * 记一笔用量进总账（不挂在哪件活上的：制作人、验收员）。
+   * 不推界面：制作人每次请求都记一笔，那么推会让面板跟着每条回复重读
+   */
+  addUsage(who: string, usage: TeamUsage): Promise<void>
+  usage(): Promise<TeamUsageLedger>
   recordEvent(event: Omit<TeamEvent, 'at'>): Promise<void>
   events(limit?: number): Promise<TeamEvent[]>
 }
@@ -162,6 +176,7 @@ export function createTeamStore(
   const activityFile = join(dirs.stateDir, 'activity.json')
   const jobsFile = join(dirs.stateDir, 'jobs.json')
   const eventsFile = join(dirs.stateDir, 'events.json')
+  const usageFile = join(dirs.stateDir, 'usage.json')
   const historyFile = (name: string): string =>
     join(dirs.stateDir, 'members', `${memberFileBase(name)}.json`)
 
@@ -191,6 +206,20 @@ export function createTeamStore(
 
   const sameName = (a: string, b: string): boolean =>
     a.trim().toLowerCase() === b.trim().toLowerCase()
+
+  const readUsage = (): Promise<TeamUsageLedger> =>
+    readJson<TeamUsageLedger>(usageFile, { total: { ...EMPTY_TEAM_USAGE }, byWho: {} })
+  /** 只在 `serial` 里调 */
+  const chargeUsage = async (who: string, usage: TeamUsage): Promise<void> => {
+    if (usage.total <= 0 && usage.cost <= 0) return
+    await fs.mkdir(dirs.stateDir, { recursive: true })
+    const ledger = await readUsage()
+    // 名字不分大小写，同 roster：「Art」和「art」是一个人，不记成两行
+    const key = Object.keys(ledger.byWho).find((k) => sameName(k, who)) ?? who
+    ledger.total = addTeamUsage(ledger.total, usage)
+    ledger.byWho[key] = addTeamUsage(ledger.byWho[key] ?? EMPTY_TEAM_USAGE, usage)
+    await writeJson(usageFile, ledger)
+  }
 
   return {
     dirs,
@@ -320,7 +349,10 @@ export function createTeamStore(
         job.outcome = end.outcome
         if (end.outcome === 'done') job.report = end.report
         else job.reason = end.reason
+        if (end.usage && end.usage.total > 0) job.usage = end.usage
         await writeJson(jobsFile, list)
+        // 同一段串行里记进总账：活上的数和总账不会一边记上、一边没记上
+        if (end.usage) await chargeUsage(job.member, end.usage)
       }).then(changed),
     closeOpenJobs: (reason) =>
       serial(async () => {
@@ -351,6 +383,8 @@ export function createTeamStore(
         return job
       }),
     jobs: async (limit = 60) => (await readJson<TeamJob[]>(jobsFile, [])).slice(-limit),
+    addUsage: (who, usage) => serial(() => chargeUsage(who, usage)),
+    usage: readUsage,
     recordEvent: (event) =>
       serial(async () => {
         await fs.mkdir(dirs.stateDir, { recursive: true })

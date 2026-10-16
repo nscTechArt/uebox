@@ -1,5 +1,5 @@
 /** @vitest-environment node */
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core'
@@ -32,6 +32,7 @@ import {
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './teamPrompt'
 import { parseGoalCommand, parseVerdict } from '../goalLoop'
 import type { SubAgentResult } from '../../tools/builtin/task'
+import { ACCEPTOR, teamUsageOf, type TeamUsage } from '../../../../shared/agentTeam'
 import { effectiveRisk, toToolSchema, type UnrealAgentTool } from '../../tools/defineTool'
 import { createApprovalGate, type ApprovalDeps } from '../approval'
 
@@ -264,6 +265,69 @@ describe('活的账和团队事件', () => {
     const events = await store.events()
     expect(events.map((e) => e.kind)).toEqual(['crashed', 'recovered'])
     expect(events[0]!.detail).toBe('Assertion failed')
+  })
+})
+
+describe('团队的用量', () => {
+  let dir: string
+  let store: TeamStore
+  const priced = teamUsageOf({ input: 100, output: 20, cacheRead: 30, cost: { total: 0.5 } })
+  const free = teamUsageOf({ input: 40, output: 10 })
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'team-usage-'))
+    store = createTeamStore({ stateDir: join(dir, 'state'), workspaceDir: join(dir, 'ws') })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('没价目的请求整笔算进 unpriced，有价目的不算', () => {
+    expect(priced).toMatchObject({ total: 150, cost: 0.5, unpriced: 0 })
+    expect(free).toMatchObject({ total: 50, cost: 0, unpriced: 50 })
+  })
+
+  it('交回、停下的活都把用量记在活上，并记进总账', async () => {
+    const a = await store.startJob('甲', '统计资产')
+    const b = await store.startJob('乙', '统计配置')
+    await store.finishJob(a.id, { outcome: 'done', report: '报告', usage: priced })
+    await store.finishJob(b.id, { outcome: 'stopped', reason: '被停下', usage: free })
+    const jobs = await store.jobs()
+    expect(jobs.map((j) => j.usage?.total)).toEqual([150, 50])
+    const ledger = await store.usage()
+    expect(ledger.total).toMatchObject({ total: 200, cost: 0.5, unpriced: 50 })
+    expect(Object.keys(ledger.byWho)).toEqual(['甲', '乙'])
+  })
+
+  it('不挂在活上的（制作人、验收员）直接记总账；名字不分大小写；全 0 不记', async () => {
+    await store.addUsage(PRODUCER, priced)
+    await store.addUsage('Art', free)
+    await store.addUsage('art', free)
+    await store.addUsage(ACCEPTOR, teamUsageOf({}))
+    const ledger = await store.usage()
+    expect(Object.keys(ledger.byWho)).toEqual([PRODUCER, 'Art'])
+    expect(ledger.byWho.Art).toMatchObject({ total: 100, unpriced: 100 })
+    expect(ledger.total.total).toBe(250)
+  })
+
+  it('活的账截掉旧的，总账不跟着少', async () => {
+    const one = teamUsageOf({ input: 1 })
+    const first = await store.startJob('甲', '最早的一件')
+    await store.finishJob(first.id, { outcome: 'done', report: 'ok', usage: one })
+    // 再塞满 200 件（直接写盘，逐件走 store 在 Windows 上太慢）
+    const file = join(store.dirs.stateDir, 'jobs.json')
+    const jobs = JSON.parse(readFileSync(file, 'utf8')) as unknown[]
+    for (let i = 2; i <= 200; i++) jobs.push({ id: `j${i}`, member: '甲', brief: 'x', startedAt: 0 })
+    writeFileSync(file, JSON.stringify(jobs))
+    const last = await store.startJob('甲', '最新的一件')
+    await store.finishJob(last.id, { outcome: 'done', report: 'ok', usage: one })
+
+    const kept = await store.jobs(500)
+    expect(kept).toHaveLength(200)
+    expect(kept.some((j) => j.id === first.id)).toBe(false)
+    expect((await store.usage()).total.total).toBe(2)
+  })
+
+  it('没有账的老团队读出来是空账', async () => {
+    expect(await store.usage()).toEqual({ total: expect.objectContaining({ total: 0 }), byWho: {} })
   })
 })
 
@@ -506,6 +570,42 @@ describe('团队工具', () => {
     })
     expect(jobs[1]).toMatchObject({ id: 'j2', outcome: 'stopped', reason: '编辑器连接断开' })
     expect(jobs[1]!.endedAt).toBeGreaterThanOrEqual(jobs[1]!.startedAt)
+  })
+
+  it('用量：队员的活（含停下的）记在活上和总账里，验收员的记进总账，验收被停下也记', async () => {
+    const usage: TeamUsage = teamUsageOf({ input: 10, output: 5 })
+    let fail = false
+    const t = tools({
+      runMember: async ({ keepUsage }) => {
+        keepUsage?.(usage)
+        if (fail) throw new Error('被停下')
+        return ok('好了')
+      },
+      runAcceptance: async ({ keepUsage }) => {
+        keepUsage(usage)
+        if (fail) throw new Error('验收被停下')
+        return 'VERDICT: PASS'
+      }
+    })
+    await t.team_hire!({ name: '程序', role: '写玩法' })
+    await t.team_send!({ to: '程序', message: '第一件' })
+    await t.team_deliver!({ report: 'r', how_to_play: 'h' })
+    fail = true
+    await expect(t.team_send!({ to: '程序', message: '第二件' })).rejects.toThrow()
+    await expect(t.team_deliver!({ report: 'r', how_to_play: 'h' })).rejects.toThrow()
+
+    expect((await store.jobs()).map((j) => [j.outcome, j.usage?.total])).toEqual([
+      ['done', 15],
+      ['stopped', 15]
+    ])
+    const ledger = await store.usage()
+    expect(ledger.byWho['程序']?.total).toBe(30)
+    expect(ledger.byWho[ACCEPTOR]?.total).toBe(30)
+    expect(ledger.total.total).toBe(60)
+  })
+
+  it('验收员的名字不能被招走', async () => {
+    await expect(tools().team_hire!({ name: 'Acceptor', role: 'x' })).rejects.toThrow(/验收员/)
   })
 
   it('任务板渲染：计数、负责人、证据', () => {

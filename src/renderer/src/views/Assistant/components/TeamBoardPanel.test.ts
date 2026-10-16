@@ -3,7 +3,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 
 import TeamBoardPanel from './TeamBoardPanel.vue'
 import { setOfficeStyle } from './teamOffice/officeStyle'
-import type { TeamModelCandidate, TeamStateView } from '@core/shared/agentTeam'
+import type { TeamModelCandidate, TeamStateView, TeamUsage } from '@core/shared/agentTeam'
 
 const now = Date.now()
 const min = (n: number): number => now - n * 60_000
@@ -144,6 +144,49 @@ describe('TeamBoardPanel 摘要行', () => {
     const ended = docked({ team: { ...team, external: true, ended: true } })
     expect(ended.find('.team-board-end').attributes('disabled')).toBeDefined()
     expect(ended.find('.team-board-end').text()).toBe('已结束')
+  })
+
+  it('团队用量：收起时跟在摘要后面，右侧面板里点开按人看；没价目的不显示金额', async () => {
+    const usage = (total: number, cost: number): TeamUsage => ({
+      input: total,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total,
+      cost,
+      unpriced: cost > 0 ? 0 : total
+    })
+    const withUsage: TeamStateView = {
+      ...team,
+      usage: {
+        total: { ...usage(46_000, 0.5), unpriced: 6000 },
+        byWho: {
+          acceptor: usage(6000, 0),
+          资产统计员: usage(30_000, 0.5),
+          producer: usage(10_000, 0)
+        }
+      }
+    }
+    expect(
+      mount(TeamBoardPanel, { props: { team: withUsage } })
+        .find('.team-board-head')
+        .text()
+    ).toContain('46k tokens · $0.5000')
+    // 没记过用量的老团队：不显示
+    expect(docked().find('.team-board-usage').exists()).toBe(false)
+
+    const wrapper = docked({ team: withUsage })
+    expect(wrapper.find('.team-board-head .head-meta').text()).not.toContain('tokens')
+    await wrapper.find('.team-board-usage').trigger('click')
+    const rows = [...document.querySelectorAll('.usage-pop-row')].map((el) => el.textContent)
+    expect(rows).toEqual([
+      '制作人10k tokens',
+      '资产统计员30k tokens · $0.5000',
+      '验收员6.0k tokens',
+      '合计46k tokens · $0.5000'
+    ])
+    expect(document.querySelector('.usage-pop')!.textContent).toContain('金额只含有价目的部分')
+    wrapper.unmount()
   })
 })
 

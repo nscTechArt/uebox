@@ -2790,6 +2790,16 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         days: '{n} days ago'
       },
       producer: 'Producer',
+      usage: {
+        label: '{total} tokens',
+        labelWithCost: '{total} tokens · {cost}',
+        open: 'Usage by member',
+        title: 'Team usage',
+        acceptor: 'Acceptance reviewer',
+        total: 'Total',
+        hint: 'Tokens the producer, teammates and acceptance reviewer sent to and received from models, counted the way providers bill',
+        partialCost: 'Some models have no price list; the amount covers only the priced part'
+      },
       fast: 'fast',
       readOnly: 'read-only',
       model: {

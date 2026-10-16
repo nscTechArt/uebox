@@ -2724,6 +2724,16 @@ export default {
         days: '{n} 天前'
       },
       producer: '制作人',
+      usage: {
+        label: '{total} tokens',
+        labelWithCost: '{total} tokens · {cost}',
+        open: '查看各成员的用量',
+        title: '团队用量',
+        acceptor: '验收员',
+        total: '合计',
+        hint: '制作人、队员和验收员实际发送给模型及模型返回的 token，按服务商计费口径累计',
+        partialCost: '部分模型没有价目，金额只含有价目的部分'
+      },
       fast: '快档',
       readOnly: '只读',
       model: {

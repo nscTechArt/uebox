@@ -39,7 +39,7 @@ import {
   type TeamModel,
   type TeamStore
 } from './teamStore'
-import { sameTeamModel } from '../../../../shared/agentTeam'
+import { ACCEPTOR, sameTeamModel, type TeamUsage } from '../../../../shared/agentTeam'
 import { getTargetProjectPath } from '../projectTargetContext'
 import { withoutSystemMessages } from '../systemMessages'
 import { checkupPassed } from './modelCheckups'
@@ -75,6 +75,8 @@ export interface RunMemberInput {
   keepMessages: (messages: AgentMessage[]) => void
   /** 钉给它的模型。不给 = 老规矩（制作人的模型，或老 `fast` 档的对话模型），见 `routeMember` */
   pin?: TeamModel
+  /** 跑完（含被停下）时交回这件活花掉的 token，记进这件活和团队的总账 */
+  keepUsage?: (usage: TeamUsage) => void
 }
 
 export interface TeamToolDeps {
@@ -90,6 +92,8 @@ export interface TeamToolDeps {
     packageExe?: string
     signal?: AbortSignal
     onProgress: (text: string) => void
+    /** 跑完（含被停下）时交回验收花掉的 token，记进团队的总账 */
+    keepUsage: (usage: TeamUsage) => void
   }) => Promise<string>
   /** 验收有了结论。宿主用它记「这一局有没有过验收」 */
   onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
@@ -234,6 +238,9 @@ function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<
     execute: async ({ name, role, model, model_reason, namespaces, read_only, role_type }) => {
       if (name.trim().toLowerCase() === PRODUCER) {
         throw new Error(`"${PRODUCER}" 是留给制作人（你）的名字，换一个`)
+      }
+      if (name.trim().toLowerCase() === ACCEPTOR) {
+        throw new Error(`"${ACCEPTOR}" 是留给验收员的名字，换一个`)
       }
       if (namespaces?.length) {
         const unknown = namespaces.filter((ns) => !deps.namespaces.includes(ns))
@@ -394,6 +401,8 @@ function createSendTool(
     let startedAt = Date.now()
     /** 活的账（`store.startJob`）：界面上「谁交回了什么」就是它。记不上不影响干活 */
     let jobId: string | undefined
+    /** 这件活花掉的 token。跑完（含停下）才有，记进这件活和总账 */
+    let spent: TeamUsage | undefined
     // 记一笔履历：哪个模型、干哪类活、交没交回来。说不准是哪个模型（老 fast 档）就不记
     const remember = (outcome: 'done' | 'unfinished'): void => {
       if (!route.used || !deps.models?.record) return
@@ -406,6 +415,18 @@ function createSendTool(
           ms: Date.now() - startedAt
         })
         .catch(() => undefined)
+    }
+    const settleJob = async (
+      end: { outcome: 'done'; report: string } | { outcome: 'stopped'; reason: string }
+    ): Promise<void> => {
+      const usage = spent ? { usage: spent } : {}
+      await (jobId
+        ? deps.store.finishJob(jobId, { ...end, ...usage })
+        : // 活的账没记上（startJob 失败）：用量照样进总账
+          spent
+          ? deps.store.addUsage(member.name, spent)
+          : Promise.resolve()
+      ).catch(() => undefined)
     }
     const previous = busy.get(key) ?? Promise.resolve()
     const run = previous
@@ -430,6 +451,7 @@ function createSendTool(
             message: inbox ? `${inbox}\n\n${message}` : message,
             history,
             ledger,
+            keepUsage: (usage) => (spent = usage),
             ...(route.pin ? { pin: route.pin } : {}),
             ...(ctx.signal ? { signal: ctx.signal } : {}),
             // 界面给这类进度统一加「团队：」前缀，这里只标是哪个队员
@@ -456,18 +478,13 @@ function createSendTool(
         result = await run
       } catch (error) {
         remember('unfinished')
-        if (jobId) {
-          const reason = error instanceof Error ? error.message : String(error)
-          await deps.store.finishJob(jobId, { outcome: 'stopped', reason }).catch(() => undefined)
-        }
+        const reason = error instanceof Error ? error.message : String(error)
+        // 停下的活也记已经花掉的：钱是真花了
+        await settleJob({ outcome: 'stopped', reason })
         throw error
       }
       remember('done')
-      if (jobId) {
-        await deps.store
-          .finishJob(jobId, { outcome: 'done', report: result.text })
-          .catch(() => undefined)
-      }
+      await settleJob({ outcome: 'done', report: result.text })
       // 按台账记下它实际改了什么 —— `team_status` 的「最近改动」读它，不靠队员自己说
       await deps.store
         .recordActivity({
@@ -817,14 +834,22 @@ function createDeliverTool(deps: TeamToolDeps): UnrealAgentTool<GoalVerdict | nu
       'PASS 之前不算交付；FAIL 就修它指出的问题，再按交付标准整体过一遍才交；BLOCKED 就停下来告诉用户缺什么。',
     input: deliverInput,
     execute: async ({ report, how_to_play, project_path, package_exe }, ctx) => {
-      const text = await deps.runAcceptance({
-        report,
-        howToPlay: how_to_play,
-        ...(project_path ? { projectPath: project_path } : {}),
-        ...(package_exe ? { packageExe: package_exe } : {}),
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
-        onProgress: (line) => ctx.report({ text: line })
-      })
+      // 验收员不进活的账（它不是队员、不交成果），用量只记进总账；被停下也记
+      let spent: TeamUsage | undefined
+      let text: string
+      try {
+        text = await deps.runAcceptance({
+          report,
+          howToPlay: how_to_play,
+          ...(project_path ? { projectPath: project_path } : {}),
+          ...(package_exe ? { packageExe: package_exe } : {}),
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
+          onProgress: (line) => ctx.report({ text: line }),
+          keepUsage: (usage) => (spent = usage)
+        })
+      } finally {
+        if (spent) await deps.store.addUsage(ACCEPTOR, spent).catch(() => undefined)
+      }
       const verdict = parseVerdict(text)
       await deps.onVerdict?.(verdict)
       const head = !verdict
