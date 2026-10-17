@@ -11,6 +11,7 @@ import {
   resolveAssistantMessage,
   resolveTargetChatSid
 } from './agentHandlerShared'
+import { PLAN_LINE_BUSY } from '@core/shared/creatorPlan'
 import { creatorPlanErrorInfo, isCreatorPlanChatErrorCode } from './creatorPlanChatError'
 
 const NETWORK_ERROR_CODES = [
@@ -201,6 +202,21 @@ export function createAgentControlHandlers(deps: AgentModeHandlersDeps) {
     // 而用户要做的是去管理订阅、重新连接
     if (isCreatorPlanChatErrorCode(data.planError)) {
       return creatorPlanErrorInfo(data.planError, t)
+    }
+    // 失败不扣费的套餐模型线路全挂（主进程已自动重试过一次）：不是坏了，留「接着跑」，
+    // 下面那条通用 503 文案会让人以为是服务挂了
+    if (data.planError === PLAN_LINE_BUSY) {
+      const title = t('aiProvider.creatorPlan.chat.line_busy.title')
+      const reason = t('aiProvider.creatorPlan.chat.line_busy.desc')
+      return {
+        toast: title,
+        display: `**${title}**
+
+${reason}`,
+        type: 'warning',
+        recoveryTitle: title,
+        recoveryReason: reason
+      }
     }
 
     const statusCode = data.statusCode || data.status

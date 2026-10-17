@@ -229,7 +229,7 @@ const DOMAIN_TERMS: Record<string, string> = {
   project:
     '工程 项目 创建 打开 启动 打包 发布 可执行文件 冒烟 project create open launch package build exe smoke',
   engine: '引擎 版本 安装 路径 engine version install path',
-  aigc: '生成 图片 视频 三维 generate image video 3d',
+  aigc: '生成 图片 视频 三维 音效 声音 generate image video 3d sound effect sfx',
   'video.production':
     '剪辑 成片 字幕 配音 台词 对白 语音合成 配乐 时间线 video edit subtitle voiceover tts speech render',
   note: '笔记 记事 待办 摘录 note todo memo',

@@ -19,6 +19,7 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { z } from 'zod'
 
 import { defineTool, type UnrealAgentTool } from '../../tools/defineTool'
+import { SET_SESSION_PROJECT_TOOL_NAME } from '../../tools/toolNames'
 import {
   formatWriteAudit,
   stripPendingToolCalls,
@@ -180,7 +181,9 @@ function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<
     namespaces: z
       .array(z.string())
       .optional()
-      .describe(`只给它这些命名空间的工具；省略 = 和你同一套。可选：${deps.namespaces.join(', ')}`),
+      .describe(
+        `只给它这些命名空间的工具；省略 = 全套（含你手上没有的写工具）。可选：${deps.namespaces.join(', ')}`
+      ),
     read_only: z
       .boolean()
       .optional()
@@ -860,4 +863,25 @@ export function createTeamTools(
         ]
       : [])
   ] as unknown as UnrealAgentTool<never>[]
+}
+
+/**
+ * 制作人手上留哪些工具：只读的，加上建工程、绑工程。其余（写文件、改编辑器、跑命令、
+ * `task` 子任务）一律收走，活只能招人派出去。团队工具在这之后追加，不经这道过滤。
+ *
+ * 2026-10-16 加，规则台账有记：制作人拿着全套写工具，两次都一个人没招、自己把游戏写完。
+ * 团队模式就是为了多个模型分工协作，想单干用普通对话就行。参照 Claude Code Agent Teams 的 delegate mode。
+ *
+ * - `task` 虽然是 safe，但它派出去的子 agent 带全套写工具，留着等于没收。
+ * - 建工程、绑工程留给制作人：队员开了工程，它这一轮的工具清单不会跟着刷新
+ *   （见 `runSubAgent` 的 `refreshEngine`），而快照、`team_status` 认的是这条会话绑的工程。
+ */
+const PRODUCER_SETUP_TOOLS = new Set(['project_manage', SET_SESSION_PROJECT_TOOL_NAME])
+
+export function producerTools(pool: UnrealAgentTool<never>[]): UnrealAgentTool<never>[] {
+  return pool.filter(
+    (tool) =>
+      PRODUCER_SETUP_TOOLS.has(tool.name) ||
+      (tool.name !== 'task' && tool.unrealBox.risk === 'safe')
+  )
 }

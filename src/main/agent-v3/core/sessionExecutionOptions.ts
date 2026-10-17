@@ -11,6 +11,8 @@ const optionsSchema = z.object({
   thinkingLevel: z
     .enum(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     .optional(),
+  /** 「快速」开关，续跑沿用这一轮的。见 `supportsFastMode` */
+  fastMode: z.boolean().optional(),
   skillLearning: z.enum(['off', 'ask', 'auto']).optional(),
   /**
    * 这条会话绑定的模型。第一轮开始时记下，之后一直用它 —— 用户在别的会话里

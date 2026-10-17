@@ -21,6 +21,7 @@ import { isLocalModelConfigured } from './resolveModel'
 import type { AiProviderSettings, ProviderConfig } from './types'
 import {
   applyRolePatch,
+  disallowedRoles,
   sanitizeRolePatch,
   unsavedRoles,
   type ProbeFailure,
@@ -238,10 +239,18 @@ export function registerAiProviderIPC(): void {
   ipcMain.handle('ai-provider:set-roles', async (_event, raw: unknown) => {
     try {
       const patch = sanitizeRolePatch(raw)
-      const saved = await updateSettings((settings) => ({
-        ...settings,
-        roles: applyRolePatch(settings.roles, patch)
-      }))
+      let refused: string[] = []
+      const saved = await updateSettings((settings) => {
+        // 模型只开放给部分角色的（套餐可选模型，见 ModelConfig.allowedRoles），绑到别的角色网关会拒：不存
+        refused = disallowedRoles(settings, patch)
+        const allowed = Object.fromEntries(
+          Object.entries(patch).filter(([role]) => !refused.includes(role))
+        ) as typeof patch
+        return { ...settings, roles: applyRolePatch(settings.roles, allowed) }
+      })
+      if (refused.length > 0) {
+        return { ok: false, error: `保存失败（${refused.join('、')}）：所选模型不能用于该角色。` }
+      }
       const lost = unsavedRoles(saved.roles, patch)
       if (lost.length > 0) {
         return {

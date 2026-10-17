@@ -11,6 +11,7 @@
 
 import { app } from 'electron'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import { z } from 'zod'
 
 import { defineV2Tool } from '../../adaptV2Tool'
@@ -31,6 +32,13 @@ import { summarizeAutoplay } from './summary'
 import { createFileTrace } from './trace'
 import type { PieRunReport } from './types'
 import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
+import { isPlanProvider } from '../../../../../shared/creatorPlan'
+import {
+  acceptAutoplayVisually,
+  summarizeVisualAcceptance,
+  type VisualAsk,
+  type VisualFrame
+} from './visualAcceptance'
 
 const Vec3Schema = z.object({ x: z.number(), y: z.number(), z: z.number() })
 
@@ -82,7 +90,32 @@ const AutoplaySchema = z.object({
     .max(60)
     .optional()
     .describe('每一步按住多少帧，默认 12（固定 60fps 下 0.2 秒）。关卡很大时可以调大'),
-  screenshot: z.boolean().optional().describe('结束时截一张玩家视角，默认 true')
+  screenshot: z.boolean().optional().describe('结束时截一张玩家视角，默认 true'),
+  visual_checks: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(40),
+        description: z.string().trim().min(1).max(500)
+      })
+    )
+    .min(1)
+    .max(6)
+    .refine((checks) => new Set(checks.map((check) => check.id)).size === checks.length, {
+      message: 'visual_checks 的 id 必须唯一'
+    })
+    .optional()
+    .describe(
+      '按时间顺序验收 1–6 个可见里程碑，如「钥匙图标出现在 HUD」「通关面板出现」。' +
+        '显式启用后，将包含 HUD 的窗口采样发送给已配置的 Jev 判定模型，并保存本机关键帧回放与报告。' +
+        '每项必须由更晚的独立画面证明；不支持用画面证明隐藏逻辑或音效。需要 Jev 1.13+，推荐 1.14。'
+    ),
+  visual_frames: z
+    .number()
+    .int()
+    .min(2)
+    .max(36)
+    .optional()
+    .describe('视觉验收采样帧数，默认 18，上限 36；仅 visual_checks 启用时生效')
 })
 
 /** 这个工程的试玩一次都没真跑起来之前，最多等它多久（大关卡加载、编着色器） */
@@ -133,6 +166,15 @@ export function createAutoplayTool(): ReturnType<typeof defineV2Tool> {
 达成会提前停。**until_log 是这里唯一的断言** —— 想证明某段逻辑真的执行了，
 就在那段逻辑里放 PrintString，再把那句写进 until_log。
 
+## 自己玩给用户看：视觉验收
+
+用户要求「你自己玩给我看」或验证画面效果时，给 visual_checks 写清按顺序出现的可见状态，例如：
+    { objective: "捡起钥匙并打开门", visual_checks: [{ id: "key", description: "HUD 出现钥匙图标" }, { id: "win", description: "游戏画面出现通关面板" }] }
+控制仍复用现有机器人；验收由 Jev 查看包含 HUD 的窗口采样。缺少判定模型或禁止截图会在启动前拒绝。
+返回 acceptance、关键帧回放 replay_path、时间轴 image_paths、完整 report_path。向用户展示回放（Markdown 图片）和逐项证据。
+回放是抽帧动画而非连续录像；只保证在不同采样时刻按顺序看到了这些状态，不证明中间行为、音效、键位或屏幕点击命中。
+未观察到不等于游戏坏了：先查看证据、采样缺口和运行日志，再决定修复或调整采样重试，不能凭控制器的 done 宣称通过。
+
 ## 必须如实转述给用户的限制
 
 - **移动和按键绕开了键位映射**：按键走动作层注入；长距离行走直接给角色加移动输入，连游戏自己的移动蓝图也绕过了。
@@ -157,6 +199,33 @@ export function createAutoplayTool(): ReturnType<typeof defineV2Tool> {
       const wsService = serviceManager.getWebSocketService()
       if (wsService.getConnectionCount() === 0) {
         return { success: false, error: UE_NOT_CONNECTED_MESSAGE }
+      }
+      let visualAsk: VisualAsk | undefined
+      let visualModel = ''
+      if (input.visual_checks) {
+        if (!editorScreenshotAllowed() || input.screenshot === false) {
+          return { success: false, error: '视觉验收需要截图授权；当前禁止截图，未启动试玩。' }
+        }
+        const { resolveJudgeBinding, requestJudgement } = await import('../../../../ai/judge')
+        const binding = await resolveJudgeBinding()
+        if (!binding || isPlanProvider(binding.provider.id)) {
+          return {
+            success: false,
+            error:
+              '视觉验收需要直连 TypeSafe Jev：设置 → AI 服务 → 配置 Jev 1.14 并设为「判定」角色。未启动试玩。'
+          }
+        }
+        visualModel = binding.modelId
+        visualAsk = (state, questions, options) =>
+          requestJudgement(
+            binding.provider,
+            binding.modelId,
+            state,
+            questions,
+            4_000,
+            abortSignal,
+            options
+          )
       }
       /*
        * objective 模式要判定模型（Jev 一类）当每一步的决策者。没配就当场拒绝，不起 PIE：
@@ -199,7 +268,12 @@ export function createAutoplayTool(): ReturnType<typeof defineV2Tool> {
       const runPromise = (
         wsService.callRequest<PieRunReport>(
           'pie.run',
-          { duration_seconds: duration, screenshot: wantScreenshot, fixed_fps: FIXED_FPS },
+          {
+            duration_seconds: duration,
+            screenshot: wantScreenshot,
+            fixed_fps: FIXED_FPS,
+            ...(visualAsk ? { frames: input.visual_frames ?? 18, frame_mode: 'window' } : {})
+          },
           connectionId,
           duration * 1000 + 120_000
         ) as Promise<PieRunReport>
@@ -219,7 +293,8 @@ export function createAutoplayTool(): ReturnType<typeof defineV2Tool> {
       const stopPie = async (reason: string): Promise<void> => {
         if (settled) return
         try {
-          await rpc.stop(reason)
+          // Cleanup must still reach the engine after the user aborts the tool.
+          await wsService.callRequest('pie.stop', { reason }, connectionId, 10_000)
         } catch {
           // 停不掉（会话刚好自己结束了）不影响报告
         }
@@ -324,18 +399,89 @@ export function createAutoplayTool(): ReturnType<typeof defineV2Tool> {
         }
       }
 
+      // Early goal completion can precede the next scheduled frame. Capture the still-running
+      // session before teardown; pie.run's final scene screenshot omits HUD and cannot replace it.
+      let finalFrame: VisualFrame | undefined
+      if (visualAsk && !settled && !abortSignal?.aborted) {
+        try {
+          const observation = await rpc.observe({ includeWidgets: false })
+          if (observation.session_active && observation.playing) {
+            const capture = (await call('editor.capture_app_window', { window: 'pie' }, 6_000)) as {
+              saved?: boolean
+              path?: string
+              window_source?: string
+            }
+            finalFrame = {
+              at: observation.session_elapsed ?? 0,
+              ...(capture.saved && capture.path && capture.window_source === 'requested'
+                ? { path: capture.path }
+                : { error: '未能捕获本次 PIE 窗口，不能用其他窗口冒充试玩画面' })
+            }
+          }
+        } catch {
+          finalFrame = { at: 0, error: '收尾窗口截图失败；保留定时采样证据' }
+        }
+      }
       await stopPie(result.outcome === 'goal_reached' ? '目标达成' : '机器人跑完了')
       await runPromise
       await trace.close()
 
       const final = report as PieRunReport | null
-      const images =
-        final?.screenshot_path && !screenshotBlocked
+      let acceptance: Awaited<ReturnType<typeof acceptAutoplayVisually>> | undefined
+      if (visualAsk && input.visual_checks) {
+        try {
+          acceptance = await acceptAutoplayVisually({
+            checks: input.visual_checks,
+            report: final ?? { ok: false, error: '没有收到试玩报告' },
+            finalFrame,
+            outputDir: join(app.getPath('userData'), 'autoplay-reports', randomUUID()),
+            model: visualModel,
+            ask: visualAsk,
+            signal: abortSignal,
+            requiredLog: input.goal?.until_log,
+            logSeen: result.goal?.logSeen
+          })
+        } catch (error) {
+          return {
+            success: false,
+            error: `试玩已结束，但视觉验收未完成：${error instanceof Error ? error.message : String(error)}`,
+            trace_path: trace.path
+          }
+        }
+      }
+      const images = acceptance
+        ? (
+            await Promise.all(acceptance.image_paths.map((path) => readScreenshotImage(path)))
+          ).flat()
+        : final?.screenshot_path && !screenshotBlocked
           ? await readScreenshotImage(final.screenshot_path)
           : []
 
+      const summary =
+        (acceptance
+          ? `${summarizeVisualAcceptance(acceptance)}\n\n机器人操作记录（不代表视觉验收通过）：\n`
+          : '') +
+        (!final?.ok ? `试玩报告失败：${final?.error ?? '未收到报告'}\n` : '') +
+        summarizeAutoplay(result, final?.ok ? final : null, trace.path) +
+        (screenshotBlocked ? `\n${EDITOR_SCREENSHOT_SKIPPED_NOTE}` : '')
       return {
+        // The adapter serializes in insertion order. Lead with acceptance, not tool completion.
+        summary,
         success: true,
+        ...(acceptance
+          ? {
+              acceptance,
+              failed_count:
+                acceptance.checks.filter((check) => check.status !== 'passed').length +
+                acceptance.blockers.length,
+              replay_path: acceptance.replay_path,
+              report_path: acceptance.report_path,
+              image_paths: [
+                ...(acceptance.replay_path ? [acceptance.replay_path] : []),
+                ...acceptance.image_paths
+              ]
+            }
+          : {}),
         outcome: result.outcome,
         ...(result.goal ? { goal: result.goal } : {}),
         findings: result.findings,
@@ -365,13 +511,10 @@ export function createAutoplayTool(): ReturnType<typeof defineV2Tool> {
             }
           : {}),
         ...(images.length > 0 ? { images } : {}),
-        ...(final?.screenshot_path && !screenshotBlocked
+        ...(final?.screenshot_path && !screenshotBlocked && !acceptance
           ? { screenshot_path: final.screenshot_path, image_paths: [final.screenshot_path] }
           : {}),
-        ...(trace.path ? { trace_path: trace.path } : {}),
-        summary:
-          summarizeAutoplay(result, final?.ok ? final : null, trace.path) +
-          (screenshotBlocked ? `\n${EDITOR_SCREENSHOT_SKIPPED_NOTE}` : '')
+        ...(trace.path ? { trace_path: trace.path } : {})
       }
     }
   })

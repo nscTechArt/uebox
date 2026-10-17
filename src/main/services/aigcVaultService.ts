@@ -11,13 +11,14 @@ import {
   type VaultInfo
 } from '../sqliteDataBase/VaultManager'
 
-export type AIGCAssetType = 'image' | 'model' | 'video' | 'music'
+export type AIGCAssetType = 'image' | 'model' | 'video' | 'music' | 'sound'
 
 const AIGC_SUBDIRS: Record<AIGCAssetType, string> = {
   image: '图片',
   model: '模型',
   video: '视频',
-  music: '音乐'
+  music: '音乐',
+  sound: '音效'
 }
 
 export function getAIGCVaultInfoOrThrow(): VaultInfo {

@@ -55,6 +55,10 @@ tools/FBX2glTF.exe
 # 二进制由 `node scripts/fetch-lore-cli.mjs` 核对后放进 resources/lore/<平台>/
 resources/lore/*/
 
+# 官方 Blender Lab MCP 源码 zip（27 MB 源码）不进 git：只提交 blender-mcp-source.json，
+# zip 由 `node scripts/fetch-blender-mcp.mjs --ensure` 按 commit 取来
+resources/blender-mcp/*.zip
+
 .tmp
 tmp/
 

@@ -11,7 +11,13 @@ vi.mock('../core/projectTargetContext', async (importOriginal) => targetContextM
 
 import { BANNED_TERMS, scan, type Leaf } from '../../../shared/terminologyGuard'
 import { createSkillTools } from '../capabilities/skills'
-import { createBoardTool, createMessageTool, createTeamTools } from '../core/team/teamTools'
+import {
+  createBoardTool,
+  createMessageTool,
+  createTeamTools,
+  TEAM_TOOL_NAMES
+} from '../core/team/teamTools'
+import type { TeamModels } from '../core/team/teamModels'
 import { createStatusTool } from '../core/team/teamStatus'
 import type { TeamSnapshots } from '../core/team/snapshots'
 import type { TeamStore } from '../core/team/teamStore'
@@ -61,8 +67,8 @@ import type { UnrealAgentTool } from './defineTool'
  *
  * ## 已知缺口
  *
- * `generate_3d_model` / `generate_video` 的参数表随用户绑的厂商变（注册时
- * `readSettingsSync` 读设置）：这里扫到的只有测试默认厂商的那一份参数说明。
+ * `generate_3d_model` 的参数 schema 与工具说明、`generate_video` 的工具说明会随绑定配置变化。
+ * 这里只扫描测试默认配置下生成的版本，不保证覆盖全部配置分支。
  */
 /** 桩只满足类型：说明是写死的常量，依赖只在执行时才被碰 */
 const sender = { send: () => undefined } as unknown as WebContents
@@ -112,6 +118,28 @@ function explicitlyListedTools(): UnrealAgentTool<never>[] {
       store,
       objective: '测试目标',
       namespaces: ['ue.blueprint'],
+      // 两个候选让模型选择分支的说明与参数也进入扫描。
+      models: {
+        candidates: [
+          {
+            providerId: 'test-provider',
+            modelId: 'model-a',
+            key: 'test-provider/model-a',
+            name: 'Model A',
+            providerName: 'Test provider',
+            vision: false
+          },
+          {
+            providerId: 'test-provider',
+            modelId: 'model-b',
+            key: 'test-provider/model-b',
+            name: 'Model B',
+            providerName: 'Test provider',
+            vision: false
+          }
+        ],
+        isAvailable: async () => true
+      } satisfies TeamModels,
       runMember: async () => ({ text: '', messageCount: 0 }),
       runAcceptance: async () => '',
       sessionId: 's',
@@ -206,15 +234,11 @@ function collectLeaves(tools: UnrealAgentTool<never>[]): Leaf[] {
 
 /**
  * 白名单：完整位置 → 放行的禁用词条目。语义与界面文案守卫相同，每条必须写清理由。
- * 全是正当用法，改写会丢失信息（引擎功能名、回执原因码原文）。
+ * 只收改写会丢失信息的正当用法（引擎功能名）。
  */
 const WHITELIST = new Map<string, string[]>([
   // "Session Frontend" 是 UE 自带的性能分析工具名，改名模型会找不到它
-  ['ue_capture_perf_trace.description', ['session']],
-  // `session-scoped` 是 open_project 回执里「切换被挡住」原因码的原文，
-  // 模型要拿说明里的同一串去对照 details
-  ['project_manage.description', ['session']],
-  ['set_session_project.description', ['session']]
+  ['ue_capture_perf_trace.description', ['session']]
 ])
 
 const TOOLS = collectTools()
@@ -229,16 +253,7 @@ describe('工具说明守卫', () => {
       expect(collected.has(name), `${name} 在 allToolNames() 里但没被收到`).toBe(true)
     }
     // 手工列出的工具不在 allToolNames() 里，逐个点名：工厂按依赖裁剪时这里会红
-    for (const name of [
-      'voice_report',
-      'team_hire',
-      'team_send',
-      'team_board',
-      'team_deliver',
-      'team_message',
-      'team_snapshot',
-      'team_status'
-    ]) {
+    for (const name of ['voice_report', ...TEAM_TOOL_NAMES]) {
       expect(collected.has(name), `${name} 没被收到`).toBe(true)
     }
     // 说明是模型读的：空说明等于这个工具对模型隐身，连名字一起报出来
@@ -247,6 +262,12 @@ describe('工具说明守卫', () => {
         true
       )
     }
+    expect(LEAVES.map((leaf) => leaf.path)).toEqual(
+      expect.arrayContaining([
+        'team_hire.parameters.properties.model.description',
+        'team_hire.parameters.properties.model_reason.description'
+      ])
+    )
   })
 
   describe('提取规则自证', () => {

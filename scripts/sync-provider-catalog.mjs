@@ -581,6 +581,12 @@ export const CURATED = [
     displayName: 'ElevenLabs Music'
   },
   {
+    id: 'elevenlabs-sfx',
+    group: 'sfx',
+    baseUrl: 'https://api.elevenlabs.io/v1',
+    displayName: 'ElevenLabs 音效'
+  },
+  {
     id: 'sunoapi-music',
     group: 'music',
     baseUrl: 'https://api.sunoapi.org/api/v1',
@@ -1156,6 +1162,14 @@ const MANUAL_ENTRIES = {
     doc: 'https://elevenlabs.io/docs/api-reference/music/compose',
     models: { music_v2: { id: 'music_v2', name: 'Eleven Music v2' } }
   },
+  'elevenlabs-sfx': {
+    name: 'ElevenLabs 音效',
+    env: ['ELEVENLABS_API_KEY'],
+    doc: 'https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert',
+    models: {
+      eleven_text_to_sound_v2: { id: 'eleven_text_to_sound_v2', name: 'Eleven Sound Effects v2' }
+    }
+  },
   'mureka-music': {
     name: 'Mureka',
     env: ['MUREKA_API_KEY'],
@@ -1515,6 +1529,9 @@ const MANUAL_ENTRIES = {
       // 别名，跟着厂商滚动。默认给这个 —— 判定的问题是我们写死在代码里的，
       // 版本锁死收益不大，而新版本修的正是 jaggedness 上那些已知短板。
       'jev-latest': { id: 'jev-latest', name: 'Jev（最新）' },
+      // 2026-10-14 发布：https://typesafe.ai/blog/jev-1-14
+      'jev-preview': { id: 'jev-preview', name: 'Jev Preview' },
+      'jev-1.14.0': { id: 'jev-1.14.0', name: 'Jev 1.14.0' },
       // 要可复现的判定时绑这个：同一份 state 同一组问题，换了版本答案会变
       'jev-1.13.0': { id: 'jev-1.13.0', name: 'Jev 1.13（锁定版本）' }
     }
@@ -1538,6 +1555,7 @@ const GROUP_KIND = {
   tts: 'tts',
   stt: 'stt',
   music: 'music',
+  sfx: 'sfx',
   search: 'search',
   judge: 'judge'
 }
@@ -1764,7 +1782,12 @@ const THINKING_OVERRIDES = {
     // Opus 5.5 的思考关不掉：发 `thinking: disabled` 在任何档位都是 400，
     // 所以 `off` 写成不存在（pi 给 Fable 5 也是这么标的）。
     // https://platform.claude.com/docs/en/build-with-claude/effort (2026-09-23)
-    'claude-opus-5-5': { adaptive: true, thinking: { off: null, xhigh: 'xhigh', max: 'max' } }
+    'claude-opus-5-5': { adaptive: true, thinking: { off: null, xhigh: 'xhigh', max: 'max' } },
+    // Sonnet 5.5 只认自适应思考：老式预算 400「requires adaptive thinking or
+    // thinking.type=between_tools」；`disabled` 也不收（关思考要发 between_tools，
+    // pi 没有这一档），所以 `off` 同样写成不存在。
+    // https://platform.claude.com/docs/en/build-with-claude/effort (2026-10-15)
+    'claude-sonnet-5-5': { adaptive: true, thinking: { off: null, xhigh: 'xhigh', max: 'max' } }
   },
 
   // 2026-09-16: https://api-docs.deepseek.com/guides/thinking_mode/
@@ -2054,7 +2077,7 @@ async function main() {
 
     const protocol = item.protocol || NPM_TO_PROTOCOL[source.npm] || 'openai-completions'
     const models =
-      item.group === 'tts' || item.group === 'music'
+      item.group === 'tts' || item.group === 'music' || item.group === 'sfx'
         ? Object.values(source.models).map((model) => ({
             id: model.id,
             displayName: model.name,

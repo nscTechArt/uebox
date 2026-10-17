@@ -187,6 +187,7 @@ export const ROLE_FALLBACK: Readonly<Record<ModelRole, readonly ModelRole[]>> = 
    */
   realtime: Object.freeze<ModelRole[]>(['realtime']),
   music: Object.freeze<ModelRole[]>(['music']),
+  sfx: Object.freeze<ModelRole[]>(['sfx']),
   tts: Object.freeze<ModelRole[]>(['tts']),
   /*
    * 语音识别。这张表里**唯一一个真有回落、却不能写在这里**的角色。

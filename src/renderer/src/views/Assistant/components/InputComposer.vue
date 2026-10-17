@@ -417,6 +417,7 @@
             >
               <PhLightbulb class="thinking-trigger-icon" />
               <span class="mode-trigger-label">{{ currentThinkingLabel }}</span>
+              <PhLightning v-if="fastModeOn" class="fast-mode-icon" weight="fill" />
               <PhCaretDown class="mode-trigger-arrow" :class="{ open: showThinkingDropdown }" />
               <span class="mode-trigger-glow" />
             </AppButton>
@@ -455,6 +456,26 @@
                     })
                   }}
                 </div>
+                <!-- 「快速」只有支持的模型才露出来（目前是 ChatGPT 订阅），见主进程 supportsFastMode -->
+                <button
+                  v-if="thinkingSupport?.fastMode"
+                  type="button"
+                  class="mode-option fast-mode-option"
+                  :class="{ active: fastModeOn }"
+                  :aria-pressed="fastModeOn"
+                  @click="aiConfigStore.setAgentFastMode(!fastModeOn)"
+                >
+                  <span class="thinking-level-name">
+                    <PhLightning class="fast-mode-icon" weight="fill" />
+                    {{ t('assistantInputComposer.thinking.fast') }}
+                  </span>
+                  <span class="mode-option-desc">{{
+                    t('assistantInputComposer.thinking.fastDesc')
+                  }}</span>
+                  <div v-if="fastModeOn" class="mode-option-check">
+                    <PhCheck />
+                  </div>
+                </button>
               </div>
             </Transition>
           </div>
@@ -545,9 +566,13 @@
                       :class="{ active: option.key === selectedAgentModelKey }"
                       role="menuitemradio"
                       :aria-checked="option.key === selectedAgentModelKey"
+                      :title="option.description"
                       @click="selectAgentModel(option)"
                     >
                       <span class="agent-model-option-name">{{ option.modelName }}</span>
+                      <span v-if="option.badge" class="agent-model-option-badge">
+                        {{ option.badge }}
+                      </span>
                       <span
                         v-if="option.modelName !== option.modelId"
                         class="mode-option-desc agent-model-option-id"
@@ -1284,6 +1309,10 @@ const thinkingLevel = computed(() => aiConfigStore.agentThinkingLevel)
 /** 选的档位当前模型没有时，内核会夹到最近的一档 —— 界面得说出来 */
 const effectiveThinkingLevel = computed(() =>
   resolveEffectiveLevel(thinkingLevel.value, thinkingSupport.value)
+)
+/** 开着、而且当前模型认这个开关，触发器上才亮那个闪电 */
+const fastModeOn = computed(
+  () => aiConfigStore.agentFastMode && thinkingSupport.value?.fastMode === true
 )
 const thinkingClamped = computed(() => effectiveThinkingLevel.value !== thinkingLevel.value)
 
@@ -3760,6 +3789,19 @@ onMounted(() => {
 }
 
 /* 厂商别名后面跟的档位原名 */
+.fast-mode-option {
+  border-top: 1px solid var(--color-border-subtle);
+  margin-top: 4px;
+}
+
+.fast-mode-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: var(--color-warning-text);
+}
+
 .thinking-alias {
   margin-left: 4px;
   font-family: var(--font-mono, monospace);
@@ -3857,6 +3899,26 @@ onMounted(() => {
   white-space: nowrap;
   font-size: var(--font-size-sm);
   font-weight: 500;
+}
+
+/* 有标签时标签紧跟名字，空白让给标签后面 */
+.agent-model-option-name:has(+ .agent-model-option-badge) {
+  flex: 0 1 auto;
+}
+
+/* 套餐清单给的标签（如「Beta」），样式同侧栏的 beta-tag */
+.agent-model-option-badge {
+  flex: none;
+  margin-right: auto;
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
 }
 
 .agent-model-option-id {

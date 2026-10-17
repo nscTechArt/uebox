@@ -102,4 +102,42 @@ describe('buildAgentModelCatalog', () => {
     expect(catalog.selected?.modelId).toBe('gpt-5.4')
     expect(catalog.binding).toEqual({ providerId: 'openai', modelId: 'gpt-5.4' })
   })
+
+  // 套餐的模型名、标签、能接的角色都是清单给的，这里只照着画
+  it('套餐来源：可选模型带服务端的标签和说明；不许接对话的模型不列', () => {
+    const value = settings({
+      providers: [
+        provider({
+          id: 'creator-plan',
+          displayName: 'Box Plan',
+          models: [
+            { id: 'uebox-chat', displayName: 'Box-Chat', allowedRoles: ['chat', 'agent'] },
+            {
+              id: 'uebox-chat-beta',
+              displayName: 'Box-Chat Beta',
+              badge: 'Beta',
+              description: '更便宜的对话线路',
+              allowedRoles: ['chat', 'agent', 'vision', 'summary']
+            },
+            { id: 'uebox-summary-only', displayName: 'Box-Lite', allowedRoles: ['summary'] }
+          ]
+        })
+      ],
+      roles: { chat: { providerId: 'creator-plan', modelId: 'uebox-chat' } }
+    })
+
+    const catalog = buildAgentModelCatalog(value)
+
+    expect(catalog.options.map((option) => option.modelId)).toEqual([
+      'uebox-chat',
+      'uebox-chat-beta'
+    ])
+    expect(catalog.options[0]!.badge).toBeUndefined()
+    expect(catalog.options[1]).toMatchObject({
+      modelName: 'Box-Chat Beta',
+      badge: 'Beta',
+      description: '更便宜的对话线路',
+      fullLabel: 'Box-Chat Beta (Beta) · Box Plan'
+    })
+  })
 })

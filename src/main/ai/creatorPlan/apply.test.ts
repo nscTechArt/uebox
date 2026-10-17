@@ -8,6 +8,7 @@ import {
   PLAN_PROVIDER_ID,
   PLAN_PROVIDER_IDS,
   applyPlan,
+  isFreeOnFailureModel,
   managedRoles,
   planProviders,
   planRoleChanges,
@@ -15,7 +16,8 @@ import {
   recordOriginals,
   refreshPlanModels,
   releaseDroppedRoles,
-  removePlan
+  removePlan,
+  syncPlanModels
 } from './apply'
 
 const chatSpec = (model: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -146,7 +148,7 @@ describe('planProviders', () => {
 })
 
 describe('planProviders 非对话角色', () => {
-  it('清单标了 beta 的角色，显示名后面带「(Beta)」', () => {
+  it('旧清单（没有 models）标了 beta 的角色，标签是「Beta」', () => {
     const beta: CreatorPlanManifest = {
       ...fullManifest,
       roles: {
@@ -155,7 +157,7 @@ describe('planProviders 非对话角色', () => {
       }
     }
     const music = planProviders(beta, keyRef).find((p) => p.id === 'creator-plan-music')!
-    expect(music.models[0]!.displayName).toBe('Creator · Music (Beta)')
+    expect(music.models[0]).toMatchObject({ displayName: 'Creator · Music', badge: 'Beta' })
     const change = planRoleChanges({ version: 3, providers: [], roles: {} }, beta).find(
       (c) => c.role === 'music'
     )!
@@ -668,5 +670,193 @@ describe('accepted route prices', () => {
     const provider = planProviders(priced, keyRef)[0]!
     const model = toPiModel(provider, provider.models.find((m) => m.id === 'uebox-chat')!)
     expect(model.headers).toMatchObject({ 'X-UEBox-Pricing-Version': 'rp-one' })
+  })
+})
+
+/**
+ * 清单 `models`（2026-10-15）：模型列表、名字、标签、能接的角色都由服务端定。
+ * 形状照服务端 capabilities.test.ts：默认模型合成一项，可选模型 default_for 为空
+ */
+describe('清单 models：模型列表由服务端定', () => {
+  const CHAT_ROLES = ['chat', 'agent', 'vision', 'summary']
+  const chat = chatSpec('uebox-chat', {
+    display_name: 'Box-Chat',
+    supports_vision: true,
+    supports_video: true,
+    context_window: 262144,
+    max_output_tokens: 65536
+  })
+  const chatBeta = {
+    ...chatSpec('uebox-chat-beta', {
+      display_name: 'Box-Chat Beta',
+      supports_vision: true,
+      supports_video: false,
+      context_window: 200000,
+      max_output_tokens: 32000
+    }),
+    roles: CHAT_ROLES,
+    default_for: [],
+    badge: 'Beta',
+    description: '更便宜的对话线路，测试阶段，偶尔会失败；失败不扣 Credits',
+    free_on_failure: true
+  }
+  const image = { model: 'uebox-image', display_name: 'Box-Image', sizes: ['1K', '2K'] }
+  const music = { model: 'uebox-music', display_name: 'Box-Music', seconds: { min: 10, max: 240 } }
+  /** 客户端从没见过的未来可选模型，换个角色类别：不改代码也该出现 */
+  const imagePro = {
+    model: 'uebox-image-pro',
+    display_name: 'Box-Image Pro',
+    sizes: ['2K', '4K'],
+    roles: ['image'],
+    default_for: [],
+    badge: 'New'
+  }
+  const modelsManifest: CreatorPlanManifest = {
+    ...manifest,
+    roles: { chat, agent: chat, vision: chat, summary: chat, image, music, judge: null },
+    models: [
+      { ...chat, roles: CHAT_ROLES, default_for: CHAT_ROLES },
+      { ...image, roles: ['image'], default_for: ['image'] },
+      { ...music, roles: ['music'], default_for: ['music'], badge: 'Beta' },
+      chatBeta,
+      imagePro
+    ]
+  }
+  const withoutBeta: CreatorPlanManifest = {
+    ...modelsManifest,
+    models: modelsManifest.models!.filter((m) => m !== chatBeta)
+  }
+  const imported = (): AiProviderSettings =>
+    normalizeSettings(
+      applyPlan(base, modelsManifest, keyRef, ['chat', 'summary', 'vision', 'image', 'music'])
+    )
+  const choose = (
+    settings: AiProviderSettings,
+    roles: AiProviderSettings['roles']
+  ): AiProviderSettings => ({ ...settings, roles: { ...settings.roles, ...roles } })
+  const betaBinding = { providerId: PLAN_PROVIDER_ID, modelId: 'uebox-chat-beta' }
+  const defaultBinding = { providerId: PLAN_PROVIDER_ID, modelId: 'uebox-chat', source: 'plan' }
+  const plan = (settings: AiProviderSettings, id = PLAN_PROVIDER_ID): ProviderConfig =>
+    settings.providers.find((p) => p.id === id)!
+
+  it('可选模型出现在它主角色那一类的来源里，名字、标签、说明、能力都照它自己那一项', () => {
+    const providers = planProviders(modelsManifest, keyRef)
+    const chatProvider = providers.find((p) => p.id === PLAN_PROVIDER_ID)!
+    expect(chatProvider.models.map((m) => m.id)).toEqual(['uebox-chat', 'uebox-chat-beta'])
+    expect(chatProvider.models[0]).toMatchObject({
+      displayName: 'Box-Chat',
+      supportsVideo: true,
+      contextWindow: 262144,
+      allowedRoles: CHAT_ROLES
+    })
+    expect(chatProvider.models[0]!.badge).toBeUndefined()
+    expect(chatProvider.models[1]).toMatchObject({
+      displayName: 'Box-Chat Beta',
+      badge: 'Beta',
+      description: chatBeta.description,
+      supportsVision: true,
+      supportsVideo: false,
+      contextWindow: 200000,
+      maxOutputTokens: 32000,
+      allowedRoles: CHAT_ROLES,
+      freeOnFailure: true
+    })
+
+    const imageProvider = providers.find((p) => p.id === 'creator-plan-image')!
+    expect(imageProvider.models.map((m) => m.id)).toEqual(['uebox-image', 'uebox-image-pro'])
+    expect(imageProvider.models[1]).toMatchObject({
+      displayName: 'Box-Image Pro',
+      badge: 'New',
+      imageApi: 'uebox-images',
+      allowedRoles: ['image']
+    })
+    // 音乐的「Beta」来自服务端的 badge，名字里不再拼
+    expect(providers.find((p) => p.id === 'creator-plan-music')!.models[0]).toMatchObject({
+      displayName: 'Box-Music',
+      badge: 'Beta'
+    })
+    const musicChange = planRoleChanges({ version: 3, providers: [], roles: {} }, modelsManifest)
+    expect(musicChange.find((c) => c.role === 'music')!.modelDisplayName).toBe('Box-Music (Beta)')
+  })
+
+  it('默认绑定照旧按 roles：可选模型不会被自动绑上', () => {
+    const settings = imported()
+    expect(settings.roles.chat).toEqual(defaultBinding)
+    expect(settings.roles.image?.modelId).toBe('uebox-image')
+  })
+
+  it('落盘归一化后新字段不丢；同一份清单再刷新、再对齐都原样返回（不白写盘）', () => {
+    const settings = imported()
+    expect(plan(settings).models[1]).toMatchObject({
+      badge: 'Beta',
+      allowedRoles: CHAT_ROLES,
+      freeOnFailure: true
+    })
+    expect(refreshPlanModels(settings, modelsManifest)).toBe(settings)
+    expect(syncPlanModels(settings, modelsManifest)).toBe(settings)
+  })
+
+  it('旧服务端导入的老用户：清单带上 models 后，可选模型不用重新导入就出现；没导入的类不新建来源', () => {
+    const old = normalizeSettings(applyPlan(base, manifest, keyRef, ['chat']))
+    const next = syncPlanModels(refreshPlanModels(old, modelsManifest), modelsManifest)
+    expect(plan(next).models.map((m) => m.id)).toContain('uebox-chat-beta')
+    expect(next.providers.some((p) => p.id === 'creator-plan-image')).toBe(false)
+  })
+
+  it('用户手动绑的可选模型下线了：那个角色退回默认模型，模型从列表里拿掉', () => {
+    const chosen = choose(imported(), { chat: betaBinding })
+    // 还在：什么都不动，不替用户换
+    expect(syncPlanModels(chosen, modelsManifest)).toBe(chosen)
+
+    const next = syncPlanModels(chosen, withoutBeta)
+    expect(next.roles.chat).toEqual(defaultBinding)
+    expect(plan(next).models.map((m) => m.id)).toEqual(['uebox-chat'])
+    expect(next.roles.summary).toEqual(chosen.roles.summary)
+  })
+
+  it('可选模型不再允许接某个角色（换档）：只把那个角色退回默认', () => {
+    const chosen = choose(imported(), { chat: betaBinding, summary: betaBinding })
+    const narrowed: CreatorPlanManifest = {
+      ...modelsManifest,
+      models: modelsManifest.models!.map((m) =>
+        m === chatBeta ? { ...chatBeta, roles: ['chat'] } : m
+      )
+    }
+    const next = syncPlanModels(chosen, narrowed)
+    expect(next.roles.chat).toEqual(betaBinding)
+    expect(next.roles.summary).toEqual(defaultBinding)
+  })
+
+  it('重新导入时没勾的角色绑着已下线的可选模型：同样退回默认', () => {
+    const chosen = choose(imported(), { chat: betaBinding })
+    expect(applyPlan(chosen, withoutBeta, keyRef, []).roles.chat).toEqual(defaultBinding)
+  })
+
+  it('旧清单（没有 models）、订阅失效：一概不增不删、不换绑定', () => {
+    const chosen = choose(imported(), { chat: betaBinding })
+    expect(syncPlanModels(chosen, { ...withoutBeta, models: undefined })).toBe(chosen)
+    const canceled = { ...withoutBeta, plan: { ...withoutBeta.plan, status: 'canceled' as const } }
+    expect(syncPlanModels(chosen, canceled)).toBe(chosen)
+  })
+
+  it('认不出的项跳过：主角色不认识、规格形状不对', () => {
+    const odd: CreatorPlanManifest = {
+      ...modelsManifest,
+      models: [
+        ...modelsManifest.models!,
+        { model: 'uebox-holo', display_name: 'Box-Holo', roles: ['hologram'], default_for: [] },
+        { model: 'uebox-chat-broken', display_name: 'Broken', roles: ['chat'], default_for: [] }
+      ]
+    }
+    const ids = planProviders(odd, keyRef).flatMap((p) => p.models.map((m) => m.id))
+    expect(ids).not.toContain('uebox-holo')
+    expect(ids).not.toContain('uebox-chat-broken')
+  })
+
+  it('哪个模型失败不扣费，按它自己那一项', () => {
+    const settings = imported()
+    expect(isFreeOnFailureModel(settings, PLAN_PROVIDER_ID, 'uebox-chat-beta')).toBe(true)
+    expect(isFreeOnFailureModel(settings, PLAN_PROVIDER_ID, 'uebox-chat')).toBe(false)
+    expect(isFreeOnFailureModel(settings, 'my-gateway', 'gpt-x')).toBe(false)
   })
 })

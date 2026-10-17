@@ -5,7 +5,13 @@
  * 免得界面那头自己抄一份、字段一改就对不上。
  */
 
-import { ROLE_KIND, type ModelConfig, type ProbeFailure, type ProviderKind } from './aiProvider'
+import {
+  ROLE_KIND,
+  modelAllowsRole,
+  type ModelConfig,
+  type ProbeFailure,
+  type ProviderKind
+} from './aiProvider'
 
 /**
  * 老名册的模型档位。`strong` 跟着制作人，`fast` 走用户绑的对话模型。
@@ -146,7 +152,7 @@ export function teamModelCandidates(
     kind: ProviderKind
     models: readonly Pick<
       ModelConfig,
-      'id' | 'displayName' | 'supportsTools' | 'supportsVision' | 'contextWindow'
+      'id' | 'displayName' | 'supportsTools' | 'supportsVision' | 'contextWindow' | 'allowedRoles'
     >[]
   }[]
 ): TeamModelCandidate[] {
@@ -155,7 +161,7 @@ export function teamModelCandidates(
     if (provider.kind !== ROLE_KIND.agent) continue
     const providerName = provider.displayName?.trim() || provider.id
     for (const model of provider.models) {
-      if (model.supportsTools === false) continue
+      if (model.supportsTools === false || !modelAllowsRole(model, 'agent')) continue
       if (list.some((c) => c.providerId === provider.id && c.modelId === model.id)) continue
       // 模型 id 常带斜杠（`anthropic/claude-…`），拼出来可能和别的来源撞上；撞了加序号，不丢模型
       const base = `${provider.id}/${model.id}`

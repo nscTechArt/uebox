@@ -348,6 +348,10 @@ export const mcpClientAPI = {
   /** 装一次要几分钟：要 git fetch、建 venv、pip 装依赖、再起两次后台 Blender */
   blenderSetup(blenderPath?: string) {
     return window.api.agentV3.mcp.blenderSetup(blenderPath ? { blenderPath } : {})
+  },
+  /** 用 winget 装缺的 Git / Python，一个几分钟；装 Git 会弹一次管理员确认 */
+  blenderInstallPrereqs(ids: Array<'git' | 'python'>) {
+    return window.api.agentV3.mcp.blenderInstallPrereqs({ ids })
   }
 }
 

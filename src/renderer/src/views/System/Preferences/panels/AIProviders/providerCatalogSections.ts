@@ -47,7 +47,7 @@ export const TAB_SECTIONS: Readonly<Record<TabKey, readonly SectionKey[]>> = Obj
   chat: Object.freeze(['subscription', 'local', 'cn', 'cloud', 'gateway'] as SectionKey[]),
   visual: Object.freeze(['image', 'video'] as SectionKey[]),
   voice: Object.freeze(['realtime', 'tts', 'stt'] as SectionKey[]),
-  creative: Object.freeze(['music', 'model3d'] as SectionKey[]),
+  creative: Object.freeze(['music', 'sfx', 'model3d'] as SectionKey[]),
   retrieval: Object.freeze(['embedding', 'search', 'judge'] as SectionKey[])
 })
 

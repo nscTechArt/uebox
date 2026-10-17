@@ -169,6 +169,12 @@ export interface AIConfigState {
   agentThinkingLevel?: AgentV3ThinkingLevel
 
   /**
+   * 「快速」开关（Codex 订阅的 priority 档，额度按倍数扣）。缺省关。
+   * 只有支持的模型才在菜单里露出来，别的模型带上也被主进程忽略。
+   */
+  agentFastMode?: boolean
+
+  /**
    * 技能沉淀档位。缺省是 `ask` —— 想沉淀时先问用户。
    *
    * 和思考程度一样存用户的选择本身，不做推导：没选过就是默认那档。
@@ -455,6 +461,12 @@ export const useAIConfigStore = defineStore(
 
     function setAgentThinkingLevel(level: AgentV3ThinkingLevel): void {
       config.value.agentThinkingLevel = level
+    }
+
+    const agentFastMode = computed(() => config.value.agentFastMode ?? false)
+
+    function setAgentFastMode(on: boolean): void {
+      config.value.agentFastMode = on
     }
 
     /**
@@ -841,6 +853,8 @@ export const useAIConfigStore = defineStore(
       setAgentPermissionMode,
       agentThinkingLevel,
       setAgentThinkingLevel,
+      agentFastMode,
+      setAgentFastMode,
       skillLearningMode,
       setSkillLearningMode,
       followUpBehavior,

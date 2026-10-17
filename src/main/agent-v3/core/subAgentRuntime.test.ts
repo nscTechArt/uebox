@@ -4,6 +4,7 @@ import { createModels } from '@earendil-works/pi-ai'
 import {
   fauxAssistantMessage,
   fauxProvider,
+  fauxText,
   fauxToolCall
 } from '@earendil-works/pi-ai/providers/faux'
 import { z } from 'zod'
@@ -138,6 +139,37 @@ describe('真实子任务运行边界', () => {
     expect(await runSubAgent(parent, { prompt: 'work', seedMessages: [] })).toMatchObject({
       text: 'done'
     })
+  })
+
+  /**
+   * 真机上出过的事：队员把 32k 输出额度全花在思考上，最后一条被截断、一个字没有，
+   * 往前找到的是半路那句「CONTRACT.md 出现了，让我读它」，团队面板把它当成果上架
+   */
+  it('最后一条被截断，不拿前面半路的话当结论', async () => {
+    buildTools.mockReturnValue([
+      defineTool({
+        name: 'read_state',
+        namespace: 'asset',
+        description: 'read',
+        input: z.object({}),
+        risk: 'safe',
+        execute: async () => ({ text: 'read' })
+      })
+    ])
+    faux.setResponses([
+      fauxAssistantMessage([fauxText('让我读它'), fauxToolCall('read_state', {}, { id: 'r1' })]),
+      fauxAssistantMessage([], { stopReason: 'length' })
+    ])
+    await expect(runSubAgent(parent, { prompt: 'work', seedMessages: [] })).rejects.toThrow(
+      '被截断'
+    )
+  })
+
+  it('最后一条没有文字，算没交回结论', async () => {
+    faux.setResponses([fauxAssistantMessage([])])
+    await expect(runSubAgent(parent, { prompt: 'work', seedMessages: [] })).rejects.toThrow(
+      '没有交回结论'
+    )
   })
 
   /**

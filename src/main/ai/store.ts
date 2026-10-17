@@ -176,8 +176,20 @@ function normalizeModel(
       kind === 'realtime'
         ? str(source.realtimeVoice) ||
           (isOpenAiRealtimeModelId(id) ? OPENAI_DEFAULT_REALTIME_VOICE : undefined)
-        : undefined
+        : undefined,
+    // 下面四位来自 Box Plan 清单的 `models`（见 creatorPlan/apply.ts），丢了的话每次刷新清单都要白写一次盘
+    badge: str(source.badge) || undefined,
+    description: str(source.description) || undefined,
+    allowedRoles: normalizeAllowedRoles(source.allowedRoles),
+    freeOnFailure: source.freeOnFailure === true ? true : undefined
   }
+}
+
+/** 只认已知角色；一个都不剩就当没写（不限），免得把模型锁死在哪个角色都绑不上 */
+function normalizeAllowedRoles(value: unknown): ModelRole[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const roles = MODEL_ROLES.filter((role) => value.includes(role))
+  return roles.length > 0 ? roles : undefined
 }
 
 /**

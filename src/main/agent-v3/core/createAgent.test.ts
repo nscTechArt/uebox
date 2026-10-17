@@ -1364,14 +1364,16 @@ describe('buildSystemPrompt', () => {
 
   // 套餐网关会注入「你是 Box-Chat」；这里再写 creator-plan/xxx 就两条打架，
   // 模型会在思考过程里把两段提示词摆出来比
-  it('接的是 Box Plan：说法和网关一致，不写来源 ID', () => {
-    const prompt = buildSystemPrompt(base, [], {
-      providerId: 'creator-plan',
-      modelId: 'uebox-chat'
-    })
+  // 身份由网关按模型注入（Box-Chat Beta 会如实说底层模型）：这边写哪个名字都可能和它打架
+  it('接的是 Box Plan：不报模型名、不写来源 ID，身份交给网关', () => {
+    for (const modelId of ['uebox-chat', 'uebox-chat-beta']) {
+      const prompt = buildSystemPrompt(base, [], { providerId: 'creator-plan', modelId })
 
-    expect(prompt).toContain('Box-Chat (uebox-chat)')
-    expect(prompt).not.toContain('creator-plan/')
+      expect(prompt).toContain("a model from the user's Box Plan subscription")
+      expect(prompt).not.toContain('Box-Chat')
+      expect(prompt).not.toContain(modelId)
+      expect(prompt).not.toContain('creator-plan/')
+    }
   })
 
   // 无头场景（HTTP server、旧调用点）不传身份就整句不出现，而不是印 undefined

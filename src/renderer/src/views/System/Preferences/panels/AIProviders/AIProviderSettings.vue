@@ -28,6 +28,7 @@ import {
   findVisionCapableRole,
   missingForVoicePipeline,
   MODEL_ROLES,
+  modelLabelWithBadge,
   type CatalogEntry,
   type ModelRole
 } from '@core/shared/aiProvider'
@@ -111,6 +112,8 @@ const ROLES_WITH_MORE = new Set<ModelRole>([
   // 而是退回实时语音那一路 —— 那条路对豆包用户是死胡同。一行放不下
   'stt',
   'music',
+  // 「音效」要说的是空着也能用（本机 FFmpeg 合成），和别的生成角色正相反
+  'sfx',
   // 「判定」是这一列里最需要解释的：名字看不出它是什么，而它又是**唯一一个
   // 不配也完全不影响任何功能**的角色。这两件事都得说，行内放不下
   'judge'
@@ -232,6 +235,9 @@ function keyStatus(provider: (typeof providers.value)[number]): {
 // ==================== 角色绑定 ====================
 interface RoleModelOption extends ModelOption {
   modelName: string
+  /** 名字旁的小标签、悬停说明：套餐清单给的，原样显示 */
+  badge?: string
+  description?: string
 }
 
 interface RoleModelGroup {
@@ -260,10 +266,13 @@ const modelGroups = computed<RoleModelGroup[]>(() =>
       const modelName = model.displayName || model.id
       return {
         value: `${provider.id}::${model.id}`,
-        label: modelOptionLabel(provider.displayName, modelName),
+        label: modelOptionLabel(provider.displayName, modelLabelWithBadge(modelName, model.badge)),
         modelName,
+        badge: model.badge,
+        description: model.description,
         kind: provider.kind,
-        supportsVision: model.supportsVision === true
+        supportsVision: model.supportsVision === true,
+        allowedRoles: model.allowedRoles
       }
     })
   }))
@@ -561,13 +570,16 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
                 :label="option.label"
                 :aria-label="option.label"
               >
-                <span
-                  class="model-option-name"
-                  :title="option.label"
-                  @mouseenter="scrollOptionTextToEnd"
-                  @mouseleave="resetOptionText"
-                >
-                  {{ option.modelName }}
+                <span class="model-option-row">
+                  <span
+                    class="model-option-name"
+                    :title="option.description || option.label"
+                    @mouseenter="scrollOptionTextToEnd"
+                    @mouseleave="resetOptionText"
+                  >
+                    {{ option.modelName }}
+                  </span>
+                  <span v-if="option.badge" class="model-option-badge">{{ option.badge }}</span>
                 </span>
               </a-select-option>
             </a-select-opt-group>
@@ -681,6 +693,26 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
 .model-option-name {
   display: block;
   min-width: 0;
+}
+
+.model-option-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 套餐清单给的标签（如「Beta」），样式同侧栏的 beta-tag */
+.model-option-badge {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {

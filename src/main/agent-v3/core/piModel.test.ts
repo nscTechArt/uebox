@@ -447,6 +447,23 @@ describe('toPiModel', () => {
       expect(getSupportedThinkingLevels(model)).toContain('max')
     })
 
+    /**
+     * 中转网关、第二个 Claude 渠道（自动起名 `anthropic-4`）按自己的 id 两本目录
+     * 都查不到。Sonnet 5.5 只认自适应，退回预算那条路就是整轮 400。
+     */
+    it('Anthropic 协议的其他渠道也按官方目录认型号', () => {
+      const provider = {
+        ...claude([{ id: 'claude-sonnet-5-5' }]),
+        id: 'anthropic-4',
+        baseUrl: 'https://relay.example.com'
+      }
+      const model = toPiModel(provider, provider.models[0])
+
+      expect(adaptiveOf(model)).toBe(true)
+      expect(getSupportedThinkingLevels(model)).toContain('max')
+      expect(getSupportedThinkingLevels(model)).not.toContain('off')
+    })
+
     /** 4.6 那几代 pi 目录里就有，不必再往我们的目录里抄一遍 */
     it('pi 自带目录里标了的也认', () => {
       const provider = claude([{ id: 'claude-opus-4-8' }])

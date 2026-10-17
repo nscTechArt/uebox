@@ -328,6 +328,40 @@ describe('createAutoResume 持续模式', () => {
     expect(h.delays).toEqual([])
     expect(kinds(h.delivered)).toContain('end:error')
   })
+
+  /**
+   * 失败不扣费的套餐模型（Box-Chat Beta）线路全挂：卡死重发那层已经重试过一次，
+   * 这里再转半小时就是让用户干等 —— 直接报，让用户选等一会儿还是换回默认模型
+   */
+  it('失败不扣费的模型线路全挂：不接，照常报；别的模型同样的 503 照接', async () => {
+    const busy = (model: string): AgentMessage =>
+      ({
+        ...(failure('503 {"error":{"code":"upstream_unavailable"}}') as object),
+        provider: 'creator-plan',
+        model
+      }) as unknown as AgentMessage
+    const run = async (model: string): Promise<number[]> => {
+      const delays: number[] = []
+      const resume = createAutoResume({
+        signal: new AbortController().signal,
+        persistent: true,
+        delay: async (ms) => {
+          delays.push(ms)
+        },
+        freeOnFailure: (m) => m.provider === 'creator-plan' && m.id === 'uebox-chat-beta'
+      })
+      const deliver = resume.wrap(() => {})
+      const agent = scriptedAgent([busy(model), done], () => deliver)
+      await resume.run(agent.step, agent, {
+        onScheduled: () => {},
+        onResume: async () => {},
+        resume: agent.step
+      })
+      return delays
+    }
+    expect(await run('uebox-chat-beta')).toEqual([])
+    expect(await run('uebox-chat')).toEqual([PERSISTENT_RESUME_INTERVAL_MS])
+  })
 })
 
 describe('abortableDelay', () => {

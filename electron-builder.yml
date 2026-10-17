@@ -59,6 +59,14 @@ extraResources:
     filter:
       - lore-cli.json
       - '*/lore.exe'
+  # 官方 Blender Lab MCP 源码（GPL-3.0-or-later），「一键接入 Blender」解压安装用，
+  # 用户机器上因此不需要 Git。zip 不进 git，由 scripts/fetch-blender-mcp.mjs 按
+  # blender-mcp-source.json 的 commit 取来；出包前 --ensure，commit 对不上就不出包。
+  - from: resources/blender-mcp
+    to: blender-mcp
+    filter:
+      - blender-mcp-source.json
+      - '*.zip'
   # 不携带 FFmpeg、FBX2glTF、Poppler。FFmpeg 由用户自行安装；
   # PDF 文字提取走本地 anydoc，FBX 预览走渲染层 FBXLoader。
   # 分发说明和对应源码入口见 THIRD-PARTY-NOTICES.md。

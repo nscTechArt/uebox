@@ -265,6 +265,20 @@ export default {
       unsupported: 'No installer for this platform yet — Windows and macOS only.',
       failed: 'Check failed: {error}. If you just updated the app, restart it and try again.',
       hint: 'Installs the official Blender Lab server and Blender add-on, then fills in the MCP config. Needs network access.',
+      installPrereqs: 'Install {names}',
+      installingPrereqs: 'Installing {names}. This takes a few minutes…',
+      nameJoiner: ' and ',
+      prereqsUacHint:
+        'Windows will ask for administrator permission while installing Git. Click "Yes" in the prompt.',
+      prereqsInstalled: '{names} installed.',
+      askAi: 'Ask AI to troubleshoot',
+      askAiFailed: 'Could not hand off to AI: {reason}',
+      aiPrompt: `Help me install {names} on this Windows PC so I can connect Blender. Unreal Box tried to install it automatically (Python from a mirror in China, then winget) and failed. Raw output:
+
+{detail}
+
+Requirements: after installing Git, git must run from the command line; Python must be 3.11 or newer and runnable as py or python.
+First work out why the install failed from the output above. If you can run commands, install it and verify; if you can't, walk me through installing it by hand. Finally, remind me to reopen Settings → MCP so the Blender row re-checks.`,
       // Name what is missing. "Environment not satisfied" is exactly the failure the
       // install script already had (one line of Command failed: git).
       prereq: {
@@ -492,6 +506,7 @@ export default {
         video: 'Video generation',
         model3d: '3D generation',
         music: 'Music generation',
+        sfx: 'Sound effects',
         tts: 'Text to speech',
         stt: 'Speech to text',
         realtime: 'Realtime voice',
@@ -579,6 +594,8 @@ export default {
       saved: 'Saved',
       saveFailed: 'Save failed',
       testOk: 'Connected ({model})',
+      testOkThinkingRejected:
+        'Connected ({model}), but requests with thinking enabled are rejected. Keep the thinking level on Auto or Off for this model.',
       imported: 'Imported, {count} models added',
       importFailed: 'Import failed',
       oauthOk: 'Authorized. The key is filled in — press Save to apply.',
@@ -608,6 +625,10 @@ export default {
         'No such model. Check the model ID, or use "Import models" to pull the available list.',
       rateLimited: 'Rate limited, or out of quota.',
       badRequest: 'Request rejected (400). Check the model ID, API URL, and protocol.',
+      protocolMismatch:
+        'Rejected under the current protocol, but the test passes with {protocol}. Change the protocol.',
+      toolsRejected:
+        'This model does not accept tool calls, so it cannot operate the editor in chat.',
       unreachable:
         'Cannot reach that address. Check the Base URL, and whether the local service is running.',
       unknown: 'The connection failed, but the provider gave no reason.',
@@ -690,6 +711,11 @@ export default {
       musicMore:
         'Generates instrumental music with the selected provider. Charges and commercial rights depend on your plan.',
       musicMissing: 'Automatic music unavailable',
+      sfx: 'Sound effects',
+      sfxDesc:
+        'Generate footsteps, clicks, explosions and other game sounds. Uses local FFmpeg synthesis when unset.',
+      sfxMore:
+        'With ElevenLabs, realistic sounds are generated from a description and may be charged. When unset, the agent synthesizes synth-style sounds with local FFmpeg, which must be installed first. Both output WAV files ready to import into UE.',
       ttsDesc: 'Read AI replies aloud with an AI-generated voice.',
       ttsMore:
         'Doubao TTS 2.0 and Alibaba Qwen-Audio are built in. A local Kokoro or CosyVoice server that speaks the OpenAI speech API works too — add the local text-to-speech entry under Add provider → Voice. Change the voice in model settings.',
@@ -734,7 +760,7 @@ export default {
         chat: 'Chat',
         visual: 'Image & Video',
         voice: 'Voice',
-        creative: 'Music & 3D',
+        creative: 'Audio & 3D',
         retrieval: 'Search & Tools'
       },
       access: {
@@ -751,6 +777,7 @@ export default {
         image: 'Image Generation',
         embedding: 'Embedding (knowledge search)',
         music: 'Music generation',
+        sfx: 'Sound effects',
         tts: 'Text to speech',
         stt: 'Speech to text (dictation)',
         realtime: 'Realtime voice',
@@ -783,6 +810,8 @@ export default {
       codeDesc: 'Your browser is open. Sign in, check that this code matches, then click Approve.',
       codeCopy: 'Click to copy',
       notOpened: "Browser didn't open? Visit:",
+      openLink: 'Open in browser',
+      copyLink: 'Copy link',
       tier: '{tier} · {interval}',
       intervalMonth: 'Monthly',
       intervalYear: 'Yearly',
@@ -878,6 +907,10 @@ export default {
         unauthorized: {
           title: 'Box Plan authorization expired',
           desc: 'The key was revoked or deleted. Reconnect in Settings → Models.'
+        },
+        line_busy: {
+          title: 'Lines are busy',
+          desc: "Retried once already, and failed calls don't use Credits. Try again later, or switch back to the default model."
         },
         manage: 'Manage subscription',
         reconnect: 'Reconnect'
@@ -2927,6 +2960,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         prepare_task_video: 'Preparing video materials',
         read_task_video_context: 'Reading task history',
         generate_task_music: 'Creating background music',
+        generate_sound_effect: 'Generating sound effects',
         generate_speech: 'Synthesizing speech',
         render_task_video: 'Producing task video',
         analyze_video: 'Analyzing video',
@@ -6019,7 +6053,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       highDesc: 'High reasoning',
       xhighDesc: 'Extra high reasoning',
       maxDesc: 'Maximum reasoning',
-      clamped: '{model} has no {chosen} level — this run uses {actual} instead'
+      clamped: '{model} has no {chosen} level — this run uses {actual} instead',
+      fast: 'Fast',
+      fastDesc: 'Faster responses, uses about 2× quota'
     },
     approval: {
       readOnlyLabel: 'Read only',

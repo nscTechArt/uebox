@@ -140,8 +140,25 @@ async function openKeys(): Promise<void> {
   if (revokeFailedUrl.value) await window.api.shell.openExternal(revokeFailedUrl.value)
 }
 
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success(t('common.copied'))
+  } catch {
+    message.error(t('common.copyFailed'))
+  }
+}
+
 async function copyCode(): Promise<void> {
-  if (prompt.value) await navigator.clipboard.writeText(prompt.value.userCode)
+  if (prompt.value) await copyText(prompt.value.userCode)
+}
+
+async function openVerification(): Promise<void> {
+  if (prompt.value) await window.api.shell.openExternal(prompt.value.verificationUri)
+}
+
+async function copyVerification(): Promise<void> {
+  if (prompt.value) await copyText(prompt.value.verificationUri)
 }
 
 /** 「今天 17:00」「明天 08:00」，再远的带日期。按本机时区 */
@@ -331,10 +348,20 @@ onUnmounted(() => unsubscribe?.())
         >
           {{ prompt.userCode }}
         </button>
-        <p class="plan-desc">
-          {{ $t('aiProvider.creatorPlan.notOpened') }}
-          <code>{{ prompt.verificationUri }}</code>
-        </p>
+        <p class="plan-desc">{{ $t('aiProvider.creatorPlan.notOpened') }}</p>
+        <div class="verify-url">
+          <a
+            :href="prompt.verificationUri"
+            class="verify-link"
+            :title="$t('aiProvider.creatorPlan.openLink')"
+            @click.prevent="openVerification"
+          >
+            {{ prompt.verificationUri }}
+          </a>
+          <AppButton size="small" @click="copyVerification">
+            {{ $t('aiProvider.creatorPlan.copyLink') }}
+          </AppButton>
+        </div>
       </div>
     </AppModal>
 
@@ -542,6 +569,27 @@ onUnmounted(() => unsubscribe?.())
   letter-spacing: 0.15em;
   color: var(--color-text-primary);
   cursor: pointer;
+}
+
+.verify-url {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+
+.verify-link {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.verify-link:hover {
+  text-decoration: underline;
 }
 
 .preview {

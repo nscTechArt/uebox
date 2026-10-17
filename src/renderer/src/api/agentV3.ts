@@ -120,6 +120,8 @@ export const agentV3API = {
     approvalMode?: AgentV3ApprovalMode
     /** 思考程度。不传等同 auto —— 不指定，随模型自己的默认 */
     thinkingLevel?: AgentV3ThinkingLevel
+    /** 「快速」：Codex 订阅走 priority 档，别的模型忽略 */
+    fastMode?: boolean
     /** 对话归属的 UE 工程；不传主进程就只能拿当前连接当「这个工程」 */
     sessionProject?: AgentV3SessionProject | null
   }) {

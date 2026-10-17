@@ -163,4 +163,24 @@ describe('set-roles：按补丁合并', () => {
     expect(result.error).toContain('agent')
     expect(settings.roles).toEqual({ chat: bind('gpt-x'), summary: bind('gpt-x') })
   })
+
+  // 套餐可选模型只开放给清单 models[].roles 里的角色：绑到别的角色网关会拒，这里先拦
+  it('模型不许接这个角色：回 ok:false、不存；补丁里别的角色照存', async () => {
+    settings = {
+      ...settings,
+      providers: [
+        {
+          ...mine,
+          models: [{ id: 'gpt-x' }, { id: 'gpt-y' }, { id: 'lite', allowedRoles: ['chat'] }]
+        }
+      ]
+    }
+    const result = await invoke('ai-provider:set-roles', {
+      chat: bind('lite'),
+      summary: bind('lite')
+    })
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('summary')
+    expect(settings.roles).toEqual({ chat: bind('lite'), summary: bind('gpt-x') })
+  })
 })

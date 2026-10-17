@@ -58,6 +58,12 @@ export interface CreatorPlanManifest {
   api: { base_url: string }
   /** 为 null 表示套餐不含这个角色（或服务端还没开放） */
   roles: Partial<Record<ModelRole, unknown>>
+  /**
+   * 这一档能用的全部模型（2026-10-15 新增）。有它时套餐来源的模型只按它生成，
+   * 名字、标签、能接哪些角色都由服务端定；旧服务端没有这个字段，按 `roles` 生成。
+   * 每项的形状见 `creatorPlan/apply.ts` 的 `planModelEntries`
+   */
+  models?: unknown[]
   /** 对象存储（10-storage.md）。`enabled` 为假时导入预览里不提供这一项 */
   storage?: CreatorPlanStorageSpec | null
   /** 要下线的虚拟模型。命中正在用的模型时提示用户 */
@@ -290,6 +296,23 @@ export function creatorPlanChatError(
   if (statusCode === 401) return 'unauthorized'
   const hit = code && Object.hasOwn(CHAT_ERRORS, code) ? CHAT_ERRORS[code] : undefined
   return hit && hit[0] === statusCode ? hit[1] : null
+}
+
+/**
+ * 「失败不扣费」的套餐模型（清单 `models[].free_on_failure`，如 Box-Chat Beta）线路全不可用。
+ *
+ * 不归进 `CreatorPlanChatErrorCode`：那几种是不改配置就一定再失败的，挂「管理订阅」；
+ * 这一种稍后再试可能就好，主进程已经自动重试过一次，界面提示稍后重试或换回默认模型，
+ * 照常留「继续尝试」。服务端不会替用户改走默认模型（协议 02-chat），这边也不自动换。
+ */
+export const PLAN_LINE_BUSY = 'line_busy'
+
+/** 服务端回的是不是「线路都不可用」（00-conventions：503 `upstream_unavailable`） */
+export function isPlanUpstreamUnavailable(
+  statusCode: number | undefined,
+  code: string | undefined
+): boolean {
+  return statusCode === 503 && code === 'upstream_unavailable'
 }
 
 /**

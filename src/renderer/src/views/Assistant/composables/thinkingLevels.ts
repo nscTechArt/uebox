@@ -35,6 +35,8 @@ export interface ModelThinkingSupport {
   /** 厂商给档位起的别名。有的模型把 high 叫成别的词 */
   levelMap: Record<string, string | null>
   modelId: string
+  /** 这个模型能不能开「快速」。老主进程不回这个字段，按不能算 */
+  fastMode?: boolean
 }
 
 export interface ThinkingOption {

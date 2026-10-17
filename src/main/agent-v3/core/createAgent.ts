@@ -91,7 +91,12 @@ import { loadTeamModels, type TeamModels } from './team/teamModels'
 import type { TeamSnapshots } from './team/snapshots'
 import type { TeamLive } from './team/teamLive'
 import { PRODUCER } from './team/teamStore'
-import { createBoardTool, createMessageTool, createTeamTools } from './team/teamTools'
+import {
+  createBoardTool,
+  createMessageTool,
+  createTeamTools,
+  producerTools
+} from './team/teamTools'
 import { createStatusTool } from './team/teamStatus'
 import { pacedStreamFn, stallGuardStreamFn, type PacedStreamDeps } from './team/requestGate'
 import { diagnosedStreamFn, dumpRejectedRequest, formatRequestRecord } from './requestDiagnostics'
@@ -226,6 +231,8 @@ export interface SessionContext {
   alwaysAllowed?: Set<string>
   /** 思考程度。省略等同 auto —— 不指定，随模型自己的默认 */
   thinkingLevel?: ThinkingLevelChoice
+  /** 模型菜单里的「快速」（Codex 订阅的 priority 档），见 `supportsFastMode` */
+  fastMode?: boolean
   modelRequest?: ModelRequest
   /** 向用户发起审批。省略则等同 yolo（无人值守场景，如定时任务） */
   requestApproval?: ApprovalDeps['request']
@@ -687,7 +694,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     ctx.auditorJudges
   )
     ctx.toolSearchEnabled = false
-  const runtime = await resolveAgentModel(ctx.modelRequest, ctx.thinkingLevel)
+  const runtime = await resolveAgentModel(ctx.modelRequest, ctx.thinkingLevel, ctx.fastMode)
   const { selection, models, summaryModel } = runtime
   // 工作室模式：模型请求按网关的实际反应自适应排队、卡死重发（见 `core/team/requestGate.ts`）。
   // 子 agent 经 `...parent` 继承这个开关，队员、验收员、`task` 子任务共用同一个名额池。
@@ -717,9 +724,10 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         )
         .catch(() => undefined)
   })
+  const freeOnFailure = runtime.freeOnFailure
   const streamFn = ctx.pacedRequests
-    ? pacedStreamFn(diagnosed, { onRetry })
-    : stallGuardStreamFn(diagnosed, { onRetry })
+    ? pacedStreamFn(diagnosed, { onRetry, freeOnFailure })
+    : stallGuardStreamFn(diagnosed, { onRetry, freeOnFailure })
 
   // skill 清单在 system prompt 里常驻，正文按需加载（渐进披露）。
   // 子 agent 复用父 agent 已经发现的清单，不重复扫盘。
@@ -761,7 +769,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
    * 就只看命名空间和名字，先滤后滤结果一样。
    */
 
-  const onlineTools = resolveAgentTools(
+  const resolvedTools = resolveAgentTools(
     { ...ctx, ueConnected: true },
     skills,
     taskTool,
@@ -777,7 +785,12 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
           ctx.modelRequest?.pin ?? { providerId: selection.providerId, modelId: selection.modelId }
         )
       : undefined
-  onlineTools.push(...teamToolsFor(ctx, onlineTools, teamModels))
+  const teamTools = teamToolsFor(ctx, resolvedTools, teamModels)
+  // 制作人只协调不动手：写工具全部收走，活只能派给队员（见 `producerTools`）
+  const onlineTools = [
+    ...(ctx.team && !ctx.isSubAgent ? producerTools(resolvedTools) : resolvedTools),
+    ...teamTools
+  ]
   const offlineTools = onlineTools.filter(
     (tool) => !tool.unrealBox.namespace.startsWith('ue.') || OFFLINE_UE_TOOLS.has(tool.name)
   )
@@ -1456,27 +1469,38 @@ function teamToolsFor(
   })
 }
 
-/** 取子 agent 最后一条 assistant 消息的文本作为返回值 */
+/**
+ * 子 agent 的结论：**最后一条** assistant 消息的文本。
+ *
+ * 只认最后一条，不往前找。最后一条被截断（`length`：输出额度全花在思考上、一个字没写）
+ * 或者没有文字时，往前找到的只会是半路的自言自语（「让我读一下契约」），
+ * 拿它当结论交回去，界面上就成了一份「成果」，制作人也以为这件活干完了。
+ * 这种情况算没交回：抛出去，派活方按「停下了」记账、能重开。
+ */
 function extractFinalText(messages: AgentMessage[], seedCount: number): string {
-  for (let i = messages.length - 1; i >= seedCount; i--) {
-    const message = messages[i] as { role?: string; content?: unknown }
-    if (message.role !== 'assistant') continue
-
-    const content = message.content
-    if (typeof content === 'string') return content
-    if (!Array.isArray(content)) continue
-
-    const text = content
-      .filter((block): block is { type: 'text'; text: string } => {
-        const b = block as { type?: string; text?: unknown }
-        return b.type === 'text' && typeof b.text === 'string'
-      })
-      .map((block) => block.text)
-      .join('')
-
-    if (text) return text
+  const last = messages
+    .slice(seedCount)
+    .findLast((m) => (m as { role?: string }).role === 'assistant') as
+    | { content?: unknown; stopReason?: string }
+    | undefined
+  if (last?.stopReason === 'length') {
+    throw new Error('回复超出模型的输出上限被截断，没有交回结论')
   }
-  return '(子 agent 没有产出文本结论)'
+  const content = last?.content
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((block): block is { type: 'text'; text: string } => {
+              const b = block as { type?: string; text?: unknown }
+              return b.type === 'text' && typeof b.text === 'string'
+            })
+            .map((block) => block.text)
+            .join('')
+        : ''
+  if (!text.trim()) throw new Error('最后一条回复没有文字，没有交回结论')
+  return text
 }
 
 /**
@@ -1580,6 +1604,7 @@ export function buildSystemPrompt(
     // 「编译通过」和「跑起来不炸」是两件事，而模型默认会把前者当成后者。
     // 后半句同样重要：试玩碰不到按键触发的逻辑，一份干净的报告不等于游戏能玩。
     '- Compiling proves the syntax is valid, not that the game runs. After building gameplay, save and then run `ue_playtest` to actually execute it, and read the `print_strings` and `errors` it returns. It cannot simulate player input, so it only exercises what runs on its own (BeginPlay, Tick, physics, timers) — never tell the user an input-driven feature works on the strength of a clean playtest. For input-driven or multi-step gameplay you can try `ue_autoplay` — it is experimental: reliable on flat ground and navmesh-reachable targets, often fails where the route needs jumping up steps, climbing or crossing gaps, so treat "did not reach it" as a likely terrain limit rather than a game bug, and tell the user the result came from an experimental tool. Its objective mode: give one natural-language `objective` ("find the key, then open the door") and a bot plays it step by step, walking around obstacles and reading the whole scene; add `goal.until_log` with a PrintString you placed in the Blueprint, because that is the only assertion (the bot saying the objective is done is a judgment, not proof). Objective mode needs a judge model configured; without one, use goal mode (fixed steps: reach_actor / press / until_log). Explore mode is a smoke test for stuck spots, falls and inputs that throw errors, and a clean explore run only means nothing crashed. Each call is a fresh play session.',
+    '- When the user asks you to play and show the result ("你自己玩给我看"), use `ue_autoplay` with `visual_checks`: 1–6 concrete visible milestones in chronological order, each observed in a later frame (e.g. key icon visible, then victory screen visible). This explicitly sends game-window samples to the configured Jev judge. Check acceptance.status, blockers and each evidence path; a controller done score is not visual acceptance. Display replay_path as a Markdown image and report the observed milestones and missing evidence. Call it a sampled keyframe replay, never continuous video. If evidence is missing, inspect the saved timeline and logs before fixing or rerunning; never claim an unseen state passed. Do not use this feature when editor screenshots are disallowed.',
     '- Never guess asset paths. Search first when unsure.',
     // 实际踩到过的一种表现：用户问「我在场景中选择的这个是啥」，模型不知道有
     // targets.selection 这条路，先写了 19.7 秒的 Python 去读 EditorActorSubsystem，
@@ -1830,10 +1855,11 @@ function buildRuntimeSection(
   return [
     ...(model
       ? [
-          // 套餐那头的网关会注入「你是 Box-Chat」。这里再写 creator-plan/uebox-chat
-          // 加一句「直说」，两条说法打架，模型会在思考里把两段提示词摆出来比，全给用户看见了
+          // 套餐那头的网关会给每个模型注入自己的身份说明（Box-Chat 说「你是 Box-Chat」，
+          // Box-Chat Beta 如实说底层模型）。这里不报名字、不写「直说」：再写一个名字，
+          // 两条说法打架，模型会在思考里把两段提示词摆出来比，全给用户看见了
           isPlanProvider(model.providerId)
-            ? `You are running on Box-Chat (${model.modelId}), from the user's Box Plan subscription, which they chose in Unreal Box's settings and can change there.`
+            ? "You are running on a model from the user's Box Plan subscription, which they chose in Unreal Box's settings and can change there."
             : `You are running on ${model.providerId}/${model.modelId}, which the user chose in Unreal Box's settings and can change there. Unreal Box is open source and this is not a secret: if they ask what model you are, say so plainly instead of deflecting.`
         ]
       : []),

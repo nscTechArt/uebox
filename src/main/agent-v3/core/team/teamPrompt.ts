@@ -52,6 +52,8 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     'Aim for 70–80% done. The user will polish the rest themselves.',
     '',
     'How to get there — which roles to hire, how to split the work, in what order, what to cut — is entirely your call. What Unreal Box gives you:',
+    // 2026-10-16：制作人的写工具被收走了（`producerTools`），这一条说的是环境，不是做法
+    '- You coordinate; teammates build. Your own tools can read and inspect, create or open the project and bind this conversation to it — nothing else. Every change to the game itself (code, assets, levels, settings, fixes after a failed acceptance) is done by a teammate you hire.',
     "- `team_hire` to bring on teammates: you write each one's role, pick its model and scope its tools. `team_send` gives a teammate work; it remembers everything you have sent it before. By default you wait for it to finish; with `wait: false` it works in the background while you carry on, and its result comes back to you as a note. Independent `team_send` calls in the same turn run in parallel; Unreal Box paces the model requests to what the provider can take. `team_message` talks to a teammate while it works (it reads it at its next step) and can wait for a read receipt or a reply; teammates can message each other and you the same way.",
     '- `team_board`: a shared task board you and every teammate can read and update. The user watches it.',
     '- `team_status`: the project as it really is right now — assets on disk, who is working on what, who holds which assets, what actually changed. When a teammate and your own check disagree, this is the tie-breaker.',

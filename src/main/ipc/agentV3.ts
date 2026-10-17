@@ -892,6 +892,8 @@ export interface AgentV3ExecuteArgs {
   approvalMode?: ApprovalMode
   /** 思考程度。不传等同 auto —— 不指定，随模型自己的默认 */
   thinkingLevel?: ThinkingLevelChoice
+  /** 模型菜单里的「快速」。和思考程度一样住在渲染层，每轮带过来 */
+  fastMode?: boolean
   /**
    * 技能沉淀档位。不传等同 ask。
    *
@@ -2099,6 +2101,7 @@ export function registerAgentV3IPC(): void {
       mode = 'agent',
       approvalMode = 'ask',
       thinkingLevel = 'auto',
+      fastMode = false,
       skillLearning = 'ask',
       // 兜底值只有 `EDITOR_SCREENSHOT_DEFAULT` 这一份，渲染层和 zod 校验读的是
       // 同一个语义 —— 三层各写各的默认，用户一个开关都没动过就会看到两种行为
@@ -2181,6 +2184,7 @@ export function registerAgentV3IPC(): void {
         approvalMode: () => approvalModeFor(sessionId),
         alwaysAllowed: alwaysAllowedFor(sessionId),
         thinkingLevel,
+        fastMode,
         skillLearning,
         // 关着的话 `ue_screenshot` 不进这一轮的工具池，系统提示词里那句
         // 「拍一张确认一下」也跟着换掉（见 `createAgent.ts`）
@@ -2288,6 +2292,7 @@ export function registerAgentV3IPC(): void {
         mode,
         ...(sessionProject !== undefined ? { sessionProject } : {}),
         thinkingLevel,
+        fastMode,
         skillLearning,
         ...(sessionModel.record ? { model: sessionModel.record } : {}),
         // 落盘是为了「从断点继续」—— 那条路不经过渲染层，读不到这一档的话，
@@ -2317,7 +2322,7 @@ export function registerAgentV3IPC(): void {
       emit('agent-v3:goal-state', { sessionId })
       await prepareTeam(ctx, options, emit)
       run.controller.signal.throwIfAborted()
-      const { agent, selection, tools, allTools } = await createUnrealAgent(ctx)
+      const { agent, selection, tools, allTools, runtime } = await createUnrealAgent(ctx)
       run.agent = agent
       run.selection = selection
       run.controller.signal.throwIfAborted()
@@ -2350,13 +2355,15 @@ export function registerAgentV3IPC(): void {
       // 插话回执顺手给影子队列销号：读进上下文的那条就撤不回来了
       const bridge = createEventBridge(sender, sessionId, {
         onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
-        riskOf: callRiskOf(allTools)
+        riskOf: callRiskOf(allTools),
+        freeOnFailure: runtime.freeOnFailure
       })
       // 连接中途被掐断时自动「继续尝试」，见 `core/autoResume.ts`。
       // 失败事件经它转交事件桥：决定续跑的那次，界面不会先看到一张失败卡片
       const autoResume = createAutoResume({
         signal: run.controller.signal,
-        persistent: await persistentAutoResumeEnabled()
+        persistent: await persistentAutoResumeEnabled(),
+        freeOnFailure: runtime.freeOnFailure
       })
       ctx.autoResumeAttempt = () => autoResume.attempts
       ctx.onModelRetry = (info) => notifyModelRetry(sender, sessionId, info, autoResume.attempts)
@@ -2665,6 +2672,7 @@ export function registerAgentV3IPC(): void {
       mode: options.mode,
       isReadOnly: () => readOnlyBySession.get(sessionId) === true,
       thinkingLevel: options.thinkingLevel,
+      fastMode: options.fastMode,
       skillLearning: options.skillLearning,
       // 同上：这一档也从执行记录里来，不然续跑那半程 `ue_screenshot` 会重新出现
       editorScreenshotEnabled: options.editorScreenshotEnabled,
@@ -2743,7 +2751,7 @@ export function registerAgentV3IPC(): void {
       run.controller.signal.throwIfAborted()
       // 续跑照样是工作室：团队、任务板、队员的记忆都在盘上，接着用
       await prepareTeam(ctx, options, emit)
-      const { agent, selection, allTools } = await createUnrealAgent(ctx)
+      const { agent, selection, allTools, runtime } = await createUnrealAgent(ctx)
       run.agent = agent
       run.selection = selection
       run.controller.signal.throwIfAborted()
@@ -2766,12 +2774,14 @@ export function registerAgentV3IPC(): void {
       // 插话回执顺手给影子队列销号：读进上下文的那条就撤不回来了
       const bridge = createEventBridge(sender, sessionId, {
         onUserMessage: (text) => markSteerDelivered(run.pendingSteers, text),
-        riskOf: callRiskOf(allTools)
+        riskOf: callRiskOf(allTools),
+        freeOnFailure: runtime.freeOnFailure
       })
       // 同 execute：手动「继续尝试」这一轮里再断，同样自动接着跑
       const autoResume = createAutoResume({
         signal: run.controller.signal,
-        persistent: await persistentAutoResumeEnabled()
+        persistent: await persistentAutoResumeEnabled(),
+        freeOnFailure: runtime.freeOnFailure
       })
       ctx.autoResumeAttempt = () => autoResume.attempts
       ctx.onModelRetry = (info) => notifyModelRetry(sender, sessionId, info, autoResume.attempts)
@@ -3746,11 +3756,16 @@ export function registerAgentV3IPC(): void {
   // ── 一键接入官方 Blender Lab MCP ──────────────────────────────────────
   // 手工流程有四道关（装 git/Python、跑安装脚本、手填命令行、手填三行环境
   // 变量），走完的用户几乎没有。后三道盒子代劳，见 blenderSetup.ts
+  //
+  // 探之前先从注册表刷新 PATH：用户照着提示装好 Git / Python 回来，
+  // 不用重启盒子就能被认出来（见 services/systemPath.ts）
   ipcMain.handle('agent-v3:mcp:blender-status', async () => {
     try {
       const { inspectBlenderSetup } = await import(
         '../agent-v3/capabilities/mcp/blenderSetupRuntime'
       )
+      const { refreshProcessPath } = await import('../services/systemPath')
+      await refreshProcessPath()
       return { success: true, status: await inspectBlenderSetup() }
     } catch (error) {
       return { success: false, error: (error as Error).message }
@@ -3762,6 +3777,8 @@ export function registerAgentV3IPC(): void {
     async (_event, args: { blenderPath?: string } = {}) => {
       try {
         const { runBlenderSetup } = await import('../agent-v3/capabilities/mcp/blenderSetupRuntime')
+        const { refreshProcessPath } = await import('../services/systemPath')
+        await refreshProcessPath()
         const result = await runBlenderSetup(args)
         // 装完立刻重连，用户在设置页当场看到「已连接」和工具数，
         // 而不是被告知「去点一下重新连接」
@@ -3773,6 +3790,33 @@ export function registerAgentV3IPC(): void {
           message: '安装过程本身出错了。',
           error: (error as Error).message,
           statuses: currentStatuses()
+        }
+      }
+    }
+  )
+
+  // 缺 Git / Python 时用 winget 替用户装。失败的原话交还界面，由用户决定要不要交给 AI
+  ipcMain.handle(
+    'agent-v3:mcp:blender-install-prereqs',
+    async (_event, args: { ids?: Array<'git' | 'python'> } = {}) => {
+      try {
+        const { installBlenderPrerequisites } = await import(
+          '../agent-v3/capabilities/mcp/blenderSetupRuntime'
+        )
+        const ids = (args.ids ?? []).filter((id) => id === 'git' || id === 'python')
+        const result = await installBlenderPrerequisites(ids)
+        // 装 Git 就带来了 bash。成没成都重探一次：Python 失败时 Git 可能已经装上，
+        // 不重探的话 Agent 的 shell 工具要等重启盒子才出现
+        if (ids.includes('git')) {
+          const { forgetShellProbe } = await import('../agent-v3/tools/builtin/localShell')
+          forgetShellProbe()
+        }
+        return result
+      } catch (error) {
+        return {
+          success: false,
+          message: '安装过程本身出错了。',
+          error: (error as Error).message
         }
       }
     }

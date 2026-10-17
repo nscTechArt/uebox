@@ -27,17 +27,18 @@ import { join, extname, basename } from 'path'
 import { existsSync, statSync } from 'fs'
 import { createHash } from 'node:crypto'
 
-/** Import completed local music without another download or duplicate receipt on retry. */
+/** Import completed local music or sound effects without another download or duplicate receipt on retry. */
 export async function saveLocalMusicAsset(
   sourcePath: string,
-  prompt?: string
+  prompt?: string,
+  assetType: 'music' | 'sound' = 'music'
 ): Promise<{ filePath: string; assetKey: string }> {
   assertAIGCVaultLocalWritesAllowed()
   const bytes = await fs.readFile(sourcePath)
-  if (!bytes.length) throw new Error('音乐文件为空，无法入库。')
+  if (!bytes.length) throw new Error('音频文件为空，无法入库。')
   const hash = createHash('sha256').update(bytes).digest('hex')
-  const folderKey = await ensureAIGCFolderExists('music')
-  const dir = await getAIGCAssetDir('music')
+  const folderKey = await ensureAIGCFolderExists(assetType)
+  const dir = await getAIGCAssetDir(assetType)
   const filePath = join(dir, `${hash}${extname(sourcePath).toLowerCase() || '.mp3'}`)
   if (!existsSync(filePath)) {
     const temp = `${filePath}.tmp`
@@ -51,14 +52,14 @@ export async function saveLocalMusicAsset(
         .get(filePath) as { assetKey: string } | undefined
   )
   const assetKey =
-    existing?.assetKey ?? (await createAssetRecord(folderKey, filePath, 'music', prompt))
+    existing?.assetKey ?? (await createAssetRecord(folderKey, filePath, assetType, prompt))
   return { filePath, assetKey }
 }
 
 /**
  * AIGC 资产类型
  */
-export type AIGCAssetType = 'image' | 'model' | 'video' | 'music'
+export type AIGCAssetType = 'image' | 'model' | 'video' | 'music' | 'sound'
 
 /**
  * AIGC 资产类型到子目录的映射
@@ -67,7 +68,8 @@ const AIGC_SUBDIRS: Record<AIGCAssetType, string> = {
   image: '图片',
   model: '模型',
   video: '视频',
-  music: '音乐'
+  music: '音乐',
+  sound: '音效'
 }
 
 /**
@@ -164,7 +166,8 @@ async function createAssetRecord(
     image: { classNameCn: 'AI 图片', classColor: '#E74C3C' },
     model: { classNameCn: 'AI 模型', classColor: '#3498DB' },
     video: { classNameCn: 'AI 视频', classColor: '#9B59B6' },
-    music: { classNameCn: 'AI 音乐', classColor: '#1ABC9C' }
+    music: { classNameCn: 'AI 音乐', classColor: '#1ABC9C' },
+    sound: { classNameCn: 'AI 音效', classColor: '#16A085' }
   }
 
   const { classNameCn, classColor } = typeInfo[assetType]

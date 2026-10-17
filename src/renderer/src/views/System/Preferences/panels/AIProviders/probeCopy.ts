@@ -21,7 +21,13 @@ import type { ProbeFailure } from '@core/shared/aiProvider'
 import i18n from '@renderer/i18n'
 
 /** 带原文的那几种：光有文案说不清，必须让用户看见厂商原话 */
-const WITH_RAW = new Set(['forbidden', 'providerServerError', 'badRequest', 'listHttpError'])
+const WITH_RAW = new Set([
+  'forbidden',
+  'providerServerError',
+  'badRequest',
+  'toolsRejected',
+  'listHttpError'
+])
 
 export function describeProbeFailure(failure: ProbeFailure | string | null | undefined): string {
   const { t } = i18n.global
@@ -44,7 +50,7 @@ export function describeProbeFailure(failure: ProbeFailure | string | null | und
   if (failure.code === 'unknown' && failure.raw) return failure.raw
 
   const key = `aiProvider.probe.${failure.code}`
-  const copy = t(key)
+  const copy = t(key, { protocol: failure.suggestedProtocol ?? '' })
   // 查不到就退回原文 —— 新增了码却忘了配文案时，用户读到的是英文原始错误，
   // 而不是一个 `aiProvider.probe.somethingNew` 这样的 key
   if (copy === key) return failure.raw || t('aiProvider.probe.unknown')

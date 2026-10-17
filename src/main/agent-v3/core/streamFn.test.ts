@@ -167,6 +167,47 @@ describe('思考程度 → pi 的 reasoning', () => {
   })
 })
 
+// 模型菜单里的「快速」：Codex 订阅在请求体里带 service_tier=priority，别家不碰
+describe('快速模式', () => {
+  const payloadSent = async (
+    model: Record<string, unknown>,
+    fastMode: boolean,
+    onPayload?: (payload: unknown) => unknown
+  ): Promise<unknown> => {
+    const runtime = await resolveAgentModel({ role: 'agent' }, 'auto', fastMode)
+    runtime.streamFn(
+      model as never,
+      EMPTY_CONTEXT,
+      (onPayload ? { onPayload } : undefined) as never
+    )
+    const options = streamSimple.mock.calls.at(-1)?.[2] as {
+      onPayload?: (payload: unknown, model: unknown) => Promise<unknown>
+    }
+    const body = { model: 'm1' }
+    return (await options.onPayload?.(body, model)) ?? body
+  }
+
+  it('Codex 订阅开了就带 priority，并保留 pi 自己的 onPayload', async () => {
+    const upstream = (payload: unknown): unknown => ({ ...(payload as object), store: false })
+    expect(await payloadSent(PI_MODEL, true, upstream)).toEqual({
+      model: 'm1',
+      store: false,
+      service_tier: 'priority'
+    })
+  })
+
+  it('没开、或者不是 Codex 订阅：请求体不动', async () => {
+    expect(await payloadSent(PI_MODEL, false)).toEqual({ model: 'm1' })
+    expect(await payloadSent({ ...PI_MODEL, api: 'openai-responses' }, true)).toEqual({
+      model: 'm1'
+    })
+  })
+
+  it('档位清单里报出这个模型能不能开', async () => {
+    expect((await listThinkingLevels({ role: 'agent' }))?.fastMode).toBe(true)
+  })
+})
+
 /**
  * 出口闸挂在这条 streamFn 上，理由和 reasoning 一样：**这是全应用唯一一条
  * 把请求交给厂商的路**。工具那边压没压是各管各的，这里是最后一道。

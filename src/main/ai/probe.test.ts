@@ -219,6 +219,56 @@ describe('testProvider 的探测方式', () => {
     expect(urls[0]).toContain('/chat/completions')
   })
 
+  /*
+   * 对话探测要和对话里同一种形状：带工具，会思考的模型带思考档位。只发光秃秃的 ping 时，
+   * 「工具 + reasoning_effort」被拒的配置照样显示「连接成功」，一开工就 400。
+   */
+  describe('对话探测的请求形状', () => {
+    function captureChatBody(bodies: Record<string, unknown>[]): void {
+      globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')))
+        return new Response(
+          JSON.stringify({
+            id: 'x',
+            object: 'chat.completion',
+            created: 0,
+            model: 'm',
+            choices: [
+              { index: 0, message: { role: 'assistant', content: 'pong' }, finish_reason: 'stop' }
+            ]
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }) as unknown as typeof fetch
+    }
+
+    it('会思考、能调工具的模型：请求里带工具和思考档位', async () => {
+      const bodies: Record<string, unknown>[] = []
+      captureChatBody(bodies)
+
+      await testProvider(
+        providerWith([{ id: 'thinker', supportsTools: true, supportsReasoning: true }], 'chat'),
+        'thinker'
+      )
+
+      expect(bodies[0]?.tools).toBeDefined()
+      expect(bodies[0]?.reasoning_effort).toBeDefined()
+    })
+
+    it('不会思考、标明不能调工具的模型：两样都不带，免得误报', async () => {
+      const bodies: Record<string, unknown>[] = []
+      captureChatBody(bodies)
+
+      await testProvider(
+        providerWith([{ id: 'plain', supportsTools: false, supportsReasoning: false }], 'chat'),
+        'plain'
+      )
+
+      expect(bodies[0]?.tools).toBeUndefined()
+      expect(bodies[0]?.reasoning_effort).toBeUndefined()
+    })
+  })
+
   it('向量化探测的失败走同一套错误翻译', async () => {
     globalThis.fetch = (async () =>
       ({

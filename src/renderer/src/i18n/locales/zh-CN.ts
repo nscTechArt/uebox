@@ -265,6 +265,26 @@ export default {
       unsupported: '当前平台暂无安装脚本，仅支持 Windows 和 macOS。',
       failed: '检查失败：{error}。如刚更新过虚幻盒子，请重启应用后重试。',
       hint: '将安装官方 Blender Lab 服务与 Blender 插件，并自动填写 MCP 配置。需要联网。',
+      // 缺 Git / Python 时主按钮换成这个，用 winget 装（仅 Windows）
+      installPrereqs: '安装 {names}',
+      installingPrereqs: '正在安装 {names}，需要几分钟…',
+      nameJoiner: ' 和 ',
+      prereqsUacHint: '安装 Git 时 Windows 会请求管理员权限，请在弹出的窗口中点击「是」。',
+      prereqsInstalled: '{names} 已安装。',
+      // 自动安装失败之后才出现
+      askAi: '交给 AI 排查',
+      askAiFailed: '无法提交给 AI：{reason}',
+      /*
+       * 交给 AI 的那条消息。winget 的原话不翻译，原样给。
+       * 缺 Git 的机器上 AI 没有 shell 工具，所以要说清楚：跑不了命令就教用户手动装，
+       * 不然模型会回一句「我没有这个能力」就停了。
+       */
+      aiPrompt: `帮我在这台 Windows 电脑上装好 {names}，用于接入 Blender。虚幻盒子自动安装失败了（Python 先试过国内镜像，再试过 winget），原始输出如下：
+
+{detail}
+
+要求：Git 装好后命令行里能直接运行 git；Python 需要 3.11 或更高版本，命令行里能运行 py 或 python。
+请先根据上面的输出判断失败原因。如果你能运行命令，就直接装好并验证；如果不能，就一步步告诉我怎么手动装。最后提醒我重新打开「设置 → MCP」，Blender 一栏会重新检测。`,
       // 缺什么点名说，别合成一句「环境不满足」—— 那正是安装脚本原来的
       // 失败样子（一句 Command failed: git），用户看不出要去装什么
       prereq: {
@@ -490,6 +510,7 @@ export default {
         video: '视频生成',
         model3d: '3D 生成',
         music: '音乐生成',
+        sfx: '音效生成',
         tts: '语音合成',
         stt: '语音识别',
         realtime: '实时语音',
@@ -576,6 +597,8 @@ export default {
       saved: '已保存',
       saveFailed: '保存失败',
       testOk: '连接成功（{model}）',
+      testOkThinkingRejected:
+        '连接成功（{model}），但开启思考后请求被拒绝。使用该模型时，思考档位请保持「自动」或设为「关」。',
       imported: '已导入，新增 {count} 个模型',
       importFailed: '导入失败',
       oauthOk: '授权成功，请保存设置',
@@ -600,6 +623,8 @@ export default {
       modelNotFound: '模型不存在。请确认模型 ID 是否正确，或使用「导入模型」获取可用列表。',
       rateLimited: '触发限流或额度不足。',
       badRequest: '请求被拒绝（400），请检查模型 ID、API 地址和接口协议。',
+      protocolMismatch: '当前接口协议下请求被拒绝，改为 {protocol} 后测试通过。请修改接口协议。',
+      toolsRejected: '该模型不接受工具调用，无法在对话中操作编辑器。',
       unreachable: '无法连接该地址。请检查 API 地址是否正确、本机服务是否已启动。',
       unknown: '连接失败，服务商未返回原因。',
       listUnsupportedGenerative: '此服务商不支持获取模型列表，请按其文档填写模型 ID。',
@@ -670,6 +695,10 @@ export default {
       musicDesc: '为视频生成背景音乐；未配置时可无配乐成片。',
       musicMore: '使用所选服务商生成纯音乐。生成可能收费，商用权限以服务商套餐为准。',
       musicMissing: '不自动生成配乐',
+      sfx: '音效生成',
+      sfxDesc: '为游戏生成脚步、点击、爆炸等音效；未配置时用本机 FFmpeg 合成。',
+      sfxMore:
+        '选择 ElevenLabs 时按描述生成写实音效，可能收费；未配置时 Agent 用本机 FFmpeg 合成合成器类音效，需先安装 FFmpeg。两种方式都输出可直接导入 UE 的 WAV。',
       ttsDesc: '朗读 AI 回复，使用 AI 合成声音。',
       ttsMore:
         '内置豆包 TTS 2.0 与阿里云 Qwen-Audio；也可接入本机运行的 Kokoro、CosyVoice 等 OpenAI 兼容合成服务（添加服务商 → 本机语音合成）。音色可在模型设置中修改。',
@@ -711,7 +740,7 @@ export default {
         chat: '对话',
         visual: '生图与视频',
         voice: '语音',
-        creative: '音乐与 3D',
+        creative: '音频与 3D',
         retrieval: '检索与工具'
       },
       access: {
@@ -728,6 +757,7 @@ export default {
         image: '图片生成',
         embedding: '嵌入（知识库检索）',
         music: '音乐生成',
+        sfx: '音效生成',
         tts: '语音合成',
         stt: '语音识别（听写）',
         realtime: '实时语音（语音通话）',
@@ -762,6 +792,8 @@ export default {
       codeDesc: '已打开浏览器。登录后核对以下代码，然后点击「允许」。',
       codeCopy: '点击复制',
       notOpened: '浏览器未打开？请手动访问：',
+      openLink: '在浏览器中打开',
+      copyLink: '复制链接',
       tier: '{tier} · {interval}',
       intervalMonth: '月付',
       intervalYear: '年付',
@@ -854,6 +886,10 @@ export default {
         unauthorized: {
           title: 'Box Plan 授权失效',
           desc: 'Key 已被吊销或删除。请在「设置 → 模型」中重新连接。'
+        },
+        line_busy: {
+          title: '线路繁忙',
+          desc: '已自动重试一次，本次失败不扣 Credits。请稍后重试，或换回默认模型。'
         },
         manage: '管理订阅',
         reconnect: '重新连接'
@@ -2855,6 +2891,7 @@ export default {
         prepare_task_video: '整理视频素材',
         read_task_video_context: '读取任务过程',
         generate_task_music: '制作配乐',
+        generate_sound_effect: '生成音效',
         generate_speech: '合成语音',
         render_task_video: '制作任务视频',
         analyze_video: '分析视频',
@@ -5853,7 +5890,9 @@ export default {
       highDesc: '高强度推理',
       xhighDesc: '超高强度推理',
       maxDesc: '最高强度推理',
-      clamped: '{model} 不支持 {chosen} 档位，本次按 {actual} 执行'
+      clamped: '{model} 不支持 {chosen} 档位，本次按 {actual} 执行',
+      fast: '快速',
+      fastDesc: '响应更快，额度消耗约 2 倍'
     },
     approval: {
       readOnlyLabel: '只读',

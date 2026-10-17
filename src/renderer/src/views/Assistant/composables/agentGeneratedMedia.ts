@@ -155,7 +155,12 @@ export function collectGeneratedMusic(args: {
 }): GeneratedMusicTrack[] {
   const tracks = new Map<string, GeneratedMusicTrack>()
   const collect = (toolName: string | undefined, result: unknown): void => {
-    if (toolName !== 'generate_task_music' && toolName !== 'generate_speech') return
+    if (
+      toolName !== 'generate_task_music' &&
+      toolName !== 'generate_speech' &&
+      toolName !== 'generate_sound_effect'
+    )
+      return
     const record = parseStructuredValue(result)
     if (!record || record.success === false) return
     const candidates =
