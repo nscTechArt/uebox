@@ -30,7 +30,7 @@ vi.mock('electron', () => ({
 vi.mock('./creatorPlan/ipc', () => ({ registerCreatorPlanIPC: () => {} }))
 vi.mock('./creatorPlan/refresh', () => ({ startCreatorPlanRefresh: () => {} }))
 vi.mock('../ipc/speech', () => ({ registerSpeechIPC: () => {} }))
-vi.mock('./catalog', () => ({ PROVIDER_CATALOG: [] }))
+vi.mock('./catalog', () => ({ PROVIDER_CATALOG: [], findCatalogEntry: () => undefined }))
 vi.mock('./oauth', () => ({
   OAuthCancelledError: class extends Error {},
   runOAuthLogin: vi.fn(),

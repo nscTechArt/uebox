@@ -238,3 +238,112 @@ export function applyVaultSchema(db: Database.Database): void {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run('ALL', null, 'system', 'ALL', '/ALL', '["ALL"]', 0, '["ALL"]')
 }
+
+// ─────────────────────── 一次性：扩展名去点 ───────────────────────
+
+/** 完成标记，记在 vault_metadata。值是这次改了多少行，只供排查 */
+export const EXTENSION_NORMALIZED_KEY = 'migration.extension_no_dot.v1'
+
+/**
+ * 全文 / 向量索引的待重建队列（assetSearchIndex.ts 的 DIRTY_TABLE、assetVectorIndex.ts 的
+ * VECTOR_DIRTY_TABLE）。assetData 上任何 UPDATE 都会被触发器排进去，可扩展名两个索引都不收 ——
+ * 迁移改的行不该因此全库重建一遍（向量开着时还要重新算向量）。
+ * 这里写死名字是为了保持本模块只依赖 better-sqlite3，单测核对两边一致
+ */
+export const REINDEX_QUEUE_TABLES = ['assetSearchDirty', 'assetVectorDirty'] as const
+
+/** 和 SyncClient.normalizeExtensionValue 同一个口径：去掉开头的一个点、转小写 */
+const normalizedExt = (col: string): string =>
+  `lower(CASE WHEN substr(${col}, 1, 1) = '.' THEN substr(${col}, 2) ELSE ${col} END)`
+
+export interface ExtensionMigrationOptions {
+  /** 每块按 rowid 扫多少行。一块一个事务，块间让出事件循环 */
+  chunkRows?: number
+  /** 返回 true 就停（连接被关）；没跑完不记完成，下次打开从头扫 —— 已改过的行不会再匹配 */
+  shouldStop?: () => boolean
+  yieldFn?: () => Promise<void>
+}
+
+/**
+ * 把同步进来的带点扩展名（'.wav'）改成本机的口径（'wav'）。每个库只跑一次。
+ *
+ * 新写入的行 SyncClient 已经在入口规整了，这里只收拾升级前落库的老行。
+ * 54 万行的库不能一句 UPDATE 了事（主线程一口气占好几秒），所以按 rowid 分块：
+ * 每块 1000 行、一个事务，块间让出。不刷 updated_at（按修改时间排序会整个乱掉），
+ * 也不让触发器把改过的行排进索引重建队列（原本就在队列里的照留）。
+ *
+ * @returns 改了多少行；已经跑过、被停掉或出错时返回 null
+ */
+export async function normalizeStoredExtensions(
+  db: Database.Database,
+  options: ExtensionMigrationOptions = {}
+): Promise<number | null> {
+  const chunkRows = options.chunkRows ?? 1000
+  const shouldStop = options.shouldStop ?? ((): boolean => !db.open)
+  const yieldFn =
+    options.yieldFn ?? ((): Promise<void> => new Promise((resolve) => setImmediate(resolve)))
+  try {
+    if (db.prepare(`SELECT 1 FROM vault_metadata WHERE key = ?`).get(EXTENSION_NORMALIZED_KEY)) {
+      return null
+    }
+    const queues = REINDEX_QUEUE_TABLES.filter((name) =>
+      db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(name)
+    )
+    const nextBound = db.prepare(
+      `SELECT max(id) AS hi FROM (SELECT id FROM assetData WHERE id > ? ORDER BY id LIMIT ?)`
+    )
+    const pick = db
+      .prepare(
+        `SELECT id FROM assetData WHERE id > ? AND id <= ?
+           AND (ext IS NOT ${normalizedExt('ext')}
+                OR fileExtension IS NOT ${normalizedExt('fileExtension')})`
+      )
+      .pluck()
+    const fix = db.prepare(
+      `UPDATE assetData
+       SET ext = ${normalizedExt('ext')}, fileExtension = ${normalizedExt('fileExtension')}
+       WHERE id IN (SELECT value FROM json_each(?))`
+    )
+    const queued = queues.map((name) =>
+      db
+        .prepare(`SELECT assetId FROM ${name} WHERE assetId IN (SELECT value FROM json_each(?))`)
+        .pluck()
+    )
+    const unqueue = queues.map((name) =>
+      db.prepare(`DELETE FROM ${name} WHERE assetId IN (SELECT value FROM json_each(?))`)
+    )
+
+    const runChunk = db.transaction((lo: number, hi: number): number => {
+      const ids = pick.all(lo, hi) as number[]
+      if (ids.length === 0) return 0
+      const json = JSON.stringify(ids)
+      const before = queued.map((stmt) => new Set(stmt.all(json) as number[]))
+      fix.run(json)
+      before.forEach((already, i) => {
+        const added = ids.filter((id) => !already.has(id))
+        if (added.length > 0) unqueue[i].run(JSON.stringify(added))
+      })
+      return ids.length
+    })
+
+    let cursor = 0
+    let fixed = 0
+    for (;;) {
+      if (shouldStop()) return null
+      const hi = (nextBound.get(cursor, chunkRows) as { hi: number | null }).hi
+      if (hi === null) break
+      fixed += runChunk(cursor, hi)
+      cursor = hi
+      await yieldFn()
+    }
+    if (shouldStop()) return null
+    db.prepare(
+      `INSERT OR REPLACE INTO vault_metadata (key, value, type) VALUES (?, ?, 'number')`
+    ).run(EXTENSION_NORMALIZED_KEY, String(fixed))
+    if (fixed > 0) console.log(`[vaultSchema] 扩展名去点：改了 ${fixed} 行`)
+    return fixed
+  } catch (err) {
+    console.warn('[vaultSchema] 扩展名去点迁移失败（下次打开再试，不影响使用）:', err)
+    return null
+  }
+}

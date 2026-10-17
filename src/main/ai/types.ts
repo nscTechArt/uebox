@@ -69,6 +69,8 @@ export interface ProviderConfig {
   /** 用户可见的唯一标识，如 'openai'、'my-gateway' */
   id: string
   displayName: string
+  /** 从目录哪一条添加的；有值时 kind 跟着目录走。见 shared 里 ProviderView 上同名字段的注释 */
+  catalogId?: string
   /** 这个 Provider 是用来干什么的。决定它出现在哪些角色的候选里 */
   kind: ProviderKind
   /** 3D / 视频的接口形状。见 shared 里 ProviderView 上同名字段的注释 */

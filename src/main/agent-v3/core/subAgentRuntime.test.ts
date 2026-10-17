@@ -27,7 +27,7 @@ vi.mock('../../appSettingsManager', () => ({
   appSettingsManager: { getSettings: () => ({ agentToolSearchEnabled: false }) }
 }))
 
-import { runSubAgent } from './createAgent'
+import { NoConclusionError, runSubAgent } from './createAgent'
 import { createTaskTool } from '../tools/builtin/task'
 
 const faux = fauxProvider({ tokensPerSecond: 100000 })
@@ -167,9 +167,10 @@ describe('真实子任务运行边界', () => {
 
   it('最后一条没有文字，算没交回结论', async () => {
     faux.setResponses([fauxAssistantMessage([])])
-    await expect(runSubAgent(parent, { prompt: 'work', seedMessages: [] })).rejects.toThrow(
-      '没有交回结论'
-    )
+    const run = runSubAgent(parent, { prompt: 'work', seedMessages: [] })
+    await expect(run).rejects.toThrow('没有交回结论')
+    // 目标复核靠这个类型认出「没给裁决」，按警告收住，不算主对话出错
+    await expect(run).rejects.toBeInstanceOf(NoConclusionError)
   })
 
   /**

@@ -111,6 +111,20 @@ describe('draftFromCatalog', () => {
 
     expect(draftFromCatalog(entry).apiKeyInput).toBe('OPENAI_API_KEY')
   })
+
+  it('记下目录条目，界面据此锁住用途', () => {
+    const entry: CatalogEntry = {
+      id: 'elevenlabs-music',
+      displayName: 'ElevenLabs Music',
+      kind: 'music',
+      protocol: 'openai-completions',
+      baseUrl: 'https://api.elevenlabs.io/v1',
+      requiresApiKey: true,
+      models: []
+    }
+
+    expect(draftFromCatalog(entry).catalogId).toBe('elevenlabs-music')
+  })
 })
 
 describe('missingCatalogModels', () => {

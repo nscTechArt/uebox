@@ -1852,6 +1852,10 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
       {
         "id": "eleven_text_to_sound_v2",
         "displayName": "Eleven Sound Effects v2"
+      },
+      {
+        "id": "eleven_text_to_sound_v3",
+        "displayName": "Eleven Sound Effects v3"
       }
     ]
   },

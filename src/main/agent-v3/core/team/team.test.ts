@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core'
+import { validateToolArguments } from '@earendil-works/pi-ai'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
@@ -30,7 +32,8 @@ import {
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './teamPrompt'
 import { parseGoalCommand, parseVerdict } from '../goalLoop'
 import type { SubAgentResult } from '../../tools/builtin/task'
-import { effectiveRisk, type UnrealAgentTool } from '../../tools/defineTool'
+import { effectiveRisk, toToolSchema, type UnrealAgentTool } from '../../tools/defineTool'
+import { createApprovalGate, type ApprovalDeps } from '../approval'
 
 /**
  * 工作室模式里盒子负责的那几件事：认命令、排钥匙、记账、派活、交付闸。
@@ -684,6 +687,122 @@ describe('提示词只写环境，不写方法论', () => {
     const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
     expect(brief).toMatch(/You coordinate; teammates build/)
     expect(brief).not.toMatch(/better done alone/)
+  })
+
+  it('制作人的 project_manage 只能建工程、开工程，改游戏的动作被挡下', async () => {
+    const execute = vi.fn(async () => ({ content: [], details: {} }))
+    const [manage] = producerTools([
+      {
+        name: 'project_manage',
+        unrealBox: { risk: 'destructive' },
+        execute
+      } as unknown as UnrealAgentTool<never>
+    ])
+
+    await manage.execute('c1', { action: 'open_project', projectPath: 'p' } as never)
+    expect(execute).toHaveBeenCalledTimes(1)
+    for (const action of [
+      'import_assets_to_scene',
+      'setup_level_sequence',
+      'enable_plugins',
+      'import_assets'
+    ]) {
+      await expect(manage.execute('c2', { action } as never)).rejects.toThrow('派给队员')
+    }
+    // 列举不是「改游戏」，指到对的工具上
+    await expect(manage.execute('c3', { action: 'list_projects' } as never)).rejects.toThrow(
+      'project_list'
+    )
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * 2026-10-17：拒绝原来只做在 execute 里，可审批门跑在它前面 —— ask 档下 `enable_plugins`
+   * 先弹审批卡、用户点了允许才换回一句「不让做」，卡上的「以后都允许」还会把整个
+   * `project_manage` 记进永久名单，普通对话里开插件从此不再问。
+   */
+  it('制作人的 project_manage 名单外的动作走不到审批门，工具名也进不了永久名单', async () => {
+    const ACTIONS = [
+      'list_templates',
+      'create_project',
+      'list_projects',
+      'open_project',
+      'import_assets',
+      'import_assets_to_scene',
+      'setup_level_sequence',
+      'enable_plugins'
+    ] as const
+    const [manage] = producerTools([
+      {
+        name: 'project_manage',
+        description: 'create_project / import_assets / setup_level_sequence / enable_plugins',
+        parameters: toToolSchema(
+          z.object({
+            action: z.enum(ACTIONS).describe(ACTIONS.join('、')),
+            projectPath: z
+              .string()
+              .optional()
+              .describe('open_project、import、enable_plugins 都认'),
+            pluginNames: z.array(z.string()).optional(),
+            assetKeys: z.array(z.string()).optional(),
+            overwrite: z.boolean().optional()
+          })
+        ),
+        // 和 splitByRisk 的 projectManageRisk 同形：开插件、带 overwrite 的按声明的 destructive
+        unrealBox: {
+          namespace: 'project',
+          risk: 'destructive',
+          riskFor: (args: { action?: string; overwrite?: boolean }) =>
+            args.action === 'enable_plugins' || args.overwrite === true ? 'destructive' : 'mutating'
+        },
+        execute: vi.fn(async () => ({ content: [], details: {} }))
+      } as unknown as UnrealAgentTool<never>
+    ])
+
+    // 模型看到的只有建工程、开工程：枚举、字段、说明里都不再露别的动作
+    const schema = manage.parameters as unknown as {
+      properties: Record<string, { enum?: string[] }>
+    }
+    expect(schema.properties.action!.enum).toEqual(['create_project', 'open_project'])
+    expect(Object.keys(schema.properties).sort()).toEqual(['action', 'projectPath'])
+    expect(JSON.stringify(schema) + manage.description).not.toMatch(
+      /import_assets|setup_level_sequence|enable_plugins|list_projects/
+    )
+
+    // pi 在 beforeToolCall 之前按这份 schema 校验，名单外的动作当场退回
+    for (const action of ['enable_plugins', 'import_assets', 'list_projects']) {
+      expect(() =>
+        validateToolArguments(manage, {
+          type: 'toolCall',
+          id: 'c',
+          name: 'project_manage',
+          arguments: { action }
+        })
+      ).toThrow()
+    }
+
+    // 就算绕过校验漏到审批门：不弹卡；建/开工程照常问，但不给「以后都允许」
+    const request = vi.fn<ApprovalDeps['request']>(async () => 'forever')
+    const add = vi.fn()
+    const gate = createApprovalGate({
+      sessionId: 's',
+      mode: 'ask',
+      persistent: { has: () => false, add },
+      lookup: () => manage,
+      request
+    })
+    const call = (args: Record<string, unknown>): ReturnType<typeof gate> =>
+      gate({ toolCall: { id: 'c', name: 'project_manage', arguments: args }, args } as never)
+
+    expect(await call({ action: 'enable_plugins', pluginNames: ['PoseSearch'] })).toBeUndefined()
+    expect(request).not.toHaveBeenCalled()
+
+    expect(
+      await call({ action: 'open_project', projectPath: 'p', overwrite: true })
+    ).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(request.mock.calls[0]![0]).toMatchObject({ risk: 'mutating', allowForever: false })
+    expect(add).not.toHaveBeenCalled()
   })
 
   /** 默认新建工程；但用户在目标里点名已有工程时，不能一口拒掉 */

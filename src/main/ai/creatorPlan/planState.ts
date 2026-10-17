@@ -55,7 +55,19 @@ function normalizeOriginals(raw: unknown): OriginalBindings {
       out[role as ModelRole] = { providerId: binding.providerId, modelId: binding.modelId }
     }
   }
-  return out
+  return foldMainModel(out)
+}
+
+/**
+ * 主模型合并之前（1.0.8 及以前）记的原绑定，「对话」「Agent」各记一条。现在只剩 chat 一格，
+ * 读的时候并过去，规则和 `store.ts` 的 mergeMainModel 一样：Agent 那条有值就听它的
+ * （1.0.8 断开后两格各自还原，合并读出来的也是它）；它是 null（原来没设置）才用对话那条。
+ * 只在这一处并：apply.ts 拿到的原绑定都是读盘归一化过的，往后也不会再记 agent。
+ */
+function foldMainModel(originals: OriginalBindings): OriginalBindings {
+  if (!Object.hasOwn(originals, 'agent')) return originals
+  const { agent, ...rest } = originals
+  return { ...rest, chat: agent ?? rest.chat ?? null }
 }
 
 export function normalizePlanState(raw: unknown): PlanState {

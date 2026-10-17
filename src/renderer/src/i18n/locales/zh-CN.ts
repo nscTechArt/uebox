@@ -503,6 +503,7 @@ export default {
       baseUrl: 'API 地址',
       kind: '用途',
       kindDesc: '选择用途；同一服务商提供多种用途时，可分别添加。',
+      kindLockedDesc: '用途由目录条目决定。要使用该服务商的其他用途，请从目录添加对应条目。',
       kinds: {
         chat: '对话',
         embedding: '嵌入（知识库检索）',

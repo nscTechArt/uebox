@@ -19,8 +19,15 @@ import { readFileSync } from 'fs'
 vi.unmock('better-sqlite3')
 
 import Database from 'better-sqlite3'
-import { applyVaultSchema, VAULT_TABLE_DDL } from './vaultSchema'
+import {
+  applyVaultSchema,
+  EXTENSION_NORMALIZED_KEY,
+  normalizeStoredExtensions,
+  REINDEX_QUEUE_TABLES,
+  VAULT_TABLE_DDL
+} from './vaultSchema'
 import { initAssetDataModel } from './models/assetData'
+import { DIRTY_TABLE, initAssetSearchIndexModel } from './models/assetSearchIndex'
 
 const source = readFileSync('src/main/sqliteDataBase/VaultManager.ts', 'utf8')
 
@@ -96,6 +103,107 @@ describe('保管库 schema：真的建一遍', () => {
   it('VaultManager 真的走 applyVaultSchema，assetNote 也由它建', () => {
     expect(source).toContain('applyVaultSchema(vaultDb)')
     expect(source).toContain('initAssetNoteModel(vaultDb)')
+  })
+})
+
+/**
+ * 旧 asset-server-standalone 存的扩展名带点（'.wav'），以前同步原样抄进本地库，
+ * 类型下拉、统计分桶、详情面板（都按 'wav' / 'uasset' 比）就对不上。这里钉住一次性迁移。
+ */
+describe('一次性迁移：扩展名去点', () => {
+  function vaultWithRows(): Database.Database {
+    const db = new Database(':memory:')
+    applyVaultSchema(db)
+    initAssetSearchIndexModel(db)
+    const insert = db.prepare(
+      `INSERT INTO assetData (assetKey, folderKey, assetName, ext, fileExtension, updated_at)
+       VALUES (?, 'ALL', ?, ?, ?, '2020-01-01 00:00:00')`
+    )
+    insert.run('a1', 'a1', '.wav', '.wav')
+    insert.run('a2', 'a2', 'uasset', 'uasset')
+    insert.run('a3', 'a3', '.UASSET', null)
+    insert.run('a4', 'a4', null, null)
+    insert.run('a5', 'a5', '.png', '.png')
+    // 插入时触发器排的队清掉；a5 本来就在等重建（比如刚改过名），迁移不能把它踢出去
+    db.exec(`DELETE FROM ${DIRTY_TABLE}`)
+    db.prepare(
+      `INSERT INTO ${DIRTY_TABLE}(assetId) SELECT id FROM assetData WHERE assetKey = 'a5'`
+    ).run()
+    return db
+  }
+
+  const rows = (db: Database.Database): unknown[] =>
+    db
+      .prepare(`SELECT assetKey, ext, fileExtension, updated_at FROM assetData ORDER BY assetKey`)
+      .all()
+
+  it('分块改成小写不带点，不刷 updated_at，不把改过的行排进索引重建', async () => {
+    const db = vaultWithRows()
+    let yields = 0
+    const fixed = await normalizeStoredExtensions(db, {
+      chunkRows: 2,
+      yieldFn: async () => {
+        yields += 1
+      }
+    })
+
+    expect(fixed).toBe(3)
+    // 5 行、每块 2 行 → 3 块，块间都让出过
+    expect(yields).toBe(3)
+    const stamp = '2020-01-01 00:00:00'
+    expect(rows(db)).toEqual([
+      { assetKey: 'a1', ext: 'wav', fileExtension: 'wav', updated_at: stamp },
+      { assetKey: 'a2', ext: 'uasset', fileExtension: 'uasset', updated_at: stamp },
+      { assetKey: 'a3', ext: 'uasset', fileExtension: null, updated_at: stamp },
+      { assetKey: 'a4', ext: null, fileExtension: null, updated_at: stamp },
+      { assetKey: 'a5', ext: 'png', fileExtension: 'png', updated_at: stamp }
+    ])
+    const queued = db
+      .prepare(`SELECT a.assetKey FROM ${DIRTY_TABLE} d JOIN assetData a ON a.id = d.assetId`)
+      .pluck()
+      .all()
+    expect(queued).toEqual(['a5'])
+    // 读的地方按不带点比，现在对得上了
+    expect(db.prepare(`SELECT COUNT(*) FROM assetData WHERE ext = 'uasset'`).pluck().get()).toBe(2)
+  })
+
+  it('每个库只跑一次', async () => {
+    const db = vaultWithRows()
+    await normalizeStoredExtensions(db)
+    expect(
+      db
+        .prepare(`SELECT value FROM vault_metadata WHERE key = ?`)
+        .pluck()
+        .get(EXTENSION_NORMALIZED_KEY)
+    ).toBe('3')
+    db.prepare(`UPDATE assetData SET ext = '.wav' WHERE assetKey = 'a2'`).run()
+    expect(await normalizeStoredExtensions(db)).toBeNull()
+    expect(db.prepare(`SELECT ext FROM assetData WHERE assetKey = 'a2'`).pluck().get()).toBe('.wav')
+  })
+
+  it('中途被停掉不记完成，下次打开接着改', async () => {
+    const db = vaultWithRows()
+    let calls = 0
+    const stopped = await normalizeStoredExtensions(db, {
+      chunkRows: 2,
+      shouldStop: () => (calls += 1) > 1,
+      yieldFn: async () => {}
+    })
+    expect(stopped).toBeNull()
+    expect(
+      db.prepare(`SELECT 1 FROM vault_metadata WHERE key = ?`).get(EXTENSION_NORMALIZED_KEY)
+    ).toBeUndefined()
+    // 第一块（a1、a2）已改，剩下的下次补
+    expect(await normalizeStoredExtensions(db)).toBe(2)
+  })
+
+  it('重建队列表名和索引模块一致；VaultManager 在后台跑它', () => {
+    const vectorSource = readFileSync('src/main/sqliteDataBase/models/assetVectorIndex.ts', 'utf8')
+    expect(REINDEX_QUEUE_TABLES).toContain(DIRTY_TABLE)
+    for (const name of REINDEX_QUEUE_TABLES.filter((n) => n !== DIRTY_TABLE)) {
+      expect(vectorSource).toContain(`VECTOR_DIRTY_TABLE = '${name}'`)
+    }
+    expect(source).toContain('normalizeStoredExtensions(vaultDb)')
   })
 })
 

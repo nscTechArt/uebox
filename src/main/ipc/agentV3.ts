@@ -95,6 +95,7 @@ import type {
 } from '../../shared/agentRunRejection'
 import {
   createUnrealAgent,
+  NoConclusionError,
   runSubAgent,
   type EngineFacts,
   type SessionContext
@@ -570,15 +571,22 @@ function attachGoalLoop(
     isReadOnlyCall: (toolName, args) =>
       effectiveRisk(tools.find((tool) => tool.name === toolName)?.unrealBox, args) === 'safe',
     runAudit: async (input) => {
-      const result = await runSubAgent(ctx, {
-        prompt: buildAuditPrompt(input),
-        auditorJudges: AUDITOR_HARD_JUDGES,
-        withoutApproval: true,
-        seedMessages: [],
-        ...(input.signal ? { signal: input.signal } : {}),
-        ...(input.onProgress ? { onProgress: input.onProgress } : {})
-      })
-      return result.text
+      try {
+        const result = await runSubAgent(ctx, {
+          prompt: buildAuditPrompt(input),
+          auditorJudges: AUDITOR_HARD_JUDGES,
+          withoutApproval: true,
+          seedMessages: [],
+          ...(input.signal ? { signal: input.signal } : {}),
+          ...(input.onProgress ? { onProgress: input.onProgress } : {})
+        })
+        return result.text
+      } catch (error) {
+        // 审计员被截断或没写字：没有裁决，交给目标循环按「复核未给出裁决」收住，
+        // 别让它变成主对话这一轮的报错
+        if (error instanceof NoConclusionError) return error.message
+        throw error
+      }
     },
     followUp: (text) => agent.followUp({ role: 'user', content: text, timestamp: 0 }),
     report

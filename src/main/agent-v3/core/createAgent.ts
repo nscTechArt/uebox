@@ -34,7 +34,7 @@ import {
   type AskUserToolDeps
 } from '../tools/builtin/askUser'
 import { createVoiceReportTool, type VoiceReportToolDeps } from '../tools/builtin/voiceReport'
-import { createUpdatePlanTool, createWrapUpTool } from '../tools/builtin/turnReport'
+import { createUpdatePlanTool, createWrapUpTool, planReminder } from '../tools/builtin/turnReport'
 import {
   createSetSessionProjectTool,
   type SetSessionProjectDeps
@@ -243,6 +243,11 @@ export interface SessionContext {
    * 给了这个工具等于允许 agent 挂在那儿等一个不会来的回答。
    */
   requestQuestion?: AskUserToolDeps['request']
+  /**
+   * 对外 MCP 会话。它可能有提问通道（客户端声明了 elicitation），但没有盒子的界面：
+   * `update_plan` / `wrap_up` 画在盒子回复下方，外部客户端看不到，不给。
+   */
+  externalClient?: boolean
   /**
    * 把进度念给正在听的用户。省略则不注册 `voice_report`。
    *
@@ -471,11 +476,13 @@ function resolveCandidateTools(ctx: SessionContext): UnrealAgentTool<never>[] {
         }
       }) as unknown as UnrealAgentTool<never>
     )
-    // 任务清单和收尾提问：同样只有人看着界面时才有意义，条件跟反问一致
-    tools.push(
-      createUpdatePlanTool() as unknown as UnrealAgentTool<never>,
-      createWrapUpTool() as unknown as UnrealAgentTool<never>
-    )
+    // 任务清单和收尾提问：只有人看着盒子界面时才有意义，外部客户端画不出来
+    if (!ctx.externalClient) {
+      tools.push(
+        createUpdatePlanTool() as unknown as UnrealAgentTool<never>,
+        createWrapUpTool() as unknown as UnrealAgentTool<never>
+      )
+    }
   }
 
   /*
@@ -1002,7 +1009,14 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         text: content.map((part) => (part.type === 'text' ? part.text : '')).join('\n')
       })
       // 本工程见过这个错：把上次怎么过的挂在错误结果后面，和写文件后贴体检报告同一个手法
-      return note ? { content: [...content, { type: 'text', text: note }] } : undefined
+      // 清单没走完也挂一句，不然长活里模型会忘了推进（见 `planReminder`）
+      const extra = [
+        note,
+        planReminder(onlineTools, hookCtx.assistantMessage, hookCtx.toolCall.id)
+      ].filter((text): text is string => !!text)
+      return extra.length
+        ? { content: [...content, ...extra.map((text) => ({ type: 'text' as const, text }))] }
+        : undefined
     },
     toolExecution: 'parallel',
     steeringMode: 'all',
@@ -1477,6 +1491,8 @@ function teamToolsFor(
  * 拿它当结论交回去，界面上就成了一份「成果」，制作人也以为这件活干完了。
  * 这种情况算没交回：抛出去，派活方按「停下了」记账、能重开。
  */
+export class NoConclusionError extends Error {}
+
 function extractFinalText(messages: AgentMessage[], seedCount: number): string {
   const last = messages
     .slice(seedCount)
@@ -1484,7 +1500,7 @@ function extractFinalText(messages: AgentMessage[], seedCount: number): string {
     | { content?: unknown; stopReason?: string }
     | undefined
   if (last?.stopReason === 'length') {
-    throw new Error('回复超出模型的输出上限被截断，没有交回结论')
+    throw new NoConclusionError('回复超出模型的输出上限被截断，没有交回结论')
   }
   const content = last?.content
   const text =
@@ -1499,7 +1515,7 @@ function extractFinalText(messages: AgentMessage[], seedCount: number): string {
             .map((block) => block.text)
             .join('')
         : ''
-  if (!text.trim()) throw new Error('最后一条回复没有文字，没有交回结论')
+  if (!text.trim()) throw new NoConclusionError('最后一条回复没有文字，没有交回结论')
   return text
 }
 
@@ -1576,7 +1592,10 @@ export function buildSystemPrompt(
     ...(ctx.isSubAgent
       ? []
       : [
-          '- `task`: hand a well-scoped subtask to a sub-agent, which inherits this conversation in full'
+          // 对外 MCP 会话不把对话交给子 agent（hostSession 的 getParentMessages 是空的）
+          ctx.externalClient
+            ? '- `task`: hand a well-scoped subtask to a sub-agent, which starts fresh — put everything it needs in the prompt'
+            : '- `task`: hand a well-scoped subtask to a sub-agent, which inherits this conversation in full'
         ]),
     // 没有 skill 时 createSkillTools() 返回空数组，这两个工具根本不存在 ——
     // 照样列在能力清单里，模型会去调一个没注册的工具。
@@ -1676,10 +1695,11 @@ export function buildSystemPrompt(
     // 界面下方的「本轮改动」已经按资产列清了动过什么，那是台账。
     // 模型再把施工步骤复述一遍，用户读完两份都还是不知道那个材质长什么样 ——
     // 台账答不了「它现在会做什么」，而那恰恰是只有模型答得出的一半。
-    '- When you finish, say plainly what you did, what came of it, and anything the user has to decide. The UI already lists which assets you touched, so do not re-narrate the steps. Explain the outcome instead: what the thing now does, and which parameter or node the user would change to adjust it. "Created M_GlowBreath with 10 nodes" tells them nothing; "M_GlowBreath pulses its emissive glow on a 2-second cycle — change the Speed or GlowColor parameter to adjust it" tells them everything.',
+    // 外部客户端的用户看不到那份台账，资产得在回复里点名
+    `- When you finish, say plainly what you did, what came of it, and anything the user has to decide. ${ctx.externalClient ? 'Name the assets you touched in one line, but do not re-narrate the steps.' : 'The UI already lists which assets you touched, so do not re-narrate the steps.'} Explain the outcome instead: what the thing now does, and which parameter or node the user would change to adjust it. "Created M_GlowBreath with 10 nodes" tells them nothing; "M_GlowBreath pulses its emissive glow on a 2-second cycle — change the Speed or GlowColor parameter to adjust it" tells them everything.`,
     // 清单和收尾提问的用法写在工具描述里，这里只交代「什么时候想起它们」。
     // 没有这两个工具（子 agent、无人值守）时不写，免得模型去找不存在的工具
-    ...(ctx.isSubAgent || !ctx.requestQuestion
+    ...(ctx.isSubAgent || !ctx.requestQuestion || ctx.externalClient
       ? []
       : [
           '- For work with three or more steps, show the user a task list with update_plan before you start and tick it off as you go. If your turn ends with a decision the user has to make, call wrap_up with that one question and one or two reply buttons.'

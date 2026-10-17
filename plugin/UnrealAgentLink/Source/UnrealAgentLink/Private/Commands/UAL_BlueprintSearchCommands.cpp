@@ -2,9 +2,11 @@
 
 #include "UAL_CommandUtils.h"
 
+#include "Async/TaskGraphInterfaces.h"
 #include "Containers/Ticker.h"
 #include "CoreGlobals.h"
 #include "FindInBlueprintManager.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/RunnableThread.h"
 #include "Misc/PackageName.h"
@@ -162,8 +164,16 @@ namespace UALFiB
 		if (!Search.IsComplete())
 		{
 			// 超时或编辑器要退出：叫停，等线程退出（它在两个蓝图之间、或等索引的 0.1 秒睡眠后检查停止标志），
-			// 再把停下前搜到的那部分取出来
+			// 再把停下前搜到的那部分取出来。
+			// 等的时候必须边等边处理游戏线程任务：搜索线程可能正卡在 FSearchableValueInfo::GetDisplayText
+			// 里（AsyncTask(GameThread) 去加载 String Table，再 Promise.Get() 干等），游戏线程干等就互锁死。
+			// 5.5 起引擎自己的 EnsureCompletion 也是这么等的；5.0–5.4 的直接 WaitForCompletion，不能指望它
 			Search.Stop();
+			while (!Search.IsComplete())
+			{
+				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+				FPlatformProcess::Sleep(0.01f);
+			}
 			if (Search.Thread.IsValid())
 			{
 				Search.Thread->WaitForCompletion();
@@ -316,6 +326,9 @@ void FUAL_BlueprintSearchCommands::Handle_FindInBlueprints(const TSharedPtr<FJso
 	}
 
 	Job->StartedAt = FPlatformTime::Seconds();
+	// 先在游戏线程把管理器建出来：Get() 首次调用会 Initialize（挂资产注册表回调等），
+	// 不能让搜索线程的 BeginSearchQuery 去做第一次
+	FFindInBlueprintSearchManager::Get();
 	// 构造即开线程（FStreamSearch_N，低于普通优先级）。选项用默认值：
 	// 不按类别过滤、低于当前 FiB 版本的算过期 —— 和编辑器的全局查找窗口一致
 	Job->Search = MakeShared<FStreamSearch>(Query);

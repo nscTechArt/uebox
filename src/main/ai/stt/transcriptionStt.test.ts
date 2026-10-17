@@ -30,10 +30,14 @@ const silence = (ms: number): Buffer => Buffer.alloc(((RATE * ms) / 1000) * 2)
 /** 一句话：前面静一下（攒底噪）、说 600 毫秒 */
 const sentence = (): Buffer => Buffer.concat([silence(300), tone(600)])
 
+/** 一句一句说，每句之后都停够一秒 */
+const sentences = (count: number): Buffer =>
+  Buffer.concat(Array.from({ length: count }, () => [sentence(), silence(1_000)]).flat())
+
 const fetchMock = vi.fn<typeof fetch>()
 
-function reply(body: unknown, status = 200): Response {
-  return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })
+function reply(body: unknown, status = 200, headers?: Record<string, string>): Response {
+  return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers })
 }
 
 /** 按采集节奏送进会话（base64，200 毫秒一包） */
@@ -188,6 +192,20 @@ describe('transcribePcm', () => {
       transcribePcm(config, silence(100), RATE, new AbortController().signal)
     ).rejects.toThrow(/不是 JSON/)
   })
+
+  it('回包迟迟读不完（超时）：说是服务没回应，不甩英文原话', async () => {
+    const stuck = new Response(
+      new ReadableStream({
+        pull(controller) {
+          controller.error(new DOMException('The operation was aborted', 'TimeoutError'))
+        }
+      })
+    )
+    fetchMock.mockResolvedValueOnce(stuck)
+    await expect(
+      transcribePcm(config, silence(100), RATE, new AbortController().signal)
+    ).rejects.toThrow('迟迟没有回应')
+  })
 })
 
 describe('probeTranscription', () => {
@@ -232,9 +250,10 @@ describe('会话', () => {
     await tick()
     send(session, Buffer.concat([sentence(), silence(1_000)]))
     await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ final: true })))
+    // 起止按 200 毫秒一包取：300 毫秒处开口落在第二包，说完再静 800 毫秒落在第九包
     expect(events).toEqual([
       { type: 'ready' },
-      { type: 'user-text', text: '打开关卡', final: true }
+      { type: 'user-text', text: '打开关卡', final: true, audioMs: { start: 200, end: 1_800 } }
     ])
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -257,7 +276,7 @@ describe('会话', () => {
     await vi.waitFor(() => expect(events.at(-1)).toEqual({ type: 'closed' }))
     expect(events).toEqual([
       { type: 'ready' },
-      { type: 'user-text', text: '保存', final: true },
+      { type: 'user-text', text: '保存', final: true, audioMs: { start: 200, end: 900 } },
       { type: 'closed' }
     ])
   })
@@ -267,7 +286,11 @@ describe('会话', () => {
     const { session, events } = open()
     await tick()
     send(session, Buffer.concat([sentence(), silence(1_000)]))
-    await vi.waitFor(() => expect(events).toContainEqual({ type: 'asr-failed' }))
+    await vi.waitFor(() =>
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'asr-failed', reason: 'unclear' })
+      )
+    )
     expect(events).not.toContainEqual({ type: 'closed' })
   })
 
@@ -304,6 +327,222 @@ describe('会话', () => {
       type: 'error',
       message: expect.stringContaining('model not found')
     })
+  })
+
+  /** 云端识别偶尔 503、限流、连接断一次，为这一句挂断整通电话太重了 */
+  it('服务忙、限流、连接中途断了一次：这一句重试，识别出来就当没事', async () => {
+    const now = { 'Retry-After': '0' }
+    fetchMock
+      .mockResolvedValueOnce(reply({ error: { message: 'busy' } }, 503, now))
+      .mockResolvedValueOnce(reply({ text: '第一句' }))
+      .mockResolvedValueOnce(reply({ error: { message: 'rate limited' } }, 429, now))
+      .mockResolvedValueOnce(reply({ text: '第二句' }))
+      .mockRejectedValueOnce(
+        Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })
+      )
+      .mockResolvedValueOnce(reply({ text: '第三句' }))
+    const { session, events } = open()
+    await tick()
+    send(session, sentences(3))
+    await vi.waitFor(() =>
+      expect(events.filter((event) => event.type === 'user-text')).toHaveLength(3)
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(events.map((event) => event.type)).not.toContain('error')
+    expect(events.map((event) => event.type)).not.toContain('closed')
+  })
+
+  /**
+   * 识别是一句一句排着做的：超时的那句再等一整轮，后面的话全跟着等。
+   * 这一句作废（说是服务那头的事），接着识别下一句
+   */
+  it('超时：不重试，这一句报没听清（服务那头的事），下一句照常', async () => {
+    fetchMock
+      .mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'))
+      .mockResolvedValueOnce(reply({ text: '第二句' }))
+    const { session, events } = open()
+    await tick()
+    send(session, sentences(2))
+    await vi.waitFor(() =>
+      expect(events).toContainEqual(expect.objectContaining({ type: 'user-text', text: '第二句' }))
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'asr-failed',
+        reason: 'service',
+        audioMs: expect.any(Object)
+      })
+    )
+  })
+
+  it('限流说了等多久：照它说的等了再送；要等太久的就不送了', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const slowDown = (seconds: string): Response =>
+        reply({ error: { message: 'slow down' } }, 429, { 'Retry-After': seconds })
+      fetchMock
+        .mockResolvedValueOnce(slowDown('1'))
+        .mockResolvedValueOnce(reply({ text: '第一句' }))
+        .mockResolvedValueOnce(slowDown('30'))
+      const { session, events } = open()
+      await vi.advanceTimersByTimeAsync(0)
+      send(session, sentences(1))
+      await vi.advanceTimersByTimeAsync(900)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      await vi.waitFor(() =>
+        expect(events).toContainEqual(expect.objectContaining({ text: '第一句' }))
+      )
+
+      send(session, sentences(1))
+      await vi.waitFor(() =>
+        expect(events).toContainEqual(expect.objectContaining({ type: 'asr-failed' }))
+      )
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('重试了还是失败：只作废这一句（报没听清），不掐会话', async () => {
+    fetchMock.mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })
+    )
+    const { session, events } = open()
+    await tick()
+    send(session, sentences(1))
+    await vi.waitFor(() =>
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'asr-failed', reason: 'service' })
+      )
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(events.map((event) => event.type)).not.toContain('error')
+    expect(events.map((event) => event.type)).not.toContain('closed')
+  })
+
+  /** 一直报「没听清」、原因只在控制台里，用户只会一遍遍重说 */
+  it('连着几句都没识别出来：不再一直报没听清，带上原因收摊；中间成过一句就重新数', async () => {
+    const dropped = (): Error =>
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })
+    fetchMock
+      .mockRejectedValueOnce(dropped())
+      .mockRejectedValueOnce(dropped())
+      .mockResolvedValueOnce(reply({ text: '成了一句' }))
+      .mockRejectedValue(dropped())
+    const { session, events } = open()
+    await tick()
+    send(session, sentences(5))
+    await vi.waitFor(() => expect(events.at(-1)).toEqual({ type: 'closed' }))
+    // 第一句失败、第二句成了、后面三句连着失败：第三句失败时收摊
+    expect(events.filter((event) => event.type === 'asr-failed')).toHaveLength(3)
+    expect(events).toContainEqual({
+      type: 'error',
+      message: expect.stringMatching(/连着 3 句.*连接中途断了/)
+    })
+  })
+
+  /** 本机服务显存一紧会回一次 500：只作废这一句、不重送，下一句照常识别 */
+  it('偶发 500：这一句没听清、不重送，会话照常', async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply({ error: { message: 'CUDA out of memory' } }, 500))
+      .mockResolvedValueOnce(reply({ text: '第二句' }))
+    const { session, events } = open()
+    await tick()
+    send(session, sentences(2))
+    await vi.waitFor(() =>
+      expect(events).toContainEqual(expect.objectContaining({ text: '第二句' }))
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(events.filter((event) => event.type === 'asr-failed')).toHaveLength(1)
+    expect(events.map((event) => event.type)).not.toContain('error')
+  })
+
+  /** Gradio 取结果那一下是一段事件流，识别完才收尾：读到一半断掉，和请求本身失败一个样 */
+  it('回包读到一半断了：当一过性的重试，不拿原话挂断', async () => {
+    const broken = new Response(
+      new ReadableStream({
+        pull(controller) {
+          controller.error(
+            Object.assign(new TypeError('terminated'), { cause: { code: 'UND_ERR_SOCKET' } })
+          )
+        }
+      })
+    )
+    fetchMock.mockResolvedValueOnce(broken).mockResolvedValueOnce(reply({ text: '打开关卡' }))
+    const { session, events } = open()
+    await tick()
+    send(session, sentences(1))
+    await vi.waitFor(() =>
+      expect(events).toContainEqual(expect.objectContaining({ text: '打开关卡' }))
+    )
+    expect(events.map((event) => event.type)).not.toContain('error')
+  })
+
+  /** 不在白名单里的一律当配置问题，当场说清楚：重试多少次都一样 */
+  it('端口被禁用、证书不认、额度用完：不重试，带上原因收摊', async () => {
+    const failures = [
+      () =>
+        fetchMock.mockRejectedValue(
+          Object.assign(new TypeError('fetch failed'), { cause: new Error('bad port') })
+        ),
+      () =>
+        fetchMock.mockRejectedValue(
+          Object.assign(new TypeError('fetch failed'), {
+            cause: { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' }
+          })
+        ),
+      () =>
+        fetchMock.mockResolvedValue(
+          reply(
+            { error: { message: 'You exceeded your current quota', code: 'insufficient_quota' } },
+            429
+          )
+        )
+    ]
+    for (const failure of failures) {
+      fetchMock.mockReset()
+      failure()
+      const { session, events } = open()
+      await tick()
+      send(session, sentences(1))
+      await vi.waitFor(() => expect(events.at(-1)).toEqual({ type: 'closed' }))
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(events.map((event) => event.type)).not.toContain('asr-failed')
+      expect(events).toContainEqual({
+        type: 'error',
+        message: expect.stringMatching(/bad port|UNABLE_TO_VERIFY_LEAF_SIGNATURE|quota/)
+      })
+    }
+  })
+
+  it('密钥不对、服务没开：不重试，说清楚再收摊', async () => {
+    fetchMock.mockResolvedValue(reply({ error: { message: 'Invalid token' } }, 401))
+    const first = open()
+    await tick()
+    send(first.session, Buffer.concat([sentence(), silence(1_000)]))
+    await vi.waitFor(() => expect(first.events.at(-1)).toEqual({ type: 'closed' }))
+    expect(first.events).toContainEqual({
+      type: 'error',
+      message: expect.stringContaining('拒绝了密钥')
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fetchMock.mockReset()
+    fetchMock.mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
+    )
+    const second = open()
+    await tick()
+    send(second.session, Buffer.concat([sentence(), silence(1_000)]))
+    await vi.waitFor(() => expect(second.events.at(-1)).toEqual({ type: 'closed' }))
+    expect(second.events).toContainEqual({
+      type: 'error',
+      message: expect.stringContaining('正在运行')
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('关掉：在路上的请求撤掉，之后什么都不再报', async () => {
@@ -503,12 +742,13 @@ describe('识别模型说不是人声的', () => {
     await tick()
     send(session, Buffer.concat([sentence(), silence(1_000), sentence(), silence(1_000)]))
     await vi.waitFor(() => expect(events.filter((e) => e.type === 'user-text')).toHaveLength(1))
-    expect(events).not.toContainEqual({ type: 'asr-failed' })
+    expect(events.map((event) => event.type)).not.toContain('asr-failed')
     expect(events).toContainEqual({
       type: 'user-text',
       text: '保存关卡。',
       final: true,
-      asrTags: ['zh', 'NEUTRAL', 'Speech', 'withitn']
+      asrTags: ['zh', 'NEUTRAL', 'Speech', 'withitn'],
+      audioMs: expect.any(Object)
     })
   })
 })

@@ -110,12 +110,18 @@ defineEmits<{ import: [] }>()
     -->
     <label class="field">
       <span class="field-label">{{ $t('aiProvider.field.kind') }}</span>
-      <a-select v-model:value="draft.kind" class="field-select">
+      <!--
+        从目录添加的锁死：ElevenLabs Music 改成「音效」只会留下一个装着音乐模型的音效来源，
+        调用必然被拒。同一家的另一种用途在目录里是单独一条
+      -->
+      <a-select v-model:value="draft.kind" class="field-select" :disabled="!!draft.catalogId">
         <a-select-option v-for="item in PROVIDER_KINDS" :key="item" :value="item">
           {{ $t(`aiProvider.field.kinds.${item}`) }}
         </a-select-option>
       </a-select>
-      <p class="hint">{{ $t('aiProvider.field.kindDesc') }}</p>
+      <p class="hint">
+        {{ $t(draft.catalogId ? 'aiProvider.field.kindLockedDesc' : 'aiProvider.field.kindDesc') }}
+      </p>
     </label>
 
     <!--

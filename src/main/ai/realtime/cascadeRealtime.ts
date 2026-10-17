@@ -8,7 +8,12 @@ import type {
 import type { SpeechAudio } from '../../../shared/speech'
 import type { RealtimeEchoGuard } from '../../../shared/realtimeEchoGuard'
 import { createEndpointer } from '../stt/endpointer'
-import { STT_INPUT_SAMPLE_RATE, type SttEvent, type SttSessionHandle } from '../stt/types'
+import {
+  STT_INPUT_SAMPLE_RATE,
+  type SttAudioSpan,
+  type SttEvent,
+  type SttSessionHandle
+} from '../stt/types'
 import type {
   AudioSpec,
   RealtimeSessionConfig,
@@ -298,6 +303,23 @@ export function openCascadeSession(
     grace: ReturnType<typeof setTimeout> | null
     limit: ReturnType<typeof setTimeout>
   } | null = null
+  /**
+   * 停着播时开口（或这一开口触发了停播）的那几段，在这一路识别的音频里从哪到哪（毫秒，`earMs`）。
+   *
+   * 认回声不能只看「这会儿停没停着播」：用户说「嗯」触发停播，紧接着说「停一下」，
+   * 「嗯」先判成附和、放开了停播，「停一下」的结果再到时已经没在停着了，会被当回声丢掉。
+   *
+   * 也不能按段数记账：这里的断句和识别那一路的各断各的 —— 太短被扔掉的一下、识别说不是人声的
+   * 一段都不会有结果，两下开口也可能被识别成一句。记下的账一旦对不上，后面喇叭的回声会冒领
+   * 停播时的那一笔（自己打断自己），真说的「停一下」反倒被当回声丢掉。所以**按位置对**：
+   * 识别结果带着它那一句的起止（`audioMs`），和这里哪一段重叠，就是停着播时说的。
+   * 位置对不上就是对不上，没有剩下的账，停播怎么收场都不用清。
+   */
+  let heldSpans: SttAudioSpan[] = []
+  /** 送进这一路识别的音频有多长（毫秒）。识别那一路的起止也从它开的那一刻算起 */
+  let earMs = 0
+  /** 上一条结果回来时 `earMs` 走到哪了。不报起止的那几家（流式厂商），这一句只知道是那以后说的 */
+  let lastResultMs = 0
   /** 一句一句排着判，判定快慢不一也不会把两句的先后弄反 */
   let judging: Promise<void> = Promise.resolve()
 
@@ -342,13 +364,21 @@ export function openCascadeSession(
           if (!text) break
           // 出得了整句，说明这一路是好的。重连计数只防「一开就断」那种来回
           sttReconnects = 0
-          judging = judging.then(() => consider(text, event.asrTags))
+          // 这会儿就对：结果按说话的顺序回来，排队判到它时后面的结果可能已经把账对掉了
+          const heard = startedUnderHold(event.audioMs)
+          judging = judging.then(() => consider(text, heard, event.asrTags))
           break
         }
         case 'asr-failed':
-          // 停着播等结果时没听清：多半是杂音，接着放，不说「没听清」
-          if (hold) releaseOutput()
-          else emit(event)
+          startedUnderHold(event.audioMs)
+          if (event.reason === 'service') {
+            // 识别服务这一句没办成，他说了什么不知道 —— 可能正是「停一下」。接着放，让他再说一遍
+            releaseOutput()
+            emit({ type: 'asr-failed' })
+          } else if (hold) {
+            // 停着播等结果时识别说没听清：多半是杂音，接着放，不说「没听清」
+            releaseOutput()
+          } else emit({ type: 'asr-failed' })
           break
         case 'error':
           fail(event.message)
@@ -365,6 +395,24 @@ export function openCascadeSession(
       }
     })
     stt = session
+    // 新的一路从零算起，上一路记的位置对不上了
+    earMs = 0
+    lastResultMs = 0
+    heldSpans = []
+  }
+
+  /**
+   * 这一句是不是停着播时开口说的（见 `heldSpans`）。顺手丢掉以后再也对不上的那几段。
+   *
+   * 不报起止的那几家，当它是上一条结果之后说的：宽一点，最多让一句回声多过一遍判定。
+   */
+  function startedUnderHold(audio?: SttAudioSpan): boolean {
+    const span = audio ?? { start: lastResultMs, end: earMs }
+    lastResultMs = earMs
+    const heard = heldSpans.some((item) => item.start <= span.end && item.end >= span.start)
+    // 结果按说话的顺序回来：在这一句开头之前就结束的段，后面的句子也对不上了
+    heldSpans = heldSpans.filter((item) => item.end >= span.start)
+    return heard
   }
 
   // ── 插话 ──
@@ -390,13 +438,21 @@ export function openCascadeSession(
       hold.grace = null
       return
     }
-    hold = { grace: null, limit: setTimeout(releaseOutput, HOLD_MAX_MS) }
+    hold = { grace: null, limit: setTimeout(giveUpHold, HOLD_MAX_MS) }
     emit({ type: 'output-hold' })
   }
 
   /** 刚才那不算插话：接着放 */
   function releaseOutput(): void {
     if (clearHold()) emit({ type: 'output-release' })
+  }
+
+  /**
+   * 等到点了还没结果：多半是识别那一路认定不是人声，不会再回来了。
+   * 真回来了（识别得慢、重试过）也还认得出是停着播时说的，见 `heldSpans`
+   */
+  function giveUpHold(): void {
+    releaseOutput()
   }
 
   /** 掐掉手上的事。`notify` 为真时告诉渲染层把喇叭里排着的也掐掉 */
@@ -418,7 +474,7 @@ export function openCascadeSession(
    * 不忙时也问一句「是不是在对它说话」：它说完了、喇叭的尾音被收回来认成「Yeah.」，
    * 不拦的话它会一本正经地问「你说的 Yeah 是什么意思」。
    */
-  async function consider(text: string, asrTags?: string[]): Promise<void> {
+  async function consider(text: string, heard: boolean, asrTags?: string[]): Promise<void> {
     if (closed) return
     /*
      * **回声先拦，不交给判定模型。** 它出声的时候，用户真开口会先被本机响度检测听见、
@@ -426,8 +482,11 @@ export function openCascadeSession(
      * 喇叭里自己的声音收回来也认得出字 —— 「虚幻工程」被认成「来工程。」，判定模型
      * 看它像个回答，0.85 放行了（真机 2026-10-14）。所以：喇叭在响（或刚停）时认出的话，
      * 之前没触发过停播的，就是不够响、不像有人凑着麦克风在说，按回声丢掉。
+     *
+     * 「触发过停播」按这一段算，不看这会儿还停没停着（见 `heldSpans`）：这会儿停着播，
+     * 可能是后面另一句触发的，这一句照样是回声。
      */
-    if (!hold && Date.now() < playbackUntil + ECHO_TAIL_MS) {
+    if (!heard && Date.now() < playbackUntil + ECHO_TAIL_MS) {
       console.log(`[拼装通话] 当作回声：「${text}」`)
       return
     }
@@ -671,6 +730,9 @@ export function openCascadeSession(
     interrupt(true)
     // 先 `interrupted` 再上屏这句：反过来的话渲染层会把这句之后的新回答当被打断的残片丢掉
     if (spoken) emit({ type: 'user-text', text, final: true })
+    // 打字发来的没有那条终稿，渲染层「丢弃残片」只能等三秒兜底，新回答的头一两秒全被吞掉。
+    // 被掐那一轮已经停发音频了（排着的由 `interrupted` 清掉），这里直接告诉它这句说完了
+    else emit({ type: 'user-speech-done' })
     schedule(async (signal) => {
       // 被掐的那一轮可能还有工具结果没收：结果得紧跟在调用后面，排在这句话前头
       await settleToolResults()
@@ -723,15 +785,24 @@ export function openCascadeSession(
     appendAudio(base64) {
       if (closed) return
       stt?.appendAudio(base64)
+      const pcm = Buffer.from(base64, 'base64')
+      const at = earMs
+      earMs += (pcm.length / 2 / STT_INPUT_SAMPLE_RATE) * 1000
       const wasTalking = endpointer.speaking
-      endpointer.push(Buffer.from(base64, 'base64'))
+      endpointer.push(pcm)
       // 它在说、或者在想的时候有人出声：先停播，等识别结果再定（不再一听见就掐）
-      if (!wasTalking && endpointer.speaking && (speaking() || hold)) holdOutput()
+      if (!wasTalking && endpointer.speaking && (speaking() || hold)) {
+        holdOutput()
+        // 这一段从这一包算起，到他停下为止
+        heldSpans.push({ start: at, end: Infinity })
+      }
       if (wasTalking && !endpointer.speaking) {
+        const open = heldSpans.at(-1)
+        if (open?.end === Infinity) open.end = earMs
         // 他停下了：渲染层据此不再把新到的音频当被打断那一轮的残片丢掉
         emit({ type: 'user-speech-done' })
         // 停下来这么久还没识别结果，就是识别那一路认定不是人声，接着放
-        if (hold && !hold.grace) hold.grace = setTimeout(releaseOutput, HOLD_RESULT_GRACE_MS)
+        if (hold && !hold.grace) hold.grace = setTimeout(giveUpHold, HOLD_RESULT_GRACE_MS)
       }
     },
     sendText(text) {

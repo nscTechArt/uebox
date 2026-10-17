@@ -26,7 +26,22 @@ describe('realtime voice session ownership', () => {
     expect(assistant).toContain('shared = useRealtimeVoice({')
     // 组件销毁不挂断：那条 onBeforeUnmount 正是「切一下会话语音就没了」的成因
     expect(realtime).not.toContain('onBeforeUnmount(')
-    expect(welcome.match(/:voice="voice"/g)).toHaveLength(2)
+    // 两个输入框 + 两处语音状态条（首页一处、对话页输入框那层一处）
+    expect(welcome.match(/:voice="voice"/g)).toHaveLength(4)
+  })
+
+  /*
+   * 对话页的消息区铺满整页、输入框浮在上面。状态条要是放在输入框外面，
+   * 它既不算进 --composer-height、又被消息区盖住，静音、重试都点不到。
+   */
+  it('对话页的语音状态条放在输入框那一层里', () => {
+    const composerSection = welcome.slice(
+      welcome.indexOf('ref="chatComposerRef"'),
+      welcome.indexOf('</section>', welcome.indexOf('ref="chatComposerRef"'))
+    )
+    expect(composerSection).toContain('<VoiceStatusPanel')
+    // 外面那一份只给首页
+    expect(welcome).toContain('v-if="!conversationMode && showVoiceStatus"')
   })
 
   it('连接成功后继续使用普通对话列表和底部输入框', () => {

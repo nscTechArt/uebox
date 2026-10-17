@@ -68,10 +68,13 @@ export function advancePlan(items: PlanItem[]): PlanItem[] {
   return next
 }
 
+/** 每个清单工具实例手上的那张清单，给 `planReminder` 读 */
+const planOf = new WeakMap<object, () => PlanItem[]>()
+
 export function createUpdatePlanTool(): UnrealAgentTool<PlanSnapshot> {
   // 每轮现造一次（见 `resolveCandidateTools`），清单状态跟着这一轮走
   let items: PlanItem[] = []
-  return defineTool<typeof planInput, PlanSnapshot>({
+  const tool = defineTool<typeof planInput, PlanSnapshot>({
     name: UPDATE_PLAN_TOOL_NAME,
     namespace: 'host',
     description: PLAN_DESCRIPTION,
@@ -102,6 +105,37 @@ export function createUpdatePlanTool(): UnrealAgentTool<PlanSnapshot> {
       }
     }
   })
+  planOf.set(tool, () => items)
+  return tool
+}
+
+/**
+ * 清单没走完时，挂在这一步最后一个工具结果后面的那句提醒；不用提醒返回 undefined。
+ *
+ * 真机上工作室模式的制作人建完清单后连调 73 次工具（派活、等回话、看产出）
+ * 一次 advance 都没有，界面上第一步转了一个多小时。推进的说明只在 `update_plan`
+ * 自己的结果里出现过一次，几十步以后早被淹了。
+ *
+ * 不数步数：每一步（一条助手消息）都挂，只挂在它最后一个调用上，并行调用不重复；
+ * 这一步自己调了 `update_plan` 就不挂。措辞留「还在做就不用管」，免得把没做完的步骤催成打勾。
+ */
+export function planReminder(
+  tools: readonly object[],
+  assistantMessage: { content: readonly { type: string; id?: string; name?: string }[] },
+  toolCallId: string
+): string | undefined {
+  const tool = tools.find((t) => (t as { name?: string }).name === UPDATE_PLAN_TOOL_NAME)
+  const items = tool ? planOf.get(tool)?.() : undefined
+  if (!items) return undefined
+  const calls = assistantMessage.content.filter((block) => block.type === 'toolCall')
+  if (calls.at(-1)?.id !== toolCallId) return undefined
+  if (calls.some((call) => call.name === UPDATE_PLAN_TOOL_NAME)) return undefined
+  const current = items.findIndex((item) => item.status !== 'completed')
+  if (current < 0) return undefined
+  return (
+    `（清单第 ${current + 1}/${items.length} 步「${items[current].content}」还没打勾。` +
+    '这步已经做完就带上 update_plan advance=true；还在做就不用管。）'
+  )
 }
 
 const wrapUpInput = z.object({

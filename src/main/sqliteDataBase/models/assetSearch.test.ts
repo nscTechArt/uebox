@@ -503,3 +503,29 @@ describe('按时间 / 大小排序和浏览那条路一致', () => {
     })
   })
 })
+
+/**
+ * 旧 asset-server-standalone 扫描入库写的是 path.extname 的结果（'.wav'，带点），
+ * 同步原样抄进本地库；本机导入写的是 'wav'。按扩展名筛选两种都要筛得出来。
+ */
+describe('按扩展名筛选，带点不带点都认', () => {
+  beforeEach(() => {
+    insertAsset('local', 'local_wav', 'k_role')
+    insertAsset('synced', 'synced_wav', 'k_role')
+    insertAsset('mesh', 'mesh', 'k_role')
+    const setExt = db.prepare('UPDATE assetData SET fileExtension = ?, ext = ? WHERE assetKey = ?')
+    setExt.run('wav', 'wav', 'local')
+    setExt.run('.wav', '.wav', 'synced')
+    setExt.run('uasset', 'uasset', 'mesh')
+  })
+
+  it.each([['wav'], ['.wav'], ['WAV']])('fileExtensions 传 %s', (ext) => {
+    const rows = searchAssetsByCriteria(db, { fileExtensions: [ext] })
+    expect(rows.map((r) => r.assetKey).sort()).toEqual(['local', 'synced'])
+  })
+
+  it('别名展开出来的 formatMatch 也一样', () => {
+    const rows = searchAssetsByCriteria(db, { formatMatch: { extensions: ['wav', 'mp3'] } })
+    expect(rows.map((r) => r.assetKey).sort()).toEqual(['local', 'synced'])
+  })
+})

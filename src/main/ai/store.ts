@@ -19,6 +19,8 @@ import {
   model3dApiFromBaseUrl,
   OPENAI_DEFAULT_REALTIME_VOICE,
   PROVIDER_KINDS,
+  ROLE_KIND,
+  type CatalogEntry,
   type EmbeddingApi,
   type ImageApi,
   type Model3dApi,
@@ -369,6 +371,31 @@ function inferKind(
   return 'chat'
 }
 
+/**
+ * 这条来源是从目录哪一条添加的。认出来的，用途（kind）跟着目录走。
+ *
+ * 新配置存着 `catalogId`。老配置没存，按 id（含 `openai-2` 这种第二份）加 Base URL 认；
+ * 认出来但用途和目录对不上的，只有模型还全是那条目录的预置项才算 —— 那是改了用途却
+ * 没换模型（ElevenLabs Music 改成「音效」，留下一个只有 music_v2 的音效来源），本来
+ * 就用不了，改回目录的用途。自己换过模型的是有意挪作他用，原样留着、不锁。
+ */
+function catalogOrigin(
+  source: Record<string, unknown>,
+  id: string,
+  baseUrl: string,
+  kind: ProviderKind,
+  rawModels: unknown[]
+): CatalogEntry | undefined {
+  const saved = findCatalogEntry(str(source.catalogId))
+  if (saved) return saved
+  const entry = findCatalogEntry(id) ?? findCatalogEntry(id.replace(/-\d+$/, ''))
+  if (!entry || entry.baseUrl.replace(/\/+$/, '') !== baseUrl) return undefined
+  if (entry.kind === kind) return entry
+  const presets = new Set(entry.models.map((model) => model.id))
+  const ids = rawModels.map((model) => str((model as Record<string, unknown>)?.id))
+  return ids.length > 0 && ids.every((modelId) => presets.has(modelId)) ? entry : undefined
+}
+
 function normalizeProvider(raw: unknown, legacy: boolean): ProviderConfig | null {
   if (!raw || typeof raw !== 'object') return null
   const source = raw as Record<string, unknown>
@@ -402,7 +429,9 @@ function normalizeProvider(raw: unknown, legacy: boolean): ProviderConfig | null
   const rawModels = Array.isArray(source.models) ? source.models : []
   // v3 起磁盘上直接写着 kind；读到老配置（或用户手写了个不认识的值）才去推
   const declared = PROVIDER_KINDS.find((item) => item === source.kind)
-  const providerKind = declared ?? inferKind(source, baseUrl, rawModels)
+  const stored = declared ?? inferKind(source, baseUrl, rawModels)
+  const origin = catalogOrigin(source, id, baseUrl, stored, rawModels)
+  const providerKind = origin?.kind ?? stored
 
   const models = rawModels
     .map((model) => normalizeModel(model, id, providerKind, legacy, baseUrl))
@@ -411,6 +440,7 @@ function normalizeProvider(raw: unknown, legacy: boolean): ProviderConfig | null
   return {
     id,
     displayName: str(source.displayName) || id,
+    catalogId: origin?.id,
     kind: providerKind,
     // 形状那两位提到了 Provider 上。v2 的配置把它们写在模型里，所以先从
     // 模型上捞一次，再按域名兜底 —— 两条都空就留空，调用时会明确报「没选」
@@ -429,7 +459,9 @@ function normalizeProvider(raw: unknown, legacy: boolean): ProviderConfig | null
         source.musicApi === 'sunoapi-music' ||
         source.musicApi === 'uebox-tasks')
         ? source.musicApi
-        : undefined,
+        : providerKind === 'music'
+          ? origin?.musicApi
+          : undefined,
     videoApi:
       providerKind === 'video'
         ? (normalizeVideoApi(source.videoApi) ?? videoApiFromBaseUrl(baseUrl))
@@ -468,6 +500,13 @@ function normalizeRoles(raw: unknown, providers: ProviderConfig[]): AiProviderSe
       console.warn(`[AI 配置] 角色 ${role} 指向不存在的 provider «${providerId}»，已忽略`)
       continue
     }
+    // 用途对不上的同理：音乐来源绑在「音效生成」上，调用时只会被服务商拒收
+    if (provider && provider.kind !== ROLE_KIND[role]) {
+      console.warn(
+        `[AI 配置] 角色 ${role} 指向用途为 ${provider.kind} 的 provider «${providerId}»，已忽略`
+      )
+      continue
+    }
     out[role as ModelRole] = {
       providerId,
       modelId,
@@ -485,11 +524,16 @@ function normalizeRoles(raw: unknown, providers: ProviderConfig[]): AiProviderSe
  * 换成了 A，账单上一直在扣 B。合成一格之后，所有没单独指定模型的地方都跟着它走。
  *
  * 两格都有值时听 Agent 的：它是输入框写的，是用户最近亲手选的那个。
+ * 例外是 Agent 那格是套餐导入时绑的（`source: 'plan'`）、对话那格不是：那不是用户亲手选的。
+ * 1.0.8 按默认勾选导入的用户就是这样（对话是自己的模型，Agent 原来没设置、被套餐接了），
+ * 听 Agent 的就把用户自己的主模型盖掉了，而那条绑定哪儿都没记，断开后主模型就没了。
+ * 这时留用户自己的，套餐不再管主模型。
  * `agent` 这个角色名照旧可以请求（回落链 agent → chat），只是不再单独存。
  */
 function mergeMainModel(roles: AiProviderSettings['roles']): AiProviderSettings['roles'] {
   if (!roles.agent) return roles
   const { agent, ...rest } = roles
+  if (agent.source === 'plan' && rest.chat && rest.chat.source !== 'plan') return rest
   return { ...rest, chat: agent }
 }
 

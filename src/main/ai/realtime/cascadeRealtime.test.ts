@@ -180,6 +180,25 @@ function speakUp(h: { session: ReturnType<typeof openCascadeSession> }): void {
   for (const packet of [...quietPackets(300), ...loudPackets(200)]) h.session.appendAudio(packet)
 }
 
+/**
+ * 整段转写那一路给每句报的起止（毫秒）。开局 `speakUp` 一次，第一句在 300 毫秒处开口；
+ * 停一秒再说 200 毫秒，第二句在 1500 毫秒处开口。句尾都带着断句等的那 800 毫秒静音
+ */
+const firstWords = { start: 300, end: 1_300 }
+const secondWords = { start: 1_500, end: 2_500 }
+
+/** 每句合成出来都有十秒长：喇叭一直在响，认回声那一条才判得到 */
+function longPlayback(h: ReturnType<typeof harness>): void {
+  h.setSpeak(async (text, _signal, onAudio) => {
+    h.spoken.push(text)
+    onAudio({
+      base64: Buffer.alloc(480_000).toString('base64'),
+      format: 'pcm_s16le',
+      sampleRate: 24000
+    })
+  })
+}
+
 describe('切句与清洗', () => {
   it('到句号、问号、换行就切；英文句点后面要跟空白才算', () => {
     expect(sentenceBreak('好的。接着')).toBe(3)
@@ -434,11 +453,185 @@ describe('插话', () => {
     release()
   })
 
+  /**
+   * 「嗯」触发了停播，紧接着又说「停一下」。「嗯」先判成附和、放开了停播，
+   * 「停一下」的结果到时已经不在停着了 —— 它也是停着播时开口的，不能当回声丢掉
+   */
+  it('停着播时接连说了两句，头一句判成附和放开了：后一句照样当真，不当回声', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const judge = vi.fn(async ({ text }: { text: string }) =>
+      text === '嗯' ? { addressed: 0.9, interrupt: 0.1 } : { addressed: 0.95, interrupt: 0.9 }
+    )
+    const h = harness([{ text: ['我先看一下。', '还有'], hold }, { text: ['好，停下了。'] }], judge)
+    h.stt.onEvent({ type: 'user-text', text: '看看', final: true })
+    await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+
+    speakUp(h)
+    expect(types(h.events)).toContain('output-hold')
+    // 停下一会儿又开口：还停着播，这一段同样记着
+    for (const packet of [...quietPackets(1_000), ...loudPackets(200), ...quietPackets(1_000)])
+      h.session.appendAudio(packet)
+
+    // 两句的起止照整段转写那一路报的给（开口在 300、1500 毫秒处，各说 200 毫秒）
+    h.stt.onEvent({ type: 'user-text', text: '嗯', final: true, audioMs: firstWords })
+    await vi.waitFor(() => expect(types(h.events)).toContain('output-release'))
+    h.stt.onEvent({ type: 'user-text', text: '停一下', final: true, audioMs: secondWords })
+    await vi.waitFor(() => expect(types(h.events)).toContain('interrupted'))
+    expect(judge).toHaveBeenLastCalledWith(expect.objectContaining({ text: '停一下' }))
+    expect(h.signals[0].aborted).toBe(true)
+    release()
+    await vi.waitFor(() => expect(h.spoken).toContain('好，停下了。'))
+  })
+
+  /**
+   * 停着播时开口了两下，第二下识别那一路没回结果（太短被扔了、说不是人声）。
+   * 按段数记账的话那一笔一直挂着，后面喇叭的回声冒领了它，绕过认回声把自己打断
+   */
+  it('停着播时有一下开口没等到结果：后面喇叭的回声不冒领它，照样当回声丢掉', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const judge = vi.fn(async () => ({ addressed: 0.9, interrupt: 0.1 }))
+    const h = harness([{ text: ['我先看一下。', '还有'], hold }], judge)
+    longPlayback(h)
+    h.stt.onEvent({ type: 'user-text', text: '看看', final: true })
+    await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+
+    speakUp(h)
+    for (const packet of [...quietPackets(1_000), ...loudPackets(200), ...quietPackets(1_000)])
+      h.session.appendAudio(packet)
+    h.stt.onEvent({ type: 'user-text', text: '嗯', final: true, audioMs: firstWords })
+    await vi.waitFor(() => expect(types(h.events)).toContain('output-release'))
+
+    // 第二下没有结果。又过了一会儿，喇叭的声音被收回来认成了字
+    for (const packet of quietPackets(1_000)) h.session.appendAudio(packet)
+    h.stt.onEvent({
+      type: 'user-text',
+      text: '来工程。',
+      final: true,
+      audioMs: { start: 2_900, end: 3_700 }
+    })
+    await settle()
+    expect(judge).not.toHaveBeenCalledWith(expect.objectContaining({ text: '来工程。' }))
+    expect(types(h.events)).not.toContain('interrupted')
+    release()
+  })
+
+  /**
+   * 结果是按说话顺序回来的，可它前面那句不一定是停着播时说的：喇叭的回声先回来，
+   * 不能吃掉后面「停一下」的那一笔，让「停一下」被当成回声丢掉
+   */
+  it('停着播时先回来一句更早的回声：回声照样丢，后面真说的「停一下」照样当真', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const judge = vi.fn(async ({ text }: { text: string }) =>
+      text === '来工程。' ? { addressed: 0.1 } : { addressed: 0.95, interrupt: 0.9 }
+    )
+    const h = harness([{ text: ['我先看一下。', '还有'], hold }, { text: ['好。'] }], judge)
+    longPlayback(h)
+    h.stt.onEvent({ type: 'user-text', text: '看看', final: true })
+    await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+
+    // 前一秒半里喇叭的回声被认成了一句；随后用户真开口（1800 毫秒处），触发停播
+    for (const packet of quietPackets(1_500)) h.session.appendAudio(packet)
+    speakUp(h)
+    expect(types(h.events)).toContain('output-hold')
+    h.stt.onEvent({
+      type: 'user-text',
+      text: '来工程。',
+      final: true,
+      audioMs: { start: 0, end: 1_400 }
+    })
+    for (const packet of quietPackets(1_000)) h.session.appendAudio(packet)
+    h.stt.onEvent({
+      type: 'user-text',
+      text: '停一下',
+      final: true,
+      audioMs: { start: 1_800, end: 2_800 }
+    })
+    await vi.waitFor(() => expect(types(h.events)).toContain('interrupted'))
+    expect(judge).not.toHaveBeenCalledWith(expect.objectContaining({ text: '来工程。' }))
+    expect(h.signals[0].aborted).toBe(true)
+    release()
+  })
+
+  /** 识别慢了（重试过、云端排队），结果在停播放开之后才到：它是停着播时说的，不是回声 */
+  it('停着播时说的话结果来晚了、停播已经放开：照样当真，不当回声', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const h = harness([{ text: ['我先看一下。', '还有'], hold }, { text: ['好，停下了。'] }])
+    longPlayback(h)
+    h.stt.onEvent({ type: 'user-text', text: '看看', final: true })
+    await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+
+    vi.useFakeTimers()
+    try {
+      speakUp(h)
+      for (const packet of quietPackets(1_000)) h.session.appendAudio(packet)
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(types(h.events)).toContain('output-release')
+    } finally {
+      vi.useRealTimers()
+    }
+    h.stt.onEvent({ type: 'user-text', text: '停一下', final: true, audioMs: firstWords })
+    await vi.waitFor(() => expect(types(h.events)).toContain('interrupted'))
+    expect(h.signals[0].aborted).toBe(true)
+    release()
+  })
+
+  /** 识别服务这一句没办成，他说的可能正是「停一下」：不能当杂音悄悄放过去 */
+  it('停着播时识别服务失败了：接着放，但报没听清，让他再说一遍', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const h = harness([{ text: ['我先看一下。', '还有'], hold }])
+    h.stt.onEvent({ type: 'user-text', text: '看看', final: true })
+    await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+    speakUp(h)
+    h.stt.onEvent({ type: 'asr-failed', reason: 'service', audioMs: firstWords })
+    expect(types(h.events)).toContain('output-release')
+    expect(h.events).toContainEqual({ type: 'asr-failed' })
+    release()
+  })
+
   it('判定模型判不了（没配、超时）：照老规矩当真', async () => {
     const judge = vi.fn(async () => null)
     const h = harness([{ text: ['好。'] }], judge)
     h.stt.onEvent({ type: 'user-text', text: '嗯', final: true })
     await vi.waitFor(() => expect(h.requests).toHaveLength(1))
+  })
+
+  /**
+   * 渲染层收到 `interrupted` 就开始丢残片，要等到「这句说完了」的信号才停丢。
+   * 打字发来的那句没有识别终稿，不另给信号的话只能等三秒兜底，新回答的头一两秒全被吞掉
+   */
+  it('它说着时打了一句字：掐掉之后马上说这句完了，新回答的声音不被当残片丢掉', async () => {
+    let release!: () => void
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const h = harness([{ text: ['我先看一下。', '还有'], hold }, { text: ['好，改蓝色。'] }])
+    h.stt.onEvent({ type: 'user-text', text: '看看', final: true })
+    await vi.waitFor(() => expect(h.spoken).toHaveLength(1))
+
+    h.session.sendText('改成蓝色')
+    const cut = types(h.events).lastIndexOf('interrupted')
+    expect(cut).toBeGreaterThan(-1)
+    release()
+    await vi.waitFor(() => expect(h.spoken).toContain('好，改蓝色。'))
+    await vi.waitFor(() => expect(types(h.events)).toContain('turn-done'))
+
+    // 照渲染层的规矩走一遍：`interrupted` 起开始丢，到终稿、没听清、他说完了才停丢
+    let discarding = false
+    let played = 0
+    for (const event of h.events.slice(cut)) {
+      if (event.type === 'interrupted') discarding = true
+      else if (
+        (event.type === 'user-text' && event.final) ||
+        event.type === 'asr-failed' ||
+        event.type === 'user-speech-done'
+      )
+        discarding = false
+      else if (event.type === 'audio' && !discarding) played += 1
+    }
+    expect(played).toBeGreaterThan(0)
   })
 
   it('没在说话时用户开口：不发打断', () => {

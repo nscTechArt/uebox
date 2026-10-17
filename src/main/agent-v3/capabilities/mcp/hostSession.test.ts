@@ -100,3 +100,23 @@ describe('外部会话的 task 用哪个模型', () => {
     expect(Object.keys((parameters as { properties: object }).properties)).not.toContain('model')
   })
 })
+
+describe('外部会话没有盒子的界面', () => {
+  it('客户端支持提问也不给 update_plan / wrap_up，说明里也不提', async () => {
+    providers.list = [chat('a', ['m1'])]
+
+    const { tools, instructions } = await setupMcpSession({
+      sessionId: 'mcp-test',
+      elicit: async () => ({ action: 'cancel' })
+    } as never)
+    const names = tools.map((t) => t.name)
+
+    expect(names).toContain('ask_user')
+    expect(names).not.toContain('update_plan')
+    expect(names).not.toContain('wrap_up')
+    expect(instructions).not.toContain('wrap_up')
+    // 外部会话的子任务不继承对话，用户也看不到盒子的改动台账
+    expect(instructions).not.toContain('inherits this conversation in full')
+    expect(instructions).not.toContain('The UI already lists which assets you touched')
+  })
+})

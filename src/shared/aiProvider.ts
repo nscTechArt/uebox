@@ -682,7 +682,8 @@ export function applyRolePatch(roles: RoleBindings, patch: RoleBindingsPatch): R
 }
 
 /**
- * 补丁里哪些角色绑到了不许绑的模型（模型写了 `allowedRoles` 而不含这个角色，见 `modelAllowsRole`）。
+ * 补丁里哪些角色绑到了不许绑的模型：来源用途对不上角色（音乐来源绑「音效生成」），
+ * 或模型写了 `allowedRoles` 而不含这个角色（见 `modelAllowsRole`）。
  * 界面上的下拉本来就不列它们，走到这里的是过期的界面或手改的请求
  */
 export function disallowedRoles(source: RoleBindingSource, patch: RoleBindingsPatch): ModelRole[] {
@@ -690,6 +691,7 @@ export function disallowedRoles(source: RoleBindingSource, patch: RoleBindingsPa
     .filter(([role, binding]) => {
       if (!binding) return false
       const provider = source.providers.find((item) => item.id === binding.providerId)
+      if (provider?.kind && provider.kind !== ROLE_KIND[role]) return true
       const model = provider?.models.find((item) => item.id === binding.modelId)
       return !modelAllowsRole(model, role)
     })
@@ -738,7 +740,8 @@ export const VISION_FALLBACK_ROLES: readonly ModelRole[] = Object.freeze([
  */
 export interface RoleBindingSource {
   roles: RoleBindings
-  providers: readonly { id: string; models: readonly ModelConfig[] }[]
+  /** `kind` 给了就按它查用途对不对得上角色（见 `disallowedRoles`） */
+  providers: readonly { id: string; kind?: ProviderKind; models: readonly ModelConfig[] }[]
 }
 
 /** 这条绑定指向的模型声明了「看得懂图」吗。模型不在清单里（用户手改过配置）按不支持算 */
@@ -836,6 +839,12 @@ export function isAgentBindingAvailable(
 export interface ProviderView {
   id: string
   displayName: string
+  /**
+   * 从目录哪一条添加的。有值时用途（kind）跟着目录走、不许改：ElevenLabs 音乐和音效是
+   * 两条目录，把音乐那条改成「音效」留下的是一个只有音乐模型的音效来源，调用必然被拒。
+   * 要用同一家的另一种服务，从目录再添加那一条。手工新建的没有这一位，用途随便选
+   */
+  catalogId?: string
   /** 这个 Provider 是用来干什么的。决定它出现在哪些角色的候选里、界面显示哪些字段 */
   kind: ProviderKind
   /**
@@ -895,6 +904,12 @@ export interface SettingsView {
 export interface ProviderDraft {
   id: string
   displayName: string
+  /**
+   * 从目录哪一条添加的。有值时用途（kind）跟着目录走、不许改：ElevenLabs 音乐和音效是
+   * 两条目录，把音乐那条改成「音效」留下的是一个只有音乐模型的音效来源，调用必然被拒。
+   * 要用同一家的另一种服务，从目录再添加那一条。手工新建的没有这一位，用途随便选
+   */
+  catalogId?: string
   /** 这个 Provider 是用来干什么的。决定它出现在哪些角色的候选里、界面显示哪些字段 */
   kind: ProviderKind
   /**

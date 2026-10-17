@@ -462,10 +462,15 @@ export function buildAssetQueryParts(
    * SQLite 才能对这个 OR 两边分别走索引再取并集。以前 ext 没有单独的索引，
    * OR 的一边走不了索引，整个条件就退化成全表扫 —— 52 万行的库上一点「音频」就卡死。
    *
-   * 库里写的是小写、不带点（导入时 toLowerCase），这里把入参规整成同一个口径。
+   * 本机导入写的是小写、不带点（导入时 toLowerCase）；但旧 asset-server-standalone 扫描入库的
+   * 是 path.extname 的结果，**带点**（'.wav'）。现在同步入口（SyncClient）写之前就去点，
+   * 老行由 normalizeStoredExtensions 一次性迁掉；这里两种写法都放进 IN 只是兜底 ——
+   * 迁移跑完之前（大库要几秒）、或者迁移出错没跑完时，「音频」照样筛得出来。
+   * 仍是等值匹配，索引照走，多几个 IN 值几乎不要钱。
    */
   const buildExtensionCondition = (extensions: string[]): string => {
-    const normalized = extensions.map((ext) => String(ext).trim().replace(/^\./, '').toLowerCase())
+    const bare = extensions.map((ext) => String(ext).trim().replace(/^\./, '').toLowerCase())
+    const normalized = [...new Set(bare.flatMap((ext) => [ext, `.${ext}`]))]
     const placeholders = normalized.map(() => '?').join(',')
     whereParams.push(...normalized, ...normalized)
     return `(ad.fileExtension IN (${placeholders}) OR ad.ext IN (${placeholders}))`

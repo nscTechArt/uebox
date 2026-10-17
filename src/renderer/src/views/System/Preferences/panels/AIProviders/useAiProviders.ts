@@ -128,6 +128,7 @@ export function draftFromCatalog(entry: CatalogEntry): ProviderDraft {
   return {
     id: entry.id,
     displayName: entry.displayName,
+    catalogId: entry.id,
     kind: entry.kind,
     model3dApi: entry.model3dApi,
     videoApi: entry.videoApi,
@@ -173,6 +174,7 @@ export function draftFromProvider(provider: ProviderView): ProviderDraft {
   return {
     id: provider.id,
     displayName: provider.displayName,
+    catalogId: provider.catalogId,
     kind: provider.kind,
     model3dApi: provider.model3dApi,
     videoApi: provider.videoApi,

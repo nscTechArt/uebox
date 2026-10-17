@@ -39,6 +39,7 @@ import {
   setReadonlyLockEnabledResolver
 } from '../core/assetLockEnforcement'
 import { resetReadonlyGuardCaches } from '../core/assetReadonlyGuard'
+import { runWithEditorKey } from '../core/team/editorKey'
 import { invalidateSettingsCache } from '../../ai/store'
 import { estimateTokens } from '../../../shared/tokenBudget'
 import { effectiveRisk } from './defineTool'
@@ -614,6 +615,21 @@ describe('资产锁接线', () => {
     await expect(
       runWithLockOwner('me', () => tool.execute('call-4b', { actor_class: 'StaticMeshActor' }))
     ).rejects.toThrow('当前关卡')
+  })
+
+  it('工作室模式制作人锁不上关卡时，先拿到的资产路径锁一并放掉', async () => {
+    acquire(CONN, 'other-session', [CURRENT_LEVEL_LOCK], { soft: true })
+
+    const tool = toolNamed('ue_spawn_actor')
+    await expect(
+      runWithEditorKey(() =>
+        runWithLockOwner('producer', () =>
+          tool.execute('call-4d', { actor_class: '/Game/BP_Door' })
+        )
+      )
+    ).rejects.toThrow('当前关卡')
+
+    expect(listLocks().filter((l) => l.owner === 'producer')).toHaveLength(0)
   })
 
   it('不碰关卡的写工具不会顺手锁上关卡', async () => {
