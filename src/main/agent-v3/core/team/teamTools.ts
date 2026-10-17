@@ -18,7 +18,7 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import { z } from 'zod'
 
-import { defineTool, type UnrealAgentTool } from '../../tools/defineTool'
+import { defineTool, type ToolRisk, type UnrealAgentTool } from '../../tools/defineTool'
 import { SET_SESSION_PROJECT_TOOL_NAME } from '../../tools/toolNames'
 import {
   formatWriteAudit,
@@ -878,10 +878,136 @@ export function createTeamTools(
  */
 const PRODUCER_SETUP_TOOLS = new Set(['project_manage', SET_SESSION_PROJECT_TOOL_NAME])
 
+/** `project_manage` 里制作人能用的动作。导资产、往关卡放东西、建定序器、开插件都是改游戏，派给队员 */
+const PRODUCER_PROJECT_ACTIONS = ['create_project', 'open_project'] as const
+const PRODUCER_PROJECT_ACTION_SET: ReadonlySet<string> = new Set(PRODUCER_PROJECT_ACTIONS)
+
+/** 这两个动作用得到的参数。导入、插件、定序器那十几个字段制作人一个都用不上 */
+const PRODUCER_PROJECT_FIELDS: ReadonlySet<string> = new Set([
+  'action',
+  'templateName',
+  'projectName',
+  'targetDir',
+  'engineVersion',
+  'projectKey',
+  'projectPath',
+  'waitSeconds'
+])
+
+/**
+ * 底层这两个字段的说明里写着 import / enable_plugins 也认 —— 留着就等于在提示词里
+ * 再告诉一遍制作人「这个工具还能导资产」，所以连说明一起换掉。
+ */
+const PRODUCER_FIELD_DESCRIPTIONS: Record<string, string> = {
+  projectKey:
+    'open_project 用：项目唯一标识（project_list 的 list_projects 里查），优先于 projectPath',
+  projectPath: 'open_project 用：项目目录或 .uproject 路径（没有 projectKey 时给它）'
+}
+
+const PRODUCER_PROJECT_DESCRIPTION = `建新工程、打开已有工程。工作室模式里你只用它做这两件事。
+
+【action 取值】
+- create_project：按模板建新工程（需要 templateName、projectName、targetDir）
+- open_project：打开一个已有工程（给 projectKey，或直接给 projectPath）
+
+导资产、往关卡里放东西、建定序器、给工程开插件都是改游戏内容，写进任务派给队员。
+列模板、列工程用 project_list。
+
+【打开不用先挑引擎】open_project 把 .uproject 交给系统打开，用哪个引擎由工程里的
+EngineAssociation 定，这里没有引擎参数；UnrealAgentLink 插件由盒子在打开前装好。
+【打开默认立即返回】waitSeconds 默认 0，connected=false 是还在加载，不是失败，不要重复启动。
+用 ue_session_health 确认目标工程连上后，再对同一工程调一次 open_project、waitSeconds: 5
+做就绪校验；connected=true 且 switched_target=true 就直接接着干，不用请用户去界面上切工程。
+open_project 不改这条对话挂在哪个工程下，要改归属用 set_session_project。`
+
+/**
+ * 只认 create / open 的 JSON Schema：action 枚举收窄，用不上的字段去掉。
+ *
+ * 和 `splitByRisk.ts` 的 `withWriteActionsOnly` 是同一件事（2026-09-11「声明在骗人」：
+ * 枚举里露着调不通的动作），只是做在适配之后的 JSON Schema 上 —— 这里拿到的是已经
+ * 适配、包过资产锁的工具，Zod schema 早就转掉了；而为了拿 Zod 去 import `splitByRisk`，
+ * 会把底下 `projectTool` 那一整串（数据库、服务、electron）拖进团队模块。
+ *
+ * 枚举收窄不只是给模型看的：pi 在 `beforeToolCall` **之前**按这份 schema 校验参数，
+ * 枚举外的动作在那一步就被退回，根本走不到审批门。
+ */
+function producerProjectSchema(parameters: unknown): unknown {
+  const schema = parameters as
+    | { properties?: Record<string, unknown>; required?: unknown }
+    | undefined
+  // 不是对象 schema（测试替身、将来换写法）就原样返回，execute 那道拦截照样在
+  if (!schema?.properties) return parameters
+  const properties: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(schema.properties)) {
+    if (!PRODUCER_PROJECT_FIELDS.has(key)) continue
+    properties[key] = PRODUCER_FIELD_DESCRIPTIONS[key]
+      ? { ...(value as object), description: PRODUCER_FIELD_DESCRIPTIONS[key] }
+      : value
+  }
+  properties.action = {
+    type: 'string',
+    enum: [...PRODUCER_PROJECT_ACTIONS],
+    description: '【必填】create_project 建工程 / open_project 开工程'
+  }
+  return {
+    ...schema,
+    properties,
+    ...(Array.isArray(schema.required)
+      ? { required: schema.required.filter((key) => PRODUCER_PROJECT_FIELDS.has(String(key))) }
+      : {})
+  }
+}
+
+/**
+ * 制作人版的 `project_manage`：说明、schema、风险、执行入口四处一起收窄。
+ *
+ * 原来只在 execute 里拒，可审批门跑在 execute 前面：ask 档下制作人调一次
+ * `enable_plugins`，先弹一张审批卡、用户点了允许才换回一句「不让做」；
+ * 卡上还有「以后都允许」，点了就把**整个** `project_manage` 记进永久名单，
+ * 普通对话里的开插件从此再也不问。
+ *
+ * - **schema 收窄**：模型看不见别的动作；看见了硬调，pi 的参数校验先退回。
+ * - **riskFor 封顶 mutating**：声明风险仍是 destructive，于是实际风险永远低于声明，
+ *   审批门不会给「以后都允许」（只在两者相等时给），工具名不会进永久名单。
+ *   名单外的动作算 safe：反正下面 execute 会拒，不该为一次注定被拒的调用弹框。
+ * - **execute 拦截保留**：schema 只是建议，绕过校验漏进来的照样挡掉。
+ */
+function producerProjectManage(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
+  const allowed = (args: unknown): boolean => {
+    const action = (args as { action?: unknown } | undefined)?.action
+    return typeof action === 'string' && PRODUCER_PROJECT_ACTION_SET.has(action)
+  }
+  return {
+    ...tool,
+    description: PRODUCER_PROJECT_DESCRIPTION,
+    parameters: producerProjectSchema(tool.parameters) as UnrealAgentTool<never>['parameters'],
+    unrealBox: {
+      ...tool.unrealBox,
+      // 建工程、开工程只往外加东西（见 splitByRisk 的 ADDITIVE_ACTIONS），按 mutating 问
+      riskFor: (args): ToolRisk => (allowed(args) ? 'mutating' : 'safe')
+    },
+    execute: (async (...args: Parameters<UnrealAgentTool<never>['execute']>) => {
+      if (!allowed(args[1])) {
+        const action = String((args[1] as { action?: unknown } | undefined)?.action)
+        const hint =
+          action === 'list_projects' || action === 'list_templates'
+            ? '列模板、列工程用 project_list'
+            : '这是改游戏内容的活，写进任务派给队员去做'
+        throw new Error(
+          `制作人的 project_manage 只能 create_project、open_project，不支持 action="${action}"；${hint}`
+        )
+      }
+      return tool.execute(...args)
+    }) as UnrealAgentTool<never>['execute']
+  }
+}
+
 export function producerTools(pool: UnrealAgentTool<never>[]): UnrealAgentTool<never>[] {
-  return pool.filter(
-    (tool) =>
-      PRODUCER_SETUP_TOOLS.has(tool.name) ||
-      (tool.name !== 'task' && tool.unrealBox.risk === 'safe')
-  )
+  return pool
+    .filter(
+      (tool) =>
+        PRODUCER_SETUP_TOOLS.has(tool.name) ||
+        (tool.name !== 'task' && tool.unrealBox.risk === 'safe')
+    )
+    .map((tool) => (tool.name === 'project_manage' ? producerProjectManage(tool) : tool))
 }

@@ -1569,7 +1569,15 @@ function withAssetLock(tool: UnrealAgentTool<never>): UnrealAgentTool<never> {
       // 干活是常态，把关卡的手动保存也拦下来，代价和收益完全不成比例。
       const levelScoped = LEVEL_SCOPED_NAMESPACES.has(tool.unrealBox.namespace)
       if (levelScoped) {
-        await lock([CURRENT_LEVEL_LOCK], true)
+        try {
+          await lock([CURRENT_LEVEL_LOCK], true)
+        } catch (error) {
+          // 制作人的锁只占这一次调用（见下）：关卡锁没拿到、这次不调了，先拿到的路径锁一并放掉
+          if (team && teamRootOf(owner) === owner) {
+            releasePaths(effectiveConnectionId(), owner, paths)
+          }
+          throw error
+        }
       }
 
       // 工作室模式的制作人：它那一轮就是整局，锁跟着一轮走的话，它碰过的资产和「当前关卡」
