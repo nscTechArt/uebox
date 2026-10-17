@@ -128,6 +128,7 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
     // 客户端批准了派子任务，就等于批准了子任务要做的事（task 对外标成破坏性）
     requestApproval: async () => 'approve',
     ...(request.elicit ? { requestQuestion: elicitQuestions(request.elicit) } : {}),
+    externalClient: true,
     sender: broadcastSender,
     notebook: 'all',
     mcp
