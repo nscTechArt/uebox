@@ -54,11 +54,58 @@ namespace
 		return Token == TEXT("gl") || Token == TEXT("opengl") || Token == TEXT("dx") || Token == TEXT("directx");
 	}
 
+	/** 非空且全是数字。不用 FString::IsNumeric：它还认 +1 / 1.5 这种 */
+	bool UAL_IsAllDigits(const FString& Token)
+	{
+		if (Token.IsEmpty())
+		{
+			return false;
+		}
+		for (const TCHAR Ch : Token)
+		{
+			if (!FChar::IsDigit(Ch))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * 分辨率词：4k / 2K / 16k，或者写成像素数的 256 ~ 16384（2 的幂）。
+	 *
+	 * 分类（UAL_TypeToken 跳过它找类型词）和基名（ExtractBaseName 先摘掉它）共用这一个判断：
+	 * 两边口径不一样的话，rock_arm_2048 认得出是 ARM，基名却是 rock_arm_2048，和 rock_nor_gl_2048 分不到一组。
+	 * 大小写都认（ExtractBaseName 拿的是原名）。只认 2 的幂：随便一个三四位数可能是编号，不能当分辨率摘
+	 */
+	bool UAL_IsResolutionToken(const FString& Token)
+	{
+		if (Token.Len() >= 2 && Token.EndsWith(TEXT("k"), ESearchCase::IgnoreCase) && UAL_IsAllDigits(Token.LeftChop(1)))
+		{
+			return true;
+		}
+		if (!UAL_IsAllDigits(Token) || Token.Len() < 3 || Token.Len() > 5)
+		{
+			return false;
+		}
+		const int32 Pixels = FCString::Atoi(*Token);
+		return Pixels >= 256 && Pixels <= 16384 && (Pixels & (Pixels - 1)) == 0;
+	}
+
+	/**
+	 * 末尾的两位编号：T_Rock_ARM_01。和下面 ExtractBaseName 最后摘的 _01 / _02 是同一个口径（1.0.8 就这么摘），
+	 * 只是挪到类型后缀前面也摘一次，T_Rock_ARM_01 和 T_Rock_Normal_01 的基名才对得上。一位数、三位数的编号不摘
+	 */
+	bool UAL_IsVariantNumberToken(const FString& Token)
+	{
+		return Token.Len() == 2 && UAL_IsAllDigits(Token);
+	}
+
 	/**
 	 * 「类型词」= 名字里最后一个有意义的词。
 	 *
 	 * 贴图类型按惯例写在名字末尾：T_Rock_ORM、rock_arm_4k、Rock_Normal_GL。
-	 * 末尾的分辨率（4k / 2048 / 01）和法线约定词跳过。只看末尾是为了不把
+	 * 末尾的分辨率（4k / 2048）、编号（01 / 1）和法线约定词跳过。只看末尾是为了不把
 	 * "T_Arm_BaseColor"（手臂的颜色图）、"T_Mask_Albedo"（面具）认成打包遮罩。
 	 */
 	FString UAL_TypeToken(const TArray<FString>& Tokens)
@@ -66,9 +113,8 @@ namespace
 		for (int32 Index = Tokens.Num() - 1; Index >= 0; --Index)
 		{
 			const FString& Token = Tokens[Index];
-			const bool bResolution = Token.IsNumeric() ||
-				(Token.Len() >= 2 && Token.EndsWith(TEXT("k")) && Token.LeftChop(1).IsNumeric());
-			if (bResolution || UAL_IsNormalConventionToken(Token))
+			// 纯数字一律跳过（编号也算）；基名那边只摘分辨率和两位编号，见 ExtractBaseName
+			if (UAL_IsResolutionToken(Token) || UAL_IsAllDigits(Token) || UAL_IsNormalConventionToken(Token))
 			{
 				continue;
 			}
@@ -87,6 +133,31 @@ namespace
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * 只凭末尾一个普通单词 Arm / Mask 认成的打包图。T_Robot_Arm、T_Gas_Mask 多半是手臂、面具的颜色图，
+	 * 同组没有别的 PBR 图撑着就不算（见 GroupTexturesByAsset）。ORM / RMA / MRA 不是普通单词，不在此列
+	 */
+	bool UAL_IsBarePackedWord(const FString& TextureName, EUAL_PBRTextureType Type)
+	{
+		if (Type != EUAL_PBRTextureType::PackedORM && Type != EUAL_PBRTextureType::PackedMask)
+		{
+			return false;
+		}
+		const FString TypeToken = UAL_TypeToken(UAL_NameTokens(TextureName));
+		return TypeToken == TEXT("arm") || TypeToken == TEXT("mask") || TypeToken == TEXT("masks");
+	}
+
+	/** 组里有没有母材质收的图 —— 和 CreatePBRMaterialInstance 第 7 步接的那几种对齐 */
+	bool UAL_HasWirableTexture(const FUAL_TextureGroup& Group)
+	{
+		return Group.Textures.Contains(EUAL_PBRTextureType::Albedo) ||
+			Group.Textures.Contains(EUAL_PBRTextureType::Normal) ||
+			Group.Textures.Contains(EUAL_PBRTextureType::Roughness) ||
+			Group.Textures.Contains(EUAL_PBRTextureType::AO) ||
+			Group.Textures.Contains(EUAL_PBRTextureType::Height) ||
+			Group.Textures.Contains(EUAL_PBRTextureType::Opacity);
 	}
 }
 
@@ -146,8 +217,12 @@ EUAL_PBRTextureType FUAL_PBRMaterialHelper::ClassifyTexture(const FString& Textu
 		{
 			return EUAL_PBRTextureType::PackedMRA;
 		}
-		// 只写 Mask 的不知道通道顺序：照数据图处理（关 sRGB），但不往材质里接
-		if (TypeToken == TEXT("mask") || TypeToken == TEXT("masks"))
+		// 只写 Mask 的不知道通道顺序：照数据图处理（关 sRGB），但不往材质里接。
+		// Opacity_Mask / Alpha_Mask 是透明遮罩，落到下面照旧认成 Opacity。
+		// 末尾只有一个 Mask / Arm 的还可能就是面具、手臂的颜色图，分组时再看同组有没有别的 PBR 图
+		const TArray<FString> OpacityMaskKeywords = { TEXT("opacity"), TEXT("alpha") };
+		if ((TypeToken == TEXT("mask") || TypeToken == TEXT("masks")) &&
+			!ContainsAnyKeyword(LowerName, OpacityMaskKeywords))
 		{
 			return EUAL_PBRTextureType::PackedMask;
 		}
@@ -155,6 +230,17 @@ EUAL_PBRTextureType FUAL_PBRMaterialHelper::ClassifyTexture(const FString& Textu
 		if (TypeToken == TEXT("nor"))
 		{
 			return EUAL_PBRTextureType::Normal;
+		}
+		// Poly Haven 的颜色图叫 diff、置换叫 disp（aerial_rocks_02_diff_4k）。
+		// diff 只按整词认，子串的话 "Different" 也成了颜色图；disp 下面的子串检测本来就认，
+		// 放这里是让末尾写明 disp 的排在 color / _d_ 那些子串前面（T_Color_Disp 是置换不是颜色）
+		if (TypeToken == TEXT("diff"))
+		{
+			return EUAL_PBRTextureType::Albedo;
+		}
+		if (TypeToken == TEXT("disp"))
+		{
+			return EUAL_PBRTextureType::Height;
 		}
 	}
 
@@ -283,27 +369,31 @@ FString FUAL_PBRMaterialHelper::ExtractBaseName(const FString& TextureName)
 {
 	FString BaseName = TextureName;
 
-	// 法线约定词先摘掉：Rock_Normal_GL 要和 Rock_Albedo 分到同一组（基名都是 Rock），
-	// 不摘的话下面只摘得掉一层，基名成了 Rock_Normal，法线自己单成一组
+	// 类型词后面跟的分辨率、编号、法线约定词最先摘，口径和 UAL_TypeToken 跳过的那些对齐：
+	// rock_arm_2048 / rock_nor_gl_4k / T_Rock_ARM_01 / Rock_Normal_GL 都得先露出类型后缀，
+	// 不然后面的后缀一个都对不上，同一套图的基名各不相同，分不到一组（ARM 落单还会被当成手臂图丢掉）。
+	// 顺序不定（nor_gl_4k、Normal_2048_GL 都见过），一个个往前摘，直到碰上别的词
 	{
-		const TArray<FString> ConventionSuffixes = {
-			TEXT("_OpenGL"), TEXT("_DirectX"), TEXT("_GL"), TEXT("_DX")
-		};
-		for (const FString& Suffix : ConventionSuffixes)
+		int32 UnderscorePos = INDEX_NONE;
+		while (BaseName.FindLastChar(TEXT('_'), UnderscorePos) && UnderscorePos > 0)
 		{
-			if (BaseName.EndsWith(Suffix, ESearchCase::IgnoreCase))
+			const FString Last = BaseName.Mid(UnderscorePos + 1);
+			if (!UAL_IsResolutionToken(Last) && !UAL_IsVariantNumberToken(Last) &&
+				!UAL_IsNormalConventionToken(Last.ToLower()))
 			{
-				BaseName = BaseName.Left(BaseName.Len() - Suffix.Len());
 				break;
 			}
+			BaseName = BaseName.Left(UnderscorePos);
 		}
 	}
 
 	// 移除常见的纹理类型后缀
 	TArray<FString> Suffixes = {
-		// 打包遮罩、凹凸、Poly Haven 的 nor —— 和 ClassifyTexture 认的词对齐
+		// 透明遮罩整个摘掉，和同名的颜色图分到一组（只摘 _Mask 的话基名剩个 _Opacity）
+		TEXT("_Opacity_Mask"), TEXT("_Alpha_Mask"),
+		// 打包遮罩、凹凸、Poly Haven 的 nor / diff / disp —— 和 ClassifyTexture 认的词对齐
 		TEXT("_ORM"), TEXT("_ARM"), TEXT("_RMA"), TEXT("_MRA"), TEXT("_Masks"), TEXT("_Mask"),
-		TEXT("_Bump"), TEXT("_Nor"),
+		TEXT("_Bump"), TEXT("_Nor"), TEXT("_Diff"), TEXT("_Disp"),
 		TEXT("_Albedo"), TEXT("_BaseColor"), TEXT("_Diffuse"), TEXT("_Color"),
 		TEXT("_Normal"), TEXT("_NRM"), TEXT("_N"),
 		TEXT("_Roughness"), TEXT("_Rough"), TEXT("_R"),
@@ -326,7 +416,8 @@ FString FUAL_PBRMaterialHelper::ExtractBaseName(const FString& TextureName)
 		}
 	}
 	
-	// 移除数字后缀（例如 _01, _02）
+	// 移除数字后缀（例如 _01, _02）。
+	// 1.0.8 起就这么摘：aerial_rocks_02_diff_4k 的基名是 aerial_rocks，T_Rock_01_* 和 T_Rock_02_* 会并成一组
 	if (BaseName.Len() > 3)
 	{
 		int32 UnderscorePos = BaseName.Len() - 3;
@@ -344,7 +435,17 @@ FString FUAL_PBRMaterialHelper::ExtractBaseName(const FString& TextureName)
 TArray<FUAL_TextureGroup> FUAL_PBRMaterialHelper::GroupTexturesByAsset(const TArray<UTexture2D*>& Textures)
 {
 	TMap<FString, FUAL_TextureGroup> GroupMap;
-	
+
+	// 先全部分好类，再入组：只凭末尾 Arm / Mask 认的打包图，要看同一基名下有没有别的 PBR 图
+	struct FClassified
+	{
+		UTexture2D* Texture;
+		EUAL_PBRTextureType Type;
+		FString BaseName;
+		bool bBarePackedWord;
+	};
+	TArray<FClassified> Classified;
+	TSet<FString> BasesWithPBRMap;
 	for (UTexture2D* Texture : Textures)
 	{
 		if (!Texture) continue;
@@ -358,10 +459,31 @@ TArray<FUAL_TextureGroup> FUAL_PBRMaterialHelper::GroupTexturesByAsset(const TAr
 			UE_LOG(LogPBRHelper, Warning, TEXT("Unknown texture type: %s"), *TextureName);
 			continue;
 		}
-		
-		// 提取基础名称
-		FString BaseName = ExtractBaseName(TextureName);
-		
+
+		const bool bBare = UAL_IsBarePackedWord(TextureName, Type);
+		const FString TextureBaseName = ExtractBaseName(TextureName);
+		if (!bBare)
+		{
+			BasesWithPBRMap.Add(TextureBaseName);
+		}
+		Classified.Add({ Texture, Type, TextureBaseName, bBare });
+	}
+
+	for (const FClassified& Entry : Classified)
+	{
+		UTexture2D* Texture = Entry.Texture;
+		const FString TextureName = Texture->GetName();
+		const EUAL_PBRTextureType Type = Entry.Type;
+
+		// 孤零零一张 T_Gas_Mask / T_Robot_Arm：照 1.0.8 当认不出，sRGB、压缩都不碰
+		if (Entry.bBarePackedWord && !BasesWithPBRMap.Contains(Entry.BaseName))
+		{
+			UE_LOG(LogPBRHelper, Warning, TEXT("Unknown texture type (no PBR set around a bare Arm/Mask name): %s"), *TextureName);
+			continue;
+		}
+
+		const FString& BaseName = Entry.BaseName;
+
 		// 如果该基础名称的组不存在，创建新组
 		if (!GroupMap.Contains(BaseName))
 		{
@@ -414,7 +536,33 @@ UMaterialInstanceConstant* FUAL_PBRMaterialHelper::CreatePBRMaterialInstance(
 		UE_LOG(LogPBRHelper, Warning, TEXT("Invalid texture group for material creation"));
 		return nullptr;
 	}
-	
+
+	// 一个参数都接不上的组（只有打包遮罩、金属度这类母材质不收的图）不建 MI：建出来是个没参数的空壳，
+	// 单网格导入时还会顶掉网格原来的 0 号槽材质。贴图设置和回执照做，只是 MaterialParameter 留空
+	if (!UAL_HasWirableTexture(TextureGroup))
+	{
+		for (const auto& Pair : TextureGroup.Textures)
+		{
+			bool bFlipped = false;
+			if (Options.bAutoConfigureTextures)
+			{
+				const bool bWasFlipped = Pair.Value && Pair.Value->bFlipGreenChannel;
+				ConfigureTextureSettings(Pair.Value, Pair.Key);
+				bFlipped = Pair.Value && !bWasFlipped && Pair.Value->bFlipGreenChannel;
+			}
+			if (OutTextureReports)
+			{
+				FUAL_PBRTextureReport Report;
+				Report.Texture = Pair.Value;
+				Report.Type = Pair.Key;
+				Report.bFlippedGreenByNaming = bFlipped;
+				OutTextureReports->Add(Report);
+			}
+		}
+		UE_LOG(LogPBRHelper, Log, TEXT("No material parameter to wire for '%s', material instance skipped"), *TextureGroup.BaseName);
+		return nullptr;
+	}
+
 	// 1. 加载Master Material
 	FString MasterMatPath = Options.MasterMaterialPath.IsEmpty() ? 
 		TEXT("/Engine/EngineMaterials/DefaultMaterial") : Options.MasterMaterialPath;
@@ -798,7 +946,17 @@ int32 FUAL_PBRMaterialHelper::BatchProcessPBRAssets(
 	}
 	
 	int32 SuccessCount = 0;
-	
+
+	// 会建出材质实例的组（有参数可接的）。单网格自动匹配按这个数，只配了贴图的组不算
+	int32 MaterialGroupCount = 0;
+	for (const FUAL_TextureGroup& Group : TextureGroups)
+	{
+		if (UAL_HasWirableTexture(Group))
+		{
+			++MaterialGroupCount;
+		}
+	}
+
 	// 2. 为每个纹理组创建PBR材质
 	for (const FUAL_TextureGroup& Group : TextureGroups)
 	{
@@ -835,7 +993,7 @@ int32 FUAL_PBRMaterialHelper::BatchProcessPBRAssets(
 				}
 				
 				// 如果没有找到名称匹配的，并且只有一个网格体和一个材质组，自动匹配
-				if (!MatchedMesh && ImportedMeshes.Num() == 1 && TextureGroups.Num() == 1)
+				if (!MatchedMesh && ImportedMeshes.Num() == 1 && MaterialGroupCount == 1)
 				{
 					MatchedMesh = ImportedMeshes[0];
 					UE_LOG(LogPBRHelper, Log, TEXT("Auto-matching single mesh to single material group"));
@@ -854,7 +1012,7 @@ int32 FUAL_PBRMaterialHelper::BatchProcessPBRAssets(
 				}
 			}
 		}
-		else
+		else if (UAL_HasWirableTexture(Group))
 		{
 			UE_LOG(LogPBRHelper, Error, TEXT("Failed to create material for group: %s"), 
 				*Group.BaseName);

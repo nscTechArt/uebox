@@ -75,6 +75,10 @@
 #include "MovieScene.h"
 #if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
 #include "WidgetBlueprintOperationUtils.h"
+#elif ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+// 改名时同步 UI Component 扩展里记的控件名（5.6/5.7 引擎 RenameWidget 里的 FUIComponentUtils::OnWidgetRenamed）
+#include "WidgetBlueprintExtension.h"
+#include "UIComponentWidgetBlueprintExtension.h"
 #endif
 #endif
 
@@ -1173,6 +1177,7 @@ static bool UAL_NodeRefsWidgetVariable(const UEdGraphNode* Node, const UWidgetBl
  * 对应的 FWidgetBlueprintEditorUtils::RenameWidget 在 Private 头里，还要传一个打开着的
  * 编辑器，只能照 5.0 引擎那份实现抄关键步骤：改对象名、改图表里的变量/事件引用、
  * 属性绑定、动画绑定、导航绑定、子蓝图撞名检查，最后标记结构变更让骨架类重编。
+ * 后续版本引擎多出来的步骤按版本补上：5.3 起的默认焦点控件名，5.6 起的变量 GUID 表和 UI Component。
  * 名字已经由调用方验过（不撞控件树、不撞蓝图成员）。
  */
 static bool UAL_RenameWidgetLikeEditor(UWidgetBlueprint* WidgetBP, UWidget* Widget, const FName NewName)
@@ -1191,8 +1196,29 @@ static bool UAL_RenameWidgetLikeEditor(UWidgetBlueprint* WidgetBP, UWidget* Widg
 	{
 		return false;
 	}
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+	// 5.6 起控件变量名 → GUID 的表（WidgetVariableNameToGuidMap）要跟着改，
+	// 不然编译时 ValidateAndFixUpVariableGuids 连报两个 ensure，还给它换个新 GUID，外部引用就断了
+	WidgetBP->OnVariableRenamed(OldName, NewName);
+#endif
 
 	FBlueprintEditorUtils::ReplaceVariableReferences(WidgetBP, OldName, NewName);
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
+	// 5.3 起引擎会顺手改 CDO 上记的默认焦点控件名（ReplaceDesiredFocus，私有头里），照它的效果改
+	if (WidgetBP->GeneratedClass)
+	{
+		if (UUserWidget* WidgetCDO = WidgetBP->GeneratedClass->GetDefaultObject<UUserWidget>())
+		{
+			if (WidgetCDO->GetDesiredFocusWidgetName() == OldName)
+			{
+				WidgetCDO->SetFlags(RF_Transactional);
+				WidgetCDO->Modify();
+				WidgetCDO->SetDesiredFocusWidget(NewName);
+			}
+		}
+	}
+#endif
 
 	for (FDelegateEditorBinding& Binding : WidgetBP->Bindings)
 	{
@@ -1238,6 +1264,19 @@ static bool UAL_RenameWidgetLikeEditor(UWidgetBlueprint* WidgetBP, UWidget* Widg
 			Each->Navigation->TryToRenameBinding(OldName, NewName);
 		}
 	});
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+	// UI Component 扩展里按控件名记着挂了哪些组件，要跟着改（FUIComponentUtils::OnWidgetRenamed 的蓝图那一半，
+	// 它要一个打开的编辑器，预览那一半这里没有）。5.7 这个类没导出 StaticClass，只能按类路径找
+	if (UClass* ComponentExtClass = FindObject<UClass>(nullptr, TEXT("/Script/UMGEditor.UIComponentWidgetBlueprintExtension")))
+	{
+		UWidgetBlueprintExtension* Extension = UWidgetBlueprintExtension::GetExtension(WidgetBP, ComponentExtClass);
+		if (Extension && Extension->IsA(ComponentExtClass))
+		{
+			static_cast<UUIComponentWidgetBlueprintExtension*>(Extension)->RenameWidget(OldName, NewName);
+		}
+	}
+#endif
 
 	FBlueprintEditorUtils::ValidateBlueprintChildVariables(WidgetBP, NewName);
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
