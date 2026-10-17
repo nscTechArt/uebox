@@ -34,6 +34,8 @@
  * 也不要存下一个到期才爆的承诺。扩范围（依赖对账）是阶段 2 的活。
  */
 
+import type { SnippetMeta, SnippetOpenPort } from '../../../shared/snippetPayload'
+
 // ============================================================
 //  读侧（blueprint_get_graph 工具层返回）
 // ============================================================
@@ -82,32 +84,6 @@ export interface ReadGraph {
   graph_name?: string
   nodes?: ReadNode[]
   connections?: ReadConnection[]
-}
-
-// ============================================================
-//  扫出来的东西
-// ============================================================
-
-/** 悬空端口：片段里的某个引脚，原本连到选区外面去了 */
-export interface OpenPort {
-  nodeId: string
-  pinName: string
-  dir: 'in' | 'out'
-  /** 原来连到哪儿，只作说明用，跨工程没有意义 */
-  formerPeer: string
-}
-
-/**
- * 片段的摘要。**只作展示与检索，不参与放回工程** ——
- * 放回工程用的是那段 T3D 正文，这里一个字都不参与。
- */
-export interface SnippetMeta {
-  nodeCount: number
-  /** 两端都在选区内的连线条数 */
-  connectionCount: number
-  /** 用到的节点类型，去重后按出现顺序。能给简名的给简名（Branch），给不出的给引擎类名 */
-  classes: string[]
-  openPorts: OpenPort[]
 }
 
 // ============================================================
@@ -379,7 +355,7 @@ export function scanSnippet(graph: ReadGraph, nodeIds: readonly string[] = []): 
   // —— 连线：两端都在选区内才算这段自己的 ——
 
   let connectionCount = 0
-  const openPorts: OpenPort[] = []
+  const openPorts: SnippetOpenPort[] = []
 
   for (const link of graph.connections ?? []) {
     const { from_node: fromNode, from_pin: fromPin, to_node: toNode, to_pin: toPin } = link

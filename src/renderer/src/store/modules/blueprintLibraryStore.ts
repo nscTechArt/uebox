@@ -26,7 +26,7 @@ import { extractFunctionSignatureFromCode } from '@renderer/views/BlueprintLibra
 import { sortLibraryEntries } from '@renderer/views/library-common/utils/libraryCollection'
 import { createLibraryPackagePersistence, parseUiPrefs } from './libraryPackagePersistence'
 import { clearLegacyLocalStorage, readLegacyLibrarySnapshot } from './libraryLegacyRead'
-import { detectSnippetForm } from '@renderer/views/library-common/utils/snippetForm'
+import { detectPayloadForm } from '@core/shared/snippetPayload'
 import i18n from '@renderer/i18n'
 
 /** store 不是组件，拿不到 `useI18n()`；`i18n.global.t` 每次调用现读当前语言 */
@@ -257,7 +257,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
      * 要接的话在 `SnippetDetail.vue` 里接，不是在这儿伪造成一条老条目。）
      */
     normalizeEntry: (payload) => {
-      if (detectSnippetForm(payload) !== 'snippet') return payload
+      if (detectPayloadForm(payload) !== 'snippet') return payload
       return {
         blueprintType: 'actor',
         engineVersion: '5.x',

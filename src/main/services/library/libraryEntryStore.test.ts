@@ -4,14 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createPackage } from '../libraryPackageStore'
-import {
-  detectPayloadForm,
-  findEntryById,
-  readSnippetPayload,
-  saveSnippetEntry,
-  searchEntries
-} from './libraryEntryStore'
-import type { SnippetMeta } from './snippetScan'
+import { findEntryById, saveSnippetEntry, searchEntries } from './libraryEntryStore'
+import { readSnippetPayload, type SnippetMeta } from '../../../shared/snippetPayload'
 
 const T3D =
   'Begin Object Class=/Script/BlueprintGraph.K2Node_Event Name="K2Node_Event_0"\nEnd Object'
@@ -22,49 +16,6 @@ const meta: SnippetMeta = {
   classes: ['Event', 'Function'],
   openPorts: []
 }
-
-describe('detectPayloadForm', () => {
-  it('明确写着 form: snippet 且有正文才算片段', () => {
-    expect(detectPayloadForm({ form: 'snippet', t3d: T3D })).toBe('snippet')
-  })
-
-  it('缺 form 一律按老条目 —— 老包就是这个样子', () => {
-    // 2026-08-29 之前的 payload 直接就是 { graphs, functions, macros }
-    expect(detectPayloadForm({ graphs: [], functions: [], macros: [] })).toBe('t3d')
-  })
-
-  it('form 写了但正文是空的，仍然按老条目', () => {
-    // 判宽的代价是拿一条没有正文的条目去放进工程，那是一次必然失败的写入
-    expect(detectPayloadForm({ form: 'snippet' })).toBe('t3d')
-    expect(detectPayloadForm({ form: 'snippet', t3d: '' })).toBe('t3d')
-  })
-
-  it('改道之前那个短命的 form: graph 落进老条目这一支', () => {
-    // 结构化形态从没对外开放过，不留兼容分支
-    expect(detectPayloadForm({ form: 'graph', graph: { nodes: [] } })).toBe('t3d')
-  })
-
-  it('null / 非对象按老条目', () => {
-    expect(detectPayloadForm(null)).toBe('t3d')
-    expect(detectPayloadForm('nonsense')).toBe('t3d')
-  })
-})
-
-describe('readSnippetPayload', () => {
-  it('缺省的摘要补成零值，调用方不用到处判 undefined', () => {
-    const payload = readSnippetPayload({ form: 'snippet', t3d: T3D })
-    expect(payload?.meta).toEqual({
-      nodeCount: 0,
-      connectionCount: 0,
-      classes: [],
-      openPorts: []
-    })
-  })
-
-  it('老形态返回 null', () => {
-    expect(readSnippetPayload({ graphs: [] })).toBeNull()
-  })
-})
 
 describe('库条目的读写（真实临时目录）', () => {
   let vaultRoot: string
