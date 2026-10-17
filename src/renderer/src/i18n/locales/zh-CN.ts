@@ -719,7 +719,8 @@ export default {
       model3dMissing: '3D 生成不可用',
       search: '网页检索',
       searchDesc: '选择网页搜索服务；未配置时使用内置浏览器。',
-      searchMore: '内置浏览器无需配置；也可使用 Jina 或自建 SearXNG，费用以所选服务为准。',
+      searchMore:
+        '内置浏览器无需配置；也可使用 Jina、DeepSeek 或自建 SearXNG，费用以所选服务为准。',
       searchMissing: '网页检索不可用',
       judge: '结构化判定',
       judgeDesc: '可选。用于收紧 Agent 的护栏；未配置时保持当前行为，功能不受影响。',

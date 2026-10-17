@@ -20,6 +20,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const jinaKey = { value: '' }
 const browserSearch = vi.fn()
 const searxngSearch = vi.fn()
+const deepseekSearch = vi.fn()
+/** 对话那条 DeepSeek 上配的 Key。检索那条没填时借它 */
+const deepseekChatKey = { value: '' }
 const boundProvider: { value: unknown } = { value: null }
 
 vi.mock('../ai/jinaKey', () => ({
@@ -31,6 +34,7 @@ vi.mock('./searchProvider', () => ({
   BUILTIN_BROWSER_PROVIDER_ID: 'builtin-browser',
   SEARXNG_PROVIDER_ID: 'searxng',
   JINA_SEARCH_PROVIDER_ID: 'jina-search',
+  DEEPSEEK_SEARCH_PROVIDER_ID: 'deepseek-search',
   resolveSearchProvider: async () => boundProvider.value
 }))
 
@@ -40,6 +44,15 @@ vi.mock('./browserSearch', () => ({
 
 vi.mock('./searxngSearch', () => ({
   searchViaSearxng: (...args: unknown[]) => searxngSearch(...args)
+}))
+
+vi.mock('./deepseekSearch', () => ({
+  searchViaDeepseek: (...args: unknown[]) => deepseekSearch(...args)
+}))
+
+vi.mock('../ai/providerKey', () => ({
+  resolveProviderApiKey: async (providerId: string) =>
+    providerId === 'deepseek' ? deepseekChatKey.value || undefined : undefined
 }))
 
 // 界面语言。检索要把它翻成 Jina 的 hl 参数，不给的话结果跟着出口 IP 走
@@ -122,6 +135,9 @@ beforeEach(() => {
   browserSearch.mockResolvedValue({ success: true, engine: 'duckduckgo', items: BROWSER_ITEMS })
   searxngSearch.mockReset()
   searxngSearch.mockResolvedValue({ success: true, items: BROWSER_ITEMS })
+  deepseekSearch.mockReset()
+  deepseekSearch.mockResolvedValue({ success: true, items: BROWSER_ITEMS })
+  deepseekChatKey.value = ''
 })
 
 /** 绑一个「网页检索」Provider。modelId 是「去哪儿搜」，不是模型 */
@@ -304,6 +320,51 @@ describe('searchWeb', () => {
       expect(calls).toEqual([])
     })
 
+    it('绑了 DeepSeek 就把地址和 Key 交给它', async () => {
+      bind('deepseek-search', 'search', 'https://api.deepseek.com', 'sk-search')
+
+      const result = await searchWeb('虚幻引擎 事件分发器', { limit: 3 })
+
+      expect(result.success).toBe(true)
+      expect(result.provider).toBe('deepseek-search')
+      expect(deepseekSearch).toHaveBeenCalledWith(
+        'https://api.deepseek.com',
+        'sk-search',
+        '虚幻引擎 事件分发器',
+        3
+      )
+    })
+
+    it('检索那条没填 Key 时，借对话那条 DeepSeek 的', async () => {
+      bind('deepseek-search', 'search', 'https://api.deepseek.com')
+      deepseekChatKey.value = 'sk-chat'
+
+      await searchWeb('虚幻引擎 事件分发器')
+
+      expect(deepseekSearch.mock.calls[0][1]).toBe('sk-chat')
+    })
+
+    it('两处都没有 Key 时说清楚去哪儿拿，不发请求', async () => {
+      bind('deepseek-search', 'search', 'https://api.deepseek.com')
+
+      const result = await searchWeb('虚幻引擎')
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('platform.deepseek.com')
+      expect(deepseekSearch).not.toHaveBeenCalled()
+    })
+
+    it('DeepSeek 失败如实报错，不偷偷改走别的路', async () => {
+      bind('deepseek-search', 'search', '', 'sk-search')
+      deepseekSearch.mockResolvedValue({ success: false, error: 'DeepSeek 账户余额不足。' })
+
+      const result = await searchWeb('虚幻引擎')
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('余额不足')
+      expect(browserSearch).not.toHaveBeenCalled()
+    })
+
     /**
      * 绑了个不认识的 Provider —— **退回内置浏览器，但要说出来**。
      *
@@ -476,7 +537,9 @@ describe('目录与实现对得上', () => {
         // searxngSearch.ts：具体开哪些上游引擎是实例自己的配置
         'searxng/web-search',
         // webSearch.ts 的 searchViaJina
-        'jina-search/s.jina.ai'
+        'jina-search/s.jina.ai',
+        // deepseekSearch.ts：接口没有模型之分
+        'deepseek-search/search'
       ])
     )
   })

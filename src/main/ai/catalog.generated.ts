@@ -6464,5 +6464,23 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "ttsVoice": "zf_xiaobei"
       }
     ]
+  },
+  {
+    "id": "deepseek-search",
+    "displayName": "DeepSeek（网页检索）",
+    "group": "search",
+    "kind": "search",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.deepseek.com",
+    "apiKeyUrl": "https://platform.deepseek.com/api_keys",
+    "requiresApiKey": true,
+    "defaultEnvVar": "DEEPSEEK_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "search",
+        "displayName": "网页搜索（/v1/tools/search）"
+      }
+    ]
   }
 ] as CatalogEntry[])
