@@ -34,7 +34,7 @@ import {
   type AskUserToolDeps
 } from '../tools/builtin/askUser'
 import { createVoiceReportTool, type VoiceReportToolDeps } from '../tools/builtin/voiceReport'
-import { createUpdatePlanTool, createWrapUpTool } from '../tools/builtin/turnReport'
+import { createUpdatePlanTool, createWrapUpTool, planReminder } from '../tools/builtin/turnReport'
 import {
   createSetSessionProjectTool,
   type SetSessionProjectDeps
@@ -1009,7 +1009,14 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         text: content.map((part) => (part.type === 'text' ? part.text : '')).join('\n')
       })
       // 本工程见过这个错：把上次怎么过的挂在错误结果后面，和写文件后贴体检报告同一个手法
-      return note ? { content: [...content, { type: 'text', text: note }] } : undefined
+      // 清单没走完也挂一句，不然长活里模型会忘了推进（见 `planReminder`）
+      const extra = [
+        note,
+        planReminder(onlineTools, hookCtx.assistantMessage, hookCtx.toolCall.id)
+      ].filter((text): text is string => !!text)
+      return extra.length
+        ? { content: [...content, ...extra.map((text) => ({ type: 'text' as const, text }))] }
+        : undefined
     },
     toolExecution: 'parallel',
     steeringMode: 'all',
