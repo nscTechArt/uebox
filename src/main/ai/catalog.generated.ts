@@ -1198,6 +1198,26 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     ]
   },
   {
+    "id": "chatgpt-image",
+    "displayName": "Codex 生图（ChatGPT 订阅）",
+    "group": "image",
+    "kind": "image",
+    "protocol": "openai-codex-responses",
+    "baseUrl": "https://chatgpt.com/backend-api/codex",
+    "apiKeyUrl": "https://developers.openai.com/codex/auth",
+    "requiresApiKey": true,
+    "hasLogo": true,
+    "supportsOAuth": true,
+    "oauthProvider": "chatgpt",
+    "models": [
+      {
+        "id": "gpt-5.6-luna",
+        "displayName": "GPT Image（经 GPT-5.6 Luna 调用）",
+        "imageApi": "codex-images"
+      }
+    ]
+  },
+  {
     "id": "google-image",
     "displayName": "Google Nano Banana",
     "group": "image",

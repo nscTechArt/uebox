@@ -565,6 +565,7 @@ First work out why the install failed from the output above. If you can run comm
       zcodeHint:
         'Authorize your account in ZCode and activate Coding Plan before signing in with Z.ai, or enter a subscription JWT. This connection only uses the ZCode subscription and never falls back to API balance. If verification is required, complete it in ZCode and retry.',
       oauthKeyFetched: 'Key fetched from {name} and filled in above — click Save to apply',
+      oauthShared: 'Uses the sign-in from "{name}" — just click Save',
       getKey: 'Get an API key ↗',
       oauthOpening: 'Browser opened — complete the authorization there',
       authorizing: 'Waiting for browser… click to cancel',

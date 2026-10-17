@@ -367,13 +367,14 @@ describe('图片生成分组', () => {
   })
 
   /**
-   * 生图只有这两种协议走得通（见 imageGeneration.ts 的 PROTOCOLS_WITH_IMAGES）。
-   * 剩下三种是真的没有 —— Anthropic 没有生图模型，Codex 后端只接 responses，
+   * 生图只有这三种协议走得通（见 imageGeneration.ts 的 PROTOCOLS_WITH_IMAGES）。
+   * Codex 后端没有生图端点，靠的是生图工具（codex-images 适配器）。
+   * 剩下两种是真的没有 —— Anthropic 没有生图模型，
    * `google-generative-ai` 是对话协议（Nano Banana 走的是自己的 Interactions API，
    * 那条目录条目挂在 openai-completions 下，由适配器换端点）。
    */
-  it('协议只用走得通的那两种', () => {
-    const supported = ['openai-completions', 'openai-responses']
+  it('协议只用走得通的那三种', () => {
+    const supported = ['openai-completions', 'openai-responses', 'openai-codex-responses']
     const bad = imageEntries
       .filter((entry) => !supported.includes(entry.protocol))
       .map((entry) => `${entry.id} → ${entry.protocol}`)
@@ -394,7 +395,8 @@ describe('图片生成分组', () => {
       'grok-images',
       'siliconflow-images',
       'ark-images',
-      'gemini-images'
+      'gemini-images',
+      'codex-images'
     ]
     const bad: string[] = []
     for (const entry of imageEntries) {

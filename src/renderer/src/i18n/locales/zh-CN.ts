@@ -564,6 +564,7 @@ export default {
       zcodeHint:
         '请先在 ZCode 授权并开通 Coding Plan，再通过 Z.ai 账号登录；也可填写订阅 JWT。此入口只使用 ZCode 订阅，不回退到普通 API 余额。平台要求重新验证时，请在 ZCode 完成验证后重试。',
       oauthKeyFetched: '已从 {name} 取回密钥并填入上方，点「保存」后生效',
+      oauthShared: '沿用「{name}」的账号登录，点「保存」即可',
       getKey: '去获取 API 密钥 ↗',
       oauthOpening: '浏览器已打开，请完成授权',
       authorizing: '等待浏览器授权… 点此取消',

@@ -51,6 +51,7 @@ const LOGO_ALIAS = {
   // 生图条目是同一家厂商的另一个入口（见 CURATED 里的「图片生成」一段），
   // 用母公司的标，免得目录里出现一排没有图标的方块
   'openai-image': 'openai',
+  'chatgpt-image': 'openai',
   'google-image': 'google',
   'xai-image': 'xai',
   'ark-seedream': 'bytedance',
@@ -359,6 +360,18 @@ export const CURATED = [
     baseUrl: 'https://api.openai.com/v1',
     protocol: 'openai-responses',
     displayName: 'OpenAI GPT Image'
+  },
+  // ChatGPT 订阅出图：与上面的「Codex」对话是同一个账号、同一个后端，走的是 Codex CLI
+  // 出图那条路（Responses 的 image_generation 工具，适配器 codex-images）。额度算在订阅里，
+  // 不按张计费。oauthProvider 让已经登录过 Codex 的用户直接沿用那份登录
+  {
+    id: 'chatgpt-image',
+    group: 'image',
+    baseUrl: 'https://chatgpt.com/backend-api/codex',
+    protocol: 'openai-codex-responses',
+    displayName: 'Codex 生图（ChatGPT 订阅）',
+    supportsOAuth: true,
+    oauthProvider: 'chatgpt'
   },
   {
     id: 'google-image',
@@ -1395,6 +1408,19 @@ const MANUAL_ENTRIES = {
    *
    * 下面每一条的接口路径与 model id 都在 2026-08 逐一核对过厂商文档。
    */
+  /**
+   * 模型 id 是**驱动生图工具的对话模型**，不是画图的那个 —— 画图的模型由 Codex 后端定，
+   * 请求里指定了也不听（2026-10-17 实测）。取同一批订阅模型里最轻的一档：它只负责把
+   * 提示词交给工具，一次约两千 token。下线了用户可以在详情里换成别的 Codex 模型。
+   */
+  'chatgpt-image': {
+    name: 'Codex 生图（ChatGPT 订阅）',
+    env: [],
+    doc: 'https://developers.openai.com/codex/auth',
+    models: {
+      'gpt-5.6-luna': imageModel('gpt-5.6-luna', 'GPT Image（经 GPT-5.6 Luna 调用）', 'codex-images')
+    }
+  },
   'openai-image': {
     name: 'OpenAI GPT Image',
     env: ['OPENAI_API_KEY'],
@@ -2132,6 +2158,7 @@ async function main() {
       defaultEnvVar: (source.env || [])[0],
       hasLogo,
       supportsOAuth: item.supportsOAuth || undefined,
+      oauthProvider: item.oauthProvider,
       models
     })
   }

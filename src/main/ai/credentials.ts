@@ -232,6 +232,16 @@ export function resetShellCacheForTest(): void {
   shellCache.clear()
 }
 
+/**
+ * 正在进行的续期，按令牌 id。
+ *
+ * 刷新令牌是**一次性**的（ChatGPT 换完就作废旧的）。同一份令牌同时续两次，
+ * 后到的那次拿着已作废的刷新令牌，换来的是「请重新登录」—— 一次出四张图、
+ * 或者生图与对话共用一份登录时，过期那一刻正好就是并发的。所以同一个 id 只续一次，
+ * 其余的等它。
+ */
+const refreshing = new Map<string, Promise<OAuthTokens>>()
+
 /** 取出登录令牌，过期了就续期并写回，否则每次调用都要续一遍 */
 async function resolveOAuthTokens(
   ref: Extract<ApiKeyRef, { kind: 'oauth' }>
@@ -242,11 +252,17 @@ async function resolveOAuthTokens(
   }
   if (!isExpired(tokens)) return tokens
 
-  const refreshed = await refreshOAuthTokens(ref.provider, tokens)
-  const secrets = { ...(await loadSecrets()) }
-  secrets[ref.id] = JSON.stringify(refreshed)
-  await persist(secrets)
-  return refreshed
+  const pending = refreshing.get(ref.id)
+  if (pending) return pending
+  const task = (async () => {
+    const refreshed = await refreshOAuthTokens(ref.provider, tokens)
+    const secrets = { ...(await loadSecrets()) }
+    secrets[ref.id] = JSON.stringify(refreshed)
+    await persist(secrets)
+    return refreshed
+  })().finally(() => refreshing.delete(ref.id))
+  refreshing.set(ref.id, task)
+  return task
 }
 
 /**

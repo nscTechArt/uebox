@@ -92,11 +92,11 @@ async function materialize(
   let apiKey: ProviderConfig['apiKey']
   if (!parsed) {
     // 留空：原来是 literal 就沿用（明文读不回界面，用户不是"看着它删掉的"），
-    // 其余情况按真的不要密钥处理。
+    // 同一个账号已经在别的来源登录过就共用那份登录，其余情况按真的不要密钥处理。
     apiKey =
       previous?.apiKey.kind === 'literal' || previous?.apiKey.kind === 'oauth'
         ? previous.apiKey
-        : { kind: 'none' }
+        : ((await sharedOAuthKey(draft)) ?? { kind: 'none' })
   } else if (parsed.kind === 'env') {
     apiKey = { kind: 'env', name: parsed.name }
   } else if (parsed.kind === 'shell') {
@@ -122,6 +122,25 @@ async function materialize(
   // 从目录添加的，用途跟着目录走：界面上那一栏已经锁了，这里再拦一道过期界面和手改的请求
   const kind = findCatalogEntry(draft.catalogId ?? '')?.kind ?? rest.kind
   return { provider: { ...rest, kind, apiKey }, staleKeyId }
+}
+
+/**
+ * 同一个账号在别的来源已经登录过时，那份登录。
+ *
+ * 「Codex 生图」和「Codex」对话是同一个 ChatGPT 账号：已经登录过的用户添加生图来源时
+ * 不该再授权一遍。共用的是同一条令牌记录，续期写回的也是它，两边一直是同一份；
+ * 删来源不删登录令牌（见 delete-provider），所以删掉其中一个不会让另一个掉线。
+ */
+async function sharedOAuthKey(draft: ProviderDraft): Promise<ProviderConfig['apiKey'] | null> {
+  const entry = findCatalogEntry(draft.catalogId ?? '')
+  if (!entry?.supportsOAuth) return null
+  const account = entry.oauthProvider ?? entry.id
+  for (const provider of (await readSettings()).providers) {
+    const key = provider.apiKey
+    if (provider.id === draft.id || key.kind !== 'oauth' || key.provider !== account) continue
+    if (await hasApiKey(key)) return key
+  }
+  return null
 }
 
 /** 落盘之后删掉换下来的旧密文；别的来源还在用同一份（Box Plan 的几个来源共用一把 Key）就留着 */
