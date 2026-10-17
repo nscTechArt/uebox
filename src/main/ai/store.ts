@@ -485,11 +485,16 @@ function normalizeRoles(raw: unknown, providers: ProviderConfig[]): AiProviderSe
  * 换成了 A，账单上一直在扣 B。合成一格之后，所有没单独指定模型的地方都跟着它走。
  *
  * 两格都有值时听 Agent 的：它是输入框写的，是用户最近亲手选的那个。
+ * 例外是 Agent 那格是套餐导入时绑的（`source: 'plan'`）、对话那格不是：那不是用户亲手选的。
+ * 1.0.8 按默认勾选导入的用户就是这样（对话是自己的模型，Agent 原来没设置、被套餐接了），
+ * 听 Agent 的就把用户自己的主模型盖掉了，而那条绑定哪儿都没记，断开后主模型就没了。
+ * 这时留用户自己的，套餐不再管主模型。
  * `agent` 这个角色名照旧可以请求（回落链 agent → chat），只是不再单独存。
  */
 function mergeMainModel(roles: AiProviderSettings['roles']): AiProviderSettings['roles'] {
   if (!roles.agent) return roles
   const { agent, ...rest } = roles
+  if (agent.source === 'plan' && rest.chat && rest.chat.source !== 'plan') return rest
   return { ...rest, chat: agent }
 }
 

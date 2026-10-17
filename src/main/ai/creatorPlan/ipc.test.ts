@@ -223,11 +223,11 @@ describe('导入与断开：原绑定', () => {
     expect(await invoke('creator-plan:apply', roles)).toMatchObject({ ok: true })
   }
 
-  it('导入时记下被接管角色的原绑定；原来没设置的记 null', async () => {
+  // 对话和 Agent 已合成一个主模型（mergeMainModel），套餐的 Agent 模型落在主模型那一格
+  it('导入时记下被接管的主模型原绑定', async () => {
     await importRoles(['chat', 'agent'])
     expect(planState.originals).toEqual({
-      chat: { providerId: 'my-gateway', modelId: 'gpt-x' },
-      agent: null
+      chat: { providerId: 'my-gateway', modelId: 'gpt-x' }
     })
     expect(settings.roles.chat).toMatchObject({ providerId: PLAN_PROVIDER_ID, source: 'plan' })
   })
@@ -257,23 +257,32 @@ describe('导入与断开：原绑定', () => {
     expect(planState).toEqual(empty())
   })
 
-  it('用户导入后手动改过的角色不动；原绑定的来源被删了 → 未设置', async () => {
+  it('用户导入后手动改过的主模型不动', async () => {
+    const other = { ...mine, id: 'other', models: [{ id: 'm' }] }
+    settings = { ...settings, providers: [mine, other] }
+    await importRoles(['chat'])
+    // 之后用户手动把主模型改成了另一个来源
+    settings = {
+      ...settings,
+      roles: { ...settings.roles, chat: { providerId: 'other', modelId: 'm' } }
+    }
+    stubFetch({ '/auth/revoke': () => new Response(null, { status: 204 }) })
+    await invoke('creator-plan:disconnect')
+    expect(settings.roles).toEqual({ chat: { providerId: 'other', modelId: 'm' } })
+  })
+
+  it('原绑定的来源被删了 → 断开后回到未设置', async () => {
     const other = { ...mine, id: 'other', models: [{ id: 'm' }] }
     settings = {
       ...settings,
       providers: [mine, other],
-      roles: { ...settings.roles, agent: { providerId: 'other', modelId: 'm' } }
+      roles: { chat: { providerId: 'other', modelId: 'm' } }
     }
-    await importRoles(['chat', 'agent'])
-    // 之后用户删掉了 agent 原来那个来源，又手动把 chat 改回自己的
-    settings = {
-      ...settings,
-      providers: settings.providers.filter((p) => p.id !== 'other'),
-      roles: { ...settings.roles, chat: { providerId: 'my-gateway', modelId: 'gpt-x' } }
-    }
+    await importRoles(['chat'])
+    settings = { ...settings, providers: settings.providers.filter((p) => p.id !== 'other') }
     stubFetch({ '/auth/revoke': () => new Response(null, { status: 204 }) })
     await invoke('creator-plan:disconnect')
-    expect(settings.roles).toEqual({ chat: { providerId: 'my-gateway', modelId: 'gpt-x' } })
+    expect(settings.roles).toEqual({})
   })
 
   it('吊销失败（断网）：照常断开、删本机 Key，回 revoked: false 和网页端地址', async () => {

@@ -58,6 +58,53 @@ describe('models.json 解析', () => {
     expect(chatOnly.roles.chat).toEqual({ providerId: 'p', modelId: 'claude' })
   })
 
+  /**
+   * 1.0.8 按默认勾选导入过 Box Plan 的用户：对话是自己的模型，Agent 是套餐导入时绑的（source: 'plan'）。
+   * Agent 那格不是用户亲手选的，不能拿它盖掉用户自己的主模型 —— 那条用户绑定哪儿都没记，断开就找不回来
+   */
+  it('套餐绑的 Agent 不盖用户自己的对话模型；没有对话模型时照旧用套餐的', () => {
+    const providers = [
+      {
+        id: 'p',
+        kind: 'chat',
+        protocol: 'openai-completions',
+        baseUrl: 'https://api.example/v1',
+        models: [{ id: 'claude' }]
+      },
+      {
+        id: 'creator-plan',
+        kind: 'chat',
+        protocol: 'openai-completions',
+        baseUrl: 'https://plan.example/v1',
+        models: [{ id: 'uebox-agent' }]
+      }
+    ]
+    const plan = { providerId: 'creator-plan', modelId: 'uebox-agent', source: 'plan' }
+    const mineAndPlan = normalizeSettings({
+      version: 3,
+      providers,
+      roles: { chat: { providerId: 'p', modelId: 'claude' }, agent: plan }
+    })
+    expect(mineAndPlan.roles).toEqual({ chat: { providerId: 'p', modelId: 'claude' } })
+
+    const planOnly = normalizeSettings({ version: 3, providers, roles: { agent: plan } })
+    expect(planOnly.roles).toEqual({ chat: plan })
+
+    // 两格都是套餐绑的、或 Agent 是用户自己选的：照旧听 Agent 的
+    const bothPlan = normalizeSettings({
+      version: 3,
+      providers,
+      roles: { chat: { ...plan, modelId: 'uebox-chat' }, agent: plan }
+    })
+    expect(bothPlan.roles).toEqual({ chat: plan })
+    const userAgent = normalizeSettings({
+      version: 3,
+      providers,
+      roles: { chat: plan, agent: { providerId: 'p', modelId: 'claude' } }
+    })
+    expect(userAgent.roles).toEqual({ chat: { providerId: 'p', modelId: 'claude' } })
+  })
+
   it('保存独立语音合成绑定与音色，往返不丢失', () => {
     const settings = normalizeSettings({
       version: 3,

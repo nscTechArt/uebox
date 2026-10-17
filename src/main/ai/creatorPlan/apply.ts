@@ -47,7 +47,10 @@ import {
 export { PLAN_PROVIDER_ID, isPlanProvider }
 export const PLAN_KEY_ID = 'creator-plan:key'
 
-/** 被套餐接管前的绑定。null = 那个角色原来没设置 */
+/**
+ * 被套餐接管前的绑定。null = 那个角色原来没设置。
+ * 主模型只记在 chat 上；合并之前记在 agent 上的老记录，读盘时并过去（planState.ts 的 foldMainModel）
+ */
 export type OriginalBindings = Partial<Record<ModelRole, ModelBinding | null>>
 /** 套餐来源在界面上的名字。清单刷新时老用户的来源也跟着改过来（见 refreshPlanModels） */
 export const PLAN_DISPLAY_NAME = 'Box Plan'
@@ -111,6 +114,21 @@ export function planRoleSpecs(
     if (isRoleSpec(role, spec)) out[role] = spec
   }
   return out
+}
+
+/**
+ * 能绑的角色 → 规格。来源里列哪些模型照旧按 planRoleSpecs，这个只管绑定。
+ *
+ * 本地「对话」和「Agent」已合成一个主模型、存在 chat 那一格（`store.ts` 的 mergeMainModel），
+ * 落盘后 roles.agent 永远是空的。清单里 agent 的那份就当主模型的规格（两份都给时听 agent 的，
+ * 和 mergeMainModel 一致），预览里不再单列一行 Agent：不然那一行总显示「未设置」、默认勾上，
+ * 一落盘就并进 chat，把用户自己的主模型盖掉，原绑定也没记，断开后主模型就没了。
+ */
+function bindableRoleSpecs(
+  manifest: CreatorPlanManifest
+): Partial<Record<ModelRole, PlanRoleSpec>> {
+  const { agent, ...specs } = planRoleSpecs(manifest)
+  return agent ? { ...specs, chat: agent } : specs
 }
 
 function chatModel(spec: CreatorPlanChatSpec): ModelConfig {
@@ -414,7 +432,7 @@ export function planRoleChanges(
   settings: AiProviderSettings,
   manifest: CreatorPlanManifest
 ): CreatorPlanRoleChange[] {
-  const specs = planRoleSpecs(manifest)
+  const specs = bindableRoleSpecs(manifest)
   const models = planModelsById(manifest)
   return SUPPORTED_ROLES.flatMap((role) => {
     const spec = specs[role]
@@ -458,7 +476,7 @@ export function applyPlan(
   selected: readonly ModelRole[],
   originals: OriginalBindings = {}
 ): AiProviderSettings {
-  const specs = planRoleSpecs(manifest)
+  const specs = bindableRoleSpecs(manifest)
   const providers = [
     ...settings.providers.filter((p) => !isPlanProvider(p.id)),
     ...planProviders(manifest, apiKey)
@@ -523,7 +541,7 @@ export function syncPlanModels(
 ): AiProviderSettings {
   if (!planModelEntries(manifest) || !isLivePlan(manifest)) return settings
   const configs = planModelConfigs(manifest)
-  const roles = fallBackUnoffered(settings.roles, configs, planRoleSpecs(manifest))
+  const roles = fallBackUnoffered(settings.roles, configs, bindableRoleSpecs(manifest))
   const bound = new Set(
     Object.values(roles).map((binding) => binding && `${binding.providerId}\n${binding.modelId}`)
   )
@@ -575,7 +593,7 @@ export function recordOriginals(
   manifest: CreatorPlanManifest,
   selected: readonly ModelRole[]
 ): OriginalBindings {
-  const specs = planRoleSpecs(manifest)
+  const specs = bindableRoleSpecs(manifest)
   const next: OriginalBindings = { ...originals }
   for (const role of SUPPORTED_ROLES) {
     if (!specs[role] || !selected.includes(role)) continue
@@ -653,13 +671,17 @@ export function releaseDroppedRoles(
   originals: OriginalBindings = {}
 ): AiProviderSettings {
   if (!isLivePlan(manifest)) return settings
-  const specs = planRoleSpecs(manifest)
+  const specs = bindableRoleSpecs(manifest)
   if (Object.keys(specs).length === 0) return settings
+  // 主模型（chat 那一格）清单里 chat、agent 两份都不给了才算不再给
+  const dropped = (role: ModelRole): boolean =>
+    !specs[role] &&
+    (manifest.roles?.[role] === null || (role === 'chat' && manifest.roles?.agent === null))
 
   const roles: RoleBindings = { ...settings.roles }
   for (const role of MODEL_ROLES) {
     const binding = roles[role]
-    if (!binding || !isPlanBinding(binding) || manifest.roles?.[role] !== null) continue
+    if (!binding || !isPlanBinding(binding) || !dropped(role)) continue
     const restored = restoredBinding(settings.providers, originals[role])
     if (restored) roles[role] = restored
     else delete roles[role]
@@ -728,7 +750,7 @@ export function migrateRetiredModels(
 ): AiProviderSettings {
   const deprecations = manifest.deprecations ?? []
   if (deprecations.length === 0) return settings
-  const specs = planRoleSpecs(manifest)
+  const specs = bindableRoleSpecs(manifest)
 
   const roles: RoleBindings = { ...settings.roles }
   const added = new Map<string, ModelConfig>()

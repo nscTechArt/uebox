@@ -115,7 +115,8 @@ const connected = (): AiProviderSettings => ({
       ]
     }
   ],
-  roles: { agent: { providerId: PLAN_PROVIDER_ID, modelId: 'uebox-agent', source: 'plan' } }
+  // 对话和 Agent 已合成主模型（mergeMainModel），存在 chat 那一格
+  roles: { chat: { providerId: PLAN_PROVIDER_ID, modelId: 'uebox-agent', source: 'plan' } }
 })
 
 function stubFetch(respond: () => Response): ReturnType<typeof vi.fn> {
@@ -158,7 +159,7 @@ describe('refreshPlan', () => {
     const model = settings.providers.find((p) => p.id === PLAN_PROVIDER_ID)!.models[0]!
     expect(model).toMatchObject({ contextWindow: 262144, supportsVision: true })
     expect(settings.providers[0]).toBe(mine)
-    expect(settings.roles.agent).toEqual({
+    expect(settings.roles.chat).toEqual({
       providerId: PLAN_PROVIDER_ID,
       modelId: 'uebox-agent',
       source: 'plan'
@@ -205,7 +206,7 @@ describe('refreshPlan', () => {
         )
     )
     await refreshPlan()
-    expect(settings.roles.agent).toEqual({
+    expect(settings.roles.chat).toEqual({
       providerId: PLAN_PROVIDER_ID,
       modelId: 'uebox-chat',
       source: 'plan'
@@ -218,7 +219,7 @@ describe('refreshPlan', () => {
   it('停用的对话模型被用户自己改绑过（不在套餐手里）：不动', async () => {
     settings = {
       ...settings,
-      roles: { agent: { providerId: 'my-gateway', modelId: 'gpt-x' } }
+      roles: { chat: { providerId: 'my-gateway', modelId: 'gpt-x' } }
     }
     const chat = spec({ model: 'uebox-chat' })
     stubFetch(
@@ -238,7 +239,7 @@ describe('refreshPlan', () => {
         )
     )
     await refreshPlan()
-    expect(settings.roles.agent).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
+    expect(settings.roles.chat).toEqual({ providerId: 'my-gateway', modelId: 'gpt-x' })
   })
 
   it('订阅失效（roles 全是 null）：不删模型，来源还在，连接不丢', async () => {
@@ -273,7 +274,7 @@ describe('refreshPlan', () => {
     )
     await refreshPlan()
     expect(settings.roles.stt).toEqual({ providerId: 'my-stt', modelId: 'whisper' })
-    expect(settings.roles.agent).toMatchObject({ source: 'plan' })
+    expect(settings.roles.chat).toMatchObject({ source: 'plan' })
     expect(settings.providers.map((p) => p.id)).toEqual(['my-gateway', PLAN_PROVIDER_ID, 'my-stt'])
   })
 
