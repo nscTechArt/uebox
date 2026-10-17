@@ -13,6 +13,17 @@
  * 过来，读代码的人就得逐条去确认「这个分支到底会不会走」，而答案全是「不会」。
  */
 
+/**
+ * 这一句在这一路音频里的起止，毫秒，从会话开始送进来的第一个字节算起。
+ *
+ * 只有自己断句的那一路（整段转写）报得出来。拼装通话拿它对「这句话是不是停着播时说的」，
+ * 按位置对、不按段数记账 —— 两边断句各断各的，段数对不上（见 `cascadeRealtime.ts`）。
+ */
+export interface SttAudioSpan {
+  start: number
+  end: number
+}
+
 /** 一次听写里我们关心的事件。已经翻译成中性形状，与厂商无关 */
 export type SttEvent =
   /** 厂商就绪，可以开始送音频。收到之前采到的音频由上层攒着 */
@@ -27,13 +38,17 @@ export type SttEvent =
       final: boolean
       /** 识别模型打的标签（SenseVoice 的语种、情绪、事件）。拼装通话拿去帮判定器分辨杂音 */
       asrTags?: string[]
+      audioMs?: SttAudioSpan
     }
   /**
    * 这一段没听清。
    *
    * 和 `error` 分开：识别失败**不该掐掉会话**，再说一遍就好。
+   *
+   * `reason`：`unclear` 是识别模型听了、没认出字（多半是杂音）；`service` 是识别服务那头
+   * 这一句没办成（超时、限流、连接断了），用户说了什么不知道。不带的按 `unclear` 算。
    */
-  | { type: 'asr-failed' }
+  | { type: 'asr-failed'; reason?: 'unclear' | 'service'; audioMs?: SttAudioSpan }
   /** 会话本身出问题了，带一句能说给用户看的话。收到之后这条会话就废了 */
   | { type: 'error'; message: string }
   /** 会话结束（厂商关的、或者我们自己关的） */

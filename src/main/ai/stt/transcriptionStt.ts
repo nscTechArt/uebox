@@ -2,6 +2,7 @@ import { createEndpointer } from './endpointer'
 import {
   STT_FLUSH_GRACE_MS,
   STT_INPUT_SAMPLE_RATE,
+  type SttAudioSpan,
   type SttEvent,
   type SttSessionConfig,
   type SttSessionHandle
@@ -26,11 +27,34 @@ import {
  * @see https://github.com/FunAudioLLM/SenseVoice/blob/main/api.py
  */
 
-/** 单次识别最多等多久。本机识别是百毫秒级，云端一段 30 秒的话也就一两秒 */
+/**
+ * 单次识别最多等多久，重试、等限流也算在里面。本机识别是百毫秒级，云端一段 30 秒的话也就一两秒
+ */
 const REQUEST_TIMEOUT_MS = 30_000
 
 /** 「测试连接」送多长的静音。OpenAI 那家短于 0.1 秒直接拒，留足余量 */
 const PROBE_AUDIO_MS = 500
+
+/**
+ * 连着几句没识别出来就挂断。和合成那边（`cascadeRealtime.ts` 的 MAX_SPEAK_FAILURES）一个想法：
+ * 偶尔一句超时、限流，作废这一句就好；连着几句都不行，是服务坏了或者配错了，说清楚再挂。
+ */
+const MAX_FAILED_SENTENCES = 3
+
+/** 等一会儿。会话关了就不等了 */
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason)
+      },
+      { once: true }
+    )
+  })
+}
 
 export type TranscriptionApi = 'openai' | 'sensevoice' | 'gradio'
 
@@ -167,6 +191,47 @@ function vendorDetail(raw: string): string {
 }
 
 /**
+ * 识别请求的失败，带上「是不是一过性的」。
+ *
+ * **一过性的按白名单认**：超时、连接中途断了、网关 502/503/504、500、不是额度用完的 429。
+ * 这些只作废这一句，不为它挂断整通电话。其余的（密钥、地址、服务没开、证书、额度用完……）
+ * 重试多少次都一样，要用户去改 —— 当场说清楚，别一直报「没听清」。
+ *
+ * `retryAfterMs`：值得再送一次、送之前等多久。超时的不给 —— 排着队识别，
+ * 一句再等一轮，后面的话全跟着等。
+ */
+class TranscriptionError extends Error {
+  constructor(
+    message: string,
+    readonly transient: boolean,
+    readonly retryAfterMs?: number
+  ) {
+    super(message)
+  }
+}
+
+const isTransient = (error: unknown): error is TranscriptionError =>
+  error instanceof TranscriptionError && error.transient
+
+/** 限流、服务忙时没说等多久，就等这么久再送 */
+const RETRY_BACKOFF_MS = 500
+
+/** 最多等这么久再送。对方要我们等得更久，这一句就不再送了：边说边等，用户会以为它卡住了 */
+const RETRY_BACKOFF_MAX_MS = 2_000
+
+/** 回包说该等多久（`Retry-After`，秒数或日期）。等不起的回 undefined，不重试 */
+function retryDelay(header: string | null): number | undefined {
+  const seconds = header === null || header.trim() === '' ? NaN : Number(header)
+  const at = Number.isFinite(seconds) ? Date.now() + seconds * 1000 : Date.parse(header ?? '')
+  const delay = Number.isFinite(at) ? Math.max(0, at - Date.now()) : RETRY_BACKOFF_MS
+  return delay <= RETRY_BACKOFF_MAX_MS ? delay : undefined
+}
+
+/** 429 里额度用完的那种（OpenAI 的 insufficient_quota）：等多久都没用，要用户去充值 */
+const isQuotaExhausted = (raw: string): boolean =>
+  /insufficient_quota|exceeded your current quota|余额不足|欠费/i.test(raw)
+
+/**
  * HTTP 失败翻成一句用户能照着改的话。
  *
  * 只挑两类单独说：密钥不对和地址不对 —— 这一档十次失败里九次是这两样，
@@ -184,15 +249,32 @@ function describeHttpFailure(status: number, detail: string): string {
   return `语音识别请求失败（HTTP ${status}）${suffix}`
 }
 
+const isTimeout = (error: unknown): boolean =>
+  error instanceof DOMException && error.name === 'TimeoutError'
+
+const causeOf = (error: unknown): { code?: string; message?: string } | undefined =>
+  (error as { cause?: { code?: string; message?: string } } | null)?.cause
+
+/**
+ * 连接中途被掐断：连上了、请求发了一半或回包读了一半，对面断了。重连一次多半就好。
+ * undici 读回包读到一半断掉时抛的是 `TypeError('terminated')`，cause 不一定带 code
+ */
+function isDropped(error: unknown): boolean {
+  const code = causeOf(error)?.code ?? (error as { code?: string } | null)?.code
+  if (code && ['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET'].includes(code)) return true
+  return error instanceof Error && error.message === 'terminated'
+}
+
 /** 网络层的失败。连不上本机服务是最常见的一种 —— 服务没开 */
 function describeNetworkFailure(error: unknown, url: string): string {
-  if (error instanceof DOMException && error.name === 'TimeoutError') {
-    return '语音识别服务迟迟没有回应'
-  }
-  const code = (error as { cause?: { code?: string } })?.cause?.code
-  if (code === 'ECONNREFUSED') return `连不上语音识别服务（${url}），请确认它正在运行`
-  if (code === 'ENOTFOUND') return `找不到语音识别服务的地址（${url}）`
-  return error instanceof Error ? error.message : String(error)
+  if (isTimeout(error)) return '语音识别服务迟迟没有回应'
+  const cause = causeOf(error)
+  if (cause?.code === 'ECONNREFUSED') return `连不上语音识别服务（${url}），请确认它正在运行`
+  if (cause?.code === 'ENOTFOUND') return `找不到语音识别服务的地址（${url}）`
+  if (isDropped(error)) return '和语音识别服务的连接中途断了'
+  // 其余的（证书不认、主机不可达、端口被浏览器内核禁用……）带上底层原话，fetch failed 那一句没用
+  const detail = cause?.code ?? cause?.message ?? (error instanceof Error ? error.message : '')
+  return `连不上语音识别服务（${url}）${detail ? `：${detail}` : ''}`
 }
 
 export interface TranscriptionConfig {
@@ -214,6 +296,7 @@ async function send(
   signal: AbortSignal
 ): Promise<string> {
   let response: Response
+  let raw: string
   try {
     response = await fetch(url, {
       method: init.method,
@@ -226,13 +309,28 @@ async function send(
       body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
       signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
     })
+    // 回包也在这里读：它同样会超时、读到一半断掉（Gradio 取结果那一下是一段事件流，识别完才收尾）
+    raw = await response.text()
   } catch (error) {
     // 我们自己撤的（会话关了）原样抛，调用方认得出；超时和网络错误翻成人话
     if (signal.aborted && (signal.reason as Error | undefined)?.name !== 'TimeoutError') throw error
-    throw new Error(describeNetworkFailure(error, url))
+    const dropped = isDropped(error)
+    throw new TranscriptionError(
+      describeNetworkFailure(error, url),
+      dropped || isTimeout(error),
+      dropped ? 0 : undefined
+    )
   }
-  const raw = await response.text()
-  if (!response.ok) throw new Error(describeHttpFailure(response.status, vendorDetail(raw)))
+  if (!response.ok) {
+    const { status } = response
+    const busy = [502, 503, 504].includes(status) || (status === 429 && !isQuotaExhausted(raw))
+    // 500：本机服务显存一紧就会回一次，只作废这一句、不重送；一直 500 由连败上限收摊
+    throw new TranscriptionError(
+      describeHttpFailure(status, vendorDetail(raw)),
+      busy || status === 500,
+      busy ? retryDelay(response.headers.get('retry-after')) : undefined
+    )
+  }
   return raw
 }
 
@@ -447,6 +545,15 @@ export function openTranscriptionSttSession(config: SttSessionConfig): SttSessio
   let queue: Promise<void> = Promise.resolve()
   let pending = 0
   let graceTimer: ReturnType<typeof setTimeout> | null = null
+  /** 连着几句没识别出来（服务那头的失败，不算没听清），见 MAX_FAILED_SENTENCES */
+  let failures = 0
+  /**
+   * 收到了多少毫秒的音频。每句话的起止按它算（`SttAudioSpan`）。
+   * 断句是按帧做的，这里只知道在哪一包里开的口、哪一包里说完的：起止按包取，宁宽勿窄
+   */
+  let receivedMs = 0
+  /** 正在说的那句从哪一包开始 */
+  let sentenceStart: number | null = null
 
   const emit = (event: SttEvent): void => {
     if (closed) return
@@ -479,31 +586,53 @@ export function openTranscriptionSttSession(config: SttSessionConfig): SttSessio
     finish()
   }
 
-  function recognize(sentence: Buffer): void {
+  function recognize(sentence: Buffer, audioMs: SttAudioSpan): void {
     pending += 1
     queue = queue.then(async () => {
       try {
         if (closed) return
-        const result = await transcribePcm(
-          config,
-          sentence,
-          STT_INPUT_SAMPLE_RATE,
-          controller.signal
-        )
+        // 这一句连重试在内一共等这么久：排着队识别，一句卡住，后面的话全跟着等
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+        const transcribe = (): Promise<Transcript> =>
+          transcribePcm(config, sentence, STT_INPUT_SAMPLE_RATE, signal)
+        // 服务忙、限流、连接中途断了：照对方说的等一会儿，这一句再送一次
+        const result = await transcribe().catch(async (error) => {
+          if (closed || !isTransient(error) || error.retryAfterMs === undefined) throw error
+          await wait(error.retryAfterMs, signal).catch(() => {
+            throw error
+          })
+          return transcribe()
+        })
+        failures = 0
         if (result.text) {
           emit({
             type: 'user-text',
             text: result.text,
             final: true,
-            ...(result.tags.length ? { asrTags: result.tags } : {})
+            ...(result.tags.length ? { asrTags: result.tags } : {}),
+            audioMs
           })
         } else if (!result.tags.length) {
           // 断句判出来有人说话，识别却一个字没有、也没说那不是人声：多半是没说清，让界面说一声
-          emit({ type: 'asr-failed' })
+          emit({ type: 'asr-failed', reason: 'unclear', audioMs })
         }
         // 识别模型自己说这段不是人声（打了 nospeech、或者只回了个标点）：当没发生，不上屏
       } catch (error) {
-        if (!closed) fail(error instanceof Error ? error.message : String(error))
+        if (closed) return
+        if (isTransient(error)) {
+          failures += 1
+          console.warn(`[整段转写] 这一句没识别出来（连着第 ${failures} 句）：`, error)
+          // 连着几句都这样就不是偶然了：把最后那句原因说清楚再收摊，别一直报「没听清」
+          if (failures >= MAX_FAILED_SENTENCES) {
+            fail(`语音识别连着 ${failures} 句都没识别出来：${error.message}`)
+            return
+          }
+          // 只作废这一句（让用户再说一遍），不为它挂断通话
+          emit({ type: 'asr-failed', reason: 'service', audioMs })
+          return
+        }
+        // 配置错了（密钥、地址、服务没开）：说清楚再收摊，让用户去改设置
+        fail(error instanceof Error ? error.message : String(error))
       } finally {
         pending -= 1
         if (flushed && pending === 0) finish()
@@ -514,13 +643,20 @@ export function openTranscriptionSttSession(config: SttSessionConfig): SttSessio
   return {
     appendAudio(base64) {
       if (closed || flushed) return
-      for (const sentence of endpointer.push(Buffer.from(base64, 'base64'))) recognize(sentence)
+      const pcm = Buffer.from(base64, 'base64')
+      const at = receivedMs
+      receivedMs += (pcm.length / 2 / STT_INPUT_SAMPLE_RATE) * 1000
+      const sentences = endpointer.push(pcm)
+      for (const sentence of sentences)
+        recognize(sentence, { start: sentenceStart ?? at, end: receivedMs })
+      if (!endpointer.speaking) sentenceStart = null
+      else if (sentences.length || sentenceStart === null) sentenceStart = at
     },
     flush() {
       if (closed || flushed) return
       flushed = true
       const tail = endpointer.end()
-      if (tail) recognize(tail)
+      if (tail) recognize(tail, { start: sentenceStart ?? receivedMs, end: receivedMs })
       if (pending === 0) {
         finish()
         return
