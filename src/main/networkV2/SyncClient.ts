@@ -286,6 +286,21 @@ function normalizeBindValue(value: unknown): number | string | bigint | Buffer |
   return value as number | string | bigint | Buffer
 }
 
+/**
+ * 扩展名的两列统一写成「小写、不带点」。
+ *
+ * 旧 asset-server-standalone 扫描入库的是 path.extname 的结果，**带点**（'.wav'、'.WAV'），
+ * 以前同步原样抄进本地库；本机导入写的是 'wav'。读的地方 —— 类型下拉
+ * （getDistinctAssetTypes 的 ext = 'uasset'）、统计分桶、详情面板的 ext === 'uasset' ——
+ * 全按后者比，带点的行在这些地方统统对不上。在写入口一处规整，读的地方不用各自兜。
+ * 已经带点落了库的老行由 vaultSchema.normalizeStoredExtensions 一次性迁掉。
+ */
+const EXTENSION_COLUMNS: ReadonlySet<string> = new Set(['ext', 'fileExtension'])
+
+function normalizeExtensionValue(value: unknown): unknown {
+  return typeof value === 'string' ? value.replace(/^\./, '').toLowerCase() : value
+}
+
 // ─────────────────────────── Client ───────────────────────────
 
 export class SyncClient extends EventEmitter {
@@ -2247,7 +2262,16 @@ export class SyncClient extends EventEmitter {
     if (!stmt) {
       if (this.stmtCache.size > 200) this.stmtCache.clear()
       const setClause = columns.map((col) => `${col} = @${col}`).join(', ')
-      const changedClause = columns.map((col) => `${col} IS NOT @${col}`).join(' OR ')
+      // 扩展名：本地还没迁移的老行是 '.wav'，传进来的已经规整成 'wav' —— 这算没变。
+      // 不然迁移跑完之前赶上的那轮对账会把每一行带点的都重写一遍（刷 updated_at、触发重建索引），
+      // 老行留给 normalizeStoredExtensions 去改，它不碰 updated_at
+      const changedClause = columns
+        .map((col) =>
+          tableName === 'assetData' && EXTENSION_COLUMNS.has(col)
+            ? `(${col} IS NOT @${col} AND ${col} IS NOT ('.' || @${col}))`
+            : `${col} IS NOT @${col}`
+        )
+        .join(' OR ')
       stmt = this.localDb.prepare(
         `UPDATE ${tableName} SET ${setClause}, updated_at = datetime('now','localtime')
          WHERE ${keyColumn} = @${keyColumn} AND (${changedClause})`
@@ -2291,7 +2315,13 @@ export class SyncClient extends EventEmitter {
     })
 
     const params: Record<string, unknown> = { [keyColumn]: recordKey }
-    for (const col of columns) params[col] = normalizeBindValue(row[col])
+    for (const col of columns) {
+      const value =
+        tableName === 'assetData' && EXTENSION_COLUMNS.has(col)
+          ? normalizeExtensionValue(row[col])
+          : row[col]
+      params[col] = normalizeBindValue(value)
+    }
 
     if (columns.length > 0) {
       /**
@@ -2492,7 +2522,34 @@ export class SyncClient extends EventEmitter {
 
     const minSeq = batch.reduce((min, entry) => Math.min(min, entry.seq), Infinity)
     const contiguous = this.activeRunId === null && minSeq <= this.lastSeq + 1
+    // 界面只关心「哪张表动了」：文件夹动了要刷目录树，其余只刷列表。
+    // 单条时照旧带上这一条的详情。
+    // 写完才发：分片写时立刻发，界面防抖 500ms 后读到的只有第一片，之后再没有通知来刷新
+    const notify = (): void => {
+      const last = batch[batch.length - 1]
+      const touchedFolders = batch.some((entry) => entry.tableName === 'assetFolder')
+      this.emit(
+        'change',
+        batch.length === 1
+          ? {
+              seq: last.seq,
+              op: last.op,
+              tableName: last.tableName,
+              recordKey: last.recordKey,
+              payload: last.payload
+            }
+          : {
+              seq: Math.max(...batch.map((entry) => entry.seq)),
+              op: 'batch',
+              tableName: touchedFolders ? 'assetFolder' : 'assetData',
+              recordKey: '',
+              payload: null,
+              count: batch.length
+            }
+      )
+    }
     const afterApply = (): void => {
+      notify()
       this.scheduleMissingRowRepair()
       if (!contiguous && this.activeRunId === null) {
         this.pullChanges().catch((pullErr) => {
@@ -2502,6 +2559,8 @@ export class SyncClient extends EventEmitter {
     }
     const onFailure = (err: unknown): void => {
       if (err instanceof Error && err.message === SYNC_ABORTED_BY_STOP) return
+      // 分片写到一半失败时前面几片已经落了，照样让界面刷一次
+      notify()
       console.warn('[SyncClient] WS 变更应用失败，补拉增量同步:', err)
       this.pullChanges().catch((pullErr) => {
         console.warn('[SyncClient] 补拉同步失败:', (pullErr as Error).message)
@@ -2510,38 +2569,15 @@ export class SyncClient extends EventEmitter {
     if (batch.length <= this.sliceSizer.size) {
       try {
         this.timedApplyChanges(batch, contiguous ? {} : { advanceSeqTo: null })
-        afterApply()
       } catch (err) {
         onFailure(err)
+        return
       }
+      afterApply()
     } else {
       // 一批太大（同事删了一个大文件夹）：分片写，写的过程中后面来的实时变更继续攒着
       this.applyChangesInSlices(batch, { advance: contiguous }).then(afterApply, onFailure)
     }
-
-    // 界面只关心「哪张表动了」：文件夹动了要刷目录树，其余只刷列表。
-    // 单条时照旧带上这一条的详情
-    const last = batch[batch.length - 1]
-    const touchedFolders = batch.some((entry) => entry.tableName === 'assetFolder')
-    this.emit(
-      'change',
-      batch.length === 1
-        ? {
-            seq: last.seq,
-            op: last.op,
-            tableName: last.tableName,
-            recordKey: last.recordKey,
-            payload: last.payload
-          }
-        : {
-            seq: Math.max(...batch.map((entry) => entry.seq)),
-            op: 'batch',
-            tableName: touchedFolders ? 'assetFolder' : 'assetData',
-            recordKey: '',
-            payload: null,
-            count: batch.length
-          }
-    )
   }
 
   private handleWsMessage(msg: WsServerMessage): void {

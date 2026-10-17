@@ -21,7 +21,7 @@ import {
   stopWalCheckpointing
 } from './services/assetQueryRunner'
 import { applyVaultConnectionPragmas, isPathInside } from './vaultConnectionPragmas'
-import { applyVaultSchema } from './vaultSchema'
+import { applyVaultSchema, normalizeStoredExtensions } from './vaultSchema'
 import { refreshPlannerStatsIfStale } from './plannerStats'
 
 /**
@@ -1543,10 +1543,15 @@ export class VaultManager {
     }
 
     // 统计信息：没有或者过时（行数差两倍以上）就在后台一个索引一个索引地重算。
-    // 以前在这里同步跑整库 ANALYZE，52 万行的库打开时卡 5 秒；之后库再怎么长也不再算
+    // 以前在这里同步跑整库 ANALYZE，52 万行的库打开时卡 5 秒；之后库再怎么长也不再算。
+    //
+    // 排在它前面的是一次性的扩展名去点（旧服务端同步来的 '.wav' → 'wav'），每库只跑一次，
+    // 分块、块间让出。两件都是后台整库活，一件做完再做下一件，不同时抢主线程
     setImmediate(() => {
       if (!vaultDb.open) return
-      void refreshPlannerStatsIfStale(vaultDb)
+      void normalizeStoredExtensions(vaultDb).then(() => {
+        if (vaultDb.open) void refreshPlannerStatsIfStale(vaultDb)
+      })
     })
   }
 

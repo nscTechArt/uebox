@@ -321,6 +321,61 @@ describe('没变的行不写', () => {
   })
 })
 
+/**
+ * 旧 asset-server-standalone 存的是 path.extname 的结果（'.wav'）。以前原样抄进本地库，
+ * 类型下拉（ext = 'uasset'）、统计分桶、详情面板全对不上。
+ */
+describe('扩展名写成小写、不带点', () => {
+  const extOf = (assetKey: string): unknown =>
+    db
+      .prepare(`SELECT ext, fileExtension, updated_at FROM assetData WHERE assetKey = ?`)
+      .get(assetKey)
+
+  it('对账拉来的新行去点', async () => {
+    install(
+      fakeServer({
+        folders: [],
+        assets: [asset('a0', { ext: '.WAV', fileExtension: '.wav' })]
+      })
+    )
+    await reconcile()
+    expect(extOf('a0')).toMatchObject({ ext: 'wav', fileExtension: 'wav' })
+  })
+
+  it('实时推来的变更去点', () => {
+    ;(client as unknown as { applySingleChange: (c: unknown) => void }).applySingleChange({
+      seq: 1,
+      op: 'insert',
+      tableName: 'assetData',
+      recordKey: 'a0',
+      payload: JSON.stringify(asset('a0', { ext: '.uasset', fileExtension: '.uasset' }))
+    })
+    expect(extOf('a0')).toMatchObject({ ext: 'uasset', fileExtension: 'uasset' })
+  })
+
+  /** 不然每一轮对账都把带点的行当成「变了」，或者迁移跑完前那轮把老行整批重写 */
+  it('只差一个点不算变：已去点的、还没迁移的老行都不重写', async () => {
+    db.prepare(
+      `INSERT INTO assetData (assetKey, folderKey, assetName, ext, fileExtension, isDelete, updated_at)
+       VALUES ('a0', 'ALL', 'a0', 'wav', 'wav', 0, '2020-01-01 00:00:00'),
+              ('a1', 'ALL', 'a1', '.wav', '.wav', 0, '2020-01-01 00:00:00')`
+    ).run()
+    install(
+      fakeServer({
+        folders: [],
+        assets: [
+          asset('a0', { ext: '.wav', fileExtension: '.wav' }),
+          asset('a1', { ext: '.wav', fileExtension: '.wav' })
+        ]
+      })
+    )
+    await reconcile()
+    expect(extOf('a0')).toMatchObject({ ext: 'wav', updated_at: '2020-01-01 00:00:00' })
+    // 老行留给 normalizeStoredExtensions 改（它不刷 updated_at）
+    expect(extOf('a1')).toMatchObject({ ext: '.wav', updated_at: '2020-01-01 00:00:00' })
+  })
+})
+
 describe('实时变更攒批', () => {
   it('连发的变更攒成几批写，界面只收到一条汇总通知', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })
@@ -375,6 +430,36 @@ describe('实时变更攒批', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  /** 以前分片写一开头就发通知：界面防抖后读到的只有第一片，之后再没有通知来刷新 */
+  it('一批要分片写时，所有片都写完才发通知', async () => {
+    ;(client as unknown as { lastSeq: number }).lastSeq = 0
+    const rowsAtNotify: number[] = []
+    client.on('change', () => rowsAtNotify.push(activeKeys().length))
+    const handle = (msg: unknown): void =>
+      (client as unknown as { handleWsMessage: (m: unknown) => void }).handleWsMessage(msg)
+    // 少于 WS_CHANGE_BATCH_MAX（200），只攒成一批；又多过起始片大小，要分片写
+    for (let i = 0; i < 150; i += 1) {
+      handle({
+        type: 'change',
+        seq: i + 1,
+        op: 'insert',
+        tableName: 'assetData',
+        recordKey: `a${i}`,
+        payload: JSON.stringify({
+          assetKey: `a${i}`,
+          folderKey: 'ALL',
+          assetName: `a${i}`,
+          isDelete: 0
+        }),
+        clientId: 'other'
+      })
+    }
+    ;(client as unknown as { flushWsChanges: () => void }).flushWsChanges()
+
+    await vi.waitFor(() => expect(rowsAtNotify).toHaveLength(1))
+    expect(rowsAtNotify).toEqual([150])
   })
 })
 
