@@ -47,13 +47,6 @@ export interface SnippetFormPayload {
   meta: SnippetMeta
 }
 
-/** 老形态：手工粘进来的整张图导出文本 */
-export interface LegacyFormPayload {
-  [key: string]: unknown
-}
-
-export type LibraryPayload = SnippetFormPayload | LegacyFormPayload
-
 /**
  * 判别 payload 形态。
  *
@@ -95,11 +88,6 @@ export function readSnippetPayload(payload: unknown): SnippetFormPayload | null 
   }
 }
 
-export interface FoundEntry {
-  entry: LibraryPackageEntry
-  form: 'snippet' | 't3d'
-}
-
 /**
  * 按条目 id 找一个包。
  *
@@ -111,14 +99,11 @@ export async function findEntryById(
   vaultRoot: string,
   library: LibraryKind,
   entryId: string
-): Promise<FoundEntry | null> {
+): Promise<LibraryPackageEntry | null> {
   if (!vaultRoot || !entryId) return null
 
   const { entries } = await scanPackages(vaultRoot)
-  const hit = entries.find((item) => item.library === library && item.manifest.id === entryId)
-  if (!hit) return null
-
-  return { entry: hit, form: detectPayloadForm(hit.manifest.payload) }
+  return entries.find((item) => item.library === library && item.manifest.id === entryId) ?? null
 }
 
 export interface SaveSnippetOptions {
@@ -236,5 +221,3 @@ export async function searchEntries(options: SearchOptions): Promise<EntrySummar
   const limit = options.limit && options.limit > 0 ? options.limit : 50
   return matched.slice(0, limit)
 }
-
-export { summarize as summarizeEntry }

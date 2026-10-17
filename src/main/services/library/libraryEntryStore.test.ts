@@ -9,8 +9,7 @@ import {
   findEntryById,
   readSnippetPayload,
   saveSnippetEntry,
-  searchEntries,
-  summarizeEntry
+  searchEntries
 } from './libraryEntryStore'
 import type { SnippetMeta } from './snippetScan'
 
@@ -92,10 +91,10 @@ describe('库条目的读写（真实临时目录）', () => {
     })
 
     const found = await findEntryById(vaultRoot, 'blueprint', 'entry-1')
-    expect(found?.form).toBe('snippet')
-    expect(found?.entry.manifest.name).toBe('受击闪红')
+    expect(found?.manifest.id).toBe('entry-1')
+    expect(found?.manifest.name).toBe('受击闪红')
 
-    const payload = readSnippetPayload(found!.entry.manifest.payload)
+    const payload = readSnippetPayload(found!.manifest.payload)
     expect(payload?.t3d).toBe(T3D)
     expect(payload?.meta.nodeCount).toBe(2)
     expect(payload?.sourceBlueprintPath).toBe('/Game/BP_Player')
@@ -120,7 +119,7 @@ describe('库条目的读写（真实临时目录）', () => {
     expect(await findEntryById(vaultRoot, 'material', 'entry-1')).toBeNull()
   })
 
-  it('老形态的包也找得到，form 报 t3d', async () => {
+  it('老形态的包也找得到 —— 按 id 查找不看 payload 形态', async () => {
     await createPackage(vaultRoot, {
       library: 'blueprint',
       id: 'legacy-1',
@@ -130,7 +129,7 @@ describe('库条目的读写（真实临时目录）', () => {
     })
 
     const found = await findEntryById(vaultRoot, 'blueprint', 'legacy-1')
-    expect(found?.form).toBe('t3d')
+    expect(found?.manifest.name).toBe('旧条目')
   })
 })
 
@@ -145,7 +144,10 @@ describe('searchEntries', () => {
       entryId: 'a',
       name: '受击闪红',
       t3d: T3D,
-      meta,
+      meta: {
+        ...meta,
+        openPorts: [{ nodeId: '1', pinName: 'then', dir: 'out', formerPeer: '9.execute' }]
+      },
       now: 3000
     })
     await saveSnippetEntry({
@@ -197,48 +199,16 @@ describe('searchEntries', () => {
 
   it('摘要带上节点数和用到的类型', async () => {
     const [first] = await searchEntries({ vaultRoot, keyword: '闪红' })
+    expect(first.form).toBe('snippet')
     expect(first.nodeCount).toBe(2)
     expect(first.connectionCount).toBe(1)
     expect(first.classes).toEqual(['Event', 'Function'])
+    expect(first.openPortCount).toBe(1)
   })
 
   it('老形态的摘要不报节点数 —— 那不是它的形状', async () => {
     const [material] = await searchEntries({ vaultRoot, library: 'material' })
     expect(material.form).toBe('t3d')
     expect(material.nodeCount).toBeUndefined()
-  })
-})
-
-describe('summarizeEntry', () => {
-  it('摘要直接读 meta，不去解析正文', () => {
-    const summary = summarizeEntry({
-      dirPath: 'x',
-      relPath: 'x',
-      library: 'blueprint',
-      manifest: {
-        format: 'unreal-box-blueprint',
-        formatVersion: 1,
-        id: 'a',
-        name: 'n',
-        createdAt: 1,
-        updatedAt: 2,
-        cover: '',
-        payload: {
-          form: 'snippet',
-          t3d: T3D,
-          meta: {
-            nodeCount: 3,
-            connectionCount: 2,
-            classes: ['Branch', 'Function'],
-            openPorts: [{ nodeId: '1', pinName: 'then', dir: 'out', formerPeer: '9.execute' }]
-          }
-        }
-      }
-    })
-
-    expect(summary.form).toBe('snippet')
-    expect(summary.nodeCount).toBe(3)
-    expect(summary.classes).toEqual(['Branch', 'Function'])
-    expect(summary.openPortCount).toBe(1)
   })
 })
