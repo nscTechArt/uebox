@@ -311,6 +311,9 @@ void FUAL_LevelCommands::Handle_QueryAssets(const TSharedPtr<FJsonObject>& Paylo
 	const double MinInstances = ReadNumber(Conditions, TEXT("min_instances"), -1.0);
 	const bool bMissingCollisionOnly = ReadBool(Conditions, TEXT("missing_collision"), false);
 	const bool bNaniteEnabled = ReadBool(Conditions, TEXT("nanite_enabled"), true); // 默认允许 Nanite，false 表示筛未开启
+	// nanite_enabled=true 只是「不排除」，拿不到「只要开了 Nanite 的」。盒子把 Nanite 网格
+	// 单列时要的是后者，否则回来的是整体前 N 名、里面常常一个 Nanite 都没有。不传就不生效
+	const bool bNaniteOnly = ReadBool(Conditions, TEXT("nanite_only"), false);
 	const bool bShadowCasting = ReadBool(Conditions, TEXT("shadow_casting"), false);
 	FString ClassFilter;
 	if (Conditions && Conditions->IsValid())
@@ -471,6 +474,10 @@ void FUAL_LevelCommands::Handle_QueryAssets(const TSharedPtr<FJsonObject>& Paylo
 			continue;
 		}
 		if (!bNaniteEnabled && Item.bNanite)
+		{
+			continue;
+		}
+		if (bNaniteOnly && !Item.bNanite)
 		{
 			continue;
 		}

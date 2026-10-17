@@ -54,6 +54,29 @@ describe('什么时候拆', () => {
     expect(shouldSplitByNanite({ sort_by: 'InstanceCount', limit: 20 })).toBe(false)
     expect(shouldSplitByNanite({ sort_by: 'ResourceSize', limit: 20 })).toBe(false)
   })
+
+  /** 在找问题网格时拆，会把开了 Nanite 的连同它们的缺碰撞等发现一起踢出主榜 */
+  it('在找问题网格时不拆', () => {
+    expect(shouldSplitByNanite({ conditions: { missing_collision: true }, limit: 20 })).toBe(false)
+    expect(shouldSplitByNanite({ conditions: { shadow_casting: true }, limit: 20 })).toBe(false)
+    expect(shouldSplitByNanite({ conditions: { nanite_enabled: false }, limit: 20 })).toBe(false)
+  })
+
+  /** 门槛和范围不是在找毛病；false 在插件里等于没给（默认就是 false） */
+  it('只给门槛、范围或 false 时照拆', () => {
+    expect(shouldSplitByNanite({ conditions: { min_triangles: 100000 }, limit: 20 })).toBe(true)
+    expect(shouldSplitByNanite({ conditions: { min_instances: 50 }, limit: 20 })).toBe(true)
+    expect(
+      shouldSplitByNanite({ conditions: { class_filter: 'StaticMeshActor' }, limit: 20 })
+    ).toBe(true)
+    expect(
+      shouldSplitByNanite({
+        conditions: { missing_collision: false, shadow_casting: false },
+        limit: 20
+      })
+    ).toBe(true)
+    expect(shouldSplitByNanite({ conditions: {}, limit: 20 })).toBe(true)
+  })
 })
 
 describe('面数榜', () => {
@@ -65,8 +88,9 @@ describe('面数榜', () => {
     const r = await run({ limit: 20 })
 
     expect(callRequest.mock.calls[0]![1]).toMatchObject({ conditions: { nanite_enabled: false } })
+    // nanite_enabled: true 在插件里是「不排除」，回的是整体前 N 名；要 nanite_only 才只回 Nanite 的
     expect(callRequest.mock.calls[1]![1]).toMatchObject({
-      conditions: { nanite_enabled: true },
+      conditions: { nanite_only: true },
       limit: 5
     })
     const data = r.data!
@@ -86,7 +110,7 @@ describe('面数榜', () => {
     expect(r.data!.nanite_assets).toEqual([])
   })
 
-  /** 旧插件不认 nanite_enabled 时会原样回全部 —— 单列里只留真开了 Nanite 的 */
+  /** 旧插件不认 nanite_only，会回整体前 N 名 —— 单列里只留真开了 Nanite 的 */
   it('单列里只留真开了 Nanite 的', async () => {
     callRequest.mockResolvedValueOnce({ count: 0, assets: [] }).mockResolvedValueOnce({
       count: 2,
@@ -95,6 +119,37 @@ describe('面数榜', () => {
 
     const r = await run({})
 
+    expect((r.data!.nanite_assets as { name: string }[]).map((a) => a.name)).toEqual(['SM_Cliff'])
+  })
+
+  it('查缺碰撞时只查一次，开了 Nanite 的留在主榜', async () => {
+    callRequest.mockResolvedValueOnce({ count: 1, assets: [asset('SM_Cliff', true, 2_000_000)] })
+
+    const r = await run({ conditions: { missing_collision: true } })
+
+    expect(callRequest).toHaveBeenCalledTimes(1)
+    expect(callRequest.mock.calls[0]![1]).toEqual(
+      expect.objectContaining({ conditions: { missing_collision: true } })
+    )
+    expect((r.data!.assets as { name: string }[]).map((a) => a.name)).toEqual(['SM_Cliff'])
+    expect(r.data!.nanite_assets).toBeUndefined()
+  })
+
+  /** 描述里自己的例子：给了面数门槛照样拆，两次查询都带着门槛 */
+  it('给了 min_triangles 时照拆，门槛两次都带上', async () => {
+    callRequest
+      .mockResolvedValueOnce({ count: 1, assets: [asset('SM_Rock', false, 150_000)] })
+      .mockResolvedValueOnce({ count: 1, assets: [asset('SM_Cliff', true, 2_000_000)] })
+
+    const r = await run({ conditions: { min_triangles: 100000 } })
+
+    expect(callRequest).toHaveBeenCalledTimes(2)
+    expect(callRequest.mock.calls[0]![1]).toMatchObject({
+      conditions: { min_triangles: 100000, nanite_enabled: false }
+    })
+    expect(callRequest.mock.calls[1]![1]).toMatchObject({
+      conditions: { min_triangles: 100000, nanite_only: true }
+    })
     expect((r.data!.nanite_assets as { name: string }[]).map((a) => a.name)).toEqual(['SM_Cliff'])
   })
 
