@@ -59,4 +59,24 @@ describe('readSnippetPayload', () => {
   it('老条目返回 null', () => {
     expect(readSnippetPayload({ graphs: [] })).toBeNull()
   })
+
+  it('classes 中的非字符串元素被剔除，其余按原顺序保留', () => {
+    const payload = readSnippetPayload({
+      form: 'snippet',
+      t3d: T3D,
+      meta: { classes: ['Event', 42, { name: 'x' }, 'Branch'] }
+    })
+    expect(payload?.meta.classes).toEqual(['Event', 'Branch'])
+  })
+
+  it('openPorts 只剔除非对象元素，不按字段类型过滤', () => {
+    // 字段类型不对的元素可能仍对应真实的悬空端口，剔除会让回执少报
+    const malformed = { nodeId: 5, pinName: 'then', dir: 'out', formerPeer: 'x.y' }
+    const payload = readSnippetPayload({
+      form: 'snippet',
+      t3d: T3D,
+      meta: { openPorts: [null, 7, malformed] }
+    })
+    expect(payload?.meta.openPorts).toEqual([malformed])
+  })
 })

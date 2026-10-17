@@ -98,8 +98,14 @@ export function readSnippetPayload(payload: unknown): SnippetFormPayload | null 
     meta: {
       nodeCount: typeof meta.nodeCount === 'number' ? meta.nodeCount : 0,
       connectionCount: typeof meta.connectionCount === 'number' ? meta.connectionCount : 0,
-      classes: Array.isArray(meta.classes) ? (meta.classes as string[]) : [],
-      openPorts: Array.isArray(meta.openPorts) ? (meta.openPorts as SnippetOpenPort[]) : []
+      classes: Array.isArray(meta.classes)
+        ? meta.classes.filter((item): item is string => typeof item === 'string')
+        : [],
+      openPorts: Array.isArray(meta.openPorts)
+        ? meta.openPorts.filter(
+            (port): port is SnippetOpenPort => typeof port === 'object' && port !== null
+          )
+        : []
     }
   }
 }
