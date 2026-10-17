@@ -3,7 +3,7 @@ import { registerCreatorPlanIPC } from './creatorPlan/ipc'
 import { startCreatorPlanRefresh } from './creatorPlan/refresh'
 import { isPlanProvider } from '../../shared/creatorPlan'
 import { registerSpeechIPC } from '../ipc/speech'
-import { PROVIDER_CATALOG } from './catalog'
+import { findCatalogEntry, PROVIDER_CATALOG } from './catalog'
 import {
   deleteLiteralKey,
   hasApiKey,
@@ -119,7 +119,9 @@ async function materialize(
       ? previousId
       : null
 
-  return { provider: { ...rest, apiKey }, staleKeyId }
+  // 从目录添加的，用途跟着目录走：界面上那一栏已经锁了，这里再拦一道过期界面和手改的请求
+  const kind = findCatalogEntry(draft.catalogId ?? '')?.kind ?? rest.kind
+  return { provider: { ...rest, kind, apiKey }, staleKeyId }
 }
 
 /** 落盘之后删掉换下来的旧密文；别的来源还在用同一份（Box Plan 的几个来源共用一把 Key）就留着 */

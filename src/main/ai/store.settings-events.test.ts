@@ -119,19 +119,30 @@ describe('updateSettings：读改写排队', () => {
   it('两个同时改的都生效：后一个拿到的是前一个写完的配置，不是旧快照', async () => {
     const { updateSettings } = await import('./store')
     writeConfig('tripo')
+    const chat = {
+      id: 'gateway',
+      displayName: 'Gateway',
+      kind: 'chat' as const,
+      protocol: 'openai-completions' as const,
+      baseUrl: 'https://gateway.example/v1',
+      apiKey: { kind: 'none' as const },
+      models: [{ id: 'm' }]
+    }
+    // 后一个绑的是前一个才加进去的来源：拿到旧快照的话这个来源不在，绑定会被丢掉
     await Promise.all([
       updateSettings((current) => ({
         ...current,
-        roles: { ...current.roles, chat: { providerId: 'tripo', modelId: 'v3.1-20260211' } }
+        providers: [...current.providers, chat],
+        roles: { ...current.roles, chat: { providerId: 'gateway', modelId: 'm' } }
       })),
       updateSettings((current) => ({
         ...current,
-        roles: { ...current.roles, summary: { providerId: 'tripo', modelId: 'v3.1-20260211' } }
+        roles: { ...current.roles, summary: { providerId: 'gateway', modelId: 'm' } }
       }))
     ])
     const roles = (await readSettings()).roles
-    expect(roles.chat?.providerId).toBe('tripo')
-    expect(roles.summary?.providerId).toBe('tripo')
+    expect(roles.chat?.providerId).toBe('gateway')
+    expect(roles.summary?.providerId).toBe('gateway')
     expect(roles.model3d?.providerId).toBe('tripo')
   })
 

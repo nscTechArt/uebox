@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyRolePatch, sanitizeRolePatch, unsavedRoles } from './aiProvider'
+import { applyRolePatch, disallowedRoles, sanitizeRolePatch, unsavedRoles } from './aiProvider'
 
 /** 改角色的补丁：洗干净、合并、找出没留住的 */
 describe('角色补丁', () => {
@@ -28,5 +28,14 @@ describe('角色补丁', () => {
 
   it('没留住的：要设的角色落盘后不是这个绑定；清空的不算', () => {
     expect(unsavedRoles({ chat: a }, { chat: a, agent: b, summary: null })).toEqual(['agent'])
+  })
+
+  it('不许绑：用途对不上角色的来源（音乐来源绑「音效生成」）', () => {
+    const source = {
+      roles: {},
+      providers: [{ id: 'eleven', kind: 'music' as const, models: [{ id: 'music_v2' }] }]
+    }
+    const music = { providerId: 'eleven', modelId: 'music_v2' }
+    expect(disallowedRoles(source, { sfx: music, music })).toEqual(['sfx'])
   })
 })

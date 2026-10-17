@@ -499,6 +499,8 @@ First work out why the install failed from the output above. If you can run comm
       baseUrl: 'Base URL',
       kind: 'Purpose',
       kindDesc: 'Choose a purpose. Add separate entries if a provider serves multiple purposes.',
+      kindLockedDesc:
+        'The catalog entry sets the purpose. To use this provider for something else, add its matching catalog entry.',
       kinds: {
         chat: 'Chat',
         embedding: 'Embedding (knowledge search)',

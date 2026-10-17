@@ -1167,7 +1167,9 @@ const MANUAL_ENTRIES = {
     env: ['ELEVENLABS_API_KEY'],
     doc: 'https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert',
     models: {
-      eleven_text_to_sound_v2: { id: 'eleven_text_to_sound_v2', name: 'Eleven Sound Effects v2' }
+      // v2 在前当默认：官方文档写明 loop 只有 v2 支持；v3 接口已收，文档未列
+      eleven_text_to_sound_v2: { id: 'eleven_text_to_sound_v2', name: 'Eleven Sound Effects v2' },
+      eleven_text_to_sound_v3: { id: 'eleven_text_to_sound_v3', name: 'Eleven Sound Effects v3' }
     }
   },
   'mureka-music': {

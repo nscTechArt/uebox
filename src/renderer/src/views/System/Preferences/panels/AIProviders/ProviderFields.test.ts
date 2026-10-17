@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import type { ProviderDraft } from '@core/shared/aiProvider'
@@ -65,6 +65,46 @@ describe('Provider advanced image settings', () => {
     draft.value.kind = 'chat'
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[role="switch"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('Provider 用途', () => {
+  function mountWith(catalogId?: string): { wrapper: VueWrapper; kind: VueWrapper } {
+    const draft = ref<ProviderDraft>({
+      id: 'elevenlabs-music',
+      displayName: 'ElevenLabs Music',
+      catalogId,
+      kind: 'music',
+      musicApi: 'elevenlabs-music',
+      protocol: 'openai-completions',
+      baseUrl: 'https://api.elevenlabs.io/v1',
+      models: [{ id: 'music_v2' }]
+    })
+    const wrapper = mount(ProviderFields, {
+      props: { state: { draft, importing: ref(false) } as unknown as AiProvidersState },
+      global: {
+        mocks: { $t: (key: string) => key },
+        stubs: { ApiKeyField: true, 'a-select': true, 'a-select-option': true }
+      }
+    })
+    const kind = wrapper
+      .findAllComponents({ name: 'ASelect' })
+      .find((select) => select.attributes('value') === 'music')!
+    return { wrapper, kind }
+  }
+
+  it('从目录添加的锁死用途，提示去目录添加另一条', () => {
+    const { wrapper, kind } = mountWith('elevenlabs-music')
+    expect(kind.attributes('disabled')).toBe('true')
+    expect(wrapper.text()).toContain('aiProvider.field.kindLockedDesc')
+    wrapper.unmount()
+  })
+
+  it('手工新建的用途可以改', () => {
+    const { wrapper, kind } = mountWith(undefined)
+    expect(kind.attributes('disabled')).toBe('false')
+    expect(wrapper.text()).toContain('aiProvider.field.kindDesc')
     wrapper.unmount()
   })
 })

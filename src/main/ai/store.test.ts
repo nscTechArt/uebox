@@ -888,6 +888,115 @@ describe('models.json 解析', () => {
     expect(result.roles.agent).toBeUndefined()
   })
 
+  describe('从目录添加的来源，用途跟着目录走', () => {
+    const elevenMusic = {
+      id: 'elevenlabs-music',
+      protocol: 'openai-completions',
+      baseUrl: 'https://api.elevenlabs.io/v1'
+    }
+
+    it('ElevenLabs Music 被改成「音效」、模型没换：改回音乐，音效绑定作废', () => {
+      const result = normalizeSettings({
+        version: 3,
+        providers: [{ ...elevenMusic, kind: 'sfx', models: [{ id: 'music_v2' }] }],
+        roles: { sfx: { providerId: 'elevenlabs-music', modelId: 'music_v2' } }
+      })
+      expect(result.providers[0]).toMatchObject({
+        kind: 'music',
+        catalogId: 'elevenlabs-music',
+        musicApi: 'elevenlabs-music'
+      })
+      expect(result.roles.sfx).toBeUndefined()
+    })
+
+    it('存了 catalogId 的，手改用途也改回目录的', () => {
+      const result = normalizeSettings({
+        version: 3,
+        providers: [
+          {
+            ...elevenMusic,
+            id: 'my-eleven',
+            catalogId: 'elevenlabs-music',
+            kind: 'sfx',
+            models: [{ id: 'eleven_text_to_sound_v2' }]
+          }
+        ]
+      })
+      expect(result.providers[0].kind).toBe('music')
+    })
+
+    it('第二份（openai-2）也认得出来', () => {
+      const result = normalizeSettings({
+        version: 3,
+        providers: [
+          {
+            id: 'openai-2',
+            kind: 'chat',
+            protocol: 'openai-completions',
+            baseUrl: 'https://api.openai.com/v1',
+            models: [{ id: 'gpt-x' }]
+          }
+        ]
+      })
+      expect(result.providers[0].catalogId).toBe('openai')
+    })
+
+    it('自己换过模型、挪作他用的老配置原样留着，不锁', () => {
+      const result = normalizeSettings({
+        version: 3,
+        providers: [
+          {
+            id: 'openai',
+            kind: 'image',
+            protocol: 'openai-completions',
+            baseUrl: 'https://api.openai.com/v1',
+            models: [{ id: 'my-image-model' }]
+          }
+        ],
+        roles: { image: { providerId: 'openai', modelId: 'my-image-model' } }
+      })
+      expect(result.providers[0].kind).toBe('image')
+      expect(result.providers[0].catalogId).toBeUndefined()
+      expect(result.roles.image).toEqual({ providerId: 'openai', modelId: 'my-image-model' })
+    })
+
+    it('同名但换了网关的不算目录来源', () => {
+      const result = normalizeSettings({
+        version: 3,
+        providers: [
+          {
+            ...elevenMusic,
+            baseUrl: 'https://relay.example/v1',
+            kind: 'sfx',
+            models: [{ id: 'music_v2' }]
+          }
+        ]
+      })
+      expect(result.providers[0]).toMatchObject({ kind: 'sfx', catalogId: undefined })
+    })
+  })
+
+  it('丢弃用途对不上角色的绑定', () => {
+    const result = normalizeSettings({
+      version: 3,
+      providers: [
+        {
+          id: 'suno',
+          kind: 'music',
+          protocol: 'openai-completions',
+          baseUrl: 'https://suno.example/v1',
+          models: [{ id: 'v6' }]
+        }
+      ],
+      roles: {
+        music: { providerId: 'suno', modelId: 'v6' },
+        sfx: { providerId: 'suno', modelId: 'v6' }
+      }
+    })
+    expect(result.roles.music).toEqual({ providerId: 'suno', modelId: 'v6' })
+    expect(result.roles.sfx).toBeUndefined()
+  })
+
   it('输入完全不是对象时给出空配置而不是抛错', () => {
     expect(normalizeSettings(null).providers).toEqual([])
     expect(normalizeSettings('boom').providers).toEqual([])
