@@ -3,10 +3,17 @@
  * 使用 electron-updater 实现应用的自动更新功能
  */
 import type { AppUpdater, UpdateInfo } from 'electron-updater'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, net } from 'electron'
 import { requestGuardedQuit } from '../../tray/quitGuard'
 import { logger } from '../logger'
-import { describeUpdateFeed, readAppMetadata, resolveUpdateFeed } from './updateFeed'
+import {
+  describeUpdateFeed,
+  pickFastestFeed,
+  readAppMetadata,
+  resolveUpdateFeeds,
+  updateManifestName,
+  type UpdateFeed
+} from './updateFeed'
 
 export interface UpdateStatus {
   checking: boolean
@@ -33,10 +40,12 @@ interface CheckForUpdatesOptions {
 
 export class AutoUpdaterService {
   private mainWindow: BrowserWindow | null = null
-  private readonly feed = resolveUpdateFeed({
+  private readonly feeds = resolveUpdateFeeds({
     env: process.env,
     appMetadata: readAppMetadata(app.getAppPath())
   })
+  /** 当前交给 electron-updater 的源。每次检查前重新比一次（见 selectFeed） */
+  private activeFeed: UpdateFeed | null = null
   private status: UpdateStatus = {
     checking: false,
     updateAvailable: false,
@@ -77,16 +86,14 @@ export class AutoUpdaterService {
    * 设置自动更新器
    */
   private setupAutoUpdater(autoUpdater: AppUpdater): void {
-    // 走到这里说明 feed 一定有值：没有配置更新源时 initialize() 直接返回，
-    // 连 electron-updater 都不会加载。
-    const feed = this.feed
-    if (feed) autoUpdater.setFeedURL(feed)
+    // 源不在这里定：有镜像时每次检查前要重新比一次快慢，见 selectFeed。
+    // 没有配置更新源时 initialize() 直接返回，连 electron-updater 都不会加载。
 
     // 不自动下载：发现新版先问一句。安装包是几百 MB，替用户决定要不要占带宽、
     // 占磁盘，在一个号称「完全离线」的应用里尤其说不过去。
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = false // 不在退出时自动安装，由用户控制
-    logger.info('自动更新源已配置:', { feed: describeUpdateFeed(feed) })
+    logger.info('自动更新源已配置:', { feeds: this.feeds.map(describeUpdateFeed) })
 
     // 监听更新检查事件
     autoUpdater.on('checking-for-update', () => {
@@ -239,7 +246,9 @@ export class AutoUpdaterService {
 
     try {
       logger.info('Starting update check...', this.currentCheckOptions)
-      await this.getUpdater().checkForUpdates()
+      const updater = this.getUpdater()
+      await this.selectFeed(updater)
+      await updater.checkForUpdates()
     } catch (error) {
       if (!this.errorHandledByUpdaterEvent) {
         this.handleUpdateError(error)
@@ -247,6 +256,25 @@ export class AutoUpdaterService {
     } finally {
       this.errorHandledByUpdaterEvent = false
     }
+  }
+
+  /**
+   * 有镜像时，挑这一刻最先响应的源交给 electron-updater。
+   *
+   * 每次检查都重新比：用户开着代理和关着代理时，赢的可能不是同一个。
+   * 下载沿用检查时选中的源 —— 清单和安装包得来自同一处，文件名和 sha512 才对得上。
+   * 走 Electron 的 net 而不是 Node 的 fetch：前者跟 electron-updater 一样认系统代理。
+   */
+  private async selectFeed(updater: AppUpdater): Promise<void> {
+    const feed = await pickFastestFeed(
+      this.feeds,
+      updateManifestName(process.platform),
+      (url, init) => net.fetch(url, init)
+    )
+    if (!feed || feed === this.activeFeed) return
+    updater.setFeedURL(feed)
+    this.activeFeed = feed
+    logger.info('本次更新源:', describeUpdateFeed(feed))
   }
 
   /**
@@ -416,7 +444,7 @@ export class AutoUpdaterService {
 
   /** 这个安装包有没有更新源。没有就一次网络请求都不该发 */
   isConfigured(): boolean {
-    return this.feed !== null
+    return this.feeds.length > 0
   }
 
   /**

@@ -11,7 +11,7 @@ vi.mock('../logger', () => ({
 vi.mock('./updateFeed', () => ({
   describeUpdateFeed: () => '',
   readAppMetadata: () => ({}),
-  resolveUpdateFeed: () => null
+  resolveUpdateFeeds: () => []
 }))
 
 import { setQuitGuard } from '../../tray/quitGuard'
