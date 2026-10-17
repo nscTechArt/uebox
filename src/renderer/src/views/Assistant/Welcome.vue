@@ -24,46 +24,14 @@
         />
       </div>
 
-      <div
-        v-if="voice.connecting.value || voice.active.value || voice.error.value"
-        class="voice-status-panel"
-      >
-        <span role="status" aria-live="polite">{{ voice.error.value || voiceStatusText }}</span>
-        <template v-if="voice.active.value">
-          <AppButton
-            variant="text"
-            size="small"
-            @click="router.push({ name: 'AssistantWelcome', query: { sid: voiceChatSid() } })"
-          >
-            {{ t('assistantInputComposer.voice.boundCall', { name: voiceBoundTitle }) }}
-          </AppButton>
-          <AppButton
-            variant="text"
-            size="small"
-            :aria-pressed="voice.muted.value"
-            @click="voice.setMuted(!voice.muted.value)"
-          >
-            {{
-              t(
-                voice.muted.value
-                  ? 'assistantInputComposer.voice.unmute'
-                  : 'assistantInputComposer.voice.mute'
-              )
-            }}
-          </AppButton>
-        </template>
-        <AppButton v-if="voice.connecting.value" variant="text" size="small" @click="voice.stop()">
-          {{ t('assistantInputComposer.voice.cancelConnection') }}
-        </AppButton>
-        <AppButton
-          v-if="voice.error.value && !voice.connecting.value && !voice.active.value"
-          variant="text"
-          size="small"
-          @click="toggleVoice"
-        >
-          {{ t('assistantInputComposer.voice.retry') }}
-        </AppButton>
-      </div>
+      <VoiceStatusPanel
+        v-if="!conversationMode && showVoiceStatus"
+        :voice="voice"
+        :status-text="voiceStatusText"
+        :bound-title="voiceBoundTitle"
+        @open-call="openVoiceCall"
+        @retry="toggleVoice"
+      />
 
       <section v-if="!conversationMode" class="hero">
         <button
@@ -175,6 +143,16 @@
           得再写一套测量，还容易把 sticky 的输入框顶出屏幕。
         -->
         <div :ref="setApprovalDock" class="approval-dock"></div>
+
+        <!-- 对话页的语音状态条放在输入框这一层：高度算进 --composer-height，不盖住消息区 -->
+        <VoiceStatusPanel
+          v-if="showVoiceStatus"
+          :voice="voice"
+          :status-text="voiceStatusText"
+          :bound-title="voiceBoundTitle"
+          @open-call="openVoiceCall"
+          @retry="toggleVoice"
+        />
 
         <!--
           输入框上方的语音球。谁在说话由它一个人交代 ——
@@ -306,6 +284,7 @@
 
 <script setup lang="ts">
 import AppButton from '@renderer/components/AppButton.vue'
+import VoiceStatusPanel from './components/VoiceStatusPanel.vue'
 import { provideApprovalDock } from '@renderer/components/useApprovalDock'
 defineOptions({ name: 'AssistantWelcome' })
 import {
@@ -925,6 +904,14 @@ const voiceStatusText = computed(() =>
         `assistantInputComposer.voice.status.${voice.phase.value === 'idle' ? 'listening' : voice.phase.value}`
       )
 )
+const showVoiceStatus = computed(
+  () => voice.connecting.value || voice.active.value || Boolean(voice.error.value)
+)
+
+function openVoiceCall(): void {
+  router.push({ name: 'AssistantWelcome', query: { sid: voiceChatSid() } })
+}
+
 const voiceBoundTitle = computed(() => {
   if (!voice.active.value && !voice.connecting.value) return ''
   return chatStore.sessionById(voiceChatSid())?.title || t('assistant.chatFlow.unnamedChat')
@@ -2894,17 +2881,6 @@ function selectBrowserPage(): void {
 .voice-orb-button:disabled {
   pointer-events: none;
   cursor: default;
-}
-
-.voice-status-panel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
 }
 
 .suggestions {
