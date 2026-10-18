@@ -1514,6 +1514,8 @@ const api = {
     goalEnd: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:goal-end', args),
     /** 工作室模式（`/team`）的任务板面板：名册、任务、留言、验收结论 */
     teamState: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-state', args),
+    /** 「外部团队」页：Claude Code 当大脑的那些团队 */
+    externalTeams: () => ipcRenderer.invoke('agent-v3:external-teams'),
     teamTaskReopen: (args: { sessionId: string; taskId: string }) =>
       ipcRenderer.invoke('agent-v3:team-task-reopen', args),
     teamJobReopen: (args: { sessionId: string; jobId: string }) =>

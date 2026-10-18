@@ -43,6 +43,9 @@ const ZH = `虚幻盒子 CLI —— 从终端调用虚幻引擎能力
   tools show <name>         某个工具的完整描述和参数定义
   tools call <name>         调用一个工具
   viewport screenshot       把视口画面存成 PNG 文件
+  team list / team status [id]  列出外部团队 / 看某个团队的交付闸
+  team use <id>             把当前目录绑到这个外部团队
+  team gate / team round    收尾检查 / 新一轮清零；Claude Code hook 里加 --hook
 
 示例：
   uebox ask "列出当前关卡里所有点光源和它们的强度"
@@ -70,6 +73,7 @@ const ZH = `虚幻盒子 CLI —— 从终端调用虚幻引擎能力
   --output <path>           截图存到哪，只接受 .png，相对路径按当前目录算
   --world auto|editor       截图拍哪个世界，默认 auto：PIE 在跑就拍游戏
   --overwrite               截图允许覆盖已存在的文件
+  --hook                    team gate/round 按 Claude Code hook 的约定读写
   --config <path>           盒子的配置文件，装在别处时用；或设 UEBOX_HOST_CONFIG
   --timeout <seconds>       整条命令的期限，默认 120
   --lang zh-CN|en-US        帮助与提示用哪种语言
@@ -125,6 +129,8 @@ Commands:
   tools show <name>         Full description and input schema for one tool
   tools call <name>         Call one tool
   viewport screenshot       Save the viewport image to a PNG file
+  team list / team status [id] / team use <id>  List, inspect, bind cwd
+  team gate / team round    Finish check / new round; add --hook in hooks
 
 Examples:
   uebox ask "list every point light in the level with its intensity"
@@ -152,6 +158,7 @@ Options (before or after the command):
   --output <path>           Screenshot file, .png only, relative to cwd
   --world auto|editor       Which world to capture; auto captures PIE if running
   --overwrite               Let the screenshot replace an existing file
+  --hook                    team gate/round: speak the Claude Code hook format
   --config <path>           The box's config file if installed elsewhere;
                             or set UEBOX_HOST_CONFIG
   --timeout <seconds>       Deadline for the whole command, default 120

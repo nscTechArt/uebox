@@ -718,3 +718,43 @@ describe('createAutoCompact —— 后台提前写摘要', () => {
     expect(generateSummary).not.toHaveBeenCalled()
   })
 })
+
+describe('createAutoCompact —— 超长补救的当场压缩', () => {
+  it('远没到压缩线也照压，返回的视图带着 system 消息，后续请求接着用这份检查点', async () => {
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要 O' })
+    const saved = vi.fn(async () => undefined)
+    const compact = createAutoCompact({
+      ...deps(10_000_000),
+      hashMessages: (messages) => `${messages.length}`,
+      checkpoint: { save: saved }
+    })
+    const messages = [
+      { role: 'system', content: '你是虚幻盒子', timestamp: 0 },
+      ...longHistory()
+    ] as unknown as AgentMessage[]
+
+    // 估算远在线下：transform 原样交回
+    expect(await compact(messages)).toBe(messages)
+    expect(generateSummary).not.toHaveBeenCalled()
+
+    const projected = await compact.compactForOverflow()
+
+    expect(projected).toBeDefined()
+    expect(projected![0]).toMatchObject({ role: 'system', content: '你是虚幻盒子' })
+    expect(String((projected![1] as { content: string }).content)).toContain('摘要 O')
+    expect(saved).toHaveBeenCalledTimes(1)
+    // 下一次请求经 transform 直接投影到同一份，不再调摘要模型
+    expect(JSON.stringify(await compact(messages))).toBe(JSON.stringify(projected))
+    expect(generateSummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('还没见过历史、或摘要失败时返回 undefined，交给调用方照常报错', async () => {
+    generateSummary.mockReset().mockResolvedValue({ ok: false, error: new Error('厂商 500') })
+    const compact = createAutoCompact(deps(10_000_000))
+
+    expect(await compact.compactForOverflow()).toBeUndefined()
+    await compact(longHistory())
+    expect(await compact.compactForOverflow()).toBeUndefined()
+    expect(generateSummary).toHaveBeenCalled()
+  })
+})

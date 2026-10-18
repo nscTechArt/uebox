@@ -5,7 +5,6 @@ import { helpText, type Lang } from './help.js'
 
 const LANGS: Lang[] = ['zh-CN', 'en-US']
 
-
 /**
  * 东亚宽字符：中文、假名、谚文、全角标点，一个占 2 列。
  *
@@ -76,7 +75,12 @@ describe('帮助文本和实现保持同步', () => {
     'tools list',
     'tools show',
     'tools call',
-    'viewport screenshot'
+    'viewport screenshot',
+    'team list',
+    'team status',
+    'team use',
+    'team gate',
+    'team round'
   ]
 
   it.each(LANGS)('%s 列出了每一条命令', (lang) => {
@@ -98,7 +102,8 @@ describe('帮助文本和实现保持同步', () => {
     '--output',
     '--world',
     '--overwrite',
-    '--allow-write'
+    '--allow-write',
+    '--hook'
   ]
 
   it.each(LANGS)('%s 列出了每一个选项', (lang) => {

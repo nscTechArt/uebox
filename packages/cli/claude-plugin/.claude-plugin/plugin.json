@@ -1,0 +1,6 @@
+{
+  "name": "uebox-team",
+  "version": "0.1.0",
+  "description": "Run an Unreal Box game-studio team from Claude Code: Claude is the producer, teammates and acceptance tester; Unreal Box provides the board, mail, asset locks, snapshots and the delivery gate.",
+  "author": { "name": "Unreal Box" }
+}

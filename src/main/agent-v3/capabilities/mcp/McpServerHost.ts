@@ -96,6 +96,8 @@ interface Session {
   lastActiveAt: number
   /** 正在处理中的请求数。>0 时绝不回收 —— 长请求不是空闲 */
   inFlight: number
+  /** 会话结束时要收的尾（见 `McpSessionSetup.dispose`）。只调一次，调完清掉 */
+  dispose?: () => void | Promise<void>
 }
 
 export interface McpServerHostOptions {
@@ -129,6 +131,11 @@ export interface McpSessionSetup {
   tools: UnrealAgentTool<never>[]
   /** MCP `initialize` 结果里的 `instructions`，客户端拿它当系统提示的一部分 */
   instructions?: string
+  /**
+   * 会话结束（客户端 DELETE、断线、闲置回收）时调一次。
+   * 外部团队的队员连接靠它把没交回的活收成「停下」、放掉文件锁
+   */
+  dispose?: () => void | Promise<void>
 }
 
 export interface McpSessionRequest {
@@ -345,6 +352,7 @@ export class McpServerHost {
     const sessionId = `mcp-${randomUUID()}`
     const setup = await this.setupSession(session, sessionId, clientCapabilities)
     session.tools = setup.tools
+    if (setup.dispose) session.dispose = setup.dispose
 
     session.transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => sessionId,
@@ -356,6 +364,7 @@ export class McpServerHost {
       onsessionclosed: (id) => {
         this.sessions.delete(id)
         releaseSessionBrowser(id)
+        disposeSession(session)
       }
     })
 
@@ -373,6 +382,7 @@ export class McpServerHost {
       if (id) this.sessions.delete(id)
       // 这条会话的工具按会话 id 开过内置浏览器的话，窗口跟着会话一起关，不然留到进程结束
       releaseSessionBrowser(sessionId)
+      disposeSession(session)
     }
 
     session.lastActiveAt = Date.now()
@@ -667,6 +677,16 @@ function failure(message: string, code: string): CallToolOutcome {
 /**
  * 关掉某条 MCP 会话开过的内置浏览器。按需加载：浏览器服务要 electron，单测里不该被连带拉起
  */
+/** 会话的收尾只做一次：DELETE 和传输层关闭两条路都会走到这里 */
+function disposeSession(session: Session): void {
+  const dispose = session.dispose
+  if (!dispose) return
+  session.dispose = undefined
+  void Promise.resolve()
+    .then(dispose)
+    .catch((error: unknown) => console.warn('[AgentV3][MCP-Server] 会话收尾失败:', error))
+}
+
 function releaseSessionBrowser(sessionId: string): void {
   void import('../../../services/agentBrowser')
     .then(({ deleteSessionBrowser }) => deleteSessionBrowser(sessionId))

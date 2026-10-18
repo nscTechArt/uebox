@@ -133,6 +133,13 @@ import { setProviderUsageProbe } from '../ai/providerUsage'
 import { DEFAULT_GOAL_MAX_ROUNDS, normalizeGoalMaxRounds } from '../../shared/goalRounds'
 import { buildCrashNotice, type EditorWatchEvent } from '../agent-v3/core/team/editorWatch'
 import { startTeamEditorWatch } from './teamEditorWatch'
+import {
+  endExternalTeam,
+  externalTeamExists,
+  isExternalTeamId,
+  listExternalTeams,
+  readExternalTeamState
+} from './externalTeams'
 import { createTeamSnapshots } from './teamSnapshots'
 import {
   applyVerdict,
@@ -661,6 +668,8 @@ const liveTeams = new Map<string, TeamLive>()
 
 /** 任务板面板要的一整份。不是工作室的会话返回 null */
 async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
+  // 外部团队（Claude Code 当大脑）没有盒子侧的对话，账在 external.json 里
+  if (isExternalTeamId(sessionId)) return readExternalTeamState(sessionId)
   const team = (await loadExecutionOptions(sessionId))?.team
   if (!team) return null
   const store = createTeamStore(teamDirsFor(sessionId))
@@ -708,6 +717,15 @@ function notifyModelRetry(
     model: info.model,
     reason: info.reason.slice(0, 120)
   })
+}
+
+/**
+ * 任务板上「重开」那两个入口认的「这是一个团队」：盒子里的看执行记录，外部团队看 external.json。
+ * 换模型不走这里 —— 外部团队的队员在 Claude Code 里，盒子换不了它的模型
+ */
+async function isTeamSession(sessionId: string): Promise<boolean> {
+  if (isExternalTeamId(sessionId)) return externalTeamExists(sessionId)
+  return Boolean((await loadExecutionOptions(sessionId))?.team)
 }
 
 /** 判「这一轮改没改过工程」「验收后改没改过」时，往回看多少条队员交活记录 */
@@ -1729,6 +1747,12 @@ export function registerAgentV3IPC(): void {
   })
 
   /** 工作室模式的任务板面板：名册、任务、留言、验收结论。不是工作室的会话给 null */
+  /** 「外部团队」页：Claude Code 当大脑的那些团队（`ext-*`），最近的在前 */
+  ipcMain.handle('agent-v3:external-teams', async () => ({
+    success: true,
+    teams: await listExternalTeams()
+  }))
+
   ipcMain.handle('agent-v3:team-state', async (_event, args: { sessionId?: string }) => {
     if (typeof args?.sessionId !== 'string' || !args.sessionId) return { success: true, team: null }
     return { success: true, team: await readTeamState(args.sessionId) }
@@ -1749,7 +1773,7 @@ export function registerAgentV3IPC(): void {
       if (typeof sessionId !== 'string' || !sessionId || typeof taskId !== 'string' || !taskId) {
         return { success: false, error: 'sessionId 和 taskId 都要给' }
       }
-      if (!(await loadExecutionOptions(sessionId))?.team) {
+      if (!(await isTeamSession(sessionId))) {
         return { success: false, error: '这条 session 不是团队模式' }
       }
       const store = createTeamStore(teamDirsFor(sessionId))
@@ -1785,7 +1809,7 @@ export function registerAgentV3IPC(): void {
       if (typeof sessionId !== 'string' || !sessionId || typeof jobId !== 'string' || !jobId) {
         return { success: false, error: 'sessionId 和 jobId 都要给' }
       }
-      if (!(await loadExecutionOptions(sessionId))?.team) {
+      if (!(await isTeamSession(sessionId))) {
         return { success: false, error: '这条 session 不是团队模式' }
       }
       const store = createTeamStore(teamDirsFor(sessionId))
@@ -1859,6 +1883,12 @@ export function registerAgentV3IPC(): void {
     const sessionId = args?.sessionId
     if (typeof sessionId !== 'string' || !sessionId)
       return { success: false, error: '缺 sessionId' }
+    // 外部团队只是标记结束：它的循环在 Claude Code 里，盒子停不了
+    if (isExternalTeamId(sessionId)) {
+      const found = await endExternalTeam(sessionId)
+      if (found) event.sender.send('agent-v3:team-board', { sessionId })
+      return found ? { success: true } : { success: false, error: '没有这个外部团队' }
+    }
     if (activeAgents.has(sessionId)) return { success: false, errorKey: 'running' }
     const options = await loadExecutionOptions(sessionId)
     if (!options?.team) return { success: true }

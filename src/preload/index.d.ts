@@ -23,7 +23,12 @@ import type {
 } from '../shared/assetDependency'
 import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { EditorHealthResult } from '../shared/editorHealth'
-import type { ModelCheckup, ModelDossier, TeamStateView } from '../shared/agentTeam'
+import type {
+  ExternalTeamSummary,
+  ModelCheckup,
+  ModelDossier,
+  TeamStateView
+} from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
 import type {
   AgentStartRejectionCode,
@@ -3336,6 +3341,8 @@ declare global {
       teamState: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; team: TeamStateView | null }>
+      /** 「外部团队」页：Claude Code 当大脑的那些团队（`ext-*`），最近的在前 */
+      externalTeams: () => Promise<{ success: boolean; teams: ExternalTeamSummary[] }>
       /** 任务板上卡住的一项改回待办，下一轮制作人会看到 */
       teamTaskReopen: (args: {
         sessionId: string

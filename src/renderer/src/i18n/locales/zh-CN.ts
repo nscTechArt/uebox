@@ -34,6 +34,7 @@ export default {
     model3dStudio: '3D 工作室',
     aigcStudio: 'AI 创作',
     serverManagement: '服务器管理',
+    externalTeams: '外部团队',
     appName: '虚幻盒子'
   },
   // 侧边栏工具定制：常驻名单与「更多」分组
@@ -2595,6 +2596,13 @@ export default {
       assistant: '助手'
     },
     teamBoard: {
+      external: {
+        label: 'Claude Code 驱动',
+        hint: '大脑在 Claude Code 里：队员用的模型和花掉的额度盒子都看不到，这里只记任务板、留言、快照和验收。',
+        endHint:
+          '标记这个团队已结束。盒子停不了 Claude Code，那边还在跑的话要在 Claude Code 里停。',
+        ended: '已结束'
+      },
       ui: {
         quest: '委托',
         crew: '队员',
@@ -4650,6 +4658,25 @@ export default {
       good: '表现良好，请继续保持',
       keepGoing: '仍有提升空间，建议查阅相关文档',
       encourage: '知识需要逐步积累，建议复习错题后再试'
+    }
+  },
+  externalTeams: {
+    title: '外部团队',
+    intro:
+      'Claude Code 当大脑、盒子当工作室的团队。思考花的是 Claude Code 的额度，盒子只记任务板、留言、快照和验收。',
+    empty: '还没有外部团队',
+    emptyHint:
+      '在 Claude Code 里装上 uebox-team 插件，让它用虚幻盒子的团队做一个游戏，团队就会出现在这里。',
+    members: '{n} 人',
+    pick: '选一个团队看它的任务板',
+    endedNotice: '已标记结束。Claude Code 那边还在跑的话，请在 Claude Code 里停下它。',
+    status: {
+      ended: '已结束',
+      passed: '已过验收',
+      stale: '改动后未重验',
+      failed: '验收未过',
+      blocked: '验收卡住',
+      pending: '未验收'
     }
   },
   serverManagement: {

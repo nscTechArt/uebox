@@ -287,6 +287,26 @@ export interface TeamStateView {
   events?: TeamEvent[]
   /** 此刻谁在跑、谁在等。只有这条对话这次运行里跑过团队才有（内存里的事，不落盘） */
   live?: TeamLiveView
+  /**
+   * 外部团队：大脑在外部客户端（Claude Code），盒子只当工作室。队员用什么模型盒子不知道
+   * （docs/外部大脑跑团队设计-2026-10-17.md）
+   */
+  external?: boolean
+  /** 外部团队已经结束（用户在面板上点了结束） */
+  ended?: boolean
+}
+
+/** 「外部团队」页上列表里的一项 */
+export interface ExternalTeamSummary {
+  id: string
+  objective: string
+  projectPath?: string
+  createdAt: number
+  ended: boolean
+  verdict: TeamVerdict | null
+  /** 过了验收，并且之后没再改过工程 */
+  passed: boolean
+  members: number
 }
 
 /**

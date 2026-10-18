@@ -39,7 +39,12 @@ const FORBIDDEN = [
 ]
 
 /** 这些必须在，缺了说明打包配置写错了 */
-const REQUIRED = ['package/dist/index.js', 'package/README.md', 'package/skills/uebox/SKILL.md']
+const REQUIRED = [
+  'package/dist/index.js',
+  'package/README.md',
+  'package/skills/uebox/SKILL.md',
+  'package/claude-plugin/.claude-plugin/plugin.json'
+]
 
 function packedFiles() {
   // `--dry-run` 不产出文件，只报会打进去什么。

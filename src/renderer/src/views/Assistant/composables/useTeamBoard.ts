@@ -57,12 +57,15 @@ export interface UseTeamBoard {
 /** 界面上最多留多少条动态（所有人加起来） */
 const ACTIVITY_KEPT = 80
 
-export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
+/**
+ * @param teamId 直接给团队 id（「外部团队」页用：外部团队没有盒子里的对话）。给了就不看 chatSid
+ */
+export function useTeamBoard(chatSid: Ref<string>, teamId?: Ref<string>): UseTeamBoard {
   const chatStore = useChatSessionsStore()
   const { t } = useI18n()
   const team = ref<TeamStateView | null>(null)
-  const agentSessionId = computed(() =>
-    chatSid.value ? chatStore.getAgentSessionId(chatSid.value) : ''
+  const agentSessionId = computed(
+    () => teamId?.value || (chatSid.value ? chatStore.getAgentSessionId(chatSid.value) : '')
   )
 
   const activity = ref<TeamActivity[]>([])

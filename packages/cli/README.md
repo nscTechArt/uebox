@@ -30,7 +30,7 @@ are meaningful; `--json` prints exactly one JSON object on stdout. Full help:
 
 ## 命令一览
 
-一共七条：
+常用的七条，外加外部团队的 `team` 一组（见下文「外部团队」）：
 
 | 命令                        | 作用                                            |
 | --------------------------- | ----------------------------------------------- |
@@ -120,6 +120,22 @@ uebox tools call ue_get_actor --args '{\"name\":\"Floor\"}'
 ```bat
 uebox tools call ue_get_actor --args "{""name"":""Floor""}"
 ```
+
+## 外部团队
+
+让 Claude Code 当大脑跑虚幻盒子的团队模式（盒子只当工作室，不调模型）时用。
+打法和插件见 [claude-plugin/README.md](claude-plugin/README.md)。
+
+```bash
+uebox team list --json              # 外部团队：id、目标、验收结论
+uebox team status ext-… --json      # 某个团队的交付闸现状
+uebox team use ext-…                # 把当前目录绑到这个团队（写 .uebox/team.json）
+uebox team gate --hook              # Claude Code 的 Stop hook：没过验收就拦
+uebox team round --hook             # UserPromptSubmit hook：新一轮清零
+```
+
+- `--hook` 时不出信封，按 Claude Code hook 的约定输出；任何意外都放行、退出码 0。
+- `--project <目录>` 在这组命令里指「哪个目录的 `.uebox/team.json`」，默认当前目录。
 
 ## 截图
 

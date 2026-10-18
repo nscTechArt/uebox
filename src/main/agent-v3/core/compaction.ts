@@ -312,15 +312,42 @@ export function applyCheckpoint(
  * 模型就没有提示词也没有工具了 —— pi 把 system 消息当普通历史交给我们。
  */
 export function createAutoCompact(deps: CompactionDeps) {
-  const compactConversation = createConversationCompact(deps)
-  return async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
+  const { transform: compactConversation, compactLatest } = createConversationCompact(deps)
+  /** 最近一次交进来的完整历史（含 system 消息）。超长补救要拿它当场压 */
+  let latest: AgentMessage[] | undefined
+  const withHead = (messages: AgentMessage[], projected: AgentMessage[]): AgentMessage[] => {
+    const head = getCurrentSystemMessage(messages as Message[])
+    return head ? [head, ...projected] : projected
+  }
+  const transform = async (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ): Promise<AgentMessage[]> => {
+    latest = messages
     const conversation = withoutSystemMessages(messages)
     const projected = await compactConversation(conversation, signal)
     // 没压（原样返回）就把原数组交回去，一条都不动
     if (projected === conversation) return messages
-    const head = getCurrentSystemMessage(messages as Message[])
-    return head ? [head, ...projected] : projected
+    return withHead(messages, projected)
   }
+  /**
+   * 不看阈值，把最近那份历史当场压掉，返回压完的模型视图（含 system 消息）。
+   *
+   * 给 `contextOverflow.ts` 用：厂商已经回了超长，说明估算低了，阈值不作数。
+   * 压出来的检查点记进闭包，这一轮后面的请求经 `transform` 照样用上。
+   * 压不动（没有可换的头部、摘要失败）返回 undefined。
+   */
+  const compactForOverflow = async (signal?: AbortSignal): Promise<AgentMessage[] | undefined> => {
+    if (!latest) return undefined
+    const messages = latest
+    try {
+      const projected = await compactLatest(withoutSystemMessages(messages), signal)
+      return projected ? withHead(messages, projected) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  return Object.assign(transform, { compactForOverflow })
 }
 
 function createConversationCompact(deps: CompactionDeps) {
@@ -336,7 +363,28 @@ function createConversationCompact(deps: CompactionDeps) {
   /** 只在第一次调用时验一遍指纹：同一轮里历史的头部不会变，验第二遍是白算 hash */
   let validated = false
 
-  return async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
+  /** 不看阈值当场压。压不动返回 undefined。见 `createAutoCompact` 的 `compactForOverflow` */
+  const compactLatest = async (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ): Promise<AgentMessage[] | undefined> => {
+    const base = checkpoint ? applyCheckpoint(messages, checkpoint) : messages
+    // 后台那份描述的是压之前的一代，换了检查点就作废
+    if (deps.precompactKey) precompactions.delete(deps.precompactKey)
+    const projected = await compactNow(
+      messages,
+      base,
+      estimateContextTokens(base).tokens,
+      false,
+      signal
+    )
+    return projected === base ? undefined : projected
+  }
+
+  const transform = async (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ): Promise<AgentMessage[]> => {
     try {
       if (!validated) {
         validated = true
@@ -502,6 +550,8 @@ function createConversationCompact(deps: CompactionDeps) {
     if (next.sourceHash) await deps.checkpoint?.save(next)
     return applyCheckpoint(messages, next)
   }
+
+  return { transform, compactLatest }
 }
 
 /** 摘要以一条用户消息的形式回到上下文最前面 */

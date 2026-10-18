@@ -31,13 +31,16 @@
           <span v-if="busy" class="q-dots" aria-hidden="true"><i /><i /><i /></span>
         </div>
         <div v-if="model.round.length" class="banner-progress">
-          <span
-            v-for="job in model.round"
-            :key="job.id"
-            class="pip"
-            :class="`is-${job.state}`"
-            :title="pipTitle(job)"
-          />
+          <!-- 任务多了折成几行，不往外撑：一行撑出框会把目标挤没、把状态和计数截掉 -->
+          <div class="pips" :class="{ 'is-dense': model.round.length > DENSE_PIPS }">
+            <span
+              v-for="job in model.round"
+              :key="job.id"
+              class="pip"
+              :class="`is-${job.state}`"
+              :title="pipTitle(job)"
+            />
+          </div>
           <PixelText :text="`${roundDone}/${model.round.length}`" :color="P.muted" :scale="2" />
         </div>
       </div>
@@ -589,6 +592,8 @@ const colorOf = (c: CrewView): string => crewColor(c.crew, 'v2')
 
 const busy = computed(() => props.model.phase === 'working' || props.model.phase === 'planning')
 const roundDone = computed(() => props.model.round.filter((j) => j.state === 'done').length)
+/** 进度格超过这么多就收窄，一行放得更多（见 `.pips.is-dense`） */
+const DENSE_PIPS = 24
 
 const phaseText = computed(() => {
   const m = props.model
@@ -1021,7 +1026,9 @@ button.q-frame {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 60%;
 }
 
 .banner-phase {
@@ -1036,15 +1043,28 @@ button.q-frame {
 
 .banner-progress {
   display: flex;
-  align-items: center;
-  gap: 3px;
+  align-items: flex-end;
+  gap: 9px;
+  min-width: 0;
+  max-width: 100%;
+}
 
-  :deep(.pixel-text) {
-    margin-left: 6px;
+/* 一行最多 24 格（12px + 3px 间距），多了往下折；超过 24 项时格子收窄，一行放得更多 */
+.pips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
+  max-width: calc(24 * 15px);
+
+  &.is-dense .pip {
+    width: 8px;
   }
 }
 
 .pip {
+  flex-shrink: 0;
   width: 12px;
   height: 8px;
   background: var(--q-edge);

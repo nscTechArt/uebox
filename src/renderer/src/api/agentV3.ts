@@ -7,7 +7,12 @@
 
 import type { AgentTurnUsage } from '@core/shared/agentUsage'
 import type { AgentReviewResult, AgentReviewTarget } from '@core/shared/agentReview'
-import type { ModelCheckup, ModelDossier, TeamStateView } from '@core/shared/agentTeam'
+import type {
+  ExternalTeamSummary,
+  ModelCheckup,
+  ModelDossier,
+  TeamStateView
+} from '@core/shared/agentTeam'
 import type { AgentQuestion, AgentQuestionAction } from '@core/shared/agentQuestion'
 import type { EditorSnapshotCaptureResult } from '@core/shared/editorSnapshot'
 import { unwrapResult } from '@renderer/common/utils'
@@ -472,6 +477,12 @@ export const agentV3API = {
   async teamState(sessionId: string): Promise<TeamStateView | null> {
     const result = await window.api.agentV3.teamState({ sessionId })
     return result?.team ?? null
+  },
+
+  /** 外部团队（Claude Code 当大脑），最近的在前。读不到给空列表 */
+  async externalTeams(): Promise<ExternalTeamSummary[]> {
+    const result = await window.api.agentV3.externalTeams()
+    return result?.teams ?? []
   },
 
   /**

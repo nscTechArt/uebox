@@ -31,6 +31,8 @@ describe('toStructuredContent', () => {
    */
   it('对外有结构化结果的就这几个', () => {
     expect(PUBLIC_RESULT_TOOLS.sort()).toEqual([
+      'team_gate',
+      'team_list',
       'ue_get_actor',
       'ue_get_selection',
       'ue_screenshot',
@@ -38,6 +40,34 @@ describe('toStructuredContent', () => {
       'ue_undo',
       'ue_undo_history'
     ])
+  })
+})
+
+describe('team_gate / team_list', () => {
+  it('交付闸：缺的字段给 null，不补成「没验过」', () => {
+    expect(
+      toStructuredContent('team_gate', {
+        teamId: 'ext-1',
+        objective: '做个塔防',
+        verdict: 'pass',
+        verdictAt: 100,
+        deliveries: 1,
+        passed: true,
+        ended: false
+      })
+    ).toEqual({
+      teamId: 'ext-1',
+      objective: '做个塔防',
+      verdict: 'pass',
+      verdictAt: 100,
+      lastWriteAt: null,
+      deliveries: 1,
+      passed: true,
+      ended: false
+    })
+    expect(toStructuredContent('team_list', { teams: [{ teamId: 'ext-1' }] })).toMatchObject({
+      teams: [{ teamId: 'ext-1', verdict: null, passed: null, projectPath: null }]
+    })
   })
 })
 

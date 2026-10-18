@@ -134,6 +134,17 @@ describe('TeamBoardPanel 摘要行', () => {
     const running = docked({ running: true })
     expect(running.find('.team-board-end').attributes('disabled')).toBeDefined()
   })
+
+  it('外部团队（Claude Code 当大脑）：照实标出来；结束了的不能再结束', () => {
+    const external = docked({ team: { ...team, external: true } })
+    expect(external.text()).toContain('Claude Code 驱动')
+    expect(external.find('.team-board-end').attributes('disabled')).toBeUndefined()
+    expect(docked().text()).not.toContain('Claude Code 驱动')
+
+    const ended = docked({ team: { ...team, external: true, ended: true } })
+    expect(ended.find('.team-board-end').attributes('disabled')).toBeDefined()
+    expect(ended.find('.team-board-end').text()).toBe('已结束')
+  })
 })
 
 describe('像素画风：委托板', () => {
@@ -146,6 +157,24 @@ describe('像素画风：委托板', () => {
     ])
     // 上一轮的验收不盖章
     expect(wrapper.find('.stamp').exists()).toBe(false)
+    expect(wrapper.find('.pips').classes()).not.toContain('is-dense')
+  })
+
+  it('活多了进度格收窄、折行，计数仍在格子外', () => {
+    const many = Array.from({ length: 46 }, (_, i) => ({
+      id: `m${i}`,
+      member: '资产统计员',
+      brief: `第 ${i} 件`,
+      startedAt: min(10),
+      endedAt: min(5),
+      outcome: 'done' as const
+    }))
+    const wrapper = docked({ team: { ...team, jobs: many } })
+    const pips = wrapper.find('.banner-progress .pips')
+    expect(pips.classes()).toContain('is-dense')
+    expect(pips.findAll('.pip')).toHaveLength(46)
+    // 计数不跟格子一起折行
+    expect(pips.find('.pixel-text').exists()).toBe(false)
   })
 
   it('角色卡：气泡说此刻在干嘛；交过活的说交了什么、右上角记几份', () => {

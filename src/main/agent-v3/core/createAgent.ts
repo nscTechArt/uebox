@@ -54,6 +54,7 @@ import { createApprovalGate, type ApprovalDeps, type ApprovalMode } from './appr
 import { VIEWPORT_CAPTURE_TOOLS } from './editorScreenshotScope'
 import { createLoopBreaker } from './loopBreaker'
 import { createAutoCompact, UNREAL_BOX_COMPACTION } from './compaction'
+import { overflowRecoveringStreamFn } from './contextOverflow'
 import { generateSummary } from '../vendor/pi-harness'
 import { restoreTranscript, withoutSystemMessages, withSystemPrompt } from './systemMessages'
 import {
@@ -871,10 +872,41 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   const checkpoint = ctx.isSubAgent ? undefined : await loadCheckpoint(ctx.sessionId)
   let contextEpoch = checkpoint?.contextEpoch ?? 0
 
+  const autoCompact = createAutoCompact({
+    models,
+    summaryModel,
+    contextWindow: selection.model.contextWindow,
+    hashMessages,
+    ...(ctx.isSubAgent
+      ? {}
+      : {
+          precompactKey: ctx.sessionId,
+          checkpoint: {
+            ...(checkpoint ? { initial: checkpoint } : {}),
+            save: (next) => {
+              contextEpoch = next.contextEpoch
+              return saveCheckpoint(ctx.sessionId, next)
+            }
+          }
+        }),
+    ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
+    ...(ctx.onCompacting ? { onCompacting: ctx.onCompacting } : {})
+  })
+  // 厂商回「上下文超长」时缩输出上限或当场压缩再重发一次，见 `contextOverflow.ts`。
+  // 包在卡死重发外面：超长不是网关的事，重发同一个请求只会再被拒一次
+  const recovering = overflowRecoveringStreamFn(streamFn, {
+    compact: async (signal) =>
+      (await autoCompact.compactForOverflow(signal)) as Message[] | undefined,
+    onRecover: ({ action, reason }) =>
+      logger.warn(
+        `[AgentV3] 会话 ${ctx.sessionId} 上下文超长，${action === 'shrink-output' ? '缩小输出上限' : '当场压缩'}后重发：${reason.slice(0, 200)}`
+      )
+  })
+
   const agent = new Agent({
     streamFn: search
       ? (model, context, options) =>
-          streamFn(model, context, {
+          recovering(model, context, {
             ...options,
             sessionId: promptCacheKey(
               ctx.sessionId,
@@ -882,7 +914,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
               toolSearchPrefixKey(model, context)
             )
           })
-      : streamFn,
+      : recovering,
     // **不是**业务 sessionId：这是供应商缓存亲和键，摘要检查点一换就该换，
     // 而业务 id 是会话身份、界面和锁都认它，不能动。见 `compactionCheckpoint.ts`。
     sessionId: promptCacheKey(ctx.sessionId, checkpoint?.contextEpoch ?? 0),
@@ -891,26 +923,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       systemPrompt: systemPromptFor(ctx),
       tools: tools as unknown as AgentTool<never>[]
     },
-    transformContext: createAutoCompact({
-      models,
-      summaryModel,
-      contextWindow: selection.model.contextWindow,
-      hashMessages,
-      ...(ctx.isSubAgent
-        ? {}
-        : {
-            precompactKey: ctx.sessionId,
-            checkpoint: {
-              ...(checkpoint ? { initial: checkpoint } : {}),
-              save: (next) => {
-                contextEpoch = next.contextEpoch
-                return saveCheckpoint(ctx.sessionId, next)
-              }
-            }
-          }),
-      ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
-      ...(ctx.onCompacting ? { onCompacting: ctx.onCompacting } : {})
-    }),
+    transformContext: autoCompact,
     /*
      * 引擎状态中途变了就把工具清单和环境块换掉。
      *

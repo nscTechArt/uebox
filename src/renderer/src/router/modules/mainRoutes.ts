@@ -393,6 +393,27 @@ const mainRoutes: RouteRecordRaw = {
       }
     },
 
+    /**
+     * 外部团队：Claude Code 当大脑、盒子当工作室（docs/外部大脑跑团队设计-2026-10-17.md）。
+     * 它们没有盒子里的对话，单独一页看任务板。不叫 /team：那是已移除的商业版团队协作页
+     */
+    {
+      path: '/external-teams',
+      name: 'ExternalTeams',
+      component: () => import('../../views/ExternalTeams/index.vue'),
+      meta: {
+        title: 'menu.externalTeams',
+        isShowInTab: true,
+        fixed: false,
+        sort: 15.5,
+        isCanDelete: true,
+        showMenu: true,
+        showTab: true,
+        isShowInMenu: true,
+        keepAlive: true
+      }
+    },
+
     {
       path: '/dev-assistant',
       name: 'AssistantWelcome',

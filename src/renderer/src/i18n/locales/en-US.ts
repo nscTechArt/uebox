@@ -34,6 +34,7 @@ export default {
     model3dStudio: '3D Studio',
     aigcStudio: 'AIGC Studio',
     serverManagement: 'Server Management',
+    externalTeams: 'External Teams',
     appName: 'Unreal Box'
   },
   // Sidebar tool customization: pinned list and the "More" group
@@ -2660,6 +2661,13 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       assistant: 'Assistant'
     },
     teamBoard: {
+      external: {
+        label: 'Driven by Claude Code',
+        hint: 'The brain is in Claude Code: Unreal Box cannot see which models the teammates use or what they spend. It keeps the board, mail, snapshots and acceptance record.',
+        endHint:
+          'Mark this team as ended. Unreal Box cannot stop Claude Code; if it is still running, stop it there.',
+        ended: 'Ended'
+      },
       ui: {
         quest: 'Quest',
         crew: 'Crew',
@@ -4802,6 +4810,25 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       good: 'Good result. Keep it up',
       keepGoing: 'Room for improvement. Reviewing the docs is recommended',
       encourage: 'Knowledge builds over time. Review your mistakes and try again'
+    }
+  },
+  externalTeams: {
+    title: 'External Teams',
+    intro:
+      'Teams where Claude Code is the brain and Unreal Box is the studio. The thinking runs on Claude Code; Unreal Box keeps the board, mail, snapshots and acceptance record.',
+    empty: 'No external teams yet',
+    emptyHint:
+      'Install the uebox-team plugin in Claude Code and ask it to build a game with an Unreal Box team. The team shows up here.',
+    members: '{n} people',
+    pick: 'Pick a team to see its board',
+    endedNotice: 'Marked as ended. If Claude Code is still running it, stop it in Claude Code.',
+    status: {
+      ended: 'Ended',
+      passed: 'Passed',
+      stale: 'Changed since check',
+      failed: 'Failed check',
+      blocked: 'Check blocked',
+      pending: 'Not checked'
     }
   },
   serverManagement: {

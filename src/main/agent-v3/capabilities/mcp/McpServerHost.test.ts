@@ -854,6 +854,20 @@ describe('McpServerHost 按会话装配', () => {
     expect(seen[1]).toMatch(/^mcp-/)
   }, 30_000)
 
+  it('会话结束时调一次装配给的收尾（外部团队靠它把没交回的活收成停下）', async () => {
+    let disposed = 0
+    const client = await connect(async () => ({
+      tools: TOOLS,
+      dispose: () => {
+        disposed++
+      }
+    }))
+    const transport = (client as unknown as { transport: StreamableHTTPClientTransport }).transport
+    await transport.terminateSession()
+    await client.close()
+    await vi.waitFor(() => expect(disposed).toBe(1))
+  }, 30_000)
+
   it('握手时下发说明', async () => {
     const client = await connect(async () => ({ tools: TOOLS, instructions: '盒子的规矩' }))
     expect(client.getInstructions()).toBe('盒子的规矩')

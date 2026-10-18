@@ -69,10 +69,11 @@ describe('sidebarTools', () => {
     // 这里镜像同一层排除后再验证拆分
     const excluded = new Set(['Profile', 'Preferences'])
     const featureItems = menu.filter((i) => !excluded.has(i.key))
-    expect(featureItems.map((i) => i.key).sort()).toEqual([...KNOWN_KEYS].sort())
+    // 外部团队（Claude Code 当大脑的团队任务板）也是一个工具，默认收进「更多」
+    expect(featureItems.map((i) => i.key).sort()).toEqual([...KNOWN_KEYS, 'ExternalTeams'].sort())
 
     const { pinned, more } = resolveSidebarTools(featureItems, DEFAULT_SIDEBAR_TOOLS_PREFS)
-    expect(more.map((i) => i.key)).toEqual(['Notebooks', 'AIGCStudio'])
+    expect(more.map((i) => i.key)).toEqual(['Notebooks', 'AIGCStudio', 'ExternalTeams'])
     expect(pinned.map((i) => i.key)).toContain('Home')
   })
 

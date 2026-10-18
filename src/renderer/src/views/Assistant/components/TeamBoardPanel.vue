@@ -29,19 +29,21 @@
       <AppTag v-if="!docked && verdictTag" :tone="verdictTag.tone" :title="verdictTag.title">
         {{ verdictTag.label }}
       </AppTag>
+      <!-- 外部团队：大脑在 Claude Code，队员用什么模型盒子不知道，照实说 -->
+      <AppTag v-if="team.external" tone="info" :title="t('assistant.teamBoard.external.hint')">
+        {{ t('assistant.teamBoard.external.label') }}
+      </AppTag>
       <PhCaretRight v-if="!docked" class="caret" />
       <AppButton
         v-else
         class="team-board-end"
         size="small"
         variant="text"
-        :disabled="running"
-        :title="
-          running ? t('assistant.teamBoard.endWhileRunning') : t('assistant.teamBoard.endHint')
-        "
+        :disabled="running || team.ended"
+        :title="endTitle"
         @click="emit('end')"
       >
-        {{ t('assistant.teamBoard.end') }}
+        {{ team.ended ? t('assistant.teamBoard.external.ended') : t('assistant.teamBoard.end') }}
       </AppButton>
     </component>
 
@@ -145,6 +147,14 @@ onMounted(() => {
 const model = computed(() =>
   buildBoardModel(props.team, props.activity ?? [], { running: !!props.running, now: now.value })
 )
+
+/** 外部团队结束只是标记：它的循环在 Claude Code 里，要用户自己去那边停 */
+const endTitle = computed(() => {
+  if (props.running) return t('assistant.teamBoard.endWhileRunning')
+  return props.team.external
+    ? t('assistant.teamBoard.external.endHint')
+    : t('assistant.teamBoard.endHint')
+})
 
 // ── 摘要行 ──────────────────────────────────────────────────────────────
 
