@@ -21,6 +21,7 @@ snapshots your work when you report.
 
 1. Your first call is `team_join` with `team_id`, `member` (your name, exactly as given) and
    `brief` (the assignment, copied word for word). If it fails, stop and answer with the error.
+   It gives you a `team_seat`: put it in the arguments of every later Unreal Box call.
 2. `team_join` returns your role, the assignment, notes left for you and the task board. Follow
    that role. It is the real brief; this file only covers the mechanics.
 3. Make every project change through `uebox-member` tools: editor, assets, local files and

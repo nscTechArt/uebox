@@ -13,14 +13,16 @@ import { getTargetProjectPath } from '../projectTargetContext'
 import { editorKeyActive } from './editorKey'
 import { createExternalTeamRegistry, gateFacts, type ExternalTeamRegistry } from './externalTeam'
 import { createExternalTeamSession, type ExternalTeamSession } from './externalTeamTools'
+import { runWithTeamSeat } from './teamSeatContext'
 import type { Snapshot, TeamSnapshots } from './snapshots'
 import { createTeamStore, type TeamStore } from './teamStore'
 
 /**
  * 外部团队：Claude Code 当大脑，盒子当工作室（docs/外部大脑跑团队设计-2026-10-17.md）。
  *
- * 这里量的是「一条连接 = 一个角色」那道门：没进团队的连接原样透传；制作人、验收员拿不到写工具；
+ * 这里量的是「这次调用是谁」那道门：没进团队的连接原样透传；制作人、验收员拿不到写工具；
  * 队员的写操作带自己的锁主、进团队的工程、记进交付闸；交回存快照、放锁。
+ * 前半段不带通行证、按连接认人（Claude Code 插件的打法）；最后一组带通行证，一条连接跑全队。
  */
 
 let dir: string
@@ -83,13 +85,14 @@ const BOX_TOOLS = [
 
 interface Connection {
   session: ExternalTeamSession
+  tools: UnrealAgentTool<never>[]
   call: (name: string, args?: Record<string, unknown>) => Promise<string>
   details: (name: string, args?: Record<string, unknown>) => Promise<unknown>
 }
 
-function connect(): Connection {
+function connect(reg: ExternalTeamRegistry = registry): Connection {
   const session = createExternalTeamSession({
-    registry,
+    registry: reg,
     storeFor,
     snapshots,
     namespaces: ['ue.level', 'aigc'],
@@ -108,6 +111,7 @@ function connect(): Connection {
   }
   return {
     session,
+    tools,
     call: async (name, args) =>
       (await run(name, args)).content.map((c) => (c.type === 'text' ? c.text : '')).join(''),
     details: async (name, args) => (await run(name, args)).details
@@ -123,15 +127,9 @@ async function openTeam(projectPath?: string): Promise<{ producer: Connection; t
   return { producer, teamId: details.teamId }
 }
 
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'external-team-'))
-  clock = 1_000
-  saved = []
-  calls = []
-  stores.clear()
-  forceReleaseAll()
+function makeRegistry(): ExternalTeamRegistry {
   let n = 0
-  registry = createExternalTeamRegistry({
+  return createExternalTeamRegistry({
     dirsFor: (id) => ({
       stateDir: join(dir, 'sessions', `${id}.team`),
       workspaceDir: join(dir, 'team', id)
@@ -140,6 +138,16 @@ beforeEach(() => {
     now,
     newId: () => `ext-t${++n}`
   })
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'external-team-'))
+  clock = 1_000
+  saved = []
+  calls = []
+  stores.clear()
+  forceReleaseAll()
+  registry = makeRegistry()
 })
 
 afterEach(() => {
@@ -258,7 +266,7 @@ describe('队员', () => {
     await member.call('write_script', { path: 'res://player.gd' })
     expect(calls.at(-1)).toEqual({
       tool: 'write_script',
-      owner: `${teamId}:mate-程序`,
+      owner: expect.stringMatching(new RegExp(`^${teamId}:mate-程序@`)),
       project: 'D:/Games/TD',
       editorKey: true
     })
@@ -378,5 +386,158 @@ describe('验收员', () => {
     await expect(
       producer.call('team_verdict', { verdict: 'PASS', reason: '我说过了' })
     ).rejects.toThrow('不能调 team_verdict')
+  })
+})
+
+describe('通行证（team_seat）', () => {
+  async function seatOf(
+    conn: Connection,
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<string> {
+    return ((await conn.details(name, args)) as { seat: string }).seat
+  }
+
+  it('每个工具的参数表里多一个 team_seat；交给工具的参数里没有它', async () => {
+    const conn = connect()
+    const write = conn.tools.find((t) => t.name === 'write_script')!
+    expect(
+      (write.parameters as { properties: Record<string, unknown> }).properties.team_seat
+    ).toBeTruthy()
+    const seen: unknown[] = []
+    const strict = defineTool({
+      name: 'strict_tool',
+      description: '参数表是严格的',
+      namespace: 'ue.level',
+      risk: 'safe',
+      input: z.object({ path: z.string() }).strict(),
+      execute: async (params) => {
+        seen.push(params)
+        return { text: 'ok' }
+      }
+    }) as unknown as UnrealAgentTool<never>
+    const { teamId } = await openTeam()
+    const producerSeat = (
+      (await conn.details('team_open', { team_id: teamId })) as { seat: string }
+    ).seat
+    const [guarded] = conn.session.guard([strict])
+    await guarded!.execute('x', { path: 'a', team_seat: producerSeat } as never)
+    expect(seen).toEqual([{ path: 'a' }])
+  })
+
+  it('一条连接同时跑制作人、两个队员和验收员：各认各的', async () => {
+    const conn = connect()
+    const producer = await seatOf(conn, 'team_open', {
+      objective: '做一个塔防',
+      project_path: 'D:/Games/TD'
+    })
+    const teamId = producer.split('.')[0]!
+    await conn.call('team_hire', { name: '程序', role: 'a', team_seat: producer })
+    await conn.call('team_hire', { name: '关卡', role: 'b', team_seat: producer })
+
+    // 子 Agent 和主会话共用这条连接：进门不带通行证，各拿一张
+    const coder = await seatOf(conn, 'team_join', { team_id: teamId, member: '程序', brief: 'x' })
+    const level = await seatOf(conn, 'team_join', { team_id: teamId, member: '关卡', brief: 'y' })
+    expect(new Set([producer, coder, level]).size).toBe(3)
+
+    await conn.call('write_script', { team_seat: coder })
+    // 能发 `_meta` 的客户端走 `_meta.unrealBox.teamSeat`，效果一样
+    await runWithTeamSeat(level, () => conn.call('write_script'))
+    expect(calls.map((c) => c.owner)).toEqual([
+      expect.stringMatching(new RegExp(`^${teamId}:mate-程序@`)),
+      expect.stringMatching(new RegExp(`^${teamId}:mate-关卡@`))
+    ])
+    expect(calls.every((c) => c.project === 'D:/Games/TD' && c.editorKey)).toBe(true)
+
+    // 共用连接上不带通行证：盒子不猜是谁
+    await expect(conn.call('write_script')).rejects.toThrow('team_seat')
+    await expect(conn.call('team_board', { action: 'list' })).rejects.toThrow('team_seat')
+    // 制作人的规矩还在
+    await expect(conn.call('write_script', { team_seat: producer })).rejects.toThrow(
+      '制作人不直接改工程'
+    )
+    await expect(conn.call('team_report', { report: 'x', team_seat: producer })).rejects.toThrow(
+      '不能调 team_report'
+    )
+
+    await conn.call('team_report', { report: '主角写完了。', team_seat: coder })
+    await conn.call('team_report', { report: '关卡搭完了。', team_seat: level })
+    expect(saved).toEqual(['程序：主角写完了。', '关卡：关卡搭完了。'])
+    // 交回之后这张通行证不能再写
+    await expect(conn.call('write_script', { team_seat: coder })).rejects.toThrow('手上没有活')
+
+    // 干过队员的通行证当不了验收员；新进门的验收员可以，哪怕这条连接上跑过队员
+    await expect(
+      conn.call('team_join', {
+        team_id: teamId,
+        member: 'acceptor',
+        report: 'r',
+        how_to_play: 'h',
+        team_seat: coder
+      })
+    ).rejects.toThrow('干过队员的活')
+    const acceptor = await seatOf(conn, 'team_join', {
+      team_id: teamId,
+      member: 'acceptor',
+      report: '塔防做完了',
+      how_to_play: '从 main 开始'
+    })
+    await expect(conn.call('write_script', { team_seat: acceptor })).rejects.toThrow('验收员只读')
+    clock = 9_000
+    await conn.call('team_verdict', { verdict: 'PASS', reason: '玩通一局', team_seat: acceptor })
+    expect(await conn.call('team_gate', { team_seat: producer })).toContain('已过验收')
+    await expect(
+      conn.call('team_verdict', { verdict: 'PASS', reason: '再记一次', team_seat: acceptor })
+    ).rejects.toThrow('不能调 team_verdict')
+  })
+
+  it('换一条连接、盒子重启之后，通行证还认得', async () => {
+    const { producer, teamId } = await openTeam('D:/Games/TD')
+    await producer.call('team_hire', { name: '程序', role: 'a' })
+    const first = connect()
+    const seat = await seatOf(first, 'team_join', {
+      team_id: teamId,
+      member: '程序',
+      brief: '写主角'
+    })
+    await first.call('write_script', { team_seat: seat })
+    const owner = calls.at(-1)!.owner
+    // 连接断了：调用方自己带着通行证，活不收
+    await first.session.dispose()
+    expect((await storeFor(teamId).jobs())[0]!.outcome).toBeUndefined()
+
+    // 盒子重启：进程里什么都没有了，从团队记录里认回来
+    const restarted = makeRegistry()
+    const second = connect(restarted)
+    clock = 6_000
+    await second.call('write_script', { team_seat: seat })
+    expect(calls.at(-1)).toMatchObject({ owner, project: 'D:/Games/TD', editorKey: true })
+
+    // 再重启一次，交回时没有写操作明细了，但通行证上记着写过：照样存快照
+    const third = connect(makeRegistry())
+    const done = await third.call('team_report', { report: '主角写完了。', team_seat: seat })
+    expect(done).toContain('盒子中途重启过')
+    expect(saved).toEqual(['程序：主角写完了。'])
+  })
+
+  it('伪造的、不认得的通行证一律拒绝', async () => {
+    const { producer, teamId } = await openTeam()
+    await producer.call('team_hire', { name: '程序', role: 'a' })
+    const conn = connect()
+    for (const forged of [`${teamId}.not-a-real-seat`, 'ext-nope.x', 'garbage']) {
+      await expect(conn.call('write_script', { team_seat: forged })).rejects.toThrow('不认得')
+      await expect(conn.call('team_board', { action: 'list', team_seat: forged })).rejects.toThrow(
+        '不认得'
+      )
+    }
+    expect(calls).toEqual([])
+    // 别的团队的通行证进不了这个团队
+    const other = await openTeam()
+    const otherSeat = (await other.producer.details('team_open', { team_id: other.teamId })) as {
+      seat: string
+    }
+    await expect(
+      conn.call('team_open', { team_id: teamId, team_seat: otherSeat.seat })
+    ).rejects.toThrow('属于团队')
   })
 })

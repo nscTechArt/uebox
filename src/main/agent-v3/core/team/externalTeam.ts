@@ -32,8 +32,48 @@ export interface ExternalTeamRecord {
   createdAt: number
   /** 用户或制作人宣布结束的时刻。结束的团队交付闸一律放行 */
   endedAt?: number
+  /**
+   * 验收员进门的时刻，记下结论时清掉。结论按这个时刻算：验收员开始玩之后才落下的改动，
+   * 它没看到，PASS 不能盖过去
+   */
+  acceptanceStartedAt?: number
+  /** 发出去的通行证：谁拿着、是什么角色、手上哪件活。见 `ExternalSeat` */
+  seats?: Record<string, ExternalSeat>
   /** 交付闸状态：验收结论、最近一次写工程的时刻。和盒子里的团队同一个形状 */
   state: TeamState
+}
+
+/**
+ * 一张通行证（team_seat）：`team_open` / `team_join` 发给调用方，之后每次调用都带上，
+ * 盒子凭它认出「这次是谁」。
+ *
+ * 角色跟着通行证走，不跟着 MCP 连接走：有的客户端（Kimi Code、Codex、Cursor）的子 Agent 和主会话
+ * 共用一条连接，按连接认人就分不清；记在这里，盒子重启、连接重连之后也还认得。
+ * 角色发出去就不再变：干过队员的通行证当不了验收员。
+ */
+export interface ExternalSeat {
+  role: 'producer' | 'member' | 'acceptor'
+  /** 队员：名册上的名字 */
+  member?: string
+  /** 队员：手上这件活。交回后清掉，同一张通行证可以再进门接下一件 */
+  jobId?: string
+  brief?: string
+  /** 队员：这件活写过工程。写操作明细只在内存里，盒子重启后靠它决定交回时存不存快照 */
+  wrote?: boolean
+  /** 验收员：记过结论了，这张通行证用完了 */
+  closed?: boolean
+  createdAt: number
+}
+
+/** 通行证是 `团队id.随机串`：拿到通行证就知道去哪个团队的记录里查，不用扫全部团队 */
+export function newSeatId(teamId: string): string {
+  return `${teamId}.${randomUUID()}`
+}
+
+export function seatTeamId(seat: string): string | undefined {
+  const at = seat.lastIndexOf('.')
+  const teamId = at > 0 ? seat.slice(0, at) : ''
+  return isExternalTeamId(teamId) ? teamId : undefined
 }
 
 export function isExternalTeamId(id: string): boolean {
@@ -85,7 +125,13 @@ export interface ExternalTeamRegistry {
   ): Promise<ExternalTeamRecord>
   /** 有队员写了工程。只在跨过「上次验收」那条线时落盘，见 `noteWrite` */
   noteWrite(id: string): Promise<void>
+  /** 验收员进门。之后记下的结论按这一刻算，见 `acceptanceStartedAt` */
+  startAcceptance(id: string): Promise<ExternalTeamRecord>
   recordVerdict(id: string, verdict: GoalVerdict | null): Promise<ExternalTeamRecord>
+  /** 按通行证找回团队和那张通行证。认不出来回 undefined */
+  getSeat(seat: string): Promise<{ record: ExternalTeamRecord; seat: ExternalSeat } | undefined>
+  /** 记下（或改写）一张通行证 */
+  putSeat(teamId: string, seat: string, value: ExternalSeat): Promise<void>
   /** 最近的在前 */
   list(): Promise<ExternalTeamRecord[]>
 }
@@ -103,6 +149,9 @@ export function createExternalTeamRegistry(deps: ExternalTeamRegistryDeps): Exte
   const newId = deps.newId ?? (() => `${EXTERNAL_TEAM_PREFIX}${randomUUID()}`)
   // 同一个团队的读改写排成一条：几个队员同时写工程时，`noteWrite` 不能互相覆盖
   const chains = new Map<string, Promise<unknown>>()
+  // 写工程成功了、但 external.json 没写上的那些时刻。读的时候叠上去，交付闸宁可多拦不放过；
+  // 下次写成功就落进文件
+  const unsaved = new Map<string, number>()
 
   const fileFor = (id: string): string => join(deps.dirsFor(id).stateDir, RECORD_FILE)
 
@@ -110,7 +159,11 @@ export function createExternalTeamRegistry(deps: ExternalTeamRegistryDeps): Exte
     if (!isExternalTeamId(id)) return undefined
     try {
       const raw = JSON.parse(await fs.readFile(fileFor(id), 'utf8')) as ExternalTeamRecord
-      return raw && raw.id === id && raw.state ? raw : undefined
+      if (!raw || raw.id !== id || !raw.state) return undefined
+      const extra = unsaved.get(id)
+      return extra !== undefined && (raw.state.lastWriteAt ?? -Infinity) < extra
+        ? { ...raw, state: { ...raw.state, lastWriteAt: extra } }
+        : raw
     } catch {
       return undefined
     }
@@ -122,6 +175,10 @@ export function createExternalTeamRegistry(deps: ExternalTeamRegistryDeps): Exte
     const tmp = `${file}.${process.pid}.tmp`
     await fs.writeFile(tmp, JSON.stringify(record, null, 2), 'utf8')
     await fs.rename(tmp, file)
+    const extra = unsaved.get(record.id)
+    if (extra !== undefined && (record.state.lastWriteAt ?? -Infinity) >= extra) {
+      unsaved.delete(record.id)
+    }
   }
 
   function serial<T>(id: string, fn: () => Promise<T>): Promise<T> {
@@ -163,16 +220,45 @@ export function createExternalTeamRegistry(deps: ExternalTeamRegistryDeps): Exte
     },
 
     async noteWrite(id) {
-      await registry.update(id, (record) => {
-        const state = noteWrite(record.state, now())
-        return state ? { ...record, state } : null
-      })
+      const t = now()
+      await registry
+        .update(id, (record) => {
+          // 验收进行中：「上次验收」那条线其实是验收员进门那一刻，跨过它也要落盘
+          const pending = record.acceptanceStartedAt
+          if (pending !== undefined && (record.state.lastWriteAt ?? -Infinity) <= pending) {
+            return { ...record, state: { ...record.state, lastWriteAt: t } }
+          }
+          const state = noteWrite(record.state, t)
+          return state ? { ...record, state } : null
+        })
+        .catch((error: unknown) => {
+          unsaved.set(id, Math.max(unsaved.get(id) ?? -Infinity, t))
+          console.warn('[AgentV3][ExternalTeam] 写工程的时刻没记进 external.json:', error)
+        })
+    },
+
+    startAcceptance(id) {
+      return registry.update(id, (record) => ({ ...record, acceptanceStartedAt: now() }))
     },
 
     recordVerdict(id, verdict) {
-      return registry.update(id, (record) => ({
+      return registry.update(id, ({ acceptanceStartedAt, ...record }) => ({
         ...record,
-        state: applyVerdict(record.state, verdict, now())
+        state: applyVerdict(record.state, verdict, acceptanceStartedAt ?? now())
+      }))
+    },
+
+    async getSeat(seat) {
+      const teamId = seatTeamId(seat)
+      const record = teamId ? await read(teamId) : undefined
+      const value = record?.seats?.[seat]
+      return record && value ? { record, seat: value } : undefined
+    },
+
+    async putSeat(teamId, seat, value) {
+      await registry.update(teamId, (record) => ({
+        ...record,
+        seats: { ...record.seats, [seat]: value }
       }))
     },
 

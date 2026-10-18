@@ -17,7 +17,8 @@ acceptance record.
      If it is not set, stop and point the user to "Setup" in this plugin's README.
    - This session must have Unreal Box's MCP server. Its tools include `team_open`.
 2. Call `team_open` with `objective` (the user's request, in their words). Read the producer
-   brief it returns: it is the real rulebook for this team.
+   brief it returns: it is the real rulebook for this team. Put the `team_seat` it gives you
+   in the arguments of every later Unreal Box call, and never hand it to a subagent.
 3. In your working directory, run `uebox team use <team id>`. The delivery hook uses it to find
    the team.
 

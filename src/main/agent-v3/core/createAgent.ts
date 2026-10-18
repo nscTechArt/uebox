@@ -85,7 +85,7 @@ import {
   runWithTargetConnectionId
 } from './projectTargetContext'
 import { releaseAll, runWithLockOwner, teamRootOf } from './assetLock'
-import { AUDITOR_HARD_JUDGES, isAuditorTool, type GoalVerdict } from './goalLoop'
+import { ACCEPTANCE_JUDGES, isAuditorTool, type GoalVerdict } from './goalLoop'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
 import { memberFileBase, type TeamMember, type TeamModel, type TeamStore } from './team/teamStore'
 import { loadTeamModels, type TeamModels } from './team/teamModels'
@@ -1369,20 +1369,6 @@ export async function runSubAgent(
     input.keepUsage?.(spent)
   }
 }
-
-/**
- * 验收员手上的工具：`/goal` 审计员那一套，再加真能「玩」的两个。
- *
- * 审计员只要能回读和跑一遍；交付验收要从开始玩到胜负再重来，
- * 光 `ue_playtest` 模拟不了玩家输入，所以带上自动试玩和注入输入；
- * 交了打包版的话，再拿 `project_smoke_test` 起一次打包版看会不会崩。
- */
-const ACCEPTANCE_JUDGES = [
-  ...AUDITOR_HARD_JUDGES,
-  'ue_autoplay',
-  'ue_inject_input',
-  'project_smoke_test'
-]
 
 /**
  * 工作室里「谁在跑」：制作人和每个队员开跑时登记、收工时注销，别人发来的话才能当场插进来；

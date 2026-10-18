@@ -137,6 +137,39 @@ uebox team round --hook             # UserPromptSubmit hook：新一轮清零
 - `--hook` 时不出信封，按 Claude Code hook 的约定输出；任何意外都放行、退出码 0。
 - `--project <目录>` 在这组命令里指「哪个目录的 `.uebox/team.json`」，默认当前目录。
 
+### 没有插件的客户端（Kimi Code、Codex、Cursor……）
+
+任何能连 MCP 的客户端都能跑外部团队，不需要插件。关键是**通行证**（`team_seat`）：
+
+- 制作人调 `team_open`、队员和验收员调 `team_join`，返回的第一行就是自己的通行证。
+- 之后每次调用盒子的工具都带上它：参数里加 `"team_seat": "…"`（每个工具的参数表里都有这一项），
+  能发 `_meta` 的客户端也可以放在 `_meta.unrealBox.teamSeat`。
+- 盒子按通行证认人，不按连接。所以子 Agent 和主会话共用一条 MCP 连接也分得清；连接断了、
+  盒子重启了，带着同一张通行证接着干就行。
+- 一条连接上进过两个角色之后，不带通行证的调用会被拒绝 —— 盒子不猜这次是谁。
+
+制作人怎么起队员：用客户端自己的子 Agent（Kimi Code 的子任务、Codex / Cursor 的子 Agent 都行），
+在子 Agent 的提示里写清三件事：
+
+```text
+team_id: ext-…
+member: 程序            # 和 team_hire 登记的名字一字不差；验收员写 acceptor
+assignment: 这件活要做什么，连同它需要的背景
+先调 team_join（不带 team_seat），之后每次调用都带上它返回的 team_seat，干完调 team_report。
+```
+
+- 别把制作人自己的通行证给子 Agent。每个子 Agent 进门时自己领一张。
+- 验收员要另起一个**没干过活**的子 Agent，`team_join` 时 `member` 写 `acceptor`，
+  带上交付说明（`report`）和怎么玩（`how_to_play`）。干过队员的通行证当不了验收员。
+
+没有 hook 时怎么守交付闸：制作人回复用户之前自己查一次。
+
+```bash
+uebox team status ext-… --json     # data.passed 为 true 才算过了验收
+```
+
+或者直接调 `team_gate`（带 `team_id`）。验收 PASS 之后工程又被改过，`passed` 会变回 false，要重新验。
+
 ## 截图
 
 ```bash

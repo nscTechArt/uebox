@@ -19,7 +19,8 @@ You judge it. You do not fix it. Unreal Box makes your connection read-only.
 
 1. Your first call is `team_join` with `team_id`, `member: "acceptor"`, `report` (the
    producer's delivery report, word for word) and `how_to_play`. If it fails, stop and answer
-   with the error.
+   with the error. It gives you a `team_seat`: put it in the arguments of every later Unreal Box
+   call.
 2. `team_join` returns the acceptance instructions and the bar. Follow them: run the game,
    play it, take screenshots, and check each line of the bar against what you actually see.
 3. Record your verdict with `team_verdict` (`PASS`, `FAIL` or `BLOCKED`, with the reason).

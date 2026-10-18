@@ -45,6 +45,7 @@ import {
 import type { AgentToolResult } from '@earendil-works/pi-agent-core'
 
 import { runWithTargetConnectionId } from '../../core/projectTargetContext'
+import { readTeamSeat, runWithTeamSeat } from '../../core/team/teamSeatContext'
 import type { UnrealAgentTool } from '../../tools/defineTool'
 import { OFFLINE_UE_TOOLS } from '../../tools/toolNames'
 import {
@@ -548,8 +549,11 @@ export class McpServerHost {
             if (text) onProgress(text)
           }
         : undefined
+      // 外部团队的通行证：能发 `_meta` 的客户端（CLI）放在这里，模型填参数的放在 `team_seat`。
+      // 见 core/team/externalTeamTools.ts
+      const seat = readTeamSeat(request.params._meta?.unrealBox)
       const execute = (): ReturnType<typeof tool.execute> =>
-        tool.execute(callId, args, signal, onUpdate)
+        runWithTeamSeat(seat, () => tool.execute(callId, args, signal, onUpdate))
       const result = target ? await runWithTargetConnectionId(target, execute) : await execute()
 
       const structured = toStructuredContent(tool.name, result.details)
