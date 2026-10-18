@@ -75,7 +75,7 @@ describe('team copy', () => {
     const catalog = (zhCN as unknown as { catalogLibrary: { switcher: Record<string, unknown> } })
       .catalogLibrary.switcher
     expect(catalog.badge).toBe('团队')
-    expect((catalog.state as Record<string, string>).offline).toBe('连不上团队')
+    expect((catalog.state as Record<string, string>).offline).toBe('无法连接团队')
   })
 
   it('has the same keys in both languages', () => {

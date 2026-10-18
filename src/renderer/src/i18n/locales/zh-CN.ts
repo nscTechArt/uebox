@@ -1462,7 +1462,7 @@ export default {
       badge: '团队',
       state: {
         online: '已连接',
-        offline: '无法连接服务器',
+        offline: '无法连接团队',
         signedOut: '需要重新登录',
         unknown: '未连接'
       },
