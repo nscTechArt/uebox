@@ -8,7 +8,7 @@
   "homepage": "https://github.com/ueboxai/uebox",
   "updateGithubRepo": "ueboxai/uebox",
   "updateMirrors": [
-    "https://dl.unrealagent.net/dl"
+    "https://uebox.cn-sy1.rains3.com/dl"
   ],
   "packageManager": "pnpm@10.28.2",
   "engines": {
