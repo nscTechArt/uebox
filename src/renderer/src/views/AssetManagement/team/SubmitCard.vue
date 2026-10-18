@@ -53,9 +53,13 @@
           <AppMenu @click="onMenu">
             <template v-if="submit.milestone">
               <AppMenuItem item-key="rename">{{ t('teamProject.card.rename') }}</AppMenuItem>
-              <AppMenuItem item-key="remove">{{ t('teamProject.card.removeMilestone') }}</AppMenuItem>
+              <AppMenuItem item-key="remove">{{
+                t('teamProject.card.removeMilestone')
+              }}</AppMenuItem>
             </template>
-            <AppMenuItem v-else item-key="set">{{ t('teamProject.card.setMilestone') }}</AppMenuItem>
+            <AppMenuItem v-else item-key="set">{{
+              t('teamProject.card.setMilestone')
+            }}</AppMenuItem>
           </AppMenu>
         </template>
       </AppDropdown>
@@ -64,7 +68,10 @@
     <div class="submit-message">{{ submit.message }}</div>
     <div v-if="submit.rejected" class="submit-rejected">
       {{
-        t('teamProject.card.rejected', { reason: submit.rejected.reason, who: submit.rejected.by.name })
+        t('teamProject.card.rejected', {
+          reason: submit.rejected.reason,
+          who: submit.rejected.by.name
+        })
       }}
     </div>
 
@@ -295,7 +302,9 @@ async function approve(): Promise<void> {
   deciding.value = false
   if (!result.success) {
     message.error(
-      result.errorCode === 'not-allowed' ? t('teamProject.dialogs.notAllowed') : t('teamProject.dialogs.failed')
+      result.errorCode === 'not-allowed'
+        ? t('teamProject.dialogs.notAllowed')
+        : t('teamProject.dialogs.failed')
     )
     return
   }

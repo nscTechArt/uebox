@@ -13,7 +13,9 @@
     </div>
     <div v-else-if="error" class="page-state">
       {{ error }}
-      <AppButton v-if="!notFound" size="small" @click="load">{{ t('teamProject.retry') }}</AppButton>
+      <AppButton v-if="!notFound" size="small" @click="load">{{
+        t('teamProject.retry')
+      }}</AppButton>
     </div>
     <template v-else-if="result">
       <!-- 汇总：「6 次提交 · 新增 3 · 修改 44 · 删除 1」；从里程碑对比时「M2 → M3 提审版：88 次提交」 -->
@@ -60,7 +62,9 @@
 
       <!-- 文件：用网格，卡片右上角是改动标记；写是哪次改的 -->
       <template v-if="tab === 'files'">
-        <div v-if="result.files.length === 0" class="page-state">{{ t('teamProject.compare.empty') }}</div>
+        <div v-if="result.files.length === 0" class="page-state">
+          {{ t('teamProject.compare.empty') }}
+        </div>
         <div v-else class="card-grid">
           <div
             v-for="file in result.files"
@@ -93,7 +97,9 @@
         </div>
       </template>
       <template v-else>
-        <div v-if="submits.length === 0" class="page-state">{{ t('teamProject.compare.empty') }}</div>
+        <div v-if="submits.length === 0" class="page-state">
+          {{ t('teamProject.compare.empty') }}
+        </div>
         <SubmitCard
           v-for="submit in submits"
           :key="submit.number"

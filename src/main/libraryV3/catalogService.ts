@@ -1963,7 +1963,9 @@ export class CatalogService {
             if (!local) continue
             // 外包区的参考 / 交付：放进 UE 工程时去掉 reference/ 或 delivery/N/ 这一层
             const relative =
-              library.record.team?.role === 'outsourcer' ? areaToProjectPath(paths[index]) : paths[index]
+              library.record.team?.role === 'outsourcer'
+                ? areaToProjectPath(paths[index])
+                : paths[index]
             const destination = join(root, ...relative.split('/'))
             const ext = extname(paths[index]).toLowerCase()
             if (ext === '.uasset' || ext === '.umap') {

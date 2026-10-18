@@ -642,7 +642,8 @@ export class ServerLibrarySource implements AssetLibrarySource {
     if (path === 'reference') return { ...folder, folderName: t('teamProject.outsource.reference') }
     if (path === 'delivery') return { ...folder, folderName: t('teamProject.outsource.delivery') }
     const batch = /^delivery\/(\d+)$/.exec(path)
-    if (batch) return { ...folder, folderName: t('teamProject.outsource.deliveryN', { n: batch[1] }) }
+    if (batch)
+      return { ...folder, folderName: t('teamProject.outsource.deliveryN', { n: batch[1] }) }
     return folder
   }
 

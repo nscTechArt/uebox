@@ -125,7 +125,9 @@ async function pickPlace(): Promise<void> {
   if (!result.success || !result.data) return
   const name = projectName.value || 'Project'
   const inspected = await teamAPI.inspectFolder(result.data).catch(() => null)
-  target.value = inspected?.empty ? result.data : `${result.data.replace(/[\\/]+$/, '')}${sep}${name}`
+  target.value = inspected?.empty
+    ? result.data
+    : `${result.data.replace(/[\\/]+$/, '')}${sep}${name}`
   existing.value = false
   await refreshFree()
 }

@@ -481,12 +481,13 @@ function createSendTool(
       end: { outcome: 'done'; report: string } | { outcome: 'stopped'; reason: string }
     ): Promise<void> => {
       const usage = spent ? { usage: spent } : {}
-      await (jobId
-        ? deps.store.finishJob(jobId, { ...end, ...usage })
-        : // 活的账没记上（startJob 失败）：用量照样进总账
-          spent
-          ? deps.store.addUsage(member.name, spent)
-          : Promise.resolve()
+      await (
+        jobId
+          ? deps.store.finishJob(jobId, { ...end, ...usage })
+          : // 活的账没记上（startJob 失败）：用量照样进总账
+            spent
+            ? deps.store.addUsage(member.name, spent)
+            : Promise.resolve()
       ).catch(() => undefined)
     }
 

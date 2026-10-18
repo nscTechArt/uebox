@@ -39,7 +39,10 @@ export function formatTeamTime(at: number, now: number, t: Translate): string {
   if (at >= today) return hhmm(at)
   if (at >= today - DAY) return t('teamProject.time.yesterday', { time: hhmm(at) })
   if (at >= today - 6 * DAY)
-    return t('teamProject.time.weekday', { day: t(`teamProject.time.days.${d.getDay()}`), time: hhmm(at) })
+    return t('teamProject.time.weekday', {
+      day: t(`teamProject.time.days.${d.getDay()}`),
+      time: hhmm(at)
+    })
   if (d.getFullYear() === new Date(now).getFullYear())
     return t('teamProject.time.date', { m: d.getMonth() + 1, d: d.getDate() })
   return t('teamProject.time.fullDate', { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() })
@@ -210,8 +213,11 @@ export function checkText(check: TeamCheck, t: Translate): string {
 export function waitingText(submit: Pick<TeamSubmit, 'waitingFor'>, t: Translate): string | null {
   const waiting = submit.waitingFor
   if (!waiting) return null
-  if (waiting.kind === 'admins' || waiting.people.length === 0) return t('teamProject.card.waitingAdmins')
-  return t('teamProject.card.waitingPeople', { people: peopleText(waiting.people, t('teamProject.nameSep')) })
+  if (waiting.kind === 'admins' || waiting.people.length === 0)
+    return t('teamProject.card.waitingAdmins')
+  return t('teamProject.card.waitingPeople', {
+    people: peopleText(waiting.people, t('teamProject.nameSep'))
+  })
 }
 
 /** 改动计数「新增 3 · 修改 12 · 删除 1」，为 0 的不写 */

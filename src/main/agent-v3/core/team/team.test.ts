@@ -358,7 +358,8 @@ describe('团队的用量', () => {
     // 再塞满 200 件（直接写盘，逐件走 store 在 Windows 上太慢）
     const file = join(store.dirs.stateDir, 'jobs.json')
     const jobs = JSON.parse(readFileSync(file, 'utf8')) as unknown[]
-    for (let i = 2; i <= 200; i++) jobs.push({ id: `j${i}`, member: '甲', brief: 'x', startedAt: 0 })
+    for (let i = 2; i <= 200; i++)
+      jobs.push({ id: `j${i}`, member: '甲', brief: 'x', startedAt: 0 })
     writeFileSync(file, JSON.stringify(jobs))
     const last = await store.startJob('甲', '最新的一件')
     await store.finishJob(last.id, { outcome: 'done', report: 'ok', usage: one })

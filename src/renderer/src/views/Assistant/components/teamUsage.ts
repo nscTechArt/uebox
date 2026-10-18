@@ -34,9 +34,7 @@ export function teamUsageRows(
     const index = members.findIndex((m) => key(m.name) === k)
     return index >= 0 ? index : members.length
   }
-  return entries
-    .map(([who, usage]) => ({ who, usage }))
-    .sort((a, b) => rank(a.who) - rank(b.who))
+  return entries.map(([who, usage]) => ({ who, usage })).sort((a, b) => rank(a.who) - rank(b.who))
 }
 
 /** 金额只含有价目的部分：既有金额、又有没价目的 token 时，界面要说明 */

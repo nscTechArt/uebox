@@ -1435,7 +1435,11 @@ const MANUAL_ENTRIES = {
     env: [],
     doc: 'https://developers.openai.com/codex/auth',
     models: {
-      'gpt-5.6-luna': imageModel('gpt-5.6-luna', 'GPT Image（经 GPT-5.6 Luna 调用）', 'codex-images')
+      'gpt-5.6-luna': imageModel(
+        'gpt-5.6-luna',
+        'GPT Image（经 GPT-5.6 Luna 调用）',
+        'codex-images'
+      )
     }
   },
   'openai-image': {

@@ -45,10 +45,15 @@ describe('parseTeamOpenLink', () => {
     const server = encodeURIComponent('http://127.0.0.1:47484')
     expect(
       parseTeamOpenLink(`unrealbox://open?server=${server}&path=/p/xinghai/submits/1532`)
-    ).toEqual({ server: 'http://127.0.0.1:47484', project: 'xinghai', path: '/p/xinghai/submits/1532' })
+    ).toEqual({
+      server: 'http://127.0.0.1:47484',
+      project: 'xinghai',
+      path: '/p/xinghai/submits/1532'
+    })
     expect(
-      parseTeamOpenLink(`unrealbox://open?server=${server}&path=${encodeURIComponent('/p/xinghai/compare?from=1460&to=latest')}`)
-        ?.path
+      parseTeamOpenLink(
+        `unrealbox://open?server=${server}&path=${encodeURIComponent('/p/xinghai/compare?from=1460&to=latest')}`
+      )?.path
     ).toBe('/p/xinghai/compare?from=1460&to=latest')
   })
 
@@ -61,7 +66,9 @@ describe('parseTeamOpenLink', () => {
 
 describe('areaToProjectPath', () => {
   it('drops the reference / delivery N layer of an outsourcing area', () => {
-    expect(areaToProjectPath('reference/Content/Env/M_Rock.uasset')).toBe('Content/Env/M_Rock.uasset')
+    expect(areaToProjectPath('reference/Content/Env/M_Rock.uasset')).toBe(
+      'Content/Env/M_Rock.uasset'
+    )
     expect(areaToProjectPath('delivery/7/Content/Env/Rocks/SM_Rock_11.uasset')).toBe(
       'Content/Env/Rocks/SM_Rock_11.uasset'
     )

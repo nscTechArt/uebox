@@ -702,8 +702,7 @@ function parseCodexImageStream(raw: string): { images: RawImage[] } {
       continue
     }
     if (event.type === 'response.failed' || event.type === 'error') {
-      const detail =
-        event.response?.error?.message ?? event.error?.message ?? event.message ?? ''
+      const detail = event.response?.error?.message ?? event.error?.message ?? event.message ?? ''
       throw new CodexImageError(String(detail))
     }
     if (event.type !== 'response.output_item.done') continue
@@ -1652,7 +1651,9 @@ export async function generateImages(
    * 不能因为那一张把它们一起扔掉。全挂了才报错，报第一个原因。
    */
   const results = await Promise.allSettled(
-    Array.from({ length: input.count }, () => send(provider, adapter, { ...input, count: 1 }, signal))
+    Array.from({ length: input.count }, () =>
+      send(provider, adapter, { ...input, count: 1 }, signal)
+    )
   )
   const images = results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
   if (images.length > 0) return images

@@ -7,7 +7,9 @@
       {{ t('teamProject.activity.error') }}
       <AppButton size="small" @click="load">{{ t('teamProject.retry') }}</AppButton>
     </div>
-    <div v-else-if="items.length === 0" class="page-state">{{ t('teamProject.deleted.empty') }}</div>
+    <div v-else-if="items.length === 0" class="page-state">
+      {{ t('teamProject.deleted.empty') }}
+    </div>
     <div v-else class="card-grid">
       <div
         v-for="item in items"

@@ -85,7 +85,9 @@
         <span v-for="n in 3" :key="n" class="skeleton-row" />
       </div>
       <div v-else-if="failed" class="history-empty">{{ t('teamProject.history.offline') }}</div>
-      <div v-else-if="items.length === 0" class="history-empty">{{ t('teamProject.history.none') }}</div>
+      <div v-else-if="items.length === 0" class="history-empty">
+        {{ t('teamProject.history.none') }}
+      </div>
 
       <!-- 默认：最近一次改动 + 历史条 -->
       <template v-else-if="!expanded">

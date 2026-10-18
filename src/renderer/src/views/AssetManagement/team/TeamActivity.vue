@@ -15,7 +15,9 @@
       </span>
       <span v-else class="skeleton-block" />
       <AppDropdown placement="bottomLeft">
-        <button class="pill-btn">{{ t(`teamProject.activity.periods.${period}`) }} <PhCaretDown /></button>
+        <button class="pill-btn">
+          {{ t(`teamProject.activity.periods.${period}`) }} <PhCaretDown />
+        </button>
         <template #overlay>
           <AppMenu :selected-keys="[period]" @click="(info) => setPeriod(info.key)">
             <AppMenuItem v-for="p in PERIODS" :key="p" :item-key="p">
@@ -93,9 +95,13 @@
     </div>
     <div v-else-if="error" class="page-state">
       {{ offlineText ?? t('teamProject.activity.error') }}
-      <AppButton v-if="!offlineText" size="small" @click="reload">{{ t('teamProject.retry') }}</AppButton>
+      <AppButton v-if="!offlineText" size="small" @click="reload">{{
+        t('teamProject.retry')
+      }}</AppButton>
     </div>
-    <div v-else-if="items.length === 0" class="page-state">{{ t('teamProject.activity.empty') }}</div>
+    <div v-else-if="items.length === 0" class="page-state">
+      {{ t('teamProject.activity.empty') }}
+    </div>
     <template v-else>
       <section v-for="day in days" :key="day.key" class="day-group">
         <div class="day-title">{{ day.title }}</div>
@@ -172,7 +178,9 @@ const whoLabel = computed(() => {
 })
 const offlineText = computed(() =>
   error.value === 'unreachable' && teamStore.offlineSince
-    ? t('teamProject.activity.offline', { time: formatTeamTime(teamStore.offlineSince, now.value, t) })
+    ? t('teamProject.activity.offline', {
+        time: formatTeamTime(teamStore.offlineSince, now.value, t)
+      })
     : null
 )
 

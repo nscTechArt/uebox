@@ -302,6 +302,8 @@ export function applyCheckpoint(
   return [toSummaryMessage(checkpoint.summary), ...messages.slice(checkpoint.cutIndex)]
 }
 
+type CompactTransform = (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>
+
 /**
  * 自动压缩，装在 pi 的 `transformContext` 上。
  *
@@ -311,7 +313,9 @@ export function applyCheckpoint(
  * 0.84 时一样；真压了，再把它们合成一条放回最前面。不放回的话，压完第一次
  * 模型就没有提示词也没有工具了 —— pi 把 system 消息当普通历史交给我们。
  */
-export function createAutoCompact(deps: CompactionDeps) {
+export function createAutoCompact(deps: CompactionDeps): CompactTransform & {
+  compactForOverflow: (signal?: AbortSignal) => Promise<AgentMessage[] | undefined>
+} {
   const { transform: compactConversation, compactLatest } = createConversationCompact(deps)
   /** 最近一次交进来的完整历史（含 system 消息）。超长补救要拿它当场压 */
   let latest: AgentMessage[] | undefined
@@ -350,7 +354,13 @@ export function createAutoCompact(deps: CompactionDeps) {
   return Object.assign(transform, { compactForOverflow })
 }
 
-function createConversationCompact(deps: CompactionDeps) {
+function createConversationCompact(deps: CompactionDeps): {
+  transform: CompactTransform
+  compactLatest: (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ) => Promise<AgentMessage[] | undefined>
+} {
   /**
    * 当前生效的检查点。
    *

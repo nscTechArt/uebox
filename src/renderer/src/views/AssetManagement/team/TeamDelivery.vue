@@ -121,14 +121,19 @@ function cardTitle(item: TeamDeliveryItem): string {
   if (item.missingReferences.length > 0)
     lines.push(
       t('teamProject.outsource.missingRef', {
-        name: item.missingReferences.map((ref) => ref.split('/').pop()).join(t('teamProject.nameSep'))
+        name: item.missingReferences
+          .map((ref) => ref.split('/').pop())
+          .join(t('teamProject.nameSep'))
       })
     )
   for (const check of item.checks.filter((c) => c.rule !== 'no-broken-references'))
     lines.push(checkText(check, t))
   if (item.state === 'rejected' && item.reason)
     lines.push(
-      t('teamProject.outsource.rejectedDetail', { reason: item.reason, who: item.rejectedBy?.name ?? '' })
+      t('teamProject.outsource.rejectedDetail', {
+        reason: item.reason,
+        who: item.rejectedBy?.name ?? ''
+      })
     )
   return lines.join('\n')
 }

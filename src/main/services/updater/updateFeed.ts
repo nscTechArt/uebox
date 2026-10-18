@@ -126,7 +126,10 @@ export function updateManifestUrl(feed: UpdateFeed, manifestName: string): strin
   return `${feed.url}/${manifestName}`
 }
 
-type FetchLike = (url: string, init: { signal: AbortSignal }) => Promise<{ ok: boolean; body?: { cancel(): Promise<void> } | null }>
+type FetchLike = (
+  url: string,
+  init: { signal: AbortSignal }
+) => Promise<{ ok: boolean; body?: { cancel(): Promise<void> } | null }>
 
 /**
  * 同时拉每个源的清单，返回最先成功的那个。

@@ -74,7 +74,10 @@ export function useTeamAsset(): TeamAssetActions {
     const change = lastChange.get(cacheKey(path))
     if (change)
       lines.push(
-        t('teamProject.grid.edited', { who: change.author.name, time: formatTeamTime(change.at, now, t) })
+        t('teamProject.grid.edited', {
+          who: change.author.name,
+          time: formatTeamTime(change.at, now, t)
+        })
       )
     const checkout = teamStore.checkoutOf(path)
     if (checkout) lines.push(checkoutLine(checkout.holder, checkout.since, now, teamStore.me, t))

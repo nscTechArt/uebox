@@ -37,8 +37,17 @@ describe('team credential file', () => {
   it('writes the DPAPI form the plugin unprotects, and removes it on leaving', async () => {
     const env = { UNREALBOX_TEAM_DIR: dir }
     const path = await writeTeamCredential(
-      { memberUrl: 'http://127.0.0.1:47484/', account: 'ajie', identityToken: 'jwt', expires: 2000 },
-      { env, protect: async (token) => Buffer.from(`dpapi:${token}`).toString('base64'), now: () => 1000_000 }
+      {
+        memberUrl: 'http://127.0.0.1:47484/',
+        account: 'ajie',
+        identityToken: 'jwt',
+        expires: 2000
+      },
+      {
+        env,
+        protect: async (token) => Buffer.from(`dpapi:${token}`).toString('base64'),
+        now: () => 1000_000
+      }
     )
     expect(path).toBe(join(dir, '127.0.0.1_47484.json'))
     const file = JSON.parse(await readFile(path as string, 'utf8'))
@@ -50,7 +59,9 @@ describe('team credential file', () => {
       writtenAt: 1000_000
     })
     expect(file.identityToken).toBeUndefined()
-    expect(await readTeamCredential('http://127.0.0.1:47484', env)).toMatchObject({ account: 'ajie' })
+    expect(await readTeamCredential('http://127.0.0.1:47484', env)).toMatchObject({
+      account: 'ajie'
+    })
     await removeTeamCredential('http://127.0.0.1:47484', env)
     await expect(stat(path as string)).rejects.toThrow()
   })

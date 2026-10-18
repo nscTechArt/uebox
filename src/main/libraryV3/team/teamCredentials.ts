@@ -96,7 +96,12 @@ export async function readTeamCredential(
 }
 
 export async function writeTeamCredential(
-  input: { memberUrl: string; account: string | null; identityToken: string; expires: number | null },
+  input: {
+    memberUrl: string
+    account: string | null
+    identityToken: string
+    expires: number | null
+  },
   options: {
     env?: NodeJS.ProcessEnv
     protect?: (token: string) => Promise<string | null>

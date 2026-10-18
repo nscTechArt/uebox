@@ -19,7 +19,8 @@ let release: () => void = () => {}
 const refreshOAuthTokens = vi.fn(
   () =>
     new Promise((resolve) => {
-      release = () => resolve({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: Date.now() + 3_600_000 })
+      release = () =>
+        resolve({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: Date.now() + 3_600_000 })
     })
 )
 vi.mock('./oauth', () => ({

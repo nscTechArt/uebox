@@ -7,7 +7,9 @@
       {{ t('teamProject.activity.error') }}
       <AppButton size="small" @click="load">{{ t('teamProject.retry') }}</AppButton>
     </div>
-    <div v-else-if="groups.length === 0" class="page-state">{{ t('teamProject.checkouts.empty') }}</div>
+    <div v-else-if="groups.length === 0" class="page-state">
+      {{ t('teamProject.checkouts.empty') }}
+    </div>
 
     <!-- 按人分组：「阿杰 · 12 个 · 在线」；最早超过 3 天加琥珀色「最早 5 天」；管理员 [全部收回] -->
     <section v-for="group in groups" :key="group.holder.id" class="checkout-group">
@@ -23,7 +25,11 @@
           · {{ personState(group.holder, now, t) }}
         </span>
         <span v-if="now - group.oldestSince > THREE_DAYS" class="oldest">
-          {{ t('teamProject.checkouts.oldest', { duration: formatDuration(now - group.oldestSince, t) }) }}
+          {{
+            t('teamProject.checkouts.oldest', {
+              duration: formatDuration(now - group.oldestSince, t)
+            })
+          }}
         </span>
         <AppButton
           v-if="teamStore.isAdmin && group.holder.id !== teamStore.me"
@@ -98,7 +104,10 @@ function cardsOf(
     entry.map
       ? {
           key: `map:${entry.map}`,
-          name: t('teamProject.checkouts.mapCard', { map: assetNameOf(entry.map), n: entry.items.length }),
+          name: t('teamProject.checkouts.mapCard', {
+            map: assetNameOf(entry.map),
+            n: entry.items.length
+          }),
           since: Math.min(...entry.items.map((item) => item.since)),
           paths: entry.items.map((item) => item.path),
           // Actor 的缩略图用所在地图的
@@ -156,7 +165,9 @@ const menuItems = computed<MenuItem[]>(() => {
   if (!target || target.group.holder.id === teamStore.me) return []
   if (teamStore.isAdmin) return [{ key: 'take-back', label: t('teamProject.history.takeBack') }]
   const asked = teamAsset.askedLabel(target.paths[0])
-  return [{ key: 'ask', label: asked ?? t('teamProject.history.askDone'), disabled: Boolean(asked) }]
+  return [
+    { key: 'ask', label: asked ?? t('teamProject.history.askDone'), disabled: Boolean(asked) }
+  ]
 })
 
 function openMenu(event: MouseEvent, group: TeamCheckoutGroup, paths: string[]): void {

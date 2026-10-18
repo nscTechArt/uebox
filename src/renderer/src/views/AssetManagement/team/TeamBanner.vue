@@ -72,7 +72,9 @@ const banner = computed<Banner | null>(() => {
     return {
       kind: 'offline',
       tone: 'grey',
-      text: t('teamProject.banner.offline', { time: formatTeamTime(teamStore.offlineSince, now, t) })
+      text: t('teamProject.banner.offline', {
+        time: formatTeamTime(teamStore.offlineSince, now, t)
+      })
     }
   const old = teamStore.viewingOld
   if (old)
@@ -85,7 +87,11 @@ const banner = computed<Banner | null>(() => {
     }
   const freeze = teamStore.frozen
   if (freeze)
-    return { kind: 'frozen', tone: 'amber', text: t('teamProject.banner.frozen', { note: freeze.note }) }
+    return {
+      kind: 'frozen',
+      tone: 'amber',
+      text: t('teamProject.banner.frozen', { note: freeze.note })
+    }
   if (teamStore.isOutsourcer || !teamStore.project || teamStore.isEmpty) return null
   if (teamStore.justSynced && teamStore.isLocal)
     return { kind: 'ready', tone: 'grey', text: t('teamProject.banner.ready') }

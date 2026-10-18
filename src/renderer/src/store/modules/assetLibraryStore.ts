@@ -70,7 +70,9 @@ export function teamJobDoneText(
 ): string | null {
   if (job.type === 'sync') return t('teamProject.sync.done')
   if (job.type === 'put-in')
-    return job.message ? t('teamProject.putIn.done', { n: job.message }) : t('teamProject.putIn.doneNoNumber')
+    return job.message
+      ? t('teamProject.putIn.done', { n: job.message })
+      : t('teamProject.putIn.doneNoNumber')
   if (job.type === 'approve')
     return job.message
       ? t('teamProject.outsource.approvedDone', { n: job.done, number: job.message })

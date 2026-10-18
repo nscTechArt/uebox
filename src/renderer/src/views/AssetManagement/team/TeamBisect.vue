@@ -16,7 +16,9 @@
     <!-- 开始：「#1460 是好的 · #1532 是坏的 · 中间 72 次提交，大约 6 轮」[开始] -->
     <div v-else-if="!bisect" class="bisect-card">
       <p class="bisect-line">
-        {{ t('teamProject.bisect.startLine', { good, bad, n: between, rounds: roundsFor(between) }) }}
+        {{
+          t('teamProject.bisect.startLine', { good, bad, n: between, rounds: roundsFor(between) })
+        }}
       </p>
       <AppButton variant="primary" :loading="busy" data-testid="team-bisect-start" @click="start">
         {{ t('teamProject.bisect.start') }}
@@ -26,7 +28,9 @@
     <!-- 每一轮 -->
     <div v-else-if="bisect.state === 'running' && bisect.current" class="bisect-card">
       <div class="try-row">
-        <span class="try-number">{{ t('teamProject.bisect.tryThis', { n: bisect.current.number }) }}</span>
+        <span class="try-number">{{
+          t('teamProject.bisect.tryThis', { n: bisect.current.number })
+        }}</span>
         <AppButton size="small" @click="copy(`#${bisect.current.number}`)">
           {{ t('teamProject.bisect.copyNumber') }}
         </AppButton>
@@ -39,7 +43,9 @@
       </button>
       <div v-if="showCommand" class="command-row">
         <code>{{ buildCommand }}</code>
-        <AppButton size="small" @click="copy(buildCommand)">{{ t('teamProject.bisect.copy') }}</AppButton>
+        <AppButton size="small" @click="copy(buildCommand)">{{
+          t('teamProject.bisect.copy')
+        }}</AppButton>
       </div>
       <div class="verdict-row">
         <AppButton variant="primary" :loading="busy" @click="verdict('good')">{{
@@ -48,7 +54,9 @@
         <AppButton danger :loading="busy" @click="verdict('bad')">{{
           t('teamProject.bisect.bad')
         }}</AppButton>
-        <AppButton :loading="busy" @click="verdict('skip')">{{ t('teamProject.bisect.skip') }}</AppButton>
+        <AppButton :loading="busy" @click="verdict('skip')">{{
+          t('teamProject.bisect.skip')
+        }}</AppButton>
       </div>
       <div class="bisect-foot">
         <button v-if="bisect.steps.length > 0" class="link-btn" @click="undo">

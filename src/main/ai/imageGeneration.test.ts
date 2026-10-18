@@ -1557,15 +1557,16 @@ describe('Codex 订阅出图', () => {
   it('部分失败时留下出好的那几张', async () => {
     let calls = 0
     stubFetch(() =>
-      ++calls === 2 ? new Response('{"error":{"message":"busy"}}', { status: 500 }) : sse(imageDone())
+      ++calls === 2
+        ? new Response('{"error":{"message":"busy"}}', { status: 500 })
+        : sse(imageDone())
     )
     expect(await generateImages({ prompt: 'x', count: 3 })).toHaveLength(2)
   })
 
   it('全部失败时报第一个原因', async () => {
     stubFetch(
-      () =>
-        new Response('{"error":{"message":"You have hit your usage limit"}}', { status: 429 })
+      () => new Response('{"error":{"message":"You have hit your usage limit"}}', { status: 429 })
     )
     await expect(generateImages({ prompt: 'x', count: 2 })).rejects.toBeInstanceOf(
       ImageRequestError

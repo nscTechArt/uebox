@@ -3,7 +3,9 @@
   <div class="team-empty" data-testid="team-empty-project">
     <template v-if="teamStore.isAdmin">
       <p>{{ t('teamProject.putIn.empty') }}</p>
-      <AppButton variant="primary" @click="open = true">{{ t('teamProject.putIn.action') }}</AppButton>
+      <AppButton variant="primary" @click="open = true">{{
+        t('teamProject.putIn.action')
+      }}</AppButton>
     </template>
     <p v-else>{{ t('teamProject.putIn.emptyWait') }}</p>
   </div>
@@ -25,7 +27,9 @@
         <span class="muted">{{ t('teamProject.putIn.from') }}</span>
         <button class="place-btn" @click="pick">{{ source || t('teamProject.putIn.pick') }}</button>
       </div>
-      <div v-if="source && !uproject" class="warn-line">{{ t('teamProject.putIn.notProject') }}</div>
+      <div v-if="source && !uproject" class="warn-line">
+        {{ t('teamProject.putIn.notProject') }}
+      </div>
       <div class="muted">{{ t('teamProject.putIn.hint') }}</div>
     </div>
   </AppModal>

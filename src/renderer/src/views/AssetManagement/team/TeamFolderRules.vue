@@ -47,7 +47,9 @@
           <div class="row-hint">{{ t('teamProject.folder.othersWait') }}</div>
         </template>
         <div class="editor-actions">
-          <AppButton size="small" @click="editingSubmit = false">{{ t('teamProject.cancel') }}</AppButton>
+          <AppButton size="small" @click="editingSubmit = false">{{
+            t('teamProject.cancel')
+          }}</AppButton>
           <AppButton
             size="small"
             variant="primary"
@@ -62,7 +64,9 @@
 
       <!-- 提交前检查（只有管理员看得到这一段） -->
       <template v-if="rules.canEdit && rules.effective.checks.length > 0">
-        <div class="inspector-group-title checks-title">{{ t('teamProject.folder.checksTitle') }}</div>
+        <div class="inspector-group-title checks-title">
+          {{ t('teamProject.folder.checksTitle') }}
+        </div>
         <div v-for="rule in TEAM_RULES" :key="rule" class="check-row">
           <button class="rule-name" @click="toggleParams(rule)">{{ ruleName(rule) }}</button>
           <a-select
@@ -97,7 +101,9 @@
               <a-input-number v-model:value="maxFileGb" size="small" :min="0.1" :step="0.5" />
             </label>
             <div v-if="hasParams(rule)" class="editor-actions">
-              <AppButton size="small" @click="paramsOpen = null">{{ t('teamProject.cancel') }}</AppButton>
+              <AppButton size="small" @click="paramsOpen = null">{{
+                t('teamProject.cancel')
+              }}</AppButton>
               <AppButton size="small" variant="primary" :loading="saving" @click="saveParams(rule)">
                 {{ t('teamProject.folder.save') }}
               </AppButton>
@@ -191,7 +197,9 @@ const deliveryState = computed(() => {
 const whoCanSubmitText = computed(() => {
   const submit = rules.value?.effective.submit
   if (!submit || submit.mode === 'all') return t('teamProject.folder.all')
-  return t('teamProject.folder.only', { people: peopleText(submit.people, t('teamProject.nameSep')) })
+  return t('teamProject.folder.only', {
+    people: peopleText(submit.people, t('teamProject.nameSep'))
+  })
 })
 
 /** 「跟上级一样（所有成员）」括号里写上级实际是什么 */
@@ -200,7 +208,9 @@ const parentText = computed(() => {
   if (!submit) return t('teamProject.folder.all')
   if (submit.from === path.value && rules.value?.own.submit?.mode !== 'inherit')
     return t('teamProject.folder.all')
-  return submit.mode === 'all' ? t('teamProject.folder.all') : peopleText(submit.people, t('teamProject.nameSep'))
+  return submit.mode === 'all'
+    ? t('teamProject.folder.all')
+    : peopleText(submit.people, t('teamProject.nameSep'))
 })
 
 const peopleOptions = computed(() => {
@@ -233,7 +243,9 @@ async function save(input: {
   saving.value = false
   if (!result.success || !result.data) {
     message.error(
-      result.errorCode === 'not-allowed' ? t('teamProject.dialogs.notAllowed') : t('teamProject.dialogs.failed')
+      result.errorCode === 'not-allowed'
+        ? t('teamProject.dialogs.notAllowed')
+        : t('teamProject.dialogs.failed')
     )
     return false
   }
@@ -288,7 +300,9 @@ function levelOptions(rule: TeamRuleId): Array<{ label: string; value: string }>
   if (path.value !== '') {
     const inherited = inheritedLevel(rule)
     options.unshift({
-      label: t('teamProject.folder.levels.inherit', { level: t(`teamProject.folder.levels.${inherited}`) }),
+      label: t('teamProject.folder.levels.inherit', {
+        level: t(`teamProject.folder.levels.${inherited}`)
+      }),
       value: 'inherit'
     })
   }

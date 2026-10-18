@@ -56,7 +56,10 @@ describe('ZCode subscription sign-in field', () => {
  * 要说清楚「保存就行」，登录按钮也要走 chatgpt 那一家的授权而不是生图条目自己的 id。
  */
 describe('Codex image source reuses the ChatGPT sign-in', () => {
-  function mountField(providers: unknown[], apiKeyInput = ''): {
+  function mountField(
+    providers: unknown[],
+    apiKeyInput = ''
+  ): {
     wrapper: ReturnType<typeof mount>
     oauthLogin: ReturnType<typeof vi.fn>
   } {

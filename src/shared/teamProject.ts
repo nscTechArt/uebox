@@ -414,7 +414,9 @@ export interface TeamJoinLink {
  * `unrealbox://open?server=<成员面地址>&path=/p/xinghai/submits/1532`（契约 4.14）：
  * UE 里点提交号、[在虚幻盒子里看]、「选同步哪些文件夹…」都走它。path 只认 `/p/<工程>/…`。
  */
-export function parseTeamOpenLink(raw: string): { server: string; project: string; path: string } | null {
+export function parseTeamOpenLink(
+  raw: string
+): { server: string; project: string; path: string } | null {
   let url: URL
   try {
     url = new URL(raw.trim())

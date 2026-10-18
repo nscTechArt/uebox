@@ -7,7 +7,9 @@
       <div class="version-menu" @click.stop>
         <AppMenu :selected-keys="[selectedKey]" @click="onPick">
           <AppMenuItem item-key="latest">
-            <PhCheck v-if="modelValue === 'latest'" class="check" />{{ t('teamProject.compare.latest') }}
+            <PhCheck v-if="modelValue === 'latest'" class="check" />{{
+              t('teamProject.compare.latest')
+            }}
           </AppMenuItem>
           <template v-if="shownMilestones.length > 0">
             <AppMenuDivider />

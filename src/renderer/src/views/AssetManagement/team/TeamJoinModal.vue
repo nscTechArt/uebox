@@ -20,7 +20,9 @@
         <span class="join-muted">{{
           t('teamProject.join.sendAccount', { account: noProjectsAccount })
         }}</span>
-        <AppButton size="small" @click="copyAccount">{{ t('teamProject.join.copyAccount') }}</AppButton>
+        <AppButton size="small" @click="copyAccount">{{
+          t('teamProject.join.copyAccount')
+        }}</AppButton>
       </div>
     </div>
 

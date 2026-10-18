@@ -6,7 +6,10 @@
       <span class="row-text">
         <span class="muted">
           {{
-            t('teamProject.outsource.sentBy', { who: item.by.name, time: formatTeamTime(item.at, now, t) })
+            t('teamProject.outsource.sentBy', {
+              who: item.by.name,
+              time: formatTeamTime(item.at, now, t)
+            })
           }}
         </span>
         <br />
