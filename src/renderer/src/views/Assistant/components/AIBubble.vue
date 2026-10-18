@@ -1871,9 +1871,15 @@ async function openInEditor(group: ChangeGroup): Promise<void> {
  * 完整原文挂在 title 里，鼠标停上去能看全。
  */
 function displayDetail(detail: string | undefined): string {
-  const firstLine = String(detail ?? '')
-    .split('\n')[0]
-    .trim()
+  // 脚本原文的头几行是 import 和注释，取第一行就是一溜 `import unreal`。
+  // 跳到第一句真干活的；全是这些（不可能，但别显示空）就还用第一行
+  const lines = String(detail ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+  const firstLine =
+    lines.find((line) => line && !/^(#|import\s|from\s+\S+\s+import\s)/.test(line)) ??
+    lines[0] ??
+    ''
   return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine
 }
 

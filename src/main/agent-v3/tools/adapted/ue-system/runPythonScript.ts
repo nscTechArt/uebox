@@ -36,7 +36,12 @@ const RunPythonScriptParamsSchema = z.object({
     .describe(
       '传给 skill 脚本的参数，脚本里以全局变量 SKILL_ARGS（dict）读取。参数名按 skill 正文写'
     ),
-  description: z.string().optional().describe('脚本用途描述，用于日志记录')
+  description: z
+    .string()
+    .optional()
+    .describe(
+      '一句话写这段脚本干了什么，如「给 20 盏路灯调亮度」「查关卡里有哪些相机」。会原样列进给用户看的改动清单，每次都要写'
+    )
 })
 
 /**
