@@ -5877,6 +5877,9 @@ export default {
       empty: '没有匹配的命令或技能',
       groupCommands: '命令',
       groupSkills: '技能',
+      attach: '添加文件',
+      attachHint: '图片、文档、表格、音视频',
+      plusTooltip: '添加文件、命令与技能',
       source: {
         user: '用户',
         plugin: '插件',

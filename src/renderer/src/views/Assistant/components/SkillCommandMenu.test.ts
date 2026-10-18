@@ -150,4 +150,21 @@ describe('SkillCommandMenu', () => {
     await wrapper.setProps({ loading: true })
     expect(menu.onKeydown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true)
   })
+
+  it('从「+」打开时「添加文件」排第一，命令和技能的下标顺延', async () => {
+    const wrapper = mount(SkillCommandMenu, {
+      props: { skills, query: '', showAttach: true }
+    })
+    const menu = wrapper.vm as unknown as ExposedMenu
+    const options = wrapper.findAll('[role="option"]')
+
+    expect(options).toHaveLength(1 + COMMAND_COUNT + skills.length)
+    expect(options[0].classes()).toContain('attach-item')
+
+    expect(menu.onKeydown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true)
+    expect(wrapper.emitted('attach')).toHaveLength(1)
+
+    await options[1 + COMMAND_COUNT].trigger('click')
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(skills[0])
+  })
 })

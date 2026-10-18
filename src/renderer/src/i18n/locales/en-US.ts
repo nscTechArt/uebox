@@ -6049,6 +6049,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       empty: 'No matching command or skill',
       groupCommands: 'Commands',
       groupSkills: 'Skills',
+      attach: 'Add files',
+      attachHint: 'Images, documents, spreadsheets, audio and video',
+      plusTooltip: 'Add files, commands and skills',
       source: {
         user: 'User',
         plugin: 'Plugin',
