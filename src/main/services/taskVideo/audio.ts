@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { readSettings } from '../../ai/store'
-import { requestSpeech } from '../../ai/speech'
+import { requestSpeech, type SpeechOptions } from '../../ai/speech'
 import { CreatorPlanCallError } from '../../ai/creatorPlan/callError'
 import { recoverMediaFile, saveMediaFile } from './files'
 import type { Storyboard } from './schema'
@@ -44,14 +44,17 @@ export async function speakToFile(
   text: string,
   cacheDir: string,
   signal?: AbortSignal,
-  onSynthesize: () => void = () => {}
+  onSynthesize: () => void = () => {},
+  options: SpeechOptions = {}
 ): Promise<{ path: string; seconds: number }> {
   const key = digest({
     text,
     provider: provider.id,
     baseUrl: provider.baseUrl,
     model: modelId,
-    voice: provider.models.find((m) => m.id === modelId)?.ttsVoice
+    voice: options.voice ?? provider.models.find((m) => m.id === modelId)?.ttsVoice,
+    // 不带演法时不进键：以前合成过的配音照旧命中缓存
+    ...(options.instruction ? { instruction: options.instruction } : {})
   })
   await fs.mkdir(cacheDir, { recursive: true })
   const speechFile = path.join(cacheDir, `${key}.pcm`)
@@ -68,8 +71,13 @@ export async function speakToFile(
       )
     onSynthesize()
     const chunks: Buffer[] = []
-    await requestSpeech(provider, modelId, text, signal ?? new AbortController().signal, (chunk) =>
-      chunks.push(Buffer.from(chunk.base64, 'base64'))
+    await requestSpeech(
+      provider,
+      modelId,
+      text,
+      signal ?? new AbortController().signal,
+      (chunk) => chunks.push(Buffer.from(chunk.base64, 'base64')),
+      options
     ).catch((error: unknown) => {
       // Box Plan 的额度 / 订阅 / 授权错误：错误码后面挂着说清下一步的原话，给它
       const cause = error instanceof Error ? error.cause : undefined

@@ -231,7 +231,7 @@ const DOMAIN_TERMS: Record<string, string> = {
   engine: '引擎 版本 安装 路径 engine version install path',
   aigc: '生成 图片 视频 三维 音效 声音 generate image video 3d sound effect sfx',
   'video.production':
-    '剪辑 成片 字幕 配音 台词 对白 语音合成 配乐 时间线 video edit subtitle voiceover tts speech render',
+    '剪辑 成片 字幕 配音 台词 对白 语音合成 音色 角色声音 配乐 时间线 video edit subtitle voiceover tts speech voice render',
   note: '笔记 记事 待办 摘录 note todo memo',
   notebook: '知识库 笔记本 wiki 文档库 notebook knowledge wiki',
   browser: '浏览器 网页 点击 输入 browser webpage click',

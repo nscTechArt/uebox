@@ -131,6 +131,24 @@ describe('Qwen-Audio WebSocket speech', () => {
       expect(socket.terminate).toHaveBeenCalled()
     }
   )
+  it('设计出来的音色和演法盖过模型默认音色；不带演法时不发这个字段', async () => {
+    const controller = new AbortController()
+    void requestSpeech(provider, 'qwen-audio-3.0-tts-plus', '站住！', controller.signal, vi.fn(), {
+      voice: 'qwen-audio-3.0-tts-plus-vd-uebox-abc',
+      instruction: '愤怒地吼出来'
+    }).catch(() => {})
+    await Promise.resolve()
+    sockets.at(-1)!.emit('open')
+    expect(JSON.parse(sockets.at(-1)!.sent[0]).payload.parameters).toMatchObject({
+      voice: 'qwen-audio-3.0-tts-plus-vd-uebox-abc',
+      instruction: '愤怒地吼出来'
+    })
+    controller.abort()
+    const plain = await start()
+    expect(JSON.parse(plain.socket.sent[0]).payload.parameters).not.toHaveProperty('instruction')
+    plain.controller.abort()
+    await expect(plain.run).rejects.toThrow('TTS_CANCELLED')
+  })
   it('does not open a connection for already cancelled input', async () => {
     const controller = new AbortController()
     controller.abort()

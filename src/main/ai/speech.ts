@@ -13,6 +13,23 @@ import { resolveApiKey } from './credentials'
 import { readSettings } from './store'
 import type { ProviderConfig } from './types'
 
+export interface SpeechOptions {
+  /** 不用模型上填的音色，换这一个（项目角色音色表里设计出来的） */
+  voice?: string
+  /** 演法。只有百炼的 qwen-audio 认，见 `supportsSpeechInstruction` */
+  instruction?: string
+}
+
+/** 百炼数演法长度的算法：汉字等全角字符算 2，其余算 1。上限 100，超了整句报错 */
+export function instructionWidth(text: string): number {
+  return Array.from(text).reduce((n, c) => n + (c.charCodeAt(0) > 0xff ? 2 : 1), 0)
+}
+
+/** 这个模型认不认演法。其余家拿到了也只会忽略，调用方要如实告诉模型没生效 */
+export function supportsSpeechInstruction(modelId: string): boolean {
+  return modelId.startsWith('qwen-audio-3.0-tts-')
+}
+
 /** Stream PCM from the configured TTS provider.
  * https://github.com/bytedance/agentkit-samples/blob/main/skills/byted-text-to-speech/scripts/text_to_speech.py
  */
@@ -21,7 +38,8 @@ export async function requestSpeech(
   modelId: string,
   text: string,
   signal: AbortSignal,
-  onAudio: (chunk: SpeechAudio) => void = () => {}
+  onAudio: (chunk: SpeechAudio) => void = () => {},
+  options: SpeechOptions = {}
 ): Promise<void> {
   // Box Plan 单次上限按清单的 max_input_chars（协议 06-audio，导入时写进模型），其余家 600 字
   const plan = isPlanProvider(provider.id)
@@ -42,6 +60,7 @@ export async function requestSpeech(
   if (!key && !openAiCompatible) throw new Error('TTS_NOT_CONFIGURED')
   signal.throwIfAborted()
   const voice =
+    options.voice ||
     provider.models.find((model) => model.id === modelId)?.ttsVoice ||
     defaultSpeechVoice(modelId, provider.baseUrl)
   if (plan) return requestPlanSpeech(provider, modelId, voice, text, key, signal, onAudio)
@@ -49,7 +68,16 @@ export async function requestSpeech(
     return requestOpenAiSpeech(provider, modelId, voice, text, key, signal, onAudio)
   }
   if (modelId.startsWith('qwen-audio-3.0-tts-')) {
-    return requestQwenAudioSpeech(provider, modelId, voice, text, key, signal, onAudio)
+    return requestQwenAudioSpeech(
+      provider,
+      modelId,
+      voice,
+      text,
+      key,
+      signal,
+      onAudio,
+      options.instruction
+    )
   }
   if (!modelId.startsWith('seed-tts-')) throw new Error('TTS_UNSUPPORTED_MODEL')
   const response = await fetch(provider.baseUrl, {

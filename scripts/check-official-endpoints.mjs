@@ -162,6 +162,8 @@ const NOT_OFFICIAL_CALLS = {
     '这是生成产物，加厂商时数会涨 —— 涨之前先确认新增的确实是厂商地址',
   'src/main/services/dashscope/ossUpload.ts':
     '用户自己的 API Key 直接请求 dashscope.aliyuncs.com 的临时上传凭证',
+  'src/main/ai/speechVoiceDesign.ts':
+    '百炼声音设计的 /api/v1/services/audio/tts/customization：域名取自用户配的语音合成 Provider，用自己的 API Key 直连',
   'src/main/ai/oauth.ts': '厂商自己的 OAuth 端点（OpenRouter / ChatGPT / Kimi）',
   'src/main/ai/zcode.ts':
     '用户主动连接的 ZCode 订阅：向 zcode.z.ai 登录和发送 Anthropic 消息，使用用户自己的 JWT',
