@@ -182,8 +182,8 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     if (ui.sortType) {
       sortType.value = ui.sortType as GallerySortType
     }
-    if (ui.galleryViewMode) {
-      galleryViewMode.value = ui.galleryViewMode as GalleryViewMode
+    if (ui.galleryViewMode === 'grid' || ui.galleryViewMode === 'list') {
+      galleryViewMode.value = ui.galleryViewMode
     }
     if (typeof ui.typeFilter === 'string') {
       typeFilter.value = ui.typeFilter

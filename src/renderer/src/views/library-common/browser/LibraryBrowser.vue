@@ -70,6 +70,8 @@ const emit = defineEmits<{
   (e: 'rename-folder', folderKey: string, name: string): void
   (e: 'delete-folder', folderKey: string): void
 }>()
+/** 未绑定时由组件自行维护；需要在重启后保留视图模式的库，自行绑定并负责存盘 */
+const viewMode = defineModel<BrowserViewMode>('viewMode', { default: 'grid' })
 
 const { t } = useI18n()
 const initialLoading = useInitialLoading(
@@ -81,7 +83,6 @@ const initialLoading = useInitialLoading(
 
 const folderKey = ref('')
 const keyword = ref('')
-const viewMode = ref<BrowserViewMode>('grid')
 const sortType = ref<BrowserSortType>('recent')
 /** 每个 facet 当前选了什么，空串表示不限 */
 const facetValues = ref<Record<string, string>>({})

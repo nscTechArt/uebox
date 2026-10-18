@@ -178,4 +178,24 @@ describe('BlueprintGallery', () => {
     expect(importButton.attributes('aria-label')).toBe(importButton.attributes('title'))
     expect(toolbar.find('.btn-primary-create').exists()).toBe(true)
   })
+
+  it('网格 / 列表的选择存进 store，重启后还在', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useBlueprintLibraryStore()
+    store.setGalleryViewMode('list')
+
+    const router = createTestRouter()
+    router.push('/blueprint-library')
+    await router.isReady()
+    const wrapper = mount(BlueprintGallery, {
+      global: { plugins: [pinia, router], stubs: { teleport: true, AppModal: true } }
+    })
+
+    const [gridButton, listButton] = wrapper.findAll('.view-toggle .toggle-btn')
+    expect(listButton.attributes('aria-pressed')).toBe('true')
+
+    await gridButton.trigger('click')
+    expect(store.galleryViewMode).toBe('grid')
+  })
 })
