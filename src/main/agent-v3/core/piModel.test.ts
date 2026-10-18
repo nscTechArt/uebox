@@ -12,6 +12,8 @@ vi.mock('../../ai/zcodeCaptcha', () => ({
 }))
 
 import { createModels, getSupportedThinkingLevels } from '@earendil-works/pi-ai'
+import { streamSimple } from '@earendil-works/pi-ai/api/openai-responses'
+import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript'
 import { getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import { toPiModel, toPiProvider } from './piModel'
 import { PROVIDER_CATALOG } from '../../ai/catalog'
@@ -342,6 +344,67 @@ describe('toPiModel', () => {
 
       expect(toPiModel(plain, plain.models[0]).thinkingLevelMap).toBeUndefined()
       expect(toPiModel(completions, completions.models[0]).thinkingLevelMap).toBeUndefined()
+    })
+
+    /**
+     * 2026-10-18 的真实配置：第二个 OpenAI 渠道自动起名 `openai-4`、没存 `catalogId`，
+     * 存下的阶梯是老版本滤掉 `off` 之后的样子。目录按 id 查不到，`off: null` 补不回来，
+     * pi 就在「自动」档、上下文压缩这类不带档位的请求里发 `effort: "none"`，
+     * GPT-6.1 Sol 不认，每轮 400。这里直接看 pi 组出来的请求体。
+     */
+    describe('不认 none 的模型收不到 none', () => {
+      const savedSol = {
+        id: 'gpt-6.1-sol',
+        supportsReasoning: true,
+        thinkingLevelMap: { minimal: null, xhigh: 'xhigh', max: 'max' }
+      }
+
+      async function sentEffort(
+        provider: ProviderConfig,
+        reasoning?: 'low'
+      ): Promise<string | undefined> {
+        const model = toPiModel(provider, provider.models[0])
+        let payload: { reasoning?: { effort?: string } } | undefined
+        const events = streamSimple(
+          model as Parameters<typeof streamSimple>[0],
+          normalizeContext({ messages: [{ role: 'user', content: 'hi', timestamp: 0 }] }),
+          {
+            apiKey: 'sk-test-key',
+            reasoning,
+            onPayload: (params) => {
+              payload = params as typeof payload
+              throw new Error('stop before network')
+            }
+          }
+        )
+        for await (const event of events) if (event.type === 'error') break
+        expect(payload).toBeDefined()
+        return payload?.reasoning?.effort
+      }
+
+      const channels: ProviderConfig[] = [
+        { ...openaiProvider, id: 'openai-4', models: [savedSol] },
+        { ...openaiProvider, id: 'my-gateway', catalogId: 'openai', models: [savedSol] },
+        { ...openaiProvider, id: 'my-gateway', models: [savedSol] }
+      ]
+
+      it.each(channels.map((channel) => [channel.id, channel.catalogId ?? '-', channel] as const))(
+        '%s（catalogId %s）「自动」档不发 effort，选了 low 就发 low',
+        async (_id, _catalogId, channel) => {
+          expect(await sentEffort(channel)).toBeUndefined()
+          expect(await sentEffort(channel, 'low')).toBe('low')
+        }
+      )
+
+      it('自建网关恰好叫 openai-2、协议不同时不冒认 OpenAI 目录', () => {
+        const gateway: ProviderConfig = {
+          ...ollamaProvider,
+          id: 'openai-2',
+          models: [{ id: 'gpt-6.1-sol' }]
+        }
+
+        expect(toPiModel(gateway, gateway.models[0]).thinkingLevelMap).toBeUndefined()
+      })
     })
   })
 
