@@ -85,13 +85,15 @@ afterEach(async () => {
 
 describe('角色音色：设计 → 试听 → 采用', () => {
   it('设计出的音色先进试听，试听 WAV 写进工程，配音拿不到它', async () => {
-    await design()
+    const designed = (await design()) as { details: { path: string; title: string } }
+    expect(designed.details.title).toBe('老铁匠 · 试听')
     const role = (await readCast())['老铁匠']
     expect(role.adopted).toBeUndefined()
     expect(role.candidate.voiceId).toBe('voice-00000001')
     const preview = (role.candidate as unknown as { preview: string }).preview
     expect(preview.startsWith(path.join(mocks.project!, '.uebox', 'voices'))).toBe(true)
     expect(await fs.readFile(preview, 'utf8')).toBe('RIFF')
+    expect(designed.details.path).toBe(preview)
     await expect(
       tool('generate_speech').execute('s', { text: '你好', role: '老铁匠' })
     ).rejects.toThrow('还在试听')

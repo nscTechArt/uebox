@@ -36,6 +36,17 @@ describe('chat music', () => {
     ).toHaveLength(1)
   })
 
+  it('设计音色的试听也挂播放器，标题带角色名', () => {
+    const result = { role: '老铁匠', path: 'H:/Game/.uebox/voices/a.wav', title: '老铁匠 · 试听' }
+    expect(
+      collectGeneratedMusic({
+        agentProcess: [
+          { type: 'tool-result', timestamp: 1, data: { toolName: 'design_voice', result } }
+        ]
+      })
+    ).toEqual([{ path: 'H:/Game/.uebox/voices/a.wav', title: '老铁匠 · 试听' }])
+  })
+
   it('plays, pauses, seeks and exposes copy/save actions without autoplay', async () => {
     const wrapper = mount(ChatAudioPlayer, {
       props: { filePath: 'C:/music/second.mp3' },

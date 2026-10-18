@@ -83,7 +83,7 @@ export function voiceDesignTools(): UnrealAgentTool[] {
       concurrency: 'sequential',
       description:
         '按文字描述给游戏角色设计一个新音色，返回试听 WAV。只支持阿里云 Qwen-Audio 3.0 语音合成。' +
-        '设计不收费，但还不能配音：把 preview 作为本地音频链接交给用户试听，然后调用 adopt_voice，' +
+        '设计不收费，但还不能配音：对话里会自动挂出试听播放器，请用户听，然后调用 adopt_voice，' +
         '盒子会请用户确认。用户不满意就改描述再调一次，上一个试听会被替换。' +
         '先用 list_voices 看已有角色，别重复设计。',
       input: z.object({
@@ -150,7 +150,9 @@ export function voiceDesignTools(): UnrealAgentTool[] {
         await releaseVoice(name, previous)
         const result = {
           role: name,
-          preview,
+          // 字段叫 path、带 title：对话界面按这个形状挂播放器（agentGeneratedMedia.ts）
+          path: preview,
+          title: `${name} · 试听`,
           status: '试听中，用户确认前不能配音',
           replaces_adopted: !!roles[name].adopted
         }
