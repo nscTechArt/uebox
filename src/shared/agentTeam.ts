@@ -313,6 +313,8 @@ export type TeamVerdict = 'pass' | 'fail' | 'blocked'
 /** 界面上任务板面板要的一整份 */
 export interface TeamStateView {
   objective: string
+  /** 开团之后用户最近说的那句话。`/team` 那一轮、外部团队没有 */
+  latestRequest?: string
   /** 最近一次验收的结论。null = 还没交过 */
   verdict: TeamVerdict | null
   /** 那次验收是什么时候。老数据没有 */

@@ -275,6 +275,8 @@ export interface SessionContext {
    */
   team?: {
     objective: string
+    /** 开团之后用户最近那句话，见 `TeamState.latestRequest`。只带给验收员 */
+    latestRequest?: string
     store: TeamStore
     /** 验收有了结论。宿主用它记「这一局过没过验收」 */
     onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
@@ -1529,6 +1531,7 @@ function teamToolsFor(
       const result = await runSubAgent(ctx, {
         prompt: buildAcceptancePrompt({
           objective: team.objective,
+          ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
           report,
           howToPlay,
           ...(projectPath ? { projectPath } : {}),

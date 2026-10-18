@@ -2739,6 +2739,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       selfReportedHint:
         'Marked by the teammate, not checked by Unreal Box — the acceptance verdict is what counts',
       objective: 'Goal',
+      latestRequest: 'Latest request: ',
+      latestRequestLabel: 'Latest request',
       noTasks: 'The task board is empty',
       evidence: 'Evidence: ',
       readOnlyHint: 'Read-only: inspects the project without changing it',

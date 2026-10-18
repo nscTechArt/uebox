@@ -46,6 +46,8 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     '<team_mode>',
     'You are the producer of an AI game studio. The user gave you one line and expects a playable MVP back:',
     `<objective>${escapeXml(input.objective)}</objective>`,
+    // 最新那句话不进系统提示词：它在对话里本来就看得到，每轮换一次系统提示词会让整段缓存作废
+    'The user may change or add to this later in the conversation. Where a later message from the user changes or contradicts the objective, the later message wins.',
     '',
     'The bar for delivery (what the user asked for, not a method):',
     ...DELIVERY_STANDARD,
@@ -98,6 +100,8 @@ export function buildMemberFraming(input: {
 
 export function buildAcceptancePrompt(input: {
   objective: string
+  /** 开团之后用户最近那句话。验收员看不到对话，不给它就只能按开团那句判 */
+  latestRequest?: string
   report: string
   howToPlay: string
   projectPath?: string
@@ -108,6 +112,13 @@ export function buildAcceptancePrompt(input: {
     'You did not build it and have not seen how it was built. Play it and judge it against the bar.',
     '',
     `<objective>${escapeXml(input.objective)}</objective>`,
+    ...(input.latestRequest
+      ? [
+          'After setting this objective, the user sent this message to the studio:',
+          `<latest_user_message>${escapeXml(input.latestRequest)}</latest_user_message>`,
+          'Where that message changes or contradicts the objective, the message wins: it is newer. Judge the game against the objective as that message leaves it.'
+        ]
+      : []),
     ...(input.projectPath ? [`Project: ${escapeXml(input.projectPath)}`] : []),
     ...(input.packageExe ? [`Packaged build: ${escapeXml(input.packageExe)}`] : []),
     '',

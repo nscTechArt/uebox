@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { TeamJob, TeamStateView } from '@core/shared/agentTeam'
 
-import { buildBoardModel, type BoardModel } from './teamBoardModel'
+import { buildBoardModel, latestRequestLine, type BoardModel } from './teamBoardModel'
 
 const NOW = 1_000_000_000
 const min = (n: number): number => NOW - n * 60_000
@@ -234,5 +234,18 @@ describe('buildBoardModel：往来和事件', () => {
     expect(a!.shaken).toBe(true)
     expect(a!.thread.some((e) => e.kind === 'crashed')).toBe(true)
     expect(b!.shaken).toBe(false)
+  })
+})
+
+describe('latestRequestLine：委托下面那行最新要求', () => {
+  it('短的原样显示，换行压成空格', () => {
+    expect(latestRequestLine('主角\n换成猫 ')).toBe('主角 换成猫')
+  })
+
+  it('长的截末尾：用户自己的话在最后，前面是拼进来的上下文', () => {
+    const line = latestRequestLine(`${'上下文'.repeat(100)}主角换成猫`)
+    expect(line.startsWith('…')).toBe(true)
+    expect(line.endsWith('主角换成猫')).toBe(true)
+    expect(line.length).toBe(121)
   })
 })

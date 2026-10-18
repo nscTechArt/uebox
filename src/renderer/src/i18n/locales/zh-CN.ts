@@ -2674,6 +2674,8 @@ export default {
       closeTab: '关闭团队任务',
       selfReportedHint: '由队员自行标记，虚幻盒子未核实；以验收结论为准',
       objective: '目标',
+      latestRequest: '最新要求：',
+      latestRequestLabel: '最新要求',
       noTasks: '任务板为空',
       evidence: '证据：',
       readOnlyHint: '只读：只查看，不修改工程',

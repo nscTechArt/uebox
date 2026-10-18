@@ -437,3 +437,17 @@ export function pendingStops(jobs: readonly JobView[]): JobView[] {
     )
     .reverse()
 }
+
+/** 任务板上「最新要求」那一行最多显示多少字。完整的一段放在悬停提示里 */
+const LATEST_REQUEST_LINE_CHARS = 120
+
+/**
+ * 「最新要求」那一行的文字。主进程存的是整段消息的末尾（渲染层拼在前面的知识库命中、
+ * 附件正文都可能在里面），用户自己的话在最后 —— 所以截末尾，不靠 CSS 从头省略
+ */
+export function latestRequestLine(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length <= LATEST_REQUEST_LINE_CHARS
+    ? flat
+    : `…${flat.slice(flat.length - LATEST_REQUEST_LINE_CHARS)}`
+}

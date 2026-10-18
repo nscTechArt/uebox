@@ -640,6 +640,7 @@ async function prepareTeam(
   liveTeams.set(ctx.sessionId, live)
   ctx.team = {
     objective: team.objective,
+    ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
     store,
     live,
     snapshots: createTeamSnapshots(),
@@ -688,6 +689,7 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
   ])
   return {
     objective: team.objective,
+    ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
     verdict: team.verdict,
     ...(team.verdictAt !== undefined ? { verdictAt: team.verdictAt } : {}),
     verdictStale: verdictIsStale(team.verdictAt, team.lastWriteAt, activity),
@@ -2321,7 +2323,12 @@ export function registerAgentV3IPC(): void {
           : teamObjective
             ? startTeamRound(newTeamState(teamObjective))
             : previousOptions?.team
-              ? startTeamRound(previousOptions.team)
+              ? // 沿用老团队的这一轮，记下用户刚说的话：验收员看不到对话，靠它知道目标改过什么。
+                // 截取的口径同上面的 `goal.latestRequest`
+                startTeamRound({
+                  ...previousOptions.team,
+                  latestRequest: tailOf(promptText, LATEST_REQUEST_MAX_CHARS)
+                })
               : undefined
 
       /*

@@ -997,6 +997,23 @@ describe('提示词只写环境，不写方法论', () => {
     expect(brief).not.toMatch(/Never modify the user's existing projects/)
   })
 
+  /** 2026-10-18：用户开团后中途改了要求，验收员看不到对话，仍按开团那句判 */
+  it('开团之后用户又说的话：验收员拿到并以它为准，制作人知道后来的话压过目标', () => {
+    const prompt = buildAcceptancePrompt({
+      objective: '塔防',
+      latestRequest: '改成 2D <俯视>',
+      report: 'r',
+      howToPlay: 'h'
+    })
+    expect(prompt).toContain('<latest_user_message>改成 2D &lt;俯视&gt;</latest_user_message>')
+    expect(prompt).toMatch(/the message wins/)
+    expect(buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })).not.toContain(
+      'latest_user_message'
+    )
+    const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
+    expect(brief).toMatch(/later message wins/)
+  })
+
   it('验收员拿到同一份交付标准，要一行结论', () => {
     const prompt = buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })
     expect(prompt).toMatch(/Complete game loop/)

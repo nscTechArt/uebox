@@ -25,6 +25,10 @@
         <span class="objective-label">{{ t('assistant.teamBoard.objective') }}</span>
         {{ team.objective }}
       </p>
+      <p v-if="team.latestRequest" class="objective" :title="team.latestRequest">
+        <span class="objective-label">{{ t('assistant.teamBoard.latestRequestLabel') }}</span>
+        {{ latestRequestLine(team.latestRequest) }}
+      </p>
     </header>
 
     <p v-if="!model.crew.length" class="empty">{{ t('assistant.teamBoard.ui.recruiting') }}</p>
@@ -324,7 +328,13 @@ import {
 import MarkdownRenderer from '../MarkdownRenderer.vue'
 import TeamMemberModel from '../TeamMemberModel.vue'
 import TeamTaskList from '../TeamTaskList.vue'
-import type { BoardModel, CrewView, JobView, LogEntry } from '../teamBoardModel'
+import {
+  latestRequestLine,
+  type BoardModel,
+  type CrewView,
+  type JobView,
+  type LogEntry
+} from '../teamBoardModel'
 import { useTeamLabels } from '../teamBoardLabels'
 import { recentSteps, shortTarget, type StepGroup } from '../teamBoardView'
 import { crewColor, officeStyle } from '../teamOffice/officeStyle'

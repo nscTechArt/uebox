@@ -24,6 +24,9 @@
           />
         </div>
         <p class="banner-goal" :title="objective">{{ objective }}</p>
+        <p v-if="team.latestRequest" class="banner-latest" :title="team.latestRequest">
+          {{ t('assistant.teamBoard.latestRequest') }}{{ latestRequestLine(team.latestRequest) }}
+        </p>
       </div>
       <div class="banner-side">
         <div class="banner-phase">
@@ -536,7 +539,13 @@ import {
 
 import MarkdownRenderer from '../MarkdownRenderer.vue'
 import TeamMemberModel from '../TeamMemberModel.vue'
-import type { BoardModel, CrewView, JobView, LogEntry } from '../teamBoardModel'
+import {
+  latestRequestLine,
+  type BoardModel,
+  type CrewView,
+  type JobView,
+  type LogEntry
+} from '../teamBoardModel'
 import { useTeamLabels } from '../teamBoardLabels'
 import { recentSteps, shortTarget } from '../teamBoardView'
 import type { Pose } from '../teamOffice/officeSim'
@@ -1016,6 +1025,15 @@ button.q-frame {
   color: var(--q-paper);
   font-size: 14px;
   font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.banner-latest {
+  margin: 4px 0 0;
+  color: var(--q-muted);
+  font-size: 12px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
