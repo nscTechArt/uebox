@@ -69,6 +69,18 @@ export const COMPACT_AT_RATIO = 0.85
 export const PRECOMPACT_AT_RATIO = 0.6
 
 /**
+ * 后台那份写好之后，摘要外的原文又涨了多少就再续写一份。
+ *
+ * 只在 60% 写一次的话，撞线换上时 60% 到 85% 之间长出来的那一大段全是原文：
+ * 真机 1M 窗口的会话从 83 万只压到 41 万，900 多条消息原样留着。
+ * 续写拿上一份摘要接着往下写，每次只喂新长出来的这一段，写得快，撞线时
+ * 那份摘要离当下就差一小段。
+ */
+export function precompactionStep(contextWindow: number): number {
+  return Math.max(UNREAL_BOX_COMPACTION.keepRecentTokens * 2, contextWindow * 0.05)
+}
+
+/**
  * 这个窗口下超过多少 token 就压。
  *
  * 取比例线和 pi 原来那条固定余量线里**更早的那个**：小窗口（8K、32K）下
@@ -99,6 +111,8 @@ interface Precompaction {
   result: Promise<CheckpointState | undefined>
   /** 已经写完（成败都算）。撞线时还没写完才需要提示用户在等 */
   done: boolean
+  /** 写好的那份。续写时拿它当起点 */
+  ready?: CheckpointState
 }
 
 const precompactions = new Map<string, Precompaction>()
@@ -435,8 +449,12 @@ function createConversationCompact(deps: CompactionDeps): {
       }
 
       if (tokens <= compactionThreshold(deps.contextWindow)) {
-        if (key && !pending && tokens > precompactionThreshold(deps.contextWindow)) {
-          startPrecompaction(key, messages, base, epoch)
+        if (key && tokens > precompactionThreshold(deps.contextWindow)) {
+          if (!pending) startPrecompaction(key, messages, base, epoch, checkpoint)
+          else if (shouldRoll(messages, pending)) {
+            const ready = pending.ready as CheckpointState
+            startPrecompaction(key, messages, applyCheckpoint(messages, ready), epoch, ready, ready)
+          }
         }
         return base
       }
@@ -459,9 +477,10 @@ function createConversationCompact(deps: CompactionDeps): {
           checkpoint = ready
           await deps.checkpoint?.save(ready)
           const projected = applyCheckpoint(messages, ready)
-          // 摘要写好之后又涨了太多、换上仍然超线，才往下走当场再压一次
+          // 换上之后还在后台线以上，说明摘要没跟上，当场把剩下那段也压掉。
+          // 只看压缩线的话，换上后落在 60%~85% 也算「压完了」，下一轮马上又撞线
           const after = tokens - (estimateMessagesTokens(base) - estimateMessagesTokens(projected))
-          if (after <= compactionThreshold(deps.contextWindow)) return projected
+          if (after <= precompactionThreshold(deps.contextWindow)) return projected
           return await compactNow(messages, projected, tokens, announced, signal)
         }
       }
@@ -484,23 +503,39 @@ function createConversationCompact(deps: CompactionDeps): {
     key: string,
     messages: AgentMessage[],
     base: AgentMessage[],
-    baseEpoch: number
+    baseEpoch: number,
+    previous: CheckpointState | undefined,
+    fallback?: CheckpointState
   ): void {
     const entry: Precompaction = {
       baseEpoch,
       done: false,
-      result: summarize(messages, base, checkpoint).then(
+      result: summarize(messages, base, previous).then(
         (value) => {
           entry.done = true
-          return value
+          entry.ready = value
+          // 续写失败就退回上一份：照样能换上，只是多留点原文。
+          // ready 不跟着退，免得每次请求都拿同一份去重试
+          return value ?? fallback
         },
         () => {
           entry.done = true
-          return undefined
+          return fallback
         }
       )
     }
     precompactions.set(key, entry)
+  }
+
+  /**
+   * 后台那份写好了、摘要外的原文又攒够一段：该续写了。
+   * 写好的那份对不上当前历史（被改过）就不续，撞线时自然当场重压。
+   */
+  function shouldRoll(messages: AgentMessage[], pending: Precompaction): boolean {
+    const ready = pending.ready
+    if (!ready || !checkpointApplies(messages, ready, deps.hashMessages)) return false
+    const uncovered = estimateMessagesTokens(messages.slice(ready.cutIndex))
+    return uncovered > precompactionStep(deps.contextWindow)
   }
 
   /** 把 base 的头部换成摘要，换算成原始历史下标上的检查点。不成返回 undefined */
@@ -513,6 +548,9 @@ function createConversationCompact(deps: CompactionDeps): {
     // 后台写摘要时 messages 是 pi 的活数组，写的这段时间里循环还在往后追加；
     // 切点必须按调用这一刻的长度算，否则会把没进摘要的那几条一起切掉
     const total = messages.length
+    // 代数按**生效中**的检查点算：续写时 previous 是还没换上的那份，
+    // 拿它 +1 会跳代，缓存键（见 createAgent 的 promptCacheKey）跟着乱
+    const contextEpoch = (checkpoint?.contextEpoch ?? 0) + 1
     const outcome = await compactMessages(base, deps, {
       // 迭代式摘要：下一次压缩把上一次的摘要一起喂进去更新，
       // 而不是对着已经压过的历史再压一次。
@@ -525,7 +563,7 @@ function createConversationCompact(deps: CompactionDeps): {
     const cutIndex = total - (outcome.messages.length - 1)
     if (cutIndex <= 0) return undefined
     return {
-      contextEpoch: (previous?.contextEpoch ?? 0) + 1,
+      contextEpoch,
       summary: outcome.summary,
       cutIndex,
       sourceHash: deps.hashMessages?.(messages.slice(0, cutIndex)) ?? '',
