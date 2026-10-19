@@ -903,10 +903,19 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
      * 而且它每行带 value、全部引脚名和类型，还可能跟一行长度不受控的节点注释 ——
      * 「条数封不住输出」这个理由对它只会更成立。800 节点带注释实测能到 36.7k。
      */
-    const DETAIL_CHAR_BUDGET = 14_000
+    /*
+     * 三段额度合计 14,000，让「正文 + 结尾的存档编号」落在存档预算 16,000 以内
+     * （`core/resultArchive.ts` 的 ARCHIVE_BUDGET_CHARS）。
+     *
+     * 原来是 14,000 / 12,000 / 6,000，合计 32,000 —— 那时额度外的节点和连线
+     * 根本拿不到，只能尽量多塞。现在大图的完整数据存档了，额度外的部分凭编号
+     * 用 result_query 取，正文只需要给够「认路」的那一段。
+     * 余下约两千留给标题、主节点引脚、Substrate 提示、几句「还有 N 个没列」和结尾那句编号。
+     */
+    const DETAIL_CHAR_BUDGET = 6_500
     /** 连线这一段的字符额度。理由同上：行长由两端 node_id 决定，条数封不住 */
-    const CONNECTION_CHAR_BUDGET = 6_000
-    const BRIEF_CHAR_BUDGET = 12_000
+    const CONNECTION_CHAR_BUDGET = 3_000
+    const BRIEF_CHAR_BUDGET = 4_500
     const shownNodes = nodes.slice(0, MAX_GRAPH_NODES)
     /** 详列实际列了几个。字符额度可能比条数上限先到，剩下的全进简表 */
     let detailCount = 0
@@ -1044,7 +1053,8 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
           `  （下面 ${briefLines.length} 个节点只给 node_id ｜ 类型 ｜ 值 ｜ guid，引脚没展开。` +
             '这些 id 照样能直接用于 material_set_node_value / material_delete_node / ' +
             'material_disconnect_pins 和 material_apply_graph 的连线；' +
-            '想知道某一类的引脚名，把类名去掉 MaterialExpression 前缀拿去 material_search_nodes 查）：'
+            '想知道某一类的引脚名，把类名去掉 MaterialExpression 前缀拿去 material_search_nodes 查，' +
+            '结尾有存档编号时也可以用 result_query 按 node_id 取这个节点的完整引脚）：'
         )
         lines.push(...briefLines)
 
@@ -1055,10 +1065,15 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
          * 那就别编一个 —— 能给的真办法是从连线往回缩小范围。
          */
         if (briefNodes.length > briefLines.length) {
+          /*
+           * 「结尾有存档编号时」是条件句，不是客套：这里不知道这次会不会存档 ——
+           * 按名单授权、手里没有 result_query 的会话不存（见 `createResultArchiver`）。
+           * 两种情况下这句话都得是真的
+           */
           lines.push(
             `  …还有 ${briefNodes.length - briefLines.length} 个节点连简表都没列（全图共 ${nodes.length} 个）。` +
-              '这张图超出了一次能读完的规模：先看下面的连线，从主节点往回锁定你关心的那一段，' +
-              '再按那几个 node_id 动手。'
+              '先看下面的连线，从主节点往回锁定你关心的那一段，再按那几个 node_id 动手；' +
+              '结尾有存档编号时，这些节点的引脚、类型和值用 result_query 按 node_id 取。'
           )
         }
       }
@@ -1110,7 +1125,8 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
       if (connOmitted > 0) {
         lines.push(
           `  …另有 ${connOmitted} 根连线没列（共 ${connections.length} 根）。` +
-            '上面连主节点的那几根优先列，从它们往回追。'
+            '上面连主节点的那几根优先列，从它们往回追；' +
+            '结尾有存档编号时，其余连线用 result_query 按 from_node / to_node 查。'
         )
       }
     }

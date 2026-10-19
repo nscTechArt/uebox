@@ -21,7 +21,12 @@ vi.mock('../../core/projectTargetContext', () => ({
   getTargetConnectionId: () => 'conn-1'
 }))
 
-import { createResultArchiver, queryArchive, type ArchiveRecord } from '../../core/resultArchive'
+import {
+  ARCHIVE_BUDGET_CHARS,
+  createResultArchiver,
+  queryArchive,
+  type ArchiveRecord
+} from '../../core/resultArchive'
 import type { ArchiveSpec } from '../defineTool'
 import { materialTools } from './index'
 
@@ -36,7 +41,10 @@ type Tool = {
 
 const tool = (materialTools as unknown as Tool[]).find((t) => t.name === 'material_get_graph')!
 
-/** 800 个节点、每个挂一张 Megascans 风格的长路径贴图 —— 详列和简表都列不完 */
+/**
+ * 800 个节点、每个挂一张 Megascans 风格的长路径贴图、带一段长注释，连线带两端类型 ——
+ * 和 graphReadout.test.ts 里「最坏情况」同一种形状：详列、简表、连线三段额度全部撑满
+ */
 function bigMaterial(count: number): Record<string, unknown> {
   return {
     material_name: 'M_Terrain',
@@ -47,6 +55,7 @@ function bigMaterial(count: number): Record<string, unknown> {
       class: 'MaterialExpressionTextureSample',
       guid: `GUID-${i}`,
       value: `/Game/Megascans/Surfaces/Forest_Floor_${i}/T_Forest_Floor_${i}_4K_Albedo`,
+      description: '湿度遮罩，别动。这一段是设计师随手写的说明，通常会写为什么要这么接。'.repeat(4),
       inputs: [{ name: 'Coordinates', is_connected: true, type: 'float2' }],
       outputs: [{ name: 'RGB', type: 'float3' }]
     })),
@@ -54,7 +63,9 @@ function bigMaterial(count: number): Record<string, unknown> {
       from_node: `TextureSample_${i}`,
       from_pin: 'RGB',
       to_node: `TextureSample_${i + 1}`,
-      to_input: 'Coordinates'
+      to_input: 'Coordinates',
+      from_type: 'float3',
+      to_type: 'float2'
     }))
   }
 }
@@ -90,6 +101,8 @@ describe('material_get_graph 的大图存档', () => {
 
     const text = archived.content[0].text!
     expect(text.startsWith(original)).toBe(true)
+    // 正文的三段额度就是按这条定的：正文加上补的那句编号，落在存档预算以内
+    expect(text.length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
     expect(text.slice(original.length)).toContain('r1')
     expect(text.slice(original.length)).toContain('result_query')
 
