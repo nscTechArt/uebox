@@ -242,9 +242,75 @@ export function measureCompaction(
   before: AgentMessage[],
   after: AgentMessage[]
 ): { tokensBefore: number; tokensAfter: number; saved: number } {
-  const tokensBefore = estimateContextTokens(before).tokens
+  const tokensBefore = estimateOutgoingTokens(before).tokens
   const saved = estimateMessagesTokens(before) - estimateMessagesTokens(after)
   return { tokensBefore, tokensAfter: Math.max(0, tokensBefore - saved), saved }
+}
+
+/**
+ * 「即将发出去的这一份」上下文有多大。
+ *
+ * 和 `estimateContextTokens` 同样优先信最后一条 assistant 上厂商报的用量，多一道防御：
+ * **那个用量只对它当时发出去的那份上下文成立。** 要发的这份要是比那时大得多，
+ * 它就是个过期的数。
+ *
+ * 真机上撞过：队员（子 agent）没有落盘的检查点，重新派活时 agent 重建、闭包里的
+ * 检查点清空，要发的是盘上 977 条、约 170 万字符的完整历史 —— 而最后那条 assistant
+ * 带的用量，是上一轮**压缩后视图**的 9.4 万。照它算远低于压缩线，于是原样发出，
+ * 厂商回「input exceeds the context window」。
+ *
+ * 防御的判据不是编出来的阈值，是一个下限：**上下文不可能比它装着的文字还小。**
+ * 用量那条之前（含它）的消息按纯文字估一遍，超过厂商报的数，就说明那个数描述的
+ * 不是这一份，改用文字估算。纯文字指正文、工具调用参数、工具结果文字：
+ *
+ *   - 图片不算：各家计价差很远，拿 pi 的一律 1200 去比，会在厂商如实报了低价的会话里
+ *     误判「用量过期」，然后每一轮都压一次
+ *   - 思考不算：好几家不把上一轮的思考再发一遍，算进来同样会误判
+ *
+ * 中文按「4 字符 1 token」是往低估的，JSON 和英文大致持平 —— 所以这个下限只会偏小，
+ * 正常会话里（用量还含着系统提示词和工具定义）它碰不到厂商报的数。
+ */
+export function estimateOutgoingTokens(base: AgentMessage[]): {
+  tokens: number
+  lastUsageIndex: number | null
+  /** 厂商报的用量对不上要发的这份，改用了文字下限 */
+  staleUsage: boolean
+} {
+  const usage = estimateContextTokens(base)
+  if (usage.lastUsageIndex === null) {
+    return { tokens: usage.tokens, lastUsageIndex: null, staleUsage: false }
+  }
+  let floor = 0
+  for (let i = 0; i <= usage.lastUsageIndex; i++) floor += estimateTextTokens(base[i])
+  if (floor <= usage.usageTokens) {
+    return { tokens: usage.tokens, lastUsageIndex: usage.lastUsageIndex, staleUsage: false }
+  }
+  return {
+    tokens: floor + usage.trailingTokens,
+    lastUsageIndex: usage.lastUsageIndex,
+    staleUsage: true
+  }
+}
+
+/** 一条消息的纯文字部分按 pi 的口径（4 字符 1 token）估多少。为什么不算图片和思考见上面 */
+function estimateTextTokens(message: AgentMessage): number {
+  const content = (message as { content?: unknown }).content
+  if (typeof content === 'string') return Math.ceil(content.length / 4)
+  if (!Array.isArray(content)) return 0
+  let chars = 0
+  for (const block of content as Array<{
+    type?: string
+    text?: unknown
+    name?: unknown
+    arguments?: unknown
+  }>) {
+    if (block?.type === 'text' && typeof block.text === 'string') chars += block.text.length
+    else if (block?.type === 'toolCall') {
+      chars +=
+        String(block.name ?? '').length + (JSON.stringify(block.arguments ?? {})?.length ?? 0)
+    }
+  }
+  return Math.ceil(chars / 4)
 }
 
 /**
@@ -399,7 +465,7 @@ function createConversationCompact(deps: CompactionDeps): {
     const projected = await compactNow(
       messages,
       base,
-      estimateContextTokens(base).tokens,
+      estimateOutgoingTokens(base).tokens,
       false,
       signal
     )
@@ -420,7 +486,8 @@ function createConversationCompact(deps: CompactionDeps): {
       // 情况下判定「还要再压」，然后每一次请求都白跑一趟摘要模型。
       const base = checkpoint ? applyCheckpoint(messages, checkpoint) : messages
 
-      const usage = estimateContextTokens(base)
+      // 用量过期（要发的这份比厂商报账那时大）时改用文字下限，见 `estimateOutgoingTokens`
+      const usage = estimateOutgoingTokens(base)
 
       // `estimateContextTokens` 会优先采信最近一条 assistant 上厂商报的真实用量 ——
       // 那一段是最准的，一个字都不该改。**只给它后面那几条补图片的差额**：
