@@ -37,6 +37,15 @@ describe('result_query', () => {
     await expect(run([], { ref: 'r1' })).rejects.toThrow(/还没有被存档的结果/)
   })
 
+  it('编号在、数据不在时说数据不在，不说成没有这个编号', async () => {
+    const lost = {
+      role: 'toolResult',
+      toolName: 'material_get_graph',
+      details: { archive: { ref: 'r7', lists: ['nodes'], source: 'details' } }
+    }
+    await expect(run([lost], { ref: 'r7' })).rejects.toThrow(/r7 的数据已经不在/)
+  })
+
   it('自成一组，不跟着 core 组一起加载', () => {
     expect(toolSearchGroup({ name: 'result_query', unrealBox: { namespace: 'core' } })).toBe(
       'core.result'

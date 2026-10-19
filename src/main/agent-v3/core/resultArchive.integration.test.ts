@@ -98,11 +98,15 @@ describe('大结果存档走一整轮', () => {
     expect(preview.length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
     expect(preview).toContain('"ref":"r1"')
     expect(preview).not.toContain('模板说明')
-    // 完整的那份跟着消息走
-    const details = (listed as { details?: { archive?: { text: string }; success?: boolean } })
-      .details
-    expect(details?.success).toBe(true)
-    expect(details?.archive?.text).toContain('Template_299')
+    // 完整的那份跟着消息走：这个工具的 details 就是同一张表，存档只记来源、不另存文本
+    const details = (
+      listed as {
+        details?: { archive?: { text?: string; source?: string }; templates?: unknown[] }
+      }
+    ).details
+    expect(details?.templates).toHaveLength(300)
+    expect(details?.archive?.source).toBe('details')
+    expect(details?.archive?.text).toBeUndefined()
 
     // 目录页只有名字和分类，查回来的是带说明的完整一行
     const answer = JSON.parse(textOf(queried)) as {

@@ -51,10 +51,15 @@ export interface ArchiveRecord {
   /** 哪几个字段是表，按声明顺序 */
   lists: string[]
   /**
-   * `text` 来源：原本要给模型的那份完整文本（JSON）。
-   * `details` 来源没有这一项：表就在这条消息的 details 里，再存一份只会让会话文件翻倍
+   * 原本要给模型的那份完整文本（JSON）。表就在这条消息的 details 里时不带它
+   * （`source: 'details'`），再存一份只会让会话文件翻倍
    */
   text?: string
+  /**
+   * 表在 details 里时明说出来。不能拿「没有 text」来判：界面那份 details 也剔掉了 text
+   * （`detailsForRenderer`），两者就分不开了
+   */
+  source?: 'details'
 }
 
 type Row = Record<string, unknown>
@@ -94,29 +99,38 @@ export function archiveOf(message: unknown): ArchiveRecord | undefined {
   if (
     typeof archive?.ref !== 'string' ||
     !Array.isArray(archive.lists) ||
-    (archive.text !== undefined && typeof archive.text !== 'string')
+    (typeof archive.text !== 'string' && archive.source !== 'details')
   ) {
     return undefined
   }
   return archive as ArchiveRecord
 }
 
-/** 解析过的存档按消息缓存：模型翻页时一份存档会被查很多次，每次都重新 parse 十几万字符不划算 */
-const parsedArchives = new WeakMap<object, Row>()
+/**
+ * 最近解析过的几份存档。模型翻页时同一份会被连着查好几次，每次重新 parse 十几万字符不划算；
+ * 但只留最近两份 —— 消息活多久缓存就活多久的话，长会话会一直攥着几 MB 解析结果不放
+ */
+const PARSED_CACHE_SIZE = 2
+const parsedArchives = new Map<object, Row>()
 
-/** 存档里的表在哪：`text` 来源解析那份文本，`details` 来源就是消息的 details 本身 */
+/** 存档里的表在哪：`details` 来源就是消息的 details 本身，否则解析那份文本 */
 export function archiveDataOf(message: unknown): Row | undefined {
   const record = archiveOf(message)
   if (!record) return undefined
-  if (record.text === undefined) {
+  if (record.source === 'details') {
     const details = (message as { details?: unknown }).details
     return isRow(details) ? details : undefined
   }
   const key = message as object
   let data = parsedArchives.get(key)
-  if (!data) {
-    data = JSON.parse(record.text) as Row
-    parsedArchives.set(key, data)
+  if (data) {
+    parsedArchives.delete(key)
+  } else {
+    data = JSON.parse(record.text as string) as Row
+  }
+  parsedArchives.set(key, data)
+  while (parsedArchives.size > PARSED_CACHE_SIZE) {
+    parsedArchives.delete(parsedArchives.keys().next().value as object)
   }
   return data
 }
@@ -294,7 +308,7 @@ export function archiveDetails(
     note:
       `完整数据已存档为 ${ref}（${summary}，含全部字段）。上面没展开或没列出的部分用 ` +
       `${RESULT_QUERY_TOOL_NAME} 按条件取，${queryExample(ref, tables)}。`,
-    record: { ref, lists: tables.map((t) => t.key) }
+    record: { ref, lists: tables.map((t) => t.key), source: 'details' }
   }
 }
 
@@ -317,6 +331,19 @@ export interface ArchivableCall<TPart extends { type: string }> {
   isError: boolean
   toolCall: { name: string }
   result: { content?: TPart[]; details?: unknown }
+}
+
+/**
+ * details 里是不是已经有一模一样的表。适配工具的 details 就是给模型的那份结果对象
+ * （见 `adaptV2Tool` 的 toText），这时存档不必另存文本 —— 会话文件里本来就有一份。
+ * 逐张表比序列化结果：只要有一张对不上（比如 details 是插件原始回包），就老实存文本
+ */
+function sameTablesInDetails(record: ArchiveRecord, details: unknown): boolean {
+  if (!isRow(details) || record.text === undefined) return false
+  const parsed = JSON.parse(record.text) as Row
+  return record.lists.every(
+    (list) => JSON.stringify(details[list]) === JSON.stringify(parsed[list])
+  )
 }
 
 export type ResultArchiver = <TPart extends { type: string }>(
@@ -356,8 +383,11 @@ export function createResultArchiver(deps: ArchiverDeps): ResultArchiver {
     if (spec.source === 'details') {
       const outcome = archiveDetails(original, spec, ref)
       if (!outcome) return undefined
-      // 存档时换小额度那一版正文：额度外的部分凭编号取得到
-      const body = spec.compact ? spec.compact(original) : (textParts[0].text as string)
+      // 工具自己的正文加上编号放得下，就照原样给 —— 中等大小的图正文本来是完整的，
+      // 换小额度只会把已经列出来的引脚挤掉。放不下才换小额度那一版
+      const full = textParts[0].text as string
+      const fits = full.length + 2 + outcome.note.length <= ARCHIVE_BUDGET_CHARS
+      const body = !fits && spec.compact ? spec.compact(original) : full
       content = parts.map((part) =>
         part.type === 'text' ? ({ ...part, text: `${body}\n\n${outcome.note}` } as TPart) : part
       )
@@ -368,7 +398,9 @@ export function createResultArchiver(deps: ArchiverDeps): ResultArchiver {
       content = parts.map((part) =>
         part.type === 'text' ? ({ ...part, text: outcome.text } as TPart) : part
       )
-      record = outcome.record
+      record = sameTablesInDetails(outcome.record, original)
+        ? { ref, lists: outcome.record.lists, source: 'details' }
+        : outcome.record
     }
     lastRef += 1
 
@@ -442,6 +474,12 @@ export function queryArchive(
   if (!record.lists.includes(list)) {
     throw new Error(`存档 ${record.ref} 里没有 ${list} 这张表，有：${record.lists.join('、')}。`)
   }
+  // 只给 search_in 不给 search 什么也筛不了；照常返回全表的话，模型会以为已经筛过了
+  if (params.search_in?.length && !params.search?.trim()) {
+    throw new Error(
+      'search_in 只限定 search 在哪几列里找，要和 search 一起用；按列等值筛用 where。'
+    )
+  }
   const rows = (data[list] as Row[]) ?? []
   const allColumns = columnsOf(rows)
 
@@ -501,13 +539,11 @@ export function queryArchive(
  */
 export function describeSnapshot(
   messages: readonly unknown[],
-  ref: string,
-  isMutating: (toolName: string, args: unknown) => boolean,
-  /** 调用方已经找到了存档在第几条消息，就别再从头扫一遍 */
-  knownIndex?: number
+  /** 存档所在那条消息的下标。由调用方找：它本来就要先找到这条消息才能查 */
+  index: number,
+  isMutating: (toolName: string, args: unknown) => boolean
 ): { toolName: string; note: string } | undefined {
-  const index = knownIndex ?? messages.findIndex((message) => archiveOf(message)?.ref === ref)
-  if (index < 0) return undefined
+  if (!archiveOf(messages[index])) return undefined
   const source = messages[index] as { toolName?: string }
   const toolName = source.toolName ?? '工具'
 

@@ -49,6 +49,35 @@ function bigMaterial(count: number): Record<string, unknown> {
   return {
     material_name: 'M_Terrain',
     material_path: '/Game/Materials/M_Terrain',
+    // 三段额度之外的固定几行也要进夹具：主节点可用引脚、Substrate 提示、
+    // 材质属性警告、插件附注 —— 少了它们，「正文加编号不超预算」这条就量不到最坏情况
+    use_material_attributes: true,
+    substrate_enabled: true,
+    note: '插件附注：这张材质有 2 个函数调用节点的引脚来自函数资产，读图时按实例展开。',
+    material_pins: [
+      'BaseColor',
+      'Metallic',
+      'Specular',
+      'Roughness',
+      'Anisotropy',
+      'EmissiveColor',
+      'Opacity',
+      'OpacityMask',
+      'Normal',
+      'Tangent',
+      'WorldPositionOffset',
+      'SubsurfaceColor',
+      'CustomData0',
+      'CustomData1',
+      'AmbientOcclusion',
+      'Refraction',
+      'PixelDepthOffset',
+      'ShadingModel',
+      'FrontMaterial',
+      'MaterialAttributes',
+      'Displacement',
+      'SurfaceThickness'
+    ],
     node_count: count,
     nodes: Array.from({ length: count }, (_, i) => ({
       node_id: `TextureSample_${i}`,
@@ -112,7 +141,7 @@ describe('material_get_graph 的大图存档', () => {
 
     // 表就在 details 里，存档不再另存一份文本
     const record = archived.details.archive as ArchiveRecord
-    expect(record).toEqual({ ref: 'r1', lists: ['nodes', 'connections'] })
+    expect(record).toEqual({ ref: 'r1', lists: ['nodes', 'connections'], source: 'details' })
     const data = archived.details
     const last = queryArchive(record, data, {
       list: 'nodes',
@@ -130,6 +159,30 @@ describe('material_get_graph 的大图存档', () => {
       where: { to_node: 'TextureSample_799' }
     })
     expect(wire.matched).toBe(1)
+  })
+
+  it('中等材质：完整数据超预算但正文放得下，正文原样给、只补编号', async () => {
+    // 30 个节点：details 序列化后 17.7K、过了 16K，大额度正文 12.7K、完整且放得下
+    callRequest.mockResolvedValue(bigMaterial(30))
+    const result = await tool.execute('c1', { path: '/Game/Materials/M_Medium' })
+    const original = result.content[0].text!
+    expect(JSON.stringify(result.details).length).toBeGreaterThan(ARCHIVE_BUDGET_CHARS)
+    expect(original).not.toContain('连简表都没列')
+
+    const archived = createResultArchiver({
+      getMessages: () => [],
+      specFor: () => tool.unrealBox.archive,
+      canQuery: () => true,
+      loadQueryTool: () => undefined
+    })({
+      isError: false,
+      toolCall: { name: 'material_get_graph' },
+      result: { content: result.content, details: result.details }
+    })!
+    const text = archived.content[0].text!
+    // 没换小额度：已经列出来的引脚不会被挤掉
+    expect(text.startsWith(original)).toBe(true)
+    expect(text.slice(original.length)).toContain('r1')
   })
 
   it('小材质不补编号', async () => {

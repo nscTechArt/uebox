@@ -1,5 +1,5 @@
 /** @vitest-environment node */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   ARCHIVE_BUDGET_CHARS,
@@ -158,8 +158,8 @@ describe('archiveDetails', () => {
     expect(outcome.note).toContain('r4')
     expect(outcome.note).toContain('templates 300 行')
     expect(outcome.note.length).toBeLessThan(300)
-    // 表就在 details 里，不再存一份文本
-    expect(outcome.record).toEqual({ ref: 'r4', lists: ['templates'] })
+    // 表就在 details 里，不再存一份文本，并明说来源
+    expect(outcome.record).toEqual({ ref: 'r4', lists: ['templates'], source: 'details' })
   })
 
   it('放得下就不存；details 不是对象也不存', () => {
@@ -228,6 +228,10 @@ describe('queryArchive', () => {
     ).toBe(11)
   })
 
+  it('只给 search_in 不给 search 时报错，不假装筛过', () => {
+    expect(() => queryArchive(record(), data, { search_in: ['name'] })).toThrow(/和 search 一起用/)
+  })
+
   it('preface 排在最前面，并且算进每页的预算', () => {
     const preface = { snapshot: '快照说明'.repeat(30) }
     const page = queryArchive(record(), data, {}, preface)
@@ -264,7 +268,7 @@ describe('describeSnapshot', () => {
     name === 'project_manage' && (args as { action?: string })?.action !== 'dry_run'
 
   it('之后没动过东西就直说', () => {
-    const note = describeSnapshot([archiveMessage], 'r1', mutating)?.note
+    const note = describeSnapshot([archiveMessage], 0, mutating)?.note
     expect(note).toContain('没有执行过修改类工具')
   })
 
@@ -280,13 +284,14 @@ describe('describeSnapshot', () => {
       assistant('c4', 'project_manage', { action: 'create' }),
       result('c4', 'project_manage', true)
     ]
-    const note = describeSnapshot(messages, 'r1', mutating)?.note
+    const note = describeSnapshot(messages, messages.indexOf(archiveMessage), mutating)?.note
     expect(note).toContain('执行过 1 个修改类工具')
     expect(note).toContain('重新调用 project_list')
   })
 
-  it('找不到编号返回 undefined', () => {
-    expect(describeSnapshot([archiveMessage], 'r9', mutating)).toBeUndefined()
+  it('下标上不是存档就返回 undefined', () => {
+    expect(describeSnapshot([archiveMessage], 3, mutating)).toBeUndefined()
+    expect(describeSnapshot([{ role: 'user' }], 0, mutating)).toBeUndefined()
   })
 })
 
@@ -323,6 +328,47 @@ describe('createResultArchiver', () => {
       loadedToolNames: ['result_query'],
       loadedGroups: ['core.result']
     })
+  })
+
+  it('details 里已经有一模一样的表时不另存文本，查询直接读 details', () => {
+    const result = templates()
+    const out = archiver()({
+      isError: false,
+      toolCall: { name: 'project_list' },
+      result: { content: [{ type: 'text', text: JSON.stringify(result) }], details: result }
+    })!
+    expect(out.details.archive).toEqual({ ref: 'r1', lists: ['templates'], source: 'details' })
+    const data = archiveDataOf({ role: 'toolResult', details: out.details })
+    expect((data?.templates as unknown[]).length).toBe(300)
+  })
+
+  it('details 里的表和给模型的不一样时照旧存文本', () => {
+    const out = archiver()(bigCall({ success: true, templates: [{ name: 'raw' }] }))!
+    expect(typeof (out.details.archive as { text?: unknown }).text).toBe('string')
+  })
+
+  it('details 来源：工具正文加编号放得下就原样给，放不下才换 compact', () => {
+    const compact = vi.fn(() => 'compact body')
+    const spec = { source: 'details' as const, lists: { templates: ['name'] }, compact }
+    const details = templates()
+    const run = (text: string): string =>
+      (
+        createResultArchiver({
+          getMessages: () => [],
+          specFor: () => spec,
+          canQuery: () => true,
+          loadQueryTool: () => undefined
+        })({
+          isError: false,
+          toolCall: { name: 'x' },
+          result: { content: [{ type: 'text', text }], details }
+        })!.content[0] as { text: string }
+      ).text
+
+    expect(run('short full body').startsWith('short full body')).toBe(true)
+    expect(compact).not.toHaveBeenCalled()
+    expect(run('x'.repeat(ARCHIVE_BUDGET_CHARS)).startsWith('compact body')).toBe(true)
+    expect(compact).toHaveBeenCalledTimes(1)
   })
 
   it('同一轮并行的两个结果拿到不同编号，并接着历史往后编', () => {
@@ -376,8 +422,31 @@ describe('辅助函数', () => {
     expect(first?.templates).toHaveLength(2)
     expect(archiveDataOf(textMessage)).toBe(first)
 
-    const details = { nodes: [{ node_id: 'A' }], archive: { ref: 'r2', lists: ['nodes'] } }
+    const details = {
+      nodes: [{ node_id: 'A' }],
+      archive: { ref: 'r2', lists: ['nodes'], source: 'details' }
+    }
     expect(archiveDataOf({ role: 'toolResult', details })).toBe(details)
+  })
+
+  it('界面那份剔掉了 text 的存档不会被当成 details 来源', () => {
+    const rendererCopy = { assets: [], archive: { ref: 'r3', lists: ['assets'] } }
+    expect(archiveDataOf({ role: 'toolResult', details: rendererCopy })).toBeUndefined()
+  })
+
+  it('解析缓存只留最近两份', () => {
+    const message = (n: number): Record<string, unknown> => ({
+      role: 'toolResult',
+      details: { archive: { ref: `r${n}`, lists: ['t'], text: JSON.stringify({ t: [{ n }] }) } }
+    })
+    const [a, b, c] = [message(1), message(2), message(3)]
+    const first = archiveDataOf(a)
+    expect(archiveDataOf(a)).toBe(first)
+    archiveDataOf(b)
+    archiveDataOf(c)
+    // a 已经被挤出去，再查是重新解析出来的另一个对象
+    expect(archiveDataOf(a)).not.toBe(first)
+    expect(archiveDataOf(a)).toEqual(first)
   })
 
   it('发给界面时剔掉完整文本，只留编号', () => {

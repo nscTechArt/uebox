@@ -65,8 +65,7 @@ export function createResultQueryTool(deps: ResultQueryDeps): UnrealAgentTool<un
       // 一遍找到消息；它的下标留给快照说明，免得再从头扫
       const index = messages.findIndex((message) => archiveOf(message)?.ref === ref)
       const record = index >= 0 ? archiveOf(messages[index]) : undefined
-      const data = index >= 0 ? archiveDataOf(messages[index]) : undefined
-      if (!record || !data) {
+      if (!record) {
         const known = messages.map(archiveOf).flatMap((archive) => (archive ? [archive.ref] : []))
         throw new Error(
           `没有编号为 ${ref} 的存档。` +
@@ -76,8 +75,17 @@ export function createResultQueryTool(deps: ResultQueryDeps): UnrealAgentTool<un
             '编号只在产生它的那个对话里有效。'
         )
       }
+      const data = archiveDataOf(messages[index])
+      if (!data || !record.lists.every((list) => Array.isArray(data[list]))) {
+        // 编号在，数据不在了（这条结果的 details 被替换或丢了）—— 别说成「没有这个编号」
+        throw new Error(
+          `存档 ${ref} 的数据已经不在这条结果上了，查不了。要这份数据请重新调用 ${String(
+            (messages[index] as { toolName?: string }).toolName ?? '原工具'
+          )}。`
+        )
+      }
 
-      const snapshot = describeSnapshot(messages, ref, deps.isMutating, index)
+      const snapshot = describeSnapshot(messages, index, deps.isMutating)
       // 快照说明作为 preface 交给 queryArchive，一起算进每页的预算
       const result = queryArchive(
         record,
