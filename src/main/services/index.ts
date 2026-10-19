@@ -132,7 +132,17 @@ export class ServiceManager {
         httpServer.setConnectionManager(this.websocketService.getConnectionManager())
         this.httpServer = httpServer
 
-        await httpServer.start()
+        // 起不来同样不算致命，理由和上面 WebSocket 那段一样，而且更站得住：
+        // 这是默认关闭、只给开发者用的调试服务。以前这里的异常会走到下面的
+        // catch，把**所有**服务（包括引擎桥接）一起停掉再往上抛 ——
+        // 只是因为它一直谎报启动成功（见 `http/listen.ts`），这条路才没人走到过
+        try {
+          await httpServer.start()
+        } catch {
+          // 原因已经由 HttpServer 记过一句能照着改的话，这里只说后果
+          this.httpServer = null
+          logger.warn('[ServiceManager] HTTP 调试服务不可用，其余功能照常启动')
+        }
       } else {
         logger.info('HTTP服务器已跳过（如需调试接口，设置 HTTP_ENABLED=true）')
       }
