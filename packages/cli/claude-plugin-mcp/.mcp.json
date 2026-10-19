@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "unreal-box": {
+      "type": "http",
+      "url": "${UEBOX_URL:-http://127.0.0.1:17861/}",
+      "headers": {
+        "Authorization": "Bearer ${UEBOX_TOKEN}"
+      }
+    }
+  }
+}
