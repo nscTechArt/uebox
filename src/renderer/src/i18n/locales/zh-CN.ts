@@ -3649,6 +3649,8 @@ export default {
       archiveImportAsk: '压缩包导入前询问',
       archiveImportAskDesc:
         '将压缩包导入 UE 工程时，询问解压后导入还是原样复制（关闭后一律解压后导入）',
+      showAssetVersion: '显示资产版本',
+      showAssetVersionDesc: '鼠标悬停在资产卡片上时，在左上角显示保存该资产所用的引擎版本。',
       crossVaultSearch: '跨库搜索',
       crossVaultSearchDesc: 'AI 助手查找素材时同时搜索其他保管库。关闭后仅搜索当前保管库。',
       defaultApps: '默认应用',

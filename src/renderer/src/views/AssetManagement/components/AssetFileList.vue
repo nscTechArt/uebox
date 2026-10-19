@@ -467,6 +467,14 @@
                     >
                       {{ file.engineVersion }}
                     </div>
+                    <!-- 资产引擎版本角标（设置里开）。插件右上角已经常驻一个，不重复 -->
+                    <div
+                      v-else-if="showAssetVersion && file.engineVersion"
+                      class="asset-version-tag"
+                      :title="t('assetFileList.engineVersion', { version: file.engineVersion })"
+                    >
+                      {{ file.engineVersion }}
+                    </div>
                   </div>
                   <div class="file-info">
                     <div
@@ -771,6 +779,7 @@ import { useImportTasksStore } from '@renderer/store/modules/importTasks'
 import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
 import CatalogDownloadModal from '../catalog/CatalogDownloadModal.vue'
 import TeamCardBadge from '../team/TeamCardBadge.vue'
+import { useShowAssetVersion } from '../utils/assetVersionBadge'
 import { pathOfFile, useTeamAsset } from '../team/useTeamAsset'
 import type { CatalogAssetSummary } from '@core/shared/catalogLibrary'
 import { assetFolderAPI } from '@renderer/api/assetFolder'
@@ -1156,6 +1165,8 @@ const { t, locale } = useI18n()
 // ---- 当前数据源能做什么（服务器库时，本地库的改动类操作不出现）
 const libraryStore = useAssetLibraryStore()
 const libraryCaps = computed(() => libraryStore.capabilities)
+/** 设置里「显示资产版本」开关 */
+const showAssetVersion = useShowAssetVersion()
 // 团队工程的那几件事（签出角标、悬停两行、右键三项）都在 useTeamAsset 里
 const teamAsset = useTeamAsset()
 /** 多选时右键「发给外包」「收回」作用于选中的那几个（工程内路径） */
@@ -7017,6 +7028,43 @@ async function handleAssetDragEnd(event: DragEvent): Promise<void> {
             box-shadow: 0 1px 3px var(--shadow-color);
             backdrop-filter: blur(4px);
             letter-spacing: 0.3px;
+          }
+
+          // 资产引擎版本角标：样子跟 hover 的类型标签一套，放左上角，同样 hover 才出现
+          .asset-version-tag {
+            position: absolute;
+            left: 6px;
+            top: 6px;
+            z-index: 5;
+            opacity: 0;
+            transform: scale(0.9);
+            transform-origin: top left;
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            pointer-events: none;
+            user-select: none;
+            font-family:
+              ui-monospace, 'Cascadia Mono', 'JetBrains Mono', 'SF Mono', Menlo, Monaco, Consolas,
+              monospace;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            line-height: 1;
+            font-size: v-bind('`${Math.max(9, Math.min(12, gridItemSize * 0.08))}px`');
+            color: var(--color-text-on-solid);
+            padding: 2px 5px;
+            background: var(--color-bg-overlay);
+            backdrop-filter: blur(4px);
+            border-radius: 4px;
+            transition:
+              opacity 0.2s ease,
+              transform 0.2s ease;
+          }
+
+          &:hover .asset-version-tag {
+            opacity: 1;
+            transform: scale(1);
           }
 
           // 缩略图容器
