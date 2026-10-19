@@ -168,6 +168,7 @@ export const ALWAYS_RESIDENT_TOOL_NAMES = new Set<string>([
   // 工作室模式（`/team`）的四个。只有那种会话里才有它们，有就必须看得见 ——
   // 折进搜索的话，制作人得先搜到「招人」才能开始组队
   'team_hire',
+  'team_dismiss',
   'team_send',
   'team_board',
   'team_deliver',

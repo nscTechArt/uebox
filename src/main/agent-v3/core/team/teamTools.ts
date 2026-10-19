@@ -40,7 +40,14 @@ import {
   type TeamModel,
   type TeamStore
 } from './teamStore'
-import { ACCEPTOR, sameTeamModel, type TeamUsage } from '../../../../shared/agentTeam'
+import {
+  ACCEPTOR,
+  DISMISSAL_GROUNDS,
+  sameTeamModel,
+  type TeamDismissal,
+  type TeamUsage
+} from '../../../../shared/agentTeam'
+import { dismissMember, formatDismissal } from './dismissal'
 import { getTargetProjectPath } from '../projectTargetContext'
 import { withoutSystemMessages } from '../systemMessages'
 import { checkupPassed } from './modelCheckups'
@@ -56,6 +63,7 @@ import {
 
 export const TEAM_TOOL_NAMES = [
   'team_hire',
+  'team_dismiss',
   'team_send',
   'team_board',
   'team_deliver',
@@ -173,6 +181,76 @@ export function createBoardTool(store: TeamStore): UnrealAgentTool<BoardTask[]> 
   })
 }
 
+// ── 辞退 ────────────────────────────────────────────────────────────────
+
+const sameName = (a: string, b: string): boolean =>
+  a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** 制作人能挑的依据：`user` 留给用户在任务板上辞的，制作人不能冒用 */
+const PRODUCER_GROUNDS = DISMISSAL_GROUNDS.filter((g) => g !== 'user') as [
+  Exclude<(typeof DISMISSAL_GROUNDS)[number], 'user'>,
+  ...Exclude<(typeof DISMISSAL_GROUNDS)[number], 'user'>[]
+]
+
+function createDismissTool(
+  deps: TeamToolDeps,
+  busy: BusyMap,
+  now: () => number
+): UnrealAgentTool<TeamDismissal> {
+  const dismissInput = z.object({
+    name: z.string().min(1).describe('要辞退的队员名'),
+    grounds: z
+      .enum(PRODUCER_GROUNDS)
+      .describe(
+        'quality = 交的活不达标；unfinished = 活老是干不完；redundant = 岗位不需要了或和别人重了；' +
+          'user_request = 用户在对话里要求的'
+      ),
+    reason: z.string().min(1).max(500).describe('理由，写给用户看的：具体到哪件活、哪里不行'),
+    evidence: z
+      .array(z.string())
+      .optional()
+      .describe(
+        '它名下的活 id（j…，team_status 的【最近的活】）或任务 id。grounds 是 quality / unfinished 时至少一条'
+      ),
+    handover_to: z
+      .string()
+      .optional()
+      .describe('它没做完的任务交给谁（在册队员）。省略 = 清掉负责人，之后你再分配')
+  })
+  return defineTool<typeof dismissInput, TeamDismissal>({
+    name: 'team_dismiss',
+    namespace: 'core',
+    risk: 'safe',
+    concurrency: 'sequential',
+    description:
+      '辞退一个队员：移出名册，没做完的任务交接出去，它的记忆归档。' +
+      '手上有活的不能辞。说它干得不行要引用它名下的活或任务当证据；' +
+      '盒子另从账上记下它交回、停下了几件，连同理由一起存档，用户在任务板上看得到。' +
+      '只是想换模型或改人设，用 team_hire 同名再招，不用辞。',
+    input: dismissInput,
+    execute: async ({ name, grounds, reason, evidence, handover_to }) => {
+      const record = await dismissMember(deps.store, {
+        name,
+        by: 'producer',
+        grounds,
+        reason,
+        ...(evidence ? { evidence } : {}),
+        ...(handover_to ? { handoverTo: handover_to } : {}),
+        isBusy: (who) => busy.has(who.toLowerCase()) || !!deps.live?.isRunning(who),
+        now
+      })
+      const roster = await deps.store.roster()
+      return {
+        text: formatDismissal(
+          record,
+          roster.map((m) => m.name)
+        ),
+        details: record
+      }
+    }
+  })
+}
+
 // ── 招人 ────────────────────────────────────────────────────────────────
 
 function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<TeamMember> {
@@ -274,6 +352,10 @@ function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<
       }
       await deps.store.putMember(member)
       const roster = await deps.store.roster()
+      // 同名的人辞退过：新招的是新人，记忆从空白开始；用户辞的要让制作人看见理由
+      const dismissed = existing
+        ? undefined
+        : (await deps.store.dismissals()).filter((d) => sameName(d.name, member.name)).at(-1)
       const flags = [
         ...(choosable && member.model
           ? [
@@ -293,7 +375,14 @@ function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<
         text:
           `${existing ? '已更新' : '已招入'} ${member.name}` +
           (flags.length ? `（${flags.join('；')}）` : '') +
-          `。\n团队现在 ${roster.length} 人：${roster.map((m) => m.name).join('、')}`,
+          `。\n团队现在 ${roster.length} 人：${roster.map((m) => m.name).join('、')}` +
+          (dismissed
+            ? `\n注意：${dismissed.by === 'user' ? '用户' : '你'}辞退过同名队员，理由：${dismissed.reason}。` +
+              '这次是新人，不记得之前的活' +
+              (dismissed.by === 'user'
+                ? '；用户没开口要它回来的话，换个名字、换掉让用户不满的地方'
+                : '')
+            : ''),
         details: member
       }
     }
@@ -416,17 +505,23 @@ export function createMemorySaver(
   }
 }
 
+/**
+ * 每个队员手上（在干 + 排着）的活，键是小写名字。
+ *
+ * 同一个队员一次只干一件活。它的记忆是一条对话，两件活同时往里写会串台，
+ * 所以同一个人的第二件活排在第一件后面；不同的人照常并行。
+ *
+ * 不同队员之间**不设人数上限**：真正扛不住并发的是模型套餐，那一层由
+ * `requestGate.ts` 按网关的实际反应自适应调度，队员在编辑器里干活、等工具的时候不占名额。
+ *
+ * 辞退也看它：手上有活的不能辞
+ */
+type BusyMap = Map<string, Promise<unknown>>
+
 function createSendTool(
-  deps: TeamToolDeps
+  deps: TeamToolDeps,
+  busy: BusyMap
 ): UnrealAgentTool<SubAgentResult | { dispatched: string }> {
-  /**
-   * 同一个队员一次只干一件活。它的记忆是一条对话，两件活同时往里写会串台，
-   * 所以同一个人的第二件活排在第一件后面；不同的人照常并行。
-   *
-   * 不同队员之间**不设人数上限**：真正扛不住并发的是模型套餐，那一层由
-   * `requestGate.ts` 按网关的实际反应自适应调度，队员在编辑器里干活、等工具的时候不占名额。
-   */
-  const busy = new Map<string, Promise<unknown>>()
 
   const sendInput = z.object({
     to: z.string().min(1).describe('队员名'),
@@ -497,7 +592,10 @@ function createSendTool(
     const run = previous
       .catch(() => undefined)
       .then(async () => {
-        current = (await deps.store.findMember(member.name)) ?? member
+        const latest = await deps.store.findMember(member.name)
+        // 排队期间被用户在任务板上辞了：这件不开工
+        if (!latest) throw new Error(`${member.name} 在排队期间被辞退了，这件活没开工`)
+        current = latest
         route = await routeMember(deps.models, current)
         startedAt = Date.now()
         jobId = (await deps.store.startJob(member.name, message).catch(() => undefined))?.id
@@ -588,8 +686,10 @@ function createSendTool(
       const member = await deps.store.findMember(to)
       if (!member) {
         const roster = await deps.store.roster()
+        const gone = (await deps.store.dismissals()).filter((d) => sameName(d.name, to)).at(-1)
         throw new Error(
           `团队里没有「${to}」。` +
+            (gone ? `它已被${gone.by === 'user' ? '用户' : '你'}辞退（${gone.reason}）。` : '') +
             (roster.length
               ? `现有：${roster.map((m) => m.name).join('、')}`
               : '还没招任何人，先用 team_hire')
@@ -930,9 +1030,11 @@ export function createTeamTools(
   deps: TeamToolDeps,
   now: () => number = Date.now
 ): UnrealAgentTool<never>[] {
+  const busy: BusyMap = new Map()
   return [
     createHireTool(deps, now),
-    createSendTool(deps),
+    createDismissTool(deps, busy, now),
+    createSendTool(deps, busy),
     createBoardTool(deps.store),
     createDeliverTool(deps),
     // 制作人也能当场跟正在干活的队员说话（配合 team_send 的 wait=false）

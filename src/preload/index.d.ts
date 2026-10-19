@@ -24,6 +24,7 @@ import type {
 import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { EditorHealthResult } from '../shared/editorHealth'
 import type {
+  DismissalErrorCode,
   ExternalTeamSummary,
   ModelCheckup,
   ModelDossier,
@@ -3449,6 +3450,12 @@ declare global {
         providerId: string
         modelId: string
       }) => Promise<{ success: boolean; error?: string; checkup?: ModelCheckup }>
+      /** 辞退一个队员。理由必填；手上有活的不行（errorKey 'busy'）。档案留在团队的账里 */
+      teamMemberDismiss: (args: {
+        sessionId: string
+        name: string
+        reason: string
+      }) => Promise<{ success: boolean; error?: string; errorKey?: DismissalErrorCode }>
       /** 结束团队模式。正在跑的时候不行（errorKey 'running'）；任务板和队员留在盘上 */
       teamEnd: (args: {
         sessionId: string

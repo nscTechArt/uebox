@@ -173,6 +173,16 @@
             >
               {{ selectedCrew.member.persona }}
             </span>
+            <!-- 外部团队的名册在 Claude Code 那边管，盒子不替它辞人 -->
+            <TeamMemberDismiss
+              v-if="!team.external"
+              class="detail-dismiss"
+              :member="selectedCrew.member"
+              :team="team"
+              :busy="!!selectedCrew.open || !!selectedCrew.assignment"
+              pixel
+              @dismiss="(name, reason) => emit('dismiss', name, reason)"
+            />
           </div>
         </div>
         <div class="detail-col">
@@ -538,6 +548,7 @@ import {
 } from '@core/shared/agentTeam'
 
 import MarkdownRenderer from '../MarkdownRenderer.vue'
+import TeamMemberDismiss from '../TeamMemberDismiss.vue'
 import TeamMemberModel from '../TeamMemberModel.vue'
 import {
   latestRequestLine,
@@ -574,6 +585,7 @@ const emit = defineEmits<{
   'reopen-job': [jobId: string]
   'open-models': []
   'set-model': [name: string, model: TeamModel]
+  dismiss: [name: string, reason: string]
 }>()
 const { t } = useI18n()
 const { ago, exact, who, toolVerb, statusText } = useTeamLabels()
@@ -1468,6 +1480,11 @@ button.q-frame {
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.detail-dismiss {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .thread {

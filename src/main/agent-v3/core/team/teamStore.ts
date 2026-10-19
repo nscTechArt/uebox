@@ -27,6 +27,7 @@ import {
   type BoardTask,
   type MemberTier,
   type TaskStatus,
+  type TeamDismissal,
   type TeamEvent,
   type TeamJob,
   type TeamMail,
@@ -41,6 +42,7 @@ export type {
   BoardTask,
   MemberTier,
   TaskStatus,
+  TeamDismissal,
   TeamEvent,
   TeamJob,
   TeamMail,
@@ -138,6 +140,15 @@ export interface TeamStore {
   usage(): Promise<TeamUsageLedger>
   recordEvent(event: Omit<TeamEvent, 'at'>): Promise<void>
   events(limit?: number): Promise<TeamEvent[]>
+  /**
+   * 辞退一个队员，一次落完：移出名册、交接它没做完的任务、记忆归档（不删）、写进人事档案。
+   * 规矩（能不能辞、理由和证据够不够）在 `dismissal.ts` 里查过才调到这里。名册里没有它就抛错
+   */
+  recordDismissal(record: Omit<TeamDismissal, 'memoryArchive'>): Promise<TeamDismissal>
+  /** 人事档案，旧的在前。不截断 */
+  dismissals(): Promise<TeamDismissal[]>
+  /** 用户辞的、还没告诉制作人的：取出来并标成已告诉。制作人每轮开局调一次 */
+  takeUnnotifiedDismissals(): Promise<TeamDismissal[]>
 }
 
 /** 活的账、事件的账各留多少条：它们是近况，不是档案 */
@@ -185,6 +196,7 @@ export function createTeamStore(
   const jobsFile = join(dirs.stateDir, 'jobs.json')
   const eventsFile = join(dirs.stateDir, 'events.json')
   const usageFile = join(dirs.stateDir, 'usage.json')
+  const dismissalsFile = join(dirs.stateDir, 'dismissals.json')
   const historyFile = (name: string): string =>
     join(dirs.stateDir, 'members', `${memberFileBase(name)}.json`)
 
@@ -410,6 +422,60 @@ export function createTeamStore(
         list.push({ ...event, at: now() })
         await writeJson(eventsFile, list.slice(-EVENTS_KEPT))
       }).then(changed),
-    events: async (limit = 20) => (await readJson<TeamEvent[]>(eventsFile, [])).slice(-limit)
+    events: async (limit = 20) => (await readJson<TeamEvent[]>(eventsFile, [])).slice(-limit),
+    recordDismissal: (record) =>
+      serial(async () => {
+        const roster = await readJson<TeamMember[]>(rosterFile, [])
+        const index = roster.findIndex((m) => sameName(m.name, record.name))
+        if (index < 0) throw new Error(`团队里没有「${record.name}」`)
+        roster.splice(index, 1)
+
+        // 没做完的任务：有接手人就改到它名下，没有就清掉负责人。备注里写明原负责人和去向
+        const board = await readJson<BoardTask[]>(boardFile, [])
+        const handed = new Set(record.handover.tasks)
+        for (const task of board) {
+          if (!handed.has(task.id)) continue
+          const line = record.handover.to
+            ? `原负责人 ${record.name} 已辞退，转给 ${record.handover.to}`
+            : `原负责人 ${record.name} 已辞退，待重新分配`
+          task.note = task.note ? `${task.note}\n${line}` : line
+          if (record.handover.to) task.owner = record.handover.to
+          else delete task.owner
+          task.updatedAt = now()
+        }
+
+        // 记忆归档不删：档案要能回头查它当时干了什么；同名再招的是新人，从空白开始
+        let memoryArchive: string | undefined
+        const archiveDir = join(dirs.stateDir, 'members', 'dismissed')
+        const archived = `${memberFileBase(record.name)}-${record.at}.json`
+        try {
+          await fs.mkdir(archiveDir, { recursive: true })
+          await fs.rename(historyFile(record.name), join(archiveDir, archived))
+          memoryArchive = `members/dismissed/${archived}`
+        } catch (error) {
+          // 从没派过活的没有记忆文件，不算错
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+
+        const full: TeamDismissal = { ...record, ...(memoryArchive ? { memoryArchive } : {}) }
+        const archive = await readJson<TeamDismissal[]>(dismissalsFile, [])
+        archive.push(full)
+        // 档案先落：名册、任务板后写。中途断了，最坏是人还在名册上、档案里多一条，不会人没了却没留痕
+        await writeJson(dismissalsFile, archive)
+        await writeJson(boardFile, board)
+        await writeJson(rosterFile, roster)
+        return full
+      }).then(changed),
+    dismissals: () => readJson<TeamDismissal[]>(dismissalsFile, []),
+    takeUnnotifiedDismissals: () =>
+      serial(async () => {
+        const archive = await readJson<TeamDismissal[]>(dismissalsFile, [])
+        const fresh = archive.filter((d) => d.by === 'user' && d.producerNotifiedAt === undefined)
+        if (fresh.length === 0) return fresh
+        const at = now()
+        for (const d of fresh) d.producerNotifiedAt = at
+        await writeJson(dismissalsFile, archive)
+        return fresh
+      })
   }
 }

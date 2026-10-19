@@ -276,6 +276,7 @@
           @end="teamBoard.end"
           @open-models="teamBoard.loadModels"
           @set-model="teamBoard.setMemberModel"
+          @dismiss="teamBoard.dismissMember"
         />
       </template>
     </AgentBrowserPane>

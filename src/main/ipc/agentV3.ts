@@ -160,6 +160,11 @@ import {
   verdictIsStale
 } from '../agent-v3/core/team/boardRecap'
 import {
+  DismissalError,
+  dismissMember,
+  formatUserDismissals
+} from '../agent-v3/core/team/dismissal'
+import {
   createRuntimeScopeId,
   formatLocalNow,
   lastRuntimeScopeId,
@@ -678,8 +683,9 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
   const team = (await loadExecutionOptions(sessionId))?.team
   if (!team) return null
   const store = createTeamStore(teamDirsFor(sessionId))
-  const [members, board, mail, activity, jobs, events, usage] = await Promise.all([
+  const [members, dismissals, board, mail, activity, jobs, events, usage] = await Promise.all([
     store.roster(),
+    store.dismissals(),
     store.board(),
     store.mail(),
     store.activity(TEAM_ACTIVITY_LOOKBACK),
@@ -696,6 +702,7 @@ async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
     deliveries: team.deliveries,
     ...(team.roundStartedAt !== undefined ? { roundStartedAt: team.roundStartedAt } : {}),
     members,
+    ...(dismissals.length ? { dismissals } : {}),
     board,
     mail: mail.slice(-TEAM_PANEL_MAIL),
     jobs,
@@ -807,11 +814,21 @@ async function teamCarryOverBlock(
   options: SessionExecutionOptions
 ): Promise<string> {
   const since = options.team?.roundStartedAt
-  if (!ctx.team || since === undefined) return ''
+  if (!ctx.team) return ''
+  // 用户在任务板上辞了人：告诉制作人一声（只说一次），免得它接着给这个人派活
+  const dismissed = await ctx.team.store
+    .takeUnnotifiedDismissals()
+    .then(formatUserDismissals)
+    .catch(() => '')
+  if (since === undefined) return dismissed
   try {
-    return formatBoardCarryOver(carryOverTasks(await ctx.team.store.board(), since), Date.now())
+    const board = formatBoardCarryOver(
+      carryOverTasks(await ctx.team.store.board(), since),
+      Date.now()
+    )
+    return [dismissed, board].filter(Boolean).join('\n\n')
   } catch {
-    return ''
+    return dismissed
   }
 }
 
@@ -1860,6 +1877,51 @@ export function registerAgentV3IPC(): void {
         models?.checkup
       )
       if (!result.success) return result
+      event.sender.send('agent-v3:team-board', { sessionId })
+      return { success: true }
+    }
+  )
+
+  /**
+   * 用户在任务板上辞退一个队员。规矩和制作人的 `team_dismiss` 同一份（`dismissal.ts`）：
+   * 理由必填，手上有活的不能辞，没做完的任务清掉负责人，档案留底。
+   *
+   * 这一轮正跑着也允许，只要这个人手上没活：派活在轮到它开工时才读名册，
+   * 排着队的那件会因为它不在名册上而不开工。下一轮开局制作人会被告知（`teamCarryOverBlock`）。
+   */
+  ipcMain.handle(
+    'agent-v3:team-member-dismiss',
+    async (event, args: { sessionId?: string; name?: string; reason?: string }) => {
+      const { sessionId, name, reason } = args ?? {}
+      if (!sessionId || !name || typeof reason !== 'string') {
+        return { success: false, error: 'sessionId、name、reason 都要给' }
+      }
+      if (!(await loadExecutionOptions(sessionId))?.team) {
+        return { success: false, error: '这条 session 不是团队模式' }
+      }
+      const store = createTeamStore(teamDirsFor(sessionId))
+      // 没在跑的时候，账上挂着的「在干」是上次被打断留下的，下一轮开局会收掉，不算手上有活
+      const running = activeAgents.has(sessionId)
+      const openJobs = running
+        ? (await store.jobs()).filter((job) => job.endedAt === undefined)
+        : []
+      try {
+        await dismissMember(store, {
+          name,
+          by: 'user',
+          grounds: 'user',
+          reason: reason.slice(0, 500),
+          isBusy: (who) =>
+            running &&
+            (!!liveTeams.get(sessionId)?.isRunning(who) ||
+              openJobs.some((job) => job.member.toLowerCase() === who.toLowerCase()))
+        })
+      } catch (error) {
+        if (error instanceof DismissalError) {
+          return { success: false, error: error.message, errorKey: error.code }
+        }
+        throw error
+      }
       event.sender.send('agent-v3:team-board', { sessionId })
       return { success: true }
     }

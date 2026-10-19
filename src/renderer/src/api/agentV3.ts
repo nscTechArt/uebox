@@ -8,6 +8,7 @@
 import type { AgentTurnUsage } from '@core/shared/agentUsage'
 import type { AgentReviewResult, AgentReviewTarget } from '@core/shared/agentReview'
 import type {
+  DismissalErrorCode,
   ExternalTeamSummary,
   ModelCheckup,
   ModelDossier,
@@ -506,6 +507,15 @@ export const agentV3API = {
     model: { providerId: string; modelId: string }
   ): Promise<{ success: boolean; error?: string; checkup?: ModelCheckup }> {
     return window.api.agentV3.teamMemberModel({ sessionId, name, ...model })
+  },
+
+  /** 任务板上辞退队员。同上，不走 `unwrapResult()`：失败按 errorKey 在面板上就地说 */
+  teamMemberDismiss(
+    sessionId: string,
+    name: string,
+    reason: string
+  ): Promise<{ success: boolean; error?: string; errorKey?: DismissalErrorCode }> {
+    return window.api.agentV3.teamMemberDismiss({ sessionId, name, reason })
   },
 
   teamEnd(sessionId: string): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {

@@ -52,6 +52,95 @@ export interface TeamMember {
   hiredAt: number
 }
 
+/**
+ * 辞退的依据。制作人辞人必须挑一条；用户在任务板上辞的记 `user`，由用户自己写理由。
+ *
+ * - `quality` 交的活不达标（被打回、验收没过），`unfinished` 活老是干不完 ——
+ *   这两条是说这个人干得不行，必须引用它自己名下的活或任务当证据，不许空口说
+ * - `redundant` 岗位不需要了、和别人重了；`user_request` 用户在对话里要求的 ——
+ *   不评价这个人，不要求绩效证据，理由里写清楚
+ */
+export const DISMISSAL_GROUNDS = [
+  'quality',
+  'unfinished',
+  'redundant',
+  'user_request',
+  'user'
+] as const
+export type DismissalGrounds = (typeof DISMISSAL_GROUNDS)[number]
+
+/** 辞退被退回的原因。界面按它选双语文案 */
+export type DismissalErrorCode =
+  | 'not-found'
+  | 'reserved'
+  | 'busy'
+  | 'no-reason'
+  | 'no-evidence'
+  | 'bad-evidence'
+  | 'bad-handover'
+
+/** 说「这个人干得不行」的依据：要有证据 */
+export const PERFORMANCE_GROUNDS: ReadonlySet<DismissalGrounds> = new Set(['quality', 'unfinished'])
+
+/** 辞退档案里引用的一条证据：活（`j…`）或任务板上的一项，带上当时的原文 */
+export interface DismissalEvidence {
+  kind: 'job' | 'task'
+  id: string
+  /** 活的派活第一句 + 结局，或任务的标题 + 状态。当场抄下来：活的账会被截掉，档案不会 */
+  text: string
+}
+
+/** 辞退那一刻盒子从账上数出来的事实，不是谁说的 */
+export interface DismissalFacts {
+  /** 交回来的活 */
+  jobsDone: number
+  /** 停下、没干完的活 */
+  jobsStopped: number
+  /** 名下任务按状态数 */
+  tasks: Record<TaskStatus, number>
+}
+
+/** 从活的账和任务板上数出一个人的事实。辞退对话框和档案用同一份，用户看到的就是存下的 */
+export function countDismissalFacts(
+  name: string,
+  jobs: readonly TeamJob[],
+  board: readonly BoardTask[]
+): DismissalFacts {
+  const key = name.trim().toLowerCase()
+  const mine = jobs.filter((j) => j.member.trim().toLowerCase() === key)
+  const tasks = Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])) as Record<TaskStatus, number>
+  for (const task of board) {
+    if (task.owner && task.owner.trim().toLowerCase() === key) tasks[task.status] += 1
+  }
+  return {
+    jobsDone: mine.filter((j) => j.outcome === 'done').length,
+    jobsStopped: mine.filter((j) => j.outcome === 'stopped').length,
+    tasks
+  }
+}
+
+/**
+ * 一份辞退档案。存在 `dismissals.json`，不截断：这是人事档案，不是近况。
+ * 界面、制作人看到的辞退记录都读它
+ */
+export interface TeamDismissal {
+  name: string
+  at: number
+  by: 'producer' | 'user'
+  grounds: DismissalGrounds
+  reason: string
+  evidence: DismissalEvidence[]
+  facts: DismissalFacts
+  /** 辞退那一刻的完整设定（人设、模型、工具范围、招入时间） */
+  member: TeamMember
+  /** 没做完的任务交给了谁。`to` 没有 = 清掉了负责人，等制作人重新分配 */
+  handover: { tasks: string[]; to?: string }
+  /** 它的记忆归档到了哪个文件（`members/dismissed/` 下）。从没派过活的没有 */
+  memoryArchive?: string
+  /** 用户辞的：制作人在哪一轮开局看到了。没有 = 还没告诉它 */
+  producerNotifiedAt?: number
+}
+
 export function sameTeamModel(a: TeamModel | undefined, b: TeamModel | undefined): boolean {
   return !!a && !!b && a.providerId === b.providerId && a.modelId === b.modelId
 }
@@ -328,6 +417,8 @@ export interface TeamStateView {
    */
   roundStartedAt?: number
   members: TeamMember[]
+  /** 辞退档案，旧的在前。没辞过人的没有 */
+  dismissals?: TeamDismissal[]
   board: BoardTask[]
   /** 最近的留言，旧的在前 */
   mail: TeamMail[]

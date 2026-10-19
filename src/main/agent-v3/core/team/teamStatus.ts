@@ -140,6 +140,25 @@ export async function buildTeamStatus(deps: TeamStatusDeps): Promise<string> {
     )
   }
 
+  // ── 最近的活：带 id，辞退时引用证据用 ──
+  const jobs = (await deps.store.jobs(8)).filter((job) => job.endedAt !== undefined)
+  if (jobs.length) {
+    sections.push(
+      [
+        '【最近的活】',
+        ...[...jobs]
+          .reverse()
+          .map(
+            (job) =>
+              `- ${job.id} ${job.member}「${firstLine(job.brief, 40)}」：` +
+              (job.outcome === 'done'
+                ? '交回'
+                : `停下${job.reason ? `（${firstLine(job.reason, 40)}）` : ''}`)
+          )
+      ].join('\n')
+    )
+  }
+
   // ── 任务板 ──
   const board = await deps.store.board()
   if (board.length) {
@@ -189,7 +208,7 @@ export function createStatusTool(deps: TeamStatusDeps): UnrealAgentTool<unknown>
     concurrency: 'parallel',
     description:
       '团队此刻的现状，一次查全：磁盘上的资产概况和最近存过的文件、谁在干什么、谁占着哪些资产（已占多久）、' +
-      '最近实际改了什么（按写操作记账）、任务板上很久没更新的项、最近的快照。' +
+      '最近实际改了什么（按写操作记账）、最近交回和停下的活（带 id）、任务板上很久没更新的项、最近的快照。' +
       '队员说的和你查的对不上时，以这里为准；派活前先看一眼，别给队员发过期的现状。',
     input: statusInput,
     execute: async () => ({ text: await buildTeamStatus(deps) })

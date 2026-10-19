@@ -2750,6 +2750,32 @@ export default {
         checkupFailed: '{model} 检测未通过，未更换：{reason}',
         checkupNoTools: '两次要求调用工具均未调用，该模型无法担任队员'
       },
+      dismiss: {
+        action: '辞退',
+        title: '辞退 {name}',
+        lead: '{name} 将移出团队，记忆归档保留，不会删除。',
+        handover: '名下 {n} 项未完成的任务将清除负责人，由制作人重新分配。',
+        facts: '已交回 {done} 项任务，中途停止 {stopped} 项',
+        reasonLabel: '辞退理由',
+        reasonPlaceholder: '说明哪里不满意。理由记入档案，并在下一轮告知制作人',
+        busyHint: '{name} 正在执行任务，任务交回后才能辞退',
+        busy: '{name} 正在执行任务，请在任务交回或本轮结束后再辞退',
+        failed: '辞退失败，请稍后重试',
+        records: '已辞退 {n} 人',
+        byUser: '由你辞退',
+        byProducer: '由制作人辞退',
+        grounds: {
+          quality: '交付不达标',
+          unfinished: '任务屡次未完成',
+          redundant: '岗位不再需要',
+          user_request: '应你的要求',
+          user: '你的决定'
+        },
+        evidence: '证据',
+        handedTo: '未完成的任务已转给 {name}：{tasks}',
+        unassigned: '未完成的任务已清除负责人：{tasks}',
+        memoryArchived: '记忆已归档'
+      },
       office: {
         aria: '团队办公室：{summary}',
         noTasksFor: '{name} 名下暂无任务',
@@ -2903,6 +2929,7 @@ export default {
         team_message: '发送留言',
         team_deliver: '提交交付',
         team_hire: '添加队员',
+        team_dismiss: '辞退队员',
         team_snapshot: '保存工程快照',
         ue_list: '查看列表',
         ue_project_asset_ranking: '统计资产占用',

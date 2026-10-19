@@ -1526,6 +1526,8 @@ const api = {
       providerId: string
       modelId: string
     }) => ipcRenderer.invoke('agent-v3:team-member-model', args),
+    teamMemberDismiss: (args: { sessionId: string; name: string; reason: string }) =>
+      ipcRenderer.invoke('agent-v3:team-member-dismiss', args),
     teamEnd: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-end', args),
     /** 设置「团队」页：模型档案、重新检测 */
     teamModels: () => ipcRenderer.invoke('agent-v3:team-models'),

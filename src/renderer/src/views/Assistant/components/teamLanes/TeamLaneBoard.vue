@@ -240,6 +240,15 @@
               <span v-if="c.member.persona" class="persona" :title="c.member.persona">
                 {{ c.member.persona }}
               </span>
+              <!-- 外部团队的名册在 Claude Code 那边管，盒子不替它辞人 -->
+              <TeamMemberDismiss
+                v-if="!team.external"
+                class="dismiss"
+                :member="c.member"
+                :team="team"
+                :busy="!!c.open || !!c.assignment"
+                @dismiss="(name, reason) => emit('dismiss', name, reason)"
+              />
             </div>
           </div>
         </li>
@@ -326,6 +335,7 @@ import {
 } from '@core/shared/agentTeam'
 
 import MarkdownRenderer from '../MarkdownRenderer.vue'
+import TeamMemberDismiss from '../TeamMemberDismiss.vue'
 import TeamMemberModel from '../TeamMemberModel.vue'
 import TeamTaskList from '../TeamTaskList.vue'
 import {
@@ -354,6 +364,7 @@ const emit = defineEmits<{
   'reopen-job': [jobId: string]
   'open-models': []
   'set-model': [name: string, model: TeamModel]
+  dismiss: [name: string, reason: string]
 }>()
 const { t } = useI18n()
 const { ago, exact, who, toolVerb, statusText, now } = useTeamLabels()
@@ -1079,6 +1090,11 @@ function entryText(entry: LogEntry): string {
   font-size: var(--font-size-xs);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.dismiss {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .tail {
