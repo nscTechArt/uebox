@@ -194,6 +194,8 @@ export function isDefaultResidentTool(tool: GroupedTool): boolean {
  */
 const DOMAIN_TERMS: Record<string, string> = {
   'ue.blueprint': '蓝图 逻辑 节点 变量 事件 函数 blueprint graph node logic event function',
+  'core.result':
+    '存档 大结果 目录 编号 查行 筛选 翻页 完整的行 archived ref result query rows filter page',
   'ue.blueprint.usages':
     '谁在用 哪些蓝图 用到 调用了 引用 波及 改名 删除 全局搜索 在所有蓝图中查找 uproperty ufunction find in blueprints usages callers references rename',
   'ue.material': '材质 材质实例 表面 颜色 贴图 纹理 material shader color surface texture',
@@ -392,6 +394,9 @@ function pickGroups(
  * 以及落盘的 `details.toolSearch` 恢复路径。
  */
 export function toolSearchGroup(tool: GroupedTool): string {
+  // 查存档的大结果。命名空间留在 core（设置页分类不变），但不能跟着 core 组一起加载：
+  // 它由第一次存档自动带上（见 `core/resultArchive.ts`），不是搜出来的
+  if (tool.name === 'result_query') return 'core.result'
   if (tool.name === 'ue_screenshot' || tool.name === 'ue_focus_viewport') return 'ue.actor'
   // 实验性、说明又长（约 5 KB），不跟 ue.editor 整组常驻，要用时 search_tools 按名加载
   if (tool.name === 'ue_autoplay') return 'ue.editor.autoplay'

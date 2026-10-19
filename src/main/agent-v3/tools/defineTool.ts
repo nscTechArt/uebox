@@ -177,6 +177,20 @@ export interface ToolMeta {
    * 在预演上点的允许放不过真正的那次。
    */
   riskFor?: (args: unknown) => ToolRisk
+  /** 见 `ArchiveSpec`。没声明的工具结果原样给模型 */
+  archive?: ArchiveSpec
+}
+
+/**
+ * 结果里哪个字段是「一张表」，以及目录页显示哪几列。
+ *
+ * 结果太大时只给模型目录页和一个编号，整份存在这条消息的 details 里，
+ * 模型用 `result_query` 按条件取（见 `core/resultArchive.ts`）。
+ * 键是表字段名，值是目录列；同一个工具不同动作回不同的表时写多项，取第一个出现的。
+ */
+export interface ArchiveSpec {
+  // 值允许 undefined：注册表是一张异构字面量数组，TS 会给别的工具的表名补上 `?: undefined`
+  lists: Readonly<Record<string, readonly string[] | undefined>>
 }
 
 const RISK_RANK: Record<ToolRisk, number> = { safe: 0, mutating: 1, destructive: 2 }

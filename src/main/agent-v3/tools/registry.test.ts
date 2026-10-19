@@ -86,6 +86,15 @@ describe('buildAllTools', () => {
     expect(new Set(names).size).toBe(names.length)
   })
 
+  // 大结果存档（core/resultArchive.ts）只认工具声明的表。声明要从注册表一路带到 unrealBox 上，
+  // 少一层转手就静默失效：结果照旧整份给，没有任何报错
+  it('声明了存档的工具把表声明带到了 unrealBox 上', () => {
+    const byName = new Map(buildAllTools().map((t) => [t.name, t]))
+    expect(byName.get('search_assets')?.unrealBox.archive?.lists.assets).toContain('name')
+    expect(byName.get('project_list')?.unrealBox.archive?.lists.templates).toContain('name')
+    expect(byName.get('project_manage')?.unrealBox.archive).toBeUndefined()
+  })
+
   /**
    * 工具**几乎都是**无状态的，唯一的例外是 `generate_3d_model`：它的入参表取决于
    * 用户给「3D 生成」绑的是哪家厂商。不跟着配置作废的话，用户在偏好设置里换完

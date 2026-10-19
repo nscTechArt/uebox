@@ -41,6 +41,8 @@ import {
 } from '../tools/builtin/setSessionProject'
 import { createBrowserTools } from '../tools/builtin/browser'
 import { createTaskTool, type SubAgentResult } from '../tools/builtin/task'
+import { createResultQueryTool } from '../tools/builtin/resultQuery'
+import { RESULT_QUERY_TOOL_NAME, createResultArchiver } from './resultArchive'
 import { oneLine, pickStepTarget } from '../../../shared/stepTarget'
 import {
   ALWAYS_RESIDENT_TOOL_NAMES,
@@ -619,7 +621,9 @@ export function resolveAgentTools(
   ctx: SessionContext,
   skills: SkillMetadata[],
   taskTool?: UnrealAgentTool<never>,
-  loadSkillTools?: Parameters<typeof createSkillTools>[2]
+  loadSkillTools?: Parameters<typeof createSkillTools>[2],
+  /** 查存档大结果的工具（见 `core/resultArchive.ts`）。和 task 一样要引用 Agent 实例，由调用方造 */
+  resultQueryTool?: UnrealAgentTool<never>
 ): UnrealAgentTool<never>[] {
   const tools = resolveCandidateTools(ctx)
   tools.push(
@@ -644,9 +648,14 @@ export function resolveAgentTools(
   if (!ctx.isSubAgent && taskTool) {
     tools.push(taskTool)
   }
+  if (resultQueryTool) tools.push(resultQueryTool)
 
   const policed = applyFinalToolPolicy(tools, ctx)
-  return policed
+  // 授权过滤之后池里一个声明存档的工具都不剩（按名单点的子任务、只给了部分领域的会话），
+  // 就永远不会有编号可查，不白占一份工具定义
+  return policed.some((tool) => tool.unrealBox.archive)
+    ? policed
+    : policed.filter((tool) => tool.name !== RESULT_QUERY_TOOL_NAME)
 }
 
 export interface CreatedAgent {
@@ -773,6 +782,16 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         runSubAgent: async (input) => runSubAgent(ctx, input)
       }) as unknown as UnrealAgentTool<never>)
 
+  // 同上，闭包只在 Agent 构造完之后执行。「修改类」按工具自己声明的风险算；
+  // 不认识的工具（池外的名字）当作改过 —— 宁可多提醒一句数据可能已变
+  const resultQueryTool = createResultQueryTool({
+    getMessages: () => agent.state.messages,
+    isMutating: (toolName, args) => {
+      const meta = byName.get(toolName)?.unrealBox
+      return meta ? effectiveRisk(meta, args) !== 'safe' : true
+    }
+  }) as unknown as UnrealAgentTool<never>
+
   /*
    * 工具池装配一次，**按引擎状态切两个视图**。
    *
@@ -789,7 +808,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     { ...ctx, ueConnected: true },
     skills,
     taskTool,
-    ctx.toolSearchEnabled ? (content) => search!.loadFromSkill(content) : undefined
+    ctx.toolSearchEnabled ? (content) => search!.loadFromSkill(content) : undefined,
+    resultQueryTool
   )
   // 工作室模式的工具排在授权过滤之后追加：招人时要把制作人手上有哪些命名空间
   // 写进描述，得先有那份清单。它们全是 `core` / safe，过滤本来也不会拿掉它们
@@ -911,6 +931,14 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       )
   })
 
+  // 大结果存档，规则见 `createResultArchiver`。闭包只在 Agent 构造完之后执行
+  const archiveLargeResult = createResultArchiver({
+    getMessages: () => agent.state.messages,
+    specFor: (toolName) => byName.get(toolName)?.unrealBox.archive,
+    canQuery: () => byName.has(RESULT_QUERY_TOOL_NAME),
+    loadQueryTool: () => search?.loadFromSkill(RESULT_QUERY_TOOL_NAME).details
+  })
+
   const agent = new Agent({
     streamFn: search
       ? (model, context, options) =>
@@ -1022,12 +1050,16 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       // （理由见 toolSearch.ts 顶部），于是这层包装也一起去掉 —— 熔断照常管
       // 真正的失败和原地打转，不需要为一个不会发生的状态留特例。
       loopBreaker.after(hookCtx)
-      const content = hookCtx.result.content ?? []
+      const archived = archiveLargeResult(hookCtx)
+      const content = archived?.content ?? hookCtx.result.content ?? []
       const note = await experienceRuntime()?.after({
         tool: hookCtx.toolCall.name,
         args: hookCtx.args,
         isError: hookCtx.isError,
-        text: content.map((part) => (part.type === 'text' ? part.text : '')).join('\n')
+        // 经验记录看的是工具真正回了什么，不是存档后的目录页
+        text: (hookCtx.result.content ?? [])
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join('\n')
       })
       // 本工程见过这个错：把上次怎么过的挂在错误结果后面，和写文件后贴体检报告同一个手法
       // 清单没走完也挂一句，不然长活里模型会忘了推进（见 `planReminder`）
@@ -1035,9 +1067,11 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         note,
         planReminder(onlineTools, hookCtx.assistantMessage, hookCtx.toolCall.id)
       ].filter((text): text is string => !!text)
-      return extra.length
-        ? { content: [...content, ...extra.map((text) => ({ type: 'text' as const, text }))] }
-        : undefined
+      if (!extra.length && !archived) return undefined
+      return {
+        content: [...content, ...extra.map((text) => ({ type: 'text' as const, text }))],
+        ...(archived ? { details: archived.details } : {})
+      }
     },
     toolExecution: 'parallel',
     steeringMode: 'all',

@@ -126,6 +126,7 @@ export function resetPrecompactionsForTest(): void {
 const SUMMARY_INSTRUCTIONS = `这是虚幻引擎工作流的对话。生成摘要时**必须**逐字保留：
 - 已确认存在的资产完整路径（如 /Game/Materials/M_Wood），以及已确认**不存在**的路径
 - 材质/蓝图图表里已创建节点的 node_id 与类型
+- 被存档的大结果的编号（archived.ref，如 r3）和它装的是什么 —— 凭编号还能用 result_query 取回细节
 - 已完成的操作及其结果（创建了什么、连了哪些线、编译是否通过）
 - 用户明确表达过的偏好和约束
 - 尚未完成的待办
