@@ -473,6 +473,9 @@ export function createTeamStore(
           // 从没派过活的没有记忆文件，不算错
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         }
+        // 压缩检查点只是这份记忆的缓存，记忆归档了它就没用了，直接删。
+        // 留着也不会被同名新人误用（指纹对不上），但会在 members/ 里留一个没人认的文件
+        await fs.rm(checkpointFile(record.name), { force: true })
 
         const full: TeamDismissal = { ...record, ...(memoryArchive ? { memoryArchive } : {}) }
         const archive = await readJson<TeamDismissal[]>(dismissalsFile, [])

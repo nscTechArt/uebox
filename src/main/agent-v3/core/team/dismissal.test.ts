@@ -117,6 +117,7 @@ describe('辞退留痕', () => {
       { id: 't3', title: '移动', owner: '程序', status: 'todo' }
     ])
     await store.saveHistory('美术', [])
+    await store.saveMemberCheckpoint('美术', { summary: '旧摘要' })
 
     const record = await dismissMember(
       store,
@@ -149,6 +150,10 @@ describe('辞退留痕', () => {
     const stateDir = join(dir, 'state')
     expect(existsSync(join(stateDir, 'members', `${memberFileBase('美术')}.json`))).toBe(false)
     expect(existsSync(join(stateDir, record.memoryArchive!))).toBe(true)
+    // 压缩检查点是那份记忆的缓存，记忆归档了它就删掉，不留给同名新人
+    expect(existsSync(join(stateDir, 'members', `${memberFileBase('美术')}.compaction.json`))).toBe(
+      false
+    )
 
     const board = await store.board()
     expect(board.find((t) => t.id === 't2')).toMatchObject({
