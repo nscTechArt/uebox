@@ -1,0 +1,6 @@
+{
+  "name": "uebox",
+  "version": "0.1.0",
+  "description": "Connect Claude Code to Unreal Box: exposes the box's shared engine tools over MCP. No setup beyond one token.",
+  "author": { "name": "Unreal Box" }
+}

@@ -43,7 +43,9 @@ const REQUIRED = [
   'package/dist/index.js',
   'package/README.md',
   'package/skills/uebox/SKILL.md',
-  'package/claude-plugin/.claude-plugin/plugin.json'
+  'package/claude-plugin/.claude-plugin/plugin.json',
+  'package/claude-plugin-mcp/.claude-plugin/plugin.json',
+  'package/claude-plugin-mcp/.mcp.json'
 ]
 
 function packedFiles() {
