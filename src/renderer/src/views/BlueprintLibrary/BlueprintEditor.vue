@@ -29,7 +29,7 @@ import type {
 } from '@renderer/views/BlueprintLibrary/types/blueprint'
 import BlueprintRenderer from '@renderer/views/BlueprintLibrary/BlueprintRenderer.vue'
 import SnippetDetail from '@renderer/views/BlueprintLibrary/SnippetDetail.vue'
-import { detectSnippetForm } from '@renderer/views/library-common/utils/snippetForm'
+import { detectPayloadForm } from '@core/shared/snippetPayload'
 import { appExecuteAgent } from '@renderer/views/Assistant/composables/appAgentRunner'
 import { ensureSessionWithTitle } from '@renderer/views/Assistant/composables/chatSendPrimitives'
 import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
@@ -148,13 +148,13 @@ const blueprint = computed(
 /**
  * 片段条目（新形态）的 payload；老条目是 null。
  *
- * 判别规则见 `library-common/utils/snippetForm.ts` —— 缺 `form` 一律按老形态，
+ * 判别规则见 `src/shared/snippetPayload.ts` —— 缺 `form` 一律按老形态，
  * 因为 2026-08-29 之前的包里根本没有这个字段，判错会让存量条目全打不开。
  */
 const snippetPayload = computed(() => {
   const bp = blueprint.value as unknown as Record<string, unknown> | null
   if (!bp) return null
-  return detectSnippetForm(bp) === 'snippet' ? bp : null
+  return detectPayloadForm(bp) === 'snippet' ? bp : null
 })
 
 /** 「放进当前工程」跑到哪儿了 */

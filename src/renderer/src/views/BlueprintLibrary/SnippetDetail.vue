@@ -27,11 +27,8 @@ import LibraryEditorTopbar from '@renderer/views/library-common/components/Libra
 import LibraryAIPanel from '@renderer/views/library-common/components/LibraryAIPanel.vue'
 import type { LibraryChatContext } from '@renderer/views/Assistant/composables/libraryChatContext'
 import type { AIPanelMode } from '@renderer/views/library-common/types'
-import {
-  readSnippetPayload,
-  summarizeSnippet,
-  type SnippetPayload
-} from '@renderer/views/library-common/utils/snippetForm'
+import { summarizeSnippet } from '@renderer/views/library-common/utils/snippetSummary'
+import { readSnippetPayload, type SnippetFormPayload } from '@core/shared/snippetPayload'
 
 const props = withDefaults(
   defineProps<{
@@ -57,7 +54,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const snippet = computed<SnippetPayload | null>(() => readSnippetPayload(props.payload))
+const snippet = computed<SnippetFormPayload | null>(() => readSnippetPayload(props.payload))
 const summary = computed(() => (snippet.value ? summarizeSnippet(snippet.value) : null))
 
 /** 正文最多往上下文里塞多少。一段片段通常几千字符，整段带得起 */
