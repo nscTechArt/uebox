@@ -101,7 +101,9 @@ function armIdleClose(): void {
   idleTimer = setTimeout(closeReaders, IDLE_CLOSE_MS)
 }
 
-function runSearch(request: Extract<AssetQueryRequest, { op: 'search' | 'engine-facet' }>): unknown[] {
+function runSearch(
+  request: Extract<AssetQueryRequest, { op: 'search' | 'engine-facet' }>
+): unknown[] {
   vaultDb = ensure(vaultDb, request.vaultDbPath, request.mmap)
   let pub: Database.Database | null = null
   if (request.publicDbPath) {

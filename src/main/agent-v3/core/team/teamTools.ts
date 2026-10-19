@@ -595,7 +595,6 @@ function createSendTool(
   deps: TeamToolDeps,
   busy: BusyMap
 ): UnrealAgentTool<SubAgentResult | { dispatched: string }> {
-
   const sendInput = z.object({
     to: z.string().min(1).describe('队员名'),
     message: z

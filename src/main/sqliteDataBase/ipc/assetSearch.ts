@@ -52,7 +52,11 @@ export function registerAssetSearchIPC(): void {
   // 筛选栏的引擎版本下拉：各版本有几个（同一组筛选条件，见 countAssetsByEngineVersion）
   ipcMain.handle('db:assetSearch:engineFacet', async (_event, criteria: AssetSearchCriteria) => {
     try {
-      const data = await engineFacetOffMainThread(getVaultDatabase(), criteria ?? {}, safePublicDb())
+      const data = await engineFacetOffMainThread(
+        getVaultDatabase(),
+        criteria ?? {},
+        safePublicDb()
+      )
       return { success: true, data }
     } catch (error) {
       if (error instanceof QueryCancelledError) {

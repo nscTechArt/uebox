@@ -22,8 +22,7 @@ export function writeShowAssetVersion(value: boolean): void {
 export function useShowAssetVersion(): Ref<boolean> {
   const show = ref(readShowAssetVersion(localStorage))
   const sync = (e: Event): void => {
-    const key =
-      e instanceof StorageEvent ? e.key : (e as CustomEvent<{ key?: string }>).detail?.key
+    const key = e instanceof StorageEvent ? e.key : (e as CustomEvent<{ key?: string }>).detail?.key
     if (key === SHOW_ASSET_VERSION_KEY) show.value = readShowAssetVersion(localStorage)
   }
   onMounted(() => {
