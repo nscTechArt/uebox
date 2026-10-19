@@ -121,26 +121,90 @@ export interface TeamToolDeps {
 
 // ── 任务板 ──────────────────────────────────────────────────────────────
 
-export function renderBoard(tasks: BoardTask[]): string {
-  if (tasks.length === 0) return '任务板是空的。'
+/** 计数那一行。整张板、只看几项、改完回执都以它开头，模型随时知道全局 */
+function boardSummary(tasks: BoardTask[]): string {
   const count = (status: string): number => tasks.filter((t) => t.status === status).length
-  const lines = [
-    `任务板：${tasks.length} 项（待办 ${count('todo')} · 进行中 ${count('doing')} · 完成 ${count('done')} · 卡住 ${count('blocked')}）`
-  ]
-  for (const t of tasks) {
-    lines.push(
-      `- [${t.status}] ${t.id} ${t.title}` +
-        (t.owner ? ` @${t.owner}` : '') +
-        (t.deps?.length ? ` ←${t.deps.join(',')}` : '') +
-        (t.evidence ? `\n    证据：${t.evidence}` : '') +
-        (t.note ? `\n    备注：${t.note}` : '')
+  return `任务板：${tasks.length} 项（待办 ${count('todo')} · 进行中 ${count('doing')} · 完成 ${count('done')} · 卡住 ${count('blocked')}）`
+}
+
+/** 一项任务。`full` 时带上证据和备注全文，否则只标「有」 */
+function boardLine(t: BoardTask, full: boolean): string {
+  const head =
+    `- [${t.status}] ${t.id} ${t.title}` +
+    (t.owner ? ` @${t.owner}` : '') +
+    (t.deps?.length ? ` ←${t.deps.join(',')}` : '')
+  if (full) {
+    return (
+      head +
+      (t.evidence ? `\n    证据：${t.evidence}` : '') +
+      (t.note ? `\n    备注：${t.note}` : '')
     )
+  }
+  return head + (t.evidence ? ' · 有证据' : '') + (t.note ? ' · 有备注' : '')
+}
+
+/**
+ * 任务板给模型看的样子。
+ *
+ * **已完成的项默认只列一行，证据和备注折叠成「有证据 / 有备注」。** 以前每次都是整张板
+ * 带全文：真机上一个团队 138 项、每项带完整证据，一次 list 约 14 万字符，一个队员的
+ * 历史里攒了 13 份 —— 工具结果进了上下文就不出来，这是把队员顶到厂商上下文上限的
+ * 放大器之一。完成项的证据是「交回时」要看的东西，之后大多只用知道它做完了；
+ * 要验收某几项，`team_board` list 带 `ids` 看全文（`expand`）。
+ *
+ * 没做完的项照旧带全文：那是正在干的活，备注里往往就是下一步。
+ */
+export function renderBoard(
+  tasks: BoardTask[],
+  options: { expand?: readonly string[] } = {}
+): string {
+  if (tasks.length === 0) return '任务板是空的。'
+  const expand = new Set(options.expand ?? [])
+  const lines = [boardSummary(tasks)]
+  let folded = false
+  for (const t of tasks) {
+    const full = t.status !== 'done' || expand.has(t.id)
+    if (!full && (t.evidence || t.note)) folded = true
+    lines.push(boardLine(t, full))
+  }
+  if (folded) {
+    lines.push('（已完成项的证据和备注折叠了：team_board list 带 ids，如 ["t1"]，看全文）')
   }
   return lines.join('\n')
 }
 
+/** 只看这几项：计数行 + 这几项的全文。没有的 id 说出来，免得模型以为它们存在 */
+export function renderBoardTasks(tasks: BoardTask[], ids: readonly string[]): string {
+  const wanted = new Set(ids)
+  const found = tasks.filter((t) => wanted.has(t.id))
+  const missing = ids.filter((id) => !tasks.some((t) => t.id === id))
+  return [
+    boardSummary(tasks),
+    ...found.map((t) => boardLine(t, true)),
+    ...(missing.length ? [`（任务板上没有：${missing.join('、')}）`] : [])
+  ].join('\n')
+}
+
+/**
+ * 改完的回执：计数行 + 改到的那几项。
+ *
+ * 不再回整张板：改一项就回 138 项全文，正是上面说的那个放大器里占大头的一份 ——
+ * 改任务板是队员最常做的事。要看整张板用 list
+ */
+export function renderBoardUpdate(tasks: BoardTask[], changedIds: readonly string[]): string {
+  const changed = new Set(changedIds)
+  return [
+    `已更新 ${changed.size} 项。${boardSummary(tasks)}`,
+    ...tasks.filter((t) => changed.has(t.id)).map((t) => boardLine(t, true))
+  ].join('\n')
+}
+
 const boardInput = z.object({
   action: z.enum(['list', 'update']).describe('list = 看整张板；update = 新建或修改任务'),
+  ids: z
+    .array(z.string())
+    .optional()
+    .describe('action=list 时只看这几项，带证据和备注全文（整张板里已完成项的证据是折叠的）'),
   tasks: z
     .array(
       z.object({
@@ -169,14 +233,23 @@ export function createBoardTool(store: TeamStore): UnrealAgentTool<BoardTask[]> 
       '按 id 合并：写一个已有的 id 就是修改它，新 id 就是新建（要给 title）。' +
       '标 done 时把证据写进 evidence —— 没有证据的「做完」谁也分不出真假。',
     input: boardInput,
-    execute: async ({ action, tasks }) => {
+    execute: async ({ action, ids, tasks }) => {
       if (action === 'update') {
         if (!tasks?.length) throw new Error('action=update 需要 tasks')
         const board = await store.patchBoard(tasks)
-        return { text: renderBoard(board), details: board }
+        return {
+          text: renderBoardUpdate(
+            board,
+            tasks.map((t) => t.id)
+          ),
+          details: board
+        }
       }
       const board = await store.board()
-      return { text: renderBoard(board), details: board }
+      return {
+        text: ids?.length ? renderBoardTasks(board, ids) : renderBoard(board),
+        details: board
+      }
     }
   })
 }

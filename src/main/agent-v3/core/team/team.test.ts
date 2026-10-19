@@ -692,14 +692,71 @@ describe('团队工具', () => {
     await expect(tools().team_hire!({ name: 'Acceptor', role: 'x' })).rejects.toThrow(/验收员/)
   })
 
-  it('任务板渲染：计数、负责人、证据', () => {
+  it('任务板渲染：计数、负责人；完成项的证据折叠，没做完的带全文', () => {
     const text = renderBoard([
       { id: 't1', title: '灰盒', status: 'done', owner: '地编', evidence: 'a.png', updatedAt: 0 },
-      { id: 't2', title: '数值表', status: 'todo', deps: ['t1'], updatedAt: 0 }
+      { id: 't2', title: '数值表', status: 'todo', deps: ['t1'], note: '等策划', updatedAt: 0 }
     ])
     expect(text).toMatch(/2 项（待办 1 · 进行中 0 · 完成 1 · 卡住 0）/)
-    expect(text).toMatch(/\[done\] t1 灰盒 @地编\n {4}证据：a\.png/)
-    expect(text).toMatch(/\[todo\] t2 数值表 ←t1/)
+    expect(text).toMatch(/\[done\] t1 灰盒 @地编 · 有证据/)
+    expect(text).not.toContain('a.png')
+    expect(text).toMatch(/\[todo\] t2 数值表 ←t1\n {4}备注：等策划/)
+    expect(text).toMatch(/带 ids.*看全文/)
+  })
+
+  /*
+   * 真机规模：138 项、每项带一段完整证据。以前 list 和 update 每次都回整张板全文，
+   * 约 14 万字符，一个队员的历史里攒了 13 份
+   */
+  describe('任务板输出的体积', () => {
+    const evidence = (i: number): string =>
+      `关卡 /Game/Maps/L_${i} 已搭完，截图 shots/${i}.png，试玩通过：` + '细节说明。'.repeat(200)
+    const bigBoard = async (): Promise<void> => {
+      await store.patchBoard(
+        Array.from({ length: 138 }, (_, i) => ({
+          id: `t${i}`,
+          title: `第 ${i} 项`,
+          status: i < 130 ? ('done' as const) : ('doing' as const),
+          owner: '地编',
+          evidence: evidence(i)
+        }))
+      )
+    }
+
+    it('list 默认：完成项不带证据全文，整张板一万多字符而不是十几万', async () => {
+      await bigBoard()
+      const full = (await store.board()).reduce((n, t) => n + (t.evidence?.length ?? 0), 0)
+      const text = await tools().team_board!({ action: 'list' })
+
+      expect(full).toBeGreaterThan(130_000)
+      expect(text.length).toBeLessThan(15_000)
+      expect(text).not.toContain(evidence(0))
+      // 没做完的那几项照旧带全文
+      expect(text).toContain(evidence(135))
+    })
+
+    it('list 带 ids：只看这几项，带全文；没有的 id 说出来', async () => {
+      await bigBoard()
+      const text = await tools().team_board!({ action: 'list', ids: ['t3', 'nope'] })
+
+      expect(text).toContain(evidence(3))
+      expect(text).not.toContain('t4 第 4 项')
+      expect(text).toContain('任务板上没有：nope')
+    })
+
+    it('update 只回改到的那几项和计数，不回整张板', async () => {
+      await bigBoard()
+      const text = await tools().team_board!({
+        action: 'update',
+        tasks: [{ id: 't131', status: 'done', evidence: '截图 shots/131-final.png' }]
+      })
+
+      expect(text).toMatch(/^已更新 1 项。任务板：138 项/)
+      expect(text).toContain('t131 第 131 项')
+      expect(text).toContain('截图 shots/131-final.png')
+      expect(text).not.toContain('t0 第 0 项')
+      expect(text.length).toBeLessThan(500)
+    })
   })
 })
 
