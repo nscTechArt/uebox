@@ -61,8 +61,23 @@ describe('listenOnce', () => {
       }
     }
 
-    await expect(listenOnce(fake, 8766, '127.0.0.1')).rejects.toMatchObject({ code: 'EACCES' })
+    const onLateError = vi.fn()
+    await expect(listenOnce(fake, 8766, '127.0.0.1', onLateError)).rejects.toMatchObject({
+      code: 'EACCES'
+    })
     expect(close).toHaveBeenCalledTimes(1)
+    // 同一个启动错误从 error 事件再来一次，不算「运行中出错」
+    await new Promise((r) => setImmediate(r))
+    expect(onLateError).not.toHaveBeenCalled()
+  })
+
+  it('监听成功之后的错误交给 onLateError，不悄悄吞掉', async () => {
+    const onLateError = vi.fn()
+    const server = await listenOnce(express(), 0, '127.0.0.1', onLateError)
+    opened.push(server)
+    const late = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })
+    server.emit('error', late)
+    expect(onLateError).toHaveBeenCalledWith(late)
   })
 })
 

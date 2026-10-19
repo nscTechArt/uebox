@@ -50,8 +50,11 @@ export interface ArchiveRecord {
   ref: string
   /** 哪几个字段是表，按声明顺序 */
   lists: string[]
-  /** 完整数据（JSON）：`text` 来源是原本要给模型的文本，`details` 来源是工具的 details */
-  text: string
+  /**
+   * `text` 来源：原本要给模型的那份完整文本（JSON）。
+   * `details` 来源没有这一项：表就在这条消息的 details 里，再存一份只会让会话文件翻倍
+   */
+  text?: string
 }
 
 type Row = Record<string, unknown>
@@ -91,11 +94,31 @@ export function archiveOf(message: unknown): ArchiveRecord | undefined {
   if (
     typeof archive?.ref !== 'string' ||
     !Array.isArray(archive.lists) ||
-    typeof archive.text !== 'string'
+    (archive.text !== undefined && typeof archive.text !== 'string')
   ) {
     return undefined
   }
   return archive as ArchiveRecord
+}
+
+/** 解析过的存档按消息缓存：模型翻页时一份存档会被查很多次，每次都重新 parse 十几万字符不划算 */
+const parsedArchives = new WeakMap<object, Row>()
+
+/** 存档里的表在哪：`text` 来源解析那份文本，`details` 来源就是消息的 details 本身 */
+export function archiveDataOf(message: unknown): Row | undefined {
+  const record = archiveOf(message)
+  if (!record) return undefined
+  if (record.text === undefined) {
+    const details = (message as { details?: unknown }).details
+    return isRow(details) ? details : undefined
+  }
+  const key = message as object
+  let data = parsedArchives.get(key)
+  if (!data) {
+    data = JSON.parse(record.text) as Row
+    parsedArchives.set(key, data)
+  }
+  return data
 }
 
 /**
@@ -107,6 +130,10 @@ export function archiveOf(message: unknown): ArchiveRecord | undefined {
 export function detailsForRenderer(details: unknown): unknown {
   const archive = (details as { archive?: Partial<ArchiveRecord> } | null)?.archive
   if (!archive || typeof archive !== 'object') return details
+  // 工具本来没有 details、是存档器给它造的：剩下的只有编号和工具加载记录，
+  // 界面拿去当结果显示就成了一个空壳 —— 交回 undefined，让界面照旧显示正文
+  const own = Object.keys(details as Row).filter((key) => key !== 'archive' && key !== 'toolSearch')
+  if (own.length === 0) return undefined
   return {
     ...(details as Record<string, unknown>),
     archive: { ref: archive.ref, lists: archive.lists }
@@ -267,7 +294,7 @@ export function archiveDetails(
     note:
       `完整数据已存档为 ${ref}（${summary}，含全部字段）。上面没展开或没列出的部分用 ` +
       `${RESULT_QUERY_TOOL_NAME} 按条件取，${queryExample(ref, tables)}。`,
-    record: { ref, lists: tables.map((t) => t.key), text }
+    record: { ref, lists: tables.map((t) => t.key) }
   }
 }
 
@@ -329,10 +356,10 @@ export function createResultArchiver(deps: ArchiverDeps): ResultArchiver {
     if (spec.source === 'details') {
       const outcome = archiveDetails(original, spec, ref)
       if (!outcome) return undefined
+      // 存档时换小额度那一版正文：额度外的部分凭编号取得到
+      const body = spec.compact ? spec.compact(original) : (textParts[0].text as string)
       content = parts.map((part) =>
-        part.type === 'text'
-          ? ({ ...part, text: `${textParts[0].text as string}\n\n${outcome.note}` } as TPart)
-          : part
+        part.type === 'text' ? ({ ...part, text: `${body}\n\n${outcome.note}` } as TPart) : part
       )
       record = outcome.record
     } else {
@@ -362,6 +389,8 @@ export interface QueryParams {
   list?: string
   where?: Record<string, unknown>
   search?: string
+  /** search 只在这几列里找。不给就找整行 —— 路径这类长字段很容易让短关键词误中 */
+  search_in?: string[]
   fields?: string[]
   offset?: number
   limit?: number
@@ -389,35 +418,45 @@ function matches(row: Row, params: QueryParams): boolean {
     if (!options.some((option) => sameValue(row[column], option))) return false
   }
   const needle = params.search?.trim().toLowerCase()
-  if (needle && !textValues(row).some((text) => text.includes(needle))) return false
+  const scope = params.search_in?.length ? pick(row, params.search_in) : row
+  if (needle && !textValues(scope).some((text) => text.includes(needle))) return false
   return true
 }
 
 /**
- * 在一份存档里查行。
+ * 在一份存档里查行。`data` 是存档里的表所在的那个对象（见 `archiveDataOf`）。
  *
  * 返回同样受 `ARCHIVE_BUDGET_CHARS` 约束：塞不下就给 `next_offset`。
+ * `preface` 是调用方要排在最前面的字段（快照说明），一起算进预算 ——
+ * 不算的话整页会比预算多出那一句。
  * 单独一行就超预算时照样给这一行 —— 行是最小单位，拆开反而没法用。
  * 表名写错了抛出去，并列出有哪几张。
  */
-export function queryArchive(record: ArchiveRecord, params: QueryParams): Row {
+export function queryArchive(
+  record: Pick<ArchiveRecord, 'ref' | 'lists'>,
+  data: Row,
+  params: QueryParams,
+  preface: Row = {}
+): Row {
   const list = params.list ?? record.lists[0]
   if (!record.lists.includes(list)) {
     throw new Error(`存档 ${record.ref} 里没有 ${list} 这张表，有：${record.lists.join('、')}。`)
   }
-  const parsed = JSON.parse(record.text) as Row
-  const rows = (parsed[list] as Row[]) ?? []
+  const rows = (data[list] as Row[]) ?? []
   const allColumns = columnsOf(rows)
 
-  const unknownColumns = [...Object.keys(params.where ?? {}), ...(params.fields ?? [])].filter(
-    (column) => !allColumns.includes(column)
-  )
+  const unknownColumns = [
+    ...Object.keys(params.where ?? {}),
+    ...(params.fields ?? []),
+    ...(params.search_in ?? [])
+  ].filter((column) => !allColumns.includes(column))
 
   const matched = rows.filter((row) => matches(row, params))
   const offset = Math.max(0, params.offset ?? 0)
   const limit = params.limit ?? matched.length
 
   const head: Row = {
+    ...preface,
     ref: record.ref,
     list,
     matched: matched.length,
@@ -463,9 +502,11 @@ export function queryArchive(record: ArchiveRecord, params: QueryParams): Row {
 export function describeSnapshot(
   messages: readonly unknown[],
   ref: string,
-  isMutating: (toolName: string, args: unknown) => boolean
+  isMutating: (toolName: string, args: unknown) => boolean,
+  /** 调用方已经找到了存档在第几条消息，就别再从头扫一遍 */
+  knownIndex?: number
 ): { toolName: string; note: string } | undefined {
-  const index = messages.findIndex((message) => archiveOf(message)?.ref === ref)
+  const index = knownIndex ?? messages.findIndex((message) => archiveOf(message)?.ref === ref)
   if (index < 0) return undefined
   const source = messages[index] as { toolName?: string }
   const toolName = source.toolName ?? '工具'

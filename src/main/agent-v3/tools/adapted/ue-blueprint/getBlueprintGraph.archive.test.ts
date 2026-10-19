@@ -126,13 +126,14 @@ describe('blueprint_get_graph 的大图存档', () => {
   it('按 id 取回带引脚和默认值的完整节点，按节点查得到它的连线', async () => {
     const outcome = archiveResult(await readGraph(200), BLUEPRINT_GRAPH_ARCHIVE, 'r1')!
 
-    const nodes = queryArchive(outcome.record, { list: 'nodes', where: { id: [guid(150)] } })
+    const data = JSON.parse(outcome.record.text!) as Record<string, unknown>
+    const nodes = queryArchive(outcome.record, data, { list: 'nodes', where: { id: [guid(150)] } })
     expect(nodes.matched).toBe(1)
     const [node] = nodes.rows as Array<{ pins: Array<{ name: string; default_value?: string }> }>
     expect(node.pins.map((pin) => pin.name)).toEqual(['execute', 'then', 'InString'])
     expect(node.pins[2].default_value).toBe('第 150 步')
 
-    const wires = queryArchive(outcome.record, {
+    const wires = queryArchive(outcome.record, data, {
       list: 'connections',
       where: { from_node: guid(150) }
     })

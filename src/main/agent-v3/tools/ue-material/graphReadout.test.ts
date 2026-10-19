@@ -274,19 +274,11 @@ describe('material_get_graph 的正文', () => {
       ]
     })
 
-    /*
-     * 第 61 个之后只给三件套，紧接着详列往下列；列不下的如实说有几个、怎么拿。
-     *
-     * 以前这里断言的是「第 200 个也在正文里」—— 那时额度外就是死路，只能尽量多塞。
-     * 现在大图的完整数据存档了（见 graphArchive.test.ts），正文的额度收小，
-     * 列不下的那条尾巴凭编号用 result_query 取
-     */
-    it('超出详列上限的节点照样给 node_id 和 guid，列不下的如实说并指到存档', async () => {
+    it('超出详列上限的节点仍然给得出 node_id 和 guid', async () => {
       const text = await read(bigGraph(200, 10))
-      expect(text).toContain('Multiply_60 ｜')
-      expect(text).toContain('GUID-60')
-      expect(text).toMatch(/还有 \d+ 个节点连简表都没列（全图共 200 个）/)
-      expect(text).toContain('用 result_query 按 node_id 取')
+      // 第 61 个之后只给三件套，但一个都不能少
+      expect(text).toContain('Multiply_199')
+      expect(text).toContain('GUID-199')
       // 而且不能再叫模型去干一件没有工具能干的事
       expect(text).not.toContain('按 node_id 定点看')
     })
@@ -332,23 +324,20 @@ describe('material_get_graph 的正文', () => {
         }))
       })
       /*
-       * 上限 = 三个额度之和 + 一点点散文余量。实测 14,952。
+       * 上限 = 三个额度之和 + 一点点散文余量。实测 32,624。
        *
-       * 详列 6,500 + 简表 4,500 + 连线 3,000 = 14,000，剩下九百多是标题、
-       * 页脚和「还有 N 个没列」那几句一次性的话。所以定 15,500：
-       * 任何一个额度往上调超过五百多，这里立刻红。
-       *
-       * 这个数还有一层约束：正文后面会补一句存档编号（约 250 字符），
-       * 两样加起来要落在存档预算 16,000 以内 —— graphArchive.test.ts 对此直接断言。
+       * 详列 14,000 + 简表 12,000 + 连线 6,000 = 32,000，剩下六百多是标题、
+       * 页脚和「还有 N 个没列」那几句一次性的话。所以定 34,000：
+       * 任何一个额度往上调超过一千多，这里立刻红。
        *
        * 这么定而不是「贴着实测再留一成」，是因为实测值本身几乎全由额度决定 ——
-       * 贴着输出定，等于把旋钮的容差放大好几倍（更早一版定 30,000 时，
+       * 贴着输出定，等于把旋钮的容差放大好几倍（上一版定 30,000，
        * 详列额度从 14,000 偷偷调到 17,000 都不会红）。
        * 改了任何一个额度就回来改这个数，顺手把上面这笔账重算一遍。
        */
-      expect(text.length).toBeLessThan(15_500)
+      expect(text.length).toBeLessThan(34_000)
       // 别封过头：简表该列的还是要列出来
-      expect(text).toContain('个节点只给 node_id')
+      expect(text).toContain('TextureSampleParameter2D_60')
       expect(text).toContain('连简表都没列')
     })
 
@@ -366,7 +355,7 @@ describe('material_get_graph 的正文', () => {
     it('简表列出来的是连续的一段，不是挑着列', async () => {
       // 长短差距要拉够大：差一点点的话，跳过一条长行之后剩下的额度连短行也放不下，
       // continue 就退化成 break，这条用例也就区分不出两者了（第一版夹具就是这么失效的）
-      const long = `/Game/Megascans/${'VeryLongSurfaceName'.repeat(20)}.Albedo`
+      const long = `/Game/Megascans/${'VeryLongSurfaceName'.repeat(100)}.Albedo`
       const text = await read({
         material_name: 'M_Mixed',
         nodes: Array.from({ length: 400 }, (_, i) => ({

@@ -199,6 +199,12 @@ export interface ArchiveSpec {
    * 文字原样给，后面补一句存档编号，被它自己的额度截掉的部分凭编号取
    */
   source?: 'text' | 'details'
+  /**
+   * 只给 `details` 来源用：存档时换用的那份小额度正文。工具自己的正文得照顾
+   * 不存档的调用方（外部 MCP、没有 result_query 的会话），额度只能放大；
+   * 存档时额度外凭编号取得到，正文就该收小
+   */
+  compact?: (details: unknown) => string
 }
 
 const RISK_RANK: Record<ToolRisk, number> = { safe: 0, mutating: 1, destructive: 2 }

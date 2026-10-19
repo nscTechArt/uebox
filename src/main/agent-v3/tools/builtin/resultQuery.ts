@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 import {
   RESULT_QUERY_TOOL_NAME,
+  archiveDataOf,
   archiveOf,
   describeSnapshot,
   queryArchive
@@ -39,6 +40,10 @@ const input = z.object({
     .optional()
     .describe('按列等值筛（不分大小写）；值给数组表示任一，如 {"type":["StaticMesh","Texture"]}'),
   search: z.string().optional().describe('在每行所有文字里找这个子串（不分大小写）'),
+  search_in: z
+    .array(z.string())
+    .optional()
+    .describe('search 只在这几列里找，如 ["name"]；不给就找整行，路径这类长列容易让短关键词误中'),
   fields: z.array(z.string()).optional().describe('只要哪几列，默认整行'),
   offset: z.number().int().min(0).optional(),
   limit: z.number().int().min(1).optional()
@@ -52,13 +57,16 @@ export function createResultQueryTool(deps: ResultQueryDeps): UnrealAgentTool<un
     description:
       '查一份被存档的大结果。工具结果太大时只回目录页，带 archived.ref（如 "r3"）；' +
       '要完整的行或目录里没列出的行，用这个按 ref 取。where 按列等值筛，search 找子串，' +
-      'fields 挑列，返回带 next_offset 时用 offset 翻页。查的是当时的快照：' +
+      'search_in 限定 search 找哪几列，fields 挑列，返回带 next_offset 时用 offset 翻页。查的是当时的快照：' +
       '之后改过东西的话返回里会说，要最新状态就重新调用原工具。',
     input,
-    execute: async ({ ref, list, where, search, fields, offset, limit }) => {
+    execute: async ({ ref, list, where, search, search_in, fields, offset, limit }) => {
       const messages = deps.getMessages()
-      const record = messages.map(archiveOf).find((archive) => archive?.ref === ref)
-      if (!record) {
+      // 一遍找到消息；它的下标留给快照说明，免得再从头扫
+      const index = messages.findIndex((message) => archiveOf(message)?.ref === ref)
+      const record = index >= 0 ? archiveOf(messages[index]) : undefined
+      const data = index >= 0 ? archiveDataOf(messages[index]) : undefined
+      if (!record || !data) {
         const known = messages.map(archiveOf).flatMap((archive) => (archive ? [archive.ref] : []))
         throw new Error(
           `没有编号为 ${ref} 的存档。` +
@@ -69,18 +77,23 @@ export function createResultQueryTool(deps: ResultQueryDeps): UnrealAgentTool<un
         )
       }
 
-      const snapshot = describeSnapshot(messages, ref, deps.isMutating)
-      const result = queryArchive(record, {
-        ...(list ? { list } : {}),
-        ...(where ? { where } : {}),
-        ...(search ? { search } : {}),
-        ...(fields ? { fields } : {}),
-        ...(offset !== undefined ? { offset } : {}),
-        ...(limit !== undefined ? { limit } : {})
-      })
-      return {
-        text: JSON.stringify({ ...(snapshot ? { snapshot: snapshot.note } : {}), ...result })
-      }
+      const snapshot = describeSnapshot(messages, ref, deps.isMutating, index)
+      // 快照说明作为 preface 交给 queryArchive，一起算进每页的预算
+      const result = queryArchive(
+        record,
+        data,
+        {
+          ...(list ? { list } : {}),
+          ...(where ? { where } : {}),
+          ...(search ? { search } : {}),
+          ...(search_in ? { search_in } : {}),
+          ...(fields ? { fields } : {}),
+          ...(offset !== undefined ? { offset } : {}),
+          ...(limit !== undefined ? { limit } : {})
+        },
+        snapshot ? { snapshot: snapshot.note } : {}
+      )
+      return { text: JSON.stringify(result) }
     }
   })
 }

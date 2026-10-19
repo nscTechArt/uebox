@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ARCHIVE_BUDGET_CHARS,
   type ArchivableCall,
+  archiveDataOf,
   archiveDetails,
   archiveResult,
   createResultArchiver,
@@ -133,9 +134,14 @@ describe('archiveResult', () => {
     expect(meta.note).toContain('nodes / connections')
     expect(outcome.record.lists).toEqual(['nodes', 'connections'])
 
-    const linked = queryArchive(outcome.record, { list: 'connections', where: { from_node: 'N5' } })
+    const linked = queryArchive(outcome.record, graph, {
+      list: 'connections',
+      where: { from_node: 'N5' }
+    })
     expect(linked.matched).toBe(2)
-    expect(() => queryArchive(outcome.record, { list: 'pins' })).toThrow(/nodes、connections/)
+    expect(() => queryArchive(outcome.record, graph, { list: 'pins' })).toThrow(
+      /nodes、connections/
+    )
   })
 
   it('不是 JSON、或者声明的表不在，都原样给', () => {
@@ -152,11 +158,8 @@ describe('archiveDetails', () => {
     expect(outcome.note).toContain('r4')
     expect(outcome.note).toContain('templates 300 行')
     expect(outcome.note.length).toBeLessThan(300)
-    expect(outcome.record).toEqual({
-      ref: 'r4',
-      lists: ['templates'],
-      text: JSON.stringify(details)
-    })
+    // 表就在 details 里，不再存一份文本
+    expect(outcome.record).toEqual({ ref: 'r4', lists: ['templates'] })
   })
 
   it('放得下就不存；details 不是对象也不存', () => {
@@ -166,14 +169,11 @@ describe('archiveDetails', () => {
 })
 
 describe('queryArchive', () => {
-  const record = (): { ref: string; lists: string[]; text: string } => ({
-    ref: 'r1',
-    lists: ['templates'],
-    text: JSON.stringify(templates())
-  })
+  const record = (): { ref: string; lists: string[] } => ({ ref: 'r1', lists: ['templates'] })
+  const data = templates()
 
   it('where 等值筛不分大小写，返回完整的行', () => {
-    const out = queryArchive(record(), { where: { name: 'template_42' } })
+    const out = queryArchive(record(), data, { where: { name: 'template_42' } })
     expect(out.matched).toBe(1)
     const [row] = out.rows as Array<Record<string, unknown>>
     expect(row.name).toBe('Template_42')
@@ -181,7 +181,7 @@ describe('queryArchive', () => {
   })
 
   it('where 给数组表示任一，fields 只挑列', () => {
-    const out = queryArchive(record(), {
+    const out = queryArchive(record(), data, {
       where: { name: ['Template_1', 'Template_2'] },
       fields: ['name', 'path']
     })
@@ -192,19 +192,19 @@ describe('queryArchive', () => {
   })
 
   it('search 在嵌套的文字里找子串', () => {
-    const out = queryArchive(record(), { search: 'TAG-7', fields: ['name'] })
+    const out = queryArchive(record(), data, { search: 'TAG-7', fields: ['name'] })
     expect((out.rows as Array<{ name: string }>).map((row) => row.name)).toContain('Template_7')
   })
 
   it('一页塞不下就给 next_offset，接着翻能翻完', () => {
-    const first = queryArchive(record(), {})
+    const first = queryArchive(record(), data, {})
     expect(JSON.stringify(first).length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
     expect(first.next_offset).toBe(first.returned)
 
     let seen = first.returned as number
     let offset = first.next_offset as number | undefined
     while (offset !== undefined) {
-      const page = queryArchive(record(), { offset })
+      const page = queryArchive(record(), data, { offset })
       seen += page.returned as number
       offset = page.next_offset as number | undefined
     }
@@ -212,13 +212,31 @@ describe('queryArchive', () => {
   })
 
   it('limit 收得比一页小时，后面还有就给 next_offset', () => {
-    const out = queryArchive(record(), { limit: 5, fields: ['name'] })
+    const out = queryArchive(record(), data, { limit: 5, fields: ['name'] })
     expect(out.returned).toBe(5)
     expect(out.next_offset).toBe(5)
   })
 
+  it('search_in 把 search 限定在几列里，长路径不再误中', () => {
+    // 每个模板的 path 里都有 "Templates"，不限定的话全中
+    expect(queryArchive(record(), data, { search: 'templates' }).matched).toBe(300)
+    expect(queryArchive(record(), data, { search: 'templates', search_in: ['name'] }).matched).toBe(
+      0
+    )
+    expect(
+      queryArchive(record(), data, { search: 'template_7', search_in: ['name'] }).matched
+    ).toBe(11)
+  })
+
+  it('preface 排在最前面，并且算进每页的预算', () => {
+    const preface = { snapshot: '快照说明'.repeat(30) }
+    const page = queryArchive(record(), data, {}, preface)
+    expect(Object.keys(page)[0]).toBe('snapshot')
+    expect(JSON.stringify(page).length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
+  })
+
   it('写错列名时说出来，并给出全部列名', () => {
-    const out = queryArchive(record(), { where: { title: 'x' } })
+    const out = queryArchive(record(), data, { where: { title: 'x' } })
     expect(out.matched).toBe(0)
     expect(out.unknown_columns).toEqual(['title'])
     expect(out.columns).toContain('name')
@@ -338,6 +356,28 @@ describe('辅助函数', () => {
     })
     expect(lastRefIn([at('r2'), at('r10'), { role: 'user' }])).toBe(10)
     expect(lastRefIn([])).toBe(0)
+  })
+
+  it('存档器替没有 details 的工具造出来的那份，交给界面时换回 undefined', () => {
+    expect(
+      detailsForRenderer({
+        archive: { ref: 'r1', lists: ['x'], text: '{}' },
+        toolSearch: { loadedToolNames: ['result_query'] }
+      })
+    ).toBeUndefined()
+  })
+
+  it('archiveDataOf：text 来源解析一次就缓存，details 来源直接用 details', () => {
+    const textMessage = {
+      role: 'toolResult',
+      details: { archive: { ref: 'r1', lists: ['templates'], text: JSON.stringify(templates(2)) } }
+    }
+    const first = archiveDataOf(textMessage)
+    expect(first?.templates).toHaveLength(2)
+    expect(archiveDataOf(textMessage)).toBe(first)
+
+    const details = { nodes: [{ node_id: 'A' }], archive: { ref: 'r2', lists: ['nodes'] } }
+    expect(archiveDataOf({ role: 'toolResult', details })).toBe(details)
   })
 
   it('发给界面时剔掉完整文本，只留编号', () => {

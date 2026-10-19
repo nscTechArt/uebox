@@ -136,7 +136,9 @@ export class HttpServer {
 
   /** 单次监听尝试。Express 5 的 listen 回调出错时也会被调用，判法见 `./listen.ts` */
   private async bindOnce(): Promise<void> {
-    this.server = await listenOnce(this.app, this.options.port, this.options.host)
+    this.server = await listenOnce(this.app, this.options.port, this.options.host, (error) =>
+      logger.error('HTTP 调试服务运行中出错:', error)
+    )
     logger.info(`HTTP服务器启动成功: http://${this.options.host}:${this.options.port}`)
   }
 

@@ -41,7 +41,11 @@ vi.mock('./http/server', () => ({
 }))
 vi.mock('./task/taskManager', () => ({
   TaskManager: vi.fn(function TaskManager() {
-    return { start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) }
+    return {
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+      getStats: vi.fn(() => ({}))
+    }
   })
 }))
 vi.mock('./messaging/router', () => ({
@@ -75,6 +79,12 @@ describe('ServiceManager.start', () => {
     expect(ws.start).toHaveBeenCalledTimes(1)
     expect(ws.stop).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('HTTP 调试服务不可用'))
+    // 状态里写「开了没起来」和原因，不写成「没开」
+    expect(services.getStatus().services.http).toEqual({
+      running: false,
+      enabled: true,
+      startError: 'listen EACCES'
+    })
   })
 
   it('HTTP 起来了就照常记着，停服务时一起停', async () => {

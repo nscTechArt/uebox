@@ -785,18 +785,345 @@ function formatPin(pin: { name: string; type?: string }): string {
   return pin.type ? `${pin.name} ${pin.type}` : pin.name
 }
 
+/** 读图正文的三段字符额度：详列、简表、连线。为什么按字符封顶见 renderMaterialGraph 里的注释 */
+interface GraphBudgets {
+  detail: number
+  brief: number
+  connection: number
+}
+
+/**
+ * 不存档时用这一套。外部 MCP 客户端、按名单授权手里没有 result_query 的会话，
+ * 额度外的节点和连线就是死路 —— 全套材质工具只有这一个读图入口 —— 只能尽量多塞。
+ */
+const FULL_GRAPH_BUDGETS: GraphBudgets = { detail: 14_000, brief: 12_000, connection: 6_000 }
+
+/**
+ * 存档时用这一套（`archive.compact`）：额度外的部分凭编号用 result_query 取得到，
+ * 正文只需给够「认路」的一段。合计 14,000，加上标题、提示和结尾那句编号，
+ * 落在存档预算 16,000（`core/resultArchive.ts` 的 ARCHIVE_BUDGET_CHARS）以内。
+ */
+const ARCHIVED_GRAPH_BUDGETS: GraphBudgets = { detail: 6_500, brief: 4_500, connection: 3_000 }
+
+/** material_get_graph 给模型的正文 */
+function renderMaterialGraph(r: GetGraphResponse, budgets: GraphBudgets): string {
+  const nodes = r.nodes ?? []
+  const connections = r.connections ?? []
+  const name = r.material_name ?? r.material_path ?? '材质'
+
+  const lines = [`${name}：${nodes.length} 个节点，${connections.length} 根连线。`]
+
+  // 开着材质属性时，主节点那一排引脚全是摆设 —— 往上连线会「成功」但毫无效果
+  if (r.use_material_attributes) {
+    lines.push(
+      '⚠️ use_material_attributes=true：主节点上只有 MaterialAttributes 那一根有效，' +
+        '往 BaseColor / Roughness 上连线会成功但没有任何效果。'
+    )
+  }
+  if (r.note) lines.push(r.note)
+
+  /*
+   * 封顶，但**不能封掉 id**。
+   *
+   * 这个 toOutcome 是为了「三十个节点起就没法读了」写的，可它自己一开始一个上限
+   * 都没有：一张量产母材质四百个节点、六百根线，每个节点行都带全部输入输出引脚
+   * 加类型加 guid，一次工具结果十万字符起。
+   *
+   * 但直接 `slice(0, 60)` 是另一个极端：61 号之后的 node_id 和 guid 就**再也拿不到了**
+   * —— 这个工具没有 node_id / offset 入参，别的工具也读不了图的一段，而
+   * material_apply_graph 的描述又让模型「先用 material_get_graph 拿 node_id」。
+   * 等于把它逼回猜编号，正是本文件上面那段注释里记的那次事故。
+   *
+   * 所以分两段：前 60 个给全貌（引脚、类型、值、注释），之后的只给
+   * `node_id ｜ 类型 ｜ guid` 三件套 —— 一行几十个字符，四百个节点也就两万字符，
+   * 尽量多留 id（拿着 id 能直接改值、删、断线、连线），但**不保证全留** ——
+   * 八百个节点的图，任何一个说得过去的额度都列不完，那就如实说没列完；
+   * 唯独「只读某一个节点」没有工具（本工具就是唯一的读图入口），
+   * 所以下面那句提示里别写「拿 id 去读这个节点」—— 引脚要按类型去
+   * material_search_nodes 查，那才是真能调的。
+   */
+  const MAX_GRAPH_NODES = 60
+  const MAX_GRAPH_CONNECTIONS = 80
+  /**
+   * 简表按**字符**封顶，不按条数。
+   *
+   * 这里前后估错过两次：先估一行 50 字符、改成按条数封顶时又估 95 ——
+   * 实测是 **203**（同一次改动把 value 加进了这一行，而 Megascans 的贴图路径
+   * 单独就有 140 字符）。800 个节点实测下来：不列简表 15,781 字符、
+   * 列 60 条 27,922、120 条 40,103、240 条 64,463。
+   *
+   * 条数根本不可能封住输出：行长取决于 value 这个长度不受控的字符串。
+   * 所以改成累加字符、到额度就停 —— 这是真的上限，不是估出来的。
+   * 配套有一条按实测字符数断言的用例，改坏了会红。
+   */
+  /**
+   * 详列这半边也要按字符封顶，不能只封条数。
+   *
+   * 之前只给简表上了额度，可实测详列才是大头（60 条约 15.8k，简表 12k），
+   * 而且它每行带 value、全部引脚名和类型，还可能跟一行长度不受控的节点注释 ——
+   * 「条数封不住输出」这个理由对它只会更成立。800 节点带注释实测能到 36.7k。
+   */
+  const DETAIL_CHAR_BUDGET = budgets.detail
+  /** 连线这一段的字符额度。理由同上：行长由两端 node_id 决定，条数封不住 */
+  const CONNECTION_CHAR_BUDGET = budgets.connection
+  const BRIEF_CHAR_BUDGET = budgets.brief
+  const shownNodes = nodes.slice(0, MAX_GRAPH_NODES)
+  /** 详列实际列了几个。字符额度可能比条数上限先到，剩下的全进简表 */
+  let detailCount = 0
+
+  /*
+   * 连主节点的那些线要**单独拎出来先印**。
+   *
+   * 引擎侧 Handle_GetMaterialGraph 是先遍历每个表达式的输入、**最后**才补
+   * UAL_CollectRootInputs（`to_node === "Material"` 那一批）。也就是说
+   * `Material.BaseColor ←` 这几行永远排在数组最末尾 —— 一个 `slice(0, 80)`
+   * 砍掉的恰恰是它们，而那正是读一张材质图的起点（从主节点倒着往回追）。
+   * 主节点输入就那十几根，不占预算，全印。
+   */
+  const rootConnections = connections.filter((c) => c.to_node === 'Material')
+  const innerConnections = connections.filter((c) => c.to_node !== 'Material')
+  const shownInner = innerConnections.slice(0, MAX_GRAPH_CONNECTIONS)
+  const shownConnections = [...rootConnections, ...shownInner]
+
+  if (shownNodes.length > 0) {
+    lines.push(
+      '',
+      '节点（node_id ｜ 类型 ｜ 值 ｜ 输入引脚（*=已接线）｜ 输出引脚 ｜ guid）。引脚名后面跟的是类型：'
+    )
+    let detailChars = 0
+    for (const node of shownNodes) {
+      const before = lines.length
+      const value = formatNodeValue(node.value)
+      /*
+       * 引脚**带类型**，而且**已接线的输入也要列出来**。
+       *
+       * 类型：material_compile 编译失败时的那句提示（还有本工具自己的描述）
+       * 都叫模型「回来看 inputs/outputs 里的 type」—— 只印名字的话那是条死路，
+       * 类型只剩在 details 里，而 details 不进模型上下文。
+       *
+       * 已接线的输入：这里一度只印空着的。可「把这根线改接到别处」是常规操作，
+       * 需要的正是那个**已经占着**的引脚名；而全部接满的 MaterialFunctionCall
+       * 连 material_search_nodes 也帮不上（它的引脚来自函数资产，CDO 上是空的），
+       * 读图是唯一的来源。所以全列，用 * 标出哪些已经接了。
+       */
+      const outputs = (node.outputs ?? []).map(formatPin).join(', ')
+      const inputs = (node.inputs ?? [])
+        .map((pin) => `${formatPin(pin)}${pin.is_connected ? '*' : ''}`)
+        .join(', ')
+
+      const parts = [`  ${node.node_id}`, node.class ?? '?']
+      if (value) parts.push(value)
+      // 只回和默认值不同的设置，所以有就一定是有人改过的，值得印
+      const settings = Object.entries(node.properties ?? {})
+      if (settings.length > 0) {
+        parts.push(
+          `设置: ${settings.map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')}`
+        )
+      }
+      if (inputs) parts.push(`in: ${inputs}`)
+      if (outputs) parts.push(`out: ${outputs}`)
+      if (node.guid) parts.push(node.guid)
+      lines.push(parts.join(' ｜ '))
+
+      // 节点上的注释是手搓材质里唯一的自然语言线索（「湿度遮罩，别动」
+      // 「由 MPC_Weather 驱动」）。丢掉它，改图的人就会径直改过去
+      // 注释是设计师随手写的自由文本，没有长度上限 —— 截一下，
+      // 否则详列这半边（本来就是更大的一半）照样可以无限长
+      if (node.description) {
+        // 判长度和切的必须是**同一个单位**。上一版判 `.length`（UTF-16 码元）、
+        // 切 `[...]`（码点），于是 125 个 emoji（250 码元 / 125 码点）走进截断分支、
+        // 一个字都没切掉，却挂上了「（截断）」—— 模型以为有内容被藏了，
+        // 而这个工具没有「只读一个节点」的入口，它找不回来。顺带上限也虚了一倍。
+        const chars = [...node.description]
+        const note =
+          chars.length > 200 ? `${chars.slice(0, 200).join('')}…（截断）` : node.description
+        lines.push(`      ※ 节点注释：${note}`)
+      }
+
+      // 命名重定向：图上是两个孤立节点，实际是一根线的两头。
+      // 顺着连线追到 usage 就断了，得从它对应的 declaration 接着往上走
+      if (node.reroute_kind === 'usage') {
+        lines.push(
+          `      ↳ 重定向 usage「${node.reroute_name ?? '?'}」，` +
+            (node.reroute_error
+              ? `❌ ${node.reroute_error}`
+              : `接着从 ${node.reroute_declaration_node ?? '?'} 往上追`)
+        )
+      }
+
+      detailCount++
+      // 按这个节点**实际吐了多少字**计费：一个节点可能吐 1~3 行
+      // （主行 + 注释 + 重定向），行长又取决于引脚数和 value，条数算不出来
+      for (let i = before; i < lines.length; i++) detailChars += lines[i].length + 1
+      if (detailChars > DETAIL_CHAR_BUDGET) break
+    }
+    const briefNodes = nodes.slice(detailCount)
+    if (briefNodes.length > 0) {
+      /*
+       * 这句话里只准出现**真的能调**的东西。
+       *
+       * 没有「只读一个节点」的工具（全套材质工具里唯一的读图入口就是本工具，
+       * 而它没有 node_id 入参）。所以别写「拿 node_id 去读这个节点」——
+       * 那是条死路，模型会照着试然后卡住。
+       * 真正能做的是：引脚按**类型**查（material_search_nodes，引脚是类的属性
+       * 不是实例的），上下游看下面的连线，改值/删/断线都用这个 node_id 直接下手。
+       */
+      /*
+       * 先按字符额度攒出简表，再决定标题里写几条。
+       *
+       * 值**要带上**，别只给 id 和类型：这个文件开头记的那次事故就是
+       * 「五张贴图分别挂在哪个 TextureSample 上」，而贴图路径正存在 value 里。
+       * 引脚还能按类型去 search_nodes 查，值没有任何别的来源 ——
+       * 所以值要留，代价则由下面这个额度兜住。
+       */
+      const briefLines: string[] = []
+      let briefChars = 0
+      for (const node of briefNodes) {
+        const value = formatNodeValue(node.value)
+        const parts = [`  ${node.node_id}`, node.class ?? '?']
+        if (value) parts.push(value)
+        if (node.guid) parts.push(node.guid)
+        const line = parts.join(' ｜ ')
+        /*
+         * break 不是 continue：**列出来的必须是一段连续的前缀**。
+         *
+         * 一度改成 continue（「长行不该把后面的短行挤掉」），但那样跳掉的恰恰是
+         * 最长的那些行 —— 也就是带 Megascans 贴图路径的节点，而简表加上 value
+         * 就是为了留住它们。而且列出来的成了断续的：读到 Node_81、Node_83，
+         * 谁都会以为 Node_82 不存在，本文件开头记的就是模型猜节点号那次事故。
+         * 下面那句「还有 N 个没列」说的是一条尾巴，break 才让这句话是真的。
+         *
+         * +1 是每行拼接时多花的那个换行符。
+         */
+        if (briefChars + line.length + 1 > BRIEF_CHAR_BUDGET) break
+        briefLines.push(line)
+        briefChars += line.length + 1
+      }
+
+      lines.push(
+        `  （下面 ${briefLines.length} 个节点只给 node_id ｜ 类型 ｜ 值 ｜ guid，引脚没展开。` +
+          '这些 id 照样能直接用于 material_set_node_value / material_delete_node / ' +
+          'material_disconnect_pins 和 material_apply_graph 的连线；' +
+          '想知道某一类的引脚名，把类名去掉 MaterialExpression 前缀拿去 material_search_nodes 查，' +
+          '结尾有存档编号时也可以用 result_query 按 node_id 取这个节点的完整引脚）：'
+      )
+      lines.push(...briefLines)
+
+      /*
+       * 额度用完了只能如实说「读不完」。
+       *
+       * 本工具没有 offset / 过滤入参，给不出「接着读下一段」的办法，
+       * 那就别编一个 —— 能给的真办法是从连线往回缩小范围。
+       */
+      if (briefNodes.length > briefLines.length) {
+        /*
+         * 「结尾有存档编号时」是条件句，不是客套：这里不知道这次会不会存档 ——
+         * 按名单授权、手里没有 result_query 的会话不存（见 `createResultArchiver`）。
+         * 两种情况下这句话都得是真的
+         */
+        lines.push(
+          `  …还有 ${briefNodes.length - briefLines.length} 个节点连简表都没列（全图共 ${nodes.length} 个）。` +
+            '先看下面的连线，从主节点往回锁定你关心的那一段，再按那几个 node_id 动手；' +
+            '结尾有存档编号时，这些节点的引脚、类型和值用 result_query 按 node_id 取。'
+        )
+      }
+    }
+  }
+
+  if (shownConnections.length > 0) {
+    lines.push('', '连线：')
+    /*
+     * 连线这一段也按字符封顶。
+     *
+     * 前两段（详列、简表）都上了额度，唯独这里还只有条数上限 ——
+     * 而行长取决于两端的 node_id，节点名长起来一根线就上百字符：
+     * 800 节点 600 连线实测能给整段输出再加 7.6k，直接顶穿总量断言。
+     * 「条数封不住输出」这个理由对它和对前两段一样成立。
+     *
+     * 主节点那几根仍然优先：它们排在 shownConnections 前面，
+     * 额度先花在它们身上，用完了截掉的是节点间的连线。
+     */
+    let connChars = 0
+    let connShown = 0
+    for (const conn of shownConnections) {
+      /*
+       * 两端的类型如实并列，**不替调用方判「这算不算不匹配」**。
+       *
+       * 这里一度是「两端不一样就打个 ⚠️」。真机上第一次跑就证明那样会喊狼来了：
+       * `Constant3Vector` 的 G 输出（1 个通道）引擎回的 from_type 是 `float3`，
+       * 接进 Roughness 就被标成「float3 → float 不匹配」—— 而那根线完全正确。
+       * 引擎的类型标注对带 mask 的输出本来就不精确，自动转换规则也有一堆特例。
+       * 假警报比不报更糟：模型会掉头去查一个不存在的问题。
+       *
+       * 插件侧对这件事早有结论（AddConnection 的注释），这里跟它保持一致。
+       */
+      const types = conn.from_type && conn.to_type ? `  [${conn.from_type} → ${conn.to_type}]` : ''
+      // 四个字段都是可选的。老插件只回 from_output 不回 from_pin，
+      // 不兜一下就是满屏 `….undefined → Material.BaseColor` ——
+      // 而引脚名恰恰是重接时要填的那个词
+      const fromPin =
+        conn.from_pin ?? (conn.from_output !== undefined ? `<${conn.from_output}>` : '?')
+      // 连着却不起作用的线必须点破，否则读图的人会以为 Metallic 那根还在生效
+      const ignored = conn.ignored_by_substrate ? '  ⚠️ Substrate 下不生效' : ''
+      const line = `  ${conn.from_node ?? '?'}.${fromPin} → ${conn.to_node ?? '?'}.${conn.to_input ?? '?'}${types}${ignored}`
+      if (connChars + line.length + 1 > CONNECTION_CHAR_BUDGET) break
+      lines.push(line)
+      connChars += line.length + 1
+      connShown++
+    }
+    const connOmitted = connections.length - connShown
+    if (connOmitted > 0) {
+      lines.push(
+        `  …另有 ${connOmitted} 根连线没列（共 ${connections.length} 根）。` +
+          '上面连主节点的那几根优先列，从它们往回追；' +
+          '结尾有存档编号时，其余连线用 result_query 按 from_node / to_node 查。'
+      )
+    }
+  }
+
+  if (r.material_pins?.length) {
+    lines.push('', `主节点可用引脚：${r.material_pins.join('、')}`)
+  }
+  /*
+   * 按这个材质**此刻**的模式说，不按工程开没开说。
+   *
+   * 真机上这里一度只写「本项目开着 Substrate：接 FrontMaterial」，用户要一个普通
+   * 半透明塑料，AI 读完就做成了 Substrate，还告诉用户 Opacity 引脚不生效 —— 其实
+   * 5.6+ 上 FrontMaterial 空着时 BaseColor 那一排照常能用（可用引脚里就列着）。
+   */
+  if (r.substrate_enabled) {
+    const classicOk = (r.material_pins ?? []).includes('BaseColor')
+    lines.push(
+      classicOk
+        ? '本项目开着 Substrate，但这个材质的 FrontMaterial 还空着：普通材质照常连 BaseColor / Roughness / Opacity，' +
+            '引擎会自动转换。只有要分层、彩色透射这类效果时才换 Substrate 节点接 FrontMaterial（接上之后 BaseColor 那一排就不生效了）。'
+        : '这个材质按 Substrate 解释：着色全部从 Material.FrontMaterial 进来，BaseColor 那一排不生效。'
+    )
+  }
+
+  lines.push(
+    '',
+    '改图用 material_apply_graph，两端填上面的 node_id（或 guid）加引脚名。' +
+      '不认识某个节点类型的引脚就先 material_search_nodes 查，别猜。'
+  )
+
+  return lines.join('\n')
+}
+
 const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
   name: 'material_get_graph',
   namespace: NAMESPACE,
   method: 'material.get_graph',
   risk: 'safe',
   /*
-   * 下面的 toOutcome 按字符额度封了顶，额度外的节点和连线以前是死路：
+   * 正文按字符额度封了顶，额度外的节点和连线以前是死路：
    * 全套材质工具里只有这一个读图入口，又没有 node_id / offset 入参。
-   * 存档之后文字照旧，后面补一句编号，被截掉的部分凭编号用 result_query 取
+   * 存档时正文换成小额度那一版，后面补一句编号，被截掉的部分凭编号用 result_query 取；
+   * 不存档的地方（外部 MCP、没有 result_query 的会话）照旧拿大额度那一版
    */
   archive: {
     source: 'details',
+    compact: (details) => renderMaterialGraph(details as GetGraphResponse, ARCHIVED_GRAPH_BUDGETS),
     lists: {
       nodes: ['node_id', 'class', 'guid'],
       connections: ['from_node', 'from_pin', 'to_node', 'to_input']
@@ -821,7 +1148,7 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
 回来改图，改中的是另一个节点，而且不会报错。跨过删除/撤销之后一律用 guid，
 两种 id 传哪个都认。
 
-大图的文字按额度截断，结尾会给一个存档编号：没展开的节点（引脚、类型、值）和没列出的连线
+大图的文字按额度截断。结尾有存档编号时，没展开的节点（引脚、类型、值）和没列出的连线
 用 result_query 按编号取，例如 {"ref":"r3","list":"nodes","where":{"node_id":"…"}}。`,
   input: z.object({
     path: z.string().describe('材质资产路径，如 /Game/Materials/M_Wood'),
@@ -846,319 +1173,7 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
    *   · 每个节点的值 / 贴图路径 —— 判断「这张图在干什么」的主要依据
    *   · 输出引脚名 —— 从这个节点接出去时要写的名字（R/G/B 这些）
    */
-  toOutcome: (r) => {
-    const nodes = r.nodes ?? []
-    const connections = r.connections ?? []
-    const name = r.material_name ?? r.material_path ?? '材质'
-
-    const lines = [`${name}：${nodes.length} 个节点，${connections.length} 根连线。`]
-
-    // 开着材质属性时，主节点那一排引脚全是摆设 —— 往上连线会「成功」但毫无效果
-    if (r.use_material_attributes) {
-      lines.push(
-        '⚠️ use_material_attributes=true：主节点上只有 MaterialAttributes 那一根有效，' +
-          '往 BaseColor / Roughness 上连线会成功但没有任何效果。'
-      )
-    }
-    if (r.note) lines.push(r.note)
-
-    /*
-     * 封顶，但**不能封掉 id**。
-     *
-     * 这个 toOutcome 是为了「三十个节点起就没法读了」写的，可它自己一开始一个上限
-     * 都没有：一张量产母材质四百个节点、六百根线，每个节点行都带全部输入输出引脚
-     * 加类型加 guid，一次工具结果十万字符起。
-     *
-     * 但直接 `slice(0, 60)` 是另一个极端：61 号之后的 node_id 和 guid 就**再也拿不到了**
-     * —— 这个工具没有 node_id / offset 入参，别的工具也读不了图的一段，而
-     * material_apply_graph 的描述又让模型「先用 material_get_graph 拿 node_id」。
-     * 等于把它逼回猜编号，正是本文件上面那段注释里记的那次事故。
-     *
-     * 所以分两段：前 60 个给全貌（引脚、类型、值、注释），之后的只给
-     * `node_id ｜ 类型 ｜ guid` 三件套 —— 一行几十个字符，四百个节点也就两万字符，
-     * 尽量多留 id（拿着 id 能直接改值、删、断线、连线），但**不保证全留** ——
-     * 八百个节点的图，任何一个说得过去的额度都列不完，那就如实说没列完；
-     * 唯独「只读某一个节点」没有工具（本工具就是唯一的读图入口），
-     * 所以下面那句提示里别写「拿 id 去读这个节点」—— 引脚要按类型去
-     * material_search_nodes 查，那才是真能调的。
-     */
-    const MAX_GRAPH_NODES = 60
-    const MAX_GRAPH_CONNECTIONS = 80
-    /**
-     * 简表按**字符**封顶，不按条数。
-     *
-     * 这里前后估错过两次：先估一行 50 字符、改成按条数封顶时又估 95 ——
-     * 实测是 **203**（同一次改动把 value 加进了这一行，而 Megascans 的贴图路径
-     * 单独就有 140 字符）。800 个节点实测下来：不列简表 15,781 字符、
-     * 列 60 条 27,922、120 条 40,103、240 条 64,463。
-     *
-     * 条数根本不可能封住输出：行长取决于 value 这个长度不受控的字符串。
-     * 所以改成累加字符、到额度就停 —— 这是真的上限，不是估出来的。
-     * 配套有一条按实测字符数断言的用例，改坏了会红。
-     */
-    /**
-     * 详列这半边也要按字符封顶，不能只封条数。
-     *
-     * 之前只给简表上了额度，可实测详列才是大头（60 条约 15.8k，简表 12k），
-     * 而且它每行带 value、全部引脚名和类型，还可能跟一行长度不受控的节点注释 ——
-     * 「条数封不住输出」这个理由对它只会更成立。800 节点带注释实测能到 36.7k。
-     */
-    /*
-     * 三段额度合计 14,000，让「正文 + 结尾的存档编号」落在存档预算 16,000 以内
-     * （`core/resultArchive.ts` 的 ARCHIVE_BUDGET_CHARS）。
-     *
-     * 原来是 14,000 / 12,000 / 6,000，合计 32,000 —— 那时额度外的节点和连线
-     * 根本拿不到，只能尽量多塞。现在大图的完整数据存档了，额度外的部分凭编号
-     * 用 result_query 取，正文只需要给够「认路」的那一段。
-     * 余下约两千留给标题、主节点引脚、Substrate 提示、几句「还有 N 个没列」和结尾那句编号。
-     */
-    const DETAIL_CHAR_BUDGET = 6_500
-    /** 连线这一段的字符额度。理由同上：行长由两端 node_id 决定，条数封不住 */
-    const CONNECTION_CHAR_BUDGET = 3_000
-    const BRIEF_CHAR_BUDGET = 4_500
-    const shownNodes = nodes.slice(0, MAX_GRAPH_NODES)
-    /** 详列实际列了几个。字符额度可能比条数上限先到，剩下的全进简表 */
-    let detailCount = 0
-
-    /*
-     * 连主节点的那些线要**单独拎出来先印**。
-     *
-     * 引擎侧 Handle_GetMaterialGraph 是先遍历每个表达式的输入、**最后**才补
-     * UAL_CollectRootInputs（`to_node === "Material"` 那一批）。也就是说
-     * `Material.BaseColor ←` 这几行永远排在数组最末尾 —— 一个 `slice(0, 80)`
-     * 砍掉的恰恰是它们，而那正是读一张材质图的起点（从主节点倒着往回追）。
-     * 主节点输入就那十几根，不占预算，全印。
-     */
-    const rootConnections = connections.filter((c) => c.to_node === 'Material')
-    const innerConnections = connections.filter((c) => c.to_node !== 'Material')
-    const shownInner = innerConnections.slice(0, MAX_GRAPH_CONNECTIONS)
-    const shownConnections = [...rootConnections, ...shownInner]
-
-    if (shownNodes.length > 0) {
-      lines.push(
-        '',
-        '节点（node_id ｜ 类型 ｜ 值 ｜ 输入引脚（*=已接线）｜ 输出引脚 ｜ guid）。引脚名后面跟的是类型：'
-      )
-      let detailChars = 0
-      for (const node of shownNodes) {
-        const before = lines.length
-        const value = formatNodeValue(node.value)
-        /*
-         * 引脚**带类型**，而且**已接线的输入也要列出来**。
-         *
-         * 类型：material_compile 编译失败时的那句提示（还有本工具自己的描述）
-         * 都叫模型「回来看 inputs/outputs 里的 type」—— 只印名字的话那是条死路，
-         * 类型只剩在 details 里，而 details 不进模型上下文。
-         *
-         * 已接线的输入：这里一度只印空着的。可「把这根线改接到别处」是常规操作，
-         * 需要的正是那个**已经占着**的引脚名；而全部接满的 MaterialFunctionCall
-         * 连 material_search_nodes 也帮不上（它的引脚来自函数资产，CDO 上是空的），
-         * 读图是唯一的来源。所以全列，用 * 标出哪些已经接了。
-         */
-        const outputs = (node.outputs ?? []).map(formatPin).join(', ')
-        const inputs = (node.inputs ?? [])
-          .map((pin) => `${formatPin(pin)}${pin.is_connected ? '*' : ''}`)
-          .join(', ')
-
-        const parts = [`  ${node.node_id}`, node.class ?? '?']
-        if (value) parts.push(value)
-        // 只回和默认值不同的设置，所以有就一定是有人改过的，值得印
-        const settings = Object.entries(node.properties ?? {})
-        if (settings.length > 0) {
-          parts.push(
-            `设置: ${settings.map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')}`
-          )
-        }
-        if (inputs) parts.push(`in: ${inputs}`)
-        if (outputs) parts.push(`out: ${outputs}`)
-        if (node.guid) parts.push(node.guid)
-        lines.push(parts.join(' ｜ '))
-
-        // 节点上的注释是手搓材质里唯一的自然语言线索（「湿度遮罩，别动」
-        // 「由 MPC_Weather 驱动」）。丢掉它，改图的人就会径直改过去
-        // 注释是设计师随手写的自由文本，没有长度上限 —— 截一下，
-        // 否则详列这半边（本来就是更大的一半）照样可以无限长
-        if (node.description) {
-          // 判长度和切的必须是**同一个单位**。上一版判 `.length`（UTF-16 码元）、
-          // 切 `[...]`（码点），于是 125 个 emoji（250 码元 / 125 码点）走进截断分支、
-          // 一个字都没切掉，却挂上了「（截断）」—— 模型以为有内容被藏了，
-          // 而这个工具没有「只读一个节点」的入口，它找不回来。顺带上限也虚了一倍。
-          const chars = [...node.description]
-          const note =
-            chars.length > 200 ? `${chars.slice(0, 200).join('')}…（截断）` : node.description
-          lines.push(`      ※ 节点注释：${note}`)
-        }
-
-        // 命名重定向：图上是两个孤立节点，实际是一根线的两头。
-        // 顺着连线追到 usage 就断了，得从它对应的 declaration 接着往上走
-        if (node.reroute_kind === 'usage') {
-          lines.push(
-            `      ↳ 重定向 usage「${node.reroute_name ?? '?'}」，` +
-              (node.reroute_error
-                ? `❌ ${node.reroute_error}`
-                : `接着从 ${node.reroute_declaration_node ?? '?'} 往上追`)
-          )
-        }
-
-        detailCount++
-        // 按这个节点**实际吐了多少字**计费：一个节点可能吐 1~3 行
-        // （主行 + 注释 + 重定向），行长又取决于引脚数和 value，条数算不出来
-        for (let i = before; i < lines.length; i++) detailChars += lines[i].length + 1
-        if (detailChars > DETAIL_CHAR_BUDGET) break
-      }
-      const briefNodes = nodes.slice(detailCount)
-      if (briefNodes.length > 0) {
-        /*
-         * 这句话里只准出现**真的能调**的东西。
-         *
-         * 没有「只读一个节点」的工具（全套材质工具里唯一的读图入口就是本工具，
-         * 而它没有 node_id 入参）。所以别写「拿 node_id 去读这个节点」——
-         * 那是条死路，模型会照着试然后卡住。
-         * 真正能做的是：引脚按**类型**查（material_search_nodes，引脚是类的属性
-         * 不是实例的），上下游看下面的连线，改值/删/断线都用这个 node_id 直接下手。
-         */
-        /*
-         * 先按字符额度攒出简表，再决定标题里写几条。
-         *
-         * 值**要带上**，别只给 id 和类型：这个文件开头记的那次事故就是
-         * 「五张贴图分别挂在哪个 TextureSample 上」，而贴图路径正存在 value 里。
-         * 引脚还能按类型去 search_nodes 查，值没有任何别的来源 ——
-         * 所以值要留，代价则由下面这个额度兜住。
-         */
-        const briefLines: string[] = []
-        let briefChars = 0
-        for (const node of briefNodes) {
-          const value = formatNodeValue(node.value)
-          const parts = [`  ${node.node_id}`, node.class ?? '?']
-          if (value) parts.push(value)
-          if (node.guid) parts.push(node.guid)
-          const line = parts.join(' ｜ ')
-          /*
-           * break 不是 continue：**列出来的必须是一段连续的前缀**。
-           *
-           * 一度改成 continue（「长行不该把后面的短行挤掉」），但那样跳掉的恰恰是
-           * 最长的那些行 —— 也就是带 Megascans 贴图路径的节点，而简表加上 value
-           * 就是为了留住它们。而且列出来的成了断续的：读到 Node_81、Node_83，
-           * 谁都会以为 Node_82 不存在，本文件开头记的就是模型猜节点号那次事故。
-           * 下面那句「还有 N 个没列」说的是一条尾巴，break 才让这句话是真的。
-           *
-           * +1 是每行拼接时多花的那个换行符。
-           */
-          if (briefChars + line.length + 1 > BRIEF_CHAR_BUDGET) break
-          briefLines.push(line)
-          briefChars += line.length + 1
-        }
-
-        lines.push(
-          `  （下面 ${briefLines.length} 个节点只给 node_id ｜ 类型 ｜ 值 ｜ guid，引脚没展开。` +
-            '这些 id 照样能直接用于 material_set_node_value / material_delete_node / ' +
-            'material_disconnect_pins 和 material_apply_graph 的连线；' +
-            '想知道某一类的引脚名，把类名去掉 MaterialExpression 前缀拿去 material_search_nodes 查，' +
-            '结尾有存档编号时也可以用 result_query 按 node_id 取这个节点的完整引脚）：'
-        )
-        lines.push(...briefLines)
-
-        /*
-         * 额度用完了只能如实说「读不完」。
-         *
-         * 本工具没有 offset / 过滤入参，给不出「接着读下一段」的办法，
-         * 那就别编一个 —— 能给的真办法是从连线往回缩小范围。
-         */
-        if (briefNodes.length > briefLines.length) {
-          /*
-           * 「结尾有存档编号时」是条件句，不是客套：这里不知道这次会不会存档 ——
-           * 按名单授权、手里没有 result_query 的会话不存（见 `createResultArchiver`）。
-           * 两种情况下这句话都得是真的
-           */
-          lines.push(
-            `  …还有 ${briefNodes.length - briefLines.length} 个节点连简表都没列（全图共 ${nodes.length} 个）。` +
-              '先看下面的连线，从主节点往回锁定你关心的那一段，再按那几个 node_id 动手；' +
-              '结尾有存档编号时，这些节点的引脚、类型和值用 result_query 按 node_id 取。'
-          )
-        }
-      }
-    }
-
-    if (shownConnections.length > 0) {
-      lines.push('', '连线：')
-      /*
-       * 连线这一段也按字符封顶。
-       *
-       * 前两段（详列、简表）都上了额度，唯独这里还只有条数上限 ——
-       * 而行长取决于两端的 node_id，节点名长起来一根线就上百字符：
-       * 800 节点 600 连线实测能给整段输出再加 7.6k，直接顶穿总量断言。
-       * 「条数封不住输出」这个理由对它和对前两段一样成立。
-       *
-       * 主节点那几根仍然优先：它们排在 shownConnections 前面，
-       * 额度先花在它们身上，用完了截掉的是节点间的连线。
-       */
-      let connChars = 0
-      let connShown = 0
-      for (const conn of shownConnections) {
-        /*
-         * 两端的类型如实并列，**不替调用方判「这算不算不匹配」**。
-         *
-         * 这里一度是「两端不一样就打个 ⚠️」。真机上第一次跑就证明那样会喊狼来了：
-         * `Constant3Vector` 的 G 输出（1 个通道）引擎回的 from_type 是 `float3`，
-         * 接进 Roughness 就被标成「float3 → float 不匹配」—— 而那根线完全正确。
-         * 引擎的类型标注对带 mask 的输出本来就不精确，自动转换规则也有一堆特例。
-         * 假警报比不报更糟：模型会掉头去查一个不存在的问题。
-         *
-         * 插件侧对这件事早有结论（AddConnection 的注释），这里跟它保持一致。
-         */
-        const types =
-          conn.from_type && conn.to_type ? `  [${conn.from_type} → ${conn.to_type}]` : ''
-        // 四个字段都是可选的。老插件只回 from_output 不回 from_pin，
-        // 不兜一下就是满屏 `….undefined → Material.BaseColor` ——
-        // 而引脚名恰恰是重接时要填的那个词
-        const fromPin =
-          conn.from_pin ?? (conn.from_output !== undefined ? `<${conn.from_output}>` : '?')
-        // 连着却不起作用的线必须点破，否则读图的人会以为 Metallic 那根还在生效
-        const ignored = conn.ignored_by_substrate ? '  ⚠️ Substrate 下不生效' : ''
-        const line = `  ${conn.from_node ?? '?'}.${fromPin} → ${conn.to_node ?? '?'}.${conn.to_input ?? '?'}${types}${ignored}`
-        if (connChars + line.length + 1 > CONNECTION_CHAR_BUDGET) break
-        lines.push(line)
-        connChars += line.length + 1
-        connShown++
-      }
-      const connOmitted = connections.length - connShown
-      if (connOmitted > 0) {
-        lines.push(
-          `  …另有 ${connOmitted} 根连线没列（共 ${connections.length} 根）。` +
-            '上面连主节点的那几根优先列，从它们往回追；' +
-            '结尾有存档编号时，其余连线用 result_query 按 from_node / to_node 查。'
-        )
-      }
-    }
-
-    if (r.material_pins?.length) {
-      lines.push('', `主节点可用引脚：${r.material_pins.join('、')}`)
-    }
-    /*
-     * 按这个材质**此刻**的模式说，不按工程开没开说。
-     *
-     * 真机上这里一度只写「本项目开着 Substrate：接 FrontMaterial」，用户要一个普通
-     * 半透明塑料，AI 读完就做成了 Substrate，还告诉用户 Opacity 引脚不生效 —— 其实
-     * 5.6+ 上 FrontMaterial 空着时 BaseColor 那一排照常能用（可用引脚里就列着）。
-     */
-    if (r.substrate_enabled) {
-      const classicOk = (r.material_pins ?? []).includes('BaseColor')
-      lines.push(
-        classicOk
-          ? '本项目开着 Substrate，但这个材质的 FrontMaterial 还空着：普通材质照常连 BaseColor / Roughness / Opacity，' +
-              '引擎会自动转换。只有要分层、彩色透射这类效果时才换 Substrate 节点接 FrontMaterial（接上之后 BaseColor 那一排就不生效了）。'
-          : '这个材质按 Substrate 解释：着色全部从 Material.FrontMaterial 进来，BaseColor 那一排不生效。'
-      )
-    }
-
-    lines.push(
-      '',
-      '改图用 material_apply_graph，两端填上面的 node_id（或 guid）加引脚名。' +
-        '不认识某个节点类型的引脚就先 material_search_nodes 查，别猜。'
-    )
-
-    return { text: lines.join('\n'), details: r }
-  }
+  toOutcome: (r) => ({ text: renderMaterialGraph(r, FULL_GRAPH_BUDGETS), details: r })
 })
 
 const compileMaterial = defineUeTool({

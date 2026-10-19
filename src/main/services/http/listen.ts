@@ -27,14 +27,26 @@ export interface Listenable {
  * 否则重试会挂在一个坏实例上。
  *
  * 监听成功之后的错误照样要有人接：没有 `error` 监听器的话，Node 会把它当未捕获异常
- * 抛出来，直接带走主进程。
+ * 抛出来，直接带走主进程。接住之后交给 `onLateError` 记下来 —— 默不作声地吞掉，
+ * 就又是「服务悄悄不响应、日志里什么都没有」那一类问题。
  */
-export function listenOnce(app: Listenable, port: number, host: string): Promise<Server> {
+export function listenOnce(
+  app: Listenable,
+  port: number,
+  host: string,
+  onLateError?: (error: Error) => void
+): Promise<Server> {
   return new Promise((resolve, reject) => {
     let settled = false
+    /** 监听失败时 Express 会把同一个错误同时交给 callback 和 error 事件，第二次不算「运行中出错」 */
+    let startupError: Error | undefined
     const fail = (error: Error): void => {
-      if (settled) return
+      if (settled) {
+        if (error !== startupError) onLateError?.(error)
+        return
+      }
       settled = true
+      startupError = error
       server.close(() => undefined)
       reject(error)
     }

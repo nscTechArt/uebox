@@ -99,16 +99,25 @@ describe('material_get_graph 的大图存档', () => {
       result: { content: result.content, details: result.details }
     })!
 
-    const text = archived.content[0].text!
-    expect(text.startsWith(original)).toBe(true)
-    // 正文的三段额度就是按这条定的：正文加上补的那句编号，落在存档预算以内
-    expect(text.length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
-    expect(text.slice(original.length)).toContain('r1')
-    expect(text.slice(original.length)).toContain('result_query')
+    // 不存档时（外部 MCP、没有 result_query 的会话）拿的是大额度那一版，比预算大
+    expect(original.length).toBeGreaterThan(ARCHIVE_BUDGET_CHARS)
 
+    // 存档时换成小额度那一版，加上结尾的编号，落在存档预算以内
+    const text = archived.content[0].text!
+    expect(text.length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
+    expect(text).toContain('连简表都没列')
+    const note = text.slice(text.lastIndexOf('\n\n'))
+    expect(note).toContain('r1')
+    expect(note).toContain('result_query')
+
+    // 表就在 details 里，存档不再另存一份文本
     const record = archived.details.archive as ArchiveRecord
-    expect(record.lists).toEqual(['nodes', 'connections'])
-    const last = queryArchive(record, { list: 'nodes', where: { node_id: 'TextureSample_799' } })
+    expect(record).toEqual({ ref: 'r1', lists: ['nodes', 'connections'] })
+    const data = archived.details
+    const last = queryArchive(record, data, {
+      list: 'nodes',
+      where: { node_id: 'TextureSample_799' }
+    })
     expect(last.rows).toEqual([
       expect.objectContaining({
         guid: 'GUID-799',
@@ -116,7 +125,7 @@ describe('material_get_graph 的大图存档', () => {
         inputs: [{ name: 'Coordinates', is_connected: true, type: 'float2' }]
       })
     ])
-    const wire = queryArchive(record, {
+    const wire = queryArchive(record, data, {
       list: 'connections',
       where: { to_node: 'TextureSample_799' }
     })
