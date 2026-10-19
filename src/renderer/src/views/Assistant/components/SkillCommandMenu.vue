@@ -144,11 +144,14 @@ const props = withDefaults(
     error?: string
     /** 顶上加「添加文件」一条，从「+」按钮打开时用 */
     showAttach?: boolean
+    /** 列不列内置命令。正在生成时命令发不出去，「+」面板只留文件和技能 */
+    showCommands?: boolean
   }>(),
   {
     loading: false,
     error: '',
-    showAttach: false
+    showAttach: false,
+    showCommands: true
   }
 )
 
@@ -163,7 +166,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const menuRef = ref<HTMLElement | null>(null)
 const selectedIndex = ref(0)
-const filteredCommands = computed(() => filterSlashCommands(props.query))
+const filteredCommands = computed(() =>
+  props.showCommands ? filterSlashCommands(props.query) : []
+)
 const filteredSkills = computed(() =>
   props.loading || props.error ? [] : filterSkillCommands(props.skills, props.query)
 )

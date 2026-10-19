@@ -167,4 +167,20 @@ describe('SkillCommandMenu', () => {
     await options[1 + COMMAND_COUNT].trigger('click')
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(skills[0])
   })
+
+  // 正在生成时从「+」打开：命令发不出去，只留「添加文件」和技能，技能紧跟在文件后面
+  it('不列命令时「添加文件」后面直接是技能', async () => {
+    const wrapper = mount(SkillCommandMenu, {
+      props: { skills, query: '', showAttach: true, showCommands: false }
+    })
+    const menu = wrapper.vm as unknown as ExposedMenu
+    const options = wrapper.findAll('[role="option"]')
+
+    expect(options).toHaveLength(1 + skills.length)
+    expect(wrapper.findAll('.skill-group-label')).toHaveLength(0)
+
+    expect(menu.onKeydown(new KeyboardEvent('keydown', { key: 'ArrowDown' }))).toBe(true)
+    expect(menu.onKeydown(new KeyboardEvent('keydown', { key: 'Enter' }))).toBe(true)
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(skills[0])
+  })
 })

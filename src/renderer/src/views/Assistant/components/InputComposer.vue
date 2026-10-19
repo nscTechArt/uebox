@@ -254,6 +254,7 @@
           :loading="loadingSkills"
           :error="skillLoadError"
           :show-attach="plusMenuOpen && skillQuery === null"
+          :show-commands="skillCommandsEnabled"
           @select="handleSelectSkill"
           @select-command="handleSelectCommand"
           @attach="handleMenuAttach"
@@ -1932,15 +1933,24 @@ function closeSkillMenu(): void {
 }
 
 /**
- * 「+」打开面板。命令和技能被禁用的时候（生成图片模式、正在生成）面板里
- * 只剩「添加文件」一条，那就不必多弹一层，直接开文件选择器。
+ * 「+」面板里能不能挑技能。
+ *
+ * 比 `skillCommandsEnabled` 宽一档：正在生成时也能挑。技能就是插进草稿里的
+ * 一个 `$名字`，跟着插话一起送进正在跑的那一轮照样管用；命令不行，
+ * `/goal`、`/team` 这些只在开一轮新对话时才认，所以生成中面板里不列命令。
+ */
+const plusMenuSkillsEnabled = computed(() => !isImageGenerationMode.value && !props.disabled)
+
+/**
+ * 「+」打开面板。生成图片模式下技能和命令都用不上，面板里只剩「添加文件」
+ * 一条，那就不必多弹一层，直接开文件选择器。
  */
 function togglePlusMenu(): void {
   if (plusMenuOpen.value) {
     plusMenuOpen.value = false
     return
   }
-  if (!skillCommandsEnabled.value) {
+  if (!plusMenuSkillsEnabled.value) {
     triggerFileInput()
     return
   }
@@ -4008,22 +4018,22 @@ onMounted(() => {
   border-top: 0;
 }
 
+/* 和右边的审批档、思考档同一套：24 高、无底无边、悬停才给表面色。
+   单独描一圈边的话，整排只有它是个「按钮」，别的都是文字，看着不在一条线上 */
 .plus-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   color: var(--color-text-primary);
-  font-size: 18px;
+  font-size: 16px;
   background: transparent;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 50%;
+  border: none;
+  border-radius: 16px;
   cursor: pointer;
-  transition:
-    background var(--motion-fast) var(--easing-standard),
-    transform var(--motion-fast) var(--easing-standard);
+  transition: background var(--motion-fast) var(--easing-standard);
 
   svg {
     transition: transform var(--motion-fast) var(--easing-standard);
@@ -4034,12 +4044,8 @@ onMounted(() => {
   }
 
   // 开着的时候转成 ×，告诉用户再点一下是收起
-  &.active {
-    background: var(--color-bg-selected);
-
-    svg {
-      transform: rotate(45deg);
-    }
+  &.active svg {
+    transform: rotate(45deg);
   }
 
   &:focus-visible {
