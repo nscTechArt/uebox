@@ -5,7 +5,7 @@
  *
  * 工具结果进了上下文就不出来，之后每一轮请求都要原样再带一遍。本机 2,457 个真实会话里，
  * 工具结果占全部消息文字的 94.7%，而大结果几乎都是「同一种记录排成的一张表」——
- * 300 个工程模板、两百多个资产 —— 模型通常只用其中几行。
+ * 300 个工程模板、两百多个资产、两百个蓝图节点 —— 模型通常只用其中几行。
  * 设计和数据见 `docs/大结果存档与按需查询设计-2026-10-19.md`。
  *
  * ## 三条规则
@@ -16,9 +16,16 @@
  *    错了也查不出原因（见 `getBlueprintGraph.ts` 文件头）。这里不是删，
  *    是收起来，并在同一个返回里讲清楚怎么拿。
  *
+ * ## 两种来源
+ *
+ * - `text`（默认）：给模型的文本就是一份 JSON，表在里面。目录页**替换**它。
+ * - `details`：工具自己把结果排成了文字、并已自行封顶（`material_get_graph`），
+ *   表在 details 里。文字原样给，后面**补一句**存档编号 —— 补的是被它自己的额度
+ *   截掉的那部分怎么拿。以前那部分是死路：没有别的工具读得到。
+ *
  * ## 不新建存储
  *
- * 完整文本放在这条工具结果的 `details.archive.text`。details 本来就随消息落盘、
+ * 完整数据放在这条工具结果的 `details.archive.text`。details 本来就随消息落盘、
  * 随会话恢复，压缩也只改发给模型的那份 —— 所以重启后、压缩后、子 agent 继承父消息后
  * 都能凭编号查到，不需要另写一套文件和清理。
  *
@@ -28,7 +35,7 @@
 import type { ArchiveSpec } from '../tools/defineTool'
 
 /**
- * 超过这么多字符才存档，查询的每一页也以它为上限。
+ * 超过这么多字符才存档，目录页和查询的每一页也以它为上限。
  *
  * 从真实会话里挑的：预算取 8K / 16K / 32K / 50K 时，存档能省下的累计搬运量
  * 分别是 16.3% / 15.0% / 11.8% / 9.8%。从 8K 放到 16K 几乎不少省，被改变的调用却少很多；
@@ -41,9 +48,9 @@ export const RESULT_QUERY_TOOL_NAME = 'result_query'
 /** 存在 details 里的那份 */
 export interface ArchiveRecord {
   ref: string
-  /** 哪个字段是表 */
-  list: string
-  /** 原本要给模型的完整文本（JSON） */
+  /** 哪几个字段是表，按声明顺序 */
+  lists: string[]
+  /** 完整数据（JSON）：`text` 来源是原本要给模型的文本，`details` 来源是工具的 details */
   text: string
 }
 
@@ -83,7 +90,7 @@ export function archiveOf(message: unknown): ArchiveRecord | undefined {
   const archive = m.details?.archive as Partial<ArchiveRecord> | undefined
   if (
     typeof archive?.ref !== 'string' ||
-    typeof archive.list !== 'string' ||
+    !Array.isArray(archive.lists) ||
     typeof archive.text !== 'string'
   ) {
     return undefined
@@ -102,7 +109,7 @@ export function detailsForRenderer(details: unknown): unknown {
   if (!archive || typeof archive !== 'object') return details
   return {
     ...(details as Record<string, unknown>),
-    archive: { ref: archive.ref, list: archive.list }
+    archive: { ref: archive.ref, lists: archive.lists }
   }
 }
 
@@ -113,6 +120,33 @@ export function lastRefIn(messages: readonly unknown[]): number {
   return last
 }
 
+interface Table {
+  key: string
+  rows: Row[]
+  catalog: readonly string[]
+  allColumns: string[]
+}
+
+/** 声明过、且这次结果里真有的表 */
+function tablesIn(parsed: Row, spec: ArchiveSpec): Table[] {
+  return Object.entries(spec.lists).flatMap(([key, catalog]) => {
+    const rows = parsed[key]
+    if (!catalog || !Array.isArray(rows) || !rows.every(isRow)) return []
+    return [{ key, rows: rows as Row[], catalog, allColumns: columnsOf(rows as Row[]) }]
+  })
+}
+
+/** 查询示例。多张表时带上 list，告诉模型这个参数存在 */
+function queryExample(ref: string, tables: Table[]): string {
+  const first = tables[0]
+  const column = first.catalog[0] ?? first.allColumns[0] ?? 'name'
+  const list = tables.length > 1 ? `"list":"${first.key}",` : ''
+  return (
+    `例如 {"ref":"${ref}",${list}"where":{"${column}":"值"}} 或 {"ref":"${ref}",${list}"search":"关键词"}` +
+    (tables.length > 1 ? `；list 可选 ${tables.map((t) => t.key).join(' / ')}` : '')
+  )
+}
+
 export interface ArchiveOutcome {
   /** 给模型的目录页 */
   text: string
@@ -120,10 +154,13 @@ export interface ArchiveOutcome {
 }
 
 /**
- * 判断要不要存档，要的话造出目录页。
+ * `text` 来源：判断要不要存档，要的话造出目录页。
  *
  * 不存档的情况都返回 null、调用方照原样给：没超预算、不是 JSON 对象、声明的表一个都不在、
  * 或者目录页并不比原文小。
+ *
+ * 多张表时按声明顺序往目录页里填行，预算先给排在前面的表（蓝图是节点先于连线：
+ * 先知道图里有什么，连线可以按节点 id 去查）。
  */
 export function archiveResult(text: string, spec: ArchiveSpec, ref: string): ArchiveOutcome | null {
   if (text.length <= ARCHIVE_BUDGET_CHARS) return null
@@ -136,56 +173,102 @@ export function archiveResult(text: string, spec: ArchiveSpec, ref: string): Arc
   }
   if (!isRow(parsed)) return null
 
-  const list = Object.keys(spec.lists).find(
-    (key) =>
-      spec.lists[key] !== undefined &&
-      Array.isArray(parsed[key]) &&
-      (parsed[key] as unknown[]).every(isRow)
-  )
-  if (!list) return null
+  const tables = tablesIn(parsed, spec)
+  if (tables.length === 0) return null
 
-  const rows = parsed[list] as Row[]
-  const catalog = spec.lists[list] ?? []
-  const allColumns = columnsOf(rows)
   const rest: Row = { ...parsed }
-  delete rest[list]
+  for (const table of tables) delete rest[table.key]
 
-  const archived = (shown: number): Row => ({
-    ref,
-    list,
-    total_rows: rows.length,
-    shown_rows: shown,
-    catalog_columns: catalog,
-    all_columns: allColumns,
-    note:
-      `结果太大，这里只是目录：${list} 共 ${rows.length} 行，` +
-      (shown < rows.length ? `列出了前 ${shown} 行的 ` : '每行只列了 ') +
-      `${catalog.join(' / ')} 这几列。完整的行（全部 ${allColumns.length} 列）` +
-      (shown < rows.length ? `和其余 ${rows.length - shown} 行` : '') +
-      `用 ${RESULT_QUERY_TOOL_NAME} 按条件取，例如 {"ref":"${ref}","search":"关键词"} 或 ` +
-      `{"ref":"${ref}","where":{"${catalog[0] ?? allColumns[0] ?? 'name'}":"值"}}。`
-  })
+  const catalogRows = tables.map((table) => table.rows.map((row) => pick(row, table.catalog)))
 
-  // 先量出不放行的骨架，再一行行往里加，直到预算用完。
-  // 说明文字随列出几行而变（全列出时没有「和其余 N 行」），按两种写法里长的那种留够
-  const skeleton = (shown: number): number =>
-    JSON.stringify({ ...rest, archived: archived(shown), [list]: [] }).length
-  let used = Math.max(skeleton(0), skeleton(rows.length))
-  const shownRows: Row[] = []
-  for (const row of rows) {
-    const line = JSON.stringify(pick(row, catalog))
-    if (used + line.length + 1 > ARCHIVE_BUDGET_CHARS) break
-    shownRows.push(JSON.parse(line) as Row)
-    used += line.length + 1
+  const build = (shown: number[]): string => {
+    const summary = tables.map((table, i) => {
+      const n = shown[i]
+      const cols = table.catalog.join(' / ')
+      if (n === 0) return `${table.key} 共 ${table.rows.length} 行，这里一行都没列`
+      if (n < table.rows.length) {
+        return `${table.key} 共 ${table.rows.length} 行，列出了前 ${n} 行的 ${cols} 这几列，其余 ${table.rows.length - n} 行没列`
+      }
+      return `${table.key} 共 ${table.rows.length} 行，每行只列了 ${cols} 这几列`
+    })
+    const archived = {
+      ref,
+      lists: Object.fromEntries(
+        tables.map((table, i) => [
+          table.key,
+          {
+            total_rows: table.rows.length,
+            shown_rows: shown[i],
+            catalog_columns: table.catalog,
+            all_columns: table.allColumns
+          }
+        ])
+      ),
+      note:
+        `结果太大，这里只是目录：${summary.join('；')}。完整的行和没列出的行用 ` +
+        `${RESULT_QUERY_TOOL_NAME} 按条件取，${queryExample(ref, tables)}。`
+    }
+    return JSON.stringify({
+      ...rest,
+      archived,
+      ...Object.fromEntries(
+        tables.map((table, i) => [table.key, catalogRows[i].slice(0, shown[i])])
+      )
+    })
   }
 
-  const preview = JSON.stringify({
-    ...rest,
-    archived: archived(shownRows.length),
-    [list]: shownRows
-  })
+  // 按声明顺序一行行往里填，每加一行量一次真实长度 —— 说明文字随列出的行数在变，
+  // 估出来的骨架长度靠不住（第一版就因此超了预算十个字符）。
+  // 先按每行的长度粗填，最后再用真实长度往回退，保证不超
+  const shown = tables.map(() => 0)
+  let used = build(shown).length
+  for (let i = 0; i < tables.length; i++) {
+    for (const row of catalogRows[i]) {
+      const line = JSON.stringify(row).length + 1
+      if (used + line > ARCHIVE_BUDGET_CHARS) break
+      shown[i] += 1
+      used += line
+    }
+    if (shown[i] < catalogRows[i].length) break
+  }
+  let preview = build(shown)
+  for (let i = tables.length - 1; i >= 0 && preview.length > ARCHIVE_BUDGET_CHARS; ) {
+    if (shown[i] === 0) {
+      i -= 1
+      continue
+    }
+    shown[i] -= 1
+    preview = build(shown)
+  }
+
   if (preview.length >= text.length) return null
-  return { text: preview, record: { ref, list, text } }
+  return { text: preview, record: { ref, lists: tables.map((t) => t.key), text } }
+}
+
+/**
+ * `details` 来源：工具的文字原样给，后面补一句存档编号。
+ *
+ * 判据和 `text` 来源同一个：完整数据超预算才存。没超说明工具自己的文字放得下全部，
+ * 不需要另一条取数的路。
+ */
+export function archiveDetails(
+  details: unknown,
+  spec: ArchiveSpec,
+  ref: string
+): { note: string; record: ArchiveRecord } | null {
+  if (!isRow(details)) return null
+  const text = JSON.stringify(details)
+  if (text.length <= ARCHIVE_BUDGET_CHARS) return null
+  const tables = tablesIn(details, spec)
+  if (tables.length === 0) return null
+
+  const summary = tables.map((table) => `${table.key} ${table.rows.length} 行`).join('、')
+  return {
+    note:
+      `完整数据已存档为 ${ref}（${summary}，含全部字段）。上面没展开或没列出的部分用 ` +
+      `${RESULT_QUERY_TOOL_NAME} 按条件取，${queryExample(ref, tables)}。`,
+    record: { ref, lists: tables.map((t) => t.key), text }
+  }
 }
 
 export interface ArchiverDeps {
@@ -217,7 +300,7 @@ export type ResultArchiver = <TPart extends { type: string }>(
  * 造一个挂在 `afterToolCall` 上的存档器：结果该存档就返回改写后的 content 和 details，
  * 否则 undefined（调用方照原样给）。
  *
- * - 完整文本挂进 `details.archive`；原来的 details 字段一个不动，界面照旧读。
+ * - 完整数据挂进 `details.archive`；原来的 details 字段一个不动，界面照旧读。
  * - 第一次存档时顺手加载 `result_query`，加载记录写进这条结果的 `details.toolSearch` ——
  *   和 `load_skill` 同一个写法，重启后 `toolSearch.restore` 照样恢复。
  * - 编号用计数器发，不按消息现数：同一轮里并行的两个工具会同时走到这里，
@@ -239,18 +322,35 @@ export function createResultArchiver(deps: ArchiverDeps): ResultArchiver {
     if (original !== undefined && !isRow(original)) return undefined
 
     lastRef ??= lastRefIn(deps.getMessages())
-    const outcome = archiveResult(textParts[0].text, spec, `r${lastRef + 1}`)
-    if (!outcome) return undefined
+    const ref = `r${lastRef + 1}`
+
+    let content: TPart[]
+    let record: ArchiveRecord
+    if (spec.source === 'details') {
+      const outcome = archiveDetails(original, spec, ref)
+      if (!outcome) return undefined
+      content = parts.map((part) =>
+        part.type === 'text'
+          ? ({ ...part, text: `${textParts[0].text as string}\n\n${outcome.note}` } as TPart)
+          : part
+      )
+      record = outcome.record
+    } else {
+      const outcome = archiveResult(textParts[0].text, spec, ref)
+      if (!outcome) return undefined
+      content = parts.map((part) =>
+        part.type === 'text' ? ({ ...part, text: outcome.text } as TPart) : part
+      )
+      record = outcome.record
+    }
     lastRef += 1
 
     const loaded = deps.loadQueryTool()
     return {
-      content: parts.map((part) =>
-        part.type === 'text' ? ({ ...part, text: outcome.text } as TPart) : part
-      ),
+      content,
       details: {
         ...original,
-        archive: outcome.record,
+        archive: record,
         ...(loaded ? { toolSearch: loaded } : {})
       }
     }
@@ -258,6 +358,8 @@ export function createResultArchiver(deps: ArchiverDeps): ResultArchiver {
 }
 
 export interface QueryParams {
+  /** 多张表时查哪一张，默认第一张 */
+  list?: string
   where?: Record<string, unknown>
   search?: string
   fields?: string[]
@@ -296,10 +398,15 @@ function matches(row: Row, params: QueryParams): boolean {
  *
  * 返回同样受 `ARCHIVE_BUDGET_CHARS` 约束：塞不下就给 `next_offset`。
  * 单独一行就超预算时照样给这一行 —— 行是最小单位，拆开反而没法用。
+ * 表名写错了抛出去，并列出有哪几张。
  */
 export function queryArchive(record: ArchiveRecord, params: QueryParams): Row {
+  const list = params.list ?? record.lists[0]
+  if (!record.lists.includes(list)) {
+    throw new Error(`存档 ${record.ref} 里没有 ${list} 这张表，有：${record.lists.join('、')}。`)
+  }
   const parsed = JSON.parse(record.text) as Row
-  const rows = (parsed[record.list] as Row[]) ?? []
+  const rows = (parsed[list] as Row[]) ?? []
   const allColumns = columnsOf(rows)
 
   const unknownColumns = [...Object.keys(params.where ?? {}), ...(params.fields ?? [])].filter(
@@ -312,7 +419,7 @@ export function queryArchive(record: ArchiveRecord, params: QueryParams): Row {
 
   const head: Row = {
     ref: record.ref,
-    list: record.list,
+    list,
     matched: matched.length,
     offset,
     ...(unknownColumns.length > 0

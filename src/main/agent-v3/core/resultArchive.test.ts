@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ARCHIVE_BUDGET_CHARS,
   type ArchivableCall,
+  archiveDetails,
   archiveResult,
   createResultArchiver,
   describeSnapshot,
@@ -13,6 +14,12 @@ import {
 } from './resultArchive'
 
 const SPEC = { lists: { templates: ['name', 'category'], projects: ['name'] } }
+
+interface ArchivedMeta {
+  ref: string
+  note: string
+  lists: Record<string, { total_rows: number; shown_rows: number }>
+}
 
 /** 300 个模板，每个带一段长描述 —— 形状照着 project_list 的 list_templates */
 function templates(count = 300): Record<string, unknown> {
@@ -48,30 +55,41 @@ describe('archiveResult', () => {
     expect(preview.success).toBe(true)
     const rows = preview.templates as Array<Record<string, unknown>>
     expect(Object.keys(rows[0]).sort()).toEqual(['category', 'name'])
-    const meta = preview.archived as Record<string, unknown>
-    expect(meta).toMatchObject({ ref: 'r1', list: 'templates', total_rows: 300 })
-    expect(meta.shown_rows).toBe(rows.length)
+    const meta = preview.archived as {
+      ref: string
+      note: string
+      lists: Record<string, { total_rows: number; shown_rows: number; all_columns: string[] }>
+    }
+    expect(meta.ref).toBe('r1')
+    expect(meta.lists.templates).toMatchObject({ total_rows: 300, shown_rows: rows.length })
     // 明说缺了什么、怎么拿
-    expect(String(meta.note)).toContain('result_query')
-    expect(String(meta.note)).toContain('r1')
-    expect(meta.all_columns).toEqual(['name', 'category', 'path', 'description', 'nested'])
+    expect(meta.note).toContain('result_query')
+    expect(meta.note).toContain('r1')
+    expect(meta.lists.templates.all_columns).toEqual([
+      'name',
+      'category',
+      'path',
+      'description',
+      'nested'
+    ])
     // 完整文本原样存着
-    expect(outcome.record).toEqual({ ref: 'r1', list: 'templates', text })
+    expect(outcome.record).toEqual({ ref: 'r1', lists: ['templates'], text })
   })
 
   it('目录列塞得下就全列出来，说明里不再提「其余的行」', () => {
     const { preview } = archived(templates(120))
-    const meta = preview.archived as { shown_rows: number; note: string }
-    expect(meta.shown_rows).toBe(120)
+    const meta = preview.archived as ArchivedMeta
+    expect(meta.lists.templates.shown_rows).toBe(120)
     expect(meta.note).not.toContain('其余')
   })
 
   it('塞不下时说清还差多少行', () => {
     const { preview } = archived(templates(1000))
     expect(JSON.stringify(preview).length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
-    const meta = preview.archived as { shown_rows: number; note: string }
-    expect(meta.shown_rows).toBeLessThan(1000)
-    expect(meta.note).toContain(`其余 ${1000 - meta.shown_rows} 行`)
+    const meta = preview.archived as ArchivedMeta
+    const shown = meta.lists.templates.shown_rows
+    expect(shown).toBeLessThan(1000)
+    expect(meta.note).toContain(`其余 ${1000 - shown} 行`)
   })
 
   it('同一个工具的另一张表（list_projects）也认', () => {
@@ -80,7 +98,44 @@ describe('archiveResult', () => {
       projects: Array.from({ length: 200 }, (_, i) => ({ name: `P${i}`, path: 'x'.repeat(100) }))
     }
     const { preview } = archived(result as unknown as Record<string, unknown>)
-    expect((preview.archived as { list: string }).list).toBe('projects')
+    expect(Object.keys((preview.archived as ArchivedMeta).lists)).toEqual(['projects'])
+  })
+
+  it('多张表都换成目录，预算先给排在前面的表；查询示例带上 list', () => {
+    const graph = {
+      success: true,
+      nodes: Array.from({ length: 200 }, (_, i) => ({
+        id: `N${i}`,
+        class: 'K2Node_CallFunction',
+        pins: [{ name: 'execute', type: 'exec', default_value: 'x'.repeat(200) }]
+      })),
+      connections: Array.from({ length: 300 }, (_, i) => ({
+        from_node: `N${i % 200}`,
+        from_pin: 'then',
+        to_node: `N${(i + 1) % 200}`,
+        to_pin: 'execute'
+      }))
+    }
+    const text = JSON.stringify(graph)
+    const outcome = archiveResult(
+      text,
+      { lists: { nodes: ['id', 'class'], connections: ['from_node', 'to_node'] } },
+      'r2'
+    )!
+    expect(outcome.text.length).toBeLessThanOrEqual(ARCHIVE_BUDGET_CHARS)
+    const preview = JSON.parse(outcome.text) as Record<string, unknown>
+    const meta = preview.archived as ArchivedMeta
+    // 节点全列下了，连线拿剩下的预算
+    expect(meta.lists.nodes.shown_rows).toBe(200)
+    expect(meta.lists.connections.shown_rows).toBeLessThan(300)
+    expect((preview.nodes as unknown[])[0]).toEqual({ id: 'N0', class: 'K2Node_CallFunction' })
+    expect(meta.note).toContain('"list":"nodes"')
+    expect(meta.note).toContain('nodes / connections')
+    expect(outcome.record.lists).toEqual(['nodes', 'connections'])
+
+    const linked = queryArchive(outcome.record, { list: 'connections', where: { from_node: 'N5' } })
+    expect(linked.matched).toBe(2)
+    expect(() => queryArchive(outcome.record, { list: 'pins' })).toThrow(/nodes、connections/)
   })
 
   it('不是 JSON、或者声明的表不在，都原样给', () => {
@@ -90,10 +145,30 @@ describe('archiveResult', () => {
   })
 })
 
+describe('archiveDetails', () => {
+  it('完整数据超预算才存，返回的是补在正文后面的一句话', () => {
+    const details = templates()
+    const outcome = archiveDetails(details, SPEC, 'r4')!
+    expect(outcome.note).toContain('r4')
+    expect(outcome.note).toContain('templates 300 行')
+    expect(outcome.note.length).toBeLessThan(300)
+    expect(outcome.record).toEqual({
+      ref: 'r4',
+      lists: ['templates'],
+      text: JSON.stringify(details)
+    })
+  })
+
+  it('放得下就不存；details 不是对象也不存', () => {
+    expect(archiveDetails(templates(3), SPEC, 'r1')).toBeNull()
+    expect(archiveDetails('x'.repeat(ARCHIVE_BUDGET_CHARS + 1), SPEC, 'r1')).toBeNull()
+  })
+})
+
 describe('queryArchive', () => {
-  const record = (): { ref: string; list: string; text: string } => ({
+  const record = (): { ref: string; lists: string[]; text: string } => ({
     ref: 'r1',
-    list: 'templates',
+    lists: ['templates'],
     text: JSON.stringify(templates())
   })
 
@@ -155,7 +230,7 @@ describe('describeSnapshot', () => {
     role: 'toolResult',
     toolCallId: 'c1',
     toolName: 'project_list',
-    details: { archive: { ref: 'r1', list: 'templates', text: '{}' } }
+    details: { archive: { ref: 'r1', lists: ['templates'], text: '{}' } }
   }
   const assistant = (id: string, name: string, args: unknown): unknown => ({
     role: 'assistant',
@@ -234,7 +309,7 @@ describe('createResultArchiver', () => {
 
   it('同一轮并行的两个结果拿到不同编号，并接着历史往后编', () => {
     const history = [
-      { role: 'toolResult', details: { archive: { ref: 'r4', list: 'x', text: '{}' } } }
+      { role: 'toolResult', details: { archive: { ref: 'r4', lists: ['x'], text: '{}' } } }
     ]
     const archive = archiver({ getMessages: () => history })
     expect((archive(bigCall())!.details.archive as { ref: string }).ref).toBe('r5')
@@ -259,7 +334,7 @@ describe('辅助函数', () => {
   it('lastRefIn 取历史里最大的编号', () => {
     const at = (ref: string): unknown => ({
       role: 'toolResult',
-      details: { archive: { ref, list: 'x', text: '{}' } }
+      details: { archive: { ref, lists: ['x'], text: '{}' } }
     })
     expect(lastRefIn([at('r2'), at('r10'), { role: 'user' }])).toBe(10)
     expect(lastRefIn([])).toBe(0)
@@ -268,11 +343,11 @@ describe('辅助函数', () => {
   it('发给界面时剔掉完整文本，只留编号', () => {
     const details = {
       success: true,
-      archive: { ref: 'r1', list: 'templates', text: 'x'.repeat(99) }
+      archive: { ref: 'r1', lists: ['templates'], text: 'x'.repeat(99) }
     }
     expect(detailsForRenderer(details)).toEqual({
       success: true,
-      archive: { ref: 'r1', list: 'templates' }
+      archive: { ref: 'r1', lists: ['templates'] }
     })
     expect(detailsForRenderer({ success: true })).toEqual({ success: true })
   })

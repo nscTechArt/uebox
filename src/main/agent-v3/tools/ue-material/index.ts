@@ -790,6 +790,18 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
   namespace: NAMESPACE,
   method: 'material.get_graph',
   risk: 'safe',
+  /*
+   * 下面的 toOutcome 按字符额度封了顶，额度外的节点和连线以前是死路：
+   * 全套材质工具里只有这一个读图入口，又没有 node_id / offset 入参。
+   * 存档之后文字照旧，后面补一句编号，被截掉的部分凭编号用 result_query 取
+   */
+  archive: {
+    source: 'details',
+    lists: {
+      nodes: ['node_id', 'class', 'guid'],
+      connections: ['from_node', 'from_pin', 'to_node', 'to_input']
+    }
+  },
   description: `读取材质图表的全部节点与连线。改图之前**必须**先调它拿到真实的 node_id，不要凭猜测连线。
 
 排查已有材质时看这三样，比读连线本身有用：
@@ -807,7 +819,10 @@ const getMaterialGraph = defineUeTool<z.ZodTypeAny, GetGraphResponse>({
 每个节点还带一个 **guid**。node_id 是按数组下标编的，**删掉任何一个节点，
 后面所有节点的 node_id 都会往前挪一位** —— 拿着删除或撤销之前读到的 node_id
 回来改图，改中的是另一个节点，而且不会报错。跨过删除/撤销之后一律用 guid，
-两种 id 传哪个都认。`,
+两种 id 传哪个都认。
+
+大图的文字按额度截断，结尾会给一个存档编号：没展开的节点（引脚、类型、值）和没列出的连线
+用 result_query 按编号取，例如 {"ref":"r3","list":"nodes","where":{"node_id":"…"}}。`,
   input: z.object({
     path: z.string().describe('材质资产路径，如 /Game/Materials/M_Wood'),
     include_values: z.boolean().optional().default(true).describe('是否包含节点当前值')

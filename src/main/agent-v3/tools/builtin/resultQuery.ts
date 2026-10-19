@@ -30,6 +30,10 @@ const cell = z.union([z.string(), z.number(), z.boolean()])
 
 const input = z.object({
   ref: z.string().describe('存档编号，如 "r3"'),
+  list: z
+    .string()
+    .optional()
+    .describe('存档里有多张表时查哪一张（如 nodes / connections），默认第一张'),
   where: z
     .record(z.string(), z.union([cell, z.array(cell)]))
     .optional()
@@ -51,7 +55,7 @@ export function createResultQueryTool(deps: ResultQueryDeps): UnrealAgentTool<un
       'fields 挑列，返回带 next_offset 时用 offset 翻页。查的是当时的快照：' +
       '之后改过东西的话返回里会说，要最新状态就重新调用原工具。',
     input,
-    execute: async ({ ref, where, search, fields, offset, limit }) => {
+    execute: async ({ ref, list, where, search, fields, offset, limit }) => {
       const messages = deps.getMessages()
       const record = messages.map(archiveOf).find((archive) => archive?.ref === ref)
       if (!record) {
@@ -67,6 +71,7 @@ export function createResultQueryTool(deps: ResultQueryDeps): UnrealAgentTool<un
 
       const snapshot = describeSnapshot(messages, ref, deps.isMutating)
       const result = queryArchive(record, {
+        ...(list ? { list } : {}),
         ...(where ? { where } : {}),
         ...(search ? { search } : {}),
         ...(fields ? { fields } : {}),

@@ -251,7 +251,8 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'blueprint_get_graph',
     namespace: 'ue.blueprint',
     risk: 'safe',
-    make: () => ueBlueprint.createGetBlueprintGraphTool()
+    make: () => ueBlueprint.createGetBlueprintGraphTool(),
+    archive: ueBlueprint.BLUEPRINT_GRAPH_ARCHIVE
   },
   {
     name: 'blueprint_search_nodes',

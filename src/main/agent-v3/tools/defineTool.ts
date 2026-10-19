@@ -92,6 +92,8 @@ export interface ToolSpec<TIn extends z.ZodTypeAny, TDetails = unknown> {
   riskFor?: (args: z.infer<TIn>) => ToolRisk
   /** 能否与同批其他工具并发执行。改同一份资源的工具要声明 sequential */
   concurrency?: 'sequential' | 'parallel'
+  /** 见 `ArchiveSpec` */
+  archive?: ArchiveSpec
   execute: (args: z.infer<TIn>, ctx: ToolCallContext<TDetails>) => Promise<ToolOutcome<TDetails>>
 }
 
@@ -191,6 +193,12 @@ export interface ToolMeta {
 export interface ArchiveSpec {
   // 值允许 undefined：注册表是一张异构字面量数组，TS 会给别的工具的表名补上 `?: undefined`
   lists: Readonly<Record<string, readonly string[] | undefined>>
+  /**
+   * 表在哪。默认 `text`：给模型的文本就是 JSON，目录页替换它。
+   * `details`：工具自己把结果排成了文字（并已自行封顶），表在 details 里 ——
+   * 文字原样给，后面补一句存档编号，被它自己的额度截掉的部分凭编号取
+   */
+  source?: 'text' | 'details'
 }
 
 const RISK_RANK: Record<ToolRisk, number> = { safe: 0, mutating: 1, destructive: 2 }
@@ -306,7 +314,8 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
       namespace: spec.namespace,
       risk,
       ...(spec.requiresExplicitApproval ? { requiresExplicitApproval: true } : {}),
-      ...(spec.riskFor ? { riskFor: spec.riskFor as (args: unknown) => ToolRisk } : {})
+      ...(spec.riskFor ? { riskFor: spec.riskFor as (args: unknown) => ToolRisk } : {}),
+      ...(spec.archive ? { archive: spec.archive } : {})
     }
   }
 

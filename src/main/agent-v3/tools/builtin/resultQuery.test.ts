@@ -11,7 +11,7 @@ const archived = {
   details: {
     archive: {
       ref: 'r2',
-      list: 'assets',
+      lists: ['assets'],
       text: JSON.stringify({ assets: [{ name: 'SM_Rock', type: 'StaticMesh' }] })
     }
   }

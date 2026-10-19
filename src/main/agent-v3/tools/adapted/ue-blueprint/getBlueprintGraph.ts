@@ -20,6 +20,7 @@ import {
 } from './graphDiscovery'
 import { resolveBlueprintPathInput } from './resolveBlueprintPath'
 import { PLUGIN_UPDATE_HINT } from '../project/pluginUpdateHint'
+import type { ArchiveSpec } from '../../defineTool'
 
 const GetBlueprintGraphSchema = z.object({
   blueprint_path: z
@@ -466,6 +467,24 @@ export function graphNameMissHint(graphName: string, miss: GraphNameMiss | null)
   return describeGraphNameMiss(graphName, miss, PLUGIN_UPDATE_HINT)
 }
 
+/**
+ * 图太大时的存档声明（见 `core/resultArchive.ts`），由注册表挂到工具上。
+ *
+ * 一个节点带全部引脚约 660 字符，真实会话里一张图到过 12.8 万字符、212 根连线就占 3.2 万。
+ * 目录**不带引脚** —— 这正是文件头记的那次教训的反面：当年是悄悄删，这次是收起来，
+ * 目录页明说没有引脚、连线前按 id 去 result_query 取完整节点。
+ *
+ * 节点排在连线前面：预算先花在「图里有什么」上，连线按节点 id 查得到。
+ * 连线的目录列同时写了普通图（from_node / to_pin）和状态机页（from / to）两种形状，
+ * 目录只取实际有的列。
+ */
+export const BLUEPRINT_GRAPH_ARCHIVE: ArchiveSpec = {
+  lists: {
+    nodes: ['id', 'class', 'title', 'write_as', 'member_name', 'sub_graph', 'pos_x', 'pos_y'],
+    connections: ['from_node', 'from_pin', 'to_node', 'to_pin', 'from', 'to']
+  }
+}
+
 export const __testing = {
   stateMachineConnections,
   describePin,
@@ -518,7 +537,15 @@ are each their own graph, addressed by path (graph_kind says which). Animation n
 states come back with "settings" (only what differs from the defaults) and, when they
 contain a graph, "sub_graph" — the path to read or write next. A state machine page
 returns states as nodes and its transitions as connections ({ from, to, settings,
-rule_graph }), the same shape blueprint_apply_graph takes there.`,
+rule_graph }), the same shape blueprint_apply_graph takes there.
+
+Large graphs come back as a catalogue: "archived" gives a ref (e.g. "r3"), nodes carry only
+id / class / title / write_as / member_name / position — NO pins — and connections may be
+cut short. Before wiring or setting pin defaults, fetch the full nodes you touch with
+result_query {"ref":"r3","list":"nodes","where":{"id":[...]}}; find a node's wires with
+{"list":"connections","where":{"from_node":"<id>"}} (or to_node). Adding nodes and wiring
+them to existing ids needs only those nodes. Rewriting the whole graph (clear_existing)
+needs every node: page through result_query first.`,
     inputSchema: GetBlueprintGraphSchema,
     execute: async (input) => {
       try {

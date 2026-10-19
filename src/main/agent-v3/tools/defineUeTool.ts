@@ -23,7 +23,13 @@ import { z } from 'zod'
 import { serviceManager } from '../../services'
 import { WebSocketServiceError } from '../../services/websocket/types'
 import { getTargetConnectionId } from '../../agent-v3/core/projectTargetContext'
-import { defineTool, type ToolOutcome, type ToolRisk, type UnrealAgentTool } from './defineTool'
+import {
+  defineTool,
+  type ArchiveSpec,
+  type ToolOutcome,
+  type ToolRisk,
+  type UnrealAgentTool
+} from './defineTool'
 
 /** UE 侧 RPC 的失败响应形状。历史原因有四种，全部在这里认。 */
 interface RpcErrorShape {
@@ -377,6 +383,8 @@ export interface UeToolSpec<TIn extends z.ZodTypeAny, TResponse> {
   /** 见 `ToolMeta.riskFor`：dry_run 这类只读开关按参数降风险 */
   riskFor?: (args: z.infer<TIn>) => ToolRisk
   concurrency?: 'sequential' | 'parallel'
+  /** 见 `ArchiveSpec` */
+  archive?: ArchiveSpec
   timeoutMs?: number
   /** Zod 解析后的参数 → RPC payload。省略则原样透传 */
   toParams?: (args: z.infer<TIn>) => Record<string, unknown>
@@ -400,6 +408,7 @@ export function defineUeTool<TIn extends z.ZodTypeAny, TResponse = unknown>(
     input: spec.input,
     risk: spec.risk ?? 'mutating',
     ...(spec.riskFor ? { riskFor: spec.riskFor } : {}),
+    ...(spec.archive ? { archive: spec.archive } : {}),
     concurrency: spec.concurrency ?? 'parallel',
     execute: async (args, ctx) => {
       const params = spec.toParams ? spec.toParams(args) : (args as Record<string, unknown>)
