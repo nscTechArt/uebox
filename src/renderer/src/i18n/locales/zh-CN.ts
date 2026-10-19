@@ -2672,6 +2672,8 @@ export default {
       tab: '团队任务',
       openTab: '在右侧面板查看团队任务',
       closeTab: '关闭团队任务',
+      closeReport: '关闭这份交付',
+      reportGone: '这份交付已经不在团队记录里了',
       selfReportedHint: '由队员自行标记，虚幻盒子未核实；以验收结论为准',
       objective: '目标',
       latestRequest: '最新要求：',

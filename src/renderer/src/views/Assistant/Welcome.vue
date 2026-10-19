@@ -234,16 +234,23 @@
     </div>
 
     <AgentBrowserPane
-      v-if="browserSessionId || fileReview || teamTab.open.value"
+      v-if="browserSessionId || fileReview || teamTab.open.value || teamTab.reports.value.length"
       :key="`${sid}:${browserSessionId}`"
       :session-id="browserSessionId || ''"
-      :open="browserPaneOpen || !!fileReview || teamTab.open.value"
+      :open="
+        browserPaneOpen || !!fileReview || teamTab.open.value || !!teamTab.reports.value.length
+      "
       :review-open="!!fileReview"
       :review-active="
-        !!fileReview && !teamTab.active.value && (fileReview.active || !browserPaneOpen)
+        !!fileReview &&
+        !teamTab.active.value &&
+        !teamTab.activeReport.value &&
+        (fileReview.active || !browserPaneOpen)
       "
       :team-open="teamTab.open.value"
       :team-active="teamTab.active.value"
+      :reports="teamTab.reports.value"
+      :active-report="teamTab.activeReport.value"
       :url="browserUrl"
       :navigation="browserNavigation"
       :group="browserGroup"
@@ -252,6 +259,8 @@
       @close-review="closeFileReview"
       @select-team="teamTab.show"
       @close-team="teamTab.close"
+      @select-report="teamTab.openReport"
+      @close-report="teamTab.closeReport"
       @select-browser="selectBrowserPage"
     >
       <template #review>
@@ -277,6 +286,19 @@
           @open-models="teamBoard.loadModels"
           @set-model="teamBoard.setMemberModel"
           @dismiss="teamBoard.dismissMember"
+          @open-report="teamTab.openReport"
+        />
+      </template>
+      <template #report>
+        <TeamReportPane
+          v-if="teamBoard.team.value && teamTab.activeReport.value"
+          :key="teamTab.activeReport.value"
+          :team="teamBoard.team.value"
+          :activity="teamBoard.activity.value"
+          :job-id="teamTab.activeReport.value"
+          :title="
+            teamTab.reports.value.find((r) => r.id === teamTab.activeReport.value)?.title ?? ''
+          "
         />
       </template>
     </AgentBrowserPane>
@@ -341,6 +363,7 @@ import { provideFileReview } from './composables/useFileReview'
 import { useSessionBrowser } from './composables/useSessionBrowser'
 import { useChatSessionsStore, type BoundNotebook } from '../../store/modules/chatSessions'
 import TeamBoardPanel from './components/TeamBoardPanel.vue'
+import TeamReportPane from './components/TeamReportPane.vue'
 import { useTeamBoard } from './composables/useTeamBoard'
 import { useTeamTab } from './composables/useTeamTab'
 import { useSessionGoal } from './composables/useSessionGoal'

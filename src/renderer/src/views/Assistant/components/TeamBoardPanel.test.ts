@@ -269,7 +269,7 @@ describe('像素画风：委托板', () => {
     expect(wrapper.find('.scroll-open').exists()).toBe(false)
   })
 
-  it('任务板、日志默认收着：日志只露最新一条；交付那条点了展开那份卷轴', async () => {
+  it('任务板、日志默认收着：日志只露最新一条；交付那条点了要求另开页签看', async () => {
     const wrapper = docked({ running: true })
     const [board, log] = wrapper.findAll('.q-fold-box')
     expect(board!.find('.board-list').exists()).toBe(false)
@@ -280,7 +280,9 @@ describe('像素画风：委托板', () => {
     expect(items.length).toBeGreaterThan(3)
     const delivered = items.find((item) => item.classes().includes('is-delivered'))!
     await delivered.find('button').trigger('click')
-    expect(wrapper.find('.scroll-open .parch-title').text()).toBe('配置统计报告')
+    expect(wrapper.find('.scroll-open').exists()).toBe(false)
+    const [report] = wrapper.emitted('open-report')![0] as [{ id: string; title: string }]
+    expect(report.title).toBe('配置统计报告')
   })
 
   it('还没招人、还没派活：说清楚在等什么', () => {

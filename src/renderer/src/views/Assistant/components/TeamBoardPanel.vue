@@ -109,6 +109,7 @@
         @open-models="emit('open-models')"
         @set-model="(name: string, m: TeamModel) => emit('set-model', name, m)"
         @dismiss="(name: string, reason: string) => emit('dismiss', name, reason)"
+        @open-report="emit('open-report', $event)"
       />
       <TeamDismissalList
         class="team-board-dismissals"
@@ -137,6 +138,7 @@ import {
   type TeamUsage,
   type TeamVerdict
 } from '@core/shared/agentTeam'
+import type { TeamReportTab } from '../composables/useTeamTab'
 import TeamDismissalList from './TeamDismissalList.vue'
 import TeamLaneBoard from './teamLanes/TeamLaneBoard.vue'
 import TeamOffice from './teamOffice/TeamOffice.vue'
@@ -172,6 +174,8 @@ const emit = defineEmits<{
   'reopen-job': [jobId: string]
   /** 用户结束团队模式 */
   end: []
+  /** 用户在日志里点了一份交付：右侧面板另开页签看全文 */
+  'open-report': [report: TeamReportTab]
   /** 用户打开了团队任务或换模型菜单：重读一次模型设置 */
   'open-models': []
   /** 用户给队员换了模型 */

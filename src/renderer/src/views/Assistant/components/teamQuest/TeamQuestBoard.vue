@@ -547,6 +547,7 @@ import {
   type TeamStateView
 } from '@core/shared/agentTeam'
 
+import type { TeamReportTab } from '../../composables/useTeamTab'
 import MarkdownRenderer from '../MarkdownRenderer.vue'
 import TeamMemberDismiss from '../TeamMemberDismiss.vue'
 import TeamMemberModel from '../TeamMemberModel.vue'
@@ -586,6 +587,7 @@ const emit = defineEmits<{
   'open-models': []
   'set-model': [name: string, model: TeamModel]
   dismiss: [name: string, reason: string]
+  'open-report': [report: TeamReportTab]
 }>()
 const { t } = useI18n()
 const { ago, exact, who, toolVerb, statusText } = useTeamLabels()
@@ -799,14 +801,10 @@ function stopSteps(job: JobView): ReturnType<typeof recentSteps> {
 
 const shelfHas = (jobId: string): boolean =>
   props.model.round.some((j) => j.id === jobId) || props.model.earlier.some((j) => j.id === jobId)
+/** 日志里点一份交付：右侧面板另开一个页签看全文，不在上面的架子里就地展开（离得远，点了像没反应） */
 function openFromLog(jobId: string): void {
-  if (!shelf.value.some((j) => j.id === jobId)) {
-    // 架子正按某个人筛着、这件不是他的：先撤掉筛选，不然点了日志架上什么也没开
-    if (props.selected) emit('select', null)
-    earlierOpen.value = true
-  }
-  openJobId.value = jobId
-  fullText.value = false
+  const job = [...props.model.round, ...props.model.earlier].find((j) => j.id === jobId)
+  if (job) emit('open-report', { id: job.id, title: job.title })
 }
 
 // ── 任务板 ──────────────────────────────────────────────────────────────

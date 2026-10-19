@@ -2736,6 +2736,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       tab: 'Team tasks',
       openTab: 'View team tasks in the side panel',
       closeTab: 'Close team tasks',
+      closeReport: 'Close this delivery',
+      reportGone: 'This delivery is no longer in the team records',
       selfReportedHint:
         'Marked by the teammate, not checked by Unreal Box — the acceptance verdict is what counts',
       objective: 'Goal',
