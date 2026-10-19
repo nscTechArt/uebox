@@ -30,6 +30,7 @@ vi.mock('../../../../sqliteDataBase/models/projectCollection', () => ({
 }))
 
 import {
+  buildImportedAssetSummary,
   handOffToOpenedProject,
   isSameProject,
   listProjects,
@@ -289,5 +290,39 @@ describe('list_projects 的分组信息', () => {
 
     expect(projects[0].collections).toEqual(['UE 5.5', '教学用'])
     expect(collections.map((c) => c.projectCount)).toEqual([1, 1])
+  })
+})
+
+describe('buildImportedAssetSummary', () => {
+  it('不把推断原料 className 发出去，softPath 和 uePath 同值时只留 uePath', () => {
+    const summary = buildImportedAssetSummary({
+      assetKey: 'k1',
+      assetName: 'SM_Rock',
+      assetClass: 'StaticMesh',
+      className: 'StaticMesh',
+      softPath: '/Game/Props/SM_Rock',
+      uePath: '/Game/Props/SM_Rock',
+      sourceType: 'uasset',
+      imported: true
+    })
+
+    expect(summary).not.toHaveProperty('className')
+    expect(summary).not.toHaveProperty('softPath')
+    expect(summary.uePath).toBe('/Game/Props/SM_Rock')
+  })
+
+  it('外部文件导入时 softPath 和 uePath 不同，两个都留着', () => {
+    const summary = buildImportedAssetSummary({
+      assetKey: 'k2',
+      assetName: 'T_Wood',
+      assetClass: 'Texture2D',
+      softPath: '/Lib/Textures/T_Wood',
+      uePath: '/Game/Imported/T_Wood',
+      sourceType: 'external',
+      imported: true
+    })
+
+    expect(summary.softPath).toBe('/Lib/Textures/T_Wood')
+    expect(summary.uePath).toBe('/Game/Imported/T_Wood')
   })
 })

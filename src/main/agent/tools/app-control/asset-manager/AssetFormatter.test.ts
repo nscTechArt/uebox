@@ -34,7 +34,8 @@ describe('formatAssets 的 real_path', () => {
     const [asset] = formatAssets([backupRow], { vaultPath: DEFAULT_VAULT })
 
     expect(asset.real_path).toBe(path.join(DEFAULT_VAULT, backupRow.filePath))
-    expect(asset.realPath).toBe(asset.real_path)
+    // 只发一份：驼峰的 realPath 是同值副本，没有读方，每行白占一百多字符
+    expect(asset).not.toHaveProperty('realPath')
   })
 
   it('跨库搜索时按资产自己那个库拼，不按当前活跃库', () => {

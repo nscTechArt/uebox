@@ -180,8 +180,8 @@ export function formatAssets(assets: AssetRow[], options?: FormatAssetsOptions):
       ...(asset.engineVersion ? { engineVersion: String(asset.engineVersion) } : {}),
       // 添加图片 URL，用于图生图功能
       imageUrl: asset.customPoster || asset.imgLocalPath || undefined,
-      // 返回本地真实路径，供图生图等场景直接读取文件
-      realPath,
+      // 返回本地真实路径，供图生图等场景直接读取文件。
+      // 原来还带一份同值的驼峰 `realPath`，没有任何读方 —— 一页 200 条就白发两万字符
       real_path: realPath
     }
   })
