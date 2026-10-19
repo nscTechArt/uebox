@@ -56,7 +56,7 @@ const RAW_REQUEST_CHANNELS = new Set(
   `agent-v3:approval-reply agent-v3:question-reply agent-v3:mcp:get-settings
 aigc:importLocalModel aigc:save3DModelFromUrls aigc:update3DModelFolderName app:show-input-context-menu asset:confirmOverwriteResponse asset:resolveImportError
 backup:create backup:delete backup:getConfig backup:list backup:restore backup:setConfig backup:stats
-clouddrive:downloadFile db:assetFolder:search db:assetSearch:search db:settings:get db:settings:set db:shortcut:getAll db:shortcut:resetAll db:shortcut:update
+clouddrive:downloadFile db:assetFolder:search db:assetSearch:engineFacet db:assetSearch:search db:settings:get db:settings:set db:shortcut:getAll db:shortcut:resetAll db:shortcut:update
 diagnostics:abandon-import diagnostics:dismiss-import-recovery diagnostics:list-import-recovery diagnostics:resume-import dialog:saveFile dialog:savePdfFromHtml dialog:showSaveDialog file:execute fs:writeFile
 image:deleteTask image:getActiveTasks image:getHistory image:startGeneration legacy:import-blueprints legacy:scan-db legacy:select-db
 assetNote:create assetNote:delete assetNote:getById assetNote:saveImage assetNote:saveVideo assetNote:search assetNote:update

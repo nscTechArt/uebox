@@ -3535,7 +3535,7 @@ interface ListCriteria {
   offset?: number
   classNameCnFilters?: string[]
   fileExtensions?: string[]
-  /** 服务器库：引擎版本分面 */
+  /** 引擎版本（前缀匹配：5.3 也命中 5.3.x） */
   engineVersions?: string[]
   sizeRange?: { min?: number; max?: number }
   dateRange?: { start: string; end: string }
@@ -3624,7 +3624,7 @@ const buildListCriteria = (options: {
     criteria.classNameCnFilters = [...filterForm.assetTypes]
   }
 
-  // 引擎版本只有服务器库有（服务端分面）
+  // 库支持版本分面才带（本地库、服务器库都有）
   if (libraryCaps.value.filters.engine && filterForm.engineVersions.length > 0) {
     criteria.engineVersions = [...filterForm.engineVersions]
   }

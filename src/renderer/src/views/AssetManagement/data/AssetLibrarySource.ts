@@ -26,7 +26,7 @@ export interface LibraryListCriteria {
   keyword?: string
   classNameCnFilters?: string[]
   fileExtensions?: string[]
-  /** 只有服务端库有：引擎版本分面 */
+  /** 引擎版本（库的 filters.engine 为真时才认） */
   engineVersions?: string[]
   sortBy?: string
   sortOrder?: SortOrder
