@@ -101,6 +101,15 @@ export interface TeamStore {
   patchBoard(patches: BoardPatch[]): Promise<BoardTask[]>
   history(name: string): Promise<AgentMessage[]>
   saveHistory(name: string, messages: AgentMessage[]): Promise<void>
+  /**
+   * 这个队员记忆的压缩检查点（见 `compactionCheckpoint.ts`），原样读回，格式由那边校验。
+   *
+   * 和记忆放在一起：队员每次派活都重建 agent，检查点不落盘的话，闭包一清就得拿
+   * 完整原始历史去发 —— 真机上就这样撞过厂商的上下文上限。记忆被改过、换了人，
+   * 检查点里的指纹对不上，自然作废
+   */
+  memberCheckpoint(name: string): Promise<unknown>
+  saveMemberCheckpoint(name: string, checkpoint: unknown): Promise<void>
   /** 全部留言（含已送到的），界面按时间显示 */
   mail(): Promise<TeamMail[]>
   post(from: string, to: string, text: string, replyTo?: string): Promise<TeamMail>
@@ -199,6 +208,8 @@ export function createTeamStore(
   const dismissalsFile = join(dirs.stateDir, 'dismissals.json')
   const historyFile = (name: string): string =>
     join(dirs.stateDir, 'members', `${memberFileBase(name)}.json`)
+  const checkpointFile = (name: string): string =>
+    join(dirs.stateDir, 'members', `${memberFileBase(name)}.compaction.json`)
 
   // 并行派活时几个队员会同时改任务板。读-改-写串起来，免得后写的盖掉先写的。
   // 链按目录共用而不是按实例：界面那头（重开、换模型）每次另造一个 store，
@@ -296,6 +307,12 @@ export function createTeamStore(
       serial(async () => {
         await fs.mkdir(join(dirs.stateDir, 'members'), { recursive: true })
         await writeJson(historyFile(name), messages)
+      }),
+    memberCheckpoint: (name) => readJson<unknown>(checkpointFile(name), undefined),
+    saveMemberCheckpoint: (name, checkpoint) =>
+      serial(async () => {
+        await fs.mkdir(join(dirs.stateDir, 'members'), { recursive: true })
+        await writeJson(checkpointFile(name), checkpoint)
       }),
     mail: () => readJson<TeamMail[]>(mailFile, []),
     post: (from, to, text, replyTo) =>

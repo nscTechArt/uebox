@@ -62,9 +62,17 @@ import { restoreTranscript, withoutSystemMessages, withSystemPrompt } from './sy
 import {
   hashMessages,
   loadCheckpoint,
+  parseCheckpoint,
   promptCacheKey,
-  saveCheckpoint
+  saveCheckpoint,
+  type CompactionCheckpoint
 } from './compactionCheckpoint'
+
+/** 压缩检查点的读写口子：主会话和队员各存各的地方，见 `createUnrealAgent` 里那段 */
+interface CheckpointStore {
+  load(): Promise<CompactionCheckpoint | undefined>
+  save(next: CompactionCheckpoint): Promise<void>
+}
 import {
   RUNTIME_ENVELOPE_RULES,
   formatLocalNow,
@@ -895,9 +903,29 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     request: ctx.requestApproval ?? (async () => 'approve')
   })
 
-  // 压缩检查点。子 agent 不落盘 —— 它的 sessionId 是 `<父>:sub-N`，一次性的，
-  // 存下来只会让会话目录里堆满再也不会被读到的文件。
-  const checkpoint = ctx.isSubAgent ? undefined : await loadCheckpoint(ctx.sessionId)
+  /*
+   * 压缩检查点存在哪。
+   *
+   * - 主会话：会话目录里，按 sessionId。
+   * - 队员：团队目录里、它的记忆旁边（`TeamStore.memberCheckpoint`）。队员每次派活都
+   *   重建 agent，不落盘的话闭包里那份一清，就得拿完整原始历史去发 —— 真机上一个
+   *   队员 977 条历史就这样原样发出去，撞了厂商的上下文上限。
+   * - 一次性子任务（`task`）：不存。它的 sessionId 是 `<父>:sub-N`，存下来只会让
+   *   会话目录里堆满再也不会被读到的文件。
+   */
+  const member = ctx.isSubAgent ? ctx.teamMember : undefined
+  const checkpointStore: CheckpointStore | undefined = member
+    ? {
+        load: async () => parseCheckpoint(await member.store.memberCheckpoint(member.name)),
+        save: (next) => member.store.saveMemberCheckpoint(member.name, next)
+      }
+    : ctx.isSubAgent
+      ? undefined
+      : {
+          load: () => loadCheckpoint(ctx.sessionId),
+          save: (next) => saveCheckpoint(ctx.sessionId, next)
+        }
+  const checkpoint = await checkpointStore?.load().catch(() => undefined)
   let contextEpoch = checkpoint?.contextEpoch ?? 0
 
   const autoCompact = createAutoCompact({
@@ -905,18 +933,18 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     summaryModel,
     contextWindow: selection.model.contextWindow,
     hashMessages,
-    ...(ctx.isSubAgent
-      ? {}
-      : {
+    ...(checkpointStore
+      ? {
           precompactKey: ctx.sessionId,
           checkpoint: {
             ...(checkpoint ? { initial: checkpoint } : {}),
             save: (next) => {
               contextEpoch = next.contextEpoch
-              return saveCheckpoint(ctx.sessionId, next)
+              return checkpointStore.save(next).catch(() => undefined)
             }
           }
-        }),
+        }
+      : {}),
     ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
     ...(ctx.onCompacting ? { onCompacting: ctx.onCompacting } : {})
   })

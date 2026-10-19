@@ -124,11 +124,20 @@ function checkpointPath(sessionId: string): string {
  */
 export async function loadCheckpoint(sessionId: string): Promise<CompactionCheckpoint | undefined> {
   try {
-    const parsed = JSON.parse(await fs.readFile(checkpointPath(sessionId), 'utf8')) as unknown
-    return isCheckpoint(parsed) ? parsed : undefined
+    return parseCheckpoint(JSON.parse(await fs.readFile(checkpointPath(sessionId), 'utf8')))
   } catch {
     return undefined
   }
+}
+
+/**
+ * 盘上读回来的一份是不是检查点，是就原样给回，不是给 undefined。
+ *
+ * 导出给队员那份用：队员的检查点存在团队目录里（`TeamStore.memberCheckpoint`），
+ * 那边只管读写文件，格式校验还在这一处
+ */
+export function parseCheckpoint(value: unknown): CompactionCheckpoint | undefined {
+  return isCheckpoint(value) ? value : undefined
 }
 
 /** 手写校验而不是信任盘上的 JSON —— 半个文件也能 parse 成功，字段却是 undefined */
