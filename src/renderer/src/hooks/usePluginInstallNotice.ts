@@ -103,6 +103,54 @@ export function notifyPluginUpgradeFailure(
   return true
 }
 
+/** 弹窗开着期间陆续导入进来的工程；null 表示弹窗没开 */
+let pendingInstallPaths: string[] | null = null
+
+/**
+ * 首次导入工程时问一句要不要装连接插件。只问一次，答案由主进程记住。
+ *
+ * 「全部导入」会连发很多次，弹窗开着时后来的工程并进同一个弹窗，点安装一起装。
+ * 点叉、按 Esc 和「暂不安装」一样算答过：用户已经看到了，之后去设置里改就行。
+ */
+export function askUALinkInstall(uprojectPath: string): void {
+  if (pendingInstallPaths) {
+    if (!pendingInstallPaths.includes(uprojectPath)) pendingInstallPaths.push(uprojectPath)
+    return
+  }
+  pendingInstallPaths = [uprojectPath]
+
+  const { t } = i18n.global
+  const answer = async (install: boolean): Promise<void> => {
+    const paths = pendingInstallPaths ?? []
+    pendingInstallPaths = null
+    let failures: Array<{ uprojectPath: string; reason: string }>
+    try {
+      failures = await window.api.database.project.ualinkPromptAnswer(install, paths)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error))
+      return
+    }
+    if (!install) return
+    if (failures.length > 0) {
+      notifyPluginInstallFailure({
+        pluginFailure: failures[0].reason,
+        data: { originPath: failures[0].uprojectPath }
+      })
+    } else {
+      message.success(t('page.home.project.ualinkPrompt.installed'))
+    }
+  }
+
+  confirmDialog({
+    title: t('page.home.project.ualinkPrompt.title'),
+    content: t('page.home.project.ualinkPrompt.content'),
+    okText: t('page.home.project.ualinkPrompt.install'),
+    cancelText: t('page.home.project.ualinkPrompt.skip'),
+    onOk: () => answer(true),
+    onCancel: () => void answer(false)
+  })
+}
+
 interface HandOffContext {
   /** 给用户看的那句话 */
   content: string

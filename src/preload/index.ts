@@ -669,6 +669,16 @@ const api = {
       /** 把 UnrealAgentLink 装回项目 */
       ualinkInstall: (uprojectPath: string) =>
         ipcRenderer.invoke('db:project:ualinkInstall', uprojectPath),
+      /** 首次导入时那一问的答案；装失败的工程和原因码原样返回 */
+      ualinkPromptAnswer: (install: boolean, uprojectPaths: string[]) =>
+        ipcRenderer.invoke('db:project:ualinkPromptAnswer', install, uprojectPaths),
+      /** 首次导入工程、自动安装又关着时，主进程请界面问一句要不要装，返回退订函数 */
+      onUALinkInstallPrompt: (callback: (uprojectPath: string) => void) => {
+        const handler = (_: Electron.IpcRendererEvent, uprojectPath: string): void =>
+          callback(uprojectPath)
+        ipcRenderer.on('db:project:ualink-install-prompt', handler)
+        return () => ipcRenderer.removeListener('db:project:ualink-install-prompt', handler)
+      },
       /**
        * 「我的项目」里多了工程时的通知，返回退订函数。
        *

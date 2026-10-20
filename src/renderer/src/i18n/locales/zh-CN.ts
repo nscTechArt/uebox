@@ -1851,6 +1851,14 @@ export default {
           createCollection: '创建分组',
           refresh: '刷新'
         },
+        ualinkPrompt: {
+          title: '为导入的工程安装连接插件？',
+          content:
+            '连接插件装在工程的 Plugins 目录下，不改动引擎。不安装则 AI 无法操作该工程。安装后可在工程右键菜单中移除，也可在「设置 → 插件」中关闭自动安装。此提示只出现一次。',
+          install: '安装',
+          skip: '暂不安装',
+          installed: '连接插件已安装'
+        },
         ualink: {
           removeTitle: '从此项目移除 UnrealAgentLink？',
           removeContent:

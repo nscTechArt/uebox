@@ -30,7 +30,7 @@ vi.mock('@renderer/router', () => ({
 }))
 
 vi.mock('@renderer/utils/messageManager', () => ({
-  message: { error: (...args: unknown[]) => errorToast(...args) }
+  message: { error: (...args: unknown[]) => errorToast(...args), success: vi.fn() }
 }))
 
 vi.mock('@renderer/store/modules/chatSessions', () => ({ useChatSessionsStore: () => ({}) }))
@@ -57,7 +57,7 @@ vi.mock('@renderer/i18n', () => ({
   }
 }))
 
-const { notifyPluginInstallFailure, notifyPluginUpgradeFailure } = await import(
+const { askUALinkInstall, notifyPluginInstallFailure, notifyPluginUpgradeFailure } = await import(
   './usePluginInstallNotice'
 )
 
@@ -173,5 +173,37 @@ describe('notifyPluginUpgradeFailure', () => {
 
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(await clickAskAi()).toContain('H:/UE/a/a.uproject')
+  })
+})
+
+describe('askUALinkInstall', () => {
+  const answer = vi.fn()
+
+  beforeEach(() => {
+    confirm.mockClear()
+    answer.mockReset().mockResolvedValue([])
+    ;(globalThis as { window?: unknown }).window = {
+      api: { database: { project: { ualinkPromptAnswer: answer } } }
+    }
+  })
+
+  it('一批导入只弹一个框，点安装时把这批工程一起交给主进程', async () => {
+    askUALinkInstall('H:/UE/a/a.uproject')
+    askUALinkInstall('H:/UE/b/b.uproject')
+    askUALinkInstall('H:/UE/b/b.uproject')
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    await (dialogOptions().onOk as () => Promise<unknown>)()
+    expect(answer).toHaveBeenCalledWith(true, ['H:/UE/a/a.uproject', 'H:/UE/b/b.uproject'])
+  })
+
+  it('关掉或暂不安装也算答过，下一次导入重新开一个框', async () => {
+    askUALinkInstall('H:/UE/a/a.uproject')
+    ;(dialogOptions().onCancel as () => void)()
+    await Promise.resolve()
+    expect(answer).toHaveBeenCalledWith(false, ['H:/UE/a/a.uproject'])
+
+    askUALinkInstall('H:/UE/c/c.uproject')
+    expect(confirm).toHaveBeenCalledTimes(2)
   })
 })
