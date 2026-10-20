@@ -814,6 +814,13 @@ declare global {
       ualinkRemove: (uprojectPath: string) => Promise<{ success: boolean; error?: string }>
       /** 把 UnrealAgentLink 装回项目 */
       ualinkInstall: (uprojectPath: string) => Promise<{ success: boolean; error?: string }>
+      /** 首次导入时那一问的答案；装失败的工程和原因码原样返回 */
+      ualinkPromptAnswer: (
+        install: boolean,
+        uprojectPaths: string[]
+      ) => Promise<Array<{ uprojectPath: string; reason: string }>>
+      /** 首次导入工程、自动安装又关着时，请界面问一句要不要装，返回退订函数 */
+      onUALinkInstallPrompt: (callback: (uprojectPath: string) => void) => () => void
       /** 「我的项目」里多了工程时的通知，返回退订函数 */
       onLibraryChanged: (callback: () => void) => () => void
       /** 开机后台升级插件失败时的通知，返回退订函数 */

@@ -53,7 +53,7 @@
 
 1. 从 [Releases](https://github.com/ueboxai/uebox/releases) 下载安装（Windows）
 2. **设置 → 模型 → 添加服务商**，填 API 密钥；**默认模型 → 对话** 选它（模型需支持工具调用）
-3. **项目库 → 导入项目**，选 `.uproject`，点 **打开项目**（自动安装 UnrealAgentLink 插件并连接）
+3. **项目库 → 导入项目**，选 `.uproject`，在弹出的询问里点 **安装** UnrealAgentLink 插件，再点 **打开项目**
 4. **侧边栏 → AI 对话**，输入「这个关卡里有多少个光源？」验证连接
 
 文档：[第一次打开](https://uebox.ai/guide/first-run) · [配置模型](https://uebox.ai/guide/ai-setup) · [连接虚幻引擎](https://uebox.ai/guide/plugin) · [常见问题](https://uebox.ai/guide/troubleshooting)

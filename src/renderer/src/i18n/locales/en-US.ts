@@ -1893,6 +1893,14 @@ First work out why the install failed from the output above. If you can run comm
           createCollection: 'Create group',
           refresh: 'Refresh'
         },
+        ualinkPrompt: {
+          title: 'Install the connection plugin for imported projects?',
+          content:
+            "The plugin goes into the project's Plugins folder; the engine is not modified. Without it, the AI cannot work with the project. You can remove it from the project's right-click menu, or turn off automatic installation in Settings → Plugin. This prompt appears only once.",
+          install: 'Install',
+          skip: 'Not now',
+          installed: 'Connection plugin installed'
+        },
         ualink: {
           removeTitle: 'Remove UnrealAgentLink from this project?',
           removeContent:

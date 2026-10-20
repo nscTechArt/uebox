@@ -10,7 +10,7 @@ import AppTag from '@renderer/components/AppTag.vue'
 const { t } = useI18n()
 
 const pluginSourceUrl = 'https://github.com/ueboxai/unreal-agent-link'
-const autoEnableUnrealAgentLink = ref(true)
+const autoEnableUnrealAgentLink = ref(false)
 /** 编辑器崩溃后自动重开。真相源在主进程，见 `services/editorCrashWatch` */
 const autoRecoverEditorCrash = ref(true)
 const isLoadingSettings = ref(true)
