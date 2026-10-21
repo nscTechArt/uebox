@@ -2424,6 +2424,8 @@ export default {
         widget_add_child: '添加子控件',
         widget_make_variable: '将控件设为变量',
         widget_set_property: '修改控件属性',
+        widget_replace: '替换控件',
+        widget_remove: '删除控件',
 
         // 本地文件与其他
         write_local_file: '写入文件',

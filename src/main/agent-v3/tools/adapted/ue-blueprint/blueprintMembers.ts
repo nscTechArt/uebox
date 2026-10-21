@@ -255,7 +255,10 @@ const ComponentEventSchema = z.object({
   blueprint_path: z.string().describe('蓝图路径，如 /Game/Blueprints/BP_Door'),
   component_name: z
     .string()
-    .describe('组件名，就是组件面板里显示的那个名字。用 blueprint_describe 可以查到'),
+    .describe(
+      '组件名，就是组件面板里显示的那个名字，用 blueprint_describe 可以查到。' +
+        '控件蓝图写控件名（按钮、滑条），用 widget_get_hierarchy 查'
+    ),
   action: z
     .enum(['list', 'add'])
     .describe('list 列出这个组件能绑哪些事件（连参数签名）；add 在事件图里放一个绑定节点'),
@@ -285,6 +288,9 @@ export function createBlueprintComponentEventTool() {
     description: `列出或绑定组件上的事件（OnComponentBeginOverlap、OnClicked、OnComponentHit 等）。
 
 **所有触发式交互的入口都在这里**：走进触发区就开门、点一下就捡起来、撞到就扣血。
+
+控件蓝图（UMG 界面）里的按钮也走这里：blueprint_path 写控件蓝图，component_name 写控件名，
+普通 Button 绑 OnClicked，CommonUI 按钮绑 OnButtonBaseClicked。控件还不是变量的会自动设成变量。
 
 先 action="list" 看这个组件到底能绑什么 —— 事件名很容易记混
 （OnComponentBeginOverlap 不是 OnBeginOverlap），而且不同组件类型能绑的不一样。

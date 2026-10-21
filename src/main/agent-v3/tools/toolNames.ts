@@ -81,6 +81,8 @@ const CROSS_REFERENCE_RENAMES: Readonly<Record<string, string>> = Object.freeze(
   'widget.preview': 'widget_preview',
   'widget.make_variable': 'widget_make_variable',
   'widget.set_property': 'widget_set_property',
+  'widget.replace': 'widget_replace',
+  'widget.remove': 'widget_remove',
   // 2026-09-11 两合一（见 registry.ts 的 ue_insights_trace）。旧名还会出现在
   // 历史会话和第三方 skill 里，指过去才不会让模型去调一个不存在的工具。
   // 注意这两个键**没有点号**：rewriteCrossReferences 对键做整词替换，不依赖点号。

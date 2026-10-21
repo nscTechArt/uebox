@@ -1,6 +1,6 @@
 ---
 name: ue-widget-umg-layout
-description: Build a UMG Widget Blueprint — create it, place controls with anchors and sizes, set text/colour/values, expose controls as variables for Blueprint to drive, and render a preview to check the result. Use when the user wants a HUD, menu or any in-game UI. Do not use for editing Blueprint node graphs, or for placing actors in the level.
+description: Build or edit a UMG Widget Blueprint — create it, place controls with anchors and sizes, swap or delete controls in an existing UI, set text/colour/any editable property, bind button clicks, expose controls as variables, and render a preview to check the result. Use when the user wants a HUD, menu or any in-game UI, or wants to change one they already have. Do not use for editing Blueprint node graphs, or for placing actors in the level.
 ---
 
 # UMG widget layout
@@ -14,8 +14,11 @@ looking at the rendered result.
 widget_create          root container: CanvasPanel / VerticalBox / ScrollBox / GridPanel / …
 widget_add_child       one call per control, carries its own initial layout
 widget_set_slot        move/resize/align a control that is already there
-widget_set_property    text, percent, colour, visibility, enabled
+widget_set_property    text, percent, colour, visibility — or any editable property by name
+widget_replace         swap a control for another type in place (keeps slot, name, events)
+widget_remove          delete a control and its children
 widget_make_variable   expose a control so Blueprint can drive it
+blueprint_component_event   bind a button's OnClicked (component_name = the control's name)
 widget_get_hierarchy   read back the real structure and slot data
 widget_preview         render it and LOOK at it
 ```
@@ -26,8 +29,9 @@ widget_preview         render it and LOOK at it
 `Button`, `TextBlock`, `RichTextBlock`, `Image`, `CanvasPanel`, `VerticalBox`, `HorizontalBox`,
 `Overlay`, `Border`, `ScrollBox`, `SizeBox`, `Spacer`, `ProgressBar`, `Slider`, `CheckBox`,
 `ComboBoxString`, `EditableText`, `EditableTextBox`, `SpinBox`, `GridPanel`, `WrapBox`,
-`UniformGridPanel` — and anything else resolves dynamically by class name (drop the `U`), so a
-project's own widget classes work too.
+`UniformGridPanel`. Anything else works too: a native class by name without the `U`
+(`CommonButtonBase`), and a project's own Widget Blueprint by asset name (`WB_Text_Button`) or path
+(`/Game/UI/WB_Text_Button`). If a name matches two Widget Blueprints the error lists both paths.
 
 A scrolling list is a `ScrollBox`, a text field is an `EditableTextBox`, an inventory grid is a
 `UniformGridPanel`. Do not fake them out of the four containers you happen to remember.
@@ -118,9 +122,20 @@ Colour values are **0..1 floats**, not 0..255:
 `FontSize` is a number and works on `TextBlock` / `RichTextBlock`; it changes the size only and
 leaves the typeface alone. `Justification` takes `Left` / `Center` / `Right` on any text control.
 
-Still out of reach: border radius, background brush textures, swapping the font asset itself.
-Say so rather than reporting a half-styled widget as finished — and do **not** go looking for a
-Python route around it.
+Anything else in the control's Details panel can be set by its property name; the plugin finds it
+by reflection. Struct values take an object with only the fields you change, asset references take
+an object path:
+
+```
+property_name: "Background"     (a Border)
+value: { "DrawAs": "RoundedBox",
+         "OutlineSettings": { "RoundingType": "FixedRadius", "CornerRadii": { "X": 8, "Y": 8, "Z": 8, "W": 8 } } }
+```
+
+A project widget placed inside this one (a `WB_Text_Button`) exposes the variables its author
+ticked **Instance Editable** — that is how its label is set (`InText` or similar). If the name is
+wrong, the error lists what that control can take; pick from that list. A variable that exists but
+is not Instance Editable is refused with that reason: tell the user to tick it, do not work around it.
 
 When a call fails, read the `error` and the `hint` in the return: they say whether the control was
 not found, the value type was wrong, or that control type simply has no such property. Retrying
@@ -199,6 +214,45 @@ screenshot with no HUD in it proves nothing. Three things that do work:
 Reading the TextBlock's `Text` property back is **not** evidence that the text is on screen —
 that is exactly the false positive `SetTextPropertyByName` produces. Say what you verified and
 how; do not report a runtime UI as confirmed on the strength of a property read.
+
+## Changing a UI the user already has
+
+Most requests are about an existing screen, not a new one: "make the login button look like the
+nav buttons", "remove that panel". Read it first with `widget_get_hierarchy`, then change it in
+place. Do not add a second control next to the old one and leave the old one for the user.
+
+**Swap a control for another type** with `widget_replace`. Name, slot (position, anchors, size,
+alignment, padding), visibility and enabled state stay; children move over if the new type can
+hold them. Events bound to the old control are moved to the new class's event and the logic wired
+after them stays connected. When the new class has no event of the same name the plugin refuses
+and lists what it can bind — pass `event_map`:
+
+```
+widget_replace  path: "/Game/UI/WB_StartScreen", widget_name: "Btn_Login",
+                new_type: "WB_Text_Button",
+                event_map: { "OnClicked": "OnButtonBaseClicked" },
+                drop_children: true
+```
+
+A plain `Button` holds its label as a child `TextBlock`; a CommonUI button usually has no slot for
+it, so the replace is refused until you pass `drop_children: true`. The receipt gives the label
+text it dropped and the new control's `editable_properties`: set the label there with
+`widget_set_property` (`InText` or whatever the list says). Then `blueprint_compile` — nodes that
+called functions only the old class had show up as compile errors — and `widget_preview`.
+
+A refused call changed nothing; add what it asks for and call again.
+
+**Delete a control** with `widget_remove`. Its children go with it. If the graph still uses any of
+them it refuses and lists the nodes; `force: true` removes those nodes too (logic wired after a
+removed event stays in the graph, disconnected).
+
+## Button clicks
+
+`blueprint_component_event` binds them: `blueprint_path` is the Widget Blueprint, `component_name`
+is the control's name. `action: "list"` shows what the control can bind; a plain `Button` has
+`OnClicked`, a CommonUI button `OnButtonBaseClicked`. `action: "add"` returns the event node and
+its pins — wire `then` to the logic with `blueprint_apply_graph`. The control becomes a variable
+automatically.
 
 ## Exposing controls to Blueprint
 

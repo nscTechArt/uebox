@@ -132,8 +132,59 @@ describe('设不了的属性要当场说清楚，别让模型换个名字再试'
 
     expect(String(r.hint)).toContain('BrushColor')
     expect(String(r.hint)).toContain('widget_get_hierarchy')
-    // 真的没有入口的那几项要直说别再试
-    expect(String(r.hint)).toContain('圆角')
+    // 表外的属性走反射，换名字要照插件回的清单，不是凭记忆猜
+    expect(String(r.hint)).toContain('清单')
+  })
+
+  /**
+   * 工具不许比后端窄（第二次）：插件对表外的属性名按反射写，schema 原来是 z.enum，
+   * 用户控件的「实例可编辑」变量（CommonUI 按钮的 InText）在这一层就被拒了。
+   */
+  it('表外的属性名和结构体值照样发下去', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      widget_name: 'Btn_Login',
+      property_name: 'InText',
+      message: 'Set InText (FText) by reflection',
+      value: '登录'
+    })
+    const tool = setPropertyTool() as unknown as {
+      inputSchema: { safeParse: (v: unknown) => { success: boolean } }
+    }
+    const input = {
+      path: '/Game/UI/WB_StartScreen',
+      widget_name: 'Btn_Login',
+      property_name: 'InText',
+      value: '登录'
+    }
+    expect(tool.inputSchema.safeParse(input).success).toBe(true)
+    expect(
+      tool.inputSchema.safeParse({
+        ...input,
+        property_name: 'Background',
+        value: {
+          DrawAs: 'RoundedBox',
+          OutlineSettings: { CornerRadii: { X: 8, Y: 8, Z: 8, W: 8 } }
+        }
+      }).success
+    ).toBe(true)
+
+    const r = await runner(setPropertyTool())(input)
+    expect(r.ok).toBe(true)
+    expect(r.message).toBe('InText 现在是 登录')
+    expect(callRequest.mock.calls[0][1]).toMatchObject({ property_name: 'InText', value: '登录' })
+  })
+
+  it('颜色给成 0..255 当场拦下，不发给插件', async () => {
+    const r = await runner(setPropertyTool())({
+      path: '/Game/UI/WBP_ScoreHUD',
+      widget_name: 'Bd_Panel',
+      property_name: 'BrushColor',
+      value: { r: 255, g: 0, b: 0, a: 1 }
+    })
+    expect(r.ok).toBe(false)
+    expect(String(r.error)).toContain('0..1')
+    expect(callRequest).not.toHaveBeenCalled()
   })
 
   /**

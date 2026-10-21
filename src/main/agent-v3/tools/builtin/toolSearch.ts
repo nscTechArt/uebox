@@ -216,7 +216,8 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.landscape':
     '地形 地表 高度图 虚拟纹理 rvt 融合 landscape terrain heightmap virtual texture blend',
   'ue.system': '性能 崩溃 日志 插件 控制台 脚本 卡顿 crash log performance plugin python',
-  'ue.widget': '界面 控件 按钮 文本 布局 widget umg ui layout button text',
+  'ue.widget':
+    '界面 控件 按钮 文本 布局 替换 删除 widget umg ui layout button text replace remove commonui',
   'ue.animation': '动画 骨骼 运动 animation skeleton motion',
   'ue.sequencer': '过场 镜头 摄像机 时间轴 序列 sequencer camera cinematic timeline',
   'ue.pcg': '程序化 散布 植被 pcg procedural scatter foliage',

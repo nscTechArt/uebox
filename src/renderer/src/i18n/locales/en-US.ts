@@ -2481,6 +2481,8 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         widget_add_child: 'Add child widget',
         widget_make_variable: 'Expose widget as variable',
         widget_set_property: 'Change widget property',
+        widget_replace: 'Replace widget',
+        widget_remove: 'Remove widget',
 
         write_local_file: 'Write file',
         edit_local_file: 'Edit file',

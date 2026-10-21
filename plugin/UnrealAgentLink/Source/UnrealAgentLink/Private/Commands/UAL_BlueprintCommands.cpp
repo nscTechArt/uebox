@@ -10105,19 +10105,70 @@ void FUAL_BlueprintCommands::Handle_ComponentEvent(const TSharedPtr<FJsonObject>
 		return;
 	}
 
-	const FName ComponentName(*ComponentNameStr);
+	FName ComponentName(*ComponentNameStr);
 	TArray<FString> AvailableComponents;
-	USCS_Node* ComponentNode = UAL_FindComponentNode(Blueprint, ComponentName, AvailableComponents);
-	if (!ComponentNode || !ComponentNode->ComponentTemplate)
-	{
-		UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(
-			TEXT("Component '%s' not found on %s (available: %s)"),
-			*ComponentNameStr, *Blueprint->GetName(),
-			AvailableComponents.Num() ? *FString::Join(AvailableComponents, TEXT(", ")) : TEXT("(none)")));
-		return;
-	}
+	UClass* ComponentClass = nullptr;
 
-	UClass* ComponentClass = ComponentNode->ComponentTemplate->GetClass();
+	/**
+	 * 控件蓝图里的按钮、滑条也走这里：引擎给控件绑 OnClicked 用的是同一种节点
+	 * （UK2Node_ComponentBoundEvent），只是控件不在 SCS 里，在 WidgetTree 里。
+	 * 原来只查 SCS，控件蓝图一律「找不到组件」—— 菜单搭得出来，按钮却点了没反应，
+	 * 而 UMG 那套工具里也没有别的地方能绑事件。
+	 */
+	if (UWidgetBlueprint* WidgetBP = Cast<UWidgetBlueprint>(Blueprint))
+	{
+		UWidget* FoundWidget = nullptr;
+		if (WidgetBP->WidgetTree)
+		{
+			WidgetBP->WidgetTree->ForEachWidget([&](UWidget* Widget)
+			{
+				if (!Widget)
+				{
+					return;
+				}
+				AvailableComponents.Add(Widget->GetName());
+				if (Widget->GetName().Equals(ComponentNameStr, ESearchCase::IgnoreCase))
+				{
+					FoundWidget = Widget;
+				}
+			});
+		}
+		if (!FoundWidget)
+		{
+			UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(
+				TEXT("Widget '%s' not found in %s (widgets: %s)"),
+				*ComponentNameStr, *Blueprint->GetName(),
+				AvailableComponents.Num() ? *FString::Join(AvailableComponents, TEXT(", ")) : TEXT("(none)")));
+			return;
+		}
+		ComponentName = FoundWidget->GetFName();
+		ComponentClass = FoundWidget->GetClass();
+
+		// 和在细节面板点 OnClicked 旁边的「+」一样：控件不是变量就先设成变量，
+		// 骨架类上才有它的属性，事件节点才挂得上去
+		FString Action;
+		Payload->TryGetStringField(TEXT("action"), Action);
+		if (Action.Equals(TEXT("add"), ESearchCase::IgnoreCase) && !FoundWidget->bIsVariable)
+		{
+			WidgetBP->Modify();
+			FoundWidget->Modify();
+			FoundWidget->bIsVariable = true;
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+		}
+	}
+	else
+	{
+		USCS_Node* ComponentNode = UAL_FindComponentNode(Blueprint, ComponentName, AvailableComponents);
+		if (!ComponentNode || !ComponentNode->ComponentTemplate)
+		{
+			UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(
+				TEXT("Component '%s' not found on %s (available: %s)"),
+				*ComponentNameStr, *Blueprint->GetName(),
+				AvailableComponents.Num() ? *FString::Join(AvailableComponents, TEXT(", ")) : TEXT("(none)")));
+			return;
+		}
+		ComponentClass = ComponentNode->ComponentTemplate->GetClass();
+	}
 
 	// 只收 BlueprintAssignable 的委托。其余的蓝图里绑不上，
 	// 列出来只会让调用方挑一个然后失败

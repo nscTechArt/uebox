@@ -298,7 +298,9 @@ describe('buildAllTools', () => {
       'widget_add_child',
       'widget_set_slot',
       'widget_make_variable',
-      'widget_set_property'
+      'widget_set_property',
+      'widget_replace',
+      'widget_remove'
     ]
     for (const name of writers) {
       expect((byName.get(name) as { executionMode?: string })?.executionMode, name).toBe(
@@ -448,6 +450,9 @@ describe('buildAllTools', () => {
     for (const name of [
       // widget.set_canvas_slot / set_vertical_slot：加完控件还能挪
       'widget_set_slot',
+      // widget.replace / remove：现成的界面换得了控件、删得掉控件
+      'widget_replace',
+      'widget_remove',
       // models/tag.ts 的 updateTag / deleteTag：标签改得动、合并得了
       'manage_tags',
       'delete_tags',

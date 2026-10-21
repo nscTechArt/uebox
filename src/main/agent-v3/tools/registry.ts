@@ -941,6 +941,29 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     concurrency: 'sequential',
     make: () => ueWidget.setPropertyTool()
   },
+  /**
+   * 改现成的界面：原地换控件、删控件。
+   *
+   * 控件工具原来只有「往里加」，用户说「把登录按钮换成导航那种」时，调用方只能
+   * 在旁边再加一个，然后让用户自己去编辑器里删旧的、接事件。
+   *
+   * 两个都是 mutating：插件端开在事务里，ue_undo 撤得回来；删除碰到图表引用
+   * 默认拒绝，替换碰到接不上的事件也拒绝，都要调用方显式确认。
+   */
+  {
+    name: 'widget_replace',
+    namespace: 'ue.widget',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueWidget.replaceWidgetTool()
+  },
+  {
+    name: 'widget_remove',
+    namespace: 'ue.widget',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueWidget.removeWidgetTool()
+  },
 
   // ── 资产库（盒子本地，不依赖引擎连接）────────────────────────────────
   {
