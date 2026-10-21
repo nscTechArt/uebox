@@ -144,6 +144,8 @@ export interface GetBlueprintGraphResponse {
   graph_name: string
   /** 动画图才有：anim_graph / state_machine / state / conduit / transition / custom_blend */
   graph_kind?: string
+  /** 函数图里声明了局部变量才有；VariableGet / VariableSet 直接写这些名字 */
+  local_variables?: Array<Record<string, unknown>>
   nodes: BlueprintGraphNodeInfo[]
   /** 状态机那一页才有 */
   transitions?: StateMachineTransitionInfo[]
@@ -774,6 +776,7 @@ needs every node: page through result_query first.`,
           blueprint_path: response.blueprint_path,
           graph_name: response.graph_name,
           ...(response.graph_kind ? { graph_kind: response.graph_kind } : {}),
+          ...(response.local_variables ? { local_variables: response.local_variables } : {}),
           node_count: response.nodes?.length ?? 0,
           ...describeGraphPage(response, autoPaged, pagingRequested),
           nodes: graphNodes,

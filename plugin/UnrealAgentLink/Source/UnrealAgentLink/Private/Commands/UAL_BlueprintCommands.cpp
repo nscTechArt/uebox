@@ -462,6 +462,89 @@ static FString UAL_GraphNotFoundMessage(UBlueprint* Blueprint, const FString& Gr
 	return FString::Printf(TEXT("Graph not found: %s"), GraphName.IsEmpty() ? TEXT("EventGraph") : *GraphName);
 }
 
+/**
+ * 函数局部变量（编辑器「我的蓝图 → Local Variables」）不在 NewVariables 里，
+ * 挂在函数入口节点的 LocalVariables 上。折叠子图里的节点也属于外层函数，
+ * 所以一律回到顶层函数图找入口。事件图、宏、接口函数没有局部变量，回 nullptr。
+ */
+static UK2Node_FunctionEntry* UAL_FindLocalsEntry(const UEdGraph* Graph)
+{
+	UEdGraph* TopGraph = Graph ? FBlueprintEditorUtils::GetTopLevelGraph(Graph) : nullptr;
+	if (!FBlueprintEditorUtils::DoesSupportLocalVariables(TopGraph))
+	{
+		return nullptr;
+	}
+	TArray<UK2Node_FunctionEntry*> Entries;
+	TopGraph->GetNodesOfClass(Entries);
+	return Entries.Num() > 0 ? Entries[0] : nullptr;
+}
+
+static FBPVariableDescription* UAL_FindLocalVariable(UK2Node_FunctionEntry* Entry, const FName& VarName)
+{
+	if (Entry)
+	{
+		for (FBPVariableDescription& Var : Entry->LocalVariables)
+		{
+			if (Var.VarName == VarName)
+			{
+				return &Var;
+			}
+		}
+	}
+	return nullptr;
+}
+
+static TArray<FString> UAL_LocalVariableNames(const UK2Node_FunctionEntry* Entry)
+{
+	TArray<FString> Names;
+	if (Entry)
+	{
+		for (const FBPVariableDescription& Var : Entry->LocalVariables)
+		{
+			Names.Add(Var.VarName.ToString());
+		}
+	}
+	return Names;
+}
+
+/**
+ * add_variable / remove_variable 的 function 参数：找到那个函数的入口节点。
+ * 以前没有这条路，循环累加器只能建成成员变量，污染细节面板、函数也不再可重入（#57）。
+ */
+static UK2Node_FunctionEntry* UAL_ResolveLocalsScope(UBlueprint* Blueprint, const FString& FunctionName, FString& OutError)
+{
+	UEdGraph* Graph = nullptr;
+	TArray<FString> FunctionNames;
+	for (UEdGraph* G : Blueprint->FunctionGraphs)
+	{
+		if (!G)
+		{
+			continue;
+		}
+		FunctionNames.Add(G->GetName());
+		if (!Graph && G->GetName().Equals(FunctionName, ESearchCase::IgnoreCase))
+		{
+			Graph = G;
+		}
+	}
+	if (!Graph)
+	{
+		OutError = FString::Printf(
+			TEXT("Function '%s' not found on %s (functions: %s). Create it with blueprint_create_function first, or leave function empty for a member variable"),
+			*FunctionName, *Blueprint->GetName(),
+			FunctionNames.Num() > 0 ? *FString::Join(FunctionNames, TEXT(", ")) : TEXT("none"));
+		return nullptr;
+	}
+	UK2Node_FunctionEntry* Entry = UAL_FindLocalsEntry(Graph);
+	if (!Entry)
+	{
+		OutError = FString::Printf(
+			TEXT("Function '%s' on %s cannot have local variables (interface functions don't support them)"),
+			*Graph->GetName(), *Blueprint->GetName());
+	}
+	return Entry;
+}
+
 static TSharedPtr<FJsonObject> UAL_BuildGraphRefJson(UEdGraph* Graph, const FString& GraphType, const FString& NameOverride = FString())
 {
 	if (!Graph)
@@ -1039,7 +1122,8 @@ static void UAL_AnnotateNodeForRewrite(UEdGraphNode* Node, const TSharedPtr<FJso
 		if (bIsGet || Node->IsA<UK2Node_VariableSet>())
 		{
 			const FString VarName = VarNode->VariableReference.GetMemberName().ToString();
-			UClass* OwnerClass = VarNode->VariableReference.IsSelfContext()
+			// 局部变量编译后 MemberParent 会被补成骨架类，带上类名就成了 SKEL_xxx_C.Name，写不回去
+			UClass* OwnerClass = (VarNode->VariableReference.IsSelfContext() || VarNode->VariableReference.IsLocalScope())
 				? nullptr
 				: VarNode->VariableReference.GetMemberParentClass(VarNode->GetBlueprintClassFromNode());
 			NodeObj->SetStringField(TEXT("write_as"), bIsGet ? TEXT("VariableGet") : TEXT("VariableSet"));
@@ -3821,6 +3905,37 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 		}
 
 		const FName VarName(*VarNamePart);
+
+		/**
+		 * 函数局部变量先查：编辑器里同名时也是局部的那个赢。引用写法照
+		 * K2Node_LocalVariable / BlueprintVariableNodeSpawner：SetLocalMember(名字, 顶层函数图名, VarGuid)。
+		 * 以前这里只走 SetSelfMember，编辑器里手建的局部变量也读写不了（#57）。
+		 */
+		UK2Node_FunctionEntry* LocalsEntry = UAL_FindLocalsEntry(Graph);
+		if (const FBPVariableDescription* LocalVar = UAL_FindLocalVariable(LocalsEntry, VarName))
+		{
+			const FString ScopeName = LocalsEntry->GetGraph()->GetName();
+			if (bIsGet)
+			{
+				FGraphNodeCreator<UK2Node_VariableGet> NodeCreator(*Graph);
+				UK2Node_VariableGet* VarNode = NodeCreator.CreateNode();
+				VarNode->VariableReference.SetLocalMember(VarName, ScopeName, LocalVar->VarGuid);
+				VarNode->NodePosX = PosX;
+				VarNode->NodePosY = PosY;
+				NodeCreator.Finalize();
+				VarNode->ReconstructNode();
+				return VarNode;
+			}
+			FGraphNodeCreator<UK2Node_VariableSet> NodeCreator(*Graph);
+			UK2Node_VariableSet* VarNode = NodeCreator.CreateNode();
+			VarNode->VariableReference.SetLocalMember(VarName, ScopeName, LocalVar->VarGuid);
+			VarNode->NodePosX = PosX;
+			VarNode->NodePosY = PosY;
+			NodeCreator.Finalize();
+			VarNode->ReconstructNode();
+			return VarNode;
+		}
+
 		const bool bIsUserVariable = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VarName) != INDEX_NONE;
 
 		/**
@@ -3866,7 +3981,8 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 		{
 			OutError = FString::Printf(TEXT("Variable not found: %s"), *VarNamePart);
 
-			TArray<FString> Available;
+			const TArray<FString> LocalNames = UAL_LocalVariableNames(LocalsEntry);
+			TArray<FString> Available = LocalNames;
 			for (const FBPVariableDescription& Var : Blueprint->NewVariables)
 			{
 				Available.Add(Var.VarName.ToString());
@@ -3890,10 +4006,20 @@ static UEdGraphNode* UAL_CreateNodeInternal(
 			}
 			else
 			{
+				Available.RemoveAt(0, LocalNames.Num());
+				FString LocalsPart;
+				if (LocalsEntry)
+				{
+					LocalsPart = FString::Printf(TEXT(" Local variables of %s: %s."),
+						*LocalsEntry->GetGraph()->GetName(),
+						LocalNames.Num() > 0 ? *FString::Join(LocalNames, TEXT(", ")) : TEXT("none"));
+				}
 				OutError += FString::Printf(
-					TEXT(" (variables and components on this blueprint: %s. Create a variable with blueprint_add_variable, a component with blueprint_add_component. ")
+					TEXT(" (variables and components on this blueprint: %s.%s Create a variable with blueprint_add_variable%s, a component with blueprint_add_component. ")
 					TEXT("A variable on another blueprint is written as BlueprintName.VariableName, e.g. WBP_HUD.Health)"),
-					Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("none"));
+					Available.Num() > 0 ? *FString::Join(Available, TEXT(", ")) : TEXT("none"),
+					*LocalsPart,
+					LocalsEntry ? *FString::Printf(TEXT(" (function=%s makes it local to this function)"), *LocalsEntry->GetGraph()->GetName()) : TEXT(""));
 			}
 			return nullptr;
 		}
@@ -5928,6 +6054,7 @@ void FUAL_BlueprintCommands::Handle_SetBlueprintProperty(const TSharedPtr<FJsonO
  *   - object_class: 当 type=object/class/soft_object/soft_class 时指定类（可选）
  *   - is_array: 是否数组（可选，默认 false）
  *   - default_value: 默认值（可选，字符串形式，走 BlueprintEditorUtils 解析）
+ *   - function: 函数名（可选）。给了就建成这个函数的局部变量，不给是成员变量
  *
  * 响应:
  *   - ok: 是否成功
@@ -5983,6 +6110,44 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 		return;
 	}
 
+	// 给了 function 就建成那个函数的局部变量
+	FString FunctionName;
+	Payload->TryGetStringField(TEXT("function"), FunctionName);
+	UK2Node_FunctionEntry* LocalsEntry = nullptr;
+	if (!FunctionName.IsEmpty())
+	{
+		FString ScopeError;
+		LocalsEntry = UAL_ResolveLocalsScope(Blueprint, FunctionName, ScopeError);
+		if (!LocalsEntry)
+		{
+			UAL_CommandUtils::SendError(RequestId, 404, ScopeError);
+			return;
+		}
+		const FString ScopeName = LocalsEntry->GetGraph()->GetName();
+		if (UAL_FindLocalVariable(LocalsEntry, VarName))
+		{
+			UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(
+				TEXT("Local variable already exists in %s: %s"), *ScopeName, *VarNameStr));
+			return;
+		}
+		// 和参数 / 返回值同名的话，图里按名字引用时分不清是哪一个
+		TArray<UK2Node_EditablePinBase*> SignatureNodes;
+		LocalsEntry->GetGraph()->GetNodesOfClass(SignatureNodes);
+		for (const UK2Node_EditablePinBase* SigNode : SignatureNodes)
+		{
+			for (const TSharedPtr<FUserPinInfo>& Pin : SigNode->UserDefinedPins)
+			{
+				if (Pin.IsValid() && Pin->PinName == VarName)
+				{
+					UAL_CommandUtils::SendError(RequestId, 409, FString::Printf(
+						TEXT("%s already has a parameter or return value named %s; pick another name for the local variable"),
+						*ScopeName, *VarNameStr));
+					return;
+				}
+			}
+		}
+	}
+
 	// 类型解析走全仓库唯一那份 UAL_ResolvePinType（见文件上方）。
 	// 这里以前是第二份手抄的类型表，只认四个硬编码的结构体，
 	// 于是「片段里有个 Transform 变量」这种再常见不过的情况就卡死。
@@ -6000,9 +6165,21 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 		return;
 	}
 
-	FBlueprintEditorUtils::AddMemberVariable(Blueprint, VarName, PinType);
-
-	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	if (LocalsEntry)
+	{
+		// AddLocalVariable 自己会标结构性修改，骨架类上的函数随之带上这个局部属性
+		if (!FBlueprintEditorUtils::AddLocalVariable(Blueprint, LocalsEntry->GetGraph(), VarName, PinType))
+		{
+			UAL_CommandUtils::SendError(RequestId, 500, FString::Printf(
+				TEXT("The engine refused to add local variable %s to %s"), *VarNameStr, *LocalsEntry->GetGraph()->GetName()));
+			return;
+		}
+	}
+	else
+	{
+		FBlueprintEditorUtils::AddMemberVariable(Blueprint, VarName, PinType);
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
 
 	/**
 	 * 默认值。
@@ -6023,9 +6200,19 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 	FString AppliedDefault;
 	if (!DefaultValueStr.IsEmpty())
 	{
-		FProperty* NewProp = Blueprint->SkeletonGeneratedClass
-			? Blueprint->SkeletonGeneratedClass->FindPropertyByName(VarName)
-			: nullptr;
+		// 局部变量的属性挂在骨架类的那个 UFunction 上，不在类本身
+		FProperty* NewProp = nullptr;
+		if (UClass* Skeleton = Blueprint->SkeletonGeneratedClass)
+		{
+			if (!LocalsEntry)
+			{
+				NewProp = Skeleton->FindPropertyByName(VarName);
+			}
+			else if (UFunction* Func = Skeleton->FindFunctionByName(LocalsEntry->GetGraph()->GetFName()))
+			{
+				NewProp = FindFProperty<FProperty>(Func, VarName);
+			}
+		}
 
 		FString DefaultError;
 		if (!NewProp)
@@ -6076,8 +6263,15 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 			return;
 		}
 
-		const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VarName);
-		if (VarIndex != INDEX_NONE)
+		const int32 VarIndex = LocalsEntry ? INDEX_NONE : FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VarName);
+		if (FBPVariableDescription* LocalVar = UAL_FindLocalVariable(LocalsEntry, VarName))
+		{
+			// 局部变量的默认值在编译时展开成函数开头的一次赋值（K2Node_FunctionEntry::ExpandNode）
+			LocalsEntry->Modify();
+			LocalVar->DefaultValue = DefaultValueStr;
+			FKismetEditorUtilities::CompileBlueprint(Blueprint);
+		}
+		else if (VarIndex != INDEX_NONE)
 		{
 			Blueprint->Modify();
 			Blueprint->NewVariables[VarIndex].DefaultValue = DefaultValueStr;
@@ -6087,11 +6281,32 @@ void FUAL_BlueprintCommands::Handle_AddVariableToBlueprint(const TSharedPtr<FJso
 		}
 	}
 
+	// 局部变量按入口节点上那份描述回报（编译后再读），引擎改过的类型 / 清掉的默认值都跟着走
+	if (LocalsEntry)
+	{
+		const FBPVariableDescription* LocalVar = UAL_FindLocalVariable(LocalsEntry, VarName);
+		if (!LocalVar)
+		{
+			UAL_CommandUtils::SendError(RequestId, 500, FString::Printf(
+				TEXT("Local variable %s did not appear on %s after adding it"), *VarNameStr, *LocalsEntry->GetGraph()->GetName()));
+			return;
+		}
+		PinType = LocalVar->VarType;
+		if (LocalVar->DefaultValue.IsEmpty())
+		{
+			AppliedDefault.Reset();
+		}
+	}
+
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("ok"), true);
 	Result->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
 	TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
 	VarObj->SetStringField(TEXT("name"), VarNameStr);
+	if (LocalsEntry)
+	{
+		VarObj->SetStringField(TEXT("function"), LocalsEntry->GetGraph()->GetName());
+	}
 	VarObj->SetStringField(TEXT("type"), PinType.PinCategory.ToString());
 	// 容器从解析出来的 PinType 读，不回显入参：`container` 优先于 `is_array`，
 	// 两个都传且矛盾时回显 is_array 会把一个数组说成标量（2026-09-24 用户反馈）
@@ -6219,6 +6434,34 @@ void FUAL_BlueprintCommands::Handle_GetBlueprintGraph(const TSharedPtr<FJsonObje
 	if (const TCHAR* Kind = UALAnimGraph::GetGraphKind(Graph))
 	{
 		Result->SetStringField(TEXT("graph_kind"), Kind);
+	}
+	// 局部变量不在 blueprint_describe 的 variables 里，读函数图时一起给，写图才知道有哪些能 Get / Set
+	if (const UK2Node_FunctionEntry* LocalsEntry = UAL_FindLocalsEntry(Graph))
+	{
+		if (LocalsEntry->LocalVariables.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> Locals;
+			for (const FBPVariableDescription& Var : LocalsEntry->LocalVariables)
+			{
+				TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
+				VarObj->SetStringField(TEXT("name"), Var.VarName.ToString());
+				VarObj->SetStringField(TEXT("type"), Var.VarType.PinCategory.ToString());
+				if (const TCHAR* ContainerName = UAL_ContainerName(Var.VarType))
+				{
+					VarObj->SetStringField(TEXT("container"), ContainerName);
+				}
+				if (const UObject* Sub = Var.VarType.PinSubCategoryObject.Get())
+				{
+					VarObj->SetStringField(TEXT("sub_category_object"), Sub->GetPathName());
+				}
+				if (!Var.DefaultValue.IsEmpty())
+				{
+					VarObj->SetStringField(TEXT("default_value"), Var.DefaultValue);
+				}
+				Locals.Add(MakeShared<FJsonValueObject>(VarObj));
+			}
+			Result->SetArrayField(TEXT("local_variables"), Locals);
+		}
 	}
 	Result->SetArrayField(TEXT("nodes"), Nodes);
 	UAL_CommandUtils::SendResponse(RequestId, 200, Result);
@@ -9771,11 +10014,76 @@ void FUAL_BlueprintCommands::Handle_RemoveVariable(const TSharedPtr<FJsonObject>
 	}
 
 	const FName VarName(*VarNameStr);
+
+	/**
+	 * 局部变量：从入口节点上摘掉，再删掉这个函数里引用它的 Get / Set 节点。
+	 * 不交给 RemoveLocalVariable —— 它按 UFunction 找作用域（要骨架类已编译），
+	 * 删节点那步 RemoveVariableNodes 又只认 self 成员，局部变量的节点一个都删不掉。
+	 */
+	FString FunctionName;
+	Payload->TryGetStringField(TEXT("function"), FunctionName);
+	if (!FunctionName.IsEmpty())
+	{
+		FString ScopeError;
+		UK2Node_FunctionEntry* LocalsEntry = UAL_ResolveLocalsScope(Blueprint, FunctionName, ScopeError);
+		if (!LocalsEntry)
+		{
+			UAL_CommandUtils::SendError(RequestId, 404, ScopeError);
+			return;
+		}
+		UEdGraph* FunctionGraph = LocalsEntry->GetGraph();
+		const int32 LocalIndex = LocalsEntry->LocalVariables.IndexOfByPredicate(
+			[&VarName](const FBPVariableDescription& Var) { return Var.VarName == VarName; });
+		if (LocalIndex == INDEX_NONE)
+		{
+			const TArray<FString> LocalNames = UAL_LocalVariableNames(LocalsEntry);
+			UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(
+				TEXT("Local variable '%s' not found in %s (local variables: %s)"), *VarNameStr, *FunctionGraph->GetName(),
+				LocalNames.Num() > 0 ? *FString::Join(LocalNames, TEXT(", ")) : TEXT("none")));
+			return;
+		}
+
+		Blueprint->Modify();
+		LocalsEntry->Modify();
+		LocalsEntry->LocalVariables.RemoveAt(LocalIndex);
+
+		TArray<UEdGraph*> ScopeGraphs;
+		ScopeGraphs.Add(FunctionGraph);
+		FunctionGraph->GetAllChildrenGraphs(ScopeGraphs);
+		int32 RemovedNodes = 0;
+		for (UEdGraph* ScopeGraph : ScopeGraphs)
+		{
+			TArray<UK2Node_Variable*> VarNodes;
+			ScopeGraph->GetNodesOfClass(VarNodes);
+			for (UK2Node_Variable* VarNode : VarNodes)
+			{
+				if (VarNode->VariableReference.IsLocalScope() && VarNode->VariableReference.GetMemberName() == VarName &&
+					VarNode->VariableReference.GetMemberScopeName() == FunctionGraph->GetName())
+				{
+					VarNode->DestroyNode();
+					++RemovedNodes;
+				}
+			}
+		}
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetBoolField(TEXT("ok"), true);
+		Result->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+		Result->SetStringField(TEXT("name"), VarNameStr);
+		Result->SetStringField(TEXT("function"), FunctionGraph->GetName());
+		Result->SetBoolField(TEXT("removed"), UAL_FindLocalVariable(LocalsEntry, VarName) == nullptr);
+		Result->SetNumberField(TEXT("removed_node_count"), RemovedNodes);
+		UAL_CommandUtils::SendResponse(RequestId, 200, Result);
+		return;
+	}
+
 	FString Available;
 	if (!UAL_FindMemberVariable(Blueprint, VarName, Available))
 	{
 		UAL_CommandUtils::SendError(RequestId, 404, FString::Printf(
-			TEXT("Variable '%s' not found on %s (available: %s)"), *VarNameStr, *Blueprint->GetName(), *Available));
+			TEXT("Variable '%s' not found on %s (available: %s). A function's local variable needs function=<function name>"),
+			*VarNameStr, *Blueprint->GetName(), *Available));
 		return;
 	}
 

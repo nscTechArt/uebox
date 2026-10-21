@@ -201,7 +201,8 @@ export function createSetBlueprintVariableMetaTool() {
 
 const RemoveVariableSchema = z.object({
   blueprint_path: z.string().describe('蓝图路径，如 /Game/Blueprints/BP_Hero'),
-  name: z.string().describe('要删除的变量名')
+  name: z.string().describe('要删除的变量名'),
+  function: z.string().optional().describe('删函数局部变量时填所属函数名')
 })
 
 interface RemoveVariableResponse {
@@ -209,16 +210,20 @@ interface RemoveVariableResponse {
   blueprint_path: string
   name: string
   removed: boolean
+  /** 局部变量才有 */
+  function?: string
+  /** 局部变量才有：顺带删掉的 Get / Set 节点数 */
+  removed_node_count?: number
   note?: string
 }
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function createRemoveBlueprintVariableTool() {
   return defineV2Tool({
-    description: `删除蓝图成员变量。
+    description: `删除蓝图成员变量；给 function 时删该函数的局部变量。
 
-**不可逆，而且会波及图表**：引用这个变量的 Get / Set 节点会变成孤儿节点，
-删完要 blueprint_compile 一次才能看到哪些图断了。
+**不可逆，而且会波及图表**：成员变量的 Get / Set 节点会变成孤儿节点，
+删完要 blueprint_compile 一次才能看到哪些图断了；局部变量的 Get / Set 节点会一起删掉。
 
 建错变量时用它收拾，别留着不管 —— 留着的话它会出现在后续每一次
 blueprint_describe 里，模型会以为那是有意义的状态。`,
@@ -229,10 +234,36 @@ blueprint_describe 里，模型会以为那是有意义的状态。`,
       try {
         const response = await callBlueprint<RemoveVariableResponse>(
           'blueprint.remove_variable',
-          { blueprint_path: input.blueprint_path, name: input.name },
+          {
+            blueprint_path: input.blueprint_path,
+            name: input.name,
+            ...(input.function ? { function: input.function } : {})
+          },
           '删除变量失败'
         )
         if (isFailure(response)) return response
+
+        if (response.function) {
+          if (response.removed === false) {
+            return {
+              success: false,
+              error: `删除局部变量失败：${response.name} 仍在函数 ${response.function} 上`
+            }
+          }
+          const nodes = response.removed_node_count ?? 0
+          return {
+            success: true,
+            blueprint_path: response.blueprint_path,
+            name: response.name,
+            function: response.function,
+            removed_node_count: nodes,
+            message:
+              `已删除函数 ${response.function} 的局部变量 ${response.name}` +
+              (nodes > 0
+                ? `，连带删掉 ${nodes} 个引用它的 Get / Set 节点，原来接在上面的线也断了。`
+                : '。')
+          }
+        }
 
         return {
           success: true,

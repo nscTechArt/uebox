@@ -81,7 +81,7 @@ const NodeDefinitionSchema = z.object({
         'Function 必须是 ClassName.FunctionName（如 KismetSystemLibrary.PrintString，' +
         '用 blueprint_search_nodes 查到的 member_name 可直接填）；' +
         'Event 用 ReceiveBeginPlay / ReceiveTick；EnhancedInputAction 写 Input Action 资产名或路径（IA_Jump）；' +
-        'VariableGet 写变量名、组件名（如 Light）或父类变量名；' +
+        'VariableGet 写变量名（写函数图时也认这个函数的局部变量）、组件名（如 Light）或父类变量名；' +
         '别的蓝图上的变量写 蓝图名.变量名（如 WBP_HUD.Health），节点多一根 self 输入接那个对象；' +
         '引擎类的属性同理（Character.CharacterMovement —— 它是属性不是函数，别写成 Function）；' +
         'Timeline 写 Timeline 自己的名字；控制节点可省略。' +
@@ -515,6 +515,8 @@ nodes 传空数组表示「只补连线」—— 那是给「两个已有节点�
 
 VariableGet / VariableSet 引用的变量必须已经存在，先用
 blueprint_add_variable 建。常量不要建变量 —— 直接写 pin_defaults。
+函数里的累加器、中间结果建成局部变量（blueprint_add_variable 带 function），
+写这个函数的图时直接写名字，同名时局部变量优先。
 
 **组件也是变量**：VariableGet 的 member_name 写组件名（blueprint_describe 里
 components 的 name，如 Light、Mesh）就能拿到组件引用，接着连 SetMaterial /

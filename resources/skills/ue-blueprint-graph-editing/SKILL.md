@@ -74,7 +74,8 @@ class yourself.
 - `id` is yours, local to this call. Connections and diagnostics use it.
 - **Literals go in `pin_defaults`.** Never create a variable to hold a constant.
 - Variables used by `VariableGet`/`VariableSet` must exist first
-  (`blueprint_add_variable`).
+  (`blueprint_add_variable`). Loop accumulators and scratch values inside a function are
+  local variables: pass `function`, then use the name in that function's graph.
 - Omit `position` and it is laid out for you, following execution flow.
 
 ## Decide the members before you write the graph

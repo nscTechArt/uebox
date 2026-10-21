@@ -137,7 +137,8 @@ observe the value and took them out again.
 `Get`/`Set` nodes that referenced it become orphans, so run `blueprint_compile`
 afterwards to see which graphs broke. Use it when you created the wrong variable —
 leaving it behind means it shows up in every later `blueprint_describe` and reads
-like intentional state.
+like intentional state. With `function` it deletes that function's local variable
+instead, together with its `Get`/`Set` nodes.
 
 ## Functions can be changed after they are created
 
