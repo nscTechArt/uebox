@@ -9,7 +9,7 @@ import type {
   SharedSkillInstallOutcome,
   SharedSkillInstallRequest,
   SharedSkillPack,
-  SharedSkillSubmitInput,
+  SharedSkillConnectPrompt,
   SharedSkillSubmitResult
 } from '@core/shared/share'
 import { unwrapResult } from '@renderer/common/utils'
@@ -28,8 +28,17 @@ export const shareAPI = {
   async packSkill(name: string): Promise<SharedSkillPack> {
     return unwrap(await window.api.share.packSkill(name))
   },
-  async submitSkill(input: SharedSkillSubmitInput): Promise<SharedSkillSubmitResult> {
-    return unwrap(await window.api.share.submitSkill(input))
+  async submitSkill(name: string): Promise<SharedSkillSubmitResult> {
+    return unwrap(await window.api.share.submitSkill(name))
+  },
+  async connect(): Promise<{ account: string | null }> {
+    return unwrap(await window.api.share.connect())
+  },
+  cancelConnect(): void {
+    void window.api.share.cancelConnect()
+  },
+  onConnectPrompt(listener: (prompt: SharedSkillConnectPrompt) => void): () => void {
+    return window.api.share.onConnectPrompt(listener)
   },
   async openPage(url: string): Promise<void> {
     unwrap(await window.api.share.openPage(url))

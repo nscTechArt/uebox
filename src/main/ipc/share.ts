@@ -14,22 +14,28 @@ import { ipcMain, shell } from 'electron'
 import { findMainWindow } from '../appWindows'
 import { SHARE_ORIGIN, skillPageUrl } from '../services/share/endpoint'
 import { parseShareRef } from '../services/share/shareRules'
-import { fetchSharedSkill, submitSharedSkill, ShareError } from '../services/share/shareClient'
+import { fetchSharedSkill, publishSharedSkill, ShareError } from '../services/share/shareClient'
+import {
+  accountKey,
+  accountName,
+  cancelConnect,
+  connectAccount,
+  forgetAccountKey
+} from '../services/share/shareAccount'
 import {
   findInstallConflict,
   installSharedSkill,
   packUserSkill,
-  readShareState,
-  writeShareState
+  rememberPublished
 } from '../services/share/sharedSkills'
 import {
+  SHARE_CONNECT_PROMPT_CHANNEL,
   SHARE_INSTALL_FAILED_CHANNEL,
   SHARE_INSTALL_REQUEST_CHANNEL,
   type SharedSkillInstallFailure,
   type SharedSkillInstallOutcome,
   type SharedSkillInstallRequest,
   type SharedSkillPack,
-  type SharedSkillSubmitInput,
   type SharedSkillSubmitResult
 } from '../../shared/share'
 
@@ -158,45 +164,43 @@ export function registerShareIPC(): void {
   ipcMain.handle('share:pack-skill', (_event, name: unknown) =>
     run(async (): Promise<SharedSkillPack> => {
       if (typeof name !== 'string') throw new Error('缺少技能名。')
-      const [pack, state] = await Promise.all([packUserSkill(name), readShareState()])
-      return {
-        ...pack,
-        author: state.author,
-        authorLink: state.authorLink,
-        isUpdate: Boolean(state.keys[name])
-      }
+      const [pack, key] = await Promise.all([packUserSkill(name), accountKey()])
+      return { ...pack, account: key ? await accountName(key) : null }
     })
   )
 
-  /** 文件在主进程重新打包，不用界面传上来的内容：提交的一定是盘上那一份 */
-  ipcMain.handle('share:submit-skill', (_event, input: SharedSkillSubmitInput) =>
-    run(async (): Promise<SharedSkillSubmitResult> => {
-      const name = String(input?.name ?? '')
-      const author = String(input?.author ?? '')
-        .trim()
-        .slice(0, 40)
-      const authorLink = String(input?.authorLink ?? '')
-        .trim()
-        .slice(0, 200)
-      const note = String(input?.note ?? '').slice(0, 500)
-      if (!author) throw new Error('请填写署名。')
+  /** 连接 UEBox 账户：浏览器打开 uebox.ai/connect，校验码推给界面，等用户点「允许」 */
+  ipcMain.handle('share:connect', (event) =>
+    run(async () => {
+      await connectAccount((prompt) => {
+        if (!event.sender.isDestroyed()) event.sender.send(SHARE_CONNECT_PROMPT_CHANNEL, prompt)
+        if (/^https?:\/\//.test(prompt.verificationUri))
+          void shell.openExternal(prompt.verificationUri)
+      })
+      const key = await accountKey()
+      return { account: key ? await accountName(key) : null }
+    })
+  )
+  ipcMain.handle('share:cancel-connect', () => cancelConnect())
 
+  /**
+   * 以连接的账户发布。文件在主进程重新打包，不用界面传上来的内容：提交的一定是盘上那一份。
+   * 同名技能由同一个账户再发就是更新；名字被别的账户占了，服务端会拒。
+   */
+  ipcMain.handle('share:submit-skill', (_event, name: unknown) =>
+    run(async (): Promise<SharedSkillSubmitResult> => {
+      if (typeof name !== 'string') throw new Error('缺少技能名。')
+      const key = await accountKey()
+      if (!key) throw new ShareError('请先连接 UEBox 账户。', 'not-connected')
       const pack = await packUserSkill(name)
-      const state = await readShareState()
-      const editKey = state.keys[name]
-      const result = await submitSharedSkill({
-        author,
-        authorLink,
-        note,
-        ...(editKey ? { editKey } : {}),
-        files: pack.files
-      })
-      await writeShareState({
-        author,
-        authorLink,
-        keys: { ...state.keys, [result.id]: result.editKey || editKey || '' }
-      })
-      return { id: result.id, isUpdate: Boolean(editKey), statusUrl: result.statusUrl }
+      try {
+        const result = await publishSharedSkill(key, pack.files)
+        await rememberPublished(result.id)
+        return result
+      } catch (error) {
+        if (error instanceof ShareError && error.code === 'not-connected') await forgetAccountKey()
+        throw error
+      }
     })
   )
 

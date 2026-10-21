@@ -1,11 +1,14 @@
 /**
  * 和官网共享库通信。只在用户主动安装或分享时调用，地址从 endpoint.ts 拿。
  *
+ * 安装不要账户；分享要账户：用设备授权领到的 API Key（`Authorization: Bearer`），服务端按 Key
+ * 认出是哪个 UEBox 账户，技能就发布在这个账户名下。接口在 uebox-token-plan 的 share/routes.ts。
+ *
  * 服务端返回的内容一律当作陌生人写的东西：先过 shareRules 的同一套检查再交给界面和磁盘，
  * 不信任服务端已经查过。
  */
 
-import { SHARE_API, submissionStatusUrl } from './endpoint'
+import { SHARE_API } from './endpoint'
 import { checkBundle, type ShareFile } from './shareRules'
 
 const TIMEOUT_MS = 15_000
@@ -16,20 +19,35 @@ export interface SharedSkill {
   id: string
   description: string
   author: string
-  authorLink: string
   version: number
   updatedAt: string
   installs: number
   files: ShareFile[]
 }
 
+export type ShareErrorCode = 'not-found' | 'network' | 'invalid' | 'not-connected' | 'rejected'
+
 export class ShareError extends Error {
   constructor(
     message: string,
-    readonly code: 'not-found' | 'network' | 'invalid' | 'name-taken' | 'rejected' = 'network'
+    readonly code: ShareErrorCode = 'network'
   ) {
     super(message)
   }
+}
+
+/** 发布被拒时服务端给的原因代号（error.param）→ 给用户看的话。没列到的用服务端原句 */
+const REJECT_REASONS: Record<string, string> = {
+  name_taken: '这个名字已经被别的账户用了。请改 SKILL.md 里的 name 后再分享。',
+  file_not_allowed: '有不符合要求的文件：只能分享 SKILL.md 和 references/、assets/ 下的文本文件。',
+  missing_skill_md: '缺少 SKILL.md。',
+  no_frontmatter: 'SKILL.md 开头缺少 --- 包裹的 name 和 description。',
+  bad_name: '技能名只能包含小写字母、数字和连字符，最长 64 个字符。',
+  reserved_name: '技能名不能包含 anthropic 或 claude。',
+  bad_description: 'description 不能为空，最长 1024 个字符，且不能包含尖括号。',
+  too_large: '文件合计超过 256 KB。',
+  too_many_files: '文件数超过 20 个。',
+  bom: 'SKILL.md 带有 BOM，请保存为无 BOM 的 UTF-8。'
 }
 
 async function readJson(res: Response): Promise<Record<string, unknown>> {
@@ -78,44 +96,52 @@ export async function fetchSharedSkill(id: string): Promise<SharedSkill> {
     )
   }
 
+  const author = data.author as { name?: unknown } | undefined
   return {
     id,
     description: check.description,
-    author: str(data.author),
-    authorLink: str(data.authorLink),
+    author: str(author?.name),
     version: typeof data.version === 'number' ? data.version : 1,
-    updatedAt: str(data.updatedAt),
+    updatedAt: str(data.updated_at),
     installs: typeof data.installs === 'number' ? data.installs : 0,
     files
   }
 }
 
-export interface SubmitInput {
-  author: string
-  authorLink?: string
-  note?: string
-  editKey?: string
-  files: ShareFile[]
-}
-
-export interface SubmitResult {
-  sid: string
+export interface PublishResult {
   id: string
-  editKey: string
-  statusUrl: string
+  version: number
+  /** pending：新账户的第一份，等管理员看过才公开 */
+  status: 'published' | 'pending'
+  url: string
 }
 
-export async function submitSharedSkill(input: SubmitInput): Promise<SubmitResult> {
-  const res = await request('/submissions', {
+/** 以 apiKey 对应的账户发布（同名就是更新自己的那一份） */
+export async function publishSharedSkill(
+  apiKey: string,
+  files: ShareFile[]
+): Promise<PublishResult> {
+  const res = await request('/skills', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input)
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ files })
   })
   const data = await readJson(res).catch(() => ({}) as Record<string, unknown>)
-  if (!res.ok) {
-    const message = str(data.error) || `共享技能服务出错（HTTP ${res.status}）。`
-    throw new ShareError(message, data.code === 'name-taken' ? 'name-taken' : 'rejected')
+  if (res.status === 401) {
+    throw new ShareError('UEBox 账户的连接已失效，请重新连接后再分享。', 'not-connected')
   }
-  const sid = str(data.sid)
-  return { sid, id: str(data.id), editKey: str(data.editKey), statusUrl: submissionStatusUrl(sid) }
+  if (!res.ok) {
+    const err = (data.error ?? {}) as { param?: unknown; message?: unknown }
+    const reason = REJECT_REASONS[str(err.param)]
+    throw new ShareError(
+      reason ?? (str(err.message) || `共享技能服务出错（HTTP ${res.status}）。`),
+      'rejected'
+    )
+  }
+  return {
+    id: str(data.id),
+    version: typeof data.version === 'number' ? data.version : 1,
+    status: data.status === 'pending' ? 'pending' : 'published',
+    url: str(data.url)
+  }
 }

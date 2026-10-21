@@ -34,7 +34,12 @@ vi.mock('@renderer/api/agentV3', () => ({
 }))
 
 vi.mock('@renderer/api/share', () => ({
-  shareAPI: { openPage: vi.fn(async () => undefined), packSkill: vi.fn(), submitSkill: vi.fn() }
+  shareAPI: {
+    openPage: vi.fn(async () => undefined),
+    packSkill: vi.fn(),
+    submitSkill: vi.fn(),
+    onConnectPrompt: () => () => undefined
+  }
 }))
 
 import ProfileSkills from './ProfileSkills.vue'

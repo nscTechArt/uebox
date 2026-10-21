@@ -1826,7 +1826,16 @@ const api = {
     installReply: (requestId: string, approve: boolean) =>
       ipcRenderer.invoke('share:install-reply', requestId, approve),
     packSkill: (name: string) => ipcRenderer.invoke('share:pack-skill', name),
-    submitSkill: (input: unknown) => ipcRenderer.invoke('share:submit-skill', input),
+    submitSkill: (name: string) => ipcRenderer.invoke('share:submit-skill', name),
+    connect: () => ipcRenderer.invoke('share:connect'),
+    cancelConnect: () => ipcRenderer.invoke('share:cancel-connect'),
+    onConnectPrompt: (listener: (prompt: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, prompt: unknown): void => listener(prompt)
+      ipcRenderer.on('share:connect-prompt', handler)
+      return () => {
+        ipcRenderer.removeListener('share:connect-prompt', handler)
+      }
+    },
     openPage: (url: string) => ipcRenderer.invoke('share:open-page', url),
     onInstallRequest: (listener: (request: unknown) => void) => {
       const handler = (_: Electron.IpcRendererEvent, request: unknown): void => listener(request)

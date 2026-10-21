@@ -22,7 +22,7 @@ import {
   packUserSkill,
   readShareMeta,
   sharedSkillOrigins,
-  writeShareState
+  rememberPublished
 } from './sharedSkills'
 import { discoverSkillsOnDisk } from '../../agent-v3/capabilities/skills'
 import type { SharedSkill } from './shareClient'
@@ -38,7 +38,6 @@ function shared(id: string, version: number, extra: SharedSkill['files'] = []): 
     id,
     description: `Does ${id}.`,
     author: '作者甲',
-    authorLink: '',
     version,
     updatedAt: '2026-10-21T00:00:00.000Z',
     installs: 0,
@@ -150,11 +149,11 @@ describe('packUserSkill', () => {
     await expect(packUserSkill('ue-level-organize')).rejects.toThrow(/只能分享你自己的技能/)
   })
 
-  it('别人分享的技能不能以自己的名义再分享；自己分享过的（有修改码）可以', async () => {
+  it('别人分享的技能不能以自己的名义再分享；自己分享过的可以', async () => {
     await installSharedSkill(shared('rename-assets', 1))
     await expect(packUserSkill('rename-assets')).rejects.toThrow(/从共享库安装/)
 
-    await writeShareState({ author: '我', authorLink: '', keys: { 'rename-assets': 'k' } })
+    await rememberPublished('rename-assets')
     const pack = await packUserSkill('rename-assets')
     // 来源标记文件不进共享包
     expect(pack.files.map((f) => f.path)).toEqual(['SKILL.md'])

@@ -152,7 +152,7 @@ export async function packUserSkill(name: string): Promise<PackedSkill> {
   }
 
   const meta = await readShareMeta(skill.path)
-  if (meta && !(await readShareState()).keys[meta.id]) {
+  if (meta && !(await readShareState()).published.includes(meta.id)) {
     throw new PackError(
       `${name} 是从共享库安装的技能，作者是 ${meta.author}，不能以你的名义再次分享。`
     )
@@ -179,18 +179,16 @@ export async function packUserSkill(name: string): Promise<PackedSkill> {
   return { name, files, skipped }
 }
 
-// ── 署名和修改码 ─────────────────────────────────────────────────────────
+// ── 分享过哪些 ─────────────────────────────────────────────────────────
 
 /**
- * 记在 `<userData>/share/state.json`。
+ * 记在 `<userData>/share/state.json`：这台机器以自己账户分享过的技能名。
  *
- * 修改码只用来证明「这个名字是我先用的」，凭它提交的更新照样要人工审核，
- * 所以按普通配置存，不进系统加密存储。
+ * 只用来放行一种情况：自己分享过、又从共享库装回来的技能（文件夹里有 .share.json），
+ * 还可以继续更新。真正的归属由服务端按账户判断（名字被别的账户占了会被拒），这里只是少拦一次。
  */
 export interface ShareState {
-  author: string
-  authorLink: string
-  keys: Record<string, string>
+  published: string[]
 }
 
 const statePath = (): string => join(app.getPath('userData'), 'share', 'state.json')
@@ -199,16 +197,22 @@ export async function readShareState(): Promise<ShareState> {
   try {
     const data = JSON.parse(await readFile(statePath(), 'utf8')) as Partial<ShareState>
     return {
-      author: typeof data.author === 'string' ? data.author : '',
-      authorLink: typeof data.authorLink === 'string' ? data.authorLink : '',
-      keys: data.keys && typeof data.keys === 'object' ? data.keys : {}
+      published: Array.isArray(data.published)
+        ? data.published.filter((x): x is string => typeof x === 'string')
+        : []
     }
   } catch {
-    return { author: '', authorLink: '', keys: {} }
+    return { published: [] }
   }
 }
 
-export async function writeShareState(state: ShareState): Promise<void> {
+export async function rememberPublished(id: string): Promise<void> {
+  const state = await readShareState()
+  if (state.published.includes(id)) return
   await mkdir(join(statePath(), '..'), { recursive: true })
-  await writeFile(statePath(), JSON.stringify(state, null, 2), 'utf8')
+  await writeFile(
+    statePath(),
+    JSON.stringify({ published: [...state.published, id] }, null, 2),
+    'utf8'
+  )
 }

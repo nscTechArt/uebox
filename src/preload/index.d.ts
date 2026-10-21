@@ -15,7 +15,7 @@ import type {
   SharedSkillInstallRequest,
   SharedSkillOrigin,
   SharedSkillPack,
-  SharedSkillSubmitInput,
+  SharedSkillConnectPrompt,
   SharedSkillSubmitResult
 } from '../shared/share'
 import type {
@@ -3147,9 +3147,10 @@ declare global {
         approve: boolean
       ) => Promise<ShareIpcResult<SharedSkillInstallOutcome>>
       packSkill: (name: string) => Promise<ShareIpcResult<SharedSkillPack>>
-      submitSkill: (
-        input: SharedSkillSubmitInput
-      ) => Promise<ShareIpcResult<SharedSkillSubmitResult>>
+      submitSkill: (name: string) => Promise<ShareIpcResult<SharedSkillSubmitResult>>
+      connect: () => Promise<ShareIpcResult<{ account: string | null }>>
+      cancelConnect: () => Promise<void>
+      onConnectPrompt: (listener: (prompt: SharedSkillConnectPrompt) => void) => () => void
       openPage: (url: string) => Promise<ShareIpcResult<void>>
       onInstallRequest: (listener: (request: SharedSkillInstallRequest) => void) => () => void
       onInstallFailed: (listener: (failure: SharedSkillInstallFailure) => void) => () => void

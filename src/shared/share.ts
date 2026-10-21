@@ -30,7 +30,6 @@ export interface SharedSkillInstallRequest {
     id: string
     description: string
     author: string
-    authorLink: string
     version: number
     updatedAt: string
     installs: number
@@ -55,25 +54,25 @@ export interface SharedSkillPack {
   name: string
   files: SharedSkillFile[]
   skipped: string[]
-  /** 上次分享时填的署名和主页，省得每次重填 */
-  author: string
-  authorLink: string
-  /** 这个名字之前分享过（本机存着修改码），这次提交是更新 */
-  isUpdate: boolean
-}
-
-export interface SharedSkillSubmitInput {
-  name: string
-  author: string
-  authorLink: string
-  note: string
+  /** 连接的 UEBox 账户名（作者名）；没连接为 null，界面让用户先连接 */
+  account: string | null
 }
 
 export interface SharedSkillSubmitResult {
   id: string
-  isUpdate: boolean
-  statusUrl: string
+  version: number
+  /** pending：新账户的第一份，管理员看过才公开 */
+  status: 'published' | 'pending'
+  url: string
 }
+
+/** 连接账户时给用户看的校验码和授权页地址（浏览器已经打开） */
+export interface SharedSkillConnectPrompt {
+  userCode: string
+  verificationUri: string
+}
+
+export const SHARE_CONNECT_PROMPT_CHANNEL = 'share:connect-prompt'
 
 /** 技能页上的来源标记：从共享库装的技能 */
 export interface SharedSkillOrigin {

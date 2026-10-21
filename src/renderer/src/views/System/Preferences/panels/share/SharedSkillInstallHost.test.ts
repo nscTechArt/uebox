@@ -39,7 +39,6 @@ function request(id: string, requestId = `req-${id}`): SharedSkillInstallRequest
       id,
       description: `Does ${id}.`,
       author: '作者甲',
-      authorLink: '',
       version: 1,
       updatedAt: '2026-10-21T00:00:00.000Z',
       installs: 3,

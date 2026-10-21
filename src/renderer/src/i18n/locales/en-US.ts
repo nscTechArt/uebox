@@ -3618,23 +3618,24 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       share: 'Share',
       shareTitle: 'Share "{name}"',
       shareNote:
-        'Submits the skill to the shared library on the UE Box website. It is listed after review, and other users can then install it.',
-      shareUpdateNote:
-        'You have shared this skill before. This submission is an update and is also reviewed.',
+        'Publishes the skill to the shared library on the UE Box website so other users can install it. Sharing it again from the same account updates it.',
       shareFiles: 'Files to submit',
       shareSkipped:
         'These files do not meet the sharing requirements and will not be submitted: {list}',
-      shareAuthor: 'Name',
-      shareAuthorHint: 'Shown on the skill page',
-      shareLink: 'Homepage (optional)',
-      shareNoteLabel: 'Note to the reviewer (optional)',
-      shareSubmit: 'Submit for review',
+      shareAccount: 'Author',
+      shareAsAccount: 'Published as UE Box account "{account}".',
+      shareNeedAccount:
+        'Sharing needs a UE Box account. Click Connect account to open the authorization page in your browser, then sign in and click Allow.',
+      shareConnect: 'Connect account',
+      shareConnectCode: 'Make sure the web page shows this code:',
+      shareConnectFailed: 'Could not connect: {reason}',
+      shareSubmit: 'Publish',
       shareLoadFailed: 'Cannot share: {reason}',
-      shareFailed: 'Submission failed: {reason}',
-      shareDoneTitle: 'Submitted. Waiting for review.',
-      shareDone:
-        'The skill is listed on the website after review. The edit key is saved on this computer, so sharing this skill again submits an update.',
-      shareStatus: 'Check review status',
+      shareFailed: 'Publishing failed: {reason}',
+      sharePending:
+        'Submitted. A new account’s first skill is reviewed by an administrator before it goes public.',
+      sharePublished: 'Published (version {version}).',
+      shareView: 'View on website',
       // Install confirmation
       installTitle: 'Install shared skill',
       installFrom: {
