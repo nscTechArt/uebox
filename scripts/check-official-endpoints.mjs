@@ -206,7 +206,10 @@ const NOT_OFFICIAL_CALLS = {
 const USER_ENABLED_OFFICIAL_SERVICES = {
   'src/main/ai/creatorPlan/endpoint.ts':
     '创作者 Token Plan 的服务地址。只有用户在「设置 → 模型」里点「连接」才会用到；' +
-    '未连接时 creator-plan:state 直接返回、不发请求（见 src/main/ai/creatorPlan/ipc.ts）'
+    '未连接时 creator-plan:state 直接返回、不发请求（见 src/main/ai/creatorPlan/ipc.ts）',
+  'src/main/services/share/endpoint.ts':
+    '官网共享技能库的地址。只有用户在网页上点「装到盒子」、让 Agent 或 uebox skills add 安装，' +
+    '或在技能页点「分享」/「浏览共享技能」时才会用到；启动和打开页面不发请求（见 src/main/ipc/share.ts）'
 }
 
 /** 进了「用户主动开通」一类的文件里不许出现的东西：它只该是个地址常量 */

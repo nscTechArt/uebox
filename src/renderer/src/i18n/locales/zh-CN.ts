@@ -3500,7 +3500,43 @@ export default {
       deleteTitle: '删除「{name}」？',
       deleteContent: '将删除该技能的整个目录，且不会移入回收站。',
       deletedGone: '「{name}」已删除',
-      deletedRestored: '自定义副本已删除，「{name}」已恢复为原版'
+      deletedRestored: '自定义副本已删除，「{name}」已恢复为原版',
+      // 共享技能（官网共享库）
+      sharedBadge: '来自共享 · 第 {version} 版',
+      browseShared: '浏览共享技能',
+      share: '分享',
+      shareTitle: '分享「{name}」',
+      shareNote: '提交到官网共享库，经人工审核后公开，其他用户可以安装。',
+      shareUpdateNote: '此技能之前已分享过，本次提交将作为更新，同样需要审核。',
+      shareFiles: '将提交以下文件',
+      shareSkipped: '以下文件不符合共享要求，不会提交：{list}',
+      shareAuthor: '署名',
+      shareAuthorHint: '显示在技能页面上',
+      shareLink: '主页链接（可选）',
+      shareNoteLabel: '给审核人员的备注（可选）',
+      shareSubmit: '提交审核',
+      shareLoadFailed: '无法分享：{reason}',
+      shareFailed: '提交失败：{reason}',
+      shareDoneTitle: '已提交，等待审核',
+      shareDone: '审核通过后，此技能将在官网公开。修改码已保存在本机，以后再次分享此技能会作为更新提交。',
+      shareStatus: '查看审核状态',
+      // 安装确认框
+      installTitle: '安装共享技能',
+      installFrom: {
+        link: '安装请求来自网页。',
+        tool: '安装请求来自 Agent 或命令行。'
+      },
+      installMeta: '作者 {author} · 第 {version} 版 · 更新于 {date}',
+      installReview: '技能会影响 Agent 的行为。请阅读全文后再安装。',
+      installConflict: {
+        update: '已安装第 {from} 版，安装后将更新到第 {to} 版。',
+        own: '本机已有同名的自定义技能，安装后将被替换。',
+        builtin: '本机已有同名的内置或插件技能，安装后将使用此共享版本。'
+      },
+      installPage: '在官网查看',
+      install: '安装',
+      installed: '已安装技能「{name}」，下次任务生效。',
+      installFailed: '安装失败：{reason}'
     },
     // 经验库：做事时踩过又绕过去的坑（见 ProfileExperience.vue）
     experience: {

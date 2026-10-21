@@ -21,6 +21,7 @@ const mcpStore = vi.hoisted(() => ({ readMcpSettings: vi.fn(), removeMcpServer: 
 const mcpIndex = vi.hoisted(() => ({ currentStatuses: vi.fn(), reconnectMcp: vi.fn() }))
 const resume = vi.hoisted(() => ({ resumeImport: vi.fn(), abandonImport: vi.fn() }))
 const detector = vi.hoisted(() => ({ getRunningProjects: vi.fn() }))
+const share = vi.hoisted(() => ({ requestSharedSkillInstall: vi.fn() }))
 
 vi.mock('../../core/transcriptStore', () => transcripts)
 vi.mock('../../capabilities/skills', () => skills)
@@ -28,6 +29,7 @@ vi.mock('../../capabilities/mcp/store', () => mcpStore)
 vi.mock('../../capabilities/mcp/index', () => mcpIndex)
 vi.mock('../../../services/asset/ResumeImportService', () => resume)
 vi.mock('../../../utils/UnrealProcessDetector', () => ({ default: detector }))
+vi.mock('../../../ipc/share', () => share)
 
 const {
   createBoxManageTool,
@@ -194,6 +196,33 @@ describe('box_manage', () => {
     expect(riskFor({ action: 'remove_mcp_server', target: 'fs' })).toBe('destructive')
     expect(riskFor({ action: 'disable_skill', target: 'x' })).toBe('mutating')
     expect(riskFor({ action: 'backup_database' })).toBe('mutating')
+    // 盒子自己弹安装确认框，那就是审批；再走 Agent 审批是重复问
+    expect(riskFor({ action: 'install_shared_skill', target: 'x' })).toBe('safe')
+  })
+
+  it('装共享技能：交给盒子的确认流程，回执按用户的选择说', async () => {
+    share.requestSharedSkillInstall.mockResolvedValueOnce({
+      status: 'installed',
+      id: 'rename-assets',
+      version: 2
+    })
+    const out = await text(tool, { action: 'install_shared_skill', target: 'rename-assets' })
+    expect(share.requestSharedSkillInstall).toHaveBeenCalledWith('rename-assets', 'tool')
+    expect(out).toMatch(/^已安装共享技能 rename-assets（第 2 版）/)
+
+    share.requestSharedSkillInstall.mockResolvedValueOnce({ status: 'declined', id: 'rename-assets' })
+    expect(await text(tool, { action: 'install_shared_skill', target: 'rename-assets' })).toContain(
+      '用户没有安装'
+    )
+
+    share.requestSharedSkillInstall.mockResolvedValueOnce({
+      status: 'failed',
+      id: 'rename-assets',
+      error: '磁盘已满'
+    })
+    await expect(
+      tool.execute('c', { action: 'install_shared_skill', target: 'rename-assets' })
+    ).rejects.toThrow('磁盘已满')
   })
 
   it('不给 target 就打回，并指去 box_status', async () => {

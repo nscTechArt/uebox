@@ -3054,9 +3054,13 @@ export function registerAgentV3IPC(): void {
    * **列的是盘上全部**，不是 agent 实际拿到的那份：过滤在
    * `discoverEnabledSkills()` 里，两边不能混用（见那个函数的注释）。
    */
-  ipcMain.handle('agent-v3:list-skills', async () => ({
-    skills: listSkillSummaries(await discoverSkillsOnDisk(), await readDisabledSkills())
-  }))
+  ipcMain.handle('agent-v3:list-skills', async () => {
+    const skills = await discoverSkillsOnDisk()
+    const { sharedSkillOrigins } = await import('../services/share/sharedSkills')
+    return {
+      skills: listSkillSummaries(skills, await readDisabledSkills(), await sharedSkillOrigins(skills))
+    }
+  })
 
   /** 详情弹窗：读 SKILL.md 全文（含 frontmatter）。名字对不上返回 null */
   ipcMain.handle('agent-v3:read-skill', async (_event, name: unknown) => {

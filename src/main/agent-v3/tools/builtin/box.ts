@@ -25,6 +25,8 @@
 import { z } from 'zod'
 
 import { defineTool, type ToolRisk, type UnrealAgentTool } from '../defineTool'
+// 只是两个地址常量，没有副作用，可以静态引入（描述里要写出技能页地址的样子）
+import { SHARE_HOST } from '../../../services/share/endpoint'
 
 // ── box_sessions ────────────────────────────────────────────────────────────
 
@@ -397,7 +399,8 @@ const MANAGE_ACTIONS = [
   'abandon_import',
   'reimport_asset',
   'reimport_folder',
-  'backup_database'
+  'backup_database',
+  'install_shared_skill'
 ] as const
 type ManageAction = (typeof MANAGE_ACTIONS)[number]
 
@@ -417,13 +420,15 @@ const manageInput = z.object({
         'reconnect_mcp：重连全部第三方 MCP；remove_mcp_server：删掉一个第三方 MCP（target=服务 id）；' +
         'resume_import：续传一次卡住的导入（target=导入任务 id）；abandon_import：放弃它并清掉服务端暂存（target=导入任务 id）；' +
         'reimport_asset：重新导入一个资产（target=资产 key）；reimport_folder：重新导入一个文件夹（target=文件夹 key）；' +
-        'backup_database：立刻备份一次盒子数据库'
+        'backup_database：立刻备份一次盒子数据库；' +
+        `install_shared_skill：从官网共享库安装一个技能（target=技能名或 ${SHARE_HOST}/s/技能名）`
     ),
   target: z
     .string()
     .optional()
     .describe(
-      '动作的对象：技能名、MCP 服务 id、导入任务 id、资产 key 或文件夹 key。先用 box_status 拿到'
+      '动作的对象：技能名、MCP 服务 id、导入任务 id、资产 key 或文件夹 key。先用 box_status 拿到；' +
+        `install_shared_skill 用用户给的技能名或 ${SHARE_HOST}/s/… 地址`
     )
 })
 
@@ -505,6 +510,20 @@ async function runManage(action: ManageAction, target: string | undefined): Prom
       const result = await new AssetImportService().reimportFolder(key)
       return `文件夹 ${key} 重新导入：共 ${result.total} 个，成功 ${result.success}，失败 ${result.failed}。`
     }
+    case 'install_shared_skill': {
+      const ref = requireTarget(action, target)
+      const { requestSharedSkillInstall } = await import('../../../ipc/share')
+      const outcome = await requestSharedSkillInstall(ref, 'tool')
+      switch (outcome.status) {
+        case 'installed':
+          return `已安装共享技能 ${outcome.id}（第 ${outcome.version} 版），下一轮对话开始生效。`
+        case 'declined':
+          return `用户没有安装 ${outcome.id}（在确认框里取消，或超时未处理）。不要再次发起，除非用户要求。`
+        case 'failed':
+          throw new Error(`安装 ${outcome.id} 失败：${outcome.error}`)
+      }
+      break
+    }
     case 'backup_database': {
       const { DatabaseBackupService } = await import('../../../services/backup')
       const result = await DatabaseBackupService.getInstance().createFullBackup()
@@ -521,11 +540,18 @@ export function createBoxManageTool(): UnrealAgentTool<unknown> {
     // 最坏情况。实际按动作算，见 riskFor
     risk: 'destructive',
     riskFor: (args): ToolRisk =>
-      DESTRUCTIVE_ACTIONS.has(args.action) ? 'destructive' : 'mutating',
+      DESTRUCTIVE_ACTIONS.has(args.action)
+        ? 'destructive'
+        : // 盒子自己会弹安装确认框给用户看全文，那就是审批；再走一道 Agent 审批是重复问
+          args.action === 'install_shared_skill'
+          ? 'safe'
+          : 'mutating',
     concurrency: 'sequential',
     description:
-      '管理虚幻盒子本身：开关技能、重连或删掉第三方 MCP 服务、续传或放弃卡住的素材导入、重新导入资产、备份盒子数据库。\n\n' +
+      '管理虚幻盒子本身：开关技能、从官网共享库安装技能、重连或删掉第三方 MCP 服务、续传或放弃卡住的素材导入、重新导入资产、备份盒子数据库。\n\n' +
       '【先看再动】target 用 box_status 拿到的名字或 id，别猜。\n' +
+      `【装共享技能】用户说「装上 ${SHARE_HOST}/s/xxx」或给出共享技能名时用 install_shared_skill。` +
+      '盒子会弹窗让用户看全文并确认，这一步会等到用户点了才返回。\n' +
       '【不可逆的】abandon_import 会清掉服务端暂存，之后不能再续传；remove_mcp_server 会把那条配置删掉。' +
       '做之前跟用户说清楚。\n' +
       '恢复 / 删除备份、改盒子设置不在这里 —— 那些让用户在盒子界面里自己做。',

@@ -10,6 +10,7 @@ import { assertArgsInputExclusive, parse, type ParsedArgs } from './args.js'
 import { runAsk } from './commands/ask.js'
 import { runDoctor } from './commands/doctor.js'
 import { runProjectsList } from './commands/projects.js'
+import { runSkillsAdd } from './commands/skills.js'
 import { runViewportScreenshot } from './commands/screenshot.js'
 import {
   runTeamGate,
@@ -141,6 +142,10 @@ async function dispatch(parsed: ParsedArgs, env: NodeJS.ProcessEnv, io: RunIO): 
     case 'team':
       return dispatchTeam(parsed, sub, shared)
 
+    case 'skills':
+      if (sub !== 'add') throw unknownCommand(['skills add <技能名或技能页地址>'])
+      return runSkillsAdd({ ...shared, ref: parsed.command.slice(2).join(' ') })
+
     default:
       throw unknownCommand([
         'ask "<要做的事>"',
@@ -150,6 +155,7 @@ async function dispatch(parsed: ParsedArgs, env: NodeJS.ProcessEnv, io: RunIO): 
         'tools show <name>',
         'tools call <name>',
         'viewport screenshot',
+        'skills add <技能名或技能页地址>',
         'team list|status|use|gate|round'
       ])
   }

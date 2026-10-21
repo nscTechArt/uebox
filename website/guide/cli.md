@@ -100,6 +100,15 @@ uebox viewport screenshot --output shot.png
 
 **明暗只有在场景锁定手动曝光时才可信**（`data.exposure` 为 `manual`）。自动曝光下，截图、视口、游戏各自收敛亮度，要判断过曝或欠曝，先锁定曝光。物体是否存在、位置、材质颜色、灯是否亮着，任何时候都可信。
 
+## 安装共享技能
+
+```bash
+uebox skills add ue-level-organize
+uebox skills add uebox.ai/s/ue-level-organize
+```
+
+从官网共享库安装技能。盒子会弹出确认框显示全文，点「安装」后才写入；命令一直等到你做出选择，最长 10 分钟。取消不算失败：退出码为 0，`data.installed` 为 `false`。详见[共享技能](./tools-and-skills#共享技能)。
+
 ## 改东西
 
 写操作都要加 `--allow-write`。

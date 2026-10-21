@@ -43,6 +43,7 @@ const ZH = `虚幻盒子 CLI —— 从终端调用虚幻引擎能力
   tools show <name>         某个工具的完整描述和参数定义
   tools call <name>         调用一个工具
   viewport screenshot       把视口画面存成 PNG 文件
+  skills add <技能>         从官网共享库安装技能，盒子里确认后才装
   team list / team status [id]  列出外部团队 / 看某个团队的交付闸
   team use <id>             把当前目录绑到这个外部团队
   team gate / team round    收尾检查 / 新一轮清零；Claude Code hook 里加 --hook
@@ -129,6 +130,7 @@ Commands:
   tools show <name>         Full description and input schema for one tool
   tools call <name>         Call one tool
   viewport screenshot       Save the viewport image to a PNG file
+  skills add <skill>        Install a shared skill; confirm it in UE Box first
   team list / team status [id] / team use <id>  List, inspect, bind cwd
   team gate / team round    Finish check / new round; add --hook in hooks
 
@@ -185,8 +187,7 @@ The target project is: --project, else the nearest .uproject above the current
 directory, else the one online project if there is exactly one. A project from
 the first two that is not connected fails the command.
 
-Screenshot brightness is only reliable when the scene uses manual exposure;
-check data.exposure, and lock it before judging exposure.
+Screenshot brightness is reliable only with manual exposure; see data.exposure.
 
 Exit codes:
   0     ok

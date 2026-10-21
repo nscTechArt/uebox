@@ -1818,6 +1818,32 @@ const api = {
     }
   },
   /**
+   * 共享技能（官网共享库）。通道全部是 share:*，返回 { success, data?, error? }。
+   * 安装请求由主进程推过来（onInstallRequest），用户在确认框里决定后用 installReply 回复。
+   */
+  share: {
+    pendingInstalls: () => ipcRenderer.invoke('share:pending-installs'),
+    installReply: (requestId: string, approve: boolean) =>
+      ipcRenderer.invoke('share:install-reply', requestId, approve),
+    packSkill: (name: string) => ipcRenderer.invoke('share:pack-skill', name),
+    submitSkill: (input: unknown) => ipcRenderer.invoke('share:submit-skill', input),
+    openPage: (url: string) => ipcRenderer.invoke('share:open-page', url),
+    onInstallRequest: (listener: (request: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, request: unknown): void => listener(request)
+      ipcRenderer.on('share:install-request', handler)
+      return () => {
+        ipcRenderer.removeListener('share:install-request', handler)
+      }
+    },
+    onInstallFailed: (listener: (failure: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, failure: unknown): void => listener(failure)
+      ipcRenderer.on('share:install-failed', handler)
+      return () => {
+        ipcRenderer.removeListener('share:install-failed', handler)
+      }
+    }
+  },
+  /**
    * 通用事件监听器 - 监听主进程发送的事件
    */
   on: (channel: string, listener: (...args: any[]) => void) => {

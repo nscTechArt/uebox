@@ -10,6 +10,15 @@ import type {
 } from '../shared/agentNotificationActivation'
 import type { TrayAction, TrayRecentSession } from '../shared/trayActions'
 import type {
+  SharedSkillInstallFailure,
+  SharedSkillInstallOutcome,
+  SharedSkillInstallRequest,
+  SharedSkillOrigin,
+  SharedSkillPack,
+  SharedSkillSubmitInput,
+  SharedSkillSubmitResult
+} from '../shared/share'
+import type {
   CommunityFetchResult,
   CommunityTemplate,
   TemplateDownloadProgress,
@@ -3130,6 +3139,19 @@ declare global {
       /** 订阅主进程推来的失效 / 状态 / 作业进度；返回取消订阅 */
       onEvent: (listener: (event: CatalogLibraryEvent) => void) => () => void
     }
+    /** 共享技能（官网共享库）。类型见 src/shared/share.ts */
+    share: {
+      pendingInstalls: () => Promise<ShareIpcResult<SharedSkillInstallRequest[]>>
+      installReply: (
+        requestId: string,
+        approve: boolean
+      ) => Promise<ShareIpcResult<SharedSkillInstallOutcome>>
+      packSkill: (name: string) => Promise<ShareIpcResult<SharedSkillPack>>
+      submitSkill: (input: SharedSkillSubmitInput) => Promise<ShareIpcResult<SharedSkillSubmitResult>>
+      openPage: (url: string) => Promise<ShareIpcResult<void>>
+      onInstallRequest: (listener: (request: SharedSkillInstallRequest) => void) => () => void
+      onInstallFailed: (listener: (failure: SharedSkillInstallFailure) => void) => () => void
+    }
     /**
      * 团队工程（版本控制与资产协作）。`call` 的动作名和参数见
      * src/main/libraryV3/team/teamOps.ts；返回值是团队服务成员面的 JSON（src/shared/teamProject.ts）。
@@ -3864,7 +3886,11 @@ declare global {
     source: 'user' | 'plugin' | 'builtin'
     /** 用户有没有把它关掉。关掉的仍然在清单里 —— 否则没法再打开 */
     enabled: boolean
+    /** 从官网共享库装的 */
+    shared?: SharedSkillOrigin
   }
+
+  type ShareIpcResult<T> = { success: true; data: T } | { success: false; error: string }
 
   /** 一条经验在哪。主进程只认项目库里登记过的工程路径 */
   interface AgentV3ExperienceRef {
