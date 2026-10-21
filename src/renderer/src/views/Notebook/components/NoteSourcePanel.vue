@@ -106,9 +106,12 @@ const nbStore = useNotebookStore()
  * 主进程存完发这条事件。不听的话用户要手动切一次页面才看得见新来源。
  *
  * 认 notebookId 是因为 KeepAlive 会缓存好几个 NoteSourcePanel，不认的话每一个都会跟着刷。
+ * 出于同样的原因，卸载时只移除自己的监听：removeAllListeners 会把其他面板的监听
+ * 一并移除，而缓存中的面板不会重新挂载，移除后就再也收不到事件。
  */
+let offSourceChanged: (() => void) | null = null
 onMounted(() => {
-  window.electron.ipcRenderer.on(
+  offSourceChanged = window.electron.ipcRenderer.on(
     'agent:notebook:source-changed',
     async (_event, payload: { notebookId?: string }) => {
       if (!props.notebookId || payload?.notebookId !== props.notebookId) return
@@ -118,7 +121,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  window.electron.ipcRenderer.removeAllListeners('agent:notebook:source-changed')
+  offSourceChanged?.()
+  offSourceChanged = null
 })
 
 /**
