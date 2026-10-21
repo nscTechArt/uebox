@@ -6,24 +6,21 @@ import {
   type MaterialCollection,
   type MaterialCompileStatus,
   type MaterialEntry,
-  type MaterialLibraryFilters,
-  type MaterialParameterValue,
-  type MaterialSortType,
-  type MaterialViewMode
+  type MaterialParameterValue
 } from '@renderer/views/MaterialLibrary/types/material'
+import type { BrowserViewMode } from '@renderer/views/library-common/browser/types'
 import {
   extractLegacyMaterialDependencies,
   extractLegacyMaterialParameters,
   summarizeLegacyGraph
 } from '@renderer/views/MaterialLibrary/services/materialLibraryTransformers'
-import { sortLibraryEntries } from '@renderer/views/library-common/utils/libraryCollection'
 import { createLibraryPackagePersistence, parseUiPrefs } from './libraryPackagePersistence'
 import { clearLegacyLocalStorage, readLegacyLibrarySnapshot } from './libraryLegacyRead'
 
 /** 旧版把整库写在这个 localStorage 键下，现在只在首次迁移时读一次 */
 const LEGACY_PERSIST_KEY = 'material-library-v2-state'
 
-/** 界面偏好（排序、视图模式、筛选）留在 localStorage —— 它本来就该放这儿 */
+/** 界面偏好（视图模式、当前条目、liveSearchPath）留在 localStorage —— 它本来就该放这儿 */
 const UI_STATE_KEY = 'material-library-ui'
 
 function readUiPrefs(): Record<string, unknown> {
@@ -175,109 +172,11 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   const collections = ref<MaterialCollection[]>([])
   const loading = ref(false)
   const activeEntryId = ref<string | null>(null)
-  const viewMode = ref<MaterialViewMode>('grid')
-  const sortType = ref<MaterialSortType>('recent')
+  const viewMode = ref<BrowserViewMode>('grid')
   const liveSearchPath = ref('/Game')
-  const filters = ref<MaterialLibraryFilters>({
-    searchQuery: '',
-    entryType: 'all',
-    favoriteState: 'all',
-    blendMode: 'all',
-    materialDomain: 'all',
-    shadingModel: 'all',
-    compileStatus: 'all',
-    hasTextureDependencies: 'all',
-    hasFunctionDependencies: 'all',
-    hasChildInstances: 'all',
-    activeCollectionId: null
-  })
-
   const activeEntry = computed(
     () => entries.value.find((entry) => entry.id === activeEntryId.value) || null
   )
-
-  const availableBlendModes = computed(() =>
-    [...new Set(entries.value.map((entry) => entry.blendMode).filter(Boolean))].sort()
-  )
-  const availableDomains = computed(() =>
-    [...new Set(entries.value.map((entry) => entry.materialDomain).filter(Boolean))].sort()
-  )
-  const availableShadingModels = computed(() =>
-    [...new Set(entries.value.map((entry) => entry.shadingModel).filter(Boolean))].sort()
-  )
-
-  const filteredEntries = computed(() => {
-    let list = [...entries.value]
-    const query = filters.value.searchQuery.trim().toLowerCase()
-
-    if (query) {
-      list = list.filter((entry) => {
-        return (
-          entry.name.toLowerCase().includes(query) ||
-          entry.assetPath.toLowerCase().includes(query) ||
-          entry.tags.some((tag) => tag.toLowerCase().includes(query))
-        )
-      })
-    } else if (!filters.value.activeCollectionId) {
-      list = list.filter((entry) => !entry.collectionId)
-    }
-
-    if (filters.value.entryType !== 'all') {
-      list = list.filter((entry) => entry.entryType === filters.value.entryType)
-    }
-
-    if (filters.value.favoriteState !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.favoriteState === 'favorite' ? entry.isFavorite : !entry.isFavorite
-      )
-    }
-
-    if (filters.value.blendMode !== 'all') {
-      list = list.filter((entry) => entry.blendMode === filters.value.blendMode)
-    }
-
-    if (filters.value.materialDomain !== 'all') {
-      list = list.filter((entry) => entry.materialDomain === filters.value.materialDomain)
-    }
-
-    if (filters.value.shadingModel !== 'all') {
-      list = list.filter((entry) => entry.shadingModel === filters.value.shadingModel)
-    }
-
-    if (filters.value.compileStatus !== 'all') {
-      list = list.filter((entry) => entry.compileStatus === filters.value.compileStatus)
-    }
-
-    if (filters.value.hasTextureDependencies !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.hasTextureDependencies === 'yes'
-          ? entry.textureDependencies.length > 0
-          : entry.textureDependencies.length === 0
-      )
-    }
-
-    if (filters.value.hasFunctionDependencies !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.hasFunctionDependencies === 'yes'
-          ? entry.functionDependencies.length > 0
-          : entry.functionDependencies.length === 0
-      )
-    }
-
-    if (filters.value.hasChildInstances !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.hasChildInstances === 'yes'
-          ? entry.childInstancePaths.length > 0
-          : entry.childInstancePaths.length === 0
-      )
-    }
-
-    if (filters.value.activeCollectionId) {
-      list = list.filter((entry) => entry.collectionId === filters.value.activeCollectionId)
-    }
-
-    return sortLibraryEntries(list, sortType.value)
-  })
 
   /**
    * 持久化。
@@ -296,13 +195,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   function applyUiState(ui: Record<string, unknown>): void {
     if (typeof ui.activeEntryId === 'string') activeEntryId.value = ui.activeEntryId
     if (ui.viewMode === 'grid' || ui.viewMode === 'list') viewMode.value = ui.viewMode
-    if (ui.sortType === 'recent' || ui.sortType === 'name' || ui.sortType === 'created') {
-      sortType.value = ui.sortType
-    }
     if (typeof ui.liveSearchPath === 'string') liveSearchPath.value = ui.liveSearchPath
-    if (ui.filters && typeof ui.filters === 'object') {
-      filters.value = { ...filters.value, ...(ui.filters as Partial<MaterialLibraryFilters>) }
-    }
   }
 
   const persistence = createLibraryPackagePersistence<MaterialEntry, MaterialCollection>({
@@ -323,9 +216,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
           ui: {
             activeEntryId: raw.activeEntryId,
             viewMode: raw.viewMode,
-            sortType: raw.sortType,
-            liveSearchPath: raw.liveSearchPath,
-            filters: raw.filters
+            liveSearchPath: raw.liveSearchPath
           }
         })
       }),
@@ -336,9 +227,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
       ui: {
         activeEntryId: activeEntryId.value,
         viewMode: viewMode.value,
-        sortType: sortType.value,
-        liveSearchPath: liveSearchPath.value,
-        filters: filters.value
+        liveSearchPath: liveSearchPath.value
       }
     }),
     applySnapshot: (snapshot) => {
@@ -374,10 +263,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
       }
     }
     collections.value = collections.value.filter((item) => item.id !== collectionId)
-
-    if (filters.value.activeCollectionId === collectionId) {
-      filters.value.activeCollectionId = null
-    }
   }
 
   function findExistingEntry(incoming: MaterialEntry): MaterialEntry | undefined {
@@ -455,45 +340,13 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     loading.value = value
   }
 
-  function setViewMode(mode: MaterialViewMode): void {
+  function setViewMode(mode: BrowserViewMode): void {
     viewMode.value = mode
-    persistState()
-  }
-
-  function setSortType(nextSortType: MaterialSortType): void {
-    sortType.value = nextSortType
     persistState()
   }
 
   function setLiveSearchPath(path: string): void {
     liveSearchPath.value = path || '/Game'
-    persistState()
-  }
-
-  function updateFilters(patch: Partial<MaterialLibraryFilters>): void {
-    filters.value = { ...filters.value, ...patch }
-    persistState()
-  }
-
-  function clearCollectionFilter(): void {
-    filters.value.activeCollectionId = null
-    persistState()
-  }
-
-  function clearFilters(): void {
-    filters.value = {
-      searchQuery: '',
-      entryType: 'all',
-      favoriteState: 'all',
-      blendMode: 'all',
-      materialDomain: 'all',
-      shadingModel: 'all',
-      compileStatus: 'all',
-      hasTextureDependencies: 'all',
-      hasFunctionDependencies: 'all',
-      hasChildInstances: 'all',
-      activeCollectionId: null
-    }
     persistState()
   }
 
@@ -525,15 +378,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
 
     if (activeEntryId.value === id) {
       activeEntryId.value = null
-    }
-
-    if (entry?.collectionId && filters.value.activeCollectionId === entry.collectionId) {
-      const hasRemainingEntries = entries.value.some(
-        (item) => item.collectionId === filters.value.activeCollectionId
-      )
-      if (!hasRemainingEntries) {
-        filters.value.activeCollectionId = null
-      }
     }
 
     persistState()
@@ -755,10 +599,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
       }
     }
 
-    if (filters.value.activeCollectionId === collectionId) {
-      filters.value.activeCollectionId = null
-    }
-
     persistState()
   }
 
@@ -834,24 +674,14 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     loading,
     activeEntryId,
     activeEntry,
-    filteredEntries,
     viewMode,
-    sortType,
-    filters,
     liveSearchPath,
-    availableBlendModes,
-    availableDomains,
-    availableShadingModels,
     upsertEntries,
     importLegacyEntries,
     setActiveEntryId,
     setLoading,
     setViewMode,
-    setSortType,
     setLiveSearchPath,
-    updateFilters,
-    clearCollectionFilter,
-    clearFilters,
     updateEntry,
     deleteEntry,
     toggleFavorite,

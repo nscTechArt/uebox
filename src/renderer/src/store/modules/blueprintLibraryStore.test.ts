@@ -133,37 +133,18 @@ describe('blueprintLibrary store editor tab state', () => {
     })
   })
 
-  it('filters gallery blueprints by search text, type, and favorite state', () => {
+  it('toggles a blueprint favorite on and off', () => {
     const store = useBlueprintLibraryStore()
-    store.blueprints.splice(0)
-    store.collections.splice(0)
-
     const actor = store.createBlueprint({
       name: 'BP_DoorController',
       blueprintType: 'BlueprintClass',
-      engineVersion: '5.4',
-      description: '门交互逻辑',
-      tags: ['interaction']
+      engineVersion: '5.4'
     })
-    const widget = store.createBlueprint({
-      name: 'WBP_StatusPanel',
-      blueprintType: 'WidgetBlueprint',
-      engineVersion: '5.4',
-      description: '玩家状态 UI',
-      tags: ['hud']
-    })
-
-    store.setSearchQuery('控件')
-    expect(store.filteredBlueprints.map((bp) => bp.id)).toEqual([widget.id])
-
-    store.setSearchQuery('')
-    store.setTypeFilter('BlueprintClass')
-    expect(store.filteredBlueprints.map((bp) => bp.id)).toEqual([actor.id])
-
-    store.setFavoriteOnly(true)
-    expect(store.filteredBlueprints).toEqual([])
 
     store.toggleFavorite(actor.id)
-    expect(store.filteredBlueprints.map((bp) => bp.id)).toEqual([actor.id])
+    expect(store.blueprints.find((bp) => bp.id === actor.id)?.isFavorite).toBe(true)
+
+    store.toggleFavorite(actor.id)
+    expect(store.blueprints.find((bp) => bp.id === actor.id)?.isFavorite).toBe(false)
   })
 })

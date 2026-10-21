@@ -288,15 +288,6 @@ export interface BlueprintCollection {
 //  Gallery / UI 相关类型
 // ============================================================
 
-/** 列表视图模式 */
-export type GalleryViewMode = 'grid' | 'list'
-
-/** 列表分类筛选 */
-export type GalleryCategory = 'all' | 'my' | 'featured'
-
-/** 排序方式 */
-export type GallerySortType = 'recent' | 'name' | 'created'
-
 /** 蓝图内部元素类型（侧栏导航用） */
 export type BlueprintElementType =
   | 'graph'

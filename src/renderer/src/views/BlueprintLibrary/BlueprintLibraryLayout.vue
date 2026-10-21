@@ -33,15 +33,4 @@ const { viewRoute, keepChild } = useLibraryLayout({
   margin: var(--space-3) var(--space-4) 0;
   flex-shrink: 0;
 }
-
-/* 淡入淡出过渡效果 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.12s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
 </style>

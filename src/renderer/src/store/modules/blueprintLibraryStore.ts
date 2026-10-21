@@ -1,6 +1,6 @@
 /**
  * 蓝图库 v2 Store
- * 管理蓝图列表、CRUD、筛选、排序
+ * 管理蓝图列表、CRUD
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -15,15 +15,11 @@ import type {
   BlueprintEventDispatcher,
   BlueprintMacro,
   BlueprintCollection,
-  GalleryCategory,
-  GallerySortType,
-  GalleryViewMode,
   BlueprintElementType
 } from '@renderer/views/BlueprintLibrary/types/blueprint'
+import type { BrowserViewMode } from '@renderer/views/library-common/browser/types'
 import { SAMPLE_EVENT_GRAPH_CODE } from '@renderer/views/BlueprintLibrary/constants/sampleBlueprintCode'
-import { getBlueprintTypeLabel } from '@renderer/views/BlueprintLibrary/types/blueprint'
 import { extractFunctionSignatureFromCode } from '@renderer/views/BlueprintLibrary/utils/blueprintCodeParser'
-import { sortLibraryEntries } from '@renderer/views/library-common/utils/libraryCollection'
 import { createLibraryPackagePersistence, parseUiPrefs } from './libraryPackagePersistence'
 import { clearLegacyLocalStorage, readLegacyLibrarySnapshot } from './libraryLegacyRead'
 import { detectPayloadForm } from '@core/shared/snippetPayload'
@@ -39,7 +35,7 @@ const t = i18n.global.t
 /** 旧版把整库写在这个 localStorage 键下，现在只在首次迁移时读一次 */
 const LEGACY_PERSIST_KEY = 'blueprint-library-v2-state'
 
-/** 界面偏好（排序、视图模式、编辑器视角）留在 localStorage —— 它本来就该放这儿 */
+/** 界面偏好（视图模式、编辑器视角）留在 localStorage —— 它本来就该放这儿 */
 const UI_STATE_KEY = 'blueprint-library-ui'
 
 function readUiPrefs(): Record<string, unknown> {
@@ -93,12 +89,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   const loading = ref(false)
 
   // ========== Gallery 状态 ==========
-  const category = ref<GalleryCategory>('all')
-  const sortType = ref<GallerySortType>('created')
-  const searchQuery = ref('')
-  const typeFilter = ref<string>('all')
-  const favoriteOnly = ref(false)
-  const galleryViewMode = ref<GalleryViewMode>('grid')
+  const galleryViewMode = ref<BrowserViewMode>('grid')
 
   // ========== Editor 状态 ==========
   const editorTabStates = new Map<string, EditorTabState>()
@@ -115,44 +106,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   const engineVersionList = computed(() => ENGINE_VERSIONS)
 
   // ========== 计算属性 ==========
-
-  /** 按排序和筛选条件过滤后的蓝图列表（排除已属于集合的蓝图，搜索时显示全部） */
-  const filteredBlueprints = computed(() => {
-    let list = [...blueprints.value]
-
-    // 搜索过滤
-    const isSearching = !!searchQuery.value
-    if (isSearching) {
-      const q = searchQuery.value.toLowerCase()
-      list = list.filter(
-        (bp) =>
-          bp.name.toLowerCase().includes(q) ||
-          bp.description.toLowerCase().includes(q) ||
-          bp.blueprintType.toLowerCase().includes(q) ||
-          getBlueprintTypeLabel(bp.blueprintType).toLowerCase().includes(q) ||
-          bp.tags.some((tag) => tag.toLowerCase().includes(q))
-      )
-    } else {
-      // 非搜索模式：排除已属于集合的蓝图
-      list = list.filter((bp) => !bp.collectionId)
-    }
-
-    if (typeFilter.value !== 'all') {
-      list = list.filter((bp) => bp.blueprintType === typeFilter.value)
-    }
-
-    if (favoriteOnly.value) {
-      list = list.filter((bp) => bp.isFavorite)
-    }
-
-    // 分类过滤
-    if (category.value === 'my') {
-      list = list.filter((bp) => bp.status !== 'archived')
-    }
-
-    // 排序
-    return sortLibraryEntries(list, sortType.value)
-  })
 
   /** 当前活跃蓝图 */
   const activeBlueprint = computed(() =>
@@ -179,17 +132,8 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     if (ui.activeBlueprintId && !activeBlueprintId.value) {
       activeBlueprintId.value = ui.activeBlueprintId as string
     }
-    if (ui.sortType) {
-      sortType.value = ui.sortType as GallerySortType
-    }
     if (ui.galleryViewMode === 'grid' || ui.galleryViewMode === 'list') {
       galleryViewMode.value = ui.galleryViewMode
-    }
-    if (typeof ui.typeFilter === 'string') {
-      typeFilter.value = ui.typeFilter
-    }
-    if (typeof ui.favoriteOnly === 'boolean') {
-      favoriteOnly.value = ui.favoriteOnly
     }
     if (ui.editorViewStates && typeof ui.editorViewStates === 'object') {
       for (const [key, value] of Object.entries(ui.editorViewStates)) {
@@ -236,9 +180,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
             : [],
           ui: {
             activeBlueprintId: raw.activeBlueprintId,
-            sortType: raw.sortType,
-            typeFilter: raw.typeFilter,
-            favoriteOnly: raw.favoriteOnly,
             galleryViewMode: raw.galleryViewMode,
             editorViewStates: raw.editorViewStates
           }
@@ -281,9 +222,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
       collections: collections.value,
       ui: {
         activeBlueprintId: activeBlueprintId.value,
-        sortType: sortType.value,
-        typeFilter: typeFilter.value,
-        favoriteOnly: favoriteOnly.value,
         galleryViewMode: galleryViewMode.value,
         editorViewStates: Object.fromEntries(editorViewStates.entries())
       }
@@ -334,30 +272,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
 
   // ========== Gallery 操作 ==========
 
-  function setCategory(cat: GalleryCategory): void {
-    category.value = cat
-  }
-
-  function setSortType(sort: GallerySortType): void {
-    sortType.value = sort
-    persistState()
-  }
-
-  function setSearchQuery(query: string): void {
-    searchQuery.value = query
-  }
-
-  function setTypeFilter(type: string): void {
-    typeFilter.value = type || 'all'
-    persistState()
-  }
-
-  function setFavoriteOnly(value: boolean): void {
-    favoriteOnly.value = value
-    persistState()
-  }
-
-  function setGalleryViewMode(mode: GalleryViewMode): void {
+  function setGalleryViewMode(mode: BrowserViewMode): void {
     galleryViewMode.value = mode
     persistState()
   }
@@ -1047,26 +962,15 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     blueprints,
     collections,
     loading,
-    category,
-    sortType,
-    searchQuery,
-    typeFilter,
-    favoriteOnly,
     galleryViewMode,
     activeBlueprintId,
     activeElementId,
     activeElementType,
     createModalAdvancedExpanded,
     // 计算属性
-    filteredBlueprints,
     activeBlueprint,
     engineVersionList,
     // Gallery
-    setCategory,
-    setSortType,
-    setSearchQuery,
-    setTypeFilter,
-    setFavoriteOnly,
     setGalleryViewMode,
     setEditorTabId,
     copyEditorStateToTabId,
