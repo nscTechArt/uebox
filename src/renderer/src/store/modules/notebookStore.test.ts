@@ -339,3 +339,121 @@ describe('notebookStore sources per notebook', () => {
     expect(store.sourcesOf('notebook-b')[0]?.contextLevel).toBe('full')
   })
 })
+
+/**
+ * 写库失败的回滚：await 期间列表可能被整体替换（重新加载或释放），下标也可能被其他操作改变。
+ * 回滚不能按发起请求时的下标写入。
+ */
+describe('notebookStore rollback after a failed write', () => {
+  type SourceRows = Awaited<ReturnType<typeof window.api.notebook.getSources>>
+  const rowsOf = (...sourceIds: string[]): SourceRows =>
+    sourceIds.map((sourceId) => ({
+      sourceId,
+      title: sourceId,
+      type: 'text',
+      content: 'x'
+    })) as unknown as SourceRows
+
+  function deferred(): { promise: Promise<never>; reject: (error: unknown) => void } {
+    let reject: (error: unknown) => void = () => {}
+    const promise = new Promise<never>((_resolve, rejectPromise) => {
+      reject = rejectPromise
+    })
+    return { promise, reject }
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('does not write back into sources released while the update was in flight', async () => {
+    const pending = deferred()
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async () => rowsOf('a-1', 'a-2')),
+        updateSource: vi.fn(() => pending.promise)
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    const updating = store.updateSource('notebook-a', 'a-2', { title: 'renamed' })
+    store.releaseSources('notebook-a')
+    pending.reject(new Error('db down'))
+    await updating
+
+    expect(store.sourcesOf('notebook-a')).toEqual([])
+  })
+
+  it('rolls back the updated source, not its neighbour, after an earlier one was removed', async () => {
+    const pending = deferred()
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async () => rowsOf('a-1', 'a-2', 'a-3')),
+        updateSource: vi.fn(() => pending.promise),
+        deleteSource: vi.fn(async () => true)
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    const updating = store.updateSource('notebook-a', 'a-2', { title: 'renamed' })
+    await store.removeSource('notebook-a', 'a-1')
+    pending.reject(new Error('db down'))
+    await updating
+
+    expect(store.sourcesOf('notebook-a').map((s) => [s.id, s.title])).toEqual([
+      ['a-2', 'a-2'],
+      ['a-3', 'a-3']
+    ])
+  })
+
+  it('reinserts a failed delete after its surviving predecessor when an earlier one was removed', async () => {
+    const pending = deferred()
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async () => rowsOf('a', 'b', 'c', 'd')),
+        deleteSource: vi.fn((sourceId: string) =>
+          sourceId === 'c' ? pending.promise : Promise.resolve(true)
+        )
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    const removing = store.removeSource('notebook-a', 'c')
+    await store.removeSource('notebook-a', 'a')
+    pending.reject(new Error('db down'))
+    await removing
+
+    expect(store.sourcesOf('notebook-a').map((s) => s.id)).toEqual(['b', 'c', 'd'])
+  })
+
+  it('does not reinsert a source the list was reloaded with while the delete was in flight', async () => {
+    const pending = deferred()
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async () => rowsOf('a-1', 'a-2')),
+        deleteSource: vi.fn(() => pending.promise)
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    const removing = store.removeSource('notebook-a', 'a-1')
+    await store.loadSources('notebook-a')
+    pending.reject(new Error('db down'))
+    await removing
+
+    expect(store.sourcesOf('notebook-a').map((s) => s.id)).toEqual(['a-1', 'a-2'])
+  })
+})

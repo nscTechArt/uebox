@@ -384,6 +384,7 @@ export const useNotebookStore = defineStore('notebook', {
       updates: Partial<SourceItem>
     ): Promise<void> {
       const runtimeState = this.findRuntimeState(notebookId)
+      const generation = runtimeState?.loadSourcesRequestId
       const index = runtimeState?.sources.findIndex((source) => source.id === sourceId) ?? -1
       const previousSource =
         runtimeState && index !== -1 ? { ...runtimeState.sources[index] } : null
@@ -409,9 +410,13 @@ export const useNotebookStore = defineStore('notebook', {
           mediaUrl: updates.mediaUrl
         })
       } catch (error) {
-        const latestRuntimeState = this.findRuntimeState(notebookId)
-        if (latestRuntimeState && previousSource) {
-          latestRuntimeState.sources[index] = previousSource
+        // await 期间列表若被整体替换（重新加载或释放）则不回滚：替换后的就是库里的数据，
+        // 写入失败时库里本来就是旧值。未被替换时也按 id 查找：期间可能有条目被删除，下标已经变化
+        if (runtimeState && previousSource && runtimeState.loadSourcesRequestId === generation) {
+          const latestIndex = runtimeState.sources.findIndex((source) => source.id === sourceId)
+          if (latestIndex !== -1) {
+            runtimeState.sources[latestIndex] = previousSource
+          }
         }
         console.error('[notebookStore] Failed to update source:', error)
       }
@@ -422,8 +427,13 @@ export const useNotebookStore = defineStore('notebook', {
      */
     async removeSource(notebookId: string, sourceId: string): Promise<void> {
       const runtimeState = this.findRuntimeState(notebookId)
+      const generation = runtimeState?.loadSourcesRequestId
       const index = runtimeState?.sources.findIndex((source) => source.id === sourceId) ?? -1
       const removedSource = runtimeState && index !== -1 ? { ...runtimeState.sources[index] } : null
+      const precedingIds =
+        runtimeState && index !== -1
+          ? runtimeState.sources.slice(0, index).map((source) => source.id)
+          : []
 
       if (runtimeState && index !== -1) {
         runtimeState.sources.splice(index, 1)
@@ -432,13 +442,21 @@ export const useNotebookStore = defineStore('notebook', {
       try {
         await window.api.notebook.deleteSource(sourceId)
       } catch (error) {
-        const latestRuntimeState = this.findRuntimeState(notebookId)
-        if (latestRuntimeState && removedSource) {
-          latestRuntimeState.sources.splice(
-            Math.min(index, latestRuntimeState.sources.length),
-            0,
-            removedSource
-          )
+        // await 期间列表若被整体替换则不插回：重新加载后库里那条还在，再插入会重复；
+        // 释放之后再插入，会得到只有这一条的残缺列表。
+        // 未被替换时，按前面仍存在的那一条定位插回，这样期间前面有条目被删除也不会错位
+        if (runtimeState && removedSource && runtimeState.loadSourcesRequestId === generation) {
+          let insertIndex = 0
+          for (let i = precedingIds.length - 1; i >= 0; i -= 1) {
+            const position = runtimeState.sources.findIndex(
+              (source) => source.id === precedingIds[i]
+            )
+            if (position !== -1) {
+              insertIndex = position + 1
+              break
+            }
+          }
+          runtimeState.sources.splice(insertIndex, 0, removedSource)
         }
         console.error('[notebookStore] Failed to delete source:', error)
       }
