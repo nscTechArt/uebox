@@ -76,6 +76,7 @@ describe('帮助文本和实现保持同步', () => {
     'tools show',
     'tools call',
     'viewport screenshot',
+    'skills add',
     'team list',
     'team status',
     'team use',

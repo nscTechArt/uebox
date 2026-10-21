@@ -39,6 +39,7 @@ import { registerNetworkVaultHandlers } from './networkVault'
 import { registerNetworkVaultV2Handlers } from './networkVaultV2'
 import { registerCatalogLibraryIPC } from './catalogLibrary'
 import { registerTeamIPC } from './team'
+import { registerShareIPC } from './share'
 import { registerDiagnosticsIPC } from './diagnostics'
 // 导入assetImport以注册其IPC处理器
 import './assetImport'
@@ -174,6 +175,7 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 团队工程（版本控制与资产协作）：加入团队、动态、签出、等你处理……
   registerTeamIPC()
+  registerShareIPC()
 
   // Register diagnostics and import recovery IPC
   registerDiagnosticsIPC()

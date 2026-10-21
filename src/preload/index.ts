@@ -669,6 +669,16 @@ const api = {
       /** 把 UnrealAgentLink 装回项目 */
       ualinkInstall: (uprojectPath: string) =>
         ipcRenderer.invoke('db:project:ualinkInstall', uprojectPath),
+      /** 首次导入时那一问的答案；装失败的工程和原因码原样返回 */
+      ualinkPromptAnswer: (install: boolean, uprojectPaths: string[]) =>
+        ipcRenderer.invoke('db:project:ualinkPromptAnswer', install, uprojectPaths),
+      /** 首次导入工程、自动安装又关着时，主进程请界面问一句要不要装，返回退订函数 */
+      onUALinkInstallPrompt: (callback: (uprojectPath: string) => void) => {
+        const handler = (_: Electron.IpcRendererEvent, uprojectPath: string): void =>
+          callback(uprojectPath)
+        ipcRenderer.on('db:project:ualink-install-prompt', handler)
+        return () => ipcRenderer.removeListener('db:project:ualink-install-prompt', handler)
+      },
       /**
        * 「我的项目」里多了工程时的通知，返回退订函数。
        *
@@ -1804,6 +1814,32 @@ const api = {
       ipcRenderer.on('team:event', handler)
       return () => {
         ipcRenderer.removeListener('team:event', handler)
+      }
+    }
+  },
+  /**
+   * 共享技能（官网共享库）。通道全部是 share:*，返回 { success, data?, error? }。
+   * 安装请求由主进程推过来（onInstallRequest），用户在确认框里决定后用 installReply 回复。
+   */
+  share: {
+    pendingInstalls: () => ipcRenderer.invoke('share:pending-installs'),
+    installReply: (requestId: string, approve: boolean) =>
+      ipcRenderer.invoke('share:install-reply', requestId, approve),
+    packSkill: (name: string) => ipcRenderer.invoke('share:pack-skill', name),
+    submitSkill: (input: unknown) => ipcRenderer.invoke('share:submit-skill', input),
+    openPage: (url: string) => ipcRenderer.invoke('share:open-page', url),
+    onInstallRequest: (listener: (request: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, request: unknown): void => listener(request)
+      ipcRenderer.on('share:install-request', handler)
+      return () => {
+        ipcRenderer.removeListener('share:install-request', handler)
+      }
+    },
+    onInstallFailed: (listener: (failure: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, failure: unknown): void => listener(failure)
+      ipcRenderer.on('share:install-failed', handler)
+      return () => {
+        ipcRenderer.removeListener('share:install-failed', handler)
       }
     }
   },

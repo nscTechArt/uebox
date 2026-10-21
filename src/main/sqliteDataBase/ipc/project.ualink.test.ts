@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => ({
   findUnrealEnginePaths: vi.fn(async () => []),
   uninstallUNTLink: vi.fn(async () => ({ success: true })),
   isUALinkOptedOut: vi.fn(() => false),
+  getAutoEnableUnrealAgentLink: vi.fn(() => true),
+  setAutoEnableUnrealAgentLink: vi.fn(),
+  setUALinkInstallPromptShown: vi.fn(),
+  getAllProjects: vi.fn((): unknown[] => []),
   ensurePluginIgnored: vi.fn(async () => ({ gitignore: false, p4ignore: false }))
 }))
 
@@ -29,7 +33,7 @@ vi.mock('../models/project', () => ({
   createProject: vi.fn(),
   getProjectByKey: vi.fn(),
   getProjectById: vi.fn(),
-  getAllProjects: vi.fn(() => []),
+  getAllProjects: mocks.getAllProjects,
   updateProject: vi.fn(),
   deleteProjectByKey: vi.fn(),
   projectExists: vi.fn(),
@@ -45,7 +49,9 @@ vi.mock('../../utils/ThumbnailManager', () => ({ default: {} }))
 vi.mock('../../appSettingsManager', () => ({
   appSettingsManager: {
     isUALinkOptedOut: mocks.isUALinkOptedOut,
-    getAutoEnableUnrealAgentLink: vi.fn(() => true),
+    getAutoEnableUnrealAgentLink: mocks.getAutoEnableUnrealAgentLink,
+    setAutoEnableUnrealAgentLink: mocks.setAutoEnableUnrealAgentLink,
+    setUALinkInstallPromptShown: mocks.setUALinkInstallPromptShown,
     setUALinkOptOut: vi.fn()
   }
 }))
@@ -60,9 +66,17 @@ vi.mock('../../utils/UnrealPathManager', () => ({
     isProjectPluginUpToDate: vi.fn(async () => false)
   }
 }))
+vi.mock('../../utils/UnrealProcessDetector', () => ({
+  default: { findRunningProjectByPath: vi.fn(async () => null) }
+}))
 vi.mock('../../utils/pluginVcsIgnore', () => ({ ensurePluginIgnored: mocks.ensurePluginIgnored }))
 
-import { ensureUnrealAgentLinkPlugin, installUnrealAgentLinkPlugin } from './project'
+import {
+  answerUALinkInstallPrompt,
+  ensureUnrealAgentLinkPlugin,
+  installUnrealAgentLinkPlugin,
+  upgradeAllProjectPlugins
+} from './project'
 
 let projectDir = ''
 let uprojectPath = ''
@@ -88,6 +102,73 @@ afterEach(() => {
   rmSync(projectDir, { recursive: true, force: true })
   vi.clearAllMocks()
   mocks.isUALinkOptedOut.mockReturnValue(false)
+  mocks.getAutoEnableUnrealAgentLink.mockReturnValue(true)
+  mocks.getAllProjects.mockReturnValue([])
+})
+
+/** 让 installPluginToProject 真把 .uplugin 写到磁盘上 */
+function installWritesPlugin(): void {
+  mocks.installPluginToProject.mockImplementation(async () => {
+    const dir = join(projectDir, 'Plugins', 'UnrealAgentLink')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'UnrealAgentLink.uplugin'), JSON.stringify({ VersionName: '1.2.8' }))
+    return { success: true }
+  })
+}
+
+describe('首次导入时的安装询问', () => {
+  it('暂不安装：记成问过，不打开自动安装，什么都不装', async () => {
+    const failures = await answerUALinkInstallPrompt(false, [uprojectPath])
+
+    expect(failures).toEqual([])
+    expect(mocks.setUALinkInstallPromptShown).toHaveBeenCalledWith(true)
+    expect(mocks.setAutoEnableUnrealAgentLink).not.toHaveBeenCalled()
+    expect(mocks.installPluginToProject).not.toHaveBeenCalled()
+  })
+
+  it('安装：打开自动安装，并给这次导入的工程装上', async () => {
+    installWritesPlugin()
+
+    const failures = await answerUALinkInstallPrompt(true, [uprojectPath])
+
+    expect(failures).toEqual([])
+    expect(mocks.setUALinkInstallPromptShown).toHaveBeenCalledWith(true)
+    expect(mocks.setAutoEnableUnrealAgentLink).toHaveBeenCalledWith(true)
+    expect(readPlugins()).toEqual([{ Name: 'UnrealAgentLink', Enabled: true }])
+  })
+
+  it('安装失败的工程连同原因码一起交回界面', async () => {
+    mocks.installPluginToProject.mockResolvedValue({ success: false, code: '插件包不存在' })
+
+    const failures = await answerUALinkInstallPrompt(true, [uprojectPath])
+
+    expect(failures).toHaveLength(1)
+    expect(failures[0].uprojectPath).toBe(uprojectPath)
+  })
+})
+
+describe('启动时的插件升级', () => {
+  it('自动安装关着：没装过的工程不补装', async () => {
+    mocks.getAutoEnableUnrealAgentLink.mockReturnValue(false)
+    mocks.getAllProjects.mockReturnValue([{ originPath: uprojectPath, EngineAssociation: '5.5' }])
+
+    await upgradeAllProjectPlugins()
+
+    expect(mocks.installPluginToProject).not.toHaveBeenCalled()
+  })
+
+  it('自动安装关着：已经装了的照样跟着盒子升级', async () => {
+    mocks.getAutoEnableUnrealAgentLink.mockReturnValue(false)
+    mocks.getAllProjects.mockReturnValue([{ originPath: uprojectPath, EngineAssociation: '5.5' }])
+    installWritesPlugin()
+    const dir = join(projectDir, 'Plugins', 'UnrealAgentLink')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'UnrealAgentLink.uplugin'), JSON.stringify({ VersionName: '1.0.0' }))
+
+    await upgradeAllProjectPlugins()
+
+    expect(mocks.installPluginToProject).toHaveBeenCalled()
+  })
 })
 
 describe('ensureUnrealAgentLinkPlugin', () => {

@@ -21,6 +21,8 @@ export interface SkillEntry {
    * 界面只是把它画暗一点、加一个「已关闭」的标。
    */
   enabled: boolean
+  /** 从官网共享库装的。来源仍是 `user`，标签上改写成「来自共享 · 第 N 版」 */
+  shared?: { version: number; author: string }
 }
 
 export interface SkillFilter {

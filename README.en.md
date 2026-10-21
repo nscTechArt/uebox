@@ -53,7 +53,7 @@ Full capabilities and limits: [Capabilities](https://uebox.ai/guide/capabilities
 
 1. Download and install from [Releases](https://github.com/ueboxai/uebox/releases) (Windows)
 2. **Settings → Models → Add Provider**, enter an API key; set it under **Default models → Chat** (the model must support tool calling)
-3. **Projects → Import Project**, pick a `.uproject`, click **Open Project** (installs the UnrealAgentLink plugin and connects)
+3. **Projects → Import Project**, pick a `.uproject`, click **Install** when asked about the UnrealAgentLink plugin, then click **Open Project**
 4. **Sidebar → AI Chat**, ask "How many lights are in this level?" to check the connection
 
 Docs (Chinese): [First run](https://uebox.ai/guide/first-run) · [Model setup](https://uebox.ai/guide/ai-setup) · [Connect Unreal](https://uebox.ai/guide/plugin) · [Troubleshooting](https://uebox.ai/guide/troubleshooting)

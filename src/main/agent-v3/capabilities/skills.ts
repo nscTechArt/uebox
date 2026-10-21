@@ -33,6 +33,7 @@ import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { app } from 'electron'
 import { z } from 'zod'
 import { SKILL_CREATOR_NAME } from '../../../shared/skillLearning'
+import type { SharedSkillOrigin } from '../../../shared/share'
 
 import {
   discoverSkills,
@@ -428,6 +429,8 @@ export interface SkillSummary {
   source: SkillSource
   /** 用户有没有把它关掉。关掉的仍然要列出来 —— 否则没法再打开 */
   enabled: boolean
+  /** 从官网共享库装的：技能页显示「来自共享 · 第 N 版」 */
+  shared?: SharedSkillOrigin
 }
 
 /**
@@ -438,14 +441,19 @@ export interface SkillSummary {
  */
 export function listSkillSummaries(
   skills: SkillMetadata[],
-  disabled: ReadonlySet<string> = new Set()
+  disabled: ReadonlySet<string> = new Set(),
+  shared: ReadonlyMap<string, SharedSkillOrigin> = new Map()
 ): SkillSummary[] {
-  return skills.map((skill) => ({
-    name: skill.name,
-    description: firstSentence(skill.description),
-    source: skill.source ?? 'builtin',
-    enabled: !disabled.has(skill.name)
-  }))
+  return skills.map((skill) => {
+    const origin = shared.get(skill.name)
+    return {
+      name: skill.name,
+      description: firstSentence(skill.description),
+      source: skill.source ?? 'builtin',
+      enabled: !disabled.has(skill.name),
+      ...(origin ? { shared: origin } : {})
+    }
+  })
 }
 
 /**

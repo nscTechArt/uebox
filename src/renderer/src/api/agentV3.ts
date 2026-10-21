@@ -16,6 +16,7 @@ import type {
 } from '@core/shared/agentTeam'
 import type { AgentQuestion, AgentQuestionAction } from '@core/shared/agentQuestion'
 import type { EditorSnapshotCaptureResult } from '@core/shared/editorSnapshot'
+import type { SharedSkillOrigin } from '@core/shared/share'
 import { unwrapResult } from '@renderer/common/utils'
 import { toSessionProjectPayload } from '@renderer/views/Assistant/composables/sessionProjectBinding'
 
@@ -116,6 +117,8 @@ export interface AgentV3SkillSummary {
   source: 'user' | 'plugin' | 'builtin'
   /** 用户有没有把它关掉。关掉的仍然在清单里 —— 否则「技能」页没法再打开它 */
   enabled: boolean
+  /** 从官网共享库装的 */
+  shared?: SharedSkillOrigin
 }
 
 export const agentV3API = {
