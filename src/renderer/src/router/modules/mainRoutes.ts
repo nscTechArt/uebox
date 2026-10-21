@@ -301,11 +301,9 @@ const mainRoutes: RouteRecordRaw = {
 
             // 动态导入 store 以避免循环依赖
             const { useNotebookStore } = await import('../../store/modules/notebookStore')
-            const { getNotebookTabIdFromQuery } = await import(
-              '../../views/Notebook/utils/notebookTabRoute'
-            )
+            const { getTabIdFromQuery } = await import('../../common/tabRoute')
             const notebookStore = useNotebookStore()
-            const notebookTabId = getNotebookTabIdFromQuery(_to.query)
+            const notebookTabId = getTabIdFromQuery(_to.query)
             const activeNotebookId = notebookStore.getActiveNotebookIdForTab(notebookTabId)
 
             // 如果有缓存的详情页 ID，直接重定向到详情页

@@ -442,4 +442,19 @@ describe('materialLibraryStore', () => {
       viewMode: 'list'
     })
   })
+
+  // Layout 每次切回本 tab 都会同步一次 active id，值没变时不应触发存盘
+  it('当前条目没变时不存盘', async () => {
+    const store = useMaterialLibraryStore()
+    await store.ready
+
+    store.setActiveEntryId('material-entry-1')
+    await store.flushPersistence()
+    localStorage.removeItem('material-library-ui')
+
+    store.setActiveEntryId('material-entry-1')
+    await store.flushPersistence()
+
+    expect(localStorage.getItem('material-library-ui')).toBeNull()
+  })
 })

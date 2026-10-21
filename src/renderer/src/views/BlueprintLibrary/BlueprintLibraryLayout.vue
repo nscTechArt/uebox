@@ -2,8 +2,8 @@
   <div class="blueprint-library-layout">
     <!-- 有东西没存上时常驻在页面顶部，直到真的写进去 -->
     <LibrarySaveAlert class="save-alert" :save-state="store.saveState" />
-    <router-view v-slot="{ Component }">
-      <component :is="Component" v-if="Component" :key="cachedRouteKey" />
+    <router-view v-slot="{ Component }" :route="viewRoute">
+      <component :is="Component" v-if="Component && keepChild" :key="viewRoute.fullPath" />
     </router-view>
   </div>
 </template>
@@ -15,9 +15,9 @@ import { useLibraryLayout } from '@renderer/views/library-common/composables/use
 
 const store = useBlueprintLibraryStore()
 
-const { cachedRouteKey } = useLibraryLayout({
+const { viewRoute, keepChild } = useLibraryLayout({
   syncActiveId: (id) => store.setActiveBlueprintId(id),
-  onEditorTabIdChange: (tabId) => store.setEditorTabId(tabId)
+  syncTabId: (tabId) => store.setEditorTabId(tabId)
 })
 </script>
 

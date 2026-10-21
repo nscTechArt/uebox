@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useNotebookStore } from './notebookStore'
+import { useNotebookStore, type SourceItem } from './notebookStore'
+
+/** 前台 tab 当前展示的来源：store 只按笔记本提供，前台是哪个笔记本由 tab 状态决定 */
+function frontSources(store: ReturnType<typeof useNotebookStore>): SourceItem[] {
+  return store.activeNotebookId ? store.sourcesOf(store.activeNotebookId) : []
+}
 
 describe('notebookStore tab isolation', () => {
   beforeEach(() => {
@@ -13,8 +18,8 @@ describe('notebookStore tab isolation', () => {
 
     store.setTabId('tab-a')
     store.setActiveNotebookId('notebook-a')
-    store.setDetailViewType('note-editor')
-    store.setCurrentNoteId(101)
+    store.setDetailViewType('note-editor', 'tab-a')
+    store.setCurrentNoteId(101, 'tab-a')
 
     store.setTabId('tab-b')
     expect(store.activeNotebookId).toBeNull()
@@ -22,8 +27,8 @@ describe('notebookStore tab isolation', () => {
     expect(store.currentNoteId).toBeNull()
 
     store.setActiveNotebookId('notebook-b')
-    store.setDetailViewType('source-preview')
-    store.setCurrentNoteId(202)
+    store.setDetailViewType('source-preview', 'tab-b')
+    store.setCurrentNoteId(202, 'tab-b')
 
     store.setTabId('tab-a')
     expect(store.activeNotebookId).toBe('notebook-a')
@@ -41,8 +46,8 @@ describe('notebookStore tab isolation', () => {
 
     store.setTabId('source-tab')
     store.setActiveNotebookId('notebook-source')
-    store.setDetailViewType('note-editor')
-    store.setCurrentNoteId(88)
+    store.setDetailViewType('note-editor', 'source-tab')
+    store.setCurrentNoteId(88, 'source-tab')
 
     store.copyStateToTabId('source-tab', 'target-tab')
     store.setTabId('target-tab')
@@ -50,5 +55,287 @@ describe('notebookStore tab isolation', () => {
     expect(store.activeNotebookId).toBe('notebook-source')
     expect(store.detailViewType).toBe('note-editor')
     expect(store.currentNoteId).toBe(88)
+  })
+})
+
+/**
+ * 来源按笔记本存储：后台 tab 中的详情页写入自己的笔记本，不能写进当时位于前台的 tab。
+ */
+describe('notebookStore sources per notebook', () => {
+  type SourceRows = Awaited<ReturnType<typeof window.api.notebook.getSources>>
+  const rowsOf = (...sourceIds: string[]): SourceRows =>
+    sourceIds.map((sourceId) => ({
+      sourceId,
+      title: sourceId,
+      type: 'text',
+      content: 'x'
+    })) as unknown as SourceRows
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async (notebookId: string) =>
+          rowsOf(notebookId === 'notebook-a' ? 'a-1' : 'b-1')
+        ),
+        updateSource: vi.fn(async () => undefined)
+      }
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the foreground tab untouched when a background notebook loads or updates', async () => {
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    store.retainSources('notebook-b')
+    store.setTabId('tab-a')
+    store.setActiveNotebookId('notebook-a')
+    await store.loadSources('notebook-a')
+    store.setTabId('tab-b')
+    store.setActiveNotebookId('notebook-b')
+    await store.loadSources('notebook-b')
+
+    await store.loadSources('notebook-a')
+    await store.updateSource('notebook-a', 'a-1', { title: 'renamed' })
+
+    expect(frontSources(store).map((s) => s.id)).toEqual(['b-1'])
+    store.setTabId('tab-a')
+    expect(frontSources(store).map((s) => s.title)).toEqual(['renamed'])
+  })
+
+  it('shows the same sources in two tabs that open the same notebook', async () => {
+    const store = useNotebookStore()
+    store.setTabId('tab-1')
+    store.setActiveNotebookId('notebook-a')
+    store.setTabId('tab-2')
+    store.setActiveNotebookId('notebook-a')
+    store.retainSources('notebook-a')
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    await store.updateSource('notebook-a', 'a-1', { title: 'renamed' })
+
+    expect(frontSources(store).map((s) => s.title)).toEqual(['renamed'])
+    store.setTabId('tab-1')
+    expect(frontSources(store).map((s) => s.title)).toEqual(['renamed'])
+  })
+
+  // 后台详情页扫描完文件夹后才添加来源，查重应针对它自己的笔记本，而不是用户当前在看的那个
+  it('checks duplicates against the given notebook, not the foreground tab', async () => {
+    const fileRow = (sourceId: string, filePath: string): SourceRows =>
+      [{ sourceId, title: sourceId, type: 'file', content: 'x', filePath }] as unknown as SourceRows
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async (notebookId: string) =>
+          notebookId === 'notebook-a' ? fileRow('a-1', 'D:/a.pdf') : fileRow('b-1', 'D:/b.pdf')
+        )
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    store.retainSources('notebook-b')
+    await store.loadSources('notebook-a')
+    store.setTabId('tab-b')
+    store.setActiveNotebookId('notebook-b')
+    await store.loadSources('notebook-b')
+
+    const isDuplicateInA = (filePath: string): boolean =>
+      store.isDuplicateSource('notebook-a', { type: 'file', filePath })
+    expect(isDuplicateInA('D:/a.pdf')).toBe(true)
+    expect(isDuplicateInA('D:/b.pdf')).toBe(false)
+  })
+
+  /**
+   * 来源的生命周期跟随展示它的详情页实例：最后一个持有者释放后，
+   * 缓存中的正文也应随之释放。
+   */
+  it("frees a notebook's sources when its last holder releases", async () => {
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    expect(store.sourcesOf('notebook-a').map((s) => s.id)).toEqual(['a-1'])
+
+    store.releaseSources('notebook-a')
+
+    expect(store.sourcesOf('notebook-a')).toEqual([])
+  })
+
+  it('keeps sources while another holder remains', async () => {
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    store.releaseSources('notebook-a')
+
+    expect(store.sourcesOf('notebook-a').map((s) => s.id)).toEqual(['a-1'])
+  })
+
+  // 释放之后才返回的加载结果不能把内容写回：release 会让在途请求的 requestId 失效
+  it('discards an in-flight load that resolves after the last release', async () => {
+    let resolveGet: (rows: SourceRows) => void = () => {}
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(
+          () =>
+            new Promise<SourceRows>((resolve) => {
+              resolveGet = resolve
+            })
+        ),
+        updateSource: vi.fn(async () => undefined)
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+
+    const loading = store.loadSources('notebook-a')
+    store.releaseSources('notebook-a')
+    resolveGet(rowsOf('a-1'))
+    await loading
+
+    expect(store.sourcesOf('notebook-a')).toEqual([])
+  })
+
+  // 页面卸载后才到达的刷新（Agent 添加来源、后台读图完成等）不能把已释放的正文重新载入内存
+  it('loads sources only while a holder exists', async () => {
+    const store = useNotebookStore()
+
+    await store.loadSources('notebook-a')
+    expect(window.api.notebook.getSources).not.toHaveBeenCalled()
+    expect(store.sourcesOf('notebook-a')).toEqual([])
+
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+    expect(window.api.notebook.getSources).toHaveBeenCalledTimes(1)
+    expect(store.sourcesOf('notebook-a').map((s) => s.id)).toEqual(['a-1'])
+  })
+
+  // 关闭 tab 时文件夹仍在扫描：之后添加的来源只写入数据库，不能在已释放的内存状态里拼出一份残缺的列表
+  it('only persists a source added after the last release', async () => {
+    const createSource = vi.fn(async () => undefined)
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async () => rowsOf('a-1')),
+        createSource
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+    store.releaseSources('notebook-a')
+
+    await store.addSource('notebook-a', {
+      id: 'a-2',
+      title: 'a-2',
+      type: 'text',
+      content: 'x'
+    } as SourceItem)
+
+    expect(createSource).toHaveBeenCalledTimes(1)
+    expect(store.sourcesOf('notebook-a')).toEqual([])
+  })
+
+  // 乐观插入的那条在写库失败后要撤掉，不能碰列表里的其他来源
+  it('rolls back only the optimistic source when the create write fails', async () => {
+    const createSource = vi.fn(async () => {
+      throw new Error('db down')
+    })
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async () => rowsOf('s1', 's2')),
+        createSource
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    await store.addSource('notebook-a', {
+      id: 's-new',
+      title: 's-new',
+      type: 'text',
+      content: 'x'
+    } as SourceItem)
+
+    expect(store.sourcesOf('notebook-a').map((s) => s.id)).toEqual(['s1', 's2'])
+  })
+
+  // await 期间列表被整体重新加载过时，回滚按 id 匹配 —— 不能误删重新加载出来的那几条
+  it('leaves a reloaded list intact when the failed add is rolled back', async () => {
+    const store = useNotebookStore()
+    const getSources = vi
+      .fn(async () => rowsOf('s1', 's2', 's3'))
+      .mockResolvedValueOnce(rowsOf('s1', 's2'))
+    const createSource = vi.fn(async () => {
+      await store.loadSources('notebook-a')
+      throw new Error('db down')
+    })
+    vi.stubGlobal('api', {
+      notebook: { getSources, createSource }
+    })
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    await store.addSource('notebook-a', {
+      id: 's-new',
+      title: 's-new',
+      type: 'text',
+      content: 'x'
+    } as SourceItem)
+
+    expect(store.sourcesOf('notebook-a').map((s) => s.id)).toEqual(['s1', 's2', 's3'])
+  })
+
+  // 同 id 的来源已经在列表里时（例如同一条笔记被加了两次），写库会因 UNIQUE 冲突失败：
+  // 回滚只撤掉刚插入的那一条，原有的那条要留着
+  it('keeps the existing source when a duplicate-id add fails', async () => {
+    vi.stubGlobal('api', {
+      notebook: {
+        getSources: vi.fn(async () => rowsOf('s1')),
+        createSource: vi.fn(async () => {
+          throw new Error('UNIQUE constraint failed: notebook_sources.source_id')
+        })
+      }
+    })
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    await store.loadSources('notebook-a')
+
+    await store.addSource('notebook-a', {
+      id: 's1',
+      title: 's1-dup',
+      type: 'text',
+      content: 'x'
+    } as SourceItem)
+
+    const remaining = store.sourcesOf('notebook-a')
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0]?.title).toBe('s1')
+  })
+
+  /**
+   * 上下文档位操作按传入的笔记本写库和回滚，与前台 tab 无关：
+   * 前台打开 B 时修改 A 的来源，写入失败时回滚的是 A 的那一条。
+   */
+  it('rolls back the passed notebook when writing the context level fails', async () => {
+    const store = useNotebookStore()
+    store.retainSources('notebook-a')
+    store.retainSources('notebook-b')
+    await store.loadSources('notebook-a')
+    store.setTabId('tab-b')
+    store.setActiveNotebookId('notebook-b')
+    await store.loadSources('notebook-b')
+
+    vi.mocked(window.api.notebook.updateSource).mockRejectedValueOnce(new Error('db down'))
+
+    await store.setSourceContextLevel('notebook-a', 'a-1', 'excluded')
+
+    expect(store.sourcesOf('notebook-a')[0]?.contextLevel).toBe('full')
+    expect(store.sourcesOf('notebook-b')[0]?.contextLevel).toBe('full')
   })
 })

@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import AppButton from '@renderer/components/AppButton.vue'
-import { ref, onUnmounted, watch, computed, onMounted, onActivated, nextTick } from 'vue'
+import {
+  ref,
+  onUnmounted,
+  watch,
+  computed,
+  onMounted,
+  onActivated,
+  onDeactivated,
+  nextTick
+} from 'vue'
 import { debounce } from 'lodash'
 import { useI18n } from 'vue-i18n'
 defineOptions({ name: 'NotebookDetail' })
@@ -18,7 +27,7 @@ import { provide } from 'vue'
 import type { EditableNote } from './utils/noteStore'
 import { useNotebookStore, type SourceItem } from '@renderer/store/modules/notebookStore'
 import { useTabsStore } from '@renderer/store/modules/tabs'
-import { resolveTabRoute } from '@renderer/common/tabRoute'
+import { getTabCacheKey, getTabIdFromQuery } from '@renderer/common/tabRoute'
 import { useChatMessagesStore } from '@renderer/store/modules/chatMessages'
 import { useStudioOutputStore, type StudioOutput } from '@renderer/store/modules/studioOutputStore'
 import {
@@ -26,10 +35,7 @@ import {
   cleanWebContent
 } from '@renderer/services/notebookContent/SourceSummarizer'
 import { getFormattedErrorMessage } from '@renderer/utils/errorMessage'
-import {
-  buildNotebookListRoute,
-  getNotebookTabIdFromQuery
-} from '@renderer/views/Notebook/utils/notebookTabRoute'
+import { buildNotebookListRoute } from '@renderer/views/Notebook/utils/notebookTabRoute'
 
 const router = useRouter()
 const route = useRoute()
@@ -43,15 +49,7 @@ const { t } = useI18n()
  * 当前知识库 ID
  */
 const notebookId = computed(() => route.params.id as string)
-const notebookTabId = computed(() => getNotebookTabIdFromQuery(route.query))
-
-watch(
-  notebookTabId,
-  (tabId) => {
-    notebookStore.setTabId(tabId)
-  },
-  { immediate: true }
-)
+const notebookTabId = computed(() => getTabIdFromQuery(route.query))
 
 /**
  * 当前知识库里那条对话的消息
@@ -67,27 +65,21 @@ const isTraining = ref(false)
 let titleInputEl: HTMLInputElement | null = null
 let loadNotebookRequestId = 0
 
-const getCurrentTabKey = (): string => resolveTabRoute(route)?.key || route.fullPath
-
 const syncNotebookTabTitle = (): void => {
   const title = notebookTitle.value.trim()
   if (!title) return
 
-  const updated = tabsStore.updateTabTitleByPath(getCurrentTabKey(), title)
+  const updated = tabsStore.updateTabTitleByPath(getTabCacheKey(route), title)
   if (updated) return
 
   void nextTick(() => {
-    tabsStore.updateTabTitleByPath(getCurrentTabKey(), title)
+    tabsStore.updateTabTitleByPath(getTabCacheKey(route), title)
   })
 }
 
 watch(
   () => notebookTitle.value,
-  () => {
-    if (route.path.startsWith('/notebooks')) {
-      syncNotebookTabTitle()
-    }
-  },
+  () => syncNotebookTabTitle(),
   { immediate: true }
 )
 
@@ -174,6 +166,10 @@ const getWarnedIds = (): Set<string> => {
   return newSet
 }
 
+/** route 是 Layout 为本 tab 冻结的路由，它的 cache key 就是本 tab 的 key */
+const isOwnTabInFront = (): boolean =>
+  getTabCacheKey(router.currentRoute.value) === getTabCacheKey(route)
+
 /**
  * 恢复中断的分析任务
  * 当页面刷新后，如果有来源处于 loading 状态但没有内容，说明分析被中断，需要重新分析
@@ -182,7 +178,7 @@ const getWarnedIds = (): Set<string> => {
  * @param targetNotebookId 知识库 ID
  */
 const resumeInterruptedAnalysisTasks = (targetNotebookId: string): void => {
-  const currentSources = notebookStore.currentSources
+  const currentSources = notebookStore.sourcesOf(targetNotebookId)
 
   const interruptedSources = currentSources.filter((source) => {
     if (source.loading !== true || source.error) return false
@@ -244,6 +240,8 @@ const loadNotebookData = async (id: string): Promise<void> => {
     const notebook = await window.api.notebook.get(id)
     if (requestId !== loadNotebookRequestId || notebookId.value !== id) return
     if (!notebook) {
+      // 不在前台时先不处理：切回本 tab 时 onActivated 会重新加载，届时仍不存在再跳转
+      if (!isOwnTabInFront()) return
       // 知识库不存在，清理状态并跳转回列表页
       // 只在首次遇到该 ID 时打印警告
       const warnedIds = getWarnedIds()
@@ -265,6 +263,8 @@ const loadNotebookData = async (id: string): Promise<void> => {
   } catch (error) {
     if (requestId !== loadNotebookRequestId || notebookId.value !== id) return
     console.error('[NotebookDetail] 加载知识库信息失败:', error)
+    // 不在前台时先不处理：切回本 tab 时 onActivated 会重新加载，届时仍不存在再跳转
+    if (!isOwnTabInFront()) return
     // 发生错误也跳转回列表页
     if (!getIsRedirecting()) {
       setIsRedirecting(true)
@@ -276,9 +276,8 @@ const loadNotebookData = async (id: string): Promise<void> => {
     return
   }
 
-  // 设置 activeNotebookId
-  notebookStore.setActiveNotebookId(id)
-  // 设置 Deep Research 的 activeNotebookId
+  // activeNotebookId 不在这里设置：NotebookLayout 在路由切回本 tab 时已经设置好了；
+  // 若在 await 之后再设置，用户此时切到别的 tab，就会写进其他 tab
 
   // 加载来源数据
   await notebookStore.loadSources(id)
@@ -288,33 +287,42 @@ const loadNotebookData = async (id: string): Promise<void> => {
   resumeInterruptedAnalysisTasks(id)
 }
 
-// 监听路由参数变化，加载对应知识库数据
-// 添加路由前缀检查，确保只在 notebooks 路由下才响应
+// 来源正文的生命周期跟随本页面实例：被 keep-alive 缓存期间仍算持有，
+// 只有真正卸载（返回列表、关闭 tab、被挤出 keep-alive 缓存）时才释放。
+// 先登记持有再加载：loadSources 只为有人持有的笔记本加载。
+// route 是 NotebookLayout 为本 tab 冻结的路由，切到别的 tab 时不会变化
+let heldNotebookId: string | null = null
 watch(
   notebookId,
-  (newId) => {
-    // 只有当前路由是 notebooks 路由时才加载数据
-    // 防止切换到其他模块时误触发
-    if (newId && route.path.startsWith('/notebooks')) {
-      loadNotebookData(newId)
+  (id) => {
+    if (heldNotebookId) notebookStore.releaseSources(heldNotebookId)
+    heldNotebookId = id || null
+    if (heldNotebookId) {
+      notebookStore.retainSources(heldNotebookId)
+      loadNotebookData(heldNotebookId)
     }
   },
   { immediate: true }
 )
-
-// 组件挂载时加载数据
-onMounted(() => {
-  // 只有当前路由是 notebooks 路由时才加载数据
-  if (notebookId.value && route.path.startsWith('/notebooks')) {
-    syncNotebookTabTitle()
-    loadNotebookData(notebookId.value)
-  }
+onUnmounted(() => {
+  if (heldNotebookId) notebookStore.releaseSources(heldNotebookId)
+  heldNotebookId = null
+  // 卸载后不再发起新的加工：同一笔记本仍被其他 tab 持有时 loadSources 会放行，
+  // 否则在途的 loadNotebookData 会继续执行 resumeInterruptedAnalysisTasks → retrySource
+  loadNotebookRequestId += 1
 })
 
-// 组件从缓存中激活时刷新数据（处理 keep-alive 场景）
+let wasDeactivated = false
+onDeactivated(() => {
+  wasDeactivated = true
+})
+// 从缓存切回前台时刷新：停留在别的 tab 期间可能新增了来源。
+// 只处理真正从后台切回的情况：新开 tab 时 activated 也会触发，那一次由上面的 watch 负责加载
+// store 已在路由切回本 tab 时由 NotebookLayout 切换回来
 onActivated(() => {
-  // 只有当前路由是 notebooks 路由时才加载数据
-  if (notebookId.value && route.path.startsWith('/notebooks')) {
+  if (!wasDeactivated) return
+  wasDeactivated = false
+  if (notebookId.value) {
     syncNotebookTabTitle()
     loadNotebookData(notebookId.value)
   }
@@ -345,8 +353,9 @@ onUnmounted(() => {
 /**
  * 从 store 获取当前知识库的来源列表
  * 使用 computed 确保响应式更新
+ * 按本页的笔记本获取，而不是按前台 tab：页面在后台缓存时，读到的也是自己的数据
  */
-const sources = computed(() => notebookStore.currentSources)
+const sources = computed(() => notebookStore.sourcesOf(notebookId.value))
 
 /**
  * 添加来源到当前知识库
@@ -569,8 +578,10 @@ const updateSource = (
     if (options.deferTraining) return
 
     // 检查更新后的来源状态，只有内容就绪时才触发向量化
-    const updatedSource = notebookStore.getSource(idToUse, sourceId)
-    if (updatedSource && isSourceReady(updatedSource)) {
+    // 页面已卸载、来源已释放时，缓存中没有这条来源。
+    // 就绪判断基于缓存中的数据加上本次更新，这样后台加工完成后仍会照常向量化
+    const updatedSource = { ...(notebookStore.getSource(idToUse, sourceId) ?? {}), ...updates }
+    if (isSourceReady(updatedSource)) {
       scheduleTrainNotebook(idToUse)
     }
   }
@@ -983,14 +994,17 @@ watch(currentView, (newView, oldView) => {
   // 因为这些视图需要数据支持，刷新后无法直接恢复
   const persistableViews = ['assistant', 'note-editor', 'source-preview'] as const
   if (persistableViews.includes(newView as (typeof persistableViews)[number])) {
-    notebookStore.setDetailViewType(newView as (typeof persistableViews)[number])
+    notebookStore.setDetailViewType(
+      newView as (typeof persistableViews)[number],
+      notebookTabId.value
+    )
   }
 })
 
 watch(
   currentNoteId,
   (newNoteId) => {
-    notebookStore.setCurrentNoteId(newNoteId ?? null)
+    notebookStore.setCurrentNoteId(newNoteId ?? null, notebookTabId.value)
   },
   { immediate: true }
 )
@@ -1318,7 +1332,7 @@ const processVisionFile = async (
   let compressedFilePath: string | null = null
 
   // 保存原始标题用于恢复
-  const originalTitle = notebookStore.currentSources.find((s) => s.id === sourceId)?.title || ''
+  const originalTitle = sources.value.find((s) => s.id === sourceId)?.title || ''
 
   try {
     console.log(`[Vision] 开始分析 ${mediaType}: ${filePath}`)
@@ -1479,7 +1493,7 @@ const handleAddSource = async (payload: SourcePayload): Promise<void> => {
   const filePath =
     payload.content instanceof File ? window.api.getPathForFile(payload.content) : undefined
   if (
-    notebookStore.isDuplicateSource({
+    notebookStore.isDuplicateSource(currentNotebookId, {
       type: payload.type,
       filePath,
       sourceUrl: payload.sourceUrl

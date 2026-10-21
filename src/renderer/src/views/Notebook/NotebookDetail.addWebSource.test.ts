@@ -155,7 +155,7 @@ describe('批量添加网页来源', () => {
 
     // 因此没有一条因为 UNIQUE 冲突被清理逻辑顺手删掉：5 个来源全部留在列表里
     const notebookStore = useNotebookStore()
-    expect(notebookStore.sources).toHaveLength(5)
-    expect(new Set(notebookStore.sources.map((s) => s.id)).size).toBe(5)
+    expect(notebookStore.sourcesOf('notebook-1')).toHaveLength(5)
+    expect(new Set(notebookStore.sourcesOf('notebook-1').map((s) => s.id)).size).toBe(5)
   })
 })

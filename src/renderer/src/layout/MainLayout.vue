@@ -27,7 +27,7 @@ import {
   askUALinkInstall,
   notifyPluginUpgradeFailure
 } from '@renderer/hooks/usePluginInstallNotice'
-import { resolveTabRoute } from '@renderer/common/tabRoute'
+import { getTabCacheKey } from '@renderer/common/tabRoute'
 import { useAppAgentRunner } from '@renderer/views/Assistant/composables/appAgentRunner'
 import { useFollowUpDelivery } from '@renderer/views/Assistant/composables/followUpDelivery'
 import { useSessionProjectSync } from '@renderer/views/Assistant/composables/sessionProjectSync'
@@ -276,9 +276,6 @@ const showTab = computed(() => route.meta.showTab !== false)
 const showMacTitlebarInset = computed(
   () => window.api?.platform === 'darwin' && !showTab.value && !showMenu.value
 )
-const getRouteCacheKey = (currentRoute: typeof route): string => {
-  return resolveTabRoute(currentRoute)?.key || currentRoute.fullPath
-}
 
 // 侧边栏收折状态 - 持久化到 localStorage
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
@@ -553,7 +550,7 @@ onUnmounted(() => {
               <component
                 :is="Component"
                 v-if="pageRoute.meta.keepAlive"
-                :key="getRouteCacheKey(pageRoute)"
+                :key="getTabCacheKey(pageRoute)"
               />
             </keep-alive>
             <component :is="Component" v-if="!pageRoute.meta.keepAlive" :key="pageRoute.fullPath" />

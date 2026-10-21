@@ -1,59 +1,20 @@
 <template>
   <div class="notebook-layout">
-    <router-view v-slot="{ Component }">
-      <component :is="Component" v-if="Component" :key="cachedRouteKey" />
+    <router-view v-slot="{ Component }" :route="viewRoute">
+      <component :is="Component" v-if="Component && keepChild" :key="viewRoute.fullPath" />
     </router-view>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onActivated, onDeactivated, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { useNotebookStore } from '@renderer/store/modules/notebookStore'
-import { getNotebookTabIdFromQuery } from '@renderer/views/Notebook/utils/notebookTabRoute'
+import { useLibraryLayout } from '@renderer/views/library-common/composables/useLibraryLayout'
 
-const route = useRoute()
 const notebookStore = useNotebookStore()
-const isLayoutActive = ref(true)
-const cachedRouteKey = ref(route.fullPath)
 
-watch(
-  () => route.fullPath,
-  (nextPath) => {
-    if (!isLayoutActive.value) return
-    cachedRouteKey.value = nextPath
-  }
-)
-
-watch(
-  () => route.query._tab_id,
-  () => {
-    if (!isLayoutActive.value) return
-    notebookStore.setTabId(getNotebookTabIdFromQuery(route.query))
-  },
-  { immediate: true }
-)
-
-/**
- * Track the active notebook only while the cached layout is visible.
- */
-watch(
-  () => route.params.id,
-  (newId) => {
-    if (!isLayoutActive.value) return
-    notebookStore.setActiveNotebookId(newId && typeof newId === 'string' ? newId : null)
-  },
-  { immediate: true }
-)
-
-onActivated(() => {
-  isLayoutActive.value = true
-  cachedRouteKey.value = route.fullPath
-  notebookStore.setTabId(getNotebookTabIdFromQuery(route.query))
-})
-
-onDeactivated(() => {
-  isLayoutActive.value = false
+const { viewRoute, keepChild } = useLibraryLayout({
+  syncActiveId: (id) => notebookStore.setActiveNotebookId(id),
+  syncTabId: (tabId) => notebookStore.setTabId(tabId)
 })
 </script>
 

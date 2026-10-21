@@ -87,17 +87,7 @@ import { onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 const isEditorActive = ref(false)
 const currentBlueprintId = ref(typeof route.params.id === 'string' ? route.params.id : '')
 
-function getEditorTabId(): string {
-  const tabId = route.query._tab_id
-  return typeof tabId === 'string' && tabId.trim() ? tabId : 'default'
-}
-
 const { syncTabTitle: syncBlueprintTabTitle } = useLibraryTabTitleSync(() => blueprint.value?.name)
-
-function syncActiveBlueprintStore(): void {
-  store.setEditorTabId(getEditorTabId())
-  store.setActiveBlueprintId(currentBlueprintId.value || null)
-}
 
 function ensureSideMenuCollapsedForFocusMode(): void {
   if (isFocusMode.value) {
@@ -105,9 +95,9 @@ function ensureSideMenuCollapsedForFocusMode(): void {
   }
 }
 
+// store 的 tab 与当前蓝图由 BlueprintLibraryLayout 按这个 tab 的路由同步
 onMounted(() => {
   isEditorActive.value = true
-  syncActiveBlueprintStore()
   syncBlueprintTabTitle()
   startListening()
   ensureSideMenuCollapsedForFocusMode()
@@ -115,7 +105,6 @@ onMounted(() => {
 
 onActivated(() => {
   isEditorActive.value = true
-  syncActiveBlueprintStore()
   syncBlueprintTabTitle()
   startListening()
   ensureSideMenuCollapsedForFocusMode()

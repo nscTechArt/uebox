@@ -29,6 +29,7 @@ import { getFileTypeLabel, isSupportedSourceFile } from '../utils/fileTypeUtils'
 import type { SourceItem } from '@renderer/store/modules/notebookStore'
 import { useNotebookStore } from '@renderer/store/modules/notebookStore'
 import {
+  isSourceIncluded,
   normalizeNotebookContextLevel,
   summarizeContextBudget,
   type NotebookContextLevel
@@ -133,7 +134,7 @@ const runRecallTest = async (query: string): Promise<void> => {
 
   try {
     // 取选中的来源 ID（转成普通数组以便 IPC 序列化）
-    const selectedIds = [...nbStore._selectedSourceIds]
+    const selectedIds = [...selectedSourceIds.value]
     recallResults.value = await window.api.notebook.ragSearch({
       notebookId: props.notebookId,
       query,
@@ -258,27 +259,34 @@ const renameSourceId = ref<string | null>(null)
 const renameNewTitle = ref('')
 
 /**
+ * 会进上下文的来源 id。
+ *
+ * 按本面板自己的来源算：面板缓存在后台时，前台 tab 打开的可能是别的笔记本
+ */
+const selectedSourceIds = computed(
+  () => new Set(props.sources.filter(isSourceIncluded).map((s) => s.id))
+)
+
+/**
  * 检查来源是否被选中
  */
 const isSourceSelected = (sourceId: string): boolean => {
-  return nbStore._selectedSourceIds.includes(sourceId)
+  return selectedSourceIds.value.has(sourceId)
 }
 
 /**
  * 切换来源选中状态
  */
 const toggleSourceSelection = (sourceId: string): void => {
-  nbStore.toggleSourceIncluded(sourceId)
+  if (!props.notebookId) return
+  nbStore.toggleSourceIncluded(props.notebookId, sourceId)
 }
 
 /**
  * 是否全选
  */
 const isAllSelected = (): boolean => {
-  return (
-    props.sources.length > 0 &&
-    props.sources.every((s) => nbStore._selectedSourceIds.includes(s.id))
-  )
+  return props.sources.length > 0 && props.sources.every(isSourceIncluded)
 }
 
 /**
@@ -293,14 +301,15 @@ const isSomeSelected = (): boolean => {
  * 获取选中来源数量
  */
 const getSelectedSourceCount = (): number => {
-  return props.sources.filter((s) => nbStore._selectedSourceIds.includes(s.id)).length
+  return selectedSourceIds.value.size
 }
 
 /**
  * 切换全选/取消全选
  */
 const toggleAllSelection = (): void => {
-  nbStore.setAllContextLevels(isAllSelected() ? 'excluded' : 'full')
+  if (!props.notebookId) return
+  nbStore.setAllContextLevels(props.notebookId, isAllSelected() ? 'excluded' : 'full')
 }
 
 // ============ 上下文档位 ============
@@ -334,11 +343,12 @@ const setContextLevel = async (source: SourceItem, level: NotebookContextLevel):
     再覆盖一遍 summaryContent。
   */
   if (summarizingSourceIds.value.has(source.id)) return
-
-  await nbStore.setSourceContextLevel(source.id, level)
-  if (level !== 'summary' || !props.notebookId) return
-
+  if (!props.notebookId) return
   const notebookId = props.notebookId
+
+  await nbStore.setSourceContextLevel(notebookId, source.id, level)
+  if (level !== 'summary') return
+
   summarizingSourceIds.value = new Set(summarizingSourceIds.value).add(source.id)
   try {
     const outcome = await ensureSourceSummary(source, (updates) =>
@@ -361,7 +371,8 @@ const toggleContextLevel = (source: SourceItem): void => {
 
 /** 整份来源列表的档位一起改 */
 const setAllContextLevels = (level: NotebookContextLevel): void => {
-  void nbStore.setAllContextLevels(level)
+  if (!props.notebookId) return
+  void nbStore.setAllContextLevels(props.notebookId, level)
 }
 
 /**

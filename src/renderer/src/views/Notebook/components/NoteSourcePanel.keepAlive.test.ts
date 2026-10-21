@@ -66,4 +66,20 @@ describe('NoteSourcePanel 与别的缓存面板共存', () => {
     expect(loadSources).toHaveBeenCalledWith('nb-kept')
     kept.unmount()
   })
+
+  it('选中状态按面板自己的来源算，不跟前台 tab 走', () => {
+    const store = useNotebookStore()
+    // 前台 tab 开着的是另一个笔记本
+    store.setTabId('front-tab')
+    store.setActiveNotebookId('nb-front')
+
+    const wrapper = mountPanel('nb-background', [
+      { id: 'kept-in', title: '进上下文', type: 'note', content: '正文', contextLevel: 'full' },
+      { id: 'left-out', title: '不进', type: 'note', content: '正文', contextLevel: 'excluded' }
+    ])
+
+    const [included, excluded] = wrapper.findAll('.source-item')
+    expect(included.classes()).not.toContain('unselected')
+    expect(excluded.classes()).toContain('unselected')
+  })
 })

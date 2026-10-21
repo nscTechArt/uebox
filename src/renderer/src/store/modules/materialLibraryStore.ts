@@ -446,6 +446,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   }
 
   function setActiveEntryId(id: string | null): void {
+    if (activeEntryId.value === id) return
     activeEntryId.value = id
     persistState()
   }

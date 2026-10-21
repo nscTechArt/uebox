@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import {
   DEFAULT_NOTEBOOK_CONTEXT_LEVEL,
+  isSourceIncluded,
   normalizeNotebookContextLevel,
   type NotebookContextLevel
 } from '@core/shared/notebookContext'
@@ -43,9 +43,8 @@ interface NotebookUiTabState {
   currentNoteId: number | null
 }
 
-interface NotebookRuntimeTabState {
+interface NotebookRuntimeState {
   sources: SourceItem[]
-  isLoadingSources: boolean
   loadSourcesRequestId: number
 }
 
@@ -57,9 +56,8 @@ const createDefaultUiTabState = (): NotebookUiTabState => ({
   currentNoteId: null
 })
 
-const createDefaultRuntimeTabState = (): NotebookRuntimeTabState => ({
+const createDefaultRuntimeState = (): NotebookRuntimeState => ({
   sources: [],
-  isLoadingSources: false,
   loadSourcesRequestId: 0
 })
 
@@ -67,14 +65,19 @@ let legacyNotebookStateMigrated = false
 
 /**
  * Notebook module state management.
- * UI state is stored per tab. Source content is cached per tab in memory
+ * UI state is stored per tab. Source content is cached per notebook in memory
  * and sourced from SQLite rather than localStorage persistence.
+ *
+ * 来源按笔记本而不是按 tab 存储：后台 tab 中（被 keep-alive 缓存）的详情页完成异步任务后，
+ * 要写回它自己的笔记本；按 tab 存储的话，只能写进当时位于前台的 tab。
+ * 同一个笔记本在两个 tab 中打开时，看到的本来就是库里的同一份数据。
  */
 export const useNotebookStore = defineStore('notebook', {
   state: () => ({
     _tabId: 'default' as string,
     tabUiStates: {} as Record<string, NotebookUiTabState>,
-    tabRuntimeStates: {} as Record<string, NotebookRuntimeTabState>,
+    notebookRuntimeStates: {} as Record<string, NotebookRuntimeState>,
+    sourceHolders: {} as Record<string, number>,
     leftColWidth: 300,
     rightColWidth: 320
   }),
@@ -92,45 +95,33 @@ export const useNotebookStore = defineStore('notebook', {
       return state.tabUiStates[state._tabId]?.currentNoteId ?? null
     },
 
-    sources(state): SourceItem[] {
-      return state.tabRuntimeStates[state._tabId]?.sources ?? []
-    },
-
-    currentSources(): SourceItem[] {
-      return this.sources
-    },
-
-    isLoadingSources(state): boolean {
-      return state.tabRuntimeStates[state._tabId]?.isLoadingSources ?? false
-    },
-
     /**
-     * 会进上下文的来源 id。
+     * 指定笔记本的来源，与它是否位于前台 tab 无关。
      *
-     * 这里是**算出来的**，不再另存一份数组：以前那份数组要和每条来源的
-     * selected 手动保持一致，任何一条漏同步都会让「界面上勾着、实际没送进去」
-     * 这种谁都查不出来的问题溜过去。
+     * 有意不提供「前台 tab 的来源」：后台缓存的页面也在执行异步任务，
+     * 读取前台的来源会拿到别的笔记本的数据。需要哪个笔记本就按 id 获取。
      */
-    _selectedSourceIds(): string[] {
-      return this.sources
-        .filter((source) => normalizeNotebookContextLevel(source.contextLevel) !== 'excluded')
-        .map((source) => source.id)
+    sourcesOf(state): (notebookId: string) => SourceItem[] {
+      return (notebookId) => state.notebookRuntimeStates[notebookId]?.sources ?? []
     },
 
     /**
-     * Check whether a source already exists in the active tab.
+     * Check whether a source already exists in a notebook.
+     *
+     * 按传入的笔记本查重，而不是按前台 tab：拖入文件夹后要等扫描完成才逐个添加，
+     * 期间用户可能已经切到别的 tab，此时前台的来源属于另一个笔记本。
      */
-    isDuplicateSource(): (source: {
-      type?: string
-      filePath?: string
-      sourceUrl?: string
-    }) => boolean {
-      return (source) => {
+    isDuplicateSource(): (
+      notebookId: string,
+      source: { type?: string; filePath?: string; sourceUrl?: string }
+    ) => boolean {
+      return (notebookId, source) => {
+        const sources = this.sourcesOf(notebookId)
         if (source.type === 'file' && source.filePath) {
-          return this.sources.some((item) => item.filePath === source.filePath)
+          return sources.some((item) => item.filePath === source.filePath)
         }
         if ((source.type === 'link' || source.type === 'wechat') && source.sourceUrl) {
-          return this.sources.some((item) => item.sourceUrl === source.sourceUrl)
+          return sources.some((item) => item.sourceUrl === source.sourceUrl)
         }
         return false
       }
@@ -194,12 +185,9 @@ export const useNotebookStore = defineStore('notebook', {
       return this.tabUiStates[normalizedTabId]
     },
 
-    ensureTabRuntimeState(tabId: string): NotebookRuntimeTabState {
-      const normalizedTabId = this.normalizeTabId(tabId)
-      if (!this.tabRuntimeStates[normalizedTabId]) {
-        this.tabRuntimeStates[normalizedTabId] = createDefaultRuntimeTabState()
-      }
-      return this.tabRuntimeStates[normalizedTabId]
+    /** 指定笔记本的内存状态；尚未 loadSources 时为 undefined */
+    findRuntimeState(notebookId: string): NotebookRuntimeState | undefined {
+      return this.notebookRuntimeStates[notebookId]
     },
 
     setTabId(tabId: string): void {
@@ -207,7 +195,6 @@ export const useNotebookStore = defineStore('notebook', {
       const normalizedTabId = this.normalizeTabId(tabId)
       this._tabId = normalizedTabId
       this.ensureTabUiState(normalizedTabId)
-      this.ensureTabRuntimeState(normalizedTabId)
     },
 
     getActiveNotebookIdForTab(tabId: string): string | null {
@@ -220,15 +207,9 @@ export const useNotebookStore = defineStore('notebook', {
       this.migrateLegacyPersistedState()
 
       const sourceUiState = this.ensureTabUiState(this.normalizeTabId(sourceTabId))
-      const sourceRuntimeState = this.ensureTabRuntimeState(this.normalizeTabId(sourceTabId))
       const normalizedTargetTabId = this.normalizeTabId(targetTabId)
 
       this.tabUiStates[normalizedTargetTabId] = { ...sourceUiState }
-      this.tabRuntimeStates[normalizedTargetTabId] = {
-        sources: sourceRuntimeState.sources.map((source) => ({ ...source })),
-        isLoadingSources: sourceRuntimeState.isLoadingSources,
-        loadSourcesRequestId: sourceRuntimeState.loadSourcesRequestId
-      }
     },
 
     /**
@@ -239,24 +220,24 @@ export const useNotebookStore = defineStore('notebook', {
     },
 
     /**
-     * Get a source from the current tab cache.
+     * Get a source from the notebook cache.
      */
-    getSource(_notebookId: string, sourceId: string): SourceItem | undefined {
-      return this.sources.find((source) => source.id === sourceId)
+    getSource(notebookId: string, sourceId: string): SourceItem | undefined {
+      return this.sourcesOf(notebookId).find((source) => source.id === sourceId)
     },
 
     /**
-     * Persist the detail view type for the current tab.
+     * Persist the detail view type for a tab.
      */
-    setDetailViewType(viewType: NotebookDetailViewType) {
-      this.ensureTabUiState(this._tabId).detailViewType = viewType
+    setDetailViewType(viewType: NotebookDetailViewType, tabId: string) {
+      this.ensureTabUiState(tabId).detailViewType = viewType
     },
 
     /**
-     * Persist the selected note id for the current tab.
+     * Persist the selected note id for a tab.
      */
-    setCurrentNoteId(noteId: number | null) {
-      this.ensureTabUiState(this._tabId).currentNoteId = noteId
+    setCurrentNoteId(noteId: number | null, tabId: string) {
+      this.ensureTabUiState(tabId).currentNoteId = noteId
     },
 
     setLeftColWidth(width: number) {
@@ -268,23 +249,58 @@ export const useNotebookStore = defineStore('notebook', {
     },
 
     /**
-     * Load notebook sources for the current tab from SQLite.
+     * 来源的生命周期跟随展示它的详情页实例：每有一个页面展示该笔记本的来源，
+     * 就记一次持有。
+     */
+    retainSources(notebookId: string): void {
+      this.sourceHolders[notebookId] = (this.sourceHolders[notebookId] ?? 0) + 1
+    },
+
+    /**
+     * 释放一次持有；无人持有时释放正文。
+     *
+     * 内存状态本身保留（字段原地重置）：在途的 loadSources 返回后会通过
+     * requestId 发现请求已失效，不会把已释放的内容写回。
+     */
+    releaseSources(notebookId: string): void {
+      const remaining = (this.sourceHolders[notebookId] ?? 0) - 1
+      if (remaining > 0) {
+        this.sourceHolders[notebookId] = remaining
+        return
+      }
+      delete this.sourceHolders[notebookId]
+      const runtimeState = this.notebookRuntimeStates[notebookId]
+      if (runtimeState) {
+        runtimeState.sources = []
+        runtimeState.loadSourcesRequestId += 1
+      }
+    },
+
+    /**
+     * Load a notebook's sources from SQLite.
+     *
+     * 只有这里会创建笔记本的内存状态；对未加载过的笔记本，增删改只写数据库，
+     * 避免留下只有一两条的残缺列表。
+     *
+     * 无人持有时不加载：页面卸载后才到达的刷新（Agent 添加来源、后台读图完成等）
+     * 不能把已释放的正文重新载入内存。
      */
     async loadSources(notebookId: string): Promise<void> {
-      const tabId = this.normalizeTabId(this._tabId)
-      const runtimeState = this.ensureTabRuntimeState(tabId)
+      if (!this.sourceHolders[notebookId]) return
+      if (!this.notebookRuntimeStates[notebookId]) {
+        this.notebookRuntimeStates[notebookId] = createDefaultRuntimeState()
+      }
+      const runtimeState = this.notebookRuntimeStates[notebookId]
       const requestId = runtimeState.loadSourcesRequestId + 1
       runtimeState.loadSourcesRequestId = requestId
-      runtimeState.isLoadingSources = true
 
       try {
         const dbSources = await window.api.notebook.getSources(notebookId)
-        const latestRuntimeState = this.ensureTabRuntimeState(tabId)
-        if (requestId !== latestRuntimeState.loadSourcesRequestId) {
+        if (requestId !== runtimeState.loadSourcesRequestId) {
           return
         }
 
-        latestRuntimeState.sources = dbSources.map((source) => ({
+        runtimeState.sources = dbSources.map((source) => ({
           id: source.sourceId,
           title: source.title,
           type: source.type,
@@ -307,27 +323,23 @@ export const useNotebookStore = defineStore('notebook', {
         }))
       } catch (error) {
         console.error('[notebookStore] Failed to load sources:', error)
-        const latestRuntimeState = this.ensureTabRuntimeState(tabId)
-        if (requestId === latestRuntimeState.loadSourcesRequestId) {
-          latestRuntimeState.sources = []
-        }
-      } finally {
-        const latestRuntimeState = this.ensureTabRuntimeState(tabId)
-        if (requestId === latestRuntimeState.loadSourcesRequestId) {
-          latestRuntimeState.isLoadingSources = false
+        if (requestId === runtimeState.loadSourcesRequestId) {
+          runtimeState.sources = []
         }
       }
     },
 
     /**
-     * Add a source to the current tab and persist it to SQLite.
+     * Add a source to a notebook and persist it to SQLite.
      */
     async addSource(notebookId: string, source: SourceItem): Promise<void> {
-      const tabId = this.normalizeTabId(this._tabId)
-      const runtimeState = this.ensureTabRuntimeState(tabId)
-      const insertIndex = runtimeState.sources.length
+      // 无人持有时只写数据库：在途的添加不能把残缺列表写回已释放的内存状态
+      const runtimeState = this.sourceHolders[notebookId]
+        ? this.findRuntimeState(notebookId)
+        : undefined
+      const insertIndex = runtimeState?.sources.length ?? -1
 
-      runtimeState.sources.push({
+      runtimeState?.sources.push({
         ...source,
         contextLevel: normalizeNotebookContextLevel(
           source.contextLevel ?? DEFAULT_NOTEBOOK_CONTEXT_LEVEL
@@ -349,32 +361,34 @@ export const useNotebookStore = defineStore('notebook', {
           error: source.error ?? undefined
         })
       } catch (error) {
-        const latestRuntimeState = this.ensureTabRuntimeState(tabId)
-        if (latestRuntimeState.sources[insertIndex]?.id === source.id) {
-          latestRuntimeState.sources.splice(insertIndex, 1)
-        } else {
-          latestRuntimeState.sources = latestRuntimeState.sources.filter(
-            (item) => item.id !== source.id
-          )
+        const latestRuntimeState = this.findRuntimeState(notebookId)
+        if (latestRuntimeState) {
+          if (latestRuntimeState.sources[insertIndex]?.id === source.id) {
+            latestRuntimeState.sources.splice(insertIndex, 1)
+          } else {
+            latestRuntimeState.sources = latestRuntimeState.sources.filter(
+              (item) => item.id !== source.id
+            )
+          }
         }
         console.error('[notebookStore] Failed to create source:', error)
       }
     },
 
     /**
-     * Update a source in the current tab and persist changes to SQLite.
+     * Update a source in a notebook and persist changes to SQLite.
      */
     async updateSource(
-      _notebookId: string,
+      notebookId: string,
       sourceId: string,
       updates: Partial<SourceItem>
     ): Promise<void> {
-      const tabId = this.normalizeTabId(this._tabId)
-      const runtimeState = this.ensureTabRuntimeState(tabId)
-      const index = runtimeState.sources.findIndex((source) => source.id === sourceId)
-      const previousSource = index !== -1 ? { ...runtimeState.sources[index] } : null
+      const runtimeState = this.findRuntimeState(notebookId)
+      const index = runtimeState?.sources.findIndex((source) => source.id === sourceId) ?? -1
+      const previousSource =
+        runtimeState && index !== -1 ? { ...runtimeState.sources[index] } : null
 
-      if (index !== -1) {
+      if (runtimeState && index !== -1) {
         runtimeState.sources[index] = { ...runtimeState.sources[index], ...updates }
       }
 
@@ -395,8 +409,8 @@ export const useNotebookStore = defineStore('notebook', {
           mediaUrl: updates.mediaUrl
         })
       } catch (error) {
-        const latestRuntimeState = this.ensureTabRuntimeState(tabId)
-        if (index !== -1 && previousSource) {
+        const latestRuntimeState = this.findRuntimeState(notebookId)
+        if (latestRuntimeState && previousSource) {
           latestRuntimeState.sources[index] = previousSource
         }
         console.error('[notebookStore] Failed to update source:', error)
@@ -404,23 +418,22 @@ export const useNotebookStore = defineStore('notebook', {
     },
 
     /**
-     * Remove a source from the current tab and SQLite.
+     * Remove a source from a notebook and SQLite.
      */
-    async removeSource(_notebookId: string, sourceId: string): Promise<void> {
-      const tabId = this.normalizeTabId(this._tabId)
-      const runtimeState = this.ensureTabRuntimeState(tabId)
-      const index = runtimeState.sources.findIndex((source) => source.id === sourceId)
-      const removedSource = index !== -1 ? { ...runtimeState.sources[index] } : null
+    async removeSource(notebookId: string, sourceId: string): Promise<void> {
+      const runtimeState = this.findRuntimeState(notebookId)
+      const index = runtimeState?.sources.findIndex((source) => source.id === sourceId) ?? -1
+      const removedSource = runtimeState && index !== -1 ? { ...runtimeState.sources[index] } : null
 
-      if (index !== -1) {
+      if (runtimeState && index !== -1) {
         runtimeState.sources.splice(index, 1)
       }
 
       try {
         await window.api.notebook.deleteSource(sourceId)
       } catch (error) {
-        const latestRuntimeState = this.ensureTabRuntimeState(tabId)
-        if (removedSource) {
+        const latestRuntimeState = this.findRuntimeState(notebookId)
+        if (latestRuntimeState && removedSource) {
           latestRuntimeState.sources.splice(
             Math.min(index, latestRuntimeState.sources.length),
             0,
@@ -432,16 +445,11 @@ export const useNotebookStore = defineStore('notebook', {
     },
 
     /**
-     * Clear only the active tab state when leaving a notebook detail page.
+     * Clear only the tab's ui state when leaving a notebook detail page.
+     * 来源按笔记本存储，其他 tab 可能还打开着同一个笔记本，因此不清空。
      */
-    clearActiveNotebook(tabId?: string) {
-      const normalizedTabId = this.normalizeTabId(tabId ?? this._tabId)
-      const uiState = this.ensureTabUiState(normalizedTabId)
-      const runtimeState = this.ensureTabRuntimeState(normalizedTabId)
-
-      runtimeState.loadSourcesRequestId += 1
-      runtimeState.sources = []
-      runtimeState.isLoadingSources = false
+    clearActiveNotebook(tabId: string) {
+      const uiState = this.ensureTabUiState(this.normalizeTabId(tabId))
 
       uiState.activeNotebookId = null
       uiState.detailViewType = 'assistant'
@@ -454,11 +462,14 @@ export const useNotebookStore = defineStore('notebook', {
      * 失败就把界面上的档位改回去 —— 显示成改成功了、下次生成却按老档位送，
      * 是最难查的一类问题。
      */
-    async setSourceContextLevel(sourceId: string, level: NotebookContextLevel): Promise<void> {
-      const tabId = this.normalizeTabId(this._tabId)
-      const runtimeState = this.ensureTabRuntimeState(tabId)
-      const index = runtimeState.sources.findIndex((source) => source.id === sourceId)
-      if (index === -1) return
+    async setSourceContextLevel(
+      notebookId: string,
+      sourceId: string,
+      level: NotebookContextLevel
+    ): Promise<void> {
+      const runtimeState = this.findRuntimeState(notebookId)
+      const index = runtimeState?.sources.findIndex((source) => source.id === sourceId) ?? -1
+      if (!runtimeState || index === -1) return
 
       const previousLevel = runtimeState.sources[index].contextLevel
       runtimeState.sources[index] = { ...runtimeState.sources[index], contextLevel: level }
@@ -466,11 +477,10 @@ export const useNotebookStore = defineStore('notebook', {
       try {
         await window.api.notebook.updateSource(sourceId, { contextLevel: level })
       } catch (error) {
-        const latest = this.ensureTabRuntimeState(tabId)
-        const latestIndex = latest.sources.findIndex((source) => source.id === sourceId)
+        const latestIndex = runtimeState.sources.findIndex((source) => source.id === sourceId)
         if (latestIndex !== -1) {
-          latest.sources[latestIndex] = {
-            ...latest.sources[latestIndex],
+          runtimeState.sources[latestIndex] = {
+            ...runtimeState.sources[latestIndex],
             contextLevel: previousLevel
           }
         }
@@ -484,35 +494,36 @@ export const useNotebookStore = defineStore('notebook', {
      * 重新勾上时回到全文而不是上一次的摘要档：勾选框只表达进不进，
      * 记住一个用户看不见的档位只会让下次生成的字数对不上他的预期。
      */
-    async toggleSourceIncluded(sourceId: string): Promise<void> {
-      const source = this.sources.find((item) => item.id === sourceId)
+    async toggleSourceIncluded(notebookId: string, sourceId: string): Promise<void> {
+      const source = this.sourcesOf(notebookId).find((item) => item.id === sourceId)
       if (!source) return
 
-      const nextLevel: NotebookContextLevel =
-        normalizeNotebookContextLevel(source.contextLevel) === 'excluded' ? 'full' : 'excluded'
-      await this.setSourceContextLevel(sourceId, nextLevel)
+      const nextLevel: NotebookContextLevel = isSourceIncluded(source) ? 'excluded' : 'full'
+      await this.setSourceContextLevel(notebookId, sourceId, nextLevel)
     },
 
     /**
-     * 把当前标签页里所有来源设成同一档。
+     * 把一个笔记本的所有来源设成同一档。
      *
      * 逐条落库、各自回滚：一条写失败不该把其他几条也回滚（它们是真的写进去了）。
      * 失败的那条会自己滚回原档位并在控制台留一行，界面上就是那一条没跟着变。
      */
-    async setAllContextLevels(level: NotebookContextLevel): Promise<void> {
-      await Promise.all(this.sources.map((source) => this.setSourceContextLevel(source.id, level)))
+    async setAllContextLevels(notebookId: string, level: NotebookContextLevel): Promise<void> {
+      await Promise.all(
+        this.sourcesOf(notebookId).map((source) =>
+          this.setSourceContextLevel(notebookId, source.id, level)
+        )
+      )
     }
   },
 
-  persist: usePersistOptions<{
-    tabUiStates: Record<string, NotebookUiTabState>
-    leftColWidth: number
-    rightColWidth: number
-  }>({
+  // 插件 v4 只识别 pick，不识别 usePersistOptions 透传的 paths；若写成 paths，整个 state 都会落盘，
+  // 包括来源正文和持有计数
+  persist: {
     key: NOTEBOOK_STORE_KEY,
-    paths: ['tabUiStates', 'leftColWidth', 'rightColWidth'],
-    storage: 'localStorage'
-  })
+    storage: localStorage,
+    pick: ['tabUiStates', 'leftColWidth', 'rightColWidth']
+  }
 })
 
 export type { SourceItem, NotebookDetailViewType }
