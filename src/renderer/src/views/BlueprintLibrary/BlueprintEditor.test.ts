@@ -35,7 +35,8 @@ vi.mock('@renderer/views/BlueprintLibrary/BlueprintRenderer.vue', () => ({
     name: 'BlueprintRendererStub',
     props: {
       code: { type: String, default: '' },
-      name: { type: String, default: '' }
+      name: { type: String, default: '' },
+      tabId: { type: String, default: '' }
     },
     setup(_, { expose }) {
       expose({
@@ -231,6 +232,77 @@ describe('BlueprintEditor UX state flows', () => {
     expect(tabsStore.historyTabs.map((tab) => tab.title)).toEqual(['BP_Renamed', 'Other'])
   })
 
+  // 后台编辑器中选中的图被删除时，兜底选择只写入它自己 tab 的存档，不覆盖前台 tab
+  it('writes a deactivated editor fallback selection into its own tab, not the foreground tab', async () => {
+    const { pinia, router, blueprint } = await seedBlueprintEditor()
+    const store = useBlueprintLibraryStore()
+
+    store.addGraph(blueprint.id, {
+      name: 'BP_Graph_G',
+      type: 'custom',
+      code: 'Begin Object Class="/Script/BlueprintGraph.K2Node_CustomEvent" Name="K2Node_CustomEvent_G"\nEnd Object',
+      nodeCount: 1,
+      description: ''
+    })
+    store.addGraph(blueprint.id, {
+      name: 'BP_Graph_H',
+      type: 'custom',
+      code: 'Begin Object Class="/Script/BlueprintGraph.K2Node_CustomEvent" Name="K2Node_CustomEvent_H"\nEnd Object',
+      nodeCount: 1,
+      description: ''
+    })
+
+    const graphs = store.blueprints.find((b) => b.id === blueprint.id)!.graphs
+    const G = graphs.find((g) => g.name === 'BP_Graph_G')!
+    const H = graphs.find((g) => g.name === 'BP_Graph_H')!
+    const F = graphs.find((g) => g.type === 'event')!
+    expect(F.id).not.toBe(H.id)
+    expect(F.id).not.toBe(G.id)
+    expect(G.id).not.toBe(H.id)
+
+    await router.push(`/blueprint-library/${blueprint.id}?_tab_id=t1`)
+    await router.isReady()
+    store.setEditorTabId('t1')
+    store.setActiveBlueprintId(blueprint.id)
+
+    const showEditor = ref(true)
+    const DummyPage = defineComponent({ template: '<div />' })
+    const Harness = defineComponent({
+      components: { KeepAlive },
+      setup: () => ({ showEditor, editorComponent: BlueprintEditor, dummyComponent: DummyPage }),
+      template: `
+        <KeepAlive>
+          <component :is="showEditor ? editorComponent : dummyComponent" />
+        </KeepAlive>
+      `
+    })
+    const wrapper = mount(Harness, {
+      global: { plugins: [pinia, router], components: { KeepAlive } }
+    })
+    await flushPromises()
+
+    const graphItem = wrapper
+      .findAll('.tree-item')
+      .find((node) => node.text().includes('BP_Graph_G'))
+    expect(graphItem).toBeTruthy()
+    await graphItem!.trigger('click')
+    await nextTick()
+
+    showEditor.value = false
+    await flushPromises()
+
+    store.setEditorTabId('t2')
+    store.setActiveElement(H.id, 'graph', 't2')
+
+    store.removeElement(blueprint.id, G.id, 'graph')
+    await flushPromises()
+
+    expect(store.activeElementId).toBe(H.id)
+
+    store.setEditorTabId('t1')
+    expect(store.activeElementId).toBe(F.id)
+  })
+
   it('does not rename the shared blueprint library tab when the editor route has no dedicated tab id', async () => {
     const { pinia, router, blueprint } = await seedBlueprintEditor()
     const tabsStore = useTabsStore()
@@ -359,6 +431,38 @@ describe('BlueprintEditor UX state flows', () => {
 
     expect(wrapper.findComponent(BlueprintEditor).get('.focus-btn').text()).toContain('退出专注')
     expect(layoutUiStore.sideMenuCollapseRequestVersion).toBe(2)
+  })
+
+  /**
+   * 渲染器按 tab 存视图状态：编辑器把自己 tab 的 id（冻结路由上的 _tab_id）
+   * 传给渲染器，不要让它读取 store 中的「当前 tab」—— 用户切走之后那就是别的 tab 了。
+   */
+  it('passes the route tab id to the renderer', async () => {
+    const { pinia, router, blueprint } = await seedBlueprintEditor()
+    await router.push(`/blueprint-library/${blueprint.id}?_tab_id=t7`)
+    await router.isReady()
+
+    const wrapper = mount(BlueprintEditor, {
+      global: {
+        plugins: [pinia, router]
+      }
+    })
+    await nextTick()
+
+    expect(wrapper.findComponent({ name: 'BlueprintRendererStub' }).props('tabId')).toBe('t7')
+  })
+
+  it('passes the default tab id to the renderer when the route has no _tab_id', async () => {
+    const { pinia, router } = await seedBlueprintEditor()
+
+    const wrapper = mount(BlueprintEditor, {
+      global: {
+        plugins: [pinia, router]
+      }
+    })
+    await nextTick()
+
+    expect(wrapper.findComponent({ name: 'BlueprintRendererStub' }).props('tabId')).toBe('default')
   })
 
   it('drops a dragged variable into the renderer as a get node by default', async () => {

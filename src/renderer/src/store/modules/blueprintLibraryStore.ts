@@ -278,8 +278,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   }
 
   function saveCurrentEditorTabState(): void {
-    const tabId = editorTabId.value || 'default'
-    editorTabStates.set(tabId, {
+    editorTabStates.set(editorTabId.value, {
       activeBlueprintId: activeBlueprintId.value,
       activeElementId: activeElementId.value,
       activeElementType: activeElementType.value
@@ -300,10 +299,9 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     elementId: string,
     elementType: BlueprintElementType,
     viewState: BlueprintEditorViewState,
-    tabId = editorTabId.value
+    tabId: string
   ): void {
-    const normalizedTabId = String(tabId || '').trim() || 'default'
-    const key = buildEditorViewStateKey(normalizedTabId, blueprintId, elementId, elementType)
+    const key = buildEditorViewStateKey(tabId, blueprintId, elementId, elementType)
     editorViewStates.set(key, {
       zoom: viewState.zoom,
       scrollX: viewState.scrollX,
@@ -321,10 +319,9 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     blueprintId: string,
     elementId: string,
     elementType: BlueprintElementType,
-    tabId = editorTabId.value
+    tabId: string
   ): BlueprintEditorViewState | null {
-    const normalizedTabId = String(tabId || '').trim() || 'default'
-    const key = buildEditorViewStateKey(normalizedTabId, blueprintId, elementId, elementType)
+    const key = buildEditorViewStateKey(tabId, blueprintId, elementId, elementType)
     const viewState = editorViewStates.get(key)
     if (!viewState) return null
     return {
@@ -370,11 +367,10 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   }
 
   function setEditorTabId(tabId: string): void {
-    const normalizedTabId = String(tabId || '').trim() || 'default'
     saveCurrentEditorTabState()
-    editorTabId.value = normalizedTabId
+    editorTabId.value = tabId
 
-    const savedState = editorTabStates.get(normalizedTabId)
+    const savedState = editorTabStates.get(tabId)
     if (savedState) {
       activeBlueprintId.value = savedState.activeBlueprintId
       activeElementId.value = savedState.activeElementId
@@ -500,10 +496,24 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
 
   // ========== Editor 内部元素操作 ==========
 
-  function setActiveElement(id: string | null, type: BlueprintElementType | null): void {
-    activeElementId.value = id
-    activeElementType.value = type
-    saveCurrentEditorTabState()
+  function setActiveElement(
+    id: string | null,
+    type: BlueprintElementType | null,
+    tabId: string
+  ): void {
+    if (tabId === editorTabId.value) {
+      activeElementId.value = id
+      activeElementType.value = type
+      saveCurrentEditorTabState()
+      return
+    }
+    // 后台 tab：只修改它自己的那份，不影响前台
+    const saved = editorTabStates.get(tabId)
+    editorTabStates.set(tabId, {
+      activeBlueprintId: saved?.activeBlueprintId ?? null,
+      activeElementId: id,
+      activeElementType: type
+    })
   }
 
   function addGraph(

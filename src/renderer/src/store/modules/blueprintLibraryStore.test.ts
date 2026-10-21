@@ -13,7 +13,7 @@ describe('blueprintLibrary store editor tab state', () => {
 
     store.setEditorTabId('tab-a')
     store.setActiveBlueprintId('bp-a')
-    store.setActiveElement('graph-a', 'graph')
+    store.setActiveElement('graph-a', 'graph', 'tab-a')
 
     store.setEditorTabId('tab-b')
     expect(store.activeBlueprintId).toBeNull()
@@ -21,7 +21,7 @@ describe('blueprintLibrary store editor tab state', () => {
     expect(store.activeElementType).toBeNull()
 
     store.setActiveBlueprintId('bp-b')
-    store.setActiveElement('graph-b', 'graph')
+    store.setActiveElement('graph-b', 'graph', 'tab-b')
 
     store.setEditorTabId('tab-a')
     expect(store.activeBlueprintId).toBe('bp-a')
@@ -34,12 +34,24 @@ describe('blueprintLibrary store editor tab state', () => {
     expect(store.activeElementType).toBe('graph')
   })
 
+  it('writes a background tab selection into its own saved state, not the foreground', () => {
+    const store = useBlueprintLibraryStore()
+
+    store.setEditorTabId('A')
+    store.setActiveElement('g2', 'graph', 'B')
+    expect(store.activeElementId).toBeNull()
+
+    store.setEditorTabId('B')
+    expect(store.activeElementId).toBe('g2')
+    expect(store.activeElementType).toBe('graph')
+  })
+
   it('copies editor state into a duplicated tab', () => {
     const store = useBlueprintLibraryStore()
 
     store.setEditorTabId('source-tab')
     store.setActiveBlueprintId('bp-source')
-    store.setActiveElement('function-source', 'function')
+    store.setActiveElement('function-source', 'function', 'source-tab')
 
     store.copyEditorStateToTabId('source-tab', 'target-tab')
     store.setEditorTabId('target-tab')
@@ -53,33 +65,45 @@ describe('blueprintLibrary store editor tab state', () => {
     const store = useBlueprintLibraryStore()
 
     store.setEditorTabId('tab-a')
-    store.saveEditorViewState('bp-a', 'graph-a', 'graph', {
-      zoom: -2,
-      scrollX: 1200,
-      scrollY: 900,
-      translateX: 800,
-      translateY: 1200,
-      centerX: 320,
-      centerY: 480,
-      selectedNodeNames: ['NodeA', 'NodeB']
-    })
+    store.saveEditorViewState(
+      'bp-a',
+      'graph-a',
+      'graph',
+      {
+        zoom: -2,
+        scrollX: 1200,
+        scrollY: 900,
+        translateX: 800,
+        translateY: 1200,
+        centerX: 320,
+        centerY: 480,
+        selectedNodeNames: ['NodeA', 'NodeB']
+      },
+      'tab-a'
+    )
 
     store.setEditorTabId('tab-b')
-    expect(store.getEditorViewState('bp-a', 'graph-a', 'graph')).toBeNull()
+    expect(store.getEditorViewState('bp-a', 'graph-a', 'graph', 'tab-b')).toBeNull()
 
-    store.saveEditorViewState('bp-a', 'graph-a', 'graph', {
-      zoom: 1,
-      scrollX: 2400,
-      scrollY: 1800,
-      translateX: 400,
-      translateY: 400,
-      centerX: 1280,
-      centerY: 960,
-      selectedNodeNames: ['NodeC']
-    })
+    store.saveEditorViewState(
+      'bp-a',
+      'graph-a',
+      'graph',
+      {
+        zoom: 1,
+        scrollX: 2400,
+        scrollY: 1800,
+        translateX: 400,
+        translateY: 400,
+        centerX: 1280,
+        centerY: 960,
+        selectedNodeNames: ['NodeC']
+      },
+      'tab-b'
+    )
 
     store.setEditorTabId('tab-a')
-    expect(store.getEditorViewState('bp-a', 'graph-a', 'graph')).toEqual({
+    expect(store.getEditorViewState('bp-a', 'graph-a', 'graph', 'tab-a')).toEqual({
       zoom: -2,
       scrollX: 1200,
       scrollY: 900,
@@ -91,7 +115,7 @@ describe('blueprintLibrary store editor tab state', () => {
     })
 
     store.setEditorTabId('tab-b')
-    expect(store.getEditorViewState('bp-a', 'graph-a', 'graph')).toEqual({
+    expect(store.getEditorViewState('bp-a', 'graph-a', 'graph', 'tab-b')).toEqual({
       zoom: 1,
       scrollX: 2400,
       scrollY: 1800,
@@ -107,21 +131,27 @@ describe('blueprintLibrary store editor tab state', () => {
     const store = useBlueprintLibraryStore()
 
     store.setEditorTabId('source-tab')
-    store.saveEditorViewState('bp-source', 'graph-source', 'graph', {
-      zoom: -4,
-      scrollX: 1600,
-      scrollY: 1100,
-      translateX: 1200,
-      translateY: 800,
-      centerX: 640,
-      centerY: 360,
-      selectedNodeNames: ['NodeA']
-    })
+    store.saveEditorViewState(
+      'bp-source',
+      'graph-source',
+      'graph',
+      {
+        zoom: -4,
+        scrollX: 1600,
+        scrollY: 1100,
+        translateX: 1200,
+        translateY: 800,
+        centerX: 640,
+        centerY: 360,
+        selectedNodeNames: ['NodeA']
+      },
+      'source-tab'
+    )
 
     store.copyEditorStateToTabId('source-tab', 'target-tab')
     store.setEditorTabId('target-tab')
 
-    expect(store.getEditorViewState('bp-source', 'graph-source', 'graph')).toEqual({
+    expect(store.getEditorViewState('bp-source', 'graph-source', 'graph', 'target-tab')).toEqual({
       zoom: -4,
       scrollX: 1600,
       scrollY: 1100,

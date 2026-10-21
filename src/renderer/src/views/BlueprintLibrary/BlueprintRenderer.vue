@@ -40,6 +40,8 @@ const props = defineProps<{
   elementId?: string
   /** 持久化：当前元素类型 */
   elementType?: BlueprintElementType
+  /** 持久化：所在编辑器 tab 的 id（视图状态按 tab 存） */
+  tabId?: string
 }>()
 
 const emit = defineEmits<{
@@ -247,10 +249,15 @@ function persistSerializedCode(serialized: string): void {
 }
 
 function getPersistedViewState(): BlueprintRendererViewState | null {
-  if (!props.blueprintId || !props.elementId || !props.elementType) {
+  if (!props.blueprintId || !props.elementId || !props.elementType || !props.tabId) {
     return null
   }
-  return store.getEditorViewState(props.blueprintId, props.elementId, props.elementType)
+  return store.getEditorViewState(
+    props.blueprintId,
+    props.elementId,
+    props.elementType,
+    props.tabId
+  )
 }
 
 function getCurrentViewState(): BlueprintRendererViewState | null {
@@ -327,7 +334,7 @@ function computeScrollFromWorldCenter(
 }
 
 function persistViewState(): boolean {
-  if (!props.blueprintId || !props.elementId || !props.elementType) {
+  if (!props.blueprintId || !props.elementId || !props.elementType || !props.tabId) {
     return false
   }
 
@@ -336,7 +343,13 @@ function persistViewState(): boolean {
     return false
   }
 
-  store.saveEditorViewState(props.blueprintId, props.elementId, props.elementType, viewState)
+  store.saveEditorViewState(
+    props.blueprintId,
+    props.elementId,
+    props.elementType,
+    viewState,
+    props.tabId
+  )
   return true
 }
 

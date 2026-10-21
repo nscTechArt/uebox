@@ -55,6 +55,7 @@ import {
   useLibraryTabTitleSync
 } from '@renderer/views/library-common/composables/useLibraryEditorShell'
 import type { VariableNodeAccessType } from '@renderer/views/BlueprintLibrary/utils/variableNodeFactory'
+import { getTabIdFromQuery } from '@renderer/common/tabRoute'
 
 const router = useRouter()
 const route = useRoute()
@@ -124,6 +125,8 @@ onBeforeRouteUpdate(() => {
 })
 
 // ========== 当前蓝图 ==========
+// route 是 Layout 为本 tab 冻结的路由，视图状态按其中的 _tab_id 存储
+const editorTabId = computed(() => getTabIdFromQuery(route.query))
 const bpId = computed(() => currentBlueprintId.value)
 const blueprint = computed(
   () => store.blueprints.find((bp) => bp.id === currentBlueprintId.value) || null
@@ -436,7 +439,7 @@ function ensureActiveLogicSelection(): void {
   if (fallbackSelection) {
     activeLogicId.value = fallbackSelection.id
     activeLogicType.value = fallbackSelection.type
-    store.setActiveElement(fallbackSelection.id, fallbackSelection.type)
+    store.setActiveElement(fallbackSelection.id, fallbackSelection.type, editorTabId.value)
     return
   }
 
@@ -470,7 +473,7 @@ function selectElement(id: string, type: BlueprintElementType): void {
   if (isSwitchingLogicTarget) {
     flushActiveRendererState()
   }
-  store.setActiveElement(id, type)
+  store.setActiveElement(id, type, editorTabId.value)
   // 只有逻辑类型才切换中央内容区
   if (isLogicType(type)) {
     activeLogicId.value = id
@@ -616,7 +619,7 @@ const libraryChatContext = computed<LibraryChatContext | null>(() => {
 // ========== 操作 ==========
 function goBack(): void {
   flushActiveRendererState()
-  store.setActiveElement(null, null)
+  store.setActiveElement(null, null, editorTabId.value)
   router.push({ name: 'BlueprintGallery' })
 }
 
@@ -1555,6 +1558,7 @@ function handleCanvasDrop(event: DragEvent): void {
               :blueprint-id="bpId"
               :element-id="activeLogicId!"
               :element-type="activeLogicType!"
+              :tab-id="editorTabId"
             />
             <div
               v-if="!isCanvasDropActive && !String((activeLogicDetail as any).code || '').trim()"
