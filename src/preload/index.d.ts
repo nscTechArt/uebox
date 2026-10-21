@@ -3147,7 +3147,9 @@ declare global {
         approve: boolean
       ) => Promise<ShareIpcResult<SharedSkillInstallOutcome>>
       packSkill: (name: string) => Promise<ShareIpcResult<SharedSkillPack>>
-      submitSkill: (input: SharedSkillSubmitInput) => Promise<ShareIpcResult<SharedSkillSubmitResult>>
+      submitSkill: (
+        input: SharedSkillSubmitInput
+      ) => Promise<ShareIpcResult<SharedSkillSubmitResult>>
       openPage: (url: string) => Promise<ShareIpcResult<void>>
       onInstallRequest: (listener: (request: SharedSkillInstallRequest) => void) => () => void
       onInstallFailed: (listener: (failure: SharedSkillInstallFailure) => void) => () => void

@@ -58,7 +58,8 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 /** 取一个技能的完整内容（安装用）。服务端按这个请求计安装次数 */
 export async function fetchSharedSkill(id: string): Promise<SharedSkill> {
   const res = await request(`/skills/${encodeURIComponent(id)}/bundle`)
-  if (res.status === 404) throw new ShareError(`共享技能库里没有 ${id}，它可能已经下架。`, 'not-found')
+  if (res.status === 404)
+    throw new ShareError(`共享技能库里没有 ${id}，它可能已经下架。`, 'not-found')
   if (!res.ok) throw new ShareError(`共享技能服务出错（HTTP ${res.status}）。`)
   const data = await readJson(res)
 
@@ -71,7 +72,10 @@ export async function fetchSharedSkill(id: string): Promise<SharedSkill> {
   const check = checkBundle(files)
   if (!check.ok) throw new ShareError(`技能内容不符合要求，已拒绝安装：${check.error}`, 'invalid')
   if (check.name !== id) {
-    throw new ShareError(`技能内容的名字 ${check.name} 与请求的 ${id} 不一致，已拒绝安装。`, 'invalid')
+    throw new ShareError(
+      `技能内容的名字 ${check.name} 与请求的 ${id} 不一致，已拒绝安装。`,
+      'invalid'
+    )
   }
 
   return {

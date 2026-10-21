@@ -210,7 +210,10 @@ describe('box_manage', () => {
     expect(share.requestSharedSkillInstall).toHaveBeenCalledWith('rename-assets', 'tool')
     expect(out).toMatch(/^已安装共享技能 rename-assets（第 2 版）/)
 
-    share.requestSharedSkillInstall.mockResolvedValueOnce({ status: 'declined', id: 'rename-assets' })
+    share.requestSharedSkillInstall.mockResolvedValueOnce({
+      status: 'declined',
+      id: 'rename-assets'
+    })
     expect(await text(tool, { action: 'install_shared_skill', target: 'rename-assets' })).toContain(
       '用户没有安装'
     )

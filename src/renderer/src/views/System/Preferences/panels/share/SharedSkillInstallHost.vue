@@ -99,7 +99,12 @@ onUnmounted(() => unsubscribers.forEach((off) => off()))
 </script>
 
 <template>
-  <AppModal v-model:open="open" :title="$t('profile.skills.installTitle')" :width="760" :mask-closable="false">
+  <AppModal
+    v-model:open="open"
+    :title="$t('profile.skills.installTitle')"
+    :width="760"
+    :mask-closable="false"
+  >
     <template v-if="current">
       <div class="head">
         <div class="name">{{ current.skill.id }}</div>
@@ -139,7 +144,9 @@ onUnmounted(() => unsubscribers.forEach((off) => off()))
 
     <template #footer>
       <div class="footer">
-        <AppButton variant="text" @click="openPage">{{ $t('profile.skills.installPage') }}</AppButton>
+        <AppButton variant="text" @click="openPage">{{
+          $t('profile.skills.installPage')
+        }}</AppButton>
         <div class="actions">
           <AppButton :disabled="busy" @click="decide(false)">{{ $t('common.cancel') }}</AppButton>
           <AppButton variant="primary" :loading="busy" @click="decide(true)">

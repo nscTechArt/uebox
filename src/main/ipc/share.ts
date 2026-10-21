@@ -172,8 +172,12 @@ export function registerShareIPC(): void {
   ipcMain.handle('share:submit-skill', (_event, input: SharedSkillSubmitInput) =>
     run(async (): Promise<SharedSkillSubmitResult> => {
       const name = String(input?.name ?? '')
-      const author = String(input?.author ?? '').trim().slice(0, 40)
-      const authorLink = String(input?.authorLink ?? '').trim().slice(0, 200)
+      const author = String(input?.author ?? '')
+        .trim()
+        .slice(0, 40)
+      const authorLink = String(input?.authorLink ?? '')
+        .trim()
+        .slice(0, 200)
       const note = String(input?.note ?? '').slice(0, 500)
       if (!author) throw new Error('请填写署名。')
 

@@ -3518,7 +3518,8 @@ export default {
       shareLoadFailed: '无法分享：{reason}',
       shareFailed: '提交失败：{reason}',
       shareDoneTitle: '已提交，等待审核',
-      shareDone: '审核通过后，此技能将在官网公开。修改码已保存在本机，以后再次分享此技能会作为更新提交。',
+      shareDone:
+        '审核通过后，此技能将在官网公开。修改码已保存在本机，以后再次分享此技能会作为更新提交。',
       shareStatus: '查看审核状态',
       // 安装确认框
       installTitle: '安装共享技能',

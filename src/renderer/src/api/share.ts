@@ -15,7 +15,8 @@ import type {
 import { unwrapResult } from '@renderer/common/utils'
 
 type Res<T> = { success: true; data: T } | { success: false; error: string }
-const unwrap = <T>(res: Res<T>): T => unwrapResult(res as { success: boolean; data: T; error?: string })
+const unwrap = <T>(res: Res<T>): T =>
+  unwrapResult(res as { success: boolean; data: T; error?: string })
 
 export const shareAPI = {
   async pendingInstalls(): Promise<SharedSkillInstallRequest[]> {

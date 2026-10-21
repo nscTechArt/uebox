@@ -67,11 +67,17 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 describe('installSharedSkill', () => {
   it('装进用户技能目录，带上来源标记，能被发现', async () => {
-    await installSharedSkill(shared('rename-assets', 1, [{ path: 'references/a.md', content: 'A' }]))
+    await installSharedSkill(
+      shared('rename-assets', 1, [{ path: 'references/a.md', content: 'A' }])
+    )
 
     const dir = join(userDir, 'rename-assets')
     expect(readFileSync(join(dir, 'references', 'a.md'), 'utf8')).toBe('A')
-    expect(await readShareMeta(dir)).toMatchObject({ id: 'rename-assets', version: 1, author: '作者甲' })
+    expect(await readShareMeta(dir)).toMatchObject({
+      id: 'rename-assets',
+      version: 1,
+      author: '作者甲'
+    })
     expect((await discoverSkillsOnDisk()).map((s) => s.name)).toContain('rename-assets')
     // 临时目录不在技能目录里，也不会残留
     expect(existsSync(join(root, 'share', 'staging', 'rename-assets'))).toBe(false)
@@ -84,8 +90,12 @@ describe('installSharedSkill', () => {
   })
 
   it('更新时整份替换：新版删掉的文件不残留', async () => {
-    await installSharedSkill(shared('rename-assets', 1, [{ path: 'references/old.md', content: 'old' }]))
-    await installSharedSkill(shared('rename-assets', 2, [{ path: 'references/new.md', content: 'new' }]))
+    await installSharedSkill(
+      shared('rename-assets', 1, [{ path: 'references/old.md', content: 'old' }])
+    )
+    await installSharedSkill(
+      shared('rename-assets', 2, [{ path: 'references/new.md', content: 'new' }])
+    )
 
     const dir = join(userDir, 'rename-assets')
     expect(existsSync(join(dir, 'references', 'old.md'))).toBe(false)

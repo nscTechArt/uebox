@@ -3058,7 +3058,11 @@ export function registerAgentV3IPC(): void {
     const skills = await discoverSkillsOnDisk()
     const { sharedSkillOrigins } = await import('../services/share/sharedSkills')
     return {
-      skills: listSkillSummaries(skills, await readDisabledSkills(), await sharedSkillOrigins(skills))
+      skills: listSkillSummaries(
+        skills,
+        await readDisabledSkills(),
+        await sharedSkillOrigins(skills)
+      )
     }
   })
 

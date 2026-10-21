@@ -61,7 +61,10 @@ function mountHost(): void {
 }
 
 const buttons = (): HTMLButtonElement[] => [...document.querySelectorAll('button')]
-const click = (label: string): void => buttons().find((b) => b.textContent?.trim() === label)?.click()
+const click = (label: string): void =>
+  buttons()
+    .find((b) => b.textContent?.trim() === label)
+    ?.click()
 
 beforeEach(() => {
   vi.clearAllMocks()

@@ -30,7 +30,8 @@ export function isShareablePath(path: string): boolean {
   const parts = p.split('/')
   if (parts.length !== 2) return false
   const [dir, file] = parts
-  if (!(ALLOWED_DIRS as readonly string[]).includes(dir) || !file || file.startsWith('.')) return false
+  if (!(ALLOWED_DIRS as readonly string[]).includes(dir) || !file || file.startsWith('.'))
+    return false
   const ext = file.slice(file.lastIndexOf('.')).toLowerCase()
   return (ALLOWED_EXT as readonly string[]).includes(ext)
 }
@@ -104,7 +105,9 @@ export function parseShareRef(raw: string): string | null {
   }
 
   const host = SHARE_HOST.replace(/\./g, '\\.')
-  const page = new RegExp(`^(?:https?://)?(?:www\\.)?${host}(?:/en)?/s/([a-z0-9-]+)/?$`, 'i').exec(ref)
+  const page = new RegExp(`^(?:https?://)?(?:www\\.)?${host}(?:/en)?/s/([a-z0-9-]+)/?$`, 'i').exec(
+    ref
+  )
   if (page && NAME_RE.test(page[1]) && page[1].length <= 64) return page[1]
   return null
 }

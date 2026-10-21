@@ -16,7 +16,11 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises'
 import { join, resolve, sep } from 'path'
 import { app } from 'electron'
 
-import { discoverSkillsOnDisk, isUserSkillPath, userSkillsDir } from '../../agent-v3/capabilities/skills'
+import {
+  discoverSkillsOnDisk,
+  isUserSkillPath,
+  userSkillsDir
+} from '../../agent-v3/capabilities/skills'
 import { isShareablePath, MAX_FILES, type ShareFile } from './shareRules'
 import type { SharedSkill } from './shareClient'
 import type { SharedSkillConflict, SharedSkillOrigin } from '../../../shared/share'
@@ -86,7 +90,8 @@ export async function installSharedSkill(skill: SharedSkill): Promise<{ path: st
     for (const file of skill.files) {
       // 路径已经过 isShareablePath（只有 SKILL.md 和两个子目录下一层），这里再兜一次
       const out = join(staging, file.path)
-      if (!resolve(out).startsWith(resolve(staging) + sep)) throw new Error(`非法路径：${file.path}`)
+      if (!resolve(out).startsWith(resolve(staging) + sep))
+        throw new Error(`非法路径：${file.path}`)
       await mkdir(join(out, '..'), { recursive: true })
       await writeFile(out, file.content, 'utf8')
     }
@@ -118,7 +123,8 @@ export async function sharedSkillOrigins(
       .filter((s) => isUserSkillPath(s.path))
       .map(async (s) => {
         const meta = await readShareMeta(s.path)
-        if (meta && meta.id === s.name) out.set(s.name, { version: meta.version, author: meta.author })
+        if (meta && meta.id === s.name)
+          out.set(s.name, { version: meta.version, author: meta.author })
       })
   )
   return out
@@ -147,7 +153,9 @@ export async function packUserSkill(name: string): Promise<PackedSkill> {
 
   const meta = await readShareMeta(skill.path)
   if (meta && !(await readShareState()).keys[meta.id]) {
-    throw new PackError(`${name} 是从共享库安装的技能，作者是 ${meta.author}，不能以你的名义再次分享。`)
+    throw new PackError(
+      `${name} 是从共享库安装的技能，作者是 ${meta.author}，不能以你的名义再次分享。`
+    )
   }
 
   const files: ShareFile[] = []
