@@ -17,7 +17,8 @@ export interface ResolvedTabRoute {
   meta: RouteMeta
 }
 
-function hasDedicatedTabInstance(route: MinimalRouteLike): boolean {
+/** 路由带有非空的 `_tab_id`，说明它是专用 tab，缓存 key 使用 fullPath */
+export function hasDedicatedTabInstance(route: MinimalRouteLike): boolean {
   const tabId = route.query?._tab_id
   return typeof tabId === 'string' && tabId.trim().length > 0
 }

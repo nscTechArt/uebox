@@ -84,7 +84,6 @@ const {
 // ========== Keyboard Shortcuts ==========
 import { onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 
-const isEditorActive = ref(false)
 const currentBlueprintId = ref(typeof route.params.id === 'string' ? route.params.id : '')
 
 const { syncTabTitle: syncBlueprintTabTitle } = useLibraryTabTitleSync(() => blueprint.value?.name)
@@ -97,26 +96,22 @@ function ensureSideMenuCollapsedForFocusMode(): void {
 
 // store 的 tab 与当前蓝图由 BlueprintLibraryLayout 按这个 tab 的路由同步
 onMounted(() => {
-  isEditorActive.value = true
   syncBlueprintTabTitle()
   startListening()
   ensureSideMenuCollapsedForFocusMode()
 })
 
 onActivated(() => {
-  isEditorActive.value = true
   syncBlueprintTabTitle()
   startListening()
   ensureSideMenuCollapsedForFocusMode()
 })
 
 onDeactivated(() => {
-  isEditorActive.value = false
   stopListening()
 })
 
 onBeforeUnmount(() => {
-  isEditorActive.value = false
   stopListening()
 })
 
@@ -188,15 +183,7 @@ async function handleApplySnippet(): Promise<void> {
   }
 }
 
-watch(
-  () => blueprint.value?.name,
-  (newName) => {
-    if (newName && isEditorActive.value) {
-      syncBlueprintTabTitle()
-    }
-  },
-  { immediate: true }
-)
+watch(() => blueprint.value?.name, syncBlueprintTabTitle, { immediate: true })
 
 // ========== 扁平 Section 列表（参考 UE5 My Blueprint 面板） ==========
 interface SectionDef {

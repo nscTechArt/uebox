@@ -1,6 +1,7 @@
 import { nextTick, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { getTabCacheKey, hasDedicatedTabInstance } from '@renderer/common/tabRoute'
 import { useTabsStore } from '@renderer/store/modules/tabs'
 import type { AIPanelMode } from '../types'
 
@@ -20,7 +21,6 @@ import type { AIPanelMode } from '../types'
  *   调用 startKeyboardListening/stopListening，保持 keep-alive 语义）
  * - 蓝图库重激活时"若仍在 focus mode 则再次请求折叠全局侧栏菜单"的联动
  *   （ensureSideMenuCollapsedForFocusMode，蓝图独有）
- * - isEditorActive 等领域编辑器自身的激活标记
  */
 export interface LibraryEditorShell {
   aiPanelMode: Ref<AIPanelMode>
@@ -199,8 +199,6 @@ export function useLibraryEditorShell(options: {
  * nextTick 后重试一次。getTitle 由领域侧提供（蓝图取 blueprint.name，材质取 entry.name）。
  */
 export interface LibraryTabTitleSync {
-  hasDedicatedTab: () => boolean
-  getCurrentTabKey: () => string | null
   syncTabTitle: () => void
 }
 
@@ -208,21 +206,11 @@ export function useLibraryTabTitleSync(getTitle: () => string | undefined): Libr
   const route = useRoute()
   const tabsStore = useTabsStore()
 
-  function hasDedicatedTab(): boolean {
-    const tabId = route.query._tab_id
-    return typeof tabId === 'string' && tabId.trim().length > 0
-  }
-
-  function getCurrentTabKey(): string | null {
-    if (!hasDedicatedTab()) return null
-    return route.fullPath
-  }
-
   function syncTabTitle(): void {
     const title = getTitle()?.trim()
     if (!title) return
-    const currentTabKey = getCurrentTabKey()
-    if (!currentTabKey) return
+    if (!hasDedicatedTabInstance(route)) return
+    const currentTabKey = getTabCacheKey(route)
 
     const updated = tabsStore.updateTabTitleByPath(currentTabKey, title)
     if (updated) return
@@ -232,5 +220,5 @@ export function useLibraryTabTitleSync(getTitle: () => string | undefined): Libr
     })
   }
 
-  return { hasDedicatedTab, getCurrentTabKey, syncTabTitle }
+  return { syncTabTitle }
 }

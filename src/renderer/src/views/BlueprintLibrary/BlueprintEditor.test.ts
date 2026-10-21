@@ -196,6 +196,41 @@ describe('BlueprintEditor UX state flows', () => {
     expect(tabsStore.historyTabs[0]?.title).toBe('BP_Test')
   })
 
+  // 编辑器读取的是自己 tab 的路由，在后台时也只会修改自己 tab 的标题
+  it('renames its own dedicated tab when the blueprint is renamed while deactivated', async () => {
+    const { pinia, router, blueprint } = await seedBlueprintEditor()
+    const tabsStore = useTabsStore()
+    const store = useBlueprintLibraryStore()
+    const targetRoute = buildBlueprintEditorRoute(blueprint.id)
+    const tabKey = `${router.resolve(targetRoute).fullPath}`
+    await router.push(targetRoute)
+    await router.isReady()
+    tabsStore.historyTabs = [
+      { key: tabKey, title: 'menu.blueprintDetail', path: tabKey, sort: 1 },
+      { key: '/other', title: 'Other', path: '/other', sort: 2 }
+    ]
+    const showEditor = ref(true)
+    const DummyPage = defineComponent({ template: '<div />' })
+    const Harness = defineComponent({
+      components: { KeepAlive },
+      setup: () => ({ showEditor, editorComponent: BlueprintEditor, dummyComponent: DummyPage }),
+      template: `
+        <KeepAlive>
+          <component :is="showEditor ? editorComponent : dummyComponent" />
+        </KeepAlive>
+      `
+    })
+    mount(Harness, { global: { plugins: [pinia, router], components: { KeepAlive } } })
+    await flushPromises()
+
+    showEditor.value = false
+    await flushPromises()
+    store.updateBlueprint(blueprint.id, { name: 'BP_Renamed' })
+    await flushPromises()
+
+    expect(tabsStore.historyTabs.map((tab) => tab.title)).toEqual(['BP_Renamed', 'Other'])
+  })
+
   it('does not rename the shared blueprint library tab when the editor route has no dedicated tab id', async () => {
     const { pinia, router, blueprint } = await seedBlueprintEditor()
     const tabsStore = useTabsStore()
