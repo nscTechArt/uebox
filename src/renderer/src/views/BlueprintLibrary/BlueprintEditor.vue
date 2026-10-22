@@ -95,7 +95,6 @@ function ensureSideMenuCollapsedForFocusMode(): void {
   }
 }
 
-// store 的 tab 与当前蓝图由 BlueprintLibraryLayout 按这个 tab 的路由同步
 onMounted(() => {
   syncBlueprintTabTitle()
   startListening()
@@ -384,6 +383,8 @@ function isLogicType(type: BlueprintElementType): type is LogicElementType {
 // 当前选中的逻辑元素（驱动中央图表区）
 const activeLogicId = ref<string | null>(null)
 const activeLogicType = ref<LogicElementType | null>(null)
+// 侧栏中高亮的元素（包括变量、组件等非逻辑元素）。每个 tab 对应一个编辑器实例，状态互不影响
+const selectedElementId = ref<string | null>(null)
 const rendererRef = ref<InstanceType<typeof BlueprintRenderer> | null>(null)
 const selectedNodesSnapshot = ref<SelectedNodeInfo[]>([])
 
@@ -439,7 +440,7 @@ function ensureActiveLogicSelection(): void {
   if (fallbackSelection) {
     activeLogicId.value = fallbackSelection.id
     activeLogicType.value = fallbackSelection.type
-    store.setActiveElement(fallbackSelection.id, fallbackSelection.type, editorTabId.value)
+    selectedElementId.value = fallbackSelection.id
     return
   }
 
@@ -473,7 +474,7 @@ function selectElement(id: string, type: BlueprintElementType): void {
   if (isSwitchingLogicTarget) {
     flushActiveRendererState()
   }
-  store.setActiveElement(id, type, editorTabId.value)
+  selectedElementId.value = id
   // 只有逻辑类型才切换中央内容区
   if (isLogicType(type)) {
     activeLogicId.value = id
@@ -482,7 +483,7 @@ function selectElement(id: string, type: BlueprintElementType): void {
 }
 
 function isActive(id: string): boolean {
-  return store.activeElementId === id
+  return selectedElementId.value === id
 }
 
 // ========== 中央图表区当前元素（只显示逻辑元素）==========
@@ -619,7 +620,6 @@ const libraryChatContext = computed<LibraryChatContext | null>(() => {
 // ========== 操作 ==========
 function goBack(): void {
   flushActiveRendererState()
-  store.setActiveElement(null, null, editorTabId.value)
   router.push({ name: 'BlueprintGallery' })
 }
 

@@ -11,7 +11,7 @@ import {
 import type { ComputedRef, ShallowRef } from 'vue'
 import { routeLocationKey, START_LOCATION, useRouter } from 'vue-router'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
-import { getTabCacheKey, getTabIdFromQuery } from '@renderer/common/tabRoute'
+import { getTabCacheKey } from '@renderer/common/tabRoute'
 import { useTabsStore } from '@renderer/store/modules/tabs'
 
 /**
@@ -32,26 +32,18 @@ import { useTabsStore } from '@renderer/store/modules/tabs'
  * 只有 `useRoute()` 和 RouterLink 会读取这份 provide，拿到本 tab 的路由；模板中的 `$route`、
  * `router.currentRoute` 读取的仍是全局路由。子树中需要本 tab 的路由时，一律使用 `useRoute()`。
  *
- * 同时把本 tab 的 `_tab_id` 和路由参数 id 同步给 store：冻结路由每变化一次（包括从
- * 别的 tab 切回，期间别的 tab 可能修改过 store）就同步一次。同步发生在路由变化的那一刻，
- * 而不是 onActivated：子页的 activated 先于 Layout 执行，如果等 Layout 再同步，子页读到的
- * 就是别的 tab 的状态。
+ * 需要按 tab 记录状态的 Layout，应自行监听返回的 `viewRoute`，并显式带上 tab id：
+ * store 中不保存「当前是哪个 tab」，读取方也就不会读到其他 tab 的状态。
  *
  * tab 关闭后释放子页（`keepChild`）：MainLayout 的 keep-alive 不会因关闭 tab 而清理缓存，
  * 被冻结的子页会一直占用内存，直到超出 max 被淘汰。Layout 壳本身仍保留在缓存中。
  */
-export function useLibraryLayout(options: {
-  /** 同步路由参数 id（null 表示列表页） */
-  syncActiveId: (id: string | null) => void
-  /** 同步 `_tab_id`（没有时为 'default'），先于 syncActiveId */
-  syncTabId?: (tabId: string) => void
-}): {
+export function useLibraryLayout(): {
   viewRoute: ShallowRef<RouteLocationNormalizedLoaded>
   keepChild: ComputedRef<boolean>
 } {
   const router = useRouter()
   const tabsStore = useTabsStore()
-  const { syncActiveId, syncTabId } = options
 
   const ownTabKey = getTabCacheKey(router.currentRoute.value)
   const viewRoute = shallowRef(router.currentRoute.value)
@@ -76,18 +68,6 @@ export function useLibraryLayout(options: {
     })
   }
   provide(routeLocationKey, shallowReactive(frozenRoute))
-
-  watch(
-    viewRoute,
-    (route) => {
-      // tab id 要先于 active id：store 按 tab 存 active id
-      syncTabId?.(getTabIdFromQuery(route.query))
-      const id = route.params.id
-      syncActiveId(typeof id === 'string' && id ? id : null)
-    },
-    // sync：切回本 tab 时要赶在子页的 activated 之前
-    { immediate: true, flush: 'sync' }
-  )
 
   // 只用于决定是否释放子页，不用于判断路由归属（后者必须用 cache key，见上）
   const isActive = ref(true)

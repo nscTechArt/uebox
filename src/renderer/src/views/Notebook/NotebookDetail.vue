@@ -276,8 +276,7 @@ const loadNotebookData = async (id: string): Promise<void> => {
     return
   }
 
-  // activeNotebookId 不在这里设置：NotebookLayout 在路由切回本 tab 时已经设置好了；
-  // 若在 await 之后再设置，用户此时切到别的 tab，就会写进其他 tab
+  // activeNotebookId 不在这里设置，由 NotebookLayout 按本 tab 的路由记录
 
   // 加载来源数据
   await notebookStore.loadSources(id)
@@ -318,7 +317,6 @@ onDeactivated(() => {
 })
 // 从缓存切回前台时刷新：停留在别的 tab 期间可能新增了来源。
 // 只处理真正从后台切回的情况：新开 tab 时 activated 也会触发，那一次由上面的 watch 负责加载
-// store 已在路由切回本 tab 时由 NotebookLayout 切换回来
 onActivated(() => {
   if (!wasDeactivated) return
   wasDeactivated = false
@@ -965,8 +963,10 @@ type ViewType =
   | 'infographic-viewer'
   | 'webpage-viewer'
   | 'brainstorm-viewer'
-const currentView = ref<ViewType>(notebookStore.detailViewType || 'assistant')
-const currentNoteId = ref<number | undefined>(notebookStore.currentNoteId ?? undefined)
+// 本 tab 上次停在哪个视图、哪条笔记，按自己的 tab id 读
+const savedTabUiState = notebookStore.ensureTabUiState(notebookTabId.value)
+const currentView = ref<ViewType>(savedTabUiState.detailViewType || 'assistant')
+const currentNoteId = ref<number | undefined>(savedTabUiState.currentNoteId ?? undefined)
 const isAutoCreate = ref(false)
 
 // Mindmap State

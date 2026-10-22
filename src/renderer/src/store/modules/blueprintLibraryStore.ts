@@ -77,12 +77,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     selectedNodeNames: string[]
   }
 
-  type EditorTabState = {
-    activeBlueprintId: string | null
-    activeElementId: string | null
-    activeElementType: BlueprintElementType | null
-  }
-
   // ========== 蓝图列表 ==========
   const blueprints = ref<Blueprint[]>([])
   const collections = ref<BlueprintCollection[]>([])
@@ -92,27 +86,15 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   const galleryViewMode = ref<BrowserViewMode>('grid')
 
   // ========== Editor 状态 ==========
-  const editorTabStates = new Map<string, EditorTabState>()
+  // 侧栏选中哪个元素由编辑器实例自行管理（每个 tab 一个实例）；
+  // 这里只按 tab 保存画布状态：视角和图中选中的节点
   const editorViewStates = new Map<string, BlueprintEditorViewState>()
-  const editorTabId = ref('default')
-  const activeBlueprintId = ref<string | null>(null)
-  const activeElementId = ref<string | null>(null)
-  const activeElementType = ref<BlueprintElementType | null>(null)
 
   // ========== 新建蓝图弹窗设置 ==========
   const createModalAdvancedExpanded = ref(false)
 
   // ========== 引擎版本列表 ==========
   const engineVersionList = computed(() => ENGINE_VERSIONS)
-
-  // ========== 计算属性 ==========
-
-  /** 当前活跃蓝图 */
-  const activeBlueprint = computed(() =>
-    activeBlueprintId.value
-      ? blueprints.value.find((bp) => bp.id === activeBlueprintId.value) || null
-      : null
-  )
 
   // ========== 工具方法 ==========
 
@@ -128,10 +110,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
 
   /** 从一份（新的或旧的）界面偏好里挑出这个 store 关心的字段并做校验 */
   function applyUiState(ui: Record<string, unknown>): void {
-    // 组件可能已经先于读取设过当前蓝图（深链进编辑器），别把它盖掉
-    if (ui.activeBlueprintId && !activeBlueprintId.value) {
-      activeBlueprintId.value = ui.activeBlueprintId as string
-    }
     if (ui.galleryViewMode === 'grid' || ui.galleryViewMode === 'list') {
       galleryViewMode.value = ui.galleryViewMode
     }
@@ -155,12 +133,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
         })
       }
     }
-
-    editorTabStates.set('default', {
-      activeBlueprintId: activeBlueprintId.value,
-      activeElementId: activeElementId.value,
-      activeElementType: activeElementType.value
-    })
   }
 
   const persistence = createLibraryPackagePersistence<Blueprint, BlueprintCollection>({
@@ -179,7 +151,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
             ? (raw.collections as BlueprintCollection[])
             : [],
           ui: {
-            activeBlueprintId: raw.activeBlueprintId,
             galleryViewMode: raw.galleryViewMode,
             editorViewStates: raw.editorViewStates
           }
@@ -221,7 +192,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
       entries: blueprints.value,
       collections: collections.value,
       ui: {
-        activeBlueprintId: activeBlueprintId.value,
         galleryViewMode: galleryViewMode.value,
         editorViewStates: Object.fromEntries(editorViewStates.entries())
       }
@@ -275,14 +245,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   function setGalleryViewMode(mode: BrowserViewMode): void {
     galleryViewMode.value = mode
     persistState()
-  }
-
-  function saveCurrentEditorTabState(): void {
-    editorTabStates.set(editorTabId.value, {
-      activeBlueprintId: activeBlueprintId.value,
-      activeElementId: activeElementId.value,
-      activeElementType: activeElementType.value
-    })
   }
 
   function buildEditorViewStateKey(
@@ -366,29 +328,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     }
   }
 
-  function setEditorTabId(tabId: string): void {
-    saveCurrentEditorTabState()
-    editorTabId.value = tabId
-
-    const savedState = editorTabStates.get(tabId)
-    if (savedState) {
-      activeBlueprintId.value = savedState.activeBlueprintId
-      activeElementId.value = savedState.activeElementId
-      activeElementType.value = savedState.activeElementType
-      return
-    }
-
-    activeBlueprintId.value = null
-    activeElementId.value = null
-    activeElementType.value = null
-    saveCurrentEditorTabState()
-  }
-
   function copyEditorStateToTabId(sourceTabId: string, targetTabId: string): void {
-    const sourceState = editorTabStates.get(sourceTabId)
-    if (!sourceState) return
-    editorTabStates.set(targetTabId, { ...sourceState })
-
     for (const [key, value] of editorViewStates.entries()) {
       const parts = key.split('::')
       if (parts[0] !== sourceTabId) continue
@@ -411,11 +351,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     }
 
     persistState()
-  }
-
-  function setActiveBlueprintId(id: string | null): void {
-    activeBlueprintId.value = id
-    saveCurrentEditorTabState()
   }
 
   // ========== CRUD ==========
@@ -472,15 +407,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
 
   function deleteBlueprint(id: string): void {
     blueprints.value = blueprints.value.filter((bp) => bp.id !== id)
-    if (activeBlueprintId.value === id) {
-      activeBlueprintId.value = null
-    }
-    for (const state of editorTabStates.values()) {
-      if (state.activeBlueprintId === id) {
-        state.activeBlueprintId = null
-      }
-    }
-    saveCurrentEditorTabState()
     removeEditorViewStatesForBlueprint(id)
     persistState()
   }
@@ -495,26 +421,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   }
 
   // ========== Editor 内部元素操作 ==========
-
-  function setActiveElement(
-    id: string | null,
-    type: BlueprintElementType | null,
-    tabId: string
-  ): void {
-    if (tabId === editorTabId.value) {
-      activeElementId.value = id
-      activeElementType.value = type
-      saveCurrentEditorTabState()
-      return
-    }
-    // 后台 tab：只修改它自己的那份，不影响前台
-    const saved = editorTabStates.get(tabId)
-    editorTabStates.set(tabId, {
-      activeBlueprintId: saved?.activeBlueprintId ?? null,
-      activeElementId: id,
-      activeElementType: type
-    })
-  }
 
   function addGraph(
     bpId: string,
@@ -604,17 +510,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
         bp.macros = bp.macros.filter((m) => m.id !== elementId)
         break
     }
-    if (activeElementId.value === elementId) {
-      activeElementId.value = null
-      activeElementType.value = null
-    }
-    for (const state of editorTabStates.values()) {
-      if (state.activeElementId === elementId) {
-        state.activeElementId = null
-        state.activeElementType = null
-      }
-    }
-    saveCurrentEditorTabState()
     bp.updatedAt = Date.now()
     removeEditorViewStatesForElement(bpId, elementId, type)
     persistState()
@@ -915,11 +810,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   //
   // 读库是异步的，但两个库的路由在进入之前会 await 这个 ready（见 mainRoutes.ts），
   // 所以组件仍然是「一挂载数据就在」，视图代码不需要动。
-  editorTabStates.set('default', {
-    activeBlueprintId: null,
-    activeElementId: null,
-    activeElementType: null
-  })
   loadCreateModalSettings()
   const ready = persistence.ready.then(() => {
     if (blueprints.value.length === 0) {
@@ -973,20 +863,14 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     collections,
     loading,
     galleryViewMode,
-    activeBlueprintId,
-    activeElementId,
-    activeElementType,
     createModalAdvancedExpanded,
     // 计算属性
-    activeBlueprint,
     engineVersionList,
     // Gallery
     setGalleryViewMode,
-    setEditorTabId,
     copyEditorStateToTabId,
     saveEditorViewState,
     getEditorViewState,
-    setActiveBlueprintId,
     // 新建蓝图弹窗设置
     setCreateModalAdvancedExpanded,
     // CRUD
@@ -995,7 +879,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     deleteBlueprint,
     toggleFavorite,
     // Editor 内部
-    setActiveElement,
     addGraph,
     addFunction,
     addVariable,

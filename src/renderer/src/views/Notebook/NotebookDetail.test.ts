@@ -263,12 +263,11 @@ describe('NotebookDetail', () => {
       rowsOf(notebookId === 'notebook-cached' ? 'cached-source' : 'front-source')
     )
 
-    // 切到别的 tab：那个 tab 打开的是另一个笔记本，store 的当前 tab 随之切换
+    // 切到别的 tab：那个 tab 打开的是另一个笔记本
     visible.value = false
     await flushPromises()
     const notebookStore = useNotebookStore()
-    notebookStore.setTabId('front-tab')
-    notebookStore.setActiveNotebookId('notebook-front')
+    notebookStore.setActiveNotebookId('notebook-front', 'front-tab')
     // 前台 tab 的详情页持有它自己的笔记本
     notebookStore.retainSources('notebook-front')
     await notebookStore.loadSources('notebook-front')

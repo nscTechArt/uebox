@@ -4,21 +4,11 @@ import type { VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter, useRoute } from 'vue-router'
 import type { Router } from 'vue-router'
-import {
-  defineComponent,
-  onActivated,
-  onBeforeUnmount,
-  onDeactivated,
-  onMounted,
-  ref,
-  watch
-} from 'vue'
+import { defineComponent, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import BlueprintLibraryLayout from '@renderer/views/BlueprintLibrary/BlueprintLibraryLayout.vue'
 import MaterialLibraryLayout from '@renderer/views/MaterialLibrary/MaterialLibraryLayout.vue'
 import NotebookLayout from '@renderer/views/Notebook/NotebookLayout.vue'
-import { useBlueprintLibraryStore } from '@renderer/store/modules/blueprintLibraryStore'
-import { useMaterialLibraryStore } from '@renderer/store/modules/materialLibraryStore'
 import { useNotebookStore } from '@renderer/store/modules/notebookStore'
 import { getTabCacheKey } from '@renderer/common/tabRoute'
 import { useTabsStore } from '@renderer/store/modules/tabs'
@@ -220,51 +210,25 @@ describe.each(layouts)('%s releases the child page when its tab is closed', (_na
   })
 })
 
-describe('active entry sync across tabs', () => {
+describe('NotebookLayout records the open notebook per tab', () => {
   afterEach(() => {
     document.body.innerHTML = ''
     localStorage.clear()
   })
 
-  it.each([
-    ['blueprint', BlueprintLibraryLayout, () => useBlueprintLibraryStore().activeBlueprintId],
-    ['material', MaterialLibraryLayout, () => useMaterialLibraryStore().activeEntryId]
-  ] as const)(
-    'restores the %s active id when returning to an editor tab',
-    async (_n, layout, activeId) => {
-      const { go } = await setup(layout, EDITOR_1)
-      expect(activeId()).toBe('x1')
+  // 从侧栏回到笔记本列表时，路由守卫按 tab 跳回它打开的笔记本：其他 tab 的路由不能改写这条记录
+  it('keeps each tab open notebook, untouched by other tabs routes', async () => {
+    const { go } = await setup(NotebookLayout, EDITOR_1)
+    const store = useNotebookStore()
+    expect(store.getActiveNotebookIdForTab('t1')).toBe('x1')
 
-      await go(EDITOR_2)
-      expect(activeId()).toBe('x2')
+    await go(EDITOR_2)
+    await go(LIST)
+    await go('/other')
+    await go(EDITOR_1)
 
-      await go('/other')
-      await go(EDITOR_1)
-      expect(activeId()).toBe('x1')
-    }
-  )
-
-  // 子页的 activated 先于 Layout 执行：store 必须在路由变化时就切换回来，子页才不必自行同步
-  it.each([
-    ['blueprint', BlueprintLibraryLayout, () => useBlueprintLibraryStore().activeBlueprintId],
-    ['material', MaterialLibraryLayout, () => useMaterialLibraryStore().activeEntryId],
-    ['notebook', NotebookLayout, () => useNotebookStore().activeNotebookId]
-  ] as const)(
-    'the %s child page already sees its own tab in its activated hook',
-    async (_n, layout, activeId) => {
-      const seenOnActivated: (string | null)[] = []
-      const ProbePage = defineComponent({
-        setup() {
-          onActivated(() => seenOnActivated.push(activeId()))
-        },
-        template: '<div />'
-      })
-      const { go } = await setup(layout, EDITOR_1, ProbePage)
-
-      await go(EDITOR_2)
-      await go(EDITOR_1)
-
-      expect(seenOnActivated.at(-1)).toBe('x1')
-    }
-  )
+    expect(store.getActiveNotebookIdForTab('t1')).toBe('x1')
+    expect(store.getActiveNotebookIdForTab('t2')).toBe('x2')
+    expect(store.getActiveNotebookIdForTab('default')).toBeNull()
+  })
 })

@@ -15,10 +15,7 @@ import { useLibraryLayout } from '@renderer/views/library-common/composables/use
 
 const store = useBlueprintLibraryStore()
 
-const { viewRoute, keepChild } = useLibraryLayout({
-  syncActiveId: (id) => store.setActiveBlueprintId(id),
-  syncTabId: (tabId) => store.setEditorTabId(tabId)
-})
+const { viewRoute, keepChild } = useLibraryLayout()
 </script>
 
 <style scoped lang="less">

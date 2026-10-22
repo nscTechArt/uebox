@@ -2,69 +2,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useBlueprintLibraryStore } from './blueprintLibraryStore'
 
-describe('blueprintLibrary store editor tab state', () => {
+describe('blueprintLibrary store editor view state', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
   })
 
-  it('isolates active blueprint and element state per editor tab', () => {
-    const store = useBlueprintLibraryStore()
-
-    store.setEditorTabId('tab-a')
-    store.setActiveBlueprintId('bp-a')
-    store.setActiveElement('graph-a', 'graph', 'tab-a')
-
-    store.setEditorTabId('tab-b')
-    expect(store.activeBlueprintId).toBeNull()
-    expect(store.activeElementId).toBeNull()
-    expect(store.activeElementType).toBeNull()
-
-    store.setActiveBlueprintId('bp-b')
-    store.setActiveElement('graph-b', 'graph', 'tab-b')
-
-    store.setEditorTabId('tab-a')
-    expect(store.activeBlueprintId).toBe('bp-a')
-    expect(store.activeElementId).toBe('graph-a')
-    expect(store.activeElementType).toBe('graph')
-
-    store.setEditorTabId('tab-b')
-    expect(store.activeBlueprintId).toBe('bp-b')
-    expect(store.activeElementId).toBe('graph-b')
-    expect(store.activeElementType).toBe('graph')
-  })
-
-  it('writes a background tab selection into its own saved state, not the foreground', () => {
-    const store = useBlueprintLibraryStore()
-
-    store.setEditorTabId('A')
-    store.setActiveElement('g2', 'graph', 'B')
-    expect(store.activeElementId).toBeNull()
-
-    store.setEditorTabId('B')
-    expect(store.activeElementId).toBe('g2')
-    expect(store.activeElementType).toBe('graph')
-  })
-
-  it('copies editor state into a duplicated tab', () => {
-    const store = useBlueprintLibraryStore()
-
-    store.setEditorTabId('source-tab')
-    store.setActiveBlueprintId('bp-source')
-    store.setActiveElement('function-source', 'function', 'source-tab')
-
-    store.copyEditorStateToTabId('source-tab', 'target-tab')
-    store.setEditorTabId('target-tab')
-
-    expect(store.activeBlueprintId).toBe('bp-source')
-    expect(store.activeElementId).toBe('function-source')
-    expect(store.activeElementType).toBe('function')
-  })
-
   it('isolates renderer view state per editor tab', () => {
     const store = useBlueprintLibraryStore()
 
-    store.setEditorTabId('tab-a')
     store.saveEditorViewState(
       'bp-a',
       'graph-a',
@@ -82,7 +28,6 @@ describe('blueprintLibrary store editor tab state', () => {
       'tab-a'
     )
 
-    store.setEditorTabId('tab-b')
     expect(store.getEditorViewState('bp-a', 'graph-a', 'graph', 'tab-b')).toBeNull()
 
     store.saveEditorViewState(
@@ -102,7 +47,6 @@ describe('blueprintLibrary store editor tab state', () => {
       'tab-b'
     )
 
-    store.setEditorTabId('tab-a')
     expect(store.getEditorViewState('bp-a', 'graph-a', 'graph', 'tab-a')).toEqual({
       zoom: -2,
       scrollX: 1200,
@@ -114,7 +58,6 @@ describe('blueprintLibrary store editor tab state', () => {
       selectedNodeNames: ['NodeA', 'NodeB']
     })
 
-    store.setEditorTabId('tab-b')
     expect(store.getEditorViewState('bp-a', 'graph-a', 'graph', 'tab-b')).toEqual({
       zoom: 1,
       scrollX: 2400,
@@ -130,7 +73,6 @@ describe('blueprintLibrary store editor tab state', () => {
   it('copies renderer view state into a duplicated tab', () => {
     const store = useBlueprintLibraryStore()
 
-    store.setEditorTabId('source-tab')
     store.saveEditorViewState(
       'bp-source',
       'graph-source',
@@ -149,7 +91,6 @@ describe('blueprintLibrary store editor tab state', () => {
     )
 
     store.copyEditorStateToTabId('source-tab', 'target-tab')
-    store.setEditorTabId('target-tab')
 
     expect(store.getEditorViewState('bp-source', 'graph-source', 'graph', 'target-tab')).toEqual({
       zoom: -4,

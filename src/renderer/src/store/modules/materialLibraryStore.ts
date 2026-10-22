@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import {
   createEmptyGraphSummary,
   getMaterialCoverStyle,
@@ -20,7 +20,7 @@ import { clearLegacyLocalStorage, readLegacyLibrarySnapshot } from './libraryLeg
 /** 旧版把整库写在这个 localStorage 键下，现在只在首次迁移时读一次 */
 const LEGACY_PERSIST_KEY = 'material-library-v2-state'
 
-/** 界面偏好（视图模式、当前条目、liveSearchPath）留在 localStorage —— 它本来就该放这儿 */
+/** 界面偏好（视图模式、liveSearchPath）留在 localStorage —— 它本来就该放这儿 */
 const UI_STATE_KEY = 'material-library-ui'
 
 function readUiPrefs(): Record<string, unknown> {
@@ -171,12 +171,8 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   const entries = ref<MaterialEntry[]>([])
   const collections = ref<MaterialCollection[]>([])
   const loading = ref(false)
-  const activeEntryId = ref<string | null>(null)
   const viewMode = ref<BrowserViewMode>('grid')
   const liveSearchPath = ref('/Game')
-  const activeEntry = computed(
-    () => entries.value.find((entry) => entry.id === activeEntryId.value) || null
-  )
 
   /**
    * 持久化。
@@ -193,7 +189,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
    * 并在下次落盘时重试。老用户在 SQLite / 旧 localStorage 里那份，首次打开时自动搬成包。
    */
   function applyUiState(ui: Record<string, unknown>): void {
-    if (typeof ui.activeEntryId === 'string') activeEntryId.value = ui.activeEntryId
     if (ui.viewMode === 'grid' || ui.viewMode === 'list') viewMode.value = ui.viewMode
     if (typeof ui.liveSearchPath === 'string') liveSearchPath.value = ui.liveSearchPath
   }
@@ -214,7 +209,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
             ? (raw.collections as MaterialCollection[])
             : [],
           ui: {
-            activeEntryId: raw.activeEntryId,
             viewMode: raw.viewMode,
             liveSearchPath: raw.liveSearchPath
           }
@@ -225,7 +219,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
       entries: entries.value,
       collections: collections.value,
       ui: {
-        activeEntryId: activeEntryId.value,
         viewMode: viewMode.value,
         liveSearchPath: liveSearchPath.value
       }
@@ -330,12 +323,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     persistState()
   }
 
-  function setActiveEntryId(id: string | null): void {
-    if (activeEntryId.value === id) return
-    activeEntryId.value = id
-    persistState()
-  }
-
   function setLoading(value: boolean): void {
     loading.value = value
   }
@@ -374,10 +361,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
 
     for (const collectionId of affectedCollectionIds) {
       releaseCollectionIfTooSmall(collectionId)
-    }
-
-    if (activeEntryId.value === id) {
-      activeEntryId.value = null
     }
 
     persistState()
@@ -672,13 +655,10 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     entries,
     collections,
     loading,
-    activeEntryId,
-    activeEntry,
     viewMode,
     liveSearchPath,
     upsertEntries,
     importLegacyEntries,
-    setActiveEntryId,
     setLoading,
     setViewMode,
     setLiveSearchPath,

@@ -72,25 +72,12 @@ const createDefaultRuntimeState = (): NotebookRuntimeState => ({
  */
 export const useNotebookStore = defineStore('notebook', {
   state: () => ({
-    _tabId: 'default' as string,
     tabUiStates: {} as Record<string, NotebookUiTabState>,
     notebookRuntimeStates: {} as Record<string, NotebookRuntimeState>,
     sourceHolders: {} as Record<string, number>
   }),
 
   getters: {
-    activeNotebookId(state): string | null {
-      return state.tabUiStates[state._tabId]?.activeNotebookId ?? null
-    },
-
-    detailViewType(state): NotebookDetailViewType {
-      return state.tabUiStates[state._tabId]?.detailViewType ?? 'assistant'
-    },
-
-    currentNoteId(state): number | null {
-      return state.tabUiStates[state._tabId]?.currentNoteId ?? null
-    },
-
     /**
      * 指定笔记本的来源，与它是否位于前台 tab 无关。
      *
@@ -142,29 +129,22 @@ export const useNotebookStore = defineStore('notebook', {
       return this.notebookRuntimeStates[notebookId]
     },
 
-    setTabId(tabId: string): void {
-      const normalizedTabId = this.normalizeTabId(tabId)
-      this._tabId = normalizedTabId
-      this.ensureTabUiState(normalizedTabId)
-    },
-
     getActiveNotebookIdForTab(tabId: string): string | null {
-      const uiState = this.ensureTabUiState(this.normalizeTabId(tabId))
-      return uiState.activeNotebookId
+      return this.ensureTabUiState(tabId).activeNotebookId
     },
 
     copyStateToTabId(sourceTabId: string, targetTabId: string): void {
-      const sourceUiState = this.ensureTabUiState(this.normalizeTabId(sourceTabId))
+      const sourceUiState = this.ensureTabUiState(sourceTabId)
       const normalizedTargetTabId = this.normalizeTabId(targetTabId)
 
       this.tabUiStates[normalizedTargetTabId] = { ...sourceUiState }
     },
 
     /**
-     * Set the active notebook id for the current tab.
+     * Set the active notebook id for a tab.
      */
-    setActiveNotebookId(id: string | null) {
-      this.ensureTabUiState(this._tabId).activeNotebookId = id
+    setActiveNotebookId(id: string | null, tabId: string) {
+      this.ensureTabUiState(tabId).activeNotebookId = id
     },
 
     /**
@@ -407,7 +387,7 @@ export const useNotebookStore = defineStore('notebook', {
      * 来源按笔记本存储，其他 tab 可能还打开着同一个笔记本，因此不清空。
      */
     clearActiveNotebook(tabId: string) {
-      const uiState = this.ensureTabUiState(this.normalizeTabId(tabId))
+      const uiState = this.ensureTabUiState(tabId)
 
       uiState.activeNotebookId = null
       uiState.detailViewType = 'assistant'

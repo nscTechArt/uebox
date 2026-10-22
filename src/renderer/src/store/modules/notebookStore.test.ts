@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNotebookStore, type SourceItem } from './notebookStore'
 
-/** 前台 tab 当前展示的来源：store 只按笔记本提供，前台是哪个笔记本由 tab 状态决定 */
-function frontSources(store: ReturnType<typeof useNotebookStore>): SourceItem[] {
-  return store.activeNotebookId ? store.sourcesOf(store.activeNotebookId) : []
+/** 某个 tab 展示的来源：store 只按笔记本提供，tab 打开的是哪个笔记本由它的界面状态决定 */
+function tabSources(store: ReturnType<typeof useNotebookStore>, tabId: string): SourceItem[] {
+  const notebookId = store.getActiveNotebookIdForTab(tabId)
+  return notebookId ? store.sourcesOf(notebookId) : []
 }
 
 describe('notebookStore tab isolation', () => {
@@ -16,45 +17,46 @@ describe('notebookStore tab isolation', () => {
   it('keeps notebook ui state isolated per tab', () => {
     const store = useNotebookStore()
 
-    store.setTabId('tab-a')
-    store.setActiveNotebookId('notebook-a')
+    store.setActiveNotebookId('notebook-a', 'tab-a')
     store.setDetailViewType('note-editor', 'tab-a')
     store.setCurrentNoteId(101, 'tab-a')
 
-    store.setTabId('tab-b')
-    expect(store.activeNotebookId).toBeNull()
-    expect(store.detailViewType).toBe('assistant')
-    expect(store.currentNoteId).toBeNull()
+    expect(store.ensureTabUiState('tab-b')).toEqual({
+      activeNotebookId: null,
+      detailViewType: 'assistant',
+      currentNoteId: null
+    })
 
-    store.setActiveNotebookId('notebook-b')
+    store.setActiveNotebookId('notebook-b', 'tab-b')
     store.setDetailViewType('source-preview', 'tab-b')
     store.setCurrentNoteId(202, 'tab-b')
 
-    store.setTabId('tab-a')
-    expect(store.activeNotebookId).toBe('notebook-a')
-    expect(store.detailViewType).toBe('note-editor')
-    expect(store.currentNoteId).toBe(101)
-
-    store.setTabId('tab-b')
-    expect(store.activeNotebookId).toBe('notebook-b')
-    expect(store.detailViewType).toBe('source-preview')
-    expect(store.currentNoteId).toBe(202)
+    expect(store.ensureTabUiState('tab-a')).toEqual({
+      activeNotebookId: 'notebook-a',
+      detailViewType: 'note-editor',
+      currentNoteId: 101
+    })
+    expect(store.ensureTabUiState('tab-b')).toEqual({
+      activeNotebookId: 'notebook-b',
+      detailViewType: 'source-preview',
+      currentNoteId: 202
+    })
   })
 
   it('copies notebook tab state when a tab is duplicated', () => {
     const store = useNotebookStore()
 
-    store.setTabId('source-tab')
-    store.setActiveNotebookId('notebook-source')
+    store.setActiveNotebookId('notebook-source', 'source-tab')
     store.setDetailViewType('note-editor', 'source-tab')
     store.setCurrentNoteId(88, 'source-tab')
 
     store.copyStateToTabId('source-tab', 'target-tab')
-    store.setTabId('target-tab')
 
-    expect(store.activeNotebookId).toBe('notebook-source')
-    expect(store.detailViewType).toBe('note-editor')
-    expect(store.currentNoteId).toBe(88)
+    expect(store.ensureTabUiState('target-tab')).toEqual({
+      activeNotebookId: 'notebook-source',
+      detailViewType: 'note-editor',
+      currentNoteId: 88
+    })
   })
 })
 
@@ -88,40 +90,34 @@ describe('notebookStore sources per notebook', () => {
     vi.unstubAllGlobals()
   })
 
-  it('keeps the foreground tab untouched when a background notebook loads or updates', async () => {
+  it('keeps the other tab untouched when a background notebook loads or updates', async () => {
     const store = useNotebookStore()
     store.retainSources('notebook-a')
     store.retainSources('notebook-b')
-    store.setTabId('tab-a')
-    store.setActiveNotebookId('notebook-a')
+    store.setActiveNotebookId('notebook-a', 'tab-a')
     await store.loadSources('notebook-a')
-    store.setTabId('tab-b')
-    store.setActiveNotebookId('notebook-b')
+    store.setActiveNotebookId('notebook-b', 'tab-b')
     await store.loadSources('notebook-b')
 
     await store.loadSources('notebook-a')
     await store.updateSource('notebook-a', 'a-1', { title: 'renamed' })
 
-    expect(frontSources(store).map((s) => s.id)).toEqual(['b-1'])
-    store.setTabId('tab-a')
-    expect(frontSources(store).map((s) => s.title)).toEqual(['renamed'])
+    expect(tabSources(store, 'tab-b').map((s) => s.id)).toEqual(['b-1'])
+    expect(tabSources(store, 'tab-a').map((s) => s.title)).toEqual(['renamed'])
   })
 
   it('shows the same sources in two tabs that open the same notebook', async () => {
     const store = useNotebookStore()
-    store.setTabId('tab-1')
-    store.setActiveNotebookId('notebook-a')
-    store.setTabId('tab-2')
-    store.setActiveNotebookId('notebook-a')
+    store.setActiveNotebookId('notebook-a', 'tab-1')
+    store.setActiveNotebookId('notebook-a', 'tab-2')
     store.retainSources('notebook-a')
     store.retainSources('notebook-a')
     await store.loadSources('notebook-a')
 
     await store.updateSource('notebook-a', 'a-1', { title: 'renamed' })
 
-    expect(frontSources(store).map((s) => s.title)).toEqual(['renamed'])
-    store.setTabId('tab-1')
-    expect(frontSources(store).map((s) => s.title)).toEqual(['renamed'])
+    expect(tabSources(store, 'tab-2').map((s) => s.title)).toEqual(['renamed'])
+    expect(tabSources(store, 'tab-1').map((s) => s.title)).toEqual(['renamed'])
   })
 
   // 后台详情页扫描完文件夹后才添加来源，查重应针对它自己的笔记本，而不是用户当前在看的那个
@@ -139,8 +135,7 @@ describe('notebookStore sources per notebook', () => {
     store.retainSources('notebook-a')
     store.retainSources('notebook-b')
     await store.loadSources('notebook-a')
-    store.setTabId('tab-b')
-    store.setActiveNotebookId('notebook-b')
+    store.setActiveNotebookId('notebook-b', 'tab-b')
     await store.loadSources('notebook-b')
 
     const isDuplicateInA = (filePath: string): boolean =>
@@ -327,8 +322,7 @@ describe('notebookStore sources per notebook', () => {
     store.retainSources('notebook-a')
     store.retainSources('notebook-b')
     await store.loadSources('notebook-a')
-    store.setTabId('tab-b')
-    store.setActiveNotebookId('notebook-b')
+    store.setActiveNotebookId('notebook-b', 'tab-b')
     await store.loadSources('notebook-b')
 
     vi.mocked(window.api.notebook.updateSource).mockRejectedValueOnce(new Error('db down'))

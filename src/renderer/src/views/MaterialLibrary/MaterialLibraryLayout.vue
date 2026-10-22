@@ -15,9 +15,7 @@ import { useLibraryLayout } from '@renderer/views/library-common/composables/use
 
 const store = useMaterialLibraryStore()
 
-const { viewRoute, keepChild } = useLibraryLayout({
-  syncActiveId: (id) => store.setActiveEntryId(id)
-})
+const { viewRoute, keepChild } = useLibraryLayout()
 </script>
 
 <style scoped lang="less">

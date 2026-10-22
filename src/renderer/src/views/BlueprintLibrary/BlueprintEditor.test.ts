@@ -105,7 +105,6 @@ async function seedBlueprintEditor() {
     blueprintType: 'Actor',
     engineVersion: '5.4'
   })
-  store.setActiveBlueprintId(blueprint.id)
 
   const router = createRouterForTest()
   router.push(`/blueprint-library/${blueprint.id}`)
@@ -232,8 +231,8 @@ describe('BlueprintEditor UX state flows', () => {
     expect(tabsStore.historyTabs.map((tab) => tab.title)).toEqual(['BP_Renamed', 'Other'])
   })
 
-  // 后台编辑器中选中的图被删除时，兜底选择只写入它自己 tab 的存档，不覆盖前台 tab
-  it('writes a deactivated editor fallback selection into its own tab, not the foreground tab', async () => {
+  // 后台编辑器中选中的图被删除时，编辑器自行退回默认图；高亮状态属于编辑器实例，切回时显示的就是默认图
+  it('falls back to the default graph highlight on its own while deactivated', async () => {
     const { pinia, router, blueprint } = await seedBlueprintEditor()
     const store = useBlueprintLibraryStore()
 
@@ -262,8 +261,6 @@ describe('BlueprintEditor UX state flows', () => {
 
     await router.push(`/blueprint-library/${blueprint.id}?_tab_id=t1`)
     await router.isReady()
-    store.setEditorTabId('t1')
-    store.setActiveBlueprintId(blueprint.id)
 
     const showEditor = ref(true)
     const DummyPage = defineComponent({ template: '<div />' })
@@ -288,19 +285,23 @@ describe('BlueprintEditor UX state flows', () => {
     await graphItem!.trigger('click')
     await nextTick()
 
+    const activeItems = (): string[] =>
+      wrapper.findAll('.tree-item.active').map((node) => node.text())
+    expect(activeItems().some((text) => text.includes('BP_Graph_G'))).toBe(true)
+
     showEditor.value = false
     await flushPromises()
-
-    store.setEditorTabId('t2')
-    store.setActiveElement(H.id, 'graph', 't2')
 
     store.removeElement(blueprint.id, G.id, 'graph')
     await flushPromises()
 
-    expect(store.activeElementId).toBe(H.id)
+    showEditor.value = true
+    await flushPromises()
 
-    store.setEditorTabId('t1')
-    expect(store.activeElementId).toBe(F.id)
+    const active = activeItems()
+    expect(active).toHaveLength(1)
+    expect(active[0]).toContain(F.name)
+    expect(active[0]).not.toContain(H.name)
   })
 
   it('does not rename the shared blueprint library tab when the editor route has no dedicated tab id', async () => {
@@ -435,7 +436,7 @@ describe('BlueprintEditor UX state flows', () => {
 
   /**
    * 渲染器按 tab 存视图状态：编辑器把自己 tab 的 id（冻结路由上的 _tab_id）
-   * 传给渲染器，不要让它读取 store 中的「当前 tab」—— 用户切走之后那就是别的 tab 了。
+   * 传给渲染器，视图状态按它存。
    */
   it('passes the route tab id to the renderer', async () => {
     const { pinia, router, blueprint } = await seedBlueprintEditor()
