@@ -27,10 +27,6 @@ describe('notebookStore persistence', () => {
 
     const saved = localStorage.getItem('notebook-store')
     expect(saved).not.toBeNull()
-    expect(Object.keys(JSON.parse(saved!)).sort()).toEqual([
-      'leftColWidth',
-      'rightColWidth',
-      'tabUiStates'
-    ])
+    expect(Object.keys(JSON.parse(saved!))).toEqual(['tabUiStates'])
   })
 })

@@ -61,8 +61,6 @@ const createDefaultRuntimeState = (): NotebookRuntimeState => ({
   loadSourcesRequestId: 0
 })
 
-let legacyNotebookStateMigrated = false
-
 /**
  * Notebook module state management.
  * UI state is stored per tab. Source content is cached per notebook in memory
@@ -77,9 +75,7 @@ export const useNotebookStore = defineStore('notebook', {
     _tabId: 'default' as string,
     tabUiStates: {} as Record<string, NotebookUiTabState>,
     notebookRuntimeStates: {} as Record<string, NotebookRuntimeState>,
-    sourceHolders: {} as Record<string, number>,
-    leftColWidth: 300,
-    rightColWidth: 320
+    sourceHolders: {} as Record<string, number>
   }),
 
   getters: {
@@ -129,50 +125,6 @@ export const useNotebookStore = defineStore('notebook', {
   },
 
   actions: {
-    migrateLegacyPersistedState() {
-      if (legacyNotebookStateMigrated) return
-      legacyNotebookStateMigrated = true
-
-      try {
-        const raw = localStorage.getItem(NOTEBOOK_STORE_KEY)
-        if (!raw) return
-
-        const data = JSON.parse(raw) as Partial<{
-          tabUiStates: Record<string, NotebookUiTabState>
-          activeNotebookId: string | null
-          detailViewType: NotebookDetailViewType
-          currentNoteId: number | null
-          leftColWidth: number
-          rightColWidth: number
-        }>
-
-        if (data.tabUiStates && Object.keys(data.tabUiStates).length > 0) {
-          return
-        }
-
-        const hasLegacyUiState =
-          'activeNotebookId' in data || 'detailViewType' in data || 'currentNoteId' in data
-        if (!hasLegacyUiState) {
-          return
-        }
-
-        this.tabUiStates.default = {
-          activeNotebookId: data.activeNotebookId ?? null,
-          detailViewType: data.detailViewType ?? 'assistant',
-          currentNoteId: data.currentNoteId ?? null
-        }
-
-        if (typeof data.leftColWidth === 'number') {
-          this.leftColWidth = data.leftColWidth
-        }
-        if (typeof data.rightColWidth === 'number') {
-          this.rightColWidth = data.rightColWidth
-        }
-      } catch (error) {
-        console.warn('[notebookStore] Failed to migrate legacy persisted state:', error)
-      }
-    },
-
     normalizeTabId(tabId: string | null | undefined): string {
       return String(tabId || '').trim() || 'default'
     },
@@ -191,21 +143,17 @@ export const useNotebookStore = defineStore('notebook', {
     },
 
     setTabId(tabId: string): void {
-      this.migrateLegacyPersistedState()
       const normalizedTabId = this.normalizeTabId(tabId)
       this._tabId = normalizedTabId
       this.ensureTabUiState(normalizedTabId)
     },
 
     getActiveNotebookIdForTab(tabId: string): string | null {
-      this.migrateLegacyPersistedState()
       const uiState = this.ensureTabUiState(this.normalizeTabId(tabId))
       return uiState.activeNotebookId
     },
 
     copyStateToTabId(sourceTabId: string, targetTabId: string): void {
-      this.migrateLegacyPersistedState()
-
       const sourceUiState = this.ensureTabUiState(this.normalizeTabId(sourceTabId))
       const normalizedTargetTabId = this.normalizeTabId(targetTabId)
 
@@ -238,14 +186,6 @@ export const useNotebookStore = defineStore('notebook', {
      */
     setCurrentNoteId(noteId: number | null, tabId: string) {
       this.ensureTabUiState(tabId).currentNoteId = noteId
-    },
-
-    setLeftColWidth(width: number) {
-      this.leftColWidth = width
-    },
-
-    setRightColWidth(width: number) {
-      this.rightColWidth = width
     },
 
     /**
@@ -540,7 +480,7 @@ export const useNotebookStore = defineStore('notebook', {
   persist: {
     key: NOTEBOOK_STORE_KEY,
     storage: localStorage,
-    pick: ['tabUiStates', 'leftColWidth', 'rightColWidth']
+    pick: ['tabUiStates']
   }
 })
 
