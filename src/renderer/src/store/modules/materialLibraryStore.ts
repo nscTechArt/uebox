@@ -230,29 +230,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     persistence.persist()
   }
 
-  function releaseCollectionIfTooSmall(collectionId: string): void {
-    const collection = collections.value.find((item) => item.id === collectionId)
-    if (!collection) return
-
-    const memberIds = entries.value
-      .filter((entry) => entry.collectionId === collectionId)
-      .map((entry) => entry.id)
-    const memberIdSet = new Set(memberIds)
-    collection.entryIds = [
-      ...collection.entryIds.filter((entryId) => memberIdSet.has(entryId)),
-      ...memberIds.filter((entryId) => !collection.entryIds.includes(entryId))
-    ]
-
-    if (collection.entryIds.length > 1) return
-
-    for (const entry of entries.value) {
-      if (entry.collectionId === collectionId) {
-        entry.collectionId = undefined
-      }
-    }
-    collections.value = collections.value.filter((item) => item.id !== collectionId)
-  }
-
   function findExistingEntry(incoming: MaterialEntry): MaterialEntry | undefined {
     return entries.value.find((entry) => {
       if (
@@ -331,22 +308,10 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   }
 
   function deleteEntry(id: string): void {
-    const entry = entries.value.find((item) => item.id === id)
-    const affectedCollectionIds = new Set<string>()
-    if (entry?.collectionId) affectedCollectionIds.add(entry.collectionId)
-
-    for (const collection of collections.value) {
-      if (collection.entryIds.includes(id)) affectedCollectionIds.add(collection.id)
-    }
-
     entries.value = entries.value.filter((item) => item.id !== id)
 
     for (const collection of collections.value) {
       collection.entryIds = collection.entryIds.filter((entryId) => entryId !== id)
-    }
-
-    for (const collectionId of affectedCollectionIds) {
-      releaseCollectionIfTooSmall(collectionId)
     }
 
     persistState()
@@ -471,49 +436,12 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     persistState()
   }
 
-  function createCollection(name: string, entryIds: string[] = []): MaterialCollection | null {
-    const normalizedName = name.trim()
-    if (!normalizedName) return null
-    const existingEntryIds = [...new Set(entryIds)].filter((entryId) =>
-      entries.value.some((entry) => entry.id === entryId)
-    )
-    const collection: MaterialCollection = {
-      id: generateCollectionId(normalizedName),
-      name: normalizedName,
-      entryIds: existingEntryIds,
-      createdAt: Date.now()
-    }
-    collections.value.push(collection)
-
-    const previousCollectionIds = new Set<string>()
-    for (const entryId of existingEntryIds) {
-      const entry = entries.value.find((item) => item.id === entryId)
-      if (!entry) continue
-      if (entry.collectionId && entry.collectionId !== collection.id) {
-        previousCollectionIds.add(entry.collectionId)
-        const previousCollection = collections.value.find((item) => item.id === entry.collectionId)
-        if (previousCollection) {
-          previousCollection.entryIds = previousCollection.entryIds.filter((id) => id !== entry.id)
-        }
-      }
-      entry.collectionId = collection.id
-    }
-
-    for (const previousCollectionId of previousCollectionIds) {
-      releaseCollectionIfTooSmall(previousCollectionId)
-    }
-
-    persistState()
-    return collection
-  }
-
   /**
    * 把一批材质移到某个文件夹。`folderKey` 传空串表示移回根目录。
    *
-   * 跟上面那套集合操作的区别只有一条但很要紧：**不会自动解散**。
-   * `releaseCollectionIfTooSmall` 在集合剩 ≤1 个成员时把集合整个删掉 —— 那是
+   * **不会自动解散**：旧的集合操作会在集合剩 ≤1 个成员时把集合整个删掉 —— 那是
    * iOS 桌面文件夹的脾气，放在库里就是「我把最后一个拖出来，文件夹没了」。
-   * 文件夹是用户建的地方，空着也该在。
+   * 文件夹是用户建的地方，空着也该在；删掉其中的材质也一样。
    *
    * 材质落成保管库里的包之后，这里的 `collectionId` 换成真实目录路径，签名不变。
    */
@@ -540,7 +468,17 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
 
   /** 新建一个空文件夹。空着也留着 —— 用户建它就是为了往里放东西。 */
   function createFolder(name: string): MaterialCollection | null {
-    return createCollection(name, [])
+    const normalizedName = name.trim()
+    if (!normalizedName) return null
+    const collection: MaterialCollection = {
+      id: generateCollectionId(normalizedName),
+      name: normalizedName,
+      entryIds: [],
+      createdAt: Date.now()
+    }
+    collections.value.push(collection)
+    persistState()
+    return collection
   }
 
   function renameCollection(collectionId: string, name: string): boolean {
@@ -588,7 +526,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     toggleFavorite,
     createDraftMaterial,
     updateGraphCode,
-    createCollection,
     moveEntriesToFolder,
     createFolder,
     renameCollection,

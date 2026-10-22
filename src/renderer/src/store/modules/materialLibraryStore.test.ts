@@ -119,6 +119,23 @@ describe('materialLibraryStore', () => {
     expect(store.entries[0]?.collectionId).toBeUndefined()
   })
 
+  it('删掉文件夹里的材质时，文件夹留着 —— 剩一个、剩零个都不解散', () => {
+    const store = useMaterialLibraryStore()
+    store.upsertEntries([
+      createEntry({ id: 'material-8', name: 'M_Left', assetPath: '/Game/Materials/M_Left' }),
+      createEntry({ id: 'material-9', name: 'M_Right', assetPath: '/Game/Materials/M_Right' })
+    ])
+    const folder = store.createFolder('Pair')
+    store.moveEntriesToFolder(['material-8', 'material-9'], folder?.id || '')
+
+    store.deleteEntry('material-8')
+    expect(store.collections.find((c) => c.id === folder?.id)?.entryIds).toEqual(['material-9'])
+    expect(store.entries.find((e) => e.id === 'material-9')?.collectionId).toBe(folder?.id)
+
+    store.deleteEntry('material-9')
+    expect(store.collections.find((c) => c.id === folder?.id)?.entryIds).toEqual([])
+  })
+
   it('creates a local draft material entry without Unreal connectivity', () => {
     const store = useMaterialLibraryStore()
 
