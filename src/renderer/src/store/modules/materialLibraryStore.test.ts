@@ -103,13 +103,12 @@ describe('materialLibraryStore', () => {
     const entry = createEntry({ id: 'material-2' })
 
     store.upsertEntries([entry])
-    const created = store.createCollection(' Metals ')
+    const created = store.createFolder(' Metals ')
 
     expect(created?.name).toBe('Metals')
 
-    store.assignToCollection('material-2', created?.id || null)
+    store.moveEntriesToFolder(['material-2'], created?.id || '')
     expect(store.entries[0]?.collectionId).toBe(created?.id)
-    expect(store.getCollectionEntries(created?.id || '')).toHaveLength(1)
 
     expect(store.renameCollection(created?.id || '', 'Hero Metals')).toBe(true)
     expect(store.collections[0]?.name).toBe('Hero Metals')
@@ -118,25 +117,6 @@ describe('materialLibraryStore', () => {
 
     expect(store.collections).toHaveLength(0)
     expect(store.entries[0]?.collectionId).toBeUndefined()
-  })
-
-  it('dissolves material collections when removal leaves one entry', () => {
-    const store = useMaterialLibraryStore()
-    store.upsertEntries([
-      createEntry({ id: 'material-8', name: 'M_Left', assetPath: '/Game/Materials/M_Left' }),
-      createEntry({ id: 'material-9', name: 'M_Right', assetPath: '/Game/Materials/M_Right' })
-    ])
-    const collection = store.createCollection('Pair', ['material-8', 'material-9'])
-    expect(collection?.entryIds).toEqual(['material-8', 'material-9'])
-    expect(store.entries.find((entry) => entry.id === 'material-9')?.collectionId).toBe(
-      collection?.id
-    )
-
-    store.assignToCollection('material-8', null)
-
-    expect(store.collections).toHaveLength(0)
-    expect(store.entries.find((entry) => entry.id === 'material-8')?.collectionId).toBeUndefined()
-    expect(store.entries.find((entry) => entry.id === 'material-9')?.collectionId).toBeUndefined()
   })
 
   it('creates a local draft material entry without Unreal connectivity', () => {

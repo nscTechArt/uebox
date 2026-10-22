@@ -20,7 +20,7 @@ import { clearLegacyLocalStorage, readLegacyLibrarySnapshot } from './libraryLeg
 /** 旧版把整库写在这个 localStorage 键下，现在只在首次迁移时读一次 */
 const LEGACY_PERSIST_KEY = 'material-library-v2-state'
 
-/** 界面偏好（视图模式、liveSearchPath）留在 localStorage —— 它本来就该放这儿 */
+/** 界面偏好（视图模式）留在 localStorage —— 它本来就该放这儿 */
 const UI_STATE_KEY = 'material-library-ui'
 
 function readUiPrefs(): Record<string, unknown> {
@@ -170,9 +170,7 @@ function mergeDependencyRecords<
 export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   const entries = ref<MaterialEntry[]>([])
   const collections = ref<MaterialCollection[]>([])
-  const loading = ref(false)
   const viewMode = ref<BrowserViewMode>('grid')
-  const liveSearchPath = ref('/Game')
 
   /**
    * 持久化。
@@ -190,7 +188,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
    */
   function applyUiState(ui: Record<string, unknown>): void {
     if (ui.viewMode === 'grid' || ui.viewMode === 'list') viewMode.value = ui.viewMode
-    if (typeof ui.liveSearchPath === 'string') liveSearchPath.value = ui.liveSearchPath
   }
 
   const persistence = createLibraryPackagePersistence<MaterialEntry, MaterialCollection>({
@@ -209,8 +206,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
             ? (raw.collections as MaterialCollection[])
             : [],
           ui: {
-            viewMode: raw.viewMode,
-            liveSearchPath: raw.liveSearchPath
+            viewMode: raw.viewMode
           }
         })
       }),
@@ -219,8 +215,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
       entries: entries.value,
       collections: collections.value,
       ui: {
-        viewMode: viewMode.value,
-        liveSearchPath: liveSearchPath.value
+        viewMode: viewMode.value
       }
     }),
     applySnapshot: (snapshot) => {
@@ -323,17 +318,8 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     persistState()
   }
 
-  function setLoading(value: boolean): void {
-    loading.value = value
-  }
-
   function setViewMode(mode: BrowserViewMode): void {
     viewMode.value = mode
-    persistState()
-  }
-
-  function setLiveSearchPath(path: string): void {
-    liveSearchPath.value = path || '/Game'
     persistState()
   }
 
@@ -370,14 +356,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     const entry = entries.value.find((item) => item.id === id)
     if (!entry) return
     entry.isFavorite = !entry.isFavorite
-    entry.updatedAt = Date.now()
-    persistState()
-  }
-
-  function setTags(id: string, tags: string[]): void {
-    const entry = entries.value.find((item) => item.id === id)
-    if (!entry) return
-    entry.tags = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))]
     entry.updatedAt = Date.now()
     persistState()
   }
@@ -585,59 +563,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     persistState()
   }
 
-  function assignToCollection(entryId: string, collectionId: string | null): void {
-    const entry = entries.value.find((item) => item.id === entryId)
-    if (!entry) return
-    if (entry.collectionId === collectionId) {
-      if (collectionId) {
-        const collection = collections.value.find((item) => item.id === collectionId)
-        if (collection && !collection.entryIds.includes(entry.id)) {
-          collection.entryIds.push(entry.id)
-          persistState()
-        }
-      }
-      return
-    }
-
-    const previousCollectionId = entry.collectionId
-
-    if (previousCollectionId) {
-      const previousCollection = collections.value.find((item) => item.id === previousCollectionId)
-      if (previousCollection) {
-        previousCollection.entryIds = previousCollection.entryIds.filter((id) => id !== entry.id)
-      }
-      entry.collectionId = undefined
-      releaseCollectionIfTooSmall(previousCollectionId)
-    }
-
-    if (collectionId) {
-      const nextCollection = collections.value.find((item) => item.id === collectionId)
-      if (nextCollection) {
-        entry.collectionId = collectionId
-        if (!nextCollection.entryIds.includes(entry.id)) {
-          nextCollection.entryIds.push(entry.id)
-        }
-      }
-    }
-
-    persistState()
-  }
-
-  function getCollectionEntries(collectionId: string): MaterialEntry[] {
-    const collection = collections.value.find((item) => item.id === collectionId)
-    if (!collection) return entries.value.filter((entry) => entry.collectionId === collectionId)
-
-    const entriesById = new Map(entries.value.map((entry) => [entry.id, entry]))
-    const orderedEntries = collection.entryIds
-      .map((entryId) => entriesById.get(entryId))
-      .filter((entry): entry is MaterialEntry => !!entry && entry.collectionId === collectionId)
-    const orderedIds = new Set(orderedEntries.map((entry) => entry.id))
-    const unlistedEntries = entries.value.filter(
-      (entry) => entry.collectionId === collectionId && !orderedIds.has(entry.id)
-    )
-    return [...orderedEntries, ...unlistedEntries]
-  }
-
   // 读库是异步的，但材质库的路由在进入之前会 await 这个 ready（见 mainRoutes.ts），
   // 所以组件仍然是「一挂载数据就在」，视图代码不需要动。
   const ready = persistence.ready
@@ -654,18 +579,13 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
 
     entries,
     collections,
-    loading,
     viewMode,
-    liveSearchPath,
     upsertEntries,
     importLegacyEntries,
-    setLoading,
     setViewMode,
-    setLiveSearchPath,
     updateEntry,
     deleteEntry,
     toggleFavorite,
-    setTags,
     createDraftMaterial,
     updateGraphCode,
     createCollection,
@@ -673,8 +593,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     createFolder,
     renameCollection,
     deleteCollection,
-    assignToCollection,
-    getCollectionEntries,
     persistState
   }
 })

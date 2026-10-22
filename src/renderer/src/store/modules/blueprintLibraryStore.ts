@@ -80,7 +80,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   // ========== 蓝图列表 ==========
   const blueprints = ref<Blueprint[]>([])
   const collections = ref<BlueprintCollection[]>([])
-  const loading = ref(false)
 
   // ========== Gallery 状态 ==========
   const galleryViewMode = ref<BrowserViewMode>('grid')
@@ -616,8 +615,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   /**
    * 把一批蓝图移到某个文件夹。`folderKey` 传空串表示移回根目录。
    *
-   * 跟下面那套「集合」操作的区别，只有一条但很要紧：**这里不会自动解散**。
-   * `removeFromCollection` 在集合剩 ≤1 个成员时会把集合整个删掉 —— 那是
+   * **不会自动解散**：旧的 `removeFromCollection` 会在集合剩 ≤1 个成员时把集合整个删掉 —— 那是
    * iOS 桌面文件夹的脾气，放在库里就是「我把最后一个拖出来，文件夹没了」。
    * 文件夹是用户建的地方，空着也该在。
    *
@@ -671,37 +669,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     return col
   }
 
-  /** 将蓝图加入已有集合 */
-  function addToCollection(collectionId: string, blueprintId: string): boolean {
-    const col = collections.value.find((c) => c.id === collectionId)
-    if (!col) return false
-    if (col.blueprintIds.includes(blueprintId)) return true // 已存在
-    col.blueprintIds.push(blueprintId)
-    const bp = blueprints.value.find((b) => b.id === blueprintId)
-    if (bp) bp.collectionId = collectionId
-    persistState()
-    return true
-  }
-
-  /** 从集合中移除蓝图（剩 ≤1 自动解散） */
-  function removeFromCollection(collectionId: string, blueprintId: string): void {
-    const col = collections.value.find((c) => c.id === collectionId)
-    if (!col) return
-    col.blueprintIds = col.blueprintIds.filter((id) => id !== blueprintId)
-    const bp = blueprints.value.find((b) => b.id === blueprintId)
-    if (bp) bp.collectionId = undefined
-    // 集合内 ≤1 个蓝图时自动解散
-    if (col.blueprintIds.length <= 1) {
-      // 释放剩余蓝图
-      col.blueprintIds.forEach((id) => {
-        const remainBp = blueprints.value.find((b) => b.id === id)
-        if (remainBp) remainBp.collectionId = undefined
-      })
-      collections.value = collections.value.filter((c) => c.id !== collectionId)
-    }
-    persistState()
-  }
-
   /** 重命名集合 */
   function renameCollection(collectionId: string, newName: string): void {
     const col = collections.value.find((c) => c.id === collectionId)
@@ -721,15 +688,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     })
     collections.value = collections.value.filter((c) => c.id !== collectionId)
     persistState()
-  }
-
-  /** 获取集合内的蓝图列表 */
-  function getCollectionBlueprints(collectionId: string): Blueprint[] {
-    const col = collections.value.find((c) => c.id === collectionId)
-    if (!col) return []
-    return col.blueprintIds
-      .map((id) => blueprints.value.find((b) => b.id === id))
-      .filter((b): b is Blueprint => !!b)
   }
 
   // ========== Mock 数据 ==========
@@ -861,7 +819,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     // 状态
     blueprints,
     collections,
-    loading,
     galleryViewMode,
     createModalAdvancedExpanded,
     // 计算属性
@@ -892,13 +849,8 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     moveBlueprintsToFolder,
     createFolder,
     createCollection,
-    addToCollection,
-    removeFromCollection,
     renameCollection,
     deleteCollection,
-    getCollectionBlueprints,
-    persistState,
-    // Mock
-    loadMockData
+    persistState
   }
 })
