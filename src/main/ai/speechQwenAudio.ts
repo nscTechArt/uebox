@@ -11,7 +11,8 @@ export function requestQwenAudioSpeech(
   text: string,
   key: string,
   signal: AbortSignal,
-  onAudio: (chunk: SpeechAudio) => void
+  onAudio: (chunk: SpeechAudio) => void,
+  instruction?: string
 ): Promise<void> {
   signal.throwIfAborted()
   if (!provider.baseUrl.startsWith('wss://')) throw new Error('TTS_INVALID_ENDPOINT')
@@ -56,7 +57,14 @@ export function requestQwenAudioSpeech(
         task: 'tts',
         function: 'SpeechSynthesizer',
         model: modelId,
-        parameters: { text_type: 'PlainText', voice, format: 'pcm', sample_rate: 24000 },
+        parameters: {
+          text_type: 'PlainText',
+          voice,
+          format: 'pcm',
+          sample_rate: 24000,
+          // 演法（「愤怒地」「压低声音」），系统音色和设计出来的音色都认
+          ...(instruction ? { instruction } : {})
+        },
         input: {}
       })
     })

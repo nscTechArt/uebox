@@ -122,3 +122,41 @@ describe('formatVariableType', () => {
     expect(formatVariableType({ type: 'object', is_array: true })).toBe('object[]')
   })
 })
+
+/**
+ * #57：函数里的循环累加器只能建成成员变量。function 透传给插件，
+ * 回执按引擎读回的那份说（类型、所属函数），不拿入参拼。
+ */
+describe('blueprint_add_variable 的局部变量', () => {
+  it('function 发给插件，回执写明是哪个函数的局部变量', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      blueprint_path: '/Game/A/PC.PC',
+      variable: { name: 'MinDist', function: 'FindNearest', type: 'real', is_array: false }
+    })
+
+    const result = await run({
+      blueprint_path: '/Game/A/PC',
+      name: 'MinDist',
+      type: 'double',
+      function: 'FindNearest'
+    })
+
+    expect((callRequest.mock.calls[0][1] as Record<string, unknown>).function).toBe('FindNearest')
+    expect(String(result.message)).toContain('局部变量 MinDist（real）')
+    expect(String(result.message)).toContain('FindNearest')
+  })
+
+  it('不给 function 时不发这个字段，仍是成员变量', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      blueprint_path: '/Game/BP_Door.BP_Door',
+      variable: { name: 'OpenAngle', type: 'real', is_array: false }
+    })
+
+    const result = await run({ blueprint_path: '/Game/BP_Door', name: 'OpenAngle', type: 'float' })
+
+    expect(callRequest.mock.calls[0][1]).not.toHaveProperty('function')
+    expect(String(result.message)).not.toContain('局部变量')
+  })
+})

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { TeamJob, TeamStateView } from '@core/shared/agentTeam'
 
-import { buildBoardModel, type BoardModel } from './teamBoardModel'
+import { buildBoardModel, latestRequestLine, type BoardModel } from './teamBoardModel'
 
 const NOW = 1_000_000_000
 const min = (n: number): number => NOW - n * 60_000
@@ -112,6 +112,26 @@ describe('buildBoardModel：这一轮到哪了', () => {
     expect(build(fresh, true).verdict).toBeNull()
   })
 
+  it('每次验收各占往来里一条；老数据没有验收事件时拿最近那次补一条', () => {
+    const verdicts = (t: TeamStateView): string[] =>
+      build(t)
+        .log.filter((e) => e.kind === 'verdict')
+        .map((e) => e.verdict ?? '')
+    const history = team({
+      verdict: 'pass',
+      verdictAt: min(1),
+      deliveries: 3,
+      events: [
+        { kind: 'verdict', verdict: 'fail', at: min(20) },
+        { kind: 'crashed', at: min(15) },
+        { kind: 'verdict', verdict: 'fail', at: min(10) },
+        { kind: 'verdict', verdict: 'pass', at: min(1) }
+      ]
+    })
+    expect(verdicts(history)).toEqual(['pass', 'fail', 'fail'])
+    expect(verdicts(team({ verdict: 'fail', verdictAt: min(1), deliveries: 1 }))).toEqual(['fail'])
+  })
+
   it('这一轮之前交回的放进「更早」；这一轮的按开工先后', () => {
     const t = team({
       jobs: [
@@ -214,5 +234,18 @@ describe('buildBoardModel：往来和事件', () => {
     expect(a!.shaken).toBe(true)
     expect(a!.thread.some((e) => e.kind === 'crashed')).toBe(true)
     expect(b!.shaken).toBe(false)
+  })
+})
+
+describe('latestRequestLine：委托下面那行最新要求', () => {
+  it('短的原样显示，换行压成空格', () => {
+    expect(latestRequestLine('主角\n换成猫 ')).toBe('主角 换成猫')
+  })
+
+  it('长的截末尾：用户自己的话在最后，前面是拼进来的上下文', () => {
+    const line = latestRequestLine(`${'上下文'.repeat(100)}主角换成猫`)
+    expect(line.startsWith('…')).toBe(true)
+    expect(line.endsWith('主角换成猫')).toBe(true)
+    expect(line.length).toBe(121)
   })
 })

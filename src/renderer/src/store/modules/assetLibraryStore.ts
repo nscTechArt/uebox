@@ -25,7 +25,8 @@ import type {
 import { LOCAL_CAPABILITIES } from '@renderer/views/AssetManagement/data/LocalLibrarySource'
 import {
   ServerLibrarySource,
-  serverCapabilities
+  serverCapabilities,
+  teamCapabilities
 } from '@renderer/views/AssetManagement/data/ServerLibrarySource'
 import {
   activeLibrarySource,
@@ -62,6 +63,31 @@ export function jobPercent(job: CatalogJobProgress): number {
   return Math.min(95, Math.round(from + (to - from) * fraction))
 }
 
+/** 团队工程的作业完成时的一句话（界面方案 4.3、4.13、4.14） */
+export function teamJobDoneText(
+  job: CatalogJobProgress,
+  t: (key: string, params?: Record<string, unknown>) => string
+): string | null {
+  if (job.type === 'sync') return t('teamProject.sync.done')
+  if (job.type === 'put-in')
+    return job.message
+      ? t('teamProject.putIn.done', { n: job.message })
+      : t('teamProject.putIn.doneNoNumber')
+  if (job.type === 'approve')
+    return job.message
+      ? t('teamProject.outsource.approvedDone', { n: job.done, number: job.message })
+      : t('teamProject.outsource.approvedDoneNoNumber', { n: job.done })
+  if (job.type === 'reference') return t('teamProject.dialogs.sent', { company: job.label ?? '' })
+  return null
+}
+
+/** 团队页想知道自己的作业什么时候做完（放入完成要刷新横幅、收交付完成要重取） */
+const teamJobListeners = new Set<(job: CatalogJobProgress) => void>()
+export function onTeamJob(listener: (job: CatalogJobProgress) => void): () => void {
+  teamJobListeners.add(listener)
+  return () => teamJobListeners.delete(listener)
+}
+
 export const useAssetLibraryStore = defineStore('assetLibrary', () => {
   const serverLibraries = ref<CatalogLibraryView[]>([])
   const activeServerKey = ref<string | null>(null)
@@ -87,13 +113,15 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
   const capabilities = computed<LibraryCapabilities>(() => {
     if (!activeServerKey.value) return LOCAL_CAPABILITIES
     const status = activeStatus.value
-    return serverCapabilities({
+    const base = serverCapabilities({
       annotations: status?.capabilities.annotations ?? null,
       lore: status?.capabilities.lore ?? false,
       online: status?.online !== false,
       folderSearch: status?.capabilities.folderSearch ?? null,
       tagRegistry: status?.capabilities.tagRegistry ?? null
     })
+    const team = activeServer.value?.team
+    return team ? teamCapabilities(base, { role: team.role, local: Boolean(team.localPath) }) : base
   })
   const source = computed<AssetLibrarySource>(() => activeLibrarySource.value)
   const signedOut = computed(
@@ -109,9 +137,11 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
   function reportJob(job: CatalogJobProgress): void {
     const tasks = useImportTasksStore()
     const t = i18n.global.t
-    const name = t(
-      job.type === 'import' ? 'catalogLibrary.jobs.import' : 'catalogLibrary.jobs.download'
-    )
+    const teamJob = job.type !== 'import' && job.type !== 'download'
+    // 团队工程的作业一件事一行：「同步 星海 到本机 · 42%」「放入 星海 · 42%」「交付 7 · 上传中 42%」
+    const name = teamJob
+      ? t(`teamProject.jobs.${job.type}`, { name: job.label ?? '' })
+      : t(job.type === 'import' ? 'catalogLibrary.jobs.import' : 'catalogLibrary.jobs.download')
     const stageText =
       job.phase === 'failed'
         ? t('catalogLibrary.jobs.failedDetail', { reason: job.error ?? '' })
@@ -128,13 +158,22 @@ export const useAssetLibraryStore = defineStore('assetLibrary', () => {
         status,
         total: job.total,
         done: job.done,
-        taskType: job.type === 'import' ? 'vault-import' : 'project-import',
+        taskType:
+          job.type === 'import' || job.type === 'deliver' ? 'vault-import' : 'project-import',
         cancellable: false
       })
     } else {
       tasks.updateTask(job.jobId, { progress, stageText, status, total: job.total, done: job.done })
     }
     // 成功的：任务条把它收起，这里给一句结果；失败的留在任务条上，等用户看见原因
+    if (job.phase === 'done' && teamJob) {
+      const text = teamJobDoneText(job, t)
+      if (text) message.success(text)
+      teamJobListeners.forEach((listener) => listener(job))
+      setTimeout(() => tasks.removeTask(job.jobId), 4000)
+      return
+    }
+    if (job.phase === 'failed' && teamJob) teamJobListeners.forEach((listener) => listener(job))
     if (job.phase === 'done') {
       const count = job.outputPaths?.length ?? job.total
       message.success(

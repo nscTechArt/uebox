@@ -23,8 +23,11 @@ import { isCleanImportReport } from '@core/shared/projectImport'
 import { useAssetViewStore } from '@renderer/store/modules/assetViewStore'
 import { useLayoutUiStore } from '@renderer/store/modules/layoutUiStore'
 import { useVaultStore } from '@renderer/store/modules/vaultStore'
-import { notifyPluginUpgradeFailure } from '@renderer/hooks/usePluginInstallNotice'
-import { resolveTabRoute } from '@renderer/common/tabRoute'
+import {
+  askUALinkInstall,
+  notifyPluginUpgradeFailure
+} from '@renderer/hooks/usePluginInstallNotice'
+import { getTabCacheKey } from '@renderer/common/tabRoute'
 import { useAppAgentRunner } from '@renderer/views/Assistant/composables/appAgentRunner'
 import { useFollowUpDelivery } from '@renderer/views/Assistant/composables/followUpDelivery'
 import { useSessionProjectSync } from '@renderer/views/Assistant/composables/sessionProjectSync'
@@ -273,9 +276,6 @@ const showTab = computed(() => route.meta.showTab !== false)
 const showMacTitlebarInset = computed(
   () => window.api?.platform === 'darwin' && !showTab.value && !showMenu.value
 )
-const getRouteCacheKey = (currentRoute: typeof route): string => {
-  return resolveTabRoute(currentRoute)?.key || currentRoute.fullPath
-}
 
 // 侧边栏收折状态 - 持久化到 localStorage
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
@@ -461,6 +461,8 @@ const handleVaultSwitched = (_event: unknown, payload: { vaultId: string; name: 
  * 「你还在用旧版插件」的那个人。
  */
 let offPluginUpgradeFailed: (() => void) | null = null
+/** 首次导入工程时问要不要装连接插件，同样挂在布局上：导入入口不只首页一个 */
+let offUALinkInstallPrompt: (() => void) | null = null
 
 onMounted(() => {
   // 监听 Agent 创建文件夹事件
@@ -473,6 +475,8 @@ onMounted(() => {
   document.addEventListener('keydown', handleGlobalKeydown)
   offPluginUpgradeFailed =
     window.api.database.project.onPluginUpgradeFailed?.(notifyPluginUpgradeFailure) ?? null
+  offUALinkInstallPrompt =
+    window.api.database.project.onUALinkInstallPrompt?.(askUALinkInstall) ?? null
 })
 
 onUnmounted(() => {
@@ -491,6 +495,8 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
   offPluginUpgradeFailed?.()
   offPluginUpgradeFailed = null
+  offUALinkInstallPrompt?.()
+  offUALinkInstallPrompt = null
 })
 </script>
 
@@ -544,7 +550,7 @@ onUnmounted(() => {
               <component
                 :is="Component"
                 v-if="pageRoute.meta.keepAlive"
-                :key="getRouteCacheKey(pageRoute)"
+                :key="getTabCacheKey(pageRoute)"
               />
             </keep-alive>
             <component :is="Component" v-if="!pageRoute.meta.keepAlive" :key="pageRoute.fullPath" />

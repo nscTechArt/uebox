@@ -75,6 +75,10 @@
     "category": "ui",
     "why": "是否显示依赖资产。"
   },
+  "assetManagement.showAssetVersion": {
+    "category": "ui",
+    "why": "资产卡片是否显示引擎版本角标的界面偏好。"
+  },
   "assetManagement.skipDeleteConfirm": {
     "category": "ui",
     "why": "「删除不再询问」的一次性标记。"

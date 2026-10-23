@@ -24,6 +24,9 @@
           />
         </div>
         <p class="banner-goal" :title="objective">{{ objective }}</p>
+        <p v-if="team.latestRequest" class="banner-latest" :title="team.latestRequest">
+          {{ t('assistant.teamBoard.latestRequest') }}{{ latestRequestLine(team.latestRequest) }}
+        </p>
       </div>
       <div class="banner-side">
         <div class="banner-phase">
@@ -31,13 +34,16 @@
           <span v-if="busy" class="q-dots" aria-hidden="true"><i /><i /><i /></span>
         </div>
         <div v-if="model.round.length" class="banner-progress">
-          <span
-            v-for="job in model.round"
-            :key="job.id"
-            class="pip"
-            :class="`is-${job.state}`"
-            :title="pipTitle(job)"
-          />
+          <!-- 任务多了折成几行，不往外撑：一行撑出框会把目标挤没、把状态和计数截掉 -->
+          <div class="pips" :class="{ 'is-dense': model.round.length > DENSE_PIPS }">
+            <span
+              v-for="job in model.round"
+              :key="job.id"
+              class="pip"
+              :class="`is-${job.state}`"
+              :title="pipTitle(job)"
+            />
+          </div>
           <PixelText :text="`${roundDone}/${model.round.length}`" :color="P.muted" :scale="2" />
         </div>
       </div>
@@ -167,6 +173,16 @@
             >
               {{ selectedCrew.member.persona }}
             </span>
+            <!-- 外部团队的名册在 Claude Code 那边管，盒子不替它辞人 -->
+            <TeamMemberDismiss
+              v-if="!team.external"
+              class="detail-dismiss"
+              :member="selectedCrew.member"
+              :team="team"
+              :busy="!!selectedCrew.open || !!selectedCrew.assignment"
+              pixel
+              @dismiss="(name, reason) => emit('dismiss', name, reason)"
+            />
           </div>
         </div>
         <div class="detail-col">
@@ -531,9 +547,17 @@ import {
   type TeamStateView
 } from '@core/shared/agentTeam'
 
+import type { TeamReportTab } from '../../composables/useTeamTab'
 import MarkdownRenderer from '../MarkdownRenderer.vue'
+import TeamMemberDismiss from '../TeamMemberDismiss.vue'
 import TeamMemberModel from '../TeamMemberModel.vue'
-import type { BoardModel, CrewView, JobView, LogEntry } from '../teamBoardModel'
+import {
+  latestRequestLine,
+  type BoardModel,
+  type CrewView,
+  type JobView,
+  type LogEntry
+} from '../teamBoardModel'
 import { useTeamLabels } from '../teamBoardLabels'
 import { recentSteps, shortTarget } from '../teamBoardView'
 import type { Pose } from '../teamOffice/officeSim'
@@ -562,6 +586,8 @@ const emit = defineEmits<{
   'reopen-job': [jobId: string]
   'open-models': []
   'set-model': [name: string, model: TeamModel]
+  dismiss: [name: string, reason: string]
+  'open-report': [report: TeamReportTab]
 }>()
 const { t } = useI18n()
 const { ago, exact, who, toolVerb, statusText } = useTeamLabels()
@@ -589,6 +615,8 @@ const colorOf = (c: CrewView): string => crewColor(c.crew, 'v2')
 
 const busy = computed(() => props.model.phase === 'working' || props.model.phase === 'planning')
 const roundDone = computed(() => props.model.round.filter((j) => j.state === 'done').length)
+/** 进度格超过这么多就收窄，一行放得更多（见 `.pips.is-dense`） */
+const DENSE_PIPS = 24
 
 const phaseText = computed(() => {
   const m = props.model
@@ -773,14 +801,10 @@ function stopSteps(job: JobView): ReturnType<typeof recentSteps> {
 
 const shelfHas = (jobId: string): boolean =>
   props.model.round.some((j) => j.id === jobId) || props.model.earlier.some((j) => j.id === jobId)
+/** 日志里点一份交付：右侧面板另开一个页签看全文，不在上面的架子里就地展开（离得远，点了像没反应） */
 function openFromLog(jobId: string): void {
-  if (!shelf.value.some((j) => j.id === jobId)) {
-    // 架子正按某个人筛着、这件不是他的：先撤掉筛选，不然点了日志架上什么也没开
-    if (props.selected) emit('select', null)
-    earlierOpen.value = true
-  }
-  openJobId.value = jobId
-  fullText.value = false
+  const job = [...props.model.round, ...props.model.earlier].find((j) => j.id === jobId)
+  if (job) emit('open-report', { id: job.id, title: job.title })
 }
 
 // ── 任务板 ──────────────────────────────────────────────────────────────
@@ -1016,12 +1040,23 @@ button.q-frame {
   text-overflow: ellipsis;
 }
 
+.banner-latest {
+  margin: 4px 0 0;
+  color: var(--q-muted);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .banner-side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 60%;
 }
 
 .banner-phase {
@@ -1036,15 +1071,28 @@ button.q-frame {
 
 .banner-progress {
   display: flex;
-  align-items: center;
-  gap: 3px;
+  align-items: flex-end;
+  gap: 9px;
+  min-width: 0;
+  max-width: 100%;
+}
 
-  :deep(.pixel-text) {
-    margin-left: 6px;
+/* 一行最多 24 格（12px + 3px 间距），多了往下折；超过 24 项时格子收窄，一行放得更多 */
+.pips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
+  max-width: calc(24 * 15px);
+
+  &.is-dense .pip {
+    width: 8px;
   }
 }
 
 .pip {
+  flex-shrink: 0;
   width: 12px;
   height: 8px;
   background: var(--q-edge);
@@ -1430,6 +1478,11 @@ button.q-frame {
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.detail-dismiss {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .thread {

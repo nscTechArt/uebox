@@ -35,6 +35,8 @@ export class ServiceManager {
    * 端口被占」，而不是让他自己去猜为什么插件死活握不上手。
    */
   private startupWarning?: string
+  /** HTTP 调试服务开着（HTTP_ENABLED）却没起来时的原因 */
+  private httpStartError?: string
 
   constructor(options: ServiceManagerOptions = {}) {
     this.options = {
@@ -132,7 +134,19 @@ export class ServiceManager {
         httpServer.setConnectionManager(this.websocketService.getConnectionManager())
         this.httpServer = httpServer
 
-        await httpServer.start()
+        // 起不来同样不算致命，理由和上面 WebSocket 那段一样，而且更站得住：
+        // 这是默认关闭、只给开发者用的调试服务。以前这里的异常会走到下面的
+        // catch，把**所有**服务（包括引擎桥接）一起停掉再往上抛 ——
+        // 只是因为它一直谎报启动成功（见 `http/listen.ts`），这条路才没人走到过
+        try {
+          await httpServer.start()
+        } catch (error) {
+          // 原因已经由 HttpServer 记过一句能照着改的话，这里只说后果；
+          // 原因也留给 getStatus()，免得状态里写成「没开」而不是「开了没起来」
+          this.httpServer = null
+          this.httpStartError = error instanceof Error ? error.message : String(error)
+          logger.warn('[ServiceManager] HTTP 调试服务不可用，其余功能照常启动')
+        }
       } else {
         logger.info('HTTP服务器已跳过（如需调试接口，设置 HTTP_ENABLED=true）')
       }
@@ -226,7 +240,11 @@ export class ServiceManager {
       ...(this.startupWarning ? { startupWarning: this.startupWarning } : {}),
       services: {
         websocket: this.websocketService.getStatus(),
-        http: this.httpServer?.getStatus() ?? { running: false, enabled: false },
+        http:
+          this.httpServer?.getStatus() ??
+          (this.httpStartError
+            ? { running: false, enabled: true, startError: this.httpStartError }
+            : { running: false, enabled: false }),
         taskManager: this.taskManager.getStats()
       }
     }

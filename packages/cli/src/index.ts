@@ -60,7 +60,8 @@ async function main(): Promise<void> {
   process.on('SIGTERM', onInterrupt)
 
   const result = await run(process.argv.slice(2), process.env, {
-    progress: (message) => process.stderr.write(`… ${message}\n`)
+    progress: (message) => process.stderr.write(`… ${message}\n`),
+    readStdin
   })
   // 中断后调用被取消时 `run` 也会收尾出一个信封，那不是真实结局：保持 130、不输出
   if (cancelSent) return
@@ -69,6 +70,14 @@ async function main(): Promise<void> {
   if (result.stderr) process.stderr.write(result.stderr)
 
   process.exitCode = result.exitCode
+}
+
+/** 读完标准输入。终端上直接敲的命令没有输入可读，不等 */
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return ''
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk as Buffer))
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 main().catch((error) => {

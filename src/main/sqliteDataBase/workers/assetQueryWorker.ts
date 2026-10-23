@@ -16,7 +16,7 @@
  */
 import { parentPort } from 'node:worker_threads'
 import Database from 'better-sqlite3'
-import { searchAssetsByCriteria } from '../models/assetSearchCore'
+import { countAssetsByEngineVersion, searchAssetsByCriteria } from '../models/assetSearchCore'
 import type { AssetQueryRequest, AssetQueryResponse } from '../services/assetQueryProtocol'
 import { applyVaultConnectionPragmas } from '../vaultConnectionPragmas'
 
@@ -101,7 +101,9 @@ function armIdleClose(): void {
   idleTimer = setTimeout(closeReaders, IDLE_CLOSE_MS)
 }
 
-function runSearch(request: Extract<AssetQueryRequest, { op: 'search' }>): unknown[] {
+function runSearch(
+  request: Extract<AssetQueryRequest, { op: 'search' | 'engine-facet' }>
+): unknown[] {
   vaultDb = ensure(vaultDb, request.vaultDbPath, request.mmap)
   let pub: Database.Database | null = null
   if (request.publicDbPath) {
@@ -114,12 +116,14 @@ function runSearch(request: Extract<AssetQueryRequest, { op: 'search' }>): unkno
       pub = null
     }
   }
-  return searchAssetsByCriteria(vaultDb.db, request.criteria, { publicDb: pub })
+  const query = request.op === 'engine-facet' ? countAssetsByEngineVersion : searchAssetsByCriteria
+  return query(vaultDb.db, request.criteria, { publicDb: pub })
 }
 
 function handle(request: AssetQueryRequest): unknown {
   switch (request.op) {
     case 'search':
+    case 'engine-facet':
       return runSearch(request)
     case 'release':
       releaseAll()
@@ -149,6 +153,6 @@ parentPort?.on('message', (request: AssetQueryRequest) => {
       code: (error as { code?: unknown })?.code as string | undefined
     }
   }
-  if (request.op === 'search') armIdleClose()
+  if (request.op === 'search' || request.op === 'engine-facet') armIdleClose()
   parentPort?.postMessage(response)
 })

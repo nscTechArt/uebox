@@ -49,7 +49,8 @@ import { defineV2Tool, type V2Tool } from '../../adaptV2Tool'
 import { serviceManager } from '../../../../services'
 import { resolveBlueprintPathInput } from '../ue-blueprint/resolveBlueprintPath'
 import { resolveWriteConnection } from './writeConnection'
-import { findEntryById, readSnippetPayload } from '../../../../services/library/libraryEntryStore'
+import { findEntryById } from '../../../../services/library/libraryEntryStore'
+import { readSnippetPayload } from '../../../../../shared/snippetPayload'
 import { checkPluginCapability } from '../../../../services/library/pluginCapabilities'
 import { containsAsset, toPackagePath } from '../../../../utils/uePackagePath'
 import { requireVaultRoot } from './vaultRoot'
@@ -211,12 +212,12 @@ export function createBlueprintLibraryApplyTool(): V2Tool {
         return { success: false, error: `蓝图库里没有 id 为 ${input.entry_id} 的条目。` }
       }
 
-      const payload = readSnippetPayload(found.entry.manifest.payload)
+      const payload = readSnippetPayload(found.manifest.payload)
       if (!payload) {
         return {
           success: false,
           error:
-            `「${found.entry.manifest.name}」是手工粘进库的老条目，没有扫过依赖，放不进工程。` +
+            `「${found.manifest.name}」是手工粘进库的老条目，没有扫过依赖，放不进工程。` +
             '在库里打开它、复制代码，然后在 UE 的蓝图编辑器里粘贴。'
         }
       }
@@ -363,7 +364,7 @@ export function createBlueprintLibraryApplyTool(): V2Tool {
 
         return {
           success: true,
-          entry_name: found.entry.manifest.name,
+          entry_name: found.manifest.name,
           blueprint_path: targetPackage,
           graph_name: response.graph_name || graphName,
           node_count: response.imported_count ?? payload.meta.nodeCount,
@@ -387,7 +388,7 @@ export function createBlueprintLibraryApplyTool(): V2Tool {
               }
             : {}),
           summary:
-            `已把「${found.entry.manifest.name}」放进 ${targetPackage} 的 ${graphName}，` +
+            `已把「${found.manifest.name}」放进 ${targetPackage} 的 ${graphName}，` +
             `编译通过并已保存。` +
             (openPorts.length > 0 ? ` 有 ${openPorts.length} 个悬空端口要手动接。` : '') +
             (response.undoable === false ? ' 注意：本次改动无法用 Ctrl+Z 撤销。' : '')

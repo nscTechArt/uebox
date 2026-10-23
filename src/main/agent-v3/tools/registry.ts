@@ -73,7 +73,7 @@ import {
   rewriteCrossReferences
 } from './toolNames'
 import { UPDATE_PLAN_TOOL_NAME, WRAP_UP_TOOL_NAME } from '../../../shared/agentTurnReport'
-import type { ToolRisk, UnrealAgentTool } from './defineTool'
+import type { ArchiveSpec, ToolRisk, UnrealAgentTool } from './defineTool'
 import { effectiveRisk } from './defineTool'
 import { materialTools } from './ue-material'
 import { meshTools } from './ue-mesh'
@@ -128,6 +128,8 @@ interface Registration {
   concurrency?: 'sequential' | 'parallel'
   /** 按这次的参数降风险（见 `ToolMeta.riskFor`）。工具自己带了的话这里优先 */
   riskFor?: (args: unknown) => ToolRisk
+  /** 结果太大时存档、只给目录页（见 `ArchiveSpec`） */
+  archive?: ArchiveSpec
 }
 
 /** 带着 `force: true`（丢弃未保存的改动）才算 destructive；不带时插件有未保存就拒绝 */
@@ -249,7 +251,8 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'blueprint_get_graph',
     namespace: 'ue.blueprint',
     risk: 'safe',
-    make: () => ueBlueprint.createGetBlueprintGraphTool()
+    make: () => ueBlueprint.createGetBlueprintGraphTool(),
+    archive: ueBlueprint.BLUEPRINT_GRAPH_ARCHIVE
   },
   {
     name: 'blueprint_search_nodes',
@@ -938,13 +941,38 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     concurrency: 'sequential',
     make: () => ueWidget.setPropertyTool()
   },
+  /**
+   * 改现成的界面：原地换控件、删控件。
+   *
+   * 控件工具原来只有「往里加」，用户说「把登录按钮换成导航那种」时，调用方只能
+   * 在旁边再加一个，然后让用户自己去编辑器里删旧的、接事件。
+   *
+   * 两个都是 mutating：插件端开在事务里，ue_undo 撤得回来；删除碰到图表引用
+   * 默认拒绝，替换碰到接不上的事件也拒绝，都要调用方显式确认。
+   */
+  {
+    name: 'widget_replace',
+    namespace: 'ue.widget',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueWidget.replaceWidgetTool()
+  },
+  {
+    name: 'widget_remove',
+    namespace: 'ue.widget',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    make: () => ueWidget.removeWidgetTool()
+  },
 
   // ── 资产库（盒子本地，不依赖引擎连接）────────────────────────────────
   {
     name: 'search_assets',
     namespace: 'asset',
     risk: 'safe',
-    make: () => assetTools.createSearchAssetsTool()
+    make: () => assetTools.createSearchAssetsTool(),
+    // 一页最多几百个资产、每行十来个字段，真实会话里单次到过 17.8 万字符
+    archive: { lists: { assets: ['name', 'type', 'path', 'vault', 'engineVersion'] } }
   },
   // 「我库里有什么」不能靠翻页去数。几十万个资产的库里，search_assets 一页 100 个，
   // 调用方拿到的只会是按名字排在最前的那一百个，然后拿它们总结全库 —— 错得看不出来。
@@ -1132,7 +1160,14 @@ const REGISTRATIONS: readonly Registration[] = Object.freeze([
     name: 'project_list',
     namespace: 'project',
     risk: 'safe',
-    make: () => createProjectListTool()
+    make: () => createProjectListTool(),
+    // list_templates 一次回 300 个模板（约 10 万字符），模型只挑其中一个
+    archive: {
+      lists: {
+        templates: ['name', 'templateKey', 'category', 'engineVersion'],
+        projects: ['name', 'projectKey', 'engineVersion', 'path']
+      }
+    }
   },
   {
     name: 'project_manage',
@@ -1375,6 +1410,7 @@ export function buildAllTools(deps: BuildToolsDeps = {}): UnrealAgentTool<never>
       namespace: reg.namespace,
       risk: reg.risk,
       ...(reg.riskFor ? { riskFor: reg.riskFor } : {}),
+      ...(reg.archive ? { archive: reg.archive } : {}),
       description: rewriteCrossReferences(v2.description ?? reg.name),
       ...(reg.concurrency ? { concurrency: reg.concurrency } : {})
     })

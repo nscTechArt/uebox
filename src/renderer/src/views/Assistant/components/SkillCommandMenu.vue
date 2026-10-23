@@ -5,7 +5,9 @@
     class="skill-command-menu"
     role="listbox"
     :aria-label="t('assistantInputComposer.skillMenu.title')"
+    @mousedown.prevent
   >
+    <!-- 面板里任何地方按下都不抢输入框焦点：「+」打开的面板靠输入框失焦收起，拖滚动条也不能把它拖没了 -->
     <div class="skill-menu-header">
       <span class="skill-menu-title">{{ t('assistantInputComposer.skillMenu.title') }}</span>
       <span class="skill-menu-hint">{{ t('assistantInputComposer.skillMenu.hint') }}</span>
@@ -18,6 +20,32 @@
     -->
     <div class="skill-menu-scroll">
       <!--
+        从输入框左下角「+」打开时，顶上多一条「添加文件」：+ 号顶替了原来的回形针，
+        选文件的入口得留在这个面板里。打 `/` 打开时不出现 —— 那是在挑命令。
+      -->
+      <div v-if="showAttach" class="skill-command-list">
+        <button
+          id="assistant-skill-option-0"
+          type="button"
+          role="option"
+          class="skill-command-item attach-item"
+          :class="{ selected: selectedIndex === 0 }"
+          :aria-selected="selectedIndex === 0"
+          @mouseenter="selectedIndex = 0"
+          @mousedown.prevent
+          @click="selectAt(0)"
+        >
+          <PhPaperclip class="attach-icon" />
+          <span class="attach-name">{{ t('assistantInputComposer.skillMenu.attach') }}</span>
+          <span class="skill-command-meta">
+            <span class="skill-description">{{
+              t('assistantInputComposer.skillMenu.attachHint')
+            }}</span>
+          </span>
+        </button>
+      </div>
+
+      <!--
       命令组在技能组之前，而且**不等技能加载完**。
       命令是本地常量，技能要走一次 IPC —— 让确定的东西等不确定的东西，
       结果就是打 /goal 时先盯半秒「加载中」。
@@ -28,16 +56,16 @@
         </div>
         <button
           v-for="(command, index) in filteredCommands"
-          :id="`assistant-skill-option-${index}`"
+          :id="`assistant-skill-option-${offset + index}`"
           :key="command.name"
           type="button"
           role="option"
           class="skill-command-item"
-          :class="{ selected: index === selectedIndex }"
-          :aria-selected="index === selectedIndex"
-          @mouseenter="selectedIndex = index"
+          :class="{ selected: offset + index === selectedIndex }"
+          :aria-selected="offset + index === selectedIndex"
+          @mouseenter="selectedIndex = offset + index"
           @mousedown.prevent
-          @click="selectAt(index)"
+          @click="selectAt(offset + index)"
         >
           <span class="skill-command-name">
             <span class="skill-prefix">/</span>{{ command.name }}
@@ -75,16 +103,16 @@
         </div>
         <button
           v-for="(skill, index) in filteredSkills"
-          :id="`assistant-skill-option-${filteredCommands.length + index}`"
+          :id="`assistant-skill-option-${skillStart + index}`"
           :key="skill.name"
           type="button"
           role="option"
           class="skill-command-item"
-          :class="{ selected: filteredCommands.length + index === selectedIndex }"
-          :aria-selected="filteredCommands.length + index === selectedIndex"
-          @mouseenter="selectedIndex = filteredCommands.length + index"
+          :class="{ selected: skillStart + index === selectedIndex }"
+          :aria-selected="skillStart + index === selectedIndex"
+          @mouseenter="selectedIndex = skillStart + index"
           @mousedown.prevent
-          @click="selectAt(filteredCommands.length + index)"
+          @click="selectAt(skillStart + index)"
         >
           <span class="skill-command-name"
             ><span class="skill-prefix">$</span>{{ skill.name }}</span
@@ -103,6 +131,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { PhPaperclip } from '@phosphor-icons/vue'
 import type { AgentV3SkillSummary } from '@/api/agentV3'
 import { filterSkillCommands } from './skillCommands'
 import { filterSlashCommands, type SlashCommand } from './slashCommands'
@@ -113,16 +142,23 @@ const props = withDefaults(
     query: string
     loading?: boolean
     error?: string
+    /** 顶上加「添加文件」一条，从「+」按钮打开时用 */
+    showAttach?: boolean
+    /** 列不列内置命令。正在生成时命令发不出去，「+」面板只留文件和技能 */
+    showCommands?: boolean
   }>(),
   {
     loading: false,
-    error: ''
+    error: '',
+    showAttach: false,
+    showCommands: true
   }
 )
 
 const emit = defineEmits<{
   (event: 'select', skill: AgentV3SkillSummary): void
   (event: 'select-command', command: SlashCommand): void
+  (event: 'attach'): void
   (event: 'retry'): void
   (event: 'close'): void
 }>()
@@ -130,18 +166,22 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const menuRef = ref<HTMLElement | null>(null)
 const selectedIndex = ref(0)
-const filteredCommands = computed(() => filterSlashCommands(props.query))
+const filteredCommands = computed(() =>
+  props.showCommands ? filterSlashCommands(props.query) : []
+)
 const filteredSkills = computed(() =>
   props.loading || props.error ? [] : filterSkillCommands(props.skills, props.query)
 )
 
 /**
- * 键盘导航把两组拉平成一条：命令在前，技能在后。
+ * 键盘导航把各组拉平成一条：「添加文件」（有的话）在最前，然后命令，最后技能。
  *
  * 分开两个下标的话，↓ 从命令组末尾走到技能组第一条时要在组件里判一次边界，
  * 那种判断每加一组就得重写一遍。
  */
-const optionCount = computed(() => filteredCommands.value.length + filteredSkills.value.length)
+const offset = computed(() => (props.showAttach ? 1 : 0))
+const skillStart = computed(() => offset.value + filteredCommands.value.length)
+const optionCount = computed(() => skillStart.value + filteredSkills.value.length)
 
 watch([() => props.query, optionCount], () => {
   selectedIndex.value = 0
@@ -166,13 +206,18 @@ function moveSelection(delta: number): void {
 }
 
 function selectAt(index = selectedIndex.value): void {
-  const command = filteredCommands.value[index]
+  if (props.showAttach && index === 0) {
+    emit('attach')
+    return
+  }
+
+  const command = filteredCommands.value[index - offset.value]
   if (command) {
     emit('select-command', command)
     return
   }
 
-  const skill = filteredSkills.value[index - filteredCommands.value.length]
+  const skill = filteredSkills.value[index - skillStart.value]
   if (skill) emit('select', skill)
 }
 
@@ -185,7 +230,7 @@ function onKeydown(event: KeyboardEvent): boolean {
 
   // 技能还在加载时不能拿回车赌一个还没到的列表。但命令是本地常量，
   // 已经列在那儿了就该能选 —— 让它陪着技能一起等是白等。
-  if (props.loading && filteredCommands.value.length === 0) {
+  if (props.loading && filteredCommands.value.length === 0 && !props.showAttach) {
     if (event.key === 'Enter' || event.key === 'Tab') {
       event.preventDefault()
       return true
@@ -278,12 +323,12 @@ defineExpose({ onKeydown })
   font-weight: var(--font-weight-regular);
 }
 
+// 一行一条：名字在左，说明跟在后面，放不下就省略号 —— 两行一条的话一屏只看得见四五条
 .skill-command-item {
   display: flex;
   width: 100%;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   color: var(--color-text-primary);
   text-align: start;
@@ -310,7 +355,8 @@ defineExpose({ onKeydown })
 }
 
 .skill-command-name {
-  max-width: 100%;
+  flex: none;
+  max-width: 50%;
   overflow: hidden;
   font-family: var(--font-family-mono);
   font-size: var(--font-size-base);
@@ -326,7 +372,7 @@ defineExpose({ onKeydown })
 
 .skill-command-meta {
   display: flex;
-  width: 100%;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   gap: var(--space-1);
@@ -340,6 +386,23 @@ defineExpose({ onKeydown })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.attach-item {
+  gap: var(--space-2);
+}
+
+.attach-icon {
+  flex: none;
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
+
+.attach-name {
+  flex: none;
+  margin-inline-end: var(--space-1);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
 }
 
 .skill-menu-state {

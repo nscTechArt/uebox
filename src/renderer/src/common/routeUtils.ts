@@ -11,7 +11,8 @@ import {
   PhSparkle,
   PhStorefront,
   PhGraph,
-  PhUser
+  PhUser,
+  PhUsersThree
 } from '@phosphor-icons/vue'
 
 export interface MenuItem {
@@ -113,6 +114,11 @@ function getIconByPath(path: string): any {
   if (path.includes('setting')) {
     return PhGear
   }
+  // 外部团队（Claude Code 当大脑）
+  if (path.includes('external-teams')) {
+    return PhUsersThree
+  }
+
   // 虚幻AI助手图标
   if (path.includes('dev-assistant') || path.includes('assistant')) {
     return PhRobot

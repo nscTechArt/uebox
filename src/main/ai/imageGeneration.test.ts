@@ -43,6 +43,8 @@ vi.mock('./store', () => ({
 }))
 
 const {
+  CodexAccountMissingError,
+  CodexImageError,
   generateImages,
   getImageModelStatus,
   ImageGenerationEmptyError,
@@ -310,9 +312,9 @@ describe('生图的协议边界', () => {
    * 反复去改模型名 —— 真正的问题是这家协议不提供这个能力。
    *
    * `google-generative-ai` 现在也在这一列：Nano Banana 那条路（对话接口出图）
-   * 已整体删除。
+   * 已整体删除。Codex 后端不在：它没有生图端点，但有生图工具（见下面「Codex 订阅出图」）。
    */
-  it.each<Protocol>(['anthropic-messages', 'openai-codex-responses', 'google-generative-ai'])(
+  it.each<Protocol>(['anthropic-messages', 'google-generative-ai'])(
     '%s 没有生图接口，直说而不是发出去等 404',
     async (protocol) => {
       settings.providers[0].protocol = protocol
@@ -1457,5 +1459,149 @@ describe('异步任务式的中转站', () => {
       { base64: 'QUJD', mediaType: 'image/png' }
     ])
     expect(sent).toHaveLength(1)
+  })
+})
+
+/**
+ * ChatGPT 订阅出图：Codex 后端没有 `/images/*`，出图是 Responses 的 image_generation 工具，
+ * 响应是事件流。这里钉住三件做错就一张图都拿不到的事：后端要的那几个头、
+ * 强制调用工具的请求体、从事件流里取图。
+ */
+describe('Codex 订阅出图', () => {
+  const CODEX_URL = 'https://chatgpt.com/backend-api/codex'
+  const ACCOUNT = 'acct-123'
+  const jwt = (claims: Record<string, unknown>): string =>
+    `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`
+
+  /** 一段事件流：每个事件一行 `data:`，与后端的形状一致 */
+  function sse(...events: Record<string, unknown>[]): Response {
+    return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+      headers: { 'content-type': 'text/event-stream' }
+    })
+  }
+
+  const imageDone = (result = 'QUJD', format = 'png'): Record<string, unknown> => ({
+    type: 'response.output_item.done',
+    item: { type: 'image_generation_call', result, output_format: format }
+  })
+
+  let originalBaseUrl = ''
+  beforeEach(() => {
+    originalBaseUrl = settings.providers[0].baseUrl
+    process.env.CODEX_TEST_TOKEN = jwt({
+      'https://api.openai.com/auth': { chatgpt_account_id: ACCOUNT }
+    })
+    settings.providers[0].protocol = 'openai-codex-responses'
+    settings.providers[0].baseUrl = CODEX_URL
+    settings.providers[0].apiKey = { kind: 'env', name: 'CODEX_TEST_TOKEN' }
+    useModel('codex-images', 'gpt-5.6-luna')
+    stubFetch(() => sse({ type: 'response.created' }, imageDone(), { type: 'response.completed' }))
+  })
+  afterEach(() => {
+    settings.providers[0].baseUrl = originalBaseUrl
+    delete process.env.CODEX_TEST_TOKEN
+  })
+
+  it('打 /responses，带上账号 id，强制调用生图工具、只要流、不落库', async () => {
+    await generateImages({ prompt: '一只木箱', aspectRatio: '16:9' })
+
+    const request = lastRequest()
+    expect(request.url).toBe(`${CODEX_URL}/responses`)
+    expect(request.headers).toMatchObject({
+      Authorization: `Bearer ${process.env.CODEX_TEST_TOKEN}`,
+      'chatgpt-account-id': ACCOUNT,
+      'OpenAI-Beta': 'responses=experimental',
+      Accept: 'text/event-stream'
+    })
+    expect(request.json).toMatchObject({
+      model: 'gpt-5.6-luna',
+      stream: true,
+      store: false,
+      tools: [{ type: 'image_generation', output_format: 'png' }],
+      tool_choice: { type: 'image_generation' }
+    })
+    // 后端不听 size，比例要写进提示词才生效
+    const content = (request.json.input as { content: { type: string; text?: string }[] }[])[0]
+      .content
+    expect(content[0]).toEqual({ type: 'input_text', text: '一只木箱\n\nAspect ratio: 16:9.' })
+  })
+
+  it('只给了像素尺寸时按尺寸推出比例', async () => {
+    await generateImages({ prompt: 'x', size: '1536x1024' })
+    const content = (lastRequest().json.input as { content: { text?: string }[] }[])[0].content
+    expect(content[0].text).toBe('x\n\nAspect ratio: 3:2.')
+  })
+
+  it('从事件流里取图，媒体类型跟着输出格式走', async () => {
+    stubFetch(() => sse({ type: 'response.created' }, imageDone('V0VCUA', 'webp')))
+    expect(await generateImages({ prompt: 'x' })).toEqual([
+      { base64: 'V0VCUA', mediaType: 'image/webp' }
+    ])
+  })
+
+  it('参考图作为 input_image 跟在提示词后面', async () => {
+    await generateImages({ prompt: 'x', referenceImages: ['data:image/jpeg;base64,QUJD'] })
+    const content = (lastRequest().json.input as { content: unknown[] }[])[0].content
+    expect(content[1]).toEqual({ type: 'input_image', image_url: 'data:image/jpeg;base64,QUJD' })
+  })
+
+  /** 后端一次只出一张：要三张就是三次请求，而不是发一个它不认的 n */
+  it('要几张就并发几次，每次一张', async () => {
+    const images = await generateImages({ prompt: 'x', count: 3 })
+    expect(sent).toHaveLength(3)
+    expect(images).toHaveLength(3)
+    expect(sent.every((request) => !('n' in request.json))).toBe(true)
+  })
+
+  /** 挂了一张不能把已经出好的几张一起扔掉：那几张的额度已经花了 */
+  it('部分失败时留下出好的那几张', async () => {
+    let calls = 0
+    stubFetch(() =>
+      ++calls === 2
+        ? new Response('{"error":{"message":"busy"}}', { status: 500 })
+        : sse(imageDone())
+    )
+    expect(await generateImages({ prompt: 'x', count: 3 })).toHaveLength(2)
+  })
+
+  it('全部失败时报第一个原因', async () => {
+    stubFetch(
+      () => new Response('{"error":{"message":"You have hit your usage limit"}}', { status: 429 })
+    )
+    await expect(generateImages({ prompt: 'x', count: 2 })).rejects.toBeInstanceOf(
+      ImageRequestError
+    )
+  })
+
+  /** 被审核拦下时后端不报错，只回一段话 —— 那段话就是原因，不能换成「没有返回图片」 */
+  it('只回了一段话时把那段话带出来', async () => {
+    stubFetch(() =>
+      sse({
+        type: 'response.output_item.done',
+        item: { type: 'message', content: [{ type: 'output_text', text: '这个请求我不能画。' }] }
+      })
+    )
+    await expect(generateImages({ prompt: 'x' })).rejects.toThrow('这个请求我不能画。')
+  })
+
+  it('事件流里报错时带出后端那句话', async () => {
+    stubFetch(() =>
+      sse({ type: 'response.failed', response: { error: { message: 'image tool failed' } } })
+    )
+    await expect(generateImages({ prompt: 'x' })).rejects.toBeInstanceOf(CodexImageError)
+    await expect(generateImages({ prompt: 'x' })).rejects.toThrow('image tool failed')
+  })
+
+  /** 手填的模型没写 imageApi：Codex 后端只有这一种出图方式，不能按名字猜去打 /images/generations */
+  it('手填的模型没写接口形状也走生图工具', async () => {
+    useModel(undefined, 'gpt-6-luna')
+    await generateImages({ prompt: 'x' })
+    expect(lastRequest().url).toBe(`${CODEX_URL}/responses`)
+  })
+
+  it('令牌里解不出账号 id 时直说重新登录，不发请求', async () => {
+    process.env.CODEX_TEST_TOKEN = 'not-a-jwt'
+    await expect(generateImages({ prompt: 'x' })).rejects.toBeInstanceOf(CodexAccountMissingError)
+    expect(sent).toHaveLength(0)
   })
 })

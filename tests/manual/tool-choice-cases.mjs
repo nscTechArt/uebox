@@ -255,6 +255,14 @@ export const CASES = Object.freeze([
     group: 'widget',
     scope: ['ue.widget']
   },
+  {
+    ...D,
+    tag: 'ui-replace',
+    say: '/Game/UI/WB_StartScreen 里的登录按钮换成导航栏用的 WB_Text_Button，点击还是走原来的登录逻辑。',
+    accept: ['widget_replace', 'widget_get_hierarchy'],
+    group: 'widget',
+    scope: ['ue.widget']
+  },
 
   // ── sequencer ──────────────────────────────────────────────────────────
   {

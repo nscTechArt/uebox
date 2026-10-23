@@ -20,6 +20,10 @@ import {
   readStoredNetworkVaultPreference,
   resolveNetworkVaultEnabled
 } from '@renderer/views/AssetManagement/utils/networkVaultAccess'
+import {
+  useShowAssetVersion,
+  writeShowAssetVersion
+} from '@renderer/views/AssetManagement/utils/assetVersionBadge'
 import AppSwitch from '@renderer/components/AppSwitch.vue'
 import { assetSemanticAPI } from '@renderer/api/assetSemantic'
 
@@ -56,6 +60,11 @@ watch(deleteConfirm, (val) => {
     )
   }
 })
+
+// ==============================
+// 卡片显示资产版本
+// ==============================
+const showAssetVersion = useShowAssetVersion()
 
 // 「显示依赖资产」搬去资产库的筛选栏了，在那里叫「只看主资产」。
 // 它筛的是资产列表，属于那个列表；放在这儿的后果是：想临时看一眼附带资产，
@@ -565,6 +574,20 @@ onUnmounted(() => {
           </div>
           <div class="row-control">
             <AppSwitch v-model:checked="archiveImportAsk" />
+          </div>
+        </div>
+
+        <!-- Show Asset Version Row -->
+        <div class="setting-row">
+          <div class="row-icon">
+            <PhInfo />
+          </div>
+          <div class="row-content">
+            <div class="row-title">{{ $t('profile.asset.showAssetVersion') }}</div>
+            <div class="row-desc">{{ $t('profile.asset.showAssetVersionDesc') }}</div>
+          </div>
+          <div class="row-control">
+            <AppSwitch :checked="showAssetVersion" @update:checked="writeShowAssetVersion" />
           </div>
         </div>
       </div>

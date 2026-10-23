@@ -1,5 +1,5 @@
 /**
- * 添加蓝图成员变量工具
+ * 添加蓝图变量工具（成员变量，或给了 function 时的函数局部变量）
  * 通过 WebSocket 向虚幻引擎插件发送 blueprint.add_variable 命令
  */
 
@@ -40,6 +40,13 @@ const AddBlueprintVariableSchema = z.object({
       '默认值（可选）。用 UE 自己的字面量写法："600.0"、"true"、"(X=0,Y=0,Z=0)"、' +
         '资产写完整路径 "/Game/M_Gold.M_Gold"。写不进去会报错，不会静默留 0；' +
         '返回里的 default_value 是**引擎读回来的值**，不是这里填的回声'
+    ),
+  function: z
+    .string()
+    .optional()
+    .describe(
+      '函数名（可选）。给了就建成这个函数的局部变量（编辑器里的 Local Variables），' +
+        '只在这个函数里能 Get / Set，每次调用从默认值开始。循环累加器、中间结果用它，别建成员变量'
     )
 })
 
@@ -48,6 +55,8 @@ export interface AddBlueprintVariableResponse {
   blueprint_path: string
   variable: {
     name: string
+    /** 局部变量才有：所属函数名 */
+    function?: string
     type: string
     /** 从引擎解析出的类型读，不是入参回声：container 优先于 is_array */
     is_array: boolean
@@ -74,7 +83,7 @@ export function formatVariableType(v: {
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function createAddBlueprintVariableTool() {
   return defineV2Tool({
-    description: `为蓝图添加成员变量（Blueprint Member Variable）。
+    description: `为蓝图添加成员变量；给 function 时添加该函数的局部变量。
 
 【使用建议】
 - 添加变量后，如需在图表中使用，用 blueprint_apply_graph 往图里放节点，
@@ -106,6 +115,7 @@ export function createAddBlueprintVariableTool() {
         if (input.object_class) params.object_class = input.object_class
         if (input.container) params.container = input.container
         if (input.default_value !== undefined) params.default_value = input.default_value
+        if (input.function) params.function = input.function
 
         const response = await wsService.callRequest<AddBlueprintVariableResponse>(
           'blueprint.add_variable',
@@ -128,7 +138,9 @@ export function createAddBlueprintVariableTool() {
           success: true,
           blueprint_path: response.blueprint_path,
           variable: response.variable,
-          message: `已添加变量 ${response.variable.name}（${formatVariableType(response.variable)}）到 ${response.blueprint_path}`
+          message: response.variable.function
+            ? `已添加局部变量 ${response.variable.name}（${formatVariableType(response.variable)}）到 ${response.blueprint_path} 的函数 ${response.variable.function}`
+            : `已添加变量 ${response.variable.name}（${formatVariableType(response.variable)}）到 ${response.blueprint_path}`
         }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

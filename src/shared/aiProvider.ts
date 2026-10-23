@@ -77,6 +77,12 @@ export type ImageApi =
    * 只由套餐导入写进来，用户不会手选。
    */
   | 'uebox-images'
+  /**
+   * ChatGPT 订阅的 Codex 后端（`openai-codex-responses` 协议）。没有 `/images/*` 端点：
+   * 出图是 Responses 里的 `image_generation` 工具，强制调用一次、从事件流里取图。
+   * 模型 id 是**驱动工具的那个对话模型**，画图的模型由后端定。一次请求一张。
+   */
+  | 'codex-images'
 
 /**
  * 结构化输出的能力档位。
@@ -1008,6 +1014,13 @@ export interface CatalogEntry {
    * 打内部接口那种做法不在此列。
    */
   supportsOAuth?: boolean
+  /**
+   * 登录用哪一家的账号（`oauth.ts` 的 OAUTH_PROVIDERS 键）。不填就是本条的 id。
+   *
+   * 「Codex 生图」与「Codex」对话是同一个 ChatGPT 账号：填 `chatgpt` 之后，
+   * 已经登录过的用户添加生图来源时直接沿用那份登录，不用再走一遍授权。
+   */
+  oauthProvider?: string
   models: ModelConfig[]
 }
 

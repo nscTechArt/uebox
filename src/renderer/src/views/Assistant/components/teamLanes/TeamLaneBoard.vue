@@ -25,6 +25,10 @@
         <span class="objective-label">{{ t('assistant.teamBoard.objective') }}</span>
         {{ team.objective }}
       </p>
+      <p v-if="team.latestRequest" class="objective" :title="team.latestRequest">
+        <span class="objective-label">{{ t('assistant.teamBoard.latestRequestLabel') }}</span>
+        {{ latestRequestLine(team.latestRequest) }}
+      </p>
     </header>
 
     <p v-if="!model.crew.length" class="empty">{{ t('assistant.teamBoard.ui.recruiting') }}</p>
@@ -236,6 +240,15 @@
               <span v-if="c.member.persona" class="persona" :title="c.member.persona">
                 {{ c.member.persona }}
               </span>
+              <!-- 外部团队的名册在 Claude Code 那边管，盒子不替它辞人 -->
+              <TeamMemberDismiss
+                v-if="!team.external"
+                class="dismiss"
+                :member="c.member"
+                :team="team"
+                :busy="!!c.open || !!c.assignment"
+                @dismiss="(name, reason) => emit('dismiss', name, reason)"
+              />
             </div>
           </div>
         </li>
@@ -322,9 +335,16 @@ import {
 } from '@core/shared/agentTeam'
 
 import MarkdownRenderer from '../MarkdownRenderer.vue'
+import TeamMemberDismiss from '../TeamMemberDismiss.vue'
 import TeamMemberModel from '../TeamMemberModel.vue'
 import TeamTaskList from '../TeamTaskList.vue'
-import type { BoardModel, CrewView, JobView, LogEntry } from '../teamBoardModel'
+import {
+  latestRequestLine,
+  type BoardModel,
+  type CrewView,
+  type JobView,
+  type LogEntry
+} from '../teamBoardModel'
 import { useTeamLabels } from '../teamBoardLabels'
 import { recentSteps, shortTarget, type StepGroup } from '../teamBoardView'
 import { crewColor, officeStyle } from '../teamOffice/officeStyle'
@@ -344,6 +364,7 @@ const emit = defineEmits<{
   'reopen-job': [jobId: string]
   'open-models': []
   'set-model': [name: string, model: TeamModel]
+  dismiss: [name: string, reason: string]
 }>()
 const { t } = useI18n()
 const { ago, exact, who, toolVerb, statusText, now } = useTeamLabels()
@@ -1069,6 +1090,11 @@ function entryText(entry: LogEntry): string {
   font-size: var(--font-size-xs);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.dismiss {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .tail {

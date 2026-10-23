@@ -28,8 +28,3 @@ export function buildNotebookListRoute(tabId?: string, extraQuery: NotebookRoute
     query
   }
 }
-
-export function getNotebookTabIdFromQuery(query: Record<string, unknown>): string {
-  const tabId = query._tab_id
-  return typeof tabId === 'string' && tabId.trim() ? tabId : 'default'
-}

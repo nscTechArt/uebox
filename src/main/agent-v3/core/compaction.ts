@@ -69,6 +69,18 @@ export const COMPACT_AT_RATIO = 0.85
 export const PRECOMPACT_AT_RATIO = 0.6
 
 /**
+ * 后台那份写好之后，摘要外的原文又涨了多少就再续写一份。
+ *
+ * 只在 60% 写一次的话，撞线换上时 60% 到 85% 之间长出来的那一大段全是原文：
+ * 真机 1M 窗口的会话从 83 万只压到 41 万，900 多条消息原样留着。
+ * 续写拿上一份摘要接着往下写，每次只喂新长出来的这一段，写得快，撞线时
+ * 那份摘要离当下就差一小段。
+ */
+export function precompactionStep(contextWindow: number): number {
+  return Math.max(UNREAL_BOX_COMPACTION.keepRecentTokens * 2, contextWindow * 0.05)
+}
+
+/**
  * 这个窗口下超过多少 token 就压。
  *
  * 取比例线和 pi 原来那条固定余量线里**更早的那个**：小窗口（8K、32K）下
@@ -99,6 +111,8 @@ interface Precompaction {
   result: Promise<CheckpointState | undefined>
   /** 已经写完（成败都算）。撞线时还没写完才需要提示用户在等 */
   done: boolean
+  /** 写好的那份。续写时拿它当起点 */
+  ready?: CheckpointState
 }
 
 const precompactions = new Map<string, Precompaction>()
@@ -112,6 +126,7 @@ export function resetPrecompactionsForTest(): void {
 const SUMMARY_INSTRUCTIONS = `这是虚幻引擎工作流的对话。生成摘要时**必须**逐字保留：
 - 已确认存在的资产完整路径（如 /Game/Materials/M_Wood），以及已确认**不存在**的路径
 - 材质/蓝图图表里已创建节点的 node_id 与类型
+- 被存档的大结果的编号（archived.ref，如 r3）和它装的是什么 —— 凭编号还能用 result_query 取回细节
 - 已完成的操作及其结果（创建了什么、连了哪些线、编译是否通过）
 - 用户明确表达过的偏好和约束
 - 尚未完成的待办
@@ -227,9 +242,75 @@ export function measureCompaction(
   before: AgentMessage[],
   after: AgentMessage[]
 ): { tokensBefore: number; tokensAfter: number; saved: number } {
-  const tokensBefore = estimateContextTokens(before).tokens
+  const tokensBefore = estimateOutgoingTokens(before).tokens
   const saved = estimateMessagesTokens(before) - estimateMessagesTokens(after)
   return { tokensBefore, tokensAfter: Math.max(0, tokensBefore - saved), saved }
+}
+
+/**
+ * 「即将发出去的这一份」上下文有多大。
+ *
+ * 和 `estimateContextTokens` 同样优先信最后一条 assistant 上厂商报的用量，多一道防御：
+ * **那个用量只对它当时发出去的那份上下文成立。** 要发的这份要是比那时大得多，
+ * 它就是个过期的数。
+ *
+ * 真机上撞过：队员（子 agent）没有落盘的检查点，重新派活时 agent 重建、闭包里的
+ * 检查点清空，要发的是盘上 977 条、约 170 万字符的完整历史 —— 而最后那条 assistant
+ * 带的用量，是上一轮**压缩后视图**的 9.4 万。照它算远低于压缩线，于是原样发出，
+ * 厂商回「input exceeds the context window」。
+ *
+ * 防御的判据不是编出来的阈值，是一个下限：**上下文不可能比它装着的文字还小。**
+ * 用量那条之前（含它）的消息按纯文字估一遍，超过厂商报的数，就说明那个数描述的
+ * 不是这一份，改用文字估算。纯文字指正文、工具调用参数、工具结果文字：
+ *
+ *   - 图片不算：各家计价差很远，拿 pi 的一律 1200 去比，会在厂商如实报了低价的会话里
+ *     误判「用量过期」，然后每一轮都压一次
+ *   - 思考不算：好几家不把上一轮的思考再发一遍，算进来同样会误判
+ *
+ * 中文按「4 字符 1 token」是往低估的，JSON 和英文大致持平 —— 所以这个下限只会偏小，
+ * 正常会话里（用量还含着系统提示词和工具定义）它碰不到厂商报的数。
+ */
+export function estimateOutgoingTokens(base: AgentMessage[]): {
+  tokens: number
+  lastUsageIndex: number | null
+  /** 厂商报的用量对不上要发的这份，改用了文字下限 */
+  staleUsage: boolean
+} {
+  const usage = estimateContextTokens(base)
+  if (usage.lastUsageIndex === null) {
+    return { tokens: usage.tokens, lastUsageIndex: null, staleUsage: false }
+  }
+  let floor = 0
+  for (let i = 0; i <= usage.lastUsageIndex; i++) floor += estimateTextTokens(base[i])
+  if (floor <= usage.usageTokens) {
+    return { tokens: usage.tokens, lastUsageIndex: usage.lastUsageIndex, staleUsage: false }
+  }
+  return {
+    tokens: floor + usage.trailingTokens,
+    lastUsageIndex: usage.lastUsageIndex,
+    staleUsage: true
+  }
+}
+
+/** 一条消息的纯文字部分按 pi 的口径（4 字符 1 token）估多少。为什么不算图片和思考见上面 */
+function estimateTextTokens(message: AgentMessage): number {
+  const content = (message as { content?: unknown }).content
+  if (typeof content === 'string') return Math.ceil(content.length / 4)
+  if (!Array.isArray(content)) return 0
+  let chars = 0
+  for (const block of content as Array<{
+    type?: string
+    text?: unknown
+    name?: unknown
+    arguments?: unknown
+  }>) {
+    if (block?.type === 'text' && typeof block.text === 'string') chars += block.text.length
+    else if (block?.type === 'toolCall') {
+      chars +=
+        String(block.name ?? '').length + (JSON.stringify(block.arguments ?? {})?.length ?? 0)
+    }
+  }
+  return Math.ceil(chars / 4)
 }
 
 /**
@@ -302,6 +383,8 @@ export function applyCheckpoint(
   return [toSummaryMessage(checkpoint.summary), ...messages.slice(checkpoint.cutIndex)]
 }
 
+type CompactTransform = (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>
+
 /**
  * 自动压缩，装在 pi 的 `transformContext` 上。
  *
@@ -311,19 +394,54 @@ export function applyCheckpoint(
  * 0.84 时一样；真压了，再把它们合成一条放回最前面。不放回的话，压完第一次
  * 模型就没有提示词也没有工具了 —— pi 把 system 消息当普通历史交给我们。
  */
-export function createAutoCompact(deps: CompactionDeps) {
-  const compactConversation = createConversationCompact(deps)
-  return async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
+export function createAutoCompact(deps: CompactionDeps): CompactTransform & {
+  compactForOverflow: (signal?: AbortSignal) => Promise<AgentMessage[] | undefined>
+} {
+  const { transform: compactConversation, compactLatest } = createConversationCompact(deps)
+  /** 最近一次交进来的完整历史（含 system 消息）。超长补救要拿它当场压 */
+  let latest: AgentMessage[] | undefined
+  const withHead = (messages: AgentMessage[], projected: AgentMessage[]): AgentMessage[] => {
+    const head = getCurrentSystemMessage(messages as Message[])
+    return head ? [head, ...projected] : projected
+  }
+  const transform = async (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ): Promise<AgentMessage[]> => {
+    latest = messages
     const conversation = withoutSystemMessages(messages)
     const projected = await compactConversation(conversation, signal)
     // 没压（原样返回）就把原数组交回去，一条都不动
     if (projected === conversation) return messages
-    const head = getCurrentSystemMessage(messages as Message[])
-    return head ? [head, ...projected] : projected
+    return withHead(messages, projected)
   }
+  /**
+   * 不看阈值，把最近那份历史当场压掉，返回压完的模型视图（含 system 消息）。
+   *
+   * 给 `contextOverflow.ts` 用：厂商已经回了超长，说明估算低了，阈值不作数。
+   * 压出来的检查点记进闭包，这一轮后面的请求经 `transform` 照样用上。
+   * 压不动（没有可换的头部、摘要失败）返回 undefined。
+   */
+  const compactForOverflow = async (signal?: AbortSignal): Promise<AgentMessage[] | undefined> => {
+    if (!latest) return undefined
+    const messages = latest
+    try {
+      const projected = await compactLatest(withoutSystemMessages(messages), signal)
+      return projected ? withHead(messages, projected) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  return Object.assign(transform, { compactForOverflow })
 }
 
-function createConversationCompact(deps: CompactionDeps) {
+function createConversationCompact(deps: CompactionDeps): {
+  transform: CompactTransform
+  compactLatest: (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ) => Promise<AgentMessage[] | undefined>
+} {
   /**
    * 当前生效的检查点。
    *
@@ -336,7 +454,28 @@ function createConversationCompact(deps: CompactionDeps) {
   /** 只在第一次调用时验一遍指纹：同一轮里历史的头部不会变，验第二遍是白算 hash */
   let validated = false
 
-  return async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
+  /** 不看阈值当场压。压不动返回 undefined。见 `createAutoCompact` 的 `compactForOverflow` */
+  const compactLatest = async (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ): Promise<AgentMessage[] | undefined> => {
+    const base = checkpoint ? applyCheckpoint(messages, checkpoint) : messages
+    // 后台那份描述的是压之前的一代，换了检查点就作废
+    if (deps.precompactKey) precompactions.delete(deps.precompactKey)
+    const projected = await compactNow(
+      messages,
+      base,
+      estimateOutgoingTokens(base).tokens,
+      false,
+      signal
+    )
+    return projected === base ? undefined : projected
+  }
+
+  const transform = async (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ): Promise<AgentMessage[]> => {
     try {
       if (!validated) {
         validated = true
@@ -347,7 +486,8 @@ function createConversationCompact(deps: CompactionDeps) {
       // 情况下判定「还要再压」，然后每一次请求都白跑一趟摘要模型。
       const base = checkpoint ? applyCheckpoint(messages, checkpoint) : messages
 
-      const usage = estimateContextTokens(base)
+      // 用量过期（要发的这份比厂商报账那时大）时改用文字下限，见 `estimateOutgoingTokens`
+      const usage = estimateOutgoingTokens(base)
 
       // `estimateContextTokens` 会优先采信最近一条 assistant 上厂商报的真实用量 ——
       // 那一段是最准的，一个字都不该改。**只给它后面那几条补图片的差额**：
@@ -377,8 +517,12 @@ function createConversationCompact(deps: CompactionDeps) {
       }
 
       if (tokens <= compactionThreshold(deps.contextWindow)) {
-        if (key && !pending && tokens > precompactionThreshold(deps.contextWindow)) {
-          startPrecompaction(key, messages, base, epoch)
+        if (key && tokens > precompactionThreshold(deps.contextWindow)) {
+          if (!pending) startPrecompaction(key, messages, base, epoch, checkpoint)
+          else if (shouldRoll(messages, pending)) {
+            const ready = pending.ready as CheckpointState
+            startPrecompaction(key, messages, applyCheckpoint(messages, ready), epoch, ready, ready)
+          }
         }
         return base
       }
@@ -401,9 +545,10 @@ function createConversationCompact(deps: CompactionDeps) {
           checkpoint = ready
           await deps.checkpoint?.save(ready)
           const projected = applyCheckpoint(messages, ready)
-          // 摘要写好之后又涨了太多、换上仍然超线，才往下走当场再压一次
+          // 换上之后还在后台线以上，说明摘要没跟上，当场把剩下那段也压掉。
+          // 只看压缩线的话，换上后落在 60%~85% 也算「压完了」，下一轮马上又撞线
           const after = tokens - (estimateMessagesTokens(base) - estimateMessagesTokens(projected))
-          if (after <= compactionThreshold(deps.contextWindow)) return projected
+          if (after <= precompactionThreshold(deps.contextWindow)) return projected
           return await compactNow(messages, projected, tokens, announced, signal)
         }
       }
@@ -426,23 +571,39 @@ function createConversationCompact(deps: CompactionDeps) {
     key: string,
     messages: AgentMessage[],
     base: AgentMessage[],
-    baseEpoch: number
+    baseEpoch: number,
+    previous: CheckpointState | undefined,
+    fallback?: CheckpointState
   ): void {
     const entry: Precompaction = {
       baseEpoch,
       done: false,
-      result: summarize(messages, base, checkpoint).then(
+      result: summarize(messages, base, previous).then(
         (value) => {
           entry.done = true
-          return value
+          entry.ready = value
+          // 续写失败就退回上一份：照样能换上，只是多留点原文。
+          // ready 不跟着退，免得每次请求都拿同一份去重试
+          return value ?? fallback
         },
         () => {
           entry.done = true
-          return undefined
+          return fallback
         }
       )
     }
     precompactions.set(key, entry)
+  }
+
+  /**
+   * 后台那份写好了、摘要外的原文又攒够一段：该续写了。
+   * 写好的那份对不上当前历史（被改过）就不续，撞线时自然当场重压。
+   */
+  function shouldRoll(messages: AgentMessage[], pending: Precompaction): boolean {
+    const ready = pending.ready
+    if (!ready || !checkpointApplies(messages, ready, deps.hashMessages)) return false
+    const uncovered = estimateMessagesTokens(messages.slice(ready.cutIndex))
+    return uncovered > precompactionStep(deps.contextWindow)
   }
 
   /** 把 base 的头部换成摘要，换算成原始历史下标上的检查点。不成返回 undefined */
@@ -455,6 +616,9 @@ function createConversationCompact(deps: CompactionDeps) {
     // 后台写摘要时 messages 是 pi 的活数组，写的这段时间里循环还在往后追加；
     // 切点必须按调用这一刻的长度算，否则会把没进摘要的那几条一起切掉
     const total = messages.length
+    // 代数按**生效中**的检查点算：续写时 previous 是还没换上的那份，
+    // 拿它 +1 会跳代，缓存键（见 createAgent 的 promptCacheKey）跟着乱
+    const contextEpoch = (checkpoint?.contextEpoch ?? 0) + 1
     const outcome = await compactMessages(base, deps, {
       // 迭代式摘要：下一次压缩把上一次的摘要一起喂进去更新，
       // 而不是对着已经压过的历史再压一次。
@@ -467,7 +631,7 @@ function createConversationCompact(deps: CompactionDeps) {
     const cutIndex = total - (outcome.messages.length - 1)
     if (cutIndex <= 0) return undefined
     return {
-      contextEpoch: (previous?.contextEpoch ?? 0) + 1,
+      contextEpoch,
       summary: outcome.summary,
       cutIndex,
       sourceHash: deps.hashMessages?.(messages.slice(0, cutIndex)) ?? '',
@@ -502,6 +666,8 @@ function createConversationCompact(deps: CompactionDeps) {
     if (next.sourceHash) await deps.checkpoint?.save(next)
     return applyCheckpoint(messages, next)
   }
+
+  return { transform, compactLatest }
 }
 
 /** 摘要以一条用户消息的形式回到上下文最前面 */

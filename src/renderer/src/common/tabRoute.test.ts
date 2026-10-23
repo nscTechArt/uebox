@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RouteLocationMatched, RouteMeta, RouteLocationNormalizedLoaded } from 'vue-router'
-import { resolveTabRoute } from './tabRoute'
+import { getTabIdFromQuery, resolveTabRoute } from './tabRoute'
 
 type TestRoute = Pick<RouteLocationNormalizedLoaded, 'path' | 'fullPath' | 'meta' | 'query'> & {
   matched?: Array<Pick<RouteLocationMatched, 'path' | 'meta'>>
@@ -61,5 +61,17 @@ describe('resolveTabRoute', () => {
     })
 
     expect(resolveTabRoute(route)).toBeNull()
+  })
+})
+
+describe('getTabIdFromQuery', () => {
+  it('falls back to the default tab when _tab_id is missing or blank', () => {
+    expect(getTabIdFromQuery({})).toBe('default')
+    expect(getTabIdFromQuery({ _tab_id: '  ' })).toBe('default')
+    expect(getTabIdFromQuery({ _tab_id: ['t1'] })).toBe('default')
+  })
+
+  it('returns the dedicated tab id', () => {
+    expect(getTabIdFromQuery({ _tab_id: 't1' })).toBe('t1')
   })
 })

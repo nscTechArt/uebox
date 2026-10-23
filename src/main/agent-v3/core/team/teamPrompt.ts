@@ -46,6 +46,8 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     '<team_mode>',
     'You are the producer of an AI game studio. The user gave you one line and expects a playable MVP back:',
     `<objective>${escapeXml(input.objective)}</objective>`,
+    // 最新那句话不进系统提示词：它在对话里本来就看得到，每轮换一次系统提示词会让整段缓存作废
+    'The user may change or add to this later in the conversation. Where a later message from the user changes or contradicts the objective, the later message wins.',
     '',
     'The bar for delivery (what the user asked for, not a method):',
     ...DELIVERY_STANDARD,
@@ -54,7 +56,7 @@ export function buildProducerBrief(input: { objective: string; workspaceDir: str
     'How to get there — which roles to hire, how to split the work, in what order, what to cut — is entirely your call. What Unreal Box gives you:',
     // 2026-10-16：制作人的写工具被收走了（`producerTools`），这一条说的是环境，不是做法
     '- You coordinate; teammates build. Your own tools can read and inspect, create or open the project and bind this conversation to it — nothing else. Every change to the game itself (code, assets, levels, settings, fixes after a failed acceptance) is done by a teammate you hire.',
-    "- `team_hire` to bring on teammates: you write each one's role, pick its model and scope its tools. `team_send` gives a teammate work; it remembers everything you have sent it before. By default you wait for it to finish; with `wait: false` it works in the background while you carry on, and its result comes back to you as a note. Independent `team_send` calls in the same turn run in parallel; Unreal Box paces the model requests to what the provider can take. `team_message` talks to a teammate while it works (it reads it at its next step) and can wait for a read receipt or a reply; teammates can message each other and you the same way.",
+    "- `team_hire` to bring on teammates: you write each one's role, pick its model and scope its tools. `team_send` gives a teammate work; it remembers everything you have sent it before. By default you wait for it to finish; with `wait: false` it works in the background while you carry on, and its result comes back to you as a note. Independent `team_send` calls in the same turn run in parallel; Unreal Box paces the model requests to what the provider can take. `team_message` talks to a teammate while it works (it reads it at its next step) and can wait for a read receipt or a reply; teammates can message each other and you the same way. `team_dismiss` takes a teammate off the roster when the role is no longer needed or its work keeps falling short; give the grounds and cite its own jobs or tasks, since the user reads the record.",
     '- `team_board`: a shared task board you and every teammate can read and update. The user watches it.',
     '- `team_status`: the project as it really is right now — assets on disk, who is working on what, who holds which assets, what actually changed. When a teammate and your own check disagree, this is the tie-breaker.',
     `- A shared workspace folder every teammate can read and write: ${input.workspaceDir}`,
@@ -98,6 +100,8 @@ export function buildMemberFraming(input: {
 
 export function buildAcceptancePrompt(input: {
   objective: string
+  /** 开团之后用户最近那句话。验收员看不到对话，不给它就只能按开团那句判 */
+  latestRequest?: string
   report: string
   howToPlay: string
   projectPath?: string
@@ -108,6 +112,13 @@ export function buildAcceptancePrompt(input: {
     'You did not build it and have not seen how it was built. Play it and judge it against the bar.',
     '',
     `<objective>${escapeXml(input.objective)}</objective>`,
+    ...(input.latestRequest
+      ? [
+          'After setting this objective, the user sent this message to the studio:',
+          `<latest_user_message>${escapeXml(input.latestRequest)}</latest_user_message>`,
+          'Where that message changes or contradicts the objective, the message wins: it is newer. Judge the game against the objective as that message leaves it.'
+        ]
+      : []),
     ...(input.projectPath ? [`Project: ${escapeXml(input.projectPath)}`] : []),
     ...(input.packageExe ? [`Packaged build: ${escapeXml(input.packageExe)}`] : []),
     '',

@@ -15,6 +15,13 @@
  * 所以这里改成开放字符串 + 把已知名单写进描述：**认得的照样有引导，
  * 认不得的不再一刀切**。给错了插件会回一句 `Unknown control type: X`，
  * 那比 schema 校验直接拒掉更有用 —— 至少模型知道自己该换个名字。
+ *
+ * ## 2026-10-20 更正
+ *
+ * 上面说的「按 `U<名字>` 动态查」其实从来没查到过东西：类对象的名字本来就不带
+ * U 前缀（UButton 的类对象叫 Button）。工程自己做的控件蓝图（CommonUI 项目里的
+ * WB_Text_Button）也不在任何查找路径上。插件改成 `ResolveWidgetClass`：原生类名、
+ * 控件蓝图资产名、资产或类路径都认，重名时列出候选让调用方给路径。
  */
 
 /** 插件 `FindWidgetClass` 里写死的映射表（UAL_WidgetCommands.cpp） */
@@ -43,8 +50,9 @@ export const KNOWN_WIDGET_TYPES = [
   'UniformGridPanel'
 ] as const
 
-/** 写进 schema 描述里的那句话，两个工具共用 */
+/** 写进 schema 描述里的那句话，几个工具共用 */
 export const WIDGET_TYPE_HINT =
   `常用类型：${KNOWN_WIDGET_TYPES.join(' / ')}。` +
-  '这张表之外也认 —— 任何 UWidget 子类写类名（去掉 U 前缀，如 InputKeySelector）都会被动态查找，' +
-  '包括工程自己写的控件。名字不对时插件会回 Unknown control type，换个写法再试。'
+  '表外的也认：引擎和插件里的控件类写类名（去掉 U 前缀，如 CommonButtonBase），' +
+  '工程自己做的控件蓝图写资产名（WB_Text_Button）或路径（/Game/UI/WB_Text_Button）。' +
+  '名字不对或重名时插件会说怎么改。'

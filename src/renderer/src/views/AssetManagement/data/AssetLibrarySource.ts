@@ -26,7 +26,7 @@ export interface LibraryListCriteria {
   keyword?: string
   classNameCnFilters?: string[]
   fileExtensions?: string[]
-  /** 只有服务端库有：引擎版本分面 */
+  /** 引擎版本（库的 filters.engine 为真时才认） */
   engineVersions?: string[]
   sortBy?: string
   sortOrder?: SortOrder
@@ -95,6 +95,17 @@ export interface LibraryCapabilities {
   }
   /** 不可用的原因（i18n 键），按能力名查 */
   reasons: Record<string, CapabilityReason>
+  /**
+   * 这个库是团队工程：签出角标、历史段、动态 / 签出中 / 等你处理、谁能提交、外包……
+   * 界面据此出现团队的那几样东西；本地库和普通服务器库是 null，界面一行不变。
+   */
+  team: TeamCapability | null
+}
+
+export interface TeamCapability {
+  role: 'member' | 'admin' | 'outsourcer' | 'build'
+  /** 工程在这台电脑上（同步到本机 / 放入之后） */
+  local: boolean
 }
 
 export interface LibraryFolderApi {

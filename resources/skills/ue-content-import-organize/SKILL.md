@@ -16,7 +16,7 @@ Three ways to get them, in order of preference:
 - **On disk** — `list_local_dir` for one folder, `find_local_files` with a glob
   (`**/*.fbx`) when the files could be at any depth. "把 D:/Downloads/kit 里的都导进来"
   starts here: list it, show the user what you found, then import.
-- **In the box's asset library** — `search_assets` first, take `realPath` from each result.
+- **In the box's asset library** — `search_assets` first, take `real_path` from each result.
 - **Neither** — ask the user for the paths. Do not guess filenames from a folder's name.
 
 ## Import does more than you asked

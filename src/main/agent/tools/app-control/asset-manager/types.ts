@@ -30,8 +30,6 @@ export interface FormattedAsset {
    * 资产在本地磁盘的真实路径（绝对路径）。
    * 优先是保管库里的那一份，其次才是导入来源，缩略图只在前两者都没有时垫底。
    */
-  realPath?: string
-  /** 同 realPath，兼容下划线命名 */
   real_path?: string
 }
 

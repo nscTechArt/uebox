@@ -20,3 +20,7 @@ export { previewWidgetTool } from './previewWidget'
 // Phase 5: 事件绑定
 export { makeVariableTool } from './makeVariable'
 export { setPropertyTool } from './setProperty'
+
+// Phase 6: 改现成的界面
+export { replaceWidgetTool } from './replaceWidget'
+export { removeWidgetTool } from './removeWidget'

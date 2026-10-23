@@ -580,3 +580,25 @@ describe('侧栏分界线可以拖', () => {
     expect(handle.attributes('aria-label')).toBe('拖动调整文件夹栏宽度')
   })
 })
+
+describe('网格 / 列表', () => {
+  const pressed = (wrapper: VueWrapper, label: string): string | undefined =>
+    wrapper.find(`.view-toggle [aria-label="${label}"]`).attributes('aria-pressed')
+
+  it('不传 viewMode 时组件自己记', async () => {
+    const wrapper = mountBrowser()
+    await wrapper.find('.view-toggle [aria-label="列表"]').trigger('click')
+    expect(pressed(wrapper, '列表')).toBe('true')
+  })
+
+  it('传了 viewMode 就按它显示，切换时发给库去存盘', async () => {
+    const wrapper = mount(LibraryBrowser, {
+      props: { scope: blueprintScope, items, folders, viewMode: 'list' },
+      global: { plugins: [i18n] }
+    })
+    expect(pressed(wrapper, '列表')).toBe('true')
+
+    await wrapper.find('.view-toggle [aria-label="网格"]').trigger('click')
+    expect(wrapper.emitted('update:viewMode')).toEqual([['grid']])
+  })
+})

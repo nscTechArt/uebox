@@ -1,29 +1,26 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import {
   createEmptyGraphSummary,
   getMaterialCoverStyle,
   type MaterialCollection,
   type MaterialCompileStatus,
   type MaterialEntry,
-  type MaterialLibraryFilters,
-  type MaterialParameterValue,
-  type MaterialSortType,
-  type MaterialViewMode
+  type MaterialParameterValue
 } from '@renderer/views/MaterialLibrary/types/material'
+import type { BrowserViewMode } from '@renderer/views/library-common/browser/types'
 import {
   extractLegacyMaterialDependencies,
   extractLegacyMaterialParameters,
   summarizeLegacyGraph
 } from '@renderer/views/MaterialLibrary/services/materialLibraryTransformers'
-import { sortLibraryEntries } from '@renderer/views/library-common/utils/libraryCollection'
 import { createLibraryPackagePersistence, parseUiPrefs } from './libraryPackagePersistence'
 import { clearLegacyLocalStorage, readLegacyLibrarySnapshot } from './libraryLegacyRead'
 
 /** 旧版把整库写在这个 localStorage 键下，现在只在首次迁移时读一次 */
 const LEGACY_PERSIST_KEY = 'material-library-v2-state'
 
-/** 界面偏好（排序、视图模式、筛选）留在 localStorage —— 它本来就该放这儿 */
+/** 界面偏好（视图模式）留在 localStorage —— 它本来就该放这儿 */
 const UI_STATE_KEY = 'material-library-ui'
 
 function readUiPrefs(): Record<string, unknown> {
@@ -173,111 +170,7 @@ function mergeDependencyRecords<
 export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   const entries = ref<MaterialEntry[]>([])
   const collections = ref<MaterialCollection[]>([])
-  const loading = ref(false)
-  const activeEntryId = ref<string | null>(null)
-  const viewMode = ref<MaterialViewMode>('grid')
-  const sortType = ref<MaterialSortType>('recent')
-  const liveSearchPath = ref('/Game')
-  const filters = ref<MaterialLibraryFilters>({
-    searchQuery: '',
-    entryType: 'all',
-    favoriteState: 'all',
-    blendMode: 'all',
-    materialDomain: 'all',
-    shadingModel: 'all',
-    compileStatus: 'all',
-    hasTextureDependencies: 'all',
-    hasFunctionDependencies: 'all',
-    hasChildInstances: 'all',
-    activeCollectionId: null
-  })
-
-  const activeEntry = computed(
-    () => entries.value.find((entry) => entry.id === activeEntryId.value) || null
-  )
-
-  const availableBlendModes = computed(() =>
-    [...new Set(entries.value.map((entry) => entry.blendMode).filter(Boolean))].sort()
-  )
-  const availableDomains = computed(() =>
-    [...new Set(entries.value.map((entry) => entry.materialDomain).filter(Boolean))].sort()
-  )
-  const availableShadingModels = computed(() =>
-    [...new Set(entries.value.map((entry) => entry.shadingModel).filter(Boolean))].sort()
-  )
-
-  const filteredEntries = computed(() => {
-    let list = [...entries.value]
-    const query = filters.value.searchQuery.trim().toLowerCase()
-
-    if (query) {
-      list = list.filter((entry) => {
-        return (
-          entry.name.toLowerCase().includes(query) ||
-          entry.assetPath.toLowerCase().includes(query) ||
-          entry.tags.some((tag) => tag.toLowerCase().includes(query))
-        )
-      })
-    } else if (!filters.value.activeCollectionId) {
-      list = list.filter((entry) => !entry.collectionId)
-    }
-
-    if (filters.value.entryType !== 'all') {
-      list = list.filter((entry) => entry.entryType === filters.value.entryType)
-    }
-
-    if (filters.value.favoriteState !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.favoriteState === 'favorite' ? entry.isFavorite : !entry.isFavorite
-      )
-    }
-
-    if (filters.value.blendMode !== 'all') {
-      list = list.filter((entry) => entry.blendMode === filters.value.blendMode)
-    }
-
-    if (filters.value.materialDomain !== 'all') {
-      list = list.filter((entry) => entry.materialDomain === filters.value.materialDomain)
-    }
-
-    if (filters.value.shadingModel !== 'all') {
-      list = list.filter((entry) => entry.shadingModel === filters.value.shadingModel)
-    }
-
-    if (filters.value.compileStatus !== 'all') {
-      list = list.filter((entry) => entry.compileStatus === filters.value.compileStatus)
-    }
-
-    if (filters.value.hasTextureDependencies !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.hasTextureDependencies === 'yes'
-          ? entry.textureDependencies.length > 0
-          : entry.textureDependencies.length === 0
-      )
-    }
-
-    if (filters.value.hasFunctionDependencies !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.hasFunctionDependencies === 'yes'
-          ? entry.functionDependencies.length > 0
-          : entry.functionDependencies.length === 0
-      )
-    }
-
-    if (filters.value.hasChildInstances !== 'all') {
-      list = list.filter((entry) =>
-        filters.value.hasChildInstances === 'yes'
-          ? entry.childInstancePaths.length > 0
-          : entry.childInstancePaths.length === 0
-      )
-    }
-
-    if (filters.value.activeCollectionId) {
-      list = list.filter((entry) => entry.collectionId === filters.value.activeCollectionId)
-    }
-
-    return sortLibraryEntries(list, sortType.value)
-  })
+  const viewMode = ref<BrowserViewMode>('grid')
 
   /**
    * 持久化。
@@ -294,15 +187,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
    * 并在下次落盘时重试。老用户在 SQLite / 旧 localStorage 里那份，首次打开时自动搬成包。
    */
   function applyUiState(ui: Record<string, unknown>): void {
-    if (typeof ui.activeEntryId === 'string') activeEntryId.value = ui.activeEntryId
     if (ui.viewMode === 'grid' || ui.viewMode === 'list') viewMode.value = ui.viewMode
-    if (ui.sortType === 'recent' || ui.sortType === 'name' || ui.sortType === 'created') {
-      sortType.value = ui.sortType
-    }
-    if (typeof ui.liveSearchPath === 'string') liveSearchPath.value = ui.liveSearchPath
-    if (ui.filters && typeof ui.filters === 'object') {
-      filters.value = { ...filters.value, ...(ui.filters as Partial<MaterialLibraryFilters>) }
-    }
   }
 
   const persistence = createLibraryPackagePersistence<MaterialEntry, MaterialCollection>({
@@ -321,11 +206,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
             ? (raw.collections as MaterialCollection[])
             : [],
           ui: {
-            activeEntryId: raw.activeEntryId,
-            viewMode: raw.viewMode,
-            sortType: raw.sortType,
-            liveSearchPath: raw.liveSearchPath,
-            filters: raw.filters
+            viewMode: raw.viewMode
           }
         })
       }),
@@ -334,11 +215,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
       entries: entries.value,
       collections: collections.value,
       ui: {
-        activeEntryId: activeEntryId.value,
-        viewMode: viewMode.value,
-        sortType: sortType.value,
-        liveSearchPath: liveSearchPath.value,
-        filters: filters.value
+        viewMode: viewMode.value
       }
     }),
     applySnapshot: (snapshot) => {
@@ -351,33 +228,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
 
   function persistState(): void {
     persistence.persist()
-  }
-
-  function releaseCollectionIfTooSmall(collectionId: string): void {
-    const collection = collections.value.find((item) => item.id === collectionId)
-    if (!collection) return
-
-    const memberIds = entries.value
-      .filter((entry) => entry.collectionId === collectionId)
-      .map((entry) => entry.id)
-    const memberIdSet = new Set(memberIds)
-    collection.entryIds = [
-      ...collection.entryIds.filter((entryId) => memberIdSet.has(entryId)),
-      ...memberIds.filter((entryId) => !collection.entryIds.includes(entryId))
-    ]
-
-    if (collection.entryIds.length > 1) return
-
-    for (const entry of entries.value) {
-      if (entry.collectionId === collectionId) {
-        entry.collectionId = undefined
-      }
-    }
-    collections.value = collections.value.filter((item) => item.id !== collectionId)
-
-    if (filters.value.activeCollectionId === collectionId) {
-      filters.value.activeCollectionId = null
-    }
   }
 
   function findExistingEntry(incoming: MaterialEntry): MaterialEntry | undefined {
@@ -445,54 +295,8 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     persistState()
   }
 
-  function setActiveEntryId(id: string | null): void {
-    activeEntryId.value = id
-    persistState()
-  }
-
-  function setLoading(value: boolean): void {
-    loading.value = value
-  }
-
-  function setViewMode(mode: MaterialViewMode): void {
+  function setViewMode(mode: BrowserViewMode): void {
     viewMode.value = mode
-    persistState()
-  }
-
-  function setSortType(nextSortType: MaterialSortType): void {
-    sortType.value = nextSortType
-    persistState()
-  }
-
-  function setLiveSearchPath(path: string): void {
-    liveSearchPath.value = path || '/Game'
-    persistState()
-  }
-
-  function updateFilters(patch: Partial<MaterialLibraryFilters>): void {
-    filters.value = { ...filters.value, ...patch }
-    persistState()
-  }
-
-  function clearCollectionFilter(): void {
-    filters.value.activeCollectionId = null
-    persistState()
-  }
-
-  function clearFilters(): void {
-    filters.value = {
-      searchQuery: '',
-      entryType: 'all',
-      favoriteState: 'all',
-      blendMode: 'all',
-      materialDomain: 'all',
-      shadingModel: 'all',
-      compileStatus: 'all',
-      hasTextureDependencies: 'all',
-      hasFunctionDependencies: 'all',
-      hasChildInstances: 'all',
-      activeCollectionId: null
-    }
     persistState()
   }
 
@@ -504,35 +308,10 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
   }
 
   function deleteEntry(id: string): void {
-    const entry = entries.value.find((item) => item.id === id)
-    const affectedCollectionIds = new Set<string>()
-    if (entry?.collectionId) affectedCollectionIds.add(entry.collectionId)
-
-    for (const collection of collections.value) {
-      if (collection.entryIds.includes(id)) affectedCollectionIds.add(collection.id)
-    }
-
     entries.value = entries.value.filter((item) => item.id !== id)
 
     for (const collection of collections.value) {
       collection.entryIds = collection.entryIds.filter((entryId) => entryId !== id)
-    }
-
-    for (const collectionId of affectedCollectionIds) {
-      releaseCollectionIfTooSmall(collectionId)
-    }
-
-    if (activeEntryId.value === id) {
-      activeEntryId.value = null
-    }
-
-    if (entry?.collectionId && filters.value.activeCollectionId === entry.collectionId) {
-      const hasRemainingEntries = entries.value.some(
-        (item) => item.collectionId === filters.value.activeCollectionId
-      )
-      if (!hasRemainingEntries) {
-        filters.value.activeCollectionId = null
-      }
     }
 
     persistState()
@@ -542,14 +321,6 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     const entry = entries.value.find((item) => item.id === id)
     if (!entry) return
     entry.isFavorite = !entry.isFavorite
-    entry.updatedAt = Date.now()
-    persistState()
-  }
-
-  function setTags(id: string, tags: string[]): void {
-    const entry = entries.value.find((item) => item.id === id)
-    if (!entry) return
-    entry.tags = [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))]
     entry.updatedAt = Date.now()
     persistState()
   }
@@ -665,49 +436,12 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
     persistState()
   }
 
-  function createCollection(name: string, entryIds: string[] = []): MaterialCollection | null {
-    const normalizedName = name.trim()
-    if (!normalizedName) return null
-    const existingEntryIds = [...new Set(entryIds)].filter((entryId) =>
-      entries.value.some((entry) => entry.id === entryId)
-    )
-    const collection: MaterialCollection = {
-      id: generateCollectionId(normalizedName),
-      name: normalizedName,
-      entryIds: existingEntryIds,
-      createdAt: Date.now()
-    }
-    collections.value.push(collection)
-
-    const previousCollectionIds = new Set<string>()
-    for (const entryId of existingEntryIds) {
-      const entry = entries.value.find((item) => item.id === entryId)
-      if (!entry) continue
-      if (entry.collectionId && entry.collectionId !== collection.id) {
-        previousCollectionIds.add(entry.collectionId)
-        const previousCollection = collections.value.find((item) => item.id === entry.collectionId)
-        if (previousCollection) {
-          previousCollection.entryIds = previousCollection.entryIds.filter((id) => id !== entry.id)
-        }
-      }
-      entry.collectionId = collection.id
-    }
-
-    for (const previousCollectionId of previousCollectionIds) {
-      releaseCollectionIfTooSmall(previousCollectionId)
-    }
-
-    persistState()
-    return collection
-  }
-
   /**
    * 把一批材质移到某个文件夹。`folderKey` 传空串表示移回根目录。
    *
-   * 跟上面那套集合操作的区别只有一条但很要紧：**不会自动解散**。
-   * `releaseCollectionIfTooSmall` 在集合剩 ≤1 个成员时把集合整个删掉 —— 那是
+   * **不会自动解散**：旧的集合操作会在集合剩 ≤1 个成员时把集合整个删掉 —— 那是
    * iOS 桌面文件夹的脾气，放在库里就是「我把最后一个拖出来，文件夹没了」。
-   * 文件夹是用户建的地方，空着也该在。
+   * 文件夹是用户建的地方，空着也该在；删掉其中的材质也一样。
    *
    * 材质落成保管库里的包之后，这里的 `collectionId` 换成真实目录路径，签名不变。
    */
@@ -734,7 +468,17 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
 
   /** 新建一个空文件夹。空着也留着 —— 用户建它就是为了往里放东西。 */
   function createFolder(name: string): MaterialCollection | null {
-    return createCollection(name, [])
+    const normalizedName = name.trim()
+    if (!normalizedName) return null
+    const collection: MaterialCollection = {
+      id: generateCollectionId(normalizedName),
+      name: normalizedName,
+      entryIds: [],
+      createdAt: Date.now()
+    }
+    collections.value.push(collection)
+    persistState()
+    return collection
   }
 
   function renameCollection(collectionId: string, name: string): boolean {
@@ -754,64 +498,7 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
       }
     }
 
-    if (filters.value.activeCollectionId === collectionId) {
-      filters.value.activeCollectionId = null
-    }
-
     persistState()
-  }
-
-  function assignToCollection(entryId: string, collectionId: string | null): void {
-    const entry = entries.value.find((item) => item.id === entryId)
-    if (!entry) return
-    if (entry.collectionId === collectionId) {
-      if (collectionId) {
-        const collection = collections.value.find((item) => item.id === collectionId)
-        if (collection && !collection.entryIds.includes(entry.id)) {
-          collection.entryIds.push(entry.id)
-          persistState()
-        }
-      }
-      return
-    }
-
-    const previousCollectionId = entry.collectionId
-
-    if (previousCollectionId) {
-      const previousCollection = collections.value.find((item) => item.id === previousCollectionId)
-      if (previousCollection) {
-        previousCollection.entryIds = previousCollection.entryIds.filter((id) => id !== entry.id)
-      }
-      entry.collectionId = undefined
-      releaseCollectionIfTooSmall(previousCollectionId)
-    }
-
-    if (collectionId) {
-      const nextCollection = collections.value.find((item) => item.id === collectionId)
-      if (nextCollection) {
-        entry.collectionId = collectionId
-        if (!nextCollection.entryIds.includes(entry.id)) {
-          nextCollection.entryIds.push(entry.id)
-        }
-      }
-    }
-
-    persistState()
-  }
-
-  function getCollectionEntries(collectionId: string): MaterialEntry[] {
-    const collection = collections.value.find((item) => item.id === collectionId)
-    if (!collection) return entries.value.filter((entry) => entry.collectionId === collectionId)
-
-    const entriesById = new Map(entries.value.map((entry) => [entry.id, entry]))
-    const orderedEntries = collection.entryIds
-      .map((entryId) => entriesById.get(entryId))
-      .filter((entry): entry is MaterialEntry => !!entry && entry.collectionId === collectionId)
-    const orderedIds = new Set(orderedEntries.map((entry) => entry.id))
-    const unlistedEntries = entries.value.filter(
-      (entry) => entry.collectionId === collectionId && !orderedIds.has(entry.id)
-    )
-    return [...orderedEntries, ...unlistedEntries]
   }
 
   // 读库是异步的，但材质库的路由在进入之前会 await 这个 ready（见 mainRoutes.ts），
@@ -830,40 +517,19 @@ export const useMaterialLibraryStore = defineStore('materialLibrary', () => {
 
     entries,
     collections,
-    loading,
-    activeEntryId,
-    activeEntry,
-    filteredEntries,
     viewMode,
-    sortType,
-    filters,
-    liveSearchPath,
-    availableBlendModes,
-    availableDomains,
-    availableShadingModels,
     upsertEntries,
     importLegacyEntries,
-    setActiveEntryId,
-    setLoading,
     setViewMode,
-    setSortType,
-    setLiveSearchPath,
-    updateFilters,
-    clearCollectionFilter,
-    clearFilters,
     updateEntry,
     deleteEntry,
     toggleFavorite,
-    setTags,
     createDraftMaterial,
     updateGraphCode,
-    createCollection,
     moveEntriesToFolder,
     createFolder,
     renameCollection,
     deleteCollection,
-    assignToCollection,
-    getCollectionEntries,
     persistState
   }
 })

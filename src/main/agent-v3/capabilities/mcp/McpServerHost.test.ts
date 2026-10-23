@@ -24,6 +24,7 @@ vi.mock('../../../services/project/projectManager', () => ({
 }))
 
 import { getTargetConnectionId } from '../../core/projectTargetContext'
+import { getMetaTeamSeat } from '../../core/team/teamSeatContext'
 import { defineTool, type ToolRisk, type UnrealAgentTool } from '../../tools/defineTool'
 import { CLI_CONTRACT_VERSION } from './externalTarget'
 import {
@@ -70,8 +71,13 @@ const TOOLS: UnrealAgentTool<never>[] = [
   fakeTool('boom', 'ue.system', 'safe', async () => {
     throw new Error('工具内部炸了')
   }),
-  // 报出自己看到的目标连接。绑定到底生没生效，只有工具自己说了算
-  fakeTool('ue_session_health', 'ue.system', 'safe', async () => `目标=${getTargetConnectionId()}`)
+  // 报出自己看到的目标连接和团队通行证。绑定到底生没生效，只有工具自己说了算
+  fakeTool(
+    'ue_session_health',
+    'ue.system',
+    'safe',
+    async () => `目标=${getTargetConnectionId()} 通行证=${getMetaTeamSeat()}`
+  )
 ]
 
 describe('selectExposedTools', () => {
@@ -735,6 +741,15 @@ describe('McpServerHost 目标工程', () => {
     expect(JSON.stringify(result.content)).toContain('目标=undefined')
   }, 30_000)
 
+  it('_meta.unrealBox.teamSeat 带进工具的执行流；不带就没有', async () => {
+    const client = await connected()
+
+    const seated = await callWithTarget(client, { teamSeat: 'ext-t1.abc' })
+    expect(JSON.stringify(seated.content)).toContain('通行证=ext-t1.abc')
+    const plain = await callWithTarget(client, undefined)
+    expect(JSON.stringify(plain.content)).toContain('通行证=undefined')
+  }, 30_000)
+
   it('工具执行失败仍然是 isError，不会被包装成成功', async () => {
     const client = await connected()
 
@@ -852,6 +867,20 @@ describe('McpServerHost 按会话装配', () => {
     expect(seen).toHaveLength(2)
     expect(seen[1]).toBe(transport.sessionId)
     expect(seen[1]).toMatch(/^mcp-/)
+  }, 30_000)
+
+  it('会话结束时调一次装配给的收尾（外部团队靠它把没交回的活收成停下）', async () => {
+    let disposed = 0
+    const client = await connect(async () => ({
+      tools: TOOLS,
+      dispose: () => {
+        disposed++
+      }
+    }))
+    const transport = (client as unknown as { transport: StreamableHTTPClientTransport }).transport
+    await transport.terminateSession()
+    await client.close()
+    await vi.waitFor(() => expect(disposed).toBe(1))
   }, 30_000)
 
   it('握手时下发说明', async () => {

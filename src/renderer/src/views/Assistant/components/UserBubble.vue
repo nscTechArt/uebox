@@ -425,7 +425,8 @@ function handleKeydown(e: KeyboardEvent): void {
 .edit-textarea {
   width: 100%;
   min-height: 60px;
-  max-height: 200px;
+  max-height: 520px;
+  field-sizing: content;
   background: transparent;
   border: none;
   outline: none;

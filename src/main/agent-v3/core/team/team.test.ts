@@ -1,5 +1,5 @@
 /** @vitest-environment node */
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core'
@@ -9,13 +9,21 @@ import { z } from 'zod'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
-import { parseTeamCommand } from './teamCommand'
+import { activeLoop, parseTeamCommand } from './teamCommand'
 import { editorKeyActive, runWithEditorKey, withEditorKey } from './editorKey'
-import { createTeamStore, memberFileBase, PRODUCER, type TeamStore } from './teamStore'
 import {
+  createTeamStore,
+  MEMORY_KEPT_NOTE,
+  memberFileBase,
+  PRODUCER,
+  type TeamStore
+} from './teamStore'
+import {
+  createMemorySaver,
   createMessageTool,
   createTeamTools,
   formatMail,
+  MEMORY_SAVE_INTERVAL_MS,
   producerTools,
   renderBoard,
   type TeamToolDeps
@@ -32,6 +40,7 @@ import {
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './teamPrompt'
 import { parseGoalCommand, parseVerdict } from '../goalLoop'
 import type { SubAgentResult } from '../../tools/builtin/task'
+import { ACCEPTOR, teamUsageOf, type TeamUsage } from '../../../../shared/agentTeam'
 import { effectiveRisk, toToolSchema, type UnrealAgentTool } from '../../tools/defineTool'
 import { createApprovalGate, type ApprovalDeps } from '../approval'
 
@@ -55,6 +64,18 @@ describe('/team 命令', () => {
   it('和 /goal 互不认领', () => {
     expect(parseGoalCommand('/team 做一个塔防游戏')).toBeNull()
     expect(parseTeamCommand('/goal 做一个塔防游戏')).toBeNull()
+  })
+
+  it('目标和团队只挂一套：新敲的命令替掉旧的，没敲就沿用', () => {
+    const goal = { objective: '门' }
+    const team = newTeamState('塔防')
+    expect(activeLoop('team', { goal })).toBe('team')
+    expect(activeLoop('goal', { team })).toBe('goal')
+    expect(activeLoop(null, { goal })).toBe('goal')
+    expect(activeLoop(null, { team })).toBe('team')
+    expect(activeLoop(null, undefined)).toBeNull()
+    // 老执行记录里两套都在：留团队
+    expect(activeLoop(null, { goal, team })).toBe('team')
   })
 })
 
@@ -237,6 +258,29 @@ describe('活的账和团队事件', () => {
     ])
   })
 
+  it('上次运行没交回的活：开工后队员记忆落过盘的，原因里说它记得干到哪了', async () => {
+    const message = [{ role: 'user', content: 'hi', timestamp: 1 }] as AgentMessage[]
+    let clock = Date.now() - 60_000
+    store = createTeamStore(
+      { stateDir: join(dir, 'state'), workspaceDir: join(dir, 'ws') },
+      () => clock
+    )
+    const saved = await store.startJob('甲', '搭关卡')
+    await store.saveHistory('甲', message)
+    // 乙的记忆是上一件活留下的，这件开工后一轮都没说完
+    await store.saveHistory('乙', message)
+    clock = Date.now() + 60_000
+    const before = await store.startJob('乙', '做材质')
+    const none = await store.startJob('丙', '写脚本')
+    await store.closeOpenJobs('上次运行中断')
+    const reasons = Object.fromEntries((await store.jobs()).map((j) => [j.id, j.reason]))
+    expect(reasons).toEqual({
+      [saved.id]: `上次运行中断；${MEMORY_KEPT_NOTE}`,
+      [before.id]: '上次运行中断',
+      [none.id]: '上次运行中断'
+    })
+  })
+
   it('只有停下的活能重开，重开记下时刻', async () => {
     const a = await store.startJob('甲', '统计资产')
     const b = await store.startJob('乙', '统计配置')
@@ -264,6 +308,70 @@ describe('活的账和团队事件', () => {
     const events = await store.events()
     expect(events.map((e) => e.kind)).toEqual(['crashed', 'recovered'])
     expect(events[0]!.detail).toBe('Assertion failed')
+  })
+})
+
+describe('团队的用量', () => {
+  let dir: string
+  let store: TeamStore
+  const priced = teamUsageOf({ input: 100, output: 20, cacheRead: 30, cost: { total: 0.5 } })
+  const free = teamUsageOf({ input: 40, output: 10 })
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'team-usage-'))
+    store = createTeamStore({ stateDir: join(dir, 'state'), workspaceDir: join(dir, 'ws') })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('没价目的请求整笔算进 unpriced，有价目的不算', () => {
+    expect(priced).toMatchObject({ total: 150, cost: 0.5, unpriced: 0 })
+    expect(free).toMatchObject({ total: 50, cost: 0, unpriced: 50 })
+  })
+
+  it('交回、停下的活都把用量记在活上，并记进总账', async () => {
+    const a = await store.startJob('甲', '统计资产')
+    const b = await store.startJob('乙', '统计配置')
+    await store.finishJob(a.id, { outcome: 'done', report: '报告', usage: priced })
+    await store.finishJob(b.id, { outcome: 'stopped', reason: '被停下', usage: free })
+    const jobs = await store.jobs()
+    expect(jobs.map((j) => j.usage?.total)).toEqual([150, 50])
+    const ledger = await store.usage()
+    expect(ledger.total).toMatchObject({ total: 200, cost: 0.5, unpriced: 50 })
+    expect(Object.keys(ledger.byWho)).toEqual(['甲', '乙'])
+  })
+
+  it('不挂在活上的（制作人、验收员）直接记总账；名字不分大小写；全 0 不记', async () => {
+    await store.addUsage(PRODUCER, priced)
+    await store.addUsage('Art', free)
+    await store.addUsage('art', free)
+    await store.addUsage(ACCEPTOR, teamUsageOf({}))
+    const ledger = await store.usage()
+    expect(Object.keys(ledger.byWho)).toEqual([PRODUCER, 'Art'])
+    expect(ledger.byWho.Art).toMatchObject({ total: 100, unpriced: 100 })
+    expect(ledger.total.total).toBe(250)
+  })
+
+  it('活的账截掉旧的，总账不跟着少', async () => {
+    const one = teamUsageOf({ input: 1 })
+    const first = await store.startJob('甲', '最早的一件')
+    await store.finishJob(first.id, { outcome: 'done', report: 'ok', usage: one })
+    // 再塞满 200 件（直接写盘，逐件走 store 在 Windows 上太慢）
+    const file = join(store.dirs.stateDir, 'jobs.json')
+    const jobs = JSON.parse(readFileSync(file, 'utf8')) as unknown[]
+    for (let i = 2; i <= 200; i++)
+      jobs.push({ id: `j${i}`, member: '甲', brief: 'x', startedAt: 0 })
+    writeFileSync(file, JSON.stringify(jobs))
+    const last = await store.startJob('甲', '最新的一件')
+    await store.finishJob(last.id, { outcome: 'done', report: 'ok', usage: one })
+
+    const kept = await store.jobs(500)
+    expect(kept).toHaveLength(200)
+    expect(kept.some((j) => j.id === first.id)).toBe(false)
+    expect((await store.usage()).total.total).toBe(2)
+  })
+
+  it('没有账的老团队读出来是空账', async () => {
+    expect(await store.usage()).toEqual({ total: expect.objectContaining({ total: 0 }), byWho: {} })
   })
 })
 
@@ -339,6 +447,46 @@ describe('团队工具', () => {
     await expect(t.team_send!({ to: '程序', message: '第二件' })).rejects.toThrow('stopped')
     expect(seen[1]).toHaveLength(1)
     expect(await store.history('程序')).toHaveLength(2)
+    // 停下的活：制作人看得到它记得干到哪了
+    expect((await store.jobs()).at(-1)?.reason).toBe(`stopped；${MEMORY_KEPT_NOTE}`)
+  })
+
+  it('干活途中每说完一轮就存盘：活还没交回，记忆里已经有了', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      let midway!: () => void
+      const reachedMidway = new Promise<void>((resolve) => (midway = resolve))
+      const t = tools({
+        runMember: async ({ history, keepMessages, message }) => {
+          // 和 runSubAgent 一样交活的数组：之后还会往里推
+          const live = [...history, { role: 'user', content: message, timestamp: 0 }]
+          keepMessages(live as AgentMessage[])
+          live.push({ role: 'user', content: '第一轮的工具结果', timestamp: 1 })
+          keepMessages(live as AgentMessage[])
+          midway()
+          await gate
+          live.push({ role: 'user', content: '最后一轮', timestamp: 2 })
+          keepMessages(live as AgentMessage[])
+          return ok('好了')
+        }
+      })
+      await t.team_hire!({ name: '程序', role: '写玩法' })
+      const sending = t.team_send!({ to: '程序', message: '长活' })
+      await reachedMidway
+      // 两轮合并成一次写，间隔没到不写
+      await vi.advanceTimersByTimeAsync(MEMORY_SAVE_INTERVAL_MS - 1)
+      expect(await store.history('程序')).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      await vi.waitFor(async () => expect(await store.history('程序')).toHaveLength(2))
+
+      release()
+      await expect(sending).resolves.toMatch(/好了/)
+      expect(await store.history('程序')).toHaveLength(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('同一个队员的两件活排队，不同队员并行', async () => {
@@ -508,14 +656,107 @@ describe('团队工具', () => {
     expect(jobs[1]!.endedAt).toBeGreaterThanOrEqual(jobs[1]!.startedAt)
   })
 
-  it('任务板渲染：计数、负责人、证据', () => {
+  it('用量：队员的活（含停下的）记在活上和总账里，验收员的记进总账，验收被停下也记', async () => {
+    const usage: TeamUsage = teamUsageOf({ input: 10, output: 5 })
+    let fail = false
+    const t = tools({
+      runMember: async ({ keepUsage }) => {
+        keepUsage?.(usage)
+        if (fail) throw new Error('被停下')
+        return ok('好了')
+      },
+      runAcceptance: async ({ keepUsage }) => {
+        keepUsage(usage)
+        if (fail) throw new Error('验收被停下')
+        return 'VERDICT: PASS'
+      }
+    })
+    await t.team_hire!({ name: '程序', role: '写玩法' })
+    await t.team_send!({ to: '程序', message: '第一件' })
+    await t.team_deliver!({ report: 'r', how_to_play: 'h' })
+    fail = true
+    await expect(t.team_send!({ to: '程序', message: '第二件' })).rejects.toThrow()
+    await expect(t.team_deliver!({ report: 'r', how_to_play: 'h' })).rejects.toThrow()
+
+    expect((await store.jobs()).map((j) => [j.outcome, j.usage?.total])).toEqual([
+      ['done', 15],
+      ['stopped', 15]
+    ])
+    const ledger = await store.usage()
+    expect(ledger.byWho['程序']?.total).toBe(30)
+    expect(ledger.byWho[ACCEPTOR]?.total).toBe(30)
+    expect(ledger.total.total).toBe(60)
+  })
+
+  it('验收员的名字不能被招走', async () => {
+    await expect(tools().team_hire!({ name: 'Acceptor', role: 'x' })).rejects.toThrow(/验收员/)
+  })
+
+  it('任务板渲染：计数、负责人；完成项的证据折叠，没做完的带全文', () => {
     const text = renderBoard([
       { id: 't1', title: '灰盒', status: 'done', owner: '地编', evidence: 'a.png', updatedAt: 0 },
-      { id: 't2', title: '数值表', status: 'todo', deps: ['t1'], updatedAt: 0 }
+      { id: 't2', title: '数值表', status: 'todo', deps: ['t1'], note: '等策划', updatedAt: 0 }
     ])
     expect(text).toMatch(/2 项（待办 1 · 进行中 0 · 完成 1 · 卡住 0）/)
-    expect(text).toMatch(/\[done\] t1 灰盒 @地编\n {4}证据：a\.png/)
-    expect(text).toMatch(/\[todo\] t2 数值表 ←t1/)
+    expect(text).toMatch(/\[done\] t1 灰盒 @地编 · 有证据/)
+    expect(text).not.toContain('a.png')
+    expect(text).toMatch(/\[todo\] t2 数值表 ←t1\n {4}备注：等策划/)
+    expect(text).toMatch(/带 ids.*看全文/)
+  })
+
+  /*
+   * 真机规模：138 项、每项带一段完整证据。以前 list 和 update 每次都回整张板全文，
+   * 约 14 万字符，一个队员的历史里攒了 13 份
+   */
+  describe('任务板输出的体积', () => {
+    const evidence = (i: number): string =>
+      `关卡 /Game/Maps/L_${i} 已搭完，截图 shots/${i}.png，试玩通过：` + '细节说明。'.repeat(200)
+    const bigBoard = async (): Promise<void> => {
+      await store.patchBoard(
+        Array.from({ length: 138 }, (_, i) => ({
+          id: `t${i}`,
+          title: `第 ${i} 项`,
+          status: i < 130 ? ('done' as const) : ('doing' as const),
+          owner: '地编',
+          evidence: evidence(i)
+        }))
+      )
+    }
+
+    it('list 默认：完成项不带证据全文，整张板一万多字符而不是十几万', async () => {
+      await bigBoard()
+      const full = (await store.board()).reduce((n, t) => n + (t.evidence?.length ?? 0), 0)
+      const text = await tools().team_board!({ action: 'list' })
+
+      expect(full).toBeGreaterThan(130_000)
+      expect(text.length).toBeLessThan(15_000)
+      expect(text).not.toContain(evidence(0))
+      // 没做完的那几项照旧带全文
+      expect(text).toContain(evidence(135))
+    })
+
+    it('list 带 ids：只看这几项，带全文；没有的 id 说出来', async () => {
+      await bigBoard()
+      const text = await tools().team_board!({ action: 'list', ids: ['t3', 'nope'] })
+
+      expect(text).toContain(evidence(3))
+      expect(text).not.toContain('t4 第 4 项')
+      expect(text).toContain('任务板上没有：nope')
+    })
+
+    it('update 只回改到的那几项和计数，不回整张板', async () => {
+      await bigBoard()
+      const text = await tools().team_board!({
+        action: 'update',
+        tasks: [{ id: 't131', status: 'done', evidence: '截图 shots/131-final.png' }]
+      })
+
+      expect(text).toMatch(/^已更新 1 项。任务板：138 项/)
+      expect(text).toContain('t131 第 131 项')
+      expect(text).toContain('截图 shots/131-final.png')
+      expect(text).not.toContain('t0 第 0 项')
+      expect(text.length).toBeLessThan(500)
+    })
   })
 })
 
@@ -813,6 +1054,23 @@ describe('提示词只写环境，不写方法论', () => {
     expect(brief).not.toMatch(/Never modify the user's existing projects/)
   })
 
+  /** 2026-10-18：用户开团后中途改了要求，验收员看不到对话，仍按开团那句判 */
+  it('开团之后用户又说的话：验收员拿到并以它为准，制作人知道后来的话压过目标', () => {
+    const prompt = buildAcceptancePrompt({
+      objective: '塔防',
+      latestRequest: '改成 2D <俯视>',
+      report: 'r',
+      howToPlay: 'h'
+    })
+    expect(prompt).toContain('<latest_user_message>改成 2D &lt;俯视&gt;</latest_user_message>')
+    expect(prompt).toMatch(/the message wins/)
+    expect(buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })).not.toContain(
+      'latest_user_message'
+    )
+    const brief = buildProducerBrief({ objective: 'x', workspaceDir: 'w' })
+    expect(brief).toMatch(/later message wins/)
+  })
+
   it('验收员拿到同一份交付标准，要一行结论', () => {
     const prompt = buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })
     expect(prompt).toMatch(/Complete game loop/)
@@ -836,5 +1094,84 @@ describe('提示词只写环境，不写方法论', () => {
     const prompt = buildAcceptancePrompt({ objective: 'x', report: 'r', howToPlay: 'h' })
     expect(prompt).toMatch(/screenshots while the game is running/)
     expect(prompt).toMatch(/Basic art is part of the bar/)
+  })
+})
+
+describe('队员记忆按轮存盘', () => {
+  const msg = (content: string): AgentMessage =>
+    ({ role: 'user', content, timestamp: 0 }) as AgentMessage
+
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('间隔内交来的几份合并成一次写，写的是最新那份；system 消息不进记忆', async () => {
+    const saves: string[][] = []
+    const memory = createMemorySaver(async (messages) => {
+      saves.push(messages.map((m) => String((m as { content: unknown }).content)))
+    }, 1000)
+    const live = [{ role: 'system', content: 'prompt' } as unknown as AgentMessage, msg('a')]
+    memory.keep(live)
+    live.push(msg('b'))
+    memory.keep(live)
+    // 交的是活的数组：交完之后再推进去的不算这一份
+    live.push(msg('c'))
+    await vi.advanceTimersByTimeAsync(999)
+    expect(saves).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(saves).toEqual([['a', 'b']])
+    // 没有新交来的就不再写
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(saves).toHaveLength(1)
+  })
+
+  it('最终版排在最后：在途的旧快照写得再慢也盖不掉它，待写的那次取消', async () => {
+    let disk: string[] = []
+    const calls: string[][] = []
+    let finishSlow!: () => void
+    const memory = createMemorySaver(async (messages) => {
+      const snapshot = messages.map((m) => String((m as { content: unknown }).content))
+      calls.push(snapshot)
+      // 第一次写卡在半路
+      if (calls.length === 1) await new Promise<void>((resolve) => (finishSlow = resolve))
+      disk = snapshot
+    }, 1000)
+    memory.keep([msg('a')])
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(calls).toHaveLength(1)
+    // 这一份等着下一次定时写，但活先结束了
+    memory.keep([msg('a'), msg('b')])
+    memory.keep([msg('a'), msg('b'), msg('c')])
+    const flushed = memory.flush()
+    finishSlow()
+    await flushed
+    expect(disk).toEqual(['a', 'b', 'c'])
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(calls).toEqual([['a'], ['a', 'b', 'c']])
+    expect(memory.kept).toBe(true)
+  })
+
+  it('中途写失败不挡后面；最终版写失败报给调用方', async () => {
+    let fail = true
+    const saved: number[] = []
+    const memory = createMemorySaver(async (messages) => {
+      if (fail) throw new Error('disk full')
+      saved.push(messages.length)
+    }, 1000)
+    memory.keep([msg('a')])
+    await vi.advanceTimersByTimeAsync(1000)
+    fail = false
+    memory.keep([msg('a'), msg('b')])
+    await expect(memory.flush()).resolves.toBeUndefined()
+    expect(saved).toEqual([2])
+    fail = true
+    await expect(memory.flush()).rejects.toThrow('disk full')
+  })
+
+  it('一份都没交过：什么都不写', async () => {
+    const save = vi.fn(async () => undefined)
+    const memory = createMemorySaver(save, 1000)
+    await memory.flush()
+    expect(save).not.toHaveBeenCalled()
+    expect(memory.kept).toBe(false)
   })
 })

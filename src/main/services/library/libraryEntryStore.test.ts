@@ -4,15 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createPackage } from '../libraryPackageStore'
-import {
-  detectPayloadForm,
-  findEntryById,
-  readSnippetPayload,
-  saveSnippetEntry,
-  searchEntries,
-  summarizeEntry
-} from './libraryEntryStore'
-import type { SnippetMeta } from './snippetScan'
+import { findEntryById, saveSnippetEntry, searchEntries } from './libraryEntryStore'
+import { readSnippetPayload, type SnippetMeta } from '../../../shared/snippetPayload'
 
 const T3D =
   'Begin Object Class=/Script/BlueprintGraph.K2Node_Event Name="K2Node_Event_0"\nEnd Object'
@@ -23,49 +16,6 @@ const meta: SnippetMeta = {
   classes: ['Event', 'Function'],
   openPorts: []
 }
-
-describe('detectPayloadForm', () => {
-  it('明确写着 form: snippet 且有正文才算片段', () => {
-    expect(detectPayloadForm({ form: 'snippet', t3d: T3D })).toBe('snippet')
-  })
-
-  it('缺 form 一律按老条目 —— 老包就是这个样子', () => {
-    // 2026-08-29 之前的 payload 直接就是 { graphs, functions, macros }
-    expect(detectPayloadForm({ graphs: [], functions: [], macros: [] })).toBe('t3d')
-  })
-
-  it('form 写了但正文是空的，仍然按老条目', () => {
-    // 判宽的代价是拿一条没有正文的条目去放进工程，那是一次必然失败的写入
-    expect(detectPayloadForm({ form: 'snippet' })).toBe('t3d')
-    expect(detectPayloadForm({ form: 'snippet', t3d: '' })).toBe('t3d')
-  })
-
-  it('改道之前那个短命的 form: graph 落进老条目这一支', () => {
-    // 结构化形态从没对外开放过，不留兼容分支
-    expect(detectPayloadForm({ form: 'graph', graph: { nodes: [] } })).toBe('t3d')
-  })
-
-  it('null / 非对象按老条目', () => {
-    expect(detectPayloadForm(null)).toBe('t3d')
-    expect(detectPayloadForm('nonsense')).toBe('t3d')
-  })
-})
-
-describe('readSnippetPayload', () => {
-  it('缺省的摘要补成零值，调用方不用到处判 undefined', () => {
-    const payload = readSnippetPayload({ form: 'snippet', t3d: T3D })
-    expect(payload?.meta).toEqual({
-      nodeCount: 0,
-      connectionCount: 0,
-      classes: [],
-      openPorts: []
-    })
-  })
-
-  it('老形态返回 null', () => {
-    expect(readSnippetPayload({ graphs: [] })).toBeNull()
-  })
-})
 
 describe('库条目的读写（真实临时目录）', () => {
   let vaultRoot: string
@@ -92,10 +42,10 @@ describe('库条目的读写（真实临时目录）', () => {
     })
 
     const found = await findEntryById(vaultRoot, 'blueprint', 'entry-1')
-    expect(found?.form).toBe('snippet')
-    expect(found?.entry.manifest.name).toBe('受击闪红')
+    expect(found?.manifest.id).toBe('entry-1')
+    expect(found?.manifest.name).toBe('受击闪红')
 
-    const payload = readSnippetPayload(found!.entry.manifest.payload)
+    const payload = readSnippetPayload(found!.manifest.payload)
     expect(payload?.t3d).toBe(T3D)
     expect(payload?.meta.nodeCount).toBe(2)
     expect(payload?.sourceBlueprintPath).toBe('/Game/BP_Player')
@@ -120,7 +70,7 @@ describe('库条目的读写（真实临时目录）', () => {
     expect(await findEntryById(vaultRoot, 'material', 'entry-1')).toBeNull()
   })
 
-  it('老形态的包也找得到，form 报 t3d', async () => {
+  it('老形态的包也找得到 —— 按 id 查找不看 payload 形态', async () => {
     await createPackage(vaultRoot, {
       library: 'blueprint',
       id: 'legacy-1',
@@ -130,7 +80,7 @@ describe('库条目的读写（真实临时目录）', () => {
     })
 
     const found = await findEntryById(vaultRoot, 'blueprint', 'legacy-1')
-    expect(found?.form).toBe('t3d')
+    expect(found?.manifest.name).toBe('旧条目')
   })
 })
 
@@ -145,7 +95,10 @@ describe('searchEntries', () => {
       entryId: 'a',
       name: '受击闪红',
       t3d: T3D,
-      meta,
+      meta: {
+        ...meta,
+        openPorts: [{ nodeId: '1', pinName: 'then', dir: 'out', formerPeer: '9.execute' }]
+      },
       now: 3000
     })
     await saveSnippetEntry({
@@ -197,48 +150,16 @@ describe('searchEntries', () => {
 
   it('摘要带上节点数和用到的类型', async () => {
     const [first] = await searchEntries({ vaultRoot, keyword: '闪红' })
+    expect(first.form).toBe('snippet')
     expect(first.nodeCount).toBe(2)
     expect(first.connectionCount).toBe(1)
     expect(first.classes).toEqual(['Event', 'Function'])
+    expect(first.openPortCount).toBe(1)
   })
 
   it('老形态的摘要不报节点数 —— 那不是它的形状', async () => {
     const [material] = await searchEntries({ vaultRoot, library: 'material' })
     expect(material.form).toBe('t3d')
     expect(material.nodeCount).toBeUndefined()
-  })
-})
-
-describe('summarizeEntry', () => {
-  it('摘要直接读 meta，不去解析正文', () => {
-    const summary = summarizeEntry({
-      dirPath: 'x',
-      relPath: 'x',
-      library: 'blueprint',
-      manifest: {
-        format: 'unreal-box-blueprint',
-        formatVersion: 1,
-        id: 'a',
-        name: 'n',
-        createdAt: 1,
-        updatedAt: 2,
-        cover: '',
-        payload: {
-          form: 'snippet',
-          t3d: T3D,
-          meta: {
-            nodeCount: 3,
-            connectionCount: 2,
-            classes: ['Branch', 'Function'],
-            openPorts: [{ nodeId: '1', pinName: 'then', dir: 'out', formerPeer: '9.execute' }]
-          }
-        }
-      }
-    })
-
-    expect(summary.form).toBe('snippet')
-    expect(summary.nodeCount).toBe(3)
-    expect(summary.classes).toEqual(['Branch', 'Function'])
-    expect(summary.openPortCount).toBe(1)
   })
 })

@@ -34,24 +34,27 @@ const SUPPORTED_PROPERTIES = [
   'BrushColor'
 ] as const
 
+/** 颜色类属性名。值是 { r, g, b, a }，分量 0..1 */
+const COLOR_PROPERTIES = new Set(['FillColorAndOpacity', 'ColorAndOpacity', 'BrushColor'])
+
 const SetPropertySchema = z.object({
   path: z.string().describe('Widget Blueprint 路径'),
   widget_name: z.string().describe('控件名称'),
-  property_name: z.enum(SUPPORTED_PROPERTIES).describe('属性名称'),
+  // 开放字符串：表里的是有专门处理的常用项，表外的插件按反射找同名属性。
+  // 原来是 z.enum，表外的名字在这一层就被拒，插件那边再能干也够不着
+  property_name: z
+    .string()
+    .min(1)
+    .describe(
+      `属性名。常用：${SUPPORTED_PROPERTIES.join(' / ')}；` +
+        '其余写细节面板里的属性名（Background、Brush、WidgetStyle、用户控件的实例可编辑变量如 InText）'
+    ),
   value: z
-    .union([
-      z.string(),
-      z.number(),
-      z.boolean(),
-      // 颜色是对象：{ r, g, b, a }，分量取 0..1（不是 0..255）
-      z.object({
-        r: z.number().min(0).max(1),
-        g: z.number().min(0).max(1),
-        b: z.number().min(0).max(1),
-        a: z.number().min(0).max(1).optional().default(1)
-      })
-    ])
-    .describe('属性值。颜色类属性传 { r, g, b, a }，分量 0..1')
+    .union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.unknown())])
+    .describe(
+      '属性值。颜色类传 { r, g, b, a }，分量 0..1；结构体传对象，只写要改的字段；' +
+        '也收 UE 文本格式字符串，如 (R=1,G=0,B=0,A=1)'
+    )
 })
 
 interface SetPropertyResponse {
@@ -77,9 +80,9 @@ interface SetPropertyResponse {
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function setPropertyTool() {
   return defineV2Tool({
-    description: `设置 Widget 控件的属性值。
+    description: `设置 Widget 控件的属性值（设计期默认值，和在细节面板里改一样）。
 
-【支持的属性】：
+【常用属性】有专门处理，按控件类型分派：
 - Text: TextBlock 的文本内容（字符串）
 - Visibility: 可见性，只认 Visible / Collapsed / Hidden / HitTestInvisible / SelfHitTestInvisible
 - IsEnabled: 是否启用（布尔值）
@@ -87,30 +90,39 @@ export function setPropertyTool() {
 - Percent: ProgressBar 的百分比（0.0-1.0）
 - FontSize: 字号（数字，如 34）。TextBlock / RichTextBlock
 - Justification: 水平对齐，Left / Center / Right。文本类控件
-  （TextBlock / RichTextBlock / EditableText / EditableTextBox）
-- FillColorAndOpacity: ProgressBar 的填充色
-- ColorAndOpacity: TextBlock / Image 的着色
-- BrushColor: Border 的底色
-  颜色一律传 { r, g, b, a }，分量是 **0..1 浮点**，不是 0..255
+- FillColorAndOpacity / ColorAndOpacity / BrushColor: 颜色，传 { r, g, b, a }，分量是 **0..1 浮点**
 
-【还是设不了的】圆角、背景笔刷贴图、字体资产本身（FontSize 只改大小，不换字体）。
-碰到这类要求照实说「这几项现在设不了」，别报一个只做了一半的控件说做完了。
+【其余属性】写细节面板里的属性名，插件按反射找到再写：
+- 用户控件（WB_Text_Button 这类）上勾了「实例可编辑」的变量，比如按钮文字 InText
+- 结构体只写要改的字段，如 Border 圆角：property_name="Background"，
+  value={ "DrawAs": "RoundedBox", "OutlineSettings": { "RoundingType": "FixedRadius", "CornerRadii": { "X": 8, "Y": 8, "Z": 8, "W": 8 } } }
+- 资产引用写对象路径字符串
+不知道叫什么就随便给一个，失败回执会列出这个控件能设的属性名。
 
 【这里设的是设计期默认值】不是运行时的值。游戏跑起来要变的文字和数值，
 必须在蓝图图表里改（TextBlock.SetText / ProgressBar.SetPercent），
 **不要**用 KismetSystemLibrary 的 SetTextPropertyByName 那类反射写字段的节点 ——
-那种写法字段值会变、屏幕不会重画。
-
-【适用场景】：
-- 设置默认文本
-- 配置初始可见性
-- 设置进度条默认值`,
+那种写法字段值会变、屏幕不会重画。`,
 
     inputSchema: SetPropertySchema,
 
     execute: async (input) => {
       if (!input || !input.path || !input.widget_name || !input.property_name) {
         return { ok: false, error: '缺少必填参数', widget_name: 'unknown' }
+      }
+
+      // 颜色给成 0..255 时，插件会把它当成超亮的 HDR 色照写不误，这里先拦下
+      const value = input.value as unknown
+      if (COLOR_PROPERTIES.has(input.property_name) && value && typeof value === 'object') {
+        const channels = ['r', 'g', 'b', 'a'].map((k) => (value as Record<string, unknown>)[k])
+        if (channels.some((c) => typeof c === 'number' && (c < 0 || c > 1))) {
+          return {
+            ok: false,
+            error: `颜色分量要 0..1 的浮点，不是 0..255：收到 ${JSON.stringify(value)}`,
+            widget_name: input.widget_name,
+            property_name: input.property_name
+          }
+        }
       }
 
       const wsService = serviceManager.getWebSocketService()
@@ -132,28 +144,32 @@ export function setPropertyTool() {
             widget_name: input.widget_name,
             property_name: input.property_name,
             hint:
-              `这个工具只认 ${SUPPORTED_PROPERTIES.join(' / ')}，而且分控件类型：` +
-              `Percent 只有 ProgressBar 有，FontSize 只有 TextBlock / RichTextBlock 有，` +
-              `Justification 要文本类控件，颜色只支持 ProgressBar / TextBlock / Image / Border。` +
-              `先用 widget_get_hierarchy 确认 "${input.widget_name}" 存在、是哪个类。` +
-              `圆角、背景笔刷这些不在列表里的样式属性这个工具设不了，别换个名字再试。`
+              `常用项（${SUPPORTED_PROPERTIES.join(' / ')}）分控件类型：Percent 只有 ProgressBar 有，` +
+              `FontSize 只有 TextBlock / RichTextBlock 有，颜色只支持 ProgressBar / TextBlock / Image / Border。` +
+              `表外的属性按名字反射写，回执会列出这个控件实际能设的名字，照那张清单改，别凭记忆换名字。` +
+              `先用 widget_get_hierarchy 确认 "${input.widget_name}" 存在、是哪个类。`
           }
         }
 
         // 引擎读回来的值和请求的不一样时，第一句就说（AGENTS.md §5 第 14 条）
         const readBack = response.value
         const requested = input.value
+        // 反射写的 float 读回来带单精度尾巴（0.3 → 0.30000001），差得在误差内不算不一致
         const differs =
           readBack !== undefined &&
-          (typeof requested === 'string' ||
-            typeof requested === 'number' ||
-            typeof requested === 'boolean') &&
-          String(readBack).toLowerCase() !== String(requested).toLowerCase()
+          (typeof requested === 'number' && typeof readBack === 'number'
+            ? Math.abs(readBack - requested) > 1e-4
+            : (typeof requested === 'string' ||
+                typeof requested === 'number' ||
+                typeof requested === 'boolean') &&
+              String(readBack).toLowerCase() !== String(requested).toLowerCase())
+        const show = (v: unknown): string =>
+          v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v)
         const message = differs
-          ? `⚠️ ${response.property_name} 请求的是 ${String(requested)}，` +
-            `引擎里实际是 ${String(readBack)}。${response.message ?? ''}`
+          ? `⚠️ ${response.property_name} 请求的是 ${show(requested)}，` +
+            `引擎里实际是 ${show(readBack)}。${response.message ?? ''}`
           : readBack !== undefined
-            ? `${response.property_name} 现在是 ${String(readBack)}`
+            ? `${response.property_name} 现在是 ${show(readBack)}`
             : response.message
 
         return {

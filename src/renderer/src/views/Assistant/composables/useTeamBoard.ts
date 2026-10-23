@@ -52,17 +52,22 @@ export interface UseTeamBoard {
   loadModels: () => Promise<void>
   /** 给队员换模型，下一件活开始用 */
   setMemberModel: (name: string, model: TeamModel) => Promise<void>
+  /** 辞退队员：理由必填，手上有活的不行。档案留在团队的账里 */
+  dismissMember: (name: string, reason: string) => Promise<void>
 }
 
 /** 界面上最多留多少条动态（所有人加起来） */
 const ACTIVITY_KEPT = 80
 
-export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
+/**
+ * @param teamId 直接给团队 id（「外部团队」页用：外部团队没有盒子里的对话）。给了就不看 chatSid
+ */
+export function useTeamBoard(chatSid: Ref<string>, teamId?: Ref<string>): UseTeamBoard {
   const chatStore = useChatSessionsStore()
   const { t } = useI18n()
   const team = ref<TeamStateView | null>(null)
-  const agentSessionId = computed(() =>
-    chatSid.value ? chatStore.getAgentSessionId(chatSid.value) : ''
+  const agentSessionId = computed(
+    () => teamId?.value || (chatSid.value ? chatStore.getAgentSessionId(chatSid.value) : '')
   )
 
   const activity = ref<TeamActivity[]>([])
@@ -184,6 +189,19 @@ export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
     message.error(t('assistant.teamBoard.model.changeFailed'))
   }
 
+  // 成功不提示：主进程推 `agent-v3:team-board`，名册和辞退档案自己就变了
+  const dismissMember = async (name: string, reason: string): Promise<void> => {
+    const sessionId = agentSessionId.value
+    if (!sessionId) return
+    const result = await agentV3API.teamMemberDismiss(sessionId, name, reason).catch(() => null)
+    if (result?.success) return
+    message.error(
+      result?.errorKey === 'busy'
+        ? t('assistant.teamBoard.dismiss.busy', { name })
+        : t('assistant.teamBoard.dismiss.failed')
+    )
+  }
+
   return {
     team,
     activity,
@@ -195,6 +213,7 @@ export function useTeamBoard(chatSid: Ref<string>): UseTeamBoard {
     modelChoices,
     modelsLoaded: computed(() => modelSettings.value !== null),
     loadModels,
-    setMemberModel
+    setMemberModel,
+    dismissMember
   }
 }

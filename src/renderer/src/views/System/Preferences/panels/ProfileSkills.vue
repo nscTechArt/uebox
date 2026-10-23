@@ -38,6 +38,8 @@ import { useAIConfigStore } from '@renderer/store/modules/aiConfig'
 import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import { SKILL_CREATOR_NAME } from '@core/shared/skillLearning'
+import { shareAPI } from '@renderer/api/share'
+import SharedSkillShareModal from './share/SharedSkillShareModal.vue'
 
 import {
   countSkillsBySource,
@@ -156,6 +158,18 @@ function openSkillsFolder(): void {
   void window.api.invoke('shell:openSkillsDir')
 }
 
+/** 官网共享库。从那里点「装到盒子」，盒子会弹安装确认框 */
+function browseShared(): void {
+  void shareAPI.openPage('list').catch(() => undefined)
+}
+
+/** 来源标记：从共享库装的写版本号，其余写内置 / 插件 / 自定义 */
+function sourceBadge(skill: SkillEntry): string {
+  return skill.shared
+    ? t('profile.skills.sharedBadge', { version: skill.shared.version })
+    : t(`profile.skills.source.${skill.source}`)
+}
+
 // ── 详情弹窗 ────────────────────────────────────────────────────────────
 
 const detailOpen = ref(false)
@@ -173,6 +187,16 @@ const detailSaving = ref(false)
 const detailDirty = computed(() => detailContent.value !== detailSavedContent.value)
 /** 只有用户自己那份能删。内置和插件带的删了下次启动又回来，给了按钮就是骗人 */
 const detailDeletable = computed(() => detailSource.value === 'user')
+/**
+ * 只有自己写的能分享。从共享库装来的不给按钮 —— 那是别人的署名；
+ * 本机存着修改码的（自己分享过、又装回来的）由主进程放行，这里不细分。
+ */
+const detailShareable = computed(
+  () =>
+    detailSource.value === 'user' &&
+    !skills.value.find((skill) => skill.name === detailName.value)?.shared
+)
+const shareOpen = ref(false)
 
 async function openDetail(skill: SkillEntry): Promise<void> {
   detailOpen.value = true
@@ -293,9 +317,14 @@ onMounted(refresh)
           {{ $t('profile.skills.listTitle') }}
           <span class="count">{{ loadError ? '—' : skills.length }}</span>
         </h4>
-        <AppButton variant="soft" size="medium" @click="openSkillsFolder">
-          {{ $t('profile.skills.openFolder') }}
-        </AppButton>
+        <div class="head-actions">
+          <AppButton variant="soft" size="medium" @click="browseShared">
+            {{ $t('profile.skills.browseShared') }}
+          </AppButton>
+          <AppButton variant="soft" size="medium" @click="openSkillsFolder">
+            {{ $t('profile.skills.openFolder') }}
+          </AppButton>
+        </div>
       </div>
       <p class="section-note">{{ $t('profile.skills.listNote') }}</p>
 
@@ -341,7 +370,7 @@ onMounted(refresh)
           <button class="entity-open" @click="openDetail(skill)">
             <div class="entity-name">
               {{ skill.name }}
-              <span class="badge">{{ $t(`profile.skills.source.${skill.source}`) }}</span>
+              <span class="badge">{{ sourceBadge(skill) }}</span>
               <span v-if="!skill.enabled" class="badge badge-off">
                 {{ $t('profile.skills.offBadge') }}
               </span>
@@ -385,6 +414,13 @@ onMounted(refresh)
           </AppButton>
           <span v-else />
           <div class="detail-actions">
+            <AppButton
+              v-if="detailShareable"
+              :disabled="detailLoading || !!detailError || detailDirty"
+              @click="shareOpen = true"
+            >
+              {{ $t('profile.skills.share') }}
+            </AppButton>
             <AppButton @click="closeDetail">{{ $t('common.close') }}</AppButton>
             <AppButton
               variant="primary"
@@ -398,6 +434,8 @@ onMounted(refresh)
         </div>
       </template>
     </AppModal>
+
+    <SharedSkillShareModal v-model:open="shareOpen" :name="detailName" />
   </div>
 </template>
 
@@ -430,6 +468,11 @@ onMounted(refresh)
   color: var(--color-text-primary);
   letter-spacing: 0.02em;
   flex: 1;
+}
+
+.head-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 .count {

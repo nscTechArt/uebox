@@ -109,6 +109,19 @@ before publishing it checks that all three came from the same build, that the ve
 `package.json`, and that the source has been pushed. With `updateGithubRepo` unset it refuses
 to run — such a build never checks for updates in the first place.
 
+Website downloads and the mainland mirror:
+
+```bash
+node scripts/release-dl.mjs              # dry run
+node scripts/release-dl.mjs --publish    # actually upload
+```
+
+Uploads the installers to R2, and to a mainland S3-compatible bucket too when `MIRROR_*` is set
+(see `.env.example`). Besides the website's `dl/manifest.json`, each bucket gets a `dl/latest.yml`
+for in-app update checks: put `<public domain>/dl` in `package.json`'s `updateMirrors` and the app
+races it against GitHub and uses whichever answers first. `latest.yml` goes up last, so a failed
+upload never advertises a half-uploaded installer.
+
 ### Mac signing and notarization
 
 Signing, notarization and an actual upgrade still

@@ -612,6 +612,112 @@ interface ImageAdapter {
    * 外面那个整次请求的信号会跟着放宽一分钟，见 generateImages。
    */
   taskTimeoutMs?: number
+  /** 鉴权头之外每次都要带的头。Codex 后端要从令牌里解出来的账号 id，没法写死在配置里 */
+  extraHeaders?(apiKey: string | undefined): Record<string, string>
+  /** 响应体怎么读。不填就是 JSON；Codex 后端只回事件流 */
+  parse?(raw: string): unknown
+  /** 一次请求只出一张。要几张就并发几次，见 generateImages */
+  onePerRequest?: boolean
+}
+
+// ── Codex 后端 ─────────────────────────────────────────────────────────────
+
+/**
+ * Codex 后端说这次没出图：事件流里报了错，或者模型只回了一段话。
+ *
+ * 后者多半是内容审核拦下了 —— 那段话就是原因，原样带出来（截短，理由同 ImageRequestError）。
+ */
+export class CodexImageError extends Error {
+  constructor(detail: string) {
+    super(`Codex 没有出图：${detail.trim().slice(0, 50) || '后端没有给出原因'}`)
+    this.name = 'CodexImageError'
+  }
+}
+
+/** 令牌里解不出账号 id。只可能是登录信息坏了，重新登录就好 */
+export class CodexAccountMissingError extends Error {
+  constructor() {
+    super(`Codex 登录信息里没有账号 id，请到 ${IMAGE_CONFIG_ERROR_MARKER} 重新登录 Codex。`)
+    this.name = 'CodexAccountMissingError'
+  }
+}
+
+/** 令牌（JWT）里放账号信息的那一段。与 pi-ai 的 openai-codex 实现取的是同一处 */
+const CODEX_AUTH_CLAIM = 'https://api.openai.com/auth'
+
+function codexAccountId(token: string | undefined): string {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(String(token).split('.')[1] ?? '', 'base64url').toString('utf-8')
+    ) as Record<string, { chatgpt_account_id?: unknown } | undefined>
+    const id = payload[CODEX_AUTH_CLAIM]?.chatgpt_account_id
+    if (typeof id === 'string' && id) return id
+  } catch {
+    // 不是 JWT：落到下面那句「重新登录」
+  }
+  throw new CodexAccountMissingError()
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b)
+}
+
+/**
+ * 画面比例。Codex 的生图工具**不听 `size`**（实测发 2048x1152 回的是 1374x1145），
+ * 但听提示词里写明的比例 —— 所以比例写进提示词，像素尺寸只用来推比例。
+ */
+function codexAspectRatio(input: AdapterInput): string | undefined {
+  const ratio = asAspectRatio(input.aspectRatio)
+  if (ratio) return ratio
+  const pixels = asSize(input.size)
+  if (!pixels) return undefined
+  const [width, height] = pixels.split('x').map(Number)
+  if (!width || !height) return undefined
+  const divisor = gcd(width, height)
+  return `${width / divisor}:${height / divisor}`
+}
+
+/**
+ * 从事件流里取图。
+ *
+ * 图在 `response.output_item.done` 那一项（`type: image_generation_call`），`result` 是 base64。
+ * 一张都没有时，模型回的那段话就是原因（多半是被审核拦了），连同 `response.failed` 一起抛出去 ——
+ * 否则用户看到的是一句「厂商没有返回图片」，不知道该改提示词还是该换模型。
+ */
+function parseCodexImageStream(raw: string): { images: RawImage[] } {
+  const images: RawImage[] = []
+  let text = ''
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue
+    let event: {
+      type?: unknown
+      item?: { type?: unknown; result?: unknown; output_format?: unknown; content?: unknown }
+      response?: { error?: { message?: unknown } }
+      error?: { message?: unknown }
+      message?: unknown
+    }
+    try {
+      event = JSON.parse(line.slice(5))
+    } catch {
+      continue
+    }
+    if (event.type === 'response.failed' || event.type === 'error') {
+      const detail = event.response?.error?.message ?? event.error?.message ?? event.message ?? ''
+      throw new CodexImageError(String(detail))
+    }
+    if (event.type !== 'response.output_item.done') continue
+    const item = event.item
+    if (item?.type === 'image_generation_call' && typeof item.result === 'string' && item.result) {
+      const format = typeof item.output_format === 'string' ? item.output_format : 'png'
+      images.push({ base64: item.result, mediaType: `image/${format}` })
+    } else if (item?.type === 'message' && Array.isArray(item.content)) {
+      for (const part of item.content as { type?: unknown; text?: unknown }[]) {
+        if (part?.type === 'output_text' && typeof part.text === 'string') text += part.text
+      }
+    }
+  }
+  if (images.length === 0 && text.trim()) throw new CodexImageError(text)
+  return { images }
 }
 
 /** OpenAI 系的响应：`data[]` 里要么 b64_json 要么 url */
@@ -957,6 +1063,63 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
       const single = pick(interaction.output_image)
       return single ? [single] : []
     }
+  },
+
+  /**
+   * ChatGPT 订阅的 Codex 后端，也就是 Codex CLI 出图走的那条路。
+   *
+   * 这里没有 `/images/*` 端点，出图是 Responses 的 `image_generation` 工具：
+   * 用 `tool_choice` 强制它调一次，从事件流里把图取出来。额度算在用户的 ChatGPT
+   * 订阅里，不另外按张计费。
+   *
+   * 与 Responses API 文档对不上的几处，都是这个后端自己的规矩（见 aiProvider.ts 的协议注释）：
+   * 必须带 `chatgpt-account-id`、只收 `stream: true`、只收 `store: false`。
+   *
+   * 能控制的只有比例（写进提示词，见 codexAspectRatio）；像素尺寸和画质由后端定，
+   * 发了也不听。一次请求只出一张图。
+   *
+   * @see https://platform.openai.com/docs/guides/tools-image-generation
+   */
+  'codex-images': {
+    doc: 'https://platform.openai.com/docs/guides/tools-image-generation',
+    onePerRequest: true,
+    extraHeaders: (apiKey) => ({
+      'chatgpt-account-id': codexAccountId(apiKey),
+      'OpenAI-Beta': 'responses=experimental',
+      // 与登录时报的请求方一致（oauth.ts）
+      originator: 'unreal-box',
+      Accept: 'text/event-stream'
+    }),
+    async request(input, signal) {
+      const references = await Promise.all(
+        input.references.map(async (reference) => {
+          const trimmed = reference.trim()
+          const url = /^https?:\/\//i.test(trimmed)
+            ? `data:image/png;base64,${await downloadAsBase64(trimmed, signal)}`
+            : toDataUri(trimmed)
+          return { type: 'input_image', image_url: url }
+        })
+      )
+      const ratio = codexAspectRatio(input)
+      const text = ratio ? `${input.prompt}\n\nAspect ratio: ${ratio}.` : input.prompt
+      return {
+        path: '/responses',
+        contentType: 'application/json',
+        body: JSON.stringify({
+          model: input.modelId,
+          instructions:
+            'Generate exactly one image with the image_generation tool, following the user prompt ' +
+            'and any attached reference images. Do not reply with text.',
+          input: [{ role: 'user', content: [{ type: 'input_text', text }, ...references] }],
+          tools: [{ type: 'image_generation', output_format: 'png' }],
+          tool_choice: { type: 'image_generation' },
+          store: false,
+          stream: true
+        })
+      }
+    },
+    parse: parseCodexImageStream,
+    images: (payload) => (payload as { images?: RawImage[] })?.images ?? []
   }
 }
 
@@ -969,6 +1132,8 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
  * 少了这级兜底，存量用户升级之后会原地退化。
  */
 function resolveImageApi(provider: ProviderConfig, modelId: string): ImageApi {
+  // Codex 后端只有这一种出图方式，手填的模型没写 imageApi 也不该去打 /images/generations
+  if (provider.protocol === 'openai-codex-responses') return 'codex-images'
   return provider.models.find((model) => model.id === modelId)?.imageApi ?? guessImageApi(modelId)
 }
 
@@ -1005,10 +1170,14 @@ function adapterOf(api: ImageApi): ImageAdapter {
   return ADAPTERS[api] ?? ADAPTERS['openai-images']
 }
 
-/** 这些协议根本没有生图端点，打过去只会得到一句厂商的 404 */
+/**
+ * 能出图的协议。不在这里的那几种根本没有生图能力，打过去只会得到一句厂商的 404。
+ * Codex 后端没有生图端点，但有生图工具，走的是 codex-images 适配器
+ */
 const PROTOCOLS_WITH_IMAGES: readonly ProviderProtocol[] = [
   'openai-completions',
-  'openai-responses'
+  'openai-responses',
+  'openai-codex-responses'
 ]
 
 /** 响应体像不像一个网页。网关的错误页、登录页、404 页都是这个形状 */
@@ -1141,6 +1310,7 @@ function authHeaders(
         ? { [adapter.apiKeyHeader]: apiKey }
         : { Authorization: `Bearer ${apiKey}` }
       : {}),
+    ...adapter.extraHeaders?.(apiKey),
     ...provider.headers
   }
 }
@@ -1399,10 +1569,14 @@ async function send(
   // 抛的是一句 `Unexpected token '<'`，看不出是谁、也看不出打的哪个地址
   const raw = await response.text()
   let payload: unknown
-  try {
-    payload = JSON.parse(raw)
-  } catch {
-    throw new ImageResponseNotJsonError(request.path, url)
+  if (adapter.parse) {
+    payload = adapter.parse(raw)
+  } else {
+    try {
+      payload = JSON.parse(raw)
+    } catch {
+      throw new ImageResponseNotJsonError(request.path, url)
+    }
   }
 
   let images = adapter.images(payload)
@@ -1464,15 +1638,26 @@ export async function generateImages(
     useResolutionTiers: provider.imageResolutionTiers === true
   }
 
-  return send(
-    provider,
-    adapter,
-    input,
-    withTimeout(
-      request.signal,
-      adapter.taskTimeoutMs ? adapter.taskTimeoutMs + 60_000 : REQUEST_TIMEOUT_MS
+  const signal = withTimeout(
+    request.signal,
+    adapter.taskTimeoutMs ? adapter.taskTimeoutMs + 60_000 : REQUEST_TIMEOUT_MS
+  )
+  if (!adapter.onePerRequest || input.count === 1) return send(provider, adapter, input, signal)
+
+  /*
+   * 一次只出一张的后端：要几张就并发几次。
+   *
+   * 用 allSettled 而不是 all：四张里挂了一张，另外三张的额度已经花了，
+   * 不能因为那一张把它们一起扔掉。全挂了才报错，报第一个原因。
+   */
+  const results = await Promise.allSettled(
+    Array.from({ length: input.count }, () =>
+      send(provider, adapter, { ...input, count: 1 }, signal)
     )
   )
+  const images = results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+  if (images.length > 0) return images
+  throw (results[0] as PromiseRejectedResult).reason
 }
 
 export interface ImageModelStatus {

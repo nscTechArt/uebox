@@ -84,24 +84,21 @@ const T3D =
 
 function snippetEntry(): unknown {
   return {
-    form: 'snippet',
-    entry: {
-      dirPath: 'x',
-      relPath: 'x',
-      library: 'blueprint',
-      manifest: {
-        format: 'unreal-box-blueprint',
-        formatVersion: 1,
-        id: 'entry-1',
-        name: '受击闪红',
-        createdAt: 1,
-        updatedAt: 2,
-        cover: '',
-        payload: {
-          form: 'snippet',
-          t3d: T3D,
-          meta: { nodeCount: 1, connectionCount: 0, classes: ['Event'], openPorts: [] }
-        }
+    dirPath: 'x',
+    relPath: 'x',
+    library: 'blueprint',
+    manifest: {
+      format: 'unreal-box-blueprint',
+      formatVersion: 1,
+      id: 'entry-1',
+      name: '受击闪红',
+      createdAt: 1,
+      updatedAt: 2,
+      cover: '',
+      payload: {
+        form: 'snippet',
+        t3d: T3D,
+        meta: { nodeCount: 1, connectionCount: 0, classes: ['Event'], openPorts: [] }
       }
     }
   }
@@ -570,8 +567,7 @@ describe('闸 4：落盘核对', () => {
 describe('条目形态', () => {
   it('手工粘进库的老条目明确拒绝，不偷偷失败', async () => {
     findEntryById.mockResolvedValue({
-      form: 't3d',
-      entry: { manifest: { id: 'entry-1', name: '旧条目', payload: { graphs: [] } } }
+      manifest: { id: 'entry-1', name: '旧条目', payload: { graphs: [] } }
     })
 
     const result = await run(INPUT)
@@ -617,20 +613,17 @@ describe('回执如实上报', () => {
 
   it('片段里的悬空端口要提醒去接', async () => {
     findEntryById.mockResolvedValue({
-      form: 'snippet',
-      entry: {
-        manifest: {
-          id: 'entry-1',
-          name: '受击闪红',
-          payload: {
-            form: 'snippet',
-            t3d: T3D,
-            meta: {
-              nodeCount: 1,
-              connectionCount: 0,
-              classes: ['Event'],
-              openPorts: [{ nodeId: 'print', pinName: 'execute', dir: 'in', formerPeer: 'x.then' }]
-            }
+      manifest: {
+        id: 'entry-1',
+        name: '受击闪红',
+        payload: {
+          form: 'snippet',
+          t3d: T3D,
+          meta: {
+            nodeCount: 1,
+            connectionCount: 0,
+            classes: ['Event'],
+            openPorts: [{ nodeId: 'print', pinName: 'execute', dir: 'in', formerPeer: 'x.then' }]
           }
         }
       }

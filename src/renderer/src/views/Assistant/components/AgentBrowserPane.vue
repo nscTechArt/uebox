@@ -61,6 +61,30 @@
         ></AppButton>
       </div>
       <div
+        v-for="report in reports ?? []"
+        :key="`report:${report.id}`"
+        class="pane-tab"
+        :class="{ 'is-selected': activeReport === report.id }"
+      >
+        <AppButton
+          variant="text"
+          size="small"
+          role="tab"
+          :aria-selected="activeReport === report.id"
+          :title="report.title"
+          @click="emit('selectReport', report)"
+        >
+          {{ report.title }}
+        </AppButton>
+        <AppButton
+          variant="text"
+          size="small"
+          :aria-label="t('assistant.teamBoard.closeReport')"
+          @click="emit('closeReport', report.id)"
+          ><template #icon><PhX /></template
+        ></AppButton>
+      </div>
+      <div
         v-for="tab in group?.tabs ?? []"
         :key="tab.id"
         class="pane-tab"
@@ -187,6 +211,9 @@
     <div v-else-if="teamActive" class="pane-review">
       <div class="pane-review-content"><slot name="team" /></div>
     </div>
+    <div v-else-if="activeReport" class="pane-review">
+      <div class="pane-review-content"><slot name="report" /></div>
+    </div>
   </aside>
 </template>
 
@@ -227,6 +254,7 @@ import type {
   BrowserToolbarAction
 } from '../../../../../shared/agentBrowser'
 import { useBrowserPaneResize } from '../composables/useBrowserPaneResize'
+import type { TeamReportTab } from '../composables/useTeamTab'
 
 const props = defineProps<{
   reviewOpen?: boolean
@@ -234,6 +262,9 @@ const props = defineProps<{
   /** 工作室对话的「团队任务」页签。和审查一样是渲染层内容，选中时网页让位 */
   teamOpen?: boolean
   teamActive?: boolean
+  /** 团队日志里点开的交付，一份一个页签 */
+  reports?: TeamReportTab[]
+  activeReport?: string | null
   group?: BrowserGroupState
   standalone?: boolean
   navigation?: BrowserNavigationState
@@ -249,6 +280,8 @@ const emit = defineEmits<{
   closeReview: []
   selectTeam: []
   closeTeam: []
+  selectReport: [report: TeamReportTab]
+  closeReport: [id: string]
   selectBrowser: []
 }>()
 
@@ -317,8 +350,10 @@ async function submitAddress(event: KeyboardEvent): Promise<void> {
 }
 
 const paneShown = computed(() => props.open && props.visible)
-/** 选中的是渲染层自己画的页签（审查 / 团队任务），网页那层要收起来 */
-const panelActive = computed(() => !!props.reviewActive || !!props.teamActive)
+/** 选中的是渲染层自己画的页签（审查 / 团队任务 / 交付），网页那层要收起来 */
+const panelActive = computed(
+  () => !!props.reviewActive || !!props.teamActive || !!props.activeReport
+)
 const shouldShow = computed(() => paneShown.value && !panelActive.value && !!props.sessionId)
 const {
   width: paneWidth,

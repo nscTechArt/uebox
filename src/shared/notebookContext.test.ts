@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   SUMMARY_FALLBACK_HEAD_CHARS,
   contextCharsForSource,
+  isSourceIncluded,
   normalizeNotebookContextLevel,
   packSourcesWithinBudget,
   resolveContextContent,
@@ -25,6 +26,19 @@ describe('normalizeNotebookContextLevel', () => {
     expect(normalizeNotebookContextLevel('full')).toBe('full')
     expect(normalizeNotebookContextLevel('summary')).toBe('summary')
     expect(normalizeNotebookContextLevel('excluded')).toBe('excluded')
+  })
+})
+
+describe('isSourceIncluded', () => {
+  it('只有「不给」这一档不进上下文', () => {
+    expect(isSourceIncluded({ contextLevel: 'full' })).toBe(true)
+    expect(isSourceIncluded({ contextLevel: 'summary' })).toBe(true)
+    expect(isSourceIncluded({ contextLevel: 'excluded' })).toBe(false)
+  })
+
+  it('没有档位的老数据当全文，算进', () => {
+    expect(isSourceIncluded({})).toBe(true)
+    expect(isSourceIncluded({ contextLevel: null })).toBe(true)
   })
 })
 

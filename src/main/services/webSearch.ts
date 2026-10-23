@@ -1,10 +1,12 @@
 import { JINA_KEY_MISSING_HINT, resolveJinaApiKey } from '../ai/jinaKey'
+import { resolveProviderApiKey } from '../ai/providerKey'
 import { CreatorPlanCallError } from '../ai/creatorPlan/callError'
 import { searchViaPlan } from '../ai/creatorPlan/search'
 import { isPlanProvider } from '../../shared/creatorPlan'
 import { judgeResults, type Relevance } from './searchRelevance'
 import {
   BUILTIN_BROWSER_PROVIDER_ID,
+  DEEPSEEK_SEARCH_PROVIDER_ID,
   JINA_SEARCH_PROVIDER_ID,
   resolveSearchProvider,
   SEARXNG_PROVIDER_ID
@@ -41,6 +43,8 @@ import {
  *   - `searxng` —— 自建实例（`searxngSearch.ts`）。质量最好也最快，但要用户
  *     自己跑一台，而且实例得打开 JSON 输出。
  *   - `jina-search` —— Jina 的搜索接口。约 0.5 秒，用用户自己的额度。
+ *   - `deepseek-search` —— DeepSeek 的检索接口（`deepseekSearch.ts`）。中文结果好、
+ *     国内直连，按次计费。和对话那条 DeepSeek 共用一把 Key。
  *
  * **没绑就用内置浏览器。** 社区版的零配置承诺全靠这一条 —— 检索不能是一个
  * 「先去第三方申请点什么」才能用的功能。
@@ -49,6 +53,9 @@ import {
  *
  * 撞上验证码一律**如实报错**，绝不尝试绕过 —— 那是设计文档 §3.2 明写的红线。
  */
+
+/** 内置目录里 DeepSeek 对话那条的 id。检索那条没填 Key 时借它的 */
+const DEEPSEEK_CHAT_PROVIDER_ID = 'deepseek'
 
 /** 检索超时。这是交互动作，不该让用户干等 */
 const SEARCH_TIMEOUT_MS = 15_000
@@ -269,6 +276,29 @@ async function runProviders(query: string, limit: number): Promise<WebSearchResu
     }
   }
 
+  if (bound.providerId === DEEPSEEK_SEARCH_PROVIDER_ID) {
+    // 检索和对话是同一个 DeepSeek 账号、同一把 Key。用户只在对话那条上填过也该能用
+    const apiKey =
+      bound.apiKey ||
+      (await resolveProviderApiKey(DEEPSEEK_CHAT_PROVIDER_ID, 'DEEPSEEK_API_KEY').catch(
+        () => undefined
+      ))
+    if (!apiKey) {
+      return {
+        success: false,
+        error:
+          'DeepSeek 网页检索缺少 API Key。到 https://platform.deepseek.com/api_keys 申请，' +
+          '在「设置 → 模型」里填进 DeepSeek 即可（对话和检索共用这一把）。'
+      }
+    }
+    const { searchViaDeepseek } = await import('./deepseekSearch')
+    const result = await searchViaDeepseek(bound.baseUrl, apiKey, query, limit)
+    if (result.success && result.items) {
+      return { success: true, provider: 'deepseek-search', items: result.items }
+    }
+    return { success: false, error: result.error ?? 'DeepSeek 检索失败。' }
+  }
+
   /*
    * 绑了一个我们不认识的 Provider —— **退回内置浏览器，但要说出来**。
    *
@@ -285,7 +315,8 @@ async function runProviders(query: string, limit: number): Promise<WebSearchResu
    */
   const notice =
     `注意：「网页检索」这一档绑的是不支持的服务商 «${bound.providerId}»，这次已改用内置浏览器。` +
-    '这一档只支持内置浏览器（builtin-browser）、SearXNG（searxng）、Jina 网页检索（jina-search）—— ' +
+    '这一档只支持内置浏览器（builtin-browser）、SearXNG（searxng）、Jina 网页检索（jina-search）、' +
+    'DeepSeek 网页检索（deepseek-search）—— ' +
     '到 设置 → 模型 里换一个，或者把这个角色清空（清空就是用内置浏览器）。'
 
   const fallback = await runBuiltinBrowser(query, limit)

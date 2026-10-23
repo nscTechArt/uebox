@@ -96,6 +96,8 @@ const optionsSchema = z.object({
   team: z
     .object({
       objective: z.string().min(1),
+      // 开团之后用户最近那句话，见 `TeamState.latestRequest`。`/team` 那一轮和老记录里没有
+      latestRequest: z.string().optional(),
       verdict: z.enum(['pass', 'fail', 'blocked']).nullable(),
       deliveries: z.number().int().min(0),
       nudges: z.number().int().min(0),

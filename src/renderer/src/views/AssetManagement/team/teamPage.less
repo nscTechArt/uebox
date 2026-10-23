@@ -1,0 +1,153 @@
+// 团队工程中间区域各页（动态、对比、找坏提交、签出中、等你处理、最近删除、交付）共用的样子。
+// 沿用资产库的暗色和间距变量，不另起一套。
+
+.team-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.page-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-bg-surface-hover);
+  }
+
+  &.active {
+    border-color: var(--color-accent-border);
+    background: var(--color-accent-bg);
+    color: var(--color-accent-text);
+  }
+}
+
+.page-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) 0;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.skeleton-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.skeleton-card {
+  height: 84px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-soft);
+}
+
+.skeleton-block {
+  display: inline-block;
+  width: 240px;
+  height: 18px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-soft);
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--space-3);
+}
+
+.asset-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-bg-surface-hover);
+  }
+
+  &.selected {
+    border-color: var(--color-accent-border);
+    background: var(--color-bg-selected);
+  }
+
+  .card-name {
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-sub {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.change-mark {
+  font-size: var(--font-size-xs);
+
+  &.added {
+    color: var(--color-success-text);
+  }
+
+  &.modified,
+  &.moved {
+    color: var(--color-accent-text);
+  }
+
+  &.deleted {
+    color: var(--color-danger-text);
+  }
+}
+
+.section-title {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.row-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+
+  .row-text {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-text-primary);
+  }
+}

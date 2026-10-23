@@ -4,6 +4,7 @@ import { VideoStoryboard } from '../../../services/taskVideo/schema'
 import { readSettingsSync } from '../../../ai/store'
 import { isPlanProvider } from '../../../../shared/creatorPlan'
 import { MAX_SPEECH_CHARS } from '../../../../shared/speech'
+import { voiceDesignTools } from './voiceDesign'
 
 async function currentSession(): Promise<string> {
   const { getCurrentSessionId } = await import('../../core/projectTargetContext')
@@ -44,6 +45,7 @@ const PLAN_MUSIC_NOTE =
 export function taskVideoTools(): UnrealAgentTool[] {
   const planMusic = planMusicBound()
   return [
+    ...voiceDesignTools(),
     defineTool({
       name: 'prepare_task_video',
       namespace: 'video.production',
@@ -189,26 +191,80 @@ export function taskVideoTools(): UnrealAgentTool[] {
       risk: 'mutating',
       concurrency: 'sequential',
       description:
-        '文字合成语音，输出可播放、可导入 UE 的 WAV。台词、对白、无线电通话、旁白都用它，多句逐句调用。用用户绑定的语音合成模型，可能收费；同样文字复用不重复扣费。不必在盒子的对话里调用。返回 path、seconds，把 path 作为本地音频链接交给用户。',
+        '文字合成语音，输出可播放、可导入 UE 的 WAV。台词、对白、无线电通话、旁白都用它，多句逐句调用。用用户绑定的语音合成模型，可能收费；同样文字复用不重复扣费。不必在盒子的对话里调用。返回 path、seconds，把 path 作为本地音频链接交给用户。' +
+        '给角色配音时填 role，用工程角色音色表里该角色的音色（design_voice 设计、用户确认过的）；不填用模型默认音色。',
 
       input: z.object({
-        text: z.string().min(1).max(MAX_SPEECH_CHARS)
+        text: z.string().min(1).max(MAX_SPEECH_CHARS),
+        role: z
+          .string()
+          .min(1)
+          .max(40)
+          .optional()
+          .describe('角色名，用这个角色的音色。list_voices 可查有哪些'),
+        style: z
+          .string()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            '演法，一句话说情绪和语气，如「愤怒地吼出来」「压低声音、有些害怕」。只有阿里云 Qwen-Audio 生效；汉字算 2 个字符，合计不超过 100'
+          )
       }),
-      execute: async ({ text }, ctx) => {
+      execute: async ({ text, role, style }, ctx) => {
         const { resolveSpeechBinding, speakToFile, pcmToWav } = await import(
           '../../../services/taskVideo/audio'
         )
-        const binding = await resolveSpeechBinding()
-        if (!binding) throw new Error('未配置语音合成模型。请到偏好设置 → 模型来源配置语音合成。')
+        let binding: Awaited<ReturnType<typeof resolveSpeechBinding>>
+        let voice: string | undefined
+        if (role) {
+          const { currentCastDir, castBinding } = await import('./voiceDesign')
+          const { normalizeRole, readVoiceCast } = await import(
+            '../../../services/taskVideo/voiceCast'
+          )
+          const name = normalizeRole(role)
+          const roles = await readVoiceCast(await currentCastDir())
+          const entry = roles[name]?.adopted
+          if (!entry) {
+            const adopted = Object.keys(roles).filter((key) => roles[key].adopted)
+            throw new Error(
+              roles[name]?.candidate
+                ? `「${name}」的音色还在试听，用户确认（adopt_voice）之后才能配音。`
+                : `角色音色表里没有「${name}」。` +
+                  (adopted.length ? `已有：${adopted.join('、')}。` : '') +
+                  '要新角色先用 design_voice 设计。'
+            )
+          }
+          binding = await castBinding(name, entry)
+          voice = entry.voiceId
+        } else {
+          binding = await resolveSpeechBinding()
+          if (!binding) throw new Error('未配置语音合成模型。请到偏好设置 → 模型来源配置语音合成。')
+        }
+        const { supportsSpeechInstruction, instructionWidth } = await import('../../../ai/speech')
+        const styleApplied = !!style && supportsSpeechInstruction(binding.modelId)
+        if (style && styleApplied && instructionWidth(style) > 100)
+          throw new Error('style 太长：汉字算 2 个字符，合计不能超过 100。')
         const { app } = await import('electron')
         const { join } = await import('node:path')
         const dir = join(app.getPath('music'), 'UnrealBox', 'speech')
-        const spoken = await speakToFile(binding, text, dir, ctx.signal, () =>
-          ctx.report({ text: '正在合成语音' })
+        const spoken = await speakToFile(
+          binding,
+          text,
+          dir,
+          ctx.signal,
+          () => ctx.report({ text: '正在合成语音' }),
+          { voice, instruction: styleApplied ? style : undefined }
         )
         const wav = spoken.path.replace(/\.pcm$/, '.wav')
         await pcmToWav(spoken.path, wav)
-        const result = { path: wav, seconds: Number(spoken.seconds.toFixed(2)) }
+        const result = {
+          path: wav,
+          seconds: Number(spoken.seconds.toFixed(2)),
+          ...(role ? { role } : {}),
+          // 回执如实说：没生效的演法不能让模型以为念出了那个情绪
+          ...(style ? { style_applied: styleApplied } : {})
+        }
         return { text: JSON.stringify(result), details: result }
       }
     }),

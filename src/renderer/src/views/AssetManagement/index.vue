@@ -83,7 +83,8 @@
         <AppAlert
           v-if="
             libraryStore.isServer &&
-            (libraryStore.signedOut || libraryStore.activeStatus?.online === false)
+            (libraryStore.signedOut ||
+              (libraryStore.activeStatus?.online === false && !libraryCaps.team))
           "
           type="warning"
           show-icon
@@ -94,9 +95,11 @@
           <template #message>
             <div class="server-library-banner-row">
               <span>{{
-                libraryStore.signedOut
-                  ? t('catalogLibrary.view.signedOut')
-                  : t('catalogLibrary.view.offlineBanner')
+                libraryCaps.team
+                  ? t('teamProject.state.signedOut')
+                  : libraryStore.signedOut
+                    ? t('catalogLibrary.view.signedOut')
+                    : t('catalogLibrary.view.offlineBanner')
               }}</span>
               <AppButton
                 size="small"
@@ -112,6 +115,9 @@
             </div>
           </template>
         </AppAlert>
+
+        <!-- 团队工程的横幅：一次一条（连不上 > 在看旧版 > 冻结中 > 工程不在本机），方案 2.11 -->
+        <TeamBanner v-if="libraryCaps.team && !libraryStore.signedOut" />
 
         <AppAlert
           v-if="pendingImportRecoveryNotice"
@@ -219,6 +225,8 @@
               <div v-if="assetViewStore.mode === 'tagManagement'" class="current-dir-text">
                 {{ t('assetLib.ui.tagManagement') }}
               </div>
+              <!-- 团队工程：面包屑右端按需出现「主线 ▾」「最新 ▾」（方案 4.5） -->
+              <TeamVersionPill v-if="libraryCaps.team" />
             </div>
 
             <!--
@@ -229,7 +237,7 @@
             <!-- 有关键词就一直摊开：正在生效的筛选不能藏在图标后面 -->
             <div
               class="search-controls"
-              :class="{ expanded: searchExpanded || !!filterForm.keyword }"
+              :class="{ expanded: searchExpanded || !!filterForm.keyword || teamPageActive }"
             >
               <button
                 class="search-icon-btn"
@@ -238,7 +246,20 @@
               >
                 <PhMagnifyingGlass />
               </button>
-              <div v-if="canQueryCurrentList" class="search-field">
+              <div v-if="teamPageActive" class="search-field">
+                <a-input
+                  v-model:value="teamStore.query"
+                  :placeholder="t('teamProject.activity.searchPlaceholder')"
+                  class="search-input"
+                  allow-clear
+                  data-testid="team-search"
+                >
+                  <template #prefix>
+                    <PhMagnifyingGlass />
+                  </template>
+                </a-input>
+              </div>
+              <div v-else-if="canQueryCurrentList" class="search-field">
                 <a-input
                   ref="searchInputRef"
                   v-model:value="filterForm.keyword"
@@ -259,7 +280,8 @@
 
           <!-- 工具栏区域 -->
           <div class="command-bar">
-            <div class="left-actions">
+            <!-- 团队工程的几页（动态、对比……）里排序、筛选、标签管理按钮隐藏（方案 4.8） -->
+            <div v-show="!teamPageActive" class="left-actions">
               <AppDropdown
                 v-if="canQueryCurrentList"
                 v-model:open="sortDropdownVisible"
@@ -424,7 +446,7 @@
                 />
               </div>
               <button
-                v-if="isShowingDeleted"
+                v-if="isShowingDeleted && !libraryCaps.team"
                 class="action-btn danger"
                 :title="
                   isHttpNetworkVault
@@ -450,7 +472,7 @@
           </div>
 
           <AssetFilterBar
-            v-if="canQueryCurrentList"
+            v-if="canQueryCurrentList && !teamPageActive"
             v-model:file-category="filterForm.fileCategory"
             v-model:asset-types="filterForm.assetTypes"
             v-model:size-range="filterForm.sizeRange"
@@ -474,7 +496,9 @@
           <!-- 拖拽覆盖层 -->
           <DragDropOverlay :visible="isDragOver" />
 
-          <div class="file-list-section">
+          <TeamCenter v-if="teamPageActive" @open-path="handleTeamOpenPath" />
+          <TeamEmptyProject v-else-if="libraryCaps.team && teamStore.isEmpty" />
+          <div v-else class="file-list-section">
             <AssetFileList
               ref="assetFileListRef"
               :current-path="currentPath"
@@ -633,10 +657,23 @@
           @close="serverImportOpen = false"
         />
         <CatalogSignInModal
-          :open="serverSignInOpen"
+          :open="serverSignInOpen && !libraryCaps.team"
           :server="libraryStore.activeServer?.server ?? null"
           @close="serverSignInOpen = false"
           @signed-in="handleServerSignedIn"
+        />
+        <!-- 团队工程：重新登录就是「加入团队」那个框，账号已填好（方案 4.2） -->
+        <TeamJoinModal
+          :open="serverSignInOpen && Boolean(libraryCaps.team)"
+          :relogin="libraryStore.activeServer?.server ?? null"
+          @close="serverSignInOpen = false"
+          @signed-in="handleServerSignedIn"
+        />
+        <TeamDialogs v-if="libraryCaps.team" />
+        <TeamDeliverModal
+          :open="teamDeliverFiles.length > 0"
+          :files="teamDeliverFiles"
+          @close="teamDeliverFiles = []"
         />
       </div>
 
@@ -1025,6 +1062,15 @@ import { useAssetLibraryStore } from '../../store/modules/assetLibraryStore'
 import { getActiveLibrarySource } from './data/activeLibrarySource'
 import CatalogImportModal from './catalog/CatalogImportModal.vue'
 import CatalogSignInModal from './catalog/CatalogSignInModal.vue'
+import TeamBanner from './team/TeamBanner.vue'
+import TeamCenter from './team/TeamCenter.vue'
+import TeamDialogs from './team/TeamDialogs.vue'
+import TeamDeliverModal from './team/TeamDeliverModal.vue'
+import TeamEmptyProject from './team/TeamEmptyProject.vue'
+import TeamJoinModal from './team/TeamJoinModal.vue'
+import TeamVersionPill from './team/TeamVersionPill.vue'
+import { assetRowByPath } from './team/teamAssets'
+import { useTeamStore } from '../../store/modules/teamStore'
 import {
   buildDirectFileUrl,
   buildThumbnailUrl,
@@ -1108,6 +1154,23 @@ const importMenuOpen = ref(false)
 const serverImportOpen = ref(false)
 const serverImportFiles = ref<string[]>([])
 const serverSignInOpen = ref(false)
+
+// ---- 团队工程：中间区域在看哪一页、外包的交付
+const teamStore = useTeamStore()
+/** 动态、对比、签出中……这几页顶替网格（点左栏文件夹就回到网格） */
+const teamPageActive = computed(() => Boolean(libraryCaps.value.team) && teamStore.view !== 'grid')
+/** 外包把文件拖进「交付」：先出「交付给 星海」确认窗 */
+const teamDeliverFiles = ref<string[]>([])
+
+/** 动态 / 签出中 / 对比里点了一个资产：右边详情打开它 */
+const handleTeamOpenPath = async (path: string): Promise<void> => {
+  const key = libraryStore.activeServerKey
+  if (!key) return
+  const row = await assetRowByPath(key, path)
+  if (!row) return
+  detailsPanelVisible.value = true
+  handleFileClick(row)
+}
 const serverImportFolder = ref<{
   dirId: number
   path: string
@@ -3472,7 +3535,7 @@ interface ListCriteria {
   offset?: number
   classNameCnFilters?: string[]
   fileExtensions?: string[]
-  /** 服务器库：引擎版本分面 */
+  /** 引擎版本（前缀匹配：5.3 也命中 5.3.x） */
   engineVersions?: string[]
   sizeRange?: { min?: number; max?: number }
   dateRange?: { start: string; end: string }
@@ -3561,7 +3624,7 @@ const buildListCriteria = (options: {
     criteria.classNameCnFilters = [...filterForm.assetTypes]
   }
 
-  // 引擎版本只有服务器库有（服务端分面）
+  // 库支持版本分面才带（本地库、服务器库都有）
   if (libraryCaps.value.filters.engine && filterForm.engineVersions.length > 0) {
     criteria.engineVersions = [...filterForm.engineVersions]
   }
@@ -6804,6 +6867,16 @@ const handleWebImageCapture = async (files: File[]): Promise<void> => {
 
 // 处理拖拽导入逻辑
 const handleDragImport = async (filePaths: string[]) => {
+  // 外包成员：拖进「交付」就是交一批（方案 4.12）；别处照旧（置灰，说为什么）
+  if (libraryCaps.value.team?.role === 'outsourcer') {
+    const folder = (await getActiveLibrarySource()
+      .folders.getByKey(selectedKeys.value[0] || ALL_FOLDER)
+      .catch(() => undefined)) as { catalogPath?: string } | undefined
+    if ((folder?.catalogPath ?? '').split('/')[0] === 'delivery') {
+      teamDeliverFiles.value = filePaths
+      return
+    }
+  }
   // 服务器库：同一个导入入口，走 lore 以本人身份提交（先确认仓库和提交说明）
   if (libraryStore.isServer) {
     importMenuOpen.value = false

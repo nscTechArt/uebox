@@ -86,6 +86,15 @@ describe('buildAllTools', () => {
     expect(new Set(names).size).toBe(names.length)
   })
 
+  // 大结果存档（core/resultArchive.ts）只认工具声明的表。声明要从注册表一路带到 unrealBox 上，
+  // 少一层转手就静默失效：结果照旧整份给，没有任何报错
+  it('声明了存档的工具把表声明带到了 unrealBox 上', () => {
+    const byName = new Map(buildAllTools().map((t) => [t.name, t]))
+    expect(byName.get('search_assets')?.unrealBox.archive?.lists.assets).toContain('name')
+    expect(byName.get('project_list')?.unrealBox.archive?.lists.templates).toContain('name')
+    expect(byName.get('project_manage')?.unrealBox.archive).toBeUndefined()
+  })
+
   /**
    * 工具**几乎都是**无状态的，唯一的例外是 `generate_3d_model`：它的入参表取决于
    * 用户给「3D 生成」绑的是哪家厂商。不跟着配置作废的话，用户在偏好设置里换完
@@ -289,7 +298,9 @@ describe('buildAllTools', () => {
       'widget_add_child',
       'widget_set_slot',
       'widget_make_variable',
-      'widget_set_property'
+      'widget_set_property',
+      'widget_replace',
+      'widget_remove'
     ]
     for (const name of writers) {
       expect((byName.get(name) as { executionMode?: string })?.executionMode, name).toBe(
@@ -439,6 +450,9 @@ describe('buildAllTools', () => {
     for (const name of [
       // widget.set_canvas_slot / set_vertical_slot：加完控件还能挪
       'widget_set_slot',
+      // widget.replace / remove：现成的界面换得了控件、删得掉控件
+      'widget_replace',
+      'widget_remove',
       // models/tag.ts 的 updateTag / deleteTag：标签改得动、合并得了
       'manage_tags',
       'delete_tags',

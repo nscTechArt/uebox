@@ -188,4 +188,17 @@ describe('MaterialGallery', () => {
     expect(store.entries.find((e) => e.id === 'material-only')?.collectionId).toBeUndefined()
     expect(store.collections.some((c) => c.id === folder!.id)).toBe(true)
   })
+
+  it('网格 / 列表的选择存进 store，重启后还在', async () => {
+    const store = useMaterialLibraryStore()
+    store.setViewMode('list')
+
+    const { wrapper } = await mountGallery()
+
+    const [gridButton, listButton] = wrapper.findAll('.view-toggle .toggle-btn')
+    expect(listButton.attributes('aria-pressed')).toBe('true')
+
+    await gridButton.trigger('click')
+    expect(store.viewMode).toBe('grid')
+  })
 })

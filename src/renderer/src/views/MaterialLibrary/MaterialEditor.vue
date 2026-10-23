@@ -51,8 +51,6 @@ const collapsedNodeParameterOwners = ref<Set<string>>(new Set())
 const materialRendererRef = ref<InstanceType<typeof MaterialRenderer> | null>(null)
 const selectedNodesSnapshot = ref<SelectedNodeInfo[]>([])
 
-const isEditorActive = ref(false)
-
 // ========== 编辑器壳（AI 面板 / focus mode / 快捷键 / 侧栏拖宽） ==========
 const {
   aiPanelMode,
@@ -387,33 +385,21 @@ function getSectionLabel(secKey: EditorSection): string {
 }
 
 onMounted(() => {
-  isEditorActive.value = true
   syncMaterialTabTitle()
   startListening()
 })
 onActivated(() => {
-  isEditorActive.value = true
   syncMaterialTabTitle()
   startListening()
 })
 onDeactivated(() => {
-  isEditorActive.value = false
   stopListening()
 })
 onBeforeUnmount(() => {
-  isEditorActive.value = false
   stopListening()
 })
 
-watch(
-  () => entry.value?.name,
-  (newName) => {
-    if (newName && isEditorActive.value) {
-      syncMaterialTabTitle()
-    }
-  },
-  { immediate: true }
-)
+watch(() => entry.value?.name, syncMaterialTabTitle, { immediate: true })
 </script>
 
 <template>

@@ -8,6 +8,8 @@
  * - 路径：`Content/Props/SM_Chair.uasset` ↔ 软路径 `/Game/Props/SM_Chair`（插件内容是 `/<插件名>/…`）。
  */
 import { catalogLibraryAPI } from '@renderer/api/catalogLibrary'
+import i18n from '@renderer/i18n'
+import { areaToProjectPath } from '@core/shared/teamProject'
 import type {
   CatalogAssetDetail,
   CatalogAssetSummary,
@@ -30,7 +32,8 @@ import {
   type RegistryTag,
   type RegistryTagGroup,
   type SortBy,
-  type SortOrder
+  type SortOrder,
+  type TeamCapability
 } from './AssetLibrarySource'
 
 export const SERVER_CAPABILITIES_BASE: LibraryCapabilities = {
@@ -80,6 +83,35 @@ export const SERVER_CAPABILITIES_BASE: LibraryCapabilities = {
     'filters.tags': 'catalogLibrary.reasons.filterUnsupported',
     'filters.favorite': 'catalogLibrary.reasons.favoriteFilter',
     'filters.showDependencies': 'catalogLibrary.reasons.filterUnsupported'
+  },
+  team: null
+}
+
+/**
+ * 团队工程在服务器库能力上的改动（界面方案 4.0 对照表）：
+ *
+ * - 「最近删除」可用（被提交删掉的文件，没有「清空」）；
+ * - 网盘置灰、拖文件进来导入置灰，悬停写为什么（文件只从 UE 进工程）；
+ * - 扫描变更、改结构照旧不出现 / 不可用。
+ */
+export function teamCapabilities(
+  base: LibraryCapabilities,
+  team: { role: TeamCapability['role']; local: boolean }
+): LibraryCapabilities {
+  return {
+    ...base,
+    hasTrash: team.role !== 'outsourcer',
+    canImport: false,
+    cloudDrives: false,
+    canScan: false,
+    canEditStructure: false,
+    reasons: {
+      ...base.reasons,
+      hasTrash: null,
+      canImport: 'teamProject.reasons.import',
+      cloudDrives: 'teamProject.reasons.cloudDrives'
+    },
+    team: { role: team.role, local: team.local }
   }
 }
 
@@ -156,7 +188,8 @@ export function assetIdOf(assetKey: string | undefined | null): number | null {
 
 /** 库内路径 → UE 包路径（不带 .Object 后缀） */
 export function softPathOf(path: string): string {
-  const withoutExt = path.replace(/\.(uasset|umap)$/i, '')
+  // 外包区里 reference/Content/… 和 delivery/7/Content/… 对应的是工程里的 /Game/…
+  const withoutExt = areaToProjectPath(path).replace(/\.(uasset|umap)$/i, '')
   const parts = withoutExt.split('/')
   if (parts[0] === 'Content') return `/Game/${parts.slice(1).join('/')}`
   const content = parts.indexOf('Content')
@@ -286,24 +319,26 @@ export class ServerLibrarySource implements AssetLibrarySource {
       getByFatherKey: async (fatherKey, sortBy, sortOrder, limit, offset) => {
         const dirId = dirIdOf(fatherKey)
         const { items } = await this.loadChildren(dirId)
-        const sorted = [...items]
+        const sorted = this.visibleFolders(items)
         if (sortBy === 'fileSize') sorted.sort((a, b) => a.bytes - b.bytes)
         if (sortOrder === 'desc') sorted.reverse()
         const start = offset ?? 0
         const page =
           typeof limit === 'number' ? sorted.slice(start, start + limit) : sorted.slice(start)
-        return page.map((folder) => mapFolder(folder, folderKeyOf(dirId)))
+        return page.map((folder) => this.named(mapFolder(folder, folderKeyOf(dirId))))
       },
       getByKey: async (folderKey) => {
         const dirId = dirIdOf(folderKey)
         const known = this.known.get(dirId)
         if (known)
-          return mapFolder(known.folder, known.parent === null ? null : folderKeyOf(known.parent))
+          return this.named(
+            mapFolder(known.folder, known.parent === null ? null : folderKeyOf(known.parent))
+          )
         const { folder } = await this.loadChildren(dirId)
-        return folder ? mapFolder(folder, null) : undefined
+        return folder ? this.named(mapFolder(folder, null)) : undefined
       },
       getChildCount: async (fatherKey) =>
-        (await this.loadChildren(dirIdOf(fatherKey))).items.length,
+        this.visibleFolders((await this.loadChildren(dirIdOf(fatherKey))).items).length,
       getPathArray: async (folderKey) => await this.pathArray(dirIdOf(folderKey)),
       setColor: async (folderKey, color) => {
         const dirId = dirIdOf(folderKey)
@@ -585,6 +620,31 @@ export class ServerLibrarySource implements AssetLibrarySource {
       500
     )
     return new Map((result.facets.tags ?? []).map((value) => [value.value, value.n]))
+  }
+
+  /**
+   * 团队工程不显示 `__ExternalActors__`、`__ExternalObjects__`（里面的文件名是哈希）：
+   * 这些 Actor 的签出、改动、历史都算在所属地图上（方案 4.4）
+   */
+  private visibleFolders(items: CatalogFolder[]): CatalogFolder[] {
+    if (!this.capabilities.team) return [...items]
+    return items.filter((folder) => !/^__External(Actors|Objects)__$/.test(folder.name))
+  }
+
+  /**
+   * 外包成员看到的外包区：`reference/` 叫「参考」，`delivery/` 叫「交付」，`delivery/7` 叫「交付 7」
+   * （方案 4.12）。只改显示的名字，路径不动。
+   */
+  private named<T extends { folderName?: string; catalogPath?: unknown }>(folder: T): T {
+    if (this.capabilities.team?.role !== 'outsourcer') return folder
+    const path = typeof folder.catalogPath === 'string' ? folder.catalogPath : ''
+    const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+    if (path === 'reference') return { ...folder, folderName: t('teamProject.outsource.reference') }
+    if (path === 'delivery') return { ...folder, folderName: t('teamProject.outsource.delivery') }
+    const batch = /^delivery\/(\d+)$/.exec(path)
+    if (batch)
+      return { ...folder, folderName: t('teamProject.outsource.deliveryN', { n: batch[1] }) }
+    return folder
   }
 
   private rootStub(children: number): CatalogFolder {

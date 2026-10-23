@@ -605,6 +605,52 @@ export function countAssetsByCriteria(
   return Number(row?.total ?? 0)
 }
 
+/**
+ * 引擎版本分面：符合条件的资产里各引擎版本有几个，给资产库筛选栏的版本下拉用。
+ *
+ * 按「主.次」归并（5.3.2 记到 5.3 里）：筛选那边 5.3 本来就前缀匹配 5.3.x，
+ * 分开列的话勾一项命中的数和旁边写的数对不上。没标版本的不列 —— 筛不出来。
+ * 自身的版本条件不参与：勾了 5.3 之后下拉里别的版本也得照样有数。
+ */
+export function countAssetsByEngineVersion(
+  db: Database.Database,
+  criteria: AssetSearchCriteria,
+  env: AssetQueryEnv = {}
+): Array<{ value: string; n: number }> {
+  const { withClause, joinSql, whereSql, params } = buildAssetQueryParts(
+    db,
+    { ...criteria, engineVersions: [], limit: undefined, offset: undefined },
+    env
+  )
+  const rows = db
+    .prepare(
+      `
+    ${withClause}
+    SELECT TRIM(ad.engineVersion) AS version, COUNT(*) AS n
+    FROM assetData ad
+    ${joinSql}
+    ${whereSql ? `${whereSql} AND` : 'WHERE'} TRIM(COALESCE(ad.engineVersion, '')) <> ''
+    GROUP BY version
+  `
+    )
+    .all(...params) as Array<{ version: string; n: number }>
+
+  const merged = new Map<string, number>()
+  for (const { version, n } of rows) {
+    const key = /^(\d+\.\d+)/.exec(version)?.[1] ?? version
+    merged.set(key, (merged.get(key) ?? 0) + Number(n))
+  }
+  // 新版本在前；不是数字版本号的排最后
+  const numeric = (value: string): number => (/^\d/.test(value) ? 0 : 1)
+  return [...merged]
+    .map(([value, n]) => ({ value, n }))
+    .sort(
+      (a, b) =>
+        numeric(a.value) - numeric(b.value) ||
+        b.value.localeCompare(a.value, undefined, { numeric: true })
+    )
+}
+
 /** 先排 id 再取整行的分页上限；更大的「一页」照旧一步查完（IN 列表有参数个数上限） */
 const LATE_MATERIALIZE_MAX_LIMIT = 5000
 

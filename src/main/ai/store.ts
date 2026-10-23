@@ -207,7 +207,8 @@ const IMAGE_APIS: readonly ImageApi[] = [
   'siliconflow-images',
   'ark-images',
   'gemini-images',
-  'uebox-images'
+  'uebox-images',
+  'codex-images'
 ]
 
 function normalizeImageApi(value: unknown): ImageApi | undefined {

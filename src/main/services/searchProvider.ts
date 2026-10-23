@@ -13,10 +13,11 @@ import { BUILTIN_BROWSER_PROVIDER_ID } from '../../shared/aiProvider'
  * 返回 `null` 而不是抛异常，让调用方走默认那条。
  */
 
-/** 目录里预置的三条。用户自定义的 Provider 会是别的 id */
+/** 目录里预置的几条。用户自定义的 Provider 会是别的 id */
 export { BUILTIN_BROWSER_PROVIDER_ID }
 export const SEARXNG_PROVIDER_ID = 'searxng'
 export const JINA_SEARCH_PROVIDER_ID = 'jina-search'
+export const DEEPSEEK_SEARCH_PROVIDER_ID = 'deepseek-search'
 
 export interface ResolvedSearchProvider {
   providerId: string

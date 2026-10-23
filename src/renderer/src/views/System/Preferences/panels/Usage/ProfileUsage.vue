@@ -495,7 +495,7 @@ onMounted(() => {
             <span class="rank-name">{{ tool.name }}</span>
             <span class="rank-count">{{ formatCount(tool.calls) }}</span>
             <span class="rank-count" :class="{ danger: tool.failed > 0 }">
-              {{ tool.failed > 0 ? `${formatCount(tool.failed)} · ${failRate(tool)}` : '—' }}
+              {{ tool.failed > 0 ? `${formatCount(tool.failed)} (${failRate(tool)})` : '—' }}
             </span>
             <span class="rank-count">{{ formatDuration(tool.medianMs) }}</span>
           </div>

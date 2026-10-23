@@ -158,7 +158,9 @@ export function collectGeneratedMusic(args: {
     if (
       toolName !== 'generate_task_music' &&
       toolName !== 'generate_speech' &&
-      toolName !== 'generate_sound_effect'
+      toolName !== 'generate_sound_effect' &&
+      // 设计音色的试听：用户听过才决定采用，播放器挂不出来这一步就没法走
+      toolName !== 'design_voice'
     )
       return
     const record = parseStructuredValue(result)

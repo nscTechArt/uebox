@@ -67,15 +67,22 @@ function limitsFor(
 /**
  * 查目录时依次试哪几个 provider id。
  *
- * 先试自己的 id；走 Anthropic 协议的再试一次 `anthropic`。中转网关、加第二个
- * Claude 渠道时自动起的 `anthropic-4` 这类 id 两本目录都查不到，而 Claude 的
- * 思考方式是型号的事，跟从哪条渠道发出去无关 —— 查不到时 Sonnet 5.5 就退回
- * 老式思考预算，对面整轮 400「requires adaptive thinking」（2026-10-15）。
+ * 先试自己的 id，再试它是从目录哪一条加的；走 Anthropic 协议的最后再试一次
+ * `anthropic`。加第二个渠道时自动起的 `anthropic-4` / `openai-4` 这类 id 两本目录
+ * 都查不到，而思考方式是型号的事，跟从哪条渠道发出去无关 —— 查不到时 Sonnet 5.5
+ * 就退回老式思考预算，对面整轮 400「requires adaptive thinking」（2026-10-15）；
+ * GPT-6.1 Sol 则丢了 `off: null`，「自动」档发 `effort: "none"` 整轮 400（2026-10-18）。
+ *
+ * 早期存下的配置没有 `catalogId`，就按 `uniqueProviderId` 起名的规矩把 `-N` 去掉，
+ * 协议对得上才算同一家 —— 用户恰好把自建网关叫成 `openai-2` 也不会认错。
  */
 function catalogIdsFor(provider: ProviderConfig): string[] {
-  return provider.protocol === 'anthropic-messages' && provider.id !== 'anthropic'
-    ? [provider.id, 'anthropic']
-    : [provider.id]
+  const ids = [provider.id]
+  if (provider.catalogId) ids.push(provider.catalogId)
+  const base = /^(.+)-\d+$/.exec(provider.id)?.[1]
+  if (base && findCatalogEntry(base)?.protocol === provider.protocol) ids.push(base)
+  if (provider.protocol === 'anthropic-messages') ids.push('anthropic')
+  return [...new Set(ids)]
 }
 
 function catalogModel(provider: ProviderConfig, model: ModelConfig): ModelConfig | undefined {
@@ -143,10 +150,12 @@ function thinkingLevelMapFor(
   const known =
     (catalogModel(provider, model)?.thinkingLevelMap as ThinkingLevelMap | undefined) ??
     builtinModel(provider, model)?.thinkingLevelMap
-  if (!own) return known ?? unknownModelLevelMap(provider, model)
+  const fallback = known ?? unknownModelLevelMap(provider, model)
+  if (!own) return fallback
   // 用户那份没提 `off` 就跟随目录：Opus 5.5 的 `off: null`（关不掉思考）是模型的事实，
-  // 以前存盘时会被滤掉 —— 丢了它，「自动」档就会发 thinking: disabled，整轮 400
-  if (!('off' in own) && known && 'off' in known) return { off: known.off, ...own }
+  // 以前存盘时会被滤掉 —— 丢了它，「自动」档就会发 thinking: disabled，整轮 400。
+  // 目录也查不到时按目录外的模型处理，responses 那两条路上同样不发 `effort: "none"`
+  if (!('off' in own) && fallback && 'off' in fallback) return { off: fallback.off, ...own }
   return own
 }
 

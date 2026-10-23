@@ -29,7 +29,7 @@ import type {
 } from '@renderer/views/BlueprintLibrary/types/blueprint'
 import BlueprintRenderer from '@renderer/views/BlueprintLibrary/BlueprintRenderer.vue'
 import SnippetDetail from '@renderer/views/BlueprintLibrary/SnippetDetail.vue'
-import { detectSnippetForm } from '@renderer/views/library-common/utils/snippetForm'
+import { detectPayloadForm } from '@core/shared/snippetPayload'
 import { appExecuteAgent } from '@renderer/views/Assistant/composables/appAgentRunner'
 import { ensureSessionWithTitle } from '@renderer/views/Assistant/composables/chatSendPrimitives'
 import { useChatSessionsStore } from '@renderer/store/modules/chatSessions'
@@ -55,6 +55,7 @@ import {
   useLibraryTabTitleSync
 } from '@renderer/views/library-common/composables/useLibraryEditorShell'
 import type { VariableNodeAccessType } from '@renderer/views/BlueprintLibrary/utils/variableNodeFactory'
+import { getTabIdFromQuery } from '@renderer/common/tabRoute'
 
 const router = useRouter()
 const route = useRoute()
@@ -84,20 +85,9 @@ const {
 // ========== Keyboard Shortcuts ==========
 import { onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 
-const isEditorActive = ref(false)
 const currentBlueprintId = ref(typeof route.params.id === 'string' ? route.params.id : '')
 
-function getEditorTabId(): string {
-  const tabId = route.query._tab_id
-  return typeof tabId === 'string' && tabId.trim() ? tabId : 'default'
-}
-
 const { syncTabTitle: syncBlueprintTabTitle } = useLibraryTabTitleSync(() => blueprint.value?.name)
-
-function syncActiveBlueprintStore(): void {
-  store.setEditorTabId(getEditorTabId())
-  store.setActiveBlueprintId(currentBlueprintId.value || null)
-}
 
 function ensureSideMenuCollapsedForFocusMode(): void {
   if (isFocusMode.value) {
@@ -106,28 +96,22 @@ function ensureSideMenuCollapsedForFocusMode(): void {
 }
 
 onMounted(() => {
-  isEditorActive.value = true
-  syncActiveBlueprintStore()
   syncBlueprintTabTitle()
   startListening()
   ensureSideMenuCollapsedForFocusMode()
 })
 
 onActivated(() => {
-  isEditorActive.value = true
-  syncActiveBlueprintStore()
   syncBlueprintTabTitle()
   startListening()
   ensureSideMenuCollapsedForFocusMode()
 })
 
 onDeactivated(() => {
-  isEditorActive.value = false
   stopListening()
 })
 
 onBeforeUnmount(() => {
-  isEditorActive.value = false
   stopListening()
 })
 
@@ -140,6 +124,8 @@ onBeforeRouteUpdate(() => {
 })
 
 // ========== 当前蓝图 ==========
+// route 是 Layout 为本 tab 冻结的路由，视图状态按其中的 _tab_id 存储
+const editorTabId = computed(() => getTabIdFromQuery(route.query))
 const bpId = computed(() => currentBlueprintId.value)
 const blueprint = computed(
   () => store.blueprints.find((bp) => bp.id === currentBlueprintId.value) || null
@@ -148,13 +134,13 @@ const blueprint = computed(
 /**
  * 片段条目（新形态）的 payload；老条目是 null。
  *
- * 判别规则见 `library-common/utils/snippetForm.ts` —— 缺 `form` 一律按老形态，
+ * 判别规则见 `src/shared/snippetPayload.ts` —— 缺 `form` 一律按老形态，
  * 因为 2026-08-29 之前的包里根本没有这个字段，判错会让存量条目全打不开。
  */
 const snippetPayload = computed(() => {
   const bp = blueprint.value as unknown as Record<string, unknown> | null
   if (!bp) return null
-  return detectSnippetForm(bp) === 'snippet' ? bp : null
+  return detectPayloadForm(bp) === 'snippet' ? bp : null
 })
 
 /** 「放进当前工程」跑到哪儿了 */
@@ -199,15 +185,7 @@ async function handleApplySnippet(): Promise<void> {
   }
 }
 
-watch(
-  () => blueprint.value?.name,
-  (newName) => {
-    if (newName && isEditorActive.value) {
-      syncBlueprintTabTitle()
-    }
-  },
-  { immediate: true }
-)
+watch(() => blueprint.value?.name, syncBlueprintTabTitle, { immediate: true })
 
 // ========== 扁平 Section 列表（参考 UE5 My Blueprint 面板） ==========
 interface SectionDef {
@@ -405,6 +383,8 @@ function isLogicType(type: BlueprintElementType): type is LogicElementType {
 // 当前选中的逻辑元素（驱动中央图表区）
 const activeLogicId = ref<string | null>(null)
 const activeLogicType = ref<LogicElementType | null>(null)
+// 侧栏中高亮的元素（包括变量、组件等非逻辑元素）。每个 tab 对应一个编辑器实例，状态互不影响
+const selectedElementId = ref<string | null>(null)
 const rendererRef = ref<InstanceType<typeof BlueprintRenderer> | null>(null)
 const selectedNodesSnapshot = ref<SelectedNodeInfo[]>([])
 
@@ -460,7 +440,7 @@ function ensureActiveLogicSelection(): void {
   if (fallbackSelection) {
     activeLogicId.value = fallbackSelection.id
     activeLogicType.value = fallbackSelection.type
-    store.setActiveElement(fallbackSelection.id, fallbackSelection.type)
+    selectedElementId.value = fallbackSelection.id
     return
   }
 
@@ -494,7 +474,7 @@ function selectElement(id: string, type: BlueprintElementType): void {
   if (isSwitchingLogicTarget) {
     flushActiveRendererState()
   }
-  store.setActiveElement(id, type)
+  selectedElementId.value = id
   // 只有逻辑类型才切换中央内容区
   if (isLogicType(type)) {
     activeLogicId.value = id
@@ -503,7 +483,7 @@ function selectElement(id: string, type: BlueprintElementType): void {
 }
 
 function isActive(id: string): boolean {
-  return store.activeElementId === id
+  return selectedElementId.value === id
 }
 
 // ========== 中央图表区当前元素（只显示逻辑元素）==========
@@ -640,7 +620,6 @@ const libraryChatContext = computed<LibraryChatContext | null>(() => {
 // ========== 操作 ==========
 function goBack(): void {
   flushActiveRendererState()
-  store.setActiveElement(null, null)
   router.push({ name: 'BlueprintGallery' })
 }
 
@@ -1579,6 +1558,7 @@ function handleCanvasDrop(event: DragEvent): void {
               :blueprint-id="bpId"
               :element-id="activeLogicId!"
               :element-type="activeLogicType!"
+              :tab-id="editorTabId"
             />
             <div
               v-if="!isCanvasDropActive && !String((activeLogicDetail as any).code || '').trim()"

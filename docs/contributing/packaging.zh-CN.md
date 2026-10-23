@@ -98,6 +98,18 @@ pnpm release:app --publish    # 真发
 三者出自同一次构建、版本号与 `package.json` 一致、源码已推送。未配置
 `updateGithubRepo` 时直接拒绝运行——那样的包本来就不检查更新。
 
+官网下载与国内镜像：
+
+```bash
+node scripts/release-dl.mjs              # 演练
+node scripts/release-dl.mjs --publish    # 真传
+```
+
+把安装包传到 R2；配了 `MIRROR_*`（见 `.env.example`）就再传一份到国内的 S3 兼容存储。
+每个桶上除了官网用的 `dl/manifest.json`，还有一份给盒子检查更新用的 `dl/latest.yml`，
+把 `<对外域名>/dl` 填进 `package.json` 的 `updateMirrors`，盒子就会和 GitHub 比谁先响应。
+`latest.yml` 最后传，中途失败不会让客户端看到指向半截包的新版本。
+
 ### Mac 签名与公证
 
 Mac 自动更新发布前还需验证签名、公证和真实升级流程，生成安装包不代表已通过这些验收。

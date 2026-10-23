@@ -168,6 +168,7 @@ export const ALWAYS_RESIDENT_TOOL_NAMES = new Set<string>([
   // 工作室模式（`/team`）的四个。只有那种会话里才有它们，有就必须看得见 ——
   // 折进搜索的话，制作人得先搜到「招人」才能开始组队
   'team_hire',
+  'team_dismiss',
   'team_send',
   'team_board',
   'team_deliver',
@@ -193,6 +194,8 @@ export function isDefaultResidentTool(tool: GroupedTool): boolean {
  */
 const DOMAIN_TERMS: Record<string, string> = {
   'ue.blueprint': '蓝图 逻辑 节点 变量 事件 函数 blueprint graph node logic event function',
+  'core.result':
+    '存档 大结果 目录 编号 查行 筛选 翻页 完整的行 archived ref result query rows filter page',
   'ue.blueprint.usages':
     '谁在用 哪些蓝图 用到 调用了 引用 波及 改名 删除 全局搜索 在所有蓝图中查找 uproperty ufunction find in blueprints usages callers references rename',
   'ue.material': '材质 材质实例 表面 颜色 贴图 纹理 material shader color surface texture',
@@ -213,7 +216,8 @@ const DOMAIN_TERMS: Record<string, string> = {
   'ue.landscape':
     '地形 地表 高度图 虚拟纹理 rvt 融合 landscape terrain heightmap virtual texture blend',
   'ue.system': '性能 崩溃 日志 插件 控制台 脚本 卡顿 crash log performance plugin python',
-  'ue.widget': '界面 控件 按钮 文本 布局 widget umg ui layout button text',
+  'ue.widget':
+    '界面 控件 按钮 文本 布局 替换 删除 widget umg ui layout button text replace remove commonui',
   'ue.animation': '动画 骨骼 运动 animation skeleton motion',
   'ue.sequencer': '过场 镜头 摄像机 时间轴 序列 sequencer camera cinematic timeline',
   'ue.pcg': '程序化 散布 植被 pcg procedural scatter foliage',
@@ -231,7 +235,7 @@ const DOMAIN_TERMS: Record<string, string> = {
   engine: '引擎 版本 安装 路径 engine version install path',
   aigc: '生成 图片 视频 三维 音效 声音 generate image video 3d sound effect sfx',
   'video.production':
-    '剪辑 成片 字幕 配音 台词 对白 语音合成 配乐 时间线 video edit subtitle voiceover tts speech render',
+    '剪辑 成片 字幕 配音 台词 对白 语音合成 音色 角色声音 配乐 时间线 video edit subtitle voiceover tts speech voice render',
   note: '笔记 记事 待办 摘录 note todo memo',
   notebook: '知识库 笔记本 wiki 文档库 notebook knowledge wiki',
   browser: '浏览器 网页 点击 输入 browser webpage click',
@@ -391,6 +395,9 @@ function pickGroups(
  * 以及落盘的 `details.toolSearch` 恢复路径。
  */
 export function toolSearchGroup(tool: GroupedTool): string {
+  // 查存档的大结果。命名空间留在 core（设置页分类不变），但不能跟着 core 组一起加载：
+  // 它由第一次存档自动带上（见 `core/resultArchive.ts`），不是搜出来的
+  if (tool.name === 'result_query') return 'core.result'
   if (tool.name === 'ue_screenshot' || tool.name === 'ue_focus_viewport') return 'ue.actor'
   // 实验性、说明又长（约 5 KB），不跟 ue.editor 整组常驻，要用时 search_tools 按名加载
   if (tool.name === 'ue_autoplay') return 'ue.editor.autoplay'

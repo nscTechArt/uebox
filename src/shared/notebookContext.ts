@@ -63,6 +63,11 @@ export function normalizeNotebookContextLevel(value: unknown): NotebookContextLe
     : DEFAULT_NOTEBOOK_CONTEXT_LEVEL
 }
 
+/** 这条来源是否进入上下文（即勾选框是否勾选）：只有「不进上下文」这一档不进入 */
+export function isSourceIncluded(source: { contextLevel?: unknown }): boolean {
+  return normalizeNotebookContextLevel(source.contextLevel) !== 'excluded'
+}
+
 /** 这条来源有没有一份能用的摘要 */
 export function hasUsableSummary(source: NotebookContextSource): boolean {
   return (

@@ -46,6 +46,8 @@
 
 只有一条线：上述 GitHub 仓库的 Releases。由 `package.json` 的 `updateGithubRepo` 字段指定，也可以用 `updateFeedUrl` 指向自架的静态源。
 
+主源之外可以用 `updateMirrors` 再挂几个内容相同的镜像。每次检查更新时会同时询问所有源，用最先响应的那个；镜像上的安装包同样要过 `latest.yml` 里的 sha512 校验。
+
 ::: warning 没配置更新源 = 一次网络请求都不发
 这是社区版的硬规则。改过那个字段（例如打包自己的 fork）而没有填新的源时，构建出的版本**不带更新源**，不会加载 electron-updater。
 

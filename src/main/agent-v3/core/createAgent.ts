@@ -41,6 +41,8 @@ import {
 } from '../tools/builtin/setSessionProject'
 import { createBrowserTools } from '../tools/builtin/browser'
 import { createTaskTool, type SubAgentResult } from '../tools/builtin/task'
+import { createResultQueryTool } from '../tools/builtin/resultQuery'
+import { RESULT_QUERY_TOOL_NAME, createResultArchiver } from './resultArchive'
 import { oneLine, pickStepTarget } from '../../../shared/stepTarget'
 import {
   ALWAYS_RESIDENT_TOOL_NAMES,
@@ -54,14 +56,23 @@ import { createApprovalGate, type ApprovalDeps, type ApprovalMode } from './appr
 import { VIEWPORT_CAPTURE_TOOLS } from './editorScreenshotScope'
 import { createLoopBreaker } from './loopBreaker'
 import { createAutoCompact, UNREAL_BOX_COMPACTION } from './compaction'
+import { overflowRecoveringStreamFn } from './contextOverflow'
 import { generateSummary } from '../vendor/pi-harness'
 import { restoreTranscript, withoutSystemMessages, withSystemPrompt } from './systemMessages'
 import {
   hashMessages,
   loadCheckpoint,
+  parseCheckpoint,
   promptCacheKey,
-  saveCheckpoint
+  saveCheckpoint,
+  type CompactionCheckpoint
 } from './compactionCheckpoint'
+
+/** 压缩检查点的读写口子：主会话和队员各存各的地方，见 `createUnrealAgent` 里那段 */
+interface CheckpointStore {
+  load(): Promise<CompactionCheckpoint | undefined>
+  save(next: CompactionCheckpoint): Promise<void>
+}
 import {
   RUNTIME_ENVELOPE_RULES,
   formatLocalNow,
@@ -84,13 +95,19 @@ import {
   runWithTargetConnectionId
 } from './projectTargetContext'
 import { releaseAll, runWithLockOwner, teamRootOf } from './assetLock'
-import { AUDITOR_HARD_JUDGES, isAuditorTool, type GoalVerdict } from './goalLoop'
+import { ACCEPTANCE_JUDGES, isAuditorTool, type GoalVerdict } from './goalLoop'
 import { buildAcceptancePrompt, buildMemberFraming, buildProducerBrief } from './team/teamPrompt'
 import { memberFileBase, type TeamMember, type TeamModel, type TeamStore } from './team/teamStore'
 import { loadTeamModels, type TeamModels } from './team/teamModels'
 import type { TeamSnapshots } from './team/snapshots'
 import type { TeamLive } from './team/teamLive'
 import { PRODUCER } from './team/teamStore'
+import {
+  EMPTY_TEAM_USAGE,
+  addTeamUsage,
+  teamUsageOf,
+  type TeamUsage
+} from '../../../shared/agentTeam'
 import {
   createBoardTool,
   createMessageTool,
@@ -268,6 +285,8 @@ export interface SessionContext {
    */
   team?: {
     objective: string
+    /** 开团之后用户最近那句话，见 `TeamState.latestRequest`。只带给验收员 */
+    latestRequest?: string
     store: TeamStore
     /** 验收有了结论。宿主用它记「这一局过没过验收」 */
     onVerdict?: (verdict: GoalVerdict | null) => void | Promise<void>
@@ -610,7 +629,9 @@ export function resolveAgentTools(
   ctx: SessionContext,
   skills: SkillMetadata[],
   taskTool?: UnrealAgentTool<never>,
-  loadSkillTools?: Parameters<typeof createSkillTools>[2]
+  loadSkillTools?: Parameters<typeof createSkillTools>[2],
+  /** 查存档大结果的工具（见 `core/resultArchive.ts`）。和 task 一样要引用 Agent 实例，由调用方造 */
+  resultQueryTool?: UnrealAgentTool<never>
 ): UnrealAgentTool<never>[] {
   const tools = resolveCandidateTools(ctx)
   tools.push(
@@ -635,9 +656,14 @@ export function resolveAgentTools(
   if (!ctx.isSubAgent && taskTool) {
     tools.push(taskTool)
   }
+  if (resultQueryTool) tools.push(resultQueryTool)
 
   const policed = applyFinalToolPolicy(tools, ctx)
-  return policed
+  // 授权过滤之后池里一个声明存档的工具都不剩（按名单点的子任务、只给了部分领域的会话），
+  // 就永远不会有编号可查，不白占一份工具定义
+  return policed.some((tool) => tool.unrealBox.archive)
+    ? policed
+    : policed.filter((tool) => tool.name !== RESULT_QUERY_TOOL_NAME)
 }
 
 export interface CreatedAgent {
@@ -764,6 +790,16 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         runSubAgent: async (input) => runSubAgent(ctx, input)
       }) as unknown as UnrealAgentTool<never>)
 
+  // 同上，闭包只在 Agent 构造完之后执行。「修改类」按工具自己声明的风险算；
+  // 不认识的工具（池外的名字）当作改过 —— 宁可多提醒一句数据可能已变
+  const resultQueryTool = createResultQueryTool({
+    getMessages: () => agent.state.messages,
+    isMutating: (toolName, args) => {
+      const meta = byName.get(toolName)?.unrealBox
+      return meta ? effectiveRisk(meta, args) !== 'safe' : true
+    }
+  }) as unknown as UnrealAgentTool<never>
+
   /*
    * 工具池装配一次，**按引擎状态切两个视图**。
    *
@@ -780,7 +816,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     { ...ctx, ueConnected: true },
     skills,
     taskTool,
-    ctx.toolSearchEnabled ? (content) => search!.loadFromSkill(content) : undefined
+    ctx.toolSearchEnabled ? (content) => search!.loadFromSkill(content) : undefined,
+    resultQueryTool
   )
   // 工作室模式的工具排在授权过滤之后追加：招人时要把制作人手上有哪些命名空间
   // 写进描述，得先有那份清单。它们全是 `core` / safe，过滤本来也不会拿掉它们
@@ -866,15 +903,74 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     request: ctx.requestApproval ?? (async () => 'approve')
   })
 
-  // 压缩检查点。子 agent 不落盘 —— 它的 sessionId 是 `<父>:sub-N`，一次性的，
-  // 存下来只会让会话目录里堆满再也不会被读到的文件。
-  const checkpoint = ctx.isSubAgent ? undefined : await loadCheckpoint(ctx.sessionId)
+  /*
+   * 压缩检查点存在哪。
+   *
+   * - 主会话：会话目录里，按 sessionId。
+   * - 队员：团队目录里、它的记忆旁边（`TeamStore.memberCheckpoint`）。队员每次派活都
+   *   重建 agent，不落盘的话闭包里那份一清，就得拿完整原始历史去发 —— 真机上一个
+   *   队员 977 条历史就这样原样发出去，撞了厂商的上下文上限。
+   * - 一次性子任务（`task`）：不存。它的 sessionId 是 `<父>:sub-N`，存下来只会让
+   *   会话目录里堆满再也不会被读到的文件。
+   */
+  const member = ctx.isSubAgent ? ctx.teamMember : undefined
+  const checkpointStore: CheckpointStore | undefined = member
+    ? {
+        load: async () => parseCheckpoint(await member.store.memberCheckpoint(member.name)),
+        save: (next) => member.store.saveMemberCheckpoint(member.name, next)
+      }
+    : ctx.isSubAgent
+      ? undefined
+      : {
+          load: () => loadCheckpoint(ctx.sessionId),
+          save: (next) => saveCheckpoint(ctx.sessionId, next)
+        }
+  const checkpoint = await checkpointStore?.load().catch(() => undefined)
   let contextEpoch = checkpoint?.contextEpoch ?? 0
+
+  const autoCompact = createAutoCompact({
+    models,
+    summaryModel,
+    contextWindow: selection.model.contextWindow,
+    hashMessages,
+    ...(checkpointStore
+      ? {
+          precompactKey: ctx.sessionId,
+          checkpoint: {
+            ...(checkpoint ? { initial: checkpoint } : {}),
+            save: (next) => {
+              contextEpoch = next.contextEpoch
+              return checkpointStore.save(next).catch(() => undefined)
+            }
+          }
+        }
+      : {}),
+    ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
+    ...(ctx.onCompacting ? { onCompacting: ctx.onCompacting } : {})
+  })
+  // 厂商回「上下文超长」时缩输出上限或当场压缩再重发一次，见 `contextOverflow.ts`。
+  // 包在卡死重发外面：超长不是网关的事，重发同一个请求只会再被拒一次
+  const recovering = overflowRecoveringStreamFn(streamFn, {
+    compact: async (signal) =>
+      (await autoCompact.compactForOverflow(signal)) as Message[] | undefined,
+    onRecover: ({ action, reason }) =>
+      logger.warn(
+        `[AgentV3] 会话 ${ctx.sessionId} 上下文超长，${action === 'shrink-output' ? '缩小输出上限' : '当场压缩'}后重发：${reason.slice(0, 200)}`
+      )
+  })
+
+  // 大结果存档，规则见 `createResultArchiver`。闭包只在 Agent 构造完之后执行
+  const archiveLargeResult = createResultArchiver({
+    getMessages: () => agent.state.messages,
+    specFor: (toolName) => byName.get(toolName)?.unrealBox.archive,
+    canQuery: () => byName.has(RESULT_QUERY_TOOL_NAME),
+    loadQueryTool: () => search?.loadFromSkill(RESULT_QUERY_TOOL_NAME).details
+  })
 
   const agent = new Agent({
     streamFn: search
       ? (model, context, options) =>
-          streamFn(model, context, {
+          recovering(model, context, {
             ...options,
             sessionId: promptCacheKey(
               ctx.sessionId,
@@ -882,7 +978,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
               toolSearchPrefixKey(model, context)
             )
           })
-      : streamFn,
+      : recovering,
     // **不是**业务 sessionId：这是供应商缓存亲和键，摘要检查点一换就该换，
     // 而业务 id 是会话身份、界面和锁都认它，不能动。见 `compactionCheckpoint.ts`。
     sessionId: promptCacheKey(ctx.sessionId, checkpoint?.contextEpoch ?? 0),
@@ -891,26 +987,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       systemPrompt: systemPromptFor(ctx),
       tools: tools as unknown as AgentTool<never>[]
     },
-    transformContext: createAutoCompact({
-      models,
-      summaryModel,
-      contextWindow: selection.model.contextWindow,
-      hashMessages,
-      ...(ctx.isSubAgent
-        ? {}
-        : {
-            precompactKey: ctx.sessionId,
-            checkpoint: {
-              ...(checkpoint ? { initial: checkpoint } : {}),
-              save: (next) => {
-                contextEpoch = next.contextEpoch
-                return saveCheckpoint(ctx.sessionId, next)
-              }
-            }
-          }),
-      ...(ctx.onUsage ? { onUsage: ctx.onUsage } : {}),
-      ...(ctx.onCompacting ? { onCompacting: ctx.onCompacting } : {})
-    }),
+    transformContext: autoCompact,
     /*
      * 引擎状态中途变了就把工具清单和环境块换掉。
      *
@@ -1001,12 +1078,16 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       // （理由见 toolSearch.ts 顶部），于是这层包装也一起去掉 —— 熔断照常管
       // 真正的失败和原地打转，不需要为一个不会发生的状态留特例。
       loopBreaker.after(hookCtx)
-      const content = hookCtx.result.content ?? []
+      const archived = archiveLargeResult(hookCtx)
+      const content = archived?.content ?? hookCtx.result.content ?? []
       const note = await experienceRuntime()?.after({
         tool: hookCtx.toolCall.name,
         args: hookCtx.args,
         isError: hookCtx.isError,
-        text: content.map((part) => (part.type === 'text' ? part.text : '')).join('\n')
+        // 经验记录看的是工具真正回了什么，不是存档后的目录页
+        text: (hookCtx.result.content ?? [])
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join('\n')
       })
       // 本工程见过这个错：把上次怎么过的挂在错误结果后面，和写文件后贴体检报告同一个手法
       // 清单没走完也挂一句，不然长活里模型会忘了推进（见 `planReminder`）
@@ -1014,9 +1095,11 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         note,
         planReminder(onlineTools, hookCtx.assistantMessage, hookCtx.toolCall.id)
       ].filter((text): text is string => !!text)
-      return extra.length
-        ? { content: [...content, ...extra.map((text) => ({ type: 'text' as const, text }))] }
-        : undefined
+      if (!extra.length && !archived) return undefined
+      return {
+        content: [...content, ...extra.map((text) => ({ type: 'text' as const, text }))],
+        ...(archived ? { details: archived.details } : {})
+      }
     },
     toolExecution: 'parallel',
     steeringMode: 'all',
@@ -1031,6 +1114,7 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   if (search) restoreSearchBeforeFirstRun(agent, search)
 
   attachTeamLive(ctx, agent)
+  attachProducerUsage(ctx, agent)
 
   return {
     agent,
@@ -1146,8 +1230,19 @@ export async function runSubAgent(
      * 不给就是老规矩：老 `fast` 档走用户绑的对话模型，其余跟着父 agent
      */
     model?: TeamModel
-    /** 跑完（含被停下）时交回它的全部消息。队员靠它记住干过的活 */
+    /**
+     * 交回它的全部消息。队员靠它记住干过的活。
+     *
+     * 每说完一轮（`turn_end`，这一轮的工具结果都已在里面）交一次，跑完（含被停下）再交一次，
+     * 最后那次是最终版。按轮交是为了盒子崩了、进程被杀时 finally 不跑也丢不了已经干过的部分。
+     * 交的是活的数组，要留就自己拷一份；回调同步跑在事件循环里，别在里面做重活
+     */
     keepMessages?: (messages: AgentMessage[]) => void
+    /**
+     * 跑完（含被停下、出错）时交回这一路新花掉的 token。工作室记团队的账用它。
+     * 和 `onUsage`（上下文用了多少）不是一回事：那个照旧不往上冒
+     */
+    keepUsage?: (usage: TeamUsage) => void
   }
 ): Promise<SubAgentResult> {
   input.signal?.throwIfAborted()
@@ -1246,6 +1341,8 @@ export async function runSubAgent(
    * 纪律：不认识的一律从严。
    */
   const ledger = input.ledger ?? new WriteLedger()
+  // 按每条回复的结束事件累计，不按最后的消息列表数：中途压缩过的话列表已经换了一份
+  let spent: TeamUsage = EMPTY_TEAM_USAGE
   // 按这次的参数算（dry_run 预演不算写）
   const metaByName = new Map(allTools.map((tool) => [tool.name, tool.unrealBox]))
 
@@ -1264,8 +1361,14 @@ export async function runSubAgent(
     // 子 agent 两步之间说的话（「先看车辆结构」）也冒泡上去：只有工具名的话，
     // 用户看得到它在调什么，看不出它为什么调、打算干嘛
     if (event.type === 'message_end') {
+      const message = event.message as { role?: string; usage?: Parameters<typeof teamUsageOf>[0] }
+      if (message.role === 'assistant') spent = addTeamUsage(spent, teamUsageOf(message.usage))
       const narration = readNarration(event.message)
       if (narration) input.onProgress?.(narration)
+      return
+    }
+    if (event.type === 'turn_end') {
+      input.keepMessages?.(agent.state.messages)
       return
     }
     if (event.type !== 'tool_execution_end') return
@@ -1325,22 +1428,9 @@ export async function runSubAgent(
   } finally {
     input.signal?.removeEventListener('abort', onAbort)
     input.keepMessages?.(agent.state.messages)
+    input.keepUsage?.(spent)
   }
 }
-
-/**
- * 验收员手上的工具：`/goal` 审计员那一套，再加真能「玩」的两个。
- *
- * 审计员只要能回读和跑一遍；交付验收要从开始玩到胜负再重来，
- * 光 `ue_playtest` 模拟不了玩家输入，所以带上自动试玩和注入输入；
- * 交了打包版的话，再拿 `project_smoke_test` 起一次打包版看会不会崩。
- */
-const ACCEPTANCE_JUDGES = [
-  ...AUDITOR_HARD_JUDGES,
-  'ue_autoplay',
-  'ue_inject_input',
-  'project_smoke_test'
-]
 
 /**
  * 工作室里「谁在跑」：制作人和每个队员开跑时登记、收工时注销，别人发来的话才能当场插进来；
@@ -1348,6 +1438,21 @@ const ACCEPTANCE_JUDGES = [
  *
  * 验收员、`task` 子任务不登记：它们不收留言。
  */
+/**
+ * 制作人自己花的 token 记进团队的总账。队员、验收员的由 `runSubAgent` 的 `keepUsage`
+ * 交给团队工具去记（见 `teamTools.ts`），这里只管制作人：每条回复结束记一笔。
+ */
+function attachProducerUsage(ctx: SessionContext, agent: Agent): void {
+  const store = ctx.isSubAgent ? undefined : ctx.team?.store
+  if (!store) return
+  agent.subscribe((event) => {
+    if (event.type !== 'message_end') return
+    const message = event.message as { role?: string; usage?: Parameters<typeof teamUsageOf>[0] }
+    if (message.role !== 'assistant') return
+    void store.addUsage(PRODUCER, teamUsageOf(message.usage)).catch(() => undefined)
+  })
+}
+
 function attachTeamLive(ctx: SessionContext, agent: Agent): void {
   const live = ctx.teamMember?.live ?? (ctx.isSubAgent ? undefined : ctx.team?.live)
   const name = ctx.teamMember?.name ?? (ctx.isSubAgent ? undefined : PRODUCER)
@@ -1434,6 +1539,7 @@ function teamToolsFor(
       onProgress,
       ledger,
       keepMessages,
+      keepUsage,
       pin
     }) => {
       // 队员用自己的锁主：两个队员改同一个资产会被挡下，而不是像 `task` 那样
@@ -1449,6 +1555,7 @@ function teamToolsFor(
             ledger,
             onProgress,
             keepMessages,
+            ...(keepUsage ? { keepUsage } : {}),
             ...(member.namespaces ? { namespaces: member.namespaces } : {}),
             ...(member.readOnly ? { readOnly: true } : {}),
             ...(signal ? { signal } : {})
@@ -1458,12 +1565,21 @@ function teamToolsFor(
         }
       })
     },
-    runAcceptance: async ({ report, howToPlay, projectPath, packageExe, signal, onProgress }) => {
+    runAcceptance: async ({
+      report,
+      howToPlay,
+      projectPath,
+      packageExe,
+      signal,
+      onProgress,
+      keepUsage
+    }) => {
       // 验收员什么都不带：不看制作过程，只看交付说明和游戏本身。
       // 不给审批通道，理由同 `/goal` 的审计员：它的授权边界就是 `isAuditorTool`
       const result = await runSubAgent(ctx, {
         prompt: buildAcceptancePrompt({
           objective: team.objective,
+          ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
           report,
           howToPlay,
           ...(projectPath ? { projectPath } : {}),
@@ -1473,6 +1589,7 @@ function teamToolsFor(
         withoutApproval: true,
         seedMessages: [],
         onProgress,
+        keepUsage,
         ...(signal ? { signal } : {})
       })
       return result.text

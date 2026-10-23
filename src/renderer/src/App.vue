@@ -14,6 +14,8 @@ import {
 } from '@renderer/store/modules/updateStore'
 import { message } from '@renderer/utils/messageManager'
 import { useI18n } from '@renderer/hooks/useI18n'
+import TeamGlobalHost from '@renderer/views/AssetManagement/team/TeamGlobalHost.vue'
+import SharedSkillInstallHost from '@renderer/views/System/Preferences/panels/share/SharedSkillInstallHost.vue'
 // 导入样式系统。调色板必须在最前面 —— 后面每个文件都在引用它定义的语义变量。
 import '@renderer/assets/styles/palette.generated.css'
 import '@renderer/assets/styles/theme.css'
@@ -143,6 +145,8 @@ onUnmounted(() => {
         <div class="app-content glass">
           <router-view />
         </div>
+        <TeamGlobalHost />
+        <SharedSkillInstallHost />
       </div>
     </template>
   </ConfigProvider>

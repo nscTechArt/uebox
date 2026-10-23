@@ -1,6 +1,6 @@
 /**
  * 蓝图库 v2 Store
- * 管理蓝图列表、CRUD、筛选、排序
+ * 管理蓝图列表、CRUD
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -15,18 +15,14 @@ import type {
   BlueprintEventDispatcher,
   BlueprintMacro,
   BlueprintCollection,
-  GalleryCategory,
-  GallerySortType,
-  GalleryViewMode,
   BlueprintElementType
 } from '@renderer/views/BlueprintLibrary/types/blueprint'
+import type { BrowserViewMode } from '@renderer/views/library-common/browser/types'
 import { SAMPLE_EVENT_GRAPH_CODE } from '@renderer/views/BlueprintLibrary/constants/sampleBlueprintCode'
-import { getBlueprintTypeLabel } from '@renderer/views/BlueprintLibrary/types/blueprint'
 import { extractFunctionSignatureFromCode } from '@renderer/views/BlueprintLibrary/utils/blueprintCodeParser'
-import { sortLibraryEntries } from '@renderer/views/library-common/utils/libraryCollection'
 import { createLibraryPackagePersistence, parseUiPrefs } from './libraryPackagePersistence'
 import { clearLegacyLocalStorage, readLegacyLibrarySnapshot } from './libraryLegacyRead'
-import { detectSnippetForm } from '@renderer/views/library-common/utils/snippetForm'
+import { detectPayloadForm } from '@core/shared/snippetPayload'
 import i18n from '@renderer/i18n'
 
 /** store 不是组件，拿不到 `useI18n()`；`i18n.global.t` 每次调用现读当前语言 */
@@ -39,7 +35,7 @@ const t = i18n.global.t
 /** 旧版把整库写在这个 localStorage 键下，现在只在首次迁移时读一次 */
 const LEGACY_PERSIST_KEY = 'blueprint-library-v2-state'
 
-/** 界面偏好（排序、视图模式、编辑器视角）留在 localStorage —— 它本来就该放这儿 */
+/** 界面偏好（视图模式、编辑器视角）留在 localStorage —— 它本来就该放这儿 */
 const UI_STATE_KEY = 'blueprint-library-ui'
 
 function readUiPrefs(): Record<string, unknown> {
@@ -81,85 +77,23 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     selectedNodeNames: string[]
   }
 
-  type EditorTabState = {
-    activeBlueprintId: string | null
-    activeElementId: string | null
-    activeElementType: BlueprintElementType | null
-  }
-
   // ========== 蓝图列表 ==========
   const blueprints = ref<Blueprint[]>([])
   const collections = ref<BlueprintCollection[]>([])
-  const loading = ref(false)
 
   // ========== Gallery 状态 ==========
-  const category = ref<GalleryCategory>('all')
-  const sortType = ref<GallerySortType>('created')
-  const searchQuery = ref('')
-  const typeFilter = ref<string>('all')
-  const favoriteOnly = ref(false)
-  const galleryViewMode = ref<GalleryViewMode>('grid')
+  const galleryViewMode = ref<BrowserViewMode>('grid')
 
   // ========== Editor 状态 ==========
-  const editorTabStates = new Map<string, EditorTabState>()
+  // 侧栏选中哪个元素由编辑器实例自行管理（每个 tab 一个实例）；
+  // 这里只按 tab 保存画布状态：视角和图中选中的节点
   const editorViewStates = new Map<string, BlueprintEditorViewState>()
-  const editorTabId = ref('default')
-  const activeBlueprintId = ref<string | null>(null)
-  const activeElementId = ref<string | null>(null)
-  const activeElementType = ref<BlueprintElementType | null>(null)
 
   // ========== 新建蓝图弹窗设置 ==========
   const createModalAdvancedExpanded = ref(false)
 
   // ========== 引擎版本列表 ==========
   const engineVersionList = computed(() => ENGINE_VERSIONS)
-
-  // ========== 计算属性 ==========
-
-  /** 按排序和筛选条件过滤后的蓝图列表（排除已属于集合的蓝图，搜索时显示全部） */
-  const filteredBlueprints = computed(() => {
-    let list = [...blueprints.value]
-
-    // 搜索过滤
-    const isSearching = !!searchQuery.value
-    if (isSearching) {
-      const q = searchQuery.value.toLowerCase()
-      list = list.filter(
-        (bp) =>
-          bp.name.toLowerCase().includes(q) ||
-          bp.description.toLowerCase().includes(q) ||
-          bp.blueprintType.toLowerCase().includes(q) ||
-          getBlueprintTypeLabel(bp.blueprintType).toLowerCase().includes(q) ||
-          bp.tags.some((tag) => tag.toLowerCase().includes(q))
-      )
-    } else {
-      // 非搜索模式：排除已属于集合的蓝图
-      list = list.filter((bp) => !bp.collectionId)
-    }
-
-    if (typeFilter.value !== 'all') {
-      list = list.filter((bp) => bp.blueprintType === typeFilter.value)
-    }
-
-    if (favoriteOnly.value) {
-      list = list.filter((bp) => bp.isFavorite)
-    }
-
-    // 分类过滤
-    if (category.value === 'my') {
-      list = list.filter((bp) => bp.status !== 'archived')
-    }
-
-    // 排序
-    return sortLibraryEntries(list, sortType.value)
-  })
-
-  /** 当前活跃蓝图 */
-  const activeBlueprint = computed(() =>
-    activeBlueprintId.value
-      ? blueprints.value.find((bp) => bp.id === activeBlueprintId.value) || null
-      : null
-  )
 
   // ========== 工具方法 ==========
 
@@ -175,21 +109,8 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
 
   /** 从一份（新的或旧的）界面偏好里挑出这个 store 关心的字段并做校验 */
   function applyUiState(ui: Record<string, unknown>): void {
-    // 组件可能已经先于读取设过当前蓝图（深链进编辑器），别把它盖掉
-    if (ui.activeBlueprintId && !activeBlueprintId.value) {
-      activeBlueprintId.value = ui.activeBlueprintId as string
-    }
-    if (ui.sortType) {
-      sortType.value = ui.sortType as GallerySortType
-    }
-    if (ui.galleryViewMode) {
-      galleryViewMode.value = ui.galleryViewMode as GalleryViewMode
-    }
-    if (typeof ui.typeFilter === 'string') {
-      typeFilter.value = ui.typeFilter
-    }
-    if (typeof ui.favoriteOnly === 'boolean') {
-      favoriteOnly.value = ui.favoriteOnly
+    if (ui.galleryViewMode === 'grid' || ui.galleryViewMode === 'list') {
+      galleryViewMode.value = ui.galleryViewMode
     }
     if (ui.editorViewStates && typeof ui.editorViewStates === 'object') {
       for (const [key, value] of Object.entries(ui.editorViewStates)) {
@@ -211,12 +132,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
         })
       }
     }
-
-    editorTabStates.set('default', {
-      activeBlueprintId: activeBlueprintId.value,
-      activeElementId: activeElementId.value,
-      activeElementType: activeElementType.value
-    })
   }
 
   const persistence = createLibraryPackagePersistence<Blueprint, BlueprintCollection>({
@@ -235,10 +150,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
             ? (raw.collections as BlueprintCollection[])
             : [],
           ui: {
-            activeBlueprintId: raw.activeBlueprintId,
-            sortType: raw.sortType,
-            typeFilter: raw.typeFilter,
-            favoriteOnly: raw.favoriteOnly,
             galleryViewMode: raw.galleryViewMode,
             editorViewStates: raw.editorViewStates
           }
@@ -257,7 +168,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
      * 要接的话在 `SnippetDetail.vue` 里接，不是在这儿伪造成一条老条目。）
      */
     normalizeEntry: (payload) => {
-      if (detectSnippetForm(payload) !== 'snippet') return payload
+      if (detectPayloadForm(payload) !== 'snippet') return payload
       return {
         blueprintType: 'actor',
         engineVersion: '5.x',
@@ -280,10 +191,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
       entries: blueprints.value,
       collections: collections.value,
       ui: {
-        activeBlueprintId: activeBlueprintId.value,
-        sortType: sortType.value,
-        typeFilter: typeFilter.value,
-        favoriteOnly: favoriteOnly.value,
         galleryViewMode: galleryViewMode.value,
         editorViewStates: Object.fromEntries(editorViewStates.entries())
       }
@@ -334,41 +241,9 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
 
   // ========== Gallery 操作 ==========
 
-  function setCategory(cat: GalleryCategory): void {
-    category.value = cat
-  }
-
-  function setSortType(sort: GallerySortType): void {
-    sortType.value = sort
-    persistState()
-  }
-
-  function setSearchQuery(query: string): void {
-    searchQuery.value = query
-  }
-
-  function setTypeFilter(type: string): void {
-    typeFilter.value = type || 'all'
-    persistState()
-  }
-
-  function setFavoriteOnly(value: boolean): void {
-    favoriteOnly.value = value
-    persistState()
-  }
-
-  function setGalleryViewMode(mode: GalleryViewMode): void {
+  function setGalleryViewMode(mode: BrowserViewMode): void {
     galleryViewMode.value = mode
     persistState()
-  }
-
-  function saveCurrentEditorTabState(): void {
-    const tabId = editorTabId.value || 'default'
-    editorTabStates.set(tabId, {
-      activeBlueprintId: activeBlueprintId.value,
-      activeElementId: activeElementId.value,
-      activeElementType: activeElementType.value
-    })
   }
 
   function buildEditorViewStateKey(
@@ -385,10 +260,9 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     elementId: string,
     elementType: BlueprintElementType,
     viewState: BlueprintEditorViewState,
-    tabId = editorTabId.value
+    tabId: string
   ): void {
-    const normalizedTabId = String(tabId || '').trim() || 'default'
-    const key = buildEditorViewStateKey(normalizedTabId, blueprintId, elementId, elementType)
+    const key = buildEditorViewStateKey(tabId, blueprintId, elementId, elementType)
     editorViewStates.set(key, {
       zoom: viewState.zoom,
       scrollX: viewState.scrollX,
@@ -406,10 +280,9 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     blueprintId: string,
     elementId: string,
     elementType: BlueprintElementType,
-    tabId = editorTabId.value
+    tabId: string
   ): BlueprintEditorViewState | null {
-    const normalizedTabId = String(tabId || '').trim() || 'default'
-    const key = buildEditorViewStateKey(normalizedTabId, blueprintId, elementId, elementType)
+    const key = buildEditorViewStateKey(tabId, blueprintId, elementId, elementType)
     const viewState = editorViewStates.get(key)
     if (!viewState) return null
     return {
@@ -454,30 +327,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     }
   }
 
-  function setEditorTabId(tabId: string): void {
-    const normalizedTabId = String(tabId || '').trim() || 'default'
-    saveCurrentEditorTabState()
-    editorTabId.value = normalizedTabId
-
-    const savedState = editorTabStates.get(normalizedTabId)
-    if (savedState) {
-      activeBlueprintId.value = savedState.activeBlueprintId
-      activeElementId.value = savedState.activeElementId
-      activeElementType.value = savedState.activeElementType
-      return
-    }
-
-    activeBlueprintId.value = null
-    activeElementId.value = null
-    activeElementType.value = null
-    saveCurrentEditorTabState()
-  }
-
   function copyEditorStateToTabId(sourceTabId: string, targetTabId: string): void {
-    const sourceState = editorTabStates.get(sourceTabId)
-    if (!sourceState) return
-    editorTabStates.set(targetTabId, { ...sourceState })
-
     for (const [key, value] of editorViewStates.entries()) {
       const parts = key.split('::')
       if (parts[0] !== sourceTabId) continue
@@ -500,11 +350,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     }
 
     persistState()
-  }
-
-  function setActiveBlueprintId(id: string | null): void {
-    activeBlueprintId.value = id
-    saveCurrentEditorTabState()
   }
 
   // ========== CRUD ==========
@@ -561,15 +406,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
 
   function deleteBlueprint(id: string): void {
     blueprints.value = blueprints.value.filter((bp) => bp.id !== id)
-    if (activeBlueprintId.value === id) {
-      activeBlueprintId.value = null
-    }
-    for (const state of editorTabStates.values()) {
-      if (state.activeBlueprintId === id) {
-        state.activeBlueprintId = null
-      }
-    }
-    saveCurrentEditorTabState()
     removeEditorViewStatesForBlueprint(id)
     persistState()
   }
@@ -584,12 +420,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   }
 
   // ========== Editor 内部元素操作 ==========
-
-  function setActiveElement(id: string | null, type: BlueprintElementType | null): void {
-    activeElementId.value = id
-    activeElementType.value = type
-    saveCurrentEditorTabState()
-  }
 
   function addGraph(
     bpId: string,
@@ -679,17 +509,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
         bp.macros = bp.macros.filter((m) => m.id !== elementId)
         break
     }
-    if (activeElementId.value === elementId) {
-      activeElementId.value = null
-      activeElementType.value = null
-    }
-    for (const state of editorTabStates.values()) {
-      if (state.activeElementId === elementId) {
-        state.activeElementId = null
-        state.activeElementType = null
-      }
-    }
-    saveCurrentEditorTabState()
     bp.updatedAt = Date.now()
     removeEditorViewStatesForElement(bpId, elementId, type)
     persistState()
@@ -796,8 +615,7 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   /**
    * 把一批蓝图移到某个文件夹。`folderKey` 传空串表示移回根目录。
    *
-   * 跟下面那套「集合」操作的区别，只有一条但很要紧：**这里不会自动解散**。
-   * `removeFromCollection` 在集合剩 ≤1 个成员时会把集合整个删掉 —— 那是
+   * **不会自动解散**：旧的 `removeFromCollection` 会在集合剩 ≤1 个成员时把集合整个删掉 —— 那是
    * iOS 桌面文件夹的脾气，放在库里就是「我把最后一个拖出来，文件夹没了」。
    * 文件夹是用户建的地方，空着也该在。
    *
@@ -851,37 +669,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     return col
   }
 
-  /** 将蓝图加入已有集合 */
-  function addToCollection(collectionId: string, blueprintId: string): boolean {
-    const col = collections.value.find((c) => c.id === collectionId)
-    if (!col) return false
-    if (col.blueprintIds.includes(blueprintId)) return true // 已存在
-    col.blueprintIds.push(blueprintId)
-    const bp = blueprints.value.find((b) => b.id === blueprintId)
-    if (bp) bp.collectionId = collectionId
-    persistState()
-    return true
-  }
-
-  /** 从集合中移除蓝图（剩 ≤1 自动解散） */
-  function removeFromCollection(collectionId: string, blueprintId: string): void {
-    const col = collections.value.find((c) => c.id === collectionId)
-    if (!col) return
-    col.blueprintIds = col.blueprintIds.filter((id) => id !== blueprintId)
-    const bp = blueprints.value.find((b) => b.id === blueprintId)
-    if (bp) bp.collectionId = undefined
-    // 集合内 ≤1 个蓝图时自动解散
-    if (col.blueprintIds.length <= 1) {
-      // 释放剩余蓝图
-      col.blueprintIds.forEach((id) => {
-        const remainBp = blueprints.value.find((b) => b.id === id)
-        if (remainBp) remainBp.collectionId = undefined
-      })
-      collections.value = collections.value.filter((c) => c.id !== collectionId)
-    }
-    persistState()
-  }
-
   /** 重命名集合 */
   function renameCollection(collectionId: string, newName: string): void {
     const col = collections.value.find((c) => c.id === collectionId)
@@ -901,15 +688,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     })
     collections.value = collections.value.filter((c) => c.id !== collectionId)
     persistState()
-  }
-
-  /** 获取集合内的蓝图列表 */
-  function getCollectionBlueprints(collectionId: string): Blueprint[] {
-    const col = collections.value.find((c) => c.id === collectionId)
-    if (!col) return []
-    return col.blueprintIds
-      .map((id) => blueprints.value.find((b) => b.id === id))
-      .filter((b): b is Blueprint => !!b)
   }
 
   // ========== Mock 数据 ==========
@@ -990,11 +768,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
   //
   // 读库是异步的，但两个库的路由在进入之前会 await 这个 ready（见 mainRoutes.ts），
   // 所以组件仍然是「一挂载数据就在」，视图代码不需要动。
-  editorTabStates.set('default', {
-    activeBlueprintId: null,
-    activeElementId: null,
-    activeElementType: null
-  })
   loadCreateModalSettings()
   const ready = persistence.ready.then(() => {
     if (blueprints.value.length === 0) {
@@ -1046,33 +819,15 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     // 状态
     blueprints,
     collections,
-    loading,
-    category,
-    sortType,
-    searchQuery,
-    typeFilter,
-    favoriteOnly,
     galleryViewMode,
-    activeBlueprintId,
-    activeElementId,
-    activeElementType,
     createModalAdvancedExpanded,
     // 计算属性
-    filteredBlueprints,
-    activeBlueprint,
     engineVersionList,
     // Gallery
-    setCategory,
-    setSortType,
-    setSearchQuery,
-    setTypeFilter,
-    setFavoriteOnly,
     setGalleryViewMode,
-    setEditorTabId,
     copyEditorStateToTabId,
     saveEditorViewState,
     getEditorViewState,
-    setActiveBlueprintId,
     // 新建蓝图弹窗设置
     setCreateModalAdvancedExpanded,
     // CRUD
@@ -1081,7 +836,6 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     deleteBlueprint,
     toggleFavorite,
     // Editor 内部
-    setActiveElement,
     addGraph,
     addFunction,
     addVariable,
@@ -1095,13 +849,8 @@ export const useBlueprintLibraryStore = defineStore('blueprintLibrary', () => {
     moveBlueprintsToFolder,
     createFolder,
     createCollection,
-    addToCollection,
-    removeFromCollection,
     renameCollection,
     deleteCollection,
-    getCollectionBlueprints,
-    persistState,
-    // Mock
-    loadMockData
+    persistState
   }
 })

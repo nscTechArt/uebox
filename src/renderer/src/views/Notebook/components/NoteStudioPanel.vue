@@ -29,17 +29,12 @@ import {
   type KnowledgeGraphData
 } from '@renderer/services/knowledgeGraph'
 import { useStudioOutputStore, type StudioOutput } from '@renderer/store/modules/studioOutputStore'
-import { useNotebookStore } from '@renderer/store/modules/notebookStore'
+import { isSourceIncluded } from '@core/shared/notebookContext'
 import {
   canSaveOutputAsSource,
   studioOutputToMarkdown
 } from '@renderer/services/notebook/studioOutputToMarkdown'
 import { formatErrorMessage } from '@renderer/utils/errorMessage'
-
-/**
- * notebookStore 实例（用于获取选中的来源）
- */
-const nbStore = useNotebookStore()
 
 type WorkbenchSerialTaskType = Extract<
   StudioOutput['type'],
@@ -387,10 +382,13 @@ onMounted(() => {
 /**
  * 获取选中的来源（用于 Studio 生成功能）
  * 只有选中的来源会参与内容生成
+ *
+ * 按本面板自己的来源算：生成任务排队执行，轮到它时用户可能已经切去
+ * 另一个笔记本的 tab 了
  */
 const selectedSources = computed(() => {
   if (!props.sources) return []
-  return props.sources.filter((s) => nbStore._selectedSourceIds.includes(s.id))
+  return props.sources.filter(isSourceIncluded)
 })
 
 /**

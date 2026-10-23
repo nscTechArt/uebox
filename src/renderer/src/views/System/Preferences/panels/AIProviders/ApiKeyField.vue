@@ -70,6 +70,24 @@ const oauthEntry = computed(() => {
   return catalog.value.find((entry) => entry.supportsOAuth && draftId.startsWith(entry.id))
 })
 
+/**
+ * 同一个账号已经在别的来源登录过：保存时主进程会直接共用那份登录（ipc.ts 的 sharedOAuthKey），
+ * 这里先说出来，免得用户以为还得再授权一遍。判据与主进程一致：按草稿的目录条目认账号。
+ */
+const sharedLogin = computed(() => {
+  if (savedOAuth.value || (draft.value?.apiKeyInput || '').trim()) return undefined
+  const entry = catalog.value.find((item) => item.id === draft.value?.catalogId)
+  if (!entry?.supportsOAuth) return undefined
+  const account = entry.oauthProvider ?? entry.id
+  return providers.value.find(
+    (item) =>
+      item.id !== selectedId.value &&
+      item.apiKey.kind === 'oauth' &&
+      item.apiKey.provider === account &&
+      item.apiKey.hasKey
+  )
+})
+
 /** 「去获取 API Key」的地址。同样按目录 id 前缀匹配 */
 const apiKeyUrl = computed(() => {
   const draftId = draft.value?.id || ''
@@ -129,7 +147,7 @@ async function handleOAuthLogin(): Promise<void> {
 
   message.info(t('aiProvider.apiKey.oauthOpening'))
   devicePrompt.value = null
-  const result = await props.state.oauthLogin(entry.id)
+  const result = await props.state.oauthLogin(entry.oauthProvider ?? entry.id)
   devicePrompt.value = null
 
   if (result.cancelled) return
@@ -229,6 +247,10 @@ async function copyUserCode(): Promise<void> {
     <div v-else-if="keyJustFetched && oauthEntry" class="linked pending">
       <span class="linked-check">✓</span>
       <span>{{ $t('aiProvider.apiKey.oauthKeyFetched', { name: oauthEntry.displayName }) }}</span>
+    </div>
+    <div v-else-if="sharedLogin" class="linked pending">
+      <span class="linked-check">✓</span>
+      <span>{{ $t('aiProvider.apiKey.oauthShared', { name: sharedLogin.displayName }) }}</span>
     </div>
 
     <p class="hint">{{ $t('aiProvider.apiKey.hint') }}</p>

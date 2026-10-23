@@ -361,11 +361,9 @@ export async function installUnrealAgentLinkPlugin(
  * 非阻塞：在后台异步执行，不影响 App 启动速度
  */
 export async function upgradeAllProjectPlugins(): Promise<void> {
-  // 仅在用户启用了自动启用 UnrealAgentLink 时执行
-  if (!appSettingsManager.getAutoEnableUnrealAgentLink()) {
-    console.log('[UALink升级] 自动启用 UnrealAgentLink 未开启，跳过启动升级')
-    return
-  }
+  // 自动安装关着时只升级已经装了的：没装的不去补，但装了的不跟着盒子升级，
+  // 盒子一更新就和插件对不上，用户右键手动装的那几个工程会一起连不上
+  const installMissing = appSettingsManager.getAutoEnableUnrealAgentLink()
 
   try {
     const db = getPublicDatabase()
@@ -413,6 +411,10 @@ export async function upgradeAllProjectPlugins(): Promise<void> {
 
         // 如果插件根本没安装过，也执行安装
         if (!fs.existsSync(upluginPath)) {
+          if (!installMissing) {
+            skipped++
+            continue
+          }
           // 装不上时它不抛异常，只在返回值里说原因 —— 不看的话这里会把
           // 一次失败的安装记成 upgraded，日志上一片太平，而插件根本没装上
           const outcome = await ensureUnrealAgentLinkPlugin(uprojectPath)
@@ -513,6 +515,60 @@ function notifyPluginUpgradeFailed(failures: Array<{ project: string; reason: st
   for (const win of getAppWindows()) {
     win.webContents.send('db:project:plugin-upgrade-failed', failures)
   }
+}
+
+/**
+ * 用户刚导入了工程，自动安装又关着，而且还没问过 —— 让界面问一句要不要装连接插件。
+ *
+ * 只挂在用户自己点的导入上（首页、拖拽、导入弹窗）。agent 建工程、引擎连上来补登记
+ * 都不算：前者有自己的装插件工具，后者连得上来说明插件本来就在。
+ *
+ * 一批导入会连发好几次，界面那头攒成一个弹窗；答完之前每次都发，答完就不再发。
+ */
+function maybeAskUALinkInstall(uprojectPath: string): void {
+  if (appSettingsManager.getAutoEnableUnrealAgentLink()) return
+  if (appSettingsManager.getUALinkInstallPromptShown()) return
+  if (appSettingsManager.isUALinkOptedOut(uprojectPath)) return
+  const upluginPath = path.join(
+    path.dirname(uprojectPath),
+    'Plugins',
+    'UnrealAgentLink',
+    'UnrealAgentLink.uplugin'
+  )
+  if (fs.existsSync(upluginPath)) return
+
+  for (const win of getAppWindows()) {
+    win.webContents.send('db:project:ualink-install-prompt', uprojectPath)
+  }
+}
+
+/**
+ * 首次导入时那一问的答案。不管答什么都记成问过；点了安装就打开自动安装，
+ * 并给这次导入的工程装上。
+ *
+ * @returns 装失败的工程和原因码，界面拿去走 `notifyPluginInstallFailure`
+ */
+export async function answerUALinkInstallPrompt(
+  install: boolean,
+  uprojectPaths: string[]
+): Promise<Array<{ uprojectPath: string; reason: string }>> {
+  appSettingsManager.setUALinkInstallPromptShown(true)
+  if (!install) return []
+
+  appSettingsManager.setAutoEnableUnrealAgentLink(true)
+  const failures: Array<{ uprojectPath: string; reason: string }> = []
+  for (const uprojectPath of uprojectPaths) {
+    try {
+      const outcome = await ensureUnrealAgentLinkPlugin(uprojectPath)
+      if (outcome.pluginFailure) failures.push({ uprojectPath, reason: outcome.pluginFailure })
+    } catch (error) {
+      failures.push({
+        uprojectPath,
+        reason: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
+  return failures
 }
 
 export interface RegisterProjectResult {
@@ -637,6 +693,7 @@ export const registerProjectIPC = (): void => {
   ipcMain.handle('db:project:importByFilePath', async (_, filePath: string) => {
     void _
     const result = await registerProjectByUproject(filePath)
+    if (result.success) maybeAskUALinkInstall(filePath)
     // alreadyRegistered 也带出去：首页在分组里导入一个已在库里的工程时，
     // 要拿 data 里那条现成记录把它放进分组，而不是报一句「已存在」了事
     return {
@@ -673,6 +730,7 @@ export const registerProjectIPC = (): void => {
       for (const filePath of files) {
         const result = await registerProjectByUproject(filePath)
         if (result.success) {
+          maybeAskUALinkInstall(filePath)
           results.push({ filePath, id: result.data?.id })
         } else {
           results.push({
@@ -812,6 +870,18 @@ export const registerProjectIPC = (): void => {
       return { success: false, error: (error as Error).message }
     }
   })
+
+  // 首次导入时「要不要装连接插件」的答案
+  ipcMain.handle(
+    'db:project:ualinkPromptAnswer',
+    async (_, install: boolean, uprojectPaths: string[]) => {
+      void _
+      return answerUALinkInstallPrompt(
+        install === true,
+        Array.isArray(uprojectPaths) ? uprojectPaths : []
+      )
+    }
+  )
 
   /**
    * 检测项目目录下是否有 .sln 文件（判断是否为 C++ 工程）

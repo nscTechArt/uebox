@@ -27,6 +27,7 @@ import type Database from 'better-sqlite3'
 import createAssetQueryWorker from '../workers/assetQueryWorker?nodeWorker'
 import type { AssetData } from '../models/assetData'
 import {
+  countAssetsByEngineVersion,
   searchAssetsByCriteria as searchInProcess,
   type AssetSearchCriteria
 } from '../models/assetSearchCore'
@@ -93,21 +94,40 @@ export class AssetQueryRunner {
    * 资产库列表 / 筛选 / 搜索的那一页。worker 能用就在 worker 里查，否则主进程里查。
    * @param group 同一组的新查询会作废这一组里还没开始的旧查询（资产库列表传 'asset-list'）
    */
-  async search(
+  search(
     db: Database.Database,
     criteria: AssetSearchCriteria,
     publicDb: Database.Database | null,
     group?: string
   ): Promise<AssetData[]> {
+    return this.query('search', db, criteria, publicDb, group)
+  }
+
+  /** 筛选栏版本下拉的分面，和列表查询走同一条队列（一样可能是全库扫描） */
+  engineFacet(
+    db: Database.Database,
+    criteria: AssetSearchCriteria,
+    publicDb: Database.Database | null
+  ): Promise<Array<{ value: string; n: number }>> {
+    return this.query('engine-facet', db, criteria, publicDb)
+  }
+
+  private async query<T>(
+    op: 'search' | 'engine-facet',
+    db: Database.Database,
+    criteria: AssetSearchCriteria,
+    publicDb: Database.Database | null,
+    group?: string
+  ): Promise<T> {
     if (this.retired.has(db) || !db.open) {
       throw new QueryCancelledError('保管库连接已关闭')
     }
     const vaultDbPath = fileBackedPath(db)
     if (vaultDbPath && !this.disabled) {
       try {
-        const rows = await this.enqueue<AssetData[]>(
+        const rows = await this.enqueue<T>(
           {
-            op: 'search',
+            op,
             vaultDbPath,
             // 主连接开了内存映射（库在本机 userData 下）worker 才跟着开，见 vaultConnectionPragmas
             mmap: Number(db.pragma('mmap_size', { simple: true })) > 0,
@@ -123,7 +143,8 @@ export class AssetQueryRunner {
         console.warn('[资产查询] worker 不可用，这一次在主进程查询:', error.message)
       }
     }
-    return searchInProcess(db, criteria, { publicDb })
+    const inProcess = op === 'engine-facet' ? countAssetsByEngineVersion : searchInProcess
+    return inProcess(db, criteria, { publicDb }) as T
   }
 
   // ─────────────────────── 放手 / 关闭 ───────────────────────
@@ -139,7 +160,10 @@ export class AssetQueryRunner {
       this.stopWatchingLocally(db)
     }
     // 排着还没开始的查询都不要了（它们查的是要关的库，或者马上会被新查询顶掉）
-    this.cancelQueued((job) => job.request.op === 'search', '保管库正在切换或关闭')
+    this.cancelQueued(
+      (job) => job.request.op === 'search' || job.request.op === 'engine-facet',
+      '保管库正在切换或关闭'
+    )
     const target = this.worker
     if (!target) return
 
@@ -345,6 +369,14 @@ export function searchAssetsOffMainThread(
   group?: string
 ): Promise<AssetData[]> {
   return runner.search(db, criteria, publicDb, group)
+}
+
+export function engineFacetOffMainThread(
+  db: Database.Database,
+  criteria: AssetSearchCriteria,
+  publicDb: Database.Database | null
+): Promise<Array<{ value: string; n: number }>> {
+  return runner.engineFacet(db, criteria, publicDb)
 }
 
 /** 保管库连接要关 / 库文件要动之前调用，见 AssetQueryRunner.release */

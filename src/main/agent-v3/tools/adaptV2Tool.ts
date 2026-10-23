@@ -37,7 +37,7 @@ import type { z } from 'zod'
 
 import { runAbortable } from './abortable'
 import { admitImageForContext } from './contextImage'
-import { toToolSchema, type ToolRisk, type UnrealAgentTool } from './defineTool'
+import { toToolSchema, type ArchiveSpec, type ToolRisk, type UnrealAgentTool } from './defineTool'
 
 /**
  * V2 工具对象的可内省形状。
@@ -120,6 +120,8 @@ export interface AdaptOptions {
   concurrency?: 'sequential' | 'parallel'
   /** 注册表那边按参数降风险（见 `ToolMeta.riskFor`）。给了就盖过 V2 工具自带的 */
   riskFor?: (args: unknown) => ToolRisk
+  /** 大结果存档的表声明（见 `ArchiveSpec`） */
+  archive?: ArchiveSpec
 }
 
 /**
@@ -339,7 +341,8 @@ export function adaptV2Tool(v2: V2Tool, options: AdaptOptions): UnrealAgentTool<
     unrealBox: {
       namespace: options.namespace,
       risk: options.risk,
-      ...(riskFor ? { riskFor } : {})
+      ...(riskFor ? { riskFor } : {}),
+      ...(options.archive ? { archive: options.archive } : {})
     }
   }
 

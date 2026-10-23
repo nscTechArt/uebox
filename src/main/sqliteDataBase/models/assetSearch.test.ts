@@ -16,6 +16,7 @@ import { getAssetDataByFolderKey, initAssetDataModel } from './assetData'
 import { initAssetFavoriteModel } from './assetFavorite'
 import { initAssetTagModel } from './assetTag'
 import { searchAssetsByCriteria } from './assetSearch'
+import { countAssetsByEngineVersion } from './assetSearchCore'
 
 let db: Database.Database
 
@@ -527,5 +528,39 @@ describe('按扩展名筛选，带点不带点都认', () => {
   it('别名展开出来的 formatMatch 也一样', () => {
     const rows = searchAssetsByCriteria(db, { formatMatch: { extensions: ['wav', 'mp3'] } })
     expect(rows.map((r) => r.assetKey).sort()).toEqual(['local', 'synced'])
+  })
+})
+
+describe('countAssetsByEngineVersion', () => {
+  const setEngine = (key: string, version: string | null): void => {
+    db.prepare('UPDATE assetData SET engineVersion = ? WHERE assetKey = ?').run(version, key)
+  }
+
+  /** 筛选里勾 5.3 会前缀命中 5.3.x，分面不按主.次合并的话旁边写的数就对不上 */
+  it('按主.次合并、新版本在前、没标版本的不列、自身的版本条件不参与', () => {
+    for (const key of ['a', 'b', 'c', 'd', 'e', 'f']) insertAsset(key, key, 'k_role')
+    setEngine('a', '5.3')
+    setEngine('b', '5.3.2')
+    setEngine('c', '4.27')
+    setEngine('d', '5.10')
+    setEngine('e', '')
+    setEngine('f', null)
+
+    expect(
+      countAssetsByEngineVersion(db, { folderKey: 'k_role', engineVersions: ['4.27'] })
+    ).toEqual([
+      { value: '5.10', n: 1 },
+      { value: '5.3', n: 2 },
+      { value: '4.27', n: 1 }
+    ])
+  })
+
+  it('跟着文件夹范围走', () => {
+    insertAsset('a', 'a', 'k_role')
+    insertAsset('b', 'b', 'k_env')
+    setEngine('a', '5.3')
+    setEngine('b', '5.4')
+
+    expect(countAssetsByEngineVersion(db, { folderKey: 'k_env' })).toEqual([{ value: '5.4', n: 1 }])
   })
 })

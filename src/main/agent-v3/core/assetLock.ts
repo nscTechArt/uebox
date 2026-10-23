@@ -170,6 +170,8 @@ export function rootSessionId(sessionId: string): string {
  * 制作人的锁主是会话本身。两者同属一个团队。
  */
 const MATE = ':mate-'
+/** 外部团队的锁主在队员名后面带上活的编号（`队员@活`），界面上只显示队员名 */
+export const JOB_SEP = '@'
 
 export function teamRootOf(owner: string): string {
   return owner.split(MATE)[0] ?? owner
@@ -182,7 +184,7 @@ export function sameTeam(a: string, b: string): boolean {
 /** 冲突里占着锁的那一方叫什么：队友名，或者制作人 */
 export function holderLabel(owner: string): string {
   const at = owner.indexOf(MATE)
-  return at >= 0 ? `队友「${owner.slice(at + MATE.length)}」` : '制作人'
+  return at >= 0 ? `队友「${owner.slice(at + MATE.length).split(JOB_SEP)[0]}」` : '制作人'
 }
 
 /**

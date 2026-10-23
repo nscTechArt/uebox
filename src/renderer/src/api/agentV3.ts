@@ -7,9 +7,16 @@
 
 import type { AgentTurnUsage } from '@core/shared/agentUsage'
 import type { AgentReviewResult, AgentReviewTarget } from '@core/shared/agentReview'
-import type { ModelCheckup, ModelDossier, TeamStateView } from '@core/shared/agentTeam'
+import type {
+  DismissalErrorCode,
+  ExternalTeamSummary,
+  ModelCheckup,
+  ModelDossier,
+  TeamStateView
+} from '@core/shared/agentTeam'
 import type { AgentQuestion, AgentQuestionAction } from '@core/shared/agentQuestion'
 import type { EditorSnapshotCaptureResult } from '@core/shared/editorSnapshot'
+import type { SharedSkillOrigin } from '@core/shared/share'
 import { unwrapResult } from '@renderer/common/utils'
 import { toSessionProjectPayload } from '@renderer/views/Assistant/composables/sessionProjectBinding'
 
@@ -110,6 +117,8 @@ export interface AgentV3SkillSummary {
   source: 'user' | 'plugin' | 'builtin'
   /** 用户有没有把它关掉。关掉的仍然在清单里 —— 否则「技能」页没法再打开它 */
   enabled: boolean
+  /** 从官网共享库装的 */
+  shared?: SharedSkillOrigin
 }
 
 export const agentV3API = {
@@ -474,6 +483,12 @@ export const agentV3API = {
     return result?.team ?? null
   },
 
+  /** 外部团队（Claude Code 当大脑），最近的在前。读不到给空列表 */
+  async externalTeams(): Promise<ExternalTeamSummary[]> {
+    const result = await window.api.agentV3.externalTeams()
+    return result?.teams ?? []
+  },
+
   /**
    * 任务板上的两个出口：重开一项、结束团队模式。
    *
@@ -495,6 +510,15 @@ export const agentV3API = {
     model: { providerId: string; modelId: string }
   ): Promise<{ success: boolean; error?: string; checkup?: ModelCheckup }> {
     return window.api.agentV3.teamMemberModel({ sessionId, name, ...model })
+  },
+
+  /** 任务板上辞退队员。同上，不走 `unwrapResult()`：失败按 errorKey 在面板上就地说 */
+  teamMemberDismiss(
+    sessionId: string,
+    name: string,
+    reason: string
+  ): Promise<{ success: boolean; error?: string; errorKey?: DismissalErrorCode }> {
+    return window.api.agentV3.teamMemberDismiss({ sessionId, name, reason })
   },
 
   teamEnd(sessionId: string): Promise<{ success: boolean; error?: string; errorKey?: 'running' }> {

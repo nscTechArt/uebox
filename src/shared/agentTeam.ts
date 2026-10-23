@@ -12,6 +12,7 @@ import {
   type ProbeFailure,
   type ProviderKind
 } from './aiProvider'
+import { mergeTurnUsage, toTurnUsage, type AgentTurnUsage, type PiUsageLike } from './agentUsage'
 
 /**
  * 老名册的模型档位。`strong` 跟着制作人，`fast` 走用户绑的对话模型。
@@ -49,6 +50,95 @@ export interface TeamMember {
   namespaces?: string[]
   readOnly: boolean
   hiredAt: number
+}
+
+/**
+ * 辞退的依据。制作人辞人必须挑一条；用户在任务板上辞的记 `user`，由用户自己写理由。
+ *
+ * - `quality` 交的活不达标（被打回、验收没过），`unfinished` 活老是干不完 ——
+ *   这两条是说这个人干得不行，必须引用它自己名下的活或任务当证据，不许空口说
+ * - `redundant` 岗位不需要了、和别人重了；`user_request` 用户在对话里要求的 ——
+ *   不评价这个人，不要求绩效证据，理由里写清楚
+ */
+export const DISMISSAL_GROUNDS = [
+  'quality',
+  'unfinished',
+  'redundant',
+  'user_request',
+  'user'
+] as const
+export type DismissalGrounds = (typeof DISMISSAL_GROUNDS)[number]
+
+/** 辞退被退回的原因。界面按它选双语文案 */
+export type DismissalErrorCode =
+  | 'not-found'
+  | 'reserved'
+  | 'busy'
+  | 'no-reason'
+  | 'no-evidence'
+  | 'bad-evidence'
+  | 'bad-handover'
+
+/** 说「这个人干得不行」的依据：要有证据 */
+export const PERFORMANCE_GROUNDS: ReadonlySet<DismissalGrounds> = new Set(['quality', 'unfinished'])
+
+/** 辞退档案里引用的一条证据：活（`j…`）或任务板上的一项，带上当时的原文 */
+export interface DismissalEvidence {
+  kind: 'job' | 'task'
+  id: string
+  /** 活的派活第一句 + 结局，或任务的标题 + 状态。当场抄下来：活的账会被截掉，档案不会 */
+  text: string
+}
+
+/** 辞退那一刻盒子从账上数出来的事实，不是谁说的 */
+export interface DismissalFacts {
+  /** 交回来的活 */
+  jobsDone: number
+  /** 停下、没干完的活 */
+  jobsStopped: number
+  /** 名下任务按状态数 */
+  tasks: Record<TaskStatus, number>
+}
+
+/** 从活的账和任务板上数出一个人的事实。辞退对话框和档案用同一份，用户看到的就是存下的 */
+export function countDismissalFacts(
+  name: string,
+  jobs: readonly TeamJob[],
+  board: readonly BoardTask[]
+): DismissalFacts {
+  const key = name.trim().toLowerCase()
+  const mine = jobs.filter((j) => j.member.trim().toLowerCase() === key)
+  const tasks = Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])) as Record<TaskStatus, number>
+  for (const task of board) {
+    if (task.owner && task.owner.trim().toLowerCase() === key) tasks[task.status] += 1
+  }
+  return {
+    jobsDone: mine.filter((j) => j.outcome === 'done').length,
+    jobsStopped: mine.filter((j) => j.outcome === 'stopped').length,
+    tasks
+  }
+}
+
+/**
+ * 一份辞退档案。存在 `dismissals.json`，不截断：这是人事档案，不是近况。
+ * 界面、制作人看到的辞退记录都读它
+ */
+export interface TeamDismissal {
+  name: string
+  at: number
+  by: 'producer' | 'user'
+  grounds: DismissalGrounds
+  reason: string
+  evidence: DismissalEvidence[]
+  facts: DismissalFacts
+  /** 辞退那一刻的完整设定（人设、模型、工具范围、招入时间） */
+  member: TeamMember
+  /** 没做完的任务交给了谁。`to` 没有 = 清掉了负责人，等制作人重新分配 */
+  handover: { tasks: string[]; to?: string }
+  /** 它的记忆归档到了哪个文件（`members/dismissed/` 下）。从没派过活的没有 */
+  memoryArchive?: string
+  /** 用户辞的：制作人在哪一轮开局看到了。没有 = 还没告诉它 */
+  producerNotifiedAt?: number
 }
 
 export function sameTeamModel(a: TeamModel | undefined, b: TeamModel | undefined): boolean {
@@ -247,6 +337,50 @@ export interface TeamJob {
    * 这件就不再算「停着没人管」
    */
   reopenedAt?: number
+  /** 这件活花掉的 token（交回、停下都记）。老数据、一个请求都没发出去的没有 */
+  usage?: TeamUsage
+}
+
+/** 验收员在用量账上的名字。和 `PRODUCER` 一样不许队员用 */
+export const ACCEPTOR = 'acceptor'
+
+/**
+ * 一个人（或整个团队）花掉的 token。口径同回复下面的「本轮消耗」（`AgentTurnUsage`），
+ * 多记一项 `unpriced`：第三方网关、套餐常常没有价目表，那部分算出来的金额是 0。
+ * 只有 token 数是可靠的；金额只含有价目的部分，界面据此说明。
+ */
+export interface TeamUsage extends AgentTurnUsage {
+  /** 其中没有价目的 token */
+  unpriced: number
+}
+
+/**
+ * 团队的用量总账。单独一份，不靠逐件活加：活的账只留最近 200 件，会被截掉。
+ * 键是队员名；制作人是 `PRODUCER`，验收员是 `ACCEPTOR`。
+ */
+export interface TeamUsageLedger {
+  total: TeamUsage
+  byWho: Record<string, TeamUsage>
+}
+
+export const EMPTY_TEAM_USAGE: TeamUsage = Object.freeze({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  total: 0,
+  cost: 0,
+  unpriced: 0
+})
+
+/** 一次模型请求报的用量 → 团队账的一笔。没给价（cost 为 0）的整笔算进 `unpriced` */
+export function teamUsageOf(usage: PiUsageLike | undefined | null): TeamUsage {
+  const turn = toTurnUsage(usage)
+  return { ...turn, unpriced: turn.cost > 0 ? 0 : turn.total }
+}
+
+export function addTeamUsage(a: TeamUsage, b: TeamUsage): TeamUsage {
+  return { ...mergeTurnUsage(a, b), unpriced: (a.unpriced ?? 0) + (b.unpriced ?? 0) }
 }
 
 /**
@@ -254,10 +388,13 @@ export interface TeamJob {
  * 它影响所有正在干活的人，界面上画成一条贯穿所有人的线，而不是几条一样的留言
  */
 export interface TeamEvent {
-  kind: 'crashed' | 'recovered' | 'recoverFailed'
+  /** `verdict` = 跑过一次验收。执行记录里只留最近一次结论，每次的结论记在这里 */
+  kind: 'crashed' | 'recovered' | 'recoverFailed' | 'verdict'
   at: number
   /** 崩溃的报错摘要、恢复失败的原因。给人看的，可能没有 */
   detail?: string
+  /** 只有 `verdict` 有。读不出结论记 fail，同交付闸 */
+  verdict?: TeamVerdict
 }
 
 export type TeamVerdict = 'pass' | 'fail' | 'blocked'
@@ -265,6 +402,8 @@ export type TeamVerdict = 'pass' | 'fail' | 'blocked'
 /** 界面上任务板面板要的一整份 */
 export interface TeamStateView {
   objective: string
+  /** 开团之后用户最近说的那句话。`/team` 那一轮、外部团队没有 */
+  latestRequest?: string
   /** 最近一次验收的结论。null = 还没交过 */
   verdict: TeamVerdict | null
   /** 那次验收是什么时候。老数据没有 */
@@ -278,6 +417,8 @@ export interface TeamStateView {
    */
   roundStartedAt?: number
   members: TeamMember[]
+  /** 辞退档案，旧的在前。没辞过人的没有 */
+  dismissals?: TeamDismissal[]
   board: BoardTask[]
   /** 最近的留言，旧的在前 */
   mail: TeamMail[]
@@ -285,8 +426,30 @@ export interface TeamStateView {
   jobs?: TeamJob[]
   /** 最近的团队事件（编辑器崩溃、恢复），旧的在前。老数据没有 */
   events?: TeamEvent[]
+  /** 团队花掉的 token 总账（制作人、队员、验收员）。老数据没有 */
+  usage?: TeamUsageLedger
   /** 此刻谁在跑、谁在等。只有这条对话这次运行里跑过团队才有（内存里的事，不落盘） */
   live?: TeamLiveView
+  /**
+   * 外部团队：大脑在外部客户端（Claude Code），盒子只当工作室。队员用什么模型盒子不知道
+   * （docs/外部大脑跑团队设计-2026-10-17.md）
+   */
+  external?: boolean
+  /** 外部团队已经结束（用户在面板上点了结束） */
+  ended?: boolean
+}
+
+/** 「外部团队」页上列表里的一项 */
+export interface ExternalTeamSummary {
+  id: string
+  objective: string
+  projectPath?: string
+  createdAt: number
+  ended: boolean
+  verdict: TeamVerdict | null
+  /** 过了验收，并且之后没再改过工程 */
+  passed: boolean
+  members: number
 }
 
 /**

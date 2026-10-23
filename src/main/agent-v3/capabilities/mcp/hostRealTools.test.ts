@@ -148,6 +148,8 @@ describe('外部客户端看到的是真实工具', () => {
     expect(names).toContain('add_notebook_source')
     // 没声明 elicitation 的客户端不给 ask_user —— 给了只会挂在那儿等
     expect(names).not.toContain('ask_user')
+    // 外部团队：Claude Code 当大脑、盒子当工作室
+    expect(names).toEqual(expect.arrayContaining(['team_open', 'team_join', 'team_gate']))
     expect(client.getInstructions()).toContain('You are the AI assistant inside Unreal Box')
   }, 60_000)
 })

@@ -3,10 +3,13 @@
     <!-- 当前选中的保管库 -->
     <div class="vault-current" @click="toggleDropdown">
       <div v-if="activeServer" class="vault-info">
-        <div class="vault-icon"><PhCloud /></div>
+        <div class="vault-icon">
+          <PhUsersThree v-if="activeServer.team" />
+          <PhCloud v-else />
+        </div>
         <div class="vault-details">
           <div class="vault-name-row">
-            <div class="vault-name">{{ activeServer.name }}</div>
+            <div class="vault-name">{{ serverRowName(activeServer) }}</div>
           </div>
         </div>
       </div>
@@ -33,7 +36,7 @@
           <span
             class="server-state-dot"
             :class="`state-${serverState(activeServer.key)}`"
-            :title="t(`catalogLibrary.switcher.state.${serverState(activeServer.key)}`)"
+            :title="serverStateTitle(activeServer)"
           ></span>
         </template>
         <span
@@ -138,12 +141,18 @@
             @click="handleServerSelect(library)"
           >
             <div class="drag-handle"></div>
-            <div class="vault-icon"><PhCloud /></div>
+            <div class="vault-icon">
+              <PhUsersThree v-if="library.team" />
+              <PhCloud v-else />
+            </div>
             <div class="vault-details">
               <div class="vault-name-row">
-                <div class="vault-name">{{ library.name }}</div>
+                <div class="vault-name">{{ serverRowName(library) }}</div>
               </div>
-              <div class="vault-path">{{ library.server.label }}</div>
+              <!-- 团队的库不写主机名：员工不认识地址（方案 0.4） -->
+              <div v-if="!library.server.memberUrl" class="vault-path">
+                {{ library.server.label }}
+              </div>
             </div>
             <div class="vault-status-badge vault-type-server">
               {{ t('catalogLibrary.switcher.badge') }}
@@ -151,7 +160,7 @@
             <span
               class="server-state-dot"
               :class="`state-${serverState(library.key)}`"
-              :title="t(`catalogLibrary.switcher.state.${serverState(library.key)}`)"
+              :title="serverStateTitle(library)"
             ></span>
             <div class="vault-more-btn" @click.stop="handleServerContextMenu($event, library)">
               <PhDotsThree />
@@ -236,21 +245,50 @@
       :style="contextMenuStyle"
       @click.stop
     >
-      <div class="context-menu-item" @click="handleServerSignIn">
-        {{ t('catalogLibrary.switcher.signIn') }}
-      </div>
-      <div class="context-menu-item" @click="handleServerClearCache">
-        {{ t('catalogLibrary.switcher.clearCache') }}
-      </div>
-      <div class="context-menu-divider"></div>
-      <div class="context-menu-item danger" @click="handleServerRemove">
-        {{ t('catalogLibrary.switcher.remove') }}
-      </div>
+      <!-- 团队的库（方案 4.2）：重新登录只在需要时出现；复制邀请链接所有成员都有；没有「清空本机缓存」 -->
+      <template v-if="serverMenuLibrary?.server.memberUrl">
+        <div
+          v-if="serverState(serverMenuLibrary.key) === 'signedOut'"
+          class="context-menu-item"
+          @click="handleServerSignIn"
+        >
+          {{ t('teamProject.menu.signIn') }}
+        </div>
+        <div
+          v-if="serverMenuLibrary.team && serverMenuLibrary.team.role !== 'outsourcer'"
+          class="context-menu-item"
+          @click="handleCopyInvite"
+        >
+          {{ t('teamProject.menu.copyInvite') }}
+        </div>
+        <div class="context-menu-item danger" @click="handleServerRemove">
+          {{ t('teamProject.menu.remove') }}
+        </div>
+      </template>
+      <template v-else>
+        <div class="context-menu-item" @click="handleServerSignIn">
+          {{ t('catalogLibrary.switcher.signIn') }}
+        </div>
+        <div class="context-menu-item" @click="handleServerClearCache">
+          {{ t('catalogLibrary.switcher.clearCache') }}
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item danger" @click="handleServerRemove">
+          {{ t('catalogLibrary.switcher.remove') }}
+        </div>
+      </template>
     </div>
     <CatalogSignInModal
-      :open="serverSignInLibrary !== null"
+      :open="serverSignInLibrary !== null && !serverSignInLibrary.server.memberUrl"
       :server="serverSignInLibrary?.server ?? null"
       @close="serverSignInLibrary = null"
+      @signed-in="handleServerSignedIn"
+    />
+    <TeamJoinModal
+      :open="teamJoinOpen || Boolean(serverSignInLibrary?.server.memberUrl)"
+      :relogin="serverSignInLibrary?.server.memberUrl ? serverSignInLibrary.server : null"
+      @close="handleTeamJoinClose"
+      @joined="handleTeamJoined"
       @signed-in="handleServerSignedIn"
     />
 
@@ -265,7 +303,7 @@
     <CreateVaultModal
       v-model:open="showCreateModal"
       @created="handleVaultCreated"
-      @server-library-added="handleServerLibraryAdded"
+      @join-team="handleJoinTeamCard"
     />
 
     <AppModal
@@ -497,11 +535,15 @@ import {
   PhKanban,
   PhShieldCheck,
   PhTrash,
+  PhUsersThree,
   PhX
 } from '@phosphor-icons/vue'
 import { useVaultStore, type VaultInfo, VaultType } from '../../../store/modules/vaultStore'
 import CreateVaultModal from './CreateVaultModal.vue'
 import CatalogSignInModal from '../catalog/CatalogSignInModal.vue'
+import TeamJoinModal from '../team/TeamJoinModal.vue'
+import { useTeamStore } from '@renderer/store/modules/teamStore'
+import { teamAPI } from '@renderer/api/team'
 import { catalogLibraryAPI } from '@renderer/api/catalogLibrary'
 import { useAssetLibraryStore } from '@renderer/store/modules/assetLibraryStore'
 import type { CatalogLibraryView } from '@core/shared/catalogLibrary'
@@ -525,9 +567,59 @@ const activeServer = computed(() => libraryStore.activeServer)
 const serverMenuLibrary = ref<CatalogLibraryView | null>(null)
 const serverSignInLibrary = ref<CatalogLibraryView | null>(null)
 
+const teamStore = useTeamStore()
+const teamJoinOpen = ref(false)
+
+/** 外包成员看到的那一行写「星海 · 某某外包」（方案 4.2） */
+const serverRowName = (library: CatalogLibraryView): string =>
+  library.team?.company
+    ? t('teamProject.rowWithCompany', {
+        project: library.team.projectName,
+        company: library.team.company.name
+      })
+    : library.name
+
+const serverStateTitle = (library: CatalogLibraryView): string => {
+  const state = serverState(library.key)
+  if (library.server.memberUrl && state !== 'unknown') return t(`teamProject.state.${state}`)
+  return t(`catalogLibrary.switcher.state.${state}`)
+}
+
+const handleCopyInvite = async (): Promise<void> => {
+  const library = serverMenuLibrary.value
+  serverMenuLibrary.value = null
+  if (!library) return
+  const result = await teamAPI.inviteLink(library.key)
+  if (!result.success || !result.data) {
+    message.error(t('teamProject.dialogs.failed'))
+    return
+  }
+  await navigator.clipboard.writeText(result.data).catch(() => undefined)
+  message.success(t('teamProject.inviteCopied'))
+}
+
+const handleJoinTeamCard = (): void => {
+  showCreateModal.value = false
+  teamJoinOpen.value = true
+}
+
+const handleTeamJoinClose = (): void => {
+  teamJoinOpen.value = false
+  serverSignInLibrary.value = null
+}
+
+/** 加入团队成功：账号所在的工程全部进切换器，链接指的那个直接打开 */
+const handleTeamJoined = async (payload: {
+  keys: string[]
+  openKey: string | null
+}): Promise<void> => {
+  await handleServerLibraryAdded(payload.openKey ? [payload.openKey] : payload.keys)
+}
+
 /** 连接状态点：在线 / 离线 / 需要重新登录 / 还不知道 */
 const serverState = (key: string): 'online' | 'offline' | 'signedOut' | 'unknown' => {
   const library = serverLibraries.value.find((candidate) => candidate.key === key)
+  if (library?.server.memberUrl) return teamStore.stateOf(key)
   if (library && !library.server.signedIn) return 'signedOut'
   const status = libraryStore.statuses[key]
   if (!status) return 'unknown'
@@ -579,10 +671,14 @@ const handleServerRemove = (): void => {
   const library = serverMenuLibrary.value
   serverMenuLibrary.value = null
   if (!library) return
+  const team = Boolean(library.server.memberUrl)
   confirmDialog({
-    title: t('catalogLibrary.view.removeTitle', { name: library.name }),
-    content: t('catalogLibrary.view.removeContent'),
-    okText: t('catalogLibrary.view.remove'),
+    title: team
+      ? t('teamProject.remove.title', { name: serverRowName(library) })
+      : t('catalogLibrary.view.removeTitle', { name: library.name }),
+    content: team ? t('teamProject.remove.body') : t('catalogLibrary.view.removeContent'),
+    okText: team ? t('teamProject.remove.action') : t('catalogLibrary.view.remove'),
+    cancelText: team ? t('teamProject.cancel') : undefined,
     danger: true,
     onOk: async () => {
       const wasActive = activeServer.value?.key === library.key

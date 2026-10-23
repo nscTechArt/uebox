@@ -5,8 +5,8 @@
       <VaultSwitcher @manage="handleManageVaults" @vault-changed="handleVaultChanged" />
     </div>
 
-    <!-- 快捷目录 -->
-    <div class="shortcuts-section">
+    <!-- 快捷目录（外包成员看不到这一组，方案 4.4） -->
+    <div v-if="!isOutsourcer" class="shortcuts-section">
       <div class="shortcuts-header" @click="shortcutsCollapsed = !shortcutsCollapsed">
         <PhCaretRight
           weight="fill"
@@ -19,10 +19,42 @@
       <div v-show="!shortcutsCollapsed" class="shortcuts-list">
         <!-- 移除"未标签的"入口：在海量资产场景下，该功能不实用，改为利用路径/类型等隐式元数据分类 -->
 
+        <!-- 团队工程（方案 4.4）：动态、签出中所有人都有；「等你处理」有事才出现 -->
+        <template v-if="isTeam">
+          <div
+            class="shortcut-item"
+            :class="{ selected: teamStore.view === 'activity' }"
+            data-testid="team-shortcut-activity"
+            @click="openTeamView('activity')"
+          >
+            <span class="shortcut-label">{{ t('teamProject.shortcuts.activity') }}</span>
+          </div>
+          <div
+            class="shortcut-item"
+            :class="{ selected: teamStore.view === 'checkouts' }"
+            data-testid="team-shortcut-checkouts"
+            @click="openTeamView('checkouts')"
+          >
+            <span class="shortcut-label">{{ t('teamProject.shortcuts.checkouts') }}</span>
+          </div>
+          <div
+            v-if="teamStore.showInbox"
+            class="shortcut-item"
+            :class="{ selected: teamStore.view === 'inbox' }"
+            data-testid="team-shortcut-inbox"
+            @click="openTeamView('inbox')"
+          >
+            <span class="shortcut-label">{{ t('teamProject.shortcuts.inbox') }}</span>
+            <span v-if="teamStore.inboxCount > 0" class="shortcut-badge">{{
+              teamStore.inboxCount
+            }}</span>
+          </div>
+        </template>
+
         <div
           class="shortcut-item"
           :class="{
-            selected: selectedShortcut === 'favorites',
+            selected: selectedShortcut === 'favorites' && (!isTeam || teamStore.view === 'grid'),
             disabled: !libraryCaps.canFavorite
           }"
           :title="libraryCaps.canFavorite ? undefined : capabilityReason('canFavorite')"
@@ -42,20 +74,25 @@
           v-if="supportsDeletedShortcut"
           class="shortcut-item"
           :class="{
-            selected: selectedShortcut === 'recent' || selectedShortcut === 'deleted',
+            selected: isTeam
+              ? teamStore.view === 'deleted'
+              : selectedShortcut === 'recent' || selectedShortcut === 'deleted',
             disabled: !libraryCaps.hasTrash
           }"
           :title="libraryCaps.hasTrash ? undefined : capabilityReason('hasTrash')"
           :aria-disabled="!libraryCaps.hasTrash"
-          @click="libraryCaps.hasTrash && handleShortcutClick('recent')"
+          @click="
+            libraryCaps.hasTrash &&
+            (isTeam ? openTeamView('deleted') : handleShortcutClick('recent'))
+          "
         >
           <span class="shortcut-label">{{ t('assetLib.shortcuts.recent') }}</span>
         </div>
       </div>
     </div>
 
-    <!-- 同步 -->
-    <div class="sync-section">
+    <!-- 同步（网盘）：外包成员看不到这一组 -->
+    <div v-if="!isOutsourcer" class="sync-section">
       <div class="sync-header" @click="syncCollapsed = !syncCollapsed">
         <PhCaretRight weight="fill" class="collapse-icon" :class="{ collapsed: syncCollapsed }" />
         <span class="sync-title">{{ t('assetLib.network.title') }}</span>
@@ -143,10 +180,13 @@
         </template>
 
         <!-- eslint-disable-next-line vue/no-unused-vars -- folderType 暂时隐藏，保留供后续恢复 -->
-        <template #title="{ title, folderType, key, color, img }">
+        <template #title="{ title, folderType, key, color, img, path }">
           <div
             class="tree-node-title"
-            :class="{ 'node-drop-target': dropTargetKey === key }"
+            :class="{
+              'node-drop-target': dropTargetKey === key,
+              'team-unsynced': isTeam && teamStore.isUnsynced(teamPathOf(path))
+            }"
             :title="title"
             :data-folder-key="key"
             @dragover.prevent.stop="handleNodeDragOver($event)"
@@ -177,9 +217,71 @@
               <PhFolder v-else weight="fill" class="folder-icon" />
             </span>
             <span class="tree-node-text">{{ title }}</span>
+            <!-- 「人 + 勾」：只有这些人能提交（不用锁图标 —— UE 里带锁的图标表示别人签出） -->
+            <span
+              v-if="isTeam && restrictionOf(path)"
+              class="team-restricted-icon"
+              :title="
+                t('teamProject.tree.restricted', {
+                  people: peopleText(restrictionOf(path)?.people ?? [], t('teamProject.nameSep'))
+                })
+              "
+            >
+              <PhUserCheck />
+            </span>
           </div>
         </template>
       </a-tree>
+    </div>
+
+    <!-- 外包（方案 4.4）：管理员，且工程里有外包才出现；行上不挂数字，待办只在「等你处理」里 -->
+    <div v-if="isTeam && teamStore.outsourceCompanies.length > 0" class="team-outsource-section">
+      <div class="folder-header">
+        <span class="folder-title">{{ t('teamProject.outsource.title') }}</span>
+      </div>
+      <div v-for="company in teamStore.outsourceCompanies" :key="company.id" class="team-company">
+        <div class="team-outsource-row" @click="toggleCompany(company.id)">
+          <PhCaretRight
+            weight="fill"
+            class="team-caret"
+            :class="{ open: openCompanies.has(company.id) }"
+          />
+          <span>{{ company.name }}</span>
+        </div>
+        <template v-if="openCompanies.has(company.id)">
+          <div
+            class="team-outsource-row nested"
+            :class="{
+              selected: teamStore.view === 'reference' && teamStore.params.companyId === company.id
+            }"
+            @click="teamStore.openView('reference', { companyId: company.id })"
+          >
+            {{ t('teamProject.outsource.reference') }}
+          </div>
+          <div class="team-outsource-row nested" @click="toggleDeliveries(company.id)">
+            <PhCaretRight
+              weight="fill"
+              class="team-caret"
+              :class="{ open: openDeliveries.has(company.id) }"
+            />
+            <span>{{ t('teamProject.outsource.delivery') }}</span>
+          </div>
+          <template v-if="openDeliveries.has(company.id)">
+            <div
+              v-for="delivery in deliveriesOf(company.id)"
+              :key="delivery.id"
+              class="team-outsource-row nested deep"
+              :class="{
+                selected:
+                  teamStore.view === 'delivery' && teamStore.params.deliveryId === delivery.id
+              }"
+              @click="teamStore.openView('delivery', { deliveryId: delivery.id })"
+            >
+              {{ t('teamProject.outsource.deliveryN', { n: delivery.n }) }}
+            </div>
+          </template>
+        </template>
+      </div>
     </div>
 
     <!-- 右键菜单 -->
@@ -273,8 +375,15 @@ import {
   PhPencilSimple,
   PhPlus,
   PhTag,
-  PhTrash
+  PhTrash,
+  PhUserCheck,
+  PhUsersThree
 } from '@phosphor-icons/vue'
+import { useTeamStore, type TeamView } from '@renderer/store/modules/teamStore'
+import { teamAPI } from '@renderer/api/team'
+import { openTeamDialog } from '../team/teamDialogs'
+import { peopleText } from '../team/teamFormat'
+import type { TeamDelivery, TeamRestrictedFolder } from '@core/shared/teamProject'
 import TagSelectorModal from '@renderer/components/TagSelector/TagSelectorModal.vue'
 import ColorPickerModal from './modals/ColorPickerModal.vue'
 import ImportToProjectModal from './modals/ImportToProjectModal.vue'
@@ -516,6 +625,50 @@ const selectionStore = useAssetSelectionStore()
 // 当前数据源能做什么（服务器库时一些本地库功能在原位禁用，并给一句原因）
 const libraryStore = useAssetLibraryStore()
 const libraryCaps = computed(() => libraryStore.capabilities)
+
+// ---- 团队工程：左栏多出来的几样（方案 4.4）
+const teamStore = useTeamStore()
+const isTeam = computed(() => libraryCaps.value.team !== null)
+const isOutsourcer = computed(() => libraryCaps.value.team?.role === 'outsourcer')
+
+/** 树节点的 path 是 `/ALL/Content/Env`：换成工程内路径 `Content/Env` */
+const teamPathOf = (path: unknown): string =>
+  typeof path === 'string' ? path.replace(/^\/ALL\/?/, '').replace(/^\/+/, '') : ''
+
+const restrictionOf = (path: unknown): TeamRestrictedFolder | null => {
+  const projectPath = teamPathOf(path)
+  return projectPath ? teamStore.restrictionIconOf(projectPath) : null
+}
+
+const openTeamView = (view: TeamView): void => {
+  selectedShortcut.value = null
+  teamStore.openView(view)
+}
+
+const openCompanies = ref(new Set<string>())
+const openDeliveries = ref(new Set<string>())
+const deliveries = ref<Record<string, TeamDelivery[]>>({})
+const deliveriesOf = (companyId: string): TeamDelivery[] => deliveries.value[companyId] ?? []
+const toggleCompany = (companyId: string): void => {
+  const next = new Set(openCompanies.value)
+  if (next.has(companyId)) next.delete(companyId)
+  else next.add(companyId)
+  openCompanies.value = next
+}
+const toggleDeliveries = async (companyId: string): Promise<void> => {
+  const next = new Set(openDeliveries.value)
+  if (next.has(companyId)) {
+    next.delete(companyId)
+    openDeliveries.value = next
+    return
+  }
+  next.add(companyId)
+  openDeliveries.value = next
+  const key = teamStore.key
+  if (!key) return
+  const result = await teamAPI.deliveries(key, companyId).catch(() => null)
+  if (result) deliveries.value = { ...deliveries.value, [companyId]: result.items }
+}
 // 换了库（本地 ↔ 服务器）：收藏数跟着换 —— 服务器库的收藏是另一份，记在本机
 watch(
   () => libraryStore.source,
@@ -630,6 +783,24 @@ const contextMenuItems = computed<MenuItem[]>(() => {
         disabled: isAllFolder || !currentRightClickNode.value || !libraryCaps.value.canSendToProject
       }
     ]
+    // 团队工程：同步到本机 / 不同步到本机（工程在本机时，按顶层文件夹）；发给外包（管理员，有外包时）
+    if (isTeam.value && !isAllFolder && currentRightClickNode.value) {
+      const node = findNodeByKey(currentRightClickNode.value)
+      const path = teamPathOf(node?.path)
+      if (teamStore.isLocal && path) {
+        serverItems.push(
+          teamStore.isUnsynced(path)
+            ? { key: 'team-sync', label: t('teamProject.tree.sync'), icon: PhArrowsClockwise }
+            : { key: 'team-unsync', label: t('teamProject.tree.unsync'), icon: PhArrowsClockwise }
+        )
+      }
+      for (const company of teamStore.outsourceCompanies)
+        serverItems.push({
+          key: `team-send:${company.id}`,
+          label: `${t('teamProject.outsource.sendTo')} ▸ ${company.name}`,
+          icon: PhUsersThree
+        })
+    }
     // 文件夹颜色：服务器库写成注释，要 writer 权限
     if (libraryCaps.value.folderColor && !isAllFolder)
       serverItems.push({
@@ -819,6 +990,8 @@ const renameFolderForm = reactive({
 const handleSelect = (selectedKeys: string[], info: any) => {
   // 当树形文件夹被选中时，清除快捷区域的选中状态
   selectedShortcut.value = null
+  // 团队工程：点文件夹会离开动态 / 签出中……回到网格（方案 4.8）
+  if (isTeam.value) teamStore.backToGrid()
   const emitInfo = isFolderSearchActive.value ? { ...info, globalFolderSearch: true } : info
 
   // 如果点击的是已经选中的节点（selectedKeys 为空表示取消选择），则重新选择它
@@ -854,6 +1027,7 @@ const handleSelect = (selectedKeys: string[], info: any) => {
 
 // 处理快捷区域点击
 const handleShortcutClick = (shortcutKey: string) => {
+  if (isTeam.value) teamStore.backToGrid()
   // 设置快捷区域选中状态
   selectedShortcut.value = shortcutKey
   // 写入互斥选择：快捷项优先
@@ -936,6 +1110,48 @@ const handleRightClick = ({ event, node }: any) => {
 
 // 处理右键菜单点击
 const handleContextMenuClick = async (key: string, _item: MenuItem) => {
+  if (key === 'team-sync' || key === 'team-unsync') {
+    const node = currentRightClickNode.value ? findNodeByKey(currentRightClickNode.value) : null
+    const libraryKey = teamStore.key
+    const path = teamPathOf(node?.path)
+    if (!libraryKey || !path) return
+    const result = await teamAPI.setFolderSynced(libraryKey, path, key === 'team-sync')
+    if (result.success && result.data && !result.data.ok) {
+      message.warning(t('teamProject.tree.pending', { n: result.data.pending }))
+      return
+    }
+    if (!result.success) {
+      message.error(t('teamProject.dialogs.failed'))
+      return
+    }
+    await libraryStore.loadServerLibraries()
+    await teamStore.loadLocal()
+    return
+  }
+  if (key.startsWith('team-send:')) {
+    const company = teamStore.outsourceCompanies.find(
+      (c) => c.id === key.slice('team-send:'.length)
+    )
+    const node = currentRightClickNode.value ? findNodeByKey(currentRightClickNode.value) : null
+    const folderKey = currentRightClickNode.value
+    if (!company || !node || !folderKey) return
+    const rows = (await getActiveLibrarySource().search.assets({
+      folderKey,
+      includeSubfolders: true,
+      limit: 500,
+      offset: 0
+    })) as Array<Record<string, unknown>>
+    const paths = rows
+      .map((row) => (typeof row.catalogPath === 'string' ? row.catalogPath : ''))
+      .filter(Boolean)
+    if (paths.length === 0) return
+    await openTeamDialog({
+      kind: 'sendReference',
+      company: { id: company.id, name: company.name },
+      paths
+    })
+    return
+  }
   switch (key) {
     case 'import-to-project': {
       const folderKey = currentRightClickNode.value
@@ -1979,6 +2195,63 @@ onMounted(() => {
           font-size: 14px;
           color: var(--color-text-secondary);
         }
+      }
+    }
+  }
+
+  // 团队工程：没同步到本机的文件夹字色变淡；「人 + 勾」图标；外包分组
+  .team-unsynced .tree-node-text {
+    color: var(--color-text-muted);
+    opacity: 0.7;
+  }
+
+  .team-restricted-icon {
+    display: inline-flex;
+    margin-left: var(--space-1);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+  }
+
+  .team-outsource-section {
+    padding: var(--space-2) var(--space-4);
+    border-top: 1px solid var(--color-border-subtle);
+    background: var(--color-bg-surface);
+
+    .team-outsource-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-1);
+      padding: var(--space-1) var(--space-2);
+      border-radius: var(--radius-xs);
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+      cursor: pointer;
+
+      &:hover {
+        background: var(--color-bg-surface-hover);
+      }
+
+      &.selected {
+        background: var(--color-bg-selected);
+        color: var(--color-text-primary);
+      }
+
+      &.nested {
+        padding-left: var(--space-6);
+      }
+
+      &.deep {
+        padding-left: var(--space-10);
+      }
+    }
+
+    .team-caret {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-muted);
+      transition: transform var(--motion-fast) var(--easing-standard);
+
+      &.open {
+        transform: rotate(90deg);
       }
     }
   }

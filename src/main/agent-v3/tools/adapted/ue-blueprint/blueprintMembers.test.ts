@@ -211,6 +211,46 @@ describe('blueprint_remove_variable', () => {
     expect(result.success).toBe(false)
     expect(String(result.error)).toContain('IsLocked')
   })
+
+  it('删局部变量时透传 function，回执报引擎删掉的节点数', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      blueprint_path: '/Game/A/PC.PC',
+      name: 'MinDist',
+      function: 'FindNearest',
+      removed: true,
+      removed_node_count: 3
+    })
+    const result = await runRemove({
+      blueprint_path: '/Game/A/PC',
+      name: 'MinDist',
+      function: 'FindNearest'
+    })
+
+    expect((callRequest.mock.calls[0][1] as Record<string, unknown>).function).toBe('FindNearest')
+    expect(result.success).toBe(true)
+    expect(result.removed_node_count).toBe(3)
+    expect(String(result.message)).toContain('3 个')
+    expect(String(result.message)).not.toContain('孤儿')
+  })
+
+  it('引擎说局部变量还在时不报成功', async () => {
+    callRequest.mockResolvedValue({
+      ok: true,
+      blueprint_path: '/Game/A/PC.PC',
+      name: 'MinDist',
+      function: 'FindNearest',
+      removed: false,
+      removed_node_count: 0
+    })
+    const result = await runRemove({
+      blueprint_path: '/Game/A/PC',
+      name: 'MinDist',
+      function: 'FindNearest'
+    })
+
+    expect(result.success).toBe(false)
+  })
 })
 
 describe('blueprint_event_dispatcher', () => {

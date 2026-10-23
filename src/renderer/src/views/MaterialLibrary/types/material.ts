@@ -8,10 +8,6 @@ export type MaterialSourceOrigin = 'legacy' | 'live' | 'local'
 
 export type MaterialLiveDataState = 'full' | 'partial' | 'unavailable'
 
-export type MaterialViewMode = 'grid' | 'list'
-
-export type MaterialSortType = 'recent' | 'name' | 'created'
-
 export interface MaterialDiagnostic {
   message: string
   severity: 'Error' | 'Warning' | 'Info'
@@ -112,20 +108,6 @@ export interface MaterialCollection {
   name: string
   entryIds: string[]
   createdAt: number
-}
-
-export interface MaterialLibraryFilters {
-  searchQuery: string
-  entryType: MaterialEntryType | 'all'
-  favoriteState: 'all' | 'favorite' | 'unfavorite'
-  blendMode: string
-  materialDomain: string
-  shadingModel: string
-  compileStatus: MaterialCompileStatus | 'all'
-  hasTextureDependencies: 'all' | 'yes' | 'no'
-  hasFunctionDependencies: 'all' | 'yes' | 'no'
-  hasChildInstances: 'all' | 'yes' | 'no'
-  activeCollectionId: string | null
 }
 
 export const MATERIAL_ENTRY_LABELS: Record<MaterialEntryType, string> = {

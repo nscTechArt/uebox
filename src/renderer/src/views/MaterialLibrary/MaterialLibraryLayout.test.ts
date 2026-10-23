@@ -3,13 +3,17 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { defineComponent } from 'vue'
+import { getTabCacheKey } from '@renderer/common/tabRoute'
+import { useTabsStore } from '@renderer/store/modules/tabs'
 import MaterialLibraryLayout from './MaterialLibraryLayout.vue'
 
+// 缓存 key 与 MainLayout 使用同一个函数：Layout 依靠它判断路由归属
 const AppShell = defineComponent({
+  setup: () => ({ getTabCacheKey }),
   template: `
     <router-view v-slot="{ Component, route }">
       <keep-alive>
-        <component :is="Component" :key="route.fullPath" />
+        <component :is="Component" :key="getTabCacheKey(route)" />
       </keep-alive>
     </router-view>
   `
@@ -72,8 +76,12 @@ function createTestRouter() {
 }
 
 describe('MaterialLibraryLayout', () => {
+  // 挂载和 afterEach 使用同一个 pinia：Layout 读取的 tab 列表必须和创建 tab 的是同一份
+  let pinia: ReturnType<typeof createPinia>
+
   beforeEach(() => {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
   })
 
   afterEach(() => {
@@ -82,6 +90,10 @@ describe('MaterialLibraryLayout', () => {
 
   it('switches between cached parent routes without throwing keep-alive lifecycle errors', async () => {
     const router = createTestRouter()
+    // 与真实应用一致，每次导航后创建 tab：Layout 根据 tab 是否还在决定是否保留子页
+    router.afterEach((to) => {
+      useTabsStore(pinia).addTab(to)
+    })
     router.push('/material-library')
     await router.isReady()
 
@@ -92,7 +104,7 @@ describe('MaterialLibraryLayout', () => {
       {
         attachTo: document.body,
         global: {
-          plugins: [createPinia(), router]
+          plugins: [pinia, router]
         }
       }
     )

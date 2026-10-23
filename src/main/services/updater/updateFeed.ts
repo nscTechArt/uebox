@@ -30,6 +30,15 @@ import path from 'path'
  *
  * 两者都能写进 `package.json`（`updateGithubRepo` / `updateFeedUrl`），打包时会被
  * 带进 asar；环境变量优先，方便在本机验证。
+ *
+ * ## 镜像
+ *
+ * 国内连 GitHub 和 R2 都慢。主源之外可以再挂几个内容相同的静态镜像
+ * （`UEBOX_UPDATE_MIRRORS` / `updateMirrors`，逗号分隔或数组），每次检查更新前
+ * 同时去拉各源的 `latest.yml`，谁先拉到就用谁（`pickFastestFeed`）。
+ * 不按 IP 猜用户在哪、也不定「多少毫秒算慢」：直接比，比输了的自然落选。
+ * 镜像换掉文件也没用 —— `latest.yml` 里记着 sha512，下下来对不上就装不了。
+ * 镜像的目录结构由 scripts/release-dl.mjs 生成。
  */
 
 export interface ResolveUpdateFeedInput {
@@ -75,6 +84,90 @@ export function parseGithubRepo(value: unknown): GithubUpdateFeed | undefined {
   if (!match) return undefined
 
   return { provider: 'github', owner: match[1], repo: match[2] }
+}
+
+function parseMirrorList(value: unknown): GenericUpdateFeed[] {
+  const items = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+  return items
+    .map(normalizeUrl)
+    .filter((url): url is string => !!url && /^https?:\/\//i.test(url))
+    .map((url) => ({ provider: 'generic', url }))
+}
+
+/**
+ * 主源 + 镜像，主源排第一。一个都没配时是空数组 —— 更新服务整个不启动。
+ *
+ * 镜像跟主源一样，环境变量整体盖过打包进去的元数据。
+ */
+export function resolveUpdateFeeds(input: ResolveUpdateFeedInput = {}): UpdateFeed[] {
+  const primary = resolveUpdateFeed(input)
+  const envMirrors = parseMirrorList(input.env?.UEBOX_UPDATE_MIRRORS)
+  const mirrors = envMirrors.length ? envMirrors : parseMirrorList(input.appMetadata?.updateMirrors)
+
+  const feeds: UpdateFeed[] = primary ? [primary] : []
+  for (const mirror of mirrors) {
+    if (!feeds.some((f) => f.provider === 'generic' && f.url === mirror.url)) feeds.push(mirror)
+  }
+  return feeds
+}
+
+/** electron-updater 按平台读的清单文件名 */
+export function updateManifestName(platform: NodeJS.Platform): string {
+  if (platform === 'darwin') return 'latest-mac.yml'
+  if (platform === 'linux') return 'latest-linux.yml'
+  return 'latest.yml'
+}
+
+/** 这个源的清单地址。GitHub 用 releases/latest/download，跟 electron-updater 认的是同一个 Release */
+export function updateManifestUrl(feed: UpdateFeed, manifestName: string): string {
+  if (feed.provider === 'github') {
+    return `https://github.com/${feed.owner}/${feed.repo}/releases/latest/download/${manifestName}`
+  }
+  return `${feed.url}/${manifestName}`
+}
+
+type FetchLike = (
+  url: string,
+  init: { signal: AbortSignal }
+) => Promise<{ ok: boolean; body?: { cancel(): Promise<void> } | null }>
+
+/**
+ * 同时拉每个源的清单，返回最先成功的那个。
+ *
+ * 只有一个源时不发探测请求 —— 没得选，多拉一次纯属浪费。
+ * 全都失败时退回主源，让 electron-updater 自己去撞、报出真实的错。
+ *
+ * `hangGuardMs` 不是「慢」的标准，只是防止所有源都挂住时检查更新永远不返回。
+ */
+export async function pickFastestFeed(
+  feeds: UpdateFeed[],
+  manifestName: string,
+  fetchFn: FetchLike,
+  hangGuardMs = 30_000
+): Promise<UpdateFeed | null> {
+  if (feeds.length <= 1) return feeds[0] ?? null
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), hangGuardMs)
+  try {
+    return await Promise.any(
+      feeds.map(async (feed) => {
+        const res = await fetchFn(updateManifestUrl(feed, manifestName), {
+          signal: controller.signal
+        })
+        // 只要「通不通」，正文留给 electron-updater 自己拉
+        await res.body?.cancel().catch(() => {})
+        if (!res.ok) throw new Error('not ok')
+        return feed
+      })
+    )
+  } catch {
+    return feeds[0]
+  } finally {
+    clearTimeout(timer)
+    // 赢家已定，其余还在路上的请求全部掐掉
+    controller.abort()
+  }
 }
 
 /** 没有配置更新源时返回 null —— 此时整个更新服务不启动，不发任何请求 */

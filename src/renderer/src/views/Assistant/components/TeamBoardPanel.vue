@@ -29,19 +29,50 @@
       <AppTag v-if="!docked && verdictTag" :tone="verdictTag.tone" :title="verdictTag.title">
         {{ verdictTag.label }}
       </AppTag>
+      <!-- 外部团队：大脑在 Claude Code，队员用什么模型盒子不知道，照实说 -->
+      <AppTag v-if="team.external" tone="info" :title="t('assistant.teamBoard.external.hint')">
+        {{ t('assistant.teamBoard.external.label') }}
+      </AppTag>
+
+      <!-- 团队花了多少：默认只露总数，点开按人看。不进上面的摘要句：那句说的是进度 -->
+      <AppDropdown v-if="docked && usageLabel" placement="bottomRight">
+        <AppButton
+          class="team-board-usage"
+          size="small"
+          variant="text"
+          :title="t('assistant.teamBoard.usage.open')"
+        >
+          {{ usageLabel }}
+        </AppButton>
+        <template #overlay>
+          <div class="usage-pop" role="dialog" :aria-label="t('assistant.teamBoard.usage.title')">
+            <div class="usage-pop-title">{{ t('assistant.teamBoard.usage.title') }}</div>
+            <div v-for="row in usageRows" :key="row.who" class="usage-pop-row">
+              <span class="usage-pop-who">{{ row.label }}</span>
+              <span>{{ row.value }}</span>
+            </div>
+            <div class="usage-pop-row is-total">
+              <span>{{ t('assistant.teamBoard.usage.total') }}</span>
+              <span>{{ usageLabel }}</span>
+            </div>
+            <div class="usage-pop-hint">{{ t('assistant.teamBoard.usage.hint') }}</div>
+            <div v-if="usagePartial" class="usage-pop-hint">
+              {{ t('assistant.teamBoard.usage.partialCost') }}
+            </div>
+          </div>
+        </template>
+      </AppDropdown>
       <PhCaretRight v-if="!docked" class="caret" />
       <AppButton
         v-else
         class="team-board-end"
         size="small"
         variant="text"
-        :disabled="running"
-        :title="
-          running ? t('assistant.teamBoard.endWhileRunning') : t('assistant.teamBoard.endHint')
-        "
+        :disabled="running || team.ended"
+        :title="endTitle"
         @click="emit('end')"
       >
-        {{ t('assistant.teamBoard.end') }}
+        {{ team.ended ? t('assistant.teamBoard.external.ended') : t('assistant.teamBoard.end') }}
       </AppButton>
     </component>
 
@@ -77,6 +108,13 @@
         @reopen-job="emit('reopen-job', $event)"
         @open-models="emit('open-models')"
         @set-model="(name: string, m: TeamModel) => emit('set-model', name, m)"
+        @dismiss="(name: string, reason: string) => emit('dismiss', name, reason)"
+        @open-report="emit('open-report', $event)"
+      />
+      <TeamDismissalList
+        class="team-board-dismissals"
+        :dismissals="team.dismissals"
+        :pixel="style === 'v2'"
       />
     </div>
   </section>
@@ -88,14 +126,20 @@ import { useI18n } from 'vue-i18n'
 import { PhCaretRight, PhUsersThree } from '@phosphor-icons/vue'
 
 import AppButton from '@renderer/components/AppButton.vue'
+import AppDropdown from '@renderer/components/AppDropdown.vue'
 import AppTag from '@renderer/components/AppTag.vue'
-import type {
-  TeamActivity,
-  TeamModel,
-  TeamModelCandidate,
-  TeamStateView,
-  TeamVerdict
+import {
+  ACCEPTOR,
+  PRODUCER,
+  type TeamActivity,
+  type TeamModel,
+  type TeamModelCandidate,
+  type TeamStateView,
+  type TeamUsage,
+  type TeamVerdict
 } from '@core/shared/agentTeam'
+import type { TeamReportTab } from '../composables/useTeamTab'
+import TeamDismissalList from './TeamDismissalList.vue'
 import TeamLaneBoard from './teamLanes/TeamLaneBoard.vue'
 import TeamOffice from './teamOffice/TeamOffice.vue'
 import { officeStyle } from './teamOffice/officeStyle'
@@ -103,6 +147,8 @@ import TeamQuestBoard from './teamQuest/TeamQuestBoard.vue'
 import { QUEST_VARS } from './teamQuest/questPalette'
 import { useTeamLabels } from './teamBoardLabels'
 import { buildBoardModel } from './teamBoardModel'
+import { teamUsageRows, usageCostIsPartial } from './teamUsage'
+import { formatTokenCount, formatUsageCost } from '../composables/tokenUsageFormat'
 
 const props = defineProps<{
   team: TeamStateView
@@ -128,10 +174,14 @@ const emit = defineEmits<{
   'reopen-job': [jobId: string]
   /** 用户结束团队模式 */
   end: []
+  /** 用户在日志里点了一份交付：右侧面板另开页签看全文 */
+  'open-report': [report: TeamReportTab]
   /** 用户打开了团队任务或换模型菜单：重读一次模型设置 */
   'open-models': []
   /** 用户给队员换了模型 */
   'set-model': [name: string, model: TeamModel]
+  /** 用户辞退了一个队员（理由必填） */
+  dismiss: [name: string, reason: string]
 }>()
 const { t } = useI18n()
 const { ago, now } = useTeamLabels()
@@ -144,6 +194,43 @@ onMounted(() => {
 
 const model = computed(() =>
   buildBoardModel(props.team, props.activity ?? [], { running: !!props.running, now: now.value })
+)
+
+/** 外部团队结束只是标记：它的循环在 Claude Code 里，要用户自己去那边停 */
+const endTitle = computed(() => {
+  if (props.running) return t('assistant.teamBoard.endWhileRunning')
+  return props.team.external
+    ? t('assistant.teamBoard.external.endHint')
+    : t('assistant.teamBoard.endHint')
+})
+
+// ── 团队用量 ────────────────────────────────────────────────────────────
+
+/** 「12k tokens · $0.42」。没价目的模型不显示金额，全团队都没价目就只有 token 数 */
+function usageText(usage: TeamUsage): string {
+  const total = formatTokenCount(usage.total)
+  const cost = formatUsageCost(usage.cost)
+  return cost
+    ? t('assistant.teamBoard.usage.labelWithCost', { total, cost })
+    : t('assistant.teamBoard.usage.label', { total })
+}
+
+const usageLabel = computed(() => {
+  const total = props.team.usage?.total
+  return total && (total.total > 0 || total.cost > 0) ? usageText(total) : ''
+})
+const usagePartial = computed(() => usageCostIsPartial(props.team.usage?.total))
+const usageRows = computed(() =>
+  teamUsageRows(props.team.usage, props.team.members).map((row) => ({
+    who: row.who,
+    label:
+      row.who === PRODUCER
+        ? t('assistant.teamBoard.producer')
+        : row.who === ACCEPTOR
+          ? t('assistant.teamBoard.usage.acceptor')
+          : row.who,
+    value: usageText(row.usage)
+  }))
 )
 
 // ── 摘要行 ──────────────────────────────────────────────────────────────
@@ -170,6 +257,8 @@ const summary = computed(() => {
       })
     )
   }
+  // 收起时这一行是唯一看得到的地方，总数跟在后面；展开后挪到右边那个能点开的按钮上
+  if (!props.docked && usageLabel.value) parts.push(usageLabel.value)
   return parts.join(' · ')
 })
 
@@ -291,6 +380,7 @@ watch(
 }
 
 .caret,
+.team-board-usage,
 .team-board-end {
   flex-shrink: 0;
   color: var(--color-text-muted);
@@ -305,6 +395,10 @@ watch(
   &.is-v2 {
     background: var(--q-bg);
   }
+}
+
+.team-board-dismissals {
+  padding: var(--space-3) var(--space-4) var(--space-4);
 }
 
 .office-wrap {
@@ -328,6 +422,55 @@ watch(
         3px 0 0 0 var(--q-banner-edge);
     }
   }
+}
+
+.team-board-usage {
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-pop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 220px;
+  max-width: 320px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-raised);
+  box-shadow: var(--shadow-menu);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.usage-pop-title {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.usage-pop-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-variant-numeric: tabular-nums;
+
+  &.is-total {
+    margin-top: var(--space-1);
+    padding-top: var(--space-1);
+    border-top: 1px solid var(--color-border-subtle);
+    color: var(--color-text-primary);
+  }
+}
+
+.usage-pop-who {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.usage-pop-hint {
+  color: var(--color-text-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

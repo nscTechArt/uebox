@@ -40,6 +40,11 @@ import {
   type SessionContext
 } from '../../core/createAgent'
 import { EDITOR_SCREENSHOT_DEFAULT } from '../../core/editorScreenshotScope'
+import type { TargetProjectRef } from '../../core/projectTargetContext'
+import { sharedExternalTeamRegistry } from '../../core/team/externalTeam'
+import { createExternalTeamSession } from '../../core/team/externalTeamTools'
+import { teamDirsFor } from '../../core/team/teamSession'
+import { createTeamStore } from '../../core/team/teamStore'
 import {
   canChooseModels,
   describeCandidates,
@@ -51,7 +56,9 @@ import { createTaskTool } from '../../tools/builtin/task'
 import type { UnrealAgentTool } from '../../tools/defineTool'
 import { applySkillLearningMode, discoverEnabledSkills } from '../skills'
 import { readUserInstructions } from '../userInstructions'
+import { createTeamSnapshots } from '../../../ipc/teamSnapshots'
 import { elicitQuestions } from './elicitQuestions'
+import { ExternalTargetError, resolveExternalTarget } from './externalTarget'
 import { ensureConnected } from './index'
 import type { McpSessionRequest, McpSessionSetup } from './McpServerHost'
 
@@ -86,6 +93,22 @@ function connectedProject(): SessionContext['project'] {
     name: project.projectName,
     ...(project.engineVersion ? { engineVersion: project.engineVersion } : {}),
     ...(project.projectPath ? { path: project.projectPath } : {})
+  }
+}
+
+/**
+ * 外部团队的工程 → 执行流上的目标。
+ *
+ * 编辑器连着就认那条连接。没连着也不能留空：留空的话「恰好一个连接就回退」那条路会把
+ * 编辑器命令发进旁边另一个连着的工程。给一个认不出来的 id 加上工程路径，编辑器连上时
+ * `getTargetConnectionId()` 会按路径认回来，连不上时报「不存在或已断开」—— 看得见的失败。
+ */
+function externalTeamTarget(projectPath: string): TargetProjectRef {
+  try {
+    return resolveExternalTarget({ projectPath }) ?? { projectPath }
+  } catch (error) {
+    if (!(error instanceof ExternalTargetError)) throw error
+    return { connectionId: `offline:${projectPath}`, projectPath }
   }
 }
 
@@ -148,7 +171,23 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
       : {})
   }) as unknown as UnrealAgentTool<never>
 
-  const tools = resolveAgentTools(ctx, skills, taskTool)
+  const boxTools = resolveAgentTools(ctx, skills, taskTool)
+
+  // 外部团队（Claude Code 当大脑、盒子当工作室）：这条连接调了 team_open / team_join
+  // 才生效，之前原样透传。见 core/team/externalTeamTools.ts
+  const team = createExternalTeamSession({
+    registry: sharedExternalTeamRegistry(),
+    storeFor: (id) =>
+      createTeamStore(teamDirsFor(id), Date.now, () =>
+        sendToAppWindows('agent-v3:team-board', { sessionId: id })
+      ),
+    snapshots: createTeamSnapshots(),
+    namespaces: [...new Set(boxTools.map((tool) => tool.unrealBox.namespace))]
+      .filter((ns) => ns !== 'core')
+      .sort(),
+    resolveTarget: externalTeamTarget
+  })
+  const tools = team.guard([...boxTools, ...team.tools])
 
   // 说明按真实连接状态写：工具可以先给全，但环境块不能说一句假话
   const instructions =
@@ -158,5 +197,5 @@ export async function setupMcpSession(request: McpSessionRequest): Promise<McpSe
       skills
     )
 
-  return { tools, instructions }
+  return { tools, instructions, dispose: team.dispose }
 }

@@ -301,11 +301,9 @@ const mainRoutes: RouteRecordRaw = {
 
             // 动态导入 store 以避免循环依赖
             const { useNotebookStore } = await import('../../store/modules/notebookStore')
-            const { getNotebookTabIdFromQuery } = await import(
-              '../../views/Notebook/utils/notebookTabRoute'
-            )
+            const { getTabIdFromQuery } = await import('../../common/tabRoute')
             const notebookStore = useNotebookStore()
-            const notebookTabId = getNotebookTabIdFromQuery(_to.query)
+            const notebookTabId = getTabIdFromQuery(_to.query)
             const activeNotebookId = notebookStore.getActiveNotebookIdForTab(notebookTabId)
 
             // 如果有缓存的详情页 ID，直接重定向到详情页
@@ -389,6 +387,27 @@ const mainRoutes: RouteRecordRaw = {
         showTab: true,
         isShowInMenu: true,
         // 保留偏好设置内部当前页；切到其他应用 Tab 再回来时，不要重建并退回“常规”。
+        keepAlive: true
+      }
+    },
+
+    /**
+     * 外部团队：Claude Code 当大脑、盒子当工作室（docs/外部大脑跑团队设计-2026-10-17.md）。
+     * 它们没有盒子里的对话，单独一页看任务板。不叫 /team：那是已移除的商业版团队协作页
+     */
+    {
+      path: '/external-teams',
+      name: 'ExternalTeams',
+      component: () => import('../../views/ExternalTeams/index.vue'),
+      meta: {
+        title: 'menu.externalTeams',
+        isShowInTab: true,
+        fixed: false,
+        sort: 15.5,
+        isCanDelete: true,
+        showMenu: true,
+        showTab: true,
+        isShowInMenu: true,
         keepAlive: true
       }
     },

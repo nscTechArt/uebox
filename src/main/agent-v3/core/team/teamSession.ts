@@ -24,6 +24,11 @@ import type { TeamDirs } from './teamStore'
 
 export interface TeamState {
   objective: string
+  /**
+   * 开团之后用户最近说的那句话（`/team` 那一轮没有）。验收员看不到对话，
+   * 要靠它知道用户中途改了什么；任务板也把它显示在委托下面。同 `/goal` 的 `latestRequest`
+   */
+  latestRequest?: string
   /** 最近一次验收的结论。null = 还没交过，或者结论读不出来 */
   verdict: GoalVerdict['kind'] | null
   deliveries: number

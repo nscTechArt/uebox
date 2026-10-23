@@ -136,6 +136,8 @@ interface ImportedAssetSummary {
   assetName: string
   assetClass: string
   uePath?: string
+  /** 素材库里记的软路径，只在和 uePath 不同时出现 */
+  softPath?: string
   sourceType: 'uasset' | 'external'
   imported: boolean
   alreadyExists?: boolean
@@ -164,11 +166,6 @@ interface ProjectImportResult {
     hasMore: boolean
     nextFolderOffset?: number
   }
-  output?: {
-    importedAssets: ImportedAssetSummary[]
-    spawnCandidates: ImportedAssetSummary[]
-    placedActors: Array<Record<string, unknown>>
-  }
 }
 
 interface SequenceSetupResult {
@@ -182,11 +179,6 @@ interface SequenceSetupResult {
   actor_binding_added?: boolean
   animation_path?: string
   animation_applied?: boolean
-  output?: {
-    sequencePath?: string
-    actorPath?: string
-    animationPath?: string
-  }
 }
 
 interface SequenceSetupOptions {
@@ -1476,12 +1468,7 @@ output_data = {
     actor_created: actorCreated,
     actor_binding_added: actorBindingAdded,
     animation_path: animationPath || undefined,
-    animation_applied: animationApplied,
-    output: {
-      sequencePath: sequencePath || `${sequenceFolderPath}/${sequenceName}`,
-      actorPath: actorPath || undefined,
-      animationPath: animationPath || undefined
-    }
+    animation_applied: animationApplied
   }
 }
 
@@ -1890,7 +1877,7 @@ async function resolveExternalAssetPath(asset: AssetData, tempDir: string): Prom
 /**
  * 根据导入结果构造统一的资产摘要
  */
-function buildImportedAssetSummary(args: {
+export function buildImportedAssetSummary(args: {
   assetKey: string
   assetName: string
   assetClass: string
@@ -1908,8 +1895,16 @@ function buildImportedAssetSummary(args: {
     softPath: args.softPath || args.uePath
   })
   const spawnable = isSpawnableAssetClass(resolvedAssetClass)
+  // `className` 只是推 assetClass 用的原料，不往外发；`softPath` 和 `uePath`
+  // 同值时只发 uePath（.uasset 导入几乎总是同值，外部文件导入两者才不同）
   return {
-    ...args,
+    assetKey: args.assetKey,
+    assetName: args.assetName,
+    ...(args.uePath !== undefined ? { uePath: args.uePath } : {}),
+    ...(args.softPath && args.softPath !== args.uePath ? { softPath: args.softPath } : {}),
+    sourceType: args.sourceType,
+    imported: args.imported,
+    ...(args.alreadyExists !== undefined ? { alreadyExists: args.alreadyExists } : {}),
     assetClass: resolvedAssetClass,
     spawnable,
     reference:
@@ -2486,12 +2481,9 @@ async function importAssetsToProject(
       ...(folderSelection ? { folder_selection: folderSelection } : {}),
       imported_assets: importedAssets,
       spawn_candidates: spawnCandidates,
-      placed_actors: placedActors,
-      output: {
-        importedAssets,
-        spawnCandidates,
-        placedActors
-      }
+      // 原来这里还有一个 `output: { importedAssets, spawnCandidates, placedActors }`，
+      // 是上面三项的驼峰复本，没有任何读方。导两百个资产时它独占十四万字符
+      placed_actors: placedActors
     }
   } finally {
     db.close()

@@ -105,6 +105,11 @@ mac:
   entitlements: build/entitlements.mac.plist
   icon: build/icon.icns
   entitlementsInherit: build/entitlements.mac.plist
+  # 团队邀请链接「用虚幻盒子打开」：macOS 只认 Info.plist 里登记过的协议
+  protocols:
+    - name: Unreal Box
+      schemes:
+        - unrealbox
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.

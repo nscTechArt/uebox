@@ -4,7 +4,8 @@ import type { AssetSearchCriteria } from '../models/assetSearchCore'
 export type AssetQueryRequest =
   | {
       id: number
-      op: 'search'
+      /** search = 取一页资产；engine-facet = 各引擎版本有几个（筛选栏的版本下拉） */
+      op: 'search' | 'engine-facet'
       vaultDbPath: string
       /** 主连接开了内存映射才开，见 vaultConnectionPragmas */
       mmap: boolean

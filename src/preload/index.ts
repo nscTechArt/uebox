@@ -56,7 +56,7 @@ const RAW_REQUEST_CHANNELS = new Set(
   `agent-v3:approval-reply agent-v3:question-reply agent-v3:mcp:get-settings
 aigc:importLocalModel aigc:save3DModelFromUrls aigc:update3DModelFolderName app:show-input-context-menu asset:confirmOverwriteResponse asset:resolveImportError
 backup:create backup:delete backup:getConfig backup:list backup:restore backup:setConfig backup:stats
-clouddrive:downloadFile db:assetFolder:search db:assetSearch:search db:settings:get db:settings:set db:shortcut:getAll db:shortcut:resetAll db:shortcut:update
+clouddrive:downloadFile db:assetFolder:search db:assetSearch:engineFacet db:assetSearch:search db:settings:get db:settings:set db:shortcut:getAll db:shortcut:resetAll db:shortcut:update
 diagnostics:abandon-import diagnostics:dismiss-import-recovery diagnostics:list-import-recovery diagnostics:resume-import dialog:saveFile dialog:savePdfFromHtml dialog:showSaveDialog file:execute fs:writeFile
 image:deleteTask image:getActiveTasks image:getHistory image:startGeneration legacy:import-blueprints legacy:scan-db legacy:select-db
 assetNote:create assetNote:delete assetNote:getById assetNote:saveImage assetNote:saveVideo assetNote:search assetNote:update
@@ -669,6 +669,16 @@ const api = {
       /** 把 UnrealAgentLink 装回项目 */
       ualinkInstall: (uprojectPath: string) =>
         ipcRenderer.invoke('db:project:ualinkInstall', uprojectPath),
+      /** 首次导入时那一问的答案；装失败的工程和原因码原样返回 */
+      ualinkPromptAnswer: (install: boolean, uprojectPaths: string[]) =>
+        ipcRenderer.invoke('db:project:ualinkPromptAnswer', install, uprojectPaths),
+      /** 首次导入工程、自动安装又关着时，主进程请界面问一句要不要装，返回退订函数 */
+      onUALinkInstallPrompt: (callback: (uprojectPath: string) => void) => {
+        const handler = (_: Electron.IpcRendererEvent, uprojectPath: string): void =>
+          callback(uprojectPath)
+        ipcRenderer.on('db:project:ualink-install-prompt', handler)
+        return () => ipcRenderer.removeListener('db:project:ualink-install-prompt', handler)
+      },
       /**
        * 「我的项目」里多了工程时的通知，返回退订函数。
        *
@@ -1514,6 +1524,8 @@ const api = {
     goalEnd: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:goal-end', args),
     /** 工作室模式（`/team`）的任务板面板：名册、任务、留言、验收结论 */
     teamState: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-state', args),
+    /** 「外部团队」页：Claude Code 当大脑的那些团队 */
+    externalTeams: () => ipcRenderer.invoke('agent-v3:external-teams'),
     teamTaskReopen: (args: { sessionId: string; taskId: string }) =>
       ipcRenderer.invoke('agent-v3:team-task-reopen', args),
     teamJobReopen: (args: { sessionId: string; jobId: string }) =>
@@ -1524,6 +1536,8 @@ const api = {
       providerId: string
       modelId: string
     }) => ipcRenderer.invoke('agent-v3:team-member-model', args),
+    teamMemberDismiss: (args: { sessionId: string; name: string; reason: string }) =>
+      ipcRenderer.invoke('agent-v3:team-member-dismiss', args),
     teamEnd: (args: { sessionId: string }) => ipcRenderer.invoke('agent-v3:team-end', args),
     /** 设置「团队」页：模型档案、重新检测 */
     teamModels: () => ipcRenderer.invoke('agent-v3:team-models'),
@@ -1755,6 +1769,86 @@ const api = {
       ipcRenderer.on('catalogLibrary:event', handler)
       return () => {
         ipcRenderer.removeListener('catalogLibrary:event', handler)
+      }
+    }
+  },
+  /**
+   * 团队工程（版本控制与资产协作）。通道全部是 team:*，
+   * 返回 { success, data?, error?, errorCode? }；令牌从不经过这里。
+   * `call` 只认主进程路由表里有名字的动作（src/main/libraryV3/team/teamOps.ts）。
+   */
+  team: {
+    join: (input: unknown) => ipcRenderer.invoke('team:join', input),
+    peek: (link: unknown) => ipcRenderer.invoke('team:peek', link),
+    parseLink: (raw: string) => ipcRenderer.invoke('team:parseLink', raw),
+    pendingJoinLink: () => ipcRenderer.invoke('team:pendingJoinLink'),
+    call: (key: string, op: string, args?: unknown) =>
+      ipcRenderer.invoke('team:call', key, op, args ?? {}),
+    facts: (key: string, hashes: string[], library?: string | null) =>
+      ipcRenderer.invoke('team:facts', key, hashes, library ?? null),
+    inviteLink: (key: string) => ipcRenderer.invoke('team:inviteLink', key),
+    startStreams: () => ipcRenderer.invoke('team:startStreams'),
+    restartStream: (serverId: string) => ipcRenderer.invoke('team:restartStream', serverId),
+    streamState: (serverId: string) => ipcRenderer.invoke('team:streamState', serverId),
+    localInfo: (key: string) => ipcRenderer.invoke('team:localInfo', key),
+    freeSpace: (path: string) => ipcRenderer.invoke('team:freeSpace', path),
+    inspectFolder: (path: string) => ipcRenderer.invoke('team:inspectFolder', path),
+    syncToLocal: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:syncToLocal', key, input),
+    putIn: (key: string, input: unknown) => ipcRenderer.invoke('team:putIn', key, input),
+    setFolderSynced: (key: string, folder: string, synced: boolean) =>
+      ipcRenderer.invoke('team:setFolderSynced', key, folder, synced),
+    restore: (key: string, input: unknown) => ipcRenderer.invoke('team:restore', key, input),
+    isModified: (key: string, path: string) => ipcRenderer.invoke('team:isModified', key, path),
+    cancelCheckout: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:cancelCheckout', key, input),
+    deliver: (key: string, input: unknown) => ipcRenderer.invoke('team:deliver', key, input),
+    approveDelivery: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:approveDelivery', key, input),
+    sendReference: (key: string, input: unknown) =>
+      ipcRenderer.invoke('team:sendReference', key, input),
+    openPath: (path: string) => ipcRenderer.invoke('team:openPath', path),
+    notify: (input: unknown) => ipcRenderer.invoke('team:notify', input),
+    onEvent: (listener: (event: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, event: unknown): void => listener(event)
+      ipcRenderer.on('team:event', handler)
+      return () => {
+        ipcRenderer.removeListener('team:event', handler)
+      }
+    }
+  },
+  /**
+   * 共享技能（官网共享库）。通道全部是 share:*，返回 { success, data?, error? }。
+   * 安装请求由主进程推过来（onInstallRequest），用户在确认框里决定后用 installReply 回复。
+   */
+  share: {
+    pendingInstalls: () => ipcRenderer.invoke('share:pending-installs'),
+    installReply: (requestId: string, approve: boolean) =>
+      ipcRenderer.invoke('share:install-reply', requestId, approve),
+    packSkill: (name: string) => ipcRenderer.invoke('share:pack-skill', name),
+    submitSkill: (name: string) => ipcRenderer.invoke('share:submit-skill', name),
+    connect: () => ipcRenderer.invoke('share:connect'),
+    cancelConnect: () => ipcRenderer.invoke('share:cancel-connect'),
+    onConnectPrompt: (listener: (prompt: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, prompt: unknown): void => listener(prompt)
+      ipcRenderer.on('share:connect-prompt', handler)
+      return () => {
+        ipcRenderer.removeListener('share:connect-prompt', handler)
+      }
+    },
+    openPage: (url: string) => ipcRenderer.invoke('share:open-page', url),
+    onInstallRequest: (listener: (request: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, request: unknown): void => listener(request)
+      ipcRenderer.on('share:install-request', handler)
+      return () => {
+        ipcRenderer.removeListener('share:install-request', handler)
+      }
+    },
+    onInstallFailed: (listener: (failure: unknown) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, failure: unknown): void => listener(failure)
+      ipcRenderer.on('share:install-failed', handler)
+      return () => {
+        ipcRenderer.removeListener('share:install-failed', handler)
       }
     }
   },

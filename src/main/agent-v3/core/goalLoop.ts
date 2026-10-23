@@ -71,6 +71,21 @@ export const AUDITOR_HARD_JUDGES: readonly string[] = [
 ]
 
 /**
+ * 验收员手上的工具：`/goal` 审计员那一套，再加真能「玩」的两个。
+ *
+ * 审计员只要能回读和跑一遍；交付验收要从开始玩到胜负再重来，
+ * 光 `ue_playtest` 模拟不了玩家输入，所以带上自动试玩和注入输入；
+ * 交了打包版的话，再拿 `project_smoke_test` 起一次打包版看会不会崩。
+ * 盒子里的验收员和外部团队的验收员（`externalTeamTools.ts`）用同一份。
+ */
+export const ACCEPTANCE_JUDGES: readonly string[] = [
+  ...AUDITOR_HARD_JUDGES,
+  'ue_autoplay',
+  'ue_inject_input',
+  'project_smoke_test'
+]
+
+/**
  * 只读也不给审计员的命名空间。
  *
  * - `browser` / `web`：伸到盒子外面去 —— 开窗口、发请求。审计员验的是这边的状态，用不上。

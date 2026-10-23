@@ -162,6 +162,33 @@ public:
 	 */
 	static void Handle_SetProperty(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
 
+	// ========================================================================
+	// Phase 6: 改现成的界面
+	// ========================================================================
+
+	/**
+	 * widget.replace - 把一个控件原地换成另一种（编辑器右键「替换为」，但不丢图表）
+	 *
+	 * 槽位（位置、锚点、尺寸、对齐）和名字不变；新类装得下的子控件搬过去；
+	 * 绑在旧控件上的事件改挂到新类的事件上，后面连的逻辑不断。
+	 *
+	 * @param Payload 请求参数:
+	 *   - path / widget_name（必填）
+	 *   - new_type（必填）：原生类名、控件蓝图名或资产路径
+	 *   - event_map（可选）：{ "旧事件": "新事件" }，新类上没有同名事件时必须给
+	 *   - drop_children（可选）：新类装不下旧控件的子控件时，确认连它们一起删
+	 */
+	static void Handle_Replace(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
+	/**
+	 * widget.remove - 删除控件和它的子控件
+	 *
+	 * @param Payload 请求参数:
+	 *   - path / widget_name（必填）
+	 *   - force（可选）：图表里还在用它们时，连那些节点一起删；不给就拒绝并列出引用
+	 */
+	static void Handle_Remove(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+
 private:
 	// ========================================================================
 	// 辅助函数
@@ -181,6 +208,12 @@ private:
 	 * 查找 Widget 类
 	 */
 	static UClass* FindWidgetClass(const FString& ClassName);
+
+	/**
+	 * 控件类型名 → 类：原生类名（带不带 U）、控件蓝图资产名、资产或类路径。
+	 * 找不到或有歧义时 OutError 说清楚该怎么写
+	 */
+	static UClass* ResolveWidgetClass(const FString& ClassName, FString& OutError);
 	
 	/**
 	 * 构建 Widget 的 JSON 表示（递归）

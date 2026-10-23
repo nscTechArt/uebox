@@ -401,6 +401,27 @@ describe('resolveTools —— 动态工具过滤', () => {
       expect(tools.map((tool) => tool.name).sort()).toEqual(['load_skill', 'mcp_demo_read', 'task'])
     })
 
+    it('result_query 只在池里还有声明存档的工具时才留下', () => {
+      const query = fakeTool('result_query', 'core')
+      const withArchive = resolveAgentTools(
+        { sessionId: 's', ueConnected: true, toolNames: ['search_assets', 'result_query'] },
+        skills,
+        taskTool,
+        undefined,
+        query
+      )
+      expect(withArchive.map((tool) => tool.name).sort()).toEqual(['result_query', 'search_assets'])
+
+      const without = resolveAgentTools(
+        { sessionId: 's', ueConnected: true, toolNames: ['material_describe', 'result_query'] },
+        skills,
+        taskTool,
+        undefined,
+        query
+      )
+      expect(without.map((tool) => tool.name)).toEqual(['material_describe'])
+    })
+
     it('Ask 模式的最终过滤也覆盖后追加工具', () => {
       const unsafeTask = fakeTool('task', 'core', 'mutating')
       const tools = resolveAgentTools(

@@ -42,10 +42,11 @@ export const LOCAL_CAPABILITIES: LibraryCapabilities = {
     tags: true,
     favorite: true,
     showDependencies: true,
-    engine: false,
+    engine: true,
     tagMode: 'full'
   },
-  reasons: {}
+  reasons: {},
+  team: null
 }
 
 async function invokeSearch<T>(channel: string, payload: unknown): Promise<T[]> {
@@ -180,7 +181,12 @@ export const localLibrarySource: AssetLibrarySource = {
     folders: (params) => invokeSearch('db:assetFolder:search', params)
   },
   annotations: null,
-  facets: null,
+  facets: {
+    engines: (criteria) =>
+      invokeSearch('db:assetSearch:engineFacet', { ...criteria, engineVersions: [] }),
+    // 本地库的标签筛选走标签库（按 id），用不着标签分面
+    tags: async () => []
+  },
   favorites: localFavorites,
   tagRegistry: localTagRegistry
 }

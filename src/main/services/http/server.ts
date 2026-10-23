@@ -12,6 +12,7 @@ import { isBrowserToolName } from '../../agent-v3/tools/toolNames'
 // 只要类型，编译后不留 import —— agent-v3 那一大坨仍旧走下面的动态 import
 import type { UnrealAgentTool } from '../../agent-v3/tools/defineTool'
 import { logger } from '../logger'
+import { describeHttpListenError, listenOnce } from './listen'
 import { config } from '../config'
 import { TaskManager } from '../task/taskManager'
 import { ConnectionManager } from '../websocket/connectionManager'
@@ -115,13 +116,13 @@ export class HttpServer {
   async start(): Promise<void> {
     for (let attempt = 1; attempt <= HttpServer.BIND_RETRIES; attempt++) {
       try {
-        await this.listenOnce()
+        await this.bindOnce()
         return
       } catch (error) {
         const inUse = (error as NodeJS.ErrnoException)?.code === 'EADDRINUSE'
         const last = attempt === HttpServer.BIND_RETRIES
         if (!inUse || last) {
-          logger.error('HTTP服务器启动失败:', error)
+          logger.error(describeHttpListenError(error, this.options.port))
           throw error
         }
         logger.warn(
@@ -133,24 +134,12 @@ export class HttpServer {
     }
   }
 
-  /** 单次监听尝试。失败时把 server 清掉，否则重试会挂在一个坏实例上 */
-  private listenOnce(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        const server = this.app.listen(this.options.port, this.options.host, () => {
-          this.server = server
-          logger.info(`HTTP服务器启动成功: http://${this.options.host}:${this.options.port}`)
-          resolve()
-        })
-
-        server.on('error', (error) => {
-          server.close()
-          reject(error)
-        })
-      } catch (error) {
-        reject(error)
-      }
-    })
+  /** 单次监听尝试。Express 5 的 listen 回调出错时也会被调用，判法见 `./listen.ts` */
+  private async bindOnce(): Promise<void> {
+    this.server = await listenOnce(this.app, this.options.port, this.options.host, (error) =>
+      logger.error('HTTP 调试服务运行中出错:', error)
+    )
+    logger.info(`HTTP服务器启动成功: http://${this.options.host}:${this.options.port}`)
   }
 
   /**

@@ -155,7 +155,8 @@ it.each([
   }>('AssetDetailsPanel.vue', ['previewUrl', 'folderPreviewUrl'], {
     ...scope,
     props: Object.assign(props, { folder: { img: url } }),
-    isImageAsset: ref(false)
+    isImageAsset: ref(false),
+    teamPreview: ref(null)
   })
   expect(folderPreviewUrl.value).toBe(expected)
   expect(previewUrl.value).toBe(expected)

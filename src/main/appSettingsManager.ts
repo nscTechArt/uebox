@@ -60,6 +60,12 @@ interface AppSettings {
   /** 启动项目时自动启用 UnrealAgentLink 插件 */
   autoEnableUnrealAgentLink: boolean
   /**
+   * 首次导入工程时「要不要装连接插件」那一问，问过没有。只问一次，答完不再问。
+   *
+   * 老用户（升级前就有配置文件）一律算问过：他们一直是自动安装，没必要补问。
+   */
+  ualinkInstallPromptShown: boolean
+  /**
    * 明确拒绝安装 UnrealAgentLink 的项目（规范化后的 .uproject 路径）。
    *
    * 用户在项目上点过「移除 UnrealAgentLink」就进这个名单。没有它的话，
@@ -171,7 +177,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoLaunch: false,
   enableFollowUpSuggestions: false,
   language: 'zh-CN',
-  autoEnableUnrealAgentLink: true,
+  // 默认关：往用户工程里写插件、改 .uproject，得先问一声。首次导入工程时弹窗问，
+  // 用户点了安装才打开（见 `ualinkInstallPromptShown`）
+  autoEnableUnrealAgentLink: false,
+  ualinkInstallPromptShown: false,
   ualinkOptOutProjects: [],
   // 默认嵌入助手：安全前提「用户看得见 agent 在操作什么」照样成立，
   // 但不会弹一个独立窗口盖在虚幻上面打断用户。默认值不该是把它藏起来的那一档
@@ -253,7 +262,10 @@ class AppSettingsManager {
           autoLaunch: mergedSettings.autoLaunch,
           enableFollowUpSuggestions: mergedSettings.enableFollowUpSuggestions,
           language: mergedSettings.language,
-          autoEnableUnrealAgentLink: mergedSettings.autoEnableUnrealAgentLink,
+          // 老配置里没写这个字段的，按当时的默认（开）算，别让升级悄悄把它关掉
+          autoEnableUnrealAgentLink: savedSettings.autoEnableUnrealAgentLink !== false,
+          // 有配置文件就是老用户：没写这个字段说明是升级上来的，不再补问
+          ualinkInstallPromptShown: savedSettings.ualinkInstallPromptShown !== false,
           ualinkOptOutProjects: mergedSettings.ualinkOptOutProjects,
           agentBrowserMode: mergedSettings.agentBrowserMode,
           agentFileAccessScope: mergedSettings.agentFileAccessScope,
@@ -629,6 +641,15 @@ class AppSettingsManager {
    */
   getAutoEnableUnrealAgentLink(): boolean {
     return this.settings.autoEnableUnrealAgentLink
+  }
+
+  /** 首次导入时的安装询问是否已经问过 */
+  getUALinkInstallPromptShown(): boolean {
+    return this.settings.ualinkInstallPromptShown
+  }
+
+  setUALinkInstallPromptShown(shown: boolean): void {
+    this.saveSettings({ ualinkInstallPromptShown: shown })
   }
 
   /**

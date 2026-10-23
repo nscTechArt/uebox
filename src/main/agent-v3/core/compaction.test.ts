@@ -710,11 +710,119 @@ describe('createAutoCompact —— 后台提前写摘要', () => {
     expect(await pending).toBe(messages)
   })
 
+  it('写好之后对话接着长：拿上一份摘要续写，撞线换上的是最新那份', async () => {
+    resetPrecompactionsForTest()
+    generateSummary
+      .mockReset()
+      .mockResolvedValueOnce({ ok: true, value: '第一份' })
+      .mockResolvedValueOnce({ ok: true, value: '续写的' })
+    // 200K 窗口：后台线 120K、压缩线 170K、续写步长 48K。13 条 × 10K = 130K
+    const messages = Array.from({ length: 13 }, (_, i) =>
+      bigMsg(i % 2 === 0 ? 'user' : 'assistant', 40_000)
+    )
+    await createAutoCompact(keyed(200_000))(messages)
+    await flush()
+
+    // 摘要外原来留 2 条（20K），再长 3 条就超过步长，还没到压缩线
+    messages.push(...Array.from({ length: 3 }, () => bigMsg('assistant', 40_000)))
+    await createAutoCompact(keyed(200_000))(messages)
+    await flush()
+    expect(generateSummary).toHaveBeenCalledTimes(2)
+    expect(generateSummary.mock.calls[1][6]).toBe('第一份')
+
+    // 换个窄窗口撞线：直接换上续写的那份，不当场再写
+    const result = await createAutoCompact(keyed(180_000))(messages)
+    expect(generateSummary).toHaveBeenCalledTimes(2)
+    expect(String((result[0] as { content: string }).content)).toContain('续写的')
+    expect(result.length).toBe(3)
+  })
+
+  it('续写失败：撞线时退回上一份，不当场重压', async () => {
+    resetPrecompactionsForTest()
+    generateSummary
+      .mockReset()
+      .mockResolvedValueOnce({ ok: true, value: '第一份' })
+      .mockResolvedValueOnce({ ok: false })
+    const messages = Array.from({ length: 13 }, (_, i) =>
+      bigMsg(i % 2 === 0 ? 'user' : 'assistant', 40_000)
+    )
+    await createAutoCompact(keyed(200_000))(messages)
+    await flush()
+    messages.push(...Array.from({ length: 3 }, () => bigMsg('assistant', 40_000)))
+    await createAutoCompact(keyed(200_000))(messages)
+    await flush()
+
+    // 换上第一份后剩 50K 原文，在 180K 窗口的后台线以下，不用再压
+    const result = await createAutoCompact(keyed(180_000))(messages)
+    expect(String((result[0] as { content: string }).content)).toContain('第一份')
+    expect(result.length).toBe(6)
+  })
+
+  it('换上后仍在后台线以上：当场把剩下那段也压掉', async () => {
+    resetPrecompactionsForTest()
+    generateSummary
+      .mockReset()
+      .mockResolvedValueOnce({ ok: true, value: '旧的' })
+      .mockResolvedValueOnce({ ok: true, value: '当场' })
+    const messages = Array.from({ length: 13 }, (_, i) =>
+      bigMsg(i % 2 === 0 ? 'user' : 'assistant', 40_000)
+    )
+    await createAutoCompact(keyed(200_000))(messages)
+    await flush()
+
+    // 一口气长了 9 条，没机会续写就撞线：换上旧的仍剩 110K 原文，超过 100K 窗口的后台线
+    messages.push(...Array.from({ length: 9 }, () => bigMsg('assistant', 40_000)))
+    const result = await createAutoCompact(keyed(100_000))(messages)
+    expect(generateSummary).toHaveBeenCalledTimes(2)
+    expect(String((result[0] as { content: string }).content)).toContain('当场')
+    expect(result.length).toBe(3)
+  })
+
   it('没给归属（子 agent）就不在后台写', async () => {
     resetPrecompactionsForTest()
     generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要' })
     await createAutoCompact({ ...deps(BELOW), hashMessages })(longHistory())
     await flush()
     expect(generateSummary).not.toHaveBeenCalled()
+  })
+})
+
+describe('createAutoCompact —— 超长补救的当场压缩', () => {
+  it('远没到压缩线也照压，返回的视图带着 system 消息，后续请求接着用这份检查点', async () => {
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要 O' })
+    const saved = vi.fn(async () => undefined)
+    const compact = createAutoCompact({
+      ...deps(10_000_000),
+      hashMessages: (messages) => `${messages.length}`,
+      checkpoint: { save: saved }
+    })
+    const messages = [
+      { role: 'system', content: '你是虚幻盒子', timestamp: 0 },
+      ...longHistory()
+    ] as unknown as AgentMessage[]
+
+    // 估算远在线下：transform 原样交回
+    expect(await compact(messages)).toBe(messages)
+    expect(generateSummary).not.toHaveBeenCalled()
+
+    const projected = await compact.compactForOverflow()
+
+    expect(projected).toBeDefined()
+    expect(projected![0]).toMatchObject({ role: 'system', content: '你是虚幻盒子' })
+    expect(String((projected![1] as { content: string }).content)).toContain('摘要 O')
+    expect(saved).toHaveBeenCalledTimes(1)
+    // 下一次请求经 transform 直接投影到同一份，不再调摘要模型
+    expect(JSON.stringify(await compact(messages))).toBe(JSON.stringify(projected))
+    expect(generateSummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('还没见过历史、或摘要失败时返回 undefined，交给调用方照常报错', async () => {
+    generateSummary.mockReset().mockResolvedValue({ ok: false, error: new Error('厂商 500') })
+    const compact = createAutoCompact(deps(10_000_000))
+
+    expect(await compact.compactForOverflow()).toBeUndefined()
+    await compact(longHistory())
+    expect(await compact.compactForOverflow()).toBeUndefined()
+    expect(generateSummary).toHaveBeenCalled()
   })
 })

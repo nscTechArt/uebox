@@ -33,12 +33,28 @@ vi.mock('@renderer/api/agentV3', () => ({
   }
 }))
 
+vi.mock('@renderer/api/share', () => ({
+  shareAPI: {
+    openPage: vi.fn(async () => undefined),
+    packSkill: vi.fn(),
+    submitSkill: vi.fn(),
+    onConnectPrompt: () => () => undefined
+  }
+}))
+
 import ProfileSkills from './ProfileSkills.vue'
 
 const SKILLS = [
   { name: 'ue-greybox-blockout', description: '搭灰盒', source: 'builtin', enabled: true },
   { name: 'my-skill', description: '我自己写的', source: 'user', enabled: true },
-  { name: 'off-skill', description: '关掉的那条', source: 'builtin', enabled: false }
+  { name: 'off-skill', description: '关掉的那条', source: 'builtin', enabled: false },
+  {
+    name: 'rename-assets',
+    description: '从共享库装的',
+    source: 'user',
+    enabled: true,
+    shared: { version: 2, author: '作者甲' }
+  }
 ]
 
 function mountPanel(): VueWrapper {
@@ -75,8 +91,17 @@ describe('技能清单', () => {
     const wrapper = mountPanel()
     await flushPromises()
 
-    expect(wrapper.findAll('.entity-item')).toHaveLength(3)
+    expect(wrapper.findAll('.entity-item')).toHaveLength(4)
     expect(wrapper.text()).toContain('off-skill')
+  })
+
+  it('从共享库装的标上来源和版本', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.findAll('.entity-item')[3].find('.badge').text()).toBe(
+      'profile.skills.sharedBadge'
+    )
   })
 
   it('页头没有批量删除按钮', async () => {
@@ -122,6 +147,27 @@ describe('详情弹窗', () => {
 
     expect(document.querySelector('.detail-footer')).not.toBeNull()
     expect(document.querySelector('.detail-footer')?.textContent).toContain('common.delete')
+  })
+
+  it('自己写的给「分享」按钮；从共享库装的不给 —— 那是别人的署名', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.findAll('.entity-open')[1].trigger('click')
+    await flushPromises()
+    expect(document.querySelector('.detail-footer')?.textContent).toContain('profile.skills.share')
+
+    readSkill.mockResolvedValue({
+      name: 'rename-assets',
+      source: 'user',
+      content: '---\nname: rename-assets\ndescription: 从共享库装的\n---\n',
+      savesAs: 'own'
+    })
+    await wrapper.findAll('.entity-open')[3].trigger('click')
+    await flushPromises()
+    expect(document.querySelector('.detail-footer')?.textContent).not.toContain(
+      'profile.skills.share'
+    )
   })
 
   it('内置的那份不给删除按钮 —— 删了下次启动又回来，给了就是骗人', async () => {

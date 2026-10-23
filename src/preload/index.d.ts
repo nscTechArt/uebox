@@ -10,6 +10,15 @@ import type {
 } from '../shared/agentNotificationActivation'
 import type { TrayAction, TrayRecentSession } from '../shared/trayActions'
 import type {
+  SharedSkillInstallFailure,
+  SharedSkillInstallOutcome,
+  SharedSkillInstallRequest,
+  SharedSkillOrigin,
+  SharedSkillPack,
+  SharedSkillConnectPrompt,
+  SharedSkillSubmitResult
+} from '../shared/share'
+import type {
   CommunityFetchResult,
   CommunityTemplate,
   TemplateDownloadProgress,
@@ -23,7 +32,13 @@ import type {
 } from '../shared/assetDependency'
 import type { AgentTurnUsage } from '../shared/agentUsage'
 import type { EditorHealthResult } from '../shared/editorHealth'
-import type { ModelCheckup, ModelDossier, TeamStateView } from '../shared/agentTeam'
+import type {
+  DismissalErrorCode,
+  ExternalTeamSummary,
+  ModelCheckup,
+  ModelDossier,
+  TeamStateView
+} from '../shared/agentTeam'
 import type { AgentReviewResult, AgentReviewTarget } from '../shared/agentReview'
 import type {
   AgentStartRejectionCode,
@@ -77,6 +92,7 @@ import type {
   CatalogClosure,
   CatalogUnclaimed
 } from '../shared/catalogLibrary'
+import type { TeamEvent, TeamFact, TeamJoinLink } from '../shared/teamProject'
 
 /** 服务端资产库 IPC 的统一返回形状（见 src/main/ipc/catalogLibrary.ts） */
 type CatalogIpcResult<T> =
@@ -807,6 +823,13 @@ declare global {
       ualinkRemove: (uprojectPath: string) => Promise<{ success: boolean; error?: string }>
       /** 把 UnrealAgentLink 装回项目 */
       ualinkInstall: (uprojectPath: string) => Promise<{ success: boolean; error?: string }>
+      /** 首次导入时那一问的答案；装失败的工程和原因码原样返回 */
+      ualinkPromptAnswer: (
+        install: boolean,
+        uprojectPaths: string[]
+      ) => Promise<Array<{ uprojectPath: string; reason: string }>>
+      /** 首次导入工程、自动安装又关着时，请界面问一句要不要装，返回退订函数 */
+      onUALinkInstallPrompt: (callback: (uprojectPath: string) => void) => () => void
       /** 「我的项目」里多了工程时的通知，返回退订函数 */
       onLibraryChanged: (callback: () => void) => () => void
       /** 开机后台升级插件失败时的通知，返回退订函数 */
@@ -3116,6 +3139,110 @@ declare global {
       /** 订阅主进程推来的失效 / 状态 / 作业进度；返回取消订阅 */
       onEvent: (listener: (event: CatalogLibraryEvent) => void) => () => void
     }
+    /** 共享技能（官网共享库）。类型见 src/shared/share.ts */
+    share: {
+      pendingInstalls: () => Promise<ShareIpcResult<SharedSkillInstallRequest[]>>
+      installReply: (
+        requestId: string,
+        approve: boolean
+      ) => Promise<ShareIpcResult<SharedSkillInstallOutcome>>
+      packSkill: (name: string) => Promise<ShareIpcResult<SharedSkillPack>>
+      submitSkill: (name: string) => Promise<ShareIpcResult<SharedSkillSubmitResult>>
+      connect: () => Promise<ShareIpcResult<{ account: string | null }>>
+      cancelConnect: () => Promise<void>
+      onConnectPrompt: (listener: (prompt: SharedSkillConnectPrompt) => void) => () => void
+      openPage: (url: string) => Promise<ShareIpcResult<void>>
+      onInstallRequest: (listener: (request: SharedSkillInstallRequest) => void) => () => void
+      onInstallFailed: (listener: (failure: SharedSkillInstallFailure) => void) => () => void
+    }
+    /**
+     * 团队工程（版本控制与资产协作）。`call` 的动作名和参数见
+     * src/main/libraryV3/team/teamOps.ts；返回值是团队服务成员面的 JSON（src/shared/teamProject.ts）。
+     */
+    team: {
+      join: (input: {
+        server: string
+        caFingerprint?: string | null
+        project?: string | null
+        member: string
+        password: string
+      }) => Promise<
+        CatalogIpcResult<{
+          member: string
+          displayName: string
+          keys: string[]
+          openKey: string | null
+          noProjects: boolean
+        }>
+      >
+      peek: (link: TeamJoinLink) => Promise<CatalogIpcResult<{ projectName: string | null }>>
+      parseLink: (raw: string) => Promise<CatalogIpcResult<TeamJoinLink | null>>
+      pendingJoinLink: () => Promise<CatalogIpcResult<TeamJoinLink | null>>
+      call: (key: string, op: string, args?: unknown) => Promise<CatalogIpcResult<unknown>>
+      facts: (
+        key: string,
+        hashes: string[],
+        library?: string | null
+      ) => Promise<CatalogIpcResult<Record<string, TeamFact | null>>>
+      inviteLink: (key: string) => Promise<CatalogIpcResult<string | null>>
+      startStreams: () => Promise<CatalogIpcResult<void>>
+      restartStream: (serverId: string) => Promise<CatalogIpcResult<void>>
+      streamState: (
+        serverId: string
+      ) => Promise<CatalogIpcResult<{ connected: boolean; signedOut: boolean }>>
+      localInfo: (key: string) => Promise<
+        CatalogIpcResult<{
+          localPath: string | null
+          exists: boolean
+          uproject: string | null
+          unsynced: string[]
+        }>
+      >
+      freeSpace: (path: string) => Promise<CatalogIpcResult<number | null>>
+      inspectFolder: (
+        path: string
+      ) => Promise<CatalogIpcResult<{ hasLore: boolean; uproject: string | null; empty: boolean }>>
+      syncToLocal: (
+        key: string,
+        input: { targetDir: string; existing?: boolean }
+      ) => Promise<CatalogIpcResult<string>>
+      putIn: (key: string, input: { sourceDir: string }) => Promise<CatalogIpcResult<string>>
+      setFolderSynced: (
+        key: string,
+        folder: string,
+        synced: boolean
+      ) => Promise<CatalogIpcResult<{ ok: boolean; pending: number }>>
+      restore: (
+        key: string,
+        input: { path: string; number: number }
+      ) => Promise<CatalogIpcResult<{ ok: boolean }>>
+      isModified: (key: string, path: string) => Promise<CatalogIpcResult<boolean>>
+      cancelCheckout: (
+        key: string,
+        input: { path: string; discard: boolean }
+      ) => Promise<CatalogIpcResult<{ kept: string | null }>>
+      deliver: (
+        key: string,
+        input: { files: string[]; message: string; facts?: unknown[] }
+      ) => Promise<CatalogIpcResult<string>>
+      approveDelivery: (
+        key: string,
+        input: { id: string; paths: string[]; message: string }
+      ) => Promise<CatalogIpcResult<string>>
+      sendReference: (
+        key: string,
+        input: { company: string; paths: string[]; note: string }
+      ) => Promise<CatalogIpcResult<string>>
+      openPath: (path: string) => Promise<CatalogIpcResult<boolean>>
+      notify: (input: {
+        key?: string
+        title: string
+        body: string
+        open?: { serverId: string; project: string; path?: string } | null
+      }) => Promise<CatalogIpcResult<boolean>>
+      /** 订阅团队事件（通知、该重新取了、通知流连上 / 断开、邀请链接）；返回取消订阅 */
+      onEvent: (listener: (event: TeamEvent) => void) => () => void
+    }
     /**
      * Agent V3 —— 扁平单 agent + pi 内核。
      *
@@ -3336,6 +3463,8 @@ declare global {
       teamState: (args: {
         sessionId: string
       }) => Promise<{ success: boolean; team: TeamStateView | null }>
+      /** 「外部团队」页：Claude Code 当大脑的那些团队（`ext-*`），最近的在前 */
+      externalTeams: () => Promise<{ success: boolean; teams: ExternalTeamSummary[] }>
       /** 任务板上卡住的一项改回待办，下一轮制作人会看到 */
       teamTaskReopen: (args: {
         sessionId: string
@@ -3353,6 +3482,12 @@ declare global {
         providerId: string
         modelId: string
       }) => Promise<{ success: boolean; error?: string; checkup?: ModelCheckup }>
+      /** 辞退一个队员。理由必填；手上有活的不行（errorKey 'busy'）。档案留在团队的账里 */
+      teamMemberDismiss: (args: {
+        sessionId: string
+        name: string
+        reason: string
+      }) => Promise<{ success: boolean; error?: string; errorKey?: DismissalErrorCode }>
       /** 结束团队模式。正在跑的时候不行（errorKey 'running'）；任务板和队员留在盘上 */
       teamEnd: (args: {
         sessionId: string
@@ -3754,7 +3889,11 @@ declare global {
     source: 'user' | 'plugin' | 'builtin'
     /** 用户有没有把它关掉。关掉的仍然在清单里 —— 否则没法再打开 */
     enabled: boolean
+    /** 从官网共享库装的 */
+    shared?: SharedSkillOrigin
   }
+
+  type ShareIpcResult<T> = { success: true; data: T } | { success: false; error: string }
 
   /** 一条经验在哪。主进程只认项目库里登记过的工程路径 */
   interface AgentV3ExperienceRef {

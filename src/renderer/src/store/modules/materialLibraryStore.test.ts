@@ -103,94 +103,37 @@ describe('materialLibraryStore', () => {
     const entry = createEntry({ id: 'material-2' })
 
     store.upsertEntries([entry])
-    const created = store.createCollection(' Metals ')
+    const created = store.createFolder(' Metals ')
 
     expect(created?.name).toBe('Metals')
 
-    store.assignToCollection('material-2', created?.id || null)
+    store.moveEntriesToFolder(['material-2'], created?.id || '')
     expect(store.entries[0]?.collectionId).toBe(created?.id)
-    expect(store.getCollectionEntries(created?.id || '')).toHaveLength(1)
 
     expect(store.renameCollection(created?.id || '', 'Hero Metals')).toBe(true)
     expect(store.collections[0]?.name).toBe('Hero Metals')
 
-    store.updateFilters({ activeCollectionId: created?.id || null })
     store.deleteCollection(created?.id || '')
 
     expect(store.collections).toHaveLength(0)
     expect(store.entries[0]?.collectionId).toBeUndefined()
-    expect(store.filters.activeCollectionId).toBeNull()
   })
 
-  it('filters entries by favorite and collection state', () => {
-    const store = useMaterialLibraryStore()
-    const favoriteEntry = createEntry({
-      id: 'material-3',
-      name: 'M_Favorite',
-      collectionId: 'collection-gold',
-      isFavorite: true
-    })
-    const regularEntry = createEntry({
-      id: 'material-4',
-      name: 'M_Regular',
-      assetPath: '/Game/Materials/M_Regular',
-      isFavorite: false
-    })
-
-    store.upsertEntries([favoriteEntry, regularEntry])
-    store.updateFilters({ favoriteState: 'favorite' })
-    expect(store.filteredEntries.map((item) => item.id)).toEqual([])
-
-    store.updateFilters({ searchQuery: 'favorite' })
-    expect(store.filteredEntries.map((item) => item.id)).toEqual(['material-3'])
-
-    store.updateFilters({ favoriteState: 'all', activeCollectionId: 'collection-gold' })
-    expect(store.filteredEntries.map((item) => item.id)).toEqual(['material-3'])
-  })
-
-  it('hides collection members from the main gallery unless searching or viewing the collection', () => {
-    const store = useMaterialLibraryStore()
-    store.upsertEntries([
-      createEntry({
-        id: 'material-5',
-        name: 'M_Grouped_A',
-        assetPath: '/Game/Materials/M_Grouped_A'
-      }),
-      createEntry({
-        id: 'material-6',
-        name: 'M_Grouped_B',
-        assetPath: '/Game/Materials/M_Grouped_B'
-      }),
-      createEntry({ id: 'material-7', name: 'M_Free', assetPath: '/Game/Materials/M_Free' })
-    ])
-
-    const collection = store.createCollection('Grouped', ['material-5', 'material-6'])
-
-    expect(collection?.entryIds).toEqual(['material-5', 'material-6'])
-    expect(store.filteredEntries.map((item) => item.id)).toEqual(['material-7'])
-
-    store.updateFilters({ searchQuery: 'grouped' })
-    expect(store.filteredEntries.map((item) => item.id)).toEqual(['material-5', 'material-6'])
-
-    store.updateFilters({ searchQuery: '', activeCollectionId: collection?.id || null })
-    expect(store.filteredEntries.map((item) => item.id)).toEqual(['material-5', 'material-6'])
-  })
-
-  it('dissolves material collections when removal leaves one entry', () => {
+  it('删掉文件夹里的材质时，文件夹留着 —— 剩一个、剩零个都不解散', () => {
     const store = useMaterialLibraryStore()
     store.upsertEntries([
       createEntry({ id: 'material-8', name: 'M_Left', assetPath: '/Game/Materials/M_Left' }),
       createEntry({ id: 'material-9', name: 'M_Right', assetPath: '/Game/Materials/M_Right' })
     ])
-    const collection = store.createCollection('Pair', ['material-8', 'material-9'])
-    store.updateFilters({ activeCollectionId: collection?.id || null })
+    const folder = store.createFolder('Pair')
+    store.moveEntriesToFolder(['material-8', 'material-9'], folder?.id || '')
 
-    store.assignToCollection('material-8', null)
+    store.deleteEntry('material-8')
+    expect(store.collections.find((c) => c.id === folder?.id)?.entryIds).toEqual(['material-9'])
+    expect(store.entries.find((e) => e.id === 'material-9')?.collectionId).toBe(folder?.id)
 
-    expect(store.collections).toHaveLength(0)
-    expect(store.entries.find((entry) => entry.id === 'material-8')?.collectionId).toBeUndefined()
-    expect(store.entries.find((entry) => entry.id === 'material-9')?.collectionId).toBeUndefined()
-    expect(store.filters.activeCollectionId).toBeNull()
+    store.deleteEntry('material-9')
+    expect(store.collections.find((c) => c.id === folder?.id)?.entryIds).toEqual([])
   })
 
   it('creates a local draft material entry without Unreal connectivity', () => {

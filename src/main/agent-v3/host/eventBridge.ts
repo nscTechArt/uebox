@@ -31,6 +31,7 @@ import {
 import { notifyAgentRun, toRunSignal } from './runObserver'
 import { rememberRunOwner } from './runOwners'
 import { stripEditorSnapshotBlock } from '../core/editorSnapshot'
+import { detailsForRenderer } from '../core/resultArchive'
 import { stripAttachmentBlock } from '../core/promptAttachments'
 import { parseMediaRef } from '../core/promptMedia'
 import { stripSteerContextBlock } from './steerQueue'
@@ -404,7 +405,9 @@ export function projectEvent(
             toolName: event.toolName,
             isError: event.isError,
             text: extractResultText(event.result),
-            details: (event.result as { details?: unknown } | undefined)?.details
+            details: detailsForRenderer(
+              (event.result as { details?: unknown } | undefined)?.details
+            )
           }
         }
       ]

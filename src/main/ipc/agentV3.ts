@@ -119,7 +119,7 @@ import {
   createGoalLoop,
   parseGoalCommand
 } from '../agent-v3/core/goalLoop'
-import { parseTeamCommand } from '../agent-v3/core/team/teamCommand'
+import { activeLoop, parseTeamCommand } from '../agent-v3/core/team/teamCommand'
 import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
 import { createTeamStore, PRODUCER } from '../agent-v3/core/team/teamStore'
 import { createTeamLive, type TeamLive } from '../agent-v3/core/team/teamLive'
@@ -133,6 +133,13 @@ import { setProviderUsageProbe } from '../ai/providerUsage'
 import { DEFAULT_GOAL_MAX_ROUNDS, normalizeGoalMaxRounds } from '../../shared/goalRounds'
 import { buildCrashNotice, type EditorWatchEvent } from '../agent-v3/core/team/editorWatch'
 import { startTeamEditorWatch } from './teamEditorWatch'
+import {
+  endExternalTeam,
+  externalTeamExists,
+  isExternalTeamId,
+  listExternalTeams,
+  readExternalTeamState
+} from './externalTeams'
 import { createTeamSnapshots } from './teamSnapshots'
 import {
   applyVerdict,
@@ -152,6 +159,11 @@ import {
   reopenedJobTask,
   verdictIsStale
 } from '../agent-v3/core/team/boardRecap'
+import {
+  DismissalError,
+  dismissMember,
+  formatUserDismissals
+} from '../agent-v3/core/team/dismissal'
 import {
   createRuntimeScopeId,
   formatLocalNow,
@@ -633,12 +645,17 @@ async function prepareTeam(
   liveTeams.set(ctx.sessionId, live)
   ctx.team = {
     objective: team.objective,
+    ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
     store,
     live,
     snapshots: createTeamSnapshots(),
     onVerdict: async (verdict) => {
       options.team = applyVerdict(options.team ?? team, verdict)
       await saveExecutionOptions(ctx.sessionId, options)
+      // 执行记录只留最近一次；每次的结论进团队事件，往来记录里一条一条看得到（落盘失败不影响交付闸）
+      await store
+        .recordEvent({ kind: 'verdict', verdict: options.team.verdict ?? 'fail' })
+        .catch(() => undefined)
       changed()
     }
   }
@@ -661,29 +678,36 @@ const liveTeams = new Map<string, TeamLive>()
 
 /** 任务板面板要的一整份。不是工作室的会话返回 null */
 async function readTeamState(sessionId: string): Promise<TeamStateView | null> {
+  // 外部团队（Claude Code 当大脑）没有盒子侧的对话，账在 external.json 里
+  if (isExternalTeamId(sessionId)) return readExternalTeamState(sessionId)
   const team = (await loadExecutionOptions(sessionId))?.team
   if (!team) return null
   const store = createTeamStore(teamDirsFor(sessionId))
-  const [members, board, mail, activity, jobs, events] = await Promise.all([
+  const [members, dismissals, board, mail, activity, jobs, events, usage] = await Promise.all([
     store.roster(),
+    store.dismissals(),
     store.board(),
     store.mail(),
     store.activity(TEAM_ACTIVITY_LOOKBACK),
     store.jobs(TEAM_PANEL_JOBS),
-    store.events(TEAM_PANEL_EVENTS)
+    store.events(TEAM_PANEL_EVENTS),
+    store.usage()
   ])
   return {
     objective: team.objective,
+    ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
     verdict: team.verdict,
     ...(team.verdictAt !== undefined ? { verdictAt: team.verdictAt } : {}),
     verdictStale: verdictIsStale(team.verdictAt, team.lastWriteAt, activity),
     deliveries: team.deliveries,
     ...(team.roundStartedAt !== undefined ? { roundStartedAt: team.roundStartedAt } : {}),
     members,
+    ...(dismissals.length ? { dismissals } : {}),
     board,
     mail: mail.slice(-TEAM_PANEL_MAIL),
     jobs,
     events,
+    ...(usage.total.total > 0 || usage.total.cost > 0 ? { usage } : {}),
     ...(liveTeams.has(sessionId) ? { live: liveTeams.get(sessionId)!.view() } : {})
   }
 }
@@ -708,6 +732,15 @@ function notifyModelRetry(
     model: info.model,
     reason: info.reason.slice(0, 120)
   })
+}
+
+/**
+ * 任务板上「重开」那两个入口认的「这是一个团队」：盒子里的看执行记录，外部团队看 external.json。
+ * 换模型不走这里 —— 外部团队的队员在 Claude Code 里，盒子换不了它的模型
+ */
+async function isTeamSession(sessionId: string): Promise<boolean> {
+  if (isExternalTeamId(sessionId)) return externalTeamExists(sessionId)
+  return Boolean((await loadExecutionOptions(sessionId))?.team)
 }
 
 /** 判「这一轮改没改过工程」「验收后改没改过」时，往回看多少条队员交活记录 */
@@ -781,11 +814,21 @@ async function teamCarryOverBlock(
   options: SessionExecutionOptions
 ): Promise<string> {
   const since = options.team?.roundStartedAt
-  if (!ctx.team || since === undefined) return ''
+  if (!ctx.team) return ''
+  // 用户在任务板上辞了人：告诉制作人一声（只说一次），免得它接着给这个人派活
+  const dismissed = await ctx.team.store
+    .takeUnnotifiedDismissals()
+    .then(formatUserDismissals)
+    .catch(() => '')
+  if (since === undefined) return dismissed
   try {
-    return formatBoardCarryOver(carryOverTasks(await ctx.team.store.board(), since), Date.now())
+    const board = formatBoardCarryOver(
+      carryOverTasks(await ctx.team.store.board(), since),
+      Date.now()
+    )
+    return [dismissed, board].filter(Boolean).join('\n\n')
   } catch {
-    return ''
+    return dismissed
   }
 }
 
@@ -1729,6 +1772,12 @@ export function registerAgentV3IPC(): void {
   })
 
   /** 工作室模式的任务板面板：名册、任务、留言、验收结论。不是工作室的会话给 null */
+  /** 「外部团队」页：Claude Code 当大脑的那些团队（`ext-*`），最近的在前 */
+  ipcMain.handle('agent-v3:external-teams', async () => ({
+    success: true,
+    teams: await listExternalTeams()
+  }))
+
   ipcMain.handle('agent-v3:team-state', async (_event, args: { sessionId?: string }) => {
     if (typeof args?.sessionId !== 'string' || !args.sessionId) return { success: true, team: null }
     return { success: true, team: await readTeamState(args.sessionId) }
@@ -1749,7 +1798,7 @@ export function registerAgentV3IPC(): void {
       if (typeof sessionId !== 'string' || !sessionId || typeof taskId !== 'string' || !taskId) {
         return { success: false, error: 'sessionId 和 taskId 都要给' }
       }
-      if (!(await loadExecutionOptions(sessionId))?.team) {
+      if (!(await isTeamSession(sessionId))) {
         return { success: false, error: '这条 session 不是团队模式' }
       }
       const store = createTeamStore(teamDirsFor(sessionId))
@@ -1785,7 +1834,7 @@ export function registerAgentV3IPC(): void {
       if (typeof sessionId !== 'string' || !sessionId || typeof jobId !== 'string' || !jobId) {
         return { success: false, error: 'sessionId 和 jobId 都要给' }
       }
-      if (!(await loadExecutionOptions(sessionId))?.team) {
+      if (!(await isTeamSession(sessionId))) {
         return { success: false, error: '这条 session 不是团队模式' }
       }
       const store = createTeamStore(teamDirsFor(sessionId))
@@ -1833,6 +1882,51 @@ export function registerAgentV3IPC(): void {
     }
   )
 
+  /**
+   * 用户在任务板上辞退一个队员。规矩和制作人的 `team_dismiss` 同一份（`dismissal.ts`）：
+   * 理由必填，手上有活的不能辞，没做完的任务清掉负责人，档案留底。
+   *
+   * 这一轮正跑着也允许，只要这个人手上没活：派活在轮到它开工时才读名册，
+   * 排着队的那件会因为它不在名册上而不开工。下一轮开局制作人会被告知（`teamCarryOverBlock`）。
+   */
+  ipcMain.handle(
+    'agent-v3:team-member-dismiss',
+    async (event, args: { sessionId?: string; name?: string; reason?: string }) => {
+      const { sessionId, name, reason } = args ?? {}
+      if (!sessionId || !name || typeof reason !== 'string') {
+        return { success: false, error: 'sessionId、name、reason 都要给' }
+      }
+      if (!(await loadExecutionOptions(sessionId))?.team) {
+        return { success: false, error: '这条 session 不是团队模式' }
+      }
+      const store = createTeamStore(teamDirsFor(sessionId))
+      // 没在跑的时候，账上挂着的「在干」是上次被打断留下的，下一轮开局会收掉，不算手上有活
+      const running = activeAgents.has(sessionId)
+      const openJobs = running
+        ? (await store.jobs()).filter((job) => job.endedAt === undefined)
+        : []
+      try {
+        await dismissMember(store, {
+          name,
+          by: 'user',
+          grounds: 'user',
+          reason: reason.slice(0, 500),
+          isBusy: (who) =>
+            running &&
+            (!!liveTeams.get(sessionId)?.isRunning(who) ||
+              openJobs.some((job) => job.member.toLowerCase() === who.toLowerCase()))
+        })
+      } catch (error) {
+        if (error instanceof DismissalError) {
+          return { success: false, error: error.message, errorKey: error.code }
+        }
+        throw error
+      }
+      event.sender.send('agent-v3:team-board', { sessionId })
+      return { success: true }
+    }
+  )
+
   /** 设置「团队」页：每个模型的体检结论和履历汇总（`modelDossier.ts`） */
   ipcMain.handle('agent-v3:team-models', async () => ({
     success: true,
@@ -1859,6 +1953,12 @@ export function registerAgentV3IPC(): void {
     const sessionId = args?.sessionId
     if (typeof sessionId !== 'string' || !sessionId)
       return { success: false, error: '缺 sessionId' }
+    // 外部团队只是标记结束：它的循环在 Claude Code 里，盒子停不了
+    if (isExternalTeamId(sessionId)) {
+      const found = await endExternalTeam(sessionId)
+      if (found) event.sender.send('agent-v3:team-board', { sessionId })
+      return found ? { success: true } : { success: false, error: '没有这个外部团队' }
+    }
     if (activeAgents.has(sessionId)) return { success: false, errorKey: 'running' }
     const options = await loadExecutionOptions(sessionId)
     if (!options?.team) return { success: true }
@@ -2254,8 +2354,15 @@ export function registerAgentV3IPC(): void {
        * 目标也是**跨轮**的：`/goal` 定下之后一直挂在这条会话上，直到用户在输入框上方
        * 那一行点掉（`agent-v3:goal-end`）。用户再说一句就是新的一轮，复核重新武装 ——
        * 上一轮「停下来交给你」也好、复核通过也好，用户开口了就该按目标再验一遍。
+       *
+       * 两套只挂一套（`activeLoop`）：新敲的命令替掉旧的。
        */
-      const goalSource = goalObjective ?? previousOptions?.goal?.objective
+      const loop = activeLoop(
+        goalObjective ? 'goal' : teamObjective ? 'team' : null,
+        previousOptions
+      )
+      const goalSource =
+        loop === 'goal' ? (goalObjective ?? previousOptions?.goal?.objective) : undefined
       const goal = goalSource
         ? {
             objective: goalSource,
@@ -2272,11 +2379,19 @@ export function registerAgentV3IPC(): void {
             settled: false
           }
         : undefined
-      const team = teamObjective
-        ? startTeamRound(newTeamState(teamObjective))
-        : previousOptions?.team
-          ? startTeamRound(previousOptions.team)
-          : undefined
+      const team =
+        loop !== 'team'
+          ? undefined
+          : teamObjective
+            ? startTeamRound(newTeamState(teamObjective))
+            : previousOptions?.team
+              ? // 沿用老团队的这一轮，记下用户刚说的话：验收员看不到对话，靠它知道目标改过什么。
+                // 截取的口径同上面的 `goal.latestRequest`
+                startTeamRound({
+                  ...previousOptions.team,
+                  latestRequest: tailOf(promptText, LATEST_REQUEST_MAX_CHARS)
+                })
+              : undefined
 
       /*
        * 落盘的是**归属表**里那份，不是文件里那份。
@@ -2328,6 +2443,22 @@ export function registerAgentV3IPC(): void {
       if (team) emit('agent-v3:team-board', { sessionId })
       // 输入框上方那行「当前目标」：新对话第一轮时渲染层还查不到，落盘后推一下
       emit('agent-v3:goal-state', { sessionId })
+      // 被新命令替掉的那一套：面板跟着收起，说一声为什么不见了。任务板、队员留在盘上，同 `agent-v3:team-end`
+      if (previousOptions?.team && !team) {
+        liveTeams.delete(sessionId)
+        emit('agent-v3:team-board', { sessionId })
+        emit('agent-v3:notice', {
+          sessionId,
+          message: '已结束团队模式，这一轮按目标执行。',
+          level: 'info'
+        })
+      } else if (previousOptions?.goal && !goal) {
+        emit('agent-v3:notice', {
+          sessionId,
+          message: '已结束当前目标，这一轮按团队模式执行。',
+          level: 'info'
+        })
+      }
       await prepareTeam(ctx, options, emit)
       run.controller.signal.throwIfAborted()
       const { agent, selection, tools, allTools, runtime } = await createUnrealAgent(ctx)
@@ -2923,9 +3054,17 @@ export function registerAgentV3IPC(): void {
    * **列的是盘上全部**，不是 agent 实际拿到的那份：过滤在
    * `discoverEnabledSkills()` 里，两边不能混用（见那个函数的注释）。
    */
-  ipcMain.handle('agent-v3:list-skills', async () => ({
-    skills: listSkillSummaries(await discoverSkillsOnDisk(), await readDisabledSkills())
-  }))
+  ipcMain.handle('agent-v3:list-skills', async () => {
+    const skills = await discoverSkillsOnDisk()
+    const { sharedSkillOrigins } = await import('../services/share/sharedSkills')
+    return {
+      skills: listSkillSummaries(
+        skills,
+        await readDisabledSkills(),
+        await sharedSkillOrigins(skills)
+      )
+    }
+  })
 
   /** 详情弹窗：读 SKILL.md 全文（含 frontmatter）。名字对不上返回 null */
   ipcMain.handle('agent-v3:read-skill', async (_event, name: unknown) => {

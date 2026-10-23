@@ -247,14 +247,17 @@
 
       <Transition name="popover-fade">
         <SkillCommandMenu
-          v-if="showSkillMenu && skillQuery !== null"
+          v-if="skillMenuVisible"
           ref="skillCommandMenuRef"
           :skills="installedSkills"
-          :query="skillQuery"
+          :query="skillQuery ?? ''"
           :loading="loadingSkills"
           :error="skillLoadError"
+          :show-attach="plusMenuOpen && skillQuery === null"
+          :show-commands="skillCommandsEnabled"
           @select="handleSelectSkill"
           @select-command="handleSelectCommand"
+          @attach="handleMenuAttach"
           @retry="loadSkills"
           @close="closeSkillMenu"
         />
@@ -303,9 +306,10 @@
           :auto-size="{ minRows: 1, maxRows: 10 }"
           aria-autocomplete="list"
           aria-controls="assistant-skill-command-menu"
-          :aria-expanded="showSkillMenu"
+          :aria-expanded="skillMenuVisible"
           spellcheck="false"
           @keydown="handleKeydown"
+          @blur="plusMenuOpen = false"
           @paste="handlePaste"
           @click="handleTextareaClick"
           @contextmenu.prevent="handleContextMenu"
@@ -337,7 +341,24 @@
               <span class="at-symbol">@</span>
             </AppButton>
           </AppTooltip>
-          <PhPaperclip class="tool" @click="triggerFileInput" />
+          <!--
+            「+」= 不用打 `/` 也能打开的那张命令与技能面板，顶上多一条「添加文件」。
+            mousedown 不抢焦点：输入框一失焦面板就收起，按钮自己再点就成了开了又关。
+          -->
+          <AppTooltip :title="t('assistantInputComposer.skillMenu.plusTooltip')">
+            <button
+              type="button"
+              class="plus-btn"
+              :class="{ active: plusMenuOpen }"
+              :aria-label="t('assistantInputComposer.skillMenu.plusTooltip')"
+              :aria-expanded="plusMenuOpen"
+              aria-controls="assistant-skill-command-menu"
+              @mousedown.prevent
+              @click="togglePlusMenu"
+            >
+              <PhPlus />
+            </button>
+          </AppTooltip>
           <input ref="fileInputRef" type="file" multiple hidden @change="handleFileSelect" />
           <!--
           审批策略。这是现在唯一的「让它别乱动」开关 —— 老的 Chat 模式已经删了，
@@ -824,7 +845,7 @@ import {
   PhMicrophone,
   PhNotePencil,
   PhPencilSimple,
-  PhPaperclip,
+  PhPlus,
   PhSealCheck,
   PhSliders,
   PhStop,
@@ -1605,6 +1626,11 @@ const installedSkills = ref<AgentV3SkillSummary[]>([])
 const loadingSkills = ref(false)
 const skillLoadError = ref('')
 const showSkillMenu = ref(false)
+/** 从「+」按钮打开的面板。输入框里不用有 `/`，所以不能跟着 skillQuery 走 */
+const plusMenuOpen = ref(false)
+const skillMenuVisible = computed(
+  () => (showSkillMenu.value && skillQuery.value !== null) || plusMenuOpen.value
+)
 
 const skillCommandsEnabled = computed(
   () => !isImageGenerationMode.value && !props.disabled && !props.isGenerating
@@ -1841,6 +1867,7 @@ function handleRemoveMention(sourceId: string): void {
  * 不在这里补一次的话，点击重新聚焦后菜单就再也弹不出来。
  */
 function handleTextareaClick(): void {
+  plusMenuOpen.value = false
   showMentionPopover.value = false
   showWikiPopover.value = false
   showSkillMenu.value = skillQuery.value !== null
@@ -1902,11 +1929,55 @@ async function loadSkills(): Promise<void> {
 
 function closeSkillMenu(): void {
   showSkillMenu.value = false
+  plusMenuOpen.value = false
+}
+
+/**
+ * 「+」面板里能不能挑技能。
+ *
+ * 比 `skillCommandsEnabled` 宽一档：正在生成时也能挑。技能就是插进草稿里的
+ * 一个 `$名字`，跟着插话一起送进正在跑的那一轮照样管用；命令不行，
+ * `/goal`、`/team` 这些只在开一轮新对话时才认，所以生成中面板里不列命令。
+ */
+const plusMenuSkillsEnabled = computed(() => !isImageGenerationMode.value && !props.disabled)
+
+/**
+ * 「+」打开面板。生成图片模式下技能和命令都用不上，面板里只剩「添加文件」
+ * 一条，那就不必多弹一层，直接开文件选择器。
+ */
+function togglePlusMenu(): void {
+  if (plusMenuOpen.value) {
+    plusMenuOpen.value = false
+    return
+  }
+  if (!plusMenuSkillsEnabled.value) {
+    triggerFileInput()
+    return
+  }
+
+  showMentionPopover.value = false
+  showWikiPopover.value = false
+  plusMenuOpen.value = true
+  void loadSkills()
+  focus()
+}
+
+function handleMenuAttach(): void {
+  closeSkillMenu()
+  triggerFileInput()
+}
+
+/**
+ * 从「+」选的时候输入框里是用户已经写好的草稿，不能像 `/关键词` 那样整个换掉：
+ * 前缀插到草稿前面。打 `/` 选的时候草稿就是那串 `/关键词`，丢掉正好。
+ */
+function draftAfterPick(): string {
+  return plusMenuOpen.value ? content.value.trimStart() : ''
 }
 
 function handleSelectSkill(skill: AgentV3SkillSummary): void {
-  content.value = skillMention(skill.name)
-  showSkillMenu.value = false
+  content.value = skillMention(skill.name) + draftAfterPick()
+  closeSkillMenu()
 
   focus()
 }
@@ -1922,18 +1993,24 @@ function handleSelectSkill(skill: AgentV3SkillSummary): void {
  * 是白让他多按一下。
  */
 function handleSelectCommand(command: SlashCommand): void {
-  showSkillMenu.value = false
+  const draft = draftAfterPick()
+  closeSkillMenu()
 
   if (command.kind === 'run') {
-    content.value = ''
+    content.value = draft
     emit('run-command', command.name)
     focus()
     return
   }
 
-  content.value = slashCommandInsertion(command.name)
+  content.value = slashCommandInsertion(command.name) + draft
   focus()
 }
+
+// 面板开着又接着打字：打的是 `/` 就交给下面那个 watcher 换成筛选，打别的就收起
+watch(content, () => {
+  plusMenuOpen.value = false
+})
 
 watch(skillQuery, (query, previousQuery) => {
   if (query === null) {
@@ -3018,7 +3095,7 @@ watch(
 function handleKeydown(e: KeyboardEvent): void {
   if (props.disabled) return
 
-  if (showSkillMenu.value && skillCommandMenuRef.value?.onKeydown(e)) return
+  if (skillMenuVisible.value && skillCommandMenuRef.value?.onKeydown(e)) return
 
   // 修复在输入框中无法使用快捷键全选的问题
   const isSelectAll = (e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'a'
@@ -3941,22 +4018,39 @@ onMounted(() => {
   border-top: 0;
 }
 
-.tool {
-  font-size: 18px;
+/* 和右边的审批档、思考档同一套：24 高、无底无边、悬停才给表面色。
+   单独描一圈边的话，整排只有它是个「按钮」，别的都是文字，看着不在一条线上 */
+.plus-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   color: var(--color-text-primary);
+  font-size: 16px;
+  background: transparent;
+  border: none;
+  border-radius: 16px;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 8px;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background var(--motion-fast) var(--easing-standard);
 
-  &:hover {
-    color: var(--color-accent-text);
-    background: var(--color-accent-bg);
-    transform: rotate(-12deg);
+  svg {
+    transition: transform var(--motion-fast) var(--easing-standard);
   }
 
-  &:active {
-    transform: scale(0.9) rotate(-12deg);
+  &:hover {
+    background: var(--color-bg-surface-hover);
+  }
+
+  // 开着的时候转成 ×，告诉用户再点一下是收起
+  &.active svg {
+    transform: rotate(45deg);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-border-focus);
+    outline-offset: 2px;
   }
 }
 

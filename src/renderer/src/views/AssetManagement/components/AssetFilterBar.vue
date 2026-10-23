@@ -390,7 +390,7 @@
         </button>
       </a-popover>
 
-      <!-- 引擎版本（服务器库的分面，带数量） -->
+      <!-- 引擎版本（库的分面，带数量） -->
       <AppDropdown v-if="libraryCaps.filters.engine" :trigger="['click']" placement="bottomLeft">
         <button
           class="filter-dropdown-btn"
@@ -742,7 +742,7 @@ const engineButtonLabel = computed((): string => {
   if (selected.length === 1) return selected[0]
   return t('catalogLibrary.filter.enginesWithCount', { count: selected.length })
 })
-/** 引擎版本的取值和数量来自服务端分面（整个库） */
+/** 引擎版本的取值和数量来自库的分面（当前文件夹 + 搜索词范围内） */
 async function loadEngineOptions(): Promise<void> {
   const facets = getActiveLibrarySource().facets
   if (!facets) return

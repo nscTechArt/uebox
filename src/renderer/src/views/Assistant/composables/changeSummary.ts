@@ -472,8 +472,10 @@ function readUndoableFlag(result: unknown): boolean | null {
 const DETAIL_KEYS: Record<string, readonly string[]> = {
   run_shell_command: ['command'],
   ue_run_console_command: ['command'],
-  // 跑 skill 自带脚本时没有 script 原文，报出是哪个脚本
-  ue_run_python_script: ['script', 'skill_script'],
+  // 脚本先取模型写的用途说明。原文开头十有八九是 `import unreal`，清单上
+  // 一溜六十行 `import unreal` 等于什么都没说。没写说明的（老记录）退回原文，
+  // 跑 skill 自带脚本时没有原文，报出是哪个脚本
+  ue_run_python_script: ['description', 'script', 'skill_script'],
   ue_manage_plugin: ['action']
 }
 

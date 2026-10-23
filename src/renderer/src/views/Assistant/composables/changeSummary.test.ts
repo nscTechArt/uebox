@@ -560,6 +560,21 @@ describe('引擎命令与脚本', () => {
     expect(changes.map((change) => change.detail)).toEqual(['print(1)', 'stat fps'])
   })
 
+  it('脚本写了用途就列用途，不列以 import unreal 开头的原文', () => {
+    const changes = summarizeChanges(
+      [
+        call('ue_run_python_script', {
+          script: 'import unreal\nunreal.log(1)',
+          description: '给路灯调亮度'
+        }),
+        result('ue_run_python_script')
+      ],
+      SHELL_RISKS
+    )
+
+    expect(changes[0].detail).toBe('给路灯调亮度')
+  })
+
   it('本地命令行进得了台账，但分不到这一区的行里', () => {
     const changes = summarizeChanges(
       [call('run_shell_command', { command: 'git status' }), result('run_shell_command')],

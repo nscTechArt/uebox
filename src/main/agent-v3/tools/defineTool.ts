@@ -92,6 +92,8 @@ export interface ToolSpec<TIn extends z.ZodTypeAny, TDetails = unknown> {
   riskFor?: (args: z.infer<TIn>) => ToolRisk
   /** 能否与同批其他工具并发执行。改同一份资源的工具要声明 sequential */
   concurrency?: 'sequential' | 'parallel'
+  /** 见 `ArchiveSpec` */
+  archive?: ArchiveSpec
   execute: (args: z.infer<TIn>, ctx: ToolCallContext<TDetails>) => Promise<ToolOutcome<TDetails>>
 }
 
@@ -177,6 +179,32 @@ export interface ToolMeta {
    * 在预演上点的允许放不过真正的那次。
    */
   riskFor?: (args: unknown) => ToolRisk
+  /** 见 `ArchiveSpec`。没声明的工具结果原样给模型 */
+  archive?: ArchiveSpec
+}
+
+/**
+ * 结果里哪个字段是「一张表」，以及目录页显示哪几列。
+ *
+ * 结果太大时只给模型目录页和一个编号，整份存在这条消息的 details 里，
+ * 模型用 `result_query` 按条件取（见 `core/resultArchive.ts`）。
+ * 键是表字段名，值是目录列；同一个工具不同动作回不同的表时写多项，取第一个出现的。
+ */
+export interface ArchiveSpec {
+  // 值允许 undefined：注册表是一张异构字面量数组，TS 会给别的工具的表名补上 `?: undefined`
+  lists: Readonly<Record<string, readonly string[] | undefined>>
+  /**
+   * 表在哪。默认 `text`：给模型的文本就是 JSON，目录页替换它。
+   * `details`：工具自己把结果排成了文字（并已自行封顶），表在 details 里 ——
+   * 文字原样给，后面补一句存档编号，被它自己的额度截掉的部分凭编号取
+   */
+  source?: 'text' | 'details'
+  /**
+   * 只给 `details` 来源用：存档时换用的那份小额度正文。工具自己的正文得照顾
+   * 不存档的调用方（外部 MCP、没有 result_query 的会话），额度只能放大；
+   * 存档时额度外凭编号取得到，正文就该收小
+   */
+  compact?: (details: unknown) => string
 }
 
 const RISK_RANK: Record<ToolRisk, number> = { safe: 0, mutating: 1, destructive: 2 }
@@ -292,7 +320,8 @@ export function defineTool<TIn extends z.ZodTypeAny, TDetails = unknown>(
       namespace: spec.namespace,
       risk,
       ...(spec.requiresExplicitApproval ? { requiresExplicitApproval: true } : {}),
-      ...(spec.riskFor ? { riskFor: spec.riskFor as (args: unknown) => ToolRisk } : {})
+      ...(spec.riskFor ? { riskFor: spec.riskFor as (args: unknown) => ToolRisk } : {}),
+      ...(spec.archive ? { archive: spec.archive } : {})
     }
   }
 

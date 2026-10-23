@@ -3,7 +3,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 
 import TeamBoardPanel from './TeamBoardPanel.vue'
 import { setOfficeStyle } from './teamOffice/officeStyle'
-import type { TeamModelCandidate, TeamStateView } from '@core/shared/agentTeam'
+import type { TeamModelCandidate, TeamStateView, TeamUsage } from '@core/shared/agentTeam'
 
 const now = Date.now()
 const min = (n: number): number => now - n * 60_000
@@ -74,7 +74,13 @@ const team: TeamStateView = {
 /** 正文渲染器、办公室换成小壳：这里只测任务板 */
 const stubs = {
   MarkdownRenderer: { props: ['content'], template: '<div class="md-stub">{{ content }}</div>' },
-  TeamOffice: { template: '<div class="office-stub" />' }
+  TeamOffice: { template: '<div class="office-stub" />' },
+  // 辞退对话框里的输入框（antd），换成原生的
+  'a-textarea': {
+    props: ['value'],
+    emits: ['update:value'],
+    template: `<textarea :value="value" @input="$emit('update:value', $event.target.value)" />`
+  }
 }
 
 function docked(props: Record<string, unknown> = {}): VueWrapper {
@@ -134,6 +140,60 @@ describe('TeamBoardPanel 摘要行', () => {
     const running = docked({ running: true })
     expect(running.find('.team-board-end').attributes('disabled')).toBeDefined()
   })
+
+  it('外部团队（Claude Code 当大脑）：照实标出来；结束了的不能再结束', () => {
+    const external = docked({ team: { ...team, external: true } })
+    expect(external.text()).toContain('Claude Code 驱动')
+    expect(external.find('.team-board-end').attributes('disabled')).toBeUndefined()
+    expect(docked().text()).not.toContain('Claude Code 驱动')
+
+    const ended = docked({ team: { ...team, external: true, ended: true } })
+    expect(ended.find('.team-board-end').attributes('disabled')).toBeDefined()
+    expect(ended.find('.team-board-end').text()).toBe('已结束')
+  })
+
+  it('团队用量：收起时跟在摘要后面，右侧面板里点开按人看；没价目的不显示金额', async () => {
+    const usage = (total: number, cost: number): TeamUsage => ({
+      input: total,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total,
+      cost,
+      unpriced: cost > 0 ? 0 : total
+    })
+    const withUsage: TeamStateView = {
+      ...team,
+      usage: {
+        total: { ...usage(46_000, 0.5), unpriced: 6000 },
+        byWho: {
+          acceptor: usage(6000, 0),
+          资产统计员: usage(30_000, 0.5),
+          producer: usage(10_000, 0)
+        }
+      }
+    }
+    expect(
+      mount(TeamBoardPanel, { props: { team: withUsage } })
+        .find('.team-board-head')
+        .text()
+    ).toContain('46k tokens · $0.5000')
+    // 没记过用量的老团队：不显示
+    expect(docked().find('.team-board-usage').exists()).toBe(false)
+
+    const wrapper = docked({ team: withUsage })
+    expect(wrapper.find('.team-board-head .head-meta').text()).not.toContain('tokens')
+    await wrapper.find('.team-board-usage').trigger('click')
+    const rows = [...document.querySelectorAll('.usage-pop-row')].map((el) => el.textContent)
+    expect(rows).toEqual([
+      '制作人10k tokens',
+      '资产统计员30k tokens · $0.5000',
+      '验收员6.0k tokens',
+      '合计46k tokens · $0.5000'
+    ])
+    expect(document.querySelector('.usage-pop')!.textContent).toContain('金额只含有价目的部分')
+    wrapper.unmount()
+  })
 })
 
 describe('像素画风：委托板', () => {
@@ -146,6 +206,24 @@ describe('像素画风：委托板', () => {
     ])
     // 上一轮的验收不盖章
     expect(wrapper.find('.stamp').exists()).toBe(false)
+    expect(wrapper.find('.pips').classes()).not.toContain('is-dense')
+  })
+
+  it('活多了进度格收窄、折行，计数仍在格子外', () => {
+    const many = Array.from({ length: 46 }, (_, i) => ({
+      id: `m${i}`,
+      member: '资产统计员',
+      brief: `第 ${i} 件`,
+      startedAt: min(10),
+      endedAt: min(5),
+      outcome: 'done' as const
+    }))
+    const wrapper = docked({ team: { ...team, jobs: many } })
+    const pips = wrapper.find('.banner-progress .pips')
+    expect(pips.classes()).toContain('is-dense')
+    expect(pips.findAll('.pip')).toHaveLength(46)
+    // 计数不跟格子一起折行
+    expect(pips.find('.pixel-text').exists()).toBe(false)
   })
 
   it('角色卡：气泡说此刻在干嘛；交过活的说交了什么、右上角记几份', () => {
@@ -191,7 +269,7 @@ describe('像素画风：委托板', () => {
     expect(wrapper.find('.scroll-open').exists()).toBe(false)
   })
 
-  it('任务板、日志默认收着：日志只露最新一条；交付那条点了展开那份卷轴', async () => {
+  it('任务板、日志默认收着：日志只露最新一条；交付那条点了要求另开页签看', async () => {
     const wrapper = docked({ running: true })
     const [board, log] = wrapper.findAll('.q-fold-box')
     expect(board!.find('.board-list').exists()).toBe(false)
@@ -202,7 +280,9 @@ describe('像素画风：委托板', () => {
     expect(items.length).toBeGreaterThan(3)
     const delivered = items.find((item) => item.classes().includes('is-delivered'))!
     await delivered.find('button').trigger('click')
-    expect(wrapper.find('.scroll-open .parch-title').text()).toBe('配置统计报告')
+    expect(wrapper.find('.scroll-open').exists()).toBe(false)
+    const [report] = wrapper.emitted('open-report')![0] as [{ id: string; title: string }]
+    expect(report.title).toBe('配置统计报告')
   })
 
   it('还没招人、还没派活：说清楚在等什么', () => {
@@ -319,5 +399,96 @@ describe('队员的模型（打开角色详情后出现）', () => {
     expect(wrapper.emitted('set-model')).toEqual([
       ['搭建', { providerId: 'anthropic', modelId: 'opus' }]
     ])
+  })
+})
+
+describe('辞退队员', () => {
+  function mountWith(props: Record<string, unknown> = {}): VueWrapper {
+    return mount(TeamBoardPanel, {
+      props: { team, docked: true, ...props },
+      global: { stubs },
+      attachTo: document.body
+    })
+  }
+  async function openCard(wrapper: VueWrapper, name: string): Promise<void> {
+    await wrapper
+      .findAll('.crew-card')
+      .find((card) => card.text().includes(name))!
+      .trigger('click')
+  }
+  const okButton = (): HTMLButtonElement =>
+    [...document.querySelectorAll<HTMLButtonElement>('.app-modal__footer button')].at(-1)!
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('手上有活的灰掉；空着的点开写了理由才能确认，确认后报给外面', async () => {
+    setOfficeStyle('v2')
+    const wrapper = mountWith()
+    await openCard(wrapper, '资产统计员')
+    expect(wrapper.find('.member-dismiss').attributes('disabled')).toBeDefined()
+
+    await openCard(wrapper, '配置统计员')
+    const button = wrapper.find('.member-dismiss')
+    expect(button.attributes('disabled')).toBeUndefined()
+    await button.trigger('click')
+    // 事实和档案同一份：配置统计员交回过 1 件
+    expect(document.body.textContent).toContain('已交回 1 项任务，中途停止 0 项')
+    expect(okButton().disabled).toBe(true)
+
+    const field = document.querySelector('textarea')!
+    field.value = '统计口径不对'
+    field.dispatchEvent(new Event('input'))
+    await wrapper.vm.$nextTick()
+    expect(okButton().disabled).toBe(false)
+    okButton().click()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('dismiss')).toEqual([['配置统计员', '统计口径不对']])
+  })
+
+  it('外部团队不给辞退入口', async () => {
+    setOfficeStyle('v2')
+    const wrapper = mountWith({ team: { ...team, external: true } })
+    await openCard(wrapper, '配置统计员')
+    expect(wrapper.find('.member-dismiss').exists()).toBe(false)
+  })
+
+  it('辞退档案默认收着，点开看谁辞的、理由、事实和交接', async () => {
+    setOfficeStyle('v1')
+    const wrapper = mountWith({
+      team: {
+        ...team,
+        dismissals: [
+          {
+            name: '美术',
+            at: min(10),
+            by: 'producer',
+            grounds: 'quality',
+            reason: '贴图两次被打回',
+            evidence: [{ kind: 'job', id: 'j7', text: '画主角（交回）' }],
+            facts: {
+              jobsDone: 2,
+              jobsStopped: 1,
+              tasks: { todo: 0, doing: 1, done: 2, blocked: 0 }
+            },
+            member: { name: '美术', persona: '画', tier: 'strong', readOnly: false, hiredAt: 1 },
+            handover: { tasks: ['t9'] },
+            memoryArchive: 'members/dismissed/美术-1.json'
+          }
+        ]
+      }
+    })
+    const section = wrapper.find('.dismissals')
+    expect(section.text()).toContain('已辞退 1 人')
+    expect(section.find('.record').exists()).toBe(false)
+    await section.find('.fold').trigger('click')
+    const text = section.text()
+    expect(text).toContain('由制作人辞退')
+    expect(text).toContain('交付不达标')
+    expect(text).toContain('贴图两次被打回')
+    expect(text).toContain('已交回 2 项任务，中途停止 1 项')
+    expect(text).toContain('j7 画主角（交回）')
+    expect(text).toContain('未完成的任务已清除负责人：t9')
   })
 })

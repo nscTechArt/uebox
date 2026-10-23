@@ -34,6 +34,7 @@ export default {
     model3dStudio: '3D 工作室',
     aigcStudio: 'AI 创作',
     serverManagement: '服务器管理',
+    externalTeams: '外部团队',
     appName: '虚幻盒子'
   },
   // 侧边栏工具定制：常驻名单与「更多」分组
@@ -564,6 +565,7 @@ export default {
       zcodeHint:
         '请先在 ZCode 授权并开通 Coding Plan，再通过 Z.ai 账号登录；也可填写订阅 JWT。此入口只使用 ZCode 订阅，不回退到普通 API 余额。平台要求重新验证时，请在 ZCode 完成验证后重试。',
       oauthKeyFetched: '已从 {name} 取回密钥并填入上方，点「保存」后生效',
+      oauthShared: '沿用「{name}」的账号登录，点「保存」即可',
       getKey: '去获取 API 密钥 ↗',
       oauthOpening: '浏览器已打开，请完成授权',
       authorizing: '等待浏览器授权… 点此取消',
@@ -717,7 +719,8 @@ export default {
       model3dMissing: '3D 生成不可用',
       search: '网页检索',
       searchDesc: '选择网页搜索服务；未配置时使用内置浏览器。',
-      searchMore: '内置浏览器无需配置；也可使用 Jina 或自建 SearXNG，费用以所选服务为准。',
+      searchMore:
+        '内置浏览器无需配置；也可使用 Jina、DeepSeek 或自建 SearXNG，费用以所选服务为准。',
       searchMissing: '网页检索不可用',
       judge: '结构化判定',
       judgeDesc: '可选。用于收紧 Agent 的护栏；未配置时保持当前行为，功能不受影响。',
@@ -1456,10 +1459,10 @@ export default {
   },
   catalogLibrary: {
     switcher: {
-      badge: '服务器',
+      badge: '团队',
       state: {
         online: '已连接',
-        offline: '无法连接服务器',
+        offline: '无法连接团队',
         signedOut: '需要重新登录',
         unknown: '未连接'
       },
@@ -1847,6 +1850,14 @@ export default {
           create: '新建工程',
           createCollection: '创建分组',
           refresh: '刷新'
+        },
+        ualinkPrompt: {
+          title: '为导入的工程安装连接插件？',
+          content:
+            '连接插件装在工程的 Plugins 目录下，不改动引擎。不安装则 AI 无法操作该工程。安装后可在工程右键菜单中移除，也可在「设置 → 插件」中关闭自动安装。此提示只出现一次。',
+          install: '安装',
+          skip: '暂不安装',
+          installed: '连接插件已安装'
         },
         ualink: {
           removeTitle: '从此项目移除 UnrealAgentLink？',
@@ -2421,6 +2432,8 @@ export default {
         widget_add_child: '添加子控件',
         widget_make_variable: '将控件设为变量',
         widget_set_property: '修改控件属性',
+        widget_replace: '替换控件',
+        widget_remove: '删除控件',
 
         // 本地文件与其他
         write_local_file: '写入文件',
@@ -2594,6 +2607,13 @@ export default {
       assistant: '助手'
     },
     teamBoard: {
+      external: {
+        label: 'Claude Code 驱动',
+        hint: '大脑在 Claude Code 里：队员用的模型和花掉的额度盒子都看不到，这里只记任务板、留言、快照和验收。',
+        endHint:
+          '标记这个团队已结束。盒子停不了 Claude Code，那边还在跑的话要在 Claude Code 里停。',
+        ended: '已结束'
+      },
       ui: {
         quest: '委托',
         crew: '队员',
@@ -2662,8 +2682,12 @@ export default {
       tab: '团队任务',
       openTab: '在右侧面板查看团队任务',
       closeTab: '关闭团队任务',
+      closeReport: '关闭这份交付',
+      reportGone: '这份交付已经不在团队记录里了',
       selfReportedHint: '由队员自行标记，虚幻盒子未核实；以验收结论为准',
       objective: '目标',
+      latestRequest: '最新要求：',
+      latestRequestLabel: '最新要求',
       noTasks: '任务板为空',
       evidence: '证据：',
       readOnlyHint: '只读：只查看，不修改工程',
@@ -2714,6 +2738,16 @@ export default {
         days: '{n} 天前'
       },
       producer: '制作人',
+      usage: {
+        label: '{total} tokens',
+        labelWithCost: '{total} tokens · {cost}',
+        open: '查看各成员的用量',
+        title: '团队用量',
+        acceptor: '验收员',
+        total: '合计',
+        hint: '制作人、队员和验收员实际发送给模型及模型返回的 token，按服务商计费口径累计',
+        partialCost: '部分模型没有价目，金额只含有价目的部分'
+      },
       fast: '快档',
       readOnly: '只读',
       model: {
@@ -2727,6 +2761,32 @@ export default {
         checking: '正在检测 {model} 的连通性和工具调用能力…',
         checkupFailed: '{model} 检测未通过，未更换：{reason}',
         checkupNoTools: '两次要求调用工具均未调用，该模型无法担任队员'
+      },
+      dismiss: {
+        action: '辞退',
+        title: '辞退 {name}',
+        lead: '{name} 将移出团队，记忆归档保留，不会删除。',
+        handover: '名下 {n} 项未完成的任务将清除负责人，由制作人重新分配。',
+        facts: '已交回 {done} 项任务，中途停止 {stopped} 项',
+        reasonLabel: '辞退理由',
+        reasonPlaceholder: '说明哪里不满意。理由记入档案，并在下一轮告知制作人',
+        busyHint: '{name} 正在执行任务，任务交回后才能辞退',
+        busy: '{name} 正在执行任务，请在任务交回或本轮结束后再辞退',
+        failed: '辞退失败，请稍后重试',
+        records: '已辞退 {n} 人',
+        byUser: '由你辞退',
+        byProducer: '由制作人辞退',
+        grounds: {
+          quality: '交付不达标',
+          unfinished: '任务屡次未完成',
+          redundant: '岗位不再需要',
+          user_request: '应你的要求',
+          user: '你的决定'
+        },
+        evidence: '证据',
+        handedTo: '未完成的任务已转给 {name}：{tasks}',
+        unassigned: '未完成的任务已清除负责人：{tasks}',
+        memoryArchived: '记忆已归档'
       },
       office: {
         aria: '团队办公室：{summary}',
@@ -2881,6 +2941,7 @@ export default {
         team_message: '发送留言',
         team_deliver: '提交交付',
         team_hire: '添加队员',
+        team_dismiss: '辞退队员',
         team_snapshot: '保存工程快照',
         ue_list: '查看列表',
         ue_project_asset_ranking: '统计资产占用',
@@ -3441,7 +3502,45 @@ export default {
       deleteTitle: '删除「{name}」？',
       deleteContent: '将删除该技能的整个目录，且不会移入回收站。',
       deletedGone: '「{name}」已删除',
-      deletedRestored: '自定义副本已删除，「{name}」已恢复为原版'
+      deletedRestored: '自定义副本已删除，「{name}」已恢复为原版',
+      // 共享技能（官网共享库）
+      sharedBadge: '来自共享 · 第 {version} 版',
+      browseShared: '浏览共享技能',
+      share: '分享',
+      shareTitle: '分享「{name}」',
+      shareNote: '发布到官网共享库，其他用户可以安装。以后用同一个账户再分享这个技能就是更新。',
+      shareFiles: '将提交以下文件',
+      shareSkipped: '以下文件不符合共享要求，不会提交：{list}',
+      shareAccount: '作者',
+      shareAsAccount: '以 UEBox 账户「{account}」发布。',
+      shareNeedAccount:
+        '分享需要 UEBox 账户。点「连接账户」后会在浏览器打开授权页，登录并点「允许」即可。',
+      shareConnect: '连接账户',
+      shareConnectCode: '请确认网页上显示的校验码是',
+      shareConnectFailed: '连接失败：{reason}',
+      shareSubmit: '发布',
+      shareLoadFailed: '无法分享：{reason}',
+      shareFailed: '发布失败：{reason}',
+      sharePending: '已提交。新账户的第一份技能需要管理员审核，通过后公开。',
+      sharePublished: '已发布（第 {version} 版）。',
+      shareView: '在官网查看',
+      // 安装确认框
+      installTitle: '安装共享技能',
+      installFrom: {
+        link: '安装请求来自网页。',
+        tool: '安装请求来自 Agent 或命令行。'
+      },
+      installMeta: '作者 {author} · 第 {version} 版 · 更新于 {date}',
+      installReview: '技能会影响 Agent 的行为。请阅读全文后再安装。',
+      installConflict: {
+        update: '已安装第 {from} 版，安装后将更新到第 {to} 版。',
+        own: '本机已有同名的自定义技能，安装后将被替换。',
+        builtin: '本机已有同名的内置或插件技能，安装后将使用此共享版本。'
+      },
+      installPage: '在官网查看',
+      install: '安装',
+      installed: '已安装技能「{name}」，下次任务生效。',
+      installFailed: '安装失败：{reason}'
     },
     // 经验库：做事时踩过又绕过去的坑（见 ProfileExperience.vue）
     experience: {
@@ -3600,6 +3699,8 @@ export default {
       archiveImportAsk: '压缩包导入前询问',
       archiveImportAskDesc:
         '将压缩包导入 UE 工程时，询问解压后导入还是原样复制（关闭后一律解压后导入）',
+      showAssetVersion: '显示资产版本',
+      showAssetVersionDesc: '鼠标悬停在资产卡片上时，在左上角显示保存该资产所用的引擎版本。',
       crossVaultSearch: '跨库搜索',
       crossVaultSearchDesc: 'AI 助手查找素材时同时搜索其他保管库。关闭后仅搜索当前保管库。',
       defaultApps: '默认应用',
@@ -4649,6 +4750,25 @@ export default {
       good: '表现良好，请继续保持',
       keepGoing: '仍有提升空间，建议查阅相关文档',
       encourage: '知识需要逐步积累，建议复习错题后再试'
+    }
+  },
+  externalTeams: {
+    title: '外部团队',
+    intro:
+      'Claude Code 当大脑、盒子当工作室的团队。思考花的是 Claude Code 的额度，盒子只记任务板、留言、快照和验收。',
+    empty: '还没有外部团队',
+    emptyHint:
+      '在 Claude Code 里装上 uebox-team 插件，让它用虚幻盒子的团队做一个游戏，团队就会出现在这里。',
+    members: '{n} 人',
+    pick: '选一个团队看它的任务板',
+    endedNotice: '已标记结束。Claude Code 那边还在跑的话，请在 Claude Code 里停下它。',
+    status: {
+      ended: '已结束',
+      passed: '已过验收',
+      stale: '改动后未重验',
+      failed: '验收未过',
+      blocked: '验收卡住',
+      pending: '未验收'
     }
   },
   serverManagement: {
@@ -5838,6 +5958,9 @@ export default {
       empty: '没有匹配的命令或技能',
       groupCommands: '命令',
       groupSkills: '技能',
+      attach: '添加文件',
+      attachHint: '图片、文档、表格、音视频',
+      plusTooltip: '添加文件、命令与技能',
       source: {
         user: '用户',
         plugin: '插件',
@@ -8325,6 +8448,449 @@ export default {
     serverManagement: {
       title: '服务器管理',
       desc: '管理网络资产库的服务器连接'
+    }
+  },
+  /**
+   * 团队工程（版本控制与资产协作）。文案逐字照界面方案 vcs-collab-uiux.zh.md；
+   * 这一段受方案 0.4 的禁用词表约束，门禁见 views/AssetManagement/team/teamCopy.test.ts。
+   */
+  teamProject: {
+    badge: '团队',
+    rowWithCompany: '{project} · {company}',
+    state: {
+      online: '已连接',
+      offline: '连不上团队',
+      signedOut: '需要重新登录'
+    },
+    menu: {
+      signIn: '重新登录',
+      copyInvite: '复制邀请链接',
+      remove: '从列表移除'
+    },
+    inviteCopied: '已复制邀请链接',
+    remove: {
+      title: '从列表移除 {name}？',
+      body: '只从盒子的列表里移除。你电脑上的工程和签出不受影响。',
+      action: '移除'
+    },
+    cancel: '取消',
+    retry: '重试',
+    listSep: '，',
+    nameSep: '、',
+    pathsMore: '{name} 等 {n} 个',
+    join: {
+      cardTitle: '加入团队',
+      cardDesc: '用公司账号登录，打开团队的工程和资产库',
+      title: '加入团队',
+      link: '邀请链接',
+      linkPlaceholder: '粘贴管理员发给你的链接',
+      account: '公司账号',
+      password: '密码',
+      signIn: '登录',
+      signingIn: '正在登录…',
+      errors: {
+        credentials: '账号或密码不对',
+        unreachable: '连不上团队，看看网络，或者问一下 IT',
+        disabled: '你的账号已停用，找 IT',
+        badLink: '这个链接打不开，找管理员要个新的'
+      },
+      noProjects: '你还没被加进任何工程',
+      sendAccount: '把账号发给 IT：{account}',
+      copyAccount: '复制账号',
+      accountCopied: '已复制账号'
+    },
+    banner: {
+      offline: '连不上团队（{time} 起）。看到的是那时的样子。',
+      viewingOld: '在看 {name}（#{number}），只能看。',
+      viewingNumber: '在看 #{number}，只能看。',
+      backToLatest: '回到最新',
+      frozen: '冻结中：{note} · 提交要等管理员通过',
+      waiting: ' · 在等 {n} 个',
+      unfreeze: '解冻',
+      notLocal: '这个工程还不在你电脑上。',
+      syncToLocal: '同步到本机',
+      ready: '好了。',
+      openInUe: '在 UE 里打开'
+    },
+    sync: {
+      title: '同步 {name} 到本机',
+      placeAt: '放在',
+      choose: '选择位置',
+      size: '约 {size} · {drive} 盘还剩 {free}',
+      free: '{drive} 盘还剩 {free}',
+      notEnough: '{drive} 盘不够，还差 {need}。',
+      sizeHere: '约 {size} · 还剩 {free}',
+      freeHere: '还剩 {free}',
+      notEnoughHere: '空间不够，还差 {need}。',
+      haveIt: '电脑上已经有这个工程？',
+      pickIt: '选它',
+      existing: '只下载不一样的文件。和团队不一样的换成团队的，你的先留一份。',
+      start: '开始',
+      done: '好了。'
+    },
+    putIn: {
+      empty: '工程还是空的。',
+      emptyWait: '工程还是空的，等管理员放进来。',
+      action: '放入电脑上的工程',
+      title: '放入 {name}',
+      from: '从',
+      pick: '选择 .uproject 所在的文件夹',
+      hint: 'UE 自己生成的 Saved、Intermediate、DerivedDataCache 不传。',
+      notProject: '这个文件夹里没有 .uproject。',
+      start: '开始',
+      done: '放好了，已提交为 #{n}。',
+      doneNoNumber: '放好了。'
+    },
+    shortcuts: {
+      activity: '动态',
+      checkouts: '签出中',
+      inbox: '等你处理'
+    },
+    outsource: {
+      title: '外包',
+      reference: '参考',
+      delivery: '交付',
+      deliveryN: '交付 {n}',
+      sendTo: '发给外包',
+      deliverEmpty: '把要交的资产拖进来',
+      deliverEmptyHint: '路径保持和参考里一致，引用才不会断',
+      deliverTitle: '交付给 {name}',
+      deliverGroup: '{folder}：{n} 个',
+      deliverMessage: '说明',
+      deliverDefault: '{folder} {n} 个',
+      deliver: '交付',
+      state: {
+        uploading: '上传中 {p}%',
+        waiting: '等管理员通过',
+        done: '通过 {a} · 打回 {r}'
+      },
+      toolbar: '交付 {n} · {count} 个',
+      approve: '通过',
+      approveAll: '全部通过',
+      reject: '打回',
+      missingRef: '缺引用：{name}',
+      rejectedTag: '打回',
+      rejectedDetail: '打回：{reason} · {who}',
+      skipped: '跳过 {n} 个：{parts}。',
+      skippedMissing: '{n} 个缺引用',
+      skippedHeld: '{n} 个 {who} 已签出',
+      approvedDone: '通过 {n} 个，已提交为 #{number}。',
+      approvedDoneNoNumber: '通过 {n} 个。',
+      fromCompany: '来自 {company} · 交付 {n}',
+      sentBy: '{who} · {time}',
+      approveEmpty: '这一批都处理完了。'
+    },
+    tree: {
+      restricted: '只有 {people} 能提交，其他人的提交等他们通过',
+      sync: '同步到本机',
+      unsync: '不同步到本机',
+      pending: '这个文件夹里有 {n} 个改动还没提交，先在 UE 里提交。'
+    },
+    reasons: {
+      cloudDrives: '网盘是本地库的导入来源。团队工程的文件在 UE 里提交。',
+      import: '往工程里加文件：放进你电脑上的工程，在 UE 里提交',
+      offline: '连不上团队'
+    },
+    grid: {
+      edited: '{who} · {time} 改过'
+    },
+    person: {
+      checkedOut: '{who} 已签出（{duration}）',
+      checkedOutState: '{who} 已签出（{duration}，{state}）',
+      youCheckedOut: '你已签出（{duration}）',
+      online: '在线',
+      notToday: '今天没上线',
+      disabled: '（已停用）'
+    },
+    duration: {
+      minutes: '{n} 分钟',
+      hours: '{n} 小时',
+      days: '{n} 天'
+    },
+    time: {
+      yesterday: '昨天 {time}',
+      weekday: '{day} {time}',
+      date: '{m}月{d}日',
+      fullDate: '{y}年{m}月{d}日',
+      days: {
+        0: '周日',
+        1: '周一',
+        2: '周二',
+        3: '周三',
+        4: '周四',
+        5: '周五',
+        6: '周六'
+      }
+    },
+    history: {
+      title: '历史',
+      askDone: '问他改完没',
+      takeBack: '收回',
+      cancelCheckout: '取消签出',
+      checkout: '签出',
+      hoverVersion: '#{number} · {who} · {date}',
+      viewThis: '看这一版',
+      compareLatest: '和最新对比',
+      restore: '回到这一版',
+      restoreInUe: '在 UE 里回到这一版',
+      heldBy: '{who} 已签出',
+      offline: '连上才能看历史。',
+      none: '还没提交过。',
+      restored: '{name} 已换成 #{n} 的样子（在你电脑上）。看过没问题再提交，别人才会拿到。',
+      compareStart: '起点',
+      compareEnd: '终点',
+      diffInUe: '在 UE 里看差异',
+      openInUe: '在 UE 里打开',
+      moved: '挪到 {path}',
+      latest: '最新',
+      back: '返回'
+    },
+    ask: {
+      askedOnline: '已问{who}。他回了会告诉你。',
+      askedOffline: '已问{who}。他今天没上线。',
+      requestTakeBack: '请管理员收回',
+      escalated: '已告诉管理员（{admins}）。',
+      stillEditing: '还在改',
+      askedRecently: '已问过（{ago}前）'
+    },
+    folder: {
+      whoCanSubmit: '谁能提交',
+      all: '所有成员',
+      only: '{people}（其他人的等他们通过）',
+      modeInherit: '跟上级一样（{what}）',
+      modeAll: '所有成员',
+      modeOnly: '只有这些人',
+      pickPeople: '选人',
+      othersWait: '其他人的提交等他们通过',
+      save: '保存',
+      saved: '已生效，UE 里马上能看到。',
+      checksTitle: '提交前检查',
+      rules: {
+        'name-prefix': '命名要带类型前缀',
+        'texture-power-of-two': '贴图边长是 2 的幂',
+        'texture-max-size': '贴图不超过 {max}',
+        'no-broken-references': '没有断掉的引用',
+        'file-max-size': '单个文件不超过 {size}'
+      },
+      levels: {
+        off: '不查',
+        warn: '提醒',
+        block: '拦住',
+        inherit: '跟上级一样（{level}）'
+      },
+      checksFoot: 'UE 里提交和外包交付时都会查。',
+      prefixTypes: {
+        Texture2D: '贴图',
+        Material: '材质',
+        MaterialInstanceConstant: '材质实例',
+        StaticMesh: '静态网格',
+        SkeletalMesh: '骨骼网格',
+        Blueprint: '蓝图',
+        NiagaraSystem: 'Niagara'
+      },
+      addPrefix: '加一行',
+      maxSide: '贴图边长上限',
+      maxFile: '单个文件上限（GB）'
+    },
+    activity: {
+      summary: '{period} {n} 次提交',
+      periods: {
+        week: '本周',
+        lastWeek: '上周',
+        month: '本月'
+      },
+      freeze: '冻结',
+      longCheckouts: '签出超过 3 天：',
+      longItem: '{who} {label}（{duration}）',
+      longMore: '等 {n} 人',
+      who: '谁',
+      everyone: '所有人',
+      folder: '文件夹',
+      allFolders: '全部文件夹',
+      onlyMilestones: '只看里程碑',
+      compare: '对比',
+      today: '今天',
+      yesterday: '昨天',
+      empty: '这段时间没人提交。',
+      error: '动态没读到。',
+      offline: '连不上团队，这里是 {time} 之前的动态。',
+      searchPlaceholder: '提交号、说明、人名或文件名',
+      loadMore: '更早的'
+    },
+    card: {
+      added: '新增 {n}',
+      modified: '修改 {n}',
+      deleted: '删除 {n}',
+      actionAdded: '新增',
+      actionModified: '修改',
+      actionDeleted: '删除',
+      actionMoved: '修改',
+      waitingAdmins: '等管理员通过',
+      waitingPeople: '等 {people} 通过',
+      rejected: '打回：{reason} · {who}',
+      built: '已进包 {machine}',
+      builtHover: '{machine} {time} 的包带上了它',
+      approve: '通过',
+      reject: '打回',
+      copyLink: '复制链接',
+      compareFrom: '从这里对比',
+      comparePrevMilestone: '和上一个里程碑对比',
+      setMilestone: '设为里程碑',
+      rename: '改名',
+      removeMilestone: '去掉里程碑',
+      milestoneBy: '{who} {date} 设的',
+      submitNo: '第 {n} 次提交',
+      copied: '已复制 #{n}',
+      approved: '#{n} 通过了。',
+      removedMilestone: '已去掉 {name}，#{n} 不受影响。',
+      linkCopied: '已复制链接',
+      more: '+{n}',
+      ofpa: '{map} · {n} 个 Actor',
+      filesFolded: '{folder}：{n} 个'
+    },
+    dialogs: {
+      milestoneTitle: '把 #{n} 设为里程碑？',
+      milestoneName: '名字',
+      milestonePlaceholder: '比如：M3 提审版',
+      setMilestone: '设为里程碑',
+      renameTitle: '改名',
+      rename: '改名',
+      nameTaken: '这个名字已经有了。',
+      freezeTitle: '冻结 {name}？',
+      freezeBody: '冻结期间，除了管理员和打包机，所有人的提交都要等管理员通过。',
+      freezeNote: '说明（大家都会看到）',
+      freezePlaceholder: '比如：M3 提审，周五 18:00 解冻',
+      freeze: '冻结',
+      unfreezeTitle: '解冻 {name}？',
+      unfreezeBody: '解冻后提交直接生效。在等的 {n} 个还要你们通过或打回。',
+      unfreeze: '解冻',
+      unfrozen: '解冻了。',
+      rejectTitle: '打回 #{n}？',
+      rejectAssetsTitle: '打回 {n} 个资产？',
+      reason: '原因（对方会看到）',
+      reject: '打回',
+      takeBackTitle: '收回 {who} 的签出？',
+      takeBackAllTitle: '收回 {who} 的 {n} 个签出？',
+      takeBackBody: '他没提交的改动留在他电脑上，不会丢。收回后别人就能签出。',
+      takeBackReason: '说一句原因（可以不填）',
+      takeBack: '收回',
+      takenBack: '已收回，{who} 会收到通知。',
+      sendTitle: '发给 {company}？',
+      sendNote: '改了什么（对方会看到）',
+      send: '发送',
+      sent: '已发给 {company}。',
+      cancelCheckoutTitle: '取消签出 {name}？',
+      cancelCheckoutBody: '你改过它。不要的改动先在你电脑上留一份，历史里能找回。',
+      keepChanges: '留着改动',
+      discardChanges: '不要改动',
+      notAllowed: '你的身份做不了这件事。',
+      failed: '没办成，再试一次。'
+    },
+    compare: {
+      title: '对比',
+      from: '从',
+      to: '到',
+      latest: '最新',
+      earlier: '更早的',
+      byNumber: '按提交号…',
+      byNumberPlaceholder: '#1496',
+      recent: '最近的提交',
+      summary: '{submits} 次提交',
+      milestoneTitle: '{from} → {to}：{n} 次提交',
+      files: '文件',
+      submits: '提交',
+      fileRow: '{action} · #{n} {who}',
+      stuck: '还是找不到原因？',
+      bisect: '找出是哪次提交弄坏的',
+      swapped: '已按先后排好。',
+      noSuch: '没有 #{n} 这个提交。',
+      empty: '这两次之间没有改动。',
+      incomplete: '范围里有太大的提交，它的文件没有逐个列出。'
+    },
+    bisect: {
+      title: '找出是哪次提交弄坏的',
+      startLine: '#{good} 是好的 · #{bad} 是坏的 · 中间 {n} 次提交，大约 {rounds} 轮',
+      start: '开始',
+      tryThis: '试这个：#{n}',
+      copyNumber: '复制号',
+      inUe: '在 UE 里：同步 ▾ → 按提交号…',
+      buildCmd: '打包机命令',
+      copy: '复制',
+      copied: '已复制',
+      good: '好',
+      bad: '坏',
+      skip: '跳过',
+      undo: '上一步',
+      stop: '不找了',
+      progress: '第 {round} 轮 · 还剩大约 {left} 轮',
+      found: '是 #{n}：{who} · {message}',
+      ambiguous: '范围缩到 #{from}–#{to}，分不出是哪一次。',
+      copyLink: '复制链接'
+    },
+    checkouts: {
+      groupTitle: '{who} · {n} 个',
+      oldest: '最早 {duration}',
+      takeBackAll: '全部收回',
+      empty: '现在没人签出。',
+      mapCard: '{map} · {n} 块'
+    },
+    inbox: {
+      approvals: '等你通过',
+      takeBack: '请你收回',
+      deliveryRow: '{company} · 交付 {n} · {count} 个 · {time}',
+      goSee: '去看',
+      takeBackRow: '{asker} 想改 {label} · {holder}',
+      allDone: '都处理完了。'
+    },
+    deleted: {
+      subtitle: '{who} 删的 · {time} · #{n}',
+      restore: '恢复',
+      restoreInUe: '在 UE 里恢复',
+      empty: '最近 30 天没有删掉的文件。',
+      restored: '{name} 放回你电脑上了。在 UE 里提交后别人才会拿到。'
+    },
+    check: {
+      setBy: '（{who}定的）',
+      namePrefix: '{name} 建议加前缀 {prefix}。',
+      powerOfTwo: '{name} 的边长不是 2 的幂。',
+      maxSize: '{name} 是 {value}，上限 {max}{setBy}。',
+      brokenRefs: '缺引用：{refs}',
+      fileSize: '{name} 超过 {max}。'
+    },
+    notify: {
+      askReceived: '{who} 想改 {name}，你改完了吗？',
+      askSubmitted: '{who} 提交了 {name}。',
+      askReleased: '{who} 取消了签出，{name} 已为你签出。',
+      askStill: '{who}：还在改，大概 {eta}。',
+      eta: {
+        '30m': '30 分钟',
+        '1h': '1 小时',
+        today: '今天下班前',
+        tomorrow: '明天'
+      },
+      inbox: '有 {n} 件等你处理。',
+      takenBack: '{who} 收回了你对 {name} 的签出。你的改动还在你电脑上。',
+      takenBackReason: '{who} 收回了你对 {name} 的签出：{reason}。你的改动还在你电脑上。',
+      assigned: '{name} 已为你签出。',
+      approved: '#{n} 通过了。签出已取消。',
+      rejected: '#{n} 被{who}打回：{reason}。改动还在你电脑上，改好再提交。',
+      conflict: '#{n} 和别人的改动合不上，改动还在你电脑上，改好再提交。',
+      freezeStarted: '冻结了：{note}。之后的提交要等管理员通过。',
+      freezeEnded: '解冻了。',
+      bisectDone: '找到了：是 #{n}。',
+      deliveryDecided: '交付 {n}：通过 {a}，打回 {r}。',
+      syncDone: '好了。'
+    },
+    versions: {
+      latest: '最新',
+      mainline: '主线'
+    },
+    jobs: {
+      sync: '同步 {name} 到本机',
+      'put-in': '放入 {name}',
+      deliver: '交付 {name} · 上传中',
+      approve: '通过 交付 {name}',
+      reference: '发给 {name}'
     }
   }
 }

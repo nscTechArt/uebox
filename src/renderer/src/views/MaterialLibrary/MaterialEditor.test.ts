@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent } from 'vue'
+import { KeepAlive, defineComponent, ref } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { useMaterialLibraryStore } from '@renderer/store/modules/materialLibraryStore'
 import { useTabsStore } from '@renderer/store/modules/tabs'
@@ -353,6 +353,49 @@ describe('MaterialEditor', () => {
     await flushPromises()
 
     expect(tabsStore.historyTabs[0]?.title).toBe('M_MasterSurface')
+  })
+
+  // 编辑器读取的是自己 tab 的路由，在后台时也只会修改自己 tab 的标题
+  it('renames its own dedicated tab when the material is renamed while deactivated', async () => {
+    const store = useMaterialLibraryStore()
+    store.upsertEntries([
+      createStoredEntry({
+        id: 'material-master',
+        name: 'M_MasterSurface'
+      })
+    ])
+
+    const router = createTestRouter()
+    const targetRoute = buildMaterialEditorRoute('material-master')
+    const tabKey = `${router.resolve(targetRoute).fullPath}`
+    await router.push(targetRoute)
+    await router.isReady()
+
+    const tabsStore = useTabsStore()
+    tabsStore.historyTabs = [
+      { key: tabKey, title: 'menu.materialDetail', path: tabKey, sort: 1 },
+      { key: '/other', title: 'Other', path: '/other', sort: 2 }
+    ]
+    const showEditor = ref(true)
+    const DummyPage = defineComponent({ template: '<div />' })
+    const Harness = defineComponent({
+      components: { KeepAlive },
+      setup: () => ({ showEditor, editorComponent: MaterialEditor, dummyComponent: DummyPage }),
+      template: `
+        <KeepAlive>
+          <component :is="showEditor ? editorComponent : dummyComponent" />
+        </KeepAlive>
+      `
+    })
+    mount(Harness, { global: { plugins: [router], components: { KeepAlive } } })
+    await flushPromises()
+
+    showEditor.value = false
+    await flushPromises()
+    store.updateEntry('material-master', { name: 'M_Renamed' })
+    await flushPromises()
+
+    expect(tabsStore.historyTabs.map((tab) => tab.title)).toEqual(['M_Renamed', 'Other'])
   })
 
   it('does not rename the shared material library tab when the editor route has no dedicated tab id', async () => {
