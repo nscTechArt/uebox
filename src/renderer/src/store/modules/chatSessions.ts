@@ -110,8 +110,9 @@ export const useChatSessionsStore = defineStore(
   'chat-sessions',
   () => {
     const sessions = ref<ChatSession[]>([])
-    /** 仅保留到本次应用运行结束；草稿不属于对话记录，不写入持久层。 */
+    /** 输入框文字草稿，故意随 chat-sessions 落盘 —— 理由见下方 persist 配置的注释。 */
     const draftsById = ref<Record<string, string>>({})
+    /** 图片草稿只存内存：File 序列化后只剩 {}、preview 是 base64 data URL，故意不进下方 persist 的 pick。 */
     const imageDraftsById = ref<Record<string, ChatImageDraft[]>>({})
 
     /**
@@ -770,7 +771,7 @@ export const useChatSessionsStore = defineStore(
         // 草稿同理，而且更直接：用户在输入框里打了半段话没发，关掉应用再打开，
         // 那段话本来会消失。切对话时它是留着的（内存里），偏偏关应用不留 ——
         // 对用户来说这两件事没有区别，凭什么一个记一个不记
-        paths: ['sessions', 'permissionModeById', 'draftsById']
+        pick: ['sessions', 'permissionModeById', 'draftsById']
       }),
       // 跟 chat-messages 一起落磁盘：对话里挂着 agentHistory（整条过程时间线），
       // 留在 localStorage 里迟早撑爆配额。

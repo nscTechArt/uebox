@@ -452,7 +452,7 @@
     "warnings": 0
   },
   "src/renderer/src/store/modules/tabs.ts": {
-    "errors": 16,
+    "errors": 15,
     "warnings": 0
   },
   "src/renderer/src/store/modules/webdav.ts": {

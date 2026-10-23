@@ -895,7 +895,7 @@ export const useAIConfigStore = defineStore(
     // 持久化配置
     persist: usePersistOptions<{ config: AIConfigState }>({
       key: 'ai-config-store',
-      paths: ['config'],
+      pick: ['config'],
       storage: 'localStorage',
       serializer: StorageUtils.createCustomSerializer()
     })

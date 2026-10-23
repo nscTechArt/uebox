@@ -115,7 +115,7 @@ export const useAssetSelectionStore = defineStore(
       selectedTreeKey: string | null
     }>({
       key: 'asset-selection-store',
-      paths: ['selectedShortcut', 'selectedTreeKey'],
+      pick: ['selectedShortcut', 'selectedTreeKey'],
       storage: 'localStorage',
       serializer: StorageUtils.createCustomSerializer()
     })

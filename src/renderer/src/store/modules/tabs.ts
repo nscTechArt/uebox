@@ -1,7 +1,6 @@
-import { defineStore } from 'pinia'
+import { defineStore, type PiniaPluginContext } from 'pinia'
 import { ref, computed, watch, nextTick } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { resolveTabRoute } from '../../common/tabRoute'
 
 export interface TabItem {
@@ -813,20 +812,19 @@ export const useTabsStore = defineStore(
   },
   {
     // 持久化配置
-    // 使用类型断言绕过 pinia-plugin-persistedstate 类型定义不完整的问题
     persist: {
       key: 'tabs-store',
-      paths: ['historyTabs', 'activeTab'],
+      pick: ['historyTabs', 'activeTab'],
       storage: localStorage,
       /**
        * 数据恢复后的钩子
        * 确保在持久化数据被恢复后执行清理逻辑
        */
-      afterHydrate: (ctx: { store: Record<string, unknown> }) => {
+      afterHydrate: (ctx: PiniaPluginContext) => {
         console.log('[TabsStore] 持久化数据已恢复，执行清理...')
         // 延迟执行确保 store 完全初始化
         setTimeout(() => {
-          const store = ctx.store
+          const store = ctx.store as unknown as Record<string, unknown>
           // 标题迁移必须在这里跑：setup 阶段 historyTabs 还是空的，
           // 老数据要等持久化插件恢复完才看得见
           if (typeof store.migrateTabTitles === 'function') {
@@ -848,6 +846,6 @@ export const useTabsStore = defineStore(
           }
         }, 0)
       }
-    } as unknown as boolean
+    }
   }
 )

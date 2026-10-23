@@ -119,6 +119,6 @@ describe('输入框草稿的持久化', () => {
       resolve(process.cwd(), 'src/renderer/src/store/modules/chatSessions.ts'),
       'utf8'
     )
-    expect(source).toMatch(/paths: \[[^\]]*'draftsById'/)
+    expect(source).toMatch(/pick: \[[^\]]*'draftsById'/)
   })
 })

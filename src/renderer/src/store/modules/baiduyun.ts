@@ -177,9 +177,14 @@ export const useBaiduyunStore = defineStore(
     }
   },
   {
-    persist: usePersistOptions<{ token: BaiduTokenState | null; appConfig: BaiduAppConfig }>({
+    persist: usePersistOptions<{
+      token: BaiduTokenState | null
+      appConfig: BaiduAppConfig
+      currentDir: string
+    }>({
       key: 'baiduyun-store',
-      paths: ['token', 'appConfig'],
+      // currentDir 是有意落盘的：重启后回到上次浏览的目录（resetAccount 时会重置）
+      pick: ['token', 'appConfig', 'currentDir'],
       storage: 'localStorage',
       serializer: StorageUtils.createCustomSerializer()
     })

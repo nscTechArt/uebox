@@ -112,7 +112,7 @@ export const useAssetViewStore = defineStore('assetView', {
   },
   persist: usePersistOptions<{ mode: AssetViewMode }>({
     key: 'asset-view-store',
-    paths: ['mode'],
+    pick: ['mode'],
     storage: 'localStorage',
     serializer: StorageUtils.createCustomSerializer()
   })

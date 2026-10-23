@@ -25,7 +25,7 @@ describe('InputComposer per-session image drafts', () => {
   })
 
   it('keeps image drafts memory-only and outside persisted session data', () => {
-    const persistPaths = sessions.match(/paths:\s*\[([^\]]+)\]/)?.[1] || ''
+    const persistPaths = sessions.match(/pick:\s*\[([^\]]+)\]/)?.[1] || ''
 
     expect(sessions).toContain('const imageDraftsById = ref<Record<string, ChatImageDraft[]>>({})')
     expect(persistPaths).not.toContain('imageDraftsById')

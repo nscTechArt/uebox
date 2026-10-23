@@ -196,7 +196,7 @@ export const useChatSidebarStore = defineStore(
   {
     persist: usePersistOptions<ChatSidebarState>({
       key: 'chat-sidebar',
-      paths: [
+      pick: [
         'groupMode',
         'sortMode',
         'collapsedGroups',

@@ -38,7 +38,7 @@ export const useNoteViewStore = defineStore('noteView', {
     tabStates: Record<string, NoteTabState>
   }>({
     key: 'note-view-store',
-    paths: ['tabStates'],
+    pick: ['tabStates'],
     storage: 'localStorage',
     serializer: StorageUtils.createCustomSerializer()
   })

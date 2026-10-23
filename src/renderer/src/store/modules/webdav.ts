@@ -195,9 +195,11 @@ export const useWebdavStore = defineStore(
     persist: usePersistOptions<{
       connection: WebdavConnectionConfig | null
       history: WebdavConnectionConfig[]
+      currentDir: string
     }>({
       key: 'webdav-store',
-      paths: ['connection', 'history'],
+      // currentDir 是有意落盘的：重启后回到上次浏览的目录（clearConnection 时会重置）
+      pick: ['connection', 'history', 'currentDir'],
       storage: 'localStorage',
       serializer: StorageUtils.createCustomSerializer()
     })
