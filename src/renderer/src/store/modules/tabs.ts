@@ -824,26 +824,16 @@ export const useTabsStore = defineStore(
         console.log('[TabsStore] 持久化数据已恢复，执行清理...')
         // 延迟执行确保 store 完全初始化
         setTimeout(() => {
-          const store = ctx.store as unknown as Record<string, unknown>
+          const store = ctx.store as ReturnType<typeof useTabsStore>
           // 标题迁移必须在这里跑：setup 阶段 historyTabs 还是空的，
           // 老数据要等持久化插件恢复完才看得见
-          if (typeof store.migrateTabTitles === 'function') {
-            ;(store.migrateTabTitles as () => void)()
-          }
+          store.migrateTabTitles()
           // 老数据里的项目库还带着 fixed / isCanDelete=false，就地解锁
-          if (typeof store.unlockProjectLibTab === 'function') {
-            ;(store.unlockProjectLibTab as () => void)()
-          }
+          store.unlockProjectLibTab()
           // 调用清理函数
-          if (typeof store.cleanupSpotlightTabs === 'function') {
-            ;(store.cleanupSpotlightTabs as () => void)()
-          }
-          if (typeof store.cleanupNestedRouteTabs === 'function') {
-            ;(store.cleanupNestedRouteTabs as () => void)()
-          }
-          if (typeof store.cleanupLibraryTabs === 'function') {
-            ;(store.cleanupLibraryTabs as () => void)()
-          }
+          store.cleanupSpotlightTabs()
+          store.cleanupNestedRouteTabs()
+          store.cleanupLibraryTabs()
         }, 0)
       }
     }

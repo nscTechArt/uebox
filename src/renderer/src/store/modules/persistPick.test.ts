@@ -51,6 +51,10 @@ describe('store 持久化 pick 白名单', () => {
     expect(options).not.toHaveProperty('paths')
   })
 
+  // 钉住整张落盘清单，而不是只查「没有 imageDraftsById」—— 文字草稿是故意落盘的
+  // （打了半段话关掉应用，那段话不该没）。图片草稿不许进：File 序列化后只剩 {}，
+  // 恢复出来是坏草稿；preview 是 base64，可能让整份重写的 chat-sessions.json
+  // 膨胀到几十 MB。往这张单子里加东西要有意为之。
   it('chat-sessions 只落 pick 字段；base64 图片草稿不进持久层', async () => {
     const store = useChatSessionsStore()
     store.setDraft('s1', 'half typed')
