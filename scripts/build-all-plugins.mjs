@@ -18,7 +18,7 @@
  * 工程由 make-host-project.mjs 生成，放在临时目录，插件用目录联接挂进去。
  *
  * 用法：
- *   node scripts/build-all-plugins.mjs                 # 全部支持版本（5.0–5.8）
+ *   node scripts/build-all-plugins.mjs                 # 全部支持版本（5.0–5.9）
  *   node scripts/build-all-plugins.mjs --only 5.0,5.1  # 指定几个
  *   node scripts/build-all-plugins.mjs --hosts <目录>  # 宿主工程放哪
  */
@@ -34,7 +34,7 @@ import { RELEASE_ENGINES } from './plugin-package-format.mjs'
 const ROOT = resolve(import.meta.dirname, '..')
 const PLUGIN_SRC = join(ROOT, 'plugin', 'UnrealAgentLink')
 
-/** 分发只覆盖 UE5，4.27 不在支持范围内（当前是 5.0–5.8） */
+/** 分发只覆盖 UE5，4.27 不在支持范围内（当前是 5.0–5.9） */
 const isSupported = (version) => RELEASE_ENGINES.includes(version)
 
 function sh(cmd, args, opts = {}) {

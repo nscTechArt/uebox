@@ -54,7 +54,7 @@ Inspects the selected development package only when packaged plugin inputs chang
   --engine <version>  覆盖 VERIFY_PLUGIN_ENGINE，仅本次有效 / Override VERIFY_PLUGIN_ENGINE once
   --help              显示帮助 / Show this help
 
-适用时必须给出 UE 5.0–5.8 的显式目标 / When applicable, set an explicit UE 5.0–5.8 target:
+适用时必须给出 UE 5.0–5.9 的显式目标 / When applicable, set an explicit UE 5.0–5.9 target:
 ${TARGET_HINT.join('\n')}
 
 本机没装 Unreal、出不了包时声明 none：这一步报 NOT RUN 并放行，PR 里注明插件改动未经编译。
@@ -105,7 +105,7 @@ export function runVerifyPlugin({
   if (options.engine !== undefined && !isTarget(options.engine)) {
     return {
       status: 1,
-      output: `✖ 不支持的版本 / Unsupported engine: ${options.engine} (UE 5.0–5.8, or ${NO_UNREAL})`
+      output: `✖ 不支持的版本 / Unsupported engine: ${options.engine} (UE 5.0–5.9, or ${NO_UNREAL})`
     }
   }
 
@@ -155,8 +155,8 @@ export function runVerifyPlugin({
 
   if (!isTarget(target)) {
     return report(1, [
-      '✖ 改了插件打包输入，需要显式选择开发目标（UE 5.0–5.8）。',
-      '  Packaged plugin inputs changed: select an explicit development target (UE 5.0–5.8).',
+      '✖ 改了插件打包输入，需要显式选择开发目标（UE 5.0–5.9）。',
+      '  Packaged plugin inputs changed: select an explicit development target (UE 5.0–5.9).',
       ...(target ? [`  当前配置不受支持 / Unsupported value: '${target}'`] : []),
       ...TARGET_HINT,
       `  本机没装 Unreal / No Unreal on this machine: VERIFY_PLUGIN_ENGINE=${NO_UNREAL}`

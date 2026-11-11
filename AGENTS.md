@@ -111,7 +111,7 @@ plugin inputs, and only the version selected by `VERIFY_PLUGIN_ENGINE`; `pnpm ve
 it as NOT RUN. How to select the target, and what to declare without Unreal installed, is in
 [the packaging guide](docs/contributing/packaging.md#the-everyday-gate). The strict tier is
 `plugin:check:all`, wired into the official installer scripts (`build:win` / `build:mac` /
-`build:linux`); it requires **every version, 5.0–5.8, to be fresh** — ship a release with one
+`build:linux`); it requires **every version, 5.0–5.9, to be fresh** — ship a release with one
 version behind and those users really do install a stale plugin. Rebuild the whole set with
 `node scripts/build-all-plugins.mjs`.
 
@@ -219,7 +219,7 @@ until it is met:
     install, the AI cannot see the engine", wrapped in an error message they cannot read.
     Always read through `src/main/utils/ueTextFile.ts` (`readUeTextFile` / `readUeJsonFile` /
     `decodeUeText`); write back as UTF-8 without a BOM (with no BOM the engine decodes as
-    UTF-8, identically on 5.0-5.8). Gate: `scripts/check-ue-file-reads.mjs`.
+    UTF-8, identically on 5.0-5.9). Gate: `scripts/check-ue-file-reads.mjs`.
 
 13. **Media going to a model tries object storage first, and falls back only when that
     does not work.** Images, video, audio — anything a user hands to a model — is

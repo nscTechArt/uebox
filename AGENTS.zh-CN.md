@@ -102,7 +102,7 @@ pnpm verify             # 约 3.5 分钟 —— 完整门禁
 选定的那个版本；`pnpm verify --ci` 把它列为 NOT RUN。怎么选目标、没装 Unreal 时怎么声明，
 见[打包指南](docs/contributing/packaging.zh-CN.md#日常门禁)。
 严格的那一档是 `plugin:check:all`，挂在出正式安装包的脚本上
-（`build:win` / `build:mac` / `build:linux`），要求 **5.0–5.8 每个版本都新鲜**
+（`build:win` / `build:mac` / `build:linux`），要求 **5.0–5.9 每个版本都新鲜**
 —— 发版时少一个版本，那个版本的用户就实实在在装到旧插件。出全套：`node scripts/build-all-plugins.mjs`。
 
 出正式安装包就是 `pnpm build:win` 一条命令，没有渠道之分（原来的 personal / enterprise
@@ -195,7 +195,7 @@ Release 上的 `.exe`、`.blockmap`、`latest.yml`。运行期解析见 `src/mai
     `Unexpected token '�'` —— 用户那边表现为「插件装不上、AI 看不见引擎」，
     而报错信息他一个字也看不懂。读一律走 `src/main/utils/ueTextFile.ts`
     （`readUeTextFile` / `readUeJsonFile` / `decodeUeText`），写回去用不带 BOM 的 UTF-8
-    （引擎没有 BOM 时按 UTF-8 解，5.0–5.8 一致）。门禁见 `scripts/check-ue-file-reads.mjs`。
+    （引擎没有 BOM 时按 UTF-8 解，5.0–5.9 一致）。门禁见 `scripts/check-ue-file-reads.mjs`。
 
 13. **多媒体进模型：先走对象存储，走不通再退。** 图片、视频、音频 —— 凡是用户交给模型
     的多媒体，先传到用户自己配的对象存储（设置 → 对象存储），给模型一个链接。只有存储

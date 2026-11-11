@@ -584,7 +584,7 @@ const UnrealPathManagerUtil = {
       // 两者给同一句「插件包不存在」，开发者会去查一个不存在的事故。
       if (!(await fse.pathExists(pluginZip))) {
         const hint = app.isPackaged
-          ? '插件包不存在（安装包内缺少该引擎版本的插件，请反馈给我们）'
+          ? `虚幻盒子暂不支持 UE ${String(engineVersion).split('.').slice(0, 2).join('.')}，没有这个引擎版本的 UnrealAgentLink 插件`
           : `插件包不存在：${pluginZip}。开发环境需要先出包：pnpm plugin:build --engine ${engineVersion}`
         console.error('[UALink]', hint)
         return { success: false, code: hint }

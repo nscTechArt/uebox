@@ -14,7 +14,7 @@
  * 检查范围必须显式选择，两档都不依赖本机有没有安装引擎：
  *   · `--engine <版本>` 只检查选中的包，不枚举其他包
  *   · `--all`（出正式安装包时跑）要求磁盘上**每个**包都新鲜，一个都不许旧，
- *     且必须覆盖 UE 5.0–5.8。
+ *     且必须覆盖 UE 5.0–5.9。
  * 日常就要求全套是不现实的，但发版时少一个版本，
  * 那个版本的用户就实实在在拿到旧插件 —— 所以那一档不留余地。
  *
@@ -194,11 +194,11 @@ function checkPackages(fingerprint, distDir, platform, { required, zips, rebuild
 
 const HELP = `用法 / Usage:
   pnpm plugin:check --engine 5.7   检查指定包 / Inspect the selected package
-  pnpm plugin:check --all          发版检查 / Release check (UE 5.0–5.8)
+  pnpm plugin:check --all          发版检查 / Release check (UE 5.0–5.9)
   pnpm plugin:check:all            同上 / Same as --all
 
-必须且只能选择 --engine <version> 或 --all；支持 UE 5.0–5.8，没有默认版本。
-Select exactly one of --engine <version> and --all; supported: UE 5.0–5.8, no default.
+必须且只能选择 --engine <version> 或 --all；支持 UE 5.0–5.9，没有默认版本。
+Select exactly one of --engine <version> and --all; supported: UE 5.0–5.9, no default.
 单目标只读指定平台的那一个包，不需要安装 Unreal；缺包不会拿别的版本顶替。
 Single-target inspection reads only the selected package and needs no Unreal installation.
 发版检查要求全套包，外加同平台的其他 ZIP 也都通过。
@@ -218,7 +218,7 @@ function parseCheckOptions(args) {
   })
   const hasEngine = values.engine !== undefined
   if (hasEngine && !RELEASE_ENGINES.includes(values.engine)) {
-    throw new Error(`不支持的版本 / Unsupported engine: ${values.engine} (UE 5.0–5.8)`)
+    throw new Error(`不支持的版本 / Unsupported engine: ${values.engine} (UE 5.0–5.9)`)
   }
   if ((hasEngine && values.all) || (!hasEngine && !values.all && !values.help)) {
     throw new Error('检查必须且只能选择一个 / Select exactly one: --engine <version> or --all')
