@@ -159,12 +159,12 @@ export function buildMcpSection(
   if (statuses.some((s) => s.connected && isEpicServerId(s.id))) {
     lines.push(
       '',
-      "A server marked as Unreal Engine's own toolsets exposes only 3 tools directly (`list_toolsets`, `describe_toolset`, `call_tool`), but roughly 900 engine tools sit behind them — Niagara, PCG, animation and Sequencer, MetaHuman, Gameplay Ability System, StateTree, UMG, physics, and more.",
-      "To use them: call `list_toolsets` to see what exists, `describe_toolset` to get a toolset's tool names and input schemas, then dispatch through `call_tool`. Do not conclude a capability is missing without checking `list_toolsets` first.",
+      "A server marked as Unreal Engine's own toolsets exposes only a few tools directly (`list_toolsets`, `call_tool`, and `describe_toolset` on 5.8 or `describe_toolsets` / `describe_tools` on 5.9), but hundreds of engine tools sit behind them — Niagara, PCG, animation and Sequencer, MetaHuman, Gameplay Ability System, StateTree, UMG, physics, and more.",
+      "To use them: call `list_toolsets` to see what exists, the describe tool this server offers to get a toolset's tool names and input schemas, then dispatch through `call_tool`. Do not conclude a capability is missing without checking `list_toolsets` first.",
       // 这里只写**核实过**的理由。初稿还写了「接了资产快照和撤销」——
       // 查下去 `core/assetSnapshot.ts` 的 IPC handler 根本没有调用方，
       // 那是一句假话，而且是写给模型当决策依据的假话。
-      "Prefer this project's own built-in `ue.*` tools when both could do the job — they work on Unreal Engine 5.0 through 5.8, they do not need the Python plugin, and their arguments are schema-validated. Reach for the engine toolsets for things the built-in tools do not cover.",
+      "Prefer this project's own built-in `ue.*` tools when both could do the job — they work on Unreal Engine 5.0 through 5.9, they do not need the Python plugin, and their arguments are schema-validated. Reach for the engine toolsets for things the built-in tools do not cover.",
       "These toolsets only exist on Unreal Engine 5.8 and newer, and they require the project's Python plugin. If a call fails because Python is unavailable, say so plainly instead of retrying."
     )
   }

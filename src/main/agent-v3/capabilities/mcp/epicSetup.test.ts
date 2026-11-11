@@ -73,6 +73,31 @@ describe('autoStartEnabledIn', () => {
   })
 })
 
+describe('5.9 起设置段换了名字，默认随编辑器启动', () => {
+  const SECTION_59 = '[/Script/ModelContextProtocol.ModelContextProtocolSettings]'
+
+  it('文件里没写时：5.8 当关，5.9 当开', () => {
+    expect(autoStartEnabledIn('', '5.8')).toBe(false)
+    expect(autoStartEnabledIn('', '5.9')).toBe(true)
+    expect(autoStartEnabledIn('', '5.9.0-60351404')).toBe(true)
+  })
+
+  it('5.9 只认新段：用户在新段里关掉就是关，旧段里残留的值不算', () => {
+    expect(autoStartEnabledIn(`${SECTION_59}\nbAutoStartServer=False\n`, '5.9')).toBe(false)
+    expect(autoStartEnabledIn(`${SECTION}\nbAutoStartServer=False\n`, '5.9')).toBe(true)
+  })
+
+  it('5.9 写进新段，旧段原样留着', () => {
+    const out = withAutoStartEnabled(
+      `${SECTION}\nServerPortNumber=8123\n${SECTION_59}\nbAutoStartServer=False\n`,
+      '5.9'
+    )
+    expect(autoStartEnabledIn(out, '5.9')).toBe(true)
+    expect(out).toContain('ServerPortNumber=8123')
+    expect(out.match(/bAutoStartServer/g)).toHaveLength(1)
+  })
+})
+
 describe('withAutoStartEnabled', () => {
   it('段不存在时补一整段', () => {
     const out = withAutoStartEnabled('[/Script/Other.Settings]\nFoo=1\n')

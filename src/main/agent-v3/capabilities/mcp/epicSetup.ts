@@ -43,8 +43,11 @@ import { readUeJsonFile, readUeTextFile } from '../../../utils/ueTextFile'
 import {
   EPIC_MCP_DEFAULT_PORT,
   EPIC_MCP_DEFAULT_URL_PATH,
+  EPIC_MCP_INI_SECTION_58,
+  EPIC_MCP_INI_SECTION_59,
   readEpicMcpSettings,
   supportsOfficialMcp,
+  usesRelocatedMcpSettings,
   type DiscoverableProject
 } from './epicToolsets'
 
@@ -53,9 +56,13 @@ import {
  */
 export const REQUIRED_UPROJECT_PLUGINS = ['ModelContextProtocol', 'AllToolsets'] as const
 
-/** 落盘的 ini 段名与键，来自 `ModelContextProtocolSettings.h` */
-const INI_SECTION = '[/Script/ModelContextProtocolEngine.ModelContextProtocolSettings]'
+/** 落盘的 ini 段名与键，来自 `ModelContextProtocolSettings.h`。5.9 起段名换了，见 epicToolsets.ts */
 const AUTO_START_KEY = 'bAutoStartServer'
+
+/** 这一版引擎读的是哪个段 */
+function iniSectionFor(engineVersion: string): string {
+  return `[${usesRelocatedMcpSettings(engineVersion) ? EPIC_MCP_INI_SECTION_59 : EPIC_MCP_INI_SECTION_58}]`
+}
 
 /**
  * 一键之前，项目处在哪个状态。
@@ -107,13 +114,15 @@ export function missingPluginsIn(data: UprojectData): string[] {
  * ini 文本里 `bAutoStartServer` 是不是 True。
  *
  * 和 `parseEpicMcpIni` 一样只认目标段内的键 —— 同名键出现在别的段里是常事。
+ * 文件里没写这个键时取引擎的默认值：5.8 默认关，5.9 起默认开。
  */
-export function autoStartEnabledIn(text: string): boolean {
+export function autoStartEnabledIn(text: string, engineVersion = '5.8'): boolean {
+  const section = iniSectionFor(engineVersion)
   let inSection = false
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (line.startsWith('[')) {
-      inSection = line === INI_SECTION
+      inSection = line === section
       continue
     }
     if (!inSection) continue
@@ -128,7 +137,7 @@ export function autoStartEnabledIn(text: string): boolean {
       )
     }
   }
-  return false
+  return usesRelocatedMcpSettings(engineVersion)
 }
 
 /**
@@ -139,7 +148,8 @@ export function autoStartEnabledIn(text: string): boolean {
  *   - 段在键不在  → 在段内追加
  *   - 段不在      → 在文件末尾补一整段
  */
-export function withAutoStartEnabled(text: string): string {
+export function withAutoStartEnabled(text: string, engineVersion = '5.8'): string {
+  const INI_SECTION = iniSectionFor(engineVersion)
   const lines = text.split(/\r?\n/)
   let sectionStart = -1
   let sectionEnd = lines.length
@@ -205,10 +215,12 @@ export async function inspectEpicMcpSetup(
   let autoStartEnabled = false
   try {
     autoStartEnabled = autoStartEnabledIn(
-      await readUeTextFile(editorUserIniPath(project.projectPath))
+      await readUeTextFile(editorUserIniPath(project.projectPath)),
+      project.engineVersion
     )
   } catch {
-    // 没有 ini 就是没开过
+    // 没有 ini 就是没改过，按引擎默认值
+    autoStartEnabled = usesRelocatedMcpSettings(project.engineVersion)
   }
 
   if (serverReachable) {
@@ -298,9 +310,9 @@ export async function applyEpicMcpSetup(
       // 没有就新建
     }
 
-    if (!autoStartEnabledIn(text)) {
+    if (!autoStartEnabledIn(text, project.engineVersion)) {
       await fs.mkdir(dirname(iniPath), { recursive: true })
-      await fs.writeFile(iniPath, withAutoStartEnabled(text), 'utf8')
+      await fs.writeFile(iniPath, withAutoStartEnabled(text, project.engineVersion), 'utf8')
       wroteAutoStart = true
     }
   } catch (error) {
