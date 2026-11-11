@@ -10,6 +10,7 @@
 
 ### 新增
 
+- 支持 UE 5.9（MegaJam 预览版）：随包带 5.9 的 UnrealAgentLink 插件；5.9 自带的官方 MCP 服务自动接上，不用改工程设置
 - game-jam 技能：按天带着走完选题、开发、打包、英文化、录视频、开发日志和提交
 - 打包工具：`project_package` 可用 `maps` 只烘焙指定地图；`project_zip_build` 压成「队名_游戏名.zip」并检查
   itch.io 的 1 GB 上限；`project_find_non_english_text` 扫出工程里没换成英文的文字

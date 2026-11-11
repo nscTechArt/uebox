@@ -59,7 +59,12 @@ Follow `references/kickoff.md`. In short:
    tier and a daily timetable. Write them to `DevLog.md`.
 5. **Setup** — a new jam project from an engine template (`project_manage` with
    `create_project`), git, the UnrealAgentLink plugin, a link check (ask how many lights the
-   level has).
+   level has). Engine choice: UE Box works with 5.0–5.9. The UE 5.9 MegaJam Preview is
+   optional, not required by the rules; Epic calls it unstable and says to test on a copy of
+   a project. Recommend the newest release the player already knows, and 5.9 only if they
+   want its new features and accept crashes. Running in a browser (5.9, experimental) needs
+   a source-built engine and a C++ project and does not replace the Windows build the jam
+   requires.
 6. **Warm-up run** (before the jam starts) — a one-hour practice game that goes all the way to
    a packaged zip. It teaches the player how to work with the agent and surfaces packaging
    problems while there is still time. Throw the game away afterwards: nothing of the jam game
