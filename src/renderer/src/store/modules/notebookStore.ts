@@ -455,7 +455,7 @@ export const useNotebookStore = defineStore('notebook', {
     }
   },
 
-  // 插件 v4 只识别 pick，不识别 usePersistOptions 透传的 paths；若写成 paths，整个 state 都会落盘，
+  // 插件 v4 只识别 pick，不识别 paths；若写成 paths，整个 state 都会落盘，
   // 包括来源正文和持有计数
   persist: {
     key: NOTEBOOK_STORE_KEY,

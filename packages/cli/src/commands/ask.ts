@@ -17,6 +17,12 @@
  *     引擎里能跑任意代码的 `ue.system`（Python、控制台命令）这时也不给，
  *     没人盯着的时候，这些出了错没有回头路。
  *
+ * ## 模型
+ *
+ * `--model` 原样交给 `task` 的 `model` 参数，名单和校验都在盒子那边。盒子只配了一个
+ * 模型时 `task` 没有这个参数，多给的字段会被悄悄丢掉、照样用默认模型跑，所以先看
+ * 清单里的参数表，没有就直接报错。
+ *
  * 命名空间从这次的工具清单里现算，不在 CLI 里抄一份：盒子加了新的 `ue.*`
  * 分组，这里自动跟上；抄一份的话，漏掉的那组就成了子任务莫名其妙做不到的事。
  */
@@ -31,6 +37,8 @@ export interface AskOptions {
   prompt: string
   allowWrite: boolean
   project?: string
+  /** 子任务用哪个模型，填盒子里候选名单的 id。不给就用盒子的默认模型 */
+  model?: string
   configPath?: string
   timeoutSeconds?: number
   env?: NodeJS.ProcessEnv
@@ -76,11 +84,21 @@ export async function runAsk(options: AskOptions): Promise<Envelope> {
 
   try {
     const catalog = await runtime.catalog(rt)
-    if (!catalog.some((tool) => tool.name === DELEGATE_TOOL)) {
+    const delegate = catalog.find((tool) => tool.name === DELEGATE_TOOL)
+    if (!delegate) {
       throw new UeboxError(
         'TOOL_UNAVAILABLE',
         `虚幻盒子没有开放 ${DELEGATE_TOOL}，ask 用不了。`,
         '在虚幻盒子的 MCP 设置里确认暴露范围没有把 core 命名空间收掉。'
+      )
+    }
+
+    const model = options.model?.trim()
+    if (model && !acceptsModel(delegate)) {
+      throw new UeboxError(
+        'INVALID_ARGUMENT',
+        '虚幻盒子里只配了一个模型，--model 没有可选的。',
+        '在虚幻盒子的设置里再配一个模型，或者去掉 --model。'
       )
     }
 
@@ -94,6 +112,7 @@ export async function runAsk(options: AskOptions): Promise<Envelope> {
         prompt,
         context_mode: 'fresh',
         namespaces,
+        ...(model ? { model } : {}),
         ...(options.allowWrite ? {} : { read_only: true })
       },
       project?.path,
@@ -113,6 +132,13 @@ export async function runAsk(options: AskOptions): Promise<Envelope> {
   } finally {
     await rt.close()
   }
+}
+
+/** 盒子配了不止一个模型时，`task` 的参数表里才有 `model` */
+function acceptsModel(tool: CatalogTool): boolean {
+  const properties = (tool.inputSchema as { properties?: Record<string, unknown> } | undefined)
+    ?.properties
+  return properties !== undefined && 'model' in properties
 }
 
 /**

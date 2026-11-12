@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { extractFile, listPackage } from '@electron/asar'
+import { load } from 'js-yaml'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const LICENSE_NAME = /^(?:licen[cs]e|copying|notice)(?:[._-]|$)/i
@@ -43,6 +44,20 @@ export function findPackagedDependencySource(packageDir, metadata, root = ROOT) 
   // 磁盘上只有顶层那一份。版本对得上就是同一个包，拿它核对许可证。
   const hoisted = join(root, 'node_modules', metadata.name)
   if (matches(hoisted)) return hoisted
+  // node-linker=hoisted 的不同版本可能只在某个父包下；builder 会重新提升它们。
+  // pnpm 的安装清单记录真实位置，仍须核对磁盘上的 name/version，不能只相信索引。
+  const modulesFile = join(root, 'node_modules', '.modules.yaml')
+  if (existsSync(modulesFile)) {
+    const locations = load(readFileSync(modulesFile, 'utf8'))?.hoistedLocations ?? {}
+    const identity = `${metadata.name}@${metadata.version}`
+    for (const [id, paths] of Object.entries(locations)) {
+      if (id !== identity && !id.startsWith(`${identity}(`)) continue
+      for (const relative of paths) {
+        const candidate = join(root, ...relative.split(/[\\/]/))
+        if (matches(candidate)) return candidate
+      }
+    }
+  }
   return null
 }
 

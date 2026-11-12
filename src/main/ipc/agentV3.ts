@@ -79,6 +79,7 @@ import {
   type McpSettings
 } from '../agent-v3/capabilities/mcp'
 import { clientConfigSnippet, hostUrl } from '../agent-v3/capabilities/mcp/hostStore'
+import { installMcpClient, type McpClientId } from '../agent-v3/capabilities/mcp/clientInstall'
 import { listToolCatalog, listToolRisks } from '../agent-v3/tools/registry'
 import {
   restoreAssetSnapshot,
@@ -121,9 +122,10 @@ import {
 } from '../agent-v3/core/goalLoop'
 import { activeLoop, parseTeamCommand } from '../agent-v3/core/team/teamCommand'
 import { runWithEditorKey } from '../agent-v3/core/team/editorKey'
-import { createTeamStore, PRODUCER } from '../agent-v3/core/team/teamStore'
+import { createTeamStore } from '../agent-v3/core/team/teamStore'
+import { runningHybridTeam } from '../agent-v3/core/team/hybridTeam'
 import { createTeamLive, type TeamLive } from '../agent-v3/core/team/teamLive'
-import { formatMail } from '../agent-v3/core/team/teamTools'
+import { awaitTeamWork } from '../agent-v3/core/team/teamWait'
 import { assignMemberModel, loadTeamModels, recordReopen } from '../agent-v3/core/team/teamModels'
 import { createTrackRecord } from '../agent-v3/core/team/trackRecord'
 import { loadModelDossiers, recheckModel } from '../agent-v3/core/team/modelDossier'
@@ -137,6 +139,7 @@ import {
   endExternalTeam,
   externalTeamExists,
   isExternalTeamId,
+  isHybridTeam,
   listExternalTeams,
   readExternalTeamState
 } from './externalTeams'
@@ -628,6 +631,9 @@ async function prepareTeam(
   // 上次运行没交回的活（盒子关了、崩了）不会再交回来了；不收掉，界面上会一直挂着「正在写」
   await store.closeOpenJobs('上次运行中断，这件活没有交回').catch(() => undefined)
   ctx.pacedRequests = true
+  // 团队模式统一全放行：队员（和制作人那几个建工程、开工程的动作）不弹确认框，由模型自己判断。
+  // 队员经 `...parent` 继承这一档。和混合团队的默认一致，三种跑法同一个规矩
+  ctx.approvalMode = 'yolo'
   // 谁开始跑、谁在等也告诉界面（任务板上的办公室）。派活时几个人同时开工，合并成一次
   let liveTimer: ReturnType<typeof setTimeout> | null = null
   const live = createTeamLive(
@@ -792,7 +798,7 @@ function attachTeamGate(
       followUp: (text) => agent.followUp({ role: 'user', content: text, timestamp: 0 }),
       report: (message) =>
         emit('agent-v3:notice', { sessionId: ctx.sessionId, message, level: 'info' }),
-      awaitTeam: (signal) => awaitTeamWork(ctx, signal),
+      awaitTeam: (signal) => awaitTeamWork(ctx.team, signal),
       checkBoard: async (state) => {
         const since = state.roundStartedAt
         if (since === undefined) return null
@@ -830,44 +836,6 @@ async function teamCarryOverBlock(
   } catch {
     return dismissed
   }
-}
-
-/** 制作人想收尾时，最多等一件后台的活多久。到点就提醒它一声，再接着等 */
-const TEAM_SETTLE_WAIT_MS = 10 * 60_000
-
-/**
- * 制作人想收尾时，团队这边还有没有事：
- * 后台派出去的活还在跑，就等下一件交回来（结论会插进制作人的下一步）；
- * 等太久就提醒它一声谁还在干、干了多久；信箱里有没看的留言就补给它。
- */
-async function awaitTeamWork(
-  ctx: SessionContext,
-  signal?: AbortSignal
-): Promise<{ continued?: boolean; followUp?: string } | null> {
-  const team = ctx.team
-  if (!team?.live) return null
-  const pending = team.live.pendingJobs()
-  if (pending.length > 0) {
-    const settled = await team.live.nextSettle(TEAM_SETTLE_WAIT_MS, signal)
-    if (settled) return { continued: true }
-    const now = Date.now()
-    return {
-      followUp: [
-        '[team mode · still working] This is not the user speaking.',
-        `Teammates are still on background work: ${pending
-          .map((job) => `${job.member} (${Math.round((now - job.startedAt) / 60_000)} min)`)
-          .join(', ')}.`,
-        'Their results will come to you as notes. Wait by ending your turn again, or check in with team_message.'
-      ].join('\n')
-    }
-  }
-  const inbox = await team.store.takeInbox(PRODUCER)
-  if (inbox.length > 0) {
-    return {
-      followUp: formatMail('[team mode · notes for you] This is not the user speaking.', inbox)
-    }
-  }
-  return null
 }
 
 /** 正在看护的编辑器，按会话记。一轮结束（`finally` 里）就停 */
@@ -1864,7 +1832,7 @@ export function registerAgentV3IPC(): void {
       if (!sessionId || !name || !providerId || !modelId) {
         return { success: false, error: 'sessionId、name、providerId、modelId 都要给' }
       }
-      if (!(await loadExecutionOptions(sessionId))?.team) {
+      if (!(await loadExecutionOptions(sessionId))?.team && !(await isHybridTeam(sessionId))) {
         return { success: false, error: '这条 session 不是团队模式' }
       }
       // 先过入职体检：不会调工具的模型换上去也干不了活，当场说清卡在哪比派活时才出错好
@@ -1896,12 +1864,15 @@ export function registerAgentV3IPC(): void {
       if (!sessionId || !name || typeof reason !== 'string') {
         return { success: false, error: 'sessionId、name、reason 都要给' }
       }
-      if (!(await loadExecutionOptions(sessionId))?.team) {
+      const hybrid = await isHybridTeam(sessionId)
+      if (!hybrid && !(await loadExecutionOptions(sessionId))?.team) {
         return { success: false, error: '这条 session 不是团队模式' }
       }
       const store = createTeamStore(teamDirsFor(sessionId))
+      // 混合团队的队员跑在宿主上（`core/team/hybridTeam.ts`），谁在跑问它
+      const live = hybrid ? runningHybridTeam(sessionId)?.live : liveTeams.get(sessionId)
       // 没在跑的时候，账上挂着的「在干」是上次被打断留下的，下一轮开局会收掉，不算手上有活
-      const running = activeAgents.has(sessionId)
+      const running = hybrid ? live !== undefined : activeAgents.has(sessionId)
       const openJobs = running
         ? (await store.jobs()).filter((job) => job.endedAt === undefined)
         : []
@@ -1913,7 +1884,7 @@ export function registerAgentV3IPC(): void {
           reason: reason.slice(0, 500),
           isBusy: (who) =>
             running &&
-            (!!liveTeams.get(sessionId)?.isRunning(who) ||
+            (!!live?.isRunning(who) ||
               openJobs.some((job) => job.member.toLowerCase() === who.toLowerCase()))
         })
       } catch (error) {
@@ -3987,6 +3958,21 @@ export function registerAgentV3IPC(): void {
   }))
 
   ipcMain.handle('agent-v3:mcp-server:status', async () => withHostSettings(mcpServerStatus()))
+
+  /**
+   * 把对外 MCP 写进 Claude Code / Codex 的用户级配置。服务没开就顺手开起来 ——
+   * 写好了配置、服务却没跑，用户在客户端里看到的只是一条「连接失败」。
+   */
+  ipcMain.handle('agent-v3:mcp-server:install-client', async (_event, client: McpClientId) => {
+    try {
+      const { path } = await installMcpClient(client)
+      let status = mcpServerStatus()
+      if (!status.running) status = await startMcpServer(mcpSessionSource, {})
+      return { success: true, path, status: await withHostSettings(status) }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
 
   /**
    * 保存端口 / 暴露范围。运行中有变化时自动重启服务，让新权限立即生效。

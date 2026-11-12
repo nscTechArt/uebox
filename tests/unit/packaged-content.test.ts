@@ -138,6 +138,48 @@ describe('actual packaged archive gate', () => {
     const path = await archive('clean')
     expect(() => checkPackagedContent(path)).not.toThrow()
   })
+  it('finds a nested hoisted version after builder moves it to the archive root', () => {
+    const workspace = join(temp, 'hoisted-versions')
+    const direct = join(workspace, 'node_modules/@scope/example')
+    const actual = join(workspace, 'node_modules/parent/node_modules/@scope/example')
+    for (const [directory, version] of [
+      [direct, '2.0.0'],
+      [actual, '1.0.0']
+    ]) {
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(
+        join(directory, 'package.json'),
+        JSON.stringify({ name: '@scope/example', version })
+      )
+    }
+    writeFileSync(
+      join(workspace, 'node_modules/.modules.yaml'),
+      require('js-yaml').dump({
+        nodeLinker: 'hoisted',
+        hoistedLocations: {
+          '@scope/example@1.0.0(peer@2.0.0)': [
+            'node_modules\\parent\\node_modules\\@scope\\example'
+          ],
+          '@scope/example@3.0.0': ['node_modules/parent/node_modules/@scope/example']
+        }
+      })
+    )
+    expect(
+      findPackagedDependencySource(
+        'node_modules/@scope/example',
+        { name: '@scope/example', version: '1.0.0' },
+        workspace
+      )
+    ).toBe(actual)
+    // 过期索引不能拿错误版本的源码替代许可证核验。
+    expect(
+      findPackagedDependencySource(
+        'node_modules/@scope/example',
+        { name: '@scope/example', version: '3.0.0' },
+        workspace
+      )
+    ).toBeNull()
+  })
   it('does not mistake a module-scope package.json for a dependency root', async () => {
     const path = await archive('module-scope', ['node_modules/example/dist/esm/package.json'])
     expect(() => checkPackagedContent(path)).not.toThrow()

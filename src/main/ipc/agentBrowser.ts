@@ -3,6 +3,39 @@ import { logger } from '../services/logger'
 import { normalizeBrowserAddress } from '../services/agentBrowser/address'
 
 import { getSessionBrowser, type EmbeddedBounds } from '../services/agentBrowser'
+import type { BrowserCommand } from '../../shared/agentBrowser'
+
+/** 渲染层能经 IPC 触发的快捷键动作。地址栏、查找条、新标签面板自己处理，不走这里 */
+const COMMANDS = new Set([
+  'back',
+  'forward',
+  'reload',
+  'hardReload',
+  'stop',
+  'closeTab',
+  'reopenTab',
+  'nextTab',
+  'previousTab',
+  'lastTab',
+  'selectTab',
+  'zoomIn',
+  'zoomOut',
+  'zoomReset'
+])
+
+function validCommand(value: unknown): BrowserCommand {
+  const input = value as { name?: unknown; index?: unknown } | null
+  if (!input || typeof input.name !== 'string' || !COMMANDS.has(input.name)) {
+    throw new Error('Invalid browser command')
+  }
+  if (input.name === 'selectTab') {
+    if (!Number.isInteger(input.index) || (input.index as number) < 0) {
+      throw new Error('Invalid tab index')
+    }
+    return { name: 'selectTab', index: input.index as number }
+  }
+  return { name: input.name } as BrowserCommand
+}
 
 /**
  * Agent 浏览器的界面通道。
@@ -119,7 +152,45 @@ export function registerAgentBrowserIPC(): void {
         browser.selectTab(input.tabId)
       else if (typeof input.tabId === 'string' && input.action === 'close')
         await browser.closeTab(input.tabId)
+      else if (
+        typeof input.tabId === 'string' &&
+        input.action === 'move' &&
+        Number.isInteger(input.index)
+      )
+        browser.moveTab(input.tabId, input.index as number)
       else throw new Error('Invalid tab command')
+      return { success: true, data: null }
+    } catch (error) {
+      return failure(null, error)
+    }
+  })
+
+  /** 焦点在面板上时按的浏览器快捷键 */
+  ipcMain.handle('agent-browser:command', (_event, sessionId: string, command: unknown) => {
+    try {
+      if (!sessionId) throw new Error('Missing browser session ID')
+      getSessionBrowser(validSessionId(sessionId)).runCommand(validCommand(command))
+      return { success: true, data: null }
+    } catch (error) {
+      return failure(null, error)
+    }
+  })
+
+  /** 页内查找。传 null 收起；结果随 `agent-browser:state` 的 `find` 推回来 */
+  ipcMain.handle('agent-browser:find', (_event, sessionId: string, query: unknown) => {
+    try {
+      if (!sessionId) throw new Error('Missing browser session ID')
+      const input = query as { text?: unknown; forward?: unknown; findNext?: unknown } | null
+      if (input !== null && (typeof input !== 'object' || typeof input.text !== 'string')) {
+        throw new Error('Invalid find query')
+      }
+      getSessionBrowser(validSessionId(sessionId)).find(
+        input && {
+          text: (input.text as string).slice(0, 1000),
+          forward: input.forward !== false,
+          findNext: input.findNext === true
+        }
+      )
       return { success: true, data: null }
     } catch (error) {
       return failure(null, error)

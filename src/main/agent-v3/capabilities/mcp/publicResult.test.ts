@@ -63,7 +63,9 @@ describe('team_gate / team_list', () => {
       lastWriteAt: null,
       deliveries: 1,
       passed: true,
-      ended: false
+      ended: false,
+      pendingJobs: null,
+      unreadForProducer: null
     })
     expect(toStructuredContent('team_list', { teams: [{ teamId: 'ext-1' }] })).toMatchObject({
       teams: [{ teamId: 'ext-1', verdict: null, passed: null, projectPath: null }]

@@ -1,7 +1,6 @@
-import { defineStore } from 'pinia'
+import { defineStore, type PiniaPluginContext } from 'pinia'
 import { ref, computed, watch, nextTick } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { resolveTabRoute } from '../../common/tabRoute'
 
 export interface TabItem {
@@ -813,41 +812,32 @@ export const useTabsStore = defineStore(
   },
   {
     // 持久化配置
-    // 使用类型断言绕过 pinia-plugin-persistedstate 类型定义不完整的问题
     persist: {
       key: 'tabs-store',
-      paths: ['historyTabs', 'activeTab'],
+      pick: ['historyTabs', 'activeTab'],
       storage: localStorage,
       /**
        * 数据恢复后的钩子
        * 确保在持久化数据被恢复后执行清理逻辑
        */
-      afterHydrate: (ctx: { store: Record<string, unknown> }) => {
+      afterHydrate: (ctx: PiniaPluginContext) => {
         console.log('[TabsStore] 持久化数据已恢复，执行清理...')
         // 延迟执行确保 store 完全初始化
         setTimeout(() => {
-          const store = ctx.store
+          // 断言成本 store 的类型：方法改了名，tsc 直接报错，
+          // 而不是 typeof 判断为假、清理逻辑在运行时被静默跳过
+          const store = ctx.store as ReturnType<typeof useTabsStore>
           // 标题迁移必须在这里跑：setup 阶段 historyTabs 还是空的，
           // 老数据要等持久化插件恢复完才看得见
-          if (typeof store.migrateTabTitles === 'function') {
-            ;(store.migrateTabTitles as () => void)()
-          }
+          store.migrateTabTitles()
           // 老数据里的项目库还带着 fixed / isCanDelete=false，就地解锁
-          if (typeof store.unlockProjectLibTab === 'function') {
-            ;(store.unlockProjectLibTab as () => void)()
-          }
+          store.unlockProjectLibTab()
           // 调用清理函数
-          if (typeof store.cleanupSpotlightTabs === 'function') {
-            ;(store.cleanupSpotlightTabs as () => void)()
-          }
-          if (typeof store.cleanupNestedRouteTabs === 'function') {
-            ;(store.cleanupNestedRouteTabs as () => void)()
-          }
-          if (typeof store.cleanupLibraryTabs === 'function') {
-            ;(store.cleanupLibraryTabs as () => void)()
-          }
+          store.cleanupSpotlightTabs()
+          store.cleanupNestedRouteTabs()
+          store.cleanupLibraryTabs()
         }, 0)
       }
-    } as unknown as boolean
+    }
   }
 )

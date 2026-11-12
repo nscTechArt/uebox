@@ -69,6 +69,7 @@ import {
 import { runEditorPython } from '../../../core/editorPython'
 import { isSameProjectPath } from '../../../core/projectPathKey'
 import { awaitProjectLive, DEFAULT_WAIT_MS, MAX_WAIT_MS } from './awaitProjectLive'
+import { editorStillLoading, noteEditorLaunch } from './editorLaunch'
 import { applyVaultConnectionPragmas } from '../../../../sqliteDataBase/vaultConnectionPragmas'
 
 /**
@@ -639,17 +640,13 @@ async function openProject(projectKey: string): Promise<OpenProjectResult> {
 
   const running = await alreadyRunning(uprojectPath)
   if (running === 'stuck') return stuckEditorResult(uprojectPath)
-  if (running === 'yes' || running === 'busy') {
+  if (running !== 'no') {
     console.log(`[ProjectTool] ${project.projectName} 已经开着，不再启动一次`)
     return {
       success: true,
       projectName: project.projectName ?? undefined,
       openedPath: uprojectPath,
-      details: [
-        running === 'busy'
-          ? '♻️ 这个工程本来就开着，但它手上还有请求没回话 —— 要是一直不回，可能已经卡死，用 ue_session_health 看一眼'
-          : '♻️ 这个工程本来就开着'
-      ]
+      details: [ALREADY_OPEN_DETAIL[running]]
     }
   }
 
@@ -687,6 +684,7 @@ async function openProject(projectKey: string): Promise<OpenProjectResult> {
     }
   }
 
+  noteEditorLaunch(uprojectPath)
   console.log(`[ProjectTool] 已成功启动项目: ${project.projectName}`)
   return {
     success: true,
@@ -750,16 +748,12 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
 
   const runningByPath = await alreadyRunning(uprojectPath)
   if (runningByPath === 'stuck') return stuckEditorResult(uprojectPath)
-  if (runningByPath === 'yes' || runningByPath === 'busy') {
+  if (runningByPath !== 'no') {
     console.log(`[ProjectTool] ${uprojectPath} 已经开着，不再启动一次`)
     return {
       success: true,
       openedPath: uprojectPath,
-      details: [
-        runningByPath === 'busy'
-          ? '♻️ 这个工程本来就开着，但它手上还有请求没回话 —— 要是一直不回，可能已经卡死，用 ue_session_health 看一眼'
-          : '♻️ 这个工程本来就开着'
-      ]
+      details: [ALREADY_OPEN_DETAIL[runningByPath]]
     }
   }
 
@@ -797,6 +791,7 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
     }
   }
 
+  noteEditorLaunch(uprojectPath)
   console.log(`[ProjectTool] 已成功启动项目: ${uprojectPath}`)
   return {
     success: true,
@@ -826,10 +821,29 @@ async function openProjectByPath(projectPath: string): Promise<OpenProjectResult
  * - 连接不答话、进程还在 → `stuck`：多半卡在崩溃处理或弹窗上。这时再启动一个
  *   就是两个编辑器抢同一个工程（反馈里正好出现过），宁可停下来说清楚
  */
-async function alreadyRunning(uprojectPath: string): Promise<'yes' | 'busy' | 'no' | 'stuck'> {
+/**
+ * 已经开着、不再启动时回给模型的那一句。`loading` 要说清「这不是没开」，
+ * 不然它会接着反复调 open_project 等就绪
+ */
+const ALREADY_OPEN_DETAIL: Record<'yes' | 'busy' | 'loading', string> = {
+  yes: '♻️ 这个工程本来就开着',
+  busy: '♻️ 这个工程本来就开着，但它手上还有请求没回话 —— 要是一直不回，可能已经卡死，用 ue_session_health 看一眼',
+  loading:
+    '♻️ 这个工程的编辑器已经在启动、还没连上盒子，没有再启动一个。用 ue_session_health 看它连上没有，不要重复调 open_project'
+}
+
+async function alreadyRunning(
+  uprojectPath: string
+): Promise<'yes' | 'busy' | 'loading' | 'no' | 'stuck'> {
   // `isSameProject` 自己会削掉 `.uproject` 并抹平大小写和斜杠方向，原样传进去就行
   const connectionId = findLiveConnection(uprojectPath)
-  if (!connectionId) return 'no'
+  // 没连上不等于没开：编辑器加载要几十秒到几分钟，这时再启动就是第二个编辑器（见 editorLaunch.ts）
+  if (!connectionId) {
+    const loading = await editorStillLoading(uprojectPath, {
+      findProcess: (p) => UnrealProcessDetector.findRunningProjectByPath(p, { throwOnError: true })
+    })
+    return loading ? 'loading' : 'no'
+  }
   const ws = serviceManager.getWebSocketService()
   const verdict = await ws.probeConnection(connectionId)
   // 忙 = 有请求在路上、没去探：既可能在跑长操作，也可能已经卡死，不能直接说「开着、好着」

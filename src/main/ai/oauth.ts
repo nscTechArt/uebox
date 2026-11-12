@@ -312,17 +312,43 @@ async function runPkceLogin(
       })()
     })
 
+    // 浏览器解析 localhost 时 IPv4、IPv6 都可能先试。固定端口在某个地址上
+    // 被拒（Windows 上常见 EACCES：被别的程序独占或落在系统保留段）时换另一个地址再绑
+    const hosts = spec.fixedPort ? ['127.0.0.1', '::1'] : ['127.0.0.1']
+    let hostIndex = 0
+    let listening = false
+
     server.on('error', (error) => {
-      const message =
-        (error as NodeJS.ErrnoException).code === 'EADDRINUSE' && spec.fixedPort
-          ? `本机 ${spec.fixedPort} 端口被占用。${providerId} 要求回调必须走这个端口，` +
-            '请关掉占用它的程序（常见是官方 CLI 的登录流程）后重试。'
-          : error.message
+      const code = (error as NodeJS.ErrnoException).code
+      if (
+        !listening &&
+        (code === 'EACCES' || code === 'EADDRINUSE') &&
+        hostIndex < hosts.length - 1
+      ) {
+        hostIndex += 1
+        listen()
+        return
+      }
+      let message = error.message
+      if (spec.fixedPort && code === 'EADDRINUSE') {
+        message =
+          `本机 ${spec.fixedPort} 端口被占用。${providerId} 要求回调必须走这个端口，` +
+          '请关掉占用它的程序（常见是官方 CLI 的登录流程）后重试。'
+      } else if (spec.fixedPort && code === 'EACCES') {
+        message =
+          `没有权限监听本机 ${spec.fixedPort} 端口。${providerId} 要求回调必须走这个端口，` +
+          '它可能被系统保留或被安全软件拦截。可以用管理员权限运行 ' +
+          `netsh interface ipv4 show excludedportrange protocol=tcp 查看保留段，或暂时关闭拦截端口的安全软件后重试。`
+      }
       finish(new Error(message))
     })
 
     // 固定端口是对方注册死的，只能用它；其余情况交给系统分配
-    server.listen(spec.fixedPort ?? 0, '127.0.0.1', () => {
+    const listen = (): void => {
+      server.listen(spec.fixedPort ?? 0, hosts[hostIndex], onListening)
+    }
+    const onListening = (): void => {
+      listening = true
       const { port } = server.address() as AddressInfo
       const authorizeUrl = new URL(spec.authorizeUrl)
       // 回调用 localhost 而不是 127.0.0.1：ChatGPT 注册的就是 localhost 字面量
@@ -345,7 +371,8 @@ async function runPkceLogin(
       }
 
       void shell.openExternal(authorizeUrl.toString()).catch((error) => finish(error))
-    })
+    }
+    listen()
   })
 }
 

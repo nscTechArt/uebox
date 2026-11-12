@@ -22,7 +22,9 @@ import {
   buildSkillsSection,
   createSkillTools,
   discoverEnabledSkills,
-  type SkillLearningMode
+  skillBodyVisible,
+  type SkillLearningMode,
+  type SkillToolHooks
 } from '../capabilities/skills'
 import { buildUserInstructionsSection } from '../capabilities/userInstructions'
 import type { SkillMetadata } from '../../agent-v3/capabilities/skillsService/SkillsService'
@@ -112,7 +114,7 @@ import {
   createBoardTool,
   createMessageTool,
   createTeamTools,
-  producerTools
+  type TeamToolDeps
 } from './team/teamTools'
 import { createStatusTool } from './team/teamStatus'
 import { pacedStreamFn, stallGuardStreamFn, type PacedStreamDeps } from './team/requestGate'
@@ -631,14 +633,17 @@ export function resolveAgentTools(
   taskTool?: UnrealAgentTool<never>,
   loadSkillTools?: Parameters<typeof createSkillTools>[2],
   /** 查存档大结果的工具（见 `core/resultArchive.ts`）。和 task 一样要引用 Agent 实例，由调用方造 */
-  resultQueryTool?: UnrealAgentTool<never>
+  resultQueryTool?: UnrealAgentTool<never>,
+  /** 技能工具要看对话的接缝（重复加载去重），同样要引用 Agent 实例 */
+  skillHooks?: SkillToolHooks
 ): UnrealAgentTool<never>[] {
   const tools = resolveCandidateTools(ctx)
   tools.push(
     ...(createSkillTools(
       skills,
       ctx.skillLearning ?? 'ask',
-      loadSkillTools
+      loadSkillTools,
+      skillHooks
     ) as unknown as UnrealAgentTool<never>[])
   )
 
@@ -685,6 +690,8 @@ export interface CreatedAgent {
   allTools: UnrealAgentTool<never>[]
   runtime: AgentModelRuntime
   skills: SkillMetadata[]
+  /** 不看阈值压掉已装进来的历史，见 `createAutoCompact` 的 `compactHistory` */
+  compactHistory: (signal?: AbortSignal) => Promise<boolean>
 }
 
 /** 子 agent 序号，用于生成唯一 sessionId */
@@ -718,12 +725,16 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
    * `runSubAgent` 的 `namespaces` / `toolNames` / `readOnly` 都是可选的，不带白名单
    * 派出去的子任务拿的是**完整工具池**，那恰恰是折叠最划算的场景。按身份关等于
    * 把一个没发生的收窄当成发生了。
+   *
+   * **队员的 `namespaces` 也不算收窄。** 制作人给队员一配就是十来个命名空间，
+   * 真机上队员第一个请求 2.2–2.7 万 token，直接对话折叠后只有 1.4 万；
+   * 队员一件活几十个请求，每个都多带一万。
    */
   if (
     ctx.readOnly ||
     ctx.mode === 'ask' ||
     ctx.toolNames?.length ||
-    ctx.namespaces?.length ||
+    (ctx.namespaces?.length && !ctx.teamMember) ||
     ctx.auditorJudges
   )
     ctx.toolSearchEnabled = false
@@ -812,12 +823,17 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
    * 就只看命名空间和名字，先滤后滤结果一样。
    */
 
+  /** 最近一次真正发给模型的上下文（压缩后的视图）。下面 `transformContext` 和超长补救两处更新 */
+  let sentContext: readonly unknown[] | undefined
   const resolvedTools = resolveAgentTools(
     { ...ctx, ueConnected: true },
     skills,
     taskTool,
     ctx.toolSearchEnabled ? (content) => search!.loadFromSkill(content) : undefined,
-    resultQueryTool
+    resultQueryTool,
+    // 看的是**最近一次真正发给模型的那份**（压缩之后的视图），不是 `state.messages`：
+    // 正文被压进摘要以后 state 里还留着原文，按它判断会把重新加载错拦下来
+    { bodyVisible: (name, content) => skillBodyVisible(sentContext ?? [], name, content) }
   )
   // 工作室模式的工具排在授权过滤之后追加：招人时要把制作人手上有哪些命名空间
   // 写进描述，得先有那份清单。它们全是 `core` / safe，过滤本来也不会拿掉它们
@@ -830,11 +846,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
         )
       : undefined
   const teamTools = teamToolsFor(ctx, resolvedTools, teamModels)
-  // 制作人只协调不动手：写工具全部收走，活只能派给队员（见 `producerTools`）
-  const onlineTools = [
-    ...(ctx.team && !ctx.isSubAgent ? producerTools(resolvedTools) : resolvedTools),
-    ...teamTools
-  ]
+  // 盒子里的制作人可以单干完成整个游戏，不再收走写工具；外部团队的制作人仍走 `producerTools`
+  const onlineTools = [...resolvedTools, ...teamTools]
   const offlineTools = onlineTools.filter(
     (tool) => !tool.unrealBox.namespace.startsWith('ue.') || OFFLINE_UE_TOOLS.has(tool.name)
   )
@@ -951,8 +964,11 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
   // 厂商回「上下文超长」时缩输出上限或当场压缩再重发一次，见 `contextOverflow.ts`。
   // 包在卡死重发外面：超长不是网关的事，重发同一个请求只会再被拒一次
   const recovering = overflowRecoveringStreamFn(streamFn, {
-    compact: async (signal) =>
-      (await autoCompact.compactForOverflow(signal)) as Message[] | undefined,
+    compact: async (signal) => {
+      const view = (await autoCompact.compactForOverflow(signal)) as Message[] | undefined
+      if (view) sentContext = view
+      return view
+    },
     onRecover: ({ action, reason }) =>
       logger.warn(
         `[AgentV3] 会话 ${ctx.sessionId} 上下文超长，${action === 'shrink-output' ? '缩小输出上限' : '当场压缩'}后重发：${reason.slice(0, 200)}`
@@ -987,7 +1003,11 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
       systemPrompt: systemPromptFor(ctx),
       tools: tools as unknown as AgentTool<never>[]
     },
-    transformContext: autoCompact,
+    transformContext: async (messages, signal) => {
+      const view = await autoCompact(messages, signal)
+      sentContext = view
+      return view
+    },
     /*
      * 引擎状态中途变了就把工具清单和环境块换掉。
      *
@@ -1123,7 +1143,8 @@ export async function createUnrealAgent(ctx: SessionContext): Promise<CreatedAge
     allTools: search ? [...onlineTools, search.tool] : onlineTools,
     runtime,
     skills,
-    toolSearchEnabled: ctx.toolSearchEnabled
+    toolSearchEnabled: ctx.toolSearchEnabled,
+    compactHistory: (signal) => autoCompact.compactHistory(agent.state.messages, signal)
   }
 }
 
@@ -1255,7 +1276,7 @@ export async function runSubAgent(
     ? `${parent.sessionId}:mate-${memberFileBase(input.member.name)}`
     : `${parent.sessionId}:sub-${++subAgentSeq}`
 
-  const { agent, allTools } = await createUnrealAgent({
+  const { agent, allTools, compactHistory } = await createUnrealAgent({
     ...parent,
     sessionId: subId,
     isSubAgent: true,
@@ -1322,6 +1343,13 @@ export async function runSubAgent(
 
   if (input.seedMessages.length > 0) {
     restoreTranscript(agent, input.seedMessages)
+    // 队员接新活：之前几件活的过程压成摘要，最近一段（含上件活的交活报告）留原文。
+    // 历史本来就短的话压不动，原样往下走
+    if (input.member) {
+      const compacted = await compactHistory(input.signal)
+      input.signal?.throwIfAborted()
+      if (compacted) input.onProgress?.('之前几件活的记录已压成摘要')
+    }
   }
   // 「这一路新产生的」从这里往后算。不能用 seedMessages.length：开头有子 agent
   // 自己那条提示词，继承来的父历史里的 system 消息又被 restoreTranscript 丢了
@@ -1493,8 +1521,89 @@ function attachTeamLive(ctx: SessionContext, agent: Agent): void {
 }
 
 /** 队员的锁主。不带 `:sub-`，所以不会被 `rootSessionId` 归回制作人 */
-function memberLockOwner(sessionId: string, name: string): string {
+export function memberLockOwner(sessionId: string, name: string): string {
   return `${sessionId}:mate-${memberFileBase(name)}`
+}
+
+/**
+ * 团队里真正跑模型的那两件：派给队员的活、交付验收。
+ *
+ * `parentOf` 每件活现取一次父上下文：盒子里的团队就是制作人这一轮的 ctx，
+ * 混合团队（`team/hybridTeam.ts`）每件活现算一份（引擎连没连上、工程在哪会变）。
+ * 验收要 `team`（目标、用户最近那句话），没有就报错。
+ */
+export function createTeamRunners(
+  parentOf: () => SessionContext
+): Pick<TeamToolDeps, 'runMember' | 'runAcceptance'> {
+  return {
+    runMember: async ({
+      member,
+      message,
+      history,
+      signal,
+      onProgress,
+      ledger,
+      keepMessages,
+      keepUsage,
+      pin
+    }) => {
+      const ctx = parentOf()
+      // 队员用自己的锁主：两个队员改同一个资产会被挡下，而不是像 `task` 那样
+      // 父子共用一把锁、互相不设防。它这件活干完就放锁 —— 队员的「一轮」就是一件活
+      const owner = memberLockOwner(ctx.sessionId, member.name)
+      return runWithLockOwner(owner, async () => {
+        try {
+          return await runSubAgent(ctx, {
+            prompt: message,
+            member,
+            ...(pin ? { model: pin } : {}),
+            seedMessages: history,
+            ledger,
+            onProgress,
+            keepMessages,
+            ...(keepUsage ? { keepUsage } : {}),
+            ...(member.namespaces ? { namespaces: member.namespaces } : {}),
+            ...(member.readOnly ? { readOnly: true } : {}),
+            ...(signal ? { signal } : {})
+          })
+        } finally {
+          releaseAll(owner)
+        }
+      })
+    },
+    runAcceptance: async ({
+      report,
+      howToPlay,
+      projectPath,
+      packageExe,
+      signal,
+      onProgress,
+      keepUsage
+    }) => {
+      const ctx = parentOf()
+      const team = ctx.team
+      if (!team) throw new Error('不是团队，没有验收')
+      // 验收员什么都不带：不看制作过程，只看交付说明和游戏本身。
+      // 不给审批通道，理由同 `/goal` 的审计员：它的授权边界就是 `isAuditorTool`
+      const result = await runSubAgent(ctx, {
+        prompt: buildAcceptancePrompt({
+          objective: team.objective,
+          ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
+          report,
+          howToPlay,
+          ...(projectPath ? { projectPath } : {}),
+          ...(packageExe ? { packageExe } : {})
+        }),
+        auditorJudges: ACCEPTANCE_JUDGES,
+        withoutApproval: true,
+        seedMessages: [],
+        onProgress,
+        keepUsage,
+        ...(signal ? { signal } : {})
+      })
+      return result.text
+    }
+  }
 }
 
 /**
@@ -1531,69 +1640,7 @@ function teamToolsFor(
     objective: team.objective,
     namespaces,
     ...(models ? { models } : {}),
-    runMember: async ({
-      member,
-      message,
-      history,
-      signal,
-      onProgress,
-      ledger,
-      keepMessages,
-      keepUsage,
-      pin
-    }) => {
-      // 队员用自己的锁主：两个队员改同一个资产会被挡下，而不是像 `task` 那样
-      // 父子共用一把锁、互相不设防。它这件活干完就放锁 —— 队员的「一轮」就是一件活
-      const owner = memberLockOwner(ctx.sessionId, member.name)
-      return runWithLockOwner(owner, async () => {
-        try {
-          return await runSubAgent(ctx, {
-            prompt: message,
-            member,
-            ...(pin ? { model: pin } : {}),
-            seedMessages: history,
-            ledger,
-            onProgress,
-            keepMessages,
-            ...(keepUsage ? { keepUsage } : {}),
-            ...(member.namespaces ? { namespaces: member.namespaces } : {}),
-            ...(member.readOnly ? { readOnly: true } : {}),
-            ...(signal ? { signal } : {})
-          })
-        } finally {
-          releaseAll(owner)
-        }
-      })
-    },
-    runAcceptance: async ({
-      report,
-      howToPlay,
-      projectPath,
-      packageExe,
-      signal,
-      onProgress,
-      keepUsage
-    }) => {
-      // 验收员什么都不带：不看制作过程，只看交付说明和游戏本身。
-      // 不给审批通道，理由同 `/goal` 的审计员：它的授权边界就是 `isAuditorTool`
-      const result = await runSubAgent(ctx, {
-        prompt: buildAcceptancePrompt({
-          objective: team.objective,
-          ...(team.latestRequest ? { latestRequest: team.latestRequest } : {}),
-          report,
-          howToPlay,
-          ...(projectPath ? { projectPath } : {}),
-          ...(packageExe ? { packageExe } : {})
-        }),
-        auditorJudges: ACCEPTANCE_JUDGES,
-        withoutApproval: true,
-        seedMessages: [],
-        onProgress,
-        keepUsage,
-        ...(signal ? { signal } : {})
-      })
-      return result.text
-    },
+    ...createTeamRunners(() => ctx),
     ...(team.onVerdict ? { onVerdict: team.onVerdict } : {}),
     ...(team.snapshots ? { snapshots: team.snapshots } : {}),
     ...(team.live ? { live: team.live } : {})

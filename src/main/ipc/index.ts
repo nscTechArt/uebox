@@ -30,6 +30,7 @@ import { registerAiImageIPC } from './aiImage'
 import { registerAppSettingsIPC, type SetAppIconTheme } from './appSettings'
 import { registerPersonalizationIPC } from './personalization'
 import { registerChatHistoryIPC } from './chatHistory'
+import { registerSecureStoreIPC } from './secureStore'
 import { registerBackupIpc } from './backup'
 import { registerFileIPC } from './fileIPC'
 import { registerScreenshotIPC } from './screenshot'
@@ -148,6 +149,9 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 注册 AI 对话历史落盘 IPC（原来存在 localStorage，配额不够）
   registerChatHistoryIPC()
+
+  // 注册渲染层凭据的加密落盘 IPC（原来明文存在 localStorage）
+  registerSecureStoreIPC()
 
   // 注册数据库备份相关 IPC
   registerBackupIpc()

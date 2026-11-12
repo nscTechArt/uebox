@@ -1,5 +1,6 @@
 import type {
   BrowserGroupState,
+  BrowserCommand,
   BrowserTabCommand,
   BrowserNavigationState,
   BrowserToolbarAction
@@ -102,6 +103,27 @@ type CatalogIpcResult<T> =
 export {}
 
 declare global {
+  /**
+   * 命名规则保存时交上去的东西：完整配置 **+ 这一次点掉了哪些出厂键**。
+   *
+   * 和主进程的 `NamingRulesSavePayload`（`src/main/utils/namingRulesConfig.ts`）
+   * 是同一个形状。这里重写一遍而不是 import 过来：那个模块 import 了 `electron` 和 `fs`，
+   * 而本文件同时在 tsconfig.web 的程序里，把主进程模块拉进渲染侧会直接挂。
+   * 放在 global 里是为了 `src/preload/index.ts` 也能标注同一个类型（硬规则 4）。
+   * 四张表的键名跟着主进程那边改。
+   */
+  type NamingRulesSavePayload = import('../renderer/src/types/namingRules').NamingRulesConfig & {
+    removedKeys?: Partial<
+      Record<
+        | 'assetPrefixes'
+        | 'assetTypeToDirectory'
+        | 'libraryAssetTypeToDirectory'
+        | 'extensionToAssetType',
+        string[]
+      >
+    >
+  }
+
   /**
    * 引擎桥接（盒子这一侧的 WebSocket 服务）的状态。
    *
@@ -2069,10 +2091,8 @@ declare global {
     namingRules: {
       /** 加载配置 */
       loadConfig: () => Promise<import('../renderer/src/types/namingRules').NamingRulesConfig>
-      /** 保存配置 */
-      saveConfig: (
-        config: import('../renderer/src/types/namingRules').NamingRulesConfig
-      ) => Promise<boolean>
+      /** 保存配置。`removedKeys` 是这一轮在设置页点掉的出厂键，按表分组 */
+      saveConfig: (config: NamingRulesSavePayload) => Promise<boolean>
       /** 重置配置 */
       resetConfig: () => Promise<boolean>
     }
@@ -2136,6 +2156,11 @@ declare global {
         data?: { configured: boolean; model: string | null }
       }>
     }
+    /** AIGC 生图任务 */
+    imageGeneration: {
+      /** 掐断正在出图的那条任务。主进程会补发一条 `image:event` 的 failed，界面据此回落 */
+      cancelTask: (taskId: string) => Promise<{ success: boolean; error?: string }>
+    }
     /**
      * 本地直连 Provider 配置。
      *
@@ -2159,6 +2184,12 @@ declare global {
       >
       deleteProvider: (
         providerId: string
+      ) => Promise<
+        import('../shared/aiProvider').AiProviderResult<import('../shared/aiProvider').SettingsView>
+      >
+      setEnabled: (
+        providerId: string,
+        enabled: boolean
       ) => Promise<
         import('../shared/aiProvider').AiProviderResult<import('../shared/aiProvider').SettingsView>
       >
@@ -2228,6 +2259,20 @@ declare global {
         >
       >
       openManage: () => Promise<void>
+      /** 活动状态（MegaJam）。没连接时不联网 */
+      campaign: () => Promise<
+        import('../shared/creatorPlan').CreatorPlanResult<
+          import('../shared/creatorPlan').CreatorPlanCampaign
+        >
+      >
+      /** 参赛登记，填 itch.io 主页 */
+      claimCampaign: (
+        itchUrl: string
+      ) => Promise<import('../shared/creatorPlan').CreatorPlanResult<{ expiresAt: string | null }>>
+      /** 交卷，填 itch 作品页 */
+      submitCampaignEntry: (
+        entryUrl: string
+      ) => Promise<import('../shared/creatorPlan').CreatorPlanResult<{ entryUrl: string | null }>>
       onDeviceCode: (
         callback: (prompt: import('../shared/creatorPlan').CreatorPlanDevicePrompt) => void
       ) => () => void
@@ -2349,11 +2394,6 @@ declare global {
         expireTime?: string
         error?: string
       }>
-      /**
-       * 检查 DashScope 配置状态
-       * @returns 是否已配置及默认模型名称
-       */
-      check: () => Promise<{ configured: boolean; defaultModel: string }>
     }
     /** 实时语音连接。密钥只在主进程，渲染层只负责麦克风与喇叭 */
     realtimeVoice: {
@@ -2612,7 +2652,7 @@ declare global {
     }
     /**
      * Bilibili 视频分析 API
-     * 使用 Gemini 模型分析 Bilibili 视频内容
+     * 主进程把视频下到本地，交给用户在 设置 → 模型 里勾了「视频」能力的那个模型
      * 供知识库添加 Bilibili 来源使用
      */
     bilibili: {
@@ -2620,17 +2660,19 @@ declare global {
        * 分析 Bilibili 视频内容
        * @param params.url - Bilibili 视频 URL
        * @param params.prompt - 自定义分析提示词（可选）
-       * @param params.authToken - 认证 Token
        * @returns 分析结果，包含 Markdown 格式的视频内容描述
        */
       analyze: (params: { url: string; prompt?: string }) => Promise<{
         success: boolean
         content?: string
-        title?: string
         videoId?: string
-        realUrl?: string
         error?: string
       }>
+      /**
+       * 订阅分析进度。解析链接、下载、压缩、送模型各报一句，整条链最长要几分钟
+       * @returns 退订函数
+       */
+      onAnalyzeProgress: (callback: (payload: { url: string; note: string }) => void) => () => void
       /**
        * 验证 Bilibili URL 格式
        * @param url - 待验证的 URL
@@ -2834,6 +2876,13 @@ declare global {
       writeSessions: (
         writes: Array<{ sid: string; json: string | null; typing?: string[] }>
       ) => Promise<void>
+    }
+    /**
+     * 渲染层凭据的加密落盘；available 为 false 时 write 会被拒绝
+     */
+    secureStore: {
+      read: () => Promise<{ available: boolean; values: Record<string, string> }>
+      write: (key: string, value: string | null) => Promise<void>
     }
     /**
      * 个性化 API：用户写给 agent 的那段常驻说明。技能的列与删在 `agentV3` 下。
@@ -3272,6 +3321,14 @@ declare global {
         error?: string
         code?: string
       }>
+      command: (
+        sessionId: string,
+        command: BrowserCommand
+      ) => Promise<{ success: boolean; data: null; error?: string; code?: string }>
+      find: (
+        sessionId: string,
+        query: { text: string; forward?: boolean; findNext?: boolean } | null
+      ) => Promise<{ success: boolean; data: null; error?: string; code?: string }>
       /** 报告嵌入面板的位置；传 null 表示此刻不该显示 */
       setBounds: (
         bounds: { x: number; y: number; width: number; height: number } | null,
@@ -3810,6 +3867,13 @@ declare global {
         status: () => Promise<McpServerHostView>
         /** 换新令牌，旧的客户端配置随即失效 */
         rotateToken: () => Promise<{ success: boolean; status: McpServerHostView }>
+        /** 写进 Claude Code / Codex 的用户级配置，服务没开就一起开 */
+        installClient: (client: 'claude-code' | 'codex') => Promise<{
+          success: boolean
+          path?: string
+          error?: string
+          status?: McpServerHostView
+        }>
         /** 保存端口 / 暴露范围；运行中变更会自动重启服务 */
         saveConfig: (args: {
           port?: number

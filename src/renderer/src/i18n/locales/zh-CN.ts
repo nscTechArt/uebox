@@ -353,6 +353,11 @@ export default {
       clientConfig: '连接配置',
       copyConfig: '复制配置',
       copyToken: '只复制令牌',
+      installClaudeCode: '写入 Claude Code',
+      installCodex: '写入 Codex',
+      installedClaudeCode: '已写入 Claude Code 配置（{path}），重启 Claude Code 后生效',
+      installedCodex: '已写入 Codex 配置（{path}），重启 Codex 后生效',
+      installFailed: '写入失败：{error}',
       copied: '已复制',
       tokenMasked: '出于安全考虑仅显示首尾字符，完整令牌请点击「复制令牌」',
       // 「重置」两个字单看不知道重置什么，而它旁边就是两个复制动作
@@ -426,6 +431,7 @@ export default {
       add: '+ 添加服务商',
       // 也搜模型名：想找 Kimi K3 的人未必记得它挂在「Kimi Code（会员）」下面
       searchPlaceholder: '搜索服务商或模型',
+      enableProvider: '启用 {name}',
       // 密钥没配好是最常见的故障，而它在列表上完全看不出来
       keyReady: '密钥已配置',
       keyMissing: '缺少密钥',
@@ -704,7 +710,7 @@ export default {
         '选择 ElevenLabs 时按描述生成写实音效，可能收费；未配置时 Agent 用本机 FFmpeg 合成合成器类音效，需先安装 FFmpeg。两种方式都输出可直接导入 UE 的 WAV。',
       ttsDesc: '朗读 AI 回复，使用 AI 合成声音。',
       ttsMore:
-        '内置豆包 TTS 2.0 与阿里云 Qwen-Audio；也可接入本机运行的 Kokoro、CosyVoice 等 OpenAI 兼容合成服务（添加服务商 → 本机语音合成）。音色可在模型设置中修改。',
+        '内置豆包 TTS 2.0、阿里云 Qwen-Audio 与 Fish Audio；也可接入本机运行的 Kokoro、CosyVoice 等 OpenAI 兼容合成服务（添加服务商 → 本机语音合成）。音色可在模型设置中修改。',
       ttsMissing: '回复朗读不可用',
       realtimeDesc: '选择实时语音模型，用于语音通话。',
       realtimeMore:
@@ -868,7 +874,28 @@ export default {
         bad_response: 'Box Plan 服务返回了无法识别的内容',
         not_connected: '尚未连接',
         encryption_unavailable: '无法安全保存 Key',
+        invalid_itch_url: '请填写 itch.io 个人主页地址，例如 https://yourname.itch.io',
+        itch_not_found: 'itch.io 上没有这个主页',
+        itch_taken: '这个 itch.io 主页已被其他账户登记',
+        already_claimed: '本账户已登记过',
+        sold_out: '名额已发完',
+        campaign_closed: '已截止',
+        invalid_entry_url: '请填写 itch.io 作品页地址，例如 https://yourname.itch.io/game',
+        entry_not_found: 'itch.io 上没有这个作品页',
         unknown: '发生错误：{error}'
+      },
+      campaign: {
+        title: 'MegaJam 参赛登记',
+        itchLabel: 'itch.io 主页',
+        claim: '登记',
+        claimed: '已登记，试用额度已到账',
+        claimedShort: '已登记',
+        expires: '试用 {date} 到期',
+        entryLabel: 'itch.io 作品页',
+        submit: '交卷',
+        resubmit: '重新提交',
+        submitted: '已交卷',
+        entry: '已交卷：{url}'
       },
       chat: {
         subscription_inactive: {
@@ -2497,6 +2524,12 @@ export default {
       greetingPrompt: '{greeting}，有什么可以帮您？'
     },
     suggestions: {
+      // 2026-11-16 10:00 前顶替「知识问答」，见 megaJamSuggestion.ts
+      megaJam: {
+        title: 'MegaJam 参赛',
+        desc: '2026 Epic AI MegaJam',
+        prompt: '我要参加 2026 Epic AI MegaJam，带我走一遍参赛流程。'
+      },
       // 智能对话模式建议（默认）
       blueprintDebug: {
         title: '知识问答',
@@ -2604,7 +2637,11 @@ export default {
     },
     export: {
       user: '用户',
-      assistant: '助手'
+      assistant: '助手',
+      tools: '工具',
+      changes: '改动',
+      failed: '未生效',
+      turn: '第 {n} 轮'
     },
     teamBoard: {
       external: {
@@ -3146,7 +3183,13 @@ export default {
       stop: '停止加载',
 
       address: '网址',
-      addressPlaceholder: '输入网址',
+      addressPlaceholder: '搜索或输入网址',
+      resetZoom: '恢复默认大小',
+      closeBrowser: '关闭浏览器',
+      find: '在页面中查找',
+      findPrevious: '上一个',
+      findNext: '下一个',
+      findClose: '关闭查找',
       navigationFailed: '无法打开该网址，请检查地址或网络后重试。',
       actionFailed: '操作失败，请稍后重试。',
       busy: '助手正在使用浏览器，请在当前步骤完成后重试。',
@@ -4586,8 +4629,6 @@ export default {
         youtubeLabel: 'YouTube URL',
         youtubeHint: '输入 YouTube 视频链接',
         bilibiliLabel: 'Bilibili URL',
-        bilibiliHint:
-          '输入 Bilibili 视频链接，将自动公开分析视频内容，该功能为第三方提供的实验功能，不保证可用性',
         wechatLabel: '微信公众号文章链接',
         wechatHint: '输入微信公众号文章链接，将自动提取文章内容并转换为 Markdown 格式'
       },
@@ -4754,6 +4795,9 @@ export default {
   },
   externalTeams: {
     title: '外部团队',
+    driven: '外部驱动的对话',
+    unavailable: '暂时无法读取这条外部对话的任务板',
+    retry: '重试',
     intro:
       'Claude Code 当大脑、盒子当工作室的团队。思考花的是 Claude Code 的额度，盒子只记任务板、留言、快照和验收。',
     empty: '还没有外部团队',
@@ -5150,8 +5194,9 @@ export default {
     colInfo: '信息',
     colTags: '标签',
     loading: '加载中…',
-    emptyTitle: '用于存放可复用的资产',
-    emptyHint: '新建条目，或将文件拖入左侧文件夹',
+    emptyTitle: '{library}为空',
+    emptyFolderTitle: '这个文件夹是空的',
+    filteredEmptyTitle: '没有符合条件的条目',
     clearSearch: '清除搜索',
     folderSection: '文件夹',
     createFolder: '新建文件夹',
@@ -5341,6 +5386,9 @@ export default {
     }
   },
   aigcImageHistoryPanel: {
+    error: {
+      cancelledByUser: '生成已取消'
+    },
     status: {
       generating: '生成中 {progress}%',
       pending: '排队中',
@@ -6835,18 +6883,15 @@ export default {
   },
   screenRecorderExportPanel: {
     title: '录制导出',
-    subtitleFallback: '剪辑与导出设置',
     resetButton: '重置',
     exportButton: '导出',
     previewSectionTitle: '预览',
     noFileTitle: '未选择录制文件',
-    noFileDesc: '请先完成录制或传入视频地址',
     trimRangeTitle: '剪辑区间',
     startLabel: '起点',
     endLabel: '终点',
     trimDurationLabel: '剪辑时长',
     exportFormatTitle: '导出格式',
-    gifDesc: 'GIF 体积更小但不包含音频',
     qualityLabel: '质量',
     qualityOptions: {
       high: '高',
@@ -6861,9 +6906,7 @@ export default {
     bitrateLabel: '码率',
     advancedSettingsTitle: '高级设置',
     includeAudioTitle: '包含音频',
-    includeAudioDesc: '仅 MP4 可用',
     highQualityScaleTitle: '高质量缩放',
-    highQualityScaleDesc: '保持清晰度与细节',
     summaryTitle: '导出摘要',
     summaryFormat: '格式',
     summaryDuration: '时长',
@@ -7765,7 +7808,11 @@ export default {
       }
     },
     scan: {
-      done: '扫描完成'
+      done: '扫描完成',
+      partial: '扫描完成，{count} 个目录无法读取'
+    },
+    aiNaming: {
+      noVisionModel: '没有能看图的模型，请在 设置 → 模型 中为「图片理解」绑定一个模型'
     },
     folder: {
       unknownFolder: '未知文件夹',
@@ -8277,21 +8324,6 @@ export default {
     defaultGraph: {
       name: '新事件图表',
       description: '默认事件图表'
-    },
-    /*
-     * 空库时塞进去的四条示例蓝图。
-     *
-     * 英文用户第一次打开蓝图库，看到的四条示例全是中文描述。
-     * （「要不要有示例数据」是另一个问题，见评审 4.6；这里只负责别让它只有中文。）
-     */
-    samples: {
-      damageSystem: '通用伤害计算系统，支持物理和魔法伤害',
-      calculateDamage: '计算最终伤害值',
-      damageMultiplier: '伤害倍率',
-      isActive: '是否激活',
-      characterController: '角色移动控制蓝图，包含跳跃、冲刺、攀爬',
-      mainMenu: '主菜单 UI 蓝图',
-      networkManager: '网络同步管理器'
     }
   },
   miniChatWindow: {

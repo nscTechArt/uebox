@@ -369,7 +369,9 @@ function serializeTeamGate(details: Record<string, unknown>): Record<string, unk
     lastWriteAt: num(details.lastWriteAt),
     deliveries: num(details.deliveries),
     passed: bool(details.passed),
-    ended: bool(details.ended)
+    ended: bool(details.ended),
+    pendingJobs: num(details.pendingJobs),
+    unreadForProducer: num(details.unreadForProducer)
   }
 }
 

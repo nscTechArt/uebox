@@ -25,13 +25,14 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { createWriteStream, promises as fs } from 'fs'
 import { constants, setPriority } from 'os'
-import { basename, dirname, join, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { z } from 'zod'
 
 import { defineTool, type UnrealAgentTool } from '../defineTool'
 import { getTargetProjectPath } from '../../core/projectTargetContext'
 import UnrealPathManagerUtil from '../../../utils/UnrealPathManager'
 import { readUeJsonFile } from '../../../utils/ueTextFile'
+import { createFindNonEnglishTextTool } from './projectTextAudit'
 
 // ── 纯函数：参数、阶段、日志 ────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ export function buildUatArgs(input: {
   configuration: PackageConfiguration
   archiveDir: string
   platform: 'Win64' | 'Mac'
+  /** 只烘焙这几张地图；不给 = 工程里所有地图 */
+  maps?: string[]
 }): string[] {
   return [
     'BuildCookRun',
@@ -52,7 +55,7 @@ export function buildUatArgs(input: {
     `-serverconfig=${input.configuration}`,
     '-build',
     '-cook',
-    '-allmaps',
+    input.maps?.length ? `-map=${input.maps.join('+')}` : '-allmaps',
     '-stage',
     '-pak',
     '-archive',
@@ -60,6 +63,29 @@ export function buildUatArgs(input: {
     '-utf8output',
     '-unattended'
   ]
+}
+
+/**
+ * 地图参数规整成 UAT `-map=` 认的写法：`/Game/Maps/Main` 或 `Main`，去掉 `.umap` 和对象名后缀。
+ * 名字里只许字母、数字、下划线、连字符和斜杠 —— `+` 是 UAT 的分隔符，其余字符进不了命令行。
+ */
+export function normalizeMaps(maps: string[] | undefined): string[] {
+  const out: string[] = []
+  for (const raw of maps ?? []) {
+    const name = raw
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\.umap$/i, '')
+      .replace(/\.[A-Za-z0-9_]+$/, '')
+    if (!name) continue
+    if (!/^[A-Za-z0-9_\-/]+$/.test(name)) {
+      throw new Error(
+        `地图「${raw}」的写法不对：给地图名（Main）或资产路径（/Game/Maps/Main），只能有字母、数字、下划线、连字符和斜杠`
+      )
+    }
+    if (!out.includes(name)) out.push(name)
+  }
+  return out
 }
 
 /**
@@ -239,6 +265,13 @@ const packageInput = z.object({
     .optional()
     .default('Development')
     .describe('Development 带日志和控制台，适合冒烟和排错；Shipping 是发行版'),
+  maps: z
+    .array(z.string())
+    .optional()
+    .describe(
+      '只烘焙这几张地图（地图名或 /Game/ 路径），要带上启动地图和游戏里会切到的每一张。' +
+        '省略 = 工程里所有地图，带着示例和测试地图时包体会大很多'
+    ),
   output_dir: z.string().optional().describe('输出目录。省略 = <工程>/Saved/UEBoxBuilds/<时间>')
 })
 
@@ -262,9 +295,11 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
       '要几分钟到几十分钟，以较低的 CPU 优先级跑，不抢用户前台。' +
       '返回 exe 路径和完整日志路径；失败时附日志里的关键报错。' +
       '打包前先保存编辑器里的改动 —— 打包读的是磁盘上的资产。' +
+      '默认烘焙工程里所有地图；要控制包体（itch.io 网页上传上限 1 GB）时用 maps 只打游戏真正用到的地图。' +
       '打包出来之后用 project_smoke_test 起一次看会不会崩。',
     input: packageInput,
-    execute: async ({ project_path, configuration, output_dir }, ctx) => {
+    execute: async ({ project_path, configuration, output_dir, maps }, ctx) => {
+      const cookMaps = normalizeMaps(maps)
       const projectDir = project_path ?? getTargetProjectPath()
       if (!projectDir)
         throw new Error('不知道打包哪个工程：这一轮没有连着的工程，请给 project_path')
@@ -286,7 +321,8 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
         uproject,
         configuration,
         archiveDir: outputDir,
-        platform: process.platform === 'darwin' ? 'Mac' : 'Win64'
+        platform: process.platform === 'darwin' ? 'Mac' : 'Win64',
+        maps: cookMaps
       })
       // 先把命令行拼出来：带了没法安全传递的字符就在起进程之前报错。只有 Windows 走 cmd
       const commandLine =
@@ -354,7 +390,9 @@ export function createPackageTool(): UnrealAgentTool<PackageResult> {
       }
       if (result.success) {
         return {
-          text: `打包成功（${minutes} 分钟）。\nexe：${exe}\n输出目录：${outputDir}\n完整日志：${logPath}`,
+          text:
+            `打包成功（${minutes} 分钟）。\nexe：${exe}\n输出目录：${outputDir}\n完整日志：${logPath}` +
+            (cookMaps.length ? `\n烘焙的地图：${cookMaps.join('、')}` : ''),
           details: result
         }
       }
@@ -456,5 +494,155 @@ export function createSmokeTestTool(): UnrealAgentTool<SmokeResult> {
   })
 }
 
+// ── project_zip_build ───────────────────────────────────────────────────
+//
+// 打包版要交出去（itch.io、jam、发给别人试玩）都是一个 zip。itch 网页上传上限 1 GB，
+// Development 版里的 .pdb 动辄几百 MB、试玩用不上，压之前去掉。
+// 压缩用系统自带的 tar（Windows 10 起自带 bsdtar，macOS 也是 bsdtar）：边读边写，
+// 几个 GB 的包也不占内存；adm-zip 要把整个包读进内存。
+
+/** itch.io 网页上传的上限。按十进制算，比 1 GiB 严一点，宁可提前提醒 */
+export const ZIP_UPLOAD_LIMIT_BYTES = 1_000_000_000
+
+/**
+ * `队名_游戏名.zip`。只留 ASCII 字母、数字和连字符：jam 要求全英文，
+ * 文件名里的中文、空格到了别人的解压软件里也常是乱码。
+ */
+export function zipFileName(teamName: string, gameName: string): string {
+  const clean = (value: string, label: string): string => {
+    const out = value
+      .trim()
+      .replace(/\s+/g, '')
+      .replace(/[^A-Za-z0-9-]/g, '')
+    if (!out) throw new Error(`${label}「${value}」去掉非英文字符后是空的，请给英文名`)
+    return out
+  }
+  return `${clean(teamName, '队名')}_${clean(gameName, '游戏名')}.zip`
+}
+
+/** 把 `parent/folder` 整个压进 dest；zip 里第一层就是 folder。去掉调试符号 */
+export function zipArgs(parent: string, folder: string, dest: string): string[] {
+  return ['-a', '-c', '-f', dest, '--exclude', '*.pdb', '-C', parent, folder]
+}
+
+/**
+ * 玩家要的那一整层目录（UE5 是 `Windows/`）。`project_package` 回的是这一层里的启动器 exe，
+ * 但人手里常是 `Windows/<工程>/Binaries/Win64/` 下的那个真 exe —— 只压它所在的目录，
+ * 压出来的包缺 Content，起不来。
+ */
+export function packageRootOf(exePath: string): string {
+  const dir = dirname(exePath)
+  const binaries = dirname(dir)
+  if (basename(binaries).toLowerCase() === 'binaries') return dirname(dirname(binaries))
+  return dir
+}
+
+/** child 是不是 parent 自己或它里面的路径 */
+export function isInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`
+  return `${Math.max(1, Math.round(bytes / 1_000_000))} MB`
+}
+
+const zipInput = z.object({
+  exe_path: z.string().min(1).describe('project_package 返回的 exe'),
+  team_name: z.string().min(1).describe('队名，英文'),
+  game_name: z.string().min(1).describe('游戏名，英文'),
+  output_dir: z.string().optional().describe('zip 放哪。省略 = 打包输出目录')
+})
+
+export interface ZipResult {
+  zipPath: string
+  bytes: number
+  overLimit: boolean
+}
+
+export function createZipBuildTool(): UnrealAgentTool<ZipResult> {
+  return defineTool<typeof zipInput, ZipResult>({
+    name: 'project_zip_build',
+    namespace: 'project',
+    risk: 'mutating',
+    concurrency: 'sequential',
+    description:
+      '把 project_package 打出来的游戏压成「队名_游戏名.zip」，去掉 .pdb 调试符号，并报告大小；' +
+      '超过 1 GB（itch.io 网页上传上限）时会提示。提交 jam、上传 itch.io、发给别人试玩前用。',
+    input: zipInput,
+    execute: async ({ exe_path, team_name, game_name, output_dir }, ctx) => {
+      if (process.platform !== 'win32' && process.platform !== 'darwin') {
+        throw new Error('只支持 Windows 和 macOS 上压缩')
+      }
+      const name = zipFileName(team_name, game_name)
+      await fs.access(exe_path).catch(() => {
+        throw new Error(`找不到 ${exe_path}`)
+      })
+      const buildDir = packageRootOf(resolve(exe_path))
+      const parent = dirname(buildDir)
+      const destDir = resolve(output_dir ?? parent)
+      if (isInside(buildDir, destDir)) {
+        throw new Error(
+          `output_dir 不能放在要压缩的目录里（${buildDir}）：zip 会把自己也压进去。换一个目录，或者省略`
+        )
+      }
+      await fs.mkdir(destDir, { recursive: true })
+      const zipPath = join(destDir, name)
+      await fs.rm(zipPath, { force: true })
+
+      ctx.report({ text: `压缩 ${name}` })
+      const tar =
+        process.platform === 'win32'
+          ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+          : '/usr/bin/tar'
+      await fs.access(tar).catch(() => {
+        throw new Error(
+          `系统里没有 ${tar}（Windows 10 1803 之前的系统不带）。` +
+            `请在资源管理器里右键「${buildDir}」→ 发送到 → 压缩(zipped)文件夹，压好后改名为 ${name}`
+        )
+      })
+      const child = spawn(tar, zipArgs(parent, basename(buildDir), zipPath), {
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe']
+      })
+      lowerPriority(child)
+      let stderr = ''
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString('utf8')).slice(-2000)
+      })
+      const onAbort = (): void => killTree(child)
+      ctx.signal?.addEventListener('abort', onAbort, { once: true })
+      const code = await new Promise<number | null>((done) => {
+        child.on('close', (exit) => done(exit))
+        child.on('error', (error) => {
+          stderr += String(error)
+          done(null)
+        })
+      }).finally(() => ctx.signal?.removeEventListener('abort', onAbort))
+
+      const bytes = await fs.stat(zipPath).then(
+        (stat) => stat.size,
+        () => 0
+      )
+      if (code !== 0 || bytes === 0) {
+        await fs.rm(zipPath, { force: true })
+        throw new Error(`压缩失败（退出码 ${code ?? '无'}）：${stderr.trim() || '没有输出'}`)
+      }
+      const overLimit = bytes > ZIP_UPLOAD_LIMIT_BYTES
+      const text = overLimit
+        ? `zip 超过 1 GB：${formatBytes(bytes)}，itch.io 网页传不上去。` +
+          `用 itch 的 butler 命令行上传，或者减小包体（删没用到的地图和资产、降纹理尺寸）后重新打包。\n${zipPath}`
+        : `zip 已生成：${formatBytes(bytes)}，在 1 GB 以内。\n${zipPath}`
+      return { text, details: { zipPath, bytes, overLimit } }
+    }
+  })
+}
+
 export const projectPackageTools = (): UnrealAgentTool<never>[] =>
-  [createPackageTool(), createSmokeTestTool()] as unknown as UnrealAgentTool<never>[]
+  [
+    createPackageTool(),
+    createSmokeTestTool(),
+    createZipBuildTool(),
+    createFindNonEnglishTextTool()
+  ] as unknown as UnrealAgentTool<never>[]

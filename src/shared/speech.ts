@@ -8,12 +8,21 @@ export const DEFAULT_TTS_VOICE = 'zh_female_vv_uranus_bigtts'
  */
 export function isOpenAiCompatibleSpeech(modelId: string, baseUrl: string): boolean {
   return (
+    !isFishAudioSpeech(baseUrl) &&
     !modelId.startsWith('qwen-audio-3.0-tts-') &&
     !modelId.startsWith('seed-tts-') &&
     !modelId.startsWith('uebox-') &&
     !/openspeech\.bytedance\.com|dashscope/i.test(baseUrl) &&
     /^https?:\/\//i.test(baseUrl.trim())
   )
+}
+
+/**
+ * Fish Audio（`api.fish.audio/v1/tts`）。它的模型名是 `s1`、`s2.1-pro` 这种，
+ * 太泛了认不出来，只能按地址认。
+ */
+export function isFishAudioSpeech(baseUrl: string): boolean {
+  return /(^|\/\/|\.)fish\.audio(\/|:|$)/i.test(baseUrl.trim())
 }
 
 /**
@@ -25,6 +34,8 @@ export function isOpenAiCompatibleSpeech(modelId: string, baseUrl: string): bool
 export function defaultSpeechVoice(modelId: string, baseUrl = ''): string {
   if (modelId.startsWith('qwen-audio-3.0-tts-plus')) return 'longanlingxin'
   if (modelId.startsWith('qwen-audio-3.0-tts-flash')) return 'longanfengyue'
+  // Fish Audio 不带 reference_id 就用它自己的默认音色
+  if (isFishAudioSpeech(baseUrl)) return ''
   if (isOpenAiCompatibleSpeech(modelId, baseUrl)) return 'alloy'
   return DEFAULT_TTS_VOICE
 }

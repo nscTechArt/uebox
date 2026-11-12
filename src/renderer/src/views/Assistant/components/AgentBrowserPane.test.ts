@@ -61,7 +61,9 @@ beforeEach(async () => {
     close: vi.fn(),
     getState: vi.fn(),
     openUrl: vi.fn(),
-    toolbar: vi.fn()
+    toolbar: vi.fn(),
+    command: vi.fn().mockResolvedValue({ success: true, data: null }),
+    find: vi.fn().mockResolvedValue({ success: true, data: null })
   }
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -258,10 +260,10 @@ describe('浏览器分割线', () => {
   })
 })
 
-it('显示域名，聚焦编辑完整地址，回车打开会话新页面', async () => {
+it('显示省掉协议和 www 的地址，聚焦编辑完整地址，回车打开会话新页面', async () => {
   await wrapper.setProps({ url: 'https://www.unrealengine.com/feed?tags=news' })
   const input = wrapper.get('input')
-  expect((input.element as HTMLInputElement).value).toBe('unrealengine.com')
+  expect((input.element as HTMLInputElement).value).toBe('unrealengine.com/feed?tags=news')
   await input.trigger('focus')
   expect((input.element as HTMLInputElement).value).toBe(
     'https://www.unrealengine.com/feed?tags=news'
@@ -274,7 +276,7 @@ it('显示域名，聚焦编辑完整地址，回车打开会话新页面', asyn
   await input.trigger('keydown', { key: 'Enter' })
   await paint()
   expect(window.api.agentBrowser.openUrl).toHaveBeenCalledWith('session-a', 'example.com/docs')
-  expect((input.element as HTMLInputElement).value).toBe('example.com')
+  expect((input.element as HTMLInputElement).value).toBe('example.com/docs')
 })
 
 it('页面跳转同步域名，编辑期间不覆盖输入，Esc 取消且不导航', async () => {
@@ -285,7 +287,7 @@ it('页面跳转同步域名，编辑期间不覆盖输入，Esc 取消且不导
   await wrapper.setProps({ url: 'https://example.org/redirect' })
   expect((input.element as HTMLInputElement).value).toBe('new.example.com')
   await input.trigger('keydown', { key: 'Escape' })
-  expect((input.element as HTMLInputElement).value).toBe('example.org')
+  expect((input.element as HTMLInputElement).value).toBe('example.org/redirect')
   expect(window.api.agentBrowser.openUrl).not.toHaveBeenCalled()
 })
 
@@ -396,4 +398,93 @@ it('关标签页失败不说成打不开网址：助手占着浏览器时提示�
   await paint()
   expect(message.error).toHaveBeenLastCalledWith('assistant.browserPane.actionFailed')
   expect(message.error).not.toHaveBeenCalledWith('assistant.browserPane.navigationFailed')
+})
+
+describe('浏览器手感', () => {
+  const twoTabs = {
+    activeTabId: 'first',
+    tabs: [
+      { id: 'first', title: 'First', url: 'https://example.com/', loading: false },
+      { id: 'second', title: 'Second', url: 'https://example.org/', loading: true }
+    ]
+  }
+
+  it('焦点在面板上时 Ctrl+W 关当前标签，Ctrl+Tab 切标签，交给主进程执行', async () => {
+    await wrapper.setProps({ group: twoTabs })
+    const tab = wrapper.findAll('[role="tab"]')[0]
+    await tab.trigger('keydown', { key: 'w', ctrlKey: true })
+    expect(window.api.agentBrowser.command).toHaveBeenLastCalledWith('session-a', {
+      name: 'closeTab'
+    })
+    await tab.trigger('keydown', { key: 'Tab', ctrlKey: true })
+    expect(window.api.agentBrowser.command).toHaveBeenLastCalledWith('session-a', {
+      name: 'nextTab'
+    })
+  })
+
+  it('Ctrl+L 把焦点放进地址栏并全选', async () => {
+    await wrapper.setProps({ url: 'https://example.com/docs', group: twoTabs })
+    await wrapper.findAll('[role="tab"]')[0].trigger('keydown', { key: 'l', ctrlKey: true })
+    await paint()
+    const input = wrapper.get('input.pane-address').element as HTMLInputElement
+    expect(document.activeElement).toBe(input)
+    expect(input.value).toBe('https://example.com/docs')
+  })
+
+  it('中键关标签，加载中的标签显示转圈', async () => {
+    await wrapper.setProps({ group: twoTabs })
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs[1].find('.is-spinning').exists()).toBe(true)
+    await tabs[1].trigger('auxclick', { button: 1 })
+    expect(window.api.agentBrowser.tab).toHaveBeenLastCalledWith('session-a', {
+      action: 'close',
+      tabId: 'second'
+    })
+  })
+
+  it('Ctrl+F 打开查找条：输入即查，回车下一个、Shift+回车上一个，Esc 收起', async () => {
+    await wrapper.setProps({ group: twoTabs })
+    await wrapper.findAll('[role="tab"]')[0].trigger('keydown', { key: 'f', ctrlKey: true })
+    await paint()
+    const input = wrapper.get('.pane-find input')
+    await input.setValue('unreal')
+    expect(window.api.agentBrowser.find).toHaveBeenLastCalledWith('session-a', { text: 'unreal' })
+    await wrapper.setProps({ find: { active: 2, matches: 5 } })
+    expect(wrapper.get('.pane-find-count').text()).toBe('2/5')
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(window.api.agentBrowser.find).toHaveBeenLastCalledWith('session-a', {
+      text: 'unreal',
+      forward: true,
+      findNext: true
+    })
+    await input.trigger('keydown', { key: 'Enter', shiftKey: true })
+    expect(window.api.agentBrowser.find).toHaveBeenLastCalledWith('session-a', {
+      text: 'unreal',
+      forward: false,
+      findNext: true
+    })
+    await input.trigger('keydown', { key: 'Escape' })
+    expect(wrapper.find('.pane-find').exists()).toBe(false)
+    expect(window.api.agentBrowser.find).toHaveBeenLastCalledWith('session-a', null)
+  })
+
+  it('地址里的中文按原文显示，不显示成百分号编码', async () => {
+    await wrapper.setProps({ url: 'https://www.bing.com/search?q=%E6%9D%90%E8%B4%A8' })
+    expect((wrapper.get('input.pane-address').element as HTMLInputElement).value).toBe(
+      'bing.com/search?q=材质'
+    )
+  })
+
+  it('缩放不是 100% 时显示百分比，点一下恢复', async () => {
+    expect(wrapper.find('.pane-zoom').exists()).toBe(false)
+    await wrapper.setProps({
+      navigation: { canGoBack: false, canGoForward: false, loading: false, zoom: 1.25 }
+    })
+    const zoom = wrapper.get('.pane-zoom')
+    expect(zoom.text()).toBe('125%')
+    await zoom.trigger('click')
+    expect(window.api.agentBrowser.command).toHaveBeenLastCalledWith('session-a', {
+      name: 'zoomReset'
+    })
+  })
 })

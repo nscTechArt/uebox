@@ -18,6 +18,9 @@
  *
  * 用法：node scripts/verify-offline-boot.mjs [--exe <path>] [--port 9222]
  * 由 `pnpm verify --ci` / `--with-build` 自动调用（见 scripts/verify.mjs 的 STEPS）。
+ *
+ * --port 是起点不是定值：启动前先探测能否 bind，不行就顺延（Windows 的系统保留端口段
+ * 会让 Electron bind() 报 0x271D，窗口照常弹出但 CDP 永远起不来，见 scripts/cdp-launch.mjs）。
  */
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
@@ -25,6 +28,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
+import { describeLaunchFailure, findFreePort, stderrTail } from './cdp-launch.mjs'
 import { packagedAppPaths } from './packaged-app-paths.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -86,7 +90,7 @@ async function fetchTargets(port) {
   return res.json()
 }
 
-async function waitForTarget(port, timeoutMs = 60000) {
+async function waitForTarget(port, timeoutMs = 60000, hasExited = () => false) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
@@ -96,6 +100,8 @@ async function waitForTarget(port, timeoutMs = 60000) {
     } catch {
       // devtools 还没起来
     }
+    // 进程都没了就别等满超时，直接去报 stderr
+    if (hasExited()) return null
     await sleep(1000)
   }
   return null
@@ -130,12 +136,17 @@ function attach(page) {
 }
 
 async function main() {
-  const { exe, port, settleMs } = parseArgs(process.argv.slice(2))
+  const { exe, port: requestedPort, settleMs } = parseArgs(process.argv.slice(2))
   if (!existsSync(exe)) {
     // 只 fail 不 report：收尾统一由文件末尾那次 report() 输出，
     // 在这里再调一次会把同一条错误打印两遍。
     fail(`找不到打包产物：${exe}（先执行 pnpm build:unpack）`)
     return
+  }
+
+  const port = String(await findFreePort(requestedPort))
+  if (port !== String(requestedPort)) {
+    console.log(`调试端口 ${requestedPort} 无法绑定（已被占用或落在系统保留端口段），改用 ${port}`)
   }
 
   // 每次冷启动使用独立目录，避免读取用户令牌、修改用户数据或命中已有进程。
@@ -144,16 +155,28 @@ async function main() {
     detached: true,
     windowsHide: true,
     env: { ...process.env, UA_DISABLE_SINGLE_INSTANCE_LOCK: '1', UA_REMOTE_DEBUGGING_PORT: port },
-    stdio: 'ignore'
+    // 只接 stderr：bind 失败、主进程崩溃这类致命错误都在这儿，拿不到就只能瞎猜。
+    stdio: ['ignore', 'ignore', 'pipe']
   })
+  const tail = stderrTail()
+  let exit = null
+  child.stderr.on('data', (chunk) => tail.push(chunk))
+  child.on('exit', (code, signal) => {
+    exit = { code, signal }
+  })
+  child.on('error', (error) => tail.push(`spawn 失败：${error.message}\n`))
+  // 管道不该拖着本脚本不退出：子进程被 kill 后 Chromium 的子进程可能还活几百毫秒。
+  child.stderr.unref()
   child.unref()
   let session
   console.log(`离线启动临时数据目录：${userDataDir}`)
 
   try {
-    const page = await waitForTarget(port)
+    const page = await waitForTarget(port, undefined, () => exit !== null)
     if (!page) {
-      fail('应用启动后没有出现可调试页面（可能是主进程崩溃或窗口未创建）')
+      fail(
+        `应用启动后没有出现可调试页面（端口 ${port}）。\n${describeLaunchFailure({ exit, tail })}`
+      )
       return
     }
 

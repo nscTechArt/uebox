@@ -180,7 +180,10 @@ describe('UE 5.8 官方工具集那一段', () => {
     expect(text).toContain('list_toolsets')
     expect(text).toContain('describe_toolset')
     expect(text).toContain('call_tool')
-    expect(text).toContain('900')
+    // 5.9 把 describe_toolset 拆成了 describe_toolsets / describe_tools，两版的名字都要提到
+    expect(text).toContain('describe_toolsets')
+    expect(text).toContain('describe_tools')
+    expect(text).toContain('hundreds of engine tools')
   })
 
   it('明确要求先查 list_toolsets 再下「没有这个能力」的结论', () => {

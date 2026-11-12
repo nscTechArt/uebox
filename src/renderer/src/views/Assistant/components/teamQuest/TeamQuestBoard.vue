@@ -173,9 +173,9 @@
             >
               {{ selectedCrew.member.persona }}
             </span>
-            <!-- 外部团队的名册在 Claude Code 那边管，盒子不替它辞人 -->
+            <!-- 外部团队的名册在 Claude Code 那边管，盒子不替它辞人；混合团队的队员在盒子里，照常辞 -->
             <TeamMemberDismiss
-              v-if="!team.external"
+              v-if="!team.external || team.hostedMembers"
               class="detail-dismiss"
               :member="selectedCrew.member"
               :team="team"

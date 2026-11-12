@@ -94,7 +94,27 @@ const STRINGS: Record<Lang, Record<string, string>> = {
 
     // Spotlight 里「把这句话发给 AI」那一条
     'spotlight.askAi': '与 AI 对话：{query}',
-    'spotlight.askAiDesc': '发送此消息给 AI 助手'
+    'spotlight.askAiDesc': '发送此消息给 AI 助手',
+
+    // 内嵌浏览器网页里的右键菜单（原生菜单，渲染层画不了）
+    'browser.openLinkInNewTab': '在新标签页中打开链接',
+    'browser.openLinkInSystemBrowser': '在默认浏览器中打开链接',
+    'browser.copyLink': '复制链接地址',
+    'browser.openImageInNewTab': '在新标签页中打开图片',
+    'browser.copyImage': '复制图片',
+    'browser.copyImageAddress': '复制图片地址',
+    'browser.undo': '撤销',
+    'browser.redo': '重做',
+    'browser.cut': '剪切',
+    'browser.copy': '复制',
+    'browser.paste': '粘贴',
+    'browser.selectAll': '全选',
+    'browser.searchFor': '用必应搜索「{text}」',
+    'browser.back': '后退',
+    'browser.forward': '前进',
+    'browser.reload': '重新加载',
+    'browser.copyPageUrl': '复制网址',
+    'browser.openInSystemBrowser': '在默认浏览器中打开'
   },
   'en-US': {
     'tray.tooltip': 'Unreal Box',
@@ -134,7 +154,26 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     'vault.aigcDesc': 'System vault for AI-generated assets',
 
     'spotlight.askAi': 'Ask the AI: {query}',
-    'spotlight.askAiDesc': 'Send this message to the AI assistant'
+    'spotlight.askAiDesc': 'Send this message to the AI assistant',
+
+    'browser.openLinkInNewTab': 'Open link in new tab',
+    'browser.openLinkInSystemBrowser': 'Open link in default browser',
+    'browser.copyLink': 'Copy link address',
+    'browser.openImageInNewTab': 'Open image in new tab',
+    'browser.copyImage': 'Copy image',
+    'browser.copyImageAddress': 'Copy image address',
+    'browser.undo': 'Undo',
+    'browser.redo': 'Redo',
+    'browser.cut': 'Cut',
+    'browser.copy': 'Copy',
+    'browser.paste': 'Paste',
+    'browser.selectAll': 'Select all',
+    'browser.searchFor': 'Search Bing for "{text}"',
+    'browser.back': 'Back',
+    'browser.forward': 'Forward',
+    'browser.reload': 'Reload',
+    'browser.copyPageUrl': 'Copy page address',
+    'browser.openInSystemBrowser': 'Open in default browser'
   }
 }
 

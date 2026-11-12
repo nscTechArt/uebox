@@ -5,6 +5,7 @@
     :url="url"
     :navigation="navigation"
     :group="group"
+    :find="find"
     :visible="true"
     standalone
   />
@@ -23,7 +24,7 @@ const { t } = useI18n()
 const sessionId = computed(() =>
   typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
 )
-const { open, url, navigation, group } = useSessionBrowser(
+const { open, url, navigation, group, find } = useSessionBrowser(
   sessionId,
   ref(true),
   () => {

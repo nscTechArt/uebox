@@ -300,7 +300,7 @@ export function describeGraphPage(
  * 现在把具体类型拼进 `type`（`object(Actor)`、`struct(Vector)`），
  * 数组和引用只在为真时才出现 —— 比原来准，字数也没多多少。
  */
-function describePin(pin: BlueprintGraphPinInfo): Record<string, unknown> {
+export function describePin(pin: BlueprintGraphPinInfo): Record<string, unknown> {
   return {
     name: pin.name,
     dir: pin.dir,

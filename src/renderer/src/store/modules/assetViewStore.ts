@@ -1,5 +1,4 @@
 import { defineStore } from 'pinia'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { StorageUtils } from '../../common/utils/storage'
 
 export type AssetViewMode = 'assets' | 'baiduyun' | 'tagManagement' | 'webdav'
@@ -110,10 +109,10 @@ export const useAssetViewStore = defineStore('assetView', {
       }
     }
   },
-  persist: usePersistOptions<{ mode: AssetViewMode }>({
+  persist: {
     key: 'asset-view-store',
-    paths: ['mode'],
-    storage: 'localStorage',
+    pick: ['mode'],
+    storage: localStorage,
     serializer: StorageUtils.createCustomSerializer()
-  })
+  }
 })

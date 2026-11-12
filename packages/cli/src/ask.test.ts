@@ -136,6 +136,44 @@ describe('uebox ask', () => {
     expect(JSON.parse(result.stdout).warnings.join('')).toContain('碰不到引擎')
   })
 
+  describe('--model', () => {
+    /** 盒子配了多个模型时 task 的参数表里才有 model */
+    function withModelParam(tool: FakeTool): FakeTool {
+      return { ...tool, inputSchema: { type: 'object', properties: { model: { type: 'string' } } } }
+    }
+
+    it('原样交给 task 的 model 参数', async () => {
+      const calls: Parameters<typeof taskTool>[0] = []
+      const env = await startBox([...CATALOG, withModelParam(taskTool(calls))])
+
+      const result = await run(['ask', '列出灯', '--model', 'deepseek-chat'], env)
+
+      expect(result.exitCode).toBe(0)
+      expect(calls[0]!.args.model).toBe('deepseek-chat')
+    })
+
+    it('不给就不带 model，用盒子的默认模型', async () => {
+      const calls: Parameters<typeof taskTool>[0] = []
+      const env = await startBox([...CATALOG, withModelParam(taskTool(calls))])
+
+      await run(['ask', '列出灯'], env)
+
+      expect(calls[0]!.args).not.toHaveProperty('model')
+    })
+
+    /** 盒子只配了一个模型时多给的字段会被悄悄丢掉，用户以为换了模型其实没换 */
+    it('盒子只配了一个模型时报用法错误，不派任务', async () => {
+      const calls: Parameters<typeof taskTool>[0] = []
+      const env = await startBox([...CATALOG, taskTool(calls)])
+
+      const result = await run(['ask', '列出灯', '--model', 'deepseek-chat', '--json'], env)
+
+      expect(result.exitCode).toBe(2)
+      expect(JSON.parse(result.stdout).error.message).toContain('只配了一个模型')
+      expect(calls).toHaveLength(0)
+    })
+  })
+
   it('没给要做的事时报用法错误', async () => {
     const result = await run(['ask'], {})
     expect(result.exitCode).toBe(2)

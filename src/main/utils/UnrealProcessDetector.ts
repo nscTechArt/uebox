@@ -50,91 +50,99 @@ const UnrealProcessDetector = {
    */
   async getRunningProjects(): Promise<RunningUnrealProject[]> {
     try {
-      if (process.platform === 'darwin') {
-        return await Promise.all(
-          (await getMacEditorProjects()).map(async (editor) => ({
-            pid: editor.pid,
-            processName: editor.processName,
-            projectPath: editor.projectPath,
-            projectName: path.basename(editor.projectPath, path.extname(editor.projectPath)),
-            projectDir: path.dirname(editor.projectPath),
-            engineVersion: await this.getEngineVersionFromProject(editor.projectPath)
-          }))
-        )
-      }
-      // 使用 PowerShell 获取 UnrealEditor.exe（UE5）/ UE4Editor.exe（UE4）进程及其命令行参数
-      // 使用 Base64 编码命令以避免引号转义问题
-      const psCommand = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;Get-CimInstance Win32_Process -Filter "Name='UnrealEditor.exe' OR Name='UE4Editor.exe'"|Select-Object ProcessId,Name,CommandLine|ConvertTo-Json -Compress`
-      const encodedCommand = Buffer.from(psCommand, 'utf16le').toString('base64')
-
-      const { stdout } = await execAsync(
-        `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`,
-        {
-          encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-          // WMI 坏了会一直挂着：托盘「打开工程」在等它，挂住就一直显示「启动中」
-          timeout: 15_000
-        }
-      )
-
-      if (!stdout || stdout.trim() === '' || stdout.trim() === 'null') {
-        return []
-      }
-
-      // 解析 JSON 输出，清理可能的换行和多余空格
-      const cleanedStdout = stdout
-        .trim()
-        .replace(/\r?\n/g, '')
-        .replace(/\s{2,}/g, ' ')
-
-      const parsed = JSON.parse(cleanedStdout)
-      // PowerShell 返回单个对象时不是数组，需要处理
-      const processes: Array<{
-        ProcessId: number
-        Name: string
-        CommandLine: string
-      }> = Array.isArray(parsed) ? parsed : [parsed]
-
-      // 清理每个进程的命令行字符串中的额外空白
-      for (const proc of processes) {
-        if (proc.CommandLine) {
-          proc.CommandLine = proc.CommandLine.replace(/\r?\n/g, '')
-            .replace(/\s{2,}/g, ' ')
-            .trim()
-        }
-      }
-
-      const projects: RunningUnrealProject[] = []
-
-      for (const proc of processes) {
-        if (!proc.CommandLine) continue
-
-        // 从命令行参数中提取 .uproject 文件路径
-        const projectPath = this.extractProjectPath(proc.CommandLine)
-
-        if (projectPath && fs.existsSync(projectPath)) {
-          const projectName = path.basename(projectPath, '.uproject')
-          const projectDir = path.dirname(projectPath)
-
-          // 尝试读取引擎版本
-          const engineVersion = await this.getEngineVersionFromProject(projectPath)
-
-          projects.push({
-            pid: proc.ProcessId,
-            processName: proc.Name,
-            projectPath,
-            projectName,
-            projectDir,
-            engineVersion
-          })
-        }
-      }
-
-      return projects
+      return await this.listRunningProjects()
     } catch (error) {
       console.error('[UnrealProcessDetector] 获取运行中项目失败:', error)
       return []
     }
+  },
+
+  /**
+   * 同 `getRunningProjects`，但查不了（PowerShell / WMI 失败、超时）时抛出，
+   * 不混成「一个都没开」。要据此决定「再启动一个编辑器」的调用方用它
+   */
+  async listRunningProjects(): Promise<RunningUnrealProject[]> {
+    if (process.platform === 'darwin') {
+      return await Promise.all(
+        (await getMacEditorProjects()).map(async (editor) => ({
+          pid: editor.pid,
+          processName: editor.processName,
+          projectPath: editor.projectPath,
+          projectName: path.basename(editor.projectPath, path.extname(editor.projectPath)),
+          projectDir: path.dirname(editor.projectPath),
+          engineVersion: await this.getEngineVersionFromProject(editor.projectPath)
+        }))
+      )
+    }
+    // 使用 PowerShell 获取 UnrealEditor.exe（UE5）/ UE4Editor.exe（UE4）进程及其命令行参数
+    // 使用 Base64 编码命令以避免引号转义问题
+    const psCommand = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;Get-CimInstance Win32_Process -Filter "Name='UnrealEditor.exe' OR Name='UE4Editor.exe'"|Select-Object ProcessId,Name,CommandLine|ConvertTo-Json -Compress`
+    const encodedCommand = Buffer.from(psCommand, 'utf16le').toString('base64')
+
+    const { stdout } = await execAsync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`,
+      {
+        encoding: 'utf8',
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        // WMI 坏了会一直挂着：托盘「打开工程」在等它，挂住就一直显示「启动中」
+        timeout: 15_000
+      }
+    )
+
+    if (!stdout || stdout.trim() === '' || stdout.trim() === 'null') {
+      return []
+    }
+
+    // 解析 JSON 输出，清理可能的换行和多余空格
+    const cleanedStdout = stdout
+      .trim()
+      .replace(/\r?\n/g, '')
+      .replace(/\s{2,}/g, ' ')
+
+    const parsed = JSON.parse(cleanedStdout)
+    // PowerShell 返回单个对象时不是数组，需要处理
+    const processes: Array<{
+      ProcessId: number
+      Name: string
+      CommandLine: string
+    }> = Array.isArray(parsed) ? parsed : [parsed]
+
+    // 清理每个进程的命令行字符串中的额外空白
+    for (const proc of processes) {
+      if (proc.CommandLine) {
+        proc.CommandLine = proc.CommandLine.replace(/\r?\n/g, '')
+          .replace(/\s{2,}/g, ' ')
+          .trim()
+      }
+    }
+
+    const projects: RunningUnrealProject[] = []
+
+    for (const proc of processes) {
+      if (!proc.CommandLine) continue
+
+      // 从命令行参数中提取 .uproject 文件路径
+      const projectPath = this.extractProjectPath(proc.CommandLine)
+
+      if (projectPath && fs.existsSync(projectPath)) {
+        const projectName = path.basename(projectPath, '.uproject')
+        const projectDir = path.dirname(projectPath)
+
+        // 尝试读取引擎版本
+        const engineVersion = await this.getEngineVersionFromProject(projectPath)
+
+        projects.push({
+          pid: proc.ProcessId,
+          processName: proc.Name,
+          projectPath,
+          projectName,
+          projectDir,
+          engineVersion
+        })
+      }
+    }
+
+    return projects
   },
 
   /**
@@ -224,19 +232,24 @@ const UnrealProcessDetector = {
    * @param projectPath 项目文件路径
    * @returns Promise<RunningUnrealProject | null>
    */
-  async findRunningProjectByPath(projectPath: string): Promise<RunningUnrealProject | null> {
+  async findRunningProjectByPath(
+    projectPath: string,
+    options: { throwOnError?: boolean } = {}
+  ): Promise<RunningUnrealProject | null> {
+    const running = (): Promise<RunningUnrealProject[]> =>
+      options.throwOnError ? this.listRunningProjects() : this.getRunningProjects()
     if (process.platform === 'darwin') {
       // lsof reports physical paths (/private/var vs /var); compare actual files.
       const target = await fs.promises.realpath(projectPath).catch(() => null)
       if (!target) return null
-      for (const project of await this.getRunningProjects()) {
+      for (const project of await running()) {
         const actual = await fs.promises.realpath(project.projectPath).catch(() => null)
         if (actual === target) return project
       }
       return null
     }
     const normalizedPath = path.normalize(projectPath).toLowerCase()
-    const projects = await this.getRunningProjects()
+    const projects = await running()
     return (
       projects.find((p) => path.normalize(p.projectPath).toLowerCase() === normalizedPath) || null
     )

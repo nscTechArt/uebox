@@ -111,7 +111,7 @@ export interface MemberRoute {
   pin?: TeamModel
   /** 这件活实际用的模型，记账和回话用。说不准（老 `fast` 档）时不给 */
   used?: TeamModel
-  /** 它的模型这会儿用不了，这件活改用制作人的 */
+  /** 它的模型这会儿用不了，这件活改用制作人的；没有制作人的模型（混合团队）就是盒子的默认模型 */
   fellBack: boolean
 }
 

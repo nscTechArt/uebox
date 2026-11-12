@@ -42,7 +42,15 @@ import {
 
 import { getTargetConnectionId } from '../../../core/projectTargetContext'
 import { UE_NOT_CONNECTED_MESSAGE } from '../../defineUeTool'
-import { graphNameMissHint, isGraphNotFound, lookupMissedGraphName } from './getBlueprintGraph'
+import {
+  deriveConnectionsFromPins,
+  describePin,
+  graphNameMissHint,
+  isGraphNotFound,
+  lookupMissedGraphName,
+  type BlueprintGraphNodeInfo,
+  type BlueprintGraphPinInfo
+} from './getBlueprintGraph'
 
 /**
  * 节点类型。
@@ -280,6 +288,26 @@ const ApplyGraphSchema = z
 
 type ApplyGraphInput = z.infer<typeof ApplyGraphSchema>
 type NodeDefinition = ApplyGraphInput['nodes'][number]
+
+/**
+ * 写图回话里的节点和连线，引脚按读图（`blueprint_get_graph`）那份的样子给。
+ *
+ * 插件原样回的每个引脚都带着 `is_array:false`、`friendly_name:""`、`linked_count:0`
+ * 这类默认值，一根线还在两头的 `linked_to` 里各记一遍：一次写 18 个节点就是两万多字符。
+ * 真机上一个队员一局写四五十次，这些回话一直留在上下文里，之后每一步都要重发。
+ * 引脚一个不少，名字、方向、具体类型、字面量都在；连线收成一张表，同读图
+ */
+function describeWrittenNodes(
+  nodes: NonNullable<ApplyGraphResponse['nodes']>
+): Record<string, unknown> {
+  const connections = deriveConnectionsFromPins(nodes as unknown as BlueprintGraphNodeInfo[])
+  return {
+    nodes: nodes.map(({ pins, ...rest }) =>
+      pins ? { ...rest, pins: (pins as unknown as BlueprintGraphPinInfo[]).map(describePin) } : rest
+    ),
+    ...(connections.length > 0 ? { connections } : {})
+  }
+}
 
 interface ApplyGraphResponse {
   ok: boolean
@@ -738,7 +766,7 @@ AnimGraph、状态机、状态内部、转换条件都用这个工具写，graph
           connection_count: response.connection_count,
           ...(response.removed_count ? { removed_count: response.removed_count } : {}),
           compiled: response.compiled,
-          nodes: response.nodes,
+          ...(response.nodes ? describeWrittenNodes(response.nodes) : {}),
           ...(response.transitions ? { transitions: response.transitions } : {}),
           ...(response.entry_state ? { entry_state: response.entry_state } : {}),
           ...(diagnostics.length > 0 ? { diagnostics } : {}),

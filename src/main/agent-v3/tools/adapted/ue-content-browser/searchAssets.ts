@@ -170,11 +170,13 @@ total 才是真实匹配数，truncated=true 就是被截断了。
           const total = response.total ?? response.count
           const truncated = response.truncated ?? false
           const folderCounts = response.folder_counts
+          // 排成一行一个对象而不是「路径（N 个）」的字符串：结果大时按表存档（registry 的 archive），
+          // 存档只认对象行
           const folderLines =
             folderCounts && Object.keys(folderCounts).length > 0
               ? Object.entries(folderCounts)
                   .sort((a, b) => b[1] - a[1])
-                  .map(([folder, count]) => `${folder}（${count} 个）`)
+                  .map(([folder, count]) => ({ path: folder, assets: count }))
               : []
 
           const message = truncated

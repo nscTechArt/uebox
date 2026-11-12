@@ -88,6 +88,11 @@ interface PlaytestResponse {
   screenshot_error?: string
   events?: Array<{ at: number; command: string; fired: boolean; accepted: boolean }>
   levels?: PlaytestLevels
+  /**
+   * 此刻有编译错误的蓝图（对象路径）。引擎本来会弹框问「确定要运行吗」，
+   * 插件替用户点了运行，这些蓝图跑的是上一次编译成功的版本
+   */
+  blueprint_errors?: string[]
   /** 按时间抓的帧。没抓成的那些也在里面，带 error；capture_ms 是这一帧卡了游戏多久 */
   frames?: Array<{ at: number; path?: string; error?: string; capture_ms?: number }>
   frame_mode?: 'scene' | 'window' | string
@@ -209,6 +214,14 @@ function summarize(response: PlaytestResponse): string {
   }
 
   const parts: string[] = [`跑了 ${response.elapsed_seconds} 秒`]
+
+  // 放在最前：这些蓝图的改动根本没进这次试玩，后面的日志读得再细也是旧逻辑的
+  if (response.blueprint_errors?.length) {
+    parts.unshift(
+      `**${response.blueprint_errors.length} 个蓝图有编译错误，跑的是它们上次编译成功的版本**` +
+        `（见 blueprint_errors，用 blueprint_compile 看具体错误）`
+    )
+  }
 
   if (response.error_count > 0) {
     parts.push(`**${response.error_count} 个运行时错误**（见 errors）`)
@@ -685,6 +698,9 @@ Play，或者你之前在 Python 里调过 editor_play_simulate() 没停。停�
             : {}),
           ...(response.events?.length ? { events: response.events } : {}),
           ...(response.levels ? { levels: response.levels } : {}),
+          ...(response.blueprint_errors?.length
+            ? { blueprint_errors: response.blueprint_errors }
+            : {}),
           ...(images.length > 0 ? { images } : {}),
           // 路径要留在返回值里：进上下文的那张图是压过的，界面显示的是磁盘上这张原图。
           // 关着截图时连路径都不回 —— 回了等于告诉模型「磁盘上有一张，自己去读」

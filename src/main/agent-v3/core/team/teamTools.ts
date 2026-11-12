@@ -326,6 +326,9 @@ function createDismissTool(
 
 // ── 招人 ────────────────────────────────────────────────────────────────
 
+/** `team_hire` 说明里候选名单的开头。混合团队把名单挪进 `team_open` 的回话，按它切（`hybridTeamTools.ts`） */
+export const HIRE_CANDIDATES_HEADING = '可用模型：\n'
+
 function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<TeamMember> {
   const models = deps.models
   const choosable = canChooseModels(models)
@@ -386,7 +389,8 @@ function createHireTool(deps: TeamToolDeps, now: () => number): UnrealAgentTool<
         ? '\n\n每个队员可以用不同的模型。看这个岗位的活要多强、量多大、要不要换一家的眼光来查，自己判断；' +
           '用户在任务板上亲手改过的模型（回话里标着「用户定的」），除非用户开口别再改。' +
           '某个岗位的活老被用户打回，可以同名再招一次换个模型，回话里跟用户说清依据。' +
-          '挑了你以外的模型，盒子会先给它做一次入职体检（通不通、会不会调工具），没过会告诉你。可用模型：\n' +
+          '挑了你以外的模型，盒子会先给它做一次入职体检（通不通、会不会调工具），没过会告诉你。' +
+          HIRE_CANDIDATES_HEADING +
           describeCandidates(models)
         : ''),
     input: hireInput,
@@ -772,12 +776,15 @@ function createSendTool(
         const live = deps.live
         // 后台跑：进度照样冒到这次调用的泳道上，结论作为留言送回制作人
         const job = assign(member, message, ctx).then(
-          ({ text }) => live.send(member.name, PRODUCER, `【交活】${text}`),
+          ({ text }) =>
+            live.send(member.name, PRODUCER, `【交活】${text}`, undefined, { interrupt: true }),
           (error: unknown) =>
             live.send(
               member.name,
               PRODUCER,
-              `【没干完】${member.name} 这件活停下了：${error instanceof Error ? error.message : String(error)}`
+              `【没干完】${member.name} 这件活停下了：${error instanceof Error ? error.message : String(error)}`,
+              undefined,
+              { interrupt: true }
             )
         )
         live.track(member.name, job)
@@ -812,7 +819,8 @@ function describeRoute(
   route: MemberRoute
 ): string {
   if (route.fellBack && member.model) {
-    return `（它的模型 ${modelLabel(models, member.model)} 现在用不了，这件活改用你的模型）`
+    // 没有「制作人的模型」（混合团队的制作人在盒子外）时退回的是盒子的默认模型，不能说成你的
+    return `（它的模型 ${modelLabel(models, member.model)} 现在用不了，这件活改用${models?.producer ? '你的模型' : '盒子的默认模型'}）`
   }
   if (!canChooseModels(models) || !route.used) return ''
   return `（${modelLabel(models, route.used)}${member.modelBy === 'user' ? '，用户定的' : ''}）`
@@ -864,7 +872,7 @@ export function createMessageTool(
       : delivery === 'live'
         ? `${to} 正在干活，已插进它的下一步。`
         : to === PRODUCER
-          ? '制作人这会儿没在跑，已放进它的信箱。'
+          ? '已放进制作人的信箱，它下次看信箱时会读到。'
           : `${to} 这会儿没在干活，已放进它的信箱，下次接活时会看到。`
 
   return defineTool<typeof messageInput, unknown>({
@@ -876,6 +884,7 @@ export function createMessageTool(
     description:
       `给队友或制作人（"${PRODUCER}"）说话：交接产出、提问、提醒对方你改了什么。**它不派活** —— ` +
       '对方正在干活的话，这句会插进它的下一步；对方空闲的话只是进信箱，不会让它开工（要它干活用 team_send）。' +
+      '发给制作人的话不带 wait 只进它的信箱，不打断它。' +
       'wait=read 等回执（对方真的读到），wait=reply 等对方回话。',
     input: messageInput,
     execute: async ({ to, text, reply_to, wait, wait_seconds }, ctx) => {
@@ -907,7 +916,10 @@ export function createMessageTool(
         return { text: deliveryNote(target, 'queued'), details: mail }
       }
 
-      const { mail, delivery } = await live.send(from, target, text, reply_to)
+      // 给制作人的话只有对方要等的才当场插进去，见 `teamLive.ts` 文件头
+      const { mail, delivery } = await live.send(from, target, text, reply_to, {
+        interrupt: wait !== 'none'
+      })
       const lines = [`已发出 ${mail.id}。${deliveryNote(target, delivery)}`]
       // 2026-09-26 真机反馈：制作人给空闲的队员发 team_message 当派活，其实只进了信箱，
       // 白等一整轮才发现得再用 team_send 发一遍

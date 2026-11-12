@@ -1,5 +1,4 @@
 import { defineStore } from 'pinia'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { StorageUtils } from '../../common/utils/storage'
 
 interface NoteTabState {
@@ -34,12 +33,10 @@ export const useNoteViewStore = defineStore('noteView', {
       this.noteUpdateTimestamp = Date.now()
     }
   },
-  persist: usePersistOptions<{
-    tabStates: Record<string, NoteTabState>
-  }>({
+  persist: {
     key: 'note-view-store',
-    paths: ['tabStates'],
-    storage: 'localStorage',
+    pick: ['tabStates'],
+    storage: localStorage,
     serializer: StorageUtils.createCustomSerializer()
-  })
+  }
 })

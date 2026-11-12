@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Unreal Engine" src="https://img.shields.io/badge/Unreal%20Engine-5.0%20~%205.8-0e1128">
+  <img alt="Unreal Engine" src="https://img.shields.io/badge/Unreal%20Engine-5.0%20~%205.9-0e1128">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%2F%20Linux%20from%20source-6b7280">
   <img alt="Built with" src="https://img.shields.io/badge/Electron%20%2B%20Vue%203%20%2B%20TypeScript-42b883">
 </p>
@@ -81,7 +81,7 @@ Local connections only, token required.
 | macOS   | Build from source | ✅ common paths + manual | Validation pending |
 | Linux   | Build from source | Not supported yet        | —                  |
 
-UE 5.0–5.8. Windows is the primary platform. Plugin source: [`plugin/UnrealAgentLink`](plugin/UnrealAgentLink) ([MIT](plugin/UnrealAgentLink/LICENSE)).
+UE 5.0–5.9. Windows is the primary platform. Plugin source: [`plugin/UnrealAgentLink`](plugin/UnrealAgentLink) ([MIT](plugin/UnrealAgentLink/LICENSE)).
 
 ## Development
 

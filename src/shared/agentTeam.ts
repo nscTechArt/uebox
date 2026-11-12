@@ -435,6 +435,8 @@ export interface TeamStateView {
    * （docs/外部大脑跑团队设计-2026-10-17.md）
    */
   external?: boolean
+  /** 混合团队：制作人在外部客户端，队员在盒子里跑（模型、用量、谁在跑盒子都看得到） */
+  hostedMembers?: boolean
   /** 外部团队已经结束（用户在面板上点了结束） */
   ended?: boolean
 }

@@ -20,6 +20,7 @@ import {
   runTeamStatus,
   runTeamUse
 } from './commands/team.js'
+import { runGuardHook } from './commands/teamGuard.js'
 import { runToolsCall, runToolsList, runToolsShow } from './commands/tools.js'
 import { failure, writeJson, type Envelope } from './envelope.js'
 import { exitCodeFor, toUeboxError, UeboxError } from './errors.js'
@@ -106,6 +107,7 @@ async function dispatch(parsed: ParsedArgs, env: NodeJS.ProcessEnv, io: RunIO): 
         prompt: parsed.command.slice(1).join(' '),
         allowWrite: parsed.allowWrite,
         ...(parsed.project ? { project: parsed.project } : {}),
+        ...(parsed.model ? { model: parsed.model } : {}),
         ...(io.progress ? { onProgress: io.progress } : {})
       })
 
@@ -195,16 +197,23 @@ async function dispatchTeam(
   }
 }
 
-/** `team gate|round --hook`：永远退出码 0，只有拦的时候 stdout 有一个 hook JSON */
+/** `team gate|round|guard --hook`：永远退出码 0，只有拦的时候 stdout 有一个 hook JSON */
 async function runHook(parsed: ParsedArgs, env: NodeJS.ProcessEnv, io: RunIO): Promise<RunResult> {
   const [group, sub] = parsed.command
-  if (group !== 'team' || (sub !== 'gate' && sub !== 'round')) {
+  if (group !== 'team' || (sub !== 'gate' && sub !== 'round' && sub !== 'guard')) {
     return output(
-      toEnvelope(new UeboxError('INVALID_ARGUMENT', '--hook 只用于 team gate 和 team round。')),
+      toEnvelope(
+        new UeboxError('INVALID_ARGUMENT', '--hook 只用于 team gate、team round 和 team guard。')
+      ),
       parsed.json
     )
   }
   const stdin = io.readStdin ? await io.readStdin().catch(() => '') : ''
+  // 守卫只看这次要调的工具，不连盒子：每次工具调用前都跑，不能慢
+  if (sub === 'guard') {
+    markSettled()
+    return { exitCode: 0, stdout: runGuardHook(stdin), stderr: '' }
+  }
   const result = await runTeamHook(
     sub,
     {

@@ -148,7 +148,15 @@ export interface McpSessionRequest {
   clientCapabilities?: ClientCapabilities
   /** 向客户端发起一次表单询问（MCP elicitation）。只在客户端声明支持时给 */
   elicit?: (params: ElicitRequestFormParams, signal?: AbortSignal) => Promise<ElicitResult>
+  /**
+   * 客户端要哪套工具（初始化请求的 `X-Unreal-Box-Profile` 头）。没有 = 完整的那一套。
+   * `producer` 是混合团队制作人的精简工具集（`core/team/hybridTeamTools.ts`）
+   */
+  profile?: string
 }
+
+/** 选工具集的请求头。只在初始化请求上读：会话的工具清单握手时就定了 */
+export const PROFILE_HEADER = 'x-unreal-box-profile'
 
 /**
  * 工具从哪来。
@@ -332,7 +340,7 @@ export class McpServerHost {
 
     let session: Session
     try {
-      session = await this.createSession(body.params.capabilities)
+      session = await this.createSession(body.params.capabilities, headerValue(req, PROFILE_HEADER))
     } catch (error) {
       jsonRpcError(res, 500, -32603, `会话装配失败：${(error as Error).message}`)
       return
@@ -343,7 +351,10 @@ export class McpServerHost {
   }
 
   /** 造一条新会话：一个 Server、一个 Transport，注册进表里 */
-  private async createSession(clientCapabilities: ClientCapabilities): Promise<Session> {
+  private async createSession(
+    clientCapabilities: ClientCapabilities,
+    profile?: string
+  ): Promise<Session> {
     // 先把壳造出来，再往里填 —— 下面几个回调都要引用这条会话本身，
     // 而它们最早也要等到 `handleRequest` 才会被调到（那时字段已经填完了）。
     const session = {} as Session
@@ -351,7 +362,7 @@ export class McpServerHost {
     // id 由我们先定，而不是等 transport 在握手时现生成：工具要在握手**之前**
     // 按这个 id 装配（浏览器窗口、提问都挂在会话 id 上）
     const sessionId = `mcp-${randomUUID()}`
-    const setup = await this.setupSession(session, sessionId, clientCapabilities)
+    const setup = await this.setupSession(session, sessionId, clientCapabilities, profile)
     session.tools = setup.tools
     if (setup.dispose) session.dispose = setup.dispose
 
@@ -421,7 +432,8 @@ export class McpServerHost {
   private async setupSession(
     session: Session,
     sessionId: string,
-    clientCapabilities: ClientCapabilities
+    clientCapabilities: ClientCapabilities,
+    profile?: string
   ): Promise<McpSessionSetup> {
     if (Array.isArray(this.source)) return { tools: this.exposed }
 
@@ -429,6 +441,7 @@ export class McpServerHost {
       sessionId,
       readOnly: !this.options.includeMutating,
       clientCapabilities,
+      ...(profile ? { profile } : {}),
       // 只有客户端说了支持才给：不支持的客户端收到 elicitation 请求只会报错，
       // 而 ask_user 会挂在那儿等一个不会来的回答
       ...(clientCapabilities.elicitation

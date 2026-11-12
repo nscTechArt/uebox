@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Unreal Engine" src="https://img.shields.io/badge/Unreal%20Engine-5.0%20~%205.8-0e1128">
+  <img alt="Unreal Engine" src="https://img.shields.io/badge/Unreal%20Engine-5.0%20~%205.9-0e1128">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%2F%20Linux%20from%20source-6b7280">
   <img alt="Built with" src="https://img.shields.io/badge/Electron%20%2B%20Vue%203%20%2B%20TypeScript-42b883">
 </p>
@@ -81,7 +81,7 @@
 | macOS   | 源码构建 | ✅ 常见目录 + 手动 | 未完成验收 |
 | Linux   | 源码构建 | 未适配             | —          |
 
-UE 5.0–5.8。Windows 为主力平台。插件源码：[`plugin/UnrealAgentLink`](plugin/UnrealAgentLink)（[MIT](plugin/UnrealAgentLink/LICENSE)）。
+UE 5.0–5.9。Windows 为主力平台。插件源码：[`plugin/UnrealAgentLink`](plugin/UnrealAgentLink)（[MIT](plugin/UnrealAgentLink/LICENSE)）。
 
 ## 开发
 

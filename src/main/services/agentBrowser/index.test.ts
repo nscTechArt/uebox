@@ -15,6 +15,8 @@ interface FakeContents {
   windowOpenHandler?: (details: { url: string }) => { action: string }
   loadedUrls: string[]
   commands: Array<{ method: string; params: Record<string, unknown> }>
+  zoom: number
+  finds: Array<{ text: string; options: Record<string, unknown> } | 'stop'>
 }
 
 /** 页面（隔离世界）按顺序返回这些结果。测试在调用之前排好队 */
@@ -83,7 +85,9 @@ class FakeBrowserWindow {
       id: ++contentsId,
       handlers: new Map(),
       loadedUrls: [],
-      commands: []
+      commands: [],
+      zoom: 1,
+      finds: []
     }
 
     const on = (event: string, handler: (...args: unknown[]) => void): void => {
@@ -137,7 +141,18 @@ class FakeBrowserWindow {
         throw new Error(`${failure.description} (${failure.errorCode}) loading '${url}'`)
       },
       reload: vi.fn(),
+      reloadIgnoringCache: vi.fn(),
       stop: vi.fn(),
+      getZoomFactor: live(() => contents.zoom),
+      setZoomFactor: (factor: number) => {
+        contents.zoom = factor
+      },
+      findInPage: (text: string, options: Record<string, unknown>) => {
+        contents.finds.push({ text, options })
+      },
+      stopFindInPage: () => {
+        contents.finds.push('stop')
+      },
       navigationHistory: {
         canGoBack: () => true,
         canGoForward: () => false,
@@ -215,7 +230,17 @@ const views: FakeWebContentsView[] = []
 /** 主窗口的 contentView 上挂了哪些子视图 */
 const attachedViews: unknown[] = []
 
+/** 弹出过的右键菜单模板 */
+const popups: Array<Array<{ label?: string; type?: string }>> = []
+
 vi.mock('electron', () => ({
+  Menu: {
+    buildFromTemplate: (template: Array<{ label?: string; type?: string }>) => ({
+      popup: () => popups.push(template)
+    })
+  },
+  clipboard: { writeText: vi.fn() },
+  shell: { openExternal: vi.fn(async () => undefined) },
   BrowserWindow: FakeBrowserWindow,
   WebContentsView: FakeWebContentsView,
   session: {
@@ -279,7 +304,7 @@ vi.mock('../../appWindows', () => ({
   },
   findMainWindow: () => ({
     isDestroyed: () => false,
-    webContents: { id: 9999 },
+    webContents: { id: 9999, isDestroyed: () => false, focus: () => undefined },
     contentView: {
       addChildView: (view: unknown) => attachedViews.push(view),
       removeChildView: (view: unknown) => {
@@ -327,7 +352,8 @@ vi.mock('./sessionState', () => ({
   })
 }))
 
-const { AgentBrowserService, AgentBrowserError, setEmbeddedHostResolver } = await import('./index')
+const { AgentBrowserService, AgentBrowserError, getSessionBrowser, setEmbeddedHostResolver } =
+  await import('./index')
 
 type Service = InstanceType<typeof AgentBrowserService>
 
@@ -386,6 +412,7 @@ beforeEach(() => {
   attachedViews.length = 0
   broadcasts.length = 0
   windowBroadcasts.length = 0
+  popups.length = 0
   settings.mode = 'window'
 })
 
@@ -963,6 +990,21 @@ describe('显示方式', () => {
     instance.close()
     expect(broadcasts.at(-1)?.payload).toMatchObject({ open: false })
   })
+
+  it('工具先拿到的实例，切过别的对话后面板仍然报给它', async () => {
+    settings.mode = 'embedded'
+    // 建 Agent 时工具攥住实例，那会儿还没开网页
+    const held = getSessionBrowser('held-by-tools')
+    // 用户切到别的对话：界面为那条对话来问状态
+    getSessionBrowser('another-chat')
+    await openPage(held)
+
+    // 界面按会话 ID 报位置、关面板，必须落到网页所在的那个实例上
+    getSessionBrowser('held-by-tools').setEmbeddedBounds({ x: 700, y: 64, width: 600, height: 800 })
+    expect(views[0].visible).toBe(true)
+    await getSessionBrowser('held-by-tools').close()
+    expect(held.hasWindow()).toBe(false)
+  })
 })
 
 describe('会话页面恢复', () => {
@@ -1086,7 +1128,8 @@ it('原生工具栏导航尊重历史边界，刷新和停止无需等待页面�
   expect(instance.navigationState()).toEqual({
     canGoBack: false,
     canGoForward: true,
-    loading: true
+    loading: true,
+    zoom: 1
   })
   instance.toolbar('stop')
   expect(contents.stop).toHaveBeenCalledOnce()
@@ -1268,5 +1311,176 @@ describe('嵌入宿主跟着会话走', () => {
     await openPage(other)
     expect(attachedViews).toHaveLength(1)
     expect(chat.children).toHaveLength(0)
+  })
+})
+
+describe('浏览器手感', () => {
+  beforeEach(() => {
+    settings.mode = 'embedded'
+  })
+
+  function emit(contents: FakeContents, event: string, ...args: unknown[]): void {
+    contents.handlers.get(event)?.forEach((handler) => handler(...args))
+  }
+
+  const key = (
+    name: string,
+    mods: Partial<{ control: boolean; shift: boolean; alt: boolean }> = {}
+  ): Record<string, unknown> => ({
+    type: 'keyDown',
+    key: name,
+    control: false,
+    meta: false,
+    shift: false,
+    alt: false,
+    ...mods
+  })
+
+  it('网页里按 Ctrl+T 开新标签，并让面板聚焦地址栏', async () => {
+    const instance = new AgentBrowserService('keys')
+    await openPage(instance)
+    const event = { preventDefault: vi.fn() }
+
+    emit(lastContents(), 'before-input-event', event, key('t', { control: true }))
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(instance.groupState().tabs).toHaveLength(2)
+    expect(windowBroadcasts.at(-1)).toEqual({
+      channel: 'agent-browser:ui',
+      payload: { sessionId: 'keys', action: 'focusAddress' }
+    })
+  })
+
+  it('没在加载时 Esc 留给网页自己用', async () => {
+    const instance = new AgentBrowserService('esc')
+    await openPage(instance)
+    const event = { preventDefault: vi.fn() }
+
+    emit(lastContents(), 'before-input-event', event, key('Escape'))
+
+    expect(event.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('关掉的标签能用 Ctrl+Shift+T 找回', async () => {
+    const instance = new AgentBrowserService('reopen')
+    await openPage(instance, 'https://example.com/a')
+    pageResults.push(SCAN_OK)
+    await settle(instance.openInNewTab('https://example.com/b'))
+    await instance.closeTab(instance.groupState().activeTabId!)
+
+    pageResults.push(SCAN_OK)
+    instance.runCommand({ name: 'reopenTab' })
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(instance.groupState().tabs.map((tab) => tab.url)).toEqual([
+      'https://example.com/a',
+      'https://example.com/b'
+    ])
+  })
+
+  it('Ctrl+Tab 循环切标签，Ctrl+1 回第一个', async () => {
+    const instance = new AgentBrowserService('cycle')
+    await openPage(instance, 'https://example.com/a')
+    pageResults.push(SCAN_OK)
+    await settle(instance.openInNewTab('https://example.com/b'))
+    const [first, second] = instance.groupState().tabs.map((tab) => tab.id)
+
+    instance.runCommand({ name: 'nextTab' })
+    expect(instance.groupState().activeTabId).toBe(first)
+    instance.runCommand({ name: 'previousTab' })
+    expect(instance.groupState().activeTabId).toBe(second)
+    instance.runCommand({ name: 'selectTab', index: 0 })
+    expect(instance.groupState().activeTabId).toBe(first)
+  })
+
+  it('后台打开不切走当前标签', async () => {
+    const instance = new AgentBrowserService('background')
+    await openPage(instance, 'https://example.com/a')
+    const active = instance.groupState().activeTabId
+
+    await instance.openInBackground('https://example.com/b')
+
+    expect(instance.groupState().tabs).toHaveLength(2)
+    expect(instance.groupState().activeTabId).toBe(active)
+    expect(lastContents().loadedUrls).toEqual(['https://example.com/b'])
+  })
+
+  it('拖动标签只换顺序', async () => {
+    const instance = new AgentBrowserService('move')
+    await openPage(instance, 'https://example.com/a')
+    pageResults.push(SCAN_OK)
+    await settle(instance.openInNewTab('https://example.com/b'))
+    const [first, second] = instance.groupState().tabs.map((tab) => tab.id)
+
+    instance.moveTab(second, 0)
+
+    expect(instance.groupState().tabs.map((tab) => tab.id)).toEqual([second, first])
+    expect(instance.groupState().activeTabId).toBe(second)
+  })
+
+  it('缩放按 Chrome 的档位走，状态里带上倍数', async () => {
+    const instance = new AgentBrowserService('zoom')
+    await openPage(instance)
+
+    instance.zoom(1)
+    instance.zoom(1)
+    expect(instance.navigationState().zoom).toBe(1.25)
+    instance.zoom(-1)
+    expect(instance.navigationState().zoom).toBe(1.1)
+    instance.zoom(0)
+    expect(instance.navigationState().zoom).toBe(1)
+  })
+
+  it('页内查找把结果推给面板，换标签时收起高亮', async () => {
+    const instance = new AgentBrowserService('find')
+    await openPage(instance, 'https://example.com/a')
+    const contents = lastContents()
+    instance.find({ text: 'unreal' })
+    instance.find({ text: 'unreal', findNext: true })
+    // Electron 的 findNext 反着来：新查找传 true，往下走传 false
+    expect(contents.finds).toEqual([
+      { text: 'unreal', options: { forward: true, findNext: true } },
+      { text: 'unreal', options: { forward: true, findNext: false } }
+    ])
+    emit(contents, 'found-in-page', {}, { activeMatchOrdinal: 2, matches: 5 })
+    expect(broadcasts.at(-1)?.payload).toMatchObject({ find: { active: 2, matches: 5 } })
+
+    // 换到新开的标签：旧标签上的高亮要收掉
+    pageResults.push(SCAN_OK)
+    await settle(instance.openInNewTab('https://example.com/b'))
+    instance.selectTab(instance.groupState().tabs[0].id)
+    instance.find({ text: 'unreal' })
+    emit(contents, 'found-in-page', {}, { activeMatchOrdinal: 1, matches: 5 })
+    instance.selectTab(instance.groupState().tabs[1].id)
+
+    expect(contents.finds.at(-1)).toBe('stop')
+  })
+
+  it('右键链接给出新标签打开和复制链接', async () => {
+    const instance = new AgentBrowserService('menu')
+    await openPage(instance)
+
+    emit(
+      lastContents(),
+      'context-menu',
+      {},
+      {
+        x: 1,
+        y: 1,
+        linkURL: 'https://example.com/next',
+        srcURL: '',
+        mediaType: 'none',
+        selectionText: '',
+        isEditable: false,
+        editFlags: {},
+        pageURL: 'https://example.com/'
+      }
+    )
+
+    expect(popups.at(-1)?.map((item) => item.label ?? item.type)).toEqual([
+      '在新标签页中打开链接',
+      '在默认浏览器中打开链接',
+      '复制链接地址'
+    ])
   })
 })

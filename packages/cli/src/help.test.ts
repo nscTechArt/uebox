@@ -81,7 +81,8 @@ describe('帮助文本和实现保持同步', () => {
     'team status',
     'team use',
     'team gate',
-    'team round'
+    'team round',
+    'team guard'
   ]
 
   it.each(LANGS)('%s 列出了每一条命令', (lang) => {

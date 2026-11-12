@@ -200,9 +200,9 @@ describe('分发包新鲜度', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  /** 九个版本各一个包，除了 except 里点名的，其余都用 stamp */
+  /** 十个版本各一个包，除了 except 里点名的，其余都用 stamp */
   const putAll = (stamp: string, except: Record<string, string | null> = {}): void => {
-    for (const v of ['50', '51', '52', '53', '54', '55', '56', '57', '58']) {
+    for (const v of ['50', '51', '52', '53', '54', '55', '56', '57', '58', '59']) {
       const name = `UnrealAgentLink${v}.zip`
       putZip(name, name in except ? except[name] : stamp)
     }
@@ -291,7 +291,7 @@ describe('分发包新鲜度', () => {
       expect(checkReleasePackages(FRESH, dist)).toBe(false)
     })
 
-    it('九个包全新鲜 —— 放行', () => {
+    it('十个包全新鲜 —— 放行', () => {
       putAll(FRESH)
       expect(checkReleasePackages(FRESH, dist)).toBe(true)
     })
@@ -301,7 +301,7 @@ describe('分发包新鲜度', () => {
      * 少了它，发版入口不把全部 zip 交给污染检查（比如全部新鲜就提前放行）也能全绿。
      * checkPackages 本身的 .pdb 分支由 checkSelectedPackage 的用例覆盖。
      */
-    it('九个包全新鲜、其中一个混进 .pdb —— 拦住', () => {
+    it('十个包全新鲜、其中一个混进 .pdb —— 拦住', () => {
       putAll(FRESH)
       putZip('UnrealAgentLink58.zip', FRESH, ['Binaries/Win64/UnrealEditor-UnrealAgentLink.pdb'])
       expect(checkReleasePackages(FRESH, dist)).toBe(false)

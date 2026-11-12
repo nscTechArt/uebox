@@ -1,4 +1,5 @@
 import type {
+  BrowserCommand,
   BrowserGroupState,
   BrowserTabCommand,
   BrowserNavigationState,
@@ -35,6 +36,9 @@ export const agentBrowserAPI = {
   },
   async toolbar(sessionId: string, action: BrowserToolbarAction): Promise<void> {
     unwrapAction(await window.api.agentBrowser.toolbar(sessionId, action))
+  },
+  async command(sessionId: string, command: BrowserCommand): Promise<void> {
+    unwrapAction(await window.api.agentBrowser.command(sessionId, command))
   },
   async openUrl(sessionId: string, address: string): Promise<{ url: string }> {
     return unwrapAction(await window.api.agentBrowser.openUrl(sessionId, address))

@@ -1387,6 +1387,30 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     ]
   },
   {
+    "id": "minimax-image",
+    "displayName": "MiniMax 海螺生图",
+    "group": "image",
+    "kind": "image",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.minimaxi.com/v1",
+    "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    "requiresApiKey": true,
+    "defaultEnvVar": "MINIMAX_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "image-01",
+        "displayName": "Image-01",
+        "imageApi": "minimax-images"
+      },
+      {
+        "id": "image-01-live",
+        "displayName": "Image-01 Live（插画风，仅比例档）",
+        "imageApi": "minimax-images"
+      }
+    ]
+  },
+  {
     "id": "ollama-embedding",
     "displayName": "Ollama（本机向量化）",
     "group": "embedding",
@@ -1965,6 +1989,36 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
         "id": "qwen-audio-3.0-tts-flash",
         "displayName": "Qwen-Audio 3.0 TTS Flash",
         "ttsVoice": "longanfengyue"
+      }
+    ]
+  },
+  {
+    "id": "fish-audio-tts",
+    "displayName": "Fish Audio",
+    "group": "tts",
+    "kind": "tts",
+    "protocol": "openai-completions",
+    "baseUrl": "https://api.fish.audio/v1",
+    "apiKeyUrl": "https://fish.audio/app/api-keys",
+    "requiresApiKey": true,
+    "defaultEnvVar": "FISH_API_KEY",
+    "hasLogo": false,
+    "models": [
+      {
+        "id": "s2.1-pro",
+        "displayName": "Fish Audio S2.1 Pro"
+      },
+      {
+        "id": "drama-3",
+        "displayName": "Fish Audio Drama 3"
+      },
+      {
+        "id": "s2-pro",
+        "displayName": "Fish Audio S2 Pro"
+      },
+      {
+        "id": "s1",
+        "displayName": "Fish Audio S1"
       }
     ]
   },
@@ -4802,6 +4856,48 @@ export const GENERATED_CATALOG: readonly CatalogEntry[] = Object.freeze([
     "defaultEnvVar": "INFERENCE_API_KEY",
     "hasLogo": true,
     "models": []
+  },
+  {
+    "id": "meta",
+    "displayName": "Meta",
+    "group": "cloud",
+    "kind": "chat",
+    "protocol": "openai-responses",
+    "baseUrl": "https://api.meta.ai/v1",
+    "apiKeyUrl": "https://dev.meta.ai/docs",
+    "requiresApiKey": true,
+    "defaultEnvVar": "META_MODEL_API_KEY",
+    "hasLogo": true,
+    "models": [
+      {
+        "id": "muse-wonder-1.0",
+        "displayName": "Muse Wonder",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072,
+        "cost": {
+          "input": 4,
+          "output": 20
+        }
+      },
+      {
+        "id": "muse-spark-1.3",
+        "displayName": "Muse Spark 1.3",
+        "supportsVision": true,
+        "supportsVideo": true,
+        "supportsTools": true,
+        "supportsReasoning": true,
+        "contextWindow": 1048576,
+        "maxOutputTokens": 131072,
+        "cost": {
+          "input": 1.25,
+          "output": 4.25
+        }
+      }
+    ]
   },
   {
     "id": "amazon-bedrock",

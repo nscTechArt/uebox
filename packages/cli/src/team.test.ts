@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { run } from './cli.js'
-import { decideGate, MAX_NUDGES, type GateFacts } from './commands/team.js'
+import { decideGate, MAX_NUDGES, MAX_WAITS, type GateFacts } from './commands/team.js'
+import { decideGuard, runGuardHook } from './commands/teamGuard.js'
 import { startFakeBox, type FakeBox } from './testServer.js'
 
 /**
@@ -64,17 +65,23 @@ describe('拦不拦', () => {
   })
 })
 
-async function box(gate: () => GateFacts): Promise<FakeBox> {
+/** 盒子收到的 team_gate 调用（phase、latest_request） */
+const gateCalls: Array<Record<string, unknown>> = []
+
+async function box(gate: () => GateFacts, roundText = '新一轮已记下。'): Promise<FakeBox> {
   const started = await startFakeBox({
     token: TOKEN,
     tools: [
       {
         name: 'team_gate',
         meta: { namespace: 'core', risk: 'safe' },
-        handle: (args) => ({
-          content: [{ type: 'text', text: 'gate' }],
-          structuredContent: { ...gate(), teamId: String(args.team_id) }
-        })
+        handle: (args) => {
+          gateCalls.push(args)
+          return {
+            content: [{ type: 'text', text: args.phase === 'round' ? roundText : 'gate' }],
+            structuredContent: { ...gate(), teamId: String(args.team_id) }
+          }
+        }
       },
       {
         name: 'team_list',
@@ -98,9 +105,14 @@ async function workdir(): Promise<string> {
 
 const env = (b: FakeBox): NodeJS.ProcessEnv => ({ UEBOX_URL: b.url, UEBOX_TOKEN: TOKEN })
 
-function hook(sub: 'gate' | 'round', b: FakeBox, cwd: string): ReturnType<typeof run> {
+function hook(
+  sub: 'gate' | 'round',
+  b: FakeBox,
+  cwd: string,
+  extra: Record<string, unknown> = {}
+): ReturnType<typeof run> {
   return run(['team', sub, '--hook'], env(b), {
-    readStdin: async () => JSON.stringify({ hook_event_name: 'Stop', cwd })
+    readStdin: async () => JSON.stringify({ hook_event_name: 'Stop', cwd, ...extra })
   })
 }
 
@@ -176,5 +188,83 @@ describe('uebox team', () => {
   it('--hook 只用于 team gate / round', async () => {
     const result = await run(['tools', 'list', '--hook', '--json'], {})
     expect(result.exitCode).toBe(2)
+  })
+})
+
+describe('混合团队的交付闸', () => {
+  it('还有活在跑、有话没看：拦下让它 team_wait，不用提醒额度；到上限放行', () => {
+    const busy = facts({ pendingJobs: 2, unreadForProducer: 1, verdict: 'pass', passed: true })
+    const decision = decideGate(busy, MAX_NUDGES, 0)
+    expect(decision).toMatchObject({ block: true, kind: 'wait' })
+    expect(decision.reason).toContain('team_wait')
+    expect(decision.reason).toContain('2 teammate job(s)')
+    expect(decideGate(busy, 0, MAX_WAITS).block).toBe(false)
+    expect(decideGate(facts({ pendingJobs: 0, unreadForProducer: 0 }), 0).kind).toBe('nudge')
+  })
+
+  it('hook：为在跑的活拦不占提醒次数；放行时告诉盒子收工；新一轮把用户那句话和旧账带回来', async () => {
+    gateCalls.length = 0
+    let pending = 1
+    const b = await box(
+      () => facts({ pendingJobs: pending, verdict: 'pass', passed: true }),
+      '<team_board_carryover>\n- t1 做主角\n</team_board_carryover>'
+    )
+    const dir = await workdir()
+    await run(['team', 'use', 'ext-1', '--project', dir], env(b))
+    expect((await hook('gate', b, dir)).stdout).toContain('team_wait')
+    expect(JSON.parse(await fs.readFile(join(dir, '.uebox', 'team.json'), 'utf8'))).toMatchObject({
+      nudges: 0,
+      waits: 1
+    })
+    pending = 0
+    expect((await hook('gate', b, dir)).stdout).toBe('')
+    expect(gateCalls.at(-1)).toMatchObject({ team_id: 'ext-1', phase: 'stop' })
+
+    const round = await hook('round', b, dir, { prompt: 'Boss 要会飞' })
+    expect(round.stdout).toContain('<team_board_carryover>')
+    expect(gateCalls.at(-1)).toMatchObject({ phase: 'round', latest_request: 'Boss 要会飞' })
+    expect(JSON.parse(await fs.readFile(join(dir, '.uebox', 'team.json'), 'utf8'))).toEqual({
+      teamId: 'ext-1',
+      nudges: 0
+    })
+  }, 30_000)
+})
+
+describe('混合团队制作人的守卫', () => {
+  it('不许改文件；Bash 只许单条 uebox；子 Agent 只许验收员；只许制作人和验收员那两条盒子连接', () => {
+    for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+      expect(decideGuard(tool, { file_path: 'a.txt' }).deny).toBe(true)
+    }
+    expect(decideGuard('Bash', { command: 'uebox team use ext-1' }).deny).toBe(false)
+    expect(decideGuard('Bash', { command: 'uebox team use ext-1 && rm -rf x' }).deny).toBe(true)
+    expect(decideGuard('Bash', { command: 'echo hi > a.txt' }).deny).toBe(true)
+    expect(decideGuard('Task', { subagent_type: 'uebox-acceptor' }).deny).toBe(false)
+    expect(decideGuard('Agent', { subagent_type: 'uebox-hybrid:uebox-acceptor' }).deny).toBe(false)
+    expect(decideGuard('Task', { subagent_type: 'general-purpose' }).deny).toBe(true)
+    expect(decideGuard('mcp__plugin_uebox-hybrid_uebox-producer__team_wait', {}).deny).toBe(false)
+    expect(decideGuard('mcp__uebox-acceptor__ue_playtest', {}).deny).toBe(false)
+    expect(decideGuard('mcp__unreal-box__write_local_file', {}).deny).toBe(true)
+    expect(decideGuard('mcp__plugin_uebox_unreal-box__ue_set_property', {}).deny).toBe(true)
+    expect(decideGuard('mcp__github__create_issue', {}).deny).toBe(false)
+    expect(decideGuard('Read', { file_path: 'a.txt' }).deny).toBe(false)
+  })
+
+  it('hook：拒绝时按 PreToolUse 的约定回 deny，放行和读不懂时什么都不说', async () => {
+    const denied = JSON.parse(runGuardHook(JSON.stringify({ tool_name: 'Write', tool_input: {} })))
+    expect(denied.hookSpecificOutput).toMatchObject({
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny'
+    })
+    expect(runGuardHook(JSON.stringify({ tool_name: 'Read', tool_input: {} }))).toBe('')
+    expect(runGuardHook('not json')).toBe('')
+    const viaCli = await run(
+      ['team', 'guard', '--hook'],
+      {},
+      {
+        readStdin: async () => JSON.stringify({ tool_name: 'Edit', tool_input: {} })
+      }
+    )
+    expect(viaCli.exitCode).toBe(0)
+    expect(viaCli.stdout).toContain('"deny"')
   })
 })

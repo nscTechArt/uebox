@@ -332,7 +332,7 @@
     "warnings": 0
   },
   "src/renderer/src/common/utils/storage.ts": {
-    "errors": 3,
+    "errors": 1,
     "warnings": 0
   },
   "src/renderer/src/components/AssetDependencyGraph.vue": {
@@ -387,10 +387,6 @@
     "errors": 1,
     "warnings": 0
   },
-  "src/renderer/src/hooks/usePersistOptions.ts": {
-    "errors": 2,
-    "warnings": 0
-  },
   "src/renderer/src/hooks/useProjects.ts": {
     "errors": 7,
     "warnings": 0
@@ -439,10 +435,6 @@
     "errors": 2,
     "warnings": 0
   },
-  "src/renderer/src/store/modules/blueprintLibraryStore.ts": {
-    "errors": 3,
-    "warnings": 0
-  },
   "src/renderer/src/store/modules/chatSessions.ts": {
     "errors": 3,
     "warnings": 0
@@ -452,7 +444,7 @@
     "warnings": 0
   },
   "src/renderer/src/store/modules/tabs.ts": {
-    "errors": 16,
+    "errors": 15,
     "warnings": 0
   },
   "src/renderer/src/store/modules/webdav.ts": {
@@ -504,7 +496,7 @@
     "warnings": 0
   },
   "src/renderer/src/views/AssetManagement/components/AssetFileList.vue": {
-    "errors": 216,
+    "errors": 215,
     "warnings": 0
   },
   "src/renderer/src/views/AssetManagement/components/AssetTree.vue": {

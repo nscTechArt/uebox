@@ -180,7 +180,11 @@ describe('辞退留痕', () => {
       await dismissMember(store, base({ name: `临时${i}` }))
     }
     expect(await store.dismissals()).toHaveLength(120)
-  })
+    const reopened = createTeamStore(store.dirs)
+    expect((await reopened.dismissals()).map((record) => record.name)).toEqual(
+      Array.from({ length: 120 }, (_, i) => `临时${i}`)
+    )
+  }, 30_000) // 120 次真实文件事务在 Windows CI 的共享磁盘上可能超过默认 10 秒。
 
   it('用户辞的只告诉制作人一次；制作人自己辞的不用告诉它', async () => {
     await dismissMember(store, base({ name: '程序', by: 'user', grounds: 'user', reason: '太慢' }))

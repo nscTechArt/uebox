@@ -63,14 +63,41 @@ export const EPIC_MCP_DEFAULT_URL_PATH = '/mcp'
  * 全弹审批的话用户在真正的操作出现之前就已经点了两三次确认 ——
  * 审批门被点烦了就等于没有。`call_tool` 不在此列。
  */
-export const EPIC_MCP_READ_ONLY_TOOLS = ['list_toolsets', 'describe_toolset']
+// 5.8 叫 describe_toolset；5.9 改成 describe_toolsets，并多了一个 describe_tools
+export const EPIC_MCP_READ_ONLY_TOOLS = [
+  'list_toolsets',
+  'describe_toolset',
+  'describe_toolsets',
+  'describe_tools'
+]
 
 /** UE 5.8 起才有官方 MCP */
 const MIN_MAJOR = 5
 const MIN_MINOR = 8
 
-/** `EditorPerProjectUserSettings.ini` 里的段名，按 UE 的 `/Script/<模块>.<类>` 约定 */
-const INI_SECTION = '/Script/ModelContextProtocolEngine.ModelContextProtocolSettings'
+/**
+ * `EditorPerProjectUserSettings.ini` 里的段名，按 UE 的 `/Script/<模块>.<类>` 约定。
+ *
+ * 5.9 把设置类从 ModelContextProtocolEngine 模块搬到了 ModelContextProtocol 模块，
+ * 段名跟着变；5.8 的工程升上来之后旧段还留在文件里。两个都认，后出现的覆盖先出现的。
+ */
+export const EPIC_MCP_INI_SECTION_58 =
+  '/Script/ModelContextProtocolEngine.ModelContextProtocolSettings'
+export const EPIC_MCP_INI_SECTION_59 = '/Script/ModelContextProtocol.ModelContextProtocolSettings'
+const INI_SECTIONS = [`[${EPIC_MCP_INI_SECTION_58}]`, `[${EPIC_MCP_INI_SECTION_59}]`]
+
+/** 5.9 起：设置段换了名字，并且引擎默认随编辑器启动 MCP 服务（BaseEditorPerProjectUserSettings.ini） */
+export function usesRelocatedMcpSettings(engineVersion: string): boolean {
+  const match = /^\s*(\d+)\.(\d+)/.exec(engineVersion)
+  if (!match) return false
+  const major = Number(match[1])
+  return major > 5 || (major === 5 && Number(match[2]) >= 9)
+}
+
+/** 这一行是不是官方 MCP 设置段的段头 */
+export function isEpicMcpIniSection(line: string): boolean {
+  return INI_SECTIONS.includes(line)
+}
 
 /**
  * 编辑器平台目录。Windows 是主力平台，另两个顺带试一下 ——
@@ -112,7 +139,7 @@ export function parseEpicMcpIni(text: string): EpicMcpServerSettings {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (line.startsWith('[')) {
-      inSection = line === `[${INI_SECTION}]`
+      inSection = isEpicMcpIniSection(line)
       continue
     }
     if (!inSection) continue
@@ -214,7 +241,9 @@ export async function discoverEpicMcpServers(
     (p) =>
       p.isConnected !== false &&
       supportsOfficialMcp(p.engineVersion) &&
-      p.enabledPlugins.includes(EPIC_MCP_PLUGIN_NAME) &&
+      // 5.9 起这个插件默认启用、服务随编辑器启动，`.uproject` 里不会有它
+      (usesRelocatedMcpSettings(p.engineVersion) ||
+        p.enabledPlugins.includes(EPIC_MCP_PLUGIN_NAME)) &&
       p.projectPath
   )
   if (candidates.length === 0) return {}
@@ -243,7 +272,7 @@ export async function discoverEpicMcpServers(
 
   if (Object.keys(servers).length > 0) {
     console.log(
-      `[AgentV3][MCP] 发现 ${Object.keys(servers).length} 个 UE 5.8 官方 MCP server：` +
+      `[AgentV3][MCP] 发现 ${Object.keys(servers).length} 个 UE 官方 MCP server：` +
         Object.values(servers)
           .map((s) => (s as { url: string }).url)
           .join('、')

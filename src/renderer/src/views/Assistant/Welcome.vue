@@ -254,6 +254,7 @@
       :url="browserUrl"
       :navigation="browserNavigation"
       :group="browserGroup"
+      :find="browserFind"
       :visible="paneActive"
       @select-review="selectReviewTab"
       @close-review="closeFileReview"
@@ -359,6 +360,7 @@ import SuggestionCards, { type SuggestionItem } from './components/SuggestionCar
 import ChatLog, { type ChatMessage } from './components/ChatLog.vue'
 import AgentBrowserPane from './components/AgentBrowserPane.vue'
 import FileReviewPane from './components/FileReviewPane.vue'
+import { conversationToMarkdown } from './composables/devlogMarkdown'
 import { provideFileReview } from './composables/useFileReview'
 import { useSessionBrowser } from './composables/useSessionBrowser'
 import { useChatSessionsStore, type BoundNotebook } from '../../store/modules/chatSessions'
@@ -378,6 +380,7 @@ import { message } from '@renderer/utils/messageManager'
 import { confirmDialog } from '@renderer/utils/dialog'
 import { PhCaretCircleDown, PhTarget, PhX } from '@phosphor-icons/vue'
 import { useGreeting } from './composables/useGreeting'
+import { withMegaJamSuggestion } from './composables/megaJamSuggestion'
 import { useContextChips } from './composables/useContextChips'
 import { useAgentMode } from './composables/useAgentMode'
 import { ensurePermissionMode } from './composables/sessionPermissionMode'
@@ -470,7 +473,7 @@ const suggestions = computed<SuggestionItem[]>(() => {
     ]
   }
   // 默认：智能对话模式
-  return [
+  const defaults: SuggestionItem[] = [
     {
       title: t('assistant.suggestions.blueprintDebug.title'),
       description: t('assistant.suggestions.blueprintDebug.desc'),
@@ -487,6 +490,12 @@ const suggestions = computed<SuggestionItem[]>(() => {
       prompt: t('assistant.suggestions.buildPackage.prompt')
     }
   ]
+  // 比赛截止（2026-11-16 10:00）前，MegaJam 卡片顶替第一张「知识问答」
+  return withMegaJamSuggestion(defaults, {
+    title: t('assistant.suggestions.megaJam.title'),
+    description: t('assistant.suggestions.megaJam.desc'),
+    prompt: t('assistant.suggestions.megaJam.prompt')
+  })
 })
 
 const messages = computed<ChatMessage[]>(() => chatMsgStore.getMessages(sid.value))
@@ -2343,15 +2352,15 @@ function exportAsJSON(): void {
  * 导出当前对话为Markdown文件。
  */
 function exportAsMarkdown(): void {
-  const lines = messages.value.map((m) => {
-    const prefix = m.role === 'user' ? t('assistant.export.user') : t('assistant.export.assistant')
-    const content = String(m.content || '')
-    if (content.includes('\n')) {
-      return `${prefix}：\n\n\`\`\`\n${content}\n\`\`\`\n`
-    }
-    return `${prefix}：${content}`
+  const markdown = conversationToMarkdown(messages.value, {
+    user: t('assistant.export.user'),
+    assistant: t('assistant.export.assistant'),
+    tools: t('assistant.export.tools'),
+    changes: t('assistant.export.changes'),
+    failed: t('assistant.export.failed'),
+    turn: (index) => t('assistant.export.turn', { n: index })
   })
-  const blob = new Blob([lines.join('\n\n')], { type: 'text/markdown' })
+  const blob = new Blob([markdown], { type: 'text/markdown' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -2702,7 +2711,8 @@ const {
   open: browserPaneOpen,
   url: browserUrl,
   navigation: browserNavigation,
-  group: browserGroup
+  group: browserGroup,
+  find: browserFind
 } = useSessionBrowser(browserSessionId, paneActive, () => {
   message.error(t('assistant.browserPane.restoreFailed'))
 })

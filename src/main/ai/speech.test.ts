@@ -214,6 +214,63 @@ describe('OpenAI 兼容（本机 Kokoro、CosyVoice 封装等）', () => {
   })
 })
 
+describe('Fish Audio', () => {
+  const fish: ProviderConfig = {
+    id: 'fish-audio-tts',
+    displayName: 'Fish Audio',
+    kind: 'tts',
+    protocol: 'openai-completions',
+    baseUrl: 'https://api.fish.audio/v1',
+    apiKey: { kind: 'none' },
+    models: [{ id: 's2.1-pro', ttsVoice: '' }]
+  }
+
+  it('模型放 model 头、要 24k PCM；没填音色就不带 reference_id', async () => {
+    // 三个字节：最后半个样本要留到下一包，不能丢也不能错位
+    const fetcher = vi.fn(
+      async () => new Response(new Uint8Array([1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7]))
+    )
+    vi.stubGlobal('fetch', fetcher)
+    const onAudio = vi.fn()
+    await requestSpeech(fish, 's2.1-pro', '你好', signal(), onAudio)
+    const [url, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.fish.audio/v1/tts')
+    expect(options.headers).toMatchObject({
+      Authorization: 'Bearer test-speech-key',
+      model: 's2.1-pro'
+    })
+    const body = JSON.parse(options.body as string)
+    expect(body).toMatchObject({ text: '你好', format: 'pcm', sample_rate: 24000 })
+    expect(body).not.toHaveProperty('reference_id')
+    const bytes = Buffer.concat(
+      onAudio.mock.calls.map(([frame]) => Buffer.from(frame.base64, 'base64'))
+    )
+    expect([...bytes]).toEqual([1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0])
+  })
+
+  it('填了音色就当 reference_id 发；报错带上厂商原话', async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ status: 402, message: 'No credits' }), { status: 402 })
+    )
+    vi.stubGlobal('fetch', fetcher)
+    await expect(
+      requestSpeech(fish, 's2.1-pro', '你好', signal(), () => {}, { voice: 'abc123' })
+    ).rejects.toThrow('TTS_HTTP_402: No credits')
+    const [, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(options.body as string).reference_id).toBe('abc123')
+  })
+
+  it('没密钥报没配好', async () => {
+    const { resolveApiKey } = await import('./credentials')
+    vi.mocked(resolveApiKey).mockResolvedValueOnce('')
+    vi.stubGlobal('fetch', vi.fn())
+    await expect(requestSpeech(fish, 's2.1-pro', '你好', signal())).rejects.toThrow(
+      'TTS_NOT_CONFIGURED'
+    )
+  })
+})
+
 describe('defaultSpeechVoice', () => {
   it('豆包和 Box Plan 沿用豆包的默认音色，OpenAI 兼容的地址给 OpenAI 的标准名', async () => {
     const { defaultSpeechVoice, DEFAULT_TTS_VOICE } = await import('../../shared/speech')
@@ -222,6 +279,7 @@ describe('defaultSpeechVoice', () => {
     expect(defaultSpeechVoice('uebox-tts', 'https://plan.example/v1')).toBe(DEFAULT_TTS_VOICE)
     expect(defaultSpeechVoice('qwen-audio-3.0-tts-flash')).toBe('longanfengyue')
     expect(defaultSpeechVoice('kokoro', local)).toBe('alloy')
+    expect(defaultSpeechVoice('s2.1-pro', 'https://api.fish.audio/v1')).toBe('')
     // 豆包的地址上配了个认不得的模型名：还是豆包的音色
     expect(defaultSpeechVoice('1.2.6.1', 'https://openspeech.bytedance.com')).toBe(
       DEFAULT_TTS_VOICE

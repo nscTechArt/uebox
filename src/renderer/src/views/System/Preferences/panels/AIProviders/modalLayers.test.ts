@@ -66,6 +66,8 @@ describe('弹窗层级', () => {
         models: []
       }),
       providers: computed(() => []),
+      managedProviders: computed(() => []),
+      disabledIds: computed(() => new Set<string>()),
       isNew: ref(false),
       isDirty: computed(() => true),
       saving: ref(false),

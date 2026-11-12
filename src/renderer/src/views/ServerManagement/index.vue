@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { secureStorage } from '@renderer/utils/secureStorage'
 import { ref, onMounted, computed } from 'vue'
 import { message } from '@renderer/utils/messageManager'
 import { useI18n } from 'vue-i18n'
@@ -27,15 +28,15 @@ const SERVER_ADDR_KEY = 'assetManagement.serverAddress'
 const SERVER_API_KEY_KEY = 'assetManagement.serverApiKey'
 
 const serverAddress = ref(localStorage.getItem(SERVER_ADDR_KEY) || '')
-const serverApiKey = ref(localStorage.getItem(SERVER_API_KEY_KEY) || '')
+const serverApiKey = ref(secureStorage.getItem(SERVER_API_KEY_KEY) || '')
 const serverVersion = ref('')
 const connectionStatus = ref<'idle' | 'connecting' | 'connected' | 'error'>('idle')
 const connectionError = ref('')
 const isContainerMode = ref(false)
 const authMode = ref<'member' | 'owner'>('member')
-const memberUsername = ref(localStorage.getItem('assetManagement.serverUsername') || '')
+const memberUsername = ref(secureStorage.getItem('assetManagement.serverUsername') || '')
 const memberPassword = ref('')
-const serverAuthToken = ref(localStorage.getItem('assetManagement.serverAuthToken') || '')
+const serverAuthToken = ref(secureStorage.getItem('assetManagement.serverAuthToken') || '')
 const serverAuthSession = ref<{
   userId: string
   username: string
@@ -70,18 +71,18 @@ const saveServerAddress = () => {
 const saveApiKey = () => {
   const val = serverApiKey.value.trim()
   if (val) {
-    localStorage.setItem(SERVER_API_KEY_KEY, val)
+    secureStorage.setItem(SERVER_API_KEY_KEY, val)
   } else {
-    localStorage.removeItem(SERVER_API_KEY_KEY)
+    secureStorage.removeItem(SERVER_API_KEY_KEY)
   }
 }
 
 const saveMemberUsername = () => {
   const val = memberUsername.value.trim()
   if (val) {
-    localStorage.setItem('assetManagement.serverUsername', val)
+    secureStorage.setItem('assetManagement.serverUsername', val)
   } else {
-    localStorage.removeItem('assetManagement.serverUsername')
+    secureStorage.removeItem('assetManagement.serverUsername')
   }
 }
 
@@ -89,9 +90,9 @@ const saveServerAuth = (token: string, session: typeof serverAuthSession.value) 
   serverAuthToken.value = token
   serverAuthSession.value = session
   if (token) {
-    localStorage.setItem('assetManagement.serverAuthToken', token)
+    secureStorage.setItem('assetManagement.serverAuthToken', token)
   } else {
-    localStorage.removeItem('assetManagement.serverAuthToken')
+    secureStorage.removeItem('assetManagement.serverAuthToken')
   }
 }
 

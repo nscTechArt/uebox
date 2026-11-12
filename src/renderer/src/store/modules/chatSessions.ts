@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { chatHistoryStorage } from '../../utils/chatHistoryStorage'
 import { UNTITLED_CHAT_FALLBACK } from '../../utils/untitledChat'
 import { agentV3API } from '@renderer/api/agentV3'
@@ -110,8 +109,8 @@ export const useChatSessionsStore = defineStore(
   'chat-sessions',
   () => {
     const sessions = ref<ChatSession[]>([])
-    /** 仅保留到本次应用运行结束；草稿不属于对话记录，不写入持久层。 */
     const draftsById = ref<Record<string, string>>({})
+    /** 仅保留到本次应用运行结束，不写入持久层。 */
     const imageDraftsById = ref<Record<string, ChatImageDraft[]>>({})
 
     /**
@@ -758,20 +757,16 @@ export const useChatSessionsStore = defineStore(
   },
   {
     persist: {
-      ...usePersistOptions<{
-        sessions: ChatSession[]
-        permissionModeById: Record<string, ChatPermissionMode>
-        draftsById: Record<string, string>
-      }>({
-        key: 'chat-sessions',
-        // 档位要存盘：重开应用之后，用户设成只读的那条对话还得是只读的 ——
-        // 不存的话它会悄悄退回默认档，而他以为自己锁上了
-        //
-        // 草稿同理，而且更直接：用户在输入框里打了半段话没发，关掉应用再打开，
-        // 那段话本来会消失。切对话时它是留着的（内存里），偏偏关应用不留 ——
-        // 对用户来说这两件事没有区别，凭什么一个记一个不记
-        paths: ['sessions', 'permissionModeById', 'draftsById']
-      }),
+      key: 'chat-sessions',
+      // 档位要存盘：重开应用之后，用户设成只读的那条对话还得是只读的 ——
+      // 不存的话它会悄悄退回默认档，而他以为自己锁上了
+      //
+      // 草稿同理，而且更直接：用户在输入框里打了半段话没发，关掉应用再打开，
+      // 那段话本来会消失。切对话时它是留着的（内存里），偏偏关应用不留 ——
+      // 对用户来说这两件事没有区别，凭什么一个记一个不记
+      //
+      // 图片草稿不存：preview 是 base64，File 序列化后是空对象，恢复出来也用不了
+      pick: ['sessions', 'permissionModeById', 'draftsById'],
       // 跟 chat-messages 一起落磁盘：对话里挂着 agentHistory（整条过程时间线），
       // 留在 localStorage 里迟早撑爆配额。
       storage: chatHistoryStorage

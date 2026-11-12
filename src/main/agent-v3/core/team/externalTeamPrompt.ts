@@ -99,6 +99,7 @@ export function buildExternalMemberFraming(input: {
 
 export function buildExternalAcceptancePrompt(input: {
   objective: string
+  latestRequest?: string
   report: string
   howToPlay: string
   projectPath?: string

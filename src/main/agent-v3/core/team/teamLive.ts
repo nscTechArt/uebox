@@ -17,6 +17,17 @@
  * 对方来不及读就收工了的，退回信箱，下次接活再交 —— 不会悄悄丢掉。
  *
  * 只在一次运行（进程）里有效：谁在跑、谁在等，都是内存里的事；留言本身照旧落盘。
+ *
+ * ## 给制作人的话
+ *
+ * 制作人的上下文最长（十几二十万），每插一句它就要带着整段多跑一次。真机上制作人
+ * 40–73% 的 token 花在被留言叫醒之后，而那些留言大半是「收到，正在建」「已停手」
+ * 这类不用它回的话。所以发给制作人的话分两种：
+ *
+ * - **要它当场看的**（`interrupt`）：交活、对方在等它回话或回执。照上面三种送法走，
+ *   并且把信箱里攒着的通知一起带上 —— 反正要叫醒它，顺路的不再单独叫一次。
+ * - **其余的**：进信箱，不插话，也不叫醒它的「等回复」。它下次看信箱时一起读到：
+ *   同步派活交回、想收工时（交付闸）、混合团队每次调团队工具时。
  */
 
 import type { TeamActivity, TeamLiveView } from '../../../../shared/agentTeam'
@@ -57,11 +68,16 @@ export interface TeamLive {
   /** 开始跑的时候登记，返回收工时调用的注销函数（它返回的 Promise 是「退回信箱」那次落盘） */
   attach(name: string, handle: LiveHandle): () => Promise<void>
   isRunning(name: string): boolean
+  /**
+   * `interrupt`：只对发给制作人的话起作用，见文件头「给制作人的话」。
+   * 交活、有人在等它回话的留言要给 true
+   */
   send(
     from: string,
     to: string,
     text: string,
-    replyTo?: string
+    replyTo?: string,
+    options?: { interrupt?: boolean }
   ): Promise<{ mail: TeamMail; delivery: Delivery }>
   /** 它的上下文里进来了一段 user 消息：从里面认出留言编号，记成已读。返回那次落盘 */
   consumed(name: string, text: string): Promise<void>
@@ -174,12 +190,15 @@ export function createTeamLive(
 
     isRunning: (name) => running.has(key(name)),
 
-    async send(from, to, text, replyTo) {
+    async send(from, to, text, replyTo, options) {
       const mail = await store.post(from, to, text, replyTo)
       const k = key(to)
+      const toProducer = k === key(PRODUCER)
+      const hold = toProducer && !options?.interrupt
 
       const waiter = waiting.get(k)
-      if (waiter) {
+      // 制作人在等的那条回复照样交给它；别的通知不叫醒它
+      if (waiter && !(hold && mail.replyTo !== waiter.mailId)) {
         waiting.delete(k)
         changed()
         void markRead([mail.id])
@@ -191,11 +210,21 @@ export function createTeamLive(
         return { mail, delivery: 'handed' }
       }
 
+      if (hold) return { mail, delivery: 'queued' }
+
       const target = running.get(k)
       if (target) {
-        await store.markDelivered([mail.id])
-        target.pending.add(mail.id)
-        target.handle.steer(renderLiveMail(mail))
+        // 给制作人的：信箱里还没送的通知排在前面一起插进去。
+        // 读完信箱到这里之间不能有 await —— 两条同时送达时，后到的那条靠 pending 认出已经带过的
+        const queued = toProducer
+          ? (await store.mail()).filter(
+              (m) => !m.deliveredAt && key(m.to) === k && m.id !== mail.id
+            )
+          : []
+        const batch = [...queued, mail].filter((m) => !target.pending.has(m.id))
+        for (const m of batch) target.pending.add(m.id)
+        await store.markDelivered(batch.map((m) => m.id))
+        for (const m of batch) target.handle.steer(renderLiveMail(m))
         return { mail, delivery: 'live' }
       }
 

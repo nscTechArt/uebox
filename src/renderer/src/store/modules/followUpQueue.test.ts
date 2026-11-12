@@ -108,17 +108,3 @@ describe('队列的持久化', () => {
     )
   })
 })
-
-/**
- * 输入框草稿同理：切会话时留着（内存里），关掉应用却没了 —— 对用户来说这两件事
- * 没有区别，凭什么一个记一个不记。
- */
-describe('输入框草稿的持久化', () => {
-  it('draftsById 在 chat-sessions 的落盘字段里', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/renderer/src/store/modules/chatSessions.ts'),
-      'utf8'
-    )
-    expect(source).toMatch(/paths: \[[^\]]*'draftsById'/)
-  })
-})

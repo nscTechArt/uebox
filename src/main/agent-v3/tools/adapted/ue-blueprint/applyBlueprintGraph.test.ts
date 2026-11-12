@@ -103,6 +103,59 @@ describe('整图写入', () => {
     expect(result.success).toBe(true)
   })
 
+  it('回话里的引脚按读图的样子给：一个不少，默认值字段不带，连线收成一张表', async () => {
+    const pin = (name: string, dir: string, extra: Record<string, unknown> = {}): unknown => ({
+      name,
+      dir,
+      category: 'exec',
+      sub_category: '',
+      is_array: false,
+      is_reference: false,
+      is_const: false,
+      friendly_name: '',
+      linked_count: 0,
+      is_connected: false,
+      linked_to: [],
+      ...extra
+    })
+    mockApply({
+      ...okResponse,
+      nodes: [
+        {
+          id: 'begin',
+          node_id: 'GUID-1',
+          class: 'K2Node_Event',
+          reused: true,
+          pins: [pin('then', 'Output', { linked_to: [{ node_id: 'GUID-2', pin_name: 'execute' }] })]
+        },
+        {
+          id: 'print',
+          node_id: 'GUID-2',
+          class: 'K2Node_CallFunction',
+          pins: [
+            pin('execute', 'Input', { linked_to: [{ node_id: 'GUID-1', pin_name: 'then' }] }),
+            pin('InString', 'Input', { category: 'string', default_value: 'Hello' })
+          ]
+        }
+      ]
+    })
+
+    const result = await run(MINIMAL)
+    const nodes = result.nodes as Array<{ id: string; node_id: string; pins: unknown[] }>
+
+    expect(nodes.map((n) => [n.id, n.node_id])).toEqual([
+      ['begin', 'GUID-1'],
+      ['print', 'GUID-2']
+    ])
+    expect(nodes[1].pins).toEqual([
+      { name: 'execute', dir: 'Input', type: 'exec' },
+      { name: 'InString', dir: 'Input', type: 'string', default_value: 'Hello' }
+    ])
+    expect(result.connections).toEqual([
+      { from_node_id: 'GUID-1', from_pin: 'then', to_node_id: 'GUID-2', to_pin: 'execute' }
+    ])
+  })
+
   /**
    * 前一代最贵的一个缺陷：schema 里的 `class` 是九项枚举，其中四项插件端
    * 不认，而工具示例用的恰好是不认的那个。zod 在 app 侧就把合法输入拦下，

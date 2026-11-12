@@ -883,6 +883,31 @@ describe('McpServerHost 按会话装配', () => {
     await vi.waitFor(() => expect(disposed).toBe(1))
   }, 30_000)
 
+  it('初始化请求带的 X-Unreal-Box-Profile 头原样交给装配函数，不带就没有', async () => {
+    const profiles: Array<string | undefined> = []
+    const host = new McpServerHost()
+    hosts.push(host)
+    const status = await startFetchable(
+      host,
+      async (request) => {
+        if (request.clientCapabilities) profiles.push(request.profile)
+        return { tools: TOOLS }
+      },
+      { includeMutating: true }
+    )
+    const variants: Array<Record<string, string>> = [{ 'X-Unreal-Box-Profile': 'producer' }, {}]
+    for (const headers of variants) {
+      const client = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} })
+      clients.push(client)
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(status.url!), {
+          requestInit: { headers: { Authorization: `Bearer ${status.token!}`, ...headers } }
+        })
+      )
+    }
+    expect(profiles).toEqual(['producer', undefined])
+  }, 30_000)
+
   it('握手时下发说明', async () => {
     const client = await connect(async () => ({ tools: TOOLS, instructions: '盒子的规矩' }))
     expect(client.getInstructions()).toBe('盒子的规矩')

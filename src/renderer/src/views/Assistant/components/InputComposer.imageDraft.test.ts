@@ -6,7 +6,6 @@ const read = (path: string): string => readFileSync(resolve(process.cwd(), path)
 
 describe('InputComposer per-session image drafts', () => {
   const composer = read('src/renderer/src/views/Assistant/components/InputComposer.vue')
-  const sessions = read('src/renderer/src/store/modules/chatSessions.ts')
 
   it('reads the pending images from the current conversation and writes every list change back', () => {
     expect(composer).toContain('chatSessionsStore.getImageDraft(props.chatSid)')
@@ -24,19 +23,5 @@ describe('InputComposer per-session image drafts', () => {
     )
   })
 
-  it('keeps image drafts memory-only and outside persisted session data', () => {
-    const persistPaths = sessions.match(/paths:\s*\[([^\]]+)\]/)?.[1] || ''
-
-    expect(sessions).toContain('const imageDraftsById = ref<Record<string, ChatImageDraft[]>>({})')
-    expect(persistPaths).not.toContain('imageDraftsById')
-
-    // 钉住整张存盘清单，而不是「不许出现 draftsById」—— 文字草稿是 a4e05f7 起
-    // **故意**存盘的（打了半段话关掉应用，那段话不该没）。图片草稿仍然不许进：
-    // 它是 base64，几张截图就能把这块存储顶爆。往这张单子里加东西要有意为之。
-    expect(persistPaths.replace(/[\s']/g, '').split(',')).toEqual([
-      'sessions',
-      'permissionModeById',
-      'draftsById'
-    ])
-  })
+  // 图片草稿不落盘、存盘清单是哪几项，由 store/modules/persistPick.test.ts 读真实存储来验证
 })

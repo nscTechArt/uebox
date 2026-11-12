@@ -63,6 +63,15 @@ describe('parseEpicMcpIni', () => {
     expect(parseEpicMcpIni(ini)).toEqual({ port: 9123, urlPath: '/unreal' })
   })
 
+  it('5.9 换了名字的段也读得出', () => {
+    const ini = [
+      '[/Script/ModelContextProtocol.ModelContextProtocolSettings]',
+      'ServerPortNumber=9321'
+    ].join('\n')
+
+    expect(parseEpicMcpIni(ini)).toEqual({ port: 9321, urlPath: '/mcp' })
+  })
+
   it('只认目标段内的同名键', () => {
     // 别的段里出现 ServerPortNumber 是常事，读串了会连到毫不相干的端口
     const ini = [
@@ -216,6 +225,17 @@ describe('discoverEpicMcpServers', () => {
     // 不加这道门，所有 5.8 用户都会多出一条连不上的 server，
     // 它会进设置页也会进系统提示词，对没开插件的人纯属噪音
     await expect(discoverEpicMcpServers([{ ...base, enabledPlugins: [] }])).resolves.toEqual({})
+  })
+
+  it('5.9 起插件默认启用：.uproject 里没写也接上，发现类工具的新名字也降级', async () => {
+    const servers = await discoverEpicMcpServers([
+      { ...base, engineVersion: '5.9.0-60351404', enabledPlugins: [] }
+    ])
+    expect(Object.keys(servers)).toEqual(['ue-official'])
+    const readOnly = (servers['ue-official'] as { readOnlyTools: string[] }).readOnlyTools
+    expect(readOnly).toContain('describe_toolsets')
+    expect(readOnly).toContain('describe_tools')
+    expect(readOnly).not.toContain('call_tool')
   })
 
   it('已断开的项目跳过', async () => {

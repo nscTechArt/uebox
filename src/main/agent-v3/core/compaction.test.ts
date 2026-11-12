@@ -816,6 +816,35 @@ describe('createAutoCompact —— 超长补救的当场压缩', () => {
     expect(generateSummary).toHaveBeenCalledTimes(1)
   })
 
+  it('队员接活前压历史：不用先过 transform，压完的检查点后续请求直接用', async () => {
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '前几件活' })
+    const saved = vi.fn(async () => undefined)
+    const compact = createAutoCompact({
+      ...deps(10_000_000),
+      hashMessages: (messages) => `${messages.length}`,
+      checkpoint: { save: saved }
+    })
+    const messages = longHistory()
+
+    expect(await compact.compactHistory(messages)).toBe(true)
+    expect(saved).toHaveBeenCalledTimes(1)
+
+    messages.push(msg('user', '新的活'))
+    const projected = await compact(messages)
+    expect(String((projected[0] as { content: string }).content)).toContain('前几件活')
+    expect(projected.at(-1)).toBe(messages.at(-1))
+    expect(generateSummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('历史没超出保留的那段就不压', async () => {
+    generateSummary.mockReset().mockResolvedValue({ ok: true, value: '摘要' })
+    const compact = createAutoCompact(deps(10_000_000))
+    expect(await compact.compactHistory([msg('user', '上一件活'), msg('assistant', '交了')])).toBe(
+      false
+    )
+    expect(generateSummary).not.toHaveBeenCalled()
+  })
+
   it('还没见过历史、或摘要失败时返回 undefined，交给调用方照常报错', async () => {
     generateSummary.mockReset().mockResolvedValue({ ok: false, error: new Error('厂商 500') })
     const compact = createAutoCompact(deps(10_000_000))

@@ -123,6 +123,7 @@ beforeEach(() => {
   settings.providers[0].imageUploadUrl = undefined
   settings.providers[0].imageResolutionTiers = undefined
   settings.providers[0].protocol = 'openai-completions'
+  settings.providers[0].baseUrl = 'https://gateway.example.com/v1'
   settings.providers[0].apiKey = { kind: 'none' }
   settings.providers[0].models = [{ id: 'flux-1-schnell' }]
   settings.roles = { image: { providerId: 'my-gateway', modelId: 'flux-1-schnell' } }
@@ -822,6 +823,146 @@ describe('各家的官方适配器', () => {
     expect(await generateImages({ prompt: 'x' })).toEqual([
       { base64: 'FINAL', mediaType: 'image/png' }
     ])
+  })
+
+  function minimaxResponse(): Response {
+    return new Response(
+      JSON.stringify({
+        id: 'trace-1',
+        data: { image_base64: ['QUJD'] },
+        metadata: { success_count: 1, failed_count: 0 },
+        base_resp: { status_code: 0, status_msg: 'success' }
+      }),
+      { headers: { 'content-type': 'application/json' } }
+    )
+  }
+
+  it('minimax-images：打 /image_generation，比例档单独给 aspect_ratio', async () => {
+    useModel('minimax-images', 'image-01')
+    stubFetch(minimaxResponse)
+
+    const images = await generateImages({ prompt: 'x', count: 2, aspectRatio: '16:9' })
+
+    expect(lastRequest().url).toBe('https://gateway.example.com/v1/image_generation')
+    expect(lastRequest().json).toEqual({
+      model: 'image-01',
+      prompt: 'x',
+      n: 2,
+      response_format: 'base64',
+      aspect_ratio: '16:9'
+    })
+    // 官方示例把回来的数据写成 .jpeg
+    expect(images).toEqual([{ base64: 'QUJD', mediaType: 'image/jpeg' }])
+  })
+
+  /**
+   * 两者同时发时官方写明 `aspect_ratio` 优先，于是界面上选的档位会一声不响地失效。
+   * 所以能算出像素尺寸时只发像素尺寸。
+   */
+  it('minimax-images：档位 + 比例换算成 width/height，不同时发 aspect_ratio', async () => {
+    useModel('minimax-images', 'image-01')
+    stubFetch(minimaxResponse)
+
+    await generateImages({ prompt: 'x', size: '2K', aspectRatio: '16:9' })
+
+    const json = lastRequest().json
+    expect(json.aspect_ratio).toBeUndefined()
+    // 长边封顶 2048，比例照原样保住
+    expect(json.width).toBe(2048)
+    expect(json.height).toBe(1152)
+  })
+
+  it('minimax-images：像素尺寸顶进 512–2048 且取 8 的倍数', async () => {
+    useModel('minimax-images', 'image-01')
+    stubFetch(minimaxResponse)
+
+    await generateImages({ prompt: 'x', size: '4000x300' })
+
+    const { width, height } = lastRequest().json as { width: number; height: number }
+    expect(width).toBeLessThanOrEqual(2048)
+    expect(height).toBeGreaterThanOrEqual(512)
+    expect(width % 8).toBe(0)
+    expect(height % 8).toBe(0)
+  })
+
+  it('minimax-images：live 那一档不认 width/height，只发比例', async () => {
+    useModel('minimax-images', 'image-01-live')
+    stubFetch(minimaxResponse)
+
+    await generateImages({ prompt: 'x', size: '2K', aspectRatio: '3:2' })
+
+    expect(lastRequest().json).toEqual({
+      model: 'image-01-live',
+      prompt: 'x',
+      n: 1,
+      response_format: 'base64',
+      aspect_ratio: '3:2'
+    })
+  })
+
+  it('minimax-images：清单外的比例干脆不发，而不是换来一次 2013', async () => {
+    useModel('minimax-images', 'image-01-live')
+    stubFetch(minimaxResponse)
+
+    await generateImages({ prompt: 'x', aspectRatio: '7:3' })
+
+    expect(lastRequest().json.aspect_ratio).toBeUndefined()
+  })
+
+  it('minimax-images：参考图走 subject_reference，只收一张', async () => {
+    useModel('minimax-images', 'image-01')
+    stubFetch(minimaxResponse)
+
+    await generateImages({ prompt: 'x', referenceImages: ['QUJD'] })
+
+    expect(lastRequest().json.subject_reference).toEqual([
+      { type: 'character', image_file: 'data:image/png;base64,QUJD' }
+    ])
+
+    sent = []
+    await expect(
+      generateImages({ prompt: 'x', referenceImages: ['QUJD', 'REVG'] })
+    ).rejects.toThrow('尚未提交生成')
+    expect(sent).toHaveLength(0)
+  })
+
+  /**
+   * 密钥错 / 余额不足也是 HTTP 200。不认 base_resp 的话用户看到的是
+   * 「换个提示词再试」—— 而提示词在这两种里是清白的。
+   */
+  it('minimax-images：HTTP 200 但 base_resp 报错时带着状态码抛出来', async () => {
+    useModel('minimax-images', 'image-01')
+    stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({ base_resp: { status_code: 1008, status_msg: 'insufficient balance' } }),
+          { headers: { 'content-type': 'application/json' } }
+        )
+    )
+
+    await expect(generateImages({ prompt: 'x' })).rejects.toThrow(
+      /base_resp 1008.*insufficient balance/
+    )
+  })
+
+  /**
+   * 官方域名下压根没有 /images/generations。手填地址的用户少了这一级会一路打到 404。
+   */
+  it('MiniMax 官方域名下没写 imageApi 也走 minimax-images', async () => {
+    settings.providers[0].baseUrl = 'https://api.minimaxi.com/v1'
+    useModel(undefined, 'image-01')
+    stubFetch(minimaxResponse)
+
+    await generateImages({ prompt: 'x' })
+
+    expect(lastRequest().url).toBe('https://api.minimaxi.com/v1/image_generation')
+  })
+
+  it('聚合网关转发的 MiniMax 模型仍走通用形状', async () => {
+    useModel(undefined, 'minimax/image-01')
+    await generateImages({ prompt: 'x' })
+
+    expect(lastRequest().url).toMatch(/\/images\/generations$/)
   })
 
   /**
@@ -1603,5 +1744,45 @@ describe('Codex 订阅出图', () => {
     process.env.CODEX_TEST_TOKEN = 'not-a-jwt'
     await expect(generateImages({ prompt: 'x' })).rejects.toBeInstanceOf(CodexAccountMissingError)
     expect(sent).toHaveLength(0)
+  })
+})
+
+describe('Box Plan（uebox-images）', () => {
+  it('带参考图打 /images/edits，每张参考图一个 image[]，档位按比例换成像素', async () => {
+    useModel('uebox-images', 'gpt-image-2.6-flare')
+    await generateImages({
+      prompt: '把图1 的服装换到图2 的模特身上',
+      size: '4K',
+      aspectRatio: '9:16',
+      referenceImages: ['data:image/png;base64,AAAA', 'data:image/jpeg;base64,BBBB']
+    })
+    const request = lastRequest()
+    expect(request.url).toBe('https://gateway.example.com/v1/images/edits')
+    expect(request.form?.getAll('image[]')).toHaveLength(2)
+    expect(request.form?.get('model')).toBe('gpt-image-2.6-flare')
+    expect(request.form?.get('size')).toBe('2160x3840')
+    expect(request.form?.has('image_urls')).toBe(false)
+    expect(request.form?.has('response_format')).toBe(false)
+  })
+
+  it('没有参考图打 /images/generations，不发中转站不认的字段', async () => {
+    useModel('uebox-images', 'gpt-image-2.6-flare')
+    await generateImages({ prompt: 'x', size: '1K', aspectRatio: '16:9', seed: 7 })
+    const request = lastRequest()
+    expect(request.url).toBe('https://gateway.example.com/v1/images/generations')
+    expect(request.json).toEqual({
+      model: 'gpt-image-2.6-flare',
+      prompt: 'x',
+      n: 1,
+      size: '1360x768'
+    })
+  })
+
+  it('像素尺寸原样发，没给尺寸就不发', async () => {
+    useModel('uebox-images', 'gpt-image-2.6-flare')
+    await generateImages({ prompt: 'x', size: '1024x1536' })
+    expect(lastRequest().json.size).toBe('1024x1536')
+    await generateImages({ prompt: 'x' })
+    expect(lastRequest().json).not.toHaveProperty('size')
   })
 })

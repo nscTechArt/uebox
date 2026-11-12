@@ -42,7 +42,7 @@ function makeState(
     models: [...models]
   })
 
-  return {
+  const state = {
     draft,
     providers: computed(() => [
       {
@@ -79,6 +79,15 @@ function makeState(
     importModels: vi.fn(),
     ...overrides
   } as unknown as AiProvidersState
+  // 树列的是启用加停用的；没单独给就跟 providers 一样，全部启用
+  return Object.assign(
+    {
+      managedProviders: state.providers,
+      disabledIds: computed(() => new Set<string>()),
+      setEnabled: vi.fn(async () => ({ ok: true }))
+    },
+    state
+  )
 }
 
 function mountManager(state: AiProvidersState): VueWrapper {
@@ -89,6 +98,21 @@ function mountManager(state: AiProvidersState): VueWrapper {
 }
 
 describe('ModelManagerModal 的树', () => {
+  it('停用的来源仍在树上，开关关着；拨开关调 setEnabled', async () => {
+    const state = makeState([], { disabledIds: computed(() => new Set(['p2'])) })
+    const wrapper = mountManager(state)
+
+    const rows = wrapper.findAll('.tree-provider-row')
+    expect(rows.map((row) => row.find('.tree-provider').classes('off'))).toEqual([false, true])
+    expect(rows.map((row) => row.find('[role="switch"]').attributes('aria-checked'))).toEqual([
+      'true',
+      'false'
+    ])
+
+    await rows[1].find('[role="switch"]').trigger('click')
+    expect(state.setEnabled).toHaveBeenCalledWith('p2', true)
+  })
+
   it('默认显示 Provider 面板，不是某个模型', () => {
     const wrapper = mountManager(makeState([{ id: 'a' }]))
 

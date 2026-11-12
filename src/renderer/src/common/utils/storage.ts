@@ -1,3 +1,6 @@
+import type { StateTree } from 'pinia'
+import type { Serializer } from 'pinia-plugin-persistedstate'
+
 /**
  * 存储工具类，提供加密和解密功能
  */
@@ -37,15 +40,17 @@ export class StorageUtils {
 
   /**
    * 创建自定义序列化器
+   *
+   * 解不开时返回空对象：插件拿到 null 会在 pick 时抛错并被它自己吞掉，store 照样从默认值起步
    * @returns 序列化器对象
    */
-  static createCustomSerializer() {
+  static createCustomSerializer(): Serializer {
     return {
-      serialize: (value: any): string => {
+      serialize: (value: StateTree): string => {
         return this.encrypt(value)
       },
-      deserialize: <T>(value: string): T | null => {
-        return this.decrypt<T>(value)
+      deserialize: (value: string): StateTree => {
+        return this.decrypt<StateTree>(value) ?? {}
       }
     }
   }

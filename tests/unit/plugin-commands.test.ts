@@ -90,7 +90,8 @@ const RELEASE_PACKAGES = [
   'UnrealAgentLink55.zip',
   'UnrealAgentLink56.zip',
   'UnrealAgentLink57.zip',
-  'UnrealAgentLink58.zip'
+  'UnrealAgentLink58.zip',
+  'UnrealAgentLink59.zip'
 ]
 
 function putComplete(platform = 'win32'): void {
@@ -137,7 +138,7 @@ describe('explicit development package command', () => {
       ['--engine', '5.7', '--unknown'],
       ['--engine', '5.7', 'extra'],
       ['--check', '--all'],
-      ['--engine', '5.9']
+      ['--engine', '6.0']
     ].map((selection) => ({ selection }))
   )('rejects invalid check arguments $selection', ({ selection }) => {
     putComplete()

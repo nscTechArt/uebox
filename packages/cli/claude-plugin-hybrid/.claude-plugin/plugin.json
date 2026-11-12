@@ -1,0 +1,6 @@
+{
+  "name": "uebox-hybrid",
+  "version": "0.1.0",
+  "description": "Produce an Unreal Box hybrid team from Claude Code: you plan and coordinate, teammates are models running inside Unreal Box, an acceptor subagent judges delivery.",
+  "author": { "name": "Unreal Box" }
+}

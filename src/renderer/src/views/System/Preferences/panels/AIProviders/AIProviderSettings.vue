@@ -44,7 +44,8 @@ import {
 
 const { t } = useI18n()
 const state = useAiProviders()
-const { catalog, providers, roles, configured, encryptionAvailable, configPath } = state
+const { catalog, providers, managedProviders, roles, configured, encryptionAvailable, configPath } =
+  state
 
 const showCatalog = ref(false)
 const showManager = ref(false)
@@ -605,7 +606,7 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
     <ProviderCatalogModal
       v-model:visible="showCatalog"
       :catalog="addableCatalog"
-      :existing-ids="providers.map((item) => item.id)"
+      :existing-ids="managedProviders.map((item) => item.id)"
       @pick="handlePickCatalog"
       @pick-custom="handlePickCustom"
     />

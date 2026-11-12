@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 
 import ImagePreviewArea from './ImagePreviewArea.vue'
 import { openImageViewer } from '@renderer/services/imageViewer'
@@ -8,6 +8,13 @@ vi.mock('@renderer/services/imageViewer', () => ({
   openImageViewer: vi.fn()
 }))
 
+enableAutoUnmount(afterEach)
+beforeEach(() => {
+  // happy-dom 不加载本地协议图片；显式模拟等待加载，缓存命中的用例单独设为 true。
+  vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(false)
+})
+afterEach(() => vi.restoreAllMocks())
+
 function mountPreview(images: string[]): ReturnType<typeof mount> {
   return mount(ImagePreviewArea, {
     props: { images, isLoading: false }
@@ -15,6 +22,16 @@ function mountPreview(images: string[]): ReturnType<typeof mount> {
 }
 
 describe('ImagePreviewArea result reveal', () => {
+  it('缓存图片即使没有再次派发 load，也会揭示结果', async () => {
+    vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(true)
+    const wrapper = mountPreview(['local-resource://vault/cached.png'])
+
+    await flushPromises()
+
+    expect(wrapper.find('img.preview-image').classes()).toContain('is-ready')
+    expect(wrapper.find('.result-preparing-state').exists()).toBe(false)
+  })
+
   it('等浏览器真正加载到图片后才揭示生成结果', async () => {
     const wrapper = mountPreview(['local-resource://vault/generated.png'])
     const image = wrapper.find('img.preview-image')

@@ -58,6 +58,7 @@ const LOGO_ALIAS = {
   'siliconflow-image': 'siliconflow',
   'zhipuai-image': 'zhipuai',
   'togetherai-image': 'togetherai',
+  'minimax-image': 'minimax',
 
   // 网页检索里的 Jina 也是同一家的另一个入口
   'jina-search': 'jina',
@@ -182,6 +183,7 @@ const KEY_PAGE = {
   'siliconflow-image': 'https://cloud.siliconflow.cn/account/ak',
   'zhipuai-image': 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
   'togetherai-image': 'https://api.together.xyz/settings/api-keys',
+  'minimax-image': 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
 
   // ── 向量化（同名厂商共用控制台）──
   jina: 'https://jina.ai/api-dashboard/key-manager',
@@ -196,6 +198,7 @@ const KEY_PAGE = {
   // 火山的**语音**控制台，不是方舟那个 —— 两条产品线的凭据互不通用
   'doubao-tts': 'https://console.volcengine.com/speech/new/setting/apikeys',
   'alibaba-tts': 'https://bailian.console.aliyun.com/?apiKey=1',
+  'fish-audio-tts': 'https://fish.audio/app/api-keys',
   'doubao-stt': 'https://console.volcengine.com/speech/new/setting/apikeys',
   'alibaba-asr': 'https://bailian.console.aliyun.com/?apiKey=1',
   'siliconflow-stt': 'https://cloud.siliconflow.cn/account/ak',
@@ -411,6 +414,15 @@ export const CURATED = [
     group: 'image',
     baseUrl: 'https://api.together.xyz/v1',
     displayName: 'Together AI（FLUX）'
+  },
+  {
+    id: 'minimax-image',
+    group: 'image',
+    // 与「MiniMax 海螺视频」同一把密钥，但**是两条记录**，而且连 Base URL 都不同 ——
+    // 视频在 /v2，图片在 /v1。国内站是 minimaxi.com，国际站是 minimax.io，
+    // 两边的 Key 不通用；默认给国内站，用海外账号的用户自己改地址
+    baseUrl: 'https://api.minimaxi.com/v1',
+    displayName: 'MiniMax 海螺生图'
   },
 
   // ── 向量化 ──
@@ -633,6 +645,12 @@ export const CURATED = [
     baseUrl: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference',
     displayName: '阿里云 Qwen-Audio 3.0 语音合成'
   },
+  {
+    id: 'fish-audio-tts',
+    group: 'tts',
+    baseUrl: 'https://api.fish.audio/v1',
+    displayName: 'Fish Audio'
+  },
 
   // ── 语音识别 ──
   // 这一组只转写、不回话。与上面那两家是**同一个控制台、同一把密钥**，
@@ -740,6 +758,13 @@ export const CURATED = [
   { id: 'baseten', group: 'cloud', baseUrl: 'https://inference.baseten.co/v1' },
   { id: 'venice', group: 'cloud', baseUrl: 'https://api.venice.ai/api/v1' },
   { id: 'inference', group: 'cloud', baseUrl: 'https://api.inference.net/v1' },
+  // Meta 的 Muse 系列。只预置当前主力的两个，旧版和 contributor 变体让用户按需导入
+  {
+    id: 'meta',
+    group: 'cloud',
+    baseUrl: 'https://api.meta.ai/v1',
+    onlyModels: ['muse-spark-1.3', 'muse-wonder-1.0']
+  },
   { id: 'amazon-bedrock', group: 'cloud', baseUrl: '', requiresApiKey: true },
   { id: 'azure', group: 'cloud', baseUrl: '', requiresApiKey: true },
   { id: 'google-vertex', group: 'cloud', baseUrl: '', requiresApiKey: true },
@@ -1235,6 +1260,21 @@ const MANUAL_ENTRIES = {
       }
     }
   },
+  /*
+   * 音色填 fish.audio 音色页地址里的那串 ID（reference_id），留空用它的默认音色。
+   * s2.1-pro 在前当默认：接口不带 model 头时也是落到它
+   */
+  'fish-audio-tts': {
+    name: 'Fish Audio',
+    env: ['FISH_API_KEY'],
+    doc: 'https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech',
+    models: {
+      's2.1-pro': { id: 's2.1-pro', name: 'Fish Audio S2.1 Pro' },
+      'drama-3': { id: 'drama-3', name: 'Fish Audio Drama 3' },
+      's2-pro': { id: 's2-pro', name: 'Fish Audio S2 Pro' },
+      s1: { id: 's1', name: 'Fish Audio S1' }
+    }
+  },
   'doubao-tts': {
     name: '豆包语音合成 TTS 2.0',
     env: ['VOLCENGINE_SPEECH_KEY'],
@@ -1537,6 +1577,22 @@ const MANUAL_ENTRIES = {
         'siliconflow-images'
       ),
       'Kwai-Kolors/Kolors': imageModel('Kwai-Kolors/Kolors', 'Kolors 可图', 'siliconflow-images')
+    }
+  },
+  'minimax-image': {
+    name: 'MiniMax 海螺生图',
+    env: ['MINIMAX_API_KEY'],
+    doc: 'https://platform.minimax.io/docs/api-reference/image-generation-t2i',
+    // 端点是 /image_generation，不是 /images/generations，所以走 minimax-images。
+    // 官方只有这两个 id（2026-11 核对），`MiniMax-Image-01` 这种写法是聚合平台的命名，
+    // 打官方域名会被打回。live 那一档不认 width/height，只能用比例档
+    models: {
+      'image-01': imageModel('image-01', 'Image-01', 'minimax-images'),
+      'image-01-live': imageModel(
+        'image-01-live',
+        'Image-01 Live（插画风，仅比例档）',
+        'minimax-images'
+      )
     }
   },
   'zhipuai-image': {
@@ -1925,6 +1981,14 @@ const MODEL_REMOVALS = {
 export function sourceFor(item, upstream) {
   const source = upstream[item.sourceId || item.id] || MANUAL_ENTRIES[item.id]
   if (!source) return undefined
+  if (item.onlyModels) {
+    return {
+      ...source,
+      models: Object.fromEntries(
+        Object.entries(source.models).filter(([id]) => item.onlyModels.includes(id))
+      )
+    }
+  }
   if (item.id !== 'bytedance') return source
   return {
     ...source,

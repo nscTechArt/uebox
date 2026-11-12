@@ -75,6 +75,7 @@ import { initAgentEventDispatcher } from './views/Assistant/composables/agentEve
 import { initApprovalModeSync } from './views/Assistant/composables/approvalModeSync'
 import { initAgentReattach } from './views/Assistant/composables/agentReattach'
 import { chatHistoryStorage } from './utils/chatHistoryStorage'
+import { secureStorage } from './utils/secureStorage'
 import { installChatWindowSync } from './utils/chatWindowSync'
 import { followVoiceCallFromOtherWindows } from './views/Assistant/composables/voiceCallState'
 import { syncAppIconTheme } from './hooks/useTheme'
@@ -127,7 +128,8 @@ window.api?.appSettings?.setLanguage(savedLocale as 'zh-CN' | 'en-US').catch((er
 // 对话历史存在磁盘上（见 utils/chatHistoryStorage.ts），而 pinia 的 storage 接口
 // 是同步的 —— 必须先把它读进内存，再让任何人碰 store。initAgentReattach 起手就读
 // 对话缓存，顺序错了它只会看到一片空历史，然后把还在跑的对话判成中断。
-void chatHistoryStorage.preload().finally(() => {
+// 凭据同理（见 utils/secureStorage.ts）：网盘、WebDAV 的 store 恢复时要能读到
+void Promise.all([chatHistoryStorage.preload(), secureStorage.preload()]).finally(() => {
   // 审批档位改动实时送到主进程，让运行中的对话也跟着变（必须在 pinia 之后）
   initApprovalModeSync()
   // 刷新页面不会停掉 agent（它跑在主进程）—— 问一次主进程谁还活着，把界面接回去

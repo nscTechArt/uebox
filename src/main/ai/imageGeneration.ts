@@ -515,6 +515,50 @@ function arkSize(size?: string, ratio?: string): `${number}x${number}` | undefin
   return `${width}x${height}`
 }
 
+// ── Box Plan 的尺寸换算 ────────────────────────────────────────────────────
+
+/** gpt-image 的像素约束：边长 16 的倍数、最长边 3840、总像素区间（与套餐服务端同一套） */
+const PLAN_MIN_PIXELS = 655_360
+const PLAN_MAX_PIXELS = 8_294_400
+const PLAN_MAX_EDGE = 3840
+const PLAN_TIER_EDGE: Record<string, number> = { '1K': 1024, '2K': 2048, '4K': 4096 }
+
+/**
+ * 档位 + 比例 → gpt-image 认识的 `宽x高`。4K + 9:16 是 2160x3840，与界面显示的一致。
+ * 给的本来就是像素尺寸就原样发；档位和像素都没有时不发，交给模型默认。
+ */
+function planImageSize(size?: string, ratio?: string): `${number}x${number}` | undefined {
+  const explicit = asSize(size)
+  if (explicit) return explicit
+  const edge =
+    PLAN_TIER_EDGE[
+      String(size || '')
+        .trim()
+        .toUpperCase()
+    ]
+  if (!edge) return undefined
+  const [rw, rh] = sidesOfRatio(ratio)
+  const target = Math.min(Math.max(edge * edge, PLAN_MIN_PIXELS), PLAN_MAX_PIXELS)
+  const scale = Math.sqrt(target / (rw * rh))
+  let width = roundEdge(rw * scale)
+  let height = roundEdge(rh * scale)
+  const longest = Math.max(width, height)
+  if (longest > PLAN_MAX_EDGE) {
+    const k = PLAN_MAX_EDGE / longest
+    width = Math.floor((width * k) / 16) * 16
+    height = Math.floor((height * k) / 16) * 16
+  }
+  for (let guard = 0; guard < 64 && width * height > PLAN_MAX_PIXELS; guard += 1) {
+    if (width >= height) width -= 16
+    else height -= 16
+  }
+  for (let guard = 0; guard < 64 && width * height < PLAN_MIN_PIXELS; guard += 1) {
+    if (width >= height) height += 16
+    else width += 16
+  }
+  return `${width}x${height}`
+}
+
 // ── Gemini 的尺寸换算 ──────────────────────────────────────────────────────
 
 /**
@@ -559,6 +603,107 @@ const GEMINI_ASPECT_RATIOS: ReadonlySet<string> = new Set([
   '16:9',
   '21:9'
 ])
+
+// ── MiniMax 的尺寸换算 ─────────────────────────────────────────────────────
+
+/**
+ * MiniMax 认的比例是一份**固定清单**，每一档还对应一个固定像素尺寸
+ * （`16:9` 就是 1280x720）。清单外的值是一次 2013 invalid parameters。
+ *
+ * @see https://platform.minimax.io/docs/api-reference/image-generation-t2i
+ */
+const MINIMAX_ASPECT_RATIOS: ReadonlySet<string> = new Set([
+  '1:1',
+  '16:9',
+  '4:3',
+  '3:2',
+  '2:3',
+  '3:4',
+  '9:16',
+  '21:9'
+])
+
+/** `width`/`height` 的硬区间：512–2048、8 的倍数，官方文档写明 */
+const MINIMAX_MIN_EDGE = 512
+const MINIMAX_MAX_EDGE = 2048
+
+/** 界面档位在 MiniMax 这边能换到多少像素。4K 够不到 —— 长边封顶 2048，只能给到 2K */
+const MINIMAX_TIER_PIXELS: Record<string, number> = {
+  '1K': 1024 * 1024,
+  '2K': 2048 * 2048,
+  '4K': 2048 * 2048
+}
+
+function minimaxEdge(value: number): number {
+  return Math.min(MINIMAX_MAX_EDGE, Math.max(MINIMAX_MIN_EDGE, Math.round(value / 8) * 8))
+}
+
+/**
+ * 按总像素预算把形状换算成 MiniMax 认的 `width`/`height`。
+ *
+ * 先把缩放系数顶进区间再取整，而不是取整之后再裁：直接裁长边会把比例改掉，
+ * 而这一位是用户唯一明确说出口的要求。
+ */
+function minimaxPixels(shape: [number, number], budget: number): { width: number; height: number } {
+  const [shapeWidth, shapeHeight] = shape
+  let scale = Math.sqrt(budget / (shapeWidth * shapeHeight))
+  scale = Math.min(scale, MINIMAX_MAX_EDGE / Math.max(shapeWidth, shapeHeight))
+  scale = Math.max(scale, MINIMAX_MIN_EDGE / Math.min(shapeWidth, shapeHeight))
+  return { width: minimaxEdge(shapeWidth * scale), height: minimaxEdge(shapeHeight * scale) }
+}
+
+/**
+ * 这次请求的尺寸怎么发：要么 `aspect_ratio` 一档，要么 `width`/`height` 一对。
+ *
+ * **两者不能同时发** —— 官方写明 `aspect_ratio` 优先，于是同时发等于界面上选的
+ * 分辨率一声不响地失效（`16:9` 永远出 1280x720，选 2K 也一样）。所以能算出
+ * 像素尺寸时就只发像素尺寸，让档位真的生效。
+ *
+ * `image-01-live` 例外：官方说 `width`/`height` 只对 `image-01` 生效，
+ * 这一档只能走比例档。
+ */
+function minimaxSize(
+  input: AdapterInput
+): { aspect_ratio: string } | { width: number; height: number } | undefined {
+  const ratio = asAspectRatio(input.aspectRatio)
+  const ratioParam = ratio && MINIMAX_ASPECT_RATIOS.has(ratio) ? { aspect_ratio: ratio } : undefined
+  if (/-live$/i.test(input.modelId)) return ratioParam
+
+  const pixels = asSize(input.size)
+  if (pixels) {
+    const [width, height] = pixels.split('x').map(Number)
+    if (width > 0 && height > 0) return minimaxPixels([width, height], width * height)
+  }
+
+  const tier =
+    MINIMAX_TIER_PIXELS[
+      String(input.size || '')
+        .trim()
+        .toUpperCase()
+    ]
+  if (tier && ratio) return minimaxPixels(sidesOfRatio(ratio), tier)
+  if (tier) return minimaxPixels([1, 1], tier)
+  return ratioParam
+}
+
+/**
+ * MiniMax 把失败也回成 HTTP 200，错在 `base_resp` 里。
+ *
+ * 不单独认这一位的话，密钥错（1004）、余额不足（1008）、提示词被审核拦下（1026）
+ * 全都表现为「厂商没有返回图片」—— 那一句让用户去改提示词，而前两种改一万遍
+ * 也不会通。状态码一起带出来，用户照着官方文档一查就知道是哪一类。
+ *
+ * @see https://platform.minimax.io/docs/api-reference/image-generation-t2i
+ */
+export class MiniMaxImageError extends Error {
+  constructor(
+    readonly statusCode: number,
+    detail: string
+  ) {
+    super(`MiniMax 生图失败（base_resp ${statusCode}）：${detail.slice(0, 30) || '没有给出说明'}`)
+    this.name = 'MiniMaxImageError'
+  }
+}
 
 // ── 适配器 ─────────────────────────────────────────────────────────────────
 
@@ -914,37 +1059,33 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
   },
 
   /**
-   * Box Plan。形状贴近 OpenAI，三处不同：
+   * Box Plan。生图那一段是 new-api 中转，按 OpenAI Images 的形状收：
    *
-   * 1. 参考图放 JSON 的 `image_urls`，只收 **https 链接或 data URI** —— 不走 multipart、
-   *    不先上传；http 直链先取回来转成 data URI
-   * 2. `size` 收 `1K` / `2K` / `4K` 档位或 `宽x高`（服务端就近取档），比例单给 `aspect_ratio`
-   * 3. 预计超过 60 秒的请求回 **202 任务单**（`{ id, status }`），轮询
-   *    `GET /images/generations/{id}` —— 这正是上面那段异步任务后处理，状态词对得上；
-   *    10 分钟内必定结束，所以任务上限放宽到 PLAN_TASK_TIMEOUT_MS
+   * 1. 带参考图打 `/images/edits`（multipart，重复的 `image[]`），纯文生图打
+   *    `/images/generations`。参考图放进 `/images/generations` 的 JSON 里会被**静默丢掉**，
+   *    照样出图、照样扣费 —— 2026-11-07 用红底「AB7」实测过，出来的图与参考图毫无关系
+   * 2. `size` 只认 `宽x高`。界面给的是档位 + 比例，这里换算成 gpt-image 能收的像素
+   *    （见 planImageSize）；`aspect_ratio` / `seed` 中转站不认，不发
+   * 3. 不发 `response_format`：gpt-image 永远回 base64
    *
-   * 不带 `Idempotency-Key`：带了一律按任务处理，每张图都要多等至少一轮轮询；
-   * 提交只对 429 重试（「没收下」），不存在重复扣费。
-   *
-   * 协议见 Box Plan 仓库 docs/protocol/04-images.md。
+   * 慢请求可能回任务单，由 send() 里那段异步任务后处理接住，上限放宽到 PLAN_TASK_TIMEOUT_MS。
    */
   'uebox-images': {
-    doc: 'docs/protocol/04-images.md（Box Plan）',
+    doc: 'https://platform.openai.com/docs/api-reference/images',
     taskTimeoutMs: PLAN_TASK_TIMEOUT_MS,
     async request(input, signal) {
-      const references = await Promise.all(
-        input.references.map(async (reference) => {
-          const trimmed = reference.trim()
-          if (/^https:\/\//i.test(trimmed)) return trimmed
-          if (/^http:\/\//i.test(trimmed)) {
-            return `data:image/png;base64,${await downloadAsBase64(trimmed, signal)}`
-          }
-          return toDataUri(trimmed)
-        })
-      )
-      const tier = input.size?.trim().toUpperCase()
-      const size = tier && ['1K', '2K', '4K'].includes(tier) ? tier : asSize(input.size)
-      const aspectRatio = asAspectRatio(input.aspectRatio)
+      const size = planImageSize(input.size, input.aspectRatio)
+      if (input.references.length > 0) {
+        const form = new FormData()
+        form.append('model', input.modelId)
+        form.append('prompt', input.prompt)
+        form.append('n', String(input.count))
+        if (size) form.append('size', size)
+        for (const [index, reference] of input.references.entries()) {
+          form.append('image[]', await toBlob(reference.trim(), signal), `reference-${index}.png`)
+        }
+        return { path: '/images/edits', body: form }
+      }
       return {
         path: '/images/generations',
         contentType: 'application/json',
@@ -952,11 +1093,7 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
           model: input.modelId,
           prompt: input.prompt,
           n: input.count,
-          ...(size ? { size } : {}),
-          ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
-          ...(references.length > 0 ? { image_urls: references } : {}),
-          ...(typeof input.seed === 'number' ? { seed: input.seed } : {}),
-          response_format: 'b64_json'
+          ...(size ? { size } : {})
         })
       }
     },
@@ -1066,6 +1203,72 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
   },
 
   /**
+   * MiniMax（海螺）。与这里其余每一家的 `/images/generations` 有四处不同：
+   *
+   * 1. **端点是 `/image_generation`**，文生图和图生图同一个，没有 `/images/edits`
+   * 2. 尺寸要么 `aspect_ratio` 八档、要么 `width`/`height` 一对，两者同时发时
+   *    比例优先 —— 所以只发一种，见 minimaxSize
+   * 3. 参考图放 `subject_reference`，**一次只收一张**，且只认 `type: "character"`：
+   *    它做的是「保住这个人物的长相」，不是通用的图生图重绘
+   * 4. 失败是 **HTTP 200 + `base_resp.status_code`**，所以响应里要先验这一位，
+   *    否则密钥错和余额不足都会表现成「厂商没有返回图片」
+   *
+   * `response_format` 显式发 `base64`：默认是 `url`，而那个地址 24 小时后失效 ——
+   * 落进资产库的图不能指着一个会过期的地址。
+   *
+   * `prompt_optimizer` 不发（默认 false）：它会背着用户改写提示词，出的图
+   * 和他写的那句话不是一件事。
+   *
+   * @see https://platform.minimax.io/docs/api-reference/image-generation-t2i
+   * @see https://platform.minimax.io/docs/api-reference/image-generation-i2i
+   */
+  'minimax-images': {
+    doc: 'https://platform.minimax.io/docs/api-reference/image-generation-t2i',
+    async request(input) {
+      const size = minimaxSize(input)
+      return {
+        path: '/image_generation',
+        contentType: 'application/json',
+        body: JSON.stringify({
+          model: input.modelId,
+          prompt: input.prompt,
+          n: input.count,
+          response_format: 'base64',
+          ...(size ?? {}),
+          ...(typeof input.seed === 'number' ? { seed: input.seed } : {}),
+          ...(input.references.length > 0
+            ? {
+                subject_reference: [
+                  { type: 'character', image_file: toDataUri(input.references[0]) }
+                ]
+              }
+            : {})
+        })
+      }
+    },
+    images(payload) {
+      const status = (payload as { base_resp?: { status_code?: unknown; status_msg?: unknown } })
+        ?.base_resp
+      if (typeof status?.status_code === 'number' && status.status_code !== 0) {
+        throw new MiniMaxImageError(status.status_code, String(status.status_msg ?? ''))
+      }
+
+      const data = (payload as { data?: { image_base64?: unknown; image_urls?: unknown } })?.data
+      const base64 = Array.isArray(data?.image_base64) ? data.image_base64 : []
+      const urls = Array.isArray(data?.image_urls) ? data.image_urls : []
+      return [
+        ...base64
+          .filter((item): item is string => typeof item === 'string' && item.length > 0)
+          // 官方示例把回来的数据写成 .jpeg，不是 png
+          .map((item) => ({ base64: item, mediaType: 'image/jpeg' })),
+        ...urls
+          .filter((item): item is string => typeof item === 'string' && item.length > 0)
+          .map((item) => ({ url: item, mediaType: 'image/jpeg' }))
+      ]
+    }
+  },
+
+  /**
    * ChatGPT 订阅的 Codex 后端，也就是 Codex CLI 出图走的那条路。
    *
    * 这里没有 `/images/*` 端点，出图是 Responses 的 `image_generation` 工具：
@@ -1134,7 +1337,30 @@ const ADAPTERS: Record<ImageApi, ImageAdapter> = {
 function resolveImageApi(provider: ProviderConfig, modelId: string): ImageApi {
   // Codex 后端只有这一种出图方式，手填的模型没写 imageApi 也不该去打 /images/generations
   if (provider.protocol === 'openai-codex-responses') return 'codex-images'
-  return provider.models.find((model) => model.id === modelId)?.imageApi ?? guessImageApi(modelId)
+  const declared = provider.models.find((model) => model.id === modelId)?.imageApi
+  if (declared) return declared
+  // MiniMax 官方域名下压根没有 /images/generations，只有 /image_generation ——
+  // 这是 Provider 级的事实（按模型名猜不出来，见 guessImageApi 的注释），
+  // 手填地址的用户少了这一级会一路打到 404
+  if (isMiniMaxHost(provider.baseUrl)) return 'minimax-images'
+  return guessImageApi(modelId)
+}
+
+/**
+ * 这个地址是不是 MiniMax 官方站。
+ *
+ * 只认官方的三个域名，不认聚合网关：OpenRouter 这类转发 MiniMax 时用的是
+ * OpenAI 形状，按 MiniMax 的端点打过去是 404。国内站 minimaxi.com / minimax.cn
+ * 与国际站 minimax.io 的 Key 不通用，但端点形状一样。
+ */
+function isMiniMaxHost(baseUrl: string): boolean {
+  let host: string
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return /(^|\.)minimaxi?\.(com|cn|io|chat)$/.test(host)
 }
 
 /**
@@ -1614,9 +1840,12 @@ export async function generateImages(
   const imageApi = resolveImageApi(provider, modelId)
   const adapter = adapterOf(imageApi)
   const references = (request.referenceImages ?? []).filter(Boolean)
-  if (imageApi === 'siliconflow-images' && references.length > 1) {
+  if (
+    (imageApi === 'siliconflow-images' || imageApi === 'minimax-images') &&
+    references.length > 1
+  ) {
     throw new Error(
-      '当前 siliconflow-images 接入只会发送一张参考图，但本次提供了多张。尚未提交生成；' +
+      `当前 ${imageApi} 接入只会发送一张参考图，但本次提供了多张。尚未提交生成；` +
         '请改用支持多图的接入，或由用户明确选择一张。不要自行丢弃其余参考图。'
     )
   }

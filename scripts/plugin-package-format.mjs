@@ -33,7 +33,8 @@ export const RELEASE_ENGINES = Object.freeze([
   '5.5',
   '5.6',
   '5.7',
-  '5.8'
+  '5.8',
+  '5.9'
 ])
 
 /** 引擎版本对应的分发包文件名：5.5 → UnrealAgentLink55.zip */

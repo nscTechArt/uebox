@@ -15,6 +15,7 @@ import {
   sharedExternalTeamRegistry,
   type ExternalTeamRegistry
 } from '../agent-v3/core/team/externalTeam'
+import { runningHybridTeam, stopHybridTeam } from '../agent-v3/core/team/hybridTeam'
 import { teamDirsFor } from '../agent-v3/core/team/teamSession'
 import { createTeamStore, type TeamStore } from '../agent-v3/core/team/teamStore'
 
@@ -72,15 +73,19 @@ export async function readExternalTeamState(
   const record = await deps.registry.get(id)
   if (!record) return null
   const store = deps.storeFor(id)
-  const [members, board, mail, activity, jobs, events] = await Promise.all([
+  const hosted = record.members === 'box'
+  const [members, board, mail, activity, jobs, events, usage] = await Promise.all([
     store.roster(),
     store.board(),
     store.mail(),
     store.activity(ACTIVITY_LOOKBACK),
     store.jobs(PANEL_JOBS),
-    store.events(PANEL_EVENTS)
+    store.events(PANEL_EVENTS),
+    hosted ? store.usage() : undefined
   ])
   const { state } = record
+  // 混合团队的队员在盒子里跑：用量、谁在跑和盒子里的团队一样看得到
+  const live = hosted ? runningHybridTeam(id)?.live.view() : undefined
   return {
     objective: record.objective,
     verdict: state.verdict,
@@ -92,8 +97,11 @@ export async function readExternalTeamState(
     mail: mail.slice(-PANEL_MAIL),
     jobs,
     events,
-    // 用量不给：队员的模型在 Claude Code 那头，盒子一个 token 都看不到
+    // 外部团队的用量不给：队员的模型在 Claude Code 那头，盒子一个 token 都看不到
+    ...(usage && (usage.total.total > 0 || usage.total.cost > 0) ? { usage } : {}),
+    ...(live ? { live } : {}),
     external: true,
+    ...(hosted ? { hostedMembers: true } : {}),
     ended: record.endedAt !== undefined
   }
 }
@@ -108,7 +116,17 @@ export async function endExternalTeam(
   await deps.registry.update(id, (record) =>
     record.endedAt !== undefined ? null : { ...record, endedAt: now() }
   )
+  // 混合团队的队员在盒子里跑：结束就停掉后台的活
+  await stopHybridTeam(id)
   return true
+}
+
+/** 这是混合团队吗（队员由盒子托管）。任务板上换模型认它：外部团队的队员模型盒子换不了 */
+export async function isHybridTeam(
+  id: string,
+  deps: ExternalTeamPanelDeps = defaultDeps()
+): Promise<boolean> {
+  return isExternalTeamId(id) && (await deps.registry.get(id))?.members === 'box'
 }
 
 /** 这个外部团队存在吗。任务板上「重开」那两个入口用它代替「这条对话是不是团队」 */

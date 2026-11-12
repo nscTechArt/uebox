@@ -11,7 +11,6 @@ import {
 } from '../../../../shared/speechBriefing'
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import type { SendShortcut } from '../../views/Assistant/composables/sendShortcut'
 import type { ChatPermissionMode } from './chatSessions'
 import { StorageUtils } from '../../common/utils/storage'
@@ -893,11 +892,11 @@ export const useAIConfigStore = defineStore(
   },
   {
     // 持久化配置
-    persist: usePersistOptions<{ config: AIConfigState }>({
+    persist: {
       key: 'ai-config-store',
-      paths: ['config'],
-      storage: 'localStorage',
+      pick: ['config'],
+      storage: localStorage,
       serializer: StorageUtils.createCustomSerializer()
-    })
+    }
   }
 )

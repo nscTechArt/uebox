@@ -396,6 +396,7 @@ type CompactTransform = (messages: AgentMessage[], signal?: AbortSignal) => Prom
  */
 export function createAutoCompact(deps: CompactionDeps): CompactTransform & {
   compactForOverflow: (signal?: AbortSignal) => Promise<AgentMessage[] | undefined>
+  compactHistory: (messages: AgentMessage[], signal?: AbortSignal) => Promise<boolean>
 } {
   const { transform: compactConversation, compactLatest } = createConversationCompact(deps)
   /** 最近一次交进来的完整历史（含 system 消息）。超长补救要拿它当场压 */
@@ -432,7 +433,24 @@ export function createAutoCompact(deps: CompactionDeps): CompactTransform & {
       return undefined
     }
   }
-  return Object.assign(transform, { compactForOverflow })
+  /**
+   * 不看阈值，把一段已有的历史压掉，只留最近 `keepRecentTokens` 那段原文。压了返回 true。
+   *
+   * 给队员接新活用（`runSubAgent`）：队员记得之前所有活，不压的话第 N 件活的每一步
+   * 都要把前 N-1 件活的全过程重发一遍。真机上一个队员干了 6 件活，上下文从 2.4 万
+   * 涨到 26.9 万，一共烧掉 900 万 token。最近那段（含上件活的交活报告）还是原文
+   */
+  const compactHistory = async (
+    messages: AgentMessage[],
+    signal?: AbortSignal
+  ): Promise<boolean> => {
+    try {
+      return (await compactLatest(withoutSystemMessages(messages), signal)) !== undefined
+    } catch {
+      return false
+    }
+  }
+  return Object.assign(transform, { compactForOverflow, compactHistory })
 }
 
 function createConversationCompact(deps: CompactionDeps): {
@@ -453,12 +471,19 @@ function createConversationCompact(deps: CompactionDeps): {
   let checkpoint: CheckpointState | undefined = deps.checkpoint?.initial
   /** 只在第一次调用时验一遍指纹：同一轮里历史的头部不会变，验第二遍是白算 hash */
   let validated = false
+  const validate = (messages: AgentMessage[]): void => {
+    if (validated) return
+    validated = true
+    if (!checkpointApplies(messages, checkpoint, deps.hashMessages)) checkpoint = undefined
+  }
 
   /** 不看阈值当场压。压不动返回 undefined。见 `createAutoCompact` 的 `compactForOverflow` */
   const compactLatest = async (
     messages: AgentMessage[],
     signal?: AbortSignal
   ): Promise<AgentMessage[] | undefined> => {
+    // 队员接活时在第一个请求之前就来压，那时还没经过 `transform` 验过检查点
+    validate(messages)
     const base = checkpoint ? applyCheckpoint(messages, checkpoint) : messages
     // 后台那份描述的是压之前的一代，换了检查点就作废
     if (deps.precompactKey) precompactions.delete(deps.precompactKey)
@@ -477,10 +502,7 @@ function createConversationCompact(deps: CompactionDeps): {
     signal?: AbortSignal
   ): Promise<AgentMessage[]> => {
     try {
-      if (!validated) {
-        validated = true
-        if (!checkpointApplies(messages, checkpoint, deps.hashMessages)) checkpoint = undefined
-      }
+      validate(messages)
 
       // 有检查点就先投影成模型视图再量 —— 拿全量历史去量，会在明明已经压过的
       // 情况下判定「还要再压」，然后每一次请求都白跑一趟摘要模型。

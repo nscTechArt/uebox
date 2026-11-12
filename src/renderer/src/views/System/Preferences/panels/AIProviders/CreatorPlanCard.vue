@@ -24,6 +24,7 @@ import type { ModelRole } from '@core/shared/aiProvider'
 import {
   formatPlanResetTime,
   planUsage,
+  type CreatorPlanCampaign,
   type CreatorPlanDeprecationHit,
   type CreatorPlanDevicePrompt,
   type CreatorPlanErrorCode,
@@ -58,6 +59,69 @@ function errorText(code: CreatorPlanErrorCode, raw: string): string {
 async function load(): Promise<void> {
   const result = await creatorPlanAPI.state()
   if (result.ok) state.value = result.data
+  await loadCampaign()
+}
+
+/**
+ * MegaJam 活动：连着 Box Plan 时问服务端开没开。能登记、没登记过显示登记那一行，
+ * 登记过显示试用到期时间；能交卷时显示交卷那一行。拿不到状态（老服务端、断网）就什么都不显示。
+ */
+const campaign = ref<CreatorPlanCampaign | null>(null)
+const itchUrl = ref('')
+const claiming = ref(false)
+const claimError = ref('')
+const entryUrl = ref('')
+const submitting = ref(false)
+/** 交过的作品页、能不能交卷。模板里事件处理之后 campaign 的非空收窄会丢，单独算出来 */
+const submittedEntry = computed(() => campaign.value?.entryUrl ?? null)
+const canSubmit = computed(() => campaign.value?.submitOpen === true)
+
+async function loadCampaign(): Promise<void> {
+  if (!state.value?.connected) {
+    campaign.value = null
+    return
+  }
+  const result = await creatorPlanAPI.campaign()
+  campaign.value = result.ok ? result.data : null
+}
+
+async function claimCampaign(): Promise<void> {
+  if (claiming.value || !itchUrl.value.trim()) return
+  claiming.value = true
+  claimError.value = ''
+  try {
+    const result = await creatorPlanAPI.claimCampaign(itchUrl.value)
+    if (!result.ok) {
+      claimError.value = errorText(result.code, result.error)
+      return
+    }
+    message.success(t('aiProvider.creatorPlan.campaign.claimed'))
+    itchUrl.value = ''
+    await load()
+    emit('changed')
+    // 套餐变了，模型清单跟着变：直接弹导入预览，让用户把新模型接上
+    await reimport()
+  } finally {
+    claiming.value = false
+  }
+}
+
+async function submitEntry(): Promise<void> {
+  if (submitting.value || !entryUrl.value.trim()) return
+  submitting.value = true
+  claimError.value = ''
+  try {
+    const result = await creatorPlanAPI.submitCampaignEntry(entryUrl.value)
+    if (!result.ok) {
+      claimError.value = errorText(result.code, result.error)
+      return
+    }
+    message.success(t('aiProvider.creatorPlan.campaign.submitted'))
+    entryUrl.value = ''
+    await loadCampaign()
+  } finally {
+    submitting.value = false
+  }
 }
 
 function openPreview(data: CreatorPlanPreview): void {
@@ -320,6 +384,74 @@ onUnmounted(() => unsubscribe?.())
       <AppButton variant="primary" size="small" @click="openManage">
         {{ $t('aiProvider.creatorPlan.pastDueAction') }}
       </AppButton>
+    </div>
+
+    <!-- MegaJam 活动：能登记、没登记过时可登记，登记过显示试用到期时间；能交卷时可交卷 -->
+    <div
+      v-if="
+        state?.connected && campaign && (campaign.claimed || campaign.open || campaign.submitOpen)
+      "
+      class="plan-campaign"
+    >
+      <span class="plan-desc">
+        {{ $t('aiProvider.creatorPlan.campaign.title') }}
+        <template v-if="campaign.claimed">
+          ·
+          {{
+            campaign.expiresAt
+              ? $t('aiProvider.creatorPlan.campaign.expires', {
+                  date: formatTime(campaign.expiresAt)
+                })
+              : $t('aiProvider.creatorPlan.campaign.claimedShort')
+          }}
+        </template>
+      </span>
+      <form
+        v-if="!campaign.claimed && campaign.open"
+        class="plan-campaign-form"
+        @submit.prevent="claimCampaign"
+      >
+        <a-input
+          v-model:value="itchUrl"
+          class="plan-campaign-input"
+          :aria-label="$t('aiProvider.creatorPlan.campaign.itchLabel')"
+          placeholder="https://yourname.itch.io"
+          :disabled="claiming"
+        />
+        <AppButton
+          variant="primary"
+          size="small"
+          :disabled="claiming || !itchUrl.trim()"
+          @click="claimCampaign"
+        >
+          {{ $t('aiProvider.creatorPlan.campaign.claim') }}
+        </AppButton>
+      </form>
+      <span v-if="submittedEntry" class="plan-desc">
+        {{ $t('aiProvider.creatorPlan.campaign.entry', { url: submittedEntry }) }}
+      </span>
+      <form v-if="canSubmit" class="plan-campaign-form" @submit.prevent="submitEntry">
+        <a-input
+          v-model:value="entryUrl"
+          class="plan-campaign-input"
+          :aria-label="$t('aiProvider.creatorPlan.campaign.entryLabel')"
+          placeholder="https://yourname.itch.io/game"
+          :disabled="submitting"
+        />
+        <AppButton
+          :variant="submittedEntry ? 'default' : 'primary'"
+          size="small"
+          :disabled="submitting || !entryUrl.trim()"
+          @click="submitEntry"
+        >
+          {{
+            submittedEntry
+              ? $t('aiProvider.creatorPlan.campaign.resubmit')
+              : $t('aiProvider.creatorPlan.campaign.submit')
+          }}
+        </AppButton>
+      </form>
+      <span v-if="claimError" class="plan-desc plan-warn" role="alert">{{ claimError }}</span>
     </div>
 
     <!-- 清单说要下线、而且正在用的模型 -->
@@ -622,5 +754,23 @@ onUnmounted(() => unsubscribe?.())
 .preview-row > :first-child {
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.plan-campaign {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.plan-campaign-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.plan-campaign-input {
+  flex: 1;
+  min-width: 0;
 }
 </style>

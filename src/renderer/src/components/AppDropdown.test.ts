@@ -26,6 +26,7 @@ const mounted: VueWrapper[] = []
 
 function mountDropdown(props: Record<string, unknown> = {}): VueWrapper {
   const wrapper = mount(AppDropdown, {
+    attachTo: document.body,
     props,
     slots: {
       default: '<button class="trigger">菜单</button>',
@@ -65,6 +66,7 @@ describe('AppDropdown', () => {
   it('触发器外面套着 Tooltip 时，定位到真正按钮而不是透明壳', async () => {
     vi.mocked(computePosition).mockClear()
     const wrapper = mount(AppDropdown, {
+      attachTo: document.body,
       slots: {
         default:
           '<span class="app-tooltip-trigger"><button class="nested-trigger">菜单</button></span>',
@@ -117,6 +119,7 @@ describe('AppDropdown', () => {
 
   it('子触发器阻止冒泡时仍能打开', async () => {
     const wrapper = mount(AppDropdown, {
+      attachTo: document.body,
       slots: {
         default: '<button class="trigger" @click.stop>菜单</button>',
         overlay: '<div class="overlay">内容</div>'
@@ -228,6 +231,7 @@ describe('AppDropdown', () => {
    */
   it('子节点 @click.stop 也照样能打开（监听走捕获阶段）', async () => {
     const wrapper = mount(AppDropdown, {
+      attachTo: document.body,
       slots: {
         default: '<button class="trigger" @click.stop>菜单</button>',
         overlay: '<div class="overlay">内容</div>'
@@ -285,9 +289,9 @@ describe('AppDropdown', () => {
     const floating = document.querySelector<HTMLElement>('.app-dropdown')
     expect(floating?.style.transform).toBe('translate(320px, 72px)')
 
-    // happy-dom 没有 checkVisibility，这里按 display: none 之后的真实返回值补上
+    // 用真实的可见性判断，保留触发器隐藏后不重新定位的保护。
     const trigger = wrapper.get('.trigger').element as HTMLElement
-    trigger.checkVisibility = (): boolean => false
+    trigger.style.display = 'none'
 
     // autoUpdate 的第三个参数就是组件的 place()
     vi.mocked(autoUpdate).mock.calls.at(-1)?.[2]()
@@ -392,6 +396,7 @@ describe('AppDropdown', () => {
    */
   it('无 item-key 的菜单项被键盘激活：菜单照关，AppMenu 不发 click', async () => {
     const wrapper = mount(AppDropdown, {
+      attachTo: document.body,
       props: { open: true, trigger: [] },
       global: { components: { AppMenu, AppMenuItem } },
       slots: {

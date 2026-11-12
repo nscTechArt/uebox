@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, reactive } from 'vue'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { StorageUtils } from '../../common/utils/storage'
+import { secureStorage } from '../../utils/secureStorage'
 
 export interface BaiduOAuthTokenResponse {
   expires_in: number
@@ -177,11 +177,12 @@ export const useBaiduyunStore = defineStore(
     }
   },
   {
-    persist: usePersistOptions<{ token: BaiduTokenState | null; appConfig: BaiduAppConfig }>({
+    persist: {
       key: 'baiduyun-store',
-      paths: ['token', 'appConfig'],
-      storage: 'localStorage',
+      pick: ['token', 'appConfig'],
+      // 凭据：主进程加密落盘，不进 localStorage
+      storage: secureStorage,
       serializer: StorageUtils.createCustomSerializer()
-    })
+    }
   }
 )

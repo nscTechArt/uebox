@@ -38,6 +38,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import WebSocket from 'ws'
+import { describeLaunchFailure, findFreePort, stderrTail } from './cdp-launch.mjs'
 import { packagedAppPaths } from './packaged-app-paths.mjs'
 import { buildWorkspace, defaultWorkspace, seedSteps } from './docs-mock-data.mjs'
 
@@ -501,7 +502,7 @@ function copyAiCredentials(targetDir) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-async function waitForTarget(port, timeoutMs = 90000) {
+async function waitForTarget(port, timeoutMs = 90000, hasExited = () => false) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
@@ -514,6 +515,8 @@ async function waitForTarget(port, timeoutMs = 90000) {
     } catch {
       // devtools 还没起来
     }
+    // 进程都没了就别等满超时，直接去报 stderr
+    if (hasExited()) return null
     await sleep(1000)
   }
   return null
@@ -856,29 +859,45 @@ async function main() {
   }
   console.log(`画布：${VIEWPORT.width}×${VIEWPORT.height} @${VIEWPORT.deviceScaleFactor}x\n`)
 
+  // --port 是起点：绑不上（被占用或落在 Windows 保留端口段）就顺延，见 scripts/cdp-launch.mjs
+  const port = String(await findFreePort(args.port))
+  if (port !== String(args.port)) {
+    console.log(`调试端口 ${args.port} 无法绑定（已被占用或落在系统保留端口段），改用 ${port}`)
+  }
+
   const child = spawn(
     args.exe,
-    [`--remote-debugging-port=${args.port}`, `--user-data-dir=${userDataDir}`],
+    [`--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`],
     {
       detached: true,
       windowsHide: true,
       env: {
         ...process.env,
         UA_DISABLE_SINGLE_INSTANCE_LOCK: '1',
-        UA_REMOTE_DEBUGGING_PORT: args.port
+        UA_REMOTE_DEBUGGING_PORT: port
       },
-      stdio: 'ignore'
+      // 只接 stderr：bind 失败、主进程崩溃这类致命错误都在这儿
+      stdio: ['ignore', 'ignore', 'pipe']
     }
   )
+  const tail = stderrTail()
+  let exit = null
+  child.stderr.on('data', (chunk) => tail.push(chunk))
+  child.on('exit', (code, signal) => {
+    exit = { code, signal }
+  })
+  child.on('error', (error) => tail.push(`spawn 失败：${error.message}\n`))
+  child.stderr.unref()
   child.unref()
 
   const manifest = []
   let session
   let enginePid = null
   try {
-    const page = await waitForTarget(args.port)
+    const page = await waitForTarget(port, undefined, () => exit !== null)
     if (!page) {
-      console.error('ERROR 应用起来了但没出现可调试页面')
+      console.error(`ERROR 应用起来了但没出现可调试页面（端口 ${port}）`)
+      console.error(describeLaunchFailure({ exit, tail }))
       process.exitCode = 1
       return
     }

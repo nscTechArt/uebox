@@ -4111,6 +4111,29 @@ namespace
 	}
 
 	/**
+	 * 此刻处于编译错误状态的蓝图（对象路径）。
+	 *
+	 * 引擎开 PIE 前遇到这种蓝图会弹「蓝图编译错误，确定要运行吗」，pie.run 让它直接继续
+	 * （见 Handle_RunPlaytest 里 GIsRunningUnattendedScript 那段），代价是这些蓝图跑的是
+	 * 上一次编译成功的版本，所以必须写进报告。不看 bDisplayCompilePIEWarning：
+	 * 用户之前点过一次「编辑器中运行」，引擎就不再提醒，但错误还在。
+	 */
+	TArray<FString> UAL_CollectErroredBlueprints()
+	{
+		TArray<FString> Out;
+		for (TObjectIterator<UBlueprint> It; It; ++It)
+		{
+			UBlueprint* Blueprint = *It;
+			if (IsValid(Blueprint) && Blueprint->Status == BS_Error && Blueprint->GetPackage() != GetTransientPackage())
+			{
+				Out.Add(Blueprint->GetPathName());
+			}
+		}
+		Out.Sort();
+		return Out;
+	}
+
+	/**
 	 * 收尾：汇总 → 发响应 → 清场。
 	 *
 	 * `ActorsAtEnd` 只在我们主动收尾时拿得到 —— 那时 PIE 世界还在。被用户
@@ -4193,6 +4216,12 @@ namespace
 				Fired.Add(MakeShared<FJsonValueObject>(Entry));
 			}
 			Result->SetArrayField(TEXT("events"), Fired);
+		}
+
+		const TArray<FString> ErroredBlueprints = UAL_CollectErroredBlueprints();
+		if (ErroredBlueprints.Num() > 0)
+		{
+			Result->SetArrayField(TEXT("blueprint_errors"), UAL_ToJsonStrings(ErroredBlueprints));
 		}
 
 		if (GPieSession.LevelsAtEnd.IsValid())
@@ -4575,9 +4604,23 @@ void FUAL_EditorCommands::Handle_RunPlaytest(const TSharedPtr<FJsonObject>& Payl
 		Params.EditorPlaySettings = PlaySettings;
 	}
 
-	GEditor->RequestPlaySession(Params);
-	// RequestPlaySession 只是排队，真正启动在下一帧。这里踢一下让它尽快开始。
-	GEditor->StartQueuedPlaySessionRequest();
+	{
+		/**
+		 * 有蓝图编译错误时，引擎在 StartPlayInEditorSession 里同步弹「蓝图编译错误，
+		 * 确定要在编辑器中运行吗」。那是 SCustomDialog，不走 FMessageDialog 的委托，
+		 * FUAL_ScopedDialogAutoAnswer 接不住；它弹出来时这条命令卡在游戏线程上，
+		 * 盒子收不到任何回复，编辑器界面也被挡住。
+		 *
+		 * ShowBlueprintErrorDialog 开头查 GIsRunningUnattendedScript，为真就当用户点了
+		 * 「运行」（PlayLevel.cpp，5.0–5.8 一致）。只在这一次同步启动里置位；
+		 * 哪些蓝图带着错误跑由 UAL_CollectErroredBlueprints 写进报告。
+		 * 关掉 AutoRecompileBlueprints 时的「要不要先编译」框也会按默认答案过去。
+		 */
+		TGuardValue<bool> UnattendedGuard(GIsRunningUnattendedScript, true);
+		GEditor->RequestPlaySession(Params);
+		// RequestPlaySession 只是排队，真正启动在下一帧。这里踢一下让它尽快开始。
+		GEditor->StartQueuedPlaySessionRequest();
+	}
 
 	GPieSession.TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateLambda([](float /*Delta*/) -> bool

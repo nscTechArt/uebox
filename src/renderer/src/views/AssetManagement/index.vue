@@ -219,12 +219,6 @@
                   displayBreadcrumbItems.last.name
                 }}</span>
               </div>
-              <div v-if="assetViewStore.mode === 'baiduyun'" class="current-dir-text">
-                {{ t('assetLib.ui.currentDir') }}{{ baiduyunStore.currentDir }}
-              </div>
-              <div v-if="assetViewStore.mode === 'tagManagement'" class="current-dir-text">
-                {{ t('assetLib.ui.tagManagement') }}
-              </div>
               <!-- 团队工程：面包屑右端按需出现「主线 ▾」「最新 ▾」（方案 4.5） -->
               <TeamVersionPill v-if="libraryCaps.team" />
             </div>
@@ -1590,7 +1584,14 @@ const handleIncrementalScan = async (): Promise<void> => {
       await loadRootFolders()
       await hydrateExpandedNodes()
       await loadCurrentFolderAssets()
-      message.success(t('assetManagement.scan.done'))
+      // 主进程把读不到的目录数算在 failedDirs 里，partial 为真就不是一次完整的扫描。
+      // 本机主机和远程可写客户端两条路径都带这两个字段（远程那条经 POST /scan 的
+      // data 原样回传），报「扫描完成」会把半个库读不到说成成功。
+      if (result.data?.partial) {
+        message.warning(t('assetManagement.scan.partial', { count: result.data.failedDirs ?? 0 }))
+      } else {
+        message.success(t('assetManagement.scan.done'))
+      }
     } else {
       message.error(t('assetLib.scan.scanFailed', { error: result.error }))
     }
@@ -7986,11 +7987,6 @@ const handleUploadProjectArchive = async (): Promise<void> => {
                 text-overflow: ellipsis;
               }
             }
-          }
-
-          .current-dir-text {
-            font-size: 13px;
-            color: var(--color-text-secondary);
           }
         }
 

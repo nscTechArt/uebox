@@ -242,6 +242,9 @@ export interface AiProvidersState {
   /** 草稿与上一次存盘（或刚进入编辑时）相比有没有改动 */
   isDirty: ComputedRef<boolean>
   providers: ComputedRef<ProviderView[]>
+  /** 启用的加停用的，模型管理弹窗列的是这一份 */
+  managedProviders: ComputedRef<ProviderView[]>
+  disabledIds: ComputedRef<Set<string>>
   roles: ComputedRef<RoleBindings>
   configured: ComputedRef<boolean>
   encryptionAvailable: ComputedRef<boolean>
@@ -252,6 +255,7 @@ export interface AiProvidersState {
   cancelEdit: () => void
   save: () => Promise<{ ok: boolean; error?: string }>
   remove: (providerId: string) => Promise<{ ok: boolean; error?: string }>
+  setEnabled: (providerId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
   /**
    * `skipped` 有值表示根本没发请求（3D 那一档，探测一次就扣钱），界面别显示成绿勾。
    *
@@ -314,6 +318,9 @@ export function useAiProviders(): AiProvidersState {
   const providers = computed(() =>
     (settings.value?.providers ?? []).filter((item) => item.id !== BUILTIN_BROWSER_PROVIDER_ID)
   )
+  const disabledProviders = computed(() => settings.value?.disabledProviders ?? [])
+  const disabledIds = computed(() => new Set(disabledProviders.value.map((item) => item.id)))
+  const managedProviders = computed(() => [...providers.value, ...disabledProviders.value])
   const roles = computed(() => settings.value?.roles ?? {})
   const configured = computed(() => settings.value?.configured ?? false)
   const encryptionAvailable = computed(() => settings.value?.encryptionAvailable ?? true)
@@ -330,9 +337,9 @@ export function useAiProviders(): AiProvidersState {
       catalog.value = nextCatalog
 
       // 选中项还在就保持不动，免得存一次盘右侧就跳回空态
-      const stillThere = nextSettings.providers.some((item) => item.id === selectedId.value)
+      const stillThere = managedProviders.value.some((item) => item.id === selectedId.value)
       if (!stillThere) {
-        selectedId.value = firstEditableId(nextSettings.providers)
+        selectedId.value = firstEditableId(managedProviders.value)
         setDraft(null)
       }
     } finally {
@@ -343,7 +350,7 @@ export function useAiProviders(): AiProvidersState {
   function selectProvider(providerId: string): void {
     // 套餐来源只读，操作都走套餐卡片（主进程的保存、删除也会拦）
     if (isPlanProvider(providerId)) return
-    const provider = providers.value.find((item) => item.id === providerId)
+    const provider = managedProviders.value.find((item) => item.id === providerId)
     if (!provider) return
     selectedId.value = providerId
     setDraft(draftFromProvider(provider))
@@ -355,7 +362,7 @@ export function useAiProviders(): AiProvidersState {
     // 目录里选来的 provider 会与已存在的同 id 撞车（比如配两个 OpenAI 走不同网关）。
     // id 是 models.json 的主键，撞了就会**静默覆盖**掉原来那条，所以必须让开。
     if (next.id) {
-      next.id = uniqueProviderId(next.id, providers.value)
+      next.id = uniqueProviderId(next.id, managedProviders.value)
     }
     setDraft(next)
     selectedId.value = null
@@ -365,7 +372,7 @@ export function useAiProviders(): AiProvidersState {
   function cancelEdit(): void {
     if (isNew.value) {
       setDraft(null)
-      selectedId.value = firstEditableId(providers.value)
+      selectedId.value = firstEditableId(managedProviders.value)
       if (selectedId.value) selectProvider(selectedId.value)
       return
     }
@@ -403,8 +410,10 @@ export function useAiProviders(): AiProvidersState {
       isNew.value = false
       // 用存盘后的结果重建草稿：密钥字段要重新变回空，
       // 否则用户会以为明文还留在框里，再点一次保存就重复写入密钥库。
+      const stored = managedProviders.value.find((item) => item.id === payload.id)
+      if (stored) setDraft(draftFromProvider(stored))
+      // 停用中的来源不绑角色
       const saved = result.data.providers.find((item) => item.id === payload.id)
-      if (saved) setDraft(draftFromProvider(saved))
 
       /*
        * 第一个对话 Provider 存下来就自动绑「对话」角色。
@@ -441,14 +450,31 @@ export function useAiProviders(): AiProvidersState {
     if (!result.ok) return { ok: false, error: result.error }
     settings.value = result.data
     if (selectedId.value === providerId) {
-      selectedId.value = firstEditableId(result.data.providers)
+      selectedId.value = firstEditableId(managedProviders.value)
       setDraft(
         selectedId.value
-          ? draftFromProvider(result.data.providers.find((i) => i.id === selectedId.value)!)
+          ? draftFromProvider(managedProviders.value.find((i) => i.id === selectedId.value)!)
           : null
       )
     }
     return { ok: true }
+  }
+
+  /** 停用 / 启用。停用的来源不出现在任何选模型的地方，也不会被自动选中 */
+  async function setEnabled(
+    providerId: string,
+    enabled: boolean
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const result = await window.api.aiProvider.setEnabled(providerId, enabled)
+      if (!result.ok) return { ok: false, error: result.error }
+      settings.value = result.data
+      // 停用会顺带清掉绑着它的角色，按角色缓存的上限跟着作废
+      invalidateModelLimitsCache()
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   async function test(modelId: string): Promise<TestProviderResult> {
@@ -592,6 +618,8 @@ export function useAiProviders(): AiProvidersState {
     isNew,
     isDirty,
     providers,
+    managedProviders,
+    disabledIds,
     roles,
     configured,
     encryptionAvailable,
@@ -602,6 +630,7 @@ export function useAiProviders(): AiProvidersState {
     cancelEdit,
     save,
     remove,
+    setEnabled,
     test,
     importModels,
     oauthLogin,

@@ -89,4 +89,29 @@ describe('Beta 工具前缀缓存键', () => {
     })
     expect(toolSearchPrefixKey(anthropic, initial)).not.toBe(toolSearchPrefixKey(anthropic, loaded))
   })
+
+  it('撤销或重定义后再追加工具，只在顶层定义变化时换键', () => {
+    const native = model('openai-responses', { supportsToolSearch: true })
+    const redefined = transcript([
+      ...loaded.messages,
+      {
+        role: 'system',
+        content: '',
+        toolsAdded: [{ ...resident, description: 'updated' }],
+        timestamp: 3
+      }
+    ])
+    const removed = transcript([
+      ...loaded.messages,
+      { role: 'system', content: '', toolsRemoved: [{ name: resident.name }], timestamp: 3 }
+    ])
+    for (const changed of [redefined, removed]) {
+      expect(toolSearchPrefixKey(native, changed)).not.toBe(toolSearchPrefixKey(native, loaded))
+      const appended = transcript([
+        ...changed.messages,
+        { role: 'system', content: '', toolsAdded: [tool('new_tool')], timestamp: 4 }
+      ])
+      expect(toolSearchPrefixKey(native, appended)).toBe(toolSearchPrefixKey(native, changed))
+    }
+  })
 })

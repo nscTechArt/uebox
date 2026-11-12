@@ -346,6 +346,11 @@ First work out why the install failed from the output above. If you can run comm
       clientConfig: 'Connection config',
       copyConfig: 'Copy config',
       copyToken: 'Copy token only',
+      installClaudeCode: 'Add to Claude Code',
+      installCodex: 'Add to Codex',
+      installedClaudeCode: 'Added to Claude Code config ({path}). Restart Claude Code to use it.',
+      installedCodex: 'Added to Codex config ({path}). Restart Codex to use it.',
+      installFailed: 'Could not write the config: {error}',
       copied: 'Copied',
       tokenMasked: 'Only the ends are shown; use “Copy token” for the full value',
       // "Reset" alone does not say what it resets, and it sits beside two copy actions.
@@ -418,6 +423,7 @@ First work out why the install failed from the output above. If you can run comm
       empty: 'No providers yet',
       add: '+ Add Provider',
       searchPlaceholder: 'Search providers or models',
+      enableProvider: 'Enable {name}',
       keyReady: 'Key configured',
       keyMissing: 'Key missing',
       linked: 'Signed in',
@@ -722,7 +728,7 @@ First work out why the install failed from the output above. If you can run comm
         'With ElevenLabs, realistic sounds are generated from a description and may be charged. When unset, the agent synthesizes synth-style sounds with local FFmpeg, which must be installed first. Both output WAV files ready to import into UE.',
       ttsDesc: 'Read AI replies aloud with an AI-generated voice.',
       ttsMore:
-        'Doubao TTS 2.0 and Alibaba Qwen-Audio are built in. A local Kokoro or CosyVoice server that speaks the OpenAI speech API works too — add the local text-to-speech entry under Add provider → Voice. Change the voice in model settings.',
+        'Doubao TTS 2.0, Alibaba Qwen-Audio and Fish Audio are built in. A local Kokoro or CosyVoice server that speaks the OpenAI speech API works too — add the local text-to-speech entry under Add provider → Voice. Change the voice in model settings.',
       ttsMissing: 'Read aloud unavailable',
       realtimeDesc: 'Choose a real-time voice model for voice calls.',
       realtimeMore:
@@ -889,7 +895,29 @@ First work out why the install failed from the output above. If you can run comm
         bad_response: 'The Box Plan service sent an unexpected response',
         not_connected: 'Not connected yet',
         encryption_unavailable: "Can't store the key securely",
+        invalid_itch_url: 'Enter your itch.io profile URL, for example https://yourname.itch.io',
+        itch_not_found: 'No such itch.io profile',
+        itch_taken: 'This itch.io profile is registered to another account',
+        already_claimed: 'This account is already registered',
+        sold_out: 'All spots are taken',
+        campaign_closed: 'Closed',
+        invalid_entry_url:
+          'Enter your itch.io game page, for example https://yourname.itch.io/game',
+        entry_not_found: 'No such itch.io game page',
         unknown: 'Something went wrong: {error}'
+      },
+      campaign: {
+        title: 'MegaJam registration',
+        itchLabel: 'itch.io profile',
+        claim: 'Register',
+        claimed: 'Registered. Trial credit added',
+        claimedShort: 'Registered',
+        expires: 'Trial expires {date}',
+        entryLabel: 'itch.io game page',
+        submit: 'Submit',
+        resubmit: 'Resubmit',
+        submitted: 'Entry submitted',
+        entry: 'Submitted: {url}'
       },
       chat: {
         subscription_inactive: {
@@ -2553,6 +2581,12 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       greetingPrompt: '{greeting}, how can I help you?'
     },
     suggestions: {
+      // Replaces the first card until 2026-11-16 10:00, see megaJamSuggestion.ts
+      megaJam: {
+        title: 'Join MegaJam',
+        desc: '2026 Epic AI MegaJam',
+        prompt: "I'm entering the 2026 Epic AI MegaJam. Walk me through the entry process."
+      },
       blueprintDebug: {
         title: 'Performance Analysis',
         desc: 'One-click performance check, display FPS and GPU time',
@@ -2668,7 +2702,11 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     },
     export: {
       user: 'User',
-      assistant: 'Assistant'
+      assistant: 'Assistant',
+      tools: 'Tools',
+      changes: 'Changes',
+      failed: 'failed',
+      turn: 'Turn {n}'
     },
     teamBoard: {
       external: {
@@ -3222,7 +3260,13 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       stop: 'Stop loading',
 
       address: 'Page address',
-      addressPlaceholder: 'Enter a URL',
+      addressPlaceholder: 'Search or enter address',
+      resetZoom: 'Reset to default size',
+      closeBrowser: 'Close browser',
+      find: 'Find in page',
+      findPrevious: 'Previous',
+      findNext: 'Next',
+      findClose: 'Close find bar',
       navigationFailed: 'Could not open this address. Check the URL or connection and try again.',
       actionFailed: 'That didn’t work. Please try again.',
       busy: 'The assistant is using the browser. Try again when this step finishes.',
@@ -4742,8 +4786,6 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
         youtubeLabel: 'YouTube URL',
         youtubeHint: 'Enter YouTube video link',
         bilibiliLabel: 'Bilibili URL',
-        bilibiliHint:
-          'Enter Bilibili video link for automatic content analysis (experimental third-party feature, availability not guaranteed)',
         wechatLabel: 'WeChat Article Link',
         wechatHint: 'Enter WeChat article link to automatically extract and convert to Markdown'
       },
@@ -4912,6 +4954,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
   },
   externalTeams: {
     title: 'External Teams',
+    driven: 'Externally driven chat',
+    unavailable: 'The board for this external chat is currently unavailable',
+    retry: 'Retry',
     intro:
       'Teams where Claude Code is the brain and Unreal Box is the studio. The thinking runs on Claude Code; Unreal Box keeps the board, mail, snapshots and acceptance record.',
     empty: 'No external teams yet',
@@ -5318,8 +5363,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     colInfo: 'Info',
     colTags: 'Tags',
     loading: 'Loading…',
-    emptyTitle: 'A place for things you reuse',
-    emptyHint: 'Create one, or drag files into a folder on the left',
+    emptyTitle: '{library} is empty',
+    emptyFolderTitle: 'This folder is empty',
+    filteredEmptyTitle: 'No matching items',
     clearSearch: 'Clear search',
     folderSection: 'Folders',
     createFolder: 'New folder',
@@ -5508,6 +5554,9 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     }
   },
   aigcImageHistoryPanel: {
+    error: {
+      cancelledByUser: 'Generation cancelled'
+    },
     status: {
       generating: 'Generating {progress}%',
       pending: 'Queued',
@@ -7027,18 +7076,15 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
   },
   screenRecorderExportPanel: {
     title: 'Recording export',
-    subtitleFallback: 'Trim and export settings',
     resetButton: 'Reset',
     exportButton: 'Export',
     previewSectionTitle: 'Preview',
     noFileTitle: 'No recording selected',
-    noFileDesc: 'Finish a recording first or provide a video URL',
     trimRangeTitle: 'Trim range',
     startLabel: 'Start',
     endLabel: 'End',
     trimDurationLabel: 'Trim duration',
     exportFormatTitle: 'Export format',
-    gifDesc: 'GIF is smaller but has no audio',
     qualityLabel: 'Quality',
     qualityOptions: {
       high: 'High',
@@ -7053,9 +7099,7 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     bitrateLabel: 'Bitrate',
     advancedSettingsTitle: 'Advanced settings',
     includeAudioTitle: 'Include audio',
-    includeAudioDesc: 'MP4 only',
     highQualityScaleTitle: 'High-quality scaling',
-    highQualityScaleDesc: 'Keeps sharpness and detail',
     summaryTitle: 'Export summary',
     summaryFormat: 'Format',
     summaryDuration: 'Duration',
@@ -8037,7 +8081,12 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
       }
     },
     scan: {
-      done: 'Scan complete'
+      done: 'Scan complete',
+      partial: 'Scan complete. {count} folder(s) could not be read.'
+    },
+    aiNaming: {
+      noVisionModel:
+        'No vision-capable model. Assign one to Image understanding in Settings → Models.'
     },
     folder: {
       unknownFolder: 'Unknown folder',
@@ -8532,22 +8581,6 @@ Places to start: whether this .uproject can be read at all and which EngineAssoc
     defaultGraph: {
       name: 'New event graph',
       description: 'Default event graph'
-    },
-    /*
-     * The four sample blueprints seeded into an empty library.
-     *
-     * An English user opening the blueprint library for the first time saw
-     * four samples described entirely in Chinese. (Whether sample data should
-     * exist at all is a separate question — see review §4.6.)
-     */
-    samples: {
-      damageSystem: 'General damage calculation, physical and magical',
-      calculateDamage: 'Compute the final damage value',
-      damageMultiplier: 'Damage multiplier',
-      isActive: 'Is active',
-      characterController: 'Character movement: jump, sprint, climb',
-      mainMenu: 'Main menu UI blueprint',
-      networkManager: 'Network replication manager'
     }
   },
   miniChatWindow: {

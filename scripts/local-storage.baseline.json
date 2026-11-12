@@ -59,25 +59,13 @@
     "category": "ui",
     "why": "网络保管库服务端地址，是配置不是凭据。"
   },
-  "assetManagement.serverApiKey": {
-    "category": "secret",
-    "why": "网络保管库的 API Key，明文存在 localStorage 里，应走主进程安全存储。"
-  },
-  "assetManagement.serverAuthToken": {
-    "category": "secret",
-    "why": "网络保管库的登录令牌，明文存在 localStorage 里，应走主进程安全存储。"
-  },
-  "assetManagement.serverUsername": {
-    "category": "secret",
-    "why": "网络保管库账号，与令牌同处，一并迁走。"
+  "assetManagement.showAssetVersion": {
+    "category": "ui",
+    "why": "资产卡片是否显示引擎版本角标的界面偏好。"
   },
   "assetManagement.showDependencies": {
     "category": "ui",
     "why": "是否显示依赖资产。"
-  },
-  "assetManagement.showAssetVersion": {
-    "category": "ui",
-    "why": "资产卡片是否显示引擎版本角标的界面偏好。"
   },
   "assetManagement.skipDeleteConfirm": {
     "category": "ui",
@@ -86,10 +74,6 @@
   "assetManagement.sortConfig": {
     "category": "ui",
     "why": "资产列表排序方式。"
-  },
-  "baiduyun-store": {
-    "category": "secret",
-    "why": "百度网盘的访问令牌与应用配置，明文存在 localStorage 里。"
   },
   "blueprint-create-modal-settings": {
     "category": "ui",
@@ -206,9 +190,5 @@
   "unreal-agent:import-path": {
     "category": "ui",
     "why": "上次导入到项目的路径，是输入框记忆。"
-  },
-  "webdav-store": {
-    "category": "secret",
-    "why": "WebDAV 连接配置与历史，含账号密码，明文存在 localStorage 里。"
   }
 }

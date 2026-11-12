@@ -139,8 +139,9 @@ uebox ask "halve the intensity of every point light" --allow-write --json
   not just discouraged — it can look but not change.
 - **Its reach is fixed:** engine, asset library, project library. It never gets the shell,
   local files, the browser or third-party MCP servers, with or without the flag.
-- **It runs on the model configured in the box**, billed to that model. Do not use it for
-  a single lookup that one `tools call` would answer.
+- **It runs on the box's default model**, billed to it. `--model <id>` picks another of
+  the box's models; only add it when the user names one. Do not use it for a single lookup
+  that one `tools call` would answer.
 - Progress lines go to stderr while it works; the conclusion is `data.answer`, and ends
   with a line listing every write it made. **Report that line to the user** — it is
   bookkeeping, not the agent's own claim.

@@ -126,3 +126,62 @@ describe('外部团队面板', () => {
     expect(await externalTeamExists('ext-nope', deps)).toBe(false)
   })
 })
+
+describe('混合团队在面板上', () => {
+  it('队员在盒子里跑：给用量、谁在跑、标成托管；结束就停掉宿主', async () => {
+    const { createHybridTeamHost, hybridTeamHost, runningHybridTeam } = await import(
+      '../agent-v3/core/team/hybridTeam'
+    )
+    const team = await registry.create({ objective: '塔防', members: 'box' })
+    const store = deps.storeFor(team.id)
+    await store.putMember({
+      name: '策划',
+      persona: '写文档',
+      tier: 'strong',
+      readOnly: false,
+      hiredAt: 1
+    })
+    const job = await store.startJob('策划', '写设计文档')
+    await store.finishJob(job.id, {
+      outcome: 'done',
+      report: '写好了',
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: 15,
+        cost: 0,
+        unpriced: 0
+      }
+    })
+    await hybridTeamHost(team.id, () =>
+      createHybridTeamHost(team, {
+        store,
+        namespaces: [],
+        jobScope: async () => {
+          throw new Error('不派活')
+        },
+        runTool: (_record, fn) => fn(),
+        runners: () => ({
+          runMember: async () => ({ text: '', messageCount: 0 }),
+          runAcceptance: async () => ''
+        }),
+        noteWrite: async () => undefined
+      })
+    )
+
+    const view = await readExternalTeamState(team.id, deps)
+    expect(view).toMatchObject({
+      external: true,
+      hostedMembers: true,
+      usage: { total: { total: 15 } }
+    })
+    // 宿主以制作人的名义挂在「谁在跑」上，任务板据此画运行中
+    expect(view?.live?.running).toContain('producer')
+
+    expect(await endExternalTeam(team.id, deps)).toBe(true)
+    expect(runningHybridTeam(team.id)).toBeUndefined()
+    expect((await readExternalTeamState(team.id, deps))?.live).toBeUndefined()
+  })
+})

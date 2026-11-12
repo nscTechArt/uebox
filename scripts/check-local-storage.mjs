@@ -58,7 +58,10 @@ const TEST_FILE_PATTERN = /\.(test|spec)\.(ts|js|mjs)$/
  * 通用存储适配器，本身不决定存什么 —— key 是调用方传进来的，
  * 调用方那边已经被扫到了。整文件排除，比在这儿硬编一个动态 key 白名单干净。
  */
-const EXCLUDED_FILES = new Set(['src/renderer/src/utils/chatHistoryStorage.ts'])
+const EXCLUDED_FILES = new Set([
+  'src/renderer/src/utils/chatHistoryStorage.ts',
+  'src/renderer/src/utils/secureStorage.ts'
+])
 
 /** 必须落文件的类别；这两类是棘轮，只准变少 */
 const RATCHETED = new Set(['content', 'secret'])
@@ -162,6 +165,8 @@ function collect() {
       if (/storage:\s*['"]?sessionStorage/.test(window)) continue
       // 对话历史已经落磁盘文件了（utils/chatHistoryStorage.ts），不占 localStorage
       if (/storage:\s*chatHistoryStorage/.test(window)) continue
+      // 凭据走主进程加密文件（utils/secureStorage.ts），同样不占 localStorage
+      if (/storage:\s*secureStorage/.test(window)) continue
       const keyMatch = /\bkey:\s*([^,\n}]+)/.exec(window)
       if (keyMatch) record(resolveKey(keyMatch[1], text, globalConsts), repoPath)
     }

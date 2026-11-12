@@ -38,6 +38,11 @@ interface FakeServer {
 /** 每次 createServer 记一台，测试用最后一台驱动回调 */
 const servers: FakeServer[] = []
 
+/** 依次让后续的 listen 失败，值是错误码；用完后恢复成功 */
+const listenFailures: string[] = []
+/** 每次 listen 绑定的地址 */
+const listenHosts: string[] = []
+
 vi.mock('http', () => {
   const createServer = (): unknown => {
     const errorHandlers: Array<(error: Error) => void> = []
@@ -55,8 +60,17 @@ vi.mock('http', () => {
         if (event === 'request') server.handler = fn as RequestHandler
         else if (event === 'error') errorHandlers.push(fn as (e: Error) => void)
       },
-      listen(port, _host, cb) {
+      listen(port, host, cb) {
         server.port = port || 49876
+        listenHosts.push(host)
+        const failure = listenFailures.shift()
+        if (failure) {
+          const error = Object.assign(new Error(`listen ${failure} ${host}:${port}`), {
+            code: failure
+          })
+          setTimeout(() => errorHandlers.forEach((fn) => fn(error)), 0)
+          return
+        }
         // 异步回调，跟真实 listen 的时序一致
         setTimeout(cb, 0)
       },
@@ -200,6 +214,24 @@ describe('runOAuthLogin', () => {
 
     const outcome = await settled
     expect((outcome as Error).message).toContain('state 校验失败')
+  })
+
+  it('1455 在 IPv4 上被拒（EACCES）时改绑 IPv6 回环', async () => {
+    listenFailures.push('EACCES')
+    listenHosts.length = 0
+    const settled = runOAuthLogin('chatgpt').catch((e: Error) => e)
+    while (openedUrls.length === 0) await new Promise((r) => setTimeout(r, 10))
+
+    expect(listenHosts).toEqual(['127.0.0.1', '::1'])
+    hitCallback('/auth/callback?error=access_denied')
+    await settled
+  })
+
+  it('两个回环地址都被拒（EACCES）时给出权限提示', async () => {
+    listenFailures.push('EACCES', 'EACCES')
+    const outcome = await runOAuthLogin('chatgpt').catch((e: Error) => e)
+
+    expect((outcome as Error).message).toContain('没有权限监听本机 1455 端口')
   })
 })
 

@@ -265,6 +265,7 @@ function handleMenuClick(key: string): void {
   flex-direction: column;
   padding: var(--space-4) 0;
   height: 100%;
+  min-height: 0;
 }
 
 .sidebar-header {
@@ -272,6 +273,7 @@ function handleMenuClick(key: string): void {
   align-items: center;
   margin-bottom: var(--space-10);
   padding: 0 var(--space-4);
+  flex-shrink: 0;
 }
 
 .sidebar-title {
@@ -286,6 +288,14 @@ function handleMenuClick(key: string): void {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  > * {
+    flex-shrink: 0;
+  }
 }
 
 /* 分割线 - 用于视觉分组 */

@@ -64,6 +64,11 @@ import { createStatusTool } from './teamStatus'
 import { memberFileBase, PRODUCER, type TeamMember, type TeamStore } from './teamStore'
 import { getMetaTeamSeat } from './teamSeatContext'
 import { createBoardTool, createSnapshotTool, formatMail, renderBoard } from './teamTools'
+import { carryOverTasks, formatBoardCarryOver } from './boardRecap'
+import { startTeamRound } from './teamSession'
+
+/** 记给验收员的「用户最近那句话」最长多少字。同盒子里 `ipc/agentV3.ts` 截的那一截 */
+const LATEST_REQUEST_MAX = 2000
 
 /** 验收员进门时报的名字。队员不许叫这个（`team_hire` 里拦着） */
 export const ACCEPTOR = 'acceptor'
@@ -114,6 +119,11 @@ const ROLE_TEAM_TOOLS: Record<Role | 'none', ReadonlySet<string>> = {
   producer: new Set([
     'team_open',
     'team_hire',
+    // 混合团队的制作人（`hybridTeamTools.ts`）：队员在盒子里跑，派活、辞人、等结果都走盒子
+    'team_send',
+    'team_dismiss',
+    'team_wait',
+    'team_approve',
     'team_board',
     'team_message',
     'team_inbox',
@@ -147,6 +157,18 @@ const ROLE_TEAM_TOOLS: Record<Role | 'none', ReadonlySet<string>> = {
 export const EXTERNAL_TEAM_TOOL_NAMES: ReadonlySet<string> = new Set(
   Object.values(ROLE_TEAM_TOOLS).flatMap((names) => [...names])
 )
+
+/** 混合团队开团时能选的思考档位，同盒子输入框里那一档（`ThinkingLevelChoice`） */
+const THINKING_CHOICES = [
+  'auto',
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max'
+] as const
 
 /** 进门的两个工具：不按连接认人，只认这次亲手带的通行证 */
 const ENTRY_TOOLS: ReadonlySet<string> = new Set(['team_open', 'team_join'])
@@ -212,6 +234,28 @@ export interface ExternalTeamDeps {
    * 「认不出来」的目标，免得编辑器命令落进旁边另一个连着的工程（见 `projectTargetContext.ts`）
    */
   resolveTarget: (projectPath: string) => TargetProjectRef
+  /**
+   * 混合团队（队员由盒子托管，`hybridTeam.ts`）。给了它，这条连接是混合制作人的：
+   * `team_open` 建的团队记成 `members: 'box'`，回话里的制作人须知由它给（顺带把宿主拉起来）。
+   * 不给的连接开不了混合团队，混合团队的队员也不经 `team_join` 进门
+   */
+  hosted?: {
+    /** 制作人须知。团队记录已经落盘 */
+    brief: (record: ExternalTeamRecord) => Promise<string>
+  }
+  /**
+   * 混合团队的宿主（`hybridTeam.ts`），交付闸和收工要问它。任何连接都给：Stop hook 走的是
+   * 普通的 CLI 连接。宿主没起来时 `facts` 回 undefined
+   */
+  hybrid?: {
+    facts: (
+      teamId: string
+    ) => Promise<{ pendingJobs: number; unreadForProducer: number } | undefined>
+    /** 制作人收工：从「谁在跑」上摘下来 */
+    stop: (teamId: string) => Promise<void>
+    /** 记录变了（用户新说的话） */
+    update: (record: ExternalTeamRecord) => void
+  }
   now?: () => number
 }
 
@@ -224,6 +268,10 @@ export interface ExternalTeamSession {
   dispose: () => Promise<void>
   /** 测试用：不带通行证时这条连接被认成谁 */
   binding: () => Readonly<Binding> | undefined
+  /**
+   * 这次调用是哪个团队的制作人。只在 `guard` 包着的调用里有值：混合团队的制作人工具靠它找到宿主
+   */
+  producerTeam: () => string | undefined
 }
 
 /**
@@ -539,7 +587,7 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
     }
   }
 
-  const openInput = z.object({
+  const baseOpenInput = z.object({
     objective: z.string().optional().describe('新开团队时必填：用户要的那一句话'),
     team_id: z.string().optional().describe('接着已有的团队干（换天、换会话、补工程路径）'),
     project_path: z
@@ -547,6 +595,20 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
       .optional()
       .describe('团队在哪个虚幻工程里干（.uproject 所在目录的绝对路径）。工程建好之后补上')
   })
+  const hostedOpenInput = baseOpenInput.extend({
+    thinking_level: z
+      .enum(THINKING_CHOICES)
+      .optional()
+      .describe('新开团队时：队员的思考档位，省略 = auto'),
+    approval_mode: z
+      .enum(['yolo', 'producer', 'ask', 'auto-edit'])
+      .optional()
+      .describe(
+        '新开团队时：队员的审批档位。yolo（默认）= 全放行，队员自己判断；producer = 不可逆的发给你用 team_approve 批；auto-edit / ask = 在盒子窗口弹框问用户'
+      )
+  })
+  // 两种形状给同一个类型：普通连接上 thinking_level 永远是 undefined（同 team_hire 的 model）
+  const openInput = (deps.hosted ? hostedOpenInput : baseOpenInput) as typeof hostedOpenInput
 
   const openTool = defineTool<typeof openInput, unknown>({
     name: 'team_open',
@@ -554,11 +616,13 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
     risk: 'safe',
     concurrency: 'sequential',
     description:
-      '外部团队（你当制作人，队员和验收员是你客户端里的子 Agent，盒子只提供任务板、留言、锁、快照、验收记录）。' +
+      (deps.hosted
+        ? '混合团队（你当制作人，队员是盒子里跑的模型，你招人时给它挑模型）。'
+        : '外部团队（你当制作人，队员和验收员是你客户端里的子 Agent，盒子只提供任务板、留言、锁、快照、验收记录）。') +
       `新开一个团队，或者接着已有的团队干。返回团队 id、制作人须知和你的通行证（${TEAM_SEAT_ARG}）：之后每次调用都带上它。` +
       `带着自己的 ${TEAM_SEAT_ARG} 再调一次就是补工程路径。`,
     input: openInput,
-    execute: async ({ objective, team_id, project_path }) => {
+    execute: async ({ objective, team_id, project_path, thinking_level, approval_mode }) => {
       const prior = presented()
       if (prior && prior.role !== 'producer') {
         throw new Error(
@@ -568,17 +632,33 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
       sameTeam(prior, team_id?.trim())
       const projectPath = project_path?.trim() || undefined
       const existingId = team_id?.trim() || prior?.teamId
+      const hosted = deps.hosted
       let record
       if (existingId) {
         record = await openRecord(existingId)
-        if (projectPath && projectPath !== record.projectPath) {
-          record = await deps.registry.update(record.id, (r) => ({ ...r, projectPath }))
+        if (Boolean(hosted) !== (record.members === 'box')) {
+          throw new Error(
+            record.members === 'box'
+              ? `团队 ${record.id} 的队员由盒子托管：用混合制作人的连接（请求头 X-Unreal-Box-Profile: producer）接着开`
+              : `团队 ${record.id} 的队员是客户端里的子 Agent，不是混合团队：用普通的盒子连接接着开`
+          )
+        }
+        // 混合团队带着 team_id 再开时给的 objective 是用户新说的话：记下来给验收员，目标原文不动
+        const latest = hosted ? objective?.trim() : undefined
+        if ((projectPath && projectPath !== record.projectPath) || latest) {
+          record = await deps.registry.update(record.id, (r) => ({
+            ...r,
+            ...(projectPath ? { projectPath } : {}),
+            ...(latest ? { latestRequest: latest } : {})
+          }))
         }
       } else {
         if (!objective?.trim()) throw new Error('新开团队要给 objective；接着干给 team_id')
         record = await deps.registry.create({
           objective: objective.trim(),
-          ...(projectPath ? { projectPath } : {})
+          ...(projectPath ? { projectPath } : {}),
+          ...(hosted ? { members: 'box' as const, approvalMode: approval_mode ?? 'yolo' } : {}),
+          ...(hosted && thinking_level ? { thinkingLevel: thinking_level } : {})
         })
       }
       const store = deps.storeFor(record.id)
@@ -617,12 +697,14 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
         text: [
           seatNote(b.seat),
           '',
-          buildExternalProducerBrief({
-            teamId: record.id,
-            objective: record.objective,
-            workspaceDir,
-            ...(record.projectPath ? { projectPath: record.projectPath } : {})
-          }),
+          hosted
+            ? await hosted.brief(record)
+            : buildExternalProducerBrief({
+                teamId: record.id,
+                objective: record.objective,
+                workspaceDir,
+                ...(record.projectPath ? { projectPath: record.projectPath } : {})
+              }),
           '',
           `团队 ${record.id}：${roster.length ? `现有 ${roster.map((m) => m.name).join('、')}` : '还没有队员'}。`,
           renderBoard(await store.board())
@@ -662,8 +744,16 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
       const record = await openRecord(team_id.trim())
       const store = deps.storeFor(record.id)
       const { workspaceDir } = deps.registry.dirsFor(record.id)
+      const asAcceptor = member.trim().toLowerCase() === ACCEPTOR
 
-      if (member.trim().toLowerCase() === ACCEPTOR) {
+      // 混合团队的队员是盒子里的子 Agent，制作人用 team_send 派活；客户端里再起一个同名的就是两份记忆、两本账
+      if (record.members === 'box' && !asAcceptor) {
+        throw new Error(
+          `团队 ${record.id} 的队员由盒子托管，不用 team_join 进门。制作人用 team_send 给「${member.trim()}」派活`
+        )
+      }
+
+      if (asAcceptor) {
         if (prior?.role === 'member' || (!prior && !shared && servedAsMember)) {
           throw new Error(
             `${prior ? '这张通行证' : '这条连接'}干过队员的活，不能再当验收员。` +
@@ -693,6 +783,7 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
             '',
             buildExternalAcceptancePrompt({
               objective: record.objective,
+              ...(record.latestRequest ? { latestRequest: record.latestRequest } : {}),
               report,
               howToPlay: how_to_play,
               ...(record.projectPath ? { projectPath: record.projectPath } : {}),
@@ -871,6 +962,11 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
       const kind = verdict === 'PASS' ? 'pass' : verdict === 'BLOCKED' ? 'blocked' : 'fail'
       // 结论只记在 external.json：虚幻盒子的团队事件账里没有「验收」这一类
       const record = await deps.registry.recordVerdict(b.teamId, { kind, reason })
+      // 每次的结论记进团队事件，任务板的往来记录里一条一条看得到（同盒子里的团队）
+      await deps
+        .storeFor(b.teamId)
+        .recordEvent({ kind: 'verdict', verdict: kind })
+        .catch(() => undefined)
       b.closed = true
       await saveSeat(b).catch(() => undefined)
       leave(b)
@@ -1037,7 +1133,15 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
   })
 
   const gateInput = z.object({
-    team_id: z.string().optional().describe('不给就是这条连接所在的团队')
+    team_id: z.string().optional().describe('不给就是这条连接所在的团队'),
+    phase: z
+      .enum(['check', 'stop', 'round'])
+      .optional()
+      .default('check')
+      .describe(
+        'check = 只看（默认）；stop = 收工检查放行了，混合团队的制作人从「在跑」上摘下来；round = 用户发了新消息'
+      ),
+    latest_request: z.string().optional().describe('phase=round 时：用户刚说的那句话')
   })
 
   const gateTool = defineTool<typeof gateInput, ExternalGateFacts>({
@@ -1046,14 +1150,35 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
     risk: 'safe',
     concurrency: 'parallel',
     description:
-      '交付闸的现状（只读）：最近一次验收结论、之后有没有再改过工程、算不算已经过了验收。给收尾检查（hook）用。',
+      '交付闸的现状：最近一次验收结论、之后有没有再改过工程、算不算已经过了验收，混合团队还有后台的活和没看的话。给收尾检查（hook）用。',
     input: gateInput,
-    execute: async ({ team_id }) => {
+    execute: async ({ team_id, phase, latest_request }) => {
       const id = team_id?.trim() || current.getStore()?.binding?.teamId
       if (!id) throw new Error('给 team_id')
-      const record = await deps.registry.get(id)
+      let record = await deps.registry.get(id)
       if (!record) throw new Error(`没有这个外部团队：${id}`)
-      const facts = gateFacts(record)
+      if (phase === 'stop' && record.members === 'box') await deps.hybrid?.stop(id)
+      let carryOver = ''
+      if (phase === 'round') {
+        // 上一轮留下没动的「进行中 / 卡住」摆给制作人看（同盒子里开局的旧账），再开新一轮
+        const since = record.state.roundStartedAt
+        const latest = latest_request?.trim().slice(-LATEST_REQUEST_MAX)
+        if (since !== undefined) {
+          carryOver = formatBoardCarryOver(
+            carryOverTasks(await deps.storeFor(id).board(), since),
+            now()
+          )
+        }
+        record = await deps.registry.update(id, (r) => ({
+          ...r,
+          state: startTeamRound(r.state, now()),
+          ...(latest && r.members === 'box' ? { latestRequest: latest } : {})
+        }))
+        deps.hybrid?.update(record)
+      }
+      const live = record.members === 'box' ? await deps.hybrid?.facts(id) : undefined
+      const facts = { ...gateFacts(record), ...live }
+      if (phase === 'round') return { text: carryOver || '新一轮已记下。', details: facts }
       return {
         text: facts.passed
           ? '已过验收，之后没有改动。'
@@ -1121,6 +1246,10 @@ export function createExternalTeamSession(deps: ExternalTeamDeps): ExternalTeamS
     binding: () => {
       const b = boundSeat ? seats.get(boundSeat) : undefined
       return b instanceof Promise ? undefined : b
+    },
+    producerTeam: () => {
+      const b = current.getStore()?.binding
+      return b && b.role === 'producer' && !inactive(b) ? b.teamId : undefined
     },
     async dispose() {
       const b = !shared && boundSeat ? seats.get(boundSeat) : undefined

@@ -34,6 +34,8 @@ export interface ParsedArgs {
   overwrite: boolean
   /** 这次允许调用会改动工程的工具。CLI 没有审批弹窗，这个开关顶替它 */
   allowWrite: boolean
+  /** ask：子任务用哪个模型，填盒子里候选名单的 id */
+  model?: string
   /** `team gate|round` 作为 Claude Code hook 跑：读 stdin 的 hook 输入，按 hook 的约定输出 */
   hook: boolean
 }
@@ -54,6 +56,7 @@ const OPTIONS = {
   world: { type: 'string' },
   overwrite: { type: 'boolean' },
   'allow-write': { type: 'boolean' },
+  model: { type: 'string' },
   hook: { type: 'boolean' }
 } as const
 
@@ -88,6 +91,7 @@ export function parse(argv: string[]): ParsedArgs {
     ...(values.world ? { world: parseWorld(values.world) } : {}),
     overwrite: values.overwrite === true,
     allowWrite: values['allow-write'] === true,
+    ...(values.model ? { model: values.model } : {}),
     hook: values.hook === true
   }
 }

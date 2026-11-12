@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import type { ChatGroupMode, ChatSortMode } from '../../layout/composables/chatSessionGrouping'
 
 /** 用户手动加进侧边栏的工程（还没有任何对话时也要显示） */
@@ -194,17 +193,17 @@ export const useChatSidebarStore = defineStore(
     }
   },
   {
-    persist: usePersistOptions<ChatSidebarState>({
+    persist: {
       key: 'chat-sidebar',
-      paths: [
+      pick: [
         'groupMode',
         'sortMode',
         'collapsedGroups',
         'manualProjects',
         'hiddenProjects',
         'pinnedProjects'
-      ],
-      storage: 'localStorage'
-    })
+      ] satisfies (keyof ChatSidebarState)[],
+      storage: localStorage
+    }
   }
 )

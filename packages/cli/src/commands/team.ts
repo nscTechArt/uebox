@@ -19,6 +19,15 @@
  * `--hook` 时不输出信封：Stop hook 只认 `{"decision":"block","reason":…}`，其余一律放行。
  * 连不上盒子、找不到团队、读不了文件 —— 都只在 stderr 说一句、退出码 0、放行。
  * 一个坏掉的检查不该让用户的会话停不下来。
+ *
+ * ## 混合团队（队员在盒子里跑）
+ *
+ * 队员还在后台干活、或者有话没交到制作人手上时，收工就是把活扔下：拦下来让它 `team_wait`。
+ * 这种拦不用掉「两次提醒」的额度（那是给「没过验收」的），另记一个上限，防的是队员卡死时
+ * 制作人永远停不下来。放行时告诉盒子制作人收工了（`team_gate` 的 `phase: 'stop'`），
+ * 宿主把它从「谁在跑」上摘下来，队员再找它就进信箱。新消息时（UserPromptSubmit）把用户那句话
+ * 交给盒子（给验收员看），并把任务板上没动的旧账打印出来，Claude Code 会把它加进上下文。
+ * docs/混合团队设计-2026-10-24.md 第 2 节。
  */
 
 import { promises as fs } from 'node:fs'
@@ -30,6 +39,12 @@ import * as runtime from '../runtime.js'
 
 /** 和盒子里 `MAX_TEAM_NUDGES` 同一个数：一轮最多推两次，真卡住要让它停下来跟用户说 */
 export const MAX_NUDGES = 2
+
+/**
+ * 一轮里最多为「还有活在跑 / 有话没看」拦几次。每次拦下它会 `team_wait` 最多几分钟，
+ * 这个数大约是两三个小时；到了就放行，让制作人跟用户说清楚谁卡住了
+ */
+export const MAX_WAITS = 40
 
 /** hook 默认的期限。Stop hook 每次收尾都跑，不能让用户干等两分钟 */
 const HOOK_TIMEOUT_SECONDS = 15
@@ -47,26 +62,52 @@ export interface GateFacts {
   deliveries: number | null
   passed: boolean | null
   ended: boolean | null
+  /** 混合团队：还在后台跑的活。旧盒子没有这一项 */
+  pendingJobs?: number | null
+  /** 混合团队：队员发给制作人、它还没看的话 */
+  unreadForProducer?: number | null
 }
 
 /** 当前目录绑定的团队，以及这一轮拦过几次 */
 export interface LocalTeamState {
   teamId: string
   nudges: number
+  /** 这一轮为「还有活在跑」拦过几次。旧文件没有 */
+  waits?: number
 }
 
 export interface GateDecision {
   block: boolean
   /** 拦的时候交回给 Claude Code 的那句话；放行时说为什么放行 */
   reason: string
+  /** `wait` = 为还在跑的活拦的，不用提醒额度 */
+  kind?: 'wait' | 'nudge'
 }
 
 /**
  * 拦不拦。口径同盒子里的 `createTeamGate`：
  * 过了验收（之后没再改）放行；BLOCKED 放行（验收员说「这得用户来」）；一轮拦满两次放行。
  */
-export function decideGate(facts: GateFacts, nudges: number): GateDecision {
+export function decideGate(facts: GateFacts, nudges: number, waits = 0): GateDecision {
   if (facts.ended) return { block: false, reason: '团队已结束。' }
+  const pending = facts.pendingJobs ?? 0
+  const unread = facts.unreadForProducer ?? 0
+  if ((pending > 0 || unread > 0) && waits < MAX_WAITS) {
+    return {
+      block: true,
+      kind: 'wait',
+      reason: [
+        '[Unreal Box team · automatic check] This is not the user speaking.',
+        [
+          pending > 0 ? `${pending} teammate job(s) are still running.` : '',
+          unread > 0 ? `${unread} message(s) from teammates have not reached you yet.` : ''
+        ]
+          .filter(Boolean)
+          .join(' '),
+        'Call team_wait to collect them before you finish.'
+      ].join('\n')
+    }
+  }
   if (facts.passed) return { block: false, reason: '已过验收，之后没有改动。' }
   if (facts.verdict === 'blocked') return { block: false, reason: '验收员说缺的东西得用户给。' }
   if (nudges >= MAX_NUDGES) {
@@ -80,6 +121,7 @@ export function decideGate(facts: GateFacts, nudges: number): GateDecision {
         : 'The game has not been through acceptance yet.'
   return {
     block: true,
+    kind: 'nudge',
     reason: [
       '[Unreal Box team · automatic check] This is not the user speaking.',
       `${why} Delivery only counts once a uebox-acceptor subagent records PASS with team_verdict.`,
@@ -102,7 +144,11 @@ export async function findLocalState(
       if (typeof raw.teamId === 'string' && raw.teamId) {
         return {
           file,
-          state: { teamId: raw.teamId, nudges: typeof raw.nudges === 'number' ? raw.nudges : 0 }
+          state: {
+            teamId: raw.teamId,
+            nudges: typeof raw.nudges === 'number' ? raw.nudges : 0,
+            ...(typeof raw.waits === 'number' && raw.waits > 0 ? { waits: raw.waits } : {})
+          }
         }
       }
     } catch {
@@ -129,6 +175,10 @@ export interface TeamOptions {
   teamId?: string
   /** 找 `.uebox/team.json` 从哪开始。默认当前目录 */
   cwd?: string
+  /** hook 放行时告诉盒子制作人收工了（混合团队摘信箱） */
+  stopOnAllow?: boolean
+  /** 新一轮时用户说的那句话（UserPromptSubmit hook 的 prompt） */
+  prompt?: string
 }
 
 async function withRuntime<T>(
@@ -219,30 +269,58 @@ export async function runTeamGate(options: TeamOptions): Promise<Envelope> {
   return withRuntime(options, async (rt) => {
     const facts = await fetchGate(rt, teamId)
     const nudges = local?.state.nudges ?? 0
-    const decision = decideGate(facts, nudges)
-    if (decision.block && local) {
-      await writeLocalState(local.file, { ...local.state, nudges: nudges + 1 })
+    const waits = local?.state.waits ?? 0
+    const decision = decideGate(facts, nudges, waits)
+    const next = {
+      nudges: decision.block && decision.kind !== 'wait' ? nudges + 1 : nudges,
+      waits: decision.block && decision.kind === 'wait' ? waits + 1 : waits
     }
-    return success({ data: { ...facts, nudges: decision.block ? nudges + 1 : nudges, decision } })
+    if (decision.block && local) await writeLocalState(local.file, { ...local.state, ...next })
+    if (!decision.block && options.stopOnAllow) {
+      await runtime.callTool(rt, 'team_gate', { team_id: teamId, phase: 'stop' })
+    }
+    return success({ data: { ...facts, ...next, decision } })
   })
 }
 
 export async function runTeamRound(options: TeamOptions): Promise<Envelope> {
   const local = await findLocalState(options.cwd ?? process.cwd())
   if (!local) return success({ data: { teamId: null, reset: false } })
-  await writeLocalState(local.file, { ...local.state, nudges: 0 })
+  await writeLocalState(local.file, { teamId: local.state.teamId, nudges: 0 })
   return success({ data: { teamId: local.state.teamId, reset: true } })
+}
+
+/**
+ * 新一轮告诉盒子：用户刚说的话记给验收员，回来的是任务板上没动的旧账（没有就是空串）。
+ * 旧盒子不认 `phase` 也没关系：它回的是交付闸那句话，这里只取 round 的回话
+ */
+async function announceRound(options: TeamOptions, teamId: string): Promise<string> {
+  return withRuntime(options, async (rt) => {
+    const result = await runtime.callTool(rt, 'team_gate', {
+      team_id: teamId,
+      phase: 'round',
+      ...(options.prompt?.trim() ? { latest_request: options.prompt.trim() } : {})
+    })
+    const text = (result.content ?? [])
+      .map((block) => (block.type === 'text' && typeof block.text === 'string' ? block.text : ''))
+      .join('\n')
+      .trim()
+    return text.includes('<team_board_carryover>') ? text : ''
+  })
 }
 
 // ── hook 模式 ───────────────────────────────────────────────────────────
 
-/** hook 的 stdin（Claude Code 的约定）。只用得到 cwd */
-function hookCwd(stdin: string): string | undefined {
+/** hook 的 stdin（Claude Code 的约定）。用得到 cwd 和 UserPromptSubmit 的 prompt */
+function hookInput(stdin: string): { cwd?: string; prompt?: string } {
   try {
-    const input = JSON.parse(stdin) as { cwd?: unknown }
-    return typeof input.cwd === 'string' && input.cwd ? input.cwd : undefined
+    const input = JSON.parse(stdin) as { cwd?: unknown; prompt?: unknown }
+    return {
+      ...(typeof input.cwd === 'string' && input.cwd ? { cwd: input.cwd } : {}),
+      ...(typeof input.prompt === 'string' && input.prompt ? { prompt: input.prompt } : {})
+    }
   } catch {
-    return undefined
+    return {}
   }
 }
 
@@ -259,22 +337,33 @@ export async function runTeamHook(
   options: TeamOptions,
   stdin: string
 ): Promise<HookResult> {
-  const cwd = hookCwd(stdin) ?? options.cwd
+  const input = hookInput(stdin)
+  const cwd = input.cwd ?? options.cwd
   const opts: TeamOptions = {
     ...options,
     ...(cwd ? { cwd } : {}),
+    ...(input.prompt ? { prompt: input.prompt } : {}),
     timeoutSeconds: options.timeoutSeconds ?? HOOK_TIMEOUT_SECONDS
   }
   try {
     if (sub === 'round') {
-      await runTeamRound(opts)
-      return { stdout: '', stderr: '' }
+      const reset = await runTeamRound(opts)
+      const teamId = (reset.data as { teamId: string | null }).teamId
+      // 清零是本地的事，一定做；告诉盒子是锦上添花，连不上就算了
+      const carryOver = teamId
+        ? await announceRound(opts, teamId).catch((error: unknown) => {
+            throw new Error(
+              `新一轮没告诉盒子：${error instanceof Error ? error.message : String(error)}`
+            )
+          })
+        : ''
+      return { stdout: carryOver ? `${carryOver}\n` : '', stderr: '' }
     }
     // 没绑团队的目录：不是团队会话，什么都不做
     if (!opts.teamId && !(await findLocalState(opts.cwd ?? process.cwd()))) {
       return { stdout: '', stderr: '' }
     }
-    const envelope = await runTeamGate(opts)
+    const envelope = await runTeamGate({ ...opts, stopOnAllow: true })
     const decision = (envelope.data as { decision: GateDecision }).decision
     return decision.block
       ? {

@@ -68,6 +68,25 @@ const MAX_MATCHES_LIMIT = 1000
 const MAX_SEARCHABLE_BYTES = 32 * 1024 * 1024
 /** 命中行超长时截断，避免一行压缩过的 JSON 就占满上下文 */
 const MAX_LINE_CHARS = 300
+/**
+ * 结果大到要存档时（`core/resultArchive.ts`）正文收到多长。存档器还要在后面补一句
+ * 存档编号和查法，所以比存档预算（16K）留出一截
+ */
+const ARCHIVED_BODY_CHARS = 12_000
+
+/** 存档时的正文：抬头加上放得下的那几行，再说清还有几行没列 */
+function renderWithin(header: string, lines: string[], unit: string): string {
+  const out = [header]
+  let used = header.length
+  for (const line of lines) {
+    if (used + line.length + 1 > ARCHIVED_BODY_CHARS) break
+    out.push(line)
+    used += line.length + 1
+  }
+  const rest = lines.length - (out.length - 1)
+  if (rest > 0) out.push(`（这里只列了前 ${out.length - 1} ${unit}，其余 ${rest} ${unit}在存档里）`)
+  return out.join('\n')
+}
 
 const findInput = z.object({
   path: z.string().describe('起始目录的绝对路径，如 "I:/MyProject" 或 "D:/素材"'),
@@ -156,6 +175,19 @@ function createFindTool(): UnrealAgentTool<never> {
       '【别整盘扫】起始目录不能是盘符根（C:/、D:/）。不知道目标在哪就问用户要路径，' +
       '或者从已知工程所在的目录找起 —— 扫一块盘要几分钟，中途还停不下来。',
     input: findInput,
+    // 一次能回两千个路径、二十万字符，进了上下文之后每一步都要重发
+    archive: {
+      source: 'details',
+      lists: { files: ['path'] },
+      compact: (details) => {
+        const d = details as { files: Array<{ path: string }>; header: string }
+        return renderWithin(
+          d.header,
+          d.files.map((f) => f.path),
+          '个'
+        )
+      }
+    },
     execute: async (args, ctx) => {
       const limit = Math.max(1, Math.min(args.limit ?? MAX_FILES, MAX_FILES_LIMIT))
 
@@ -222,7 +254,9 @@ function createFindTool(): UnrealAgentTool<never> {
             pattern: args.pattern,
             count: shown.length,
             truncated,
-            recursive: !shallow
+            recursive: !shallow,
+            header,
+            files: shown.map((file) => ({ path: file }))
           }
         }
       } catch (error) {
@@ -287,6 +321,19 @@ function createGrepTool(): UnrealAgentTool<never> {
       '要查虚幻资产请用 ue_content_search / ue_content_describe。\n' +
       '【先收窄】用 glob 限定范围（如 "**/*.ini"）。',
     input: grepInput,
+    // 同 find_local_files：命中上限一千行，十几万字符
+    archive: {
+      source: 'details',
+      lists: { hits: ['file', 'line', 'text'] },
+      compact: (details) => {
+        const d = details as { hits: Match[]; header: string }
+        return renderWithin(
+          d.header,
+          d.hits.map((m) => `${m.file}:${m.line}: ${m.text}`),
+          '条'
+        )
+      }
+    },
     execute: async (args, ctx) => {
       const limit = Math.max(1, Math.min(args.limit ?? MAX_MATCHES, MAX_MATCHES_LIMIT))
 
@@ -366,7 +413,9 @@ function createGrepTool(): UnrealAgentTool<never> {
             pattern: args.pattern,
             scanned: files.length,
             matches: matches.length,
-            truncated: matches.length >= limit
+            truncated: matches.length >= limit,
+            header,
+            hits: matches
           }
         }
       } catch (error) {

@@ -32,6 +32,8 @@ import {
 export interface FakeTool {
   name: string
   description?: string
+  /** 不给就是没有参数的空对象 */
+  inputSchema?: { type: 'object'; properties: Record<string, unknown> }
   meta?: {
     namespace: string
     risk: string
@@ -99,7 +101,7 @@ export async function startFakeBox(options: FakeBoxOptions): Promise<FakeBox> {
       tools: options.tools.map((tool) => ({
         name: tool.name,
         description: tool.description ?? `假工具 ${tool.name}`,
-        inputSchema: { type: 'object' as const, properties: {} },
+        inputSchema: tool.inputSchema ?? { type: 'object' as const, properties: {} },
         ...(tool.meta
           ? {
               _meta: {

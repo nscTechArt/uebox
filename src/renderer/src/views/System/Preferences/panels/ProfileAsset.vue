@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { secureStorage } from '@renderer/utils/secureStorage'
 import AppButton from '@renderer/components/AppButton.vue'
 /**
  * 资产库设置组件
@@ -156,7 +157,7 @@ const SERVER_ADDR_KEY = 'assetManagement.serverAddress'
 const SERVER_API_KEY_KEY = 'assetManagement.serverApiKey'
 
 const serverAddress = ref(localStorage.getItem(SERVER_ADDR_KEY) || '')
-const serverApiKey = ref(localStorage.getItem(SERVER_API_KEY_KEY) || '')
+const serverApiKey = ref(secureStorage.getItem(SERVER_API_KEY_KEY) || '')
 const serverVersion = ref('')
 const serverUpdateStatus = ref<
   'idle' | 'checking' | 'available' | 'applying' | 'upToDate' | 'error'
@@ -176,9 +177,9 @@ watch(serverAddress, (val) => {
 // 持久化保存 API Key
 watch(serverApiKey, (val) => {
   if (val.trim()) {
-    localStorage.setItem(SERVER_API_KEY_KEY, val.trim())
+    secureStorage.setItem(SERVER_API_KEY_KEY, val.trim())
   } else {
-    localStorage.removeItem(SERVER_API_KEY_KEY)
+    secureStorage.removeItem(SERVER_API_KEY_KEY)
   }
 })
 

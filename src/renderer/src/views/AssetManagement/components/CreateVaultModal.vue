@@ -523,6 +523,7 @@
 </template>
 
 <script setup lang="ts">
+import { secureStorage } from '@renderer/utils/secureStorage'
 import AppModal from '@renderer/components/AppModal.vue'
 /**
  * CreateVaultModal - 创建资产库模态框
@@ -624,7 +625,7 @@ const nasServerUrl = computed(() => {
   if (!ip) return ''
   return port ? `${ip}:${port}` : ip
 })
-const nasApiKey = ref(localStorage.getItem('assetManagement.serverApiKey') || '')
+const nasApiKey = ref(secureStorage.getItem('assetManagement.serverApiKey') || '')
 const nasConnecting = ref(false)
 const nasConnected = ref(false)
 const nasError = ref('')
@@ -1063,7 +1064,7 @@ const handleRemoteCreate = async (): Promise<void> => {
 const handleRemoteDelete = async (vault: RemoteVaultInfo): Promise<void> => {
   // 获取 API Key（优先使用当前输入，其次使用设置页保存的）
   const apiKey =
-    nasApiKey.value?.trim() || localStorage.getItem('assetManagement.serverApiKey') || ''
+    nasApiKey.value?.trim() || secureStorage.getItem('assetManagement.serverApiKey') || ''
   const hasApiKey = !!apiKey
 
   const confirmMsg = hasApiKey

@@ -1,4 +1,8 @@
-import type { BrowserGroupState, BrowserNavigationState } from '../../../../../shared/agentBrowser'
+import type {
+  BrowserFindState,
+  BrowserGroupState,
+  BrowserNavigationState
+} from '../../../../../shared/agentBrowser'
 import { onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { agentBrowserAPI } from '@renderer/api/agentBrowser'
 
@@ -13,6 +17,7 @@ export function useSessionBrowser(
   url: Ref<string>
   navigation: Ref<BrowserNavigationState>
   group: Ref<BrowserGroupState>
+  find: Ref<BrowserFindState | null>
 } {
   const emptyNavigation = (): BrowserNavigationState => ({
     canGoBack: false,
@@ -23,6 +28,7 @@ export function useSessionBrowser(
   const navigation = ref(emptyNavigation())
   const url = ref('')
   const open = ref(false)
+  const find = ref<BrowserFindState | null>(null)
   let revision = 0
   let stateRevision = 0
   let handler: ((...args: unknown[]) => void) | null = null
@@ -40,6 +46,7 @@ export function useSessionBrowser(
         open.value = false
         url.value = ''
         navigation.value = emptyNavigation()
+        find.value = null
       }
       if (!id || !active) return
       const restore = !restored.has(id)
@@ -70,6 +77,7 @@ export function useSessionBrowser(
             mode?: string
             url?: string
             navigation?: BrowserNavigationState
+            find?: BrowserFindState | null
           }
         | undefined
       if (!state || state.sessionId !== sessionId.value) return
@@ -79,6 +87,7 @@ export function useSessionBrowser(
       group.value = { tabs: state.tabs ?? [], activeTabId: state.activeTabId ?? null }
       url.value = state.url ?? ''
       navigation.value = state.navigation ?? emptyNavigation()
+      find.value = state.find ?? null
     })
   })
 
@@ -87,5 +96,5 @@ export function useSessionBrowser(
     if (handler) window.api.off('agent-browser:state', handler)
   })
 
-  return { open, url, navigation, group }
+  return { open, url, navigation, group, find }
 }

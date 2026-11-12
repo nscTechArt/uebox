@@ -2,12 +2,24 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 import { protectRendererWindow } from '../../security'
-import type {
-  BrowserGroupState,
-  BrowserNavigationState,
-  BrowserToolbarAction
+import {
+  resolveBrowserShortcut,
+  type BrowserCommand,
+  type BrowserFindState,
+  type BrowserGroupState,
+  type BrowserNavigationState,
+  type BrowserToolbarAction
 } from '../../../shared/agentBrowser'
-import { BrowserWindow, session, WebContentsView, type Session, type WebContents } from 'electron'
+import {
+  BrowserWindow,
+  clipboard,
+  Menu,
+  session,
+  shell,
+  WebContentsView,
+  type Session,
+  type WebContents
+} from 'electron'
 
 import { appSettingsManager, type AgentBrowserMode } from '../../appSettingsManager'
 import {
@@ -29,6 +41,8 @@ import {
   type PageScanResult
 } from './pageScan'
 import { checkNavigationUrl, checkResolvedAddresses, setLocalNetworkPolicy } from './urlPolicy'
+import { searchUrl } from './address'
+import { buildPageMenu } from './pageMenu'
 import { loadBrowserGroup, saveBrowserGroup, saveBrowserUrl } from './sessionState'
 
 // 地址校验每次现读「允许浏览器访问局域网」（设置 → AI）。注册在这里而不是 urlPolicy
@@ -78,6 +92,14 @@ const PAGE_CLOSED_ITSELF = '这个页面打开后自己关掉了，没有可以�
 
 /** 加载被主动取消。重定向和用户中途点链接都会走到这里，不是错误 */
 const ERR_ABORTED = -3
+
+/** 缩放档位，和 Chrome 一样 */
+const ZOOM_LEVELS = [
+  0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5
+]
+
+/** Ctrl+Shift+T 能找回的最近关闭标签数 */
+const CLOSED_TABS_KEPT = 10
 
 export type BrowserErrorCode =
   | 'BROWSER_NOT_OPEN'
@@ -174,6 +196,8 @@ interface BrowserSurface {
   window: BrowserWindow | null
   /** 远程页面始终使用视图，可在主窗口与组窗口之间移动 */
   view: WebContentsView | null
+  /** 页面声明的图标地址，标签上显示 */
+  favicon?: string
 }
 
 /**
@@ -226,6 +250,10 @@ export class AgentBrowserService {
    * 拦掉）。不记下来的话网页搬过去之后是隐藏的，要等用户动一下窗口才出现。
    */
   private boundsByHost = new Map<number, EmbeddedBounds | null>()
+  /** 用户关掉的标签地址，Ctrl+Shift+T 从后往前找回 */
+  private closedUrls: string[] = []
+  /** 当前标签的页内查找结果，查找条关掉时为 null */
+  private findState: BrowserFindState | null = null
   private persistence: Promise<void> = Promise.resolve()
   private restoring: Promise<void> | null = null
   private restoreGeneration = 0
@@ -310,14 +338,6 @@ export class AgentBrowserService {
     return this.surface !== null && !this.surface.contents.isDestroyed()
   }
 
-  /**
-   * 没窗口、没在忙、也没有正在跑的恢复 —— 这个实例除了占位什么都不做，
-   * 可以直接从表里丢掉。磁盘上的地址记录不受影响，下次进来照样恢复。
-   */
-  isIdle(): boolean {
-    return !this.hasWindow() && !this.busy && this.restoring === null
-  }
-
   navigationState(): BrowserNavigationState {
     const contents = this.surface?.contents
     if (!contents || contents.isDestroyed()) {
@@ -326,7 +346,8 @@ export class AgentBrowserService {
     return {
       canGoBack: contents.navigationHistory.canGoBack(),
       canGoForward: contents.navigationHistory.canGoForward(),
-      loading: contents.isLoading()
+      loading: contents.isLoading(),
+      zoom: contents.getZoomFactor()
     }
   }
 
@@ -425,14 +446,15 @@ export class AgentBrowserService {
       // 页面自己 `window.close()` 之后 `contents` 就销毁了，而它还在表里
       // （`destroyed` 回调把它摘掉之前）。销毁之后 `getURL()` 这些一律抛，
       // 而这个方法是从 Electron 的事件派发里调进来的 —— 抛在那儿就是主进程退出。
-      tabs: [...this.tabs.values()].map(({ id, contents }) =>
+      tabs: [...this.tabs.values()].map(({ id, contents, favicon }) =>
         contents.isDestroyed()
           ? { id, url: '', title: '', loading: false }
           : {
               id,
               url: contents.getURL(),
               title: contents.getTitle(),
-              loading: contents.isLoading()
+              loading: contents.isLoading(),
+              favicon
             }
       )
     }
@@ -459,6 +481,7 @@ export class AgentBrowserService {
     if (this.busy) throw new AgentBrowserError('BROWSER_BUSY', '浏览器正在操作，请稍后重试')
     const surface = this.tabs.get(tabId)
     if (!surface) throw new AgentBrowserError('BROWSER_NOT_OPEN', '标签页已关闭')
+    if (surface !== this.surface) this.stopFind()
     this.surface = surface
     this.debuggerAttached = debuggerAttachedOn(surface.contents)
     void this.persistUrl(this.currentUrl() || 'about:blank').catch(() => undefined)
@@ -468,12 +491,204 @@ export class AgentBrowserService {
 
   async closeTab(tabId: string): Promise<void> {
     const previous = this.surface?.id
+    const closing = this.tabs.get(tabId)?.contents
+    const url = closing && !closing.isDestroyed() ? closing.getURL() : ''
     this.selectTab(tabId)
+    if (url && url !== 'about:blank') {
+      this.closedUrls = [...this.closedUrls, url].slice(-CLOSED_TABS_KEPT)
+    }
     this.detachDebugger()
     this.releaseSurface({ destroy: true })
     if (previous && previous !== tabId && this.tabs.has(previous)) this.selectTab(previous)
     await this.persistUrl(this.hasWindow() ? this.currentUrl() || 'about:blank' : null)
     this.notifyState()
+  }
+
+  /** 拖动标签换位置。只改顺序，不切当前标签 */
+  moveTab(tabId: string, index: number): void {
+    const entries = [...this.tabs.entries()]
+    const from = entries.findIndex(([id]) => id === tabId)
+    if (from < 0) throw new AgentBrowserError('BROWSER_NOT_OPEN', '标签页已关闭')
+    const [entry] = entries.splice(from, 1)
+    entries.splice(Math.max(0, Math.min(entries.length, Math.trunc(index))), 0, entry)
+    this.tabs = new Map(entries)
+    void this.persistUrl(this.currentUrl() || 'about:blank').catch(() => undefined)
+    this.notifyState()
+  }
+
+  /**
+   * 在后台标签里打开，当前标签不动 —— 中键点链接、右键「在新标签页中打开」。
+   *
+   * 不等加载完、不扫页面：用户还在看当前这页，Agent 也没在等这一页的结果。
+   */
+  async openInBackground(url: string): Promise<void> {
+    if (this.busy) throw new AgentBrowserError('BROWSER_BUSY', '浏览器正在操作，请稍后重试')
+    const target = this.validateUrl(url)
+    await this.assertPublicHost(target)
+    // 查 DNS 的这一会儿，浏览器可能被关了，或者 Agent 开始操作了
+    const previous = this.surface
+    if (this.busy || !previous) return
+    if (this.tabs.size >= 100) throw new AgentBrowserError('BROWSER_BUSY', '标签页数量已达到上限')
+    this.surface = null
+    let surface: BrowserSurface
+    try {
+      surface = this.ensureSurface()
+    } finally {
+      this.surface = previous
+    }
+    this.debuggerAttached = debuggerAttachedOn(previous.contents)
+    this.applyEmbeddedBounds()
+    void surface.contents.loadURL(target.toString()).catch(() => undefined)
+    void this.persistUrl(this.currentUrl() || 'about:blank').catch(() => undefined)
+    this.notifyState()
+  }
+
+  /** 缩放当前页。`step` 为 0 时回到 100% */
+  zoom(step: -1 | 0 | 1): void {
+    const contents = this.requireContents()
+    const current = contents.getZoomFactor()
+    const next =
+      step === 0
+        ? 1
+        : step > 0
+          ? (ZOOM_LEVELS.find((level) => level > current + 0.001) ?? ZOOM_LEVELS.at(-1)!)
+          : ([...ZOOM_LEVELS].reverse().find((level) => level < current - 0.001) ?? ZOOM_LEVELS[0])
+    contents.setZoomFactor(next)
+    this.notifyState()
+  }
+
+  /** 页内查找。传 null 或空字符串就收起高亮 */
+  find(query: { text: string; forward?: boolean; findNext?: boolean } | null): void {
+    const contents = this.requireContents()
+    if (!query?.text) {
+      this.stopFind()
+      this.notifyState()
+      return
+    }
+    // Electron 的 `findNext` 意思反过来：true 是「开一次新查找」，false 才是在结果里往下走
+    contents.findInPage(query.text, {
+      forward: query.forward ?? true,
+      findNext: !query.findNext
+    })
+  }
+
+  private stopFind(): void {
+    const contents = this.surface?.contents
+    if (this.findState === null || !contents || contents.isDestroyed()) return
+    contents.stopFindInPage('clearSelection')
+    this.findState = null
+  }
+
+  /**
+   * 执行一条快捷键动作。
+   *
+   * 焦点在网页里时 `before-input-event` 调进来，焦点在面板上时渲染层经 IPC 调进来。
+   * 地址栏和查找条在渲染层，这两条只是把焦点交回去、让面板自己打开。
+   */
+  runCommand(command: BrowserCommand): void {
+    const ids = [...this.tabs.keys()]
+    const current = this.surface ? ids.indexOf(this.surface.id) : -1
+    const select = (index: number): void => {
+      const id = ids[(index + ids.length) % ids.length]
+      if (id && id !== this.surface?.id) this.selectTab(id)
+    }
+    switch (command.name) {
+      case 'back':
+      case 'forward':
+      case 'reload':
+        this.toolbar(command.name)
+        break
+      case 'stop':
+        if (this.surface?.contents.isLoading()) this.toolbar('stop')
+        break
+      case 'hardReload':
+        this.requireContents().reloadIgnoringCache()
+        break
+      case 'newTab':
+        this.createTab()
+        this.requestUi('focusAddress')
+        break
+      case 'closeTab':
+        if (this.surface) void this.closeTab(this.surface.id).catch(() => undefined)
+        break
+      case 'reopenTab': {
+        const url = this.closedUrls.pop()
+        if (url) {
+          void this.openInNewTab(url).catch((error: unknown) => {
+            logger.info(`[AgentBrowser] 找回关闭的标签失败：${String(error)}`)
+          })
+        }
+        break
+      }
+      case 'nextTab':
+        select(current + 1)
+        break
+      case 'previousTab':
+        select(current - 1)
+        break
+      case 'lastTab':
+        select(ids.length - 1)
+        break
+      case 'selectTab':
+        if (command.index < ids.length) select(command.index)
+        break
+      case 'zoomIn':
+        this.zoom(1)
+        break
+      case 'zoomOut':
+        this.zoom(-1)
+        break
+      case 'zoomReset':
+        this.zoom(0)
+        break
+      case 'focusAddress':
+      case 'find':
+        this.requestUi(command.name)
+        break
+    }
+  }
+
+  /** 宿主窗口：嵌入时是主窗口（或独立对话窗口），否则是浏览器自己的窗口 */
+  private hostWindow(): BrowserWindow | null {
+    const window =
+      this.currentMode() === 'embedded'
+        ? (this.embeddedHostWindow ?? this.embeddedHost() ?? null)
+        : this.groupWindow
+    return window && !window.isDestroyed() ? window : null
+  }
+
+  /** 让面板打开地址栏或查找条。焦点要先交给面板，否则按键还是进网页 */
+  private requestUi(action: 'focusAddress' | 'find'): void {
+    const host = this.hostWindow()
+    if (!host) return
+    host.webContents.focus()
+    sendToWindow(host, 'agent-browser:ui', { sessionId: this.sessionId, action })
+  }
+
+  private popupPageMenu(surface: BrowserSurface, params: Electron.ContextMenuParams): void {
+    const host = this.hostWindow()
+    const contents = surface.contents
+    if (!host || contents.isDestroyed()) return
+    const history = contents.navigationHistory
+    const report = (error: unknown): void => {
+      logger.info(`[AgentBrowser] 右键菜单操作失败：${String(error)}`)
+    }
+    const template = buildPageMenu(params, {
+      canGoBack: history.canGoBack(),
+      canGoForward: history.canGoForward(),
+      back: () => history.goBack(),
+      forward: () => history.goForward(),
+      reload: () => contents.reload(),
+      openInBackground: (url) => void this.openInBackground(url).catch(report),
+      copyText: (text) => clipboard.writeText(text),
+      copyImageAt: (x, y) => contents.copyImageAt(x, y),
+      editCommand: (command) => contents[command](),
+      searchFor: (text) => void this.openInNewTab(searchUrl(text)).catch(report),
+      openExternal: (url) => {
+        if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(report)
+      }
+    })
+    Menu.buildFromTemplate(template).popup({ window: host })
   }
 
   /** 移动已有的视图，保留 DOM、历史、滚动位置和正在填写的内容。 */
@@ -1014,7 +1229,8 @@ export class AgentBrowserService {
       open: this.hasWindow(),
       mode: this.currentMode(),
       url: overview?.url ?? this.currentUrl(),
-      title: overview?.title ?? ''
+      title: overview?.title ?? '',
+      find: this.findState
     }
     sendToAppWindows('agent-browser:state', state)
     sendToWindow(this.groupWindow, 'agent-browser:state', state)
@@ -1035,6 +1251,49 @@ export class AgentBrowserService {
     contents.on('did-stop-loading', updateNavigation)
     contents.on('did-finish-load', updateNavigation)
     contents.on('did-navigate', rememberNavigation)
+    contents.on('page-favicon-updated', (_event, favicons) => {
+      surface.favicon = favicons.find((url) => /^https?:\/\//i.test(url))
+      updateNavigation()
+    })
+    // 换了页面，旧图标不该留着
+    contents.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) surface.favicon = undefined
+    })
+
+    /*
+     * 浏览器快捷键。焦点在网页里时按键根本到不了渲染层，只能在这里拦。
+     * Esc 只在加载中才拦（停止加载），平时留给网页自己关弹窗。
+     */
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+      const command = resolveBrowserShortcut(input, process.platform)
+      if (!command || (command.name === 'stop' && !contents.isLoading())) return
+      if (this.surface !== surface) return
+      event.preventDefault()
+      try {
+        this.runCommand(command)
+      } catch (error) {
+        logger.info(`[AgentBrowser] 快捷键没有执行：${String(error)}`)
+      }
+    })
+
+    contents.on('context-menu', (_event, params) => this.popupPageMenu(surface, params))
+
+    // Ctrl+滚轮 / 触控板捏合。Electron 只报方向，缩放要自己做
+    contents.on('zoom-changed', (_event, direction) => {
+      if (this.surface !== surface) return
+      try {
+        this.zoom(direction === 'in' ? 1 : -1)
+      } catch {
+        // 页面已经没了
+      }
+    })
+
+    contents.on('found-in-page', (_event, result) => {
+      if (this.surface !== surface) return
+      this.findState = { active: result.activeMatchOrdinal, matches: result.matches }
+      this.notifyState()
+    })
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (isMainFrame) rememberNavigation(_event, url)
     })
@@ -1055,7 +1314,12 @@ export class AgentBrowserService {
 
     contents.setWindowOpenHandler((details) => {
       const checked = checkNavigationUrl(details.url)
-      if (checked.ok) {
+      // 中键或 Ctrl+点击：开在后台，和浏览器一样不打断当前页
+      if (checked.ok && details.disposition === 'background-tab') {
+        void this.openInBackground(checked.url.toString()).catch((error: unknown) => {
+          logger.warn(`[AgentBrowser] 后台标签页未打开：${String(error)}`)
+        })
+      } else if (checked.ok) {
         void this.openInNewTab(checked.url.toString()).catch((error: unknown) => {
           logger.warn(`[AgentBrowser] 新标签页未打开：${String(error)}`)
         })
@@ -1391,16 +1655,18 @@ export const agentBrowser = new AgentBrowserService()
 
 const sessionBrowsers = new Map<string, AgentBrowserService>()
 
-/** 同一会话复用页面；后台会话的工具不会操作到前台会话的页面。 */
+/**
+ * 同一会话复用页面；后台会话的工具不会操作到前台会话的页面。
+ *
+ * **一个会话只能有一个实例，空转的也不能从表里丢。** Agent 的浏览器工具在建 Agent 时
+ * 就把实例攥在手里（`createBrowserTools`），表里换成新实例后，网页开在旧实例上，
+ * 面板报的位置、关闭、切标签却全打到新实例：点标签报「标签页已关闭」，网页按旧位置
+ * 盖在对话上、关不掉。实例只是几个字段，对话删掉时 `deleteSessionBrowser` 会清。
+ */
 export function getSessionBrowser(sessionId?: string): AgentBrowserService {
   if (!sessionId) return agentBrowser
   let browser = sessionBrowsers.get(sessionId)
   if (!browser) {
-    // 新建之前先清掉空转的实例。界面每切一次对话就来问一次状态，
-    // 不清的话这张表会跟着用户开对话一直长到退出应用为止。
-    for (const [id, idle] of sessionBrowsers) {
-      if (id !== sessionId && idle.isIdle()) sessionBrowsers.delete(id)
-    }
     browser = new AgentBrowserService(sessionId)
     sessionBrowsers.set(sessionId, browser)
   }

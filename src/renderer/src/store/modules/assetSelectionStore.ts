@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { usePersistOptions } from '../../hooks/usePersistOptions'
 import { StorageUtils } from '../../common/utils/storage'
 
 export type ShortcutKey =
@@ -110,14 +109,11 @@ export const useAssetSelectionStore = defineStore(
     }
   },
   {
-    persist: usePersistOptions<{
-      selectedShortcut: ShortcutKey | null
-      selectedTreeKey: string | null
-    }>({
+    persist: {
       key: 'asset-selection-store',
-      paths: ['selectedShortcut', 'selectedTreeKey'],
-      storage: 'localStorage',
+      pick: ['selectedShortcut', 'selectedTreeKey'],
+      storage: localStorage,
       serializer: StorageUtils.createCustomSerializer()
-    })
+    }
   }
 )

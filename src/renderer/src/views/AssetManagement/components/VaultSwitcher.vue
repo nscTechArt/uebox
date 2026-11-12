@@ -512,6 +512,7 @@
 </template>
 
 <script setup lang="ts">
+import { secureStorage } from '@renderer/utils/secureStorage'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppModal from '@renderer/components/AppModal.vue'
 import AppButton from '@renderer/components/AppButton.vue'
@@ -1206,7 +1207,7 @@ const handleEditServerAddress = (): void => {
 
   editingServerVault.value = selectedVault.value
   editingServerAddress.value = parts.serverBase
-  editingServerApiKey.value = localStorage.getItem('assetManagement.serverApiKey') || ''
+  editingServerApiKey.value = secureStorage.getItem('assetManagement.serverApiKey') || ''
   serverAddressError.value = ''
   showServerAddressModal.value = true
 }

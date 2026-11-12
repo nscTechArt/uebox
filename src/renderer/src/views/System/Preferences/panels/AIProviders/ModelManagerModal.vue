@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppButton from '@renderer/components/AppButton.vue'
 import AppModal from '@renderer/components/AppModal.vue'
+import AppSwitch from '@renderer/components/AppSwitch.vue'
 import { PhCaretRight } from '@phosphor-icons/vue'
 /**
  * 模型管理弹窗 —— **只有这一层**。
@@ -31,8 +32,18 @@ const props = defineProps<{ open: boolean; state: AiProvidersState }>()
 const emit = defineEmits<{ 'update:open': [value: boolean]; addProvider: [] }>()
 
 const { t } = useI18n()
-const { draft, providers, isNew, isDirty, saving, testing, selectedId, configPath, catalog } =
-  props.state
+const {
+  draft,
+  managedProviders: providers,
+  disabledIds,
+  isNew,
+  isDirty,
+  saving,
+  testing,
+  selectedId,
+  configPath,
+  catalog
+} = props.state
 
 /**
  * 右侧显示谁。
@@ -178,6 +189,11 @@ function pickProvider(providerId: string): void {
     props.state.selectProvider(providerId)
     focus.value = 'provider'
   })
+}
+
+async function toggleProvider(providerId: string, enabled: boolean): Promise<void> {
+  const result = await props.state.setEnabled(providerId, enabled)
+  if (!result.ok) message.error(result.error || t('aiProvider.messages.saveFailed'))
 }
 
 function addModel(): void {
@@ -422,29 +438,43 @@ function addProvider(): void {
 
             <template v-if="!isCollapsed(group.kind)">
               <template v-for="provider in group.providers" :key="provider.id">
-                <button
-                  type="button"
-                  class="tree-provider"
-                  :class="{ active: selectedId === provider.id && !isNew }"
-                  @click="pickProvider(provider.id)"
-                >
-                  <span class="tree-logo">
-                    <img
-                      v-if="providerLogoUrl(provider.id)"
-                      :src="providerLogoUrl(provider.id)"
-                      alt=""
-                      aria-hidden="true"
+                <div class="tree-provider-row">
+                  <button
+                    type="button"
+                    class="tree-provider"
+                    :class="{
+                      active: selectedId === provider.id && !isNew,
+                      off: disabledIds.has(provider.id)
+                    }"
+                    @click="pickProvider(provider.id)"
+                  >
+                    <span class="tree-logo">
+                      <img
+                        v-if="providerLogoUrl(provider.id)"
+                        :src="providerLogoUrl(provider.id)"
+                        alt=""
+                        aria-hidden="true"
+                      />
+                      <template v-else>{{ logoFallbackText(provider.displayName) }}</template>
+                    </span>
+                    <span class="tree-provider-name">{{ provider.displayName }}</span>
+                    <!-- 改过还没存的那条带个点，否则「切走会丢东西」只有拦截弹窗才说得出来 -->
+                    <span
+                      v-if="selectedId === provider.id && !isNew && isDirty"
+                      class="tree-dirty"
+                      :title="$t('aiProvider.unsaved.dot')"
                     />
-                    <template v-else>{{ logoFallbackText(provider.displayName) }}</template>
-                  </span>
-                  <span class="tree-provider-name">{{ provider.displayName }}</span>
-                  <!-- 改过还没存的那条带个点，否则「切走会丢东西」只有拦截弹窗才说得出来 -->
-                  <span
-                    v-if="selectedId === provider.id && !isNew && isDirty"
-                    class="tree-dirty"
-                    :title="$t('aiProvider.unsaved.dot')"
+                  </button>
+                  <AppSwitch
+                    class="tree-provider-switch"
+                    size="small"
+                    :checked="!disabledIds.has(provider.id)"
+                    :aria-label="
+                      $t('aiProvider.list.enableProvider', { name: provider.displayName })
+                    "
+                    @change="(on: boolean) => toggleProvider(provider.id, on)"
                   />
-                </button>
+                </div>
 
                 <!-- 只展开当前这一条：全展开的话十几个模型就把树撑爆了 -->
                 <template v-if="selectedId === provider.id && !isNew && draft">
@@ -790,6 +820,26 @@ function addProvider(): void {
 
 .tree-provider:hover {
   background: var(--color-bg-surface-hover);
+}
+
+.tree-provider-row {
+  position: relative;
+}
+
+.tree-provider-row .tree-provider {
+  padding-right: 44px;
+}
+
+.tree-provider-switch {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.tree-provider.off .tree-logo,
+.tree-provider.off .tree-provider-name {
+  opacity: 0.45;
 }
 
 .tree-provider.active {

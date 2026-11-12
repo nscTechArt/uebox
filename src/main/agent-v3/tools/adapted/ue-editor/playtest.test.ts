@@ -196,6 +196,29 @@ describe('跑完了但其实没成的几种情况', () => {
     expect(String(result.summary)).toContain('1 个运行时错误')
   })
 
+  // 插件替用户点掉了「蓝图编译错误，确定要运行吗」，这次跑的是旧逻辑 —— 结论开头就要说
+  it('有蓝图带着编译错误时放在结论最前面', async () => {
+    callRequest.mockResolvedValue({
+      ...CLEAN_RUN,
+      blueprint_errors: ['/Game/UI/WBP_KillFeed.WBP_KillFeed']
+    })
+
+    const result = await run()
+
+    expect(result.success).toBe(true)
+    expect(result.blueprint_errors).toEqual(['/Game/UI/WBP_KillFeed.WBP_KillFeed'])
+    expect(String(result.summary)).toMatch(/^\*\*1 个蓝图有编译错误/)
+  })
+
+  it('没有蓝图错误时不带这个字段', async () => {
+    callRequest.mockResolvedValue(CLEAN_RUN)
+
+    const result = await run()
+
+    expect(result).not.toHaveProperty('blueprint_errors')
+    expect(String(result.summary)).not.toContain('编译错误')
+  })
+
   /**
    * 提前被打断时跑的时间不够，结论不能读起来像正常跑完。
    */

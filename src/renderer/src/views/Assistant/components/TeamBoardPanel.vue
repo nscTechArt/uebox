@@ -29,8 +29,12 @@
       <AppTag v-if="!docked && verdictTag" :tone="verdictTag.tone" :title="verdictTag.title">
         {{ verdictTag.label }}
       </AppTag>
-      <!-- 外部团队：大脑在 Claude Code，队员用什么模型盒子不知道，照实说 -->
-      <AppTag v-if="team.external" tone="info" :title="t('assistant.teamBoard.external.hint')">
+      <!-- 外部团队：大脑在 Claude Code，队员用什么模型盒子不知道，照实说。混合团队的队员在盒子里，不用说 -->
+      <AppTag
+        v-if="team.external && !team.hostedMembers"
+        tone="info"
+        :title="t('assistant.teamBoard.external.hint')"
+      >
         {{ t('assistant.teamBoard.external.label') }}
       </AppTag>
 
